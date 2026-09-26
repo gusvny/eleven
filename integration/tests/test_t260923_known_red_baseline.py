@@ -6,15 +6,23 @@
 isolated=环境/杂物/扫描面隔离（不挂产品欠账）。修掉即删行并下调 max_entries；
 新挂账须 integration 岗位判词+home 认领，不得静默增行（棘轮：行数≤max_entries，
 更新纪律=只降 max，不升）。抖动绿（串行复跑绿）不入册。
+
+260926 追加（洞①时间证据）：每条还必须带**机械证据戳** `booked_at`（ISO8601，须带
+时区）+ `booked_sha`（引入该行的 main 提交）——采纳判据要求 booked_at 早于本票开票
+基点，缺戳/戳畸形条目不成立为「既有欠账」。戳的推断依据写在 meta.booked_evidence。
 跑法：python3 integration/tests/test_t260923_known_red_baseline.py（stdlib-only）。
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import re
 from pathlib import Path
 
 BOOK = Path(__file__).resolve().parents[1] / "known-red-baseline.json"
 VERDICTS = {"booked", "isolated"}
+ENTRY_KEYS = {"name", "verdict", "home", "note", "booked_at", "booked_sha"}
+SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 
 
 def _load():
@@ -28,12 +36,34 @@ def test_schema_hygiene():
     assert isinstance(meta.get("policy"), str) and meta["policy"]
     seen = set()
     for e in entries:
-        assert set(e.keys()) == {"name", "verdict", "home", "note"}, e
+        assert set(e.keys()) == ENTRY_KEYS, e
         assert e["name"] and e["name"] not in seen, "场景名必非空且不重复：%s" % e["name"]
         seen.add(e["name"])
         assert e["verdict"] in VERDICTS, e
         assert e["home"].strip(), "每条挂账必须有 home 认领：%s" % e["name"]
         assert e["note"].strip(), "每条挂账必须有判词摘要：%s" % e["name"]
+
+
+def test_evidence_stamps_are_mechanical_and_consistent():
+    """260926 洞①：证据戳必须机械可判——booked_at=带时区的 ISO8601（naive/unknown/
+    空串一律不成立），booked_sha=引入该行的 main 提交号；同一提交的条目时刻必一致
+    （防手改单条漂移）；推断依据落 meta.booked_evidence（谁按什么补的，可复核）。"""
+    d = _load()
+    assert str(d["meta"].get("booked_evidence") or "").strip(), \
+        "证据戳的推断依据必须落 meta.booked_evidence（可复核，不静默补戳）"
+    by_sha = {}
+    for e in d["entries"]:
+        at, sha = e["booked_at"], e["booked_sha"]
+        assert isinstance(at, str) and at.strip() and at.strip().lower() != "unknown", e["name"]
+        assert isinstance(sha, str) and SHA_RE.match(sha.strip().lower()), e
+        try:
+            ts = _dt.datetime.fromisoformat(at.strip().replace("Z", "+00:00"))
+        except ValueError:
+            raise AssertionError("booked_at 不是 ISO8601：%s" % e["name"])
+        assert ts.tzinfo is not None, "booked_at 必须带时区（不猜时区）：%s" % e["name"]
+        by_sha.setdefault(sha.strip().lower(), set()).add(at.strip())
+    assert by_sha and all(len(v) == 1 for v in by_sha.values()), \
+        "同一 booked_sha 的 booked_at 必须一致（防逐条手改漂移）：%s" % by_sha
 
 
 def test_ratchet_shrink_only():

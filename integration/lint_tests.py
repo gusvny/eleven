@@ -15,8 +15,15 @@ practice:
         non-empty intent, cmd scripts must exist
   L5 orphans: test-shaped files under integration/**/ not in SCENARIOS and
         not in the exemption table → warning
+  L8 tmp hygiene: a file that calls mkdtemp* must reclaim somewhere in the same
+        file (registry + exit hook / rmtree / TemporaryDirectory / dispose) —
+        new call sites on a file with no reclaim verb → warning (260926: the
+        $TMPDIR leak reached 400k dirs / 98.6% older than 6h before anyone
+        noticed; this is the mechanical brake against new debt)
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
+       python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
+       grandfather list (existing debt; only new debt may turn L8 yellow)
 """
 import atexit
 import json
@@ -326,6 +333,84 @@ def lint_terminology():
         ok("L7 术语废止看守：无新增「%s」（存量 %d 处，随替换批次下调基线）" % (term, total))
 
 
+# ---- L8 测试临时目录卫生（260926 磁盘泄漏修：宿主 $TMPDIR 顶层 407,294 个目录、
+# 401,578 个 >6h（98.6%）的同类普查产物）。判据=**纯文本机械检查**：文件里出现
+# `mkdtemp(`/`mkdtempSync(` 就必须在**同一文件**里出现回收动词（注册表 + exit 钩子、
+# rmtree、TemporaryDirectory、dispose/reap 任一）。为什么按文件而不是按调用点：回收
+# 可以写在别处（共享 helper、夹具基类），只有「整个文件一个回收动词都没有」才是真漏点
+# ——这正是 `test_multirepo_anchor.py`（1.7 万目录）与 `stage_docker.py`（2 万目录）的形态。
+# 存量债（约 70 个文件，多为共享夹具库）进 baseline **豁免**（值=mkdtemp 调用点数）：
+# 只有 ①基线外的新文件用 mkdtemp 且零回收动词，或 ②基线内文件**新增**调用点 → 黄。
+# 警告级、不阻断（本闸防新债，不负责追缴存量——存量由清扫器与巡检水位面处置）。
+TMPDIR_BASELINE = INTEG / "tmpdir-baseline.json"
+MKD_TMP = re.compile(r"mkdtempSync\s*\(|mkdtemp\s*\(")
+RECLAIM_TOKENS = ("rmtree", "rmSync", "unlink", "TemporaryDirectory", "atexit",
+                  "dispose", "reap", "cleanup", "remove(", "rm(")
+TMP_HYGIENE_EXTS = {".py", ".mjs", ".js", ".cjs", ".ts"}
+
+
+def tmpdir_users():
+    """→ {rel: mkdtemp 调用点数}（只含「零回收动词」的文件；L8 与基线再生成共用同一判据）。"""
+    skip_dirs = {".git", ".lane", ".sandbox", ".sandbar", "node_modules",
+                 "__pycache__", ".venv", "out", "data", ".pytest_cache"}
+    out = {}
+    for p in _lint_targets():
+        if not p.is_file() or p.suffix not in TMP_HYGIENE_EXTS:
+            continue
+        if set(p.relative_to(REPO).parts[:-1]) & skip_dirs:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:                            # noqa: BLE001 —— 读不动=不判，不改判
+            continue
+        n = len(MKD_TMP.findall(text))
+        if not n:
+            continue
+        if any(tok in text for tok in RECLAIM_TOKENS):
+            continue
+        out[str(p.relative_to(REPO))] = n
+    return out
+
+
+def write_tmpdir_baseline():
+    users = tmpdir_users()
+    TMPDIR_BASELINE.write_text(json.dumps({
+        "rule": "L8: a file calling mkdtemp* must reclaim in the same file; "
+                "grandfathered here (value = mkdtemp call sites); only NEW debt warns",
+        "generated_by": "python3 integration/lint_tests.py --write-tmpdir-baseline",
+        "files": users}, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    print("L8 baseline written: %s (%d grandfathered files)" % (TMPDIR_BASELINE.name, len(users)))
+    return 0
+
+
+def lint_tmpdir_hygiene():
+    if not TMPDIR_BASELINE.is_file():
+        warn("L8 临时目录卫生：基线缺失 %s（本项无法判定；再生成："
+             "python3 integration/lint_tests.py --write-tmpdir-baseline）" % TMPDIR_BASELINE.name)
+        return
+    try:
+        base = json.loads(TMPDIR_BASELINE.read_text(encoding="utf-8")).get("files") or {}
+    except Exception as e:                           # noqa: BLE001 —— 畸形基线=黄不猜
+        warn("L8 临时目录卫生：基线畸形（%s: %s）——本项未能判定" % (type(e).__name__, e))
+        return
+    new_files, grown = [], []
+    for rel, n in sorted(tmpdir_users().items()):
+        cap = base.get(rel)
+        if cap is None:
+            new_files.append("%s (%d call site%s, no reclaim verb)" % (rel, n, "" if n == 1 else "s"))
+        elif n > cap:
+            grown.append("%s (%d > baseline %d)" % (rel, n, cap))
+    if new_files or grown:
+        warn("L8 tmp-dir hygiene: mkdtemp without any reclaim verb in the same file — %s%s"
+             " | fix: registry + exit hook (e.g. server/engine/tests/_tmp_reclaim.py) or "
+             "rmtree/TemporaryDirectory; batch registry: %s"
+             % ("; ".join(new_files[:6]), ("; " + "; ".join(grown[:4])) if grown else "",
+                TMPDIR_BASELINE.name))
+    else:
+        ok("L8 tmp-dir hygiene: no new mkdtemp-without-reclaim (baseline %d grandfathered file%s)"
+           % (len(base), "" if len(base) == 1 else "s"))
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -333,10 +418,13 @@ def main():
     lint_registry()
     lint_three_state()
     lint_terminology()
+    lint_tmpdir_hygiene()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0
 
 
 if __name__ == "__main__":
+    if "--write-tmpdir-baseline" in sys.argv[1:]:      # 父列表再生成（见 lint_tmpdir_hygiene）
+        sys.exit(write_tmpdir_baseline())
     sys.exit(main())

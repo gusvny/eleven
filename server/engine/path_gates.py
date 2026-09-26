@@ -43,6 +43,7 @@
 本模块零 IO 零进程零网络（「基点已存在」由调用方注入谓词），全部纯函数——单测
 （server/engine/tests/test_t260911_03_path_gates.py）与场景可直调。
 """
+import posixpath
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # 拒绝回执的机器可辨键值：is_gate_refusal 以此辨认闸拒绝（区别于其它 settle note）。
@@ -156,13 +157,40 @@ def _is_safe_path(path: Any) -> bool:
     return True
 
 
+def _norm_path(path: str) -> str:
+    """路径**归一**（`./x` → `x`、`a//b` → `a/b`、`a/../b` → `b`）——纯字符串处理。
+
+    260926 独立复核新发现（宿主批准随批修；与 KI-125 同族＝「判据认字面不认归一」）：
+    `_clean_files` 此前只做安全过滤、不规范化，于是 `./integration/known-red-baseline.json`、
+    `integration//integration/known-red-baseline.json`、`a/../integration/known-red-baseline.json`
+    这类**等价写法**判不进受保护名单（`_within` 逐字比对）＝同族纵深缺口。今天不可达
+    （清单来自 `git status/diff`，git 输出已规范化；写集侧的等价写法只会误判 unauthorized
+    ＝fail-closed），但判据不该认字面而不认归一。只用 posixpath（git 路径恒 `/` 分隔，
+    不受宿主平台反斜杠语义影响）；空/非串由调用方先剔除，归一后仍不安全的由
+    `_is_safe_path` 照旧拒（**fail-closed 方向不变**）。"""
+    try:
+        return posixpath.normpath(path)
+    except (TypeError, ValueError):
+        return path
+
+
 def _clean_files(files: Iterable[Any]) -> List[str]:
-    """脏文件清单清洗：非串/空串/不安全路径直接丢弃不猜（fail-closed，交由「清单外
-    即违规」的立场由调用方兜底——清洗后不安全的条目不进判定，避免畸形输入放大）。"""
+    """脏文件清单清洗：非串/空串直接丢弃不猜；其余**先归一再看安全性**（fail-closed）。
+
+    归一的后果逐条点名（不静默改语义）：
+      - 等价写法（`./x`/`x//y`/`a/../x`）现在**进判定面**且判的是归一后的真路径——
+        受保护/测试面等「认字面」的判据不再被等价写法绕过；
+      - 归一后**仍**不安全的（绝对路径/残留 `..` 段/反斜杠/glob 哨兵）照旧丢弃不猜
+        （清洗后不安全的条目不进判定，交由「清单外即违规」的调用方立场兜底）；
+      - 归一可能把「原先因含 `..` 被丢」的写法变成一条**真路径**并据此判定（例：
+        `.sandbar/../evil` → `evil`：不再被丢弃，而是按仓根真路径判 unauthorized＝更严）。"""
     out: List[str] = []
     for f in files if isinstance(files, (list, tuple)) else []:
-        if _is_safe_path(f):
-            out.append(f)
+        if not isinstance(f, str) or not f.strip():
+            continue
+        norm = _norm_path(f.strip())
+        if _is_safe_path(norm):
+            out.append(norm)
     return out
 
 
@@ -330,6 +358,8 @@ def judge_protected_paths(files: Iterable[Any],
     「存在才拦」：名单内文件还要在泳道分叉点（base_ref）已存在才算改真源——新建
     （base 不存在）放行，落地后即受保护（闸不挡自己的出生）。exists_at_base 为 None
     （调用方无法锚定基点）→ 一律按已存在处理（fail-closed 拦），绝不因锚缺失放行。
+    路径先经 `_clean_files` **归一**再比对（260926）：`./x`/`x//y`/`a/../x` 与真路径同判，
+    等价写法不构成绕过；`exists_at_base` 收到的也是归一后的真路径（锚查询更准）。
     """
     clean = _clean_files(files)
     violations: List[str] = []

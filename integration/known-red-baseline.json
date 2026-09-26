@@ -3,278 +3,369 @@
     "policy": "集成轮次瘦身提案（260923 定稿）A 慢性红清账的已知红基线挂账册。基线只缩不增：修掉即删行并下调 max_entries；新挂账须 integration 岗位判词+home 认领，不得静默增行。verdict=booked（产品面欠账挂账）| isolated（环境/杂物/扫描面隔离，不挂产品欠账）。抖动绿（串行复跑绿）不入册。",
     "max_entries": 45,
     "evidence": "全量跑 370/290/29/51（out/integration-report-260923-192446.json）+ 定点串行复跑定性 + t260917-02 对照实验（31a4f6a 同型）；收口全量 370/290/28/52（out/integration-report-260923-203816.json）+ 5 条新增候选串行复跑（out/integration-report-260923-204427.json）：2 抖动绿不入册、3 条为首跑暴露存量红（首轮 ENV_FAIL 未跑断言=KI-038 环境红捂真红第四案）补挂账，max 27→30（判词+home 非静默增行） ｜ 260925 清账批次（宿主直修令：不开票、main 直修）：t260925-05 两趟闸回执（ran=315 fail=23 env=9）暴露 16 条未入册稳定红（UI 8／供给 2／守卫台账 5），逐条给 integration 判词＋home 认领后增行；依据=该票仲裁三轮判词「本票零新增红（本票场景绿）；余红均共享资产/抖动，转人工」＋基线覆盖差实测（33 败 vs 基线 30 条，仅覆盖 17）。max_entries 30→45。",
-    "registered": "260923 宿主直修令清账"
+    "registered": "260923 宿主直修令清账",
+    "booked_evidence": "证据戳口径（260926 integration 岗位按宿主裁定补齐）：每条 booked_at/booked_sha = **引入该行的 main 提交**时刻与提交号（推断依据=git log --follow integration/known-red-baseline.json 的三个引入提交 f61f239(27 条)/4cf4fa8(3 条)/c348c4c(15 条)，逐提交 diff 归条）；45/45 可由 git 历史机械推断，无 unknown 项。戳只作「登记早于本票基点」的时间证据，不替代 integration 判词与 home 认领；欠账本身更早的条目（note 引更早票据/台账）取本保守下界（登记提交时刻）——该取值只会更严，不会更松。"
   },
   "entries": [
     {
       "name": "capture-chat-active",
       "verdict": "booked",
       "home": "workbench 捕获族欠账（KI-051 同族后续）",
-      "note": "fail×prepare-reason 违约形态（t260910-13 决策表在案）"
+      "note": "fail×prepare-reason 违约形态（t260910-13 决策表在案）",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "capture-chat-e2e",
       "verdict": "booked",
       "home": "workbench 捕获族欠账（KI-051 同族后续）",
-      "note": "11 视图走访族，与 capture-chat-active 同根"
+      "note": "11 视图走访族，与 capture-chat-active 同根",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260904-05-chat-band-affiliation",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260904-05-session-lifecycle-ui",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260904-07-charter-injection-journey",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260904-17-ticket-list-rowcard-ui",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260905-06-doc-entry-present",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260905-06-doc-read-through",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260905-07-ticket-detail-panel",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260905-08-wb-contrast-guard",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260907-08-wb-contrast-quadrant",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260910-10-docs-ui-mock-v1",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260915-09-epics-client-project-wire",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260915-10-docs-follow-project",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260916-26-console-boot-no-plugin-banner",
       "verdict": "booked",
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
-      "note": "台账在册慢性红；同票 stage-plugins-selfcheck 另有环境红族"
+      "note": "台账在册慢性红；同票 stage-plugins-selfcheck 另有环境红族",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260907-10-engine-layout",
       "verdict": "booked",
       "home": "t260907-10 布局守卫面",
-      "note": "台账在册慢性红"
+      "note": "台账在册慢性红",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260922-03-dsh-probe-live-green",
       "verdict": "booked",
       "home": "dsh 0.1.5 迁移在途面（KI-101~103 对账工作流）",
-      "note": "台账在册慢性红，与 cred-env 同根"
+      "note": "台账在册慢性红，与 cred-env 同根",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260922-03-dsh-probe-live-cred-env",
       "verdict": "booked",
       "home": "dsh 0.1.5 迁移在途面（KI-101~103 对账工作流）",
-      "note": "桩自报路由/产品红保全五断言红（定点复跑 6/5 稳定）"
+      "note": "桩自报路由/产品红保全五断言红（定点复跑 6/5 稳定）",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260915-20-project-identity-realchain",
       "verdict": "booked",
       "home": "巡检发现证据复核语义面（t260915-20/t260916-02）",
-      "note": "发现证据复核 verified 卡 unverified（J1g/J1g2，定点复跑稳定）"
+      "note": "发现证据复核 verified 卡 unverified（J1g/J1g2，定点复跑稳定）",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260916-02-relocation-realchain",
       "verdict": "booked",
       "home": "巡检发现证据复核语义面（t260915-20/t260916-02）",
-      "note": "同上 T4a2/T4b2，与 t260915-20 同根"
+      "note": "同上 T4a2/T4b2，与 t260915-20 同根",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260917-02-legacy-fire-redirect",
       "verdict": "booked",
       "home": "t260917-02 调度路人门/台账面",
-      "note": "R1e/R1f/R3b；对照实验 31a4f6a（本目标直修前）同型红=先于本目标存在"
+      "note": "R1e/R1f/R3b；对照实验 31a4f6a（本目标直修前）同型红=先于本目标存在",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260917-02-board-unresolved-running",
       "verdict": "booked",
       "home": "t260917-02 调度路人门/台账面",
-      "note": "B3b 同根；与 legacy-fire 同族"
+      "note": "B3b 同根；与 legacy-fire 同族",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260913-04-lifecycle-gc",
       "verdict": "booked",
       "home": "t260913-04 容器生命周期 gc 面",
-      "note": "孤儿 gc 收走+remove_container 幂等两断言红（定点复跑稳定）"
+      "note": "孤儿 gc 收走+remove_container 幂等两断言红（定点复跑稳定）",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260910-04-console-paused-list",
       "verdict": "booked",
       "home": "t260910-04 续派收口面",
-      "note": "merge_check 红灯：泳道差集无 gitlink（嵌套仓）base_ref 缺失+续派 300s 超时"
+      "note": "merge_check 红灯：泳道差集无 gitlink（嵌套仓）base_ref 缺失+续派 300s 超时",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "scenario-guard-spec-landed",
       "verdict": "isolated",
       "home": "主树未提交 roles yml（0.1.5 迁移在途工序）",
-      "note": "persona 块提取 18 项全红=未提交 yml 改动所致；不挂产品欠账，在途工序收尾即回绿"
+      "note": "persona 块提取 18 项全红=未提交 yml 改动所致；不挂产品欠账，在途工序收尾即回绿",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260907-01-path-hygiene",
       "verdict": "isolated",
       "home": "杂物 .probe-home/ 入扫描根（183 个会话数据文件含旧仓名）",
-      "note": "扫描面被未跟踪数据杂物污染（新故障模式，KI-109 候选）；杂物清理工序处置"
+      "note": "扫描面被未跟踪数据杂物污染（新故障模式，KI-109 候选）；杂物清理工序处置",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260916-02-decl-gate-aggregate",
       "verdict": "isolated",
       "home": "扫描面吞 .lane 冻结泳道树（t260908-02/t260907-10 遗留树）",
-      "note": "全仓零命中扫描命中泳道历史树（KI-109）；泳道清理/巡检处置"
+      "note": "全仓零命中扫描命中泳道历史树（KI-109）；泳道清理/巡检处置",
+      "booked_at": "2026-09-23T19:59:23+08:00",
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
     },
     {
       "name": "t260911-02-trigger-kinds",
       "verdict": "booked",
       "home": "suyou 标识迁移欠账（项目注册面：已注册 suyou、拒 sandbar）",
-      "note": "收口跑首跑暴露（首轮 ENV_FAIL 未跑断言）；串行复跑稳定红 4 断言同根：ValueError 未知项目 'sandbar'（已注册：suyou）——CLAUDE.md 硬规则 5 存量标识欠账现形"
+      "note": "收口跑首跑暴露（首轮 ENV_FAIL 未跑断言）；串行复跑稳定红 4 断言同根：ValueError 未知项目 'sandbar'（已注册：suyou）——CLAUDE.md 硬规则 5 存量标识欠账现形",
+      "booked_at": "2026-09-23T20:47:27+08:00",
+      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f"
     },
     {
       "name": "t260910-11-temporal-isolation-guard",
       "verdict": "booked",
       "home": "t260910-11 测试票号命名空间面",
-      "note": "收口跑首跑暴露；子用例c 扫描面撞真票号 t260923-03（无进程戳）——测试票号带进程戳要求与真实票号空间冲突，场景命名空间待收紧"
+      "note": "收口跑首跑暴露；子用例c 扫描面撞真票号 t260923-03（无进程戳）——测试票号带进程戳要求与真实票号空间冲突，场景命名空间待收紧",
+      "booked_at": "2026-09-23T20:47:27+08:00",
+      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f"
     },
     {
       "name": "t260913-02-suite-journey",
       "verdict": "booked",
       "home": "台账落账面（t260913-02/t260917-02 同族）",
-      "note": "收口跑首跑暴露；B5f/B7b 落账 ledger=None 与 t260917-02 R1f 台账=[] 同族——台账写路径在旅程夹具模式下不出行"
+      "note": "收口跑首跑暴露；B5f/B7b 落账 ledger=None 与 t260917-02 R1f 台账=[] 同族——台账写路径在旅程夹具模式下不出行",
+      "booked_at": "2026-09-23T20:47:27+08:00",
+      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f"
     },
     {
       "name": "t02-t260902-02-teardown-versioning",
       "verdict": "booked",
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
-      "note": "守卫/台账类在 lane 口径下的稳定红；待专项"
+      "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260903-07-chat-project-tag",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260903-07-click-no-chat-switch",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260904-05-top-entry-retired-form",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260904-11-charter-prompt-wire-contract",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260905-07-stale-handshake-banner",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260905-09-platform-context-fold-stacked",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260907-04-naming-grep-assert",
       "verdict": "booked",
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
-      "note": "守卫/台账类在 lane 口径下的稳定红；待专项"
+      "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260910-12-lease-unit",
       "verdict": "booked",
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
-      "note": "守卫/台账类在 lane 口径下的稳定红；待专项"
+      "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260913-03-executor-pool-exclude-l1",
       "verdict": "booked",
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
-      "note": "守卫/台账类在 lane 口径下的稳定红；待专项"
+      "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260915-19-sidebar-inspection-ui",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260916-15-sidebar-merged-sort-ui",
       "verdict": "booked",
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
-      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修"
+      "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260916-25-stage-console-prepare-refresh",
       "verdict": "isolated",
       "home": "stage 供给/台面（lane 口径隔离，不挂产品欠账）",
-      "note": "共享台供给面瞬缺/自检面；按环境记录面隔离"
+      "note": "共享台供给面瞬缺/自检面；按环境记录面隔离",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260916-26-stage-plugins-selfcheck",
       "verdict": "isolated",
       "home": "stage 供给/台面（lane 口径隔离，不挂产品欠账）",
-      "note": "共享台供给面瞬缺/自检面；按环境记录面隔离"
+      "note": "共享台供给面瞬缺/自检面；按环境记录面隔离",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     },
     {
       "name": "t260921-06-batch-manifest-contract",
       "verdict": "booked",
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
-      "note": "守卫/台账类在 lane 口径下的稳定红；待专项"
+      "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
+      "booked_at": "2026-09-25T15:26:54+08:00",
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
     }
   ]
 }

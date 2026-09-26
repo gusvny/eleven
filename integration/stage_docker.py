@@ -1238,7 +1238,7 @@ def compose_env(project, services, ports, opts):
     # single-file bind must exist, otherwise docker creates a directory): one
     # independent tmp copy per stage, so the main tree's/lane's real admin.log
     # is never touched by tests.
-    admin_log = pathlib.Path(tempfile.gettempdir()) / ("sandbar-admin-log-%s.log" % project)
+    admin_log = stage_tmp_artifact_paths(project)["admin_log"]
     if not admin_log.exists():
         admin_log.touch()
     env["SANDBAR_TEST_ADMIN_LOG"] = str(admin_log)
@@ -1269,7 +1269,7 @@ def compose_env(project, services, ports, opts):
         if cand and os.path.isfile(cand):
             cred_src = cand
             break
-    cred_dst = pathlib.Path(tempfile.gettempdir()) / ("sandbar-credentials-%s.yaml" % project)
+    cred_dst = stage_tmp_artifact_paths(project)["credentials"]
     if cred_src:
         shutil.copyfile(cred_src, cred_dst)
         os.chmod(cred_dst, 0o600)  # dsh credentials-local is fail-closed: 644 = refuses to start (proven in gen4)
@@ -1278,7 +1278,7 @@ def compose_env(project, services, ports, opts):
     # sandbar-integration preset; source = host ~/.dsh/.agent-presets/<project>
     # or the in-repo .dsh sibling). Missing = an empty directory (preset
     # absence shown honestly), boot not blocked.
-    presets_dir = pathlib.Path(tempfile.gettempdir()) / ("sandbar-agent-presets-%s" % project)
+    presets_dir = stage_tmp_artifact_paths(project)["presets"]
     presets_dir.mkdir(parents=True, exist_ok=True)
     preset_name = "sandbar-integration"  # naming-compat
     for base in filter(None, [os.path.expanduser("~/.dsh/.agent-presets"),
@@ -1315,6 +1315,52 @@ def compose_env(project, services, ports, opts):
         # 127.0.0.1:1 always refuses inside the container). Never a production 7233.
         env["SANDBAR_TEST_TARGET_HOST"] = "127.0.0.1:1"
     return env
+
+
+# 台侧每项目临时物料（t260926 磁盘泄漏修）：**物化与回收同源**。
+# 病灶：`sandbar-agent-presets-<project>` 由本文件的 compose_env 物化（拷宿主 preset 树），
+# 拆台却一个没回收——$TMPDIR 顶层实测攒了 2 万个目录 / ~383MB（同族还有 admin.log 影子
+# 文件与凭据副本）。路径原先在物化侧直拼字符串、回收侧根本不存在，这种「只写半边」形态
+# 必然漂移，故集中到本函数：compose_env 用它落盘，do_down 用它回收。
+def stage_tmp_artifact_paths(project, root=None):
+    """本台三件临时物料的真源路径：{presets 目录, admin.log 影子文件, 凭据副本}。
+
+    root 可注入（UT 用私有 TMPDIR，绝不碰宿主真 $TMPDIR）。"""
+    base = pathlib.Path(root if root is not None else tempfile.gettempdir())
+    return {
+        "presets": base / ("sandbar-agent-presets-%s" % project),
+        "admin_log": base / ("sandbar-admin-log-%s.log" % project),
+        "credentials": base / ("sandbar-credentials-%s.yaml" % project),
+    }
+
+
+def reclaim_stage_tmp_artifacts(project, root=None):
+    """拆台回收本台的临时物料（幂等）：返回 {"removed": [...], "missing": [...],
+    "errors": [...]}（标签级点名，不刷屏）。
+
+    **只在 compose down 成功之后调用**：`presets` 目录被 bind 进容器
+    （server/docker-compose.test.yml 的 /dsh-home/.agent-presets），台没拆干净就删=
+    把活台的挂载点抽掉。幂等＝不在场记 missing（不算错、不算残留）；失败逐条点名**不抛**——
+    拆台结论不该被清理失败改写，但残留必须可见（同 residue_containers 的诚实口径）。
+    符号链接只删链接本身（不当目录递归进去删别人的东西）。"""
+    out = {"removed": [], "missing": [], "errors": []}
+    paths = stage_tmp_artifact_paths(project, root)
+    for label in sorted(paths):
+        p = paths[label]
+        try:
+            if p.is_symlink():
+                p.unlink()
+            elif p.is_dir():
+                shutil.rmtree(p)
+            elif p.exists():
+                p.unlink()
+            else:
+                out["missing"].append(label)
+                continue
+            out["removed"].append(label)
+        except OSError as e:
+            out["errors"].append("%s (%s): %s: %s" % (label, p, type(e).__name__, e))
+    return out
 
 
 def compose_cmd(project, args, env, timeout):
@@ -2964,14 +3010,23 @@ def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
 
 def _do_down(project, env=None, quiet=False):
     """down -v + container list check (internal version: state-file clearing is
-    managed centrally by do_down)."""
+    managed centrally by do_down).
+
+    这一路是**起台半途失败的就地清场**（do_up 的 except 分支，最频繁的拆台路径之一）：
+    compose down 真成功（rc=0）才回收本台临时物料——rc!=0 / 抛异常=容器可能还在，
+    而 presets 目录是容器 bind 的挂载点，绝不能抽掉（残留交 do_down/sweep/人工）。"""
     env = env if env is not None else dict(os.environ)
     try:
-        compose_cmd(project, ["down", "-v", "--remove-orphans", "--timeout", "30"],
-                    env, timeout=_STOP_TIMEOUT)
+        comp = compose_cmd(project, ["down", "-v", "--remove-orphans", "--timeout", "30"],
+                           env, timeout=_STOP_TIMEOUT)
     except StageError:
         if not quiet:
             raise
+        return
+    if getattr(comp, "returncode", 1) != 0:
+        return
+    for line in reclaim_stage_tmp_artifacts(project)["errors"]:
+        print("STAGE_TMP_RECLAIM: %s" % line, file=sys.stderr)
 
 
 def do_down(project, harvest_hold=True):
@@ -2984,7 +3039,10 @@ def do_down(project, harvest_hold=True):
          heartbeat would resurrect a fake up-file and cost the next entrant a
          full TTL);
       3. compose down -v (idempotent);
-      4. unlink the lease (release) + hold pid file.
+      4. unlink the lease (release) + hold pid file;
+      5. reclaim this stage's tmp artifacts (agent-presets dir + admin.log shadow +
+         credentials copy; t260926 disk-leak fix — only reachable once the
+         containers are gone, since the presets dir is bind-mounted into them).
     Idempotent (absent project / already-cleared containers both succeed).
     harvest_hold=False is the hold's own orphan-reclaim path (it IS the hold —
     signaling itself is skipped; _stop_hold_by_pid also self-guards)."""
@@ -3032,8 +3090,14 @@ def do_down(project, harvest_hold=True):
         (lock_root() / ("holder-%s.pid" % project)).unlink()
     except FileNotFoundError:
         pass
+    # 容器已归零 → 回收本台临时物料（t260926 磁盘泄漏修；顺序不可换：presets 目录是
+    # 容器 bind 的挂载点，台没拆干净就删 = 抽活台的挂载点）。失败只点名不改写拆台结论。
+    tmp_artifacts = reclaim_stage_tmp_artifacts(project)
+    for line in tmp_artifacts["errors"]:
+        print("STAGE_TMP_RECLAIM: %s" % line, file=sys.stderr)
     residue = residue_containers(project)
-    return {"project": project, "down": True, "residue": residue}
+    return {"project": project, "down": True, "residue": residue,
+            "tmp_artifacts": tmp_artifacts}
 
 
 def _gates(services_list):

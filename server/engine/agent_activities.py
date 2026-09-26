@@ -7337,6 +7337,22 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # 已在闸侧机械完成）——命中红=既有欠账（诚实计数，不拦≠放行）；命中绿=佐证；
     # 歧义/降级/写账问题全部点名，仲裁与运维可见。----
     _led = res.get("ledger") or {}
+    # 260926 KI-122①「加保险」（洞①第二重）：把两路**实跑**证据合成到回执（additive；
+    # 缺键/畸形 → 空 = 本轮无活基线证据，老回执零漂移）。合成单点在 shared 纯函数；
+    # 判定（绿优先/红满足）在采纳判据侧单点，此处只做数据搬运。
+    _ba = res.get("baseline") if isinstance(res.get("baseline"), dict) else {}
+    try:
+        _bl_red, _bl_green, _bl_src = shared.live_baseline_evidence(
+            _ba.get("answers") if isinstance(_ba, dict) else None,
+            _led.get("hits_red"), _led.get("hits_green"),
+            baseline_ref=str(res.get("baseline_ref") or ""),
+            ledger_available=bool(_led.get("available")))
+    except Exception as e:  # noqa: BLE001 —— 合成面故障不抛（判据侧按「无证据」走时间证据）
+        _bl_red, _bl_green, _bl_src = [], [], "evidence merge failed: %s: %s" % (
+            type(e).__name__, e)
+    out.live_baseline_red = list(_bl_red)
+    out.live_baseline_green = list(_bl_green)
+    out.live_baseline_source = str(_bl_src)
     if _led:
         _led_tail = ("台账：available=%s written=%s 命中红=%s 命中绿=%s 歧义=%s "
                      "基线免整跑=%s 基线定点=%s 基线墙钟=%s%s%s%s"

@@ -22,6 +22,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -345,32 +346,66 @@ async def reconcile_ticket_workers() -> Dict[str, Any]:
             "missing": missing, "reaped": reaped}
 
 
+def _git_ref_commit_iso(root, ref) -> tuple:
+    """`base_ref` 的**提交时刻**（ISO8601 带时区）→ (iso, error)。只读幂等零写。
+
+    KI-122① 260926 时间证据判据要拿「票面 base_ref 的提交时间」当开票基点：提交时刻是
+    仓里的事实，工作流体零 IO 纪律不破，故在本壳里解析。ref 畸形（空 / 以 `-` 开头=疑似
+    参数注入）→ 直接判不可得（不猜、不外传）；git 不可用/超时/解析不出 → 具名 error
+    （调用方据此回落到票面 created，二者都不可得才 fail-closed）。"""
+    ref = str(ref or "").strip()
+    if not ref or ref.startswith("-"):
+        return "", "base_ref is empty or malformed (%r)" % (ref,)
+    try:
+        r = subprocess.run(["git", "-C", str(root), "show", "-s", "--format=%cI", ref],
+                           capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", "base_ref commit time unresolved (%s: %s)" % (type(e).__name__, e)
+    if r.returncode != 0:
+        return "", ("base_ref commit time unresolved (git exit %d: %s)"
+                    % (r.returncode, (r.stderr or r.stdout or "").strip()[-200:]))
+    return r.stdout.strip(), ""
+
+
 @activity.defn
 async def read_known_red_roster(args: Dict[str, Any]) -> Dict[str, Any]:
     """KI-122①：读仓根已知红挂账册（integration/known-red-baseline.json）——**只读**面。
 
     裁决采纳判据要用「这条闸拦（blocker）是否已挂账」这一既有名册归属，而名册是仓内文件：
     workflow 体零 IO 纪律不破，IO 全在本壳。回执形状：
-      {ok: True, result: {entries: {name: {verdict, home}}, error: "", path: <绝对路径>}}
+      {ok: True, result: {entries: {name: {verdict, home, booked_at, booked_sha}},
+                          error: "", path: <绝对路径>, base_ref: <票面基点>,
+                          base_at: <base_ref 的提交时刻 ISO 或 "">,
+                          base_at_error: <解析失败原因或 "">}}
     名册读不到 / JSON 畸形 / 条目畸形 → **不抛**，error 非空（fail-closed 由调用方判定：
     照旧拦、照旧重跑，并把路径与原因点名进票面）——「名册确实缺失」不是基础设施故障，
     不该被 Temporal 重试成无限循环。零写零信号：绝不改文件、绝不碰票态。"""
     rel = str((args or {}).get("rel") or KNOWN_RED_BASELINE_REL)
     root = Path(str((args or {}).get("repo_root") or REPO_ROOT))
     path = root / rel
+    base_ref = str((args or {}).get("base_ref") or "")
+    base_at, base_err = _git_ref_commit_iso(root, base_ref)
+    if not base_ref:
+        base_err = "base_ref is empty or malformed ('')"
     entries: Dict[str, Any] = {}
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as e:
         return {"ok": True, "result": {"entries": entries, "path": str(path),
+                                       "base_ref": base_ref, "base_at": base_at,
+                                       "base_at_error": base_err,
                                        "error": "cannot read %s: %s" % (rel, type(e).__name__)}}
     try:
         payload = json.loads(text)
     except (ValueError, TypeError) as e:
         return {"ok": True, "result": {"entries": entries, "path": str(path),
+                                       "base_ref": base_ref, "base_at": base_at,
+                                       "base_at_error": base_err,
                                        "error": "malformed JSON in %s: %s" % (rel, type(e).__name__)}}
     entries, err = known_red_roster(payload)
-    return {"ok": True, "result": {"entries": entries, "path": str(path), "error": err}}
+    return {"ok": True, "result": {"entries": entries, "path": str(path),
+                                   "base_ref": base_ref, "base_at": base_at,
+                                   "base_at_error": base_err, "error": err}}
 
 
 @activity.defn
@@ -615,6 +650,69 @@ async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "巡检票落账失败：%s" % e}
 
 
+#: 水位扫描的顶层条目计数上界（防呆）：越过即截断并点名——计数是**下界**，
+#: 绝不因为「扫不动」就静默当成水位 0（巡检面不许有静默零）。
+TMP_SCAN_MAX_ENTRIES = 2_000_000
+#: 同进程内同 root 的水位扫描缓存 TTL（秒；0=不用缓存）。为什么可以缓存：水位是分钟级
+#: 慢变量，同一 worker 进程一次巡检期内多次调用（UT/重试）扫同一个顶层目录是纯浪费；
+#: 跨期（>TTL）=新一次真扫。**只缓存只读结果**，不写任何状态。
+TMP_SCAN_CACHE_TTL_S = 60.0
+_TMP_SCAN_CACHE: Dict[Any, Any] = {}
+
+
+def scan_tmp_fixture_dirs(root: str, prefixes=()) -> Dict[str, Any]:
+    """只读扫临时根**顶层**一次：白名单前缀的**真目录** + mtime（零写、零递归、零 du）。
+
+    为什么要单独一个函数而不是写在活动里：这是本面唯一的 IO（巡检纪律=只读、可复核），
+    抽出来便于单测注入/替换，也便于「扫不动」的三态（OK/截断/读不到）逐态点名。
+    白名单外一律只计数（untouched）——宿主 temp 里还有别的程序的东西，绝不算进水位。
+    """
+    out: Dict[str, Any] = {"root": str(root), "entries": [], "entries_seen": 0,
+                           "untouched": 0, "skipped": [], "scan_error": "",
+                           "truncated": False, "scanned_at": time.time()}
+    prefixes = tuple(prefixes)
+    try:
+        with os.scandir(root) as it:
+            for ent in it:
+                out["entries_seen"] += 1
+                if out["entries_seen"] > TMP_SCAN_MAX_ENTRIES:
+                    out["truncated"] = True
+                    break
+                name = ent.name
+                if not any(name.startswith(p) for p in prefixes):
+                    out["untouched"] += 1
+                    continue
+                try:
+                    if not ent.is_dir(follow_symlinks=False):
+                        # 符号链接不算夹具目录（跟进去量的是别人的东西）
+                        out["skipped"].append("%s (not a real directory)" % name[:120])
+                        continue
+                    out["entries"].append(
+                        {"name": name, "mtime": ent.stat(follow_symlinks=False).st_mtime})
+                except OSError as e:
+                    out["skipped"].append("%s (stat failed: %s: %s)"
+                                          % (name[:120], type(e).__name__, e))
+    except OSError as e:
+        out["scan_error"] = "%s: %s" % (type(e).__name__, e)
+    return out
+
+
+def _scan_tmp_fixture_cached(root: str, prefixes, ttl: float) -> Dict[str, Any]:
+    """带 TTL 的只读扫描（同 root+白名单 命中缓存；ttl<=0 直扫）。"""
+    key = (str(root), tuple(prefixes))
+    now = time.time()
+    hit = _TMP_SCAN_CACHE.get(key)
+    if hit and ttl > 0 and (now - float(hit[0])) < ttl:
+        scan = dict(hit[1])
+        scan["cached"] = True
+        return scan
+    scan = scan_tmp_fixture_dirs(root, prefixes)
+    scan["cached"] = False
+    if ttl > 0:
+        _TMP_SCAN_CACHE[key] = (now, scan)
+    return scan
+
+
 @activity.defn
 async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
     """lane/watchdog 面（KI-122 追加面 / KI-126 同源）：扫**非终态票**的工作流快照与时间线。
@@ -631,9 +729,20 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
     范围：按项目注册表解析出的**全部项目**的非终态票（票的 ProjectKey SA ∈ 注册表 key），
     不只宿主项目——逐票超阈出发现（同票多族由纯函数聚合为一条）。回执含计数（scanned /
     with_findings / by_leg）与阈值来源（declaration|default + 逐键回落原因），不静默。
-    单票查询失败=点名进 errors（绝不静默吞成「这票没问题」）。"""
-    from inspection_lane_watchdog import (facts_from_snapshot, lane_findings,
-                                          lane_section, resolve_thresholds)
+    单票查询失败=点名进 errors（绝不静默吞成「这票没问题」）。
+
+    第四判据（260926 补）：**测试夹具临时目录水位**——只读扫临时根顶层（白名单前缀的真
+    目录 + mtime，零写零递归），越线出宿主级发现（`tmp-fixture-water`），回执挂在
+    `result["tmp_fixture"]`（自己的 facts/findings/section：与票级三族的计数口径分开，
+    票级断言零回归）。阈值同样走声明侧 `watchdog:` 档（`tmp_fixture_max_dirs`/
+    `tmp_fixture_max_age_h`），来源=declaration|env|default 且逐键点名。扫描三态
+    （OK/截断/读不到）逐态显式化：读不到=具名 med 发现（绝不渲染成「绿」）。
+    """
+    from inspection_lane_watchdog import (TMP_ENV_MAX_AGE_H, TMP_ENV_MAX_DIRS,
+                                          TMP_FIXTURE_PREFIXES, facts_from_snapshot,
+                                          lane_findings, lane_section, merge_lane_section,
+                                          resolve_thresholds, resolve_tmp_thresholds,
+                                          tmp_fixture_scan_result)
 
     thresholds, thr_source, thr_note, _problems = resolve_thresholds(args.get("watchdog"))
     try:
@@ -736,6 +845,36 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
 
     findings, meta = lane_findings(facts, now_ts=now_ts, thresholds=thresholds,
                                    tickets_meta={"non_terminal": non_terminal})
+
+    # ---- 第四判据：测试夹具临时目录水位（宿主级；只读扫描，零写）----
+    #     注入口（tmp_fixture=扫描回执 dict）供 UT 用私有根跑真判据，绝不碰宿主真 $TMPDIR；
+    #     缺省走 tmp_fixture_root（缺省 tempfile.gettempdir()）真扫。
+    tmp_env = {TMP_ENV_MAX_DIRS: os.environ.get(TMP_ENV_MAX_DIRS),
+               TMP_ENV_MAX_AGE_H: os.environ.get(TMP_ENV_MAX_AGE_H)}
+    tmp_thr, tmp_src, tmp_note, tmp_problems = resolve_tmp_thresholds(
+        args.get("watchdog"), tmp_env)
+    injected = args.get("tmp_fixture")
+    if isinstance(injected, dict):
+        tmp_scan = dict(injected)
+        tmp_scan.setdefault("root", str(args.get("tmp_fixture_root") or "<injected>"))
+        tmp_scan["scanned_at"] = float(tmp_scan.get("scanned_at") or time.time())
+        tmp_scan["injected"] = True
+    else:
+        tmp_root = str(args.get("tmp_fixture_root") or tempfile.gettempdir())
+        try:
+            tmp_ttl = float(args.get("tmp_fixture_scan_ttl_sec")
+                            if args.get("tmp_fixture_scan_ttl_sec") is not None
+                            else TMP_SCAN_CACHE_TTL_S)
+        except (TypeError, ValueError):
+            tmp_ttl = TMP_SCAN_CACHE_TTL_S
+        tmp_scan = _scan_tmp_fixture_cached(tmp_root, TMP_FIXTURE_PREFIXES, tmp_ttl)
+        tmp_scan["injected"] = False
+    tmp_out = tmp_fixture_scan_result(tmp_scan, tmp_thr, source=tmp_src, note=tmp_note,
+                                      now_ts=now_ts)
+    tmp_out["scan_mode"] = "injected" if isinstance(injected, dict) else "scanned"
+    tmp_out["scan_cached"] = bool(tmp_scan.get("cached"))
+    tmp_out["threshold_problems"] = list(tmp_problems)
+
     meta["errors"] = errors
     meta["unreadable"] = unreadable
     meta["quarantined_projects"] = [str(q.get("dir") or "") for q in (quarantined or [])
@@ -746,12 +885,31 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
     meta["threshold_source"] = thr_source
     meta["threshold_note"] = thr_note
     meta["scanned_at"] = now_ts
-    activity.logger.info("lane/watchdog：非终态票 %d 张（读到 %d 张；注册项目 %d 个），发现 %d 条（%s）",
+    meta["tmp_fixture"] = {"dirs": tmp_out["section"]["dirs"],
+                           "oldest_age_h": tmp_out["section"]["oldest_age_h"],
+                           "finding_count": tmp_out["section"]["finding_count"],
+                           "thresholds": tmp_out["section"]["thresholds"],
+                           "threshold_source": tmp_out["section"]["threshold_source"],
+                           "scan_error": tmp_out["section"]["scan_error"],
+                           "scan_mode": tmp_out["scan_mode"],
+                           "scan_cached": tmp_out["scan_cached"],
+                           "prefixes": list(TMP_FIXTURE_PREFIXES)}
+    activity.logger.info("lane/watchdog：非终态票 %d 张（读到 %d 张；注册项目 %d 个），发现 %d 条（%s）；"
+                         "夹具水位：%d 目录 / 最老 %.1fh / 发现 %d 条（%s）",
                          meta["non_terminal"], meta["scanned"], len(known_keys), len(findings),
-                         ", ".join("%s=%d" % (k, v) for k, v in meta["by_leg"].items()))
+                         ", ".join("%s=%d" % (k, v) for k, v in meta["by_leg"].items()),
+                         tmp_out["section"]["dirs"], tmp_out["section"]["oldest_age_h"],
+                         tmp_out["section"]["finding_count"],
+                         tmp_out["section"]["threshold_source"])
     return {"ok": True, "result": {
         "findings": findings,
         "section": lane_section(findings, meta, source=thr_source, source_note=thr_note),
+        # 票面用的**合并段**（票级三族 + 宿主水位；计数合并单点在纯函数面）：在活动侧算好，
+        # 工作流只需取字段——工作流侧零算法、零新 import 面（沙箱/回放确定性都最省事）。
+        "section_merged": merge_lane_section(
+            lane_section(findings, meta, source=thr_source, source_note=thr_note),
+            tmp_out["section"]),
+        "tmp_fixture": tmp_out,
         "meta": meta}}
 
 

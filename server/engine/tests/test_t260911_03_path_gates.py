@@ -195,6 +195,7 @@ def test_protected_existing_at_base_refused():
         "integration/t260902-07/tests/test_route_table.py",
         "integration/t260902-07/tests/test_route_lookup.py",
         "integration/baselines/expectations.json",
+        "integration/known-red-baseline.json",
         "verify.yaml",
         "server/model-routes.yaml",
         "server/merge-checks.yaml",
@@ -276,9 +277,19 @@ def test_malformed_inputs_fail_closed():
     # 畸形写集条目已由 test_implement_empty_write_set_fail_closed 覆盖
     # 不安全路径被清洗出判定面（丢弃不猜）；剩余合法条目只有结果文件 → 放行
     ok, vio, reason = pg.judge_stage_paths(
-        "create_plan", [".sandbar", "../.sandbar/evil", ".sandbar/../evil"],
-        write_set=None)
+        "create_plan", [".sandbar", "../.sandbar/evil"], write_set=None)
     assert (ok, vio, reason) == (True, [], "")
+    # 260926 归一（宿主批准随批修）：`.sandbar/../evil` 归一到仓根真路径 `evil`——不再被
+    # 「含 .. 段」丢弃，而是按真路径判 unauthorized（**更严**，fail-closed 方向不变；
+    # 旧断言钉的是「丢弃＝放行」这条宽松后果，随归一改写）。
+    ok2, vio2, reason2 = pg.judge_stage_paths(
+        "create_plan", [".sandbar", ".sandbar/../evil"], write_set=None)
+    assert (ok2, reason2) == (False, "unauthorized_path") and vio2 == ["evil"]
+    # 归一后仍不安全的（绝对路径/逃出仓根/反斜杠/glob 哨兵）照旧丢弃不猜
+    ok3, vio3, reason3 = pg.judge_stage_paths(
+        "create_plan", ["/abs/x.py", "../../etc/passwd", "a\\b.py", "x[*].py"],
+        write_set=None)
+    assert (ok3, vio3, reason3) == (True, [], "")
 
 
 def test_note_single_line_and_names_files():
@@ -443,3 +454,84 @@ def test_protected_list_hygiene():
     # 显式排除项不在名单
     assert not pg._within("integration/run_scenarios.py", pg.PROTECTED_PATHS)
     assert not pg._within(".sandbar/anything", pg.PROTECTED_PATHS)
+
+
+# ---------------- 洞②回归（260926 独立复核）：已知红名册不可被泳道票自写 ----------------
+
+def test_roster_roster_not_writable_by_integration_writeset_tickets():
+    """260926 洞②回归：`design_integration_tests` 段的允许面**就是** `integration/` 前缀
+    （这正是当初的口子：写集含 integration/ 的票可把自己的新红写进名册并同步抬
+    max_entries → 下一轮「逐条在册」→ 采纳放行＝自证豁免）。段允许面照旧放行，
+    **受保护名单闸必须拦**（名单已收 `integration/known-red-baseline.json`）。"""
+    roster = "integration/known-red-baseline.json"
+    # ① 段允许面：该段确实允许 integration/ 面内容（洞的可利用面在，才能验闸有牙）
+    allowed, vio, reason = pg.judge_stage_paths(
+        "design_integration_tests", [roster], write_set=["integration"],
+        ticket_id="t260926-99")
+    assert (allowed, vio, reason) == (True, [], ""), (allowed, vio, reason)
+    # ② 受保护闸：基点已存在 → 拦，且具名文件 + 原因码 + 出路
+    vio2, reason2 = pg.judge_protected_paths([roster], exists_at_base=lambda p: True)
+    assert vio2 == [roster] and reason2 == "protected_path"
+    note = pg.gate_refusal_note("design_integration_tests", vio2, reason2)
+    assert pg.is_gate_refusal(note) and roster in note
+    assert pg.PATH_GATE_REASON_KEY + "protected_path" in note
+    # ③ 锚不可知（无谓词/谓词炸）= fail-closed 拦（不因锚缺失放行）
+    assert pg.judge_protected_paths([roster], exists_at_base=None)[0] == [roster]
+
+    def _boom(_):
+        raise RuntimeError("git 故障")
+    assert pg.judge_protected_paths([roster], exists_at_base=_boom)[0] == [roster]
+    # ④ 反例：同目录的正常工作面（场景登记/共享工具）不被本名单误伤
+    for ok_path in ("integration/run_scenarios.py", "integration/lib_result.py",
+                    "integration/t260926-99/sc_x.py"):
+        assert pg.judge_protected_paths([ok_path], exists_at_base=lambda p: True) == ([], ""), ok_path
+    # ⑤ 名册自身在册（匹配立场与写集一致）
+    assert pg._within(roster, pg.PROTECTED_PATHS)
+
+
+def test_protected_gate_normalizes_equivalent_path_forms():
+    """260926 归一修复（宿主批准随批修；与 KI-125 同族「判据认字面不认归一」）：受保护名单
+    的判定必须先归一——`./x`、`x//y`、`a/../x` 这些**等价写法**与真路径同判，不构成绕过。
+
+    修前：`_clean_files` 只过滤不归一，上述写法要么判不进名单、要么被当「含 .. 段」丢弃
+    ＝判据看不见（同族纵深缺口；今天不可达是因为清单来自 git status/diff，输出已规范化）。
+    正反例齐：等价写法必拦；归一后**不是**真路径的写法不得误拦（含「显式不保护」的
+    run_scenarios.py 的等价写法）。"""
+    roster = "integration/known-red-baseline.json"
+    # 正例①：三种等价写法 → 归一后判进受保护名单，且回执点名的是**归一后的真路径**
+    #（报错精确：让人照着能改的那条路径去改），拒收回执带原因码
+    for disguised in ("./" + roster, "integration//known-red-baseline.json",
+                      "a/../integration/known-red-baseline.json",
+                      ".//integration/./" + "known-red-baseline.json",
+                      "integration/baselines/../../" + roster):
+        vio, reason = pg.judge_protected_paths([disguised], exists_at_base=lambda p: True)
+        assert vio == [roster] and reason == "protected_path", (disguised, vio, reason)
+        assert "protected_path" in pg.gate_refusal_note("implement", vio, reason)
+        assert pg.is_gate_refusal(pg.gate_refusal_note("implement", vio, reason))
+    # 正例②：归一后仍是名单内文件（baselines 前缀）→ 同样拦
+    vio2, reason2 = pg.judge_protected_paths(["./integration/baselines/../baselines/x.json"],
+                                             exists_at_base=lambda p: True)
+    assert vio2 == ["integration/baselines/x.json"] and reason2 == "protected_path"
+    # 正例③：「存在才拦」的出生两态在归一后照旧（锚查询用归一后的真路径）
+    vio3, _ = pg.judge_protected_paths(["./" + roster], exists_at_base=lambda p: False)
+    assert (vio3, _) == ([], "")
+    vio4, _ = pg.judge_protected_paths(["./" + roster], exists_at_base=lambda p: True)
+    assert vio4 == [roster]
+    # 反例①：归一后**不是**真路径的写法不得误拦（.bak/别的目录/同名前缀）
+    for other in (roster + ".bak", "other/" + roster, "integration/known-red-baseline.jsonx",
+                  "integration/known-red-baseline.json/sub"):
+        vio5, reason5 = pg.judge_protected_paths([other], exists_at_base=lambda p: True)
+        expect = ([other], "protected_path") if other.endswith("/sub") else ([], "")
+        assert (vio5, reason5) == expect, (other, vio5, reason5)
+    # 反例②：「显式不保护」的 run_scenarios.py 及其等价写法照旧不拦（归一不制造假命中）
+    for ok_path in ("integration/run_scenarios.py", "./integration/run_scenarios.py",
+                    "integration/baselines/../run_scenarios.py"):
+        assert pg.judge_protected_paths([ok_path], exists_at_base=lambda p: True) == ([], ""), ok_path
+    # 反例③：归一后仍不安全的（逃出仓根/绝对路径/反斜杠/glob 哨兵）照旧丢弃不猜
+    for unsafe in ("../" + roster, "/abs/" + roster, "a\\" + roster, "we?rd.py"):
+        assert pg.judge_protected_paths([unsafe], exists_at_base=lambda p: True) == ([], "")
+    # 反例④：段允许面（design_integration_tests=integration/ 前缀）在归一后语义不变
+    ok, vio6, reason6 = pg.judge_stage_paths(
+        "design_integration_tests", ["./integration/t260926-99/sc_x.py"],
+        write_set=["integration"], ticket_id="t260926-99")
+    assert (ok, vio6, reason6) == (True, [], "")

@@ -197,6 +197,32 @@ def decide(case, baseline_red, fp_equal=True, fp_diffs=None):
     return {"name": name, "verdict": "unknown", "why": "cause_unknown"}
 
 
+def baseline_answers(lane_cases, baseline_cases, lane_fp, baseline_fp, baseline_ok):
+    """活基线主跑的**逐名答案**（{"红名": "red"|"green"}）——只读派生物，不改任何判定。
+
+    KI-122①（260926 洞①「加保险」）：采纳面要问「这条红在活基线里是什么状态」。
+    与 `_baseline_answer` 同一判据（单写者：基线缺席/指纹不等=无答案；基线 not-checked
+    不算答案 C1；red=checked fail / green=跑过且 pass）——本函数只是把它**逐名取出来**
+    放进回执，供采纳面与票面审计，不参与闸的 block/record 判定（判据零改动）。
+
+    `lane_cases` 传**红面**（非 pass）即可：全绿用例进不进答案表对采纳无意义，且回执
+    尺寸更小。名字畸形/非 dict 条目逐项跳过（不抛）。"""
+    fp_equal = bool(baseline_ok) and (
+        (lane_fp or {}).get("value") == (baseline_fp or {}).get("value"))
+    baseline_red = _baseline_red_set(baseline_cases or [])
+    baseline_by_name = {c["name"]: c for c in (baseline_cases or [])
+                        if isinstance(c, dict) and c.get("name")}
+    out = {}
+    for raw in (lane_cases or []):
+        name = raw.get("name") if isinstance(raw, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            continue
+        ans = _baseline_answer(name, baseline_red, baseline_by_name, baseline_ok, fp_equal)
+        if ans in ("red", "green"):
+            out[name.strip()] = ans
+    return out
+
+
 def apply_affiliation(lane_cases, baseline_cases, lane_fp, baseline_fp,
                       baseline_ok, baseline_seen=True):
     """整批归属：逐用例语义收紧 → 决策表。返回

@@ -7,18 +7,23 @@
     write_set=rebase 全量透传）；真畸形条目（branch 缺失）照旧 RuntimeError；
   - prepare_workspace 通道子用例：混合夹具直调 → 推导出含根树明细；单仓夹具 →
     rws=None 走旧单仓路径（零回归）。
+
+夹具回收（260926 磁盘泄漏修）：实测 $TMPDIR 顶层 `t260907-12-ut*` 13,595 个 / ~771MB
+（>6h 未动）——原 `tempfile.mkdtemp` 从不回收（正常退出也不回收）。夹具一律经
+`_tmp_reclaim.mkdtemp_reclaimed` 创建（注册表 + 进程退出 atexit 兜底 + 幂等回收）。
 """
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 POC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(POC))
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # 同目录 _tmp_reclaim
 
 import pytest  # noqa: E402
 import shared  # noqa: E402
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402
 from shared import WorkspacePrep  # noqa: E402
 import agent_activities as aa  # noqa: E402
 
@@ -43,7 +48,7 @@ def _init_repo(path):
 
 @pytest.fixture
 def mixed():
-    root = _init_repo(Path(tempfile.mkdtemp(prefix="t260907-12-act-")))
+    root = _init_repo(mkdtemp_reclaimed("t260907-12-act-"))
     a = _init_repo(root / "repo_a")
     _git("worktree", "add", "-b", "lane/ut-root", str(root / ".lane" / "ut"), cwd=root)
     _git("worktree", "add", "-b", "lane/ut-repo_a",
@@ -117,7 +122,7 @@ def test_lane_scopes_still_rejects_missing_branch(mixed):
 
 def test_prepare_workspace_channel_mixed_vs_single():
     # 混合夹具：通道子用例推导出含根树明细
-    root = _init_repo(Path(tempfile.mkdtemp(prefix="t260907-12-ch-")))
+    root = _init_repo(mkdtemp_reclaimed("t260907-12-ch-"))
     a = _init_repo(root / "repo_a")
     prep = WorkspacePrep(ticket_id="t26090712ut", write_set=["README.md"],
                          project_root=str(root))
@@ -128,7 +133,7 @@ def test_prepare_workspace_channel_mixed_vs_single():
     assert r.ok, r.error
     assert (lane / "README.md").exists()  # 树=泳道容器且基线随仓
     # 单仓夹具：通道字段忽略，走旧单仓路径（repo_worktrees 不进）
-    single = _init_repo(Path(tempfile.mkdtemp(prefix="t260907-12-ch1-")))
+    single = _init_repo(mkdtemp_reclaimed("t260907-12-ch1-"))
     prep2 = WorkspacePrep(ticket_id="t26090712ut", write_set=["x.py"],
                           project_root=str(single))
     r2 = asyncio.run(aa.prepare_workspace(_prep_with(

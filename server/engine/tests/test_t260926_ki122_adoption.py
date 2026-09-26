@@ -47,10 +47,21 @@ REPO = POC.parent.parent
 # 实案票的两条闸拦（今天 t260926-05 逐字；名册 verdict/home 见 integration/known-red-baseline.json）
 REAL_BLOCKERS = ["t260903-07-click-no-chat-switch",
                  "t260916-25-stage-console-prepare-refresh"]
+# 260926 洞①裁定：采纳要「开票基点」在手（时间证据比较下界）。测试用固定基点——
+# 必须**晚于**名册全部证据戳（末批 2026-09-25T15:26:54+08:00），否则判 stale-evidence。
+BASE_AFTER = "2026-09-30T00:00:00+00:00"
+BASE_BEFORE = "2026-09-01T00:00:00+00:00"
 
 
 def _roster_payload(entries):
     return {"entries": [dict({"name": n}, **v) for n, v in entries.items()]}
+
+
+def _stamped(name, *, verdict="booked", home="h", booked_at="2026-09-23T19:59:23+08:00",
+             booked_sha="f61f239c5e05ea691ae07e1abed25eb3f827ff77"):
+    """单条带证据戳的名册条目（时间证据用例的最小载荷）。"""
+    return {"name": name, "verdict": verdict, "home": home, "note": "n",
+            "booked_at": booked_at, "booked_sha": booked_sha}
 
 
 def _real_roster_entries():
@@ -92,8 +103,12 @@ def test_a2_roster_parsing_malformed_failclosed():
 
 
 def test_a3_all_known_red_adopts_with_audit_anchor():
-    """①零新增红 → 采纳：审计锚逐条列 blocker 名 + 名册 verdict/home（凭什么放行可复核）。"""
-    a = blockers_known_red_adoption(REAL_BLOCKERS, _roster_payload(_real_roster_entries()))
+    """①零新增红 → 采纳：审计锚逐条列 blocker 名 + 名册 verdict/home（凭什么放行可复核），
+    并带**时间证据**（每条登记早于本票开票基点）与**活基线可得性**（260926 洞①裁定）。
+    调用方给了基点=判据可判；没给基点=fail-closed（见 test_a8）。"""
+    a = blockers_known_red_adoption(REAL_BLOCKERS, _roster_payload(_real_roster_entries()),
+                                    ticket_base_at=BASE_AFTER,
+                                    ticket_base_source="ticket created (test)")
     assert a["adopt"] is True and a["why"] == "adopted"
     assert [k["name"] for k in a["known"]] == REAL_BLOCKERS and a["new"] == []
     assert a["known"][0]["verdict"] == "booked" and a["known"][1]["verdict"] == "isolated"
@@ -101,6 +116,13 @@ def test_a3_all_known_red_adopts_with_audit_anchor():
     for kw in ("ADOPTED", "zero new red", shared.KNOWN_RED_BASELINE_REL,
                "acceptance_walkthrough", REAL_BLOCKERS[0], REAL_BLOCKERS[1],
                "booked", "isolated"):
+        assert kw in a["note"], kw
+    # 洞① 时间证据面：逐条戳进审计锚 + 基点具名 + 活基线不可得时明确「仅时间证据」
+    assert a["stale"] == [] and a["stamps_ok"] is True
+    assert a["known"][0]["booked_at"] == "2026-09-25T15:26:54+08:00"
+    assert a["known"][0]["booked_sha"].startswith("c348c4c")
+    for kw in ("basis 2: time evidence", BASE_AFTER, "ticket created (test)",
+               "basis 3:", "UNAVAILABLE", "time evidence only"):
         assert kw in a["note"], kw
     # 文案是票面/报告面，一律英文（数据字段=blocker 名与 home 原文不译）
     assert not shared.__dict__.get("_never")
@@ -136,27 +158,160 @@ def test_a5_roster_unavailable_is_failclosed_and_named():
 def test_a6_startup_error_and_env_side_red_never_adopt():
     """③④启动级 error（没检验到）与环境面红都不是「零新增红」，一律不采纳。"""
     e = _roster_payload(_real_roster_entries())
-    a = blockers_known_red_adoption(REAL_BLOCKERS, e, run_error="supply assembly failed")
+    a = blockers_known_red_adoption(REAL_BLOCKERS, e, run_error="supply assembly failed",
+                                    ticket_base_at=BASE_AFTER,
+                                    ticket_base_source="test")
     assert a["adopt"] is False and a["why"] == "startup-error"
     assert "Nothing was verified" in a["note"] or "nothing was verified" in a["note"]
-    a2 = blockers_known_red_adoption(REAL_BLOCKERS, e, env_side_red=True)
+    a2 = blockers_known_red_adoption(REAL_BLOCKERS, e, env_side_red=True,
+                                     ticket_base_at=BASE_AFTER, ticket_base_source="test")
     assert a2["adopt"] is False and a2["why"] == "env-side-red"
-    # 畸形信号一律按「拦」的一侧读（不因畸形放行）
+    # 畸形信号一律按「拦」的一侧读（不因畸形放行）——260926 复核缺口②：旧断言把
+    # `env_side_red="yes"` 的 **fail-open** 固化成契约（docstring 写「按拦读」而代码读成
+    # 「非环境面」），此处改按裁定钉 fail-closed 的一侧，并点名畸形值本身。
     a3 = blockers_known_red_adoption(REAL_BLOCKERS, e, env_side_red="yes",
-                                     run_error=None)
-    assert a3["adopt"] is True
+                                     run_error=None,
+                                     ticket_base_at=BASE_AFTER, ticket_base_source="test")
+    assert a3["adopt"] is False and a3["why"] == "env-side-red"
+    assert "'yes'" in a3["note"] and "not a bool" in a3["note"]
+    assert "BLOCK side" in a3["note"]
+    # 非 bool 的其它形态（0 / None / "false"）同按拦读，不静默当「不是环境面」
+    for bad in (0, None, "false", 1):
+        r = blockers_known_red_adoption(REAL_BLOCKERS, e, env_side_red=bad,
+                                        ticket_base_at=BASE_AFTER, ticket_base_source="test")
+        assert r["adopt"] is False and r["why"] == "env-side-red", bad
+    # 畸形 run_error（非串非 None）同按拦读（旧代码把它读成「无 error」= fail-open）
+    for bad in (0, [], {}, object()):
+        r = blockers_known_red_adoption(REAL_BLOCKERS, e, run_error=bad,
+                                        ticket_base_at=BASE_AFTER, ticket_base_source="test")
+        assert r["adopt"] is False and r["why"] == "startup-error", bad
+        assert "not a string" in r["note"] and "BLOCK side" in r["note"]
 
 
 def test_a7_empty_blockers_keeps_the_existing_exemption_lane():
     """空名单不在本面改判（既有 known_red 豁免车道语义不动，上限照旧兜底）。"""
     a = blockers_known_red_adoption([], _roster_payload(_real_roster_entries()))
     assert a["adopt"] is False and a["why"] == "no-blockers"
+    # 畸形 blockers 载荷（非列表/条目非串）→ 剔除后仍无有效名字 → 一律 no-blockers
+    #（260926 复核缺陷③：此处原为 `... or True` 恒真空断言，实际什么都没验）
     for bad in (None, "x", {}, [1, "", None], [["a"]]):
         a2 = blockers_known_red_adoption(bad, _roster_payload(_real_roster_entries()))
-        assert a2["adopt"] is False and a2["why"] in ("no-blockers", "adopted") or True
+        assert a2["adopt"] is False and a2["why"] == "no-blockers", bad
+        assert a2["known"] == [] and a2["new"] == []
     # 非串条目剔除后若无有效名字 → 仍走 no-blockers（保守：不放行）
     a3 = blockers_known_red_adoption([1, None, "  "], _roster_payload(_real_roster_entries()))
     assert a3["adopt"] is False and a3["why"] == "no-blockers"
+
+
+# ---------------- A′. 260926 洞①：时间证据 + 活基线四象限（正反例） ----------------
+
+def _one(name="cap-a"):
+    return [_stamped(name)]
+
+
+def test_a8_time_evidence_quadrants_positive_and_negative():
+    """洞① 主判据：**时间证据 × 活基线**四象限（每格正反例齐）。
+    - 时间证据成立＝每条在册 blocker 的 booked_at 早于本票开票基点；
+    - 活基线可得＝有活基线红集（该红在集里）；在集里但不是红=按拦读；不可得=仅时间证据。"""
+    pl = {"entries": _one()}
+    # ① 时间成立 × 基线不可得（今天真实形态）→ 采纳，note 点名「仅时间证据」
+    ok = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_AFTER,
+                                     ticket_base_source="test")
+    assert ok["adopt"] is True and ok["why"] == "adopted"
+    assert "UNAVAILABLE" in ok["note"] and "time evidence only" in ok["note"]
+    assert ok["live_baseline"]["available"] is False
+    # ①′ 时间成立 × 基线有数据但**该名无答案**（没跑到）→ 仍采纳并逐条点名无答案之名
+    ok2 = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_AFTER,
+                                      ticket_base_source="test",
+                                      live_baseline_red=["other-red"],
+                                      live_baseline_green=["other-green"],
+                                      live_baseline_source="ledger")
+    assert ok2["adopt"] is True and ok2["live_baseline"]["no_answer"] == ["cap-a"]
+    assert "live baseline set has NO answer for cap-a" in ok2["note"]
+    assert "time evidence only" in ok2["note"]
+    # ② 时间成立 × 活证据说 main 红（台账行）→ 两条都满足才采纳
+    ok3 = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_AFTER,
+                                      ticket_base_source="test",
+                                      live_baseline_red=["cap-a", "other"],
+                                      live_baseline_green=["other-green"],
+                                      live_baseline_source="ledger")
+    assert ok3["adopt"] is True and "cap-a" in ok3["live_baseline"]["red_hit"]
+    assert "every blocker is red in it (cap-a)" in ok3["note"]
+    # ③ 时间成立 × 活证据答 GREEN（本轮基线主跑在该名上 pass）→ 不采纳
+    bad1 = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_AFTER,
+                                       ticket_base_source="test",
+                                       live_baseline_red=[],
+                                       live_baseline_green=["cap-a"],
+                                       live_baseline_source="in-round gate baseline")
+    assert bad1["adopt"] is False and bad1["why"] == "live-baseline-green"
+    assert "cap-a" in bad1["note"] and "GREEN" in bad1["note"]
+    # ③′ 冲突（同一条既有红又有绿）→ **绿优先**拦，且冲突本身点名
+    conf = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_AFTER,
+                                       ticket_base_source="test",
+                                       live_baseline_red=["cap-a"],
+                                       live_baseline_green=["cap-a"],
+                                       live_baseline_source="ledger + baseline")
+    assert conf["adopt"] is False and conf["why"] == "live-baseline-green"
+    assert "conflicting live red evidence" in conf["note"]
+    assert conf["live_baseline"]["conflict"] == ["cap-a"]
+    # ④ 时间不成立（戳晚于基点）→ 不采纳，逐条点名 booked-after-base
+    bad2 = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_BEFORE,
+                                       ticket_base_source="test")
+    assert bad2["adopt"] is False and bad2["why"] == "stale-evidence"
+    assert "booked-after-base" in bad2["note"] and "cap-a" in bad2["note"]
+    assert bad2["stale"] and bad2["stale"][0]["name"] == "cap-a"
+    # ⑤ 时间不成立 × 基线也不可得 → 时间证据独当一面（不因基线缺席放行）
+    bad3 = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_BEFORE,
+                                       ticket_base_source="test")
+    assert bad3["adopt"] is False and bad3["why"] == "stale-evidence"
+    # ⑥ 边界：戳 == 基点（严格早于才算）→ 拦
+    same = {"entries": [_stamped("cap-a")]}
+    eq = blockers_known_red_adoption(["cap-a"], same,
+                                     ticket_base_at="2026-09-23T19:59:23+08:00",
+                                     ticket_base_source="test")
+    assert eq["adopt"] is False and eq["why"] == "stale-evidence"
+
+
+def test_a9_roster_evidence_stamps_validated_missing_malformed():
+    """洞① 戳校验（每条只废自己，不废整册）＋畸形活基线集按拦读。"""
+    base = dict(ticket_base_at=BASE_AFTER, ticket_base_source="test")
+    # 缺戳（老形态载荷）/ 缺一个字段 / 空串 / 非串 → stale-evidence，逐条点名原因
+    for entry, kw in (
+            ({"name": "cap-a", "verdict": "booked", "home": "h", "note": "n"}, "missing-stamp"),
+            ({"name": "cap-a", "verdict": "booked", "home": "h",
+              "booked_at": "2026-09-23T19:59:23+08:00"}, "missing-stamp"),
+            (_stamped("cap-a", booked_at=""), "malformed-booked_at"),
+            (_stamped("cap-a", booked_at="2026-09-23T19:59:23"), "malformed-booked_at"),  # naive=不猜时区
+            (_stamped("cap-a", booked_at="not-a-time"), "malformed-booked_at"),
+            (_stamped("cap-a", booked_sha=""), "malformed-booked_sha"),
+            (_stamped("cap-a", booked_sha="xyz-not-a-sha"), "malformed-booked_sha"),
+            (_stamped("cap-a", booked_sha=12345), "malformed-booked_sha")):
+        r = blockers_known_red_adoption(["cap-a"], {"entries": [entry]}, **base)
+        assert r["adopt"] is False and r["why"] == "stale-evidence", (entry, r["why"])
+        assert kw in r["note"], (entry, r["note"])
+    # 正例对照：同形条目补上合法戳即采纳（证明上面每格拦的是戳本身，不是别的原因）
+    assert blockers_known_red_adoption(["cap-a"], {"entries": _one()}, **base)["adopt"] is True
+    # 一条坏戳不影响另一条合法戳的判定口径：两条一起 → 整轮不采纳（不部分采纳），
+    # 但 note 只点名坏的那条
+    two = {"entries": [_stamped("cap-a"),
+                       {"name": "cap-b", "verdict": "booked", "home": "h"}]}
+    r2 = blockers_known_red_adoption(["cap-a", "cap-b"], two, **base)
+    assert r2["adopt"] is False and [s["name"] for s in r2["stale"]] == ["cap-b"]
+    assert "cap-b" in r2["note"] and "cap-a" not in r2["note"].split("|")[-1]
+    # 畸形活基线集（不是名字表）→ 按拦读（绝不静默当「不可得」而放行）
+    for bad_live in ("cap-a", {"cap-a": True}, 7):
+        r3 = blockers_known_red_adoption(["cap-a"], {"entries": _one()},
+                                         live_baseline_red=bad_live, **base)
+        assert r3["adopt"] is False and r3["why"] == "live-baseline-malformed", bad_live
+    for bad_live in ("cap-a", {"cap-a": True}, 7):
+        r3b = blockers_known_red_adoption(["cap-a"], {"entries": _one()},
+                                          live_baseline_green=bad_live, **base)
+        assert r3b["adopt"] is False and r3b["why"] == "live-baseline-malformed", bad_live
+    # 只给红集（不给绿集）= 其余名字无答案（可采纳但逐条点名）
+    r4 = blockers_known_red_adoption(["cap-a", "cap-b"],
+                                     {"entries": [_stamped("cap-a"), _stamped("cap-b")]},
+                                     live_baseline_red=["cap-a"], **base)
+    assert r4["adopt"] is True and r4["live_baseline"]["no_answer"] == ["cap-b"]
 
 
 # ---------------- B. 活动壳（只读，真文件 IO） ----------------
@@ -183,19 +338,61 @@ def test_b2_activity_is_registered_on_the_worker():
     assert names.count("read_known_red_roster") == 1
 
 
+def test_b3_receipt_carries_evidence_stamps_and_base_point(tmp_path):
+    """260926 洞①：活动回执必须把**证据戳**与**开票基点**（base_ref 提交时刻）带出来，
+    否则判据面根本判不了「登记早于本票」；解析不出来时具名（不静默、不猜）。"""
+    r = asyncio.run(activities.read_known_red_roster(
+        {"repo_root": str(REPO), "base_ref": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"}))
+    res = r["result"]
+    assert r["ok"] is True and res["error"] == ""
+    e = res["entries"][REAL_BLOCKERS[0]]
+    assert e["booked_at"] == "2026-09-25T15:26:54+08:00"
+    assert e["booked_sha"].startswith("c348c4c")
+    assert res["base_at"] == "2026-09-25T15:26:54+08:00" and res["base_at_error"] == ""
+    assert all(v.get("booked_at") and v.get("booked_sha") for v in res["entries"].values())
+    # 反例①：base_ref 解析不出（不存在的 ref）→ 具名 error，条目照常返回（回落 created）
+    r2 = asyncio.run(activities.read_known_red_roster({"repo_root": str(REPO),
+                                                       "base_ref": "deadbeef"}))
+    assert r2["result"]["base_at"] == "" and "unresolved" in r2["result"]["base_at_error"]
+    assert r2["result"]["entries"], r2
+    # 反例②：base_ref 缺席／像选项注入 → 不猜、不传给 git（安全面）
+    r3 = asyncio.run(activities.read_known_red_roster({"repo_root": str(REPO)}))
+    assert r3["result"]["base_at"] == "" and "empty or malformed" in r3["result"]["base_at_error"]
+    r4 = asyncio.run(activities.read_known_red_roster({"repo_root": str(REPO),
+                                                      "base_ref": "--upload-pack=x"}))
+    assert r4["result"]["base_at"] == "" and "empty or malformed" in r4["result"]["base_at_error"]
+    # 反例③：repo_root 非 git 仓 → 具名（不抛、不影响名册读面）
+    r5 = asyncio.run(activities.read_known_red_roster({"repo_root": str(tmp_path),
+                                                       "base_ref": "main"}))
+    assert r5["ok"] is True and r5["result"]["base_at"] == ""
+    assert r5["result"]["base_at_error"]
+
+
 # ---------------- C. dev_lane 采纳接线（决策先于重跑） ----------------
 
-def _lane(monkeypatch, entries, error=""):
+def _lane(monkeypatch, entries, error="", *, base_at="", raw=None,
+          with_meta=True, created=None):
     """免 Temporal 运行时的泳道壳：**自带 workflow 桩模块**（不经 dev_lane.workflow 现值——
     兄弟测试里有直接赋值 SimpleNamespace 且不还原的老套路，全局模块身份在会话内已不可信；
-    本文件自装自还，顺序无关）。"""
+    本文件自装自还，顺序无关）。
+
+    `with_meta`/`created`：260926 洞①裁定后采纳要「开票基点」在手。缺省给一张**晚于**
+    名册全部证据戳的票面（模拟 260926 之后新开的票）；`base_at` 模拟活动解析出的 base_ref
+    提交时刻。"""
     wf = object.__new__(dev_lane.DevLaneWorkflow)
+    if with_meta:
+        wf.meta = {"created": created if created is not None else BASE_AFTER,
+                   "base_ref": "c348c4c"}
 
     async def _exec(name, *a, **kw):
         assert name == "read_known_red_roster", name
+        if raw is not None:
+            return raw
         return {"ok": True, "result": {
             "entries": entries, "error": error,
-            "path": "/repo/" + shared.KNOWN_RED_BASELINE_REL}}
+            "path": "/repo/" + shared.KNOWN_RED_BASELINE_REL,
+            "base_ref": str(wf.meta.get("base_ref") or "") if with_meta else "",
+            "base_at": base_at, "base_at_error": ""}}
 
     monkeypatch.setattr(dev_lane, "workflow", SimpleNamespace(execute_activity=_exec))
     return wf
@@ -208,10 +405,11 @@ def _receipt(blockers=None, error="", failed=0, env_fail=0, ran=300):
 
 
 def test_c1_lane_adoption_true_on_real_blockers(monkeypatch):
-    """①实案形态：两条在册既有红 → 采纳（推进），note 带审计锚。"""
+    """①实案形态：两条在册既有红（真名册）+ 开票基点在手 → 采纳（推进），note 带审计锚。"""
     wf = _lane(monkeypatch, _real_roster_entries())
     a = asyncio.run(wf._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
-    assert a["adopt"] is True and a["why"] == "adopted"
+    assert a["adopt"] is True and a["why"] == "adopted", a["note"]
+    assert "basis 2: time evidence" in a["note"] and "time evidence only" in a["note"]
     assert wf._tests_env_side_red(_receipt(REAL_BLOCKERS)) is False
 
 
@@ -249,6 +447,79 @@ def test_c4_lane_adoption_no_blockers_skips_roster_read(monkeypatch):
     a = asyncio.run(wf._tests_fault_adoption(_receipt([])))
     assert a == {"adopt": False, "why": "no-blockers", "known": [], "new": [],
                  "roster_ok": False, "note": ""}
+
+
+def test_c7_lane_failclosed_on_receipt_shape_drift(monkeypatch):
+    """260926 复核缺口①：活动回执**形状漂移**（result/entries 非 dict、条目非对象、整份
+    非 dict）一律 fail-closed 回来——不采纳、不抛。旧代码只查 raw["ok"]，漂移形状会抛
+    AttributeError，而 `run()` 是裸 while 主循环=未捕获异常打断工作流实例。"""
+    for tag, raw in (
+            ("result is a list", {"ok": True, "result": ["a"]}),
+            ("entries is a list", {"ok": True, "result": {"entries": ["a"]}}),
+            ("entry is a list", {"ok": True, "result": {"entries": {"x": ["v"]}}}),
+            ("entry is a string", {"ok": True, "result": {"entries": {"x": "v"}}}),
+            ("receipt is a string", "nope"),
+            ("receipt is a list", [1, 2])):
+        wf = _lane(monkeypatch, {}, raw=raw)
+        a = asyncio.run(wf._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+        assert a["adopt"] is False and a["why"] == "roster-unavailable", (tag, a)
+        assert shared.KNOWN_RED_BASELINE_REL in a["note"], tag
+    # 形状合法的空回执 / 缺 result 键 → 名册读得到但零条目 = 任何 blocker 都「非在册」
+    #（fail-closed 同族；receipt 形状本身不算畸形，故走 new-red 而非 roster-unavailable）
+    for empty_raw in ({"ok": True, "result": None}, {"ok": True, "result": {}}):
+        wf = _lane(monkeypatch, {}, raw=empty_raw)
+        a = asyncio.run(wf._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+        assert a["adopt"] is False and a["why"] == "new-red", empty_raw
+    # 反例（正控）：形状合法的真名册 → 采纳，证明上面拦的是形状而非别的
+    wf2 = _lane(monkeypatch, _real_roster_entries())
+    assert asyncio.run(wf2._tests_fault_adoption(_receipt(REAL_BLOCKERS)))["adopt"] is True
+
+
+def test_c8_lane_no_base_point_is_failclosed(monkeypatch):
+    """洞① fail-closed 面：开票基点二者都不可得（无 meta=老回放 / created 畸形 /
+    base_ref 解析失败）→ **不采纳**且点名原因（绝不因「判不了」放行）。"""
+    # ① 无 meta（老回放形态：object.__new__ 壳没有 meta）
+    wf = _lane(monkeypatch, _real_roster_entries(), with_meta=False)
+    a = asyncio.run(wf._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+    assert a["adopt"] is False and a["why"] == "no-base-point", a["note"]
+    assert "no usable ticket base point" in a["note"]
+    # ② created 畸形 + base_ref 解析失败 → 同拦
+    wf2 = _lane(monkeypatch, _real_roster_entries(), created="not-a-time")
+    a2 = asyncio.run(wf2._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+    assert a2["adopt"] is False and a2["why"] == "no-base-point"
+    # ③ created 是 naive 串（不猜时区）→ 同拦
+    wf3 = _lane(monkeypatch, _real_roster_entries(), created="2026-09-30T00:00:00")
+    assert asyncio.run(wf3._tests_fault_adoption(_receipt(REAL_BLOCKERS)))["why"] == "no-base-point"
+
+
+def test_c9_lane_base_point_uses_the_earliest_evidence(monkeypatch):
+    """洞① 基点取值：base_ref 提交时刻 ∪ 票 created 取**更早者**（保守下界），两者都
+    具名进票面；本票戳晚于该下界 → 拦（这一格证明下界不是摆设）。"""
+    # base_ref 提交时刻=2026-09-25T15:26:54+08:00（=名册末批戳那一刻）｜created=更晚 →
+    # 取更早者=base_ref 时刻 → 「戳 >= 基点」→ 拦
+    wf = _lane(monkeypatch, _real_roster_entries(),
+               base_at="2026-09-25T15:26:54+08:00", created=BASE_AFTER)
+    a = asyncio.run(wf._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+    assert a["adopt"] is False and a["why"] == "stale-evidence"
+    assert "earliest of" in a["note"] and "base_ref commit time" in a["note"]
+    # 同一票把 created 该早（更早者=created）→ 同样按更早者判（戳晚于它 → 拦）
+    wf2 = _lane(monkeypatch, _real_roster_entries(),
+                base_at="2026-10-05T00:00:00+08:00", created=BASE_BEFORE)
+    a2 = asyncio.run(wf2._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+    assert a2["adopt"] is False and a2["why"] == "stale-evidence"
+    assert "ticket created" in a2["note"] and "earliest of" in a2["note"]
+    # base_ref 解析失败（base_at_error 非空）→ 具名进来源，仍用 created 判（可采纳）
+    wf3 = _lane(monkeypatch, _real_roster_entries(), created=BASE_AFTER)
+    raw = {"ok": True, "result": {
+        "entries": _real_roster_entries(), "error": "",
+        "path": "/repo/" + shared.KNOWN_RED_BASELINE_REL,
+        "base_ref": "deadbeef", "base_at": "",
+        "base_at_error": "base_ref commit time unresolved (git exit 128)"}}
+    wf3 = _lane(monkeypatch, _real_roster_entries(), raw=raw)
+    wf3.meta = {"created": BASE_AFTER, "base_ref": "deadbeef"}
+    a3 = asyncio.run(wf3._tests_fault_adoption(_receipt(REAL_BLOCKERS)))
+    assert a3["adopt"] is True and a3["why"] == "adopted"
+    assert "resolution issue" in a3["note"]
 
 
 def test_c5_both_branches_adopt_before_rerun_and_advance():
@@ -371,3 +642,67 @@ def test_e4_no_automatic_rerun_route_at_or_over_cap():
     assert integration_route("tests-fault", MAX_TESTS_FAULT_ROUNDS + 1, 0).startswith("blocked:")
     assert integration_route("tests-fault", 99, 0).startswith("blocked:")
     assert integration_route("code-fault", 0, 0) == "implement"
+
+
+# ---------------- B′/C′. 260926 加保险的真实生产者（两路实跑证据） ----------------
+
+def test_b4_live_baseline_evidence_merge_single_source():
+    """活基线证据合成（shared 纯函数，判据侧的单一数据入口）：两路（本轮闸基线主跑逐名
+    答案 ∪ 场景台账可信行）合成 red/green 两名单；冲突两名单都带出（判定在判据侧=绿优先）；
+    畸形逐项降级；两路都空=来源点名「没有活基线证据」。"""
+    red, green, src = shared.live_baseline_evidence(
+        {"a": "red", "b": "green", "c": "bogus", 1: "red", "d": None},
+        ledger_red=["e", "a"], ledger_green=["f"], baseline_ref="main@abc123",
+        ledger_available=True)
+    assert red == ["a", "e"] and green == ["b", "f"]
+    assert "in-round gate baseline (2 answered name(s), ref=main@abc123)" in src
+    assert "scenario ledger (available)" in src
+    # 冲突：同一条红绿都在 → 两名单都带出（判据侧绿优先，见 test_a8 ③′）
+    red2, green2, _ = shared.live_baseline_evidence({"x": "green"}, ledger_red=["x"])
+    assert red2 == ["x"] and green2 == ["x"]
+    # 反例①：两路都空 → 来源点名（票面据此写「基线不可得，仅时间证据」）
+    r3, g3, s3 = shared.live_baseline_evidence({}, [], [], ledger_available=False)
+    assert (r3, g3) == ([], []) and "no live main-tip baseline evidence" in s3
+    # 反例②：畸形入参不抛（非 dict / 非名字表 / 值非 red|green）
+    for bad in (None, "x", 7, {"a": 1}, {"": "red"}, {None: "red"}):
+        r4, g4, _ = shared.live_baseline_evidence(bad, ledger_red="nope", ledger_green={"k": 1})
+        assert r4 == [] and g4 == [], bad
+
+
+def test_b5_receipt_producers_are_wired_source_lock():
+    """生产者接线锁（防止「判据有接口但没人产数据」的空转）：闸侧把逐名答案放进回执
+    `baseline.answers`（判据单点=failure_protocol.baseline_answers）；活动壳把两路证据
+    合成到 IntegrationRunResult 的 live_baseline_* 字段（合成单点=shared.live_baseline_evidence）。"""
+    import failure_protocol as fp
+    vlan = (REPO / "server/tools/verify_lane.py").read_text(encoding="utf-8")
+    assert "'answers': fp.baseline_answers(" in vlan
+    assert "fp.baseline_answers(" in vlan or "failure_protocol" in vlan
+    assert hasattr(fp, "baseline_answers") and callable(fp.baseline_answers)
+    acts = (POC / "agent_activities.py").read_text(encoding="utf-8")
+    assert "shared.live_baseline_evidence(" in acts
+    for k in ("out.live_baseline_red = ", "out.live_baseline_green = ",
+              "out.live_baseline_source = "):
+        assert k in acts, k
+    # 回执数据类字段（additive，缺省空=老回放/老闸零漂移）
+    r = shared.IntegrationRunResult()
+    assert r.live_baseline_red == [] and r.live_baseline_green == [] \
+        and r.live_baseline_source == ""
+
+
+def test_c10_lane_live_baseline_green_blocks_and_red_adopts(monkeypatch):
+    """洞①「最小复现」在**泳道入口**被拦：同名新红而活基线主跑在该名上答 pass（main 绿）
+    → 不采纳（照旧拦、照旧重跑）；反过来台账可信红行在手 → 两条都满足才采纳。"""
+    wf = _lane(monkeypatch, _real_roster_entries())
+    green = _receipt(REAL_BLOCKERS)
+    green.live_baseline_green = list(REAL_BLOCKERS)
+    green.live_baseline_source = "in-round gate baseline (2 answered name(s), ref=main@abc)"
+    a = asyncio.run(wf._tests_fault_adoption(green))
+    assert a["adopt"] is False and a["why"] == "live-baseline-green", a["note"]
+    assert REAL_BLOCKERS[0] in a["note"] and "GREEN" in a["note"]
+    wf2 = _lane(monkeypatch, _real_roster_entries())
+    red = _receipt(REAL_BLOCKERS)
+    red.live_baseline_red = list(REAL_BLOCKERS)
+    red.live_baseline_source = "in-round gate baseline (0 answered name(s)) + scenario ledger (available)"
+    a2 = asyncio.run(wf2._tests_fault_adoption(red))
+    assert a2["adopt"] is True and a2["why"] == "adopted", a2["note"]
+    assert "every blocker is red in it" in a2["note"]

@@ -275,3 +275,38 @@ def test_timeout_reason_is_not_prepare_violation():
                                evidence="超时（>900s）"))
     c2, viols = fp.enforce_semantics(c)
     assert c2["status"] == "fail" and not viols   # 超时按断言级红走归属表，不算违约
+
+
+# ---------------- 260926 KI-122①「加保险」：活基线逐名答案（只读派生物） ----------------
+
+def test_baseline_answers_red_green_and_no_answer():
+    """逐名答案三态：基线 checked fail=red / 跑过且 pass=green / **没跑到或 not-checked
+    或基线缺席或指纹不等=无答案**（缺名）。C1 口径：基线答不了锅时**不许冒充答案**。"""
+    lane = [fp.normalize_case(case(name="a-red")),
+            fp.normalize_case(case(name="b-green")),
+            fp.normalize_case(case(name="c-uncovered")),
+            fp.normalize_case(case(name="d-notchecked", status="not-checked",
+                                   cause="external", reason="timeout",
+                                   evidence="env red"))]
+    base = [fp.normalize_case(case(name="a-red")),
+            fp.normalize_case(case(name="b-green", status="pass", reason="ok",
+                                   evidence="pass")),
+            fp.normalize_case(case(name="d-notchecked", status="not-checked",
+                                   cause="external", reason="timeout",
+                                   evidence="env red"))]
+    fp_v = {"value": "x"}
+    ans = fp.baseline_answers(lane, base, fp_v, fp_v, True)
+    assert ans == {"a-red": "red", "b-green": "green"}, ans
+    assert "c-uncovered" not in ans and "d-notchecked" not in ans
+    # 反例①：基线缺席（baseline_ok=False）→ 全无答案（绝不因缺席给「绿」）
+    assert fp.baseline_answers(lane, base, fp_v, fp_v, False) == {}
+    # 反例②：指纹不等 → 全无答案（不可比）
+    assert fp.baseline_answers(lane, base, fp_v, {"value": "y"}, True) == {}
+    # 反例③：畸形入参不抛（条目非 dict/名字空白/基线非列表）
+    assert fp.baseline_answers([None, {}, {"name": "  "}], base, fp_v, fp_v, True) == {}
+    assert fp.baseline_answers(lane, None, fp_v, fp_v, True) == {}
+    # 与闸判定同源：同一输入下 decide 对 a-red 判 record、对 b-green 判 block（判据零改动）
+    aff = fp.apply_affiliation(lane, base, fp_v, fp_v, True)
+    assert set(aff["blockers"]) == {"b-green", "c-uncovered"}
+    assert "a-red" in aff["records"]
+    assert "d-notchecked" in aff["records"]      # not-checked×external=促治理不堵（record）

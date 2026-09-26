@@ -15,17 +15,24 @@
 
 消费外部输入的畸形用例（岗位纪律）：非串条目/空串/绝对路径/../逃逸/嵌套仓/
 空仓集合/分支名碰撞，全部 tmp 桩内复现，不靠真外部源。
+
+夹具回收（260926 磁盘泄漏修）：本文件是引擎侧最大泄漏源之一（实测 $TMPDIR 顶层
+`t260907-06-ut-*` 16,726 个 + `t260907-12-ut*` 13,595 个，均 >6h 未动）——原
+`tempfile.mkdtemp` 从不回收（正常退出也不回收）。现在所有夹具一律经
+`_tmp_reclaim.mkdtemp_reclaimed` 创建（注册表 + 进程退出 atexit 兜底 + 幂等回收）；
+SIGKILL 类残留由 `integration/tools/sweep_tmp_fixtures.py` 与巡检临时目录水位判据兜底。
 """
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 POC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(POC))
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # 同目录 _tmp_reclaim（不经 pytest 也能 import）
 
 import pytest  # noqa: E402
 import shared  # noqa: E402
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402
 
 
 def _git(*args, cwd):
@@ -49,7 +56,7 @@ def _init_repo(path, commit=True):
 
 @pytest.fixture
 def multirepo():
-    root = Path(tempfile.mkdtemp(prefix="t260907-06-ut-"))
+    root = mkdtemp_reclaimed("t260907-06-ut-")
     a = _init_repo(root / "repo_a")
     (a / "src").mkdir()
     (a / "src" / "a.py").write_text("a\n", encoding="utf-8")
@@ -87,7 +94,7 @@ def test_repos_under_multirepo_one_level(multirepo):
 
 def test_repos_under_no_repo_and_nested_not_scanned(multirepo):
     root, a, b = multirepo
-    empty = Path(tempfile.mkdtemp(prefix="t260907-06-ut-empty-"))
+    empty = mkdtemp_reclaimed("t260907-06-ut-empty-")
     assert shared.repos_under(empty) == []
     _init_repo(a / "nested")  # 仓中仓
     assert all("nested" not in str(p) for p in shared.repos_under(root))  # 不递归
@@ -129,7 +136,7 @@ def test_resolve_malformed_entries_rejected(multirepo):
 
 
 def test_resolve_empty_repo_set_rejected():
-    empty = Path(tempfile.mkdtemp(prefix="t260907-06-ut-norepo-"))
+    empty = mkdtemp_reclaimed("t260907-06-ut-norepo-")
     with pytest.raises(ValueError, match="未发现任何 git 仓"):
         shared.resolve_repos_for_paths(empty, ["x.py"])
 
@@ -266,7 +273,7 @@ def test_gate_error_repo_worktrees_shapes():
 @pytest.fixture
 def mixedrepo():
     """混合夹具（dengzhufpv 形态）：项目根=git 仓（知识库仓）+ repos/* 两子仓并存。"""
-    root = _init_repo(Path(tempfile.mkdtemp(prefix="t260907-12-ut-")))
+    root = _init_repo(mkdtemp_reclaimed("t260907-12-ut-"))
     (root / "docs").mkdir()
     (root / "docs" / "kb.md").write_text("kb\n", encoding="utf-8")
     _git("add", "-A", cwd=root)
@@ -289,7 +296,7 @@ def test_repos_under_mixed_root_plus_children(mixedrepo):
 
 def test_repos_under_root_without_children_unchanged(mixedrepo):
     root, a, _ = mixedrepo
-    single = Path(tempfile.mkdtemp(prefix="t260907-12-ut-single-"))
+    single = mkdtemp_reclaimed("t260907-12-ut-single-")
     _init_repo(single)
     (single / "x").mkdir()
     assert shared.repos_under(single) == [single]  # 根无子仓 → 恒 [根]（零变化）
@@ -298,13 +305,13 @@ def test_repos_under_root_without_children_unchanged(mixedrepo):
 def test_is_multi_repo_layout_three_states(mixedrepo):
     root, a, _ = mixedrepo
     assert shared.is_multi_repo_layout(root) is True          # 混合形态
-    single = Path(tempfile.mkdtemp(prefix="t260907-12-ut-single2-"))
+    single = mkdtemp_reclaimed("t260907-12-ut-single2-")
     _init_repo(single)
     assert shared.is_multi_repo_layout(single) is False       # 单仓=零变化
-    empty = Path(tempfile.mkdtemp(prefix="t260907-12-ut-empty2-"))
+    empty = mkdtemp_reclaimed("t260907-12-ut-empty2-")
     assert shared.is_multi_repo_layout(empty) is False        # 无仓
     # 票B 原形态：根无 .git、单子仓 → True
-    legacy = Path(tempfile.mkdtemp(prefix="t260907-12-ut-legacy-"))
+    legacy = mkdtemp_reclaimed("t260907-12-ut-legacy-")
     _init_repo(legacy / "only")
     assert shared.is_multi_repo_layout(legacy) is True
 
@@ -349,7 +356,7 @@ def test_derive_mixed_activates_and_single_repo_ignores(mixedrepo):
     assert shared.lane_workspace_gate_error(
         {"lane": "worktree", "workspace": ws, "worktree": worktree, "branch": branch}) == ""
     # 单仓（根 .git 无子仓）→ 不激活，旧路径零变化
-    single = Path(tempfile.mkdtemp(prefix="t260907-12-ut-single3-"))
+    single = mkdtemp_reclaimed("t260907-12-ut-single3-")
     _init_repo(single)
     _, ws2, _, _ = shared.derive_lane_workspace(
         "t260907-12-ut", "worktree", project_root=str(single),

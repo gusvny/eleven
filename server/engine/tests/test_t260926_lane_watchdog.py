@@ -137,8 +137,11 @@ def test_a4_declaration_side_validation_is_failclosed():
     assert "watchdog:" in decl_src and "rerun_rounds: 3" in decl_src
     d = decl.parse_decl_text(decl_src, "inspection.yaml")
     inst = d.instance("integration-tests")
+    # 票级三键逐字锁 + 水位两键（第四判据，260926 同批新增的声明键）在场：本断言原为
+    # 「恰三键」，声明扩键后按**逐字值**锁全五键（票级语义未动，值漂移照红）。
     assert inst is not None and inst.watchdog == {
-        "rerun_rounds": "3", "fault_loop_min": "90", "inflight_silent_min": "120"}
+        "rerun_rounds": "3", "fault_loop_min": "90", "inflight_silent_min": "120",
+        "tmp_fixture_max_dirs": "1000", "tmp_fixture_max_age_h": "6"}
     plan = decl.resolve_instance_plan.__wrapped__("integration-tests") if hasattr(
         decl.resolve_instance_plan, "__wrapped__") else None
     # plan 透传（additive 键）：直接走纯函数 _plan_from_decl，零 IO
@@ -347,7 +350,14 @@ class _FakeClient:
         return _FakeHandle(self._snaps.get(wid, {}), self._calls)
 
 
-def _patch_lane_io(monkeypatch, wfs, snaps, projects=("sandbar",)):
+def _patch_lane_io(monkeypatch, wfs, snaps, projects=("sandbar",), now=NOW):
+    """入口级用例的公共装配：桩 Temporal client + 桩注册表 + **判据时钟钉死**。
+
+    时钟同源锁（260926 宿主提醒，KI-135「跑绿=当时绿」家族）：本文件的桩快照用固定 `NOW`
+    造 `last_activity_at`，而活动壳取**真墙钟** `time.time()` 当判据 `now_ts`——真实时刻一过
+    `NOW + inflight 阈值`，桩里的「干净票」就被判成僵尸票（**2 小时保质期的时钟炸弹**；实测
+    23:40 到点，C1/C2 立刻假红）。故在此把活动侧时钟钉成与桩同源的 `now`：判据完全确定性、
+    桩永不过期。**新增入口级用例一律走本 helper**（别自己接 Client，否则炸弹回潮）。"""
     calls: list = []
     async def _connect(host, **kw):
         calls.append(("connect", host))
@@ -355,6 +365,7 @@ def _patch_lane_io(monkeypatch, wfs, snaps, projects=("sandbar",)):
     monkeypatch.setattr(activities.Client, "connect", _connect)
     monkeypatch.setattr(activities, "list_registered_projects",
                         lambda: ([{"key": k, "name": k, "dirs": ["/x"]} for k in projects], []))
+    monkeypatch.setattr(activities.time, "time", lambda: now)
     return calls
 
 
@@ -537,3 +548,136 @@ def test_d3_lane_activity_failure_and_unreadable_tickets_are_named(monkeypatch):
     assert "truncated" in finds3[2]["subject"]
     assert all(f["scan"] == "lane" and f["suggest"] is False for f in finds3)
     assert ins.finding_language_violations(finds3) == []
+
+
+# ---------------- B′. 260926 复核缺陷⑤⑥：读面降级族 + ③族不适用票态 ----------------
+
+def _malformed_facts(ticket_id="t-broken", now=NOW, **kw):
+    """快照读不懂的票事实（facts_from_snapshot 对畸形快照的真实产物形态）。"""
+    f = lw.facts_from_snapshot(ticket_id, "sandbar", kw.pop("snapshot", None), now_ts=now)
+    f.update(kw)
+    return f
+
+
+def test_b10_malformed_snapshot_without_hits_emits_low_data_unreadable():
+    """缺陷⑥：三族都无命中而快照读不懂 → **不许静默零发现**，出 low `data-unreadable`
+    并逐个点名读不懂的项；有命中族时不重复出条（notes 已随命中族 evidence 上台面）。"""
+    bad = _malformed_facts(last_activity_at=0.0)
+    assert bad["parse_notes"], "构造前提：畸形快照必须真的产出 parse_notes"
+    finds, meta = lw.lane_findings([bad], now_ts=NOW)
+    assert len(finds) == 1 and finds[0]["legs"] == [lw.LEG_DATA_UNREADABLE]
+    assert finds[0]["severity"] == "low" and finds[0]["suggest"] is False
+    assert meta["with_findings"] == 1 and meta["by_leg"][lw.LEG_DATA_UNREADABLE] == 1
+    # 具名：读不懂的每一项都进 evidence（不静默吞）
+    for n in bad["parse_notes"]:
+        assert n in finds[0]["evidence"], n
+    assert "NOT a clean bill" in finds[0]["subject"]
+    assert "stuck in the lane" not in finds[0]["subject"]      # 没读懂≠卡住（报错精确）
+    assert ins.finding_language_violations(finds) == []
+    # 段面可见：low 是 max_severity，本族计数进 by_leg（零命中槽位照旧在）
+    sec = lw.lane_section(finds, meta)
+    assert sec["max_severity"] == "low" and sec["by_leg"][lw.LEG_DATA_UNREADABLE] == 1
+    assert sec["finding_count"] == 1
+    # 反例①：干净票（parse_notes 空）→ 零发现（不误报）
+    clean = _malformed_facts(ticket_id="t-clean", snapshot=_snapshot(rounds=1, last_lag=60))
+    f2, m2 = lw.lane_findings([clean], now_ts=NOW)
+    assert f2 == [] and m2["with_findings"] == 0
+    # 反例②：读不懂**且**有族命中 → 只出命中族一条（notes 折进它的 evidence，不重复刷屏）
+    hit = _malformed_facts(ticket_id="t-hit", suite_rounds=6, last_activity_at=NOW - 60)
+    f3, m3 = lw.lane_findings([hit], now_ts=NOW, thresholds={"rerun_rounds": 3})
+    assert len(f3) == 1 and f3[0]["legs"] == [lw.LEG_RERUN]
+    assert lw.LEG_DATA_UNREADABLE not in m3["by_leg"] or not m3["by_leg"][lw.LEG_DATA_UNREADABLE]
+    # 反例③：手工事实（无 parse_notes 键）——缺键≠读不懂（老调用面零回归）
+    bare = {"ticket_id": "t-bare", "suite_rounds": 1, "last_activity_at": NOW - 60}
+    f4, _ = lw.lane_findings([bare], now_ts=NOW)
+    assert f4 == []
+
+
+def test_b11_inflight_leg_not_applicable_to_paused_blocked_awaiting():
+    """缺陷⑤：③族（inflight-silent）只对**真在飞**的票成立。paused（KI-122 止血动作本身）/
+    status=blocked（等人审）/ stage_state=awaiting*（等人门）三态不出本族——改逐条进
+    meta/section 的 suppressed 面（降级可见，但不再假报「while in flight」，也不再让每期
+    含等人签字票的巡检恒 heartbeat=False）。"""
+    for tag, kw in (("paused", {"paused": True, "status": "paused"}),
+                    ("blocked", {"status": "blocked"}),
+                    ("awaiting-human", {"stage_state": "awaiting-human"}),
+                    ("awaiting", {"stage_state": "awaiting"})):
+        f = _facts(rounds=1, last_lag=4 * 3600)
+        f.update(kw)
+        finds, meta = lw.lane_findings([f], now_ts=NOW, thresholds={"inflight_silent_min": 120})
+        assert finds == [], (tag, finds)
+        assert meta["suppressed"] and "inflight-silent NOT reported" in meta["suppressed"][0], tag
+        assert tag.split("-")[0] in meta["suppressed"][0], meta["suppressed"]
+        sec = lw.lane_section(finds, meta)
+        assert sec["suppressed"] == meta["suppressed"] and sec["finding_count"] == 0
+        assert sec["max_severity"] == ""
+    # 正控①：同样的静默时长，在飞（running/dispatched）→ 照旧 high 命中
+    pos, mpos = lw.lane_findings([_facts(rounds=1, last_lag=4 * 3600)], now_ts=NOW,
+                                 thresholds={"inflight_silent_min": 120})
+    assert [x["legs"] for x in pos] == [[lw.LEG_INFLIGHT]] and pos[0]["severity"] == "high"
+    assert mpos["suppressed"] == []
+    # 正控②：等人签字**且**另外两族真命中 → 命中族照旧报（抑制只针对③族）
+    loop = _facts(rounds=3, verdict="tests-fault", verdict_age=3 * 3600,
+                  last_round_ago=3 * 3600, last_lag=3 * 3600)
+    loop["stage_state"] = "awaiting-human"
+    fl, ml = lw.lane_findings([loop], now_ts=NOW, thresholds={"fault_loop_min": 90})
+    assert lw.LEG_FAULT_LOOP in fl[0]["legs"] and lw.LEG_INFLIGHT not in fl[0]["legs"]
+    assert ml["suppressed"], "被抑制的③族仍须具名（不静默）"
+    # 正控③：paused 且静默未超阈 → 既不报也不留 suppressed（无事实可降级）
+    qu = _facts(rounds=1, last_lag=60)
+    qu.update({"paused": True, "status": "paused"})
+    f2, m2 = lw.lane_findings([qu], now_ts=NOW, thresholds={"inflight_silent_min": 120})
+    assert f2 == [] and m2["suppressed"] == []
+
+
+def test_b12_entry_level_data_unreadable_never_silent(monkeypatch):
+    """入口级（活动真入口）：畸形快照的票在活动回执里**可见**（low data-unreadable 发现 +
+    section 计数），不再与「干净票」在结果上不可分。"""
+    wfs = [_FakeWF("t-broken", "sandbar"), _FakeWF("t-paused", "sandbar"),
+           _FakeWF("t-clean", "sandbar")]
+    snaps = {
+        # 快照存在但缺 timeline/gens/meta.created：读不懂（parse_notes 非空）且三族无命中
+        "t-broken": {"stage": "implement", "stage_state": "running", "status": "dispatched",
+                     "results": {}, "meta": {}},
+        # last_round_ago 与 last_lag 都要老：last_activity_at=max(时间线各条)，
+        # 只给 last_lag 会被「本轮进入点」压在 30 分钟以内（静默未超阈=不触发抑制判定）
+        "t-paused": _snapshot(rounds=1, last_round_ago=5 * 3600, last_lag=5 * 3600,
+                              status="paused"),
+        "t-clean": _snapshot(rounds=1, last_lag=60, stage="acceptance_walkthrough"),
+    }
+    snaps["t-paused"]["paused"] = True
+    calls = _patch_lane_io(monkeypatch, wfs, snaps)
+    out = _run_lane_activity({})
+    res = out["result"]
+    by_ticket = {f["ticket_id"]: f for f in res["findings"]}
+    assert set(by_ticket) == {"t-broken"}, by_ticket.keys()
+    assert by_ticket["t-broken"]["legs"] == [lw.LEG_DATA_UNREADABLE]
+    assert by_ticket["t-broken"]["severity"] == "low"
+    assert res["meta"]["by_leg"][lw.LEG_DATA_UNREADABLE] == 1
+    assert res["section"]["max_severity"] == "low"
+    assert any("t-paused" in s for s in res["section"]["suppressed"])
+    assert all("t-paused" not in k for k in by_ticket)
+    assert ins.finding_language_violations(res["findings"]) == []
+    kinds = {c[0] for c in calls}
+    assert kinds == {"connect", "list", "query"}, calls       # 仍只读
+
+
+def test_b13_entry_clock_is_pinned_to_the_stub_clock(monkeypatch):
+    """**KI-135 家族反向锁**：入口级的桩时钟与判据时钟必须同源（本文件曾有「2 小时保质期」
+    的时钟炸弹：桩固定 NOW、判据取真墙钟，过点即假红）。本用例把桩钉在**十年前的固定时刻**
+    （远超任何 inflight 阈值），若活动壳改回真墙钟，这张「干净票」立刻被判 inflight 僵尸票
+    → 本用例红。修法= `_patch_lane_io` 里的 `activities.time.time` 钉死（结构锁见该 helper）。"""
+    far_past = NOW - 10 * 365 * 86400
+    snaps = {"t-ancient-clean": _snapshot(rounds=1, last_lag=60, now=far_past,
+                                          stage="acceptance_walkthrough")}
+    _patch_lane_io(monkeypatch, [_FakeWF("t-ancient-clean", "sandbar")], snaps, now=far_past)
+    out = _run_lane_activity({})
+    res = out["result"]
+    assert res["findings"] == [], res["findings"]
+    assert res["meta"]["scanned"] == 1 and res["section"]["max_severity"] == ""
+    # 同一条桩快照，判据时钟被换到别处（把 pinned 时钟改回真墙钟的等价形态）→ 立刻红：
+    # 证明上一条的绿是「同源」换来的，不是碰巧。
+    monkeypatch.setattr(activities.time, "time", lambda: NOW)
+    out2 = _run_lane_activity({})
+    assert out2["result"]["findings"] and \
+        lw.LEG_INFLIGHT in out2["result"]["findings"][0]["legs"]

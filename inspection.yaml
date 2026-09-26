@@ -63,13 +63,23 @@ instances:
     # **非终态票**的工作流时间线/快照，出三类发现——①同票重跑轮次 > rerun_rounds；
     # ②停在 tests-fault 回路超 fault_loop_min（判决已下却不收敛）；③在飞静默超
     # inflight_silent_min（僵尸票）。三键均为正整数（轮次 / 分钟）。
+    # 第四判据（260926 同批，宿主级）——**测试夹具临时目录水位**：只读扫临时根顶层白名单
+    # 前缀（测试夹具）的真目录，目录数 > tmp_fixture_max_dirs 或最老目录年龄 >
+    # tmp_fixture_max_age_h（小时）→ 出 `tmp-fixture-water` 发现（宿主两次追问「巡检为什么
+    # 没发现」后补的面：前三族看的是「票卡在泳道里」，看不见磁盘在漏）。两键亦为正整数。
     # 本行值 = 模块缺省（显式声明与缺省等价；改本行即改阈值）。键缺失/畸形 → 回落缺省，
-    # 且票面 lane 段点名「阈值来源=declaration|default」+ 逐键回落原因（不静默）。
-    # 取值理由：rerun_rounds=3 抓得住「同一票 5 轮 × ~2h 全量」的活锁（t260926-05 实案）。
+    # 且票面 lane 段点名「阈值来源=declaration|env|default」+ 逐键回落原因（不静默）；
+    # 运维临时覆盖用环境变量 SANDBAR_TMP_FIXTURE_MAX_DIRS / SANDBAR_TMP_FIXTURE_MAX_AGE_H
+    # （只补声明没写的键，被点名在 threshold_note 里）。
+    # 取值理由：rerun_rounds=3 抓得住「同一票 5 轮 × ~2h 全量」的活锁（t260926-05 实案）；
+    # tmp_fixture_max_dirs=1000 抓得住 260926 的 27.7 万（四个数量级）又不与日常churn 齐平，
+    # tmp_fixture_max_age_h=6 与清扫器/`.mjs` 复收器同口径（无活套件会用到的龄线）。
     watchdog:
       rerun_rounds: 3
       fault_loop_min: 90
       inflight_silent_min: 120
+      tmp_fixture_max_dirs: 1000
+      tmp_fixture_max_age_h: 6
   - id: docs-sync
     enabled: true
     project_key: sandbar

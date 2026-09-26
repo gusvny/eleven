@@ -448,6 +448,12 @@ class IntegrationRunResult:
     # 260927 混版本接缝（宿主要求 1②）：巡检形态却缺预算/执行器墙下发，或选中的泳道闸副本
     # 不认这些键——**响亮 WARN 上回执**，绝不静默回落缺省 3000 硬杀。空=无告警（正常轮）。
     warnings: List[str] = field(default_factory=list)
+    # 260926 KI-122① 加保险（洞①第二重，**additive**：空=本轮无活基线证据，老回放/老闸
+    # 形态逐字节零漂移）。live_baseline_red/green=实跑里红/绿的名字（闸基线主跑逐名答案 ∪
+    # 场景台账可信行，合成单点=shared.live_baseline_evidence）；source=两路可得性点名。
+    live_baseline_red: List[str] = field(default_factory=list)
+    live_baseline_green: List[str] = field(default_factory=list)
+    live_baseline_source: str = ""
 
 
 @dataclass
@@ -823,6 +829,122 @@ def tests_exempt_cap_blocked_text(exempt_rounds: int, audit: str = "") -> str:
 
 
 # ---- KI-122 ①：已知红名册归属（纯函数面，零 IO；IO 在活动壳 read_known_red_roster）----
+#
+# 260926 独立复核裁定（洞①：判据是「名字在册」而非「这条红与在册那条是同一个红」）：
+# 「在册」必须带**机械证据戳**才算既有欠账——名册条目带 booked_at（登记时刻，ISO8601 须带
+# 时区）+ booked_sha（登记时刻的 main 提交号），采纳面额外要求 **booked_at 早于本票开票
+# 基点**（票面 base_ref 的提交时刻 ∪ 票的 created 时刻，取可得的更早者=保守下界）。
+# 缺戳/戳畸形/戳晚于基点 → 一律不采纳（照旧拦、照旧重跑）并逐条点名原因。
+# 为什么不改成「要求 ∈ 基线实跑红集」：闸的基线红集与 blockers **构造上不相交**
+# （failure_protocol.decide：在基线红名单里 ⇒ verdict=record，永不为 block），那样会让
+# KI-122 实案（基线覆盖差）重回活锁。时间证据是「本条登记早于本票」的机械可判替代。
+# 「活的实跑基线集」加保险（洞①第二重）：有活基线集时**同时**要求该红在集合里；不可得时
+# 仅时间证据成立也可采纳，但票面必须点名「基线不可得，仅时间证据」。
+
+#: 名册条目的机械证据戳字段（缺任一 = 该条不可作为「既有欠账」证据）。
+KNOWN_RED_STAMP_FIELDS = ("booked_at", "booked_sha")
+#: 提交号形状（短/长 sha 十六进制）：形状不合法 = 戳畸形（不猜、不补全）。
+_KNOWN_RED_SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
+#: epoch 基准（**只**是常量，不在工作流里读墙钟——沙箱纪律：now/utcnow/today 禁调用）。
+_UTC_EPOCH = _dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc)
+
+
+def evidence_ts_epoch(value: Any) -> Optional[float]:
+    """时刻证据 → epoch 秒（浮点）。判不了 → None（**绝不猜时区**）。
+
+    受理两形态：ISO8601 串（**须带时区**，'Z' 视作 UTC；naive 串=畸形）+ 数字（epoch 秒，
+    只收正有限值）。与 integration/scenario_ledger._ts_epoch 同口径「不带时区判不了」。
+    本函数不读墙钟（只在工作流体内做纯算术，沙箱安全）。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return v if 0.0 < v < 1e18 else None
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        d = _dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if d.tzinfo is None:
+        return None
+    return (d - _UTC_EPOCH).total_seconds()
+
+
+def known_red_stamp_check(entry: Any):
+    """名册条目证据戳校验 → ({"booked_at","booked_sha","at"} 或 None, 具名原因 token)。
+
+    原因 token（英文，票面 note 直接引用）：missing-stamp / malformed-booked_at /
+    malformed-booked_sha。**只判戳自身**——「戳晚于本票基点」是逐票比较，归调用方。
+    戳只废该条（不废整册）：整册不可用留给 name/verdict/home 的账面矛盾（见
+    known_red_roster）；戳是可逐条重挂的记录面，一条陈戳不该让其余挂账失效。"""
+    if not isinstance(entry, dict):
+        return None, "missing-stamp"
+    if not all(k in entry for k in KNOWN_RED_STAMP_FIELDS):
+        missing = [k for k in KNOWN_RED_STAMP_FIELDS if k not in entry]
+        return None, "missing-stamp(%s)" % ",".join(missing)
+    at_raw, sha = entry.get("booked_at"), entry.get("booked_sha")
+    at = evidence_ts_epoch(at_raw)
+    if at is None:
+        return None, "malformed-booked_at(%r)" % (at_raw,)
+    if not isinstance(sha, str) or not _KNOWN_RED_SHA_RE.match(sha.strip().lower()):
+        return None, "malformed-booked_sha(%r)" % (sha,)
+    return {"booked_at": str(at_raw).strip(), "booked_sha": sha.strip().lower(),
+            "at": at}, ""
+
+
+def _name_set(value: Any):
+    """名字集合入参 → (frozenset 或 None, 畸形原因)。None=未提供；非空容器以外的
+    形态（串/数字/映射）=畸形（调用方按「拦」的一侧读，绝不静默当「不可得」）。"""
+    if value is None:
+        return None, ""
+    if isinstance(value, (list, tuple, set, frozenset)):
+        names = set()
+        for v in value:
+            if not isinstance(v, str):
+                return None, "not a name list (element %r)" % (v,)
+            if v.strip():
+                names.add(v.strip())
+        return frozenset(names), ""
+    return None, "not a name list (%s)" % type(value).__name__
+
+
+def live_baseline_evidence(baseline_answers: Any, ledger_red: Any = None,
+                           ledger_green: Any = None, baseline_ref: str = "",
+                           ledger_available: bool = False):
+    """活基线证据**合成单点**（纯函数零 IO）：两路实跑证据 → (red, green, source)。
+
+    两路（都是「真的跑过」的证据，不是人工账）：
+      ① 本轮闸基线主跑逐名答案 `baseline_answers`（{name: "red"|"green"}；缺名=没跑到/
+         not-checked/基线缺席/指纹不等——「没跑到」**不算答案**，因此不算「main 绿」）；
+      ② 场景台账可信行 `ledger_red`/`ledger_green`（同指纹/同宽/祖先或相同/≤7 天的最新
+         可信行；main 覆盖主要靠「每日 main 全集」的巡检同宽行）。
+    合成规则（数据面，不作判定：冲突时两个名单都带出，判定顺序在判据侧单点=**绿优先**）：
+      red = ①red ∪ ②ledger_red；green = ①green ∪ ②ledger_green。
+    畸形逐项降级（非名字/非 red/green 的值忽略），绝不抛；`source` 点名两路可得性，
+    供票面写「基线不可得，仅时间证据」。"""
+    red, green = set(), set()
+    if isinstance(baseline_answers, dict):
+        for k, v in baseline_answers.items():
+            if not isinstance(k, str) or not k.strip() or not isinstance(v, str):
+                continue
+            if v.strip() == "red":
+                red.add(k.strip())
+            elif v.strip() == "green":
+                green.add(k.strip())
+    answered = len(red) + len(green)
+    for names, bucket in ((ledger_red, red), (ledger_green, green)):
+        if isinstance(names, (list, tuple, set, frozenset)):
+            for n in names:
+                if isinstance(n, str) and n.strip():
+                    bucket.add(n.strip())
+    src = ("in-round gate baseline (%d answered name(s)%s)%s"
+           % (answered, (", ref=" + str(baseline_ref)) if baseline_ref else "",
+              " + scenario ledger (available)" if ledger_available else ""))
+    if not answered and not ledger_available:
+        src = "none: no live main-tip baseline evidence was produced this round"
+    return sorted(red), sorted(green), src
+
 
 def known_red_roster(payload: Any):
     """名册载荷 → (entries, error)：entries={name: {"verdict","home"}}，error=非空即不可用。
@@ -853,38 +975,107 @@ def known_red_roster(payload: Any):
             return {}, "roster entry %s has no home owner" % name.strip()
         if name.strip() in entries:
             return {}, "roster entry %s appears twice" % name.strip()
-        entries[name.strip()] = {"verdict": str(verdict), "home": home.strip()}
+        out = {"verdict": str(verdict), "home": home.strip()}
+        # 证据戳随条目带出（260926）：存在即原样带出（校验归 known_red_stamp_check）；
+        # 两字段都不在场=老形态载荷（逐条按「缺戳」读，形与其他字段分开处理，故此处不抛）。
+        if any(k in e for k in KNOWN_RED_STAMP_FIELDS):
+            for k in KNOWN_RED_STAMP_FIELDS:
+                if k in e:
+                    out[k] = e[k]
+        entries[name.strip()] = out
     return entries, ""
+
+
+def _roster_adoption_payload(roster: Dict[str, Any], names: List[str]):
+    """名册读面 + 逐条戳校验的合并面（判据内单点，供 base/note 复用）。"""
+    rows = []
+    for n in names:
+        stamp, why = known_red_stamp_check(roster.get(n) or {})
+        rows.append({"name": n, "stamp": stamp, "why": why,
+                     "verdict": (roster.get(n) or {}).get("verdict", ""),
+                     "home": (roster.get(n) or {}).get("home", "")})
+    return rows
 
 
 def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
                                 roster_error: str = "", *,
-                                run_error: Any = "", env_side_red: Any = False):
+                                run_error: Any = "", env_side_red: Any = False,
+                                ticket_base_at: Any = None,
+                                ticket_base_source: str = "",
+                                live_baseline_red: Any = None,
+                                live_baseline_green: Any = None,
+                                live_baseline_source: str = ""):
     """KI-122①：仲裁 tests-fault 判决可否采纳（纯函数，UT 主面）。
 
-    采纳（adopt=True）当且仅当四条同时成立（少一条即照旧拦、照旧重跑）：
+    采纳（adopt=True）当且仅当**六条**同时成立（少一条即照旧拦、照旧重跑）：
       ① blockers 是**非空**名单且逐条为非空字符串——空名单不在此改判（那是既有
          known_red 豁免车道，语义不动）；
       ② 名册可读可解且**逐条在册**（booked/isolated 都算「已挂账」，本函数不下产品结论）；
       ③ 本轮没有启动级 error（零跑/装配失败/超时前缀——「没检验到」不得当零新增红）；
-      ④ 本轮不是环境面红（产品红 0/闸拦 0/环境红≥1，或供给装配失败）。
-    返回 {adopt, why, known, new, roster_ok, note}：
+      ④ 本轮不是环境面红（产品红 0/闸拦 0/环境红≥1，或供给装配失败）；
+      ⑤ **时间证据**（260926 洞①裁定）：本票开票基点在手（ticket_base_at 可解），且每条
+       在册 blocker 的条目戳可解、`booked_at` **早于**该基点——缺戳/戳畸形/戳晚于基点一律
+       不采纳（戳只废该条，原因逐条点名）；基点不可得=fail-closed 不采纳；
+    ⑥ **活基线加保险**（同裁定）：给了活基线证据（live_baseline_red=实跑里红的名字、
+       live_baseline_green=实跑里绿的名字；两源=本轮闸基线主跑逐名答案 ∪ 场景台账可信答案）
+       时，**同时**要求该红在红集里——而对「实跑说 main 绿」的名字按「拦」读（**绿优先于
+       红**：同一条既有红又有绿=两路活证据冲突，取闸基线权威的一侧）。**两名单对该名都
+       无数据=基线不可得：仅时间证据成立也可采纳，但票面必须点名「基线不可得，仅时间证据」**
+       （逐条点名无答案的名字）——「没跑到」永不等于「main 绿」（C1 口径），故不拦。
+    返回 {adopt, why, known, new, roster_ok, stale, stamps_ok, live_baseline, note}：
       - why 是机器 token：adopted | no-blockers | new-red | roster-unavailable |
-        startup-error | env-side-red（后四者即 fail-closed 的具名原因）；
-      - known=[{name,verdict,home}...]（审计锚：凭什么放行）、new=[非在册名字...]；
-      - note=上票面/banner 的**英文**审计锚（逐条列 blocker 名 + 名册 verdict/home），
-        四条不满足时 note 也点名原因（名册路径与失败原因进票面，不静默）。
-    畸形入参不抛：env_side_red 非 bool、run_error 非串等一律按「拦」的一侧读。"""
+        startup-error | env-side-red | no-base-point | stale-evidence |
+        live-baseline-green | live-baseline-malformed（后四者=260926 新增加保险的具名原因）；
+      - known=[{name,verdict,home,booked_at,booked_sha}...]（审计锚：凭什么放行）、
+        new=[非在册名字...]、stale=[{name,why,booked_at}...]（在册但戳不合格的 blocker）；
+      - note=上票面/banner 的**英文**审计锚（逐条列 blocker 名 + 名册 verdict/home +
+        时间证据基点 + 活基线可得性），任一条不满足时 note 也点名原因（名册路径与失败
+        原因进票面，不静默）。
+    畸形入参不抛：env_side_red 非 bool、run_error 非串、活基线集非名字表等一律按「拦」的
+    一侧读（fail-closed），并在 note 里点名畸形值本身（报错精确纪律）。"""
     roster, err = known_red_roster(roster_payload)
     if isinstance(roster_error, str) and roster_error:
         err = roster_error
-    env_red = env_side_red is True
-    run_err = run_error if isinstance(run_error, str) else ""
+    # ④ 环境面信号：**只有字面 False 才是「不是环境面」**（非 bool 畸形 → 按拦读）。
+    env_red = env_side_red is not False
+    env_red_malformed = (env_side_red is not True) and (env_side_red is not False)
+    # ③ 启动级 error：非串非 None = 畸形信号（旧读法把畸形当「无 error」=fail-open）。
+    if isinstance(run_error, str):
+        run_err, run_err_malformed = run_error, ""
+    elif run_error is None:
+        run_err, run_err_malformed = "", ""
+    else:
+        run_err, run_err_malformed = "malformed run_error signal", (
+            "run_error=%r is not a string" % (run_error,))
     names = [b.strip() for b in (blockers if isinstance(blockers, (list, tuple)) else [])
              if isinstance(b, str) and b.strip()]
     known = [{"name": n, **roster[n]} for n in names if n in roster]
     new = [n for n in names if n not in roster]
-    base = {"known": known, "new": new, "roster_ok": not err}
+    # ⑤ 时间证据：逐条戳校验（只在册 blocker 参与——非在册走 new-red 更精确）。
+    stamp_rows = _roster_adoption_payload(roster, [n for n in names if n in roster])
+    stale = [{"name": r["name"], "why": r["why"] or "missing-stamp",
+              "booked_at": (r["stamp"] or {}).get(
+                  "booked_at", (roster.get(r["name"]) or {}).get("booked_at"))}
+             for r in stamp_rows if r["stamp"] is None]
+    base_at = evidence_ts_epoch(ticket_base_at)
+    # ⑥ 活基线集：两名单对该名都没数据=不可得（仅时间证据）；畸形=按拦读（绝不静默当不可得）。
+    red_set, red_bad = _name_set(live_baseline_red)
+    grn_set, grn_bad = _name_set(live_baseline_green)
+    live_bad = "; ".join(x for x in (red_bad, grn_bad) if x)
+    live_available = (red_set is not None) or (grn_set is not None)
+    live_red = set(red_set or ())
+    live_grn = set(grn_set or ())
+    live_green = [n for n in names if n in live_grn]
+    live_red_hit = [n for n in names if n in live_red and n not in live_grn]
+    live_no_answer = [n for n in names if n not in live_grn and n not in live_red]
+    live = {"available": bool(live_available and not live_bad),
+            "malformed": live_bad, "source": str(live_baseline_source or ""),
+            "red": sorted(live_red), "green": live_green,
+            "red_hit": live_red_hit, "no_answer": live_no_answer,
+            "conflict": [n for n in names if n in live_red and n in live_grn]}
+    base = {"known": known, "new": new, "roster_ok": not err, "stale": stale,
+            "stamps_ok": not stale and not new and bool(names),
+            "live_baseline": live}
     if not names:
         return dict(base, adopt=False, why="no-blockers", note=(
             "No gate blocker to attribute: the round keeps the existing known-red "
@@ -902,19 +1093,79 @@ def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
     if run_err:
         return dict(base, adopt=False, why="startup-error", note=(
             "Startup-level error in this round (%s): nothing was verified, so zero new "
-            "red cannot be claimed — the verdict is NOT adopted." % (run_err or "<empty>")[:160]))
+            "red cannot be claimed — the verdict is NOT adopted.%s"
+            % ((run_err or "<empty>")[:160],
+               (" Malformed signal read on the BLOCK side: %s." % run_err_malformed)
+               if run_err_malformed else "")))
     if env_red:
         return dict(base, adopt=False, why="env-side-red", note=(
             "Environment-side red this round (product red 0 / gate blockers 0 / env red>=1 "
             "or supply-assembly failure): the known-red exemption lane handles it, the "
-            "verdict is not adopted here."))
-    detail = "; ".join("%s [%s: %s]" % (k["name"], k["verdict"], k["home"]) for k in known)
+            "verdict is not adopted here.%s"
+            % ((" Signal env_side_red=%r is not a bool — malformed signal read on the "
+                "BLOCK side (fail-closed)." % (env_side_red,)) if env_red_malformed else "")))
+    # ---- ⑤ 时间证据（洞①）：基点不可得=fail-closed；戳不合格=逐条点名（照旧拦+重跑）----
+    if base_at is None:
+        return dict(base, adopt=False, why="no-base-point", note=(
+            "No usable ticket base point (ticket_base_at=%r%s): the roster evidence "
+            "stamps cannot be compared with this ticket's start, so 'booked before this "
+            "ticket' is unproven — fail-closed, the verdict is NOT adopted and the suite "
+            "is re-run." % (ticket_base_at,
+                            ("; " + str(ticket_base_source)) if ticket_base_source else "")))
+    base_iso = _dt.datetime.fromtimestamp(
+        float(base_at), _dt.timezone.utc).isoformat(timespec="seconds")
+    late = [r for r in stamp_rows
+            if r["stamp"] is not None and float(r["stamp"]["at"]) >= float(base_at)]
+    if stale or late:
+        bad = list(stale) + [{"name": r["name"],
+                              "why": "booked-after-base(%s>=%s)"
+                                     % (r["stamp"]["booked_at"], base_iso),
+                              "booked_at": r["stamp"]["booked_at"]} for r in late]
+        return dict(base, stale=bad, adopt=False, why="stale-evidence", note=(
+            "Roster evidence stamps are not admissible for this ticket (base point %s; "
+            "source: %s): %s — a missing/malformed stamp, or a booking that is not "
+            "earlier than this ticket's base point, is NOT evidence of pre-existing debt; "
+            "the verdict is NOT adopted and the suite is re-run."
+            % (base_iso, str(ticket_base_source or "n/a"),
+               "; ".join("%s [%s]" % (b["name"], b["why"]) for b in bad))))
+    # ---- ⑥ 活基线加保险：畸形=按拦读；在集里但非红=基线说 main 绿（按拦读）----
+    if live_bad:
+        return dict(base, adopt=False, why="live-baseline-malformed", note=(
+            "Live baseline set is malformed (%s; source: %s) — a malformed live baseline "
+            "signal is read on the BLOCK side (fail-closed); the verdict is NOT adopted "
+            "and the suite is re-run." % (live_bad, str(live_baseline_source or "n/a"))))
+    if live_green:
+        extra = (" | conflicting live red evidence also exists for %s (the round's own "
+                 "baseline run is authoritative: green wins)"
+                 % ", ".join(live["conflict"])) if live["conflict"] else ""
+        return dict(base, adopt=False, why="live-baseline-green", note=(
+            "Live actually-run baseline evidence answers GREEN on main for %s (source: %s) — "
+            "these gate blockers are NOT contained in the live baseline red set (both "
+            "conditions must hold), so the verdict is NOT adopted and the suite is "
+            "re-run.%s" % (", ".join(live_green), str(live_baseline_source or "n/a"), extra)))
+    detail = "; ".join(
+        "%s [%s: %s | booked %s @ %s]" % (
+            k["name"], k["verdict"], k["home"],
+            k.get("booked_at") or "<no stamp>", str(k.get("booked_sha") or "<none>")[:12])
+        for k in known)
     return dict(base, adopt=True, why="adopted", note=(
         "Arbitration verdict ADOPTED (verdict=tests-fault, zero new red): every gate "
         "blocker is registered debt in %s, so the workflow advances to "
-        "acceptance_walkthrough instead of re-running the full suite. | basis: zero new "
-        "red = no blocker outside the roster | blockers: %s"
-        % (KNOWN_RED_BASELINE_REL, detail)))
+        "acceptance_walkthrough instead of re-running the full suite. | basis 1: zero new "
+        "red = no blocker outside the roster | basis 2: time evidence — every entry was "
+        "booked before this ticket's base point (%s; source: %s) | basis 3: %s | "
+        "blockers: %s"
+        % (KNOWN_RED_BASELINE_REL, base_iso, str(ticket_base_source or "n/a"),
+           ("live baseline set (%s): every blocker is red in it (%s)"
+            % (str(live_baseline_source or "n/a"), ", ".join(live_red_hit)))
+           if live_red_hit else
+           ("live baseline set has NO answer for %s (source: %s) — time evidence only; "
+            "no live evidence says main is green on it"
+            % (", ".join(live_no_answer), str(live_baseline_source or "no source given")))
+           if live_available else
+           ("live baseline set UNAVAILABLE (%s) — time evidence only"
+            % str(live_baseline_source or "no source given")),
+           detail)))
 
 
 def tests_fault_cap_audit_text(rounds: Any, cap: Any, exempt_rounds: Any = 0,

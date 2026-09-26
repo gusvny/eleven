@@ -1249,11 +1249,16 @@ class InspectionPeriodicWorkflow:
             lane_section, lane_findings = await self._lane_watchdog(inp, plan)
             extra_findings += lane_findings
             if lane_section:
+                tmp_sec = lane_section.get("tmp_fixture") or {}
                 self._enter("inspect", "running",
                             "Lane/watchdog sweep done (scanned %s non-terminal tickets, %s "
-                            "finding(s); %s)"
+                            "finding(s); %s; test-fixture temp dirs: %s dirs / oldest %sh / "
+                            "%s finding(s), threshold source %s)"
                             % (lane_section.get("scanned"), lane_section.get("finding_count"),
-                               lane_section.get("threshold_note") or ""))
+                               lane_section.get("threshold_note") or "",
+                               tmp_sec.get("dirs", "?"), tmp_sec.get("oldest_age_h", "?"),
+                               tmp_sec.get("finding_count", "?"),
+                               tmp_sec.get("threshold_source", "?")))
         # ---- inspect 段：只读 agent 审查（预算双闸：内部 deadline=预算−60s） ----
         # （无套件档的期不进 suite 段——suite_only 语义由源码锁钉死；档位状态并入
         # inspect 段文案可见，不静默）
@@ -1588,11 +1593,13 @@ class InspectionPeriodicWorkflow:
     async def _lane_watchdog(self, inp: "InspectionPeriodicInput",
                              plan: Dict[str, Any]):
         """lane/watchdog 面（260926，KI-122 追加面 / KI-126 同源）：只读扫非终态票的
-        工作流时间线/快照 → (票面 lane 段, 发现清单)。
+        工作流时间线/快照 + **测试夹具临时目录水位**（第四判据）→ (票面 lane 段, 发现清单)。
 
         活动失败=显式 high 发现（**这个面本身不能静默**——否则「巡检没发现」的盲区会
         再长回来）；阈值档来自声明 plan.watchdog（缺省/畸形的回落与来源点名由纯函数面
-        resolve_thresholds 给，随 lane 段上票面）。"""
+        resolve_thresholds / resolve_tmp_thresholds 给，随 lane 段上票面）。
+        第四判据是**宿主级**发现（不挂任何票），随活动回执的 tmp_fixture 段并进同一发现
+        清单与同一 lane 段计数（计数合并单点=merge_lane_section，段与清单不许漂移）。"""
         from inspection_deadman import make_finding
         try:
             raw: Any = await workflow.execute_activity(
@@ -1612,8 +1619,17 @@ class InspectionPeriodicWorkflow:
                 str((raw or {}).get("error") or "unknown"), suggest=False)]
         res = (raw or {}).get("result") or {}
         findings = res.get("findings") if isinstance(res.get("findings"), list) else []
-        section = res.get("section") if isinstance(res.get("section"), dict) else None
+        # 票面段：优先吃活动侧算好的**合并段**（票级三族 + 宿主水位；计数合并单点在纯函数
+        # 面，工作流侧零算法/零新 import）；老在途回执没有该字段 → 退回票级段，逐字段同旧形。
+        section = (res.get("section_merged") if isinstance(res.get("section_merged"), dict)
+                   else res.get("section") if isinstance(res.get("section"), dict) else None)
         meta = res.get("meta") if isinstance(res.get("meta"), dict) else {}
+        # 第四判据（夹具临时目录水位）：宿主级发现挂进同一发现清单（段计数已由活动合并）。
+        # 缺字段/畸形=当没有（老 worker 回执形态），此时清单与段逐字段与旧实现同形。
+        tmp = res.get("tmp_fixture") if isinstance(res.get("tmp_fixture"), dict) else {}
+        tmp_findings = [f for f in (tmp.get("findings") or []) if isinstance(f, dict)]
+        if tmp_findings:
+            findings = findings + tmp_findings
         # 查询/枚举面的故障点名进票面（单票快照查不到=点名，绝不静默当「这票没问题」）
         errs = [str(x) for x in (meta.get("unreadable") or [])]
         if errs:

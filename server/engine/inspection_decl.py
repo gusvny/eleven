@@ -59,8 +59,11 @@ from inspection_inspect import (DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDING
                                 PROFILE_FACES)
 # lane/watchdog 面阈值（260926，KI-122 追加面）：**单源**在 inspection_lane_watchdog
 # （纯函数模块，零 IO）——声明解析件只做词法/范围校验，值语义与运行期回落规则同源，
-# 绝不在这里另造一份缺省（两套默认值必然漂移）。
-from inspection_lane_watchdog import WATCHDOG_DEFAULTS, WATCHDOG_KEYS, WATCHDOG_RANGES
+# 绝不在这里另造一份缺省（两套默认值必然漂移）。第四判据（测试夹具临时目录水位，
+# 260926 同批）走同一份合并字典 WATCHDOG_ALL_*（票级三键 + 水位两键）。
+from inspection_lane_watchdog import (WATCHDOG_ALL_DEFAULTS, WATCHDOG_ALL_KEYS,
+                                      WATCHDOG_ALL_RANGES, WATCHDOG_DEFAULTS,
+                                      WATCHDOG_KEYS, WATCHDOG_RANGES)
 
 DECL_FILE_NAME = "inspection.yaml"
 
@@ -381,31 +384,34 @@ def _req_str(where: str, data: Dict[str, Any], key: str, no: str = "") -> str:
 
 
 def _validate_watchdog(where: str, raw: Any) -> Dict[str, str]:
-    """lane/watchdog 阈值档校验（260926，KI-122 追加面）：缺省段=空档（全缺省值）；
-    非映射/未知键/非正整数或越界 → DeclError 点名（与 inspect 预算键同款 fail-closed 纪律）。
-    范围与缺省**同源**自 inspection_lane_watchdog（WATCHDOG_RANGES/DEFAULTS）——本函数
-    只做词法闸，值语义单点在运行期 resolve_thresholds。"""
+    """lane/watchdog 阈值档校验（260926，KI-122 追加面 + 第四判据水位档 t260926 同批）：
+    缺省段=空档（全缺省值）；非映射/未知键/非正整数或越界 → DeclError 点名（与 inspect 预算键
+    同款 fail-closed 纪律）。范围与缺省**同源**自 inspection_lane_watchdog（票级三键 +
+    水位两键的合并字典 WATCHDOG_ALL_RANGES/DEFAULTS）——本函数只做词法闸，值语义单点在
+    运行期 resolve_thresholds / resolve_tmp_thresholds。"""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
         raise DeclError("%s：watchdog 必须是映射（got %r；合法键：%s）"
-                        % (where, raw, "/".join(WATCHDOG_KEYS)))
-    unknown = sorted(set(raw) - set(WATCHDOG_KEYS))
+                        % (where, raw, "/".join(WATCHDOG_ALL_KEYS)))
+    unknown = sorted(set(raw) - set(WATCHDOG_ALL_KEYS))
     if unknown:
         raise DeclError("%s：watchdog 未知字段 %s（合法：%s）"
-                        % (where, unknown, "/".join(WATCHDOG_KEYS)))
+                        % (where, unknown, "/".join(WATCHDOG_ALL_KEYS)))
+    what = {"rerun_rounds": "同票重跑轮次阈值",
+            "fault_loop_min": "tests-fault 回路停留阈值（分钟）",
+            "inflight_silent_min": "在飞静默阈值（分钟）",
+            "tmp_fixture_max_dirs": "测试夹具临时目录数水位（第四判据；目录数上界）",
+            "tmp_fixture_max_age_h": "测试夹具最老目录年龄水位（第四判据；小时）"}
     out: Dict[str, str] = {}
-    for k in WATCHDOG_KEYS:
+    for k in WATCHDOG_ALL_KEYS:
         if k not in raw:
             continue
         v = raw[k]
-        lo, hi = WATCHDOG_RANGES[k]
+        lo, hi = WATCHDOG_ALL_RANGES[k]
         if not isinstance(v, str) or not re.match(r"^\d+$", v) or not (lo <= int(v) <= hi):
             raise DeclError("%s：watchdog.%s %r 非法（正整数 %d~%d；缺省 %d——本项=%s）"
-                            % (where, k, v, lo, hi, WATCHDOG_DEFAULTS[k],
-                               {"rerun_rounds": "同票重跑轮次阈值",
-                                "fault_loop_min": "tests-fault 回路停留阈值（分钟）",
-                                "inflight_silent_min": "在飞静默阈值（分钟）"}[k]))
+                            % (where, k, v, lo, hi, WATCHDOG_ALL_DEFAULTS[k], what[k]))
         out[k] = v
     return out
 

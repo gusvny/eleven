@@ -92,6 +92,7 @@ with workflow.unsafe.imports_passed_through():
         ReprobeRedArgs,
         ReprobeRedResult,
         blockers_known_red_adoption,
+        evidence_ts_epoch,
         tests_exempt_cap_blocked_text,
         tests_fault_cap_audit_text,
         tests_round_step,
@@ -312,6 +313,19 @@ TESTS_STREAK_PATCH_ID = "dev-lane-tests-streak-v1"
 # 名册路径与失败原因点名进票面。同构布尔门：旧历史（无本 marker）逐字旧行为（恒重跑），
 # 在途票不追溯——门求值点在主循环直线段，无 KI-061 式唤醒重放路径，不需 #seq 后缀。
 KI122_ADOPTION_PATCH_ID = "dev-lane-ki122-adoption-v1"
+# KI-122① 260926 洞①裁定：采纳除「在册」外还要**机械证据戳 + 时间证据**（名册条目
+# booked_at/booked_sha 早于本票开票基点），以及**活基线加保险**——两路**实跑**证据：
+#   ① 本轮闸基线主跑逐名答案（failure_protocol.baseline_answers → 闸回执 baseline.answers）
+#      ——**这条正是洞①「同名新红」的拦点**：用例被基线跑到且 pass（main 绿）而泳道红 ⇒
+#      绿证据在案 ⇒ 不采纳（闸的红绿判据本身零改动，采纳面只是不再放行）；
+#   ② 场景台账可信行（同指纹/同宽/祖先或相同/≤7 天）命中红/绿——覆盖「这一趟基线没跑到」
+#      的 main 侧红证据（KI-122 实案的「基线覆盖差」形态靠它或「无答案」两路收场）。
+# 两名单对该名都无数据 ⇒ 基线不可得：仅时间证据成立也可采纳，但票面必须点名「基线不可得，
+# 仅时间证据」（宿主裁定原文口径）——「没跑到」永不等于「main 绿」（C1 口径），故不拦。
+# 本常量只在老回执（无 live_baseline_* 键）时兜底作来源点名。
+KI122_LIVE_BASELINE_SOURCE = (
+    "none: the receipt carried no live-baseline evidence (gate baseline answers / ledger "
+    "rows absent) — time evidence only")
 # KI-122②：tests 连续计数的**段入口复位**必须停用——旧口径对「任何非 tests-fault 迭代来源
 # 的重进」都复位（新实现轮/验收打回/**人工 rework**/retry_qc/blocked 脱困重进），于是两道上限
 # （MAX_TESTS_FAULT_ROUNDS=5 / MAX_TESTS_EXEMPT_ROUNDS=5）可被外部处置反复击穿、永不触顶
@@ -1106,42 +1120,127 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         return names
 
     async def _known_red_roster_payload(self):
-        """读仓根已知红名册（只读活动壳；KI-122①）。故障/畸形**不抛**：返回
-        (None, 原因) —— 调用方 fail-closed 照旧拦、照旧重跑，并把原因点名进票面。
-        活动回执形状：{ok, result:{entries:{name:{verdict,home}}, error, path}}。"""
+        """读仓根已知红名册（只读活动壳；KI-122①）。故障/畸形**不抛**：error 非空 ——
+        调用方 fail-closed 照旧拦、照旧重跑，并把原因点名进票面。
+        活动回执形状：{ok, result:{entries:{name:{verdict,home,booked_at,booked_sha}},
+        error, path, base_ref, base_at, base_at_error}}；本方法顺带把 base_ref 的提交
+        时刻带回来（时间证据的比较下界，见 `_ticket_base_point`）。
+        260926 独立复核缺口①：回执**形状漂移**（result/entries 非 dict、条目非对象）
+        同样 fail-closed 回来（error 非空），**绝不抛未捕获异常**——主循环是裸
+        `while True:`，抛出去=打断工作流实例。"""
+        meta = getattr(self, "meta", None) or {}
+        base_ref = str(meta.get("base_ref") or "")
+        out = {"payload": None, "error": "", "base_at": "", "base_ref": base_ref,
+               "base_issue": ""}
         try:
             raw = await workflow.execute_activity(
-                "read_known_red_roster", args=[{}],
+                "read_known_red_roster", args=[{"base_ref": base_ref}],
                 start_to_close_timeout=SHORT, retry_policy=RETRY)
         except Exception as e:  # noqa: BLE001 —— 名册读不到=照旧拦（不拦主链、不放行）
-            return None, "roster activity failed: %s: %s" % (type(e).__name__, e)
-        if not isinstance(raw, dict) or not raw.get("ok"):
-            return None, str((raw or {}).get("error") or "roster activity returned ok=false")
-        res = raw.get("result") or {}
+            out["error"] = "roster activity failed: %s: %s" % (type(e).__name__, e)
+            return out
+        if not isinstance(raw, dict):
+            out["error"] = ("roster activity receipt is not an object (%s)"
+                            % type(raw).__name__)
+            return out
+        if not raw.get("ok"):
+            out["error"] = str(raw.get("error") or "roster activity returned ok=false")
+            return out
+        res = raw.get("result")
+        if res is None:
+            res = {}
+        if not isinstance(res, dict):
+            out["error"] = ("roster activity result is not an object (%s)"
+                            % type(res).__name__)
+            return out
+        entries = res.get("entries")
+        if entries is None:
+            entries = {}
+        if not isinstance(entries, dict):
+            out["error"] = ("roster activity entries is not an object (%s)"
+                            % type(entries).__name__)
+            return out
+        bad = [(str(k), type(v).__name__) for k, v in entries.items()
+               if not isinstance(v, dict)]
+        if bad:
+            out["error"] = ("roster entry %s is not an object (%s)"
+                            % (bad[0][0], bad[0][1]))
+            return out
         err = str(res.get("error") or "")
         if err:
-            return None, "%s (%s)" % (err, res.get("path") or "")
-        return {"entries": [dict({"name": k}, **(v if isinstance(v, dict) else {}))
-                            for k, v in (res.get("entries") or {}).items()]}, ""
+            out["error"] = "%s (%s)" % (err, res.get("path") or "")
+            return out
+        out["payload"] = {"entries": [dict({"name": k}, **v) for k, v in entries.items()]}
+        out["base_at"] = str(res.get("base_at") or "")
+        out["base_issue"] = str(res.get("base_at_error") or "")
+        return out
+
+    def _ticket_base_point(self, roster_base_at):
+        """本票**开票基点**（时间证据的比较下界；KI-122① 260926 裁定）：票面 base_ref 的
+        提交时刻 ∪ 票的 created 时刻，取**可得的更早者**=保守下界（只用更严的一侧，绝不用
+        更松的一侧放行）。返回 (值, 具名来源)；二者皆不可得 → (None, 具名原因)——判据侧
+        fail-closed 不采纳。纯读 meta+入参，零 IO、零墙钟（回放安全）。"""
+        meta = getattr(self, "meta", None) or {}
+        cands = []
+        rb = str(roster_base_at or "")
+        if rb:
+            cands.append(("base_ref commit time", rb))
+        created = meta.get("created")
+        if evidence_ts_epoch(created) is not None:
+            cands.append(("ticket created", created))
+        usable = []
+        for tag, v in cands:
+            at = evidence_ts_epoch(v)
+            if at is not None:
+                usable.append((at, tag, v))
+        if not usable:
+            return None, ("no usable ticket base point (base_ref=%r, created=%r)"
+                          % (meta.get("base_ref"), created))
+        usable.sort(key=lambda x: x[0])
+        _, tag, v = usable[0]
+        src = "%s=%s" % (tag, v)
+        if len(usable) > 1:
+            src += " (earliest of %s)" % ", ".join("%s=%s" % (t, vv) for _, t, vv in usable)
+        return v, src
 
     async def _tests_fault_adoption(self, cur_integ):
         """KI-122①：tests-fault 判决可否采纳（推进而非重跑）。返回
-        shared.blockers_known_red_adoption 的形状（adopt/why/known/new/note）。
+        shared.blockers_known_red_adoption 的形状（adopt/why/known/new/stale/note）。
 
-        单写者=shared 纯函数（判据只此一份）；本方法只做两件事：取闸回执的 blocker
-        名单与启动级 error、读名册。**fail-closed**：名册不可用 → adopt=False（照旧拦、
-        照旧重跑），原因随 note 上票面。空名单不走本面（既有 known_red 豁免车道语义不动）。"""
+        单写者=shared 纯函数（判据只此一份）；本方法只做三件事：取闸回执的 blocker
+        名单与启动级 error、读名册（含 base_ref 提交时刻）、算本票开票基点。**fail-closed**：
+        名册不可用/基点不可得/戳不合格 → adopt=False（照旧拦、照旧重跑），原因随 note 上票面。
+        空名单不走本面（既有 known_red 豁免车道语义不动）。
+        活基线加保险：回执的 live_baseline_red/green（两路实跑证据：本轮闸基线主跑逐名
+        答案 ∪ 场景台账可信行）原样带入；两名单对该名都无数据=不可得，仍按时间证据判，
+        但票面点名「基线不可得，仅时间证据」——「没跑到」永不等于「main 绿」。"""
         blockers = getattr(cur_integ, "blockers", None) if cur_integ is not None else None
         names = [b for b in (blockers if isinstance(blockers, (list, tuple)) else [])
                  if isinstance(b, str) and b.strip()]
         if not names:
             return {"adopt": False, "why": "no-blockers", "known": [], "new": [],
                     "roster_ok": False, "note": ""}
-        roster, roster_err = await self._known_red_roster_payload()
+        receipt = await self._known_red_roster_payload()
+        base_at, base_src = self._ticket_base_point(receipt.get("base_at"))
+        if receipt.get("base_issue"):
+            base_src = "%s; base_ref resolution issue: %s" % (base_src, receipt["base_issue"])
+        # 活基线加保险（洞①第二重）：两路实跑证据由活动壳合成在回执上（live_baseline_*）；
+        # 本轮没有活证据（老回执/基线未跑/台账不可用）→ 空名单 + 具名来源，判据侧按
+        # 「基线不可得，仅时间证据」走并逐票点名。
+        lb_red = [str(x) for x in (getattr(cur_integ, "live_baseline_red", None) or [])
+                  if isinstance(x, str) and str(x).strip()]
+        lb_green = [str(x) for x in (getattr(cur_integ, "live_baseline_green", None) or [])
+                    if isinstance(x, str) and str(x).strip()]
+        lb_src = str(getattr(cur_integ, "live_baseline_source", "") or "")
+        if not lb_red and not lb_green:
+            lb_src = lb_src or KI122_LIVE_BASELINE_SOURCE
         return blockers_known_red_adoption(
-            names, roster, roster_error=roster_err,
+            names, receipt.get("payload"), roster_error=receipt.get("error") or "",
             run_error=(getattr(cur_integ, "error", "") if cur_integ is not None else ""),
-            env_side_red=self._tests_env_side_red(cur_integ))
+            env_side_red=self._tests_env_side_red(cur_integ),
+            ticket_base_at=base_at, ticket_base_source=base_src,
+            live_baseline_red=lb_red, live_baseline_green=lb_green,
+            live_baseline_source=lb_src)
 
     async def _tests_round_account(self, tests_rounds, tests_exempt_rounds,
                                    cur_integ):
