@@ -1977,3 +1977,13 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **不在 known-red 名册内**（名册只收实跑红项；这条在真机器上恒绿，故从未入册）。
 > **修法方向**：夹具自建它需要的「陈旧指针」（显式 `mkdir/write` 到自建 tmp 路径 + 用注入 `now_fn` 造陈旧），并在断言里写明前提；顺手全班扫一遍「直接用 `$TMPDIR/<固定名>` 当夹具」的同族写法（本仓已有前缀白名单可作扫描面）。
 > **影响**：干净环境（新机器、CI、清过临时目录）上引擎全量会多出一条红——归因成本高（今天三把刀各跑全量时都被它绊过一次）。
+
+## KI-137 提交的用例带「有效期」：桩时钟与判据时钟不同源 → 到点必红（260926 实测，bec15f9 引入，integration 岗登记）
+> **实案**：`server/engine/tests/test_t260926_lane_watchdog.py` 的入口级两例（`test_c1_entry_level_three_shapes_hit_and_counterexamples`
+> /`test_c2_entry_level_declaration_thresholds_take_effect`）用固定 `NOW = 1_790_430_000.0`（=本地 2026-09-26 21:40）
+> 造桩快照，而真活动壳取**真墙钟** `time.time()`；桩里 `t-clean.last_activity_at = NOW − 60` ⇒ 算出的静默时长
+> **随真实时间增长**，越过 `NOW + 120min`（23:40）后 `t-clean` 被判僵尸票 → 两例必红。
+> 实测：干净 worktree（HEAD=8770154、零改动）`2 failed, 2471 passed`；21:40–23:40 窗口内为绿——**提交时绿、到点红**。
+> **性质**：与 KI-135（跑绿=当时绿）同族：用例的**时间基准不同源**（桩=冻结常量，判据=真时钟）⇒ 用例有「保质期」。
+> **修法方向**：判据时钟与桩时钟同源（在入口桩里 monkeypatch 活动所用 `time.time`，或桩改喂相对此刻），
+> 并加**反向锁**（把常量往后推 10 年仍全绿）防回潮。**影响**：这类红在夜间/次日必现，最容易被误读成「谁改坏了」。
