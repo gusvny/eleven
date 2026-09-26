@@ -1195,7 +1195,15 @@ def _integ(args):
             'affiliation': aff,
             'baseline_ref': baseline_ref,
             'baseline': {'ok': baseline_ok, 'err': baseline_err,
-                         'enabled': baseline_enabled},
+                         'enabled': baseline_enabled,
+                         # 260926 KI-122①「加保险」：活基线主跑**逐名答案**（{红名:
+                         # red|green}；缺名=没跑到/not-checked=不算答案）。只读派生物，
+                         # 不改任何判定（判据单点=failure_protocol._baseline_answer）；
+                         # 只对红面取名（全绿用例对采纳无意义，回执更小）。
+                         'answers': fp.baseline_answers(
+                             [c for c in (cases_dedup or [])
+                              if isinstance(c, dict) and c.get('status') != 'pass'],
+                             baseline_cases, lane_fp, baseline_fp, baseline_ok)},
             'detail_red': ([{'malformed': m} for m in malformed]
                            + ([{'executor_crashed': crash_note}] if executor_crashed else [])
                            + ([{'recount': recount_mismatch}] if recount_mismatch else [])
