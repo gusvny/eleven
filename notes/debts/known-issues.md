@@ -1987,3 +1987,15 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **性质**：与 KI-135（跑绿=当时绿）同族：用例的**时间基准不同源**（桩=冻结常量，判据=真时钟）⇒ 用例有「保质期」。
 > **修法方向**：判据时钟与桩时钟同源（在入口桩里 monkeypatch 活动所用 `time.time`，或桩改喂相对此刻），
 > 并加**反向锁**（把常量往后推 10 年仍全绿）防回潮。**影响**：这类红在夜间/次日必现，最容易被误读成「谁改坏了」。
+
+## KI-138 agent 活动「Activity task timed out」在同一小时内密集出现（260927 凌晨三票实案，integration 岗登记）
+> **实案**：`t260926-05`、`t260927-03`（acceptance_walkthrough）、`t260927-04`（design_integration_tests）在
+> **同一小时内**先后 blocked，票面文案一致：`agent 活动故障（已重试）：ActivityError: Activity task timed out`；
+> 两次标的是**不同票、不同段、不同项目**（sandbar + dengzhufpv）⇒ 不是票自身问题，指向**共因**（agent 侧被拖住）。
+> **时间巧合**：同一天我们刚按宿主令把 `inspection/ops/artist` 切到 `zai-coding-cn/glm-5.3`；`integration`（验收走查角色）
+> 本就在同一家账号 → **候选共因一：该路当前慢/限流**。候选共因二：dsh headless spawn 侧卡住（spawn 后长时间无产出）；
+> 候选共因三：并发起台/资源争用（同刻多票 spawn）。
+> **处置（当场）**：三票全部 `retry_qc` 唤醒重跑（他项目票带显式越权旗记名）；观察「同段是否再次超时」以区分偶发/共因。
+> **修法方向**：①agent 活动超时文案要能区分「模型侧无响应/卡在流」与「进程侧卡住」（现在只有一句 timed out）；
+> ②超时前把已产生的轮次/日志尾落进结果面（别让诊断从零开始）；③给 agent 活动加「心跳/无进展」判据，
+> 超时阈值按「静默时长」而非「总时长」计（长时间正常干活不该被误杀）。
