@@ -77,6 +77,10 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t260925-21: 角色报告英文化（260925 宿主令）——跨载体一致面 ----
+    ("t260925-21-report-language-face",
+     "角色报告英文化·双载体一致面（t260925-21，灰盒秒级零 docker）：A charter 双规则并存——260904 聊天中文条目不回潮、260925 报告英文条目在其后且自身写清双口径并点名 developer/integration；B 常量单源——shared.py ROLE_REPORT_ENGLISH_CLAUSE 定义且 FLOW_BRIEF key 全集恰为六段、六段全部消费同一常量（逐段复制=漂移源判红）；C build_stage_prompt 同源消费+角色门控字面在场；D charter 条目与常量同锚 260925 令且常量写明与中文规则并存。门控行为面归 developer L1 单测（intent 分工见场景头注）。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260925-21/sc_t260925_21_report_language_face.py", "ro", "serial"),
     # ---- t260926-03: KI-123 create 面对外置模板类面可见性 + 拒收点名 ----
     ("t260926-03-ki123-create-face-template-visibility",
      "KI-123 建票面×外置模板类面可见性回归棒（t260926-03，灰盒 L3，离线秒级零 docker，与 t260924-04 ticket-start 全链旅程 intent 不同面=只打 create 面可见性/拒收点名）：E1 公开 op template-faces（引擎 venv 现算）在真实声明路径（SANDBAR_PROJECTS_DIR 注册根 + project.yaml workflow_modules + 真形状模块，非夹具钉面）回执 class_available 含该 id、rejections 空非双空 silent no-op、declared_projects>=1、契约键在位；E2 P0 正向可达——外置 id 建票离线失败点是 Temporal 阶段而非「可用：dev-lane」裸拒收（模板闸已放行）；E3 坏模块拒收点名 check（加载失败）+detail（ModuleNotFoundError 缺什么），不许装死；E4 未声明项目拒收点名「未登记/未声明」类原因（与 E3 不同形）；E5 畸形注册根 fail-closed 点名原因不静默回落内置面（外部输入畸形纪律）；E6 内置 dev-lane 快路径零扰动。三态：引擎 venv（temporalio）缺席=ENV_FAIL exit 2；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",

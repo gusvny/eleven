@@ -3979,6 +3979,22 @@ def agent_log_for(ticket_id: str, stage_id: str,
     return str(lane_dot_path(p, "agent_%s_gen%d.log" % (stage_id, gen)))
 
 
+# 宿主令 260925（工单 t260925-21）：developer/integration 角色 report 内容一律英文。
+# 单源措辞——build_stage_prompt（通用注入，按 role 门控）与 dev_lane.FLOW_BRIEF
+# 六个角色段共用同一常量，不留两个口径不一致的源。与之并存不冲突：用户面向聊天
+# 回复仍按 260904 宿主令用平实中文；docs/知识库与代码注释仍用现代中文；工单票面
+# 仍用英文（CLAUDE.md 规则 6）。
+ROLE_REPORT_ENGLISH_CLAUSE = (
+    "报告语言（宿主令 260925）：developer/integration 角色的 stage report 内容"
+    "（方案、审方案意见、实现交接报告、测试设计说明、仲裁判决与证据、验收报告，"
+    "以及 lane handoff/report 产物）一律用**英文**写；对用户的聊天回复仍按 260904 "
+    "宿主令用平实中文，两者口径互补不冲突。"
+)
+
+# developer/integration 之外的角色（ops/product-operation/artist 等）不在 260925
+# 令的范围内——注入按 role 门控，其它角色 prompt 零变化。
+ROLE_REPORT_ENGLISH_ROLES = ("developer", "integration")
+
 # Stage-level acceptance extras (ticket t260901-09): standing check items hung on the
 # prompt assembly source of truth (build_stage_prompt), keyed by stage id —
 # build_stage_prompt is shared by base.py and dev_lane.py, so a missing key means zero
@@ -4188,6 +4204,12 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         " 遗留与风险」（没有内容的小节省略；review 步的意见在这里分条写）。",
         "     读者是不熟悉本工单的人和你自己的下一棒——写清楚而不是写压缩长句。",
         "   - evidence：机器口径原始证据（命令/路径/关键输出），台面默认折叠，不用照顾可读性。",
+    ]
+    # 宿主令 260925（t260925-21）：developer/integration 角色的报告语言纪律，按 role
+    # 门控注入（其它角色零变化）；与 FLOW_BRIEF 六段共用单源常量。
+    if stage.role in ROLE_REPORT_ENGLISH_ROLES:
+        lines.append("   " + ROLE_REPORT_ENGLISH_CLAUSE)
+    lines += [
         "   结算 note 末列参考 docs 清单（读过哪些路径；空则写无）——"
         "integration merge 关卡核对文档漂移的观测点。",
         "   结果文件是幂等锚点：已存在则本段视为已完成（重跑安全），所以只在真正完成后写。",

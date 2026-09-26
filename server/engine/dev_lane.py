@@ -142,6 +142,8 @@ with workflow.unsafe.imports_passed_through():
         build_workspace_prep,
         format_agent_stage_failure,
         integration_route,
+        # t260925-21：角色报告英文纪律（单源常量，六段共用）
+        ROLE_REPORT_ENGLISH_CLAUSE,
         is_ui_write_set,
         lane_workspace_gate_error,
         agent_env_failed_reason,
@@ -406,6 +408,7 @@ FLOW_BRIEF = {
         "备选分解（宿主令 20260903 试行）：方案须另列 1-2 个备选切法"
         "（步骤划分/排序/分层之异，非功能取舍）并各一句说明为何不选——"
         "逼分解成为想过的选择而非习惯模子；review_plan 可据此追问切法合理性。"
+        + ROLE_REPORT_ENGLISH_CLAUSE
         + integration_discipline.prompt_clause()),
     "review_plan": (
         "你是 reviewer。审读上一步的方案（见上下文），逐条写 review comments。三态结论"
@@ -419,7 +422,8 @@ FLOW_BRIEF = {
         "comments 在 report 分条写（打回后 developer 带着你的 comments 重做方案）。"
         "除三态外不许发明其它结论。"
         "执行钩子：方案声称照搬/参考既有实现 → 必须附该实现的故障模式取舍清单，缺→打回；"
-        "方案涉及消费外部输入 → 验收必须含畸形输入用例，缺→打回。"),
+        "方案涉及消费外部输入 → 验收必须含畸形输入用例，缺→打回。"
+        + ROLE_REPORT_ENGLISH_CLAUSE),
     "implement": (
         "按已通过方案实现。硬性纪律：写集白名单内；**不要自己 git commit**"
         "（沙箱写不了真 .git，你交付结果文件后 worker 会确定性代落盘）；"
@@ -433,6 +437,7 @@ FLOW_BRIEF = {
         '"handover_runs":[{"name":"…","cmd":"…"}]（≤20 条，cmd 为泳道根可独立执行）——'
         "验证由集测段 worker 执行面代跑，票不停摆；不许谎报 status=failed（非实现缺位），"
         "也不许用 status=ok 掩盖「验证未运行」。"
+        + ROLE_REPORT_ENGLISH_CLAUSE
         + integration_discipline.prompt_clause()),
     "design_integration_tests": (
         # t260902-12（票）：用例设计依据第三项=组件对外契约与行为规格（以修订二为准）
@@ -458,7 +463,8 @@ FLOW_BRIEF = {
         "ENV_FAIL（exit 2）不写 SKIP（exit 0）；N/A 仅给系统状态条件子用例，全部子用例 N/A=场景红。"
         "落盘后先跑 python3 integration/lint_tests.py（秒级静态检查：语法/import/清单/intent），"
         "红则先修再交结果文件——不要把静态错误拖到套件执行时才暴露。"
-        "结果文件 status=failed 仅限你无法产出测试集的极端情况。"),
+        "结果文件 status=failed 仅限你无法产出测试集的极端情况。"
+        + ROLE_REPORT_ENGLISH_CLAUSE),
     "arbitrate": (
         "你是 integration 仲裁。机械集成测试已跑完，结果见上下文。三态判定（summary "
         "**必须以 verdict= 开头标明**，如「verdict=code-fault …」）："
@@ -506,7 +512,8 @@ FLOW_BRIEF = {
         "结果台账契约（t260922-12）：details 内 name=__ledger__ 是闸的结果台账回执——"
         "命中红（既有欠账·同红）不拦是诚实计数不是放行；命中绿而泳道红=真回归仍拦；"
         "歧义/无记录/指纹不等/过期/宽度不等=闸已回退实跑点名。台账不产生任何免签"
-        "语义，三态判定仍按本段全部分工执行。"),
+        "语义，三态判定仍按本段全部分工执行。"
+        + ROLE_REPORT_ENGLISH_CLAUSE),
     "acceptance_walkthrough": (
         "你是 integration 验收。本步与仲裁（arbitrate）**并行**执行：机械集成测试结果已随"
         "上下文注入（与仲裁同源），走查以**用户视角**独立进行，不预设「测试已全部通过」——"
@@ -522,7 +529,8 @@ FLOW_BRIEF = {
         "③禁止把全量当复现工具：同一段内非定点全套只许 1 趟，机械护栏执法"
         "（裸全量/口径漂移/第二趟全套=段结果红+票面点名 full_suite_violations）；"
         "④验收报告必含「对照证据」小节：同一场景名在闸回执与定点复跑回执两列"
-        "耗时，缺数据面如实标注并给移交命令，不得以跨场景数字顶替。"),
+        "耗时，缺数据面如实标注并给移交命令，不得以跨场景数字顶替。"
+        + ROLE_REPORT_ENGLISH_CLAUSE),
 }
 
 
