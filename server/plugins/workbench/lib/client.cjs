@@ -54970,7 +54970,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							detail,
 							operator,
 							opBusy,
-							onSign: (decision, note) => doSign(detail.id, decision, note, detail.gate_id)
+							onSign: (decision, note) => doSign(detail.id, decision, note, detail.gate_id || "inspection-close")
 						}),
 						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Reworks, {
 							detail,

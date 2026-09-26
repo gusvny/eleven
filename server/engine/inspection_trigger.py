@@ -379,6 +379,16 @@ async def cmd_verdict(args: argparse.Namespace) -> Dict[str, Any]:
                 "verdict": payload["verdict"], "who": payload["who"]})
 
 
+def _current_gate_id(snap: Dict[str, Any]) -> str:
+    """当前人门 gate id（只读投影用）：等待人工且段=收口段 → 模板收口 gate；否则空串。
+    真源=inspection_flow.CLOSE_GATE_ID（单点，不另造字面量）。"""
+    from inspection_flow import CLOSE_GATE_ID
+    if str(snap.get("stage_state") or "") == "awaiting-human" and str(snap.get("stage") or "") == "close":
+        return CLOSE_GATE_ID
+    hg = (snap.get("human_gate") or {}) if isinstance(snap.get("human_gate"), dict) else {}
+    return str(hg.get("gate") or "")
+
+
 def ticket_receipt(snap: Dict[str, Any], ticket_id: str) -> Dict[str, Any]:
     """workflow snapshot 查询 → 工单详情同构回执（纯函数；畸形快照逐字段降级不崩，
     畸形≠缺省：缺键如实出 None/空，不编造值）。"""
@@ -407,6 +417,11 @@ def ticket_receipt(snap: Dict[str, Any], ticket_id: str) -> Dict[str, Any]:
         "timeline_len": len(snap.get("timeline") or []) if isinstance(snap.get("timeline"), list) else 0,
         "human_gate": face.get("human_gate"),
         "report_path": face.get("report_path") or "",
+        # 260927 实案（宿主「巡检票点了 approve 不能 close」）：控制台签字面把
+        # `detail.gate_id` 原样带给引擎，而本投影**从不给 gate_id** → 签字载荷缺 gate
+        # → 引擎 close 门拒收/忽略，UI 上「点了没反应」。此处补出**权威 gate id**：
+        # 人门等待期=本票模板的收口 gate（inspection-lane 唯一人门）；非人门期=空串（不撒谎）。
+        "gate_id": _current_gate_id(snap),
     }
 
 

@@ -4281,7 +4281,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               {detail.kind === 'inspection' && laneModel && <LaneMap model={laneModel} />}
               {detail.kind === 'inspection' && (
                 <InspectionDetailFace detail={detail} operator={operator} opBusy={opBusy}
-                  onSign={(decision, note) => doSign(detail.id, decision, note, detail.gate_id)} />
+                  onSign={(decision, note) => doSign(detail.id, decision, note, detail.gate_id || 'inspection-close')} />
               )}
               {detail.kind !== 'inspection' && <D2Reworks detail={detail} wf={selWf} />}
               {/* t260915-05：拓扑在场=真泳道图（并行虚线框/人门虚线圈/轮次带）；
