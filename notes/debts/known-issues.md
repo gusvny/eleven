@@ -1908,3 +1908,17 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ——清单 ①④⑤ 三项过，②（ran>0）**不过**，③（审查段）被供应商周额度打断（见下，环境因非引擎因）。
 > **环境因（非 KI，留证）**：审查段 `inspect` blocked，原因为 `dsh: AUTH: 403 … You've reached your weekly (7-day) usage limit`
 > ——**模型供应商 7 天额度用尽**，故本期无发现清单；额度恢复后需重跑一期。
+
+## KI-133 模型供应商额度耗尽（AUTH 403 weekly limit）不被识别为环境类：票面只报「agent 退出码 1」，引擎照通用重试烧尝试（260926 两处实案，integration 岗登记）
+> **实案（同日两处）**：① 巡检期 20260927 的 `inspect` 段 blocked，票面文案=「agent 退出码 1（未完成）」，
+> 真因在 agent 日志里：`dsh: AUTH: 403 {"error":{"type":"permission_error","message":"You've reached your weekly (7-day)
+> usage limit…"}}`；② 签完 `t260926-04` 终审门后 `cs-publish` 段同一形态 blocked（`RuntimeError: headless agent 退出（rc=1）
+> 但未写结果文件 …/stage_cs-publish_gen1.json`），agent 日志里是同一串 403，且**反复重试**（`dsh-headless-resume: 已恢复会话`
+> 数轮）直到退出。
+> **性质**：额度类失败（401/403 AUTH、quota/rate-limit）与「代码/内容失败」在票面**完全同形**——都是 generic agent 退出 rc=1；
+> 引擎按通用瞬态故障重试，票面不点名「额度/鉴权」，**宿主与值守只能翻 agent 日志才知道不是自己的活坏了**。
+> **影响**：① 排障误导（照「agent 崩了」查代码，实为额度）；② 白烧重试与日志；③ 巡检/内容链在额度耗尽期间会**连续多期零产出**
+> 而票面看像产品故障。
+> **修法方向**：① spawn 结果面识别 AUTH 403/quota/rate-limit 关键字 → 段结果落 `env_fail` 语义 + 票面/巡检 face 点名
+> 「模型供应商额度耗尽（哪家/何时重置）」，且**不重试**（额度不会因重试恢复）；② 巡检审查段遇此态记为「环境红」而非「agent 未完成」，
+> 免得把它算进「巡检连续零信号」的家族里。
