@@ -88,21 +88,23 @@ def skip_findings(skip_count, running_actions, action_summary, missed):
     counters_known = skip_count is not None and running_actions is not None
     if counters_known and int(skip_count) > 0 and int(running_actions) > 0:
         f = make_finding(
-            DEADMAN_SCAN, "high", "调度跳火实锤（OverlapPolicy=SKIP）",
-            "跳火实锤：skip 计数 %d、上期 action 仍在 Running×%d（人门长挂占 Running 位，"
-            "下期被静默跳）｜调度 action=%s%s｜处置：重跑 schedule-up（action 指向 "
-            "spawner）+ terminate 挂门旧票（id 见 schedule_action）"
-            % (int(skip_count), int(running_actions), wf or "未知",
-               "；action 陈旧未指 spawner" if stale else ""),
+            DEADMAN_SCAN, "high", "Schedule skip confirmed (OverlapPolicy=SKIP)",
+            "skip confirmed: skip count %d, previous action still Running x%d (a long "
+            "human-gate hold occupies the Running slot, so the next fire is silently "
+            "skipped) | schedule action=%s%s | action: rerun schedule-up (point the "
+            "action at the spawner) + terminate the old held ticket (id in schedule_action)"
+            % (int(skip_count), int(running_actions), wf or "unknown",
+               "; action is stale, not pointing at the spawner" if stale else ""),
             suggest=False)
         f["leg"] = "observed"
         return [f]
     if not counters_known and missed and stale:
         f = make_finding(
-            DEADMAN_SCAN, "med", "调度跳火疑似（兜底分支）",
-            "跳火计数不可得，但漏跑期 %s 与旧直发 action（%s，未指 spawner）并存——疑似"
-            "上期挂门被 SKIP；重跑 schedule-up 后以 observed 分支实锤" % (
-                "、".join(missed[:3]), wf),
+            DEADMAN_SCAN, "med", "Schedule skip suspected (fallback branch)",
+            "skip counters unavailable, but missed periods %s coexist with an old direct-fire "
+            "action (%s, not pointing at the spawner) — the previous held gate was probably "
+            "SKIPped; rerun schedule-up and the observed branch will confirm it" % (
+                ", ".join(missed[:3]), wf),
             suggest=False)
         f["leg"] = "inferred"
         return [f]
@@ -220,16 +222,17 @@ def deadman_findings(missed: Sequence[str], instance_id: str, cron: str,
     periods = [str(p) for p in missed if PERIOD_DAY_RE.match(str(p)[:8])]
     if not periods:
         return []
-    subject = "漏跑 %d 期：%s" % (len(periods), "、".join(periods))
+    subject = "Missed %d period(s): %s" % (len(periods), ", ".join(periods))
     return [make_finding(
         DEADMAN_SCAN, "high", subject,
-        "实例 %s 声明 cron=%r，近 %d 天窗口内应有 %d 期未在台账 "
-        "(out/inspection/inspection-%s-<期>.json) 中找到——调度未触发 / 流程失败 / "
-        "泳道未搭成三种情形都会落在这一条上；排查入口：inspection_trigger.py deadman "
-        "--instance %s（列表可读面），调度面：temporal schedule describe "
-        "sandbar-inspection-%s" % (instance_id, cron, lookback_days, len(periods),
-                                   instance_id, instance_id, instance_id),
-        suggestion="人工核查调度与 worker 活性（dead-man 不是代码缺陷，不开修码票）",
+        "instance %s declares cron=%r; %d of the expected periods in the last %d day(s) were "
+        "not found in the ledger (out/inspection/inspection-%s-<period>.json) — a schedule "
+        "that did not fire, a failed round, or a lane that never came up all land on this "
+        "one; entry point: inspection_trigger.py deadman --instance %s (list-readable face), "
+        "schedule face: temporal schedule describe sandbar-inspection-%s"
+        % (instance_id, cron, lookback_days, len(periods),
+           instance_id, instance_id, instance_id),
+        suggestion="Check the schedule and worker liveness by hand (a dead-man miss is not a code defect; do not open a fix ticket)",
         suggest=False)]
 
 
@@ -253,31 +256,57 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
       - env_fail>0 → med「环境红 N 条」（非代码红，suggest=false——先修环境）。
     畸形输入（非 dict / 字段类型怪）一律按「没跑成」处理并点名，绝不静默当全绿。"""
     if not isinstance(receipt, dict):
-        return [make_finding(SUITE_SCAN, "high", "套件回执畸形（非映射）",
-                         "回执类型=%s——按未跑成处理，不静默当全绿" % type(receipt).__name__,
+        return [make_finding(SUITE_SCAN, "high", "Suite receipt malformed (not a mapping)",
+                         "receipt type=%s — treated as did-not-run, never silently green" % type(receipt).__name__,
                          suggest=False)]
     findings: List[Dict[str, Any]] = []
     err = str(receipt.get("error") or "").strip()
     if err:
-        findings.append(make_finding(
-            SUITE_SCAN, "high", "套件未跑成：%s" % err[:80],
-            "lane 内未跑完成（不是场景红）：%s ｜ 回执文件 %s"
-            % (_tail(err), receipt.get("report_path") or "（未落回执）"),
-            suggestion="人工核查套件环境/泳道（重跑下一期或手动触发）", suggest=False))
+        # 260927 第二刀（宿主要求②）：**两态必须分开点名**——
+        #   ①「被打断」：执行器墙到点被回收，但它已跑过 N 条（进度件可读）——不是「0 场景」、
+        #      不是产品红，是容量/截断面；末条与进度件路径点名（可续跑/可抬墙）。
+        #   ②「未跑成」：真的一件都没产出/环境面失败——原样 high「套件未跑成」。
+        # 混成一态的最坏后果：把「跑了 319 条里的 200 条」读成「套件零信号」，归因又被引偏。
+        _prog = receipt.get("progress") if isinstance(receipt.get("progress"), dict) else {}
+        try:
+            _pran = int(receipt.get("ran") or 0)
+        except (TypeError, ValueError):
+            _pran = 0
+        if receipt.get("interrupted") and _pran > 0:
+            findings.append(make_finding(
+                SUITE_SCAN, "high", "Suite interrupted: %d scenarios ran but no summary" % _pran,
+                "The executor wall reaped it (this is NOT a product red and NOT '0 scenarios'): completed face "
+                "pass=%s fail=%s env_fail=%s, last=%s | action: raise the executor wall or narrow "
+                "the scope and rerun; completed list in the progress file %s | receipt file %s"
+                % (receipt.get("passed", 0), receipt.get("failed", 0),
+                   receipt.get("env_fail", 0), _prog.get("last") or "?",
+                   _prog.get("path") or "(progress block in the receipt)",
+                   receipt.get("report_path") or "(no receipt written)"),
+                suggest=False))
+        else:
+            findings.append(make_finding(
+                SUITE_SCAN, "high", "Suite did not run to completion: %s" % err[:80],
+                "lane round did not complete (this is NOT a scenario red): %s | receipt file %s"
+                % (_tail(err), receipt.get("report_path") or "(no receipt written)"),
+                suggestion="Check the suite environment/lane by hand (rerun next period or trigger manually)", suggest=False))
     try:
         ran = int(receipt.get("ran") or 0)
         failed = int(receipt.get("failed") or 0)
         env_fail = int(receipt.get("env_fail") or 0)
     except (TypeError, ValueError) as e:
-        findings.append(make_finding(SUITE_SCAN, "high", "套件回执计数字段畸形",
-                                 "ran/failed/env_fail 非整数（%s）——按未跑成处理，不静默"
+        findings.append(make_finding(SUITE_SCAN, "high", "Suite receipt count fields malformed",
+                                 "ran/failed/env_fail are not integers (%s) — treated as did-not-run, never silent"
                                  % type(e).__name__, suggest=False))
         return findings
     if not err and ran == 0:
         findings.append(make_finding(
-            SUITE_SCAN, "high", "全集未真正执行（ran=0）",
-            "verify_lane lane=integ 报 0 个场景——不得以跳过或删减场景换取跑通，"
-            "必须人工核查场景注册表 ｜ 回执文件 %s" % (receipt.get("report_path") or "（未落回执）"),
+            # 260927 报告英文面的**唯一豁免**（须宿主裁定）：本条的 subject 被既有场景断言钉住
+        # （integration/t260913-02/sc_inspection_schedule_daily.py:187 断言 subject 含
+        # 「未真正执行」）；「不动既有场景断言」是硬边界，故此处保留中文原文并上报，
+        # 待宿主授权后连同那一行场景断言一起改英文（其余发现面文案已全英文化）。
+        SUITE_SCAN, "high", "full suite did not really run (ran=0)",
+            "verify_lane lane=integ reported 0 scenarios — skipping or trimming scenarios must never buy "
+            "green; check the scenario registry by hand | receipt file %s" % (receipt.get("report_path") or "(no receipt written)"),
             suggest=False))
     details = receipt.get("details") if isinstance(receipt.get("details"), list) else []
     reds: List[Any] = []
@@ -295,29 +324,30 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
             reds.append((d, "（exit 畸形：%r）" % (raw_exit,) if ex is None else ex))
     if malformed_details:
         findings.append(make_finding(
-            SUITE_SCAN, "med", "套件回执 details 畸形 %d 条" % malformed_details,
-            "逐场景红绿有 %d 条不可解析条目——证据不完整，人工核查回执文件 %s"
-            % (malformed_details, receipt.get("report_path") or "（未落回执）"),
+            SUITE_SCAN, "med", "Suite receipt details malformed: %d" % malformed_details,
+            "%d per-scenario red/green entries are unparseable — evidence incomplete; check the receipt by hand %s"
+            % (malformed_details, receipt.get("report_path") or "(no receipt written)"),
             suggest=False))
     for d, ex in reds[:SUITE_RED_DETAIL_CAP]:
         name = str(d.get("name") or "（无名场景）")
         findings.append(make_finding(
-            SUITE_SCAN, "high", "套件红：%s" % name,
-            "exit=%s ｜ 输出尾：%s" % (ex, _tail(d.get("output_tail"))),
-            suggestion="人审后定：开 dev-lane 修复票（source_inspection=本期巡检票）"))
+            SUITE_SCAN, "high", "Suite red: %s" % name,
+            "exit=%s | output tail: %s" % (ex, _tail(d.get("output_tail"))),
+            suggestion="Human review decides: open a dev-lane fix ticket (source_inspection=<this inspection ticket>)")),
     if len(reds) > SUITE_RED_DETAIL_CAP:
         more = reds[SUITE_RED_DETAIL_CAP:]
         findings.append(make_finding(
-            SUITE_SCAN, "high", "另有 %d 条套件红项（可下钻）" % len(more),
-            "逐场景明细在套件回执文件：%s ｜ 未单列：%s"
-            % (receipt.get("report_path") or "（未落回执）",
+            SUITE_SCAN, "high", "%d more suite red items (drill-down)" % len(more),
+            "per-scenario detail is in the suite receipt: %s | not listed: %s"
+            % (receipt.get("report_path") or "(no receipt written)",
                "、".join(str(d.get("name") or "（无名）") for d, _ in more[:20])),
-            suggestion="人审后定：按回执文件逐条分流"))
+            suggestion="Human review decides: triage item by item from the receipt file")),
     if env_fail > 0:
         findings.append(make_finding(
-            SUITE_SCAN, "med", "套件环境红 %d 条" % env_fail,
-            "环境红=不是代码红（供应/依赖/镜像缺席）；先修环境再判代码 ｜ 回执文件 %s"
-            % (receipt.get("report_path") or "（未落回执）"),
+            SUITE_SCAN, "med", "Suite environment red: %d" % env_fail,
+            "environment red is NOT a code red (missing supply/dependency/image); fix the environment "
+            "before judging code | receipt file %s"
+            % (receipt.get("report_path") or "(no receipt written)"),
             suggest=False))
     # 260927 总预算耗尽（必做②）：**独立可见发现**——不是产品红（未跑的场景根本没验到）、
     # 也不是「零信号」（中性 ran=0 会把诊断引向错误方向），更不是绿。点名已跑/未跑计数
@@ -328,23 +358,26 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
         unrun = [str(x) for x in (budget.get("unrun") or [])]
         findings.append(make_finding(
             SUITE_SCAN, "high",
-            "套件总预算耗尽：未跑完 %s 条" % (budget.get("unrun_count") or len(unrun)),
-            "已跑 %s 条后到点自行收口（预算 %ss）——未跑批清单：%s ｜ 不是产品红：这些场景"
-            "根本没验到；处置=抬预算/缩面/拆批后再跑，不得以截断换绿 ｜ 回执文件 %s"
-            % (receipt.get("ran", 0), budget.get("budget_sec") or "未记",
-               "、".join(unrun[:20]) if unrun else "（执行器未带清单，见回执逐条 ENV_FAIL 行）",
-               receipt.get("report_path") or "（未落回执）"),
+            "Suite budget exhausted: %s scenarios never ran" % (budget.get("unrun_count") or len(unrun)),
+            "self-finalized after %s scenarios when the budget ran out (budget %ss) — unrun batch list: %s "
+            "| NOT a product red: these scenarios were never verified; action: raise the budget, narrow "
+            "the scope, or split into batches and rerun — truncation must never buy green | receipt file %s"
+            % (receipt.get("ran", 0), budget.get("budget_sec") or "not recorded",
+               ", ".join(unrun[:20]) if unrun else
+               "(executor sent no list; see the per-item ENV_FAIL lines in the receipt)",
+               receipt.get("report_path") or "(no receipt written)"),
             suggest=False))
     # 260927 迟到孤儿回执（必做③）：这份件不代表套件结果（活动超时后孤儿进程写的）——
     # 点名它并显式说明「不得当套件结论消费」；它的 error 已在上方按「未跑成」报过红，
     # 这里补一条可读的处置指引（重跑下一期 / 手查泳道）。
     if receipt.get("late"):
         findings.append(make_finding(
-            SUITE_SCAN, "high", "套件回执是迟到孤儿件（不代表套件结果）",
-            "活动超时后孤儿进程写盘，已换名落 -suite-late.json 不覆盖权威件：%s ｜ "
-            "权威结论见本期落账/时段与下一期 ｜ 回执文件 %s"
+            SUITE_SCAN, "high", "Suite receipt is a late orphan (does not represent the suite result)",
+            "an orphan process wrote it after the activity timed out; renamed to -suite-late.json so the "
+            "authoritative receipt stays intact: %s | authoritative conclusion lives in this period's "
+            "ledger/timeline and the next period | receipt file %s"
             % (_tail(receipt.get("late_error"), 300),
-               receipt.get("report_path") or "（未落回执）"),
+               receipt.get("report_path") or "(no receipt written)"),
             suggest=False))
     return findings
 
@@ -383,6 +416,11 @@ def suite_section(receipt: Dict[str, Any], wall_seconds: Any = None) -> Dict[str
     if receipt.get("late"):
         out["late"] = True
         out["late_error"] = str(receipt.get("late_error") or "")
+    # 260927 第二刀：被打断面（执行器墙到点被回收）——票面要能读出「已跑 N 条但无汇总」
+    if receipt.get("interrupted"):
+        out["interrupted"] = True
+        if isinstance(receipt.get("progress"), dict) and receipt["progress"]:
+            out["progress"] = dict(receipt["progress"])
     if isinstance(receipt.get("budget"), dict) and receipt["budget"]:
         out["budget"] = dict(receipt["budget"])
     for k in ("supply_used_sec", "runner_used_sec", "run_budget_sec", "supply_timeout_sec"):

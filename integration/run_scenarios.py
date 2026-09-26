@@ -2414,11 +2414,19 @@ def batch_teardown():
               % (p.returncode, ((p.stdout or "") + (p.stderr or ""))[-300:]), flush=True)
 
 
+#: 信号路径的进度句柄（main 建好即挂——信号处理函数是模块级，拿不到闭包）
+_SIGNAL_PROGRESS = [None]
+
+
 def _batch_signal_teardown(signum, frame):
     """信号路径（SIGINT/SIGTERM，t260921-06 全终态收口段）：批台就地 down 后快速退
     （os._exit——执行器已无完整结果，半轮=诚实中断；在飞场景子进程由自身超时/管道
     断开兜底，批台 zero-residue 由本 down 保证）。"""
     print("batch-stage: 收到信号 %s——批台就地收口后退出" % signum, flush=True)
+    try:
+        _SIGNAL_PROGRESS[0].flush()        # 被打断也保留已完成面（验道据此点名「已跑 N 条」）
+    except Exception:                      # noqa: BLE001——观测面不拦收口
+        pass
     batch_teardown()
     os._exit(130)
 
@@ -2432,6 +2440,49 @@ def _batch_signal_teardown(signum, frame):
 #: 总预算 env（引擎侧 = inspection_flow.SUITE_RUN_BUDGET_SEC 派生，经活动载荷下发）。
 #: 缺省/畸形/非正 = 不启用（每票集测段与历史手跑逐字节零改动）。
 RUN_BUDGET_ENV = "SANDBAR_INTEG_RUN_BUDGET_SEC"
+#: 进度件 env（260927 第二刀）：引擎下单 → 验道读 / 执行器写，**同一路径三方同源**。
+#: 执行器每完成一条就把已完成面原子落盘；验道被自己的执行器墙打断时据此把
+#: 「已跑 N 条但无汇总」与「未产出任何结果」分开点名（禁止裸 ran=0）。
+PROGRESS_ENV = "SANDBAR_INTEG_PROGRESS_JSON"
+#: 进度落盘节流（秒）：逐条写但最多每秒一次（319 条不至于拖慢跑面）；收口/中断路径强制 flush。
+PROGRESS_MIN_INTERVAL_S = 1.0
+
+
+class _Progress:
+    """跑者进度件（atomic 写：tmp + os.replace，读写两侧永不见半截 JSON）。
+
+    写入节流到 PROGRESS_MIN_INTERVAL_S；flush() 强制落盘（收口/预算耗尽/信号路径）。
+    任何写失败都只留痕不抛——**进度面是观测面，绝不因它把套件跑挂**（同报告落档纪律）。"""
+
+    def __init__(self, path, budget_sec=0.0):
+        self.path = str(path or "")
+        self.budget_sec = float(budget_sec or 0.0)
+        self.state = {"ran": 0, "pass": 0, "fail": 0, "env_fail": 0,
+                      "done": [], "last": "", "budget_sec": self.budget_sec,
+                      "started": datetime.datetime.now().isoformat(timespec="seconds")}
+        self._last_write = 0.0
+
+    def note(self, name, ran, passed, failed, env_failed):
+        self.state.update({"ran": ran, "pass": passed, "fail": failed,
+                           "env_fail": env_failed, "last": str(name)})
+        self.state["done"].append(str(name))
+        if time.monotonic() - self._last_write >= PROGRESS_MIN_INTERVAL_S:
+            self.flush()
+
+    def flush(self):
+        if not self.path:
+            return
+        self._last_write = time.monotonic()
+        self.state["updated"] = datetime.datetime.now().isoformat(timespec="seconds")
+        tmp = self.path + ".tmp"
+        try:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(self.state, fh, ensure_ascii=False)
+            os.replace(tmp, self.path)          # 原子替换：读者永不读到半截
+        except OSError as e:
+            print("PROGRESS_WARN 进度件落盘失败（观测面，不拦跑面）：%s: %s"
+                  % (type(e).__name__, e), flush=True)
 
 
 def parse_run_budget(raw):
@@ -2462,7 +2513,7 @@ def _fmt_left(left):
 
 
 def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_failed,
-                           wall, expected, prelude_s=0.0):
+                           wall, expected, prelude_s=0.0, progress=None):
     """总预算耗尽收口（260927）：点名「跑了几条/还剩哪些没跑」后**立刻退出**。
 
     为什么是 os._exit 而不是正常返回：预算耗尽意味着外层截止近在眼前，而存活池线程
@@ -2483,6 +2534,8 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
     「清单残缺」伪红，也不让未跑的条目冒充已跑（明细行逐条点名它的名字与原因）。
     「**已跑**」在文案里只算到点前真正开跑的那些（ran 计入未跑条目之后 print 会撒谎）。"""
     executed = int(ran)                     # 到点时真正跑完的条数（未跑条**不计入此数**）
+    if progress is not None:
+        progress.flush()                    # 收口前把已完成面钉死（进度件与收口面同口径）
     env_failed += len(run_unrun)
     ran += len(run_unrun)
     print("FAIL [__budget__] 总预算耗尽（%ds）：已跑 %d/%d 条、未跑 %d 条——"
@@ -2501,6 +2554,7 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
              "wall_s": round(wall, 1), "expected": expected,
              "timings": {"prelude_s": round(float(prelude_s), 1),
                          "scenarios_s": round(max(0.0, wall - float(prelude_s)), 1)},
+             "budget_env": "present",
              "budget": {"exhausted": True, "budget_sec": int(budget),
                         "executed": executed, "unrun_count": len(run_unrun),
                         "unrun": [n for n, _p in run_unrun][:200]}},
@@ -2567,6 +2621,11 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     t_mono = time.monotonic()
     #: 预算耗尽时**未开跑**的条目（name, pool），收口面逐条点名（必做②「未跑批清单」）。
     run_unrun = []
+    # 260927 第二刀：进度件（env 缺席=空路径=零落盘零分支；每完成一条原子写已完成面）。
+    # 验道被自己的执行器墙打断时据此说「已跑 N 条但无汇总」，不再是一句裸 ran=0。
+    progress = _Progress(os.environ.get(PROGRESS_ENV), run_budget)
+    _SIGNAL_PROGRESS[0] = progress          # 信号路径也要能 flush 这份已完成面
+    progress.flush()          # 起跑即落一份（ran=0 的显式起点，与「文件压根没有」可辨）
     if run_budget > 0:
         print("INTEG_BUDGET 总预算 %ds 生效（%s）：到点自行收口并点名已跑/未跑，"
               "不等外层硬杀" % (int(run_budget), RUN_BUDGET_ENV), flush=True)
@@ -2732,6 +2791,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
                             # tail 只进 stdout 即弃，报告对 FAIL 无败因可读，仲裁轮
                             # 只能盲跑复现。PASS 不存（体积与隐私面，绿的无须读）。
                             **({} if exit_code == 0 else {"tail": tail_out[-1200:]})})
+            progress.note(name, ran, passed, failed, env_failed)
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
@@ -2748,7 +2808,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
               "本轮零场景开跑（%s）" % _fmt_left(_prelude_left), flush=True)
         _budget_exhausted_exit(t_mono, run_budget, run_unrun, ran, passed, failed,
                                env_failed, time.time() - t0, len(registry),
-                               prelude_s=time.time() - _pre_t0)
+                               prelude_s=time.time() - _pre_t0, progress=progress)
     # ---- t260921-06 批台预起（清扫后、场景前）：恰一批消费者轮=恰起 1 个批台 ----
     selected = list(exclusives) + [e for _lst in pools.values() for (e, _s) in _lst]
     consumers = batch_consumers(selected)
@@ -2815,7 +2875,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         wall_b = time.time() - t0
         _budget_exhausted_exit(t_mono, run_budget, run_unrun, ran, passed, failed,
                                env_failed, wall_b, expected_b,
-                               prelude_s=_prelude_s)
+                               prelude_s=_prelude_s, progress=progress)
     if _left_now is not None and _left_now <= 0:
         # 越窗（**不是**「没跑完」）：全部条目都跑了，只是墙钟越过了预算——观测面点名
         # （additive 行，绝不改判红绿：跑完且全绿就是绿）。与「耗尽」严格分流：混成一个
@@ -2871,6 +2931,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         _summary = {
             "ran": _ran, "pass": _p, "fail": _f,
             "not_checked": _nc, "wall_s": round(wall, 1),
+            # 1③（宿主令）：预算 env 到没到岗**显式可见**（additive；缺省语义不变）——
+            # 「env 缺席静默不启用」正是混版本难查的根：现在一行可判。
+            "budget_env": "present" if run_budget > 0 else "absent",
             "concurrency": conc_width,
             "pool_config": ",".join(sorted("%s:%s" % kv for kv in conc_pools.items())),
             "env_fingerprint": _fpv["value"],

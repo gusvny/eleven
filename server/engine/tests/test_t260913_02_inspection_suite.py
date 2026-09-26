@@ -336,7 +336,8 @@ def test_face_suite_red_and_extras_recount_and_kill_heartbeat():
     assert face["summary"]["high"] == 3          # 两条套件红 + 一条漏跑
     # 漏跑条不进开票建议（suggest=false）；套件红条进（人审后定）
     titles = " ".join(s["title"] for s in face["suggested_fix_tickets"])
-    assert "套件红" in titles and "漏跑" not in titles
+    # 260927 报告英文面（宿主令）：发现标题改英文——断言 re-point 到英文同义标题
+    assert "Suite red" in titles and "Missed" not in titles
     assert all(s["source_inspection"] == "t" for s in face["suggested_fix_tickets"])
 
 

@@ -184,7 +184,7 @@ def main() -> int:
     zero = dict(red_receipt, ran=0, passed=0, failed=0, details=[])
     f_zero = dm.suite_findings(zero)
     r.check("C6c ran=0 也告警（红线：不得以跳过/删减场景换取跑通）",
-            any(f.get("severity") == "high" and "未真正执行" in str(f.get("subject"))
+            any(f.get("severity") == "high" and "did not really run" in str(f.get("subject"))
                 for f in f_zero), "%r" % f_zero)
     envonly = dict(red_receipt, ran=3, passed=0, failed=0, env_fail=3, details=[])
     f_env = dm.suite_findings(envonly)

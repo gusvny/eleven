@@ -85,6 +85,25 @@ def test_suite_run_budget_from_single_source():
     assert flow.suite_run_budget_sec() == flow.SUITE_RUN_BUDGET_SEC
 
 
+def test_inspection_exec_wall_layer_260927b():
+    """260927 第二刀（宿主实测校准，t260928-01 `场景执行器整体超时（>3000s）`）：
+    巡检链的**执行器墙**必须自成一档、显式派生，且四层同源有界——
+      BATCH_TIMEOUT_SEC(3000) ≤ 执行器墙(6000) < 跑者总预算(6600) < SUITE_TO(10800)
+    外加两条「不许把点名收口变回硬杀」的次序不等式。旧断言只加不减（本函数是新增）。"""
+    exec_to = aa.inspect_integ_exec_timeout_sec()
+    cutoff = aa.inspection_runner_cutoff(exec_to, flow.SUITE_RUN_BUDGET_SEC)
+    chain = aa.inspection_chain_timeout(exec_to, flow.INTEG_SUPPLY_TO_SEC)
+    suite_to = flow.SUITE_TO.total_seconds()
+    assert aa.BATCH_TIMEOUT_SEC <= exec_to < flow.SUITE_RUN_BUDGET_SEC < suite_to, \
+        (aa.BATCH_TIMEOUT_SEC, exec_to, flow.SUITE_RUN_BUDGET_SEC, suite_to)
+    assert exec_to >= 5400 and cutoff >= 5400, (exec_to, cutoff)
+    assert cutoff < exec_to, (cutoff, exec_to)          # 跑者先自行收口，执行器墙兜底
+    assert chain < suite_to, (chain, suite_to)          # 链不越活动超时
+    assert aa.INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC >= 5400
+    # 每票集测段逐字回落旧值（链=内层守卫；payload 由活动侧钉 BATCH_TIMEOUT_SEC）
+    assert aa._inspection_gate_timeout(0.0, 0.0) == float(aa.INTEG_GUARD_SEC)
+
+
 def test_inspection_chain_and_gate_outlive_runner_budget():
     """跑者必须**先于**闸内截止与活动超时收口（否则「点名收口」又变成「硬杀」）：
       跑者总预算 < 子进程链截止 < SUITE_TO；跑者总预算 < 闸内截止 ≤ SUITE_TO。

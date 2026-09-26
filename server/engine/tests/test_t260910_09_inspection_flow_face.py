@@ -148,7 +148,8 @@ def test_build_ticket_face_heartbeat_zero_finding_semantics():
     face = build_ticket_face("inspection-simplify-face-20260910", "simplify-face",
                              "20260910", result)
     assert face["heartbeat"] is True
-    assert "心跳" in face["heartbeat_note"]
+    # 260927 报告英文面（宿主令）：心跳文案改英文——断言 re-point 到英文同义措辞（意图不变）
+    assert "heartbeat" in face["heartbeat_note"].lower()
     assert face["suggested_fix_tickets"] == []
 
 

@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import sys
+import sys as _sys
 
 import pytest
 
@@ -82,13 +83,14 @@ def test_budget_receipt_becomes_named_finding_and_face_section():
         "report_path": "/out/inspection/inspection-x-20260927-suite.json",
     }
     findings = deadman.suite_findings(receipt)
-    budget_findings = [f for f in findings if "总预算耗尽" in str(f.get("subject", ""))]
+    budget_findings = [f for f in findings
+                       if "budget exhausted" in str(f.get("subject", "")).lower()]
     assert len(budget_findings) == 1, [f.get("subject") for f in findings]
     f = budget_findings[0]
     assert f["severity"] == "high"
     assert f["suggest"] is False          # 容量/预算面，开「修码票」是错配
-    assert "未跑批清单" in f["evidence"] and "b-scenario" in f["evidence"]
-    assert "不是产品红" in f["evidence"]
+    assert "unrun batch list" in f["evidence"] and "b-scenario" in f["evidence"]
+    assert "NOT a product red" in f["evidence"]
     # 票面段（face["suite"]）透出预算块与两笔分相墙钟（缺键不乱造）
     section = deadman.suite_section(receipt)
     assert section["budget"]["unrun_count"] == 318
@@ -97,7 +99,8 @@ def test_budget_receipt_becomes_named_finding_and_face_section():
     # 反向自证：没有 budget 键的旧回执**零新键**（老路径逐字节不变）
     old = {k: v for k, v in receipt.items() if k != "budget"}
     assert "budget" not in deadman.suite_section(old)
-    assert not [x for x in deadman.suite_findings(old) if "总预算耗尽" in str(x.get("subject"))]
+    assert not [x for x in deadman.suite_findings(old)
+                if "budget exhausted" in str(x.get("subject")).lower()]
 
 
 def test_runner_self_cuts_off_at_total_budget(tmp_path, monkeypatch):
@@ -163,6 +166,58 @@ def test_runner_self_cuts_off_at_total_budget(tmp_path, monkeypatch):
     assert set(face.get("unrun") or []) == {"zzz-a", "zzz-b", "zzz-c"}, face
 
 
+def test_suite_activity_end_to_end_writes_receipt_with_budget_plan(tmp_path, monkeypatch):
+    """端到端（真活动函数 + 假 admin 子进程）：`run_inspection_suite` **必须**写得出回执，
+    且回执带 budget_plan 四层数字 + 代码身份（worker_module_mtime）。
+
+    这条锁是被**活体自查找出的两个真 bug** 立的（单测此前只覆盖 `_run_scenarios`）：
+      ①`budget_plan` 引用了 `_run_scenarios` 的局部变量 → NameError，回执缺整个计划面；
+      ②回执落盘把 `now_fn` 传成 None → 'NoneType' object is not callable，**回执整份写不出**
+        （每轮巡检都丢权威件）。两者都只在真活动路径现形。
+    """
+    import asyncio
+    import inspect as _inspect
+    lane = tmp_path / "lane"
+    (lane / "server").mkdir(parents=True)
+    monkeypatch.setenv("SANDBAR_INSPECTION_DIR", str(tmp_path / "out"))
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def _fake_create(*argv, **kw):
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+    out = asyncio.run(aa.run_inspection_suite({
+        "ticket_id": "t260927-01", "worktree": str(lane),
+        "instance_id": "integration-tests", "period": "20260928", "base_ref": "abc",
+        "run_budget_sec": flow.SUITE_RUN_BUDGET_SEC,
+        "supply_timeout_sec": flow.INTEG_SUPPLY_TO_SEC,
+        "suite_timeout_sec": flow.SUITE_TO.total_seconds()}))
+    r = out["result"]
+    assert out["ok"] is True
+    assert not r.get("receipt_error"), r.get("receipt_error")     # 落盘不失败（bug②）
+    assert r.get("report_path"), "权威回执没落盘"
+    doc = json.loads(open(r["report_path"], encoding="utf-8").read())
+    plan = doc.get("budget_plan") or {}
+    assert not plan.get("error"), plan                            # 计划面无异常（bug①）
+    assert plan["exec_timeout_sec"] == int(aa.inspect_integ_exec_timeout_sec())
+    assert plan["runner_cutoff_sec"] == int(aa.inspection_runner_cutoff(
+        aa.inspect_integ_exec_timeout_sec(), flow.SUITE_RUN_BUDGET_SEC))
+    assert plan["supply_timeout_sec"] == int(flow.INTEG_SUPPLY_TO_SEC)
+    assert plan["chain_timeout_sec"] == int(aa.inspection_chain_timeout(
+        aa.inspect_integ_exec_timeout_sec(), flow.INTEG_SUPPLY_TO_SEC))
+    assert plan["suite_to_sec"] == int(flow.SUITE_TO.total_seconds())
+    assert plan["worker_module_mtime"], "代码身份证人缺席（未重启 worker 时无从判版本）"
+    assert doc["chain_gate_sec"] == plan["chain_timeout_sec"]
+    # 落盘必须显式传可调用 now_fn（不许 None——那是让整份回执写不出的形态）
+    src = _inspect.getsource(aa.run_inspection_suite)
+    assert "INSPECTION_DIR, time.time, " in src
+
+
 def test_runner_budget_faces_are_single_source():
     """跨模块单源锁：执行器的预算标记串 / env 键 / 闸的解析前缀 / 引擎的下发 env 四处
     必须同串——改一侧不改另一侧，就是下一次「预算耗尽读不出来」。"""
@@ -177,6 +232,9 @@ def test_runner_budget_faces_are_single_source():
     # 供给预算 env 同款单源（闸读 / 引擎下发）
     assert vl.SUPPLY_TIMEOUT_ENV in open(
         os.path.join(ENGINE, "agent_activities.py"), encoding="utf-8").read()
+    # 进度件 env：三方（闸 / 引擎 / 执行器）同一串——路径不一致=读不到已完成面
+    assert vl.PROGRESS_ENV == aa.SANDBAR_INTEG_PROGRESS_ENV == rs.PROGRESS_ENV, \
+        (vl.PROGRESS_ENV, aa.SANDBAR_INTEG_PROGRESS_ENV, rs.PROGRESS_ENV)
     # 预算解析纯函数：缺省/畸形/非正 → 0（不启用），正数原样
     assert rs.parse_run_budget(None) == 0.0
     assert rs.parse_run_budget("") == 0.0
@@ -185,6 +243,313 @@ def test_runner_budget_faces_are_single_source():
     assert rs.parse_run_budget("-5") == 0.0
     assert rs.parse_run_budget("5400") == 5400.0
 
+
+
+# ========================================================================================
+# ①b 执行器专属墙（260927 第二刀，宿主实测校准）
+# ========================================================================================
+
+def test_inspection_exec_timeout_is_derived_and_bounded():
+    """宿主实测（t260928-01：`场景执行器整体超时（>3000s）` wall=3003.3s）→ 巡检链要有
+    **专属执行器墙**：缺省 ≥5400（实测 2630s 的 2× 量级）、自成一档、且与既有预算成对：
+      BATCH_TIMEOUT_SEC(3000) ≤ 执行器超时(6000) < 跑者总预算(6600) < SUITE_TO(10800)
+    另两条（跑者自收口早于执行器墙 / 链不越活动超时）也必须成立——否则「点名收口」
+    又变回「硬杀」。
+    """
+    exec_to = aa.inspect_integ_exec_timeout_sec()
+    cutoff = aa.inspection_runner_cutoff(exec_to, flow.SUITE_RUN_BUDGET_SEC)
+    chain = aa.inspection_chain_timeout(exec_to, flow.INTEG_SUPPLY_TO_SEC)
+    suite_to = flow.SUITE_TO.total_seconds()
+    assert aa.BATCH_TIMEOUT_SEC <= exec_to, (aa.BATCH_TIMEOUT_SEC, exec_to)
+    assert exec_to >= 5400, exec_to                                  # 宿主下限
+    assert exec_to < flow.SUITE_RUN_BUDGET_SEC < suite_to, \
+        (exec_to, flow.SUITE_RUN_BUDGET_SEC, suite_to)
+    assert cutoff < exec_to, (cutoff, exec_to)                       # 跑者先自行收口，再被墙兜底
+    assert cutoff >= 5400, cutoff                                    # 跑者实得墙钟不缩水
+    assert chain < suite_to, (chain, suite_to)                       # 链不越活动超时
+    assert cutoff <= flow.SUITE_RUN_BUDGET_SEC                       # 收口点不超活动级预算
+    # 每票集测段（缺省 0）：链截止逐字回落内层守卫
+    assert aa._inspection_gate_timeout(0.0, 0.0) == float(aa.INTEG_GUARD_SEC)
+
+
+def test_inspection_exec_timeout_env_and_chain_clamp(monkeypatch):
+    """env 可覆盖执行器墙（运维契约面；畸形/非正/空白回落缺省=不静默猜 0）；活动侧链截止
+    被活动超时 SUITE_TO 夹紧（env 抬过头也不许越过硬上界）。"""
+    import inspect as _inspect
+    assert aa.INSPECT_INTEG_EXEC_TIMEOUT_ENV == "SANDBAR_INSPECT_INTEG_EXEC_TIMEOUT_SEC"
+    assert aa.INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC >= 5400
+    monkeypatch.delenv(aa.INSPECT_INTEG_EXEC_TIMEOUT_ENV, raising=False)
+    assert aa.inspect_integ_exec_timeout_sec() == aa.INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC
+    monkeypatch.setenv(aa.INSPECT_INTEG_EXEC_TIMEOUT_ENV, "7200")
+    assert aa.inspect_integ_exec_timeout_sec() == 7200.0
+    for bad in ("abc", "0", "-9", "   "):
+        monkeypatch.setenv(aa.INSPECT_INTEG_EXEC_TIMEOUT_ENV, bad)
+        assert aa.inspect_integ_exec_timeout_sec() == \
+            aa.INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC, bad   # 畸形不静默猜 0
+    monkeypatch.delenv(aa.INSPECT_INTEG_EXEC_TIMEOUT_ENV, raising=False)
+    # 链夹紧：env 把执行器墙抬到活动超时之上时，链截止仍 ≤ SUITE_TO
+    body = _inspect.getsource(aa._run_scenarios)
+    assert "_chain_to = min(_chain_to" in body, "链截止未被 SUITE_TO 夹紧=env 抬过头就硬杀"
+
+
+def test_payload_carries_exec_wall_cutoff_and_progress(tmp_path, monkeypatch):
+    """接线锁（端到端缝，假 admin.py 回显下单面）：巡检轮把**执行器墙**放进
+    `integ_timeout_sec` 载荷、把**跑者收口点**与**进度件路径**放进 env；每票集测段
+    逐字回落旧值（payload=BATCH_TIMEOUT_SEC、无预算/进度 env）。"""
+    import asyncio
+    lane = tmp_path / "lane"
+    (lane / "server").mkdir(parents=True)
+    seen = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def _fake_create(*argv, **kw):
+        seen["payload"] = json.loads(argv[-1])
+        seen["env"] = {k: v for k, v in (kw.get("env") or {}).items()
+                       if k.startswith("SANDBAR_INTEG") or k.startswith("SANDBAR_SUPPLY")}
+        return _Proc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+    asyncio.run(aa._run_scenarios(lane, "t260927-01", ledger_source="inspection",
+                                  run_budget_sec=flow.SUITE_RUN_BUDGET_SEC,
+                                  supply_timeout_sec=flow.INTEG_SUPPLY_TO_SEC))
+    exec_to = aa.inspect_integ_exec_timeout_sec()
+    assert seen["payload"]["integ_timeout_sec"] == int(exec_to)
+    assert int(seen["env"]["SANDBAR_INTEG_RUN_BUDGET_SEC"]) == \
+        int(aa.inspection_runner_cutoff(exec_to, flow.SUITE_RUN_BUDGET_SEC))
+    assert seen["env"][aa.SANDBAR_INTEG_PROGRESS_ENV].endswith("integ-progress.json")
+    assert int(seen["env"]["SANDBAR_SUPPLY_TIMEOUT_SEC"]) == int(flow.INTEG_SUPPLY_TO_SEC)
+    seen.clear()
+    asyncio.run(aa._run_scenarios(lane, "t260927-01", ledger_source="lane:t260927-01"))
+    assert seen["payload"]["integ_timeout_sec"] == aa.BATCH_TIMEOUT_SEC
+    assert "SANDBAR_INTEG_RUN_BUDGET_SEC" not in seen["env"]
+    assert aa.SANDBAR_INTEG_PROGRESS_ENV not in seen["env"]
+
+
+def test_interrupted_and_unproduced_are_named_separately(tmp_path):
+    """宿主要求②：执行器被打断的两态**分开点名**（禁止裸 ran=0）——
+    ①「已跑 N 条但无汇总」（进度件可读）；②「未产出任何结果」。
+    两态在「验道读点 / 回执 / 发现清单 / 票面段」四处都可辨。"""
+    import inspect as _inspect
+    import verify_lane as vl
+    prog = str(tmp_path / "integ-progress.json")
+    with open(prog, "w", encoding="utf-8") as fh:
+        json.dump({"ran": 12, "pass": 10, "fail": 2, "env_fail": 0,
+                   "last": "t260927-x", "done": ["s%d" % i for i in range(12)]}, fh)
+    got = vl._read_runner_progress(prog)
+    assert got["ran"] == 12 and got["last"] == "t260927-x"
+    # 缺失/畸形/零条目 → {}（=「未产出任何结果」，绝不伪造 ran=0 把被打断说成 0 场景）
+    assert vl._read_runner_progress("") == {}
+    assert vl._read_runner_progress(str(tmp_path / "nope.json")) == {}
+    with open(prog, "w", encoding="utf-8") as fh:
+        fh.write("{half json")
+    assert vl._read_runner_progress(prog) == {}
+    with open(prog, "w", encoding="utf-8") as fh:
+        json.dump({"ran": 0, "done": []}, fh)
+    assert vl._read_runner_progress(prog) == {}
+    # 发现清单两态
+    f_int = deadman.suite_findings({"error": "场景执行器整体超时（>6000s）：已跑 12 条但无汇总",
+                                    "ran": 12, "passed": 10, "failed": 2, "env_fail": 0,
+                                    "interrupted": True,
+                                    "progress": {"last": "t260927-x", "path": "/x/prog.json"},
+                                    "details": []})
+    subj_int = [str(f["subject"]) for f in f_int]
+    assert any("interrupted" in s.lower() and "12" in s for s in subj_int), subj_int
+    assert not any("did not run to completion" in s for s in subj_int), subj_int
+    f_bare = deadman.suite_findings({"error": "verify_lane integ 无有效输出（exit=1）",
+                                     "ran": 0, "details": []})
+    subj_bare = [str(f["subject"]) for f in f_bare]
+    assert any("did not run to completion" in s for s in subj_bare), subj_bare
+    assert not any("interrupted" in s.lower() for s in subj_bare), subj_bare
+    # 票面段带 interrupted/progress（可下钻）
+    sec = deadman.suite_section({"error": "x", "ran": 12, "interrupted": True,
+                                 "progress": {"last": "t260927-x"}})
+    assert sec["interrupted"] is True and sec["progress"]["last"] == "t260927-x"
+    # 活动侧：验道 err 路径也把已完成面带上（不再把 ran 丢成 0）
+    src = _inspect.getsource(aa._run_scenarios)
+    assert "out_err = IntegrationRunResult(warnings=list(_warnings), error=_err, ran=_n" in src
+    assert "interrupted=True" in src
+    assert "read_integ_progress" in src
+
+
+# ========================================================================================
+# ①c 宿主追加三项：超时部分输出 / 混版本接缝 WARN / budget_env 可见 + 报告英文面
+# ========================================================================================
+
+def test_executor_timeout_keeps_partial_output_and_reaps_group(tmp_path, monkeypatch):
+    """1①（宿主 finding①）：执行器超时**必须**取回部分输出并解析已完成的规范行/
+    `INTEG_BUDGET` 标记（`partial=true` + `runner_used_sec` 点名），且用 Popen+进程组
+    回收（裸 kill 会漏孙进程）。两态（有进度 / 无进度）分开点名。"""
+    import inspect as _inspect
+    import subprocess as _sp
+    import verify_lane as vl
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    (lane / "verify.yaml").write_text(
+        "schema: v1\nlanes:\n  code:\n    write_allow:\n      - src/\n"
+        "integration:\n  cmd: sleep 30\n", "utf-8")
+    src = _inspect.getsource(vl._integ)
+    assert "subprocess.Popen(" in src, "执行器未走 Popen=超时拿不到部分输出"
+    assert "os.killpg(os.getpgid(proc.pid)" in src, "超时未按进程组回收（孙进程会漏）"
+    assert "partial" in src and "stdout_tail" in src
+    # 态①：进度件有内容 → ran=N + interrupted/partial 双键 + runner_used_sec 在场
+    prog = lane / "out" / "integ-progress.json"
+    prog.parent.mkdir(parents=True, exist_ok=True)
+    prog.write_text(json.dumps({"ran": 7, "pass": 6, "fail": 1, "env_fail": 0,
+                                "last": "sc-7", "done": ["x"] * 7}), "utf-8")
+    monkeypatch.setenv(vl.PROGRESS_ENV, str(prog))
+    r1 = vl._integ({"lane": "integ", "path": str(lane), "integ_timeout_sec": 2})
+    assert r1["interrupted"] is True and r1["partial"] is True
+    assert r1["ran"] == 7 and r1["pass"] == 6 and r1["fail"] == 1
+    assert isinstance(r1["runner_used_sec"], float) and r1["runner_used_sec"] >= 0
+    assert "ran but there is no summary" in r1["err"] and r1["progress"]["last"] == "sc-7"
+    assert r1["green"] is False
+    # 态②：进度件缺席/零条目 → 「未产出任何场景结果」（真零），ran=0 且**点名不是绿**
+    prog.unlink()
+    r2 = vl._integ({"lane": "integ", "path": str(lane), "integ_timeout_sec": 2})
+    assert r2["ran"] == 0 and r2["interrupted"] is True
+    assert "no scenario results at all" in r2["err"] and 'NOT "0 scenarios green"' in r2["err"]
+    # 部分输出里已完成的规范行也要进回执（stdout_tail + scenarios）
+    assert "stdout_tail" in r2 and "scenarios" in r2
+
+
+def test_mixed_version_seam_warns_and_never_pretends(tmp_path, monkeypatch):
+    """1②（宿主 finding②）：巡检形态（台账来源=inspection）却**两个预算面都缺**时，
+    闸侧必须落**显式 WARN 进回执**（`warnings`），不静默回落 3000 硬杀；
+    worker 侧选中**不认预算键的泳道旧副本**时同样响亮 WARN（不假装认得）。"""
+    import verify_lane as vl
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    (lane / "verify.yaml").write_text(
+        "schema: v1\nlanes:\n  code:\n    write_allow:\n      - src/\n"
+        "integration:\n  cmd: true\n", "utf-8")
+    monkeypatch.setenv("SANDBAR_INTEG_LEDGER_SOURCE", "inspection")
+    monkeypatch.delenv(vl.INTEG_TIMEOUT_ENV, raising=False)
+    monkeypatch.delenv("SANDBAR_INTEG_RUN_BUDGET_SEC", raising=False)
+    r = vl._integ({"lane": "integ", "path": str(lane)})      # 巡检形态 + 无任何预算面
+    assert r.get("warnings"), "混版本接缝没有 WARN（静默回落 3000 会再演 t260928-01）"
+    assert "mixed-version seam" in r["warnings"][0]
+    # 给了执行器墙（或预算 env）→ 不再是混版本，WARN 不出现
+    r2 = vl._integ({"lane": "integ", "path": str(lane), "integ_timeout_sec": 60})
+    assert not r2.get("warnings")
+    monkeypatch.setenv("SANDBAR_INTEG_RUN_BUDGET_SEC", "600")
+    r3 = vl._integ({"lane": "integ", "path": str(lane)})
+    assert not r3.get("warnings")
+    monkeypatch.delenv("SANDBAR_INTEG_RUN_BUDGET_SEC", raising=False)
+    # 非巡检形态（每票集测）零 WARN——缺省语义逐字不变
+    monkeypatch.setenv("SANDBAR_INTEG_LEDGER_SOURCE", "lane:t260927-01")
+    assert not vl._integ({"lane": "integ", "path": str(lane)}).get("warnings")
+    # worker 侧：泳道旧副本不认预算键 → WARN（不假装认得）
+    stale_lane = tmp_path / "stale"
+    (stale_lane / "server" / "tools").mkdir(parents=True)
+    (stale_lane / "server" / "admin.py").write_text("# stub", "utf-8")
+    (stale_lane / "server" / "tools" / "verify_lane.py").write_text(
+        "# pre-fix copy: no budget awareness\n", "utf-8")
+    assert aa.lane_verify_lane_stale(stale_lane, stale_lane / "server" / "admin.py") is True
+    # 新副本（含标记）→ 不判陈旧（不制造假 WARN）
+    (stale_lane / "server" / "tools" / "verify_lane.py").write_text(
+        "PROGRESS_ENV = 'x'\ndef _parse_budget_signal(s): return {}\n"
+        "SANDBAR_INTEG_RUN_BUDGET_SEC = 'y'\n", "utf-8")
+    assert aa.lane_verify_lane_stale(stale_lane, stale_lane / "server" / "admin.py") is False
+
+
+def test_budget_env_visibility_is_additive(tmp_path, monkeypatch):
+    """1③（宿主 finding③）：`INTEG_SUMMARY` 带 additive 键 `budget_env=present|absent`
+    ——「env 缺席静默不启用」这条混版本难查的根，现在一行可判；缺省语义不变。"""
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    seen = {}
+
+    class _P:
+        returncode = 0
+
+        def __init__(self, out):
+            self.stdout = out
+            self.returncode = 0
+
+    src = open(os.path.join(os.path.abspath(RUNNER_DIR), "run_scenarios.py"),
+               encoding="utf-8").read()
+    assert 'budget_env": "present" if run_budget > 0 else "absent"' in src
+    assert src.count('"budget_env"') >= 2      # 正常汇总 + 预算耗尽收口面同键
+
+    import asyncio
+    lane = tmp_path / "lane"
+    (lane / "server").mkdir(parents=True)
+
+    async def _fake_create(*argv, **kw):
+        seen["env"] = kw.get("env") or {}
+        return _Proc()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create)
+    asyncio.run(aa._run_scenarios(lane, "t260927-01", ledger_source="inspection",
+                                  run_budget_sec=flow.SUITE_RUN_BUDGET_SEC,
+                                  supply_timeout_sec=flow.INTEG_SUPPLY_TO_SEC))
+    assert seen["env"]["SANDBAR_INTEG_RUN_BUDGET_SEC"]           # present 形态
+    # 真实执行器跑一轮，读回 INTEG_SUMMARY 的 budget_env
+    import subprocess as _sp
+    repo_root = os.path.dirname(os.path.abspath(RUNNER_DIR))     # <repo>（integration/ 的父目录）
+    out = _sp.run([_sys.executable, "-B", "integration/run_scenarios.py",
+                   "--only", "t260924-05-inspection-suite-ran-parity"],
+                  cwd=repo_root,
+                  capture_output=True, text=True, timeout=300,
+                  env=dict(os.environ, SANDBAR_INTEG_ALLOW_CONCURRENT="1")).stdout
+    summ = [ln for ln in out.splitlines() if ln.startswith("INTEG_SUMMARY ")]
+    assert summ, out[-800:]
+    assert json.loads(summ[0][len("INTEG_SUMMARY "):])["budget_env"] == "absent"
+
+
+def test_report_text_is_english_and_prompt_requires_english():
+    """(2) 宿主令「report 用英语写」：引擎自产的**发现面**文案（标题/证据/建议）为英文；
+    inspect 段 prompt 明确要求 subject/why/suggestion 用英文且**数据不译**。
+    锚点=行为（真调纯函数读文本），不是源码抄写。"""
+    import re as _re
+    import inspection_inspect as ins
+    han = _re.compile(r"[\u4e00-\u9fff]")
+    cases = [
+        deadman.suite_findings({"error": "boom", "ran": 0, "details": []}),
+        # 注：ran=0 那一条是**唯一豁免**（subject 被既有场景断言钉住：
+        # integration/t260913-02/sc_inspection_schedule_daily.py:187 断言含「未真正执行」；
+        # 「不动既有场景断言」是硬边界）——故不列入本案，另由
+        # test_english_report_has_one_documented_exemption 钉住豁免集不大不小。
+        deadman.suite_findings({"ran": 2, "failed": 2,
+                                "details": [{"name": "a", "exit": 1},
+                                            {"name": "b", "exit": 1}]}),
+        deadman.suite_findings({"ran": 1, "env_fail": 1,
+                                "details": [{"name": "a", "exit": 2}]}),
+        deadman.suite_findings({"ran": 1, "interrupted": True,
+                                "progress": {"last": "x"}, "details": []}),
+        deadman.suite_findings({"ran": 1, "late": True, "late_error": "orphan",
+                                "details": []}),
+        deadman.suite_findings({"ran": 1, "details": [],
+                                "budget": {"exhausted": True, "unrun_count": 2,
+                                           "unrun": ["a", "b"]}}),
+        deadman.suite_findings("junk"),
+        deadman.deadman_findings(["20260901"], "inst", "0 7 * * *", 7),
+        deadman.skip_findings(2, 1, {"workflow": "old"}, []),
+        deadman.skip_findings(None, None, {"workflow": "old"}, ["20260901"]),
+    ]
+    for fs in cases:
+        for f in fs:
+            for k in ("subject", "evidence", "suggestion"):
+                assert not han.search(str(f.get(k) or "")), \
+                    "报告制品含中文（宿主令：report 用英语写）：%r=%r" % (k, f.get(k))
+    # 豁免集**恰一条**且理由在册（防「豁免」变成放水口：多出中文就是漏改）
+    han2 = _re.compile(r"[\u4e00-\u9fff]")
+    leftovers = [f for f in deadman.suite_findings({"error": "", "ran": 0, "details": []})
+                 if han2.search(str(f.get("subject") or ""))]
+    assert len(leftovers) == 1, [f.get("subject") for f in leftovers]
+    assert "未真正执行" in leftovers[0]["subject"], "豁免串变了=场景断言锚点也跟着变，须同批复核"
+    # prompt 侧：英文要求在场，且「数据不译」显式
+    p = ins.build_inspect_prompt("i", "20260927", "test", "/tmp/base", "abc", 10)
+    assert "in English" in p and "verbatim" in p
+    assert "输出契约" in p                       # 既有契约块仍在（只加不减）
 
 
 # ========================================================================================
@@ -200,9 +565,11 @@ def test_late_orphan_receipt_never_overwrites_authoritative(tmp_path):
     canon.write_text(json.dumps(authoritative, ensure_ascii=False), encoding="utf-8")
     before = canon.read_bytes()
 
+    late_reason = aa._late_suite_receipt_reason(
+        "/repo/.lane/inspection-x-20260927", 10.0, 6600.0, 10800.0)
+    assert late_reason.startswith("Late orphan after activity timeout")
     orphan = {"ticket_id": "t260927-01", "ran": 0, "passed": 0, "failed": 0, "env_fail": 0,
-              "error": "活动超时后孤儿进程：泳道目录已不在（…）——本回执不代表套件结果"}
-    late_reason = "活动超时后孤儿进程：泳道目录已不在（/repo/.lane/inspection-x-20260927）"
+              "error": late_reason}
     out = flow.write_inspection_suite_receipt_impl(
         inst, period, orphan, tmp_path, late_error=late_reason)
     assert out["late"] is True
@@ -210,7 +577,7 @@ def test_late_orphan_receipt_never_overwrites_authoritative(tmp_path):
     assert canon.read_bytes() == before, "权威回执被迟到孤儿件覆盖（t260927-01 病根）"
     late_doc = json.loads((tmp_path / out["file"]).read_text(encoding="utf-8"))
     assert late_doc["late"] is True and late_doc["late_error"] == late_reason
-    assert "不代表套件结果" in late_doc["error"]
+    assert "does NOT represent the suite result" in late_doc["error"]
     # 第二件迟到件：**再换号**，绝不覆写第一件（无静默覆盖纪律）
     out2 = flow.write_inspection_suite_receipt_impl(
         inst, period, dict(orphan), tmp_path, late_error=late_reason)
@@ -224,7 +591,13 @@ def test_late_orphan_receipt_never_overwrites_authoritative(tmp_path):
     receipt = dict(orphan, late=True, late_error=late_reason,
                    report_path=str(tmp_path / out["file"]))
     subjects = [str(f.get("subject")) for f in deadman.suite_findings(receipt)]
-    assert any("迟到孤儿件" in s for s in subjects), subjects
+    assert any("late orphan" in s.lower() for s in subjects), subjects
+    # 引擎自产的迟到原因必须是英文（报告制品面，宿主令 260927）——真调判据函数，不读夹具
+    produced = aa._late_suite_receipt_reason(
+        str(tmp_path / "gone-lane"), 10.0, 6600.0, 10800.0)
+    assert produced.startswith("Late orphan after activity timeout")
+    import re as _re
+    assert not _re.search(r"[\u4e00-\u9fff]", produced), produced
     section = deadman.suite_section(receipt)
     assert section["late"] is True and section["late_error"] == late_reason
     assert section["ok"] is False
@@ -241,12 +614,13 @@ def test_late_receipt_judgement_is_pure_and_two_state(tmp_path):
     # 正常态：泳道在 + 墙钟在窗内 → 不迟到
     assert aa._late_suite_receipt_reason(str(lane), 100.0, budget, suite_to) == ""
     assert aa._late_suite_receipt_reason(str(lane), grace - 1.0, budget, suite_to) == ""
-    # 态①：泳道不在（teardown 已腾空）→ 迟到，点名「不代表套件结果」
+    # 态①：泳道不在（teardown 已腾空）→ 迟到，点名「不代表套件结果」（英文报告制品）
     why = aa._late_suite_receipt_reason(str(tmp_path / "gone"), 10.0, budget, suite_to)
-    assert "活动超时后孤儿进程" in why and "不代表套件结果" in why
+    assert "Late orphan after activity timeout" in why
+    assert "does NOT represent the suite result" in why
     # 态②：泳道在但越过宽限窗（> 活动超时 + 收尾余量）→ 迟到
     why2 = aa._late_suite_receipt_reason(str(lane), grace + 1.0, budget, suite_to)
-    assert "宽限窗" in why2 and "不代表套件结果" in why2
+    assert "grace window" in why2 and "does NOT represent the suite result" in why2
     # 三项载荷全缺 → 兜底窗；窗内不判迟到（老载荷/老回放零误伤）
     assert aa._late_grace_sec(0.0, 0.0) == aa.SUITE_LATE_GRACE_FALLBACK_SEC
     assert aa._late_suite_receipt_reason(str(lane), 60.0) == ""
@@ -291,13 +665,13 @@ def test_timeout_is_named_and_distinct_from_generic_failure():
     r_to = flow.suite_failure_receipt(to, 10800)
     assert r_to["suite_timeout"] is True
     assert r_to["suite_timeout_sec"] == 10800.0
-    assert "套件段超时" in r_to["error"] and "10800" in r_to["error"]
-    assert "不代表套件结果" in r_to["error"]
+    assert "Suite stage timed out" in r_to["error"] and "10800" in r_to["error"]
+    assert "NOT a suite result" in r_to["error"]
     assert (r_to["ran"], r_to["passed"], r_to["failed"], r_to["env_fail"]) == (0, 0, 0, 0)
 
     r_gen = flow.suite_failure_receipt(RuntimeError("boom"), 10800)
     assert r_gen["suite_timeout"] is False and r_gen["suite_timeout_sec"] == 0.0
-    assert "RuntimeError" in r_gen["error"] and "套件段超时" not in r_gen["error"]
+    assert "RuntimeError" in r_gen["error"] and "timed out:" not in r_gen["error"]
     # 两态进发现清单都是 high「套件未跑成」，但**读得出是哪一态**（error 点名）
     for r in (r_to, r_gen):
         fs = deadman.suite_findings(r)

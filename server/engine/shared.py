@@ -423,6 +423,15 @@ class IntegrationRunResult:
     # 260927 跑者**本体**墙钟（闸回执 runner_used_sec=integration.cmd 那一段；不含供给）：
     # 与 wall_s/subprocess_wall_s 的分工——后两者是活动/子进程链整体，本键是场景跑面本身。
     runner_used_sec: Optional[float] = None
+    # 260927 第二刀：执行器**被打断**（自身墙钟到点/被外层回收）时，把「已跑 N 条但无汇总」
+    # 与「未产出任何结果」两态分开——interrupted=True 时 ran/passed/failed/env_fail 是
+    # **已完成面**（来自跑者逐条落盘的进度件），progress 是该进度件原文。
+    # 缺省 False/空=正常轮，老回放零漂移。
+    interrupted: bool = False
+    progress: Dict[str, Any] = field(default_factory=dict)
+    # 260927 混版本接缝（宿主要求 1②）：巡检形态却缺预算/执行器墙下发，或选中的泳道闸副本
+    # 不认这些键——**响亮 WARN 上回执**，绝不静默回落缺省 3000 硬杀。空=无告警（正常轮）。
+    warnings: List[str] = field(default_factory=list)
 
 
 @dataclass

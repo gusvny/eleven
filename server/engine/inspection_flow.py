@@ -448,11 +448,12 @@ def suite_failure_receipt(exc: BaseException, timeout_sec: float) -> Dict[str, A
     回执里（旧实现只给 ran=0 与一句含糊 error，归因指向「零场景信号」，把诊断引向错误
     方向：真因是活动超时，不是套件没跑）。"""
     if is_activity_timeout_error(exc):
-        err = ("套件段超时：SUITE_TO=%ds 内未返回（活动被判死；本回执是故障台账，"
-               "不代表套件结果——套件可能仍在跑，权威结论见本期时段与下一期）"
-               % int(timeout_sec))
+        err = ("Suite stage timed out: no return within SUITE_TO=%ds (the activity was "
+               "reaped; this receipt is a failure record, NOT a suite result — the suite "
+               "may still be running; the authoritative conclusion is this period's "
+               "timeline plus the next period)" % int(timeout_sec))
     else:
-        err = "套件活动故障：%s: %s" % (type(exc).__name__, exc)
+        err = "Suite activity failed: %s: %s" % (type(exc).__name__, exc)
     return {"error": err, "details": [], "ran": 0, "passed": 0, "failed": 0,
             "env_fail": 0, "suite_timeout": bool(is_activity_timeout_error(exc)),
             "suite_timeout_sec": float(timeout_sec) if is_activity_timeout_error(exc) else 0.0}
@@ -575,7 +576,7 @@ def build_ticket_face(
         "period": period,
         "red_line": INSPECTION_RED_LINE,
         "heartbeat": heartbeat,
-        "heartbeat_note": "全绿期=零发现票（心跳证明）" if heartbeat else "",
+        "heartbeat_note": "All green: zero-finding ticket (heartbeat proof)" if heartbeat else "",
         "summary": counts,
         "findings": findings,
         "suggested_fix_tickets": suggestions,
@@ -1188,8 +1189,8 @@ class InspectionPeriodicWorkflow:
             if teardown_note.startswith("未净"):
                 from inspection_deadman import make_finding
                 extra_findings.append(make_finding(
-                    "suite", "med", "泳道拆除未净",
-                    "%s ｜ 清场入口：inspection_trigger.py sweep-lanes --instance %s"
+                    "suite", "med", "Lane teardown left residue",
+                    "%s | sweep entry point: inspection_trigger.py sweep-lanes --instance %s"
                     % (teardown_note, inp.instance_id), suggest=False))
             # 漏跑核查（dead-man 面①）仍在 suite 块内、不占段位（与旧轨道同源）
             extra_findings += await self._deadman_findings(inp, plan)
@@ -1244,8 +1245,9 @@ class InspectionPeriodicWorkflow:
         used_sec = float(ins_meta.get("used_sec") or 0.0)
         if used_sec > 0.9 * inspect_budget_sec:
             self.face["budget_note"] = (
-                "inspect 段实测 %.0fs / 预算 %.0fs（超 90%%）——先报实测数据再谈调预算，"
-                "不默认抬" % (used_sec, inspect_budget_sec))
+                "inspect stage measured %.0fs of a %.0fs budget (>90%%) — report the "
+                "measurement before discussing a budget raise; do not raise it by default"
+                % (used_sec, inspect_budget_sec))
         self._enter("report", "running",
                     "复核完成（unverified %d / 去重 %d / 假报压制 %d / 截断 %s）"
                     % (vmeta.get("unverified", 0), vmeta.get("deduped", 0),
@@ -1497,18 +1499,20 @@ class InspectionPeriodicWorkflow:
                        "tz": plan.get("tz") or ""}],
                 start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         except Exception as e:  # noqa: BLE001
-            return [make_finding("deadman", "high", "漏跑核查未跑成",
-                             "run_inspection_deadman 故障：%s: %s（本期的漏跑判定缺席）"
+            return [make_finding("deadman", "high", "Dead-man check did not run",
+                             "run_inspection_deadman failed: %s: %s (this period's "
+                             "missed-period verdict is absent)"
                              % (type(e).__name__, e), suggest=False)]
         if not (raw or {}).get("ok"):
-            return [make_finding("deadman", "high", "漏跑核查未跑成",
-                             str((raw or {}).get("error") or "未知"), suggest=False)]
+            return [make_finding("deadman", "high", "Dead-man check did not run",
+                             str((raw or {}).get("error") or "unknown"), suggest=False)]
         res = (raw or {}).get("result") or {}
         findings = res.get("findings") if isinstance(res.get("findings"), list) else []
         if res.get("malformed"):
             findings = findings + [make_finding(
-                "deadman", "med", "台账畸形条目 %d 个" % len(res["malformed"]),
-                "out/inspection 下本实例前缀但非期号词法的文件：%s"
+                "deadman", "med", "Ledger entries malformed: %d" % len(res["malformed"]),
+                "files under out/inspection with this instance's prefix but no period "
+                "lexeme: %s"
                 % "、".join(str(x) for x in res["malformed"][:10]), suggest=False)]
         return findings
 
@@ -1883,8 +1887,8 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
             # 「不得静默」）；不进开票建议——它不是代码缺陷，清场入口=sweep/CLI。
             from inspection_deadman import make_finding
             extra_findings.append(make_finding(
-                "suite", "med", "泳道拆除未净",
-                "%s ｜ 清场入口：inspection_trigger.py sweep-lanes --instance %s"
+                "suite", "med", "Lane teardown left residue",
+                "%s | sweep entry point: inspection_trigger.py sweep-lanes --instance %s"
                 % (teardown_note, inp.instance_id), suggest=False))
     # 时间线文案：无追加发现时与票①逐字一致（零回归面）；有追加才展开两段计数
     scan_n = len(scan_result["result"].get("findings") or [])

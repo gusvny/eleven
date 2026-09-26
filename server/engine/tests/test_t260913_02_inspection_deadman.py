@@ -180,7 +180,7 @@ def test_suite_findings_all_green_is_empty():
 def test_suite_findings_error_is_high_not_a_code_fix():
     got = dm.suite_findings(_receipt(error="场景执行器整体超时（>5700s）"))
     assert len(got) == 1 and got[0]["severity"] == "high"
-    assert "套件未跑成" in got[0]["subject"] and got[0]["suggest"] is False
+    assert "did not run to completion" in got[0]["subject"] and got[0]["suggest"] is False
     assert "/out/x-suite.json" in got[0]["evidence"]
 
 
@@ -193,10 +193,10 @@ def test_suite_findings_ran_zero_is_alarm():
 def test_suite_findings_reds_capped_with_drilldown():
     details = [{"name": "sc-%d" % i, "exit": 1, "output_tail": "boom%d" % i} for i in range(13)]
     got = dm.suite_findings(_receipt(ran=13, failed=13, details=details))
-    per_item = [f for f in got if f["subject"].startswith("套件红：")]
-    agg = [f for f in got if f["subject"].startswith("另有")]
+    per_item = [f for f in got if f["subject"].startswith("Suite red: ")]
+    agg = [f for f in got if f["subject"].startswith("3 more") or "more suite red" in f["subject"]]
     assert len(per_item) == dm.SUITE_RED_DETAIL_CAP == 10
-    assert len(agg) == 1 and "3 条" in agg[0]["subject"]
+    assert len(agg) == 1 and "3" in agg[0]["subject"]
     assert "/out/x-suite.json" in agg[0]["evidence"]     # 聚合条可下钻（C7）
     assert all(f["severity"] == "high" for f in got)
 
@@ -212,12 +212,12 @@ def test_suite_findings_malformed_inputs_fail_loud():
     assert dm.suite_findings("nope")[0]["severity"] == "high"
     assert dm.suite_findings(None)[0]["severity"] == "high"
     got = dm.suite_findings(_receipt(ran="many"))
-    assert got and got[0]["severity"] == "high" and "畸形" in got[0]["subject"]
+    assert got and got[0]["severity"] == "high" and "malformed" in got[0]["subject"].lower()
     # details 里有畸形条目：exit 缺失按红处理（判不了红绿=不得不看），非 dict 条目点名降级
     got2 = dm.suite_findings(_receipt(ran=1, failed=1,
                                       details=[{"name": "x", "exit": None}, "junk"]))
-    assert any("套件红：x" in f["subject"] for f in got2)
-    assert any("畸形 1 条" in f["subject"] for f in got2)
+    assert any("Suite red: x" in f["subject"] for f in got2)
+    assert any("malformed: 1" in f["subject"] for f in got2)
 
 
 def test_suite_section_shapes_and_malformed():
@@ -320,8 +320,8 @@ def test_skip_observed_leg_namesskip_count_and_running():
     assert len(fs) == 1
     f = fs[0]
     assert f["leg"] == "observed" and f["severity"] == "high" and f["suggest"] is False
-    assert "跳火实锤" in f["evidence"] and "skip 计数 2" in f["evidence"]
-    assert "仍在 Running" in f["evidence"] and "schedule-up" in f["evidence"]
+    assert "skip confirmed" in f["evidence"] and "skip count 2" in f["evidence"]
+    assert "still Running" in f["evidence"] and "schedule-up" in f["evidence"]
 
 
 def test_skip_observed_suppresses_inferred():
@@ -339,7 +339,7 @@ def test_skip_needs_both_count_and_running():
 def test_skip_inferred_only_when_counters_unknown():
     fs = dm.skip_findings(None, None, STALE, ["20260914", "20260915"])
     assert len(fs) == 1 and fs[0]["leg"] == "inferred" and fs[0]["severity"] == "med"
-    assert "20260914" in fs[0]["evidence"] and "兜底" in fs[0]["subject"]
+    assert "20260914" in fs[0]["evidence"] and "fallback" in fs[0]["subject"].lower()
     # 计数可得且全零 → 不推断（报错必须精确：无实锤不出疑似）
     assert dm.skip_findings(0, 0, STALE, ["20260914"]) == []
 

@@ -6761,16 +6761,142 @@ def integ_subprocess_timeout(run_budget_sec: float = 0.0,
 
 
 def _inspection_gate_timeout(run_budget_sec: float, supply_timeout_sec: float = 0.0) -> float:
-    """巡检套件轮的 **闸内截止**（`integ_timeout_sec` 载荷键的真源）= 供给 + 跑者 + 余量。
+    """巡检套件轮的 **闸内截止**（活动自己那条子进程链的硬截止）。
 
-    三个数必须同源有界：跑者总预算 < 供给+跑者+余量 ≤ 活动超时（SUITE_TO）。闸只做
-    **上界**，不替谁判预算——预算判定在各自的执行面（供给段在 verify_lane 的段级预算、
-    跑者在执行器自己的总预算），闸早杀=把「点名收口」重新变成「硬杀」（本票修的病）。
+    260927 第二刀（宿主实测校准）：闸内截止改为**派生自「执行器专属超时」**——
+    供给 + 执行器超时 + 余量（旧式「跑者总预算 + 供给 + 余量」把**执行器墙**与**跑者
+    自我收口点**混成一个数，执行器于是在自己没有预算概念时被闸早杀）。
     每票集测段（预算缺省 0）恒回落 INTEG_GUARD_SEC=旧行为逐字。"""
     if run_budget_sec and run_budget_sec > 0:
-        return (float(run_budget_sec) + float(supply_timeout_sec or 0.0)
-                + float(INTEG_CHAIN_MARGIN_SEC))
+        return inspection_chain_timeout(inspect_integ_exec_timeout_sec(),
+                                        float(supply_timeout_sec or 0.0))
     return float(INTEG_GUARD_SEC)
+
+
+#: 巡检链**专属执行器超时**（verify_lane 的 `integ_timeout_sec` 载荷键：`integration.cmd`
+#: 整条命令的墙钟上限）。260927 第二刀（宿主实测）：执行器此前吃的是 `BATCH_TIMEOUT_SEC`
+#: 缺省 3000s（每票集测的批次值），而巡检是**恒全跑**——实测 319 场景串行 `wall_s` 合计
+#: 2630s，加泳道 docker 供给/等待与抖动必越 3000s ⇒ 执行器「整体超时」、ran=0 零信号
+#: （t260928-01 首次真跑：`error="场景执行器整体超时（>3000s）" wall=3003.3s`）。
+#: 缺省 6000s（实测 2630s 的 2.3×，给齐 319 场景 + 长尾）；env 可覆盖（运维契约面）。
+#: 不等式（单测锁）：BATCH_TIMEOUT_SEC(3000) ≤ 本值(6000) < 跑者预算(6600) < SUITE_TO。
+INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC = 6000.0
+INSPECT_INTEG_EXEC_TIMEOUT_ENV = "SANDBAR_INSPECT_INTEG_EXEC_TIMEOUT_SEC"
+
+
+def inspect_integ_exec_timeout_sec() -> float:
+    """巡检执行器超时唯一读取点（env 缺省 6000；畸形/非正=fail-closed 到缺省并留痕）。"""
+    raw = os.environ.get(INSPECT_INTEG_EXEC_TIMEOUT_ENV)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        activity.logger.warning("执行器超时 env 畸形（%s=%r）——回落缺省 %.0fs",
+                                INSPECT_INTEG_EXEC_TIMEOUT_ENV, raw,
+                                INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC)
+        return INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC
+    return v if v > 0 else INSPECT_INTEG_EXEC_TIMEOUT_DEFAULT_SEC
+
+
+def inspection_runner_cutoff(exec_timeout_sec: float,
+                             suite_budget_sec: float = 0.0) -> float:
+    """巡检**跑者自我收口点**（跑者总预算 env 的值）= min(跑者总预算, 执行器超时 − 余量)。
+
+    为什么必须严格小于执行器超时：跑者到点要能**自己打印收口面再退出**（点名已跑/未跑）；
+    它若晚于执行器墙，就又被验道 SIGKILL 成「整体超时 + 零进度」。取 min 是让「活动级
+    跑者总预算」成为上界、执行器墙成为实际收口依据，两者同源有界。"""
+    try:
+        exec_to = float(exec_timeout_sec or 0.0)
+    except (TypeError, ValueError):
+        exec_to = 0.0
+    try:
+        budget = float(suite_budget_sec or 0.0)
+    except (TypeError, ValueError):
+        budget = 0.0
+    cut = exec_to - float(INTEG_CHAIN_MARGIN_SEC)
+    if budget > 0:
+        cut = min(cut, budget)
+    return max(1.0, cut)
+
+
+def inspection_chain_timeout(exec_timeout_sec: float,
+                             supply_timeout_sec: float = 0.0) -> float:
+    """活动自己那条子进程链（admin→verify_lane→执行器）的硬截止 = 供给 + 执行器 + 余量。
+
+    必须**晚于**执行器墙（否则验道还没返回各自的 JSON 回执，活动就把整链杀了——
+    回执退化成「无有效输出」）；又必须**早于**活动超时 SUITE_TO（否则重演 Temporal 硬杀）。"""
+    return (float(supply_timeout_sec or 0.0) + float(exec_timeout_sec or 0.0)
+            + float(INTEG_CHAIN_MARGIN_SEC))
+
+
+#: 跑者进度件 env（worker 下单 → 验道读 / 执行器写，同一路径三方同源）：执行器每完成一条
+#: 就把 {ran,pass,fail,env_fail,done} 原子落盘；验道被自己的执行器墙打断时据此把
+#: 「已跑 N 条但无汇总」与「未产出结果」**分开点名**（宿主要求②：禁止把「被打断」
+#: 写成裸 ran=0）。
+SANDBAR_INTEG_PROGRESS_ENV = "SANDBAR_INTEG_PROGRESS_JSON"
+
+
+def __code_mtime() -> str:
+    """本模块文件的 mtime（ISO）——「跑的是哪版代码」的机械证人（验收自证用）。"""
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromtimestamp(
+            Path(__file__).stat().st_mtime).isoformat(timespec="seconds")
+    except OSError:
+        return ""
+
+
+#: 认出「预算感知版闸」的标记串（泳道副本里应当在场；不在=该副本是修复前版本）。
+VERIFY_LANE_BUDGET_MARKERS = ("_parse_budget_signal", "PROGRESS_ENV",
+                              "SANDBAR_INTEG_RUN_BUDGET_SEC")
+
+
+def lane_verify_lane_stale(worktree: Any, admin: Any) -> bool:
+    """选中泳道副本时判「这份 verify_lane 认不认预算键」（1② 混版本接缝，不假装认得）。
+
+    判据=机械在场：泳道副本的 `verify_lane.py` 里有没有预算/进度面标记（上面三个串）。
+    缺标记=修复前副本 → 本轮下发的执行器墙/预算/进度对它**无效**（它会回落缺省并硬杀），
+    必须响亮 WARN，而不是当作「已经下发成功」。读面失败（文件不在/不可读）=不判陈旧
+    （不制造假 WARN；是否走泳道副本另有 admin 选择点记录）。"""
+    try:
+        a = Path(str(admin or ""))
+        if a.name != "admin.py":
+            return False
+        vl = a.parent / "tools" / "verify_lane.py"
+        if not vl.is_file():
+            return False
+        src = vl.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return not any(m in src for m in VERIFY_LANE_BUDGET_MARKERS)
+
+
+def integ_progress_path(worktree: Any) -> str:
+    """进度件路径（泳道 out/ 下；泳道随拆道消亡=不脏仓，且与执行器同机同盘可读）。"""
+    wt = Path(str(worktree or "")).resolve() if worktree else Path(REPO_ROOT)
+    return str(wt / "out" / "integ-progress.json")
+
+
+def read_integ_progress(path: Any) -> Dict[str, Any]:
+    """读跑者进度件（畸形/缺失 → {}，绝不抛）：执行器被打断后把「已完成面」捞回来。
+
+    三态显式：文件不在/不可读/内容畸形一律 {}（调用方据此说「未产出任何场景结果」，
+    不是伪造一个 ran=0）；ran>0 才算「已跑 N 条但无汇总」。"""
+    p = Path(str(path or ""))
+    if not str(path or "").strip() or not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    try:
+        data["ran"] = int(data.get("ran") or 0)
+    except (TypeError, ValueError):
+        data["ran"] = 0
+    return data if data.get("ran", 0) > 0 or data.get("done") else {}
 
 
 # t260917-08：移交命令单条超时=场景单命令同款容量参数（INTEG_CMD_TIMEOUT_SEC，缺省
@@ -6939,7 +7065,8 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          ledger_source: str = "",
                          only_names=None,
                          run_budget_sec: float = 0.0,
-                         supply_timeout_sec: float = 0.0) -> IntegrationRunResult:
+                         supply_timeout_sec: float = 0.0,
+                         suite_timeout_sec: float = 0.0) -> IntegrationRunResult:
     """A thin shell (thinned by host order t260902): declaration reading, command
     execution and contract parsing all live in verify_lane lane=integ (one
     implementation + one parser); this function only places the order and translates
@@ -6968,8 +7095,18 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # cross-project without an engine layout) — the integ shell had missed that
     # precedent, which meant the two mechanical gates behaved differently.
     lane_admin = wt / "server" / "admin.py"
-    admin = str(lane_admin if lane_admin.is_file() else
+    _lane_copy = lane_admin.is_file()
+    admin = str(lane_admin if _lane_copy else
                 Path(__file__).resolve().parents[1] / "admin.py")
+    # 1② 混版本接缝：选中泳道副本且该副本不认预算键 → 不假装认得（回执响亮 WARN）
+    _warnings: List[str] = []
+    if _lane_copy and lane_verify_lane_stale(wt, admin):
+        _warnings.append(
+            "mixed-version seam: the lane copy of verify_lane.py does not recognize the "
+            "budget/progress knobs (markers absent) — the executor-wall/runner-budget "
+            "handed down for this round has NO effect on it; it will fall back to the "
+            "%ds default and can kill a full-suite round. Recreate the lane (or restart "
+            "the worker on the current revision)." % BATCH_TIMEOUT_SEC)
     # A real near-miss from t260903-09: blocking subprocess.run is forbidden inside an
     # async activity — it once froze the worker's event loop for the entire scenario
     # duration and every query timed out at 8s (diagnostic note
@@ -6996,29 +7133,42 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
             "t26,sandbar-test,stage-console"
     # t260924-05 KI-116：组装面统一走 integ_subprocess_env（剥两个封闭元组后并
     # 显式注入面），worker 自身路由旋钮不再漏进子进程链。
-    # 260927：巡检套件段的**总预算**与**供给上限**经 env 下发给执行器与闸
-    # （缺省 0/None=不下发，每票集测段与老载荷逐字节零改动）——跑者到点自行收口、
-    # 供给段到点点名报红，两者都不让外层硬杀成为唯一结局。
-    if run_budget_sec and run_budget_sec > 0:
-        _extra_env["SANDBAR_INTEG_RUN_BUDGET_SEC"] = "%.0f" % float(run_budget_sec)
+    # 260927：巡检套件段三笔预算经 env 下发给执行器与闸（缺省 0/None=不下发，每票集测段
+    # 与老载荷逐字节零改动）：
+    #   ① 跑者**自我收口点**（SANDBAR_INTEG_RUN_BUDGET_SEC）= min(跑者总预算, 执行器超时−余量)
+    #      ——到点自行打印「已跑/未跑」再退出，不让验道 SIGKILL 成零进度；
+    #   ② 供给段上限（SANDBAR_SUPPLY_TIMEOUT_SEC）——到点点名报红，不与跑者预算混成一笔；
+    #   ③ 进度面（SANDBAR_INTEG_PROGRESS_JSON）——跑者逐条落盘的进度件，验道超时后据此
+    #      把「已跑 N 条但无汇总」与「未产出结果」分开点名（宿主实测要求②）。
+    _exec_to = inspect_integ_exec_timeout_sec() if (run_budget_sec and run_budget_sec > 0) else 0.0
+    if _exec_to > 0:
+        _extra_env["SANDBAR_INTEG_RUN_BUDGET_SEC"] = \
+            "%.0f" % inspection_runner_cutoff(_exec_to, run_budget_sec)
+        _prog = integ_progress_path(wt)
+        if _prog:
+            _extra_env[SANDBAR_INTEG_PROGRESS_ENV] = _prog
     if supply_timeout_sec and supply_timeout_sec > 0 and \
             not os.environ.get("SANDBAR_SUPPLY_TIMEOUT_SEC"):
         _extra_env["SANDBAR_SUPPLY_TIMEOUT_SEC"] = "%.0f" % float(supply_timeout_sec)
     _sub_env = integ_subprocess_env(_extra_env)
     # t260924-05 KI-116：integ 道整体超时经载荷显式下单（=内层批次值，≤守卫），
     # verify_lane 不再独立读 env；老载荷缺键回落同值缺省（replay/老回放零漂移）。
-    # 260927：巡检段（run_budget_sec>0）改为**派生自运行预算**（总预算 + 子进程链余量），
-    # 否则闸会在 3300s 处 SIGTERM 掉一个还有 100 分钟预算的跑者（=本票修的那个错配）。
-    # 每票集测段（缺省）逐字不变 = BATCH_TIMEOUT_SEC。
+    # 260927 第二刀：巡检段（执行器超时>0）下**执行器专属墙**（缺省 6000s）——旧版这条
+    # 吃的是每票批次的 3000s，恒全跑的巡检必越它 ⇒ 执行器「整体超时」、ran=0（t260928-01
+    # 实况：>3000s / wall=3003.3s）。每票集测段（缺省）逐字不变 = BATCH_TIMEOUT_SEC。
     _payload = shared.integ_verify_payload(wt, write_set, apply_skip_pools)
-    _payload["integ_timeout_sec"] = (
-        int(_inspection_gate_timeout(run_budget_sec, supply_timeout_sec))
-        if (run_budget_sec and run_budget_sec > 0) else BATCH_TIMEOUT_SEC)
-    # 260927：本活动自己的子进程链（admin→verify_lane→执行器）截止必须**派生**自总预算
-    # 而不是钉死内层批次守卫 —— 否则巡检套件的实际截止（3300s）比总预算（4500s）更早，
-    # 执行器根本走不到自己的收口点，被 SIGTERM 打进「批台收口」这段无界等待里，
-    # 最后被 Temporal 判死（t260927-01：85min 判死、超时后 2.5min 才落一行 ran=0）。
-    _chain_to = integ_subprocess_timeout(run_budget_sec)
+    _payload["integ_timeout_sec"] = int(_exec_to) if _exec_to > 0 else BATCH_TIMEOUT_SEC
+    # 260927：本活动自己的子进程链（admin→verify_lane→执行器）截止 = 供给 + 执行器 + 余量
+    # ——必须晚于执行器墙（否则验道来不及吐 JSON 回执，回执退化成「无有效输出」），又必须
+    # 早于活动超时 SUITE_TO（否则重演 Temporal 硬杀）。运维把执行器超时 env 抬过
+    # SUITE_TO 时在此**夹紧**（活动超时是硬上界，算式不许越过它）。
+    _chain_to = _inspection_gate_timeout(run_budget_sec, supply_timeout_sec)
+    try:
+        _suite_to = float(suite_timeout_sec or 0.0)
+    except (TypeError, ValueError):
+        _suite_to = 0.0
+    if _suite_to > 0:
+        _chain_to = min(_chain_to, max(1.0, _suite_to - 60.0))
     _act_t0 = time.monotonic()   # t260925-12：活动整体墙钟起点（回执自报）
     p = await asyncio.create_subprocess_exec(
         "python3", admin, "call", "verify_lane",
@@ -7043,11 +7193,28 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         except (ProcessLookupError, PermissionError):
             p.kill()
         await p.wait()
+        # 260927 第二刀（宿主要求②）：整链被本层杀掉也要**保留已完成信息**——读跑者
+        # 逐条落盘的进度件，把「已跑 N 条」与裸「未产出结果」两态分开点名。
+        _partial = read_integ_progress(
+            _extra_env.get(SANDBAR_INTEG_PROGRESS_ENV, ""))
+        _n = int((_partial or {}).get("ran") or 0)
         return IntegrationRunResult(
-            error="场景执行器整体超时（>%ds%s）" % (
+            warnings=list(_warnings),
+            error="场景执行器整体超时（>%ds%s）：%s" % (
                 int(_chain_to),
                 "，含巡检总预算 %ds" % int(run_budget_sec)
-                if run_budget_sec and run_budget_sec > 0 else ""),
+                if run_budget_sec and run_budget_sec > 0 else "",
+                ("已跑 %d 条但无汇总（末条=%s）——已跑面见进度件 %s"
+                 % (_n, (_partial or {}).get("last") or "?",
+                    _extra_env.get(SANDBAR_INTEG_PROGRESS_ENV, ""))
+                 if _n > 0 else
+                 "未产出任何场景结果（进度件缺席或无条目）——不是「跑了 0 条绿」，是没验到")),
+            ran=_n,
+            passed=int((_partial or {}).get("pass") or 0),
+            failed=int((_partial or {}).get("fail") or 0),
+            env_fail=int((_partial or {}).get("env_fail") or 0),
+            interrupted=True,
+            progress=dict(_partial or {}),
             wall_s=time.monotonic() - _act_t0,
             subprocess_wall_s=time.monotonic() - _sub_t0)
     p_stdout = p_out_b.decode("utf-8", "replace")
@@ -7055,17 +7222,47 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     try:
         payload = json.loads(p_stdout)
     except json.JSONDecodeError:
-        return IntegrationRunResult(error="verify_lane integ 无有效输出（exit=%s）：%s"
-                                    % (p.returncode, (p_stdout + p_stderr)[-2000:]),
-                                    wall_s=time.monotonic() - _act_t0,
-                                    subprocess_wall_s=time.monotonic() - _sub_t0)
+        # 无 JSON 信封（执行器被杀/解析层挂）：同样先读进度件保信息，再点名
+        _partial = read_integ_progress(
+            _extra_env.get(SANDBAR_INTEG_PROGRESS_ENV, ""))
+        _n = int((_partial or {}).get("ran") or 0)
+        return IntegrationRunResult(
+            warnings=list(_warnings),
+            error="verify_lane integ 无有效输出（exit=%s%s）：%s"
+                  % (p.returncode,
+                     "，已跑 %d 条但无汇总（进度件见 %s）" % (_n, _extra_env.get(
+                         SANDBAR_INTEG_PROGRESS_ENV, "")) if _n > 0
+                     else "，未产出任何场景结果",
+                     (p_stdout + p_stderr)[-2000:]),
+            ran=_n,
+            interrupted=bool(_n > 0),
+            progress=dict(_partial or {}),
+            wall_s=time.monotonic() - _act_t0,
+            subprocess_wall_s=time.monotonic() - _sub_t0)
     _err = _integ_receipt_err(payload)
     if _err:
-        return IntegrationRunResult(error=_err,
-                                    wall_s=time.monotonic() - _act_t0,
-                                    subprocess_wall_s=time.monotonic() - _sub_t0)
+        # 验道报红也要把**它测到的**进度面带上（执行器被打断时验道已从进度件补出 ran=N）
+        _res = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        try:
+            _n = int(_res.get("ran") or 0)
+        except (TypeError, ValueError):
+            _n = 0
+        out_err = IntegrationRunResult(warnings=list(_warnings), error=_err, ran=_n,
+                                       interrupted=bool(_res.get("interrupted")),
+                                       progress=dict(_res.get("progress") or {}),
+                                       wall_s=time.monotonic() - _act_t0,
+                                       subprocess_wall_s=time.monotonic() - _sub_t0)
+        for _k in ("pass", "fail", "env_fail"):
+            try:
+                setattr(out_err, "passed" if _k == "pass" else
+                        ("failed" if _k == "fail" else "env_fail"),
+                        int(_res.get(_k) or 0))
+            except (TypeError, ValueError):
+                pass
+        return out_err
     res = payload.get("result") or {}
     out = IntegrationRunResult()
+    out.warnings = list(_warnings) + [str(w) for w in (res.get("warnings") or [])]
     out.ran = int(res.get("ran") or 0)
     out.passed = int(res.get("pass") or 0)
     out.failed = int(res.get("fail") or 0)
@@ -7551,7 +7748,8 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
     # tip 永远有记录」的日常供给者；台账唯一写者=闸，来源仅作 env 注入）
     result = await _run_scenarios(wt, ticket_id, ledger_source="inspection",
                                   run_budget_sec=run_budget,
-                                  supply_timeout_sec=supply_to)
+                                  supply_timeout_sec=supply_to,
+                                  suite_timeout_sec=suite_to)
     wall = round(time.monotonic() - started, 1)
     receipt: Dict[str, Any] = {
         "ticket_id": ticket_id, "worktree": str(wt), "base_ref": base_ref,
@@ -7568,6 +7766,17 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
     # 跑者侧总预算回执面（INTEG_SUMMARY 的 additive 键；缺键=非预算轮，零新键）
     if getattr(result, "budget", None):
         receipt["budget"] = result.budget
+    # 1② 混版本接缝告警（泳道旧副本 / 闸侧检出）——上回执，绝不静默
+    if getattr(result, "warnings", None):
+        receipt["warnings"] = list(result.warnings)
+    # 260927 第二刀（宿主要求②）：被打断面（执行器墙到点被回收）——把**已完成面**连同
+    # 进度件一起上回执（ran/passed/... 已是验道从进度件补出的数，不是裸 0）。
+    if getattr(result, "interrupted", False):
+        receipt["interrupted"] = True
+        if getattr(result, "progress", None):
+            _pg = dict(result.progress)
+            _pg.setdefault("path", integ_progress_path(wt))
+            receipt["progress"] = _pg
     # 260927 分相墙钟（供给 / 跑者两笔分别落账，事后归因要能读出「供给吃掉了多少」）：
     # 供给墙钟由闸回执带（supply_used_sec），缺键（老回放/独立入口形态）恒落 -1 表示
     # 「未测到」，绝不落 0 冒充「瞬时完成」；跑者墙钟取闸回执的 runner_used_sec
@@ -7577,7 +7786,27 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
     _gate_runner = getattr(result, "runner_used_sec", None)
     receipt["runner_used_sec"] = (float(_gate_runner) if _gate_runner is not None
                                   else round(float(result.subprocess_wall_s or 0.0), 1))
-    receipt["chain_gate_sec"] = int(_inspection_gate_timeout(run_budget, supply_to))
+    # 链截止（与 _run_scenarios 同一算出点 + 同一 SUITE_TO 夹紧；此处只回执不算决策）
+    _chain_sec = _inspection_gate_timeout(run_budget, supply_to)
+    if suite_to > 0:
+        _chain_sec = min(_chain_sec, max(1.0, suite_to - 60.0))
+    receipt["chain_gate_sec"] = int(_chain_sec)
+    # 260927：**预算计划与代码身份**一次上回执（验收面自证）——四个数就是本轮的层序，
+    # 模块 mtime 是「到底跑的是哪版代码」的机械证人（t260928-01 实测踩过：工人进程未
+    # 重启时，票面看不出跑的是旧码，归因只能靠猜；这一行让它一眼可判）。
+    try:
+        _exec_here = inspect_integ_exec_timeout_sec() if run_budget > 0 else 0.0
+        receipt["budget_plan"] = {
+            "suite_to_sec": int(suite_to) if suite_to else None,
+            "supply_timeout_sec": int(supply_to) if supply_to else None,
+            "exec_timeout_sec": int(_exec_here) if _exec_here else None,
+            "runner_cutoff_sec": int(inspection_runner_cutoff(_exec_here, run_budget))
+            if _exec_here else None,
+            "chain_timeout_sec": int(_chain_sec),
+            "worker_module_mtime": __code_mtime(),
+        }
+    except Exception as e:  # noqa: BLE001——身份面故障绝不拦回执
+        receipt["budget_plan"] = {"error": "%s: %s" % (type(e).__name__, e)}
     # ---- 迟到孤儿闸（必做③）：写盘前确认「泳道与本活动仍在位」 ----
     late_reason = _late_suite_receipt_reason(wt, time.monotonic() - started,
                                              run_budget, suite_to)
@@ -7586,7 +7815,7 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
         from shared import INSPECTION_DIR
         written = await asyncio.to_thread(
             write_inspection_suite_receipt_impl, instance_id, period, receipt,
-            INSPECTION_DIR, None, "", late_reason)
+            INSPECTION_DIR, time.time, "", late_reason)
         receipt["report_path"] = written.get("path", "")
         if written.get("late"):
             receipt["late"] = True
@@ -7641,12 +7870,15 @@ def _late_suite_receipt_reason(worktree: Any, elapsed: float,
     返回的文案点名「活动超时后孤儿进程…本回执不代表套件结果」（读者一眼可辨，不得把
     这种件误当套件结论）。"""
     if not Path(str(worktree or "")).is_dir():
-        return ("活动超时后孤儿进程：泳道目录已不在（%s）——本回执不代表套件结果，"
-                "权威结论见本期落账与时段（绝不覆盖权威回执）" % (worktree,))
+        return ("Late orphan after activity timeout: the lane directory is gone (%s) — this receipt "
+                "does NOT represent the suite result; the authoritative conclusion is this "
+                "period's ledger/timeline (it never overwrites the authoritative receipt)"
+                % (worktree,))
     grace = _late_grace_sec(run_budget_sec, suite_timeout_sec)
     if float(elapsed) > grace:
-        return ("活动超时后孤儿进程：本活动墙钟 %.0fs 已越过宽限窗 %.0fs（活动超时 %s、"
-                "跑者预算 %s）——本回执不代表套件结果，绝不覆盖权威回执"
+        return ("Late orphan after activity timeout: this activity's wall clock %.0fs passed the grace "
+                "window %.0fs (suite timeout %s, runner budget %s) — this receipt does NOT "
+                "represent the suite result and never overwrites the authoritative receipt"
                 % (float(elapsed), grace,
                    "%.0fs" % float(suite_timeout_sec or 0.0) if suite_timeout_sec else "未下发",
                    "%.0fs" % float(run_budget_sec or 0.0) if run_budget_sec else "未下发"))

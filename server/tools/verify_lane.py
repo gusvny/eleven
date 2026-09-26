@@ -662,6 +662,42 @@ def _integ_timeout_sec(args):
 #: 执行器总预算耗尽的标记行前缀（run_scenarios._budget_exhausted_exit 唯一产出口；
 #: 两侧同串=契约，改一侧必改另一侧——单测跨模块锁定）。
 BUDGET_SIGNAL_PREFIX = 'INTEG_BUDGET_EXHAUSTED'
+#: 跑者进度件 env（260927 第二刀）：与 agent_activities.SANDBAR_INTEG_PROGRESS_ENV 和
+#: run_scenarios.PROGRESS_ENV **同一串**（三方同源，单测锁定）；执行器每完成一条原子落盘，
+#: 验道被自己的执行器墙打断时读它，把「已跑 N 条但无汇总」与「未产出结果」分开点名。
+PROGRESS_ENV = 'SANDBAR_INTEG_PROGRESS_JSON'
+
+
+def _read_runner_progress(path):
+    """读跑者进度件 → {} 或已完成面（畸形/缺失 → {}，绝不抛、绝不伪造 ran=0）。
+
+    本函数是「被打断」这一态的**唯一读点**：空 dict = 「未产出任何结果」（真·零），
+    非空 = 「已跑 N 条但无汇总」（进度面可读）。两态在下游分开点名，不许混装。"""
+    p = Path(str(path or ''))
+    if not str(path or '').strip() or not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    try:
+        data['ran'] = int(data.get('ran') or 0)
+    except (TypeError, ValueError):
+        data['ran'] = 0
+    if data['ran'] <= 0 and not data.get('done'):
+        return {}
+    return data
+
+
+def _integ_timeout_payload_given(args):
+    """载荷是否显式给了执行器墙（`integ_timeout_sec` 非空白）——混版本接缝判据之一。
+
+    为什么不用 `_integ_timeout_sec` 的回退结果判：那条链会把 env/缺省也吃进去，
+    而本判据要的正是「**载荷**这一路有没有人到岗」（缺=调用方是旧活动/旧副本）。"""
+    raw = (args or {}).get('integ_timeout_sec')
+    return not (raw is None or (isinstance(raw, str) and not str(raw).strip()))
 
 
 def _parse_budget_signal(stdout):
@@ -770,9 +806,28 @@ def _integ(args):
     引擎 activity 只下单（spawn 本工具）+ 翻译 JSON。红绿=退出码+契约解析，引擎零项目策略。"""
     import os as _os
     root = Path(args.get('path') or '.').resolve()
+    # ---- 1② 混版本接缝（显式 WARN 进回执，绝不静默回落 3000 硬杀）---------------
+    # 巡检形态（台账来源=inspection）却两个预算面**都缺**（载荷 integ_timeout_sec 与
+    # env SANDBAR_INTEG_RUN_BUDGET_SEC 同时缺席）= worker/闸**混版本**（旧活动 + 新闸，
+    # 或泳道里带的是旧副本）：此时执行器墙会回落缺省 3000s，恒全跑的巡检必被它判成
+    # 「整体超时」——正是 t260928-01 的病象。WARN 必须上回执（不让混版本静默）。
+    _warnings = []
+    _run_budget_env = os.environ.get('SANDBAR_INTEG_RUN_BUDGET_SEC')
+    if _ledger_source() == 'inspection' and not _integ_timeout_payload_given(args) \
+            and not _run_budget_env:
+        _warn = ('mixed-version seam: inspection form without any budget/exec-timeout knob '
+                 '(payload integ_timeout_sec and env SANDBAR_INTEG_RUN_BUDGET_SEC both '
+                 'absent) — the executor wall falls back to the %ds default, which a '
+                 'full-suite inspection round will exceed; restart the worker on the '
+                 'current revision (or pass the knob) instead of relying on the default'
+                 % INTEG_DEFAULT_TIMEOUT_SEC)
+        _warnings.append(_warn)
+        sys.stderr.write('INTEG_WARN %s\n' % _warn)
+        sys.stderr.flush()
     cfg, err = _cfg_load(root)
     if err:
-        return {'lane': 'integ', 'green': False, 'err': err}
+        return {'lane': 'integ', 'green': False, 'err': err,
+                'warnings': list(_warnings)}
     if cfg is None:
         return {'lane': 'integ', 'green': False,
                 'err': 'verify.yaml 缺失：integration 道 fail-closed（本道无声明级关闭态，凡调道必判；契约②b）'}
@@ -791,7 +846,8 @@ def _integ(args):
     # 返回红并带上已耗墙钟（事后归因要能读出「供给吃掉了多少」）。
     _supply_to, _supply_err = _supply_timeout_sec()
     if _supply_err:
-        return {'lane': 'integ', 'green': False, 'err': _supply_err}
+        return {'lane': 'integ', 'green': False, 'err': _supply_err,
+                'warnings': list(_warnings)}
     _sup_t0 = time.time()
     for e in (integ_cfg.get('supply') or []):
         need, scmd = str(e.get('need')), str(e.get('cmd'))
@@ -813,7 +869,7 @@ def _integ(args):
         except subprocess.TimeoutExpired:
             _stage_hit = _item_to < sto          # 撞的是段级预算还是单条预算
             if _stage_hit:
-                return {'lane': 'integ', 'green': False,
+                return {'lane': 'integ', 'green': False, 'warnings': list(_warnings),
                         'err': ('供给段超时（段预算耗尽，need=%s，已耗 %.0fs，上限 %s=%ds）——'
                                 '供给面红点名，不静默；供给预算独立于跑者场景预算'
                                 % (need, time.time() - _sup_t0, SUPPLY_TIMEOUT_ENV,
@@ -823,14 +879,14 @@ def _integ(args):
                                    'stage_timeout': True, 'need': need}}
             # 单条 timeout（段预算没撞上）：文案与旧契约逐字同口径——dev_lane 的
             # 「供给失败不计入 tests-fault 轮次」签名就吃这句话，措辞漂了签名就漂。
-            return {'lane': 'integ', 'green': False,
+            return {'lane': 'integ', 'green': False, 'warnings': list(_warnings),
                     'err': 'supply 装配超时（need=%s，>%ds）——供给面红点名，不静默'
                            % (need, sto),
                     'supply': {'timeout_sec': int(_supply_to),
                                'used_sec': round(time.time() - _sup_t0, 1),
                                'stage_timeout': False, 'need': need}}
         if sp.returncode != 0:
-            return {'lane': 'integ', 'green': False,
+            return {'lane': 'integ', 'green': False, 'warnings': list(_warnings),
                     'err': 'supply 装配失败（need=%s，exit=%d）：%s——供给面红点名，不静默'
                            % (need, sp.returncode, ((sp.stdout or '') + (sp.stderr or ''))[-1500:]),
                     'supply': {'timeout_sec': int(_supply_to),
@@ -844,20 +900,101 @@ def _integ(args):
     # ---- t260913-03 池排除（每票段专用通道；apply 缺省 False=零分支）----
     pool_exclude, cmd_env = _integ_pool_exclude(root, integ_cfg, args)
     if pool_exclude is not None and pool_exclude.get('err'):
-        return {'lane': 'integ', 'green': False, 'err': pool_exclude['err']}
+        return {'lane': 'integ', 'green': False, 'err': pool_exclude['err'],
+                'warnings': list(_warnings)}
     # 260927：执行器自己也有总预算（SANDBAR_INTEG_RUN_BUDGET_SEC，引擎侧下发）——闸的子
     # 进程截止恒晚于它（跑者自行收口），这里只把同一份预算回执给下游同源可见。
-    _run_budget_env = os.environ.get('SANDBAR_INTEG_RUN_BUDGET_SEC')
+    _prog_path = os.environ.get(PROGRESS_ENV)
     _run_t0 = time.time()
+    # 260927 第二刀 1①（宿主令）：执行器用 **Popen + 进程组回收**并**取回部分输出**——
+    # 旧实现 subprocess.run 超时即丢 stdout，回执只剩「整体超时」一句（t260928-01：
+    # ran=0/wall=3003.3s，连「跑到哪」都读不出来）。现在超时也把已产出的规范行/
+    # PASS·FAIL·ENV_FAIL 行与 INTEG_BUDGET 标记解析进回执（partial=true 点明）。
+    proc = None
+    timed_out = False
+    _out_s, _err_s, _rc = '', '', 0
     try:
-        proc = subprocess.run(['/bin/sh', '-c', cmd], cwd=str(root), capture_output=True,
-                              text=True, timeout=timeout, env=cmd_env)
-    except subprocess.TimeoutExpired:
+        proc = subprocess.Popen(['/bin/sh', '-c', cmd], cwd=str(root),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=cmd_env, start_new_session=True)
+        try:
+            _out_s, _err_s = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as _te:
+            timed_out = True
+            _out_s = _te.output if isinstance(_te.output, str) else \
+                (_te.output or b'').decode('utf-8', 'replace')
+            _err_s = _te.stderr if isinstance(_te.stderr, str) else \
+                (_te.stderr or b'').decode('utf-8', 'replace')
+            # 进程组回收（KI-116 纪律：裸 kill 会漏 verify_lane→sh→run_scenarios→node/docker
+            # 一串孙进程——它们会继续写盘/占端口，跨期孤儿累积）
+            import signal as _signal
+            try:
+                os.killpg(os.getpgid(proc.pid), _signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+            try:
+                _more_out, _more_err = proc.communicate(timeout=30)
+                _out_s = (_out_s or '') + (_more_out or '')
+                _err_s = (_err_s or '') + (_more_err or '')
+            except subprocess.TimeoutExpired:
+                sys.stderr.write('INTEG_WARN executor pipe still open 30s after SIGKILL '
+                                 '(pid=%s)\n' % getattr(proc, 'pid', '?'))
+                sys.stderr.flush()
+        _rc = proc.returncode if proc.returncode is not None else -9
+    except OSError as e:
         return {'lane': 'integ', 'green': False,
-                'err': '场景执行器整体超时（>%ds）' % timeout,
+                'err': '场景执行器起不来（%s: %s）' % (type(e).__name__, e),
                 'supply_used_sec': supply_used,
                 'runner_used_sec': round(time.time() - _run_t0, 1),
-                'run_budget_sec': int(float(_run_budget_env)) if _run_budget_env else None}
+                'warnings': _warnings}
+
+    class _ProcView:            # 既有下游按 proc.stdout/returncode 读，保持同形
+        def __init__(self, out, rc):
+            self.stdout = out
+            self.returncode = rc
+
+    proc = _ProcView(_out_s, _rc)
+    if timed_out:
+        # 260927 第二刀（宿主要求②）：被打断也要**保留已完成信息**——三重取数：
+        #   ①部分 stdout 里的规范行/文本行（已完成的场景，逐条可读）；
+        #   ②INTEG_BUDGET 标记/汇总（跑者自行收口过的话）；
+        #   ③跑者进度件（逐条落盘，最权威的「跑到哪」）。
+        # 两态分开点名：有进度=「已跑 N 条但无汇总」；无进度=「未产出任何结果」。
+        prog = _read_runner_progress(_prog_path)
+        _pran, _pp, _pf, _pef, _pscen, _ = _parse_integ_run(_out_s, _rc)
+        n = max(int(prog.get('ran') or 0), int(_pran or 0))
+        if n > 0:
+            _last = prog.get('last') or (_pscen[-1].get('name') if _pscen else '?')
+            tail = ('%d scenarios ran but there is no summary (last=%s) — this is NOT a '
+                    'product red and NOT "0 scenarios": the executor wall (%ds) reaped an '
+                    'interrupted runner; the completed face is in the progress file %s'
+                    % (n, _last, timeout, _prog_path or '(not handed down)'))
+        else:
+            tail = ('no scenario results at all (progress file absent or empty) — this is '
+                    'NOT "0 scenarios green", it is nothing verified; the executor wall (%ds) '
+                    'reaped an interrupted runner; progress file=%s'
+                    % (timeout, _prog_path or '(not handed down)'))
+        _partials = [{'name': s.get('name', ''), 'exit': int(s.get('exit') or 0),
+                      'output_tail': s.get('output_tail') or ''} for s in (_pscen or [])]
+        return {'lane': 'integ', 'green': False,
+                'err': '场景执行器整体超时（>%ds）：%s' % (timeout, tail),
+                'ran': n,
+                'pass': max(int(prog.get('pass') or 0), int(_pp or 0)),
+                'fail': max(int(prog.get('fail') or 0), int(_pf or 0)),
+                'env_fail': max(int(prog.get('env_fail') or 0), int(_pef or 0)),
+                'interrupted': True,
+                'partial': True,          # 宿主口径命名（=interrupted 的同义键，显式可读）
+                'progress': prog,
+                'scenarios': _partials,   # 已完成的逐条明细（部分输出不丢）
+                'budget': _parse_budget_signal(_out_s) or {},
+                'stdout_tail': (_out_s or '')[-2000:],
+                'supply_used_sec': supply_used,
+                'runner_used_sec': round(time.time() - _run_t0, 1),
+                'run_budget_sec': int(float(_run_budget_env)) if _run_budget_env else None,
+                'warnings': _warnings}
     runner_used = round(time.time() - _run_t0, 1)
     # t260924-05 KI-116：解析面抽成 _parse_integ_run 纯函数（单测直调），并拆除
     # 「ran==0 且含规范行且 exit==0 → 静默绿」逃逸口（零场景信号一律显式 err）。
@@ -865,6 +1002,7 @@ def _integ(args):
         _parse_integ_run(proc.stdout or '', proc.returncode)
     if perr:
         return {'lane': 'integ', 'green': False, 'err': perr,
+                'warnings': list(_warnings),
                 'supply_used_sec': supply_used, 'runner_used_sec': runner_used}
     # 260927 总预算耗尽（执行器自行收口的形态）：**独立可见发现**——不是产品红（那些
     # 场景根本没验到），也不是「零信号」；点名已跑/未跑数量，明细在明细行与执行器汇总。
@@ -1049,6 +1187,8 @@ def _integ(args):
     # 两键恒在（additive；NaN 面用 -1 表「未跑到」而不是 0=「瞬时完成」的假值）。
     _out['supply_used_sec'] = supply_used
     _out['runner_used_sec'] = runner_used
+    if _warnings:                       # 1② 混版本接缝显式 WARN（进回执，不静默）
+        _out['warnings'] = list(_warnings)
     if _run_budget_env:
         try:
             _out['run_budget_sec'] = int(float(_run_budget_env))

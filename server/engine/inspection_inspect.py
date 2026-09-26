@@ -584,15 +584,23 @@ _SKELETON = """\
 - 本期发现条数上限 **{max_findings} 条**（超出部分机械侧按 severity 截断丢弃——宁可
   精选最有把握的 {max_findings} 条，不要灌水）。
 
+## 语言（宿主令 260927「报告用英语写」）
+- findings 的 **subject / why / suggestion** 一律用**英文**书写（报告 JSON 与票面直接消费
+  它们，跨项目收件人读英文面）。
+- **数据不译**：evidence 里的 `quote`（被测文件原文）、`path`/filename、命令原文、标识符
+  一律**照抄原样**，不得翻译/改写（机械复核按原文子串匹配，翻译即判 unverified）。
+- 你要调用的 SKILL.md / 仓库内文档里出现其它语言（含中文）时，照读不误；只有你**输出**的
+  这三段叙述文字用英文。
+
 ## 输出契约（必须逐字遵守）
 在回答的**最末尾**输出**恰好一块** ```json 围栏代码块，内容形如：
 ```json
 {{"findings": [
-  {{"subject": "一句话概述（含 file:line）",
+  {{"subject": "One-line summary (include file:line) — in English",
     "severity": "high|med|low",
-    "evidence": [{{"path": "相对基座的路径", "line": 123, "quote": "该行原文片段（建议精炼在 {max_quote} 字内）"}}],
-    "why": "为什么这是问题（语义判断）",
-    "suggestion": "建议（或『无需修，仅记录』）",
+    "evidence": [{{"path": "path relative to the base dir", "line": 123, "quote": "verbatim snippet of that line (keep it within ~{max_quote} chars)"}}],
+    "why": "Why this is a problem (semantic judgement) — in English",
+    "suggestion": "Suggested action (or 'no fix needed, record only') — in English",
     "confidence": 0.0}}
 ]}}
 ```
@@ -606,6 +614,7 @@ _SKELETON = """\
   前缀并在报告点名，所以别为守字数丢证据信息；但引文必须真实抄自标注的那一行
   （机械逐条复核，不符=该条降级 unverified 并点名）。
 - severity 只认 high|med|low；confidence 是 0.0~1.0 的小数。
+- **subject / why / suggestion 用英文写**（evidence 的 quote/path 与命令原文照抄不译）。
 - 红线：巡检只出报告与建议，绝不改码。
 """
 
