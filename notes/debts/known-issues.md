@@ -1947,3 +1947,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ② 演进：回执/face 落可读 `code_stamp`（多模块 mtime + worker 启动时刻），使「混版本」机械可判，
 >   不再靠人肉比 mtime（已授权实现）；③ 教训入审查清单：**实测出「不像新代码/数值不合理」时，
 >   第一步先判版本，再谈归因**。
+
+## KI-135 引擎改动只跑 pytest 不足以发现「工作流沙箱校验」失败：worker 起不来（260930 实证，integration 岗登记）
+> **实案**：`code_stamp` 身份面把 `WORKER_STARTED_AT`/`CODE_LOADED_AT` 写成**模块级** `datetime.now()`——
+> 该值在被工作流 import 的模块里求值 → Temporal 工作流沙箱抛
+> `RestrictedWorkflowAccessError: Cannot access datetime.datetime.now.__call__ from inside a workflow`
+> → **worker 启动即失败**（`RuntimeError: Failed validating workflow InspectionPeriodicWorkflow`）。
+> 该改动**全量 pytest 2429 passed**（单测不走沙箱校验），**没有任何测试红**——只有真的起一个 worker 才现形。
+> **处置**：① 四个模块的值改**惰性**（模块 `__getattr__` + 模块内访问器，import 期零副作用），全量复跑绿、worker 起来；
+> ② 纪律：**凡改动被工作流 import 的模块（shared / inspection_flow / dev_lane / agent_activities 的导入面）**，
+>   验收必须含一次**真实 worker 启动**（`worker.py --daemon` 起来 + `polling queues` 行），不能只看 pytest；
+>   ③ 演进方向：把「worker 能起来」做成一条机械闸（或 dry-run 自检里加 workflow 定义校验），别靠人记得。
