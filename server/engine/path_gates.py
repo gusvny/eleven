@@ -62,6 +62,11 @@ PROTECTED_PATHS: Tuple[str, ...] = (
     "integration/t260902-07/tests/test_route_lookup.py",
     # 共享电池的期望值/阈值档
     "integration/baselines",
+    # 已知红挂账名册（260926 独立复核洞②实锤：不在保护面时，写集含 integration/ 的票
+    # 可把自己的新红写进名册并同步抬 max_entries → 下一轮「逐条在册」→ 自证豁免放行，
+    # 票面还带合规审计锚。名册政策本就要求「新挂账须 integration 岗位判词 + home」，
+    # 归入受保护真源与政策一致。）
+    "integration/known-red-baseline.json",
     # 配置真源
     "verify.yaml",
     "server/model-routes.yaml",
