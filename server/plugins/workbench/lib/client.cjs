@@ -52422,6 +52422,12 @@ const INSPECTION_FACE_CSS = `
 .wb-insp-tl{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
 .wb-insp-tl code{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
 .wb-insp-f{display:flex;gap:8px;align-items:baseline;padding:4px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+/* 260926 报告面可读性（宿主报「都是 [object Object]」）：发现项改成块状两行制——
+   首行=严重度/扫描面/置信度/核实态/主题，下面逐行 Why / Suggestion / Evidence 清单。 */
+.wb-insp-f{flex-direction:column;align-items:stretch;gap:3px}
+.wb-insp-f-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.wb-insp-f ul{margin:2px 0 2px 16px;padding:0}
+.wb-insp-f li{margin:1px 0;word-break:break-all}
 .wb-insp-sev-tag{flex:none;display:inline-block;min-width:34px;text-align:center;padding:1px 6px;border-radius:9px;font-size:11px}
 .wb-insp-sev-tag[data-sev=high]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 .wb-insp-sev-tag[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
@@ -52430,6 +52436,21 @@ const INSPECTION_FACE_CSS = `
 .wb-insp-note-banner{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
   color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:5px 10px;font-size:12px;margin-bottom:6px}
 `;
+/** 对象/数组 → 可读文本（260926 宿主报「report UI 都是 [object Object]」）：
+*  字符串原样（超长截断）、数字/布尔 String()、其余走紧凑 JSON（超长截断），
+*  **绝不产出 `[object Object]`**；null/undefined → 空串（调用方据此决定是否渲染该行）。 */
+function asText(v, limit = 400) {
+	if (v === null || v === void 0) return "";
+	if (typeof v === "string") return v.length > limit ? v.slice(0, limit) + "…" : v;
+	if (typeof v === "number" || typeof v === "boolean") return String(v);
+	try {
+		const s = JSON.stringify(v);
+		if (!s) return "";
+		return s.length > limit ? s.slice(0, limit) + "…" : s;
+	} catch {
+		return String(v);
+	}
+}
 function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 	const [note, setNote] = (0, react.useState)("");
 	const findings = Array.isArray(detail.findings) ? detail.findings : [];
@@ -52603,19 +52624,43 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }) {
 				}), findings.map((f, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-insp-f",
 					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-insp-sev-tag",
-							"data-sev": String(f?.severity ?? ""),
-							children: String(f?.severity ?? "?")
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-insp-f-head",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-insp-sev-tag",
+									"data-sev": asText(f?.severity),
+									children: asText(f?.severity) || "?"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: asText(f?.scan) }),
+								typeof f?.confidence === "number" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "wb-sub",
+									children: ["confidence ", f.confidence]
+								}) : null,
+								asText(f?.verified) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "wb-sub",
+									children: asText(f?.verified)
+								}) : null,
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: asText(f?.subject) })
+							]
 						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: String(f?.scan ?? "") }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: String(f?.subject ?? "") }),
-						f?.evidence ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						asText(f?.why) ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-sub",
-							children: String(f.evidence)
+							children: ["Why: ", asText(f?.why)]
+						}) : null,
+						asText(f?.suggestion) ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-sub",
+							children: ["Suggestion: ", asText(f?.suggestion)]
+						}) : null,
+						Array.isArray(f?.evidence) && f.evidence.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+							className: "wb-sub",
+							children: f.evidence.map((e, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("code", { children: [asText(e?.path), typeof e?.line === "number" ? `:${e.line}` : ""] }), asText(e?.quote) ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [" — ", asText(e?.quote, 200)] }) : null] }, j))
+						}) : f?.evidence ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-sub",
+							children: ["Evidence: ", asText(f.evidence)]
 						}) : null
 					]
-				}, i))] })]
+				}, asText(f?.id) || String(i)))] })]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-insp-block",

@@ -1173,7 +1173,12 @@ interface TicketDetail {
   report_path?: string
   heartbeat?: boolean
   summary?: Record<string, unknown>
-  findings?: { severity?: unknown; scan?: unknown; subject?: unknown; evidence?: unknown }[]
+  findings?: {
+    severity?: unknown; scan?: unknown; subject?: unknown; evidence?: unknown
+    // 260926（宿主报「report UI 都是 [object Object]」）：巡检 agent 的发现项还有
+    // why/suggestion/confidence/verified/id 五个字段，报告面要能读出来。
+    why?: unknown; suggestion?: unknown; confidence?: unknown; verified?: unknown; id?: unknown
+  }[]
   suggested_fix_tickets?: unknown[]
   red_line?: string
   human_gate?: { who?: string; gate?: string; decision?: string; note?: string } | null
@@ -2160,6 +2165,12 @@ const INSPECTION_FACE_CSS = `
 .wb-insp-tl{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
 .wb-insp-tl code{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
 .wb-insp-f{display:flex;gap:8px;align-items:baseline;padding:4px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+/* 260926 报告面可读性（宿主报「都是 [object Object]」）：发现项改成块状两行制——
+   首行=严重度/扫描面/置信度/核实态/主题，下面逐行 Why / Suggestion / Evidence 清单。 */
+.wb-insp-f{flex-direction:column;align-items:stretch;gap:3px}
+.wb-insp-f-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.wb-insp-f ul{margin:2px 0 2px 16px;padding:0}
+.wb-insp-f li{margin:1px 0;word-break:break-all}
 .wb-insp-sev-tag{flex:none;display:inline-block;min-width:34px;text-align:center;padding:1px 6px;border-radius:9px;font-size:11px}
 .wb-insp-sev-tag[data-sev=high]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 .wb-insp-sev-tag[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
@@ -2168,6 +2179,22 @@ const INSPECTION_FACE_CSS = `
 .wb-insp-note-banner{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
   color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:5px 10px;font-size:12px;margin-bottom:6px}
 `
+
+/** 对象/数组 → 可读文本（260926 宿主报「report UI 都是 [object Object]」）：
+ *  字符串原样（超长截断）、数字/布尔 String()、其余走紧凑 JSON（超长截断），
+ *  **绝不产出 `[object Object]`**；null/undefined → 空串（调用方据此决定是否渲染该行）。 */
+function asText(v: unknown, limit = 400): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return v.length > limit ? v.slice(0, limit) + '…' : v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  try {
+    const s = JSON.stringify(v)
+    if (!s) return ''
+    return s.length > limit ? s.slice(0, limit) + '…' : s
+  } catch {
+    return String(v)
+  }
+}
 
 function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
   detail: TicketDetail
@@ -2249,11 +2276,29 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
         <div>
           {findings.length === 0 && <div className="wb-sub">No findings (green-proof period)</div>}
           {findings.map((f, i) => (
-            <div className="wb-insp-f" key={i}>
-              <span className="wb-insp-sev-tag" data-sev={String(f?.severity ?? '')}>{String(f?.severity ?? '?')}</span>
-              <code>{String(f?.scan ?? '')}</code>
-              <span>{String(f?.subject ?? '')}</span>
-              {f?.evidence ? <span className="wb-sub">{String(f.evidence)}</span> : null}
+            <div className="wb-insp-f" key={asText(f?.id) || String(i)}>
+              <div className="wb-insp-f-head">
+                <span className="wb-insp-sev-tag" data-sev={asText(f?.severity)}>{asText(f?.severity) || '?'}</span>
+                <code>{asText(f?.scan)}</code>
+                {typeof f?.confidence === 'number' ? <span className="wb-sub">confidence {f.confidence}</span> : null}
+                {asText(f?.verified) ? <span className="wb-sub">{asText(f?.verified)}</span> : null}
+                <span>{asText(f?.subject)}</span>
+              </div>
+              {asText(f?.why) ? <div className="wb-sub">Why: {asText(f?.why)}</div> : null}
+              {asText(f?.suggestion) ? <div className="wb-sub">Suggestion: {asText(f?.suggestion)}</div> : null}
+              {Array.isArray(f?.evidence) && f.evidence.length > 0 ? (
+                <ul className="wb-sub">
+                  {f.evidence.map((e, j) => (
+                    <li key={j}>
+                      <code>
+                        {asText((e as { path?: unknown })?.path)}
+                        {typeof (e as { line?: unknown })?.line === 'number' ? `:${(e as { line?: number }).line}` : ''}
+                      </code>
+                      {asText((e as { quote?: unknown })?.quote) ? <span> — {asText((e as { quote?: unknown })?.quote, 200)}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (f?.evidence ? <div className="wb-sub">Evidence: {asText(f.evidence)}</div> : null)}
             </div>
           ))}
         </div>
