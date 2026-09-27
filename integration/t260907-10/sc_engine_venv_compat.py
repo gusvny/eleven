@@ -28,7 +28,6 @@ Hermetic：全部活在 tempfile fixture 仓内，零端口零网络零 3099，�
 import os
 import stat
 import sys
-import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INTEG = os.path.dirname(HERE)
@@ -38,6 +37,7 @@ sys.path.insert(0, os.path.join(INTEG, "t260907-04"))  # 共享 helper：lib_nam
 sys.path.insert(0, os.path.join(REPO, "server"))
 import lib_naming  # noqa: E402
 from installer.runtime import InstallPaths  # noqa: E402
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （同目录集成侧回收 helper）
 
 NEW_VENV = os.path.join("server", "engine", ".venv", "bin", "python")
 OLD_VENV = os.path.join("server", "dsh", "temporal-poc", ".venv", "bin", "python")
@@ -54,8 +54,12 @@ def _mk_stub(path, executable=True, dangling=False):
 
 
 def _fixture(with_new=True, with_old=True, new_dangling=False, new_noexec=False):
-    root = tempfile.mkdtemp(prefix="venv-compat-root-")
-    home = tempfile.mkdtemp(prefix="venv-compat-home-")
+    # 夹具回收（260927 磁盘泄漏全族整治）：此前两处裸 `mkdtemp` 从不回收——$TMPDIR 顶层
+    # 实测 `venv-compat-root-*` 50 个（前缀在册）与 `venv-compat-home-*` 4,764 个（不在
+    # 册）共 4,814 个 / 最老 345h（本场景每跑一次留 10 个目录）。改走集成侧注册表
+    # （`lib_tmp_reclaim`：登记 + atexit 兜底 + 幂等回收；SIGKILL 由清扫器兜底）。
+    root = mkdtemp_reclaimed("venv-compat-root-")
+    home = mkdtemp_reclaimed("venv-compat-home-")
     if with_new:
         _mk_stub(os.path.join(root, NEW_VENV), executable=not new_noexec,
                  dangling=new_dangling)

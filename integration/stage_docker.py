@@ -3008,22 +3008,40 @@ def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
                           sa_registered, sa_note)
 
 
+def _report_stage_tmp_kept(project, why):
+    """**保留**本台临时物料时点名（260927 磁盘泄漏全族整治的可见性半）。
+
+    为什么是「点名保留」而不是「一律删」：三件物料**都是容器 bind 的宿主机侧**
+    （`server/docker-compose.test.yml`：credentials→/dsh-home/.credentials.yaml、
+    presets 目录→/dsh-home/.agent-presets、admin.log 影子→/repo 与 /repo-nm 两处）。
+    台没拆干净就删 = 把活台的挂载点抽掉。所以拆台失败路径只能保留；但**保留必须可见**
+    （此前是静默 return：既不知道留了什么，也不知道该找谁清）——残留的去处逐条点名。
+    """
+    labels = ", ".join(sorted(stage_tmp_artifact_paths(project)))
+    print("STAGE_TMP_RECLAIM: kept %s for %s (%s) — containers may still hold the bind "
+          "mounts; residue goes to the next down/sweep or manual cleanup"
+          % (labels, project, why), file=sys.stderr, flush=True)
+
+
 def _do_down(project, env=None, quiet=False):
     """down -v + container list check (internal version: state-file clearing is
     managed centrally by do_down).
 
     这一路是**起台半途失败的就地清场**（do_up 的 except 分支，最频繁的拆台路径之一）：
     compose down 真成功（rc=0）才回收本台临时物料——rc!=0 / 抛异常=容器可能还在，
-    而 presets 目录是容器 bind 的挂载点，绝不能抽掉（残留交 do_down/sweep/人工）。"""
+    而 presets 目录是容器 bind 的挂载点，绝不能抽掉（残留**点名保留**，交 do_down/
+    sweep/人工；260927 补上点名面，此前是静默 return）。"""
     env = env if env is not None else dict(os.environ)
     try:
         comp = compose_cmd(project, ["down", "-v", "--remove-orphans", "--timeout", "30"],
                            env, timeout=_STOP_TIMEOUT)
     except StageError:
+        _report_stage_tmp_kept(project, "compose down raised (stage state unknown)")
         if not quiet:
             raise
         return
     if getattr(comp, "returncode", 1) != 0:
+        _report_stage_tmp_kept(project, "compose down rc=%s" % getattr(comp, "returncode", "?"))
         return
     for line in reclaim_stage_tmp_artifacts(project)["errors"]:
         print("STAGE_TMP_RECLAIM: %s" % line, file=sys.stderr)

@@ -88,7 +88,12 @@ INFLIGHT_INAPPLICABLE_STATUS = "blocked"
 #: 已知测试夹具前缀白名单（**同一份清单**也用于 integration/tools/sweep_tmp_fixtures.py；
 #: 两处一致性由机械漂移锁钉住：server/engine/tests/test_t260926_tmp_fixture_water.py
 #: ::test_e1_prefix_whitelist_single_source）。白名单之外一律不计入水位——宿主 temp 目录里
-#: 还有别的程序（实测 `com.google.Chrome.*` 4,380 个目录）与别项目（`nusuyou-*`）的东西。
+#: 还有别的程序（实测 `com.google.Chrome.*` 4,380 个目录）与**dsh 运行时自己的临时 spill
+#: 目录**（前缀逐条见清扫器的 `EXCLUDED_PREFIXES`：那是 harness 侧 mkdtemp 建的、**不是本仓
+#: 的夹具**——260926 普查曾把它误归成「本仓 dsh 子进程探针族」，260927 已改正并明确排除：
+#: 删活会话的 spill 目录会弄坏在飞的 agent 进程）。
+#: 260927 全族整治：第二批 28 个前缀（原只登记未启用）正式并入；本表按「目录族 + 文件族」
+#: 一视同仁——水位判据只数**真目录**，文件族（`*-integ-run-*.lock` 等）由清扫器处置。
 TMP_FIXTURE_PREFIXES = (
     "integ-e2e-fixture-",
     "lint-pyc-",
@@ -98,8 +103,16 @@ TMP_FIXTURE_PREFIXES = (
     "t260907-12-ut",
     "sandbar-agent-presets-",
     "t26092212-", "t260906-", "lease-ut-", "t260904-02-", "t260901-21-",
-    "t02-lane", "venv-compat-root", "t26090704-lane",
+    "t02-lane", "t26090704-lane",
     "wb-",
+    # ---- 第二批（260927 启用；逐条证据见 integration/tools/sweep_tmp_fixtures.py 的同名表）----
+    "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
+    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",
+    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t260908-02-ut", "t090506-",
+    "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
+    "t260915-10-", "t26092404-",
+    "t260923-", "t260925-", "t260916-", "t260922-", "t260921-", "t260917-",
+    "t260918-", "t260919-", "t260920-",
 )
 
 #: 模块缺省阈值（真源；声明侧同名键可覆盖）。rerun_rounds 缺省 3 = 抓得住今天这种
@@ -675,8 +688,8 @@ def tmp_fixture_facts(scan: Any, *, now_ts: float = 0.0,
     out: Dict[str, Any] = {
         "root": "", "dirs": 0, "live": 0, "oldest_age_h": 0.0, "oldest_name": "",
         "by_prefix": {}, "entries_seen": 0, "untouched": 0, "epochs": 0,
-        "malformed": [], "skipped": [], "scan_error": "", "scanned_at": 0.0,
-        "age_unknown": False, "truncated": False,
+        "malformed": [], "skipped": [], "skipped_count": 0, "scan_error": "",
+        "scanned_at": 0.0, "age_unknown": False, "truncated": False,
     }
     if not isinstance(scan, dict):
         out["malformed"].append("scan result is not an object (%s)" % type(scan).__name__)
@@ -687,6 +700,11 @@ def tmp_fixture_facts(scan: Any, *, now_ts: float = 0.0,
         out[k] = int(v) if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
     out["scan_error"] = str(scan.get("scan_error") or "")
     out["skipped"] = [str(x) for x in (scan.get("skipped") or []) if str(x)]
+    # 跳过条目**全量**计数（名单有上界，见 activities.TMP_SCAN_SKIPPED_CAP）：缺/畸形时
+    # 回落成名单长度（下界，绝不假装 0——文件族跳过量是「白名单里有多少非目录条目」的信号）
+    _sk = scan.get("skipped_count")
+    out["skipped_count"] = (int(_sk) if isinstance(_sk, int) and not isinstance(_sk, bool)
+                            and _sk >= 0 else len(out["skipped"]))
     out["truncated"] = bool(scan.get("truncated"))
     ts = float(now_ts or 0.0) or _num(scan.get("scanned_at"))
     out["scanned_at"] = ts
@@ -886,6 +904,7 @@ def tmp_fixture_section(facts: Any, findings: Any, thresholds: Any, *, source: s
         "scan_error": str(fct.get("scan_error") or ""),
         "malformed": list(fct.get("malformed") or []),
         "skipped": list(fct.get("skipped") or []),
+        "skipped_count": int(fct.get("skipped_count") or len(fct.get("skipped") or [])),
         "finding_count": len(f),
         "by_leg": _by_leg_all({LEG_TMP_FIXTURE: len([x for x in f if LEG_TMP_FIXTURE in
                                                      (x.get("legs") or [])])}),

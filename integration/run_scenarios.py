@@ -2426,13 +2426,17 @@ _SIGNAL_PROGRESS = [None]
 def _batch_signal_teardown(signum, frame):
     """信号路径（SIGINT/SIGTERM，t260921-06 全终态收口段）：批台就地 down 后快速退
     （os._exit——执行器已无完整结果，半轮=诚实中断；在飞场景子进程由自身超时/管道
-    断开兜底，批台 zero-residue 由本 down 保证）。"""
+    断开兜底，批台 zero-residue 由本 down 保证）。
+
+    260927：`os._exit` **跳过 atexit**，故这里显式回收本进程登记的临时物料（锁档等）
+    ——否则信号路径正是「锁档从不回收」的那条缝。"""
     print("batch-stage: 收到信号 %s——批台就地收口后退出" % signum, flush=True)
     try:
         _SIGNAL_PROGRESS[0].flush()        # 被打断也保留已完成面（验道据此点名「已跑 N 条」）
     except Exception:                      # noqa: BLE001——观测面不拦收口
         pass
     batch_teardown()
+    reclaim_tmp_artifacts()
     os._exit(130)
 
 
@@ -2567,6 +2571,9 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
     except Exception as _ex:   # noqa: BLE001——汇总行失败不改收口（观测面）
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
     batch_teardown()
+    # 260927：`os._exit` 跳过 atexit → 显式回收本进程登记的临时物料（锁档等；
+    # 幂等，正常/异常路径早由 helper 的 atexit 收过一次）。
+    reclaim_tmp_artifacts()
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -3025,6 +3032,39 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
 # rs.main()）不经过本锁——嵌套调用不会被自锁死（零回归面）。
 RUN_LOCK_OFF_ENV = "SANDBAR_INTEG_ALLOW_CONCURRENT"
 
+#: 集成侧临时物料回收 helper 的惰性装载缓存（见 `reclaim_tmp_artifacts`）
+_TMP_RECLAIMER = None
+
+
+def _reclaimer():
+    """惰性装载 `integration/lib_tmp_reclaim.py`（本模块既当脚本跑也被 importlib 装载，
+    不强求 import 期的 sys.path 状态）。装载失败上抛——由调用点决定留痕口径。"""
+    global _TMP_RECLAIMER
+    if _TMP_RECLAIMER is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import lib_tmp_reclaim                # noqa: PLC0415 —— 惰性装载（见上）
+        _TMP_RECLAIMER = lib_tmp_reclaim
+    return _TMP_RECLAIMER
+
+
+def reclaim_tmp_artifacts() -> dict:
+    """回收本进程登记过的临时物料（幂等）→ `{"removed": [...], "failed": [...]}`。
+
+    260927 磁盘泄漏全族整治：锁档（每泳道一把）+ 各场景登记的夹具一律走
+    `integration/lib_tmp_reclaim.py` 的注册表；正常/异常/`sys.exit()` 由该 helper 的
+    `atexit` 兜底，本函数是给**跳过 atexit 的终态**（`os._exit`）与测试显式调的入口。
+    helper 装不上（解释器被改坏/盘上缺件）=回收面缺席但**绝不静默**：留痕 + 空账，
+    残留由 `integration/tools/sweep_tmp_fixtures.py` 与巡检水位面接管。
+    """
+    try:
+        return _reclaimer().reclaim_registered()
+    except Exception as e:                     # noqa: BLE001 —— 回收面不拦收口
+        print("INTEG_TMP_RECLAIM: helper unavailable (%s: %s) — 残留交清扫器/水位面"
+              % (type(e).__name__, e), file=sys.stderr, flush=True)
+        return {"removed": [], "failed": []}
+
 
 def _run_lock_path():
     """锁文件落平台临时区（不脏工作树）：键=本泳道仓根 realpath——同泳道共享一把，
@@ -3041,7 +3081,14 @@ def _run_lock_path():
 def _acquire_run_lock():
     """非阻塞抢「本泳道集成跑」单飞锁：返回 fd（持有到进程结束，flock 随进程消亡自
     释放）；抢不到返回 -1（调用方以环境红 2 收口——本次**零场景开跑**，按环境面归因）；
-    无 fcntl 平台/显式关闭返回 None（无锁但留痕，不静默）。"""
+    无 fcntl 平台/显式关闭返回 None（无锁但留痕，不静默）。
+
+    260927 磁盘泄漏全族整治：**抢到手才登记回收**——锁档（`sandbar-integ-run-<key>.lock`）
+    原先建了从不回收，$TMPDIR 顶层攒了 4,076 个（`nusuyou-integ-run-*` 1,836 个是同款
+    代码在姊妹项目的旧前缀）。终态覆盖=正常/异常/`sys.exit()`（helper 的 atexit）+
+    SIGTERM/SIGINT（同批装信号钩子）+ `os._exit` 两条收口路径（显式调用）；SIGKILL 抓
+    不住，残留交清扫器与巡检水位面。**抢不到（-1）绝不登记**：别把在别人手里的锁档删掉。
+    """
     if os.environ.get(RUN_LOCK_OFF_ENV) == "1":
         print("INTEG_RUN_LOCK 已显式关闭（%s=1）：并发跑的同泳道串台风险由调用方承担"
               % RUN_LOCK_OFF_ENV, flush=True)
@@ -3076,6 +3123,12 @@ def _acquire_run_lock():
         os.fsync(fd)
     except OSError:
         pass
+    try:                                      # 回收登记 + 信号钩子（装配失败只留痕，不拦发车）
+        _reclaimer().register_tmp_path(path, label="integ-run-lock")
+        _reclaimer().install_signal_reclaim()
+    except Exception as e:                    # noqa: BLE001 —— 回收面不拦发车
+        print("INTEG_RUN_LOCK: 锁档回收登记失败（%s: %s）——残留交清扫器/水位面"
+              % (type(e).__name__, e), file=sys.stderr, flush=True)
     return fd
 
 

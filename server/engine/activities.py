@@ -653,6 +653,14 @@ async def write_inspection_report(face: Dict[str, Any]) -> Dict[str, Any]:
 #: 水位扫描的顶层条目计数上界（防呆）：越过即截断并点名——计数是**下界**，
 #: 绝不因为「扫不动」就静默当成水位 0（巡检面不许有静默零）。
 TMP_SCAN_MAX_ENTRIES = 2_000_000
+#: `skipped` 名单的条数上界（260927）：白名单里现在也有**文件族**（`*-integ-run-*.lock`
+#: 单飞锁档、`sandbar-admin-log-*.log` 影子、`sandbar-credentials-*.yaml` 凭据副本——存量
+#: 上万条），而水位判据只数真目录，这些条目会逐条进 `skipped`。不设上界的话，一份回执里
+#: 塞进上万条名字：既是白烧的 payload（Temporal 单 payload 上限 2MB，越过即活动结果上报
+#: 失败=整期巡检哑掉），也让「跳过 N 条」这个信号淹在名单里。截断**不静默**：名单末尾
+#: 补一条具名计数行（`... (N more skipped entries suppressed)`），计数由 `skipped_count`
+#: 单独给全量。判据零改动（水位仍只数真目录）。
+TMP_SCAN_SKIPPED_CAP = 40
 #: 同进程内同 root 的水位扫描缓存 TTL（秒；0=不用缓存）。为什么可以缓存：水位是分钟级
 #: 慢变量，同一 worker 进程一次巡检期内多次调用（UT/重试）扫同一个顶层目录是纯浪费；
 #: 跨期（>TTL）=新一次真扫。**只缓存只读结果**，不写任何状态。
@@ -666,10 +674,22 @@ def scan_tmp_fixture_dirs(root: str, prefixes=()) -> Dict[str, Any]:
     为什么要单独一个函数而不是写在活动里：这是本面唯一的 IO（巡检纪律=只读、可复核），
     抽出来便于单测注入/替换，也便于「扫不动」的三态（OK/截断/读不到）逐态点名。
     白名单外一律只计数（untouched）——宿主 temp 里还有别的程序的东西，绝不算进水位。
+    非真目录但命中白名单的条目（文件族/符号链接）进 `skipped`：**可见但不判水位**，
+    且名单有上界（`TMP_SCAN_SKIPPED_CAP`，截断处具名给计数，全量在 `skipped_count`）。
     """
     out: Dict[str, Any] = {"root": str(root), "entries": [], "entries_seen": 0,
-                           "untouched": 0, "skipped": [], "scan_error": "",
-                           "truncated": False, "scanned_at": time.time()}
+                           "untouched": 0, "skipped": [], "skipped_count": 0,
+                           "scan_error": "", "truncated": False, "scanned_at": time.time()}
+
+    def _skip(msg: str) -> None:
+        """记一条跳过（可见性面）：全量计数 + 名单上界内逐条点名，截断处具名。"""
+        out["skipped_count"] += 1
+        if len(out["skipped"]) < TMP_SCAN_SKIPPED_CAP:
+            out["skipped"].append(msg)
+        elif len(out["skipped"]) == TMP_SCAN_SKIPPED_CAP:
+            out["skipped"].append("... (%d more skipped entries suppressed)"
+                                  % (out["skipped_count"] - TMP_SCAN_SKIPPED_CAP))
+
     prefixes = tuple(prefixes)
     try:
         with os.scandir(root) as it:
@@ -684,14 +704,14 @@ def scan_tmp_fixture_dirs(root: str, prefixes=()) -> Dict[str, Any]:
                     continue
                 try:
                     if not ent.is_dir(follow_symlinks=False):
-                        # 符号链接不算夹具目录（跟进去量的是别人的东西）
-                        out["skipped"].append("%s (not a real directory)" % name[:120])
+                        # 符号链接/文件族不算夹具目录（跟进去量的是别人的东西；文件族由
+                        # 清扫器处置）——但绝不静默丢：逐条点名 + 全量计数
+                        _skip("%s (not a real directory)" % name[:120])
                         continue
                     out["entries"].append(
                         {"name": name, "mtime": ent.stat(follow_symlinks=False).st_mtime})
                 except OSError as e:
-                    out["skipped"].append("%s (stat failed: %s: %s)"
-                                          % (name[:120], type(e).__name__, e))
+                    _skip("%s (stat failed: %s: %s)" % (name[:120], type(e).__name__, e))
     except OSError as e:
         out["scan_error"] = "%s: %s" % (type(e).__name__, e)
     return out

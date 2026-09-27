@@ -37,11 +37,13 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 INTEG = REPO / "integration"
+if str(INTEG) not in sys.path:          # 集成侧回收 helper（同目录树根）
+    sys.path.insert(0, str(INTEG))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402
 
 pass_n = fail_n = 0
 
@@ -94,7 +96,10 @@ def row(status=None, cause=None, reason=None, evidence=None, name="case-x",
 
 def make_fixture(body, git=False, stub_name="integ_stub.py"):
     """临时仓：verify.yaml 声明 integration.cmd → 桩；git=True 时提交 main（真基线子用例）。"""
-    td = tempfile.mkdtemp(prefix="t26091013-")
+    # 夹具回收（260927 全族整治）：本文件是 L8 基线里的存量债——$TMPDIR 顶层实测
+    # `t26091013-*` 17,254 条（其中 <6h 的 8,594 条=当期最大单一活生产源）。改走集成侧
+    # 注册表（登记 + atexit 兜底 + 幂等回收；终态矩阵见 lib_tmp_reclaim 模块头）。
+    td = str(mkdtemp_reclaimed("t26091013-"))
     repo = Path(td)
     (repo / "verify.yaml").write_text(
         "schema: v1\nlanes:\n  code:\n    write_allow:\n      - src/\n"

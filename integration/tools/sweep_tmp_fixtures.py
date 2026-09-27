@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""sweep_tmp_fixtures — 一次性、可复核的「测试夹具临时目录」清扫器（宿主令 260926）。
+"""sweep_tmp_fixtures — 一次性、可复核的「测试夹具临时物料」清扫器（宿主令 260926／260927）。
 
-背景：`$TMPDIR` 顶层实测 407,294 个目录，其中 401,578 个 >6 小时未动（98.6%）。
-大头是各测试面 `mkdtemp` 出来的夹具（`integ-e2e-fixture-*` 1086 个 / ~391GB、
-`t260907-06-ut-*` 1.7 万、`sandbar-agent-presets-*` 2 万……）。生产者侧已逐个修
-（见同日各票：注册表 + exit 钩子 + 拆台回收），本脚本是**存量止血**与
-「SIGKILL 类终态」的兜底网。
+背景：`$TMPDIR` 顶层实测 407,294 个目录，其中 401,578 个 >6 小时未动（98.6%）——大头是
+各测试面 `mkdtemp` 出来的夹具（`integ-e2e-fixture-*` 1,086 个 / ~391GB、`t260907-06-ut-*`
+1.7 万、`sandbar-agent-presets-*` 2 万……）。生产者侧已逐个修（见同日各票：注册表 +
+退出钩子 + 拆台回收），本脚本是**存量止血**与「SIGKILL 类终态」的兜底网。
 
 判据（两条同时满足才删，缺一不删）：
   ① 顶层条目名以**白名单前缀**开头（TMP_FIXTURE_PREFIXES；白名单之外一律不碰——
      宿主 temp 目录里可能有别的程序的东西）；
-  ② 该目录 `mtime` 距今 ≥ `--max-age-h`（缺省 6 小时；年龄不足的一律不碰，可能在跑）。
-另：只处理**真目录**（`is_dir(follow_symlinks=False)`）——符号链接、文件、别的类型一律跳过
-（`rmtree` 跟符号链接会删错东西）。
+  ② 该条目 `mtime` 距今 ≥ `--max-age-h`（缺省 6 小时；年龄不足的一律不碰，可能在跑）。
+另按**条目类型**分流（260927 全族清扫新增）：
+  - 真目录 → `rmtree`；**常规文件** → `unlink`（锁档 `*-integ-run-*.lock`、影子
+    `sandbar-admin-log-*.log`、凭据副本 `sandbar-credentials-*.yaml` 都是**文件**族，
+    上一轮「只碰真目录」把它们整族漏掉了）；
+  - 符号链接 / FIFO / socket 等一律跳过（`rmtree` 跟符号链接会删错东西）——逐条点名；
+  - **在用即不动**（260927 新增的第三条文件族判据）：删文件前先试 `flock(LOCK_EX|LOCK_NB)`
+    ——抢得到 = 没人持有 = 可删；抢不到 = 有活进程正握着这把锁 = **保留并点名**
+    （绝不删活锁档；无 `fcntl` 的平台跳过该判据并留痕）；
+  - `EXCLUDED_PREFIXES` 里的族**永不参与**（别的程序的/别的项目的，如
+    `com.google.Chrome.*`；以及 dsh 运行时自己的 spill 目录）——判据里**排除优先**，
+    且在报告里逐族计数可见（不静默、也不误删）。
 
 安全：默认 dry-run（只报数不删），`--apply` 才删；`--apply` 的年龄闸有 1 小时硬地板
 （拒绝更激进的取值）。日志一行一动作，失败逐条点名。
@@ -25,9 +33,9 @@
         > /tmp/sweep-tmp-fixtures.log 2>&1 &                       # 真删（宿主已明确要清）
 
 摘要行（两种模式同形，dry-run 带 DRY-RUN 前缀）：
-  swept N dirs (>=6h) | kept M live | failed F | freed≈X
-其中 `freed≈X` 是**采样估算**（每前缀最多 `--sample` 个目录实测平均 × 命中数），逐前缀行
-标注采样数；命中数为 0 的前缀不估。
+  swept N (dirs D / files F) | kept M live | failed X | locks kept L | freed≈Y
+其中 `freed≈Y` 是**估算**（目录族：每前缀最多 `--sample` 个实测平均 × 命中数；文件族：
+实删文件的实际字节累计）——估算值只进报告，**绝不参与「删不删」的判据**。
 """
 from __future__ import annotations
 
@@ -38,63 +46,98 @@ import shutil
 import sys
 import tempfile
 import time
+from collections import namedtuple
+
+#: 白名单里的条目形态（`kind` = "dir" | "file"）
+FixtureEntry = namedtuple("FixtureEntry", "name mtime kind")
 
 #: 已知测试夹具前缀白名单（真源之一；另一份在 server/engine/inspection_lane_watchdog.py
 #: 的 TMP_FIXTURE_PREFIXES——两处一致性由机械漂移锁钉住
-#: server/engine/tests/test_t260926_tmp_fixture_water.py::test_e1_prefix_whitelist_single_source）。
+#: server/engine/tests/test_t260926_tmp_fixture_water.py::test_f1_prefix_whitelist_single_source）。
 #: 本脚本**不 import 引擎包**：清扫器要在引擎装不上/被改坏的机器上也能跑（止血优先）。
+#: 260927 全族整治：第二批（原先只登记在 `CANDIDATE_PREFIXES_BATCH2` 里、**未启用**——
+#: 「登记了但没启用」这种半态本身就是陷阱：上一轮就是漏了 `t260907-12-act-/-ch-` 两个
+#: 变体，存量又攒了 6,399 个）已**正式并入本表**，不再有「候选」态。逐条证据=260927
+#: 只读普查（前缀 / 顶层条目数 / 最老年龄 / 生产者 file:line）：
 TMP_FIXTURE_PREFIXES = (
+    # ---- 第一批（260926 启用；`venv-compat-root` 260927 并入更宽的 `venv-compat-`）----
     "integ-e2e-fixture-",     # integration 场景夹具（ticket-lifecycle-scenes.mjs）
-    "lint-pyc-",              # integration/lint_tests.py 的 pyc 暂存
+    "lint-pyc-",              # integration/lint_tests.py 的 pyc 暂存（atexit 回收已加）
     "fix10-", "fix14-", "fix17-",   # integration/t26* 各票 .mjs 夹具
     "pathgate-",              # t260911-03 pathgate 场景夹具
-    "t260907-06-ut-",         # server/engine/tests/test_multirepo_anchor.py
-    "t260907-12-ut",          # 同上 + test_multirepo_root_activity.py（前缀不加连字符，含 -single/-ch 等变体）
-    "sandbar-agent-presets-",  # integration/stage_docker.py 起的台（agent preset 物化）
+    "t260907-06-ut-",         # server/engine/tests/test_multirepo_anchor.py（已修）
+    "t260907-12-ut",          # 同上 :276-362 的 -ut* 变体族（已修）
+    "sandbar-agent-presets-",  # integration/stage_docker.py 起的台（agent preset 物化，已修）
     "t26092212-", "t260906-", "lease-ut-", "t260904-02-", "t260901-21-",
-    "t02-lane", "venv-compat-root", "t26090704-lane",
+    "t02-lane", "t26090704-lane",
     "wb-",
+    # ---- 第二批（260927 启用；逐条 = 命中数 / 最老 / 生产者 file:line）----
+    "t260907-12-act-",        #  4,259  245h  server/engine/tests/test_multirepo_root_activity.py:51（已修；-ut 盖不住本变体）
+    "t260907-12-ch",          #  2,140  245h  同上 :125/:136（-ch-/-ch1- 同族）
+    "sandbar-admin-log-",     #  2,854  265h  integration/stage_docker.py:1332（**文件**；两条拆台路径已回收）
+    "sandbar-credentials-",   #  2,519  112h  同上 :1333（**文件**；凭据副本留在 $TMPDIR 属卫生面欠账）
+    "sandbar-integ-run-",     #  2,820  204h  integration/run_scenarios.py 的 `_run_lock_path`（**文件** 单飞锁档；260927 已修）
+    "nusuyou-integ-run-",     #  1,836  106h  同款锁档的旧前缀——生产者在**姊妹项目**的同一份 runner
+                              #               （~/Documents/nusuyou/integration/run_scenarios.py:182），本仓修不到；
+                              #               存量由本表清（0 条 <6h = 已无新产）
+    "venv-compat-",           #  4,814  346h  integration/t260907-10/sc_engine_venv_compat.py:56-58（root+home 两族；260927 已修，原表只覆盖 -root）
+    "t26092114-",             #  8,115  132h  integration/t260921-14/lib_t26092114.py:131/156
+    "t26090704-lock",         #  3,251  245h  integration/t260907-04/sc_dispatcher_lock_fallback.py:35
+    "t260904-18-mg",          #  3,257  245h  integration/t260904-18/lib_t260904_18.py:153
+    "t260910-10-",            #  5,785  346h  integration/t260910-10/{sc_docs_project_anchor.mjs:111, sc_docs_ui_mock_v1.mjs:121-122}
+    "t260908-02-ut",          #  2,119  245h  server/engine/tests/test_t260908_02_payload_roundtrip.py:55
+    "t090506-",               #  3,230  346h  integration/t260905-06/sc_doc_{read_through,entry_present}.mjs
+    "t260904-13-itest",       #  1,900  245h  integration/t260904-13/lib_ki044.py:47
+    "sandbar-t26091202-",     #     35  321h  integration/t260912-02/lib_lifecycle_case.py:564（目录 + 文件混族）
+    "detailred-e2e-",         #  1,568  292h  integration/t260915-01/tests/sc_detail_red_refusal_receipt.py:76
+    "sandbar-reg-",           #  1,529  305h  server/plugins/workbench/tests/registry-loader.mjs:47（JS 侧，零回收动词）
+    "t260915-10-",            #  2,204  285h  integration/t260915-10/sc_docs_follow_project.mjs:87-88
+    "t26092404-",             #  2,123   64h  integration/t260924-04/sc_project_template_{journey,gate}.py
+    # 各期场景自建夹具族（前缀形态 = 本仓票号命名空间；有实命中的三条在前，其余为前瞻覆盖）
+    "t260923-",               #    168    5h  integration/t260923-01 族场景夹具
+    "t260925-",               #  1,053   55h  integration/t260925-* 族场景夹具
+    "t260916-",               #  1,256  112h  integration/t260916-15/sc_sidebar_merged_sort_ui.mjs:52
+    "t260922-", "t260921-", "t260917-", "t260918-", "t260919-", "t260920-",
 )
 
-#: **未启用**的第二批候选前缀（只登记，不参与删除）：宿主给的白名单之外，实测还有
-#: 126,586 个目录 / 22,058 个文件属于**同族**测试夹具（同一个泄漏形态，只是前缀不在
-#: 授权清单内）。按「前缀白名单之外一律不碰」的边界，这里只登记证据，等宿主授权后再并入
-#: TMP_FIXTURE_PREFIXES（并入时同步 engine 侧 TMP_FIXTURE_PREFIXES，漂移锁会红）。
-#: 逐条证据=260926 清扫后的只读普查（前缀 / 顶层条目数 / 最老年龄 / 生产者出处）：
-CANDIDATE_PREFIXES_BATCH2 = (
-    # 前缀                     实测条目数  最老   生产者（file:line，260926 grep 定位）
-    "t260907-12-act-",        #  4,251  258h  server/engine/tests/test_multirepo_root_activity.py（本批已修，存量未清）
-    "t260907-12-ch",          #  2,136  258h  同上（whitelist 的 t260907-12-ut 盖不住这两个变体）
-    "sandbar-admin-log-",     #  5,396  255h  integration/stage_docker.py（**文件**，本批已在拆台回收；存量需人工/脚本清）
-    "sandbar-credentials-",   #  5,384  255h  同上（凭据副本留在 $TMPDIR 属卫生面欠账）
-    "sandbar-integ-run-",     #  4,076  287h  integration/run_scenarios.py:3038（每 key 一把 tmp 锁文件，从不回收）
-    "nusuyou-integ-run-",     #  4,824   96h  同款锁面（另一项目的 runner 跑同一套件）
-    "venv-compat-",           #  4,749  335h  integration/t260907-10/sc_engine_venv_compat.py:57-58（root 在册、home 不在册）
-    "t26092114-",             #  4,504  121h  integration/t260921-14/lib_t26092114.py 族
-    "t26090704-lock",         #  3,236  255h  integration 场景族（whitelist 只有 t26090704-lane）
-    "t260904-18-mg",          #  3,242  255h  integration/t260904-18/ 夹具族
-    "t260910-10-",            #  4,835  335h  integration/t260910-10/ 夹具族（uifxa-/fixb-）
-    "t260908-02-ut",          #  2,099  257h  integration/t260908-01/ 夹具族
-    "dsh-subprocess-",        #  2,024  336h  dsh 子进程探针族（server/ui-check、probe_*）
-    "t090506-",               #  3,230  335h  integration/t090506-* 夹具族（entry-/read-fixture）
-    "t260904-13-itest",       #  1,896  255h  integration/t260904-13/ 夹具族
-    "sandbar-t26091202-",     #  2,406  311h  integration/t260912-02/sc_stage_sweep_owner_gone.py:114
-    "detailred-e2e-",         #  1,559  281h  integration/t260915-01/tests/sc_detail_red_refusal_receipt.py:76
-    "sandbar-reg-",           #  1,529  294h  integration 注册表夹具族
-    "t260915-10-",            #  1,468  275h  integration/t260915-10/ 夹具族
-    "t26092404-",             #  1,772   54h  integration/t260924-04/ 夹具族
-    "t260923-", "t260925-", "t260922-", "t260921-", "t260916-", "t260917-", "t260918-",
-    "t260919-", "t260920-",   # 各期场景自建夹具族（前缀形态，逐期清点后再授权）
-    # **明确不在候选内**（别程序的/别项目的，永远不碰）：com.google.Chrome.*（4,380）、
-    # 其它非 t26*/sandbar-*/fix*- 前缀的宿主条目（共 148,685 条里的大多数）
+#: 第二批并入的前缀快照（**只作留证与回归锁**：它是 `TMP_FIXTURE_PREFIXES` 的子集，
+#: 由 `server/engine/tests/test_t260927_tmp_fixture_family.py` 钉住「真已启用」；
+#: 不是第二份可独立增删的清单——白名单真源只有上面那一个）。
+BATCH2_MERGED_PREFIXES = (
+    "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
+    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",
+    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t260908-02-ut", "t090506-",
+    "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
+    "t260915-10-", "t26092404-", "t260923-", "t260925-", "t260922-", "t260921-",
+    "t260916-", "t260917-", "t260918-", "t260919-", "t260920-",
 )
 
-#: 摘要/日志里的 「未被触碰」分类（观测用，绝不参与删除）
+#: **明确排除**的族：判据里排除优先（连白名单计数都不进），永不删——逐条给理由，
+#: 因为「不碰」本身也得是可复核的判定，而不是「恰好没写进白名单」的偶然：
+EXCLUDED_PREFIXES = (
+    "com.google.Chrome.",     # Chrome 自己的 profile 临时目录（宿主浏览器的东西）
+    "com.apple.",             # 系统服务（triald / tipsd / avconferenced…）
+    "BlobRegistryFiles",      # 系统/其它进程
+    "playwright",             # 浏览器 profile / artifacts（不是本仓夹具族）
+    "TemporaryItems", "TemporaryDirectory.",
+    "vscode-git-",            # 编辑器 socket
+    "docker_cli_",            # docker CLI socket
+    "dsh-subprocess-",        # **dsh 运行时自己的 spill 目录**：@deepseek-ai/dsh-subprocess-local
+                              # 的 `lib/runner-launch-*.js:683`（`defaultSpillDir ??=
+                              # mkdtempSync(join(tmpdir(), "dsh-subprocess-"))`）。260926 普查把它
+                              # 归成「本仓 dsh 子进程探针族」——**归因是错的**（本仓 grep 零命中）；
+                              # 删活会话的 spill 目录 = 弄坏在飞的 agent 子进程，一律不碰。
+    "dsh-spill-",             # 同族（dsh 侧的 spill 目录）
+    "tmp",                    # BSD `mktemp` 缺省模板（`tmpXXXXXXXX`）：归因不到本仓，不碰
+)
+
 DEFAULT_MAX_AGE_H = 6.0
 DEFAULT_SAMPLE = 10
 DEFAULT_SAMPLE_BUDGET_S = 8.0
 #: --apply 的年龄硬地板（小时）：比这更激进的取值一律拒（正在跑的夹具必须活着）
 APPLY_MIN_AGE_H = 1.0
+#: 报告里逐条点名的上限（失败/跳过/在册锁档各自截断，但计数不截断）
+NAMED_CAP = 40
 
 
 def human(n: float) -> str:
@@ -111,49 +154,78 @@ def age_h(now: float, mtime: float) -> float:
     return max(0.0, (now - mtime) / 3600.0)
 
 
-def scan(root: str, prefixes, max_age_h: float, now: float = None):
-    """扫 `root` 顶层一次（唯一一次遍历）：命中白名单前缀的真目录按年龄分桶。
+def match_prefix(name: str, prefixes) -> str:
+    """名称命中哪个前缀（按给定顺序取首个；无命中=空串）。扫描/分组/删除三处同一判据。"""
+    for p in prefixes:
+        if name.startswith(p):
+            return p
+    return ""
 
-    返回 dict：stale/live 各为 [(name, mtime)]（name 排序，**删除顺序可复核**），
-    外加计数：entries（顶层条目总数）、untouched（白名单外）、skipped（非常规目录/
-    符号链接/stat 失败——逐条点名在 skipped_named）。
+
+def scan(root: str, prefixes, max_age_h: float, now: float = None,
+         excluded=EXCLUDED_PREFIXES):
+    """扫 `root` 顶层一次（**唯一一次遍历**）：白名单命中的真目录/常规文件按年龄分桶。
+
+    返回 dict：
+      - `stale` / `live`：`[FixtureEntry]`（按名称排序，**删除顺序可复核**）；
+      - `entries`（顶层条目总数）、`untouched`（白名单外）；
+      - `excluded_by_prefix` / `excluded_count` / `excluded_named`（明确排除族：只可见、可删不着）；
+      - `skipped_named` / `skipped`（符号链接、FIFO、stat 失败——逐条点名，绝不当 stale 删）。
     """
     now = time.time() if now is None else now
     stale, live, skipped_named = [], [], []
     entries = untouched = 0
-    locked = 0                       # stat 失败的（点名，绝不当 stale 删）
+    locked = 0
+    excluded_by_prefix = {p: 0 for p in excluded}
+    excluded_named = []
     with os.scandir(root) as it:
         for ent in it:
             entries += 1
             name = ent.name
-            if not any(name.startswith(p) for p in prefixes):
+            ep = match_prefix(name, excluded)
+            if ep:                       # 排除优先：明确排除的族永不参与（也不进白名单计数）
+                excluded_by_prefix[ep] += 1
+                if len(excluded_named) < 5:
+                    excluded_named.append(name)
+                continue
+            if not match_prefix(name, prefixes):
                 untouched += 1
                 continue
             try:
-                if not ent.is_dir(follow_symlinks=False):
-                    # 符号链接/文件/别的类型：不碰（rmtree 跟链接会删到链接目标）
-                    skipped_named.append("%s (not a real directory)" % name)
+                if ent.is_symlink():
+                    # 符号链接：不碰（rmtree 跟链接会删到链接目标=别人的东西）
+                    skipped_named.append("%s (symlink — not followed)" % name)
+                    continue
+                if ent.is_dir(follow_symlinks=False):
+                    kind = "dir"
+                elif ent.is_file(follow_symlinks=False):
+                    kind = "file"        # 文件族单独判定（锁档/影子/凭据副本）
+                else:
+                    skipped_named.append("%s (not a real directory or regular file)" % name)
                     continue
                 mtime = ent.stat(follow_symlinks=False).st_mtime
             except OSError as e:
                 locked += 1
                 skipped_named.append("%s (stat failed: %s)" % (name, e))
                 continue
-            (stale if age_h(now, mtime) >= max_age_h else live).append((name, mtime))
+            (stale if age_h(now, mtime) >= max_age_h else live).append(
+                FixtureEntry(name, mtime, kind))
     stale.sort()
     live.sort()
     return {"entries": entries, "untouched": untouched, "stale": stale, "live": live,
-            "skipped_named": skipped_named, "skipped": locked}
+            "skipped_named": skipped_named, "skipped": locked,
+            "excluded_by_prefix": excluded_by_prefix,
+            "excluded_count": sum(excluded_by_prefix.values()),
+            "excluded_named": excluded_named}
 
 
 def by_prefix(items, prefixes):
-    """[(name, mtime)] → {prefix: [items]}（按白名单顺序；同名多前缀取首个匹配，与 scan 同判据）。"""
+    """[FixtureEntry] → {prefix: [items]}（按白名单顺序；同名多前缀取首个匹配，与 scan 同判据）。"""
     out = {p: [] for p in prefixes}
-    for name, mtime in items:
-        for p in prefixes:
-            if name.startswith(p):
-                out[p].append((name, mtime))
-                break
+    for e in items:
+        p = match_prefix(e.name, prefixes)
+        if p:
+            out[p].append(e)
     return out
 
 
@@ -191,52 +263,125 @@ def bounded_size(path: str, budget_s: float) -> tuple:
     return total, truncated
 
 
+def file_size(path: str) -> int:
+    """常规文件字节（读不到算 0——估算面不猜，也绝不因此改判据）。"""
+    try:
+        return os.stat(path, follow_symlinks=False).st_size
+    except OSError:
+        return 0
+
+
+def lock_held(path: str):
+    """该文件是否正被某个进程 `flock` 持有？True/False；平台无 fcntl 或打不开=None（不判）。
+
+    「在用即不动」的实现（文件族第三条判据）：先试着抢独占锁——抢得到 = 没人持有 =
+    可以删；抢不到（EWOULDBLOCK）= 有活进程握着它（正是 `*-integ-run-*.lock` 的形态）
+    = 保留并点名。`O_RDONLY` 打开即可 flock（不需要写权限），拿完立刻解锁。
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
 def estimate(root: str, per_prefix: dict, sample: int, budget_s: float):
-    """每前缀采样估占用（最多 sample 个目录实测平均 × 命中数）+ 最老年龄。
+    """每前缀采样估占用（目录族：最多 sample 个实测平均 × 命中数；文件族：实际字节求和）。
 
     返回 (per_prefix_rows, est_total_bytes, notes)。采样与估算是**观测**，删除判据只有
-    前缀 + 年龄两条——估算值绝不参与「删不删」的决定。
+    「前缀 + 年龄（+ 文件在用即不动）」——估算值绝不参与「删不删」的决定。
     """
     rows = []
     est_total = 0.0
     notes = []
     now = time.time()
     for prefix, items in per_prefix.items():
+        dirs = [e for e in items if e.kind == "dir"]
+        files = [e for e in items if e.kind == "file"]
         if not items:
-            rows.append({"prefix": prefix, "count": 0, "oldest_h": 0.0,
-                         "est_bytes": 0, "sampled": 0, "truncated": False})
+            rows.append({"prefix": prefix, "count": 0, "dirs": 0, "files": 0,
+                         "oldest_h": 0.0, "est_bytes": 0, "sampled": 0,
+                         "dir_avg_bytes": 0.0, "truncated": False})
             continue
-        picks = items[:sample] if sample > 0 else []
+        picks = dirs[:sample] if sample > 0 else []
         sizes = []
         truncated = False
-        for name, _m in picks:
-            b, t = bounded_size(os.path.join(root, name), budget_s)
+        for e in picks:
+            b, t = bounded_size(os.path.join(root, e.name), budget_s)
             sizes.append(b)
             truncated = truncated or t
-        if sizes:
-            avg = sum(sizes) / float(len(sizes))
-            est = avg * len(items)
-            est_total += est
-            if truncated:
-                notes.append("%s: size estimate truncated by the %ss budget (underestimate)"
-                             % (prefix, budget_s))
-        else:
-            est = 0
-            notes.append("%s: no sample taken (estimate omitted)" % prefix)
-        oldest = max(age_h(now, m) for _n, m in items)
-        rows.append({"prefix": prefix, "count": len(items), "oldest_h": oldest,
-                     "est_bytes": est, "sampled": len(sizes), "truncated": truncated})
+        dir_avg = (sum(sizes) / float(len(sizes))) if sizes else 0.0
+        if dirs and not sizes:
+            notes.append("%s: no dir sample taken (dir estimate omitted)" % prefix)
+        if truncated:
+            notes.append("%s: dir size estimate truncated by the %ss budget (underestimate)"
+                         % (prefix, budget_s))
+        file_bytes = sum(file_size(os.path.join(root, e.name)) for e in files)
+        est = dir_avg * len(dirs) + file_bytes
+        est_total += est
+        oldest = max(age_h(now, e.mtime) for e in items)
+        rows.append({"prefix": prefix, "count": len(items), "dirs": len(dirs),
+                     "files": len(files), "oldest_h": oldest, "est_bytes": est,
+                     "sampled": len(sizes), "dir_avg_bytes": dir_avg,
+                     "truncated": truncated})
     return rows, est_total, notes
 
 
+def make_tree_writable(path: str) -> None:
+    """把一棵树里的目录/文件补上写位（**只在常规删除失败时**走这条路）。
+
+    为什么需要：fixture 里「只读形态」是常见被测面（260927 实况：`t260925-15-inst-*`
+    的 `content/releases/v000001/` 是 `dr-xr-xr-x`——删它里面的文件需要父目录可写，
+    `rmtree` 于是报 `PermissionError: entries.json`，21 个目录成了**永久残留**）。补权限
+    只改 mode 位，不动内容、不碰树外任何东西；失败照旧逐条点名（不静默、不假装成功）。
+    """
+    for root, dirs, files in os.walk(path):
+        for n in dirs + files:
+            try:
+                os.chmod(os.path.join(root, n), 0o700)
+            except OSError:
+                pass
+        try:
+            os.chmod(root, 0o700)
+        except OSError:
+            pass
+
+
+def _delete(root: str, entry) -> int:
+    """真删一个条目（目录 rmtree / 文件 unlink）→ 返回该条目字节数（失败上抛给调用点）。"""
+    path = os.path.join(root, entry.name)
+    if entry.kind == "file":
+        n = file_size(path)
+        os.unlink(path)
+        return n
+    try:
+        shutil.rmtree(path)
+    except PermissionError:
+        make_tree_writable(path)      # 只读 fixture 形态：补写位后重试一次
+        shutil.rmtree(path)
+    return 0
+
+
 def run(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Sweep leaked test-fixture dirs under $TMPDIR "
+    ap = argparse.ArgumentParser(description="Sweep leaked test-fixture entries under $TMPDIR "
                                             "(dry-run by default; --apply deletes)")
     ap.add_argument("--apply", action="store_true",
                     help="actually delete (default = dry-run, report only)")
     ap.add_argument("--root", default=None, help="temp root (default: tempfile.gettempdir())")
     ap.add_argument("--max-age-h", type=float, default=DEFAULT_MAX_AGE_H,
-                    help="delete only dirs idle >= this many hours (default 6)")
+                    help="delete only entries idle >= this many hours (default 6)")
     ap.add_argument("--prefix", action="append", default=None,
                     help="override the whitelist prefix (repeatable; default = built-in whitelist)")
     ap.add_argument("--sample", type=int, default=DEFAULT_SAMPLE,
@@ -247,7 +392,9 @@ def run(argv=None) -> int:
     args = ap.parse_args(argv)
 
     root = os.path.abspath(args.root or tempfile.gettempdir())
-    prefixes = tuple(args.prefix) if args.prefix else TMP_FIXTURE_PREFIXES
+    # 空串前缀 = 形同没有前缀闸（`match_prefix` 对空串恒真）——一律剔除，宁严不松：
+    # 剔除后若白名单为空，下面 `--apply` 的空白名单闸会拒收。
+    prefixes = tuple(p for p in args.prefix if p) if args.prefix else TMP_FIXTURE_PREFIXES
     out = {"mode": "apply" if args.apply else "dry-run", "root": root,
            "max_age_h": args.max_age_h, "prefixes": list(prefixes)}
     log = (lambda m: print(m, file=sys.stderr, flush=True)) if args.json \
@@ -280,65 +427,92 @@ def run(argv=None) -> int:
     rows, est_total, notes = estimate(root, by_prefix(sc["stale"], prefixes), args.sample,
                                       args.sample_budget_s)
     live_rows = by_prefix(sc["live"], prefixes)
-    log("scanned %d top-level entries in %.1fs: %d whitelisted stale (>=%sh), %d whitelisted live, "
-        "%d untouched (outside whitelist), %d skipped"
+    n_dirs = sum(1 for e in sc["stale"] if e.kind == "dir")
+    n_files = len(sc["stale"]) - n_dirs
+    log("scanned %d top-level entries in %.1fs: %d whitelisted stale (>=%sh: %d dirs / %d files), "
+        "%d whitelisted live, %d untouched (outside whitelist), %d skipped"
         % (sc["entries"], time.monotonic() - t0, len(sc["stale"]), args.max_age_h,
-           len(sc["live"]), sc["untouched"], len(sc["skipped_named"])))
+           n_dirs, n_files, len(sc["live"]), sc["untouched"], len(sc["skipped_named"])))
     for r in rows:
         live_n = len(live_rows.get(r["prefix"], []))
-        log("  %-24s stale=%-7d live=%-5d oldest=%-8s est≈%s%s"
-            % (r["prefix"], r["count"], live_n,
+        log("  %-24s stale=%-7d (d=%-6d f=%-5d) live=%-5d oldest=%-8s est≈%s%s"
+            % (r["prefix"], r["count"], r["dirs"], r["files"], live_n,
                ("%.1fh" % r["oldest_h"]) if r["count"] else "-",
                human(r["est_bytes"]) if r["count"] else "-",
-               (" (from %d sampled)" % r["sampled"]) if r["count"] else ""))
+               (" (from %d sampled)" % r["sampled"]) if r["dirs"] else ""))
     for n in notes:
         log("  note: %s" % n)
+    if sc["excluded_count"]:
+        log("excluded by policy (never swept): %d entries — %s"
+            % (sc["excluded_count"],
+               ", ".join("%s=%d" % (p, c) for p, c in sorted(sc["excluded_by_prefix"].items())
+                         if c)))
 
     freed = 0.0
     failed, failed_named = 0, []
     done = 0
+    done_dirs = done_files = 0
+    locked_kept, locked_named = 0, []
     if args.apply:
-        # 实际释放量按「逐前缀实测平均 × 实删条数」重算（不直接抄全量估算）
-        avg_by_prefix = {}
+        # 目录族的实际释放量按「逐前缀实测平均 × 实删条数」重算（不直接抄全量估算）；
+        # 文件族按实删字节累计（精确，无需采样）。
+        dir_avg_by_prefix = {}
         for r in rows:
-            if r["count"] and r["sampled"]:
-                avg_by_prefix[r["prefix"]] = r["est_bytes"] / float(r["count"])
-        log("APPLY: deleting %d dirs (>=%sh, whitelist only) ..." % (len(sc["stale"]), args.max_age_h))
-        for name, _m in sc["stale"]:
-            path = os.path.join(root, name)
+            if r["dirs"] and r["sampled"]:
+                dir_avg_by_prefix[r["prefix"]] = r["dir_avg_bytes"]
+        log("APPLY: deleting %d entries (>=%sh, whitelist only, live locks kept) ..."
+            % (len(sc["stale"]), args.max_age_h))
+        for entry in sc["stale"]:
+            p = match_prefix(entry.name, prefixes)
+            if entry.kind == "file":
+                held = lock_held(os.path.join(root, entry.name))
+                if held is True:      # 在用的锁档绝不删（第三条文件族判据）
+                    locked_kept += 1
+                    if len(locked_named) < NAMED_CAP:
+                        locked_named.append("%s (lock held by a live process)" % entry.name)
+                    log("  KEPT %s (flock held by a live process)" % entry.name)
+                    continue
             try:
-                shutil.rmtree(path)
-                done += 1
-                for p in prefixes:
-                    if name.startswith(p):
-                        freed += avg_by_prefix.get(p, 0.0)
-                        break
-            except Exception as e:          # noqa: BLE001 —— 单条失败不中断全局清扫
-                failed += 1
-                if len(failed_named) < 40:
-                    failed_named.append("%s: %s: %s" % (name, type(e).__name__, e))
+                if entry.kind == "dir":
+                    _delete(root, entry)
+                    freed += dir_avg_by_prefix.get(p, 0.0)
+                    done_dirs += 1
                 else:
-                    failed_named.append("... (%d more failures suppressed)" % (failed - 40))
-                log("  FAILED %s: %s: %s" % (name, type(e).__name__, e))
+                    freed += _delete(root, entry)
+                    done_files += 1
+                done += 1
+            except Exception as e:            # noqa: BLE001 —— 单条失败不中断全局清扫
+                failed += 1
+                if len(failed_named) < NAMED_CAP:
+                    failed_named.append("%s: %s: %s" % (entry.name, type(e).__name__, e))
+                elif len(failed_named) == NAMED_CAP:
+                    failed_named.append("... (further failures suppressed; see the count)")
+                log("  FAILED %s: %s: %s" % (entry.name, type(e).__name__, e))
             if done and done % 500 == 0:
                 log("  progress: %d/%d deleted, %d failed, %.1fs elapsed, freed≈%s"
                     % (done, len(sc["stale"]), failed, time.monotonic() - t0, human(freed)))
     else:
-        done = len(sc["stale"])
+        # dry-run：三个计数都是**候选**数（谁会被删；`kept live` 与 `locks kept` 另计）
+        done, done_dirs, done_files = len(sc["stale"]), n_dirs, n_files
         freed = est_total
 
-    summary = ("%sswept %d dirs (>=%sh) | kept %d live | failed %d | freed≈%s"
-               % ("" if args.apply else "DRY-RUN: ", done, args.max_age_h,
-                  len(sc["live"]), failed, human(freed)))
+    summary = ("%sswept %d (dirs %d / files %d) | kept %d live | failed %d | locks kept %d | "
+               "freed≈%s" % ("" if args.apply else "DRY-RUN: ", done, done_dirs, done_files,
+                             len(sc["live"]), failed, locked_kept, human(freed)))
     log(summary)
     log("done in %.1fs" % (time.monotonic() - t0))
     out.update({"entries": sc["entries"], "untouched": sc["untouched"],
-                "swept": done, "kept_live": len(sc["live"]), "failed": failed,
-                "failed_named": failed_named, "freed_est_bytes": freed,
-                "swept_is_estimate": not args.apply,
+                "swept": done, "swept_dirs": done_dirs, "swept_files": done_files,
+                "candidate_dirs": n_dirs, "candidate_files": n_files,
+                "kept_live": len(sc["live"]), "failed": failed,
+                "failed_named": failed_named,
+                "locks_kept": locked_kept, "locks_kept_named": locked_named,
+                "freed_est_bytes": freed, "swept_is_estimate": not args.apply,
                 "per_prefix": rows,
                 "live_per_prefix": {p: len(v) for p, v in live_rows.items()},
-                "skipped_named": sc["skipped_named"][:40], "notes": notes,
+                "excluded_by_prefix": {p: c for p, c in sc["excluded_by_prefix"].items() if c},
+                "excluded_named": sc["excluded_named"],
+                "skipped_named": sc["skipped_named"][:NAMED_CAP], "notes": notes,
                 "summary": summary})
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))

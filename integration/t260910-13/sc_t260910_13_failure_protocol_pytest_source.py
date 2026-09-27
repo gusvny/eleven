@@ -24,11 +24,13 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 INTEG = REPO / "integration"
+if str(INTEG) not in sys.path:          # 集成侧回收 helper（同目录树根）
+    sys.path.insert(0, str(INTEG))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402
 
 pass_n = fail_n = 0
 
@@ -89,7 +91,8 @@ if py is None:
           "pytest 生产端映射不可验（exit 2）")
     sys.exit(2)
 
-td = tempfile.mkdtemp(prefix="t26091013-pytest-")
+# 夹具回收（260927 全族整治）：`t26091013-pytest-*` 同族存量在册，改走注册表。
+td = str(mkdtemp_reclaimed("t26091013-pytest-"))
 micro = Path(td) / "test_micro_protocol.py"
 micro.write_text(MICRO)
 
