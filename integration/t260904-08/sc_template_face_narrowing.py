@@ -136,14 +136,21 @@ def main():
                   % (passed, failed, env_failed))
             return 2
         else:
+            # 260927（integration 岗）：ticket-start 半**必须同享本场景自持的注册根**——
+            # 否则它读机器级真注册表：t260924-04 之后「当项目显式登记的模板」本就该出现在
+            # 「可用：」段（nusuyou 声明 content-studio 时文案=「可用：content-studio、dev-lane」），
+            # 于是这条「恰列 dev-lane」的断言会随宿主机器上声明了什么而红（环境耦合假红）。
+            # 断言**不放宽**（仍是「可用面恰等于真源」），只是把真源钉成场景自己的空注册根。
             for tid in lib.RETIRED_TEMPLATE_IDS:
-                rc, out = lib.run_client(py, "ticket-start", {"template_id": tid}, timeout=60)
+                rc, out = lib.run_client(py, "ticket-start", {"template_id": tid}, timeout=60,
+                                         env={"SANDBAR_PROJECTS_DIR": str(reg_root)})
                 receipt = lib.parse_out_json(out)
                 msg = str(receipt.get("error") or "")
                 seg = msg.rsplit("可用：", 1)[-1] if "可用：" in msg else msg
                 check(receipt.get("ok") is False and seg == "dev-lane）",
                       "ticket-start 传 %s 被拒且文案恰列 dev-lane（实得 %r）" % (tid, msg[:90]))
-            rc, out = lib.run_client(py, "ticket-start", {"template_id": "dev-lane"}, timeout=60)
+            rc, out = lib.run_client(py, "ticket-start", {"template_id": "dev-lane"}, timeout=60,
+                                     env={"SANDBAR_PROJECTS_DIR": str(reg_root)})
             receipt = lib.parse_out_json(out)
             msg = str(receipt.get("error") or "")
             check(receipt.get("ok") is False and "ticket_id" in msg and "未知模板" not in msg,
