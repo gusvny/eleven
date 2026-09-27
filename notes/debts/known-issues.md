@@ -2197,7 +2197,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **没有任何正路能置 closed**（宿主只能走 dispatched→settled 变通并留痕）。护栏本意是防「blocked 被静默掩盖」，
 > 与「人工确认工作已完成、显式收口」并不矛盾——**这是设计取舍，需宿主定**：建议给一条**记名收口**入口
 > （`update {status:"closed"}` 在 blocked 态允许，但必须带 note + 落 `refused/授权`同级的记名账），语义与 cancel 的记名清场同族。
-> **⑤a 引擎给的 dir 型工作区缺省落在项目外，被自己的项目内闸拒**（建票当场失败）：`ticket.py:651-655`
+> **⑤a 【已修 260927，宿主令选项 i】引擎给的 dir 型工作区缺省落在项目外，被自己的项目内闸拒**（建票当场失败）：`ticket.py:651-655`
 > （`derive_lane_workspace(..., template_workspace_dir=True)`）与 `base.py:435-436`（`WS_DIR_BASE + "/" + ticket_id`）
 > 都用缺省 `WS_DIR_BASE=/tmp/sandbar-ws`（`shared.py:2148`，env `SANDBAR_WS_DIR_BASE` 可覆盖），而 `client.py:1039-1044`
 > 对**显式**绝对 workspace 跑 `check_paths_under_project` ⇒ `/tmp/sandbar-ws/<id>` 不在项目注册目录内 ⇒ 拒收
@@ -2205,7 +2205,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 被自己那条「只该管调用方传参」的闸拦下。两个修法（**需宿主定**）：①缺省基准改**项目内**（如 `<项目主目录>/.ticket-ws`——
 > nusuyou 的 `.gitignore:58` 已经忽略了 `.ticket-ws/`，说明按票工作区在项目内才是实际用法）；②保留 /tmp 缺省但让
 > `check_paths_under_project` 认得出「这是引擎派生值、不是调用方传参」而放行（只放行等于缺省基准的那一个路径，不放宽其它）。
-> **⑤b 内容票的 agent 沙箱与段职责不匹配（能力缺口）**：模板给内容票配的是 **dir 型**工作区（`base.py` 的隔离目录），
+> **⑤b 【处置=宿主令选项 ii：保持 dir 型、落仓与发布全走 service 写接口；引擎侧经核**无改动必要**】** 内容票的 agent 沙箱与段职责不匹配（能力缺口）：模板给内容票配的是 **dir 型**工作区（`base.py` 的隔离目录），
 > agent 只能在自己的票工作区里写；而 `cs-produce` 的验收要求「内容成品经 service 写接口入账」、`cs-publish` 要
 > 「发布账应答/expect 清单/审校回执」三件落盘——宿主实测**没有可走通的通道**：落仓（写 `content/output/`）与发布
 > （写内容账 `releases/`）都做不了，`t260801` 的 brief 段于是自行假设「后续段/worker 中继落仓」，而引擎里
@@ -2213,6 +2213,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （i）内容票改用 worktree/lane 型工作区（agent 能真写仓库、由 worker 代落盘，与 dev-lane 同机制）；或
 > （ii）保持 dir 型并把「落仓/发布」全部做成 service 写接口调用（需要接口与凭据在沙箱内可达）；或
 > （iii）引擎新增「中继落仓」能力（把 agent 交出的产物由 worker 代写进仓库）——这是**新能力**，不是修 bug。
+> **选项 ii 的引擎侧核查结论（260927）**：①agent 在本部署跑的是 **host 形态**（worker 日志实证「[agent-runtime] host 形态 spawn」），容器 env 白名单不构成障碍；②dsh 沙箱限制的是**文件写**（根=票工作区），**HTTP 调用不受限** ⇒ 走 service 写接口这条路在引擎侧通；③⑤a 修完后票工作区 guaranteed 落在项目内且可持久（账件落此可被门读到）。**因此 ii 不需要引擎改动**，剩下的全在 nusuyou 侧：
+> · 段必须真去调 service 写接口（落仓 `content/output/`、发布账 `releases/`）——引擎**没有**也不该凭空充当「中继落仓」；
+> · 门的**数据源改成 service 只读接口**（`cs_publish_audit.py` 已支持 `--api URL`，其 docstring 自陈「接口名/应答 schema 在真票前定」——即这半从未落地）而不是读手工落盘的 `publish_record.json`/`expect_hashes.json`（宿主本轮是按约定代做的，这正是「没人代做的形态=票一路绿、产品里空的」的机理）；
+> · agent 学 endpoint 的通道建议走项目内既有 `service/config.local.json`（内含 content_token/admin_token；读文件不受文件写沙箱限制），免改引擎。
+> **可选引擎增强（需宿主定，本次未做）**：段验收声明了「必须落某产物」而无人/无通道产出时，引擎无法机械察觉 ⇒ 可考虑「声明通道」判据（模板为每条验收声明产出方=agent 文件 / service 接口 / 人工，引擎按声明核对）。
 > **⑥ 多红折叠：merge_check 只露第一条红与其处置建议**（文案半边已修）：`dev_lane.py:3532-3538` 非冲突红一律
 > `_blocked("merge_check", "merge_check 红灯：%s" % red)`，而 `_pin_merge_red_detail` 只把**首红项**结构化；
 > 宿主遇到的是「别人提交与在飞票写集重叠」造成的脏工作区红（其处置=提交/暂存/票面说明后 retry_qc），
