@@ -53,7 +53,10 @@ from shared import (
     Signature,
     TicketScan,
     build_scan_item,
+    gate_failure_note,
     gate_from_log,
+    gate_receipt_parse,
+    gate_verdict,
     is_pending_decision,
     known_red_roster,
     list_registered_projects,
@@ -71,10 +74,12 @@ def _admin_cmd(tool: str, args: Dict[str, Any]) -> List[str]:
 
 
 def _parse(stdout: str) -> Dict[str, Any]:
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        return {}
+    """回执解析（单点=shared.gate_receipt_parse）：容忍「说明行 + 回执行」的多对象 stdout。
+
+    t260927：老实现是整段 `json.loads`，遇上多对象 stdout 就返回 {} —— 门于是被判非绿而
+    red_count 也是 0，票面写成「脚本门 … 红灯 0 项」，票永远收不了口（宿主实报）。
+    """
+    return gate_receipt_parse(stdout)
 
 
 # ---------- Step-2 generic engine channel ----------
@@ -111,18 +116,15 @@ async def script_gate(gate: GateSpec) -> GateResult:
     activity.logger.info("gate[%s] %s", gate.stage, " ".join(cmd))
     proc = await asyncio.to_thread(_run, cmd)
     payload = _parse(proc.stdout)
-    res = payload.get("result") or {}
-    green = bool(payload.get("ok")) and bool(res.get("green")) and proc.returncode == 0
+    v = gate_verdict(payload, proc.returncode)          # t260927：判定三要素逐项带出
     return GateResult(
-        green=green,
-        red_count=int(res.get("red_count") or 0),
+        green=v["green"],
+        red_count=v["red_count"],
         label=gate.label or "%s %s" % (gate.tool, json.dumps(gate.args, ensure_ascii=False)),
         exit_code=proc.returncode,
-        checks=[
-            {"check": c.get("check"), "level": c.get("level"), "count": c.get("count")}
-            for c in (res.get("checks") or [])
-        ],
+        checks=v["checks"],
         raw_head=(proc.stdout or proc.stderr or "")[:400],
+        parsed=v["parsed"], receipt_ok=v["receipt_ok"], receipt_green=v["receipt_green"],
     )
 
 

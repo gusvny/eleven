@@ -1795,6 +1795,98 @@ class GateResult:
     exit_code: int
     checks: List[Dict[str, Any]] = field(default_factory=list)
     raw_head: str = ""
+    # t260927（宿主实报「门绿了也判 blocked，票永远收不了口」，实案 nusuyou content-260808）：
+    # 判定三要素与回执解析状态**逐项带出**——因为老实现只用 red_count 拼文案，于是
+    # 「回执没解析出来（parsed=False）」与「门真红 5 项」写出同一句「红灯 0 项 → blocked」，
+    # 读日志的人分不清「门红」还是「没推进」，而这两种情况的处置完全不同。
+    parsed: bool = True
+    receipt_ok: bool = False
+    receipt_green: bool = False
+
+
+def gate_receipt_parse(stdout: str) -> Dict[str, Any]:
+    """解析门/工具回执 stdout：**容忍「说明行 + 回执行」的多对象流**。
+
+    实案（t260927-16 / nusuyou content-260808）：`cs_publish_audit.py publish` 先打一行
+    诊断 JSON（`{"note": "含 marker 子串但非记名块形态的提交…"}`）、再打真回执
+    （`{"ok": true, "result": {"green": …, "red_count": …}}`）。老实现整段 `json.loads`
+    → `JSONDecodeError` → 返回 `{}` ⇒ 门被判非绿而 `red_count` 也是 0 ⇒ 票面写成
+    「脚本门 … 红灯 0 项 → blocked」，而且 retry_qc 重跑多少次都是同一句（回执解析结果
+    与上次逐字相同），票永远收不了口。
+
+    取法（优先级固定，可复核）：①整段能解析就用它；②否则逐行从**后往前**找 JSON 对象，
+    **优先含 `ok` 键的那个**（回执特征——诊断行通常没有 ok）；③再退而取最后一个可解析
+    对象；④都没有 = `{}`（调用方必须按「回执不可解析」精确点名，不许当绿灯也不许当门红）。
+    """
+    import json                                    # 局部导入：本模块的 json 别名在文件尾部才绑
+    text = stdout or ""
+    try:
+        whole = json.loads(text)
+        if isinstance(whole, dict):
+            return whole
+    except Exception:                                  # noqa: BLE001 —— 多对象/非 JSON：走逐行
+        pass
+    objs: List[Dict[str, Any]] = []
+    dec = json.JSONDecoder()
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln.startswith("{"):
+            continue
+        try:
+            obj = json.loads(ln)
+        except Exception:                              # noqa: BLE001 —— 该行不是完整 JSON
+            try:
+                obj, _ = dec.raw_decode(ln)
+            except Exception:                          # noqa: BLE001
+                continue
+        if isinstance(obj, dict):
+            objs.append(obj)
+    for obj in reversed(objs):
+        if "ok" in obj:
+            return obj
+    return objs[-1] if objs else {}
+
+
+def gate_verdict(payload: Dict[str, Any], returncode: int) -> Dict[str, Any]:
+    """门判定三要素（纯函数，供活动与 UT 共用）：green / red_count / 解析与要素状态。
+
+    `green` 仍是**三者全过**才算绿（载荷 ok、载荷 result.green、退出码 0）——判据不放宽；
+    这里只是把「哪一个没过」如实带出来，供文案点名。
+    """
+    res = (payload or {}).get("result") or {}
+    receipt_ok = bool((payload or {}).get("ok"))
+    receipt_green = bool(res.get("green"))
+    try:
+        red_count = int(res.get("red_count") or 0)
+    except (TypeError, ValueError):
+        red_count = 0
+    return {
+        "parsed": bool(payload),
+        "receipt_ok": receipt_ok,
+        "receipt_green": receipt_green,
+        "red_count": red_count,
+        "green": bool(receipt_ok and receipt_green and returncode == 0),
+        "checks": [
+            {"check": c.get("check"), "level": c.get("level"), "count": c.get("count")}
+            for c in (res.get("checks") or [])
+        ],
+    }
+
+
+def gate_failure_note(label: str, v: Dict[str, Any], exit_code: int, raw_head: str = "") -> str:
+    """门非绿时的**精确**文案（报错必须说清哪个检查失败——老文案「红灯 0 项」是反面教材）。
+
+    三态各写各的：①真红（red_count>0）；②回执不可解析（parsed=False，门脚本 stdout 没有
+    可解析的回执对象）；③回执在但要素没过（点名 ok/green/exit 三者各自的值）。
+    """
+    if not v.get("parsed"):
+        return ("脚本门 %s 判定非绿：**回执不可解析**（stdout 里没有可解析的 JSON 回执对象；"
+                "门脚本必须把回执打到 stdout——末行或含 ok 键的那个对象）｜exit=%s｜stdout 头=%r"
+                % (label, exit_code, (raw_head or "")[:180]))
+    if int(v.get("red_count") or 0) > 0:
+        return "脚本门 %s 红灯 %d 项" % (label, int(v["red_count"]))
+    return ("脚本门 %s 判定非绿：回执说 0 红但要素未过（ok=%s, result.green=%s, exit=%s）"
+            % (label, v.get("receipt_ok"), v.get("receipt_green"), exit_code))
 
 
 @dataclass

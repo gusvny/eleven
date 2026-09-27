@@ -69,6 +69,7 @@ with workflow.unsafe.imports_passed_through():
         WORKER_SHUTDOWN_RETRY_PATCH_ID,
         cross_project_judge,
         format_agent_stage_failure,
+    gate_failure_note,
         normalize_files_changed,
         normalize_handover_runs,
         env_note_for,
@@ -838,7 +839,14 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
                 if gate is not None:
                     gres = await self._run_gate(st)
                     if not gres.green:
-                        failure = "脚本门 %s 红灯 %d 项" % (gres.label, gres.red_count)
+                        # t260927（宿主实报「门绿了也判 blocked」）：文案必须点名到底哪个检查
+                        # 没过——老文案恒写「红灯 N 项」，于是「回执不可解析」与「真红 5 项」
+                        # 写出同一句「红灯 0 项」，读日志的人无从分辨（处置完全不同）。
+                        failure = gate_failure_note(
+                            gres.label,
+                            {"parsed": gres.parsed, "receipt_ok": gres.receipt_ok,
+                             "receipt_green": gres.receipt_green, "red_count": gres.red_count},
+                            gres.exit_code, gres.raw_head)
                 if not failure:
                     break
                 self.meta["stage_state"] = "blocked"
