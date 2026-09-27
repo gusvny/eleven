@@ -48,6 +48,8 @@ from temporalio.common import SearchAttributeKey
 
 from shared import (
     AUTH_KINDS,
+    CLOSE_OUT_PREFIX,
+    close_out_terminate_reason,
     AUTHZ_SIGNAL_GATE_MARKER,
     CALLER_PROJECT_ENV,
     CALLER_UNDECLARED_MARK,
@@ -721,6 +723,85 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
                                                "timeline/cross_project_uses 为终结前窗口"
                                                "尽力面")}),
                          gate, "ticket-cancel")
+
+
+async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
+    """人工记名收口（t260927 宿主实报④；ticket.py op=close_out 的引擎侧入口）。
+
+    与 ticket-cancel 同款纪律、不同语义：
+      · cancel = 记名**清场**（理由=为什么废掉）；
+      · close_out = 记名**收口**（理由=工作已完成的依据）——用于「票被误判 blocked、
+        工作其实已经干完」这一类：A3.5 护栏把 blocked 态的 `status=closed` 堵死了，
+        于是完成态没有任何正路能收口、看板永不归零。
+
+    次序同 cancel（宿主令 260922「留痕必须先写、后终结」）：参数校验 → describe →
+    幂等闸 → 跨项目闸（_write_gate）→ 先 signal close_out_notice（who/reason 原文进
+    事件历史，handler 写票面 close_out 记录并把 status 置 closed）→ 后 terminate
+    （reason=带固定前缀的同一串，终态面与 admin.log 一眼可辨「人工收口」而非「清场」）。
+
+    诚实口径：`delivered:true` 只承诺「信号已落事件历史」，不承诺 handler 已执行
+    （KI-081 老 worker 静默丢新信号；对账面不依赖 handler 承接）；被拒调用零副作用。
+    """
+    tid = str(args.get("ticket_id") or args.get("id") or "")
+    who = str(args.get("who") or "").strip()
+    raw_reason = args.get("reason")
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        return _err("ticket-close-out 的 reason 需为字符串（收到 %s）——收口理由是记名"
+                    "对账锚，非串不做静默归一" % type(raw_reason).__name__)
+    reason = str(raw_reason or "").strip()
+    if not tid:
+        return _err("ticket-close-out 需要 ticket_id")
+    if not who:
+        return _err("ticket-close-out 需要 who（操作人必填非空——记名收口不留 op-local）")
+    if not reason:
+        return _err("ticket-close-out 需要 reason（收口依据必填非空：说清凭什么认定工作"
+                    "已完成——这是事后审计的唯一锚点，空=结构化拒收）")
+    if len(reason) > CROSS_PROJECT_NOTE_LIMIT:
+        return _err("ticket-close-out reason 超限（%d > %d 字符）——拆短后重试"
+                    % (len(reason), CROSS_PROJECT_NOTE_LIMIT))
+    client = await _connect()
+    handle = client.get_workflow_handle(tid)
+    try:
+        desc = await handle.describe()
+    except Exception as e:
+        if _is_not_found_exc(e):
+            return _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)
+        return _err("目标读取失败（%s: %s）——未执行任何动作，稍后重试"
+                    % (type(e).__name__, e), KIND_TRANSIENT)
+    exec_status = desc.status.name if desc.status is not None else ""
+    if exec_status not in _TICKET_CANCEL_ALIVE:
+        return _ok({"ticket_id": tid, "already_terminal": True,
+                    "exec_status": exec_status or "未知", "reason": reason, "who": who,
+                    "note": "已终态（%s），未执行任何动作（幂等回执，重试安全）"
+                            % (exec_status or "未知")})
+    gate = await _write_gate(handle, tid, args)
+    if gate["err"] is not None:
+        return gate["err"]
+    try:
+        await handle.signal("close_out_notice",
+                            {"who": who, "reason": reason, "kind": "close_out",
+                             "caller_project": gate["stamp"] if gate else "",
+                             "cross_project_note": gate["note"] if gate else ""})
+    except Exception as e:
+        return _err("close_out_notice 留痕信号投递失败：%s: %s——未执行终结（先留痕失败"
+                    "即不终结）；零票面副作用，稍后重试" % (type(e).__name__, e))
+    term_reason = close_out_terminate_reason(reason)
+    try:
+        await handle.terminate(reason=term_reason)
+    except Exception as e:
+        return _err("terminate 失败：%s: %s——close_out_notice 记名信号已入事件历史，"
+                    "本次未终结（可能自然完单/已被终结）；重试安全（已终态将回幂等回执）"
+                    % (type(e).__name__, e))
+    return _gate_receipt(_ok({"ticket_id": tid, "terminated": True,
+                              "reason": reason, "terminate_reason": term_reason,
+                              "who": who, "signal": "close_out_notice", "delivered": True,
+                              "receipt_note": ("delivered=signal 已落事件历史（不承诺 "
+                                               "handler 已执行，KI-081）；权威对账=事件"
+                                               "历史（close_out_notice 先于 terminated）"
+                                               "×admin.log；terminate_reason 前缀"
+                                               "%r 即人工收口的可辨标记"
+                                               % CLOSE_OUT_PREFIX)}),
+                         gate, "ticket-close-out")
 
 
 async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2773,6 +2854,7 @@ COMMANDS = {
     "schedule-list": cmd_schedule_list,
     "cancel": cmd_cancel,
     "ticket-cancel": cmd_ticket_cancel,
+    "ticket-close-out": cmd_ticket_close_out,
     "ticket": cmd_ticket,
     "ticket-start": cmd_ticket_start,
     "ticket-list": cmd_ticket_list,

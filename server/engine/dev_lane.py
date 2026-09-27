@@ -1430,12 +1430,20 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         if detail:
             self.meta["blocked_detail"] = detail
 
-    def _pin_merge_red_detail(self, checks: Any, fallback_files: Any = None) -> None:
+    def _pin_merge_red_detail(self, checks: Any, fallback_files: Any = None,
+                              disposition: str = "") -> None:
         """merge_check 红灯的结构化明细（A4）：取首红项的既有结论（id/item/
         reason_code/files/next_action/detail）结构化写 blocked_detail——只做「已有
         结论结构化」，红绿判定与文案零改动。无红项时回落 fallback_files（conflict
         类的 conflict_files，D4 已逐文件在 checks 里，此处是畸形兜底）。三处调用点
-        全部紧邻 _blocked（非 blocked 期由清点①②清空，R2 生命周期）。"""
+        全部紧邻 _blocked（非 blocked 期由清点①②清空，R2 生命周期）。
+
+        260927（宿主实报⑥可见性半边，**纯加法**）：旧实现只结构化**首红**，于是「同一轮
+        里还有别的红、各属哪一类、各自该怎么处置」在票面上不可见——宿主实案：其红是
+        「脏工作区」这一类（处置=提交/暂存/票面说明后 retry_qc），但读起来像「预演冲突不
+        会自动消解」。现在**只加两个键**：`reds`（逐条红项：check_id/item/reason_code/
+        class/next_action/files）与 `disposition`（本轮路由结论），既有键**逐字节不变**
+        （blocked_detail 被 6 个测试文件 41 处引用，只加不改是硬约束）。"""
         if not getattr(self, "_detail_face_on", False):
             return
         red: Optional[Dict[str, Any]] = None
@@ -1467,6 +1475,31 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             inner = path_gates.sanitize_gate_refusal(red.get("gate_refusal"))
             if inner:
                 detail = inner
+        # 260927 ⑥：逐条列出**全部**红项 + 红类 + 各自处置（纯加法，既有键不变）
+        reds: List[Dict[str, Any]] = []
+        for c in (checks if isinstance(checks, list) else []):
+            if not (isinstance(c, dict) and c.get("green") is False):
+                continue
+            _cid = str(c.get("id") or "merge_check")
+            _rc = str(c.get("reason_code") or "merge_check_red")
+            _files = c.get("files")
+            reds.append({
+                "check_id": _cid,
+                "item": str(c.get("item") or ""),
+                "reason_code": _rc,
+                # 红类=引擎本轮将怎么处置：预演冲突类红会（至多 N 轮）自动打回 implement
+                # 消解；其余红一律 blocked 等人。判据与 dev_lane 的路由条件同源
+                # （merge_rehearsal / merge_conflict 即 conflict 类）。
+                "class": "auto_conflict" if (_cid == "merge_rehearsal" or _rc == "merge_conflict")
+                         else "human",
+                "next_action": str(c.get("next_action") or ""),
+                "files": [str(f) for f in _files[:20]] if isinstance(_files, list) else [],
+            })
+        if isinstance(detail, dict):
+            if reds:
+                detail["reds"] = reds
+            if disposition:
+                detail["disposition"] = str(disposition)
         safe = path_gates.sanitize_gate_refusal(detail)
         if safe:
             self.meta["blocked_detail"] = safe
@@ -3529,8 +3562,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                     self._handoff("merge_check", "合并检查四项全绿")
                     phase = "merge"
                     continue
-                red = "；".join("%s: %s" % (c.get("item"), c.get("detail"))
-                                for c in mc.checks if not c.get("green"))
+                # 260927 ⑥：逐条带出该红的**处置**（宿主实报：旧文案只有首红的处置，
+                # 于是「脏工作区红」被读成「预演冲突不会自动消解」）。
+                red = "；".join(
+                    "%s: %s%s" % (c.get("item"), c.get("detail"),
+                                  ("｜处置：%s" % c.get("next_action")) if c.get("next_action") else "")
+                    for c in mc.checks if not c.get("green"))
                 # t260826-01 conflict auto-resolution loop: only a merge dry-run conflict
                 # red (mc.conflict) skips blocked and automatically sends work back to
                 # implement for resolution (reusing the rework loop, no signal needed);
@@ -3538,7 +3575,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 if not mc.conflict:
                     # t260915-01 ②（A4）：非冲突红转 blocked——首红项既有结论结构化
                     # 紧邻 _blocked 写入（当前受阻明细；非 blocked 期由清点①②清空）。
-                    self._pin_merge_red_detail(mc.checks)
+                    # 260927 ⑥：同时逐条结构化全部红 + 本轮路由结论（纯加法）。
+                    self._pin_merge_red_detail(
+                        mc.checks,
+                        disposition="本轮=非冲突红 → blocked 等人；逐条处置见 reds")
                     await self._blocked("merge_check", "merge_check 红灯：%s" % (red or mc.error))
                     continue
                 # ---- conflict-class reds: round counting + loop protection (the blocked
@@ -3549,14 +3589,20 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 if conflict_rounds > MAX_CONFLICT_ROUNDS:
                     # t260915-01 ②（A4）：conflict 类转人工的红——首红项（rehearsal）
                     # /conflict_files 结构化，紧邻 _blocked（C6 口径：消解常态路径不写）
-                    self._pin_merge_red_detail(mc.checks, mc.conflict_files)
+                    self._pin_merge_red_detail(
+                        mc.checks, mc.conflict_files,
+                        disposition="本轮=冲突类红，消解 %d 轮未收敛（上限 %d）→ 转人工处置"
+                                    % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS))
                     await self._blocked(
                         "merge_check",
                         "冲突消解 %d 轮未收敛（上限 %d），转人工处置：冲突文件 %s"
                         % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS, files_txt))
                     continue
                 if prev_conflict_files and files_sig == prev_conflict_files:
-                    self._pin_merge_red_detail(mc.checks, mc.conflict_files)
+                    self._pin_merge_red_detail(
+                        mc.checks, mc.conflict_files,
+                        disposition="本轮=同批文件连续 2 轮相同冲突（第 %d 轮）→ 转人工处置"
+                                    % conflict_rounds)
                     await self._blocked(
                         "merge_check",
                         "同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"

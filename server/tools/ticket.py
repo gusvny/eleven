@@ -135,7 +135,8 @@ TOOL = {
             'op': {'type': 'string', 'enum': ['create', 'update', 'list', 'show', 'accept',
                                               'advance', 'dispatch-next', 'rework',
                                               'sign', 'retry_qc', 'pause', 'resume',
-                                              'authorize', 'ruling', 'cancel']},
+                                              'authorize', 'ruling', 'cancel',
+                                              'close_out']},
             'caller_project': {'type': 'string', 'description': '调用方项目身份（t260915-12 跨项目闸）：显式声明优先于 env/cwd 推导；写操作身份与目标票项目不符=拒收（cross_project_refused），确需跨项目带 cross_project 旗。引擎仓树内 cwd 不推导（防间接调用凭空造身份）'},
             'cross_project': {'type': 'object', 'properties': {'by': {'type': 'string', 'description': '谁在越权（记名）'}, 'reason': {'type': 'string', 'description': '为什么跨项目（理由必填入账）'}}, 'required': ['by', 'reason'], 'description': '越权豁免旗（记名留痕可查）：declared 身份跨项目写操作的显式放行钥匙；缺理由=拒收'},
             'cross_project_reason': {'type': 'string', 'description': '越权旗扁平形（理由必填；by 缺省取 by|who）——与 cross_project.reason 互斥'},
@@ -159,7 +160,7 @@ TOOL = {
             'status': {'type': 'string', 'enum': ['dispatched', 'settled', 'verified', 'closed', 'rework']},
             'stage_state': {'type': 'string', 'enum': ['running', 'awaiting', 'awaiting-human', 'blocked']},
             'note': {'type': 'string', 'description': '备注（结算摘要/验收结论/返工原因；pause/resume 为可选理由，上限由 workflow intake 把关）'},
-            'reason': {'type': 'string', 'description': 'cancel 清场理由（必填非空）：终结后 admin.log 与 workflow 事件历史按此串精确对账；建议 ≤300 字符（保跨项目记名条目 cross_project_uses 全文入账；残渣票判据=模块头清场 runbook）'},
+            'reason': {'type': 'string', 'description': 'cancel=清场理由 / close_out=收口依据（两者皆必填非空）：终结后 admin.log 与 workflow 事件历史按此串精确对账；建议 ≤300 字符（保跨项目记名条目 cross_project_uses 全文入账；残渣票判据=模块头清场 runbook）。close_out 的理由=凭什么认定工作已完成（事后审计唯一锚点）'},
             'pending_add': {'type': 'string', 'description': '追加一条挂起项（遗留问题，不硬改交回）'},
             'to_stage': {'type': 'string', 'description': 'rework 打回目标 stage（缺省回上一段）'},
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
@@ -953,6 +954,38 @@ def _cancel(a):
     return _poc_ok(out)
 
 
+def _close_out(a):
+    """人工记名收口（t260927，宿主实报④）：把「票被误判 blocked、工作其实已完成」的
+    完成态**记名收口**——一条 op 同时做三件：记名（who/reason 必填非空，进不可变事件
+    历史与 admin.log）、置票面终态（closed）、终止工作流。与 cancel 的分工：cancel 是
+    **清场**（理由=为什么废掉），close_out 是**收口**（理由=凭什么认定工作已完成）。
+
+    为什么需要：A3.5 护栏（blocked 态只允许 dispatched/settled/rework）把「置 closed」
+    这条正路也堵死了，于是完成态只能靠 dispatched→settled 变通、工作流仍挂在 blocked，
+    看板永不归零。判据/次序纪律全在 client.py ticket-close-out 单点（先 signal
+    close_out_notice 留痕、后 terminate，reason 带固定前缀可辨）——本薄壳不第二真源。"""
+    tid = a.get('id')
+    if not tid:
+        raise ValueError('close_out 需要 id')
+    who = _who(a).strip()
+    if not who:
+        raise ValueError('close_out 需要 by|who（操作人身份由调用方注入，不得留空）')
+    raw_reason = a.get('reason')
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        raise ValueError('close_out 的 reason 需为字符串（收到 %s）——收口理由必须逐字'
+                         '可对账，非串不做静默归一' % type(raw_reason).__name__)
+    reason = str(raw_reason or '').strip()
+    if not reason:
+        raise ValueError('close_out 需要 reason（收口依据必填非空：说清凭什么认定工作'
+                         '已完成——这是事后审计的唯一锚点）')
+    payload = {'op': 'close_out', 'ticket_id': tid, 'who': who, 'reason': reason}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket-close-out', payload, a)
+    return _poc_ok(out)
+
+
 def _ruling(a):
     """宿主裁决注入（t260915-12 F2 收口：schema op enum 宣告了 ruling 而分发器无出口
     ——宣告不支持的工具面=对模型面撒谎，KI-079 同族「说明书与实际入口不符」）。薄壳
@@ -1081,6 +1114,8 @@ def run(args):
         return _retry_qc(args)
     if op == 'cancel':
         return _cancel(args)
+    if op == 'close_out':
+        return _close_out(args)
     if op in ('pause', 'resume'):
         return _pause_resume(args, op)
     raise ValueError('未知 op: %r' % (op,))

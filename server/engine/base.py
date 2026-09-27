@@ -289,6 +289,60 @@ class TicketCrossProjectMixin:
             self._touch()
         return True
 
+    # ---------- t260927：人工记名收口信号（close_out 前置留痕，先留痕后终结） ----------
+    @workflow.signal
+    def close_out_notice(self, req: dict) -> None:
+        """人工记名收口预告（`ticket.py op=close_out` 的引擎侧入口；260927 宿主实报④）。
+
+        为什么需要它：票被误判 blocked、工作其实已完成时，A3.5 护栏（blocked 态只允许
+        `dispatched/settled/rework`）把「置 closed 收口」正路也堵死了——完成态只能靠
+        dispatched→settled 变通，且工作流仍挂在 blocked（看板永不归零）。本信号=**记名
+        收口**：把 who/reason 落票面与事件历史，把 status 置 closed，随后由 client 侧
+        terminate（与 cancel 同款「先留痕、后终结」次序纪律，事件历史里本信号恒先于
+        terminated）。
+
+        A3.5 关系（必须读明白再改）：本 handler **不走** `update` op 的 A3.5 判据——那条
+        判据防的是「用通用 update 把 blocked 悄悄写成非 blocked」；本信号是**专门的、强制
+        记名（who+reason 必填非空）**的收口语义，记录里带 `was_state/was_stage`，把被覆盖
+        的状态如实留痕（掩盖不成立=留下证据）。畸形载荷=refused[] 零副作用、不动 status。
+
+        放在共享 mixin（TicketCrossProjectMixin）里而非某个模板基类：dev_lane 与模板族
+        两个工作流都要这条能力（dev_lane 原本连 cancel_notice 都没有，票面留痕缺口同源）。
+        handler 只写两棵类树都有的面（meta/refused/_now_iso/_log/_mark），不新增 Temporal
+        command，老历史重放不会触达（事件驱动 handler，sign/rework 先例）。
+        """
+        if not isinstance(req, dict):
+            req = {}
+        who = str(req.get("who") or "").strip()
+        reason = str(req.get("reason") or "").strip()
+        if not who:
+            self.refused.append({"who": who, "want": "close_out_notice",
+                                 "why": "who 必填非空（空/纯空白拒收，零副作用）"})
+            return
+        if not reason:
+            self.refused.append({"who": who, "want": "close_out_notice",
+                                 "why": "reason 必填非空（收口理由是记名对账锚，空=拒收零副作用）"})
+            return
+        if not self._cross_project_gate(str(req.get("caller_project") or ""),
+                                        str(req.get("cross_project_note") or ""),
+                                        "close_out", who, "close_out"):
+            return
+        at = self._now_iso()
+        meta = self.meta
+        was_state = str(meta.get("stage_state") or "")
+        was_stage = str(meta.get("stage") or "")
+        meta["close_out"] = {"who": who, "reason": reason, "at": at,
+                             "was_state": was_state, "was_stage": was_stage}
+        meta["status"] = "closed"
+        meta["stage_state"] = "awaiting"
+        meta["blocked_reason"] = ""
+        meta["blocked_detail"] = None
+        self._log("人工记名收口（close_out）：%s——原状态 stage=%s state=%s（who=%s，at=%s）"
+                  % (reason, was_stage or "（无）", was_state or "（无）", who, at))
+        self._mark(was_stage or "close_out", "closed",
+                   "人工记名收口（工作已完成）：%s" % reason)
+        self._touch()
+
     # ---------- t260922-10：记名清场信号（cancel 前置留痕，先留痕后终结） ----------
     @workflow.signal
     def cancel_notice(self, req: dict) -> None:

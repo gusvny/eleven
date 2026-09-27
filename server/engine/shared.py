@@ -1804,6 +1804,26 @@ class GateResult:
     receipt_green: bool = False
 
 
+# ---- 人工记名收口（t260927 宿主实报④）-----------------------------------------------
+# 背景：票被误判 blocked 但工作其实已完成时，A3.5 护栏（blocked 只允许 dispatched/
+# settled/rework）把「置 closed 收口」这条路也堵死了，于是已完成的票没有任何正路能收口、
+# 看板永不归零。处置=宿主令「按推荐（选项 B）」：新增**记名收口**语义——一条 op 同时做
+# 三件：记名（who/reason 进不可变历史与 admin.log）、置票面终态（closed）、终止工作流
+# （复用 cancel 的「先留痕后终结」次序纪律）。terminate 的 reason 带固定前缀，使终态面
+# 与 admin.log 一眼可辨是「人工收口」而不是「清场」。
+CLOSE_OUT_PREFIX = "close_out（人工记名收口·工作已完成）："
+
+
+def close_out_terminate_reason(reason: str) -> str:
+    """收口终结理由（前缀固定=终态面/admin.log 可辨；纯函数）。"""
+    return CLOSE_OUT_PREFIX + str(reason or "").strip()
+
+
+def is_close_out_reason(text: str) -> bool:
+    """该终结理由是否出自人工记名收口（纯函数；面/看板据它区分清场与收口）。"""
+    return str(text or "").startswith(CLOSE_OUT_PREFIX)
+
+
 def gate_receipt_parse(stdout: str) -> Dict[str, Any]:
     """解析门/工具回执 stdout：**容忍「说明行 + 回执行」的多对象流**。
 

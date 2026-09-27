@@ -242,6 +242,38 @@ def test_pin_settle_refusal_tolerates_missing_attr():
     assert wf.meta["blocked_detail"]["reason_code"] == "protected_path"
 
 
+def test_pin_merge_red_detail_lists_all_reds_with_class_and_disposition():
+    """260927 宿主实报⑥可见性半边：**全部**红项逐条结构化（红类 + 各自处置），
+    且既有键（首红那套）逐字节不变——blocked_detail 被 6 个测试文件 41 处引用，
+    「只加不改」是硬约束。"""
+    checks = [
+        {"item": "泳道分支有 commit", "green": True, "detail": "2 个 commit", "id": "lane_commits"},
+        {"item": "工作区干净", "green": False, "detail": "未提交：a.py", "id": "worktree_clean",
+         "reason_code": "worktree_dirty", "files": ["a.py"], "next_action": "提交或暂存"},
+        {"item": "泳道内 verify_lane code 绿灯", "green": False, "detail": "red=1", "id": "verify_lane_code",
+         "reason_code": "verify_red", "next_action": "按红灯项修复后 retry_qc"},
+        {"item": "merge 预演无冲突", "green": False, "detail": "冲突：x.py", "id": "merge_rehearsal",
+         "reason_code": "merge_conflict", "files": ["x.py"], "next_action": "自动打回 implement 消解"},
+    ]
+    wf = _mk_wf(True)
+    wf._pin_merge_red_detail(checks, disposition="本轮=非冲突红 → blocked 等人")
+    d = wf.meta["blocked_detail"]
+    # 既有键（首红）逐字节不变
+    assert d["check_id"] == "worktree_clean" and d["reason_code"] == "worktree_dirty"
+    assert d["files"] == ["a.py"] and d["next_action"] == "提交或暂存" and d["red"] is True
+    # 加法键：逐条红 + 红类 + 处置
+    assert [r["check_id"] for r in d["reds"]] == ["worktree_clean", "verify_lane_code", "merge_rehearsal"]
+    assert [r["class"] for r in d["reds"]] == ["human", "human", "auto_conflict"]
+    assert d["reds"][0]["next_action"] == "提交或暂存"
+    assert d["reds"][0]["files"] == ["a.py"] and d["reds"][2]["files"] == ["x.py"]
+    assert d["disposition"] == "本轮=非冲突红 → blocked 等人"
+    # 无红项：不塞空 reds（老形状零变化）
+    wf2 = _mk_wf(True)
+    wf2._pin_merge_red_detail([{"item": "x", "green": True, "id": "ok"}], ["c1"])
+    assert "reds" not in wf2.meta["blocked_detail"]
+    assert wf2.meta["blocked_detail"]["reason_code"] == "merge_conflict"
+
+
 def test_pin_merge_red_detail_first_red_and_fallback():
     checks = [
         {"item": "泳道分支有 commit", "green": True, "detail": "2 个 commit", "id": "lane_commits"},
