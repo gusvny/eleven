@@ -2192,7 +2192,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （① ② ③ 同根因=门回执解析，**已修**：`shared.gate_receipt_parse` 容忍「说明行+回执行」多对象 stdout、
 > `gate_verdict` 三要素逐项带出、`gate_failure_note` 文案精确点名；实案两行 stdout 里门其实有 **1 项真红**
 > 「发布账无本票条目：source=content-260808 未在版本目录在册」，老实现把它掩成「红灯 0 项」。⑥的文案半边也已修）。
-> **④ blocked 态无法收口（A3.5 护栏与「已完成票」冲突）**：`base.py:965-977` / `dev_lane.py:4040-4052` 规定
+> **④ 【已修 260927，宿主令「按你推荐的来」=选项 B】** blocked 态无法收口（A3.5 护栏与「已完成票」冲突）：`base.py:965-977` / `dev_lane.py:4040-4052` 规定
 > `stage_state=="blocked"` 时只允许 `status∈{dispatched,settled,rework}`，于是「内容早已上线、只是段被误判 blocked」的票
 > **没有任何正路能置 closed**（宿主只能走 dispatched→settled 变通并留痕）。护栏本意是防「blocked 被静默掩盖」，
 > 与「人工确认工作已完成、显式收口」并不矛盾——**这是设计取舍，需宿主定**：建议给一条**记名收口**入口
@@ -2205,7 +2205,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 被自己那条「只该管调用方传参」的闸拦下。两个修法（**需宿主定**）：①缺省基准改**项目内**（如 `<项目主目录>/.ticket-ws`——
 > nusuyou 的 `.gitignore:58` 已经忽略了 `.ticket-ws/`，说明按票工作区在项目内才是实际用法）；②保留 /tmp 缺省但让
 > `check_paths_under_project` 认得出「这是引擎派生值、不是调用方传参」而放行（只放行等于缺省基准的那一个路径，不放宽其它）。
-> **⑤b 【处置=宿主令选项 ii：保持 dir 型、落仓与发布全走 service 写接口；引擎侧经核**无改动必要**】** 内容票的 agent 沙箱与段职责不匹配（能力缺口）：模板给内容票配的是 **dir 型**工作区（`base.py` 的隔离目录），
+> **⑤b 【处置=宿主令选项 ii：保持 dir 型、落仓与发布全走 service 写接口；引擎侧经核**无改动必要**；「声明通道」增强经宿主裁定**先不立**】** 内容票的 agent 沙箱与段职责不匹配（能力缺口）：模板给内容票配的是 **dir 型**工作区（`base.py` 的隔离目录），
 > agent 只能在自己的票工作区里写；而 `cs-produce` 的验收要求「内容成品经 service 写接口入账」、`cs-publish` 要
 > 「发布账应答/expect 清单/审校回执」三件落盘——宿主实测**没有可走通的通道**：落仓（写 `content/output/`）与发布
 > （写内容账 `releases/`）都做不了，`t260801` 的 brief 段于是自行假设「后续段/worker 中继落仓」，而引擎里
@@ -2218,7 +2218,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > · 门的**数据源改成 service 只读接口**（`cs_publish_audit.py` 已支持 `--api URL`，其 docstring 自陈「接口名/应答 schema 在真票前定」——即这半从未落地）而不是读手工落盘的 `publish_record.json`/`expect_hashes.json`（宿主本轮是按约定代做的，这正是「没人代做的形态=票一路绿、产品里空的」的机理）；
 > · agent 学 endpoint 的通道建议走项目内既有 `service/config.local.json`（内含 content_token/admin_token；读文件不受文件写沙箱限制），免改引擎。
 > **可选引擎增强（需宿主定，本次未做）**：段验收声明了「必须落某产物」而无人/无通道产出时，引擎无法机械察觉 ⇒ 可考虑「声明通道」判据（模板为每条验收声明产出方=agent 文件 / service 接口 / 人工，引擎按声明核对）。
-> **⑥ 多红折叠：merge_check 只露第一条红与其处置建议**（文案半边已修）：`dev_lane.py:3532-3538` 非冲突红一律
+> **⑥ 【已修 260927】** 多红折叠：merge_check 只露第一条红与其处置建议（文案半边修于 `bd5fadd`，可见性半边修于 `ac50f31`：blocked_detail 只加 `reds`（逐条 check_id/item/reason_code/class/next_action/files）+ `disposition`，既有键逐字节不变；三处调用点各带 disposition）：`dev_lane.py:3532-3538` 非冲突红一律
 > `_blocked("merge_check", "merge_check 红灯：%s" % red)`，而 `_pin_merge_red_detail` 只把**首红项**结构化；
 > 宿主遇到的是「别人提交与在飞票写集重叠」造成的脏工作区红（其处置=提交/暂存/票面说明后 retry_qc），
 > 于是看不到「同一轮里还有没有别的红、各属哪一类（可自动消解 vs 需人工）」。建议：blocked 记名里
