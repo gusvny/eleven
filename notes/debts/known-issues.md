@@ -2059,3 +2059,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②本票按正规入口补发 `retry_qc` → 立即 `arbitrate/running`（gen9）解封。
 > **修法方向（结构性）**：authorize intake 在 blocked 态可顺带置一次唤醒（省掉「必须连发两发」的隐性协议），
 > 或至少在票面把两发写成一条指令（「先 authorize 再 retry_qc」）。
+
+## KI-140 `merge_check` 不做主同步 → 「main 上已修的红」无法不经全量到达 merge_check（260927 实案 t260926-05，integration 岗登记）
+> **实案**：`t260926-05` 走到 `merge_check` 被泳道内 `verify_lane code` 判红 3 条：其中 2 条是
+> **KI-137 时钟炸弹**（泳道树停在 `ee79848`，其 `test_t260926_lane_watchdog.py` 是旧版：桩冻结 `NOW` vs 活动取真墙钟，
+> 越过 `NOW+120min` 必红），而 **main HEAD 早已修好**（在 main 跑同两例 `2 passed`）。
+> **机理**：主同步（把 main 并入泳道）只在 **`run_integration_tests` 段入口**发生；`merge_check`（`dev_lane.py:3486-3488`）
+> 直接跑 `verify_lane code`，**不做主同步** ⇒ 泳道树落后时，**任何「已在 main 修好」的红都会长期挡 merge_check**，
+> 唯一出路是再烧一轮全量（数小时）——正是宿主当天要避免的那件事。
+> **影响**：①已修红把 merge 卡死（本次即实例）；②鼓励「为过闸重跑全量」的反模式；③与 KI-122 的活锁叠加放大成本。
+> **修法方向**：①`merge_check` 段前也做一次主同步（与集测段入口同款单点，别造第二个同步实现）；
+> ②或提供一个**不烧全量**的显式主同步入口（op 级），由 integration 岗在 merge 前调用；
+> ③两者都做时注意不要在 merge 路径上引入隐式副作用（主同步会改泳道树，必须留痕可查）。
+>
+> **同批另一条既有红（KI-136 实例）**：`test_describe_period_identity_transient_vs_not_found` 在**干净 TMPDIR** 下必红
+> （与宿主 `$TMPDIR/t01` 现场耦合；main 真机器下 `1 passed`）——此类「环境形态决定的既有红」应进 known-red 名册挂账，
+> 否则任何票在干净环境下都会被它挡一次。
