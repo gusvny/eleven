@@ -54,6 +54,7 @@ with workflow.unsafe.imports_passed_through():
         ENGINE_VERSION_V2,
         TICKET_STATUSES,
         WS_DIR_BASE,
+        ws_dir_default,
         AgentStageArgs,
         GateResult,
         HumanGateContext,
@@ -433,7 +434,8 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
         workflow.patched(self.PATCH_ID)
         ws = inp.workspace
         if ws is None and self.TEMPLATE_WORKSPACE_DIR:
-            ws = {"type": "dir", "path": WS_DIR_BASE + "/" + inp.ticket_id}
+            # 260927 ⑤a(i)：与创建链同一真源——缺省落项目内 <项目根>/.ticket-ws/<票号>
+            ws = {"type": "dir", "path": ws_dir_default(inp.project_root, inp.ticket_id)}
         first = self.STAGES[0]
         acc = list(first.acceptance) + [x for x in inp.acceptance_extra
                                         if x not in first.acceptance]

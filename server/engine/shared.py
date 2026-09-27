@@ -2142,16 +2142,49 @@ def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
 # ========================================================================================
 
 # Root for dir-type workspaces: the isolated-directory convention for non-development
-# tickets (cleanup / ops) /tmp/sandbar-ws/<ticket id>.
-# env SANDBAR_WS_DIR_BASE can override it — self-tests point at a temp dir so the real
-# /tmp stays untouched.
-WS_DIR_BASE = os.environ.get("SANDBAR_WS_DIR_BASE") or "/tmp/sandbar-ws"
+# tickets (content / cleanup / ops).
+#
+# 260927 宿主令「⑤a 选 (i)」：**缺省基准改为项目内** `<项目主目录>/.ticket-ws/<票号>`。
+# 为什么必须改：老缺省是 `/tmp/sandbar-ws/<票号>`，而创建链把引擎自己派生的这个绝对路径
+# 当成「显式传参」送进 `check_paths_under_project` ⇒ 它不在项目注册目录内 ⇒ **建票当场被
+# 引擎自己的闸拒收**（宿主实案：nusuyou content-studio 票报「workspace 路径
+# /tmp/sandbar-ws/tXXXX 不在项目 nusuyou 的注册目录内」，只能手工传项目内路径才建得起来）。
+# 引擎自己给的缺省值被自己那条「只该管调用方传参」的闸拦下=自相矛盾；改成项目内，路径
+# 按构造就在项目里，闸与缺省自洽，且内容票的账件（manifest/发布账/expect）落在项目内可持久。
+#
+# env `SANDBAR_WS_DIR_BASE` 仍可覆盖（自检/隔离台用），覆盖时行为与老版逐字一致。
+# 注：本模块级读数**只能**在 import 期发生（workflow 沙箱里读 os.environ 是违规访问，
+# KI-135 教训）；`ws_dir_default` 是纯函数，运行期不读 env。
+WS_DIR_BASE_OVERRIDE = os.environ.get("SANDBAR_WS_DIR_BASE") or ""
+#: 项目内缺省子目录名（nusuyou 仓 `.gitignore:58` 已忽略 `.ticket-ws/`，与该用法一致）
+WS_DIR_REL = ".ticket-ws"
+#: 老基准：仅在「无项目根」或显式 env 覆盖时还会用到（向后兼容面）
+WS_DIR_BASE = WS_DIR_BASE_OVERRIDE or "/tmp/sandbar-ws"
+
+
+def ws_dir_default(project_root: str, ticket_id: str) -> str:
+    """dir 型工作区的缺省路径（**纯函数，运行期不读 env**，workflow 沙箱安全）。
+
+    优先级：①显式 env 覆盖（自检/隔离台）→ `<覆盖基准>/<票号>`；
+    ②项目根在场 → `<项目根>/.ticket-ws/<票号>`（260927 起的缺省，落在项目注册目录内，
+    与 `check_paths_under_project` 自洽）；
+    ③项目根缺席 → 老基准 `/tmp/sandbar-ws/<票号>`（无项目上下文的自检/遗留路径兜底）。
+    """
+    tid = str(ticket_id or "").strip("/")
+    if WS_DIR_BASE_OVERRIDE:
+        return WS_DIR_BASE_OVERRIDE.rstrip("/") + "/" + tid
+    root = str(project_root or "").rstrip("/")
+    if root:
+        return "%s/%s/%s" % (root, WS_DIR_REL, tid)
+    return WS_DIR_BASE + "/" + tid
 
 
 def ws_dir_path(ticket_id: str) -> str:
-    """The dir-type ticket workspace path (the old /tmp/suyou-ws base stickiness was
-    removed with the final switch — the leftover directories have been cleared)."""
-    return WS_DIR_BASE + "/" + ticket_id
+    """老签名（无项目上下文）的 dir 工作区路径——保持兼容：等于无项目根时的缺省。
+
+    新代码一律用 `ws_dir_default(project_root, ticket_id)`；本函数只服务「拿不到项目根」
+    的老调用面（自检脚本等）。"""
+    return ws_dir_default("", ticket_id)
 
 
 # ---- Lane coordination directory naming transition (ticket t260907-04) ----
@@ -2704,7 +2737,10 @@ def derive_lane_workspace(
         if not branch:
             branch = "lane/" + ws["path"].rstrip("/").rsplit("/", 1)[-1]
     elif ws is None and template_workspace_dir:
-        ws = {"type": "dir", "path": ws_dir_path(ticket_id)}
+        # 260927 ⑤a(i)：缺省基准落项目内（<项目根>/.ticket-ws/<票号>）——老实现用
+        # /tmp/sandbar-ws，随后被同链的 check_paths_under_project 判「不在项目注册目录」
+        # 而建票即拒（引擎自己的缺省值撞自己的闸）。
+        ws = {"type": "dir", "path": ws_dir_default(project_root, ticket_id)}
     if project_root and ws is not None and not ws["path"].startswith("/"):
         ws = {"type": ws["type"], "path": project_root.rstrip("/") + "/" + ws["path"]}
         if worktree and not worktree.startswith("/"):
