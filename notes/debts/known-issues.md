@@ -2075,3 +2075,22 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **同批另一条既有红（KI-136 实例）**：`test_describe_period_identity_transient_vs_not_found` 在**干净 TMPDIR** 下必红
 > （与宿主 `$TMPDIR/t01` 现场耦合；main 真机器下 `1 passed`）——此类「环境形态决定的既有红」应进 known-red 名册挂账，
 > 否则任何票在干净环境下都会被它挡一次。
+
+## KI-141 负载敏感断言：`test_b_daemon_probe_progress_naming` 全量套件下红、单独跑绿——2s 墙钟预算被首次探针吃满，点名行一条都来不及打（260927 实案，integration 岗登记；KI-136/KI-137 同族「时钟/环境耦合的假红」）
+> **实案**：夹具全族整治批在 main 单写者态跑 `pytest server/engine/tests -q` → `1 failed, 2538 passed`，
+> 唯一红 = `server/engine/tests/test_t260920_01_supply_wait_budget.py::test_b_daemon_probe_progress_naming`
+> （`AssertionError: assert ('STAGE_WAIT' in '')`，读到的是**空 stderr**）；同一条用例**单独跑 1 passed**（2.35s）。
+> **机理（读码定位，非猜测）**：`integration/stage_docker.py:3718-3739` 的探针循环里，`STAGE_WAIT` 点名**只在
+> 第一次 `docker info` 失败之后**才可能打——`except` 分支内先判 `if time.time() >= deadline: raise StageError(...)`，
+> 其后才是 `_stage_wait_ping(...)`；而首次 `_run(DOCKER_INFO_CMD)` 的超时上界正是「剩余预算」= 用例设的
+> `SANDBAR_STAGE_WAIT_BUDGET_S=2`。⇒ **机器一忙**（全量套件 + 并行 agent 同跑），首次假 docker 子进程的
+> spawn + `sleep 0.2` 就可能吃掉全部 2s → 直接走 `raise` 分支 → 一条点名行都没打 → 断言必红。
+> 同族兄弟用例 `test_b_ensure_lock_busy_overbudget` 没有这个病（它多一句 `monkeypatch.setattr(sd, "STAGE_WAIT_PING_EVERY_S", 0.0)`）。
+> **影响**：①凡跑全量（或机器有负载）就有一条**与本票无关**的红，逼值守做「这是不是我改坏的」判读，
+> 与 KI-136/KI-137 叠加成「每次全量都要人工甄别假红」；②它咬的正是 **integration 自己的闸**（verify_lane code 跑全量），
+> 任何票都可能被它挡一次。
+> **修法方向**：①用例侧（最小改）把预算抬到与节点延迟同量级（如 `SANDBAR_STAGE_WAIT_BUDGET_S=10`）或
+> 与兄弟用例对齐地 `monkeypatch.setattr(sd, "STAGE_WAIT_PING_EVERY_S", 0.0)`；②代码侧（更本质）把「首次点名」
+> 提到第一次探针**之前**（「仍在等 docker daemon（已等 0s/2s 预算）」）——那样「等就有话说」的契约对第一次尝试
+> 也成立，用例不再靠运气；③同类断言普查：凡「短墙钟预算 + 子进程」组合都用同一把尺子（KI-137 的教训已在
+> `test_t260926_lane_watchdog` 落成反向锁，本条是它的第二个实例）。
