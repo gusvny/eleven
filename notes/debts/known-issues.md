@@ -2099,3 +2099,30 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 回归锁 = `test_t260920_01_supply_wait_budget.py::test_b_daemon_probe_first_attempt_named_before_overbudget`
 > （「睡满预算再失败」的假 docker 确定性复现该形态）。**反向锁已实证**：把该处改动 stash 回旧码，新用例
 > 立刻红成 `assert ('STAGE_WAIT' in '')`（与实案同形）；恢复后 26 passed。
+
+## KI-142 裸入口建票的旅程场景在 undeclared→refuse 翻严后成批失效，而弱断言让它们「假绿」静默腐烂（260927 实案 sc_detail_lane_reds，integration 岗登记；KI-119/KI-025 同族「回执绿而事实红」）
+> **实案**：`integration/t260915-05/tests/sc_detail_lane_reds.py` 的 docker 旅程半段报
+> `FAIL 240s 内未到 create_plan/running（worker 存活）`。全权单独跑（排除沙箱因素）与保留夹具后看 worker 日志，
+> 真因浮出：worker 整段（240s × 每 2s）刷 `watch：查询 t26091505r1 状态失败：RPCError: workflow not found for ID: t26091505r1`
+> ——**票根本没建出来**。
+> **机理**：本场景经**裸入口**（`client.py ticket-start`，不声明 `caller_project`）建票。t260925-08 把
+> undeclared 策略由 `record` 翻成 `refuse` 之后，这类调用一律被跨项目闸 fail-closed 拒收。实测回执原文：
+> `ok=false / kind=cross_project_refused / identity_class=undeclared`；再实测「引擎跑的形态」（env 带
+> `SANDBAR_CALLER_PROJECT=sandbar`，与夹具项目 `t26091505` 异项目）同样拒收（`declared` 但异项目）。
+> **为什么长期没被发现（两个叠加的盲区）**：①**断言漏判**——拒收回执 `rc=0` 且回显票号，场景的
+> `fail.check(rc == 0 and TID in out, "ticket-start 受理")` 于是**假绿**，票没建出来却继续往下等 240s；
+> ②**池被跳过**——本场景属 `engine` 池，而集成段跑闸会跳过 engine/exclusive（t260927-05 回执原话
+> 「本轮跳过池=engine、exclusive（少 81 条）」），所以常规闸压根跑不到它，红绿无人知。
+> **全族（实报即全族线索）**：`grep '"ticket-start"' integration/**/*.py` 得约 30 处调用点，**只有 3 处**声明了
+> 调用方身份（t260925-17 显式 arg、t260915-12 两处）；其余（t260904-02 / t260905-02×2 / t260905-10 /
+> t260907-07 / t260908-01 lib+场景 / t260910-03 / t260910-06 / t260910-14 fixtures / t260912-03×2 /
+> t260913-01 / t260915-01 / t260915-04 / t260915-05 / t260916-24 / t260916-28 / t260917-04 / t260917-09×2 /
+> t260924-04）都未声明——凡期望「真建出票并往下走」的，翻严后即为潜在红；凡**故意测拒收**的（如
+> t260915-12 realchain 的负例）不受影响。
+> **已处置（260927）**：`sc_detail_lane_reds.py` 修好并实证——env 一次声明整条旅程身份
+> `SANDBAR_CALLER_PROJECT=PROJ`（覆盖 ticket-start/sign 等所有写 op；只补 ticket-start 会变成「前面绿、
+> ③sign 又红」，已实测），且断言收紧为**受理必须 ok=True**；改前 exit=1、改后整条旅程 PASS（含 merge 人门与关单可见）。
+> **修法方向（未处置的同族）**：①其余旅程场景按同一口径补身份（优先显式 arg `caller_project`，或 env 声明）；
+> ②把「裸入口写 op 收尾必须判 ok=True」做成场景侧共用判据（`lib_gate.run_poc_client` 层加一把「受理断言」helper），
+> 从根上堵住「拒收也当受理」的假绿；③机械闸：对 `"ticket-start"` 调用点做一次「是否声明身份」的静态检查（L9 级），
+> 防新增场景重犯。
