@@ -1,0 +1,406 @@
+diff --git a/server/engine/client.py b/server/engine/client.py
+index 6b87e65..8f3d349 100644
+--- a/server/engine/client.py
++++ b/server/engine/client.py
+@@ -2703,9 +2703,13 @@ async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
+       projects_scanned  注册表枚举到的项目数
+       declared_projects 其中声明 workflow_modules 的项目数
+       projects_root     本次扫描的注册根（SANDBAR_PROJECTS_DIR 现读语义，空转排查面）
++      templates         id → 类属性推导视图（name/lane/workspace_dir/stages 段表；
++                        t260927 缺口 5 增补 topology=拓扑契约 + topology_error 点名）
+ 
+     消费方=server/tools/ticket.py create 模板闸（三态文案可判别：扫了但拒 /
+-    空转没扫 / 面不可达）。任何异常走 main() 的结构化回执兜底，绝不静默空表。
++    空转没扫 / 面不可达）与 server/tools/workflow.py 目录面（t260927：项目外置
++    模板并入 list）与 ticket.py show（票面 topology 兜底）——同一条权威面即
++    「与创建面同源」的唯一真源。任何异常走 main() 的结构化回执兜底，绝不静默空表。
+     """
+     import shared  # noqa: PLC0415——本文件其余处 from shared import 具名清单，
+     # 此处要的是模块属性现读面（TEMPLATE_CLASS_NAMES 类回写后的活表），局部取模块对象。
+@@ -2726,13 +2730,34 @@ async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
+                 "name": str(getattr(st, "name", "") or ""),
+                 "next": str(getattr(st, "next", "") or ""),
+                 "exit": str(getattr(st, "exit", "") or ""),
++                # t260927 缺口 5：段视图补齐目录面行形状（workflow.py list 的
++                # _brief 同键）——外置模板进控制台模板面时与内置行同形，前端
++                # 站道/角色/执行主体消费面零分叉。
++                "fanout": int(getattr(st, "fanout", 0) or 0),
++                "revision_to": str(getattr(st, "revision_to", "") or ""),
++                "parts": [str(x) for x in (getattr(st, "parts", ()) or ())],
+                 "acceptance": [str(x) for x in (getattr(st, "acceptance", ()) or ())],
+             })
++        # t260927 缺口 5：拓扑导出（模板类 STAGES → topology-v1 契约）。外置模板
++        # 在引擎仓没有 yaml 快照、也不进 template_topology 的登记表，段声明就是它
++        # 唯一的真源；导出失败=本模板 topology=None + 一行 topology_error 点名（绝不
++        # 静默给半图，也绝不让一个模板的图拖垮整张回执）。
++        try:
++            import template_topology  # noqa: PLC0415——引擎目录纯数据模块（零 IO）
++            topology = template_topology.build_topology_from_stages(
++                tid, str(getattr(cls, "TEMPLATE_NAME", "") or tid),
++                getattr(cls, "STAGES", ()))
++            topology_error = ""
++        except Exception as e:  # noqa: BLE001——导出面故障按模板隔离
++            topology = None
++            topology_error = "%s: %s" % (type(e).__name__, str(e)[:160])
+         templates[tid] = {
+             "name": str(getattr(cls, "TEMPLATE_NAME", "") or tid),
+             "lane": str(getattr(cls, "TEMPLATE_LANE", "") or "main"),
+             "workspace_dir": bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)),
+             "stages": stages,
++            "topology": topology,
++            "topology_error": topology_error,
+         }
+     return _ok({
+         "names": dict(shared.TEMPLATE_CLASS_NAMES),
+diff --git a/server/engine/template_topology.py b/server/engine/template_topology.py
+index ec9b3ac..d1e71d6 100644
+--- a/server/engine/template_topology.py
++++ b/server/engine/template_topology.py
+@@ -35,6 +35,11 @@ UT 必红。fixture-two-step 同款锁。t260916-05：inspection-lite 同范式
+ inspection_flow.InspectionPeriodicWorkflow.STAGES（含 suite_only 套件档开关），
+ 一致性锁=tests/test_t260916_05_inspection_topology.py（逐字段+源码锁+变异自证）。
+ 
++t260927 缺口 5 增补：项目外置模板（project_templates 加载口）的拓扑不经登记表，
++由 `build_topology_from_stages()` 从**模板类自己的 STAGES 声明**导出（段定义在项目
++仓里，引擎不持有第二份）——节点逐字段来自声明；并行组不推断（模板类无并行组声明
++方式，硬猜即冒充），故导出为声明序链。登记表仍是内置/夹具/巡检的真源且优先。
++
+ 本模块零 IO、零 temporalio 依赖：workflow.py / 测试 / 渲染器 UT 都可直接 import。
+ 不登记进 workflows 注册表、不受 SANDBAR_FIXTURE_TEMPLATES 门约束（本表只是
+ 导出数据，不是模板注册；sc_template_face_narrowing 的默认面断言不受扰动）。
+@@ -248,3 +253,55 @@ def export_template_topology(template_id: str) -> Optional[Dict[str, Any]]:
+ def declared_templates() -> List[str]:
+     """已声明拓扑的模板 id 清单（诊断/测试用）。"""
+     return sorted(_TOPOLOGIES)
++
++
++# ---------------------------------------------------------------------------
++# 由模板类自己的段声明导出拓扑（t260927 缺口 5：项目外置模板的导出面）
++#
++# 背景：_TOPOLOGIES 是「引擎侧手工登记的拓扑声明」，只覆盖引擎包内模板（内置/
++# 夹具/巡检）。项目外置模板（project_templates 加载口那一类）的段定义在**项目仓**
++# 里，引擎没有也不该有第二份——但它的类面已带 STAGES，段序与段身份就在手里，导出
++# 面照同款契约给图即可（否则内容票在控制台里没有可画的拓扑，宿主只能看票面文字）。
++#
++# 诚实边界（绝不冒充真拓扑）：
++#   · 节点逐字段来自模板类声明（id/label/role/kind/parts），不推断、不美化；
++#   · **并行组不由本函数推断**——模板类今天没有并行组的声明方式，硬猜即冒充
++#     （groups 缺省为空 ⇒ 导出的是声明序链；确需真并行的模板走 export 登记表
++#     或后续票补声明口）；
++#   · 段声明为空/畸形 → ValueError（fail-closed：没有段就没有可画的图，不返回
++#     空图/半图冒充）。
++# ---------------------------------------------------------------------------
++
++def _stage_attr(stage: Any, name: str, default: Any = None) -> Any:
++    """段声明取值（duck-typed）：shared.Stage 形态（属性）或同形 dict 两吃——
++    本模块零 engine import，不锚具体类。"""
++    if isinstance(stage, dict):
++        return stage.get(name, default)
++    return getattr(stage, name, default)
++
++
++def node_from_stage(stage: Any) -> Dict[str, Any]:
++    """段声明 → 拓扑节点。kind 投影与 shared.Stage.kind 同口径：exit=human → human；
++    agent=False → gate；否则 agent（声明自带合法 kind 属性时优先用它）。"""
++    sid = str(_stage_attr(stage, "id", "") or "")
++    label = str(_stage_attr(stage, "name", "") or "")
++    role = str(_stage_attr(stage, "role", "") or "")
++    kind = str(_stage_attr(stage, "kind", "") or "")
++    if kind not in _KINDS:
++        exit_v = str(_stage_attr(stage, "exit", "") or "")
++        agent = _stage_attr(stage, "agent", True)
++        kind = (KIND_HUMAN if exit_v == "human"
++                else (KIND_GATE if agent is False else KIND_AGENT))
++    return _node(sid, label, role, kind, _stage_attr(stage, "parts", ()) or ())
++
++
++def build_topology_from_stages(template_id: str, name: str,
++                               stages: Sequence[Any],
++                               groups: Sequence[Dict[str, Any]] = ()) -> Dict[str, Any]:
++    """由模板类的段声明导出拓扑契约（项目外置模板导出面）。构建非法声明 → ValueError。"""
++    decl = tuple(stages or ())
++    if not decl:
++        raise ValueError("拓扑导出失败（%s）：模板段声明为空，无可画拓扑" % template_id)
++    nodes = [node_from_stage(s) for s in decl]
++    return build_topology(str(template_id), str(name or template_id), nodes,
++                          tuple(groups or ()))
+diff --git a/server/tools/ticket.py b/server/tools/ticket.py
+index 109d0bb..e499e30 100644
+--- a/server/tools/ticket.py
++++ b/server/tools/ticket.py
+@@ -89,6 +89,7 @@ import json
+ import os
+ import re
+ import subprocess
++import sys
+ import time
+ import uuid
+ from pathlib import Path
+@@ -373,6 +374,38 @@ class QueryError(ValueError):
+         self.kind = kind
+ 
+ 
++def _template_topology_fallback(meta):
++    """票面 topology 兜底（t260927 缺口 5）：项目外置模板的票在控制台里没有泳道图。
++
++    背景：票面 topology 键由 workflow 类的 snapshot() 产出——内置模板（dev-lane/
++    巡检）带自证导出，项目外置模板的类是**项目自己的**（继承 base.TicketWorkflowBase，
++    其 snapshot 不含 topology 键）⇒ 票面恒 None、没有可画的图。缺口只在「导出面」，
++    不在运行面：模板类已带 STAGES，段序与段身份就在权威模板面回执里。
++    改法：**仅在快照没有 topology 且该 id 不是内置模板时**回落权威模板面回执
++    （client.py template-faces，与创建面同源、引擎 venv 现算）的 templates[id].topology。
++    纪律：additive 只加不改（内置票零行为变化、零额外子进程）；取不到=保持 None 并
++    stderr 点名原因（不冒充拓扑、不炸 show——渲染器对 None 回落线性呈现）。"""
++    if isinstance(meta.get('topology'), dict):
++        return
++    wid = str(meta.get('workflow_id') or '')
++    if not wid or wid in _shared().BUILTIN_TEMPLATE_KEYS:
++        return
++    try:
++        faces = _template_faces()
++    except ValueError as e:
++        print('ticket: %s 无票面拓扑（模板级导出不可得，show 不带 topology 值）：%s'
++              % (wid, e), file=sys.stderr)
++        return
++    tpl = (faces.get('templates') or {}).get(wid)
++    topo = tpl.get('topology') if isinstance(tpl, dict) else None
++    if isinstance(topo, dict):
++        meta['topology'] = topo
++    else:
++        print('ticket: %s 无票面拓扑（权威模板面回执无该模板的拓扑导出%s）'
++              % (wid, '：%s' % tpl.get('topology_error') if isinstance(tpl, dict)
++                 and tpl.get('topology_error') else ''), file=sys.stderr)
++
++
+ def _v2_query(tid):
+     """工单查询：返回 (meta, snapshot)。
+ 
+@@ -402,6 +435,9 @@ def _v2_query(tid):
+               'human_context', 'engine', 'workflow_class',  # gens=t260915-01 ③ 段→轮次读数
+               'topology'):  # t260915-05 ④ 模板拓扑导出（门内 additive 键；缺=旧票回落模板级导出）
+         meta[k] = snap.get(k)
++    # t260927 缺口 5：外置模板票的票面拓扑兜底（快照无该键时回落模板级导出；
++    # 内置票/已有拓扑的票零行为变化）。
++    _template_topology_fallback(meta)
+     # t260915-12 越权对账面（工单③）：越权旗/未声明身份的写操作记名（workflow 侧
+     # meta['cross_project_uses']，盖章 op 才有账；retry_qc/update/cancel 的记名只在
+     # admin.log——覆盖口径如实分档，见 server/engine/README.md 闸契约节）。
+diff --git a/server/tools/workflow.py b/server/tools/workflow.py
+index aa43290..5bc0af4 100644
+--- a/server/tools/workflow.py
++++ b/server/tools/workflow.py
+@@ -15,14 +15,25 @@ op:
+   list           → [{id, name, lane, stages:[{id, role, name, next, exit, fanout, parts, acceptance}],
+                      topology（t260915-05 additive：模板拓扑导出面契约；None=未声明，UI 回落线性呈现）}]
+   show {id}      → 模板全文（含 desc/description）
++
++目录面来源（t260927 缺口 5，三支并列、按 id 去重、内置先占）：
++  ① yaml 参考目录 server/workflows/*.yaml（内置生产模板，收窄守卫钉默认面 {dev-lane}）；
++  ② _v2_extra_rows()：SANDBAR_FIXTURE_TEMPLATES=1 时的引擎包内 v2 模板（语义不变）；
++  ③ 项目外置模板（项目注册 paths.workflow_modules → 创建面同一权威面 client.py
++     template-faces，引擎 venv 现算类面）——只为「该项目自己的控制台视图」并入，
++     未声明 workflow_modules 的项目零行为变化。取不到/未并入的已声明模板一律
++     stderr 点名缺席（绝不静默：宿主不必在 UI 里找半天）。
+ """
+ import json
++import os
+ import re
++import subprocess
+ import sys
+ from pathlib import Path
+ 
+ HERE = Path(__file__).resolve().parent
+ DIR = HERE.parent / 'workflows'
++REPO = HERE.parent.parent
+ 
+ # t260915-05：模板拓扑导出面。被导者是引擎**纯数据模块**（零 IO 零 temporalio），
+ # server 层「不跨层 import 运行时」的铁律不破。导入失败=导出面缺位，list 通道
+@@ -263,18 +274,29 @@ def load_all():
+     return out
+ 
+ 
+-def _topology_of(tid):
+-    """模板拓扑契约导出（t260915-05）。None=未声明模板（渲染器回落线性呈现，
+-    绝不猜拓扑）；导出抛错（声明被改坏）= stderr 点名后回落 None——list 通道
+-    不被导出面炸掉，但缺口有痕。"""
+-    if template_topology is None:
+-        return None
+-    try:
+-        return template_topology.export_template_topology(tid)
+-    except Exception as e:
+-        print('workflow: %s 拓扑导出失败（回落 None）：%s: %s'
+-              % (tid, type(e).__name__, e), file=sys.stderr)
+-        return None
++def _topology_of(tid, project_topologies=None):
++    """模板拓扑契约导出（t260915-05；t260927 缺口 5 扩到项目外置模板）。
++
++    取源两档：①引擎侧登记表（template_topology.export_template_topology，覆盖
++    内置/夹具/巡检）；②项目外置模板拓扑（project_topologies=本次权威模板面回执
++    现算的 id→拓扑，由模板类 STAGES 导出——模板定义在项目仓，引擎不持第二份）。
++    两档都无 = None：未知模板**仍返回 None 不冒充**（渲染器回落线性呈现）。
++    登记表导出抛错（声明被改坏）= stderr 点名后回落 None——list 通道不被导出面
++    炸掉，但缺口有痕（既有语义不变）。"""
++    if template_topology is not None:
++        try:
++            topo = template_topology.export_template_topology(tid)
++            if topo is not None:
++                return topo
++        except Exception as e:
++            print('workflow: %s 拓扑导出失败（回落 None）：%s: %s'
++                  % (tid, type(e).__name__, e), file=sys.stderr)
++            return None
++    if project_topologies:
++        topo = project_topologies.get(tid)
++        if isinstance(topo, dict):
++            return topo
++    return None
+ 
+ 
+ def _brief(t):
+@@ -330,11 +352,145 @@ def _v2_extra_rows(yaml_ids):
+     return rows
+ 
+ 
++def _shared():
++    """engine/shared.py 装载（server 层工具与引擎的单点复用；ticket.py「以别名 spec
++    装载」同纪律——不同进程各装一份只读视图，无表裂变面）。只取两样：注册表解析
++    （哪些项目声明了外置模板）与引擎 venv 解释器解析。装载失败=返回 None，由调用方
++    降级并**点名缺席**（绝不炸 list 通道，也绝不静默当作「没有项目模板」）。"""
++    try:
++        engine_dir = str(HERE.parent / 'engine')
++        if engine_dir not in sys.path:
++            sys.path.insert(0, engine_dir)
++        import shared  # type: ignore
++        return shared
++    except Exception as e:  # noqa: BLE001——装载面故障按缺席处理并点名
++        print('workflow: engine/shared.py 装载失败（项目外置模板目录面缺席）：%s: %s'
++              % (type(e).__name__, e), file=sys.stderr)
++        return None
++
++
++def _engine_python():
++    """引擎 venv 解释器：单点走 shared.engine_venv_python（回落链一处维护），
++    shared 不可得时按同口径本地回落（server/engine/.venv → 旧路径 → 系统 python3）。"""
++    shared = _shared()
++    if shared is not None:
++        try:
++            cand = shared.engine_venv_python(shared.REPO_ROOT)
++            if cand:
++                return str(cand)
++        except Exception as e:  # noqa: BLE001——解析面故障不拦目录面，落本地链
++            print('workflow: 引擎 venv 解析失败（回落本地链）：%s: %s'
++                  % (type(e).__name__, e), file=sys.stderr)
++    for rel in (('server', 'engine'), ('server', 'dsh', 'temporal-poc')):
++        cand = REPO.joinpath(*rel) / '.venv' / 'bin' / 'python'
++        if cand.is_file() and os.access(str(cand), os.X_OK):
++            return str(cand)
++    return 'python3'
++
++
++def _project_template_faces():
++    """项目外置模板的权威面回执 = **创建面同一通道**（t260927 缺口 5）。
++
++    为什么经子进程：外置模板模块顶 import temporalio，类面（STAGES/拓扑）只在引擎
++    venv 里加载得起来，而本文件是 server 层纯 stdlib 工具（不 import 运行时=不跨层）。
++    故 spawn 引擎 venv 的 client.py template-faces（只读、纯本地、不连 Temporal）——
++    与 ticket.py create 的模板闸同一条「权威模板面」真源，绝不在此另造第二真源。
++    返回 (faces|None, 原因串)：任何失败都不炸 list，由调用方点名缺席。"""
++    cmd = [_engine_python(), str(HERE.parent / 'engine' / 'client.py'),
++           'template-faces', '{}']
++    try:
++        proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True,
++                              timeout=120)
++    except Exception as e:  # noqa: BLE001——子进程启动面故障
++        return None, '引擎 venv 子进程无法启动（%s: %s）' % (type(e).__name__, e)
++    try:
++        out = json.loads(proc.stdout)
++    except Exception:  # noqa: BLE001——非 JSON 回执（解释器缺失/巡检台污染）
++        return None, ('权威模板面回执非 JSON（exit=%s，stderr 尾=%s）'
++                      % (proc.returncode, (proc.stderr or '')[-160:].replace('\n', ' ')))
++    if not isinstance(out, dict) or not out.get('ok'):
++        why = (out or {}).get('error') if isinstance(out, dict) else type(out).__name__
++        return None, '权威模板面回执 ok=false（%s）' % why
++    faces = out.get('result')
++    if not isinstance(faces, dict) or not isinstance(faces.get('templates'), dict):
++        return None, '权威模板面回执形状不符（缺 templates 视图）'
++    return faces, ''
++
++
++def _declared_project_template_ids():
++    """名面（stdlib 源码扫描，shared 单点）已接受的项目外置模板 id 集——用于
++    「已声明但没进目录面」的点名。shared 不可得=空集（点名能力降级，list 照常）。"""
++    shared = _shared()
++    if shared is None:
++        return set()
++    try:
++        builtin = set(getattr(shared, 'BUILTIN_TEMPLATE_KEYS', ()) or ())
++        return set(shared.project_template_names_merged()) - builtin
++    except Exception as e:  # noqa: BLE001——名面故障不拦目录面
++        print('workflow: 项目模板名面读取失败（缺席点名降级）：%s: %s'
++              % (type(e).__name__, e), file=sys.stderr)
++        return set()
++
++
++def _project_extra_rows(present_ids):
++    """项目外置模板补进目录面（t260927 缺口 5 通道③）。
++
++    并入面=模板 id / name / lane / stages（与内置行同形）/ topology（模板类 STAGES
++    导出）。既有收窄守卫（yaml 参考目录只钉 dev-lane）与 _v2_extra_rows 的环境门
++    （SANDBAR_FIXTURE_TEMPLATES）语义**零放宽**：本支只在两者之后按**项目注册**
++    （paths.workflow_modules，与创建面同源）并入，未声明项目零行为变化，撞 id 不覆盖。
++    缺席一律点名（需求③），三种缺席形态分别可读：
++      · 面取不到（venv/子进程/回执故障）→ 点名原因；
++      · 名面已接受、类面拒收（id 可辨）→ 逐 id 点名「本项目另有外置模板 X（未在目录面）」；
++      · 名面即拒（畸形/无 defn 类，id 不可辨）→ 点名录到模块路径 + 检查项 + 原因
++        （拒收明细行），宿主至少知道是哪个模块、为什么。
++    绝不静默：宿主不必在 UI 里找半天，也绝不把缺席当「没有」。
++    """
++    rows, notes = [], []
++    faces, why = _project_template_faces()
++    if faces is None:
++        notes.append('项目外置模板未进目录面：%s' % why)
++    else:
++        for tid in sorted(faces.get('templates') or {}):
++            if tid in present_ids:
++                continue
++            t = (faces['templates'] or {}).get(tid) or {}
++            topo = t.get('topology') if isinstance(t.get('topology'), dict) else None
++            if t.get('topology_error'):
++                notes.append('外置模板 %s 无拓扑导出（%s）' % (tid, t['topology_error']))
++            rows.append({
++                'id': tid,
++                'name': t.get('name') or tid,
++                'lane': t.get('lane') or 'main',
++                'stages': [dict(s) if isinstance(s, dict) else s
++                           for s in (t.get('stages') or [])],
++                'topology': topo,
++            })
++    rejs = (faces or {}).get('rejections') or []
++    rej_lines = ['[%s/%s] %s：%s' % (r.get('project', ''), r.get('module', ''),
++                                     r.get('check', ''), r.get('detail', ''))
++                 for r in rejs if isinstance(r, dict)]
++    if rej_lines:
++        notes.append('项目模板面拒收明细（这些模板未进目录面）：%s' % '；'.join(rej_lines))
++    # 名面已接受、但本次没进目录面的 id：点名缺席（含类面拒收的 id——建票面同样
++    # 起不来它们，控制台面必须给出「为什么没有」）。
++    missing = sorted(_declared_project_template_ids()
++                     - set(present_ids) - {r['id'] for r in rows})
++    for tid in missing:
++        notes.append('本项目另有外置模板 %s（未在目录面）' % tid)
++    for n in notes:
++        print('workflow: ' + n, file=sys.stderr)
++    return rows
++
++
+ def run(args):
+     op = args.get('op')
+     if op == 'list':
+         yaml_rows = [_brief(t) for t in load_all().values()]
+-        return {'workflows': yaml_rows + _v2_extra_rows({t['id'] for t in yaml_rows})}
++        have = {t['id'] for t in yaml_rows}
++        v2_rows = _v2_extra_rows(have)
++        have |= {r['id'] for r in v2_rows}
++        return {'workflows': yaml_rows + v2_rows + _project_extra_rows(have)}
+     if op == 'show':
+         tid = args.get('id') or ''
+         t = load(DIR / (tid + '.yaml'))
