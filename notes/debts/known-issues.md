@@ -2044,3 +2044,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 明确要避免的「第 6 轮全量套件」再烧一遍；③休眠根因未除，重试即便重跑也只是多烧一轮、多留一批孤儿会话。
 > **给宿主的两个动作**：①**保持宿主醒着**（插电 + `caffeinate -s`，或 `sudo pmset -b sleep 0` / `pmset -b disablesleep 1`）——
 > 长闸 `run_integration_tests` 需要数小时连续运行窗，45s 切片跑不完；②`t260926-05` 的 arbitrate 需**人裁**（authorize 判决或另定），不属重试面。
+
+## KI-139 超限封的「出路①」文案漏说「authorize 之后必须再发 retry_qc」→ 按说明书操作反被卡住 2 小时（260927 实案，integration 岗登记；KI-079 同族「说明书与实际入口不符」）
+> **实案**：`t260926-05` 在 `08:39` 被「测试集迭代 6 轮超限，转人工判读」封，票面出路①写
+> 「`op=authorize（kind=arbitration_verdict, scope=[本票]）` 接受本判决→推进验收」。我按这句**只发了 authorize**
+> （回执 `landed`、票面 `authorizations` 在场、expires 未过期、scope 命中、未被拒收）——**票 2 小时不动**。
+> **真因**：引擎协议是「**authorize 不发唤醒**」——`_blocked` 只等 `self._retry_token` 递增或 `self._rework`；
+> authorize 的 sign 分支只 `_intake_authorization(...)` 然后 `return`，不碰 token；`retry_qc` 才 `+= 1`。
+> 引擎自己的注释就写着（`dev_lane.py`「authorize+retry_qc 唤醒后 pend 恒空」、host_ruling docstring
+> 「does not automatically wake a blocked — the host sends the ruling and then retry_qc」），但**票面出路文案漏了这半句**。
+> **另一处纠错**：票面在并行叉里 `stage` 采用 last-win（先 `_enter("arbitrate")` 再 `_enter("acceptance_walkthrough")`），
+> 于是「封在仲裁边」看起来像「卡在走查段」，进一步误导排查方向。
+> **处置**：①出路①文案补上「blocked 态下 authorize 不发唤醒，必须随后再发一次 `retry_qc`」（本批已改，`shared.py` 的 cap 封面文案）；
+> ②本票按正规入口补发 `retry_qc` → 立即 `arbitrate/running`（gen9）解封。
+> **修法方向（结构性）**：authorize intake 在 blocked 态可顺带置一次唤醒（省掉「必须连发两发」的隐性协议），
+> 或至少在票面把两发写成一条指令（「先 authorize 再 retry_qc」）。

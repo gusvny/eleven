@@ -590,7 +590,10 @@ def parse_arbitration_summary(summary: str) -> str:
 # startswith / 场景关键词「测试集迭代」「超限」）。
 _ARBITRATION_CAP_EXITS = (
     "。出路：① op=authorize（kind=arbitration_verdict，scope=[本票票号]）"
-    "接受本判决→推进验收（判据：产品面已收口、余红属环境/负载抖动）；"
+    "接受本判决→推进验收（判据：产品面已收口、余红属环境/负载抖动）"
+    "【重要：blocked 态下 authorize 不发唤醒，必须随后再发一次 retry_qc 才会重驱"
+    "（260927 实案 t260926-05：只发 authorize 卡住约 2 小时；引擎协议见 dev_lane 的"
+    "「authorize+retry_qc 唤醒后 pend 恒空」）】；"
     "② op=ruling 宿主终裁改判；③ op=rework 打回 implement/create_plan 修正；"
     "④ op=pause 暂停交人工处置")
 
