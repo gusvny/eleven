@@ -1999,3 +1999,48 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **修法方向**：①agent 活动超时文案要能区分「模型侧无响应/卡在流」与「进程侧卡住」（现在只有一句 timed out）；
 > ②超时前把已产生的轮次/日志尾落进结果面（别让诊断从零开始）；③给 agent 活动加「心跳/无进展」判据，
 > 超时阈值按「静默时长」而非「总时长」计（长时间正常干活不该被误杀）。
+
+### KI-138 追录①（260927 08:xx，第二轮复现 + 真因定性 + 处置；宿主令即刻核查，无独立工单）
+> **第二轮复现**：宿主各发一次 `retry_qc` 后**重跑又超时**（t260926-05 01:52:54 与 03:13:40；t260927-04 02:08:45 与 03:29:43；
+> 期间 t260927-03（dengzhufpv）在 **01:52:54.102** 与 t260926-05 的 **01:52:54.104** 同秒 blocked）⇒ 非偶发。
+> **真因（已定性，非猜测）＝宿主机整机休眠，把所有进程连 Temporal dev server 一起挂起**：
+> 宿主 Mac 电池供电 + 合盖 + `sleep 1`，整夜以「**Maintenance/Idle Sleep ~927s（15.5min）→ DarkWake 45s → 再睡**」循环；
+> agent 活动的 `heartbeat_timeout=3min`（`server/engine/dev_lane.py:176-177` 常量、`:1529` 下达）**远短于休眠时长**，
+> 于是**每次唤醒时服务器把在飞 agent 活动一律判超时**，同一唤醒窗口内**所有票同时 blocked**。心跳由活动自身轮询环发出
+> （`server/engine/agent_activities.py:138 POLL_SEC=5`、`:3318-3325` 每轮心跳），**与模型是否在产出无关** ⇒ 「模型侧流卡死」
+> 在机理上**不可能**直接造成该 timeout（反证候选共因一）。
+> **证据①**（power log 原文，`pmset -g log`）：
+> `00:31:50 Sleep Entering Sleep state due to 'Idle Sleep' Using Batt (Charge:91%) 928 secs` /
+> `00:47:18 DarkWake ... Using BATT 45 secs` / `01:52:18 DarkWake ... 45 secs`（当轮窗口 01:52:18–01:53:03）/
+> `02:40:55 DarkWake ... 45 secs`（宿主 retry_qc 与重 spawn 落 02:41:15，02:41:40 再睡）/
+> `03:13:29 DarkWake ... 45 secs`（arbitrate blocked 03:13:40）/ `03:29:41 DarkWake ... 45 secs`（design 结果 03:29:42）。
+> **证据②**（同秒共因，反证路由侧）：sandbar 票 integration=**zai-coding-cn**/glm-5.3-flash（`.lane/t260926-05/.sandbar/model_patch_acceptance_gen7.yml`），
+> dengzhufpv 票 integration=**deepseek-official**/deepseek-flash（`~/.sandbar/projects/dengzhufpv/model-routes.yaml` roles.integration）
+> ——两个**不同供应商**在同 2ms 内超时 ⇒ 供应商侧慢/限流不是共因。
+> **证据③**（整机而非单进程）：各 agent 会话 `session.v3.jsonl.zstd` 事件间隙与休眠窗口逐一对齐（1ce6449a=906.6s、73b3584b=905.5s、
+> db87d66a=918.8/926.7/931.4s、618dace2=925.9s、f753d4b9=928.7s），console 侧 `server/admin.log` 请求间隙同为 927s 级 ⇒ 连 console 一起挂起。
+> **证据④**（活体复现，诊断现行当刻）：45s 的 `time.sleep` 墙钟耗时 **483.3s**（monotonic 45.0s，skew **438.3s**，08:29:38→08:37）。
+> **证据⑤**（次生故障：孤儿持锁 → 丢上下文）：被挂起的上一 attempt 的 dsh 子进程并未被杀，醒来时仍持有会话写锁，新 attempt 于是
+> `dsh-headless-resume: 恢复会话 <ticket>-<role> 失败（session ... is already owned by an active write handle）` →
+> `改用全新会话 id（上下文不可恢复）`（见 `.lane/*/.sandbar/agent_*_gen*.log`），并成对产生随机 id 会话目录（01:03:33、02:57:16，正是唤醒窗口内 spawn 时刻）。
+> **处置**：**不再重试**——休眠循环未停（08:37 仍在休眠），重试的 attempt 只能拿到每 16min 里 45s 的连续运行窗，必然再次超时，
+> 属「静默重试」反模式并白烧模型一轮；改为报宿主前置条件：**插电** + `caffeinate -s`（电池态 `-s` 不生效时用 `sudo pmset -b sleep 0`
+> 或 `pmset -b disablesleep 1`），条件就绪后再各发一次 `retry_qc`（届时为第 2 次）。
+> **修法方向（续前一轮①②③）**：④**归因必须精确**——worker 侧可自查「墙钟 vs 单调钟 skew」（本报告 `wall=483.3s / monotonic=45.0s`），
+> 把「宿主被挂起致超时」与真·活动故障分开报，票面不该只留一句 `Activity task timed out`；
+> ⑤**唤醒后不得立刻重 spawn**（当刻窗口可能只剩几十秒）：先探测宿主是否处于休眠循环（近期 skew / 唤醒窗口长度）再决定重跑；
+> ⑥**孤儿回收**：新 attempt spawn 前按 (ticket, stage, role) 的会话 id/pidfile 先 killpg 上一轮遗留 dsh，避免会话锁互斥与上下文丢失；
+> ⑦**环境面**：把「引擎运行期禁止宿主 idle/clamshell sleep」写进运行前提（插电 + `caffeinate -s`），或由 console 启动时自持 sleep assertion。
+> **残留不确定性**：非休眠（宿主机醒着）时段的 `Activity task timed out`（如历史 KI 里限流/传输类）本轮未被覆盖——本条只定性本轮夜间密集形态。
+>
+> ### KI-138 追录②（260927 08:39，诊断收尾时的实况与本轮 signal 处置）
+> 休眠循环**当时仍在继续**：`08:14:47 DarkWake 45s → 08:15:32 Sleep 820s → 08:29:12 DarkWake 45s → 08:29:57 Sleep 440s`（电池 88%）。
+> 但**票并未死锁，而是以「每 16min 里 45s」的细碎切片缓慢前进**：孤儿 dsh 在这 45s 里干活并写出结果文件，后续 attempt 的轮询环
+> 在下一个唤醒窗口先读到结果文件（读文件判定在下达取消之前）→ 阶段照样能落地。实测：`t260927-04` 于 **08:38:46** `implement/done` +
+> `design_integration_tests/done`（随后 `run_integration_tests` 开跑）；`t260926-05` 的 arbitrate 于 **08:39:21** 跑完并落判决。
+> **本轮 signal 处置：一个都不发**，理由三条：①两张票**当前都在跑**（`t260927-04` = implement gen3 + run_integration_tests running；
+> `t260926-05` = arbitrate 已完成）——没有需要唤醒的 blocked-timed-out 段；②`t260926-05` 现在这条 `arbitrate/blocked` 是**业务闸**不是超时
+> （「测试集迭代 6 轮超限（上限 5），转人工判读」，出路=人 `op=authorize kind=arbitration_verdict`），此刻发 `retry_qc` 只会把宿主当天
+> 明确要避免的「第 6 轮全量套件」再烧一遍；③休眠根因未除，重试即便重跑也只是多烧一轮、多留一批孤儿会话。
+> **给宿主的两个动作**：①**保持宿主醒着**（插电 + `caffeinate -s`，或 `sudo pmset -b sleep 0` / `pmset -b disablesleep 1`）——
+> 长闸 `run_integration_tests` 需要数小时连续运行窗，45s 切片跑不完；②`t260926-05` 的 arbitrate 需**人裁**（authorize 判决或另定），不属重试面。
