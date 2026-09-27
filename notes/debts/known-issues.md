@@ -2150,3 +2150,25 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > `project_templates` 的装载单点，别造第二份），或对该类显式走 unsandboxed runner；②**回执要点名真因**：
 > 捕获校验异常并把内层 `ModuleNotFoundError: <alias>` 报出来（SDK 的 UnboundLocalError 不得成为对外文案）；
 > ③补一条**冒烟锁**：「对一张已知能回放的票，replay_check 必须 ok=true」——正是缺这条锁，本故障才能静默腐烂。
+
+## KI-144 `engine`/`exclusive` 池被常规集成闸**跳过** → 池内场景的既有红长期无人知（260927 修好 KI-142 后一次性浮出 6 条，integration 岗登记；KI-142 的孪生半）
+> **实案**：把 KI-142（裸入口建票缺调用方身份 → 建票被拒 → 场景干等超时）修好之后，`engine` 池里的场景**第一次真正跑到自己的正题**，
+> 一次性浮出 6 条红（逐条独立跑，`SANDBAR_SCENARIO_ONLY`，各起自己的批台）：
+> 1. `t260908-01-ki061-replay-compat` — 回放子用例红 → 真因已单列 **KI-143**（replay_check 恒 ok=false）。
+> 2. `t260917-04-arb-refusal-replay-compat` — 同上，`UnboundLocalError ... pusher` → **KI-143**。
+> 3. `t260915-01-detail-face-journey` — `240s 内未到 blocked（现 stage=arbitrate state=blocked marker='path_gate_reason='）`：
+>    票确实 blocked 了，但快照里没有 `path_gate_reason=` 语义锚 → 受阻原因不是路径闸，与场景前提不符（待定性：闸面漂移 or 场景前提老化）。
+> 4. `t260908-01-ticket-pause-gate` — ①L0b 离线契约脚本 `OFFLINE pause-entry: passed=10 failed=5`（包装层载荷/D1/畸形输入）；
+>    ②L3.7 走到 merge 人门 420s 超时——末态 `merge_check/blocked`，红因是泳道自己的 `base_ref 缺失` + `verify_lane code red=1`。
+> 5. `t260917-09-tests-false-escalation-guard` — 「不在册=保守计轮 → 第 7 判决封，实际 arb=6」。
+> 6. `t260917-09-tests-streak-reset` — 「相三 复位签名『测试集迭代（第 1 轮）』出现 1 次 ≥2（重入清零重计）」。
+> **第 5、6 条的共同嫌疑**：KI-122 落地（main `bec15f9`）**有意改过计数语义**（`KI122_STREAK_HOLD_PATCH_ID` 让
+> `tests_rounds` 连续计数**不被外部处置（rework/retry_qc/pause）复位**、超限触顶不再自动重跑）——这一对场景的期望值是改前语义，
+> 属于「引擎有意变更 → 场景没跟着改」的老化（同 `sc_template_face_narrowing`、同 KI-142 的场景侧），**待确认**后再决定改场景还是回改引擎。
+> **机理（为什么能烂这么久）**：集成段跑闸**跳过 `engine` 与 `exclusive` 两个池**（t260927-05 回执原话「本轮跳过池=engine、exclusive（少 81 条）」），
+> 而这两个池恰恰装的是「引擎自身行为」的场景；于是它们只在有人手工点名时才跑——**常规闸看不见池内的红**，
+> 加上 KI-142 的假绿断言让它们连「建票失败」都报成绿，三层叠加＝长期静默。
+> **修法方向**：①把这 6 条各自定性（KI-143 已定；其余 4 条要判「场景老化」还是「产品回归」）；②**给池跳过加可见性**——
+> 跳过的池必须在回执里点名「本次未跑 N 条（池=…）」（现在只有一行 summary 数字，容易漏读），并在周期巡检里轮转覆盖
+> engine/exclusive 池（哪怕低频，例如每天一次全池轮转），否则「引擎自身的场景」永远是盲区；
+> ③场景侧配套：裸入口写 op 一律走 KI-142 的 `accepted()` 判据（已落机械闸 L9 + L1 反锁）。
