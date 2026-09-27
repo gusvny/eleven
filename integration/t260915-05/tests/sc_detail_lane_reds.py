@@ -279,6 +279,14 @@ def journey(fail, bench):
                        check=True, capture_output=True, text=True)
         reg_dir = bench.write_registry(os.path.join(tmp, "registry"), PROJ, repo)
         env = stage_env(stage, reg_dir, audit_env)
+        # 260927（integration 岗）：**整条旅程的调用方身份**（=夹具项目自身）在 env 里
+        # 一次声明，覆盖本场景所有写 op（ticket-start / sign / …）。原因：t260925-08 把
+        # undeclared 策略由 record 翻成 refuse 之后，凡经裸入口的写 op 都会被跨项目闸
+        # fail-closed 拒收（kind=cross_project_refused，回执 rc=0 却 ok=false）——只补
+        # ticket-start 会造成「前面绿、③sign 又红」的逐点打地鼠。env 声明对
+        # 「引擎跑」（env 里带的是运行票自己的项目）与手工单跑都稳：显式参数优先于 env，
+        # 逐调用点若另给了 caller_project 仍以它为准。
+        env["SANDBAR_CALLER_PROJECT"] = PROJ
         stub_path = os.path.join(tmp, "lane_red_stub.py")
         with open(stub_path, "w", encoding="utf-8") as f:
             f.write(LANE_RED_STUB)
@@ -291,9 +299,19 @@ def journey(fail, bench):
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ,
             "title": "t260915-05 详情观测面三红旅程", "write_set": list(WRITE_SET),
-            "base_ref": "main"}, env)
-        fail.check(rc == 0 and TID in out,
-                   "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-120:]))
+            "base_ref": "main",
+            # 260927：**必须显式声明调用方项目**（=夹具项目自身）。t260925-08 把
+            # undeclared 策略由 record 翻成 refuse 之后，裸入口建票会被跨项目闸
+            # fail-closed 拒收（kind=cross_project_refused）；显式参数优先于 env，
+            # 所以「引擎跑」（env 里带的是运行票自己的项目）与手工单跑都稳。原缺陷
+            # 被「断言漏判」藏住：拒收回执 rc=0 且回显票号，旧断言 rc==0 and TID in out
+            # 于是假绿 → 票根本没建出来，worker 只能干等 240s 报 workflow not found。
+            # 断言同时收紧为「受理必须 ok=True」。
+            "caller_project": PROJ}, env)
+        _receipt = parse_out_json(out)
+        fail.check(rc == 0 and TID in out and _receipt.get("ok") is True,
+                   "ticket-start 受理（ok 必须为真；rc=%s ok=%r out尾=%s）"
+                   % (rc, _receipt.get("ok"), out[-160:]))
 
         snap0 = wait_stage_running(py, env, TID, worker, wlog, fail,
                                    "create_plan", 240)
