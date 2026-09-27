@@ -2126,3 +2126,27 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②把「裸入口写 op 收尾必须判 ok=True」做成场景侧共用判据（`lib_gate.run_poc_client` 层加一把「受理断言」helper），
 > 从根上堵住「拒收也当受理」的假绿；③机械闸：对 `"ticket-start"` 调用点做一次「是否声明身份」的静态检查（L9 级），
 > 防新增场景重犯。
+
+## KI-143 `replay_check` 对所有票一律 ok=false：外置模板类在回放沙箱里 import 不到，而 SDK 把真因掩成 UnboundLocalError（260927 实案，integration 岗登记；KI-135/KI-128 同族「在飞 workflow 回放安全网」）
+> **实案**：`server/engine/replay_check.py --workflow <任何票>` 一律返回
+> `{"ok": false, ..., "error": "UnboundLocalError: local variable 'pusher' referenced before assignment"}`。
+> 实测三张票两个类都同形（`t260926-05` DevLaneWorkflow/COMPLETED/547 事件、`t260926-04` ContentStudioWorkflow/COMPLETED、
+> `t260922-18` DevLaneWorkflow/TERMINATED）——**与历史内容无关**，即回放安全网整体失效。
+> **真因（三层因果链，逐层实证）**：`UnboundLocalError`（SDK `temporalio/worker/_replayer.py:334` 的
+> `finally: pusher.close()`，此时 `pusher` 尚未赋值）
+> ← `RuntimeError: Failed validating workflow ContentStudioWorkflow`（`_workflow.py:168`）
+> ← **`ModuleNotFoundError: No module named 'sandbar_ext_nusuyou_content_studio'`**。
+> 外置模板类是**运行期按名 importlib 装载**的（`project_templates.py:231` 生成别名
+> `sandbar_ext_<key>_<stem>`；`worker.py:359` 注释亦印证「外置模块经 importlib 按名装载，不在任何 import 表」），
+> 于是它进了 `workflows_v2.ALL_WORKFLOWS_V2`，但**在回放沙箱里没有可导入的模块** → 该类校验失败 →
+> Replayer 起不来 → 整批回放全红。
+> **为什么难查**：SDK 把「校验失败」这个真因**吞掉**，只把 finally 里的 `UnboundLocalError` 报出来（同一 SDK 缺陷：
+> 任何 `for_replay` 异常都会被掩成这句）。第一次用 `<stdin>` 探针复现时还被自证陷阱骗过（沙箱 import `__main__`
+> 时执行了探针自己的 `asyncio.run`，报 `No spec for __main__ file at <stdin>`）——真因是用**独立文件探针 +
+> `__cause__ or __context__` 链**挖出来的。
+> **影响**：①回放安全网（t260828-01 建的「改 workflow 代码后回放在飞票」机械红）**现在恒红**，等于没有；
+> 真出现非确定性变更时无法与本次故障区分；②错误文案把人引向 SDK 缺陷而不是自家模板装载。
+> **修法方向**：①`replay_check` 在构造 Replayer 前按 worker 同款方式把项目外置模板装载进来（复用
+> `project_templates` 的装载单点，别造第二份），或对该类显式走 unsandboxed runner；②**回执要点名真因**：
+> 捕获校验异常并把内层 `ModuleNotFoundError: <alias>` 报出来（SDK 的 UnboundLocalError 不得成为对外文案）；
+> ③补一条**冒烟锁**：「对一张已知能回放的票，replay_check 必须 ok=true」——正是缺这条锁，本故障才能静默腐烂。
