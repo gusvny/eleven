@@ -2150,6 +2150,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > `project_templates` 的装载单点，别造第二份），或对该类显式走 unsandboxed runner；②**回执要点名真因**：
 > 捕获校验异常并把内层 `ModuleNotFoundError: <alias>` 报出来（SDK 的 UnboundLocalError 不得成为对外文案）；
 > ③补一条**冒烟锁**：「对一张已知能回放的票，replay_check 必须 ok=true」——正是缺这条锁，本故障才能静默腐烂。
+> **处置（260927 当日收口）**：三件都做了——
+> ①`replay_check._replayer()` 现在把 `workflows_v2.PROJECT_TEMPLATE_PASSTHROUGH_MODULES`（worker 用的**同一个**
+> 真源）注入 `SandboxedWorkflowRunner(restrictions=...with_passthrough_modules(...))`，并订正了那句事实错误的
+> 注释（「Replayer default = unsandboxed」→ SDK 缺省其实是 sandboxed，正是它让缺失的注入显得「不必写」）；
+> 实测三票两类全部转绿：`t260926-05` ok=true / `t260926-04`（ContentStudioWorkflow，就是校验失败那个类）ok=true /
+> `t260922-18`（TERMINATED 老票）现在报**真信号** `NondeterminismError: No command scheduled for event
+> HistoryEvent(id: 387, ActivityTaskScheduled)`——安全网已能区分「构造坏了」与「真非确定」。
+> ②掩码句现在附带真因方向提示（识别 `UnboundLocalError` + `pusher` 特征串）。
+> ③冒烟锁 = `server/engine/tests/test_t260927_ki143_replay_preflight.py`（3 passed）：用「空 history 回放」
+> 把**校验阶段**单独钉住——见 UnboundLocalError=校验失败（回归）、见其它异常=worker 已构造成功（通过）；
+> 外加源码锚（passthrough 必须取自单点真源、旧错注释不许复活）。**反向锁已实证**：把 `replay_check.py` 的修复
+> stash 回旧码，三条立刻全红；恢复后 3 passed。
 
 ## KI-144 `engine`/`exclusive` 池被常规集成闸**跳过** → 池内场景的既有红长期无人知（260927 修好 KI-142 后一次性浮出 6 条，integration 岗登记；KI-142 的孪生半）
 > **实案**：把 KI-142（裸入口建票缺调用方身份 → 建票被拒 → 场景干等超时）修好之后，`engine` 池里的场景**第一次真正跑到自己的正题**，
