@@ -288,7 +288,7 @@ def test_d3_whitelist_discipline_and_malformed_entries():
     """白名单外的目录**不计**（宿主 temp 里有别的程序的东西）；畸形条目逐条点名不抛。"""
     entries = _dirs(2, prefix="integ-e2e-fixture-") + [
         {"name": "com.google.Chrome.AeLvzV", "mtime": NOW - 900 * 3600},
-        # 260927 改点：`nusuyou-integ-run-*` 曾是「别项目的条目」样板，现已随第二批前缀
+        # 260927 改点：`nusuyou-integ-run-*` 曾是「别项目的条目」样板，现已随第二批前缀（naming-compat）
         # 并入白名单（同款锁档族，见 test_t260927_tmp_fixture_family）——这里换成**仍**
         # 在白名单外的姊妹项目条目（判据不变：白名单外一律不计）
         {"name": "nusuyou-scratch-x.lock", "mtime": NOW - 900 * 3600},

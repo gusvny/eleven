@@ -37,7 +37,7 @@ function section(t) { console.log(`\n== ${t}`) }
 const REPO = process.cwd()
 let lane = '', contract = '', vy = ''
 try { lane = readFileSync(join(REPO, 'server', 'tools', 'verify_lane.py'), 'utf8') } catch { lane = null }
-try { contract = readFileSync(join(REPO, 'docs', 'design', 'sandbar项目接入契约v1.md'), 'utf8') } catch { contract = null }
+try { contract = readFileSync(join(REPO, 'docs', 'design', 'sandbar-project-onboarding-contract-v1.md'), 'utf8') } catch { contract = null }
 try { vy = readFileSync(join(REPO, 'verify.yaml'), 'utf8') } catch { vy = null }
 
 section('A. verify_lane.py 幻影/退役措辞零残留（commit② 勘误回归棒）')

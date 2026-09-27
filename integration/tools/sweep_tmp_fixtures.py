@@ -77,7 +77,7 @@ TMP_FIXTURE_PREFIXES = (
     "sandbar-admin-log-",     #  2,854  265h  integration/stage_docker.py:1332（**文件**；两条拆台路径已回收）
     "sandbar-credentials-",   #  2,519  112h  同上 :1333（**文件**；凭据副本留在 $TMPDIR 属卫生面欠账）
     "sandbar-integ-run-",     #  2,820  204h  integration/run_scenarios.py 的 `_run_lock_path`（**文件** 单飞锁档；260927 已修）
-    "nusuyou-integ-run-",     #  1,836  106h  同款锁档的旧前缀——生产者在**姊妹项目**的同一份 runner
+    "nusuyou-integ-run-",     #  1,836  106h  同款锁档的旧前缀——生产者在**姊妹项目**的同一份 runner（naming-compat）
                               #               （~/Documents/nusuyou/integration/run_scenarios.py:182），本仓修不到；
                               #               存量由本表清（0 条 <6h = 已无新产）
     "venv-compat-",           #  4,814  346h  integration/t260907-10/sc_engine_venv_compat.py:56-58（root+home 两族；260927 已修，原表只覆盖 -root）
@@ -105,7 +105,7 @@ TMP_FIXTURE_PREFIXES = (
 #: 不是第二份可独立增删的清单——白名单真源只有上面那一个）。
 BATCH2_MERGED_PREFIXES = (
     "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
-    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",
+    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
     "t26090704-lock", "t260904-18-mg", "t260910-10-", "t260908-02-ut", "t090506-",
     "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
     "t260915-10-", "t26092404-", "t260923-", "t260925-", "t260922-", "t260921-",
@@ -170,10 +170,10 @@ def scan(root: str, prefixes, max_age_h: float, now: float = None,
       - `stale` / `live`：`[FixtureEntry]`（按名称排序，**删除顺序可复核**）；
       - `entries`（顶层条目总数）、`untouched`（白名单外）；
       - `excluded_by_prefix` / `excluded_count` / `excluded_named`（明确排除族：只可见、可删不着）；
-      - `skipped_named` / `skipped`（符号链接、FIFO、stat 失败——逐条点名，绝不当 stale 删）。
+      - `not_swept_named` / `not_swept`（符号链接、FIFO、stat 失败——逐条点名，绝不当 stale 删）。
     """
     now = time.time() if now is None else now
-    stale, live, skipped_named = [], [], []
+    stale, live, not_swept_named = [], [], []
     entries = untouched = 0
     locked = 0
     excluded_by_prefix = {p: 0 for p in excluded}
@@ -194,26 +194,26 @@ def scan(root: str, prefixes, max_age_h: float, now: float = None,
             try:
                 if ent.is_symlink():
                     # 符号链接：不碰（rmtree 跟链接会删到链接目标=别人的东西）
-                    skipped_named.append("%s (symlink — not followed)" % name)
+                    not_swept_named.append("%s (symlink — not followed)" % name)
                     continue
                 if ent.is_dir(follow_symlinks=False):
                     kind = "dir"
                 elif ent.is_file(follow_symlinks=False):
                     kind = "file"        # 文件族单独判定（锁档/影子/凭据副本）
                 else:
-                    skipped_named.append("%s (not a real directory or regular file)" % name)
+                    not_swept_named.append("%s (not a real directory or regular file)" % name)
                     continue
                 mtime = ent.stat(follow_symlinks=False).st_mtime
             except OSError as e:
                 locked += 1
-                skipped_named.append("%s (stat failed: %s)" % (name, e))
+                not_swept_named.append("%s (stat failed: %s)" % (name, e))
                 continue
             (stale if age_h(now, mtime) >= max_age_h else live).append(
                 FixtureEntry(name, mtime, kind))
     stale.sort()
     live.sort()
     return {"entries": entries, "untouched": untouched, "stale": stale, "live": live,
-            "skipped_named": skipped_named, "skipped": locked,
+            "not_swept_named": not_swept_named, "not_swept": locked,
             "excluded_by_prefix": excluded_by_prefix,
             "excluded_count": sum(excluded_by_prefix.values()),
             "excluded_named": excluded_named}
@@ -430,9 +430,9 @@ def run(argv=None) -> int:
     n_dirs = sum(1 for e in sc["stale"] if e.kind == "dir")
     n_files = len(sc["stale"]) - n_dirs
     log("scanned %d top-level entries in %.1fs: %d whitelisted stale (>=%sh: %d dirs / %d files), "
-        "%d whitelisted live, %d untouched (outside whitelist), %d skipped"
+        "%d whitelisted live, %d untouched (outside whitelist), %d not swept"
         % (sc["entries"], time.monotonic() - t0, len(sc["stale"]), args.max_age_h,
-           n_dirs, n_files, len(sc["live"]), sc["untouched"], len(sc["skipped_named"])))
+           n_dirs, n_files, len(sc["live"]), sc["untouched"], len(sc["not_swept_named"])))
     for r in rows:
         live_n = len(live_rows.get(r["prefix"], []))
         log("  %-24s stale=%-7d (d=%-6d f=%-5d) live=%-5d oldest=%-8s est≈%s%s"
@@ -512,7 +512,7 @@ def run(argv=None) -> int:
                 "live_per_prefix": {p: len(v) for p, v in live_rows.items()},
                 "excluded_by_prefix": {p: c for p, c in sc["excluded_by_prefix"].items() if c},
                 "excluded_named": sc["excluded_named"],
-                "skipped_named": sc["skipped_named"][:NAMED_CAP], "notes": notes,
+                "not_swept_named": sc["not_swept_named"][:NAMED_CAP], "notes": notes,
                 "summary": summary})
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))

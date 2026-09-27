@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 POC = REPO / "server" / "engine"
-DOC_CONTRACT = REPO / "docs" / "design" / "sandbar项目接入契约v1.md"
+DOC_CONTRACT = REPO / "docs" / "design" / "sandbar-project-onboarding-contract-v1.md"
 ROLE = "reviewer"
 
 

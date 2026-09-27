@@ -274,7 +274,7 @@ function boundedDirSize(dir, budget = { entries: 20000, deadlineMs: 3000 }) {
         const p = join(cur, ent.name)
         if (ent.isDirectory()) stack.push(p)
         else if (ent.isFile()) bytes += statSync(p).size
-      } catch { /* race: the entry vanished or is unreadable — skip */ }
+      } catch { /* race: the entry vanished or is unreadable — treat as gone */ }
     }
   }
   return { bytes, truncated }

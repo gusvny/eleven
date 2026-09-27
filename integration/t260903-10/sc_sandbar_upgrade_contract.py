@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_installer import (REPO, Fail, cleanup, make_temp_home, run_cli,  # noqa: E402
                            require_installer_entry)
 
-CONTRACT_REL = os.path.join("docs", "design", "sandbar项目接入契约v1.md")
+CONTRACT_REL = os.path.join("docs", "design", "sandbar-project-onboarding-contract-v1.md")
 # ⑧-2 四条必查项锚：touchpoints 编号 或 语义关键词（任一命中即可辨）
 FOUR_CHECKS = [
     ("A3", ("settings", "resolve", "层叠")),

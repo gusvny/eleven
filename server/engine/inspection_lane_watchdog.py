@@ -107,7 +107,7 @@ TMP_FIXTURE_PREFIXES = (
     "wb-",
     # ---- 第二批（260927 启用；逐条证据见 integration/tools/sweep_tmp_fixtures.py 的同名表）----
     "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
-    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",
+    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
     "t26090704-lock", "t260904-18-mg", "t260910-10-", "t260908-02-ut", "t090506-",
     "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
     "t260915-10-", "t26092404-",

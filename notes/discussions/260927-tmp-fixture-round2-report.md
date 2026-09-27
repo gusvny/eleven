@@ -143,7 +143,7 @@
 | 我的引擎面定点 | 上面 9 个 import `activities` 的测试文件 + 两个新/改测试文件 | **202 passed** |
 | 新回归 | `pytest server/engine/tests/test_t260927_tmp_fixture_family.py -q` | **24 passed** |
 | 水位面既有 | `pytest server/engine/tests/test_t260926_tmp_fixture_water.py -q` | **26 passed**（含 re-point 后的 d3） |
-| 机械闸 | `python3 integration/lint_tests.py` | **0 error / 0 warn**（09:26 曾出现 1 条 **外来** L7 红：`server/plugins/workbench/tests/project-template-lane-map.mjs` 两处「腿」不在基线内，09:50 复核已消失；非我面，未触碰） |
+| 机械闸 | `python3 integration/lint_tests.py` | **0 error / 0 warn**（09:26 曾出现 1 条 **外来** L7 红：`server/plugins/workbench/tests/project-template-lane-map.mjs` 两处被禁术语不在基线内，09:50 复核已消失；非我面，未触碰） |
 | worker 启动面 | `SANDBAR_PROJECTS_DIR=<桩> server/engine/.venv/bin/python server/engine/worker_dryrun.py` | `{"ok": true, "activities": 61, "workflows": 7, "loader_rejections": 0}` |
 | 同泳道单飞锁场景 | `python3 integration/t260913-02/sc_integ_run_singleflight.py` | **11 ok / 0 fail**（并发仍被挡住、持有者留痕可读、退出后零残留；`integ-singleflight-*` 目录零残留） |
 | venv 兼容场景 | `TMPDIR=<私有> python3 integration/t260907-10/sc_engine_venv_compat.py` | **6 ok / 0 fail**，私有 `$TMPDIR` **零残留**（改前每跑留 10 个目录） |

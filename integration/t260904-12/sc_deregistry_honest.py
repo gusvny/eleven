@@ -66,7 +66,7 @@ if sc.is_file():
        "T4 嵌套护栏 env_fail 语义仍在（设计性环境红标记未被改成恒过）")
 
 # ---- T5 契约 v2.1 变更记录含移册依据 ----
-contract = (REPO / "docs" / "design" / "sandbar项目接入契约v1.md").read_text()
+contract = (REPO / "docs" / "design" / "sandbar-project-onboarding-contract-v1.md").read_text()
 ok(re.search(r"v2\.1.*(?:真跑不进闸|移册|ticket-lifecycle)", contract) is not None
    or ("v2.1" in contract and "ticket-lifecycle" in contract),
    "T5 契约 v2.1 变更记录含移册依据（定稿条款引用，追加型历史 pin）")

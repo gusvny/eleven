@@ -7,7 +7,7 @@
 
   ① **文件族整族漏了**：上一版清扫器只碰「真目录」，而最大的几族里 `sandbar-integ-run-*.lock`
      （同泳道单飞锁档）、`sandbar-admin-log-*.log`（影子）、`sandbar-credentials-*.yaml`
-     （凭据副本）、`nusuyou-integ-run-*.lock`（姊妹项目同款锁）全是**文件**——一条也删不到；
+     （凭据副本）、`nusuyou-integ-run-*.lock`（姊妹项目同款锁）全是**文件**——一条也删不到；  # naming-compat（姊妹项目同款前缀，非退役旧名）
   ② **「登记了但没启用」的半态**：第二批 28 个前缀只写在 `CANDIDATE_PREFIXES_BATCH2`
      常量里没进白名单，其中 `t260907-12-act-/-ch-` 两个变体被 `-ut` 前缀盖不住（存量
      6,399 个）——正是「前缀盖不住」这一类洞。
@@ -306,7 +306,7 @@ def test_c1_dry_run_then_apply_sweeps_dirs_and_files_only(tmp_path):
     assert out["excluded_by_prefix"]["com.google.Chrome."] == 1
     assert out["excluded_by_prefix"]["dsh-subprocess-"] == 1
     assert out["excluded_by_prefix"]["tmp"] == 1
-    assert any("not followed" in s for s in out["skipped_named"])            # 符号链接逐条点名
+    assert any("not followed" in s for s in out["not_swept_named"])            # 符号链接逐条点名
     assert (root / "t260907-12-act-stale").exists()                          # dry-run 不删
 
     p2 = _sweep(root, "--apply")

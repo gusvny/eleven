@@ -105,7 +105,7 @@ def main() -> int:
 
     print("== 形态② modify/delete 相撞 → 冲突现场 → 消解 settle 自愈（中性路径）")
     # 注：用中性路径锁「冲突子回路自愈」的一般承诺面。`.sandbar/` 特例不在此锁：
-    # settle_conflict_resolution 的 _SETTLE_RESET_PATHS=(".dsh", ".suyou", ".sandbar")
+    # settle_conflict_resolution 的 _SETTLE_RESET_PATHS=(".dsh", ".suyou", ".sandbar")  # naming-compat（引擎常量原文引用，非读侧旧名）
     # 会把 `.sandbar/` 下暂存变更回退（协调目录永不入库的既定防），该特例形态经
     # 消解回路不可自愈——已作为新故障线索上报结果文件（KI-090 处置方向②未实施
     # +主同步扩大暴露面），本场景只定位不修复。
