@@ -267,6 +267,24 @@ def test_b_daemon_probe_progress_naming(tmp_path, monkeypatch, capsys):
     assert "已等" in err and "预算" in err
 
 
+def test_b_daemon_probe_first_attempt_named_before_overbudget(tmp_path, monkeypatch, capsys):
+    """KI-141 反向锁：**首次探针就把预算吃满**时也必须有一条 STAGE_WAIT 点名。
+
+    旧码把「判超预算 → raise」放在点名**之前**，于是「第一次 `docker info` 就耗光预算」
+    （机器一忙就发生）的那条路径一条点名都没有：等 daemon 的契约对第一次尝试不成立，
+    短预算用例在负载下必红（260927 全量套件实案）。本用例用「睡满预算再失败」的假 docker
+    确定性复现该形态：断言只落公开面（stderr 文案 + exit 2 + kind=env），不锚内部实现。
+    """
+    fakebin = _fake_docker_bin(tmp_path, "sleep 3; exit 1")   # 首次探针吃满 2s 预算
+    monkeypatch.setenv("PATH", str(fakebin) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("SANDBAR_STAGE_WAIT_BUDGET_S", "2")
+    with pytest.raises(sd.StageError) as ei:
+        sd.cmd_daemon_probe()
+    err = capsys.readouterr().err
+    assert "STAGE_WAIT" in err and "docker daemon" in err, "首次即超预算也必须先点名"
+    assert ei.value.kind == "env" and ei.value.exit_code == 2
+
+
 def test_b_daemon_probe_healthy_ok(tmp_path, monkeypatch, capsys):
     fakebin = _fake_docker_bin(tmp_path, "echo fake-ok")       # daemon 在场形态
     monkeypatch.setenv("PATH", str(fakebin) + os.pathsep + os.environ["PATH"])

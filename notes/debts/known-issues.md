@@ -2094,3 +2094,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 提到第一次探针**之前**（「仍在等 docker daemon（已等 0s/2s 预算）」）——那样「等就有话说」的契约对第一次尝试
 > 也成立，用例不再靠运气；③同类断言普查：凡「短墙钟预算 + 子进程」组合都用同一把尺子（KI-137 的教训已在
 > `test_t260926_lane_watchdog` 落成反向锁，本条是它的第二个实例）。
+> **处置（同日收口，走 ② 代码侧）**：`integration/stage_docker.py::cmd_daemon_probe` 的 `except` 分支**改为
+> 先点名、后判超预算**（判据/退出码/文案一律不变；末次也点名，读出「等到底了」比静默 raise 有用）；
+> 回归锁 = `test_t260920_01_supply_wait_budget.py::test_b_daemon_probe_first_attempt_named_before_overbudget`
+> （「睡满预算再失败」的假 docker 确定性复现该形态）。**反向锁已实证**：把该处改动 stash 回旧码，新用例
+> 立刻红成 `assert ('STAGE_WAIT' in '')`（与实案同形）；恢复后 26 passed。

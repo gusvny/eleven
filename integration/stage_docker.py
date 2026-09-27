@@ -3726,16 +3726,21 @@ def cmd_daemon_probe():
             return EXIT_OK
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             waited = time.time() - t0
+            pause = max(0.5, min(5.0, deadline - time.time()))
+            # 点名**先于**超预算判定（260927，KI-141）：此前判超预算直接 raise，于是
+            # 「首次探针就把预算吃满」（机器一忙就发生）时一条 STAGE_WAIT 都不留——
+            # 等待期必有话说的契约对第一次尝试不成立，靠短预算的用例因此负载敏感必红。
+            # 改序后：每一次失败尝试都先点名（末次也点，读出「等到底了」比静默 raise 有用），
+            # 再决定 raise / 睡一觉重探；判据、退出码与文案一律不变。
+            _stage_wait_ping(" docker daemon", "docker info 未回包/未就绪（%s: %s）"
+                             % (type(e).__name__, str(e)[:120]), waited, budget,
+                             extra="%.0fs 后再探（第 %d 次）" % (pause, attempt))
             if time.time() >= deadline:
                 raise StageError(
                     "ENV_FAIL: docker daemon 等待超预算（已等 %.0fs/%.0fs）：daemon "
                     "未就绪（docker info 反复失败：%s: %s）——测试台一律走 docker，"
                     "启动 Docker/OrbStack 后重试；本条按等待预算收诚实红，不硬等"
                     % (waited, budget, type(e).__name__, str(e)[:200]), kind="env")
-            pause = max(0.5, min(5.0, deadline - time.time()))
-            _stage_wait_ping(" docker daemon", "docker info 未回包/未就绪（%s: %s）"
-                             % (type(e).__name__, str(e)[:120]), waited, budget,
-                             extra="%.0fs 后再探（第 %d 次）" % (pause, attempt))
             time.sleep(pause)
 
 
