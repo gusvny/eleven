@@ -175,6 +175,8 @@ import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
+// t260926-05：巡检落账报告只读端点（report_path → 可读摘要；fail-closed 200+reason 同 /file 风格）。
+import { readInspectionReportFile } from './src/host/inspection-report.ts'
 import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
 import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
 import { aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline } from './src/host/agent-usage.ts'
@@ -1271,6 +1273,22 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           return
         }
         await handleTicketTimeFile(req, res, id)
+        return
+      }
+      // t260926-05：巡检落账报告只读端点（report_path 指针 → 缩进式可读摘要）。
+      // 只读刚性：非 GET 一律 405；路径问题走 fail-closed 200+reason（不 5xx 不抛）。
+      if (op === 'inspection-report') {
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { ok: false, error: '巡检报告摘要是只读通道，仅支持 GET' })
+          return
+        }
+        if (!TICKET_ID_RE.test(id)) {
+          sendJson(res, 400, { ok: false, error: `工单 id 不合法：'${id.slice(0, 40)}'` })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://x')
+        const result = await readInspectionReportFile(repo, url.searchParams.get('path'))
+        sendJson(res, 200, { ok: true, result })
         return
       }
       if (op === 'review') {

@@ -1340,6 +1340,15 @@ SCENARIOS = [
      "双真源同步锁的闸内活性（t260916-05 验收③，灰盒 L2 离线）：验收③「保留则同步锁在场，两者择一并以源码锁钉住」的机械执行点——锁的断言内容（引擎 inspection_flow.py STAGES 声明 ↔ workbench INSPECTION_TOPOLOGY 短名表逐位比对+变异自证）由 developer UT 交付（server/plugins/workbench/tests/t260916-05-inspection-topology-lock.mjs），本条守锁在集成闸内被真实执行且绿：锁文件缺席=fail 点名交付约定路径（文件缺失=产品面缺失非环境）；执行非零=fail 带 stdout/stderr 尾部（锁红=双真源漂移已发生，恰是本票要抓的形态）；exit 0=pass。没有本条，锁只活在 developer 自检里——merge 后改声明忘改词表没有任何机械闸会红（KI-046/049「测试在场≠测试生效/机制活性」家族；t260913 golden-freeze 补「唯一自动比对点」同族先例）。路径解析走爬根 helper（KI-075 族）。纯离线无 ENV_FAIL 子用例。实现落地前红属预期（TDD 信号：锁文件未交付=fail），arbitrate/merge 期必须绿",
      "node integration/t260916-05/sc_inspection_dual_source_lock.mjs", "browser-free"),
 
+    # ---- t260926-05: 巡检报告面全量可读（宿主单 260926 [object Object] 修复）----
+    # 与 t260916-05-inspection-detail-lane-map-dom（泳道图/拓扑）、t260916-05-topology-receipt
+    # （查询回执数据半+查询边界畸形 T3）、t260915-08（板面行/签字）分工见 intent：
+    # 本条独占报告面渲染完整性+安全文本契约（findings 全字段/evidence path:line+引文/
+    # 畸形 finding 渲染侧回落/套件证据段/report_path 摘要亲和物/端点失败显式降级）。
+    ("t260926-05-inspection-report-ui-dom",
+     "巡检票详情报告面全量可读+安全文本契约 DOM 对拍（t260926-05，灰盒 L3 browser-free，镜 t260916-05 家族两层式；宿主单 260926：详情页曾整页 [object Object]、findings 九字段只渲染四——本条守修复后用户可感知面）：S0 build-contract（双 bundle 同步+报告面锚 inspection-suite/inspection-report/inspection-face-rows/inspection-findings-list 在 shipped bundle+inspection-report-model.ts 纯模型冒烟：畸形 suite/finding/digest 全形不抛、零 [object Object]）；S1 真浏览器 API 桩（SANDBAR_TEST_CONSOLE 隔离台 3099 零接触；list/detail/workflows+本票摘要端点全桩，浏览器/bundle/React 全真，引擎不需要）——L1 findings 全字段以自身英文标签可读（Severity/Scan/Confidence/Verified/Subject/Why/Suggestion）+evidence 逐条 path:line+引文+中文 subject 原样（数据不译）；L2 畸形 finding 三形态（字符串体/对象套对象/数组体）不炸页、可读回落在场、抽屉全文零 [object Object]；L3 套件证据段：ran/passed/failed 计数、supply/runner 墙钟、run_budget/suite_timeout、late-receipt 告警带原因、逐 case 行各自带英文标签；L4 report_path 以可读文本在场+「打开摘要」亲和物渲染出报告体可读内容（含嵌套未知键，零 [object Object] 零裸对象倾倒）；L4b 摘要端点失败→显式降级文案（静默空白=非契约）；P 卫生子用例全旅程零 pageerror/console.error。分工：泳道图/拓扑归 t260916-05-detail-lane-map-dom、查询边界畸形归 t260916-05-topology-receipt T3（本条守渲染侧不重复）、板面行/签字归 t260915-08、face 静态形状归 developer L1（t260915-08-inspection-face）。实现落地前红属预期（TDD 信号：L1~L4 红=渲染面未接线；S0 bundle 双同步应即绿），arbitrate/merge 期必须绿；stage console/playwright-core/chromium 缺席=ENV_FAIL exit 2 点名（不假红不假绿）",
+     "node integration/t260926-05/sc_inspection_report_ui_dom.mjs", "browser-free"),
+
     # ---- t260916-15: 左栏工单合并排序 + 巡检行徽标可辨（巡检票不再沉底）----
     # 与 t260915-19-sidebar-inspection-ui 分工见 intent：彼守分拣制（归位/兜底组/黄调/
     # 降级）+反沉底烟测，本条守合并排序口径全矩阵（tier 边界/级内 updated_ts 倒序/兜底组

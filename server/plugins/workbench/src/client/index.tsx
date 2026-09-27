@@ -94,6 +94,9 @@ import type { StageDuration } from './lane-durations.ts'
 // 标签全部来自拓扑，组件零业务词——fixture-two-step 拓扑对拍锚）。
 import { buildLaneMap, buildChecksDetail } from './lane-map-model.ts'
 import { LaneMap, ChecksDetail } from './lane-map.tsx'
+// t260926-05：巡检报告面纯函数层（asText/套件证据段/泛化 face 行/报告摘要/发现项防御视图）。
+import { asText, suiteSectionView, faceRows, reportDigest, findingView } from './inspection-report-model.ts'
+import type { DigestLine } from './inspection-report-model.ts'
 import { ProvidersSection } from '../../../providers/src/client/index.tsx'
 import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
@@ -1183,6 +1186,13 @@ interface TicketDetail {
   red_line?: string
   human_gate?: { who?: string; gate?: string; decision?: string; note?: string } | null
   gate_error?: string
+  // t260926-05（报告面全量上屏）：引擎 face 原样透传的其余巡检段——渲染必须
+  // 对任意形状安全（unknown 有意为之，渲染层走 asText 防御路径）。
+  suite?: unknown
+  budget_note?: unknown
+  heartbeat_note?: unknown
+  scan_meta?: unknown
+  redirect?: unknown
 }
 
 /** Temporal pending activity 心跳（agent_activities.py 每 5s 上报 {stage,gen,polls,session_kb}）。 */
@@ -2176,24 +2186,107 @@ const INSPECTION_FACE_CSS = `
 .wb-insp-sev-tag[data-sev=med]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
 .wb-insp-sev-tag[data-sev=low]{background:var(--dsw-derive-neutral-bg,#f6f8fa);color:var(--dsw-derive-muted,#57606a)}
 .wb-insp-rep{font-size:12px;padding:2px 0}
+/* t260926-05 报告面全量上屏：泛化 label:value 行 / 警示行（预算耗尽、迟到回执、
+   blockers）/ 报告 JSON 摘要缩进排版。只动巡检详情面，不涉其他 surface。 */
+.wb-insp-row{display:flex;gap:8px;align-items:baseline;padding:2px 0;font-size:12px;border-bottom:1px dashed var(--dsw-derive-border,#eaeef2)}
+.wb-insp-row .wb-insp-k{flex:none;min-width:150px;color:var(--dsw-derive-muted,#57606a)}
+.wb-insp-row .wb-insp-v{word-break:break-all}
+.wb-insp-row-warn{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-insp-digest{margin-top:4px;padding:6px 8px;background:var(--dsw-derive-surface,#fbfcfd);border:1px solid var(--dsw-derive-border,#d0d7de);
+  border-radius:6px;font-size:11px;font-family:var(--dsw-mono,ui-monospace,monospace);max-height:320px;overflow:auto;word-break:break-all}
+.wb-insp-digest-raw{margin:4px 0 0;padding:6px 8px;background:var(--dsw-derive-surface,#fbfcfd);border:1px solid var(--dsw-derive-border,#d0d7de);
+  border-radius:6px;font-size:11px;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-all}
 .wb-insp-note-banner{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
   color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:5px 10px;font-size:12px;margin-bottom:6px}
 `
 
-/** 对象/数组 → 可读文本（260926 宿主报「report UI 都是 [object Object]」）：
- *  字符串原样（超长截断）、数字/布尔 String()、其余走紧凑 JSON（超长截断），
- *  **绝不产出 `[object Object]`**；null/undefined → 空串（调用方据此决定是否渲染该行）。 */
-function asText(v: unknown, limit = 400): string {
-  if (v === null || v === undefined) return ''
-  if (typeof v === 'string') return v.length > limit ? v.slice(0, limit) + '…' : v
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
-  try {
-    const s = JSON.stringify(v)
-    if (!s) return ''
-    return s.length > limit ? s.slice(0, limit) + '…' : s
-  } catch {
-    return String(v)
+// asText 等报告面纯函数自 t260926-05 起收口到 ./inspection-report-model.ts
+// （本文件与其余消费方 + 宿主摘要端点共用一份渲染契约，单点防漂移）。
+
+/** 套件证据段（t260926-05 报告面全量上屏）：face["suite"] 的有标签可读投影——
+ *  计数/分相墙钟/预算/超时/迟到回执/逐场景红绿/blockers。数据形状不限
+ *  （模型层 suiteSectionView 全防御），畸形形状=单行安全文本不炸。 */
+function InspectionSuiteFace({ suite }: { suite: unknown }) {
+  const sv = suiteSectionView(suite)
+  if (sv.rows.length === 0 && sv.cases.length === 0 && sv.blockers.length === 0) return null
+  return (
+    <details className="wb-insp-block" data-testid="inspection-suite" open>
+      <summary>Suite evidence</summary>
+      <div>
+        {sv.rows.map((r, i) => (
+          <div className={r.warn ? 'wb-insp-row wb-insp-row-warn' : 'wb-insp-row'} key={i}>
+            <span className="wb-insp-k">{r.label}</span>
+            <span className="wb-insp-v">{r.value}</span>
+          </div>
+        ))}
+        {sv.blockers.map((b, i) => (
+          <div className="wb-insp-row wb-insp-row-warn" key={`b${i}`}>
+            <span className="wb-insp-k">Blocker</span>
+            <span className="wb-insp-v">{b}</span>
+          </div>
+        ))}
+        {sv.cases.length > 0 && (
+          <div data-testid="inspection-suite-cases">
+            <div className="wb-insp-k">Cases ({sv.cases.length})</div>
+            {sv.cases.map((cse, i) => (
+              <div className="wb-insp-tl" key={i}>
+                <code>{cse.name}</code>
+                <span data-exit={cse.exit}>{cse.exit === '0' ? 'pass' : `exit ${cse.exit}`}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+/** 报告文件 affordance（t260926-05 验收「report_path 可读出路」）：路径原样可读 +
+ *  「Open report digest」展开宿主摘要端点产出的缩进式可读摘要（reportDigest
+ *  同源）；端点 fail-closed 人话原因原样上屏（诚实降级，不静默空白）。 */
+function InspectionReportFileFace({ ticketId, reportPath }: { ticketId: string; reportPath: string }) {
+  const [digest, setDigest] = useState<DigestLine[] | null>(null)
+  const [raw, setRaw] = useState<string | null>(null)
+  const [reason, setReason] = useState('')
+  const [open, setOpen] = useState(false)
+  async function toggle() {
+    const next = !open
+    setOpen(next)
+    if (!next || digest !== null || reason !== '') return
+    try {
+      const r = await apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/inspection-report?path=${encodeURIComponent(reportPath)}`)
+      const res = (r as { result?: { ok?: boolean; digest?: DigestLine[]; report?: unknown; raw?: string; reason?: string } })?.result
+      if (res?.ok && Array.isArray(res.digest)) {
+        setDigest(res.digest)
+      } else if (res?.ok && res.report !== undefined) {
+        // 端点回原报告 JSON（宿主可只回报告不回 digest）→ 浏览器侧同一份
+        // 纯函数出摘要（渲染契约单点：reportDigest 模型层同源）。
+        setDigest(reportDigest(res.report))
+      } else {
+        setReason(String(res?.reason ?? (r as { error?: string })?.error ?? 'Report digest unavailable'))
+        if (typeof res?.raw === 'string') setRaw(res.raw)
+      }
+    } catch (err) {
+      setReason(`Report digest request failed: ${String(err instanceof Error ? err.message : err)}`)
+    }
   }
+  return (
+    <div className="wb-insp-rep" data-testid="inspection-report">
+      Report file: <code>{reportPath}</code>{' '}
+      <button className="wb-btn" data-testid="inspection-report-open" onClick={toggle}>
+        {open ? 'Hide report digest' : 'Open report digest'}
+      </button>
+      {open && reason !== '' && <div className="wb-insp-row-warn" data-testid="inspection-report-reason">{reason}</div>}
+      {open && raw !== null && <pre className="wb-insp-digest-raw" data-testid="inspection-report-raw">{raw}</pre>}
+      {open && digest !== null && (
+        <div className="wb-insp-digest" data-testid="inspection-report-digest">
+          {digest.map((l, i) => (
+            <div key={i} style={{ paddingLeft: l.depth * 14 }}>{l.text}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
@@ -2275,38 +2368,63 @@ function InspectionDetailFace({ detail, operator, opBusy, onSign }: {
         <summary>Findings ({findings.length} entries)</summary>
         <div>
           {findings.length === 0 && <div className="wb-sub">No findings (green-proof period)</div>}
-          {findings.map((f, i) => (
-            <div className="wb-insp-f" key={asText(f?.id) || String(i)}>
-              <div className="wb-insp-f-head">
-                <span className="wb-insp-sev-tag" data-sev={asText(f?.severity)}>{asText(f?.severity) || '?'}</span>
-                <code>{asText(f?.scan)}</code>
-                {typeof f?.confidence === 'number' ? <span className="wb-sub">confidence {f.confidence}</span> : null}
-                {asText(f?.verified) ? <span className="wb-sub">{asText(f?.verified)}</span> : null}
-                <span>{asText(f?.subject)}</span>
+          {/* t260926-05 硬化：每条发现项经 findingView 防御视图——非对象发现项/
+              非对象证据条目都有可读回退行，任何形状不炸、绝不 [object Object]。 */}
+          {findings.map((f, i) => {
+            const fv = findingView(f, i)
+            return (
+              <div className="wb-insp-f" key={fv.fallback !== undefined ? `fb${i}` : String((f as { id?: unknown })?.id ?? i)}>
+                {fv.fallback !== undefined ? (
+                  <div className="wb-sub" data-testid="inspection-finding-fallback">{fv.fallback}</div>
+                ) : (
+                  <>
+                    <div className="wb-insp-f-head">
+                      <span className="wb-insp-sev-tag" data-sev={fv.sev}>Severity: {fv.sev || '?'}</span>
+                      <code>Scan: {fv.scan}</code>
+                      {fv.confidence !== '' ? <span className="wb-sub">Confidence: {fv.confidence}</span> : null}
+                      {fv.verified !== '' ? <span className="wb-sub">Verified: {fv.verified}</span> : null}
+                      <span>Subject: {fv.subject}</span>
+                    </div>
+                    {fv.why !== '' ? <div className="wb-sub">Why: {fv.why}</div> : null}
+                    {fv.suggestion !== '' ? <div className="wb-sub">Suggestion: {fv.suggestion}</div> : null}
+                    {fv.evidence.length > 0 ? (
+                      <ul className="wb-sub">
+                        {fv.evidence.map((e, j) => (
+                          <li key={j}>
+                            <code>{e.loc}</code>
+                            {e.quote !== '' ? <span> — {e.quote}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (fv.evidenceFallback ? <div className="wb-sub">Evidence: {fv.evidenceFallback}</div> : null)}
+                  </>
+                )}
               </div>
-              {asText(f?.why) ? <div className="wb-sub">Why: {asText(f?.why)}</div> : null}
-              {asText(f?.suggestion) ? <div className="wb-sub">Suggestion: {asText(f?.suggestion)}</div> : null}
-              {Array.isArray(f?.evidence) && f.evidence.length > 0 ? (
-                <ul className="wb-sub">
-                  {f.evidence.map((e, j) => (
-                    <li key={j}>
-                      <code>
-                        {asText((e as { path?: unknown })?.path)}
-                        {typeof (e as { line?: unknown })?.line === 'number' ? `:${(e as { line?: number }).line}` : ''}
-                      </code>
-                      {asText((e as { quote?: unknown })?.quote) ? <span> — {asText((e as { quote?: unknown })?.quote, 200)}</span> : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (f?.evidence ? <div className="wb-sub">Evidence: {asText(f.evidence)}</div> : null)}
-            </div>
-          ))}
+            )
+          })}
+        </div>
+      </details>
+      <InspectionSuiteFace suite={detail.suite} />
+      <details className="wb-insp-block" data-testid="inspection-face-rows" open>
+        <summary>Inspection fields</summary>
+        <div>
+          {(() => {
+            const rows = faceRows(detail)
+            if (rows.length === 0) return <div className="wb-sub">No extra inspection fields</div>
+            return rows.map((r, i) => (
+              <div className="wb-insp-row" key={i}>
+                <span className="wb-insp-k">{r.label}</span>
+                <span className="wb-insp-v">{r.value}</span>
+              </div>
+            ))
+          })()}
         </div>
       </details>
       <div className="wb-insp-block">
         {(detail.report_path ?? '') !== '' && (
-          <div className="wb-insp-rep">Report: <code>{detail.report_path}</code></div>
+          <InspectionReportFileFace ticketId={String((detail as { id?: unknown }).id ?? '')} reportPath={String(detail.report_path)} />
         )}
+        {(detail.report_path ?? '') === '' && <div className="wb-sub">No report file (period not closed yet)</div>}
         {(detail.suggested_fix_tickets?.length ?? 0) > 0 && (
           <div className="wb-sub">Suggested fix tickets: {detail.suggested_fix_tickets!.length} (dev-lane, referencing this ticket)</div>
         )}
