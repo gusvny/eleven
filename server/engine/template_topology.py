@@ -248,3 +248,48 @@ def export_template_topology(template_id: str) -> Optional[Dict[str, Any]]:
 def declared_templates() -> List[str]:
     """已声明拓扑的模板 id 清单（诊断/测试用）。"""
     return sorted(_TOPOLOGIES)
+
+
+# ---------------------------------------------------------------------------
+# 项目外置模板的 STAGES → 拓扑导出（t260927-05）
+# ---------------------------------------------------------------------------
+
+def topology_from_stages(template_id: str, name: str, stages: Any) -> Dict[str, Any]:
+    """从 STAGES 声明序列导出**线性**拓扑契约（项目外置模板通道）。
+
+    为什么存在：_TOPOLOGIES 是引擎内置模板的导出面数据；项目外置模板（t260924-04
+    加载口）的拓扑真源=模板类自带的 STAGES 声明（引擎仓无其源码，进不了静态表）。
+    本函数把「声明序=执行序」的线性链投影成 topology-v1 契约（节点+顺序边，无并行
+    组——STAGES 声明本身不携带分叉信息，绝不猜拓扑）。
+
+    stages 元素：类属性对象或同形 dict（id/name/role/exit/parts；id 必有）。
+    kind 投影与本文件头注的 shared.Stage 口径一致：exit=human→human；
+    parts 无 agent/human（纯 script）→gate；否则 agent。
+    空序列/任一阶段缺 id → ValueError（fail-closed，调用方决定点名方式——
+    template-faces 回执带 topology_error，绝不静默出假图）。
+    纯函数零 IO，client.py / 测试均可安全调用。
+    """
+    nodes: List[Dict[str, Any]] = []
+
+    def _field(s: Any, k: str) -> Any:
+        if isinstance(s, dict):
+            return s.get(k)
+        return getattr(s, k, None)
+
+    for s in (stages or ()):
+        sid = str(_field(s, "id") or "")
+        if not sid:
+            raise ValueError("阶段声明缺 id（template=%s）" % template_id)
+        parts = tuple(str(p) for p in (_field(s, "parts") or ()) if str(p))
+        exit_ = str(_field(s, "exit") or "")
+        if exit_ == "human":
+            kind = KIND_HUMAN
+        elif parts and not any(p in ("agent", "human") for p in parts):
+            kind = KIND_GATE
+        else:
+            kind = KIND_AGENT
+        nodes.append(_node(sid, str(_field(s, "name") or sid),
+                           str(_field(s, "role") or ""), kind, parts))
+    if not nodes:
+        raise ValueError("STAGES 空序列（template=%s）" % template_id)
+    return build_topology(str(template_id), str(name or template_id), nodes, ())

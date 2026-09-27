@@ -54809,7 +54809,24 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		pageNo,
 		projectKey
 	]);
-	const selWf = detail ? wfById[detail.workflow_id] : void 0;
+	const selWf = (0, react.useMemo)(() => {
+		if (!detail) return void 0;
+		const hit = wfById[detail.workflow_id];
+		if (hit) return hit;
+		const topo = detail.topology;
+		if (!topo?.nodes?.length) return void 0;
+		return {
+			id: detail.workflow_id,
+			name: topo.name ?? detail.workflow_id,
+			lane: "",
+			stages: topo.nodes.map((n) => ({
+				id: n.id,
+				role: n.role ?? "",
+				name: n.label ?? n.id
+			})),
+			topology: topo
+		};
+	}, [detail, wfById]);
 	/** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */
 	const stageDurs = useStageDurations(detail, selWf);
 	const laneModel = (0, react.useMemo)(() => buildLaneMap(detail?.topology ?? selWf?.topology ?? null, detail), [detail, selWf]);

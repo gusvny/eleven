@@ -2728,11 +2728,29 @@ async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
                 "exit": str(getattr(st, "exit", "") or ""),
                 "acceptance": [str(x) for x in (getattr(st, "acceptance", ()) or ())],
             })
+        # t260927-05：外置模板拓扑导出（STAGES 线性投影，纯函数）＋声明项目键——
+        # 消费方=workflow.py 目录/list 面与 ticket.py show 拓扑回落（同一权威面，
+        # 不另立第二真源）。导出失败=该条目 topology=None + topology_error 点名
+        # （fail-closed 不静默出假图），绝不让单模板炸掉整个回执。
+        topology = None
+        topology_error = ""
+        try:
+            from template_topology import topology_from_stages
+            topology = topology_from_stages(
+                tid, str(getattr(cls, "TEMPLATE_NAME", "") or tid),
+                getattr(cls, "STAGES", ()))
+        except Exception as e:  # 拓扑声明非法/STAGES 畸形：点名留痕，回执照常
+            topology_error = "%s: %s" % (type(e).__name__, e)
         templates[tid] = {
             "name": str(getattr(cls, "TEMPLATE_NAME", "") or tid),
             "lane": str(getattr(cls, "TEMPLATE_LANE", "") or "main"),
             "workspace_dir": bool(getattr(cls, "TEMPLATE_WORKSPACE_DIR", False)),
             "stages": stages,
+            # 声明项目键（builtin/夹具模板=""；项目外置模板=注册 key）——
+            # 目录面按项目过滤的依据（「只有声明方看得见」）。
+            "project": str((res.accepted.get(tid) or {}).get("project", "") or ""),
+            "topology": topology,
+            "topology_error": topology_error,
         }
     return _ok({
         "names": dict(shared.TEMPLATE_CLASS_NAMES),

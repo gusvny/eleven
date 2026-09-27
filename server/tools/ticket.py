@@ -89,6 +89,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -406,6 +407,20 @@ def _v2_query(tid):
     # meta['cross_project_uses']，盖章 op 才有账；retry_qc/update/cancel 的记名只在
     # admin.log——覆盖口径如实分档，见 server/engine/README.md 闸契约节）。
     meta['cross_project_uses'] = (snap.get('meta') or {}).get('cross_project_uses') or []
+    # t260927-05：外置模板拓扑回落——dev-lane/巡检等内置模板快照自带 topology；
+    # 项目外置模板（t260924-04 加载口）的 workflow 类不产该键 → show 空拓扑、
+    # 控制台泳道图缺席。改：快照缺拓扑时经 template-faces 权威面取该模板的
+    # STAGES 线性拓扑（与 create 闸同源；真未知模板 id=权威面也无 → 保持 None
+    # 不 fake）。faces 通道故障=show 不炸，stderr 一行点名后回落 None（缺席有痕，
+    # 绝不静默冒充有拓扑）。
+    if not meta.get('topology') and meta.get('workflow_id'):
+        try:
+            _tv = (_template_faces().get('templates') or {}).get(meta['workflow_id'])
+            if isinstance(_tv, dict):
+                meta['topology'] = _tv.get('topology')
+        except Exception as _e:
+            print('ticket: 模板拓扑回落不可达（template-faces 故障，回落 None）：%s: %s'
+                  % (type(_e).__name__, _e), file=sys.stderr)
     return meta, snap
 
 

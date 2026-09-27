@@ -3968,7 +3968,25 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   }, [tickets, pageNo, projectKey])
 
   // 短序号（时序可见）：按 created 升序编号 #01、#02…，显示在 id 列（悬停 title 显示完整 id）。
-  const selWf = detail ? wfById[detail.workflow_id] : undefined
+  // t260927-05：目录未命中回落——wfById 查不到（目录面故障/未刷新）时，用详情快照
+  // 自带 topology 合成最小 Wf，泳道图仍按「票面拓扑优先」渲染（绝不猜拓扑：详情无
+  // topology=undefined，回落现行线性步骤条）。目录命中（正常路径，含目录面合并落地
+  // 后的已声明外置模板）零变化。
+  const selWf = useMemo(() => {
+    if (!detail) return undefined
+    const hit = wfById[detail.workflow_id]
+    if (hit) return hit
+    const topo = detail.topology as
+      { name?: string; nodes?: Array<{ id: string; label?: string; role?: string }> } | null | undefined
+    if (!topo?.nodes?.length) return undefined
+    return {
+      id: detail.workflow_id,
+      name: topo.name ?? detail.workflow_id,
+      lane: '',
+      stages: topo.nodes.map(n => ({ id: n.id, role: n.role ?? '', name: n.label ?? n.id })),
+      topology: topo,
+    } as Wf
+  }, [detail, wfById])
   /** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */
   const stageDurs = useStageDurations(detail, selWf)
   // t260915-05：真泳道图模型（mock ③④）。拓扑双层取用：详情快照 topology（门内
