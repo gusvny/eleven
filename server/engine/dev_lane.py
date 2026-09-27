@@ -699,7 +699,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
               parts=("script",),
               acceptance=("泳道分支有 commit", "工作区干净（无未提交改动）",
                           "泳道内 verify_lane code 绿灯",
-                          "merge 预演无冲突（冲突则自动消解 %d 轮内收敛）" % MAX_CONFLICT_ROUNDS)),
+                          # 260927（宿主实报「段的说明写会自动消解，实测冲突重驱两次仍红」）：
+                          # 自动消解只对**预演冲突这一类红**生效（mc.conflict），其它红（脏工作区/
+                          # verify_lane 红/差值闸…）一律 blocked 等人——原文案把两类混写成一句，
+                          # 让人以为「任何冲突都会自动消解」。文案按类分开点名。
+                          "merge 预演无冲突（**仅**预演冲突这一类红自动打回 implement 消解，"
+                          "上限 %d 轮；脏工作区/verify_lane 红等其它红 blocked 等人）"
+                          % MAX_CONFLICT_ROUNDS)),
         Stage(id="merge", name="合并（人审）", role="integration", next="", exit="human",
               desc="人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；"
                    "合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验",
