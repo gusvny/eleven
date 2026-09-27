@@ -43,7 +43,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "integration"))
 sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
 sys.path.insert(0, HERE)
-from lib_gate import (Fail, poc_python, read_audit_jsonl, require_bench,  # noqa: E402
+from lib_gate import (Fail, accepted, poc_python, read_audit_jsonl, require_bench,  # noqa: E402
                       require_stage, run_poc_client, stage_down)
 from lib_t26091624 import (STUB_VERSION, make_fixture_repo, make_stub,  # noqa: E402
                            log_hits_literal_pair, parse_json_loose, poll,
@@ -104,8 +104,11 @@ def main():
         def start_ticket(tid):
             rc, out = run_poc_client(py, "ticket-start", {
                 "ticket_id": tid, "template_id": "dev-lane", "project": PROJ_KEY,
-                "title": "dsh 版本预期不符执行面", "write_set": ["docs/"]}, env)
-            return rc == 0 and tid in out, "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:])
+                "title": "dsh 版本预期不符执行面", "write_set": ["docs/"],
+                # 260927（KI-142）：受理路径声明调用方项目（后续全是读面，arg 级最小）。
+                "caller_project": PROJ_KEY}, env)
+            _ok, _why = accepted(out, tid)
+            return (rc == 0 and _ok), "ticket-start 受理（%s）" % _why
 
         # ---------- 子用例① 缺省 off：带病跑但喊得出来 ----------
         # 计数只认 agent 形态调用（worker 启动的 face 探测也会记 version 行，

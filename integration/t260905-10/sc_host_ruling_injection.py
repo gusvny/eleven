@@ -46,7 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "integration"))
 sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
-from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
+from lib_gate import (Fail, accepted, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
                       require_bench, require_stage, run_poc_client, stage_down)
 
 TID = "t26090510-ruling"
@@ -228,6 +228,8 @@ def main():
         reg_dir = bench.write_registry(os.path.join(tmp, "registry"), PROJ_KEY,
                                        make_fixture_repo(tmp))
         env = stage_env(stage, reg_dir, audit_env)
+        # 260927（KI-142）：一处声明调用方身份——本 env 后面还有三条 gated 写（ruling）。
+        env["SANDBAR_CALLER_PROJECT"] = PROJ_KEY
         worker = spawn_worker(py, TID, env, os.path.join(tmp, "worker.log"),
                               recorder_path, recorder_log)
         wlog = os.path.join(tmp, "worker.log")
@@ -237,9 +239,11 @@ def main():
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
             "title": "宿主裁决注入端到端", "write_set": ["docs/"]}, env)
-        # 回执是多行 JSON（describe 明细），不逐行 parse——rc==0 且票号在场即受理
-        fail.check(rc == 0 and TID in out,
-                   "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:]))
+        # 260927（KI-142）：原判据「rc==0 且票号在场」是**假绿**——拒收回执 rc 恒 0
+        # （client.py main 每条路径都 os._exit(0)）且回显票号。受理只认 ok=true
+        # （accepted 跨行解析，兼容带 describe 明细的多行回执）。
+        _ok, _why = accepted(out, TID)
+        fail.check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 
         last_seen = {"snap": {}}
 

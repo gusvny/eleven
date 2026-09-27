@@ -69,7 +69,7 @@ for p in (os.path.join(REPO, "integration"),
     if p not in sys.path:
         sys.path.insert(0, p)
 import lib_ki061 as lk  # noqa: E402  （spawn_worker 的 POC_DIR 走模块全局，按子用例切换）
-from lib_gate import (Fail, poc_python, require_bench, require_stage,  # noqa: E402
+from lib_gate import (Fail, accepted, poc_python, require_bench, require_stage,  # noqa: E402
                       run_poc_client, stage_down)
 from lib_ki061 import (arb_gens, make_fixture_repo, poll,  # noqa: E402
                        query_snapshot, read_stub_log, send_signal, stage_env,
@@ -221,9 +221,11 @@ def main():
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
             "title": "t260917-04 仲裁闸拒回放兼容两代 worker 闸",
-            "write_set": ["docs/"]}, env)
-        fail.check(rc == 0 and TID in out,
-                   "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:]))
+            "write_set": ["docs/"],
+            # 260927（KI-142）：arg 级声明（env 那侧要同时喂两代 worker，越少牵连越好）。
+            "caller_project": PROJ_KEY}, env)
+        _ok, _why = accepted(out, TID)
+        fail.check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 
         def _old_blocked():
             if worker_a.poll() is not None:

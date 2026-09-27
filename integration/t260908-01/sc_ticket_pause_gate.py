@@ -97,6 +97,9 @@ def env_for(stage, extra=None):
     env["SANDBAR_EPICS_DIR"] = G["epics"]
     if extra:
         env.update(extra)
+    # 260927（KI-142）：`env_for` 是本场景所有子进程 env 的唯一构造点——在这里声明调用方
+    # 身份可一次覆盖建票/暂停/恢复/rework/sign 等全部 gated 写（只补建票会逐点打地鼠）。
+    env["SANDBAR_CALLER_PROJECT"] = PROJECT_KEY
     return env
 
 

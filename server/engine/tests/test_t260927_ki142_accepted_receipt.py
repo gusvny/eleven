@@ -95,5 +95,53 @@ def test_receipt_shape_contract_holds_for_other_write_ops():
         assert good is op_receipt["ok"]
 
 
+def test_receipt_without_id_keys_falls_back_to_raw_echo():
+    """有的 op 回执不带票号键（只回 ok/明细）：此时以**原文回显**为准；
+    既无票号键、原文也没票号=含糊回执，不许放行。"""
+    assert lib_gate.accepted(json.dumps({"ok": True, "result": {}}) + "\n(tX)", "tX")[0] is True
+    good, why = lib_gate.accepted(json.dumps({"ok": True, "result": {}}), "tX")
+    assert good is False and "未回显票号" in why
+
+
+def test_multiline_receipt_is_accepted():
+    """跨行回执同样判受理：有的 op 会缩进多行打印（带 describe 明细），
+    逐行口径会整条落空——受理判据必须跨行也认（否则真受理被读成「不可解析」）。"""
+    multi = ("some banner\n"
+             + json.dumps({"ok": True, "ticket_id": "tX"}, ensure_ascii=False, indent=1)
+             + "\ntrailing noise\n")
+    good, why = lib_gate.accepted(multi, "tX")
+    assert good is True, why
+
+
+def _lint_module():
+    """装载 integration/lint_tests.py（L9 机械闸的真源；两处判据必须同源，不抄第二份）。"""
+    import importlib.util
+    path = REPO / "integration" / "lint_tests.py"
+    spec = importlib.util.spec_from_file_location("_lint_tests_for_l9", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_every_ticket_start_call_site_is_classified():
+    """L9 锁：全仓每一处裸入口建票调用点都要么声明身份、要么显式豁免（KI-142）。
+
+    这条把「机械闸的判据」也钉进 L1：以后新增场景若照抄旧写法（不声明 caller_project
+    又无豁免标记），引擎套件这一条先红，不必等它在某个池里跑出「票没推进」的假象。
+    """
+    lint = _lint_module()
+    sites = lint._ticket_start_sites()
+    assert sites, "夹具前提：仓里至少有一处 ticket-start 调用点（判据本身不得空转）"
+    naked = [s for s in sites if not s["declared"] and not s["allowed"]]
+    assert naked == [], "未分类的建票调用点：%s" % naked
+    assert lint.L9_STRICT is True, "存量清完后 L9 应为严格档（缺身份=error）"
+
+
+def test_l9_gate_is_error_level_now():
+    """档位锁：L9_STRICT=True —— 漏声明身份必须是 error（不是 warning）。"""
+    lint = _lint_module()
+    assert lint.L9_STRICT is True
+
+
 if __name__ == "__main__":                              # 允许单文件直跑（诊断面）
     sys.exit(pytest.main([__file__, "-q"]))

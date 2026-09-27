@@ -182,6 +182,9 @@ def stop_worker(proc):
 def ticket_start(py, stage, registry, key, tid, template_id):
     return cli(py, stage, registry, "ticket-start", {
         "ticket_id": tid, "template_id": template_id, "project": key,
+        # 260927（KI-142）：声明调用方身份=本次要开的项目 key（GOOD_KEY 是受理路径；
+        # BAD_KEY 的负例要测的「未声明该模板的项目被拒」在模板闸就返回，不受影响）。
+        "caller_project": key,
         "title": "[e2e] t260924-04 外置模板 %s" % tid,
         "user_request": "integration e2e: project template journey",
         "write_set": ["integration/e2e-probe-%s.txt" % tid],

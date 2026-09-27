@@ -89,6 +89,8 @@ def main():
         audit_env, audit_log = bench.audit_hook_env(os.path.join(tmp, "audit"))
         env0 = child_env(host, state["namespace"], audit_env,
                          {"SANDBAR_PROJECTS_DIR": reg})
+        # 260927（KI-142）：一处声明调用方身份（后面 113 行 cancel 也是 gated 写）。
+        env0["SANDBAR_CALLER_PROJECT"] = PROJ_KEY
 
         # ---------- ② 开票（真 RUNNING 工单=watch 对象） ----------
         rc, out = run_poc_client(py, "ticket-start", {

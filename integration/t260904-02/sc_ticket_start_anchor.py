@@ -54,7 +54,11 @@ def open_ticket_thread(barrier, out, key, py, env, tid):
     barrier.wait()  # 两路时间真重叠（非先后存在）
     rc, stdout = run_poc_client(py, "ticket-start", {
         "ticket_id": tid, "template_id": "dev-lane", "project": key,
-        "title": "anchor 硬闸场景票", "write_set": ["docs/"]}, env)
+        "title": "anchor 硬闸场景票", "write_set": ["docs/"],
+        # 260927（KI-142）：本次是**受理**路径，必须声明调用方项目（=本台夹具项目自身）。
+        # 不声明则被跨项目闸 fail-closed 拒收（ok=false / kind=cross_project_refused），
+        # 而拒收回执 rc=0 且回显票号——弱断言（rc==0 且票号在输出里）会把它读成成功。
+        "caller_project": key}, env)
     out[tid] = (rc, stdout)
 
 
@@ -171,6 +175,8 @@ def main():
                        "%s worktree 同锚项目主目录 .lane/（实得 %r）" % (label, wtree))
 
         # ---------- ⑥ 负向：缺 project / 未知 key 拒收且红因互辨 ----------
+        # L9-allow: expects-refusal —— 负例：未知 project key 在 **project 锚定**那道就拒收
+        # （identity 闸在其后），故故意不声明调用方身份；断言要的是「未知项目」这句。
         rc_u, out_u = run_poc_client(py, "ticket-start", {
             "ticket_id": "t26090402-anchor-u", "template_id": "dev-lane",
             "project": "bench-nope", "title": "未知 key 子用例", "write_set": ["docs/"]}, env_a)
@@ -178,6 +184,8 @@ def main():
         fail.check(j_u.get("ok") is not True and "未知项目" in out_u,
                    "未知 project key 拒收且回执点名「未知项目」（rc=%s out=%s）"
                    % (rc_u, out_u.strip()[:100]))
+        # L9-allow: expects-refusal —— 负例：缺 project 在建票入口即拒（「需要 project」），
+        # 走不到 identity 闸；断言要的是这句拒收文案本身。
         rc_m, out_m = run_poc_client(py, "ticket-start", {
             "ticket_id": "t26090402-anchor-m", "template_id": "dev-lane",
             "title": "缺 project 子用例", "write_set": ["docs/"]}, env_a)

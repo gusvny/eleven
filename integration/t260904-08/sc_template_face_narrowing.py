@@ -142,6 +142,9 @@ def main():
             # 于是这条「恰列 dev-lane」的断言会随宿主机器上声明了什么而红（环境耦合假红）。
             # 断言**不放宽**（仍是「可用面恰等于真源」），只是把真源钉成场景自己的空注册根。
             for tid in lib.RETIRED_TEMPLATE_IDS:
+                # L9-allow: expects-refusal —— 负例：退役模板必须在**模板闸**就被拒
+                # （模板校验在身份闸之前返回），故这里**故意**不声明调用方身份；本条
+                # 断言的是拒收文案「可用：」段恰等于真源，不是受理。
                 rc, out = lib.run_client(py, "ticket-start", {"template_id": tid}, timeout=60,
                                          env={"SANDBAR_PROJECTS_DIR": str(reg_root)})
                 receipt = lib.parse_out_json(out)
@@ -149,6 +152,8 @@ def main():
                 seg = msg.rsplit("可用：", 1)[-1] if "可用：" in msg else msg
                 check(receipt.get("ok") is False and seg == "dev-lane）",
                       "ticket-start 传 %s 被拒且文案恰列 dev-lane（实得 %r）" % (tid, msg[:90]))
+            # L9-allow: expects-refusal —— 负例：dev-lane **过模板闸**后停在下一道必填
+            # （ticket_id），根本走不到身份闸，故同样不声明身份；断言=「未知模板」不出现。
             rc, out = lib.run_client(py, "ticket-start", {"template_id": "dev-lane"}, timeout=60,
                                      env={"SANDBAR_PROJECTS_DIR": str(reg_root)})
             receipt = lib.parse_out_json(out)

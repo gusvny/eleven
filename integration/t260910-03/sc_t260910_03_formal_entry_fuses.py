@@ -364,6 +364,9 @@ try:
         env_stub["SANDBAR_PROJECTS_DIR"] = str(regroot)
         env_stub["SANDBAR_TARGET_HOST"] = "127.0.0.1:9"
         env_stub.pop("SANDBAR_NAMESPACE", None)
+        # 260927（KI-142）：声明调用方身份=本台项目（不声明则身份闸先于保险丝A 拒收，
+        # 三处断言红因全错——368 那条要测的正是保险丝A 本身）。
+        env_stub["SANDBAR_CALLER_PROJECT"] = "utmr"
         py = sys.executable
         rc, out = run_client(py, "ticket-start", {
             "ticket_id": TICKET + "fa", "template_id": "dev-lane", "project": "utmr",
@@ -379,14 +382,16 @@ try:
             "title": "fuseA-ctl-root", "worktree": str(mixed / ".lane" / ("y-" + TICKET)),
             "write_set": ["integration/"]}, env_stub)
         check("G5 对照：纯根仓写集不被拒收（不误伤，无成员仓点名）",
-              "repo_a/src/a.py" not in out and "repo_b/lib/b.py" not in out,
+              "repo_a/src/a.py" not in out and "repo_b/lib/b.py" not in out
+              and "跨项目" not in out,          # 260927（KI-142）：身份拒收不算「过闸」
               "out=%r" % (out[-240:],))
         # 对照2：多仓写集合法派生（无显式 worktree，明细在）→ 放行过闸
         rc, out = run_client(py, "ticket-start", {
             "ticket_id": TICKET + "fc", "template_id": "dev-lane", "project": "utmr",
             "title": "fuseA-ctl-derive", "write_set": list(WS)}, env_stub)
         check("G5b 对照：多仓写集合法派生不被拒收（明细在场=闸放行）",
-              "参数非法" not in out and "repo_a/src/a.py" not in out,
+              "参数非法" not in out and "repo_a/src/a.py" not in out
+              and "跨项目" not in out,          # 260927（KI-142）：同上，堵身份拒收假绿
               "out=%r" % (out[-240:],))
 
     # ---------- 隔离台面：正规入口 CLI 全链 + 裸入口持久化契约 ----------
@@ -411,6 +416,8 @@ try:
             env_stage["SANDBAR_PROJECTS_DIR"] = str(regroot)
             env_stage["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % stage["ports"]["temporal"]
             env_stage["SANDBAR_NAMESPACE"] = stage["namespace"]
+            # 260927（KI-142）：同一身份面（L4 裸入口回归段）。
+            env_stage["SANDBAR_CALLER_PROJECT"] = "utmr"
 
             def probe_input(tid):
                 p = subprocess.run(

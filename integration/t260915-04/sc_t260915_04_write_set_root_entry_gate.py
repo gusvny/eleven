@@ -150,6 +150,10 @@ def main():
         def start(tid, project, write_set, worktree=None):
             args = {"ticket_id": tid, "template_id": "dev-lane", "project": project,
                     "title": "t260915-04 B 子用例", "write_set": write_set}
+            # 260927（KI-142）：声明调用方身份=本次要开的项目。B1/B2/B3 是**负例但必须
+            # 声明身份**——它们要测的 root-entry 拒收（保险丝A/derive 路径）在身份闸
+            # **之后**；不声明就变成身份拒收，断言要的「整仓/逐个子目录」文案一条不出现。
+            args["caller_project"] = project
             if worktree:
                 args["worktree"] = str(worktree)
             return run_client(py, "ticket-start", args, env_client)

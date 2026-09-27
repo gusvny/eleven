@@ -58,7 +58,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "integration"))
 sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
-from lib_gate import (Fail, read_audit_jsonl, require_bench, require_stage,  # noqa: E402
+from lib_gate import (Fail, accepted, read_audit_jsonl, require_bench, require_stage,  # noqa: E402
                       run_poc_client, stage_down)
 
 TID = "t26091628-lanedsh"
@@ -291,9 +291,11 @@ def main():
         # ---------- ② 开票：子用例 A create_plan 预检拦 ----------
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
-            "title": "泳道缺 profile 静默失效端到端", "write_set": ["docs/"]}, env)
-        fail.check(rc == 0 and TID in out,
-                   "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:]))
+            "title": "泳道缺 profile 静默失效端到端", "write_set": ["docs/"],
+            # 260927（KI-142）：受理路径声明调用方项目（后续全是读面，arg 级最小）。
+            "caller_project": PROJ_KEY}, env)
+        _ok, _why = accepted(out, TID)
+        fail.check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 
         last = {"snap": {}}
 

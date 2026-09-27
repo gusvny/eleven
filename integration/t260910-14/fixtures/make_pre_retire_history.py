@@ -144,6 +144,10 @@ def main():
         env["KI061_STUB_LOG"] = os.path.join(tmp, "stub.jsonl")
         env["SANDBAR_KI061_SC_ARB_VERDICT"] = "pass"   # 仲裁一次过，直奔 merge 门
         env["SANDBAR_SUGGEST_STUB"] = "ok"             # 建议桩：零模型调用秒回
+        # 260927（KI-142）：本夹具走**退役前树**的 client（PRE_COMMIT 早于身份闸），
+        # 今天不受影响；但 PRE_COMMIT 一旦被提高到 260915-12 之后，建票与 sign 都会
+        # 被身份闸拒收——这里先声明好，旧 client 忽略未知键、无害，且免疫该漂移。
+        env["SANDBAR_CALLER_PROJECT"] = PROJ_KEY
 
         pre_engine = os.path.join(args.pre_tree, "server", "engine")
         logf = open(os.path.join(tmp, "worker.log"), "ab")

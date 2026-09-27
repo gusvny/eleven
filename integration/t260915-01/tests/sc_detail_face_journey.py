@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
 sys.path.insert(0, os.path.join(REPO, "integration", "t260908-01"))
 sys.path.insert(0, os.path.join(REPO, "server", "engine"))
 
-from lib_gate import (Fail, poc_python, read_audit_jsonl, require_bench,  # noqa: E402
+from lib_gate import (Fail, accepted, poc_python, read_audit_jsonl, require_bench,  # noqa: E402
                       require_stage, run_poc_client, stage_down)
 from lib_ki061 import (make_fixture_repo, stage_env, spawn_worker, send_signal,  # noqa: E402
                        query_snapshot, poll, wait_worker_alive)
@@ -146,9 +146,11 @@ def journey(fail, bench):
 
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": PROJ,
-            "title": "t260915-01 详情数据面旅程", "write_set": list(WRITE_SET)}, env)
-        fail.check(rc == 0 and TID in out,
-                   "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-120:]))
+            "title": "t260915-01 详情数据面旅程", "write_set": list(WRITE_SET),
+            # 260927（KI-142）：受理路径必须声明调用方项目（==夹具项目自身）。
+            "caller_project": PROJ}, env)
+        _ok, _why = accepted(out, TID)
+        fail.check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 
         # ---- 造真实闸拒绝：create_plan 运行中往泳道写越权探针 → settle 拒绝 → blocked
         snap0 = wait_stage_running(py, env, TID, worker, wlog, fail,

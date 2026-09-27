@@ -63,7 +63,12 @@ def client_env(reg, stage=None):
 def start_ticket(py, env, tid, project, epic):
     args = {"ticket_id": tid, "template_id": "dev-lane", "project": project,
             "title": "t260907-07 epic 项目感知场景票", "write_set": ["integration/"],
-            "epic": epic}
+            "epic": epic,
+            # 260927（KI-142）：显式声明调用方身份=本次要开的项目（arg 优先于 env）。
+            # 本 helper 被 external 与 engine 两个 project 复用，env 级会互相误伤；
+            # 且负例 N1/N2 要测的拒收（立项代号不存在 / 不串桶）位于身份闸**之后**，
+            # 不声明身份就测不到目标红因（N1 立刻红、N2 变假绿）。
+            "caller_project": project}
     rc, out = run_poc_client(py, "ticket-start", args, env)
     try:
         payload = parse_out_json(out)

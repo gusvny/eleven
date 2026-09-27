@@ -139,6 +139,9 @@ def main():
         audit_env, audit_log = bench.audit_hook_env(os.path.join(tmp, "audit"))
         env0 = child_env(host, state["namespace"], audit_env,
                          {"SANDBAR_PROJECTS_DIR": reg})
+        # 260927（KI-142）：调用方身份一处声明——本 env 后面还有 gated 写 op（cancel），
+        # 只补建票会「前面绿、后面红」。值=本场景自己的夹具项目 key。
+        env0["SANDBAR_CALLER_PROJECT"] = PROJ_KEY
 
         # daemon worker pidfile 夹具：活 pid 占位（sleep 子进程，非 worker，零时间连接）
         sleeper = subprocess.Popen(["sleep", "600"])

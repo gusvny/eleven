@@ -276,7 +276,7 @@ stage = None
 worker = None
 stage_project = "t26091006-ki067-%d" % os.getpid()
 try:
-    from lib_gate import require_bench, require_stage, stage_down  # noqa: E402
+    from lib_gate import accepted, require_bench, require_stage, stage_down  # noqa: E402
 
     class _Fail:
         def check(self, cond, msg):
@@ -320,6 +320,8 @@ try:
         stage_env_["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % fe
         stage_env_["SANDBAR_NAMESPACE"] = stage["namespace"]
         stage_env_["SANDBAR_PROJECTS_DIR"] = str(regdir)
+        # 260927（KI-142）：一处声明调用方身份（后面 retry_qc / sign 也是 gated 写）。
+        stage_env_["SANDBAR_CALLER_PROJECT"] = "ki067"
         stage_env_.update(AUDIT_ENV)
 
         # C0 建真票（dev-lane；无 worker 时真 workflow 的 query 会挂起到超时——
@@ -334,9 +336,10 @@ try:
                                         "write_set": ["docs/"]})],
                            env=stage_env_, cwd=str(REPO),
                            capture_output=True, text=True, timeout=180)
+        _c0_ok, _c0_why = accepted(p.stdout or "", TID)   # 260927（KI-142）：受理只认 ok=true
         check("C0 隔离台建真票（正规 project 锚过闸）",
-              p.returncode == 0 and TID in (p.stdout or ""),
-              "rc=%r out尾=%r" % (p.returncode, (p.stdout or "")[-160:]))
+              p.returncode == 0 and _c0_ok,
+              "rc=%r 受理=%s out尾=%r" % (p.returncode, _c0_why, (p.stdout or "")[-160:]))
 
         # 挂起桩 agent：prompt 恒末位（引擎 spawn 契约，同 lib_ki061 桩先例）；
         # 桩读到位即长眠——activity 不完成，票恒停在首个 agent 段。

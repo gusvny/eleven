@@ -219,6 +219,27 @@ def parse_out_json(out):
     return {}
 
 
+def first_json_object(text):
+    """输出里第一个可解析的 JSON 对象（**跨行**也认）；取不到返回 {}。
+
+    为什么要跨行：多数 client.py 回执是单行，但有的 op（带 describe 明细的）会**缩进
+    多行**打印——此时 `parse_out_json` 逐行解析会整条落空，场景若据此判「受理」就会
+    假红/假绿。这里用 `raw_decode` 从每个 `{` 处试解析，单行与多行两种口径一视同仁。
+    """
+    s = text or ""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(s):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = dec.raw_decode(s[i:])
+        except Exception:                              # noqa: BLE001 —— 该处不是合法 JSON 起点
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return {}
+
+
 def accepted(out, tid=""):
     """裸入口**写 op** 的受理判据（KI-142）：受理 ⇔ 回执 `ok is True`。
 
@@ -232,7 +253,7 @@ def accepted(out, tid=""):
     返回 `(bool, why)`；`why` 逐项点名失败原因（消费外部输入纪律：报错要说清哪个检查
     失败），可直接进断言文案。
     """
-    r = parse_out_json(out)
+    r = parse_out_json(out) or first_json_object(out)   # 单行优先，多行回执回落跨行解析
     if not r:
         return False, "回执不可解析（非 JSON/空输出）"
     if r.get("ok") is not True:
@@ -241,8 +262,12 @@ def accepted(out, tid=""):
         return False, "ok≠true%s%s" % ((" kind=%s" % kind) if kind else "",
                                       ("：%s" % err) if err else "")
     got = str(r.get("ticket_id") or r.get("workflow_id") or "")
-    if tid and tid not in got:
+    if tid and got and tid not in got:
         return False, "回执票号不符（期望 %s，实得 %r）" % (tid, got)
+    if tid and not got and tid not in (out or ""):
+        # 有的 op 回执不带票号键（只回 ok/明细）——此时以**原文回显**为准（旧口径那半），
+        # 绝不放行「既无票号键、原文也没有票号」的含糊回执。
+        return False, "回执既无票号键、原文也未回显票号 %s" % tid
     return True, "ok=true%s" % (("，ticket_id=%s" % tid) if tid else "")
 
 

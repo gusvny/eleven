@@ -267,6 +267,9 @@ def main():
         reg_dir = bench.write_registry(os.path.join(tmp, "registry"), PROJ_KEY,
                                        make_fixture_repo(tmp))
         env = stage_env(state, reg_dir, audit_env)
+        # 260927（KI-142）：env 级声明调用方身份——本场景后面 authorize（经 ticket.py）
+        # 等写 op 共用同一 env；不声明则建票先被身份闸拒收，整条旅程无从谈起。
+        env["SANDBAR_CALLER_PROJECT"] = PROJ_KEY
         stub_path = os.path.join(tmp, "ki061_stub.py")
         with open(stub_path, "w", encoding="utf-8") as f:
             f.write(ARB_STUB)

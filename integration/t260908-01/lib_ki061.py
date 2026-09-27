@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "integration"))
 sys.path.insert(0, os.path.join(REPO, "integration", "t260904-02"))
-from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402,F401
+from lib_gate import (Fail, accepted, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402,F401
                       require_bench, require_stage, run_poc_client, stage_down)
 
 # 引擎目录定位（t260907-10 摊平后=server/engine；回落旧路径一轮，摘除票删旧子用例）
@@ -220,9 +220,12 @@ def drive_to_overlimit_blocked(py, fail, tmp, tid, state, proj_key, audit_env,
 
     rc, out = run_poc_client(py, "ticket-start", {
         "ticket_id": tid, "template_id": "dev-lane", "project": proj_key,
-        "title": "KI-061 超限唤醒两相闸", "write_set": ["docs/"]}, env)
-    fail.check(rc == 0 and tid in out,
-               "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:]))
+        "title": "KI-061 超限唤醒两相闸", "write_set": ["docs/"],
+        # 260927（KI-142）：显式声明调用方项目（arg 优先于 env；本 helper 的 env 由
+        # 多 key 场景共用，写进 env 会误伤别的场景）。
+        "caller_project": proj_key}, env)
+    _ok, _why = accepted(out, tid)
+    fail.check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 
     def _blocked():
         if worker.poll() is not None:

@@ -64,7 +64,7 @@ for _p in (os.path.join(REPO, "integration"),
            os.path.join(REPO, "integration", "t260908-01")):
     sys.path.insert(0, _p)
 
-from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
+from lib_gate import (Fail, accepted, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
                       require_bench, require_stage, run_poc_client, stage_down)
 from lib_ki061 import (ARB_STUB, LAST_Q, arb_gens, make_fixture_repo, poll,  # noqa: E402
                        query_snapshot, read_stub_log, send_signal, spawn_worker,
@@ -151,6 +151,8 @@ def drive_to_overlimit(py, fail, check, tmp, stage, audit_env):
     stub_log = os.path.join(tmp, "stub.jsonl")
     wlog = os.path.join(tmp, "worker.log")
     env = stage_env(stage, os.environ["_KI061_REG_DIR"], audit_env)
+    # 260927（KI-142）：env 级声明调用方身份（后面 authorize 也是 gated 写）。
+    env["SANDBAR_CALLER_PROJECT"] = PROJ_KEY
     worker = spawn_worker(py, TID, env, wlog, stub_path, stub_log,
                           disable_ki061=False, arb_verdict="tests-fault")
     check(worker.poll() is None, "worker（KI-061 修复启用，非 DISABLE=1）已拉起 pid=%s"
@@ -158,8 +160,8 @@ def drive_to_overlimit(py, fail, check, tmp, stage, audit_env):
     rc, out = run_poc_client(py, "ticket-start", {
         "ticket_id": TID, "template_id": "dev-lane", "project": PROJ_KEY,
         "title": "t260912-03 仲裁上限人授权接受判决", "write_set": ["docs/"]}, env)
-    check(rc == 0 and TID in out,
-          "ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:]))
+    _ok, _why = accepted(out, TID)             # 260927（KI-142）：受理只认 ok=true
+    check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
     return worker, env, stub_log, wlog
 
 

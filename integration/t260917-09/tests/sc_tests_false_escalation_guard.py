@@ -51,7 +51,7 @@ for _p in (os.path.join(REPO, "integration"),
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
+from lib_gate import (Fail, accepted, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
                       require_bench, require_stage, run_poc_client, stage_down)
 from lib_ki061 import (LAST_Q, poll, query_snapshot, spawn_worker,  # noqa: E402
                        stage_env, wait_worker_alive)
@@ -151,6 +151,9 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
     repo = t09.make_fixture_repo(tmp, name="repo-%s" % key, with_integration=True)
     reg_dir = bench.write_registry(os.path.join(tmp, "reg-%s" % key), key, repo)
     env = stage_env(stage, reg_dir, audit_env)
+    # 260927（KI-142）：本 env 后面还有 gated 写（authorize / retry_qc），且 key 每相不同
+    # （PHASES[i].key）——env 级 + 变量值声明调用方身份。
+    env["SANDBAR_CALLER_PROJECT"] = key
     env["T09_STUB_LOG"] = stub_log
     env = t09.fixture_mode_env(env, mode)
     env = t09.arb_seq_env(env, ["tests-fault"] * 40)
@@ -160,8 +163,8 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
     rc, out = run_poc_client(py, "ticket-start", {
         "ticket_id": tid, "template_id": "dev-lane", "project": key,
         "title": ph["title"], "write_set": ["docs/"]}, env)
-    check(rc == 0 and tid in out, "%s ticket-start 受理（rc=%s out尾=%s）"
-          % (tid, rc, (out or "")[-140:]))
+    _ok, _why = accepted(out, tid)              # 260927（KI-142）：受理只认 ok=true
+    check(rc == 0 and _ok, "%s ticket-start 受理（%s）" % (tid, _why))
     try:
         if mode == "JITTER":
             return phase_jitter(py, env, tid, worker, wlog, stub_log, fail, check)
