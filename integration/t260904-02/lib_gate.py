@@ -219,6 +219,40 @@ def parse_out_json(out):
     return {}
 
 
+def accepted(out, tid=""):
+    """裸入口**写 op** 的受理判据（KI-142）：受理 ⇔ 回执 `ok is True`。
+
+    为什么不能只判 `rc == 0 and tid in out`：**拒收回执同样 rc=0，而且会把票号回显在
+    错误文案里**（实测原文 `{"ok": false, "error": "跨项目闸：调用方项目身份未声明…",
+    "kind": "cross_project_refused", …（目标票 tXXXX，属项目 Y）"}`）。于是「被拒收」
+    会被读成「受理成功」，场景继续往下跑，最终以「票没推进」的假象报红——260927
+    KI-142 实案（sc_detail_lane_reds 干等 240s、worker 整段 workflow not found，
+    在会被跳过的池里烂了很久没人知道）。
+
+    返回 `(bool, why)`；`why` 逐项点名失败原因（消费外部输入纪律：报错要说清哪个检查
+    失败），可直接进断言文案。
+    """
+    r = parse_out_json(out)
+    if not r:
+        return False, "回执不可解析（非 JSON/空输出）"
+    if r.get("ok") is not True:
+        kind = str(r.get("kind") or "")
+        err = str(r.get("error") or "")[:200]
+        return False, "ok≠true%s%s" % ((" kind=%s" % kind) if kind else "",
+                                      ("：%s" % err) if err else "")
+    got = str(r.get("ticket_id") or r.get("workflow_id") or "")
+    if tid and tid not in got:
+        return False, "回执票号不符（期望 %s，实得 %r）" % (tid, got)
+    return True, "ok=true%s" % (("，ticket_id=%s" % tid) if tid else "")
+
+
+def check_accepted(fail, out, tid="", label="受理"):
+    """`accepted` 的断言封装：`fail.check(受理, label（why）)`。返回判据布尔。"""
+    good, why = accepted(out, tid)
+    fail.check(good, "%s（%s）" % (label, why))
+    return good
+
+
 def read_audit_jsonl(path):
     """读审计钩子 jsonl（不存在=空列表）。"""
     if not os.path.isfile(path):

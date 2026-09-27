@@ -383,6 +383,65 @@ def write_tmpdir_baseline():
     return 0
 
 
+#: L9 严格档：True=缺身份即 error；False=先给 warning（存量清理期间）。
+#: 260927 清完存量后翻 True（KI-142 修法方向③）。
+L9_STRICT = False
+
+#: L9 显式豁免注释：故意测「拒收」的调用点**必须**带这一行说明（写在调用点上方或
+#: 参数块内），而不是靠「恰好没写身份」蒙混——豁免本身也必须是可复核的判定。
+L9_ALLOW = "L9-allow: expects-refusal"
+
+
+def _ticket_start_sites():
+    """所有裸入口建票调用点：`integration/**/*.py` 里出现 `"ticket-start"` 的行。
+
+    为什么单列这一项（260927 KI-142）：引擎 t260925-08 把 undeclared 策略由 record
+    翻成 refuse 之后，凡「不声明调用方项目」的建票调用都会被跨项目闸 fail-closed 拒收
+    ——而拒收回执 rc=0 且回显票号，场景里手写的 `rc==0 and tid in out` 断言于是**假绿**：
+    票根本没建出来，旅程却继续往下等（实案 sc_detail_lane_reds 干等 240s 报 workflow
+    not found，烂了很久没人知道，因为它在会被跳过的 engine 池里）。本项把「必须声明
+    身份」变成机械可查的东西：要么声明（arg 的 `caller_project`，或调用点之前就设好的
+    env `SANDBAR_CALLER_PROJECT`），要么显式带注释 `%s`。
+    """ % L9_ALLOW
+    sites = []
+    for p in sorted(INTEG.rglob("*.py")):
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines()
+        except Exception:                              # noqa: BLE001 —— 读不到=不判（L1 会咬语法）
+            continue
+        for i, ln in enumerate(lines):
+            if '"ticket-start"' not in ln:
+                continue
+            head = "\n".join(lines[:i])                # 调用点之前：env 声明面
+            win = "\n".join(lines[max(0, i - 6):i + 18])   # 调用点附近：arg 与注释面
+            declared = ("caller_project" in win
+                        or "SANDBAR_CALLER_PROJECT" in head
+                        or "SANDBAR_UNDECLARED_POLICY" in head or "SANDBAR_UNDECLARED_POLICY" in win)
+            allowed = L9_ALLOW in win
+            sites.append({"file": str(p.relative_to(REPO)), "line": i + 1,
+                          "declared": declared, "allowed": allowed})
+    return sites
+
+
+def lint_ticket_start_identity():
+    sites = _ticket_start_sites()
+    naked = [s for s in sites if not s["declared"] and not s["allowed"]]
+    if not naked:
+        ok("L9 ticket-start identity: %d call site(s), all declare caller identity "
+           "or carry the %r marker" % (len(sites), L9_ALLOW))
+        return
+    msg = ("L9 ticket-start identity: %d of %d bare-entry creation call site(s) neither "
+           "declare the caller project nor carry the %r marker — such a call is refused by "
+           "the cross-project gate (ok=false, kind=cross_project_refused) while the usual "
+           "`rc==0 and tid in out` assertion still reads green: %s | fix: pass "
+           "caller_project=<own project key> in the args, or set SANDBAR_CALLER_PROJECT in "
+           "the scenario env before the call; for deliberate refusal cases add the marker "
+           "comment. See KI-142."
+           % (len(naked), len(sites), L9_ALLOW,
+              "; ".join("%s:%d" % (s["file"], s["line"]) for s in naked[:8])))
+    (err if L9_STRICT else warn)(msg)
+
+
 def lint_tmpdir_hygiene():
     if not TMPDIR_BASELINE.is_file():
         warn("L8 临时目录卫生：基线缺失 %s（本项无法判定；再生成："
@@ -419,6 +478,7 @@ def main():
     lint_three_state()
     lint_terminology()
     lint_tmpdir_hygiene()
+    lint_ticket_start_identity()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0
