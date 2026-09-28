@@ -2608,3 +2608,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ③**约定成文 + main 侧补**——新插件票只提交 web 链，headless 链由 integration 岗合并后补（现状做法，
 > 每次都欠一笔、易漏）。**回归要求**：无论走哪条，`integration/t260928-28/sc_profile_plugin_mounts.py`
 > （两 profile 逐项断言）必须保持为**合并后立刻回绿**的判据——它这次正确指出了红点（PASS=56 FAIL=1）。
+
+## KI-152 「桩/夹具按实现者的假设造形」⇒ 真机必红而测试全绿：守望者看板读取器与真实入口回执形状不匹配（260929 实案 t260929-07 立项修复，integration 岗登记；KI-148「夹具与实现同源于一个错误假设」同族第三次）
+> **实案**：守望者（t260928-28 已合并）的 `makeBoardReader`（`server/plugins/watchdog/node.ts`）spawn
+> `<引擎 venv python> client.py ticket-list {}`，随后按 `JSON.parse(stdout).result` 取票 —— 即假设回执是
+> `{ok, result:{tickets}}` **信封**；而该入口真实输出的是**裸结果** `{"count":219,"tickets":[…]}` ⇒
+> `doc.result` 恒 undefined ⇒ 读取器恒返回 `ok:false`（错误文案甚至把「它认为异常的回执」原文贴出来）。
+> **后果**：`reconcile`（设计稿的「第一公民」）在生产里**永远拿不到看板行**，`reconcile.state` 永久
+> degraded/never_run，Overview 的「对账一致否」永久红/降级（诚实但没有功能）。
+> **为什么测试全绿**：所有场景的看板都是**桩**，而桩的形状来自实现者自己的假设——**桩无法与它同源的
+> 假设不一致**。这是本仓第三次同类教训（KI-148 夹具自证、KI-150 撕裂档判据、本条桩形状），
+> 共同规律：**凡「测试里的输入形状」是手写的，就必须有一条锁去核对「真实入口的真实输出形状」**。
+> **本岗为何能发现**：epic 收尾后我用真数据空跑守望者（临时 `SANDBAR_WATCHDOG_DIR` 指向 /tmp 声明、
+> 账本与看板都读真的），一次就暴露——**真机跑一遍**是这类缺陷的唯一探针。
+> **处置**：立项 `t260929-07`（写集 `server/plugins/` + `integration/`），要求兼容两形 + 一条**真形状**回归锁
+> （跑真实入口输出喂解析器，Temporal 不可达=ENV_FAIL；桩测试明确不算证据）+ 反证。
+> **通用判据（写进纪律）**：凡集成用例的输入面是桩/夹具，必须至少有一条「真实入口形状」锁，否则该面等于没验。
