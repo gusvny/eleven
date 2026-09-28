@@ -1831,6 +1831,26 @@ SCENARIOS = [
      "事件账声明键的注册加载器容忍锁（t260928-13，灰盒 L2，ro 离线秒级零 Temporal；宿主 260928 实报停机的回归沉淀）：事件账开关是机器级声明（~/.sandbar/projects/<key>/project.yaml 顶层 event_ledger:），而注册表唯一装载器 shared.parse_project_file 有顶层键白名单——键没进去就整条注册条目被隔离、宿主症状=控制台左栏该项目整块消失（实案：声明一写，sandbar 即刻不可见；另一 session 修于 0c0ee58）。本场景锁四件：A1 引擎真形声明（schema/project/paths/event_ledger）端到端可装载零隔离；**A2 反停机一致性锁**——从引擎读者源码派生「读注册表顶层段的段名」（形 in_block = (X == 'key:')，现得 admin_log/event_ledger）逐个断言装载器容忍，派生为空=红（防闸空转），新增第三个段会被本条自动要求放行；A3 真坏条目仍被精确拒收（file:line+允许集）且部分隔离 fail-soft、隔离清单带 dir/error（控制台红行与详情弹层的取数面）；A4 真机面只读——真注册表零隔离且「引擎所属条目在可用清单里」（宿主症状的机器级回归锁）。**不在范围**：把装载器改成容忍任意未知键（白名单是有意为之，防错拼；要变的只是「引擎自己声明的键不得落在白名单外」）。反证：同组夹具打在 0c0ee58^ 的装载器上，event_ledger 断言红（0 可用/1 隔离）、admin_log 断言绿——本锁确实抓得住该停机。intent 分工：t260928-13-event-ledger-projection 守写入面真值，ledger-live-judge 守真票落盘判据，本条只守「声明键 × 注册加载器」的跨模块一致性。装载器缺席=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/sc_registry_additive_keys.py", "ro"),
 
+    # ---- t260928-28: watchdog（read the ledger, judge liveness, reconcile, wake, call the human）----
+    # 五条共享一条夹具缝：server/plugins/watchdog/harness.mjs（一行 JSON 一命令的
+    # stdin/stdout 协议，契约见 integration/t260928-28/lib_watchdog_harness.py 头注）。
+    # 全部离线秒级零 docker、零 3099/7233 接触；harness 缺席=FAIL 点名（TDD 期红属
+    # 预期），arbitrate/merge 期必须绿。
+    ("t260928-28-watchdog-status-surface",
+     "守望者只读面契约（t260928-28，灰盒 L3，离线秒级零 docker，经 harness 协议驱动）：A 未声明项目 status=declared:false 显式（未声明=零行为不冒充有数据）；B 已声明项目 status 键集恰含面板契约全集（declared/enabled/heartbeat/ledger/liveness{engine,executor}/self_lock/reconcile/wakes/alerts/notify/config_provenance——面板下一票的消费面，缺键=不静默降级红线）；C 每个显式状态带时间戳（last_beat/checked_at/since）；D 非 GET 405 刚性；E 配置溯源逐键可答「哪个文件#哪条键 or factory-default」（KI-148/149 教训落法）。intent 分工：本条只锁「面板读什么」；行为面归同票其余四条。harness 缺席=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260928-28/sc_watchdog_status_surface.py", "ro", "serial"),
+    ("t260928-28-watchdog-tail-dedupe-rotation",
+     "账本跟读×at-least-once 去重×轮转不丢行×畸形行三态×worth-waking 过滤（t260928-28，灰盒 L2/L3，离线秒级零 docker）：A 增量跟读 rows_seen/last_row_at 前进；B 同幂等键重投不二次消费（dupes_skipped 前进）；C 活动账 rename 轮转后新行仍被跟到、归档序号缺口显式上报（gaps/alert，绝不「看起来都在」）；D 坏 JSON/半行截断/未知 schema=跳过+计数+不崩+后续合法行照常消费（外部输入畸形纪律）；E 非状态迁移噪声行不触发 wake（宿主明拒的每行傻轮询不复发）。intent 分工：t260928-13-event-ledger-projection 守引擎写面，本条守望者消费面的时序行为半；developer L1 守 tailer 纯函数真值表。harness 缺席=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260928-28/sc_watchdog_tail_dedupe_rotation.py", "ro", "serial"),
+    ("t260928-28-watchdog-reconcile-board-truth",
+     "对账=第一公民：看板为真源×缺 N 行留痕×降级显式（t260928-28，灰盒 L3，离线秒级零 docker）：A 启动即全量（内存水位全弃）重启后仍逮到账本落后看板且 mismatches 点名到票；B 缺 N 行本身是 alertable event（ledger_missing_rows 族，N 变化重响、N 不变冷却内不重响）；C 看板真源=纯可见性列表零 worker 在线依赖；D 对账失败（board 桩超时）=degraded+reason+since 绝不 all-fine、恢复后回非 degraded；E 补齐后 mismatch 消除回 ok、mismatch 以看板状态呈现。intent 分工：与 liveness/self-lock 场景不同面；developer L1 守对账纯函数真值表。harness 缺席=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260928-28/sc_watchdog_reconcile_board_truth.py", "ro", "serial"),
+    ("t260928-28-watchdog-liveness-selflock",
+     "判活三态×进展驱动停摆×自锁即时报（t260928-28，灰盒 L3，离线秒级零 docker，注入时钟）：A 守望者自身心跳 last_beat/age_seconds/alive 显式且随钟前进；B 引擎存活显式（探针桩故障=显式 down+detail 不假绿）；C 停摆判定进展驱动——有账本新行超 stall_minutes 也不报 stalled、停信号过缺省 15min 阈值=stalled 带 last_progress_at 并落 stall alert；D 执行器等自己发的 approval=waiting_on_itself 即时报（tick 1 秒级，不等超时）带 since；E 待办面读不到=unknown+reason 绝不冒充 none（「没有 X」断言纪律反面锁）；F 注入时钟大步前跳（休眠恢复）但有进展不误报 stalled（KI-138 家族「数据过期」与「它卡住」分开报）。harness 缺席=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260928-28/sc_watchdog_liveness_selflock.py", "ro", "serial"),
+    ("t260928-28-watchdog-alert-discipline",
+     "两出口纪律×重启不重播×夜间口径×开关面（t260928-28，灰盒 L3，离线秒级零 docker）：A 状态迁移→wake 出口（队列投递 accepted 回执）与需要人→alert 出口（落账+notify.beep 位）不混装；B 队列项已消化/未消化均不重发同一 dedupe key（「不丢消息」与「不重复唤醒」双向可判定）；C 制造 alert 后 restart——12h 冷却窗内同 key 不重播、beep 不翻倍（去重态从 alerts 账重放重建）；D 夜间窗内 alert 带 night_muted 标注且红线级照常发声（例外面）；E 全量收割投递面断言无任何代签/代决定形状（未答复的 alert 永不自动变成决定）；F alerts.enabled=false 不响不写其余不受扰、总闸关=显式 stopped 非消失、未声明项目零行为。harness 缺席=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260928-28/sc_watchdog_alert_discipline.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900

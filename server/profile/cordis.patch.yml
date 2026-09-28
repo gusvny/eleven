@@ -62,6 +62,16 @@
     - id: sandbar-providers
       name: 'sandbar-providers'
 
+# 守望者插件（server/plugins/watchdog/，包名 sandbar-watchdog，t260928-28，epic project-executor）：
+# 宿主半常驻组件（非 agent 非 workflow）：读事件账 / 判活 / 对账看板 / 唤醒 executor / 叫人。
+# 只读面 GET /sandbar-watchdog/api/status；未声明项目（无 watchdog.json）零行为。
+# 以裸包名挂载：经 profile/node_modules/sandbar-watchdog 软链（→ ../../plugins/watchdog）解析，
+# profile-headless 下有同款软链（headless 无 webServer 只待机状态读面，守望者本体照常）。
+# 注意：软链落在部署面 ~/.dsh/profiles/<name>/node_modules/（安装器负责，仓库不含该目录）。
+- insert:
+    - id: sandbar-watchdog
+      name: 'sandbar-watchdog'
+
 # 模型显式钉在 dsh 出厂 deepseek-official 路由（与 dsh-base 默认一致，写出仅为显式）。
 # key 走凭据 seam，这里与任何配置文件中都不出现字面 key。
 - id: agent-default-model

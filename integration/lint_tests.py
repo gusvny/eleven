@@ -38,6 +38,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 INTEG = REPO / "integration"
 WB_TESTS = REPO / "server/plugins/workbench/tests"          # ← project parameter (fork: change here)
+WD_TESTS = REPO / "server/plugins/watchdog/tests"           # t260928-28: watchdog UT 纳入 L1/L3 同一套静态锁
 TP_TESTS = REPO / "server/engine/tests"          # ← project parameter
 VENV_PY = REPO / "server/engine/.venv/bin/python"  # ← project parameter
 # 260926 磁盘泄漏修（同类普查发现）：本目录此前从不回收——宿主 $TMPDIR 实测
@@ -72,13 +73,14 @@ def lint_syntax():
             n_py += 1
         except py_compile.PyCompileError as e:
             err("L1 语法 %s: %s" % (f.relative_to(REPO), str(e).splitlines()[-1][:120]))
-    if WB_TESTS.is_dir():
-        for f in WB_TESTS.glob("*.mjs"):
-            p = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
-            if p.returncode != 0:
-                err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
-            else:
-                n_mjs += 1
+    for tests_dir in (WB_TESTS, WD_TESTS):
+        if tests_dir.is_dir():
+            for f in tests_dir.glob("*.mjs"):
+                p = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
+                if p.returncode != 0:
+                    err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
+                else:
+                    n_mjs += 1
     # Also syntax-check every integration/**/*.mjs (t260907-04: a mechanical
     # sweep appended a python-style `# naming-compat` line into an mjs file,
     # and the SyntaxError only blew up when the suite ran — this second-level
@@ -121,16 +123,17 @@ def lint_collect():
 
 # L3 mjs relative import resolution
 def lint_mjs_imports():
-    if not WB_TESTS.is_dir():
-        return
     bad = 0
-    for f in WB_TESTS.glob("*.mjs"):
-        text = f.read_text()
-        for m in re.finditer(r"""(?:from\s+|import\s*\(\s*)['"](\.\.?/[^'"]+)['"]""", text):
-            tgt = (f.parent / m.group(1)).resolve()
-            if not tgt.exists():
-                err("L3 import 悬空 %s → %s" % (f.name, m.group(1)))
-                bad += 1
+    for tests_dir in (WB_TESTS, WD_TESTS):
+        if not tests_dir.is_dir():
+            continue
+        for f in tests_dir.glob("*.mjs"):
+            text = f.read_text()
+            for m in re.finditer(r"""(?:from\s+|import\s*\(\s*)['"](\.\.?/[^'"]+)['"]""", text):
+                tgt = (f.parent / m.group(1)).resolve()
+                if not tgt.exists():
+                    err("L3 import 悬空 %s → %s" % (f.name, m.group(1)))
+                    bad += 1
     if bad == 0:
         ok("L3 mjs 相对 import 全部可解析")
 
