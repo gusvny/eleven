@@ -121,7 +121,11 @@ def main() -> int:
 
     tree = lib.evidence_tree("verdict-cli")
     anchor = tree.line_text(lib.GUARD_REL, 3)
-    the_finding = lib.finding("裁定锚发现：守卫锚漂移", lib.GUARD_REL, 3, anchor,
+    # 260928 修：叙述字段（subject）原为中文 ⇒ 报告面语言闸（463a8f7）把它判 unverified 并**追加一条
+    # 聚合发现**（`N agent finding(s) are not written in English`，severity=high）⇒ P2 的 summary 被这条
+    # 聚合条计入（high=1）、新发现≠0 于是 heartbeat=false——两红同源，且与本场景被测面（裁定/压制
+    # 语义）无关。按 lib.finding 既有口径改英文（quote/path 数据面不译）。
+    the_finding = lib.finding("Verdict anchor finding: guard anchor drift", lib.GUARD_REL, 3, anchor,
                               severity="med", confidence=0.9)
     with open(stub, "w", encoding="utf-8") as f:
         f.write(lib.fenced_message([the_finding]))
@@ -268,7 +272,12 @@ def main() -> int:
                             failures.append("P2 假报未压制（state=%r）——「假报跨期不再重复计数」破" % st)
                     summary = face2.get("summary")
                     if isinstance(summary, dict) and any(summary.get(k) for k in ("high", "med", "low", "total")):
-                        failures.append("P2 summary 计入了被压制发现（%r）——不重复计数破" % (summary,))
+                        # 260928：失败面补证据——列出 P2 每条发现的 (id, state, severity)，
+                        # 否则「summary 计入了谁」看不出来（本红一度被环境聚合条污染）。
+                        _diag = [((f.get("id") or "")[:14], lib.finding_state(f), f.get("severity"),
+                                  str(f.get("subject") or "")[:26]) for f in fs2]
+                        failures.append("P2 summary 计入了被压制发现（%r）——不重复计数破；P2 发现=%s（对上 P1 的=%s）"
+                                        % (summary, _diag, [f.get("id") for f in same]))
                     if face2.get("heartbeat") is not True:
                         failures.append("P2 全压制票 heartbeat 非 true（%r）——压制可见不破心跳口径破"
                                         % face2.get("heartbeat"))
