@@ -67,7 +67,11 @@
 # 只读面 GET /sandbar-watchdog/api/status；未声明项目（无 watchdog.json）零行为。
 # 以裸包名挂载：经 profile/node_modules/sandbar-watchdog 软链（→ ../../plugins/watchdog）解析，
 # profile-headless 下有同款软链（headless 无 webServer 只待机状态读面，守望者本体照常）。
-# 注意：软链落在部署面 ~/.dsh/profiles/<name>/node_modules/（安装器负责，仓库不含该目录）。
+# 软链**随仓入库**（.gitignore 有 !server/profile*/node_modules/ 例外）——260929 实案：
+# 本块挂载行合并时没同批落链，而仓里**没有第二处会建链**（installer 与 start-console 均无；
+# 本行原文「安装器负责」是错的），结果=插件永不生效、下一次控制台重启则装载失败。
+# 新增插件挂载时**必须同批提交两条软链**；漏了由 integration/t260928-28/sc_profile_plugin_mounts.py
+# （注册名 t260928-28-profile-plugin-mounts）当场判红。
 - insert:
     - id: sandbar-watchdog
       name: 'sandbar-watchdog'

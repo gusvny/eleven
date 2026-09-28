@@ -24,3 +24,8 @@ server/admin.log*
 # JSONL + 轮转归档 <project>.jsonl.YYYYMMDD-HHMMSS-xxxxxx，与上一段 server/admin.log*
 # 同族风险——轮转产物体积大、落地即未跟踪，一次 git add -A 就可能被误收）。260928 补。
 server/ledger/
+# profile 插件软链（裸包名挂载的解析面）——**必须入库**：不入库则新克隆上「挂载行在、
+# 链不在」= 插件永不生效（下一次控制台重启则装载失败）。260929 实案：sandbar-watchdog
+# 挂载进 cordis.patch.yml 却没落链，且仓里没有第二处会建链（installer/start-console 均无）。
+!server/profile/node_modules/
+!server/profile-headless/node_modules/
