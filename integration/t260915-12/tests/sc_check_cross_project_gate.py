@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import re
 import sys
 from pathlib import Path
@@ -119,10 +120,22 @@ ok(g_neg["action"] == "refuse" and "dengzhufpv" in g_neg["why"]
 v_neg = caller_gate.judge_caller(caller_gate.resolve_identity("dengzhufpv", ""), "sandbar", None)
 ok(v_neg["decision"] == "refuse" and "dengzhufpv" in v_neg["why"]
    and "sandbar" in v_neg["why"], "负：client 侧拒收点名双项目")
-v_und = caller_gate.judge_caller({"value": "", "src": "none",
-                                  "identity_class": "undeclared"}, "sandbar", None)
+# 260928 修（本断言在 main 上长红的真因）：本判据测的是 `shared.undeclared_policy()` 的
+# **缺省**（缺省=refuse），而执行器给子进程 `setdefault("SANDBAR_UNDECLARED_POLICY", "record")`
+# （run_scenarios.py:2627，过渡期兼容旋钮）⇒ **在跑批上下文里「缺省」已不成立**，本断言必红；
+# 直接跑（环境无该旋钮）则绿——同一份代码两种结果，是「判据依赖环境旋钮在场」的耦合。
+# 意图不变（缺省=拒收且 why 点名调用方身份 env 名）→ 判据改**显式中立化旋钮**后求值
+# （pop→求值→还原，t260924-05 处理 SANDBAR_INTEG_BATCH_TIMEOUT_SEC 的同款手法）；
+# 旋钮在场时的放行语义由 caller_gate 自身 UT 覆盖，本文件不重复。
+_amb_pol = os.environ.pop(shared.UNDECLARED_POLICY_ENV, None)
+try:
+    v_und = caller_gate.judge_caller({"value": "", "src": "none",
+                                      "identity_class": "undeclared"}, "sandbar", None)
+finally:
+    if _amb_pol is not None:
+        os.environ[shared.UNDECLARED_POLICY_ENV] = _amb_pol
 ok(v_und["decision"] == "refuse" and shared.CALLER_PROJECT_ENV in v_und["why"],
-   "负（t260925-08 翻严缺省）：undeclared=拒收且 why 点名缺失身份 env")
+   "负（t260925-08 翻严缺省）：undeclared=拒收且 why 点名缺失身份 env（旋钮中立化后求值）")
 ok(shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "",
                               policy="record")["action"] == "allow_record",
    "record 旋钮路径真实存在：policy=record 时哨兵记名放行（显式选入的过渡策略）")
