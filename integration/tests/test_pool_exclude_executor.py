@@ -38,9 +38,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ENV_KEY = "SANDBAR_SCENARIO_EXCLUDE_POOLS"
+# 缺省 INTEG_SUMMARY 键集基线（B3 逐键全等锁）。**新增键必须来这里登记一次**——
+# 该锁的意义就是逼每个往回执里加键的改动显式登记（防「悄悄多一个键」把消费方打散）。
+# 260928 登记两键（本锁在 main 上长红的真因：后续票加了键、基线没跟）：
+#   budget_env = 260928 集成预算 env 键（run_scenarios 预算旋钮随回执回显，缺席="absent"）；
+#   timings    = 执行器耗时分解（prelude_s/scenarios_s，t260913-02 前后的可观测面）。
 DEFAULT_SUMMARY_KEYS = {
     "ran", "pass", "fail", "not_checked", "wall_s", "concurrency",
-    "pool_config", "env_fingerprint", "expected",
+    "pool_config", "env_fingerprint", "expected", "budget_env", "timings",
 }
 
 _spec = importlib.util.spec_from_file_location(
