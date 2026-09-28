@@ -382,7 +382,7 @@ def test_row_awaiting_gate_derives_from_stage_state_not_human_gate():
     assert row["human_gate"] is None
     assert row["kind"] == "inspection" and row["engine"] == client_mod.INSPECTION_ROW_ENGINE
     assert row["engine"] != ENGINE_V2  # 坑B：不得喂 availableOps 的 v2 分支
-    assert row["title"] == "巡检 integration-tests · 期 20260915"
+    assert row["title"] == "Inspection integration-tests · period 20260915"
     assert row["instance_id"] == "integration-tests" and row["period"] == "20260915"
     assert row["findings"] == {"high": 1, "med": 2, "low": 0, "total": 3}
     assert row["heartbeat"] is True
@@ -424,7 +424,7 @@ def test_row_malformed_face_degrades_per_field():
     assert row["heartbeat"] is False
     # face 缺 instance/period → 调用方解析值（SA/legacy 只读）兜底（title/字段不裸空）
     assert row["instance_id"] == "weird"
-    assert row["title"] == "巡检 weird · 期 20260901"
+    assert row["title"] == "Inspection weird · period 20260901"
     assert row["match_via"] == "legacy_id"
     # t260916-02：本函数自身绝不从 id 反解——调用方不给解析值就如实出空（不编造）
     row2 = client_mod._row_from_inspection_face(
@@ -506,7 +506,7 @@ def test_inspection_mode_rows_whitelist_and_closed_window(monkeypatch):
     # 窗内闭合行=完整巡检形（非匿名）
     closed = row_of(res, "inspection-docs-sync-20260908")
     assert closed["kind"] == "inspection" and closed["status"] == "closed"
-    assert closed["title"].startswith("巡检 ")
+    assert closed["title"].startswith("Inspection ")
     assert closed["awaiting_gate"] is False
 
 
@@ -625,7 +625,7 @@ def test_ticket_query_inspection_branch_engine_and_meta():
     assert r["engine"] == ENGINE_V2, "坑A：巡检快照无 engine 键，必须显式回 v2（否则谎报不存在）"
     m = r["ticket"]
     assert m["kind"] == "inspection" and m["gate_id"] == "inspection-close"
-    assert m["title"] == "巡检 integration-tests · 期 20260915"
+    assert m["title"] == "Inspection integration-tests · period 20260915"
     assert m["instance_id"] == "integration-tests" and m["period"] == "20260915"
     assert len(m["findings"]) == 3 and m["heartbeat"] is True
     assert m["human_gate"] is None            # 签字前常态缺键不编造
@@ -669,7 +669,7 @@ def test_inspection_board_sa_leg_rows_match_via_sa(monkeypatch):
     # 期号取 face 镜像（真源优先，20260915）；SA 值用于白名单过滤与 face 缺键兜底
     assert row["instance_id"] == "integration-tests" and row["period"] == "20260915"
     assert row["project"] == "foo" and row["legacy_unowned"] is False
-    assert row["title"] == "巡检 integration-tests · 期 20260915"
+    assert row["title"] == "Inspection integration-tests · period 20260915"
 
 
 def test_inspection_board_degraded_whitelist_named(monkeypatch):

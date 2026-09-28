@@ -1540,15 +1540,19 @@ def _inspection_title_of(snap: Dict[str, Any], ticket_id: str,
                          instance_id: str = "", period: str = "") -> str:
     """巡检行标题（票面优先；face 缺字段回落调用方解析出的（实例,期）——SA 直读或旧形
     id 只读解析（t260916-02：id 不再编码实例/期，此处绝不从新形 id 反解）。宁显编号
-    不显空）。"""
+    不显空）。
+
+    词面**英文**（宿主令 260924 票面英文 + 260925 控制台英文：本串是巡检票唯一 title
+    生成点——票面无存底 title（face/meta 都没有），行/详情/左栏三处读面全吃这一处，
+    故英文在这里落地即全绿面一致）。"""
     face = snap.get("face") if isinstance(snap.get("face"), dict) else {}
     instance = str(face.get("instance_id") or instance_id or "")
     period = str(face.get("period") or period or "")
     if instance and period:
-        return "巡检 %s · 期 %s" % (instance, period)
+        return "Inspection %s · period %s" % (instance, period)
     if instance:
-        return "巡检 %s" % instance
-    return "巡检票 %s" % ticket_id
+        return "Inspection %s" % instance
+    return "Inspection ticket %s" % ticket_id
 
 
 def _row_from_inspection_face(
