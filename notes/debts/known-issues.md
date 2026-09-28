@@ -2340,3 +2340,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ④真正的用户可感缺口：**机器级声明写错/撞白名单时，没有任何东西在写声明的那一刻提醒你**
 > （声明写入方是 agent/人，不是闸）——epic 票④面板若把「是哪个 project.yaml、
 > 哪一条声明决定了当前开关」显示出来，这一族就从「事后发现」变成「当场可见」。
+> **同族面逐处排查（本次实跑，归类如下）**：①`parse_legacy_registry_file`（env
+> `SANDBAR_PROJECTS_YAML` 单文件模式）同样硬拒未知顶层键（实测：`projects.yaml:6 顶层只认
+> projects:`）——但该模式是迁移期历史面、仓内 `projects.yaml` 已退场、当前环境未设该 env
+> ⇒ **合法历史面，不修，仅记**（仍用该模式的部署加新声明键会红，文案精确可自修）。
+> ②`installer/projects.py` 的 `add`/`remove` **不会**重写既有条目（O_EXCL 认领 + 已存在即
+> 拒收）⇒ 不可能吞掉别人的声明块；且它在写入后当场跑 `parse_project_file` + 全表零隔离
+> 自检（**正面先例**：声明写入方自校验，与本条 ④ 的缺口正相反——手写声明没有这道自检）。
+> ③`PATHS_DECL_KEYS`（`paths:` 子键闭集）是同一病在下一层的翻版，爆炸半径不同（响亮、
+> spawn/解析期），见上段 ②。
