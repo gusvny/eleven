@@ -93,8 +93,24 @@ def main():
             ghost = sb.tmp / "ghost-lane"
             t1 = fx.invoke_teardown(aa, repo2, ghost, "lane/does-not-exist", "t-integ-new")
             L.ok(getattr(t1, "ok", False) is True, "teardown_lane 拆失败不抛（回执 ok=true，warn 制）")
-            L.ok("worktree" in (getattr(t1, "error", "") or "").lower(),
-                 "回执 error 点名 worktree 环节（附录 A-c）：%s" % (getattr(t1, "error", "") or "")[:120])
+            # 260928 修（本断言在 main 上长红的真因）：260924 宿主直修令把「重拆已拆泳道」的
+            # 两形态（git rc=128 的 not-a-working-tree / branch-not-found）定为**目标态已达成**
+            # ——静默通过、**不谎报警**（teardown_lane docstring「这两形态是『目标态已达成』不是
+            # 失败，静默通过不谎报警；真失败才点名」）。本用例的 ghost 输入（不存在路径+不存在
+            # 分支）恰是该形态 ⇒ 回执 error 为空是新契约的**正确行为**，旧断言「error 必须点名
+            # worktree 环节」对这条输入已失效（它测的是旧语义下的另一分支）。
+            # 改法保住原意图（不静默、真失败必点名）而不放松：①这条输入断言「静默但不谎报」
+            # （ok=True + action=teardown + error 空）；②「真失败必点名环节」改为**源码级回归锁**
+            # （本仓单仓架构下夹具造不出真 git 清理失败——见上方覆盖诚实声明，真拆路径归
+            # dev-lane 全链 e2e）。
+            L.ok((getattr(t1, "error", "") or "") == ""
+                 and getattr(t1, "action", "") == "teardown",
+                 "已达成形态静默通过且不谎报（ok=True/action=teardown/error 空）：%r"
+                 % (getattr(t1, "error", "") or "")[:120])
+            _aa_src = (fx.REPO / "server" / "engine" / "agent_activities.py").read_text(encoding="utf-8")
+            L.ok("worktree remove 失败" in _aa_src and "目录壳残留" in _aa_src
+                 and "仓目录不存在" in _aa_src,
+                 "真失败路径仍逐仓点名环节（源码级锁：worktree remove 失败 / 目录壳残留 / 仓目录不存在）")
             err = ""
             try:
                 t2 = fx.invoke_teardown(aa, repo2, ghost, "lane/does-not-exist", "t-integ-new")
