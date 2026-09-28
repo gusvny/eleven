@@ -2368,3 +2368,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > metrics/project-anchor）都会红，而不只是事件账。教训落到「**同一契约有几份读面**」：放行一个
 > 顶层键=**所有**读面同批放行 + 每份读面各有一条派生式锁；只改一份＝留下另一个沉默面。
 > TS 自测 68 → 71 passed / 0 failed。
+> **第三处读面（260928 当日晚间实报，最硬的一处，已修）**：契约 ①d 的
+> `shared._entry_paths_parse`（条目文件顶层解析，只认 `schema/project/paths`，且顶层键正则
+> `^([a-z]+):` **连下划线都不收**）同样拒收 `event_ledger:`——它的爆炸半径比前两处都硬：
+> `project_paths` 的消费方 = `dsh_bin_for_spawn` / `roles_dir_for_spawn` / `routes_file_for_spawn`
+> ⇒ **该项目的 agent 一律 spawn 不出来**。实案：epic 票② `t260928-20` 建单后 create_plan
+> 立刻 blocked（worker 日志点名 `ProjectPathsError: …project.yaml:14 顶层无法解析（只认
+> schema:/project:/paths:）：event_ledger:`，活动重试 3 次全败）。修于 `42b149d`
+> （新增 `ADDITIVE_TOP_LEVEL_SECTIONS`，与装载器同口径；段名正则收到 `[a-z_]+`；未知键照旧
+> fail-closed 点名），锁泛化于 `d2ec15f`（A2 从「段名 × 装载器」改成「段名 × **每个读面**」，
+> 读面台账 FACES 见场景）。
+> **三处读面的同一键、三种现象（现象学要点）**：装载器红 → 项目从控制台左栏整块消失；
+> TS 镜像红 → 控制台若干功能 400/502（ui/knowledge/metrics/project-anchor）；①d 红 →
+> **该项目所有工单的 agent 都 spawn 不出来**（票一开就 blocked）。排查时若只按一处现象
+> 定位，会以为「已经修好了」——三个读面必须同批放行。
+> **教训（方法层面，比 bug 本身值钱）**：**按机制扫，不按报错文案扫**。第一轮排查我按
+> `顶层只认` 这句文案 grep，于是漏掉了本处另一种措辞「顶层无法解析（只认 …）」；正确的
+> 扫法是问「**谁在解析条目文件的顶层**」——据此本次列全：三处闭集读面（装载器 / TS 镜像 /
+> ①d）+ 两处**定向扫块**读面（ui 插件 `readDeclaredRoutesPath` / `findKeyByPrimaryDir`，
+> 只找 `paths:`/`dirs:` 块、不设闭集 ⇒ 结构性容忍，无需改动）。今后凡「新增顶层声明键」
+> 或「新增条目读面」，两处台账都要同步：段名清单（读者侧）与读面清单（场景 FACES 侧）。
