@@ -87,6 +87,21 @@ def _mark_key(project, ticket_id, mark):
     return '%s|%s|%s|%s' % (project, ticket_id, mark.get('run'), mark.get('seq'))
 
 
+def _reason_matches(got, want):
+    """账本 reason 与票面 reason 的判据（含声明的截断规则）。
+
+    event_ledger.build_line：reason 长度 > REASON_LIMIT 时截断并追加 REASON_TRUNC_MARK。
+    故合法形态有二：逐字相等；或「账本 == 票面前 REASON_LIMIT 字 + 标记」。
+    REASON_LIMIT 现读模块常量（缺失则回落 1200，与本仓声明一致）。"""
+    import event_ledger as el
+    limit = int(getattr(el, 'REASON_LIMIT', 1200))
+    mark = str(getattr(el, 'REASON_TRUNC_MARK', '…(截断,原文不落盘)'))
+    g, w = str(got or ''), str(want or '')
+    if g == w:
+        return True
+    return w.startswith(g[:-len(mark)]) and g.endswith(mark) if len(g) > len(mark) else False
+
+
 def evaluate(snap, project, ticket_id, ledger_dir):
     """判据核心（与取数解耦，供 --selftest 复用）：返回回执 dict。"""
     global PASS, FAIL
@@ -148,6 +163,17 @@ def evaluate(snap, project, ticket_id, ledger_dir):
                             ('run_id', m.get('run')), ('project', project),
                             ('seq', m.get('seq'))):
             got = row.get(field)
+            if field == 'reason':
+                # 票面 reason 可能超长；账本是**派生面**，按声明的截断规则落盘
+                # （REASON_LIMIT + REASON_TRUNC_MARK，见 event_ledger.build_line）。
+                # 判据=「未超限逐字相等」或「超限时账面 == 票面前缀+截断标记」，
+                # 绝不把有意的截断当字段不符（真票 t260928-20 实测踩出的假红）。
+                if _reason_matches(got, want):
+                    continue
+                bad.append('%s#%s reason: 账面 %r 与票面不符（票面长度 %s）'
+                           % (ticket_id, m.get('seq'), str(got)[:60],
+                              len(str(want or ''))))
+                continue
             if isinstance(want, int) and not isinstance(got, int):
                 try:
                     got = int(got)
@@ -193,6 +219,12 @@ def _selftest():
         ]
         marks = [{'i': i, 'seq': i + 1, 'run': run} for i in range(3)]
 
+        def _clip(reason):
+            """按 event_ledger 的声明规则截断（判据器必须消费同一规则，不是另立一个）。"""
+            limit = int(getattr(el, 'REASON_LIMIT', 1200))
+            mark = str(getattr(el, 'REASON_TRUNC_MARK', '…(截断,原文不落盘)'))
+            return reason if len(reason) <= limit else reason[:limit] + mark
+
         def line(i, **over):
             row = {'v': 'event-ledger-v1', 'project': proj, 'scope': 'project',
                    'ticket': tid, 'workflow': 'DevLaneWorkflow', 'template': 'dev-lane',
@@ -201,6 +233,7 @@ def _selftest():
                    'ts': timeline[i]['at'], 'seq': i + 1, 'run_id': run,
                    'idem': '%s|%s|%s|%d' % (proj, tid, run, i + 1), 'engine': 3}
             row.update(over)
+            row['reason'] = _clip(str(row.get('reason') or ''))
             return row
 
         def snap(status='running', state='running', tl=None, mk=None):
@@ -249,6 +282,14 @@ def _selftest():
             ('收口票少行', lambda: seed([line(0), line(1)]),
              snap(status='closed', state='awaiting'), 1),
             ('gap 记录在盘', lambda: (seed([line(0), line(1), line(2)]), with_gap()), snap(), 1),
+            # 超长 reason：账本按声明规则截断（前缀+标记）不是字段不符；截断后与票面
+            # 对不上的才红（260928 真票 t260928-20 实测踩出的假红）
+            ('超长 reason 按声明截断', lambda: seed([line(0, reason='X' * 4000), line(1), line(2)]),
+             snap(tl=[{'stage': 'plan', 'state': 'running', 'reason': 'X' * 4000, 'gen': 1, 'at': 'ts1'},
+                      timeline[1], timeline[2]]), 0),
+            ('截断件与票面对不上', lambda: seed([line(0, reason='Y' * 4000), line(1), line(2)]),
+             snap(tl=[{'stage': 'plan', 'state': 'running', 'reason': 'X' * 4000, 'gen': 1, 'at': 'ts1'},
+                      timeline[1], timeline[2]]), 1),
             ('一行都没有', no_file, snap(), 1),
         ]
 
