@@ -190,6 +190,10 @@ def test_judge_mismatch_with_flag_override():
 
 def test_judge_undeclared_record_and_refuse_flip(monkeypatch):
     # 缺省（t260925-08 翻严）=拒收，why 点名缺失身份 env 与注入链
+    # 260928：本用例断言的是**缺省**，而执行器给子进程 setdefault 了该旋钮=record（过渡期兼容）
+    # ⇒ 跑批上下文里「缺省」不成立、断言必红（KI-153 判据 (c)：判据不得依赖环境旋钮的缺省态）。
+    # 显式中立化旋钮，让本用例在两种上下文里同解。
+    monkeypatch.delenv(shared.UNDECLARED_POLICY_ENV, raising=False)
     v = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None)
     assert v["decision"] == "refuse"
     assert shared.CALLER_PROJECT_ENV in v["why"]
@@ -245,8 +249,10 @@ def test_wf_judge_same_and_mismatch():
     assert g2["record"]["note"] == "宿主代管"
 
 
-def test_wf_judge_undeclared_sentinel_record():
+def test_wf_judge_undeclared_sentinel_record(monkeypatch):
     # 缺省（翻严后）=refuse；显式 policy="record"=旧 B 策略记名放行
+    # 260928：同上一例——断言缺省前先中立化环境旋钮（跑批上下文里它被 setdefault 成 record）。
+    monkeypatch.delenv(shared.UNDECLARED_POLICY_ENV, raising=False)
     g = shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "")
     assert g["action"] == "refuse"
     g = shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "sandbar", "",
