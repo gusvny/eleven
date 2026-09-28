@@ -2360,3 +2360,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **处置（待宿主定）**：这份未提交修复应当入库（否则下一次 `git checkout`/泳道合并可能把它冲掉，
 > 控制台这些读面会回红；main 树不干净也会污染 merge_check 的脏面分类）。入库后本条的回归面应
 > 补 TS 侧锁（现只有 A2 守 Python 装载器——它才是 `/wf/projects` 的活路径）。
+> **收口（260928，本岗复核后入库，提交 `8dc21ec`）**：TS 侧那份未提交修复已入库，并补上 TS 侧反停机锁
+> （`server/plugins/workbench/tests/registry-loader.mjs` 第 11 段：段名从读者源码派生、逐个断言 TS
+> 装载器容忍、派生为空=红，自带 temp 回收）。**新事实**：HEAD 版 TS 解析器**两个键都缺**
+> （`admin_log` 与 `event_ledger` 均被隔离，反证实测）——即 TS 侧比 python 侧整整落后两次放行
+> （t260916-21 与 `0c0ee58`），凡声明过这两个键的项目，走 TS 读面的控制台功能（ui/knowledge/
+> metrics/project-anchor）都会红，而不只是事件账。教训落到「**同一契约有几份读面**」：放行一个
+> 顶层键=**所有**读面同批放行 + 每份读面各有一条派生式锁；只改一份＝留下另一个沉默面。
+> TS 自测 68 → 71 passed / 0 failed。
