@@ -192,18 +192,33 @@ def main():
             art = None
             C.check(False, "agent_runtime 模块不可导入（容器执行面单点缺席）：%s" % str(e)[:120])
         if art is not None:
-            notes = art.gc_stale_containers()
-            C.check(F.containers_by_label(F.LABEL_TICKET, ORPHAN[0]) == [],
-                    "孤儿（泳道已亡）被 gc 收走（label 过滤+泳道在场判据，方案 D7③）",
-                    "notes=%s" % notes[-2:])
-            C.check(F.sh("docker", "inspect", "--format", "{{.State.Running}}",
-                         name, timeout=30).stdout.strip() == "true",
-                    "安全阀：泳道还活着的容器不误杀（lane 在场判据）")
-            note = art.remove_container(TICKET_ID[0])
-            C.check(F.sh("docker", "inspect", "--format", "{{.State.Running}}",
-                         name_l, timeout=30).returncode != 0,
-                    "收口即拆：remove_container 后容器不在场（幂等原语，验收 G）",
-                    "note=%s" % note)
+            # 260928 修（本组两条断言在 main 上长红的真因）：产品侧有**模式闸**
+            # （t260921-05：`runtime_mode()=="docker"` 才碰容器面；host 形态直接返回空列表
+            # =零 docker 调用，语义正名非降级）。本组直调 `gc_stale_containers` /
+            # `remove_container`，而此刻进程 env 停在 `run_slice` 还原后的原环境
+            # （无 SANDBAR_AGENT_RUNTIME）⇒ 判成 host ⇒ 两个调用都空转、容器纹丝不动。
+            # 意图不变（D 组验的正是 docker 形态的容器生命周期；host 空转是另一面、由
+            # agent_runtime 自身 UT 覆盖）→ 本组显式进入 docker 模式，退出还原。
+            _old_rt = os.environ.get(F.RUNTIME_ENV)
+            os.environ[F.RUNTIME_ENV] = "docker"
+            try:
+                notes = art.gc_stale_containers()
+                C.check(F.containers_by_label(F.LABEL_TICKET, ORPHAN[0]) == [],
+                        "孤儿（泳道已亡）被 gc 收走（label 过滤+泳道在场判据，方案 D7③）",
+                        "notes=%s" % notes[-2:])
+                C.check(F.sh("docker", "inspect", "--format", "{{.State.Running}}",
+                             name, timeout=30).stdout.strip() == "true",
+                        "安全阀：泳道还活着的容器不误杀（lane 在场判据）")
+                note = art.remove_container(TICKET_ID[0])
+                C.check(F.sh("docker", "inspect", "--format", "{{.State.Running}}",
+                             name_l, timeout=30).returncode != 0,
+                        "收口即拆：remove_container 后容器不在场（幂等原语，验收 G）",
+                        "note=%s" % note)
+            finally:
+                if _old_rt is None:
+                    os.environ.pop(F.RUNTIME_ENV, None)
+                else:
+                    os.environ[F.RUNTIME_ENV] = _old_rt
 
         # ---- E 零残留 ----
         print("\n== 收尾：零残留 ==")
