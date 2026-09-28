@@ -1836,6 +1836,14 @@ SCENARIOS = [
      "事件账声明键的注册加载器容忍锁（t260928-13，灰盒 L2，ro 离线秒级零 Temporal；宿主 260928 实报停机的回归沉淀）：事件账开关是机器级声明（~/.sandbar/projects/<key>/project.yaml 顶层 event_ledger:），而注册表唯一装载器 shared.parse_project_file 有顶层键白名单——键没进去就整条注册条目被隔离、宿主症状=控制台左栏该项目整块消失（实案：声明一写，sandbar 即刻不可见；另一 session 修于 0c0ee58）。本场景锁四件：A1 引擎真形声明（schema/project/paths/event_ledger）端到端可装载零隔离；**A2 反停机一致性锁**——从引擎读者源码派生「读注册表顶层段的段名」（形 in_block = (X == 'key:')，现得 admin_log/event_ledger）逐个断言装载器容忍，派生为空=红（防闸空转），新增第三个段会被本条自动要求放行；A3 真坏条目仍被精确拒收（file:line+允许集）且部分隔离 fail-soft、隔离清单带 dir/error（控制台红行与详情弹层的取数面）；A4 真机面只读——真注册表零隔离且「引擎所属条目在可用清单里」（宿主症状的机器级回归锁）。**不在范围**：把装载器改成容忍任意未知键（白名单是有意为之，防错拼；要变的只是「引擎自己声明的键不得落在白名单外」）。反证：同组夹具打在 0c0ee58^ 的装载器上，event_ledger 断言红（0 可用/1 隔离）、admin_log 断言绿——本锁确实抓得住该停机。intent 分工：t260928-13-event-ledger-projection 守写入面真值，ledger-live-judge 守真票落盘判据，本条只守「声明键 × 注册加载器」的跨模块一致性。装载器缺席=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/sc_registry_additive_keys.py", "ro"),
 
+    # ---- t260928-29: 执行器身份（charter sandbar 分段 + preset 仓内真源）----
+    ("t260928-29-executor-charter-identity",
+     "执行器身份·charter 分段身份面（t260928-29，设计决定 8，灰盒 L2 静态契约，ro 离线秒级零 docker）：intent=设计稿决定 8 的 charter 载体承诺——sandbar 分段带完整执行器身份（who/MAY 代签打回开票暂停恢复取消/NEVER 不自扩权不动控制台不跨项目不替用户拍板不手工维护进度表主树直修须当面授权锚/最小权限缺省零授予只能看和问且不暗示授予面已存在）；未声明项目零变化守在源头面（通用模板段不得混入执行器身份标记，端点活体层面归 t260904-07-charter-endpoint-live，不互替）；sandbar/suyou 双分段共存且不新增其他项目分段（本票范围外）。锚语义关键词组（每组别名任一命中即过）不锚整句排版。intent 分工：t260904-07 三条守交付物在位/端点活体/注入一次的结构与接线契约，本条只守本票新增内容语义。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-29/sc_executor_charter_identity.py", "ro"),
+    ("t260928-29-executor-preset-repo-contract",
+     "执行器身份·preset 仓内真源契约（t260928-29，方案 gen1 定盘，灰盒 L2 静态契约，ro 离线秒级零 docker）：intent=preset 以仓内新文件为真源的可复现与加性承诺——三件交付物在仓且 preset 名与目录一致；agent.cordis.yml persona 带通用执行器身份与 charter 载体同义（NEVER 控制台/扩权/跨项目 + 零授予只能看和问 + 不暗示授予面已存在，漂移即红）；preset 文件零机器绝对路径（可复制可复现，KI-073 同族教训）；cordis.patch.yml default 仍指 sandbar-integration 且不含 sandbar-executor（共享挂面零编辑的反停机锁，260824 事故面）；README 带 cp -R 实体复制 + 软链不可用 + 跟进票指针三项安装契约。intent 分工：charter 载体归 t260928-29-executor-charter-identity，dsh 装载/roster 行为不在本仓断言面。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-29/sc_executor_preset_repo_contract.py", "ro"),
+
     # ---- t260928-28: watchdog（read the ledger, judge liveness, reconcile, wake, call the human）----
     # 五条共享一条夹具缝：server/plugins/watchdog/harness.mjs（一行 JSON 一命令的
     # stdin/stdout 协议，契约见 integration/t260928-28/lib_watchdog_harness.py 头注）。

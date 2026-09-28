@@ -1,0 +1,5 @@
+# sandbar-executor —— 项目执行器会话 preset（GUI roster 用；工单 t260928-29）。
+# name=目录名（roster 认名前提）；展示语义写在 description。
+name: sandbar-executor
+description: 项目执行器（project executor）：项目常驻执行器会话——盯本项目工单、授权内代签/打回/开票/暂停恢复推进；最小权限默认，零授予＝只能看和问。standard 全能力 + 执行器 persona；项目专属身份与纪律在 session_charter.md 的 ## project:<key> 段。
+order: 20
