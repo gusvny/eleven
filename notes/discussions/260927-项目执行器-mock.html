@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sandbar Console — Project executor (mock v18)</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1c2029; --line:#262b36;
+    --fg:#e6e9ef; --muted:#9aa4b2; --dim:#6b7583;
+    --green:#34d399; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa; --violet:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;}
+  .mockbar{background:#141821;border-bottom:1px solid var(--line);padding:7px 14px;font-size:12px;color:var(--muted);
+           display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .mockbar b{color:var(--fg);font-weight:600}
+  .tag{border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-size:11px;color:var(--muted)}
+  .app{display:grid;grid-template-columns:216px minmax(0,1fr);gap:1px;background:var(--line);min-height:620px}
+  .col{background:var(--bg);padding:11px;min-width:0}
+  .wide{overflow-x:auto}
+  .rail-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:5px 0 7px}
+  .pentry{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;border:1px solid transparent}
+  .pentry:hover{background:var(--panel)}
+  .pentry.active{background:var(--panel2);border-color:var(--line);box-shadow:inset 2px 0 0 var(--violet)}
+  .pentry .pname{font-weight:650;color:var(--muted)}
+  .pentry.active .pname{color:var(--fg)}
+  .pentry .role{font-size:10px;color:var(--dim)}
+  .nested{margin:0 0 7px 13px;padding-left:8px;border-left:1px solid #222733}
+  .entry{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;color:var(--muted);font-size:12px}
+  .entry:hover{background:var(--panel)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+  .dot.live{background:var(--green);box-shadow:0 0 0 3px rgba(52,211,153,.15)}
+  .entry .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{background:var(--blue);color:#06101f;border-radius:999px;font-size:10px;padding:0 6px;font-weight:700}
+  .spacer{flex:1}
+  .hd{display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap}
+  .hd h1{font-size:16px;margin:0;font-weight:650}
+  .hd .sub{color:var(--dim);font-size:11.5px}
+  .pill{border-radius:999px;font-size:11px;padding:2px 8px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .pill.ok{color:var(--green);border-color:#1f4d3d;background:rgba(52,211,153,.08)}
+  .pill.warn{color:var(--amber);border-color:#57451a;background:rgba(251,191,36,.08)}
+  .pill.bad{color:var(--red);border-color:#5a2a2a;background:rgba(248,113,113,.08)}
+  .pill.info{color:var(--blue);border-color:#24405e;background:rgba(96,165,250,.08)}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:7px;padding:4px 9px;font-size:12px;white-space:nowrap}
+  .btn.primary{border-color:#2f5d8a;background:#16283b;color:#cfe6ff}
+  .btn.danger{border-color:#5a2a2a;color:#ffd9d9;background:#2a1618}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel)}
+  .seg .seg-i{padding:4px 10px;font-size:12px;color:var(--muted)}
+  .seg .seg-i.on{background:var(--panel2);color:var(--fg);font-weight:600}
+  input.tab{position:absolute;opacity:0;pointer-events:none}
+  .tabs{display:flex;gap:3px;border-bottom:1px solid var(--line);margin-bottom:10px}
+  .tabs label{padding:5px 10px;font-size:12px;color:var(--muted);border:1px solid transparent;border-bottom:none;
+              border-radius:7px 7px 0 0;display:flex;gap:6px;align-items:center;margin-bottom:-1px}
+  .tabs label:hover{color:var(--fg)}
+  .pane{display:none}
+  #tab-overview:checked ~ .panes #pane-overview,
+  #tab-settings:checked ~ .panes #pane-settings,
+  #tab-alerts:checked ~ .panes #pane-alerts,
+  #tab-requests:checked ~ .panes #pane-requests,
+  #tab-ledger:checked ~ .panes #pane-ledger{display:block}
+  #tab-overview:checked ~ .tabs label[for=tab-overview],
+  #tab-settings:checked ~ .tabs label[for=tab-settings],
+  #tab-alerts:checked ~ .tabs label[for=tab-alerts],
+  #tab-requests:checked ~ .tabs label[for=tab-requests],
+  #tab-ledger:checked ~ .tabs label[for=tab-ledger]{
+    color:var(--fg);background:var(--panel);border-color:var(--line)}
+  .tab .n{background:#2b3341;color:var(--muted);border-radius:999px;font-size:10px;padding:0 6px}
+  .tab .n.hot{background:var(--blue);color:#06101f;font-weight:700}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 11px;margin-bottom:9px}
+  .card>h2{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
+           display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .card>h2 .cnt{margin-left:auto;color:var(--muted);text-transform:none;letter-spacing:0;font-size:11px}
+  .split{display:grid;gap:9px;align-items:start}
+  .split.b{grid-template-columns:1fr 1fr}
+  .split.c{grid-template-columns:minmax(250px,34%) 1fr}
+  @media (max-width:980px){.split.b,.split.c{grid-template-columns:1fr}}
+  .grid{display:flex;gap:7px;flex-wrap:wrap}
+  .kv{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px 8px;min-width:84px}
+  .kv .k{font-size:10px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase}
+  .kv .v{font-size:12.5px}
+  .kv .v.ok{color:var(--green)} .kv .v.warn{color:var(--amber)} .kv .v.bad{color:var(--red)}
+  .ratio{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
+  .ratio .n{font-size:18px;font-weight:650;line-height:1.1}
+  .ratio .n small{display:block;font-size:10px;color:var(--dim);font-weight:400;text-transform:uppercase}
+  .ratio .to{color:var(--dim);font-size:11.5px}
+  .bar{display:flex;height:20px;border-radius:6px;overflow:hidden;border:1px solid var(--line);background:var(--panel2)}
+  .bar span{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:650;color:#08101c}
+  .bar .h{background:var(--green)} .bar .r{background:var(--blue)} .bar .e{background:var(--amber)}
+  .legend{margin-top:6px;display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted)}
+  .legend div{display:flex;align-items:center;gap:8px}
+  .legend i{width:9px;height:9px;border-radius:2px;flex:0 0 auto}
+  .legend i.h{background:var(--green)} .legend i.r{background:var(--blue)} .legend i.e{background:var(--amber)}
+  .legend b{color:var(--fg)}
+  .legend .tr{margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--dim)}
+  .foot{color:var(--dim);font-size:11px;margin-top:7px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:4px 7px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:500;font-size:11px}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
+  .line{display:flex;gap:9px;padding:3px 0;border-bottom:1px dashed #20242e;font-size:12px}
+  .line:last-child{border-bottom:0}
+  .line .lbl{flex:0 0 96px;color:var(--dim);font-size:11.5px}
+  .line .val{flex:1}
+  .box{width:14px;height:14px;border-radius:4px;border:1px solid var(--line);background:var(--panel2);
+       display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#06101f;flex:0 0 auto}
+  .box.on{background:var(--green);border-color:var(--green)}
+  .box.lock{background:#2a2f3a;border-color:#333a47;color:var(--dim)}
+  .hr{height:1px;background:var(--line);margin:8px 0}
+  .opt{border-left:2px solid var(--line);padding:2px 0 2px 9px;margin:4px 0}
+  .opt.rec{border-left-color:var(--green)}
+  .opt .con{color:var(--muted);font-size:11.5px;display:block;margin-top:1px}
+  .thread{border-left:2px solid #2b3341;padding-left:9px;margin-top:8px}
+  .thread .msg{margin:4px 0;font-size:11.5px;color:var(--muted)}
+  .thread .who{font-size:10.5px;color:var(--dim)}
+  .banner{border-radius:8px;padding:6px 9px;font-size:11.5px;margin-bottom:8px;border:1px solid}
+  .banner.bad{background:rgba(248,113,113,.08);border-color:#5a2a2a;color:#ffd9d9}
+  .rlist .r{display:block;border:1px solid transparent;border-radius:8px;padding:7px 8px;margin-bottom:3px}
+  .rlist .r:hover{background:var(--panel2)}
+  .rlist .r.sel{background:var(--panel2);border-color:var(--line);box-shadow:inset 2px 0 0 var(--blue)}
+  input.rtab{position:absolute;opacity:0;pointer-events:none}
+  .rlist label.r{cursor:pointer}
+  .rdetail{display:none}
+  #req-r14:checked ~ .split #det-r14,
+  #req-r13:checked ~ .split #det-r13,
+  #req-r11:checked ~ .split #det-r11{display:block}
+  #req-r14:checked ~ .split label[for=req-r14],
+  #req-r13:checked ~ .split label[for=req-r13],
+  #req-r11:checked ~ .split label[for=req-r11]{
+    background:var(--panel2);border-color:var(--line);box-shadow:inset 2px 0 0 var(--blue)}
+  .rlist .r .t1{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--dim)}
+  .rlist .r .t2{font-size:12px;margin-top:2px}
+  .rlist .r .t3{margin-top:2px;font-size:11px;color:var(--dim);display:flex;gap:10px;flex-wrap:wrap}
+  .refs{display:flex;gap:5px;flex-wrap:wrap;margin-top:3px}
+  .ref{border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:11px;color:var(--muted);
+       background:var(--bg);font-family:ui-monospace,Menlo,monospace}
+  .ref b{color:var(--fg);font-weight:600}
+  .ref.doc{border-color:#2f4a63} .ref.ki{border-color:#57451a}
+  .composer{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:7px 9px;margin-top:9px}
+  .composer .inp{color:var(--dim);font-size:12px;padding:3px 2px}
+  .composer .foot{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--dim);font-size:11px;flex-wrap:wrap}
+  .mode{border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:11px;color:var(--muted)}
+  .mode.on{border-color:#2f5d8a;color:#cfe6ff;background:#16283b}
+  .mode.caution{border-color:#57451a;color:#ffe9b0;background:rgba(251,191,36,.08)}
+  .queued{border:1px solid #24405e;border-radius:6px;padding:1px 7px;font-size:11px;color:var(--blue);background:rgba(96,165,250,.08)}
+  .variants{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:14px;background:var(--line)}
+  .vcard{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px}
+  .vcard h3{margin:0 0 6px;font-size:12.5px}
+  .vcard .vl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);padding:1px 0}
+  .vcard .vl b{color:var(--fg);font-weight:600}
+  .notes{padding:13px;background:var(--bg);border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.6}
+  .notes b{color:var(--fg)}
+  .notes h3{font-size:12.5px;color:var(--fg);margin:10px 0 4px}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11.5px}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <b>MOCK v18</b> · <b>project executor</b>
+  <span class="tag">tabs clickable</span>
+  <span class="tag">hover labels for meaning</span>
+</div>
+
+<div class="app">
+
+  <!-- ── left rail ─────────────────────────────────────────── -->
+  <div class="col">
+    <div class="rail-h">Sessions</div>
+    <div class="pentry active">
+      <span class="dot live"></span><span class="pname">sandbar</span>
+      <span class="role">executor</span><span class="spacer"></span><span class="badge">2</span>
+    </div>
+    <div class="nested">
+      <div class="entry"><span class="dot live"></span><span class="nm">night · inspection</span></div>
+      <div class="entry"><span class="dot"></span><span class="nm">distribution v1</span></div>
+    </div>
+    <div class="pentry">
+      <span class="dot live"></span><span class="pname">suyou</span><span class="role">executor</span>
+    </div>
+    <div class="nested">
+      <div class="entry"><span class="dot"></span><span class="nm">freeze audit</span></div>
+    </div>
+    <div class="hr"></div>
+    <div class="rail-h">Tickets</div>
+    <div class="entry"><span class="dot live"></span><span class="nm">t260927-08 · implement</span></div>
+    <div class="entry"><span class="dot"></span><span class="nm">t260927-11 · merge</span></div>
+    <div class="entry"><span class="dot"></span><span class="nm">t260927-12 · repair</span></div>
+  </div>
+
+  <!-- ── middle ────────────────────────────────────────────── -->
+  <div class="col">
+
+    <div class="hd">
+      <h1>sandbar</h1><span class="sub">project executor</span>
+      <span class="pill ok">● Alive</span>
+      <span class="pill info">Night grant →07:30</span>
+      <span class="spacer"></span>
+      <span class="seg"><span class="seg-i on">Executor</span><span class="seg-i">Chat</span></span>
+      <span class="btn danger">Revoke</span>
+    </div>
+
+    <input class="tab" type="radio" name="tb" id="tab-overview" checked>
+    <input class="tab" type="radio" name="tb" id="tab-settings">
+    <input class="tab" type="radio" name="tb" id="tab-alerts">
+    <input class="tab" type="radio" name="tb" id="tab-requests">
+    <input class="tab" type="radio" name="tb" id="tab-ledger">
+
+    <div class="tabs">
+      <label for="tab-overview">Overview</label>
+      <label for="tab-requests">Requests <span class="n hot">2</span></label>
+      <label for="tab-alerts">Alerts <span class="n">5</span></label>
+      <label for="tab-ledger">Ledger</label>
+      <label for="tab-settings">Settings</label>
+    </div>
+
+    <div class="panes">
+
+      <!-- ① Overview -->
+      <div class="pane" id="pane-overview">
+        <div class="split b">
+          <div class="card">
+            <h2>Watchdog <span class="cnt">tick 3s</span></h2>
+            <div class="grid">
+              <div class="kv" title="Written by the watchdog on a timer; if it goes stale the watchdog is down, and nothing else would tell you.">
+                <div class="k">Heartbeat</div><div class="v ok">3s</div></div>
+              <div class="kv" title="Still consuming events with no skipped sequence. Frozen means the sense organ is broken.">
+                <div class="k">Ledger</div><div class="v ok">advancing</div></div>
+              <div class="kv" title="Pushed picture vs real ticket state. A mismatch is the useful signal.">
+                <div class="k">Reconcile</div><div class="v ok">ok</div></div>
+              <div class="kv" title="In flight with no progress beyond the threshold.">
+                <div class="k">Stalled</div><div class="v ok">0</div></div>
+              <div class="kv" title="Waiting on a request it raised itself — waiting can never resolve that, so it alerts at once.">
+                <div class="k">Self-lock</div><div class="v ok">none</div></div>
+            </div>
+            <div class="hr"></div>
+            <div class="line">
+              <span class="lbl" title="Waterline, dedupe set and in-flight bookkeeping are memory-only, so every restart begins with a full reconcile.">Restart</span>
+              <span class="val mono">2h · reconciled +3 · orphans 0</span><span class="pill ok">clean</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Flow <span class="cnt">this night ▾</span></h2>
+            <div class="ratio">
+              <span class="n">41<small>sensed</small></span><span class="to">→</span>
+              <span class="n">9<small>woken</small></span><span class="to">22%</span>
+            </div>
+            <div class="bar"><span class="h" style="flex:6">6</span><span class="r" style="flex:2">2</span><span class="e" style="flex:1">1</span></div>
+            <div class="legend">
+              <div><i class="h"></i>handled <b>6</b> · 67%<span class="tr">vs 4 ↑</span></div>
+              <div><i class="r"></i>requests <b>2</b> · 22%<span class="tr">vs 2 →</span></div>
+              <div><i class="e"></i>escalated <b>1</b> · 11%<span class="tr">vs 3 ↓</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Now <span class="cnt">same window · everything below is a ledger view</span></h2>
+          <div class="line"><span class="lbl">Doing</span>
+            <span class="val mono">main-tree fix 2/3 · sc_detail_lane_reds · afbaede</span></div>
+          <div class="line"><span class="lbl">Acting on</span>
+            <span class="val mono">host grant 260927 · night full authority</span></div>
+          <div class="wide">
+            <table>
+              <tr><th>kind</th><th>object</th><th>what</th><th>evidence</th></tr>
+              <tr><td>fix</td><td class="mono">4bb84d3</td><td>KI-141 · probe names before over-budget</td><td class="mono">26 passed</td></tr>
+              <tr><td>fix</td><td class="mono">afbaede</td><td>KI-142 · receipt helper + L9 gate</td><td class="mono">lint clean</td></tr>
+              <tr><td>fix</td><td class="mono">b06caf8</td><td>sc_detail_lane_reds · caller identity</td><td class="mono">scenario green</td></tr>
+              <tr><td>ticket</td><td class="mono">t260927-12</td><td>repair for t260925-04</td><td class="mono">queued</td></tr>
+              <tr><td>ticket</td><td class="mono">t260927-05</td><td>signed merge gate</td><td class="mono">as host · 02:19</td></tr>
+              <tr><td>ticket</td><td class="mono">t260927-11</td><td>re-ran merge_check</td><td class="mono">green · 02:41</td></tr>
+              <tr><td>request</td><td class="mono">R-13</td><td>asked for over-scope authorization</td><td class="mono">held</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ② Settings -->
+      <div class="pane" id="pane-settings">
+        <div class="split b">
+          <div class="card">
+            <h2>Grants <span class="cnt">through the engine · audited</span></h2>
+            <div class="line"><span class="box on">✓</span><span class="val">Sign human gates</span></div>
+            <div class="line"><span class="box on">✓</span><span class="val">Rework / retry blocked</span></div>
+            <div class="line"><span class="box on">✓</span><span class="val">Open repair ticket</span></div>
+            <div class="line"><span class="box on">✓</span><span class="val">Pause / resume</span></div>
+            <div class="line" title="Irreversible · reason required · never used to tidy up what it cannot solve.">
+              <span class="box on">✓</span><span class="val">Cancel ⚠</span></div>
+            <div class="line" title="Changes the main tree. Protected paths stay refused by the engine gate; every act lands a ledger line with reason and verification.">
+              <span class="box on">✓</span><span class="val">Direct fixes in main tree ⚠</span></div>
+            <div class="line"><span class="box on">✓</span><span class="val">Commit to main</span></div>
+            <div class="line" title="May collide with that lane's own agent.">
+              <span class="box on">✓</span><span class="val">Work inside a lane ⚠</span></div>
+            <div class="line"><span class="box lock">✕</span><span class="val">Touch another project</span></div>
+            <div class="line" title="Meta-permission: only the host may open or widen a grant.">
+              <span class="box lock">✕</span><span class="val">Grant / widen authorization</span></div>
+            <div class="hr"></div>
+            <div class="grid">
+              <div class="kv" title="Refused by the engine gate, not by good manners.">
+                <div class="k">Never</div><div class="v">console · other projects · protected</div></div>
+              <div class="kv"><div class="k">Scope</div><div class="v">this project</div></div>
+              <div class="kv"><div class="k">Window</div><div class="v">23:00–07:30</div></div>
+              <div class="kv"><div class="k">Signs as</div><div class="v">host (via executor)</div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Alerts</h2>
+            <div class="line"><span class="box on">✓</span><span class="val">Enabled · sound · desktop</span></div>
+            <div class="line" title="Silent except red-line level: irreversible · over-scope · another project.">
+              <span class="lbl">Night</span><span class="val">silent · red-line rings</span></div>
+            <div class="line" title="In flight with no progress beyond this counts as stalled.">
+              <span class="lbl">Stall</span><span class="val">15m</span></div>
+            <div class="line"><span class="lbl">Retention</span><span class="val">events 14d · requests keep</span></div>
+            <div class="hr"></div>
+            <div class="foot">Edits are written through the engine, so each one carries who, when and why.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ Alerts -->
+      <div class="pane" id="pane-alerts">
+        <div class="card">
+          <h2>Alerts <span class="cnt">conditions · none waits for an answer</span></h2>
+          <div class="grid" style="margin-bottom:8px">
+            <div class="kv"><div class="k">Degraded</div><div class="v">1</div></div>
+            <div class="kv"><div class="k">Red-line</div><div class="v">1</div></div>
+            <div class="kv"><div class="k">Stall</div><div class="v">1</div></div>
+            <div class="kv"><div class="k">Self-lock</div><div class="v">1</div></div>
+            <div class="kv"><div class="k">Threshold</div><div class="v">1</div></div>
+          </div>
+          <div class="wide">
+            <table>
+              <tr><th>time</th><th>kind</th><th>what</th><th>link</th><th>outcome</th></tr>
+              <tr><td class="mono">03:02</td><td>degraded</td><td>reconcile mismatch +2 — ledger had missed two events</td>
+                  <td class="mono">41,216</td><td>backfilled</td></tr>
+              <tr><td class="mono">02:19</td><td>red-line</td><td>lane of t260927-11 cancelled (after approval)</td>
+                  <td class="mono">t260927-11</td><td>told after</td></tr>
+              <tr><td class="mono">01:40</td><td>stall</td><td>t260925-04 no progress 15m</td>
+                  <td class="mono">t260925-04</td><td>recovered</td></tr>
+              <tr><td class="mono">00:58</td><td>self-lock</td><td>R-13 waited 1h46m, its waiter was blocked</td>
+                  <td class="mono">→ R-13</td><td>escalated</td></tr>
+              <tr><td class="mono">23:41</td><td>threshold</td><td>same failure 3× on t260925-04</td>
+                  <td class="mono">t260925-04</td><td>switched track</td></tr>
+            </table>
+          </div>
+          <div class="foot">Action items live in Requests; this table only links. Marking one read changes nothing else.</div>
+        </div>
+      </div>
+
+      <!-- ④ Requests：列表 | 详情（点左侧任一行切换右侧） -->
+      <div class="pane" id="pane-requests">
+        <input class="rtab" type="radio" name="req" id="req-r14" checked>
+        <input class="rtab" type="radio" name="req" id="req-r13">
+        <input class="rtab" type="radio" name="req" id="req-r11">
+
+        <div class="split c">
+          <div class="card">
+            <h2>Requests <span class="cnt">2 waiting · click one</span></h2>
+            <div class="rlist">
+              <label class="r" for="req-r14">
+                <div class="t1"><span class="mono">R-14</span><span class="pill">decision</span>
+                  <span class="spacer"></span><span class="mono">3h</span></div>
+                <div class="t2">项目执行器的第一张票，怎么拆？</div>
+                <div class="t3"><span>why: 设计取舍</span><span>timeout: 不替你拍板</span></div>
+              </label>
+              <label class="r" for="req-r13">
+                <div class="t1"><span class="mono">R-13</span><span class="pill">authorization</span>
+                  <span class="spacer"></span><span class="mono" style="color:var(--amber)">blocks 1</span></div>
+                <div class="t2">这张票现在能不能合并？它需要一个新授权。</div>
+                <div class="t3"><span>why: 超出范围</span><span>9h</span></div>
+              </label>
+              <div class="hr"></div>
+              <div class="rail-h">Resolved</div>
+              <label class="r" for="req-r11">
+                <div class="t1"><span class="mono">R-11</span><span class="pill ok">answered</span>
+                  <span class="spacer"></span><span class="mono">23:05</span></div>
+                <div class="t2">今晚要不要开夜间全权</div>
+                <div class="t3"><span>led to: 5 signs · 4 fixes · 1 ticket</span></div>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <div class="rdetail" id="det-r14">
+              <div class="card">
+                <h2>R-14 <span class="cnt">decision · open 3h · nothing blocked</span></h2>
+                <div class="line"><span class="lbl">Why you</span>
+                  <span class="val">设计取舍——定稿权在你。</span></div>
+                <div class="line"><span class="lbl">Context</span>
+                  <span class="val" style="color:var(--muted)">三件事要做：<b>把工单变化写成流水</b>、<b>加一个盯回路的守望者</b>、
+                  <b>做这个面板</b>。有依赖：没有流水，另两件只能靠每几秒重问凑合。要定的是先做哪件、拆几张票。</span></div>
+                <div class="line" style="display:block">
+                  <div class="lbl" style="margin-bottom:2px">Options</div>
+                  <div class="opt"><b>A · 一票全包</b><span class="con">一次评审；中途出问题整票重来 · 可逆低</span></div>
+                  <div class="opt rec"><b>B · 拆三票按依赖顺序（它推荐）</b><span class="con">每票单独能用；三次评审 · 可逆高</span></div>
+                  <div class="opt"><b>C · 先只做静态面板</b><span class="con">界面先用；流水收益延后 · 可逆高</span></div>
+                  <div class="opt"><b>D · 先不做</b><span class="con">现状不变 · 可逆高</span></div>
+                </div>
+                <div class="line" title="Defaults may only execute an existing rule, never make a new decision.">
+                  <span class="lbl">Timeout</span>
+                  <span class="val">不替你拍板；只做不需你决定的事（写清代价、推进无关工作）。一直不答 → 持续提醒，<b>永不自动选</b>。</span></div>
+                <div class="line" style="display:block">
+                  <div class="lbl" style="margin-bottom:2px">Refs</div>
+                  <div class="refs">
+                    <span class="ref doc">doc · <b>设计稿</b></span><span class="ref ki">ki · <b>KI-142</b></span>
+                    <span class="ref">41,203–41,210</span><span class="ref">t260925-04</span>
+                    <span class="ref">afbaede</span><span class="ref">epic · project-executor</span><span class="ref">R-11</span>
+                  </div>
+                </div>
+                <div class="thread">
+                  <div class="rail-h" style="margin:6px 0 2px">Follow-up</div>
+                  <div class="msg"><span class="who">你 · 02:41</span> 为什么不能一票全包？</div>
+                  <div class="msg"><span class="who">executor · 02:43</span> 三件的验收口径不同，合成一票会互相掩护。<span style="color:var(--dim)">↳ 已补进 A 的代价。</span></div>
+                </div>
+                <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+                  <span class="btn primary">Answer</span><span class="btn">Default</span>
+                  <span class="btn">Follow-up</span><span class="btn">Snooze</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rdetail" id="det-r13">
+              <div class="card">
+                <h2>R-13 <span class="cnt">authorization · open 9h · blocks t260927-11</span></h2>
+                <div class="line"><span class="lbl">Why you</span>
+                  <span class="val">超出现有授权范围，而开授权是元权限——只有你能开。</span></div>
+                <div class="line"><span class="lbl">Context</span>
+                  <span class="val" style="color:var(--muted)">t260927-11 的合并闸需要一次本人授权；在案授权里没有这一项。
+                  不答它就一直停在闸上——不会烂，只是慢。</span></div>
+                <div class="line" title="Defaults may only execute an existing rule, never make a new decision.">
+                  <span class="lbl">Timeout</span>
+                  <span class="val">不动（票停在合并闸等你）。</span></div>
+                <div class="line" style="display:block">
+                  <div class="lbl" style="margin-bottom:2px">Refs</div>
+                  <div class="refs">
+                    <span class="ref">ticket · <b>t260927-11</b></span><span class="ref">41,207</span>
+                    <span class="ref ki">ki · <b>KI-139</b>（授权后还要再驱动一次）</span>
+                  </div>
+                </div>
+                <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+                  <span class="btn primary">Answer</span><span class="btn">Default</span><span class="btn">Follow-up</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="rdetail" id="det-r11">
+              <div class="card">
+                <h2>R-11 <span class="cnt">decision · answered by you 23:05</span></h2>
+                <div class="line"><span class="lbl">Question</span>
+                  <span class="val">今晚要不要开夜间全权（23:00–07:30）</span></div>
+                <div class="line"><span class="lbl">Why you</span>
+                  <span class="val">授权只能在宿主侧开，它不能给自己开。</span></div>
+                <div class="line"><span class="lbl">Answered</span>
+                  <span class="val">批准 · 23:05 · 睡前授权（你）</span></div>
+                <div class="line"><span class="lbl">Led to</span>
+                  <span class="val">代签 5 张 · 主树直修 4 处 · 开 1 张修复票 · 1 次清场（经你批准）</span></div>
+                <div class="line" style="display:block">
+                  <div class="lbl" style="margin-bottom:2px">Refs</div>
+                  <div class="refs">
+                    <span class="ref">grant · <b>260927</b></span><span class="ref">4bb84d3</span>
+                    <span class="ref">afbaede</span><span class="ref">b06caf8</span>
+                    <span class="ref">ticket · <b>t260927-12</b></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⑤ Ledger -->
+      <div class="pane" id="pane-ledger">
+        <div class="card">
+          <h2>Event ledger <span class="cnt">derived · not the source of truth · this night ▾</span></h2>
+          <div class="grid" style="margin-bottom:7px">
+            <div class="kv"><div class="k">Gaps</div><div class="v ok">none</div></div>
+            <div class="kv"><div class="k">Written by</div><div class="v">engine activity</div></div>
+            <div class="kv"><div class="k">Rebuild from</div><div class="v">ticket timeline</div></div>
+            <div class="kv"><div class="k">Filter</div><div class="v">ticket · actor · kind · seq</div></div>
+          </div>
+          <div class="wide">
+            <table>
+              <tr><th>seq</th><th>time</th><th>actor</th><th>what</th><th>detail</th></tr>
+              <tr><td class="mono">41,210</td><td class="mono">02:33</td><td class="mono">executor</td><td>direct-fix main</td><td class="mono">1 file · KI-142</td></tr>
+              <tr><td class="mono">41,209</td><td class="mono">02:32</td><td class="mono">t260927-12</td><td>created</td><td class="mono">repair for t260925-04</td></tr>
+              <tr><td class="mono">41,208</td><td class="mono">02:31</td><td class="mono">t260927-08</td><td>implement → running</td><td class="mono">gen 2</td></tr>
+              <tr><td class="mono">41,207</td><td class="mono">02:30</td><td class="mono">t260927-05</td><td>merge → awaiting-human</td><td class="mono">gate: merge</td></tr>
+              <tr><td class="mono">41,206</td><td class="mono">02:29</td><td class="mono">t260925-04</td><td>tests-fault → rework</td><td class="mono">gen 4</td></tr>
+              <tr><td class="mono">41,205</td><td class="mono">02:28</td><td class="mono">executor</td><td>request opened</td><td class="mono">R-14</td></tr>
+              <tr><td class="mono">41,203</td><td class="mono">02:12</td><td class="mono">t260927-11</td><td>merge_check → red</td><td class="mono">3 checks</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="inp">Instruct…  e.g. “t260925-04 failed three times — stop retrying, send it back”</div>
+      <div class="foot">
+        <span class="mode on" title="Queued: waits for the current turn to finish, then runs in order. Nothing is interrupted.">Queue</span>
+        <span class="mode caution" title="Steer: interrupts the turn running right now. That turn stops half-done — files may be edited but not committed, and an in-flight tool call's outcome is unknown. Every direct fix is a commit, so the checkpoint survives.">Steer ⚠</span>
+        <span class="queued" title="One instruction is waiting behind the current turn. A queued item can be edited, removed, or promoted to Steer.">1 queued</span>
+        <span class="spacer"></span><span class="btn primary">Send</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── state variants ──────────────────────────────────────── -->
+<div class="variants">
+  <div class="vcard">
+    <h3>① Normal</h3>
+    <div class="vl"><span>Watchdog</span><b style="color:var(--green)">alive 3s</b></div>
+    <div class="vl"><span>Ledger</span><b>advancing</b></div>
+    <div class="vl"><span>Reconcile</span><b style="color:var(--green)">ok</b></div>
+    <div class="vl"><span>Executor</span><b>working</b></div>
+  </div>
+  <div class="vcard">
+    <h3>② Stall</h3>
+    <div class="vl"><span>Watchdog</span><b style="color:var(--green)">alive 4s</b></div>
+    <div class="vl"><span>Ledger</span><b>frozen 15m</b></div>
+    <div class="vl"><span>Reconcile</span><b style="color:var(--green)">ok</b></div>
+    <div class="vl"><span>Executor</span><b style="color:var(--amber)">no progress</b></div>
+    <div class="vl"><span>Action</span><b>wake → escalate</b></div>
+  </div>
+  <div class="vcard">
+    <h3>③ No signal</h3>
+    <div class="banner bad" style="margin:0 0 6px">May be stale since 02:14 — the watchdog itself stopped.</div>
+    <div class="vl"><span>Watchdog</span><b style="color:var(--red)">STALE 4m</b></div>
+    <div class="vl"><span>Ledger</span><b>flat</b></div>
+    <div class="vl"><span>Reconcile</span><b style="color:var(--red)">not running</b></div>
+    <div class="vl"><span>Executor</span><b>unknown</b></div>
+  </div>
+</div>
+
+<div class="notes">
+  <h3>v18 — horizontal layout + another text pass</h3>
+  <b>Width is now used.</b> Overview pairs <i>Watchdog</i> (health) beside <i>Flow</i> (throughput) with the
+  ledger-backed table under both; Settings pairs <i>Grants</i> beside <i>Alerts</i>; and Requests became a
+  <b>master–detail</b> split — the list stays visible on the left while the selected request fills the right, which
+  is what “fold so I can see the whole picture” was really asking for. Below 980px every split collapses to one
+  column.
+  <br><br>
+  <b>Less text again.</b> The <code>Did</code> card merged into <code>Now</code> (one table under two lines),
+  request fields cut to <code>Why you · Context · Options · Timeout · Refs</code>, buttons to
+  <code>Answer · Default · Follow-up · Snooze</code>, the Flow legend to <code>handled 6 · 67% vs 4 ↑</code>, and
+  every remaining explanation moved into a hover tooltip. Request bodies stay long on purpose — they are the
+  decision, not commentary.
+
+  <h3>Interaction, and the wiring check</h3>
+  Two things are actually clickable in this mock and both are now verified mechanically.
+  <br><br>
+  <b>Tabs</b>: an earlier revision had three panes whose ids collided with the radio inputs
+  (<code>t2 · t3 · t5</code>), so the CSS pointed at <code>#p2/#p3/#p5</code>, found nothing, and those tabs
+  rendered empty while the rest worked. Ids are now semantic (<code>tab-*</code> for radios, <code>pane-*</code>
+  for panes).
+  <br><br>
+  <b>Requests</b>: the first master–detail pass rendered only R-14's detail, so clicking R-13 did nothing — the list
+  looked broken. Each row is now a label bound to its own radio, and the right-hand side holds one detail block per
+  request (<code>det-r14 · det-r13 · det-r11</code>), so clicking a row really does switch the detail, including the
+  resolved one.
+  <br><br>
+  The check runs on the mock as a whole: duplicate ids, every <code>&lt;label for&gt;</code> resolving to an input
+  that exists, every <code>radio:checked</code> CSS rule pointing at a real element, and no orphan radio or pane.
+  Nesting checks alone missed both bugs; wiring checks are what catch this class.
+
+  <h3>Queue vs Steer</h3>
+  These are the two ways an instruction can be delivered to a session that may be busy right now — the session
+  interface's own vocabulary, not something invented here. <b>Queue</b> appends a turn: it waits for the current
+  one to finish and runs in order, interrupting nothing — the default. <b>Steer</b> interrupts the running turn and
+  takes over immediately; it is the emergency brake (it is about to do something you do not want, or it is stuck in
+  a loop), because that turn stops <i>half-done</i> — files may be edited but not committed and an in-flight tool
+  call's outcome is unknown. The mitigation is the same discipline used for restarts: every direct fix is a commit,
+  so the checkpoint survives. Two consequences for the UI: a queued instruction must be <b>visible</b> (otherwise a
+  ten-minute turn makes you think it was ignored), and a queued item can be edited, removed, or promoted to Steer.
+</div>
+
+</body>
+</html>
