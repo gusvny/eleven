@@ -204,13 +204,18 @@ section("E workflow 第二道落点（混入 + 三模板统一）")
 ok("class TicketCrossProjectMixin" in BASE, "base.py 闸混入在位")
 ok("class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):" in BASE,
    "TicketWorkflowBase 双混入")
-ok("class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):" in DEVLANE,
-   "DevLaneWorkflow 双混入")
+# 260928 修：类声明由单行字面量改为「含这两个混入（允许续行/允许再加混入）」——
+# t260928-13 给 DevLaneWorkflow 加了 TicketEventLedgerMixin（事件台账接线）后，
+# 原单行字面量判据必然长红。意图不变：DevLaneWorkflow 必须同时接暂停混入与跨项目混入。
+_dl_decl = DEVLANE[DEVLANE.index("class DevLaneWorkflow"):DEVLANE.index("class DevLaneWorkflow") + 200]
+ok("TicketPauseMixin" in _dl_decl and "TicketCrossProjectMixin" in _dl_decl,
+   "DevLaneWorkflow 双混入（容许额外混入与续行）")
 ok(DEVLANE.count("_cross_project_gate(") - DEVLANE.count("def _cross_project_gate(") == 3,
    "dev_lane 三落点（sign/rework/host_ruling，实测 %d 处调用）"
    % (DEVLANE.count("_cross_project_gate(") - DEVLANE.count("def _cross_project_gate(")))
-ok(BASE.count("_cross_project_gate(") - BASE.count("def _cross_project_gate(") == 5,
-   "base 五落点（sign/rework/pause/resume/cancel_notice，实测 %d 处调用）"
+ok(BASE.count("_cross_project_gate(") - BASE.count("def _cross_project_gate(") == 6,
+   "base 六落点（sign/rework/pause/resume/cancel_notice + **close_out_notice**=260928 宿主令④"
+   "的人工记名收口，与 cancel_notice 同款过闸，实测 %d 处调用）"
    % (BASE.count("_cross_project_gate(") - BASE.count("def _cross_project_gate(")))
 ok("def _cross_project_gate(self" in BASE and "cross_project_judge(" in BASE,
    "混入体消费单点判定（base 不自带矩阵）")
@@ -238,11 +243,13 @@ ok("_write_op_poc('ticket', payload, a)" in TICKET
    "写 op 统一出口（ticket/ticket-start 两入口同走）")
 ok("def _poc(subcmd, payload, caller=None)" in TICKET
    and "s.CALLER_PROJECT_ENV" in TICKET, "_poc env 注入身份（spawn 链出处）")
-ok(TICKET.count("_write_op_poc(") - 1 == 9,
-   "写面统一出口恰 9 调用点（rework/sign/retry_qc/authorize/ruling/update/ticket-start + "
+ok(TICKET.count("_write_op_poc(") - 1 == 10,
+   "写面统一出口恰 10 调用点（rework/sign/retry_qc/authorize/ruling/update/ticket-start + "
    "pause|resume 共用一处 + ticket-cancel：t260922-10（bf85990）按设计补的 cancel 接闸"
    "走同一出口，260923 A 清账登记同步；ruling=F2 收口补的包装层出口，与 schema enum "
-   "宣告对齐，实测 %d）"
+   "宣告对齐；**ticket-close-out**=260928 宿主令④（人工记名收口，与 ticket-cancel 同款"
+   "who+reason 必填、_write_gate 过闸、close_out_notice 信号留痕后 terminate）——本计数"
+   "存在的意义就是逼每新增一个写入口都来这条断言登记一次，实测 %d）"
    % (TICKET.count("_write_op_poc(") - 1))
 ok("'cross_project_uses'" in TICKET, "对账白名单 cross_project_uses 在 _v2_query")
 ok("'caller_project'" in TICKET and "'cross_project'" in TICKET
