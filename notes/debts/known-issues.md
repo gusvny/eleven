@@ -2296,3 +2296,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律落点**：「借鉴既有实现必须逐项声明带过来/不带＋理由」——本条的「不带」项（dirs 守卫）**未声明、
 > 未替换**，只有 docstring 还在声称它；今后镜像/照搬既有实现，逐项清单要写进票面或代码注释，且
 > **夹具必须来自真环境形状**（用真 `project.yaml` 采样，不手写理想形状），否则测试会把错误假设固化成预期。
+> **同族面（借了既有实现的约定、没借它的同族处置；本次一并处置）**：账本缺省目录 `server/ledger/`
+> 照搬 `server/admin.log` 的「同根」约定（模块 docstring 自陈），但 `.gitignore` 只忽略了
+> `server/admin.log*`——**轮转产物入库的风险没有同族堵住**（该忽略行本身的注释就记着前例：
+> admin.log 轮转产物曾被误入库、夹具复制导致 GB 级副本堆积、260922 才出仓；`.sandbar/`/
+> `.probe-home/` 亦于 260927 同因补忽略）。票①写集是 `server/engine/` + `integration/`，够不到仓根，
+> 故当时只能漏。260928 已在 main 补 `.gitignore` 的 `server/ledger/`（`git check-ignore` 实证命中）。
+> **通用判据**：交付任何**新的运行期落盘目录**时，必须同批检查其**轮转/归档产物**是否已被忽略
+> （「新目录 + 忽略面」是同一件事，不是两件事）。
