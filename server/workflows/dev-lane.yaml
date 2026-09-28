@@ -101,7 +101,7 @@ stages:
       - "泳道分支有 commit"
       - "工作区干净（无未提交改动）"
       - "泳道内 verify_lane code 绿灯"
-      - "merge 预演无冲突（冲突则自动消解 3 轮内收敛）"
+      - "merge 预演无冲突（**仅**预演冲突这一类红自动打回 implement 消解，上限 3 轮；脏工作区/verify_lane 红等其它红 blocked 等人）"
   - id: merge
     role: integration
     name: "合并（人审）"
