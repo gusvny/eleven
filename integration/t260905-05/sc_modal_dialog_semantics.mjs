@@ -276,10 +276,13 @@ async function main() {
     }
     results.record('L0 precheck', 'pass', '行卡消费桩列表（t260904-17 契约锚）')
 
-    // L1 审批弹层：行卡「推进」→ 审批通过并推进弹层 → dialog 语义三断言。
-    // 关闭钮按「确认/通过」语义找（按钮文案演化不破驱动；断言只落关闭行为本身）。
-    await mainCard(page).locator('button', { hasText: '推进' }).first().click({ timeout: 5000 })
-    const e1 = await assertDialogSemantics(page, { bindText: FID, closeByText: /确认|通过/ })
+    // L1 审批弹层：行卡 Advance → 审批通过并推进弹层 → dialog 语义三断言。
+    // 驱动钮与关闭钮都按用户可见标签找（宿主令 260925 控制台 UI 文案一律英文：
+    // 行卡钮=Advance / 否，弹层确认钮=Approve and advance、取消钮=Cancel；
+    // 旧中文「推进 / 确认通过并推进」已退役）。文案演化仍只作用户可见标签层面的驱动，
+    // 断言本体（可发现/aria-modal/语义通路关闭）不受影响。
+    await mainCard(page).locator('button', { hasText: 'Advance' }).first().click({ timeout: 5000 })
+    const e1 = await assertDialogSemantics(page, { bindText: FID, closeByText: /Approve|Confirm/ })
     if (!e1) {
       results.record('L1 approve-modal dialog semantics', 'pass', '发现 + aria-modal + 语义通路关闭 三断言全过')
     } else {
@@ -287,16 +290,16 @@ async function main() {
       results.record('L1 approve-modal dialog semantics', cls, e1 + (cls === 'env_fail' ? supplyHint() : ''))
     }
 
-    // L2 打回弹层：重载换干净态 → 行卡「打回」→ 打回弹层 → 同一套三断言。
+    // L2 打回弹层：重载换干净态 → 行卡 Rework（旧中文「打回」）→ 打回弹层 → 同一套三断言。
     await page.reload({ waitUntil: 'domcontentloaded' })
     await attachStub(page, counts)
     page.on('dialog', (dlg) => { void dlg.accept() })
     if (!(await openBoard(page))) {
       results.record('L2 reject-modal dialog semantics', 'env_fail', 'reload 后行卡未再现')
     } else {
-      await mainCard(page).locator('button', { hasText: '打回' }).first().click({ timeout: 5000 })
-      // 关闭钮按「取消/关闭」找（取消路径不落写，断言最纯）；找不到则退首个可用钮。
-      const e2 = await assertDialogSemantics(page, { closeByText: /取消|关闭/ })
+      await mainCard(page).locator('button', { hasText: 'Rework' }).first().click({ timeout: 5000 })
+      // 关闭钮按「取消/关闭」语义找（现取值 Cancel/Close；取消路径不落写，断言最纯）；找不到则退首个可用钮。
+      const e2 = await assertDialogSemantics(page, { closeByText: /Cancel|Close/ })
       if (!e2) {
         results.record('L2 reject-modal dialog semantics', 'pass', '发现 + aria-modal + 语义通路关闭 三断言全过')
       } else {

@@ -332,8 +332,10 @@ async function L1_clickOpens(page) {
 
 async function L2_buttonsLoop(page) {
   await openLightbox(page, 0)
-  const fwd = page.locator('.wb-lb [aria-label="下一张"]').first()
-  const back = page.locator('.wb-lb [aria-label="上一张"]').first()
+  // 导航钮钉 aria-label=该钮的**用户可感知契约本身**（无障碍名，宿主令 260925
+  // 控制台 UI 文案一律英文后取值 Previous/Next；迁移前旧值为「上一张/下一张」）。
+  const fwd = page.locator('.wb-lb [aria-label="Next"]').first()
+  const back = page.locator('.wb-lb [aria-label="Previous"]').first()
   if (!(await fwd.count())) return '› button not rendered in multi-file lightbox'
   if (!(await back.count())) return '‹ button not rendered in multi-file lightbox'
   await fwd.click(); await page.waitForTimeout(150)

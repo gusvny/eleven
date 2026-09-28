@@ -160,7 +160,7 @@ try {
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'shot stub: unknown' }) })
   })
 
-  await page.goto(`${bench.base}/`, { waitUntil: 'networkidle' })
+  await bench.goto(page, { waitUntil: 'networkidle' })
   await page.waitForTimeout(3000)
   await dismissOverlays(page)
   const probe = page.locator(`.wb-sb .wb-card[data-ticket-id="${INS_A}"]`).first()

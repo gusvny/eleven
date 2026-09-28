@@ -103,7 +103,7 @@ try {
   const WRITE_PAT = /advance|sign|approve|rework|dispatch|create|tickets\?/i;
   const writePosts = () => writes.filter((u) => WRITE_PAT.test(u));
 
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
 
   // T1 导航：工单列表 → 项目夹具甲 → 行卡在场
@@ -128,25 +128,42 @@ try {
   // T2 四态可辨：chips 计数 + 动作位 + 收口折叠
   {
     const body = await page.locator('body').innerText();
-    const chip = (re) => re.test(body.replace(/\s+/g, ''));
+    // 计数断言改钉**结构钩子**（chips 是 button.wb-chip-btn[data-state=<引擎四态枚举>]，
+    // 枚举值即契约、不随界面语言漂）；文案（原「等你/受阻/在飞/收口」→英文）不作用例依据。
+    const chipCount = async (st) => {
+      const t = (await page.locator(`.wb-chip-btn[data-state="${st}"]`).first().innerText().catch(() => '')) || '';
+      const m = t.match(/(\d+)\s*$/);
+      return m ? Number(m[1]) : null;
+    };
+    const cWait = await chipCount('waiting'), cBlock = await chipCount('blocked');
+    const cActive = await chipCount('active'), cDone = await chipCount('done');
     record('ui/chips-counts',
-      chip(/等你1/) && chip(/受阻1/) && chip(/在飞3/) && chip(/收口1/),
-      `筛选 chips 计数实况=等你1/受阻1/在飞3/收口1 期望全命中（在飞3 含未知 stage_state 票=四态缺省分支 UI 交叉验证）`);
+      cWait === 1 && cBlock === 1 && cActive === 3 && cDone === 1,
+      `筛选 chips 计数实况=waiting:${cWait}/blocked:${cBlock}/active:${cActive}/done:${cDone} 期望 1/1/3/1（active=3 含未知 stage_state 票=四态缺省分支 UI 交叉验证）`);
     const twaitTxt = (await vis('twait').innerText().catch(() => '')) || '';
     record('ui/waiting-action-gosign', twaitTxt.includes('Sign →'), twaitTxt.slice(0, 80));
     const tblockTxt = (await vis('tblock').innerText().catch(() => '')) || '';
     record('ui/blocked-action-see-reason', tblockTxt.includes('View Reason'), tblockTxt.slice(0, 80));
-    record('ui/done-collapse', /收口\s*·\s*1|✓\s*收口/.test(body), body.match(/.{0,20}收口.{0,20}/)?.[0] ?? '未找到收口折叠行');
+    // 收口折叠行=button.wb-done-row（结构钩子）；计数=该行文本里的数字（=1 才判过）。
+    // 行内文案（▾/✓ Closed · N (click to …)）随宿主令 260925 英文化，不作用例依据。
+    const doneRowTxt = (await page.locator('.wb-done-row').first().innerText().catch(() => '')) || '';
+    record('ui/done-collapse', (await page.locator('.wb-done-row').count()) > 0 && /(^|\D)1(\D|$)/.test(doneRowTxt),
+      `收口折叠行=${JSON.stringify(doneRowTxt.slice(0, 80))}（期望位在场且计数=1）`);
     // F2 回归用例（走查打回 260904）：引擎 updated_ts=秒，行卡误当毫秒曾显「20680 天前」——
-    // fixture trun=NOW-300（5 分钟前量级），必须落「分钟前」域，不得落天/小时域。
+    // fixture trun=NOW-300（5 分钟前量级），必须落**分钟**域，不得落小时/天域。
     // （自跑全程 ≤90s，5→6 分钟边界不触小时档，断言抗漂移。innerText 带重试防渲染竞态。）
+    // 相对时间格式=ticket-list-model.relativeTime 的用户可见产出，宿主令 260925 后为
+    // `Nm ago`/`Nh ago`/`Nd ago`（旧中文「N 分钟前/小时前/天前」）——单位域=断言内核，
+    // 故按当前英文形态钉（仍只锚单位档，不锚整句措辞）。
+    const reltimeRe = /\d+[smhd] ago/;
     let trunTxt = '';
-    for (let i = 0; i < 4 && !/\S*前/.test(trunTxt); i++) {
+    for (let i = 0; i < 4 && !reltimeRe.test(trunTxt); i++) {
       trunTxt = (await vis('trun').innerText().catch(() => '')) || '';
-      if (!/\S*前/.test(trunTxt)) await page.waitForTimeout(500);
+      if (!reltimeRe.test(trunTxt)) await page.waitForTimeout(500);
     }
-    record('ui/reltime-unit-sane', /分钟前/.test(trunTxt) && !/天前|小时前/.test(trunTxt),
-      `trun 相对时间实况=${(trunTxt.match(/\S*前/) ?? ['<无>'])[0]}（F2：秒/毫秒错位回归守卫）`);
+    const relHit = (trunTxt.match(reltimeRe) ?? ['<无>'])[0];
+    record('ui/reltime-unit-sane', /\d+m ago/.test(trunTxt) && !/\d+[hd] ago/.test(trunTxt),
+      `trun 相对时间实况=${relHit}（F2：秒/毫秒错位回归守卫——期望分钟域）`);
   }
 
   // T3 去签字=纯导航零写操作（R3 钉死面）。落点锚=.wb-drawer 详情抽屉在场
@@ -217,7 +234,9 @@ try {
 
   // T7 搜索过滤
   {
-    const box = page.locator('input[placeholder*="搜"]').first();
+    // 结构钩子 input.wb-search（原按中文 placeholder「搜…」定位；placeholder 随宿主令 260925
+    // 英文化，class 是稳定钩子，不再钉可翻译文案）。
+    const box = page.locator('input.wb-search').first();
     await box.fill('trun');
     await page.waitForTimeout(800);
     const trunVisible = await vis('trun').isVisible().catch(() => false);

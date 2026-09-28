@@ -299,9 +299,11 @@ export async function bootConsole(projectsRoot, stub) {
       env: benchEnv(tmpHome, projectsRoot, stub),
     });
     await waitReady(port, 45000, path.join(tmpHome, 'console.log'));
-    return {
+    const bench = {
       port, tmpHome, projectsRoot, proc, logFd, clean,
       base: `http://127.0.0.1:${port}`,
+      /** 导航进本台控制台（带 token 首页跳一次落会话 cookie）。见 gotoConsole 头注。 */
+      goto(page, options) { return gotoConsole(page, bench, options); },
       teardown() {
         if (proc.pid && proc.exitCode === null && proc.signalCode === null) {
           try { process.kill(-proc.pid, 'SIGTERM'); } catch { try { proc.kill('SIGKILL'); } catch { /* 已退 */ } }
@@ -310,12 +312,62 @@ export async function bootConsole(projectsRoot, stub) {
         clean();
       },
     };
+    return bench;
   } catch (e) { clean(); throw e; }
 }
 
 export function teardownOnExit(teardown) {
   process.on('exit', teardown);
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { teardown(); process.exit(130); });
+}
+
+/**
+ * 取隔离台的**带 token 首页地址**（dsh 0.1.5 浏览器会话门，实测定性 260928）。
+ *
+ * 背景：dsh web 对首页与 /api 走「会话 cookie 认证」——匿名 GET `/` 恒 401
+ * （body=`dsh web authentication required; ...`），页面里一个 DOM 都渲染不出来。
+ * 历史绿跑用的是无此门的旧 bits，所以本夹具过去直接 `page.goto(base)` 才成立；
+ * 现在必须先按 dsh 自己打印的那行
+ *   `dsh web: http://127.0.0.1:<port>/?token=<launchToken>`
+ * 走一次 `GET /?token=…`（303 + Set-Cookie），之后同源导航才有 DOM。
+ * 不兑 token 的后果不是产品红而是**假红**（元素找不到被当成产品缺陷），故此处
+ * 取不到就响亮 env_fail（exit 2），绝不回落成匿名 401 页继续断言——报错必须精确。
+ *
+ * @param bench bootConsole 返回值（读其 tmpHome/console.log）。
+ * @param timeoutMs token 行可能晚于 API 就绪出现（loader settle 后才 announce），缺省等 20s。
+ * @returns 带 token 的首页 URL；超时/日志畸形则打印 `ENV_FAIL: …` 并 exit 2。
+ */
+export async function benchAuthUrl(bench, timeoutMs = 20000) {
+  if (bench.authUrl) return bench.authUrl;
+  const logPath = path.join(bench.tmpHome, 'console.log');
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const log = readFileSync(logPath, 'utf8');
+      const m = log.match(/https?:\/\/[^\s"'<>]*[?&]token=[A-Za-z0-9._~-]+/);
+      if (m) { bench.authUrl = m[0]; return m[0]; }
+    } catch { /* 日志尚未落盘：续等 */ }
+    if (Date.now() - t0 > timeoutMs) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const tail = (() => { try { return readFileSync(logPath, 'utf8').slice(-400); } catch { return '(读不到 console.log)'; } })();
+  console.log(`ENV_FAIL: 隔离台未打印带 token 首页地址（等 ${timeoutMs}ms，日志尾=${JSON.stringify(tail)}）——dsh 浏览器会话门需 /?token= 兑换 cookie，拿不到不得按 401 页继续断言`);
+  process.exit(2);
+}
+
+/**
+ * 导航进隔离台控制台（带 token 首页跳一次，落会话 cookie）。
+ * 401 页=环境红点名，不当作「元素缺席」的产品红。
+ */
+export async function gotoConsole(page, bench, options = {}) {
+  const url = await benchAuthUrl(bench);
+  const res = await page.goto(url, { waitUntil: 'domcontentloaded', ...options });
+  const unauthorized = await page.evaluate(() => (document.body?.innerText ?? '').includes('authentication required')).catch(() => false);
+  if (unauthorized || (res && res.status() === 401)) {
+    console.log(`ENV_FAIL: 隔离台首页仍要求认证（token 兑换未生效，响应=${res ? res.status() : 'n/a'}）——环境红，不按缺元素判产品红`);
+    process.exit(2);
+  }
+  return page;
 }
 
 /** playwright-core 四路探测（t260904-15 同口径）。null=调用方转环境红（env_fail 点名，KI-036）。 */

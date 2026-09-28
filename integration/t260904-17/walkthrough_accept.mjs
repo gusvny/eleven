@@ -121,7 +121,7 @@ const rgbOf = (hex) => {
 const FALLBACK_RGB = 'rgb(156, 163, 175)'; // EPIC_FALLBACK_COLOR #9ca3af
 
 async function gotoBoard(page) {
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   try { await board.click({ timeout: 4000 }); } catch { await board.evaluate((el) => el.click()).catch(() => {}); }

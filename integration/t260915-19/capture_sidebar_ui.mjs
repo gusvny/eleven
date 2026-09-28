@@ -154,7 +154,7 @@ try {
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'shot stub: unknown' }) })
   })
 
-  await page.goto(`${bench.base}/`, { waitUntil: 'networkidle' })
+  await bench.goto(page, { waitUntil: 'networkidle' })
   console.log('[phase] goto ok')
   await page.waitForTimeout(3000)
   await dismissOverlays(page)

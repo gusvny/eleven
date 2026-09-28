@@ -162,7 +162,10 @@ function buildContract() {
   }
   // Artifact anchors are written as the post-tsdown-minify literals (the
   // double-quoted case, the &mode=fast concatenation, the badge copy).
-  const anchors = ['donutOption', 'specToDonutInput', 'case "donut": return donut(', '&mode=fast', '缓存快照 · 刷新中']
+  // 角标文案锚=当前产品文案「Cache snapshot · refreshing」（metrics.tsx；宿主令 260925
+  // 界面英文化，旧中文「缓存快照 · 刷新中」已退役）——S0 是「产物里确实带着这一面」的锚，
+  // 故钉当前取值。
+  const anchors = ['donutOption', 'specToDonutInput', 'case "donut": return donut(', '&mode=fast', 'Cache snapshot · refreshing']
   const missing = anchors.filter(a => !js.includes(a))
   if (missing.length) {
     record('S0 build-contract', 'fail', `shipped bundle missing donut-render anchors: ${missing.join(', ')}`)
@@ -315,6 +318,8 @@ async function openMetricsPanel(page) {
 }
 
 async function clickTab(page, label) {
+  // 视图页签名=metrics.tsx TABS 的用户可见标签（宿主令 260925 界面英文化后为
+  // Time/Delivery/Token/System Health；迁移前旧值「时间/交付/令牌/系统健康」）。
   const tab = page.locator('.wb-m-tab', { hasText: label }).first()
   if (!(await tab.count())) return false
   await tab.click()
@@ -394,9 +399,11 @@ async function runBrowser(pw, browser) {
       await p.waitForTimeout(300)
       await p.evaluate(() => document.dispatchEvent(new CustomEvent('wb-metrics-toggle')))
       const badge = await waitFor(async () =>
-        (await p.locator('.wb-m .wb-m-degrade', { hasText: '缓存快照' }).count()) > 0, 6000)
+        // 角标文案=产品当前用户可见标签「Cache snapshot · refreshing」（metrics.tsx；旧中文
+        // 「缓存快照 · 刷新中」随宿主令 260925 界面英文化退役）；判据仍是角标出现→摘除。
+        (await p.locator('.wb-m .wb-m-degrade', { hasText: /Cache snapshot/ }).count()) > 0, 6000)
       const badgeGone = await waitFor(async () =>
-        (await p.locator('.wb-m .wb-m-degrade', { hasText: '缓存快照' }).count()) === 0, 15000)
+        (await p.locator('.wb-m .wb-m-degrade', { hasText: /Cache snapshot/ }).count()) === 0, 15000)
       if (!badge && !badgeGone) return 'badge never appeared and never cleared (fast door broken?)'
       if (!badgeGone) return 'stale badge stuck (full replacement did not clear it)'
       return null
@@ -417,7 +424,7 @@ async function runBrowser(pw, browser) {
 
     // D3 delivery view: the 「有无代码变更票占比」 donut really renders.
     await run('D3 delivery view donut painted', async (p) => {
-      if (!(await clickTab(p, '交付'))) return 'delivery tab missing'
+      if (!(await clickTab(p, 'Delivery'))) return 'delivery tab missing'
       const subPainted = await waitFor(async () => (await p.evaluate(domSubPainted('有无代码变更票占比'))) > 0, 10000)
       if (!subPainted) return `有无代码变更票占比 donut not painted (painted=${await p.evaluate(domSubPainted('有无代码变更票占比'))})`
       return null
@@ -435,12 +442,17 @@ async function runBrowser(pw, browser) {
     // blank-slate canvas (the R1 tradeoff-4 hardening).
     await run('D5 malformed donut -> blank-state text, no crash', async (p) => {
       malformedMode = true
-      if (!(await clickTab(p, '时间'))) return 'time tab missing'
+      if (!(await clickTab(p, 'Time'))) return 'time tab missing'
       // 终态空态判定：metrics 缓存特性下 refreshing 分支横幅（「缓存快照已上台，全量
       // 刷新中…」）先于空态文案渲染（空态分支互斥、横幅为在途态），套件负载下瞬时
       // 首文本断言撞横幅=偶发假红（260915 仲裁轮实锤）——改轮询等刷新收敛到终态空态
       // 文案（横幅允许在途，不弱化：终态必须收敛到空态文案），超时点名所见文本。
-      const blankRe = /无可绘图数据|无可聚合数据/
+      // 空态文案现形态=「No aggregatable data in the window (or the aggregation was
+      // skipped).」（metrics.tsx；旧中文「无可聚合数据」已退役）。
+      // 终态空态文案现形态=「No drawable data in the window (or the aggregation was
+      // skipped — see the degradation note).」（metrics.tsx blankText）；另一分支
+      // 「No aggregatable data …」也认；旧中文两形态一并保留。
+      const blankRe = /No drawable data|No aggregatable data|无可绘图数据|无可聚合数据/
       let lastText = ''
       const ok2 = await waitFor(async () => {
         lastText = await p.locator('.wb-m .wb-m-empty').first().textContent().catch(() => '')
@@ -470,7 +482,9 @@ async function runBrowser(pw, browser) {
       if (!empties.some((t) => blankRe.test(t))) {
         return `precondition lost: terminal blank text no longer present (empties=${JSON.stringify(empties).slice(0, 120)})`
       }
-      const stuck = empties.filter((t) => t.includes('全量刷新中'))
+      // 在途文案现形态=「Cache snapshot shown; full refresh in progress…」（旧中文
+      // 「全量刷新中」已退役）；两形态都认，判据仍是「终态空态与在途文案互斥」。
+      const stuck = empties.filter((t) => /full refresh in progress|全量刷新中/.test(t))
       if (stuck.length > 0) {
         return `refreshing copy stuck alongside terminal empty state (count=${stuck.length}) — 空态分支互斥破`
       }

@@ -141,13 +141,15 @@ try {
       }
     } catch { /* 非本台 URL 忽略 */ }
   })
-  await page.goto(bench.base, { waitUntil: 'domcontentloaded' })
+  await bench.goto(page, { waitUntil: 'domcontentloaded' })
   await page.locator('.wb-group-head').first().waitFor({ state: 'visible', timeout: 20000 })
   await dismissNotice(page)
 
   const rowCodes = () => page.locator('.wb-ep-table tbody tr .wb-ep-code').allInnerTexts()
   const clickEpicsIcon = async (groupName) => {
-    const icon = page.locator('.wb-group-head', { hasText: groupName }).locator('[title="立项单"], [aria-label="立项单"]').first()
+    // 入口钉 title/aria-label=「立项单」入口的**用户可感知契约本身**（宿主令 260925 控制台
+    // UI 文案一律英文后取值 "Epics"，迁移前旧值为「立项单」），非实现细节故钉英文原文。
+    const icon = page.locator('.wb-group-head', { hasText: groupName }).locator('[title="Epics"], [aria-label="Epics"]').first()
     await icon.waitFor({ state: 'visible', timeout: 8000 })
     await icon.click({ timeout: 4000 })
     await page.locator('.wb-ep-root').first().waitFor({ state: 'visible', timeout: 8000 })

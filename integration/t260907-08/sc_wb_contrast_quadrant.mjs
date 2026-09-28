@@ -306,7 +306,7 @@ try {
   const page = await browser.newPage();
 
   for (const leg of LEGS) {
-    await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+    await bench.goto(page, { waitUntil: 'domcontentloaded' });
     const set = setFor(leg);
     if (set) await page.addStyleTag({ content: cssVarsBlock(set) });
     await dismissNotice(page);
@@ -359,7 +359,9 @@ try {
     // 文档视图：侧栏「文档」图标 → 树载入（等待树项，盲等 1200ms 实锤竞态）→点首篇
     // 载正文（懒加载契约：等正文元素在场再扫，正文文字正是症状①的违例源）
     let docsOpened = false;
-    const docsIcon = page.locator('[title="文档"], [aria-label="文档"]').first();
+    // 侧栏视图入口图标钉 title/aria-label（无障碍名=入口**用户可感知契约本身**；宿主令 260925
+    // 控制台 UI 文案英文化后取值 "Docs"，迁移前旧值「文档」）——不是实现细节。
+    const docsIcon = page.locator('[title="Docs"], [aria-label="Docs"]').first();
     for (let attempt = 0; attempt < 2 && !docsOpened; attempt++) {
       // 首版实跑偶发：壳 hydration 竞态下首击丢导航——重试一次（同 epics 面竞态修法精神）
       if (attempt > 0) { await page.waitForTimeout(800); }
@@ -384,9 +386,9 @@ try {
     record(`surface/docs-open/${leg}`, docsOpened ? true : 'na',
       docsOpened ? `文档面入扫（树就绪+正文懒加载；区域计数 docs=${scan.regions.docs || 0}）` : '文档入口未达（本票新走查面，全程未入扫将被 coverage 守卫点名）');
 
-    // 立项单视图：侧栏「立项单」图标 → 列表（真源 notes/epics/*.md）→点首行进详情→「＋ 新建工单」弹层
+    // 立项单视图：侧栏「Epics」图标 → 列表（真源 notes/epics/*.md）→点首行进详情→「+ New Ticket」弹层
     let epicsOpened = false, modalOpened = false;
-    const epicsIcon = page.locator('[title="立项单"], [aria-label="立项单"]').first();
+    const epicsIcon = page.locator('[title="Epics"], [aria-label="Epics"]').first();
     if (await epicsIcon.isVisible().catch(() => false)) {
       await clickish(epicsIcon);
       epicsOpened = await page.locator('.wb-ep-root').first().waitFor({ state: 'visible', timeout: 8000 })
@@ -401,7 +403,9 @@ try {
           await page.waitForTimeout(600);
         }
         scan = mergeScan(scan, await page.evaluate(SCAN_FN));
-        const createBtn = page.locator('button', { hasText: '新建工单' }).first();
+        // 入口按钮按用户可见标签定位（原「＋ 新建工单」→宿主令 260925 控制台 UI 文案英文化后
+        // 为「＋ New Ticket」，epics.tsx 该按钮无 data-testid，标签即其可感知身份）。
+        const createBtn = page.locator('button', { hasText: /New Ticket/ }).first();
         const btnReady = await createBtn.waitFor({ state: 'visible', timeout: 6000 }).then(() => true).catch(() => false);
         if (btnReady) {
           await clickish(createBtn);
@@ -460,7 +464,7 @@ try {
   }
 
   // 变异子用例：浅档＋故意低对比正文色——看守必须咬（违例>0=断言在咬）
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await page.addStyleTag({ content: cssVarsBlock(TOKEN_SETS.mutation) });
   await dismissNotice(page);
   await openBoard(page);

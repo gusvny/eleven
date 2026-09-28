@@ -235,7 +235,7 @@ try {
 
   // T1 子用例：light / dark / fallback-only（零注入）/ legacy（旧平台 bg-base 兜底链，t260907-03）
   for (const leg of ['light', 'dark', 'fallback', 'legacy']) {
-    await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+    await bench.goto(page, { waitUntil: 'domcontentloaded' });
     const set = TOKEN_SETS[leg];
     if (set) await page.addStyleTag({ content: cssVarsBlock(set) });
     await dismissNotice(page);
@@ -314,7 +314,7 @@ try {
   }
 
   // T2 变异子用例：浅档＋故意低对比正文色——看守必须咬（违例>0=断言在咬）
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await page.addStyleTag({ content: cssVarsBlock(TOKEN_SETS.mutation) });
   await dismissNotice(page);
   await openBoard(page);

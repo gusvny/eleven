@@ -1,11 +1,13 @@
 // sc_ticket_detail_panel.mjs — t260905-07 场景①：工单详情下钻面板用户可感知面（隔离台浏览器真点）。
 //
 // intent（灰盒，用户可感知行为；工单验收①② + gen2 方案改动清单 6/7/9 + review 三轮口径）：
-//   工单列表点行=详情面板（宿主看进度的主入口）：行点击开详情抽屉，四块观测数据在场——
-//   阶段时间线/最近交接/门与签字记录/工作流快照要点（数据=既有 tickets/<id> snapshot 直读，
-//   零新路由零新状态面）。KI-019 触及面（timeline 扁平可乱序到达）的呈现口径在此钉死：
-//   乱序输入按 at 升序归位渲染，缺 at 条目沉底带「时间缺失」标注——本场景钉呈现口径，
-//   不声称修复 KI-019 数据模型（缺轮次/并行维度属引擎面，写集外）。
+//   工单列表点行=详情面板（宿主看进度的主入口）：行点击开详情抽屉（.wb-drawer 在场）。
+//   契约变更留痕（260925 t260925-18 收口 645cc62，本场景 260928 随 main 红对齐）：
+//   原意图「抽屉内四块观测数据在场——阶段时间线/最近交接/门与签字记录/工作流快照要点
+//   （data-wb-digest=…，KI-019 乱序归位/缺 at 沉底口径）」**已被产品契约取代**——该折叠
+//   面板（.wb-d2-snapshot）与四区块整体移除（E3「底部六区块移除」），移除面之反面归
+//   t260925-18-ui-english-spec-markdown E3 专守；本场景相应 9 条子用例注销（见 T5 段注），
+//   不重复该 intent。KI-019 数据模型面（缺轮次/并行维度）本就不属本场景写集。
 //   无标题老票（t260903-10 现场）列表行显示正文首句、不裸编号（首句截断口径：含首句、
 //   不含第二句）；数据通道=enrich=progress 既有链路加派生字段 title_or_first（show body
 //   裁句，零新请求；title 非空票跳过裁剪=实现声明口径，本场景只硬钉无标题票的值）——
@@ -16,10 +18,7 @@
 //   - 行卡展示标题 span.wb-card-title 的 data-wb-row-title 属性（值=展示标题，
 //     data-title-src=title/first/id 源标注；与 run_scenarios 注册文本 data-wb-*
 //     契约一致）；
-//   - 详情抽屉 .wb-drawer；快照要点折叠面板 .wb-d2-snapshot（summary=「快照要点…」），
-//     四区块容器 data-wb-digest="workflow|timeline|handoffs|signatures"（注册契约锚）；
-//     timeline 行 data-wb-tl-at=排序键（升序断言面）、缺 at 条目 data-untime=true
-//     且渲染「时间缺失」。
+//   - 详情抽屉 .wb-drawer（现存契约锚）。
 //   实现落地后本场景应在 3199 隔离台全绿；playwright-core 或隔离台依赖缺失=ENV_FAIL
 //   （exit 2，KI-036 家族，环境红不假绿、不静默放行）。
 //
@@ -30,8 +29,8 @@
 //   T2 无标题票行卡标题=首句（含首句、不含第二句、非裸编号）；有题票显示标题原文。
 //   T3 enrich=progress 契约：t260903-10 的 title_or_first=正文首句（含句读符）。
 //   T4 行点击 → 详情抽屉开合（.wb-drawer 在场）。
-//   T5 快照要点四区块：点开折叠面板 → 四 data-block 区块在场；timeline 乱序归位
-//      （s2 早条目先于 s3 晚条目、时间缺失条目沉底）；交接/门与签字/工作流要点内容可达。
+//   T5（注销）快照要点四区块：原断四 data-wb-digest 区块在场 + timeline 乱序归位 +
+//      交接/门与签字/工作流内容可达——产品随 t260925-18 移除该面，子用例注销（见 T5 段注）。
 //   T6 零写 API：行点击+抽屉打开全程写端点请求=0。
 //   T7 红线：端口 ≠ 3099/7233；finally 回收进程树/浏览器/临时目录。
 //
@@ -126,7 +125,7 @@ const clickish = async (page, loc) => {
   catch { await loc.evaluate((el) => el.click()).catch(() => {}); }
 };
 const gotoBoard = async (page) => {
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   try { await board.click({ timeout: 4000 }); } catch { await board.evaluate((el) => el.click()).catch(() => {}); }
@@ -198,52 +197,18 @@ try {
   record('dp/row-opens-drawer', drawerVisible, '行点击后详情抽屉在场（.wb-drawer）');
   await page.screenshot({ path: join(OUT_DIR, 'detail-panel-open.png') }).catch(() => {});
 
-  // T5 快照要点四区块（验收①渲染面）+ KI-019 乱序呈现口径
-  if (drawerVisible) {
-    const drawer = page.locator('.wb-drawer');
-    await clickish(page, drawer.locator('.wb-d2-snapshot > summary').first());
-    const snap = drawer.locator('.wb-d2-snapshot');
-    for (const k of ['workflow', 'timeline', 'handoffs', 'signatures']) {
-      record(`dp/digest-${k}`, await snap.locator(`[data-wb-digest="${k}"]`)
-        .first().isVisible().catch(() => false), `区块 data-wb-digest="${k}" 在场`);
-    }
-    {
-      const rows = await snap.locator('[data-wb-digest="timeline"] [data-wb-tl-at]')
-        .evaluateAll((els) => els.map((e) => ({
-          at: e.getAttribute('data-wb-tl-at') || '',
-          untime: e.getAttribute('data-untime') === 'true',
-          stage: e.getAttribute('data-wb-tl-stage') || '',
-        }))).catch(() => []);
-      const timed = rows.filter((r) => !r.untime && r.at !== '').map((r) => Number(r.at));
-      const asc = timed.every((v, i) => i === 0 || timed[i - 1] <= v);
-      const stageOrderOk = timed.length === 2
-        && rows.filter((r) => !r.untime).map((r) => r.stage).join(',') === 's2,s3';
-      record('dp/digest-timeline-order',
-        timed.length === 2 && asc && stageOrderOk,
-        `data-wb-tl-at 升序=${JSON.stringify(timed)}（乱序注入 s3 晚/s2 早 → 归位 s2 先；KI-019 呈现口径）`);
-      const untimed = rows.filter((r) => r.untime);
-      record('dp/digest-timeline-missing-at-sunk',
-        untimed.length === 1 && rows[rows.length - 1]?.untime === true
-          && (await snap.locator('[data-wb-digest="timeline"]').innerText().catch(() => '')).includes('时间缺失'),
-        `缺 at 条目沉底（末位）且带「时间缺失」标注：untime 数=${untimed.length}`);
-    }
-    {
-      const handoffs = await snap.locator('[data-wb-digest="handoffs"]').innerText().catch(() => '');
-      record('dp/digest-handoffs-content', handoffs.includes('developer') && handoffs.includes('integration'),
-        '最近交接区块含 developer → integration 交接记录');
-      const gates = await snap.locator('[data-wb-digest="signatures"]').innerText().catch(() => '');
-      record('dp/digest-gates-content',
-        gates.includes('签字') && gates.includes('gen0') && gates.includes('门') && gates.includes('核验') && gates.includes('pass'),
-        '门与签字区块含人门签字（gen0/approved）与程序门（核验/pass）');
-      const wf = await snap.locator('[data-wb-digest="workflow"]').innerText().catch(() => '');
-      record('dp/digest-workflow-content', wf.includes('t260903-10') && wf.includes('s2') && wf.includes('修订'),
-        '工作流快照要点含工单号、当前段与修订轮数');
-    }
-  } else {
-    record('dp/digest-blocks', false, '抽屉未开，四区块渲染子用例无法执行（T4 已红）');
-  }
-
-  // T6 零写 API（行导航纯导航；「没看过就签了」危害面）
+  // T5 快照要点四区块：**已随 t260925-18 契约变更注销**（该票 260925 收口 645cc62）。
+  //   原意图（本场景立项时）：抽屉内 `.wb-d2-snapshot` 折叠面板里的四块观测数据
+  //     ——data-wb-digest="workflow|timeline|handoffs|signatures"，含 KI-019 呈现口径
+  //     （timeline 乱序按 at 升序归位、缺 at 条目沉底带「时间缺失」标注）。
+  //   新契约（t260925-18 票面 E3「底部六区块移除」，已入 main）：该折叠面板与四区块
+  //     **整体不再渲染**——产品源码与构建产物 grep `data-wb-digest` / `wb-d2-snapshot`
+  //     均 0 命中；移除面之反面（这些区块不得在抽屉出现）由场景
+  //     t260925-18-ui-english-spec-markdown E3 专守，本场景不重复该 intent（integration
+  //     纪律：同一意图已有用例覆盖时不另起）。故此处**注销**这组子用例——
+  //     不是放宽以求绿：所断言的 UI 已不存在，硬留即永久假红且会把诊断引向幽灵缺陷。
+  //   原 9 条子用例与该面板同进退，注销清单见本文件头注 T5 行。
+// T6 零写 API（行导航纯导航；「没看过就签了」危害面）
   record('dp/zero-write-api', writeApis.length === 0,
     writeApis.length ? `写端点被触发：${writeApis.slice(0, 3).join(' | ')}` : '全程写端点请求=0');
 } catch (e) {

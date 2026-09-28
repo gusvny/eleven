@@ -121,7 +121,7 @@ try {
     const u = r.url();
     if (u.includes('/api/wf/docs/')) docReqs.push(u);
   });
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   await page.waitForTimeout(600);
 
@@ -148,7 +148,10 @@ try {
   // ——全局 aria-label 序数会被组内 svg 错位（本台实证：nth(1)=夹具甲的 svg，点击冒泡到
   // 夹具甲 span=空转假绿）；组头 hasText 找图标 + span 标签限定双保险，消去序数与装饰
   // 节点两类错位。.wb-group-head 仅作导航定位不作断言锚。
-  const docsIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="文档"]');
+  // 入口钉 aria-label（无障碍名=入口用户可感知契约本身；宿主令 260925 控制台 UI 文案一律
+  // 英文后取值 "Docs"，迁移前旧值为「文档」）；限定 span 是为排除 ProjectIcon svg 的同名
+  // aria-label（project-icons.tsx role=img 恒同值）。
+  const docsIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="Docs"]');
   const boardIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="Tickets"]');
   const projKeyOf = () => page.evaluate(() => document.querySelector('[data-wb-docs-root]')?.getAttribute('data-wb-doc-project-key') ?? null);
   const waitProjKey = (want, timeout = 8000) => page.waitForFunction(
@@ -165,7 +168,7 @@ try {
       await page.waitForTimeout(500);
     }
     if (!iconSeen) {
-      record('ui/entry-present', 'fail', '夹具甲组「文档」图标不在场（入口面由 t260905-06-doc-entry-present 专守，本场景链路无从走起）');
+      record('ui/entry-present', 'fail', '夹具甲组 aria-label="Docs" 图标不在场（入口面由 t260905-06-doc-entry-present 专守，本场景链路无从走起）');
       summarize();
     }
     await docsIconOf("夹具甲").click();

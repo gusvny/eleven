@@ -26,7 +26,7 @@
 // 语义 testid 锚）、KI-055（真机计算样式断言+bundle 锚，防台面绿真机红）、t260910-04 R3/
 // KI-008（失败保快照不吞空列表）。
 
-import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub } from '../t260904-17/lib_fix17.mjs';
+import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub, benchAuthUrl } from '../t260904-17/lib_fix17.mjs';
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -46,6 +46,7 @@ try {
   writeProjectEntry(projectsRoot, 'fixture-beta', '夹具乙', ['/tmp/fx-beta'])
   bench = await bootConsole(projectsRoot, makeTicketStub())
   BASE = bench.base
+  await benchAuthUrl(bench) // dsh 会话门：先拿带 token 首页地址（拿不到=ENV_FAIL exit 2），否则首页 401 无 DOM
   teardownOnExit(bench.teardown)
 } catch (e) {
   console.log(`[ENV_FAIL] stage console 不可得：${String(e).slice(0, 200)}`)
@@ -196,7 +197,11 @@ function buildContract() {
 // ---------------------------------------------------------------- S1 真浏览器
 
 function consoleHealthy() {
-  return fetch(`${BASE}/`, { signal: AbortSignal.timeout(5000) }).then(r => r.ok).catch(() => false)
+  // 首页受 dsh 浏览器会话门保护（匿名 GET / 恒 401）：探带 token 首页地址——
+  // 200（cookie 已兑换）与 303（token 可兑换）都算台面在位。
+  const url = bench.authUrl ?? `${BASE}/`
+  return fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) })
+    .then(r => r.status === 303 || r.ok).catch(() => false)
 }
 
 function mainRepoRoot() {
@@ -271,7 +276,7 @@ async function runBrowser(pw, browser) {
     const pageErrors = []
     const page = await ctx.newPage()
     page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)))
-    await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+    await bench.goto(page, { waitUntil: 'networkidle' })
     await page.waitForTimeout(3000)
     await dismissOverlays(page)
 
@@ -361,8 +366,11 @@ async function runBrowser(pw, browser) {
     const rowText = await insCardA.innerText().catch(() => '')
     const missFields = [
       ['行1 标题「巡检 fixture-alpha · 期 20260915」', rowText.includes('巡检 fixture-alpha · 期 20260915')],
-      ['行2 等你签字', /等你签字/.test(rowText)],
-      ['行2 发现数 高1/中2/低0', /发现\s*高1\/中2\/低0/.test(rowText)],
+      // 行2 的**界面标签**随宿主令 260925 英文化（现取值「Awaiting your signature ·
+      // findings H1/M2/L0」；旧中文「等你签字 · 发现 高1/中2/低0」已退役）；行1 标题仍是
+      // 引擎数据（不译）——本子用例=界面字段与端点数据一致，两个面分别锚。
+      ['行2 等你签字', /Awaiting your signature|等你签字/.test(rowText)],
+      ['行2 发现数 H1/M2/L0', /findings\s*H1\/M2\/L0|发现\s*高1\/中2\/低0/.test(rowText)],
     ].filter(([, good]) => !good).map(([label]) => label)
     record('S1 row-fields', missFields.length ? 'fail' : 'pass',
       missFields.length ? `行文本缺字段：${missFields.join('；')}；text=${rowText.replace(/\s+/g, ' ').slice(0, 160)}` : '行1 标题+行2 等你/发现数与端点一致')
@@ -374,7 +382,9 @@ async function runBrowser(pw, browser) {
     const fbText = fbHeadOk ? await fbHead.innerText().catch(() => '') : ''
     // 绑浅：老票「不在任何项目组」+ 兜底组头在场即可（wrapper 形态不锚——走爬认不出
     // 无头 wrapper 的实现变体时不误伤，落错组才是用户可感知缺陷）。
-    const fbOk = fbHeadOk && /巡检/.test(fbText)
+    // 兜底组名=INSPECTION_ROW_BADGE（host/inspection-face.ts，260925 后取值 'Inspection'，
+    // 旧中文「巡检」已退役）；中英双accept，判据仍是「兜底组头在场且点名该类」。
+    const fbOk = fbHeadOk && /巡检|Inspection/.test(fbText)
       && ownerUn !== 'absent' && ownerUn !== PROJ_A && ownerUn !== PROJ_B
     record('S1 fallback-group', fbOk ? 'pass' : 'fail',
       fbOk ? `兜底组在场（head 含「巡检」），老票 ${INS_UN} 不在任何项目组（owner=${ownerUn}）`

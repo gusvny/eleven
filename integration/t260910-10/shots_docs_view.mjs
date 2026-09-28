@@ -56,7 +56,7 @@ try {
 let fail = 0;
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   await page.waitForTimeout(500);
   const docBtn = page.locator('[aria-label="文档"], [title="文档"]').first();

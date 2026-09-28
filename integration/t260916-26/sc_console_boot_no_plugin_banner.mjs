@@ -31,7 +31,7 @@
 //
 // 三态（t260904-12）：末行 SUMMARY pass/fail/env_fail/na；fail>0 或全 na=exit 1；
 // env_fail>0=exit 2。dsh 缺席/起台失败/playwright 缺失=ENV_FAIL 点名（KI-036 家族）。
-import { makeTicketStub, teardownOnExit, loadPlaywright, dismissNotice, makeResults, makeRegistryRoot, writeProjectEntry } from '../t260904-17/lib_fix17.mjs';
+import { makeTicketStub, teardownOnExit, loadPlaywright, dismissNotice, makeResults, makeRegistryRoot, writeProjectEntry, gotoConsole } from '../t260904-17/lib_fix17.mjs';
 import { bootLaneConsole } from './lib_t260916_26_bench.mjs';
 import path from 'node:path';
 
@@ -81,7 +81,8 @@ let browser
 try {
   browser = await launchBrowser()
   const page = await browser.newPage()
-  await page.goto(bench.base, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  // 本台经 lib_t260916_26_bench 自举（同 bootConsole 形状，带 tmpHome）：走共享 token 门跳转
+  await gotoConsole(page, bench, { waitUntil: 'domcontentloaded', timeout: 30000 })
   await page.waitForTimeout(5000) // 壳层首屏
   await dismissNotice(page)
   // dsh 首跑 API key 向导（本台无凭据时出现）——「Configure later」关掉，不挡走查。
@@ -122,7 +123,9 @@ try {
   // 渲染出显式状态（正常头「模 型」或 API 未挂载显式错误框）即算可用，空白才算红
   try {
     const routesIcon = page.locator('.wb-group-head', { hasText: '夹具甲' })
-      .locator('span[aria-label="模型路由"]')
+      // 入口钉 aria-label（无障碍名=入口用户可感知契约本身；宿主令 260925 控制台 UI 文案
+      // 一律英文后取值 "Model Routes"，迁移前旧值为「模型路由」）。
+      .locator('span[aria-label="Model Routes"]')
     // 点击预算 20s（t260916-26 implement gen3 加固）：图标在 workbench 板面数据
     // 加载后才渲染，闸内并发 herd（concurrency=4）下 8s 预算两度超时（单跑同树
     // 两跑全绿=负载抖动非语义红，registry load-flake 家族同型）。预算不是断言

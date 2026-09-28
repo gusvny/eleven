@@ -156,14 +156,16 @@ try {
     const u = r.url();
     if (u.includes('/api/wf/docs/')) docReqs.push(u);
   });
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   await page.waitForTimeout(600);
 
   const rootSel = page.locator('[data-wb-docs-root]');
   const items = rootSel.locator('[data-wb-doc-item]');
 
-  const docIcon = page.locator('[aria-label="文档"]').first();
+  // 入口钉 aria-label：无障碍名=入口**用户可感知契约本身**（宿主令 260925 控制台 UI 文案
+  // 一律英文后取值为 "Docs"，迁移前旧值为「文档」），非实现细节，故钉英文原文。
+  const docIcon = page.locator('[aria-label="Docs"]').first();
   // 入口探针=耐心等待而非单点取样（t260913-02 arbitrate 实证：大跑负载下左列渲染慢，
   // 固定 600ms 单点取样把「还没渲染完」记成「图标不在场」——条目自带注释也写明这是
   // 入口面，由 t260905-06-doc-entry-present 专守；同一断言两处写法，单点取样这处会假红）。
@@ -174,7 +176,7 @@ try {
     await page.waitForTimeout(500);
   }
   if (!docIconSeen) {
-    record('ui/entry-present', 'fail', '「文档」图标不在场（入口面由场景 t260905-06-doc-entry-present 专守，本场景链路无从走起）');
+    record('ui/entry-present', 'fail', 'aria-label="Docs" 图标不在场（入口面由场景 t260905-06-doc-entry-present 专守，本场景链路无从走起）');
     summarize();
   }
   await docIcon.click();

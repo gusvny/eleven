@@ -13,8 +13,9 @@
 //   T0 自举隔离台（lib_fix17 复用：临时注册表根+夹具项目+FIX17 桩；真库 docs/notes
 //      即泳道仓根 committed 内容，服务端 DEFAULT_REPO 直读——不写仓根防污染）。
 //      playwright 四路探测（缺失=env_fail）。
-//   T1 入口在场：左列存在 [aria-label="文档"] 图标且 title=「文档」；
-//      [aria-label="知识库"] 不在场（旧提法退役的入口面）。
+//   T1 入口在场：左列存在 [aria-label="Docs"] 图标且 title="Docs"
+//      （英文=宿主令 260925 控制台 UI 文案英文后的当前契约取值，原为「文档」）；
+//      旧中文 aria-label（「知识库」/「文档」）均不在场（旧提法退役的入口面）。
 //   T2 键盘可达：图标 .focus() 成功（可聚焦性）→ keyboard Enter →
 //      中列发起 GET /api/wf/docs/tree?scope=docs 且 200（目录加载的用户可感知面）。
 //      并发载荷下该子用例曾间歇红（260911 仲裁实证：空闲 6/6 绿/请求 105ms，争抢下 1/3 红）
@@ -69,19 +70,24 @@ try {
     if (r.url().includes('/api/wf/docs/tree')) docTreeHits.push({ url: r.url(), status: r.status() });
   });
 
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   await page.waitForTimeout(500);
 
-  // T1 入口在场（公开契约：方案承诺 title/aria-label=「文档」）
-  const docIcon = page.locator('[aria-label="文档"]').first();
+  // T1 入口在场（公开契约：方案承诺「文档」入口那枚图标，title/aria-label 一致）。
+  // 钉英文原文的理由（宿主令 260925：控制台 UI 界面文案一律英文）——aria-label/title
+  // 就是该入口**用户可感知的可见契约本身**（无障碍读屏名），不是实现细节；英文
+  // "Docs" 是该契约的当前取值，真源=sidebar.tsx 视图入口行（原「文档」=迁移前旧取值）。
+  const docIcon = page.locator('[aria-label="Docs"]').first();
   const present = await docIcon.isVisible().catch(() => false);
-  record('entry/icon-present', present, present ? 'aria-label=「文档」图标在场' : '左列未见 aria-label=「文档」图标（入口缺席或未实现）');
+  record('entry/icon-present', present, present ? 'aria-label="Docs" 图标在场' : '左列未见 aria-label="Docs" 图标（入口缺席或未实现）');
   if (present) {
     const title = await docIcon.getAttribute('title');
-    record('entry/title', title === '文档', `title=${String(title)}`);
-    const oldIcon = await page.locator('[aria-label="知识库"]').count();
-    record('entry/old-icon-gone', oldIcon === 0, `aria-label=「知识库」图标计数=${oldIcon}（应为 0）`);
+    record('entry/title', title === 'Docs', `title=${String(title)}`);
+    // 旧提法退场：迁移后「知识库」与「文档」两枚旧中文 aria-label 都必须清零
+    // （同位不同名=同一入口，旧名在场即回归）；计数判据比单名更严，不削弱原意图。
+    const oldIcon = await page.locator('[aria-label="知识库"], [aria-label="文档"]').count();
+    record('entry/old-icon-gone', oldIcon === 0, `旧中文 aria-label（知识库/文档）图标计数=${oldIcon}（应为 0）`);
   }
 
   if (present) {

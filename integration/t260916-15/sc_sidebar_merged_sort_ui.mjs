@@ -36,7 +36,7 @@
 // 碰巧等于期望序，排序没实现断言也会绿（断言自我失效形态）。时间戳全用引擎单位=秒
 // （base.py _now_epoch；消费点归一单点=toMillis），四行 ts 互异拉开 tier 与级内序两面。
 
-import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub } from '../t260904-17/lib_fix17.mjs';
+import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub, benchAuthUrl } from '../t260904-17/lib_fix17.mjs';
 import { readFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -53,6 +53,7 @@ try {
   writeProjectEntry(projectsRoot, 'fixture-alpha', '夹具甲', ['/tmp/fx-alpha'])
   bench = await bootConsole(projectsRoot, makeTicketStub())
   BASE = bench.base
+  await benchAuthUrl(bench) // dsh 会话门：先拿带 token 首页地址（拿不到=ENV_FAIL exit 2），否则首页 401 无 DOM
   teardownOnExit(bench.teardown)
 } catch (e) {
   console.log(`[ENV_FAIL] stage console 不可得：${String(e).slice(0, 200)}`)
@@ -201,7 +202,11 @@ function buildContract() {
 // ---------------------------------------------------------------- S1 真浏览器
 
 function consoleHealthy() {
-  return fetch(`${BASE}/`, { signal: AbortSignal.timeout(5000) }).then(r => r.ok).catch(() => false)
+  // 首页受 dsh 浏览器会话门保护（匿名 GET / 恒 401）：探带 token 首页地址——
+  // 200（cookie 已兑换）与 303（token 可兑换）都算台面在位。
+  const url = bench.authUrl ?? `${BASE}/`
+  return fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000) })
+    .then(r => r.status === 303 || r.ok).catch(() => false)
 }
 
 function mainRepoRoot() {
@@ -275,7 +280,7 @@ async function runBrowser(pw, browser) {
     const pageErrors = []
     const page = await ctx.newPage()
     page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)))
-    await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+    await bench.goto(page, { waitUntil: 'networkidle' })
     await page.waitForTimeout(3000)
     await dismissOverlays(page)
 
@@ -354,7 +359,9 @@ async function runBrowser(pw, browser) {
       const b = card.querySelector('[data-kind-badge]')
       if (!b) return { id, present: false, why: 'badge-absent' }
       const hidden = getComputedStyle(b).display === 'none'
-      return { id, present: !hidden, text: (b.textContent || '').trim(), why: hidden ? 'display-none' : (b.textContent || '').trim() !== '巡检' ? `text=${(b.textContent || '').trim()}` : '' }
+      // 徽标文案=INSPECTION_ROW_BADGE（server/plugins/workbench/src/host/inspection-face.ts，
+      // 宿主令 260925 界面英文化后取值 'Inspection'，迁移前旧值「巡检」）。
+      return { id, present: !hidden, text: (b.textContent || '').trim(), why: hidden ? 'display-none' : (b.textContent || '').trim() !== 'Inspection' ? `text=${(b.textContent || '').trim()}` : '' }
     }), INSP_IDS)
     const badgeBad = badge.filter(b => !b.present || b.why)
     record('S1 badge-inspection', badgeBad.length ? 'fail' : 'pass',

@@ -48,7 +48,7 @@ try {
   const page = await browser.newPage();
   // 侧栏入口需先有板面活动项目区——先走一遍工单列表入口把项目组点亮。
   for (const leg of ['light', 'dark']) {
-    await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+    await bench.goto(page, { waitUntil: 'domcontentloaded' });
     await page.addStyleTag({ content: cssVarsBlock(TOKEN_SETS[leg]) });
     await dismissNotice(page);
     // 点「文档」视图（侧栏项目组内图标，aria-label 确定锚）。

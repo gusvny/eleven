@@ -75,7 +75,7 @@ page.on('pageerror', (e) => consoleErrors.push(String(e)));
 // 隔离台偶发半死（bootConsole 健康判据过了但面没起来——t260905-08 gen2 机械段实锤
 // 21100 导航炸）：首导航失败=台装配环境红，env_fail 点名而非异常抛穿（exit 1 谎报产品红）。
 try {
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await bench.goto(page, { waitUntil: 'domcontentloaded', timeout: 20000 });
 } catch (e) {
   record('bench/first-nav', 'env_fail',
     `隔离台 ${bench.base} 首导航失败（boot 健康判据过但面未起=台装配环境红）：${String(e?.message ?? e).split('\n')[0].slice(0, 140)}`);

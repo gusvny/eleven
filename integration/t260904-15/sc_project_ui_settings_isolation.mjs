@@ -51,7 +51,7 @@ const newPage = async (bench) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissShellNotice(page);
   await page.waitForTimeout(1500);
   return { browser, page };

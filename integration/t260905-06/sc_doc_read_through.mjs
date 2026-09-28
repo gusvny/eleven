@@ -132,14 +132,16 @@ try {
   // 剪贴板权限（复制回归用例）：Chromium 剪贴板 API 需授权；拒绝=该子用例 env_fail 由下方 catch 兜
   await browser.contexts()[0].grantPermissions(['clipboard-read', 'clipboard-write'], { origin: bench.base })
     .catch(() => {});
-  await page.goto(`${bench.base}/`, { waitUntil: 'domcontentloaded' });
+  await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   await page.waitForTimeout(500);
 
-  const docIcon = page.locator('[aria-label="文档"]').first();
+  // 入口钉 aria-label：无障碍名=该入口**用户可感知契约本身**（宿主令 260925 控制台 UI 文案
+  // 一律英文后取值为 "Docs"，迁移前旧值为「文档」）——不是实现细节，故此处钉英文原文。
+  const docIcon = page.locator('[aria-label="Docs"]').first();
   const present = await docIcon.isVisible().catch(() => false);
   if (!present) {
-    record('ui/entry-present', 'fail', '「文档」图标不在场（场景①已钉入口，本场景链路无从走起；实现落地前红属预期）');
+    record('ui/entry-present', 'fail', 'aria-label="Docs" 图标不在场（场景①已钉入口，本场景链路无从走起）');
     summarize();
   }
 
