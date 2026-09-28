@@ -3,7 +3,7 @@
   "template_id": "dev-lane",
   "project": "sandbar",
   "title": "分发形态 v1 设计文档：init 真源＋容器整栈（mac 首发）",
-  "user_request": "做什么：写 docs/design/sandbar分发形态v1.md，定稿两档分发形态——①仓＋init 脚本（开发者/贡献者档）：install.sh 规格（幂等预检人话报错/venv/家目录接线只补缺不覆盖/git身份与密钥面/env 模板/收尾自检三探/打印下一步）；②容器整栈（最终用户档）：三服务拓扑（console 唯一对外口 3099＋engine=temporal+worker＋agent 容器内跑）、复用 19 号 docker 台零件（测试台/发行版同源参数化）、四硬问题解法（项目目录 bind mount 同路径/git身份与密钥走 .env 不进镜像/数据 named volume 保升级/init 复用为 entrypoint 单真源）、成本账（uid 映射/属主/用户重启习惯）。\n宿主裁定（260907，写死进文档）：npm 包不做；首发支持=**mac 优先**（fresh-home 验收场景先做 mac 腿），Linux 跟进，Windows 后进（WSL2/NTFS 边角记录在案不承诺）；密钥=用户的不进包；SUYOU_* env 与 /suyou-workbench 前缀迁移列为发布前置债。\n验收标准：文档过宿主审；fresh-home 场景规格（起栈→三探→开票→落地全自动）成文；两形态共享 init 真源的结构图清晰。",
+  "user_request": "做什么：写 docs/design/sandbar-distribution-v1.md，定稿两档分发形态——①仓＋init 脚本（开发者/贡献者档）：install.sh 规格（幂等预检人话报错/venv/家目录接线只补缺不覆盖/git身份与密钥面/env 模板/收尾自检三探/打印下一步）；②容器整栈（最终用户档）：三服务拓扑（console 唯一对外口 3099＋engine=temporal+worker＋agent 容器内跑）、复用 19 号 docker 台零件（测试台/发行版同源参数化）、四硬问题解法（项目目录 bind mount 同路径/git身份与密钥走 .env 不进镜像/数据 named volume 保升级/init 复用为 entrypoint 单真源）、成本账（uid 映射/属主/用户重启习惯）。\n宿主裁定（260907，写死进文档）：npm 包不做；首发支持=**mac 优先**（fresh-home 验收场景先做 mac 腿），Linux 跟进，Windows 后进（WSL2/NTFS 边角记录在案不承诺）；密钥=用户的不进包；SUYOU_* env 与 /suyou-workbench 前缀迁移列为发布前置债。\n验收标准：文档过宿主审；fresh-home 场景规格（起栈→三探→开票→落地全自动）成文；两形态共享 init 真源的结构图清晰。",
   "spec": "依据=宿主 260907 三连裁定（仓+init 可/不需要 npm/容器整栈有意思→细讲后→mac 优先）。范围=docs/。红线：设计定稿权归宿主，本文档为提案稿待审。",
   "write_set": ["docs/"],
   "deliverables": "分发形态 v1 设计文档（含 fresh-home 场景规格与发布前置债清单）"

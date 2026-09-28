@@ -6,7 +6,7 @@ let react_jsx_runtime = require("react/jsx-runtime");
 /**
 * markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
 *
-* 支持（docs 知识库设计 §5.1）：
+* 支持（docs knowledge-base-design §5.1）：
 *   - 标题（#~######）、表格（GFM）、围栏代码块（带语法高亮 + 复制按钮）、
 *     块引用、有序/无序列表、分隔线、段落
 *   - 行内：粗体/斜体/删除线、行内代码、链接、图片
@@ -50871,7 +50871,7 @@ function setViewProject(project) {
 * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
 * 数据来自 /sandbar-workbench/api/wf/* 而非会话事件。
 *
-* 页面三区（工单工作流台设计 v0.3 §5/§10）：
+* 页面三区（Ticket Workflow Console Design v0.3 §5/§10）：
 *   ① 台面区：工单卡片网格（id | 工作流 | 阶段进度条 | 当前角色 | 状态色板
 *     running绿/awaiting黄/awaiting-human蓝/blocked红/done灰）+ 状态/工作流/角色筛选。
 *   ② 详情抽屉：泳道图（stages 横排箭头=next，当前高亮，fanout 扇出分叉标注）+
@@ -54813,18 +54813,18 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		if (!detail) return void 0;
 		const hit = wfById[detail.workflow_id];
 		if (hit) return hit;
-		const topo = detail.topology;
-		if (!topo?.nodes?.length) return void 0;
+		const parsed = parseTopology(detail.topology);
+		if (!parsed || !parsed.nodes.length) return void 0;
 		return {
 			id: detail.workflow_id,
-			name: topo.name ?? detail.workflow_id,
+			name: parsed.name ?? detail.workflow_id,
 			lane: "",
-			stages: topo.nodes.map((n) => ({
+			stages: parsed.nodes.map((n) => ({
 				id: n.id,
 				role: n.role ?? "",
 				name: n.label ?? n.id
 			})),
-			topology: topo
+			topology: parsed
 		};
 	}, [detail, wfById]);
 	/** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */

@@ -12,7 +12,7 @@
  * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
  * 数据来自 /sandbar-workbench/api/wf/* 而非会话事件。
  *
- * 页面三区（工单工作流台设计 v0.3 §5/§10）：
+ * 页面三区（Ticket Workflow Console Design v0.3 §5/§10）：
  *   ① 台面区：工单卡片网格（id | 工作流 | 阶段进度条 | 当前角色 | 状态色板
  *     running绿/awaiting黄/awaiting-human蓝/blocked红/done灰）+ 状态/工作流/角色筛选。
  *   ② 详情抽屉：泳道图（stages 横排箭头=next，当前高亮，fanout 扇出分叉标注）+
@@ -92,7 +92,7 @@ import { deriveStageDurations, fmtDur as fmtDurMs, humanWaitTotalMs, stageDurati
 import type { StageDuration } from './lane-durations.ts'
 // t260915-05：真泳道图（拓扑驱动）+ 检查明细区（mock ①③④；渲染器只认节点+边+kind，
 // 标签全部来自拓扑，组件零业务词——fixture-two-step 拓扑对拍锚）。
-import { buildLaneMap, buildChecksDetail } from './lane-map-model.ts'
+import { buildLaneMap, buildChecksDetail, parseTopology } from './lane-map-model.ts'
 import { LaneMap, ChecksDetail } from './lane-map.tsx'
 // t260926-05：巡检报告面纯函数层（asText/套件证据段/泛化 face 行/报告摘要/发现项防御视图）。
 import { asText, suiteSectionView, faceRows, reportDigest, findingView } from './inspection-report-model.ts'
@@ -3976,15 +3976,19 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     if (!detail) return undefined
     const hit = wfById[detail.workflow_id]
     if (hit) return hit
-    const topo = detail.topology as
-      { name?: string; nodes?: Array<{ id: string; label?: string; role?: string }> } | null | undefined
-    if (!topo?.nodes?.length) return undefined
+    // 260928：**畸形输入必须走同一个净化器**。此前这里只判 `topo?.nodes?.length`——
+    // 字符串也有 length，于是 `nodes: 'garbage'`（票面/接缝畸形，真场景 L7b 的夹具形态）
+    // 会一路走到 `topo.nodes.map(...)` 抛 TypeError：整个详情面**崩成不可渲染**，而不是
+    // 按设计回落线性步骤条。改用 lane-map-model 的 parseTopology（它逐字段校验 id/label/
+    // kind、去重、拒绝非数组），与泳道图模型同一个净化单源，绝不猜拓扑。
+    const parsed = parseTopology(detail.topology)
+    if (!parsed || !parsed.nodes.length) return undefined
     return {
       id: detail.workflow_id,
-      name: topo.name ?? detail.workflow_id,
+      name: parsed.name ?? detail.workflow_id,
       lane: '',
-      stages: topo.nodes.map(n => ({ id: n.id, role: n.role ?? '', name: n.label ?? n.id })),
-      topology: topo,
+      stages: parsed.nodes.map(n => ({ id: n.id, role: n.role ?? '', name: n.label ?? n.id })),
+      topology: parsed,
     } as Wf
   }, [detail, wfById])
   /** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */

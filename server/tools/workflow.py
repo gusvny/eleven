@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """workflow —— 工单工作流模板（server/workflows/<id>.yaml，只读热插拔）。
 
-模板=阶段链：不同活流程不同，工单只挂实例（工单工作流台设计 §8/§9）。
+模板=阶段链：不同活流程不同，工单只挂实例（Ticket Workflow Console Design §8/§9）。
 丢文件即上线（同 tools_registry 热插拔）。模板是线性单链：
 stages[i].next == stages[i+1].id（末段无 next）；fanout 表示该段可扇出多 agent
 并行，不是流程分叉。

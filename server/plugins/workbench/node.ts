@@ -1,7 +1,7 @@
 /**
  * sandbar-workbench —— 工单工作流台的 dsh UI 插件（宿主半 / node）。
  *
- * 职责：在 dsh 自己的 webServer 上挂 /sandbar-workbench/api/wf/*（工单工作流台设计
+ * 职责：在 dsh 自己的 webServer 上挂 /sandbar-workbench/api/wf/*（Ticket Workflow Console Design
  * v0.3 §5/§9），供本插件的浏览器半（lib/client.js，设置面板「工单台」分区）同源
  * fetch 使用。独立命名，不寄生 sandbar-admin-ui 壳：
  *

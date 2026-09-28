@@ -55,7 +55,7 @@
 
 ## 与既有设计文档的关系
 
-suyou 仓《docs/design/右栏会话入口与hero定制设计.md》§2/§4 的「会话跟项目
+suyou 仓《docs/design/sidebar-session-entry-and-hero-design.md》§2/§4 的「会话跟项目
 走、不做全局会话池」列表口径，就 tab 行显示一项**废止**（suyou 仓对本仓
 只读不回写，以本记录为真源）。账册仍按项目登记归属（`project` 字段），
 「只登记 UI 主动打开/新建」的记账口径不变。

@@ -235,9 +235,9 @@ providers / knowledge 现有 smoke 零回归；生产 7233/8233/3099 监听面�
 
 - docs/ops/：《项目生命周期操作手册》新增（add/remove/purge 步骤、红线、
   故障口径；含 UI 操作路径；或并入既有 ops 文档，随票定）。
-- docs/design/项目管理UI设计.md（新增，票③交付）：入口/交互/降级与确认口径
+- docs/design/project-management-ui-design.md（新增，票③交付）：入口/交互/降级与确认口径
   （按设计文档写作指南四段）。
-- docs/design/sandbar项目接入契约v1.md：①a 增补「摘除与再接入」+「单根目录
+- docs/design/sandbar-project-onboarding-contract-v1.md：①a 增补「摘除与再接入」+「单根目录
   工具口径」节 + 变更记录一行（真源已转正本仓，v1.8 之后记行）。
 - docs/terminology.md：补「摘除 / 退役 / 再接入」词条。
 - notes/epics/project-lifecycle.md：本档（状态与归档快照随收尾固化）。

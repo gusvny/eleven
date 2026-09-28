@@ -5,7 +5,7 @@
 > gen1 conditional 放行（附条 V1-V5 已全部吸收）。本单是 **sandbar 仓代码票的
 > 硬输入**——代码落点 `/Users/user/Documents/sandbar`（suyou 仓写集之外，
 > KI-021 写集冻结无扩写集机制，故代码归新票，起票方式见 §6）。
-> 契约面真源已先行落地：`docs/design/sandbar项目接入契约v1.md` v1.7 ⑧节。
+> 契约面真源已先行落地：`docs/design/sandbar-project-onboarding-contract-v1.md` v1.7 ⑧节。
 
 ## 1. 交付物（代码票四件，对应工单正文①②③④）
 

@@ -171,7 +171,7 @@ notes/discussions/260904-notes-ui-mock.html。
 
 - **票①（面D＋债清偿，纯 main 侧文档票）**：四份规则文档落字修订（含
   `verified` 元数据豁免条款+agent 信任梯度提示词规则）＋design-doc-sync-
-  t260903-07 债清偿（改 sandbar docs/design/右栏会话入口与hero定制设计.md
+  t260903-07 债清偿（改 sandbar docs/design/sidebar-session-entry-and-hero-design.md
   三条目；⚠ suyou 冻结仓不回写——清偿注记落 sandbar 侧台账）。
 - **票②（面A＋C，引擎票，建议排写集改革拍板后）**：沉淀触发器（票级一问）
   与反向同步闸（收口一问+债登记纪律）进收口流程（dev_lane/acceptance 面）；
@@ -235,7 +235,7 @@ notes/discussions/260904-notes-ui-mock.html。
 
 ## 票① 执行记录（main 侧直管，260904 开工）
 
-- **债清偿**：docs/design/右栏会话入口与hero定制设计.md 三条目（原 L64 目标5／
+- **债清偿**：docs/design/sidebar-session-entry-and-hero-design.md 三条目（原 L64 目标5／
   L70 Stakeholder／L79 Nongoal）按 t260903-07 定稿口径改写——点工单不再切换
   右侧 chat、右侧恒单全局会话、语义与数据不变仅联动下线。suyou 侧债文件
   design-doc-sync-t260903-07.md 冻结不回写，清偿以本记录＋文档本体为准（债亡）。
