@@ -2624,3 +2624,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **处置**：立项 `t260929-07`（写集 `server/plugins/` + `integration/`），要求兼容两形 + 一条**真形状**回归锁
 > （跑真实入口输出喂解析器，Temporal 不可达=ENV_FAIL；桩测试明确不算证据）+ 反证。
 > **通用判据（写进纪律）**：凡集成用例的输入面是桩/夹具，必须至少有一条「真实入口形状」锁，否则该面等于没验。
+
+## KI-153 判据依赖的外部信号**未接线且未在交接里声明** ⇒ 判据空转：守望者的停摆判据与自锁判据在生产里没有输入（260929 实案 t260929-08 立项修复，integration 岗登记；KI-079「说明书与实际入口不符」+ KI-152「桩自证」同族）
+> **实案**：守望者插件（`server/plugins/watchdog/node.ts`）只注入 `io / boardReader / wakeIo / now`；
+> `sessionStat`（会话推进）与 `pendingProvider`（在办请求/自锁）**落到 core.ts 的缺省实现**：
+> `sessionStat → {advanced: null}`、`pendingProvider → {available:false, pending:null, reason:'…未接入…显式 unknown'}`
+> ⇒ 生产里：①`judgeExecutor` 拿不到 sessionProgress ⇒ 谓词恒落 `no_signal`，**「卡住 15 分钟就叫你」这条 epic 头牌判据永不触发**；
+> ②`detectSelfLock` 恒 `unknown` ⇒ 「它在等自己」（设计稿要求不等超时即报）永不触发；
+> ③`engineProbe=null` 时引擎存活由 `board.ok` 推得，而看板读取器缺陷（KI-152）使其恒 false ⇒
+> **健康引擎会被报红线「引擎不可达」（假警）**，同屏 `online` 还是 null（面板显示「未知」而告警说「不可达」）。
+> **共同性质**：这三处都**不是**静默降级（运行时文案诚实：no_signal/unknown 都带原因），但**交接里没有逐信号声明**
+> 「真实源 / 显式 unknown / 未接线」——于是评审与门都以为判据在工作。**这就是本条要记的故障模式。**
+> **处置**：立项 `t260929-08`（写集 `server/plugins/` + `integration/`，与 `t260929-07` 同族）：
+> 逐信号接真实源（宿主 Session API / 会话文件 mtime；请求面走面板自有台账或宿主 pendingInteractions——plan 里选一并说明），
+> **每信号一条真输入锁 + 反证**，并在交接里出逐信号状态表。
+> **通用判据（写进纪律）**：凡「判据」依赖外部信号，交付必须**逐信号声明三态**（真实源 / 显式 unknown+原因 / 未接线），
+> 且每态各有一条锁；**只有真实源那一态允许算「功能已交付」**。运行时文案诚实**不能**替代交接里的三态声明。
+> **本岗反省**：我签 ③ 时读到「不静默降级」的运行时文案就放行了，没做「判据的输入面是否真接上」这一问——
+> 教训：评审判据类交付，必查**输入面**（谁在喂它），不能只看输出面是否诚实。
