@@ -84,7 +84,10 @@
 # /sandbar-watchdog/api/status，绝不重算。headless 无 webServer——面板待机（本来没有页面）。
 # 以裸包名挂载：经 profile/node_modules/sandbar-executor-panel 软链（→
 # ../../plugins/executor-panel）解析，profile-headless 同款软链（260929 宿主打回实证：
-# 只建一条链+漏挂载块=插件永不生效；挂载块与**两条**软链必须同批落）。
+# 只建一条链+漏挂载块=插件永不生效）。**两条链的落法不同**：web 那条在票内提交，
+# headless 那条票内**做不了**——写集粒度 server/profile/ 覆盖不到兄弟目录
+# server/profile-headless/（越界守卫会反复挪走，实案 6 次空转：KI-151），故由
+# integration 岗在 main 侧合并后补（本目录下的链即如此）。
 # 宿主自检（下次控制台重启后）：curl -s -o /dev/null -w '%{http_code}'
 #   http://127.0.0.1:3099/sandbar-executor-panel  期望 200。
 - insert:
