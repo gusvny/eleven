@@ -340,11 +340,18 @@ async function seedFixturesLocked(st, fixturesHost) {
     SANDBAR_TARGET_HOST: `127.0.0.1:${st.ports.temporal}`,
     SANDBAR_NAMESPACE: st.namespace || 'sandbar-test',  // 台回报值优先；回落=契约缺省（t260917-07）
   };
-  const runTool = (argsJson) => spawnSync(py, ['-c',
+  // 260928：工具调用允许**按项目覆盖身份**。为什么必须能覆盖：夹具票建在种子项目
+  // （sp.key，如 seedws）里，而本进程的 env 带着运行票自己的身份
+  // SANDBAR_CALLER_PROJECT=sandbar（引擎 spawn 链注入）——不改的话 ticket.py create
+  // 会被跨项目闸 fail-closed 拒收（实案：`跨项目写操作拒收：调用方项目身份 sandbar 与
+  // 目标票所属项目 seedws 不符`），播种失败 ⇒ 台面夹具缺席 ⇒ 所有依赖夹具的场景一起红
+  // （t260928-13 的 merge 门就卡在这两条共享红上）。声明「调用方=该夹具项目自身」后，
+  // 身份与目标一致，闸如实放行。
+  const runTool = (argsJson, env = toolEnv) => spawnSync(py, ['-c',
     'import sys, json; sys.path.insert(0, "server/tools"); import ticket;'
     + ' print(json.dumps(ticket.run(json.loads(sys.argv[1])), ensure_ascii=False))',
     argsJson],
-    { encoding: 'utf8', env: toolEnv, cwd: WANT_REPO, timeout: 180_000 });
+    { encoding: 'utf8', env, cwd: WANT_REPO, timeout: 180_000 });
   // Ticket ids use the t<yymmdd>-<NN> shape: the chat project tag's ticket
   // reference whitelist only accepts /t\d{6}-\d{2}/ — the old short ids
   // (integfix1/2) are never indexed, so the t02 chip leg was red permanently
@@ -381,12 +388,13 @@ async function seedFixturesLocked(st, fixturesHost) {
     const have = listIds(sp.key);
     for (const fid of sp.ids) {
       if (have.has(fid)) continue;
+      const projEnv = { ...toolEnv, SANDBAR_CALLER_PROJECT: sp.key };
       const createOut = runTool(JSON.stringify({
         op: 'create', project: sp.key, id: fid, workflow: 'dev-lane',
         title: `${FIXTURE_TITLE_PREFIX} ${fid}（勿动）`,
         body: '测试台夹具票：供集成场景行卡/抽屉/tag 断言使用，人手勿操作',
         allow_empty_write_set: true,
-      }));
+      }), projEnv);
       if (createOut.status !== 0) {
         // 并发 ensure 下同票竞建（run K 供给在途竞态修复后，多场景 t=0 齐
         // 调 ensure，播种不再 fire-and-forget）：本方 create 撞上「workflow
