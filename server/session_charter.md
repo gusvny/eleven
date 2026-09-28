@@ -32,17 +32,26 @@
 的工单操作面（自动短票号、notes/ 写集机械闸、每次调用进 admin.log 审计、失败非零退出
 + 结构化错误、裸调用回执带 `entry_hint` 提醒）。
 
+**写操作必须带调用方项目身份 `caller_project`**（260928 实证）：在引擎仓树里跑时，
+cwd 兜底被**故意关掉**（仓树内 cwd 标识的是「被调用的引擎」，不是「调用方会话」），
+身份不声明即被跨项目闸拒收（错误文案：`调用方项目身份未声明（SANDBAR_CALLER_PROJECT 未注入且无显式参数）`）。
+而项目会话**恰恰就跑在引擎仓树里**，所以下列每个写操作都要显式带上它（只读的看板/单票不用）。
+
 - 看板：`$PY $TK '{"op":"list","project":"{{project_key}}"}'`
 - 单票：`$PY $TK '{"op":"show","id":"tXXXXXX-XX"}'`
 - 开票：`$PY $TK '{"op":"create","workflow":"dev-lane","project":"{{project_key}}",
-  "epic":"<立项代号>","title":"…","spec":"…","write_set":["…"]}'`
+  "caller_project":"{{project_key}}","epic":"<立项代号>","title":"…","spec":"…",
+  "write_set":["…"]}'`
   （epic 须先有立项单；票号缺省自动生成——**票号全项目唯一**，撞号就换一个再提）
-- 打回：`$PY $TK '{"op":"rework","id":"…","to_stage":"implement","note":"原因"}'`
+- 打回：`$PY $TK '{"op":"rework","id":"…","caller_project":"{{project_key}}",
+  "to_stage":"implement","note":"原因"}'`
   **合并检查/机械校验红灯打回时，必须显式写 `to_stage`**（缺省=打回当前段=空转一轮）。
-- 签字：`$PY $TK '{"op":"sign","id":"…","by":"<你的身份>","decision":"approve",
-  "gate":"merge","note":"…"}'`（gate 缺省=当前等待的人审段）
-- 重跑本段（blocked 态）：`$PY $TK '{"op":"retry_qc","id":"…","by":"…"}'`
-- 暂停/恢复（段间）：`$PY $TK '{"op":"pause"|"resume","id":"…","by":"…"}'`
+- 签字：`$PY $TK '{"op":"sign","id":"…","caller_project":"{{project_key}}",
+  "by":"<你的身份>","decision":"approve","gate":"merge","note":"…"}'`（gate 缺省=当前等待的人审段）
+- 重跑本段（blocked 态）：`$PY $TK '{"op":"retry_qc","id":"…","caller_project":"{{project_key}}",
+  "by":"…"}'`
+- 暂停/恢复（段间）：`$PY $TK '{"op":"pause"|"resume","id":"…","caller_project":"{{project_key}}",
+  "by":"…"}'`
 
 **调用形式是自己最大的坑**（260910 实证）：`ticket.py` 的 CLI 入口是 260910-06 才补上的，
 在此之前它只是库（无 `__main__`——直接跑它什么都不输出，看起来像“入口静默失败”）；

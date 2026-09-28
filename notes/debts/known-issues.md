@@ -2224,3 +2224,41 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 于是看不到「同一轮里还有没有别的红、各属哪一类（可自动消解 vs 需人工）」。建议：blocked 记名里
 > **逐条列出全部红项 + 红类 + 各自处置**（不改变判定与路由，只改可见性）；另「预演冲突类红自动消解」的
 > 验收文案已按类分开点名（`dev_lane.py:698-703`）。
+
+## KI-146 模板角色集三处分散 + 两处闸口径不一致：server 层拒收未知角色、引擎外置模板加载口只校验「非空字符串」（260928 实核，宿主令登记，integration 岗；KI-079 同族「说明书与实际入口不符」）
+> **实核（可复现）**：`server/tools/workflow.py` 的模板校验对未知角色直接拒收——用 `role="curator"`
+> 的合成模板调该模块的 `validate()`，实测回报
+> `stage s2 未知角色 'curator'（可用: developer/integration/ops/product-operation/artist/dispatcher/editor/proofreader/qa/analyst）`
+> （首次调用先报 `lane 必须 main/worktree`，修正 lane 后复现角色拒收；两次均为登记时实跑）。
+> 该固定表 = 5 个 M10 定稿角色 + 5 个退役兼容 id（`workflow.py:52`），而 `workflow list/show` 与**开票闸同源**
+> （template-faces），故未知角色在这一层必然被拒。
+> **但引擎侧不收口**：`server/engine/project_templates.py` 的类面深检（`_load_class`，约 360–372 行）
+> 只校验每段的 `id/name/role` 是**非空字符串**、`parts ⊆ part_kinds`，**不做成员集校验** ⇒
+> 同一个外置模板**引擎收、server 层拒**。
+> **概念散三处**：`workflow.py` 的 `ROLES`（10 项）、`inspection_flow.py` 的 `AGENT_ROLE_NAMES`
+> （只列 5 个当用角色）、`shared.py` 的 `ROLE_REPORT_ENGLISH_ROLES`（只列 developer/integration）——
+> 角色概念的**单一真源缺位**，加角色须同改三处，必漏。
+> **触发条件与影响**：项目要用内置表里没有的**阶段角色**时（外置模板或新模板）。表现是
+> 「模板能加载/能跑，却在模板列表里看不见或开票被拒」——把人引向错误方向（同族故障的典型后果）。
+> **修法方向（宿主 260928 已定：现在不动，不阻塞 project-executor epic）**：触发时走中间档——
+> ①三处常量收成单一真源；②两处闸口径对齐（引擎侧加载口补成员集校验，或 server 层改为**项目声明式**白名单）；
+> ③允许项目声明**角色别名 → 绑定内置角色**（人设与模型路由可覆盖），不放开全白名单。
+> **回归要求**：一条锁「同一未知角色在两个入口得到一致判定」，并要求加角色时同过两闸。
+
+## KI-147 `TicketWorkflowBase` 事实上无人继承：自述「六个模板的共享基类」、通用主循环 `_main` 全仓无人调用（260928 实核，宿主令登记，integration 岗；KI-079 同族「意图与现实漂移」）
+> **实核**：`grep -rn TicketWorkflowBase server/engine/*.py` 仅三处——`base.py:395`（定义）、
+> `dev_lane.py:611/774`（注释，774 行自认 `stands alone from TicketWorkflowBase (no inheritance, hence its own _breathe)`）、
+> `selfcheck_pause.py:75`（断言**基类**的 MRO 含暂停混入）；`grep -n "def _main"` 仅 `base.py:817` 一处，
+> **没有任何类调用它**。
+> **实际各族继承**：`DevLaneWorkflow` 直接混入 `TicketPauseMixin`/`TicketCrossProjectMixin`（不经基类）；
+> `InspectionPeriodicWorkflow`/`InspectionProduceWorkflow`/巡检 spawner/watcher/`ContentPipelineWorkflow`/
+> `DispatcherScanWorkflow` **全是裸类**（巡检连段间暂停面都没有、跨项目走独立函数 `cross_project_judge`）；
+> 外置模板是第三方类。
+> **影响**：任何「改基类即覆盖全族」的引擎改动都会**以为在基类上、实际无人走到**。本 epic 设计期即被它
+> 误导一次——曾据 `base.py` 自述判断「存在共享事件发射点」，实核后才发现各族各写自己的 timeline
+> （`dev_lane.py:740/766`、`inspection_flow.py:1031/1041/2100/2110`），事件混入因此必须**逐族接线**。
+> **修法方向（二选一）**：①让各族继承该基类（把两个混入收敛回基类，逐族验证 + 一条逐族接线断言）；
+> ②把 `base.py` 自述改成事实（「历史 M11 方案，现存仅两个混入在用」），并在文件头点名
+> 「**新增共享能力不要假设基类会被走到**」。**短期建议 ②**（零风险）；① 是否单独立票由宿主定。
+> **回归要求**：今后任何「共享混入/基类能力」必须附**逐族接线断言**（哪几族真的混入了），
+> 不允许以「基类里有」充数。
