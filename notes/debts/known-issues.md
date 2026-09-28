@@ -2262,3 +2262,37 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 「**新增共享能力不要假设基类会被走到**」。**短期建议 ②**（零风险）；① 是否单独立票由宿主定。
 > **回归要求**：今后任何「共享混入/基类能力」必须附**逐族接线断言**（哪几族真的混入了），
 > 不允许以「基类里有」充数。
+
+## KI-148 事件账「引擎所属项目」判定丢了 `dirs` 守卫：`paths:` 段冒充归属判据 → 机器级开关静默失效（260928 合并后复核实核、宿主任命 main 侧直修，integration 岗登记；KI-079/KI-146 同族「说明书与实际入口不符」＋「借鉴实现丢守卫」）
+> **实核（可复现，票 t260928-13 合并件 `8491724` 出厂版本）**：`server/engine/event_ledger.py`
+> 的 `_find_engine_project_yaml()` 自述按 `audit._dirs_cover_engine` 的**dirs 覆盖引擎仓根**规则定位
+> 「引擎所属项目」，**实际却用「文本里有 `paths:` 行 + 有任意 `- item` 列表项」冒充该守卫**。
+> 后果：按目录名稳定序会选中**任意**恰好带 `paths:` 段的项目——本机实测选中 `dengzhufpv`（字母序在
+> `sandbar` 之前），于是写在 `~/.sandbar/projects/sandbar/project.yaml` 里**完全正确**的
+> `event_ledger: enabled: true` 被忽略，`event_ledger_config()` 返回 `enabled: False`。
+> 并排实证：`audit._engine_project_yaml(root)` → `.../projects/sandbar/project.yaml`；
+> 同参 `event_ledger._find_engine_project_yaml(root)` → `.../projects/dengzhufpv/project.yaml`。
+> **表现形态＝静默失效**：不报错、不记录、不写一行账——「开关写了没生效」与「本来就没开」在盘面
+> 上不可区分（宿主实报面的失败分支「若一行都没有，就是门或声明错了」正是命中此条）。
+> **为什么 24 条单测全绿出厂（本条最该记的教训）**：该票自带的夹具 `_enable()` 把**错误判据写成了
+> 预期**——它写的声明是 `paths:\n  - /somewhere`（`dirs` 压根不指向引擎仓），于是「只要带 paths 段
+> 就算所属项目」在测试里被固化；集成探针 `integration/t260928-13/behavior_probe.py` 用了**同一个松散
+> 形状**。即：**测试与实现同源于一个错误假设 ⇒ 自证式全绿**，L1 与 L2/L3 双双失守。
+> **触发条件**：注册表根下存在目录名排序早于真所属条目、且带 `paths:` 段的项目（本机常态，非畸形输入）；
+> 或真所属条目的 `dirs` 声明发生任何漂移。**同类面排查（全族线索，已跑）**：全仓仅两处实现该判定——
+> `audit.py:160` 的原始版（正确）与本模块镜像版（错）；`grep -rn "cover_engine\|engine_project_yaml\|ENGINE_REPO"`
+> 无第三个实现。**为什么不直接 import audit**：`base.py` 在工作流 `imports_passed_through()` 块里 import
+> `event_ledger`，而 `audit` 不在工作流沙箱 passthrough 清单内（该清单只收项目外置模板模块），拉进来会触发
+> 「Failed validating workflow」（KI-143 同族）⇒ 必须本地镜像，靠一致性锁防漂移。
+> **已修（260928，宿主任命选项 a：main 侧直修，不另立票）**：镜像版按 `audit._dirs_cover_engine` 语义
+> 重写（等值或祖先命中、行级 `#` 注释剥离、非列表行复位），docstring 改成真规则 + 记历史；
+> **夹具同修**（`_enable` 按真规则造声明、新增 `_decoy` 反例、探针改 `owner_yaml()`/`decoy_yaml()`）。
+> **回归（已落，反证做过）**：L1 `test_event_ledger.py` 28 passed，其中新增
+> `test_declaration_in_non_owner_does_not_enable`（非所属项目的声明**不得**启账本）、
+> `test_engine_project_lookup_ignores_decoy_entry`、`test_engine_project_lookup_accepts_ancestor_dir`、
+> `test_resolver_agrees_with_audit`（9 组形状与 audit 版逐条同判 + `ENGINE_REPO` 同源）；
+> L2/L3 `sc_event_ledger_projection` 加 §7b「非所属条目声明不启账本 + 解析器选中真所属条目」。
+> **反证**：把 `event_ledger.py` 换回出厂版本，单测 15 红、场景 2 红（改前是「全绿」）——锁确实抓得住此 bug。
+> **纪律落点**：「借鉴既有实现必须逐项声明带过来/不带＋理由」——本条的「不带」项（dirs 守卫）**未声明、
+> 未替换**，只有 docstring 还在声称它；今后镜像/照搬既有实现，逐项清单要写进票面或代码注释，且
+> **夹具必须来自真环境形状**（用真 `project.yaml` 采样，不手写理想形状），否则测试会把错误假设固化成预期。

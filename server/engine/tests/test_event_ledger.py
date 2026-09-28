@@ -36,16 +36,97 @@ def _isolate(tmp_path, monkeypatch):
 
 
 def _enable(tmp_path):
-    """造一个「引擎所属项目」声明 event_ledger enabled 的注册表（[R1] 解析面走真文件）。"""
+    """造一个「引擎所属项目」声明 event_ledger enabled 的注册表（[R1] 解析面走真文件）。
+
+    260928 复核修复：**dirs 必须真覆盖引擎仓根**。旧夹具写的是 `paths:\\n  - /somewhere`
+    （dirs 指向别处）——它把「只要带 paths 段就算引擎所属项目」这个**错误判据固化成预期**，
+    于是本 bug 在 24 个用例全绿的前提下静默出厂。夹具现在按真规则造（见 `_decoy` 反例）。"""
     root = el._projects_root()
     d = root / 'alpha'
     d.mkdir(exist_ok=True)
     (d / 'project.yaml').write_text(
-        'project: alpha\npaths:\n  - /somewhere\n'
-        'event_ledger:\n  enabled: true\n  keep_days: 14\n  max_mb: 512\n',
+        'schema: v1\n'
+        'project:\n  - key: engine-owner\n    dirs:\n      - %s\n'
+        'paths:\n  - /somewhere\n'
+        'event_ledger:\n  enabled: true\n  keep_days: 14\n  max_mb: 512\n' % el.ENGINE_REPO,
         encoding='utf-8')
     el.reset_config_for_test()
     return root
+
+
+def _decoy(root, name='aaa-decoy', declare=True, dirs='/somewhere/else'):
+    """干扰条目：目录名**字母序更早**、带 `paths:` 段与列表项、dirs **不覆盖**引擎仓根。
+
+    这正是 t260928-13 出厂版本的错误判据会误选的那种条目（实测命中 dengzhufpv）。"""
+    d = root / name
+    d.mkdir(exist_ok=True)
+    body = 'schema: v1\nproject:\n  - key: %s\n    dirs:\n      - %s\npaths:\n  - /somewhere\n' % (
+        name, dirs)
+    if declare:
+        body += 'event_ledger:\n  enabled: true\n  keep_days: 7\n  max_mb: 64\n'
+    (d / 'project.yaml').write_text(body, encoding='utf-8')
+    el.reset_config_for_test()
+    return d
+
+
+def test_engine_project_lookup_ignores_decoy_entry(tmp_path):
+    """干预防线：字母序更早、带 paths 段但不覆盖引擎仓根的条目**不得**被选中。"""
+    root = _enable(tmp_path)
+    _decoy(root)
+    got = el._find_engine_project_yaml(root)
+    assert got == root / 'alpha' / 'project.yaml', '选中了干扰条目：%s' % got
+
+
+def test_engine_project_lookup_accepts_ancestor_dir(tmp_path):
+    """祖先也算覆盖（worktree 在主仓树下时命中的就是这条语义）。"""
+    root = tmp_path / 'projects'
+    d = root / 'owner'
+    d.mkdir(parents=True, exist_ok=True)
+    (d / 'project.yaml').write_text(
+        'project:\n  - key: owner\n    dirs:\n      - %s\npaths:\n  - /somewhere\n'
+        % el.ENGINE_REPO.parent, encoding='utf-8')
+    el.reset_config_for_test()
+    assert el._find_engine_project_yaml(root) == d / 'project.yaml'
+
+
+def test_declaration_in_non_owner_does_not_enable(tmp_path):
+    """**本 bug 的精确回归锁**：声明写在非引擎所属项目里 ⇒ 引擎账本**不得**启用。
+
+    旧实现下这条会红（它认了干扰条目的声明，引擎账本按别人的 keep_days 走）。"""
+    root = el._projects_root()
+    _decoy(root, declare=True)          # 只有干扰条目声明 enabled
+    el.reset_config_for_test()
+    cfg = el.event_ledger_config(projects_root=root)
+    assert cfg['enabled'] is False, '非所属项目的声明被误采纳：%s' % cfg
+    assert cfg['keep_days'] == el.DEFAULT_KEEP_DAYS
+
+
+def test_resolver_agrees_with_audit(tmp_path):
+    """一致性锁：同一组夹具下，本模块解析器与 audit 版**必须选中同一文件**
+    （两处实现不得漂移；本模块刻意不 import audit，靠本锁防分裂）。"""
+    import audit as au
+    root = _enable(tmp_path)
+    _decoy(root)
+    (root / 'zzz-worktree-owner').mkdir(exist_ok=True)
+    (root / 'zzz-worktree-owner' / 'project.yaml').write_text(
+        'project:\n  - key: wt\n    dirs:\n      - %s\npaths:\n  - /x\n' % el.ENGINE_REPO,
+        encoding='utf-8')
+    assert el.ENGINE_REPO == au.ENGINE_REPO, '引擎仓根口径分歧'
+    assert el._find_engine_project_yaml(root) == au._engine_project_yaml(root)
+    # 解析器口径逐条对齐（形状按真实 project.yaml：dirs: 独占一行、列表项缩进）
+    for text in (
+            'schema: v1\nproject:\n  - key: k\n    dirs:\n      - %s\n' % el.ENGINE_REPO,
+            'schema: v1\nproject:\n  - key: k\n    dirs:\n      - %s\n' % el.ENGINE_REPO.parent,
+            'schema: v1\nproject:\n  - key: k\n    dirs:\n      - /elsewhere\npaths:\n  - /x\n',
+            'project: alpha\npaths:\n  - /somewhere\n',           # 旧夹具形状：两版都不认
+            'project:\n  - key: k\n    dirs:\n      - /a\n    other: x\n',
+            'project:\n  - key: k\n    dirs:\n      - /a\n      - %s\n' % el.ENGINE_REPO,
+            'project:\n  - key: k\n    dirs:\n      - /x  # dirs 在别的条目里\n',
+            'project:\n  - dirs: inline-not-a-block\n',
+            'project:\n  - key: k\n    dirs:\n      - /a  # 注释吃掉\n',
+            ''):                                                    # 空文件不炸
+        assert el._dirs_cover_engine(text) == au._dirs_cover_engine(text), \
+            '口径分歧：%r' % text
 
 
 def _payload(tmp_path, seq=1, run='run-1', ticket='t1', project='alpha', **kw):
@@ -200,8 +281,9 @@ def test_malformed_config_block_falls_back_per_key(tmp_path):
     d = root / 'alpha'
     d.mkdir(exist_ok=True)
     (d / 'project.yaml').write_text(
+        'schema: v1\nproject:\n  - key: alpha\n    dirs:\n      - %s\n'
         'paths:\n  - /x\nevent_ledger:\n  enabled: true\n'
-        '  keep_days: banana\n  max_mb: -3\n', encoding='utf-8')
+        '  keep_days: banana\n  max_mb: -3\n' % el.ENGINE_REPO, encoding='utf-8')
     el.reset_config_for_test()
     cfg = el.event_ledger_config(root)
     assert cfg['enabled'] is True                 # 合法键生效

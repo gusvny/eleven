@@ -78,6 +78,31 @@ def read_lines(path: Path):
             path.read_text("utf-8").splitlines() if x.strip()]
 
 
+def owner_yaml(extra=""):
+    """A registry entry that GENUINELY owns the engine repo.
+
+    Config is engine-project-scoped (scope ⑧), and "engine project" means an
+    entry whose `dirs` cover the engine repo root (audit._dirs_cover_engine
+    semantics) — NOT "any entry carrying a paths: block". Writing the loose
+    shape here is how t260928-13 shipped a resolver bug behind 24 green unit
+    tests: the fixture encoded the wrong predicate. Keep this exact.
+    """
+    return ("schema: v1\n"
+            "project:\n  - key: sandbar-demo\n    dirs:\n      - %s\n"
+            "paths:\n  - /tmp/sandbar-demo\n%s" % (ROOT, extra))
+
+
+def decoy_yaml():
+    """A non-owner entry (alphabetically EARLIER) that declares the ledger on.
+
+    Its declaration must never be adopted by the engine ledger writer.
+    """
+    return ("schema: v1\n"
+            "project:\n  - key: aaa-decoy\n    dirs:\n      - /tmp/aaa-decoy\n"
+            "paths:\n  - /tmp/aaa-decoy\n"
+            "event_ledger:\n  enabled: true\n  keep_days: 1\n  max_mb: 1\n")
+
+
 def call_append(elp, name_candidates, *args, **kw):
     """Call the append entry point by the first existing candidate name.
 
@@ -111,15 +136,15 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         os.environ["SANDBAR_EVENT_LEDGER_DIR"] = td
         # Scope ⑧: undeclared => zero behaviour. So sections 1-6 must run with
-        # the project DECLARED and ENABLED in an isolated registry root
-        # (same yaml shape audit borrows: paths: marker + event_ledger block).
+        # the project DECLARED and ENABLED in an isolated registry root. The
+        # declaration must sit in an entry whose dirs COVER the engine repo
+        # (owner_yaml), otherwise the engine ledger is off by design.
         reg_root = Path(td) / "projects"
         os.environ["SANDBAR_PROJECTS_DIR"] = str(reg_root)
         demo_yaml = reg_root / "sandbar-demo" / "project.yaml"
         demo_yaml.parent.mkdir(parents=True, exist_ok=True)
-        demo_yaml.write_text(
-            "paths:\n  - /tmp/sandbar-demo\n"
-            "event_ledger:\n  enabled: true\n", "utf-8")
+        demo_yaml.write_text(owner_yaml("event_ledger:\n  enabled: true\n"),
+                             "utf-8")
 
         # ---- 1 happy path: one line, complete field set, <4KB ----
         led = Path(td) / "demo.jsonl"  # env override IS the ledger dir
@@ -218,9 +243,8 @@ def main():
         # disabled => zero behaviour (config is engine-project-scoped, so both
         # faces are driven through the SAME engine project.yaml) ----
         demo_yaml.write_text(
-            "paths:\n  - /tmp/sandbar-demo\n"
-            "event_ledger:\n  enabled: true\n"
-            "  keep_days: not-a-number\n  max_mb: -3\n", "utf-8")
+            owner_yaml("event_ledger:\n  enabled: true\n"
+                       "  keep_days: not-a-number\n  max_mb: -3\n"), "utf-8")
         try:
             r = call_append(elp, ("append_event_ledger", "append_event", "_append"),
                             payload(elp, run_id="run-CFG"))
@@ -229,8 +253,7 @@ def main():
         except AssertionError as exc:
             ok(False, "畸形声明探针缺席：%s" % exc)
         demo_yaml.write_text(
-            "paths:\n  - /tmp/sandbar-demo\n"
-            "event_ledger:\n  enabled: false\n", "utf-8")
+            owner_yaml("event_ledger:\n  enabled: false\n"), "utf-8")
         nf = Path(td) / "demo.jsonl"
         n_before = len(read_lines(nf))
         try:
@@ -242,9 +265,37 @@ def main():
         except AssertionError as exc:
             ok(False, "disabled 探针缺席：%s" % exc)
         # restore enabled for the rotation/rebuild sections
-        demo_yaml.write_text(
-            "paths:\n  - /tmp/sandbar-demo\n"
-            "event_ledger:\n  enabled: true\n", "utf-8")
+        demo_yaml.write_text(owner_yaml("event_ledger:\n  enabled: true\n"),
+                             "utf-8")
+
+        # ---- 7b owner resolution: a declaration living in a NON-owner entry
+        # (alphabetically earlier, with its own paths: block) must NOT switch
+        # the engine ledger on. This is the real-module lock for the
+        # t260928-13 resolver bug: the shipped predicate was "has paths: +
+        # any '- item'", which adopted the decoy's keep_days/max_mb.
+        try:
+            demo_yaml.write_text(owner_yaml(), "utf-8")     # owner declares nothing
+            (reg_root / "aaa-decoy").mkdir(exist_ok=True)
+            (reg_root / "aaa-decoy" / "project.yaml").write_text(
+                decoy_yaml(), "utf-8")
+            n_before = len(read_lines(nf))
+            r = call_append(elp, ("append_event_ledger", "append_event", "_append"),
+                            payload(elp, seq=77, run_id="run-DECOY"))
+            emitted = (r or {}).get("emitted", True) if isinstance(r, dict) else True
+            ok(not emitted and len(read_lines(nf)) == n_before,
+               "非所属项目的声明不启账本（引擎所属项目=dirs 覆盖引擎仓根）")
+            picked = getattr(elp, "_find_engine_project_yaml", None)
+            if picked is not None:
+                ok(picked(reg_root) == demo_yaml,
+                   "解析器选中真所属条目（不选字母序更早的干扰条目）")
+        except AssertionError as exc:
+            ok(False, "所属项目解析探针缺席：%s" % exc)
+        except Exception as exc:
+            ok(False, "所属项目解析炸出：%r" % (exc,))
+        finally:
+            demo_yaml.write_text(owner_yaml("event_ledger:\n  enabled: true\n"),
+                                 "utf-8")
+            (reg_root / "aaa-decoy" / "project.yaml").unlink(missing_ok=True)
 
         # ---- 8 rotation: >=max_mb renames to a dated archive (naming-plane
         # only); sweep drops archives older than keep_days, keeps fresh ones

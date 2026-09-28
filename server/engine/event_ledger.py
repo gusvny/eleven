@@ -127,9 +127,54 @@ def _parse_event_ledger_overrides(text):
     return out
 
 
+#: 引擎仓根（本模块位于 <repo>/server/engine/）。与 audit.ENGINE_REPO 同式——
+#: 两处必须等价，由 tests/test_event_ledger.py 的一致性锁钉住。
+ENGINE_REPO = Path(__file__).resolve().parents[2]
+
+
+def _dirs_cover_engine(text) -> bool:
+    """条目 dirs 是否覆盖引擎仓根（等值或祖先——主仓命中等值，worktree 命中祖先）。
+
+    **忠实镜像 audit._dirs_cover_engine 的语义，且刻意不 import audit**：本模块被
+    base.py 在工作流的 `imports_passed_through()` 块里 import，而 audit 不在工作流
+    沙箱的 passthrough 清单内（那份清单只收项目外置模板模块）——把 audit 拖进工作流
+    依赖图会触发「Failed validating workflow」（KI-143 同族）。故此处本地实现，并以
+    一致性锁（同一组夹具下与 audit 版选中同一文件）防两处漂移。
+
+    历史（t260928-13 合并后复核发现并修复）：本函数最初**没有落地**——`_find_engine
+    _project_yaml` 当时用「有 `paths:` 段 + 任意列表项」冒充本守卫，于是按目录名稳定序
+    会命中**任意**恰好带 paths 段的项目（实测命中 dengzhufpv），引擎账本的 enabled 声明
+    写了也不生效（静默失效）；且原 docstring 仍声称 dirs 规则，误导读者。"""
+    repo = ENGINE_REPO
+    in_dirs = False
+    for raw in text.split('\n'):
+        line = _strip_yaml_line(raw)
+        if line is None:
+            continue
+        if not line[:1].isspace():
+            in_dirs = False
+            continue
+        s = line.strip()
+        if s == 'dirs:':
+            in_dirs = True
+            continue
+        if in_dirs:
+            m = re.match(r'^-\s+(\S+)\s*$', s)
+            if m:
+                try:
+                    p = Path(os.path.realpath(m.group(1)))
+                except OSError:
+                    continue
+                if p == repo or p in repo.parents:
+                    return True
+            else:
+                in_dirs = False
+    return False
+
+
 def _find_engine_project_yaml(root: Path):
-    """借镜 audit._engine_project_yaml：dirs 覆盖引擎仓根的首个条目的 project.yaml
-    （按目录名稳定序）；找不到/不可读 → None。"""
+    """定位「引擎所属项目」条目的 project.yaml：dirs 覆盖引擎仓根的首个条目
+    （按目录名排序取稳定序）。找不到/不可读 → None（调用方走内置缺省兜底）。"""
     try:
         entries = sorted(root.iterdir())
     except OSError:
@@ -142,12 +187,8 @@ def _find_engine_project_yaml(root: Path):
             text = y.read_text(encoding='utf-8', errors='replace')
         except OSError:
             continue
-        if re.search(r'^paths:', text, re.M) is None:
-            continue
-        m = re.search(r'^\s*-\s*(.+?)\s*$', text, re.M)
-        if m is None:
-            continue
-        return y
+        if _dirs_cover_engine(text):
+            return y
     return None
 
 
