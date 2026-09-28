@@ -1390,6 +1390,41 @@ def _ws_cwd(ws: Optional[Dict[str, str]], ticket_id: str) -> Path:
     return REPO_ROOT
 
 
+def _result_file_state(path: Path) -> str:
+    """结果文件在 agent 进程退出那一刻的**真实状态**（纯读；不改任何判定）。
+
+    'missing'    —— 文件不在场（「未写结果文件」这句成立）
+    'unreadable' —— **文件在场却读不出**（JSON 坏 / 被撕裂 / 形状不合法）。旧文案在
+                    这一态说谎，把诊断引向「agent 没干活」的错误方向——260929 实案
+                    （t260929-04）：`stage_implement_gen1.json` 的 evidence 字符串写到
+                    一半就断了，文件在盘、引擎报「未写结果文件」，人按字面找不到任何
+                    东西；同时 agent 的幂等判据是「文件在场=本段已完成」，于是它不再重写，
+                    三次尝试全败 ⇒ 卡进「引擎读不出 / agent 不重写」的死结。
+    'ok'         —— 在场且能读出 StageResult（正常路径不会走到本判定）。"""
+    try:
+        if not path.is_file():
+            return "missing"
+    except OSError:
+        return "missing"
+    return "ok" if _read_result(path) is not None else "unreadable"
+
+
+def _result_gone_detail(where: str, rc, rfile, log_file) -> str:
+    """进程退出但没拿到结果时的**精确**诊断文案（三处 raise 共用，一处真源）。
+
+    'unreadable' 必须与 'missing' 分开说，并给出可执行处置：把坏档挪走留证后
+    retry_qc（让本段重写）——旧文案只说「未写」，人无处下手。"""
+    kind = _result_file_state(rfile)
+    if kind == "unreadable":
+        return ("%s agent 退出（rc=%s）但结果文件**在场却读不出**（JSON 坏/被撕裂/形状"
+                "不合法）：%s（日志 %s）——文件在场≠「没干活」；处置：把该文件挪走留证"
+                "（agent 的幂等判据是「文件在场=本段已完成」，不改名它会拒绝重写）"
+                "后发 retry_qc 让本段重写"
+                % (where, rc, rfile, log_file))
+    return ("%s agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
+            % (where, rc, rfile, log_file))
+
+
 def _read_result(path: Path) -> Optional[StageResult]:
     try:
         raw = json.loads(path.read_text("utf-8"))
@@ -3310,8 +3345,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                     args.ticket_id, args.stage_id, args.gen, _wedge_attempt())
                 # The agent process exited without writing a result file = an
                 # infrastructure / usage fault → raise so Temporal retries
-                detail = ("headless agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
-                          % (rc, rfile, args.log_file))
+                detail = _result_gone_detail("headless", rc, rfile, args.log_file)
                 if wedge_note:
                     detail += "；" + wedge_note
                 raise RuntimeError(detail)
@@ -8052,8 +8086,7 @@ async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
                     cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
                     _log_tail(args.log_file, 20000),
                     args.ticket_id, "arbitrate", args.gen, _wedge_attempt())
-                detail = ("arbitrate agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
-                          % (rc, rfile, args.log_file))
+                detail = _result_gone_detail("arbitrate", rc, rfile, args.log_file)
                 if wedge_note:
                     detail += "；" + wedge_note
                 raise RuntimeError(detail)
@@ -8404,8 +8437,7 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
                     _log_tail(args.log_file, 20000),
                     args.ticket_id, "acceptance_walkthrough", args.gen,
                     _wedge_attempt())
-                detail = ("acceptance agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
-                          % (rc, rfile, args.log_file))
+                detail = _result_gone_detail("acceptance", rc, rfile, args.log_file)
                 if wedge_note:
                     detail += "；" + wedge_note
                 raise RuntimeError(detail)
