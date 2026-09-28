@@ -281,7 +281,10 @@ async function dismissOverlays(p) {
  *  projectKey before it renders the ticket list). Returns false if the
  *  console cannot render the board (precheck env_fail). */
 async function openBoard(page) {
-  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  // 等待策略：domcontentloaded（不是 networkidle）——本台面持续轮询，networkidle 需 500ms
+  // 静默窗口，多标签页并发轮询下永不落定（T5a 实测 page.goto 30s 超时=工具性假红，与
+  // 产品行为无关）。开板判据仍是下方的显式等待（板图标在场 + 两行卡渲染），断言一条不减。
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2500)
   await dismissOverlays(page)
   const boardIcon = page.locator('span.wb-view-icon[title="Tickets"]').first()
@@ -296,10 +299,15 @@ async function openBoard(page) {
 
 // ---------------------------------------------------------------- S1 DOM probes (run in page context)
 
+// 文案面（宿主令 260925 控制台 UI 界面文案一律英文）：同行提示在 UI 上是
+// `👀 Another tab is viewing this ticket: <who>`（抽屉）/ `👀` + title
+// `Viewed from another tab: <who>`（行卡），旧中文「另一页签正在查看」已退役。
+// 中英双accept（不删旧形态）是为让本守卫在文案迁移窗口两侧都能咬合；
+// 语义判据仍是「同行可感知信号在场」，不锚整句措辞。
 const domViewerHint = `(() => {
   const text = document.body.innerText || '';
-  if (/另一页签|其它页签|正在查看|正在看/.test(text)) return 'text';
-  if ([...document.querySelectorAll('[title]')].some(e => /正在查看|正在看|另一页签|其它页签/.test(e.getAttribute('title') || ''))) return 'title';
+  if (/另一页签|其它页签|正在查看|正在看|Another tab|Viewed from another tab/.test(text)) return 'text';
+  if ([...document.querySelectorAll('[title]')].some(e => /正在查看|正在看|另一页签|其它页签|Viewed from another tab|Another tab/.test(e.getAttribute('title') || ''))) return 'title';
   if (text.includes('👀')) return 'emoji';
   return null;
 })()`
@@ -308,7 +316,14 @@ const domDrawerViewerHint = `(() => {
   const el = document.querySelector('.wb-drawer');
   if (!el) return null;
   const text = el.innerText || '';
-  return /另一页签|其它页签|正在查看|正在看/.test(text) ? 'drawer-text' : null;
+  // 抽屉内同行提示现形态=「👀 Another tab is viewing this ticket: <who>」（旧中文已退役）。
+  return /另一页签|其它页签|正在查看|正在看|Another tab is viewing/.test(text) ? 'drawer-text' : null;
+})()`
+
+// 取证探针（只读）：抽屉当前 innerText（T2 三条取证 P3 用）。
+const drawerText = `(() => {
+  const el = document.querySelector('.wb-drawer');
+  return el ? (el.innerText || '') : '<no-drawer>';
 })()`
 
 const domDrawerId = `(() => {
@@ -322,7 +337,12 @@ const domDrawerId = `(() => {
 
 const domNotice = `(() => {
   const text = document.body.innerText || '';
-  return /另一页签|其它页签|刚被|已刷新/.test(text);
+  // 跨标签失效提示（读后失效横幅）现形态=「Ticket <id> was just operated from another tab
+  // (<op> · <who>); auto-refreshed」（index.tsx setPeerNote）；写前守门 confirm 现形态=
+  // 「Continue "<op>" on ticket <id>? / Another tab (<who>) ran ...」（两行报文用「 / 」代指换行，
+  // 不写字面反斜杠-n：本串会被 page.evaluate 当 JS 源码求值，模板串里的转义换行会提前结束注释）。两条文案的公共可辨标记=
+  // 「another tab」（大小写不敏感）；旧中文「另一页签刚被…」已退役。判据仍是「同行可感知提示在场」。
+  return /另一页签|其它页签|刚被|已刷新|another tab/i.test(text);
 })()`
 
 // Narrow on purpose: corrupting unrelated console keys (theme/prefs) would be
@@ -374,9 +394,11 @@ const boardCard = (page, id) => page.locator(`[data-ticket-id="${id}"][data-comp
  *  caller's guardMsgs/write-count assertions decide the failure. */
 async function completeApproveModal(page) {
   if (!(await waitFor(async () => (await page.locator('.wb-modal').count()) > 0, 5000))) return false
-  const confirmBtn = page.locator('.wb-modal button', { hasText: '确认通过并推进' }).first()
+  // 确认钮文案=产品当前用户可见标签「Approve and advance」（index.tsx wb-modal；
+  // 旧中文「确认通过并推进」随宿主令 260925 英文化退役）。
+  const confirmBtn = page.locator('.wb-modal button', { hasText: 'Approve and advance' }).first()
   if (!(await confirmBtn.count())) {
-    throw new Error('审批弹层在场但「确认通过并推进」按钮缺失（审批流改版？断言不得静默跳过）')
+    throw new Error('审批弹层在场但确认钮（Approve and advance）缺失（审批流改版？断言不得静默跳过）')
   }
   await confirmBtn.click({ timeout: 5000 })
   return true
@@ -387,7 +409,8 @@ async function clickRowAdvance(page, id) {
   if (!(await waitFor(async () => (await card.count()) > 0, 8000))) {
     throw new Error(`row ${id} not rendered`)
   }
-  await card.locator('button', { hasText: '推进' }).first().click({ timeout: 5000 })
+  // 行卡推进钮现标签=Advance（ticket-row-card.tsx；旧中文「推进」随宿主令 260925 英文化退役）。
+  await card.locator('button', { hasText: 'Advance' }).first().click({ timeout: 5000 })
   await completeApproveModal(page)
 }
 
@@ -472,17 +495,39 @@ async function scenarioWriteCrossInvalidation(b, d) {
     p.on('dialog', (dlg) => { guardMsgs.push(dlg.message()); void dlg.accept() })
   }
   // D performs the write from its list row; B is viewing the same ticket.
+  // ── 取证三探针（260928 岗位取证令，只加打印不改断言）────────────────────────
+  // P1 D 侧写到底落没落：clickRowAdvance 前后 d.__st.counts.write 差值。
+  // P2 确认面是原生 confirm 还是自定义 modal（只有原生 confirm 会被 page.on('dialog')
+  //    自动 accept；自定义 .wb-modal 里的按钮必须真点）。
+  // P3 B 侧抽屉 innerText 前后快照：peerNote 是否出现过。
+  const writeBefore = d.__st.counts.write
+  const modalBefore = await d.locator('.wb-modal').count()
+  const bDrawerBefore = await b.evaluate(drawerText).catch(() => '')
   await clickRowAdvance(d, FIDB)
   await page_wait(800) // confirm + POST landing
-  // An awaiting-human ticket first raises the pre-existing 「审批通过并推进？」
-  // confirm, with the write-guard confirm after it — so assert that "some
-  // dialog in this round named the peer" instead of pinning the order.
-  const guardHit = guardMsgs.find(m => /另一页签|其它页签|正在查看/.test(m))
+  const writeAfter = d.__st.counts.write
+  const modalAfter = await d.locator('.wb-modal').count()
+  const bDrawerAfter = await b.evaluate(drawerText).catch(() => '')
+  console.log(`  (T2-Probe P1 writes: d=${writeBefore}→${writeAfter} Δ=${writeAfter - writeBefore})`)
+  console.log(`  (T2-Probe P2 .wb-modal count: before=${modalBefore} after=${modalAfter}; dialogs so far=${JSON.stringify(guardMsgs).slice(0, 200)})`)
+  console.log(`  (T2-Probe P3 B drawer before=${JSON.stringify(bDrawerBefore.replace(/\s+/g, ' ').slice(0, 140))})`)
+  console.log(`  (T2-Probe P3 B drawer after =${JSON.stringify(bDrawerAfter.replace(/\s+/g, ' ').slice(0, 140))})`)
+  // An awaiting-human ticket first raises the pre-existing approve confirm,
+  // with the write-guard confirm after it — so assert that "some dialog in
+  // this round named the peer" instead of pinning the order.
+  const guardHit = guardMsgs.find(m => /另一页签|其它页签|正在查看|another tab/i.test(m))
   if (!guardHit) {
-    return `no dialog names the viewing peer (dialogs: ${JSON.stringify(guardMsgs)})`
+    return `no dialog names the viewing peer (dialogs: ${JSON.stringify(guardMsgs)}; writes Δ=${writeAfter - writeBefore}; modal=${modalBefore}→${modalAfter})`
   }
   const noticed = await waitFor(async () => await b.evaluate(domNotice), 8000)
-  if (!noticed) return 'B got no cross-invalidation notice after D wrote'
+  if (!noticed) {
+    // 取证（不改判据）：把探针返回值与同刻 DOM 实况一并点名，区分「提示真没出现」与
+    // 「探针/时序问题」——报错必须精确，不把诊断引向错误方向。
+    const probeNow = await b.evaluate(domNotice).catch((e) => `EVAL_ERR:${String(e).slice(0, 80)}`)
+    const bodyNow = await b.evaluate('document.body.innerText').catch(() => '<eval-err>')
+    const drawerNow = await b.evaluate(drawerText).catch(() => '<eval-err>')
+    return `B got no cross-invalidation notice after D wrote（取证：probe=${JSON.stringify(probeNow)} bodyHasAnotherTab=${/another tab/i.test(String(bodyNow))} bodyLen=${String(bodyNow).length} drawerNow=${JSON.stringify(String(drawerNow).replace(/\s+/g, ' ').slice(0, 180))}）`
+  }
   const refreshed = await waitFor(async () =>
     (await b.evaluate('document.body.innerText')).includes(MARKER_V2), 8000)
   if (!refreshed) return `B drawer did not silently refresh to the post-write detail (missing ${MARKER_V2})`
@@ -506,7 +551,7 @@ async function scenarioWriteCrossInvalidation(b, d) {
   // of waiting out the timeout).
   const beforeWrites = b.__st.counts.write
   const hitPeer = await waitFor(async () => {
-    if (guardMsgs.length > before && guardMsgs.slice(before).some(m => /另一页签|其它页签|正在查看|仍要继续|刚刚/.test(m))) return true
+    if (guardMsgs.length > before && guardMsgs.slice(before).some(m => /另一页签|其它页签|正在查看|仍要继续|刚刚|another tab/i.test(m))) return true
     if (b.__st.counts.write > beforeWrites) throw new Error('__WRITETHRU__')
     return false
   }, 5000)

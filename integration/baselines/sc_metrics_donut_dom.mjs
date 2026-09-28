@@ -477,7 +477,9 @@ async function runBrowser(pw, browser) {
     // half of the contract: at terminal state the in-flight copy must be
     // retired. Pure widening — D1-D6 untouched.
     await run('D7 refreshing banner retired at terminal empty state', async (p) => {
-      const blankRe = /无可绘图数据|无可聚合数据/
+      // 空态文案现形态=「No drawable data in the window (or the aggregation was skipped —
+      // see the degradation note).」（metrics.tsx blankText；旧中文「无可绘图数据」已退役）。
+      const blankRe = /No drawable data|No aggregatable data|无可绘图数据|无可聚合数据/
       const empties = await p.locator('.wb-m .wb-m-empty').allTextContents().catch(() => [])
       if (!empties.some((t) => blankRe.test(t))) {
         return `precondition lost: terminal blank text no longer present (empties=${JSON.stringify(empties).slice(0, 120)})`
