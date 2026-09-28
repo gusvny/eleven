@@ -303,9 +303,31 @@ def inspection_dir() -> str:
 
 
 def ledger(ticket_id: str):
-    path = os.path.join(inspection_dir(), "%s.json" % ticket_id)
+    """读巡检台账票面（按票号取）。
+
+    260928 修（本场景 B5d/B5e/B5f 在 main 上长红的真因）：本 helper 只按**旧命名**
+    `<ticket_id>.json` 找文件，而引擎的台账是**单源名** `inspection-<实例>-<期>.json`
+    （票号不再进文件名）⇒ 收口后恒判「台账缺」。判据不变（「该票的台账票面在位」），
+    改为：先按单源名扫目录、以**文件内容里的 ticket_id** 认领本票（内容即真源），
+    再回落旧命名（存量兼容）。
+    """
+    d = inspection_dir()
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        names = sorted(os.listdir(d))
+    except OSError:
+        names = []
+    for name in names:
+        if not (name.startswith("inspection-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(d, name), "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and str(data.get("ticket_id") or "") == ticket_id:
+            return data
+    try:
+        with open(os.path.join(d, "%s.json" % ticket_id), "r", encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return None
