@@ -20,7 +20,7 @@
     - id: sandbar-admin-ui
       name: 'sandbar-admin-ui'
 
-# 工单工作流台插件（server/plugins/workbench/，包名 sandbar-workbench，工单工作流台设计 v0.3 M2）：
+# 工单工作流台插件（server/plugins/workbench/，包名 sandbar-workbench，Ticket Workflow Console Design v0.3 M2）：
 # 独立命名不寄生 admin 壳；宿主半在 dsh webServer 上挂 /sandbar-workbench/api/wf/*（调
 # ticket/workflow M1 引擎，写操作 run-id 审计在 server/admin.log），浏览器半往
 # settings.section 槽注册「工单台」分区（三区：台面/详情/操作）。
