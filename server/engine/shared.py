@@ -4909,6 +4909,17 @@ class ProjectPathsError(ValueError):
     a declared anchor missing or misplaced."""
 
 
+#: 条目文件里由**各自读面**拥有的 additive 顶层段：本解析器（①d，只管 schema/project/
+#: paths）整体透传其缩进块，不看其形状——与注册表装载器 parse_project_file 同一口径。
+#: 来历（260928 实案，KI-149 第三处读面）：此处漏放 `event_ledger:` 时，本函数抛
+#: ProjectPathsError → dsh_bin_for_spawn/project_paths 全线红 → **该项目的 agent 一律
+#: spawn 不出来**（票 t260928-20 因此在 create_plan 直接 blocked）。凡引擎读者新增一个
+#: 顶层段名，本表与 parse_project_file 必须同批放行；跨模块一致性锁见
+#: integration/t260928-13/sc_registry_additive_keys.py A2（从读者源码派生段名，逐个断言
+#: 每个读面都容忍——不以报错文案为判据，以机制为判据）。
+ADDITIVE_TOP_LEVEL_SECTIONS = ("admin_log", "event_ledger")
+
+
 def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """Minimal parse of the entry file: returns (the paths declaration dict or None, the
     first dirs item or None).
@@ -4923,13 +4934,22 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
         if not line.strip():
             continue
         if not raw[:1].isspace():
-            m = re.match(r"^([a-z]+):(.*)$", line)
+            # 段名允许下划线（`event_ledger:`；旧式 `[a-z]+` 会把它误判成「无法解析」）
+            m = re.match(r"^([a-z_]+):(.*)$", line)
             if not m:
                 raise ProjectPathsError(
-                    "%s:%d 顶层无法解析（只认 schema:/project:/paths:）：%s" % (label, i, line.strip()[:60]))
+                    "%s:%d 顶层无法解析（只认 schema:/project:/paths:/%s:）：%s"
+                    % (label, i, "/".join(ADDITIVE_TOP_LEVEL_SECTIONS), line.strip()[:60]))
             key, val = m.group(1), m.group(2).strip()
+            if key in ADDITIVE_TOP_LEVEL_SECTIONS:
+                if val:
+                    raise ProjectPathsError("%s:%d %s: 后必须换行给内容" % (label, i, key))
+                section = key        # 其缩进块整体透传（形状归该段的读面，本解析器不看）
+                continue
             if key not in ("schema", "project", "paths"):
-                raise ProjectPathsError("%s:%d 顶层只认 schema:/project:/paths:，见 %s:" % (label, i, key))
+                raise ProjectPathsError(
+                    "%s:%d 顶层只认 schema:/project:/paths:/%s:，见 %s:"
+                    % (label, i, "/".join(ADDITIVE_TOP_LEVEL_SECTIONS), key))
             if key in ("project", "paths") and val:
                 raise ProjectPathsError("%s:%d %s: 后必须换行给内容" % (label, i, key))
             if key == "schema":
@@ -4942,6 +4962,8 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
                 paths = {}
             section = key
             continue
+        if section in ADDITIVE_TOP_LEVEL_SECTIONS:
+            continue        # additive 段的缩进块：整体透传（未识别的键仍由其读面负责点名）
         if section == "paths":
             m = re.match(r"^  ([a-z_]+):\s*(.*)$", line)
             if not m:
