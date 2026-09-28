@@ -2587,3 +2587,24 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **判据（可复用的排查口诀）**：凡「agent 退出但没写结果」，先 `python3 -c
 > "import json;json.load(open('<file>'))"` 判**在场/可读**，再看文件 mtime 与 gen——
 > 「未写」与「在场却读不出」是两种完全不同的故障，处置也不同。
+
+## KI-151 新插件挂载的**引导缺口**：写集粒度 `server/profile/` 覆盖不到 `server/profile-headless/`，而约定要求两个 profile 各一条软链 ⇒ 插件票结构上无法自洽完成挂载，越界守卫反复挪走 headless 链（260929 实案 t260929-03：**6 次空转** + 一次误判打回）
+> **机理**：`server/profile-headless/cordis.patch.yml` 是指向 `server/profile/cordis.patch.yml` 的软链 ⇒
+> **一处挂载必然同时落在两个 profile** ⇒ 按仓内约定每个插件要两条 `node_modules/<包名>` 软链（既有 6 个插件
+> 都是两条）。但工单写集的粒度是目录前缀：本票写集 = `server/plugins/` · `server/profile/` · `integration/`，
+> 而 `server/profile` 与 `server/profile-headless` 是**兄弟目录**（`server/profile-headless/...` 不以
+> `server/profile/` 开头）⇒ 票内创建 headless 链 = 越界写。
+> **实证（可复现）**：`.lane/t260929-03/.sandbar/quarantine/unauth-*/` 至少 6 批存档里都有
+> `server/profile-headless/node_modules/sandbar-executor-panel`（`unauth-implement-gen0-2…-5`、
+> `unauth-arbitrate-gen0/2/3/gen1/gen2`）——引擎的写集守卫是**对的**，它在阻止越界写；
+> 代价是 agent 每轮 implement/arbitrate 都「创建→被挪走→再创建」空转（agent 自陈「KI 第 6 次复发」）。
+> **本岗自己的错（一并记）**：复核时我要求「补 headless 软链」并据此**打回**过一次门——提要求前没核对写集边界
+> （写集是前缀匹配，`server/profile` ≠ `server/profile-headless`）。纠正已发 ruling 撤销该要求，
+> 并把该链改为 integration 岗在 main 侧合并后补。**教训**：给泳道提「补哪个文件」的要求前，先拿写集做前缀核对；
+> 越界要求会让 agent 空转、还会被守卫当成越界证据。
+> **持久解（三选一，留宿主定）**：①**守卫别名化**——把 `server/profile-headless/` 视作 `server/profile/` 的
+> 写集等价面（写集语义层改动，最小、零部署变化）；②**拓扑收敛**——让 `server/profile-headless/node_modules`
+> 直接软链到 `../profile/node_modules`（一处维护，永久消灭这类缺口；但属部署面拓扑变更，需验证 dsh 解析）；
+> ③**约定成文 + main 侧补**——新插件票只提交 web 链，headless 链由 integration 岗合并后补（现状做法，
+> 每次都欠一笔、易漏）。**回归要求**：无论走哪条，`integration/t260928-28/sc_profile_plugin_mounts.py`
+> （两 profile 逐项断言）必须保持为**合并后立刻回绿**的判据——它这次正确指出了红点（PASS=56 FAIL=1）。
