@@ -1865,6 +1865,14 @@ SCENARIOS = [
      "两出口纪律×重启不重播×夜间口径×开关面（t260928-28，灰盒 L3，离线秒级零 docker）：A 状态迁移→wake 出口（队列投递 accepted 回执）与需要人→alert 出口（落账+notify.beep 位）不混装；B 队列项已消化/未消化均不重发同一 dedupe key（「不丢消息」与「不重复唤醒」双向可判定）；C 制造 alert 后 restart——12h 冷却窗内同 key 不重播、beep 不翻倍（去重态从 alerts 账重放重建）；D 夜间窗内 alert 带 night_muted 标注且红线级照常发声（例外面）；E 全量收割投递面断言无任何代签/代决定形状（未答复的 alert 永不自动变成决定）；F alerts.enabled=false 不响不写其余不受扰、总闸关=显式 stopped 非消失、未声明项目零行为。harness 缺席=FAIL 点名（TDD 红属预期）",
      "python3 integration/t260928-28/sc_watchdog_alert_discipline.py", "ro", "serial"),
 
+    # ---- t260929-03: executor panel + Settings（五 tab/请求主从/页面 beep/溯源配置面）----
+    ("t260929-03-executor-panel-page",
+     "面板页面契约 payload→pixel（t260929-03，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099；页面 HTML 取自插件真实页面模块 PANEL_PAGE_HTML seam）：T1 五 tab 英文界面（chrome 无 CJK，数据不译）；D1–D3 三种不可达各渲染显式降级态（路由 404/unreachable、declared:false/not-enrolled、alive:false/stale+reason），绝不空态或常态冒充，且路由不可达绝不 beep；B1–B4 beep 语义（宿主「一声就够」）——新未见 key 恰响一声（__panelBeepCount 同代码路径计数器，纯 markup 不算证明）、重轮询零增量、第二新 key 再 +1、notify.beep:false 不响、矛形输入（beep=true×night_muted 非 redline）页面防线仍不响；A1/A2 alerts 面只呈现 level+night-muted 标记、不发明 answered/auto-action 位；Q1/Q2 请求主从=按项目分组+详情（问题/默认动作/等待）+show more 不丢最新尾行、纯浏览零 answer POST（永不自动答复）；L1/L2 台账健康度比例呈现、unreadable 显式横幅；P1 溯源 ≥2 旋钮两形态（file#path 与 factory-default，KI-148/149）；X1 全旅程零 pageerror。playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；页面模块未落地=FAIL 点名（TDD 红属预期）。intent 分工：节点半路由/写盘行为归 t260929-03-executor-panel-api",
+     "node integration/t260929-03/sc_executor_panel_page.mjs", "browser-free"),
+    ("t260929-03-executor-panel-api",
+     "面板节点半真实路由契约（t260929-03，灰盒 L2/L3，经 harness seam 驱动真实路由面，离线零 docker 零浏览器；seam 协议=lib_panel_harness.mjs 头注）：R1 请求台账 append-only 追加后 waiting 且绝不自动答复；R2 答复按 id 闭行不删原行（审计链完整）；R3 缝重启后未答行原样在（长保留不变式「未答请求永不消失」）；R4 畸形输入纪律——台账坏 JSON/半行计数上报不静默丢且合法行照常服务、POST 非 JSON 体 4xx 拒收不 500；R5 project 形状白名单 GET/POST 一律 400、非 GET 未知路由 405（契约刚性）；S1 settings 读面工厂默认溯源可答「谁定的」；S2 validate-on-write（KI-148/149+installer 先例）——坏声明（未知键）saved:false+人类可读原因+盘上 watchdog.json 字节不变，好声明落盘且 GET 回读新值、溯源翻转为 file#path（证明过了装载器）；G1 授权=模板推导（决定 10/15）——workbench 不可达显式降级对象绝不空列表冒充「无授权」，模板桩可达时 human 出口模板出 sign 行、inspection 族无 pause 行（capability 过滤）。harness 缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：页面渲染/降级态/beep 归 t260929-03-executor-panel-page；watchdog status 键集归 t260928-28-watchdog-status-surface",
+     "node integration/t260929-03/sc_executor_panel_api.mjs", "ro", "serial"),
+
     # ---- t260929-04: wake delivery（最后一跳接真宿主 API：排队简报×已消化镜像×自醒排除）----
     # 五条共享一条夹具缝：继承 t260928-28 lib_watchdog_harness.Harness（协议命令扩展
     # 见 integration/t260929-04/lib_wake_harness.py 头注——sessionController 桩 +

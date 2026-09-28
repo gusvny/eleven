@@ -76,6 +76,21 @@
     - id: sandbar-watchdog
       name: 'sandbar-watchdog'
 
+# 执行器面板（server/plugins/executor-panel/，包名 sandbar-executor-panel，t260929-03，epic project-executor）：
+# 宿主的「脸」——五 tab 静态页（Overview/Requests/Alerts/Ledger/Settings）+ 页内一声 beep
+# （dsh 无发声能力，声音只能由控制台页面出）+ 请求账（自有 append-only JSONL）+
+# 带溯源与写时校验的 Settings。自有面挂 dsh webServer：GET /sandbar-executor-panel（页）与
+# /sandbar-executor-panel/api/*（requests/settings/grants）；watchdog 状态只读消费
+# /sandbar-watchdog/api/status，绝不重算。headless 无 webServer——面板待机（本来没有页面）。
+# 以裸包名挂载：经 profile/node_modules/sandbar-executor-panel 软链（→
+# ../../plugins/executor-panel）解析，profile-headless 同款软链（260929 宿主打回实证：
+# 只建一条链+漏挂载块=插件永不生效；挂载块与**两条**软链必须同批落）。
+# 宿主自检（下次控制台重启后）：curl -s -o /dev/null -w '%{http_code}'
+#   http://127.0.0.1:3099/sandbar-executor-panel  期望 200。
+- insert:
+    - id: sandbar-executor-panel
+      name: 'sandbar-executor-panel'
+
 # 模型显式钉在 dsh 出厂 deepseek-official 路由（与 dsh-base 默认一致，写出仅为显式）。
 # key 走凭据 seam，这里与任何配置文件中都不出现字面 key。
 - id: agent-default-model

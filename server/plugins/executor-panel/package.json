@@ -1,0 +1,11 @@
+{
+  "name": "sandbar-executor-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./node.ts",
+    "./page": "./src/host/panel-page.ts",
+    "./package.json": "./package.json"
+  }
+}
