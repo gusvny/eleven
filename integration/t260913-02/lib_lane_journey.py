@@ -319,6 +319,10 @@ def ledger(ticket_id: str):
     for name in names:
         if not (name.startswith("inspection-") and name.endswith(".json")):
             continue
+        # 260928：跳过**套件收据**companion（`inspection-<实例>-<期>-suite.json` 也带 ticket_id，
+        # 但没有 human_gate——先前按内容认领时可能先撞上它，把「收口签字记录落账」判成空）。
+        if name.endswith("-suite.json"):
+            continue
         try:
             with open(os.path.join(d, name), "r", encoding="utf-8") as f:
                 data = json.load(f)
