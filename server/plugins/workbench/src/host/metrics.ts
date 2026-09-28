@@ -4,7 +4,7 @@
  * 双前门共用本模块（契约块 2 L158「同实现同缓存」+ 立项关键决策 3「一个实现
  * 两扇前门」）：HTTP 前门 = node.ts 的 exact 路由 /sandbar-workbench/api/wf/metrics；
  * CLI 前门 = metrics-cli.mjs（argv JSON 收口后直调 buildMetricsResponse）。
- * 数据契约唯一真源 = docs/design/metrics-api契约v1.md（v1 冻结版），字段增删须
+ * 数据契约唯一真源 = docs/design/metrics-api-contract-v1.md（v1 冻结版），字段增删须
  * 开新工单 bump（块 6），本文件不得私改 schema。
  *
  * 口径出处（票 t260901-20 方案，实现锚点）：
@@ -26,7 +26,7 @@
  *
  * 缓存路径（t260901-14 路径约定）：~/.sandbar/projects/<key>/data/metrics/。
  * 【碑注——两真源矛盾】契约块 3 L189 写「~/.sandbar/data/<project>/」，与
- * sandbar 契约 ①a（sandbar项目接入契约v1.md L170-171）的 projects/<key>/data/
+ * sandbar 契约 ①a（sandbar-project-onboarding-contract-v1.md L170-171）的 projects/<key>/data/
  * 矛盾；本实现取 ①a（工单正文明示「经 t260901-14 的路径约定解析」），契约
  * 修订候选已上报用户，谁也不代改冻结文档。env SANDBAR_METRICS_DIR 仅测试覆盖。
  * legacy SANDBAR_PROJECTS_YAML 单文件模式下 per-key 目录无定义 → 缓存禁用+SKIP。

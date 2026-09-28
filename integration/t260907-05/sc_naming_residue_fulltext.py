@@ -9,7 +9,7 @@ intent（守护的用户可感知契约 / 工单验收①的独立机器重演�
   dsh-profile-suyou 包名）必须原样在位——机械替换最常见的对抗事故是「顺手多改」，
   把后续票的面提前污染。按 doc-guard G6 先例钉现状语义：后续票落地时随其语义同步改本子用例。
 - docs/ 定稿库已知漂移清单封口：本票不改 docs/（写集外），但 docs 命中必须 ⊆ 已声明
-  的遗留票清单（工单工作流台设计.md / 知识库设计.md / README.md / build_index.py）——
+  的遗留票清单（ticket-workflow-console-design.md / knowledge-base-design.md / README.md / build_index.py）——
   清单外新命中=替换面外溢或新写文件带病，红。
 
 与既有资产 intent 区别（防 intent 级重复）：
@@ -80,14 +80,14 @@ def _exempt(rel):
         rel.startswith(r) for r in EXEMPT_RUNTIME_ROOTS)
 # docs/ 已声明遗留票清单（本票不改 docs，命中封口在此清单内）。
 LEGACY_DOCS_ALLOW = {
-    "docs/design/工单工作流台设计.md",
-    "docs/design/知识库设计.md",
+    "docs/design/ticket-workflow-console-design.md",
+    "docs/design/knowledge-base-design.md",
     "docs/README.md",
     "docs/scripts/build_index.py",
     # t260907-05 消解轮随 main 带入：50 行「/suyou-workbench/ 前缀＝发布前置债，随专门
     # 专门迁移票处置」的债描述＋223 行 sandbar-*/suyou-* 迁移对照表——均为债陈述/沿革
     # 语境非现行调用契约；docs/ 写集外不改，追加进 docs 遗留票清单（清单外新命中仍红）。
-    "docs/design/sandbar分发形态v1.md",
+    "docs/design/sandbar-distribution-v1.md",
 }
 PLUGINS = ["workbench", "ui", "knowledge", "providers", "temporal-tools", "ui-check"]
 EXPECTED_NAME = {p: "sandbar-" + n for p, n in [

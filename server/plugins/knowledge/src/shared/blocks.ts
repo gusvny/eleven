@@ -2,7 +2,7 @@
  * blocks.ts —— docs 知识库 block 级 diff 的纯函数核（宿主半 node.ts 与浏览器半
  * src/client/index.tsx 共用；node 冒烟直跑）。
  *
- * 设计依据：docs/design/知识库设计.md §3.3（block 是 diff 与 review 的最小单元）、
+ * 设计依据：docs/design/knowledge-base-design.md §3.3（block 是 diff 与 review 的最小单元）、
  * §5.2（逐 block diff：新增绿/删除红/修改并排）。
  *
  * block 类型枚举：frontmatter / heading（每个标题行独立块，含级别）/ paragraph /

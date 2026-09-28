@@ -1,114 +1,119 @@
 ---
-title: "项目管理 UI 设计（左栏内嵌）"
+title: "Project Management UI Design (embedded in the left column)"
 category: design
 tags:
   - sandbar
   - workbench
-  - 项目管理
+  - project management
   - UI
 status: active
-updated: 2026-09-20
+updated: 2026-09-28
 ---
 
-# 项目管理 UI 设计（左栏内嵌）
+# Project Management UI Design (embedded in the left column)
 
-> project-lifecycle 票③（t260904-15）交付文档；底稿=notes/discussions/260904-project-ui-mock.html
-> （mock v5 过稿，宿主修订11 两枚重绘后终稿）。定稿口径真源=notes/epics/project-lifecycle.md
-> 面 D + 决策 8 + 验收 11-14，本文档是 UI 面（入口/交互/降级/确认口径）的展开，不覆盖 epic。
+> Delivery document for project-lifecycle ticket ③ (t260904-15); base draft = notes/discussions/260904-project-ui-mock.html
+> (mock v5 passed review; final version after the host's revision 11 redrew two icons). Source of truth for the settled stance = notes/epics/project-lifecycle.md
+> face D + decision 8 + acceptance 11-14; this document expands the UI face (entries / interaction / degrade / confirmation stance) and does not supersede the epic.
 
-## Problem（问题）
+## Problem
 
-sandbar 的项目注册表（`~/.sandbar/projects/<key>/project.yaml`，契约 ①a）此前进出全靠手搓：
-接入=手工建目录+手写 YAML+手工跑 credentials 迁移；摘除=手删目录（在飞票查询面悬空、归档数据蒸发风险）。
-票①② 已把这两个操作收口为安装器 CLI（`sandbar project add|remove|list`，fail-closed 前置校验+在飞闸+purge
-双旗），但宿主的操作面仍是终端——而 console 左栏本就按注册表列项目组，是宿主天然的操作面。
-缺的是：把 CLI 能力内嵌进左栏的 UI 入口，以及与注册表状态对齐的三类呈现（隔离条目、组头设置入口、接入行）。
-另有一个纯呈现问题：组头四个视图入口是 emoji（📋📖🔀🗂️），尺寸小、风格不统一（宿主令 260904：顺便做一套）。
+Until now, coming in and out of sandbar's project registry (`~/.sandbar/projects/<key>/project.yaml`, contract ①a) was entirely hand-crafted:
+onboarding = manually create the directory + hand-write the YAML + manually run the credentials migration; removal = hand-delete
+the directory (the in-flight ticket query face dangles; archived data risks evaporating).
+Tickets ①② have already consolidated these two operations into the installer CLI (`sandbar project add|remove|list`, fail-closed
+pre-validation + in-flight gate + purge dual flags), but the host's operating surface is still the terminal — and the console's left
+column already lists project groups from the registry, making it the host's natural operating surface.
+What is missing is a UI entry that embeds the CLI capability into the left column, plus three kinds of presentation aligned with
+the registry state (quarantined entry, group-header settings entry, onboarding row).
+There is also a purely presentational problem: the group header's four view entries are emoji (📋📖🔀🗂️), small and stylistically
+inconsistent (host order 260904: do a proper icon set along the way).
 
-## Requirement（需求）
+## Requirement
 
-1. 左栏新增恰三处（不建独立页/tab/中列视图，260904 宿主裁定降级）：
-   - **组头「项目设置」入口**：常驻可见的第五个图标，与四视图图标同排同款；点开**项目设置弹层**
-     （只读：key/显示名/根目录 + 票计数[在飞/完结/已归档，Temporal 不可达降级「—」提示不红] +
-     体检区 + 底部 danger 区「摘除项目…」）。本期设置弹层只读，编辑器=Nongoal。
-   - **「＋ 接入项目」行**：项目组列表末尾，方框＋语言同组内会话区；弹层表单含预检 dry-run，
-     六类拒收错误就地显示（无需翻后端日志），黄牌不阻塞；成功后左栏即时出现新项目组。
-     空/全隔离注册表仍渲染本行（首个项目接入恰恰发生在空注册表时）。
-   - **隔离行**：装载器隔离的 key 以红色一行呈现，点击弹层看原因（含 `<dir>/project.yaml`
-     定位与修复指路）；隔离期间无组头无设置入口（无装载条目可设置）。
-2. **摘除四步全在弹层内**（自设置弹层 danger 区进入）：在飞闸结果（拒摘报票号；Temporal 不可达
-   fail-closed 文案含「先 sandbar up」指路）→ 处置勾选（默认全保留）→ dry-run 清单（将删/将留）先行展示
-   → purge 勾选后需输入 key 二次确认；执行结果与 CLI 同口径（`--json` 同源）。
-   接入弹层预检口径（t260904-15 arbitrate gen1 F1 修订）：CLI `project add` 无 `--dry-run` 旗
-   （补旗=跨写集改动，裁定项上浮宿主/epic）——预检降档为**弹层本地形状检查**（key 白名单正则/
-   根目录绝对路径/非空，零落盘不调 CLI，不实现 CLI 校验语义）；确认时由 CLI 做深度校验
-   （存在性/交叉/重复/legacy）并就地显示。
-3. **图标族统一**（验收 11b）：五枚 SVG 线性图标（工单列表/知识库/模型路由/立项单/项目设置），
-   统一规格：viewBox 20×20 · stroke=currentColor · 线宽 1.6 · 圆帽圆角 · fill none · 显形 18px ·
-   命中区 26×26（radius 6）· 三态（idle/hover/active）· title+aria-label 可辨识；设置=滑杆（三轨偏置
-   旋钮）、路由=带箭头分流（mock v5 修订11 重绘终稿：轮辐齿轮像太阳、节点连线像 share，均已避开）。
-   四枚存量视图图标换装后行为零回归（工单列表图标的回列表联动语义照旧）；渲染点与注释中的
-   emoji 引用清零（sidebar/index/epics 三文件；index 的 🤖⚙️👤 执行主体徽标不在图标族范围，豁免）。
-4. **写路径薄壳单源**（决策 8）：workbench host 写路由 spawn `sandbar project add|remove --json`
-   （真实入口=仓根 `sandbar` 薄壳→installer.cli；UI 侧零校验/闸逻辑），CLI 拒收错误体原样透传就地显示；
-   注册表读面走 TS 装载器（GET /wf/projects，消费方即装载器，防两份漂移）并扩展隔离条目；
-   票计数属 Temporal 查询=CLI 独有数据，由 host 读路由 spawn `sandbar project list --json` 单点取数
-   （spawn 恰是同源而非第二份，不违背决策 8 的注册表读面口径）。写路由不进工具桥（agent 无消费方）。
-5. 零回归与红线：既有组头四图标/会话区/工单列表行为零回归；console 3099 零接触（改动上线=宿主择机
-   重启 console 生效，staleness banner 口径）；测试全走隔离台。
+1. Exactly three additions to the left column (no standalone page/tab/middle-column view; downgraded by host ruling 260904):
+   - **Group-header "Project Settings" entry**: a fifth icon, always visible, in the same row and same style as the four view icons; clicking opens the **project settings modal**
+     (read-only: key / display name / root directory + ticket counts [in-flight / completed / archived; when Temporal is unreachable, degrade to a "—" hint, not red] +
+     health-check area + a danger area at the bottom, "Remove project…"). This cycle the settings modal is read-only; an editor = Nongoal.
+   - **"＋ Onboard project" row**: at the end of the project group list, a boxed ＋ with the same wording as the session area inside a group; the modal form includes a pre-check dry-run,
+     and the six classes of rejection error are shown in place (no need to dig through backend logs), while warnings do not block; on success the new project group appears in the left column immediately.
+     An empty/fully-quarantined registry still renders this row (the first project onboarding happens precisely on an empty registry).
+   - **Quarantine row**: loader-quarantined keys are presented as a red row; clicking opens a modal with the reason (including how to locate `<dir>/project.yaml`
+     and how to repair it); while a key is quarantined there is no group header and no settings entry (there is no loaded entry to configure).
+2. **All four removal steps happen inside the modal** (entered from the danger area of the settings modal): the in-flight gate result (a refusal reports ticket numbers; when Temporal is
+   unreachable the fail-closed wording includes the "run sandbar up first" guidance) → disposition checkboxes (all preserved by default) → the dry-run manifest (what will be deleted / kept) shown first
+   → after ticking purge, the key must be typed for a second confirmation; the execution result uses the same stance as the CLI (same source as `--json`).
+   Onboarding modal pre-check stance (revised by t260904-15 arbitrate gen1 F1): the CLI `project add` has no `--dry-run` flag
+   (adding one = a cross-write-set change, so the ruling item is escalated to host/epic) — the pre-check is downgraded to a **modal-local shape check** (key whitelist regex /
+   absolute root path / non-empty; nothing written to disk, no CLI call, and it does not implement the CLI's validation semantics); on confirmation the CLI does the deep validation
+   (existence / crossing / duplicate / legacy) and shows the result in place.
+3. **One unified icon family** (acceptance 11b): five SVG line icons (ticket list / knowledge base / model routes / epic proposals / project settings),
+   one shared spec: viewBox 20×20 · stroke=currentColor · stroke width 1.6 · round caps and joins · fill none · rendered at 18px ·
+   hit area 26×26 (radius 6) · three states (idle/hover/active) · identifiable via title+aria-label; settings = sliders (three tracks with offset
+   knobs), routes = forking with an arrow (mock v5 revision 11 redraw, final: a spoked gear looked like a sun and a node link looked like share, both avoided).
+   The four existing view icons show zero behavior regression after the swap (the ticket list icon's back-to-list linkage semantics stay as before); emoji
+   references in render sites and comments are reduced to zero (three files: sidebar/index/epics; index's 🤖⚙️👤 executor badges are outside the icon family and exempt).
+4. **Single-source thin shell on the write path** (decision 8): the workbench host write route spawns `sandbar project add|remove --json`
+   (the real entry = the repo-root `sandbar` thin shell → installer.cli; zero validation/gate logic on the UI side), and the CLI's rejection error bodies are passed through and shown in place;
+   the registry read face goes through the TS loader (GET /wf/projects, whose consumer is the loader itself, preventing two copies from drifting) and is extended with quarantined entries;
+   ticket counts are a Temporal query = CLI-only data, so the host read route spawns `sandbar project list --json` to fetch them from a single point
+   (the spawn is the same source rather than a second copy, so it does not violate decision 8's registry read-face stance). Write routes do not enter the tool bridge (agents are not a consumer).
+5. Zero regression and red lines: the existing group-header four icons / session area / ticket list behave with zero regression; console 3099 is untouched (changes take effect when the host
+   chooses to restart the console; staleness banner stance); all tests go through the isolated instance.
 
-## Nongoal（不做什么）
+## Nongoal
 
-- 不做项目设置编辑器（name/paths/roles 改写）——与「自述字段编辑等真实需求」同口径，本期设置弹层只读。
-- 不建独立项目管理页/tab/中列视图；不做批量操作、拖拽、跨机迁移向导。
-- 不在 UI/路由侧实现任何校验/闸/体检逻辑（薄壳红线）：六类拒收、在飞闸、purge 前置闸全在 CLI 侧；
-  接入预检仅为本地形状白名单检查（见 Requirement 2 修订口径），非 CLI 校验语义的复刻。
-- 体检 chips 本期降档为「体检数据源未接入」中性提示位——CLI list 暂无体检字段（体检黄牌只在 add
-  一次性报告），「CLI list --json 增 projects[].health 字段」为跨写集改动，待宿主/epic 追加裁定后
-  小票补齐（UI 已留渲染位，届时零结构改动）。epic 验收 11 该子项以降档口径交付，非静默偏离。
-- 不改契约 schema 版本（摘除语义=契约 ①a-1，v1.9 已落账）。
+- No project settings editor (rewriting name/paths/roles) — same stance as "real needs such as editing self-declared fields"; this cycle the settings modal is read-only.
+- No standalone project management page/tab/middle-column view; no batch operations, drag-and-drop, or cross-machine migration wizard.
+- No validation/gate/health-check logic on the UI or route side (thin-shell red line): the six rejection classes, the in-flight gate and the purge precondition gate all live on the CLI side;
+  the onboarding pre-check is only a local shape whitelist check (see the revised stance in Requirement 2), not a replica of the CLI's validation semantics.
+- The health-check chips are downgraded this cycle to a neutral placeholder saying "health data source not wired up" — CLI list has no health field yet (health warnings are only reported
+  once, at add time), and "add a projects[].health field to CLI list --json" is a cross-write-set change that a small ticket will complete after the host/epic rules on it
+  (the UI already reserves the render slot, so zero structural change will be needed then). Acceptance item 11 of the epic is delivered with this downgraded stance, which is not a silent deviation.
+- The contract schema version is not changed (removal semantics = contract ①a-1, already booked in v1.9).
 
-## Proposal（方案）
+## Proposal
 
-### 入口与组件
+### Entries and components
 
-| 面 | 落点 | 内容 |
+| Face | Where it lands | Content |
 |---|---|---|
-| 图标族 | `src/client/project-icons.tsx` | 五枚 SVG 组件 + 规格常量单源（viewBox/线宽）+ PROJECT_ICON_SPECS（title=aria-label） |
-| 左栏三处 | `src/client/sidebar.tsx` | 组头第五枚设置入口（data-wb-project-settings-entry）、「＋ 接入项目」行（data-wb-project-add-row）、隔离红行（data-wb-quarantine-row）；数据源=GET /wf/projects 的 projects+quarantined（loadRegistry()，空/全隔离不 500） |
-| 四弹层 | `src/client/project-modals.tsx` | 设置（只读+票计数降级+体检占位+danger 区）/接入（预检 dry-run+就地错误）/摘除（四步状态机 gate→dispose→dry→confirm→executing）/隔离详情 |
-| host 路由 | `node.ts` + `src/host/project-admin.ts` | GET /wf/projects（注册表+隔离条目）；GET /wf/projects/detail?key=（票计数，spawn CLI list --json）；POST /wf/projects/add|remove（写面，dry_run/purge_data/purge_credentials/confirm_last 旗与 CLI 一一对应） |
+| Icon family | `src/client/project-icons.tsx` | five SVG components + single-source spec constants (viewBox / stroke width) + PROJECT_ICON_SPECS (title=aria-label) |
+| Three additions in the left column | `src/client/sidebar.tsx` | the fifth group-header settings entry (data-wb-project-settings-entry), the "＋ Onboard project" row (data-wb-project-add-row), the quarantine red row (data-wb-quarantine-row); data source = projects+quarantined from GET /wf/projects (loadRegistry(), no 500 when empty/fully quarantined) |
+| Four modals | `src/client/project-modals.tsx` | settings (read-only + ticket count degrade + health placeholder + danger area) / onboarding (pre-check dry-run + in-place errors) / removal (four-step state machine gate→dispose→dry→confirm→executing) / quarantine details |
+| host routes | `node.ts` + `src/host/project-admin.ts` | GET /wf/projects (registry + quarantined entries); GET /wf/projects/detail?key= (ticket counts, spawn CLI list --json); POST /wf/projects/add|remove (write face; the dry_run/purge_data/purge_credentials/confirm_last flags map one-to-one onto the CLI) |
 
-### spawn 薄壳故障模式口径（runProjectCli，取舍真源=create_plan gen1 R1-①）
+### spawn thin-shell failure-mode stance (runProjectCli; source of truth for the tradeoff = create_plan gen1 R1-①)
 
-repo 锚定=node.ts `config?.repo ?? SANDBAR_REPO ?? DEFAULT_REPO` 同源传入（cwd=repo、entry=`<repo>/sandbar`，
-防异仓执行错注册表）；超时 30s（非 admin CLI 的 300s），文案点名「CLI 执行超时」；四终态全回收——正常=解析
-stdout，超时=SIGTERM+await exit 转 504，取消=AbortSignal 转 499（均不留僵尸，UT 断言用时）；stdout 畸形/
-超 16MB=转 502 精确文案不裸抛堆栈。**非零退出按 exit 码分流**（arbitrate gen1 F3 定稿）：
-JSON 错误体（FailClosed 机器口径）→ 409 原体透传；exit 1 且人话非 JSON → 409+原文转述（用户输入拒收≠
-上游故障；票① add 拒收现状输出 `[红]` 人话，JSON 化为跨票契约缺口已上报）；exit 2 → 502「参数错误」
-（argparse 用法错=路由 argv 拼装与 CLI 契约不符，是路由自己的 bug）；旗标断言锚真 CLI `--help`
-（UT A0 用例实跑，防 stub 把错误 argv 钉成期望——arbitrate gen1 UT 盲区教训）。
+repo anchoring = `config?.repo ?? SANDBAR_REPO ?? DEFAULT_REPO` in node.ts, passed in from the same source (cwd=repo, entry=`<repo>/sandbar`,
+so that running from another repo cannot hit the wrong registry); timeout 30s (versus the admin CLI's 300s), with the wording naming "CLI execution timed out";
+all four terminal states are reclaimed — normal = parse stdout, timeout = SIGTERM + await exit turned into 504, cancellation = AbortSignal turned into 499
+(no zombies left in any case, asserted with elapsed time in UT); malformed stdout / over 16MB = turned into 502 with precise wording, never a bare stack throw.
+**Non-zero exits are routed by exit code** (settled by arbitrate gen1 F3):
+a JSON error body (the FailClosed machine stance) → 409 with the original body passed through; exit 1 with plain-language non-JSON → 409 plus a restatement of the original text (a rejected
+user input ≠ an upstream fault; ticket ①'s add rejection currently prints `[红]` plain language, and turning it into JSON is an already-reported cross-ticket contract gap);
+exit 2 → 502 "bad parameters" (an argparse usage error = the route's argv assembly does not match the CLI contract, i.e. a bug in the route itself); flag assertions are anchored on the real CLI `--help`
+(UT case A0 runs it for real, so a stub cannot pin a wrong argv as the expectation — the arbitrate gen1 UT blind-spot lesson).
 
-### 交互与确认口径
+### Interaction and confirmation stance
 
-- 弹层骨架=session-entry 确认弹层先例：在飞禁点（busy disabled、结果驱动关闭）、ESC/遮罩关闭、错误就地显示；
-  **执行中（executing）弹层锁定**（ESC/遮罩/✕ 全禁），防半途弃置假示完成。
-- 摘除处置勾选默认全不勾（默认=可逆摘除：只退役注册条目，数据全保留）；任一 purge 勾选后确认钮需输入
-  key 逐字匹配才可用；dry-run 清单先于确认展示。
-- 语义锚：弹层锚 data-wb-pmod-*（smoke/project-modals.mjs 断言面），零 CSS 类名与出厂交叉。
+- Modal skeleton = the session-entry confirmation modal precedent: clicking is disabled while in flight (busy disabled, result-driven close), ESC/overlay closes, errors show in place;
+  **during execution the modal is locked** (ESC/overlay/✕ all disabled), preventing an abandoned half-done removal from faking completion.
+- The removal disposition checkboxes are all unticked by default (default = reversible removal: retire the registry entry only, keep all data); once any purge box is ticked, the confirm button
+  requires the key to be typed and matched exactly before it becomes usable; the dry-run manifest is shown before confirmation.
+- Semantic anchors: modals are anchored on data-wb-pmod-* (the assertion face for smoke/project-modals.mjs), with zero CSS class-name cross-over with factory styles.
 
-### 图标族配色口径
+### Icon family color stance
 
-图标本体吃 currentColor，几何规格（viewBox/线宽/显形/命中区/圆角）统一是本票契约；mock 规格卡的三态配色
-（idle #57606a / hover #0969da+#f0f6ff / active #0969da）为 mock 浅色语境定稿，侧栏深色语境沿用其既有
-三态色板（换装零回归优先）——如需对齐浅色卡配色，随主题化票处置。
+The icon bodies consume currentColor, and the geometric spec (viewBox / stroke width / render size / hit area / corner radius) is unified as this ticket's contract; the three-state colors of the mock
+spec card (idle #57606a / hover #0969da+#f0f6ff / active #0969da) were settled for the mock's light-theme context, while the dark-theme sidebar keeps its existing three-state palette
+(zero regression on swap takes priority) — if alignment with the light card palette is wanted, handle it in the theming ticket.
 
-### 测试与验收映射
+### Test and acceptance mapping
 
-- UT：`tests/project-admin.mjs`（spawn 四终态+畸形输入 17 断言）、`tests/project-routes.mjs`（三路由契约
-  +空注册表+隔离条目 21 断言）、`tests/project-icons.mjs`（图标族规格+emoji 清零 29 断言）。
-- smoke：`smoke/project-modals.mjs`（四弹层语义锚+确认纪律 29 断言）。
-- 集成：`integration/t260904-15/` 三场景（host 路由契约/左栏三处+接入摘除旅程/设置面+隔离+空注册表首接），
-  run_scenarios.py 登记制、SUMMARY 末行契约、playwright-core 缺失=干净 SKIP（KI-036 守卫）。
-- 验收 11/11b/12/13/14 逐条对应关系见各场景 intent 字段。
+- UT: `tests/project-admin.mjs` (spawn four terminal states + malformed input, 17 assertions), `tests/project-routes.mjs` (three-route contract
+  + empty registry + quarantined entry, 21 assertions), `tests/project-icons.mjs` (icon family spec + emoji cleared, 29 assertions).
+- smoke: `smoke/project-modals.mjs` (four modal semantic anchors + confirmation discipline, 29 assertions).
+- Integration: three scenarios under `integration/t260904-15/` (host route contract / three left-column additions + onboarding-and-removal journey / settings face + quarantine + first onboarding on an empty registry),
+  registered through run_scenarios.py, contract on the last line of SUMMARY, playwright-core missing = clean SKIP (KI-036 guard).
+- The item-by-item correspondence for acceptance 11/11b/12/13/14 is in each scenario's intent field.

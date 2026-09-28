@@ -145,8 +145,8 @@ section('B review 存读 round-trip（临时目录）')
   const tmp = await mkdtemp(join(tmpdir(), 'kb-review-'))
   try {
     const docsDir = join(tmp, 'docs')
-    const p = 'design/知识库设计.md'
-    ok(reviewFilePath(docsDir, p).endsWith(join('docs', 'reviews', 'design__知识库设计.md.json')), '文件名 / → __ 映射')
+    const p = 'design/knowledge-base-design.md'
+    ok(reviewFilePath(docsDir, p).endsWith(join('docs', 'reviews', 'design__knowledge-base-design.md.json')), '文件名 / → __ 映射')
     const empty = await loadReview(docsDir, p)
     ok(empty.rounds.length === 0, '未存过 → 空 rounds（非错误）')
     await appendReviewRound(docsDir, p, {

@@ -1,156 +1,164 @@
 ---
-title: "右栏会话入口与 New Session hero 定制"
+title: "Right Column Session Entry and New Session hero Customization"
 category: design
 tags:
   - dsh
-  - 工单台
-  - 会话
+  - ticket console
+  - session
 status: draft
-updated: 2026-08-29
+updated: 2026-09-28
 ---
 
-# 右栏会话入口与 New Session hero 定制（epic）
+# Right Column Session Entry and New Session hero Customization (epic)
 
-> 2026-08-25 立项。起源：用户三连问——刷新后右栏 chat 的会话丢了找不回、
-> 点工单会不会建一堆 session 泄露资源、顶上那个 New Session 按钮太大能不能定制。
-> 本文是问题与方案的沉淀，实现走工单。相关：[[工单工作流台设计]]（侧栏三栏布局的出处）。
-> 来源立项：session-entry（决策缘由见 notes/epics/session-entry.md）
+> Opened 2026-08-25. Origin: the user's three questions in a row — after a refresh the sessions
+> in the right-column chat are lost and cannot be found again; does clicking a ticket create a
+> pile of sessions and leak resources; the New Session button at the top is rather large, can it
+> be customized. This document is the sediment of the problem and the proposal; implementation
+> goes through tickets. Related: [[ticket-workflow-console-design]] (source of the three-column
+> sidebar layout). Origin epic: session-entry (decision rationale in notes/epics/session-entry.md)
 
 ## 1. Problem
 
-**一句话**：右栏 chat 的会话是「一次性」的——页面一刷新，当前会话从视野里消失，
-没有任何 UI 入口能回去；同时无会话时落在的出厂 New Session 落地页（hero）
-要被整体更换——用户需要的只是：在当前项目下，一键打开、并在自己打开过的
-少数几个会话之间快速切换。
+**One sentence**: sessions in the right-column chat are "one-shot" — the moment the page is refreshed, the current
+session disappears from view and no UI entry can get back to it; at the same time, the factory New Session landing
+page (hero) you land on when there is no session is to be replaced wholesale — what the user actually needs is only
+this: under the current project, open a session in one click, and switch quickly among the few sessions they have
+opened themselves.
 
-**背景知识**（没参与过的人需要知道）：
+**Background knowledge** (what someone who was not involved needs to know):
 
-- dsh console 的三栏布局是工单台插件改造出来的：左栏=工单台侧栏，中栏=三视图，
-  右栏=chat。左栏这个位置本来是 dsh 出厂的「工作区浏览器」
-  （按工作区分组的会话列表，带搜索和新会话按钮），工单台侧栏用插件槽的优先级
-  机制把它顶掉了——顶掉的同时，也顶掉了**唯一现成的会话找回入口**。
-- dsh 里的会话分两类：**工单会话**（点工单开出，id 固定为 `ticket-<工单id>`，
-  一张工单一个，重复使用，不会点一次建一个——已查实无泄露）；**项目会话**
-  （用户在 UI 上主动打开的自由聊天，归属项目——新建落在项目主目录）。
-  本文只管后者。它**跟项目走**，不是全局资源池。
-- 会话本体存在服务端磁盘上，刷新不会丢数据；丢的是「入口」。
-- 无会话（或会话没恢复回来）时，右栏落在一个落地页（hero）：大标题 +
-  大输入卡 + 工作区/preset 选择器，体量占满整栏。口径（t260829-06 修订；本句
-  原「这个出厂形态要被更换，不是共存」经 t260828-06→t260829-01 实证不可达）：
-  hero 上全部可接管槽由插件槽位替换，大标题/大输入卡这两个无槽元素在 dsh
-  提供接管面之前允许共存。
+- The three-column layout of the dsh console was remodeled by the ticket console plugin: left column = ticket console sidebar,
+  middle column = three views, right column = chat. The left-column slot was originally dsh's factory "workspace browser"
+  (a session list grouped by workspace, with search and a new-session button), and the ticket console sidebar pushed it out
+  through the plugin-slot priority mechanism — and in doing so it also pushed out **the only ready-made session recovery entry**.
+- Sessions in dsh come in two kinds: **ticket sessions** (opened by clicking a ticket, id fixed as `ticket-<ticket id>`,
+  one per ticket, reused, not one per click — verified: no leak); **project sessions**
+  (free chat the user opens on the UI, owned by the project — a new one lands in the project's main directory).
+  This document deals only with the latter. It **follows the project**; it is not a global resource pool.
+- The session itself lives on the server's disk, so a refresh loses no data; what is lost is the "entry".
+- With no session (or when a session did not come back), the right column lands on a landing page (hero): a big title +
+  a big input card + workspace/preset selectors, filling the whole column. Stance (revised by t260829-06; the original sentence
+  "this factory form is to be replaced, not coexisted with" was proven unattainable by t260828-06→t260829-01):
+  every takeover-able slot on the hero is replaced by a plugin slot, while the big title and the big input card, the two
+  slot-less elements, are allowed to coexist until dsh provides a takeover surface for them.
 
-**证据**：
+**Evidence**:
 
-- 实测：刷新后右栏回到空白落地页，左栏工单台没有会话列表，自由会话回不去。
-- dsh 自身其实会把当前会话记进浏览器本地存储，但刷新恢复依赖会话列表先同步
-  回来的时序，对不上就回落空白——所以不能指望它。
-- 磁盘上存量的会话不少（历史遗留、他途所建），但存量 ≠ 该显示的——
-  只有用户在 UI 上主动打开的会话才是「用户的会话」，才该进切换列表。
+- Measured: after a refresh the right column returns to a blank landing page, the left-column ticket console has no session list, and free sessions cannot be reached again.
+- dsh itself does record the current session in browser local storage, but refresh recovery depends on the session list syncing back first; when the timing is off it falls back to blank — so it cannot be relied on.
+- Quite a few sessions are stored on disk (historical leftovers, sessions created by other means), but existing ≠ what should be shown —
+  only sessions the user opened on the UI are "the user's sessions", and only those belong in the switch list.
 
 ## 2. Requirement
 
-**目标（可验证）**：
+**Goals (verifiable)**:
 
-1. 刷新页面后，不用任何记忆，能从常驻入口回到任意一个自己主动打开过的会话。
-2. 新建一个会话是一键动作，新会话落在当前项目主目录。
-3. 会话切换入口按当前项目归属、只列用户在 UI 上主动打开的，不超过 5 个，
-   当前活跃的有高亮。
-4. 顶部的出厂 New Session 落地页被**槽位替换**（t260829-06 修订口径；原文
-   「整体更换——大标题大卡形态不再出现」经实证不可达，见 §1 与附录）：hero
-   上全部三个可接管槽（工作区选择器、preset 选择器、品牌标）由本插件优先级
-   抢占接管，工作区槽位渲染本插件的紧凑会话入口；大标题/大输入卡在 dsh
-   提供可接管槽之前允许共存（t260828-06 的样式压制方向已证伪并禁止）。
-5. 工单会话入口（260904 随 t260903-07 落地修订；原文「点工单开带上下文的会话，行为不变」已被推翻）：点击工单**不再切换右侧 chat**——右侧恒为单全局会话、上下文不动；点工单只在中列开工单详情抽屉（左列工单行 / 立项单关联行 / 度量下钻三个入口行为一致）。每工单会话的客户端联动入口已下线（`openTicketSessionFlow` 删除，客户端无 `ticket-session/open` 调用方）。
-6. 全部改动在工单台插件内闭环，不改 dsh 安装树任何文件。
+1. After refreshing the page, with no memorization at all, one can get from a persistent entry back to any session one has opened.
+2. Creating a session is a one-click action, and the new session lands in the current project's main directory.
+3. The session switch entry is scoped to the current project, lists only what the user opened on the UI, holds no more than 5, and highlights the currently active one.
+4. The factory New Session landing page at the top is **slot-replaced** (stance revised by t260829-06; the original text
+   "replaced wholesale — the big-title big-card form no longer appears" was proven unattainable, see §1 and the appendix):
+   all three takeover-able slots on the hero (workspace selector, preset selector, brand mark) are taken over by this plugin
+   preempting them by priority, and the workspace slot renders this plugin's compact session entry; the big title / big input
+   card are allowed to coexist until dsh provides a takeover-able slot (t260828-06's style-suppression direction has been
+   falsified and is prohibited).
+5. Ticket session entry (revised 260904 as t260903-07 landed; the original "clicking a ticket opens a session with context,
+   behavior unchanged" has been overturned): clicking a ticket **no longer switches the right-hand chat** — the right side is
+   always a single global session whose context does not move; clicking a ticket only opens the ticket detail drawer in the
+   middle column (the three entries — left-column ticket row / epic-proposal related row / metrics drill-down — behave
+   identically). The client-side linkage entry for per-ticket sessions has been retired (`openTicketSessionFlow` deleted;
+   the client has no caller of `ticket-session/open`).
+6. All changes stay closed inside the ticket console plugin; no file in the dsh installation tree is modified.
 
-**Stakeholder**：
+**Stakeholders**:
 
-- 用户（总管）：要的是「少数几个会话、一眼切换」，不要完整会话管理器。
-- 工单系统（260904 修订）：右侧恒为单全局会话，工单侧只走中列详情抽屉——工单会话与全局会话的界限由「入口分离」保证（原「界限不被搅混」的联动形态已随 t260903-07 下线）。
-- 将来的 dsh 升级：定制失效时必须软退化（样式回弹、功能不崩）。
+- User (the host): what they want is "a few sessions, switch at a glance", not a full session manager.
+- Ticket system (revised 260904): the right side is always a single global session, and the ticket side goes only through the middle-column detail drawer — the boundary between ticket sessions and the global session is guaranteed by "separate entries" (the original linkage form, "the boundary is not muddled", went offline with t260903-07).
+- Future dsh upgrades: when the customization breaks it must soft-degrade (styles bounce back, functionality does not crash).
 
-**前置限制**：不动 dsh 本体（只用插件机制）；console（3099）重启由用户执行；
-交付过 verify_lane code 四件套。
+**Upfront constraints**: do not touch the dsh core (use only the plugin mechanism); restarting the console (3099) is done by the user;
+deliver the verify_lane code four-piece set.
 
 ## 3. Nongoal
 
-- 不做完整会话列表 / 搜索 / 归档——不把出厂工作区浏览器的能力整套搬回来。
-- 工单会话的语义与数据不变（t260903-07 后仍成立）：服务端 `ticket-session/open` 路由与 `ticketContext` 保留、既有 `ticket-*` 会话数据零删除、find-or-create 不变——下线的只是「点工单触发它」这层客户端联动。
-- 本期不做会话删除/清理 UI（会话数量靠人工维持，量级无关痛痒）。
-- 不做会话跨项目迁移、不按工作区分组（项目归属 = cwd 口径，不是分组浏览器）。
+- No full session list / search / archive — do not bring the whole capability set of the factory workspace browser back.
+- The semantics and data of ticket sessions are unchanged (still true after t260903-07): the server-side `ticket-session/open` route and `ticketContext` are kept, existing `ticket-*` session data is not deleted at all, and find-or-create is unchanged — what went offline is only the client-side linkage layer "clicking a ticket triggers it".
+- No session delete/cleanup UI this cycle (session count is maintained by hand; the magnitude is nothing to worry about).
+- No cross-project session migration, no grouping by workspace (project ownership = cwd stance, not a grouping browser).
 
 ## 4. Proposal
 
-**High level**：两个定制面，都在工单台插件内。
+**High level**: two customization faces, both inside the ticket console plugin.
 
-1. **侧栏加「会话」区（常驻入口，解决找回）**：左列工单区之外加一个小区块——
-   一个新建按钮 + 当前项目最近打开的会话切换按钮（上限 5，活跃高亮）。
-   数据**不是**客户端全量会话列表的过滤——磁盘存量（历史遗留、他途所建）
-   不进列表；列表 = 用户通过 UI 主动打开的会话，**插件自己记账**（按项目分册、
-   MRU 排序），点击在右栏打开。这是主入口：常驻、刷新后还在，根治「回不去」。
-2. **槽位替换顶部 New Session（hero）**（t260829-06 修订）：出厂 hero 的三个
-   可接管插件槽（工作区选择器、preset 选择器、品牌标）全部由本插件以与左栏
-   相同的优先级抢占机制接管：工作区槽渲染紧凑会话入口（新建按钮 + 同一组
-   项目会话切换按钮，复用侧栏账册 hook），preset/品牌标槽让空。**不做任何
-   出厂元素 CSS 压制**（后缀子串类名压制已证伪，见附录）——大标题/大输入卡
-   共存，属修订口径声明项；出厂大卡发出的首条消息所建会话仍不进账册
-   （共存残留，非静默降级，文档明示）。
+1. **Add a "Sessions" section to the sidebar (persistent entry, solves recovery)**: a small block outside the ticket section in the left column —
+   a new-session button + switch buttons for the current project's recently opened sessions (cap 5, active highlighted).
+   The data is **not** a filter over the client's full session list — disk leftovers (historical, created by other means) never
+   enter the list; the list = sessions the user opened through the UI, **book-kept by the plugin itself** (per-project ledger,
+   MRU order), and clicking opens one in the right column. This is the main entry: persistent, still there after a refresh,
+   curing "cannot get back" at the root.
+2. **Slot-replace the top New Session (hero)** (revised by t260829-06): all three takeover-able plugin slots of the factory hero
+   (workspace selector, preset selector, brand mark) are taken over by this plugin using the same priority-preemption mechanism as
+   the left column: the workspace slot renders the compact session entry (new-session button + the same group of project-session
+   switch buttons, reusing the sidebar ledger hook), and the preset/brand slots are left empty. **No CSS suppression of any
+   factory element** (suffix-substring class-name suppression has been falsified, see the appendix) — the big title / big input
+   card coexist, which is a declared item of the revised stance; a session created by the first message sent from the factory big
+   card still does not enter the ledger (a coexistence leftover, not a silent degrade, stated explicitly here).
 
-**关键取舍**：
+**Key tradeoffs**:
 
-- 入口放两处（侧栏常驻 + hero 更换为同一组按钮）而不是只改 hero——因为 hero 只在
-  无会话时出现，单改 hero 解决不了「有会话时切换」和「刷新找回」。
-- 会话跟项目走：列表与新建都归属当前项目（cwd = 项目主目录），与侧栏既有
-  「按行项目分流」一致；不做全局会话池。
-- 列表 = 主动打开（插件记账）而不是全量枚举——用户打开过的才是「用户的会话」；
-  磁盘存量、工单会话、subagent 会话一律不进。记账按 MRU 自然收敛，
-  不引入置顶/钉选概念。
-- hero 槽位替换不做任何出厂元素样式压制（t260829-06 定稿；原「样式压制走
-  语义锚点」方向已证伪——t260828-06 的后缀子串规则误伤出厂 chat 唯一入口，
-  交叉面不可收敛，附录已标注）。软退化模型（来源：t260828-06 hero 版实现，
-  非左栏先例——左栏注册无 try/catch）：槽契约变化 → register throw 被插件
-  catch → 出厂元素回弹，功能不崩。
-- preset/品牌标槽让空后，hero 上出厂 preset 选择能力被移除——这是**功能性
-  损失**（不属于共存残留），本修订人审时用户已确认接受。
+- Put the entry in two places (persistent in the sidebar + hero replaced with the same button group) rather than changing the hero only — because the hero appears only when there is no session, and changing the hero alone cannot solve "switch while a session exists" or "recover after a refresh".
+- Sessions follow the project: both the list and new-session creation belong to the current project (cwd = project main directory), consistent with the sidebar's existing "per-row project routing"; no global session pool.
+- List = actively opened (plugin bookkeeping) rather than a full enumeration — only what the user opened counts as "the user's sessions";
+  disk leftovers, ticket sessions and subagent sessions never enter. The ledger converges naturally by MRU, and no
+  pin/pin-to-top concept is introduced.
+- Hero slot replacement does no style suppression of any factory element (settled by t260829-06; the original direction
+  "style suppression via semantic anchors" has been falsified — t260828-06's suffix-substring rule hit the factory chat's only
+  entry by mistake, and the cross section cannot converge; annotated in the appendix). Soft-degrade model (source: the
+  t260828-06 hero-version implementation, not the left-column precedent — the left column registers without try/catch):
+  slot contract changes → register throws, the plugin catches it → factory elements bounce back, functionality does not crash.
+- After the preset/brand slots are left empty, the factory preset-selection capability is removed from the hero — this is a
+  **functional loss** (not a coexistence leftover), which the user confirmed as acceptable at human review of this revision.
 
-**风险与对策**：
+**Risks and mitigations**:
 
-- 槽接管依赖 dsh 的槽结构稳定：升级可能失效 → 软退化可接受，失效即回弹
-  出厂形态（try/catch 放在 slots.inject 回调体内——inject 回调在槽未声明时
-  于声明方 register() 内延迟执行，包在 inject() 外的 catch 接不到，
-  见 @deepseek-ai/dsh-client-runtime slots.d.ts inject 契约）。
-- 从未发过消息的空会话在 dsh 列表语义里会被隐藏：接受这个语义
-  （空会话不值得留），或建会话时先不落盘、等首条消息——实现时定。
-- 「主动打开」的记账存放（宿主端文件或客户端存储）需刷新/重启不丢——
-  实现时定；记账是本设计的成立条件，不是可选项。
+- Slot takeover depends on dsh's slot structure being stable: an upgrade may break it → soft degrade is acceptable, and on
+  failure it bounces back to the factory form (put the try/catch inside the slots.inject callback body — when the slot is not
+  declared, the inject callback runs lazily inside the declaring party's register(), so a catch wrapped outside inject() never
+  sees it; see the @deepseek-ai/dsh-client-runtime slots.d.ts inject contract).
+- A blank session that never sent a message is hidden by dsh's list semantics: accept that semantics
+  (a blank session is not worth keeping), or do not persist the session at creation and wait for the first message —
+  to be decided at implementation time.
+- Where the "actively opened" bookkeeping lives (a host-side file or client storage) must survive refresh/restart —
+  to be decided at implementation time; the ledger is a precondition for this design to hold, not an option.
 
-**回扣**：侧栏常驻会话区（项目归属 + 主动打开记账）→ 满足目标 1/2/3；
-hero 三槽槽位替换 → 满足目标 4（修订口径）；两个面都只动插件 → 满足目标 6；
-工单会话路径不碰 → 满足目标 5、避开 Nongoal 的越界项。
+**Tie-back**: the persistent sidebar session section (project ownership + actively-opened ledger) → satisfies goals 1/2/3;
+hero three-slot replacement → satisfies goal 4 (revised stance); both faces touch only the plugin → satisfies goal 6;
+the ticket-session path is untouched → satisfies goal 5 and avoids the Nongoal overreach items.
 
-## 附录：关键查证记录（实现工单直接引用，不必重查）
+## Appendix: Key verification record (implementation tickets can cite directly, no need to re-check)
 
-> 本附录是 2026-08-25 的代码实查结论，属于「不写就会做错」的细节。
-> t260829-06 起逐条标注效力：【有效】照常引用；【已证伪】禁止再引用。
+> This appendix is the code-investigation conclusion of 2026-08-25, a "you will get it wrong if you do not write it down" detail.
+> From t260829-06 on, each item carries a validity tag: [valid] cite as usual; [falsified] no longer citable.
 
-- 【有效】工单会话无泄露实锤：宿主端按 `ticket-<工单id>` 建/找会话，已有即复用；
-  现存量 8 个，整个会话目录 90M（大头是历史存量会话）。
-- 【有效】左栏抢占先例：工单台在侧栏槽以 priority=-10 顶掉了出厂浏览器
-  （单槽「最低优先级者渲染」），hero 三个槽同为单槽，同机制可接管。
-- 【有效】hero 可接管槽三个：工作区选择器、preset 选择器、品牌标。
-- 【已证伪，t260828-06→t260829-01】样式锚点：会话根元素有 `data-phase="hero"`
-  语义属性属实，但「样式类名的语义后缀跨构建稳定——样式选择器以后缀子串
-  匹配写」这条**规范性表述作废，禁止再做任何出厂元素样式压制**：实测
-  `[class$="hero"]` 把出厂 chat 唯一入口（大输入卡，variant 类 `<哈希>_hero`）
-  display:none；`[class*="workspace"]`/`[class*="headline"]` 等 contains 匹配与
-  出厂组件类名全集交叉面极大、方向上不可收敛。hero 更换一律只走槽位替换。
-- 【有效】dsh 有「当前会话」的浏览器本地持久化（store 名 dsh.conversation.chat），
-  但恢复有时序竞争，不能当找回路径，只能当优化。
-- 【有效】空会话（blank）在出厂列表逻辑里只显示当前选中的那个。
-- 【有效】新建会话若客户端能力不足，在宿主端仿「工单会话开/找」端点加一个
-  不带工单前缀、不注入工单上下文的版本（已落地：global-session/open）。
-- 【已过时（t260828-02 起不成立），保留备查】侧栏「会话」区数据源 =
-  ctx.sessions.list 过滤（全量枚举口径）——现实现已是插件自建账册
-  （localStorage MRU，只列 UI 主动打开），本条仅说明 ctx.sessions.list 不带
-  「是否 UI 主动打开」信息这一事实，该事实仍有效。
+- [valid] Hard evidence that ticket sessions do not leak: the host side creates/finds a session by `ticket-<ticket id>` and reuses an existing one;
+  there are 8 on disk now, and the whole session directory is 90M (the bulk being historical sessions).
+- [valid] Left-column preemption precedent: the ticket console pushed the factory browser out of the sidebar slot with priority=-10
+  ("the lowest-priority one renders" for a single slot); the hero's three slots are single slots too, so the same mechanism can take them over.
+- [valid] Three takeover-able hero slots: workspace selector, preset selector, brand mark.
+- [falsified, t260828-06→t260829-01] Style anchors: it is true that the session root element has a `data-phase="hero"`
+  semantic attribute, but the **normative statement** "style class-name semantic suffixes are stable across builds, so write style
+  selectors by suffix-substring matching" is void, **and any further style suppression of factory elements is prohibited**: it was
+  measured that `[class$="hero"]` sets display:none on the factory chat's only entry (the big input card, whose variant class is
+  `<hash>_hero`); contains matches such as `[class*="workspace"]`/`[class*="headline"]` have an extremely large cross section with
+  the full set of factory component class names and cannot converge in that direction. Hero replacement always goes through slot
+  replacement only.
+- [valid] dsh has browser-local persistence of the "current session" (store name dsh.conversation.chat),
+  but recovery has a timing race, so it cannot serve as a recovery path — only as an optimization.
+- [valid] A blank session is shown as only the currently selected one in the factory list logic.
+- [valid] Creating a new session: when the client capability is insufficient, add a host-side endpoint modeled on "open/find a ticket session"
+  but without the ticket prefix and without injecting ticket context (already landed: global-session/open).
+- [obsolete (no longer holds from t260828-02), kept for reference] The data source of the sidebar "Sessions" section =
+  ctx.sessions.list filtered (full-enumeration stance) — the current implementation is a plugin-built ledger
+  (localStorage MRU, listing only UI-opened sessions); this item only documents the fact that ctx.sessions.list carries no
+  "was it opened on the UI" information, and that fact is still valid.

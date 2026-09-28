@@ -26,7 +26,7 @@
  * happy path + three states + zero-scenario + shape key sets; this baseline owns the
  * protocol-mutation faces (A tail/indent detail, B fallback, C inconsistency, E leak).
  *
- * Reference: docs/design/sandbar项目接入契约v1.md ②b-(a)（真源 verify_lane.py _integ
+ * Reference: docs/design/sandbar-project-onboarding-contract-v1.md ②b-(a)（真源 verify_lane.py _integ
  * 解析循环与红绿判据）；review_plan gen1 F2（汇总行=参考性，不构成判据）。
  */
 

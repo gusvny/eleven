@@ -42,7 +42,7 @@ SCAN_TOKENS = ("content-pipeline", "content_pipeline", "ContentPipelineTicketWor
 # 扫描面（写集五面中与模板可用面相关的部分；.suyou/notes 历史快照不入面）  # naming-compat
 SKIP_DIRS = {".venv", "__pycache__", ".dsh", ".suyou", "out", "bin", "node_modules"}  # naming-compat
 DOC_TWO = (
-    "docs/design/工单工作流台设计.md",
+    "docs/design/ticket-workflow-console-design.md",
     "docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
 )
 
@@ -59,7 +59,7 @@ ALLOW_FILES = {
     # 退役标注面（README/docs；场景另验标注在位，防豁免黑洞）
     "server/engine/README.md",
     "server/workflows/README.md",
-    "docs/design/工单工作流台设计.md",
+    "docs/design/ticket-workflow-console-design.md",
     "docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
     # v1 留存引擎样例（gen0 评审 R1 裁定：测 build_dispatch_prompt+STAGE_CLAUSES
     # 留存面，非模板可用性）与其知识常量 docstring（历史断链形态描述）

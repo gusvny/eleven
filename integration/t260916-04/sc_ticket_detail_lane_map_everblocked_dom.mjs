@@ -189,7 +189,7 @@ let currentWorkflows = null
 const AT_BLOCKED = '2026-09-15T23:57:07'
 const AT_LATER = '2026-09-15T23:58:30'
 const AT_BASE = '2026-09-15T23:50:00'
-const REASON_PROTECTED = '受保护路径闸拒绝落盘：docs/design/metrics-api契约v1.md'
+const REASON_PROTECTED = '受保护路径闸拒绝落盘：docs/design/metrics-api-contract-v1.md'
 
 const tle = (stage, state, reason = '', gen, phase, at = AT_BASE) => ({
   at, stage, state, reason,
@@ -292,7 +292,7 @@ const DETAIL_AUTHORIZED_ONLY = detailBase({
     tle('implement', 'done', '', 1, 'parallel_impl_design', AT_BLOCKED),
     tle('implement', 'blocked', REASON_PROTECTED, 1, 'parallel_impl_design', AT_BLOCKED),
     { at: AT_LATER, stage: 'implement', state: 'authorized',
-      reason: '人授权签发（kind=protected_path）：scope=写 docs/design/metrics-api契约v1.md 理由=宿主放行' },
+      reason: '人授权签发（kind=protected_path）：scope=写 docs/design/metrics-api-contract-v1.md 理由=宿主放行' },
   ],
   gens: { create_plan: 1, review_plan: 1, implement: 1 },
 })

@@ -1,185 +1,175 @@
 ---
-title: "失败分类协议 v1 与机械归属判定"
+title: "Failure Classification Protocol v1 and Mechanical Attribution"
 category: design
 tags:
-  - 失败分类
-  - 归属判定
-  - 集成闸
-  - 协议
-  - 结果台账
+  - failure classification
+  - attribution
+  - integration gate
+  - protocol
+  - result ledger
 status: active
-updated: 2026-09-22
+updated: 2026-09-28
 related:
-  - mode: 依赖
-    target: sandbar项目接入契约v1.md
-    note: verify.yaml 契约②a/integration 道
-  - mode: 实践参考
+  - mode: dependency
+    target: sandbar-project-onboarding-contract-v1.md
+    note: verify.yaml contract clause ②a / integration lane
+  - mode: practice reference
     target: ../testing-guide.md
-    note: 三态执行契约（t260904-12）
+    note: three-state execution contract (t260904-12)
 ---
 
-# 失败分类协议 v1 与机械归属判定
+# Failure Classification Protocol v1 and Mechanical Attribution
 
-## Problem（问题）
+## Problem
 
-260910 一天内三次误判实证（t260910-05 / t260910-10 / t260910-08）：
+Three misjudgments in a single day on 260910 (t260910-05 / t260910-10 / t260910-08):
 
-1. **并发环境瞬态当真红**——仲裁只能拿「文本行+退出码」人读猜，改分类器 6 轮超限转人工；
-2. **真红当环境噪声放行**——文档视图对比度 4 条子用例各 7 违例是真产品红，仲裁无 main 基线对照，被「环境噪声」话术放行；
-3. **凭时长特征判噪声**——5 条红被integration 凭时长特征判「噪声」，宿主质询后实测：两条 main 绿（真回归待隔离复跑定性）、一条 main 也红（既有欠账），且其中一条因产物陈旧预检拒跑（根本没检验到却报 FAIL）。
+1. **A transient concurrent-environment failure taken as a genuine red** — arbitration could only take "text lines + exit code" and guess by reading them; the classifier was patched six times, hit the round limit, and was escalated to a human;
+2. **A genuine red released as environment noise** — four sub-cases of the documentation-view contrast check, seven violations each, were a genuine product red; arbitration had no main baseline to compare against and let it through under the "environment noise" narrative;
+3. **Noise inferred from duration characteristics** — five reds were judged "noise" by integration on duration characteristics alone; after the host challenged it, actual measurement showed two were green on main (genuine regressions pending isolated re-runs to qualify), one was also red on main (pre-existing debt), and one refused to run because its pre-check found stale artifacts (it was never actually exercised, yet reported FAIL).
 
-根因两条：**失败信息非结构化**（文本+退出码，只能人读猜）；**ENV_FAIL 是天然免责标签**（无证据也无人拦）。
+Two root causes: **failure information is not structured** (text + exit code, readable only by guessing); and **ENV_FAIL is a natural exemption label** (nothing blocks it even without evidence).
 
-## Requirement（需求——契约面）
+## Requirement (the contract surface)
 
-**统一格式：一行 JSON = 一个用例**（唯一规范，唯一权威）。最小必需字段：
+**One uniform format: one line of JSON per test case** (the single canonical form, the single authority). Minimum required fields:
 
-| 字段 | 语义 |
+| Field | Semantics |
 |---|---|
-| name | 用例名（闸以此对齐基线，闸不认识场景语义） |
-| suite | 所属套件 |
-| status | `pass` / `fail` / `not-checked`（封闭词表；未跑到断言即失败=not-checked） |
-| cause | `self` / `external` / `unknown`（责任线索） |
-| reason | 原因码：assert_mismatch / connect_refused / timeout / lock_busy / missing_asset / self_precheck / …（开放词表，闸不封枚举只分类） |
-| dur_s | 用例耗时（巡检 B 面耗时趋势数据源；260910 实测「777s vs 单跑 176s」即该字段的用例） |
-| attempt | 第几次尝试（producer=发射器缺省 1；rework 代数由闸/引擎侧显式盖写，不双写） |
-| started | 开始时刻 |
-| git_sha | 被测树指纹 |
-| evidence | 一行原文（机械压平换行；环境红必须点名缺什么） |
-| artifacts[] | 证据工件路径 |
+| name | case name (the gate aligns baselines by this; the gate does not know scenario semantics) |
+| suite | owning suite |
+| status | `pass` / `fail` / `not-checked` (closed vocabulary; failing before reaching an assertion = not-checked) |
+| cause | `self` / `external` / `unknown` (responsibility lead) |
+| reason | reason code: assert_mismatch / connect_refused / timeout / lock_busy / missing_asset / self_precheck / … (open vocabulary; the gate does not seal the enumeration, it only classifies) |
+| dur_s | case duration (the data source for the duration trend on the B face of inspection; the 260910 measurement "777s vs 176s for a solo run" is the case for this field) |
+| attempt | which attempt this is (producer = emitter, default 1; the rework generation is explicitly stamped by the gate/engine side, never written twice) |
+| started | start time |
+| git_sha | fingerprint of the tree under test |
+| evidence | one line of verbatim text (newlines mechanically flattened; an environment red must name what is missing) |
+| artifacts[] | evidence artifact paths |
 
-**三态语义收紧**：ENV_FAIL 态=not-checked 且必须带 reason+evidence；**无证据的
-not-checked 一律按 FAIL 处理**（fail-closed，双端：写侧发射器拒发、闸侧改判）。
-`fail × prepare 型 reason`（self_precheck/connect_refused/lock_busy/missing_asset）
-= **协议违约**：闸改判 not-checked + violation 标记 + 独立拦截（不因 main 也红放行）。
+**Tightened three-state semantics**: the ENV_FAIL state = not-checked and must carry reason + evidence; **a not-checked without evidence is always treated as FAIL** (fail-closed, both ends: the emitting side refuses to emit, the gate side reclassifies).
+`fail × prepare-type reason` (self_precheck/connect_refused/lock_busy/missing_asset)
+= **protocol violation**: the gate reclassifies it as not-checked + violation flag + independent interception (not released just because main is also red).
 
-**机械归属（宿主决策表）**：闸自动在 main 上跑同一命令取基线，与泳道用例差集判定：
+**Mechanical attribution (host decision table)**: the gate automatically runs the same command on main to obtain a baseline, and decides by set difference against the lane cases:
 
-| 泳道用例 | main 基线 | 判定 |
+| Lane case | main baseline | Verdict |
 |---|---|---|
-| not-checked × self | 绿 | **拦**（本票造成） |
-| not-checked × external | 绿 | 记录+促治理不堵 |
-| fail（断言不成立） | 绿 | **拦**（真回归） |
-| 任意 | 红（checked fail） | 既有欠账，记录不堵 |
-| 任意 | not-checked（基线没检验到） | **unknown**，记录不裁 |
-| 协议违约 | 任意 | 改判+**拦** |
+| not-checked × self | green | **intercept** (caused by this ticket) |
+| not-checked × external | green | record + push for remediation, do not block |
+| fail (assertion does not hold) | green | **intercept** (genuine regression) |
+| any | red (checked fail) | pre-existing debt, record and do not block |
+| any | not-checked (baseline never checked it) | **unknown**, record without verdict |
+| protocol violation | any | reclassify + **intercept** |
 
-基线口径（关键钉死）：**基线红名单只收 checked fail（断言级）**——基线只答
-「谁的锅」，不答「是不是环境」；基线侧 not-checked=没检验到=答不了锅，绝不进
-红名单（否则 t260910-10 型「真红被基线环境红洗白」从基线侧原样复发）。
+Baseline criteria (the key point, nailed down): **the baseline red list admits only checked fails (assertion level)** — the baseline answers only "whose fault it is", never "whether this is the environment"; a baseline-side not-checked = not checked = cannot answer whose fault, and never enters the red list (otherwise the t260910-10 type of "genuine red whitewashed by a baseline environment red" recurs verbatim from the baseline side).
 
-**指纹闭环**：`env_fingerprint`（lane）== `env_fingerprint`（baseline）才采信差集；
-键集=运行语境不变面（工具链版本+协议库内容哈希），排除工单语境键
-（SANDBAR_TASK_QUEUE 等）与临时路径——键集选成永 diff 面=归属恒 unknown。不等 →
-**not-checked 类**归属降级 unknown（差集不可比不裁锅）+ 键级差异面显式声明；fail 照拦、
-violation 照拦（保守方向不放松——「真红必拦」不因基线不可比松绑，这是对「全部归属
-降级」的字面订正：降级只落在答不了锅的 not-checked 面）。降级三态（基线缺席/超时/
-指纹不等）均显式 `affiliation_confidence=unknown(reason)`，全绿用例永不受牵连。
+**Fingerprint closure**: the set difference is trusted only when `env_fingerprint` (lane) == `env_fingerprint` (baseline); the key set = the invariant surface of the runtime context (toolchain versions + hash of protocol library contents), excluding ticket-context keys (SANDBAR_TASK_QUEUE and the like) and transient paths — choosing a key set that always differs means attribution is permanently unknown. Not equal →
+attribution for the **not-checked class** degrades to unknown (an incomparable set difference cannot assign fault) + the per-key difference surface is explicitly declared; fail is still intercepted, violation is still intercepted (the conservative direction is not loosened — "a genuine red must be intercepted" is not relaxed because the baseline is incomparable). This is the literal correction to "all attribution degrades": degradation falls only on the not-checked face, which cannot assign fault. For all three degraded states (baseline absent / timed out / fingerprints unequal), attribution explicitly reports `affiliation_confidence=unknown(reason)`, and all-green cases are never implicated.
 
-**汇总行由闸生成**（不由测试写）：`{ran, pass, fail, not_checked, wall_s,
-concurrency, pool_config, env_fingerprint, baseline_ref}`。分工：执行器产计数/耗时/
-并发/指纹；闸补 baseline_ref 并以规范行明细**重算复核**（复核权威=闸重算，谎报=红）。
+**The summary line is generated by the gate** (not written by the tests): `{ran, pass, fail, not_checked, wall_s,
+concurrency, pool_config, env_fingerprint, baseline_ref}`. Division of labor: the executor produces counts/durations/
+concurrency/fingerprint; the gate supplies baseline_ref and **recomputes and cross-checks** against the canonical-line details (the authority for the cross-check = the gate's recomputation; a false report = red).
 
-**通用性**：闸不认识场景名、协议项目无关——机制在引擎（failure_protocol 纯函数 +
-verify_lane 唯一解析实现），面在项目（verify.yaml 声明 cmd，任何产规范行的测试框架
-即接入）。
+**Generality**: the gate does not know scenario names and the protocol is project-independent — the mechanism lives in the engine (the failure_protocol pure functions +
+the single parsing implementation in verify_lane), and the face lives in the project (verify.yaml declares cmd; any test framework that emits canonical lines is onboarded by that alone).
 
-## Nongoal（不做）
+## Nongoal
 
-- 不做 junit 适配、不引任何中间格式（宿主 260910 拍板，协议=一行 JSON 唯一规范）；
-- 不做场景白名单/业务语义识别（闸只看 status/cause/reason，机械判定）；
-- 基线树依赖引导只做「主仓已有共享依赖→基线树只读软链」这一种（260922 改判：
-  原条目「不做」与已落地实现相反，见维护注记；取舍清单见 Proposal，名单与开关名
-  见实现）。依赖的安装/构建/复制仍不做——名单外缺席照走基线 not-checked 诚实
-  口径；软链全败＝基线维持裸态，判据零放宽；
-- 不在本协议内处理「基线红如何还账」（只记录，还账走欠账治理流程）。
+- No junit adapter, no intermediate format of any kind (host decision on 260910: the protocol = one line of JSON, the single canonical form);
+- No scenario whitelist and no business-semantics recognition (the gate looks only at status/cause/reason and decides mechanically);
+- Baseline-tree dependency bootstrapping covers exactly one case, "shared dependencies already present in the main repo → read-only symlink into the baseline tree" (revised on 260922:
+  the original "not doing it" entry contradicts the shipped implementation, see the maintenance note; the trade-off list is in Proposal, and the list of names and switches
+  is in the implementation). Installing/building/copying dependencies is still out of scope — an absence outside the list still follows the baseline's honest
+  not-checked criteria; if every symlink fails, the baseline stays bare, with zero relaxation of the criteria;
+- How to repay the baseline red is not handled inside this protocol (it is only recorded; repayment goes through the debt governance process).
 
-## Proposal（方案——是什么/为什么，名称与开关见实现）
+## Proposal (what it is / why, names and switches in the implementation)
 
-- 纯函数核心放引擎（解析/三态收紧/指纹/决策表/汇总重算），闸执行与解析天下唯此一份
-  （verify_lane lane=integ 薄壳不破，宿主令 t260902 分层）；引擎 activity 只下单与
-  翻译回执，把闸拦名单机械计入 failed（「拦」是计数的机械面，不是文字建议）。
-- 双解析兼容期：规范行（`{` 起始 JSON 行）权威；旧 PASS[/FAIL[/ENV_FAIL[ 文本行保留
-  计数与旧绿判据（兼容面回归由 t260904-12 甲/乙段既有场景继续守）。**兼容文本行路径
-  无 cause/reason，违约类机械不可见**——盲区明示，不暗示已覆盖；纯旧输出的红面
-  fail-closed 红不归因。
-- 基线执行：临时 detach worktree + 同一命令 + 降负载串行（非泳道多宽池同口径）+
-  墙钟上限 + finally 全终态回收（worktree remove --force 只删自建路径，KI-065 半径
-  限界）。调度=先泳道后基线：泳道全绿跳过基线（零额外成本）；有红才跑。由环境开关
-  控制（缺省开、可关、可限时；名称见实现），基线缺席=降级显式声明。
-- 基线树依赖引导（260922 改判入册）：基线建树后把主仓已有的共享依赖按名单挂进
-  基线树只读使用——同仓守卫（基线树与泳道根非同一 git 仓不外链）、只新增不覆盖
-  （目标已存在则跳过）、源缺席跳过、单条失败响亮不致命。软链全败＝基线维持裸态，
-  not-checked 口径照旧（不假绿、判据零放宽）；开关缺省开、可显式关（名称见实现）；
-  回收随基线树 finally 连树带链全终态（KI-065 半径限界）。
-- pytest 生产端：原生钩子 pytest_runtest_logreport，相位合并（setup ERROR→
-  not-checked、call FAILED→fail、PASSED→pass、teardown ERROR 不翻转已判 case、
-  同名一行不变式），evidence 机械一行化。装配经薄 conftest 显式引入（不依赖
-  pytest_plugins 的版本敏感行为）。
-- 执行器为旧场景综合规范行（三态契约反推：exit1=断言级 fail、exit2=带尾巴证据的
-  not-checked、超时=timeout 标签不冒充断言错），协议全量切换前旧文本行照吐（观测面），
-  退役随专门票。场景自产规范行即透传（执行器零综合、汇总按明细计数）——两条生产
-  缝（执行器综合 / 场景自产）都成立，不自产的场景无需改。
-- **非正常退出≠绿**（260910 走查沉淀钉死）：执行器崩溃/被杀/汇总行缺席/退出码与
-  用例集不一致 = 用例集可能残缺，闸 fail-closed 红并点名「残缺」——协议模式绝不
-  因「已解析的用例恰好全绿」就对残缺用例集出绿结论。
-- **ran==在册数是唯一机械不变式**（260911 仲裁沉淀：汇总自洽≠清单完整——池级
-  异常吞掉条目时汇总照样自洽，静默丢条照常出绿）：执行器自校验 ran 与在册条数、
-  池级异常保留 futures 句柄逐个上浮=响亮产品红、spawn 失败按协议分类落红
-  （not-checked×external，evidence 点名原文）绝不 raise 丢条；汇总行带 expected
-  （在册数）供闸复核 ran==expected。
-- 覆盖口径（防误读）：闸基线只在泳道有红时真跑；「全量闸跑全绿」不触发真 main 基线
-  整跑——真基线覆盖=闸场景的真 git 基线子用例 + 泳道有红时的闸真跑。
+- The pure-function core lives in the engine (parsing / three-state tightening / fingerprints / decision table / summary recomputation); gate execution and parsing exist in exactly one place
+  in the whole system (the verify_lane lane=integ thin shell is not broken; host instruction t260902 layering). The engine activity only places orders and
+  translates receipts, and mechanically counts the gate's interception list into failed ("interception" is a mechanical counting surface, not a textual recommendation).
+- Dual-parsing compatibility period: canonical lines (JSON lines starting with `{`) are authoritative; legacy PASS[/FAIL[/ENV_FAIL[ text lines are retained for
+  counting and the legacy green criterion (compatibility-face regression continues to be guarded by the existing scenarios of t260904-12 sections A/B). **The compatibility text-line path
+  has no cause/reason, so the violation class is mechanically invisible** — the blind spot is stated plainly, with no suggestion that it is covered; the red face of purely legacy
+  output is fail-closed red with no attribution.
+- Baseline execution: a temporary detached worktree + the same command + reduced-load serialization (not the same-criteria wide pool of the lane) +
+  a wall-clock ceiling + finally-state collection across every terminal state (worktree remove --force deletes only self-created paths, respecting the KI-065
+  radius bound). Scheduling = lane first, baseline second: an all-green lane skips the baseline (zero extra cost); the baseline runs only when there are reds. It is governed by an environment switch
+  (on by default, can be turned off, can be time-limited; names in the implementation); an absent baseline = an explicitly declared degradation.
+- Baseline-tree dependency bootstrapping (reinstated into scope on 260922): after the baseline tree is created, shared dependencies already present in the main repo are mounted into the
+  baseline tree per a list and used read-only — same-repo guard (the baseline tree and the lane root must not be different git repos, no external linking), additive only, never overwriting
+  (skip when the target already exists), skip when the source is absent, and a single failure is loud but not fatal. If every symlink fails, the baseline stays bare and the
+  not-checked criteria remain as they are (no fake green, zero relaxation of the criteria); the switch is on by default and can be explicitly turned off (names in the implementation);
+  collection follows the baseline tree's finally block, taking tree and links together through every terminal state (KI-065 radius bound).
+- pytest production side: the native hook pytest_runtest_logreport, with phase merging (setup ERROR →
+  not-checked, call FAILED → fail, PASSED → pass, teardown ERROR does not flip an already-decided case,
+  same-name one-line invariant), and mechanically single-line evidence. Assembly is introduced explicitly through a thin conftest (not relying on
+  the version-sensitive behavior of pytest_plugins).
+- The executor synthesizes canonical lines for legacy scenarios (reverse-engineered from the three-state contract: exit1 = assertion-level fail, exit2 = not-checked with tail evidence,
+  timeout = a timeout label that does not masquerade as an assertion error); before the protocol is fully switched over, legacy text lines keep being emitted (the observability face), and
+  retirement follows a dedicated ticket. When a scenario emits canonical lines itself, they pass through verbatim (zero synthesis in the executor, summary counted by detail) — both production
+  seams (executor synthesis / scenario self-emission) are valid, and scenarios that do not self-emit need no change.
+- **Abnormal exit ≠ green** (settled in the 260910 walkthrough): an executor crash / being killed / a missing summary line / an exit code inconsistent with
+  the case set = the case set may be incomplete, so the gate goes fail-closed red and calls out "incomplete" — protocol mode never
+  concludes green for an incomplete case set merely because "the cases that were parsed happen to be all green".
+- **ran == the registered count is the only mechanical invariant** (settled in 260911 arbitration: a self-consistent summary ≠ a complete list — when a pool-level
+  exception swallows entries, the summary stays self-consistent and silently dropped entries still produce green): the executor self-checks ran against the registered count,
+  a pool-level exception keeps the futures handles and surfaces each one = a loud product red, and a spawn failure is classified red per the protocol
+  (not-checked×external, with verbatim evidence) and never raises away an entry; the summary line carries expected
+  (the registered count) for the gate to cross-check ran==expected.
+- Coverage criteria (to prevent misreading): the gate's baseline actually runs only when the lane has reds; "the full-gate run is all green" does not trigger a real full
+  main-baseline run — real baseline coverage = the gate scenario's genuine git baseline sub-cases + the gate's real run when the lane has reds.
 
-### 结果台账（红面归属的记账面）
+### Result ledger (the bookkeeping face for red-side attribution)
 
-治「门永远红／反复整跑」：闸的每次场景判定按提交记账，红面先查账后实跑——命中
-即可免重跑，只对说不清的条目定点复跑。
+Addresses "the gate is forever red / full runs repeat": the gate's every scenario verdict is booked per commit, and the red face is checked against the ledger before a real run is made — a hit
+exempts the case from a re-run, and only entries that cannot be accounted for are re-run in place.
 
-- **真源唯一**：宿主侧**仓外**单文件 JSONL（绝对路径与整体覆盖开关见实现）——
-  不进泳道工作区（撞「合并检查＝工作区干净」判据）、不入库（并发写=冲突=返工）、
-  不被夹具复制（408GB 事故的乘法）。
-- **格式**：append-only JSONL，一行=一次场景判定，十字段封闭 schema：ts（ISO8601
-  带时区）/commit（40hex）/env_fp（64hex）/conc_width（≥1）/pool/scenario/
-  verdict（pass|fail|env_fail|skip）/wall_s/source（lane:<票>|inspection|baseline）/
-  ticket。键＝（commit, env_fp, conc_width, scenario）；任一缺失/畸形/多余字段/
-  超行宽→拒写（脏记录比无记录更坏），整批被拒则零落盘（不建文件）。
-- **写面单写者**：唯一追加写者＝闸（lane／巡检／基线三路都经它收口）；库与查询
-  CLI 自身零第二写者入口，保留窗口维护重写不是第二写者（同键保最新、原子替换、全程
-  文件锁序列化）。泳道树脏／来源缺失／并发宽度缺失一律不写并点名——宁可缺行不可
-  脏行。
-- **采信边界**（纯函数在引擎，闸只消费）：第 0 条前提＝**只有「检验到」的面可
-  采信**（环境红与保留位＝没检验到，不入红绿证据）；在此前提下再要求 env_fp 相等
-  ＋commit 为当前基点祖先或相同＋时效 ≤7 天＋conc_width 一致，缺一即回退实跑。
-  读取面畸形行逐行点名，不静默。
-- **宽度分工（防误读）**：基线行恒为串行宽度 1（基线跑＝降负载串行），故对缺省
-  宽度泳道的红**不满足**「宽度一致」边界；main 侧覆盖靠**每日巡检的同宽行**（全量
-  面）与**活基线权威**，基线行的价值在查询与同宽采信——不是「记了账却永不命中＝
-  台账失效」。
-- **消费纪律 fail-closed**：查不到＝显式「无记录」→回退实跑，**绝不「查不到当
-  绿」**；可信台账绿不改判不松绑（拦仍来自保守原判方向，台账绿只作佐证）；基线
-  答不了锅时，可信台账红可补位记「既有欠账」；台账面缺席/坏＝降级响亮、归属回退
-  实跑（＝无台账行为）。
-- **保留与查询**：>90 天按月卷出；查询只查主账 90 天窗，「无记录」文案显式声明
-  这一点（不冒充「从未跑过」；查月卷走维护面）。
+- **Single source of truth**: a **single out-of-repo** file of JSONL on the host side (the absolute path and the global coverage switch are in the implementation) —
+  it does not enter the lane workspace (which would collide with the "merge check = workspace clean" criterion), does not go into the repo (concurrent writes = conflicts = rework),
+  and is not copied by fixtures (the multiplication behind the 408GB incident).
+- **Format**: append-only JSONL, one line = one scenario verdict, a ten-field closed schema: ts (ISO8601
+  with timezone) / commit (40hex) / env_fp (64hex) / conc_width (≥1) / pool / scenario /
+  verdict (pass|fail|env_fail|skip) / wall_s / source (lane:<ticket>|inspection|baseline) /
+  ticket. Key = (commit, env_fp, conc_width, scenario); any missing/malformed/extra field or
+  over-wide line → the write is rejected (a dirty record is worse than no record), and if a whole batch is rejected nothing lands on disk (no file is created).
+- **Single writer on the write face**: the only appending writer = the gate (the lane / inspection / baseline paths all converge through it); the library and the query
+  CLI themselves have no second-writer entry point, and retention-window maintenance rewrites are not a second writer (same key keeps the newest, atomic replacement, serialized by a
+  file lock throughout). A dirty lane tree / a missing source / a missing concurrency width all mean no write plus a named callout — better a missing row than a dirty row.
+- **Trust boundary** (pure functions in the engine, the gate only consumes): precondition zero = **only a "checked" face can be
+  trusted** (an environment red and a reserved slot = not checked, and do not enter the red/green evidence); under that precondition it further requires env_fp equality
+  + commit being an ancestor of the current base or identical + age ≤7 days + consistent conc_width; any one missing falls back to a real run.
+  On the read face, malformed lines are named one by one, never silently.
+- **Width division of labor (to prevent misreading)**: a baseline row always has the serial width 1 (a baseline run = reduced-load serial), so for a red in a lane at the default
+  width the "consistent width" boundary is **not** satisfied; main-side coverage relies on **the same-width rows of the daily inspection** (the full
+  face) and on the **live baseline authority** — the value of baseline rows lies in queries and in same-width trust — not in "it was booked but never hits, so the
+  ledger is broken".
+- **fail-closed consumption discipline**: not found = an explicit "no record" → fall back to a real run, **never "not found means green"**;
+  a trusted ledger green does not reclassify or loosen anything (interception still comes from the conservative original verdict; a ledger green is only corroboration); when the baseline
+  cannot assign fault, a trusted ledger red may fill in and record "pre-existing debt"; an absent or broken ledger face = a loud degradation, with attribution falling back to
+  a real run (= the behavior without a ledger).
+- **Retention and query**: older than 90 days is rotated out into monthly volumes; queries hit only the main ledger's 90-day window, and the "no record" wording states this
+  explicitly (it does not pretend "never run"; querying monthly volumes goes through the maintenance face).
 
-维护注记：本篇为 t260910-13 落地定稿；260910 三误判的 KI 登记归 integration 岗
-（每修复一故障至少一条回归用例的纪律由 t260910-13 场景族承担）。
+Maintenance note: this document is the finalized landing for t260910-13; KI registration for the three 260910 misjudgments belongs to the integration role
+(the discipline of at least one regression case per fixed fault is carried by the t260910-13 scenario family).
 
-260922 改判登记（清偿 t260922-12 合并后 doc-gate 两条 pending-doc-sync）：①Nongoal
-「不做基线树依赖引导」改判为已落地（取舍清单见 Proposal）；②补「结果台账」节。
-落地路径：原 dev-lane 票 t260922-17 撞受保护路径闸（`docs/design` 任何泳道不得改），
-按闸点名出路②（回 main 侧）改由 main 侧直管落账，该票作废（详史见票面与 admin.log）。
-证据口径：合并后取证 A′ 实录**缺席**，原因为**命令面构造性不可跑**——该取证命令用了
-仅输入场景名单的入口，而该入口正是本机制自身的未合并特性，在当时的 main 上不存在，
-实测 exit=-9（>900s 超时被排空）；此后 main 已含该入口，实录可在无并发泳道的安静
-窗口补跑（待办，尚未产出）。可复核替代证据＝宿主侧台账真源（仓外
-单文件，不入仓）存量实录：**546 行／0 坏行／单提交（t260922-06 收口 da942b8）／
-单环境指纹／两轮各 273 场景（2026-09-22 15:33 与 16:16）**，机制真缝在位、可机械
-复核。本登记只写缺席与替代证据，**不拿推断当实录**。
+260922 revision registration (clearing the two pending-doc-sync items of the doc gate after t260922-12 was merged): ① the Nongoal
+entry "no baseline-tree dependency bootstrapping" is revised to shipped (trade-off list in Proposal); ② the "result ledger" section is added.
+Landing path: the original dev-lane ticket t260922-17 hit the protected-path gate (`docs/design` may not be modified by any lane),
+and per the gate's named way out ② (back to the main side) the landing was instead managed directly on the main side, and that ticket was voided (full history in the ticket and admin.log).
+Evidence criteria: after the merge, evidence capture A′ is **absent**; the reason is that the **command face was constructively unrunnable** — that capture command used
+an entry point that only accepts a scenario list, and that entry point is precisely this mechanism's own unmerged feature, which did not exist on main at the time, so
+actual measurement gave exit=-9 (drained after a >900s timeout); main now contains that entry point, so the capture can be re-run in a quiet window with no concurrent lanes
+(to do, not yet produced). A reviewable substitute evidence = the host-side ledger source of truth (a single out-of-repo
+file, not committed) and its existing records: **546 rows / 0 bad rows / a single commit (t260922-06 merged at da942b8) /
+a single environment fingerprint / two rounds of 273 scenarios each (2026-09-22 15:33 and 16:16)**, so the mechanism's real seam is in place and mechanically
+reviewable. This registration records only the absence and the substitute evidence, and **does not present inference as actual measurement**.
 
-260922 勘误（代签人自查，同日）：本登记初版把实录缺席的原因写成「docker 无回包、高位
-端口被占满」——**该判断有误**：其时探测命令自身失败（本机无 `timeout` 命令，`timeout
-docker info` 报 command not found），被误读成 docker 故障；实测 docker 健康（`docker
-info` rc=0 秒回，OrbStack 29.4.0，测试台容器在位）。真实原因如上。留此勘误以记教训：
-**探测工具缺失 ≠ 被测对象故障**；判「某能力坏了」之前先证实探测本身能跑。
+260922 erratum (self-review by the substitute signer, same day): the first version of this registration attributed the absent capture to "docker returning nothing and high
+ports being exhausted" — **that judgment was wrong**: the probe command itself failed at the time (this machine has no `timeout` command, and `timeout
+docker info` reported command not found), which was misread as a docker fault; actual measurement showed docker healthy (`docker
+info` returned rc=0 in an instant, OrbStack 29.4.0, the test-bench containers in place). The real reason is as stated above. This erratum is kept to record the lesson:
+**a missing probe tool ≠ a faulty subject**; before judging that "some capability is broken", first confirm that the probe itself can run.

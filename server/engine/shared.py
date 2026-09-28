@@ -3325,7 +3325,7 @@ class TicketInput:
     proposal_id: str = ""
     book_path: str = ""
     write_set: List[str] = field(default_factory=list)
-    # Ticket t260904-18 gate ① (知识库设计.md §1's ticket-reference iron rule, host order
+    # Ticket t260904-18 gate ① (knowledge-base-design.md §1's ticket-reference iron rule, host order
     # 260904): the list of background files the ticket references (repo-relative paths) —
     # the creation entry's validate_background_refs has already verified 「committed and
     # clean (the HEAD state)」, and they are carried here verbatim as part of the ticket
@@ -3972,7 +3972,7 @@ def load_ui_evidence(root: Any):
 
 def validate_background_refs(refs: Any, project_root: Any):
     """The ticket-creation background-file gate (ticket t260904-18 gate ①;
-    知识库设计.md §1's ticket-reference iron rule; the 260904 host order: 「an
+    knowledge-base-design.md §1's ticket-reference iron rule; the 260904 host order: 「an
     uncommitted note may not open a ticket」).
 
     Background files referenced by the ticket must be **committed and clean (the HEAD
@@ -4867,7 +4867,7 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
 # the model route table — are declared by the project in the registry entry's optional
 # top-level paths section (relative to the project root), and the engine reads them
 # through this reader. The contract's source of truth =
-# docs/design/sandbar项目接入契约v1.md ①d:
+# docs/design/sandbar-project-onboarding-contract-v1.md ①d:
 #   The four fallback classes (no paths section / a missing key inside it / the entry
 #     file doesn't exist / an empty project key or one failing the whitelist) →
 #     undeclared; the consumer falls back to the current convention (zero change, zero

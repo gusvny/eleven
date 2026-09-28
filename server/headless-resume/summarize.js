@@ -14,7 +14,7 @@
  * .sandbar/plan_t260922-06_resume_addressing.md）。
  *
  * 对标实现的故障模式取舍（参考实现 = stock dsh 0.1.5 headless runner 的 summarize；
- * 格式先例 = docs/design/dsh_seam需求书v1.md「对标实现的故障模式取舍」表）：
+ * 格式先例 = docs/design/dsh-seam-requirements-v1.md「对标实现的故障模式取舍」表）：
  *
  * | stock 0.1.5 故障模式                                   | 带进本实现？ | 理由与测试锚 |
  * | ------------------------------------------------------ | ---- | ---- |

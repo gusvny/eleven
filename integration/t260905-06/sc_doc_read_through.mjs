@@ -3,9 +3,11 @@
 // intent（灰盒，用户可感知行为；工单验收②⑤ + 「移动窄栏可用」 + gen1 方案改动清单2/3 + review R2③⑤/V1）：
 //   用户点开「文档」入口后能完成完整阅读链路：目录出真库篇目 → 点篇 → 正文 markdown
 //   真渲染（标题文本在场、围栏代码块等宽）。断言锚=真库 committed 稳定篇目
-//   （docs/terminology.md 根级无嵌套 / docs/testing-guide.md 含围栏代码块 /
-//   notes/README.md）——真库即夹具：committed 内容稳定、天然覆盖 frontmatter/中文路径/
-//   嵌套子目录形状，且不向仓根写夹具文件（防污染真源）。API 契约面顺链守：tree 200
+//   （docs/terminology.md root-level, no nesting / docs/testing-guide.md carries fenced code /
+//   notes/README.md）——the real library is the fixture: committed content is stable and
+//   naturally covers frontmatter / Chinese paths /
+//   nested-directory shapes, and no fixture files are written into the repo root
+//   (no polluting the source of truth). API contract face: tree 200
 //   含锚篇目、skipped 可见性字段在场（人读视图完整性可判定）、畸形 path fail-closed
 //   不外泄正文；notes 观察窗页签切换后 notes 树真出内容（scope=notes 200 含 epics/ 篇目）。
 //   窄栏子用例按 review V1①基线对照口径，落地=容器级（@container 360px 压缩）：壳在窄视口
@@ -17,17 +19,21 @@
 // high-level steps：
 //   T0 自举隔离台（lib_fix17 复用）+ playwright 探测（缺失=env_fail）。
 //   T1 API 契约面（真库）：GET /api/wf/docs/tree?scope=docs → 200、JSON 含
-//      README.md 与 terminology.md、skipped 数组字段在场；scope=notes → 200 含
+//      README.md and terminology.md, and the skipped array field is present; scope=notes → 200 with
 //      README.md 且存在 epics/ 前缀篇目；GET doc?scope=docs&path=terminology.md →
-//      200 body 含「项目术语表」；畸形 path（../ 穿越）→ fail-closed：非 200 或
+//      200 whose body contains 「项目术语表」 (terminology.md stays Chinese by design);
+//      malformed path (../ traversal) → fail-closed: non-200 or
 //      empty=true 带 reason，响应不含穿出文件内容。
-//   T2 UI 链路（宽栏）：点「文档」→ 目录含 terminology 条目 → 点开 → 正文区出现
-//      「项目术语表」标题文本；切 testing-guide 条目 → 正文含「测试环境隔离指南」
-//      且视图内 pre code computed font-family 含 mono（代码块等宽渲染）。
+//   T2 UI journey (wide column): click the docs entry → the tree lists the terminology
+//      entry → open it → the body area shows
+//      「项目术语表」 title text; switch to the testing-guide entry → body contains the
+//      English title 「Sandbar test environment isolation guide」
+//      and the view's pre code computed font-family contains mono (fenced code renders monospace).
 //   T3 notes 观察窗：点 notes 页签 → scope=notes 的 tree 请求 200 且目录区出现
 //      notes 篇目条目（README）。
 //   T4 移动窄栏（V1①基线对照，容器级落地）：量宽栏全局溢出基线 → 复位 scope 页签 →
-//      容器压 360px（@container 单栏流触发）→ has-doc 收目录+返回钮往返+再开篇
+//      container squeezed to 360px (@container single-column flow) → has-doc collapses the
+//      tree + back button round trip + reopen a page
 //      （「项目术语表」在场）→ 断言终态 scrollWidth ≤ 基线（不新增全局溢出）。
 //   T5 红线：端口 ≠ 3099/7233；finally 回收进程树/浏览器/临时目录。
 //
@@ -149,7 +155,7 @@ try {
     const bodyTitle = await page.getByText('项目术语表').first().isVisible().catch(() => false);
     record('ui/doc-renders-title', bodyTitle, bodyTitle ? '正文渲染出「项目术语表」标题' : '正文区未见标题文本（真渲染断言）');
     // 代码块等宽：切 testing-guide 篇（真库含 14 围栏块）
-    const guideItem = page.getByText(/testing-guide|测试环境隔离指南/).first();
+    const guideItem = page.getByText(/testing-guide|Sandbar test environment isolation guide/).first();
     if (await guideItem.isVisible().catch(() => false)) {
       await guideItem.click();
       await page.waitForTimeout(1000);

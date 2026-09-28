@@ -114,7 +114,7 @@ import { DERIVE_TOKENS_CSS } from './theme';
  * 原 openTicketSessionFlow（t260831-08 会话恢复链）连同 TicketSessionFlowDeps
  * 整体删除（无其他消费方）。服务端 /api/ticket-session/open 路由与既有
  * ticket-* 会话数据按 ③ 口径留存（node.ts 两处留痕注释），回滚面完整。
- * 设计文档《右栏会话入口与hero定制设计.md》目标5/Nongoal 被本票推翻——
+ * 设计文档《sidebar-session-entry-and-hero-design.md》目标5/Nongoal 被本票推翻——
  * 同步债见 notes/debts/design-doc-sync-t260903-07.md（后续读者以债条目为准）。 */
 
 interface Ticket {

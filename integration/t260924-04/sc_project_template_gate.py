@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.join(INTEG, "t260904-02"))
 from lib_gate import Fail, poc_python, require_bench  # noqa: E402
 
 ENGINE = os.path.join(REPO, "server", "engine")
-LOAD_DOC = os.path.join(REPO, "docs", "design", "项目外置工作流模板加载口v1.md")
+LOAD_DOC = os.path.join(REPO, "docs", "design", "project-external-workflow-template-loader-v1.md")
 TICKET_PY = os.path.join(REPO, "server", "tools", "ticket.py")
 
 # 语义锚（不锚字段名与全句文案，KI-051：锚语义优先）
@@ -330,11 +330,12 @@ def main():
         fail.check(False, "加载口文档在册：%s" % LOAD_DOC)
     else:
         doc = open(LOAD_DOC, encoding="utf-8").read()
-        for anchor, label in (("确定性", "确定性编码规约"),
-                              ("新模板 id", "段序变更=新 id 并存"),
+        # 260928（docs 英文化）：文档锚改英文字面（判据不变=条款仍在文档里）
+        for anchor, label in (("Determinism", "确定性编码规约"),
+                              ("new template id", "段序变更=新 id 并存"),
                               ("workflow.patched", "分支变更=补丁标记"),
-                              ("项目", "补丁标识带项目前缀"),
-                              ("重启", "生效粒度写实")):
+                              ("project", "补丁标识带项目前缀"),
+                              ("restart", "生效粒度写实")):
             fail.check(anchor in doc, "加载口文档含%s（锚 %r）" % (label, anchor))
 
     # ---- 建票入口文案面：ticket.py 未知模板文案带可用面/拒收语义锚 ----

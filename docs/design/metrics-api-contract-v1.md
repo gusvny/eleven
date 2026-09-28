@@ -1,145 +1,183 @@
 ---
-title: metrics 口径与 API 契约 v1
+title: metrics Definitions and API Contract v1
 category: design
 tags:
   - metrics
-  - 契约
+  - contract
   - API
 status: active
-updated: 2026-09-04
+updated: 2026-09-28
 ---
 
-# metrics 口径与 API 契约 v1
+# metrics Definitions and API Contract v1
 
-> **本文是契约文档，字段级冻结即本文目的，豁免《设计文档写作指南》自查清单中
-> 「Proposal 无 API 名/字段名」一项；其余自查项照常适用。**
+> **This is a contract document; field-level freezing is its very purpose, so it is exempt from
+> the "Proposal has no API names / field names" item in the self-check list of the
+> [Design Document Writing Guide](design-doc-writing-guide.md); every other self-check item still applies.**
 >
-> 本文冻结 metrics 立项（notes/epics/metrics.md）M0 的三维数据口径、`/metrics`
-> API 请求/响应、缓存记录 schema 与降级行为。v1 冻结后，M1a/M2/M3 各工单的实现
-> 与验收以本文为唯一真源；任何字段增删须开新工单 bump 版本（见块 6），不得就地
-> 改写。`docs/design/metrics面板ui规划.md` §6 保留示意并已回指本文。
+> This document freezes the three-dimensional data definitions of M0 in the metrics epic
+> (notes/epics/metrics.md), the `/metrics` API request/response, the cache record schema, and
+> the degrade behavior. Once v1 is frozen, the implementation and acceptance of every M1a/M2/M3
+> ticket take this document as the single source of truth; any field addition or removal requires
+> a new ticket to bump the version (see block 6) and must not be rewritten in place.
+> §6 of `docs/design/metrics-panel-ui-plan.md` keeps an illustrative copy and points back here.
 
-## Problem（问题）
+## Problem
 
-### 现状哪里不好
+### What is wrong today
 
-metrics 立项的 M1a（读侧聚合后端）、M2 系列（面板四视图）、M3（对账验收）是多张
-并行工单，都要消费同一套数字。目前契约内容只有《metrics 面板 UI 规划》§6 的 12 行
-示意：参数一行、ChartSpec 一行、缓存 schema 一行——字段语义、默认值、非法值行为、
-降级路径均未定义。并行实现必然各说各话；M3 的「图表数字 vs 人工核算」「双前门
-字节级一致」两条硬验收没有可依据的口径成文，对账无从判红绿。
+The metrics epic's M1a (read-side aggregation backend), the M2 series (the panel's four views),
+and M3 (reconciliation acceptance) are several parallel tickets, and all of them consume the same
+set of numbers. Today the only contract content is the 12 illustrative lines of §6 in the
+*metrics Panel UI Plan*: one line of parameters, one line of ChartSpec, one line of cache schema —
+field semantics, default values, invalid-value behavior, and degrade paths are all undefined.
+Parallel implementations are bound to talk past each other; M3's two hard acceptance items —
+"chart numbers vs manual reconciliation" and "byte-identical across the two front doors" — have no
+definition in writing to stand on, and reconciliation has no basis for a red/green verdict.
 
-### 背景知识
+### Background
 
-- **三真源**（立项单关键决策 1）：时间=Temporal timeline（`state==='running'`
-  终态条目的时间戳）；交付=git（lane 分支 diff/commit）；token=`~/.dsh` 会话
-  落盘文件（t260828-07 已落地的解析通路）。
-- **t260828-07 usage 通路**（机制文档「usage 聚合数据通路」节）：工单台已有的
-  token 统计实现（`workbench/src/host/agent-usage.ts`），含窗口切分、事件提炼、
-  一组已处理的故障模式——本文大量沿用其口径与降级先例。
-- **双前门**：聚合唯一实现服务两个入口——workbench host 的 HTTP `GET /metrics`
-  （服务 UI）与 node CLI（服务 agent/脚本/CI）；同请求同响应字节级一致是
-  M3 基线锁的验收硬项。
-- **多模板**：聚合键=（模板， stage），stage 轴=所选模板 STAGES 链序，跨模板
-  永不混排（立项单关键决策 5）。
+- **Three sources of truth** (key decision 1 of the epic): time = Temporal timeline (the timestamps
+  of entries whose `state==='running'` is a terminal state); delivery = git (lane branch
+  diff/commit); token = session files persisted under `~/.dsh` (the parsing path already delivered
+  by t260828-07).
+- **The t260828-07 usage path** (the "usage aggregation data path" section of the mechanism doc):
+  the token statistics implementation already present in the ticket console
+  (`workbench/src/host/agent-usage.ts`), including window splitting, event distillation, and a set
+  of failure modes already handled — this document largely follows its definitions and its
+  degrade precedents.
+- **Two front doors**: a single aggregation implementation serves two entry points — the workbench
+  host's HTTP `GET /metrics` (serving the UI) and the node CLI (serving agents/scripts/CI);
+  byte-identical to the same request is a hard acceptance item of the M3 baseline lock.
+- **Multiple templates**: the aggregation key = (template, stage); the stage axis = the STAGES
+  chain order of the selected template; templates are never mixed (key decision 5 of the epic).
 
-### 证据
+### Evidence
 
-- UI 规划 §6 全部契约内容仅 12 行，无字段语义与错误行为；
-- 立项单 M0 明确要求「成文冻结，防止后续 M1a/M2 工单各说各话」；
-- M3 要求「抽 3 张已结票对账」「LOC 对 `git diff --stat`」「双前门字节级一致」，
-  三者均需口径先行。
+- The whole contract content of UI plan §6 is only 12 lines, with no field semantics and no error
+  behavior;
+- M0 of the epic explicitly requires "put it in writing and freeze it, to keep the later M1a/M2
+  tickets from talking past each other";
+- M3 requires "sample 3 closed tickets for reconciliation", "LOC against `git diff --stat`", and
+  "byte-identical across the two front doors", all three of which need the definitions to come
+  first.
 
-## Requirement（需求）
+## Requirement
 
-每条可验证：
+Each item is verifiable:
 
-1. **三维口径每条有唯一真源、明确计算式、已知近似声明**：M1a 实现者读完本文后
-   无需再做任何口径决策；
-2. **`/metrics` 请求参数枚举 + 默认值 + 非法值行为逐项定义；响应 JSON 逐字段
-   （含类型）定义**，可逐字实现；
-3. **缓存记录 schema 逐字段（含类型）+ 失效规则成文**，与立项单关键决策 2
-   （source_version/engine_version/updated_ts 版本化失效）一致；
-4. **双前门字节级一致的比较面成文**：M3 基线比对脚本按本文规则实现后不会因
-   时钟字段天然红；
-5. **错误与降级路径成文**：非法参数 4xx 防穿、无凭据 SKIP、缓存弃置重建不报错，
-   且含畸形/缺失/迟到三态用例表，每条有预期行为；
-6. **声称沿用既有实现的，须附故障模式取舍清单**（agent-usage.ts 八项逐项声明
-   带过来/不带+理由）；
-7. 交付维（delivery）真源存活期问题（lane 分支 merge 后清理 vs M3 对账已结票）
-   有明确解法且写入 schema 语义。
+1. **Every one of the three dimensions has a single source of truth, an explicit formula, and a
+   declared known approximation**: after reading this document, the M1a implementer needs to make
+   no further definitional decision;
+2. **The `/metrics` request parameter enums + default values + invalid-value behavior are defined
+   item by item; the response JSON is defined field by field (including types)**, so it can be
+   implemented literally;
+3. **The cache record schema is put in writing field by field (including types) plus its
+   invalidation rules**, consistent with key decision 2 of the epic (versioned invalidation via
+   source_version/engine_version/updated_ts);
+4. **The comparison surface for byte-identical behavior across the two front doors is put in
+   writing**: once the M3 baseline comparison script is implemented per this document's rules, it
+   will not naturally go red because of clock fields;
+5. **The error and degrade paths are put in writing**: invalid parameters blocked by 4xx, missing
+   credentials SKIP, discarded-and-rebuilt cache not raising errors, all including a
+   malformed / missing / late three-state case table, each with its expected behavior;
+6. **Anything claimed to follow an existing implementation must come with a failure-mode
+   trade-off list** (the eight items of agent-usage.ts declared one by one as carried over / not
+   carried over + reasons);
+7. The delivery dimension's source-of-truth lifetime problem (lane branches cleaned up after
+   merge vs M3 reconciling already-closed tickets) has an explicit solution written into the
+   schema semantics.
 
-## Nongoal（不做什么）
+## Nongoal
 
-- **不做 v2 精确 stage 时长的设计**（只登记存在：v2=08 终态精确，触发条件留未来工单）；
-- **不做交付维从 main 历史 dig 反推**：跨 epic 合并的 commit 不可分票，选固化方案
-  （见块 3）；
-- **健康视图不进缓存**：直查 Temporal（立项单关键决策 6）；
-- **不冻结图表视觉样式**：版式归 UI 规划与效果图；
-- **不做 stage 类别归一**（plan/review/implement/... 六类视图列 M3+ 可选项）；
-- **不改工单引擎行为**（epic 红线，交付固化挂载点归 M1a 的桥接侧）；
-- **不做计费/金额**：只做 token 数。
+- **No design for precise stage durations in v2** (only its existence is registered: v2 = precise
+  terminal states at 08, trigger conditions left to a future ticket);
+- **No deriving the delivery dimension backwards by digging through main's history**: commits
+  merged across epics cannot be attributed to a single ticket, so the freeze approach is chosen
+  (see block 3);
+- **The health view does not go into the cache**: it queries Temporal directly (key decision 6 of
+  the epic);
+- **No freezing of chart visual styling**: layout belongs to the UI plan and the mockups;
+- **No normalization of stage categories** (the six-class view of plan/review/implement/... is an
+  M3+ option);
+- **No change to ticket engine behavior** (epic red line; the mount point for the delivery freeze
+  belongs to M1a's bridge side);
+- **No billing/amount**: token counts only.
 
-## Proposal（方案）
+## Proposal
 
-### 块 1：三维口径定义
+### Block 1: Three-dimensional definitions
 
-#### 时间维
+#### Time dimension
 
-- **stage 时长 v1 = handoff 近似**：从 Temporal timeline 取 `state==='running'`
-  条目的 ISO 时间戳，第 i 窗 = [from_i, from_{i+1})，末窗开放式；同角色跨 stage
-  靠窗口切分，rework 重入=多窗加总。切窗实现复用 agent-usage.ts 的窗口派生逻辑。
-- **末窗封口规则**：末窗右端 = min(下一窗 from, closed_ts)——closed 终态条目
-  迟到时以 closed 时刻封口，开放式末窗不无限延伸。
-- **human_wait** = 人门 stage（exit:human 的 stage）窗口时长合计，单独计列，
-  是饼图「人审等待」橙色块与副图「人等 vs 机器」的数据源。
-- **单票交付时长** = closed 终态时刻 − 创建时刻。
-- **v2 = 08 终态精确**：仅登记为后续版本方向，不在 v1 冻结范围。
-- 已知近似（悬停文案）：v1 时长含 agent 排队/等待间隙，非纯执行时间；口径ⓘ
-  悬停声明「时长 v1=handoff 近似 / v2=08 终态精确」。
+- **stage duration v1 = handoff approximation**: take the ISO timestamps of entries whose
+  `state==='running'` from the Temporal timeline; the i-th window = [from_i, from_{i+1}), and the
+  last window is open-ended; the same role across stages is split by the windows, and a rework
+  re-entry = the sum of multiple windows. The window-splitting implementation reuses the window
+  derivation logic of agent-usage.ts.
+- **Last-window closing rule**: the right end of the last window = min(next window's from,
+  closed_ts) — when a closed terminal-state entry arrives late, the closed instant closes the
+  window, so the open-ended last window does not extend indefinitely.
+- **human_wait** = the total window duration of human gate stages (stages with exit:human), listed
+  separately; it is the data source for the orange "human review wait" block of the donut and for
+  the "humans waiting vs machines" secondary chart.
+- **Single-ticket delivery duration** = the closed terminal-state instant − the creation instant.
+- **v2 = precise terminal states at 08**: registered only as a direction for a later version, not
+  part of the v1 freeze.
+- Known approximation (hover text): v1 durations include agent queueing/waiting gaps, not pure
+  execution time; the definition ⓘ hover declares "duration v1 = handoff approximation / v2 = 08
+  precise terminal states".
 
-#### 交付维
+#### Delivery dimension
 
-- **LOC** = lane 分支 diff vs base 的 additions/deletions，**分列不合并净值**；
-  M3 对账基准命令：`git diff <base>...<lane> --shortstat`。
-- **base 钉死**：base = lane 创建点的主干 commit（等价于 lane 首个 commit 的
-  parent）。**中途「主干合并进泳道」不改变 base**——diff 始终对创建点，口径不随
-  计算时点漂移。base 的 commit hash 固化进缓存记录 `delivery.base`，重算/对账
-  均取该字段，不现场再求 merge-base。
-- **commits** = `git rev-list --count <base>..<lane>`，含 worker 代落盘 commit。
-- 真源存活期（Requirement 7）：见块 3 固化语义。
+- **LOC** = the lane branch diff vs base additions/deletions, **listed separately and not merged
+  into a net value**; the M3 reconciliation baseline command: `git diff <base>...<lane>
+  --shortstat`.
+- **base pinned**: base = the trunk commit at the lane creation point (equivalent to the parent of
+  the lane's first commit). **A mid-flight "trunk merged into the lane" does not change base** —
+  the diff is always against the creation point, and the definition does not drift with the
+  computation instant. The base commit hash is frozen into the cache record's `delivery.base`, and
+  both recomputation and reconciliation read that field instead of resolving merge-base on the
+  spot.
+- **commits** = `git rev-list --count <base>..<lane>`, including commits persisted by the worker on
+  the ticket's behalf.
+- Source-of-truth lifetime (Requirement 7): see the freeze semantics in block 3.
 
-#### token 维
+#### token dimension
 
-沿用 t260828-07 口径：
+Following the t260828-07 definitions:
 
-- 只加总 `assistant/message` 事件里的 `data.usage{inputTokens, outputTokens,
-  cacheReadTokens}`；`assistant/chunk`（`data.chunk.type==='usage'`）的同名
-  usage 是同一份的流式镜像，**不计入**（两处都加会翻倍）；
-- **cacheRead 单列**，不并入 `tokens_total`；`tokens_total` = in + out 合计；
-- 模型归因：usage 事件不带模型，顺序扫描维护「当前模型」（`request/context`
-  的 `data.{provider,model}` 主，`request/header` 的
-  `data.header.config.{provider,model}` 兜底），每条 usage 归到当时的模型。
+- Only the `data.usage{inputTokens, outputTokens, cacheReadTokens}` inside `assistant/message`
+  events are summed; the same-named usage of `assistant/chunk`
+  (`data.chunk.type==='usage'`) is a streaming mirror of the same thing and is **not counted**
+  (counting both would double it);
+- **cacheRead is listed separately** and not folded into `tokens_total`; `tokens_total` = in + out
+  combined;
+- Model attribution: usage events carry no model, so a sequential scan maintains the "current
+  model" (`data.{provider,model}` of `request/context` takes precedence, with
+  `data.header.config.{provider,model}` of `request/header` as the fallback), and each usage is
+  attributed to the model in effect at that moment.
 
-### 块 2：/metrics API 请求/响应契约（冻结）
+### Block 2: /metrics API request/response contract (frozen)
 
 ```
 GET /metrics?window=7d|30d|all&epic=<code|all|none>&project=<key>&template=<id>&view=time|delivery|token|health&mode=full|fast
 ```
 
-| 参数 | 枚举/类型 | 默认值 | 说明 |
+| Parameter | Enum/type | Default | Notes |
 | --- | --- | --- | --- |
-| window | `7d` \| `30d` \| `all` | `7d` | 时间窗 |
-| epic | 立项代号 \| `all` \| `none` | `all` | `none`=历史无代号票兜底桶（本文档对 UI 规划 §6 的唯一枚举扩展，理由：归属依赖生成路径注入的代号，存量票无此 attribute） |
-| project | 项目 key | 当前注册项目 | 越界/不存在 → 4xx |
-| template | 模板 id | `dev-lane` | 决定 stage 轴链序 |
-| view | `time` \| `delivery` \| `token` \| `health` | 必填 | 缺省 → 4xx |
-| mode | `full` \| `fast` | `full` | `fast`=只读缓存聚合（cache-first 先吐快照，缺票不现算，`cache.status='stale'`）；`full`=全量惰性计算（t260903-09 bump） |
+| window | `7d` \| `30d` \| `all` | `7d` | time window |
+| epic | epic code \| `all` \| `none` | `all` | `none`=fallback bucket for historical tickets with no code (the only enum extension this document makes to UI plan §6; rationale: attribution depends on a code injected by the generation path, and existing tickets carry no such attribute) |
+| project | project key | currently registered project | out of range / nonexistent → 4xx |
+| template | template id | `dev-lane` | determines the stage axis chain order |
+| view | `time` \| `delivery` \| `token` \| `health` | required | absent → 4xx |
+| mode | `full` \| `fast` | `full` | `fast`=cache-only aggregate (cache-first emits the snapshot, missing tickets are not computed on the spot, `cache.status='stale'`); `full`=full lazy computation (t260903-09 bump) |
 
-**错误行为**：非法值、缺必填、同名重复参数一律 `4xx {error, reason}`（重复参数
-无「取首个」容错，与非法值同款防穿）。
+**Error behavior**: invalid values, a missing required parameter, and a repeated parameter with the
+same name are all `4xx {error, reason}` (a repeated parameter gets no "take the first one"
+tolerance; it is blocked exactly like an invalid value).
 
-**响应**（200）：
+**Response** (200):
 
 ```json
 {
@@ -154,34 +192,50 @@ GET /metrics?window=7d|30d|all&epic=<code|all|none>&project=<key>&template=<id>&
 ChartSpec = { kind: 'bar'|'stackBar'|'hBar'|'donut', title, categories, series[{name,data}], drill: true }
 ```
 
-- `cache.status`：`hit`=命中缓存；`miss`→`computed`=本次惰性生成后回包；
-  `stale`=fast 模式缓存快照（可能缺票：未算过/引擎版本失配的票不入快照；存量旧版记录按缓存计算时刻近似归窗计入，
-  缺票走 reason 显式；客户端随后台 full 请求替换。t260903-09 bump）；
-- **KPI 归窗单一口径（t260903-09 收口）**：tickets/closed/charts/tokens 四者同
-  一 anchor——closed 票按闭单终态时刻、未结票按创建时刻归窗（gen2 成文本就如此，
-  实现曾分裂出 tickets=创建归窗的第四套人口，出现「关闭数>工单数」悖论，已收口）；
-- **donut 人审扇区契约字面（t260903-09 钉死）**：后端 donut 分类名「人审等待」
-  是冻结字面，前端 human 扇区着色据此判定（metrics-charts.isHumanSliceName）；
-  后端改名必须同票改前端 UT（tests/donut-render-dispatch.mjs），不得静默掉色；
-- **度量宇宙补全（t260903-09；验收 F2/F3 修订）**：直并/收口终态票从工单列表
-  消失后，度量侧从缓存存量并入聚合（template 筛选尊重；存量票 epic 不入缓存=未知，
-  仅 epic=all 可见，none 桶排除——未知≠无代号），reason 显式计数「度量宇宙补全：
-  N 票…」且该 notice 排 reason 首、不受 20 条 cap 截断。**锚点回落**：存量旧版缓存
-  记录（无 created_ms/closed_ms）按 rec.computed_at 近似归窗计入，reason 声明近似
-  计数；近似锚点只进响应、**绝不回写缓存**（防近似值永久化成真实闭单时刻）。
-  列表内票的旧版记录在 full 门命中后按行内 timeline 补真实锚点并**回写升级**（一次
-  性迁移），此后 fast 直接受益。无缓存记录的收口票度量侧无从补全（registry 根修
-  另立工单）。**ticket list API 响应集合不因此扩大**（dispatch 流不被 archived 票
-  污染）；
-- 健康 view 直查 Temporal，不读缓存；
-- CLI 前门：`metrics '<json 参数>'` → stdout 同一份 JSON，同实现同缓存。
+- `cache.status`: `hit`=cache hit; `miss`→`computed`=generated lazily this time and then returned;
+  `stale`=the cache snapshot in fast mode (tickets may be missing: tickets never computed and
+  tickets whose engine version does not match do not enter the snapshot; existing records from an
+  older version are approximately attributed to a window by their cache computation instant, and
+  missing tickets are surfaced explicitly in reason; the client later replaces it with the full
+  request running in the background. t260903-09 bump);
+- **Single definition for KPI window attribution (t260903-09 clarification)**: tickets/closed/
+  charts/tokens all share one anchor — closed tickets are attributed by their closing terminal-state
+  instant and open tickets by their creation instant (gen2 was written this way from the start, but
+  the implementation had split off a fourth population with tickets attributed by creation, which
+  produced the paradox "closed count > ticket count"; that has been clarified);
+- **Literal donut human-review sector contract (pinned by t260903-09)**: the backend donut category
+  name "human review wait" is a frozen literal, and the frontend's coloring of the human sector
+  keys off it (metrics-charts.isHumanSliceName); renaming it on the backend must change the
+  frontend UT (tests/donut-render-dispatch.mjs) in the same ticket and must not silently drop the
+  color;
+- **Metric universe completion (t260903-09; acceptance F2/F3 revision)**: after directly-merged and
+  clarified terminal-state tickets disappear from the ticket list, the metrics side folds them into
+  the aggregate from the existing cache (the template filter is respected; for existing tickets an
+  epic that is not in the cache = unknown, visible only under epic=all, and excluded from the none
+  bucket — unknown ≠ no code), and reason explicitly counts "metric universe completion: N
+  tickets…"; that notice is placed first in reason and is not truncated by the 20-item cap.
+  **Anchor fallback**: existing cache records from an older version (with no created_ms/closed_ms)
+  are approximately attributed to a window by rec.computed_at, and reason declares the approximate
+  count; approximate anchors only enter the response and are **never written back into the cache**
+  (to keep an approximation from being permanently reified into a real closing instant). For
+  tickets in the list, older-version records that hit the full gate get their real anchors filled in
+  from the in-row timeline and are **written back as an upgrade** (a one-time migration), after
+  which fast mode benefits directly. Clarified tickets with no cache record cannot be completed on
+  the metrics side (a root fix in the registry gets its own ticket). **The ticket list API's
+  response set does not grow because of this** (the dispatch flow is not polluted by archived
+  tickets);
+- The health view queries Temporal directly and does not read the cache;
+- CLI front door: `metrics '<json params>'` → the same JSON on stdout, same implementation and same
+  cache.
 
-**字节级一致比较面（M3 基线锁依据）**：双前门同请求的响应，比较面 = 序列化 JSON
-**剔除 `generated_at` 与 `cache.computed_at` 后的全部其余字段**（键按序列化序、
-UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 / 缓存计算时刻」，允许
-双前门各自取时钟；M3 比对脚本按此剔除后比对，任何其余字段差异即红。
+**Byte-identical comparison surface (basis of the M3 baseline lock)**: for the same request across
+the two front doors, the comparison surface = all remaining fields of the serialized JSON **after
+removing `generated_at` and `cache.computed_at`** (keys in serialization order, full UTF-8 byte
+comparison). The two timestamps mean "the instant this response was generated / the instant the
+cache was computed", so the two front doors are allowed to read their own clocks; the M3 comparison
+script removes them per this rule before comparing, and any difference in any other field is red.
 
-### 块 3：缓存记录 schema（per-ticket，冻结）
+### Block 3: Cache record schema (per-ticket, frozen)
 
 ```json
 {
@@ -201,221 +255,292 @@ UTF-8 字节全量比对）。两时间戳语义是「本次响应生成时刻 /
 }
 ```
 
-- 正典字段串（与 UI 规划 §6 schema 行逐字一致，双文档对照用）：
+- Canonical field string (byte-for-byte identical to the schema line of UI plan §6, used for
+  cross-document comparison):
   `{ ticket_id, template, durations: {by_stage,by_round,human_wait},
   delivery: {base,add,del,commits}, tokens: {by_stage,by_model,in,out,cacheRead}, open: bool, delivery_frozen: bool,
   source_version, engine_version, updated_ts, computed_at, created_ms, closed_ms }`
-- **归窗锚点 created_ms/closed_ms（t260903-09 bump）**：派生字段入缓存、不入
-  响应——缓存命中路径与 fast 路径据此免逐票 show 补锚点；读侧向后兼容（旧版
-  记录无此两键 → 走「list 行 timeline / show 取 timeline」补齐，命中路径不重写）。
-- **失效规则（t260903-09 修订）**：`source_version`（本文档版本）不一致 → 记录
-  作废重算（立项单关键决策 2）；`engine_version`（模板 STAGES 链变更）不一致 →
-  **只作废时间维**（durations 按现行链重算），delivery/tokens 两维与 stage 链
-  无关 → **降维保留**不陪葬（KI-017②③ 收口：旧实现整条作废是 token/交付蒸发
-  的缓存侧共因）。缓存整体可弃置重建，目录 `~/.sandbar/data/<project>/`，不进
-  git（sandbar 关键决策 3 随迁方向）。
-- **唯一例外——交付维固化（可弃 ≠ 可重算）**：delivery 维真源是 lane 分支，
-  merge 落账后 lane 分支清理，已结票惰性重算无源可算，而 M3 对账恰指向已结票。
-  因此 **delivery 数据在 merge_check 全绿后、落账前由确定性脚本固化进缓存**
-  （挂载点归 M1a 桥接侧，引擎零触碰红线不变）；固化后 `delivery_frozen=true`，
-  失效重算**跳过 delivery 维**只刷新其余维度。选项对比：从 main merge commit
-  历史反推（跨 epic 合并不可分票）、只统计 lane 存活票（砍掉 M3 抽样面）均不采。
-  机制上线前结的历史票无 delivery 数据（同 usage 先例：统计从功能上线算起），
-  **M3 抽样须在固化机制上线后结的票中抽**。
-- **主仓归档口径（t260903-09 增补，KI-017①② 收口）**：固化机制上线前的补账
-  路径——泳道拆了/base_ref·worktree 缺失（直并收口票）/泳道 git 失败时，
-  computeDelivery 回落主仓 `git log --grep <票id>` 提交集（merge/squash commit
-  message 均带票 id；提交集口径天然不含中途并 main 吸收的进度——区间 diff 的
-  8 万假交付病灶正面收口）。成功即 `delivery_frozen=true`，reason 显式标注
-  「主仓归档口径」，与泳道活口径不静默混用。已知边界（W4 实测 20260903）：一
-  commit 引用多票 id 时提交集口径双算；他票 commit message **引用性提及**本票 id
-  （如教训引用「t260903-05 教训」）同样被 grep 命中计入本票——两类多算面均登记
-  tests/delivery-recovery.mjs④，根治需 per-commit 归属归档（引擎侧 KI-017③ 同批）。
-- **token 维项目级账本（t260903-09 前向契约，KI-017③）**：泳道 `.dsh/sessions`
-  随泳道拆除陪葬，usage 出仓归档（merge 时刻冻结快照）落项目级账本
-  `$SANDBAR_USAGE_LEDGER_DIR/<工单id>/*.jsonl.zstd`（与 session.jsonl.zstd 同构，
-  引擎侧 agent_activities.py 落盘，本票只留探测缝）；两处皆无 → tokens=null +
-  人话 reason，不做静默 0。
+- **Window attribution anchors created_ms/closed_ms (t260903-09 bump)**: derived fields that enter
+  the cache but not the response — the cache-hit path and the fast path use them to avoid per-ticket
+  show calls to fill in anchors; the read side stays backward compatible (older-version records
+  without these two keys → fall back to "the list row's timeline / timeline from show" to fill them
+  in, and the hit path does not rewrite).
+- **Invalidation rules (t260903-09 revision)**: a `source_version` mismatch (this document's
+  version) → the record is voided and recomputed (key decision 2 of the epic); an `engine_version`
+  mismatch (the template's STAGES chain changed) → **only the time dimension is voided** (durations
+  are recomputed against the current chain), while the delivery/tokens dimensions are independent
+  of the stage chain → **retained with reduced dimensionality** rather than buried with it
+  (KI-017②③ clarification: voiding the whole record in the old implementation was the cache-side
+  common cause of token/delivery evaporation). The cache as a whole may be discarded and rebuilt;
+  its directory is `~/.sandbar/data/<project>/` and it does not enter git (sandbar key decision 3,
+  the migration direction).
+- **The single exception — delivery-dimension freeze (discardable ≠ recomputable)**: the delivery
+  dimension's source of truth is the lane branch, and after the merge is booked the lane branch is
+  cleaned up, so lazily recomputing an already-closed ticket has no source to compute from — while
+  M3 reconciliation points exactly at already-closed tickets. Therefore **delivery data is frozen
+  into the cache by a deterministic script after merge_check is all green and before the merge is
+  booked** (the mount point belongs to M1a's bridge side, and the zero-touch-engine red line is
+  unchanged); once frozen, `delivery_frozen=true`, and invalidation/recomputation **skips the
+  delivery dimension** and refreshes only the other dimensions. Options compared: deriving backwards
+  from main's merge commit history (commits merged across epics cannot be attributed per ticket) and
+  counting only tickets whose lane is still alive (which cuts away M3's sampling surface) are both
+  rejected. Historical tickets that closed before the mechanism shipped have no delivery data (same
+  precedent as usage: statistics start when the feature ships), so **M3 sampling must draw from
+  tickets closed after the freeze mechanism shipped**.
+- **Main-repo archival definition (t260903-09 addition, KI-017①② clarification)**: the
+  catch-up path for tickets that closed before the freeze mechanism shipped — when the lane has
+  been torn down / base_ref·worktree are missing (directly-merged and clarified tickets) / the lane
+  git fails, computeDelivery falls back to the main repo's `git log --grep <ticket id>` commit set
+  (both merge and squash commit messages carry the ticket id; the commit-set definition
+  inherently excludes progress absorbed by a mid-flight merge into main — a head-on clarification of
+  the interval-diff pathology of 80k phantom delivery). On success `delivery_frozen=true`, and
+  reason explicitly marks "main-repo archival definition" so it is never silently mixed with the
+  live lane definition. Known boundary (W4 measured 20260903): when one commit references multiple
+  ticket ids, the commit-set definition double-counts; a commit message of another ticket that
+  **referentially mentions** this ticket's id (e.g. a lesson citing "the t260903-05 lesson") is
+  likewise matched by grep and counted toward this ticket — both double-counting surfaces are
+  registered in tests/delivery-recovery.mjs④, and a root fix needs per-commit attribution
+  archiving (same batch as engine-side KI-017③).
+- **Token-dimension project-level ledger (t260903-09 forward contract, KI-017③)**: the lane's
+  `.dsh/sessions` is buried when the lane is torn down, so the usage out-of-repo archive (a frozen
+  snapshot at merge time) lands in the project-level ledger
+  `$SANDBAR_USAGE_LEDGER_DIR/<ticket id>/*.jsonl.zstd` (isomorphic to session.jsonl.zstd, persisted
+  by the engine-side agent_activities.py; this ticket leaves only a detection seam); if both places
+  are absent → tokens=null + a plain-language reason, never a silent 0.
 
-### 块 4：错误与降级（三态用例表，冻结）
+### Block 4: Errors and degrade (three-state case table, frozen)
 
-每条用例的预期行为（值 / 状态码 / 是否计数）：
+Expected behavior per case (value / status code / whether it is counted):
 
-**畸形**
+**Malformed**
 
-| 输入 | 预期 |
+| Input | Expected |
 | --- | --- |
 | `window=abc` | 4xx `{error, reason}` |
-| `view` 缺省或非法值 | 4xx |
-| 同名重复参数 | 4xx（无「取首个」容错） |
-| `epic` 超长或含非法字符 | 4xx |
-| `project` 不存在 | 4xx |
+| `view` absent or invalid | 4xx |
+| repeated parameter with the same name | 4xx (no "take the first one" tolerance) |
+| `epic` overlong or containing illegal characters | 4xx |
+| `project` nonexistent | 4xx |
 
-**缺失**
+**Missing**
 
-| 输入 | 预期 |
+| Input | Expected |
 | --- | --- |
-| timeline 无 running 条目 | 该 stage 时长计 0 + reason 计数（不静默丢） |
-| 会话文件不存在 | 软降级：200 + 空数据 + reason 人话（SKIP），UI 显「—」不报错 |
-| 无凭据环境 | 200 + SKIP 提示（SKIP 属正确行为，数据恢复自动填充） |
-| lane 分支无 diff | 全 0，合法数据非错误 |
-| 缓存目录不可写 | 本次直算回包 + reason，不 5xx |
+| timeline has no running entry | that stage's duration counts as 0 + a reason count (not silently dropped) |
+| session file does not exist | soft degrade: 200 + empty data + a plain-language reason (SKIP); the UI shows "—" and raises no error |
+| credential-free environment | 200 + SKIP notice (SKIP is correct behavior; the data fills in automatically once recovered) |
+| lane branch has no diff | all zeros; legitimate data, not an error |
+| cache directory not writable | compute directly this time and return + reason, no 5xx |
 
-**迟到 / 乱序**
+**Late / out of order**
 
-| 输入 | 预期 |
+| Input | Expected |
 | --- | --- |
-| rework 后 timeline 时间戳非单调 | 按 from 排序后再切窗 |
-| 事件时间戳越出本票窗口 | 丢弃 + reason 计数 |
-| 末窗开放式时 closed 条目迟到 | 按末窗封口规则：右端 = min(下一窗 from, closed_ts) |
+| timeline timestamps non-monotonic after a rework | sort by from before splitting windows |
+| event timestamp outside this ticket's window | discard + a reason count |
+| closed entry arrives late while the last window is open-ended | apply the last-window closing rule: right end = min(next window's from, closed_ts) |
 
-### 块 5：沿用实现的故障模式取舍
+### Block 5: Failure-mode trade-offs for the reused implementation
 
-声明的参考实现：`workbench/src/host/agent-usage.ts`（t260828-07，窗口派生 + 聚合）。
-八项故障模式逐项取舍（**全部带过来**）：
+Declared reference implementation: `workbench/src/host/agent-usage.ts` (t260828-07, window
+derivation + aggregation). The eight failure modes taken over one by one (**all carried over**):
 
-| # | 故障模式 | 取舍 | 说明 |
+| # | Failure mode | Trade-off | Notes |
 | --- | --- | --- | --- |
-| ① | chunk 镜像 usage 防翻倍 | 带过来 | metrics 同源数据，必须同款 |
-| ② | 首窗前事件只进 total 不落 stage | 带过来 | 同窗口派生逻辑，total ≥ ΣbyStage 口径不变 |
-| ③ | 会话目录/文件不存在→软降级 | 带过来 | metrics 同款：200 + 空数据 + reason 人话（SKIP） |
-| ④ | zstd 不可用/解压失败→软降级 | 带过来 | 同款软降级；解压输出封顶也带过来 |
-| ⑤ | 无 usage 事件→软降级 | 带过来 | 空集 200，非报错 |
-| ⑥ | usage 无模型的顺序归因兜底（request/context 主、request/header 兜） | 带过来 | token 按模型分序列依赖此归因，实现共用同一函数 |
-| ⑦ | 工单 id 非法/字段越界→4xx 防穿 | 带过来 | /metrics 所有 query 参数同款 4xx 防穿 |
-| ⑧ | 多角色多会话文件加总 | 带过来 | per-ticket token 记录按角色会话全加总 |
+| ① | chunk-mirror usage guarded against double counting | carried over | metrics consumes the same source data, so it must be the same |
+| ② | events before the first window go only into total, not into a stage | carried over | same window derivation logic; the total ≥ ΣbyStage definition is unchanged |
+| ③ | session directory/file missing → soft degrade | carried over | same as metrics: 200 + empty data + a plain-language reason (SKIP) |
+| ④ | zstd unavailable / decompression fails → soft degrade | carried over | same soft degrade; the cap on decompressed output is carried over too |
+| ⑤ | no usage events → soft degrade | carried over | empty set returns 200, not an error |
+| ⑥ | sequential attribution fallback when usage has no model (request/context primary, request/header fallback) | carried over | the token-by-model breakdown depends on this attribution, and the implementation shares the same function |
+| ⑦ | illegal ticket id / out-of-range field → 4xx block | carried over | every /metrics query parameter gets the same 4xx block |
+| ⑧ | summing multiple roles' multiple session files | carried over | the per-ticket token record sums across all role sessions |
 
-**agent-usage 不覆盖的新增故障模式**（独立列出，不复用上表序号）：
+**New failure modes that agent-usage does not cover** (listed separately, without reusing the
+numbering above):
 
-- git 命令失败（分支不存在 / 非 worktree 环境）→ 该票 delivery 置 null + reason，
-  软降级不阻塞整响应；
-- timeline 条目缺 from 时间戳 → 该 stage 计 0 + reason 计数，不静默丢弃。
+- git command failure (branch does not exist / not a worktree environment) → that ticket's delivery
+  is set to null + reason; soft degrade that does not block the whole response;
+- a timeline entry missing its from timestamp → that stage counts as 0 + a reason count, not
+  silently dropped.
 
-### 块 6：版本与变更纪律
+### Block 6: Versioning and change discipline
 
-- v1 冻结后任何字段增删须开新工单 bump 到 v1.x / v2，双前门基线同步更新；
-- 缓存记录 `source_version` 随本文版本走；
-- 与《metrics 面板 UI 规划》§6 的一致性：本文档对 §6 共**三处 delta**——
-  ①契约指针行（指向本文）；②epic 枚举补 `none`；③schema 行逐字同步（含
-  `delivery.base` 与 `delivery_frozen`）。无其他差异。
+- After v1 is frozen, any field addition or removal requires a new ticket to bump to v1.x / v2, and
+  the two-front-door baseline is updated in step;
+- The cache record's `source_version` follows this document's version;
+- Consistency with *metrics Panel UI Plan* §6: this document has **three deltas** against §6 in
+  total — ① the contract pointer line (pointing here); ② the epic enum gains `none`; ③ the schema
+  line is kept in sync byte for byte (including `delivery.base` and `delivery_frozen`). No other
+  differences.
 
-### 回扣
+### Closing the loop
 
-本方案逐字段冻结口径与降级 → 解决 Problem 里「并行实现各说各话、对账无据」→
-满足 Requirement 1–7 → 避开 Nongoal（v2/历史反推/健康缓存/视觉样式/引擎行为
-均明确划出）。
+This proposal freezes the definitions and degrade behavior field by field → it resolves the
+Problem's "parallel implementations talking past each other, reconciliation with no basis" →
+it satisfies Requirements 1–7 → it avoids the Nongoals (v2 / historical derivation / health
+caching / visual styling / engine behavior are all explicitly fenced off).
 
-### 增补段（t260904-04，KI-040~043 收口；schema 冻结不破，本段声明语义增补）
+### Supplementary section (t260904-04, KI-040~043 clarification; the schema freeze is not broken, this section declares semantic additions)
 
-1. **缓存命中自愈（KI-040）**：per-ticket 缓存命中不再无条件早退。两类陈旧记录
-   放行全量重算路径（存量降维保留机制不变）：
-   - 条件 A（失败维固化 + TTL 节流）：`delivery===null` 且记录 `updated_ts` 距今超
-     TTL（env `SANDBAR_METRICS_REPROBE_TTL_MIN`，缺省 60 分钟；0=每次必探仅测试；
-     负值按 0）。`updated_ts` 缺失/坏值视为过期必探（NaN 比较方向已定：向「重探」
-     倾斜，不给脏记录留永久静默）。重探写回恒刷 `updated_ts`=「上次尝试时刻」，
-     节流锚点自洽——真不可算票每票每 TTL 周期最多付费一轮 showTicket+git。
-     `delivery===null && delivery_frozen===true` 脏态同属条件 A（不看 frozen 位，
-     重算门同步只看 `delivery===null`）；该态原不可达，登记防 schema 演化残留。
-   - 条件 B（open 陈旧）：`rec.open` 与工单 list 行 `status` 比对不一致即刷新。
-     比对是零 spawn 纯内存且不受 TTL 门；**刷新走既有全量重算路径**（closed_ms/
-     timeline 从 ticket show 取——不内存改 flag 了事，否则闭单票归窗锚点退化为
-     created_ms 污染 KPI 归窗）。time/delivery/token 视图（closed 派生自 rec.open）
-     与 health 视图（直查 list）的 closed 计数分叉（KI-040 实证 4 vs 5）由此收敛。
-     **computed_at 语义细化 + 归档近似锚点基线（验收 F1 修复，20260904）**：重算无真
-     锚点（timeline 不可得，created_ms=null）时 computed_at 保留基线值（该票首次计算
-     时刻，不随重探覆写为本次时刻）；本请求内重算的归档票 F3 近似归窗用重算前存量
-     computed_at 作基线（响应内存面，不回写缓存）——否则治愈票近似锚点漂到窗口上界
-     之外，首拍被 inWindow 静默丢弃（人口塌缩一拍，真机实证 sandbar 6→1、suyou 50→2）。
-     有真锚点时 computed_at 恒为本次计算时刻；updated_ts 不受影响、恒刷（TTL 节流锚点）。
-     **归档票 open 无外部真源（验收 F2 处置，20260904）**：show 不可达（返回 null）时
-     open 沿用存量 flag 不漂白；归档票 open=true 在 notices 显式计数「closed 计数可能
-     低计」（命中/重算/fast 三拍一致）——收口终态真源缺失是 registry 根修欠账
-     （KI-031 家族，写集外），本票以显式化收口不静默；health 视图人口=工单列表直查
-     为契约成文口径，「time 与 health closed 一致」判据仅在票尚在 list 的世界可测。
-2. **模板过滤 reason 显式化（KI-043②）**：list 行 workflow 为空/不匹配被模板过滤
-   排除的票，计数进响应 reason notices（与宇宙补全 notice 同位，不受 20 条 cap
-   截断），文案=`N 票模板不匹配（workflow 为空或非 <template>）被过滤出聚合宇宙`。
-3. **归档口径多提交边界（KI-040 连带，口径悬停+reason 已注）**：归档口径 reason
-   首句显式「含多提交（预解/记账等提交一并计入，行数可能高于 squash 真值）」。
-   **收窄口径（只认 squash merge commit）议后不落**——git 对 squash merge 无可靠
-   机械判别（无 merge commit 可认，message 启发式误判面大）；根治归引擎侧出仓
-   快照票（KI-017③，另立）。UI 口径ⓘ 悬停同步注明。
-4. **epic/template 面板参数常量化（KI-042 宿主令）**：面板筛选行泳道（模板）与
-   立项选择器退役；客户端 `template` 恒 `dev-lane`、`epic` 恒 `all` 常量透传
-   （parseMetricsQuery 两参必收语义不变，localStorage 残留值读时归一弃用）；
-   `project` 下拉启用（数据源 GET /wf/projects，注册表），`''`=后端缺省项目。
-   请求/响应 schema 零变化。
-5. **立项白名单边界（C3 声明）**：`listEpicCodes` 白名单仍按引擎仓 notes/epics
-   解析（不随 project 换根）。面板立项面已退役（恒 all 不走校验），仅 CLI 前门
-   显式传 `epic=<code>&project=<非引擎仓 key>` 时按引擎仓白名单校验——已知边界，
-   危害休眠，随立项域多项目化（如有）另票收口。
-6. **per-project repo 换根（KI-043①）**：`deps.repo` 语义收紧为「该 project 的
-   注册表主目录」——buildMetricsResponse 在 project 校验通过后按
-   `repoForProject(project)`（defaultDeps 缺省实现=findProject→primaryDir，任何
-   注册表合法 key 含默认项目均换根；未知 key/注册表异常 null 回退传入 repo）
-   本请求局部换根，git/主仓回落/会话解析随之指向项目主目录。admin CLI 通路面
-   不变（按 project 传参分流）。**双前门同修**：node.ts 与 metrics-cli.mjs 同吃
-   defaultDeps，无前门分叉。lane worktree 内查默认项目也指向注册表主目录（非
-   worktree 自身 git）——与缓存/数据目录按项目键解析同族语义。
+1. **Cache-hit self-healing (KI-040)**: a per-ticket cache hit no longer returns early
+   unconditionally. Two kinds of stale records are let through to the full recomputation path (the
+   existing reduced-dimensionality retention mechanism is unchanged):
+   - Condition A (failed-dimension freeze + TTL throttle): `delivery===null` and the record's
+     `updated_ts` is more than the TTL old (env `SANDBAR_METRICS_REPROBE_TTL_MIN`, default 60
+     minutes; 0 = always probe, for tests only; a negative value is treated as 0). A missing or
+     corrupt `updated_ts` is treated as expired and must be probed (the NaN comparison direction is
+     settled: it leans toward "re-probe", leaving no dirty record in permanent silence). A re-probe
+     write-back always refreshes `updated_ts`="the instant of the last attempt", so the throttle
+     anchor is self-consistent — a genuinely incomputable ticket pays for at most one round of
+     showTicket+git per TTL period. The dirty state `delivery===null && delivery_frozen===true` also
+     belongs to condition A (the frozen flag is not consulted, and the recomputation gate likewise
+     looks only at `delivery===null`); that state was previously unreachable and is registered to
+     guard against schema-evolution leftovers.
+   - Condition B (stale open): when `rec.open` and the ticket list row's `status` disagree, refresh.
+     The comparison is zero-spawn, pure in-memory, and not subject to the TTL gate; **the refresh
+     goes through the existing full recomputation path** (closed_ms/timeline come from ticket show —
+     not an in-memory flag flip, which would degrade a closed ticket's window anchor to created_ms
+     and pollute KPI window attribution). This converges the closed-count divergence (KI-040's
+     measured 4 vs 5) between the time/delivery/token views (closed derived from rec.open) and the
+     health view (which queries the list directly).
+     **computed_at semantics refinement + archived-approximate-anchor baseline (acceptance F1 fix,
+     20260904)**: when a recomputation has no real anchor (timeline unavailable, created_ms=null),
+     computed_at keeps the baseline value (the instant the ticket was first computed, not overwritten
+     by this probe's instant); for archived tickets recomputed within this request, the F3
+     approximate window attribution uses the pre-recomputation existing computed_at as the baseline
+     (response-memory only, not written back to the cache) — otherwise a healed ticket's approximate
+     anchor drifts beyond the window's upper bound and is silently dropped by inWindow on the first
+     tick (the population collapses by one tick; measured on real machines: sandbar 6→1, suyou
+     50→2). With a real anchor, computed_at is always the instant of this computation; updated_ts is
+     unaffected and always refreshed (the TTL throttle anchor).
+     **Archived tickets' open has no external source of truth (acceptance F2 disposition,
+     20260904)**: when show is unreachable (returns null), open keeps the existing flag and is not
+     whitewashed; for an archived ticket with open=true, notices explicitly count "the closed count
+     may be undercounted" (identical across the hit/recompute/fast ticks) — the missing source of
+     truth for clarified terminal states is a registry root-fix debt (the KI-031 family, outside the
+     write set), and this ticket closes it by making it explicit rather than silent; the health
+     view's population = a direct query of the ticket list is the written contract definition, and
+     the criterion "time and health closed agree" is only testable in a world where the ticket is
+     still in the list.
+2. **Explicit template-filter reason (KI-043②)**: tickets whose list row workflow is empty or
+   mismatched and that are excluded by the template filter are counted into the response reason
+   notices (at the same position as the universe-completion notice, not truncated by the 20-item
+   cap), with the text `N tickets filtered out of the aggregate universe for template mismatch
+   (workflow empty or not <template>)`.
+3. **Multi-commit boundary of the archival definition (KI-040 related; the definition hover and
+   reason already note it)**: the archival definition's reason opens with an explicit note that it
+   "includes multiple commits (pre-resolution/booking commits are counted too, so the line count may
+   exceed the true squash value)". The **narrowed definition (only squash merge commits) was
+   discussed and not adopted** — git has no reliable mechanical discriminator for squash merges (no
+   merge commit to recognize, and message heuristics misjudge widely); the root fix belongs to the
+   engine-side out-of-repo snapshot ticket (KI-017③, filed separately). The UI definition ⓘ hover
+   notes this in step.
+4. **Panel parameters made constant (KI-042 host decree)**: the panel filter row's lane (template)
+   and epic selectors are retired; the client passes through `template` as the constant `dev-lane`
+   and `epic` as the constant `all` (the semantics of parseMetricsQuery requiring both parameters
+   are unchanged; leftover localStorage values are normalized and ignored on read); the `project`
+   dropdown is enabled (data source GET /wf/projects, the registry), with `''`=the backend default
+   project. The request/response schema changes in no way.
+5. **Epic whitelist boundary (C3 declaration)**: `listEpicCodes`'s whitelist is still parsed from
+   the engine repo's notes/epics (it does not re-root with project). The panel's epic surface is
+   retired (constant all does not go through validation); only when the CLI front door explicitly
+   passes `epic=<code>&project=<key of a non-engine repo>` is it validated against the engine repo's
+   whitelist — a known boundary whose harm is dormant, to be closed by another ticket if the epic
+   domain ever becomes multi-project.
+6. **Per-project repo re-rooting (KI-043①)**: the semantics of `deps.repo` tighten to "this
+   project's registry primary directory" — after project validation passes, buildMetricsResponse
+   re-roots locally for this request via `repoForProject(project)` (the defaultDeps default
+   implementation = findProject→primaryDir; any legitimate registry key including the default
+   project re-roots; an unknown key or a registry exception falls back to the passed-in repo), and
+   git/main-repo fallback/session parsing then point at the project's primary directory. The admin
+   CLI path is unchanged (it dispatches by the passed project). **Both front doors are fixed
+   together**: node.ts and metrics-cli.mjs both consume defaultDeps, so there is no front-door
+   fork. Querying the default project from inside a lane worktree also points at the registry
+   primary directory (not the worktree's own git) — the same family of semantics as resolving the
+   cache/data directory by project key.
 
-### 增补段（t260904-09，settle 出仓快照收口；schema 冻结不破，本段声明语义增补）
+### Supplementary section (t260904-09, settle out-of-repo snapshot clarification; the schema freeze is not broken, this section declares semantic additions)
 
-1. **settle 出仓快照（KI-017 引擎侧欠账收口）**：引擎在 merge（squash 收口）落定后、
-   泳道清理前，冻结单票快照出仓到 `<projects-root>/<key>/data/settle/<票号>.json`
-   （与 metrics 缓存同根约定；测试缝 env `SANDBAR_SETTLE_SNAPSHOT_DIR` 替换**项目根
-   整体**，与 `SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects` 同链，
-   读写两侧同一解析语义）。快照内容：`tokens`（in/out/cacheRead、by_model；by_stage
-   恒空对象+`by_stage_available:false`——引擎侧无 workflow timeline 时间窗真源，不硬造）
-   + `delivery`（squash 真身 numstat add/del/commits、base、squash_commit short hash、
-   `zero_change`）+ `schema_version:"v1"` + settled_at。语义：
-   - **本条取代块 3「token 维项目级账本（t260903-09 前向契约）」的出仓格式约定**：
-     原始会话文件（`$SANDBAR_USAGE_LEDGER_DIR/<id>/*.jsonl.zstd`）出仓不再实施，改
-     聚合 JSON 快照。`resolveLedgerSessionFiles` 读缝保留为兼容读位（存量外部注入
-     仍可读），读侧优先级在其下，不再新增引用。
-   - **幂等/不可变**：重复 settle 载荷一致=跳过；不一致（重开票等）=keep-old 不回写
-     ——**已知边界：重开票增量交付不可见**（快照 reason 的 squash_commit 可发现；
-     需重算删旧快照文件再 settle）。
-   - **失败软降级**：快照任何失败转 note 拼进 merge 告警链，绝不阻塞 merge（观测
-     欠账不卡交付，与 ui_evidence 同款 catch-all→log→不阻塞语义）。票 id 形状非法
-     （不过 PROJECT_KEY_RE 白名单，含 `../` 路径穿越形态）→ fail-closed 跳过快照
-     +note，不落盘（W8 打回项收口）。
-   - **收口零变更（zero_change）**：squash「未产新提交」分支 HEAD message 非本票
-     前缀（真·无内容可收，HEAD=他票收口）→ delivery 记零且不取 numstat（防他票
-     交付错记本票）；读侧 reason 显式「收口零变更（<hash> 为 main 尾提交，非本票
-     交付）」。
-2. **读侧优先级（工单条 5）**：单票 delivery/tokens 取数序=**settle 快照 > 现算
-   （泳道活口径/会话聚合）> 主仓归档 grep**。快照命中 → 数字=快照值、
-   `delivery_frozen=true`、reason 标「settle 快照（squash <hash>）」。缓存记录
-   `delivery` 对象增补**可选注记键** `squash_commit?: string` 与 `zero_change?: boolean`
-   （仅快照口径写入；旧读方按多余 JSON 键忽略，向后兼容）。
-3. **归档口径收窄（工单条 6；本条取代 t260904-04 增补段 3 的「收窄议后不落」结论
-   与「含多提交」reason 文案）**：无快照存量票归档口径只认 **message 首行以票号
-   开头**的 squash 收口提交，他账（引用性提及、预解/记账等）剔除。当初否决的是
-   **子串启发式**（引用性提及票号不居首即误判；git 对 squash merge 无机械判别）；
-   前缀锚定=消息首 token，squash 收口提交模板（引擎侧 `%s squash 收口…`）保证首
-   token 恒为票号，误判面收敛到「手工伪造 message」。实证锚=t260904-05：grep 命中
-   5 提交、前缀命中 1（真身 455320d 合计 5658；grep 合计 5783 含他账 125）。双算面
-   （一 commit 双票 id）随收窄正面关闭——一 commit 只归唯一前缀票。
-4. **重算触发器（SOURCE_VERSION bump v1→v2）**：口径语义变更（快照优先级+归档收窄）
-   随 source_version 走（本文档版本口径），bump 后全量 per-ticket 缓存整条作废重算
-   （=块 3 成文「缓存整体可弃置重建」，非红线）。已知副作用面：collectArchivedRows
-   记忆行按 source_version 过滤，bump 后旧记忆行缺席（聚合宇宙暂缩，重算入口=既有
-   list/全量门；在-list 票不受影响）。**存量 non-null frozen 记录无重算触发器**的
-   结构面（t260904-04 自愈只覆盖 delivery===null）由本 bump 打通一次；同类未来口径
-   变更须再次 bump，登记为通用纪律。
-5. **donut「有无代码变更票占比」四桶（工单条 7）**：`['有变更', '已收口·零变更',
-   '未交付（在制）', '不可算（数据缺失）']`，逐桶映射：有变更=add+del>0；已收口·
-   零变更=delivery 非空且全零；未交付（在制）=delivery=null 且 open；不可算（数据
-   缺失）=delivery=null 且 closed。四桶互斥且 Σ=票数；零变更已闭票不再与「不可算」
-   混装。**已知边界（继承，不新造静默）**：归档票 open 无外部真源（openUnverified，
-   KI-031 家族），「未交付（在制）」桶可能混入实际已闭的归档票。
-6. **legacy 单文件注册表模式（SANDBAR_PROJECTS_YAML）**：该模式只影响 host 侧 metrics
-   缓存落盘（enabled:false）；settle 快照目录解析不受其影响——引擎照常写根链目录，
-   读侧照读（快照与缓存独立性声明）。
+1. **settle out-of-repo snapshot (KI-017 engine-side debt clarification)**: after the merge (squash
+   closure) settles and before the lane is cleaned up, the engine freezes a single-ticket snapshot
+   out of the repo to `<projects-root>/<key>/data/settle/<ticket number>.json` (the same root
+   convention as the metrics cache; the test seam env `SANDBAR_SETTLE_SNAPSHOT_DIR` replaces **the
+   whole project root**, in the same chain as
+   `SANDBAR_METRICS_DIR ?? SANDBAR_PROJECTS_DIR ?? ~/.sandbar/projects`, with the same resolution
+   semantics on the read and write sides). Snapshot contents: `tokens` (in/out/cacheRead, by_model;
+   by_stage is always an empty object + `by_stage_available:false` — the engine side has no workflow
+   timeline time-window source of truth and does not fabricate one)
+   + `delivery` (the true squash numstat add/del/commits, base, squash_commit short hash,
+   `zero_change`) + `schema_version:"v1"` + settled_at. Semantics:
+   - **This item supersedes the out-of-repo format convention of block 3's "token-dimension
+     project-level ledger (t260903-09 forward contract)"**: shipping the raw session files
+     (`$SANDBAR_USAGE_LEDGER_DIR/<id>/*.jsonl.zstd`) out of the repo is no longer implemented, and an
+     aggregated JSON snapshot takes its place. `resolveLedgerSessionFiles` is retained as a
+     compatibility read slot (existing external injections can still be read), read-side priority
+     sits below it, and no new references are added.
+   - **Idempotent/immutable**: a repeated settle with an identical payload = skip; a differing one
+     (reopened ticket etc.) = keep-old, no write-back — **known boundary: incremental delivery of a
+     reopened ticket is invisible** (discoverable from the snapshot reason's squash_commit; it needs
+     the old snapshot file deleted and settle run again).
+   - **Failure soft degrade**: any snapshot failure turns into a note appended to the merge alert
+     chain and never blocks the merge (observability debt must not stall delivery — the same
+     catch-all→log→non-blocking semantics as ui_evidence). An illegal ticket id shape (failing the
+     PROJECT_KEY_RE whitelist, including `../` path traversal shapes) → fail-closed, skip the
+     snapshot + note, write nothing (W8 rework item clarified).
+   - **Zero-change closure (zero_change)**: when the squash "produced no new commit" branch's HEAD
+     message does not start with this ticket's prefix (truly nothing to close, HEAD = another
+     ticket's closure) → delivery records zero and numstat is not taken (to keep another ticket's
+     delivery from being misattributed to this one); the read-side reason explicitly says "closure
+     with zero change (<hash> is main's tail commit, not this ticket's delivery)".
+2. **Read-side priority (ticket item 5)**: the order for reading a single ticket's delivery/tokens
+   = **settle snapshot > on-the-spot computation (live lane definition / session aggregation) >
+   main-repo archival grep**. A snapshot hit → the numbers are the snapshot values,
+   `delivery_frozen=true`, and reason says "settle snapshot (squash <hash>)". The cache record's
+   `delivery` object gains **optional annotation keys** `squash_commit?: string` and
+   `zero_change?: boolean` (written only under the snapshot definition; older readers ignore the
+   extra JSON keys, so it is backward compatible).
+3. **Narrowing of the archival definition (ticket item 6; this item supersedes the "narrowing
+   discussed but not adopted" conclusion and the "includes multiple commits" reason text of
+   t260904-04's supplementary item 3)**: for existing tickets with no snapshot, the archival
+   definition recognizes only squash closure commits whose **message first line starts with the
+   ticket number**; other accounts (referential mentions, pre-resolution/booking commits, etc.) are
+   excluded. What was rejected back then was the **substring heuristic** (a referential mention of a
+   ticket number that is not at the start is misjudged; git has no mechanical discriminator for
+   squash merges); prefix anchoring = the message's first token, and the squash closure commit
+   template (engine-side `%s squash 收口…`) guarantees that the first token is always the ticket
+   number, so the misjudgment surface shrinks to "hand-forged messages". The empirical anchor is
+   t260904-05: grep matched 5 commits while prefix matching matched 1 (the true commit 455320d totals
+   5658; the grep total of 5783 includes 125 from other accounts). The double-counting surface (one
+   commit with two ticket ids) is closed head-on by the narrowing — one commit is attributed only to
+   its unique prefix ticket.
+4. **Recomputation trigger (SOURCE_VERSION bump v1→v2)**: the definitional semantic change
+   (snapshot priority + archival narrowing) travels with source_version (this document's version
+   definition); after the bump, the entire per-ticket cache is voided and recomputed (= block 3's
+   written rule "the cache as a whole may be discarded and rebuilt", not a red line). Known side
+   effect: collectArchivedRows memory rows are filtered by source_version, so after the bump the old
+   memory rows are absent (the aggregate universe shrinks temporarily; the recomputation entry
+   points are the existing list/full gates; in-list tickets are unaffected). The structural surface
+   that **existing non-null frozen records have no recomputation trigger** (t260904-04's self-healing
+   covers only delivery===null) is opened up once by this bump; future definitional changes of the
+   same kind must bump again, registered as a general discipline.
+5. **Donut "share of tickets with or without code changes" four buckets (ticket item 7)**:
+   `['has changes', 'closed·zero change', 'undelivered (in progress)', 'incomputable (missing
+   data)']`, mapped bucket by bucket: has changes = add+del>0; closed·zero change = delivery non-null
+   and all zeros; undelivered (in progress) = delivery=null and open; incomputable (missing data) =
+   delivery=null and closed. The four buckets are mutually exclusive and Σ = ticket count; a
+   zero-change closed ticket is no longer mixed with "incomputable". **Known boundary (inherited,
+   no new silence invented)**: an archived ticket's open has no external source of truth
+   (openUnverified, the KI-031 family), so the "undelivered (in progress)" bucket may contain
+   archived tickets that are in fact closed.
+6. **Legacy single-file registry mode (SANDBAR_PROJECTS_YAML)**: that mode only affects the host-side
+   metrics cache persistence (enabled:false); resolution of the settle snapshot directory is
+   unaffected by it — the engine writes the root chain directory as usual and the read side reads it
+   as usual (a declaration of snapshot/cache independence).
 
-## 相关文档
+## Related documents
 
-- [metrics 面板 UI 规划](metrics面板ui规划.md)——四视图逐图定义与面板骨架，§6 为本文示意入口
-- [DeepSeek Harness and Temporal based multi-agent mechanism](deepseek_harness_and_temporal_based_multi-agent_mechanism.md)——usage 聚合口径与故障模式先例（块 1/5 依据）
+- [metrics Panel UI Plan](./metrics-panel-ui-plan.md) — per-chart definitions of the four views and the panel skeleton; §6 is the illustrative entry point to this document
+- [DeepSeek Harness and Temporal based multi-agent mechanism](./deepseek_harness_and_temporal_based_multi-agent_mechanism.md) — usage aggregation definitions and failure-mode precedents (the basis of blocks 1/5)
 
-> 来源立项：metrics
+> Source epic: metrics

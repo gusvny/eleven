@@ -76,7 +76,7 @@ python 侧 `.venv`（系统 python 3.9.6）+ **temporalio 1.18.2**。
 
 ## 5. 对现有引擎的意味（迁移评估，供总管/用户判断，POC 不动手）
 
-现有 `server/tools/ticket.py` + `docs/design/工单工作流台设计.md` §8/§9 的语义，对到 Temporal 上：
+现有 `server/tools/ticket.py` + `docs/design/ticket-workflow-console-design.md` §8/§9 的语义，对到 Temporal 上：
 
 | 现在（json 工单 + 引擎校验） | Temporal 里对应物 | 白拿的好处 |
 |---|---|---|

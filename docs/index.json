@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-24T17:07:13+08:00",
-  "total": 16,
+  "generated_at": "2026-09-28T08:12:09+08:00",
+  "total": 21,
   "categories": [
     "design",
     "content",
@@ -9,249 +9,324 @@
   ],
   "docs": [
     {
+      "path": "design/chore-lane-ticket-template-design.md",
+      "file": "chore-lane-ticket-template-design.md",
+      "title": "Chore Ticket Template (chore-lane) Design",
+      "category": "design",
+      "tags": [
+        "ticket template",
+        "chore-lane",
+        "engine"
+      ],
+      "status": "draft",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
       "path": "design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
       "file": "deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
       "title": "DeepSeek Harness and Temporal based multi-agent mechanism",
       "category": "design",
       "tags": [
-        "角色",
-        "多agent",
-        "协作",
+        "roles",
+        "multi-agent",
+        "collaboration",
         "dsh",
-        "基础设施",
+        "infrastructure",
         "temporal"
       ],
       "status": "active",
-      "updated": "2026-08-31",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "design/dsh_seam需求书v1.md",
-      "file": "dsh_seam需求书v1.md",
-      "title": "dsh seam 需求书 v1 —— A3 运行时模型覆盖 + A4 headless 会话延续钩子",
+      "path": "design/design-doc-writing-guide.md",
+      "file": "design-doc-writing-guide.md",
+      "title": "Design Document Writing Guide",
+      "category": "design",
+      "tags": [
+        "design doc",
+        "writing guideline",
+        "guideline",
+        "discussion-first"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/dsh-seam-requirements-v1.md",
+      "file": "dsh-seam-requirements-v1.md",
+      "title": "dsh seam requirements v1 — A3 runtime model override + A4 headless session continuation hook",
       "category": "design",
       "tags": [
         "dsh",
-        "上游需求",
+        "upstream requirement",
         "headless",
         "settings"
       ],
       "status": "active",
-      "updated": "2026-09-04",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "design/metrics-api契约v1.md",
-      "file": "metrics-api契约v1.md",
-      "title": "metrics 口径与 API 契约 v1",
+      "path": "design/failure-classification-protocol-v1.md",
+      "file": "failure-classification-protocol-v1.md",
+      "title": "Failure Classification Protocol v1 and Mechanical Attribution",
+      "category": "design",
+      "tags": [
+        "failure classification",
+        "attribution",
+        "integration gate",
+        "protocol",
+        "result ledger",
+        "mode: dependency",
+        "mode: practice reference"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/inspection-produce-face-extension.md",
+      "file": "inspection-produce-face-extension.md",
+      "title": "Inspection Produce-Face Extension (doc/simplify produce change) and Inspection workflow Generalization",
+      "category": "design",
+      "tags": [
+        "finalized design",
+        "inspection",
+        "doc inspection",
+        "simplify inspection",
+        "generalization"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/knowledge-base-design.md",
+      "file": "knowledge-base-design.md",
+      "title": "Knowledge Base Design",
+      "category": "design",
+      "tags": [
+        "knowledge base",
+        "documentation",
+        "collaboration",
+        "workflow"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/metrics-api-contract-v1.md",
+      "file": "metrics-api-contract-v1.md",
+      "title": "metrics Definitions and API Contract v1",
       "category": "design",
       "tags": [
         "metrics",
-        "契约",
+        "contract",
         "API"
       ],
       "status": "active",
-      "updated": "2026-09-04",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "design/metrics面板ui规划.md",
-      "file": "metrics面板ui规划.md",
-      "title": "metrics 面板 UI 规划",
+      "path": "design/metrics-panel-ui-plan.md",
+      "file": "metrics-panel-ui-plan.md",
+      "title": "metrics Panel UI Plan",
       "category": "design",
       "tags": [
         "metrics",
         "workbench"
       ],
       "status": "active",
-      "updated": "2026-09-04",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "design/sandbar分发形态v1.md",
-      "file": "sandbar分发形态v1.md",
-      "title": "sandbar 分发形态 v1",
+      "path": "design/project-external-workflow-template-loader-v1.md",
+      "file": "project-external-workflow-template-loader-v1.md",
+      "title": "Project external workflow template loader v1",
       "category": "design",
       "tags": [
-        "分发",
-        "安装器",
-        "docker",
-        "设计"
-      ],
-      "status": "draft",
-      "updated": "2026-09-20",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/sandbar项目接入契约v1.md",
-      "file": "sandbar项目接入契约v1.md",
-      "title": "sandbar 项目接入契约 v1",
-      "category": "design",
-      "tags": [
-        "sandbar",
-        "契约",
-        "接入",
-        "schema版本"
+        "workflow-template",
+        "project-external",
+        "loader",
+        "multi-project",
+        "isolated-rejection",
+        "evolution-discipline"
       ],
       "status": "active",
-      "updated": "2026-09-20",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "design/右栏会话入口与hero定制设计.md",
-      "file": "右栏会话入口与hero定制设计.md",
-      "title": "右栏会话入口与 New Session hero 定制",
+      "path": "design/project-external-workflow-templates.md",
+      "file": "project-external-workflow-templates.md",
+      "title": "Project external workflow templates",
       "category": "design",
       "tags": [
-        "dsh",
-        "工单台",
-        "会话"
-      ],
-      "status": "draft",
-      "updated": "2026-08-29",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/失败分类协议v1.md",
-      "file": "失败分类协议v1.md",
-      "title": "失败分类协议 v1 与机械归属判定",
-      "category": "design",
-      "tags": [
-        "失败分类",
-        "归属判定",
-        "集成闸",
-        "协议",
-        "结果台账",
-        "mode: 依赖",
-        "mode: 实践参考"
+        "design-final",
+        "workflow-template",
+        "project-external",
+        "multi-project",
+        "engine-extension"
       ],
       "status": "active",
-      "updated": "2026-09-22",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "design/工单工作流台设计.md",
-      "file": "工单工作流台设计.md",
-      "title": "工单工作流台设计 v0.3",
-      "category": "design",
-      "tags": [
-        "工单",
-        "工作流",
-        "协作"
-      ],
-      "status": "superseded",
-      "updated": "2026-08-23",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/杂务工单模版设计.md",
-      "file": "杂务工单模版设计.md",
-      "title": "杂务工单模版（chore-lane）设计",
-      "category": "design",
-      "tags": [
-        "工单模板",
-        "chore-lane",
-        "引擎"
-      ],
-      "status": "draft",
-      "updated": "2026-09-04",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/知识库设计.md",
-      "file": "知识库设计.md",
-      "title": "知识库设计",
-      "category": "design",
-      "tags": [
-        "知识库",
-        "文档",
-        "协作",
-        "workflow"
-      ],
-      "status": "active",
-      "updated": "2026-08-21",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/设计文档写作指南.md",
-      "file": "设计文档写作指南.md",
-      "title": "设计文档写作指南",
-      "category": "design",
-      "tags": [
-        "设计文档",
-        "写作规范",
-        "guideline",
-        "讨论先行"
-      ],
-      "status": "active",
-      "updated": "2026-09-04",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/项目外置工作流模板加载口v1.md",
-      "file": "项目外置工作流模板加载口v1.md",
-      "title": "项目外置工作流模板加载口v1",
-      "category": "design",
-      "tags": [
-        "工作流模板",
-        "项目外置",
-        "加载口",
-        "多项目",
-        "隔离拒收",
-        "演进纪律"
-      ],
-      "status": "active",
-      "updated": "2026-09-24",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/项目管理UI设计.md",
-      "file": "项目管理UI设计.md",
-      "title": "项目管理 UI 设计（左栏内嵌）",
+      "path": "design/project-management-ui-design.md",
+      "file": "project-management-ui-design.md",
+      "title": "Project Management UI Design (embedded in the left column)",
       "category": "design",
       "tags": [
         "sandbar",
         "workbench",
-        "项目管理",
+        "project management",
         "UI"
       ],
       "status": "active",
-      "updated": "2026-09-20",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "ops/admin-dsh-应用方案.md",
-      "file": "admin-dsh-应用方案.md",
-      "title": "溯游 admin × DeepSeek Harness（dsh）应用方案",
+      "path": "design/sandbar-distribution-v1.md",
+      "file": "sandbar-distribution-v1.md",
+      "title": "sandbar distribution form v1",
+      "category": "design",
+      "tags": [
+        "distribution",
+        "installer",
+        "docker",
+        "design"
+      ],
+      "status": "draft",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/sandbar-project-onboarding-contract-v1.md",
+      "file": "sandbar-project-onboarding-contract-v1.md",
+      "title": "Sandbar project onboarding contract v1",
+      "category": "design",
+      "tags": [
+        "sandbar",
+        "contract",
+        "onboarding",
+        "schema-version"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/sidebar-session-entry-and-hero-design.md",
+      "file": "sidebar-session-entry-and-hero-design.md",
+      "title": "Right Column Session Entry and New Session hero Customization",
+      "category": "design",
+      "tags": [
+        "dsh",
+        "ticket console",
+        "session"
+      ],
+      "status": "draft",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/ticket-workflow-console-design.md",
+      "file": "ticket-workflow-console-design.md",
+      "title": "Ticket Workflow Console Design v0.3",
+      "category": "design",
+      "tags": [
+        "ticket",
+        "workflow",
+        "collaboration"
+      ],
+      "status": "deprecated",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "ops/admin-dsh-application-plan.md",
+      "file": "admin-dsh-application-plan.md",
+      "title": "Suyou admin × DeepSeek Harness (dsh) Application Plan",
       "category": "ops",
       "tags": [
         "admin",
         "dsh",
-        "应用方案"
+        "application plan"
       ],
       "status": "active",
-      "updated": "2026-08-19",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     },
     {
-      "path": "ops/项目生命周期操作手册.md",
-      "file": "项目生命周期操作手册.md",
-      "title": "项目生命周期操作手册（add/list/remove）",
+      "path": "ops/project-lifecycle-runbook.md",
+      "file": "project-lifecycle-runbook.md",
+      "title": "Project Lifecycle Runbook (add/list/remove)",
       "category": "ops",
       "tags": [
         "sandbar",
-        "安装器",
-        "项目注册表",
-        "运维"
+        "installer",
+        "project registry",
+        "ops"
       ],
       "status": "active",
-      "updated": "2026-09-04",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "README.md",
+      "file": "README.md",
+      "title": "docs index",
+      "category": "reference",
+      "tags": [
+        "index",
+        "knowledge-base"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "terminology.md",
+      "file": "terminology.md",
+      "title": "Project terminology table",
+      "category": "reference",
+      "tags": [
+        "terminology",
+        "glossary",
+        "writing-standard"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "testing-guide.md",
+      "file": "testing-guide.md",
+      "title": "Sandbar test environment isolation guide",
+      "category": "reference",
+      "tags": [
+        "testing",
+        "isolation",
+        "docker"
+      ],
+      "status": "active",
+      "updated": "2026-09-28",
       "has_frontmatter": true
     }
   ],
   "review": {
     "missing_frontmatter": [],
-    "deprecated": [],
+    "deprecated": [
+      "design/ticket-workflow-console-design.md"
+    ],
     "stale": []
   }
 }

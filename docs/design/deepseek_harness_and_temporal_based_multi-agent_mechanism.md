@@ -2,400 +2,400 @@
 title: DeepSeek Harness and Temporal based multi-agent mechanism
 category: design
 tags:
-  - 角色
-  - 多agent
-  - 协作
+  - roles
+  - multi-agent
+  - collaboration
   - dsh
-  - 基础设施
+  - infrastructure
   - temporal
 status: active
-updated: 2026-08-31
+updated: 2026-09-28
 ---
 
 # DeepSeek Harness and Temporal based multi-agent mechanism
 
-> 按《设计文档写作指南》四段结构写。本文描述溯游项目以 DeepSeek Harness（dsh）为运行时底座搭建的
-> 多角色协作基础设施：如何用一群各司其职的 agent 角色协同完成软件开发、内容生产、运营与运维。
-> 截至 2026-08-21，核心机制已落地并多轮实跑（操作总览见 `server/roles/README.md`）。
-> 落地状态不写在本文档——状态一律归立项单与 Temporal。
+> Written in the four-part structure of the Design Doc Writing Guide. This document describes the multi-role
+> collaboration infrastructure that the suyou project built on DeepSeek Harness (dsh) as its runtime foundation: how a group of agent roles, each with its own duties, cooperate to deliver software development, content production, operations and maintenance.
+> As of 2026-08-21 the core mechanisms are implemented and have gone through many rounds of real runs (operational overview in `server/roles/README.md`).
+> Implementation status is not written in this document — status always belongs to the epic proposal and to Temporal.
 
-## Problem（问题）
+## Problem
 
-### 现状哪里不好
+### What is wrong today
 
-单一「全能 agent」承担所有工作（写内容、写代码、校验、审校、部署），存在四类问题：
+A single "do-everything agent" carrying all the work (writing content, writing code, verifying, reviewing, deploying) has four classes of problem:
 
-1. **角色无约束**：没有岗位边界，一个 agent 既写内容又验内容，「生成者自验」埋幻觉。
-2. **越权无机制**：不该写文件的人（如只读审校）能写，出错无法追责。
-3. **上下文无隔离**：大而全的 agent 一次装下所有事，上下文爆炸、互相污染。
-4. **无人把关**：验收靠自觉，没有「谁拍板、谁执行、谁复核」的决策链。
+1. **No constraint on roles**: with no role boundaries, one agent both writes and verifies content, and "the generator verifying itself" plants hallucinations.
+2. **No mechanism against overreach**: people who should not write files (e.g. read-only reviewers) can write, and errors cannot be traced to an owner.
+3. **No context isolation**: an all-in-one agent holds everything at once, so the context explodes and tasks contaminate each other.
+4. **Nobody gates the work**: acceptance relies on good intentions, and there is no decision chain of "who decides, who executes, who reviews".
 
-### 落地后的流程缺口（260825 实证）
+### The process gap after implementation (260825 evidence)
 
-开发泳道并行密度上来后，同文件碰撞成为常态。260825 实证：两张并行工单在同一文件
-相邻行各加一行注释（语义零冲突、纯文本贴近），合并预演检出冲突后直接转 blocked 等
-人解，人力解完发现只是两行注释。缺口在于：审读打回返工有 agent 回路，人审签字期间
-冲突有自动打回重验，唯独**冲突消解本身没有 agent 回路**——机器能检出冲突，却只能
-等人动手解，自治链路在最后一公里断掉。
+Once the parallel density of development lanes rose, collisions on the same file became the norm. Evidence from 260825: two parallel tickets each added one line of comments
+to adjacent lines of the same file (zero semantic conflict, purely textually close). The merge rehearsal detected the conflict and the ticket went straight to blocked, waiting
+for a human to resolve it — and having resolved it, the human found it was merely two lines of comments. The gap: rework triggered by review has an agent loop, and conflicts
+during the human approval signature get automatic rework-and-reverify, but **conflict resolution itself has no agent loop** — the machine can detect a conflict, yet it can only
+wait for a human to act, so the autonomous chain breaks in the last mile.
 
-### 背景知识
+### Background
 
-- **dsh（DeepSeek Harness）**：本项目的 agent 运行时，提供 profile / preset / roster / 插件 / subagent 委派机制。
-- **preset**：一份 agent 配置（persona + 工具集 + 行为参数）；本项目 preset 由 `server/presets/gen.py` 从上游 standard 派生。
-- **roster**：dsh 的 preset 发现机制（实证入口 = `$DSH_HOME/.agent-presets/` 实体镜像）。
-- **工单**：一条 Temporal workflow（id=工单 id，单例，`server/tools/ticket.py` 薄壳 + engine v2 模版类），是派活、接力、验收、审计的载体；260823 起按 ProjectKey search attribute 区分项目（旧 `server/tickets/` JSON 投影目录已删）。
-- **知识库**：`docs/` 目录为项目的知识库（见《知识库设计》），是角色上下文的共享真相源。
-
-
-
-## Requirement（需求）
+- **dsh (DeepSeek Harness)**: this project's agent runtime, providing profile / preset / roster / plugin / subagent delegation mechanisms.
+- **preset**: one agent configuration (persona + tool set + behavior parameters); this project's presets are derived by `server/presets/gen.py` from the upstream standard.
+- **roster**: dsh's preset discovery mechanism (the proven entry point = the physical mirror at `$DSH_HOME/.agent-presets/`).
+- **ticket**: one Temporal workflow (id = the ticket id, a singleton; `server/tools/ticket.py` is a thin shell plus the engine v2 template class) — the carrier for dispatching work, handoff, acceptance and audit; since 260823 projects are distinguished by the ProjectKey search attribute (the old `server/tickets/` JSON projection directory has been deleted).
+- **knowledge base**: the `docs/` directory is the project's knowledge base (see Knowledge Base Design) and the shared source of truth for role context.
 
 
 
-### 目标（可验证）
+## Requirement
 
-以下 7 条是用户提出的需求原文，即本基础设施的验收标准；每条的可验证性与现状见 Proposal 章逐条回扣。
 
-1. **多角色协同**：能够自由定义多种不同的角色以及他们的工作流程与方式，协同完成软件开发、运营和运维工作。
-2. **角色自我迭代**：每个角色能够在开发迭代的过程中自我迭代，包括自身使用的工具、自身的工作流程等。
-3. **知识库结合**：必须与我们的 knowledge 系统相结合，保证每个工作者有充分和正确的上下文。
-4. **确定性**：必须有非常好的确定性，杜绝 LLM 在执行中的幻觉。
-5. **一角色多工作者**：角色对应的工作者并不一定是只有一个，要能够适应大规模开发的需求，一个角色建立多个工作者。
-6. **高效通信**：工作者之间应该能高效的通信，应该通过合理的组织方式和通信机制来达到这个目的。
-7. **动态选模型**：不同的工作者能够动态选择不同的模型来工作。
-8. 可审查，可审批：每个工作者的工作必须是可以回溯审查的，重要的操作必须是可审批的。
-9. 自治系统：能够持续工作，最小化人类的工作。人类工作主要限于文档的评审，重要技术方向的选择，重要操作的审批等。
-10. 期望是基于deepseek harness，以及temporal来打造。不需要对temporal做任何封装，把temporal认为是我们的第一公民，我们的基础设施即可。
 
-### 增补需求（流程改进，t260826-01）
+### Goals (verifiable)
 
-11. **冲突自动消解**：合并预演检出泳道与主干的文本冲突时，工单不转 blocked 等人，
-    自动打回开发段由 agent 消解（冲突文件清单与合并上下文随打回带出），消解完
-    回路自然回到合并检查重验。
-12. **消解防死循环**：消解轮数有上限（3 轮），连续解不掉或同一批文件反复冲突，
-    转 blocked 交人，日志写清轮数与原因。
-13. **既有行为回归不变**：非冲突类红灯（无提交/工作区脏/复验红）仍 blocked 等人；
-    人审签字期间冲突自动打回重验的既有行为不变。
+The 7 items below are the user's original requirements, i.e. the acceptance criteria for this infrastructure; the verifiability and current status of each are answered item by item in the Proposal section.
 
-## Nongoal（不做什么）
+1. **Multi-role collaboration**: it must be possible to freely define many different roles, along with their workflows and ways of working, so that they cooperate to deliver software development, operations and maintenance.
+2. **Role self-iteration**: each role must be able to iterate on itself in the course of development iterations, including the tools it uses and its own workflow.
+3. **Integration with the knowledge base**: it must integrate with our knowledge system so that every worker has sufficient and correct context.
+4. **Determinism**: determinism must be very good, eliminating LLM hallucinations during execution.
+5. **One role, many workers**: a role does not have to map to exactly one worker; to meet the needs of large-scale development, a single role can have multiple workers.
+6. **Efficient communication**: workers must be able to communicate efficiently, achieved through sensible organization and communication mechanisms.
+7. **Dynamic model selection**: different workers must be able to dynamically choose different models to work with.
+8. Auditable, approvable: every worker's work must be traceable and reviewable, and important operations must be approvable.
+9. Autonomous system: it must keep working and minimize human work. Human work is limited mainly to reviewing documents, choosing important technical directions, approving important operations, and so on.
+10. The expectation is to build it on deepseek harness and temporal. No wrapping of temporal is needed — simply treat temporal as our first-class citizen, our infrastructure.
 
-- **不做语义冲突的自动判对错**：机器只识别文本冲突并派 agent 消解，消解结果的
-  语义正确性仍由集成审读兜底（审读不通过则按既有打回回路返工）。
-- **不以 rebase 替换 merge 策略**：维持「主干合并进泳道」的现状口径，冲突消解
-  在泳道内以合并提交落账，不改写泳道历史。
+### Additional requirements (process improvement, t260826-01)
 
-> KI-006 边界（2026-09-01 拍板，t260901-26）：上一条管的是**主干合并进泳道**
-> 的方向；而「泳道收口进主干」的方向自本拍板起改为一单一提交的压缩收口——
-> 工单完整历史不进主干，审计真源在工单工作流引擎，主干保持可读、回退工单
-> 只需回退一个提交。泳道内的小步提交与冲突消解在泳道内的合并提交落账均
-> 不受影响，两者方向不同、不矛盾。工单台对压缩前历史与压缩后新形态的回放
-> 口径并存。
+11. **Automatic conflict resolution**: when the merge rehearsal detects a text conflict between a lane and the trunk, the ticket does not go to blocked waiting for a human; it is
+    automatically reworked back to the development stage for an agent to resolve (the list of conflicting files and the merge context travel with the rework), and once resolved the
+    loop naturally returns to the merge check for re-verification.
+12. **Loop prevention for resolution**: the number of resolution rounds is capped (3 rounds); if resolution keeps failing or the same batch of files conflicts repeatedly,
+    the ticket goes to blocked for a human, and the log states the round count and the reason clearly.
+13. **Existing behavior regression-free**: non-conflict red lights (no commit / dirty worktree / re-verification red) still go to blocked waiting for a human;
+    the existing behavior of automatically reworking and re-verifying conflicts during human approval signature is unchanged.
 
-## Proposal（方案）
+## Nongoal
+
+- **No automatic judgment of right and wrong in semantic conflicts**: the machine only identifies text conflicts and dispatches an agent to resolve them;
+  the semantic correctness of the resolution is still backstopped by integration review (if the review fails, the existing rework loop applies).
+- **No replacing the merge strategy with rebase**: keep the current rule of "merge the trunk into the lane"; conflict resolution is recorded inside the lane as a merge commit,
+  and lane history is not rewritten.
+
+> KI-006 boundary (host ruling 2026-09-01, t260901-26): the previous item governs the direction of **merging the trunk into the lane**;
+> the direction of "merging a lane into the trunk" has, since this ruling, changed to a squashed merge-in with a single commit —
+> a ticket's full history does not enter the trunk, the audit source of truth is the ticket workflow engine, the trunk stays readable, and reverting a ticket
+> requires reverting only one commit. Small steps committed inside the lane and conflict resolution recorded as merge commits inside the lane are both
+> unaffected; the two directions differ and do not contradict each other.
+> The ticket console carries both replay conventions: pre-squash history and the new post-squash shape.
+
+## Proposal
 
 
 
 ### High level
 
-五层结构承载 7 条需求，每层有明确的仓内落点：
+A five-layer structure carries the 7 requirements, and each layer has a clear landing point inside the repo:
 
-1. **岗位说明书层**（`server/roles/*.md`，8 份）：定义职责/边界/验收清单——解决「角色无约束」。
-2. **Preset 层**（`server/presets/`，gen.py 从上游 standard 派生 8 preset）：persona 烘焙——解决「上下文无隔离」。
-3. **Roster 层**（`$DSH_HOME/.agent-presets/` 实体镜像 + 默认 suyou-dispatcher）：发现机制——解决「谁是什么角色」。
-4. **派活工具层**（`suyou-dispatcher` preset 的 delegation 组：7 个 `dispatch_`* 实例）：一键派活；只读三角色 toolFilter.deny=[write,edit] **机制强制**——解决「越权无机制」。
-5. **决策链与防幻觉层**：验收清单预写死、生成/验证分离、异模型交叉、红线必人审、可追溯；工单系统 + verify_lane 机械校验——解决「无人把关」。
-
-
-
-### 工作任务模版
-
-每个角色都可以有多个工作任务模版，每个工作任务模版定义了角色如何完成一项工作。
-
-工作任务模版是基于temporal的工作流来定义，一个工作流有多个step，每个step有可能是由agent执行，也可能是固定的代码就可以解决的。能用代码固定下来的就用代码固定。
-
-这样，整个工作流就能很好的保证执行的确定性，避免llm的幻觉。
-
-在可能产生幻觉的地方，还可以通过工作流步骤上的调整，引入交叉检验的步骤，进一步提高执行的确定性，同时也能够利用大模型的能力。
-
-工作任务模版可以基于运营的情况持续迭代。这种迭代的需求，可能来自于管理员，也可能来自于agent自己。为了能支持这种迭代，工作任务模版应该支持多版本管理。跑之前的版本和新版本没有冲突。这种版本的并存不应该是一种常态，最终，一个工作任务模版只应该有一个版本。同时，如果多版本兼容的难度很大，大多数情况下，只要这个任务不是很重量级，那完全可以不要过去的任务，重新用新版本跑一遍即可。
-
-### 工作空间
-
-每一个任务，都应该有自己的工作空间。
-
-对于开发任务，工作空间应该是开发所需要的git repo的一个worktree。注意，有可能有多repo协同开发的情况，这种情况下，工作空间应该包括多个repo，以及每个repo的worktree。
-
-对于非开发任务，比如系统的运维，上线以后内容的运营等，这些工作的执行，应该也开辟单独的工作空间。由于这些工作通常不涉及到git repo，所以也就不需要worktree，可以使用/tmp下建立子目录或者其他特定的目录的方式，做工作空间的隔离。
-
-应该保证一个工作空间同时只有一个agent在工作。同时，也应该允许完成工作的agent把工作空间转移给另一个agent来接力使用。
+1. **Role charter layer** (`server/roles/*.md`, 8 files): defines duties / boundaries / acceptance checklists — solves "no constraint on roles".
+2. **Preset layer** (`server/presets/`, gen.py derives 8 presets from the upstream standard): persona baking — solves "no context isolation".
+3. **Roster layer** (the physical mirror at `$DSH_HOME/.agent-presets/` + the default suyou-dispatcher): the discovery mechanism — solves "who is what role".
+4. **Dispatch tool layer** (the delegation group of the `suyou-dispatcher` preset: 7 `dispatch_`* instances): one-command dispatch; for the three read-only roles toolFilter.deny=[write,edit] is **mechanically enforced** — solves "no mechanism against overreach".
+5. **Decision chain and hallucination prevention layer**: acceptance checklists frozen in advance, generation separated from verification, cross-checking by a different model, red lines always human-reviewed, full traceability; the ticket system + verify_lane machine check — solves "nobody gates the work".
 
 
 
-### 角色
+### Work task templates
 
-角色定义了一种工作者的设定，把agent限制在特定的上下文里，避免无谓信息的污染。
+Every role can have several work task templates, and each work task template defines how the role completes a piece of work.
 
-每个角色有特定的可以使用的工具，以及工作任务的模版。
+A work task template is defined as a temporal-based workflow; a workflow has several steps, and each step may be executed by an agent or may be something that fixed code can handle. Whatever can be pinned down in code is pinned down in code.
 
-常见的角色有：
+That way the workflow as a whole gives strong guarantees of execution determinism and avoids llm hallucinations.
 
-- developer：负责理解设计文档，拆分具体的任务，实现文档要求的功能，对设计文档进行小幅度的调整更新，代码的单元测试等。
-- integration：负责从用户的角度全局把关一个功能的开发，对设计文档和developer具体的实现文档进行审查，设计集成测试案例，排查测试的问题，从而保证功能的交付。Integration应该是对项目理解最全面的角色。
-- site operation：技术运维，负责维护第三方依赖（比如项目需要数据库，缓存，消息系统等），在线系统的部署，检查监控，升级等
-- product operation：负责项目上线后的业务维护，增长，内容运营，客户反馈理解，数据分析等。
-- artist：负责项目所需的音乐，美术相关方面的工作。
+Where hallucinations are possible, the workflow steps can also be adjusted to introduce cross-checking steps, which further raises execution determinism while still making use of the large model's capabilities.
+
+Work task templates can keep iterating based on how operations go. Such iteration requests may come from an administrator or from the agent itself. To support this, work task templates must support multi-version management, and running an old version alongside a new one must not conflict. Such coexistence of versions should not be the norm: in the end a work task template should have only one version. And if multi-version compatibility is very hard, then in most cases — as long as the task is not very heavyweight — the old task can simply be dropped and re-run with the new version.
+
+### Workspace
+
+Every task should have its own workspace.
+
+For development tasks the workspace should be a worktree of the git repo the development needs. Note that multi-repo collaborative development is possible; in that case the workspace should contain several repos, and a worktree for each repo.
+
+For non-development tasks — system operations, content operations after launch, and so on — execution should also open a separate workspace. Since these tasks usually do not involve a git repo, no worktree is needed; isolation can be done by creating a subdirectory under /tmp or some other dedicated directory.
+
+A workspace should be guaranteed to have only one agent working in it at a time. At the same time, an agent that has finished its work should be allowed to hand the workspace over to another agent to carry on from.
 
 
 
-### 工作单与角色间协作
+### Roles
 
-每一个任务都是基于一个工作任务模版产生的Temporal工组流。产生的方式有多种：
+A role defines a kind of worker setup, confining the agent to a specific context and avoiding pollution by irrelevant information.
 
-1. 由某个agent直接创建
-2. 由admin（人类）手动触发
-3. 由某个定时程序定时触发
+Each role has specific tools it may use, plus work task templates.
 
-无论如何触发，这个工作流都唯一对应一个工作单。通过工作台，admin可以对当前进行的所有工作单有一个全局的掌握。agent主要通过工作流来进行信息的交换和协作。
+Common roles are:
 
-比如一个agent如果想要别的role去做一件事情，那就触发一个工作流，把需求作为输入。工作流会执行对应的工作模版，如果模版里的步骤需要那个role的agent，workflow会启动这个agent并输入对应的需求。这个agent 工作完毕后，交付了什么说明清楚，记录在workflow上，如果后面的步骤还有别的role参与，可以以此为上下文继续工作。
+- developer: understands the design documents, breaks concrete tasks down, implements the functionality the documents require, makes small adjustments and updates to the design documents, writes code unit tests, and so on.
+- integration: gates the development of a feature globally from the user's point of view, reviews design documents and the developer's implementation documents, designs integration test cases, and diagnoses test problems, thereby ensuring the feature is delivered. Integration should be the role with the most complete understanding of the project.
+- site operation: technical operations, maintaining third-party dependencies (e.g. the database, cache and message system a project needs), deploying the online system, checking monitoring, upgrades, and so on
+- product operation: business maintenance after launch, growth, content operations, understanding customer feedback, data analysis, and so on.
+- artist: work related to the music and art a project needs.
 
-全部完成后，所有的工作结果在workflow上暂存，工作流进入最后一个activy （settled），等待最终的交付审批。
 
-Integration，作为项目全局的把控人，会定时出来检查所有的workflow，对于等待交付的工作流，检查结果，审批通过或不通过。通过的，这个工作流就结束了。没有通过的，说明审批意见，工作流可以重新执行（或者开一个新的工作流，与前一个关联即可）
 
-审批不一定只发生在最后，也可能发生在某个中间的activity上，审批人可能是agent，也可能是人类。
+### Tickets and collaboration between roles
 
-基于以上，多个角色之间通常不需要基于DSH的agent间通信的机制。那么什么时候需要这种机制呢？比如一个任务某个步骤需要被分解为多个subagent执行，那么多个agent之间可以通过这种机制来进行协调。至于这种情况是否也可以基于workflow来进行通信，需要具体问题，具体分析。
+Every task is a Temporal workflow produced from a work task template. There are several ways it can be produced:
 
-我们的工作单不需要对workflow做封装，一个工作单就对应一个workflow即可。反之，多个workflow可能对应一个工作单（subflow，重跑之类的）。业务相关的属性，可以根据需求，存储在workflow不同的区域（search attribute，memo，queryhandler等）。
+1. created directly by some agent
+2. triggered manually by an admin (a human)
+3. triggered on a schedule by some scheduled program
 
-agent的执行log，workflow log，必须要能够被记录下来，方便admin查看和诊断执行的问题。
+However it is triggered, this workflow corresponds uniquely to one ticket. Through the console, the admin has a global view of every ticket currently in progress. Agents exchange information and collaborate mainly through workflows.
 
-### 冲突自动消解回路
+For example, if an agent wants another role to do something, it triggers a workflow with the requirement as input. The workflow runs the corresponding work template; if a step in the template needs an agent of that role, the workflow starts that agent and feeds it the requirement. When that agent finishes, what it delivered is stated clearly and recorded on the workflow, and if later steps involve other roles they can carry on with that as context.
 
-开发泳道收口前有一道程序化的合并检查门：预演泳道并入主干，检出冲突即红。
-此前的缺口是（见 Problem 章 260825 实证）：检出冲突只能转 blocked 等人解，
-而绝大多数并行碰撞是同文件相邻行的纯文本贴近，人解的只是机械动作。
+When everything is done, all work results are staged on the workflow, and the workflow enters its last activity (settled), waiting for the final delivery approval.
 
-本条回路把冲突消解接进 agent 自治链路，机制分四层：
+Integration, as the person who gates the project globally, periodically steps in to check all workflows; for workflows waiting for delivery it examines the result and approves or rejects it. If approved, the workflow ends. If not, the approval comments are stated and the workflow can be re-run (or a new workflow can be opened and simply linked to the previous one).
 
-1. **红灯分类**：合并检查把「预演冲突」与其它红灯（无提交/工作区脏/复验红）
-   区分开。只有「其余全绿、仅预演冲突」才进消解回路；其它红灯维持 blocked
-   等人——先让人解掉基础问题，不带病消解。预演本身异常（检不出冲突清单）
-   也按非冲突红灯处理，不让消解回路空转。
-2. **自动消解**：检出冲突即自动打回开发段，不等人发指令。打回携带冲突文件
-   清单与合并上下文摘要。消解沿用「agent 写、worker 代落盘」的既有分工：
-   agent 沙箱碰不了版本库真身，所以主干合并进泳道由 worker 代跑、把冲突
-   标记留在工作区文件里，agent 只编辑这些文件消解标记，提交再由 worker
-   代落盘。消解成果回到集成审读兜底（语义对错不做自动判定），审读通过
-   自然回到合并检查重验。
-3. **防死循环**：消解轮数独立计数，上限 3 轮；同一批文件反复冲突（集合相同）
-   或超限，转 blocked 交人，日志写清轮数与原因，两类文案可区分、可检索。
-4. **人审不变**：人审签字门与「签字期间冲突自动打回重验」的既有行为不变；
-   签字期冲突打回后同样进入本条消解回路，冲突消解与最终放行仍是两道闸。
+Approval does not necessarily happen only at the end; it can also happen on some intermediate activity, and the approver may be an agent or a human.
 
-> 来源立项：t260826-01（merge_check 冲突自动消解回路；流程改进，出处见本工单及 260825 并行工单冲突实证讨论）
+Given the above, multiple roles usually do not need DSH's agent-to-agent communication mechanism. So when is that mechanism needed? For instance, when a step of a task must be split across several subagents, those agents can coordinate through that mechanism. Whether such a case could also communicate through a workflow requires case-by-case analysis.
 
-### 立项单与工单关联
+Our tickets do not need to wrap workflows: one ticket corresponding to one workflow is enough. Conversely, several workflows may correspond to one ticket (subflows, re-runs and the like). Business-related attributes can, as needed, be stored in different areas of the workflow (search attribute, memo, query handler, etc.).
 
-工单是最小执行单元。但一个交付目标往往拆成多张工单；没有工单上面那一层时，
-整体进度无处追踪，「讨论 → 立项 → 执行 → 归档」的生命周期也无承载。
-**立项单（epic）** 是工单之上的语义单元：一个交付攻坚 = 一份立项单 = 多张工单。
-立项单记录目标、验收标准、关键决策与归档快照。
+Agent execution logs and workflow logs must be recordable, so that the admin can inspect and diagnose execution problems.
 
-立项单的工作区与知识库的分工：
+### Automatic conflict resolution loop
 
-- **notes/**（过程）：讨论纪要、立项单、过程记录。不是知识库，不作为 agent 上下文加载。
-- **docs/**（真源）：设计、协议、规格——系统持续演进的知识。半年后改代码要读的文档。
+Before a development lane merges in there is a programmatic merge check gate: it rehearses merging the lane into the trunk, and a detected conflict turns it red.
+The gap before this was (see the 260825 evidence in the Problem section): a detected conflict could only go to blocked for a human to resolve,
+while the vast majority of parallel collisions are purely textual proximity on adjacent lines of the same file, so what the human resolves is merely a mechanical action.
 
-关联由**机器可查的立项代号**承载：每张工单携带它所属立项的代号，归属判断由生成路径
-保证（从立项上下文开工单时代号自动注入），不依赖 agent 自由判断，把语义判断退化为
-机械校验。代号的存在性以文件存在性作强校验。
+This loop wires conflict resolution into the agent's autonomous chain, with the mechanism in four layers:
 
-档案真源是 git，不是执行引擎：立项收尾把工单清单与结论固化进立项单再归档，执行引擎
-只承担过程状态。
+1. **Red-light classification**: the merge check separates a "rehearsal conflict" from the other red lights (no commit / dirty worktree / re-verification red).
+   Only "everything else green, rehearsal conflict the only failure" enters the resolution loop; other red lights stay blocked
+   for a human — first let the human clear the basic problems, and do not try to resolve conflicts on top of a broken state. An abnormal rehearsal itself (no conflict list
+   could be produced) is also treated as a non-conflict red light, so the resolution loop does not spin idle.
+2. **Automatic resolution**: a detected conflict is immediately reworked back to the development stage, without waiting for a human instruction. The rework carries the list of conflicting
+   files and a summary of the merge context. Resolution reuses the existing division of labor of "the agent writes, the worker lands it on disk":
+   the agent sandbox cannot touch the repository itself, so merging the trunk into the lane is run by the worker on the agent's behalf, leaving conflict
+   markers in the working files; the agent only edits these files to resolve the markers, and the commit is again landed
+   on disk by the worker. The resolution result goes back to integration review as the backstop (no automatic judgment of semantic right or wrong), and a passing review
+   naturally returns to the merge check for re-verification.
+3. **Loop prevention**: resolution rounds are counted independently, capped at 3; if the same batch of files conflicts repeatedly (identical set)
+   or the cap is exceeded, the ticket goes to blocked for a human, the log states the round count and the reason clearly, and the two kinds of message are distinguishable and searchable.
+4. **Human review unchanged**: the human approval signature gate and the existing behavior of "conflicts during signature are automatically reworked and re-verified" are unchanged;
+   a conflict reworked during signature likewise enters this resolution loop, and conflict resolution and final release remain two separate gates.
 
-`docs/` 文档被立项新增或重大修改时，对应章节末尾加一行来源标签（`> 来源立项：<代号>`），
-作为从「是什么」跳回「为什么」的桥。
+> Source epic proposal: t260826-01 (merge_check automatic conflict resolution loop; process improvement, origin in this ticket and in the 260825 discussion of the parallel-ticket conflict evidence)
 
-> 来源立项：epic-linkage（决策缘由见 notes/epics/epic-linkage.md）
+### Linking epic proposals to tickets
 
-### 五层架构与依赖方向反转
+A ticket is the smallest execution unit. But one delivery goal is often split across several tickets; without the layer above tickets,
+there is nowhere to track overall progress, and the lifecycle of "discussion → epic proposal → execution → archiving" has no carrier.
+**An epic proposal (epic)** is the semantic unit above tickets: one delivery push = one epic proposal = several tickets.
+An epic proposal records the goal, acceptance criteria, key decisions and an archival snapshot.
 
-suyou 的这套设施要独立成通用 IDE 项目 sandbar（见立项单）。独立的前提是
-**依赖方向反转**：现状是引擎住在项目仓里（`server/`）、引擎读项目；目标
-形态是**项目向 IDE 注册**，项目仓里一行引擎代码都没有。路线分三步——
-**契约化 → 就地反转 → 物理搬迁，顺序不可倒**：先在项目仓内把引擎与项目的
-接触面收敛成契约（引擎只经契约读项目），再反转，最后才物理搬迁成独立仓。
+The division of labor between the epic proposal workspace and the knowledge base:
 
-五层模型划分「谁拥有什么」，归属决定升级责任：
+- **notes/** (process): discussion minutes, epic proposals, process records. Not a knowledge base, and not loaded as agent context.
+- **docs/** (source of truth): designs, protocols, specifications — the knowledge of a system that keeps evolving. The documents you read when you change the code half a year later.
 
-| 层 | 装什么 | 归属 |
+The link is carried by a **machine-checkable epic code**: every ticket carries the code of the epic it belongs to, and the attribution is guaranteed by the generation path
+(when a ticket is opened from epic context the code is injected automatically) rather than by an agent's free judgment, degrading a semantic judgment into
+a mechanical check. The existence of the code is strongly validated by the existence of a file.
+
+The archival source of truth is git, not the execution engine: when an epic concludes, the ticket list and the conclusions are frozen into the epic proposal and then archived; the execution engine
+carries only process state.
+
+When a `docs/` document is added or substantially changed by an epic proposal, a source label line (`> Source epic proposal: <code>`) is appended at the end of the corresponding section,
+serving as a bridge from "what it is" back to "why it is".
+
+> Source epic proposal: epic-linkage (decision rationale in notes/epics/epic-linkage.md)
+
+### Five-layer architecture and the reversed dependency direction
+
+This suyou facility is to become a standalone general-purpose IDE project, sandbar (see the epic proposal). The precondition for standing alone is
+**reversing the dependency direction**: today the engine lives inside the project repo (`server/`) and the engine reads the project; the target
+shape is that **projects register with the IDE**, with not a single line of engine code in the project repo. The route has three steps —
+**contractualize → reverse in place → physically relocate, in that order, never reversed**: first converge the contact surface between the engine and the project inside the project repo
+into a contract (the engine reads the project only through the contract), then reverse, and only then physically relocate into a standalone repo.
+
+The five-layer model divides up "who owns what", and ownership determines upgrade responsibility:
+
+| Layer | What it holds | Ownership |
 | --- | --- | --- |
-| dsh 平台 | dsh CLI、console、client-runtime、cordis、approval seam、session 持久化 | 上游，**只跟不碰**：声明兼容区间，随版升级 |
-| sandbar 本体 | temporal 引擎、工单系统、dev-lane 等模版、worker 生命周期、observability、安装器 | sandbar 仓，机器级安装与升级 |
-| 内置扩展 | dsh 插件集：workbench、providers、epics、knowledge（一等组件）、角色骨架 | 跟 sandbar 走，随 sandbar 升级 |
-| 机器级配置 | 项目注册表、credentials、默认模型、provider 注册 | 出仓到 `~/.sandbar/` |
-| 工作区 | 策略配置（merge-checks.yaml、verify.yaml）、该项目 model-routes、persona 覆盖、立项单内容、工具桥 | 留项目仓，约定目录 `.sandbar/` |
+| dsh platform | dsh CLI, console, client-runtime, cordis, approval seam, session persistence | upstream, **follow but never touch**: declare the compatibility range and upgrade with the version |
+| sandbar itself | temporal engine, ticket system, templates such as dev-lane, worker lifecycle, observability, installer | the sandbar repo, machine-level install and upgrade |
+| Built-in extensions | dsh plugin set: workbench, providers, epics, knowledge (a first-class component), role skeletons | follow sandbar, upgrade with sandbar |
+| Machine-level configuration | project registry, credentials, default models, provider registration | out of the repo, into `~/.sandbar/` |
+| Workspace | policy configuration (merge-checks.yaml, verify.yaml), this project's model-routes, persona overrides, epic proposal content, tool bridge | stays in the project repo, in the agreed directory `.sandbar/` |
 
-注意与本文 High level 的「五层结构」（岗位说明书/Preset/Roster/派活工具/决策链，
-是本设施的**内部分层**）区分：本条「五层架构」是**部署归属分层**，回答「一件
-东西升级时归谁管」。
+Note the distinction from the "five-layer structure" in this document's High level section (role charter / preset / roster / dispatch tool / decision chain,
+which is this facility's **internal layering**): this "five-layer architecture" is a **deployment-ownership layering**, answering "who is in charge
+when something is upgraded".
 
-项目与 IDE 的接触面（哪些文件、什么语义、什么版本）全部由
-《sandbar 项目接入契约 v1》定义：五样转正面、schema 版本号、三态关闭语义、
-docs 语境合成顺序均见该文档，本条不重复展开。契约面即升级包袱——每转正一样，
-IDE 升版就多背一份兼容义务，所以 v1 刻意只转正五样，其余（模版、插件 API、
-`.suyou` 布局）留作 sandbar 内部实现，随时会变。
+The contact surface between a project and the IDE (which files, what semantics, what version) is defined entirely by
+the sandbar Project Onboarding Contract v1: the five promoted items, the schema version number, the three-state shutdown semantics and
+the docs context composition order are all in that document and are not repeated here. The contract surface is the upgrade burden — every promoted item
+adds one more compatibility obligation to each IDE version bump, so v1 deliberately promotes only five items and leaves the rest (templates, plugin API,
+the `.suyou` layout) as sandbar internals that may change at any time.
 
-> 来源立项：sandbar
+> Source epic proposal: sandbar
 
-### 可观测性：执行主体 parts 口径
+### Observability: the parts convention for the executing subject
 
-工单台要回答「这一步是谁在做」，前提是把执行主体从散落的 desc 注释与 `exit: human`
-里形式化出来。口径如下：
+For the ticket console to answer "who is doing this step", the executing subject must first be formalized out of scattered desc comments and `exit: human`
+entries. The convention is as follows:
 
-- **声明单位是 stage 内部活动（parts），不是 stage 单值**。混合执行已存在
-  （如开发泳道 implement = agent 写码 + worker settle 脚本代落盘 + 自测/verify 脚本门；
-  merge = 人签字 + 脚本落账与泳道清理），单值字段是逼代码说谎。
-- **枚举三值可组合**：`agent`（🤖 agent 执行）/ `script`（⚙️ 脚本·程序化）/
-  `human`（👤 人工），在 `Stage.parts`（`engine/shared.py`，枚举常量
-  `PART_KINDS`）上以有序元组声明；yaml 快照、工单台阶段链徽标均由其派生。
-  生成器对「任一 stage 缺 parts」硬失败，把「全声明」从自觉降为机械校验。
-- **计入口径**：业务产物落账必需的脚本计入（worker 代落盘、merge 落账）；
-  引擎管道件不计（结果文件轮询/幂等缓存、prepare_human_gate 机械准备、
-  非 worktree 泳道空转的 settle）。
-- **动态真源仍是 Temporal history**：parts 只是静态声明（工单台渲染与账面对照用），
-  实际执行以 history 为准；二者不混用。模版现存一个（**dev-lane**；260824 删
-  code-lane、build-workbench，**260904 宿主令 content-pipeline / proofread /
-  regression / cleanup 四模版退役**——票收口后独立回归能力由 integration main 侧直跑
-  或开 dev-lane 承担；非工单巡检 dispatcher-scan 不属工单模板面，保留。旧档
-  「六模版/五模版」为删除前措辞）。
-- **演进安全**：`Stage` 只加带默认值的元数据字段不触确定性，无需 bump patched id；
-  以 `engine/replay_check.py` 对存量运行中工单做 replay 实测兜底。
+- **The unit of declaration is the activities inside a stage (parts), not a single value per stage**. Mixed execution already exists
+  (e.g. the development lane's implement = agent writes code + the worker's settle script lands it on disk + the self-test/verify script gate;
+  merge = human signature + script bookkeeping and lane cleanup), so a single-valued field would force the code to lie.
+- **The enumeration has three combinable values**: `agent` (🤖 agent execution) / `script` (⚙️ script · programmatic) /
+  `human` (👤 human), declared as an ordered tuple on `Stage.parts` (`engine/shared.py`, the enumeration constant
+  `PART_KINDS`); the yaml snapshot and the ticket console's stage-chain badges are both derived from it.
+  The generator hard-fails when any stage lacks parts, degrading "all declared" from good intentions to a mechanical check.
+- **What counts**: scripts required to land business artifacts count (the worker landing files on disk, merge bookkeeping);
+  engine plumbing does not count (result-file polling / idempotency cache, the mechanical preparation in prepare_human_gate,
+  the settle that spins idle in a non-worktree lane).
+- **The dynamic source of truth is still Temporal history**: parts is only a static declaration (used for console rendering and cross-checking the books),
+  while actual execution is governed by history; the two are not mixed. One template exists today (**dev-lane**; 260824 deleted
+  code-lane and build-workbench, and **by host order 260904 the four templates content-pipeline / proofread /
+  regression / cleanup were retired** — after the ticket merges in, independent regression capability is carried by integration running it directly on the main side
+  or by opening a dev-lane; the non-ticket inspection dispatcher-scan is not part of the ticket template surface and is kept. The old
+  "six templates / five templates" wording predates the deletions).
+- **Evolution safety**: adding only metadata fields with defaults to `Stage` does not touch determinism and needs no bump of the patched id;
+  a replay run against in-flight tickets via `engine/replay_check.py` is the backstop.
 
-> 来源立项：observability（执行主体可见；进度心跳与 token 消耗口径见下两节）
+> Source epic proposal: observability (executing subject visible; the conventions for progress heartbeat and token consumption are in the next two sections)
 
-### 可观测性：usage 聚合数据通路与降级口径
+### Observability: the usage aggregation data path and degradation convention
 
-工单台要回答「这一步/这一单花了多少 token」，统计不新增埋点，直接消费泳道会话
-落盘事件。口径如下（t260828-07 落地）：
+For the ticket console to answer "how many tokens did this step / this ticket cost", the statistics add no new instrumentation and consume the lane session
+events on disk directly. The convention is as follows (landed in t260828-07):
 
-- **同一通路两个端点**：`agent-live`（实时动态）与 `agent-usage`（token 聚合）
-  共用一套「定位泳道会话文件 + zstd 整解 + 事件提炼」代码
-  （`workbench/src/host/agent-live.ts` 的 `resolveSessionFile`/`decompressSession`
-  + `agent-usage.ts` 的聚合），不另起解析实现，避免两单漂移打架。
-- **加总口径**：只加总 `assistant/message` 事件里的
-  `data.usage{inputTokens,outputTokens,cacheReadTokens}`。`assistant/chunk`
-  （`data.chunk.type==='usage'`）里的同名 usage 是同一份的流式镜像，**不计入**，
-  两处都加会翻倍。模型归因：usage 事件不带模型，顺序扫描维护「当前模型」
-  （`request/context` 的 `data.{provider,model}`，`request/header` 的
-  `data.header.config.{provider,model}` 兜底），每条 usage 归到当时的模型。
-- **按 stage 切分走时间窗**：session 按 `<工单id>-<角色>` 复用、同角色跨 stage，
-  窗口来自 workflow timeline 的 `state==='running'` 条目（`base.py _mark` 落的
-  ISO 时间戳）：第 i 窗 = [from_i, from_{i+1})，末窗开放式。同 stage 重入
-  （rework）天然是多窗。首窗之前的事件只进整单 total、不落任何 stage
-  （total ≥ ΣbyStage，口径如此）。多角色各一份会话文件全部加总。
-- **UI 克制**：阶段链 agent 步行内 `in/out` 数字（多模型才显示模型名）、详情
-  头部一行合计（agent 段数 + 输入/输出总量 + 模型）；`cacheRead` 与精确值收
-  悬停。不加 tab、不加趋势图。
-- **降级口径**：会话目录/文件不存在、zstd 不可用、解压失败、无 usage 事件 →
-  端点回 `200 {exists:false, reason 人话}`，UI 显「—」不报错；工单 id 非法或
-  worktree/workspace 字段越界 → `4xx` 防穿（同 agent-live 的验收硬项）。
-  历史已合并工单泳道清理后无会话文件，只有执行主体图标没有数字——不做
-  merge 前固化（2026-08-25 用户拍板），统计从功能上线算起。
-- **回归**：`workbench/smoke/agent-usage.mjs`（窗口派生/防翻倍/归因/畸形输入/
-  防穿/软降级）直跑，node ≥22.18。
+- **Two endpoints on one path**: `agent-live` (live activity) and `agent-usage` (token aggregation)
+  share one set of code for "locating the lane session file + full zstd decompression + event extraction"
+  (the `resolveSessionFile`/`decompressSession` in `workbench/src/host/agent-live.ts`
+  + the aggregation in `agent-usage.ts`), rather than starting a separate parsing implementation, so the two tickets do not drift apart and fight each other.
+- **Summation convention**: sum only the
+  `data.usage{inputTokens,outputTokens,cacheReadTokens}` in `assistant/message` events. The usage of the same name in `assistant/chunk`
+  (`data.chunk.type==='usage'`) is a streaming mirror of the same data and is **not counted** —
+  counting both would double it. Model attribution: usage events carry no model, so a sequential scan maintains the "current model"
+  (from `request/context`'s `data.{provider,model}`, with `request/header`'s
+  `data.header.config.{provider,model}` as the fallback), and each usage is attributed to the model in force at that time.
+- **Splitting by stage uses time windows**: a session is reused as `<ticket id>-<role>`, with one role spanning stages,
+  and the windows come from `state==='running'` entries in the workflow timeline (the ISO timestamps placed by
+  `base.py _mark`): window i = [from_i, from_{i+1}), with the last window open-ended. Re-entry into the same stage
+  (rework) naturally produces multiple windows. Events before the first window go only into the whole-ticket total and land on no stage
+  (total ≥ ΣbyStage — that is the convention). The session files of all roles, one each, are summed in full.
+- **UI restraint**: inline `in/out` numbers on the agent legs of the stage chain (the model name shows only when there are several models), and a single
+  summary line in the detail header (number of agent stages + total input/output + models); `cacheRead` and exact values are tucked into
+  a hover. No new tab, no trend charts.
+- **Degradation convention**: session directory/file missing, zstd unavailable, decompression failed, no usage event →
+  the endpoint returns `200 {exists:false, reason <plain language>}` and the UI shows "—" without erroring; an illegal ticket id or
+  worktree/workspace fields out of bounds → `4xx` to prevent leakage through (the same hard acceptance item as agent-live).
+  For historical merged tickets, after lane cleanup there is no session file, so the executing-subject icons show without numbers — no
+  pre-merge freeze is done (user ruling 2026-08-25); statistics start from the feature's launch.
+- **Regression**: `workbench/smoke/agent-usage.mjs` (window derivation / double-count prevention / attribution / malformed input /
+  leakage prevention / soft degrade) runs directly, node ≥22.18.
 
-> 来源立项：observability（usage 聚合端点 + 行内数字 + 头部合计）
+> Source epic proposal: observability (usage aggregation endpoint + inline numbers + header totals)
 
-### 可观测性：进度心跳与会话事件流通路
+### Observability: the progress heartbeat and session event stream paths
 
-工单台要回答「现在跑到哪、agent 还活着吗」。设计上分两条互补通路，各答一半：
-心跳通路答进度与活性，会话事件流通路答内容级动态。口径如下：
+For the ticket console to answer "where has it got to now, is the agent still alive", the design has two complementary paths, each answering half:
+the heartbeat path answers progress and liveness, and the session event stream path answers content-level activity. The convention is as follows:
 
-- **心跳通路（进度与活性）**：agent 段的 activity 在等待结果文件期间周期性
-  向引擎上报轻量心跳，载荷是进度四元组——当前阶段、段内生成代数、轮询
-  次数、会话日志体积。选挂在 Temporal pending activity 上而不另立上报通道，
-  是因为可见性天然正确：心跳只对 RUNNING 执行存在，工单终结即消失，无需
-  额外生命周期管理。查询侧从引擎的 pending activity 信息掏取，掏取失败一律
-  降级为「无数据」，绝不影响工单查询主路径。非 agent 段不产生心跳、桩模式
-  心跳不是结构化数据——都归入同一软降级，UI 显人话而不是报错。
-- **会话事件流通路（内容级动态）**：真源是泳道工作空间里的 agent 会话落盘
-  文件（zstd 压缩的行式事件流，只读，严禁整文件重写）。消费方式是整文件
-  解压后取尾部少量感兴趣事件喂给实时动态面板——只看尾部是因为只关心
-  「现在」，整解是因为压缩格式不支持随机读；解压输出封顶防爆内存。面板
-  默认折叠、不轮询——UI 克制：观测是打开才看的东西，不为它造常驻流量。
-- **同一通路两个端点**：`agent-live`（实时动态）与 `agent-usage`（token 聚合）
-  共用同一套「定位泳道会话文件 + zstd 整解 + 事件提炼」实现（见上节），不另起
-  解析代码。
-- **脉搏行 UI**：运行中工单详情一行脉搏——当前阶段、本段已运行时长、会话
-  体积及增速、心跳年龄。疑似卡死（心跳停滞或会话体积停涨）只给红色提示，
-  只显示不动作：自动干预越权，判读留给人；提示阈值是 UI 判定参数，可调，
-  不是协议承诺。
-- **降级口径**：会话文件不存在、解压工具不可用、解压失败、超封顶 → 端点回
-  「不存在 + 人话原因」，UI 照显不报错；工单定位字段越界 → `4xx` 防穿
-  （与 usage 节同一验收硬项）。历史已合并工单泳道清理后无会话文件、心跳
-  随工单终结消失——不做 merge 前固化，观测从功能上线算起（与 usage 节
-  同一决策）。
+- **Heartbeat path (progress and liveness)**: the activity of an agent stage periodically
+  reports a lightweight heartbeat to the engine while waiting for the result file; the payload is a progress quadruple — current phase, generation counter within the stage, polling
+  count, session log size. It is attached to the Temporal pending activity instead of standing up a separate reporting channel
+  because its visibility is correct by nature: a heartbeat exists only for a RUNNING execution and disappears when the ticket ends, needing no
+  extra lifecycle management. The query side picks it out of the engine's pending activity information, and a failed pickup always
+  degrades to "no data", never affecting the ticket query main path. Non-agent stages produce no heartbeat, and a stub-mode
+  heartbeat is not structured data — both fall into the same soft degrade, with the UI showing plain language rather than an error.
+- **Session event stream path (content-level activity)**: the source of truth is the agent session file written to disk inside the lane
+  workspace (a zstd-compressed line-oriented event stream, read-only, whole-file rewrites strictly forbidden). It is consumed by decompressing the whole file
+  and taking a few interesting events from the tail to feed the live activity panel — the tail only, because only "now" matters;
+  the whole decompression, because the compressed format does not support random reads; and the decompressed output is capped to avoid blowing up memory. The panel
+  is collapsed by default and does not poll — UI restraint: observability is something you look at when you open it, so no standing traffic is created for it.
+- **Two endpoints on one path**: `agent-live` (live activity) and `agent-usage` (token aggregation)
+  share the same "locate the lane session file + full zstd decompression + event extraction" implementation (see the previous section), rather than a separate
+  parsing implementation.
+- **Pulse-line UI**: one pulse line in a running ticket's detail — current phase, elapsed time for this stage, session
+  size and growth rate, heartbeat age. A suspected hang (heartbeat stalled or session size no longer growing) is only flagged in red,
+  shown but never acted on: automatic intervention would overreach, and the judgment is left to humans; the flagging threshold is a UI decision parameter, tunable,
+  not a protocol promise.
+- **Degradation convention**: session file missing, decompression tool unavailable, decompression failed, cap exceeded → the endpoint returns
+  "does not exist + a plain-language reason", and the UI still shows that without erroring; ticket lookup fields out of bounds → `4xx` to prevent leakage through
+  (the same hard acceptance item as the usage section). For historical merged tickets, after lane cleanup there is no session file and the heartbeat
+  vanishes with the ticket's end — no pre-merge freeze is done, and observation starts from the feature's launch (the same
+  decision as the usage section).
 
-> 来源立项：observability（进度可见——运行脉搏行 + 实时动态面板）
+> Source epic proposal: observability (progress visible — running pulse line + live activity panel)
 
-### 泳道提速：仲裁∥验收并行分叉与审读附条件放行
+### Lane acceleration: the arbitrate ∥ acceptance parallel fork and conditional release on review
 
-工单全链耗时大头在串行往返（t260903-01 实测：review 10min 纯工具往返串行；
-arbitrate→acceptance 串行无数据依赖；轻瑕打回整轮方案重做 ~20min）。两项改造
-（t260903-02）：
+Most of the end-to-end ticket latency is serial round trips (measured on t260903-01: review spends 10 min purely on serial tool round trips;
+arbitrate→acceptance is serial with no data dependency; a minor blemish reworking a whole plan redo costs ~20 min). Two changes
+(t260903-02):
 
-1. **arbitrate ∥ acceptance_walkthrough 并行分叉**：机械集成测试产出后，仲裁
-   （技术视角三态判定）与验收走查（用户视角报告）吃同一份测试结果、无数据依赖，
-   gather 并行。时序钉死：gather 齐 → 单点 settle_lane（tests-fault 的测试集改动
-   必须先落账再重跑机械测试）→ arbitrate verdict 判定 → 路由。仲裁非 pass 时本轮
-   走查结果作废（timeline 留痕可检索），回路收敛后重走查；格式纠正轮只重跑仲裁边。
-   代价取舍：走查会话换 ticket-stage 专用会话 id（与仲裁边并发不同写一个 session
-   文件），因此走查会话不进 agent-live/agent-usage 的 ticket-role 定位——内容仍可
-   从结果文件/日志取，不加观测侧改造。
-2. **review_plan 第三态「附条件放行」**：审读结论三态 `verdict=pass|conditional|
-   reject`（summary 唯一标记；**status=failed 恒打回**——矛盾态取保守侧，放行是
-   高风险动作）。conditional = 轻微瑕疵（表述级、不影响方案结构/写集边界/验收口径）
-   不改打回级：修改意见直通 implement 段执行（previous_context 注入），跳过方案
-   重做+复审、不计打回轮数；reject 仍走既有打回环；裁定权由后续人审门（merge）兜底。
+1. **arbitrate ∥ acceptance_walkthrough parallel fork**: after the mechanical integration test output is produced, arbitration
+   (a three-state verdict from the technical perspective) and the acceptance walkthrough (a report from the user perspective) consume the same test result with no data dependency, and
+   gather in parallel. The ordering is pinned down: gather completes → a single settle_lane point (a tests-fault change to the test set
+   must be landed first, then the mechanical test re-run) → arbitrate verdict decision → routing. When arbitration is not pass, this round's
+   walkthrough result is void (traced in the timeline and searchable) and the walkthrough is redone after the loop converges; a format-correction round re-runs only the arbitration edge.
+   Trade-off: the walkthrough session switches to a ticket-stage-specific session id (so it does not write the same session
+   file concurrently with the arbitration edge), and therefore the walkthrough session is not located by agent-live/agent-usage's ticket-role lookup — its content is still obtainable
+   from the result file / logs, with no change on the observability side.
+2. **review_plan's third state, "conditional release"**: the review conclusion has three states `verdict=pass|conditional|
+   reject` (summary is the sole marker; **status=failed always reworks** — a contradictory state takes the conservative side, since release is a
+   high-risk action). conditional = minor blemishes (wording level, not affecting the plan's structure / write-set boundary / acceptance criteria), which are not
+   rework-worthy: the change requests go straight to the implement stage for execution (injected via previous_context), skipping the plan
+   redo + re-review and not counting as a rework round; reject still follows the existing rework loop; the final say is backstopped by the later human review gate (merge).
 
-两条均套 workflow.patched 同构布尔门（dev-lane-review-conditional-v1 /
-dev-lane-arb-acc-parallel-v1）：挂起中旧 workflow 重放走旧串行分支，不 bump
-PATCH_ID。配套纪律：改词表/计数/链序前先 grep 已登记场景与 selfcheck 的精确断言，
-锁随特性同步长（本轮 sc_check_auto_rework_trace / sc_auto_rework_trace 两把锁随
-第 13 个主链 phase 值 arb_acc_parallel 同步 12→13、计数锁随新打回点同步）。
+Both are wrapped in the isomorphic workflow.patched boolean gate (dev-lane-review-conditional-v1 /
+dev-lane-arb-acc-parallel-v1): a suspended old workflow replays down the old serial branch, without bumping
+PATCH_ID. Supporting discipline: before changing the word list / counts / chain order, first grep the registered scenarios and selfcheck's exact assertions;
+locks grow in step with the feature (this round the two locks sc_check_auto_rework_trace / sc_auto_rework_trace move
+with the 13th main-chain phase value arb_acc_parallel from 12 to 13, and the count lock moves with the new rework point).
 
-> 来源立项：t260903-02
+> Source epic proposal: t260903-02
 
-### Worker 运行时
-
-
-
-一个工单一个 worker 进程。工单创建时 worker 随之启动，工单 closed/terminated 后 worker 由定时
-
-检查器回收。不共享 worker 进程的原因：
+### Worker Runtime
 
 
 
-1. **代码热更新**：工单 A 完成后的代码变更只影响新工单的 worker，不影响已在跑的工单。
+One worker process per ticket. The worker starts along with ticket creation, and after the ticket is closed/terminated the worker is
 
-2. **故障隔离**：一个工单的 agent 把 worker 搞崩了，不影响其他工单。
-
-3. **简单**：不需要零停机重启、不需要版本管理——worker 跟着工单同生共死。
+reclaimed by a periodic checker. Reasons for not sharing a worker process:
 
 
 
-**定时检查器**`worker_janitor`，Temporal Schedule 或 cron，每 5 分钟）：
+1. **Code hot update**: code changes made after ticket A completes affect only the workers of new tickets, not tickets already running.
 
-- 扫描所有 closed/terminated 工单 → 回收对应的 worker 进程
+2. **Fault isolation**: if the agent of one ticket crashes its worker, other tickets are unaffected.
 
-- 扫描所有 worker 进程 → 发现无对应工单的僵尸 worker → 回收
+3. **Simplicity**: no zero-downtime restart, no version management — the worker lives and dies with its ticket.
 
 
 
-**启动方式**`：`工单创建时创建对应的worker实例。该 worker 只服务本工单的 workflow task。workflow 提交后 worker 已在运行，activity 直接执行。
+**Periodic checker** `worker_janitor` (a Temporal Schedule or cron, every 5 minutes):
+
+- scan all closed/terminated tickets → reclaim the corresponding worker processes
+
+- scan all worker processes → find zombie workers with no corresponding ticket → reclaim them
+
+
+
+**How it starts**: a corresponding worker instance is created when the ticket is created. That worker serves only this ticket's workflow task. By the time the workflow is submitted the worker is already running, so activities execute directly.
 
 
 
@@ -405,11 +405,11 @@ PATCH_ID。配套纪律：改词表/计数/链序前先 grep 已登记场景与 
 
 
 
-## 相关文档
+## Related documents
 
-- [sandbar 项目接入契约 v1](../design/sandbar项目接入契约v1.md)——项目向 IDE 注册的五样接触面：schema 版本、三态关闭语义、语境合成顺序（五层架构依赖反转的契约依据）
-- [工单工作流台设计](../design/工单工作流台设计.md)——工作流模板/接力/单例/人门/Temporal 演进（R1/R5/R6 的落地细化）
-- [知识库设计](../design/知识库设计.md)——文档先行总纲（R2/R3/R6 的机制来源）
-- [设计文档写作指南](../design/设计文档写作指南.md)——本文的结构依据
-- `server/roles/README.md`——操作总览（本文已落地部分的真相源）
+- [sandbar Project Onboarding Contract v1](../design/sandbar-project-onboarding-contract-v1.md) — the five contact surfaces by which a project registers with the IDE: schema version, three-state shutdown semantics, context composition order (the contractual basis for the reversed dependency direction of the five-layer architecture)
+- [ticket workflow console design](../design/ticket-workflow-console-design.md) — workflow templates / handoff / singleton / human gate / Temporal evolution (the detailed implementation of R1/R5/R6)
+- [knowledge base design](../design/knowledge-base-design.md) — the docs-first master outline (the mechanism source of R2/R3/R6)
+- [design doc writing guide](../design/design-doc-writing-guide.md) — the structural basis of this document
+- `server/roles/README.md` — the operational overview (the source of truth for the parts of this document already implemented)
 

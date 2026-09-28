@@ -1,48 +1,56 @@
 ---
-title: "项目外置工作流模板加载口v1"
+title: "Project external workflow template loader v1"
 category: design
-tags: [工作流模板, 项目外置, 加载口, 多项目, 隔离拒收, 演进纪律]
+tags: [workflow-template, project-external, loader, multi-project, isolated-rejection, evolution-discipline]
 status: active
-updated: 2026-09-24
+updated: 2026-09-28
 ---
 
-# 项目外置工作流模板加载口 v1（t260924-04，票 1）
+# Project external workflow template loader v1 (t260924-04, ticket 1)
 
-> 来源：nusuyou《给 sandbar 的需求说明：项目外置工作流模板》（§六接口形状）与
-> 设计稿（`notes/discussions/260924-项目外置工作流模板-设计稿.md`）。本文是**加载口
-> 的实现契约**：接口形状、拒收语义、消费方必须遵守的编码规约与演进纪律。
-> 契约 v1 的 paths 键表见 [sandbar项目接入契约v1](sandbar项目接入契约v1.md) ①d。
+> Source: nusuyou's "Requirements for sandbar: project external workflow templates" (§six,
+> interface shape) and the design draft
+> (`notes/discussions/260924-项目外置工作流模板-设计稿.md`). This document is the **loader's
+> implementation contract**: interface shape, rejection semantics, and the coding rules and
+> evolution discipline that consumers must follow.
+> For the paths key table of contract v1 see [sandbar project onboarding contract v1](sandbar-project-onboarding-contract-v1.md) ①d.
 
-## 一、是什么（三句话）
+## 1. What it is (three sentences)
 
-1. 项目在注册条目 `paths.workflow_modules` 声明自己的工作流模板模块清单（`,` 分隔，
-   每项相对项目主目录 `dirs[0]`）；引擎启动时逐模块加载，与内置模板合并进同一张
-   注册表（`shared.TEMPLATE_CLASS_NAMES` / `workflows_v2.TEMPLATE_CLASSES` 同源合并）。
-2. **不声明 = 零行为变化**（契约 ①d 四类回落）；声明了但坏 = **模板级隔离拒收**——
-   坏模板不注册、高声点名，同项目其他模块与别项目照常。
-3. 生效粒度：启动时加载，**迟到声明（进程启动后写入）下个重启生效**；普通工单跑每票
-   专属工人 → 新票启动即吃新码、在途票冻在启动时的码（KI-113；该结论以「票型模板不落
-   共享工人」为前提，票 2 进程分池落地时须重审本文此条）。
+1. A project declares its own workflow template module list in the registration entry
+   `paths.workflow_modules` (`,`-separated, each item relative to the project's main directory
+   `dirs[0]`); at startup the engine loads them module by module and merges them into the same
+   registry as the built-in templates (`shared.TEMPLATE_CLASS_NAMES` / `workflows_v2.TEMPLATE_CLASSES`
+   merged from the same source).
+2. **Not declaring = zero behavior change** (contract ①d, four fallback classes); declaring but
+   broken = **per-template isolated rejection** — the bad template is not registered and is named
+   loudly, while other modules in the same project and other projects carry on.
+3. Effective granularity: loaded at startup, and **a late declaration (written after the process
+   started) takes effect on the next restart**; ordinary tickets run on a dedicated worker per
+   ticket → a new ticket picks up new code as soon as it starts, while in-flight tickets are frozen
+   on the code from their start (KI-113; that conclusion assumes "ticket-type templates do not land
+   on shared workers", and this clause must be re-reviewed when ticket 2's process pooling lands).
 
-## 二、接口形状（需求书 §六落地）
+## 2. Interface shape (requirements §six made concrete)
 
 ```yaml
 # ~/.sandbar/projects/<key>/project.yaml
 schema: v1
 project:
   - key: <key>
-    name: <名>
+    name: <name>
     dirs:
       - /abs/project/root
 paths:
   workflow_modules: workflows/templates_a.py,workflows/templates_b.py
 ```
 
-模板模块（每个 `.py` 恰一个模板类，同 `fixture_two_step` 惯例）：
+Template module (each `.py` holds exactly one template class, per the `fixture_two_step`
+convention):
 
 ```python
-TEMPLATE_ID = "my-flow"            # 模板 id 全局唯一（数据面，照写不改名；撞名=改自己）
-TEMPLATE_NAME = "我的流程"          # 工单台显示名
+TEMPLATE_ID = "my-flow"            # template id, globally unique (data plane, written as-is and not renamed; a collision = you rename)
+TEMPLATE_NAME = "My flow"          # display name on the ticket console
 from temporalio import workflow
 from base import TicketWorkflowBase
 from shared import Stage
@@ -50,88 +58,109 @@ from shared import Stage
 @workflow.defn
 class MyFlow(TicketWorkflowBase):
     STAGES = (Stage(id="s1", name="…", role="developer", next="s2", acceptance=("…",)), …)
-    PATCH_ID = "<key>-my-flow-v1"  # 见 §四：必须带 <项目key>- 前缀
-    TEMPLATE_ID = "my-flow"        # 须与源码声明一致（不一致=拒收点名双方）
-    TEMPLATE_NAME = "我的流程"
+    PATCH_ID = "<key>-my-flow-v1"  # see §4: must carry the <project key>- prefix
+    TEMPLATE_ID = "my-flow"        # must match the source declaration (a mismatch = rejection naming both sides)
+    TEMPLATE_NAME = "My flow"
 
     @workflow.run
     async def run(self, inp):
         return await self._main(inp)
 ```
 
-首票消费者 nusuyou 的 `content-studio`（`ContentStudioWorkflow`）按本形状接入；
-该 id 若被占用由需求方改名，不争（需求书 §六原样有效）。
+The first consumer, nusuyou's `content-studio` (`ContentStudioWorkflow`), onboards in this shape;
+if that id is taken, the requester renames it rather than contesting it (requirements §six remains
+in force as-is).
 
-## 三、拒绝面（fail-closed 且精确点名）
+## 3. Rejection face (fail-closed with precise naming)
 
-三态各为结构化拒收记录（project / module / check / detail），经建票文案
-（`ticket.py create` 与 `client.py ticket-start` 的「未知模板…」错误）可见——
-**拒收 ≠ 装死**：不静默改名、不后到覆盖、不静默跳过。
+Each of the three states is a structured rejection record (project / module / check / detail),
+visible through the ticket-creation text (the "unknown template…" error of `ticket.py create` and
+`client.py ticket-start`) —
+**rejection ≠ playing dead**: no silent renaming, no later-arrival overwriting, no silent skipping.
 
-| 检查 | 触发 | 点名内容 |
+| Check | Trigger | What is named |
 |---|---|---|
-| 撞名 id | 模板 id 与内置/夹具/其他项目已接受 id 相同 | 检查名＋占用方（id、来源）＋来件方（项目/模块） |
-| 畸形 | 缺 `TEMPLATE_ID`（或多值）、模板类不可辨、缺 `STAGES`、`STAGES` 空或非 tuple、段缺 `id/name/role`、`parts` 含非法值、源码声明与类属性不一致 | 检查名＋缺什么/双方值 |
-| 加载失败 | 声明锚点缺失、模块不可读、import 抛错 | 检查名＋文件＋异常类型/摘要 |
+| colliding id | the template id equals an id already accepted from built-in/fixture/another project | the check name + the occupying side (id, source) + the incoming side (project/module) |
+| malformed | missing `TEMPLATE_ID` (or multiple values), template class not identifiable, missing `STAGES`, `STAGES` empty or not a tuple, a stage missing `id/name/role`, `parts` containing an illegal value, source declaration inconsistent with the class attribute | the check name + what is missing / both sides' values |
+| load failure | missing declaration anchor, module unreadable, import raising | the check name + file + exception type/summary |
 
-另：**补丁标识撞引擎面**——项目模块声明的 `*_PATCH_ID` 与引擎面补丁标识集（加载时
-从 `server/engine/*.py` 动态收集，不写死列举）相同 → 拒收点名双方值（见 §四）。
+Also: **a patch identifier colliding with the engine face** — when a project module's declared
+`*_PATCH_ID` equals an engine-face patch identifier set (collected dynamically from
+`server/engine/*.py` at load time, not hardcoded as a list) → rejected, naming both sides' values
+(see §4).
 
-解析层（paths 声明值本身坏：空项/绝对/`..` 越界/非标量/条目缺 dirs 首项）沿用
-契约 ①d 的 `ProjectPathsError` fail-closed 红；在加载口转为「声明解析失败」结构化
-拒收，同样进建票文案，不静默当「未声明」。
+For the parsing layer (the declared paths value itself is bad: empty item / absolute / `..`
+escaping / non-scalar / an entry missing its first dirs item), the fail-closed red of contract ①d's
+`ProjectPathsError` is reused; at the loader it is converted into a structured "declaration parse
+failure" rejection that likewise reaches the ticket-creation text, never silently passed off as
+"not declared".
 
-## 四、演进纪律（对外置模板的硬约束）
+## 4. Evolution discipline (hard constraints on external templates)
 
-1. **段序/拓扑变更 → 新模板 id 并存**：老在途票由老类跑完（每票专属工人冻启动时
-   码）；新 id 与老 id 在注册表并存，互不影响。
-2. **分支逻辑变更 → `workflow.patched()` ＋补丁标识带项目前缀**：在改动点用
-   `workflow.patched("<key>-…-vN")` 分支，老历史走老分支、新历史走新分支，两边都能
-   重放。**新补丁标识一律 `<项目key>-` 前缀**（主防线——前缀即不可能撞引擎现有
-   `dev-lane-*`/`ki003-*`/`ticket-*` 形）；加载器动态收集引擎面标识集作兜底拒收
-   （采集=源码静态扫描 `*_PATCH_ID = "…"`，未守惯例的新引擎补丁可能漏报，后果有限：
-   patched 判等只发生在同一模板类自己的历史上）。
-3. 真源=代码：改模板=改项目仓内的类定义；引擎仓的 `server/workflows/*.yaml` 参考
-   快照**不覆盖外置模板**（`gen_workflows_doc.py` 对 `PROJECT_TEMPLATE_IDS` 显式
-   声明式排除，`--check` 防漂移只钉引擎内置模板）。
+1. **Stage order/topology change → a new template id coexisting alongside the old**: old in-flight
+   tickets are finished by the old class (each ticket's dedicated worker freezes the code from its
+   start); the new id and the old id coexist in the registry without affecting each other.
+2. **Branch logic change → `workflow.patched()` plus a patch identifier carrying the project
+   prefix**: branch at the change point with `workflow.patched("<key>-…-vN")`, so old history walks
+   the old branch and new history walks the new branch, and both replay. **Every new patch
+   identifier carries the `<project key>-` prefix** (the main line of defense — that prefix makes a
+   collision with the engine's existing `dev-lane-*`/`ki003-*`/`ticket-*` shapes impossible); the
+   loader additionally collects the engine-face identifier set as a backstop rejection (collected by
+   statically scanning source for `*_PATCH_ID = "…"`, so a new engine patch that does not follow the
+   convention may go unreported, with limited consequences: a patched equality check only ever
+   happens within a single template class's own history).
+3. Truth is the code: changing a template = changing the class definition in the project
+   repository; the `server/workflows/*.yaml` reference snapshot in the engine repository **does not
+   cover external templates** (`gen_workflows_doc.py` excludes `PROJECT_TEMPLATE_IDS` by explicit
+   declaration, and `--check`'s drift protection pins only engine built-in templates).
 
-## 五、安全面与确定性（不降级，原文适用）
+## 5. Security face and determinism (not downgraded, applies verbatim)
 
-- 人门唯一入口仍是 `sign`：外置模板走 `TicketWorkflowBase` 同一基类，无
-  set-stage/force_stage 旁路；信号面只 sign/retry_qc（另有 pause/rework 既有面）。
-- **确定性编码规约**（workflow 函数体纯确定性：零 IO、零随机、零墙钟，只用
-  `workflow.now()`；副作用一律进 activity；改执行逻辑先 bump PATCH_ID 并在改动点
-  `workflow.patched()` 分支）对外置模板同等适用。
-- **clean-module 约束**（temporalio sandbox 会重执行定义模块）：模块体只允许
-  import ＋类定义，零模块级 IO（`pathlib`/`subprocess`/`open` 一律禁止），
-  `from shared import …`/`from base import …` 等引擎内 import 照
-  `fixture_two_step` 放进 `workflow.unsafe.imports_passed_through()` 块。
-- **sandbox 兼容双层防线（D3，t260924-04）**：① worker 构造时把外置模块装载名
-  （`sandbar_ext_<key>_<stem>`）注入 `SandboxedWorkflowRunner` 的
-  `passthrough_modules`——sandbox importer 按名解析到外层已装载模块，不再
-  ModuleNotFoundError 崩工人；② 加载器类面对每个候选模板先用与 worker 同款
-  restrictions 做 `prepare_workflow` 预校验，校验失败=「sandbox 校验失败」模板级
-  拒收点名，永不进 worker 注册表——坏模板炸不垮工人进程（规格④边界）。
-  passthrough 集＝**外置装载名 ∪ 其引擎依赖顶层名**（shared/base/activities/
-  agent_activities/workflows/workflows_v2/dev_lane，D6）：activate 期 payload 解码
-  要 `typing.get_type_hints` 按名查 `TicketInput` 所属模块，受限 importer 对非
-  passthrough 名即 KeyError；worker 与预校验两侧用同一全集，「预校验过了＝worker
-  能跑」。
+- The human gate's only entry is still `sign`: external templates use the same base class
+  `TicketWorkflowBase`, with no set-stage/force_stage bypass; the signal face is only sign/retry_qc
+  (plus the existing pause/rework face).
+- **Determinism coding rules** (the workflow function body is purely deterministic: zero IO, zero
+  randomness, zero wall clock, using only `workflow.now()`; all side effects go into activities;
+  changing execution logic requires bumping PATCH_ID first and branching at the change point with
+  `workflow.patched()`) apply equally to external templates.
+- **Clean-module constraint** (the temporalio sandbox re-executes the definition module): a module
+  body may contain only imports and class definitions, with zero module-level IO (`pathlib`/
+  `subprocess`/`open` are all forbidden), and engine-internal imports such as
+  `from shared import …`/`from base import …` go inside a
+  `workflow.unsafe.imports_passed_through()` block, following `fixture_two_step`.
+- **Two-layer sandbox-compatibility defense (D3, t260924-04)**: ① at worker construction, the
+  external modules' load names (`sandbar_ext_<key>_<stem>`) are injected into
+  `SandboxedWorkflowRunner`'s `passthrough_modules` — the sandbox importer resolves them by name to
+  the already-loaded outer module, so it no longer crashes the worker with ModuleNotFoundError;
+  ② the loader class face first runs a `prepare_workflow` pre-check on every candidate template
+  using the same restrictions as the worker, and a failed check = a "sandbox check failed"
+  per-template rejection naming the template, never entering the worker registry — a bad template
+  cannot blow up the worker process (spec ④ boundary).
+  The passthrough set = **external load names ∪ their engine dependency top-level names**
+  (shared/base/activities/agent_activities/workflows/workflows_v2/dev_lane, D6): decoding the
+  payload during activate needs `typing.get_type_hints` to look up the module owning `TicketInput`
+  by name, and for a non-passthrough name the restricted importer raises KeyError; worker and
+  pre-check use the same full set, so "the pre-check passed = the worker can run it".
 
-## 六、实现锚点（读代码从这进）
+## 6. Implementation anchors (where to start reading the code)
 
-- 加载器：`server/engine/project_templates.py`（名面=stdlib 源码扫描；类面=引擎
-  venv importlib 全量加载＋形状深检；零 shared import，依赖全参数注入）。
-- 合并：`shared.py` 末尾「项目外置工作流模板面」段（名面并入两表＋拒收清单）；
-  `workflows_v2.py` 尾段（类面并入＋深检回写撤下名面已并入但深检拒掉的 id——
-  引擎进程内两表恒一致，交叉自检不破）。
-- 注册顺序钉死：内置∪夹具（`SANDBAR_FIXTURE_TEMPLATES` 门，语义不动）先占，
-  项目模板后到；后到撞名即拒收点名双方。
-- 验收用例：`server/engine/tests/test_t260924_04_project_templates.py`（A2/A3/A7
-  对应例）；收窄守卫改判：`integration/t260904-08/sc_template_face_narrowing.py`
-  （默认面=内置＋当项目显式登记；夹具门用例不动）。
+- Loader: `server/engine/project_templates.py` (name face = stdlib source scanning; class face =
+  full importlib loading in the engine venv plus deep shape inspection; zero shared imports, with
+  all dependencies injected as parameters).
+- Merging: the "project external workflow template face" section at the end of `shared.py` (the
+  name face merged into both tables plus the rejection list); the tail section of `workflows_v2.py`
+  (class face merged in plus deep-inspection write-back withdrawing ids that the name face had
+  merged but the deep inspection rejected — within an engine process the two tables are always
+  consistent, so the cross self-check does not break).
+- Registration order is hardcoded: built-in ∪ fixture (`SANDBAR_FIXTURE_TEMPLATES` gate, semantics
+  unchanged) claims slots first, project templates arrive later; a later arrival that collides is
+  rejected with both sides named.
+- Acceptance cases: `server/engine/tests/test_t260924_04_project_templates.py` (cases corresponding
+  to A2/A3/A7); narrowing-guard re-judgment:
+  `integration/t260904-08/sc_template_face_narrowing.py` (default face = built-in + templates a
+  project explicitly registers; the fixture-gate case is unchanged).
 
-## 相关文档
+## Related documents
 
-- [sandbar项目接入契约v1](sandbar项目接入契约v1.md)（①d paths 键表）
-- 设计稿：`notes/discussions/260924-项目外置工作流模板-设计稿.md`
+- [sandbar project onboarding contract v1](sandbar-project-onboarding-contract-v1.md) (①d paths key table)
+- Design draft: `notes/discussions/260924-项目外置工作流模板-设计稿.md`

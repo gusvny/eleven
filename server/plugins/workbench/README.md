@@ -3,7 +3,7 @@
 > 本目录是 dsh 管理台的工单工作流台插件：宿主半（`node.ts`）在 dsh webServer 上挂
 > `/sandbar-workbench/api/*`；浏览器半（`src/client/`，构建产物 `lib/client.js`）
 > 通过 dsh 插件槽机制接管界面。设计真源：
-> `docs/design/工单工作流台设计.md`、`docs/design/右栏会话入口与hero定制设计.md`。
+> `docs/design/ticket-workflow-console-design.md`、`docs/design/sidebar-session-entry-and-hero-design.md`。
 
 ## 目录
 
@@ -39,7 +39,7 @@ dsh 单槽（`kind:'single'`）按 **priority 最低者渲染**（lowest renders
 
 ## 会话区（session-entry 立项）
 
-**口径**（真源 `docs/design/右栏会话入口与hero定制设计.md` §2/§4/附录）：
+**口径**（真源 `docs/design/sidebar-session-entry-and-hero-design.md` §2/§4/附录）：
 会话分两类——工单会话（`ticket-<工单id>`，点工单 find-or-create，有自己常驻入口）
 与项目会话（用户 UI 主动打开，跟项目走）。本插件只管后者，列表=**插件自建账册**
 （`localStorage['sandbar-workbench-opened-sessions-v1']`，MRU ≤5、当前高亮），

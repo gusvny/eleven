@@ -1,48 +1,67 @@
-# 溯游测试环境隔离指南（M17）
+---
+title: "Sandbar test environment isolation guide"
+category: reference
+tags:
+  - testing
+  - isolation
+  - docker
+status: active
+updated: 2026-09-28
+---
 
-> **铁律**：开发、测试等工单**不允许重启/停止/修改 `localhost:3099` 上正在运行的 dsh 进程**
-> （那是总管/用户正在使用的生产控制台），也不碰生产 Temporal 的 `7233`（gRPC）/`8233`（Web UI）。
-> 测试一律走本仓库的 **Docker 隔离测试环境**（`server/docker-compose.test.yml`）。
+# Sandbar test environment isolation guide (M17)
 
-## 为什么需要隔离
+> **Hard rule**: development and test tickets are **never allowed to restart / stop / modify
+> the dsh process running on `localhost:3099`** (that is the production console the
+> supervisor/user is using), and must not touch production Temporal's `7233` (gRPC) /
+> `8233` (Web UI).
+> All testing goes through this repository's **Docker isolated test environment**
+> (`server/docker-compose.test.yml`).
 
-生产环境本机直跑（非 Docker）：dsh 控制台 `3099`、Temporal `7233/8233`、worker 常驻。
-开发/测试工单如果直接连生产 Temporal、或去重启 3099 控制台，会互相踩：
-测试票面/工作流污染生产状态、控制台重启打断总管/用户会话。
+## Why isolation is needed
 
-所以测试在 Docker 测试环境里进行：**独立 Temporal + 独立 dsh 实例 + 独立端口 + 独立数据卷**，
-与生产零交集。
+Production runs directly on the host (not in Docker): the dsh console on `3099`, Temporal on
+`7233/8233`, and the worker running resident. If a development/test ticket connects straight
+to production Temporal, or restarts the 3099 console, the two sides step on each other:
+test ticket data and workflows pollute production state, and a console restart interrupts the
+supervisor's/user's session.
 
-## 拓扑与端口
+So tests run in the Docker test environment: **its own Temporal + its own dsh instance + its
+own ports + its own data volumes**, with zero overlap with production.
 
-| 端口 | 用途 | 谁在用 |
-|------|------|--------|
-| 3099 | 生产 dsh 控制台 | 总管/用户，**禁止碰** |
-| 7233 | 生产 Temporal gRPC | 生产 worker（engine/run_server.sh），**禁止碰** |
-| 8233 | 生产 Temporal Web UI | 生产 worker 同源，**禁止碰** |
-| 3199 | **测试 dsh 控制台** | Docker 测试环境 |
-| 17233 | **测试 Temporal gRPC** | Docker 测试环境（容器内 7233） |
-| 18233 | **测试 Temporal Web UI** | Docker 测试环境（容器内 8233） |
+## Topology and ports
 
-测试 Temporal 使用独立 namespace `sandbar-test`，数据落独立卷（`temporal-data` / `dsh-home`）。
+| Port | Purpose | Who uses it |
+|------|---------|-------------|
+| 3099 | Production dsh console | supervisor/user, **do not touch** |
+| 7233 | Production Temporal gRPC | production worker (engine/run_server.sh), **do not touch** |
+| 8233 | Production Temporal Web UI | same source as the production worker, **do not touch** |
+| 3199 | **Test dsh console** | Docker test environment |
+| 17233 | **Test Temporal gRPC** | Docker test environment (7233 inside the container) |
+| 18233 | **Test Temporal Web UI** | Docker test environment (8233 inside the container) |
 
-## 快速启动测试环境
+The test Temporal uses its own namespace `sandbar-test`, with data in separate volumes
+(`temporal-data` / `dsh-home`).
+
+## Starting the test environment quickly
 
 ```bash
-# 在仓库根执行
+# run from the repository root
 docker compose -f server/docker-compose.test.yml up -d
 ```
 
-两服务镜像均本机自建、无 registry 拉取：`sh server/build-test-temporal.sh`、
-`sh server/build-test-dsh.sh`（建镜像时联网一次；dsh 曾是每次起台容器内联网
-`npm i` 全局装、每台 ~2 分钟，260908 起烤进镜像）。之后 `up`/`restart` 走缓存
-与数据卷，秒级。启动后两个容器：
+Both service images are built locally, with no registry pulls: `sh server/build-test-temporal.sh`,
+`sh server/build-test-dsh.sh` (building the images goes online once; dsh used to run `npm i`
+inside the container on every start, roughly 2 minutes per stack — since 260908 it is baked into
+the image). After that, `up`/`restart` use cache and data volumes and take seconds. Once started
+there are two containers:
 
-- `sandbar-test-temporal`：独立 Temporal（temporalite dev server，SQLite 落盘）
-- `sandbar-test-dsh`：独立 dsh 测试控制台（3199）
+- `sandbar-test-temporal`: standalone Temporal (temporalite dev server, SQLite on disk)
+- `sandbar-test-dsh`: standalone dsh test console (3199)
 
-**新数据卷首次 up 后补一步**：注册多项目化的 ProjectKey 与立项关联的 EpicCode
-两个 search attribute（temporalite 无启动参数；注册落数据卷，之后重启自带）：
+**One extra step after the first `up` on a fresh data volume**: register the two search
+attributes — ProjectKey for multi-project support and EpicCode for epic linkage (temporalite has
+no startup flag for this; the registration lands in the data volume and persists across restarts):
 
 ```bash
 server/engine/bin/temporal operator search-attribute create \
@@ -51,222 +70,270 @@ server/engine/bin/temporal operator search-attribute create \
   --name EpicCode --type Keyword --namespace sandbar-test --address 127.0.0.1:17233
 ```
 
-漏注册 EpicCode 时，带 `--epic` 开工单会大声报错（不静默丢标），按上文补注册即可。
+If EpicCode is not registered, creating a ticket with `--epic` fails loudly (it never silently
+drops the tag); just register it as shown above.
 
-保留期同理（temporalite 默认 24h——关闭的 workflow 24 小时后**物理删除**，工单历史/
-审计/验收证据会蒸发）：新数据卷首次 up 后设置一次（落数据卷，之后重启自带）：
+Retention works the same way (temporalite defaults to 24h — closed workflows are **physically
+deleted** after 24 hours, so ticket history, audit records, and acceptance evidence evaporate):
+set it once after the first `up` on a fresh data volume (it lands in the data volume and persists
+across restarts):
 
 ```bash
 server/engine/bin/temporal operator namespace update \
   --retention 876000h --namespace sandbar-test --address 127.0.0.1:17233
 ```
 
-> 来源立项：epic-linkage（决策缘由见 notes/epics/epic-linkage.md）
+> Source epic: epic-linkage (rationale in notes/epics/epic-linkage.md)
 
-## 验证测试环境
+## Verifying the test environment
 
 ```bash
 docker compose -f server/docker-compose.test.yml ps
 
-# 测试 Temporal：Web UI（浏览器打开，namespace=sandbar-test）
+# test Temporal: Web UI (open in a browser, namespace=sandbar-test)
 open http://localhost:18233
-# 或命令行核对（用仓库内 temporal CLI）
+# or check from the command line (using the repository's temporal CLI)
 server/engine/bin/temporal --address 127.0.0.1:17233 operator namespace describe -n sandbar-test
 
-# 测试 dsh 控制台
+# test dsh console
 open http://localhost:3199
 
-# 健康探针（控制台 HTTP 可达即活）
+# health probe (alive as soon as the console's HTTP port answers)
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3199/
 ```
 
-## 跑 worker / 自测（本机跑，指向测试 Temporal）
+## Running the worker / self-testing on the host against test Temporal
 
-Temporal SDK 工具（`engine/.venv`）不装进容器；在本机用仓库内 venv 跑，
-用环境变量指向测试实例——`server/engine/shared.py` 支持
-`SANDBAR_TARGET_HOST` / `SANDBAR_NAMESPACE` 覆盖（缺省仍是生产 7233/default）。
+The Temporal SDK tooling (`engine/.venv`) is not installed into the container; run it on the
+host from the repository venv and point it at the test instance with environment variables —
+`server/engine/shared.py` honours `SANDBAR_TARGET_HOST` / `SANDBAR_NAMESPACE` overrides
+(the defaults are still production 7233/default).
 
 ```bash
-# 测试 worker：连测试 Temporal（17233 / sandbar-test）
+# test worker: connect to test Temporal (17233 / sandbar-test)
 SANDBAR_TARGET_HOST=127.0.0.1:17233 SANDBAR_NAMESPACE=sandbar-test \
   server/engine/.venv/bin/python server/engine/worker.py --daemon
 
 ```
 
-> ⚠️ **注意**：worker 一定带 `SANDBAR_TARGET_HOST=127.0.0.1:17233` 前缀，否则默认连生产
-> `127.0.0.1:7233`（namespace default）——往生产 Temporal 写测试状态，等同碰 3099 级别的事故。
+> ⚠️ **Note**: always prefix the worker with `SANDBAR_TARGET_HOST=127.0.0.1:17233`, otherwise it
+> connects to production `127.0.0.1:7233` (namespace default) by default — writing test state into
+> production Temporal is an incident on the same level as touching 3099.
 
-### 每工单专属 worker（260824 起）
+### Per-ticket dedicated worker (since 260824)
 
-工单 workflow 不走共享队列：每张工单一个 task queue（`suyou-ticket-<工单id>`）+
-一个专属 worker 进程——`ticket create` 自动拉起（pidfile/log 在
-`engine/data/worker-<工单id>.{pid,log}`），workflow 收口后 worker 查到状态
-非 RUNNING 即优雅自退（30s 轮询）；巡检（dispatcher-scan）顺带对账：在跑工单缺
-worker 补拉、已收口工单回收漏退 worker。共享队列 `suyou-poc` 只服务
-dispatcher-scan / content-pipeline（仍需一个常驻共享 worker）。
+A ticket workflow does not use a shared queue: each ticket gets its own task queue
+(`suyou-ticket-<ticket id>`) plus a dedicated worker process — `ticket create` starts it
+automatically (pidfile/log under `engine/data/worker-<ticket id>.{pid,log}`), and once the
+workflow closes, the worker notices the status is no longer RUNNING and exits gracefully
+(30s polling). Inspection (dispatcher-scan) reconciles along the way: it starts a missing worker
+for a running ticket and reclaims workers that failed to exit for closed tickets. The shared
+queue `suyou-poc` only serves dispatcher-scan / content-pipeline (which still need one resident
+shared worker).
 
-测试环境验证专属 worker 生命周期时，环境变量会被 `ticket create` 透传给自动拉起的
-专属 worker（spawn 继承调用方 env），所以测试工单连同它的 worker 都落在测试
-Temporal 上，与生产零交集。
+When verifying the dedicated worker's lifecycle in the test environment, environment variables
+are passed through by `ticket create` to the automatically started dedicated worker (the spawn
+inherits the caller's env), so the test ticket and its worker both land on test Temporal, with
+zero overlap with production.
 
-没有 Docker 的机器可用第二个本地 dev server 代替（同等隔离：独立端口+独立 db 文件）：
+A machine without Docker can use a second local dev server instead (equivalent isolation:
+separate port + separate db file):
 
 ```bash
 server/engine/bin/temporal server start-dev --ip 127.0.0.1 --port 17233 \
   --ui-port 18233 --db-filename /tmp/sandbar-test.db \
   --search-attribute ProjectKey=Keyword --search-attribute EpicCode=Keyword
-# namespace 用 default 即可（SANDBAR_NAMESPACE 缺省），测完 pkill 掉、删 db 文件
+# namespace can be default (the SANDBAR_NAMESPACE default); pkill it and delete the db file when done
 ```
 
-> 来源立项：epic-linkage（决策缘由见 notes/epics/epic-linkage.md）
+> Source epic: epic-linkage (rationale in notes/epics/epic-linkage.md)
 
-## 测试控制台里看不到生产工单？
+## No production tickets visible in the test console?
 
-正常。260823 起工单真源恒为 Temporal workflow（旧 tickets/ JSON 投影目录已删）——
-测试控制台连的是测试 Temporal（17233 / sandbar-test），与生产（7233 / default）完全隔离。
+That is expected. Since 260823 the single source of truth for tickets is always the Temporal
+workflow (the old tickets/ JSON projection directory was deleted) — the test console connects to
+test Temporal (17233 / sandbar-test), fully isolated from production (7233 / default).
 
-## 停止 / 清场
+## Stopping / cleanup
 
 ```bash
-docker compose -f server/docker-compose.test.yml down      # 停，保留数据卷
-docker compose -f server/docker-compose.test.yml down -v   # 连测试数据卷一起清（测试票面/工作流全没）
+docker compose -f server/docker-compose.test.yml down      # stop, keep data volumes
+docker compose -f server/docker-compose.test.yml down -v   # also wipe test data volumes (all test ticket data/workflows gone)
 ```
 
-## 故障排查
+## Troubleshooting
 
-- **temporal 起不来**：`temporalio/temporalite` 已停维护；若 flag 不兼容，可删掉该服务的
-  `entrypoint`/`command` 两行退回镜像默认（namespace 变 default、数据不落盘），或换成任意
-  dev 模式 Temporal（官方 temporal CLI `temporal server start-dev`，同 engine 路径）。
-- **3199 打不开**：容器首次启动要装依赖，`docker compose logs dsh` 看进度；装完才 `exec dsh`。
-- **worker 连不上测试 Temporal**：确认 `docker compose ps` 里 `sandbar-test-temporal` 在跑；
-  宿主侧地址是 `127.0.0.1:17233`（不是 7233）。
+- **Temporal won't start**: `temporalio/temporalite` is no longer maintained; if a flag is
+  incompatible, delete that service's `entrypoint`/`command` lines to fall back to the image
+  defaults (namespace becomes default, data is not persisted), or switch to any dev-mode
+  Temporal (the official `temporal server start-dev` CLI, same engine path).
+- **3199 won't open**: the container installs dependencies on first start — check progress with
+  `docker compose logs dsh`; `exec dsh` only works after installation finishes.
+- **Worker cannot reach test Temporal**: confirm `sandbar-test-temporal` is running in
+  `docker compose ps`; the host-side address is `127.0.0.1:17233` (not 7233).
 
-## 测试数据纪律（260904 宿主裁定）
+## Test data discipline (host ruling 260904)
 
-背景：epic-status-enum 曾把 suyou 时代的真数据快照（写死 9 张 charter 清单+逐张 note
-点名）塞进组件单测——sandbar 迁仓后只剩 2 张即红，测试在追真数据跑。裁定分层：
+Background: epic-status-enum once stuffed a snapshot of real suyou-era data (a hardcoded list of
+9 charters plus per-charter notes) into component unit tests — after the migration to sandbar
+only 2 charters remained, so tests turned red and were chasing the real data. The ruling
+separates three layers:
 
-| 层 | 数据源 | 断言什么 |
+| Layer | Data source | What it asserts |
 | --- | --- | --- |
-| 组件单测（workbench tests/） | fixture/tmp 受控数据 | 逻辑面：枚举合法性、错误文案、配置驱动语义——与真实仓状态无关 |
-| 真数据不变量（可选） | 真实仓文件 | **性质**而非快照：全部可解析、值 ∈ 合法枚举——真源增删不红，坏数据才红 |
-| 「恰好 N 项已知清单」类断言 | —— | 不允许：清单真源就是数据目录本身，测试镜像它没有守护任何东西 |
+| Component unit tests (workbench tests/) | fixture / tmp controlled data | Logic: enum validity, error copy, config-driven semantics — independent of the real repository's state |
+| Real-data invariants (optional) | real repository files | **Properties**, not snapshots: everything parses, values ∈ legal enums — adding/removing source data does not turn it red, only bad data does |
+| "Exactly N known items" style assertions | —— | Not allowed: the source of truth for the list is the data directory itself, and a test mirroring it guards nothing |
 
-判定口诀：**新增一条真实数据（立项一张 epic、加一张工单）不应让任何测试变红**；
-变红了就说明该断言在快照现实，应重构为 fixture（逻辑）或性质（不变量）。
-例外：合同冻结类集成场景（契约文档守卫、golden 基线）以「钉住真源」为使命，快照
-是其语义本体，不在此列——它们住在 integration/ 场景清单，不在组件单测。
+Rule of thumb: **adding one piece of real data (a new epic, a new ticket) must not turn any test
+red**; if it does, the assertion is snapshotting reality and should be refactored into a fixture
+(logic) or a property (invariant).
+Exception: contract-freezing integration scenarios (contract document guards, golden baselines)
+exist to pin the source of truth — the snapshot is their very semantics, so they are out of scope
+here; they live in the integration/ scenario registry, not in component unit tests.
 
-## 外部调用形状单测规范（KI-046，260904）
+## External call-shape unit test rule (KI-046, 260904)
 
-背景：t260904-07 的 charter 注入把裸字符串传给平台 `session.prompt(content, mode)`，
-平台 wire 契约要求 `PromptContentPart[]` 分片数组 → apiproxy zod 拒收
-`invalid payload for session prompt`，核心功能上线即 100% 失效。能拦住它的类型闸
-被 `any` 类型面抹平、调用形状测试缺失、唯一旅程场景在合并闸干净 SKIP——三层全漏。
-本规范把「第三方调用必须有测试覆盖」从期望落成 developer 侧的机械义务。
+Background: the charter injection in t260904-07 passed a bare string to the platform's
+`session.prompt(content, mode)`, while the platform wire contract requires a `PromptContentPart[]`
+array of parts → apiproxy zod rejected it with `invalid payload for session prompt`, so the core
+feature was 100% broken the moment it shipped. The type gate that could have caught it was erased
+by an `any` type, call-shape tests were missing, and the only journey scenario was silently
+SKIPped inside the merge gate — three layers all missed it. This rule turns "third-party calls
+must have test coverage" from an expectation into a mechanical obligation on the developer side.
 
-**条款**：凡新增**不由本项目控制的进程外接口**调用点（HTTP API、CLI 子进程、
-平台 SDK……dsh 与 Temporal 只是本仓实例），该调用必须在 developer 单测里带
-**mock 形状断言**：捕获实参、对照对端契约校验——对端真 schema / d.ts 可导入则
-直接 import；不可导入则用**仓内冻结镜像**（常量+注释注明真源位置与同步责任）。
-消费外部输入（LLM 产出物、用户输入、文件、网络数据）的畸形输入用例纪律不变，
-与此并行适用。没有这类调用点的项目，条款自然空转。另注意两条平台语义陷阱
-（KI-046 实锤）：①平台 RPC 的**业务失败不 throw 只返回结果对象**（如
-`RpcResult{ok:false}`）——检查返回值，不能只靠 catch；②类型面不收窄，tsc 就不是闸。
+**Clause**: whenever a new call site to a **process-external interface not controlled by this
+project** is added (HTTP API, CLI subprocess, platform SDK … dsh and Temporal are merely instances
+of this repository), that call must carry a **mock shape assertion** in the developer's unit
+tests: capture the actual arguments and validate them against the counterpart contract — import
+the real schema / d.ts if importable; if not, use a **frozen in-repo mirror** (constants plus a
+comment naming the true source location and the sync responsibility). The malformed-input case
+discipline for external inputs (LLM output, user input, files, network data) remains unchanged
+and applies in parallel. Projects with no such call sites simply have the clause lying idle. Note
+two platform semantics traps (proven by KI-046): ① a platform RPC's **business failure does not
+throw, it returns a result object** (e.g. `RpcResult{ok:false}`) — check the return value, don't
+rely on catch alone; ② if the type surface does not narrow, tsc is not a gate.
 
-**范式**：`server/plugins/workbench/tests/ki046-charter-prompt-shape.mjs`——行为级 mock
-（真加载模块、桩捕获 prompt 实参、对照冻结镜像契约、畸形输入全路径）+ 三方一致锚
-（src 与构建产物调用形状一致，防「改 src 没重建 bundle」）。
+**Reference implementation**: `server/plugins/workbench/tests/ki046-charter-prompt-shape.mjs` —
+behaviour-level mock (really load the module, capture the prompt arguments with a stub, validate
+against the frozen mirror contract, exercise all malformed-input paths) plus a three-way
+consistency anchor (the call shape in src and in the build artifact agree, preventing "changed src
+but forgot to rebuild the bundle").
 
-**分工口径**：形状断言=mock，归 developer 单测，不归集成；集成侧不写 mock，只在
-仲裁加固定问句「本票新增外部调用吗？形状单测在哪？」——把关不代做。
+**Division of labour**: shape assertions = mocks, they belong to developer unit tests, not to
+integration; the integration side writes no mocks and only adds a fixed question at arbitration
+time — "does this ticket add an external call? where is the shape unit test?" — it gates, it does
+not do the work.
 
-## 两层测试的断言逻辑（260910）：集成看终态，单测看契约
+## Assertion logic of the two test layers (260910): integration asserts the end state, unit tests assert the contract
 
-**先分清是哪一层**——两层测的不是同一样东西，断言逻辑不能互套；把单测律套到集成上、
-或把终态律套到单测上，两边都会写歪。
+**First figure out which layer you are on** — the two layers do not test the same thing, and their
+assertion logic is not interchangeable; applying unit-test rules to integration, or end-state
+rules to unit tests, bends both.
 
-| | 集成 / 验收面（场景、旅程） | 单元测试面（开发者自测） |
+| | Integration / acceptance face (scenarios, journeys) | Unit test face (developer self-test) |
 | --- | --- | --- |
-| 被测对象 | **系统拼起来之后的行为** | **一个单元对外的契约**（输入→输出/异常/调用形状） |
-| 断言落点 | 交付物**终态**：谁最终消费它，就断谁（页面、磁盘、接口返回、渲染后文档） | 单元的**公开契约**——它没有“再往外一跳”，契约本身就是终态 |
-| 主要敌人 | 装配断链、**断言面写窄** | 结果**依赖环境**（运行目录、环境变量、时钟、网络、真数据）、脆弱耦合、mock 形状不对 |
-| 尺度 | 贵（起台/开浏览器/真建票），一条主干即可 | 便宜、快、可穷举边界与畸形输入 |
-| 本仓成文纪律 | 本节条款 1–6 | 上文「测试数据纪律」「外部调用形状单测规范（KI-046）」+ 本节条款 7–9 |
+| Subject under test | **Behaviour once the system is assembled** | **One unit's outward contract** (input → output/exception/call shape) |
+| Where assertions land | The deliverable's **end state**: assert on whoever ultimately consumes it (the page, the disk, the interface response, the rendered document) | The unit's **public contract** — it has no "one hop further out", the contract itself is the end state |
+| Main enemy | Assembly breaks, **assertions written too narrow** | Results **depending on the environment** (run directory, env vars, clock, network, real data), brittle coupling, wrong mock shape |
+| Cost | Expensive (spinning up stacks, opening browsers, really creating tickets); one main trunk suffices | Cheap, fast, can exhaustively cover boundaries and malformed inputs |
+| Written rules in this repo | Clauses 1–6 in this section | The "test data discipline" and "external call-shape unit test rule (KI-046)" above + clauses 7–9 in this section |
 
-**通用例子（同一处功能改动，两层各断什么）**：
-- 改了一个「列表行显示状态」的功能——**集成**断：页面/接口上这一行真的显示成那个样子；
-  **单测**断：把数据交给行组件/行构造函数，输出里的状态字段与按钮集合正确。
-- 改了一个「写文件到某目录」的功能——**集成**断：那个目录里真有文件、内容格式对；
-  **单测**断：单元收到参数后，调用了写文件接口且传入路径与内容正确（对外调用形状）。
-- 改了一个「校验拒收」的功能——**集成**断：真入口被拒、报错文案与退出码对；
-  **单测**断：校验函数对各类畸形输入的返回值/异常。
+**Common example (the same feature change, what each layer asserts)**:
+- You changed a "list row shows status" feature — **integration** asserts: that row really renders
+  that way on the page/interface; **unit test** asserts: feed the data to the row component/row
+  constructor and the output's status field and button set are correct.
+- You changed a "write a file to some directory" feature — **integration** asserts: the file is
+  really in that directory with the right content format; **unit test** asserts: given the
+  arguments, the unit called the file-writing interface with the right path and content (the
+  outward call shape).
+- You changed a "validate and reject" feature — **integration** asserts: the real entry point
+  rejects it with the right error copy and exit code; **unit test** asserts: the validation
+  function's return values/exceptions for each kind of malformed input.
 
-## 集成 / 验收面：终态保底 + 契约层并行（260910）
+## Integration / acceptance face: end-state backstop + contract layer in parallel (260910)
 
-背景：同一天两次「全绿合并、用户用不了」，加一条同族，三案同骨架——
-**断言落在「我造的东西」上，而不是「你要的东西」上**：
+Background: two "all green on merge, unusable for the user" incidents in one day, plus a third of
+the same family, all with the same skeleton — **assertions landed on "the thing I built", not on
+"the thing you want"**:
 
-1. **暂停功能（t260908-01）**：交付物=列表上点暂停/恢复；场景断言的是引擎查询面
-   `paused=True` 与引擎列表数据（中间面），真终态是 console 列表接口 + 页面按钮。
-   断点：host 未透传字段 → 场景全绿、票合并，界面无恢复按钮。
-2. **多仓修复（t260910-03）**：交付物=成员仓代码真被搬进成员仓；场景断言的是一条
-   **契约层**字段（TicketInput.repo_worktrees 持久化，要过 Temporal 编解码，本身是好
-   断言），真终态是泳道磁盘上成员仓工作区目录+分支+清单文件。断点：workflow→建泳道
-   那一跳丢字段 → 场景全绿、票合并，真项目仍建单仓泳道（KI-071）。
-3. **UI 证据闸**：闸断言的是截图**文件存在**，不是截图**内容拍到了该拍的东西**——
-   空板废图带全绿进归档，直到人眼一看才发现（KI-069）。
+1. **Pause feature (t260908-01)**: the deliverable = clicking pause/resume in the list; the
+   scenario asserted the engine query face (`paused=True`) and engine list data (an intermediate
+   face), while the real end state is the console list API + the page button. Break point: the
+   host never passed the field through → scenario all green, ticket merged, no resume button in
+   the UI.
+2. **Multi-repo fix (t260910-03)**: the deliverable = member-repo code really moved into the
+   member repo; the scenario asserted a **contract-layer** field (TicketInput.repo_worktrees
+   persisted, which has to survive Temporal codec — a good assertion in itself), while the real
+   end state is the member-repo workspace directory + branch + manifest file on the lane disk.
+   Break point: the workflow→create-lane hop dropped the field → scenario all green, ticket
+   merged, the real project still got single-repo lanes (KI-071).
+3. **UI evidence gate**: the gate asserted that screenshot **files exist**, not that the
+   screenshot **content captured what it was supposed to capture** — an empty-board junk image
+   went into the archive with full green until a human eye caught it (KI-069).
 
-### 条款
+### Clauses
 
-**1. 终态层（保底，每票至少一条）**
-先写清交付物的「终态面」——它最后被谁消费：人点按钮→页面 DOM/界面接口；别的项目跑票
-→磁盘上的仓与目录；文档给人读→渲染后的页面；下游系统吃→接口返回字段。断言必须落在
-这一面。
+**1. End-state layer (backstop, at least one per ticket)**
+First write down the deliverable's "end-state face" — who ultimately consumes it: a human clicking
+a button → page DOM / UI interface; another project running a ticket → the repos and directories
+on disk; a document for humans → the rendered page; a downstream system → the interface response
+fields. Assertions must land on that face.
 
-**2. 契约层（并行，鼓励写）**
-有明确契约的中间面**应当**断言：活动输入输出结构、HTTP/接口形状、文件格式（如清单）、
-状态字段契约。它们是对下游的**承诺**，承诺破了就是真回归——即使这一轮终态碰巧还对。
-这正是防「中间错、最后意外对」的唯一手段（否则要等下一个消费者才炸）。
+**2. Contract layer (parallel, encouraged)**
+Intermediate faces with a clear contract **should** be asserted: activity input/output structure,
+HTTP/interface shape, file formats (e.g. manifests), state-field contracts. They are **promises**
+to downstream, and a broken promise is a real regression — even if the end state happens to be
+right this round. This is the only defence against "wrong in the middle, accidentally right at the
+end" (otherwise it blows up only at the next consumer).
 
-**3. 细节层（不作证据）**
-内部变量、私有函数、无人消费的中间文件布局——不作为验收证据（可保留作诊断定位）。
+**3. Detail layer (not evidence)**
+Internal variables, private functions, intermediate file layouts nobody consumes — not acceptance
+evidence (they may be kept for diagnosis).
 
-**4. 两个方向都要封口**
+**4. Both directions must be sealed**
 
-| 情形 | 只有谁能发现 |
+| Situation | Who alone can catch it |
 | --- | --- |
-| 契约对、终态错 | 终态断言（装配那一跳断了） |
-| 契约错、终态意外对 | 契约断言（主干碰巧绕过，下一个消费者才炸） |
+| Contract right, end state wrong | The end-state assertion (the assembly hop broke) |
+| Contract wrong, end state accidentally right | The contract assertion (the trunk happened to bypass it; the next consumer catches it) |
 
-只留一层，必留半个盲区。t260910-03 的教训不是「断言写错了」，而是**写不全**：
-契约层验了、终态层没验，而断的恰是没验的那层。
+Keep only one layer and you keep half a blind spot. The lesson from t260910-03 is not "the
+assertion was written wrong" but that it was **incomplete**: the contract layer was verified and
+the end-state layer was not, and the break was exactly on the unverified layer.
 
-**5. 写场景时两问自查**
-① 这条终态断言，能证明用户能做他要做的那件事吗？
-② 契约破了，会被谁、在哪一层发现？
+**5. Two self-check questions when writing a scenario**
+① Can this end-state assertion prove the user can do the thing they want to do?
+② If the contract breaks, who discovers it, at which layer?
 
-**6. 成本配比（不是到处端到端）**
-一条终态主干 + 契约层覆盖 + 细节层诊断。终态断言贵（起台/开浏览器/真建票），所以一条
-主干即可；但也不能只有函数级直调冒充全链（KI-063 反例：场景全函数级绿、真开票即
-TypeError——那是把单测当集成用）。
+**6. Cost mix (not end-to-end everywhere)**
+One end-state trunk + contract-layer coverage + detail-layer diagnosis. End-state assertions are
+expensive (spinning up stacks, opening browsers, really creating tickets), so one trunk suffices;
+but you also cannot let function-level direct calls impersonate the full chain (counter-example
+KI-063: scenario all green at function level, real ticket creation throws TypeError — that is
+using a unit test as an integration test).
 
-**7. 把关面同步（integration 签字口径）**
-签字复核不是「你的断言过了没」，而是先问「**你的断言落在终态了吗；没有的话终态我
-怎么自己验一遍**」。t260910-03 签字时 integration 跟着其断言面复核（同样只验载荷），
-两双眼睛漏在同一盲区——这条纪律即为此立。
+**7. Gatekeeping alignment (integration sign-off stance)**
+Sign-off review is not "did your assertions pass" but first "**do your assertions land on the end
+state; if not, how do I verify the end state myself**". When signing off t260910-03, integration
+reviewed along the same assertion face (also checking only the payload), and two pairs of eyes
+missed the same blind spot — this clause exists for that.
 
-## 单元测试面：契约 + 隔离（260910）
+## Unit test face: contract + isolation (260910)
 
-**8. 单测断什么**：被测单元对外的契约——返回值、异常、对外部依赖的调用形状（对端契约
-见上文 KI-046 节）。不要为了“更真”去断言系统终态（磁盘/页面）：那是把单测写成慢集成，
-既慢又不稳，还抢了集成面的活。
+**8. What unit tests assert**: the outward contract of the unit under test — return values,
+exceptions, the call shape of external dependencies (counterpart contracts are covered in the
+KI-046 section above). Do not assert the system's end state (disk/page) in the name of being
+"more real": that turns a unit test into a slow integration test — slow, flaky, and it steals the
+integration side's job.
 
-**9. 单测的三条硬律**
-- **隔离确定性**：结果不得依赖运行目录、环境变量、时钟、网络、真实仓数据。通用反例：
-  同一份测试在仓根跑全绿、换到别的目录跑变红（依赖 cwd 定位夹具/仓）——这种红不是“环境
-  问题”，是测试缺陷；反过来它也可能掩盖真回归（t260910-08 收口项即此族）。
-- **真数据不 snapshot**：见上文「测试数据纪律」——断言性质而非“恰好 N 项”。
-- **一个红只指向一个因**：断言失败信息要点名对象与期望，别让人反查。
-
-
+**9. Three hard rules for unit tests**
+- **Isolation determinism**: results must not depend on the run directory, environment variables,
+  clock, network, or real repository data. A generic counter-example: the same test is all green
+  at the repo root and turns red from another directory (it depends on cwd to locate fixtures/the
+  repo) — that red is not an "environment problem", it is a test defect; conversely it can also
+  mask real regressions (the t260910-08 wrap-up item is of this family).
+- **No snapshots of real data**: see "test data discipline" above — assert properties, not
+  "exactly N items".
+- **One red points to one cause**: failure messages must name the object and the expectation;
+  don't make people reverse-engineer it.

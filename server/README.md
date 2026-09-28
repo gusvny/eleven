@@ -2,7 +2,7 @@
 
 admin 的第三种形态：把 `server/admin.py` 的工具面整体挂进 dsh 的 agent 运行时
 （agent loop / WebUI / 审批 / 会话审计全由 dsh 提供），**python 工具层一行不动**。
-方案论证见 `docs/ops/admin-dsh-应用方案.md`。
+方案论证见 `docs/ops/admin-dsh-application-plan.md`。
 
 - 工具真源 = `server/tools/*.py`（schema 每次启动现取现注册，不存在双写漂移）；
 - run-id 审计单一真源 = `server/admin.log`（run_id 随工具返回值进 dsh 会话日志，双层互查）；

@@ -202,7 +202,7 @@ def test_protected_existing_at_base_refused():
         "server/projects.yaml",
         "server/project-registry.ts",
         "server/roles/developer.yml",
-        "docs/design/失败分类协议v1.md",
+        "docs/design/failure-classification-protocol-v1.md",
         "server/engine/path_gates.py",
     ]
     for f in hits:

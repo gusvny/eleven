@@ -2,7 +2,7 @@
  * sandbar-workbench · 侧栏「会话」区记账层纯函数（session-entry t260828-02，
  * 口径调整：项目归属 + 只列 UI 主动打开的会话）。
  *
- * 口径（设计真源 docs/design/右栏会话入口与hero定制设计.md §2/§4/附录）：
+ * 口径（设计真源 docs/design/sidebar-session-entry-and-hero-design.md §2/§4/附录）：
  * ctx.sessions.list 是全量枚举（磁盘存量、他途所建都在里面），不带「是否
  * UI 主动打开」信息——所以列表数据源不是它，而是插件自建的账册：仅当用户
  * 通过本插件 UI 主动打开（点切换行）或新建（＋新建按钮）一个会话时登记

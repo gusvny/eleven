@@ -8,7 +8,7 @@
  *   历史上 verify_lane 写死 app/ 项目形状，merge_check 调 verify_lane 又不传
  *   `base`，写集检查被静默跳过，server-ticket 的 merge 闸对写集违规实际空转。
  *
- * 被测契约（docs/design/sandbar项目接入契约v1.md，三态语义）：
+ * 被测契约（docs/design/sandbar-project-onboarding-contract-v1.md，三态语义）：
  *   - verify.yaml 缺失 → 代码道关闭（green 项可见，非静默）；
  *   - verify.yaml 畸形 / 未知 schema → fail-closed（整条道红）；
  *   - 合法配置 → 白名单前缀取 write_allow，只跑声明的检查项；
@@ -411,22 +411,22 @@ print(json.dumps(verify_lane._parse_verify_yaml(sys.argv[1]), ensure_ascii=False
     } catch (e) { ok(false, 'F8 仓库根 verify.yaml 在位（缺失: ' + e.code + ')') }
     // 契约文档带字段级 schema 章节
     try {
-      const contract = readFileSync(join(REPO, 'docs', 'design', 'sandbar项目接入契约v1.md'), 'utf8')
-      ok(/字段级定义/.test(contract) && /write_allow/.test(contract), 'F11 契约文档含 verify.yaml 字段级定义')
-      ok(/变更记录[\s\S]*t260901-08|t260901-08[\s\S]*变更记录/.test(contract), 'F12 契约变更记录落了本票条目')
+      const contract = readFileSync(join(REPO, 'docs', 'design', 'sandbar-project-onboarding-contract-v1.md'), 'utf8')
+      ok(/field-level definition/i.test(contract) && /write_allow/.test(contract), 'F11 契约文档含 verify.yaml 字段级定义')
+      ok(/change (record|log)/i.test(contract) && /t260901-08/.test(contract), 'F12 契约变更记录落了本票条目')
       // t260903-01 声明制对齐锚点：②a 列表命令制 + ②b/②c/②d/②e 四新章在位
       const sec2a = contract.match(/^### ②a[\s\S]*?(?=^### )/m)?.[0] || ''
       ok(/id, cmd, cwd\?, timeout\?/.test(sec2a) && /integration\.cmd/.test(sec2a),
         'F13 ②a 载列表命令制键集 {id,cmd,cwd?,timeout?} 与 integration.cmd')
-      ok(sec2a.includes('schema 保 v1 裁定'), 'F14 ②a 载 schema 保 v1 裁定说明')
-      for (const [kw, label] of [['输出契约', '②b'], ['语法子集', '②c'], ['薄壳执行拓扑', '②d'], ['rule of three', '②e']]) {
-        ok(contract.includes(kw), `F15 契约新章锚点在位：${label}（${kw}）`)
+      ok(/schema stays v1 ruling|keep-schema-v1/i.test(sec2a), 'F14 ②a 载 schema 保 v1 裁定说明')
+      for (const [kw, label] of [['Output contract', '②b'], ['grammar subset', '②c'], ['Thin-shell execution topology', '②d'], ['rule of three', '②e']]) {
+        ok(new RegExp(kw, 'i').test(contract), `F15 契约新章锚点在位：${label}（${kw}）`)
       }
       // 五类型字样只允许出现在「退役/失真/勘误」注记行（含相邻行窗口——注记词
       // 可能落在跨行句子的后半句）——语义对齐防漂移。
       // 变更记录是 append 式历史（v1.1 当年条目原样保留），不在活口检查范围。
-      const liveLines = contract.split('### 变更记录')[0].split('\n')
-      const hasNote = (l) => /退役|失真|勘误|作废/.test(l)
+      const liveLines = contract.split(/^#{2,4}\s*change (record|log)/im)[0].split('\n')
+      const hasNote = (l) => /retired|distort|erratum|obsolete|void/i.test(l)
       const fiveTypeBad = liveLines.filter((l, i) =>
         /shotdebug|deps_dir|red_green\.rule|integration\.entry/.test(l)
         && !hasNote(l)

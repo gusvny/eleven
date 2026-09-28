@@ -1,114 +1,142 @@
 ---
-title: metrics 面板 UI 规划
+title: metrics Panel UI Plan
 category: design
 tags:
   - metrics
   - workbench
 status: active
-updated: 2026-09-04
+updated: 2026-09-28
 ---
 
-# metrics 面板 UI 规划
+# metrics Panel UI Plan
 
-> 本文是 metrics 立项（notes/epics/metrics.md）的 UI 落地规划：面板骨架、四视图逐图定义、
-> 工程结构与 API 契约、分期工单映射。效果图见同目录 `metrics-mockops/`（5 张，示意数据，
-> 版式为准）。改动本文档视同变更契约，需随 metrics 立项走工单。
+> This document is the UI implementation plan for the metrics epic (notes/epics/metrics.md):
+> the panel skeleton, per-chart definitions of the four views, the engineering structure and the
+> API contract, and the phase-to-ticket mapping. Mockups are in `metrics-mockops/` in the same
+> directory (5 images, illustrative data, layout authoritative). Editing this document counts as
+> changing the contract and must go through a ticket under the metrics epic.
 
-## 1. 已拍板前提（地基，评审五轮结论）
+## 1. Settled premises (the foundation, conclusions of five review rounds)
 
-- 四视图：时间分布 / 交付量 / Token 消耗 / 系统健康；入口在下栏 settings 旁；
-- 图表库 **ECharts**，经 adapter 隔离（唯一 import echarts 的文件是 metrics-charts.ts）；
-- 存储三层：真源只读（Temporal timeline / git / ~/.dsh 会话文件）→ 可弃聚合缓存（运行时
-  数据目录，记录带 source_version/engine_version/updated_ts 版本化失效，不进 git）→
-  聚合服务（host /metrics + node CLI 双前门，字节级一致，基线锁死）；
-- 多模板：聚合键=（模板, stage）；跨模板不混排；
-- 饼图纪律：占比类用环形，趋势/排名类用柱/条；
-- Temporal 原生 Prometheus/Grafana 归 sandbar M2，本规划不做。
+- Four views: time distribution / delivery volume / token consumption / system health; the entry
+  sits next to settings in the bottom bar;
+- Chart library **ECharts**, isolated behind an adapter (the only file importing echarts is
+  metrics-charts.ts);
+- Three storage layers: read-only sources of truth (Temporal timeline / git / ~/.dsh session files)
+  → discardable aggregate cache (the runtime data directory, records carrying versioned
+  invalidation via source_version/engine_version/updated_ts, not entering git) → the aggregation
+  service (host /metrics + node CLI, two front doors, byte-identical, locked by a baseline);
+- Multiple templates: the aggregation key = (template, stage); no mixing across templates;
+- Donut discipline: share-type charts use a donut, trend/ranking-type charts use columns or bars;
+- Temporal's native Prometheus/Grafana belongs to sandbar M2 and is out of scope here.
 
-## 2. 入口与导航
+## 2. Entry and navigation
 
-- 下栏重构：左「📊 度量」按钮 + 右 ⚙ settings 图标（原 sandbar 驻留内联输入收进 ⚙ 弹层，
-  弹层同时容纳「静默在制阈值（分钟）」等健康 tab 参数）；下栏高度不变；
-- 点击「度量」= 全幅覆盖面板（类 epics 全页视图，不用右侧抽屉——图表要宽度），Esc/✕ 关闭；
-- 面板状态（tab/筛选器/时间窗/项目）存 localStorage，重开恢复。
+- Bottom bar rework: a "📊 metrics" button on the left + the ⚙ settings icon on the right (the
+  original sandbar inline input area folds into the ⚙ popover, which also hosts health-tab
+  parameters such as "silent in-progress threshold (minutes)"); the bottom bar's height is
+  unchanged;
+- Clicking "metrics" = a full-bleed overlay panel (like the epics full-page view, not a right-side
+  drawer — charts need width); Esc/✕ closes it;
+- Panel state (tab/filters/time window/project) is stored in localStorage and restored on reopen.
 
-## 3. 面板骨架（四视图共用）
+## 3. Panel skeleton (shared by the four views)
 
-> **t260904-04 修订（KI-042 宿主令）**：筛选行收敛为 `[时间窗▾][项目▾]` 两下拉——
-> 「立项▾」「模板▾」退役（模板恒后端缺省 `dev-lane`、立项恒 `all`，由 loadPanelState
-> 归一常量透传，localStorage 残留值读时弃用，防旧存值锁死非 dev-lane 模板导致空面板）；
-> 项目下拉启用（数据源 GET /wf/projects 注册表，`项目：默认`=后端缺省 + 各项目 key）。
-> 下图骨架行以修订后为准。
+> **t260904-04 revision (KI-042 host decree)**: the filter row converges to the two dropdowns
+> `[time window▾][project▾]` — "epic▾" and "template▾" are retired (template is always the backend
+> default `dev-lane` and epic is always `all`, normalized to constants by loadPanelState and passed
+> through, with leftover localStorage values discarded on read, so a stale stored value cannot lock
+> the panel to a non-dev-lane template and leave it empty); the project dropdown is enabled (data
+> source GET /wf/projects, the registry, `project: default` = the backend default + each project's
+> key). The skeleton below follows the revised version.
 
 ```
 ┌────────────────────────────────────────────┐
-│ 度量  [时间窗▾][项目▾]  口径ⓘ ✕              │
-│ KPI 条：工单数│关闭数│均交付时长│Token 总量    │  ← 任何 tab 常驻
-│ [时间] [交付] [Token] [系统健康]             │
-│ ┌────────── 主图（每 tab 一张） ───────────┐ │
-│ └──────────────────────────────────────────┘ │
-│ ┌─副图1──┐ ┌─副图2──┐                        │
+│ metrics [time window▾][project▾] defsⓘ ✕   │
+│ KPI bar: tickets│closed│avg delivery│total tokens │  ← always present on any tab
+│ [time] [delivery] [Token] [system health]  │
+│ ┌────────────────────────────────────────┐ │
+│ │      primary chart (one per tab)       │ │
+│ └────────────────────────────────────────┘ │
+│ ┌─secondary 1──┐ ┌─secondary 2──┐          │
 └────────────────────────────────────────────┘
 ```
 
-- 「口径ⓘ」悬停声明：时长 v1=handoff 近似 / v2=08 终态精确、token 不含 cacheRead（悬停可见）、
-  缓存时间与 source_version；
-- **下钻全局规则（第一红线）**：任何柱子/扇区可点 → 侧滑构成清单（票 id/标题/数值）→
-  点票跳既有详情抽屉。
+- The "definitionsⓘ" hover declares: duration v1 = handoff approximation / v2 = 08 precise
+  terminal states, token excludes cacheRead (hover-visible), the cache time, and source_version;
+- **Global drill-down rule (the first red line)**: any column/sector is clickable → a side panel
+  lists the constituent tickets (ticket id/title/value) → clicking a ticket jumps to the existing
+  detail drawer.
 
-## 4. 四视图逐图定义
+## 4. Per-chart definitions of the four views
 
-### Tab 时间
-- 主图：**stage 时长分布**，柱↔饼双形态。柱：X=stage（所选模板链序）、Y=耗时，均值切换
-  （平均/P50/P90）；饼「时间去哪了」：单票平均占比环形，**人审等待独立一块橙色**，
-  中心大字「N 分钟 · 其中人等 X%」。下钻=该 stage 慢的票清单；
-- 副 1：单票耗时排行（横条 Top N，点击跳详情）；
-- 副 2：人审等待 vs 机器时间（每票 100% 堆叠条，橙=人等）。
+### Tab time
+- Primary chart: **stage duration distribution**, switchable between column and donut. Column: X =
+  stage (the selected template's chain order), Y = elapsed time, with an averaging switch
+  (mean/P50/P90); donut "where did the time go": single-ticket average shares as a donut, **human
+  review wait as its own orange block**, with the center in large type "N minutes · of which
+  human wait X%". Drill-down = the list of tickets that were slow in that stage;
+- Secondary 1: single-ticket elapsed-time ranking (horizontal bars, Top N, click jumps to detail);
+- Secondary 2: human review wait vs machine time (a 100% stacked bar per ticket, orange = human
+  wait).
 
-### Tab 交付
-- 主图：按周分组柱，序列=additions/deletions 双序列（不合净值）；计量切换器
-  （LOC/commits/工单数三模式共用图）；
-- 副 1：按 epic 份额环形；副 2：按角色柱；
-- 图下脚注钉死口径：LOC=diff vs base 分列；commits=lane 分支计数（含 worker 代落盘）；
-  tooltip 逐票列明。
+### Tab delivery
+- Primary chart: weekly grouped columns, series = additions/deletions two series (not netted);
+  metric switcher (LOC/commits/ticket count, three modes sharing one chart);
+- Secondary 1: share by epic donut; secondary 2: columns by role;
+- The footnote under the chart pins the definitions down: LOC = diff vs base, listed separately;
+  commits = lane branch count (including commits persisted by the worker on the ticket's behalf);
+  the tooltip lists them ticket by ticket.
 
-### Tab Token（沿用 t260828-07 口径：cacheRead 收悬停）
-- 顶切换：**工单视角 / 全机会话**；
-- 主图：按日堆叠柱（X=日，序列=模型，值=in+out 合计），下钻=当日按票清单；
-- 副 1：per-stage 均耗柱；副 2：单票 Top N 表；
-- 空态：无凭据环境「SKIP 属正确行为」黄条（数据恢复自动填充）。
+### Tab Token (following the t260828-07 definitions: cacheRead folded into the hover)
+- Top switcher: **ticket view / whole-machine sessions**;
+- Primary chart: daily stacked columns (X = day, series = model, value = in+out combined),
+  drill-down = that day's per-ticket list;
+- Secondary 1: per-stage average consumption columns; secondary 2: single-ticket Top N table;
+- Empty state: a yellow bar "SKIP is correct behavior" in credential-free environments (the data
+  fills in automatically once recovered).
 
-### Tab 系统健康
-- KPI 卡：在制 / 等人审 / blocked / 今日 closed；
-- 主图：票流按日堆叠（新建/关闭/在制末态/人审末态）；
-- 副 1：blocked 榜（当前 blocked 票+原因+已卡时长）；
-- 副 2：**静默在制清单**——running 但 N 分钟无活动心跳的票（阈值默认 15，⚙ 弹层可调），
-  红点脉动告警。
+### Tab system health
+- KPI cards: in progress / awaiting human review / blocked / closed today;
+- Primary chart: ticket flow stacked by day (created/closed/in-progress final state/human-review
+  final state);
+- Secondary 1: blocked leaderboard (currently blocked tickets + reason + how long they have been
+  stuck);
+- Secondary 2: **silent in-progress list** — tickets that are running but have had no activity
+  heartbeat for N minutes (threshold default 15, adjustable in the ⚙ popover), alerted by a pulsing
+  red dot.
 
-## 5. 多模板口径
+## 5. Multi-template definitions
 
-> **t260904-04 修订**：「模板▾」选择器已退役，模板恒 `dev-lane`（后端缺省）——
-> 主图 stage 轴即 dev-lane STAGES 链序；聚合存储键=（模板, stage）不变，跨模板
-> 不混排契约不破。多模板切换 UI 待宿主重开（须随契约 bump）。
+> **t260904-04 revision**: the "template▾" selector is retired and the template is always `dev-lane`
+> (the backend default) — the primary chart's stage axis is the dev-lane STAGES chain order; the
+> aggregate storage key = (template, stage) is unchanged, and the no-mixing-across-templates
+> contract is not broken. The multi-template switching UI awaits a host reopening (it must come with
+> a contract bump).
 
-- 模板决定主图 stage 轴（该模板 STAGES 链序）；聚合存储键=（模板, stage）；
-- 单票维度图（耗时排行/人等 vs 机器）与模板无关；
-- 跨模板 stage 不强映射；「stage 类别」归一视图（plan/review/implement/test/gate/human
-  六类）为 M3+ 可选项，不进 v1。
+- The template determines the primary chart's stage axis (that template's STAGES chain order); the
+  aggregate storage key = (template, stage);
+- Per-ticket dimension charts (elapsed-time ranking / human wait vs machine) are independent of the
+  template;
+- Stages are not force-mapped across templates; the "stage category" normalized view (the six
+  classes plan/review/implement/test/gate/human) is an M3+ option and does not enter v1.
 
-## 6. 工程结构与 API 契约（M0 冻结）
+## 6. Engineering structure and API contract (M0 freeze)
 
-新代码收在三个新文件 + 一个 CLI：
+New code lives in three new files + one CLI:
 
-- `server/plugins/workbench/src/client/metrics.tsx`——面板/视图/筛选/KPI 条（wb- 前缀 CSS 惯例）；
-- `server/plugins/workbench/src/client/metrics-charts.ts`——ECharts adapter：
-  暴露 `stackBar()/groupBar()/hBar()/donut()` 四工厂（入参 categories+series+onDrill），
-  视图层不见 echarts 类型；
-- `server/plugins/workbench/src/host/metrics.ts`——聚合唯一实现（三源读取+可弃缓存+失效）；
-- `metrics-cli.mjs`（workbench 下，挂 server/tools 桥 = dsh tool「metrics」）——argv→参数→
-  stdout JSON，与 HTTP 同实现同缓存。
+- `server/plugins/workbench/src/client/metrics.tsx` — panel/views/filters/KPI bar (the wb- CSS
+  prefix convention);
+- `server/plugins/workbench/src/client/metrics-charts.ts` — the ECharts adapter: exposes the four
+  factories `stackBar()/groupBar()/hBar()/donut()` (taking categories+series+onDrill); the view layer
+  never sees echarts types;
+- `server/plugins/workbench/src/host/metrics.ts` — the single aggregation implementation (three
+  source reads + discardable cache + invalidation);
+- `metrics-cli.mjs` (under workbench, mounted on the server/tools bridge = the dsh tool "metrics") —
+  argv→parameters→stdout JSON, the same implementation and the same cache as HTTP.
 
-**API 契约（v1，字段级冻结真源见《[metrics-api契约v1](metrics-api契约v1.md)》，本节为示意）**：
+**API contract (v1; the field-level frozen source of truth is
+[metrics-api-contract-v1](./metrics-api-contract-v1.md), this section is illustrative)**:
 
 ```
 GET /metrics?window=7d|30d|all&epic=<code|all|none>&project=<key>&template=<id>&view=time|delivery|token|health&mode=full|fast
@@ -117,35 +145,37 @@ GET /metrics?window=7d|30d|all&epic=<code|all|none>&project=<key>&template=<id>&
     charts: { primary: ChartSpec, secondaries: [ChartSpec, ChartSpec] },
     generated_at, cache: { status, computed_at, source_version }
   }
-CLI: metrics '{"window":"7d","view":"time",...}'  → 同一份 JSON
+CLI: metrics '{"window":"7d","view":"time",...}'  → the same JSON
 ```
 
-ChartSpec = { kind: 'bar'|'stackBar'|'hBar'|'donut', title, categories, series[{name,data}], drill: true }。
-缓存记录 schema（per-ticket）：`{ ticket_id, template, durations: {by_stage,by_round,human_wait},
+ChartSpec = { kind: 'bar'|'stackBar'|'hBar'|'donut', title, categories, series[{name,data}], drill: true }.
+Cache record schema (per-ticket): `{ ticket_id, template, durations: {by_stage,by_round,human_wait},
   delivery: {base,add,del,commits}, tokens: {by_stage,by_model,in,out,cacheRead}, open: bool, delivery_frozen: bool,
-  source_version, engine_version, updated_ts, computed_at, created_ms, closed_ms }`。
-（t260903-09 bump：mode 参数、cache.status 增 stale、缓存锚点 created_ms/closed_ms——
-语义见 metrics-api契约v1.md 块 2/块 3 增补段。）
+  source_version, engine_version, updated_ts, computed_at, created_ms, closed_ms }`.
+(t260903-09 bump: the mode parameter, cache.status gaining stale, and the cache anchors
+created_ms/closed_ms — for semantics see blocks 2/3 of [metrics-api-contract-v1](./metrics-api-contract-v1.md).)
 
-## 7. 分期→工单映射
+## 7. Phase→ticket mapping
 
-| 单 | 内容 | 前置 |
+| Ticket | Content | Prerequisite |
 | --- | --- | --- |
-| M0 | 口径文档（docs/design/metrics-api契约v1.md）+ API 契约冻结 | 现在可开（纯 docs） |
-| M1a | host /metrics + 可弃缓存 + CLI 前门（挂 tools 桥） | M0；等 t260901-08 落账（并行位纪律，写集不撞） |
-| M1b | 泳道图节点耗时（drill-down 最小消费方） | 现在可开（09 已落，写集不撞） |
-| M2a | 面板骨架 + KPI 条 + Tab 时间 | M1a |
-| M2b | Tab 交付 + Tab Token（含全机开关） | M2a |
-| M2c | Tab 系统健康（含静默在制） | M2a |
-| M3 | 对账验收（3 票人工核对）+ 双前门一致基线 + 推导基线 | 全部 |
+| M0 | definitions document (docs/design/metrics-api-contract-v1.md) + API contract freeze | can start now (pure docs) |
+| M1a | host /metrics + discardable cache + CLI front door (on the tools bridge) | M0; wait for t260901-08 to be booked (parallel-slot discipline, write sets must not collide) |
+| M1b | lane graph node elapsed time (the minimal drill-down consumer) | can start now (09 has landed, write sets do not collide) |
+| M2a | panel skeleton + KPI bar + Tab time | M1a |
+| M2b | Tab delivery + Tab Token (including the whole-machine switch) | M2a |
+| M2c | Tab system health (including silent in-progress) | M2a |
+| M3 | reconciliation acceptance (manual check of 3 tickets) + two-front-door consistency baseline + derivation baseline | all |
 
-写集纪律：M1a/M2 系列=workbench src/client + lib 产物 + host/metrics.ts(+node.ts 路由) +
-integration/（基线）；**引擎零触碰**写进每张单红线；M1b=workbench src/client + lib + integration/。
+Write-set discipline: the M1a/M2 series = workbench src/client + lib artifacts +
+host/metrics.ts (+node.ts routing) + integration/ (baseline); **zero engine touch** is written into
+every ticket as a red line; M1b = workbench src/client + lib + integration/.
 
-## 8. 全面板验收红线
+## 8. Whole-panel acceptance red lines
 
-数字可下钻到单票；口径悬停可见；tab 切换 <500ms（缓存命中）；echarts 不出 adapter；
-每视图有空态；面板纯只读（零写操作）；CLI 无 console 环境独立出数；双前门字节级一致
-（integration 基线锁）。
+Numbers can be drilled down to a single ticket; definitions are hover-visible; tab switching <500ms
+(cache hit); echarts does not escape the adapter; every view has an empty state; the panel is purely
+read-only (zero write operations); the CLI produces numbers independently with no console
+environment; byte-identical across the two front doors (integration baseline lock).
 
-> 来源立项：metrics
+> Source epic: metrics

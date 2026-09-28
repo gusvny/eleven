@@ -1,7 +1,7 @@
 /**
  * sandbar-tools —— 溯游 admin 工具面的 dsh 插件（路线 C：混合薄壳）。
  *
- * 机制（对照 docs/ops/admin-dsh-应用方案.md §3-C / §4）：
+ * 机制（对照 docs/ops/admin-dsh-application-plan.md §3-C / §4）：
  *   ① 启动时 spawn `python3 <repo>/server/admin.py tools`，拿到工具注册表的
  *     DeepSeek function-calling schema dump，逐字映射注册成 dsh 裸 JSON Schema
  *     工具（schema 每次启动现取现注册，python 侧永远是单一真源，无双写漂移）；

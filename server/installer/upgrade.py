@@ -2,7 +2,7 @@
 
 纪律（工单正文③ + §3）：
 - 只读：本命令永远只做展示与预检演练，真实升版执行归 M2-D 切换票；
-- 数据源=仓内契约真源 docs/design/sandbar项目接入契约v1.md（260904 宿主裁定
+- 数据源=仓内契约真源 docs/design/sandbar-project-onboarding-contract-v1.md（260904 宿主裁定
   本仓为真源，见契约头部声明与变更记录 v1.8）；缺⑧节 / 无已验证点 /
   必查项不足四条 / 坏格式 = ContractError 红；
 - `--to <ver>` 畸形态全 fail-closed：坏 semver / 降版本请求 / 当前 VERSION 脏（契约⑧-4）。
@@ -15,7 +15,7 @@ import re
 
 from version import VersionError, parse_semver, read_version
 
-CONTRACT_REL = pathlib.Path("docs") / "design" / "sandbar项目接入契约v1.md"
+CONTRACT_REL = pathlib.Path("docs") / "design" / "sandbar-project-onboarding-contract-v1.md"
 
 # ⑧-2 必查项 → 探针覆盖映射（touchpoints 代号 → 探针；None=本票无探针，须人工复扫）
 TOUCHPOINT_PROBES = {
@@ -29,8 +29,10 @@ TOUCHPOINT_PROBES = {
 }
 
 _SEMVERISH = re.compile(r"\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b")
-_HEADING = re.compile(r"^###\s+⑧\s+.*schema:\s*(\S+?)\s*[，,）)].*$", re.M)
-_CHECK_ITEM = re.compile(r"^\d+\.\s+\*\*(.+?)\*\*（([^）]*)）", re.M)
+# 260928（docs 英文化）：⑧ 节标题与必查项括注改走英文行文，判据放宽为
+# 「⑧ + 任意文字 + schema: vN」与「半角/全角括注皆认」；其余缺口仍一律 fail-closed。
+_HEADING = re.compile(r"^###\s+⑧\s+.*?schema:\s*(\S+?)\s*[，,）)].*$", re.M)
+_CHECK_ITEM = re.compile(r"^\d+\.\s+\*\*(.+?)\*\*\s*[（(]([^）)]*)[）)]", re.M)
 _TOUCHPOINT_CODE = re.compile(r"\b([ABCD]\d)\b")
 
 

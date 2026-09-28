@@ -1,3 +1,19 @@
+---
+title: "Project terminology table"
+category: reference
+tags:
+  - terminology
+  - glossary
+  - writing-standard
+status: active
+updated: 2026-09-28
+---
+
+> **Language note (260928)**: this table is deliberately kept in Chinese — it is the
+> machine-read source of truth for the banned-jargon lint gate (L7) and for the
+> per-meaning replacement table of the retired jargon. Every other document in `docs/`
+> is written in English.
+
 # 项目术语表（terminology）
 
 > **地位**：项目内文档、票据文本、agent 可见文字的用词规范。所有角色与 agent 按本表用词；表格由 integration 岗位维护，增删改走人审。

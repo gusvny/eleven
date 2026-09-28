@@ -1,58 +1,65 @@
 ---
-title: "docs 索引"
+title: "docs index"
 category: reference
 tags:
-  - 索引
-  - 知识库
+  - index
+  - knowledge-base
 status: active
-updated: 2026-09-22
+updated: 2026-09-28
 ---
 
-# docs 索引
+# docs index
 
-> **260904 迁移注记**：本库自 suyou 仓迁入 sandbar（宿主令）。迁的是**引擎/插件/基建域**文档——
-> 判定法则见 `notes/README.md` 毕业规则（新 agent 改 sandbar 代码需要读的进本库）。
-> **产品/内容/项目域文档**（HLD、平台架构、图书馆、游戏激励、营造、掌握模型、阅读批注、
-> agent 形象、古籍管线、reference 调研）留 suyou 冻结仓作历史参考（只读，不回写）。
-> 机器索引已重跑（`docs/index.json`，11 篇）。
+> **260904 migration note**: this library was migrated from the suyou repository into sandbar
+> (host order). What moved is the **engine / plugin / infrastructure domain** documentation — the
+> admission rule is in the graduation policy of `notes/README.md` (anything a new agent needs to
+> read in order to change sandbar code belongs in this library).
+> **Product / content / project domain** documents (HLD, platform architecture, library, game
+> incentives, construction, mastery model, reading annotations, agent persona, ancient-text
+> pipeline, reference research) stay in the frozen suyou repository as historical reference
+> (read-only, never written back).
+> The machine index has been regenerated (`docs/index.json`, 18 documents as of 260928);
+> **since 260928 the whole library is written in English** (host order) except `terminology.md`.
 >
-> 沿革：2026-08-21 docs 当知识库重构（四类目录 + frontmatter + index.json + suyou-knowledge
-> 插件消费）；本页是给人看的总目录，给机器看的是 `docs/index.json`，目录结构与迁移映射见
-> `design/知识库设计.md`（§2 / §6）。
+> History: 2026-08-21 the docs library was restructured as a knowledge base (four categories +
+> frontmatter + index.json + consumption by the suyou-knowledge plugin); this page is the
+> human-readable catalogue, the machine-readable one is `docs/index.json`, and the directory
+> structure and migration mapping are in `design/knowledge-base-design.md` (§2 / §6).
 
-## design（设计 —— 引擎/插件长什么样、为什么）
+## design (design — what the engine/plugins look like, and why)
 
-| 文件 | 内容 |
+| File | Content |
 |---|---|
-| `design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md` | **引擎机制主档**：DSH+Temporal 多 agent 工单引擎（引擎/插件域工单首读参考） |
-| `design/工单工作流台设计.md` | 工单工作流台设计（多角色协作基础设施） |
-| `design/右栏会话入口与hero定制设计.md` | workbench 右栏会话入口与 hero 定制（附录含【有效】/【已证伪】锚点结论） |
-| `design/metrics-api契约v1.md` | workbench metrics API 契约 |
-| `design/metrics面板ui规划.md` | metrics 面板 UI 规划 |
-| `design/知识库设计.md` | 知识库设计定稿：四目录、markdown 规范、UI、迁移映射 |
-| `design/dsh_seam需求书v1.md` | dsh 插件接缝需求书（插件族契约） |
-| `design/杂务工单模版设计.md` | chore-lane 杂务工单模版（草案，待宿主审定稿） |
-| `design/失败分类协议v1.md` | 失败分类协议 v1 与机械归属判定：一行 JSON 规范行 + 三态收紧 + 闸 main 基线差集决策表（t260910-13）+ 结果台账与基线树依赖引导（t260922-12，260922 改判入册） |
-| `design/设计文档写作指南.md` | 设计文档写作规范 |
-| `design/sandbar项目接入契约v1.md` | sandbar 项目接入契约 v1（键表/接手面/append 式变更记录） |
-| `design/项目外置工作流模板加载口v1.md` | 项目外置工作流模板加载口 v1（t260924-04：登记即加载/逐模板隔离拒收/演进纪律/确定性规约） |
+| `design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md` | **Engine mechanism master document**: the DSH+Temporal multi-agent ticket engine (first-read reference for engine/plugin domain tickets) |
+| `design/ticket-workflow-console-design.md` | Ticket workflow console design (multi-role collaboration infrastructure) |
+| `design/sidebar-session-entry-and-hero-design.md` | workbench right-column session entry and hero customization (appendix carries the 【valid】/【disproven】 anchor conclusions) |
+| `design/metrics-api-contract-v1.md` | workbench metrics API contract |
+| `design/metrics-panel-ui-plan.md` | metrics panel UI plan |
+| `design/knowledge-base-design.md` | Knowledge base design (final): four categories, markdown rules, UI, migration mapping |
+| `design/dsh-seam-requirements-v1.md` | dsh plugin seam requirements (plugin family contract) |
+| `design/chore-lane-ticket-template-design.md` | chore-lane chore ticket template (draft, awaiting host sign-off) |
+| `design/failure-classification-protocol-v1.md` | Failure classification protocol v1 and mechanical attribution: one-line JSON canonical line + three-state tightening + gate main-baseline difference decision table (t260910-13) + result ledger and baseline-tree dependency guidance (t260922-12, re-ruled into the registry on 260922) |
+| `design/design-doc-writing-guide.md` | Design document writing standard |
+| `design/sandbar-project-onboarding-contract-v1.md` | sandbar project onboarding contract v1 (key table / handover faces / append-style change log) |
+| `design/project-external-workflow-template-loader-v1.md` | Project external workflow template loader v1 (t260924-04: register-then-load / per-template isolated rejection / evolution discipline / determinism rules) |
 
-## ops（运维 —— build / 部署 / 监控）
+## ops (operations — build / deploy / monitor)
 
-| 文件 | 内容 |
+| File | Content |
 |---|---|
-| `ops/admin-dsh-应用方案.md` | admin × DeepSeek Harness（dsh）应用方案 |
+| `ops/admin-dsh-application-plan.md` | admin × DeepSeek Harness (dsh) application plan |
+| `ops/project-lifecycle-runbook.md` | Project lifecycle operations runbook |
 
-## 根级（横切规范）
+## Root level (cross-cutting standards)
 
-| 文件 | 内容 |
+| File | Content |
 |---|---|
-| `terminology.md` | 项目术语表（integration 维护，人审增删；自 suyou 整表迁入，含少量项目域条目待清理） |
-| `testing-guide.md` | 测试环境隔离指南（3099/7233 红线、Docker 隔离测试环境） |
+| `terminology.md` | Project terminology table (maintained by the integration role, additions/removals go through human review; migrated whole from suyou, with a few project-domain entries still to be cleaned up). **Chinese by design** — it is the machine-read source of truth for the banned-jargon lint gate |
+| `testing-guide.md` | Test environment isolation guide (3099/7233 red lines, Docker isolated test environment) |
 
-## 维护约定
+## Maintenance conventions
 
-- 每篇头部 YAML frontmatter：`title`（首个 `#` 标题）/`category`（design|content|ops|reference）/`tags`/`status`（active|draft|deprecated）/`updated`（最近实质修改日）。
-- 新增文档：放进对应分类目录 + 补 frontmatter，然后跑 `python3 docs/scripts/build_index.py` 刷新 `docs/index.json`。
-- 关联文档之间**相互链接**（相对路径，三类关系：依赖/被依赖、取代/被取代、实践参考，见 `design/知识库设计.md` §3.2）。
-- 仓库根 `CLAUDE.md` 为接力交接总入口，本目录是其细化知识库；过程性讨论与立项见 `notes/`（分工与毕业规则见 `notes/README.md`）。
+- Every document carries YAML frontmatter: `title` (the first `#` heading) / `category` (design|content|ops|reference) / `tags` / `status` (active|draft|deprecated) / `updated` (date of the last substantive change).
+- Adding a document: put it in the matching category directory + add frontmatter, then run `python3 docs/scripts/build_index.py` to refresh `docs/index.json`.
+- Related documents **link to each other** (relative paths; three relations: depends-on/depended-on-by, supersedes/superseded-by, practical reference — see `design/knowledge-base-design.md` §3.2).
+- The repository-root `CLAUDE.md` is the master handover entry point and this directory is its detailed knowledge base; process discussions and epic proposals live in `notes/` (division of labour and graduation policy in `notes/README.md`).

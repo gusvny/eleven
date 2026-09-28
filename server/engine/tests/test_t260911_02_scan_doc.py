@@ -136,6 +136,60 @@ def test_s10_missing_ref_named(tmp_path):
     assert any("gone-file.md" in s for s in _subjects(r, doc.RULE_S10_MISSING))
 
 
+def test_s10_bare_filename_suffix_hit_not_flagged(tmp_path):
+    """260928：裸文件名（无目录）按仓内后缀命中即视为有落点——不再一律「引用缺失」。
+
+    真仓实测：改前 150 条 S10 发现里 149 条是这种名称形态噪音，真人审被淹没。
+    """
+    (tmp_path / "server" / "engine").mkdir(parents=True)
+    (tmp_path / "server" / "engine" / "shared.py").write_text("x=1", encoding="utf-8")
+    text = FM + "见 `shared.py`（裸名，落点在 server/engine/）。\n"
+    repo = _mk_repo(tmp_path, ["design/a.md"], {"design/a.md": text})
+    r = doc.run_doc_face_scan(repo)
+    assert _subjects(r, doc.RULE_S10_MISSING) == []
+
+
+def test_s10_bare_filename_without_hit_still_named(tmp_path):
+    """后缀也命中不到的裸名仍逐条点名——防「后缀兜底」把真断变成全绿。"""
+    text = FM + "见 `gone-file.md`（仓内任何位置都没有）。\n"
+    repo = _mk_repo(tmp_path, ["design/a.md"], {"design/a.md": text})
+    r = doc.run_doc_face_scan(repo)
+    assert any("gone-file.md" in s for s in _subjects(r, doc.RULE_S10_MISSING))
+
+
+def test_s10_explicit_relative_path_no_suffix_fallback(tmp_path):
+    """显式相对路径（./ ../）不做后缀兜底：写死了目录主张，解析不到就是真断。"""
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "same-name.md").write_text("# x\n", encoding="utf-8")
+    text = FM + "见 `./same-name.md`（同级没有，仓别处有同名——仍应点名）。\n"
+    repo = _mk_repo(tmp_path, ["design/a.md"], {"design/a.md": text})
+    r = doc.run_doc_face_scan(repo)
+    assert any("same-name.md" in s for s in _subjects(r, doc.RULE_S10_MISSING))
+
+
+def test_s9_nested_frontmatter_block_not_duplicate(tmp_path):
+    """260928：嵌套块（related 段 `- mode:` / `  target:`）不再被误判「键重复」。
+
+    以前逐行当平铺映射读，第二项起的 target 会撞第一项的 target → 整篇降级点名。
+    """
+    fm_nested = ("---\ntitle: t\ncategory: design\ntags:\n  - a\nstatus: active\n"
+                 "updated: 2026-09-11\nrelated:\n  - mode: dependency\n"
+                 "    target: a.md\n  - mode: practice reference\n    target: b.md\n"
+                 "---\n\n# t\n")
+    repo = _mk_repo(tmp_path, ["design/a.md"], {"design/a.md": fm_nested})
+    r = doc.run_doc_face_scan(repo)
+    assert _subjects(r, doc.RULE_S9_FRONTMATTER) == []
+
+
+def test_s9_top_level_duplicate_key_still_named(tmp_path):
+    """顶层重复键仍判红——嵌套豁免不得把顶层判据一起放掉。"""
+    fm_dup = ("---\ntitle: t\ntitle: t2\ncategory: design\ntags:\n  - a\n"
+              "status: active\nupdated: 2026-09-11\n---\n\n# t\n")
+    repo = _mk_repo(tmp_path, ["design/a.md"], {"design/a.md": fm_dup})
+    r = doc.run_doc_face_scan(repo)
+    assert any("键重复" in s for s in _subjects(r, doc.RULE_S9_FRONTMATTER))
+
+
 def test_s10_inside_repo_ref_not_escape(tmp_path):
     # docs/design/../.. 仍在仓内（repo/outside.md 存在）→ 不判越界不判缺失
     text = FM + "见 [外](../../outside.md)。\n"

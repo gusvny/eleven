@@ -1,110 +1,113 @@
 ---
-title: "杂务工单模版（chore-lane）设计"
+title: "Chore Ticket Template (chore-lane) Design"
 category: design
 tags:
-  - 工单模板
+  - ticket template
   - chore-lane
-  - 引擎
+  - engine
 status: draft
-updated: 2026-09-04
+updated: 2026-09-28
 ---
 
-# 杂务工单模版（chore-lane）设计
+# Chore Ticket Template (chore-lane) Design
 
-> 状态：草案（待宿主审定稿）。起草 integration，2026-09-03。
-> 动机：t260903-12（构建链复活）实证——纯机械任务在 dev-lane 全环下，
-> plan 质量环耗 29 分钟、真活只有 10 分钟；段数×质量环的乘法对杂务不划算。
+> Status: draft (awaiting host sign-off). Drafted by integration, 2026-09-03.
+> Motivation: hard evidence from t260903-12 (build-chain revival) — for a purely mechanical
+> task under the full dev-lane cycle, the plan quality ring burned 29 minutes while the real
+> work took only 10; multiplying stage count by quality rings does not pay off for chores.
 
-## 一、定位与边界
+## 1. Positioning and boundaries
 
-**chore** = 无需 LLM 判断即可给出完整命令链的机械任务。典型：
+**chore** = a mechanical task whose complete command chain can be given without any LLM judgment. Typical cases:
 
-- 依赖装齐 + 构建/重建产物（tsdown/pnpm 面）
-- 版本号/清单文件的机械变更（升 rc、改字段）
-- 回灌镜像、批量 sed 类改动（有精确 diff 预览）
-- 文件清退（出库+gitignore 对齐）
+- Install dependencies + build/rebuild artifacts (tsdown/pnpm surface)
+- Mechanical changes to version numbers / manifest files (bump rc, change a field)
+- Re-feeding images, batch sed-style edits (with a precise diff preview)
+- File retirement (removal from the repo + gitignore alignment)
 
-**不许走 chore**（仍走 dev-lane）：涉及业务逻辑/新代码编写/取舍判断/接口变更；
-写集无法在开票时精确枚举；需要人审设计方案的。
+**Not allowed through chore** (they still go through dev-lane): anything involving business logic / writing new code / tradeoff judgment / interface changes;
+a write set that cannot be enumerated exactly at ticket-creation time; anything that needs human review of the design.
 
-判定责任在 integration 开票时；用错模版=人审闸拦下重开（合并签核时核对任务性质）。
+The judgment call belongs to integration at ticket-creation time; using the wrong template = stopped by the human gate and re-opened (the nature of the task is checked at merge sign-off).
 
-## 二、流程（对照 dev-lane 八段）
+## 2. Flow (against the dev-lane eight stages)
 
-**前提（宿主审改 2026-09-03：不许假定各项目构建方法一致）**：chore 的命令链
-**不是开票人臆造**，一律来自**项目仓内声明**——沿用 verify.yaml/merge-checks.yaml
-的「策略随仓走」哲学。落点：
+**Precondition (host review 2026-09-03: do not assume every project builds the same way)**: a chore's command chain
+is **not invented by the ticket author**; it always comes from a **declaration inside the project repo** — carrying on the
+"policy travels with the repo" philosophy of verify.yaml/merge-checks.yaml. Where it lands:
 
-- 项目仓根 `chores.yaml`（schema 与 verify.yaml 同族，字段级定义另行成文）：
-  每个具名杂务 = 命令链（逐条）+ 预期产物路径 + 失败语义（fail-fast/fail-collect）
-  + 回滚点。例：sandbar 声明 `rebuild-bundle`；suyou 可声明完全不同的链。
-- 工单只引用：`{"chore": "rebuild-bundle", "args": {...}}`——engine 按项目声明执行。
-- **项目未声明的杂务不能开 chore 票**：要么先走 dev-lane 票补声明（chores.yaml
-  本身是代码资产，走正常审查），要么整任务走 dev-lane。
-- 声明缺失/解析失败 = fail-closed 红，不静默跳过（verify.yaml 同口径）。
+- `chores.yaml` at the project repo root (schema in the same family as verify.yaml; field-level definition written up separately):
+  each named chore = command chain (item by item) + expected artifact paths + failure semantics (fail-fast/fail-collect)
+  + rollback point. Example: sandbar declares `rebuild-bundle`; suyou may declare a completely different chain.
+- The ticket only references it: `{"chore": "rebuild-bundle", "args": {...}}` — the engine executes per the project declaration.
+- **A chore the project has not declared cannot be opened as a chore ticket**: either open a dev-lane ticket first to add
+  the declaration (chores.yaml is itself a code asset and goes through normal review), or run the whole task through dev-lane.
+- Missing declaration / parse failure = fail-closed red, never silently skipped (same stance as verify.yaml).
 
-| 段 | dev-lane | chore-lane | 说明 |
+| Stage | dev-lane | chore-lane | Notes |
 |---|---|---|---|
-| create_plan | LLM 起草 | **跳过** | 方案=项目声明+工单参数，开票时人审（integration 起草→宿主批） |
-| review_plan | LLM 审查 | **跳过** | 同上 |
-| implement∥design∥ui_evidence | LLM 写码+设计+截图 | **单段 implement** | 见下分节 |
-| run_integration_tests | 场景套件 | 保留（程序步） | 场景由项目 verify.yaml 声明，杂务常为零场景=秒过 |
-| arbitrate∥acceptance | LLM 三态+走查 | **合并为程序步 verify** | verify_lane 全绿即 pass；红=blocked 等 retry/rework |
-| merge_check | 四项机械 | 保留（原样） | 含防假完成硬指标 |
-| merge 人签 | 人签 | 保留（原样） | 纪律不降级 |
+| create_plan | LLM drafts | **skipped** | plan = project declaration + ticket parameters, human-reviewed at ticket creation (integration drafts → host approves) |
+| review_plan | LLM reviews | **skipped** | same as above |
+| implement∥design∥ui_evidence | LLM writes code + design + screenshots | **single implement stage** | see the sub-section below |
+| run_integration_tests | scenario suite | kept (programmatic step) | scenarios are declared by the project's verify.yaml; a chore often has zero scenarios = instant pass |
+| arbitrate∥acceptance | LLM three-state verdict + walkthrough | **merged into the programmatic step verify** | an all-green verify_lane = pass; red = blocked waiting for retry/rework |
+| merge_check | four mechanical checks | kept (as is) | includes the anti-false-completion hard metrics |
+| merge human sign-off | human signs | kept (as is) | discipline is not downgraded |
 
-### implement 段的两种形态
+### The two forms of the implement stage
 
-- **A 纯程序**（首选）：worker 逐条执行**项目声明的**命令链（复用程序步机制），
-  任一命令非零=红回执。零 LLM。
-- **B 带修错 agent**（命令链跑挂时升级）：A 失败后可选升 B——spawn agent，
-  prompt=声明链+失败输出+「只修阻断不改语义」。防滑坡：B 的 diff 仍受
-  写集+验收硬指标约束（写集在开票时按声明产物面枚举）。
+- **A, purely programmatic** (preferred): the worker executes the **project-declared** command chain item by item
+  (reusing the programmatic-step mechanism); any non-zero command = red receipt. Zero LLM.
+- **B, with a fix-it agent** (escalated when the command chain breaks): after A fails, B may optionally be
+  escalated to — spawn an agent with prompt = declared chain + failure output + "only fix blockers, do not change
+  semantics". Anti-slippage: B's diff is still bound by the write set + acceptance hard metrics (the write set is
+  enumerated at ticket-creation time from the declared artifact face).
 
-A→B 升级自动发生一次；B 也红则 blocked 等人。
+The A→B escalation happens automatically once; if B is red too, blocked awaiting a human.
 
-## 三、防假完成（继承+新增）
+## 3. Anti-false-completion (inherited + new)
 
-1. 泳道 diff 非空（dev-lane 已加的硬指标，chore 同样必查）
-2. 产物新鲜度：声明的预期产物路径必须 mtime/内容序新于开票时基线
-3. verify 红项「敏感/运行时路径入库」（8d39555 已上）
-4. merge_check 四项原样（commit 链/树干净/泳道 verify/merge-tree）
+1. Lane diff non-empty (a hard metric already added in dev-lane; chore must check it too)
+2. Artifact freshness: the declared expected artifact paths must be newer in mtime/content order than the baseline at ticket-creation time
+3. The verify red item "sensitive/runtime paths committed to the repo" (landed in 8d39555)
+4. merge_check's four items as is (commit chain / clean tree / lane verify / merge-tree)
 
-## 四、实现量估计
+## 4. Implementation size estimate
 
-- 新子类 `ChoreLaneWorkflow(TicketWorkflowBase)`：STAGES 三段
-  （implement 程序步 / verify 程序步 / merge 门），约 120 行
-- 程序步命令链执行器：新 activity `run_chore_commands`（逐条
-  create_subprocess_exec+日志留档），约 80 行——注意 async 化纪律（t260903-09 教训）
-- 工单 create 接受 `workflow:"chore-lane"` + `chore`（具名引用）+ `args`；命令链本体在项目 chores.yaml
-- 测试：pytest 契约 3-5 例（红绿+越界+超时）+ selfcheck 一例
-- 合计量 ≈ 半天，走一张 dev-lane 票交付（不用自己吃自己的狗粮）
+- New subclass `ChoreLaneWorkflow(TicketWorkflowBase)`: STAGES with three stages
+  (implement programmatic step / verify programmatic step / merge gate), about 120 lines
+- Programmatic-step command chain executor: new activity `run_chore_commands` (item by item
+  create_subprocess_exec + log archive), about 80 lines — mind the async discipline (t260903-09 lesson)
+- Ticket create accepts `workflow:"chore-lane"` + `chore` (named reference) + `args`; the command chain itself lives in the project's chores.yaml
+- Tests: 3-5 pytest contract cases (red/green + out-of-bounds + timeout) + one selfcheck case
+- Total ≈ half a day, delivered via one dev-lane ticket (we do not eat our own dog food here)
 
-## 五、待人审决策点
+## 5. Decision points for human review
 
-1. 边界口径认不认（第一节的红线清单）
-2. implement 默认 A 还是 A→B 自动升级（我建议后者）
-3. merge 人签保留（我建议保留——今天的事故链证明最后一道人闸值钱）
-4. 排期：M2-D 后半之后 / 立即（挤占在飞两票的看护）
+1. Whether the boundary stance is accepted (the red-line list in Section 1)
+2. Whether implement defaults to A, or to automatic A→B escalation (I recommend the latter)
+3. Keeping the merge human sign-off (I recommend keeping it — today's incident chain proves the last human gate is worth its keep)
+4. Scheduling: after the second half of M2-D / immediately (which would crowd out care for the two in-flight tickets)
 
-## 六、切换验收入档
+## 6. Switchover acceptance archive
 
-> 本节为验收实况存档，不改变本文一~五节的草案待审状态。
-> 本节不含对 3099/7233 的任何操作，提及这两个端口仅作下方的区分说明。
+> This section archives acceptance facts; it does not change the draft-pending-review status of Sections 1-5.
+> This section contains no operation against 3099/7233; those two ports are mentioned only for the distinction explained below.
 
-2026-09-03 完成 sandbar M2-D 安装制切换验收，实况存档如下：
+On 2026-09-03 the sandbar M2-D install-based switchover acceptance was completed; the facts are archived below:
 
-| 项 | 实况 |
+| Item | Fact |
 |---|---|
-| 隔离实例 home | `/tmp/suyou-m2d-accept`（运行时隔离路径，验收后可能已清理；仅作历史存档，不构成可复现口径） |
-| server 端口 | 7234（本次验收实例专用） |
-| UI 端口 | 8234（本次验收实例专用） |
-| 引擎形态 | sandbar v0.2.0 安装制 |
-| 本票定性 | t260903-14 是首张跨安装制全流程票（工单权威口径，照登） |
+| Isolated instance home | `/tmp/suyou-m2d-accept` (a runtime isolation path, possibly cleaned up after acceptance; historical archive only, not a reproducible stance) |
+| server port | 7234 (dedicated to this acceptance instance) |
+| UI port | 8234 (dedicated to this acceptance instance) |
+| Engine form | sandbar v0.2.0 install-based |
+| Nature of this ticket | t260903-14 is the first ticket to run the whole flow across the install-based form (ticket authority stance, recorded as is) |
 
-端口区分说明：7234/8234 只属于本次验收隔离实例；`3099`（生产 dsh 控制台）
-与 `7233`（生产 Temporal gRPC）是生产面端口，口径见 `docs/testing-guide.md`，
-本节只记录实况，不含针对它们的任何操作。
+Port distinction: 7234/8234 belong only to this acceptance isolation instance; `3099` (production dsh console)
+and `7233` (production Temporal gRPC) are production-side ports whose stance is in `docs/testing-guide.md`;
+this section records facts only and contains no operation against them.
 
-本节记录的实况供第五节决策点 4（排期）等人审决策引用；「安装制」「切换验收」
-为新引入用语，术语登记由 integration 走人审，不在本票范围内。
+The facts recorded in this section are available for human-review decisions such as Section 5 decision point 4 (scheduling);
+"install-based" and "switchover acceptance" are newly introduced terms, and registering terminology is
+integration's job through human review, outside the scope of this ticket.

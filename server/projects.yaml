@@ -1,6 +1,6 @@
 # ⚠ 已出仓（sandbar M1-1，t260901-14）：注册表真源 = 机器级 per-key 目录
 # ~/.sandbar/projects/<key>/project.yaml（装载=扫 */project.yaml，格式见
-# docs/design/sandbar项目接入契约v1.md ①节 schema v1）。
+# docs/design/sandbar-project-onboarding-contract-v1.md ①节 schema v1）。
 # 本文件不再被运行时读取，仅作一次性自动迁移源（装载器发现新根无 .migrated
 # 标记时从这里迁移，迁移完成后不回写）。新注册项目请建
 # ~/.sandbar/projects/<key>/ 目录；以下存量条目仅为迁移种子，勿再手改。

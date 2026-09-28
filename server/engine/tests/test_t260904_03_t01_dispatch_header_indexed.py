@@ -22,8 +22,8 @@ from shared import Stage, build_dispatch_prompt, build_stage_prompt  # noqa: E40
 RETIRED_DOC_VALUES = (
     "docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md",
     "docs/design/平台架构设计.md",
-    "docs/design/工单工作流台设计.md",
-    "docs/design/知识库设计.md",
+    "docs/design/ticket-workflow-console-design.md",
+    "docs/design/knowledge-base-design.md",
     "docs/design/掌握模型设计.md",
     "docs/design/营造建造循环设计.md",
     "pipeline/proposals/README.md",

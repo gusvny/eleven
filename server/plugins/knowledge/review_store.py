@@ -4,7 +4,7 @@
 与本插件 node 侧 src/shared/review-store.ts **同制式**（同文件格式、同路径映射、同白名单）：
 
   落盘  docs/reviews/<path 中 / 换 __>.json
-        （如 docs/reviews/design__知识库设计.md.json）
+        （如 docs/reviews/design__knowledge-base-design.md.json）
   结构  { path, rounds: [ { base, ts, reviewer, conclude, blocks: [
             { block_key, summary, type, status, decision?, comment? } ] } ] }
   conclude: approved | changes-requested | in-progress

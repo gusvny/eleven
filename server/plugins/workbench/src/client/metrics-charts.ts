@@ -164,7 +164,7 @@ export interface DonutFactoryOptions {
 }
 
 /**
- * 人审扇区判定（t260903-09 S1/C3）。判定依据是**契约字面**：metrics-api契约v1.md
+ * 人审扇区判定（t260903-09 S1/C3）。判定依据是**契约字面**：metrics-api-contract-v1.md
  * 钉死后端 donut 分类名「人审等待」（human 变体兼容历史数据）；配套 UT
  * （tests/donut-render-dispatch.mjs）钉死「后端产出的 time 副1 categories 恒含
  * 人审等待且本函数命中」——后端改名即测试红，不是静默掉色。

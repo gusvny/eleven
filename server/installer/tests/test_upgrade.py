@@ -14,7 +14,7 @@ sys.path.insert(0, str(SERVER_DIR))
 from installer import upgrade  # noqa: E402
 from version import VersionError  # noqa: E402
 
-CONTRACT = ROOT / "docs" / "design" / "sandbar项目接入契约v1.md"
+CONTRACT = ROOT / "docs" / "design" / "sandbar-project-onboarding-contract-v1.md"
 
 
 class ParseRealContractTest(unittest.TestCase):
@@ -58,7 +58,7 @@ class ParseMalformedTest(unittest.TestCase):
         return f.name
 
     def _base(self):
-        return (ROOT / "docs" / "design" / "sandbar项目接入契约v1.md").read_text(encoding="utf-8")
+        return (ROOT / "docs" / "design" / "sandbar-project-onboarding-contract-v1.md").read_text(encoding="utf-8")
 
     def test_missing_file(self):
         with self.assertRaisesRegex(upgrade.ContractError, "缺失"):
@@ -76,16 +76,19 @@ class ParseMalformedTest(unittest.TestCase):
 
     def test_fewer_than_four_checks(self):
         text = self._base()
-        # 删掉第 4 条必查项（headless SIGTERM 语义整段）
-        idx = text.find("4. **headless SIGTERM 语义**")
+        # 删掉第 4 条必查项（headless SIGTERM 语义整段；260928 随 docs 英文化改英文字面）
+        idx = text.find("4. **headless SIGTERM semantics**")
+        self.assertGreater(idx, -1, "契约第四必查项行未按预期出现（英文化后字面漂移）")
         end = text.find("\n\n", idx)
         text = text[:idx] + text[end + 2:]
         with self.assertRaisesRegex(upgrade.ContractError, "不足四条"):
             upgrade.parse_contract(text)
 
     def test_check_without_touchpoint_code(self):
-        text = self._base().replace("**headless SIGTERM 语义**（D1）",
-                                    "**headless SIGTERM 语义**（无代号）")
+        text = self._base().replace("**headless SIGTERM semantics** (D1)",
+                                    "**headless SIGTERM semantics** (no code)")
+        self.assertNotIn("**headless SIGTERM semantics** (D1)", text,
+                         "畸形样本未生效（英文化后字面漂移）")
         with self.assertRaisesRegex(upgrade.ContractError, "touchpoints 代号"):
             upgrade.parse_contract(text)
 

@@ -160,7 +160,7 @@ if prod is not None:
            "零change 带证据=过（对照面）")
 
     if callable(getattr(prod, "check_protected_overlap", None)):
-        r = prod.check_protected_overlap(["docs/design/知识库设计.md", "docs/terminology.md"])
+        r = prod.check_protected_overlap(["docs/design/knowledge-base-design.md", "docs/terminology.md"])
         blob = repr(r)
         ok("docs/design" in blob and "terminology" not in blob,
            "A3 保护面点名仅列交集（docs/design 进清单、非保护不进）")

@@ -1,7 +1,7 @@
 /**
  * workspace.ts —— 工单「工作区」展示的纯函数（M14，t260822-m14-detail-refactor）。
  *
- * 数据模型（M4/M5 ticket.py，见 docs/design/工单工作流台设计.md §3）：
+ * 数据模型（M4/M5 ticket.py，见 docs/design/ticket-workflow-console-design.md §3）：
  *   - workspace: {type: 'worktree'|'dir', path} | null   —— M4 新字段：
  *     type=worktree → 代码泳道（.worktrees/<短slug>）；type=dir → 非 git 工单的
  *     隔离目录（/tmp/sandbar-ws/<工单id>，cleanup 类模板约定）；null=未登记。

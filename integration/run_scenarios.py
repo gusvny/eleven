@@ -415,7 +415,7 @@ SCENARIOS = [
      "产出型巡检链离线源码锁+纯回放（t260925-01；temporalio 不可导入环境既定模式，sc_check_auto_rework_trace 同款）：A 声明面 mode/docs_root 两键词表与缺省 docs（A6）；B 契约面围栏强 schema 畸形回放 fail-closed+写集闸越界点名（A2）+保护面点名不硬失败（A3）+零 change 显式（A5）+受限可写 pin 形态区别于只读钉（A4）；C 活动面 run_inspection_produce 注册+桩注入缝+差分真源=git+四闸接线；D workflow 面独立 defn 无 dev-lane 段位+独立 gate id+approve 红灯闸+merge/teardown 收口（A1）；E 起票面 per_ticket_queue 参数与 trigger-produce CLI（KI-113 口径）。纯 stdlib 恒可跑，实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/sc_check_inspection_produce_chain.py"),
     ("metrics-contract-doc-structure",
-     "t260901-11 M0 集成测试：契约文档存在性与结构（黑盒文档基线） // 验收对象：docs/design/metrics-api契约v1.md // - 存在、fro",
+     "t260901-11 M0 集成测试：契约文档存在性与结构（黑盒文档基线） // 验收对象：docs/design/metrics-api-contract-v1.md // - 存在、fro",
      "node integration/baselines/sc_metrics_contract_doc_structure.mjs", "ro"),
     ("metrics-contract-schema-sync",
      "t260901-11 M0 集成测试：两文档 schema/枚举冻结同步（防各说各话） // 验收对象： // 1. 契约文档缓存 schema 行与 UI 规划 §6 sch",

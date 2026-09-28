@@ -1,7 +1,7 @@
 /**
  * review-store.ts —— 知识库 block review 的落盘存取（宿主半专用，node:fs）。
  *
- * 落盘：docs/reviews/<path 中 / 换 __>.json（如 docs/reviews/design__知识库设计.md.json）。
+ * 落盘：docs/reviews/<path 中 / 换 __>.json（如 docs/reviews/design__knowledge-base-design.md.json）。
  * 结构：
  *   { path, rounds: [ { base, ts, reviewer, conclude, blocks: [
  *       { block_key, summary, type, status, decision?, comment? } ] } ] }

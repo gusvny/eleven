@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -146,6 +147,12 @@ def parse_frontmatter(text: str) -> Tuple[Optional[Dict[str, Any]], str]:
             continue
         if ":" not in ln:
             return None, "frontmatter 行无法解析：%r" % ln.strip()
+        # 缩进行=上一层键的嵌套块（related 段落形态：`- mode: …` / `  target: …`）。
+        # 260928：以前逐行当平铺映射读，嵌套块里的 `target:` 会被误判「键重复」——
+        # 见 docs/design/failure-classification-protocol-v1.md 的 related 段。
+        # 只跳过嵌套行，不改变顶层判据（顶层重复键仍红）。
+        if ln[:1].isspace():
+            continue
         k, _, v = ln.partition(":")
         key = k.strip()
         val = v.strip()
@@ -247,10 +254,40 @@ def _extract_refs(text: str) -> List[str]:
     return uniq
 
 
-def scan_referenced_paths(rel: str, text: str, repo_root: Path) -> List[Finding]:
-    """S10：单篇文档的仓内路径引用存在性（`../` 逃逸与不存在逐条点名）。"""
+def _name_index(repo_root: Path) -> frozenset:
+    """仓内文件路径后缀集（建一次、查千次）。
+
+    逐后缀入集：`server/engine/shared.py` 贡献 `server/engine/shared.py`、
+    `engine/shared.py`、`shared.py` 三个后缀。查询 O(1)。
+    跳过重目录（node_modules/.git/venv/临时件）——文档引用不会指向它们，扫它们
+    只会把一次巡检拖成分钟级（实测：逐条 rglob 直接跑不出结果）。
+    """
+    skip_dirs = {"node_modules", ".git", ".venv", "venv", "__pycache__",
+                 ".mypy_cache", ".pytest_cache", "dist", "build", ".next"}
+    suffixes = set()
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        for fn in filenames:
+            try:
+                rel = Path(dirpath, fn).relative_to(repo_root).as_posix()
+            except ValueError:
+                continue
+            parts = rel.split("/")
+            for i in range(len(parts)):
+                suffixes.add("/".join(parts[i:]))
+    return frozenset(suffixes)
+
+
+def scan_referenced_paths(rel: str, text: str, repo_root: Path, name_index=None) -> List[Finding]:
+    """S10：单篇文档的仓内路径引用存在性（`../` 逃逸与不存在逐条点名）。
+
+    `name_index` = `_name_index(repo_root)` 后缀集（调用方建一次复用）；不给则单篇自建
+    （直接调用本函数的单测/工具面仍然工作）。
+    """
     if _exempted(text, RULE_S10_MISSING, RULE_S10_ESCAPE):
         return []
+    if name_index is None:
+        name_index = _name_index(repo_root)
     findings: List[Finding] = []
     doc_dir = (repo_root / rel).parent
     for ref in _extract_refs(text):
@@ -258,7 +295,8 @@ def scan_referenced_paths(rel: str, text: str, repo_root: Path) -> List[Finding]
             # 根绝对形态（/.sandbar/… 等）多是契约字面而非仓内引用——不判越界（防误报
             # 洪水），如实进 meta.caveat（见 run_doc_face_scan）
             continue
-        base = doc_dir if ref.startswith(("./", "../")) else repo_root
+        explicit_rel = ref.startswith(("./", "../"))
+        base = doc_dir if explicit_rel else repo_root
         resolved = (base / ref).resolve()
         try:
             resolved.relative_to(repo_root.resolve())
@@ -267,10 +305,17 @@ def scan_referenced_paths(rel: str, text: str, repo_root: Path) -> List[Finding]
                                     subject="%s 引用越界：%s（解析出仓根）" % (rel, ref),
                                     evidence=ref, suggestion="改为仓内相对路径"))
             continue
-        if not resolved.exists():
-            findings.append(Finding(scan=RULE_S10_MISSING, severity=SEVERITY,
-                                    subject="%s 引用缺失：%s" % (rel, ref),
-                                    evidence=ref, suggestion="修引用或恢复目标文件"))
+        if resolved.exists():
+            continue
+        # 名称形态引用（`node.ts` / `client.py` / `merge-checks.yaml`）按仓内后缀命中；
+        # 显式相对路径不做后缀兜底（它写死了目录主张，解析不到就是真断）。
+        if not explicit_rel:
+            parts = [p for p in ref.replace("\\", "/").split("/") if p not in ("", ".")]
+            if parts and "/".join(parts) in name_index:
+                continue
+        findings.append(Finding(scan=RULE_S10_MISSING, severity=SEVERITY,
+                                subject="%s 引用缺失：%s" % (rel, ref),
+                                evidence=ref, suggestion="修引用或恢复目标文件"))
     return findings
 
 
@@ -289,6 +334,7 @@ def run_doc_face_scan(repo_root: Path, docs_root: Optional[Path] = None) -> Dict
     unreadable: List[str] = []
     scanned = 0
     ref_scanned = 0
+    name_index = _name_index(repo_root)   # 260928：S10 后缀命中表，建一次全篇复用
     for p in sorted(docs.rglob("*.md")):
         rel = _norm(str(p.relative_to(repo_root)))
         try:
@@ -298,7 +344,7 @@ def run_doc_face_scan(repo_root: Path, docs_root: Optional[Path] = None) -> Dict
             continue
         scanned += 1
         findings.extend(scan_frontmatter(rel, text))
-        refs = scan_referenced_paths(rel, text, repo_root)
+        refs = scan_referenced_paths(rel, text, repo_root, name_index)
         ref_scanned += len(_extract_refs(text))
         findings.extend(refs)
     findings = _sorted(findings)

@@ -18,7 +18,7 @@ lane=content（内容道，主树）：
   同样只扫变更册（books_json 书集格式等全库项保留，读单文件代价可忽略）。
 
 lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约②）**：检查内容来自泳道根
-  verify.yaml（schema v1，字段级定义见 docs/design/sandbar项目接入契约v1.md ②a），
+  verify.yaml（schema v1，字段级定义见 docs/design/sandbar-project-onboarding-contract-v1.md ②a），
   引擎只跑与判、零项目特定硬编码。三态关闭语义（契约②总纲）：
   - 缺失（无 verify.yaml 或无 lanes.code）：该道按项目声明关闭，green 项可见非静默；
   - 畸形（不可解析/结构不合法）：fail-closed 整道红，detail 指明文件与行/字段；

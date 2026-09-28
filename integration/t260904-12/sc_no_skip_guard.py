@@ -70,7 +70,7 @@ ALLOW = [
     re.compile(r"SKIP；全部子用例"),                                     # 三态契约句引用（t260921-05 lib 头注；
                                         # 「闸内无 SKIP」退役注记同族）
     # ---- 260923 新增三类（t260904-12 门与后续定稿/资产撞字的清账；每类只锚具体形态，不放松裸词）----
-    re.compile(r"verdict\(pass\|fail\|env_fail\|skip\)"),                # 台账 schema 原文：定稿 docs/design/失败分类协议v1.md
+    re.compile(r"verdict\(pass\|fail\|env_fail\|skip\)"),                # 台账 schema 原文：定稿 docs/design/failure-classification-protocol-v1.md
                                         # 「verdict（pass|fail|env_fail|skip）」与引擎 failure_protocol.LEDGER_VERDICTS
                                         # 是同款取值枚举（t260922-12 交付面）；照协议写下的词表不是套件状态值。
                                         # 实盘台账 4673/113/74 行无一 skip 行=该取值声明性存在。

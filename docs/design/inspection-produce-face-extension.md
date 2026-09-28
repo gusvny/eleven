@@ -1,148 +1,150 @@
 ---
-title: 巡检产出面扩展（doc/simplify 产 change）与巡检 workflow 通用化
+title: Inspection Produce-Face Extension (doc/simplify produce change) and Inspection workflow Generalization
 category: design
-tags: [设计定稿, 巡检, doc巡检, simplify巡检, 通用化]
+tags: [finalized design, inspection, doc inspection, simplify inspection, generalization]
 status: active
-updated: 2026-09-24
+updated: 2026-09-28
 ---
 
-# 巡检产出面扩展（doc/simplify 产 change）与巡检 workflow 通用化
+# Inspection Produce-Face Extension (doc/simplify produce change) and Inspection workflow Generalization
 
-> 本文自 `notes/discussions/260924-巡检产出面扩展-设计稿.md` 毕业（随工单 t260925-01 入册）。
+> This document graduated from `notes/discussions/260924-巡检产出面扩展-设计稿.md` (filed with ticket t260925-01).
 
-> 来源：宿主 260924 会话需求原话——「除了 integration 的巡检，我还需要 doc 的巡检，以及 code
-> simplify 的巡检」；跟进拍板四条：**①doc change 只限于 docs 目录下的文档（不管代码注释）；
-> ②simplify 肯定要跑集成的，全量集成；③一次就是一个工单，需要和 dev-lane 不同的工作流；
-> ④开箱声明可行，要考虑其他项目也可以添加自己的巡检 workflow；**⑤写集口径随 workflow 分化**
-> （宿主 260924 追加：「doc 和 devlane 不同工作流，写集的限制肯定也不能相同」）——各 workflow 的
-> **白名单各不相同**；共同禁令（知识库账本禁写／保护名单／人审唯一入口）仍全链适用。
-> 本稿由 integration 岗据现行巡检实现写就。**本文只写「是什么、为什么」**：接口形状与实现细节
-> 在实现票里定；落地状态与进度查立项单/工单。
+> Origin: the host's verbatim request in the 260924 session — "besides integration's inspection, I also need doc
+> inspection, and code simplify inspection"; four follow-up rulings: **①doc change is limited to documents under the docs
+> directory (code comments are out of scope); ②simplify definitely has to run integration, full integration; ③one ticket per
+> issue, and it needs a workflow different from dev-lane; ④out-of-the-box declaration must be feasible, and other projects
+> must also be able to add their own inspection workflow;** ⑤the write-set stance diverges per workflow (host addition on
+> 260924: "doc and dev-lane are different workflows, so the write-set restrictions certainly cannot be the same") — each
+> workflow's **whitelist is different**; the shared prohibitions (no writes to the knowledge-base ledger / protection list /
+> the single human-review entry) still apply across the whole chain. This draft was written by the integration role from the
+> current inspection implementation. **This document states only "what and why"**: interface shapes and implementation
+> details are settled in the implementation ticket; for landing status and progress, consult the epic proposal/ticket.
 
-## Problem（问题）
+## Problem
 
-1. **一句话**：现行巡检**只出报告**——报告完了还得有人照着报告动手改，人力成了瓶颈；而 doc 漂移与
-   「可简化面」这两类问题本来就能由 agent 直接改出来交人审。
-2. **背景知识**（外行需要先知道）：
-   - **巡检**＝按项目声明的时间表，每期开一张工单，在项目自己的泳道里干活，产出落台账，最后走人审。
-   - 现行巡检的**红线是「只出报告与开票建议，绝不直接改码」**；审查 agent 被**只读沙箱**钉死，
-     物理上改不了文件。
-   - 引擎里**已经存在五个「巡检面」**（test / doc / stage / mechanism / simplify）与三档套件声明，
-     但除 test 面外**都没接线、从没跑过**。
-   - 项目侧靠一份 `inspection.yaml` 声明要跑哪些巡检实例（面、时间表、时区、是否跑套件）。
-   - 已有两条通用机制可复用：①**期票**（一期一票、按「实例＋期号」去重）；②**外置工作流模板**
-     （项目可以在自己仓里放工作流类，引擎认了就能跑——见《项目外置工作流模板》）。
-3. **证据**：
-   - 现状面：`docs-sync`（doc 面）与 `simplify-face`（simplify 面）两个实例**在 sandbar 的声明里
-     已启用**，但调度器上只有 test 面一条排程——它们从未跑过（台账零记录）。
-   - 用户实据：宿主明确要 doc/simplify 巡检**产出 change 交人审**，而不是继续给建议。
-   - 通用性实据：同引擎下的其他项目（nusuyou 等）没有 `inspection.yaml`；而宿主明确要求
-     **其他项目也能开箱即用，甚至能加自己的巡检 workflow**。
+1. **One sentence**: the current inspection **only produces a report** — once the report is done, somebody still has to act on
+   it and make the edits, so human effort is the bottleneck; yet doc drift and "simplifiable surface" are exactly the two
+   classes of problem an agent could fix directly and hand over for human review.
+2. **Background knowledge** (what an outsider needs to know first):
+   - **Inspection** = on the schedule declared by the project, open one ticket per period, work in the project's own lane, land the output in the ledger, and finally go through human review.
+   - The current inspection's **red line is "produce only reports and ticket-opening suggestions, never edit code directly"**; the reviewing agent is pinned down by a **read-only sandbox** and physically cannot change files.
+   - The engine **already has five "inspection faces"** (test / doc / stage / mechanism / simplify) plus suite declarations in three tiers,
+     but apart from the test face they are **all unwired and have never run**.
+   - The project side declares which inspection instances to run (face, schedule, timezone, whether to run the suite) in a single `inspection.yaml`.
+   - Two general mechanisms already exist and can be reused: ①**period tickets** (one ticket per period, deduplicated by "instance + period number"); ②**external workflow templates**
+     (a project can put workflow classes in its own repo and the engine will run them once it recognizes them — see Project External Workflow Templates).
+3. **Evidence**:
+   - Current state: the two instances `docs-sync` (doc face) and `simplify-face` (simplify face) **are already enabled in
+     sandbar's declaration**, but only the test face has a schedule on the dispatcher — they have never run (zero ledger records).
+   - User evidence: the host explicitly wants doc/simplify inspection to **produce a change for human review**, not to keep giving suggestions.
+   - Generalization evidence: other projects under the same engine (nusuyou and others) have no `inspection.yaml`; and the host explicitly requires that
+     **other projects work out of the box too, and can even add their own inspection workflow**.
 
-## Requirement（需求）
+## Requirement
 
-每条都能当验收标准：
+Every item can serve as an acceptance criterion:
 
-1. **doc 面产 change**：巡检 agent 在**泳道内**直接产出**文档改动**（**仅限项目的 docs 目录**，
-   不碰代码注释），改动随后交人审。
-2. **simplify 面产 change**：巡检 agent 产出**代码改动**；**出 change 之前必须跑全量集成并通过**
-   （红灯不得出 change）。
-3. **一期一票**：沿用现有期票机制（一实例一期一票、同号去重、台账留痕）。
-4. **专用巡检 workflow**：产 change 的巡检**不与开发工作流（dev-lane）同链**——它没有「实现／仲裁／
-   设计集成测试」这些开发者段位；它的段序是「泳道 → 产出 → 机械校验 → 报告 → 人审」。
-5. **人审是唯一合并入口**：人审看 diff 后决定**通过（合并进主树）／驳回（丢弃本期 change）**；
-   **绝不自动合主树**，agent 不得自签，签字人身份由调用方注入。
-6. **通用化（开箱即用）**：三面（test / doc / simplify）都由**项目声明**驱动——文档根、代码根、
-   验证命令、写集范围、排除面、时间表都写在各项目的巡检声明里；**引擎侧不得硬编码任何
-   sandbar 专属路径**；未声明＝零行为变化。**默认约定**：引擎自带**默认文档根＝`docs`**
-   （宿主 260924：「我们目前默认是 docs 目录」），并作为默认受保护面；**受保护面（真源与期望值）
-   同样是项目声明项**——现状把 sandbar 专属保护名单写死在引擎里（`docs/design`、`server/roles`
-   等），其他项目套用会错位，属本次通用化要一并搬走的数据；**有项目声明面之后，建票时即可机械
-   校验「写集 ∩ 项目受保护面」，把今天那种「5 小时后在落盘闸上卡一次人审往返」提前到建票当场点名**。**写集口径随 workflow 分化**：dev-lane＝代码＋集成
-   测试资产（现状）；**doc 巡检＝仅项目的文档根**（不碰代码注释）；**simplify 巡检＝项目的
-   代码根＋L1 单元测试目录**（L1 是白盒、**重构时随实现重写不算契约破坏**——本仓既有分层口径），
-   **不含 L2/L3 场景资产（integration/）**；共同的**禁令**（知识库账本 notes/ 禁写、真源保护名单、
-   人审唯一入口）仍全链适用——分化的是各自的白名单，不是共同的红线。
-7. **项目可自带巡检 workflow**：项目不仅能选用引擎内置三面，还能**添加自己的巡检 workflow**
-   （复用外置工作流模板的加载口），并在自己的巡检声明里指向它；**该 workflow 自带自己的写集
-   口径**——dev-lane 那种「自动并入 integration/」的机制**不得沿用到巡检 workflow**（测试资产
-   不因巡检需要就被并入白名单）。
-8. **零发现也要显式**：本期无东西可改，必须显式声明「本期零 change」并给证据面，
-   **不许为凑数造假改动**，也不许空壳零产出。
-9. **安全面不降级**：写集白名单与受保护路径闸照旧有效（知识库账本 notes/ 仍禁写；真源保护名单
-   仍拦）；doc 面撞上保护名单里的文档时**点名列出交人审**，不静默跳过、也不整期硬失败；人审
-   **放行后在同一张期票内补落盘**（授权→同票复跑产出→再人审合并），**不跨期、不另开票**。
-10. **一期一票、全链票内闭合**：本方案不引入任何跨期的补落盘/延期机制——「发现→产出→自检→
-   报告→人审（含保护面放行）→合并/驳回」全部在同一张期票内走完，与现行巡检的期票模型一致。
+1. **The doc face produces a change**: the inspection agent directly produces **documentation changes** **inside the lane** (**limited to the project's docs directory**;
+    code comments are not touched), and the change is then handed over for human review.
+2. **The simplify face produces a change**: the inspection agent produces **code changes**; **before producing a change it must run the full integration suite and pass**
+    (no change may be produced on a red light).
+3. **One ticket per period**: reuse the existing period-ticket mechanism (one ticket per instance per period, same-number deduplication, ledger trace).
+4. **A dedicated inspection workflow**: the change-producing inspection is **not chained with the development workflow (dev-lane)** — it has none of the developer stages
+    "implement / arbitrate / design the integration tests"; its stage order is "lane → produce → machine check → report → human review".
+5. **Human review is the only merge entry**: after looking at the diff, the human reviewer decides **approve (merge into the main tree) / reject (discard this period's change)**;
+    **never auto-merge into the main tree**, an agent may not sign for itself, and the signer's identity is injected by the caller.
+6. **Generalization (out of the box)**: all three faces (test / doc / simplify) are driven by **project declaration** — the doc root, code root,
+    verification commands, write-set scope, excluded faces and schedule all live in each project's inspection declaration; **the engine side must not hardcode any
+    sandbar-specific path**; undeclared = zero behavior change. **Default convention**: the engine ships a **default doc root = `docs`**
+    (host 260924: "what we have by default right now is the docs directory"), and treats it as the default protected face; **the protected face (source of truth and expected
+    values) is likewise a project declaration item** — today sandbar-specific protection lists are hardcoded in the engine (`docs/design`, `server/roles`
+    and so on), which would misfire for other projects and is data that this generalization must move out along with everything else; **once the face is project-declared, ticket creation can
+    mechanically check "write set ∩ project protected face", moving today's "one human-review round trip stuck at the landing gate 5 hours later" forward to being named on the spot at ticket creation**.
+    **The write-set stance diverges per workflow**: dev-lane = code + integration test assets (as it is now); **doc inspection = the project's doc root only** (code comments are not touched);
+    **simplify inspection = the project's code root + the L1 unit test directory** (L1 is white-box, and **rewriting it along with the implementation is not a contract break** — the
+    layering stance already held in this repo), **excluding L2/L3 scenario assets (integration/)**; the shared **prohibitions** (no writes to the knowledge-base ledger notes/, the source-of-truth
+    protection list, the single human-review entry) still apply across the whole chain — what diverges is each one's whitelist, not the shared red lines.
+7. **A project may bring its own inspection workflow**: a project can not only choose among the engine's three built-in faces, but also **add its own inspection workflow**
+   (reusing the external workflow template loader) and point to it in its own inspection declaration; **that workflow brings its own write-set
+   stance** — dev-lane's mechanism of "automatically folding in integration/" **must not be carried over to inspection workflows** (test assets are not folded into the
+   whitelist just because an inspection needs them).
+8. **Zero findings must also be explicit**: if there is nothing to change this period, it must explicitly declare "zero change this period" and give the evidence face;
+   **no faking a change just to fill the quota**, and no empty-shell zero output either.
+9. **The safety face is not downgraded**: the write-set whitelist and the protected-path gate remain in force (writes to the knowledge-base ledger notes/ are still prohibited; the
+   source-of-truth protection list still blocks); when the doc face runs into a document on the protection list, it **names it and lists it for human review** rather than silently skipping it or
+   hard-failing the whole period; after the human review **grants clearance, the landing is completed within the same period ticket** (authorize → re-run the production in the same ticket → human-review merge),
+   **without crossing periods or opening another ticket**.
+10. **One ticket per period, everything closed within the ticket**: this proposal introduces no cross-period mechanism for late landing or postponement — "discover → produce → self-check →
+    report → human review (including protection-face clearance) → merge/reject" all happen within the same period ticket, consistent with the current inspection's period-ticket model.
 
-## Nongoal（不做什么）
+## Nongoal
 
-- **不改 test（integration）面的语义**：验证面仍**只出报告**——验证面自己改码等于自证其说。
-- 不做**自动合主树**（人审是唯一入口）；不做 agent 自签。
-- 不碰 **notes/ 知识库账本**（票据/台账由 main 侧直管）。
-- **不做代码注释改写**（那属 simplify 面）；不做「重命名/搬家」这类超范围重构（simplify 面只做
-  有把握、有明确收益的简化）。
-- **simplify 面不得改 L2/L3 场景资产来「修绿」**：重构后场景红了，不许靠改场景让绿灯回来（绿灯
-  捷径）；确实需要动场景资产＝对外行为变了，点名交人审或另开票。**L1 单元测试允许随实现重写**
-  （白盒、不作契约网），但必须：①同一 change 内自洽；②在报告「测试资产变更审查」小节逐处说明
-  改的是内部断言还是削弱覆盖；③**删除测试／减少断言／放宽断言型改动＝红**，须人审显式放行。
-- **doc 面不得越界改代码**：文档根之外的任何文件（含代码注释、构建产物）都不在白名单内，
-  越界=拒收点名。
-- 不复活 260904 退役的模板族；不做热加载（重启生效；生效粒度按事实写实，见 KI-113）。
+- **The semantics of the test (integration) face are not changed**: the verification face still **produces only a report** — a verification face that edits code itself would be testifying on its own behalf.
+- No **auto-merge into the main tree** (human review is the only entry); no agent self-signing.
+- The **notes/ knowledge-base ledger is not touched** (tickets/ledgers are managed directly by main).
+- **No rewriting of code comments** (that belongs to the simplify face); no out-of-scope refactors such as "rename/move" (the simplify face only does simplifications
+  it is confident about and that have a clear payoff).
+- **The simplify face must not modify L2/L3 scenario assets to "fix the green"**: if scenarios go red after a refactor, making the light green again by editing scenarios is not allowed (a green-light
+  shortcut); if scenario assets genuinely must change = external behavior changed, name it for human review or open a separate ticket. **L1 unit tests may be rewritten along with the implementation**
+  (white-box, not a contract net), but they must: ①be self-consistent within the same change; ②explain item by item, in the "test asset change review" section of the report, whether what changed is
+  an internal assertion or a weakening of coverage; ③**changes of the delete-a-test / reduce-assertions / loosen-assertions kind = red**, requiring explicit human-review clearance.
+- **The doc face must not edit code out of bounds**: any file outside the doc root (including code comments and build artifacts) is not in the whitelist;
+  out-of-bounds = rejection and naming.
+- Do not revive the template family retired on 260904; no hot reload (it takes a restart to take effect; the granularity of "taking effect" is described as it actually is, see KI-113).
 
-## Proposal（方案）
+## Proposal
 
-### High level：三件事
+### High level: three things
 
-1. **一条新的巡检链：产出型巡检。** 与「只报告」的验证型巡检并列：在泳道里由 agent 动手改文件 →
-   机械校验（看下面第 2 点）→ 把**改动本身**连同证据落成报告 → 人审看 diff 定**合并／驳回**。
-   一期一票，票面即「这一个 change 提案」。
-2. **各自的自检门槛（这是两个面的关键区别）。**
-   - **doc 面**：改动限于声明的文档根；出 change 前做**文档自检**（索引／链接／被引用文档是否
-     存在——改了文档不能让引用烂掉）。
-   - **simplify 面**：改动限于声明的代码根；出 change 前**跑全量集成且必须绿**（宿主 260924 拍板）。
-     这是硬门槛：红了就不出 change，而不是"带着红灯交人审"。
-3. **通用化：面与 workflow 都由项目声明驱动。** 引擎提供三面**模板**与产出型巡检**链**；
-   项目在自己的巡检声明里给参数（根、验证命令、写集、排除面、时间表），或干脆指向
-   **自己的巡检 workflow**（走外置工作流模板那条门）。引擎侧零项目硬编码，未声明零行为变化。
+1. **A new inspection chain: the producing inspection.** Standing alongside the "report-only" verifying inspection: inside the lane an agent edits files →
+   machine check (see point 2 below) → the **change itself** plus evidence is landed as a report → human review reads the diff and rules **merge / reject**.
+   One ticket per period, and the ticket face is precisely "this one change proposal".
+2. **Each face's own self-check threshold (the key difference between the two faces).**
+   - **doc face**: changes are limited to the declared doc root; before producing a change, run a **doc self-check** (whether the index / links / referenced documents
+     exist — changing a document must not leave references broken).
+   - **simplify face**: changes are limited to the declared code root; before producing a change, **run the full integration suite and it must be green** (host ruling 260924).
+     This is a hard threshold: if it is red, no change is produced, rather than "handing it over for human review with a red light".
+3. **Generalization: both faces and workflows are driven by project declaration.** The engine provides the three face **templates** and the producing inspection **chain**;
+   a project supplies parameters in its own inspection declaration (roots, verification commands, write set, excluded faces, schedule), or simply points at
+   **its own inspection workflow** (going through the external workflow template gate). Zero project hardcoding on the engine side, zero behavior change when undeclared.
 
-### 关键取舍（为什么这么选）
+### Key tradeoffs (why these choices)
 
-- **验证面不改码、产出面才改码**：一个面若既能改码又自任裁判，等于自证其说。所以 test 面保持
-  只报告，改码能力只给 doc/simplify。
-- **simplify 的全量集成门槛贵，但必须**：自动重构没有验证就交人审＝把回归测试的活推给人。
-  宁可每期多花一趟全量集成的钱（单票独占约 3.5 分钟；今天实测并发下会放大到 10~40 分钟——
-  这条要在实现时用「限宽／定点」一并处理）。
-- **人审是唯一入口**：与 dev-lane 的合并门同构——diff 摆出来、人签字、引擎才合；驳回＝丢弃本期
-  change（留痕），人也可以据此开修复票。
-- **"撞保护名单"要点名而不是跳过**：真源文档的漂移正是最该修的；静默跳过会让人以为"没漂移"。
-- **通用化落到「声明」而不是「代码分支」**：面参数来自项目声明，项目可加自己的 workflow——
-  这与本仓刚立的《项目外置工作流模板》同向，直接复用其加载口。
+- **The verification face does not edit code; the producing face does**: a face that can both edit code and judge itself would be testifying on its own behalf. So the test face stays
+  report-only, and code-editing capability is given only to doc/simplify.
+- **simplify's full-integration threshold is expensive but necessary**: handing an automatic refactor to human review without verification = pushing the regression-testing work onto the human.
+  Better to spend one extra full integration run per period (about 3.5 minutes on a single exclusive ticket; under concurrency it multiplies to 10~40 minutes as measured today —
+  this must be handled together at implementation time via "width limiting / pinning").
+- **Human review is the only entry**: isomorphic with dev-lane's merge gate — the diff is laid out, the human signs, and only then does the engine merge; a rejection = this period's
+  change is discarded (with a trace), and the human can open a fix ticket based on it.
+- **"Hitting the protection list" must be named rather than skipped**: drift in a source-of-truth document is exactly what most needs fixing; silently skipping it would make people think "there is no drift".
+- **Generalization lands in "declaration" rather than "code branches"**: face parameters come from the project declaration, and a project can add its own workflow —
+  this points the same way as the Project External Workflow Templates just established in this repo, reusing its loader directly.
 
-### 回扣
+### Tie-back
 
-本方案 → 解决 **Problem** 的「只报告、人力动手」与「不能开箱」（产出型巡检链 ＋ 声明驱动的面/workflow）
-→ 满足 **Requirement** 的 1–9 → 避开 **Nongoal** 的「不改 test 面语义、不自动合主树、不碰 notes/、
-不做注释改写」。
+This proposal → solves the **Problem** items "report only, humans do the editing" and "not available out of the box" (the producing inspection chain + declaration-driven faces/workflows)
+→ satisfies **Requirement** 1–9 → avoids the **Nongoal** items "do not change test-face semantics, do not auto-merge into the main tree, do not touch notes/, do not rewrite comments".
 
-## 附一：对现行实现的修订点（非设计正文，供立项对照）
+## Appendix 1: Revision points against the current implementation (not part of the design body; for epic cross-reference)
 
-1. 巡检红线按面分化：test 面「只出报告」；doc/simplify 面「产 change 供人审」，红线原文需重写。
-2. 审查 agent 的只读钉按面分档：doc/simplify 面给**受限可写**（写集＝声明的根），test 面保持只读。
-   写集口径**按 workflow 分化**（doc＝文档根；simplify＝代码根＋**L1 单元测试目录**，不含 L2/L3
-   场景资产）；落盘闸按各自白名单 fail-closed 点名越界文件；**dev-lane 的「自动并入 integration/」
-   机制必须按 workflow 收窄，不得沿用到巡检链**。
-2b. 单测改动护栏（simplify 面）：报告设「测试资产变更审查」小节逐处说明；新增机械告警——
-   删除测试／减少断言／放宽断言型改动判红，须人审显式放行（防"改测试修绿"）。
-3. 新增产出型巡检链（与 dev-lane 分链）：泳道 → 产出 → 校验 → 报告（含 diff）→ 人审（合并/驳回）。
-4. 面 prompt 去项目硬编码：文档根、索引文件、代码根、验证命令改由声明注入。
-5. 声明面扩展：项目可指向自己的巡检 workflow（对接外置模板加载口）。
-6. 零 change 显式声明与「撞保护名单点名」两条要落到报告契约里；保护面放行走「同一期票内」的
-   授权→补落盘回路（对齐现有巡检的期票模型，**不跨期**）。
-7. 套件档（全量集成）在产出型巡检里的位置：simplify 面固定「出 change 前跑」。
+1. The inspection red line diverges per face: the test face "produces only a report"; the doc/simplify faces "produce a change for human review", so the red-line wording must be rewritten.
+2. The reviewing agent's read-only pinning is tiered per face: the doc/simplify faces get **restricted write access** (write set = the declared roots), the test face stays read-only.
+   The write-set stance **diverges per workflow** (doc = doc root; simplify = code root + **L1 unit test directory**, excluding L2/L3
+   scenario assets); the landing gate is fail-closed per whitelist and names out-of-bounds files; **dev-lane's "automatically fold in integration/"
+   mechanism must be narrowed per workflow and must not be carried over to the inspection chain**.
+2b. Unit-test-change guardrails (simplify face): the report gets a "test asset change review" section explaining each change; a new machine warning is added —
+   changes of the delete-a-test / reduce-assertions / loosen-assertions kind are ruled red and require explicit human-review clearance (preventing "edit the test to fix the green").
+3. A producing inspection chain is added (a chain separate from dev-lane): lane → produce → check → report (including the diff) → human review (merge/reject).
+4. Face prompts lose project hardcoding: doc root, index files, code root and verification commands are injected from the declaration instead.
+5. The declaration face is extended: a project can point to its own inspection workflow (wired to the external template loader).
+6. The two items "explicit zero-change declaration" and "name what hits the protection list" must land in the report contract; protection-face clearance goes through an
+   authorize → complete-the-landing loop "within the same period ticket" (aligned with the current inspection's period-ticket model, **without crossing periods**).
+7. Where the suite tier (full integration) sits in a producing inspection: on the simplify face it is fixed as "run before producing a change".
 
-## 相关文档
+## Related documents
 
-- [设计文档写作指南](设计文档写作指南.md)
-- [项目外置工作流模板](项目外置工作流模板.md)——「项目自带巡检 workflow」直接复用其加载口
-- [已知问题清单](../../notes/debts/known-issues.md)——KI-111/116/117（巡检预算/零信号/取证面无界）是本方案实现时必须继承的教训
+- [Design Document Writing Guide](design-doc-writing-guide.md)
+- [Project External Workflow Templates](project-external-workflow-templates.md) — "a project bringing its own inspection workflow" reuses its loader directly
+- [Known Issues (KI)](../../notes/debts/known-issues.md) — KI-111/116/117 (inspection budget / zero signal / unbounded evidence face) are lessons this proposal must inherit at implementation time

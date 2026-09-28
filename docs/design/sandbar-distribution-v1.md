@@ -1,276 +1,281 @@
 ---
-title: sandbar 分发形态 v1
+title: sandbar distribution form v1
 category: design
-tags: [分发, 安装器, docker, 设计]
+tags: [distribution, installer, docker, design]
 status: draft
-updated: 2026-09-20
+updated: 2026-09-28
 ---
 
-# sandbar 分发形态 v1（提案稿，待宿主审定稿）
+# sandbar distribution form v1 (proposal draft, pending host final review)
 
-> **状态**：提案稿。设计定稿权归宿主——本文把方案讲清、把分歧点显式列为「待宿主裁定」，
-> 不替宿主定稿。宿主 260907 裁定已写死进本文：**npm 包不做；首发 mac 优先（Linux 跟进，
-> Windows 后进不承诺）；密钥=用户的不进包**。三处具体命名（发行版 env 旋钮、compose
-> 工程名、卸载子命令）以「命名待宿主审定」标注。
+> **Status**: proposal draft. Design finalization belongs to the host — this document lays the option out clearly and
+> lists the points of disagreement explicitly as "pending host decision"; it does not finalize on the host's behalf.
+> The host's 260907 decisions are already written into this document as fixed: **no npm package; mac first for the initial
+> release (Linux to follow, Windows later with no commitment); keys belong to the user and do not go into the package**.
+> Three specific names (the distribution env knobs, the compose project name, the uninstall subcommand) are marked
+> "naming pending host review".
 >
-> 宿主 260907 补充裁定（v2–v6）同样写死：**收件人视角**为第一验收视角（v2）、
-> 命名清理目标表与迁移顺序成章（v3/v4）、persona 去项目化（v5）、目录结构定稿＋
-> 交付四决策（v6）——分别见 §收件人视角、§目标命名表、§通用人格库、§目录结构与发版清单。
+> The host's supplemental decisions of 260907 (v2–v6) are likewise fixed here: **the recipient's perspective** is the
+> primary acceptance perspective (v2); the target naming table and migration order form a chapter (v3/v4); persona
+> de-projectization (v5); final directory structure plus the four delivery decisions (v6) — see §Recipient perspective,
+> §Target naming table, §Generic persona library, and §Directory structure and release manifest respectively.
 >
-> 路径书写约定：本文引用仓内实件用**现路径**（迁移完成前它是真源），每处的目标名
-> 见 §目标命名表——两套名字并排可对，迁移落完后旧路径自然失效。
+> Path-writing convention: this document cites in-repo artifacts by their **current path** (before migration completes it
+> is the source of truth), and the target name for each is in §Target naming table — the two sets of names can be compared
+> side by side, and the old paths lapse naturally once migration finishes.
 
 ## Problem
 
-**一句话**：sandbar 目前只能「会开终端、懂红线的人 clone 仓手工起栈」，想把它交到两类新受众手上——贡献者（能跑仓但不想背一遍口传步骤）和最终用户（只想用、不想懂栈）——没有一条成文的分发路径。
+**In one sentence**: today sandbar can only be picked up by "someone who can open a terminal, understands the red lines, and clones the repo to bring the stack up by hand"; to hand it to two new audiences — contributors (who can run the repo but do not want to recite a set of passed-down steps) and end users (who just want to use it without understanding the stack) — there is no written distribution path at all.
 
-**背景知识**：一套 sandbar 栈 = dsh 控制台（3099，永属用户操作面）＋ Temporal 引擎（7233 gRPC / 8233 Web UI）＋ 工单 worker ＋ agent 运行面。生产端口红线（3099/7233 禁碰）与 docker 隔离测试台拓扑见 [testing-guide](../testing-guide.md)；引擎机制见[引擎机制主档](deepseek_harness_and_temporal_based_multi-agent_mechanism.md)。
+**Background**: one sandbar stack = the dsh console (3099, forever the user's operating surface) + the Temporal engine (7233 gRPC / 8233 Web UI) + the ticket worker + the agent runtime surface. The production port red lines (3099/7233 must not be touched) and the docker-isolated test bench topology are in [testing-guide](../testing-guide.md); for engine mechanics see the [engine mechanism master document](deepseek_harness_and_temporal_based_multi-agent_mechanism.md).
 
-**证据**：新人上手全靠口口相传（clone → 建 venv → start-console.sh → 起 temporal → 起 worker → 开控制台），仓里没有 install 文档、没有 install.sh；唯一成文的 docker 台是**测试台**（3199/17233，见 testing-guide），不是给外人用的发行形态。结果就是：每来一个贡献者要老手陪跑半小时；最终用户形态根本不存在。
+**Evidence**: onboarding newcomers rests entirely on word of mouth (clone → create venv → start-console.sh → start temporal → start worker → open the console), and the repo has no install documentation and no install.sh; the only docker bench that is written down is the **test bench** (3199/17233, see testing-guide), which is not a distribution form meant for outsiders. The result: every new contributor costs a veteran half an hour of hand-holding, and the end-user form simply does not exist.
 
 ## Requirement
 
-**目标（可验证）**：
+**Goals (verifiable)**:
 
-- R1 **形态一（仓＋init 脚本，开发者/贡献者档）**：`install.sh` 按行为契约成文（见 Proposal §形态一），七项规格每一项对「缺失 / 冲突 / 畸形态」三种输入态都有定义的人话行为，畸形态一律显式报错不静默降级。
-- R2 **形态二（容器整栈，最终用户档）**：三服务拓扑（console 唯一对外口 3099 ＋ engine=temporal+worker ＋ agent 容器内跑）；up 前预检宿主端口占用，已占报错不抢；数据落 named volume，升级不丢数据；**不提供 `down -v` 等价物**（删数据必须走显式卸载＋确认）。
-- R3 **fresh-home 验收场景成文**：全新家目录 → 起栈 → 三探全绿 → 从控制台开一张真实工单 → 落地出结果，全程无人工干预；每步有预期输出与失败报错位置；先做 macOS 用例。
-- R4 **共享 init 真源结构图**：两形态共用同一套装栈逻辑，只看图能讲清单真源关系。
-- R5 版本与兼容面沿用既有口径（[接入契约 v1](sandbar项目接入契约v1.md) ⑧节：VERSION 单源、dsh 版本区间、兼容矩阵），不另造一套。
-- R6 **收件人视角（宿主令 v2）**：fresh-home 剧本以**收件人自己的项目**为主角（空注册表起步 → 引导登记收件人项目 → 在其上开票 → 七段落地），「sandbar 作为 project」全程零出场；发行包含 example-project 样例项目（教学沙盒兼验收夹具）；三处自指有拆除清单（见 §收件人视角）。
-- R7 **命名与结构定稿（宿主令 v3–v6）**：目标命名表＋分层迁移顺序成章（终审=宿主过目）；server/ 目录结构按 v6 定稿；交付四决策（发版清单/预构建/单实例/engine data 卷）锁死；persona 去项目化（v5）。
+- R1 **Form one (repo + init script, developer/contributor tier)**: `install.sh` is written down as a behavioral contract (see Proposal §Form one), and each of the seven specs defines plain-language behavior for all three input states "missing / conflicting / malformed", with the malformed state always raising an explicit error and never degrading silently.
+- R2 **Form two (whole stack in containers, end-user tier)**: a three-service topology (console as the only external port 3099 + engine = temporal + worker + agent running inside containers); a host port-occupancy pre-check before up, reporting an error instead of fighting for an occupied port; data lands in named volumes so upgrades do not lose it; **no equivalent of `down -v` is offered** (deleting data must go through an explicit uninstall plus confirmation).
+- R3 **The fresh-home acceptance scenario is written down**: a brand-new home directory → bring the stack up → all three probes green → open a real ticket from the console → land a result, with no manual intervention throughout; every step has an expected output and a location where a failure is reported; the macOS case comes first.
+- R4 **A structure diagram of the shared init source of truth**: both forms share the same stack-assembly logic, and reading the diagram alone conveys the single-source-of-truth relationships.
+- R5 Version and compatibility surfaces follow the existing criteria (clause ⑧ of the [onboarding contract v1](sandbar-project-onboarding-contract-v1.md): VERSION as a single source, the dsh version range, the compatibility matrix) rather than inventing a second set.
+- R6 **The recipient's perspective (host instruction v2)**: the fresh-home script stars **the recipient's own project** (start from an empty registry → guide the registration of the recipient's project → open tickets on it → land through the seven stages), with "sandbar as a project" absent throughout; the distribution includes an example-project sample (both a teaching sandbox and an acceptance fixture); the three self-references have a removal checklist (see §Recipient perspective).
+- R7 **Naming and structure finalized (host instructions v3–v6)**: the target naming table plus the layered migration order form a chapter (final review = the host's own read-through); the server/ directory structure is finalized per v6; the four delivery decisions (release manifest / prebuild / single instance / engine data volume) are locked; persona de-projectization (v5).
 
-**Stakeholder**：宿主（定稿与三项待裁定）；贡献者（形态一用户，要的是少背步骤、出错能自救）；最终用户（形态二用户，要的是一键起栈、数据不丢）；integration（验收场景设计，要的是发行版与测试台同源可参数化）。
+**Stakeholders**: the host (finalization and the three pending decisions); contributors (form-one users, who want fewer steps to remember and self-rescue when things go wrong); end users (form-two users, who want a one-command stack and no data loss); integration (acceptance-scenario design, which needs the distribution and the test bench to share a source and be parameterizable).
 
-**前置限制**（宿主裁定＋仓纪律，逐条写死）：
+**Prerequisites** (host decisions + repo discipline, each written down as fixed):
 
-1. npm 包**不做**（宿主裁定 260907）。
-2. 首发支持＝**mac 优先**（fresh-home 验收场景先做 macOS 用例），Linux 跟进，Windows 后进（WSL2/NTFS 边角记录在案不承诺）。
-3. 密钥＝**用户的不进包**：任何安装/分发产物不生成、不搬运、不打印用户密钥。
-4. 存量 `SANDBAR_*` env 与 `/suyou-workbench/` 前缀迁移＝**发布前置债**（见 Proposal §发布前置债），随专门迁移票处置。
-5. console（3099）永属用户操作面：任何安装路径**只探测只提示**，不得 spawn/start/kill/重启 3099（CLAUDE.md 硬规则 1；既有安装器同纪律）。
-6. 新命名一律用 sandbar 或中性名，不新增 suyou 字样命名（CLAUDE.md 硬规则 5）。
-7. 误连生产 fail-closed：worker 不带引擎地址前缀会缺省连**生产** 7233/default（testing-guide 明文警告「等同碰 3099 级别的事故」），分发形态的每一处引擎地址缺省值都不得指向生产面。
+1. No npm package (host decision 260907).
+2. Initial-release support = **mac first** (the fresh-home acceptance scenario does the macOS case first), Linux to follow, Windows later (WSL2/NTFS corner cases recorded, not committed).
+3. Keys = **the user's, never in the package**: no install/distribution artifact generates, moves, or prints user keys.
+4. Migrating the existing `SANDBAR_*` env and the `/suyou-workbench/` prefix = **release-blocking debt** (see Proposal §Release-blocking debt), handled by a dedicated migration ticket.
+5. console (3099) is forever the user's operating surface: every install path **only probes and only warns**, and must not spawn/start/kill/restart 3099 (CLAUDE.md hard rule 1; the existing installer follows the same discipline).
+6. All new naming uses sandbar or a neutral name, adding no new naming that carries the word suyou (CLAUDE.md hard rule 5).
+7. Accidental production connection is fail-closed: a worker without an engine address prefix defaults to connecting to **production** 7233/default (testing-guide states plainly that this "amounts to an incident on the scale of touching 3099"), so every engine-address default in the distribution form must avoid pointing at the production surface.
 
 ## Nongoal
 
-- **npm 包**：宿主裁定不做，不论证、不留接口。
-- **Windows/WSL2/NTFS 支持**：本期不承诺；NTFS 权限位/路径大小写等边角在 §成本账记录在案。
-- **密钥管理**：不生成、不搬运、不托管用户密钥；密钥面只探测损坏与否。
-- **存量命名迁移实施**：目标命名表与迁移顺序在本篇成章（§目标命名表），但迁移动作只随专门迁移票（每步独立票独立闸），本篇不实施。
-- **installer.cli 容器后端接口定稿**：本文只声明「需要新增」与验收方向，接口留给实现票。
-- **安装器域设计面收编**：既有安装器（init/up/down/status/doctor/upgrade）的完整设计文档不在本篇展开（是否收编见 §待宿主裁定项 3）。
-- **Linux fresh-home 用例交付**：成文为跟进项，本期不做该用例。
-- **回头改测试台**：19 号 docker 台（测试台 compose 面，现 `server/docker-compose.test.yml` ＋ `integration/stage_docker.py`）只读复用其机制，不因发行版改动测试台行为（目录随命名表迁 `server/sandbar/` 属迁移票，不属发行版改测试台）。
+- **npm package**: the host decided against it; no argument, no interface reserved.
+- **Windows/WSL2/NTFS support**: not committed this cycle; NTFS permission bits and path-case corner cases are recorded in §Cost accounting.
+- **Key management**: no generation, movement, or custody of user keys; the key surface only probes whether something is corrupted.
+- **Executing the existing naming migration**: the target naming table and migration order form a chapter here (§Target naming table), but the migration actions follow only a dedicated migration ticket (each step its own ticket and its own gate); this document does not execute them.
+- **Finalizing the installer.cli container backend interface**: this document declares only "a new one is needed" and the acceptance direction; the interface is left to the implementation ticket.
+- **Absorbing the installer domain design surface**: the full design documentation of the existing installer (init/up/down/status/doctor/upgrade) is not expanded here (whether to absorb it is §Pending host decisions item 3).
+- **Delivering the Linux fresh-home case**: written down as a follow-up item; that case is not done this cycle.
+- **Going back and changing the test bench**: docker bench no. 19 (the test-bench compose surface, today `server/docker-compose.test.yml` + `integration/stage_docker.py`) is reused read-only for its mechanism, and test-bench behavior is not changed for the sake of the distribution (moving the directory to `server/sandbar/` per the naming table belongs to the migration ticket, not to the distribution changing the test bench).
 
 ## Proposal
 
 ### High level
 
-两档分发形态，共用**同一套装栈真源**：
+Two distribution tiers sharing **one and the same stack-assembly source of truth**:
 
-- **形态① 仓＋init 脚本（开发者/贡献者档）**：`git clone` 后跑 `install.sh`——薄引导做一次性落地（人话预检、venv、家目录接线、.env 模板、三探），之后日常生命周期交给既有安装器 `./sandbar init/up/down/status/doctor/upgrade`。
-- **形态② 容器整栈（最终用户档）**：一条命令起三服务容器栈（console / engine / agent），数据落 named volume，升级换容器不丢数据；不要求用户懂 python、venv、红线。
+- **Form ① repo + init script (developer/contributor tier)**: after `git clone`, run `install.sh` — a thin bootstrap that does the one-time landing (plain-language pre-checks, venv, home-directory wiring, .env template, three probes), after which day-to-day lifecycle is handed to the existing installer `./sandbar init/up/down/status/doctor/upgrade`.
+- **Form ② whole stack in containers (end-user tier)**: one command brings up a three-service container stack (console / engine / agent), data lands in named volumes, and replacing containers on upgrade loses no data; the user is not required to understand python, venv, or the red lines.
 
-**共享 init 真源结构图（R4）**：
+**Structure diagram of the shared init source of truth (R4)**:
 
 ```
-                      仓库（装栈逻辑唯一真源）
-                                │
-        ┌───────────────────────┼─────────────────────────┐
-        ▼                       ▼                         ▼
-   install.sh             installer.cli             容器 entrypoint
-  （薄引导，一次性）      （日常生命周期）          （形态②容器内跑）
-   人话预检/venv/         init/up/down/status/      复用 install.sh 的
-   接线/.env/三探         doctor/upgrade            装栈步骤 + 容器内探针
-        │                       ▲                         │
-        │  形态①宿主直跑         │   形态②容器内复用        │
-        └────────── 装完交棒 ────┘ ◀───────────────────────┘
+                    repository (the single source of truth for stack assembly)
+                                        │
+        ┌───────────────────────────────┼──────────────────────────────┐
+        ▼                               ▼                              ▼
+   install.sh                     installer.cli               container entrypoint
+  (thin bootstrap,             (day-to-day lifecycle)         (runs inside form ②)
+   one-shot)                 init/up/down/status/         reuses install.sh's stack-
+   pre-checks/venv/              doctor/upgrade             assembly steps + in-
+   wiring/.env/three probes                                   container probes
+        │                               ▲                              │
+        │  form ① host runs direct      │  form ② reuse in-container   │
+        └──────── hand off after install ┘ ◀────────────────────────────┘
 ```
 
-关键取舍：**不造第二套、第三套装栈入口**。install.sh 与 entrypoint 都只是「同一份装栈逻辑」的两个入口壳；生命周期（起停/状态/体检/升级）只有 `installer.cli` 一个真源。形态②的 engine 生命周期 installer.cli 目前没有容器后端，本文列为实现票待办（见 §待宿主裁定项 2），接口不在本篇定死。
+Key trade-off: **do not build a second or third stack-assembly entry point**. install.sh and the entrypoint are only two entry shells over "the same stack-assembly logic"; for lifecycle (start/stop/status/health check/upgrade) the only source of truth is `installer.cli`. For form ②, installer.cli currently has no container backend for the engine lifecycle; this document lists that as a to-do for the implementation ticket (see §Pending host decisions item 2), and the interface is not fixed here.
 
-### 形态一：仓＋init 脚本（开发者/贡献者档）
+### Form one: repo + init script (developer/contributor tier)
 
-#### install.sh 行为契约（R1）
+#### install.sh behavioral contract (R1)
 
-规格写到**行为契约层**：每项检查失败时输出什么人话、修法是什么；不落完整脚本与命令行全量清单。全部七项共用一条铁律：**缺失＝补建，冲突＝只提示不覆盖，畸形态＝显式红＋修法指路，绝不静默降级**（教训先例：notes/debts/known-issues.md KI-030 配置烂了静默退默认、KI-039 依赖缺了被容错静默吞）。
+The specs stop at the **behavioral-contract level**: what plain-language message each check prints when it fails, and what the fix is; the full script and the complete command-line inventory are not included. All seven items share one iron rule: **missing = create it, conflicting = warn only without overwriting, malformed = explicit red plus a pointer to the fix, never degrade silently** (precedents: notes/debts/known-issues.md KI-030, where a rotten config silently fell back to defaults, and KI-039, where a missing dependency was silently swallowed by fault tolerance).
 
-| # | 项 | 缺失 → 补建 | 冲突 → 只提示不覆盖 | 畸形态 → 显式红 |
+| # | Item | Missing → create | Conflicting → warn only, no overwrite | Malformed → explicit red |
 |---|---|---|---|---|
-| 1 | **幂等预检**：git 在位、python3 版本达标、（容器模式）docker 在位、**3099/7233/8233 占用检查** | 缺 git/python3 → 打印一行安装指引（如 `brew install git`），停下不再走 | 端口已占 → 人话报错指路：3099 占＝「console 属用户操作面，可能已有栈在跑，请人工确认（`./sandbar status`）」；7233 占＝「已有引擎在跑，先 `./sandbar status` 核对」。**不抢占、不顶掉、不杀任何进程** | python3 在位但版本过老 / 不可执行 → 红字点名版本与安装指引 |
-| 2 | **venv**：以 requirements 固化文件驱动创建，装后体检 | 无 venv → 创建＋装依赖 | venv 在但依赖指纹与 requirements 不匹配 → 打印差异与重建命令，**不静默重建**（重建即丢，KI-039） | 半残 venv（python 坏/导入失败）→ 红＋给重建指令，不静默覆盖 |
-| 3 | **家目录接线**：profiles/settings 等接线文件 | 缺才写 | 已有文件内容不同 → 打印差异路径，只提示，不覆盖 | 已有文件半截/格式坏 → 红＋指路（烂配置静默退默认＝KI-030 级事故） |
-| 4 | **git 身份与密钥面** | user.name/user.email 缺 → 打印一行 `git config` 指引 | 身份已有 → 跳过 | 密钥面损坏 → 显式红。**脚本永不生成/搬运/打印密钥**（前置限制 3） |
-| 5 | **.env 模板**：落 `.env`（权限 600，不进 git），**显式钉引擎地址与 namespace 缺省值，绝不缺省指向生产 7233/default**（前置限制 7；键名按 §目标命名表以 `SANDBAR_*` 为终名、`SANDBAR_*` 作过渡期兼容别名） | 缺 → 写模板（每行注释说人话） | 已有 .env → 只补缺失键，已有值不覆盖 | .env 内容损坏 → 红字点名坏行＋修法 |
-| 6 | **收尾自检三探**（每探绿一行/红一行带修法）：① venv 关键依赖可导入；② console 探针——TCP connect 3099 判在位，**只探不起**；③ 引擎探针——连 .env 钉的引擎地址与 namespace | — | — | 任一探红 → 整体退出非零，红行即排障入口 |
-| 7 | **打印下一步人话清单**：装完后打印「接下来做什么」（`./sandbar init` → `./sandbar up` → 打开控制台 3099 → 读哪篇 docs） | — | — | — |
+| 1 | **Idempotent pre-check**: git present, python3 version adequate, (container mode) docker present, **3099/7233/8233 occupancy check** | git/python3 missing → print a one-line install hint (e.g. `brew install git`) and stop without going further | port occupied → plain-language error with a pointer: 3099 occupied = "the console belongs to the user's operating surface; a stack may already be running, please confirm manually (`./sandbar status`)"; 7233 occupied = "an engine is already running, verify with `./sandbar status` first". **Do not seize, do not displace, do not kill any process** | python3 present but too old / not executable → red text naming the version and the install hint |
+| 2 | **venv**: created from a pinned requirements file, with a health check after install | no venv → create it and install dependencies | venv exists but its dependency fingerprint does not match requirements → print the difference and the rebuild command, and **do not rebuild silently** (a rebuild means loss, KI-039) | half-broken venv (broken python / failed imports) → red plus a rebuild instruction, no silent overwrite |
+| 3 | **Home-directory wiring**: wiring files such as profiles/settings | write only when missing | existing file with different contents → print the differing path, warn only, do not overwrite | existing file truncated / bad format → red plus a pointer (a rotten config silently falling back to defaults = an incident on the KI-030 scale) |
+| 4 | **git identity and key surface** | user.name/user.email missing → print a one-line `git config` hint | identity already present → skip | corrupted key surface → explicit red. **The script never generates, moves, or prints keys** (prerequisite 3) |
+| 5 | **.env template**: write `.env` (mode 600, not in git), **explicitly pinning the engine address and namespace defaults, never defaulting to production 7233/default** (prerequisite 7; key names per §Target naming table, with `SANDBAR_*` as the final name and `SANDBAR_*` as the transitional compatibility alias) | missing → write the template (every line commented in plain language) | .env exists → only add missing keys, do not overwrite existing values | corrupted .env contents → red text naming the bad line plus the fix |
+| 6 | **Closing self-check, three probes** (each probe one green line / one red line with the fix): ① key venv dependencies importable; ② console probe — TCP connect to 3099 to judge presence, **probe only, never start**; ③ engine probe — connect to the engine address and namespace pinned in .env | — | — | any probe red → overall non-zero exit, and the red line is the entry point for troubleshooting |
+| 7 | **Print the plain-language next steps**: after install, print "what to do next" (`./sandbar init` → `./sandbar up` → open console 3099 → which docs to read) | — | — | — |
 
-装一半重跑：install.sh 幂等——逐项按上表三态走到绿为止，不要求删目录重来。
+Re-running after a half-finished install: install.sh is idempotent — it walks the three states of the table above item by item until green, with no need to delete the directory and start over.
 
-#### 与既有安装器的分工（单真源，防分叉）
+#### Division of labor with the existing installer (single source of truth, no fork)
 
-- `install.sh`＝**首次落地脚手架**（一次性跑绿即退场）；
-- `./sandbar`（薄壳 → `installer.cli`）＝**日常生命周期唯一入口**：init/up/down/status/doctor/upgrade；其管辖面（引擎 7233/8233＋worker）与「3099 只探测只提示」纪律沿用；
-- console（3099）起停＝用户操作面（仓根 start-console.sh / stop-console.sh），两形态都只探测引用、不替代。
+- `install.sh` = **the first-landing scaffold** (green once, then it exits the picture);
+- `./sandbar` (thin shell → `installer.cli`) = **the single entry point for day-to-day lifecycle**: init/up/down/status/doctor/upgrade; its remit (engine 7233/8233 + worker) and the "probe 3099, warn only" discipline carry over;
+- starting and stopping the console (3099) = the user's operating surface (repo-root start-console.sh / stop-console.sh), which both forms only probe and reference, never replace.
 
-### 形态二：容器整栈（最终用户档）
+### Form two: whole stack in containers (end-user tier)
 
-#### 三服务拓扑（R2）
+#### Three-service topology (R2)
 
 ```
- 宿主用户 ── 3099（唯一对外口）──▶ ┌──────────────┐
-                                  │ console 容器  │  dsh 控制台
-                                  └──────┬───────┘
-                              compose 内网│（不映射宿主端口）
-                    ┌─────────────────────┼──────────────────────┐
-                    ▼                     ▼                      ▼
-             ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-             │ engine 容器   │      │ agent 容器    │      │ 项目目录      │
-             │ temporal:7233 │◀────▶│ agent 运行面  │      │ bind mount   │
-             │ + worker     │      └──────────────┘      │ （同路径）    │
-             └──────┬───────┘                             └──────────────┘
-                    ▼
-             named volume（引擎/控制台数据，升级不丢）
+ host user ── 3099 (only external port) ──▶ ┌────────────────┐
+                                            │ console cont.  │  dsh console
+                                            └───────┬────────┘
+                                   compose network │ (no host port mapping)
+                     ┌─────────────────────────────┼───────────────────────────┐
+                     ▼                             ▼                           ▼
+             ┌────────────────┐            ┌────────────────┐        ┌────────────────┐
+             │ engine cont.   │            │ agent cont.    │        │ project dir    │
+             │ temporal:7233  │◀──────────▶│ agent runtime  │        │ bind mount     │
+             │ + worker       │            └────────────────┘        │ (same path)    │
+             └───────┬────────┘                                     └────────────────┘
+                     ▼
+             named volume (engine/console data, survives upgrade)
 ```
 
-为什么安全：容器内引擎地址指 compose 内网 `temporal:7233`、namespace 独立——网络拓扑天然隔开宿主生产面（7233/3099），不存在「忘带前缀连到生产」的路径；宿主侧唯一映射端口是 3099。
+Why it is safe: inside the container the engine address points at the compose network `temporal:7233` with an independent namespace — the network topology naturally separates it from the host production surface (7233/3099), so there is no path by which "forgetting the prefix connects you to production"; the only port mapped on the host side is 3099.
 
-#### 19 号 docker 台零件取舍清单（同源参数化的边界）
+#### Trade-off checklist for docker bench no. 19's parts (the boundary of same-source parameterization)
 
-发行版与测试台**同源**＝同一 compose 参数化面、同一镜像组；但测试台的安全设计与发行版诉求多处**相反**，逐项表态（先例：integration/stage_docker.py 文件头取舍清单、installer 交接单取舍表）：
+The distribution and the test bench are **same-source** = the same compose parameterization surface and the same image set; but the test bench's safety design runs **opposite** to the distribution's needs in several places, addressed item by item (precedents: the trade-off checklist in the integration/stage_docker.py file header, and the installer handover trade-off table):
 
-| # | 19 号台机制 | 发行版表态 | 理由 |
+| # | Bench no. 19 mechanism | Distribution position | Rationale |
 |---|---|---|---|
-| 1 | `SANDBAR_TEST_*` 参数旋钮命名域 | **不带名字、带机制**：发行版用自有中性旋钮（`SANDBAR_DIST_*`，命名待宿主审定），附发行版旋钮↔测试台旋钮同源映射表 | 测试台命名域不进最终用户面（CLAUDE.md 硬规则 5） |
-| 2 | 端口禁区硬排除 {3099,3199,7233,8233,17233,18233} | **反向定义**：3099 是发行版合法对外口；但 up 前仍探测 3099/7233/8233 宿主占用，已占→人话报错不抢（与形态一预检同语义） | 测试台防误连生产、发行版防误顶生产——同源不同向，各自 fail-closed |
-| 3 | `down -v` 零残留（连数据卷清光） | **不带**：数据卷=用户数据真源，发行版**绝不提供 down -v 等价物**；卸载＝显式 uninstall 子命令（命名待宿主审定）＋两步确认（先列会删什么再删）；升级＝卷保留、容器/镜像换代 | teardown 语义照搬＝删用户数据 |
-| 4 | 档位 flock＋端口段（并行多实例互不撞） | **不带**：发行版单实例；锁退化为「已在跑→up 幂等复用＋人话提示」，端口缺省档固定，冲突即报错不滑档 | 多实例=用户困惑面，单实例＋幂等够用 |
-| 5 | 三态退出码 0/2/3/64（ok / ENV_FAIL / 环境冲突 / 畸形输入）＋「文案点名缺什么」 | **带**：发行版 up/三探沿用同语义 | 口径已验证，用户可脚本化判断 |
-| 6 | 健康等待＋超时带 `docker compose logs` 尾部 | **带，差异一处**：超时打 logs 尾后**保留现场**，不自动拆台 | 测试台「清场再退」利于 CI；发行版用户排障需要现场 |
-| 7 | `-p` compose 工程名隔离 | **带固定值**（如 `sandbar-dist`，命名待宿主审定）：up/down 精确命中自己，不误伤宿主上其他 compose 栈 | 固定单实例下的最小隔离 |
-| 8 | SIGINT/SIGTERM 全终态回收 | **改造**：前台 up 被 Ctrl-C 只停跟随、不删卷；「信号路径必达终态」纪律沿用 | 终态回收红线不变，语义按发行版改 |
+| 1 | `SANDBAR_TEST_*` parameter knob naming domain | **Take the mechanism, not the names**: the distribution uses its own neutral knobs (`SANDBAR_DIST_*`, naming pending host review), with a same-source mapping table from distribution knobs to test-bench knobs | The test-bench naming domain does not enter the end-user surface (CLAUDE.md hard rule 5) |
+| 2 | Hard exclusion of the forbidden port set {3099,3199,7233,8233,17233,18233} | **Defined in reverse**: 3099 is a legitimate external port for the distribution; but up still probes host occupancy of 3099/7233/8233 and reports a plain-language error instead of fighting for an occupied port (same semantics as the form-one pre-check) | The test bench guards against accidentally connecting to production, the distribution guards against accidentally displacing production — same source, opposite directions, each fail-closed |
+| 3 | `down -v` zero residue (wipes data volumes too) | **Not carried over**: data volumes are the source of truth for user data, and the distribution **never offers an equivalent of down -v**; uninstall = an explicit uninstall subcommand (naming pending host review) plus a two-step confirmation (first list what will be deleted, then delete); upgrade = volumes retained, containers/images replaced | Copying the teardown semantics verbatim = deleting user data |
+| 4 | Tier flock + port ranges (parallel instances do not collide) | **Not carried over**: the distribution is single-instance; the lock degrades into "already running → up is an idempotent reuse plus a plain-language notice", the default port tier is fixed, and a conflict is an error rather than a silent tier shift | Multiple instances = a source of user confusion; single instance plus idempotence is enough |
+| 5 | Three-state exit codes 0/2/3/64 (ok / ENV_FAIL / environment conflict / malformed input) plus "the message names what is missing" | **Carried over**: the distribution's up and three probes use the same semantics | The criteria are proven, and users can branch on them in scripts |
+| 6 | Health wait with a timeout carrying the tail of `docker compose logs` | **Carried over, with one difference**: on timeout, after printing the logs tail, **preserve the scene** instead of tearing the stack down automatically | The test bench prefers "clean up then exit" for CI; distribution users need the scene for troubleshooting |
+| 7 | `-p` compose project name isolation | **Carried over with a fixed value** (e.g. `sandbar-dist`, naming pending host review): up/down hit precisely their own stack and do not damage other compose stacks on the host | The minimum isolation under a fixed single instance |
+| 8 | Full terminal-state collection on SIGINT/SIGTERM | **Adapted**: Ctrl-C on a foreground up only stops following, it does not delete volumes; the discipline "the signal path must reach a terminal state" carries over | The full-terminal-state collection red line is unchanged; the semantics change for the distribution |
 
-#### 四硬问题解法
+#### Solutions to the four hard problems
 
-1. **项目目录 bind mount 同路径**：用户项目目录按**宿主同绝对路径**挂进容器（如 `~/Documents/foo` → 容器内同路径）。原因：profile/工单面以绝对路径记录项目，跨路径挂载＝落地路径漂移。mac 上 Docker Desktop 需用户首次授权目录共享，install 流程显式提示这一步。
-2. **git 身份与密钥走 .env，不进镜像**：镜像内零身份零密钥（可分发）；git 身份、密钥面引用、引擎地址/namespace 全部运行时经 .env 注入。镜像可公开、`.env` 留宿主、不进 git 不进镜像层。
-3. **数据 named volume 保升级**：引擎落盘数据、控制台数据全部落 named volume；升级＝换镜像换容器，卷不动。**删数据只有显式 uninstall＋两步确认一条路**（取舍表 #3）。
-4. **init 复用为 entrypoint（单真源）**：容器 entrypoint 复用 install.sh 的同一套装栈步骤（容器用例：预检→接线→三探→交棒生命周期），不造第三套装栈逻辑（见结构图）。
+1. **Bind-mount the project directory at the same path**: the user's project directory is mounted into the container at the **same absolute path as on the host** (e.g. `~/Documents/foo` → the same path inside the container). Reason: profiles and the ticket surface record projects by absolute path, so mounting at a different path = landing-path drift. On mac, Docker Desktop requires the user to authorize directory sharing once, and the install flow points this step out explicitly.
+2. **git identity and keys go through .env, not into the image**: zero identity and zero keys inside the image (so it is distributable); git identity, key-surface references, and the engine address/namespace are all injected at runtime via .env. The image can be public, `.env` stays on the host, and it enters neither git nor the image layers.
+3. **Named volumes preserve data across upgrades**: the engine's on-disk data and the console's data all land in named volumes; an upgrade = new images and new containers, with the volumes untouched. **Deleting data has exactly one route: explicit uninstall plus two-step confirmation** (trade-off table #3).
+4. **init reused as the entrypoint (single source of truth)**: the container entrypoint reuses the same stack-assembly steps of install.sh (the container case: pre-check → wiring → three probes → hand off to lifecycle), rather than building a third stack-assembly logic (see the structure diagram).
 
-#### 成本账
+#### Cost accounting
 
-- **uid 映射**：mac——容器经 Docker Desktop 文件共享读写 bind mount，文件属主自动映射为宿主用户，无痛；Linux——容器内 root 写宿主 bind mount 会留下 root 属主文件，跟进的用例需容器进程以宿主 uid 运行（或等价映射），此项是 Linux 用例的主要工作量。
-- **属主验收口径**：容器跑完工单后，项目目录新落文件属主＝宿主用户（macOS 用例即时成立）。
-- **用户重启习惯**：重启机/重启 Docker Desktop 后 `up -d` 即恢复（数据在卷）；日常停栈＝down（保卷）；**没有需要用户手杀容器的场景**——文档与 CLI 文案引导「down/upgrade/uninstall」三个动词，不教 kill。
-- **Windows/WSL2 边角（记录在案不承诺）**：NTFS 无 POSIX 权限位、/home 跨界 bind mount 性能与属主问题，后进的用例另评估。
+- **uid mapping**: mac — the container reads and writes the bind mount through Docker Desktop file sharing and file ownership is mapped automatically to the host user, painlessly; Linux — the container's root writing to a host bind mount leaves root-owned files behind, so the follow-up case needs the container process to run as the host uid (or an equivalent mapping), and this is the main work item of the Linux case.
+- **Ownership acceptance criterion**: after the container finishes a ticket, the ownership of newly landed files in the project directory = the host user (immediately true for the macOS case).
+- **User restart habits**: after rebooting the machine or Docker Desktop, `up -d` restores everything (the data is in the volumes); stopping the stack day to day = down (volumes kept); **there is no scenario in which the user needs to kill containers by hand** — the docs and CLI messages steer toward the three verbs "down/upgrade/uninstall" and do not teach kill.
+- **Windows/WSL2 corner cases (recorded, not committed)**: NTFS has no POSIX permission bits, and crossing /home with a bind mount raises performance and ownership issues; the later case will assess these separately.
 
-### 收件人视角与自指拆除（宿主令 v2/v5）
+### Recipient perspective and self-reference removal (host instructions v2/v5)
 
-**第一验收视角＝收件人**：「我们交付 sandbar 给别人用，他们的 project 里可就不会有 sandbar 这个 project 了。」当前栈的多处设计以 sandbar 自身作为 project 为前提（模型路由、roles persona、自检场景、文档），交付态全部要拆：
+**The primary acceptance perspective = the recipient**: "we deliver sandbar for others to use, and their project will not contain a project called sandbar." Several parts of the current stack assume sandbar itself as the project (model routes, roles persona, self-check scenarios, documentation), and all of them must be dismantled in the delivered state:
 
-| # | 自指面 | 现状（开发态） | 拆除后（交付态） |
+| # | Self-reference | Current state (development) | After removal (delivered) |
 |---|---|---|---|
-| 1 | 引擎级模型路由/角色 | 模型路由与 roles persona 以 sandbar 项目内文件为唯一/首选路径 | **引擎级默认＋用户 keys 扶正为一等公民**；项目级覆盖＝可选进阶；按主目录解析的回落机制保留但不作为唯一路径 |
-| 2 | persona 项目指向 | 「你是溯游（suyou）项目的开发」类措辞写死项目名 | **去项目化**：roles/ 是跨项目资产，persona 措辞**参数化**（`{{project}}` 由引擎派活时按工单项目注入）或去项目指向——不换 sandbar 名（宿主令 v5）；引擎级 roles=通用人格（默认），项目特色人格走项目级覆盖契约（`paths.roles_dir`） |
-| 3 | 发行自检 | 复用跑在 sandbar 自身上的 156 条集成场景 | **独立小场景族**（收件人剧本，见 §fresh-home 三态注入口径），与开发仓场景族分开维护 |
-| 4 | 文档分层 | 引擎手册与项目 docs 混在仓 docs/ | **引擎手册跟包走**（README/安装指南/首启引导进发行包）；项目 docs 归项目 |
+| 1 | Engine-level model routing/roles | Model routes and roles persona use files inside the sandbar project as the only/preferred path | **Engine-level defaults plus user keys are promoted to first-class citizens**; project-level overrides = an optional advanced path; the fallback that resolves via the home directory is retained but is no longer the only path |
+| 2 | persona project pointing | Wording such as "you are a developer on the suyou project" hardcodes the project name | **De-projectized**: roles/ is a cross-project asset, and the persona wording is **parameterized** (`{{project}}` injected by the engine when it dispatches work, per the ticket's project) or loses its project pointer — the name is not swapped to sandbar (host instruction v5); engine-level roles = generic personas (default), and project-specific personas go through the project-level override contract (`paths.roles_dir`) |
+| 3 | Release self-check | Reuses the 156 integration scenarios that run on sandbar itself | **An independent small scenario family** (the recipient script, see §fresh-home scenario spec), maintained separately from the development-repo scenario family |
+| 4 | Documentation layering | The engine manual and the project docs are mixed in the repo's docs/ | **The engine manual ships with the package** (README/install guide/first-run guidance go into the distribution); project docs belong to the project |
 
-**example-project 样例项目**：发行包含一个样例项目目录——首启引导登记它 → 开教学票走完七段。教学沙盒兼验收夹具，一物两用；收件人随后登记自己的真实项目，样例可删可留。
+**example-project sample**: the distribution includes a sample project directory — the first-run guidance registers it → a teaching ticket runs through all seven stages. Both a teaching sandbox and an acceptance fixture, two uses in one; the recipient then registers their own real project, and the sample can be deleted or kept.
 
-### 目录结构与发版清单（宿主令 v6，结构裁定「目录可以」）
+### Directory structure and release manifest (host instruction v6, structure decision "the directory is fine")
 
-**server/ 目录结构定稿**（server 摊平）：
+**Final server/ directory structure** (server flattened):
 
-| 目标目录 | 内容 | 备注 |
+| Target directory | Contents | Note |
 |---|---|---|
-| `server/engine/` | 原 `server/engine/`（bin/temporal＋data/ 为引擎私属基底） | 引擎正名（v4 改判：重依赖 Temporal 是 design 定的事实，目录名如实反映，只去掉 poc 试验尾巴） |
-| `server/plugins/` | 原 11 个 dsh 插件目录 | 包名随命名表 suyou-* → sandbar-* |
-| `server/tools/` ＋ `server/ui-check/` | 工具族＋UI 检查 | tools 不动，ui-check 升一级 |
-| `server/profile/` ＋ `server/profile-headless/` | profile 预组 | 不动名 |
-| `server/roles/` ＋ `server/model-routes.yaml` | 跨项目通用人格库＋路由表 | 项目可覆盖（见自指拆除 #2） |
+| `server/engine/` | the former `server/engine/` (bin/temporal + data/ as the engine's private base) | The engine is properly named (v4 revision: heavy reliance on Temporal is a fact settled by the design, so the directory name reflects it honestly, and only the poc experimental tail is dropped) |
+| `server/plugins/` | the former 11 dsh plugin directories | Package names follow the naming table suyou-* → sandbar-* |
+| `server/tools/` + `server/ui-check/` | tool family + UI check | tools stays put, ui-check moves up one level |
+| `server/profile/` + `server/profile-headless/` | profile presets | names unchanged |
+| `server/roles/` + `server/model-routes.yaml` | cross-project generic persona library + routing table | projects may override (see self-reference removal #2) |
 
-**init 走查流程图**（安装时按此序走查，目录与交付互相咬合）：
+**init walkthrough flow diagram** (at install time the walkthrough follows this order; the directory and the deliverables interlock):
 
 ```
 install.sh / entrypoint
-   │ 1 预检（git/python3/docker/端口占用）
+   │ 1 pre-check (git/python3/docker/port occupancy)
    ▼
-2 落包（按发版清单摆放；engine/data/ 留空不进包）
+2 lay down the package (per the release manifest; engine/data/ left empty, not packaged)
    ▼
-3 家目录接线（profiles/settings/.env；~/.dsh/profiles 软链按命名表新名）
+3 home-directory wiring (profiles/settings/.env; ~/.dsh/profiles symlink per the naming table)
    ▼
-4 venv（形态一）或镜像内依赖（形态二）
+4 venv (form one) or in-image dependencies (form two)
    ▼
-5 三探 → 交棒 installer.cli 生命周期
+5 three probes → hand off to installer.cli lifecycle
    ▼
-6 首启引导：登记 example-project → 教学票七段 → 登记收件人自己的项目
+6 first-run guidance: register example-project → teaching ticket seven stages → register the recipient's own project
 ```
 
-**交付四决策（锁死）**：
+**The four delivery decisions (locked)**:
 
-1. **发版清单**：进包＝代码＋`bin/temporal`＋**预构建插件 bundle**；不进＝`engine/data/`、`.lane/`、`.venv`、`node_modules`；
-2. **预构建红利要吃**：收件人零前端构建链（node 只为 dsh 运行存在，不要求装构建工具链）；
-3. **机器级全局名**（`~/.dsh/profiles/sandbar` ＋ `~/.sandbar/projects/`）**v1＝单实例假设**：多实例冲突显式处理（撞名即报错指路），真正的多实例共存留后续版；
-4. **`engine/data/` 保持 gitignore**：容器形态整目录挂 named volume，挂载点进 compose 规格（与四硬问题 #3 咬合）。
+1. **Release manifest**: in the package = code + `bin/temporal` + **prebuilt plugin bundles**; out = `engine/data/`, `.lane/`, `.venv`, `node_modules`;
+2. **Reap the prebuild dividend**: the recipient needs no frontend build chain (node exists only to run dsh; installing a build toolchain is not required);
+3. **Machine-level global names** (`~/.dsh/profiles/sandbar` + `~/.sandbar/projects/`) **v1 = single-instance assumption**: multi-instance conflicts are handled explicitly (a name collision is an error with a pointer), and true multi-instance coexistence is left to a later version;
+4. **`engine/data/` stays gitignored**: in container form the entire directory is mounted as a named volume, and the mount point goes into the compose spec (interlocking with hard problem #3).
 
-### 目标命名表与迁移顺序（宿主令 v3/v4，命名终审=宿主过目）
+### Target naming table and migration order (host instructions v3/v4, final naming review = the host's own read-through)
 
-| 目标 | 现状 | 备注 |
+| Target | Current state | Note |
 |---|---|---|
-| `server/engine/`（v4 改判） | `server/engine/` | 引擎正名，去 poc 试验名 |
-| `server/sandbar/` | `server/` | 脱离宿主壳姓氏；注意 `~/.dsh/profiles/` 外部软链同步改指＋控制台重启边界 |
-| 插件包 `sandbar-*` | `suyou-*`（含 `/suyou-workbench/` 路由前缀 61 处，前后两半同票动） | |
-| 队列 `sandbar` | `suyou-poc` | worker 双队列过渡 |
-| `SANDBAR_*` env（过渡期兼容别名 `SANDBAR_*`） | `SANDBAR_*` | 泳道 `.suyou/` → `.sandbar/` 同批 |
-| roles persona `{{project}}` 参数化 | 写死「溯游项目」措辞 | v5 改判：去名不换名 |
+| `server/engine/` (v4 revision) | `server/engine/` | The engine is properly named, dropping the poc experimental name |
+| `server/sandbar/` | `server/` | Shedding the host shell's surname; note that the external symlink under `~/.dsh/profiles/` must be re-pointed in step, plus the console restart boundary |
+| Plugin packages `sandbar-*` | `suyou-*` (including 61 occurrences of the `/suyou-workbench/` route prefix; both halves move in the same ticket) | |
+| Queue `sandbar` | `suyou-poc` | The worker uses two queues during the transition |
+| `SANDBAR_*` env (transitional compatibility alias `SANDBAR_*`) | `SANDBAR_*` | The lane's `.suyou/` → `.sandbar/` changes in the same batch |
+| roles persona `{{project}}` parameterization | wording hardcodes "the suyou project" | v5 revision: drop the name, do not swap it |
 
-**迁移顺序**：env → 包名/路由 → 队列 → engine 目录（128 文件路径面）→ server 目录（最后）。全部完成于分发 v1 发布前；**每步独立票独立闸**，验收＝对应场景族复跑绿。
+**Migration order**: env → package name/routes → queues → the engine directory (a surface of 128 file paths) → the server directory (last). All complete before distribution v1 ships; **each step its own ticket and its own gate**, with acceptance = the corresponding scenario family re-run green.
 
 
 
-### fresh-home 场景规格（R3/R6，macOS 用例先做，收件人视角）
+### fresh-home scenario spec (R3/R6, macOS case first, recipient perspective)
 
-**主角＝收件人**：剧本全程以收件人自己的项目为第一主角，example-project 只作首启教学；「sandbar 作为 project」零出场。
+**Protagonist = the recipient**: the script stars the recipient's own project throughout, with example-project serving only as first-run teaching; "sandbar as a project" is absent.
 
-**前置态定义**：全新 mac（或以干净 `HOME` 模拟），只装 git 与 Docker Desktop，无 python 手工配置、无 clone 历史；项目注册表为空。
+**Definition of the initial state**: a brand-new mac (or a clean `HOME` used to simulate one), with only git and Docker Desktop installed, no manual python configuration, and no clone history; the project registry is empty.
 
-| 步 | 动作 | 预期输出（绿） | 失败时人话报错出现处 |
+| Step | Action | Expected output (green) | Where a plain-language failure message appears |
 |---|---|---|---|
-| 1 | **起栈**：形态二＝跑 install.sh（容器模式）→ `up -d`；形态一＝clone → install.sh → `./sandbar init` → `./sandbar up` | 逐项预检绿行；三容器（形态二）或引擎＋worker（形态一）起；末尾三探全绿＋下一步清单 | 每个失败项一行人话（修法指路），红行即排障入口；形态二 up 超时附 compose logs 尾并保留现场 |
-| 2 | **三探**：venv 依赖可导入 / console 探针（3099 只探）/ 引擎探针（钉死地址） | 三行绿 | 红=整体非零退出，指向对应修复动作 |
-| 3 | **首启引导**：控制台空注册表 → 按引导登记 example-project 样例项目 | 样例项目入注册表；引导下一步指向教学票 | 引导面板报注册失败原因 |
-| 4 | **教学票**：在 example-project 上开一张教学票，走完七段落地 | 票从开到落地全自动走完，结果可查——教学沙盒兼验收夹具一物两用 | 控制台面板报 worker 离线/引擎不可达 |
-| 5 | **收件人正题**：登记收件人自己的项目（bind mount 同路径，见四硬问题 #1），在其上开真实工单并落地 | 工单落地；项目目录新文件属主＝收件人用户 | — |
+| 1 | **Bring up the stack**: form two = run install.sh (container mode) → `up -d`; form one = clone → install.sh → `./sandbar init` → `./sandbar up` | Green lines from each pre-check item; three containers (form two) or engine + worker (form one) come up; three probes all green at the end plus the next-steps list | One plain-language line per failed item (with a pointer to the fix), and the red line is the troubleshooting entry point; form two's up timeout carries the compose logs tail and preserves the scene |
+| 2 | **Three probes**: venv dependencies importable / console probe (3099, probe only) / engine probe (pinned address) | three green lines | Red = an overall non-zero exit pointing at the corresponding fix |
+| 3 | **First-run guidance**: the console shows an empty registry → follow the guidance to register the example-project sample | the sample project enters the registry; the guidance points next at the teaching ticket | the guidance panel reports the reason registration failed |
+| 4 | **Teaching ticket**: open a teaching ticket on example-project and run it through the seven stages to landing | the ticket runs fully automatically from open to landing and the result is queryable — the teaching sandbox and acceptance fixture in one | the console panel reports the worker offline / the engine unreachable |
+| 5 | **The recipient's real business**: register the recipient's own project (bind-mounted at the same path, see hard problem #1) and open a real ticket on it that lands | the ticket lands; the ownership of new files in the project directory = the recipient user | — |
 
-**三态注入用例口径**（验收/测试设计用，消费外部输入的实现必带畸形态用例；本节同时是**发行自检独立小场景族**的种子清单——不复用开发仓 156 条，见自指拆除 #3）：
+**Three-state injection case criteria** (for acceptance/test design; an implementation that consumes external input must carry malformed-state cases; this section is also the seed list for the **independent small scenario family of the release self-check** — it does not reuse the development repo's 156 cases, see self-reference removal #3):
 
-- 缺失：无 docker → 预检人话点名「装 Docker Desktop + 授权目录共享」；
-- 冲突：3099 已被开发栈占用 → 预检报错指路（人工二选一），不抢占；
-- 畸形态：坏 .env → 红字点名坏行；半残 venv（形态一）→ 红＋重建指令；装一半重跑 → 幂等走到绿。
+- Missing: no docker → the pre-check names in plain language "install Docker Desktop + authorize directory sharing";
+- Conflicting: 3099 already occupied by the development stack → the pre-check errors out with a pointer (the human chooses between the two) and does not seize the port;
+- Malformed: a bad .env → red text naming the bad line; a half-broken venv (form one) → red plus a rebuild instruction; re-running a half-finished install → idempotently reaches green.
 
-Linux 用例＝同场景在 Linux 复跑（属主映射为变重点）；Windows 用例不承诺（见 Nongoal）。
+The Linux case = the same scenario re-run on Linux (with ownership mapping as the changed focus); the Windows case is not committed (see Nongoal).
 
-### 发布前置债（宿主裁定列债，随专门迁移票处置）
+### Release-blocking debt (host-decided debt, handled by dedicated migration tickets)
 
-发布形态 v1 前必须清（或宿主明示带债发布）：**§目标命名表与迁移顺序**中的全部各行（env → 包名/路由 → 队列 → engine 目录 → server 目录，每步独立票独立闸）；本篇发行版旋钮/工程名/卸载子命令的命名随命名表一并终审（当前以「命名待宿主审定」占位）。
+This must be cleared before distribution form v1 (or shipped as explicit host-acknowledged debt): every row of **§Target naming table and migration order** (env → package name/routes → queues → engine directory → server directory, each step its own ticket and its own gate); the naming of this document's distribution knobs / compose project name / uninstall subcommand is finalized together with the naming table (currently held by the "naming pending host review" placeholder).
 
-### 待宿主裁定项
+### Pending host decisions
 
-1. **3099 唯一对外口 vs 同机既有栈**：同机同时跑开发栈 console（3099）与发行版栈时端口必撞，而「console 唯一对外口 3099」与「发行版改端口档」矛盾。建议：发行版 up 前预检发现 3099 被占即报错引导二选一（不自动改口）——待宿主裁定本机共存语义。
-2. **installer.cli 容器后端**：形态二 engine 生命周期是否收编进 installer.cli（建议是，作实现票交付），避免平行第二套入口。
-3. **安装器域设计面收编**：docs 目前无安装器定稿文档；是否由本篇扩编或另票成文，待宿主裁定。
+1. **3099 as the only external port vs an existing stack on the same machine**: running the development-stack console (3099) and the distribution stack on one machine is bound to collide on the port, and "console as the only external port 3099" contradicts "the distribution can shift port tiers". Proposal: before up, the distribution pre-checks and, finding 3099 occupied, errors out and guides the user to choose between the two (without changing the port automatically) — pending the host's decision on same-machine coexistence semantics.
+2. **installer.cli container backend**: whether form two's engine lifecycle is absorbed into installer.cli (proposed yes, delivered as an implementation ticket), to avoid a second parallel entry point.
+3. **Absorbing the installer domain design surface**: docs currently has no finalized installer document; whether this document expands to cover it or a separate ticket writes one is pending the host's decision.
 
-### 验收口径
+### Acceptance criteria
 
-- 文档过宿主审（本篇为提案稿）；
-- fresh-home 场景规格（起栈→三探→开票→落地全自动）成文且每步可验证、三态注入用例口径齐；
-- 两形态共享 init 真源结构图清晰（只看图能讲出单真源关系）。
+- The document passes the host's review (this is a proposal draft);
+- The fresh-home scenario spec (bring up the stack → three probes → open a ticket → land, fully automatic) is written down with every step verifiable, and the three-state injection case criteria are complete;
+- The structure diagram of the shared init source of truth for both forms is clear (reading the diagram alone conveys the single-source-of-truth relationships).
 
-**回扣**：本方案以两形态＋单真源直接解决 Problem 的「无成文分发路径」（贡献者档成文可自装、最终用户档首次存在）；逐项满足 R1–R7（七项三态契约 / 拓扑与端口纪律 / mac fresh-home 收件人视角 / 结构图 / 契约⑧沿用 / 自指拆除＋example-project / 命名表＋结构定稿＋交付四决策）；Nongoal 把 npm 包、Windows、密钥、迁移实施、installer 接口定稿全部挡在外面，范围不蔓延。
+**Callback**: this option addresses the Problem's "no written distribution path" directly with two forms plus one source of truth (the contributor tier becomes writable and self-installable, and the end-user tier exists for the first time); it satisfies R1–R7 item by item (the seven-item three-state contract / topology and port discipline / the mac fresh-home recipient perspective / the structure diagram / carrying over contract clause ⑧ / self-reference removal + example-project / the naming table + finalized structure + four delivery decisions); Nongoal keeps the npm package, Windows, keys, migration execution, and the installer interface finalization all outside the scope, so the scope does not creep.
 
-## 相关文档
+## Related documents
 
-- 依赖：[测试环境隔离指南](../testing-guide.md)（端口红线、测试台拓扑）；[引擎机制主档](deepseek_harness_and_temporal_based_multi-agent_mechanism.md)；[sandbar 项目接入契约 v1](sandbar项目接入契约v1.md)（⑧节版本/兼容矩阵）
-- 规范依据：[设计文档写作指南](设计文档写作指南.md)
-- 仓内实件（非 docs，现路径 → 目标名见 §目标命名表）：`install.sh`（形态一，待实现票）、仓根 `sandbar`（installer.cli）、测试台 compose 面（现 `server/docker-compose.test.yml` → 目标 `server/sandbar/` 域）＋ `integration/stage_docker.py`（19 号台）、`server/probes/`（兼容探针）、roles/model-routes（现 `server/roles`、`server/model-routes.yaml` → 目标 `server/roles/`、`server/model-routes.yaml`，跨项目通用人格库）
+- Dependencies: [test environment isolation guide](../testing-guide.md) (port red lines, test-bench topology); the engine mechanism master document (`docs/design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md`); [sandbar project onboarding contract v1](sandbar-project-onboarding-contract-v1.md) (clause ⑧ version/compatibility matrix)
+- Standards basis: [design doc writing guide](design-doc-writing-guide.md)
+- In-repo artifacts (not docs; current path → target name in §Target naming table): `install.sh` (form one, pending implementation ticket), the repo-root `sandbar` (installer.cli), the test-bench compose surface (today `server/docker-compose.test.yml` → target `server/sandbar/` domain) + `integration/stage_docker.py` (bench no. 19), `server/probes/` (compatibility probes), roles/model-routes (today `server/roles`, `server/model-routes.yaml` → target `server/roles/`, `server/model-routes.yaml`, the cross-project generic persona library)

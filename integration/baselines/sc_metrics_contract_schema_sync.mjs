@@ -8,6 +8,11 @@
 //     epic=none fallback bucket is explained
 //  3. the cache invalidation rule (source_version/engine_version/updated_ts)
 //     matches key decision 2 of the proposal ticket
+//
+// 260928 re-anchoring (host order: the docs library was translated into English).
+// The anchors moved from the Chinese prose labels to the English ones
+// ('canonical field string' / 'cache record schema'); the schema line itself is
+// machine contract and was never translated, so the byte-sync assertion is intact.
 
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -17,8 +22,8 @@ const check = (name, ok, detail = '') => {
   else { fail++; console.log(`FAIL ${name}${detail ? ' — ' + detail : ''}`); }
 };
 
-const DOC = 'docs/design/metrics-api契约v1.md';
-const UI = 'docs/design/metrics面板ui规划.md';
+const DOC = 'docs/design/metrics-api-contract-v1.md';
+const UI = 'docs/design/metrics-panel-ui-plan.md';
 
 if (!existsSync(DOC)) {
   console.log(`FAIL 契约文档存在 — ${DOC} 不存在（implement 段未交付或路径漂移）`);
@@ -41,15 +46,15 @@ const REQUIRED_FIELDS = [
 ];
 const grabSchema = (text, anchor) => {
   // Canonical field string: the first backtick code span after the anchor
-  // phrase (the contract document anchors on 「正典字段串」, UI §6 anchors
-  // on 「缓存记录 schema」)
-  const ai = anchor ? text.indexOf(anchor) : 0;
+  // phrase (the contract document anchors on 「Canonical field string」,
+  // UI §6 anchors on 「Cache record schema」)
+  const ai = anchor ? text.search(new RegExp(anchor, 'i')) : 0;
   if (ai < 0) return null;
   const m = text.slice(ai).match(/`([^`]*ticket_id[^`]*)`/);
   return m ? m[1] : null;
 };
-const schemaDoc = grabSchema(doc, '正典字段串');
-const schemaUi = grabSchema(ui, '缓存记录 schema');
+const schemaDoc = grabSchema(doc, 'canonical field string');
+const schemaUi = grabSchema(ui, 'cache record schema');
 check('契约文档含完整 schema 行', !!schemaDoc);
 check('UI 规划 §6 含 schema 行', !!schemaUi);
 if (schemaDoc && schemaUi) {
@@ -64,16 +69,20 @@ for (const f of REQUIRED_FIELDS) {
 }
 
 // ---- 2. epic enum ----
-check('契约文档 epic 枚举含 none', /epic=<code\|all\|none>/.test(doc) || /`?none`?[^\n]{0,40}(兜底|未标注)/.test(doc));
+check('契约文档 epic 枚举含 none',
+  /epic=<code\|all\|none>/.test(doc) || /`?none`?[^\n]{0,60}(fallback|no code|not (yet )?tagged)/i.test(doc));
 check('UI 规划 epic 枚举含 none', ui.includes('<code|all|none>'),
   'UI 规划 §6 未同步 epic=none（三处 delta 之二）');
-check('epic=none 兜底理由成文', /none[\s\S]{0,120}(兜底|历史无代号|未标注)/.test(doc));
+check('epic=none 兜底理由成文',
+  /none[\s\S]{0,160}(fallback|no code|not (yet )?tagged|historical)/i.test(doc));
 
 // ---- 3. invalidation rules aligned with proposal decision 2 ----
 for (const f of ['source_version', 'engine_version', 'updated_ts']) {
   check(`失效版本字段 ${f} 在契约中`, doc.includes(f));
 }
-check('固化不可重算例外成文', /delivery_frozen[\s\S]{0,200}(不可重算|跳过\s*delivery|跳过delivery)/.test(doc) || /固化[\s\S]{0,200}不可重算/.test(doc));
+check('固化不可重算例外成文',
+  /delivery_frozen[\s\S]{0,220}(not recomputable|discardable\s*≠\s*recomputable|cannot be recomputed)/i.test(doc) ||
+  /(discardable[\s\S]{0,60}recomputable)[\s\S]{0,220}delivery/i.test(doc));
 
 console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=0 na=0`);
 process.exit(fail > 0 ? 1 : 0);

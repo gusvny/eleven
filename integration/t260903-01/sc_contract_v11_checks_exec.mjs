@@ -25,7 +25,7 @@
  * names in the DOC and shape key sets — not execution semantics. Malformed unknown
  * keys are owned there; this file only drives valid declarations.
  *
- * Reference: docs/design/sandbar项目接入契约v1.md ②a/②d；verify_lane.py _code 装配。
+ * Reference: docs/design/sandbar-project-onboarding-contract-v1.md ②a/②d；verify_lane.py _code 装配。
  */
 
 import { spawnSync } from 'node:child_process'

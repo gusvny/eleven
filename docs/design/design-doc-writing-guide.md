@@ -1,111 +1,113 @@
 ---
-title: 设计文档写作指南
+title: Design Document Writing Guide
 category: design
-tags: [设计文档, 写作规范, guideline, 讨论先行]
+tags: [design doc, writing guideline, guideline, discussion-first]
 status: active
-updated: 2026-09-04
+updated: 2026-09-28
 ---
 
-# 设计文档写作指南（Guideline）
+# Design Document Writing Guide (Guideline)
 
-> 本文件是**操作指南**：直接照着做，不要当散文读。
-> 适用对象：所有要写 `docs/design/` 下设计文档的人（人 + agent）。
-> **地位确认（260904 随 doc-lifecycle 立项）**：本指南是 docs/ 一切定稿文档的写作
-> 准入标准——从 notes 毕业迁入 docs 的文档必须照此改写（说人话、四段齐全），
-> 不合体者退回 notes。「要说人话」同时是宿主对 docs 的硬要求与 agent 信任的
-> 前提（读不懂的 context 不是 context）。
+> This file is an **operating guide**: follow it directly, do not read it as an essay.
+> Audience: everyone who writes a design document under `docs/design/` (human + agent).
+> **Status confirmation (260904, together with the doc-lifecycle epic)**: this guide is the
+> admission standard for all finalized documents under docs/ — a document graduating from
+> notes into docs must be rewritten to follow it (plain language, all four sections present),
+> and anything that does not fit is sent back to notes. "Speak plain language" is at once the
+> host's hard requirement for docs and the precondition for agent trust (context you cannot
+> understand is not context).
 
-## 什么时候要写
+## When to write one
 
-- 要做一件**新的事**，或**大改一件已有的事**（新玩法、新系统、改架构、改流程）。
-- 判断标准：光靠口述说不清「做什么、为什么、边界在哪」的，就写。
+- When you are doing a **new thing**, or **substantially changing an existing thing** (new gameplay, new system, architecture change, process change).
+- Test: if speech alone cannot convey "what to do, why, and where the boundary is", write it down.
 
-## 四段模板（照抄填空）
+## Four-section template (copy it and fill in the blanks)
 
-按下面顺序写，**四段一个都不能少**。每段先只回答冒号后面的问题，写完再展开。
-
----
-
-### Problem（问题）
-
-**填三样：**
-
-1. 一句话：现状哪里不好？
-2. 背景知识：没参与过的人要懂这个问题，需要先知道什么？（术语、历史、前置概念，有就写，没有就写「无」）
-3. 证据：凭什么说这是问题？（现象 / 数据 / 痛点 / 现状描述）
-
-> 写完自查：一个完全没接触过这事的人，能看懂「问题是什么、为什么值得解决」吗？不能就补。
+Write in the order below; **not one of the four sections may be missing**. In each section, answer only the question after the colon first, and expand after that.
 
 ---
 
-### Requirement（需求）
+### Problem
 
-**填三样：**
+**Fill in three things:**
 
-1. 目标：做完这件事，要满足哪些**可验证**的要求？（列表）
-2. Stakeholder：谁能拍板 / 谁受影响，各自的核心诉求？
-   - （例：用户——要能看懂；内容——要守铁律；运维——要能 build；agent——要拿文档当 context）
-3. 前置限制：有哪些不能突破的框？（技术栈、性能、安全、兼容、已有架构边界）
+1. One sentence: what is bad about the status quo?
+2. Background knowledge: what must someone who was not involved know first in order to understand this problem? (terms, history, prerequisite concepts — write them if they exist, write "none" if they do not)
+3. Evidence: what makes this a problem? (symptom / data / pain point / description of the status quo)
 
-> 写完自查：这些要求能不能拿来当「验收标准」？不能量化/验证的就改。
-
----
-
-### Nongoal（不做什么）
-
-**列清单**，每条写「这次不做 X，为什么（或什么时候做）」。
-
-- 划边界、防范围蔓延。
-- 拿不准的，宁可多写一条「本期不做」。
+> Self-check when done: can someone with no exposure to this at all understand "what the problem is and why it is worth solving"? If not, add more.
 
 ---
 
-### Proposal（方案）
+### Requirement
 
-**分两层写：**
+**Fill in three things:**
 
-1. **High level（必写）**：整体思路 + 关键取舍，一页能看懂。画个流程/结构更好。
-2. **细节（按需）**：只写「不写就会做错」的细节；其余放「见实现工单 / 见具体实现文档」。
+1. Goals: once this is done, which **verifiable** requirements must be satisfied? (list)
+2. Stakeholders: who can decide / who is affected, and what each of them cares about most?
+   - (Example: user — must be able to understand it; content — must keep the iron rules; ops — must be able to build; agent — must be able to use the doc as context)
+3. Upfront constraints: which boxes must not be broken? (tech stack, performance, security, compatibility, existing architectural boundaries)
 
-**收尾要回扣前三段**：明确写出「这个方案 → 解决了 Problem 里的 X → 满足了 Requirement 里的 Y → 避开了 Nongoal 里的 Z」。三者呼应看得见才算写完了。
+> Self-check when done: can these requirements be used as "acceptance criteria"? Rewrite anything that cannot be quantified or verified.
 
 ---
 
-## 写作步骤（按序做）
+### Nongoal
 
-1. 先写 Problem，写到「别人读懂」为止（这一步最容易被跳过）。
-2. 再写 Requirement 和 Nongoal（先把框定死，别急着想方案）。
-3. 最后写 Proposal（前三个定了，方案自然收敛）。
-4. 全文通读一遍，按每段的「自查」过。
-5. 挂到「相关文档」互链，交人 review（知识库 block diff）。
+**Make a list**, each item stating "we are not doing X this time, and why (or when we will)".
 
-## 自查清单（交出去前打勾）
+- Draw the boundary, prevent scope creep.
+- When unsure, err on the side of one more "not this cycle" item.
 
-- [ ] 四段齐全，顺序是 Problem → Requirement → Nongoal → Proposal
-- [ ] Problem 里背景知识讲清楚了，外行能懂
-- [ ] Requirement 的每条都能当验收标准
-- [ ] Nongoal 有具体条目，不是空着
-- [ ] Proposal 先 high level，细节没有提前铺满
-- [ ] Proposal 纯写「是什么、为什么」，无实现细节（API 名/命令行/路由/字段名）与落地状态/进度
-- [ ] Proposal 末尾回扣了 Problem/Requirement/Nongoal
-- [ ] frontmatter 齐全（title/category/tags/status/updated）
-- [ ] 相关文档互链了
+---
 
-## 常见错误
+### Proposal
 
-| 错 | 怎么改 |
+**Write it on two levels:**
+
+1. **High level (mandatory)**: the overall idea + key tradeoffs, understandable on one page. A flow or structure sketch is even better.
+2. **Details (on demand)**: write only the details where "not writing them down means someone will get it wrong"; leave the rest to "see the implementation ticket / see the specific implementation doc".
+
+**Close by tying back to the first three sections**: state explicitly that "this proposal → solves X in Problem → satisfies Y in Requirement → avoids Z in Nongoal". It only counts as finished when those three links are visible.
+
+---
+
+## Writing steps (do them in order)
+
+1. Write Problem first, until "someone else can understand it" (this is the step most easily skipped).
+2. Then write Requirement and Nongoal (pin the box down first; do not rush to the proposal).
+3. Write Proposal last (once the first three are settled, the proposal converges on its own).
+4. Read the whole thing through once, going through each section's "self-check".
+5. Link it into "Related documents" and hand it to human review (knowledge-base block diff).
+
+## Self-check list (tick before handing it over)
+
+- [ ] All four sections present, in the order Problem → Requirement → Nongoal → Proposal
+- [ ] Problem explains the background knowledge clearly enough for an outsider
+- [ ] Every item of Requirement can serve as an acceptance criterion
+- [ ] Nongoal has concrete items, it is not left blank
+- [ ] Proposal starts from high level, details are not laid out prematurely
+- [ ] Proposal states only "what and why", with no implementation details (API name / CLI command / route / field name) and no landing status or progress
+- [ ] Proposal ties back to Problem/Requirement/Nongoal at the end
+- [ ] frontmatter complete (title/category/tags/status/updated)
+- [ ] Related documents interlinked
+
+## Common mistakes
+
+| Mistake | How to fix |
 |---|---|
-| 一上来就写方案 | 先写 Problem/Requirement/Nongoal |
-| Problem 只写一句口号 | 补背景知识 + 证据 |
-| Requirement 写成「做一个 XX」 | 改写成可验证的目标 |
-| Nongoal 空着 | 至少写 1–2 条「本期不做」 |
-| Proposal 塞满代码细节 | 细节挪去实现文档 |
-| 在 Proposal 写落地状态/进度 | 状态属于工单与立项单，文档只写「是什么」 |
-| 跳过概念直接写机制 | 每节开头先讲「这是什么、为什么需要」 |
+| Writing the proposal straight away | Write Problem/Requirement/Nongoal first |
+| Problem is just a one-line slogan | Add background knowledge + evidence |
+| Requirement written as "build an XX" | Rewrite it as a verifiable goal |
+| Nongoal left blank | Write at least 1–2 "not this cycle" items |
+| Proposal stuffed with code details | Move the details to the implementation doc |
+| Writing landing status/progress in Proposal | Status belongs to tickets and epic proposals; the document states only "what it is" |
+| Skipping the concept and writing the mechanism | Open each section with "what this is and why it is needed" |
 
 ---
 
-## 相关文档
+## Related documents
 
-- [知识库设计](../design/知识库设计.md)——文档先行 workflow 的总纲
-- [工单工作流台设计](../design/工单工作流台设计.md)——按本指南写的一份完整样例
+- [Knowledge Base Design](../design/knowledge-base-design.md) — the master outline of the document-first workflow
+- [Ticket Workflow Console Design](../design/ticket-workflow-console-design.md) — a complete example written to this guide

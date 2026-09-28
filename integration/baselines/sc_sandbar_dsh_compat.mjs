@@ -45,7 +45,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const CONTRACT = join(ROOT, 'docs', 'design', 'sandbar项目接入契约v1.md');
+const CONTRACT = join(ROOT, 'docs', 'design', 'sandbar-project-onboarding-contract-v1.md');
 const HANDOFF = join(ROOT, 'notes', 'sandbar-m2-c-installer-handoff.md')  // 260904 migration-back adjustment: sandbar's actual location is the notes/ root;
 
 // —— section-⑧ slice and normalization ——
@@ -58,29 +58,31 @@ const HANDOFF = join(ROOT, 'notes', 'sandbar-m2-c-installer-handoff.md')  // 260
 // scope='doc' assertions run against the whole document: the cross-section
 // reference (the V5 bridge sentence) and the change-record line itself.
 function section8(c) {
-  const m = c.match(/### ⑧ dsh 平台兼容区间与升版必查项[\s\S]*?(?=\n### )/);
+  // 260928（docs 英文化）：⑧ 节标题改为英文行文；仍是「从 ⑧ 标题切到下一个 ###」，
+  // 切的仍是同一节（切片口径不变，只是标题字面换了语言）。
+  const m = c.match(/### ⑧[^\n]*\n[\s\S]*?(?=\n### )/);
   return m ? m[0] : '';
 }
 const norm = s => String(s).replace(/\s+/g, ' ');
 
 // —— assertion vocabulary (V4: same source as contract §⑧'s own keywords, not free-form wording) ——
-const CHECKS = [
-  ['⑧节存在', 'doc', c => c.includes('### ⑧ dsh 平台兼容区间与升版必查项')],
+const CHECKS = [  // 260928: anchors re-aimed at the English contract wording (same section-⑧ slice, same scope column)
+  ['⑧节存在', 'doc', c => /^### ⑧\s+\S/m.test(c) && /dsh platform compatibility range/i.test(c)],
   ['区间声明面向 @deepseek-ai/dsh', 'sect', c => c.includes('@deepseek-ai/dsh')],
-  ['已验证点列举制+唯一点在场', 'sect', c => c.includes('已验证点列举') && c.includes('0.1.1-rc.2')],
-  ['扩点须探针绿', 'sect', c => c.includes('探针集全绿')],
-  ['必查项1 settings/resolve 层叠', 'sect', c => c.includes('settings/resolve 层叠顺序')],
-  ['必查项2 headless runner 装配与启动钩子', 'sect', c => c.includes('headless runner 装配与启动钩子')],
-  ['必查项3 home 布局与会话存储格式', 'sect', c => c.includes('dsh home 布局与会话存储格式')],
-  ['必查项4 headless SIGTERM 语义', 'sect', c => c.includes('headless SIGTERM 语义')],
-  ['矩阵三轴（sandbar 版本 × dsh × 项目 schema）', 'sect', c => c.includes('sandbar 版本 × dsh 已验证点 × 项目 schema')],
+  ['已验证点列举制+唯一点在场', 'sect', c => /enumeration of verified points/i.test(c) && c.includes('0.1.1-rc.2')],
+  ['扩点须探针绿', 'sect', c => /probe set is all green|probes? (all )?green/i.test(c)],
+  ['必查项1 settings/resolve 层叠', 'sect', c => /settings\/resolve layering order/i.test(c)],
+  ['必查项2 headless runner 装配与启动钩子', 'sect', c => /headless runner assembly and startup hooks/i.test(c)],
+  ['必查项3 home 布局与会话存储格式', 'sect', c => /dsh home layout and session storage format/i.test(c)],
+  ['必查项4 headless SIGTERM 语义', 'sect', c => c.includes('headless SIGTERM semantics')],
+  ['矩阵三轴（sandbar 版本 × dsh × 项目 schema）', 'sect', c => /sandbar version\s*×\s*dsh verified point\s*×\s*project schema version/i.test(c)],
   ['矩阵 append 制落点', 'sect', c => c.includes('compat-matrix.json')],
   ['版本自报键 sandbar_version', 'sect', c => c.includes('`sandbar_version`')],
-  ['semver 起点 0.1.0', 'sect', c => c.includes('自 `0.1.0` 起')],
-  ['历史 int 键原值保留不造映射', 'sect', c => c.includes('`temporal_engine_version`') && c.includes('原值保留') && c.includes('不造历史 semver 映射')],
+  ['semver 起点 0.1.0', 'sect', c => /from `0\.1\.0`( onward)?/i.test(c)],
+  ['历史 int 键原值保留不造映射', 'sect', c => c.includes('`temporal_engine_version`') && /kept as-is/i.test(norm(c)) && /no historical semver mapping is fabricated/i.test(norm(c))],
   ['畸形 sandbar_version fail-closed', 'sect', c => c.includes('fail-closed')],
-  ['升版执行序', 'sect', c => c.includes('升版执行序')],
-  ['v1.6 两轴衔接句（V5：IDE 轴=sandbar+dsh 复合）', 'doc', c => norm(c).includes('IDE 版本轴 = sandbar 版本 + dsh 区间的复合')],
+  ['升版执行序', 'sect', c => /upgrade execution order/i.test(c)],
+  ['v1.6 两轴衔接句（V5：IDE 轴=sandbar+dsh 复合）', 'doc', c => /IDE axis = the sandbar\+dsh composite/i.test(norm(c))],
   ['变更记录含 v1.7 行', 'doc', c => /\|\s*v1\.7\s*\|\s*2026-09-03\s*\|/.test(c)],
 ];
 

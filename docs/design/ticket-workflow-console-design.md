@@ -1,412 +1,458 @@
 ---
-title: "工单工作流台设计 v0.3"
+title: "Ticket Workflow Console Design v0.3"
 category: design
 tags:
-  - 工单
-  - 工作流
-  - 协作
-status: superseded
-updated: 2026-08-23
+  - ticket
+  - workflow
+  - collaboration
+status: deprecated
+updated: 2026-09-28
 ---
 
-> **2026-08-23 注**：本文是 M1 时代设计留档。文中 `server/tickets/<id>.json/md` 投影
-> 方案已被取代——工单真源恒为 Temporal workflow（v2 模版即代码，ticket-start/list/query），
-> 投影目录与 ticket_migrate/import-migrate 工具已删除；项目区分走 ProjectKey search attribute
-> + `server/projects.yaml` 注册表。操作面（op 清单、状态机、UI 矩阵）仍以此文为准。
+> **Note 2026-08-23**: this document is an archived design from the M1 era. The
+> `server/tickets/<id>.json/md` projection scheme described in it has been superseded — the
+> source of truth for a ticket is always the Temporal workflow (v2 templates as code,
+> ticket-start/list/query), and the projection directory plus the ticket_migrate/import-migrate
+> tools have been deleted; project separation goes through the ProjectKey search attribute
+> + the `server/projects.yaml` registry. The operating surface (op list, state machine,
+> UI matrix) still follows this document.
 
-# 工单工作流台设计 v0.3
+# Ticket Workflow Console Design v0.3
 
-> 2026-08-20 立项（用户：「现在这样太原始了，搞一个 UI，用程序的方式列出 session 当前的工单；工单背后其实是工作流，不同的活流程是不同的，可能会有多个 agent 接力」）。
-> 不依赖 dsh admin 壳——独立三层（数据/引擎/UI），载体决策见 §6/§7。
-> v0.2（2026-08-20）：补 §8–§13 模板目录/API 契约/UI 规格/迁移/联动/实施波次（本波实跑提炼）。
-> v0.3（2026-08-20）：qa 评审（pipeline/output/wf_design_qa_260820/README.md，2 blocker+13 major+17 minor）处置落位——
-> 补「立项（只能人）」stage（A4.1 blocker）、解终审→发布操作矩阵死锁（A3.2 blocker）、白名单扩热更数据键（A1.1）、
-> visual 拆权归总管（A1.4）、worktree base ref/入口快照（A2.1/A2.2）、stage_state 写入者契约（A3.1）、
-> 验收人≠执行人（A5.1）、fanout 分片聚合（A5.2）、终审机械读提案 §6（A5.3）、修订计数（A4.2）等；完整处置见 §14。
+> 2026-08-20 inception (user: "this is too primitive right now — build a UI that lists the
+> session's current tickets programmatically; behind a ticket there is actually a workflow, and
+> different kinds of work have different flows, possibly with several agents handing off to
+> each other").
+> Not dependent on the dsh admin shell — three independent layers (data/engine/UI); the carrier
+> decision is recorded in §6/§7.
+> v0.2 (2026-08-20): added §8–§13 (template catalog / API contract / UI spec / migration /
+> linkage / implementation waves), distilled from this wave's actual run.
+> v0.3 (2026-08-20): disposition of the qa review (pipeline/output/wf_design_qa_260820/README.md,
+> 2 blocker + 13 major + 17 minor) —
+> added the "epic proposal (human only)" stage (A4.1 blocker), resolved the final-review→publish
+> action-matrix deadlock (A3.2 blocker), extended the allowlist with hot-update data keys (A1.1),
+> moved visual authority to the steward (A1.4), worktree base ref / entry snapshot (A2.1/A2.2),
+> stage_state writer contract (A3.1), acceptor ≠ executor (A5.1), fanout shard aggregation (A5.2),
+> final review reads proposal §6 mechanically (A5.3), revision counter (A4.2), etc.; the complete
+> disposition is in §14.
 
-## 1. 问题
+## 1. Problem
 
-现状：工单 = `server/tickets/<id>.md`（```json 块 + 正文），状态靠改文件字段，
-流程靠人脑记忆；不同活流程不同（内容加工 / 代码泳道 / 审校 / 回归 / 清洗），
-多 agent 接力全靠总管手动逐个派。结果：交接状态不清（上波被用户点名：後漢書 closed
-但终审未签，两张轨道记账造成误读）、无法一眼看到「当前所有工单、每张走到哪、
-谁在干、卡在哪」。
+Current state: a ticket = `server/tickets/<id>.md` (```json block + body), its state lives in file
+fields that get edited by hand, and the flow lives in people's heads; different kinds of work have
+different flows (content production / code lane / proofreading / regression / cleanup), and
+multi-agent handoff relies entirely on the steward dispatching agents one by one. The result:
+handoff state is unclear (this wave was called out by the user: Hou Hanshu was closed but final
+review was never signed, and the two-track bookkeeping caused a misreading), and there is no way
+to see at a glance "all current tickets, how far each one has got, who is working on it, and where
+it is stuck".
 
-## 2. 目标
+## 2. Goals
 
-1. **程序化台面**：一条命令/一个页面列出 session 当前全部工单（状态/阶段/角色/进度）。
-2. **工单挂工作流**：workflow 模板定义阶段链，不同流程不同模板，工单只填实例数据。
-3. **多 agent 接力**：阶段 = 角色 + 验收清单 + 产物；advance 后自动生成下一棒派活指令
-   （可扇出多 agent，全部结算才过合并点）。
-4. **UI 操作**：看进度、推进阶段、派下一棒、验收打勾、打回 rework、标注等用户。
+1. **Programmatic console**: one command / one page lists all the session's current tickets
+   (status/stage/role/progress).
+2. **A ticket carries a workflow**: a workflow template defines the stage chain; different flows
+   use different templates, and a ticket only fills in instance data.
+3. **Multi-agent handoff**: a stage = role + acceptance checklist + artifacts; after advance, the
+   dispatch instruction for the next handoff is generated automatically (it can fan out to several
+   agents, and the merge point is passed only once all of them have settled).
+4. **UI actions**: see progress, advance a stage, dispatch the next handoff, tick acceptance,
+   rework, mark as waiting on the user.
 
-## 3. 数据模型
+## 3. Data model
 
 ```
-Workflow（模板，server/workflows/<id>.yaml，只读）
-  id, 名, 描述
+Workflow (template, server/workflows/<id>.yaml, read-only)
+  id, name, description
   stages[]:
     - id
       role          # editor/developer/proofreader/qa/analyst/ops/artist/dispatcher
-      name, 说明
-      acceptance[]  # 验收清单（预写死，agent 结算时自检，总管/qa 复核）
-      fanout        # 0/1：是否可扇出多 agent（如内容批量、审读多对象）
-      next          # 正常推进到的下一 stage id（无=终态）
-      exit          # 可选：到终态前的出口条件（如 human 终审）
+      name, description
+      acceptance[]  # acceptance checklist (pre-written; the agent self-checks when settling, steward/qa re-check)
+      fanout        # 0/1: whether it can fan out to several agents (e.g. content batches, multi-object review)
+      next          # the next stage id on normal advancement (none = terminal state)
+      exit          # optional: exit condition before the terminal state (e.g. human final review)
 
-Ticket（真源=结构化，server/tickets/<id>.json；md 降级为导出渲染层）
+Ticket (source of truth = structured, server/tickets/<id>.json; md is downgraded to an export/render layer)
   id, title, workflow_id, role
-  status: dispatched → settled → verified → closed / rework（保留现有状态机）
-  stage: 当前阶段 id（workflow.stages 下标）
+  status: dispatched → settled → verified → closed / rework (keeps the existing state machine)
+  stage: current stage id (index into workflow.stages)
   stage_state: running | awaiting | awaiting-human | blocked
-  log[]:   {ts, status|stage, note}      # 状态流水（现状已有）
-  handoffs[]: {stage, agent_id, 摘要, 产物[]}   # 接力记录：谁干的、交了什么
-  acceptance: [] # 当前阶段验收打勾 {item, done, by}
-  pending[]:     # 挂起项（遗留问题，不硬改交回——与现有纪律对齐）
-  worktree:      # 工单绑定的持久泳道（code 类 worktree 工作流必填）
-                 # 创建一次、跨 agent 会话复用：本次 agent 挂了，下次起来仍用同一 worktree，
-                 # 中间产物/分支改动全部还在（260820 实证：mastery-m0/instr-audio 泳道重启后复用无损）
+  log[]:   {ts, status|stage, note}      # status stream (already present today)
+  handoffs[]: {stage, agent_id, summary, artifacts[]}   # handoff record: who did it, what was handed over
+  acceptance: [] # current-stage acceptance ticks {item, done, by}
+  pending[]:     # pending items (leftover issues; not force-changed back to the assignee — aligned with the current discipline)
+  worktree:      # the persistent lane bound to the ticket (mandatory for code-type worktree workflows)
+                 # created once and reused across agent sessions: if this run's agent dies, the next one
+                 # still uses the same worktree and all intermediate artifacts/branch changes are still there
+                 # (260820 evidence: the mastery-m0/instr-audio lanes were reused losslessly after a restart)
 ```
 
-- 兼容：现有 md 工单一次性导入为 json（导入脚本），md 可继续由引擎生成作为人类可读快照；
-  新数据读写全走 json。
-- 提案对接：内容类 workflow 的 stage 直接映射提案状态机
-  （提案→立项→加工→机器QC→AI审校⇄修订≤2→终审→发布），终审 stage 出口=human。
+- Compatibility: existing md tickets are imported once into json (import script); md can keep being
+  generated by the engine as a human-readable snapshot; all new reads and writes go through json.
+- Proposal linkage: the stages of a content-type workflow map directly onto the proposal state
+  machine (proposal→epic proposal→processing→machine QC→AI review⇄revision ≤2→final review→publish),
+  with the final-review stage's exit = human.
 
-## 4. 引擎（server/tools/）
+## 4. Engine (server/tools/)
 
-- `workflow.py`（新工具）：`workflow list/show` —— 模板目录扫描自注册（同 tools_registry 热插拔）。
-- `ticket.py` 扩展：
-  - `list {status?, workflow?, role?}` —— 返回结构化（含 stage 进度），不再只给摘要行。
-  - `create {workflow, ...}` —— 挂模板，初始 stage=stages[0]。
-  - `advance {id, note?}` —— 当前 stage 验收通过 → 写 handoff → 按模板 next 推进；
-    到终态前若出口=human，stage_state=awaiting-human（UI 标「等你签字」）。
-  - `dispatch-next {id}` —— 总管点按钮：按 next stage 的 role 生成派活指令
-    （角色说明书路径 + 交接物路径 + 验收清单），返回可贴进 dispatch_<role> 的 prompt。
-  - `rework {id, note}` —— 打回（回上一 stage 或 dispatched）。
-- 状态机不变（dispatched→settled→verified→closed/rework），stage_state 是进度维度，
-  两者正交：closed 只表示收口，awaiting-human 表示卡在人的终审——上波「後漢書 closed
-  但没终审」的误读，在台面上直接以 stage/出口标签呈现，不再靠备注。
+- `workflow.py` (new tool): `workflow list/show` — template directory scanning with
+  self-registration (hot-plugged the same way as tools_registry).
+- `ticket.py` extensions:
+  - `list {status?, workflow?, role?}` — returns structured data (including stage progress),
+    no longer just summary lines.
+  - `create {workflow, ...}` — attach a template; initial stage = stages[0].
+  - `advance {id, note?}` — the current stage's acceptance passes → write handoff → advance along
+    the template's next; if exit = human before the terminal state, stage_state = awaiting-human
+    (the UI marks it "waiting for your signature").
+  - `dispatch-next {id}` — the steward clicks a button: generate a dispatch instruction from the
+    next stage's role (role spec path + handoff artifact paths + acceptance checklist) and return a
+    prompt that can be pasted into dispatch_<role>.
+  - `rework {id, note}` — rework (back to the previous stage or to dispatched).
+- The state machine is unchanged (dispatched→settled→verified→closed/rework); stage_state is the
+  progress dimension, and the two are orthogonal: closed only means "merged in", whereas
+  awaiting-human means stuck on a human's final review — the "Hou Hanshu is closed but the final
+  review was never signed" misreading from the last wave is now shown directly on the console as a
+  stage/exit label instead of relying on a note.
 
-## 5. UI（工单工作流台，dsh 插件形态——用户拍板：做成 dsh 插件，独立于现有 admin 壳）
+## 5. UI (ticket workflow console, in the form of a dsh plugin — the user decided: make it a dsh plugin, independent of the existing admin shell)
 
-插件包结构与现有 server/plugins/ui/ 同制式（node.ts 宿主注册 + 前端 bundle），但独立命名
-（如 suyou-workbench），不寄生 sandbar-admin-ui；加载走 profile 的插件配置行。
-页面单页三区：
+The plugin package follows the same scheme as the existing server/plugins/ui/ (node.ts host
+registration + frontend bundle), but with a name of its own (e.g. suyou-workbench) and without
+piggybacking on sandbar-admin-ui; it is loaded through the profile's plugin config line.
+The page is a single page with three zones:
 
-1. **台面区**：工单卡片/表——id | 工作流 | 阶段进度条（stage 链高亮当前位置）| 当前角色 |
-   状态色（running 绿 / awaiting 黄 / awaiting-human 蓝 / blocked 红 / done 灰）。
-2. **详情区**：泳道图（stages 横排，箭头=next，当前高亮，扇出画分叉）+ 验收清单打勾 +
-   handoff 接力时间线（谁→交了啥）+ log 流水 + pending 挂起项。
-3. **操作区**：推进（advance）/ 派下一棒（dispatch-next 生成指令）/ 打回（rework）/
-   标注等待（awaiting-human）——按当前状态只显示可用操作。
+1. **Console zone**: ticket cards/table — id | workflow | stage progress bar (the stage chain with
+   the current position highlighted) | current role | status colors (running green / awaiting
+   yellow / awaiting-human blue / blocked red / done gray).
+2. **Detail zone**: lane diagram (stages laid out horizontally, arrows = next, the current stage
+   highlighted, fanout drawn as branches) + acceptance checklist ticks + handoff timeline
+   (who → handed over what) + log stream + pending items.
+3. **Action zone**: advance / dispatch the next handoff (dispatch-next generates the instruction) /
+   rework / mark as waiting (awaiting-human) — only the actions available for the current state
+   are shown.
 
-后端 API：统一插件前缀 `GET /suyou-workbench/api/wf/tickets`（台面）、
-`GET /suyou-workbench/api/wf/tickets/<id>`（详情）、
-`POST /suyou-workbench/api/wf/tickets/<id>/advance|dispatch-next|rework`（操作，写 admin.log 审计）。
-鉴权：沿用本机回环 + 管理 token 分层（同 serve.py 现状），部署时再加固。
+Backend API: a unified plugin prefix — `GET /suyou-workbench/api/wf/tickets` (console),
+`GET /suyou-workbench/api/wf/tickets/<id>` (detail),
+`POST /suyou-workbench/api/wf/tickets/<id>/advance|dispatch-next|rework` (actions, which write an
+admin.log audit record).
+Auth: reuses loopback + the layered admin token (the same as the current serve.py); hardening comes
+at deployment time.
 
-## 6. 落地分波
+## 6. Landing waves
 
-| 波 | 内容 | 验收 |
+| Wave | Content | Acceptance |
 |---|---|---|
-| M1 数据+引擎 | workflows 模板×5（内容加工/代码泳道/审校/回归/清洗）+ ticket 迁 json + workflow.py + ticket.py 扩展（list/advance/dispatch-next）+ **worktree 绑工单**（code 类模板要求持久泳道 .worktrees/t<id>，派活指令固定「复用泳道」条款） | 现有 10 张工单导入零丢失；list 结构化输出 |
-| M2 UI | **dsh 插件 suyou-workbench**：台面页三区 + API | 台面能列出当前全部工单并推进一张走完 |
-| M3 集成 | dispatch-next 与 dispatch_<role> 打通（一键生成 prompt）、提案状态机联动、历史工单全量迁移、CLAUDE.md 记账 |
+| M1 data + engine | 5 workflow templates (content production / code lane / proofreading / regression / cleanup) + ticket migration to json + workflow.py + ticket.py extensions (list/advance/dispatch-next) + **worktree bound to the ticket** (code-type templates require the persistent lane .worktrees/t<id>, and the dispatch instruction pins a "reuse the lane" clause) | all 10 existing tickets import with zero loss; structured list output |
+| M2 UI | **the dsh plugin suyou-workbench**: three-zone console page + API | the console lists all current tickets and can advance one of them all the way through |
+| M3 integration | dispatch-next wired to dispatch_<role> (one-click prompt generation), proposal state-machine linkage, full migration of historical tickets, CLAUDE.md ledger entries |
 
-## 7. 决策点（已拍 2026-08-20）
+## 7. Decision points (decided 2026-08-20)
 
-1. **存储**：真源=JSON，md 降级导出。✅
-2. **UI 载体**：做成 dsh 插件（独立命名，不寄生 admin 壳）。✅
-3. **接力自动化**：半自动（总管点「派下一棒」生成指令后放 agent）。✅
-4. **泳道持久化**（用户补充）：每个任务应有自己的 worktree；即使该 worktree 上的 agent
-   本次运行 fail，下次起来仍用同一 worktree，改动还在——工单↔worktree 绑定写进数据模型（§3）
-   与派活指令（§4 dispatch-next 固定条款）。✅
+1. **Storage**: source of truth = JSON, md downgraded to an export. ✅
+2. **UI carrier**: make it a dsh plugin (a name of its own, without piggybacking on the admin
+   shell). ✅
+3. **Handoff automation**: semi-automatic (the steward clicks "dispatch the next handoff" to
+   generate the instruction, then launches the agent). ✅
+4. **Lane persistence** (added by the user): every task should have its own worktree; even if the
+   agent on that worktree fails this run, the next run still uses the same worktree and the changes
+   are still there — the ticket↔worktree binding goes into the data model (§3) and the dispatch
+   instruction (§4, the dispatch-next pinned clause). ✅
 
-## 8. 工作流模板目录（首版 6 个，全部提炼自本波实跑流程）
+## 8. Workflow template catalog (6 in the first version, all distilled from this wave's actual runs)
 
-> **260904 宿主令（退役注记）**：本节为首版设计稿（模板当时以 yaml 热插拔）。现行体制
-> 「模版即代码」（真源=`engine/` 各 workflow 类，yaml 为生成快照），且
-> **content-pipeline / proofread / regression / cleanup 四模板已退役**，工单模板仅存
-> **dev-lane**（非工单巡检 dispatcher-scan 不属工单模板面，保留）；票收口后独立回归
-> （regression）能力由 integration main 侧直跑或开 dev-lane 承担。下文 yaml 为历史
-> 设计原貌，保留作上下文，不再反映现状。
+> **260904 host order (retirement note)**: this section is the first-version design draft (templates
+> were hot-plugged yaml back then). The current regime is "templates as code" (source of truth = the
+> workflow classes under `engine/`, with yaml as a generated snapshot), and
+> **the content-pipeline / proofread / regression / cleanup templates are retired**; of the ticket
+> templates only **dev-lane** remains (the non-ticket inspection dispatcher-scan is not part of the
+> ticket template surface and is kept); independent regression after a ticket has merged in
+> (regression) is now carried out either by integration running it directly on the main side or by
+> opening a dev-lane. The yaml below is the historical design as originally written, kept for
+> context; it no longer reflects the current state.
 
-模板存放 `server/workflows/<id>.yaml`（tools_registry 同款热插拔：丢文件即上线）。
+Templates live in `server/workflows/<id>.yaml` (hot-plugged the same way as tools_registry: drop in
+a file and it is live).
 
 ```yaml
-# 模板 1：content-pipeline 内容加工（提案制，映射 pipeline/proposals 状态机）
+# Template 1: content-pipeline content production (proposal-based, mapping the pipeline/proposals state machine)
 id: content-pipeline
-name: 内容加工
-lane: main           # 数据道主树（books/json/wiki 热更层），不建 worktree
+name: content production
+lane: main           # the main-tree data track (books/json/wiki hot-update layer), no worktree created
 stages:
   - id: propose
     role: editor
-    name: 提案
-    acceptance: ["提案文件落 pipeline/proposals/<id>.md", "状态=提案，机器QC 清单列明"]
+    name: proposal
+    acceptance: ["the proposal file lands in pipeline/proposals/<id>.md", "status=proposal, machine QC checklist enumerated"]
     next: approve
   - id: approve
     role: dispatcher
-    name: 立项
-    exit: human       # 「立项只能人」不可让渡红线（QA A4.1）：提案头部 状态=提案→立项 由人改
-    acceptance: ["提案头部 状态=立项（人改）"]
+    name: epic proposal
+    exit: human       # "the epic proposal is human-only" is a non-delegable red line (QA A4.1): the proposal header status=proposal→epic proposal is changed by a human
+    acceptance: ["proposal header status=epic proposal (changed by a human)"]
     next: process
   - id: process
     role: editor
-    name: 加工
-    acceptance: ["动数据前备份先落 /tmp/（QA A4.4）", "四件套/拓源产物落位", "lint_residue 零残留", "禁词零命中"]
+    name: processing
+    acceptance: ["back up to /tmp/ before touching data (QA A4.4)", "the four-artifact set / source-expansion artifacts are in place", "lint_residue zero residue", "zero banned-word hits"]
     next: machine-qc
   - id: machine-qc
     role: editor
-    name: 机器QC
-    acceptance: ["按提案 §3 机器 QC 清单逐项脚本全绿（QA A4.3，引提案不另立清单）"]
+    name: machine QC
+    acceptance: ["every script in the machine QC checklist of proposal §3 is green (QA A4.3; cite the proposal rather than keeping a separate checklist)"]
     next: ai-review
   - id: ai-review
     role: proofreader
-    name: AI审校（异模型交叉）
-    fanout: 1         # 可扇出多审读 agent；acceptance 按 agent 分片，全部分片全勾才过合并点（QA A5.2）
-    revision_to: process  # rework 目标按 stage 语义（QA A4.2）：审校修订回加工，不机械回上一 stage
-    acceptance: ["报告=severity+位置+铁律条款", "revision_count ≤ 2（超限 rework to_stage=approve 回立项）"]
+    name: AI review (cross-model)
+    fanout: 1         # can fan out to several reviewing agents; acceptance is sharded per agent, and the merge point is passed only when every shard is fully ticked (QA A5.2)
+    revision_to: process  # the rework target follows stage semantics (QA A4.2): review revisions go back to processing, not mechanically to the previous stage
+    acceptance: ["report = severity + location + iron-rule clause", "revision_count ≤ 2 (over the limit, rework with to_stage=approve, back to the epic proposal)"]
     next: final-review
   - id: final-review
     role: dispatcher
-    name: 终审
-    exit: human       # 出口条件：只能人签字（提案 §6）
-    acceptance: ["提案 §6 终审签字（机械读提案文件，QA A5.3）"]
+    name: final review
+    exit: human       # exit condition: only a human can sign (proposal §6)
+    acceptance: ["proposal §6 final-review signature (read mechanically from the proposal file, QA A5.3)"]
     next: publish
   - id: publish
     role: dispatcher
-    name: 发布闸门
-    acceptance: ["发布链重跑全绿（verify_lane content 道）", "build_shelf 终装 + books.json 书集格式校验（中途态检测，QA A4.5）"]
+    name: publish gate
+    acceptance: ["the publish chain reruns fully green (verify_lane content track)", "build_shelf final assembly + books.json book-set format validation (mid-state detection, QA A4.5)"]
 ```
 
 ```yaml
-# 模板 2：code-lane 代码泳道（worktree 持久化）
+# Template 2: code-lane code lane (worktree persistence)
 id: code-lane
-name: 代码泳道
-lane: worktree       # 必建泳道 .worktrees/t<短slug>，跨会话复用（agent 挂了改动还在）
+name: code lane
+lane: worktree       # the lane .worktrees/t<short-slug> must be created and reused across sessions (if the agent dies, the changes are still there)
 stages:
   - id: develop
     role: developer
-    name: 开发
-    acceptance: ["写集白名单内（含热更数据键，QA A1.1 口径）", "动 app/public/data/*.json 先备份/可对账", "tsc --noEmit 全绿", "变更点对应 smoke/探针全过（无则新增，QA A1.5）"]
+    name: development
+    acceptance: ["inside the write-set allowlist (including hot-update data keys, QA A1.1 wording)", "back up app/public/data/*.json first / keep it reconcilable", "tsc --noEmit fully green", "every change point has its matching smoke test/probe passing (add one if there is none, QA A1.5)"]
     next: verify
   - id: verify
     role: dispatcher
-    name: 总管验收
-    acceptance: ["verify_lane 绿灯（merge 冲突消解后必须重跑，QA A1.2）", "qa diff 审读通过（意图符合/无蔓延/无夹带，QA A1.3）", "冲突由总管协调原作者判读消解（QA A2.4）"]
+    name: steward acceptance
+    acceptance: ["verify_lane green light (must be rerun once merge conflicts are resolved, QA A1.2)", "qa diff review passes (intent matches / no scope creep / nothing unrelated smuggled in, QA A1.3)", "conflicts are coordinated by the steward and resolved with the original author's judgment (QA A2.4)"]
     next: visual
   - id: visual
     role: dispatcher
-    name: SHOTDEBUG 视觉验证   # 拆权（QA A1.4）：构建/截图/revert 归总管；qa 出检查点清单并判读截图
-    acceptance: ["qa 预写截图检查点逐项过（create 时写进实例清单，QA A1.6）", "revert 注入+干净重建（总管执行）"]
+    name: SHOTDEBUG visual verification   # authority split (QA A1.4): build/screenshot/revert belong to the steward; qa produces the checkpoint checklist and judges the screenshots
+    acceptance: ["every pre-written screenshot checkpoint from qa passes (written into the instance checklist at create time, QA A1.6)", "revert injection + clean rebuild (executed by the steward)"]
     next: close
   - id: close
     role: dispatcher
-    name: 收口
-    acceptance: ["commit 落账", "CLAUDE.md 记账", "泳道清理：close 后删分支+拆 worktree（活跃期含 rework 保留复用，QA A2.5/A1.7）"]
+    name: merge in
+    acceptance: ["commit recorded", "CLAUDE.md ledger entry", "lane cleanup: delete the branch + tear down the worktree after close (kept for reuse while active, including rework, QA A2.5/A1.7)"]
 ```
 
 ```yaml
-# 模板 3：proofread 审读（独立交叉，见 v0.1 防幻觉五层）
+# Template 3: proofread review (independent cross-check, see v0.1's five-layer anti-hallucination scheme)
 id: proofread
-name: 审读
+name: proofreading
 lane: main
 stages:
   - id: review
     role: proofreader
-    name: 审读
+    name: review
     fanout: 1
-    acceptance: ["只读不改业务文件", "报告含 severity/位置/铁律条款"]
+    acceptance: ["read-only, no changes to business files", "the report contains severity/location/iron-rule clause"]
     next: report
   - id: report
     role: dispatcher
-    name: 分流
-    acceptance: ["blocker/major→开返工单（回 content-pipeline process 或 code-lane develop）", "minor→挂 pending"]
+    name: triage
+    acceptance: ["blocker/major→open a rework ticket (back to content-pipeline process or code-lane develop)", "minor→attach to pending"]
 ```
 
 ```yaml
-# 模板 4：regression 回归验收（波收口）
+# Template 4: regression acceptance (wave merge-in)
 id: regression
-name: 回归验收
+name: regression acceptance
 lane: main
 stages:
   - id: regress
     role: qa
-    name: 独立回归
-    acceptance: ["verify_lane all 全绿", "全套 smoke 独立复跑", "diff 写集白名单复核"]
+    name: independent regression
+    acceptance: ["verify_lane all green", "the full smoke suite rerun independently", "diff re-checked against the write-set allowlist"]
     next: report
   - id: report
     role: dispatcher
-    name: 结论
-    acceptance: ["红项逐条列 ku/文件+原因"]
+    name: conclusion
+    acceptance: ["list every red item with its ku/file + reason"]
 ```
 
 ```yaml
-# 模板 5：cleanup 数据清洗（溯源修复）
+# Template 5: cleanup data cleanup (provenance repair)
 id: cleanup
-name: 数据清洗
+name: data cleanup
 lane: main
 stages:
   - id: clean
     role: editor
-    name: 清洗
-    acceptance: ["clean_inline 扩展不破坏既有顺序", "备份 /tmp 先落", "lint 零残留"]
+    name: cleaning
+    acceptance: ["clean_inline extensions do not break the existing order", "the backup lands in /tmp first", "lint zero residue"]
     next: rederive
   - id: rederive
     role: editor
-    name: 重推导（补谱/补抓/重跑生成器）
-    acceptance: ["QC 全量绿灯", "其余产物字节级零扰动"]
+    name: re-derivation (fill in notation / re-scrape / rerun generators)
+    acceptance: ["QC fully green", "all other artifacts byte-for-byte undisturbed"]
 ```
 
 ```yaml
-# 模板 6：workflow 本身的建设（本设计落地走它自己）
+# Template 6: building the workflow itself (this design lands through it)
 id: build-workbench
-name: 平台建设
+name: platform construction
 lane: worktree
-stages:   # 展开为 code-lane 同构 stage 列表（QA B5：勿用简写非法 YAML）
-  - { id: develop, role: developer, name: 开发, next: verify }
-  - { id: verify,  role: dispatcher, name: 总管验收, next: visual }
+stages:   # expanded into the same stage list as code-lane (QA B5: do not use shorthand, which is invalid YAML)
+  - { id: develop, role: developer, name: development, next: verify }
+  - { id: verify,  role: dispatcher, name: steward acceptance, next: visual }
   - { id: visual,  role: dispatcher, name: SHOTDEBUG, next: close }
-  - { id: close,   role: dispatcher, name: 收口 }
+  - { id: close,   role: dispatcher, name: merge in }
 ```
 
-## 9. 引擎 API 契约（server/tools/，热插拔）
+## 9. Engine API contract (server/tools/, hot-plugged)
 
 ```
 workflow list                          → [{id, name, stages:[{id,role,name,next,exit,fanout,revision_to}]}]
-workflow show {id}                     → 模板全文
+workflow show {id}                     → the full template text
 
 ticket list {status?, workflow?, role?, stage_state?}
     → {count, tickets:[{id, title, workflow, stage, stage_state, status, role,
                         updated, handoff_count, pending_count, worktree, proposal_id}]}
-ticket show {id}                       → 全文（含 handoffs/acceptance/pending/log）
+ticket show {id}                       → full text (including handoffs/acceptance/pending/log)
 ticket create {workflow, title, body?, proposal_id?}
-    → 自动 stage=stages[0].id；code-lane 登记 worktree（短 slug：t<前缀>-<别名>，QA A2.3）
-      + base ref=主树 HEAD（QA A2.1）+ 初始 stage_state=awaiting（QA A3.1）
-    → 实例 acceptance = 模板清单复制，允许按工单增删（QA A5.5）
+    → automatically stage=stages[0].id; code-lane registers a worktree (short slug: t<prefix>-<alias>, QA A2.3)
+      + base ref = main-tree HEAD (QA A2.1) + initial stage_state=awaiting (QA A3.1)
+    → the instance acceptance = a copy of the template checklist, editable per ticket (QA A5.5)
 ticket accept {id, item, done, by, evidence?}
-    → by 由调用方身份注入禁止自填；evidence=脚本输出原文/产物路径（QA A5.4）
+    → by is injected from the caller's identity and may not be self-filled; evidence = raw script output / artifact path (QA A5.4)
 ticket advance {id, note}
-    → 校验：验收清单全勾 ∧ 每个 done 的 by≠当前 stage role（QA A5.1）
-    → fanout stage：全部分片全勾（QA A5.2）；同 stage 二次调用报错（幂等，QA A5.5）
-    → exit=human 且到 final-review/publish：机械读提案 §6 签字（日期+结论，QA A5.3）
-    → revision_count 硬校验（QA A4.2）
-    → 写 handoff → stage=next → stage_state = exit==='human' ? 'awaiting-human' : 'awaiting'
+    → validate: every acceptance item is ticked ∧ the by of every done ≠ the current stage role (QA A5.1)
+    → fanout stage: every shard fully ticked (QA A5.2); a second call on the same stage errors out (idempotent, QA A5.5)
+    → exit=human and reaching final-review/publish: read the proposal §6 signature mechanically (date + conclusion, QA A5.3)
+    → hard validation of revision_count (QA A4.2)
+    → write handoff → stage=next → stage_state = exit==='human' ? 'awaiting-human' : 'awaiting'
 ticket dispatch-next {id}
-    → 生成派活指令（JSON）：{role, prompt:[角色说明书路径, 交接物路径清单, 验收清单,
-       worktree 条款（code-lane 必含“复用 .worktrees/<slug>，勿重建；开工前 git status 快照上报
-       总管 + fetch main rebase 到最新，QA A2.2/A2.1”), 工单 id, 小步落盘条款]}
-    → 同时置 stage_state=running（QA A3.1）
+    → generate the dispatch instruction (JSON): {role, prompt:[role spec path, handoff artifact path list, acceptance checklist,
+       worktree clause (code-lane must contain "reuse .worktrees/<slug>, do not recreate; before starting, report a git status
+        snapshot to the steward + fetch main and rebase onto the latest, QA A2.2/A2.1"), ticket id, commit-in-small-steps clause]}
+    → also sets stage_state=running (QA A3.1)
 ticket rework {id, to_stage?, note}
-    → 缺省目标按 stage 语义：ai-review→revision_to=process（QA A4.2），其余回上一 stage
-    → status=rework、stage=to_stage、stage_state=awaiting（QA A3.4）
-ticket import-migrate {dir?}           → 一次性：md→json（现有全部工单导入，数量以实施时为准，QA B1）
+    → the default target follows stage semantics: ai-review→revision_to=process (QA A4.2), everything else back to the previous stage
+    → status=rework, stage=to_stage, stage_state=awaiting (QA A3.4)
+ticket import-migrate {dir?}           → one-off: md→json (import all existing tickets; the count is whatever it is at implementation time, QA B1)
 ```
 
-**stage_state 写入者契约**（QA A3.1，写死防漂移）：
-create→awaiting；dispatch-next→running；agent 结算（ticket update settled）→awaiting（总管验收窗）；
-blocked 由 agent/总管显式置（附原因，仅允许 status∈{dispatched,settled,rework}，QA A3.5）；
-rework→awaiting；advance→awaiting / awaiting-human。
+**stage_state writer contract** (QA A3.1, hard-coded to prevent drift):
+create→awaiting; dispatch-next→running; the agent settles (ticket update settled)→awaiting (steward acceptance window);
+blocked is set explicitly by an agent/the steward (with a reason attached, only allowed while status∈{dispatched,settled,rework}, QA A3.5);
+rework→awaiting; advance→awaiting / awaiting-human.
 
-**不变式**（引擎侧校验，QA A3.3/A3.5/A3.6）：
-- `status=closed ⇒ stage_state≠awaiting-human`（close 前清 human gate；迁移遗留仅历史展示，
-  单向出口=rework 回 final-review→签字→advance→publish）
-- awaiting-human 只允许出现在 exit=human 的 stage；blocked 只允许在活动 stage。
+**Invariants** (validated on the engine side, QA A3.3/A3.5/A3.6):
+- `status=closed ⇒ stage_state≠awaiting-human` (the human gate is cleared before close; migration leftovers are
+  history display only, with a one-way exit = rework back to final-review→signature→advance→publish)
+- awaiting-human is only allowed on a stage with exit=human; blocked is only allowed on an active stage.
 
-状态机（status）不变；`stage_state` 是进度维度（§3）。两者组合驱动 UI 操作矩阵（§10）。
+The state machine (status) is unchanged; `stage_state` is the progress dimension (§3). The combination of the two
+drives the UI action matrix (§10).
 
-## 10. UI 规格（dsh 插件 suyou-workbench）
+## 10. UI spec (the dsh plugin suyou-workbench)
 
-**插件接入**（独立命名，不寄生 admin 壳）：
-- `server/plugins/workbench/`：node.ts（宿主注册，同 sandbar-admin-ui 的 `webServer.register` 模式，
-  挂同源 `/suyou-workbench/api/*`）+ src/（前端三区页面）+ tsdown.config.ts（lib/client.js bundle）。
-- profile 插件行加载；审计走 admin.log（复用 run-id 机制）。
+**Plugin wiring** (a name of its own, without piggybacking on the admin shell):
+- `server/plugins/workbench/`: node.ts (host registration, the same `webServer.register` pattern as
+  sandbar-admin-ui, mounting the same-origin `/suyou-workbench/api/*`) + src/ (the three-zone frontend
+  page) + tsdown.config.ts (lib/client.js bundle).
+- Loaded through a profile plugin line; audit goes to admin.log (reusing the run-id mechanism).
 
-**页面三区**：
+**Three zones on the page**:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│ 台面：工单卡片网格                                          │
-│  [内容加工] 後漢書 L0     ▓▓▓▓▓▓░░░░ 终审(awaiting-human)  │
-│  [代码泳道] songs-wiring ▓▓▓▓▓▓▓▓▓▓ 收口(done)             │
-│  [审读]     proofread    ▓▓▓▓░░░░░░ 分流(awaiting)         │
-│  筛选: 状态▾ 工作流▾ 角色▾                                 │
-├──────────────────────────────────────────────────────────┤
-│ 详情抽屉（点卡片展开）                                      │
-│  泳道图: 提案→加工→QC→审校→[终审●]→发布    (扇出=审校⊕⊕)      │
-│  验收清单: ☑☑☑ 交接时间线: editor→proofreader→(你)          │
-│  pending: 3 项   worktree: .worktrees/t<id>               │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Console: ticket card grid                                                               │
+│  [content] Hou Hanshu L0  ▓▓▓▓▓▓░░░░ final review(awaiting-human)                       │
+│  [code]    songs-wiring   ▓▓▓▓▓▓▓▓▓▓ merge in(done)                                     │
+│  [review]  proofread      ▓▓▓▓░░░░░░ triage(awaiting)                                   │
+│  Filters: status▾ workflow▾ role▾                                                       │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│ Detail drawer (click a card to expand)                                                  │
+│  Lane diagram: proposal→processing→QC→review→[final review●]→publish (fanout=review⊕⊕)  │
+│  Acceptance checklist: ☑☑☑  Handoff timeline: editor→proofreader→(you)                  │
+│  pending: 3 items   worktree: .worktrees/t<id>                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**状态色板**：running 绿（有 agent 在干）/ awaiting 黄（等总管派）/ awaiting-human 蓝（等你签字）/
-blocked 红（卡住，附原因）/ done 灰。closed+awaiting-human 的「後漢書式误读」直接在卡片上
-以「终审(awaiting-human)」标签呈现，不再靠备注。
+**Status palette**: running green (an agent is working on it) / awaiting yellow (waiting for the steward to dispatch) /
+awaiting-human blue (waiting for your signature) / blocked red (stuck, with a reason attached) / done gray. The
+"Hou Hanshu-style misreading" of closed+awaiting-human is now shown directly on the card as the
+"final review(awaiting-human)" label instead of relying on a note.
 
-**操作按钮矩阵**（按 status×stage_state 只显可用；QA A3.2 解死锁 + A3.4 补 rework 行）：
+**Action button matrix** (only available actions are shown, by status×stage_state; QA A3.2 resolves the deadlock and A3.4 adds the rework row):
 
 | status \ stage_state | running | awaiting | awaiting-human | blocked |
 |---|---|---|---|---|
-| dispatched | — | 派下一棒/打回 | — | 重试/打回 |
-| settled | — | 验收(accept)+推进(advance) | **终审签字→验收+推进(advance)**（QA A3.2） | 返工(rework) |
-| verified | — | 派下一棒 | **终审签字→推进(advance)**（QA A3.2） | — |
-| rework | — | 派下一棒（按回退 stage 的 role）/打回 | — | 重试 |
-| closed | 查看 | 查看 | 历史展示：查看（单向出口=rework 回 final-review 签字→advance→publish，QA A3.3） | — |
+| dispatched | — | dispatch next / rework | — | retry / rework |
+| settled | — | acceptance(accept)+advance | **final review signature→acceptance+advance** (QA A3.2) | rework |
+| verified | — | dispatch next | **final review signature→advance** (QA A3.2) | — |
+| rework | — | dispatch next (by the rolled-back stage's role) / rework | — | retry |
+| closed | view | view | history display: view (one-way exit = rework back to final-review, sign→advance→publish, QA A3.3) | — |
 
-## 11. 迁移（md→json）
+## 11. Migration (md→json)
 
-- 一次性脚本 `server/tools/ticket_migrate.py`：读 `server/tickets/*.md` 的 ```json 块 →
-  转 `server/tickets/<id>.json`（字段直映 + log 原样保留 + handoffs 从 log 摘要回填）。
-- 现有 12 张工单映射示例：t260820-mastery-m0 → code-lane（stage=develop 已完成）、
-  t260820-hanshu-l0 → content-pipeline（stage=final-review, stage_state=awaiting-human）、
-  t260820-後漢書-proofread-返工 → content-pipeline（stage=process 返工中）……全部可归类。
-- md 保留为导出快照（引擎每次写入后刷新），人类可读链路不断。
+- One-off script `server/tools/ticket_migrate.py`: reads the ```json block of `server/tickets/*.md` →
+  converts it into `server/tickets/<id>.json` (fields mapped directly + log kept as-is + handoffs
+  backfilled from the log summaries).
+- Example mapping for the 12 existing tickets: t260820-mastery-m0 → code-lane (stage=develop already done),
+  t260820-hanshu-l0 → content-pipeline (stage=final-review, stage_state=awaiting-human),
+  t260820-後漢書-proofread-返工 → content-pipeline (reworking at stage=process)... all of them can be classified.
+- md is kept as an export snapshot (refreshed after every engine write), so the human-readable path is never broken.
 
-## 12. 联动
+## 12. Linkage
 
-- **提案状态机 ↔ stage**：content-pipeline 的 propose/**approve**/process/machine-qc/ai-review/final-review/publish
-  与 pipeline/proposals README 状态机一一对应（7 态 7 stage，QA A4.1）；advance 到 final-review 时 UI 显式提示
-  「去提案 §6 签字」；签完 advance→publish 触发发布链（build_shelf 等，总管执行）；
-  Ticket 挂 `proposal_id`（QA A4.6），advance 到 final-review/publish 机械读提案头部状态与 §6。
-- **dispatch-next ↔ dispatch_<role>**：生成指令即 dispatch_<role> 的 prompt 三件套
-  （角色说明书+工单+验收），总管复制即用（半自动）；M3 可做成 UI 一键调 dispatch_<role>。
+- **Proposal state machine ↔ stage**: content-pipeline's propose/**approve**/process/machine-qc/ai-review/final-review/publish
+  maps one-to-one onto the pipeline/proposals README state machine (7 states, 7 stages, QA A4.1); when advancing to final-review,
+  the UI explicitly prompts "go and sign proposal §6"; once signed, advance→publish triggers the publish chain
+  (build_shelf etc., executed by the steward); a Ticket carries `proposal_id` (QA A4.6), and advancing to
+  final-review/publish reads the proposal header status and §6 mechanically.
+- **dispatch-next ↔ dispatch_<role>**: the generated instruction is exactly the prompt triad of dispatch_<role>
+  (role spec + ticket + acceptance), which the steward copies and uses as is (semi-automatic); in M3 this can become a
+  one-click UI call to dispatch_<role>.
 
-## 13. 实施波次（细化）
+## 13. Implementation waves (refined)
 
-| 波 | 任务 | 验收 |
+| Wave | Task | Acceptance |
 |---|---|---|
-| M1a | workflows 6 模板 yaml（按 v0.3，含 approve stage）+ ticket_migrate.py（现有全部工单导入，数量以实施时为准） | 导入零丢失；ticket list 结构化输出 |
-| M1b | workflow.py + ticket.py 扩展（accept/advance/dispatch-next/rework）+ stage_state 写入者契约 + 不变式（closed⇒¬awaiting-human 等）+ role 枚举补 dispatcher（QA B3） | 用 1 张真实工单走完 advance+dispatch-next |
-| M2 | suyou-workbench 插件：三区页面 + /suyou-workbench/api/wf/* + 操作矩阵（含 awaiting-human 推进与 rework 行） | 台面列出全部工单；推进一张走完闭环 |
-| M3 | dispatch-next 一键调 dispatch_<role>；提案联动（proposal_id+机械读 §6）；CLAUDE.md 记账 | 端到端：工单创建→接力→终审→发布全程在台面完成 |
+| M1a | 6 workflow template yaml files (per v0.3, including the approve stage) + ticket_migrate.py (import all existing tickets; the count is whatever it is at implementation time) | zero-loss import; structured ticket list output |
+| M1b | workflow.py + ticket.py extensions (accept/advance/dispatch-next/rework) + the stage_state writer contract + invariants (closed⇒¬awaiting-human etc.) + add dispatcher to the role enum (QA B3) | use 1 real ticket to run advance+dispatch-next end to end |
+| M2 | the suyou-workbench plugin: three-zone page + /suyou-workbench/api/wf/* + action matrix (including the awaiting-human advance and the rework row) | the console lists all tickets; advance one of them through a full loop |
+| M3 | dispatch-next one-click call to dispatch_<role>; proposal linkage (proposal_id + mechanical §6 read); CLAUDE.md ledger entries | end to end: ticket creation→handoff→final review→publish all completed on the console |
 
-## 14. qa 评审处置记录（v0.3，对应 pipeline/output/wf_design_qa_260820/README.md）
+## 14. qa review disposition record (v0.3, corresponding to pipeline/output/wf_design_qa_260820/README.md)
 
-| QA 项 | 处置 |
+| QA item | Disposition |
 |---|---|
-| A3.2 blocker 终审→发布矩阵死锁 | §10 矩阵 settled/verified×awaiting-human 补「终审签字→推进(advance)」✅ |
-| A4.1 blocker 缺立项人门 | 模板1 插 approve(exit=human) stage；§12 改 7 态 7 stage ✅ |
-| A1.1 白名单三不一致 | 模板2 develop 验收扩「含热更数据键」；verify_lane 白名单扩 {app/public/data/*.json}（M1 配套）✅ |
-| A1.2 merge 后重跑 verify_lane | 模板2 verify 验收改「merge 冲突消解后必须重跑」✅ |
-| A1.3 qa diff 审读无落点 | 模板2 verify 验收加「qa diff 审读通过」✅ |
-| A1.4 visual 顶 qa 红线 | visual stage role 改 dispatcher（qa 出检查点+判读，构建归总管）✅ |
-| A2.1 worktree base ref 缺失 | create 登记 base ref=主树 HEAD；dispatch-next 条款加 fetch+rebase ✅ |
-| A2.2 agent fail 入口无快照 | dispatch-next 条款加「开工前 git status 快照上报总管」✅ |
-| A3.1 stage_state 写入者未定义 | §9 补写入者契约（create→awaiting 等）✅ |
-| A3.3 closed+awaiting-human 自相矛盾 | §9 不变式 status=closed⇒stage_state≠awaiting-human；迁移遗留单向出口 ✅ |
-| A3.4 矩阵缺 rework 行 | §10 补 rework 行；§9 rework 语义（status=rework/stage/awaiting）✅ |
-| A4.2 修订≤2 无计数/回错 stage | Ticket 加 revision_count；ai-review 配 revision_to=process；超限回 approve ✅ |
-| A5.1 验收人=执行人 | advance 校验 done.by≠当前 stage role；accept by 身份注入禁止自填 ✅ |
-| A5.2 fanout 聚合未定义 | fanout acceptance 按 agent 分片，全分片全勾过合并点 ✅ |
-| A5.3 终审签字无机械校验 | advance 机械读提案 §6（日期+结论）才放行 ✅ |
-| A2.3/A2.5/A1.7 泳道命名与清理 | 短 slug 命名；close 时清理、活跃期保留 ✅ |
-| A4.3/A4.4/A4.5/A4.6 提案侧细节 | 引提案 §3 清单/备份条款/publish 细化/proposal_id ✅ |
-| A1.5/A1.6/A3.5/A3.6/A5.4/A5.5/B1–B5 | 对应处已改（smoke 措辞/实例清单/invariant/推移表/evidence/幂等/数字漂移/示例过时/role 枚举/API 路径/模板6 展开）✅ |
+| A3.2 blocker final-review→publish matrix deadlock | §10 matrix settled/verified×awaiting-human gains "final review signature→advance(advance)" ✅ |
+| A4.1 blocker missing human gate for the epic proposal | template 1 gains an approve(exit=human) stage; §12 changed to 7 states, 7 stages ✅ |
+| A1.1 allowlist inconsistent in three places | template 2 develop acceptance extended with "including hot-update data keys"; the verify_lane allowlist extended with {app/public/data/*.json} (M1 companion) ✅ |
+| A1.2 rerun verify_lane after merge | template 2 verify acceptance changed to "must be rerun once merge conflicts are resolved" ✅ |
+| A1.3 qa diff review has no landing point | template 2 verify acceptance adds "qa diff review passes" ✅ |
+| A1.4 visual overrides the qa red line | the visual stage role changed to dispatcher (qa produces checkpoints + judges; the build belongs to the steward) ✅ |
+| A2.1 worktree base ref missing | create registers base ref = main-tree HEAD; the dispatch-next clause adds fetch+rebase ✅ |
+| A2.2 no snapshot at the agent-fail entry point | the dispatch-next clause adds "before starting, report a git status snapshot to the steward" ✅ |
+| A3.1 stage_state writer undefined | §9 adds the writer contract (create→awaiting etc.) ✅ |
+| A3.3 closed+awaiting-human self-contradictory | §9 invariant status=closed⇒stage_state≠awaiting-human; migration leftovers have a one-way exit ✅ |
+| A3.4 matrix missing the rework row | §10 adds the rework row; §9 rework semantics (status=rework/stage/awaiting) ✅ |
+| A4.2 revision ≤ 2 has no counter / reworks to the wrong stage | Ticket gains revision_count; ai-review pairs with revision_to=process; over the limit goes back to approve ✅ |
+| A5.1 acceptor = executor | advance validates done.by ≠ the current stage role; accept by is identity-injected and may not be self-filled ✅ |
+| A5.2 fanout aggregation undefined | fanout acceptance is sharded per agent, and the merge point is passed only when every shard is fully ticked ✅ |
+| A5.3 no mechanical check on the final-review signature | advance reads proposal §6 mechanically (date + conclusion) before letting it through ✅ |
+| A2.3/A2.5/A1.7 lane naming and cleanup | short slug naming; cleaned up at close, kept while active ✅ |
+| A4.3/A4.4/A4.5/A4.6 proposal-side details | cite the proposal §3 checklist / backup clause / publish refinement / proposal_id ✅ |
+| A1.5/A1.6/A3.5/A3.6/A5.4/A5.5/B1–B5 | the corresponding places were changed (smoke wording / instance checklist / invariant / transition table / evidence / idempotence / number drift / stale example / role enum / API path / template 6 expanded) ✅ |
 
-## 相关文档
+## Related documents
 
-- [平台架构设计](./平台架构设计.md)（§13 编辑工作流，本文为其落地）
-- [admin-dsh-应用方案](../ops/admin-dsh-应用方案.md)（实践参考：dsh 承载）
-- [知识库设计](./知识库设计.md)（实践参考：block diff review）
-- [基于DeepSeek Harness与Temporal的多角色协作agent机制](./deepseek_harness_and_temporal_based_multi-agent_mechanism.md)（总纲：本文为其 R1/R5/R6 的落地细化）
+- Platform Architecture Design (./平台架构设计.md) — §13 editing workflow; this document is its implementation. (Note: that document is not in this repository.)
+- [admin-dsh application plan](../ops/admin-dsh-application-plan.md) (practice reference: dsh as the carrier)
+- [Knowledge Base Design](./knowledge-base-design.md) (practice reference: block diff review)
+- [Multi-role collaboration agent mechanism based on DeepSeek Harness and Temporal](./deepseek_harness_and_temporal_based_multi-agent_mechanism.md) (the overall outline: this document is the refined implementation of its R1/R5/R6)

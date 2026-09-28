@@ -15,7 +15,7 @@ function ok(name, fn) { fn(); n += 1; console.log(`  ok ${n} - ${name}`) }
 
 ok('白名单：合法相对路径（含中文/子目录/下划线）放行', () => {
   assert.equal(isSafeDocRel('design/xx.md'), true)
-  assert.equal(isSafeDocRel('设计文档/工单工作流台设计.md'), true)
+  assert.equal(isSafeDocRel('设计文档/ticket-workflow-console-design.md'), true)
   assert.equal(isSafeDocRel('README.md'), true)
   assert.equal(isSafeDocRel('a/b_c/d-1.md'), true)
 })
@@ -106,7 +106,7 @@ ok('buildDocTree：title 缺省回落 rel；白名单非法条目不进组', () 
 
 ok('docTitleOf：frontmatter title 优先，回落文件名去扩展名', () => {
   assert.equal(docTitleOf({ title: '定稿题' }, 'design/x.md'), '定稿题')
-  assert.equal(docTitleOf({}, 'design/工单工作流台设计.md'), '工单工作流台设计')
+  assert.equal(docTitleOf({}, 'design/ticket-workflow-console-design.md'), 'ticket-workflow-console-design')
   assert.equal(docTitleOf({ title: '' }, 'a/b.md'), 'b')
 })
 

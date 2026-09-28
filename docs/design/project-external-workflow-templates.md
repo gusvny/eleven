@@ -1,91 +1,179 @@
 ---
-title: 项目外置工作流模板
+title: Project external workflow templates
 category: design
-tags: [设计定稿, 工作流模板, 项目外置, 多项目, 引擎扩展]
+tags: [design-final, workflow-template, project-external, multi-project, engine-extension]
 status: active
-updated: 2026-09-24
+updated: 2026-09-28
 ---
 
-# 项目外置工作流模板
+# Project external workflow templates
 
-> 来源：nusuyou 项目《给 sandbar 的需求说明：项目外置工作流模板》（宿主 260924 拍板原话
-> 「不要直接凿门，出个说明文档，我发给 sandbar 开工单做」）。
-> 本文自 `notes/discussions/260924-项目外置工作流模板-设计稿.md` 毕业（随工单 t260924-04 入册）；
-> 宿主 260924 会话拍板四条：隔离强度=进程分池防故障（随票2）；坏模板损面=模板级隔离拒收；
-> 演进策略=段序变更走新模板 id 并存＋分支逻辑变更走补丁标识（带项目前缀）；命名边界=
-> 项目注册名/模板 id 属数据面照写、sandbar 新增标识符不得再造已退役旧引擎名形。
-> **本文只写「是什么、为什么」**：接口形状以需求书§六为准；落地状态与进度查立项单/工单。
+> Source: the nusuyou project document "Requirements for sandbar: project external workflow
+> templates" (the host's verbatim 260924 ruling: "don't chisel the gate open directly; write an
+> explanatory document and I'll send it to sandbar to open a ticket and do it").
+> This document graduated from `notes/discussions/260924-项目外置工作流模板-设计稿.md` (registered
+> with ticket t260924-04);
+> four points ruled in the host's 260924 session: isolation strength = process pooling for fault
+> containment (with ticket 2); blast radius of a bad template = per-template isolated rejection;
+> evolution strategy = stage-order changes go to a new template id coexisting alongside the old,
+> plus branch-logic changes go to a patch marker (with the project prefix); naming boundary =
+> project registration names / template ids belong to the data plane and are written as-is, and
+> new sandbar identifiers must not recreate the retired old engine name shapes.
+> **This document only writes "what and why"**: for interface shape see §six of the requirements;
+> for landing status and progress check the epic proposal / ticket.
 
-## Problem（问题）
+## Problem
 
-1. **一句话**：引擎的「模板即代码」把**项目的业务流程**焊死在**引擎仓**里——项目每改一次流程，就得在引擎仓开一张工单。
-2. **背景知识**（没参与过的人需要先知道）：
-   - **模板 = 一个工作流类**：它定义一条流程的段序（谁先谁后）、人门（人工审批）落在哪一段、每段跑什么形态；引擎靠一张「模板 id → 类」的注册表认模板。
-   - 这张注册表是**引擎全局的、内置的**：类从引擎包内加载，项目侧没有任何位置可以声明自己的流程。
-   - 引擎**服务多个项目**（项目各自注册身份与依赖），但流程模板面不随项目分发。
-   - **人门**在引擎里是唯一入口语义：人的审批只能靠签字推进，没有任何「跳段/强制推进」的旁路。
-   - 工作流代码另有一条硬约束：**确定性 + 历史可重放**（在途票的进展由历史重放重建，改分支逻辑若不打标记，老历史会与新代码失配）。
-3. **证据**：
-   - 现状面：模板类住在引擎包内；260904 之后默认可用模板面收窄到仅剩一个内置开发流程。
-   - 需求方实据：nusuyou 将新增「内容编撰」流程（八段链、两处人门），且该流程**会持续演进**——按现结构，每笔流程迭代都变成引擎工单，账目错位、排期互堵。
-   - 约束实据：上述重放约束意味着「项目能改流程」这件事本身需要配套的演进纪律，否则第一次改流程就会让在途票僵死。
+1. **In one sentence**: the engine's "template as code" welds a **project's business process** into
+   the **engine repository** — every time a project changes its process, it has to open a ticket in
+   the engine repository.
+2. **Background knowledge** (what someone who was not involved needs first):
+   - **A template = one workflow class**: it defines a process's stage order (who comes before
+     whom), which stage the human gate (manual approval) falls on, and what form each stage runs
+     in; the engine recognizes templates through a "template id → class" registry.
+   - That registry is **engine-global and built in**: classes are loaded from inside the engine
+     package, and the project side has no place at all to declare its own process.
+   - The engine **serves multiple projects** (each project registers its own identity and
+     dependencies), but the workflow template face is not distributed with the project.
+   - **The human gate** is the only entry semantics in the engine: human approval can only advance
+     through signing, and there is no bypass whatsoever to "skip a stage / force advancement".
+   - Workflow code carries one more hard constraint: **determinism + replayable history** (the
+     progress of an in-flight ticket is rebuilt by replaying history, so changing branch logic
+     without leaving a marker makes old history mismatch the new code).
+3. **Evidence**:
+   - Current state: template classes live inside the engine package; after 260904 the default
+     available template face narrowed to a single built-in development flow.
+   - Requester's hard evidence: nusuyou will add a "content authoring" flow (an eight-stage chain
+     with two human gates), and that flow **will keep evolving** — under the present structure
+     every process iteration becomes an engine ticket, so accounts are misaligned and schedules
+     block each other.
+   - Constraint evidence: the replay constraint above means that "projects can change their
+     process" itself needs a matching evolution discipline, otherwise the first process change
+     strands in-flight tickets.
 
-## Requirement（需求）
+## Requirement
 
-每条都能当验收标准（括号=验收口径）：
+Each item can serve as an acceptance criterion (parentheses = acceptance reading):
 
-1. **登记即可用**：项目能在自己的注册里声明「我的模板在这个位置」；**不声明 = 零行为变化**，既有项目的既有可用面一字不改。（A2）
-2. **外置模板走通全链**：用外置模板建票 → 段序按定义执行 → 人门经签字推进 → 票结；工人重启后能续跑（幂等靠既有结果文件机制）。（A1）
-3. **拒绝面精确（fail-closed）**：撞名、畸形（缺段定义/段形态不合）、加载失败三态**一律拒收并点名哪个检查失败**；不静默改名、不后到覆盖、不装死跳过。（A3）
-4. **损面收敛**：坏模板的影响面**限于该模板**——它被隔离拒收（高声点名、不注册），同项目其他模板与别项目照常跑；该模板的建票与续跑 fail-closed。（A7）
-5. **信任与故障隔离**：项目模板按「可信代码」待遇（登记人=宿主审），配**进程分池防故障**——一项目的坏模板/死循环不拖垮别的项目；OS 级降权（沙箱/独立用户）本期不做，明账列二期债。
-6. **演进兼容**：段序/拓扑变更走**新模板 id 并存**（老在途票由老类跑完）；分支逻辑变更走**补丁标记**纪律、标识带项目前缀防撞；含「老在途票历史重放通过」的验收面。（A6）
-7. **安全面不降级**：人门唯一入口仍是签字（无旁路），信号面不变；确定性编码规约对外置模板同等适用，并在加载口文档中明示。
-8. **说明书与实现一致**：可用模板面的工具帮助文本、生成文档、收窄守卫断言同步新语义——默认面 = 内置 + **当项目显式登记**的模板；测试夹具模板仍永不上生产板。（A5）
-9. **归属约束**：模板归属登记它的项目；本期不做「跨项目互用他人模板」，引擎自身流程照旧。
-10. **命名边界**：项目注册名/模板 id 属**数据面**（照写，不改名）；sandbar 侧新增标识符不得再造已退役的旧引擎名形。
+1. **Register and it works**: a project can declare "my template is at this location" in its own
+   registration; **not declaring = zero behavior change**, and an existing project's existing
+   available face is unchanged to the letter. (A2)
+2. **An external template works end to end**: create a ticket with an external template → stages
+   execute in the defined order → the human gate advances by signing → the ticket closes; after a
+   worker restart it can resume (idempotency relies on the existing result-file mechanism). (A1)
+3. **A precise rejection face (fail-closed)**: name collision, malformed (missing stage definition
+   / invalid stage shape), and load failure — all three states are **rejected outright and the
+   failing check is named**; no silent renaming, no later-arrival overwriting, no playing dead and
+   skipping. (A3)
+4. **Contained blast radius**: the impact of a bad template **is limited to that template** — it is
+   isolated and rejected (named loudly, not registered), while other templates in the same project
+   and other projects run as usual; ticket creation and resumption for that template are
+   fail-closed. (A7)
+5. **Trust and fault isolation**: project templates get "trusted code" treatment (the registrant is
+   the host's reviewer), paired with **process pooling for fault containment** — a bad template or
+   infinite loop in one project does not drag other projects down; OS-level privilege dropping
+   (sandbox / dedicated user) is not done this cycle and is booked explicitly as second-phase debt.
+6. **Evolution compatibility**: stage-order/topology changes go to a **new template id coexisting
+   alongside the old** (old in-flight tickets are finished by the old class); branch-logic changes
+   follow the **patch marker** discipline, with identifiers carrying the project prefix to avoid
+   collisions; this includes the acceptance face "old in-flight ticket history replays
+   successfully". (A6)
+7. **The security face is not downgraded**: the human gate's only entry is still signing (no
+   bypass), and the signal face is unchanged; the determinism coding rules apply equally to
+   external templates and are stated explicitly in the loader document.
+8. **Docs match the implementation**: the tool help text, generated documents, and narrowing guard
+   assertions on the available template face are synchronized with the new semantics — the default
+   face = built-in + templates **explicitly registered by a project**; fixture templates still
+   never reach the production board. (A5)
+9. **Ownership constraint**: a template belongs to the project that registers it; "cross-project
+   reuse of someone else's template" is not done this cycle, and the engine's own flows stay as
+   they are.
+10. **Naming boundary**: project registration names / template ids belong to the **data plane**
+    (written as-is, not renamed); new identifiers added on the sandbar side must not recreate the
+    retired old engine name shapes.
 
-## Nongoal（不做什么）
+## Nongoal
 
-- 不复活 260904 退役的内置模板族；**不改内置开发流程本体与行为**。
-- 不做**热加载 / 运行时换模板**（重启生效即可——且生效粒度按事实写明，不含混）。
-- 不做**模板市场的通用插件体系**——只开「按项目登记、启动时合并」这一扇门。
-- 不做 **OS 级降权/沙箱/独立用户隔离**（本期不做，列二期债）。
-- 不做**跨项目模板互用**（本期）。
-- 内容编撰流程的类代码与机器校验脚本**不在本设计内**（走需求方自己的票）。
+- Do not revive the built-in template family retired on 260904; **do not change the built-in
+  development flow itself or its behavior**.
+- Do not do **hot loading / swapping templates at runtime** (a restart taking effect is enough —
+  and the granularity of that effect must be stated factually, without fudging).
+- Do not do a **general-purpose plugin system as a template marketplace** — only this one door is
+  opened: "register per project, merge at startup".
+- Do not do **OS-level privilege dropping / sandboxing / dedicated-user isolation** (not this
+  cycle; booked as second-phase debt).
+- Do not do **cross-project template reuse** (not this cycle).
+- The class code and machine-check scripts of the content authoring flow **are out of scope for
+  this design** (they go through the requester's own ticket).
 
-## Proposal（方案）
+## Proposal
 
-### High level：三件事，各一句话
+### High level: three things, one sentence each
 
-1. **一扇门：登记即加载。** 项目在自己的注册里声明模板位置 → 引擎启动时加载，与内置模板合并进同一张注册表（同一套唯一性检查与自检）。不声明就什么都没有——把「零行为变化」做成默认态。
-2. **一条闸：逐模板隔离拒收。** 加载不是「全成或全败」：每个外置模板单独过检查（撞名/形状/加载），不过的那个**高声拒收但不注册**，其余照常；被拒模板的票在建票处就失败并说明原因，不产生半死票。
-3. **两条演进路：换 id 或打补丁。** 段序/拓扑变了 → 新模板 id 与老 id 并存，老在途票由老类跑完；只改分支逻辑 → 在改动点打补丁标记（标识带项目前缀），老历史走老分支、新历史走新分支，两边都能重放。
+1. **One door: register-then-load.** A project declares its template location in its own
+   registration → the engine loads it at startup and merges it into the same registry as the
+   built-in templates (the same uniqueness checks and self-checks). Declare nothing and nothing
+   happens — making "zero behavior change" the default state.
+2. **One gate: per-template isolated rejection.** Loading is not "all succeed or all fail": each
+   external template goes through its checks (name collision / shape / load) on its own, and the
+   one that fails is **loudly rejected but not registered** while the rest proceed as usual; a
+   ticket for a rejected template fails right at ticket creation with the reason stated, so no
+   half-dead ticket is produced.
+3. **Two evolution paths: change the id or apply a patch.** If the stage order/topology changes →
+   the new template id coexists with the old id, and old in-flight tickets are finished by the old
+   class; if only branch logic changes → leave a patch marker at the change point (identifier
+   carrying the project prefix), so old history walks the old branch and new history walks the new
+   branch, and both replay.
 
-### 关键取舍（为什么这么选）
+### Key trade-offs (why these choices)
 
-- **可信代码 vs 进程隔离**：外置模板是跑在引擎工人进程里的**同权代码**。选「可信（登记人审）＋进程分池防故障」——它挡住「写坏拖垮别人」，但挡不住「同一系统用户下越权读别的项目数据」；后者要 OS 级降权，本期不做、明账列债，不假装已挡。
-- **拒收的狠度**：坏模板**不**让工人起不来（否则一个项目的笔误让全体停摆），而是模板级隔离＋高声点名；被拒模板自己的票 fail-closed。**「拒收」不等于「装死」**：拒收必须点名哪个检查失败、撞的是谁。
-- **演进自由的边界**：给流程改动的自由，必须以「在途票历史可重放」为界。不设这条界，第一次改流程就会让在途票僵死——这是本方案里最容易被忽略、代价最大的一条。
-- **生效粒度写实**：普通工单流程跑在**每票专属工人**上（新票启动即吃新码；在途票冻在启动时的码）；引擎自身的周期流程跑在**共享工人**上（要重启才吃新码）。文档与帮助文本不许再说含混的「重启生效」。
+- **Trusted code vs process isolation**: an external template is **same-privilege code** running
+  inside the engine worker process. We choose "trusted (registrant reviewed by the host) + process
+  pooling for fault containment" — it stops "a bad write drags others down", but it does not stop
+  "reading another project's data without authorization under the same system user"; the latter
+  needs OS-level privilege dropping, which is not done this cycle but booked openly as debt, not
+  pretended to be blocked.
+- **How hard the rejection bites**: a bad template does **not** keep workers from starting
+  (otherwise one project's typo halts everyone); instead it is per-template isolation plus loud
+  naming, and the rejected template's own tickets are fail-closed. **"Rejected" is not "playing
+  dead"**: a rejection must name which check failed and what it collided with.
+- **The boundary of evolution freedom**: freedom to change the process must be bounded by
+  "in-flight ticket history can be replayed". Without that boundary, the first process change
+  strands in-flight tickets — the most easily overlooked and most costly item in this proposal.
+- **State the effective granularity factually**: ordinary ticket flows run on **a dedicated worker
+  per ticket** (a new ticket picks up new code as soon as it starts; in-flight tickets are frozen
+  on the code from their start); the engine's own periodic flows run on **shared workers** (they
+  need a restart to pick up new code). Documents and help text must no longer say the vague
+  "takes effect after restart".
 
-### 回扣
+### Mapping back
 
-本方案 → 解决 **Problem** 的「流程演进必须改引擎仓」（登记即加载 ＋ 两条演进路）→ 满足 **Requirement** 的 1–10 → 避开 **Nongoal** 的「不复活退役模板、不做热加载、不做隔离降权、不做跨项目互用」。
+This proposal → solves **Problem**'s "process evolution requires changing the engine repository"
+(register-then-load + the two evolution paths) → satisfies items 1–10 of **Requirement** → avoids
+**Nongoal**'s "no reviving retired templates, no hot loading, no isolation privilege dropping, no
+cross-project reuse".
 
-## 附：需求书修订点对照（非设计正文，供审阅对照）
+## Appendix: requirements revision points (not part of the design body; for review cross-reference)
 
-1. 非目标补两条：「不做 OS 级降权（二期债）」「不做跨项目模板互用（本期）」。
-2. 加载失败的损面语义明确为**模板级隔离拒收**（工人照常起、坏模板不注册并点名；不是全体拒启）。
-3. 约束补两条演进纪律：「段序/拓扑变更走新模板 id 并存」「补丁标识带项目前缀防撞引擎面」。
-4. 验收口径补 **A6**（演进兼容）与 **A7**（坏模板隔离拒收）。
-5. 收窄守卫按「扩锁不拆锁」改判（默认面=内置＋显式登记；夹具门语义不动）。
-6. 接口预期不变，原样有效（供实现方对形状）。
-7. 命名边界新增一句（见 Requirement 第 10 条）。
+1. Two additions to the non-goals: "no OS-level privilege dropping (second-phase debt)" and "no
+   cross-project template reuse (this cycle)".
+2. The blast-radius semantics of a load failure are made explicit as **per-template isolated
+   rejection** (workers start as usual; the bad template is not registered and is named; it is not
+   a wholesale refusal to start).
+3. Two evolution disciplines added as constraints: "stage-order/topology changes go to a new
+   template id coexisting alongside the old" and "patch identifiers carry the project prefix to
+   avoid colliding with the engine face".
+4. Two acceptance readings added: **A6** (evolution compatibility) and **A7** (isolated rejection
+   of a bad template).
+5. The narrowing guard is re-judged as "widening the lock without dismantling it" (default face =
+   built-in + explicit registrations; fixture gate semantics unchanged).
+6. The interface expectation is unchanged and remains in force as-is (for the implementer to match
+   the shape).
+7. One sentence added on the naming boundary (see Requirement item 10).
 
-## 相关文档
+## Related documents
 
-- [设计文档写作指南](设计文档写作指南.md)
-- 需求书（源，nusuyou 仓）：`notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`
-- 讨论稿（毕业前原件）：[项目外置工作流模板（设计稿）](../../notes/discussions/260924-项目外置工作流模板-设计稿.md)
-- [已知问题清单](../../notes/debts/known-issues.md)——KI-113（工人冻结码拓扑）与本文「生效粒度」一条直接相关
+- [Design doc writing guide](design-doc-writing-guide.md)
+- Requirements (source, nusuyou repo): `notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`（that source note lives in the nusuyou repo, not in this one）
+- Discussion draft (the original before graduation): [Project external workflow templates (design draft)](../../notes/discussions/260924-项目外置工作流模板-设计稿.md)
+- [Known issues (KI)](../../notes/debts/known-issues.md) — KI-113 (worker frozen code topology) is directly related to the "effective granularity" item of this document

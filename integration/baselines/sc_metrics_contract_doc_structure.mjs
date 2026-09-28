@@ -1,6 +1,6 @@
 // t260901-11 M0 integration test: contract document existence and structure
 // (black-box documentation baseline)
-// Under acceptance: docs/design/metrics-api契约v1.md
+// Under acceptance: docs/design/metrics-api-contract-v1.md
 //  - exists, frontmatter complete (title/category/tags/status/updated)
 //  - the four-section structure Problem → Requirement → Nongoal → Proposal
 //    present and ordered
@@ -18,8 +18,8 @@ const check = (name, ok, detail = '') => {
   else { fail++; console.log(`FAIL ${name}${detail ? ' — ' + detail : ''}`); }
 };
 
-const DOC = 'docs/design/metrics-api契约v1.md';
-const UI = 'docs/design/metrics面板ui规划.md';
+const DOC = 'docs/design/metrics-api-contract-v1.md';
+const UI = 'docs/design/metrics-panel-ui-plan.md';
 
 check('契约文档存在', existsSync(DOC), `${DOC} 不存在`);
 check('UI 规划存在（被指针引用方）', existsSync(UI));
@@ -45,17 +45,18 @@ if (existsSync(DOC)) {
   check('四段有序 P→R→N→Pr', iP < iR && iR < iN && iN < iPr);
 
   // Contract exemption statement (exempts the self-check item "Proposal has
-  // no API names / field names")
-  check('写作指南豁免声明存在',
-    /豁免/.test(text) && /字段级冻结/.test(text));
+  // no API names / field names" — 260928: re-anchored on the English wording)
+  check('writing-guide exemption statement present',
+    /contract document/i.test(text) && /field-level freez/i.test(text) && /exempt/i.test(text));
 
-  // Source tag
-  check('来源立项标签', text.includes('> 来源立项：metrics'));
+  // Source tag (evaluated on semantic identity, not on the surface language:
+  // the translated document reads "> Source epic: metrics")
+  check('source epic tag', text.includes('> 来源立项：metrics') || /^>\s*Source epic:\s*metrics\s*$/m.test(text));
 
   // Contract pointer back-reference (one of the three deltas against the UI plan)
   const ui = existsSync(UI) ? readFileSync(UI, 'utf8') : '';
   check('UI 规划含契约指针（字段级契约以契约为准）',
-    /metrics-api契约v1/.test(ui), 'UI 规划未引用契约文档');
+    /metrics-api-contract-v1/.test(ui), 'UI 规划未引用契约文档');
 } else {
   check('契约文档内容可检（前置存在）', false, '文档缺失，跳过内容断言');
 }

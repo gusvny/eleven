@@ -121,51 +121,57 @@ def build() -> dict:
     review = {"missing_frontmatter": [], "deprecated": [], "stale": []}
     today = date.today()
 
+    # 260928：扫描面 = 四类目录 + docs/ 根级散篇（README/terminology/testing-guide 等）。
+    # 以前只扫四类目录，根级三篇从未进索引 → 巡检 S8 报「文档缺登记」三项，人查目录时
+    # 也看不到它们。根级篇目的 category 取 frontmatter 声明值，不猜目录名。
+    targets = []
     for cat in CATEGORIES:
         cat_dir = DOCS / cat
-        if not cat_dir.is_dir():
+        if cat_dir.is_dir():
+            targets.extend((md, cat) for md in sorted(cat_dir.glob("*.md")))
+    targets.extend((md, "") for md in sorted(DOCS.glob("*.md")))
+
+    for md, cat in targets:
+        rel = md.relative_to(DOCS).as_posix()
+        try:
+            text = md.read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"[warn] 读不了 {rel}: {e}", file=sys.stderr)
             continue
-        for md in sorted(cat_dir.glob("*.md")):
-            rel = md.relative_to(DOCS).as_posix()
-            try:
-                text = md.read_text(encoding="utf-8")
-            except OSError as e:
-                print(f"[warn] 读不了 {rel}: {e}", file=sys.stderr)
-                continue
 
-            meta, _body = parse_frontmatter(text)
-            missing = [k for k in REQUIRED_KEYS if not meta.get(k)]
-            has_frontmatter = bool(meta)
+        meta, _body = parse_frontmatter(text)
+        missing = [k for k in REQUIRED_KEYS if not meta.get(k)]
+        has_frontmatter = bool(meta)
 
-            if missing:
-                review["missing_frontmatter"].append(rel)
-                print(f"[warn] {rel} 缺 frontmatter 键: {missing}", file=sys.stderr)
+        if missing:
+            review["missing_frontmatter"].append(rel)
+            print(f"[warn] {rel} 缺 frontmatter 键: {missing}", file=sys.stderr)
 
-            title = str(meta.get("title") or extract_title_from_heading(text) or md.stem)
-            category = str(meta.get("category") or cat)
-            status = str(meta.get("status") or "active")
-            updated_raw = str(meta.get("updated") or "")
-            tags = meta.get("tags") if isinstance(meta.get("tags"), list) else []
-            if isinstance(tags, str):
-                tags = [tags]
-            tags = [str(t) for t in tags]
+        title = str(meta.get("title") or extract_title_from_heading(text) or md.stem)
+        category = str(meta.get("category") or cat)
+        status = str(meta.get("status") or "active")
+        updated_raw = str(meta.get("updated") or "")
+        tags = meta.get("tags") if isinstance(meta.get("tags"), list) else []
+        if isinstance(tags, str):
+            tags = [tags]
+        tags = [str(t) for t in tags]
 
-            updated_date = parse_date(updated_raw)
-            if status == "deprecated":
-                review["deprecated"].append(rel)
-            if updated_date is not None and (today - updated_date).days > STALE_DAYS:
-                review["stale"].append(rel)
+        updated_date = parse_date(updated_raw)
+        if status == "deprecated":
+            review["deprecated"].append(rel)
+        if updated_date is not None and (today - updated_date).days > STALE_DAYS:
+            review["stale"].append(rel)
 
-            docs.append({
-                "path": rel,
-                "file": md.name,
-                "title": title,
-                "category": category,
-                "tags": tags,
-                "status": status,
-                "updated": updated_raw,
-                "has_frontmatter": has_frontmatter,
-            })
+        docs.append({
+            "path": rel,
+            "file": md.name,
+            "title": title,
+            "category": category,
+            "tags": tags,
+            "status": status,
+            "updated": updated_raw,
+            "has_frontmatter": has_frontmatter,
+        })
 
     docs.sort(key=lambda d: (d["category"], d["path"]))
 

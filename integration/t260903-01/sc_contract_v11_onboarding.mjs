@@ -25,7 +25,7 @@
  * no L2 fixture today. This journey is the system-level user path across both lanes.
  *
  * Reference: .suyou/stage_review_plan_gen2.json (approved plan ②a~②e);  // naming-compat
- * contract doc docs/design/sandbar项目接入契约v1.md ②.
+ * contract doc docs/design/sandbar-project-onboarding-contract-v1.md ②.
  */
 
 import { spawnSync } from 'node:child_process'
