@@ -228,7 +228,23 @@ def precheck_namespace():
 # ---------------------------------------------------------------- 夹具
 
 GUARD_REL = "integration/sc_pk20_guard.mjs"
-GUARD_ANCHOR_LINE = 5   # assert(label.includes("<token>"), "守卫锚缺失")
+
+
+def _guard_lines(producer_rel: str, token: str) -> list:
+    """守卫文件内容（行序=落盘行序；**行号从这份内容算**，见 GUARD_ANCHOR_LINE）。"""
+    return [
+        "// 守卫：分项目巡检夹具锚（t260915-20 场景夹具，capture-chat 形态）",
+        "// 守卫对象生产方: %s" % producer_rel,
+        "const label = await page.locator('.session-create').innerText();",
+        'assert(label.includes("%s"), "守卫锚缺失");' % token,
+    ]
+
+
+# 260928 修：锚行号原来写死 5，而守卫文件只有 4 行 ⇒ 复核层判「行号越界（合法 1~4）」，
+# 桩发现的引文复核恒 unverified（本场景 J1g2-A/B 双红的真因；夹具自证不成立=「假锚」）。
+# 现改为与内容同源：drifty_tree 落盘前自检 `_guard_lines()[行号-1] == guard_anchor_line(token)`，
+# 行号与文件再漂移即当场红，不会再退化成一枚查不出的 unverified。
+GUARD_ANCHOR_LINE = 4   # = _guard_lines(...) 里 assert 那行的 1-based 行号
 
 
 def guard_anchor_line(token: str) -> str:
@@ -242,11 +258,11 @@ def drifty_tree(label: str, token: str) -> RepoTree:
     t260916-22 后：夹具改作 inspect 桩发现的证据锚底座（引文锚=本行）。"""
     t = RepoTree(label)
     t.write_scenarios([("t-pk20-guard", "分项目巡检夹具守卫（%s）" % label, "true")])
-    t.write(GUARD_REL,
-            "// 守卫：分项目巡检夹具锚（t260915-20 场景夹具，capture-chat 形态）\n"
-            "// 守卫对象生产方: %s\n"
-            "const label = await page.locator('.session-create').innerText();\n"
-            'assert(label.includes("%s"), "守卫锚缺失");\n' % (PRODUCER_REL, token))
+    _gl = _guard_lines(PRODUCER_REL, token)
+    assert _gl[GUARD_ANCHOR_LINE - 1] == guard_anchor_line(token), (
+        "锚行号与守卫文件内容漂移：第 %d 行=%r，而 guard_anchor_line=%r"
+        % (GUARD_ANCHOR_LINE, _gl[GUARD_ANCHOR_LINE - 1], guard_anchor_line(token)))
+    t.write(GUARD_REL, "\n".join(_gl) + "\n")
     # 纯重写形态：生产方在位但锚字面缺席 → KI-051 high 支路必报
     t.write(PRODUCER_REL,
             'const section = "项目行";\n'
@@ -476,12 +492,20 @@ def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTr
     def lib_inspect_state(f):
         return inspect_lib.finding_state(f)
 
+    # 260928：失败面补证据——原来只印 states，看不出**为什么**判 unverified；
+    # 复核层的点名理由就在 finding["unverified_reasons"]（KI-018① 同族：报错必须精确）。
+    def _face_reasons(snap):
+        face = (snap or {}).get("face") if isinstance(snap, dict) else {}
+        fs = (face or {}).get("findings") if isinstance(face, dict) else None
+        return [((f.get("subject") or "")[:28], f.get("verified"),
+                 f.get("unverified_reasons")) for f in (fs or []) if isinstance(f, dict)]
+
     check("J1g2-A A 票发现证据复核 verified（基座=A 仓内容级证明）",
           bool(txt_a.strip()) and "verified" in _face_states(snap_a),
-          "states=%r" % _face_states(snap_a))
+          "states=%r reasons=%s" % (_face_states(snap_a), json.dumps(_face_reasons(snap_a), ensure_ascii=False)[:400]))
     check("J1g2-B B 票发现证据复核 verified（基座=B 仓内容级证明）",
           bool(txt_b.strip()) and "verified" in _face_states(snap_b),
-          "states=%r" % _face_states(snap_b))
+          "states=%r reasons=%s" % (_face_states(snap_b), json.dumps(_face_reasons(snap_b), ensure_ascii=False)[:400]))
     check("J1h 被扫树逐字节不变（巡检不改码红线）",
           not tree_a.tree_unchanged() and not tree_b.tree_unchanged(),
           "%s %s" % (tree_a.tree_unchanged(), tree_b.tree_unchanged()))
