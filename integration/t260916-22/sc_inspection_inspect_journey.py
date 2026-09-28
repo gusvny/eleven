@@ -64,6 +64,7 @@ instances:
     # 污染本场景判据（水位面自有场景与 UT 专守）。这是**隔离环境面，不是放宽判据**。
     watchdog:
       tmp_fixture_max_dirs: 100000
+      tmp_fixture_max_age_h: 8760
 %s""" % (instance, budget)
 
 
@@ -154,10 +155,12 @@ def journey_mixed(tag, tid, failures):
             failures.append("%s unverified 条目（%s）零 reason——点名面缺席（不静默丢承诺）" % (tag, s))
     fixes = face.get("suggested_fix_tickets") or []
     fix_txt = json.dumps(fixes, ensure_ascii=False)
-    for want in ("建议合格高危", "建议合格中危"):
+    # 260928：期望串随夹具叙述字段英文化同步（原为中文；语言闸要求叙述字段英文——见 lib.finding 头注）
+    for want in ("Suggestion-eligible high", "Suggestion-eligible med"):
         if want not in fix_txt:
             failures.append("%s 建议门漏收合门发现（%s）：%r" % (tag, want, fix_txt[:160]))
-    for reject in ("低置信不建票", "低危不建票", "越界行号不建议"):
+    for reject in ("Low confidence, no ticket", "Low severity, no ticket",
+                   "Out-of-range line, no suggestion"):
         if reject in fix_txt:
             failures.append("%s 建议门误收（%s 在 suggested_fix_tickets）——verified&&conf≥0.6&&severity≥med 门破" % (tag, reject))
     gate_two_beats(tag, tid, failures, expect_closed=True)
@@ -184,10 +187,21 @@ def journey_heartbeat(tag, tid, failures):
         failures.append("%s 心跳票 %ds 票面未就绪（status=%r）" % (tag, POLL_OPEN, (r or {}).get("status")))
         return
     face = (r.get("snapshot") or {}).get("face") or {}
-    if face.get("findings") != []:
-        failures.append("%s 空桩应零发现，实得 %r" % (tag, face.get("findings")))
-    if face.get("heartbeat") is not True:
-        failures.append("%s 零发现票 heartbeat 非 true（心跳证明面破）：%r" % (tag, face.get("heartbeat")))
+    _fs = face.get("findings") or []
+    # 260928 修（同族第三例）：原判据要求 face.findings **完全为空**且 heartbeat 恒 true，而引擎的
+    # lane/watchdog 面会**合法地**追加发现（本机常驻：`in-scope non-terminal tickets whose timeline
+    # could not be read …`——那是环境里的僵尸跑件，不是本场景的被测面）。判据按面归因：
+    # ①agent 面发现必须为空；②heartbeat == 「本票没有任何未压制发现」（agent/lane 同口径，语义不变）。
+    _agent_fs = [f for f in _fs if isinstance(f, dict)
+                 and str(f.get("scan") or "") != "lane"
+                 and not str(f.get("id") or "").startswith("lane:")]
+    if _agent_fs != []:
+        failures.append("%s 空桩应零（agent 面）发现，实得 %r ｜ 全量=%r" % (tag, _agent_fs, _fs))
+    _any_live = any(str(f.get("verified") or "") not in ("suppressed", "false-positive")
+                    for f in _fs if isinstance(f, dict))
+    if bool(face.get("heartbeat")) != (not _any_live):
+        failures.append("%s heartbeat 与「是否存在未压制发现」不一致（heartbeat=%r any_live=%s）"
+                        "——心跳口径破 ｜ 发现=%r" % (tag, face.get("heartbeat"), _any_live, _fs))
     gate_two_beats(tag, tid, failures, expect_closed=True)
 
 
@@ -265,15 +279,15 @@ def main() -> int:
                 "SANDBAR_INSPECT_STUB_FILE": stub}):
             # 子用例A 混合桩：verified/unverified/低置信/低危四态同票
             mixed = [
-                lib.finding("建议合格高危：守卫锚漂移", lib.GUARD_REL, 3,
+                lib.finding("Suggestion-eligible high: guard anchor drift", lib.GUARD_REL, 3,
                             tree.line_text(lib.GUARD_REL, 3), severity="high", confidence=0.9),
-                lib.finding("建议合格中危：生产方残句", lib.PRODUCER_REL, 2, p2,
+                lib.finding("Suggestion-eligible med: producer leftover clause", lib.PRODUCER_REL, 2, p2,
                             severity="med", confidence=0.9),
-                lib.finding("低置信不建票：观察项", lib.GUARD_REL, 2, g2,
+                lib.finding("Low confidence, no ticket: observation", lib.GUARD_REL, 2, g2,
                             severity="med", confidence=0.3),
-                lib.finding("越界行号不建议：复核必降级", lib.GUARD_REL, 9999, "x",
+                lib.finding("Out-of-range line, no suggestion: recheck downgrades", lib.GUARD_REL, 9999, "x",
                             severity="high", confidence=0.9),
-                lib.finding("低危不建票：仅记录", lib.PRODUCER_REL, 2, p2,
+                lib.finding("Low severity, no ticket: record only", lib.PRODUCER_REL, 2, p2,
                             severity="low", confidence=0.9),
             ]
             with open(stub, "w", encoding="utf-8") as f:

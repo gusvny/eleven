@@ -47,6 +47,7 @@ instances:
     # 污染本场景判据（水位面自有场景与 UT 专守）。这是**隔离环境面，不是放宽判据**。
     watchdog:
       tmp_fixture_max_dirs: 100000
+      tmp_fixture_max_age_h: 8760
   - id: docs-sync-%05d
     enabled: true
     project_key: sandbar
@@ -60,6 +61,7 @@ instances:
     # 污染本场景判据（水位面自有场景与 UT 专守）。这是**隔离环境面，不是放宽判据**。
     watchdog:
       tmp_fixture_max_dirs: 100000
+      tmp_fixture_max_age_h: 8760
 """ % (_STAMP, _STAMP)
 
 SIGN_WHO = "human-scenario"       # 非 agent 角色名（agent 不得自签）
