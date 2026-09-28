@@ -20,10 +20,14 @@
 
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const m = await import('../../../project-registry.ts')
 const { loadRegistry, loadProjects, findProject, parseProjectYaml, migrateRegistry, PROJECT_KEY_RE } = m
+
+//: 仓库根（本文件 = <repo>/server/plugins/workbench/tests/）
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
 
 let passed = 0
 let failed = 0
@@ -278,6 +282,30 @@ section('10 legacy env（SANDBAR_PROJECTS_YAML）旧单文件模式回归')
   writeFileSync(legacy, `- key: x\n`, 'utf8')  // 写坏（缺 projects: 根）
   throws(() => loadProjects(), 'legacy 文件写坏 → 抛错', 'projects:')
   delete process.env.SANDBAR_PROJECTS_YAML
+}
+
+section('11 顶层 additive 段容忍（与 python 装载器同锁：引擎读者声明的段名不得放倒条目）')
+// 来历（宿主 260928 实报停机）：事件账开关写在 project.yaml 顶层 event_ledger:，
+// 而装载器的顶层键白名单没含它 ⇒ 整条条目被隔离、控制台里该项目整块消失。python 侧
+// 修于 0c0ee58，TS 侧同款缺陷同步修；本段是两边的**反停机锁**：段名从引擎读者源码
+// 派生（新增第三个段会被自动要求放行），派生为空=红（防闸空转）。
+{
+  const READER_KEY_RE = /in_block\s*=\s*\(\s*\w+\s*==\s*'([a-z_]+):'\s*\)/g
+  const keys = []
+  for (const mod of ['audit.py', 'event_ledger.py']) {
+    const src = readFileSync(join(REPO, 'server/engine', mod), 'utf8')
+    for (const mm of src.matchAll(READER_KEY_RE)) if (!keys.includes(mm[1])) keys.push(mm[1])
+  }
+  ok(keys.length > 0, `从引擎读者源码派生出顶层段名（空=闸空转）：${keys.join(', ')}`)
+  const root = freshRoot()
+  for (const k of keys) {
+    writeEntry(root, 'probe-entry', GOOD('probe-entry') + `${k}:\n  enabled: true\n  keep_days: 14\n`)
+    const reg = loadRegistry()
+    const err = reg.quarantined[0]?.error ?? ''
+    ok(reg.quarantined.length === 0 && reg.projects.length === 1,
+       `读者段 ${k}: TS 装载器容忍（引擎自己声明的键不放倒自己的注册条目）${err}`)
+  }
+  rmSync(root, { recursive: true, force: true })     // 本段自带回收（勿再添 sandbar-reg- 残件）
 }
 
 // 清理所有 temp 目录

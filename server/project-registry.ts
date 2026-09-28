@@ -140,6 +140,11 @@ export function parseProjectsYaml(text: string, fileLabel = 'projects.yaml'): Pr
  *       dirs:
  *         - /abs/path
  *
+ * 顶层透传键（additive，t260916-21 起 python 侧同款）：paths: / admin_log: /
+ * event_ledger: 三个节整体透传不解析——旧读器不会因为新字段落盘就炸；各节的语义
+ * 归各自读面（paths → python project_paths；admin_log → engine audit.py；
+ * event_ledger → engine event_ledger.py）。此处只容其存在。
+ *
  * key 白名单校验在此做；key 与目录名全等的核对由装载方做（需要目录名上下文）。
  */
 export function parseProjectYaml(text: string, fileLabel: string): ProjectEntry {
@@ -148,6 +153,8 @@ export function parseProjectYaml(text: string, fileLabel: string): ProjectEntry 
   let sawProject = false
   let schema: string | null = null
   let inPaths = false   // ①d 放开（t260903 切换夜）：顶层 paths: 透传不解析
+  let inAdminLog = false     // t260916-21 同源：顶层 admin_log: 透传（读面在 engine audit.py）
+  let inEventLedger = false  // t260928 同源：顶层 event_ledger: 透传（读面在 engine event_ledger.py）
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = stripLine(lines[i])
@@ -156,9 +163,19 @@ export function parseProjectYaml(text: string, fileLabel: string): ProjectEntry 
       if (/^\s/.test(lines[i])) continue        // ①d 放开：paths 节透传（python 侧 project_paths 负责语义）
       inPaths = false
     }
+    if (inAdminLog) {
+      if (/^\s/.test(lines[i])) continue
+      inAdminLog = false
+    }
+    if (inEventLedger) {
+      if (/^\s/.test(lines[i])) continue
+      inEventLedger = false
+    }
     if (line === 'paths:') { inPaths = true; continue }
+    if (line === 'admin_log:') { inAdminLog = true; continue }
+    if (line === 'event_ledger:') { inEventLedger = true; continue }
     if (!/^\s/.test(lines[i]) && line !== 'project:' && !line.startsWith('schema:') && i + 1 > 1) {
-      throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema:/project:/paths:`)
+      throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema:/project:/paths:/admin_log:/event_ledger:`)
     }
     if (line === 'project:') {
       if (sawProject) throw new Error(`${fileLabel}:${i + 1} project: 重复`)
