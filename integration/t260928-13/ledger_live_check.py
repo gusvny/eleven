@@ -104,12 +104,33 @@ def evaluate(snap, project, ticket_id, ledger_dir):
        '一行都没有=门或声明错了（立即排查）')
 
     # ② 一次迁移恰一行：mark ↔ line 双射（idem 为键）
+    #
+    # 在飞票的「pending 尾巴」不是缺口：flush 只发生在固定边界（长等待/人门/主循环顶/收口），
+    # 所以任意时刻最新几个 mark 可能还在 workflow 内存里没投出。判据按 seq 序区分两种缺：
+    #   · 缺失键的 seq 全在「已落盘最大 seq」之后 ⇒ pending 尾巴（在飞票=data 未到，不作红；
+    #     收口票=终态仍缺 ⇒ 红，因为收口前必有一次 flush）
+    #   · 任一缺失键的 seq ≤ 已落盘最大 seq ⇒ 真缺口（跳过中间转移）⇒ 红
     valid = [m for m in marks if isinstance(m.get('i'), int) and 0 <= m['i'] < len(timeline)]
     mark_keys = [_mark_key(project, ticket_id, m) for m in valid]
     line_keys = [str(x.get('idem') or '') for x in mine]
-    missing = [k for k in mark_keys if k not in line_keys]
+    closed = (str(meta.get('status') or '') == 'closed'
+              and str(meta.get('stage_state') or '') == 'awaiting')
+    done_seqs = [x.get('seq') for x in mine if isinstance(x.get('seq'), int)]
+    max_done = max(done_seqs) if done_seqs else 0
+    missing = [m for m in valid if _mark_key(project, ticket_id, m) not in line_keys]
+    tail = [m for m in missing if isinstance(m.get('seq'), int) and m['seq'] > max_done]
+    real = [m for m in missing if m not in tail]
+    if real:
+        ok(False, '每次迁移都有对应行（真缺口 %d）' % len(real),
+           '缺：%s' % [_mark_key(project, ticket_id, m) for m in real[:3]])
+    elif tail and not closed:
+        print('  · 每次迁移都有对应行（在飞票：%d 条 pending 尾巴未冲，不作缺口——收口前必冲）'
+              % len(tail))
+    else:
+        ok(not missing, '每次迁移都有对应行（缺 %d%s）'
+           % (len(missing), '，收口票不允许缺' if closed else ''),
+           '缺：%s' % [_mark_key(project, ticket_id, m) for m in missing[:3]])
     extra = [k for k in line_keys if k not in mark_keys]
-    ok(not missing, '每次迁移都有对应行（缺 %d）' % len(missing), '缺：%s' % missing[:3])
     ok(not extra, '无多余行（多 %d）' % len(extra), '多：%s' % extra[:3])
     dups = sorted({k for k in line_keys if line_keys.count(k) > 1})
     ok(not dups, '无重复 idem', '重复：%s' % dups[:3])
@@ -212,7 +233,14 @@ def _selftest():
         # (标签, 铺盘面, 快照, 期望是否有红)
         cases = [
             ('好（恰一行×3）', lambda: seed([line(0), line(1), line(2)]), snap(), 0),
-            ('缺一行', lambda: seed([line(0), line(2)]), snap(), 1),
+            # 在飞票的 pending 尾巴：最新 mark 还没冲（seq 3 未落盘）⇒ 不作红
+            ('在飞票 pending 尾巴', lambda: seed([line(0), line(1)]), snap(), 0),
+            # 但同一形态在收口票上就是缺口（收口前必有 flush）
+            ('收口票同形态=缺口', lambda: seed([line(0), line(1)]),
+             snap(status='closed', state='awaiting'), 1),
+            # 中间跳一条（非尾巴）= 真缺口，即便在飞票也红
+            ('在飞票中间真缺口', lambda: seed([line(0), line(2)]), snap(), 1),
+            ('缺一行', lambda: seed([line(0), line(2)]), snap(status='closed', state='awaiting'), 1),
             ('多余一行', lambda: seed([line(0), line(1), line(2),
                                        line(2, idem='%s|%s|%s|99' % (proj, tid, run), seq=99)]),
              snap(), 1),
