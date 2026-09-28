@@ -398,25 +398,25 @@ def j1_dual_project(queue: str, decl_path: str, tree_a: RepoTree, tree_b: RepoTr
     if stub_path:
         with open(stub_path, "w", encoding="utf-8") as f:
             f.write(inspect_lib.fenced_message([
-                inspect_lib.finding("A 仓独特锚漂移", GUARD_REL, GUARD_ANCHOR_LINE,
+                inspect_lib.finding("Repo-A unique anchor drift", GUARD_REL, GUARD_ANCHOR_LINE,
                                     guard_anchor_line(TOKEN_A), severity="high",
                                     confidence=0.9),
             ]))
 
+    snap_a = poll_snapshot(INST_A, PERIOD, 150, want_findings=True)
+    if stub_path:
+        with open(stub_path, "w", encoding="utf-8") as f:
+            f.write(inspect_lib.fenced_message([
+                inspect_lib.finding("Repo-B unique anchor drift", GUARD_REL, GUARD_ANCHOR_LINE,
+                                    guard_anchor_line(TOKEN_B), severity="high",
+                                    confidence=0.9),
+            ]))
     proc_b, parsed_b = trg(["trigger", "--instance", INST_B, "--period", PERIOD,
                             "--decl-path", decl_path])
     tid_b = tid_of(parsed_b)
     check("J1a-B trigger(B) 放行", (parsed_b or {}).get("ok") is True,
           "ok=%r out=%s" % ((parsed_b or {}).get("ok"), (proc_b.stdout or "")[-200:]))
 
-    snap_a = poll_snapshot(INST_A, PERIOD, 150, want_findings=True)
-    if stub_path:
-        with open(stub_path, "w", encoding="utf-8") as f:
-            f.write(inspect_lib.fenced_message([
-                inspect_lib.finding("B 仓独特锚漂移", GUARD_REL, GUARD_ANCHOR_LINE,
-                                    guard_anchor_line(TOKEN_B), severity="high",
-                                    confidence=0.9),
-            ]))
     snap_b = poll_snapshot(INST_B, PERIOD, 150, want_findings=True)
     check("J1b-A 发现落面（worker 扫描完成）",
           isinstance(snap_a, dict) and bool(findings_text(snap_a).strip()),
