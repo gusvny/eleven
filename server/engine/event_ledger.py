@@ -100,7 +100,16 @@ def _strip_yaml_line(raw):
 
 def _parse_event_ledger_overrides(text):
     """从 project.yaml 文本提取顶层 `event_ledger:` 块的 enabled/keep_days/max_mb
-    （additive 顶层段，旧读取方零感知——shared 顶层段白名单不动，读面归本模块）。
+    （additive 顶层段，读面归本模块）。
+
+    **不是「旧读取方零感知」**（260928 实测纠正：本模块首版 docstring 声称「shared 顶层段
+    白名单不动」，与实际入口不符并因此误导）——注册表唯一装载器
+    `shared.parse_project_file` 有顶层键白名单，段名不在其中则**整条注册条目被隔离**，
+    宿主症状=控制台左栏该项目整块消失（260928 实案：声明 `event_ledger:` 后 sandbar
+    即刻不可见，修于 `0c0ee58` 放行该键）。凡新增/改用本段，前提是装载器白名单已同批
+    放行；跨模块一致性锁见 integration/t260928-13/sc_registry_additive_keys.py 的 A2
+    （从读者源码派生段名逐个断言装载器容忍，新增第三个段会被该锁自动要求放行）。
+
     逐键容错：非整数值该键回落缺省（不整体作废）。"""
     out: Dict[str, Any] = {}
     in_block = False

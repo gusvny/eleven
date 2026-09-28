@@ -2304,3 +2304,39 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 故当时只能漏。260928 已在 main 补 `.gitignore` 的 `server/ledger/`（`git check-ignore` 实证命中）。
 > **通用判据**：交付任何**新的运行期落盘目录**时，必须同批检查其**轮转/归档产物**是否已被忽略
 > （「新目录 + 忽略面」是同一件事，不是两件事）。
+
+## KI-149 新增「机器级声明键」撞注册加载器白名单：整条项目被隔离、控制台里该项目整块消失（260928 宿主实报停机，另一 session 修于 `0c0ee58`，integration 岗登记；KI-079「说明书与实际入口不符」+ KI-148 同批的第二个沉默面）
+> **实案**：事件账开关按设计写在**机器级** `~/.sandbar/projects/<key>/project.yaml` 顶层
+> `event_ledger:`（读面在 `event_ledger.py`）。声明一写就停机：注册表的唯一装载器
+> `shared.parse_project_file` 顶层键白名单只认 `schema:/project:/paths:/admin_log:`，
+> 未知顶层键 → 该条目**整条被隔离**（`scan_registry` 进 quarantined）⇒ 正式入口 `ticket.py`
+> 拒收该项目、控制台左栏 **sandbar 整块消失**（取而代之是一条红色「registry entry
+> quarantined」行 + 详情弹层）。宿主只看到「sandbar 不显示了」。
+> **实测复现**（修前版本 `0c0ee58^` 的 shared.py + 真声明文件）：
+> `sandbar/project.yaml:14 顶层只认 schema:/project:/paths:/admin_log:` → `scan_registry`
+> 可用 3 条（dengzhufpv/nusuyou/suyou）、隔离 1 条（sandbar）。修后：4 条可用、0 隔离，
+> `ticket.py list --project sandbar` 恢复 103 张（本次复核实测）。
+> **为什么所有闸都没看见**：故障需要「声明**存在**」才发生，而声明在机器级（
+> `~/.sandbar/projects/`）——**任何票的写集与夹具都够不到**；而 `event_ledger.py` 的读面
+> 自写解析器（正则扫文本，从不走装载器），于是「声明键 × 注册加载器」这个组合**无人守**。
+> 引擎自己的单测全绿、集成场景全绿、merge_check 全绿——**绿的是别的面**。
+> **性质与历史**：**同一族第二次**——`admin_log:` 在 t260916-21 就教过装载器同一课
+> （当时的处置也是「白名单加一个键 + 跳过其缩进块」）。根因是**声明键的容忍集分散**：
+> 一个新增顶层段要同时改 `parse_project_file` 的 4 处（`in_X` 状态位、跳过分支、`if line == 'X:'`
+> 放行、两处错误文案）+ 段读者的文档声称——人必漏一处，且漏了是**整条项目消失**级别的后果。
+> **已修（`0c0ee58`，另一 session，宿主点名直修）**：按 `admin_log:` 先例放行
+> `event_ledger:`。**本次复核补的回归（无回归用例的修复不予放过）**：
+> `integration/t260928-13/sc_registry_additive_keys.py`（已注册 ro 池
+> `t260928-13-registry-additive-keys`）——A2 是**反停机一致性锁**：从引擎读者源码派生
+> 「读注册表顶层段的段名」（形 `in_block = (X == 'key:')`）逐个断言装载器容忍，**派生为空=红**
+> （防闸空转）；新增第三个段会被这条锁自动要求放行。反证：同组夹具打在 `0c0ee58^` 的装载器上
+> `event_ledger` 腿红（0 可用 / 1 隔离）、`admin_log` 腿绿——锁确实抓得住本次停机。
+> **未处置（留档，供宿主定）**：①`parse_project_file` 的容忍集仍是 4 处手工同步
+> （建议收成单一 `ADDITIVE_TOP_LEVEL_SECTIONS` 元组，行为等价）；②`PATHS_DECL_KEYS`
+> 是同一病在 `paths:` **子键**层的翻版（未知子键 → `ProjectPathsError`，爆炸半径不同：
+> 响亮、发生在 spawn/解析期，不是控制台静默）；③**报错面**：装载器层隔离其实**有**点名
+> （file:line + 允许集，控制台隔离行/详情弹层都取这份数据）——本条不是「静默」，而是
+> 「**键的来源（引擎自己声明的）与白名单的维护者（另一个模块）之间没有锁**」；
+> ④真正的用户可感缺口：**机器级声明写错/撞白名单时，没有任何东西在写声明的那一刻提醒你**
+> （声明写入方是 agent/人，不是闸）——epic 票④面板若把「是哪个 project.yaml、
+> 哪一条声明决定了当前开关」显示出来，这一族就从「事后发现」变成「当场可见」。

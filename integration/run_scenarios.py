@@ -1819,6 +1819,10 @@ SCENARIOS = [
      "验收①活体判据器的自证（t260928-13，灰盒 L2，ro 离线秒级零 Temporal）：ledger_live_check.py 是「真票跑一遍、每次段状态迁移落恰一行台账」这条验收的唯一判据（该验收票内无法自证——账本缺省关闭、开关在机器级 project.yaml、代码合并后才到 worker）。本场景只跑它的 --selftest：合成夹具下八案定标——恰一行×3=绿；缺一行/多余行/重复 idem/字段与票面不符/收口票少行/gap 记录在盘/一行都没有=红。理由=判据器若在坏数据上仍报绿就是装饰（t260928-13 出厂件的 24 条自证式全绿正是这个病：实现与夹具同源于一个错误假设），故判据器自身必须有反证。intent 分工：写面行为真值归 t260928-13-event-ledger-projection（真模块×真文件），本器只判「真票落盘面与票面迁移的双射关系」，不重复其行为断言。真票 live 面（需真票号）不在套件内自动跑：人工单命令 server/engine/.venv/bin/python -B integration/t260928-13/ledger_live_check.py <ticket_id>",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/ledger_live_check.py --selftest", "ro"),
 
+    ("t260928-13-registry-additive-keys",
+     "事件账声明键的注册加载器容忍锁（t260928-13，灰盒 L2，ro 离线秒级零 Temporal；宿主 260928 实报停机的回归沉淀）：事件账开关是机器级声明（~/.sandbar/projects/<key>/project.yaml 顶层 event_ledger:），而注册表唯一装载器 shared.parse_project_file 有顶层键白名单——键没进去就整条注册条目被隔离、宿主症状=控制台左栏该项目整块消失（实案：声明一写，sandbar 即刻不可见；另一 session 修于 0c0ee58）。本场景锁四件：A1 引擎真形声明（schema/project/paths/event_ledger）端到端可装载零隔离；**A2 反停机一致性锁**——从引擎读者源码派生「读注册表顶层段的段名」（形 in_block = (X == 'key:')，现得 admin_log/event_ledger）逐个断言装载器容忍，派生为空=红（防闸空转），新增第三个段会被本条自动要求放行；A3 真坏条目仍被精确拒收（file:line+允许集）且部分隔离 fail-soft、隔离清单带 dir/error（控制台红行与详情弹层的取数面）；A4 真机面只读——真注册表零隔离且「引擎所属条目在可用清单里」（宿主症状的机器级回归锁）。**不在范围**：把装载器改成容忍任意未知键（白名单是有意为之，防错拼；要变的只是「引擎自己声明的键不得落在白名单外」）。反证：同组夹具打在 0c0ee58^ 的装载器上，event_ledger 腿红（0 可用/1 隔离）、admin_log 腿绿——本锁确实抓得住该停机。intent 分工：t260928-13-event-ledger-projection 守写入面真值，ledger-live-judge 守真票落盘判据，本条只守「声明键 × 注册加载器」的跨模块一致性。装载器缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/sc_registry_additive_keys.py", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
