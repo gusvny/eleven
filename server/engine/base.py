@@ -49,6 +49,8 @@ with workflow.unsafe.imports_passed_through():
     import asyncio
     from activities import script_gate
     from agent_activities import prepare_human_gate, prepare_workspace
+    # t260928-13：事件账本写活动（账面 IO 的活动承载面；详见 event_ledger.py）
+    from event_ledger import append_event_ledger
     from shared import (
         ENGINE_V2,
         ENGINE_VERSION_V2,
@@ -390,6 +392,141 @@ class TicketCrossProjectMixin:
                               "state": "cancel-noticed",
                               "reason": "%s 请求清场：%s" % (who, reason)})
         self._touch()
+
+
+# t260928-13：事件账本发射的重放安全 patch——老 RUNNING 实例重放无 marker ⇒ enqueue
+# 恒 no-op、无活动命令进入旧历史（与 PAUSE/BREATHE patch 同一家族纪律）。
+EVENT_LEDGER_PATCH_ID = "event-ledger-v1"
+# 账面写活动的超时/重试口径：写一行 <4KB 的事，5s 足够；不重试（maximum_attempts=1）
+# ——writer 本身 fail-open（event_ledger.append_event 永不 raise），重试风暴只会和
+# 幂等去重打架而无所获，失败面由 gap 记录/计数器承载。
+LEDGER_EMIT_TO = timedelta(seconds=5)
+LEDGER_EMIT_RETRY = RetryPolicy(maximum_attempts=1)
+
+
+class TicketEventLedgerMixin:
+    """事件账本发射 mixin（t260928-13，epic project-executor 第一片）——
+    TicketPauseMixin / TicketCrossProjectMixin 的同族兄弟：把本工作流的每次段状态
+    迁移（_mark 的 timeline 条目）以「恰好一事件」的口径投给每项目 append-only
+    JSONL 账本（server/engine/event_ledger.py，写面在活动里）。
+
+    接线（与 pause mixin 同款分工：机制全在本类，子类只接线）：
+      ①继承本 mixin；②在自己的 _mark 里 timeline.append 之后调
+      `self._ledger_enqueue(entry)`（唯一入队点，调用面不可能漏带载荷）；
+      ③在异步上下文的迁移点/长等待前/主循环顶/收口 return 前调
+      `await self._ledger_flush()`。
+
+    语义与取舍（对齐已过审方案 .sandbar/plan_event_ledger.md）：
+    - 载荷构建是纯计算（重放安全）：idem = project|ticket|run_id|seq——run_id 在
+      首次 enqueue 时取一次 `workflow.info().run_id` 并钉在 self 上（[R3]：同票新
+      run 的 seq 重启不会撞旧 run 的键；review 非阻塞项：run_id 只在 enqueue 时取，
+      活动侧不再推导）；seq=本 run 内 enqueue 计数（重放稳定）。
+    - flush 是批量排空：把 pending 逐条经活动投出（start_to_close=5s、不重试）。
+      同步 signal handler（sign/rework）里的迁移只入队，由下一个异步边界冲走
+      （seq 保证全序，延迟有界）；**终态取消/失败路径**（terminate/超时强杀）下
+      pending 可能不冲即亡——取消面的权威留痕=cancel_notice 事件历史 ×admin.log
+      （t260922-10 同口径），账面缺行可由 op=ledger_rebuild 从 timeline 补齐
+      （ Derived & rebuildable）。
+    - 账面写失败 fail-open 且 LOUD：活动内点名 stderr+计数器+gap 记录
+      （event_ledger._announce 家族），本类对活动的意外异常再兜一层日志——
+      任何一层都绝不把失败抛回 workflow 主流程。
+    - 未声明/停用（project.yaml 无 event_ledger: 或 enabled=false）⇒ 活动侧
+      直接零行为返回；workflow 侧不读文件保持确定性，代价只是停用项目每迁移
+      多一次空跑活动（验收⑧：零行为变化指账面/票面，不含这一次活动命令）。
+    """
+
+    # 类属性缺省（可变状态走懒初始化，不碰子类 __init__——_paused 同款纪律）
+    _ledger_pending: Optional[List[Dict[str, Any]]] = None
+    _ledger_marks: Optional[List[Dict[str, Any]]] = None
+    _ledger_seq: int = 0
+    _ledger_run_id: str = ""
+
+    def _ledger_enqueue(self, entry: Dict[str, Any]) -> None:
+        """唯一入队点（_mark 调用）：从 timeline 条目构建账面载荷（纯计算），
+        并把迁移标记（{i,seq,run}）记入 _ledger_marks——timeline 条目本身零改动
+        （票面形状逐字不变），rebuild 面由 snapshot 的 timeline+ledger_marks
+        重导出账面行（派生投影的钩子）。patched 门内：老实例重放零变化。"""
+        try:
+            gated = workflow.patched(EVENT_LEDGER_PATCH_ID)
+        except Exception:
+            # 出口①：非 workflow 事件循环（temporalio 真壳在场但不在工作流协程里，
+            # 单测直调 _mark 等）——零行为返回，与「老实例重放零变化」同语义。
+            # 与出口②严格分开：这里只吃 patched 的环境错，绝不掩护下面的载荷构造
+            # （后者对未初始化实例走逐字段 getattr 防御，见 [R-merge] 注）。
+            return
+        if not gated:
+            # 出口②：老 RUNNING 实例重放（patched 判 False）——零行为。
+            return
+        # [R-merge]（merge_check 打回，t260928-13 gen2）：载荷构造对「实例未初始化」
+        # 全防御——全量测试语境下其它用例会把 workflow 壳换成 patched 恒 True 的桩，
+        # 裸 object.__new__ 实例（没跑 _init、无 meta/template_id）也会走到这里；
+        # 事件账本是旁路观测面，绝不允许因自身缺字段把主流程炸出（getattr 逐字段
+        # 兜底；pending/seq/run_id 三件由 class-attribute 缺省保底）。
+        if self._ledger_pending is None:
+            self._ledger_pending = []
+        if not self._ledger_run_id:
+            try:
+                self._ledger_run_id = str(workflow.info().run_id)
+            except Exception:               # noqa: BLE001——info 不可得（极端重放面）
+                self._ledger_run_id = "unknown"
+        self._ledger_seq += 1
+        # [R-merge]（acceptance round2）：迁移标记**不写回 timeline 条目**——票面
+        # timeline 形状保持逐字不变（t260915-01 detail-face「四键逐字」锁 + 未声明
+        # 零变化承诺）；标记落独立的 _ledger_marks（snapshot 增量键 ledger_marks），
+        # rebuild 面由 timeline+marks 重导出账面行（派生投影钩子移居于此）。
+        if self._ledger_marks is None:
+            self._ledger_marks = []
+        self._ledger_marks.append({"i": len(getattr(self, "timeline", ()) or ()) - 1,
+                                   "seq": self._ledger_seq,
+                                   "run": self._ledger_run_id})
+        meta = getattr(self, "meta", None) or {}
+        project = str(meta.get("project") or "")
+        ticket = str(getattr(self, "ticket_id", "") or "")
+        template = str(meta.get("workflow_id")
+                       or getattr(self, "template_id", "") or "")
+        self._ledger_pending.append({
+            "v": "event-ledger-v1",
+            "project": project,
+            "scope": "project",
+            "ticket": ticket,
+            "workflow": type(self).__name__,
+            "template": template,
+            "stage": str(entry.get("stage") or ""),
+            "state": str(entry.get("state") or ""),
+            "reason": str(entry.get("reason") or ""),
+            "gen": int(entry.get("gen") or 0),
+            "ts": str(entry.get("at") or ""),
+            "seq": self._ledger_seq,
+            "run_id": self._ledger_run_id,
+            "idem": "%s|%s|%s|%d" % (project, ticket,
+                                     self._ledger_run_id, self._ledger_seq),
+            "engine": ENGINE_VERSION_V2,
+        })
+
+    async def _ledger_flush(self) -> None:
+        """排空 pending：逐条经活动投给账面（不重试；见 LEDGER_EMIT_RETRY 注）。
+        pending 空=零开销返回（无活动命令，主循环热路径不加负担）。"""
+        if not self._ledger_pending:
+            return
+        batch = self._ledger_pending
+        self._ledger_pending = []
+        for ev in batch:
+            try:
+                await workflow.execute_activity(
+                    append_event_ledger, ev,
+                    start_to_close_timeout=LEDGER_EMIT_TO,
+                    retry_policy=LEDGER_EMIT_RETRY)
+            except Exception as e:          # noqa: BLE001——fail-open 兜底（活动本身
+                # 已不抛；此处防活动级基础设施异常（超时/不可用）打断主流程）。
+                # 兜底日志自身也防弹（[R-merge]：测试泄漏壳可能连 logger 都没有
+                # ——观测面的失败绝不二次炸出打断主流程）。
+                try:
+                    workflow.logger.error(
+                        "[event-ledger] 投递失败（fail-open，账面缺口已由活动侧 "
+                        "stderr/gaps/计数器留痕）：%s %s/%s: %s",
+                        ev.get("ticket"), ev.get("stage"), ev.get("state"), e)
+                except Exception:           # noqa: BLE001
+                    pass
 
 
 class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):

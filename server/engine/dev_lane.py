@@ -45,6 +45,7 @@ with workflow.unsafe.imports_passed_through():
     from base import (
         TICKET_UPDATE_RECEIPT_PATCH_ID,
         TicketCrossProjectMixin,
+        TicketEventLedgerMixin,
         TicketPauseMixin,
         _update_echo,
     )
@@ -603,7 +604,8 @@ def _prompt_next_no(prompt: str) -> int:
 
 
 @workflow.defn
-class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
+class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
+                      TicketEventLedgerMixin):
     """The single workflow for developer-family tickets (dev-lane). Direct activity
     orchestration, no stage machine.
 
@@ -764,6 +766,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             if phase:
                 entry["phase"] = phase
         self.timeline.append(entry)
+        # t260928-13：事件账本入队（唯一入队点，机制在 TicketEventLedgerMixin；
+        # patched 门内，老实例重放零变化；flush 由各异步边界/收口点承担）
+        self._ledger_enqueue(entry)
         workflow.logger.info("[%s] %s/%s %s", self.ticket_id, step, state, reason)
 
     def _touch(self) -> None:
@@ -990,6 +995,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         self._touch()
         self._log("%s → blocked，等 retry_qc 重跑或 rework 打回" % why)
         self._mark(step_id, "blocked", why)
+        # t260928-13：blocked 是长等待入口，先冲账再等（事件账本 flush 点）
+        await self._ledger_flush()
         token = self._retry_token
         await workflow.wait_condition(
             lambda: self._retry_token > token or self._rework is not None)
@@ -1872,6 +1879,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             # resume，不推进下一相位。门在 rework 分支之前（显式语义：暂停期间
             # 到达的 rework 压在门口，resume 后先打回再派段）。
             await self._pause_gate()
+            # t260928-13：主相循环每轮先冲账（同步 signal 里的迁移由本边界冲走）
+            await self._ledger_flush()
             if self._rework is not None:
                 fb = "implement" if phase == "parallel_impl_design" else phase
                 # KI-024: a rework leaving a parallel period (target is a serial section)
@@ -3720,6 +3729,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
                 self._touch()
                 self._log("merge 人审挂起，等 sign signal（merge_check 已全绿）")
                 self._mark("merge", "awaiting-human", "等人签字：sign(gate=merge)")
+                # t260928-13：人门是无限期等待，先冲账再挂起（事件账本 flush 点）
+                await self._ledger_flush()
                 await workflow.wait_condition(
                     lambda: ("merge" in self._sigs) or (self._rework is not None))
                 if self._rework is not None:
@@ -3883,6 +3894,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
         self._touch()
         self._log("merge 落账，工单收口（closed）")
         self._mark("merge", "closed", "workflow 完成")
+        # t260928-13：收口前最后冲账——正常完单零 pending（行为验收口径）
+        await self._ledger_flush()
         return self._snapshot()
 
     # ---------- signals: human-gate signature / rework / retry_qc ----------
@@ -4156,6 +4169,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin):
             "gate_runs": self.gate_runs,
             "refused": self.refused,
             "timeline": self.timeline,
+            # t260928-13 [R-merge]：事件账本迁移标记（[{i,seq,run}]；timeline 条目
+            # 本身零标记——票面形状逐字不变）。空表=无标记（未启用/老票），增量键。
+            "ledger_marks": self._ledger_marks or [],
             "results": self.results,
             "human_context": self.human_context,
             "retry_count": self._retry_token,

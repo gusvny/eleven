@@ -1810,6 +1810,11 @@ SCENARIOS = [
      "叉内闸拒 blocked 醒后重驱的源码锁（t260925-17 KI-120 离线面，灰盒 L2，ro 离线秒级零 docker）：防「改回去」三面——L1 每处 path_gate_reason= 邻接 _blocked 落点 ±80 行窗口必须同时有 workflow.patched 门（唯一 patch id 族=在飞票重放兼容，t260917-04 Nondeterminism 事故族三修先例）与被挡边簿记复位（arb_done/impl_done/design_done=False 形）——缺任一=醒后吃滞留簿记、KI-120「空 reason 稳态」结构性复发；L2 昂贵边保留：窗口内不得清 acc_done/acc_res（walkthrough 与闸无关，重跑=用户可感知成本回归，KI-024 语义）；L3 报错精确：闸拒 reason 必须带机读 path_gate_reason= 签名（「blocked 不得无因」静态半边，动态半边归 redrive 场景）。对照面=既有复位出口（格式纠正 t260905-10 形/KI-061 超限守卫）在场——锁修复不拆旧纪律。intent 分工：机制真值/授权上下文/重放兼容归 t260925-17-fork-gate-redrive（真台旅程）与 developer L1；本条只锁源码形状不变量，窗口邻近性是灰盒绑定（断言落在三次事故背书的纪律上，不锚 PATCH_ID 字面与行号）。dev_lane.py 缺席/断言破=FAIL（TDD 信号，arbitrate/merge 期必须绿）",
      "python3 integration/t260925-17/sc_t260925_17_wake_reset_source_lock.py", "ro"),
 
+    # ---- t260928-13: 事件台账（per-project append-only JSONL of ticket state transitions）----
+    ("t260928-13-event-ledger-projection",
+     "事件台账写面×幂等×fail-open×rebuild 派生投影回归棒（t260928-13，灰盒 L2/L3，离线秒级零 docker，本票为该面首个注册场景故无 intent 级重复）：源码锁半（stdlib 恒跑）——event_ledger.py 在仓且 O_APPEND 单写/单行 <4KB/SANDBAR_EVENT_LEDGER_DIR 隔离/gap 记录/keep_days 14d 缺省/max_mb 声明/rebuild 入口在场、idem 键含 run_id 维度（同票新 run 的 seq=1 不误吞旧 run 键）、WRITE_FAILURES+stderr 双 LOUD 面、base.py TicketEventLedgerMixin+独立 patch id（老 RUNNING 重放零变化）、dev_lane 接线消费点在场、inspection 家族零引用（out-of-scope 负面锁）、client.py ledger_rebuild op 注册且 project 从快照取（防调用方改写他项目台账）；行为半（引擎 venv 真模块×tmp 真文件，temporalio 缺=ENV_FAIL exit 2）——一转移一行+声明字段集全在位+行 <4KB、at-least-once 重投同 idem 仍一行、冷进程（缓存空）文件扫描兜底仍一行、新 run_id 同票同 seq 出新行不误吞、四类畸形载荷（非 dict/缺键/超长 reason/非串 reason）不炸且行有界、只读目录写失败不 raise+计数器递增+gap 文件在盘、畸形 event_ledger: 声明 per-key 回落缺省不弃写、disabled 项目零文件、轮转后 active 永不丢、rebuild 对受损文件（缺行+重复 idem）恰补一次且回执点名 duplicate_idem。intent 分工：developer L1（server/engine/tests/test_event_ledger.py）守纯函数真值表，本条另锁接线面/负面锁/真文件行为半。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/sc_event_ledger_projection.py", "ro", "serial"),
+
 ]
 
 CMD_TIMEOUT = 900

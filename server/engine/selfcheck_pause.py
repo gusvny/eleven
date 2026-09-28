@@ -103,8 +103,15 @@ def main():
     dl = (POC / "dev_lane.py").read_text("utf-8")
     # t260924-04 锁面保鲜：DevLaneWorkflow 现声明含 TicketCrossProjectMixin（跨项目
     # 闸基类，t260915-12 族）——断言锁「TicketPauseMixin 在 MRO 首位」这一原契约点。
-    check("class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin)" in dl,
-          "dev_lane 类声明接线（mixin 基类）")
+    # t260928-13 二次保鲜（扩锁不拆锁，同 t260924-04 先例）：事件账本 mixin
+    # （TicketEventLedgerMixin）入列使声明换行，字面单行子串锁改锁两点——
+    # ①声明首基类仍是 TicketPauseMixin（MRO 首位契约）；②声明块内含新 mixin 名
+    # （接线面在场）。与原字面锁等价且对换行/续行鲁棒。
+    _decl = dl.split("class DevLaneWorkflow(", 1)[1].split("):", 1)[0]
+    check(_decl.startswith("TicketPauseMixin")
+          and "TicketCrossProjectMixin" in _decl
+          and "TicketEventLedgerMixin" in _decl,
+          "dev_lane 类声明接线（mixin 基类；首基类=TicketPauseMixin）")
     check(dl.count("await self._pause_gate()") == 1,
           "dev_lane 主循环恰一个段间门调用点（接线 ≤5 行验收口径）")
     check("**self._pause_snapshot()" in dl, "dev_lane snapshot 并入 paused 二态键")

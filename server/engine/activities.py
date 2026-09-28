@@ -30,6 +30,10 @@ from typing import Any, Dict, List
 from temporalio import activity
 from temporalio.client import Client
 
+# t260928-13：事件账本写活动的注册转发（活动体真源在 event_ledger.py；worker 经
+# ALL_ACTIVITIES 注册，保持「活动单一注册面」纪律）。
+from event_ledger import append_event_ledger as _append_event_ledger
+
 from shared import (
     ADMIN_PY,
     INSPECTION_DIR,
@@ -1162,4 +1166,6 @@ ALL_ACTIVITIES = [
     verify_inspection_findings,
     # t260916-22：发现级裁定的持久面（收口一次写齐；票内 signal 只改内存）。
     write_inspection_verdicts,
+    # t260928-13：事件账本写活动（append-only per-project JSONL；真源 event_ledger.py）
+    _append_event_ledger,
 ]

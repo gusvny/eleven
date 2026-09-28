@@ -808,9 +808,13 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
     """Ticket stage machine (step 2): exposes only legal advance entries, no set-stage /
     force_stage.
 
-    op ∈ advance / accept / rework / update / dispatch-next / sign / query.
+    op ∈ advance / accept / rework / update / dispatch-next / sign / query /
+    ledger_rebuild.
     The first five are workflow updates (synchronous result + into the immutable
-    history); sign is a human approval signature; query is read-only.
+    history); sign is a human approval signature; query is read-only;
+    ledger_rebuild (t260928-13) is engine-local ops tooling: reads the ticket
+    snapshot and regenerates the ticket's event-ledger lines from its timeline
+    (no workflow mutation, no ticket-face write).
     """
     op = str(args.get("op") or "")
     tid = str(args.get("ticket_id") or args.get("id") or "")
@@ -1006,9 +1010,35 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         # admin.log（_gate_receipt 按档补 notice，C3）。
         return _gate_receipt(_ok(r), gate, op)
 
+    if op == "ledger_rebuild":
+        # t260928-13：事件账本重建（engine-local ops 面，零 workflow 变更/零票面写）。
+        # 身份口径（review 条件1）：project/ticket 一律取自**票面快照**（workflow
+        # 侧盖章真源），绝不信调用方 args——否则调用方可把行重建进别项目的账本文件
+        # （t260915-12「调用方身份只盖章不许自认」同源纪律）。账本未声明/停用不阻
+        # 断重建（rebuild 走 skip_enabled_gate 的补洞路径：账本是时间线的派生投影，
+        # 停用只是停增量，不否定补历史）。
+        snap = await handle.query("snapshot")
+        if not isinstance(snap, dict) or not snap:
+            return _err("ledger_rebuild 拒收：票面快照不可得（票不存在或非 v2 工作流）",
+                        KIND_NOT_FOUND)
+        meta = snap.get("meta") or {}
+        project = str((meta.get("project") if isinstance(meta, dict) else "") or "")
+        if not project:
+            return _err("ledger_rebuild 拒收：快照缺 project（票面无项目归属，无法定位账本）")
+        from event_ledger import ledger_rebuild
+        report = ledger_rebuild(
+            project,
+            str(snap.get("ticket_id") or tid),      # ticket 同取快照（handle.id 在场兜底）
+            snap.get("timeline") or [],
+            workflow_class=str(snap.get("workflow_class") or ""),
+            template_id=str(snap.get("template_id") or ""),
+            marks=snap.get("ledger_marks") or [])   # [R-merge]：marks 现役轨
+        return _ok({"ticket_id": tid, "project": project, **report})
+
     return _err("未知工单操作 %r（可用：rework=打回 / ruling=宿主裁决注入 / "
                 "authorize=人授权签发（sign 信号面） / retry_qc=blocked 重跑 / "
-                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询；"
+                "pause|resume=段间暂停·恢复 / update=更新 / sign=签字 / query=查询 / "
+                "ledger_rebuild=事件账本重建（t260928-13）；"
                 "记名单票终结（清场）=子命令 ticket-cancel，t260922-10）" % op)
 
 
