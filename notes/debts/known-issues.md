@@ -1583,6 +1583,24 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 误导两次——260924 亲历）；②KI-081 冻结纪律的部署后果：engine 修法上线后，巡检流水线仍跑旧码，
 > **验货/生效都必须重启中央工人（红线：需宿主明示）**。260924 处置=宿主明示授权重启（66222 起新码）；
 > 结构性修法=巡检 workflow 迁 per-ticket 队列或中央工人纳 supervisor，待专项。
+>
+> **260928 实案（宿主追问「集成测试的巡检为什么没有跑」，会话内当场实测复现）**：当天 15:45–18:28
+> 引擎连续落盘（`8491724` base/dev_lane ← 事件账本接线、`0c0ee58`/`42b149d` shared 注册白名单、
+> `93a52c7` base/inspection_flow/workflows ← 巡检家族接入 `TicketEventLedgerMixin`），而**中央工人
+> 未重启**（worker.log 最后两条 `worker 起来了` 横幅 = 09-27 07:16:15 / 07:16:32）。后果已不是
+> 「静默跑旧码」而是**加载即炸**：沙箱按盘上**新**文件重建 workflow 实例
+> （`workflow_sandbox/_runner.py:179 _run_code` → `inspection_flow.py:87`），而
+> `workflow.unsafe.imports_passed_through()` 取的是工人进程里**旧**的 `base` 模块 → 实况
+> `ImportError: cannot import name 'TicketEventLedgerMixin' from 'base'`
+> （worker.log:69156–69159，2026-09-28T11:28:11Z，run_id `01a0e534-3907-77bc-b47b-b5e426691455`；
+> 一次 `temporal query inspection-spawn-integration-tests-…` 即时复现，非推测）。连带两点：
+> ①**查询/回放安全网同族一起炸**——KI-143 想守的「在飞 workflow 回放」在巡检家族目前不可用；
+> ②当天 `server/engine/worker_dryrun.py` 仍 `ok:true`（新进程=新码，照不出「在飞工人陈旧」），
+> 属 KI-135「跑绿=当时绿」的部署侧孪生。
+> 另待确认：`pgrep` 见两个进程同时 poll `sandbar`（pid 42867 / 86848，共用同一 pidfile），日志里
+> 每次「重启」都成对出现两条启动横幅——若为重复注册，则 `kill $(cat pidfile)` 式重启**只杀一个**，
+> 另一个旧码工人继续在岗（正是本条复发路径）。**处置**：重启中央工人属本条红线（需宿主明示），
+> 会话内已上报待令，未擅自重启。
 
 ## KI-114 终态票期号黑洞（cancel 后重开无路；260924 实案，integration 岗登记）
 > 实案：t260925-01 记名清场后重跑 `inspection_trigger trigger --period 20260925` 回执
@@ -2330,7 +2348,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > `t260928-13-registry-additive-keys`）——A2 是**反停机一致性锁**：从引擎读者源码派生
 > 「读注册表顶层段的段名」（形 `in_block = (X == 'key:')`）逐个断言装载器容忍，**派生为空=红**
 > （防闸空转）；新增第三个段会被这条锁自动要求放行。反证：同组夹具打在 `0c0ee58^` 的装载器上
-> `event_ledger` 腿红（0 可用 / 1 隔离）、`admin_log` 腿绿——锁确实抓得住本次停机。
+> `event_ledger` 面的用例红（0 可用 / 1 隔离）、`admin_log` 面的用例绿——锁确实抓得住本次停机。
 > **未处置（留档，供宿主定）**：①`parse_project_file` 的容忍集仍是 4 处手工同步
 > （建议收成单一 `ADDITIVE_TOP_LEVEL_SECTIONS` 元组，行为等价）；②`PATHS_DECL_KEYS`
 > 是同一病在 `paths:` **子键**层的翻版（未知子键 → `ProjectPathsError`，爆炸半径不同：
@@ -2388,3 +2406,57 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ①d）+ 两处**定向扫块**读面（ui 插件 `readDeclaredRoutesPath` / `findKeyByPrimaryDir`，
 > 只找 `paths:`/`dirs:` 块、不设闭集 ⇒ 结构性容忍，无需改动）。今后凡「新增顶层声明键」
 > 或「新增条目读面」，两处台账都要同步：段名清单（读者侧）与读面清单（场景 FACES 侧）。
+
+## KI-150 `deadman` 的 `schedule_action` 自检面读不到 action payload：四个字段恒空串，而真身 payload 是全的（260928 实核，integration 岗登记；KI-142「弱断言假绿」的只读面变体 + KI-079 同族「说明书与实际入口不符」）
+> 实核（宿主追问「集成测试的巡检为什么没有跑」时的现场）：`server/engine/inspection_trigger.py
+> deadman --instance integration-tests` 回执里 `schedule_action` 段
+> `instance_id / face / project_key / repo_root` **四项全空串**（只有 `sa_project_key=sandbar`
+> 有值）——按该面自述（t260915-20：用来验证「action 指没指 spawner / 带没带新 payload/SA」）
+> 会被读成「调度 action 没带实例，所以 spawn 无实例名 → 每日 fire 什么都不做」，
+> 我当场就据此怀疑了一轮。**但真身是全的**：直接 `Client.get_schedule_handle(...).describe()`
+> 打 `schedule.action.args[0]` 原文 =
+> `{"decl_path":"","face":"test","instance_id":"integration-tests","project_key":"sandbar",
+> "repo_root":"/Users/user/Documents/sandbar"}`。
+> **真因**：`_schedule_action_summary`（inspection_trigger.py:495-514）对 `action.args[0]` 直接
+> `getattr(inp, "instance_id", "")`，而 SDK `describe()` 交回的是**未解码的 `Payload`**
+> （读面里 repr = `metadata{…} data:"{…}"`）→ 四个 `getattr` 全部回落 `""`，**不抛不点名**。
+> **危害**：①这个面正是为「payload 迁移可读」而造，现在它对**正确**的 action 显示空 ⇒ 会把运维
+> 引去重跑一次白跑的 `schedule-up`；②对**真缺身份**的 action 它显示的也是空串 ⇒ 「空」与
+> 「读不出」同形，两向都不可信（若同时 `sa_project_key` 有值，连它自带的
+> `error: action 无 project_key/SA（旧调度未刷新）` 误导分支都不触发）。
+> **修法方向**：读面走 data converter 真解码（或先对 `Payload` 显式 decode 再取值），
+> 并加**双向锁**：全 payload 的 action 读出四字段全值、缺字段的 action 读出点名 error。
+> **本岗只登记不改码**（直修/开票待宿主一句话）。
+
+## KI-151 控制台写通道不带调用方身份 ⇒ 260925-08 翻严后**全部** gated op 被跨项目闸拒收；巡检票侧更是「静默失效」（回执 ok、票面 gate_error 留痕，宿主只感到点了没反应）（260928 宿主实报，integration 岗登记；KI-142「回执绿而事实红」＋KI-079「入口与说明书不符」同族）
+> **实案**：宿主在巡检票 `t260928-01` 详情里点 approve/reject「点了没反应」，票因此自 09-26 起
+> 无人收口挂 3 天。真实链条：控制台 host（`server/plugins/workbench/node.ts`）的写 op 两条通道
+> ——引擎直调（`sign`/`authorize`/`pause`/`resume`，`runPocCli`→`client.py ticket`）与
+> admin 通道（`callTool`→`admin.py call`→`tools_registry`→`ticket.py`）——**一个身份字段都不带**
+> （`caller_project` 全仓 node.ts 零字面量），而 `4aa1960`（t260925-08，09-25 05:56）起引擎对
+> undeclared 写 op 缺省 `refuse` ⇒ 全部 gated op 被拒。
+> **当场实测（`_write_gate` 直接调用，零写副作用）**：
+> - `t260928-29`（sandbar dev-lane）无身份 → `跨项目闸：调用方项目身份未声明…引擎策略=拒收`；带
+>   `caller_project=sandbar` → **PASS**。`t260928-24/26`（nusuyou）同上（带 sandbar 身份则转
+>   「跨项目写操作拒收（需越权旗）」——那是闸的正常语义）。
+> **两处让这条 bug 更难发现的结构性缺口（比 bug 本身值钱）**：
+> ①**两侧 target 不同源**：client 侧 `_write_gate` 的 target 取快照 `meta['project']`，而**巡检票
+>    `meta` 是空的**（票面无存底 title/项目）⇒ target='' ⇒ `cross_project_judge` 直接 allow；
+>   真正的拒收发生在 workflow 侧 sign 处理面（target 取 SA `ProjectKey`=`sandbar`）⇒ 结果是
+>   信号「送达但被拒」，而 client 回执仍是 `ok:true / delivered:true`。**宿主在 UI 上零错误反馈**，
+>   只有票面 `gate_error` 与 worker.log 的 WARN 留痕——这就是「点了没反应」的全部来源。
+> ②**「未声明」两形态判定相反**：client 侧把未解析身份盖成哨兵 `__undeclared__`（→refuse），
+>   而**裸信号**（不带 caller 字段，如 `inspection_trigger.py sign`）在 workflow 侧走
+>   `if not caller: allow` ⇒ 放行。同一句「未声明」，一条路拒、一条路放——巡检票 09-26 那四期
+>   （20260929–20261002，`who=宿主`）正是绕过闸的裸信号路径签掉的，而同一操作走控制台就被拒。
+> **影响面与时长**：09-25 05:56 起凡经控制台的 gated 写 op 全部拒收（dev-lane 票至少能看到
+> 「Failed: 跨项目闸…」文案，巡检票连文案都看不到）。
+> **当场处置（宿主点名直修，非开票）**：`node.ts` 两条写通道统一补 `caller_project`——身份源=
+> 请求 `?project=`（与读面同一个逐请求项目锚 `anchorOf(url)`；未注册 key 400 fail-closed，缺省
+> 视图零变化）。回归锁两处：行为级 `server/plugins/workbench/tests/t01_sign_note_passthrough.mjs`
+> F 段（带 `?project=` 必带身份／未注册 key 400 且零信号／缺省视图零变化，30 passed）、源级
+> `integration/t260915-08/sc_inspection_board_ui.mjs` S0（两条通道都带身份的锚）。**控件侧改动属
+> host 半，需重启 dsh 才生效**（宿主操作面，非本岗可动）。
+> **残留（未做，待定）**：跨项目视图（当前视图 A、点的却是 B 项目的票）仍会被拒——要么控制台带
+> `cross_project={by,reason}` 越权旗，要么按票面所属项目声明身份；以及缺口①的**根**（client 侧
+> target 对巡检票取不到项目）没修，闸对巡检家族实际只有 workflow 侧一道。
