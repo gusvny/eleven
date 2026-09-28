@@ -2349,3 +2349,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 自检（**正面先例**：声明写入方自校验，与本条 ④ 的缺口正相反——手写声明没有这道自检）。
 > ③`PATHS_DECL_KEYS`（`paths:` 子键闭集）是同一病在下一层的翻版，爆炸半径不同（响亮、
 > spawn/解析期），见上段 ②。
+> **同款缺陷的 TS 侧仍是开口（260928 复核实测，未提交）**：控制台插件族不止一个注册表读面——
+> `server/project-registry.ts` 里还有一份**同源 TS 解析器**（`parseProjectYaml`，被
+> workbench/ui/knowledge 三族插件经 `findProject/loadProjects` 消费：ui `node.ts:53`、knowledge
+> `node.ts:47`、workbench `host/project-anchor.ts:31`、`host/metrics.ts:46`）。实测两份二进制面：
+> **HEAD 版解析真声明 → 失败**（`sandbar/project.yaml:14 顶层只认 schema:/project:/paths:`），
+> 即**已提交的 main 上这条读面仍是红的**；工作树里有一份**未提交**的等价修复（`0c0ee58` 之后的
+> 16:29 编辑，`in_admin_log`/`in_event_ledger` 双状态位 + 两处枚举文案），该版解析真声明 OK，
+> `node server/plugins/workbench/tests/registry-loader.mjs` 68 passed / 0 failed。
+> **处置（待宿主定）**：这份未提交修复应当入库（否则下一次 `git checkout`/泳道合并可能把它冲掉，
+> 控制台这些读面会回红；main 树不干净也会污染 merge_check 的脏面分类）。入库后本条的回归面应
+> 补 TS 侧锁（现只有 A2 守 Python 装载器——它才是 `/wf/projects` 的活路径）。
