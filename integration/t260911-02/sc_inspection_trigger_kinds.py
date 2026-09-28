@@ -116,8 +116,22 @@ instances:
 
 
 def make_archive_root():
-    """临时计数真源根：<root>/insp<pid>/data/tickets/<id>/archive.json。"""
+    """临时计数真源根：<root>/<key>/data/tickets/<id>/archive.json。
+
+    260928 修（本场景三红「未知项目 'sandbar'（已注册：suyou）」的真因）：本场景把
+    `SANDBAR_PROJECTS_DIR` 指向这个临时根（计数真源注入点），而**同时**它声明的实例
+    `project_key: sandbar`——注册表根被换走后，机器级注册（~/.sandbar/projects/<key>/project.yaml）
+    就看不见了，装载器回落到仓内 legacy 迁移种子（只有 suyou）⇒ 声明解析判「未知项目 sandbar」。
+    修法：临时根里**同时**登记本场景用到的项目键（①a schema v1 形态），让「换根」不改变
+    「键可解析」这一前提——夹具自足，不依赖机器级注册表状态。
+    """
     root = tempfile.mkdtemp(prefix="sandbar-insp-count-%s-" % STAMP)
+    for key in ("sandbar", "insp%s" % STAMP):
+        d = os.path.join(root, key)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "project.yaml"), "w", encoding="utf-8") as f:
+            f.write("schema: v1\nproject:\n  - key: %s\n    name: %s\n    dirs:\n      - %s\n"
+                    % (key, key, lib.REPO))
     return root
 
 
