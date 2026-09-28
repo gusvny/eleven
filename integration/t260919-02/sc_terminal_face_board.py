@@ -48,7 +48,7 @@ import os
 import re
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -259,6 +259,17 @@ def row_of(res, tid):
 # ---------------------------------------------------------------- 夹具
 
 NOW = datetime(2026, 9, 19, 7, 30, 0, tzinfo=timezone.utc)
+
+# 260928 修（**时间炸弹**，KI-136/KI-137「桩时钟与判据时钟不同源 ⇒ 用例有保质期」家族）：
+# 本场景原来把所有 close_time 钉在冻结常量 NOW（2026-09-19）上，而产品侧「闭合行只在
+# 7 天 hydrate 窗内上板」（client.CLOSED_HYDRATE_WINDOW_S = 7*86400）吃的是**真墙钟**
+# ⇒ 2026-09-26 之后 F 组 COMPLETED 行必被窗杀（实测：COMPLETED 行 got None、板面 3 行
+# got 2）。修法=桩喂相对此刻的终态时刻（恒在窗内）；冻结的 NOW 只留给需要稳定字面量的
+# 面（如 start_time）。
+def _closed_ago(hours: float = 1.0) -> datetime:
+    """「真此刻 − hours」的终态时刻（与判据时钟同源；恒落在 hydrate 窗内）。"""
+    return datetime.now(timezone.utc) - timedelta(hours=hours)
+
 HOUR = 3600.0
 Q = client_mod.TASK_QUEUE
 
@@ -308,14 +319,14 @@ def failed_result_exc(cause_msg="套件 boom: step close failed", top_msg="workf
 
 def ins_wf(tid=TID_F, status_name="FAILED", close_time=None, start_time=NOW):
     if close_time is None:
-        close_time = datetime.fromtimestamp(NOW.timestamp() - HOUR, tz=timezone.utc)
+        close_time = _closed_ago()   # 260928：相对此刻（同源时钟），不再钉冻结 NOW
     return FakeListWf(tid, "InspectionPeriodicWorkflow", status_name, Q, KV_INSP,
                       close_time=close_time, start_time=start_time)
 
 
 def failed_handle(status_name="FAILED", **kw):
     """终态票 handle 桩：close_time 与扫描面一致（终态时刻面断言有真值可对）。"""
-    ct = datetime.fromtimestamp(NOW.timestamp() - HOUR, tz=timezone.utc)
+    ct = _closed_ago()   # 260928：同源时钟（见文件头时间炸弹注记）
     return FakeHandle(status_name, close_time=kw.pop("close_time", ct), **kw)
 
 

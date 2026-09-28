@@ -131,5 +131,12 @@
     "project_pattern": "none-zero-boot-*",
     "reason": "零台行：本清单的静态契约看守（离线 ro 哨兵）——源码内嵌清点判据正则字面量导致一级判据自匹配，声明豁免（其本身零起台零消费）。",
     "evidence": "integration/t260921-06/sc_batch_manifest_contract.py 自身含 CONSUMER_PAT 字面量（自匹配），cmd 直呼本场景脚本零起台"
+  },
+  {
+    "entry": "t260924-04-project-template-journey",
+    "pool": "main",
+    "project_pattern": "t26092404-*",
+    "reason": "被测对象=项目外置模板的建票全链＋续跑＋拒收面（真 Temporal＋真 worker＋桩大脑的 L3 旅程）：场景自持工程名 t260924-04-<pid> 调 require_stage（lib_gate 单点）——批模式下该调用走批台 ns-acquire 申请本场景命名空间（t260921-06 批级共享，零容器开销），批台不在位=exit 2 环境红（绝不静默回落）。故它是**批台消费者候选**，但注册池=main（第 4 元 serial=无池标注的串行条目，pool_of 归 main）：按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免（不擅自改他人条目的池=不改变闸的跑法范围），工程名前缀沿用清单既有约定。",
+    "evidence": "integration/t260924-04/sc_project_template_ticket_journey.py:203 stage_mod, stage = require_stage(fail, \"t260924-04-%d\" % os.getpid(), \"t260924-04\")；require_stage=integration/t260904-02/lib_gate.py:137（SANDBAR_STAGE_BATCH 在场 ⇒ 不起台、向批台申请 ns）"
   }
 ]

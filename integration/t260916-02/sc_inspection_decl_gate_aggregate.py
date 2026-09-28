@@ -80,8 +80,12 @@ def leg0_static():
     ledger_pat = re.compile(r'inspection-%s-%s\.json')
     fn_hits, mint_hits = [], []
     for root, dirs, files in os.walk(REPO):
+        # 260928 修（本守卫在 main 上长红的真因）：扫描面漏排 `.lane`——其它工单的泳道
+        # worktree 是历史代码副本（旧铸号调用形原样躺在里面）⇒「全仓零命中」被自己的
+        # 工作树打红。意图不变（**main 树**源码域零残留）→ 与 t260907-01 路径卫生守卫
+        # 同口径排除运行时/工作树目录。
         dirs[:] = [d for d in dirs if d not in (".git", ".venv", "__pycache__",
-                                                ".sandbar", "node_modules")]
+                                                ".sandbar", "node_modules", ".lane", "out")]
         for f in files:
             path = os.path.join(root, f)
             if not f.endswith((".py", ".sh", ".ts", ".js")):
