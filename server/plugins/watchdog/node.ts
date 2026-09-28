@@ -13,8 +13,9 @@
  *  - headless profile：无 webServer，本插件待机（定时器面照常起——守望者本体不依赖
  *    webServer；只有状态读面缺席，且 headless 形态本来没有面板）。
  *  - 未声明项目（无 watchdog.json）= 零行为：不起定时器、不读账本、不占路由数据。
- *  - wake 投递通路：S1-probe 前按「显式不可用」交付（wake: 探针结果进 status），
- *    绝不静默降级为「不醒 = 没事」。
+ *  - wake 投递通路（t260929-04）：真宿主 Session API——ctx.sessionController.prompt
+ *    （queue 模式不丢）+ control() 队列镜像（已消化判定）；宿主服务缺席 = 显式不可用
+ *    （wake: 原因进 status），绝不静默降级为「不醒 = 没事」。
  *
  * 全终态：每个项目的定时器收在 Watchdog 实例里，dispose() 全清；本插件 apply 里
  * 注册 ctx.on('dispose') 统一收口。
@@ -24,6 +25,7 @@ import { execFile } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -31,6 +33,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import { loadWatchdogConfig, isValidProjectKey } from './src/host/config.ts'
 import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus } from './src/host/core.ts'
+import { QueueMirror } from './src/host/queue-mirror.ts'
 import type { WakeIo, WakeOutcome } from './src/host/exits.ts'
 
 const execFileP = promisify(execFile)
@@ -73,33 +76,95 @@ export function makeBoardReader(repo: string, python?: string) {
   }
 }
 
-/** wake 投递面：宿主会话服务探针式接入（S1-probe 落点）。
- *  依次找：sessions.get(id)?.prompt → sessionController 的 prompt 面；都不可达 =
- *  accepted:false + 点名原因（守望者状态面显式 wake: unavailable，绝不静默）。 */
+/** wake 投递面：真宿主 Session API（t260929-04，取代 t260928-28 的 S1-probe 探针缝）。
+ *
+ * 已核实形状（~/.sandbar/dsh-015/lib/node_modules/@deepseek-ai/dsh/node_modules/
+ * @deepseek-ai/dsh-api-session-controller/lib/types/）：
+ *  - ctx.sessionController 注入服务（index.d.ts: interface Context { sessionController }）；
+ *  - prompt({requestId, sessionId, mode:'queue'|'steer', content:[{type:'text',text}]},
+ *    signal) -> {accepted:true}（index.d.ts L138；types.d.ts L291-305）——排队模式
+ *    不丢消息（agent 忙时入 inbox）；
+ *  - control(signal): AsyncIterable<SessionControlFrame>（index.d.ts L177）——
+ *    baseline + 每会话 queue 帧，是已消化判定的权威镜像（src/host/queue-mirror.ts）。
+ * 会话身份：只认 watchdog.json 的 executor_session 声明；缺声明 = 出口显式不可用
+ * （身份/槽位是 executor identity 票的面，本票绝不猜、绝不代建）。
+ */
 export function makeWakeIo(ctx: Context): WakeIo {
-  const probeReason = () => {
-    const sessions = ctx.get('sessions') as unknown as { get?: (id: string) => { prompt?: unknown } | undefined } | undefined
-    if (sessions && typeof sessions.get === 'function') {
-      return 'sessions 服务在，但会话对象缺 prompt 面（S1-probe 未过）'
+  type ControllerLike = {
+    prompt?: (req: unknown, signal: AbortSignal) => Promise<{ accepted: true }>
+    control?: (signal: AbortSignal) => AsyncIterable<unknown>
+  }
+  const getController = (): ControllerLike | undefined =>
+    (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
+  let mirror: QueueMirror | null = null
+  // 镜像曾终态不可读的留痕（重建恢复后 status 仍点名历史——显式可审计，绝不冒充一路 live）。
+  let lastMirrorFailure: string | null = null
+  // 宿主面缺席 = 镜像数据无主（陈认领不可信）：显式拆镜像 + no-signal（绝不拿
+  // 上一任宿主的队列残影冒充「未消化」把门错关）。
+  const hostGone = (): boolean => {
+    if (getController() === undefined && mirror !== null) {
+      lastMirrorFailure = mirror.describe()
+      void mirror.dispose()
+      mirror = null
+      return true
     }
-    return '宿主 sessions 服务不可达（headless 或服务未注入）——wake 出口显式不可用'
+    return getController() === undefined
+  }
+  const ensureMirror = (): QueueMirror => {
+    if (mirror !== null && mirror.stateInfo === 'unreadable') {
+      // 终态镜像允许重建：每次唤醒决策至多一次重订阅（不是每拍轮询）——控制流可能
+      // 恢复（瞬时故障/宿主侧重整），显式重订阅好过永久 no-signal 盲发。
+      lastMirrorFailure = mirror.describe()
+      void mirror.dispose()
+      mirror = null
+    }
+    if (mirror !== null) return mirror
+    mirror = new QueueMirror({
+      frames: () => {
+        const c = getController()
+        if (!c || typeof c.control !== 'function') return null
+        return c.control(new AbortController().signal) as AsyncIterable<never>
+      },
+    })
+    mirror.start()
+    return mirror
   }
   return {
-    async prompt(sessionId, text, mode): Promise<{ accepted: boolean; error?: string }> {
-      const sessions = ctx.get('sessions') as unknown as { get?: (id: string) => { prompt?: unknown } | undefined } | undefined
-      const sess = sessions && typeof sessions.get === 'function' ? sessions.get(sessionId) : undefined
-      if (sess && typeof sess.prompt === 'function') {
-        try {
-          await (sess.prompt as (content: unknown, mode: string) => Promise<unknown>)([{ type: 'text', text }], mode)
-          return { accepted: true }
-        } catch (e) {
-          return { accepted: false, error: String(e instanceof Error ? e.message : e) }
-        }
+    async prompt(sessionId, text, mode): Promise<{ accepted: boolean; error?: string; requestId?: string }> {
+      const c = getController()
+      if (!c || typeof c.prompt !== 'function') {
+        return { accepted: false, error: '宿主 sessionController 不可达（headless 或服务未注入）——wake 出口显式不可用' }
       }
-      return { accepted: false, error: probeReason() }
+      const requestId = `watchdog-${randomUUID()}`
+      try {
+        // 宿主面超时自断（10s）：投递挂死不拖住守望者节拍；失败路径显式回执。
+        await c.prompt({ requestId, sessionId, mode, content: [{ type: 'text', text }] }, AbortSignal.timeout(10_000))
+        return { accepted: true, requestId }
+      } catch (e) {
+        return { accepted: false, error: String(e instanceof Error ? e.message : e) }
+      }
     },
-    async queueDepth(_sessionId): Promise<number | null> {
-      return null // 队列镜像面未接入（S1-probe）：显式 null，wakeExecutor 按无信号照发并点名
+    async queueDepth(sessionId): Promise<number | null> {
+      if (hostGone()) return null
+      return ensureMirror().depthOf(sessionId)
+    },
+    async ourBriefPending(sessionId, requestId): Promise<boolean | null> {
+      if (hostGone()) return null
+      return ensureMirror().ourBriefPending(sessionId, requestId)
+    },
+    async ourPendingItemId(sessionId, requestId): Promise<string | null> {
+      if (hostGone()) return null
+      return ensureMirror().itemIdOfRpc(sessionId, requestId)
+    },
+    transportState(): string | null {
+      const cur = ensureMirror().describe()
+      if (lastMirrorFailure !== null && mirror !== null && mirror.stateInfo === 'live') {
+        return `live（曾 unreadable：${lastMirrorFailure}——已重订阅恢复）`
+      }
+      return cur
+    },
+    async dispose(): Promise<void> {
+      if (mirror !== null) { await mirror.dispose(); mirror = null }
     },
   }
 }
@@ -160,6 +225,7 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
         ledger: { path: '', watermark_offset: 0, rows_seen: 0, dupes_skipped: 0, malformed_rows: 0, gaps_seen: 0, last_row_at: null, unreadable: '项目未声明守望者' },
         liveness: { engine: { online: null, detail: '未探测', checked_at: null }, executor: null },
         self_lock: null, reconcile: null, startup: { missing_rows: null, replayed_rows: null, dedupe_keys: 0 },
+        presumed_self_rows: 0, presumed_self_detail: null, queue_mirror: '项目未声明守望者（镜像未起）',
         wakes: [], alerts: [], notify: { beep: false, unseen_redline: 0 }, last_error: null,
       } as never
     }
@@ -233,11 +299,12 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
     }
   })()
 
-  // 全终态：宿主卸载时停掉一切守望者（定时器/在飞拍全收）。
+  // 全终态：宿主卸载时停掉一切守望者（定时器/在飞拍/队列镜像消费循环全收）。
   ctx.on('dispose', () => {
     for (const [k, w] of watch) {
       w.dispose()
       watch.delete(k)
     }
+    void wakeIo.dispose?.()
   })
 }

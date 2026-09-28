@@ -14,6 +14,7 @@
 
 import { createInterface } from 'node:readline'
 import { Watchdog, defaultIo, readHeartbeatFile } from './src/host/core.ts'
+import { makeWakeIo } from './node.ts'
 
 // ---------- 注入式时钟（ISO 字符串 ↔ ms；跨午夜/夜间窗用它拨） ----------
 function makeClock(startMs) {
@@ -106,7 +107,6 @@ const instances = new Map() // project -> Watchdog
 const boardStub = { rows: [], failMode: 'off' } // failMode: off | timeout
 const engineStub = { fail: false }
 const sessionStub = { pending: null, unreadable: false, reason: '', progressStopped: false, queueOccupied: false }
-const wakeLog = []
 
 function boardReader() {
   return async () => {
@@ -138,16 +138,82 @@ function pendingProvider() {
 function sessionStat() {
   return async () => ({ advanced: !sessionStub.progressStopped, mtimeMs: clock.now() })
 }
-function wakeIoFactory() {
-  return {
-    async prompt(sessionId, text, mode) {
-      const accepted = true
-      wakeLog.push({ at: clock.now(), session: sessionId, mode, content: text, accepted })
-      sessionStub.queueOccupied = true // 投递成功 = 队列里有一份未消化简报
-      return { accepted }
-    },
-    async queueDepth() { return sessionStub.queueOccupied ? 1 : 0 },
+
+// ---- t260929-04 协议缝：桩 sessionController（真实 makeWakeIo 的驱动对象） ----
+// 契约=integration/t260929-04/lib_wake_harness.py 头注：session_stub_set /
+// control_seed / control_frame / control_fail / delivered_wakes（收紧）。
+// 灰盒锚公开契约（prompt 请求形状、SessionQueuedItem 的 id/placement/rpcId），
+// 不锚 dsh 内部。prompt accepted 时桩按宿主语义把项入权威队列并广播 queue 帧
+// （rpcId=prompt requestId 回显）——已消化判定由此可判定。
+const stub = {
+  present: true,
+  promptResult: { accepted: true }, // {accepted:true} | {accepted:false,error} | 'throw'
+  calls: [], // 每次 prompt 调用 {at, requestId, sessionId, mode, content, accepted, error?}
+  queues: new Map(), // sessionId -> [SessionQueuedItem 形状]（权威队列真值）
+  subscribers: new Set(), // 活跃 control 流订阅者（单进程内多路广播）
+  idSeq: 1,
+}
+function stubBroadcast(frame) {
+  for (const sub of stub.subscribers) sub.push(frame)
+}
+const stubController = {
+  async prompt(req /* , signal */) {
+    const pr = stub.promptResult
+    if (pr === 'throw') throw new Error('session stub prompt injected failure')
+    const accepted = !(pr && pr.accepted === false)
+    const rec = {
+      at: clock.now(), requestId: req.requestId, sessionId: req.sessionId,
+      mode: req.mode, content: (req.content || []).map(c => (c && c.text) || '').join(''), accepted,
+    }
+    if (!accepted) rec.error = (pr && pr.error) || 'stub refused'
+    stub.calls.push(rec)
+    if (!accepted) {
+      // 宿主拒绝形态=抛错（生产 prompt 捕获后转 accepted:false + 错误文本透传）
+      throw new Error(rec.error)
+    }
+    const items = stub.queues.get(req.sessionId) ?? []
+    const id = 'q-' + stub.idSeq++
+    items.push({ id, placement: req.mode === 'steer' ? 'steering' : 'queued', rpcId: req.requestId, message: { id, content: req.content } })
+    stub.queues.set(req.sessionId, items)
+    stubBroadcast({ type: 'queue', sessionId: req.sessionId, items: [...items] })
+    return { accepted: true }
+  },
+  control() { return makeControlStream() },
+}
+function stubValidItem(it) {
+  return it !== null && typeof it === 'object' && typeof it.id === 'string'
+}
+/** control 流：订阅即推当前权威队列 baseline，之后广播增量 queue 帧；
+ *  control_fail = 对在场订阅者注入流错误（一次性；新订阅照常=宿主侧恢复）。 */
+function makeControlStream() {
+  const sub = {
+    pending: [], err: null, done: false, woke: null,
+    push(frame) { this.pending.push(frame); if (this.woke) { const r = this.woke; this.woke = null; r() } },
+    fail(e) { this.err = e; if (this.woke) { const r = this.woke; this.woke = null; r() } },
+    end() { this.done = true; if (this.woke) { const r = this.woke; this.woke = null; r() } },
   }
+  stub.subscribers.add(sub)
+  const it = {
+    next: async () => {
+      for (;;) {
+        if (sub.pending.length > 0) return { value: sub.pending.shift(), done: false }
+        if (sub.err) throw sub.err
+        if (sub.done) return { value: undefined, done: true }
+        await new Promise(r => { sub.woke = r })
+      }
+    },
+    return: async () => { stub.subscribers.delete(sub); return { value: undefined, done: true } },
+  }
+  const stream = { [Symbol.asyncIterator]: () => it }
+  // 订阅即播种 baseline（权威队列当前快照）
+  sub.push({ type: 'baseline', value: { queues: Object.fromEntries(stub.queues) } })
+  return stream
+}
+// 生产 wakeIo：驱动真 makeWakeIo（请求形状/镜像语义/排除规则全在产品代码里）
+const stubCtx = { get: (k) => (k === 'sessionController' ? (stub.present ? stubController : undefined) : undefined) }
+const prodWakeIo = makeWakeIo(stubCtx)
+function wakeIoFactory() {
+  return prodWakeIo
 }
 function configLoaderFor(project, cfg) {
   const file = `/cfg/${project}/watchdog.json`
@@ -160,7 +226,7 @@ function configLoaderFor(project, cfg) {
     declared: true, enabled: cfg.enabled !== false, config_error: null,
     config: {
       enabled: cfg.enabled !== false,
-      executor_session: cfg.executor_session || ('executor-' + project),
+      executor_session: cfg.executor_session !== undefined ? cfg.executor_session : ('executor-' + project),
       stall_minutes: cfg.stall_minutes ?? 15,
       reconcile_seconds: cfg.reconcile_seconds ?? 60,
       alerts: {
@@ -312,12 +378,50 @@ async function handle(cmd) {
     return { ok: true }
   }
   if (op === 'session_digest') {
-    sessionStub.queueOccupied = false
+    // 已消化=权威队列清空（广播空 queue 帧；镜像认领随之翻 false）
+    for (const [sid, items] of stub.queues) {
+      if (items.length > 0) {
+        stub.queues.set(sid, [])
+        stubBroadcast({ type: 'queue', sessionId: sid, items: [] })
+      }
+    }
+    return { ok: true }
+  }
+  if (op === 'session_stub_set') {
+    // 夹具 sessionController 形态注入：present:false = 宿主服务缺席（headless 形态）；
+    // prompt_result = {accepted:true} | {accepted:false,error} | 'throw'。
+    if (cmd.present !== undefined) stub.present = Boolean(cmd.present)
+    if (cmd.prompt_result !== undefined) stub.promptResult = cmd.prompt_result
+    return { ok: true, present: stub.present }
+  }
+  if (op === 'control_seed') {
+    // 注入 baseline（整表替换）并广播到在场订阅者
+    stub.queues = new Map(Object.entries(cmd.queues || {}))
+    stubBroadcast({ type: 'baseline', value: { queues: Object.fromEntries(stub.queues) } })
+    return { ok: true }
+  }
+  if (op === 'control_frame') {
+    // 注入增量 queue 帧（整会话替换语义）；畸形项逐个计数显式回执，不入流
+    const items = Array.isArray(cmd.items) ? cmd.items : []
+    const good = items.filter(stubValidItem)
+    const bad = items.length - good.length
+    stub.queues.set(cmd.sessionId, good)
+    stubBroadcast({ type: 'queue', sessionId: cmd.sessionId, items: good })
+    return { ok: true, bad_items: bad, applied: good.length }
+  }
+  if (op === 'control_fail') {
+    // 镜像流故障注入：在场订阅者收流错误（镜像终态 unreadable，显式 no-signal）；
+    // 宿主侧活态随之丢失（权威队列清空）——新订阅照常=宿主恢复，故障不粘滞。
+    for (const sub of stub.subscribers) sub.fail(new Error('control stream injected failure (' + (cmd.mode || 'error') + ')'))
+    stub.queues = new Map()
     return { ok: true }
   }
   if (op === 'delivered_wakes') {
-    const wakes = wakeLog.splice(0, wakeLog.length) // 排水面：回全部并清（队列占用独立记账）
-    return { ok: true, wakes }
+    // 排水面（t260929-04 收紧）：回全部**成功**投递并清（失败走 wake_failed alert 面，
+    // 不冒充投递）；行带 requestId/sessionId（client-minted 锚），delivered=别名键。
+    const all = stub.calls.splice(0, stub.calls.length)
+    const wakes = all.filter(c => c.accepted).map(c => ({ ...c, session: c.sessionId }))
+    return { ok: true, wakes, delivered: wakes }
   }
   if (op === 'force_alert') {
     const project = cmd.project || currentProject

@@ -28,6 +28,9 @@ GET /sandbar-watchdog/api/status                 # 全项目汇总 {projects:[..
 | `self_lock` | `{state: none\|waiting_on_itself\|unknown, reason, target, since}` | `unknown` 必须显示 reason（绝不渲染成「无自锁」） |
 | `reconcile` | `{state: ok\|mismatch\|degraded\|never_run, reason, since, mismatches:[{ticket, board_state, ledger_state}]}` | degraded ≠ ok；mismatch 表格以看板列为准（board 是真源） |
 | `startup` | `{missing_rows, replayed_rows, dedupe_keys}` | 「曾缺 N 行」的留痕读数（Overview 卡） |
+| `presumed_self_rows` | int（t260929-04 新增，additive） | 自喂循环排除的响亮计数：简报点名后被判定为 executor 自身动作而压下的迁移数；>0 时 Overview 可标注「N 次自身动作未重复唤醒」，不是故障 |
+| `presumed_self_detail` | string\|null（t260929-04 新增，additive） | 最近一次疑似自排除的人类可读证据（票+迁移），审计用 |
+| `queue_mirror` | string\|null（t260929-04 新增，additive） | 队列镜像/投递通路状态串；`unreadable` 或非 `live` 开头 = 唤醒面在 no-signal 模式（照发但无消化判定），面板应显式标注 |
 | `wakes` | `[{at, ticket, dedupe_key, mode, accepted}]` | 唤醒流水（Flow 卡的唤醒计数源） |
 | `alerts` | `[{at, key, rule, target, level, title, detail, night_muted}]` | Alerts tab 数据源；`night_muted:true` 的行标「夜间已静音」；**没有 answered/auto_action 位**——未答复的 alert 永不自动变决定 |
 | `notify` | `{beep: bool, unseen_redline: int}` | **beep 语义**：仅在出现新 dedupe key 的未读 alert 时为 true；反复轮询不重置、不翻倍；面板响一声后经（下一票的）已读接口按 key 清除 |

@@ -21,7 +21,7 @@ import { compareStates, countMissingRows, degradedResult, makeMissingRowsSpec, t
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
 import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from './self-lock.ts'
 import { applyDedupe, judgeAlert, makeKey, replayDedupe, type AlertSpec, type DedupeState } from './alert-rules.ts'
-import { alertRecord, wakeExecutor, type WakeIo, type WakeOutcome } from './exits.ts'
+import { alertRecord, freshWakeMemory, wakeExecutor, type WakeIo, type WakeMemory, type WakeOutcome } from './exits.ts'
 
 export interface BoardReader {
   (): Promise<{ ok: boolean; rows: BoardRow[]; error?: string }>
@@ -118,6 +118,11 @@ export interface WatchdogStatus {
   self_lock: SelfLockVerdict | null
   reconcile: ReconcileResult | null
   startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number }
+  /** t260929-04 additive：自醒排除的响亮计数与最近证据（review C1 的审计面）。 */
+  presumed_self_rows: number
+  presumed_self_detail: string | null
+  /** t260929-04 additive：队列镜像/投递通路状态串（null = 镜像面未注入）。 */
+  queue_mirror: string | null
   wakes: Array<{ at: number; ticket: string; dedupe_key: string; mode: string | null; accepted: boolean | null }>
   alerts: Array<Record<string, unknown>>
   notify: { beep: boolean; unseen_redline: number }
@@ -154,6 +159,8 @@ export class Watchdog {
   private liveness: ExecutorLiveness | null = null
   private startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number } = { missing_rows: null, replayed_rows: null, dedupe_keys: 0 }
   private wakes: WatchdogStatus['wakes'] = []
+  /** 自醒排除记忆（t260929-04）：随实例存活；dispose 即随进程终态。 */
+  private wakeMem: WakeMemory = freshWakeMemory()
   private alerts: Array<Record<string, unknown>> = []
   private unseenRedline = new Set<string>()
   private lastError: string | null = null
@@ -338,10 +345,10 @@ export class Watchdog {
         await this.raise({ rule: 'self_lock', target: sid, level: 'redline', title: `executor 在等自己（${sid}）`, detail: this.selfLock.reason })
       }
 
-      // 出口 (a) wake：值得醒才醒；队列有未消化简报不重发。
+      // 出口 (a) wake：值得醒才醒；我们自己的未消化简报不重发；自喂循环排除（WakeMemory）。
       if (newRows.length > 0 && this.wakeIo) {
         const level = this.selfLock.state === 'waiting_on_itself' || this.liveness.state === 'stalled' ? 'redline' : 'info'
-        const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, newRows, this.selfLock.target, level)
+        const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, newRows, this.selfLock.target, level, this.wakeMem)
         if (this.aborted) return
         if (r.woke) {
           this.wakes.push({ at: nowMs, ticket: newRows[newRows.length - 1].ticket, dedupe_key: makeKey('wake', sid), mode: r.mode, accepted: r.accepted })
@@ -356,11 +363,12 @@ export class Watchdog {
     }
   }
 
-  /** dispose：全终态（定时器清、在飞拍标记 abort、心跳停）。 */
+  /** dispose：全终态（定时器清、在飞拍标记 abort、投递面后台循环收口、心跳停）。 */
   dispose(): void {
     this.disposed = true
     this.aborted = true
     if (this.timer !== null) { clearInterval(this.timer); this.timer = null }
+    void this.wakeIo?.dispose?.()
     this.phase = 'stopped'
   }
 
@@ -393,6 +401,9 @@ export class Watchdog {
       self_lock: this.selfLock,
       reconcile: this.reconcileState,
       startup: this.startup,
+      presumed_self_rows: this.wakeMem.presumedSelfRows,
+      presumed_self_detail: this.wakeMem.presumedSelfDetail,
+      queue_mirror: this.wakeIo?.transportState?.() ?? null,
       wakes: this.wakes.slice(-20),
       alerts: this.alerts.slice(-50),
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },

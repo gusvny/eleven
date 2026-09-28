@@ -96,6 +96,35 @@ function makeDeps({ clock, boardRows = [], ledgerLines = [], alertLines = [], wa
   assert(st.wakes.length === 1 && st.wakes[0].accepted === true, 'wake recorded with accepted receipt')
   w.dispose(); n += 4
 }
+// ④b t260929-04：自醒排除在整条 tick 链上生效 + additive 状态键在场（旧键不动）。
+{
+  const clock = fakeClock()
+  let prompts = 0
+  const files = { '/ledg/sandbar.jsonl': { ino: 1, content: ledgerLine({ seq: 1, ticket: 't1', stage_state: 'running' }) + '\n' } }
+  const { w } = makeDeps({
+    clock, boardRows: [{ id: 't1', stage_state: 'running' }],
+    tailIo: memTailIo(files),
+    wakeIo: {
+      prompt: async () => { prompts += 1; return { accepted: true, requestId: 'watchdog-core-1' } },
+      queueDepth: async () => 0,
+      ourBriefPending: async () => false,
+      transportState: () => 'live（测试桩）',
+    },
+  })
+  await w.start()
+  files['/ledg/sandbar.jsonl'].content += ledgerLine({ seq: 2, ticket: 't1', stage_state: 'done' }) + '\n'
+  await w.tickOnce()
+  assert(prompts === 1, 'first transition wakes (queued brief delivered)')
+  // executor 签字 → t1 下一迁移入账：自喂循环排除 = 不再醒。
+  files['/ledg/sandbar.jsonl'].content += ledgerLine({ seq: 3, ticket: 't1', stage_state: 'review' }) + '\n'
+  await w.tickOnce()
+  assert(prompts === 1, 'executor own next transition does NOT re-wake (no self-feeding loop)')
+  const st = w.status()
+  assert(st.presumed_self_rows === 1 && (st.presumed_self_detail ?? '').includes('t1'), 'presumed-self suppression is loud in status (audit counter)')
+  assert(st.queue_mirror === 'live（测试桩）', 'queue_mirror transport state surfaced (additive key)')
+  assert(st.wakes.length === 1 && Object.keys(st.wakes[0]).join(',') === 'at,ticket,dedupe_key,mode,accepted', 'wakes row keys unchanged (panel-contract promise)')
+  w.dispose(); n += 4
+}
 // ⑤ 自锁即时报警（不等停摆超时）。
 {
   const clock = fakeClock()

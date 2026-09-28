@@ -1864,6 +1864,27 @@ SCENARIOS = [
     ("t260928-28-watchdog-alert-discipline",
      "两出口纪律×重启不重播×夜间口径×开关面（t260928-28，灰盒 L3，离线秒级零 docker）：A 状态迁移→wake 出口（队列投递 accepted 回执）与需要人→alert 出口（落账+notify.beep 位）不混装；B 队列项已消化/未消化均不重发同一 dedupe key（「不丢消息」与「不重复唤醒」双向可判定）；C 制造 alert 后 restart——12h 冷却窗内同 key 不重播、beep 不翻倍（去重态从 alerts 账重放重建）；D 夜间窗内 alert 带 night_muted 标注且红线级照常发声（例外面）；E 全量收割投递面断言无任何代签/代决定形状（未答复的 alert 永不自动变成决定）；F alerts.enabled=false 不响不写其余不受扰、总闸关=显式 stopped 非消失、未声明项目零行为。harness 缺席=FAIL 点名（TDD 红属预期）",
      "python3 integration/t260928-28/sc_watchdog_alert_discipline.py", "ro", "serial"),
+
+    # ---- t260929-04: wake delivery（最后一跳接真宿主 API：排队简报×已消化镜像×自醒排除）----
+    # 五条共享一条夹具缝：继承 t260928-28 lib_watchdog_harness.Harness（协议命令扩展
+    # 见 integration/t260929-04/lib_wake_harness.py 头注——sessionController 桩 +
+    # control 镜像帧注入）。与 t260928-28 五条 intent 不同面：彼锁读账/判活/对账/
+    # 叫人与旧桩投递纪律，本组锁真宿主投递通路、真镜像已消化判定、自醒排除新故障面。
+    ("t260929-04-wake-host-api-delivery",
+     "wake 最后一跳走真宿主 API（t260929-04，灰盒 L3，离线秒级零 docker，harness 协议驱动）：A 值得醒的状态迁移行经 sessionController.prompt 投递——delivered 恰 1 条、mode=queue、sessionId=声明 executor_session、requestId=watchdog- 前缀（client-minted 锚）、简报点名票号；status.wakes 行键恰=panel-contract 承诺集 {at,ticket,dedupe_key,mode,accepted}（一个不改）且 accepted=true；B 红线级=steer（redline-only steer 不回潮）；C 宿主 sessionController 缺席（headless 形态）=wake 出口显式不可用点名原因，绝不「不醒=没事」；D prompt 桩拒绝=accepted=false 入契约行+宿主错误文本透传，故障不粘滞。intent 分工：developer L1 守 prompt 请求形状；真机会话面归 t260929-04-wake-real-session-bench。harness 新协议未落地=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260929-04/sc_wake_host_api_delivery.py", "ro", "serial"),
+    ("t260929-04-wake-digested-window",
+     "已消化判定走真队列镜像（t260929-04，灰盒 L3，离线秒级零 docker）：A 未消化窗内（control 帧显示我上一份简报还在）第二事件=零新简报（设计稿「不醒它还没消化的」锚）；B 消化后（queue 帧清空我的项）新事件照常再醒（不丢唤醒）；C 镜像流故障注入=照发+status 点名 queue 态不可读（显式 no-signal，绝不静默假设已消化、绝不卡死）；D 畸形/垃圾/未知 type 帧=跳过不崩不误判、合法帧照常生效（外部输入三态纪律）。intent 分工：t260928-28 alert-discipline B 锁旧桩队列面同 key 不重发；本条锁真镜像数据面+故障畸形态；QueueMirror 纯语义归 developer L1。harness 新协议未落地=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260929-04/sc_wake_digested_window.py", "ro", "serial"),
+    ("t260929-04-wake-self-wake-loop",
+     "自醒环路排除端到端（t260929-04 新故障面，灰盒 L3，离线秒级零 docker）：A 简报含票 T 后 T 的第一个新 stage_key 自写迁移=零唤醒且 presumed_self 计数在 status 高声留痕（不静默吞）；B 同票第二个新 stage_key=恢复唤醒（排除有界、外部多步进展不永久吞）；C 未简报票同窗迁移=立即唤醒（排除不扩大化）；D 非简报票自写=至多 1 次唤醒、其后迁移被排除（review C1 有界环路锚：单跳断环不无限自喂）；E 红线级出口永不被排除门拦（照走 steer）。intent 分工：developer L1 守 exclusion 纯函数真值表+loop 单测；本条锁环路形状输入的端到端投递计数。harness 新协议未落地=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260929-04/sc_wake_self_wake_loop.py", "ro", "serial"),
+    ("t260929-04-wake-session-identity",
+     "executor 会话身份纪律（t260929-04，灰盒 L3，离线秒级零 docker）：A executor_session 未声明=零投递尝试（桩零调用、零代建、无发明 id）+status 显式点名缺席原因（身份/档是后续票，显式不作为非静默）；B 声明 id 被宿主拒（session not found 形状）=accepted=false 入契约行+宿主错误文本透传，只对声明 id 投递；C config_provenance 能答 executor_session 来自哪个文件#哪条键或 factory-default（KI-148/149 溯源纪律随票保持）。intent 分工：config 校验真值表归 developer L1；liveness.executor missing 态归 t260928-28 判活面；本条锁投递面的身份两终态。harness 新协议未落地=FAIL 点名（TDD 红属预期）",
+     "python3 integration/t260929-04/sc_wake_session_identity.py", "ro", "serial"),
+    ("t260929-04-wake-real-session-bench",
+     "「不丢」的真机证明面（t260929-04 scope 6，灰盒 L3，隔离真宿主 temp DSH_HOME+临时端口，红线零接触 3099）：包装 developer 交付的 bench（server/plugins/watchdog/bench/host-prompt-bench.mjs，同一 host API 通路）——排队简报真落真会话（队列项 control 流可见、消化后消息会话内可读）、未消化窗第二事件被扣、消化后新事件再醒；判据=退出 0 且自报 PASS 汇总。intent 分工：桩面行为归同票三条秒级场景（TDD 期先行）；本条只锁桩够不到的真宿主端到端通路，互不顶替。三态：node 或 ~/.sandbar/dsh-015 缺席=ENV_FAIL exit 2；bench 缺席/红=FAIL exit 1 点名（TDD 红属预期，arbitrate/merge 期必须绿）",
+     "python3 integration/t260929-04/sc_wake_real_session_bench.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900

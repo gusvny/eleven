@@ -38,10 +38,78 @@ export function buildBrief(project: string, rows: LedgerRow[], selfLockTarget: s
 
 /** 投递面（node.ts 用宿主会话服务实现；测试注入桩）。 */
 export interface WakeIo {
-  /** 投递一轮输入；返回 accepted 回执。 */
-  prompt(sessionId: string, text: string, mode: 'queue' | 'steer'): Promise<{ accepted: boolean; error?: string }>
+  /** 投递一轮输入；返回 accepted 回执。requestId = 本次投递自铸的幂等标识
+   *  （宿主队列项以 rpcId 回显它；镜像面据此认领「我们的」未消化项）。 */
+  prompt(sessionId: string, text: string, mode: 'queue' | 'steer'): Promise<{ accepted: boolean; error?: string; requestId?: string }>
   /** 队列镜像：该会话当前待消化项数（读不到 = null，显式 no-signal）。 */
   queueDepth(sessionId: string): Promise<number | null>
+  /** 我们上一份简报是否仍未消化（按 requestId→rpcId 精确认领；review C2：
+   *  队列里有人类/其它来源输入时不能用总深度冒充「我们的没消化」）。
+   *  null = 镜像不可读（显式）。缺省未实现 = 回落 queueDepth 语义。 */
+  ourBriefPending?(sessionId: string, requestId: string): Promise<boolean | null>
+  /** 我们未消化简报的队列项 id（updateQueue 主动消化/运维用；null = 不可见或不可读）。 */
+  ourPendingItemId?(sessionId: string, requestId: string): Promise<string | null>
+  /** 镜像/通路状态串（status 面 additive 键 queue_mirror；缺省 null）。 */
+  transportState?(): string | null
+  /** 全终态：镜像消费循环等后台面的收口钩子（node.ts dispose 链调用）。 */
+  dispose?(): void | Promise<void>
+}
+
+/**
+ * 自醒排除的记忆（t260929-04 新失败模式）：executor 自己的动作也写同一本账，
+ * 不排除就是自喂循环。行内无 actor 字段（engine/base.py 的账本行形状已核实），
+ * 引擎侧改 schema 越界——排除规则落在消费侧、确定性、可测：
+ *  ① idem 排除：进过简报的 stage_key 永不重醒（尾部去重之外的第二道闸）；
+ *  ② 疑似自排除：简报点名过的票 T，它的**第一个**新 stage_key 迁移视为对那份
+ *     简报的自身响应，不醒（计数 presumed_self_rows，响亮不静默）；同一票的
+ *     **第二个**新 stage_key 再醒——多步真进展不被吞掉；
+ *  ③ 简报没点名过的票（executor 顺手直修别票）照醒一次——此后它进了简报名单，
+ *     下一次迁移被 ② 压住：循环有界（每张新票至多多醒一次），绝不无限自喂。
+ */
+export interface WakeMemory {
+  /** ticket -> 已进过简报的 stage_key 集。 */
+  briefed: Map<string, Set<string>>
+  /** ticket -> 上份简报之后观察到的新 stage_key 集（首见即疑似自产行）。 */
+  fresh: Map<string, Set<string>>
+  /** 上一份被接受简报的 requestId（镜像认领用）。 */
+  lastRequestId: string | null
+  /** 疑似自产行累计（status 面 presumed_self_rows）。 */
+  presumedSelfRows: number
+  /** 最近一次疑似自排除的人类可读说明（status 面证据）。 */
+  presumedSelfDetail: string | null
+}
+
+export function freshWakeMemory(): WakeMemory {
+  return { briefed: new Map(), fresh: new Map(), lastRequestId: null, presumedSelfRows: 0, presumedSelfDetail: null }
+}
+
+function stageKeyOf(row: LedgerRow): string {
+  return `${row.stage ?? ''}|${row.stage_state ?? ''}`
+}
+
+/** 值醒行 × 自醒排除（纯函数；mem.fresh 原地累积，其余只读）。 */
+export function splitLoopRows(rows: LedgerRow[], mem: WakeMemory): { wakeable: LedgerRow[]; presumed: LedgerRow[] } {
+  const wakeable: LedgerRow[] = []
+  const presumed: LedgerRow[] = []
+  for (const row of rows) {
+    const key = stageKeyOf(row)
+    const fresh = mem.fresh.get(row.ticket) ?? new Set<string>()
+    if (mem.briefed.get(row.ticket)?.has(key)) continue // ① idem：简报讲过的迁移不讲第二遍
+    if (fresh.has(key)) continue // 同一观察窗内的重复行（重投/同批重复）不重复计数
+    if (mem.briefed.has(row.ticket) && fresh.size === 0) {
+      // ② 首个新迁移 = 对上份简报的自身响应（疑似自），压下但响亮计数。
+      fresh.add(key)
+      mem.fresh.set(row.ticket, fresh)
+      mem.presumedSelfRows += 1
+      mem.presumedSelfDetail = `${row.ticket} ${key}（简报点名后的首个迁移——疑似它自己的动作）`
+      presumed.push(row)
+      continue
+    }
+    fresh.add(key)
+    mem.fresh.set(row.ticket, fresh)
+    wakeable.push(row)
+  }
+  return { wakeable, presumed }
 }
 
 export interface WakeOutcome {
@@ -49,13 +117,20 @@ export interface WakeOutcome {
   reason: string
   accepted: boolean | null
   mode: 'queue' | 'steer' | null
+  /** 自醒排除的观测（additive；旧消费面不读不破）。 */
+  presumedSelf?: number
+  presumedSelfDetail?: string | null
+  /** 本次被接受简报的 requestId（core 记进 WakeMemory.lastRequestId）。 */
+  requestId?: string | null
 }
 
 /**
  * 唤醒决策 + 执行（io 注入）。纪律逐条落在这一个函数里，测试逐条钉：
  *  - 无值得醒的行 → 不醒（不每行醒）；
- *  - 队列里已有未消化简报（depth>0）→ 不重发（已消化判定；depth 读不到=null → 照发但
- *    outcome.reason 点名「队列态不可读」，不静默假设已消化）；
+ *  - 自醒排除（splitLoopRows：idem + 疑似自 + 有界例外，见 WakeMemory 注）；
+ *  - 已消化判定（review C2 口径）：能按 requestId 认领时只认「我们的简报还在不在」
+ *    （别人的队列输入不拦我们）；认领面缺失回落队列深度；镜像不可读（null）→
+ *    照发但 reason 点名「队列态不可读」，绝不静默假设已消化；
  *  - 会话 id 空 → 显式不可执行（不代建 executor 会话，身份是后续票）。
  */
 export async function wakeExecutor(
@@ -65,26 +140,52 @@ export async function wakeExecutor(
   rows: LedgerRow[],
   selfLockTarget: string | null,
   level: 'info' | 'warn' | 'redline' = 'info',
+  mem: WakeMemory = freshWakeMemory(),
 ): Promise<WakeOutcome> {
-  const wakeable = rows.filter(worthWaking)
+  const { wakeable, presumed } = splitLoopRows(rows.filter(worthWaking), mem)
+  const presumedMeta = { presumedSelf: mem.presumedSelfRows, presumedSelfDetail: mem.presumedSelfDetail }
   if (wakeable.length === 0) {
+    if (presumed.length > 0) {
+      return { woke: false, reason: `全是疑似自产行，不醒（自喂循环排除：${mem.presumedSelfDetail}）`, accepted: null, mode: null, ...presumedMeta }
+    }
     return { woke: false, reason: '无状态迁移类行（不值得唤醒——不做每行唤醒的傻轮询）', accepted: null, mode: null }
   }
   if (sessionId === '') {
-    return { woke: false, reason: '该项目未声明 executor_session——不代建（身份/槽位是后续票），显式不作为', accepted: null, mode: null }
+    return { woke: false, reason: '该项目未声明 executor_session——不代建（身份/槽位是后续票），显式不作为', accepted: null, mode: null, ...presumedMeta }
   }
-  const depth = await io.queueDepth(sessionId)
-  if (depth !== null && depth > 0) {
-    return { woke: false, reason: `上一份简报仍未消化（队列深 ${depth}）——不重发`, accepted: null, mode: null }
+  // 已消化判定：先按 requestId 精确认领；没有认领面再退回队列深度。
+  let noSignal = false
+  if (typeof io.ourBriefPending === 'function' && mem.lastRequestId !== null) {
+    const ours = await io.ourBriefPending(sessionId, mem.lastRequestId)
+    if (ours === true) {
+      return { woke: false, reason: `上一份简报仍未消化（我们的队列项 ${mem.lastRequestId} 还在）——不重发`, accepted: null, mode: null, ...presumedMeta }
+    }
+    if (ours === null) noSignal = true // 镜像不可读：照发，但点名
+  } else {
+    const depth = await io.queueDepth(sessionId)
+    if (depth !== null && depth > 0) {
+      return { woke: false, reason: `上一份简报仍未消化（队列深 ${depth}）——不重发`, accepted: null, mode: null, ...presumedMeta }
+    }
+    if (depth === null) noSignal = true
   }
   const mode = wakeMode(level)
   const brief = buildBrief(project, wakeable, selfLockTarget)
   try {
     const r = await io.prompt(sessionId, brief, mode)
-    if (r.accepted) return { woke: true, reason: depth === null ? '已投递（队列态不可读，照发——不静默假设已消化）' : '已投递', accepted: true, mode }
-    return { woke: false, reason: `投递被拒：${r.error ?? 'unknown'}`, accepted: false, mode }
+    if (r.accepted) {
+      // 简报投出 = 这些 stage_key 都进了简报：fresh 并入 briefed，开始新一轮观察窗。
+      for (const row of wakeable) {
+        const set = mem.briefed.get(row.ticket) ?? new Set<string>()
+        set.add(stageKeyOf(row))
+        mem.briefed.set(row.ticket, set)
+        mem.fresh.delete(row.ticket)
+      }
+      if (r.requestId) mem.lastRequestId = r.requestId
+      return { woke: true, reason: noSignal ? '已投递（队列态不可读，照发——不静默假设已消化）' : '已投递', accepted: true, mode, requestId: r.requestId ?? null, ...presumedMeta }
+    }
+    return { woke: false, reason: `投递被拒：${r.error ?? 'unknown'}`, accepted: false, mode, ...presumedMeta }
   } catch (e) {
-    return { woke: false, reason: `投递通路失败：${e instanceof Error ? e.message : String(e)}`, accepted: false, mode }
+    return { woke: false, reason: `投递通路失败：${e instanceof Error ? e.message : String(e)}`, accepted: false, mode, ...presumedMeta }
   }
 }
 
