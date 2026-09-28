@@ -83,17 +83,25 @@ def main():
                 _os.environ["SANDBAR_INTEG_BATCH_TIMEOUT_SEC"] = _saved
         slow = _lane(tmp / "slow", SLOW_YAML)
         r = vl._integ({"lane": "integ", "path": str(slow), "integ_timeout_sec": 1})
-        if not (r.get("err") and "整体超时" in r["err"]):
-            _fail("integ_timeout_sec=1 未显式红：%s" % json.dumps(r, ensure_ascii=False)[:300])
+        # 260928 修（本棒曾因**绑实现文案**而在 main 上长红）：原判据钉中文短语「整体超时」，
+        # 而 260927/260928 的执行器收口改造把回执文案换成英文并补了结构化字段
+        # （interrupted/partial/progress/scenarios）——**意图不变、文案漂移**，故判据改绑浅：
+        # 显式红（green=False）+ 结构化「被判超时腰斩」标记 + 有具名 err（绝不静默绿）。
+        if not (r.get("green") is False and r.get("interrupted") is True and r.get("err")):
+            _fail("integ_timeout_sec=1 未显式红（须 green=False + interrupted=True + 具名 err）：%s"
+                  % json.dumps(r, ensure_ascii=False)[:300])
         r = vl._integ({"lane": "integ", "path": str(lane), "integ_timeout_sec": "abc"})
-        if not (r.get("err") and "畸形" in r["err"] and "不静默" in r["err"]):
-            _fail("畸形超时值未 fail-closed：%s" % json.dumps(r, ensure_ascii=False)[:300])
+        # 畸形值 fail-closed：显式红 + err 点名传入的畸形值（不静默回落=语义，非文案）。
+        if not (r.get("green") is False and r.get("err") and "abc" in r["err"]):
+            _fail("畸形超时值未 fail-closed（须 green=False + err 点名 'abc'）：%s"
+                  % json.dumps(r, ensure_ascii=False)[:300])
 
         # 5：零场景信号（exit=0 无 PASS 行）显式红——静默逃逸口不得复发
         zero = _lane(tmp / "zero",
                      LANES_YAML + "integration:\n  cmd: true\n")
         r = vl._integ({"lane": "integ", "path": str(zero)})
-        if not (r.get("err") and "零场景信号" in r["err"]):
+        # 同 4 的绑浅口径：显式红 + 零场景计数 + 具名 err（静默绿复发时 green 会是 True）。
+        if not (r.get("green") is False and int(r.get("ran") or 0) == 0 and r.get("err")):
             _fail("零场景信号未显式红（静默绿复发）：%s"
                   % json.dumps(r, ensure_ascii=False)[:300])
     finally:
