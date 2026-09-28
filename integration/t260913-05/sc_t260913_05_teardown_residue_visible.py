@@ -195,8 +195,15 @@ def create_ticket(tk, tid, title, proj):
     """正规入口开票（返回体只作辅证，KI-067：异常/拒收=红灯点名，不作成功判据）。"""
     res, err = None, ""
     try:
+        # 260928 修（本场景 T0 在「缺省策略」下必红的真因）：裸入口 op=create 不声明调用方
+        # 项目身份 ⇒ 260925-08 起策略缺省=拒收（跨项目闸 refuse），直接
+        # `ValueError: Temporal 拒绝: 调用方项目身份未声明`。在跑批上下文里它能过，只因执行器
+        # 给子进程 setdefault(SANDBAR_UNDECLARED_POLICY, "record")（过渡期旋钮）——那是**偶然
+        # 放行**，旋钮退役即红（KI-142/KI-151 同族）。按「身份只盖章不许自认」的正规口径显式
+        # 声明本场景的夹具项目（=目标票所属项目，同项目调用）。
         res = tk.run({"op": "create", "project": proj, "workflow": "dev-lane",
-                      "title": title, "write_set": list(WS), "id": tid})
+                      "title": title, "write_set": list(WS), "id": tid,
+                      "caller_project": proj})
     except Exception as e:
         err = "%s: %s" % (type(e).__name__, str(e)[:240])
     return (isinstance(res, dict) and not err), res, err
@@ -302,6 +309,8 @@ def run_leg(py, tk):
         try:
             sres = tk.run({"op": "sign", "id": TICKET, "gate": "merge",
                            "by": "integration-ut", "decision": "approve",
+                           # 同上：签字也是 gated op，须声明调用方项目身份
+                           "caller_project": PROJ,
                            "note": "ut 拆道可见性守卫签字"})
         except Exception as e:
             sres = "%s: %s" % (type(e).__name__, str(e)[:200])
