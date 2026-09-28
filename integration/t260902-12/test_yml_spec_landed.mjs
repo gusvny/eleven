@@ -15,7 +15,12 @@ const root = resolve(here, '..', '..');
 // 只需从 roles/integration.yml 提取 persona 块缩进文本——不引 js-yaml（仓库内无此依赖）。
 function extractPersona(text) {
   const lines = text.split('\n');
-  const i = lines.findIndex((l) => /^\s*persona:\s*(\||>)[-+]?\s*$/.test(l));
+  // 260928 修（本守卫在 main 上长红的真因）：DSH 0.1.5 persona 键迁移（0b56e26）把真源键
+  // 从 `persona:` 改成 `personaPrefix:`（遗留 `persona:` 只留文末锚点别名 `*role_brief`，
+  // 不是块标量）。旧判据只认 `persona:`+块标量 ⇒ 抽取恒 null ⇒ persona 条款断言全红。
+  // 意图不变（抽出角色说明书正文逐条比对）→ 认 personaPrefix/personaSuffix（可带锚点
+  // `&name`）与遗留 persona 三种形态。
+  const i = lines.findIndex((l) => /^\s*persona(?:Prefix|Suffix)?:\s*(?:&\S+\s*)?(\||>)[-+]?\s*$/.test(l));
   if (i === -1) return null;
   const baseIndent = lines[i].match(/^\s*/)[0].length;
   const block = [];

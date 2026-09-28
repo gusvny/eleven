@@ -105,10 +105,14 @@ def main():
     for rel in ("server/engine/README.md",
                 "server/workflows/README.md") + lib.DOC_TWO:
         text = (lib.REPO / rel).read_text("utf-8")
-        annotated = "260904" in text and "退役" in text
+        # 260928 修：判据原钉中文「退役」字样，而 docs 于 260928 英文化（宿主令）后
+        # 两篇的退役注记改为英文（"260904 host order (retirement note) … were retired"）。
+        # 意图不变（文档必须带 260904 退役标注，防整文件豁免成无标注黑洞）→ 判据收英文形态，
+        # 中文形态照旧收（存量不回归）。
+        annotated = "260904" in text and ("退役" in text or "retired" in text.lower())
         if rel in lib.DOC_TWO:
             # 两篇指定 docs 按方案承诺以「已退役（260904）」标注保留上下文（非删除）
-            check(annotated, "退役标注在位：%s（260904+退役字样）" % rel)
+            check(annotated, "退役标注在位：%s（260904+退役/retired 字样）" % rel)
         else:
             # 两 README 按方案 R6c 允许两形态：加退役标注，或整行删除零残留
             has_tokens = any(t in text for t in lib.SCAN_TOKENS)

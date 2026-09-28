@@ -50,16 +50,33 @@ def main():
     ok("roles_dir" in section and "model_routes" in section,
        "G1b ①d 声明两键 roles_dir / model_routes")
     ok("v1.6" in doc, "G2 变更记录推进 v1.6")
-    ok(("不回落" in section or "不得按" in section)
-       and ("不可解析" in section or "解析错误" in section),
+    # 260928 修（本棒在 main 上长红的真因）：契约文档于 260928 英文化（宿主令），①d 节语义
+    # 一条没少，只是从中文改成英文表述 ⇒ G3~G6 四条判据全红。意图不变（①d 节必须明文写着
+    # 这些语义）→ 判据改**双语容忍**（逐行在场判定：中文形态照旧收，同时收文档现有英文措辞）。
+    # 不是放松：仍是「该语义在 ①d 节内找不到即红」。
+    import re as _re
+
+    def _sec_line(*alts) -> bool:
+        """①d 节内存在一行同时命中全部备选组（每组内任一命中即可，双语）。"""
+        for l in section.splitlines():
+            if all(any(_re.search(a, l, _re.I) for a in grp) for grp in alts):
+                return True
+        return False
+
+    ok(_sec_line((r"不可解析", r"解析错误", r"cannot be parsed", r"cannot parse", r"unparseable"),
+                 (r"不回落", r"不得按", r"fail-closed")),
        "G3 条目文件畸形=fail-closed 不回落（三态总纲落点）")
-    ok("生效前提" in section or ("放开" in section and "装载器" in section),
+    ok(_sec_line((r"生效前提", r"take effect only once", r"only once the loader")),
        "G4 过渡状态：以装载器放开工单落地为生效前提")
-    ok(("软" in section or "跳过" in section) and ("None" in section or "返回空" in section),
+    # G5 的语义在文档里跨物理行折行（"soft skip is kept (a missing patch degrades to the
+    # default persona …"）——故用节内整体判定，不逐行。
+    ok(any(_re.search(a, section, _re.I) for a in (r"软", r"跳过", r"soft skip", r"soft fallback"))
+       and any(_re.search(b, section, _re.I)
+               for b in (r"None", r"返回空", r"returning empty", r"default persona", r"默认模型")),
        "G5 锚点 vs 内容：内容缺失维持软语义（默认 persona / 查表返回空→默认模型）")
-    ok(("损坏" in section or "不可解析" in section)
-       and ("容错" in section or "继承" in section or "None" in section)
-       and "model_routes" in section,
+    ok(_sec_line((r"损坏", r"不可解析", r"unparseable", r"bad_content"),
+                 (r"容错", r"继承", r"None", r"soft fallback", r"inherit", r"kept"),
+                 (r"model_routes",)),
        "G6 声明表内容损坏容错边界（声明与否不分叉）")
     ok("strip" in section or "纯空白" in section, "G7 空白值口径（strip 判空）")
 

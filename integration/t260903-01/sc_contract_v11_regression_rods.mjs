@@ -51,19 +51,27 @@ if (lane === null) {
 }
 
 section('B. 契约文档 F1/F2 语义明文（integration 道无关闭态 + 汇总行参考性）')
+// 260928 修（本棒在 main 上长红的真因）：契约文档于 260928 英文化（宿主令；docs 21 篇正文 +
+// 17 个中文档名改英文），**语义一条没少**，而本棒判据只认中文措辞 ⇒ B1/B2/B4/B5/B6 全红。
+// 意图不变（这些语义必须在契约文档里明文找得到）→ 判据改双语容忍：中文形态照旧收，同时收
+// 文档现有英文措辞（zero-scenario green / closing idiom / bidirectional net criterion /
+// ENV_FAIL [scenario name] exit=2 / sub-cases are all N/A = product red）。不是放松：
+// 仍是「找不到该语义即红」。
 if (contract === null) {
   ok(false, 'B0 契约文档可读')
 } else {
-  ok(/零场景绿/.test(contract), 'B1 关闭惯用法=零场景绿 已明文（F1）')
-  ok(/关闭惯用法|无声明级关闭态|没有[^。\n]{0,16}关闭态/.test(contract),
+  ok(/零场景绿|zero-scenario green/i.test(contract), 'B1 关闭惯用法=零场景绿 已明文（F1）')
+  ok(/关闭惯用法|无声明级关闭态|没有[^。\n]{0,16}关闭态|closing idiom/i.test(contract),
     'B2 integration 道无声明级关闭态 已明文（F1，与 code 道缺失=关闭 相区分）')
   ok(contract.split('\n').some(l => l.includes('SCENARIOS ran=N') && /env_fail=N na=N/.test(l)),
     'B3 汇总行五计数形状逐字入约（v1.8，t260904-12）')
-  ok(contract.split('\n').some(l => l.includes('双向净') && /谎报|不一致/.test(l)),
+  ok(contract.split('\n').some(l => (l.includes('双向净') || /bidirectional net criterion/i.test(l))
+    && (/谎报|不一致/.test(l) || /inconsistenc|lies/i.test(l))),
     'B4 汇总与明细双向净判据已明文（F2 参考性语义 v1.8 退役）')
-  ok(contract.split('\n').some(l => /ENV_FAIL \[场景名\] exit=2/.test(l)),
+  ok(contract.split('\n').some(l => /ENV_FAIL \[(场景名|scenario name)\] exit=2/.test(l)),
     'B5 ENV_FAIL 行字符级格式已入约（三态协议）')
-  ok(contract.split('\n').some(l => /全部子用例 N\/A/.test(l) && /产品红/.test(l)),
+  ok(contract.split('\n').some(l => (/全部子用例 N\/A/.test(l) || /sub-cases are all N\/A/i.test(l))
+    && (/产品红/.test(l) || /product red/i.test(l))),
     'B6 全部子用例 N/A=产品红已明文（N/A 仅系统状态条件子用例）')
 }
 

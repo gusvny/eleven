@@ -57,6 +57,13 @@ def _literal_part(node):
         return None if left is None or right is None else left + right
     if isinstance(node, ast.Call):
         return ""  # 单点渲染调用：字面部分之外的渲染产物，本守卫不读
+    # 260928 修（本守卫在 main 上长红的真因）：若干条目尾部除渲染调用外还拼了**模块级
+    # 常量**（形如 `+ ROLE_REPORT_ENGLISH_CLAUSE`）。旧读法对 Name 返回 None ⇒ 整条
+    # 表达式判「读不出」⇒ 该条目的字面部分变空串 ⇒ 条款断言全红（票面英文化同批引入）。
+    # 意图不变（读回字面部分、跳过非字面拼接件）→ Name/Attribute 与 Call 同口径按空串
+    # 跳过，字面部分照旧逐字读回。
+    if isinstance(node, (ast.Name, ast.Attribute)):
+        return ""
     return None
 
 
