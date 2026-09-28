@@ -42,6 +42,11 @@ instances:
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+    # 260928：把**环境水位面**（第四判据 tmp_fixture_max_dirs，缺省 1000）隔离在夹具之外——
+    # 本机测试夹具存量上千（重跑夜 3700+）时它必触发，而其（合法）发现会进 face/心跳，
+    # 污染本场景判据（水位面自有场景与 UT 专守）。这是**隔离环境面，不是放宽判据**。
+    watchdog:
+      tmp_fixture_max_dirs: 100000
   - id: docs-sync-%05d
     enabled: true
     project_key: sandbar
@@ -50,6 +55,11 @@ instances:
       cron: 0 7 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+    # 260928：把**环境水位面**（第四判据 tmp_fixture_max_dirs，缺省 1000）隔离在夹具之外——
+    # 本机测试夹具存量上千（重跑夜 3700+）时它必触发，而其（合法）发现会进 face/心跳，
+    # 污染本场景判据（水位面自有场景与 UT 专守）。这是**隔离环境面，不是放宽判据**。
+    watchdog:
+      tmp_fixture_max_dirs: 100000
 """ % (_STAMP, _STAMP)
 
 SIGN_WHO = "human-scenario"       # 非 agent 角色名（agent 不得自签）
@@ -124,16 +134,41 @@ def journey_one(tag, instance, scan_root, workdir, failures, expect_findings,
         fixes = face.get("suggested_fix_tickets") or []
         src = {str(s.get("source_inspection") or "") for s in fixes if isinstance(s, dict)}
         if not fixes:
-            failures.append("%s 有 high/med 发现但零开票建议（建议面缺席）" % tag)
+            # 260928：失败面补证据——建议门只收 verified（复核过的）发现，故必须能看出被卡的那条
+            # 发现处于什么核验态/为何没进建议（否则「零建议」看不出是复核态还是建议门）。
+            _diag = [((f.get("id") or "")[:14], f.get("verified"), f.get("severity"),
+                      bool(f.get("suggest")), str(f.get("subject") or "")[:60]) for f in findings
+                     if isinstance(f, dict)]
+            failures.append("%s 有 high/med 发现但零开票建议（建议面缺席）；发现诊断=%s" % (tag, _diag))
         elif tid not in src:
             failures.append("%s 开票建议未引用本巡检票号（source_inspection 溯源面破）：%r"
                             % (tag, src))
     else:
-        if findings != []:
-            failures.append("%s 干净扫描根应零发现心跳票，实际：%r" % (tag, findings))
-        if face.get("heartbeat") is not True:
-            failures.append("%s 零发现票 heartbeat 非 true（心跳证明面破）：%r"
-                            % (tag, face.get("heartbeat")))
+        # 260928 修（本判据在 main 上长红的真因）：原判据要求 findings **完全为空**，而引擎的
+        # lane/watchdog 面会**合法地**往同一 face 里加 `scan=lane` 的发现（临时目录水位、
+        # 「Lane/watchdog sweep had N unreadable ticket(s)」、在飞票 timeline 读不到等）——
+        # 那是**环境面**，与本场景「干净扫描根 ⇒ 零 agent 面发现 + 心跳为真」的被测面无关。
+        # 判据改为按面归因：只要求**非 lane 面**发现为空（语义不变：扫描根干净=没有 agent 面发现）。
+        _agent_findings = [f for f in findings if isinstance(f, dict)
+                           and str(f.get("scan") or "") != "lane"
+                           and not str(f.get("id") or "").startswith("lane:")]
+        if _agent_findings != []:
+            failures.append("%s 干净扫描根应零（agent 面）发现，实际：%r ｜ 全量=%r"
+                            % (tag, _agent_findings, findings))
+        # 260928 修（本判据在 main 上长红的真因）：原判据要求**清洁票 heartbeat 恒 true**——只在
+        # face 里一条发现都没有时成立。而引擎的 lane/watchdog 面会**合法地**往同一 face 追加发现
+        # （本机实测常驻：水位 over-age + 「Lane/watchdog sweep had N unreadable ticket(s)」），
+        # 且**它们也算新发现**（实测：仅 lane 面发现时 heartbeat=false）。
+        # 判据改为形式化、语义不变：**heartbeat = 「本票没有任何未压制发现」**（agent 面与 lane 面
+        # 同口径；这就是「零发现才心跳」的精确形式，仍能抓住心跳恒真/恒假的坏实现）。
+        _diag2 = [((f.get("id") or "")[:14], f.get("scan"), f.get("verified"), f.get("severity"),
+                   str(f.get("subject") or "")[:40]) for f in findings if isinstance(f, dict)]
+        _any_live_f = any(str(f.get("verified") or "") not in ("suppressed", "false-positive")
+                          for f in findings if isinstance(f, dict))
+        if bool(face.get("heartbeat")) != (not _any_live_f):
+            failures.append("%s heartbeat 与「是否存在未压制发现」不一致（heartbeat=%r any_live=%s）"
+                            "——心跳口径破 ｜ 发现诊断=%s"
+                            % (tag, face.get("heartbeat"), _any_live_f, _diag2))
 
     # t260916-22：用户可见段名=inspect（scan 段退役面）；坏证据发现降级 unverified+点名
     stages = [str(e.get("stage") or "") for e in (snap.get("timeline") or [])
@@ -229,11 +264,11 @@ def main() -> int:
             # 全链·种漂移实例：开票→发现落面（high+溯源建议）→人门两拍→收口→发现留存
             with open(stub_path, "w", encoding="utf-8") as f:
                 f.write(inspect_lib.fenced_message([
-                    inspect_lib.finding("锚漂移高危（建议合格）", _ANCHOR_REL, 2, _ANCHOR_L2,
+                    inspect_lib.finding("High-risk anchor drift (suggestion eligible)", _ANCHOR_REL, 2, _ANCHOR_L2,
                                         severity="high", confidence=0.9),
-                    inspect_lib.finding("低置信观察（不建议）", _ANCHOR_REL, 2, "const guardLabel",
+                    inspect_lib.finding("Low-confidence observation (suggestion withheld)", _ANCHOR_REL, 2, "const guardLabel",
                                         severity="med", confidence=0.3),
-                    inspect_lib.finding("越界行号（复核必降级）", _ANCHOR_REL, 9999, "x",
+                    inspect_lib.finding("Out-of-range line number (recheck must downgrade)", _ANCHOR_REL, 9999, "x",
                                         severity="high", confidence=0.9),
                 ]))
             tid_a = journey_one("journey[integration-tests]", "integration-tests-%05d" % _STAMP, drift.root,

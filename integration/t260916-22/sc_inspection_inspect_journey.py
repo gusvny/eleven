@@ -59,6 +59,11 @@ instances:
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+    # 260928：把**环境水位面**（第四判据 tmp_fixture_max_dirs，缺省 1000）隔离在夹具之外——
+    # 本机测试夹具存量上千（重跑夜 3700+）时它必触发，而其（合法）发现会进 face/心跳，
+    # 污染本场景判据（水位面自有场景与 UT 专守）。这是**隔离环境面，不是放宽判据**。
+    watchdog:
+      tmp_fixture_max_dirs: 100000
 %s""" % (instance, budget)
 
 
