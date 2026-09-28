@@ -103,11 +103,13 @@ def _load_shared():
 def _decl_text(key: str, name: str, dirs: str, extra: str = "") -> str:
     """引擎真形声明（schema v1 + project 条目 + paths 段 [+ 待验顶层段]）。
 
+    paths 段按 ①d 真形写（两空格缩进的 key: value，不是列表——260928 自证踩过：列表形态
+    被 ①d 正当拒收，与本次要验的「additive 段容忍」无关，属夹具造错）。
     extra 里的段按真形态给（例如 event_ledger: 下带 enabled/keep_days/max_mb 缩进块）
     ——缩进块的形状属于该段的读者，装载器只容忍其存在。"""
     return ("schema: v1\n"
             "project:\n  - key: %s\n    name: %s\n    dirs:\n      - %s\n"
-            "paths:\n  - /tmp/sc-registry-probe\n%s" % (key, name, dirs, extra))
+            "paths:\n  dsh_bin: /bin/sh\n%s" % (key, name, dirs, extra))
 
 
 def _scan(tmp_root: Path, shared_mod):
@@ -155,26 +157,54 @@ with tempfile.TemporaryDirectory() as td:
     ok(keys == ["probe-owner"], "真形声明条目被注册（可用=%s）" % keys)
     ok(not quarantined, "零隔离（隔离=%s）" % [q.get("error") for q in quarantined])
 
-section("A2 一致性锁：引擎读者认的每个顶层段都必须被装载器容忍（反停机锁）")
+section("A2 一致性锁：引擎读者认的每个顶层段都必须被**每个条目读面**容忍（反停机锁）")
 reader_keys = _derived_reader_keys()
 ok(bool(reader_keys), "从读者源码派生出顶层段清单（空=闸空转，防假绿）：%s" % reader_keys)
-for key in reader_keys:
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td) / "projects"
-        # 目录名/key 必须过 key 白名单（小写/数字/中划线）——段名带下划线，故条目
-        # 用中性名，被验的是「该段在不在装载器容忍集里」，不是条目命名。
-        entry = root / "probe-entry"
-        entry.mkdir(parents=True)
-        (entry / "project.yaml").write_text(
-            _decl_text("probe-entry", "probe-entry", str(ROOT),
-                       "%s:\n  enabled: true\n  keep_days: 14\n" % key), "utf-8")
-        projects, quarantined = _scan(root, shared)
-        if quarantined:
-            ok(False, "读者段 %s: 被装载器隔离（引擎自己声明的键把整个条目打掉）：%s"
-               % (key, quarantined[0].get("error")))
+
+
+def _face_loader(root, key):
+    """读面 ①：注册表装载器（控制台/正式入口的数据源）。"""
+    projects, quarantined = _scan(root, shared)
+    if quarantined:
+        return False, "装载器隔离：%s" % str(quarantined[0].get("error"))[:90]
+    return [p.get("key") for p in projects] == [key], "装载器可用=%s" % [p.get("key") for p in projects]
+
+
+def _face_paths(root, key):
+    """读面 ②：契约 ①d 的 paths 解析器（project_paths → dsh_bin/roles/routes 全族；
+    它红=该项目 agent 一律 spawn 不出来——260928 实案：票 t260928-20 一开就 blocked）。"""
+    old = os.environ.get("SANDBAR_PROJECTS_DIR")
+    os.environ["SANDBAR_PROJECTS_DIR"] = str(root)
+    try:
+        shared.project_paths(key)
+    except Exception as exc:                                    # noqa: BLE001
+        return False, "①d 抛错：%r" % (exc,)
+    finally:
+        if old is None:
+            os.environ.pop("SANDBAR_PROJECTS_DIR", None)
         else:
-            ok([p.get("key") for p in projects] == ["probe-entry"],
-               "读者段 %s: 装载器容忍（引擎声明的键不放倒自己的注册条目）" % key)
+            os.environ["SANDBAR_PROJECTS_DIR"] = old
+    return True, "①d 解析 OK"
+
+
+# 读面条目表：新增读面（含 TS 镜像那类）必须加进来——本表就是「同契约有几份读面」的台账。
+# TS 侧（server/project-registry.ts）另有自己的派生式锁：workbench/tests/registry-loader.mjs 第 11 段。
+FACES = (("装载器", _face_loader), ("①d paths 解析器", _face_paths))
+
+for key in reader_keys:
+    for face_name, face in FACES:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "projects"
+            # 目录名/key 必须过 key 白名单（小写/数字/中划线）——段名带下划线，故条目
+            # 用中性名，被验的是「该段在不在每个读面的容忍面里」，不是条目命名。
+            entry = root / "probe-entry"
+            entry.mkdir(parents=True)
+            (entry / "project.yaml").write_text(
+                _decl_text("probe-entry", "probe-entry", str(ROOT),
+                           "%s:\n  enabled: true\n  keep_days: 14\n" % key), "utf-8")
+            good, detail = face(root, "probe-entry")
+            ok(good, "读者段 %s × 读面 %s：容忍（引擎自己声明的键不放倒自己的注册条目）%s"
+               % (key, face_name, "" if good else "—— " + detail))
 
 section("A3 真坏条目仍被精确拒收 + 隔离面取数（不静默消失）")
 with tempfile.TemporaryDirectory() as td:
