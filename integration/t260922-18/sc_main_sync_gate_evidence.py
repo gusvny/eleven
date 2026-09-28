@@ -111,8 +111,9 @@ async def main() -> int:
         from temporalio.testing import WorkflowEnvironment
         from temporalio.worker import Worker
         import dev_lane
-        from shared import (HumanGateContext, IntegrationRunResult, StageResult,
-                            TicketInput, UiEvidenceDeclResult, UiEvidenceResult)
+        from shared import (ChangedFilesResult, HumanGateContext, IntegrationRunResult,
+                            StageResult, TicketInput, UiEvidenceDeclResult,
+                            UiEvidenceResult)
         import agent_activities as aa
     except Exception as e:
         print("ENV_FAIL: temporalio/引擎模块不可用：%r（exit 2）" % (e,))
@@ -161,6 +162,19 @@ async def main() -> int:
         from temporalio import activity as _act
         return _act.defn(name=step_id)(stub)
 
+    async def stub_changed_files(args):
+        """gate 前置「改动清单收集」桩（t260925-04 v2 文件级爆炸半径新增的活动）。
+
+        260928 修（本场景 G1 恒红 0 轮的真因）：闸段前置现在会先调 `changed_files`
+        活动；本场景的 STUBS 没注册它 ⇒ Temporal 反复回报
+        `NotFoundError: Activity function changed_files ... is not registered on this
+        worker`，探针 `probe_gate` 根本没被调度到（探针里加落盘调试实测：零调用）
+        ⇒ G1「抵达跑闸的验证轮恰 2 轮」恒为 0。改动清单不是本场景的被测面（被测=主同步
+        时点与轮数），按既有惯例给最小回执：清单不可得（error 非空）⇒ 闸侧 fail-closed
+        恒全跑——与本场景「每轮真跑」的判据同向。
+        """
+        return ChangedFilesResult(files=[], error="场景桩：改动清单不参与被测面（恒全跑）")
+
     async def probe_gate(args) -> IntegrationRunResult:
         """跑闸探针桩：被调时刻捕获泳道 HEAD 与 main 祖先关系（时点的直接证据）。"""
         payload = args if isinstance(args, dict) else vars(args)
@@ -208,6 +222,7 @@ async def main() -> int:
     STUBS = ([aa.prepare_workspace, aa.verify_review_gate, aa.settle_lane,
               aa.prepare_conflict_resolution, aa.settle_conflict_resolution,
               named(probe_gate, "run_integration_tests"),
+              named(stub_changed_files, "changed_files"),
               named(stub_merge_check, "merge_check"),
               named(stub_ui_decl, "ui_evidence_decl"),
               named(stub_ui_evidence, "prepare_ui_evidence"),
