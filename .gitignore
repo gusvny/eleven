@@ -20,3 +20,7 @@ server/admin.log*
 # 260927 补：主仓里它们此前一直以「未跟踪」面目出现，一次 git add -A 就可能被误收。
 .sandbar/
 .probe-home/
+# 事件账运行期目录（epic project-executor 票① t260928-13 交付：每项目 append-only
+# JSONL + 轮转归档 <project>.jsonl.YYYYMMDD-HHMMSS-xxxxxx，与上一段 server/admin.log*
+# 同族风险——轮转产物体积大、落地即未跟踪，一次 git add -A 就可能被误收）。260928 补。
+server/ledger/
