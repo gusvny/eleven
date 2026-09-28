@@ -185,6 +185,40 @@ printf '%s\\n' '{"ok": true, "result": {"stub": "poc-cli", "note_echoed": true}}
     ok(res.status === 400 && String(res.body?.error).includes('64KB'),
       'body 超 64KB → 400 明确报「body 超过 64KB」（历史 note 有实际上限，报错必须精确）')
   }
+
+  /* ---- F. 调用方项目身份（260928 宿主实报直接修复的回归锁）----
+   * 实案：宿主在巡检票详情里点 approve/reject「点了没反应」——真因是 host 的引擎直调 op
+   * （sign/authorize/pause/resume 走 client.py ticket）一个身份字段都不带，而 260927 起
+   * 引擎对 undeclared 写 op 一律拒收（cross_project_refused），签字信号根本没进门
+   * （票面 gate_error 留痕、UI 只表现成没反应）。三条锁：带 ?project= 必带身份 /
+   * 未注册 key fail-closed 且零信号 / 缺省视图零变化。 */
+  section('F 调用方身份：?project= → caller_project 随写 op 进引擎')
+  {
+    const r = await call(`${URL}?project=sandbar`, 'POST', { decision: 'approve', who: 'host' })
+    ok(r.status === 200 && r.body?.ok === true, '带 ?project=sandbar 的 sign → 200')
+    const sig = await lastSignal()
+    ok(sig?.caller_project === 'sandbar', '写 op 载荷带 caller_project=sandbar（跨项目闸身份不再缺）')
+    ok(sig?.op === 'sign' && sig?.input?.decision === 'approve' && sig?.ticket_id === 't260901-22',
+      '原有载荷形状零变化（op/ticket_id/input 照旧）')
+    const r2 = await call('/sandbar-workbench/api/wf/tickets/t260928-24/pause?project=sandbar',
+      'POST', { who: 'host', note: 'x' })
+    ok(r2.status === 200, 'pause 同通道 → 200')
+    const sig2 = await lastSignal()
+    ok(sig2?.caller_project === 'sandbar' && sig2?.op === 'pause',
+      'pause 走同一身份出口（caller_project 一并带上）')
+  }
+  {
+    const before = await signalCount()
+    const r = await call(`${URL}?project=no-such-project-92824`, 'POST', { decision: 'approve' })
+    ok(r.status === 400, '未注册项目 key → 400（不静默回落，防串仓）')
+    ok((await signalCount()) === before, '锚解析失败 → 零 sign 信号（fail-closed）')
+  }
+  {
+    await call(URL, 'POST', { decision: 'approve', who: 'host' })
+    const sig = await lastSignal()
+    ok(sig?.caller_project === undefined,
+      '无 ?project=（默认视图）→ 载荷不带 caller_project（老路径零变化）')
+  }
 } finally {
   await rm(tmp, { recursive: true, force: true })
 }

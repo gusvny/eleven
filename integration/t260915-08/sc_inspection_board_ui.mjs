@@ -144,6 +144,17 @@ function buildContract() {
   } else {
     record('S0 host-gate-passthrough', 'fail', 'node.ts op=sign 未见 body.gate 透传（gate 写死空串=巡检签字必被拒收）')
   }
+  // 260928 宿主实报直修的源级锚（行为级锁在 workbench tests/t01_sign_note_passthrough.mjs
+  // F 段；此处守「两条写通道都带身份」的源面）：引擎直调通道（sign/authorize/pause/resume）
+  // 与 admin→ticket.py 通道（accept/advance/rework/update）都必须声明调用方项目身份——
+  // 260925-08 翻严后 undeclared 写 op 一律 cross_project_refused，控制台点 approve/reject
+  // 「没反应」的根因就是这条通道缺身份（且巡检票侧连拒收回执都看不到）。
+  if (/caller_project/.test(host) && /withCaller\s*\(/.test(host) && /anchorOf\(url\)/.test(host)) {
+    record('S0 host-caller-identity', 'pass', 'node.ts 两条写通道均声明 caller_project（?project= 逐请求锚）')
+  } else {
+    record('S0 host-caller-identity', 'fail',
+      'node.ts 写通道未见 caller_project 声明（跨项目闸 undeclared 拒收=控制台签字/推进静默失效）')
+  }
 }
 
 // ---------------------------------------------------------------- S1 真浏览器

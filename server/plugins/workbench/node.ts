@@ -1318,6 +1318,18 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         sendJson(res, 400, { ok: false, error: `请求体不是合法 JSON：${String(err instanceof Error ? err.message : err)}` })
         return
       }
+      // t260928-24（宿主实报：巡检票详情里 approve/reject 点了没反应）：引擎直调 op
+      // （sign / authorize / pause / resume 走 client.py 的 ticket 面）必须**声明调用方
+      // 项目身份**——260927 起引擎对 undeclared 写 op 一律拒收（cross_project_refused），
+      // 而本面此前一个身份字段都不带 ⇒ 签字信号根本没进门（票面 gate_error 留痕的
+      // 「跨项目闸：…调用未声明身份…拒收」就是这个；UI 侧只表现为点了没反应）。
+      // 身份来源=请求 ?project=（与读面同一个逐请求项目锚：多项目控制台按当前视图
+      // 声明自己）；视图无 key 时不猜、保持原样（引擎照旧按未声明处理）。
+      const callAnchor = anchorGuard(res, anchorOf(url))
+      if (callAnchor === null) return
+      const callerProject = String(callAnchor.key ?? '')
+      const withCaller = <T extends Record<string, unknown>>(payload: T): T =>
+        callerProject === '' ? payload : ({ ...payload, caller_project: callerProject } as T)
       try {
         // sign = 审批签字（awaiting-human 人工审批段）：走 Temporal TicketWorkflow 的签字
         // （decision=approve 放行推进 / reject 打回），不经 admin.py（引擎对 human 门只认 sign）。
@@ -1330,11 +1342,11 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           const note = String(body.note ?? '')
           const who = String(body.who ?? 'op-local')
           const gate = String(body.gate ?? '')
-          const pocArgs = {
+          const pocArgs = withCaller({
             op: 'sign',
             ticket_id: id,
             input: { who, gate, decision, note },
-          }
+          })
           const r = await runPocCli(cli, ['ticket', JSON.stringify(pocArgs)])
           sendJson(res, 200, r)
           return
@@ -1344,7 +1356,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         // 不造旁路）；who/kind/scope/reason/expires 全由调用方注入（agent 不得自签，
         // workflow intake 机械拒收 agent 角色名）。expires 收 ISO8601 或 epoch 秒。
         if (op === 'authorize') {
-          const pocArgs = {
+          const pocArgs = withCaller({
             op: 'authorize',
             ticket_id: id,
             input: {
@@ -1354,7 +1366,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
               reason: String(body.reason ?? ''),
               expires: body.expires ?? '',
             },
-          }
+          })
           const r = await runPocCli(cli, ['ticket', JSON.stringify(pocArgs)])
           sendJson(res, 200, r)
           return
@@ -1376,14 +1388,17 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         if (op === 'pause' || op === 'resume') {
           const who = String(body.who ?? 'op-local')
           const note = String(body.note ?? '')
-          const r = await runPocCli(cli, ['ticket', JSON.stringify({
+          const r = await runPocCli(cli, ['ticket', JSON.stringify(withCaller({
             op, ticket_id: id, who, note,
-          })])
+          }))])
           sendJson(res, 200, r)
           return
         }
         // 面板通道写操作直接执行（总管操作本身即意图）；审计由 admin.py run-id 机制承担。
-        const args: Record<string, unknown> = { op, id }
+        // t260928-24 同批：ticket.py 写 op 的跨项目闸同样要身份（admin.py→tools_registry→
+        // ticket.py 一路不带身份 ⇒ accept/advance/rework/update 一律被拒）——同一个
+        // ?project= 逐请求锚透传，调用点两条通道口径一致。
+        const args: Record<string, unknown> = withCaller({ op, id })
         if (op === 'accept') {
           for (const k of ['item', 'done', 'by', 'evidence', 'agent']) {
             if (body[k] !== undefined) args[k] = body[k]
