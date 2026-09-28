@@ -190,7 +190,9 @@ def main():
             "D marker 行豁免判定（engine-venv-compat→走豁免分支）")
     r.check(not _exempt("x.py", '旧路径读点无 marker 不豁免'),
             "D 无 marker 旧路径读点不豁免")
-    r.check(not RE_SEG_FWD.search('spawn("dsh", ["--profile", "suyou"])'),
+    # L10-allow: 本行是**反向样本字面量**（证明布局扫描器认得出「不带 --no-open 的 dsh 启动」），
+    # 不是真启动点——故带标记豁免 L10。
+    r.check(not RE_SEG_FWD.search('spawn("dsh", ["--profile", "suyou"])'),  # L10-allow: 反向样本字面量
             "D dsh CLI spawn（合法外部工具名）不误报（绿）")
     r.check(not _hit('fixtures 用 self.tmp / "dsh" 作 DSH_HOME（隔离目录名）'),
             "D DSH_HOME 型隔离目录名不误报（绿）")

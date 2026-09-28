@@ -474,6 +474,51 @@ def lint_tmpdir_hygiene():
            % (len(base), "" if len(base) == 1 else "s"))
 
 
+def lint_console_no_open():
+    """L10 控制台启动面必须 --no-open（260929 宿主实报「浏览器不停跳新窗口」的机械闸）。
+
+    事故：**宿主正在工作**时浏览器不停跳新窗口。根因族=**测试/工具起的 dsh 控制台没带
+    `--no-open`**⇒ `dsh web` 每次都去打开宿主机默认浏览器；套件一跑（每个控制台类场景一个台）
+    或一个**泄漏的旧台**被守护重启，就会持续弹窗。当场处置=清掉两个挂了 3 天的泄漏台
+    （`dsh --profile sandbar --patch .../t260905-stale-*/port_patch.yml` 等），弹窗即停。
+    判据：仓内所有 **dsh 进程启动点**（`spawn('dsh'…` / `spawnSync('dsh'…` / `spawn("dsh"…`）
+    必须在同一条调用里出现 `--no-open`；只跑 `--version` 的探针不在此限（不启控制台）。
+    豁免：`server/ui-check/.debug-chat.mjs`（构建产物副本）与任何带 `L10-allow:` 注记的行。
+    """
+    pat = re.compile(r"""(spawn|spawnSync|execFile|execFileSync)\s*\(\s*['"](?:/opt/homebrew/bin/)?dsh['"]\s*,\s*\[([^\]]*)\]""", re.S)
+    bad = []
+    scanned = 0
+    _skip = {"node_modules", ".git", ".lane", ".venv", "out", ".sandbar", "__pycache__"}
+    cands = []
+    for path in REPO.rglob("*"):
+        if any(part in _skip for part in path.parts):
+            continue
+        if path.suffix in (".mjs", ".ts", ".py") and path.is_file():
+            cands.append(path)
+    for path in cands:
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for m in pat.finditer(text):
+                args = m.group(2)
+                line = text[:m.start()].count("\n") + 1
+                ctx = text.splitlines()[line - 1] if line - 1 < len(text.splitlines()) else ""
+                if "L10-allow:" in args or "L10-allow:" in ctx:
+                    continue
+                if "--version" in args:
+                    continue                      # 版本探针：不启控制台
+                scanned += 1
+                if "--no-open" not in args:
+                    bad.append("%s:%d" % (path.relative_to(REPO), line))
+    if bad:
+        err("L10 控制台启动面缺 --no-open（%d 处；宿主浏览器会被弹窗）——%s"
+            "（dsh web 每次都开宿主默认浏览器；补 `--no-open`，或加 `L10-allow:<理由>` 注记）"
+            % (len(bad), "; ".join(bad[:6])))
+    else:
+        ok("L10 控制台启动面 --no-open 齐备（dsh 启动点 %d 处）" % scanned)
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -483,6 +528,7 @@ def main():
     lint_terminology()
     lint_tmpdir_hygiene()
     lint_ticket_start_identity()
+    lint_console_no_open()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0
