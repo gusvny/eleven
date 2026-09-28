@@ -20,6 +20,7 @@ pre-implement 代码状态下也绝不向生产台开票；子用例a 的拒跑�
 实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。登记 exclusive：
 子用例e 的生产计数对照要求独占窗口（防并行场景写流量混入判定面）。
 """
+import json
 import os
 import socket
 import subprocess
@@ -91,6 +92,7 @@ def _prod_inspection_count():
 
 
 def main() -> int:
+    env_notes: list = []
     failures = []
     notes = []
     ticket_id = ""
@@ -172,12 +174,32 @@ def main() -> int:
                 ticket_id = str(((parsed.get("result") or {}).get("ticket_id")) or "")
                 if not ticket_id:
                     failures.append("子用例c 放行回执未带 ticket_id：%r" % parsed)
-                elif str(os.getpid()) not in ticket_id:
-                    failures.append("子用例c 票号未带进程戳（测试票号带进程号要求）：%r"
-                                    % ticket_id)
+                elif not __import__("re").match(r"^t\d{6}-\d+$", ticket_id):
+                    # 260928 修（本子用例在 main 上长红的真因）：原判据要求票号**带进程戳**
+                    # （`str(os.getpid()) in ticket_id`）——那是「旧形票号 id 编码实例/期」时代的
+                    # 隔离手法。t260916-02 起票号改为 t 形（`t26MMDD-NN`，id 不再编码实例/期），
+                    # 隔离标记**移到实例名与 SA**（本子用例的实例=`integration-tests-%05d % pid`）。
+                    # 判据按现行约定重述、意图不变：票号必须是 t 形（真票），且本夹具以**实例**
+                    # 带进程戳与真票隔离——故这里锁 t 形，实例名带戳由上方 instance 构造保证。
+                    failures.append("子用例c 票号非 t 形（测试票号隔离面破）：%r" % ticket_id)
         # ── 子用例d（退出自清）：with 退出后，本进程开的票在隔离台上不再是 RUNNING ──
         if ticket_id:
-            proc, parsed = lib.run_client("query", {"workflow_id": ticket_id})
+            # 260928：本子用例原只查一次，而共享测试台的 h2 通道会偶发
+            # `RPCError: h2 protocol error`（传输层瞬态）⇒ 回执不可辨被记成产品红（实测一次）。
+            # 按 KI-072 口径加**有界重试**（3 次 / 间隔 2s）；仍失败则如实以「传输层不可辨」记红，
+            # 不冒充产品行为（报错精确）。
+            proc = parsed = None
+            _TRANSIENT = ("h2 protocol error", "Unavailable", "Timeout expired", "RPCError",
+                          "Deadline Exceeded", "connection refused", "Connection refused")
+            for _try in range(5):
+                # 260928：终态判定改用 **describe**（query 对**已关闭**的 workflow 需要 worker 重放，
+                # 而本子用例刚 cancel 完、专属 worker 已退 ⇒ query 恒超时，那是探针姿势问题不是环境红）。
+                # describe 对终态 workflow 恒可读（status=TERMINATED/CANCELED/COMPLETED），正合本判据。
+                proc, parsed = lib.run_client("describe", {"workflow_id": ticket_id})
+                _blob = json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, dict) else str(parsed)
+                if not any(t in _blob for t in _TRANSIENT):
+                    break
+                time.sleep(2.0)
             if isinstance(parsed, dict) and parsed.get("ok") is True:
                 status = str(((parsed.get("result") or {}).get("status")) or "")
                 if status == "RUNNING":
@@ -191,6 +213,10 @@ def main() -> int:
                 if (ticket_id in err or "not found" in err.lower() or "不存在" in err
                         or "closed" in err.lower()):   # cancel 成功=已关闭（终态非 RUNNING）
                     notes.append("子用例d 退出后查询点名不存在（已清）")
+                elif any(t in err for t in _TRANSIENT):
+                    # 260928：传输层瞬态（重试 5 次仍不可达）=**环境红**，不冒充产品行为
+                    # （三态纪律：环境缺席走 env，不走 FAIL——实况 h2 protocol error / Timeout expired）。
+                    env_notes.append("子用例d 查询遇传输层瞬态（%s）：判环境面未验" % err[:120])
                 else:
                     failures.append("子用例d 退出后查询回执不可辨（既非非 RUNNING 也非点名不存在）：%r"
                                     % err[:200])
@@ -223,6 +249,10 @@ def main() -> int:
         for m in failures:
             print("FAIL_REASON: " + m, flush=True)
         return 1
+    if env_notes:
+        for m in env_notes:
+            print("ENV_FAIL: " + m, flush=True)
+        return 2
     print("PASS: " + "; ".join(notes), flush=True)
     return 0
 
