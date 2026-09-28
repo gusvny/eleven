@@ -5349,10 +5349,11 @@ def parse_project_file(text, label):
             dirs:
               - /abs/path
 
-    Top-level tolerance (additive fields, t260916-21): paths: and admin_log: sections
-    pass through unparsed — old readers never break when a new field lands (the admin_log
-    block's semantics live in engine audit.py's config reader; this loader only tolerates
-    its presence).
+    Top-level tolerance (additive fields, t260916-21): paths:, admin_log: and
+    event_ledger: sections pass through unparsed — old readers never break when a new
+    field lands (the admin_log block's semantics live in engine audit.py's config reader;
+    the event_ledger block's live in engine event_ledger.py's reader; this loader only
+    tolerates their presence).
 
     The key whitelist check happens here; verifying that the key equals the directory
     name is the loader's job."""
@@ -5361,6 +5362,7 @@ def parse_project_file(text, label):
     saw_project = False
     in_paths = False   # ①d: the top-level paths: section passes through the loader unparsed (semantics / anchors are fail-closed in
     in_admin_log = False  # t260916-21: the top-level admin_log: section (admin.log 轮转面配置，additive 字段)
+    in_event_ledger = False  # t260928: the top-level event_ledger: section (事件账开关，additive 字段；读面在 engine event_ledger.py)
     schema = None      # shared.project_paths's ①d reader)
     for i, raw in enumerate(text.split('\n'), 1):  # the shape of fields inside project: belongs to the loader
         line = strip_registry_line(raw)
@@ -5374,14 +5376,21 @@ def parse_project_file(text, label):
             if raw[:1].isspace():
                 continue    # a line inside the admin_log section: pass through (audit.py 的配置读面 owns shape——engine 读「引擎所属项目」条目，宿主 260916 定稿)
             in_admin_log = False
+        if in_event_ledger:
+            if raw[:1].isspace():
+                continue    # a line inside the event_ledger section: pass through (event_ledger.py 的配置读面 owns shape——enabled/keep_days/max_mb)
+            in_event_ledger = False
         if line == 'paths:':
             in_paths = True
             continue
         if line == 'admin_log:':
             in_admin_log = True
             continue
+        if line == 'event_ledger:':
+            in_event_ledger = True
+            continue
         if not raw[:1].isspace() and line != 'project:' and not line.startswith('schema:') and i > 1:
-            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:/admin_log:' % (label, i))
+            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:/admin_log:/event_ledger:' % (label, i))
         if line == 'project:':
             if saw_project:
                 raise ValueError('%s:%d project: 重复' % (label, i))
