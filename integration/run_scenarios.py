@@ -1815,6 +1815,10 @@ SCENARIOS = [
      "事件台账写面×幂等×fail-open×rebuild 派生投影回归棒（t260928-13，灰盒 L2/L3，离线秒级零 docker，本票为该面首个注册场景故无 intent 级重复）：源码锁半（stdlib 恒跑）——event_ledger.py 在仓且 O_APPEND 单写/单行 <4KB/SANDBAR_EVENT_LEDGER_DIR 隔离/gap 记录/keep_days 14d 缺省/max_mb 声明/rebuild 入口在场、idem 键含 run_id 维度（同票新 run 的 seq=1 不误吞旧 run 键）、WRITE_FAILURES+stderr 双 LOUD 面、base.py TicketEventLedgerMixin+独立 patch id（老 RUNNING 重放零变化）、dev_lane 接线消费点在场、inspection 家族零引用（out-of-scope 负面锁）、client.py ledger_rebuild op 注册且 project 从快照取（防调用方改写他项目台账）；行为半（引擎 venv 真模块×tmp 真文件，temporalio 缺=ENV_FAIL exit 2）——一转移一行+声明字段集全在位+行 <4KB、at-least-once 重投同 idem 仍一行、冷进程（缓存空）文件扫描兜底仍一行、新 run_id 同票同 seq 出新行不误吞、四类畸形载荷（非 dict/缺键/超长 reason/非串 reason）不炸且行有界、只读目录写失败不 raise+计数器递增+gap 文件在盘、畸形 event_ledger: 声明 per-key 回落缺省不弃写、disabled 项目零文件、轮转后 active 永不丢、rebuild 对受损文件（缺行+重复 idem）恰补一次且回执点名 duplicate_idem。intent 分工：developer L1（server/engine/tests/test_event_ledger.py）守纯函数真值表，本条另锁接线面/负面锁/真文件行为半。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/sc_event_ledger_projection.py", "ro", "serial"),
 
+    ("t260928-13-ledger-live-judge-selftest",
+     "验收①活体判据器的自证（t260928-13，灰盒 L2，ro 离线秒级零 Temporal）：ledger_live_check.py 是「真票跑一遍、每次段状态迁移落恰一行台账」这条验收的唯一判据（该验收票内无法自证——账本缺省关闭、开关在机器级 project.yaml、代码合并后才到 worker）。本场景只跑它的 --selftest：合成夹具下八案定标——恰一行×3=绿；缺一行/多余行/重复 idem/字段与票面不符/收口票少行/gap 记录在盘/一行都没有=红。理由=判据器若在坏数据上仍报绿就是装饰（t260928-13 出厂件的 24 条自证式全绿正是这个病：实现与夹具同源于一个错误假设），故判据器自身必须有反证。intent 分工：写面行为真值归 t260928-13-event-ledger-projection（真模块×真文件），本器只判「真票落盘面与票面迁移的双射关系」，不重复其行为断言。真票 live 面（需真票号）不在套件内自动跑：人工单命令 server/engine/.venv/bin/python -B integration/t260928-13/ledger_live_check.py <ticket_id>",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260928-13/ledger_live_check.py --selftest", "ro"),
+
 ]
 
 CMD_TIMEOUT = 900
