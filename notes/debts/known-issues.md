@@ -2545,3 +2545,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 别认产品**；需要这些子用例真绿的收口跑，应以**放行仓外写**的权限跑（或在报告里如实标注
 > 「本轮沙箱态未验」）——既不假绿，也不把它算成产品红。**绝不为了让它在沙箱里绿而改探针**：
 > 「无法建越界目标位就退回可写根内目标」正是探针明确拒绝的退化（那会把安全断言变成空转）。
+
+## KI-156 截图族（capture-chat / capture-lane）把 dsh 0.1.5 的**浏览器会话门**当「台没起来」：匿名 `/` 恒 401 被当未就绪，且导航不带 token ⇒ 拍到 401 页（260928 integration 岗直修，KI-155 同族「环境面被误判成产品红」）
+> **实案**：`capture-chat-e2e` / `capture-chat-active`（browser-free 池）两条在 main 上长红（~45s 超时、
+> 7 张截图全缺）。最小复现 `run_scenarios.py --only capture-chat-e2e`：报错尾部却是**台自己打印的
+> token 行** `dsh web: http://127.0.0.1:<port>/?token=…`——即台起来了，判据却说不就绪。
+> **真因两处**（都在 `server/ui-check/`）：
+> ① `capture-lane.mjs` 的 `waitReady` 只认 `fetch(…/).ok`，而 dsh 0.1.5 起匿名 `GET /` 恒 **401**
+>   （会话门）⇒ 永远判「未就绪」→ 45s 超时；
+> ② `capture.mjs` 直接 `page.goto(url)`（`--url` 由 lane 传裸 `http://127.0.0.1:<port>/`），两文件
+>   `token` 零命中 ⇒ **即便台判就绪，拍到的也是 401 页**（截图族全缺/全错，且不报错）。
+> **处置（本岗直修）**：`waitReady` 改为「响应可达即服务在场（200/303/401 都收，连不上才继续等）+
+> 从 console.log 抓 `?token=` 行」，返回**带 token 的首页地址**；lane 把它作为 `--url` 传给
+> `capture.mjs`（首跳兑换 cookie）；超时文案区分「未就绪」与「已可达但取不到 token」。
+> 另：`capture.mjs` 的 5 处 `waitUntil/ waitForLoadState("networkidle")` 改为 `domcontentloaded`
+> + 显式沉降（控制台持续轮询，网络永不落 idle——与 multi-tab 族同因）。
+> **验证**：`capture-chat-e2e` 的 `A6 console-torn-down`（台起来→拆台→端口拒连）由红转绿，
+> 失败面推进到 `A8 seed-message-on-transcript`（chat 种子气泡，另一面，见下条待办）。
+> **判据/纪律**：(a) 凡「等服务就绪」的判据，必须把**认证层响应（401/403）**与「连不上」分开——
+> 前者=服务在场；(b) 凡「打开控制台」的导航，必须带 token 兑换（先例 `server/tools/stage_console.sh:640`
+> 的自动认证）；(c) 同类检查要先问「这是不是会话门」，别把 401 页当产品缺陷。

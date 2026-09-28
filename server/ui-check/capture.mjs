@@ -58,6 +58,16 @@ import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+/**
+ * 控制台导航（260928 修，KI-156）：原来一律 `waitUntil: "networkidle"`，而控制台是**持续轮询**
+ * 的台面——网络永不落 idle ⇒ 首屏导航在慢台/并发下超时（实案：capture 族台已就绪却拍到 401/
+ * 超时）。改为 domcontentloaded + 显式沉降等待；真实就绪判据交给各视图自己的 waitFor。
+ */
+async function gotoConsole(page, url, timeoutMs) {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await page.waitForTimeout(800);
+}
+
 function parseArgs(argv) {
   const args = { url: null, out: null, selftest: false, allowSeed: false, fixtures: null };
   for (let i = 0; i < argv.length; i++) {
@@ -374,7 +384,7 @@ async function seedSessions(page, url) {
     }));
     localStorage.setItem(key, JSON.stringify(entries));
   }, [LEDGER_KEY, project, ids.map((x) => [x.id, x.cwd])]);
-  await page.reload({ waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
+  await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
   return ids.map((x) => x.id);
 }
 
@@ -663,7 +673,8 @@ async function openView(page, title, waitSelector, waitMs = 3000) {
       throw new Error(`点击「${title}」后未出现 ${waitSelector}（视图未切换或数据为空）`);
     }
   }
-  await page.waitForLoadState("networkidle").catch(() => {});
+  // 持续轮询台面永不落 idle（KI-156）：settle 用 domcontentloaded，真实就绪由上方的元素 waitFor 承担
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
   return `[title="${title}"]`;
 }
 
@@ -827,7 +838,7 @@ async function main() {
         file: "console-lane-parallel.png", title: "泳道并行态（fixture T-FIX-B 双 ▶）",
         run: async (page) => {
           // 先回干净首页再进（上一个视图开着详情抽屉，防列表被抽屉遮挡）
-          await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs }).catch(() => {});
+          await gotoConsole(page, url, timeoutMs).catch(() => {});
           await openView(page, "工单列表");
           const row = page.locator("tr.wb-row", { hasText: "T-FIX-B" }).first();
           try {
@@ -973,7 +984,7 @@ async function main() {
     };
     // hero 落地页（必成视图——失败即整体失败）
     try {
-      await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
+      await gotoConsole(page, url, timeoutMs);
       // 首屏就绪：出厂 notice 弹出则先关（盖住后续所有视图，见 dismissNotice 注释）
       const dismissed = await dismissNotice(page);
       if (dismissed) console.log(`[capture]   ${dismissed}`);
@@ -992,7 +1003,7 @@ async function main() {
         // 弹层视图截完即复位（防污染后续视图）
         if (v.file === "console-new-ticket.png") {
           await page.keyboard.press("Escape").catch(() => {});
-          await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs }).catch(() => {});
+          await gotoConsole(page, url, timeoutMs).catch(() => {});
         }
       } catch (e) {
         // R6 口径（t260901-24）：fixture 视图失败走既有 best-effort 通路（整 run 退出码 1），
@@ -1008,7 +1019,8 @@ async function main() {
     // 与 default 字节一致=「回得去」的正向证据（一致只加分不拦路，避免把
     // 首页的良性动态渲染误判成失败——同帧闸假阳性的教训同源）。
     try {
-      await page.reload({ waitUntil: "networkidle", timeout: timeoutMs });
+      await page.reload({ waitUntil: "domcontentloaded", timeout: timeoutMs });
+      await page.waitForTimeout(800);
       await dismissNotice(page); // 全新 home 下 reload 后 notice 可能再弹
       await shoot("console-refresh.png");
       const { createHash } = await import("node:crypto");

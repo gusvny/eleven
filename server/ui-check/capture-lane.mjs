@@ -180,12 +180,36 @@ export async function buildTempProfile(tmpHome, laneWorkbenchDir) {
   return profDir;
 }
 
+/**
+ * 等台就绪，并返回**带 token 的首页地址**（260928 修，KI-156）。
+ *
+ * dsh 0.1.5 起 web 走**浏览器会话门**：匿名 `GET /` 恒 401（body=`dsh web authentication
+ * required; …`）。旧判据只认 `res.ok` ⇒ 台其实已经起来、却永远判「未就绪」→ 45s 超时 →
+ * 截图族全缺（实案：capture-chat-e2e / -active 两条场景红，日志尾部就是台自己打的 token 行）。
+ * 新判据：**响应可达即算服务在场**（200/303/401 都收，连接被拒不收）；同时从 console.log
+ * 抓 `dsh web: http://…/?token=…` 那行，把带 token 的地址当作导航入口（首次跳转兑换 cookie）。
+ * 先例：`server/tools/stage_console.sh:640` 的自动认证（从 console.log 提 token 传给断言库）。
+ */
+function authUrlFromLog(logPath) {
+  try {
+    const log = readFileSync(logPath, "utf8");
+    const m = log.match(/https?:\/\/[^\s"'<>]*[?&]token=[A-Za-z0-9._~-]+/g);
+    return m ? m[m.length - 1] : "";
+  } catch { return ""; }
+}
+
 async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
   const t0 = Date.now();
+  let reachable = false;
   while (Date.now() - t0 < timeoutMs) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/`);
-      if (res.ok) return;
+      // 401=会话门（服务已在场）；303/200=已放行。只有连不上才继续等。
+      if (res.ok || res.status === 401 || res.status === 303) reachable = true;
+      if (reachable) {
+        const auth = authUrlFromLog(logPath);
+        if (auth) return auth;
+      }
     } catch { /* 未就绪，继续轮询 */ }
     await new Promise(r => setTimeout(r, tickMs));
   }
@@ -193,10 +217,15 @@ async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
   try {
     tail = readFileSync(logPath, "utf8").slice(-1200);
   } catch { /* 日志读不到 */ }
-  throw new Error(`dsh 控制台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）。console.log 尾部：\n${tail || "（无日志）"}`);
+  throw new Error(reachable
+    ? `dsh 控制台 ${timeoutMs}ms 内**已可达但取不到带 token 首页地址**（127.0.0.1:${port}；`
+      + `会话门需 /?token= 兑换 cookie，拿不到就不该按匿名 401 页继续截图）。console.log 尾部：\n${tail || "（无日志）"}`
+    : `dsh 控制台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）。console.log 尾部：\n${tail || "（无日志）"}`);
 }
 
 export async function main() {
+  // 260928：带 token 的首页入口（会话门兑换用；见 waitReady 头注）
+  let navUrl = "";
   let args;
   try {
     args = parseArgs(process.argv.slice(2));
@@ -362,8 +391,11 @@ export async function main() {
         detached: true,
         stdio: ["ignore", logFd, logFd],
       });
-    await waitReady(port, bootTimeoutMs, path.join(tmpHome, "console.log"));
-    console.log(`[capture-lane] 隔离台就绪：127.0.0.1:${port}（DSH_HOME=${tmpHome}）`);
+    // 260928：waitReady 现在回**带 token 的首页地址**（dsh 0.1.5 会话门）——它既是
+    // 「台真就绪」的判据，也是下游 capture.mjs 的导航入口（见 capArgs 的 --url）。
+    navUrl = await waitReady(port, bootTimeoutMs, path.join(tmpHome, "console.log"));
+    console.log(`[capture-lane] 隔离台就绪：127.0.0.1:${port}（DSH_HOME=${tmpHome}；`
+      + `带 token 入口=${navUrl ? "已取到" : "缺"}）`);
     } else {
       console.log(`[capture-lane] docker 台模式：preset 物化/凭据拷贝不适用（DSH_HOME 在容器卷内）；` +
         `chat 种子如需用户 preset 请用 --boot-local 人工通路`);
@@ -378,7 +410,8 @@ export async function main() {
     const fixtureOptIn = process.env.SANDBAR_CAPTURE_FIXTURES === "1";
     if (fixtureOptIn) console.log("[capture-lane] 状态注入已 opt-in（SANDBAR_CAPTURE_FIXTURES=1）：本次截图含 fixture 注入态视图，证据以 fixture-manifest.json 为准");
     const capArgs = [path.join(HERE, "capture.mjs"),
-      "--url", `http://127.0.0.1:${port}/`, "--out", args.out, "--allow-seed"];
+      // 260928：优先用带 token 的地址（首次跳转兑换会话 cookie；否则 capture.mjs 拍到的是 401 页）
+      "--url", navUrl || `http://127.0.0.1:${port}/`, "--out", args.out, "--allow-seed"];
     // 旗必须带目录值：capture.mjs 把裸 --fixtures 的缺省值解析成 ""（falsy），
     // 静默不注入——台内显式传本目录 fixtures/ 包（t260901-24 真拍实测发现）。
     if (fixtureOptIn) capArgs.push("--fixtures", path.join(HERE, "fixtures"));
