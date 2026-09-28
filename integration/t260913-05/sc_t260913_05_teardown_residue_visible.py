@@ -278,8 +278,19 @@ def run_leg(py, tk):
         at_gate = wait_until(lambda: at_merge_gate(tk, TICKET), GATE_DEADLINE)
         if not at_gate:
             _m = show_meta(tk, TICKET, 4.0)
+            # 260928 加（报错必须精确，KI-153 教训）：T2 超时原来只说「无读面」，说不出
+            # **链停在哪一段**——复跑一次 12 分钟却拿不到可归因证据。改为把 worker 日志尾
+            # 与最后读面一起落进断言证据（日志本就在 tmp 里，只是从没被读出来过）。
+            _wt = ""
+            try:
+                _wl = tmp / ("worker-%s.log" % TICKET)
+                if _wl.is_file():
+                    _wt = _wl.read_text(encoding="utf-8", errors="replace")[-1200:]
+            except Exception as _e:  # noqa: BLE001
+                _wt = "（worker 日志不可读：%s）" % str(_e)[:80]
             check("T2 全链推进到 merge 人审挂起（stage=merge awaiting-human）", False,
-                  "show=%s" % show_json(_m)[:400] if isinstance(_m, dict) else "无读面")
+                  "show=%s ｜ worker 日志尾=%s"
+                  % ((show_json(_m)[:400] if isinstance(_m, dict) else "无读面"), _wt.replace("\n", " ⏎ ")))
             return
         check("T2 全链推进到 merge 人审挂起（stage=merge awaiting-human）", True)
         # ---- 注入：成员仓 repo_a 的泳道工作树 lock（真实 git 态，非产品改动）----
