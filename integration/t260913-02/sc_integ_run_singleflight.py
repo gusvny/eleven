@@ -102,6 +102,12 @@ def main():
 
         print("== 子用例2 有锁发车 → 环境红收口且点名持有者（零场景开跑）")
         # 持锁方=本进程（走同一条 _acquire_run_lock——锁档格式与生产同源）
+        # 260928 修（本场景在「调用方置了并发旋钮」时必红的真因）：`_acquire_run_lock` 会读
+        # `SANDBAR_INTEG_ALLOW_CONCURRENT`——旋钮在场即**不持锁**（风险由调用方承担，fd=None），
+        # 于是子用例2 的「并发发车被拒」全条失效（实测：本进程 fd=None、并发发车 rc=0）。
+        # 子用例1/2/4 判的是**缺省语义**，故本进程显式中立化该旋钮（子用例3 仍显式置位测放行面）；
+        # 与 t260915-12 处理 SANDBAR_UNDECLARED_POLICY、t260924-05 处理批次超时旋钮同款手法。
+        os.environ.pop("SANDBAR_INTEG_ALLOW_CONCURRENT", None)
         os.environ["SANDBAR_INTEG_RUN_LOCK_PATH"] = lock_path
         spec = importlib.util.spec_from_file_location("rs_lock", RUNNER)
         rs = importlib.util.module_from_spec(spec)
