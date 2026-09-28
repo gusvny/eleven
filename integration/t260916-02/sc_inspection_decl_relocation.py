@@ -136,11 +136,14 @@ def drifty_tree(label: str, token: str) -> RepoTree:
     且证据带本仓独特 token）。与 t260915-20 同款手法，token 本票自铸防跨票串锚。"""
     t = RepoTree(label)
     t.write_scenarios([("t-rl-guard", "落位迁移夹具守卫（%s）" % label, "true")])
-    t.write("integration/sc_rl_guard.mjs",
-            "// 守卫：落位迁移夹具锚（t260916-02 场景夹具，capture-chat 形态）\n"
-            "// 守卫对象生产方: %s\n"
-            "const label = await page.locator('.session-create').innerText();\n"
-            'assert(label.includes("%s"), "守卫锚缺失");\n' % (PRODUCER_REL, token))
+    _gl = ["// 守卫：落位迁移夹具锚（t260916-02 场景夹具，capture-chat 形态）",
+           "// 守卫对象生产方: %s" % PRODUCER_REL,
+           "const label = await page.locator('.session-create').innerText();",
+           'assert(label.includes("%s"), "守卫锚缺失");' % token]
+    assert _gl[GUARD_ANCHOR_LINE - 1] == guard_anchor_line(token), (
+        "锚行号与守卫文件内容漂移：第 %d 行=%r，而 guard_anchor_line=%r"
+        % (GUARD_ANCHOR_LINE, _gl[GUARD_ANCHOR_LINE - 1], guard_anchor_line(token)))
+    t.write("integration/sc_rl_guard.mjs", "\n".join(_gl) + "\n")
     t.write(PRODUCER_REL,
             'const section = "项目行";\n'
             'const label = section + "『+ 钮』";\n'
@@ -200,7 +203,13 @@ def row_of(rows, tid):
 # ---------------------------------------------------------------- 子用例
 
 GUARD_REL = "integration/sc_rl_guard.mjs"
-GUARD_ANCHOR_LINE = 5   # assert(label.includes("<token>"), "守卫锚缺失")
+# 260928 修（同族：t260915-20 的三处真因在本题复现两处）：
+# ① 锚行号原来写死 5，而下方夹具落盘的守卫文件只有 **4** 行（assert 锚在第 4 行）⇒ 复核层判
+#    「行号越界（合法 1~4）」→ 桩发现的引文复核恒 unverified（T4a2/T4b2 双红），且只表现为
+#    unverified、看不出原因。
+# ② 桩叙述字段原是中文（"%s 仓独特锚漂移"）⇒ 报告面语言闸（463a8f7）再判 unverified。
+# 修法：行号与文件内容同源 + 落盘前自检（见 reloc_tree 里的 assert）；叙述字段英文化。
+GUARD_ANCHOR_LINE = 4   # = 守卫文件里 assert 那行的 1-based 行号（夹具落盘前自检）
 
 
 def guard_anchor_line(token: str) -> str:
@@ -211,7 +220,7 @@ def guard_anchor_line(token: str) -> str:
 def write_stub_anchor(stub_path: str, token: str):
     """按仓写桩消息（A/B 时序隔离：inspect 在 spawn 时刻读桩文件）。token 空串=空发现桩。"""
     fs = [] if not token else [inspect_lib.finding(
-        "%s 仓独特锚漂移" % ("A" if token == TOKEN_A else "B"), GUARD_REL,
+        "%s-repo unique anchor drift" % ("A" if token == TOKEN_A else "B"), GUARD_REL,
         GUARD_ANCHOR_LINE, guard_anchor_line(token), severity="high", confidence=0.9)]
     with open(stub_path, "w", encoding="utf-8") as f:
         f.write(inspect_lib.fenced_message(fs))
