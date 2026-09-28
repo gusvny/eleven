@@ -448,7 +448,7 @@ def test_wiring_source_level_four_faces():
         src_main.index("_wedge_quarantine_once(") < \
         src_main.index("_result_gone_detail(")
     # 锚从**报错文案**（原为 "headless agent 退出"）改成**符号**（260929）：失败面文案已抽到
-    # 共享真源 _result_gone_detail（KI-150：要把「在场却读不出」与「未写」分开说），文案不再
+    # 共享真源 _result_gone_detail（KI-157：要把「在场却读不出」与「未写」分开说），文案不再
     # 出现在本函数体内。锁的意图不变——仍是「if rc 分支内：先 reap、再 wedge、最后才出终结
     # 诊断」，但不再把措辞绑进断言（绑文案的锁会随文案改进误红，这正是灰盒「理解深、绑定浅」）。
     for fn, label in ((aa._arbitrate_body, "arbitrate"),

@@ -2566,7 +2566,15 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 前者=服务在场；(b) 凡「打开控制台」的导航，必须带 token 兑换（先例 `server/tools/stage_console.sh:640`
 > 的自动认证）；(c) 同类检查要先问「这是不是会话门」，别把 401 页当产品缺陷。
 
-## KI-150 撕裂的结果文件把票卡进重试死结：引擎「读不出」× agent「文件在场=已完成」互锁，且报错谎称「未写」（260929 实案 t260929-04，integration 岗登记并已修误报半边；KI-079 同族「报错把诊断引向错误方向」）
+> **编号更正（260929）**：本组五条原先编作 KI-150…KI-154，与**并行登记**的另一 session（其
+> KI-150…KI-156：deadman payload / 控制台写通道身份 / 守卫扫描面含运行时物 / 手写桩链脱节 /
+> 生成器基线 / DSH 沙箱 / 截图族浏览器门）**撞号**。按「KI 编号全局唯一」纪律，本组整体改号为
+> **KI-157…KI-161**（原 150→157 撕裂结果文件、151→158 挂载引导缺口、152→159 桩形状、
+> 153→160 判据输入未接线、154→161 真链棒不隔离数据目录）。此前在票面/提交信息里出现过的旧号
+> 即指本组对应条目；**教训**：登记前必须读清单末尾的**当前最大号**（我这次只核了 148/149 就往下编）；
+> 并行会话都在登记时，编号分配需要一个单点或先到先得之外的机制。
+
+## KI-157 撕裂的结果文件把票卡进重试死结：引擎「读不出」× agent「文件在场=已完成」互锁，且报错谎称「未写」（260929 实案 t260929-04，integration 岗登记并已修误报半边；KI-079 同族「报错把诊断引向错误方向」）
 > **实案**：epic project-executor 票⑥ `t260929-04` 的 implement 段 blocked，块因文案=
 > `headless agent 退出（rc=0）但未写结果文件 …/.sandbar/stage_implement_gen1.json`。
 > **实证**：该文件**在盘**（9667 bytes），但 `json.loads` 报
@@ -2588,7 +2596,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > "import json;json.load(open('<file>'))"` 判**在场/可读**，再看文件 mtime 与 gen——
 > 「未写」与「在场却读不出」是两种完全不同的故障，处置也不同。
 
-## KI-151 新插件挂载的**引导缺口**：写集粒度 `server/profile/` 覆盖不到 `server/profile-headless/`，而约定要求两个 profile 各一条软链 ⇒ 插件票结构上无法自洽完成挂载，越界守卫反复挪走 headless 链（260929 实案 t260929-03：**6 次空转** + 一次误判打回）
+## KI-158 新插件挂载的**引导缺口**：写集粒度 `server/profile/` 覆盖不到 `server/profile-headless/`，而约定要求两个 profile 各一条软链 ⇒ 插件票结构上无法自洽完成挂载，越界守卫反复挪走 headless 链（260929 实案 t260929-03：**6 次空转** + 一次误判打回）
 > **机理**：`server/profile-headless/cordis.patch.yml` 是指向 `server/profile/cordis.patch.yml` 的软链 ⇒
 > **一处挂载必然同时落在两个 profile** ⇒ 按仓内约定每个插件要两条 `node_modules/<包名>` 软链（既有 6 个插件
 > 都是两条）。但工单写集的粒度是目录前缀：本票写集 = `server/plugins/` · `server/profile/` · `integration/`，
@@ -2609,7 +2617,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 每次都欠一笔、易漏）。**回归要求**：无论走哪条，`integration/t260928-28/sc_profile_plugin_mounts.py`
 > （两 profile 逐项断言）必须保持为**合并后立刻回绿**的判据——它这次正确指出了红点（PASS=56 FAIL=1）。
 
-## KI-152 「桩/夹具按实现者的假设造形」⇒ 真机必红而测试全绿：守望者看板读取器与真实入口回执形状不匹配（260929 实案 t260929-07 立项修复，integration 岗登记；KI-148「夹具与实现同源于一个错误假设」同族第三次）
+## KI-159 「桩/夹具按实现者的假设造形」⇒ 真机必红而测试全绿：守望者看板读取器与真实入口回执形状不匹配（260929 实案 t260929-07 立项修复，integration 岗登记；KI-148「夹具与实现同源于一个错误假设」同族第三次）
 > **实案**：守望者（t260928-28 已合并）的 `makeBoardReader`（`server/plugins/watchdog/node.ts`）spawn
 > `<引擎 venv python> client.py ticket-list {}`，随后按 `JSON.parse(stdout).result` 取票 —— 即假设回执是
 > `{ok, result:{tickets}}` **信封**；而该入口真实输出的是**裸结果** `{"count":219,"tickets":[…]}` ⇒
@@ -2617,7 +2625,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **后果**：`reconcile`（设计稿的「第一公民」）在生产里**永远拿不到看板行**，`reconcile.state` 永久
 > degraded/never_run，Overview 的「对账一致否」永久红/降级（诚实但没有功能）。
 > **为什么测试全绿**：所有场景的看板都是**桩**，而桩的形状来自实现者自己的假设——**桩无法与它同源的
-> 假设不一致**。这是本仓第三次同类教训（KI-148 夹具自证、KI-150 撕裂档判据、本条桩形状），
+> 假设不一致**。这是本仓第三次同类教训（KI-148 夹具自证、KI-157 撕裂档判据、本条桩形状），
 > 共同规律：**凡「测试里的输入形状」是手写的，就必须有一条锁去核对「真实入口的真实输出形状」**。
 > **本岗为何能发现**：epic 收尾后我用真数据空跑守望者（临时 `SANDBAR_WATCHDOG_DIR` 指向 /tmp 声明、
 > 账本与看板都读真的），一次就暴露——**真机跑一遍**是这类缺陷的唯一探针。
@@ -2625,13 +2633,13 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （跑真实入口输出喂解析器，Temporal 不可达=ENV_FAIL；桩测试明确不算证据）+ 反证。
 > **通用判据（写进纪律）**：凡集成用例的输入面是桩/夹具，必须至少有一条「真实入口形状」锁，否则该面等于没验。
 
-## KI-153 判据依赖的外部信号**未接线且未在交接里声明** ⇒ 判据空转：守望者的停摆判据与自锁判据在生产里没有输入（260929 实案 t260929-08 立项修复，integration 岗登记；KI-079「说明书与实际入口不符」+ KI-152「桩自证」同族）
+## KI-160 判据依赖的外部信号**未接线且未在交接里声明** ⇒ 判据空转：守望者的停摆判据与自锁判据在生产里没有输入（260929 实案 t260929-08 立项修复，integration 岗登记；KI-079「说明书与实际入口不符」+ KI-159「桩自证」同族）
 > **实案**：守望者插件（`server/plugins/watchdog/node.ts`）只注入 `io / boardReader / wakeIo / now`；
 > `sessionStat`（会话推进）与 `pendingProvider`（在办请求/自锁）**落到 core.ts 的缺省实现**：
 > `sessionStat → {advanced: null}`、`pendingProvider → {available:false, pending:null, reason:'…未接入…显式 unknown'}`
 > ⇒ 生产里：①`judgeExecutor` 拿不到 sessionProgress ⇒ 谓词恒落 `no_signal`，**「卡住 15 分钟就叫你」这条 epic 头牌判据永不触发**；
 > ②`detectSelfLock` 恒 `unknown` ⇒ 「它在等自己」（设计稿要求不等超时即报）永不触发；
-> ③`engineProbe=null` 时引擎存活由 `board.ok` 推得，而看板读取器缺陷（KI-152）使其恒 false ⇒
+> ③`engineProbe=null` 时引擎存活由 `board.ok` 推得，而看板读取器缺陷（KI-159）使其恒 false ⇒
 > **健康引擎会被报红线「引擎不可达」（假警）**，同屏 `online` 还是 null（面板显示「未知」而告警说「不可达」）。
 > **共同性质**：这三处都**不是**静默降级（运行时文案诚实：no_signal/unknown 都带原因），但**交接里没有逐信号声明**
 > 「真实源 / 显式 unknown / 未接线」——于是评审与门都以为判据在工作。**这就是本条要记的故障模式。**
@@ -2643,7 +2651,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **本岗反省**：我签 ③ 时读到「不静默降级」的运行时文案就放行了，没做「判据的输入面是否真接上」这一问——
 > 教训：评审判据类交付，必查**输入面**（谁在喂它），不能只看输出面是否诚实。
 
-## KI-154 真链棒跑真流程却不隔离**运行期数据目录** ⇒ 生产数据目录被测试产物污染（260929 实案：`server/ledger/` 出现 12 个 `pka*/pkb*` 幻影项目账本，integration 岗登记；KI-152 同族「测试面与真机面边界不清」）
+## KI-161 真链棒跑真流程却不隔离**运行期数据目录** ⇒ 生产数据目录被测试产物污染（260929 实案：`server/ledger/` 出现 12 个 `pka*/pkb*` 幻影项目账本，integration 岗登记；KI-159 同族「测试面与真机面边界不清」）
 > **实案**：`integration/t260915-20/sc_inspection_project_identity.py`（真 docker 台的双项目身份旅程）用
 > `KEY_A = "pka%d" % PID` / KEY_B 起**真巡检票**跑真流程（其 intent 就是「真链路」），但**没有隔离账本目录**
 > （全文件零命中 `SANDBAR_EVENT_LEDGER_DIR`）。事件账（Epic project-executor 票①，260928 才合并）落地后，
