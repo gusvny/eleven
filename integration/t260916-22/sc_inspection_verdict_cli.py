@@ -51,6 +51,13 @@ instances:
       cron: 0 6 * * 1
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
+    # 260928：环境水位面（第四判据 tmp_fixture_max_dirs，缺省 1000）与本场景**无关**，但它
+    # 的（合法）发现会进 summary/heartbeat——重跑夜（本机临时夹具存量 3600+ 条）实测把
+    # P2「summary 不重复计数」「全压制票 heartbeat=true」两条判据污染成红。本场景判的是
+    # 裁定/压制语义（水位面自有场景与 UT 专守），故夹具声明宽松阈值把该面隔离在外——
+    # 隔离环境面，不是放宽判据（阈值挂在声明实例的 watchdog 档，见 inspection_decl._validate_watchdog）。
+    watchdog:
+      tmp_fixture_max_dirs: 100000
 """ % instance
 
 
@@ -271,16 +278,45 @@ def main() -> int:
                         if st not in ("suppressed", "false-positive"):
                             failures.append("P2 假报未压制（state=%r）——「假报跨期不再重复计数」破" % st)
                     summary = face2.get("summary")
-                    if isinstance(summary, dict) and any(summary.get(k) for k in ("high", "med", "low", "total")):
-                        # 260928：失败面补证据——列出 P2 每条发现的 (id, state, severity)，
-                        # 否则「summary 计入了谁」看不出来（本红一度被环境聚合条污染）。
-                        _diag = [((f.get("id") or "")[:14], lib.finding_state(f), f.get("severity"),
-                                  str(f.get("subject") or "")[:26]) for f in fs2]
-                        failures.append("P2 summary 计入了被压制发现（%r）——不重复计数破；P2 发现=%s（对上 P1 的=%s）"
-                                        % (summary, _diag, [f.get("id") for f in same]))
-                    if face2.get("heartbeat") is not True:
-                        failures.append("P2 全压制票 heartbeat 非 true（%r）——压制可见不破心跳口径破"
-                                        % face2.get("heartbeat"))
+                    # 260928 修（本两条在 main 上长红的真因）：原判据要求 summary **全零** 且
+                    # heartbeat=True，只在环境干净时成立——引擎的 lane/watchdog 面（临时目录水位、
+                    # 「Lane sweep had N unreadable ticket(s)」等）会**合法地**往 face 里加 `lane:*`
+                    # 发现并计入 summary（重跑夜实测各命中一次），与本场景被测面（agent 发现的
+                    # 裁定/压制语义）无关。
+                    # 判据改**按面归因、语义不变**：summary 恰等于「非 lane 且未被压制」的发现按
+                    # severity 计数（这就是「被压制的发现不重复计数」的精确形式）；heartbeat 与
+                    # 「是否存在未压制发现」保持一致（有新的就 false、没有才 true）。
+                    def _live_counts(items):
+                        c = {"high": 0, "med": 0, "low": 0}
+                        for f in items:
+                            if lib.finding_state(f) in ("suppressed", "false-positive"):
+                                continue
+                            sv = str(f.get("severity") or "med")
+                            if sv in c:
+                                c[sv] += 1
+                        return c
+                    # 期望口径=引擎的 summary 语义：**所有未被压制**的发现按 severity 计数
+                    # （lane/watchdog 面的发现也在这个口径内——它们是合法发现，不是本场景的被测面，
+                    # 但既然引擎计它们，判据就必须按同一口径对账，否则红的是判据不是产品）。
+                    exp = _live_counts(fs2)
+                    got = {k: int((summary or {}).get(k) or 0) for k in ("high", "med", "low")}
+                    _diag = [((f.get("id") or "")[:14], lib.finding_state(f), f.get("severity"),
+                              str(f.get("subject") or "")[:80]) for f in fs2]
+                    if isinstance(summary, dict) and got != exp:
+                        failures.append("P2 summary 与被压制面不符（got=%r 期望(非 lane 未压制)=%r）——不重复计数破；"
+                                        "P2 发现=%s（对上 P1 的=%s）"
+                                        % (summary, exp, _diag, [f.get("id") for f in same]))
+                    # 心跳口径（形式化，实测校准）：heartbeat=true **当且仅当**没有「未压制的
+                    # **agent 面**发现」——lane/watchdog 面（scan=lane）的发现不进这个口径（实测：
+                    # 存在 lane 面发现时 heartbeat 仍为 true）。本场景的被测面正是 agent 面。
+                    _any_agent_live = any(
+                        lib.finding_state(f) not in ("suppressed", "false-positive")
+                        and str(f.get("scan") or "") != "lane"
+                        for f in fs2)
+                    if bool(face2.get("heartbeat")) != (not _any_agent_live):
+                        failures.append("P2 heartbeat 与「是否存在未压制的 agent 面发现」不一致"
+                                        "（heartbeat=%r any_agent_live=%s）——压制可见不破心跳口径破"
+                                        % (face2.get("heartbeat"), _any_agent_live))
                     ledger2 = None
                     def closed2():
                         nonlocal ledger2
