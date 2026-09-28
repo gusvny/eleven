@@ -2565,3 +2565,25 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **判据/纪律**：(a) 凡「等服务就绪」的判据，必须把**认证层响应（401/403）**与「连不上」分开——
 > 前者=服务在场；(b) 凡「打开控制台」的导航，必须带 token 兑换（先例 `server/tools/stage_console.sh:640`
 > 的自动认证）；(c) 同类检查要先问「这是不是会话门」，别把 401 页当产品缺陷。
+
+## KI-150 撕裂的结果文件把票卡进重试死结：引擎「读不出」× agent「文件在场=已完成」互锁，且报错谎称「未写」（260929 实案 t260929-04，integration 岗登记并已修误报半边；KI-079 同族「报错把诊断引向错误方向」）
+> **实案**：epic project-executor 票⑥ `t260929-04` 的 implement 段 blocked，块因文案=
+> `headless agent 退出（rc=0）但未写结果文件 …/.sandbar/stage_implement_gen1.json`。
+> **实证**：该文件**在盘**（9667 bytes），但 `json.loads` 报
+> `Expecting ',' delimiter: line 16 column 3`——`evidence` 长字符串写到一半就断，
+> 后面直接跟 `]`/`}`（**撕裂写**，与「撕裂会话档」「撕裂台账行」同族）。
+> **死结机理**：①引擎侧 `_read_result` 对坏档返回 None ⇒ 轮询永不就绪 ⇒ 进程退出即 raise
+> 「未写结果文件」（**与事实相反**，人按字面找不到任何东西）；②agent 侧的幂等判据是
+> 「结果文件在场=本段已完成」⇒ 它**拒绝重写**；③Temporal 重试同 gen 三次全败 ⇒ blocked。
+> **已修（`715b18f`，main 侧直修，带回归锁）**：新增 `_result_file_state`
+> （missing/unreadable/ok）与三处 raise 的**唯一文案真源** `_result_gone_detail`——
+> unreadable 明说「在场却读不出」并给处置（挪走留证后 retry_qc；不改名 agent 拒绝重写），
+> missing 保持旧文案；锁 7 例（含「撕裂档文案里不得出现『未写结果文件』」）。
+> **未处置（留宿主定）**：死结本身仍在——建议照既有撕裂**会话**的成例
+> （`_wedge_quarantine_once`：挪不删、成败落事件），在进程退出判定时对 unreadable 的
+> **结果文件**同样自动挪档，让下一轮干净重写（自愈）；该改在 agent 活动热路径上，
+> 需带 activity 级测试，故本次只把误报修掉。**解卡实测**：坏档改名留证 → `retry_qc` →
+> 票立刻回到 implement 重跑（本次即以此法解卡）。
+> **判据（可复用的排查口诀）**：凡「agent 退出但没写结果」，先 `python3 -c
+> "import json;json.load(open('<file>'))"` 判**在场/可读**，再看文件 mtime 与 gen——
+> 「未写」与「在场却读不出」是两种完全不同的故障，处置也不同。
