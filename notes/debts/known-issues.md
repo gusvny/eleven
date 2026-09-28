@@ -2505,3 +2505,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > (c) 判据不得依赖执行器注入的环境旋钮的**缺省态**（要么显式中立化，要么断言旋钮在场与不在场两态）；
 > (d) 直调产品函数的子用例必须先满足该函数的**模式/前置闸**（如 runtime_mode），否则是空转不是失败；
 > (e) 出现「断言恒 0 / 症状自相矛盾」时，第一动作是**往探针/桩里落盘**确认它到底有没有被调用。
+>
+> **260928 追加第四例（抽取式桩命名空间同族）**：`auto-rework-trace`（baselines 的 pure half
+> 把 dev_lane.py 的常量/方法**抽源码在桩命名空间 exec**）连中两枪——① `ROLE_REPORT_ENGLISH_CLAUSE`
+> 已单源化到 `shared.py`（t260925-21）而桩 ns 只注入了 `integration_discipline` ⇒ `NameError`；
+> ② t260928-13 把事件台账发射接进 `_mark`（`base.TicketEventLedgerMixin._ledger_enqueue`）⇒
+> 抽出的方法体引用 `self._ledger_enqueue` 而 `FakeLane` 没有 ⇒ `AttributeError`。两处都修成
+> 「用真源 + 最小桩」，并顺手加一条「桩确实被调用」的正向锁。**判据**：凡「抽源码 exec」式夹具，
+> 引擎新增单源常量/混入方法都会以 `NameError`/`AttributeError` 的形式打断整个 pure half——
+> 报错面只印 stderr 首行（Traceback 头）时看不见真因，**复现要手工把抽取脚本喂给 python3 跑一遍**。

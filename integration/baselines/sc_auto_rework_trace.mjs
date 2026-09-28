@@ -105,6 +105,11 @@ _engine_dir = str(pathlib.Path(sys.argv[1]).resolve().parent)
 if _engine_dir not in sys.path:
     sys.path.insert(0, _engine_dir)
 import integration_discipline
+# 260928 修：核心常量 ROLE_REPORT_ENGLISH_CLAUSE 已单源化到 shared.py（t260925-21 角色报告
+# 英文纪律，dev_lane 顶部 import），而抽取出的源码片段会引用它 ⇒ 桩命名空间必须提供真值，
+# 否则 exec 直接 NameError（本场景 pure half 在 main 上长红的真因：Traceback → 场景 FAIL）。
+# 与 integration_discipline 同口径：用**真模块**，判据不脱离真源。
+import shared
 
 p_pass = 0
 p_fail = 0
@@ -139,6 +144,7 @@ ok(m_roles is not None, 'PHASE_MAIN_ROLES 常量可从源码抽出')
 ns = {
     'Dict': Dict, 'List': List, 'Any': Any, 'Optional': Optional,
     'integration_discipline': integration_discipline,
+    'ROLE_REPORT_ENGLISH_CLAUSE': shared.ROLE_REPORT_ENGLISH_CLAUSE,
     'workflow': SimpleNamespace(
         now=lambda: datetime(2026, 9, 1, tzinfo=timezone.utc),
         logger=SimpleNamespace(info=lambda *a, **k: None)),
@@ -158,7 +164,17 @@ for name in ('_now_epoch', '_now_iso', '_log', '_mark', '_touch', '_auto_rework'
     code = extract_method(name)
     ok(code is not None, '方法 %s 可从源码抽出' % name)
     methods.append(code)
-exec('class FakeLane:\n' + ''.join(methods), ns)
+# 260928（同批第二处）：t260928-13 把事件台账发射接进 _mark/_touch（base.TicketEventLedgerMixin
+# 的 _ledger_enqueue）⇒ 抽出的方法体引用它，FakeLane 上不存在即 AttributeError。
+# 绑浅：台账不是本场景判据（判据=打回轨迹），给一个最小桩并**顺手锁住「接线确实发生了」**
+# （真混入体与台账语义归 developer UT / t260928-13/-20 场景，本文件不重复）。
+EXEC_LEDGER_STUB = (
+    '    def _ledger_enqueue(self, *a, **k):\n'
+    '        self.__class__._ledger_calls.append((a, k))\n'
+    '    _ledger_calls = []\n')
+exec('class FakeLane:\n' + ''.join(methods) + EXEC_LEDGER_STUB, ns)
+ok(hasattr(ns['FakeLane'], '_ledger_enqueue'),
+   'FakeLane 提供事件台账发射桩（t260928-13 起 _mark/_touch 会调 _ledger_enqueue）')
 
 def fresh(stage):
     lane = ns['FakeLane']()
