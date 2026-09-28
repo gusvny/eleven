@@ -21,7 +21,7 @@
      解析期 raise 点名——不在注入处静默纠偏，也不给闸喂畸形身份。
   4. undeclared 兜底收口对照：无注入+无旋钮（缺省 refuse）时同一次调用被拒且
      why 点名 env 名——「注入了就放行、没注入就拒且说清缺什么」的对称面。
-  5. console 红线观察面：server/ 根 admin.py 与 server/dsh/ 插件目录零改动锚——
+  5. console 红线观察面：server/ 根 admin.py 与 server/plugins/ 插件目录零改动锚——
      grep caller 注入落点只在引擎侧（agent_runtime/agent_activities），console
      侧文件不在本票触碰面（红线：console 零重启零占用；本场景为静态只读锁）。
 
@@ -67,7 +67,10 @@ def src_of(rel):
 ACT = src_of("server/engine/agent_activities.py")
 ADMIN = src_of("server/admin.py") if (ROOT / "server/admin.py").exists() else ""
 DSH_PLUGIN_HITS = 0
-dsh_dir = ROOT / "server" / "dsh"
+# 260928 修：旧布局的插件目录已随 M2 搬迁消失（现布局=server/plugins/）⇒ 原观察面
+# `is_dir()=False` 恒零命中
+# （**假绿**：号称扫过插件目录其实一个文件没扫）。改指当前插件目录 server/plugins/。
+dsh_dir = ROOT / "server" / "plugins"
 if dsh_dir.is_dir():
     for p in dsh_dir.rglob("*.js"):
         try:
@@ -134,7 +137,7 @@ section("5 console 红线观察面（零改动锚，只读）")
 ok(shared.CALLER_PROJECT_ENV not in ADMIN if ADMIN else True,
    "server/admin.py 无本票注入落点（console 侧接线归后续插件票，红线零接触)")
 ok(DSH_PLUGIN_HITS == 0,
-   "server/dsh/ 插件目录零本票 env 注入命中（3099 运行面零触碰）")
+   "server/plugins/ 插件目录零本票 env 注入命中（3099 运行面零触碰）")
 
 print("\n== PASS=%d FAIL=%d ==" % (PASS, FAIL))
 sys.exit(0 if FAIL == 0 else 1)

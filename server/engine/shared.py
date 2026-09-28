@@ -672,7 +672,10 @@ def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
 # 共享基座前缀（爆炸半径判据，宁宽勿窄——命中=禁定点恒全跑）：引擎内核/worker/
 # 闸工具/执行器与共享库/道声明。只有票面局部改动（票目录、app/ 等）才允许定点。
 _SHARED_BASE_PREFIXES = (
-    "server/engine/", "server/tools/", "server/dsh/", "server/admin.py",
+    # 260928 修（sc_engine_layout 守卫实测真残留）：本表里原有一条 M2 搬迁前的旧插件目录
+    # 前缀，该目录已不存在——留着=**插件目录改动被误判 localized**（允许定点复跑），而
+    # 插件族（workbench/watchdog/…）正是共享基座：改为当前布局的 "server/plugins/"。
+    "server/engine/", "server/tools/", "server/plugins/", "server/admin.py",
     "integration/run_scenarios.py", "integration/stage_docker.py",
     "integration/lint_tests.py", "integration/scenario_ledger.py",
     "integration/lib_", "integration/with_stage.sh", "integration/tests/",

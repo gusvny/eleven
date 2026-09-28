@@ -100,7 +100,7 @@ ACTIVITY_CALLS = []
 
 async def _execute_activity(fn, arg, **kwargs):
     # 真活动体直调：把 flush 的载荷经真 append_event 落到 tmp 账本目录
-    # （enabled 闸由 skip 显式满足——闸行为归 t260928-13 意图，不在此重锁）。
+    # （enabled 闸由 skip_enabled_gate 参数显式满足——闸行为归 t260928-13 意图，不在此重锁）。
     ACTIVITY_CALLS.append(arg)
     return el.append_event(arg, ledger_dir=LEDGER, skip_enabled_gate=True)
 

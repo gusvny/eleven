@@ -10,17 +10,21 @@
  *     with name=raw line, exit=-1;
  *   - the SCENARIOS summary line is a REFERENCE line: the engine never reads it, so a
  *     summary inconsistent with PASS/FAIL lines must not change the verdict;
- *   - a summary-only stdout (no PASS/FAIL lines) is the documented zero-scenario face;
+ *   - a summary-only stdout (no PASS/FAIL lines, no spec rows, no INTEG_SUMMARY ran>0)
+ *     is the KI-116 explicit-red face (t260924-05: the old "zero-scenario green" escape
+ *     hatch is gone — an idle/broken executor must never fake a green);
  *   - the err shape ({lane, green:false, err}) must NOT leak content-shape keys
- *     (red_count / checks) — consumers branch on err, not on absent fields.
+ *     (red_count / checks / ran / scenarios / …) — consumers branch on err, not on
+ *     absent fields. Additive non-content keys (metering/warning face) are allowed.
  *
  * High-level steps (hermetic: per-case tmp fixture + admin.py call lane=integ):
  *   A. well-formed mixed protocol -> per-scenario parse, tail capture, 4-space rule
  *      (2-space lines are not tail), exit codes carried;
  *   B. malformed FAIL line -> fail counted, name=raw line, exit=-1;
  *   C. summary contradicts lines -> verdict follows the LINES (green stays green);
- *   D. summary-only stdout -> zero-scenario green (ran=0);
- *   E. executor absent -> err shape, exact keys {lane, green, err}, no shape leak.
+ *   D. legacy summary-only stdout -> explicit zero-signal red (never a fake green);
+ *   D2.INTEG_SUMMARY(ran>0) alone -> the guard does not misfire (not red);
+ *   E. executor absent -> err shape, required keys {lane, green, err}, no content-shape leak.
  *
  * Coverage note (anti-duplication): the approved plan's L2 additions cover the integ
  * happy path + three states + zero-scenario + shape key sets; this baseline owns the
@@ -145,8 +149,17 @@ try {
     const res = fx.call()
     if (res.ok) {
       const r = res.result
-      ok(r.green === false && typeof r.err === 'string' && r.err.includes('零场景信号'),
-        'D1 无文本行/规范行/INTEG_SUMMARY(ran>0) → 零场景信号显式红（不冒充绿）')
+      // 260928 修（main 红直修）：原判据钉中文短语「零场景信号」，而 260927/260930 的执行器
+      // 收口改造把 verify_lane 回执文案换成英文（'zero scenario signal (exit=0 with no
+      // PASS/FAIL/ENV_FAIL rows, …)'）——**意图不变、文案漂移**，属「契约不变的实现重构打破
+      // 集成测试=测试写错」一型。判据改绑浅（不钉可翻译文案）：显式红（green===false）+ 具名
+      // err（非空串）+ 不冒充内容面（不带 ran 计数）。KI-116 逃逸口复发（静默绿）时 green 会是
+      // true，本判据照样咬得住。
+      const zeroSignalRed = r.green === false && typeof r.err === 'string'
+        && r.err.length > 0 && (r.ran === undefined || r.ran === 0)
+      ok(zeroSignalRed,
+        'D1 无文本行/规范行/INTEG_SUMMARY(ran>0) → 零场景信号显式红（不冒充绿）：'
+        + 'green=' + r.green + ' err=' + JSON.stringify(String(r.err).slice(0, 80)))
     } else ok(false, 'D0 调用失败: ' + (res.stderr || ''))
   }
   await fx.cleanup()
@@ -156,13 +169,20 @@ try {
   // arbitrate 打回令修正点）；绿红仍由闸用例判定面/重算复核决定，此处只锁「不红」。
   section('D2. 仅 INTEG_SUMMARY(ran>0)：信号在场，零信号守卫不触发')
   fx = await makeFixture()
-  fx.write("print('INTEG_SUMMARY ' + JSON.stringify({ran: 2, pass: 2, fail: 0, wall_s: 1, concurrency: 1}))\n")
+  // 260928 修（main 红直修，本条此前是**假绿**）：原夹具把 JS 语句写进了 .py——
+  //   print('INTEG_SUMMARY ' + JSON.stringify({ran: 2, …}))
+  // 该文件被 python3 执行即 SyntaxError、exit=1，于是回执走的是「执行器没产出任何结果
+  // （exit=1）」分支，err 里当然不含被断言的中文短语 ⇒ 断言恒真、而**被测的
+  // INTEG_SUMMARY(ran>0) 信号路径根本没被走到**（守卫误杀面一次未验）。今按真 Python
+  // 重造夹具，并同步把判据改绑浅（err 面缺席=守卫未误杀 + 绿，不钉文案）。
+  fx.write("import json\nprint('INTEG_SUMMARY ' + json.dumps({'ran': 2, 'pass': 2, 'fail': 0, 'wall_s': 1, 'concurrency': 1}))\n")
   {
     const res = fx.call()
     if (res.ok) {
       const r = res.result
-      ok(!(r.err && r.err.includes('零场景信号')),
-        'D2 汇总行 ran>0 在场 → 不判零场景信号（守卫不误杀协议形态）')
+      ok(r.green === true && !r.err,
+        'D2 汇总行 ran>0 在场 → 不判零场景信号（守卫不误杀协议形态）：'
+        + 'green=' + r.green + ' err=' + JSON.stringify(String(r.err)))
     } else ok(false, 'D2-0 调用失败: ' + (res.stderr || ''))
   }
   await fx.cleanup()
@@ -176,8 +196,20 @@ try {
     if (res.ok) {
       const r = res.result
       ok(r.green === false && typeof r.err === 'string' && r.err.length > 0, 'E1 rc≠0 且零结果行 → err 态（非红非绿）')
-      ok(JSON.stringify(Object.keys(r).sort()) === JSON.stringify(['err', 'green', 'lane']),
-        'E2 err 态键集恰为 {lane,green,err}：无 red_count/checks 泄漏（消费方按 err 分流）')
+      // 260928 修（main 红直修）：原判据钉「键集**恰为** {lane,green,err}」，而 260927/260930
+      // 的收口改造给 err 态回执加了**合法非内容附加键**（warnings / supply_used_sec /
+      // runner_used_sec 这类计量与告警面）——原意图（err 态不泄漏**内容形状**键、消费方按 err
+      // 分流）没变，是「断言钉死了实现形状」一型。判据改绑浅且不放宽：三个契约键必在场 +
+      // 内容形状键（red_count/checks/ran/pass/fail/env_fail/scenarios/cases/detail_red/
+      // summary）**一律不许在场**——code 道的 red_count/checks 泄漏进来照样咬红。
+      const keys = Object.keys(r).sort()
+      const required = ['err', 'green', 'lane']
+      const contentShape = ['red_count', 'checks', 'ran', 'pass', 'fail', 'env_fail',
+        'scenarios', 'cases', 'detail_red', 'summary']
+      const leaked = contentShape.filter(k => keys.includes(k))
+      ok(required.every(k => keys.includes(k)) && leaked.length === 0,
+        'E2 err 态不泄漏 content 形状键：必在场 {lane,green,err}、零内容键（消费方按 err 分流）'
+        + '；实得键集=[' + keys.join(',') + '] 泄漏=[' + leaked.join(',') + ']')
     } else ok(false, 'E0 调用失败: ' + (res.stderr || ''))
   }
   await fx.cleanup()

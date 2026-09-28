@@ -87,6 +87,20 @@ ALLOW = [
     re.compile(r"apply_skip_pools"),                                     # 引擎载荷参数名（verify_lane integ 道池排除开关，
                                         # t260913-03 交付、t260924-05 回归棒消费）——排除面开关名，
                                         # 非套件跳过状态值（与 skip_settle=/skipped_budget 同类）。
+    # ---- 260928 新增一类（同族清账）：三态契约的**英文负向表述** ----
+    # t260928 的票面英文化把新场景头注写成 "Three-exit contract: PASS=0 / FAIL=1 /
+    # ENV_FAIL=2 (no SKIP)." —— 与既有「不写 SKIP」「闸内无 SKIP」是同一件事（声明没有
+    # 第四态），只是换了语言。只锚**否定式**形态（no/without/never + SKIP、SKIP-free）：
+    # 裸词 SKIP 与任何 SKIP 状态值照旧红，T1b 白名单自证同组判据照旧咬得住。
+    re.compile(r"\b(?:no|without|never)\s+SKIP\b|SKIP-free", re.I),
+    # ---- 260928 第二批同族清账（撞字三类，各只锚具体形态，裸词照旧红）----
+    re.compile(r"\bmust\s+skip\b|\bmust not masquerade\b", re.I),        # 英文**行为描述**：新场景头注写
+                                        # "a project-scope class … must skip + announce LOUD"（描述产品行为，
+                                        # 与既有 skip_when_src_absent 同类，非套件状态值）
+    re.compile(r"skip_enabled_gate"),                                   # 产品 API 参数名（事件账 enabled 闸的显式满足开关，
+                                        # t260928-13/-20 交付面）——与 apply_skip_pools/skip_settle= 同类
+    re.compile(r"/SKIP/\.test\("),                                      # 文档内容断言里的正则字面量（baselines 守「契约文档
+                                        # 提到缺失态 SKIP」——读文档文本，非套件产出状态值）
 ]
 
 hits = []

@@ -131,8 +131,7 @@ ok("announce" in src or "_announce" in src,
 print("\n== B 行为半（引擎 venv 真模块 × 假注册表 × tmp 真文件）")
 probe = Path(__file__).resolve().parent / "probe_engine_rows.py"
 py = ROOT / "server/engine/.venv/bin/python"
-if not py.exists():
-    py = ROOT / "server/dsh/temporal-poc/.venv/bin/python"
+# 260928 清残留：删 M2 搬迁前旧布局回落分支（路径已不存在）。
 if py.exists():
     import os
     env_probe = dict(os.environ)

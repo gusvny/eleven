@@ -36,9 +36,17 @@ from lib_inspection import (  # noqa: E402,F401  共享 harness 单点复用
 # ---------------------------------------------------------------- 发现条目与围栏消息伪造器
 
 
-def finding(subject, path, line, quote, *, severity="med", why="语义审查判断",
-            suggestion="无需修，仅记录", confidence=0.9, **extra):
-    """按设计稿 §4.2 schema 造一条发现（id 不带——机械铸，agent 报的 id 被忽略）。"""
+def finding(subject, path, line, quote, *, severity="med",
+            why="semantic review judgement", suggestion="no fix needed; record only",
+            confidence=0.9, **extra):
+    """按设计稿 §4.2 schema 造一条发现（id 不带——机械铸，agent 报的 id 被忽略）。
+
+    260928 修（main 红直修）：叙述字段缺省值由中文改英文。引擎 463a8f7 起装「报告面
+    语言闸」（宿主令「report 用英语写」）——agent 自写的 subject/why/suggestion 含 CJK
+    即判 unverified 并追加一条聚合发现（inspection_inspect.mark_non_english）。夹具缺省
+    值若仍是中文，任何用本工厂造的**合法**发现都会被语言闸降级，把「证据复核语义」这类
+    与语言无关的断言全部拖红（真引文不再 verified、8 进 9 出、verified 门的预算面塌）。
+    故缺省值改英文=造**契约内**的 agent 输出；quote/path 是数据面不译，保持原样。"""
     d = {
         "scan": "agent",
         "severity": severity,

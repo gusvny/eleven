@@ -125,8 +125,8 @@ def check(cond, label, detail=""):
 
 
 def engine_py() -> str:
-    for cand in (ENGINE / ".venv" / "bin" / "python",
-                 REPO / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python"):
+    # 260928 清残留：删 M2 搬迁前旧布局回落候选（路径已不存在）。
+    for cand in (ENGINE / ".venv" / "bin" / "python",):
         if cand.exists():
             return str(cand)
     return sys.executable

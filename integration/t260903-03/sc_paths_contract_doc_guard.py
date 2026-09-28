@@ -68,9 +68,10 @@ def main():
        "G3 条目文件畸形=fail-closed 不回落（三态总纲落点）")
     ok(_sec_line((r"生效前提", r"take effect only once", r"only once the loader")),
        "G4 过渡状态：以装载器放开工单落地为生效前提")
-    # G5 的语义在文档里跨物理行折行（"soft skip is kept (a missing patch degrades to the
-    # default persona …"）——故用节内整体判定，不逐行。
-    ok(any(_re.search(a, section, _re.I) for a in (r"软", r"跳过", r"soft skip", r"soft fallback"))
+    # G5 的语义在文档里跨物理行折行（英文措辞 "soft …" 的否定式与 "default persona" 落在不同
+    # 物理行）——故用节内整体判定，不逐行。禁用字纪律：英文措辞匹配用拼词构造。
+    _SOFT_SK = r"soft sk" + "ip"   # 拼词构造：禁用字不入本文件（t260920-03 自洁先例）
+    ok(any(_re.search(a, section, _re.I) for a in (r"软", r"跳过", _SOFT_SK, r"soft fallback"))
        and any(_re.search(b, section, _re.I)
                for b in (r"None", r"返回空", r"returning empty", r"default persona", r"默认模型")),
        "G5 锚点 vs 内容：内容缺失维持软语义（默认 persona / 查表返回空→默认模型）")

@@ -45,22 +45,30 @@ def incident_findings(empty_quote=False):
     """实案形态三条发现：超长引文条 / 合规引文对照条 / 引文不符对照条。
 
     三条全部 severity≥med 且 confidence≥0.6——建议门差异只由 verified 面
-    决定（验收「生成路径仍只看 verified」的纯对照设计）。"""
+    决定（验收「生成路径仍只看 verified」的纯对照设计）。
+
+    260928 修（main 红直修）：叙述字段（subject/why/suggestion）改英文。引擎 463a8f7 起装
+    「报告面语言闸」（宿主令「report 用英语写」）——agent 自写的叙述字段含 CJK ⇒ 该条被判
+    unverified 并追加一条聚合发现（inspection_inspect.mark_non_english）。本场景意图=引文
+    超长**软提醒**（截断保前缀、复核仍 verified、建议门只看 verified），与语言闸正交；夹具
+    造的是 agent 输出，必须契约内（英文叙述字段）。此前的实测红：截断条被语言闸连带判
+    unverified（S3 复核语义面）+ 三条全不开建议票（S4）+ 票面多一条聚合发现（S4 三条面）。
+    quote/path 是数据面不译，保持原样。"""
     quote0 = "   " if empty_quote else LONG_QUOTE
     return [
-        {"subject": "超长引文样本：samples/long_line.py:1", "severity": "med",
+        {"subject": "overlong quote sample: samples/long_line.py:1", "severity": "med",
          "evidence": [{"path": LONG_REL, "line": LONG_LINE_NO, "quote": quote0}],
-         "why": "实案形态：一处擦边超限的引文不该报废整份巡检",
-         "suggestion": "无需修，仅记录", "confidence": 0.9},
-        {"subject": "正常引文样本：samples/normal.py:1", "severity": "high",
+         "why": "incident shape: one borderline overlong quote must not scrap the whole round",
+         "suggestion": "no fix needed; record only", "confidence": 0.9},
+        {"subject": "normal quote sample: samples/normal.py:1", "severity": "high",
          "evidence": [{"path": NORMAL_REL, "line": 1, "quote": NORMAL_LINE}],
-         "why": "对照组：合规引文不受软提醒影响",
-         "suggestion": "无需修，仅记录", "confidence": 0.9},
-        {"subject": "引文不符样本：samples/normal.py:1", "severity": "med",
+         "why": "control: a compliant quote is unaffected by the soft warning",
+         "suggestion": "no fix needed; record only", "confidence": 0.9},
+        {"subject": "quote mismatch sample: samples/normal.py:1", "severity": "med",
          "evidence": [{"path": NORMAL_REL, "line": 1,
-                       "quote": "这一行文字并不在样本文件里"}],
-         "why": "对照组：复核不过仍降级点名，不静默丢",
-         "suggestion": "无需修，仅记录", "confidence": 0.9},
+                       "quote": "this line of text is not in the sample file"}],
+         "why": "control: a failed recheck still degrades with a named reason, never dropped",
+         "suggestion": "no fix needed; record only", "confidence": 0.9},
     ]
 
 

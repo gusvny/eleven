@@ -133,8 +133,7 @@ ok('_ledger_scope = "engine"' in body_d or '_ledger_scope="engine"' in body_d,
 print("\n== B 行为半（引擎 venv 真模块 × tmp 真文件）")
 probe = Path(__file__).resolve().parent / "probe_inspection_wiring.py"
 py = ROOT / "server/engine/.venv/bin/python"
-if not py.exists():
-    py = ROOT / "server/dsh/temporal-poc/.venv/bin/python"
+# 260928 清残留：删 M2 搬迁前旧布局回落分支（路径已不存在）。
 if py.exists():
     env_probe = dict(__import__("os").environ)
     env_probe["PYTHONPYCACHEPREFIX"] = str(ROOT / "out/pycache")

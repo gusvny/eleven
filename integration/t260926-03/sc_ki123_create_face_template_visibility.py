@@ -68,8 +68,8 @@ def section(title):
 
 def engine_py() -> str | None:
     """引擎 venv 解释器（temporalio 面依赖）；无 venv 回落链 = 环境面。"""
-    for p in (ENGINE / ".venv" / "bin" / "python",
-              REPO / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python"):
+    # 260928 清残留：删 M2 搬迁前旧布局回落候选（路径已不存在；见 sc_engine_layout 守卫）。
+    for p in (ENGINE / ".venv" / "bin" / "python",):
         if p.exists():
             return str(p)
     return None

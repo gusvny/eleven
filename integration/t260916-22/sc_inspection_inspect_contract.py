@@ -21,6 +21,17 @@ intent 分工（防 intent 级重复）：
 三态纪律：环境缺供（venv 缺 temporalio 且无桩可装——本条全离线，理论无 ENV_FAIL 子用例）
 照三态口径如实点名；实现未落地=FAIL（TDD 信号），arbitrate/merge 期必须绿。
 跑法：python3 -B integration/t260916-22/sc_inspection_inspect_contract.py
+
+260928 修（main 红直修，本棒此前在 main 上长红 13 条）：本棒的**夹具叙述字段**
+（subject/why/suggestion）由中文改英文。引擎 463a8f7 起装「报告面语言闸」（宿主令
+「report 用英语写」）：agent 自写的 subject/why/suggestion 含 CJK ⇒ 该条判 unverified
+并追加一条聚合发现（inspection_inspect.mark_non_english，票面标红不静默）。本棒意图是
+**证据机械复核语义**（真引文 verified / 坏证据 unverified+逐项点名）与语言闸正交，但夹具
+造的是「agent 输出」，必须契约内：中文叙述字段会让整份发现被判 unverified——复核实得
+8 进 9 出、真引文不 verified、id 面混入聚合条目（`agent:<12hex>`）、verified 门的预算面
+全塌（实得 0 条 verified）。**断言零放宽**：真引文/空白容差仍须 verified、坏证据仍须
+unverified 且逐项 reason、8 进 8 出、id 8 位且条内唯一、summary 只计新发现、recurring
+不占 40 预算——逐条原样保留；quote/path 是数据面不译。
 """
 import json
 import os
@@ -137,7 +148,8 @@ def main() -> int:
             ok(True, "畸形桩（%s）→ 活动层拒绝（异常点名：%s）" % (label, str(e)[:80]))
 
     print("== 子用例2 合法桩：ok=True 且 base_dir/route 进 meta（可见面） ==")
-    good_f = lib.finding("守卫锚漂移（inspect 证据锚夹具）", lib.GUARD_REL, 3,
+    # 260928 修：叙述字段一律英文（语言闸口径，见文件头）；quote/path 是数据面不译。
+    good_f = lib.finding("guard anchor drift (inspect evidence fixture)", lib.GUARD_REL, 3,
                          tree.line_text(lib.GUARD_REL, 3), severity="high", confidence=0.9)
     res = call_inspect(lib.fenced_message([good_f]))
     ok(isinstance(res, dict) and res.get("ok") is True,
@@ -150,15 +162,20 @@ def main() -> int:
     g2 = tree.line_text(lib.GUARD_REL, 2)
     p2 = tree.line_text(lib.PRODUCER_REL, 2)
     cases = [
-        ("真引文", lib.finding("A 真引文", lib.GUARD_REL, 2, g2), "verified"),
-        ("空白差异引文（容差应过）", lib.finding("B 空白容差", lib.GUARD_REL, 2,
-                                               g2.replace("const", "const   ") + "  "), "verified"),
-        ("文件不存在", lib.finding("C 坏路径", "server/definitely_absent.py", 1, "x"), "unverified"),
-        ("../ 越界路径", lib.finding("D 越界", "../outside_secret.txt", 1, "x"), "unverified"),
-        ("绝对路径", lib.finding("E 绝对路径", "/etc/hosts", 1, "x"), "unverified"),
-        ("行号超行数", lib.finding("F 坏行号", lib.GUARD_REL, 9999, "x"), "unverified"),
-        ("行号 0", lib.finding("G 零行号", lib.GUARD_REL, 0, "x"), "unverified"),
-        ("引文不符", lib.finding("H 引文不符", lib.PRODUCER_REL, 2, "这句引文根本不在文件里"), "unverified"),
+        ("real quote", lib.finding("real quote", lib.GUARD_REL, 2, g2), "verified"),
+        ("whitespace-diff quote (tolerance must pass)",
+         lib.finding("whitespace-diff quote (tolerance must pass)", lib.GUARD_REL, 2,
+                     g2.replace("const", "const   ") + "  "), "verified"),
+        ("missing file", lib.finding("missing file", "server/definitely_absent.py", 1, "x"),
+         "unverified"),
+        ("../ escape path", lib.finding("../ escape path", "../outside_secret.txt", 1, "x"),
+         "unverified"),
+        ("absolute path", lib.finding("absolute path", "/etc/hosts", 1, "x"), "unverified"),
+        ("line beyond EOF", lib.finding("line beyond EOF", lib.GUARD_REL, 9999, "x"),
+         "unverified"),
+        ("line zero", lib.finding("line zero", lib.GUARD_REL, 0, "x"), "unverified"),
+        ("quote mismatch", lib.finding("quote mismatch", lib.PRODUCER_REL, 2,
+                                       "this quote is nowhere in the file"), "unverified"),
     ]
     payload = full(lib.fenced_message([c[1] for c in cases]))
     out_findings = lib.payload_findings(payload)
@@ -169,11 +186,12 @@ def main() -> int:
         subjects = {}
         for e in out_findings:
             subjects[str(e.get("subject") or "")] = e
-        for label, _f, want in cases:
-            e = next((v for k, v in subjects.items() if k.startswith(label[:2] + " ")), None)
+        for idx, (label, _f, want) in enumerate(cases):
+            # 260928 修：subject 与 label 同名（英文），按名精确取回；退化为按序对齐
+            # （len 相等已断言）。旧按 label 前两字前缀匹配的取法在中文 label 下恒不命中。
+            e = subjects.get(label)
             if e is None:
-                # subject 可能被机械侧改写；退化为按序对齐（保持 len 一致已断言）
-                e = out_findings[cases.index((label, _f, want))] if len(out_findings) == len(cases) else None
+                e = out_findings[idx] if len(out_findings) == len(cases) else None
             got = lib.finding_state(e) if e else None
             ok(got == want, "%s → %s（实得 %r）" % (label, want, got))
             if want == "unverified" and e is not None:
@@ -189,9 +207,10 @@ def main() -> int:
         fs = lib.payload_findings(payload) or []
         return [str(f.get("id") or "") for f in fs if isinstance(f, dict)]
     ok(all(len(i) == 8 for i in ids_of(payload)) and len(set(ids_of(payload))) == len(ids_of(payload)),
-       "id=8 位且条内唯一（实得 %r）" % ids_of(payload)[:3])
+       "id=8 位且条内唯一（实得 %r；若混入 `agent:<hash>` 形状=语言闸聚合条目被追加，"
+       "先查夹具 subject/why/suggestion 是否英文）" % ids_of(payload)[:3])
     r2 = full(lib.fenced_message([good_f]))
-    r3 = full(lib.fenced_message([dict(good_f, subject=good_f["subject"] + "（措辞变了）")]))
+    r3 = full(lib.fenced_message([dict(good_f, subject=good_f["subject"] + " (reworded)")]))
     i1 = ids_of(r2)
     i2 = ids_of(r3)
     ok(bool(mint_id(good_f)) and mint_id(good_f) == mint_id(dict(good_f)),
@@ -199,7 +218,8 @@ def main() -> int:
     ok(i1 and i2 and i1[0] != i2[0], "内容变 id 变（跨期去重键不粘连）")
 
     print("== 子用例5 跨期去重与假报压制：recurring/压制点名，summary 只计新发现 ==")
-    dup_f = lib.finding("复现缺陷（跨期对照）", lib.PRODUCER_REL, 2, p2, severity="high")
+    dup_f = lib.finding("recurring defect (cross-period)", lib.PRODUCER_REL, 2, p2,
+                        severity="high")
     dup_id = str(mint_id(dup_f) or "")
     ok(bool(dup_id), "dup 发现取得机械 id（%r）" % dup_id)
     lib.seed_prev_ledger(ledger_dir, inst, "20260901", [
@@ -233,7 +253,7 @@ def main() -> int:
         ok("heartbeat" in json.dumps(pay, ensure_ascii=False), "心跳面在回执在场（键名容差）")
 
     print("== 子用例6 预算：41 条截 40 + truncated 记账；recurring/压制不占预算 ==")
-    many = [lib.finding("预算填充 %03d 号发现" % i, lib.GUARD_REL, 2, g2,
+    many = [lib.finding("budget filler finding %03d" % i, lib.GUARD_REL, 2, g2,
                         severity="high" if i % 3 == 0 else ("med" if i % 3 == 1 else "low"),
                         confidence=round(0.95 - i * 0.001, 3))
             for i in range(41)]
@@ -268,10 +288,10 @@ def main() -> int:
 
     print("== 子用例8 建议门数据：verified && conf≥0.6 && severity≥med 才进建议 ==")
     mix = [
-        lib.finding("建议合格 high", lib.GUARD_REL, 2, g2, severity="high", confidence=0.9),
-        lib.finding("低置信 med 不建议", lib.GUARD_REL, 2, g2, severity="med", confidence=0.3),
-        lib.finding("low 不建议", lib.GUARD_REL, 2, g2, severity="low", confidence=0.9),
-        lib.finding("坏证据 high 不建议", "server/absent_x.py", 1, "x", severity="high", confidence=0.9),
+        lib.finding("suggestion-eligible high", lib.GUARD_REL, 2, g2, severity="high", confidence=0.9),
+        lib.finding("low-confidence med (no ticket)", lib.GUARD_REL, 2, g2, severity="med", confidence=0.3),
+        lib.finding("low severity (no ticket)", lib.GUARD_REL, 2, g2, severity="low", confidence=0.9),
+        lib.finding("bad-evidence high (no ticket)", "server/absent_x.py", 1, "x", severity="high", confidence=0.9),
     ]
     pay = full(lib.fenced_message(mix))
     fixes = lib.payload_fixes(pay)
@@ -279,8 +299,8 @@ def main() -> int:
         ok(True, "建议面由 workflow 侧 build_ticket_face 合成（本条不越层断言，journey 覆盖）")
     else:
         subs = json.dumps(fixes, ensure_ascii=False)
-        ok("建议合格" in subs and "低置信" not in subs and "low 不建议" not in subs
-           and "坏证据" not in subs,
+        ok("suggestion-eligible" in subs and "low-confidence" not in subs
+           and "low severity" not in subs and "bad-evidence" not in subs,
            "建议门只收 verified&&conf≥0.6&&severity≥med：%r" % subs[:120])
 
     print("== 子用例9 上期台账坏面：prev_ledger_error 点名 + 降级不崩 ==")

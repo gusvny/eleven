@@ -161,10 +161,13 @@ def main() -> int:
                "S4 报告计数位落在票面 scan_meta（报告形状看守：键必在场）")
             titles = [str(s.get("title", ""))
                       for s in face.get("suggested_fix_tickets") or []]
-            ok(any("超长" in t for t in titles),
+            # 260928 修：夹具叙述字段改英文（语言闸口径，见 lib_overlong.incident_findings
+            # 注），按名取的判据随之一并改绑英文条名——判据语义（截断条照常开票、
+            # 正常条开票、不符条不开票）逐字未变。
+            ok(any("overlong" in t for t in titles),
                "S4 截断但复核过 → 照常进建议面（生成路径只看 verified）")
-            ok(any("正常" in t for t in titles)
-               and not any("不符" in t for t in titles),
+            ok(any("normal" in t for t in titles)
+               and not any("mismatch" in t for t in titles),
                "S4 建议门对照：verified 进、unverified 不进")
             ok(len(face.get("findings") or []) == 3,
                "S4 三条发现全在票面（不静默丢，点名随行）")

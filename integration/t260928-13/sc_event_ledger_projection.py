@@ -160,8 +160,9 @@ ok("ledger_rebuild" in dl_src or "ledger_rebuild" in client_src,
 # Part B — behavior half (engine venv, real files, real module entry points)
 # ===========================================================================
 def find_engine_python() -> str | None:
-    for cand in ("server/engine/.venv/bin/python",
-                 "server/dsh/temporal-poc/.venv/bin/python"):
+    # 260928 清残留：删掉 M2 搬迁前的旧布局 venv 回落候选——
+    # 该路径全仓已不存在（旧泳道也已迁走），留着只会让「旧布局字面量零残留」守卫长红。
+    for cand in ("server/engine/.venv/bin/python",):
         p = ROOT / cand
         if p.exists():
             return str(p)

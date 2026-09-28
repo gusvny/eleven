@@ -58,7 +58,13 @@ const KNOWN_RESIDUE = new Set([
 //   同口径排除；不排除即「执行器自己写的报告把自己判成新病灶」的自污染假红，
 //   t260914-01 arbitrate gen2 实测：out/integration-report-260914-102037.json 即此形态）。
 //   扫描面意图不变=**源码/文档域**零旧仓字面量；out/ 内不放源码（脚本/源码在 server/、integration/）。
-const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv', 'out'])
+// data/（260928 补，与 out/ 同口径）：引擎**运行时数据域**——`server/engine/data/` 下是
+// worker PID/meta、`temporal.db`（近 400MB 的 Temporal 本地库）、`admin.log` 等进程物，
+// 全部 gitignored 且零跟踪文件（`git ls-files | grep 'data/'` = 0，可复核）。它被 walk 到后
+// `readFileSync(utf8)` 照样把二进制读进来：库里逐字存着历史绝对路径 ⇒ 判成「新病灶」假红，
+// 顺带每轮白读 400MB（260928 实测红：`新病灶 1 文件：server/engine/data/temporal.db`）。
+// 扫描面意图不变=**源码/文档域**零旧仓字面量。
+const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv', 'out', 'data'])
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
