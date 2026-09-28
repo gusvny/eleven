@@ -133,10 +133,17 @@ ok("EVENT_LEDGER" in base_src.upper() or "EVENT_LEDGER" in base_src,
 ok("TicketEventLedgerMixin" in dl_src, "dev_lane 接入 mixin（用户可感知：转移产生台账行）")
 ok("_ledger_flush" in dl_src or "_ledger_enqueue" in dl_src,
    "接线不止挂名：enqueue/flush 消费点在 dev_lane")
+# t260928-20 更新：第二族（inspection）接线已随票②落地——「零引用」负面锁的
+# 所有权移交 integration/t260928-20 两个场景（接线纪律/rebuild 面/豁免面）。
+# 本条改为锁接线必经混入：inspection 家族若接账面，消费点必须是 mixin 入队面
+# （绝不允许 workflow 代码直调 append_event 另起第二接线模式——旁路 idem/
+# patched 机制的写法在此即红）。
 inspection_files = sorted((ROOT / "server/engine").glob("inspection_*.py"))
 insp_hits = [p.name for p in inspection_files
-             if "EventLedger" in p.read_text("utf-8")]
-ok(not insp_hits, "inspection 家族零接线（out-of-scope 负面锁）：%s" % (insp_hits or "无引用"))
+             if re.search(r"\bappend_event\b", p.read_text("utf-8"))]
+ok(not insp_hits,
+   "inspection 家族无直调 append_event 的第二接线模式（必经混入；零接线负面锁"
+   "已随 t260928-20 移交）：%s" % (insp_hits or "无"))
 
 section("A5 rebuild op 面（client.py，project 从快照取不从调用方参数取）")
 ok("ledger_rebuild" in client_src, "client.py 注册 ledger_rebuild op（写集内 op/CLI 面）")

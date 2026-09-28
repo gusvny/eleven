@@ -81,6 +81,10 @@ SCAN_TO = timedelta(minutes=15)
 # test_t260913_01_integ_budget_pair.py 与 test_t260924_05_ki116_budget.py 机械锁定。
 with workflow.unsafe.imports_passed_through():
     from agent_activities import INTEG_GUARD_SEC
+# t260928-20：事件账本发射 mixin（机制全在 base.TicketEventLedgerMixin；本文件只接线
+# ——入队点=各 _enter 单一写点，冲刷点=长等待/人门/收口/_blocked 前的异步边界）。
+with workflow.unsafe.imports_passed_through():
+    from base import TicketEventLedgerMixin
 # 260927 套件段三段预算（宿主实测校准；单一算出点全在本区块，锁测试=budget 文件）：
 #
 #  ① 供给上限 INTEG_SUPPLY_TO_SEC（integration.supply：daemon-probe + `stage_docker
@@ -999,7 +1003,7 @@ def _inspection_topology() -> Dict[str, Any]:
 
 
 @workflow.defn
-class InspectionPeriodicWorkflow:
+class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
     """One inspection-period ticket. State machine: scan → report → close (human gate) →
     a terminal closed state.
     Business refusals do not raise: a scan/posting failure → a blocked terminal ticket
@@ -1038,9 +1042,20 @@ class InspectionPeriodicWorkflow:
     def _enter(self, stage: str, state: str = "running", reason: str = "") -> None:
         self.stage = stage
         self.stage_state = state
-        self.timeline.append({
+        entry = {
             "at": workflow.now().isoformat(timespec="seconds"),
-            "stage": stage, "state": state, "reason": reason})
+            "stage": stage, "state": state, "reason": reason}
+        self.timeline.append(entry)
+        # t260928-20：事件账本入队（唯一入队点，机制在 TicketEventLedgerMixin；
+        # patched 门内，老实例重放零变化；flush 由各异步边界/收口点承担）。
+        # gen 维度：本族 timeline 条目无 gen（无轮次概念）——账面行按 mixin 纪律
+        # 记文档化常量 0（诚实：0=本族无代数维度，绝不伪造代数）。
+        self._ledger_enqueue(entry)
+
+    def _ledger_project(self) -> str:
+        """本票项目身份（t260915-20 链路）：SA ProjectKey 同源的 payload 真源；
+        mixin 缺省读 meta——本族无 meta，身份在 _input.project_key。"""
+        return str(getattr(getattr(self, "_input", None), "project_key", "") or "")
 
     @workflow.signal
     def sign(self, sig: Signature) -> None:
@@ -1136,6 +1151,12 @@ class InspectionPeriodicWorkflow:
             # 回落，绝不猜拓扑）。
             **({"topology": _inspection_topology()}
                if getattr(self, "_patched", False) else {}),
+            # t260928-20（review C1）：事件账本迁移标记（[{i,seq,run}]；timeline 条目
+            # 本身零标记，票面形状逐字不变）——终态取消/超时硬杀下 pending 未冲即亡时
+            # 取消面权威留痕可由 op=ledger_rebuild 从 timeline+marks 补齐（dev_lane
+            # 同款增量键；门内 additive=老实例快照零新键，重放安全）。
+            **({"ledger_marks": [dict(m) for m in (self._ledger_marks or [])]}
+               if getattr(self, "_patched", False) else {}),
         }
 
     @workflow.run
@@ -1224,6 +1245,8 @@ class InspectionPeriodicWorkflow:
                 # 「admin.log ENOENT」那种把真因引偏的迟到回执，t260927-01 实况）。
                 self._enter("suite", "running",
                             "Suite stage hard timeout: %s" % (suite_section.get("error") or "")[:160])
+                # t260928-20：长等待前冲账（等拆除宽限窗口期间账面应可见本迁移）
+                await self._ledger_flush()
                 await workflow.sleep(SUITE_TIMEOUT_TEARDOWN_GRACE)
                 self._enter("suite", "running",
                             "Suite stage hard timeout: waiting %ds before tearing the lane down (never races a "
@@ -1343,6 +1366,8 @@ class InspectionPeriodicWorkflow:
         self._enter("close", "awaiting-human", "Human review of the finding list: sign(gate=%s) approve=close / reject=kill the ticket" % CLOSE_GATE_ID)
         # 人门一落就再落一次账：列表可读面（离线读者）要能看见「本期已跑完、正等人审」，
         # 否则它只在 report 段那一版（stage 序列停在 report，读者以为流程没走到门）。
+        # t260928-20：人门前冲账（等待窗内 watchdog/panel 可见 awaiting-human 迁移）。
+        await self._ledger_flush()
         if self._patched:      # 新命令：老在途票不注入（replay 安全）
             await self._write_ledger()
         await workflow.wait_condition(lambda: self._close_sig is not None)
@@ -1371,6 +1396,8 @@ class InspectionPeriodicWorkflow:
         self._enter("close", "done", "Inspection ticket closed (decision=%s, findings high=%s/med=%s/low=%s)" % (
             self.decision, self.face.get("summary", {}).get("high", 0),
             self.face.get("summary", {}).get("med", 0), self.face.get("summary", {}).get("low", 0)))
+        # t260928-20：收口 return 前冲账（终态迁移必须离开 pending，防硬杀丢行）
+        await self._ledger_flush()
         return self.snapshot()
 
     # ---- t260913-02：泳道段与终态收口（全部走活动；workflow 体零 IO 零墙钟）----
@@ -1719,6 +1746,9 @@ class InspectionPeriodicWorkflow:
         # write_ledger=False（t260917-02 重定向失败路径）：本壳名下不落账——它的台账名
         # （实例,期）与承接票相同，落了会把真票账盖成 blocked 面）；该期可见性交给
         # deadman 漏跑绊线（与 deadman 跳火点名成链）。
+        # t260928-20：终态前冲账（blocked 是可见终态，迁移不得留在 pending 里等硬杀）。
+        # 老实例 pending 恒空=零活动命令（重放零变化）。
+        await self._ledger_flush()
         if self._patched and write_ledger:
             await self._write_ledger()
         return self.snapshot()
@@ -1767,10 +1797,18 @@ WATCHER_MAX_ITERATIONS = 500   # continue_as_new 节流（默认 60s 轮询≈�
 
 
 @workflow.defn
-class InspectionTicketCountWatcherWorkflow:
+class InspectionTicketCountWatcherWorkflow(TicketEventLedgerMixin):
     """常驻轮询调度器：计数 → 纯决策（decide）→ 开期票（票号幂等=一票一期去重兜底）。
     取消/失败终态随 workflow 自身收敛（Temporal 持久化）；死亡+复活=schedule-up
-    （inspection_trigger.py）——本票新引入的可死机制的 KI-049 对答。"""
+    （inspection_trigger.py）——本票新引入的可死机制的 KI-049 对答。
+
+    t260928-20：引擎级账面发射器（`_ledger_scope="engine"`——调度器不是票，行落
+    引擎所属项目账本，活动侧解析 engine-owner）。入队点=本类 _enter（迁移本就稀疏：
+    启动 / 计数失败 / 触发），冲刷点=每轮 sleep 前 + continue_as_new 前。换代
+    （continue_as_new）天然换 run_id——账面 seq/run_id 每代独立，idem 不会跨代串键
+    （运维侧读到「多代各一行 poll running」是预期形态，不是重复）。"""
+
+    _ledger_scope = "engine"
 
     def __init__(self) -> None:
         self.last_count: int = -1
@@ -1783,8 +1821,11 @@ class InspectionTicketCountWatcherWorkflow:
         self._last_event: Dict[str, Any] = {}
 
     def _enter(self, stage: str, state: str, reason: str) -> None:
-        self._last_event = {"at": workflow.now().isoformat(timespec="seconds"),
-                            "stage": stage, "state": state, "reason": reason}
+        at = workflow.now().isoformat(timespec="seconds")
+        self._last_event = {"at": at, "stage": stage, "state": state, "reason": reason}
+        # t260928-20：引擎行入队（_ledger_note 便桥走 mixin 同一入队点；patched 门内
+        # ——老 watcher 实例重放零变化）
+        self._ledger_note(stage, state, reason)
 
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
@@ -1876,6 +1917,9 @@ class InspectionTicketCountWatcherWorkflow:
                     baseline=self._baseline,
                     cron_anchor=anchor.isoformat(timespec="seconds"),
                     triggered_total=self._triggered_total))
+            # t260928-20：换代/轮询前冲账（continue_as_new 后 pending 即亡——
+            # 本代迁移必须在换代命令前投出；轮询 sleep 前同理，账面延迟有界）
+            await self._ledger_flush()
             await workflow.sleep(timedelta(seconds=inp.poll_seconds))
 
 
@@ -1914,9 +1958,15 @@ def spawn_workflow_id(instance_id: str) -> str:
 
 
 @workflow.defn
-class InspectionPeriodicSpawnWorkflow:
+class InspectionPeriodicSpawnWorkflow(TicketEventLedgerMixin):
     """每期一票的起票薄壳（调度器，非票）。体=单 activity 调用；activity 失败 →
-    ApplicationError(non_retryable) → schedule recent_actions 可见（绝不静默吞火）。"""
+    ApplicationError(non_retryable) → schedule recent_actions 可见（绝不静默吞火）。
+
+    t260928-20：引擎级账面发射器（`_ledger_scope="engine"`；行落引擎所属项目账本，
+    活动侧解析 engine-owner）。短命壳（一进一出）：start 一行 + 结果一行，return 前
+    一次冲账即尽（seq 只记真实迁移，不凑数）。"""
+
+    _ledger_scope = "engine"
 
     @workflow.query
     def snapshot(self) -> Dict[str, Any]:
@@ -1928,6 +1978,9 @@ class InspectionPeriodicSpawnWorkflow:
         if not inp.instance_id:
             from temporalio.exceptions import ApplicationError
             raise ApplicationError("spawn 输入非法：instance 空", non_retryable=True)
+        self._ledger_note("spawn", "running",
+                          "Spawning period ticket (instance %s, face=%s, project=%s)"
+                          % (inp.instance_id, inp.face, inp.project_key or ""))
         res: Dict[str, Any] = await workflow.execute_activity(
             "spawn_inspection_period",
             args=[{"instance_id": inp.instance_id, "face": inp.face,
@@ -1935,10 +1988,20 @@ class InspectionPeriodicSpawnWorkflow:
                    "decl_path": inp.decl_path}],
             start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
         if not (res or {}).get("ok"):
+            self._ledger_note("spawn", "failed",
+                              "Spawn failed: %s" % str((res or {}).get("error") or "起票失败（无事由）")[:200])
+            await self._ledger_flush()
             from temporalio.exceptions import ApplicationError
             raise ApplicationError(str((res or {}).get("error") or "起票失败（无事由）"),
                                    non_retryable=True)
-        return (res or {}).get("result") or {}
+        result: Dict[str, Any] = (res or {}).get("result") or {}
+        self._ledger_note("spawn", "done",
+                          "Period ticket spawned (instance %s, ticket=%s, deduped=%s)"
+                          % (inp.instance_id, result.get("ticket") or "?",
+                             bool(result.get("deduped"))))
+        # t260928-20：return 前冲账（短命壳收口点=唯一冲刷点）
+        await self._ledger_flush()
+        return result
 
 
 # ========================================================================================
@@ -2084,7 +2147,7 @@ class InspectionProduceInput:
 
 
 @workflow.defn
-class InspectionProduceWorkflow:
+class InspectionProduceWorkflow(TicketEventLedgerMixin):
     """One produce-mode inspection period: lane → produce → self-check → report with
     diff → human gate (approve=merge into main / reject=discard). Business refusals
     become a blocked terminal ticket (visible, queryable), never a fake green."""
@@ -2107,9 +2170,17 @@ class InspectionProduceWorkflow:
     def _enter(self, stage: str, state: str = "running", reason: str = "") -> None:
         self.stage = stage
         self.stage_state = state
-        self.timeline.append({
+        entry = {
             "at": workflow.now().isoformat(timespec="seconds"),
-            "stage": stage, "state": state, "reason": reason})
+            "stage": stage, "state": state, "reason": reason}
+        self.timeline.append(entry)
+        # t260928-20：事件账本入队（唯一入队点；gen=文档化常量 0，同 report 链注）
+        self._ledger_enqueue(entry)
+
+    def _ledger_project(self) -> str:
+        """本票项目身份：_input.project_key（t260915-20 链路，mixin 缺省读 meta——
+        本族无 meta）。"""
+        return str(getattr(getattr(self, "_input", None), "project_key", "") or "")
 
     # ---- 阻塞三态判定（纯读，approve 闸与场景共用口径） ----
     def _approve_blockers(self, sc: Dict[str, Any]) -> List[str]:
@@ -2187,6 +2258,10 @@ class InspectionProduceWorkflow:
             "face": self.face,
             "timeline": self.timeline,
             "gate_error": self._gate_err,
+            # t260928-20（review C1）：事件账本迁移标记（门内 additive 增量键；同
+            # report 链 snapshot 注——取消/硬杀面的账面缺口由 ledger_rebuild 补齐）。
+            **({"ledger_marks": [dict(m) for m in (self._ledger_marks or [])]}
+               if getattr(self, "_patched", False) else {}),
         }
 
     # ---- run ----
@@ -2337,6 +2412,8 @@ class InspectionProduceWorkflow:
                              % PRODUCE_AUTHORIZE_GATE_ID
             self._enter("close", "awaiting-human", gate_note)
             await self._write_ledger()
+            # t260928-20：人门前冲账（等待窗内 watchdog/panel 可见 awaiting-human）
+            await self._ledger_flush()
             await workflow.wait_condition(
                 lambda: self._close_sig is not None or bool(self._rerun_paths))
             if self._close_sig is not None:
@@ -2412,6 +2489,8 @@ class InspectionProduceWorkflow:
         self._enter("close", "done",
                     "Produce-mode inspection closed (decision=%s%s)" % (
                         self.decision, "; merge red handed to a human" if merge_err else ""))
+        # t260928-20：收口 return 前冲账（终态迁移必须离开 pending）
+        await self._ledger_flush()
         return self.snapshot()
 
     async def _blocked(self, ticket_id: str, inp: InspectionProduceInput, stage: str,
@@ -2422,6 +2501,8 @@ class InspectionProduceWorkflow:
         if lane:
             self.face["lane"] = dict(lane)
         self.face["blocked_reason"] = reason
+        # t260928-20：终态前冲账（老实例 pending 恒空=零活动命令，重放零变化）
+        await self._ledger_flush()
         await self._write_ledger()
         return self.snapshot()
 

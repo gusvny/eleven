@@ -36,6 +36,8 @@ with workflow.unsafe.imports_passed_through():
         InspectionProduceWorkflow,
         InspectionTicketCountWatcherWorkflow,
     )
+    # t260928-20：DispatcherScanWorkflow 的账面发射 mixin（机制在 base，本文件只接线）
+    from base import TicketEventLedgerMixin
     from shared import (
         HUMAN_GATES,
         STAGES,
@@ -229,7 +231,7 @@ WORKER_RECONCILE_PATCH_ID = "dispatcher-scan-worker-reconcile"
 
 
 @workflow.defn
-class DispatcherScanWorkflow:
+class DispatcherScanWorkflow(TicketEventLedgerMixin):
     """Dispatcher routine scan. M6 expansion: from "ticket distribution stats" to
     a "settled/awaiting-human pending-ticket check report" — per ticket it emits
     stage / dwell time / acceptance check rate / script-gate red-green / pending
@@ -243,11 +245,20 @@ class DispatcherScanWorkflow:
     contract: reading tickets, checking script gates, and writing files all happen
     in activities (scan_tickets_report / write_scan_report); the workflow only
     consumes their return values.
+
+    t260928-20：引擎级账面发射器（`_ledger_scope="engine"`——扫描是执行器自己的手，
+    行落引擎所属项目账本，活动侧解析 engine-owner）。短命壳：start 一行 + 报告汇总
+    一行，return 前一次冲账。注意：本类无票面归属（workflow id=cron 铸号），行内
+    ticket=workflow id，只作身份不作票号。老实例重放：patched 门内零变化。
     """
+
+    _ledger_scope = "engine"
 
     @workflow.run
     async def run(self) -> Dict[str, Any]:
         retry = RetryPolicy(maximum_attempts=3)
+        self._ledger_note("scan", "running", "Dispatcher scan started")
+        await self._ledger_flush()
         if not workflow.patched(SCAN_PATCH_ID):
             # Pre-M6 old branch (kept for replay compat of old instances): distribution stats only.
             scan: TicketScan = await workflow.execute_activity(
@@ -284,6 +295,14 @@ class DispatcherScanWorkflow:
             report.total_tickets, len(report.items),
             report.summary.get("疑似卡死", 0), report.summary.get("待补", 0),
             report.summary.get("可签", 0), written.get("path"))
+        # t260928-20：报告汇总一行 + return 前冲账（短命壳收口点=唯一冲刷点）
+        self._ledger_note(
+            "scan", "done",
+            "Scan report: %s tickets, %s pending (stuck-suspect %s / needs-supply %s / signable %s)"
+            % (report.total_tickets, len(report.items),
+               report.summary.get("疑似卡死", 0), report.summary.get("待补", 0),
+               report.summary.get("可签", 0)))
+        await self._ledger_flush()
         return {
             "total": report.total_tickets,
             "by_status": report.by_status,

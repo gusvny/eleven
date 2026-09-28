@@ -440,6 +440,28 @@ class TicketEventLedgerMixin:
     _ledger_marks: Optional[List[Dict[str, Any]]] = None
     _ledger_seq: int = 0
     _ledger_run_id: str = ""
+    # t260928-20：发射面声明旋钮。`_ledger_scope="project"`（缺省=t260928-13 原语义，
+    # DevLaneWorkflow 零变化）；引擎级发射器（spawner / watcher / dispatcher scan，
+    # 无票面归属的「执行器自己的手」）声明 `_ledger_scope="engine"`——行落引擎所属
+    # 项目（engine-owner，活动侧按既有 dirs-覆盖-引擎仓根规则解析
+    # event_ledger._engine_project_key）的账本，workflow 侧绝不猜项目键。
+    _ledger_scope: str = "project"
+
+    def _ledger_project(self) -> str:
+        """项目键解析钩子（t260928-20）。缺省=meta['project']（t260928-13 原语义，
+        DevLaneWorkflow 不感知）；有票身份但身份不在 meta 的族覆写本钩子（巡检两链
+        =_input.project_key）。返回空串=「本行无项目身份」→ 交 _ledger_enqueue 按
+        声明 scope 分流（project 族=跳过+点名，绝不冒充 engine 行；见该函数注）。"""
+        return str((getattr(self, "meta", None) or {}).get("project") or "")
+
+    def _ledger_note(self, stage: str, state: str, reason: str = "") -> None:
+        """无 timeline 类的入队便桥（t260928-20）：spawner/dispatcher scan 没有
+        _enter/timeline，用合成条目走同一入队点——seq/patched 门/idem 机制全同族，
+        不另起第二套发射路径。_ledger_marks 的 i 对无 timeline 类无消费面（其快照
+        不带 timeline），记 -1 明示「无条目可回指」。"""
+        self._ledger_enqueue({"stage": str(stage or ""), "state": str(state or ""),
+                              "reason": str(reason or ""), "at":
+                              workflow.now().isoformat(timespec="seconds")})
 
     def _ledger_enqueue(self, entry: Dict[str, Any]) -> None:
         """唯一入队点（_mark 调用）：从 timeline 条目构建账面载荷（纯计算），
@@ -480,14 +502,42 @@ class TicketEventLedgerMixin:
                                    "seq": self._ledger_seq,
                                    "run": self._ledger_run_id})
         meta = getattr(self, "meta", None) or {}
-        project = str(meta.get("project") or "")
-        ticket = str(getattr(self, "ticket_id", "") or "")
         template = str(meta.get("workflow_id")
                        or getattr(self, "template_id", "") or "")
+        # t260928-20 scope/project 分流（review C2 防冒充守卫）：
+        #   - 声明 scope="engine"（引擎级发射器）⇒ 恒 engine 行：project 留空哨兵，
+        #     由活动侧解析 engine-owner（event_ledger._engine_project_key）。
+        #   - 声明 scope="project" 但项目键解析为空 ⇒ **绝不**冒充 engine 行（那会把
+        #     项目票的迁移错挂到引擎账本）：跳过本行 + LOUD 点名（fail-open 同纪律，
+        #     主流程零打断；账面缺行可由 rebuild 从 timeline 补，身份修复后重放补齐）。
+        #   - ticket 面：无 ticket_id 属性的类（巡检两链/引擎级发射器）回落 workflow
+        #     id——它是该行的唯一稳定身份（rebuild 派生投影用它对账，缺了闭环即断）。
+        scope = "engine" if self._ledger_scope == "engine" else "project"
+        ticket = str(getattr(self, "ticket_id", "") or "")
+        if not ticket:
+            try:
+                ticket = str(workflow.info().workflow_id)
+            except Exception:               # noqa: BLE001——info 不可得（极端重放面）
+                ticket = "unknown"
+        if scope == "engine":
+            project = ""
+        else:
+            project = self._ledger_project()
+            if not project:
+                self._ledger_seq -= 1       # 本行未发射，seq 不留空洞
+                self._ledger_marks.pop()
+                try:
+                    workflow.logger.warning(
+                        "[event-ledger] 项目键为空（project-scope 行跳过，绝不"
+                        "冒充 engine 行）：%s %s/%s", ticket,
+                        entry.get("stage"), entry.get("state"))
+                except Exception:           # noqa: BLE001——日志面也防弹
+                    pass
+                return
         self._ledger_pending.append({
             "v": "event-ledger-v1",
             "project": project,
-            "scope": "project",
+            "scope": scope,
             "ticket": ticket,
             "workflow": type(self).__name__,
             "template": template,

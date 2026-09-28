@@ -456,14 +456,17 @@ def test_bare_instance_after_shell_swap_never_raises(monkeypatch):
     wf._gens = {}
     wf._detail_face_on = False
     wf.ticket_id = 't-1'      # 与 _mk_wf 同形：ticket_id 在、template_id 不在（真凶）
+    # t260928-20（review C2）：project-scope 类解析空项目 ⇒ 绝不冒充 engine 行——
+    # 本行跳过（pending 空、seq 不留空洞、marks 无残留），LOUD 点名，主流程零打断。
+    captured = []
+    stub.logger = SimpleNamespace(
+        info=lambda *a, **k: None,
+        warning=lambda msg, *a: captured.append(msg % a if a else msg))
     wf._mark('implement', 'running', '进入本步')
-    (ev,) = wf._ledger_pending
-    assert ev['template'] == '' and ev['project'] == '' and ev['seq'] == 1
-    assert ev['ticket'] == 't-1'
-    assert ev['idem'] == '|t-1|run-STUB|1'
-    # timeline 条目零标记（四键逐字锁面）+ 标记在 ledger_marks
+    assert wf._ledger_pending == [] and wf._ledger_seq == 0 and wf._ledger_marks == []
+    assert len(captured) == 1 and '项目键为空' in captured[0]
+    # timeline 条目零标记（四键逐字锁面）——跳过只影响账面，票面照旧
     assert set(wf.timeline[-1]) == {'at', 'stage', 'state', 'reason'}
-    assert wf._ledger_marks == [{'i': 0, 'seq': 1, 'run': 'run-STUB'}]
 
 
 # ---------- [R-merge] marks 轨 rebuild（snapshot 的 ledger_marks 现役面） ----------

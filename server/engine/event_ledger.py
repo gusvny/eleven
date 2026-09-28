@@ -416,6 +416,49 @@ def _seen_for(path: Path):
     return entry
 
 
+_ENGINE_PROJECT_CACHE: Dict[str, Any] = {'key': None, 'project': ''}
+
+
+def reset_engine_project_for_test():
+    """测试钩子：清引擎所属项目键缓存（生产路径零调用）。"""
+    _ENGINE_PROJECT_CACHE.update(key=None, project='')
+
+
+def _engine_project_key() -> str:
+    """引擎所属项目键（t260928-20，engine 行落账目标）：按既有规则取「dirs 覆盖
+    引擎仓根」的注册条目（_find_engine_project_yaml，稳定排序），键=该条目 yaml 里
+    `project:` 列表项的 `key:` 值（行式解析，与配置面同容错），键缺席回落条目目录名。
+    找不到/解析失败 ⇒ ''（调用方走 announce-only 缺口面）。缓存键=(根 mtime,
+    yaml mtime)——与 event_ledger_config 同形状，变更可感知、每行只多两次 stat。
+    复用同一引擎所属判定=配置闸与落账目标恒同源（一个项目、一个文件，绝无第二账本）。"""
+    root = _projects_root()
+    try:
+        y = _find_engine_project_yaml(root)
+    except Exception:                       # noqa: BLE001——读面故障回落缺省
+        y = None
+    if y is None:
+        _ENGINE_PROJECT_CACHE.update(key=None, project='')
+        return ''
+    try:
+        k = (str(root), root.stat().st_mtime_ns, y.stat().st_mtime_ns)
+    except OSError:
+        k = None
+    if k is not None and _ENGINE_PROJECT_CACHE['key'] == k:
+        return str(_ENGINE_PROJECT_CACHE['project'])
+    project = y.parent.name
+    try:
+        for raw in y.read_text(encoding='utf-8', errors='replace').splitlines():
+            m = re.match(r'^\s*-\s+key:\s*(\S+)\s*$', _strip_yaml_line(raw) or '')
+            if m:
+                project = m.group(1)
+                break
+    except OSError:
+        pass
+    if k is not None:
+        _ENGINE_PROJECT_CACHE.update(key=k, project=project)
+    return project
+
+
 def build_line(payload: Dict[str, Any]) -> bytes:
     """payload → 单行字节（<4KB；reason 先截断）。畸形 payload（非 dict/缺键/
     非串字段）在此归一/兜缺省，绝不 raise——外部输入面（[R1] 畸形必回落）。"""
@@ -470,6 +513,28 @@ def append_event(payload: Dict[str, Any], ledger_dir: Optional[Path] = None,
     ev = payload if isinstance(payload, dict) else {}
     project = str(ev.get('project') or '')
     ticket = str(ev.get('ticket') or '')
+    # t260928-20：engine 行落账目标=引擎所属项目（活动侧解析，workflow 侧不猜）。
+    # 解析失败 ⇒ announce-only 缺口面（review C3 选用理由：不造 `_engine-unresolved`
+    # 幻影项目文件——任何逐项目迭代账本的消费方都会把它当真项目；引擎行属旁路观测
+    # 面，保证面=stderr 点名+计数器已足，缺口语义与 rebuild 不适用于无票面行一致）。
+    scope = str(ev.get('scope') or 'project')
+    if scope == 'engine' and not project:
+        project = _engine_project_key()
+        if not project:
+            _announce(RuntimeError('engine-owner 项目解析失败（引擎行未落账）'),
+                      '?engine', ticket)
+            return {'emitted': False, 'failed': True,
+                    'why': 'engine-owner project unresolved (announce-only gap)'}
+        # 行内 project 字段与落账文件同键（行是自描述的；payload 调用方不被改写）
+        ev = dict(ev)
+        ev['project'] = project
+    elif scope != 'engine' and not project:
+        # t260928-20（review C2 活动侧同守卫）：project-scope 且项目键空 ⇒ 拒收
+        # ——落盘会产畸形 `.jsonl` 文件；与 workflow 侧跳过纪律同源（防线双落）。
+        _announce(RuntimeError('project-scope 行项目键为空（拒收，不落账）'),
+                  '?orphan', ticket)
+        return {'emitted': False, 'failed': True,
+                'why': 'project-scope row has empty project key (rejected)'}
     cfg = event_ledger_config()
     if not skip_enabled_gate and not cfg.get('enabled'):
         return {'emitted': False, 'why': 'event_ledger 未声明或未启用（零行为）'}
