@@ -92,8 +92,16 @@ def main():
     ok(bool(patch), "D1 cordis.patch.yml 在仓")
     ok(bool(re.search(r"default:\s*['\"]?sandbar-integration", patch)),
        "D2 default 仍指 sandbar-integration")
-    ok("sandbar-executor" not in patch,
-       "D3 cordis.patch.yml 不含 sandbar-executor（default 不翻、无 roots 新条目）")
+    # D3 的意图（不是子串）：本票**不把执行器预设挂进 profile**——既不翻 default、也不加
+    # `roots:`（用户 preset 唯一入口是 $DSH_HOME/.agent-presets/，rc.8 实证），且不出现
+    # 名为 sandbar-executor 的挂载条目。260929 修正：原实现用子串 `"sandbar-executor" not
+    # in patch`，被**兄弟插件** `sandbar-executor-panel`（t260929-03 挂的面板）撞中 ⇒ 假红。
+    # 灰盒纪律：断言绑在契约上（default / roots / 精确条目名），不绑会被邻名撞中的子串。
+    ok(not re.search(r"(?m)^\s*roots:\s*$", patch),
+       "D3a cordis.patch.yml 无 roots: 新条目（用户 preset 唯一入口=$DSH_HOME/.agent-presets/）")
+    ok(not re.search(r"(?m)^\s*(-\s*ids*:\s*['\"]?sandbar-executor['\"]?\s*$|name:\s*['\"]?sandbar-executor['\"]?\s*$)",
+                     patch),
+       "D3b cordis.patch.yml 无名为 sandbar-executor 的挂载条目（精确名，不吃 sandbar-executor-panel 兄弟名）")
 
     section("E README 安装契约")
     ok("cp -R" in readme or "cp -a" in readme, "E1 实体复制安装指令在文")
