@@ -124,7 +124,7 @@ try {
 }
 
 try {
-  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 });
+  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])', { timeout: 12000 });
 } catch {
   record('t0/fixture-psess-row', 'env_fail', 'no project session row rendered in test console sidebar');
   try { await browser.close(); } catch { /* noop */ }
@@ -140,7 +140,7 @@ const safeClick = async (sel) => {
   try { await loc.click({ timeout: 3000 }); } catch { await loc.evaluate(el => el.click()); }
 };
 const rowRead = () => page.evaluate(() => {
-  const row = document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])');
+  const row = document.querySelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])');
   return [...(row?.querySelectorAll('[data-wb-psess-tab]') ?? [])].map(t => (t.title ?? '').split('\n').pop() ?? '');
 });
 const chatText = () => page.evaluate(() => document.querySelector('[data-conversation-scroll]')?.textContent ?? '');
@@ -223,7 +223,7 @@ if (!injected) {
     // 钮 disabled，重点击须等钮回弹。点击锚必须与 rowRead 同row（SeedWs 行）——
     // 全局 first-match 点到 seedq 行时第二 tab 落在 seedq 行，rowRead 只读 SeedWs
     // 行恒单 tab=假缺供（260909 实锤）。
-    const SELF_PROV_SEL = '[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"]) [data-wb-psess-new]';
+    const SELF_PROV_SEL = '[data-wb-psess-row]:has([aria-label="New SeedWs session"]) [data-wb-psess-new]';
     for (let i = 0; i < 24 && tabs.length < 2; i++) {
       const btn = page.locator(SELF_PROV_SEL).first();
       if (i === 0 || ((await btn.isEnabled().catch(() => false)) && i % 4 === 0)) {
@@ -258,7 +258,7 @@ if (!injected) {
   const tabsSnap = await rowRead();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await dismissModals(page);
-  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 });
+  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])', { timeout: 12000 });
   await page.evaluate(() => document.querySelectorAll('[data-wb-psess-row] [data-wb-psess-tab]')[0]?.click());
   await page.waitForTimeout(1500);
   const afterReload = markCount(await chatText());

@@ -8,9 +8,19 @@
  * 全部行为真实，只有「落账」这一步是脚本触发的。
  *
  * 红线：临时端口（内核分配）+ 临时 DSH_HOME（退出即删）+ 不碰 3099 + 不 seed 数据。
- * 用法：node integration/t260902-03/capture-stale-banner.mjs [outDir]
+ * 用法：node server/plugins/workbench/tests/capture-stale-banner.mjs [outDir]
  * 依赖：系统 Chrome（headless）；playwright-core 从主树供给（泳道不装依赖，先例
  *       boot-and-run-s1.mjs / capture.mjs loadPlaywright 同款）。
+ *
+ * ⚠️ 260929 修（两道同族伤，都在「本轮直修」批次里）：
+ *   ① **会话门**（KI-156 同族）：dsh 0.1.5 起匿名 `GET /` 恒 401，旧 waitReady 只认
+ *      `res.ok` ⇒ 台其实已起来却恒判「未就绪」→ 90s 超时退出 1，第 6 步永远走不到。
+ *      修法=照 capture-lane.mjs 先例：可达（200/303/401）即算服务在场，并从
+ *      console.log 抓 `?token=` 首页地址当导航入口（浏览器不带 token 只会拍到 401 页）。
+ *   ② **视图图标锚 + 静默跳过**：第 6 步原用 `[title="立项单"]`（宿主令 260925 英文化后
+ *      ＝`Epics`）且写成 `if (epicsBtn) {...}`——锚点一错整步被静默跳过、脚本照样 exit 0，
+ *      等于把「横幅跨视图常驻」这条断言悄悄删掉（假绿）。现在：锚=插件英文真源，
+ *      元素不在场=明确红并报出 DOM 实有 title 清单；横幅消失也从 WARN 升为红。
  */
 
 import { spawn } from 'node:child_process'
@@ -55,15 +65,36 @@ function teardown(code = 0) {
 process.on('exit', () => teardown())
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { teardown(); process.exit(130) })
 
+/** 从 console.log 抓带 token 的首页地址（会话门兑换用；capture-lane.mjs authUrlFromLog 同款）。
+ *  dsh 0.1.5 起匿名 GET / 恒 401——不带 token 导航只会拍到 401 页。 */
+function authUrlFromLog(logPath) {
+  try {
+    const log = readFileSync(logPath, 'utf8')
+    const m = log.match(/https?:\/\/[^\s"'<>]*[?&]token=[A-Za-z0-9._~-]+/g)
+    return m ? m[m.length - 1] : ''
+  } catch { return '' }
+}
+
 async function waitReady(port, timeoutMs, logPath) {
   const t0 = Date.now()
+  let reachable = false
   while (Date.now() - t0 < timeoutMs) {
-    try { const res = await fetch(`http://127.0.0.1:${port}/`); if (res.ok) return } catch {}
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/`)
+      // 401=浏览器会话门（服务已在场）；303/200=已放行。只有连不上才继续等。
+      if (res.ok || res.status === 401 || res.status === 303) reachable = true
+      if (reachable) {
+        const auth = authUrlFromLog(logPath)
+        if (auth) return auth
+      }
+    } catch { /* 未就绪，继续轮询 */ }
     await new Promise(r => setTimeout(r, 500))
   }
   let tail = ''
   try { tail = readFileSync(logPath, 'utf8').slice(-2000) } catch {}
-  throw new Error(`隔离台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）。日志尾部：\n${tail || '（无日志）'}`)
+  throw new Error(reachable
+    ? `隔离台 ${timeoutMs}ms 内已可达但取不到带 token 首页地址（127.0.0.1:${port}；会话门需 /?token= 兑换 cookie）。日志尾部：\n${tail || '（无日志）'}`
+    : `隔离台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）。日志尾部：\n${tail || '（无日志）'}`)
 }
 
 // playwright 加载：候选=本泳道 ui-check/node_modules（泳道 checkout 常不装，KI-036②）
@@ -119,13 +150,22 @@ async function main() {
     env: {
       ...process.env,
       DSH_HOME: tmpHome,
+      // SANDBAR_REPO 必须钉到 fixture 仓（260929 修前提缺口）：workbench 的 repo 锚=
+      // config.repo → SANDBAR_REPO → 按本文件位置推导（node.ts:405），而 /api/build-info
+      // 的 disk 指纹按该 repo 根扫 server/plugins/workbench/{node.ts,src/**}——环境里
+      // 已导出 SANDBAR_REPO（本机实测 =<主仓>）时，改 fixture 的 node.ts 对指纹**不可见**，
+      // boot≡disk ⇒ 横幅永不出现（本步恒红，且是「前提没满足」不是产品缺陷）。
+      // 同族先例：integration/t260904-17/lib_fix17.mjs:223 与
+      // integration/t260916-26/lib_t260916_26_bench.mjs:104 均显式把 SANDBAR_REPO
+      // 指夹具仓，本脚本漏钉。
+      SANDBAR_REPO: fixtureRepo,
       SANDBAR_TARGET_HOST: process.env.SANDBAR_CAPTURE_TARGET_HOST
         || process.env.SANDBAR_TARGET_HOST || '127.0.0.1:17233',
     },
     detached: true, stdio: ['ignore', logFd, logFd],
   })
-  await waitReady(port, Number(process.env.SANDBAR_STALE_BOOT_MS || 90000), join(tmpHome, 'console.log'))
-  console.log(`[capture-stale-banner] 隔离台就绪：127.0.0.1:${port}`)
+  const navUrl = await waitReady(port, Number(process.env.SANDBAR_STALE_BOOT_MS || 90000), join(tmpHome, 'console.log'))
+  console.log(`[capture-stale-banner] 隔离台就绪：127.0.0.1:${port}（带 token 入口=已取到）`)
   await new Promise(r => setTimeout(r, 1500))
   try {
     const probe = await fetch(`http://127.0.0.1:${port}/`)
@@ -140,7 +180,8 @@ async function main() {
     try { browser = await playwright.chromium.launch({ channel: 'chrome', headless: true }) }
     catch { browser = await playwright.chromium.launch({ headless: true }) }
     const page = await browser.newPage()
-    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' })
+    // 导航入口=带 token 的首页地址（会话门兑换 cookie；匿名 goto 拍到的是 401 页）
+    await page.goto(navUrl || `http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' })
     // 等 workbench 侧栏挂载（项目会话区行锚——顶部行入口锚已随票② R8 退役，
     // 项目行是 R8 后恒在场的侧栏锚；C1 顺修，t260904-05）
     await page.waitForSelector('[data-wb-psess-row]', { timeout: 30_000 })
@@ -158,22 +199,56 @@ async function main() {
     // 5) 模拟合并落账：改 fixture 的 node.ts 内容 → 等 30s 轮询 + margin
     await writeFile(join(fixtureWb, 'node.ts'),
       readFileSync(join(fixtureWb, 'node.ts'), 'utf8') + '\n// stale-watchdog landed change\n')
-    await page.waitForSelector('.wb-stale-banner', { timeout: 45_000 })
+    try {
+      await page.waitForSelector('.wb-stale-banner', { timeout: 45_000 })
+    } catch (e) {
+      // 报错精确（260929）：横幅不出现时把**判定数据面**打出来——陈旧判定走
+      // /api/build-info 的 boot/disk/injected 三元组（build-info.ts 指纹 + staleness.ts
+      // 30s 轮询 + stale-check.ts 矩阵），没有这份回执只能猜（是端点没算、指纹根指错、
+      // 还是轮询没跑）。
+      const diag = await page.evaluate(async () => {
+        const out = {}
+        try {
+          const r = await fetch('/sandbar-workbench/api/build-info')
+          out.status = r.status
+          out.body = (await r.text()).slice(0, 400)
+        } catch (err) { out.fetchError = String(err) }
+        out.visibility = document.visibilityState
+        out.injected = (() => { try { return window.sessionStorage.getItem('wb.build.fingerprint.atload') } catch { return 'n/a' } })()
+        out.comments = document.querySelectorAll('.wb-stale-banner').length
+        return out
+      }).catch((err) => ({ evaluateError: String(err) }))
+      console.error('[capture-stale-banner] 横幅未出现的判定数据面=' + JSON.stringify(diag))
+      throw e
+    }
     await new Promise(r => setTimeout(r, 1000))
     await page.screenshot({ path: join(OUT, 'stale-banner-1-visible.png') })
     console.log('[capture-stale-banner] 横幅可见态已拍')
 
-    // 6) 切视图验证常驻（点「立项单」图标——若可见）
-    const epicsBtn = await page.$('[title="立项单"]')
-    if (epicsBtn) {
-      await epicsBtn.click()
-      await new Promise(r => setTimeout(r, 800))
-      const still = await page.$('.wb-stale-banner')
-      if (still) {
-        await page.screenshot({ path: join(OUT, 'stale-banner-2-epics-view.png') })
-        console.log('[capture-stale-banner] 立项单视图横幅常驻已拍')
-      } else console.log('[capture-stale-banner] WARN：立项单视图横幅消失（不应发生）')
+    // 6) 切视图验证常驻：点「Epics」图标（视图入口 title 真源=插件 PROJECT_ICON_SPECS；
+    //    宿主令 260925 英文化后旧中文 title 退役）。
+    //    三态纪律（260929 修）：旧实现 `const epicsBtn = await page.$('[title="立项单"]');
+    //    if (epicsBtn) {...}` 在锚点改名后**静默跳过**——脚本照样 exit 0，等于把这条
+    //    「横幅跨视图常驻」断言悄悄删掉（假绿；同族教训：锚点错了它反而报过）。
+    //    现在：元素不在场=明确红（本步前提已由上方 [data-wb-psess-row] 在场证明插件已挂载，
+    //    故缺席只能是视图入口改名/未渲染=真缺陷），横幅消失也从 WARN 升为红。
+    const viewTitles = await page.$$eval('.wb-view-icon',
+      els => [...new Set(els.map(e => e.getAttribute('title')).filter(Boolean))])
+    const epicsBtn = await page.$('.wb-view-icon[title="Epics"]')
+    if (!epicsBtn) {
+      console.error(`[capture-stale-banner] FAIL：侧栏无 Epics 视图图标（DOM 实有 title=${viewTitles.join(',') || '无 .wb-view-icon'}）`
+        + '——视图入口改名或未渲染；本步断言不可跳过（三态纪律：缺席不当通过）')
+      teardown(); process.exit(1)
     }
+    await epicsBtn.click()
+    await new Promise(r => setTimeout(r, 800))
+    const still = await page.$('.wb-stale-banner')
+    if (!still) {
+      console.error('[capture-stale-banner] FAIL：Epics 视图下 stale 横幅消失（应跨视图常驻）——本步原为 WARN 不判红，属漏判')
+      teardown(); process.exit(1)
+    }
+    await page.screenshot({ path: join(OUT, 'stale-banner-2-epics-view.png') })
+    console.log('[capture-stale-banner] Epics 视图横幅常驻已拍（锚 [title="Epics"]）')
     const bannerCount = await page.$$eval('.wb-stale-banner', els => els.length)
     console.log(`[capture-stale-banner] 终态横幅数=${bannerCount}`)
     teardown()

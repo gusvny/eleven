@@ -210,7 +210,7 @@ export async function openTestPage(pw, { results, tag, consoleErrors, badRespons
 /** 侧栏项目会话区在场的夹具前提；不在场=ENV_FAIL（环境无 fixture，同 t01 卫兵口径）。 */
 export async function waitProjectRowOrSkip(page, results, tag) {
   try {
-    await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 });
+    await page.waitForSelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])', { timeout: 12000 });
     return true;
   } catch {
     results.record(`${tag}/fixture-psess-row`, 'env_fail', 'no project session row rendered in test console sidebar');

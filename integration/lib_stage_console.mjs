@@ -554,7 +554,7 @@ async function seedFixturesLocked(st, fixturesHost) {
 /** Fixture project anchor (gen6): row selector suffix; scenarios pin the seed
  * row with STAGE_SEED_ROW_SEL below (the default registry's legacy row comes
  * first, so first-row would anchor the wrong, non-writable workspace row). */
-export const STAGE_SEED_ROW_SEL = '[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])';
+export const STAGE_SEED_ROW_SEL = '[data-wb-psess-row]:has([aria-label="New SeedWs session"])';
 export const STAGE_SEED = { key: 'seedws', name: 'SeedWs' };
 // Fixture ticket contract (seedFixtures): ids use the t<yymmdd>-<NN> shape —
 // the chat project tag's ticket reference whitelist only accepts

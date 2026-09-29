@@ -102,14 +102,15 @@ const sbA = sidebarOf(pa);
   // 「不红」口径：剥离降级注记引文「—（…）」（内含数据源原文如 ModuleNotFoundError，
   // 是引用不是 UI 自身的红色告警）与体检降档中性提示后再扫红色关键词。
   const noRed = !/错误|失败|error/i.test(
-    txt.replace(/体检数据源未接入/g, '').replace(/—（[^）]*）/g, ''));
+    txt.replace(/Health data source not wired up yet[^)]*\)?/g, '').replace(/—\s*\([^)]*\)/g, ''));
   record('settings/counts-degraded-not-red', degraded && noRed, `片段=${txt.slice(0, 200)}`);
 
+  // 体检区标签真源=project-modals.tsx「Onboarding health」（宿主令 260925 英文化）
   const healthNeutral = txt.length === 0
-    || (!/无黄牌|全部正常|一切正常/.test(txt) && /体检/.test(txt));
+    || (!/无黄牌|全部正常|一切正常|all (green|clear)/i.test(txt) && /Onboarding health|体检/.test(txt));
   record('settings/health-neutral', healthNeutral, '体检区中性提示，不谎报无黄牌（R2b 降档口径）');
 
-  record('settings/danger-entry', /摘除项目/.test(txt), '底部 danger 区摘除入口在位');
+  record('settings/danger-entry', /Remove project|摘除项目/i.test(txt), '底部 danger 区摘除入口在位');
   await pa.keyboard.press('Escape');
 }
 
@@ -120,7 +121,7 @@ const sbA = sidebarOf(pa);
   await pa.waitForTimeout(600);
   const txt = await dialogOf(pa).innerText().catch(() => '');
   const located = txt.includes('project.yaml');
-  const repair = /修复|处理|指路|检查|retired|重新/i.test(txt);
+  const repair = /Fix:|quarantine|retire|修复|指路/i.test(txt);
   record('isolation/detail-locate-and-repair', located && repair, `片段=${txt.slice(0, 200)}`);
 }
 
@@ -150,7 +151,7 @@ record('bench/boot-B', 'pass', benchB.base);
   const { browser: brB, page: pb } = await newPage(benchB);
   const sbB = sidebarOf(pb);
   await dismissNotice(pb); // 同上
-  const addRow = sbB.getByText('接入项目', { exact: false }).first();
+  const addRow = sbB.locator('[data-wb-project-add-row]').first();
   record('empty/add-row-present', await addRow.isVisible().catch(() => false), '零分组仍渲染接入行（验收9 面）');
 
   await forceClick(addRow);

@@ -14,6 +14,15 @@ import {
 } from '../t260904-17/lib_fix17.mjs';
 import { TOKEN_SETS, cssVarsBlock } from '../t260905-08/lib_t260905_08.mjs';
 import { mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// 夹具项目根=仓根（260929 修前提缺口）：本脚本要拍的是**真库 docs/** 的定稿篇目
+// （头注「文档源=真库 docs/testing-guide.md」；walkthrough A3 亦写「docs/design/ 下
+// 任一篇」）。原来把项目根指到 tmpRoot() 空目录 ⇒ docs 树恒空 ⇒ 点不开篇目、
+// .wb-doc-body 恒不出现（锚点修好后暴露的第二层红）。改为指仓根：docs/ 定稿库真读，
+// 篇目锚 [data-wb-doc-item="testing-guide.md"] 可命中。
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const argOf = (name, def) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -30,7 +39,7 @@ const stub = makeTicketStub();
 let bench;
 try {
   const projectsRoot = makeRegistryRoot('t0808-shot-reg-');
-  writeProjectEntry(projectsRoot, 't08a', '截图夹具', [tmpRoot('t0808-shot-proj-')]);
+  writeProjectEntry(projectsRoot, 't08a', '截图夹具', [REPO_ROOT]);
   bench = await bootConsole(projectsRoot, stub);
 } catch (e) { die(`隔离台自举失败：${String(e?.message ?? e).slice(0, 200)}`); }
 teardownOnExit(bench.teardown);
@@ -51,8 +60,9 @@ try {
     await bench.goto(page, { waitUntil: 'domcontentloaded' });
     await page.addStyleTag({ content: cssVarsBlock(TOKEN_SETS[leg]) });
     await dismissNotice(page);
-    // 点「文档」视图（侧栏项目组内图标，aria-label 确定锚）。
-    const docBtn = page.locator('[aria-label="文档"], [title="文档"]').first();
+    // 点「Docs」视图（侧栏项目组内图标；title/aria-label 真源=插件 PROJECT_ICON_SPECS，
+    // 宿主令 260925 英文化后旧中文 title/aria-label「文档」已退役——260929 同族锚点校正）。
+    const docBtn = page.locator('[title="Docs"], [aria-label="Docs"]').first();
     try { await docBtn.click({ timeout: 8000 }); }
     catch { await docBtn.evaluate((el) => el.click()); }
     await page.locator('.wb-doc-root').first().waitFor({ state: 'visible', timeout: 15000 });
