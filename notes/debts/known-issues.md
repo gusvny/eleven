@@ -2710,8 +2710,13 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **定位**：声明=`inspection.yaml`（`instances[].enabled`）；接线唯一入口=`inspection_trigger.py cmd_schedule_up`
 > （人工跑，`--note <谁/为何/频率>`）；缺对账面（无「enabled 但无 schedule」的只读清单）。
 > **处置建议（留宿主定：接线＝新增两个真调度，会真的开始跑 doc/simplify 巡检）**：①给 `decl`（或死信/巡检手册面）
-> 加只读对账：列出 enabled 但调度器上无 Schedule 的实例——这一条本岗可直修；②`docs-sync`/`simplify-face` 要么
-> `schedule-up` 接线，要么 `enabled: false`（声明与现状对齐，如 `mechanism-face`/`stage-capacity` 的占位写法）。
+> 加只读对账：列出 enabled 但调度器上无 Schedule 的实例——**260929 已直修**（只读子命令
+> `inspection_trigger.py schedule-drift`：三态分开点名＝missing 要 schedule-up / paused 要 resume / orphan＝调度器
+> 上还在跑但声明已停用或除名；`alarmed` 非空 → exit 1；调度器列表失败=显式报错「无法对账，别当无漂移」，
+> 绝不冒充绿；回归 `server/engine/tests/test_260929_inspection_schedule_drift.py`。实跑＝
+> `missing=[sandbar-inspection-docs-sync, sandbar-inspection-simplify-face]`，exit 1）；②`docs-sync`/`simplify-face`
+> 要么 `schedule-up` 接线，要么 `enabled: false`（声明与现状对齐，如 `mechanism-face`/`stage-capacity` 的占位
+> 写法）——**仍待宿主定**（接线＝新增两个真调度，会真的开始跑 doc/simplify 巡检）。
 
 ## KI-129 追记（260929 宿主实报「那个集成测试的巡检没有了」——静默跳过的**后果面**实测 + 记录面已补）
 > **实报链（本轮完整证据）**：09-26 为绕开本条（期槽被「执行 COMPLETED、判决 blocked」的票占死）按处置**一期
