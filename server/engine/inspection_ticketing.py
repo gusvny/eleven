@@ -226,6 +226,96 @@ def ledger_file_name(instance_id: str, period: str) -> str:
     return "inspection-%s-%s.json" % (instance_id, period)
 
 
+def spawn_journal_rows(ledger_dir: Any) -> List[Dict[str, Any]]:
+    """读起票裁决日志（只读；容错：文件缺席=空、坏行跳过——本面只写不读的既有纪律
+    在读取侧补齐，畸形行绝不炸整次核查）。"""
+    try:
+        text = (Path(str(ledger_dir)) / SPAWN_JOURNAL_NAME).read_text("utf-8")
+    except (FileNotFoundError, OSError):
+        return []
+    rows: List[Dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def spawn_skip_periods(ledger_dir: Any, instance_id: str) -> set:
+    """「按声明空转」已解释的期号集合（decision=skipped-no-change）。
+
+    漏跑核查据它把**「该跑而没跑」与「按声明判定无事可做」分开**——否则引入
+    skip_when_unchanged 之后，每天都会多出一条假漏跑告警（审计面既不能说谎，
+    也不能报警报成噪声，KI-129 同族纪律）。"""
+    inst = str(instance_id or "")
+    out = set()
+    for row in spawn_journal_rows(ledger_dir):
+        if str(row.get("instance") or "") != inst:
+            continue
+        if row.get("decision") == "skipped-no-change" and row.get("period"):
+            out.add(str(row["period"]))
+    return out
+
+
+def last_run_base(ledger_dir: Any, instance_id: str) -> Dict[str, str]:
+    """最近一次**真跑过**的期号与其基点 sha（lane.base_ref → suite.base_ref →
+    scan_meta.inspect.base_head 三处任一）。读不出=空串（调用方据此不跳，绝不假跳）。
+
+    期号解析复用 inspection_deadman.ledger_periods（单一真源，惰性 import 免环）。"""
+    try:
+        from inspection_deadman import ledger_periods
+        info = ledger_periods(ledger_dir, instance_id)
+    except Exception:  # noqa: BLE001——读面任何故障都只是「读不出」，不阻断起票
+        return {"period": "", "base_ref": ""}
+    for period in sorted(info.get("periods") or [], reverse=True):
+        p = Path(str(ledger_dir)) / ledger_file_name(instance_id, period)
+        try:
+            doc = json.loads(p.read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        base = ""
+        for key in ("lane", "suite"):
+            src = doc.get(key)
+            if isinstance(src, dict) and src.get("base_ref"):
+                base = str(src["base_ref"])
+                break
+        if not base:
+            sm = doc.get("scan_meta")
+            ins = sm.get("inspect") if isinstance(sm, dict) else None
+            if isinstance(ins, dict):
+                base = str(ins.get("base_head") or "")
+        if base:
+            return {"period": period, "base_ref": base}
+    return {"period": "", "base_ref": ""}
+
+
+#: sha 形态（短/全长十六进制）：任一侧不像 sha ⇒ 判据不成立（判不准**不跳**）。
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+
+
+def no_change_skip(last_base: str, head: str, last_period: str = "") -> Dict[str, Any]:
+    """「无新变更则空转」判据（纯函数）。
+
+    上次运行基点 == 当前 HEAD ⇒ 空转（不铸票、不跑套件、不占期槽资源），但仍**落一行
+    裁决记录**（决策=skipped-no-change，漏跑核查据此不误报）。任一侧缺失/非 sha 形态 ⇒
+    不跳——宁可多跑一次，绝不假跳（假跳=静默漏跑，比浪费一次更贵）。"""
+    a, b = str(last_base or "").strip(), str(head or "").strip()
+    if not (_SHA_RE.match(a) and _SHA_RE.match(b)) or a != b:
+        return {"unchanged": False, "why": ""}
+    return {"unchanged": True,
+            "why": "main 无新变更（HEAD 仍为 %s，与上次运行%s的基点相同）——按声明 "
+                   "skip_when_unchanged 空转不干活" %
+                   (b[:7], ("（期 %s）" % last_period) if last_period else "")}
+
+
 def spawn_decision_of(res: Any, ledger_dir: Any = None,
                       instance_id: str = "", period: str = "") -> Dict[str, Any]:
     """起票回执 + 台账在场性 → 裁决摘要（纯函数，无 side effect；畸形输入降级不抛）。
@@ -246,6 +336,13 @@ def spawn_decision_of(res: Any, ledger_dir: Any = None,
     r = r if isinstance(r, dict) else {}
     out["period_state"] = str(r.get("period_state") or "")
     out["ticket_id"] = str(r.get("ticket_id") or "")
+    if r.get("skipped"):
+        # 声明式空转（260929 宿主令：simplify-face 每天跑一次，没有新 change 就不干活）：
+        # 不告警——按声明该跑而**判定无事可做**，与「该跑而没跑」是两件事。
+        out["decision"] = "skipped-no-change"
+        out["alarm"] = False
+        out["note"] = str(r.get("skipped_because") or "按声明空转（无新变更）")
+        return out
     if r.get("triggered"):
         out["decision"] = "triggered"
         out["alarm"] = False

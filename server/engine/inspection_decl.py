@@ -179,6 +179,10 @@ class InstanceSpec:
     # 逐字 str）——解析期已过词法/范围校验；运行期由 inspection_lane_watchdog.
     # resolve_thresholds 归一并在面/回执上点名来源（declaration|default）。空=全缺省。
     watchdog: Dict[str, str] = field(default_factory=dict)
+    # 无新变更则空转（260929 宿主令，simplify-face）：true=起票前比对「上次运行的基点 sha
+    # 与当前 main HEAD」，相同则本期不铸票不跑（仍落一行裁决记录，漏跑核查据此不误报）；
+    # 读不出/形态不合=不跳（宁可多跑一次，绝不假跳）。
+    skip_when_unchanged: bool = False
     # 调度时区（t260913-02 实现段）：空=Temporal 缺省（UTC）；填 IANA 名（如 Asia/Shanghai）
     tz: str = ""
     workflow: str = ""
@@ -514,14 +518,16 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                       "max_findings", "inspect_timeout_min",
                                       "inspect_profile", "inspect_max_shards",
                                       "inspect_max_files_per_shard",
-                                      "mode", "docs_root", "watchdog"})
+                                      "mode", "docs_root", "watchdog",
+                                      "skip_when_unchanged"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
                             "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
                             "max_findings/inspect_timeout_min/inspect_profile（inspect 段预算三键，"
                             "t260916-22）/inspect_max_shards/inspect_max_files_per_shard"
                             "（缩面分片硬上限两键，t260924-06）/mode/docs_root（巡检模式两键，"
-                            "t260925-01）/watchdog（lane 巡检面阈值档三键，260926）；"
+                            "t260925-01）/watchdog（lane 巡检面阈值档三键，260926）/"
+                            "skip_when_unchanged（无新变更则空转，260929 宿主令）；"
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -607,6 +613,15 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                 "本项=每片文件数硬上限，缩面纪律 t260924-06）" % (where, raw_mp))
             inspect_max_files_per_shard = int(raw_mp)
         watchdog = _validate_watchdog(where, item.get("watchdog"))
+        # 布尔口径与 enabled 逐字同规（本 YAML 子集无类型推断，标量恒为 str：只认
+        # true/false 字面，其他一律 fail-closed 点名——不许 'yes'/1/True 混进来）。
+        skip_when_unchanged = False
+        if item.get("skip_when_unchanged") is not None:
+            raw_skip = item.get("skip_when_unchanged")
+            if not isinstance(raw_skip, str) or not BOOL_RE.match(raw_skip):
+                raise DeclError("%s：skip_when_unchanged 只认 true/false 字面（got %r；"
+                                "本项=「无新变更则空转」，260929 宿主令）" % (where, raw_skip))
+            skip_when_unchanged = raw_skip == "true"
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有反用例事由
         # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
@@ -624,7 +639,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             source=source, project_key=project_key,
             instance_project_key=identity_key, scan_face=scan_face,
             mode=mode, docs_root=docs_root,
-            suite=suite, tz=tz, workflow=workflow_name, template=template,
+            suite=suite, tz=tz, skip_when_unchanged=skip_when_unchanged,
+            workflow=workflow_name, template=template,
             max_findings=max_findings, inspect_timeout_min=inspect_timeout_min,
             inspect_profile=inspect_profile,
             inspect_max_shards=inspect_max_shards,
@@ -657,6 +673,9 @@ def build_schedule_specs(decl: InspectionDecl) -> List[Dict[str, Any]]:
             "mode": it.mode, "docs_root": it.docs_root,
             "suite": it.suite,
             "tz": it.tz,
+            # 无新变更则空转（260929，additive 键）：老消费者忽略零行为；spawn 活动读它
+            # 决定「起票前先比基点 sha」。
+            "skip_when_unchanged": bool(it.skip_when_unchanged),
             "workflow": it.workflow,
             "template": it.template,
             # overlap semantics (borrowed from trade-off list item 1): repeated triggers of
@@ -685,6 +704,8 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
             "run_suite": bool(it.suite), "scan_face": it.scan_face, "cron": it.cron,
             "mode": it.mode, "docs_root": it.docs_root,
             "tz": it.tz,
+            # 无新变更则空转（260929）：spawn 活动据本键决定是否「先比基点 sha 再起票」。
+            "skip_when_unchanged": bool(it.skip_when_unchanged),
             # inspect 段预算三键（t260916-22）：profile 空=回落 scan_face（consume 侧
             # workflow 定，声明零重复）。
             "inspect": {"max_findings": it.max_findings,
