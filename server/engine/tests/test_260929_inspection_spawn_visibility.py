@@ -178,3 +178,31 @@ def test_ledger_name_matches_engine_single_source():
     for inst, period in ((INST, PERIOD), ("docs-sync", "20261001"),
                          ("integration-tests", "20260929-2")):
         assert tick.ledger_file_name(inst, period) == flow.inspection_ledger_name(inst, period)
+
+
+# ---------------- ③运行期目录隔离看守（260929 实测漏网的机械面） ----------------
+
+def test_files_that_execute_the_write_path_isolate_runtime_dirs():
+    """凡**真执行**起票裁决写路径的测试文件，必须隔离两个运行期目录。
+
+    实测教训（260929 夜）：test_t260917_02_inspection_redirect.py 直接调
+    spawn_inspection_period（桩注入），而本修法给该活动新增了落盘面 ⇒ 夹具数据
+    （period=20260901 / ticket=t260917-01）被打进生产 out/inspection/ 与
+    server/admin.log 共 6 行（KI-161「测试面写生产数据目录」同族，这次是**我们自己的
+    修正**引入的）。本条把它钉成机械看守：命令面文件一旦执行写路径，缺隔离即红。"""
+    import re
+    tests_dir = Path(__file__).resolve().parent
+    call = re.compile(r"(spawn_inspection_period\(|trigger_inspection_period\(|"
+                      r"_with_spawn_decision\(|cmd_trigger\()")
+    offenders = []
+    for f in sorted(tests_dir.glob("test_*.py")):
+        src = f.read_text("utf-8")
+        if not call.search(src):
+            continue
+        has_admin = "SANDBAR_ADMIN_LOG" in src
+        has_ledger = ("SANDBAR_INSPECTION_DIR" in src) or ("ledger_dir" in src)
+        if not (has_admin and has_ledger):
+            offenders.append("%s(admin_log=%s, ledger=%s)" % (f.name, has_admin, has_ledger))
+    assert not offenders, (
+        "以下测试文件执行了「起票裁决」写路径却未隔离运行期目录（夹具会写进生产台账/"
+        "admin.log）：" + "；".join(offenders))
