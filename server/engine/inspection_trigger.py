@@ -941,30 +941,37 @@ def schedule_drift_report(declared: Any, schedule_ids: Any, paused_ids: Any = No
     declared = [{"project","id","enabled"}]（声明面，enabled 与否都要给——反向漂移要看得见）；
     schedule_ids = 调度器上真实存在的 Schedule id 集合；paused_ids = 其中**已暂停**的集合。
 
-    三态（各自点名，绝不混成一笔）：
+    四态（各自点名，绝不混成一笔）：
       - `missing`：声明 enabled=true 却没有 `sandbar-inspection-<实例>` Schedule ⇒ **永不触发**
         （实况：docs-sync / simplify-face——声明在册、实际从不跑，且此前没有任何面会报）；
       - `orphan`：调度器上有 Schedule 但声明里 enabled=false 或已除名 ⇒ 反向漂移（声明说停、
         实际还在跑）；
       - `paused`：Schedule 在但**已暂停** ⇒ 也永不触发（与 missing 同等后果，分开列因为处方不同：
-        missing 要 schedule-up，paused 要 resume）。
+        missing 要 schedule-up，paused 要 resume）；
+      - `tz_missing`：声明里**没写 tz** ⇒ 调度按 Temporal 缺省（UTC）落点，「08:00」实际是本机
+        16:00（260929 实况：simplify-face 接线后 next_action_times 落在 UTC 08:00）——时刻口径
+        不合预期也算漂移，点名而不是让它悄悄错位。
 
-    alarmed = 三者任一非空（调用方据此 exit 1）。id 命名口径=`sandbar-inspection-%s`，与
+    alarmed = 四者任一非空（调用方据此 exit 1）。id 命名口径=`sandbar-inspection-%s`，与
     cmd_schedule_up 单一真源（同处一个文件，改名必同批改）。"""
     prefix = "sandbar-inspection-"
     want: Dict[str, str] = {}
+    tz_missing: List[str] = []
     for item in (declared if isinstance(declared, list) else []):
         if not isinstance(item, dict) or not item.get("id"):
             continue
         if item.get("enabled"):
             want[prefix + str(item["id"])] = str(item.get("project") or "")
+            if not str(item.get("tz") or "").strip():
+                tz_missing.append(prefix + str(item["id"]))
     have = {str(x) for x in (schedule_ids or []) if str(x).startswith(prefix)}
     paused = {str(x) for x in (paused_ids or [])}
     missing = sorted(set(want) - have)
     orphan = sorted(have - set(want))
     paused_live = sorted(x for x in have & set(want) if x in paused)
     return {"missing": missing, "orphan": orphan, "paused": paused_live,
-            "alarmed": bool(missing or orphan or paused_live),
+            "tz_missing": sorted(tz_missing),
+            "alarmed": bool(missing or orphan or paused_live or tz_missing),
             "want": sorted(want), "have": sorted(have)}
 
 
@@ -981,7 +988,7 @@ async def cmd_schedule_drift(args: argparse.Namespace) -> Dict[str, Any]:
             if state.state == "ok" and state.decl is not None:
                 for i in state.decl.instances:
                     declared.append({"project": state.project_key, "id": i.id,
-                                     "enabled": bool(i.enabled)})
+                                     "enabled": bool(i.enabled), "tz": getattr(i, "tz", "")})
     except Exception as e:  # noqa: BLE001
         return _err("声明面不可用：%s: %s" % (type(e).__name__, e))
     if not declared:
@@ -1004,20 +1011,24 @@ async def cmd_schedule_drift(args: argparse.Namespace) -> Dict[str, Any]:
     except Exception as e:  # noqa: BLE001——列表失败=查不了（不许冒充「没有漂移」）
         return _err("调度器列表失败（无法对账，别当「无漂移」）：%s: %s" % (type(e).__name__, e))
     rep = schedule_drift_report(declared, ids, paused)
-    note = ""
+    notes = []
     if rep["missing"]:
-        note = ("声明 enabled 但调度器上无 Schedule——**永不触发**；处方："
-                "inspection_trigger.py schedule-up --instance <实例> --note <谁/为何/频率>")
-    elif rep["orphan"]:
-        note = "调度器上有 Schedule 但声明已 enabled=false/除名——处方：pause/删除该 Schedule 或改声明"
-    elif rep["paused"]:
-        note = "Schedule 已暂停=同样永不触发；处方：resume 或说明为何暂停"
+        notes.append("声明 enabled 但调度器上无 Schedule——**永不触发**；处方："
+                     "inspection_trigger.py schedule-up --instance <实例> --note <谁/为何/频率>")
+    if rep["orphan"]:
+        notes.append("调度器上有 Schedule 但声明已 enabled=false/除名——处方：pause/删除该 Schedule 或改声明")
+    if rep["paused"]:
+        notes.append("Schedule 已暂停=同样永不触发；处方：resume 或说明为何暂停")
+    if rep["tz_missing"]:
+        notes.append("声明缺 tz ⇒ 调度落 Temporal 缺省（UTC）：人读的本地时刻会错位；"
+                     "处方：声明里补 tz（如 Asia/Shanghai）后重跑 schedule-up")
     return _ok({"instances_declared": len(declared),
                 "schedules_on_server": sorted(ids),
                 "missing_schedules": rep["missing"],
                 "orphan_schedules": rep["orphan"],
                 "paused_schedules": rep["paused"],
-                "note": note, "alarmed": rep["alarmed"], "drift": rep["alarmed"]})
+                "tz_missing_schedules": rep["tz_missing"],
+                "note": "；".join(notes), "alarmed": rep["alarmed"], "drift": rep["alarmed"]})
 
 
 def _decl_instance_view(i: Any) -> Dict[str, Any]:
