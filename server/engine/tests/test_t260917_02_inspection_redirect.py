@@ -27,6 +27,17 @@ import inspection_ticketing as tick  # noqa: E402
 import shared  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runtime_dirs(tmp_path, monkeypatch):
+    """260929：本文件**真执行** spawn_inspection_period 活动，而该活动自 260929 起会落
+    「起票裁决」可观测面（台账目录 inspection-spawn.jsonl + admin.log）——必须显式隔离
+    运行期数据目录（KI-161 同族纪律：测试面不得写生产数据目录）。实测未隔离时，本文件的
+    桩夹具（period=20260901 / ticket=t260917-01）被写进生产 out/inspection/ 与
+    server/admin.log 共 6 行。"""
+    monkeypatch.setenv("SANDBAR_INSPECTION_DIR", str(tmp_path / "inspection"))
+    monkeypatch.setenv("SANDBAR_ADMIN_LOG", str(tmp_path / "admin.log"))
+
+
 # ---------------------------------------------------------------- A. 形状判别（R7①）
 
 def test_has_ticket_id_shape_truth_table():
