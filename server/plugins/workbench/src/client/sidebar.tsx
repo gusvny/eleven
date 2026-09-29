@@ -298,8 +298,12 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
-.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+/* t260929-22 gen1（acceptance 打回）：入口段=名字+计数+弹性空档，flex:1 吃掉
+   行内非图标区——1280 宽默认窗下项目名可读可点（行中部点击落入口段不落图标）；
+   name min-width:0 只为 ellipsis 生效，宽度由入口段保证。 */
+.wb-group-entry { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
+.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
@@ -333,7 +337,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
-.wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
+/* t260929-22 gen1：命中区 26→20px（显形 svg 18px 不变）——给入口段让出宽度；
+   三态色板不变。 */
+.wb-view-icon { width:20px; height:20px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
@@ -785,19 +791,24 @@ export function WorkbenchSidebar(props: SidebarProps) {
               {/* t260929-22（GAP A）：项目名行本身=执行器入口（设计稿 260927 §界面与命名：
                   一个项目一行、项目名即 project executor 的入口，不单列 Tick 行）——
                   折叠退到 caret 单独承担（一次点击只做一件事）；五个视图图标语义不变。 */}
-              <div className="wb-group-head" style={{ cursor: 'pointer' }}
-                title={`Open ${g.project.name} executor panel`}
-                onClick={() => handleViewIcon(g.project.key, 'executor')}>
+              <div className="wb-group-head" style={{ cursor: 'pointer' }}>
                 <span className="wb-group-caret" title={collapsed[g.project.key] ? 'Expand' : 'Collapse'}
                   onClick={(e) => { e.stopPropagation(); setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] })) }}>{collapsed[g.project.key] ? '▸' : '▾'}</span>
                 {/* 项目色点（票② R7 拍板 5）：8px 常驻项目色标识，色=projectColor 确定性色板 */}
                 <span className="wb-group-dot" data-wb-psess-dot="" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, flex: 'none', background: projectColor(g.project.key) }} title={g.project.key} />
-                <span className="wb-group-name" data-wb-executor-entry=""
+                {/* gen1 可达性修（acceptance 打回）：入口=名字+计数+弹性空档整段
+                    （.wb-group-entry，flex:1 吃掉行内非图标区）——普通窗口宽度下项目名
+                    不再被图标簇挤成 0 宽、行中部点击必落入入口段而非图标；图标簇命中区
+                    26→20px（显形 svg 18px 不变）。 */}
+                <span className="wb-group-entry" data-wb-executor-entry=""
                   role="button" tabIndex={0}
+                  title={`Open ${g.project.name} executor panel`}
                   aria-label={`Open ${g.project.name} executor panel`}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'executor') }}
-                  onClick={() => handleViewIcon(g.project.key, 'executor')}>{g.project.name}</span>
-                <span className="wb-group-count">{g.tickets.length || ''}</span>
+                  onClick={() => handleViewIcon(g.project.key, 'executor')}>
+                  <span className="wb-group-name">{g.project.name}</span>
+                  <span className="wb-group-count">{g.tickets.length || ''}</span>
+                </span>
                 {/* 视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
                     按行项目分流：工单列表=该项目 ProjectKey 过滤、模型路由=该项目主目录
                     model-routes.yaml；立项单（t260827-01）=全量立项清单（跨项目语义单元，

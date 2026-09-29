@@ -47946,8 +47946,12 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
-.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+/* t260929-22 gen1（acceptance 打回）：入口段=名字+计数+弹性空档，flex:1 吃掉
+   行内非图标区——1280 宽默认窗下项目名可读可点（行中部点击落入口段不落图标）；
+   name min-width:0 只为 ellipsis 生效，宽度由入口段保证。 */
+.wb-group-entry { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
+.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
@@ -47981,7 +47985,9 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
-.wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
+/* t260929-22 gen1：命中区 26→20px（显形 svg 18px 不变）——给入口段让出宽度；
+   三态色板不变。 */
+.wb-view-icon { width:20px; height:20px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
@@ -48338,8 +48344,6 @@ function WorkbenchSidebar(props) {
 						}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-group-head",
 							style: { cursor: "pointer" },
-							title: `Open ${g.project.name} executor panel`,
-							onClick: () => handleViewIcon(g.project.key, "executor"),
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-group-caret",
@@ -48366,21 +48370,24 @@ function WorkbenchSidebar(props) {
 									},
 									title: g.project.key
 								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-name",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "wb-group-entry",
 									"data-wb-executor-entry": "",
 									role: "button",
 									tabIndex: 0,
+									title: `Open ${g.project.name} executor panel`,
 									"aria-label": `Open ${g.project.name} executor panel`,
 									onKeyDown: (e) => {
 										if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "executor");
 									},
 									onClick: () => handleViewIcon(g.project.key, "executor"),
-									children: g.project.name
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-count",
-									children: g.tickets.length || ""
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-group-name",
+										children: g.project.name
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-group-count",
+										children: g.tickets.length || ""
+									})]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-view-icons",
