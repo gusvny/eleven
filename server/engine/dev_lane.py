@@ -253,6 +253,14 @@ ARCHIVE_PATCH_ID = "dev-lane-archive-ticket"
 # 明细，逐项相同才判停）；判停即转人审（_blocked_over_limit，retry_qc 可复活）。
 # 同形布尔门：老在途票 history 无此标记 → patched()=False → 旧路径逐字不变。
 INTEG_STALL_PATCH_ID = "t260929-integ-stall-guard"
+# 260929 宿主令直修（t260929-22 实案）：**冲突消解交付失败 ⇒ 先把 merge 复位再转人工**。
+# 病根：agent 交付被判失败时引擎既没提交也没 abort，把 UU 留在泳道 ⇒ 之后每一轮主同步都在
+# 同一批文件上重新冲突（"同批文件反复冲突"成永久死锁，直到有人进泳道手动 git 收尾）。
+# 修法：两条失败路径（agent 抛异常 / 交付非 ok）在 blocked 之前调 settle_conflict_resolution
+# 的 abort 分支复位（git merge --abort，兜底 reset --merge HEAD），并复位同批计数器 ⇒
+# 「永久死锁」降级为「干净重试一次」（上限 MAX_CONFLICT_ROUNDS 仍然封顶）。
+# 同形布尔门：老在途票 history 无此标记 → patched()=False → 旧路径逐字不变。
+MAIN_SYNC_RECOVERY_PATCH_ID = "t260929-main-sync-abort-on-failed-resolve"
 
 # t260903-02 speedup 3: a third review_plan verdict, "conditional pass" —
 # verdict=conditional for cosmetic nits does not count as a send-back round; comments go
@@ -1587,6 +1595,30 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         return note_fmt % (round_no, self._agent_failed_why(
             res, default="agent 报失败：%s" % ((res.summary or res.status)[:200])))
 
+    async def _main_sync_abort(self, wt: str, round_no: int) -> str:
+        """冲突消解失败后的 merge 复位（260929 宿主令直修；返回一句可上票面的结果文案）。
+
+        为什么必须复位：半合并（UU）留在泳道里，下一轮主同步会在**同一批文件**上重新冲突，
+        于是「同批文件反复冲突」守卫把票永久封死（t260929-22 实案连撞 3 轮，最后只能人工进
+        泳道 git 收尾）。复位后下一轮从干净树重试——cap/同批守卫仍然封顶，不会变成活锁。
+        失败/成功都**如实**进票面文案（不许把复位说成成功）。"""
+        try:
+            raw = await workflow.execute_activity(
+                settle_conflict_resolution,
+                ConflictSettleArgs(ticket_id=self.ticket_id, worktree=wt,
+                                   base_ref="main", round_no=round_no, abort=True),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:  # noqa: BLE001——复位失败不许遮蔽原失败原因
+            return "｜merge 复位尝试异常（%s: %s）——泳道可能仍是合并进行中态，需人工处置" % (
+                type(e).__name__, e)
+        res = raw if isinstance(raw, ConflictSettleResult) else ConflictSettleResult(
+            ok=bool(getattr(raw, "ok", False)) if not isinstance(raw, dict) else bool(raw.get("ok")),
+            error=str(getattr(raw, "error", "") if not isinstance(raw, dict)
+                      else (raw.get("error") or "")))
+        if res.ok:
+            return "｜merge 已复位（MERGE_HEAD 已清），下一轮主同步从干净树重试"
+        return "｜merge 复位失败：%s——泳道仍是合并进行中态，需人工处置" % (res.error or "未知")
+
     # ---------- t260917-08：移交命令债表（meta['env_handover_pending']） ----------
     # agent 段沙箱受限期间交接的验证命令，等后续机械段（run_integration_tests 的
     # worker 执行面）代跑。单源消费面：put 在 _run_agent_step 回执归一后，take/clear
@@ -2755,19 +2787,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             try:
                                 cres = await self._run_agent_step("implement", msolve_ctx)
                             except Exception as e:
-                                await self._blocked("implement", format_agent_stage_failure(
+                                _why = format_agent_stage_failure(
                                     self.ticket_id, "implement", e,
-                                    gen=self._gen("implement")))
+                                    gen=self._gen("implement"))
+                                if workflow.patched(MAIN_SYNC_RECOVERY_PATCH_ID):
+                                    # 260929：先把 merge 复位再转人工（不给下一轮留 UU 死锁）
+                                    _why += await self._main_sync_abort(_st_wt, conflict_rounds)
+                                    prev_conflict_files = []
+                                    conflict_rounds = 0
+                                await self._blocked("implement", _why)
                                 _sync_stop = "blocked"
                                 break
                             if cres.status != "ok":
                                 # 归因构造走 _conflict_failed_note 单点（t260922-18：
                                 # 与 M3 变体站共用，源码锁字面量/调用计数恒 2/5）
-                                await self._blocked(
-                                    "implement",
-                                    self._conflict_failed_note(
-                                        cres, "主同步冲突消解第 %d 轮：%s",
-                                        conflict_rounds))
+                                _why = self._conflict_failed_note(
+                                    cres, "主同步冲突消解第 %d 轮：%s", conflict_rounds)
+                                if workflow.patched(MAIN_SYNC_RECOVERY_PATCH_ID):
+                                    _why += await self._main_sync_abort(_st_wt, conflict_rounds)
+                                    prev_conflict_files = []
+                                    conflict_rounds = 0
+                                await self._blocked("implement", _why)
                                 _sync_stop = "blocked"
                                 break
                             sraw = await workflow.execute_activity(

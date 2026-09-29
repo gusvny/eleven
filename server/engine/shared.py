@@ -4497,6 +4497,10 @@ class ConflictSettleArgs:
     branch: str = ""
     base_ref: str = ""
     round_no: int = 0                         # the conflict resolution round (written into the commit message and the log)
+    # 260929（宿主令直修）：复位模式——冲突消解交付失败时**先把 merge 状态复位**（git merge
+    # --abort / reset --merge 兜底）再转人工，别把半合并的 UU 留在泳道里（那会让之后每一轮
+    # 主同步都在同一批文件上重新冲突，直到有人进泳道手动 git）。additive 键：旧调用零影响。
+    abort: bool = False
 
 
 @dataclass
