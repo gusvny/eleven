@@ -5031,6 +5031,32 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
+    if bool(getattr(args, "abort", False)):
+        # 260929（宿主令直修）：**复位模式**。冲突消解 agent 交付失败时由 workflow 调用：
+        # 把「合并进行中」状态清掉，使下一轮主同步能从干净树重试，而不是把 UU 留在泳道里
+        # 反复撞「同批文件反复冲突」（t260929-22 实案：连 3 轮撞同一文件，直到人工进泳道
+        # git 收尾）。幂等：本就没有合并在进行＝已复位＝ok（不谎报做过什么）。
+        p0 = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
+        if p0.returncode != 0:
+            return ConflictSettleResult(ok=True, commit="",
+                                        error="", remaining_files=[])
+        p1 = _git(["merge", "--abort"], wt)
+        if p1.returncode != 0:
+            # 兜底 reset --merge HEAD：把索引与工作树拉回合并前（**不用 --hard**——工作树里
+            # agent 的改动宁可留着让人看见，也不静默丢弃）。
+            p2 = _git(["reset", "--merge", "HEAD"], wt)
+            if p2.returncode != 0:
+                return ConflictSettleResult(
+                    ok=False, error="merge --abort 失败（%s），reset --merge 兜底亦失败（%s）——"
+                                    "泳道仍是合并进行中态，需人工处置"
+                                    % ((p1.stderr or "").strip()[-160:],
+                                       (p2.stderr or "").strip()[-160:]),
+                    remaining_files=[])
+        p3 = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
+        if p3.returncode == 0:
+            return ConflictSettleResult(ok=False,
+                                        error="复位后 MERGE_HEAD 仍在场（合并态未清）——需人工处置")
+        return ConflictSettleResult(ok=True, commit="", error="", remaining_files=[])
     # No MERGE_HEAD = no merge in progress (the agent mistook ordinary workspace
     # changes for conflicts, or prep's merge left nothing behind) — report honestly,
     # never fake a merge commit
