@@ -137,6 +137,11 @@ async function stubConsole(page) {
     return json(route, { ok: true, result: {} })
   })
   await page.route('**/sandbar-watchdog/api/status**', (route) => json(route, { ok: true, projects: [] }))
+  // 面板 settings 桩=确定性 declared:false（夹具项目不声明守望者——声明是宿主动作，
+  // out-of-scope 守卫）：Chat 分支必走「点名原因」提示，绝不触真实会话创建机器
+  // （夹具项目无工作区，放行到真台会以 console.error 收场——闸红实锤）。
+  await page.route('**/sandbar-executor-panel/api/settings**', (route) =>
+    json(route, { ok: true, declared: false, enabled: false, executor_session: '', file: null }))
   // 面板页桩：只顶替面板页面本体（console 怎么到达它才是本场景对象），页内归 t260929-03。
   await page.route('**/sandbar-executor-panel/**', (route) => {
     const url = new URL(route.request().url())
@@ -248,7 +253,11 @@ async function scenarioBoardIconStillWorks(page) {
   if (!head) return 'project row not rendered (cannot run regression leg)'
   const icon = head.locator('.wb-view-icon').first()
   if (!(await icon.count())) return 'no view icon inside the project row (existing five-view regression face broke)'
-  await icon.click({ timeout: 8000 }).catch(async () => { await icon.click({ force: true, timeout: 8000 }) })
+  // gen3 图标簇=悬停现形（静止 opacity:0 + pointer-events:none）——按用户方式来：
+  // 先悬停行现形条，再正常点击（force 点击静止态坐标会打到条下方的行内容=误触）。
+  await head.hover()
+  await page.waitForTimeout(400)
+  await icon.click({ timeout: 8000 })
   const ok = await waitFor(async () =>
     (await page.locator('.wb-card[data-ticket-id]', { hasText: FIXTURE_TICKET.id }).count()) > 0, 8000)
   if (!ok) return `board view icon click no longer shows the ticket list @ ${await snap(page)}`
@@ -283,7 +292,7 @@ async function run() {
   const consoleErrors = []
   const page = await bctx.newPage()
   page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)))
-  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)) })
+  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200) + ' @' + (m.location()?.url || '').split('/').pop() + ':' + (m.location()?.lineNumber ?? '?')) })
 
   await stubConsole(page)
   // domcontentloaded（networkidle 在轮询型 console 上不可收敛——闸红归因：导航超时）；
