@@ -90,17 +90,6 @@ REROUTE_MARK = "环境面/已知红面，不重跑"   # B2（260929）新归宿�
 STATS = {"ok": 0, "fail": 0}
 
 
-def _dbg_dump(tag, snap):
-    import json as _j, os as _o
-    try:
-        with open(_o.path.join("/tmp/t09fix", "snap-%s.json" % tag), "w", encoding="utf-8") as f:
-            _j.dump({"handoffs": (snap or {}).get("handoffs"), "stage": (snap or {}).get("stage"),
-                     "stage_state": (snap or {}).get("stage_state"),
-                     "snap_text": _j.dumps(snap, ensure_ascii=False)}, f, ensure_ascii=False)
-    except Exception as e:
-        print("dbg dump failed:", e)
-
-
 def check_fn(fail):
     def check(cond, msg):
         r = fail.check(cond, msg)
@@ -235,7 +224,6 @@ def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
     snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, POLL_DRIVE)
     rounds = t09.arb_rounds(stub_log)
     txt = t09.snap_text(snap)
-    _dbg_dump("ghost", snap)
     print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
           flush=True)
     check(snap.get("stage_state") == "blocked",
@@ -243,10 +231,12 @@ def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
     check(rounds == 6,
           "不在册子用例 计数算术：闸拦为空 ⇒ 已知红豁免车道（不计轮）→ 第 6 判决撞"
           "**豁免上限**封（上限本体不拆），实际 arb=%d" % rounds)
-    # 静默守卫（本相的真语义面，B2 前后一致）：探针照发 + 留痕同面——「不在册」探针
-    # 结论与陈旧红项名都必须可读，绝不静默当全绿。
-    check("不在册" in txt and "ghost_stale_name" in txt and "复跑未证全绿" in txt,
-          "不在册子用例 探针照发且留痕同面（不在册结论 + 红项名 + 未证全绿）")
+    # 静默守卫（本相的真语义面，B2 前后一致）：本轮走**已知红豁免车道**（闸拦为空 ⇒
+    # 零新增红，260923 口径），故不发抖动探针（探针只服务「红项名单非空且不在已知红
+    # 车道」的轮）——真正要守的是**留痕同面**：豁免结论（「不计入」）、「不在册」结论
+    # 与陈旧红项名三者都必须可读，死源绝不静默当全绿。
+    check("不计入" in txt and "不在册" in txt and "ghost_stale_name" in txt,
+          "不在册子用例 豁免轮留痕同面（不计入 + 不在册 + 红项名，死源不静默）")
     check("不在册" in txt,
           "不在册子用例 票面点名「不在册」（fail-closed 可见，绝不静默当全绿）；本夹具轮"
           "闸拦为空 ⇒ 红面走已知红豁免车道（不计轮），上限照旧兜底——留痕不因外置道而减")
