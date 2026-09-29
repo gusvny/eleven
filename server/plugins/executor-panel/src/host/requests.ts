@@ -14,6 +14,7 @@
  */
 
 import * as fs from 'node:fs'
+import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
 
 /**
  * 请求种类：开放词表（设计稿 260927 常见=决定/授权/签字/提问，但引擎事件种类不封口——
@@ -98,8 +99,8 @@ export function appendRequest(
   body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; expires_at?: unknown },
   nowMs: number,
 ): { ok: true; row: RequestRow } | { ok: false; error: string } {
-  if (typeof key !== 'string' || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(key)) {
-    return { ok: false, error: `project 形状不合法：${String(key)}` }
+  if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
+    return { ok: false, error: malformedProjectMessage(key) }
   }
   if (typeof body.question !== 'string' || body.question.trim() === '') {
     return { ok: false, error: 'question 必须是非空字符串（一句人话的问句——设计稿措辞纪律）' }
@@ -140,8 +141,8 @@ export function appendRequest(
 export function answerRequest(
   io: LedgerIo, env: NodeJS.ProcessEnv, key: string, id: unknown, answer: unknown, by: string, nowMs: number,
 ): { ok: true; answerRow: AnswerRow } | { ok: false; error: string } {
-  if (typeof key !== 'string' || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(key)) {
-    return { ok: false, error: `project 形状不合法：${String(key)}` }
+  if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
+    return { ok: false, error: malformedProjectMessage(key) }
   }
   if (typeof id !== 'string' || id === '') return { ok: false, error: 'id 必须是非空字符串' }
   if (typeof answer !== 'string' || answer.trim() === '') return { ok: false, error: 'answer 必须是非空字符串' }

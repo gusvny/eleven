@@ -1,0 +1,289 @@
+// sc_executor_entry_console.mjs — t260929-22 console 左栏执行器入口（灰盒 L3，真浏览器+隔离台+API 桩）。
+//
+// Intent（用户可感知行为；真源=notes/discussions/260927-项目执行器-设计稿.md §界面与命名 + 工单 scope①）：
+//   E1 入口=项目名行本身：左栏一个项目一组，点**项目名行**（组头，不是组内某个图标）
+//      → 中列打开该项目的执行器面板（面板带该项目的 project 标识）。
+//   E2 顶部 `Executor / Chat` 切换器：Executor=面板视图；点 Chat 翻到对话视图
+//      （面板退场）；点回 Executor 面板回来——双向可翻。
+//   E3 设计负形：没有单独的「Tick 行」、没有单独「打开对话」按钮——入口就是项目名行
+//      （E1 已证），左栏项目组内不得再出现第二个执行器入口形状。
+//   E4 既有五视图图标零回归：点组内板视图图标仍出工单列表（夹具行在）。
+//   E5 全旅程零 pageerror / console.error（渲染链卫生）。
+//
+// 分层与 intent 分工（防重复）：
+//   - t260929-03-executor-panel-page 锁面板**页面内部**（五 tab/降级态/beep）——本场景
+//     只锁 console 侧「怎么到达面板」，面板内容用桩页顶替（page.route），不复断页内。
+//   - grants 上游与 400 文案归同票 sc_grants_upstream_400_text.mjs（节点半）。
+//   - developer L1（sidebar 单测）不同层：本场景锁 payload→像素真渲染链。
+//
+// 执行契约（t260904-12 三态）：隔离台/playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；
+// 入口未落地=FAIL 点名（TDD 期红属预期，anti-proof：pre-fix 树上 E1/E2/E3 红）。
+// 红线：永不接触生产 console(3099)；台由 lib_stage_console 供给（每树一台）。
+
+import { ensureStageConsole } from '../lib_stage_console.mjs';
+import { existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const REPO = process.cwd()
+const BASE = (await ensureStageConsole()).base
+
+const PROJ = 'entryproj'          // 夹具项目 key（进面板 URL 断言）
+const PROJ_NAME = 'Entry Project' // 夹具项目显示名（点它=入口）
+const PANEL_STUB_MARKER = 'EXECUTOR_PANEL_STUB_OK'
+
+// ---------------------------------------------------------------- results
+
+const results = []
+const STATUSES = new Set(['pass', 'fail', 'env_fail', 'na'])
+function record(name, status, detail = '') {
+  if (!STATUSES.has(status)) throw new Error(`非法状态词 ${status}（词表 pass/fail/env_fail/na）`)
+  results.push({ name, status, detail })
+  console.log(`[${status.toUpperCase()}] ${name}${detail ? ' — ' + detail : ''}`)
+}
+function summarize() {
+  const p = results.filter(r => r.status === 'pass').length
+  const e = results.filter(r => r.status === 'env_fail').length
+  const n = results.filter(r => r.status === 'na').length
+  const f = results.filter(r => r.status === 'fail').length
+  const allNa = results.length > 0 && n === results.length
+  console.log(`SUMMARY pass=${p} fail=${f} env_fail=${e} na=${n}`)
+  process.exit(f > 0 || allNa ? 1 : e > 0 ? 2 : 0)
+}
+
+// ---------------------------------------------------------------- fixtures
+
+const FIXTURE_TICKET = {
+  id: 't26092922a', role: 'developer', status: 'dispatched',
+  title: 'Fixture ticket for entry regression', workflow: 'dev-lane',
+  stage: 'implement', stage_state: 'running', handoff_count: 0, pending_count: 0,
+  worktree: '/tmp/fixture', updated: '—', updated_ts: 0,
+}
+
+// ---------------------------------------------------------------- helpers
+
+async function waitFor(cond, ms) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < ms) {
+    try { if (await cond()) return true } catch { /* keep polling */ }
+    await new Promise(r => setTimeout(r, 250))
+  }
+  try { return await cond() } catch { return false }
+}
+
+async function snap(page) {
+  try {
+    const txt = await page.evaluate(() => (document.body.textContent || '').slice(0, 200))
+    return JSON.stringify(txt)
+  } catch { return '(snapshot unavailable)' }
+}
+
+function mainRepoRoot() {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'],
+      { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
+    if (common) return resolve(REPO, common, '..')
+  } catch { /* not a worktree */ }
+  return REPO
+}
+
+async function loadPlaywright() {
+  const candidates = ['playwright-core']
+  const main = mainRepoRoot()
+  for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
+    'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
+    const p = join(main, sub)
+    if (existsSync(p)) candidates.push(pathToFileURL(p).href)
+  }
+  for (const c of candidates) {
+    try { return await import(c) } catch { /* next */ }
+  }
+  return null
+}
+
+async function launchBrowser(pw) {
+  for (const opts of [{ channel: 'chrome', headless: true }, { headless: true }]) {
+    try { return await pw.chromium.launch(opts) } catch { /* next */ }
+  }
+  return null
+}
+
+const json = (route, b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
+
+async function stubConsole(page) {
+  // 低位兜底（先注册=低优先）：未知 API 一律 ok:true 空结果，静态资源放行。
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.startsWith('/sandbar-workbench/api/') || url.pathname.startsWith('/sandbar-watchdog/api/')) {
+      return json(route, { ok: true, result: {} })
+    }
+    return route.fallback()
+  })
+  // 高位夹具桩（后注册=高优先）。
+  await page.route('**/sandbar-workbench/api/wf/projects', (route) =>
+    json(route, { ok: true, result: { projects: [{ key: PROJ, name: PROJ_NAME, dirs: [] }], quarantined: [] } }))
+  await page.route('**/sandbar-workbench/api/wf/tickets**', (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/\/+$/, '')
+    if (path === '/sandbar-workbench/api/wf/tickets') return json(route, { ok: true, result: { tickets: [FIXTURE_TICKET] } })
+    return json(route, { ok: true, result: {} })
+  })
+  await page.route('**/sandbar-watchdog/api/status**', (route) => json(route, { ok: true, projects: [] }))
+  // 面板页桩：只顶替面板页面本体（console 怎么到达它才是本场景对象），页内归 t260929-03。
+  await page.route('**/sandbar-executor-panel/**', (route) => {
+    const url = new URL(route.request().url())
+    const proj = url.searchParams.get('project') ?? ''
+    const html = `<!doctype html><html><body data-panel-project="${proj}"><div id="panel-stub">${PANEL_STUB_MARKER}:${proj}</div></body></html>`
+    return route.fulfill({ contentType: 'text/html', body: html })
+  })
+}
+
+/** 左栏夹具项目组头（项目名行）。锚 class 只为定位（rendering-side hook，
+ *  t260925-18 同纪律：定位可以锚 class，断言不锚实现细节）。 */
+async function projectRow(page) {
+  const head = page.locator('.wb-group-head', { hasText: PROJ_NAME }).first()
+  if (!(await waitFor(async () => (await head.count()) > 0, 12000))) return null
+  return head
+}
+
+async function panelVisible(page, proj) {
+  return waitFor(async () => {
+    const txt = await page.evaluate(() => {
+      const f = [...document.querySelectorAll('iframe')].find(f => /sandbar-executor-panel/.test(f.src || ''))
+      return { iframeSrc: f?.src ?? '', body: document.body.textContent || '' }
+    })
+    if (proj) {
+      if (txt.iframeSrc && /project=/.test(txt.iframeSrc) && decodeURIComponent(txt.iframeSrc).includes(proj)) return true
+      return txt.body.includes(`${PANEL_STUB_MARKER}:${proj}`)
+    }
+    return !!(txt.iframeSrc || txt.body.includes(PANEL_STUB_MARKER))
+  }, 8000)
+}
+
+// ---- E1 入口=项目名行
+
+async function scenarioEntryOpensPanel(page) {
+  const head = await projectRow(page)
+  if (!head) return `project group row for "${PROJ_NAME}" not rendered in left column (projects stub not consumed?)`
+  await head.click()
+  if (!(await panelVisible(page, PROJ))) {
+    return `clicking the project-name row did not open the executor panel for ${PROJ} @ ${await snap(page)}`
+  }
+  return null
+}
+
+// ---- E2 Executor / Chat 切换器
+
+async function scenarioSwitcherFlips(page) {
+  // 切换器两个段都必须在（设计定名 Executor / Chat——英文界面标签契约 260925）。
+  const ex = page.getByText('Executor', { exact: true }).first()
+  const chat = page.getByText('Chat', { exact: true }).first()
+  if (!(await ex.count())) return 'Executor segment of the switcher not found in the executor view'
+  if (!(await chat.count())) return 'Chat segment of the switcher not found in the executor view'
+  await chat.click()
+  const chatShown = await waitFor(async () => {
+    const txt = await page.evaluate(() => ({
+      iframe: [...document.querySelectorAll('iframe')].some(f => /sandbar-executor-panel/.test(f.src || '')),
+      marker: (document.body.textContent || '').includes(PANEL_STUB_MARKER),
+    }))
+    return !txt.iframe && !txt.marker
+  }, 8000)
+  if (!chatShown) return 'clicking Chat did not leave the panel view (panel still mounted)'
+  await ex.click()
+  if (!(await panelVisible(page, PROJ))) return 'clicking Executor did not bring the panel back (switcher is one-way)'
+  return null
+}
+
+// ---- E3 设计负形：无第二入口
+
+async function scenarioNoSeparateEntry(page) {
+  const m = await page.evaluate((projName) => {
+    const heads = [...document.querySelectorAll('.wb-group-head')]
+    const head = heads.find(h => (h.textContent || '').includes(projName))
+    const group = head?.parentElement
+    return {
+      hasGroup: !!group,
+      groupText: (group?.textContent || ''),
+      // 组内可点击行数（组头 + 工单行……第二入口若存在会以行/按钮形状出现）
+      clickables: group ? group.querySelectorAll('button, [role="button"], .wb-card, .wb-group-head').length : -1,
+    }
+  }, PROJ_NAME)
+  if (!m.hasGroup) return `project group for ${PROJ_NAME} disappeared (view state lost?)`
+  if (/open\s+(the\s+)?(executor|panel|conversation)/i.test(m.groupText)) {
+    return 'design ban: a separate "open conversation/panel" affordance appeared inside the project group'
+  }
+  if (/(^|\W)tick(\W|$)/i.test(m.groupText)) {
+    return 'design ban: a separate Tick row appeared inside the project group'
+  }
+  return null
+}
+
+// ---- E4 既有视图图标零回归
+
+async function scenarioBoardIconStillWorks(page) {
+  const head = await projectRow(page)
+  if (!head) return 'project row not rendered (cannot run regression leg)'
+  const icon = head.locator('.wb-view-icon').first()
+  if (!(await icon.count())) return 'no view icon inside the project row (existing five-view regression face broke)'
+  await icon.click()
+  const ok = await waitFor(async () =>
+    (await page.locator('.wb-card[data-ticket-id]', { hasText: FIXTURE_TICKET.id }).count()) > 0, 8000)
+  if (!ok) return `board view icon click no longer shows the ticket list @ ${await snap(page)}`
+  return null
+}
+
+// ---- E5 渲染链卫生
+
+async function scenarioHygiene(pageErrors, consoleErrors) {
+  if (pageErrors.length) return `pageerror(s): ${JSON.stringify(pageErrors.slice(0, 3))}`
+  if (consoleErrors.length) return `console.error(s): ${JSON.stringify(consoleErrors.slice(0, 3))}`
+  return null
+}
+
+// ---------------------------------------------------------------- main
+
+async function run() {
+  const ctx = { browser: null, pw: null }
+  try { ctx.pw = await loadPlaywright() } catch { /* treated as missing below */ }
+  if (!ctx.pw) {
+    record('S0 playwright', 'env_fail', 'playwright-core 不可解析（KI-036 家族：ui-check 依赖缺席，恢复后自动生效）')
+    summarize()
+  }
+  ctx.browser = await launchBrowser(ctx.pw)
+  if (!ctx.browser) {
+    record('S0 chromium', 'env_fail', '无可启动的 chromium/chrome（headless）')
+    summarize()
+  }
+
+  const bctx = await ctx.browser.newContext()
+  const pageErrors = []
+  const consoleErrors = []
+  const page = await bctx.newPage()
+  page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)))
+  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)) })
+
+  await stubConsole(page)
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(3000)
+
+  const failWith = async (name, e) => record(name, 'fail', `${String(e).slice(0, 140)} @ ${await snap(page)}`)
+  const run1 = async (name, fn) => {
+    try {
+      const err = await fn(page)
+      if (err) record(name, 'fail', err)
+      else record(name, 'pass')
+    } catch (e) { await failWith(name, e) }
+  }
+
+  await run1('E1 project-name row opens the executor panel', scenarioEntryOpensPanel)
+  await run1('E2 Executor/Chat switcher flips both ways', scenarioSwitcherFlips)
+  await run1('E3 no separate Tick row / open-conversation button', scenarioNoSeparateEntry)
+  await run1('E4 existing board view icon still works', scenarioBoardIconStillWorks)
+  await run1('E5 zero pageerror / console.error', () => scenarioHygiene(pageErrors, consoleErrors))
+
+  await bctx.close().catch(() => {})
+  await ctx.browser.close().catch(() => {})
+  summarize()
+}
+
+await run()

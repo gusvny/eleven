@@ -1873,6 +1873,18 @@ SCENARIOS = [
      "面板节点半真实路由契约（t260929-03，灰盒 L2/L3，经 harness seam 驱动真实路由面，离线零 docker 零浏览器；seam 协议=lib_panel_harness.mjs 头注）：R1 请求台账 append-only 追加后 waiting 且绝不自动答复；R2 答复按 id 闭行不删原行（审计链完整）；R3 缝重启后未答行原样在（长保留不变式「未答请求永不消失」）；R4 畸形输入纪律——台账坏 JSON/半行计数上报不静默丢且合法行照常服务、POST 非 JSON 体 4xx 拒收不 500；R5 project 形状白名单 GET/POST 一律 400、非 GET 未知路由 405（契约刚性）；S1 settings 读面工厂默认溯源可答「谁定的」；S2 validate-on-write（KI-148/149+installer 先例）——坏声明（未知键）saved:false+人类可读原因+盘上 watchdog.json 字节不变，好声明落盘且 GET 回读新值、溯源翻转为 file#path（证明过了装载器）；G1 授权=模板推导（决定 10/15）——workbench 不可达显式降级对象绝不空列表冒充「无授权」，模板桩可达时 human 出口模板出 sign 行、inspection 族无 pause 行（capability 过滤）。harness 缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：页面渲染/降级态/beep 归 t260929-03-executor-panel-page；watchdog status 键集归 t260928-28-watchdog-status-surface",
      "node integration/t260929-03/sc_executor_panel_api.mjs", "ro", "serial"),
 
+    # ---- t260929-22: console 执行器入口 + grants 上游生产者 + 400 文案点名判据 ----
+    # 与 t260929-03 族 intent 不同面：彼锁面板页内/路由行为本身，本组锁「人怎么到达
+    # 面板」（左栏项目名行=入口+Executor/Chat 切换器，真源=260927 设计稿 §界面与命名）、
+    # 「生产形态下 grants 上游可由构造得出」（未设环境变量也不得出现缺配置类降级理由）
+    # 与「畸形 project 的 400 文案三要素」（点名参数/要求/收到什么——t260929-18 家族）。
+    ("t260929-22-executor-entry-console",
+     "console 左栏执行器入口 payload→像素（t260929-22，灰盒 L3，真浏览器+隔离台+API 桩，红线零接触 3099；真源=260927 设计稿 §界面与命名）：E1 入口=项目名行本身——点左栏项目组头（非组内图标）→中列打开该项目执行器面板（带该项目 project 标识）；E2 顶部 Executor/Chat 切换器双向翻（Chat=面板退场、Executor=面板回来）；E3 设计负形——项目组内不得出现单独 Tick 行或单独「打开对话」按钮（入口就是项目名行）；E4 既有五视图图标零回归（板图标仍出工单列表夹具行）；E5 全旅程零 pageerror/console.error。面板页内容用桩顶替（页内归 t260929-03-executor-panel-page）；grants/400 文案归 t260929-22-grants-upstream-400-text。playwright/chromium/隔离台缺席=ENV_FAIL exit 2（KI-036 家族）；入口未落地=FAIL 点名（TDD 红属预期=anti-proof，arbitrate/merge 期必须绿）",
+     "node integration/t260929-22/sc_executor_entry_console.mjs", "browser-free"),
+    ("t260929-22-grants-upstream-400-text",
+     "grants 上游生产者×400 文案点名判据（t260929-22，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：B1 生产形态（未设 SANDBAR_WORKBENCH_BASE）下 grants 降级理由永远不得是缺配置类（unset/not wired）——基址须由构造（请求 origin）得出，可达性类降级（HTTP/网络错）仍合法（显式降级纪律保留）；B2 强形态——harness 同源挂 /sandbar-workbench/api/wf/workflows 桩（缝扩展 workbenchStub:true，向后兼容）后 grants 必须 ok:true+degraded:false 出推导行，绝不降级对象冒充；C1–C4 畸形/缺失 project 的 400 文案三要素契约（提及 project 参数∧写明要求形状∧写明收到什么、缺失时不得裸冒号收尾）逐面锁 GET settings 无参/非法键、GET grants 空键、POST answer 空键；C5 兄弟分支分级锚——未知 settings 操作 422 文案含收到的 op 值与合法集合 save|revoke|sleep（点名判据家族可接受先例，钉住防退化）。intent 分工：400 状态刚性归 t260929-03-executor-panel-api R5（彼锁状态本场景只锁文案层）；env base 显式指向桩的 ok:true 归同票 G1（彼锁显式基址、本条锁同源无环境变量生产形态）。harness/缝缺席=FAIL 点名（TDD 红属预期=anti-proof，arbitrate/merge 期必须绿）",
+     "node integration/t260929-22/sc_grants_upstream_400_text.mjs", "ro", "serial"),
+
     # ---- t260929-04: wake delivery（最后一跳接真宿主 API：排队简报×已消化镜像×自醒排除）----
     # 五条共享一条夹具缝：继承 t260928-28 lib_watchdog_harness.Harness（协议命令扩展
     # 见 integration/t260929-04/lib_wake_harness.py 头注——sessionController 桩 +

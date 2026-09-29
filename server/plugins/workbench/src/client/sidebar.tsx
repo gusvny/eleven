@@ -88,6 +88,9 @@ import { TicketRowCard } from './ticket-row-card.tsx'
 // t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
 // 四态单点投影 tier，不另起状态词表；node 可裸 import UT 直测）。
 import { sortMergedTickets } from './ticket-list-model.ts'
+// t260929-22 执行器入口视图（GAP A）：项目行=入口，中列 Executor/Chat 切换器；
+// 判定纯层在 executor-view-model.ts（tests/executor-entry-model.mjs 看守）。
+import { ExecutorView } from './executor-view.tsx'
 // t260915-19 左栏收录巡检票：分拣/降级/进展纯函数与端点串单点住 host 层
 // （node 可裸 import 黑盒单测，tests/t260915-19-sidebar-inspection.mjs 看守）。
 // 照搬取舍收拢（review gen2 落实项）：①viewProject 兜底首项目=openEpic 先例；
@@ -219,7 +222,7 @@ interface SidebarProps {
   views: MiddleViews
 }
 
-type RightView = 'board' | 'docs' | 'routes' | 'epics'
+type RightView = 'board' | 'docs' | 'routes' | 'epics' | 'executor'
 
 /** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
  *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
@@ -691,6 +694,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
     setRightView(view)
   }, [])
 
+  // t260929-22（GAP A）：按面板声明的会话 id 打开 executor 对话——直接走平台
+  // sessions.open（项目内会话 tab 的 openSession 链收敛在 hook 内部，不外露）；
+  // throw（未列出 id）= false，ExecutorView 出显式提示，不静默。
+  const openExecutorSessionById = useCallback((sessionId: string): boolean => {
+    try { sessions.open(sessionId); return true } catch (err) {
+      console.warn('[workbench] open executor session failed:', err)
+      return false
+    }
+  }, [sessions])
+
   /** 项目组：注册表顺序。进行中工单常列；已完成工单在 sandbar 驻留窗口内也列（灰绿标记）。 */
   // 巡检行分拣（t260915-19 方案 v2）：按行 project（t260915-20 起=ProjectKey SA
   // 真源）归位——命中在册项目进对应组、空/不在册（20 之前老票、注册表隔离 key、
@@ -769,11 +782,21 @@ export function WorkbenchSidebar(props: SidebarProps) {
             <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>Loading…</div>
           ) : groups.map(g => (
             <div key={g.project.key}>
-              <div className="wb-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] }))}>
-                <span className="wb-group-caret">{collapsed[g.project.key] ? '▸' : '▾'}</span>
+              {/* t260929-22（GAP A）：项目名行本身=执行器入口（设计稿 260927 §界面与命名：
+                  一个项目一行、项目名即 project executor 的入口，不单列 Tick 行）——
+                  折叠退到 caret 单独承担（一次点击只做一件事）；五个视图图标语义不变。 */}
+              <div className="wb-group-head" style={{ cursor: 'pointer' }}
+                title={`Open ${g.project.name} executor panel`}
+                onClick={() => handleViewIcon(g.project.key, 'executor')}>
+                <span className="wb-group-caret" title={collapsed[g.project.key] ? 'Expand' : 'Collapse'}
+                  onClick={(e) => { e.stopPropagation(); setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] })) }}>{collapsed[g.project.key] ? '▸' : '▾'}</span>
                 {/* 项目色点（票② R7 拍板 5）：8px 常驻项目色标识，色=projectColor 确定性色板 */}
                 <span className="wb-group-dot" data-wb-psess-dot="" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, flex: 'none', background: projectColor(g.project.key) }} title={g.project.key} />
-                <span className="wb-group-name">{g.project.name}</span>
+                <span className="wb-group-name" data-wb-executor-entry=""
+                  role="button" tabIndex={0}
+                  aria-label={`Open ${g.project.name} executor panel`}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'executor') }}
+                  onClick={() => handleViewIcon(g.project.key, 'executor')}>{g.project.name}</span>
                 <span className="wb-group-count">{g.tickets.length || ''}</span>
                 {/* 视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
                     按行项目分流：工单列表=该项目 ProjectKey 过滤、模型路由=该项目主目录
@@ -922,8 +945,17 @@ export function WorkbenchSidebar(props: SidebarProps) {
             <div className="wb-placeholder">
               Open a view from a project row on the left:
               <br />Tickets · Docs · Model Routes · Epics · Project Settings
+              <br />or click a project name row to open its Executor panel
               <br />(routed by the row's project; Epics is a cross-project list — clicking its icon shows the list in the middle column)
             </div>
+          )}
+          {/* 执行器视图（t260929-22 GAP A）：项目行入口点进来；iframe 嵌同源面板页，
+              Chat 分支按声明开 executor 会话（判定在 executor-view-model，绝不自 declare）。 */}
+          {viewProject && rightView === 'executor' && (
+            <ExecutorView
+              projectKey={viewProject}
+              listedSessionIds={Object.keys((projectSessions.listState?.byId ?? {}) as Record<string, unknown>)}
+              openExecutorSession={openExecutorSessionById} />
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
           {/* 文档视图（t260905-06 立；t260915-10 接壳层 projectKey）：与 per-project 视图
