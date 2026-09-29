@@ -40,21 +40,65 @@ if (paletteValues.size < 11) {
 // allowlist B：echarts 数据编码色（整文件豁免，理由见头注）
 const FILE_ALLOW = new Set(['metrics-charts.ts']);
 
+// ── 260929 判据精修（t260929-22 实测误伤，裁决后归 integration）────────────────────
+// 误伤两处（都不是样式消费位，却把票卡进「打回超限」）：
+//   ①**注释里的 hex**（如 `// 声明位=#24292f`、`/* #ff0000 备用 */`）被当违规——注释不是
+//     消费位，本场景 intent 只说「样式消费位不得出现裸 hex」；
+//   ②**跨行 `var()` fallback**（`color: var(--x,\n  #123456);`）被当违规——旧实现只在
+//     单行内向左找 var(，跨行就把合法写法判红（CSS 语义与单行写法完全等价）。
+// 精修口径：先**剥注释**（等长空白替位，行号/列位不变，报告行号仍准），再把 var() fallback
+// 的向左扫描**跨行**进行（语句边界 ; { } 仍终止，语义与旧实现逐字同构，只是不再断在换行）。
+const stripComments = (text) => {
+  // 块注释（可跨行）：等长空白替位（保换行与列位）
+  let out = text.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+  // 行注释：// 到行尾（排除 URL 的 :// 形态）
+  out = out.split('\n').map((l) => {
+    for (let i = 0; i < l.length - 1; i++) {
+      if (l[i] === '/' && l[i + 1] === '/' && l[i - 1] !== ':') {
+        return l.slice(0, i) + ' '.repeat(l.length - i);
+      }
+    }
+    return l;
+  }).join('\n');
+  return out;
+};
+
 const inTokenPosition = (line, idx) => {
   // 自定义属性定义值：hex 前最近的声明边界（; { 行首）之后是 --name: 形式 → 位于定义值内
   const start = Math.max(line.lastIndexOf(';', idx - 1), line.lastIndexOf('{', idx - 1)) + 1;
   if (/--[a-zA-Z0-9-]+\s*:/.test(line.slice(start, idx))) return true;
-  // var() fallback 位：向左找最近未配对 '('，其前是 var
+  return false;
+};
+
+// var() fallback 位（跨行）：向左找最近未配对 '('，其前是 var；语句边界 ; { } 终止
+const inVarFallback = (lines, li, idx) => {
   let depth = 0;
-  for (let i = idx - 1; i >= 0; i--) {
-    const ch = line[i];
-    if (ch === ')') depth += 1;
-    else if (ch === '(') {
-      if (depth > 0) { depth -= 1; continue; }
-      return line.slice(Math.max(0, i - 3), i).toLowerCase() === 'var';
-    } else if (ch === ';' || ch === '{' || ch === '}') return false;
+  for (let l = li; l >= 0; l--) {
+    const s = lines[l];
+    for (let i = (l === li ? idx - 1 : s.length - 1); i >= 0; i--) {
+      const ch = s[i];
+      if (ch === ')') depth += 1;
+      else if (ch === '(') {
+        if (depth > 0) { depth -= 1; continue; }
+        return s.slice(Math.max(0, i - 3), i).toLowerCase() === 'var';
+      } else if (ch === ';' || ch === '{' || ch === '}') return false;
+    }
   }
   return false;
+};
+
+// 扫描单份文本（walk 与自证共用同一实现——判据只有一个真源）
+const scanText = (text, relP, sink) => {
+  const lines = stripComments(text).split('\n');
+  lines.forEach((line, li) => {
+    for (const m of line.matchAll(/#[0-9a-fA-F]{3,8}(?![0-9a-fA-F])/g)) {
+      const v = m[0].toLowerCase();
+      if (paletteValues.has(v)) continue;                       // allowlist A（值级）
+      if (inTokenPosition(line, m.index)) continue;             // allowlist C1（token 声明位）
+      if (inVarFallback(lines, li, m.index)) continue;           // allowlist C2（var() fallback，可跨行）
+      sink.push(`server/plugins/workbench/src/client/${relP}:${li + 1} ${v}  ${line.trim().slice(0, 90)}`);
+    }
+  });
 };
 
 const violations = [];
@@ -67,20 +111,33 @@ const walk = (dir, rel) => {
     if (!EXT.test(name)) continue;
     scanned += 1;
     if (FILE_ALLOW.has(name)) continue;
-    const lines = readFileSync(p, 'utf8').split('\n');
-    lines.forEach((line, li) => {
-      for (const m of line.matchAll(/#[0-9a-fA-F]{3,8}(?![0-9a-fA-F])/g)) {
-        const v = m[0].toLowerCase();
-        if (paletteValues.has(v)) continue;                       // allowlist A（值级）
-        if (inTokenPosition(line, m.index)) continue;             // allowlist C（token 声明位）
-        violations.push(`server/plugins/workbench/src/client/${relP}:${li + 1} ${v}  ${line.trim().slice(0, 90)}`);
-      }
-    });
+    scanText(readFileSync(p, 'utf8'), relP, violations);
   }
 };
 walk(CLIENT, '');
 
-const pass = ['hex-clean/allowlist-parse', 'hex-clean/scan-breadth'];
+// 判据自证（260929）：精修不得放跑真违规，也不得再误伤两类合法写法
+{
+  const t = (text) => { const out = []; scanText(text, 'selftest.ts', out); return out; };
+  const cases = [
+    ['.a { color: #abc123; }', 1, '样式消费位裸 hex 仍须判红'],
+    ['.a { color: var(--x, #abc123); }', 0, '单行 var() fallback 豁免（既有语义）'],
+    ['.a { color: var(--x,\n  #abc123); }', 0, '跨行 var() fallback 豁免（260929 精修）'],
+    ['// 声明位=#24292f\n.a { color: var(--fg); }', 0, '行注释里的 hex 不算消费位（260929 精修）'],
+    ['/* #ff0000 备用 */\n.a { color: var(--fg); }', 0, '块注释里的 hex 不算消费位（260929 精修）'],
+    ['.a { --brand: #abc123; }', 0, '等长替位后 token 声明位仍豁免'],
+    ['.a { color: #abc123; /* #def456 */ }', 1, '同行注释+真违规：只算真违规那处'],
+  ];
+  const bad = cases.filter(([text, want]) => t(text).length !== want)
+    .map(([text, want]) => `${JSON.stringify(text.slice(0, 40))} 期望 ${want} 实得 ${t(text).length}`);
+  if (bad.length) {
+    console.log('FAIL hex-clean/scanner-selftest — 判据自证失败：' + bad.join('；'));
+    console.log('SUMMARY pass=0 fail=1 env_fail=0 na=0');
+    process.exit(1);
+  }
+  console.log('[PASS] hex-clean/scanner-selftest — 7 例（真违规仍红 / 注释与跨行 var 不再误伤）');
+}
+
 console.log(`[PASS] hex-clean/allowlist-parse — EPIC_PALETTE 值级豁免 ${paletteValues.size} 值解析正常`);
 console.log(`[PASS] hex-clean/scan-breadth — 扫描 ${scanned} 个源文件（client 全目录 .ts/.tsx/.css；豁免文件=${[...FILE_ALLOW].join(',')}）`);
 if (violations.length > 0) {
@@ -95,8 +152,8 @@ if (violations.length > 0) {
   for (const [f, n] of Object.entries(byFile).sort((a, b) => b[1] - a[1])) console.log(`  聚合 ${f} = ${n} 处`);
   for (const v of violations.slice(0, 40)) console.log('  ' + v);
   if (violations.length > 40) console.log(`  …其余 ${violations.length - 40} 处略（分布以聚合行为准）`);
-  console.log('SUMMARY pass=2 fail=1 env_fail=0 na=0');
+  console.log('SUMMARY pass=3 fail=1 env_fail=0 na=0');
   process.exit(1);
 }
 console.log('[PASS] hex-clean/no-raw-hex — 样式消费位零裸 hex（token 声明位/数据调色板除外）');
-console.log('SUMMARY pass=3 fail=0 env_fail=0 na=0');
+console.log('SUMMARY pass=4 fail=0 env_fail=0 na=0');

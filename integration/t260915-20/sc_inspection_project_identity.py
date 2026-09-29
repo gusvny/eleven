@@ -610,6 +610,15 @@ def main() -> int:
 
     tmp = tempfile.mkdtemp(prefix="sandbar-t26091520-")
     reg_root = os.path.join(tmp, "projects")
+    # 260929（宿主令「清+补隔离，直修」）：**运行期数据目录隔离**（KI-161 纪律）。
+    # 本棒真起票跑真流程，但身份键是测试专用的（insa-<pid>/insb-<pid>/pka<pid>/pkb<pid>），
+    # 不隔离就会把夹具产物写进**生产**目录：实测残件＝out/inspection/inspection-insa-* 20 件
+    # （台账 + 指针 .ticket）与 server/ledger/pka*/pkb* 14 件；而目录扫描式读取面（deadman/
+    # 账本遍历）会把它们当真实期号/项目——今天不误报只是运气。两个键同时给 worker 与 CLI：
+    # 台账/指针由起票侧（CLI）落，事件账与报告由 worker 落。
+    iso_env = {"SANDBAR_INSPECTION_DIR": os.path.join(tmp, "inspection"),
+               "SANDBAR_EVENT_LEDGER_DIR": os.path.join(tmp, "ledger"),
+               "SANDBAR_ADMIN_LOG": os.path.join(tmp, "admin.log")}
     os.makedirs(reg_root, exist_ok=True)
     tree_a = drifty_tree("sbxa-%d" % PID, TOKEN_A)
     tree_b = drifty_tree("sbxb-%d" % PID, TOKEN_B)
@@ -627,11 +636,13 @@ def main() -> int:
         queue = "sandbar-ticket-insp20-%d" % PID
         TRIGGER_ENV.update({"SANDBAR_PROJECTS_DIR": reg_root,
                             "SANDBAR_TASK_QUEUE": queue,
-                            "DECL_PATH": decl_path})   # list_rows 的白名单声明 env 取这里
+                            "DECL_PATH": decl_path,     # list_rows 的白名单声明 env 取这里
+                            **iso_env})                 # 260929：运行期目录隔离（起票侧）
         try:
             with StageWorker(queue, extra_env={
                     "SANDBAR_INSPECT_STUB": "1",
-                    "SANDBAR_INSPECT_STUB_FILE": stub_path}):
+                    "SANDBAR_INSPECT_STUB_FILE": stub_path,
+                    **iso_env}):                     # 260929：运行期目录隔离（执行侧）
                 j1_dual_project(queue, decl_path, tree_a, tree_b, stub_path)
                 j3_unknown_key(decl_path)
                 j2_update_recast(decl_path, tmp, tree_a)
