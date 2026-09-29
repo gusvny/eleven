@@ -3910,7 +3910,7 @@ function startChatProjectBand(opts = {}) {
 * 行内注入（epicColorOf 结果，纯函数不动）。
 */
 function epicChipColor() {
-	return "color-mix(in srgb, var(--epic-c, #9ca3af) 30%, color-mix(in srgb, var(--dsw-alias-label-primary, #1f2328) 30%, #24292f))";
+	return "color-mix(in srgb, var(--epic-c, var(--dsw-derive-ink-strong, #9ca3af)) 30%, var(--dsw-derive-ink-strong, #24292f))";
 }
 /** 弱化文字（审批区 epicLine 等此前恒走 --wb-muted fallback 的点位，t260905-08 收编）。 */
 function epicChipMuted() {
@@ -3923,19 +3923,21 @@ function epicChipMuted() {
 const DERIVE_TOKENS_CSS = `:root{
 /* 文字系：45% 语义基色 × 55% 平台前景——浅档基色微加深（对比度↑），深档自动提亮 */
 --dsw-derive-fg:var(--dsw-alias-label-primary,#1f2328);
---dsw-derive-muted:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 72%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+/* t260929-22 gen8（对比度打回：平台 label 极性/取值不定，混不出保证对比度——
+   文字语义令牌改为浅档深墨声明位裸值；深壳主题若启用须连本块一起重订）。 */
+--dsw-derive-muted:#57606a;
 --dsw-derive-border:var(--dsw-alias-border-l,#d0d7de);
 --dsw-derive-canvas:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
 --dsw-derive-surface:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 13%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-surface-2:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 26%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-accent:color-mix(in srgb,#0969da 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-accent:#0969da;
 --dsw-derive-accent-solid:#1f6feb;
 --dsw-derive-on-solid:#ffffff;
 --dsw-derive-active:#7c3aed;
 --dsw-derive-accent-deep:color-mix(in srgb,#0550ae 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-bg:color-mix(in srgb,#0969da 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-accent-border:color-mix(in srgb,#0969da 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-danger:color-mix(in srgb,#cf222e 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-danger:#cf222e;
 --dsw-derive-danger-solid:#d1242f;
 --dsw-derive-danger-bg:color-mix(in srgb,#cf222e 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-danger-border:color-mix(in srgb,#cf222e 40%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
@@ -3946,7 +3948,8 @@ const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 /* t260929-22 gen5（对比度红 4.24<4.5）：warn 文字加深——基色换 warn-deep 家族的
    #7d4e00、alias 只作 30% 少数项（极性不定时混不出保证对比度，见 UT contrast-palette）。 */
---dsw-derive-warn:color-mix(in srgb,#7d4e00 70%,color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 30%,#1f2328));
+--dsw-derive-warn:#7d4e00;
+--dsw-derive-ink-strong:#24292f;
 --dsw-derive-warn-deep:color-mix(in srgb,#7d4e00 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
@@ -4027,9 +4030,10 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
   border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); background:none;
-  /* t260929-22 gen5（对比度红 2.64<4.5）：文字沉到固定近黑（项目色只留 25% 染色），
-     任何项目色（含最浅 #cee76a）白底都 ≥4.5；项目色仍由边框承载。 */
-  color:color-mix(in srgb,var(--wb-psess-color, #9ca3af) 25%,#1f2328); cursor:pointer; }
+  /* t260929-22 gen8 回归锁定派生（t260904-05 t3 契约未被宿主签发重归属）：45% 混
+     平台前景公式原样保留；该派生在 180px 台实测 2.64<4.5，与对比度纪律不可两全，
+     已按仲裁指引升级 DESIGN-CONFLICT（数学证明见 integration/t260929-22/）。 */
+  color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 /* 空态可发现性（t260906-01）：账册为空时 24px 无字小方块不可认出——换带文字
  * 「＋ 新建会话」按钮（auto 宽 + padding）；有 tab 后回落小方块形态。同锚
@@ -4047,7 +4051,8 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-psess-tab.active { background:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 14%,transparent);
   border-color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
-  color:color-mix(in srgb,var(--wb-psess-color, #9ca3af) 25%,#1f2328); }
+  /* gen8：同上，回归 45% 锁定派生（同 t260904-05 契约）。 */
+  color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
@@ -47970,7 +47975,13 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); }
 .wb-sb .wb-card[data-state=done] { opacity:0.72; } /* 对齐板面 .72：0.55 时次级字混底后 <3:1（看守实测） */
 .wb-sb .wb-card-title { color:inherit; font-weight:400; }
-.wb-sb .wb-card-state { color:inherit; }
+/* t260929-22 gen8（对比度打回实测 rgb(122,122,133)≈4.24 元凶）：左栏 mini 行卡
+   状态字曾一律 inherit（继承左栏弱化灰），改按四态消费语义令牌（gen8 起令牌为
+   浅档深墨声明位，白底全部 ≥4.5）。 */
+.wb-sb .wb-card-state { color:var(--dsw-derive-muted,#57606a); }
+.wb-sb .wb-card-state[data-state=waiting] { color:var(--dsw-derive-warn,#7d4e00); }
+.wb-sb .wb-card-state[data-state=blocked],.wb-sb .wb-card-state[data-state=failed] { color:var(--dsw-derive-danger,#cf222e); }
+.wb-sb .wb-card-state[data-state=active] { color:var(--dsw-derive-accent,#0969da); }
 /* t260905-08：原深档固定蓝字——平台浅档下失读（宿主实报同病），归主规则令牌 */
 .wb-sb .wb-card-id { color:var(--dsw-derive-accent,#0969da); }
 /* t260915-19 左栏「等你」黄调（巡检行）：与中列同 token（index.tsx
@@ -51325,7 +51336,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-state{font-size:11px;font-weight:600;flex:none}
 /* t260929-22 gen5（对比度红 4.24<4.5）：waiting 态文字锁深（#7d4e00，白底 ≈8:1），
    不再走混平台 label 的令牌——label 极性不定时混不出保证对比度。 */
-.wb-card-state[data-state=waiting]{color:#7d4e00}
+.wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#7d4e00)}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=failed]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
@@ -51337,7 +51348,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid;border-radius:10px;flex:none;white-space:nowrap}
 .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--dsw-derive-muted,#57606a);font-size:12px;flex:1 1 260px;min-width:0}
-.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#57606a}/* t260929-22 gen5：进展行白底对比度 2.62<4.5，锁 #57606a（≈5.9:1） */
+.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-derive-muted,#57606a)}/* t260929-22 gen5：进展行白底对比度 2.62<4.5，锁 #57606a（≈5.9:1） */
 .wb-card-progress[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-progress[data-state=awaiting-human]{color:var(--dsw-derive-warn,#9a6700)}
 .wb-card-time{flex:none}

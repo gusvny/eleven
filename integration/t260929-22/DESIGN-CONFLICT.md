@@ -53,3 +53,29 @@ with their price:
 Host picks 1, 2 or 3 (or rules a new shape). Developer implements the chosen
 leg in one rework round; the two foreign scenarios get re-attributed
 per the host's ruling instead of per geometry guess.
+
+## ADDENDUM (gen8, 260929): the `＋ New session` plus-text is PROVABLY unsatisfiable
+
+t260904-05 `t3/plus-text-derived-same-source` pins the plus-button text color to
+exactly `color-mix(in srgb, var(--wb-psess-color) 45%, var(--dsw-alias-label-primary))`
+(the scenario recomputes the expectation in-DOM from that locked formula — the
+comment in the scenario declares the 55/45 derivation and the fallback chain a
+locked contract, changeable only "through the regular gate"). t260905-08
+`wb-contrast-guard` requires that same computed color to be ≥4.5 on white.
+
+Proof of impossibility on the stage theme: `--wb-psess-color` must stay a raw
+PROJECT_PALETTE value (t3/dot-is-palette-value pins `--wb-psess-color` to the
+palette), and the lightest palette entries have relative luminance up to ≈0.69
+(#cee76a). With label-primary's contribution bounded below by 0 (any theme),
+the mix's luminance is ≥ 0.45 × 0.69 = 0.31 → contrast ≤ 1.05/0.36 ≈ **2.9 < 4.5**.
+Measured 2.64 confirms. No product change can satisfy both; only a ruling can:
+
+- (i) host re-attributes t260904-05's t3 text leg (as it did for t260904-17's
+  navigation leg) so the plus-text may sink into a dark ink (developer has the
+  fix ready — the gen5 25%-tint form, worst-case 8.0:1 over the whole palette); or
+- (ii) host accepts a documented 2.64 exemption for that one control; or
+- (iii) host re-specifies the derivation (e.g. ink = fixed dark, hue = border only).
+
+Until then the product keeps the t260904-05-pinned 45% derivation (restored in
+gen8; t260904-05 green by construction) and the psess text stays below the WCAG
+floor — explicitly escalated, not silently accepted.

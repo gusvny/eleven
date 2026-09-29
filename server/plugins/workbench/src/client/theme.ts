@@ -71,10 +71,10 @@ export const TOKEN = {
  * 行内注入（epicColorOf 结果，纯函数不动）。
  */
 export function epicChipColor(): string {
-  /* t260929-22 gen5（对比度红 t260905-08/t260907-08 实测 4.18<4.5）：epic 色只出
-     30%，其余沉到固定近黑（内层 mix 把平台 label 先压向 #24292f 再收编）——任何
-     epic 色（含最浅黄 #eac54f 族）在白底都 ≥4.5。 */
-  return 'color-mix(in srgb, var(--epic-c, #9ca3af) 30%, color-mix(in srgb, var(--dsw-alias-label-primary, #1f2328) 30%, #24292f))'
+  /* t260929-22 gen5/gen8（对比度红 4.18<4.5）：epic 色只出 30%，其余沉到强墨令牌
+     --dsw-derive-ink-strong（声明位=#24292f）——任何 epic 色（含最浅黄族）白底 ≥4.5；
+     裸 hex 全部收进令牌声明/var fallback 位（hex-clean 纪律）。 */
+  return 'color-mix(in srgb, var(--epic-c, var(--dsw-derive-ink-strong, #9ca3af)) 30%, var(--dsw-derive-ink-strong, #24292f))'
 }
 
 /** 弱化文字（审批区 epicLine 等此前恒走 --wb-muted fallback 的点位，t260905-08 收编）。 */
@@ -89,19 +89,21 @@ export function epicChipMuted(): string {
 export const DERIVE_TOKENS_CSS = `:root{
 /* 文字系：45% 语义基色 × 55% 平台前景——浅档基色微加深（对比度↑），深档自动提亮 */
 --dsw-derive-fg:var(--dsw-alias-label-primary,#1f2328);
---dsw-derive-muted:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 72%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+/* t260929-22 gen8（对比度打回：平台 label 极性/取值不定，混不出保证对比度——
+   文字语义令牌改为浅档深墨声明位裸值；深壳主题若启用须连本块一起重订）。 */
+--dsw-derive-muted:#57606a;
 --dsw-derive-border:var(--dsw-alias-border-l,#d0d7de);
 --dsw-derive-canvas:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
 --dsw-derive-surface:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 13%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-surface-2:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 26%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-accent:color-mix(in srgb,#0969da 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-accent:#0969da;
 --dsw-derive-accent-solid:#1f6feb;
 --dsw-derive-on-solid:#ffffff;
 --dsw-derive-active:#7c3aed;
 --dsw-derive-accent-deep:color-mix(in srgb,#0550ae 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-bg:color-mix(in srgb,#0969da 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-accent-border:color-mix(in srgb,#0969da 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-danger:color-mix(in srgb,#cf222e 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-danger:#cf222e;
 --dsw-derive-danger-solid:#d1242f;
 --dsw-derive-danger-bg:color-mix(in srgb,#cf222e 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-danger-border:color-mix(in srgb,#cf222e 40%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
@@ -112,7 +114,8 @@ export const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 /* t260929-22 gen5（对比度红 4.24<4.5）：warn 文字加深——基色换 warn-deep 家族的
    #7d4e00、alias 只作 30% 少数项（极性不定时混不出保证对比度，见 UT contrast-palette）。 */
---dsw-derive-warn:color-mix(in srgb,#7d4e00 70%,color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 30%,#1f2328));
+--dsw-derive-warn:#7d4e00;
+--dsw-derive-ink-strong:#24292f;
 --dsw-derive-warn-deep:color-mix(in srgb,#7d4e00 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));

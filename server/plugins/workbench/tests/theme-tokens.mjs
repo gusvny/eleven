@@ -26,10 +26,10 @@ ok('ALIAS 每个 var() 带 fallback', () => {
 ok('TOKEN 每个 var() 带 fallback', () => {
   for (const [k, v] of Object.entries(TOKEN)) assert.match(STR(v), VAR_RE, `${k}=${v}`);
 });
-ok('epicChipColor 带 --epic-c 与 alias fallback', () => {
+ok('epicChipColor 带 --epic-c 与强墨令牌缝（t260929-22 gen8：文字色不再混平台 label）', () => {
   const s = epicChipColor();
   assert.ok(s.includes('var(--epic-c,'), s);
-  assert.ok(s.includes('var(--dsw-alias-label-primary,#1f2328)'.replace(',', ', ')) || s.includes('--dsw-alias-label-primary'), s);
+  assert.ok(s.includes('--dsw-derive-ink-strong'), s);
 });
 ok('epicChipMuted 带 fallback', () => assert.match(epicChipMuted(), VAR_RE));
 

@@ -1,92 +1,86 @@
 /**
- * contrast-palette.mjs —— t260929-22 gen5 对比度红的源级守卫（t260905-08/t260907-08
- * 集测场景实测红 4.18/4.24/2.62/2.64 < 4.5 的 UT 锁）：
- * 本项目 owns 的四个文字角色在白底上的 WCAG 对比度必须 ≥4.5，且按**真实取色路径**
- * 计算（projectColor 十色板全枚举取最劣、epic 色取色板+最浅黄夹具），不锚个别 hex——
- * 将来调色板或混色比例再变，这里重算即刻红。
+ * contrast-palette.mjs —— 对比度纪律的源级守卫（t260905-08-wb-contrast-guard /
+ * t260907-08-wb-contrast-quadrant 集测实测红 2.62–4.24 < 4.5 的 UT 锁，t260929-22 gen8）：
+ * 文字语义令牌的**声明位深墨值**在白底上的 WCAG 对比度 ≥4.5，epic chip 按真实
+ * color-mix 公式（含最浅 epic 色/夹具）取最劣计算。令牌定义再变，这里重算即刻红。
  *
- * 白底场景 = 集测实测形态（t260905-08-wb-contrast-guard 的断言面）。
+ * 白底场景 = 集测实测形态。gen8 口径：文字语义令牌（warn/muted/danger/accent/
+ * ink-strong）为浅档深墨声明位裸值（hex-clean 合法位），平台 label 极性不定、
+ * 不再参与文字色混色。
+ *
+ * 已知不可调和项（升级中，UT 不为其背书）：psess「＋ New session」文字被
+ * t260904-05 t3 锁定为 45% 项目色×平台前景派生（180px 台实测 2.64），与 ≥4.5
+ * 数学不可两全——证明与宿主裁决请求见 integration/t260929-22/DESIGN-CONFLICT.md。
  */
 import assert from 'node:assert/strict'
 import { PROJECT_PALETTE, FALLBACK_COLOR } from '../src/shared/project-color.ts'
-import { epicChipColor } from '../src/client/theme.ts'
+import { epicChipColor, DERIVE_TOKENS_CSS } from '../src/client/theme.ts'
 
 let n = 0
 
-/** WCAG 2.x 相对亮度 + 对比度（vs 白底）。 */
+/** WCAG 2.x：相对亮度 + 对白底对比度。 */
 function luminance([r, g, b]) {
   const f = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
 }
 function contrastOnWhite(rgb) {
-  const l = luminance(rgb)
-  return (1.0 + 0.05) / (l + 0.05)
+  return (1.0 + 0.05) / (luminance(rgb) + 0.05)
 }
 function hex(s) {
-  const m = s.trim().match(/^#([0-9a-fA-F]{6})$/)
-  assert.ok(m, `hex parse: ${s}`)
-  const v = m[1]
+  const v = String(s).trim().replace(/^#/, '')
+  assert.ok(/^[0-9a-fA-F]{6}$/.test(v), `hex parse: ${s}`)
   return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255)
 }
-/** CSS color-mix(in srgb, a p%, b) 的直角坐标近似（srgb 空间线性插值，与浏览器一致）。 */
+/** DERIVE_TOKENS_CSS 里取某令牌的声明值（去注释后按 `--dsw-derive-名:值` 切）。 */
+function tokenDef(name) {
+  const defs = DERIVE_TOKENS_CSS.replace(/\/\*[\s\S]*?\*\//g, '').split(';').map((x) => x.trim())
+  const d = defs.find((x) => x.startsWith(name + ':'))
+  assert.ok(d, `token ${name} declared in DERIVE_TOKENS_CSS`)
+  return d.slice(name.length + 1)
+}
 function mixPct(a, p, b) {
   const t = p / 100
   return a.map((c, i) => c * t + b[i] * (1 - t))
 }
-/** 从 theme.ts 的 epicChipColor() 输出解析 mix 结构并求值（epic-c pct% × 内层 label/dark mix）。 */
-function evalEpicChip(epicHex) {
-  const s = epicChipColor()
-  const pct = Number(s.match(/var\(--epic-c,\s*#[0-9a-f]{6}\)\s*(\d+)%/)[1])
-  const label = hex(s.match(/var\(--dsw-alias-label-primary,\s*(#[0-9a-f]{6})\)/)[1])
-  const innerPct = Number(s.match(/var\(--dsw-alias-label-primary,\s*#[0-9a-f]{6}\)\s*(\d+)%/)[1])
-  const dark = hex('#' + s.match(/#([0-9a-f]{6})\)\)$/)[1])
-  const innerMix = mixPct(label, innerPct, dark)
-  return mixPct(hex(epicHex), pct, innerMix)
-}
 
-/** 「More/new」系：项目色 pct% × 近黑（project-session-row.tsx 的 psess-new/active 形状）。 */
-function evalPsessTint(projectHex) {
-  // 与 CSS 同式：color-mix(in srgb, var(--wb-psess-color,…,fallback) 25%, #1f2328)
-  const pct = 25
-  return mixPct(hex(projectHex), pct, hex('#1f2328'))
-}
-
-const NEED = 4.5
-
-// ① 行卡 waiting 态：固定深棕
+// ① waiting 态文字 = --dsw-derive-warn（声明位深墨）
 {
-  const c = contrastOnWhite(hex('#7d4e00'))
-  assert.ok(c >= NEED, `① wb-card-state waiting #7d4e00 on white = ${c.toFixed(2)} >= 4.5`)
-  console.log(`ok   ① waiting #7d4e00 -> ${c.toFixed(2)}`)
+  const c = contrastOnWhite(hex(tokenDef('--dsw-derive-warn')))
+  assert.ok(c >= 4.5, `① --dsw-derive-warn on white = ${c.toFixed(2)} >= 4.5`)
+  console.log(`ok   ① warn ink -> ${c.toFixed(2)}`)
   n++
 }
 
-// ② 进展行：#57606a
+// ② muted 文字（进展行/时间/左栏 mini 行卡缺省）= --dsw-derive-muted
 {
-  const c = contrastOnWhite(hex('#57606a'))
-  assert.ok(c >= NEED, `② wb-card-progress #57606a on white = ${c.toFixed(2)} >= 4.5`)
-  console.log(`ok   ② progress #57606a -> ${c.toFixed(2)}`)
+  const c = contrastOnWhite(hex(tokenDef('--dsw-derive-muted')))
+  assert.ok(c >= 4.5, `② --dsw-derive-muted on white = ${c.toFixed(2)} >= 4.5`)
+  console.log(`ok   ② muted ink -> ${c.toFixed(2)}`)
   n++
 }
 
-// ③ epic chip：theme.ts mix × 全 epic 色板（含最浅黄 #eac54f 夹具）取最劣
+// ③ danger / accent（blocked/failed/active 态文字）
+{
+  for (const name of ['--dsw-derive-danger', '--dsw-derive-accent']) {
+    const c = contrastOnWhite(hex(tokenDef(name)))
+    assert.ok(c >= 4.5, `③ ${name} on white = ${c.toFixed(2)} >= 4.5`)
+    console.log(`ok   ③ ${name} -> ${c.toFixed(2)}`)
+    n++
+  }
+}
+
+// ④ epic chip：真实 epicChipColor 公式 × 全 epic 色（含最浅黄/兜底灰）取最劣
 {
   const s = epicChipColor()
-  const sampleEpics = [...PROJECT_PALETTE, FALLBACK_COLOR, '#eac54f', '#cee76a']
+  const pct = Number(s.match(/var\(--epic-c,.*\)\s*(\d+)%/)[1])
+  const ink = hex(tokenDef('--dsw-derive-ink-strong'))
+  assert.ok(pct <= 35, `④ epic hue share kept minority (${pct}%)`)
   let worst = Infinity
-  for (const e of sampleEpics) worst = Math.min(worst, contrastOnWhite(evalEpicChip(e)))
-  assert.ok(worst >= NEED, `③ epic chip worst-case ${worst.toFixed(2)} >= 4.5 (formula: ${s})`)
-  console.log(`ok   ③ epic chip worst-case -> ${worst.toFixed(2)} (formula: ${s})`)
-  n++
-}
-
-// ④ psess「＋ New session」/激活 tab：projectColor 十色板全枚举 + 兜底灰取最劣
-{
-  const sample = [...PROJECT_PALETTE, FALLBACK_COLOR]
-  let worst = Infinity
-  for (const p of sample) worst = Math.min(worst, contrastOnWhite(evalPsessTint(p)))
-  assert.ok(worst >= NEED, `④ psess text worst-case ${worst.toFixed(2)} >= 4.5`)
-  console.log(`ok   ④ psess text worst-case -> ${worst.toFixed(2)}`)
+  for (const e of [...PROJECT_PALETTE, FALLBACK_COLOR, '#eac54f', '#cee76a']) {
+    worst = Math.min(worst, contrastOnWhite(mixPct(hex(e), pct, ink)))
+  }
+  assert.ok(worst >= 4.5, `④ epic chip worst-case ${worst.toFixed(2)} >= 4.5 (formula: ${s})`)
+  console.log(`ok   ④ epic chip worst-case -> ${worst.toFixed(2)}`)
   n++
 }
 
