@@ -67,6 +67,8 @@ ALLOW = [
     re.compile(r"num_actions_skipped_overlap|skipped_overlap"),         # Temporal ScheduleInfo 字段名（snake_case 内既有
                                         # skipped\b 不出界——260922 仲裁补）
     re.compile(r"skip_count"),                                          # Temporal deadman 回执键名（t260917-02 资产）
+    re.compile(r"skip_archive_no"),                                     # 守望者夹具命令旋钮名（server/plugins/watchdog/harness.mjs:344
+                                        # ——造归档跳号用的注入参数，非套件三态状态词；260929 直修 C 实测残留即此一处）
     re.compile(r"SKIP；全部子用例"),                                     # 三态契约句引用（t260921-05 lib 头注；
                                         # 「闸内无 SKIP」退役注记同族）
     # ---- 260923 新增三类（t260904-12 门与后续定稿/资产撞字的清账；每类只锚具体形态，不放松裸词）----

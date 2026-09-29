@@ -53,14 +53,21 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DSH = os.path.join(REPO, "server")
 PROFILES = ["profile", "profile-headless"]
-# 裸包名解析锚 → 实际插件目录（农场五链的「应指」映射）。
+# 裸包名解析锚 → 实际插件目录（农场链的「应指」映射）。
 # t260907-10 摊平后插件住 server/plugins/<name>（农场链 ../../plugins/<name>）
+# 260929 直修 C（宿主令·不开票）：农场由五链长到七链——t260928-28 守望者
+# （sandbar-watchdog）与 t260929-03 执行器面板（sandbar-executor-panel）落地后已进
+# profile patch 的 insert 面与 profile/node_modules 链（实证 `ls -l` 两条 symlink 在位、
+# 指向 ../../plugins/{watchdog,executor-panel}）。本期望表漏更=本场景长红（不是产品缺陷）。
+# 此处补两链，判据形状不变（id==name 成对 + 每条 id 有链对应）。
 FARM = {
     "sandbar-admin-ui": "plugins/ui",
     "sandbar-workbench": "plugins/workbench",
     "sandbar-knowledge": "plugins/knowledge",
     "sandbar-providers": "plugins/providers",
     "sandbar-temporal-tools": "plugins/temporal-tools",
+    "sandbar-watchdog": "plugins/watchdog",
+    "sandbar-executor-panel": "plugins/executor-panel",
 }
 IMPORTERS = [
     "server/plugins/workbench/node.ts",
