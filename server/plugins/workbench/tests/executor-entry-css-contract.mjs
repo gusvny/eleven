@@ -6,8 +6,10 @@
  *   - gen0：名字段被图标簇挤成 0 宽（acceptance 红）→ 入口段=名字+计数+弹性空档；
  *   - gen1：把图标命中区缩到 20px 让宽 → t260904-17 A/B 实证为新红单变量（打回）
  *     → gen2 恢复 26×26 但改 widen 列宽 → t260904-17/t260915-09 双 A/B 实证列宽也是
- *     冻结边（打回）→ gen3：几何全部还原（26×26 + 列宽 180），可达性=图标簇悬停
- *     现形，静止态整行非图标区归入口段。
+ *     冻结边（打回）→ gen3 悬停现形条挂行下 → t260915-09 实证截住 .wb-psess 点击
+ *     （打回）→ gen4（宿主 260929 裁决：260927 设计胜、260823 放宽）：图标簇行内
+ *     收纳——常驻工单+立项单两枚 + 「More views」行内展开其余三枚，零绝对定位、
+ *     零外溢命中面，列宽 180 / 命中区 26×26 双冻结边不动。
  *
  * 几何前提（组头行盒模型，全部可从源码 CSS 推出）：
  *   行宽 W（=左列宽）；水平 padding 8+8；前缀 caret10+gap5+dot8+gap5=36（内坐标）；
@@ -55,17 +57,25 @@ assert(/\.wb-group-entry \{ flex:1 1 0; min-width:0;/.test(src), `C1 entry-zone 
   assert(caret, `C4 caret owns collapse with stopPropagation (${++n})`)
 }
 
-// C5/gen3 可达性=悬停现形：列宽 180px 不动（t260915-09/t260904-17 A/B 冻结边）、
-// 图标命中区 26×26 不动（C2）——静止态图标簇退场（pointer-events:none + opacity:0），
-// 整行非图标区归入口段；悬停/键盘聚焦恢复可点。
+// C5/gen4 可达性=行内收纳：零绝对定位（gen3 的行下条被 t260915-09 A/B 实证截住
+// .wb-psess 点击，形态整体退役）；列宽 180 冻结；两枚场景钉住图标常驻在流内；
+// 「More views」展开钮在场且行内收纳其余三枚。
 {
-  const m = src.match(/\.wb-view-icons \{[^}]*pointer-events:none; opacity:0; \}/)
-  assert(m, `C5 icons cluster rest-state rule (pointer-events:none, opacity:0) (${++n})`)
-  assert(/top:100%/.test(m[0]), `C5b strip hangs below the row (top:100%) — never covers the entry anchor (${++n})`)
-  assert(/\.wb-group-head:hover \.wb-view-icons, \.wb-view-icons:focus-within \{ pointer-events:auto; opacity:1; \}/.test(src),
-    `C5c hover/focus-within restores the cluster (${++n})`)
+  const m = src.match(/\.wb-view-icons \{ display:flex; gap:2px; \}/)
+  assert(m, `C5 icon cluster is plain in-flow (no absolute/hover layer) (${++n})`)
+  assert(!/wb-view-icons[^\n]*position:absolute/.test(src) && !/top:100%/.test(src),
+    `C5b no out-of-row overlay left (${++n})`)
   const minW = Number(src.match(/\.wb-sb-left \{ flex:1 1 0; min-width:(\d+)px/)[1])
-  assert(minW === 180, `C5c left column min-width untouched at 180px (got ${minW}) (${++n})`)
+  assert(minW === 180, `C5c left column min-width stays 180px (got ${minW}) (${++n})`)
+  // 常驻钉住：board 与 epics 图标在「More views」展开位之前、无条件渲染
+  const iconsStart = src.indexOf('<span className="wb-view-icons"')
+  const more = src.indexOf('data-wb-more-views=""', iconsStart)
+  assert(iconsStart > 0 && more > 0, `C5d cluster and expander present (${++n})`)
+  const pinned = src.slice(iconsStart, more)
+  assert(pinned.includes('aria-label="Tickets"') && pinned.includes('aria-label="Epics"'),
+    `C5e Tickets and Epics icons pinned unconditionally (${++n})`)
+  assert(/aria-label=\{moreViews\[g\.project\.key\][^\n]*'More views'/.test(src),
+    `C5f More views expander with keyboard support (${++n})`)
 }
 
 console.log(`done ${n}`)

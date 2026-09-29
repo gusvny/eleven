@@ -270,9 +270,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb.wide { flex-direction:row; }
 /* t260929-22 gen3 勘误（arbitration A/B 实证）：gen2 曾把左列 min-width 提到
    320px 给入口段让宽——被 t260904-17/t260915-09 双场景 A/B 实证为破坏壳层几何的
-   单变量（shell resize handle 压住内容），此处归还 180px。入口可达性改由图标簇
-   hover 现形（见 .wb-view-icons gen3 注）：静止态整行非图标区都归入口段，名字
-   全宽可读、锚点全行可点。 */
+   单变量（shell resize handle 压住内容），此处归还 180px。gen4 勘误：gen3 的
+   行下悬停图标条同样改了行外命中面（t260915-09 A/B 实证），随之退役；可达性
+   最终落点=图标簇行内收纳（见 .wb-view-icons gen4 注）。 */
 .wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
@@ -338,19 +338,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
   border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档）。
-   t260929-22 gen3（arbitration 打回的落点，180px 内的可达性解）：图标簇悬停现形——
-   静止态 pointer-events:none + opacity:0，整行非图标区都归入口段 .wb-group-entry
-   （名字全宽可读、锚点全行可点）；悬停/键盘聚焦（focus-within）时原位右对齐浮出，
-   命中区仍 26×26、图标动作（含 Playwright locator.click 的隐式 hover）全通。几何
-   零变化：行高、列宽、簇占位与 gen1 前一致——t260904-17/t260915-09 的几何面不再被
-   本票触碰。260823「五视图常驻可见」裁定被本形状收窄为「悬停可见」，已在交接报告
-   向宿主点名请裁。组头是 position:sticky（定位祖先），条 absolute 挂行底（top:100%，
-   不占流内空间、现形后也不遮入口锚点）；条是组头子元素，指针移入条内 :hover 不丢。 */
-.wb-view-icons { display:flex; gap:2px; position:absolute; right:8px; top:100%;
-  padding:2px; border:1px solid var(--dsw-alias-border-l1,#333); border-radius:8px;
-  background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:2;
-  pointer-events:none; opacity:0; }
-.wb-group-head:hover .wb-view-icons, .wb-view-icons:focus-within { pointer-events:auto; opacity:1; }
+   t260929-22 gen4（宿主 260929 裁决落地：260927 设计胜、260823 放宽由 developer 落地、
+   栏宽 180 冻结、行外不许有改命中面的层——gen3 的行下悬停条被 t260915-09 A/B 实证
+   截住 .wb-psess 会话行的点击，此形态整体退役）：行内常驻=工单+立项单两枚场景钉住的
+   图标 + 一枚「More views」展开钮；其余三枚（文档/模型路由/项目设置）收进展开位，
+   展开也在流内（行自身盒内，零绝对定位、零外溢命中面）；展开时入口段名字瞬态让位，
+   锚点行为不变。全部几何均 gen1 前同族：行高、列宽、命中区 26×26 冻结契约不动。 */
+.wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
@@ -458,6 +452,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
    *  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
   const [listNonce, setListNonce] = useState(0)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  /* t260929-22 gen4：每项目的「More views」展开位（文档/模型路由/项目设置三枚的
+     行内收纳；展开也在流内，零外溢命中面）。 */
+  const [moreViews, setMoreViews] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   // 项目生命周期弹层（票③面D，验收 11-13）：kind 区分四弹层；settings→remove 由
   // 设置弹层 danger 区切换（同弹层面，非叠层）。
@@ -830,37 +827,44 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   <span className="wb-group-name">{g.project.name}</span>
                   <span className="wb-group-count">{g.tickets.length || ''}</span>
                 </span>
-                {/* 视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
-                    按行项目分流：工单列表=该项目 ProjectKey 过滤、模型路由=该项目主目录
-                    model-routes.yaml；立项单（t260827-01）=全量立项清单（跨项目语义单元，
-                    不按项目过滤）；文档（t260905-06 立；t260915-10 接壳层）=点哪组图标
-                    默认开哪组 docs（初值/跟随=本行项目），页内选择器可手动切且手动优先
-                    （重开文档页=重新跟随壳层，收敛口径见 docs.tsx 头注）；
+                {/* 视图入口 per 项目（用户拍板 260823；t260929-22 gen4 宿主裁决落地：
+                    260823 的「五枚常驻」放宽——行内常驻=工单+立项单（两枚场景钉住：
+                    t260904-17 点工单、t260915-09 点立项单），文档/模型路由/项目设置
+                    三枚收进「More views」行内展开位（展开也在流内，零外溢命中面）；
                     active 高亮只判 rightView（跨组同亮，t260915-10 口径不变）。 */}
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
                   <span
                     className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
                     title="Tickets" aria-label="Tickets"
                     onClick={() => handleViewIcon(g.project.key, 'board')}><ProjectIcon name="board" /></span>
-                  {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
-                  <span
-                    className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
-                    role="button" tabIndex={0}
-                    title="Docs" aria-label="Docs"
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
-                    onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
-                  <span
-                    className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="Model Routes" aria-label="Model Routes"
-                    onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
                   <span
                     className={`wb-view-icon ${rightView === 'epics' && viewProject === g.project.key ? 'active' : ''}`}
                     title="Epics" aria-label="Epics"
                     onClick={() => handleViewIcon(g.project.key, 'epics')}><ProjectIcon name="epics" /></span>
-                  {/* 第五枚=项目设置（票③面D）：常驻可见，开设置弹层（只读+danger 区摘除）。 */}
-                  <span className="wb-view-icon" data-wb-project-settings-entry=""
-                    title="Project Settings" aria-label="Project Settings"
-                    onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
+                  {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
+                  {moreViews[g.project.key] && (<>
+                    <span
+                      className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
+                      role="button" tabIndex={0}
+                      title="Docs" aria-label="Docs"
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
+                      onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
+                    <span
+                      className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
+                      title="Model Routes" aria-label="Model Routes"
+                      onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
+                    <span className="wb-view-icon" data-wb-project-settings-entry=""
+                      title="Project Settings" aria-label="Project Settings"
+                      onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
+                  </>)}
+                  <span
+                    className="wb-view-icon"
+                    role="button" tabIndex={0}
+                    data-wb-more-views="" data-on={Boolean(moreViews[g.project.key]) || undefined}
+                    title={moreViews[g.project.key] ? 'Fewer views' : 'More views'}
+                    aria-label={moreViews[g.project.key] ? 'Fewer views' : 'More views'}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setMoreViews(m => ({ ...m, [g.project.key]: !m[g.project.key] })) }}
+                    onClick={() => setMoreViews(m => ({ ...m, [g.project.key]: !m[g.project.key] }))}><span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1, fontWeight: 700 }}>⋯</span></span>
                 </span>
               </div>
               {!collapsed[g.project.key] && (
