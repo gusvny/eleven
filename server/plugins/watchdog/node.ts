@@ -25,6 +25,7 @@ import { execFile } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
+import * as net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,15 +33,22 @@ import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 
 import { loadWatchdogConfig, isValidProjectKey } from './src/host/config.ts'
-import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus } from './src/host/core.ts'
+import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type PendingProvider, type SessionStatFn } from './src/host/core.ts'
+import type { PendingInteraction } from './src/host/self-lock.ts'
 import { QueueMirror } from './src/host/queue-mirror.ts'
 import type { WakeIo, WakeOutcome } from './src/host/exits.ts'
+import { readRequests, fsLedgerIo } from '../executor-panel/src/host/requests.ts'
 
 const execFileP = promisify(execFile)
 
 export const name = 'sandbar-watchdog'
 // webServer 只在 web profile 存在；headless 下守望者本体照常，只待机状态读面。
 export const inject: string[] = []
+
+/** 引擎端口（t260929-08 探针面）：镜像部署引擎的 Temporal 监听口——workbench
+ *  metrics.ts 是另一处硬编码点（本仓暂无跨插件共享配置缝）；换口部署用
+ *  SANDBAR_ENGINE_PORT 覆盖，勿另散落第二处裸字面量。 */
+const ENGINE_PORT = Number.parseInt(process.env.SANDBAR_ENGINE_PORT ?? '', 10) || 7233
 
 /** 本文件固定落在 <repo>/server/plugins/watchdog/ 下，上三级即仓库根。 */
 function defaultRepo(): string {
@@ -210,6 +218,119 @@ export function makeWakeIo(ctx: Context): WakeIo {
   }
 }
 
+/** executor 会话快照（t260929-08）：sessionStat 每拍刷新，pendingProvider 复用
+ *  running 位（避免一拍两次 list()）；读不到 = 显式缺席，绝不冒充「没在跑」。 */
+export interface SessionSnapshot {
+  /** 声明会话本拍是否在跑；null = 本拍没读到该会话（list 缺席/调用失败/会话不存在）。 */
+  runningOf(sessionId: string): boolean | null
+}
+
+type ControllerLike = {
+  list?: (request: unknown, signal: AbortSignal) => Promise<{ items?: Array<{ sessionId?: string; updatedAt?: number; running?: boolean }> }>
+  prompt?: (req: unknown, signal: AbortSignal) => Promise<{ accepted: true }>
+  control?: (signal: AbortSignal) => AsyncIterable<unknown>
+}
+
+/** executor 推进真源（t260929-08）：真宿主 Session API list()——只认 watchdog.json
+ *  声明的 executor_session，绝不猜路径。返回 {advanced,mtimeMs}：
+ *  - 会话在列：advanced = updatedAt > sinceMs（宿主 durable message 时间，一有任何落盘
+ *    消息即前进），mtimeMs = updatedAt；
+ *  - 宿主服务缺席 / list 失败 / 会话不在列：advanced=null（显式 no_signal，绝不冒充
+ *  「有信号但没推进」，也不冒充「一切正常」）。
+ *  同拍把 running 位写进快照（自锁判定的 sessionRunning 证据）。 */
+export function makeSessionStat(ctx: Context): { stat: SessionStatFn; snapshot: SessionSnapshot } {
+  type SummaryLike = { sessionId?: string; updatedAt?: number; running?: boolean }
+  const getController = (): ControllerLike | undefined =>
+    (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
+  // 本拍缓存（同一拍内 stat 与 pendingProvider 共用一次 list 的结果）。
+  let cacheAt = -1
+  let cache: SummaryLike[] = []
+  const fetchList = async (): Promise<SummaryLike[] | null> => {
+    const c = getController()
+    if (!c || typeof c.list !== 'function') return null
+    try {
+      const res = await c.list({}, AbortSignal.timeout(10_000))
+      return Array.isArray(res?.items) ? res.items as SummaryLike[] : null
+    } catch {
+      return null
+    }
+  }
+  return {
+    snapshot: {
+      runningOf(sessionId) {
+        const hit = cache.find(s => s.sessionId === sessionId)
+        return hit ? hit.running === true : null
+      },
+    },
+    stat: async (sessionId, sinceMs) => {
+      const nowMs = Date.now()
+      if (nowMs - cacheAt > 5_000 || cacheAt < 0) {
+        const fresh = await fetchList()
+        if (fresh !== null) { cache = fresh; cacheAt = nowMs }
+      }
+      if (sessionId === '') return { advanced: null, mtimeMs: null }
+      const hit = cache.find(s => s.sessionId === sessionId)
+      if (!hit || typeof hit.updatedAt !== 'number' || !Number.isFinite(hit.updatedAt)) {
+        return { advanced: null, mtimeMs: null }
+      }
+      return { advanced: hit.updatedAt > sinceMs, mtimeMs: hit.updatedAt }
+    },
+  }
+}
+
+/** 自锁 pending 真源（t260929-08）：面板请求账（requests.jsonl，追加式、未答复永不删）
+ *  ——设计稿 260927 的「Requests＝等你答复」面。waiting 行逐条映射 PendingInteraction：
+ *  raisedBy = 行内 raised_by（'' = 未归属——自锁判定不认空归属并显式点名），target = 请求 id，
+ *  sessionRunning = 发起方会话的 list running 位（读不到 = false，快照缺席显式在 reason 面）。
+ *  文件不存在 = 真读过、确实没有挂起请求（available:true, pending:[]），不是 unknown；
+ *  读失败（io 异常）= available:false + reason → 显式 unknown。
+ */
+export function makePendingProvider(projectKey: string, runningLookup?: (sessionId: string) => boolean | null): PendingProvider {
+  const env = process.env
+  return async (): Promise<{ available: boolean; pending: PendingInteraction[] | null; reason?: string }> => {
+    if (!isValidProjectKey(projectKey)) {
+      return { available: false, pending: null, reason: `project 形状不合法：${projectKey}——请求账不读` }
+    }
+    let rows: Awaited<ReturnType<typeof readRequests>>['rows']
+    try {
+      rows = readRequests(fsLedgerIo, env, projectKey).rows.filter(r => r.status === 'waiting')
+    } catch (e) {
+      return { available: false, pending: null, reason: `请求账读失败：${String(e instanceof Error ? e.message : e)}` }
+    }
+    return {
+      available: true,
+      pending: rows.map(r => ({
+        raisedBy: r.raised_by ?? '',
+        kind: r.kind,
+        target: r.id,
+        // 发起方会话 running 位：真源是同拍的 list 快照；发起方未知/未读到 = false
+        // （证据面靠 raisedBy 归属说话，running 只是辅助位，缺席不冒充）。
+        sessionRunning: r.raised_by ? runningLookup?.(r.raised_by) === true : false,
+      })),
+    }
+  }
+}
+
+/** 引擎存活真探针（t260929-08，workbench probePort 同口径）：TCP 连 127.0.0.1:ENGINE_PORT。
+ *  连上 = online；拒绝/超时/错误 = offline（单机部署，refused 与 filtered 同义=不可达）。
+ *  单次尝试不重试（继承 workbench 语义——探针每拍都跑，重试留给节拍）；socket 必 destroy。 */
+export function makeEngineProbe(port: number = ENGINE_PORT): () => Promise<{ online: boolean; detail: string }> {
+  return () => new Promise((res) => {
+    const sock = net.connect({ host: '127.0.0.1', port })
+    let settled = false
+    const done = (online: boolean, detail: string) => {
+      if (settled) return
+      settled = true
+      sock.destroy()
+      res({ online, detail })
+    }
+    sock.setTimeout(800)
+    sock.once('connect', () => done(true, `127.0.0.1:${port} 可连（引擎在线）`))
+    sock.once('error', (e) => done(false, `127.0.0.1:${port} 连接失败（${e.code ?? e.message}）——引擎离线`))
+    sock.once('timeout', () => done(false, `127.0.0.1:${port} 800ms 超时——引擎离线`))
+  })
+}
+
 export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
   const repo = options.repo ?? process.env.SANDBAR_REPO ?? defaultRepo()
   if (process.env.SANDBAR_REPO === undefined) process.env.SANDBAR_REPO = repo // Watchdog.ledgerDir 缺省推导用
@@ -217,6 +338,10 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
   const watch = new Map<string, Watchdog>()
   const wakeIo = makeWakeIo(ctx)
   const boardReader = makeBoardReader(repo, options.python)
+  // 真信号三面（t260929-08）：会话推进（list updatedAt）/ 自锁 pending（面板请求账）/
+  // 引擎探针（7233 TCP）。快照由 sessionStat 每拍刷新，pendingProvider 复用 running 位。
+  const session = makeSessionStat(ctx)
+  const engineProbe = makeEngineProbe()
 
   /** 起/停一个项目的守望者（配置不存在或被停 = 显式 stopped，非消失）。 */
   async function ensureWatchdog(key: string): Promise<Watchdog> {
@@ -226,6 +351,9 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
       io: defaultIo,
       boardReader,
       wakeIo,
+      engineProbe,
+      sessionStat: session.stat,
+      pendingProvider: makePendingProvider(key, (sid) => session.snapshot.runningOf(sid)),
       now: Date.now,
     })
     watch.set(key, w)

@@ -368,6 +368,33 @@ def hold_wait_s():
     return float(os.environ.get("SANDBAR_STAGE_HOLD_WAIT_S", 10))
 
 
+# 常驻基建族（树级控制台，设计上长命）与「锁根分裂」保护（260929 宿主令直修）
+# 事故（本岗实测复现）：引擎给场景子进程**剥掉** `SANDBAR_STAGE_LOCK_DIR`（见
+# failure_protocol 的剥离元组）⇒ 场景族起的台，租约落 **home 根**
+# （~/.sandbar/test-stages）；而供给/操作员侧把锁根钉在 /tmp/sandbar-test-stages
+# （verify.yaml 的 supply 行）⇒ 清扫在 /tmp 里看不到 home 根的租约，于是把**活着的**
+# `stage-console-*` 判成「孤儿容器：无租约文件」，仅靠 1800s 年龄阀暂免；一旦
+# `SANDBAR_STAGE_ORPHAN_MIN_AGE_S=0` 就是真拆。后果：任何活过 30 分钟的常驻控制台都可能
+# 被**别的泳道**的自动清扫拆掉——这正是「共享台并发干扰 / 环境红」整族的机械来源。
+# 处置（fail-closed）：本族「租约不可见」**不构成孤儿证据** ⇒ 默认只报告、不真拆；要清
+# 真实泄漏必须显式开 `SANDBAR_STAGE_SWEEP_INFRA=on`（明示不静默，沿本文件旋钮纪律）。
+# 锁根的彻底统一（env 钉 vs home 根并集判定）留作后续专项。
+INFRA_FAMILY_PREFIX = ("stage-console-",)
+
+
+def infra_family_sweep_enabled() -> bool:
+    """常驻基建族是否纳入**自动**清扫（缺省关=只报告不真拆）；畸形值=usage 红点名。"""
+    raw = str(os.environ.get("SANDBAR_STAGE_SWEEP_INFRA", "")).strip().lower()
+    if not raw:
+        return False
+    if raw in ("0", "off", "no", "false"):
+        return False
+    if raw in ("1", "on", "yes", "true"):
+        return True
+    raise StageError("SANDBAR_STAGE_SWEEP_INFRA 不合法：%r（须 on/off 族）"
+                     % raw, kind="usage")
+
+
 def wait_budget_s():
     """争用等待预算（秒，t260920-01 stage-ops 票① B5-c）：只封顶「等别人」的
     窗口——docker daemon 探针、同项目 ensure 互斥锁、他人 booting 翻面、holder
@@ -1571,6 +1598,16 @@ def orphan_condemn_projects(inv=None, now=None, enabled=None, prefix=None):
             skipped.append({"project": proj,
                             "why": "年龄 %.0fs < 阀 %.0fs（SANDBAR_STAGE_ORPHAN_MIN_AGE_S）"
                                    % (age, min_age)})
+        elif (not infra_family_sweep_enabled()
+              and proj.startswith(INFRA_FAMILY_PREFIX)):
+            # 260929 直修（宿主令）：常驻基建族「租约不可见」不构成孤儿证据——锁根可能
+            # 分裂（场景族落 ~/.sandbar/test-stages、供给/操作员侧钉
+            # /tmp/sandbar-test-stages），此时活台会被误判孤儿。fail-closed：只报告。
+            skipped.append({"project": proj,
+                            "why": "常驻基建族（树级控制台，设计上长命）：租约不可见不构成"
+                                   "孤儿证据（锁根可能分裂：场景族落 home 根、供给侧钉 "
+                                   "/tmp/sandbar-test-stages）——只报告不真拆；要清真实泄漏"
+                                   "显式开 SANDBAR_STAGE_SWEEP_INFRA=on"})
         else:
             condemn.append(proj)
     return condemn, skipped

@@ -100,7 +100,9 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 // T1 三处就位
 {
   const setIcon = sidebar.locator('[title="Project Settings"], [aria-label="Project Settings"]').first();
-  const addRow = sidebar.getByText('接入项目', { exact: false }).first();
+  // 接入行锚=产品机读属性 [data-wb-project-add-row]（宿主令 260925 英文化后旧中文
+  // 文案「＋ 接入项目」退役为「＋Add project」；文案锚会随下一次改词再断，机读锚不断）。
+  const addRow = sidebar.locator('[data-wb-project-add-row]').first();
   const isoRow = sidebar.getByText('badkey', { exact: false }).first();
   const setOk = await setIcon.isVisible().catch(() => false)
     && (await setIcon.evaluate((el) => !!el.querySelector('svg') || el.tagName.toLowerCase() === 'svg').catch(() => false));
@@ -116,7 +118,8 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
   // t260905-06 仲裁同步：「知识库」提法退役（宿主令+本票验收③），原位换「文档」
   // （t260905-06）。本清单随产品契约演进更新——「文档」图标在位=新口径，同时守护
   // 旧「知识库」不回流（与 wording_retired 场景互补：这里守 DOM 呈现面，那边守源码）。
-  const labels = ['工单列表', '文档', '模型路由', '立项单'];
+  // 视图图标 title 真源=插件 PROJECT_ICON_SPECS（宿主令 260925 英文化；旧中文四名退役）
+  const labels = ['Tickets', 'Docs', 'Model Routes', 'Epics'];
   let allSvg = true;
   for (const lb of labels) {
     const ic = sidebar.locator(`[title="${lb}"], [aria-label="${lb}"]`).first();
@@ -143,7 +146,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
 
 // T3 接入弹层
 {
-  await forceClick(sidebar.getByText('接入项目', { exact: false }).first());
+  await forceClick(sidebar.locator('[data-wb-project-add-row]').first());
   const dlg = page.locator('[role=dialog], [class*=modal], [class*=overlay]').first();
   const opened = await dlg.isVisible().catch(() => false);
   record('add/modal-opens', opened);
@@ -198,7 +201,8 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
   const setOpened = (await dlg.innerText().catch(() => '')).includes('fixa');
   record('remove/entry-via-settings', setOpened, '设置弹层含目标 key（danger 入口面）');
 
-  const danger = page.getByText('摘除项目', { exact: false }).first();
+  // danger 摘除入口=产品机读属性 [data-wb-pmod-remove-danger]（按钮文案现为「Remove project…」）
+  const danger = page.locator('[data-wb-pmod-remove-danger]').first();
   await forceClick(danger);
   await page.waitForTimeout(600);
   const rmDlg = page.locator('[data-wb-pmod-overlay]').last();
@@ -265,7 +269,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
       await page2.waitForTimeout(600);
       record('remove-real/entry', (await dlg.innerText().catch(() => '')).includes('rmb'),
         '设置弹层含目标 key（真台组锚）');
-      await forceClick(page2.getByText('摘除项目', { exact: false }).first());
+      await forceClick(page2.locator('[data-wb-pmod-remove-danger]').first());
       await page2.waitForTimeout(600);
       const rmDlg = page2.locator('[data-wb-pmod-overlay]').last();
 
@@ -294,7 +298,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
         // 确认错误面不在场，防把失败闪断误当成功。
         await forceClick(rmDlg.locator('[data-wb-pmod-remove-submit]'));
         let okTxt = '', modalGone = false, errTxt = '';
-        for (let i = 0; i < 20 && !/摘除完成/.test(okTxt) && !modalGone && !errTxt; i++) {
+        for (let i = 0; i < 20 && !/Removal done/.test(okTxt) && !modalGone && !errTxt; i++) {
           await page2.waitForTimeout(500);
           modalGone = (await rmDlg.count()) === 0;
           if (!modalGone) {
@@ -302,7 +306,7 @@ const visText = async () => (await sidebar.innerText().catch(() => '')).normaliz
             okTxt = await rmDlg.locator('[data-wb-pmod-remove-result]').innerText().catch(() => '');
           }
         }
-        record('remove-real/execute-ok', /摘除完成/.test(okTxt) || (modalGone && !errTxt),
+        record('remove-real/execute-ok', /Removal done/.test(okTxt) || (modalGone && !errTxt),
           `result=${okTxt.slice(0, 120)} modalGone=${modalGone} err=${errTxt.slice(0, 200)}`);
         // 现场核验：注册表根（宿主侧挂载）退役文件在位 = 可逆摘除真落地。
         const retired = readdirSync(path.join(fx2.reg, 'rmb'))

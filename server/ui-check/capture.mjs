@@ -904,11 +904,14 @@ async function main() {
         file: "console-approval.png", title: "审批抽屉（fixture T-FIX-A awaiting-human）",
         run: async (page) => {
           await openView(page, "Tickets");
-          const row = page.locator('tr.wb-row[data-state="awaiting-human"]', { hasText: "T-FIX-A" }).first();
+          // 行锚=列表 v5 平铺行卡 .wb-card（原表格行 tr.wb-row 随 v5 改版退役）：
+          // 票 T-FIX-A stage_state=awaiting-human ⇒ deriveTicketState→'waiting'
+          // （ticket-list-model.ts:75），故 data-state 取 waiting 而非 stage_state 原值。
+          const row = page.locator('.wb-card[data-state="waiting"]', { hasText: "T-FIX-A" }).first();
           try {
             await row.waitFor({ state: "visible", timeout: 8000 });
           } catch {
-            throw new Error("列表未见 T-FIX-A 行（tr.wb-row[data-state=awaiting-human]）——fixture 注入未生效或 /tickets 未被拦截（查 fixture-manifest.json）");
+            throw new Error("列表未见 T-FIX-A 行（.wb-card[data-state=waiting]，票 T-FIX-A 为 awaiting-human ⇒ waiting）——fixture 注入未生效或 /tickets 未被拦截（查 fixture-manifest.json）");
           }
           await forceClick(row);
           const step = page.locator('.wb-d2-step[data-s="awaiting-human"]').first();
@@ -926,7 +929,7 @@ async function main() {
           // 先回干净首页再进（上一个视图开着详情抽屉，防列表被抽屉遮挡）
           await gotoConsole(page, url, timeoutMs).catch(() => {});
           await openView(page, "Tickets");
-          const row = page.locator("tr.wb-row", { hasText: "T-FIX-B" }).first();
+          const row = page.locator(".wb-card", { hasText: "T-FIX-B" }).first();
           try {
             await row.waitFor({ state: "visible", timeout: 8000 });
           } catch {

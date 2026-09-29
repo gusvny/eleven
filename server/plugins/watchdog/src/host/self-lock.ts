@@ -54,5 +54,16 @@ export function detectSelfLock(
       since: nowMs,
     }
   }
+  // 未归属行（t260929-08）：raisedBy 空 = 账里读到了但不知道谁发起——自锁判定不认空归属
+  // （绝不冒充匹配，也绝不冒充「没有自锁」），显式点名计数，人看了知道去补归属。
+  const unattributed = pending.filter(p => typeof p.raisedBy !== 'string' || p.raisedBy === '').length
+  if (unattributed > 0) {
+    return {
+      state: 'none',
+      reason: `pending 里 ${unattributed} 条挂起请求缺发起方归属（raised_by 空）——自锁只认非空归属，这几条不参与匹配（显式点名，不是「确认没有自锁」）`,
+      target: null,
+      since: nowMs,
+    }
+  }
   return { state: 'none', reason: '', target: null, since: nowMs }
 }

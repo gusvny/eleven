@@ -125,7 +125,7 @@ try {
   // var(--dsw-alias-bg-primary, var(--dsw-alias-bg-base, #fff)) 自此为**锁定契约**，
   // 源串改比例/换色源/改链即本场景红（变更走正规门，不由热修顺手改）。
   const colors = await page.evaluate(() => {
-    const root = document.querySelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])');
+    const root = document.querySelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])');
     // 同行同源口径：dot 在组头（wb-group-head，psess 行的兄弟位——sidebar 源
     // 647 行），+ 钮在行内；都取 root 所在组作用域（全局 first-match 在多项目台
     // 会锚到别行：seedq 行序在前后 first dot=seedq 蓝而 root=seedws 绿，三处同源

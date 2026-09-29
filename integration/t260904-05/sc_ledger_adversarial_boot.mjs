@@ -75,7 +75,7 @@ async function bootCase(seed) {
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
     // 环境前提：台面必须渲染出项目会话行（共享台 fixture/资源面劣化时 UI 断半——
     // 此时后续断言测的是台的伤，不是产品行为）。不渲染=envFail，点名 404 明细。
-    const rowOk = await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 15000 }).then(() => true).catch(() => false);
+    const rowOk = await page.waitForSelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])', { timeout: 15000 }).then(() => true).catch(() => false);
     if (!rowOk) {
       await browser.close();
       return { state: null, consoleErrors, bootFailed: false, envFail: true, notFound };

@@ -200,12 +200,12 @@ try {
   if (headerCode === FPV_CODE) {
     await page.locator('[data-testid="epic-status-edit"]').selectOption('已完结')
     await page.locator('[data-testid="epic-status-save"]').click({ timeout: 4000 })
-    savedMsg = await page.locator('.wb-ep-head .wb-ep-sub', { hasText: '已保存' })
+    savedMsg = await page.locator('.wb-ep-head .wb-ep-sub', { hasText: 'Saved' })
       .waitFor({ state: 'visible', timeout: 10000 }).then(() => true).catch(() => false)
     // 成功横幅会被保存成功后的详情重拉即时复位（产品现状=瞬态），不锚瞬态——
     // 硬判据=无失败文案（失败路径横幅持久在场可辨）+文件字节+wire 参数三重结果锚。
     await page.waitForTimeout(1500)
-    const errText = await page.locator('.wb-ep-head .wb-ep-sub', { hasText: /保存失败|保存请求异常/ })
+    const errText = await page.locator('.wb-ep-head .wb-ep-sub', { hasText: /Save failed|Save request failed/i })
       .first().innerText().catch(() => '')
     record('write/status-save-ok', errText === '',
       `保存未报错（横幅瞬态捕获=${savedMsg}，仅观察项；${errText ? `失败文案=${errText}` : '失败文案不在场=用户可感知面健康'}）`)

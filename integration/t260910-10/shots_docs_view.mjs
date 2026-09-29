@@ -59,7 +59,9 @@ try {
   await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
   await page.waitForTimeout(500);
-  const docBtn = page.locator('[aria-label="文档"], [title="文档"]').first();
+  // 侧栏视图入口锚：title/aria-label 真源=插件 PROJECT_ICON_SPECS（Docs）；
+  // 宿主令 260925 英文化后旧中文锚「文档」已退役（260929 同族校正）。
+  const docBtn = page.locator('[title="Docs"], [aria-label="Docs"]').first();
   try { await docBtn.click({ timeout: 8000 }); }
   catch { await docBtn.evaluate((el) => el.click()); }
   await page.locator('.wb-doc-root').first().waitFor({ state: 'visible', timeout: 15000 });

@@ -1,0 +1,10 @@
+{
+  "name": "sandbar-watchdog-bench-signals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./bench-plugin-signals.ts",
+    "./package.json": "./package.json"
+  }
+}

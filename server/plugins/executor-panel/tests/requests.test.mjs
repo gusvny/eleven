@@ -77,11 +77,29 @@ assert(parseJsonBody('{oops').ok === false, 'non-JSON body rejected')
 assert(parseJsonBody('[1,2]').ok === false, 'non-object body rejected')
 assert(parseJsonBody('{"a":1}').ok === true, 'valid object body accepted')
 
+// raised_by 归属面（t260929-08 自锁证据源）：合法落账 / 缺省='' / 畸形 fail-closed / 历史行归一化。
+const rb = appendRequest(io, env, 'alpha', { kind: 'approval', question: 'Raise the gate?', raised_by: 'executor-sb' }, clock.now())
+assert(rb.ok === true && rb.row.raised_by === 'executor-sb', 'append records raised_by attribution when given')
+const rbNo = appendRequest(io, env, 'alpha', { kind: 'sign', question: 'Sign T-2?' }, clock.now())
+assert(rbNo.ok === true && rbNo.row.raised_by === '', 'append without raised_by defaults to unattributed (empty string)')
+assert(appendRequest(io, env, 'alpha', { kind: 'sign', question: 'x', raised_by: 42 }, 1).ok === false, 'non-string raised_by rejected')
+assert(appendRequest(io, env, 'alpha', { kind: 'sign', question: 'x', raised_by: '   ' }, 1).ok === false, 'blank raised_by rejected')
+assert(appendRequest(io, env, 'alpha', { kind: 'sign', question: 'x', raised_by: 'x'.repeat(121) }, 1).ok === false, 'oversized raised_by (>120) rejected')
+const ledgerBeforeRbRej = io.files[f('alpha')].split('\n').filter(Boolean).length
+assert(!io.files[f('alpha')].includes('"raised_by":42'), 'rejected raised_by never touches the ledger')
+// 历史行（无 raised_by 字段）读出归一化为 ''，不畸形、不丢。
+const histFile = f('legacyproj')
+io.mkdirSync(histFile.slice(0, histFile.lastIndexOf('/')), { recursive: true })
+io.appendFileSync(histFile, JSON.stringify({ type: 'request', id: 'req-old-1', at: 1, project: 'beta', kind: 'sign', question: 'legacy row', detail: '', default_action: '', expires_at: null }) + '\n')
+const betaRead = readRequests(io, env, "legacyproj")
+assert(betaRead.malformed_rows === 0 && betaRead.rows[0]?.raised_by === '', 'legacy row without raised_by reads back as unattributed, not malformed')
+assert(io.files[f('alpha')].split('\n').filter(Boolean).length === ledgerBeforeRbRej, 'rejected raised_by appends never landed on the ledger')
+
 // 未答复行长保留：读一百次也不消失。
 for (let i = 0; i < 5; i++) readRequests(io, env, 'alpha')
 const linesBeforeReads = io.files[f('alpha')].split('\n').filter(Boolean).length
 for (let i = 0; i < 5; i++) readRequests(io, env, 'alpha')
 assert(io.files[f('alpha')].split('\n').filter(Boolean).length === linesBeforeReads, 'reading never mutates the ledger (long retention)')
 
-n += 19
+n += 27
 done(n)

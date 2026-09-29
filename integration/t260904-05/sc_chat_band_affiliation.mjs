@@ -152,7 +152,7 @@ try {
 
   // T6 刷新恢复（账册持久 → 归属不丢；映射失败时无期望值可断=env_fail 不自相矛盾）
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="新建 SeedWs 会话"])', { timeout: 12000 }).catch(() => {});
+  await page.waitForSelector('[data-wb-psess-row]:has([aria-label="New SeedWs session"])', { timeout: 12000 }).catch(() => {});
   await page.waitForTimeout(1500);
   const t6 = await bandState();
   if (expectKey === null) {
