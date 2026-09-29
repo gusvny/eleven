@@ -138,6 +138,16 @@ try {
 
   // 入口钉 aria-label：无障碍名=该入口**用户可感知契约本身**（宿主令 260925 控制台 UI 文案
   // 一律英文后取值为 "Docs"，迁移前旧值为「文档」）——不是实现细节，故此处钉英文原文。
+
+// t260929-22 宿主裁 1（260929）：Docs/模型路由/项目设置收进组内「More views」展开位
+// （260823 常驻可见放宽为展开显现）——取用前先展开全部组的展开位（data-on 缺席=未展开）。
+async function expandMoreViews(page) {
+  const btns = page.locator('[data-wb-more-views]:not([data-on])')
+  const n = await btns.count().catch(() => 0)
+  for (let i = 0; i < n; i++) await btns.nth(i).click({ timeout: 4000 }).catch(() => {})
+  await page.waitForTimeout(300)
+}
+  await expandMoreViews(page)
   const docIcon = page.locator('[aria-label="Docs"]').first();
   const present = await docIcon.isVisible().catch(() => false);
   if (!present) {
