@@ -970,6 +970,7 @@ async def run_inspection_deadman(args: Dict[str, Any]) -> Dict[str, Any]:
     不用于漏跑判定）。台账目录走 shared.INSPECTION_DIR（env SANDBAR_INSPECTION_DIR 可覆盖
     ——隔离台/注入演练用）。"""
     from inspection_deadman import deadman_findings, ledger_periods, missed_periods
+    from inspection_ticketing import spawn_skip_periods
     from shared import INSPECTION_DIR
 
     instance = str(args.get("instance_id") or "")
@@ -982,7 +983,10 @@ async def run_inspection_deadman(args: Dict[str, Any]) -> Dict[str, Any]:
     tz_name = str(args.get("tz") or "")
     try:
         ledger = await asyncio.to_thread(ledger_periods, ledger_dir, instance)
-        missed = (missed_periods(cron, ledger["periods"], None, lookback, 0, tz_name)
+        # 260929：声明式空转（skip_when_unchanged）的期号并入「已解释」集合——它们没跑是
+        # **按声明判定的结果**，不是漏跑（审计面既不说谎，也不把告警报成噪声）。
+        skipped = spawn_skip_periods(ledger_dir, instance)
+        missed = (missed_periods(cron, ledger["periods"] | skipped, None, lookback, 0, tz_name)
                   if cron else [])
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": "漏跑核查故障：%s: %s" % (type(e).__name__, e)}
@@ -999,6 +1003,7 @@ async def run_inspection_deadman(args: Dict[str, Any]) -> Dict[str, Any]:
         "tz": tz_name,
         "ledger_dir": str(ledger_dir), "ledger_exist": ledger["exist"],
         "ledger_periods": sorted(ledger["periods"]), "missed": missed,
+        "skipped_no_change": sorted(skipped),
         "malformed": ledger["malformed"], "findings": findings}}
 
 
@@ -1092,6 +1097,26 @@ def _inspection_ledger_dir() -> Path:
     return Path(os.environ.get("SANDBAR_INSPECTION_DIR") or INSPECTION_DIR)
 
 
+def _no_change_skip(instance_id: str, repo_root: str) -> Dict[str, Any]:
+    """声明式空转判据（260929 宿主令：simplify-face 每天跑一次、无新变更不干活）。
+
+    「上次运行的基点 sha」↔「当前 main HEAD」相同 ⇒ 本期无事可做。任一侧读不出/形态不合
+    ⇒ 不跳（宁可多跑一次，绝不假跳）。git 面复用 agent_activities.resolve_main_head_impl
+    （单一真源；阻塞 git 一律 to_thread，同该模块纪律）。"""
+    from agent_activities import resolve_main_head_impl
+    from inspection_ticketing import last_run_base, no_change_skip
+    head = resolve_main_head_impl({"repo_root": repo_root, "ref": "main"})
+    if not head.get("ok"):
+        return {"unchanged": False, "why": "", "head": "",
+                "note": "HEAD 解析不出（%s）——不跳，照常起票" % str(head.get("error"))[:160]}
+    sha = str((head.get("result") or {}).get("sha") or "")
+    last = last_run_base(_inspection_ledger_dir(), instance_id)
+    verdict = no_change_skip(last.get("base_ref", ""), sha, last.get("period", ""))
+    return {"unchanged": bool(verdict["unchanged"]), "why": verdict["why"], "head": sha,
+            "last_period": last.get("period", ""), "last_base": last.get("base_ref", ""),
+            "note": ""}
+
+
 def _with_spawn_decision(res: Any, instance_id: str, period: str, face: str) -> Any:
     """起票回执补「裁决摘要」并落可观测面（260929，KI-129 修法②/KI-131 未修块）。
 
@@ -1149,6 +1174,19 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
         ident = _resolve_spawn_identity(args, plan)
     except ValueError as e:  # noqa: BLE001——身份决议不出=显式失败（fail-closed 点名）
         return {"ok": False, "error": "spawn 身份决议失败：%s" % e}
+    # 声明式空转（260929 宿主令，decl 键 skip_when_unchanged）：无新变更 → 只落一行裁决
+    # 记录、不铸票不跑（漏跑核查读该记录，不误报漏跑）。判据读不出 ⇒ 不跳（绝不假跳）。
+    if bool(plan.get("skip_when_unchanged")):
+        skip = await asyncio.to_thread(_no_change_skip, instance_id, ident["repo_root"])
+        if skip.get("unchanged"):
+            return _with_spawn_decision(
+                {"ok": True, "result": {
+                    "triggered": False, "deduped": False, "skipped": "no-new-changes",
+                    "skipped_because": str(skip.get("why") or ""),
+                    "head": skip.get("head", ""), "last_period": skip.get("last_period", ""),
+                    "last_base": skip.get("last_base", ""),
+                    "instance": instance_id, "period": period}},
+                instance_id, period, face="cron")
     try:
         client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
     except Exception as e:  # noqa: BLE001

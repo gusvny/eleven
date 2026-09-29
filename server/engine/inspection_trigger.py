@@ -767,6 +767,7 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
     离线也可用（--offline 不连 Temporal）：隔离台/注入演练不依赖服务器。"""
     from inspection_deadman import (deadman_findings, ledger_periods, missed_periods,
                                     skip_findings)
+    from inspection_ticketing import spawn_skip_periods
     try:
         decl, decl_project = _resolve_decl(args.decl_path, args.instance)
     except ValueError as e:  # noqa: BLE001——声明不可用=ok False 点名（不猜）
@@ -783,7 +784,10 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
     ledger_dir = Path(args.ledger_dir) if args.ledger_dir else _default_ledger_dir()
     try:
         ledger = ledger_periods(ledger_dir, args.instance)
-        missed = missed_periods(it.cron, ledger["periods"], None,
+        # 260929：声明式空转（skip_when_unchanged）的期号=按声明判定的「无事可做」，
+        # 并入已解释集合——不误报漏跑（与活动面同一口径）。
+        skipped = spawn_skip_periods(ledger_dir, args.instance)
+        missed = missed_periods(it.cron, ledger["periods"] | skipped, None,
                                 int(args.lookback_days), int(args.grace_days),
                                 it.tz)
     except ValueError as e:            # cron 不可解析 → 点名（不静默当没漏）
@@ -798,7 +802,8 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
         "last_ledger_period": max(ledger["periods"]) if ledger["periods"] else "",
         "lookback_days": int(args.lookback_days), "grace_days": int(args.grace_days),
         "tz": it.tz,
-        "missed": missed, "alarmed": bool(missed),
+        "missed": missed, "skipped_no_change": sorted(skipped),
+        "alarmed": bool(missed),
         "malformed": ledger["malformed"],
         "findings": deadman_findings(missed, args.instance, it.cron, int(args.lookback_days)),
         # t260917-02（C1）：跳火回执两键——None=未查（在线面才有真值），非 None=调度面

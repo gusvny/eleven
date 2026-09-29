@@ -103,13 +103,20 @@ instances:
     template: inspection-lite
   # 260915 宿主令先试跑（手动 trigger 验产出质量，过了再 schedule-up 开每周定时）。
   # 注意：scan_face 缺省会落 test 面（票①行为）——本实例必须显式指 simplify。
+  # 260929 宿主令（接线当场追改）：改**每天一次**（09:30 Asia/Shanghai），并加
+  # skip_when_unchanged=true —— 「没有新 change 就不干啥」：起票前比对上次运行基点
+  # sha 与当前 main HEAD，相同则本期只落一行裁决记录（决策=skipped-no-change），
+  # 不铸票、不跑套件、不占期槽资源；漏跑核查读该记录，不把它算成漏跑。
+  # tz 必填（此前缺省落 UTC：人读 08:00 实际是北京 16:00 —— 对账面 tz_missing 会点名）。
   - id: simplify-face
     enabled: true
     project_key: sandbar
     scan_face: simplify
+    skip_when_unchanged: true
+    tz: Asia/Shanghai
     schedule:
       kind: cron
-      cron: 0 8 * * 1
+      cron: 30 9 * * *
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   # ---- t260915-18：stage 面（台面容量可见性）。扫描器=stage_docker inventory
