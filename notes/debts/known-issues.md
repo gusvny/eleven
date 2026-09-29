@@ -2669,3 +2669,85 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **同批观察（不属本条，报给宿主）**：09-29 那期真巡检票 `t260929-01` 的账本行时间是 00:08 CST（即被该棒
 > 在当日的 07:30 调度之前驱动跑完并收口）；另 `t260926-01` / `t260927-01` / `t260927-02` 三张巡检票仍
 > blocked（setup/inspect），日期分别为 09-26、09-27——巡检族自身的卡票需另行确认。
+
+## KI-162 重开同期「结构性搭不起泳道」：泳道坐标按 (实例,期) 复用 × setup 水位清扫刻意留本期 ⇒ 重开的票必撞旧票残骸（260926/27 实案：`t260927-02` 首次真跑 reopen 即 blocked；260929 已直修 main，integration 岗登记）
+> **实案**：260926 按 KI-131 补上「具名重开」能力（`inspection_trigger.py trigger --reopen-reason`）后首次真跑——
+> 重开期 20260927 铸出新票 `t260927-02`，它在 **setup 段就 blocked**，票面理由逐字为
+> `git worktree add /Users/user/Documents/sandbar/.lane/inspection-integration-tests-20260927
+> -b inspection/integration-tests/20260927 失败（目录已存在但非本仓库 worktree？请人工处置）`。
+> **根因两层（都在引擎侧，非操作失误）**：
+> ① 泳道坐标 = `inspection_flow.inspection_lane_name(实例, 期)`（`inspection-<实例>-<期>` / 分支
+>    `inspection/<实例>/<期>`），**与票号无关** ⇒ 重开同一期必然复用同一路径与同一分支名；
+> ② setup 前置的残留清扫用 `keep_period=本期`（`_setup_lane` 的 C2 次序，**刻意不碰本期**——那可是本票
+>    自己要用的路径）⇒ 旧票（执行 COMPLETED、判决 blocked）留下的 worktree / 分支 / 裸目录壳
+>    （KI-115 形态）原样在位 ⇒ `prepare_workspace` 必败。两张面各自都「判不准不动」是对的，合起来
+>    就成了死结：**清扫不敢动本期，重建又必须用本期**。
+> **后果**：①「具名重开」——260926 才补的能力——第一次真跑即废（此后只能靠换期绕，正是 KI-129 记的处置）；
+> ②该期此后两张票都 blocked，09-27 07:30 自动班再以 `同期已服务票出现多张：t260927-01、t260927-02——
+> 每期一票被破坏，人工处置` **硬失败**（判据=`period_slot_verdict` 把「执行 COMPLETED / 判决 blocked」算作
+> 已服务，`inspection_ticketing.py:471/482`，与 KI-129 同根）。
+> **定位**：`inspection_flow.py` 报告链 `_setup_lane` 与 `InspectionProduceWorkflow` 的 setup（产出链）；
+> 失败文案源=`agent_activities._prepare_worktree_lane`。
+> **处置（260929 宿主令「登记 + 直修 main」）**：①判据＝纯函数 `lane_residue_repair_plan`（只认「worktree add
+> 失败」这一形态；git 身份缺失/多仓/权限等别的失败一律不修——清残留解不了，判不准不动）；②修复壳＝
+> `_lane_residue_repair`（定向 `sweep remove_period=本期` 清本期 worktree+分支+裸壳 → **重试一次** prepare）；
+> ③**patch 门 `LANE_REPAIR_PATCH_ID`**（老 history 重放零新命令——否则 replay 非确定、老票卡死）；
+> ④两条链同改（同类面全量排查：泳道坐标同一套命名，只修点名那条＝另一条照旧死结）；⑤失败时票面写清
+> 「试过什么、清扫拆了几件、重试结果」（报错必须精确）。回归＝
+> `server/engine/tests/test_260929_inspection_lane_residue_repair.py`（判据四态 / 真 git 仓上定向清扫三形态 /
+> 别的期与别的实例不碰 / 内嵌真仓拒拆 / 两链接线锁）。
+> **同类面**：开发泳道不适用（坐标含票号 `t<date>-<alias>`）；watcher 计数期（`YYYYMMDD-<bucket>`）坐标独立。
+
+## KI-163 声明 `enabled: true` 的巡检实例没有 Temporal Schedule：接线面缺口，且**没有任何面会报**（docs-sync / simplify-face 声明在册却永不触发；260929 排查「巡检静默」时发现，integration 岗登记）
+> **实测**：`inspection_trigger.py decl` 报 `enabled_instances=["docs-sync","integration-tests","simplify-face"]`；
+> 而 `temporal schedule list` 上只有 `sandbar-inspection-integration-tests`（另两条是 dispatcher-scan，已暂停）。
+> 即：`docs-sync`（周一 10:00 doc 面）与 `simplify-face`（周一 08:00 simplify 面）**永远不跑**，且**不会有人
+> 知道**——deadman 是「按 `--instance` 逐个查台账」，没人会去查一个自己没有 schedule 的实例；`decl` 面照报
+> enabled；票面/控制台也不体现「声明了但没接线」。
+> **判据（写进纪律）**：**声明 enabled 与「调度器上真有 Schedule」是两件事**——声明驱动的是「准不准跑」，
+> `schedule-up` 才是「接不接线」；两者之间必须有一张机械对账面（否则「声明在册、实际不跑」可以静默无限期）。
+> 这与 KI-160「判据的外部信号未接线且未在交接里声明」同族，只是这次未接的是**触发信号**本身。
+> **定位**：声明=`inspection.yaml`（`instances[].enabled`）；接线唯一入口=`inspection_trigger.py cmd_schedule_up`
+> （人工跑，`--note <谁/为何/频率>`）；缺对账面（无「enabled 但无 schedule」的只读清单）。
+> **处置建议（留宿主定：接线＝新增两个真调度，会真的开始跑 doc/simplify 巡检）**：①给 `decl`（或死信/巡检手册面）
+> 加只读对账：列出 enabled 但调度器上无 Schedule 的实例——这一条本岗可直修；②`docs-sync`/`simplify-face` 要么
+> `schedule-up` 接线，要么 `enabled: false`（声明与现状对齐，如 `mechanism-face`/`stage-capacity` 的占位写法）。
+
+## KI-129 追记（260929 宿主实报「那个集成测试的巡检没有了」——静默跳过的**后果面**实测 + 记录面已补）
+> **实报链（本轮完整证据）**：09-26 为绕开本条（期槽被「执行 COMPLETED、判决 blocked」的票占死）按处置**一期
+> 一期往下换**，当天 10:10–20:41 CST 连续消费了 09-27、09-28、09-29、09-30、10-01、10-02 **六期**槽位；此后
+> 每天 07:30 的自动班全部 `{"deduped":true,"triggered":false,"period_state":"completed|live"}` 收场——**无新票、
+> 无报告、无告警**，宿主三天后只感到「巡检没有了」（09-29 那次 spawn 还先卡了 56 分钟＝早上那台僵住工人的老问题，
+> 重启后 08:26 才收口）。**deadman 看不见**：它只报 `20260925` 漏一期——09-27…10-02 的台账恰是提前服务留下的。
+> 09-27 那次是唯一一次出声，且是**硬失败**（`同期已服务票出现多张`＝本条判据 × KI-162 叠加）。
+> **已修（260929 main，宿主令「登记 + 直修」）**：起票**三路**（cron activity / watcher activity / 手动 CLI +
+> 产出型手动）一律落裁决面——`<台账目录>/inspection-spawn.jsonl` 一行 + `admin.log` 一行（`sub=inspection-spawn`）
+> + 回执带 `decision/alarm/note`（`inspection_ticketing.note_spawn_decision`；**刻意不放进 `open_period_ticket`**，
+> 免得所有单测顺手往真 admin.log 写字——KI-161 教训）。`alarm=True` 三态＝「本期该跑而没跑」：起票失败 / 期槽被
+> **非终态**票占住 / 期槽判已服务但**台账不在场**（跑过没出报告）。已服务且台账在场＝合法去重、不告警，但 note 里
+> 记明「本班不是本期第一次服务 + 服务于几天前」。回归＝`server/engine/tests/test_260929_inspection_spawn_visibility.py`，
+> 含反向锁：`inspection-spawn.jsonl` **不进 deadman 期号集合**（写下「本期没跑」绝不能被读成「本期跑过」）。
+> **仍未修（本条留 open）**：①**提前服务消费未来期槽**这条副作用无通道释放——只有 `reopen_reason` 逐期手动重开
+> （本轮之后要等 10-03 07:30 自动班才自然恢复）；②deadman/告警面**还没消费** `inspection-spawn.jsonl`（本岗只补了
+> 记录面，读面=下一步）；③spawner 据上期判决**自动派生重开理由**（＝KI-131 未修块）仍未动，且改 activity 需
+> 重启中央工人（KI-113）；④「同一期两张票」状态本身仍要人工处置（KI-162 修的是新建泳道，不是清这两张脏票）。
+
+## KI-164 巡检 workflow 里的 `workflow.sleep`（宽限等待）**没挂版本门** ⇒ 老 history 重放非确定（260929 排查 KI-162 时实证 `t260927-01`；同日已直修 main，integration 岗登记）
+> **现象**：`server/engine/replay_check.py --workflow t260927-01` → `NondeterminismError: Timer machine does not
+> handle this event: HistoryEvent(id: 49, ActivityTaskScheduled)`（该票任何重放面全红）。
+> **根因**：`inspection_flow.py` 套件段硬超时分支里的「拆泳道前 120s 宽限等待」
+> （`await workflow.sleep(SUITE_TIMEOUT_TEARDOWN_GRACE)`）是 260927 直修（commit `49b157a`）加的，**当时漏了
+> `workflow.patched` 版本门**——而该分支正是 `t260927-01` 那一次超时走过的分支，于是「代码要发定时器、history 里
+> 却是活动」→ 非确定。**排除法实证**：同一历史用改动前的 HEAD 代码（`git worktree add /tmp/… HEAD`）重放，
+> **报同样的错、同一个 event id** ⇒ 与本轮 260929 改动无关，是既有缺陷（KI-057 家族同款：直修漏了 replay 面）。
+> **影响面（实测收窄）**：只影响「超时发生在加 sleep 之前」的那些 history——全量巡检 history 逐条查定时器事件：
+> `t260927-01` 无、`t260928-01`/`t260929-01`/`t260930-01`/`t261001-01`/`t261002-01` 亦无（即**没有任何一期**带过该
+> 定时器），故补门**对存量零代价**；且巡检 workflow 无在跑实例（`ExecutionStatus=Running` 查为空）⇒ 补门不会
+> 打断任何在飞票。
+> **处置（260929 直修 main）**：加 `SUITE_TEARDOWN_GRACE_PATCH_ID`——`patched()` 真→照旧等 120s（那次修复的要义
+> 不许删）；假→跳过等待且**在时间线两面都留痕**（「等了/没等」都能读出来，不许静默）；回归
+> `server/engine/tests/test_260929_inspection_lane_residue_repair.py::test_suite_teardown_grace_sleep_is_patch_gated`
+> （锁唯一一处 sleep 在门内）。修后 10 张 history 全绿（`t260927-01` 由红转绿，其余九张维持绿）。
+> **纪律（写进本岗自查）**：**凡在 workflow 体里新加命令（含 sleep/timer/signal/子工作流），必须同批上
+> `workflow.patched` 版本门 + 用 `replay_check.py` 对存量 history 实测**——「直修 main」不是跳过 replay 面的理由。
+
