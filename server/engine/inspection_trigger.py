@@ -48,7 +48,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -187,18 +187,29 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
     # （实例+期号 SA 查询 / 指针三态 / AlreadyStarted 归属判定）+ 盖 ProjectKey 与
     # InspectionInstance/InspectionPeriod SA。本壳只做声明校验与回执拼装。
     from shared import TASK_QUEUE  # noqa: E402——本函数局部导入（同 _lazy_engine 模式；arbitrate gen2 缺陷①：漏导入=CLI trigger 主路径 NameError）
-    from inspection_ticketing import open_period_ticket
+    from inspection_ticketing import note_spawn_decision, open_period_ticket
     res = await open_period_ticket(
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "test"),
         decl_path=abs_decl_path(args.decl_path), task_queue=TASK_QUEUE,
         reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
+    # 260929（KI-129/131）：手动路径同样落裁决面（journal + admin.log）——自动班的静默
+    # 跳过与手动起的去重命中在同一条审计线上可对照（失败也落，读数才不断链）。
+    note = note_spawn_decision(_default_ledger_dir(), args.instance, period, res, face="manual")
+    keys = ("decision", "alarm", "note", "journal_path", "journal_error",
+            "audit_call_id", "audit_write_failed")
     if not res.get("ok"):
+        for k in keys:
+            if k in note:
+                res[k] = note[k]
         return res
     r = dict(res["result"] or {})
     r.update({"period": period, "workflow": spec["workflow"],
               "instance": args.instance, "project": project_key,
               "repo_root": repo_root})
+    for k in keys:
+        if k in note:
+            r[k] = note[k]
     return _ok(r)
 
 
@@ -225,18 +236,29 @@ async def cmd_trigger_produce(args: argparse.Namespace) -> Dict[str, Any]:
         client = await _connect()
     except Exception as e:  # noqa: BLE001
         return _err("temporal server 不可达：%s" % e)
-    from inspection_ticketing import open_produce_period_ticket
+    from inspection_ticketing import note_spawn_decision, open_produce_period_ticket
     res = await open_produce_period_ticket(
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "doc"),
         decl_path=abs_decl_path(args.decl_path),
         reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
+    # 260929：产出型手动路径同落裁决面（同类面全量排查——去重命中不许再无声）
+    note = note_spawn_decision(_default_ledger_dir(), args.instance, period, res,
+                               face="manual-produce")
+    keys = ("decision", "alarm", "note", "journal_path", "journal_error",
+            "audit_call_id", "audit_write_failed")
     if not res.get("ok"):
+        for k in keys:
+            if k in note:
+                res[k] = note[k]
         return res
     r = dict(res["result"] or {})
     r.update({"period": period, "workflow": "InspectionProduceWorkflow",
               "instance": args.instance, "project": project_key,
               "repo_root": repo_root, "queue": "per-ticket"})
+    for k in keys:
+        if k in note:
+            r[k] = note[k]
     return _ok(r)
 
 
@@ -913,6 +935,91 @@ def cmd_decl(args: argparse.Namespace) -> Dict[str, Any]:
     })
 
 
+def schedule_drift_report(declared: Any, schedule_ids: Any, paused_ids: Any = None) -> Dict[str, Any]:
+    """声明 ↔ 调度器对账（纯函数，KI-163）。
+
+    declared = [{"project","id","enabled"}]（声明面，enabled 与否都要给——反向漂移要看得见）；
+    schedule_ids = 调度器上真实存在的 Schedule id 集合；paused_ids = 其中**已暂停**的集合。
+
+    三态（各自点名，绝不混成一笔）：
+      - `missing`：声明 enabled=true 却没有 `sandbar-inspection-<实例>` Schedule ⇒ **永不触发**
+        （实况：docs-sync / simplify-face——声明在册、实际从不跑，且此前没有任何面会报）；
+      - `orphan`：调度器上有 Schedule 但声明里 enabled=false 或已除名 ⇒ 反向漂移（声明说停、
+        实际还在跑）；
+      - `paused`：Schedule 在但**已暂停** ⇒ 也永不触发（与 missing 同等后果，分开列因为处方不同：
+        missing 要 schedule-up，paused 要 resume）。
+
+    alarmed = 三者任一非空（调用方据此 exit 1）。id 命名口径=`sandbar-inspection-%s`，与
+    cmd_schedule_up 单一真源（同处一个文件，改名必同批改）。"""
+    prefix = "sandbar-inspection-"
+    want: Dict[str, str] = {}
+    for item in (declared if isinstance(declared, list) else []):
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        if item.get("enabled"):
+            want[prefix + str(item["id"])] = str(item.get("project") or "")
+    have = {str(x) for x in (schedule_ids or []) if str(x).startswith(prefix)}
+    paused = {str(x) for x in (paused_ids or [])}
+    missing = sorted(set(want) - have)
+    orphan = sorted(have - set(want))
+    paused_live = sorted(x for x in have & set(want) if x in paused)
+    return {"missing": missing, "orphan": orphan, "paused": paused_live,
+            "alarmed": bool(missing or orphan or paused_live),
+            "want": sorted(want), "have": sorted(have)}
+
+
+async def cmd_schedule_drift(args: argparse.Namespace) -> Dict[str, Any]:
+    """声明↔调度器对账（只读；KI-163 的机械面）。
+
+    为什么需要：`enabled: true` 只表示「准不准跑」，真正接线是 `schedule-up`——两者之间此前
+    **没有任何对账面**，于是「声明在册、实际永不触发」可以静默无限期（docs-sync 周一 10:00 /
+    simplify-face 周一 08:00 实况：声明 enabled、Temporal 上零 Schedule，谁都不会去查一个自己
+    没有调度的实例）。本命令把三态摆到一条可读回执上，`missing/orphan/paused` 任一非空=exit 1。"""
+    declared: List[Dict[str, Any]] = []
+    try:
+        for state in iter_project_decls():
+            if state.state == "ok" and state.decl is not None:
+                for i in state.decl.instances:
+                    declared.append({"project": state.project_key, "id": i.id,
+                                     "enabled": bool(i.enabled)})
+    except Exception as e:  # noqa: BLE001
+        return _err("声明面不可用：%s: %s" % (type(e).__name__, e))
+    if not declared:
+        return _err("声明面为空（零实例）——对账无对象，请检查项目注册表/声明落位")
+    try:
+        client = await _connect()
+    except Exception as e:  # noqa: BLE001
+        return _err("temporal server 不可达：%s" % e)
+    ids: List[str] = []
+    paused: List[str] = []
+    try:
+        it = await client.list_schedules()
+        async for ent in it:
+            sid = str(getattr(ent, "id", "") or "")
+            if not sid:
+                continue
+            ids.append(sid)
+            if bool(getattr(ent, "paused", False)):
+                paused.append(sid)
+    except Exception as e:  # noqa: BLE001——列表失败=查不了（不许冒充「没有漂移」）
+        return _err("调度器列表失败（无法对账，别当「无漂移」）：%s: %s" % (type(e).__name__, e))
+    rep = schedule_drift_report(declared, ids, paused)
+    note = ""
+    if rep["missing"]:
+        note = ("声明 enabled 但调度器上无 Schedule——**永不触发**；处方："
+                "inspection_trigger.py schedule-up --instance <实例> --note <谁/为何/频率>")
+    elif rep["orphan"]:
+        note = "调度器上有 Schedule 但声明已 enabled=false/除名——处方：pause/删除该 Schedule 或改声明"
+    elif rep["paused"]:
+        note = "Schedule 已暂停=同样永不触发；处方：resume 或说明为何暂停"
+    return _ok({"instances_declared": len(declared),
+                "schedules_on_server": sorted(ids),
+                "missing_schedules": rep["missing"],
+                "orphan_schedules": rep["orphan"],
+                "paused_schedules": rep["paused"],
+                "note": note, "alarmed": rep["alarmed"], "drift": rep["alarmed"]})
+
+
 def _decl_instance_view(i: Any) -> Dict[str, Any]:
     """decl 子命令的实例条目视图（cmd_decl 单/聚合两模式共用）。"""
     return {"id": i.id, "enabled": i.enabled, "kind": i.kind,
@@ -985,6 +1092,8 @@ def main() -> None:
     p.add_argument("--decl-path", default=None)
     p.add_argument("--offline", action="store_true",
                    help="不连 Temporal，直改台账票面+verdicts 台账")
+    p = sub.add_parser("schedule-drift", help="声明↔调度器对账（只读）：enabled 却无 Schedule / 有 Schedule 却已停用或暂停（KI-163）")
+    p.add_argument("--decl-path", default=None, help="留作显式声明路径（缺省=注册表聚合视图）")
     p = sub.add_parser("sweep-lanes", help="人工清巡检泳道残留（早于水位；开发泳道不碰）")
     p.add_argument("--instance", required=True)
     p.add_argument("--keep-period", default="", help="水位期号；空=无水位（全清）")
@@ -1004,6 +1113,7 @@ def main() -> None:
                                   "sign": cmd_sign,
                                   "describe": cmd_describe, "ticket": cmd_ticket,
                                   "watcher": cmd_watcher, "deadman": cmd_deadman,
+                                  "schedule-drift": cmd_schedule_drift,
                                   "schedule-up": cmd_schedule_up,
                                   "verdict": cmd_verdict}[args.op](args))
     except Exception as e:  # noqa: BLE001 — channel-level backstop: any exception becomes single-line JSON, never a bare stack

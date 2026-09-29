@@ -1060,7 +1060,7 @@ async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     if res.get("ok"):
         res["result"]["period"] = period
         res["result"]["instance"] = instance_id
-    return res
+    return _with_spawn_decision(res, instance_id, period, face="watcher")
 
 
 def _resolve_spawn_identity(args: Dict[str, Any], plan: Dict[str, Any]) -> Dict[str, str]:
@@ -1086,6 +1086,33 @@ def _resolve_spawn_identity(args: Dict[str, Any], plan: Dict[str, Any]) -> Dict[
     return {"project_key": project_key, "repo_root": repo_root}
 
 
+def _inspection_ledger_dir() -> Path:
+    """巡检台账目录（口径与 inspection_trigger._default_ledger_dir / 各处活动一致：
+    SANDBAR_INSPECTION_DIR → shared.INSPECTION_DIR）。"""
+    return Path(os.environ.get("SANDBAR_INSPECTION_DIR") or INSPECTION_DIR)
+
+
+def _with_spawn_decision(res: Any, instance_id: str, period: str, face: str) -> Any:
+    """起票回执补「裁决摘要」并落可观测面（260929，KI-129 修法②/KI-131 未修块）。
+
+    去重命中（triggered=false）此前只活在 workflow 返回值里——自动班连着几天不产出
+    任何票/报告/告警而无人知（260929 宿主体感「巡检没有了」的机制半边）。本壳把裁决
+    写进台账目录 `inspection-spawn.jsonl` 与 admin.log（inspection_ticketing.
+    note_spawn_decision），并把摘要并回回执：workflow 结果里也能直接读到
+    decision/alarm/note。写失败只在回执点名（journal_error/audit_write_failed），
+    绝不影响起票结果本身。"""
+    from inspection_ticketing import note_spawn_decision
+    note = note_spawn_decision(_inspection_ledger_dir(), instance_id, period, res, face=face)
+    keys = ("decision", "alarm", "note", "journal_path", "journal_error",
+            "audit_call_id", "audit_write_failed")
+    if isinstance(res, dict):
+        target = res["result"] if isinstance(res.get("result"), dict) else res
+        for k in keys:
+            if k in note:
+                target[k] = note[k]
+    return res
+
+
 @activity.defn
 async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     """spawner → 真票起票薄壳（t260916-02；t260917-02 扩重定向复用面）：cron 调度每
@@ -1100,11 +1127,15 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
       把**自己已铸的期号**传下来（防双决议在 tz 边界漂移出两个期）。
     - 身份回退链 _resolve_spawn_identity：args 缺 project_key（旧 action payload 的
       260917 实况）→ 按 plan.instance_project_key 回退；repo_root 缺 → 按身份解析
-      注册表。都决议不出=显式失败（见该函数 docstring）。"""
+      注册表。都决议不出=显式失败（见该函数 docstring）。
+
+    260929（KI-129 修法②/KI-131 未修块）：起票裁决一律落可观测面（台账目录
+    `inspection-spawn.jsonl` + admin.log 一行，见 inspection_ticketing.note_spawn_decision）
+    ——去重命中不再是「只活在返回值里」的静默跳过，回执也把裁决摘要带回 workflow 结果。"""
     from datetime import datetime
     from inspection_decl import resolve_instance_plan
     from inspection_flow import period_key_in_tz
-    from inspection_ticketing import open_period_ticket
+    from inspection_ticketing import note_spawn_decision, open_period_ticket
 
     instance_id = str(args.get("instance_id") or "")
     if not instance_id:
@@ -1132,7 +1163,7 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
     if res.get("ok"):
         res["result"]["period"] = period
         res["result"]["instance"] = instance_id
-    return res
+    return _with_spawn_decision(res, instance_id, period, face="cron")
 
 
 ALL_ACTIVITIES = [

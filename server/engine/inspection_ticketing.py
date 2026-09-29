@@ -192,6 +192,135 @@ def append_reopen_journal(ledger_dir: Any, instance_id: str, period: str,
 
 
 # ========================================================================================
+# 起票裁决的可观测面（KI-129 修法② / KI-131「仍未修」块；260929 直修）
+# ========================================================================================
+#
+# 为什么需要：自动班（cron → schedule → InspectionPeriodicSpawnWorkflow → activity
+# spawn_inspection_period）**去重命中时只有 50ms 的返回值**——无新票、无报告、无告警。
+# `triggered:false` 只活在 workflow 历史的返回值里，没有任何人能看见，于是「每日一班」
+# 静默失效可以连续多天不被发现（KI-129 实案：20260926 期被非终态票占住 → 换期处置又
+# 提前消费了 09-27…10-02 六期 → 09-27 起每天自动班全被去重挡掉，宿主 260929 只感到
+# 「巡检没有了」；deadman 也看不见——它只认台账文件，而台账恰恰是提前服务留下的）。
+#
+# 本条只做**可观测面**，不改去重判据（改判据=行为变更，另议）：
+#   ①台账目录 append-only 写 `inspection-spawn.jsonl` 一行（后缀刻意 .jsonl：deadman
+#     台账扫描只收 `.json`，**写下「本期没跑」绝不能被读成「本期跑过」**）；
+#   ②admin.log 一行（audit_call 单一收口，写失败在回执点名，绝不静默）。
+#
+# 告警口径（alarm=True ⇔「本期该跑而没跑」，都会被点名）：
+#   - 起票失败（无票）；期槽被**非终态**票占住（KI-129 真丢期）；期槽被判已服务但
+#     **台账缺失**（＝跑过却没出报告，KI-131 的「served 但判决非 ok」）。
+#   已服务且台账在场的去重**不告警**（合法：提前服务/人工重开过），但同样落两行，
+#   并在 note 里记明「本班不是本期第一次服务」+ 服务时间（这就是「巡检怎么没动」的答案）。
+
+#: 起票裁决日志名（同 REOPEN_JOURNAL_NAME 理由：不进期号集合、不参与 deadman 会计）。
+SPAWN_JOURNAL_NAME = "inspection-spawn.jsonl"
+
+
+def ledger_file_name(instance_id: str, period: str) -> str:
+    """期刊台账文件名（`inspection-<实例>-<期>.json`）。
+
+    编码真源=inspection_flow.inspection_ledger_name（deadman 的 LEDGER_NAME_RE 按同一
+    形状反解）；本模块刻意不 import inspection_flow（会牵出 workflow 依赖），改由单测
+    锁两处逐字一致（同 inspection_trigger._default_ledger_dir 的「同口径由单测锁」先例）。"""
+    return "inspection-%s-%s.json" % (instance_id, period)
+
+
+def spawn_decision_of(res: Any, ledger_dir: Any = None,
+                      instance_id: str = "", period: str = "") -> Dict[str, Any]:
+    """起票回执 + 台账在场性 → 裁决摘要（纯函数，无 side effect；畸形输入降级不抛）。
+
+    返回 {decision: triggered|deduped|failed, period_state, ticket_id, alarm, note}。
+    alarm/note 的口径见本节头注释（note 是给人读的一句话，中文＝文档面语言）。
+    instance_id/period 优先取显式入参，缺省回落到回执里的同键（回执可能早于调用方
+    补写这两键——判不准就不做台账在场性判定，只给通用文案）。"""
+    out = {"decision": "failed", "period_state": "", "ticket_id": "",
+           "alarm": True, "note": ""}
+    if not isinstance(res, dict):
+        out["note"] = "起票回执畸形（%r）——按失败处置" % (res,)
+        return out
+    if not res.get("ok"):
+        out["note"] = "起票失败：%s" % str(res.get("error") or "无事由")[:240]
+        return out
+    r = res.get("result")
+    r = r if isinstance(r, dict) else {}
+    out["period_state"] = str(r.get("period_state") or "")
+    out["ticket_id"] = str(r.get("ticket_id") or "")
+    if r.get("triggered"):
+        out["decision"] = "triggered"
+        out["alarm"] = False
+        out["note"] = "本期已开票（%s）——按常规链路跑" % (out["ticket_id"] or "?")
+        return out
+    out["decision"] = "deduped"
+    inst = str(r.get("instance") or instance_id or "")
+    per = str(r.get("period") or period or "")
+    if out["period_state"] == "live":
+        out["alarm"] = True
+        out["note"] = ("期槽被**非终态**票 %s 占住：本期不再开票、不跑套件、不出报告"
+                       "（KI-129 形态）——人工换期，或记名 cancel 后再触发"
+                       % (out["ticket_id"] or "?"))
+        return out
+    # 已服务槽位：台账在场＝正常（提前服务/人工重开）；不在场＝跑过却没出报告（欠账）。
+    if ledger_dir is not None and inst and per:
+        ledger = Path(str(ledger_dir)) / ledger_file_name(inst, per)
+        if ledger.is_file():
+            age = max(0.0, time.time() - ledger.stat().st_mtime)
+            out["alarm"] = False      # 合法去重：本期确已被服务过（不是「该跑而没跑」）
+            out["note"] = ("该期已由 %s 服务过（台账 %s，%.1f 天前）——本次自动班不再开票；"
+                           "要重跑请带 reopen_reason 具名重开"
+                           % (out["ticket_id"] or "?", ledger.name, age / 86400.0))
+            return out
+        out["alarm"] = True
+        out["note"] = ("期槽被判已服务（%s）但台账不在场：该期跑过却没出报告"
+                       "（KI-131「served 但判决非 ok」形态）——本班不会重跑它"
+                       % (out["ticket_id"] or "?"))
+        return out
+    out["note"] = ("该期已被 %s 服务过——本班不再开票（period_state=%s）；"
+                   "要重跑请带 reopen_reason 具名重开"
+                   % (out["ticket_id"] or "?", out["period_state"] or "unknown"))
+    return out
+
+
+def note_spawn_decision(ledger_dir: Any, instance_id: str, period: str, res: Any,
+                        face: str = "cron", now_fn=time.time) -> Dict[str, Any]:
+    """把一次起票裁决落到两个可观测面（journal + admin.log），返回裁决摘要。
+
+    调用点是**起票三路**（cron activity / watcher activity / 手动 CLI）——刻意不放进
+    `open_period_ticket`；放在库函数里会让所有单测顺手往真 admin.log 写字（KI-161 教训：
+    测试面不得写生产数据目录）。写失败一律**不抛**：起票本身的回执优先，缺失在返回的
+    `journal_error` / `audit_write_failed` 键上点名（审计缺失绝不静默）。"""
+    note = spawn_decision_of(res, ledger_dir=ledger_dir,
+                             instance_id=instance_id, period=period)
+    at = float(now_fn())
+    payload = {"at": at, "instance": str(instance_id or ""), "period": str(period or ""),
+               "face": str(face or ""), "decision": note["decision"],
+               "period_state": note["period_state"], "ticket_id": note["ticket_id"],
+               "alarm": bool(note["alarm"]), "note": note["note"]}
+    out = dict(note)
+    try:
+        p = Path(str(ledger_dir)) / SPAWN_JOURNAL_NAME
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        out["journal_path"] = str(p)
+    except OSError as e:      # 审计缺失绝不静默：点名进回执，起票结果照常返回
+        out["journal_error"] = "%s: %s" % (type(e).__name__, e)
+    try:
+        import audit          # 同目录模块；局部 import 保持本模块「零重型依赖」的既有纪律
+        receipt = {"ok": note["decision"] != "failed", "sub": "inspection-spawn",
+                   "instance": payload["instance"], "period": payload["period"],
+                   "face": payload["face"], "decision": payload["decision"],
+                   "period_state": payload["period_state"],
+                   "ticket_id": payload["ticket_id"], "alarm": payload["alarm"]}
+        out["audit_call_id"] = audit.audit_call("inspection-spawn", receipt) or ""
+        if receipt.get("audit_write_failed"):
+            out["audit_write_failed"] = receipt["audit_write_failed"]
+    except Exception as e:    # noqa: BLE001——审计面任何异常都不许吞掉起票回执
+        out["audit_write_failed"] = "%s: %s" % (type(e).__name__, e)
+    return out
+
+
+# ========================================================================================
 # Temporal 查询面（FakeClient 单测注入面：只用 list_workflows/get_workflow_handle/start_workflow）
 # ========================================================================================
 

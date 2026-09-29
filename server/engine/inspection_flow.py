@@ -198,6 +198,20 @@ REDIRECT_PATCH_ID = "t260917-02-inspection-legacy-fire-redirect"
 # 命令（否则 Temporal replay 非确定 → workflow task 永久失败、老票卡死）；repo 先例=上述
 # 四门同形。门求值点在 run 直线上（无 KI-061 式唤醒重放路径），不需 #seq 后缀。
 LANE_WATCHDOG_PATCH_ID = "inspection-lane-watchdog-v1"
+# 版本门 id（260929，replay 安全）：setup 段「泳道路径被本期残留占住 → 定向清本期残留
+# （sweep remove_period=本期）→ 重试一次 prepare」只在新 run 生效。理由同上述各门：
+# 老 in-flight 票（含 260926 重开实案 t260927-02：prepare 失败即 blocked）history 里
+# 没有该标记 → patched()=False → 走旧路径**绝不注入新活动命令**（否则 replay 非确定 →
+# workflow task 永久失败、老票卡死）。机器化验证=replay_check.py --workflow <老票 id>。
+LANE_REPAIR_PATCH_ID = "inspection-lane-residue-repair-v1"
+# 版本门 id（260929 补门，replay 安全）：套件段硬超时后的「拆泳道前 120s 宽限等待」
+# （260927 直修 49b157a 引入 SUITE_TIMEOUT_TEARDOWN_GRACE，**当时漏了版本门**）。
+# 后果实证：t260927-01（超时发生在加 sleep 之前）重放时「代码要定时器、history 是
+# 活动」→ NondeterminismError，该票任何重放面全红（replay_check 实测；改前 HEAD
+# 同样红＝与别的改动无关）。补门修正：老 history 无此标记 → 跳过等待（与其记录的序列
+# 逐字一致）；新 run 记录标记后照旧等。存量实证：全量巡检 history 无一处带该定时器
+# （六期逐条查过），故本门对存量零代价。
+SUITE_TEARDOWN_GRACE_PATCH_ID = "t260927-inspection-suite-teardown-grace"
 # lane/watchdog 面预算（260926）：活动内部自设扫描总预算（有界——在册非终态票可能上百张，
 # 没有 worker 应答的僵尸票每次 query 都要等到超时）；Temporal 侧 start_to_close 必须**晚于**
 # 内部预算，否则 Temporal 先杀、活动自己的「预算用尽」收口永远跑不到（SUITE/INSPECT 双闸
@@ -359,6 +373,47 @@ def inspection_lane_paths(instance_id: str, period: str,
     root = str(repo_root or "").rstrip("/")
     worktree = ("%s/.lane/%s" % (root, name)) if root else (".lane/%s" % name)
     return worktree, "%s%s/%s" % (LANE_BRANCH_NS, instance_id, period)
+
+
+#: 「泳道路径被占」的机器可辨标记：prepare_workspace 的 worktree 分支把
+#: `git worktree add` 的失败收成这条文案（agent_activities._prepare_worktree_lane）。
+#: 认这条＝只修「路径/分支被上一张本期票的残骸占住」这一种形态；别的失败（git 身份
+#: 缺失、多仓链、权限）清残留解不了，一律不碰（判不准不动）。
+LANE_OCCUPIED_MARK = "worktree add"
+
+
+def lane_residue_repair_plan(prep: Any, instance_id: str, period: str,
+                             repo_root: str) -> Optional[Dict[str, Any]]:
+    """prepare 失败 → 「定向清本期残留后重试一次」的决策（纯函数，可离线单测）。
+
+    为什么需要（260929 实案）：巡检泳道路径/分支按 **(实例, 期)** 复用
+    （inspection_lane_name），而 setup 前置的 sweep 用 `keep_period=本期` —— **刻意不碰
+    本期**（那是本票自己要用的路径）。于是「具名重开同期」这条路结构性搭不起泳道：
+    旧票（判决 blocked、执行已 COMPLETED）的泳道残留（worktree / 分支 / 裸目录壳）
+    仍在原位，新票 `git worktree add` 必败 → setup blocked（t260927-02 实案：09-26
+    10:10 首次真跑 reopen 即 blocked；该期此后两张票都 blocked，09-27 的自动班再以
+    「同期已服务票出现多张」硬失败）。
+
+    判据：prep 是 dict、ok 为假、action=="failed"、错误文案带 `worktree add`。
+    命中 → 返回 sweep 活动参数（`remove_period=本期` 定向模式，忽略水位、只清本期，
+    别的期/开发泳道一律不碰）+ 一句可上票面的理由；不命中 → None（不修，原样 blocked）。
+    返回的 args 由 workflow 侧送 sweep_inspection_lanes 活动（活动注册面零变化）。"""
+    if not isinstance(prep, dict) or prep.get("ok"):
+        return None
+    if str(prep.get("action") or "") != "failed":
+        return None
+    err = str(prep.get("error") or "")
+    if LANE_OCCUPIED_MARK not in err:
+        return None
+    return {
+        "sweep_args": {"instance_id": str(instance_id or ""),
+                       "repo_root": str(repo_root or ""),
+                       "keep_period": "", "remove_period": str(period or "")},
+        "reason": ("Lane path/branch occupied by this period's own residue "
+                   "(git worktree add failed; the setup sweep deliberately keeps the "
+                   "current period). Targeted sweep of period %s (worktree + branch + "
+                   "bare dir shell), then one prepare retry." % (period or "?")),
+    }
 
 
 def sweep_plan(worktree_entries: Any, branch_names: Any, instance_id: str,
@@ -1002,6 +1057,70 @@ def _inspection_topology() -> Dict[str, Any]:
     return export_template_topology("inspection-lite")
 
 
+async def _prepare_lane_activity(ticket_id: str, worktree: str, branch: str,
+                                 base_ref: str) -> Dict[str, Any]:
+    """prepare_workspace 活动调用一次（两个巡检 workflow 类共用同一形状：正常路径与
+    「清本期残留后重试」两次调用在 history 里逐字同形、回执归一）。"""
+    prep_raw: Any = await workflow.execute_activity(
+        prepare_workspace,
+        WorkspacePrep(ticket_id=ticket_id,
+                      workspace={"type": "worktree", "path": worktree},
+                      branch=branch, base_ref=base_ref),
+        start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+    if isinstance(prep_raw, dict):
+        return prep_raw
+    return {"ok": getattr(prep_raw, "ok", False), "action": getattr(prep_raw, "action", ""),
+            "path": getattr(prep_raw, "path", ""), "error": getattr(prep_raw, "error", "")}
+
+
+async def _lane_residue_repair(plan: Dict[str, Any], ticket_id: str, worktree: str,
+                               branch: str, base_ref: str) -> Dict[str, Any]:
+    """按修复计划定向清本期残留（sweep remove_period）→ 重试一次 prepare。
+
+    返回修复回执 {reason, sweep:{...}, retry:"ok"|<错误尾>, prep:<新回执>}——票面 blocked
+    文案与时间线都引用它（写清「试过什么、结果如何」，不许含糊）。报告链
+    （InspectionPeriodicWorkflow）与产出链（InspectionProduceWorkflow）共用本壳：两条链
+    的泳道坐标同一套命名（inspection_lane_name），残留形态与修法只有一份。"""
+    swept2: Any = await workflow.execute_activity(
+        "sweep_inspection_lanes", args=[plan["sweep_args"]],
+        start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+    sres = (swept2 or {}).get("result") or {}
+    prep2 = await _prepare_lane_activity(ticket_id, worktree, branch, base_ref)
+    return {
+        "reason": plan["reason"],
+        "sweep": {
+            "ok": bool((swept2 or {}).get("ok")),
+            "removed_worktrees": list(sres.get("removed_worktrees") or []),
+            "removed_branches": list(sres.get("removed_branches") or []),
+            "removed_dir_stubs": list(sres.get("removed_dir_stubs") or []),
+            "errors": list(sres.get("errors") or []),
+            "error": str((swept2 or {}).get("error") or "")},
+        "retry": "ok" if prep2.get("ok") else str(prep2.get("error") or "unknown")[:400],
+        "prep": prep2,
+    }
+
+
+def _lane_repair_note(repair: Dict[str, Any]) -> str:
+    """修复回执 → 时间线一行（英文，人可读；票面/时间线是给跨项目收件人的）。"""
+    sw = repair.get("sweep") or {}
+    return ("Residue repair: swept %d worktree(s) / %d branch(es) / %d dir shell(s) "
+            "(errors %s) → prepare retry %s"
+            % (len(sw.get("removed_worktrees") or []), len(sw.get("removed_branches") or []),
+               len(sw.get("removed_dir_stubs") or []), sw.get("errors") or "none",
+               "succeeded" if repair.get("retry") == "ok"
+               else "failed: %s" % (repair.get("retry") or "unknown")))
+
+
+def _lane_repair_detail(repair: Dict[str, Any]) -> str:
+    """修复回执 → blocked 文案附注（写清「试过什么、结果如何」，不许含糊）。"""
+    sw = repair.get("sweep") or {}
+    return (" | residue repair attempted: swept %d worktree(s) / %d branch(es) / %d dir "
+            "shell(s) (errors %s) → retry %s"
+            % (len(sw.get("removed_worktrees") or []), len(sw.get("removed_branches") or []),
+               len(sw.get("removed_dir_stubs") or []), sw.get("errors") or "none",
+               repair.get("retry") or "unknown"))
+
+
 @workflow.defn
 class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
     """One inspection-period ticket. State machine: scan → report → close (human gate) →
@@ -1247,11 +1366,23 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                             "Suite stage hard timeout: %s" % (suite_section.get("error") or "")[:160])
                 # t260928-20：长等待前冲账（等拆除宽限窗口期间账面应可见本迁移）
                 await self._ledger_flush()
-                await workflow.sleep(SUITE_TIMEOUT_TEARDOWN_GRACE)
-                self._enter("suite", "running",
-                            "Suite stage hard timeout: waiting %ds before tearing the lane down (never races a "
-                            "child chain that was not reaped)"
-                            % int(SUITE_TIMEOUT_TEARDOWN_GRACE.total_seconds()))
+                # 260929：本 sleep 是 260927 直修（49b157a）加的，**当时漏了版本门** →
+                # 走这条分支的老 history（t260927-01 实况：加 sleep 之前超时的那一期）
+                # 重放时「代码要定时器、history 是活动」→ Temporal 非确定 → 该票任何
+                # 重放面全红（replay_check 实证，改前 HEAD 同样红）。补门修正：老 history
+                # 无此标记 → 跳过等待（与它们记录的序列逐字一致）；新 run 记录标记后照旧等
+                # （等待本身是那次修复的要义，不许删）。全量巡检 history 实证无一处带该定时器
+                # （六期逐条查过），故本门对存量零代价。
+                if workflow.patched(SUITE_TEARDOWN_GRACE_PATCH_ID):
+                    await workflow.sleep(SUITE_TIMEOUT_TEARDOWN_GRACE)
+                    self._enter("suite", "running",
+                                "Suite stage hard timeout: waiting %ds before tearing the lane down (never "
+                                "races a child chain that was not reaped)"
+                                % int(SUITE_TIMEOUT_TEARDOWN_GRACE.total_seconds()))
+                else:
+                    self._enter("suite", "running",
+                                "Suite stage hard timeout: tearing the lane down without the 120s grace "
+                                "wait (pre-260927 history replay: no timer in this run's history)")
             self._enter("suite", "running", "Lane teardown: %s" % teardown_note)
             if teardown_note.startswith(TEARDOWN_RESIDUE):
                 from inspection_deadman import make_finding
@@ -1470,20 +1601,28 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                 "base_ref_name": str(head_res.get("ref") or "main"),
                 # 拆除回落清扫用的锚（repo 锚定，跨项目不锚错仓）
                 "instance_id": inp.instance_id, "repo_root": repo_root, "period": period}
-        prep_raw: Any = await workflow.execute_activity(
-            prepare_workspace,
-            WorkspacePrep(ticket_id=ticket_id,
-                          workspace={"type": "worktree", "path": worktree},
-                          branch=branch, base_ref=lane["base_ref"]),
-            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
-        prep = prep_raw if isinstance(prep_raw, dict) else {
-            "ok": getattr(prep_raw, "ok", False), "action": getattr(prep_raw, "action", ""),
-            "path": getattr(prep_raw, "path", ""), "error": getattr(prep_raw, "error", "")}
+        prep = await _prepare_lane_activity(ticket_id, worktree, branch, lane["base_ref"])
+        # 260929：prepare 失败且形态是「本期泳道路径/分支被自己的残骸占住」→ 定向清本期
+        # 残留后重试一次（重开同期结构性搭不起泳道的修法；判据=lane_residue_repair_plan
+        # 纯函数，patch 门保老 history 重放零新命令）。
+        repair: Optional[Dict[str, Any]] = None
+        if not prep.get("ok") and workflow.patched(LANE_REPAIR_PATCH_ID):
+            plan = lane_residue_repair_plan(prep, inp.instance_id, period, repo_root)
+            if plan is not None:
+                self._enter("setup", "running", plan["reason"])
+                repair = await _lane_residue_repair(
+                    plan, ticket_id, worktree, branch, lane["base_ref"])
+                self._enter("setup", "running", _lane_repair_note(repair))
+                if (repair.get("prep") or {}).get("ok"):
+                    prep = repair["prep"]
+                    lane["repaired"] = "1"
         if not prep.get("ok"):
             # 半建（分支可能已生）也要清：尝试拆除但不当残留报警（这次本来就没搭成）
+            detail = "Lane could not be prepared (action=%s): %s" % (prep.get("action"), prep.get("error"))
+            if repair is not None:
+                detail += _lane_repair_detail(repair)
             return None, await self._blocked(
-                ticket_id, inp, period, "setup",
-                "Lane could not be prepared (action=%s): %s" % (prep.get("action"), prep.get("error")),
+                ticket_id, inp, period, "setup", detail,
                 dict(lane, _suppress_residue="1"))
         lane["action"] = str(prep.get("action") or "")
         self._enter("setup", "running",
@@ -2312,20 +2451,25 @@ class InspectionProduceWorkflow(TicketEventLedgerMixin):
                 "base_ref": str(head_res["sha"]), "docs_root": docs_root,
                 "instance_id": inp.instance_id, "repo_root": repo_root,
                 "period": period}
-        prep_raw: Any = await workflow.execute_activity(
-            prepare_workspace,
-            WorkspacePrep(ticket_id=ticket_id,
-                          workspace={"type": "worktree", "path": worktree},
-                          branch=branch, base_ref=lane["base_ref"]),
-            start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
-        prep = prep_raw if isinstance(prep_raw, dict) else {
-            "ok": getattr(prep_raw, "ok", False), "action": getattr(prep_raw, "action", ""),
-            "error": getattr(prep_raw, "error", "")}
+        prep = await _prepare_lane_activity(ticket_id, worktree, branch, lane["base_ref"])
+        # 260929：与报告链同源（同类面全量排查）——产出链的泳道坐标同一套命名，重开同期
+        # 撞的是同一种残留；patch 门同形（LANE_REPAIR_PATCH_ID，同一改动一个门）。
+        repair: Optional[Dict[str, Any]] = None
+        if not prep.get("ok") and workflow.patched(LANE_REPAIR_PATCH_ID):
+            plan = lane_residue_repair_plan(prep, inp.instance_id, period, repo_root)
+            if plan is not None:
+                self._enter("setup", "running", plan["reason"])
+                repair = await _lane_residue_repair(
+                    plan, ticket_id, worktree, branch, lane["base_ref"])
+                self._enter("setup", "running", _lane_repair_note(repair))
+                if (repair.get("prep") or {}).get("ok"):
+                    prep = repair["prep"]
+                    lane["repaired"] = "1"
         if not prep.get("ok"):
-            return await self._blocked(
-                ticket_id, inp, "setup",
-                "Lane could not be prepared (action=%s): %s" % (prep.get("action"), prep.get("error")),
-                lane)
+            detail = "Lane could not be prepared (action=%s): %s" % (prep.get("action"), prep.get("error"))
+            if repair is not None:
+                detail += _lane_repair_detail(repair)
+            return await self._blocked(ticket_id, inp, "setup", detail, lane)
         self._enter("setup", "running", "Lane ready: %s (base %s)"
                     % (worktree, lane["base_ref"]))
         # ---- produce → 自检（首趟；授权复跑的门循环在 _finalize_and_close） ----
