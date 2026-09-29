@@ -454,6 +454,11 @@ class IntegrationRunResult:
     live_baseline_red: List[str] = field(default_factory=list)
     live_baseline_green: List[str] = field(default_factory=list)
     live_baseline_source: str = ""
+    # 260929 直修 B1（宿主令·不开票）：环境红**具名**通道（**additive**，纯加性：默认
+    # 空列表=老回放/老闸回执零漂移，缺键即空）。名字来自闸的用例级权威判决面
+    # （not-checked × external），**不是**从 `ENV_FAIL [...] exit=N` 文本行反推。
+    # 与 env_fail 分工：env_fail=int 计数（入闸口径），env_red=名单（观测面，不入判定）。
+    env_red: List[str] = field(default_factory=list)
 
 
 @dataclass

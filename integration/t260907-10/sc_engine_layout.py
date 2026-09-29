@@ -199,6 +199,27 @@ def main():
     r.check(not _hit('docker services ["dsh", "temporal"]'),
             "D docker 服务名 dsh 不误报（绿）")
 
+    # == D2 L10 --no-open 启动面闸机制自证（t260929-09：字面量盲区翻车）────────
+    # 260929 宿主实报浏览器弹窗：真凶 bench 用变量二进制（dshCmd）＋ argv 带
+    # --profile 且缺 --no-open，旧 L10 只认字面量二进制＝绿灯盲区。本节沿本文件反向样本
+    # 惯例，证明机制化闸对**事故同形状**必红、对合规/非 dsh 面不误报。
+    import lint_tests  # noqa: E402
+    _gate = getattr(lint_tests, "_l10_launch_sites", None)
+    if not callable(_gate):
+        r.check(False, "D2 机制缝 lint_tests._l10_launch_sites 缺席（闸降级=盲区回潮面）")
+    else:
+        r.check(any("--no-open" not in argv for _ln, argv, _why in
+                    _gate("spawn(dshCmd, ['--profile', 'x', '--port', '1'])")),  # L10-allow: 反向样本字面量
+                "D2 变量二进制+argv --profile 缺 --no-open 被识别（红）〔260929 事故同形状〕")
+        r.check(any("--no-open" not in argv for _ln, argv, _why in
+                    _gate("spawn(binDsh, ['web', '--port', '1'])")),  # L10-allow: 反向样本字面量
+                "D2 dsh 命名变量（无 --profile）缺 --no-open 被识别（红）")
+        r.check(all("--no-open" in argv for _ln, argv, _why in
+                    _gate("spawn(dshCmd, ['--profile', 'x', '--no-open'])")),  # L10-allow: 反向样本字面量
+                "D2 同形状带 --no-open 不报（绿）")
+        r.check(_gate("spawn('docker', ['logs', '-f', 'x'])") == [],  # L10-allow: 反向样本字面量
+                "D2 非 dsh 二进制不误报（绿）")
+
     r.finish()
 
 

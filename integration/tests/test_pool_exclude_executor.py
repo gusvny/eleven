@@ -43,9 +43,13 @@ ENV_KEY = "SANDBAR_SCENARIO_EXCLUDE_POOLS"
 # 260928 登记两键（本锁在 main 上长红的真因：后续票加了键、基线没跟）：
 #   budget_env = 260928 集成预算 env 键（run_scenarios 预算旋钮随回执回显，缺席="absent"）；
 #   timings    = 执行器耗时分解（prelude_s/scenarios_s，t260913-02 前后的可观测面）。
+# 260929 登记两键（直修 B1·宿主令不开票）：环境红**具名**通道——
+#   env_red_names = 判为环境面的场景名（判据=执行器既有 env_like：exit 2 / spawn -8），
+#                   排序去重；env_red_count = 其条数（int）。恒在场（全绿时 []/0）。
 DEFAULT_SUMMARY_KEYS = {
     "ran", "pass", "fail", "not_checked", "wall_s", "concurrency",
     "pool_config", "env_fingerprint", "expected", "budget_env", "timings",
+    "env_red_names", "env_red_count",
 }
 
 _spec = importlib.util.spec_from_file_location(
@@ -201,6 +205,23 @@ _warns = [ln for ln in out.splitlines() if "EXCLUDE_POOLS_WARN" in ln]
 ok(bool(_warns) and all(ln.startswith("EXCLUDE_POOLS_WARN [") for ln in _warns)
    and not any(ln.startswith(("PASS [", "FAIL [", "ENV_FAIL [", "{", "["))
    for ln in _warns), "C5 WARN 行前缀形状锁（不撞明细/规范行解析面）", _warns[:2])
+
+# ---- C6/C7 环境红具名通道（260929 直修 B1，纯加性）----
+# 口径：只有计数没有名单时，闸/票面答不出「红的是哪几条」；C6 锁**全绿时键在场且为空**
+# （消费方无需分支），C7 锁**真值来自既有 env_like 判据**（exit 2）+ 既有计数/rc 零改动。
+ok(bool(_sum) and _sum.get("env_red_names") == [] and _sum.get("env_red_count") == 0,
+   "C6 全绿轮 env_red_names=[] 且 env_red_count=0（键在场，缺省非缺键）", _sum)
+rc, out = drive([("t913-green", None, "print('g')\n"),
+                 ("t913-envred", None, "import sys\nsys.exit(2)\n"),
+                 ("t913-prodred", None, "import sys\nsys.exit(1)\n")], None)
+_sum = summary_of(out)
+ok(rc == 1, "C7a 产品红优先的 rc 三态语义不变（1）", rc)
+ok(bool(_sum) and _sum.get("env_red_names") == ["t913-envred"]
+   and _sum.get("env_red_count") == 1,
+   "C7b 环境红具名=判为 env_like 的那条（产品红不入名单）", _sum)
+ok(bool(_sum) and (_sum.get("ran"), _sum.get("pass"), _sum.get("fail"),
+                   _sum.get("not_checked")) == (3, 1, 1, 1),
+   "C7c 既有计数逐项不变（3/1/1/1）", _sum)
 
 # ---- D 非法 token：剥离+点名，合法部分照常生效 ----
 rc, out = drive([("t913-main", None, "print('m')\n"),

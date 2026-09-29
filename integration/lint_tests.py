@@ -474,49 +474,187 @@ def lint_tmpdir_hygiene():
            % (len(base), "" if len(base) == 1 else "s"))
 
 
+# ── L10 机制化匹配（t260929-09：字面量盲区翻车后的重写）──────────────────────
+# 事故教训：旧闸只认 `spawn('dsh', …)` 字面量，真弹窗源 host-prompt-bench.mjs 用的是
+# 变量二进制 `spawn(dshCmd, …)`——闸报「5 处全合规」而第 6 处（真凶）根本没被扫。
+# 新判据（满足任一即「dsh 族启动点」，必须携带 --no-open）：
+#   R1 二进制是字符串字面量 `dsh` 或以 `/dsh` 结尾的路径；
+#   R2 argv 数组提及 `--profile`（带 profile 的进程族⇒dsh 启动家族，与二进制写法无关——
+#      正是这条抓住了肇事形态）；
+#   R3 二进制是 dsh 命名的表达式（标识符含 dsh，如 dshCmd/dshBin；或 bin.js/bin/dsh 路径片段）。
+# 豁免必须显式且带理由（静默≠豁免）：`L10-allow:` 注记（调用行、argv 文本或紧邻上一行）、
+# 只跑 `--version` 的探针（不启控制台）。
+L10_CALL_RE = re.compile(
+    r"""\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*(?P<bin>.{0,160}?)\s*,\s*\[(?P<argv>[^\]]*)\]""",
+    re.S)
+_L10_DSH_BIN_LITERAL_RE = re.compile(r"""^\s*['"][^'"]*/?dsh['"]\s*$""")
+_L10_DSH_EXPR_RE = re.compile(r"(?i)dsh|bin\.js")
+
+
+def l10_dsh_why(bin_expr, argv):
+    """分类：该启动点为何算 dsh 族（None=不属于本闸管辖）。"""
+    if _L10_DSH_BIN_LITERAL_RE.match(bin_expr):
+        return "literal dsh binary"
+    if "--profile" in argv:
+        return "argv carries --profile"
+    if _L10_DSH_EXPR_RE.search(bin_expr):
+        return "dsh-named binary expression"
+    return None
+
+
+def _l10_classify(text):
+    """全量分类：[(lineno, argv, why, kind)]，kind ∈ bad/compliant/exempt/probe。
+
+    内部缝（闸本体用）；对外测试缝见 _l10_launch_sites。
+    """
+    sites = []
+    lines = text.splitlines()
+    for m in L10_CALL_RE.finditer(text):
+        argv = m.group("argv")
+        why = l10_dsh_why(m.group("bin"), argv)
+        if why is None:
+            continue
+        line = text[:m.start()].count("\n") + 1
+        cur = lines[line - 1] if line - 1 < len(lines) else ""
+        prev = lines[line - 2] if line >= 2 else ""
+        if "L10-allow:" in argv or "L10-allow:" in cur or "L10-allow:" in prev:
+            kind = "exempt"
+        elif "--version" in argv:
+            kind = "probe"
+        elif "--no-open" in argv:
+            kind = "compliant"
+        else:
+            kind = "bad"
+        sites.append((line, argv, why, kind))
+    return sites
+
+
+def _l10_launch_sites(text):
+    """对外测试缝（t260929-09 场景契约）：返回本闸**管辖内**的启动点。
+
+    [(lineno, argv_text, why)]——只含 dsh 族且未被豁免（L10-allow 注记 / --version
+    探针不计入；compliant 与 bad 都算管辖内，是否缺旗由调用方看 argv 判）。
+    """
+    return [(ln, argv, why) for (ln, argv, why, kind) in _l10_classify(text)
+            if kind in ("bad", "compliant")]
+
+
+
+# .sh 启动面：两类「人手启动即开浏览器」的豁免面，逐个具名＋理由（静默跳过 .sh=旧闸盲区之二）。
+L10_SH_TARGET_RE = re.compile(r"start-console\.sh|stage_console\.sh|\bdsh\b")
+# .sh 行的「命令位 dsh」判据：dsh 须处命令位（行首/控制符后/裸行首命令），排除
+# pgrep 模式串（PAT='dsh …'）、docker 镜像 tag（test-dsh:dsh-…）等词缀形态误报。
+L10_SH_CMDPOS_RE = re.compile(
+    r"(?:^|[;&|(]\s*|`\s*|\bexec\s+|\bsudo\s+|\bthen\s+|\bdo\s+|\bdocker\s+run\s+\S+\s+)"
+    r"(?:[A-Za-z_]\w*=\S+\s+)*dsh(?:\s|$)")
+L10_HUMAN_FACING = {
+    "start-console.sh": "human operator console entry (repo root) — browser opens by design when a person starts it",
+    "stage_console.sh": "human-facing staging tool (server/tools) — --no-open is an opt-in flag by design",
+}
+# 自动化启动面点名清单：闸必须在这几处真的看到 --no-open 证据（防「扫了个寂寞」的空转绿）。
+# 与 t260929-09 场景 SH_INVOKERS 同单（capture-lane 面=真起台文件 capture-lane.mjs；
+# bench_console.mjs 自身无任何 dsh 启动面，作假面入列反而制造假红，已在场景侧更正）。
+L10_AUTOMATION_FACES = [
+    ("server/ui-check/capture-lane.mjs", "capture-lane"),
+    ("integration/t260904-17/lib_fix17.mjs", "lib_fix17"),
+    ("integration/t260905-07/lib_t260905.mjs", "lib_t260905"),
+    ("integration/t260916-26/lib_t260916_26_bench.mjs", "lib_t260916_26_bench"),
+    ("integration/t260916-25/sc_stage_console_guardrails.mjs", "t260916-25 guardrails scenario"),
+    ("integration/tests/test_start_console_bits.py", "test_start_console_bits"),
+]
+# 空转绿证据判据：--no-open 与启动词同文件在场（启动词=spawn 族/runShell/runStep/启动脚本名）。
+L10_FACE_LAUNCH_TOKEN_RE = re.compile(
+    r"spawn|execFile|run_shell\s*\(|runStep\s*\(|start-console\.sh|stage_console\.sh")
+
+
 def lint_console_no_open():
     """L10 控制台启动面必须 --no-open（260929 宿主实报「浏览器不停跳新窗口」的机械闸）。
 
     事故：**宿主正在工作**时浏览器不停跳新窗口。根因族=**测试/工具起的 dsh 控制台没带
     `--no-open`**⇒ `dsh web` 每次都去打开宿主机默认浏览器；套件一跑（每个控制台类场景一个台）
-    或一个**泄漏的旧台**被守护重启，就会持续弹窗。当场处置=清掉两个挂了 3 天的泄漏台
-    （`dsh --profile sandbar --patch .../t260905-stale-*/port_patch.yml` 等），弹窗即停。
-    判据：仓内所有 **dsh 进程启动点**（`spawn('dsh'…` / `spawnSync('dsh'…` / `spawn("dsh"…`）
-    必须在同一条调用里出现 `--no-open`；只跑 `--version` 的探针不在此限（不启控制台）。
-    豁免：`server/ui-check/.debug-chat.mjs`（构建产物副本）与任何带 `L10-allow:` 注记的行。
+    或一个**泄漏的旧台**被守护重启，就会持续弹窗。260929 二次翻车：真弹窗源
+    host-prompt-bench.mjs 用变量二进制 `spawn(dshCmd,…)`，旧闸（只认字面量 `spawn('dsh',…)`）
+    报「5 处全合规」而真凶是没被扫的第 6 处——故判据从字面量升级为机制（见 L10_CALL_RE 三规则）。
+    判据：仓内所有 **dsh 族进程启动点**（含变量二进制与 .sh 启动面）必须携带 `--no-open`；
+    只跑 `--version` 的探针不在此限（不启控制台）。
+    豁免（必须显式带理由）：任何带 `L10-allow:` 注记的行；.sh 面（js/py 扫描不覆盖 bash，
+    单独 L10b 扫）里两类**具名**人手启动豁免（L10_HUMAN_FACING）——静默跳过 .sh 即旧盲区。
     """
-    pat = re.compile(r"""(spawn|spawnSync|execFile|execFileSync)\s*\(\s*['"](?:/opt/homebrew/bin/)?dsh['"]\s*,\s*\[([^\]]*)\]""", re.S)
     bad = []
     scanned = 0
     _skip = {"node_modules", ".git", ".lane", ".venv", "out", ".sandbar", "__pycache__"}
     cands = []
     for path in REPO.rglob("*"):
-        if any(part in _skip for part in path.parts):
+        # 泳道教训（t260929-09 实测复现）：skip 集必须对**仓内相对路径**判定——
+        # 绝对 parts 会在泳道 worktree（…/sandbar/.lane/<票>/…）整体命中 `.lane`
+        # 而把全仓候选清零，扫描空转绿。这正是本票要杀的盲区形态，顺手根治。
+        if any(part in _skip for part in path.relative_to(REPO).parts):
             continue
         if path.suffix in (".mjs", ".ts", ".py") and path.is_file():
             cands.append(path)
     for path in cands:
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for m in pat.finditer(text):
-                args = m.group(2)
-                line = text[:m.start()].count("\n") + 1
-                ctx = text.splitlines()[line - 1] if line - 1 < len(text.splitlines()) else ""
-                if "L10-allow:" in args or "L10-allow:" in ctx:
-                    continue
-                if "--version" in args:
-                    continue                      # 版本探针：不启控制台
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line, _argv, _why, kind in _l10_classify(text):
+            if kind == "bad":
+                bad.append("%s:%d" % (path.relative_to(REPO), line))
+            elif kind == "compliant":
                 scanned += 1
-                if "--no-open" not in args:
-                    bad.append("%s:%d" % (path.relative_to(REPO), line))
+    # L10b：.sh 启动面（自动化调用必须 --no-open；人手豁免面具名放行）
+    sh_faces = {"compliant": 0, "human": 0}
+    for path in REPO.rglob("*.sh"):
+        if any(part in _skip for part in path.relative_to(REPO).parts):
+            continue
+        rel = str(path.relative_to(REPO))
+        is_human_launcher = path.name in L10_HUMAN_FACING
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, raw in enumerate(lines, 1):
+            stripped = raw.strip()
+            if stripped.startswith("#") or not L10_SH_TARGET_RE.search(raw):
+                continue
+            if "--no-open" in raw or "L10-allow:" in raw:
+                sh_faces["compliant"] += 1
+            elif is_human_launcher or any(name in raw for name in L10_HUMAN_FACING):
+                sh_faces["human"] += 1        # 具名人手豁免（理由见 L10_HUMAN_FACING）
+            elif "--version" in raw:
+                pass                          # 版本探针：不启控制台（与 js/py 面同规则）
+            elif not L10_SH_CMDPOS_RE.search(raw):
+                pass                          # dsh 只以词缀/镜像 tag/模式串形态出现，非启动面
+            else:
+                bad.append("%s:%d (sh face, no --no-open)" % (rel, i))
+    # 空转绿守卫：点名自动化面必须真的被闸看见 --no-open 证据，否则闸=装饰品。
+    blind = []
+    for rel, label in L10_AUTOMATION_FACES:
+        p = REPO / rel
+        if not p.is_file():
+            blind.append("%s (file missing)" % label)
+            continue
+        ftext = p.read_text(encoding="utf-8", errors="replace")
+        seen = ("--no-open" in ftext
+                and (L10_FACE_LAUNCH_TOKEN_RE.search(ftext) is not None
+                     or any(k == "compliant" for _l, _a, _w, k in _l10_classify(ftext))))
+        if not seen:
+            blind.append("%s (no --no-open evidence at a launch face)" % label)
     if bad:
         err("L10 控制台启动面缺 --no-open（%d 处；宿主浏览器会被弹窗）——%s"
             "（dsh web 每次都开宿主默认浏览器；补 `--no-open`，或加 `L10-allow:<理由>` 注记）"
             % (len(bad), "; ".join(bad[:6])))
     else:
-        ok("L10 控制台启动面 --no-open 齐备（dsh 启动点 %d 处）" % scanned)
+        ok("L10 控制台启动面 --no-open 齐备（dsh 启动点 %d 处；sh 面 --no-open %d 处，"
+           "具名人手豁免 %d 处：%s）"
+           % (scanned, sh_faces["compliant"], sh_faces["human"],
+              "; ".join("%s=%s" % (k, v) for k, v in L10_HUMAN_FACING.items())))
+    if blind:
+        err("L10 空转绿守卫：点名自动化启动面闸没看见 --no-open 证据——%s"
+            "（闸形同虚设即盲区复发；核对启动面是否改道绕过）" % "; ".join(blind))
+    else:
+        ok("L10 空转绿守卫：全部点名自动化启动面均见 --no-open 证据（%d 个面）"
+           % len(L10_AUTOMATION_FACES))
 
 
 def main():

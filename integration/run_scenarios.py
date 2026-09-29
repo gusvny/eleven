@@ -1893,6 +1893,13 @@ SCENARIOS = [
     ("t260929-04-wake-real-session-bench",
      "「不丢」的真机证明面（t260929-04 scope 6，灰盒 L3，隔离真宿主 temp DSH_HOME+临时端口，红线零接触 3099）：包装 developer 交付的 bench（server/plugins/watchdog/bench/host-prompt-bench.mjs，同一 host API 通路）——排队简报真落真会话（队列项 control 流可见、消化后消息会话内可读）、未消化窗第二事件被扣、消化后新事件再醒；判据=退出 0 且自报 PASS 汇总。intent 分工：桩面行为归同票三条秒级场景（TDD 期先行）；本条只锁桩够不到的真宿主端到端通路，互不顶替。三态：node 或 ~/.sandbar/dsh-015 缺席=ENV_FAIL exit 2；bench 缺席/红=FAIL exit 1 点名（TDD 红属预期，arbitrate/merge 期必须绿）",
      "python3 integration/t260929-04/sc_wake_real_session_bench.py", "ro", "serial"),
+
+    # ---- t260929-09: L10 launch-gate mechanism（260929 弹窗事故回归：变量二进制+.sh 面逃逸字面量闸）
+    # 收编说明（260929 直修，宿主令「不开票」）：本场景与其闸本体由 t260929-09 泳道产出、
+    # integration 岗复核后收编进 main；该 workflow 已按宿主令终结（terminate），票面无在跑段。
+    ("t260929-09-l10-launch-gate-mechanism",
+     "L10 控制台启动面闸的机制化守卫（t260929-09，灰盒 L3，离线秒级零 docker）：260929 宿主实报浏览器弹窗，真凶 bench 用**变量二进制**起 dsh web、argv 带 --profile 且缺 --no-open，旧 L10 只认字面量二进制=绿灯盲区（当日基线实测 0 启动点被扫到）。A 机制红面四族样本（变量二进制+--profile argv/字面量 dsh 路径/dsh 命名变量/bin-dsh 路径拼接）缺旗必被识别（A1=事故同形状字面级回归）；B 绿面零误报（带旗/--version 探针/L10-allow 同行+前注释行两形态/非 dsh 二进制/空面）；C 畸形输入（未闭合括号/CRLF/嵌套引号/空文本）不炸；D 现树 lint_tests.py exit 0 且 0 error / 0 warn（验收口径原话）+L10 在场；E .sh 启动面合同——票 scope 2a 六个 automation 调用面逐个在场带旗（防静默不扫与 vacuous green），两个人工豁免面（start-console.sh/stage_console.sh 默认开浏览器）在闸里具名理由（scope 2b silence is not an exemption）；F ebb52c9 直修收据锚（bench 启动行仍带 --no-open）。与 t260907-10 sc_engine_layout §D（布局扫描器自证）intent 不同面；developer L1 守助手纯函数真值表。助手缝缺席=TDD 红点名即收口（不带着假缝让绿面假绿）",
+     "python3 integration/t260929-09/sc_l10_launch_gate_mechanism.py", "ro"),
 ]
 
 CMD_TIMEOUT = 900
@@ -2894,6 +2901,12 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             passed += (exit_code == 0)
             env_failed += env_like
             failed += (exit_code not in (0, 2, _SPAWN_FAIL))
+            # 260929 直修 B1（宿主令·不开票）：环境红**具名**通道（纯加性）。此前只有
+            # env_fail 计数、没有名单，闸/票面答不出「红的是哪几条」。判据=本层唯一现成
+            # 判据 env_like（exit 2 / spawn 面 -8），不新造判据；名字只进汇总与报告的
+            # 观测键，判定与既有计数逐键不变。收集在锁内（_emit 由线程池并发调）。
+            if env_like:
+                env_red_names.append(name)
             timings.append({"pool": pool_name, "name": name,
                             "status": ("PASS" if exit_code == 0
                                        else "ENV_FAIL" if exit_code == 2 else "FAIL"),
@@ -2935,6 +2948,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             except (OSError, ValueError):
                 pass
     spec_cases = []   # t260912-01：规范行明细（只收执行器本层综合行；子进程 stdout 不进计数），INTEG_SUMMARY 以此为准
+    # 260929 直修 B1（宿主令·不开票）：环境红**具名**名单（判据=env_like，见 _emit 内注）。
+    # 只作观测面：不进任何计数、不参与任何判定；_emit 并发调用，写入在 lock 内。
+    env_red_names = []
     executor_error = None   # t260911 仲裁②：池级异常必须响亮产品红，绝不静默吞
     try:
         for e in exclusives:      # exclusives go first, overlapping no pool (always serial)
@@ -3063,6 +3079,12 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         _summary["timings"] = {
             "prelude_s": round(_prelude_s, 1),
             "scenarios_s": round(max(0.0, wall - _prelude_s), 1)}
+        # 260929 直修 B1（宿主令·不开票）：环境红**具名**通道（additive 键，恒在场：
+        # 环境红名单为空时是 [] 与 0，不是缺键——消费方无需分支）。判据=本层既有
+        # env_like；既有键（含 ran/pass/fail/not_checked/env_fail 计数）逐键不变。
+        _env_red_sorted = sorted(set(env_red_names))
+        _summary["env_red_names"] = _env_red_sorted
+        _summary["env_red_count"] = len(_env_red_sorted)
         print("INTEG_SUMMARY " + json.dumps(_summary, ensure_ascii=False), flush=True)
     except Exception as _ex:   # 汇总行失败不改场景红绿（观测面），但大声留痕
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
@@ -3099,6 +3121,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             _report["excluded_count"] = len(excluded_entries)
         if only_names:
             _report["only_scenarios"] = list(only_names)
+        # 260929 直修 B1（宿主令·不开票）：报告落档同带环境红具名名单（与汇总行同名同源，
+        # 排序去重；既有键一个不动）。
+        _report["env_red_names"] = sorted(set(env_red_names))
         rp.write_text(_json.dumps(_report, ensure_ascii=False, indent=1), encoding="utf-8")
         print("报告落档：%s" % rp, flush=True)
     except OSError:

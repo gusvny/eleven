@@ -7305,6 +7305,12 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     out.passed = int(res.get("pass") or 0)
     out.failed = int(res.get("fail") or 0)
     out.env_fail = int(res.get("env_fail") or 0)   # the may-be-absent reading keeps the old gate compatible
+    # 260929 直修 B1（宿主令·不开票）：环境红**具名**名单透传（闸回执 additive 键；
+    # 缺键/畸形/非列表 → 空列表=老回执与老回放逐字节零漂移）。原样带上，不重判、
+    # 不改任何计数；名单权威在闸（not-checked × external 判决面）。
+    _env_red = res.get("env_red")
+    if isinstance(_env_red, list):
+        out.env_red = [str(x) for x in _env_red if str(x)]
     # 260927：跑者侧总预算回执面透传（闸回执的 additive 键；缺键→空=非预算轮，
     # 老回放/老载荷逐字节零漂移）。票面据此点名「哪一段没跑完」，不是中性零信号。
     _budget = res.get("budget")

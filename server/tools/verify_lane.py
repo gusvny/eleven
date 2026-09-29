@@ -1188,11 +1188,21 @@ def _integ(args):
             executor_summary.get('concurrency') if executor_summary else None,
             executor_summary.get('pool_config') if executor_summary else None,
             env_fp=lane_fp['value'], baseline_ref=baseline_ref)
+    # 260929 直修 B1（宿主令·不开票）：环境红**具名**通道（纯加性键，判据与计数零改动）。
+    # 取源=**用例级权威判决面**：cases_dedup（规范行解析面，上方）经语义收紧+决策表后的
+    # 逐条归属 verdicts，点名 why=`not_checked_external(...)`（即 not-checked × external，
+    # 闸判 record 不拦的那一族）。**绝不**从文本行 `ENV_FAIL [...] exit=N` 反推——那条面
+    # 已知与闸判决不一致（spawn 失败 -8 执行器记 env、闸按败计）。aff 缺席（无规范行
+    # 可判/全绿）→ 空列表；名字只作观测面，不进任何判定。
+    env_red = sorted({str(v["name"]) for v in ((aff or {}).get("verdicts") or [])
+                      if isinstance(v, dict) and v.get('name')
+                      and str(v.get('why') or '').startswith('not_checked_external')})
     _out = {'lane': 'integ', 'green': green,
             'ran': ran, 'pass': passed, 'fail': failed, 'env_fail': env_failed,
             'scenarios': scen, 'err': None,
             'cases': cases_dedup, 'summary': summary,
             'affiliation': aff,
+            'env_red': env_red,
             'baseline_ref': baseline_ref,
             'baseline': {'ok': baseline_ok, 'err': baseline_err,
                          'enabled': baseline_enabled,

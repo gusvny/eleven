@@ -109,6 +109,9 @@ def test_a1_stage_result_defaults_replay_safe():
 def test_a2_integration_run_defaults_replay_safe():
     ir = shared.IntegrationRunResult()
     assert (ir.handover_ran, ir.handover_passed, ir.handover_failed) == (0, 0, 0)
+    # 260929 直修 B1（纯加性）：环境红**具名**名单缺省空列表=老回放/老回执零漂移
+    # （与 env_fail 分工：那个是 int 计数，这个是名单；两者都不入新判定）。
+    assert ir.env_red == []
     args = shared.IntegrationRunArgs(ticket_id="t", worktree="w")
     assert args.handover_runs == []
 
