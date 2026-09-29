@@ -20,6 +20,11 @@ practice:
         new call sites on a file with no reclaim verb → warning (260926: the
         $TMPDIR leak reached 400k dirs / 98.6% older than 6h before anyone
         noticed; this is the mechanical brake against new debt)
+  L11 integration gate settlement (B2, host order 260929): the engine's section
+        status failure condition must NOT contain `env_fail` (environment red is
+        recorded by name, never a failure face / never a re-run reason), and
+        run_scenarios' INTEG_SUMMARY must carry `env_red_names` (the named
+        channel without which "not blocked" would become "silent").
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
@@ -657,6 +662,55 @@ def lint_console_no_open():
            % len(L10_AUTOMATION_FACES))
 
 
+# ── L11 集成门判据收口（B2，宿主 260929 令）：环境红不拦、不重跑、不静默 ──────────
+#: 段 status 的失败条件**不得**再含 env_fail（源码字面钉）。语义（宿主口径）：门只对
+#: 本票新增产品红 + 未挂账产品红判红；环境红具名记录、不拦、不重跑。
+L11_DEV_LANE = "server/engine/dev_lane.py"
+L11_RUNNER = "integration/run_scenarios.py"
+_L11_STATUS_RE = re.compile(
+    r'"status"\s*:\s*"failed"\s*if\s*\(([^)]*)\)\s*else\s*"ok"')
+_L11_ENV_RED_KEY = "env_red_names"
+
+
+def lint_integration_gate_settlement():
+    """L11：B2「集成门判据收口」的回潮闸（机械字面判据，秒级）。
+
+    两钉（任一失守即 err——它们各自是「环境红又被当失败面/名单面被静默」的入口）：
+      ① `dev_lane.py` 段 status 的失败条件不得含 `env_fail`：环境红（供给/共享台面）
+         不构成段失败，改了它=每票每轮被环境红锁死（B2 要掐断的那条链）；
+      ② `run_scenarios.py` 的 INTEG_SUMMARY 必须带 `env_red_names` 键：具名通道是
+         「不拦但不许静默」的唯一兑现面，键没了=红名单再次不可读（B1 回退）。
+    判据读源码字符串（不回退成注释/文档面）；两文件缺席也报 err（fail-closed）。"""
+    dl = REPO / L11_DEV_LANE
+    if not dl.is_file():
+        err("L11 %s 缺席——集成门判据收口无法判定（fail-closed）" % L11_DEV_LANE)
+        return
+    src = dl.read_text(encoding="utf-8", errors="replace")
+    hits = _L11_STATUS_RE.findall(src)
+    if not hits:
+        err("L11 段 status 失败条件锚未命中（%s 的 `\"status\": \"failed\" if (...) else "
+            "\"ok\"` 形态变了）——判据收口闸形同虚设，请同步本判据" % L11_DEV_LANE)
+    else:
+        bad = [c for c in hits if "env_fail" in c]
+        if bad:
+            err("L11 段 status 失败条件含 env_fail（%s）——环境红又被当失败面（B2 回退："
+                "每票每轮被环境红锁死）；环境红只具名记录，判据=ir.error or ir.failed"
+                % ("; ".join(c.strip() for c in bad)))
+        else:
+            ok("L11 段 status 失败条件已摘 env_fail（%d 处：%s）"
+               % (len(hits), "; ".join(c.strip() for c in hits)))
+    rs = REPO / L11_RUNNER
+    if not rs.is_file():
+        err("L11 %s 缺席——具名通道无法判定（fail-closed）" % L11_RUNNER)
+        return
+    rsrc = rs.read_text(encoding="utf-8", errors="replace")
+    if '"%s"' % _L11_ENV_RED_KEY not in rsrc:
+        err("L11 INTEG_SUMMARY 缺 `%s` 键（%s）——环境红具名通道失守（B1 回退：红名单"
+            "不可读，票面答不出红的是哪几条）" % (_L11_ENV_RED_KEY, L11_RUNNER))
+    else:
+        ok("L11 INTEG_SUMMARY 带 `%s` 键（环境红具名通道在场）" % _L11_ENV_RED_KEY)
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -667,6 +721,7 @@ def main():
     lint_tmpdir_hygiene()
     lint_ticket_start_identity()
     lint_console_no_open()
+    lint_integration_gate_settlement()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

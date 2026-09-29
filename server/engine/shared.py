@@ -1011,6 +1011,7 @@ def _roster_adoption_payload(roster: Dict[str, Any], names: List[str]):
 def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
                                 roster_error: str = "", *,
                                 run_error: Any = "", env_side_red: Any = False,
+                                env_red: Any = None,
                                 ticket_base_at: Any = None,
                                 ticket_base_source: str = "",
                                 live_baseline_red: Any = None,
@@ -1023,7 +1024,11 @@ def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
          known_red 豁免车道，语义不动）；
       ② 名册可读可解且**逐条在册**（booked/isolated 都算「已挂账」，本函数不下产品结论）；
       ③ 本轮没有启动级 error（零跑/装配失败/超时前缀——「没检验到」不得当零新增红）；
-      ④ 本轮不是环境面红（产品红 0/闸拦 0/环境红≥1，或供给装配失败）；
+      ④ 环境面红**必须具名**才不构成拒绝（B2，260929 宿主令）：调用方以 env_side_red
+         传环境面信号、以 env_red 传闸回执的环境红**具名**名单——`env_fail>0` 而
+         env_red 名单为空/缺键/畸形 ⇒ **仍拒**（无法具名就不放行，保守侧，why 仍落
+         `env-side-red`）；env_red 非空 ⇒ 不再构成拒绝，照常走 ⑤⑥ 采纳，并在 note
+         里点名环境红名单（env-face-named 记在 note，不复用 `env-side-red` 的语义）；
       ⑤ **时间证据**（260926 洞①裁定）：本票开票基点在手（ticket_base_at 可解），且每条
        在册 blocker 的条目戳可解、`booked_at` **早于**该基点——缺戳/戳畸形/戳晚于基点一律
        不采纳（戳只废该条，原因逐条点名）；基点不可得=fail-closed 不采纳；
@@ -1036,20 +1041,35 @@ def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
     返回 {adopt, why, known, new, roster_ok, stale, stamps_ok, live_baseline, note}：
       - why 是机器 token：adopted | no-blockers | new-red | roster-unavailable |
         startup-error | env-side-red | no-base-point | stale-evidence |
-        live-baseline-green | live-baseline-malformed（后四者=260926 新增加保险的具名原因）；
+        live-baseline-green | live-baseline-malformed（**env-side-red 自 B2 起只表示
+        「环境面红但具名通道缺席/畸形」**——具名的环境面色走 adopted，env-face-named
+        记在 note 里，不复用旧 token 语义）；
       - known=[{name,verdict,home,booked_at,booked_sha}...]（审计锚：凭什么放行）、
         new=[非在册名字...]、stale=[{name,why,booked_at}...]（在册但戳不合格的 blocker）；
       - note=上票面/banner 的**英文**审计锚（逐条列 blocker 名 + 名册 verdict/home +
         时间证据基点 + 活基线可得性），任一条不满足时 note 也点名原因（名册路径与失败
         原因进票面，不静默）。
     畸形入参不抛：env_side_red 非 bool、run_error 非串、活基线集非名字表等一律按「拦」的
-    一侧读（fail-closed），并在 note 里点名畸形值本身（报错精确纪律）。"""
+    一侧读（fail-closed），并在 note 里点名畸形值本身（报错精确纪律）。env_red 只作
+    「环境红是否已具名」的可读性判据（缺省 None=未给=按「不具名」读），不参与任何别的
+    判定——不具名即退回 B2 前的逐字节行为（环境面 ⇒ 拒）。"""
     roster, err = known_red_roster(roster_payload)
     if isinstance(roster_error, str) and roster_error:
         err = roster_error
     # ④ 环境面信号：**只有字面 False 才是「不是环境面」**（非 bool 畸形 → 按拦读）。
-    env_red = env_side_red is not False
-    env_red_malformed = (env_side_red is not True) and (env_side_red is not False)
+    env_side = env_side_red is not False
+    env_side_malformed = (env_side_red is not True) and (env_side_red is not False)
+    # ④b 环境红**具名**名单（B2，260929）：只有闸回执的 env_red 通道算数——非 list /
+    # 缺键（None）/ 表里没有非空名字 ⇒ 不具名 ⇒ 退回旧保守面（环境面即拒）。
+    env_named = ([str(x).strip() for x in env_red
+                  if isinstance(x, (str, bytes)) and str(x).strip()]
+                 if isinstance(env_red, list) else [])
+    # 不具名 ⇒ 环境面信号照旧构成拒绝（B2 前逐字节行为）；具名 ⇒ 环境面不再拦。
+    # **排他 bool 判据**：只有字面 env_side_red=True 才认「具名通道放行」——畸形信号
+    # （env_side 为 True 但非 bool）照旧走环境面拦读（旧契约：畸形按拦的一侧读，
+    # 不因名单恰恰在场而被静默救回）。
+    env_red = env_side and not (env_side_red is True and env_named)
+    env_red_malformed = env_side_malformed
     # ③ 启动级 error：非串非 None = 畸形信号（旧读法把畸形当「无 error」=fail-open）。
     if isinstance(run_error, str):
         run_err, run_err_malformed = run_error, ""
@@ -1110,9 +1130,12 @@ def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
                if run_err_malformed else "")))
     if env_red:
         return dict(base, adopt=False, why="env-side-red", note=(
-            "Environment-side red this round (product red 0 / gate blockers 0 / env red>=1 "
-            "or supply-assembly failure): the known-red exemption lane handles it, the "
-            "verdict is not adopted here.%s"
+            "Environment-side red this round with NO named env-red list (product red 0 / "
+            "gate blockers 0 / env red>=1 or supply-assembly failure): an unnamed "
+            "environment face cannot be adopted — the known-red exemption lane handles it, "
+            "the verdict is not adopted here. B2 (260929): the refusal survives only for "
+            "the unnamed face; a round whose environment red is NAMED on the gate receipt "
+            "(`env_red`) is not refused by this check.%s"
             % ((" Signal env_side_red=%r is not a bool — malformed signal read on the "
                 "BLOCK side (fail-closed)." % (env_side_red,)) if env_red_malformed else "")))
     # ---- ⑤ 时间证据（洞①）：基点不可得=fail-closed；戳不合格=逐条点名（照旧拦+重跑）----
@@ -1165,7 +1188,7 @@ def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
         "acceptance_walkthrough instead of re-running the full suite. | basis 1: zero new "
         "red = no blocker outside the roster | basis 2: time evidence — every entry was "
         "booked before this ticket's base point (%s; source: %s) | basis 3: %s | "
-        "blockers: %s"
+        "blockers: %s%s"
         % (KNOWN_RED_BASELINE_REL, base_iso, str(ticket_base_source or "n/a"),
            ("live baseline set (%s): every blocker is red in it (%s)"
             % (str(live_baseline_source or "n/a"), ", ".join(live_red_hit)))
@@ -1176,7 +1199,12 @@ def blockers_known_red_adoption(blockers: Any, roster_payload: Any,
            if live_available else
            ("live baseline set UNAVAILABLE (%s) — time evidence only"
             % str(live_baseline_source or "no source given")),
-           detail)))
+           detail,
+           # B2（260929）：环境红具名即不再构成拒绝——放行时把名单点名进审计锚
+           # （env-face-named：不可静默，也不与旧 env-side-red 的「拒」语义混读）。
+           " | environment face NAMED on the gate receipt (env-face-named, not a "
+           "refusal under B2 260929): %s" % ", ".join(env_named)
+           if env_named else "")))
 
 
 def tests_fault_cap_audit_text(rounds: Any, cap: Any, exempt_rounds: Any = 0,

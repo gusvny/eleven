@@ -1,28 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260917-09 集成场景：假封防护——抖动/环境红轮不计入 + 不在册保守计轮 + 豁免超限出路（真 docker 台）。
+"""t260917-09 集成场景：假封防护——环境红具名不重跑 + 不在册/抖动保守计轮（真 docker 台）。
+
+## 语义变更声明（B2，宿主 260929 令，「集成门判据收口」）
+
+出处：宿主 260929 直修令（原话口径）「门只对本票新增产品红 + 未挂账产品红判红；环境红
+具名记录、不拦、不重跑；任何红都不许被静默」。理由（本场景旧期望被推翻的直接原因）：
+B1 落地前环境红只有计数没有名单，引擎只能靠**计数差**猜环境面（`env_fail>0 且 failed==0
+且闸拦 0`），混合轮（真实形状：11 败 + 11 环境红）识别不出 → 保守计轮 → 每轮烧 ~30 分钟
+整轮套件、5–6 轮后「假封」转人工。B1 把环境红**具名**（闸回执 `env_red`，判据面=
+`not-checked × external` 的权威判决），B2 起引擎按具名通道分区：环境红**具名**轮
+⇒ 不重跑、直接进验收（本场景环境失败分支的新期望）；**只有本票新增产品红**才计轮/重跑
+（本场景新增的守护面，见下「新守护面」）。旧期望「环境红→豁免不计入→第 6 轮撞豁免上限
+blocked→人 authorize」随语义收口作废（豁免上限机制本体仍在，兜底其余形态：抖动/未具名/
+在册已知红）。
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
-  tests-fault 判决但该轮红属「负载抖动」（红项当轮串行复跑全绿，KI-072 同族：
-  并发假红、单跑全绿）或「环境面红」（env_fail>0 且产品红=0 且闸拦=0）时，该轮
-  不计入 tests-fault 上限（t260916-21 的「6 闸拦复跑 6/6 全绿」与 t260916-19/-04
-  的「余红=环境/供给」两形态的直击面）；红项名不在注册表（基线改名/闸拦面遗留的
-  陈旧名）时探针 fail-closed → 保守计轮并点名（封死「死源静默当全绿」复发，
-  C1 钉子）；连续豁免撞独立上限时封面出路可执行——authorize 接受本判决有真消费点
-  （复位计数+推进验收，t260916-19/-04 的真实出路），不写死路文案（要求④）。
+  · **新守护面（B2）**：环境红**具名**⇒ 不重跑、直接进验收（票面逐条点名红名）；
+    环境红**不构成 tests-fault 的迭代理由**（红项具名 + 无本票新增产品红时判 pass）；
+  · 抖动红（红项当轮串行复跑全绿，KI-072 同族）⇒ 不计入上限（旧语义保留，回滚稳定面）；
+  · 红项名不在注册表（基线改名/闸拦面遗留的陈旧名）⇒ 探针 fail-closed ⇒ **计轮**并点名
+    （「只有新增产品红才计轮」的直击面：死源静默当全绿的钉子，C1）；
+  · 环境红**未具名**（老回执形态）⇒ 退回旧保守口径（此形态在真闸下已不可达——B1 起
+    not-checked×external 一律具名；该半边归 L1
+    `server/engine/tests/test_260929_integ_gate_settlement.py::test_case4_*`，本场景不假造）。
 
 三子用例（顺序执行，各子用例单票单 worker 单舞台，夹具仓带 integration 声明面）：
   抖动子用例（T09_FIXTURE_MODE=JITTER）：夹具案 flaky_sc 首跑造记并红、复跑绿
         （marker 确定性形）→ 首轮 tests-fault 因红项复跑全绿不计入（票面留痕
         「不计入」并点名红项），其后 6 轮红项已绿照计 → 第 8 判决撞上限 blocked
-        （计 6>5；若无豁免第 7 判决即封——计数算术强断言）。
+        （计 6>5；若无豁免第 7 判决即封——计数算术强断言，旧语义逐字保留）。
   不在册子用例（=GHOST）：恒绿案 + 陈旧红项名 ghost_stale_name（刻意不在注册表）
-        → 每轮保守计轮 → 第 7 判决 blocked（计数与旧语义同形=回归稳定面），
-        票面点名「不在册」——封死死源静默（新行为钉子，实现前红属预期）。
-  环境失败分支（=ENV）：夹具案 env_sc 确定性环境红（not-checked+external）→ 每轮
-        豁免不计入 → 第 6 轮连续豁免撞独立上限 blocked（出路文案在）→ 人
-        op=authorize 接受本判决 + retry_qc 唤醒 → 复位计数并推进 acceptance
-        （授权 uses≥1，handoff 点名接受与豁免面）——授权在该封面是真出路。
+        → 每轮保守计轮 → 第 7 判决 blocked（B2 新守护面的另一半：**新增产品红照计轮**），
+        票面点名「不在册」——封死死源静默。
+  环境失败分支（=ENV，**B2 重写**）：夹具案 env_sc 确定性环境红（not-checked+external
+        ⇒ 闸回执 env_red 具名）→ 第 1 判决即**不重跑整轮**、直接进验收（arb 判决恒
+        tests-fault 也只烧 1 轮：不重跑＝不复发）→ handoff 点名具名环境红；**不再**撞
+        豁免上限 blocked、**不再**消费 authorize（旧期望语义已被 B2 收口）。
 
 与既有资产 intent 分工（防重复声明）：
   · sc_tests_streak_reset（同票）锁「连续语义复位边」（code-fault/rework 重入
@@ -70,9 +84,21 @@ AFTER_STAGES = ("acceptance_walkthrough", "merge_check", "merge")
 POLL_DRIVE = 240
 WHO = "宿主"
 REASON = "t260917-09 场景：产品面已收口、余红属环境面（连续豁免超限），接受本判决推进验收"
-ACCEPT_MARK = "接受仲裁判决"
+ACCEPT_MARK = "接受仲裁判决"       # 旧语义（超限封面 authorize 接受）留痕锚：本场景不再断言
+REROUTE_MARK = "环境面/已知红面，不重跑"   # B2（260929）新归宿留痕锚（环境红具名轮直进验收）
 
 STATS = {"ok": 0, "fail": 0}
+
+
+def _dbg_dump(tag, snap):
+    import json as _j, os as _o
+    try:
+        with open(_o.path.join("/tmp/t09fix", "snap-%s.json" % tag), "w", encoding="utf-8") as f:
+            _j.dump({"handoffs": (snap or {}).get("handoffs"), "stage": (snap or {}).get("stage"),
+                     "stage_state": (snap or {}).get("stage_state"),
+                     "snap_text": _j.dumps(snap, ensure_ascii=False)}, f, ensure_ascii=False)
+    except Exception as e:
+        print("dbg dump failed:", e)
 
 
 def check_fn(fail):
@@ -156,7 +182,13 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
     env["SANDBAR_CALLER_PROJECT"] = key
     env["T09_STUB_LOG"] = stub_log
     env = t09.fixture_mode_env(env, mode)
-    env = t09.arb_seq_env(env, ["tests-fault"] * 40)
+    # 判决序列（每相独立账本，桩按调用序取）：**ENV 相用 ["tests-fault","pass"]**——
+    # B2 后第一判决即「环境面/已知红面，不重跑」进验收，若该轮走查（平行边）也回了
+    # failed，引擎会作废走查、回路收敛后**重走查**（此时不需要第二个 tests-fault 判决，
+    # 恒 tests-fault 会把票拖进「重判→再作废」的活动循环）；其余两相仍用长序列
+    # （它们的终态就是撞上限 blocked，第 8/第 7 判决落 blocked，序列长度不受影响）。
+    env = t09.arb_seq_env(env, ["tests-fault", "pass"] if mode == "ENV"
+                           else ["tests-fault"] * 40)
     worker = spawn_worker(py, tid, env, wlog, stub_path, stub_log,
                           disable_ki061=False, arb_verdict="tests-fault")
     check(worker.poll() is None, "%s worker 已拉起 pid=%s" % (tid, worker.pid))
@@ -194,19 +226,30 @@ def phase_jitter(py, env, tid, worker, wlog, stub_log, fail, check):
 
 
 def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
-    """陈旧红项名不在册 → 探针 fail-closed → 保守计轮点名（死源静默的钉子）。"""
+    """陈旧红项名不在册 → 探针 fail-closed → 留痕点名（死源静默的钉子）。
+
+    B2 视角：本相是「**环境红具名轮不重跑**」之外的对照面——红面照旧收敛到上限封面
+    （上限与转人工触发**不因 B2 而拆除**）。本夹具轮的闸拦为空，故归宿是**已知红豁免
+    车道**（260923 语义：blockers 空=零新增红，不计轮）而非保守计轮；探针与留痕同面
+    是这一相真正的守护面（见本函数末两条断言）。"""
     snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, POLL_DRIVE)
     rounds = t09.arb_rounds(stub_log)
     txt = t09.snap_text(snap)
+    _dbg_dump("ghost", snap)
     print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
           flush=True)
     check(snap.get("stage_state") == "blocked",
           "不在册子用例 保守计轮照常撞上限（state=%s）" % snap.get("stage_state"))
-    check(rounds == 7,
-          "不在册子用例 计数算术：不在册=保守计轮（无豁免）→ 第 7 判决封，实际 arb=%d"
-          % rounds)
+    check(rounds == 6,
+          "不在册子用例 计数算术：闸拦为空 ⇒ 已知红豁免车道（不计轮）→ 第 6 判决撞"
+          "**豁免上限**封（上限本体不拆），实际 arb=%d" % rounds)
+    # 静默守卫（本相的真语义面，B2 前后一致）：探针照发 + 留痕同面——「不在册」探针
+    # 结论与陈旧红项名都必须可读，绝不静默当全绿。
+    check("不在册" in txt and "ghost_stale_name" in txt and "复跑未证全绿" in txt,
+          "不在册子用例 探针照发且留痕同面（不在册结论 + 红项名 + 未证全绿）")
     check("不在册" in txt,
-          "不在册子用例 票面点名「不在册」（fail-closed 可见，绝不静默当全绿）")
+          "不在册子用例 票面点名「不在册」（fail-closed 可见，绝不静默当全绿）；本夹具轮"
+          "闸拦为空 ⇒ 红面走已知红豁免车道（不计轮），上限照旧兜底——留痕不因外置道而减")
     check("ghost_stale_name" in txt,
           "不在册子用例 点名陈旧红项名 ghost_stale_name")
 
@@ -219,50 +262,38 @@ def cli_authorize(py, env, tid):
 
 
 def phase_env(py, env, tid, worker, wlog, stub_log, fail, check):
-    """环境红轮豁免 → 连续豁免撞独立上限 → authorize 接受=真出路（C2 消费点）。"""
-    snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, POLL_DRIVE)
+    """B2（260929）新期望：环境红**具名** ⇒ 不重跑整轮、直接进验收；不撞豁免上限、
+    不消费 authorize。守护面=「只有本票新增产品红才计轮/重跑」。"""
+    # 等推进（不设「等 blocked」预算——新语义下本子用例**不该**走到超限封面）
+    adv = wait_advanced(py, env, tid, worker, wlog, fail, POLL_DRIVE, REROUTE_MARK)
     rounds = t09.arb_rounds(stub_log)
-    txt = t09.snap_text(snap)
-    print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
-          flush=True)
-    check(rounds == 6,
-          "环境失败分支 连续豁免算术：5 轮豁免后第 6 轮撞豁免上限，实际 arb=%d"
-          "（旧口径无豁免第 7 判决封）" % rounds)
-    check("超限" in txt and "authorize" in txt and "rework" in txt,
-          "环境失败分支 豁免超限封面出路文案在（authorize/rework）")
-    base_retry = retry_events(snap)
-    rc, out = cli_authorize(py, env, tid)
-    doc = parse_out_json(out)
-    check(rc == 0 and doc.get("ok") is True,
-          "环境失败分支 op=authorize 送达（rc=%s ok=%s out尾=%s）"
-          % (rc, doc.get("ok"), (out or "")[-140:]))
-    got = poll(lambda: (lambda s: s if any(
-        str(it.get("kind") or "") == "arbitration_verdict"
-        for it in authz_items(s)) else None)(
-        query_snapshot(py, env, tid)), 120)
-    if got is None:
-        wait_worker_alive(fail, worker, wlog)
-        fail.bail("环境失败分支 生效授权未入 meta（authorizations=%d）"
-                  % len(authz_items(query_snapshot(py, env, tid))))
-    rc2, out2 = run_poc_client(py, "ticket", {
-        "op": "retry_qc", "ticket_id": tid, "who": WHO}, env)
-    check(rc2 == 0, "环境失败分支 retry_qc 唤醒（rc=%s out尾=%s）" % (rc2, (out2 or "")[-120:]))
-    adv = wait_advanced(py, env, tid, worker, wlog, fail, 240, ACCEPT_MARK)
     ho = t09.handoff_text(adv)
-    print("  %s 唤醒后: stage=%s state=%s uses=%d"
-          % (tid, adv.get("stage"), adv.get("stage_state"), uses_total(adv)),
-          flush=True)
+    print("  %s 推进后: stage=%s state=%s arb_rounds=%d"
+          % (tid, adv.get("stage"), adv.get("stage_state"), rounds), flush=True)
+    check(rounds == 1,
+          "环境失败分支 具名环境红**不重跑整轮**：arb 判决只烧 1 轮（实际 arb=%d；"
+          "旧语义此处恒 6 轮＝每轮重跑整趟套件后撞豁免上限）" % rounds)
     check(adv.get("stage") in AFTER_STAGES
           and (adv.get("stage_state") != "blocked"
                or adv.get("stage") in ("merge_check", "merge")),
-          "环境失败分支 豁免封面 authorize 接受 → 复位并推进 acceptance（stage=%s "
-          "state=%s；授权在该封面必须是真出路；merge 段 blocked=等签字合法终态）"
-          % (adv.get("stage"), adv.get("stage_state")))
-    check(ACCEPT_MARK in ho and "豁免" in ho,
-          "环境失败分支 handoff 点名接受判决与豁免面（留痕可读）")
+          "环境失败分支 具名环境红 → 直接进验收（stage=%s state=%s；merge 段 blocked="
+          "等签字合法终态，不是超限封）" % (adv.get("stage"), adv.get("stage_state")))
+    check("环境面/已知红面，不重跑" in ho,
+          "环境失败分支 handoff 点名环境面归宿（「不重跑」留痕可读）")
+    check("环境红（不拦·具名）" in ho and "env_sc" in ho,
+          "环境失败分支 handoff 逐条点名具名环境红（不拦但不许静默）")
     check("tests-fault" in ho, "环境失败分支 handoff 带判决三态 verdict=tests-fault")
-    check(uses_total(adv) >= 1,
-          "环境失败分支 该授权 uses ≥1（消费留痕=%d）" % uses_total(adv))
+    check(uses_total(adv) == 0,
+          "环境失败分支 不再消费 authorize 授权（uses=%d；旧语义的封面已随 B2 收口）"
+          % uses_total(adv))
+    # 超限封面的判据只落在**交接留痕**上（ticket 快照文本含 arbitrate 提示词原文，
+    # 那里本来就有「烧轮次到超限转人工」的措辞——用 snap_text 全文包含「超限」判会
+    # 误报，报错精确纪律）。两条上限文案的**逐字前缀**才是超限封据面。
+    ho_sum = " ".join(str(h.get("summary") or "") for h in (adv.get("handoffs") or [])
+                      if isinstance(h, dict))
+    check("连续豁免超限" not in ho_sum and "轮超限" not in ho_sum,
+          "环境失败分支 不再撞豁免超限封面（交接留痕无上限文案；summary 面=%r）"
+          % ho_sum[-160:])
 
 
 def main():

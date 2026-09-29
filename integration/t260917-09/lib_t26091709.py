@@ -9,8 +9,11 @@
   mini 执行器，供机械链真跑三态回执）。
 - MINI_RUNNER：夹具迷你执行器（场景自有资产，随夹具仓落库）。真注册表形状
   （SCENARIOS=[(name,intent,cmd)]，/bin/sh -c 语义），模式由 T09_FIXTURE_MODE
-  选 JITTER/ENV/GHOST；ghost_stale_name 刻意不在册（模拟基线/闸拦面的陈旧
-  红项名——不在册必须保守计轮，封死死源静默复发，C1 钉子）。
+  选 JITTER/ENV/GHOST；ghost_stale_name 刻意不在册（模拟基线/闸拦面的陈旧红项名
+  ——不在册必须保守计轮，封死死源静默复发，C1 钉子）。**未具名环境红**（B2
+  保守侧）在真闸下不再可达（B1 起凡 not-checked×external 一律具名，故闸回执的
+  env_red 不可能与 env_fail 计数脱节）——那半边归 L1
+  `server/engine/tests/test_260929_integ_gate_settlement.py::test_case4_*`。
 
 骨架抄 t260912-03 sc_authz_overlimit_accept / t260908-01 lib_ki061（取舍清单
 见方案 v2 §3；本库不新增引擎面依赖）。
@@ -177,6 +180,7 @@ def main():
         results.append(("real_sc", "pass" if rc == 0 else "fail", rc, tail))
         results.append(("ghost_stale_name", "fail", 1,
                         "ghost：陈旧红项名（不在注册表，t260917-09 夹具）"))
+
     else:
         print("未知 T09_FIXTURE_MODE=%r" % mode, file=sys.stderr)
         sys.exit(2)

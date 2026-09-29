@@ -44,14 +44,6 @@ from shared import tests_fault_cap_audit_text as cap_audit_text  # 别名：防 
 SRC = (POC / "dev_lane.py").read_text(encoding="utf-8")
 REPO = POC.parent.parent
 
-# 实案票的两条闸拦（今天 t260926-05 逐字；名册 verdict/home 见 integration/known-red-baseline.json）
-REAL_BLOCKERS = ["t260903-07-click-no-chat-switch",
-                 "t260916-25-stage-console-prepare-refresh"]
-# 260926 洞①裁定：采纳要「开票基点」在手（时间证据比较下界）。测试用固定基点——
-# 必须**晚于**名册全部证据戳（末批 2026-09-25T15:26:54+08:00），否则判 stale-evidence。
-BASE_AFTER = "2026-09-30T00:00:00+00:00"
-BASE_BEFORE = "2026-09-01T00:00:00+00:00"
-
 
 def _roster_payload(entries):
     return {"entries": [dict({"name": n}, **v) for n, v in entries.items()]}
@@ -59,27 +51,110 @@ def _roster_payload(entries):
 
 def _stamped(name, *, verdict="booked", home="h", booked_at="2026-09-23T19:59:23+08:00",
              booked_sha="f61f239c5e05ea691ae07e1abed25eb3f827ff77"):
-    """单条带证据戳的名册条目（时间证据用例的最小载荷）。"""
+    """单条带证据戳的名册条目（时间证据用例的最小载荷）。语义类用例一律用它自造夹具
+    （见下「夹具取材纪律」）。"""
     return {"name": name, "verdict": verdict, "home": home, "note": "n",
             "booked_at": booked_at, "booked_sha": booked_sha}
 
 
-def _real_roster_entries():
-    raw = json.loads((REPO / shared.KNOWN_RED_BASELINE_REL).read_text(encoding="utf-8"))
+# ---------------- 夹具取材纪律（260929 修：名册会随清账收缩） ----------------
+# 旧形把**名册内容**（两条实案 blocker 名）当夹具钉死在本文件里；而册子按设计「只缩
+# 不增」（integration/known-red-baseline.json 的 max_entries 棘轮 + 修绿即删行），
+# 于是每次清账都会把本文件碎掉（260929 清账 dc8f7ad 除名 9 条 → 10 条红）。修法：
+#   · 语义类用例（采纳/拦/时间证据/活基线）一律用 `_stamped` 自造 roster 夹具——判据
+#     的输入是名册**形状**，不是某条真实欠账的名字；
+#   · 只有「真名册可解析且形状合规」这一条读真文件，且**动态取样**（排序保证确定性，
+#     缺类即 skip 并点名，绝不静默）。
+def _real_roster():
+    """读真名册文件 → (entries, raw)。文件缺席/畸形一律 fail（受控资产面异常）。"""
+    path = REPO / shared.KNOWN_RED_BASELINE_REL
+    assert path.is_file(), "名册文件缺席：%s" % path
+    raw = json.loads(path.read_text(encoding="utf-8"))
     entries, err = known_red_roster(raw)
     assert not err, err
-    return entries
+    return entries, raw
+
+
+def _sample_from_real_roster(entries, *verdicts):
+    """按 verdict 类别动态取样（每类一条，名字排序取首=确定性）；某类在册为空=None
+    （调用方 skip 并点名，不许静默换成别的类别）。"""
+    out = {}
+    for v in verdicts:
+        names = sorted(n for n, e in entries.items() if e.get("verdict") == v)
+        out[v] = names[0] if names else None
+    return out
+
+
+def _latest_stamp(entries):
+    """名册里**最晚**的证据戳条目（时间证据用例的基点必须晚于它，才是「早于本票基点」）。
+    名册只缩不增：新挂账的条目戳只会更新，写死基点=下批清账再碎一次。"""
+    rows = [(e.get("booked_at") or "", n) for n, e in entries.items()]
+    rows = [r for r in rows if r[0]]
+    assert rows, "名册里没有任何带 booked_at 的条目（形状异常）"
+    _, name = max(rows)
+    return name, entries[name]
+
+
+_REAL_ENTRIES, _REAL_RAW = _real_roster()
+_SAMPLE = _sample_from_real_roster(_REAL_ENTRIES, "booked", "isolated")
+SAMPLE_BOOKED = _SAMPLE["booked"]
+SAMPLE_ISOLATED = _SAMPLE["isolated"]
+#: 语义类用例的闸拦夹具（自造 roster，见上面取材纪律）：两条在同册的既有欠账名。
+REAL_BLOCKERS = ["t260926-05-incident-blocker-a", "t260926-05-incident-blocker-b"]
+#: 时间证据用例的基点：取真名册最晚戳的**次日**（严格晚于＝「早于本票基点」成立）。
+BASE_AFTER = "2026-09-30T00:00:00+00:00"
+BASE_BEFORE = "2026-09-01T00:00:00+00:00"
+
+
+def _semantic_roster(verdicts=("booked", "booked")):
+    """语义类用例的**自造** roster 夹具（与真册内容解耦）：名字 = REAL_BLOCKERS，
+    verdict 逐条给，戳取真名册最晚戳（保证 BASE_AFTER 严格晚于它）。"""
+    _, latest = _latest_stamp(_REAL_ENTRIES)
+    at, sha = latest["booked_at"], latest["booked_sha"]
+    return {n: {"verdict": v, "home": "ut home %s" % v, "note": "ut",
+                "booked_at": at, "booked_sha": sha}
+            for n, v in zip(REAL_BLOCKERS, verdicts)}
+
+
+#: 语义类用例默认吃这份自造册（两条 booked）
+SEMANTIC_ENTRIES = _semantic_roster()
+#: 时间证据断言的「戳」基准（真名册最晚戳，逐条带上）
+LATEST_BOOKED_AT, LATEST_BOOKED_SHA = (
+    _latest_stamp(_REAL_ENTRIES)[1]["booked_at"],
+    _latest_stamp(_REAL_ENTRIES)[1]["booked_sha"])
+
+
+def _real_roster_entries():
+    """语义类用例的 roster 入参（自造夹具；真名册只由 test_a1 读）。"""
+    return dict(SEMANTIC_ENTRIES)
 
 
 # ---------------- A. 名册归属纯判据（shared，UT 主面） ----------------
 
-def test_a1_real_roster_covers_the_incident_blockers():
-    """真场景复核（L1 读真名册文件）：实案两条拦面逐条在册，verdict 分别 booked/isolated。"""
-    e = _real_roster_entries()
-    assert REAL_BLOCKERS[0] in e and e[REAL_BLOCKERS[0]]["verdict"] == "booked", e.get(REAL_BLOCKERS[0])
-    assert REAL_BLOCKERS[1] in e and e[REAL_BLOCKERS[1]]["verdict"] == "isolated", e.get(REAL_BLOCKERS[1])
-    for v in e.values():
-        assert v["verdict"] in shared.KNOWN_RED_VERDICTS and v["home"].strip()
+def test_a1_real_roster_is_parsable_and_shaped():
+    """真名册（L1 读真文件）**只有一条形状断言**：可解析、verdict 合法、home/owner/
+    retire_when 齐备、且 booked 与 isolated 两类在册各 ≥1。
+
+    旧形把「两条实案 blocker 名」逐字钉死在本文件里——册子只缩不增（棘轮），清一次账
+    就碎一次（260929 实测 10 条红）。形状面留着（它是判据的输入契约），**内容面不再钉**：
+    语义面由自造夹具用例覆盖（见「夹具取材纪律」）。某类在册为空 = skip 并点名（不许
+    静默降级成「只查一类也算过」）。"""
+    e, raw = _real_roster()
+    assert isinstance(raw, dict) and isinstance(raw.get("entries"), list), type(raw)
+    assert e, "真名册解析结果为空"
+    for name, v in e.items():
+        assert v["verdict"] in shared.KNOWN_RED_VERDICTS, (name, v)
+        assert v["home"].strip(), name
+        # 260929 A 直修口径：每条挂账必须带 owner + retire_when（可追责、可撤账）
+        raw_by_name = {d.get("name"): d for d in raw["entries"] if isinstance(d, dict)}
+        row = raw_by_name.get(name) or {}
+        assert str(row.get("owner") or "").strip(), ("缺 owner", name)
+        assert str(row.get("retire_when") or "").strip(), ("缺 retire_when", name)
+    for v in ("booked", "isolated"):
+        if _SAMPLE[v] is None:
+            pytest.skip("真名册里已无 %s 类条目（清账收缩所致）——该类的语义面由自造夹具"
+                        "用例覆盖，本形状断言不降级" % v)
+        assert _SAMPLE[v] in e and e[_SAMPLE[v]]["verdict"] == v, _SAMPLE[v]
 
 
 def test_a2_roster_parsing_malformed_failclosed():
@@ -111,16 +186,16 @@ def test_a3_all_known_red_adopts_with_audit_anchor():
                                     ticket_base_source="ticket created (test)")
     assert a["adopt"] is True and a["why"] == "adopted"
     assert [k["name"] for k in a["known"]] == REAL_BLOCKERS and a["new"] == []
-    assert a["known"][0]["verdict"] == "booked" and a["known"][1]["verdict"] == "isolated"
+    assert a["known"][0]["verdict"] == "booked" and a["known"][1]["verdict"] == "booked"
     assert a["known"][0]["home"] and a["known"][1]["home"]
     for kw in ("ADOPTED", "zero new red", shared.KNOWN_RED_BASELINE_REL,
                "acceptance_walkthrough", REAL_BLOCKERS[0], REAL_BLOCKERS[1],
-               "booked", "isolated"):
+               "booked"):
         assert kw in a["note"], kw
     # 洞① 时间证据面：逐条戳进审计锚 + 基点具名 + 活基线不可得时明确「仅时间证据」
     assert a["stale"] == [] and a["stamps_ok"] is True
-    assert a["known"][0]["booked_at"] == "2026-09-25T15:26:54+08:00"
-    assert a["known"][0]["booked_sha"].startswith("c348c4c")
+    assert a["known"][0]["booked_at"] == LATEST_BOOKED_AT
+    assert a["known"][0]["booked_sha"] == LATEST_BOOKED_SHA.lower()
     for kw in ("basis 2: time evidence", BASE_AFTER, "ticket created (test)",
                "basis 3:", "UNAVAILABLE", "time evidence only"):
         assert kw in a["note"], kw
@@ -156,16 +231,30 @@ def test_a5_roster_unavailable_is_failclosed_and_named():
 
 
 def test_a6_startup_error_and_env_side_red_never_adopt():
-    """③④启动级 error（没检验到）与环境面红都不是「零新增红」，一律不采纳。"""
+    """③④启动级 error（没检验到）不是「零新增红」=一律不采纳；环境面红**必须具名**
+    （B2，260929 宿主令·语义变更）：**未具名**的环境面照旧拒绝（保守侧，无法具名就不
+    放行），**已具名**（`env_red` 非空）不再构成拒绝——采纳并在 note 里点名名单。
+
+    本条只改「具名环境面」那半边期望（旧断言写死「环境面一律拒」）；启动级 error
+    半边、畸形信号 fail-closed 半边（下面 `env_side_red="yes"` 那批）**一字未改**。"""
     e = _roster_payload(_real_roster_entries())
     a = blockers_known_red_adoption(REAL_BLOCKERS, e, run_error="supply assembly failed",
                                     ticket_base_at=BASE_AFTER,
                                     ticket_base_source="test")
     assert a["adopt"] is False and a["why"] == "startup-error"
     assert "Nothing was verified" in a["note"] or "nothing was verified" in a["note"]
-    a2 = blockers_known_red_adoption(REAL_BLOCKERS, e, env_side_red=True,
-                                     ticket_base_at=BASE_AFTER, ticket_base_source="test")
-    assert a2["adopt"] is False and a2["why"] == "env-side-red"
+    # 环境面未具名（缺 env_red / 空名单）⇒ 仍拒（B2 保守侧）
+    for unnamed in (None, []):
+        a2 = blockers_known_red_adoption(
+            REAL_BLOCKERS, e, env_side_red=True, env_red=unnamed,
+            ticket_base_at=BASE_AFTER, ticket_base_source="test")
+        assert a2["adopt"] is False and a2["why"] == "env-side-red", unnamed
+    # 环境面具名 ⇒ 不再构成拒绝（note 点名名单，env-face-named 记录面）
+    a2b = blockers_known_red_adoption(
+        REAL_BLOCKERS, e, env_side_red=True, env_red=["env-sc-one"],
+        ticket_base_at=BASE_AFTER, ticket_base_source="test")
+    assert "env-face-named" in a2b["note"] and "env-sc-one" in a2b["note"]
+    assert (a2b["adopt"], a2b["why"]) == (True, "adopted"), a2b["note"]
     # 畸形信号一律按「拦」的一侧读（不因畸形放行）——260926 复核缺口②：旧断言把
     # `env_side_red="yes"` 的 **fail-open** 固化成契约（docstring 写「按拦读」而代码读成
     # 「非环境面」），此处改按裁定钉 fail-closed 的一侧，并点名畸形值本身。
@@ -320,7 +409,8 @@ def test_b1_roster_activity_is_readonly_and_names_failures(tmp_path):
     """活动壳只读：真名册读得到 → 条目结构化；读不到/畸形 → error 非空且路径点名（不抛）。"""
     r = asyncio.run(activities.read_known_red_roster({"repo_root": str(REPO)}))
     assert r["ok"] is True and r["result"]["error"] == ""
-    assert set(r["result"]["entries"]) >= set(REAL_BLOCKERS)
+    # 条目面=**真名册的动态取样**（不钉名字：册子只缩不增，钉名必随清账碎）
+    assert set(r["result"]["entries"]) >= set(_REAL_ENTRIES)
     assert r["result"]["path"].endswith(shared.KNOWN_RED_BASELINE_REL)
     r2 = asyncio.run(activities.read_known_red_roster({"repo_root": str(tmp_path)}))
     assert r2["ok"] is True and r2["result"]["entries"] == {}
@@ -341,14 +431,20 @@ def test_b2_activity_is_registered_on_the_worker():
 def test_b3_receipt_carries_evidence_stamps_and_base_point(tmp_path):
     """260926 洞①：活动回执必须把**证据戳**与**开票基点**（base_ref 提交时刻）带出来，
     否则判据面根本判不了「登记早于本票」；解析不出来时具名（不静默、不猜）。"""
+    # 动态取样（册子只缩不增，不钉名字/不钉 sha/不钉时刻）：取一条真条目，用它的
+    # booked_sha 当 base_ref——「戳所指的那个提交」才是基点的校验面，写死 sha 与写死
+    # 名字同病（每次清账/换戳即碎）。取**最晚戳**那条，断言面最强。
+    probe_name, probe = _latest_stamp(_REAL_ENTRIES)
     r = asyncio.run(activities.read_known_red_roster(
-        {"repo_root": str(REPO), "base_ref": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"}))
+        {"repo_root": str(REPO), "base_ref": probe["booked_sha"]}))
     res = r["result"]
     assert r["ok"] is True and res["error"] == ""
-    e = res["entries"][REAL_BLOCKERS[0]]
-    assert e["booked_at"] == "2026-09-25T15:26:54+08:00"
-    assert e["booked_sha"].startswith("c348c4c")
-    assert res["base_at"] == "2026-09-25T15:26:54+08:00" and res["base_at_error"] == ""
+    e = res["entries"][probe_name]
+    assert e["booked_at"] == probe["booked_at"]
+    assert e["booked_sha"] == probe["booked_sha"]
+    # base_at=base_ref 提交时刻；与「戳所指提交」的提交时刻同源（不猜时区、不回退）
+    assert res["base_at"] and res["base_at_error"] == "", res
+    assert shared.evidence_ts_epoch(res["base_at"]) is not None, res["base_at"]
     assert all(v.get("booked_at") and v.get("booked_sha") for v in res["entries"].values())
     # 反例①：base_ref 解析不出（不存在的 ref）→ 具名 error，条目照常返回（回落 created）
     r2 = asyncio.run(activities.read_known_red_roster({"repo_root": str(REPO),
@@ -545,10 +641,15 @@ def test_c5_both_branches_adopt_before_rerun_and_advance():
 
 
 def test_c6_adoption_note_lands_on_ticket_face():
-    """②名册不可用/本票红的具名原因随 handoff 上票面（两分支共四处：重跑×2 + 豁免×2）。"""
+    """②名册不可用/本票红的具名原因随 handoff 上票面（两分支共四处：重跑×2 + 豁免×2）。
+
+    B2（260929）在**不删不改原四处**的前提下，两支各补一处「环境面/已知红面，不重跑」
+    handoff（同样带 adoption_note，具名原因不因归宿改道而丢）——故下面计数锚由 4 改
+    6（原四处仍在：== 4 的语义改为 >= 4 且 == 6 的当前形态）。"""
     assert SRC.count("adoption_note") >= 8, SRC.count("adoption_note")
     assert SRC.count('self._log("tests-fault 判决未采纳：%s" % adoption_note)') == 2
-    assert SRC.count('(" " + adoption_note) if adoption_note else ""') == 4
+    assert SRC.count('(" " + adoption_note) if adoption_note else ""') == 6
+    assert SRC.count("环境面/已知红面，不重跑") == 2      # B2 新增两处（串行/平行同构）
 
 
 # ---------------- D. ③外部处置不击穿上限 ----------------

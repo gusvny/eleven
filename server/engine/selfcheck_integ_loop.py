@@ -119,10 +119,19 @@ ok(r.error == "" and r.ran == 2 and r.passed == 1 and r.failed == 1,
    "计数：2 跑 1 过 1 败")
 
 
-ok(len(r.details) == 3 and r.details[0]["exit"] == 0 and r.details[1]["exit"] == 1
-   and "输出尾段" in r.details[1]["output_tail"]
-   and r.details[2]["name"] == "__pool_exclude__",
-   "明细逐条带 exit 与尾段（t260913-03 起末条恒为 __pool_exclude__ 少跑点名条）")
+# B2 复核（260929）：断言「末条恒为 __pool_exclude__」是**存量红**（`main@dff62dd` 的
+# 干净导出跑本自检：66 passed / 1 failed，唯一未过即此条）——根因不在 B2，而在后续
+# 两次详情面追加：t260922-12 加 `__ledger__`（台账回执）、t260925-12 加
+# `__gate_timings__`（闸段分相），两者都排在 `__pool_exclude__` 之后，故「末条」断言
+# 早已 rot。修法收紧成不依赖次序的不变式：恰一条 `__pool_exclude__`、它**在场景行之后**、
+# 场景两行的 exit/尾段逐项不变——「少跑必须点名」的守护面一字不减。
+_scen_rows = [d for d in r.details if not str(d["name"]).startswith("__")]
+_pool_rows = [d for d in r.details if d["name"] == "__pool_exclude__"]
+ok(len(_scen_rows) == 2 and _scen_rows[0]["exit"] == 0 and _scen_rows[1]["exit"] == 1
+   and "输出尾段" in _scen_rows[1]["output_tail"]
+   and len(_pool_rows) == 1
+   and r.details.index(_pool_rows[0]) > r.details.index(_scen_rows[-1]),
+   "明细逐条带 exit 与尾段（场景行在前，__pool_exclude__ 少跑点名条恰一条且在场景行后）")
 
 # t260904-12 three-state window wording: before the section-2 change (verify_lane
 # counting env_fail), an ENV_FAIL (exit 2) showed up as an err state (verify_lane
@@ -258,6 +267,21 @@ ok("reprobe_red_scenarios," in src and "_tests_round_account(" in src,
    "探针活动接线＋两分支共用计轮判定（单写者）")
 ok("cur_integ = ir" in src and "cur_integ = None" in src,
    "本轮机械回执快照赋值（翻译处）与段入口清零（R3）")
+# B2（260929 宿主令）：集成门判据收口结构面——段 status 摘 env_fail、具名通道接线、
+# 豁免轮归宿（环境面/已知红面 → acceptance，不重跑整轮；只有新增产品红才重跑）
+_status_expr = '"status": "failed" if (ir.error or ir.failed) else "ok"'
+ok(_status_expr in src,
+   "段 status 失败条件已摘 env_fail（环境红不拦·具名记录；B2）")
+ok("env_fail" not in _status_expr and "if (ir.error or ir.failed or ir.env_fail)" not in src,
+   "负向断言：旧的 env_fail 版段 status 条件已不存在（防两写者并存）")
+ok("_tests_env_red_names(" in src and "_env_red_face_note(" in src
+   and "_tests_product_red_names(" in src,
+   "环境红具名通道读面/票面注记/产品红减法（B2 判据单写者）在场")
+ok("_acceptance_without_rerun(" in src
+   and src.count("if not counted and self._acceptance_without_rerun(cur_integ):") == 2,
+   "豁免轮归宿：环境面/已知红面不重跑整轮（两分支同构；只有新增产品红才重跑）")
+_envred_names = "｜环境红（不拦·具名）："
+ok(_envred_names in src, "环境红具名注记串在场（前 5 个 + 总数）")
 
 section("F parse_review_plan_verdict / review_plan_route（t260903-02 三态附条件放行）")
 from shared import parse_review_plan_verdict, review_plan_route  # noqa: E402

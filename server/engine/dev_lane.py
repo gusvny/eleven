@@ -506,6 +506,18 @@ FLOW_BRIEF = {
         "报告备注，**禁止以「重跑一轮等它绿」当收敛手段**：重跑已知红不会绿、只会烧"
         "轮次到超限转人工；只有本票新增红（blockers 非空）且落在测试面内才 tests-fault，"
         "实现面新增红才 code-fault）；"
+        "环境红具名口径（B2，宿主 260929 令）：回执的 **env_red 是环境红的具名通道**"
+        "（来源=闸的权威判决面 not-checked × external），它=供给面/共享台面的红（缺环境、"
+        "台跑不起来），**不是 tests-fault 的迭代理由**——修复动作是补供给声明/补环境，"
+        "不是回工重跑整轮（重跑环境红不会绿，只会烧 ~30 分钟一轮并推票到假封）。"
+        "本票面绿（无本票新增产品红）且余红均为 env_red 具名环境红/在册既有红时："
+        "**判 pass**，并把 env_red 里的红名逐条写进报告备注（引擎侧对具名环境红轮不再"
+        "重跑整轮，直接进验收——你判 tests-fault 只会被当环境面/已知红面收口）。"
+        "只有**本票新增产品红**才进迭代：红项落在测试面内 → tests-fault（测试面）；"
+        "实现面新增红 → code-fault（实现面）。**禁止以重跑等环境红变绿当收敛手段**"
+        "（env_red 不是自报 exit=2、也不从 ENV_FAIL 文本行反推——只认闸回执的具名通道）。"
+        "env_fail>0 而 env_red 名单为空/缺键（老回执形态）=环境面**未具名**：按保守侧"
+        "处置（不得凭「环境面」口头放行，回执无具名即无豁免）。"
         "verdict=tests-fault 测试集自身问题（环境/前提/断言错）→ 红项落在测试面内"
         "（tests/ 目录、test_*.py、sc_* 场景脚本、场景登记表、本票场景目录）才**你直接迭代修正**"
         "（改动随本步落盘），summary 写清改了什么、为什么是测试的问题；红项属共享资产/受保护真源"
@@ -520,8 +532,11 @@ FLOW_BRIEF = {
         "放行只认收口全量跑（你判 pass 后引擎机械补全量跑复核零新增红，有新增红则判决"
         "作废回你重裁）。"
         "归因纪律（t260904-12 三态判据）：先固定问句「环境面还是产品面？」——"
-        "ENV_FAIL（exit 2，缺环境）归 tests-fault 供给面：修复=补测试环境/供给声明"
-        "（乙段 verify.yaml supply），绝不把环境红记成代码问题；FAIL（exit 1）归产品。"
+        "环境红（回执 **env_red 具名名单**里的名字；判据面=闸的 not-checked × external，"
+        "**只认具名通道、绝不采信场景自报 exit=2 / ENV_FAIL 文本行**）归供给面："
+        "修复=补测试环境/供给声明（乙段 verify.yaml supply），绝不把环境红记成代码问题、"
+        "也绝不把「重跑整轮」当处置（重跑不补供给）。**产品红（FAIL exit 1 / 闸拦）归产品**；"
+        "本票新增产品红才进两态（tests-fault / code-fault），具名环境红与在册既有红不进迭代面。"
         "乙段（verify_lane env_fail 计数）落地前环境红以 err/退出码形态出现，按输出尾段"
         "归因。窗口期（供给声明未落地）UI 票过闸只走 break-glass 人显式签字留痕，"
         "不许以「环境面」口头豁免放行。"
@@ -1093,11 +1108,102 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             return False
         return tests_supply_assembly_error(getattr(cur_integ, "error", "") or "")
 
+    def _tests_env_red_names(self, cur_integ):
+        """B2（宿主 260929 令）环境红**具名**名单读面——唯一认的通道=闸回执的
+        `env_red`（B1 已落：来源=闸的权威判决面 `not_checked × external`）。
+
+        红线（本函数是那条红线的单点）：**绝不**采信场景自报 exit=2、**绝不**从
+        `ENV_FAIL [...] exit=N` 文本行反推——那条面已知与闸判决不一致（spawn 失败
+        -8 执行器记 env、闸按败计）。
+
+        返回 (names, channel_ok)：channel_ok=True 当且仅当 `env_red` 键在场且形状
+        可读（list）；缺键/畸形/老回放=False（调用方退回旧口径，逐字节兼容老行为）。
+        名字逐条 str(非空) 化，去重保序。不抛。"""
+        if cur_integ is None:
+            return [], False
+        raw = getattr(cur_integ, "env_red", None)
+        if not isinstance(raw, list):
+            return [], False
+        names = []
+        for x in raw:
+            nm = str(x or "").strip()
+            if nm and nm not in names:
+                names.append(nm)
+        return names, True
+
+    def _env_red_face_note(self, names, *, limit=5) -> str:
+        """环境红具名票面注记（B2）：`｜环境红（不拦·具名）：a、b、c…（共 11）`。
+        名单为空/畸形=空串（票面不加这一段）。只读展示面，不进任何判定。"""
+        if not isinstance(names, (list, tuple)):
+            return ""
+        got = [str(x).strip() for x in names if str(x or "").strip()]
+        if not got:
+            return ""
+        shown = "、".join(got[:limit])
+        return "｜环境红（不拦·具名）：%s%s（共 %d）" % (
+            shown, "…" if len(got) > limit else "", len(got))
+
+    def _acceptance_without_rerun(self, cur_integ) -> bool:
+        """B2（260929 宿主令）豁免轮归宿判据：本轮是否属于「环境面/已知红面」——
+        属于则**不再重跑整轮**，直接进验收；只有**本票新增产品红**（不在具名环境红
+        名单里、且闸 blockers 非空）才重跑。
+
+        口径（与 `_tests_env_side_red` 同源，不另造红绿判据）：
+          · 环境面（含装配级供给失败形态）= True（env_fail>0 且红项已被具名 env_red
+            整批吸收，见 `_tests_env_side_red`）；
+          · 否则，**产品红名单为空**且闸 blockers 显式为空（isinstance 校验，缺席/畸形
+            不豁免——保守计轮）且闸有红面计数（env_fail>0 或 failed>0；零红全绿轮由
+            `_tests_round_account` 的 known_red 车道处置，不归本判据）= 零新增红
+            （全属基线既有欠账/外部环境记录面）= True；
+          · 其余（任何**产品红名单非空**——含「名单盖不住那几条」的未具名产品红、
+            blockers 缺席或非空、红项名单畸形）= False → 照旧重跑整轮。
+        **具名通道盖不住的产品红一律重跑**（红线：任何红都不许被静默）——本判据只对
+        「红面已被具名/在册面解释干净」的轮放行。
+        调用点在 `if not counted:` 分支内，故 jitter 形态不会走到这里（仍走原重跑）。"""
+        if cur_integ is None:
+            return False
+        if self._tests_env_side_red(cur_integ):
+            return True
+        try:
+            env_fail = int(getattr(cur_integ, "env_fail", 0) or 0)
+            failed = int(getattr(cur_integ, "failed", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        blockers = getattr(cur_integ, "blockers", None)
+        return (not self._tests_product_red_names(cur_integ)
+                and isinstance(blockers, list) and not blockers
+                and (env_fail > 0 or failed > 0))
+
+    def _tests_product_red_names(self, cur_integ):
+        """产品红名单（B2）：`_tests_red_names` 结果**减去**环境红具名名单——
+        环境红不再被误当产品红（送去定点复跑/计轮都是白烧）。
+
+        口径（按具名通道分区）：
+          · 通道可读（env_red 键在场）⇒ 逐名减法；被减去的那批只算环境面。
+          · 通道缺席/畸形（老回放）⇒ **逐字节退回旧口径**（名单=原红项名单，
+            环境面判据也退回旧口径，见 `_tests_env_side_red`）——保守，从不放走产品红。"""
+        names = self._tests_red_names(cur_integ)
+        env_names, _ok = self._tests_env_red_names(cur_integ)
+        if not env_names:
+            return names
+        env_set = set(env_names)
+        return [n for n in names if n not in env_set]
+
     def _tests_env_side_red(self, cur_integ) -> bool:
-        """本轮红项是否全在环境面（机械口径，t260910-13；t260917-09 gen11 扩口径）：
-        场景级=产品红 0＋闸拦 0＋环境红 ≥1；装配级=供给装配失败（见
-        _tests_supply_assembly_fail）。cur_integ 缺席（旧回放/异常路径）=False
-        （保守计轮）。"""
+        """本轮红项是否全在环境面（机械口径，t260910-13；t260917-09 gen11 扩口径；
+        B2 260929 改按**具名通道**分区）：场景级=产品红整批被 `env_red` 具名名单
+        吸收（逐名减法后名单空/子集）＋闸拦 0＋环境红 ≥1；装配级=供给装配失败
+        （见 _tests_supply_assembly_fail）。cur_integ 缺席（旧回放/异常路径）=False
+        （保守计轮）。
+
+        B2 语义变更的理由（宿主 260929 令）：混合轮（如「11 败 + 11 环境红」）在旧
+        口径下产品红计数 `failed ≠ 0` 恒成立 → 环境面识别不出 → 保守计轮 → 每轮烧
+        ~30 分钟整轮套件、5–6 轮后假封。新口径用**具名通道**把环境红逐名摘出去，
+        摘不动的（无名单/名单盖不住产品红）一律退回旧口径保守计轮——**任何红都不许
+        被静默**：具名通道缺席时宁可多计一轮，也不把未具名的红当环境面放行。
+
+        `env_fail>0 但 env_red 缺键/空` ⇒ 旧保守行为（`failed==0` 才认环境面）；
+        `env_red` 非空 ⇒ `failed>0` 的混合轮也能识别（含**全条**具名的前提）。"""
         if cur_integ is None:
             return False
         try:
@@ -1106,16 +1212,35 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         except (TypeError, ValueError):
             return False
         blockers = getattr(cur_integ, "blockers", None) or []
-        if failed == 0 and not blockers and env_fail > 0:
-            return True
+        # 闸拦名单非空=有闸级红项（不在环境面）——环境面判据不成立。
+        if not blockers and env_fail > 0:
+            env_names, channel_ok = self._tests_env_red_names(cur_integ)
+            if channel_ok and env_names:
+                # 具名通道在场：产品红 = 红项名单 − 环境红名单；减法后仍有名字
+                # （含「failed≠0 但一条都没被具名吸收」的覆盖不足形态）=产品红仍在。
+                return not self._tests_product_red_names(cur_integ)
+            # 通道缺席/畸形（老回放）⇒ 逐字节退回旧口径。
+            if failed == 0:
+                return True
         return self._tests_supply_assembly_fail(cur_integ)
 
     def _tests_red_names(self, cur_integ):
         """红项名单（C4 单一来源）：details exit≠0 逐案名 ∪ blockers 闸拦名单，
         剔除 __pool_exclude__/__gate_blockers__ 合成条目（前缀 __ 识别）。两源皆缺
-        或畸形=空名单（调用方保守计轮，不发探针——绝不把「解析不出」当「无红」）。"""
+        或畸形=空名单（调用方保守计轮，不发探针——绝不把「解析不出」当「无红」）。
+
+        B2（260929）：**再剔除 `env_red` 具名名单里的名字**——环境红不该被送去定点
+        复跑（白跑一趟），也不该推进「本轮红项」的抖动探针。具名通道缺席/畸形时只在
+        原名单上做「无操作」（先摘出的那一步没有名单可摘），老回放口径不变。
+
+        两名单位（blockers 与 env_red）互斥的**理由**（据此才敢在两侧同做减法）：两者
+        同源于闸的逐条 verdicts，一条判决只能落一个 verdict block（闸拦）或
+        not_checked_external（环境记录），同名两态除非同一用例在闸侧被记两次。真出现
+        同名时，闸拦面（`_arb_json` 的 blockers、采纳判据）仍然点名该名，不被静默。"""
         if cur_integ is None:
             return []
+        env_names, _ok = self._tests_env_red_names(cur_integ)
+        env_set = set(env_names)
         names = []
         for d in (getattr(cur_integ, "details", None) or []):
             if not isinstance(d, dict):
@@ -1125,11 +1250,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             except (TypeError, ValueError):
                 ex = 0
             nm = str(d.get("name") or "")
-            if nm and ex != 0 and not nm.startswith("__") and nm not in names:
+            if nm and ex != 0 and not nm.startswith("__") and nm not in names \
+                    and nm not in env_set:
                 names.append(nm)
         for b in (getattr(cur_integ, "blockers", None) or []):
             b = str(b)
-            if b and not b.startswith("__") and b not in names:
+            if b and not b.startswith("__") and b not in names \
+                    and b not in env_set:
                 names.append(b)
         return names
 
@@ -1252,6 +1379,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             names, receipt.get("payload"), roster_error=receipt.get("error") or "",
             run_error=(getattr(cur_integ, "error", "") if cur_integ is not None else ""),
             env_side_red=self._tests_env_side_red(cur_integ),
+            env_red=(getattr(cur_integ, "env_red", None)
+                     if cur_integ is not None else None),
             ticket_base_at=base_at, ticket_base_source=base_src,
             live_baseline_red=lb_red, live_baseline_green=lb_green,
             live_baseline_source=lb_src)
@@ -2757,12 +2886,16 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 _ms_sum = ("｜主同步=%s" % _ms_note) if _ms_note else ""
                 _ms_evi = ("【主同步】%s（时点=机械验证前；同步与跑闸同轮直线衔接，"
                            "未复用旧报告）\n" % _ms_note) if _ms_note else ""
+                # B2（260929 宿主令）：环境红**具名**进票面/交接（前 5 个 + 总数；名单空
+                # =不加这段）。环境红不再是失败面（status 判据已摘 env_fail）——具名是
+                # 「不拦但不许静默」的兑现：票面答得出红的是哪几条，重跑不再当收敛手段。
+                _env_note_face = self._env_red_face_note(ir.env_red)
                 self.results["run_integration_tests"] = {
-                    "status": "failed" if (ir.error or ir.failed or ir.env_fail) else "ok",
-                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s"
+                    "status": "failed" if (ir.error or ir.failed) else "ok",
+                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s"
                                % (ir.ran, ir.passed, ir.failed, ir.env_fail,
                                   ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
-                                  _ms_sum),
+                                  _env_note_face, _ms_sum),
                     "report": "", "deliverables": [], "files_changed": [],
                     "evidence": _ms_evi + json.dumps(ir.details, ensure_ascii=False)[:4000],
                     "gen": 0}
@@ -2771,10 +2904,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                                     "过" if d.get("exit") == 0 else "败")
                                                 for d in ir.details))
                 self._handoff("run_integration_tests",
-                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s"
+                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s"
                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
                                  ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
-                                 _ms_sum))
+                                 _env_note_face, _ms_sum))
                 # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
                 # at the end of the JSON, so a head slice would squeeze out the failure
                 # details; keeping the tail keeps them
@@ -2790,6 +2923,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 _arb_json = json.dumps({"ran": ir.ran, "passed": ir.passed,
                                         "failed": ir.failed, "error": ir.error,
                                         "env_fail": ir.env_fail,
+                                        # B2（260929）：环境红具名名单进仲裁面——
+                                        # 判词据此把环境面与产品面分开归因（B1 已落的
+                                        # 只读字段，不改形状、不改任何判定）。
+                                        "env_red": list(getattr(ir, "env_red", None) or []),
                                         "blockers": ir.blockers,
                                         "affiliation_confidence":
                                             ir.affiliation_confidence,
@@ -2830,6 +2967,32 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                "同步与跑闸同轮直线衔接，未复用旧报告）" % _ms_note)
                     arb_ctx += "\n" + _ms_ctx
                     acc_ctx += _ms_ctx + "\n"
+                # B2（260929 宿主令）：环境面归因上下文——具名环境红是**供给/共享台面**，
+                # 不是 tests-fault 的迭代理由（修复=补供给声明/环境，不是回工重跑整轮）；
+                # 具名/未具名两态分别点名，防「凭环境面口头豁免」与「重跑等它绿」两坑。
+                # 同样追加在装配块之后，不挤进 [-4000:] 尾保窗（静态 pin 纪律同上）。
+                _env_red_names_ctx = list(getattr(ir, "env_red", None) or [])
+                if _env_red_names_ctx:
+                    _envf_ctx = (
+                        "【环境红（B2 具名通道，不拦·不进迭代面）】%s——判据面=闸回执 "
+                        "env_red（not-checked × external），共 %d 条。环境红=供给/共享台面，"
+                        "修复动作是补供给声明/补环境，**不是**回工重跑整轮（重跑环境红不会绿）；"
+                        "本票面绿且余红均为此名单内/在册既有红时判 verdict=pass，并把红名"
+                        "写进报告备注；只有本票新增产品红（不在本名单、闸拦 blockers 非空）"
+                        "才进 tests-fault/code-fault。"
+                        % (self._env_red_face_note(_env_red_names_ctx) or
+                           "（具名名单同上）", len(_env_red_names_ctx)))
+                elif int(getattr(ir, "env_fail", 0) or 0) > 0:
+                    _envf_ctx = (
+                        "【环境红未具名（老回执形态）】本轮环境红计数 %d 但 env_red 具名名单"
+                        "为空/缺键——**不得凭「环境面」口头豁免放行**：按保守侧处置（无具名"
+                        "即无豁免，红项仍须逐条归因）。"
+                        % int(getattr(ir, "env_fail", 0) or 0))
+                else:
+                    _envf_ctx = ""
+                if _envf_ctx:
+                    arb_ctx += "\n" + _envf_ctx
+                    acc_ctx += _envf_ctx + "\n"
                 if workflow.patched(ARB_ACC_PARALLEL_PATCH_ID):
                     # Speedup 2: arbitration ∥ acceptance walkthrough as a parallel fork
                     # (no data dependency, saves one serial stretch)
@@ -3028,6 +3191,28 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                             MAX_TESTS_EXEMPT_ROUNDS, adoption_note))):
                                 arb_done = False
                                 arb_res = None
+                            continue
+                        # B2（260929 宿主令）：豁免轮归宿收口——**只有本票新增产品红**
+                        # 才重跑整轮。环境面/已知红面（红项已被具名 env_red 吸收、或闸
+                        # blockers 空=零新增红）不再无脑重跑：重跑不会让环境红变绿
+                        # （供给/共享台面），只烧 ~30 分钟一轮 ×5–6 轮后假封。红项一律
+                        # 具名（下条 handoff 逐条点名），绝不静默。上限机制
+                        # （MAX_TESTS_EXEMPT_ROUNDS 等）保留为兜底，语义不废。
+                        if not counted and self._acceptance_without_rerun(cur_integ):
+                            self._finish("arbitrate", by="integration-agent",
+                                         evidence=res.evidence or res.summary)
+                            self._handoff(
+                                "arbitrate",
+                                "环境面/已知红面，不重跑（%s）：%s%s%s"
+                                % (note, (res.summary or "")[:80],
+                                   self._env_red_face_note(
+                                       getattr(cur_integ, "env_red", None)),
+                                   (" " + adoption_note) if adoption_note else ""),
+                                report=res.report)
+                            self._log("tests-fault 环境面/已知红面（%s）——不重跑整轮，"
+                                      "直接进验收（红项具名）" % note)
+                            tests_streak = True
+                            phase = "acceptance"
                             continue
                         if not counted:
                             # 假封防护（要求③）：该轮不计入——留痕点名原因，直接重跑
@@ -3441,6 +3626,24 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                             MAX_TESTS_EXEMPT_ROUNDS, adoption_note))):
                                 arb_done = False
                                 arb_res = None
+                            continue
+                        # B2（260929 宿主令）：与串行分支同构——环境面/已知红面不再重跑
+                        # 整轮，直接进验收；只有本票新增产品红才重跑（理由见串行分支注）。
+                        if not counted and self._acceptance_without_rerun(cur_integ):
+                            self._finish("arbitrate", by="integration-agent",
+                                         evidence=arb_res.evidence or arb_res.summary)
+                            self._handoff(
+                                "arbitrate",
+                                "环境面/已知红面，不重跑（%s）：%s%s%s"
+                                % (note, (arb_res.summary or "")[:80],
+                                   self._env_red_face_note(
+                                       getattr(cur_integ, "env_red", None)),
+                                   (" " + adoption_note) if adoption_note else ""),
+                                report=arb_res.report)
+                            self._log("tests-fault 环境面/已知红面（%s）——不重跑整轮，"
+                                      "直接进验收（红项具名）" % note)
+                            tests_streak = True
+                            phase = "acceptance"
                             continue
                         if not counted:
                             self._handoff("arbitrate",
