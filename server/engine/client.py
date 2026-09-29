@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from temporalio.client import Client
 from temporalio.common import SearchAttributeKey
 
+import shared  # t260929-18：REASON_CHAIN_MAX_DEPTH / REASON_MAX_CHARS 常量别名源
 from shared import (
     AUTH_KINDS,
     CLOSE_OUT_PREFIX,
@@ -1745,10 +1746,11 @@ async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEM
 # 宁可显失败不可显在跑（诚实缺省）。空串=describe 缺 status 的畸形形态，不判失败
 # （保持既有行形状，不新增谎报面）。
 _EXEC_ALIVE_OK = ("RUNNING", "COMPLETED", "CONTINUED_AS_NEW")
-# face 原因提取上限：__cause__ 链最多下钻 3 级、消息截 500 字（Temporal 的
-# WorkflowFailureError→ActivityError→ApplicationError 链实测 ≤3 级见到人话）。
-TERMINAL_FACE_CAUSE_DEPTH = 3
-TERMINAL_FACE_REASON_MAX_CHARS = 500
+# face 原因提取上限（t260929-18 起为 shared.REASON_CHAIN_MAX_DEPTH /
+# shared.REASON_MAX_CHARS 的别名——单一定义点在 shared，防两处漂移；本文件既有
+# 消费方沿用旧名不动）。深度 3→8 的放宽语义：取封顶内能走到的最深一层真实消息。
+TERMINAL_FACE_CAUSE_DEPTH = shared.REASON_CHAIN_MAX_DEPTH
+TERMINAL_FACE_REASON_MAX_CHARS = shared.REASON_MAX_CHARS
 # 终态执行 result() 历史回放的单次等待上限（秒）：服务端直读历史，正常亚秒；
 # 超时=读不到原因（显式「原因不可得」），绝不为一张死票拖住详情回执。
 TERMINAL_FACE_RESULT_TIMEOUT_S = 8.0
@@ -1828,20 +1830,11 @@ def _close_health_of(exec_status: str, face: Optional[Dict[str, Any]] = None,
 def _failure_reason_of(exc: Optional[BaseException]) -> str:
     """从 result() 异常链提取失败原因（正源=Temporal 工作流执行失败信息）。
 
-    沿 __cause__ 向下最多 TERMINAL_FACE_CAUSE_DEPTH 级，取能走到的最深一层消息、
-    截 TERMINAL_FACE_REASON_MAX_CHARS 字；__cause__ 是非异常对象（畸形/桩）就地停；
-    全链零消息 → ''（调用方显式写「原因不可得」，绝不编造）。纯函数零 IO。"""
-    cur = exc
-    depth = 0
-    while cur is not None and depth < TERMINAL_FACE_CAUSE_DEPTH:
-        nxt = cur.__cause__
-        if not isinstance(nxt, BaseException):
-            break
-        cur = nxt
-        depth += 1
-    if cur is None:
-        return ""
-    return str(cur).strip()[:TERMINAL_FACE_REASON_MAX_CHARS]
+    t260929-18 起委托 shared.chain_failure_reason（单一定义点，含 .cause 优先
+    遍历/成环守卫/8 层封顶/500 字截断）；本函数只取其消息分量，全链零消息 → ''
+    （调用方显式写「原因不可得」，绝不编造）。纯函数零 IO。"""
+    found = shared.chain_failure_reason(exc)
+    return found[2] if found else ""
 
 
 def _terminated_reason_of(exc: Optional[BaseException]) -> str:

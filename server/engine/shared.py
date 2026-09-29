@@ -5929,20 +5929,92 @@ def classify_worker_termination(exc) -> bool:
     return False
 
 
+# ---- 异常链消息提取（t260929-18：票面/回执失败文案的唯一真源走法）----
+# 正源=client.py _failure_reason_of 的消息下钻纪律（仓内唯一「取消息」实现），
+# 守卫补齐 classify_worker_termination 的双属性遍历（.cause 优先，Temporal
+# ActivityError 暴露 .cause；__cause__ 兜底）与成环守卫。client.py 的
+# TERMINAL_FACE_CAUSE_DEPTH / TERMINAL_FACE_REASON_MAX_CHARS 现为下列常量的别名
+# （单一定义点，防两处漂移）。深度口径=classify 同款 8 层封顶：取**封顶内能走到的
+# 最深一层真实消息**（从不编造），链被截断不是「不可得」——真实消息在手不谎称没有。
+REASON_CHAIN_MAX_DEPTH = 8
+REASON_MAX_CHARS = 500
+
+
+def chain_failure_reason(exc):
+    """沿异常链取最深一层非空消息（纯函数，stdlib-only，replay 安全）。
+
+    返回 (level, type_name, message)：level=距最外层的层数（0=最外层本身），
+    message 已截 REASON_MAX_CHARS。遍历 .cause 优先、__cause__ 兜底；下一个不是
+    异常（非异常对象/None）、成环（id 复见）、超深（REASON_CHAIN_MAX_DEPTH 封顶）
+    就地停——停前已收集的最深非空消息照常返回。全链没有任何层携带非空消息 →
+    None（调用方显式写「根因不可得」，绝不编造）。鸭子类型遍历（getattr），
+    本模块不 import temporalio（shared.py 须保持 stdlib-only）。"""
+    seen = set()
+    depth = 0
+    best = None            # (level, type_name, message) 最深非空消息
+    cur = exc
+    while cur is not None and depth < REASON_CHAIN_MAX_DEPTH:
+        key = id(cur)
+        if key in seen:    # 成环=链面已闭环，停在已见层，不无限走
+            break
+        seen.add(key)
+        msg = str(cur).strip()
+        if msg:
+            # 逐层覆盖：最后写入的非空消息=已走到的最深一层（不是最外层）。
+            best = (depth, type(cur).__name__, msg[:REASON_MAX_CHARS])
+        nxt = getattr(cur, "cause", None)
+        if not isinstance(nxt, BaseException):
+            nxt = getattr(cur, "__cause__", None)
+        if not isinstance(nxt, BaseException):
+            break          # 链断（含 cause 挂野对象）：就地停
+        cur = nxt
+        depth += 1
+    return best
+
+
+def exception_chain_note(exc) -> str:
+    """失败文案的「根因」后缀（主文案已含最外层消息时拼在后面）。
+
+    链上存在更深层非空消息 → 「；根因（链上第 N 层 Type）：消息」；最外层已是
+    最深消息（level 0，防同一句打印两遍）或全链无消息 → ''（调用方文案原样，
+    不加空尾巴、不编造）。纯函数，供 dev_lane 侧通道与 format_agent_stage_failure
+    共用同一走法。"""
+    found = chain_failure_reason(exc)
+    if not found or found[0] == 0:
+        return ""
+    return "；根因（链上第 %d 层 %s）：%s" % found
+
+
 def format_agent_stage_failure(ticket_id, stage_id, exc, gen=None) -> str:
     """agent 段活动异常 → 票面 blocked 文案（全部 catch 位的唯一出口）。
 
     worker 停机致取消 → 「worker 被外部终止（停机/重载），活动已取消（票 X 段 Y
-    第 N 次）」——绝不与限流/传输/代码故障混淆（t260916-29 要求②）；其余逐字维持
-    旧文案「agent 活动故障（已重试）：<类型>: <信息>」。本函数只改文案不改控制流，
-    对在途实例 replay 安全；改控制流的重跑兜底走 retry_once_on_worker_termination
-    （patched 门内）。gen=None 省略次数字段（并行边等不便取代数的点位）。
+    第 N 次）」——绝不与限流/传输/代码故障混淆（t260916-29 要求②），该分支恒先于
+    链下钻判（reverse lock）；其余：最外层类型+消息保底，链上有更深层非空消息
+    （Temporal ActivityError 包住的真实故障）→ 追加「；根因（链上第 N 层 Type）：消息」
+    （t260929-15：票面必须看到活动真实报错，不能只剩「Activity task failed」壳）。
+    无更深层消息（根=最外层）→ 逐字维持旧文案「agent 活动故障（已重试）：<类型>:
+    <信息>」，防同句双打；全链无消息 → 追加「根因不可得」（绝不编造）。本函数
+    只改文案不改控制流，对在途实例 replay 安全；改控制流的重跑兜底走
+    retry_once_on_worker_termination（patched 门内）。gen=None 省略次数字段
+    （并行边等不便取代数的点位）。
     """
     if classify_worker_termination(exc):
         gen_part = "" if gen is None else "，第 %s 次" % gen
         return ("worker 被外部终止（停机/重载），活动已取消（票 %s 段 %s%s）"
                 % (ticket_id, stage_id, gen_part))
-    return "agent 活动故障（已重试）：%s: %s" % (type(exc).__name__, exc)
+    outer = "agent 活动故障（已重试）：%s: %s" % (type(exc).__name__, exc)
+    if not isinstance(exc, BaseException):
+        # 非异常输入（None/桩）：不进链下钻，逐字维持旧文案（老语义字节兼容）。
+        return outer
+    found = chain_failure_reason(exc)
+    if found is None:
+        # 全链没有任何层带消息：显式「不可得」，不编造。
+        return outer + "；根因不可得（异常链无层携带可读消息）"
+    if found[0] == 0:
+        # 根=最外层（消息已在主文案里）：不加「根因」段，防同句双打。
+        return outer
+    return outer + "；根因（链上第 %d 层 %s）：%s" % found
 
 
 async def retry_once_on_worker_termination(run_once, *, gate, on_retry=None):

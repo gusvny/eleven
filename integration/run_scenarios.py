@@ -77,6 +77,13 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t260929-18: 票面失败文案携带异常链真实消息（agent 段故障不再只剩「Activity task failed」包装） ----
+    ("t260929-18-face-reason-real-wrap",
+     "票面失败文案×真实 Temporal 包裹路（t260929-18，灰盒 L3，本机测试服务零 docker 零碰生产，工单 ACCEPTANCE 主面）：全部子用例经真实 Worker 真实执行 stub 活动、异常由 SDK 真实包裹成 ActivityError（工单明令禁止手搓 ActivityError+cause 顶替真路），工作流侧走生产唯一出口 format_agent_stage_failure：A 活动 raise RuntimeError(可行动 detail)（t260929-15 同形）→ 文案含 detail 且点名根因类型 RuntimeError、外层 ActivityError 如实在场（A1）；包装串话术仍在但不再是唯一内容（A2）；同形 history 再跑同文案=确定性契约（A3，要求②）；B 反向锁 ApplicationError(type=worker_terminated) → 「worker 被外部终止…」专用文案赢过链挖掘、不出现包装话术（B，t260916-29 契约）；C 零消息活动失败 → 不炸、绝不编造（实测定性：Temporal 服务端对空消息活动失败自动填占位消息「Application error」，真实链永不为空，「空消息→显式不可得」在真路不可达，该面由场景② M5 承接，占位行为作为发现上报）。intent 分工：developer L1 UT=formatter 纯函数矩阵（白盒）；场景②=SDK 造不出的畸形链契约面；本条=SDK 真包裹语义（UT 桩钉不住，正是本票缺陷原形）。temporalio/引擎 venv 缺席或本机测试服务起不来=ENV_FAIL exit 2；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260929-18/sc_face_failure_reason_real_wrap.py", "ro", "serial"),
+    ("t260929-18-face-reason-malformed-matrix",
+     "票面失败文案×畸形链契约面（t260929-18，灰盒离线秒级零 docker，工单要求 5(c) malformed matrix）：format_agent_stage_failure 是 12 个 catch 位+base.py 共用的票面唯一出口，其对外契约=「text-in→text-out 纯函数、畸形输入不炸不编造」——锚公开函数面（白盒矩阵归 developer L1 UT 不同层；SDK 真包裹路归场景①）：M1 无 cause 链文案含外层真消息与类型名；M2 cause 挂野对象（非异常）下钻就地停不炸；M3 cause 成环守卫生效不挂死；M4 超深链（10 级真消息）不炸、文案要么点名链上真消息要么显式「不可得」、绝不编造；M5 全链零消息显式「不可得」；M6 反向锁×成环链——worker_terminated type 藏环里专用文案仍赢（要求③在畸形面上成立）。零环境依赖（stdlib-only 源码路径装载；M6 构造需引擎 venv，缺=ENV_FAIL exit 2）；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t260929-18/sc_face_failure_chain_malformed_matrix.py", "ro", "serial"),
     # ---- t260925-21: 角色报告英文化（260925 宿主令）——跨载体一致面 ----
     ("t260925-21-report-language-face",
      "角色报告英文化·双载体一致面（t260925-21，灰盒秒级零 docker）：A charter 双规则并存——260904 聊天中文条目不回潮、260925 报告英文条目在其后且自身写清双口径并点名 developer/integration；B 常量单源——shared.py ROLE_REPORT_ENGLISH_CLAUSE 定义且 FLOW_BRIEF key 全集恰为六段、六段全部消费同一常量（逐段复制=漂移源判红）；C build_stage_prompt 同源消费+角色门控字面在场；D charter 条目与常量同锚 260925 令且常量写明与中文规则并存。门控行为面归 developer L1 单测（intent 分工见场景头注）。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",

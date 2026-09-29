@@ -1360,7 +1360,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 "read_known_red_roster", args=[{"base_ref": base_ref}],
                 start_to_close_timeout=SHORT, retry_policy=RETRY)
         except Exception as e:  # noqa: BLE001 —— 名册读不到=照旧拦（不拦主链、不放行）
-            out["error"] = "roster activity failed: %s: %s" % (type(e).__name__, e)
+            # t260929-18：同款异常链下钻（shared.exception_chain_note，单走法）。
+            out["error"] = "roster activity failed: %s: %s%s" % (
+                type(e).__name__, e, shared.exception_chain_note(e))
             return out
         if not isinstance(raw, dict):
             out["error"] = ("roster activity receipt is not an object (%s)"
@@ -1506,8 +1508,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     probe = rraw if isinstance(rraw, ReprobeRedResult) \
                         else ReprobeRedResult(error="探针回执形状未知（旧 worker？）")
                 except Exception as e:  # noqa: BLE001 —— 探针故障=保守计轮，不拦主链
+                    # t260929-18：回执 error 可上票面 → 链下钻带上真实根因。
                     probe = ReprobeRedResult(
-                        error="探针活动故障：%s: %s" % (type(e).__name__, e))
+                        error="探针活动故障：%s: %s%s"
+                              % (type(e).__name__, e, shared.exception_chain_note(e)))
                 jitter_green = probe.all_green()
                 probe_note = ("抖动复跑全绿（红项=%s；%d 跑全过）"
                               % (",".join(red_names), probe.ran)
@@ -2289,7 +2293,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                 ui_ctx = "【UI 截图证据缺失】%s（审读按「无截图证据=打回」处理）" % ui.detail
                             self._log("prepare_ui_evidence：%s" % (ui.detail or ("ok" if ui.ok else "failed")))
                         except Exception as e:
-                            ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s" % (type(e).__name__, e)
+                            # t260929-18：ui_ctx 进 agent 上下文/人审面 → 链下钻。
+                            ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s%s" % (
+                                type(e).__name__, e, shared.exception_chain_note(e))
                             self._log("prepare_ui_evidence 故障（不拦主链，merge_check 闸兜底）：%s" % str(e)[:200])
                     phase = "integration_review"
                     continue
@@ -2497,8 +2503,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             # fail-closed: an activity failure is treated as "UI ticket
                             # unproven" (capture anyway, the gate catches it)
                             ui_is_ticket = True
-                            ui_judge_note = ("ui_changed_paths 故障 fail-closed：%s: %s"
-                                             % (type(e).__name__, e))
+                            ui_judge_note = ("ui_changed_paths 故障 fail-closed：%s: %s%s"
+                                             % (type(e).__name__, e,
+                                                shared.exception_chain_note(e)))
                         self._log("UI 票判定（diff 源）：%s" % ui_judge_note)
                     else:
                         # Unpatched branch (existing instances replaying): the
@@ -2529,7 +2536,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             ui_ctx = "【UI 截图证据缺失】%s（验收按「无截图证据」如实记录）" % ui.detail
                         self._log("prepare_ui_evidence：%s" % (ui.detail or ("ok" if ui.ok else "failed")))
                     except Exception as e:  # infra failure: noted, main chain unaffected, merge_check gate catches it
-                        ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s" % (type(e).__name__, e)
+                        # t260929-18：ui_ctx 进 agent 上下文/人审面 → 链下钻。
+                        ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s%s" % (
+                            type(e).__name__, e, shared.exception_chain_note(e))
                         self._log("prepare_ui_evidence 故障（不拦主链，merge_check 闸兜底）：%s" % str(e)[:200])
                 phase = "run_integration_tests"
                 continue
@@ -2926,8 +2935,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         handover_passed=int(rraw.get("handover_passed") or 0),
                         handover_failed=int(rraw.get("handover_failed") or 0))
                 except Exception as e:
-                    ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s"
-                                              % (type(e).__name__, e))
+                    # t260929-18：error 进仲裁/票面 → 链下钻带上真实根因。
+                    ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s%s"
+                                              % (type(e).__name__, e,
+                                                 shared.exception_chain_note(e)))
                 # t260917-08：命令已真跑（回执无 error）→ 债表销账（防重复执行；
                 # 命令败≠没跑，结果交仲裁/票面处置，此处只管「执行过」的账）
                 if not ir.error:
@@ -4172,8 +4183,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     except Exception as e:
                         await self._blocked(
                             "merge",
-                            "工单数据归档失败（fail-closed，泳道保留不拆）：%s: %s"
-                            % (type(e).__name__, str(e)[:400]))
+                            "工单数据归档失败（fail-closed，泳道保留不拆）：%s: %s%s"
+                            % (type(e).__name__, str(e)[:400],
+                               shared.exception_chain_note(e)))
                         continue
                     if not isinstance(ares, ArchiveResult) or not ares.ok:
                         await self._blocked(
@@ -4203,8 +4215,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     except Exception as e:
                         await self._blocked(
                             "merge",
-                            "泳道拆除故障（本体已归档，泳道残留待人工）：%s: %s"
-                            % (type(e).__name__, str(e)[:400]))
+                            "泳道拆除故障（本体已归档，泳道残留待人工）：%s: %s%s"
+                            % (type(e).__name__, str(e)[:400],
+                               shared.exception_chain_note(e)))
                         continue
                     if not isinstance(tr, MergeResult) or not tr.ok:
                         await self._blocked(
