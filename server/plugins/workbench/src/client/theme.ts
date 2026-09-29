@@ -88,7 +88,11 @@ export function epicChipMuted(): string {
  */
 export const DERIVE_TOKENS_CSS = `:root{
 /* 文字系：45% 语义基色 × 55% 平台前景——浅档基色微加深（对比度↑），深档自动提亮 */
---dsw-derive-fg:var(--dsw-alias-label-primary,#1f2328);
+/* t260929-22 gen9（对比度行级打回：平台 label 在浅底实测 rgb(122,122,133)≈4.24，
+   一切继承 fg 的正文都在线下）——fg 锁固定深墨；深壳主题启用时须连本块一起重订
+   （同 --dsw-derive-warn/muted 等 gen8 深墨家族口径，UT contrast-palette 看守）。 */
+--dsw-derive-fg:#24292f;
+--dsw-derive-ink-blue:#0550ae;
 /* t260929-22 gen8（对比度打回：平台 label 极性/取值不定，混不出保证对比度——
    文字语义令牌改为浅档深墨声明位裸值；深壳主题若启用须连本块一起重订）。 */
 --dsw-derive-muted:#57606a;

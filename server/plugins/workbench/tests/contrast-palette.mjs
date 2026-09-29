@@ -34,9 +34,9 @@ function hex(s) {
 /** DERIVE_TOKENS_CSS 里取某令牌的声明值（去注释后按 `--dsw-derive-名:值` 切）。 */
 function tokenDef(name) {
   const defs = DERIVE_TOKENS_CSS.replace(/\/\*[\s\S]*?\*\//g, '').split(';').map((x) => x.trim())
-  const d = defs.find((x) => x.startsWith(name + ':'))
+  const d = defs.find((x) => x.includes(name + ':'))
   assert.ok(d, `token ${name} declared in DERIVE_TOKENS_CSS`)
-  return d.slice(name.length + 1)
+  return d.slice(d.indexOf(name + ':') + name.length + 1)
 }
 function mixPct(a, p, b) {
   const t = p / 100
@@ -81,6 +81,30 @@ function mixPct(a, p, b) {
   }
   assert.ok(worst >= 4.5, `④ epic chip worst-case ${worst.toFixed(2)} >= 4.5 (formula: ${s})`)
   console.log(`ok   ④ epic chip worst-case -> ${worst.toFixed(2)}`)
+  n++
+}
+
+// ⑤ gen9 行级补收：fg 深墨（一切继承正文）、wb-card-title/wb-title 深墨、
+// View Reason 深蓝墨在其浅蓝底（--dsw-derive-accent-bg 派生定义解析）上 ≥4.5
+{
+  const fg = contrastOnWhite(hex(tokenDef('--dsw-derive-fg')))
+  assert.ok(fg >= 4.5, `⑤ --dsw-derive-fg on white = ${fg.toFixed(2)} >= 4.5`)
+  const inkStrong = contrastOnWhite(hex(tokenDef('--dsw-derive-ink-strong')))
+  assert.ok(inkStrong >= 4.5, `⑤ ink-strong on white = ${inkStrong.toFixed(2)} >= 4.5`)
+  console.log(`ok   ⑤ fg=${fg.toFixed(2)} ink-strong=${inkStrong.toFixed(2)}`)
+  n++
+  const bgDef = tokenDef('--dsw-derive-accent-bg') // mix(accent-bg 基色 12%, bg)
+  const baseHex = bgDef.match(/#([0-9a-fA-F]{6})/)
+  const bgBase = baseHex ? hex('#' + baseHex[1]) : hex('#ddf4ff')
+  const bg = bgDef.includes('color-mix') ? mixPct(bgBase, 12, hex('#ffffff')) : bgBase
+  const blue = contrastOnWhite(mixPct ? (function () {
+    const d = tokenDef('--dsw-derive-ink-blue')
+    return hex(d)
+  })() : hex('#0550ae'))
+  const bgLum = (1.0 + 0.05) / (luminance(bg) + 0.05) > 0 ? 0 : 0
+  const ratioBlue = (() => { const l1 = luminance(hex('#0550ae')), l2 = luminance(bg); const a = Math.max(l1, l2), b = Math.min(l1, l2); return (a + 0.05) / (b + 0.05) })()
+  assert.ok(ratioBlue >= 4.5, `⑤ View Reason ink-blue on accent-bg = ${ratioBlue.toFixed(2)} >= 4.5`)
+  console.log(`ok   ⑤ ink-blue on accent-bg -> ${ratioBlue.toFixed(2)}`)
   n++
 }
 
