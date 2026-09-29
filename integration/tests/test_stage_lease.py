@@ -552,6 +552,42 @@ class InventoryOrphanTest(LeaseTestBase):
         self.assertTrue(st["orphan-old"]["orphan"])
         self.assertEqual("orphan-old", inv["stages"][0]["project"], "孤儿排最前（点名面）")
 
+    def test_orphan_infra_family_failclosed(self):
+        """260929 直修：常驻基建族（stage-console-*）「租约不可见」不构成孤儿证据。
+
+        锁根分裂（场景族落 home 根、供给/操作员侧钉 /tmp/sandbar-test-stages）会把
+        **活着的**树级控制台判成孤儿；默认只报告不真拆，要真清须显式开
+        SANDBAR_STAGE_SWEEP_INFRA=on（明示不静默）。
+        """
+        now = time.time()
+        rows = [self.row("stage-console-deadbeef", self.MAIN + "/server", 7200),
+                self.row("t260929-99", self.MAIN + "/server", 7200)]
+        inv = sd.build_inventory(leases={}, rows=rows, now=now, repo_root=self.MAIN)
+        prefix = ("t26", "sandbar-test", "stage-console")   # 生产路径同形：orphan_prefix() 拆逗号串为元组
+        condemn, skipped = sd.orphan_condemn_projects(inv=inv, now=now, prefix=prefix)
+        self.assertNotIn("stage-console-deadbeef", condemn,
+                         "常驻基建族默认不进判拆集（fail-closed）")
+        self.assertIn("t260929-99", condemn, "其余半径内孤儿照旧判拆（本批不放松）")
+        whys = {s["project"]: s["why"] for s in skipped}
+        self.assertIn("常驻基建族", whys.get("stage-console-deadbeef", ""),
+                      "跳过必须具名点名（不静默）")
+        self.assertIn("SANDBAR_STAGE_SWEEP_INFRA=on", whys.get("stage-console-deadbeef", ""),
+                      "跳过原因里给出显式逃生口，不让人无处可去")
+        os.environ["SANDBAR_STAGE_SWEEP_INFRA"] = "on"
+        try:
+            condemn2, _ = sd.orphan_condemn_projects(inv=inv, now=now, prefix=prefix)
+            self.assertIn("stage-console-deadbeef", condemn2,
+                          "显式开旋钮后本族回到半径（明示不静默）")
+        finally:
+            os.environ.pop("SANDBAR_STAGE_SWEEP_INFRA", None)
+        os.environ["SANDBAR_STAGE_SWEEP_INFRA"] = "maybe"
+        try:
+            with self.assertRaises(sd.StageError) as ctx:
+                sd.infra_family_sweep_enabled()
+            self.assertEqual("usage", ctx.exception.kind, "畸形旋钮=usage 红点名")
+        finally:
+            os.environ.pop("SANDBAR_STAGE_SWEEP_INFRA", None)
+
     def test_orphan_condemn_valves(self):
         now = time.time()
         rows = [self.row("young", self.MAIN + "/server", 60),
