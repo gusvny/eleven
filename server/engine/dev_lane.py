@@ -826,8 +826,28 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self._rework_escape_on = (workflow.patched(REWORK_ESCAPE_PATCH_ID)
                                   and not SANDBAR_TEST_DISABLE_REWORK_ESCAPE)
         first = self.STAGES[0]
-        acc = list(first.acceptance) + [x for x in inp.acceptance_extra
-                                        if x not in first.acceptance]
+        # t260929-19：实例验收增项（acceptance_extra）随单运输 + create 时净化。
+        # 语义（shared.py:3374 声明）：增项补进第一段的清单。畸形项显式降级：
+        # str() 收敛→strip→空白项丢弃→与模板段验收重复丢弃（strip 后同形比较，
+        # 避免面上出现 ' x'/'x' 近重复对）→增项内部重复丢弃；每个被丢项在台账
+        # log 点名（_log，log 类而非段状态类，见 meta 构造后的 _log 调用），
+        # 绝不崩溃、绝不静默。
+        _tpl = {str(x).strip() for x in first.acceptance}
+        _extras: List[str] = []
+        _dropped: List[str] = []
+        _raw_extra = getattr(inp, "acceptance_extra", None)
+        if _raw_extra is None:
+            _raw_extra = []                     # 老在途 payload 缺键：无增项，零噪音
+        elif not isinstance(_raw_extra, (list, tuple)):
+            _dropped.append(repr(_raw_extra))   # 非列表形态：整体显式丢弃并点名
+            _raw_extra = []
+        for _x in _raw_extra:
+            _s = str(_x).strip()
+            if not _s or _s in _tpl or _s in _extras:
+                _dropped.append(repr(_x))
+                continue
+            _extras.append(_s)
+        acc = list(first.acceptance) + _extras
         self.meta = {
             "id": inp.ticket_id,
             "workflow_id": inp.template_id,
@@ -864,7 +884,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # KI-124：本票模板段规则表随派单钉死（replay 稳定；空表=回落内建规则表）
             "path_gate_rules": dict(getattr(inp, "path_gate_rules", None) or {}),
             "acceptance": acc,
-            "checks": {s.id: [{"item": it, "done": False, "by": ""} for it in s.acceptance]
+            # t260929-19：第一段清单 = 模板验收 + 净化后实例增项（shared.py:3374
+            # 声明语义，与 base.py:716-717 同形）；其余段仍纯模板验收。
+            "checks": {s.id: [{"item": it, "done": False, "by": ""}
+                              for it in (acc if s.id == first.id else s.acceptance)]
                        for s in self.STAGES},
             "deliverables": inp.deliverables,
             "user_request": inp.user_request,
@@ -899,6 +922,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                      "note": "工单创建（dev-lane：activity 直编排，步=%s）"
                              % [s.id for s in self.STAGES]}],
         }
+        if _dropped:
+            # t260929-19：畸形/重复增项显式降级——log 类台账点名（非 _mark 段状态，
+            # 避免污染下游 snapshot/lane 读的段状态机）。
+            self._log("acceptance_extra 丢弃畸形/重复项：%s" % ", ".join(_dropped))
         self._mark("create_plan", "awaiting", "adopt dev-lane（步=%s）"
                    % [s.id for s in self.STAGES])
 
@@ -910,7 +937,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self.meta["role"] = st.role
         self.meta["status"] = "dispatched"
         self.meta["stage_state"] = "running"
-        self.meta["acceptance"] = list(st.acceptance)
+        # t260929-19：步进入守卫（同族先例 base.py:1046-1049 / 960）——仅首段首次
+        # 进入（_gen==1）保留 create 时的实例验收增项；其余段、以及首段重入
+        # （rework 回打，_gen>1）一律换成本段模板清单。注意本函数 908 行先自增
+        # gen 再走到此处：写点读到的 gen 是自增后的（首进=1、重入=2），守卫条件
+        # 依赖这一顺序——勿调换自增与本守卫的先后。
+        if step_id != self.STAGES[0].id or self._gen(step_id) > 1:
+            self.meta["acceptance"] = list(st.acceptance)
         if getattr(self, "_detail_face_on", False):
             # t260915-01 ②（R2 清点②）：blocked_detail＝「当前受阻明细」，非
             # blocked 期恒空——所有非 blocked 推进的唯一步进入口在此统一清，关掉
