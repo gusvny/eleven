@@ -8521,7 +8521,8 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     from inspection_inspect import (  # 懒 import：防 activities↔inspection 模块环（同 run_inspection_scan 先例）
         DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDINGS, INSPECT_DEADLINE_MARGIN_SEC,
         InspectParseError, build_inspect_prompt, build_persona_patch,
-        parse_agent_findings, readonly_pin_patch, sanitize_agent_home, with_ids)
+        parse_agent_findings, readonly_pin_patch, sanitize_agent_home,
+        scope_collapse_findings, with_ids)
 
     def _err(msg: str) -> Dict[str, Any]:
         return {"ok": False, "error": msg}
@@ -8582,19 +8583,45 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     from inspection_inspect import (build_change_scope_text, ki_open_entries,
                                     parse_name_status, suite_receipt_rows)
     scope_notes: Dict[str, Any] = {}
+    # 上期基点三级回落（260929 宿主口径 A）：泳道 base_ref → 套件 base_ref → 上期台账
+    # 记的 inspect.base_head。第三级是**无泳道实例**的唯一可用面（声明不带 suite 的实例
+    # 从不建泳道，`lane` 键永远缺席 —— 09-29 实案：simplify-face 因此整期拿不到变化面，
+    # 审查范围塌成「KI 册 + 上期台账」，3 分钟就跑完而**代码一行没看**，且塌陷不出发现）。
     prev_base = ""
     if isinstance(prev_doc, dict):
-        lane_doc = prev_doc.get("lane")
-        if isinstance(lane_doc, dict) and isinstance(lane_doc.get("base_ref"), str) \
-                and lane_doc.get("base_ref").strip():
-            prev_base = lane_doc["base_ref"].strip()
+        for _k in ("lane", "suite"):
+            _d = prev_doc.get(_k)
+            if isinstance(_d, dict) and str(_d.get("base_ref") or "").strip():
+                prev_base = str(_d["base_ref"]).strip()
+                break
+        if not prev_base:
+            _sm = prev_doc.get("scan_meta")
+            _ins = _sm.get("inspect") if isinstance(_sm, dict) else None
+            if isinstance(_ins, dict) and str(_ins.get("base_head") or "").strip():
+                prev_base = str(_ins["base_head"]).strip()
+                scope_notes["base_source"] = "prev scan_meta.inspect.base_head（上期无泳道）"
     this_base = str(base_head or "").strip()
+    if not this_base:
+        # 本期基点自播种（同一口径）：无泳道实例取当前 HEAD 当本期基点，并**记进台账**
+        # ⇒ 下期就能用「上期记录的 HEAD」做差分。取不到=显式 note（不假造基点）。
+        try:
+            _hp = subprocess.run(["git", "-C", str(base), "rev-parse", "HEAD"],
+                                 capture_output=True, text=True, timeout=30, check=False)
+            if _hp.returncode == 0 and (_hp.stdout or "").strip():
+                this_base = (_hp.stdout or "").strip().splitlines()[0]
+                scope_notes["base_source_this"] = ("本期无泳道基点 → 取当前 HEAD %s 自播种"
+                                                   "（下期起可差分）" % this_base[:7])
+            else:
+                scope_notes["base_error"] = "本期基点取不到（git rev-parse rc=%s）：%s" % (
+                    _hp.returncode, ((_hp.stderr or _hp.stdout or "").strip()[-160:]))
+        except (OSError, subprocess.TimeoutExpired) as e:
+            scope_notes["base_error"] = "本期基点取不到（%s: %s）" % (type(e).__name__, e)
     diff_rows: List[str] = []
     if not prev_base:
         scope_notes["scope_note"] = ("无基点差分：%s——变化面差分未做，审查范围只含"
-                                     "回执红/漏跑/KI/上期台账" % (prev_note or "上期台账缺 lane.base_ref"))
+                                     "回执红/漏跑/KI/上期台账" % (prev_note or "上期台账无可用基点"))
     elif not this_base:
-        scope_notes["scope_note"] = ("本期基点不可得（base_head 空）——变化面差分未做，"
+        scope_notes["scope_note"] = ("本期基点不可得（base_head 空且 HEAD 取不到）——变化面差分未做，"
                                      "审查范围只含回执红/漏跑/KI/上期台账")
     else:
         try:
@@ -8605,6 +8632,13 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
             if proc_d.returncode != 0:
                 scope_notes["diff_error"] = "git diff 失败（rc=%s）：%s" % (
                     proc_d.returncode, (proc_d.stderr or "").strip()[-200:])
+            elif not (proc_d.stdout or "").strip():
+                # 差分**成功且零改动**：这是合法的「本期没动」，不是「差分做不成」——
+                # parse_name_status 对空输出会记 diff_error，那会把「无改动」误标成塌陷
+                # （260929 假红守门：合法空范围不许报警）。两件事分开记，判据只认后者。
+                scope_notes["diff_empty"] = ("基点差分成功且零改动（%s..%s）——本期变化面为空"
+                                             % (prev_base[:7], this_base[:7]))
+                diff_rows = []
             else:
                 diff_rows, dmeta = parse_name_status(proc_d.stdout)
                 scope_notes.update(dmeta)
@@ -8653,10 +8687,12 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
         except (OSError, InspectParseError) as e:
             return _err("inspect 桩夹具解析失败（与真 agent 同契约 fail-closed）：%s"
                         % e)
+        findings += with_ids(scope_collapse_findings(scope_meta))
         activity.heartbeat("inspect stub 完成（%d 条）" % len(findings))
         return {"ok": True, "result": {"findings": findings, "meta": {
             "stub": True, "face": face, "profile": profile, "base_dir": base_dir,
-            "scope": scope_meta}}}
+            "base_head": this_base, "scope_effective_base": this_base,
+            "scope_base_prev": prev_base, "scope": scope_meta}}}
 
     # ---- 真 spawn（host 形态显式钉死；模型路由 miss=profile 默认+warning，meta 点名
     #      由 _prepare_agent_spawn 的 warning 面承担） ----
@@ -8742,13 +8778,15 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
             findings = with_ids(parse_agent_findings(text))
         except InspectParseError as e:
             return _err("agent 输出解析失败：%s；输出尾：%s" % (e, text[-400:]))
+        findings += with_ids(scope_collapse_findings(scope_meta))
         return {"ok": True, "result": {"findings": findings, "meta": {
             "face": face, "profile": profile, "base_dir": base_dir,
-            "base_head": base_head, "agent_home": str(home),
+            "base_head": this_base, "agent_home": str(home),
             "model_route": route_meta,
             # 缩面对账面（t260924-06）：范围清单与用量进 meta——零发现显式的证据面、
             # 预算护栏（used_sec 超 90% 预算=票面点名先报实测再谈预算）的原始数据。
             "scope": scope_meta, "used_sec": round(time.monotonic() - t0, 1),
+            "scope_effective_base": this_base, "scope_base_prev": prev_base,
             "output_log": str(out_f)}}}
     finally:
         # 全终态回收：正常/报错/超时/取消四路都走到（KI-009 组粒度；reap 绝不外抛）

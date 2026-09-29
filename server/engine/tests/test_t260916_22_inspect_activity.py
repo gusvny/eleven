@@ -127,7 +127,12 @@ def test_inspect_stub_ok_path(base_dir, tmp_path, monkeypatch, beats):
     res = asyncio.run(aa.run_inspection_inspect(_args(base_dir, tmp_path)))
     assert res["ok"] is True
     fs = res["result"]["findings"]
-    assert len(fs) == 1 and fs[0]["id"] and fs[0]["scan"] == "agent"
+    # 260929 宿主令：审查范围塌陷（夹具无 git 基点 ⇒ 差分做不成）必须**上票面**，
+    # 故 findings 里除 agent 那条外必带一条机械侧 scan="scope" 发现（此前只躺 meta）
+    agent_fs = [f for f in fs if f.get("scan") == "agent"]
+    assert len(agent_fs) == 1 and agent_fs[0]["id"]
+    scope_fs = [f for f in fs if f.get("scan") == "scope"]
+    assert len(scope_fs) == 1 and scope_fs[0]["severity"] == "med"
     assert res["result"]["meta"]["stub"] is True
     assert beats and "stub" in beats[-1][0]
     assert not (base_dir / ".dsh").exists()      # 桩子用例同样不碰基座
@@ -176,7 +181,10 @@ def test_inspect_real_spawn_chain_green(base_dir, tmp_path, monkeypatch, beats):
     res = asyncio.run(aa.run_inspection_inspect(_args(base_dir, tmp_path)))
     assert res["ok"] is True, res
     fs = res["result"]["findings"]
-    assert len(fs) == 1 and fs[0]["id"] == ins.mint_finding_id(fs[0])
+    agent_fs = [f for f in fs if f.get("scan") == "agent"]
+    assert len(agent_fs) == 1 and agent_fs[0]["id"] == ins.mint_finding_id(agent_fs[0])
+    assert any(f.get("scan") == "scope" for f in fs), \
+        "260929 宿主令：范围塌陷必须上票面（此前只躺 meta.scope）"
     meta = res["result"]["meta"]
     assert meta["base_dir"] == str(base_dir) and Path(meta["output_log"]).is_file()
     # 本轮实际模型路由进 meta（方案 §2.1 观察期对账面）：两形态必居其一——
