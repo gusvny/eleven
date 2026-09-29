@@ -173,14 +173,11 @@ async function panelVisible(page, proj) {
 async function scenarioEntryOpensPanel(page) {
   const head = await projectRow(page)
   if (!head) return `project group row for "${PROJ_NAME}" not rendered in left column (projects stub not consumed?)`
-  // 点行本身（项目名区，x=40 避开左端 caret——caret 折叠是另一件事，一次点击一件事）。
-  // 实测定点：组头是整行 flex（宽至数百 px），几何中心/远点不携带入口点击语义
-  // （闸+定点复跑实锤：中心点击零反应），只有项目名邻域触发入口。
-  try {
-    await head.click({ position: { x: 40, y: 9 }, timeout: 8000 })
-  } catch {
-    await head.click({ position: { x: 40, y: 9 }, force: true, timeout: 8000 })
-  }
+  // 点入口段本体（data-wb-executor-entry=developer 声明的测试锚，覆盖名字+计数+空档）。
+  // gen2 起行 onClick 收进入口段（行体其余是死区）——按锚点击=按用户点项目名的语义。
+  const entry = page.locator('[data-wb-executor-entry]').first()
+  if (!(await entry.count())) return 'executor entry anchor not rendered on the project row'
+  await entry.click({ force: true, timeout: 8000 })
   if (!(await panelVisible(page, PROJ))) {
     return `clicking the project-name row did not open the executor panel for ${PROJ} @ ${await snap(page)}`
   }
