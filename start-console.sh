@@ -166,6 +166,12 @@ ARGS+=("$@")
 # 浏览器开页用 localhost 不用 127.0.0.1（260822 定案）：本机 Chrome 的代理链路
 # 只放行主机名 localhost、劫持 IP 字面量 127.0.0.1——dsh 自动开的 127.0.0.1 页
 # 会卡死成"页面在、数据全断"。故压住 dsh 自开（--no-open），这里自己开 localhost。
+#
+# 260929 补记：打印 URL 里的 127.0.0.1 是 dsh-web-app 的 lib 常量（LOOPBACK_HOST，
+# localWebUrl 硬编码），profile 的 webserver.config.host 只管绑定管不了打印——无旋钮。
+# 且登录 cookie 按 host:port 分账，localhost 与 127.0.0.1 是两份独立 cookie，混用主机名
+# 会莫名 401。故启动时把 dsh 输出过 sed，把 127.0.0.1:$PORT 改写成 localhost:$PORT 再
+# 回显——照抄打印 URL 即落在有直连保障的主机名上，两个坑一起绕开。
 NO_OPEN=0
 for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = "--no-open" ] && NO_OPEN=1; done
 if [ "$NO_OPEN" -eq 0 ]; then
@@ -196,4 +202,7 @@ echo "▶ 启动 sandbar 控制台：$DSH_BIN --profile sandbar ${ARGS[*]:-（�
 [ -n "$DSH_BITS_NOTE" ] && echo "  bits 指纹对账通过（${DSH_BITS_NOTE}）"
 # profile 即 app 容器——sandbar profile 组合 dsh-base+dsh-web-app+本仓补丁，直接 boot 出 web UI。
 # bash 3.2 空数组 + set -u：${ARGS[@]} 需 + 守卫，否则 unbound
-exec "$DSH_BIN" --profile sandbar ${ARGS[@]+"${ARGS[@]}"}
+# 输出过 sed 改写打印 URL（260929 补记）：URL 可能落在任一输出流故 2>&1 合流；
+# sed -l 行缓冲保证日志即产即显；set -o pipefail 保住 dsh 的退出码与 Ctrl+C 语义。
+exec "$DSH_BIN" --profile sandbar ${ARGS[@]+"${ARGS[@]}"} 2>&1 |
+  sed -l "s#127\.0\.0\.1:$PORT#localhost:$PORT#g"
