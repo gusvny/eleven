@@ -377,8 +377,25 @@ def _pulse_from_desc(desc: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
+class TransientConnectError(RuntimeError):
+    """连不上 temporal server（KI-029 全族修复，260929）：**瞬时**类基础设施失败。
+
+    为什么立个类型而不是逐点 try（本文件 14 个 `await _connect()` 全在分类块之外，
+    实测静态扫描 14/14）：错误分类是**契约**（模块头分类表 + 各命令 docstring），
+    分类点该收成单点。旧行为=连接异常一路逃到 main() 兜底，被记成 kind=internal
+    （5xx 语义，用户据此以为「服务端有 bug」而不是「重试一次」）——正是 KI-025
+    契约被违反的形态。做成 RuntimeError 子类：既有 except RuntimeError 行为零变化。"""
+    kind = KIND_TRANSIENT
+
+
 async def _connect() -> Client:
-    return await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+    """连服务端；失败一律翻成 TransientConnectError（瞬时，可刷新重试）。"""
+    try:
+        return await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+    except Exception as e:  # noqa: BLE001——连接失败=瞬时，绝不冒充 internal
+        raise TransientConnectError(
+            "连接 temporal server 失败（%s，瞬时，请刷新重试）：%s: %s"
+            % (TARGET_HOST, type(e).__name__, e)) from e
 
 
 # ---------- the four subcommands ----------
@@ -1964,6 +1981,16 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
     }
 
 
+def _classify_infra_error(e: BaseException) -> Dict[str, Any]:
+    """兜底异常 → 分类回执（KI-029 单点）：连接类=transient（叫用户重试），其余=internal。
+
+    「连不上」与「服务端有 bug」是两件事：前者刷新即好，后者要人查。混成一类会把诊断
+    引向错误方向（KI-079/KI-029 同族纪律）。类型携带 kind（TransientConnectError.kind），
+    不靠文案匹配猜。"""
+    kind = getattr(e, "kind", None) or KIND_INTERNAL
+    return _err(f"{type(e).__name__}: {e}", kind)
+
+
 async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     """Single-ticket query (v2): the full snapshot + meta (a JSON-compatible ticket
     shape, consumed directly by ticket.py show).
@@ -2987,7 +3014,7 @@ def main() -> None:
     try:
         result = asyncio.run(fn(args))
     except Exception as e:  # infra failure (cannot reach the server etc.) → structured receipt
-        result = _err(f"{type(e).__name__}: {e}")
+        result = _classify_infra_error(e)
 
     _emit(sub, args, result)
 

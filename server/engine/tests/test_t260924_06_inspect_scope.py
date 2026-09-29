@@ -189,7 +189,10 @@ def test_u7_e2e_scoped_prompt_and_explicit_zero_findings(
     assert res["ok"] is True, res
     result = res["result"]
     # 强 schema 结果（零发现也显式）+ 预算内（假脚本秒级，远小于预算）
-    assert result["findings"] == []
+    # 260929 宿主令：范围塌陷上票面——零 **agent** 发现，但机械侧必出 scan="scope" 发现
+    assert [f for f in result["findings"] if f.get("scan") == "agent"] == []
+    assert len([f for f in result["findings"] if f.get("scan") == "scope"]) == 1, \
+        "差分做不成 ⇒ 审查范围塌陷 ⇒ 必须在票面上说出来"
     assert result["meta"]["scope"]["scope_files"] == 0      # 无真 git 仓 → diff_error 回落
     assert "diff_error" in result["meta"]["scope"]
     assert result["meta"]["used_sec"] < 60
@@ -226,5 +229,8 @@ def test_u8_stub_missing_fixture_and_scope_in_stub_meta(base_dir, tmp_path, monk
     fixture.write_text("```json\n{\"findings\": []}\n```\n", encoding="utf-8")
     monkeypatch.setenv("SANDBAR_INSPECT_STUB_FILE", str(fixture))
     res = asyncio.run(aa.run_inspection_inspect(_args(base_dir, tmp_path)))
-    assert res["ok"] is True and res["result"]["findings"] == []
+    assert res["ok"] is True
+    assert [f for f in res["result"]["findings"] if f.get("scan") == "agent"] == []
+    assert [f.get("scan") for f in res["result"]["findings"] if f.get("scan") == "scope"], \
+        "空 agent 发现 + 塌陷范围 ⇒ 仍须有 scope 发现（桩面与真面同契约）"
     assert "scope" in res["result"]["meta"]

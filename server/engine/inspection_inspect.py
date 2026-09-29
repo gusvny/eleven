@@ -231,6 +231,54 @@ def mint_finding_id(finding: Dict[str, Any]) -> str:
     return hashlib.sha256("\x1e".join(parts).encode("utf-8")).hexdigest()[:8]
 
 
+#: 缩面塌陷发现的 scan 标签（260929 宿主令：塌陷记在**票面**上，不记 KI 册）。
+SCOPE_SCAN_TAG = "scope"
+
+
+def scope_collapse_findings(scope_meta: Any) -> List[Dict[str, Any]]:
+    """审查范围塌陷 → 票面发现（纯函数，260929）。
+
+    为什么必须出发现：本期 simplify-face 实况＝无泳道 ⇒ 本期基点空 ⇒ 变化面差分未做 ⇒
+    **审查范围 0 个文件**，agent 只能核 KI 册（3 分 15 秒跑完，代码一行没看），而这件事
+    此前只躺在台账 `scan_meta.scope_note` 里——宿主看到的形态是「巡检跑完了，9 条发现」，
+    **跑完 ≠ 审过**。零文件范围必须是票面上的发现，不许只做 meta 注记。
+
+    判据（只认「差分没做成」，不误伤「真无变化」）：scope_files 为 0 且出现
+    `scope_note`（无基点/基点不可得）、`base_error`（基点取不到）或 `diff_error`
+    （git 差分失败）。**真空变化面（`diff_empty`＝差分成功且零改动）明确不报**——
+    那是合法的「本期没动」，报了就是天天假红（260929 假红守门）。
+    严重度=med：本期票面仍有 KI/回执面产出，但**代码审查这一半没发生**。"""
+    m = scope_meta if isinstance(scope_meta, dict) else {}
+    if int(m.get("scope_files") or 0) != 0:
+        return []
+    why = ""
+    if m.get("diff_empty"):
+        return []                      # 差分成功且零改动＝合法空范围
+    if m.get("diff_error"):
+        why = "git 差分失败：%s" % str(m["diff_error"])[:200]
+    elif m.get("scope_note"):
+        why = str(m["scope_note"])[:240]
+    elif m.get("base_error"):
+        why = "本期基点取不到：%s" % str(m["base_error"])[:200]
+    if not why:
+        return []
+    # 证据=台账里那段范围 meta 本身（**不编造文件路径**：这条塌陷的证据就在台账字段里）
+    ev = [{"path": "scan_meta.inspect.scope（本期台账字段）",
+           "quote": str({k: m[k] for k in ("scope_files", "scope_note", "diff_error",
+                                           "base_error", "base_source_this", "diff_empty")
+                         if k in m})[:300]}]
+    return [{
+        "scan": SCOPE_SCAN_TAG, "severity": "med",
+        "subject": ("Scope collapsed to 0 files: the change-surface diff was not made, so this "
+                    "period did NOT review code (agent reviewed receipts/KI/previous ledger only)"),
+        "evidence": ev,
+        "suggestion": ("给该实例一个可用的审查基点：无泳道实例（声明不带 suite）用「上期运行记录的 "
+                       "HEAD → 本期 HEAD」（已接线：本期取当前 HEAD 自播种并记进台账，下期起可差分）；"
+                       "基点仍缺时先修声明/泳道，别把「跑完」当「审过」。"),
+        "suggest": False,
+    }]
+
+
 def with_ids(findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """给每条发现铸内容 id（活动侧在 parse 之后立刻调用；id 不信任 agent 自报）。"""
     for f in findings:
