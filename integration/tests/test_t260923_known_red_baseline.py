@@ -10,6 +10,10 @@ isolated=环境/杂物/扫描面隔离（不挂产品欠账）。修掉即删行
 260926 追加（洞①时间证据）：每条还必须带**机械证据戳** `booked_at`（ISO8601，须带
 时区）+ `booked_sha`（引入该行的 main 提交）——采纳判据要求 booked_at 早于本票开票
 基点，缺戳/戳畸形条目不成立为「既有欠账」。戳的推断依据写在 meta.booked_evidence。
+
+260929 追加（无主的红不许在册）：每条还必须带 `owner`（认领岗）+ `retire_when`
+（撤账条件）——挂账的意义是「有人负责、有离场条件」；缺任一即红。宿主 260929 令：
+「这些一直红，也没觉得有什么问题，那测试案例还有意义吗」＝红必须有归属与离场机制。
 跑法：python3 integration/tests/test_t260923_known_red_baseline.py（stdlib-only）。
 """
 from __future__ import annotations
@@ -21,7 +25,8 @@ from pathlib import Path
 
 BOOK = Path(__file__).resolve().parents[1] / "known-red-baseline.json"
 VERDICTS = {"booked", "isolated"}
-ENTRY_KEYS = {"name", "verdict", "home", "note", "booked_at", "booked_sha"}
+ENTRY_KEYS = {"name", "verdict", "home", "note", "booked_at", "booked_sha",
+              "owner", "retire_when"}
 SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 
 
@@ -42,6 +47,11 @@ def test_schema_hygiene():
         assert e["verdict"] in VERDICTS, e
         assert e["home"].strip(), "每条挂账必须有 home 认领：%s" % e["name"]
         assert e["note"].strip(), "每条挂账必须有判词摘要：%s" % e["name"]
+        # 260929：无主的红不许在册——owner=认领岗、retire_when=撤账条件（缺任一即红）
+        assert str(e["owner"]).strip(), \
+            "缺 owner（认领岗）：%s——260929 清账批次起每条必带；无主的红按退役处理" % e["name"]
+        assert str(e["retire_when"]).strip(), \
+            "缺 retire_when（撤账条件）：%s——挂账必须回答「什么条件下撤红」" % e["name"]
 
 
 def test_evidence_stamps_are_mechanical_and_consistent():

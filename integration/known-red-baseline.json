@@ -1,8 +1,8 @@
 {
   "meta": {
-    "policy": "集成轮次瘦身提案（260923 定稿）A 慢性红清账的已知红基线挂账册。基线只缩不增：修掉即删行并下调 max_entries；新挂账须 integration 岗位判词+home 认领，不得静默增行。verdict=booked（产品面欠账挂账）| isolated（环境/杂物/扫描面隔离，不挂产品欠账）。抖动绿（串行复跑绿）不入册。",
-    "max_entries": 25,
-    "evidence": "全量跑 370/290/29/51（out/integration-report-260923-192446.json）+ 定点串行复跑定性 + t260917-02 对照实验（31a4f6a 同型）；收口全量 370/290/28/52（out/integration-report-260923-203816.json）+ 5 条新增候选串行复跑（out/integration-report-260923-204427.json）：2 抖动绿不入册、3 条为首跑暴露存量红（首轮 ENV_FAIL 未跑断言=KI-038 环境红捂真红第四案）补挂账，max 27→30（判词+home 非静默增行） ｜ 260925 清账批次（宿主直修令：不开票、main 直修）：t260925-05 两趟闸回执（ran=315 fail=23 env=9）暴露 16 条未入册稳定红（UI 8／供给 2／守卫台账 5），逐条给 integration 判词＋home 认领后增行；依据=该票仲裁三轮判词「本票零新增红（本票场景绿）；余红均共享资产/抖动，转人工」＋基线覆盖差实测（33 败 vs 基线 30 条，仅覆盖 17）。max_entries 30→45。 ｜ 260928 清账批次（宿主直修令「把红的在main上修了呗」；integration 岗直修至绿后按「基线只缩不增」删行并下调 max_entries 45→32）：本轮修绿并除名 13 条（scenario-guard-spec-landed、t260907-01-path-hygiene、t260907-10-engine-layout、t260916-02-decl-gate-aggregate、t260921-06-batch-manifest-contract、t02-t260902-02-teardown-versioning、t260913-03-executor-pool-exclude-l1、t260905-06-doc-entry-present、t260905-06-doc-read-through、t260910-10-docs-ui-mock-v1、t260915-10-docs-follow-project、t260915-09-epics-client-project-wire、t260904-17-ticket-list-rowcard-ui）——每条附「前红→后绿」单条实跑回执，提交见 4fd7336/e55c212/264ba45/27eb201/8af192b/f81cb38/a29a1ee 及 260928 直修批次；此项违背则按「静默增行」追责（本批只删不增）。 ｜ 260928 补除名 1 条（t260913-04-lifecycle-gc：模式闸未满足导致的恒红，直修后跑批上下文 ran=1 pass=1 fail=0；见批⑧提交 cbe4599）——max_entries 32→31。 ｜ 260928 清账（子站 A 的 DOM/UI 族共因修复收编，提交 72e010c）：除名 6 条——t260905-07-ticket-detail-panel（9 条「快照要点四区块」子用例随产品 t260925-18 E3 删面带留痕注销）、t260905-08-wb-contrast-guard、t260907-08-wb-contrast-quadrant、t260915-19-sidebar-inspection-ui、t260916-15-sidebar-merged-sort-ui、t260916-26-console-boot-no-plugin-banner（4 条同因：隔离台 dsh 0.1.5 浏览器会话门要 /?token= 兑换 cookie，匿名 goto 恒 401 + 文案迁移 pin）；max_entries 31→25。仍留册：capture-chat-e2e / capture-chat-active（该族未动，仍红）。",
+    "policy": "集成轮次瘦身提案（260923 定稿）A 慢性红清账的已知红基线挂账册。基线只缩不增：修掉即删行并下调 max_entries；新挂账须 integration 岗位判词+home 认领，不得静默增行。verdict=booked（产品面欠账挂账）| isolated（环境/杂物/扫描面隔离，不挂产品欠账）。抖动绿（串行复跑绿）不入册。260929 起：每条必带 owner（认领岗）与 retire_when（撤账条件）——无主的红不许在册（逾期按退役处理）。",
+    "max_entries": 30,
+    "evidence": "全量跑 370/290/29/51（out/integration-report-260923-192446.json）+ 定点串行复跑定性 + t260917-02 对照实验（31a4f6a 同型）；收口全量 370/290/28/52（out/integration-report-260923-203816.json）+ 5 条新增候选串行复跑（out/integration-report-260923-204427.json）：2 抖动绿不入册、3 条为首跑暴露存量红（首轮 ENV_FAIL 未跑断言=KI-038 环境红捂真红第四案）补挂账，max 27→30（判词+home 非静默增行） ｜ 260925 清账批次（宿主直修令：不开票、main 直修）：t260925-05 两趟闸回执（ran=315 fail=23 env=9）暴露 16 条未入册稳定红（UI 8／供给 2／守卫台账 5），逐条给 integration 判词＋home 认领后增行；依据=该票仲裁三轮判词「本票零新增红（本票场景绿）；余红均共享资产/抖动，转人工」＋基线覆盖差实测（33 败 vs 基线 30 条，仅覆盖 17）。max_entries 30→45。 ｜ 260928 清账批次（宿主直修令「把红的在main上修了呗」；integration 岗直修至绿后按「基线只缩不增」删行并下调 max_entries 45→32）：本轮修绿并除名 13 条（scenario-guard-spec-landed、t260907-01-path-hygiene、t260907-10-engine-layout、t260916-02-decl-gate-aggregate、t260921-06-batch-manifest-contract、t02-t260902-02-teardown-versioning、t260913-03-executor-pool-exclude-l1、t260905-06-doc-entry-present、t260905-06-doc-read-through、t260910-10-docs-ui-mock-v1、t260915-10-docs-follow-project、t260915-09-epics-client-project-wire、t260904-17-ticket-list-rowcard-ui）——每条附「前红→后绿」单条实跑回执，提交见 4fd7336/e55c212/264ba45/27eb201/8af192b/f81cb38/a29a1ee 及 260928 直修批次；此项违背则按「静默增行」追责（本批只删不增）。 ｜ 260928 补除名 1 条（t260913-04-lifecycle-gc：模式闸未满足导致的恒红，直修后跑批上下文 ran=1 pass=1 fail=0；见批⑧提交 cbe4599）——max_entries 32→31。 ｜ 260928 清账（子站 A 的 DOM/UI 族共因修复收编，提交 72e010c）：除名 6 条——t260905-07-ticket-detail-panel（9 条「快照要点四区块」子用例随产品 t260925-18 E3 删面带留痕注销）、t260905-08-wb-contrast-guard、t260907-08-wb-contrast-quadrant、t260915-19-sidebar-inspection-ui、t260916-15-sidebar-merged-sort-ui、t260916-26-console-boot-no-plugin-banner（4 条同因：隔离台 dsh 0.1.5 浏览器会话门要 /?token= 兑换 cookie，匿名 goto 恒 401 + 文案迁移 pin）；max_entries 31→25。仍留册：capture-chat-e2e / capture-chat-active（该族未动，仍红）。 ｜ 260929 清账批次（宿主直修令「A、B 都直修」；integration 岗执行）：两票（t260929-07/08）当日闸回执与仲裁判词暴露 5 条未入册红——t260904-12-no-skip-guard、t260904-05-ledger-adversarial-boot、t260907-05-profile-farm-sandbar-links、ticket-session-restore 按产品面挂账（定性未毕，避免按环境面隔离遮真红）；auto-rework-trace 按 isolated（环境/共享台面）入册，依据=五轮对照证据（干净主线 PASS 14.5s/14.9s、泳道内 FAIL 93–99s）。同时为全册 25+5 条补 owner 与 retire_when 两个必填字段（同批改 integration/tests/test_t260923_known_red_baseline.py 的 ENTRY_KEYS 与断言）。max_entries 25→30（判词+home 非静默增行）。",
     "registered": "260923 宿主直修令清账",
     "booked_evidence": "证据戳口径（260926 integration 岗位按宿主裁定补齐）：每条 booked_at/booked_sha = **引入该行的 main 提交**时刻与提交号（推断依据=git log --follow integration/known-red-baseline.json 的三个引入提交 f61f239(27 条)/4cf4fa8(3 条)/c348c4c(15 条)，逐提交 diff 归条）；45/45 可由 git 历史机械推断，无 unknown 项。戳只作「登记早于本票基点」的时间证据，不替代 integration 判词与 home 认领；欠账本身更早的条目（note 引更早票据/台账）取本保守下界（登记提交时刻）——该取值只会更严，不会更松。"
   },
@@ -13,7 +13,9 @@
       "home": "workbench 捕获族欠账（KI-051 同族后续）",
       "note": "fail×prepare-reason 违约形态（t260910-13 决策表在案）",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "workbench 岗（捕获族）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "capture-chat-e2e",
@@ -21,7 +23,9 @@
       "home": "workbench 捕获族欠账（KI-051 同族后续）",
       "note": "11 视图走访族，与 capture-chat-active 同根",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "workbench 岗（捕获族）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260904-05-chat-band-affiliation",
@@ -29,7 +33,9 @@
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
       "note": "台账在册慢性红",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "docs/UI 面（26090x 批次）",
+      "retire_when": "docs/UI 浏览器面专项修绿后删行并下调 max_entries"
     },
     {
       "name": "t260904-05-session-lifecycle-ui",
@@ -37,7 +43,9 @@
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
       "note": "台账在册慢性红",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "docs/UI 面（26090x 批次）",
+      "retire_when": "docs/UI 浏览器面专项修绿后删行并下调 max_entries"
     },
     {
       "name": "t260904-07-charter-injection-journey",
@@ -45,7 +53,9 @@
       "home": "docs/UI 浏览器面存量欠账（26090x 起）",
       "note": "台账在册慢性红",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "docs/UI 面（26090x 批次）",
+      "retire_when": "docs/UI 浏览器面专项修绿后删行并下调 max_entries"
     },
     {
       "name": "t260922-03-dsh-probe-live-green",
@@ -53,7 +63,9 @@
       "home": "dsh 0.1.5 迁移在途面（KI-101~103 对账工作流）",
       "note": "台账在册慢性红，与 cred-env 同根",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "dsh 迁移面（KI-101~103）",
+      "retire_when": "迁移对账票收口后删行并下调 max_entries"
     },
     {
       "name": "t260922-03-dsh-probe-live-cred-env",
@@ -61,7 +73,9 @@
       "home": "dsh 0.1.5 迁移在途面（KI-101~103 对账工作流）",
       "note": "桩自报路由/产品红保全五断言红（定点复跑 6/5 稳定）",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "dsh 迁移面（KI-101~103）",
+      "retire_when": "迁移对账票收口后删行并下调 max_entries"
     },
     {
       "name": "t260915-20-project-identity-realchain",
@@ -69,7 +83,9 @@
       "home": "巡检发现证据复核语义面（t260915-20/t260916-02）",
       "note": "发现证据复核 verified 卡 unverified（J1g/J1g2，定点复跑稳定）",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "巡检面（t260915-20/t260916-02）",
+      "retire_when": "巡检证据复核语义修好后删行并下调 max_entries"
     },
     {
       "name": "t260916-02-relocation-realchain",
@@ -77,7 +93,9 @@
       "home": "巡检发现证据复核语义面（t260915-20/t260916-02）",
       "note": "同上 T4a2/T4b2，与 t260915-20 同根",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "巡检面（t260915-20/t260916-02）",
+      "retire_when": "巡检证据复核语义修好后删行并下调 max_entries"
     },
     {
       "name": "t260917-02-legacy-fire-redirect",
@@ -85,7 +103,9 @@
       "home": "t260917-02 调度路人门/台账面",
       "note": "R1e/R1f/R3b；对照实验 31a4f6a（本目标直修前）同型红=先于本目标存在",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "调度/台账面（t260917-02）",
+      "retire_when": "调度路台账口径修好后删行并下调 max_entries"
     },
     {
       "name": "t260917-02-board-unresolved-running",
@@ -93,7 +113,9 @@
       "home": "t260917-02 调度路人门/台账面",
       "note": "B3b 同根；与 legacy-fire 同族",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "调度/台账面（t260917-02）",
+      "retire_when": "调度路台账口径修好后删行并下调 max_entries"
     },
     {
       "name": "t260910-04-console-paused-list",
@@ -101,7 +123,9 @@
       "home": "t260910-04 续派收口面",
       "note": "merge_check 红灯：泳道差集无 gitlink（嵌套仓）base_ref 缺失+续派 300s 超时",
       "booked_at": "2026-09-23T19:59:23+08:00",
-      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77"
+      "booked_sha": "f61f239c5e05ea691ae07e1abed25eb3f827ff77",
+      "owner": "续派收口面（t260910-04）",
+      "retire_when": "续派收口面修好后删行并下调 max_entries"
     },
     {
       "name": "t260911-02-trigger-kinds",
@@ -109,7 +133,9 @@
       "home": "suyou 标识迁移欠账（项目注册面：已注册 suyou、拒 sandbar）",
       "note": "收口跑首跑暴露（首轮 ENV_FAIL 未跑断言）；串行复跑稳定红 4 断言同根：ValueError 未知项目 'sandbar'（已注册：suyou）——CLAUDE.md 硬规则 5 存量标识欠账现形",
       "booked_at": "2026-09-23T20:47:27+08:00",
-      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f"
+      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f",
+      "owner": "项目注册面（suyou→sandbar 迁移）",
+      "retire_when": "项目注册面迁移收口后删行并下调 max_entries"
     },
     {
       "name": "t260910-11-temporal-isolation-guard",
@@ -117,7 +143,9 @@
       "home": "t260910-11 测试票号命名空间面",
       "note": "收口跑首跑暴露；子用例c 扫描面撞真票号 t260923-03（无进程戳）——测试票号带进程戳要求与真实票号空间冲突，场景命名空间待收紧",
       "booked_at": "2026-09-23T20:47:27+08:00",
-      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f"
+      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f",
+      "owner": "测试票号空间面（t260910-11）",
+      "retire_when": "测试票号空间口径修好后删行并下调 max_entries"
     },
     {
       "name": "t260913-02-suite-journey",
@@ -125,7 +153,9 @@
       "home": "台账落账面（t260913-02/t260917-02 同族）",
       "note": "收口跑首跑暴露；B5f/B7b 落账 ledger=None 与 t260917-02 R1f 台账=[] 同族——台账写路径在旅程夹具模式下不出行",
       "booked_at": "2026-09-23T20:47:27+08:00",
-      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f"
+      "booked_sha": "4cf4fa89be0b650c33dbb069399f8258aa33956f",
+      "owner": "台账落账面（t260913-02 族）",
+      "retire_when": "台账落账口径修好后删行并下调 max_entries"
     },
     {
       "name": "t260903-07-chat-project-tag",
@@ -133,7 +163,9 @@
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
       "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260903-07-click-no-chat-switch",
@@ -141,7 +173,9 @@
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
       "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260904-05-top-entry-retired-form",
@@ -149,7 +183,9 @@
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
       "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260904-11-charter-prompt-wire-contract",
@@ -157,7 +193,9 @@
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
       "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260905-07-stale-handshake-banner",
@@ -165,7 +203,9 @@
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
       "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260905-09-platform-context-fold-stacked",
@@ -173,7 +213,9 @@
       "home": "workbench UI 族欠账（lane 口径下稳定红；260925 批次清账认领）",
       "note": "lane 内稳定红（05 票两趟闸回执实证）；产品面欠账，待 workbench 专项修",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "该族专项修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries"
     },
     {
       "name": "t260907-04-naming-grep-assert",
@@ -181,7 +223,9 @@
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
       "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "engine 守卫/lint 岗",
+      "retire_when": "守卫/台账在 lane 口径下稳定绿后删行并下调 max_entries"
     },
     {
       "name": "t260910-12-lease-unit",
@@ -189,7 +233,9 @@
       "home": "守卫/台账族 lane 适配欠账（260925 批次清账认领）",
       "note": "守卫/台账类在 lane 口径下的稳定红；待专项",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "engine 守卫/lint 岗",
+      "retire_when": "守卫/台账在 lane 口径下稳定绿后删行并下调 max_entries"
     },
     {
       "name": "t260916-25-stage-console-prepare-refresh",
@@ -197,7 +243,9 @@
       "home": "stage 供给/台面（lane 口径隔离，不挂产品欠账）",
       "note": "共享台供给面瞬缺/自检面；按环境记录面隔离",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "stage 供给面（环境隔离，不挂产品欠账）",
+      "retire_when": "共享台供给面连续 3 轮无缺件后删行并下调 max_entries"
     },
     {
       "name": "t260916-26-stage-plugins-selfcheck",
@@ -205,7 +253,59 @@
       "home": "stage 供给/台面（lane 口径隔离，不挂产品欠账）",
       "note": "共享台供给面瞬缺/自检面；按环境记录面隔离",
       "booked_at": "2026-09-25T15:26:54+08:00",
-      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82"
+      "booked_sha": "c348c4cbaafb293953d8ba8d4e711c5ff257ac82",
+      "owner": "stage 供给面（环境隔离，不挂产品欠账）",
+      "retire_when": "共享台供给面连续 3 轮无缺件后删行并下调 max_entries"
+    },
+    {
+      "name": "t260904-12-no-skip-guard",
+      "verdict": "booked",
+      "home": "共享套件守卫面（260929 清账批次）",
+      "note": "套件自身的守卫场景在共享台下稳定红；260929 两票闸回执双双点名（07/08 同轮都败）。定性未毕=按产品面挂账（不按环境面隔离，避免遮真红）",
+      "owner": "engine 守卫/lint 岗",
+      "retire_when": "该守卫在 lane 口径下稳定绿后删行并下调 max_entries",
+      "booked_at": "2026-09-29T11:19:39+08:00",
+      "booked_sha": "ebb52c91f3e880293d06c5efac1f218684e0be36"
+    },
+    {
+      "name": "t260904-05-ledger-adversarial-boot",
+      "verdict": "booked",
+      "home": "台账/启动面（260929 清账批次，与 t260917-02 台账族同源）",
+      "note": "旧账册升级/坏 project/坏 JSON 三态 boot 在 lane 口径下稳定红；260929 两票同轮都败。定性未毕=按产品面挂账",
+      "owner": "台账面（t260917-02 族）",
+      "retire_when": "台账/启动三态修好后删行并下调 max_entries",
+      "booked_at": "2026-09-29T11:19:39+08:00",
+      "booked_sha": "ebb52c91f3e880293d06c5efac1f218684e0be36"
+    },
+    {
+      "name": "t260907-05-profile-farm-sandbar-links",
+      "verdict": "booked",
+      "home": "profile farm 面（260929 清账批次）",
+      "note": "profile farm 软链形态红；260929 两票同轮都败。定性未毕（疑似 lane 隔离口径）=按产品面挂账",
+      "owner": "lane/profile 面",
+      "retire_when": "该族修好或改判环境面后删行并下调 max_entries",
+      "booked_at": "2026-09-29T11:19:39+08:00",
+      "booked_sha": "ebb52c91f3e880293d06c5efac1f218684e0be36"
+    },
+    {
+      "name": "ticket-session-restore",
+      "verdict": "booked",
+      "home": "UI 会话恢复面（260929 清账批次）",
+      "note": "会话恢复场景红；260929-07 闸回执点名。定性未毕=按产品面挂账",
+      "owner": "workbench 岗（UI 族专项）",
+      "retire_when": "会话恢复修绿（定点复跑稳定绿 ×2）后删行并下调 max_entries",
+      "booked_at": "2026-09-29T11:19:39+08:00",
+      "booked_sha": "ebb52c91f3e880293d06c5efac1f218684e0be36"
+    },
+    {
+      "name": "auto-rework-trace",
+      "verdict": "isolated",
+      "home": "共享台双稳态（供给/并发面，按环境面隔离）",
+      "note": "五轮证据定性双稳态共享台 flake：干净主线 @9856f14 PASS 14.5s、gen0 闸 PASS 14.9s，泳道内 FAIL 93–99s（t260929-08 仲裁 gen3 判词）。非产品回归；若在干净主线上复现=改回 booked 重开产品面",
+      "owner": "共享台/供给面",
+      "retire_when": "共享台并发争用修好后（泳道内连续 3 轮稳定绿）删行并下调 max_entries",
+      "booked_at": "2026-09-29T11:19:39+08:00",
+      "booked_sha": "ebb52c91f3e880293d06c5efac1f218684e0be36"
     }
   ]
 }
