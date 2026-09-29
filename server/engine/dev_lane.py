@@ -261,6 +261,26 @@ INTEG_STALL_PATCH_ID = "t260929-integ-stall-guard"
 # 「永久死锁」降级为「干净重试一次」（上限 MAX_CONFLICT_ROUNDS 仍然封顶）。
 # 同形布尔门：老在途票 history 无此标记 → patched()=False → 旧路径逐字不变。
 MAIN_SYNC_RECOVERY_PATCH_ID = "t260929-main-sync-abort-on-failed-resolve"
+# 260930（宿主令·nusuyou 需求说明第六条·KI-099 实案）：**未知相位绝不 raise**。
+# 病根两段：① `_auto_rework` 的两条拒绝返回可能是**空串**（`str(meta["stage"] or fallback)`
+# 而 meta['stage'] 为空、fallback 又非法）——旧路径（`_apply_rework`，patched 未激活的
+# 在飞票）把它交回主循环；② 主循环尾对未知相位 `raise ValueError`（注释自称 unreachable），
+# 而引擎自己的注释写着「主循环是裸 while True，抛出去=打断工作流实例」⇒ 票面 status=None、
+# 快照/show/query 全查不到、**不可恢复**（nusuyou t260929-28 实案：照引擎拒收提示推荐的
+# 别名 to_stage=acceptance 操作即踩雷）。
+# 修法：相位兜底夹到可进入值（候选全非法 ⇒ arbitrate 人门）+ 主循环尾改 blocked（可查、
+# 可唤醒、原因具名）。同形布尔门：老在途票 history 无此标记 → 旧路径逐字不变。
+UNKNOWN_PHASE_BLOCK_PATCH_ID = "t260930-unknown-phase-block"
+#: 相位兜底（260930）：目标与 fallback 都不可用时用的最后落点——取 arbitrate（人门段，
+#: 最接近「停下让人看」的语义），绝不把空值/未知值交回主循环。
+REWORK_PHASE_FALLBACK = "arbitrate"
+#: **可打回相位集**（260930，与拒收提示同源）：PHASE_MAIN_CHAIN 里有几个值是主循环的
+#: **编排内部相位**（并行叉的两条边与汇合点），从外部 rework 直接落进去只会得到半套上下文
+#: （nusuyou 实案：提示里列了 acceptance，操作员照做就踩雷）。提示词表与合法性判定都取
+#: 本集合——**词表里能打的，才是提示里能推的**。
+REWORK_ADMISSIBLE_PHASES = frozenset({
+    "create_plan", "review_plan", "implement", "run_integration_tests",
+    "arbitrate", "acceptance", "merge_check", "merge"})
 
 # t260903-02 speedup 3: a third review_plan verdict, "conditional pass" —
 # verdict=conditional for cosmetic nits does not count as a send-back round; comments go
@@ -1883,6 +1903,23 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         return res
 
     # ---------- rework ----------
+    def _safe_phase(self, *candidates: str) -> str:
+        """候选相位 → 第一个**可进入**的（260930）：绝不把空串/未知值交回主循环。
+
+        主循环尾对未知相位 raise＝打断工作流实例（票不可查、不可恢复，nusuyou t260929-28
+        实案）。所以这里做最后一道兜底：候选（fallback / meta 现步）逐个验，全非法 ⇒
+        `REWORK_PHASE_FALLBACK`（arbitrate 人门），并**响亮留痕**（refused + _log），
+        夹相位这件事本身要能在票面/审计里看见，不静默。"""
+        for c in candidates:
+            if c and c in PHASE_MAIN_CHAIN and c != "done":
+                return c
+        self.refused.append({"who": "", "want": "phase-clamp",
+                             "why": "候选相位全部非法 %r → 夹到 %s"
+                                    % (candidates, REWORK_PHASE_FALLBACK)})
+        self._log("相位兜底：候选 %r 全部非法（空串/未知）→ 夹到 %s（绝不把空值交回主循环）"
+                  % (candidates, REWORK_PHASE_FALLBACK))
+        return REWORK_PHASE_FALLBACK
+
     def _auto_rework(self, target: str, note: str, who: str, fallback: str) -> str:
         """Internal/unified send-back landing: validates target/fallback ∈
         PHASE_MAIN_CHAIN (except done). Valid → the five meta fields + _touch + _log +
@@ -1899,6 +1936,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             self.refused.append({"who": who, "want": "rework(%s)" % target,
                                  "why": why})
             self._log("rework 拒绝：%s（%s）" % (why, who))
+            if workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
+                return self._safe_phase(fallback, str(self.meta.get("stage") or ""))
             return fallback if fallback in PHASE_MAIN_CHAIN else \
                 str(self.meta.get("stage") or fallback)
         if fallback == "done" or fallback not in PHASE_MAIN_CHAIN:
@@ -1906,6 +1945,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                  "want": "rework(%s) fallback(%s)" % (target, fallback),
                                  "why": "fallback 不在打回词表（纯防呆，字面量不应出现）"})
             self._log("rework 拒绝：fallback %r 非法，停 meta 现步（%s）" % (fallback, who))
+            if workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
+                return self._safe_phase(str(self.meta.get("stage") or ""), fallback)
             return str(self.meta.get("stage") or fallback)
         self.meta["stage"] = target
         self.meta["role"] = PHASE_MAIN_ROLES[target]
@@ -1980,7 +2021,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             why = ("终态不可为打回目标" if target == "done"
                    else "目标步不在打回词表（可打回=%s；integration/ 段可用别名 "
                         "to_stage=design_integration_tests）"
-                        % "、".join(sorted(PHASE_MAIN_CHAIN - {"done"})))
+                        % "、".join(sorted((PHASE_MAIN_CHAIN - {"done"}) & REWORK_ADMISSIBLE_PHASES)))
             self.refused.append({"who": req.who, "want": "rework(%s)" % target,
                                  "why": why})
             self._log("【rework 拒收】%s（%s）" % (why, req.who))
@@ -4235,7 +4276,21 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 phase = "done"
                 continue
 
-            raise ValueError("未知阶段 %r" % phase)  # unreachable (the step chain is closed)
+            if not workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
+                raise ValueError("未知阶段 %r" % phase)  # unreachable (the step chain is closed)
+            # 260930（宿主令·nusuyou 需求⑥）：未知相位**绝不 raise**——本文件自己写着「主循环
+            # 是裸 while True，抛出去=打断工作流实例」，而 raise 的后果就是票面 status=None、
+            # 快照/show/query 全不可读（t260929-28 实案，票作废不可恢复）。改成 blocked：
+            # 可查、可唤醒（retry_qc/rework）、原因具名（点名合法相位词表），把「不可恢复坏态」
+            # 降成「等人处置」。相位夹到人门再 continue（_blocked 内部已 wait_condition，
+            # 不会空转）。
+            await self._blocked(
+                REWORK_PHASE_FALLBACK,
+                "内部相位解析出未知值 %r（合法相位=%s）——已停为人审（不再让工作流任务失败）；"
+                "请用 rework(to_stage=<规范段名>) 复位，或 retry_qc 重驱"
+                % (phase, "、".join(sorted(PHASE_MAIN_CHAIN - {"done"}))))
+            phase = REWORK_PHASE_FALLBACK
+            continue
 
         # Close out
         self.meta["status"] = "closed"
