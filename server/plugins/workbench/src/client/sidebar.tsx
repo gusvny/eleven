@@ -268,7 +268,16 @@ const CSS = `${DERIVE_TOKENS_CSS}
 /* 展开态：双列。整窗三栏比例 左(项目+工单)15% : 中(视图)60% : 右(chat)25% ——
    左+中=侧栏占 75%（见下方 frame 第一轨改写），侧栏内部左右子列按 1:4 分。 */
 .wb-sb.wide { flex-direction:row; }
-.wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
+/* t260929-22 gen2（acceptance 打回×2 的落点）：左列最小宽 296px——执行器入口
+   （.wb-group-entry，名字+计数+弹性空档）要盖过组头行的点击中心，几何前提：
+   内宽/2 < 内宽-前缀36-图标簇138（5×26 冻结契约+4×2 gap），即内宽 > 292，
+   列宽 > 308；296px 内宽=280 不够——按真实盒模型：中心 = 列宽/2（padding 对称），
+   图标簇起点 = 列宽-8-138，条件 列宽/2 < 列宽-146 → 列宽 > 292……逐项重算：
+   列宽 W，内宽 W-16（左右 padding 8）；前缀=caret10+gap5+dot8+gap5=28+8=36；
+   簇=5×26+4×2=138；入口段=[36, W-16-138]；行中心（绝对）=W/2 ↔ 内坐标 W/2-8。
+   条件：W/2 < W-146 → W > 292。取 320px（入口段 36..174，中心 160，余量 14px；
+   名字可得 ~115px，1280×720 与更宽宿主窗口同式满足）。 */
+.wb-sb-left { flex:1 1 0; min-width:320px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
 .wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); position:relative; }
@@ -337,9 +346,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
-/* t260929-22 gen1：命中区 26→20px（显形 svg 18px 不变）——给入口段让出宽度；
-   三态色板不变。 */
-.wb-view-icon { width:20px; height:20px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
+/* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
+   三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
+   语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。
+   t260929-22 gen2 勘误：gen1 曾把命中区缩到 20px 给入口段让宽——被 t260904-17
+   A/B 实证为该场景新红单变量，此处恢复冻结契约 26×26；入口可达性改由列宽保证
+   （见 .wb-sb-left min-width:296px 的几何推导）。 */
+.wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
