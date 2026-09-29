@@ -84,9 +84,11 @@ const benchCwd = mkdtempSync('/tmp/wd-bench-cwd-')
 const resultPath = join(tmpHome, 'bench-result.json')
 
 // ── 起台（一次性；端口只由本脚本决定，绝不复用/占用任何既有面） ──
+// --no-open 必带（260929 宿主实报「浏览器不停跳新窗口」的元凶就是本行缺它：
+// dsh 默认 openBrowser=true，起台即把带 token 的地址交给宿主默认浏览器）。
 const logPath = join(tmpHome, 'console.log')
 const logFd = openSync(logPath, 'a')
-child = spawn(dshCmd, ['--profile', 'sandbar-bench'], {
+child = spawn(dshCmd, ['--profile', 'sandbar-bench', '--no-open'], {
   env: {
     ...process.env, DSH_HOME: tmpHome, SANDBAR_BENCH_RESULT: resultPath, SANDBAR_BENCH_CWD: benchCwd,
     SANDBAR_REPO: REPO_ROOT, SANDBAR_WATCHDOG_DIR: join(tmpHome, 'watchdog-projects'),
