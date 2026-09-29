@@ -21,7 +21,8 @@ import * as fs from 'node:fs'
  */
 export const REQUEST_KINDS = ['decision', 'approval', 'sign', 'question'] as const
 
-/** 单条请求行（追加面）。 */
+/** 单条请求行（追加面）。raised_by = 发起方会话 id（t260929-08 自锁归属面）；'' = 未归属
+ *  （历史行/未声明归属）——守望者自锁判定只认非空归属，未归属行显式点名、绝不冒充匹配。 */
 export interface RequestRow {
   type: 'request'
   id: string
@@ -32,6 +33,7 @@ export interface RequestRow {
   detail: string
   default_action: string
   expires_at: number | null
+  raised_by: string
 }
 
 /** 应答行（按 id 关联；追加不改写）。 */
@@ -95,7 +97,7 @@ export function makeRequestId(nowMs: number): string {
 /** 追加一条请求（字段校验 fail-closed；id/时间戳服务端定，不信任消费方）。 */
 export function appendRequest(
   io: LedgerIo, env: NodeJS.ProcessEnv, key: string,
-  body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; expires_at?: unknown },
+  body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; expires_at?: unknown; raised_by?: unknown },
   nowMs: number,
 ): { ok: true; row: RequestRow } | { ok: false; error: string } {
   if (typeof key !== 'string' || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(key)) {
@@ -119,6 +121,15 @@ export function appendRequest(
       return { ok: false, error: 'expires_at 必须是毫秒时间戳、ISO 8601 字符串或 null' }
     }
   }
+  // raised_by（t260929-08 自锁归属面）：可缺省；给了就必须是非空短字符串（≤120 字符），
+  // 畸形显式拒绝（fail-closed）——绝不静默丢归属让自锁判定瞎转。
+  let raisedBy = ''
+  if (body.raised_by !== undefined && body.raised_by !== null) {
+    if (typeof body.raised_by !== 'string' || body.raised_by.trim() === '' || body.raised_by.length > 120) {
+      return { ok: false, error: 'raised_by 必须是非空短字符串（≤120 字符的会话 id）；不给 = 未归属（自锁判定不认）' }
+    }
+    raisedBy = body.raised_by
+  }
   const row: RequestRow = {
     type: 'request', id: makeRequestId(nowMs), at: nowMs, project: key,
     kind: body.kind,
@@ -126,6 +137,7 @@ export function appendRequest(
     detail: typeof body.detail === 'string' ? body.detail : '',
     default_action: typeof body.default_action === 'string' ? body.default_action : '',
     expires_at: expires,
+    raised_by: raisedBy,
   }
   const file = requestsLedgerFile(key, env)
   io.mkdirSync(file.slice(0, file.lastIndexOf('/')), { recursive: true })
@@ -170,7 +182,8 @@ export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string):
     let doc: unknown
     try { doc = JSON.parse(line) } catch { out.malformed_rows += 1; continue }
     if (isRequestRow(doc)) {
-      requests.set(doc.id, { ...doc, status: 'waiting' })
+      // 历史行（t260929-08 前落账）没有 raised_by：读出统一归一化为 ''（未归属哨兵），不畸形。
+      requests.set(doc.id, { ...doc, raised_by: typeof doc.raised_by === 'string' ? doc.raised_by : '', status: 'waiting' })
     } else if (isAnswerRow(doc)) {
       answers.push(doc)
     } else {

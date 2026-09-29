@@ -20,4 +20,23 @@ const EX = 'executor-sandbar'
   assert(u2.reason.includes('S1-probe'), 'unknown carries the concrete reason')
   n += 5
 }
+
+// 未归属行（t260929-08）：空归属不参与匹配，显式点名计数，绝不冒充「没有自锁」。
+{
+  const mixed = [
+    { raisedBy: '', kind: 'approval', target: 'req-1', sessionRunning: false },
+    { raisedBy: 'other-session', kind: 'sign', target: 'req-2', sessionRunning: true },
+  ]
+  const v = detectSelfLock(mixed, EX, NOW)
+  assert(v.state === 'none' && v.reason.includes('1 条') && v.reason.includes('raised_by'), 'unattributed waiting rows named explicitly in reason, state stays none')
+  assert(detectSelfLock([{ raisedBy: '', kind: 'approval', target: 'req-1', sessionRunning: false }], EX, NOW).state !== 'waiting_on_itself', 'empty attribution can never match the executor session')
+  const allAttr = detectSelfLock([{ raisedBy: 'other', kind: 'approval', target: 'x', sessionRunning: true }], EX, NOW)
+  assert(allAttr.state === 'none' && allAttr.reason === '', 'fully attributed no-match = plain none with empty reason (no noise)')
+  const matchAmongUnattr = detectSelfLock([
+    { raisedBy: '', kind: 'approval', target: 'req-1', sessionRunning: false },
+    { raisedBy: EX, kind: 'question', target: 'req-3', sessionRunning: false },
+  ], EX, NOW)
+  assert(matchAmongUnattr.state === 'waiting_on_itself' && matchAmongUnattr.target === 'req-3', 'attributed own request still fires even among unattributed rows')
+  n += 4
+}
 done(n)
