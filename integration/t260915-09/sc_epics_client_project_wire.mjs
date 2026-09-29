@@ -149,7 +149,14 @@ try {
   const clickEpicsIcon = async (groupName) => {
     // 入口钉 title/aria-label=「立项单」入口的**用户可感知契约本身**（宿主令 260925 控制台
     // UI 文案一律英文后取值 "Epics"，迁移前旧值为「立项单」），非实现细节故钉英文原文。
-    const icon = page.locator('.wb-group-head', { hasText: groupName }).locator('[title="Epics"], [aria-label="Epics"]').first()
+    // t260929-22 宿主裁决（260929，DESIGN-CONFLICT 裁决 1）：260823「五图标常驻可见」
+    // 放宽为悬停显现（gen3 起图标簇=组头下方悬停现形条，静止 pointer-events:none）——
+    // 「不悬停直接点图标」是入口前旧语义，本裁决签发本处更新：先悬停组头现形图标条再点击
+    // （与 t260904-17 同款裁决配套改法）。
+    const head = page.locator('.wb-group-head', { hasText: groupName }).first()
+    await head.hover({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    const icon = head.locator('[title="Epics"], [aria-label="Epics"]').first()
     await icon.waitFor({ state: 'visible', timeout: 8000 })
     await icon.click({ timeout: 4000 })
     await page.locator('.wb-ep-root').first().waitFor({ state: 'visible', timeout: 8000 })

@@ -110,8 +110,20 @@ try {
   const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   await clickish(page, board);
   await page.waitForTimeout(500);
-  const proj = page.getByText('夹具甲', { exact: false }).first();
-  if (await proj.isVisible().catch(() => false)) await clickish(page, proj);
+  // t260929-22 宿主裁决（260929，DESIGN-CONFLICT 裁决 1）：项目名行=执行器入口
+  // （260927 胜；260823「五图标常驻可见」放宽为悬停显现）——「点项目名留在看板」
+  // 是入口前旧语义，本裁决签发本处更新：选项目进看板改点该组「Tickets」视图图标
+  // （先悬停组头现形图标条，gen3 起条为悬停显形）。组头形状漂移时回落旧点法。
+  const groupName = page.locator('.wb-group-head', { hasText: '夹具甲' }).first();
+  if (await groupName.count()) {
+    await groupName.hover().catch(() => {});
+    await page.waitForTimeout(400);
+    const ticketsIcon = groupName.locator('[title="Tickets"], [aria-label="Tickets"]').first();
+    await clickish(page, ticketsIcon);
+  } else {
+    const proj = page.getByText('夹具甲', { exact: false }).first();
+    if (await proj.isVisible().catch(() => false)) await clickish(page, proj);
+  }
   // 板面行卡定位契约：中列全尺寸卡与左栏迷你卡共用 data-ticket-id（同票两侧并存，
   // 裸 locator 会 playwright strict-mode 撞车）——用组件自声明 data-compact 消歧：
   // 板面=「false」、左栏=「true」。全部断言仍只落公开 DOM 契约锚，不锚实现内部。
