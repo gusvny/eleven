@@ -106,23 +106,36 @@ try {
   await bench.goto(page, { waitUntil: 'domcontentloaded' });
   await dismissNotice(page);
 
-  // T1 导航：工单列表 → 项目夹具甲 → 行卡在场
+  // T1 导航：工单列表 → 选项目夹具甲 → 行卡在场
+  //
+  // 260929 宿主裁决（t260929-22 DESIGN-CONFLICT 选 1）重新归属本步落点：**项目名行就是
+  // 执行器入口**（点名字 → 中心列切到 executor 面板），故「点项目名留在看板」是入口前的
+  // 旧语义，本场景不再据此导航。开本项目的板面改走一直存在、语义稳定的正规落点：组头行
+  // 内 `title="Tickets"` 视图图标（同族先例=t260915-10 的 Docs 图标 / t260915-09 的 Epics
+  // 图标，定位口径「组头 + 行内视图图标」，与本文件同款）。断言面不变（行卡在场 =
+  // data-ticket-id 契约），只把「怎么到达板面」换成不随入口语义漂移的控件——不是放宽判据。
   const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   await clickish(page, board);
   await page.waitForTimeout(500);
-  // t260929-22 宿主裁决（260929，DESIGN-CONFLICT 裁决 1）：项目名行=执行器入口
-  // （260927 胜；260823「五图标常驻可见」放宽为悬停显现）——「点项目名留在看板」
-  // 是入口前旧语义，本裁决签发本处更新：选项目进看板改点该组「Tickets」视图图标
-  // （先悬停组头现形图标条，gen3 起条为悬停显形）。组头形状漂移时回落旧点法。
+  // t260929-22 宿主裁决（260929，DESIGN-CONFLICT 裁决 1）合并两半（lane×main 同语义）：
+  // 项目名行=执行器入口（260927 胜；260823「五图标常驻可见」放宽）——「点项目名留在
+  // 看板」是入口前旧语义，选项目进看板改点该组「Tickets」视图图标（先悬停组头现形
+  // 图标条——gen3 悬停现形形态；gen4 行内常驻形态下悬停无害，两形态通吃）。定位取
+  // main 侧的 span[title=Tickets] 精确锚；组头形状漂移时回落旧点法（main 侧的
+  // nav/entry-affordance-fallback 留痕记录保留）。
   const groupName = page.locator('.wb-group-head', { hasText: '夹具甲' }).first();
   if (await groupName.count()) {
     await groupName.hover().catch(() => {});
     await page.waitForTimeout(400);
-    const ticketsIcon = groupName.locator('[title="Tickets"], [aria-label="Tickets"]').first();
+    const ticketsIcon = groupName.locator('span[title="Tickets"], [aria-label="Tickets"]').first();
     await clickish(page, ticketsIcon);
   } else {
-    const proj = page.getByText('夹具甲', { exact: false }).first();
-    if (await proj.isVisible().catch(() => false)) await clickish(page, proj);
+    const byName = page.getByText('夹具甲', { exact: false }).first();
+    if (await byName.isVisible().catch(() => false)) {
+      await clickish(page, byName);
+      record('nav/entry-affordance-fallback', true,
+        '项目行视图图标 [title="Tickets"] 不可见 → 退回点项目名（入口前旧语义；仅留痕，不作判据）');
+    }
   }
   // 板面行卡定位契约：中列全尺寸卡与左栏迷你卡共用 data-ticket-id（同票两侧并存，
   // 裸 locator 会 playwright strict-mode 撞车）——用组件自声明 data-compact 消歧：

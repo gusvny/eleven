@@ -245,6 +245,14 @@ BREATHE_PATCH_ID = "ki003-breathe-v1"
 # succeeding fail-closed is the precondition for tearing down the lane (the stage
 # report must not be lost with it). Same-shaped boolean gate (see the first note).
 ARCHIVE_PATCH_ID = "dev-lane-archive-ticket"
+# 260929 宿主令直修（t260929-22 实案）：**闸测量面零变化 ⇒ 不重跑全套**。
+# 病根：integration_route 判 tests-fault 只看「连续轮数 ≤ 5」，不看这一轮测到的东西与
+# 上一轮是否逐字相同 ⇒ 票状态一字未变（代码自 gen4 未动、裁判连续四轮同一判词且每轮
+# 都写「转人工判读」）却仍被路由回 run_integration_tests，每轮白烧一趟全套。判据=
+# shared.gate_round_signature（闸拦名单/具名环境红/四计数/归属置信/基线 ref/逐条失败
+# 明细，逐项相同才判停）；判停即转人审（_blocked_over_limit，retry_qc 可复活）。
+# 同形布尔门：老在途票 history 无此标记 → patched()=False → 旧路径逐字不变。
+INTEG_STALL_PATCH_ID = "t260929-integ-stall-guard"
 
 # t260903-02 speedup 3: a third review_plan verdict, "conditional pass" —
 # verdict=conditional for cosmetic nits does not count as a send-back round; comments go
@@ -1175,6 +1183,39 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         shown = "、".join(got[:limit])
         return "｜环境红（不拦·具名）：%s%s（共 %d）" % (
             shown, "…" if len(got) > limit else "", len(got))
+
+    def _integ_round_stall(self, cur_integ) -> Dict[str, Any]:
+        """本轮闸**测量面**与上一轮判过的逐字相同 ⇒ 判停（260929 宿主令直修）。
+
+        调用点在 tests-fault 非采纳路径：轮数未到上限时 `integration_route` 会把它路由回
+        run_integration_tests 再跑一趟全套——但若这一轮测到的东西（闸拦名单/具名环境红/
+        四计数/归属置信/基线 ref/逐条失败明细）与上一轮**完全相同**，重跑不可能产生新信息
+        （t260929-22 实案：连 4 轮同状态、代码自 gen4 未动、裁判每轮都写「转人工判读」，
+        仍被路由回跑，每趟 ~30 分钟）。签名相同 ⇒ 直接转人审（`_blocked_over_limit`，
+        人可用 retry_qc/授权复活），判词写明「连续 N 轮零变化」。
+
+        签名单写者=shared.gate_round_signature；本方法只管取用/记账/文案。
+        判不准（签名空=老回执/畸形）→ 不判停（照旧重跑，fail-safe）。"""
+        from shared import gate_round_signature
+        sig = gate_round_signature(cur_integ)
+        if not sig:
+            return {"stall": False, "rounds": 0, "sig": "", "note": ""}
+        prev = str(self.meta.get("integ_signature") or "")
+        try:
+            rounds = int(self.meta.get("integ_signature_rounds") or 0)
+        except (TypeError, ValueError):
+            rounds = 0
+        if prev and prev == sig:
+            rounds += 1
+            self.meta["integ_signature_rounds"] = rounds
+            return {"stall": True, "rounds": rounds, "sig": sig,
+                    "note": ("连续 %d 轮闸测量面逐字相同（same gate blockers / named env-red / "
+                             "counts / failure detail / baseline ref）：本票写集与红面零变化 ⇒ "
+                             "重跑全套不可能产生新信息。转人审（读仲裁判词与 DESIGN-CONFLICT "
+                             "类交接件后裁）；人裁后 retry_qc 可复活。" % rounds)}
+        self.meta["integ_signature"] = sig
+        self.meta["integ_signature_rounds"] = 1
+        return {"stall": False, "rounds": 1, "sig": sig, "note": ""}
 
     def _acceptance_without_rerun(self, cur_integ) -> bool:
         """B2（260929 宿主令）豁免轮归宿判据：本轮是否属于「环境面/已知红面」——
@@ -3225,6 +3266,15 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                 arb_done = False
                                 arb_res = None
                             continue
+                        # 260929 判停（宿主令直修）：测量面与上轮逐字相同 ⇒ 不再重跑全套
+                        if workflow.patched(INTEG_STALL_PATCH_ID):
+                            stall = self._integ_round_stall(cur_integ)
+                            if stall["stall"]:
+                                self._log("集成判停：%s" % stall["note"])
+                                if await self._blocked_over_limit(stall["note"]):
+                                    arb_done = False
+                                    arb_res = None
+                                continue
                         # B2（260929 宿主令）：豁免轮归宿收口——**只有本票新增产品红**
                         # 才重跑整轮。环境面/已知红面（红项已被具名 env_red 吸收、或闸
                         # blockers 空=零新增红）不再无脑重跑：重跑不会让环境红变绿
@@ -3660,6 +3710,16 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                 arb_done = False
                                 arb_res = None
                             continue
+                        # 260929 判停（宿主令直修）：与串行分支同构——测量面与上轮
+                        # 逐字相同 ⇒ 不再重跑全套，转人审（判据单写者=gate_round_signature）
+                        if workflow.patched(INTEG_STALL_PATCH_ID):
+                            stall2 = self._integ_round_stall(cur_integ)
+                            if stall2["stall"]:
+                                self._log("集成判停：%s" % stall2["note"])
+                                if await self._blocked_over_limit(stall2["note"]):
+                                    arb_done = False
+                                    arb_res = None
+                                continue
                         # B2（260929 宿主令）：与串行分支同构——环境面/已知红面不再重跑
                         # 整轮，直接进验收；只有本票新增产品红才重跑（理由见串行分支注）。
                         if not counted and self._acceptance_without_rerun(cur_integ):

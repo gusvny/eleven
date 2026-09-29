@@ -326,6 +326,16 @@ def scan_unpatched_branches(files: dict) -> dict:
 # 包装」是有意的：其体内含 await self._blocked（命令面）＝混合方法，白名单登记并写明
 # 自守机制（unique-per-entry patch id，KI-061）。
 BRANCH_REGISTRY = {
+    # 260929 集成判停两处（串行 / 并行汇合侧）：外层已处
+    # workflow.patched(INTEG_STALL_PATCH_ID) 门内（AST 祖先链核实，自证钉在
+    # test_260929_integ_stall_guard.py::test_stall_branches_are_inside_their_patch_gate
+    # ——分支挪出门外该钉先红）。旧 history（无 marker）重放整块缺席=分支不可达；
+    # _blocked_over_limit 体内另有 KI-061 unique-per-entry 门自守（同上两款）。
+    "dev_lane.py#run#await self._blocked_over_limit(stall['note'])#0":
+        "260929 集成判停（串行侧）：测量面零变化 ⇒ 转人审；外层 workflow.patched("
+        "INTEG_STALL_PATCH_ID) 门内，旧 history 无 marker=整块缺席（重放零新命令）。",
+    "dev_lane.py#run#await self._blocked_over_limit(stall2['note'])#0":
+        "260929 集成判停（并行汇合侧，同形分支）：同上门与自守。",
     "dev_lane.py#run#await self._blocked_over_limit(route.split(':', 1)[1])#0":
         "KI-061：_blocked_over_limit 内部以 unique-per-entry patch id（seq 无条件递增、"
         "每次进入换 id，memo 不毒化）自守重放，分支选择本身零新命令形态；串行仲裁侧。",
