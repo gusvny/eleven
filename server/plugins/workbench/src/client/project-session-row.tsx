@@ -88,7 +88,9 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
   border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); background:none;
-  color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
+  /* t260929-22 gen5（对比度红 2.64<4.5）：文字沉到固定近黑（项目色只留 25% 染色），
+     任何项目色（含最浅 #cee76a）白底都 ≥4.5；项目色仍由边框承载。 */
+  color:color-mix(in srgb,var(--wb-psess-color, #9ca3af) 25%,#1f2328); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 /* 空态可发现性（t260906-01）：账册为空时 24px 无字小方块不可认出——换带文字
  * 「＋ 新建会话」按钮（auto 宽 + padding）；有 tab 后回落小方块形态。同锚
@@ -106,7 +108,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-psess-tab.active { background:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 14%,transparent);
   border-color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
-  color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
+  color:color-mix(in srgb,var(--wb-psess-color, #9ca3af) 25%,#1f2328); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;

@@ -71,7 +71,10 @@ export const TOKEN = {
  * 行内注入（epicColorOf 结果，纯函数不动）。
  */
 export function epicChipColor(): string {
-  return 'color-mix(in srgb, var(--epic-c, #9ca3af) 45%, var(--dsw-alias-label-primary, #1f2328))'
+  /* t260929-22 gen5（对比度红 t260905-08/t260907-08 实测 4.18<4.5）：epic 色只出
+     30%，其余沉到固定近黑（内层 mix 把平台 label 先压向 #24292f 再收编）——任何
+     epic 色（含最浅黄 #eac54f 族）在白底都 ≥4.5。 */
+  return 'color-mix(in srgb, var(--epic-c, #9ca3af) 30%, color-mix(in srgb, var(--dsw-alias-label-primary, #1f2328) 30%, #24292f))'
 }
 
 /** 弱化文字（审批区 epicLine 等此前恒走 --wb-muted fallback 的点位，t260905-08 收编）。 */
@@ -107,7 +110,9 @@ export const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-success-solid:#2da44e;
 --dsw-derive-success-bg:color-mix(in srgb,#1a7f37 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-warn:color-mix(in srgb,#9a6700 45%,var(--dsw-alias-label-primary,#1f2328));
+/* t260929-22 gen5（对比度红 4.24<4.5）：warn 文字加深——基色换 warn-deep 家族的
+   #7d4e00、alias 只作 30% 少数项（极性不定时混不出保证对比度，见 UT contrast-palette）。 */
+--dsw-derive-warn:color-mix(in srgb,#7d4e00 70%,color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 30%,#1f2328));
 --dsw-derive-warn-deep:color-mix(in srgb,#7d4e00 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));

@@ -229,7 +229,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-dot[data-state=active]::before{background:var(--dsw-derive-accent,#0969da)}
 .wb-card-dot[data-state=done]::before{background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-state{font-size:11px;font-weight:600;flex:none}
-.wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#9a6700)}
+/* t260929-22 gen5（对比度红 4.24<4.5）：waiting 态文字锁深（#7d4e00，白底 ≈8:1），
+   不再走混平台 label 的令牌——label 极性不定时混不出保证对比度。 */
+.wb-card-state[data-state=waiting]{color:#7d4e00}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=failed]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
@@ -241,7 +243,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid;border-radius:10px;flex:none;white-space:nowrap}
 .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--dsw-derive-muted,#57606a);font-size:12px;flex:1 1 260px;min-width:0}
-.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#57606a}/* t260929-22 gen5：进展行白底对比度 2.62<4.5，锁 #57606a（≈5.9:1） */
 .wb-card-progress[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-progress[data-state=awaiting-human]{color:var(--dsw-derive-warn,#9a6700)}
 .wb-card-time{flex:none}
