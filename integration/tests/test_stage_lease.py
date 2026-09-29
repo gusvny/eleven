@@ -45,14 +45,31 @@ sys.path.insert(0, str(INTEG))
 import stage_docker as sd  # noqa: E402
 
 
+ORPHAN_KNOBS = ("SANDBAR_STAGE_SWEEP_ORPHANS",
+                "SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX",
+                "SANDBAR_STAGE_ORPHAN_MIN_AGE_S")
+
+
 class LeaseTestBase(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="lease-ut-")
         self._saved = {k: os.environ.get(k) for k in (
             "SANDBAR_STAGE_LOCK_DIR", "SANDBAR_STAGE_HEARTBEAT_S",
             "SANDBAR_STAGE_LEASE_TTL_S", "SANDBAR_STAGE_MAX_STAGES",
-            "SANDBAR_STAGE_MAX_HOLD_S", "SANDBAR_STAGE_HOLD_WAIT_S")}
+            "SANDBAR_STAGE_MAX_HOLD_S", "SANDBAR_STAGE_HOLD_WAIT_S",
+            # 孤儿清扫三旋钮（t260929 直修）：本电池的真值表面=「未设=库缺省」
+            # （挂点缺省关/CLI 缺省开/无半径/年龄阀 1800s），而集测道的起台 env
+            # 显式注入 on + 半径族 t26,sandbar-test,stage-console（宿主令 260923
+            # 自动清扫孤儿台）——环境注入会顶掉「未设」前提，泳道口径下
+            # test_orphan_condemn_valves / test_sweep_orphan_leg /
+            # test_hook_default_off_cli_default_on 三条例必红（前红实证：
+            # 同一 env 在主树复跑 = 3 failures，与泳道回执逐条同形）。故与
+            # LOCK_DIR 同款进保存/清除面：断言仍打缺省语义，只是不再吃调用方
+            # 的策略注入；用例体内显式注入旋钮的子用例（真值表负形）不受影响。
+        ) + ORPHAN_KNOBS}
         os.environ["SANDBAR_STAGE_LOCK_DIR"] = self.root
+        for k in ORPHAN_KNOBS:
+            os.environ.pop(k, None)
         sd._LOCK_ROOT_CACHE = None   # 隔离根生效（本进程内）
 
     def tearDown(self):
