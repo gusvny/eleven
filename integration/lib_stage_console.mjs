@@ -53,7 +53,7 @@
 // missing); a seeding failure does not block supply — each scenario's fixture
 // leg names it as env_fail (three-state contract, never fake green).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -275,6 +275,16 @@ async function seedFixtures(st, fixturesHost) {
   //    核验收口（2c），双保险。锁=目录原子建删；持锁者崩溃会留锁，等待
   //    有 4min 帽，超时按无锁顶补路径继续（幂等，不裸等）。
   const SEED_LOCK = path.join(fixturesHost, '.seeding-lock');
+  // 陈旧锁判据（260929 直修，宿主令「A」）：持锁者崩溃留下的锁会让**每一场**都空等
+  // 满 240s 帽——实况：一个滞留于 09-26 的锁令每个用到台的场景恒等 240s（暗税），而
+  // 代码里没有陈旧判定。判据=锁目录 mtime 年龄 > 帽（缺省 240s，与下方等待帽同一常量，
+  // 可用 SANDBAR_SEED_LOCK_STALE_S 覆盖）：**年龄一旦超过帽，本来等满后也要走顶补路径**，
+  // 故此处只是"不再白等"，顶补决策与今日逐字节等价（不新增任何接管面）。
+  // 命中必须响亮点名（无静默：锁路径 + 年龄 + 走顶补），且顶补路径本身幂等
+  // （锁内单播种者 + 播种后逐票 describe 核验收口）。
+  const SEED_LOCK_CAP_MS = 240_000;
+  const SEED_LOCK_STALE_MS =
+    Number(process.env.SANDBAR_SEED_LOCK_STALE_S || SEED_LOCK_CAP_MS / 1000) * 1000;
   let lockOwner = false;
   {
     const t0 = Date.now();
@@ -284,7 +294,15 @@ async function seedFixtures(st, fixturesHost) {
         lockOwner = true;
         break;
       } catch {
-        if (Date.now() - t0 > 240_000) break;
+        let ageMs = null;
+        try { ageMs = Date.now() - statSync(SEED_LOCK).mtimeMs; } catch { /* 刚被持锁者释放 */ }
+        if (ageMs !== null && ageMs > SEED_LOCK_STALE_MS) {
+          console.warn(`[stage-console] 陈旧种子锁按无主处理（${SEED_LOCK}，age=${Math.round(ageMs / 1000)}s`
+            + ` > 帽 ${Math.round(SEED_LOCK_STALE_MS / 1000)}s）：不等待，直接走幂等顶补路径`
+            + `（判据=等满帽后本来也要顶补；若要留存锁请查持锁者为何崩溃）`);
+          break;
+        }
+        if (Date.now() - t0 > SEED_LOCK_CAP_MS) break;
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
