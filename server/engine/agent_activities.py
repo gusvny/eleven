@@ -136,6 +136,31 @@ from shared import (
 )
 
 POLL_SEC = 5
+
+#: 活动侧轮询上限缺省（KI-002 修复，260929）：兑现 shared.AgentStageArgs.max_polls
+#: 的注释承诺（「0 = default (the activity-side constant)」——此前**没有**这个常量，
+#: 于是三处轮询上限守卫恒为死码，卡死的 agent 只能等 Temporal 平台超时，回执里
+#: 没有结果文件路径也没有轮询数，诊断被引偏）。
+#: 取值口径（假红风险=0）：由「步预算 AGENT_TO（6h）− 余量」派生 —— 上限必然落在
+#: 平台超时**之前**、任何本来能跑完的步子**之后**，故「本来会成功的步子」不受影响，
+#: 只是把「卡死 → 平台超时」换成「具名超时（点名结果文件 + 轮询数）」。
+#: 集成场景显式传 max_polls（2/50 等）压超时路径的行为逐字不变（显式值优先）。
+DEFAULT_STEP_BUDGET_SEC = 6 * 3600
+DEFAULT_MAX_POLLS_MARGIN_SEC = 120
+DEFAULT_MAX_POLLS = max(1, int((DEFAULT_STEP_BUDGET_SEC - DEFAULT_MAX_POLLS_MARGIN_SEC) // POLL_SEC))
+
+
+def effective_max_polls(args: Any) -> int:
+    """args.max_polls 非 0=显式（调用方自定，集成场景压路径用）；0=活动侧缺省（KI-002）。
+
+    三处轮询上限守卫（通用 agent 步 / arbitrate / acceptance_walkthrough）共用本函数，
+    保证「缺省兜底」只有一份实现（改口径只改这里）。非正数（0/负数/畸形）=缺省——
+    「立即触发上限」不是任何人想要的行为。"""
+    try:
+        v = int(getattr(args, "max_polls", 0) or 0)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_POLLS
+    return v if v > 0 else DEFAULT_MAX_POLLS
 INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_CMD_TIMEOUT_SEC") or 900)
 DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sandbar-headless")
 # ^ 缺省别名保留（import 行为逐字节不变，坏 shlex 依旧 import 时响亮死）。运行期真实
@@ -3353,7 +3378,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
                 {"stage": args.stage_id, "gen": args.gen, "polls": polls,
                  "session_kb": _session_kb(cwd)}))
             polls += 1
-            if args.max_polls and polls >= args.max_polls:
+            if polls >= effective_max_polls(args):   # KI-002：缺省兜底由活动侧常量给
                 raise RuntimeError(
                     "等结果文件超时（%d 次轮询 × %ds）：%s" % (polls, POLL_SEC, rfile))
             await asyncio.sleep(POLL_SEC)
@@ -8099,7 +8124,7 @@ async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
             activity.heartbeat(json.dumps({"stage": "arbitrate", "gen": args.gen,
                                            "polls": polls, "session_kb": _session_kb(cwd)}))
             polls += 1
-            if args.max_polls and polls >= args.max_polls:
+            if polls >= effective_max_polls(args):   # KI-002
                 raise RuntimeError("等仲裁结果超时（%d 轮询）：%s" % (polls, rfile))
             await asyncio.sleep(POLL_SEC)
     finally:
@@ -8450,7 +8475,7 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
             activity.heartbeat(json.dumps({"stage": "acceptance_walkthrough", "gen": args.gen,
                                            "polls": polls, "session_kb": _session_kb(cwd)}))
             polls += 1
-            if args.max_polls and polls >= args.max_polls:
+            if polls >= effective_max_polls(args):   # KI-002
                 raise RuntimeError("等验收报告超时（%d 轮询）：%s" % (polls, rfile))
             await asyncio.sleep(POLL_SEC)
     finally:

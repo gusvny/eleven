@@ -3672,7 +3672,9 @@ class AgentStageArgs:
     result_file: str = ""                      # the idempotence anchor: if it exists, read it directly (safe to re-run)
     log_file: str = ""
     gen: int = 0                               # how many times this stage has been entered (a rework re-run gets a fresh result file)
-    max_polls: int = 0                         # 0 = default (the activity-side constant)
+    max_polls: int = 0                         # 0 = default (the activity-side constant
+                                               # agent_activities.DEFAULT_MAX_POLLS —— 由步预算
+                                               # 派生，KI-002 修复；显式值=集成场景压超时路径用)
     # t260910-14 退役注记：epic/state_key 曾专属「预跑下一单」段（已整链退役）；字段
     # 保留为恒空默认——老 history 事件反序列化仍带这两键，删字段会让旧票重放
     # TypeError（解码安全优先于字段洁癖）。
