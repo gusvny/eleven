@@ -603,6 +603,58 @@ _ARBITRATION_CAP_EXITS = (
     "④ op=pause 暂停交人工处置")
 
 
+#: 集成轮「测量面」签名的域分隔标记（防字段拼接歧义）
+_GATE_SIG_FIELDS = ("blockers", "env_red")
+
+
+def gate_round_signature(receipt: Any) -> str:
+    """集成闸一轮的**测量面**签名（纯函数；260929 宿主令直修）。
+
+    为什么需要：`integration_route` 判 tests-fault 只看「连续轮数 ≤ 5」，**不看这一轮
+    测到的东西与上一轮是否逐字相同** ⇒ 票状态一字未变（代码自 gen4 未动、裁判连续四轮
+    同一判词且每轮都写「转人工判读」）却仍被路由回 run_integration_tests，每轮白烧一趟
+    全套（t260929-22 实案：353 场景 × ~30 分钟 × 4+ 轮）。签名相同＝再跑一遍得到的测量面
+    必然相同（同名同判、同类计数、同归属置信、同基线 ref）⇒ 重跑零信息量，该直接转人审。
+
+    覆盖面＝闸回执上送 workflow 的**全部可测输出**：闸拦名单、具名环境红、四计数、
+    归属置信、基线 ref、逐条失败明细（name×exit）。任一项变化即签名变化 ⇒ 照旧重跑
+    （保守方向：宁可多跑，不可把真变化当零变化）。
+    畸形/缺字段（老回执、崩半截）→ 返回 ""＝**不判停**（判不准不拦，fail-safe）。"""
+    if receipt is None:
+        return ""
+    def _g(name, default=None):
+        if isinstance(receipt, dict):
+            return receipt.get(name, default)
+        return getattr(receipt, name, default)
+    blockers = _g("blockers")
+    env_red = _g("env_red")
+    if not isinstance(blockers, list) or not isinstance(env_red, list):
+        return ""
+    try:
+        counts = tuple(int(_g(k, 0) or 0) for k in ("ran", "passed", "failed", "env_fail"))
+    except (TypeError, ValueError):
+        return ""
+    details = _g("details")
+    det: List[Tuple[str, int]] = []
+    if isinstance(details, list):
+        for d in details:
+            if not isinstance(d, dict):
+                continue
+            try:
+                det.append((str(d.get("name") or ""), int(d.get("exit") or 0)))
+            except (TypeError, ValueError):
+                det.append((str(d.get("name") or ""), -999))
+    payload = "|".join([
+        ",".join(sorted(str(b) for b in blockers)),
+        ",".join(sorted(str(x) for x in env_red)),
+        ",".join(str(c) for c in counts),
+        str(_g("affiliation_confidence", "") or ""),
+        str(_g("baseline_ref", "") or ""),
+        ";".join("%s=%d" % (n, e) for n, e in sorted(det)),
+    ])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
     """The arbitrate three-state route (pure function, tested directly by the
     selfcheck). Returns the next phase name or "blocked:<reason>".
