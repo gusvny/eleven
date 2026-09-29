@@ -1927,6 +1927,11 @@ SCENARIOS = [
     ("t260929-09-l10-launch-gate-mechanism",
      "L10 控制台启动面闸的机制化守卫（t260929-09，灰盒 L3，离线秒级零 docker）：260929 宿主实报浏览器弹窗，真凶 bench 用**变量二进制**起 dsh web、argv 带 --profile 且缺 --no-open，旧 L10 只认字面量二进制=绿灯盲区（当日基线实测 0 启动点被扫到）。A 机制红面四族样本（变量二进制+--profile argv/字面量 dsh 路径/dsh 命名变量/bin-dsh 路径拼接）缺旗必被识别（A1=事故同形状字面级回归）；B 绿面零误报（带旗/--version 探针/L10-allow 同行+前注释行两形态/非 dsh 二进制/空面）；C 畸形输入（未闭合括号/CRLF/嵌套引号/空文本）不炸；D 现树 lint_tests.py exit 0 且 0 error / 0 warn（验收口径原话）+L10 在场；E .sh 启动面合同——票 scope 2a 六个 automation 调用面逐个在场带旗（防静默不扫与 vacuous green），两个人工豁免面（start-console.sh/stage_console.sh 默认开浏览器）在闸里具名理由（scope 2b silence is not an exemption）；F ebb52c9 直修收据锚（bench 启动行仍带 --no-open）。与 t260907-10 sc_engine_layout §D（布局扫描器自证）intent 不同面；developer L1 守助手纯函数真值表。助手缝缺席=TDD 红点名即收口（不带着假缝让绿面假绿）",
      "python3 integration/t260929-09/sc_l10_launch_gate_mechanism.py", "ro"),
+
+    # ---- t260929-19: create-time acceptance extras 不被段进入覆盖（工单实报缺陷回归）----
+    ("t260929-19-acceptance-extra-face-survival",
+     "create-time acceptance extras 台面存活回归棒（t260929-19，灰盒 L3，离线秒级零 docker）：工单实报 dev_lane._enter 每次段进入无条件 meta[\"acceptance\"]=模板列表，实例 extras 首段进入即丢（t260929-18 动态复现；全局清单仅 t260915-01 detail-face 族 extras 恒空，无同 intent 在册）。锁用户台面旅程：A 非空 extras 建票→_init 后台面含模板项+全部 extras，首段 _enter 后仍全可见且首段 checklist 同含（schema 承诺两落点）；B 反向锁=推进第 2 段后台面恰为第 2 段模板列表（stage-1 视图不冻结前携）；C 重入锁=首段第二次进入（gen>1 返工形态）后台面=首段模板列表（sibling base.py:1046-1049 声明语义，退场有规则非静默截断）；D 畸形用例=模板项重复/空串/纯空白/非字符串条目逐条显式降级不炸、台面无重复无空行、丢弃条目台账具名留痕（explicit 而非 silent）；E 接线锁=_enter 的 acceptance 覆盖在条件分支内（防测试在场闸被拆回潮，源码锁样式同 test_t260915_01 §E）。intent 分工：developer L1 守 sanitizer 真值表与 gen 分支细节；本条守台面旅程+畸形不炸。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio（引擎 venv）缺席=ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260929-19/sc_acceptance_extra_face_survival.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900
