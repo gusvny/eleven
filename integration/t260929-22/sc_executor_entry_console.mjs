@@ -63,6 +63,18 @@ const FIXTURE_TICKET = {
 
 // ---------------------------------------------------------------- helpers
 
+/** 关遮罩弹层（role=dialog 有钮点钮，无钮 Escape；t260925-18 同款纪律）。 */
+async function dismissOverlays(page) {
+  for (let i = 0; i < 5; i++) {
+    const dialog = page.locator('[role="dialog"]').first()
+    if (!(await dialog.count())) return
+    const btn = dialog.locator('button:enabled').first()
+    if (await btn.count()) await btn.click({ timeout: 3000 }).catch(() => {})
+    else await page.keyboard.press('Escape').catch(() => {})
+    await page.waitForTimeout(600)
+  }
+}
+
 async function waitFor(cond, ms) {
   const t0 = Date.now()
   while (Date.now() - t0 < ms) {
@@ -112,14 +124,10 @@ async function launchBrowser(pw) {
 const json = (route, b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
 
 async function stubConsole(page) {
-  // 低位兜底（先注册=低优先）：未知 API 一律 ok:true 空结果，静态资源放行。
-  await page.route('**/*', (route) => {
-    const url = new URL(route.request().url())
-    if (url.pathname.startsWith('/sandbar-workbench/api/') || url.pathname.startsWith('/sandbar-watchdog/api/')) {
-      return json(route, { ok: true, result: {} })
-    }
-    return route.fallback()
-  })
+  // 低位兜底（先注册=低优先）：一切放行到真实台——只桩本票契约面（projects/tickets/
+  // watchdog status/面板页）。之前「未知 API 回 ok:true 空壳」会让 DocsSection 等
+  // 消费方拿到错形数据直接崩槽（定点复跑实锤）——兜底绝不发明响应形状。
+  await page.route('**/*', (route) => route.fallback())
   // 高位夹具桩（后注册=高优先）。
   await page.route('**/sandbar-workbench/api/wf/projects', (route) =>
     json(route, { ok: true, result: { projects: [{ key: PROJ, name: PROJ_NAME, dirs: [] }], quarantined: [] } }))
@@ -165,7 +173,14 @@ async function panelVisible(page, proj) {
 async function scenarioEntryOpensPanel(page) {
   const head = await projectRow(page)
   if (!head) return `project group row for "${PROJ_NAME}" not rendered in left column (projects stub not consumed?)`
-  await head.click()
+  // 点行本身（项目名区，x=40 避开左端 caret——caret 折叠是另一件事，一次点击一件事）。
+  // 实测定点：组头是整行 flex（宽至数百 px），几何中心/远点不携带入口点击语义
+  // （闸+定点复跑实锤：中心点击零反应），只有项目名邻域触发入口。
+  try {
+    await head.click({ position: { x: 40, y: 9 }, timeout: 8000 })
+  } catch {
+    await head.click({ position: { x: 40, y: 9 }, force: true, timeout: 8000 })
+  }
   if (!(await panelVisible(page, PROJ))) {
     return `clicking the project-name row did not open the executor panel for ${PROJ} @ ${await snap(page)}`
   }
@@ -176,19 +191,30 @@ async function scenarioEntryOpensPanel(page) {
 
 async function scenarioSwitcherFlips(page) {
   // 切换器两个段都必须在（设计定名 Executor / Chat——英文界面标签契约 260925）。
-  const ex = page.getByText('Executor', { exact: true }).first()
-  const chat = page.getByText('Chat', { exact: true }).first()
+  // 锚=data-wb-executor-seg / data-wb-chat-seg（developer 声明的测试锚；getByText 会
+  // 撞右栏 chat 面自身的「Chat」字样——定点复跑实锤）。
+  const ex = page.locator('[data-wb-executor-seg]').first()
+  const chat = page.locator('[data-wb-chat-seg]').first()
   if (!(await ex.count())) return 'Executor segment of the switcher not found in the executor view'
   if (!(await chat.count())) return 'Chat segment of the switcher not found in the executor view'
   await chat.click()
   const chatShown = await waitFor(async () => {
+    // 判「离开面板视图」只看面板 iframe 是否退场（marker 字样会经 iframe 历史装载
+    // 残留在序列化面——定点复跑实锤，iframe 在场性才是视图契约）。
     const txt = await page.evaluate(() => ({
       iframe: [...document.querySelectorAll('iframe')].some(f => /sandbar-executor-panel/.test(f.src || '')),
-      marker: (document.body.textContent || '').includes(PANEL_STUB_MARKER),
+      frame: !!document.querySelector('[data-wb-executor-frame]'),
     }))
-    return !txt.iframe && !txt.marker
+    return !txt.iframe && !txt.frame
   }, 8000)
-  if (!chatShown) return 'clicking Chat did not leave the panel view (panel still mounted)'
+  if (!chatShown) {
+    const dump = await page.evaluate(() => ({
+      segs: [...document.querySelectorAll('[data-wb-executor-seg],[data-wb-chat-seg]')].map(b => [b.textContent, b.getAttribute('data-on')]),
+      frames: document.querySelectorAll('iframe').length,
+      exviews: document.querySelectorAll('[data-wb-executor-view]').length,
+    }))
+    return `clicking Chat did not leave the panel view (panel still mounted) — ${JSON.stringify(dump)}`
+  }
   await ex.click()
   if (!(await panelVisible(page, PROJ))) return 'clicking Executor did not bring the panel back (switcher is one-way)'
   return null
@@ -225,7 +251,7 @@ async function scenarioBoardIconStillWorks(page) {
   if (!head) return 'project row not rendered (cannot run regression leg)'
   const icon = head.locator('.wb-view-icon').first()
   if (!(await icon.count())) return 'no view icon inside the project row (existing five-view regression face broke)'
-  await icon.click()
+  await icon.click({ timeout: 8000 }).catch(async () => { await icon.click({ force: true, timeout: 8000 }) })
   const ok = await waitFor(async () =>
     (await page.locator('.wb-card[data-ticket-id]', { hasText: FIXTURE_TICKET.id }).count()) > 0, 8000)
   if (!ok) return `board view icon click no longer shows the ticket list @ ${await snap(page)}`
@@ -263,8 +289,12 @@ async function run() {
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)) })
 
   await stubConsole(page)
-  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  // domcontentloaded（networkidle 在轮询型 console 上不可收敛——闸红归因：导航超时）；
+  // 遮罩收口（Internal Testing Notice aria-modal 使 #root inert——不关它所有点击全被拦）。
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  await dismissOverlays(page)
   await page.waitForTimeout(3000)
+  await dismissOverlays(page)
 
   const failWith = async (name, e) => record(name, 'fail', `${String(e).slice(0, 140)} @ ${await snap(page)}`)
   const run1 = async (name, fn) => {
