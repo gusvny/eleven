@@ -325,7 +325,7 @@ export async function assertBoardReady(page, budgetMs) {
 
 /** 板面视图统一 run：切视图 → 就绪断言（抛错即该视图失败=不 shoot=无图）。 */
 async function openBoardView(page) {
-  const anchor = await openView(page, "工单列表");
+  const anchor = await openView(page, "Tickets");
   const ready = await assertBoardReady(page);
   return `${anchor} → ${ready}`;
 }
@@ -431,7 +431,14 @@ async function navigateToChat(page, allowSeed = false) {
     // active——t260901-02 dbg-chat 实证链）。造一条最小消息：--allow-seed 已放行
     // 台内造数，此为一次真实模型调用（凭据=临时家 .credentials.yaml，源由
     // capture-lane 按 per-key 优先/legacy 回落解析拷入，与生产台同源）。
-    await seedChatMessage(page);
+    try {
+      await seedChatMessage(page);
+    } catch (e) {
+      // 失败面补浏览器 console 尾部（t260929 修定位）：台内建会话的失败唯一留痕处是
+      // workbench 的 console.error（「新建会话失败：…」），不带上就只能靠猜——
+      // 旧文案把两个猜测（machineBusy / 准入模态）当结论，实际把诊断引向了错误方向。
+      throw new Error(`${e.message}；浏览器 console 尾部=${browserConsole.slice(-20).join(" | ") || "（无输出）"}`);
+    }
     anchor = "隔离台项目行「+ 钮」+ 种子消息（[data-wb-psess-new]，真内容驱动 active）";
   } else {
     const row = page.locator("[data-wb-psess-tab]").first();
@@ -489,79 +496,143 @@ function seedPromptText() {
  *   ① textarea 上用 prototype native setter 写 value + dispatch bubbling input
  *      （React 受控组件 onChange 生效，playwright fill 同理但受 mask 干扰更稳的是直评）；
  *   ② DOM 直点 send 按钮（aria-label="Send message"）。
- * 消息词可 env SANDBAR_UI_CAPTURE_SEED_PROMPT 覆盖；发送即一次真实模型往返。 */
+ * 消息词可 env SANDBAR_UI_CAPTURE_SEED_PROMPT 覆盖；发送即一次真实模型往返。
+ *
+ * ⚠️ 0.1.5 composer 换壳（t260929 实证，本夹具 chat 视图恒红的根因）：编辑器从
+ * `<textarea>` 换成 **Lexical 富文本**——`div[contenteditable][data-composer-input]`
+ * （dsh-client-ui-conversation 的 Editor 宿主，`editor.setEditable(editable)` 把
+ * live/machineBusy 的合成结果落到 contenteditable 属性上）。所以：
+ *   - 元素锚：优先 `[data-composer-input]`（平台机读锚），回落 `textarea`（0.1.1）；
+ *   - 可编辑判据：contenteditable="true"（不是 textarea 的 readOnly/disabled）；
+ *   - 写值通路：`keyboard.insertText` 走**真输入事件**（Lexical 只认自己的
+ *     beforeinput/input 处理链，原型 value setter 对 contenteditable 无意义）；
+ *   - 发送面不变：send 按钮 aria-label 仍是平台 i18n `input.send` = "Send message"。 */
 async function seedChatMessage(page) {
   const promptText = seedPromptText();
   const badPrompt = validateSeedText(promptText);
   if (badPrompt) throw new Error(`台内造数失败：${badPrompt}`);
   // 新建会话到 composer 挂稳有窗口期（过早拿到的是将被换装的 hero composer，
-  // 写进去会被换掉——t260901-02 实测 value 恒空）。重试写：每次现查 textarea、
-  // 写后回读校验，值不粘住即等 1s 重来（最多 20s）。
+  // 写进去会被换掉——t260901-02 实测 value 恒空）。重试写：每次现查 composer、
+  // 写后回读校验，不粘住即等 1s 重来（最多 20s）。
   // charter 注入后（session-entry.tsx 点「+」即提交 charter）composer 进入
-  // machineBusy：平台 InputBar 把它置 readOnly，此刻写值必被 React 受控回冲。
+  // machineBusy：平台 InputBar 把它置不可编辑，此刻写值必被 React 受控回冲。
   // 且隔离台可能弹「Add an API key」准入模态把会话压在 inert——不点掉
   // 「Configure later」composer 永远不会 editable。所以写值前先等 composer
-  // 可编辑（textarea 在场且非 readOnly 非 disabled，最长 120s，期间顺手点
-  // 准入模态让路）；data-phase 是否翻 active 不作为前置（平台 class 是
-  // CSS-module 哈希名，不能当选择器用，只认稳定的 data-phase/textarea 锚）。
+  // 可编辑（0.1.5：contenteditable="true"；0.1.1：textarea 非 readOnly 非
+  // disabled，最长 120s，期间顺手点准入模态让路）；data-phase 是否翻 active
+  // 不作为前置（平台 class 是 CSS-module 哈希名，不能当选择器用，只认稳定的
+  // data-phase / [data-composer-input] 锚）。
   const editableDeadline = Date.now() + Number(process.env.SANDBAR_UI_CAPTURE_COMPOSER_EDITABLE_MS || 120000);
-  let editable = false;
+  // composer 探针（双版）：0.1.5 = [data-composer-input] 的 contenteditable，
+  // 0.1.1 = textarea。返回 {kind, loc}；两版都不在场=null。
+  const probeComposer = async () => {
+    const ce = page.locator("[data-composer-input]").first();
+    if (await ce.count()) return { kind: "lexical", loc: ce };
+    const ta = page.locator("textarea").first();
+    if (await ta.count()) return { kind: "textarea", loc: ta };
+    return null;
+  };
+  const isEditable = async (c) => c.kind === "lexical"
+    ? await c.loc.evaluate((el) => el.getAttribute("contenteditable") === "true").catch(() => false)
+    : !(await c.loc.evaluate((el) => el.readOnly || el.disabled).catch(() => true));
+  let composer = null;
   while (Date.now() < editableDeadline) {
     const later = page.locator('button:has-text("Configure later")').first();
     try {
       if (await later.isVisible()) { await later.click(); console.log("[capture] key 准入模态已点 Configure later"); }
     } catch { /* 模态时隐时现，下一轮再试 */ }
-    const ta0 = page.locator("textarea").first();
-    if (await ta0.count()) {
-      const ro = await ta0.evaluate((el) => el.readOnly || el.disabled).catch(() => true);
-      if (!ro) { editable = true; break; }
-    }
+    const cand = await probeComposer();
+    if (cand && await isEditable(cand)) { composer = cand; break; }
     await page.waitForTimeout(1000);
   }
-  if (!editable) {
+  if (!composer) {
+    // 诊断面（260929 修：旧诊断只报 textarea 数组，「一句人话猜两个原因」+ 空诊断
+    // 把定位引向 machineBusy，而实测根因常在别处——按「报错必须精确」补齐自证面）：
+    // 平台 composer 不可编辑 ⟺ disabled（!live/inert/blocked/removed）或 machineBusy
+    // （input.phase ∈ adjudicating|submitting）；composer 元素是否在场 + contenteditable
+    // 取值区分「没渲染」/「渲染了但被禁」（inert=无活会话或无工作区绑定）；psess 计数 +
+    // 账册 active tab 证明「+ 钮」点击是否真的把会话立在台面上；浏览器 console 尾部
+    // 承接 handleNew 的 console.error（建会话失败的唯一留痕处）。
     const diag = await page.evaluate(() => {
-      const tas = [...document.querySelectorAll("textarea")];
+      const c = document.querySelector("[data-composer-input]");
       return {
         phases: [...document.querySelectorAll("[data-phase]")].map((e) => e.getAttribute("data-phase")),
-        textareas: tas.map((t) => ({
-          cls: (t.className || "").slice(0, 60), disabled: t.disabled, readOnly: t.readOnly,
-          visible: !!(t.offsetWidth || t.offsetHeight),
-        })),
+        composerEl: c ? {
+          contenteditable: c.getAttribute("contenteditable"),
+          disabled: c.getAttribute("aria-disabled"),
+          placeholder: (c.getAttribute("data-placeholder") || c.getAttribute("placeholder") || "").slice(0, 60),
+        } : null,
+        textareas: document.querySelectorAll("textarea").length,
+        editables: document.querySelectorAll("[contenteditable]").length,
+        psess: {
+          newBtn: document.querySelectorAll("[data-wb-psess-new]").length,
+          row: document.querySelectorAll("[data-wb-psess-row]").length,
+          tab: document.querySelectorAll("[data-wb-psess-tab]").length,
+          activeTab: document.querySelectorAll("[data-wb-psess-tab][data-active=true], [data-wb-psess-tab][data-active]").length,
+        },
+        dialogs: [...document.querySelectorAll('[role="dialog"]')].map((d) => (d.innerText || "").slice(0, 120)),
+        bodyExcerpt: (document.body.innerText || "").slice(0, 400),
       };
     }).catch((e) => String(e));
-    throw new Error("composer 在 120s 内未恢复可编辑（charter machineBusy 未解除或准入模态未让路），诊断="
-      + JSON.stringify(diag));
+    throw new Error("composer 在 120s 内未恢复可编辑（平台 composer 被禁：会话未 live/无工作区绑定/"
+      + "machineBusy，或准入模态未让路），诊断=" + JSON.stringify(diag));
   }
   let filled = "";
   let lastErr = "";
-  for (let i = 0; i < 20; i++) {
-    const ta = page.locator("textarea").first();
-    if (!(await ta.count())) { await page.waitForTimeout(1000); continue; }
-    filled = await ta.evaluate((el, txt) => {
-      el.focus();
-      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
-      setter.call(el, txt);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      return el.value;
-    }, promptText).catch((e) => { lastErr = String(e); return ""; });
-    if (filled === promptText) break;
-    await page.waitForTimeout(1000);
-  }
-  if (filled !== promptText) {
-    const diag = await page.evaluate(() => {
-      const tas = [...document.querySelectorAll("textarea")];
-      return {
+  if (composer.kind === "lexical") {
+    // Lexical 写值：先聚焦（DOM 直评，绕开 mask 拦 pointer），再 keyboard.insertText
+    // 发真输入事件；回读编辑器文本校验（不粘住=清空重来，最多 20 轮）。
+    for (let i = 0; i < 20; i++) {
+      const cur = await composer.loc.evaluate((el) => el.innerText || el.textContent || "").catch(() => "");
+      if (cur.includes(promptText)) { filled = promptText; break; }
+      if (cur.trim() !== "") {
+        await composer.loc.evaluate((el) => el.focus()).catch(() => {});
+        await page.keyboard.press("ControlOrMeta+a").catch(() => {});
+        await page.keyboard.press("Backspace").catch(() => {});
+      }
+      await composer.loc.evaluate((el) => el.focus()).catch((e) => { lastErr = String(e); });
+      await page.keyboard.insertText(promptText).catch((e) => { lastErr = String(e); });
+      await page.waitForTimeout(300);
+    }
+    if (filled !== promptText) {
+      const seen = await composer.loc.evaluate((el) => (el.innerText || el.textContent || "").slice(0, 120)).catch(() => "");
+      const diag = await page.evaluate(() => ({
         phases: [...document.querySelectorAll("[data-phase]")].map((e) => e.getAttribute("data-phase")),
-        textareas: tas.map((t) => ({
-          cls: (t.className || "").slice(0, 60), disabled: t.disabled, readOnly: t.readOnly,
-          visible: !!(t.offsetWidth || t.offsetHeight),
-        })),
-      };
-    }).catch((e) => String(e));
-    throw new Error("种子消息写入 composer 失败（重试 20s 后 value=" + JSON.stringify(filled)
-      + (lastErr ? "，末次异常=" + lastErr : "")
-      + "，诊断=" + JSON.stringify(diag) + "）");
+        composerContenteditable: document.querySelector("[data-composer-input]")?.getAttribute("contenteditable") ?? null,
+      })).catch((e) => String(e));
+      throw new Error("种子消息写入 composer 失败（Lexical 编辑器 20 轮后文本=" + JSON.stringify(seen)
+        + (lastErr ? "，末次异常=" + lastErr : "") + "，诊断=" + JSON.stringify(diag) + "）");
+    }
+  } else {
+    for (let i = 0; i < 20; i++) {
+      const ta = page.locator("textarea").first();
+      if (!(await ta.count())) { await page.waitForTimeout(1000); continue; }
+      filled = await ta.evaluate((el, txt) => {
+        el.focus();
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+        setter.call(el, txt);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        return el.value;
+      }, promptText).catch((e) => { lastErr = String(e); return ""; });
+      if (filled === promptText) break;
+      await page.waitForTimeout(1000);
+    }
+    if (filled !== promptText) {
+      const diag = await page.evaluate(() => {
+        const tas = [...document.querySelectorAll("textarea")];
+        return {
+          phases: [...document.querySelectorAll("[data-phase]")].map((e) => e.getAttribute("data-phase")),
+          textareas: tas.map((t) => ({
+            cls: (t.className || "").slice(0, 60), disabled: t.disabled, readOnly: t.readOnly,
+            visible: !!(t.offsetWidth || t.offsetHeight),
+          })),
+        };
+      }).catch((e) => String(e));
+      throw new Error("种子消息写入 composer 失败（重试 20s 后 value=" + JSON.stringify(filled)
+        + (lastErr ? "，末次异常=" + lastErr : "")
+        + "，诊断=" + JSON.stringify(diag) + "）");
+    }
   }
   await page.waitForTimeout(300); // 让 React onChange 落 state
   const clicked = await page.evaluate(() => {
@@ -573,8 +644,7 @@ async function seedChatMessage(page) {
   });
   if (clicked !== "sent") {
     // 兜底：聚焦后回车（部分布局无 aria-label 按钮时）
-    const ta2 = page.locator("textarea").first();
-    await ta2.evaluate((el) => el.focus());
+    await composer.loc.evaluate((el) => el.focus()).catch(() => {});
     await page.keyboard.press("Enter");
     console.log("[capture] send 按钮不可用（" + clicked + "），已退避回车提交");
   }
@@ -658,12 +728,23 @@ async function dismissNotice(page) {
   }
 }
 
+/** 点击侧栏视图图标（语义锚 title）切中列视图。
+ *
+ *  title 真源 = 插件 PROJECT_ICON_SPECS（server/plugins/workbench/src/client/project-icons.tsx：
+ *  Tickets / Docs / Model Routes / Epics / Project Settings）。宿主令 260925「控制台 UI
+ *  文案英文化」把这四枚图标 title 从中文改名（提交 31b9ff3 / t260926 批），本夹具漏改 ⇒
+ *  全部视图点击恒失败、chat 视图连带红（260929 修；KI-048 同族的「锚文案会自缚」前车之鉴）。
+ *  报错面因此必须报出 DOM 实有 title，不再断言单一结论——旧文案「插件未挂载或侧栏收起」
+ *  把「改名」这一真因彻底遮住，定位全靠手翻截图。 */
 async function openView(page, title, waitSelector, waitMs = 3000) {
   const icon = page.locator(`.wb-view-icon[title="${title}"]`).first();
   try {
     await icon.waitFor({ state: "visible", timeout: 5000 });
   } catch {
-    throw new Error(`侧栏视图图标不可见（[title="${title}"]）——工单台插件未挂载或侧栏收起`);
+    const present = await page.evaluate(() => [...new Set([...document.querySelectorAll(".wb-view-icon")]
+      .map((e) => e.getAttribute("title")).filter(Boolean))]).catch(() => []);
+    throw new Error(`侧栏视图图标不可见（[title="${title}"]）——工单台插件未挂载、侧栏收起，`
+      + `或图标 title 已改名（DOM 实有：${present.length ? present.join(",") : "无 .wb-view-icon"}）`);
   }
   await forceClick(icon);
   if (waitSelector) {
@@ -679,29 +760,34 @@ async function openView(page, title, waitSelector, waitMs = 3000) {
 }
 
 /** 新建工单弹层打开态（只开不提交——只读红线降级口径）。需先切到立项单视图且
- * 至少有一个立项可进详情；链路任一步不可达即报错（尽力视图，不阻断其余）。 */
+ * 至少有一个立项可进详情；链路任一步不可达即报错（尽力视图，不阻断其余）。
+ *
+ * 按钮文案真源=epics.tsx:459（宿主令 260925 英文化后＝「＋ New Ticket」，旧文案
+ * 「＋ 新建工单」随 t260926 批退役；同批 integration/t260907-08 的同类锚已改）。 */
 async function openNewTicketModal(page) {
-  await openView(page, "立项单", ".wb-ep-root");
+  await openView(page, "Epics", ".wb-ep-root");
   const chip = page.locator(".wb-ep-code").first();
   try {
     await chip.waitFor({ state: "visible", timeout: 5000 });
   } catch {
-    throw new Error("立项单列表为空（.wb-ep-code 无行），无法走「详情→＋新建工单」链路");
+    throw new Error("立项单列表为空（.wb-ep-code 无行），无法走「详情→＋ New Ticket」链路");
   }
   await forceClick(chip);
-  const btn = page.locator(".wb-ep-btn-green", { hasText: "新建工单" }).first();
+  const btn = page.locator(".wb-ep-btn-green", { hasText: "New Ticket" }).first();
   try {
     await btn.waitFor({ state: "visible", timeout: 5000 });
   } catch {
-    throw new Error("立项详情未出现「＋ 新建工单」按钮（.wb-ep-btn-green）");
+    const labels = await page.locator(".wb-ep-btn-green").allInnerTexts().catch(() => []);
+    throw new Error(`立项详情未出现「＋ New Ticket」按钮（.wb-ep-btn-green）`
+      + `——按钮文案可能已改名（DOM 实有：${labels.length ? labels.map((s) => s.trim()).join(" | ") : "无 .wb-ep-btn-green"}）`);
   }
   await forceClick(btn);
   try {
     await page.waitForSelector(".wb-ep-modal", { timeout: 5000 });
   } catch {
-    throw new Error("点击「＋ 新建工单」后弹层未出现（.wb-ep-modal）");
+    throw new Error("点击「＋ New Ticket」后弹层未出现（.wb-ep-modal）");
   }
-  return "立项详情 → ＋ 新建工单（只开不提交）";
+  return "立项详情 → ＋ New Ticket（只开不提交）";
 }
 
 // 健全性断言（t260829-01 建；t260831-02 修正 refresh 假阳性）：多张截图若字节级
@@ -788,7 +874,7 @@ async function main() {
     // selftest 校验 run 身份相等，解绑回裸 openView = selftest 红 + 场景红）。
     { ...BOARD_VIEWS.find((v) => v.file === "console-board.png") },
     { file: "console-epics.png", title: "立项单列表",
-      run: (page) => openView(page, "立项单", ".wb-ep-root") },
+      run: (page) => openView(page, "Epics", ".wb-ep-root") },
     { file: "console-new-ticket.png", title: "新建工单弹层打开态",
       run: (page) => openNewTicketModal(page) },
     { file: "console-sessions.png", title: "项目会话区行（票② R8 改锚）",
@@ -804,9 +890,9 @@ async function main() {
     // 文档=workbench 插件 DocsSection；模型路由=providers 插件（独立包，
     // 能渲染=农场 sandbar-providers 链解析通了）。
     { file: "console-docs.png", title: "文档视图（workbench 插件 DocsSection）",
-      run: (page) => openView(page, "文档", ".wb-doc-root") },
+      run: (page) => openView(page, "Docs", ".wb-doc-root") },
     { file: "console-providers.png", title: "模型路由视图（providers 插件经农场新链装载证明）",
-      run: (page) => openView(page, "模型路由", ".syp-root") },
+      run: (page) => openView(page, "Model Routes", ".syp-root") },
   ];
 
   // fixture 态专属视图（t260901-24）：仅注入模式追加进 VIEWS；缺省清单逐字节不变
@@ -817,7 +903,7 @@ async function main() {
       {
         file: "console-approval.png", title: "审批抽屉（fixture T-FIX-A awaiting-human）",
         run: async (page) => {
-          await openView(page, "工单列表");
+          await openView(page, "Tickets");
           const row = page.locator('tr.wb-row[data-state="awaiting-human"]', { hasText: "T-FIX-A" }).first();
           try {
             await row.waitFor({ state: "visible", timeout: 8000 });
@@ -839,7 +925,7 @@ async function main() {
         run: async (page) => {
           // 先回干净首页再进（上一个视图开着详情抽屉，防列表被抽屉遮挡）
           await gotoConsole(page, url, timeoutMs).catch(() => {});
-          await openView(page, "工单列表");
+          await openView(page, "Tickets");
           const row = page.locator("tr.wb-row", { hasText: "T-FIX-B" }).first();
           try {
             await row.waitFor({ state: "visible", timeout: 8000 });
