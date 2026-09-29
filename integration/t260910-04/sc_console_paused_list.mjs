@@ -96,6 +96,14 @@ function cli(sub, args, cwd, timeout = 180_000) {
   env.SANDBAR_TARGET_HOST = G.target;                   // 钉本台（L0 写守卫锚）
   if (G.namespace) env.SANDBAR_NAMESPACE = G.namespace;
   if (G.registry) env.SANDBAR_PROJECTS_YAML = G.registry;
+  // 调用方项目身份（t260915-12 跨项目写闸 + t260925-08 undeclared 翻 refuse）：
+  // 本场景的 cli() 就是「宿主/console 包装层」位置——起票与 pause/resume/sign 全是
+  // 对 p91004c 票的写操作，undeclared 一律结构化拒收（实况：L2 起票 ok=false
+  // kind=cross_project_refused）。**不许用 SANDBAR_UNDECLARED_POLICY=record 绕**——
+  // 那是把闸整场关掉（等于本场景不再覆盖闸面），正确口径是同项目声明身份（与
+  // t260908-01/sc_ticket_pause_gate.py 同款 env 形；L9 只扫 *.py，本 .mjs 调用点
+  // 不在其扫描面内故漏网，见 KI-142 家族）。
+  env.SANDBAR_CALLER_PROJECT = PROJECT_KEY;             // cwd 兜底在本形态下被仓树排除吃掉（C1）
   env.SANDBAR_FIXTURE_TEMPLATES = '1';   // fixture-two-step 注册环境门（开票侧）
   const p = sh(PY, [path.join(cwd, 'server', 'engine', 'client.py'), sub, JSON.stringify(args)],
     { cwd, env, timeout });
@@ -322,6 +330,14 @@ async function main() {
       ticket_id: tid, template_id: 'dev-lane', project: PROJECT_KEY,
       title: '[e2e] t260910-04 console 子用例暂停透传', user_request: 't260910-04 console paused list',
       write_set: [`integration/e2e-probe-${tid}.txt`],
+      // base_ref=泳道分叉点登记（镜像生产包装层 server/tools/ticket.py:_base_ref ——
+      // console 起票走 ticket.py，它按 lane=='worktree' 自动登记项目主目录 HEAD；本场景
+      // 直连 engine/client.py，而 client.py 的 base_ref 只取显式参数（client.py:1211），
+      // 不传=meta.base_ref 空 → merge_check 项1「泳道分支有 commit」与 gitlink 项两条
+      // 基线缺失红 → 流程永久 blocked 在 merge_check（实况：L4 420s 超时，stage=merge_check/
+      // blocked）。值=main：夹具仓在 L1 已把 HEAD 分支归一 main（见上「基线分支对齐」），
+      // 与 t260915-05/t260911-05 夹具票同形，main 恰为建泳道时的分叉点。
+      base_ref: 'main',
     }, fixture);
     ok(start.body?.ok === true, `L2 dev-lane 开票 RUNNING（${tid}，实得 ok=${start.body?.ok} ${String(start.body?.error ?? '').slice(0, 120)}）`);
     if (start.body?.ok !== true) process.exit(1);

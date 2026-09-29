@@ -16,11 +16,23 @@
   旋钮），不锚探针内部实现（守望轮询周期、字面量提取方式、文案措辞均可变）。
 
 红线与边界：零真 npm 安装、零真网、不碰宿主全局 dsh、不碰 console 3099；全部写面
-在 /tmp。会话超时旋钮压到 60s（KI-078 教训：场景自己绝不留无界等待；探针看门狗
-正常时远用不到它）。
+在 /tmp（$HOME 前提自供给的隔离 home 是唯一例外，见下）。会话超时旋钮压到 60s
+（KI-078 教训：场景自己绝不留无界等待；探针看门狗正常时远用不到它）。
+
+$HOME 前提自供给（镜 integration/t260922-07/sc_t260922_07_escape_out_of_roots.py
+同款先例，其文件头「HOME 前提自供给」段即本段出处）：探针 live 档的越界写目标根
+（$HOME/.sandbar-probe-escape，probe_dsh_seam.build_escape_main_repo）必须落在
+「三根」（lane ∪ /tmp ∪ tmpdir）之外才有鉴别力；宿主 agent 沙箱（workspace-write）
+不含 $HOME 时该建位必 OSError → 探针诚实自判 ENV 红、两条场景整场红——**归测试资产
+供给面而非产品面**：修法是自建前提，不是放宽断言（断言面与 $HOME 形态完全无关，
+探针照跑同一套判据）。真实 $HOME 可写→原样用（零副作用）；不可写→仓根 .sandbar/
+下建隔离 home（.dsh 软链真源零拷贝：require_probe_env 与探针隔离 DSH_HOME 组装都
+经它读到宿主配置；仓根在三根之外→越界位审计语义不变）；两形态皆不可写→ENV 红
+exit 2 点名（透传不冒充，绝不静默降级成产品红）。
 """
 from __future__ import annotations
 
+import atexit
 import os
 import pathlib
 import re
@@ -45,6 +57,7 @@ MODE_ENV = "T26092203_STUB_MODE"             # 场景→桩选档旋钮（经探
                                              #   该透传本身是票面验收③补救路径
                                              #   「export DEEPSEEK_API_KEY 重跑」的前提面）
 PROBE_TIMEOUT_SEC = 120                      # 场景侧看门狗：探针卡死场景也不许挂死
+ISO_HOME_PREFIX = "sc3-iso-home-"            # 隔离 home 前缀（与兄弟场景同前缀=同族可识别）
 
 
 # 0.1.5 实测报错形状（票面原文的路由/变量位换成桩值，引号与分号结构保持——
@@ -125,14 +138,83 @@ echo "npm-shim: stub install @deepseek-ai/dsh@$ver (mode=$T26092203_STUB_MODE)"
 """
 
 
+def _home_writable(home):
+    """$HOME 可写性原子探针：mkdtemp 建删零残留；OSError=不可写（兄弟场景同款判据）。"""
+    try:
+        d = tempfile.mkdtemp(prefix=".t26092203-home-probe-", dir=str(home))
+    except OSError:
+        return False
+    shutil.rmtree(d, ignore_errors=True)
+    return True
+
+
+_ISO_HOME = {"dir": None, "prev": None}
+
+
+def _iso_home_cleanup():
+    """隔离 home 回收（全终态：正常/报错/提前 sys.exit 都经 atexit 走到；父目录空则移除，
+    非空=兄弟场景在用，留着不吞别人的目录）。"""
+    d = _ISO_HOME.get("dir")
+    if not d:
+        return
+    _ISO_HOME["dir"] = None
+    shutil.rmtree(str(d), ignore_errors=True)
+    try:
+        pathlib.Path(d).parent.rmdir()
+    except OSError:
+        pass
+    prev = _ISO_HOME.get("prev")
+    if prev is None:
+        os.environ.pop("HOME", None)
+    else:
+        os.environ["HOME"] = prev
+
+
+def ensure_probe_home():
+    """探针 $HOME 前提自供给（见模块头注；归测试资产供给面，断言面零改动）。
+
+    返回 (home, isolated)：isolated=True=本次自建隔离 home（已置 os.environ['HOME']）；
+    两形态皆不可写→(None, False)，调用方按环境红收口（不吞不冒充）。幂等：已可写则零副作用。"""
+    real = pathlib.Path.home()
+    if _home_writable(real):
+        return real, False
+    try:
+        base = REPO_ROOT / ".sandbar"          # 仓根 .sandbar（gitignored；兄弟场景同落位）
+        base.mkdir(parents=True, exist_ok=True)
+        iso = pathlib.Path(tempfile.mkdtemp(prefix=ISO_HOME_PREFIX, dir=str(base)))
+    except OSError:
+        return None, False
+    try:
+        if (real / ".dsh").exists():
+            os.symlink(str(real / ".dsh"), str(iso / ".dsh"))
+    except OSError:
+        shutil.rmtree(str(iso), ignore_errors=True)
+        return None, False
+    _ISO_HOME["dir"] = str(iso)
+    _ISO_HOME["prev"] = os.environ.get("HOME")
+    os.environ["HOME"] = str(iso)
+    atexit.register(_iso_home_cleanup)
+    # 前缀非 '[' 起首（t260921-06 词面前缀纪律：'[' 起首行会被规范行解析器当候选）
+    print("T26092203_ISO_HOME: 真实 $HOME 不可写（宿主沙箱 workspace-write 等）——"
+          "场景自建仓根隔离 HOME 跑同判据：%s（.dsh 软链真源；三根之外，断言面无关）"
+          % iso, flush=True)
+    return iso, True
+
+
 def require_probe_env():
     """场景前置在位性（缺=ENV 红 exit 2 点名，绝不静默降级）。
-    npm 不在此列：由 PATH 缝的 npm 桩供给，判据面不依赖宿主 npm。"""
+    npm 不在此列：由 PATH 缝的 npm 桩供给，判据面不依赖宿主 npm。
+    首步=$HOME 前提自供给（探针越界写目标根建于 $HOME 之下；两形态皆不可写=ENV 红点名）。"""
+    home, isolated = ensure_probe_home()
+    if home is None:
+        env_fail("无可用 $HOME 建探针越界写目标根（%s）：真实 $HOME 与仓根 .sandbar/ "
+                 "隔离位均不可写——环境态（探针越界子用例无目标位），非产品红"
+                 % (pathlib.Path.home() / ".sandbar-probe-escape"))
     if not PROBE.is_file():
         env_fail("缺被测探针 %s" % PROBE)
     if not shutil.which("zstd"):
         env_fail("缺 zstd（探针 which_or_env_fail 同名面；缺了探针必出 ENV 行）")
-    dsh_home = pathlib.Path.home() / ".dsh"
+    dsh_home = pathlib.Path.home() / ".dsh"      # 隔离态下经软链读同一真源
     for rel, is_dir in (("profiles/sandbar-headless", True), ("settings.yaml", False),
                         (".credentials.yaml", False)):
         p = dsh_home / rel
