@@ -1894,6 +1894,11 @@ SCENARIOS = [
      "「不丢」的真机证明面（t260929-04 scope 6，灰盒 L3，隔离真宿主 temp DSH_HOME+临时端口，红线零接触 3099）：包装 developer 交付的 bench（server/plugins/watchdog/bench/host-prompt-bench.mjs，同一 host API 通路）——排队简报真落真会话（队列项 control 流可见、消化后消息会话内可读）、未消化窗第二事件被扣、消化后新事件再醒；判据=退出 0 且自报 PASS 汇总。intent 分工：桩面行为归同票三条秒级场景（TDD 期先行）；本条只锁桩够不到的真宿主端到端通路，互不顶替。三态：node 或 ~/.sandbar/dsh-015 缺席=ENV_FAIL exit 2；bench 缺席/红=FAIL exit 1 点名（TDD 红属预期，arbitrate/merge 期必须绿）",
      "python3 integration/t260929-04/sc_wake_real_session_bench.py", "ro", "serial"),
 
+    # ---- t260929-07: 看板读取器真形锁（t260928-28 实报缺陷的回归沉淀）----
+    ("t260929-07-board-reader-real-shape",
+     "看板读取器真形锁（t260929-07，灰盒 L2/L3，离线秒级零 docker 零 3099 接触，KI-148/150 自证夹具族的回归沉淀）：t260928-28 五条场景的看板全经 harness 桩注入已解析行——桩形状由实现自身假设塑形，不可能与实现分歧，故套件全绿而真机上 makeBoardReader 只认 {result:{ok,tickets}} 信封、真实入口 client.py ticket-list 打印信封但内层无 ok 键 {ok:true,result:{count,tickets}}（t260929-07 实现期实证修正）⇒ reconcile 生产恒 degraded。本条锁「实现机器读真入口的实际 stdout，而非假设的形状」：A 真跑一次 client.py ticket-list {}（只读）拿逐字节原样 stdout，引擎不可达=ENV_FAIL exit 2（工单铁律：Temporal 不可达⇒ENV_FAIL，never a silent pass）；B 原样 stdout 喂进实现导出的共享解析路径 parseTicketListDoc（读器与锁同一条出货代码路径，杜绝测试侧重抄实现假设）→ ok=true、tickets>0、每行带 id，且形状契约半——真入口实证为信封形但内层 result 无 ok 键（{ok:true,result:{count,tickets}}，旧代码 res.ok!==true 因此永不通过；内层补出 ok 键翻契约时有意识翻红）；C makeBoardReader 端到端 ok=true/rows>0（A 已证引擎可达，此刻 ok=false=产品红）；D 畸形矩阵（非 JSON/空 stdout/缺 tickets/tickets 非数组/信封 ok:false/result:null）全结构化 ok:false 带原因、绝不抛裸异常、绝不把解析失败误报成引擎不可达（review 意见①②落法）；E 信封正形仍被接受（双形状不丢旧契约）。intent 分工：t260928-28-watchdog-reconcile-board-truth 守对账语义（看板经桩注入），本条只守「读器能机器读真入口实际形状」这一条缝，互不顶替。反证：B/C 打在 pre-fix 代码上必红（TDD 期红属预期，arbitrate/merge 期必须绿，实现交接报告须记录反证跑）",
+     "python3 integration/t260929-07/sc_watchdog_board_reader_real_shape.py", "ro", "serial"),
+
     # ---- t260929-09: L10 launch-gate mechanism（260929 弹窗事故回归：变量二进制+.sh 面逃逸字面量闸）
     # 收编说明（260929 直修，宿主令「不开票」）：本场景与其闸本体由 t260929-09 泳道产出、
     # integration 岗复核后收编进 main；该 workflow 已按宿主令终结（terminate），票面无在跑段。

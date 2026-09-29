@@ -53,6 +53,50 @@ export interface WatchdogPluginConfig {
   python?: string
 }
 
+export type TicketListParse =
+  | { ok: true; tickets: Array<Record<string, unknown>> }
+  | { ok: false; error: string }
+
+/**
+ * ticket-list 回执解析（纯面；reader 与真实 stdout 锁共用本实现——测试绝不另抄
+ * 一份解析，避免自证桩家族 KI-148/150，t260929-07）：
+ *  - 兼容两种形状：引擎信封 {ok,result:{tickets}} 与真入口实证形状
+ *    {ok:true,result:{count,tickets}}（t260929-07：result 内层无 ok 键——旧代码
+ *    `res.ok !== true` 因此永不通过，reconcile 永久 degraded）。
+ *  - result 键在但非对象（如 null）= 形状不符的结构化失败，不走异常分支
+ *    （review 条件 1：否则会落进 catch 被误标「引擎离线/超时」）。
+ *  - JSON.parse 失败 = 点名「不是合法 JSON」的结构化错误；只有 spawn/超时才允许
+ *    用「不可达」措辞（review 条件 2：报错必须点中真检查）。
+ */
+export function parseTicketListDoc(raw: string): TicketListParse {
+  let doc: unknown
+  try {
+    doc = JSON.parse(raw)
+  } catch {
+    return { ok: false, error: `ticket-list 回执不是合法 JSON：${raw.slice(0, 200)}` }
+  }
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    return { ok: false, error: `ticket-list 回执形状异常：${String(raw).slice(0, 200)}` }
+  }
+  const outer = doc as { result?: unknown }
+  // 信封优先；result 键缺席才按裸结果收（present-but-null 不算缺席）。
+  const res = 'result' in outer ? outer.result : doc
+  if (typeof res !== 'object' || res === null) {
+    return { ok: false, error: `ticket-list 回执形状异常（result 非对象）：${JSON.stringify(doc).slice(0, 200)}` }
+  }
+  const inner = res as { ok?: unknown; tickets?: unknown; error?: unknown }
+  // 真入口实证（t260929-07）：信封 result 内层没有 ok 键（{count,tickets}）——旧代码
+  // `res.ok !== true` 因此永不通过。信封只在内层显式 ok:false 时拒绝；ok 缺席 +
+  // tickets 数组 = 接受（显式宽容，真形锁看住这条契约）。
+  if ('result' in outer && inner.ok === false) {
+    return { ok: false, error: `ticket-list 回执异常：${inner.error != null ? String(inner.error) : JSON.stringify(inner).slice(0, 200)}` }
+  }
+  if (!Array.isArray(inner.tickets)) {
+    return { ok: false, error: `ticket-list 回执异常（tickets 非数组）：${JSON.stringify(doc).slice(0, 200)}` }
+  }
+  return { ok: true, tickets: inner.tickets as Array<Record<string, unknown>> }
+}
+
 /** 看板真源读面：spawn 引擎 client.py ticket-list（visibility list，不依赖单票 worker）。
  *  结构化失败透传（不抛裸栈）；超时由 execFile timeout 收尸。 */
 export function makeBoardReader(repo: string, python?: string) {
@@ -63,12 +107,9 @@ export function makeBoardReader(repo: string, python?: string) {
       const { stdout } = await execFileP(py, ['client.py', 'ticket-list', JSON.stringify({})], {
         cwd: engineDir, timeout: 30_000, maxBuffer: 32 * 1024 * 1024,
       })
-      const doc = JSON.parse(stdout) as { result?: { ok?: boolean; tickets?: unknown; error?: string } }
-      const res = doc.result ?? {}
-      if (res.ok !== true || !Array.isArray(res.tickets)) {
-        return { ok: false, rows: [], error: `ticket-list 回执异常：${res.error ?? JSON.stringify(res).slice(0, 200)}` }
-      }
-      return { ok: true, rows: res.tickets as Array<Record<string, unknown>> }
+      const parsed = parseTicketListDoc(stdout)
+      if (!parsed.ok) return { ok: false, rows: [], error: parsed.error }
+      return { ok: true, rows: parsed.tickets }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return { ok: false, rows: [], error: `ticket-list 不可达（引擎离线/超时）：${msg.slice(0, 300)}` }
