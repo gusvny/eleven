@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pytest     # 260929 直修：test_a1 的「真名册某类为空 → skip 并点名」用到（此前漏 import，
+#                  潜伏到挂账册清空 booked 类、skip 路径首次被走到才炸成 NameError）
 import re
 import sys
 from pathlib import Path
