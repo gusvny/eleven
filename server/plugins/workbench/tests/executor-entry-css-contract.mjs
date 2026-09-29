@@ -5,7 +5,9 @@
  * 两代打回的几何史（本测锁的即是这两条边）：
  *   - gen0：名字段被图标簇挤成 0 宽（acceptance 红）→ 入口段=名字+计数+弹性空档；
  *   - gen1：把图标命中区缩到 20px 让宽 → t260904-17 A/B 实证为新红单变量（打回）
- *     → gen2 恢复冻结契约 26×26，可达性改由左列最小宽保证。
+ *     → gen2 恢复 26×26 但改 widen 列宽 → t260904-17/t260915-09 双 A/B 实证列宽也是
+ *     冻结边（打回）→ gen3：几何全部还原（26×26 + 列宽 180），可达性=图标簇悬停
+ *     现形，静止态整行非图标区归入口段。
  *
  * 几何前提（组头行盒模型，全部可从源码 CSS 推出）：
  *   行宽 W（=左列宽）；水平 padding 8+8；前缀 caret10+gap5+dot8+gap5=36（内坐标）；
@@ -53,20 +55,17 @@ assert(/\.wb-group-entry \{ flex:1 1 0; min-width:0;/.test(src), `C1 entry-zone 
   assert(caret, `C4 caret owns collapse with stopPropagation (${++n})`)
 }
 
-// C5 中心覆盖不等式：列 min-width 使入口段盖过行点击中心（gen2 的可达性保证）
+// C5/gen3 可达性=悬停现形：列宽 180px 不动（t260915-09/t260904-17 A/B 冻结边）、
+// 图标命中区 26×26 不动（C2）——静止态图标簇退场（pointer-events:none + opacity:0），
+// 整行非图标区归入口段；悬停/键盘聚焦恢复可点。
 {
-  const iconW = Number(src.match(/\.wb-view-icon \{ width:(\d+)px/)[1])
-  const clusterGap = Number(src.match(/\.wb-view-icons \{ display:flex; gap:(\d+)px/)[1])
+  const m = src.match(/\.wb-view-icons \{[^}]*pointer-events:none; opacity:0; \}/)
+  assert(m, `C5 icons cluster rest-state rule (pointer-events:none, opacity:0) (${++n})`)
+  assert(/top:100%/.test(m[0]), `C5b strip hangs below the row (top:100%) — never covers the entry anchor (${++n})`)
+  assert(/\.wb-group-head:hover \.wb-view-icons, \.wb-view-icons:focus-within \{ pointer-events:auto; opacity:1; \}/.test(src),
+    `C5c hover/focus-within restores the cluster (${++n})`)
   const minW = Number(src.match(/\.wb-sb-left \{ flex:1 1 0; min-width:(\d+)px/)[1])
-  const iconCount = 5 // 工单/文档/模型/立项单/项目设置（票③ 11b 五枚）
-  const cluster = iconCount * iconW + (iconCount - 1) * clusterGap
-  // 条件：W/2 < W - 8(右padding) - cluster → minW > 16 + 2×cluster
-  const required = 16 + 2 * cluster
-  assert(minW > required,
-    `C5 entry zone covers row center: min-width ${minW} > 16+2*cluster=${required} (cluster=${cluster}) (${++n})`)
-  // 可读性下限：入口段（簇右对齐后剩下的弹性区）至少 80px，名字可读
-  const entry = minW - 16 - cluster
-  assert(entry >= 80, `C5b entry zone readable (>=80px, got ${entry}) (${++n})`)
+  assert(minW === 180, `C5c left column min-width untouched at 180px (got ${minW}) (${++n})`)
 }
 
 console.log(`done ${n}`)

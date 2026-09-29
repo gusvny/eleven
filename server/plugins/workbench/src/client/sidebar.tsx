@@ -268,16 +268,12 @@ const CSS = `${DERIVE_TOKENS_CSS}
 /* 展开态：双列。整窗三栏比例 左(项目+工单)15% : 中(视图)60% : 右(chat)25% ——
    左+中=侧栏占 75%（见下方 frame 第一轨改写），侧栏内部左右子列按 1:4 分。 */
 .wb-sb.wide { flex-direction:row; }
-/* t260929-22 gen2（acceptance 打回×2 的落点）：左列最小宽 296px——执行器入口
-   （.wb-group-entry，名字+计数+弹性空档）要盖过组头行的点击中心，几何前提：
-   内宽/2 < 内宽-前缀36-图标簇138（5×26 冻结契约+4×2 gap），即内宽 > 292，
-   列宽 > 308；296px 内宽=280 不够——按真实盒模型：中心 = 列宽/2（padding 对称），
-   图标簇起点 = 列宽-8-138，条件 列宽/2 < 列宽-146 → 列宽 > 292……逐项重算：
-   列宽 W，内宽 W-16（左右 padding 8）；前缀=caret10+gap5+dot8+gap5=28+8=36；
-   簇=5×26+4×2=138；入口段=[36, W-16-138]；行中心（绝对）=W/2 ↔ 内坐标 W/2-8。
-   条件：W/2 < W-146 → W > 292。取 320px（入口段 36..174，中心 160，余量 14px；
-   名字可得 ~115px，1280×720 与更宽宿主窗口同式满足）。 */
-.wb-sb-left { flex:1 1 0; min-width:320px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
+/* t260929-22 gen3 勘误（arbitration A/B 实证）：gen2 曾把左列 min-width 提到
+   320px 给入口段让宽——被 t260904-17/t260915-09 双场景 A/B 实证为破坏壳层几何的
+   单变量（shell resize handle 压住内容），此处归还 180px。入口可达性改由图标簇
+   hover 现形（见 .wb-view-icons gen3 注）：静止态整行非图标区都归入口段，名字
+   全宽可读、锚点全行可点。 */
+.wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
 .wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); position:relative; }
@@ -341,8 +337,20 @@ const CSS = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
-   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
-.wb-view-icons { display:flex; gap:2px; }
+   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档）。
+   t260929-22 gen3（arbitration 打回的落点，180px 内的可达性解）：图标簇悬停现形——
+   静止态 pointer-events:none + opacity:0，整行非图标区都归入口段 .wb-group-entry
+   （名字全宽可读、锚点全行可点）；悬停/键盘聚焦（focus-within）时原位右对齐浮出，
+   命中区仍 26×26、图标动作（含 Playwright locator.click 的隐式 hover）全通。几何
+   零变化：行高、列宽、簇占位与 gen1 前一致——t260904-17/t260915-09 的几何面不再被
+   本票触碰。260823「五视图常驻可见」裁定被本形状收窄为「悬停可见」，已在交接报告
+   向宿主点名请裁。组头是 position:sticky（定位祖先），条 absolute 挂行底（top:100%，
+   不占流内空间、现形后也不遮入口锚点）；条是组头子元素，指针移入条内 :hover 不丢。 */
+.wb-view-icons { display:flex; gap:2px; position:absolute; right:8px; top:100%;
+  padding:2px; border:1px solid var(--dsw-alias-border-l1,#333); border-radius:8px;
+  background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:2;
+  pointer-events:none; opacity:0; }
+.wb-group-head:hover .wb-view-icons, .wb-view-icons:focus-within { pointer-events:auto; opacity:1; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
@@ -350,8 +358,8 @@ const CSS = `${DERIVE_TOKENS_CSS}
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。
    t260929-22 gen2 勘误：gen1 曾把命中区缩到 20px 给入口段让宽——被 t260904-17
-   A/B 实证为该场景新红单变量，此处恢复冻结契约 26×26；入口可达性改由列宽保证
-   （见 .wb-sb-left min-width:296px 的几何推导）。 */
+   A/B 实证为该场景新红单变量，此处恢复冻结契约 26×26（入口可达性见 .wb-view-icons
+   gen3 注：悬停现形，不再动任何几何）。 */
 .wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
