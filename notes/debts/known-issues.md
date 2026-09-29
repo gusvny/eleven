@@ -2711,12 +2711,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （人工跑，`--note <谁/为何/频率>`）；缺对账面（无「enabled 但无 schedule」的只读清单）。
 > **处置建议（留宿主定：接线＝新增两个真调度，会真的开始跑 doc/simplify 巡检）**：①给 `decl`（或死信/巡检手册面）
 > 加只读对账：列出 enabled 但调度器上无 Schedule 的实例——**260929 已直修**（只读子命令
-> `inspection_trigger.py schedule-drift`：三态分开点名＝missing 要 schedule-up / paused 要 resume / orphan＝调度器
-> 上还在跑但声明已停用或除名；`alarmed` 非空 → exit 1；调度器列表失败=显式报错「无法对账，别当无漂移」，
-> 绝不冒充绿；回归 `server/engine/tests/test_260929_inspection_schedule_drift.py`。实跑＝
+> `inspection_trigger.py schedule-drift`：四态分开点名＝missing 要 schedule-up / paused 要 resume / orphan＝调度器
+> 上还在跑但声明已停用或除名 / tz_missing＝声明缺 tz（调度落 UTC，人读的本地时刻错位）；`alarmed` 非空 → exit 1；
+> 调度器列表失败=显式报错「无法对账，别当无漂移」，绝不冒充绿；回归
+> `server/engine/tests/test_260929_inspection_schedule_drift.py`。实跑＝
 > `missing=[sandbar-inspection-docs-sync, sandbar-inspection-simplify-face]`，exit 1）；②`docs-sync`/`simplify-face`
-> 要么 `schedule-up` 接线，要么 `enabled: false`（声明与现状对齐，如 `mechanism-face`/`stage-capacity` 的占位
-> 写法）——**仍待宿主定**（接线＝新增两个真调度，会真的开始跑 doc/simplify 巡检）。
+> 要么 `schedule-up` 接线，要么 `enabled: false`——**260929 宿主令「接线」**：两个实例已 schedule-up 接上；
+> 接线当场撞见 `simplify-face` 声明缺 `tz`（落 UTC，人读 08:00 实际是北京 16:00），宿主随令改为
+> 「**每天一次（30 9 * * *，Asia/Shanghai）+ 没有新 change 就不干啥**」——于是同日补了**声明式空转**
+> （`skip_when_unchanged`：起票前比「上次运行基点 sha ↔ 当前 main HEAD」，相同则只落一行裁决记录
+> `decision=skipped-no-change`、不铸票不跑；判不出=不跳；**漏跑核查两个面同口径**把空转期号并入已解释集合并
+> 单列 `skipped_no_change`，否则每天多一条假漏跑告警；回归
+> `server/engine/tests/test_260929_inspection_no_change_skip.py` 21 例，含 CLI 实盘两方向对照）。
+> 接线后对账面四态全清（`alarmed=false`，exit 0）。
 
 ## KI-129 追记（260929 宿主实报「那个集成测试的巡检没有了」——静默跳过的**后果面**实测 + 记录面已补）
 > **实报链（本轮完整证据）**：09-26 为绕开本条（期槽被「执行 COMPLETED、判决 blocked」的票占死）按处置**一期
