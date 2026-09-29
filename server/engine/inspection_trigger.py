@@ -187,18 +187,29 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
     # （实例+期号 SA 查询 / 指针三态 / AlreadyStarted 归属判定）+ 盖 ProjectKey 与
     # InspectionInstance/InspectionPeriod SA。本壳只做声明校验与回执拼装。
     from shared import TASK_QUEUE  # noqa: E402——本函数局部导入（同 _lazy_engine 模式；arbitrate gen2 缺陷①：漏导入=CLI trigger 主路径 NameError）
-    from inspection_ticketing import open_period_ticket
+    from inspection_ticketing import note_spawn_decision, open_period_ticket
     res = await open_period_ticket(
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "test"),
         decl_path=abs_decl_path(args.decl_path), task_queue=TASK_QUEUE,
         reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
+    # 260929（KI-129/131）：手动路径同样落裁决面（journal + admin.log）——自动班的静默
+    # 跳过与手动起的去重命中在同一条审计线上可对照（失败也落，读数才不断链）。
+    note = note_spawn_decision(_default_ledger_dir(), args.instance, period, res, face="manual")
+    keys = ("decision", "alarm", "note", "journal_path", "journal_error",
+            "audit_call_id", "audit_write_failed")
     if not res.get("ok"):
+        for k in keys:
+            if k in note:
+                res[k] = note[k]
         return res
     r = dict(res["result"] or {})
     r.update({"period": period, "workflow": spec["workflow"],
               "instance": args.instance, "project": project_key,
               "repo_root": repo_root})
+    for k in keys:
+        if k in note:
+            r[k] = note[k]
     return _ok(r)
 
 
@@ -225,18 +236,29 @@ async def cmd_trigger_produce(args: argparse.Namespace) -> Dict[str, Any]:
         client = await _connect()
     except Exception as e:  # noqa: BLE001
         return _err("temporal server 不可达：%s" % e)
-    from inspection_ticketing import open_produce_period_ticket
+    from inspection_ticketing import note_spawn_decision, open_produce_period_ticket
     res = await open_produce_period_ticket(
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "doc"),
         decl_path=abs_decl_path(args.decl_path),
         reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
+    # 260929：产出型手动路径同落裁决面（同类面全量排查——去重命中不许再无声）
+    note = note_spawn_decision(_default_ledger_dir(), args.instance, period, res,
+                               face="manual-produce")
+    keys = ("decision", "alarm", "note", "journal_path", "journal_error",
+            "audit_call_id", "audit_write_failed")
     if not res.get("ok"):
+        for k in keys:
+            if k in note:
+                res[k] = note[k]
         return res
     r = dict(res["result"] or {})
     r.update({"period": period, "workflow": "InspectionProduceWorkflow",
               "instance": args.instance, "project": project_key,
               "repo_root": repo_root, "queue": "per-ticket"})
+    for k in keys:
+        if k in note:
+            r[k] = note[k]
     return _ok(r)
 
 
