@@ -2862,3 +2862,32 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 也就是**每修一个抖动名要烧掉一整轮（约 25 分钟）+ 一次人审**。册子在长、每轮的面在缩——这正是修复方向①（进 blockers 之前自动定点复跑一级）
 > 该尽快落地的**代价证据**：目前是人在扮演那条自动化规则，一天扮演了 4 次。
 
+## KI-168 共享测试台的**复用判据只认路径、不认代码** ⇒ 场景拿 22 小时前的控制台代码断言新代码（261001 实测并当日修，integration 岗；KI-165 的真根因之一；t260906-01「别的树」的**时间维度**同款）
+> **现象**：一批浏览器/控制台族场景（`browser` + `browser-free` 两池）在泳道轮里时红时绿、与各票写集无关，
+> 当天我把其中 6 条按「环境/抖动」登进了挂账册（`metrics-donut-dom`、`t260903-07-click-no-chat-switch`、
+> `t260911-05-ki048-status-card-dom`、`t260925-18-ui-english-spec-markdown`、`t260926-05-inspection-report-ui-dom`、
+> `t260904-05-ledger-adversarial-boot`）。
+> **定位过程（三步，全部可复现）**：
+> ① 控制台族并发假说 → **被证伪**：把 browser-free 里 14 条「共享台只读」场景全部标 `serial`（池内串行），
+> 同一条命令的 46 条结果**逐条不变**（22 pass/17 fail/7 env），而墙钟 487s→884s（1.8×）。已还原该改动，零保留。
+> ② 转向「台是不是旧代码」：`docker ps` 显示主树的台 `stage-console-43b626bc-*` **Up 22 小时**，而主树当天改了 20+ 次
+> （名字=路径哈希、复用前只校验**挂载源路径**是否等于本树，`integration/lib_stage_console.mjs`）。
+> ③ 受控 A/B（同一条命令 `--exclude-pools main,ro,engine,exclusive`，46 条）：旧台 22 pass/17 fail/7 env →
+> `down` 后重建再跑 **29 pass/11 fail/6 env：7 条由红转绿、0 条转红**（转绿的正是上面那 6 条 + `t260905-05-modal-dialog-semantics`）。
+> **根因**：控制台是**按树路径**命名的长命容器，树一变（sync/合并/任何提交）而容器不重启 ⇒ 容器里跑的是旧代码；
+> 复用判据只答「**同一个路径**」，不答「**同一份代码**」。
+> **危害**：①泳道轮的浏览器面判词不可信（假红→冤枉 developer、假绿→更糟：可能放行了拿旧台验的改动）；
+> ②主树**基线**（归因用的 main-red-too 名单）同样拿旧台跑 ⇒ 归属判定整体存疑；③当天那 6 条挂账是**误判**（它们不是环境抖动，是旧台红）。
+> **修法（261001 当日落 main）**：`lib_stage_console.mjs` 加**代码身份戳**——ensure 前比对本树 `server/` 的
+> 内容身份（`HEAD` + `HEAD:server` tree oid + `server/` 脏清单的 sha256，取 16 位），与上次成功 ensure 后写在
+> `<git-dir>/sandbar-console-code-stamp` 的戳不一致 ⇒ **拆台重建**（与既有「挂载源不是本树」那条同形）；
+> 不可得（git 读不到）⇒ 保持旧行为但**响亮点名**「这一轮无法证明台里的代码与树一致」，绝不静默假装一致。
+> **实测**：戳缺失 ⇒ 打出「台的代码身份与当前树不一致（台=(无戳) 树=…）⇒ 拆台重建」并重建（容器 Up 51s→9s），
+> 随后 46 条跑出 29/11/6；戳一致 ⇒ 直接复用（第二次运行无重建、结果同）；改动一个 `server/` 下文件即触发重建。
+> 成本：重建约 30~60s，落在每轮前奏里；`server/` 之外的改动（文档/测试码）不触发。
+> **未做（留 open）**：①我当天登进挂账册的那 6 条**需要在干净台面上重判**（很可能直接删行，册子 22→约 16）；
+> ②今天所有以「main-red-too」记录的归属结论要不要在干净台面上重跑一遍（尤其浏览器族）；
+> ③`t260905-05-modal-dialog-semantics` 之外的 `t260905-03-decl-gate` 等同族名字一并复核。
+> **定位**：`integration/lib_stage_console.mjs`（`consoleCodeStamp`/`consoleStampPath`/复用检查/写戳）、
+> `integration/stage_docker.py`（台的生命周期）、`integration/run_scenarios.py`（池与并发）。
+

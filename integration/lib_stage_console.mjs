@@ -53,7 +53,7 @@
 // missing); a seeding failure does not block supply — each scenario's fixture
 // leg names it as env_fail (three-state contract, never fake green).
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,6 +86,42 @@ function repoMountSource(project, env) {
   if (p.status !== 0) return null;
   const s = String(p.stdout || '').trim();
   return s || null;
+}
+
+/** 261001：被测树的**代码身份**（控制台真正服务的那部分树：`server/`——引擎+插件+工作台 UI）。
+ *
+ * 为什么需要它：`TREE_PROJECT` 与挂载面检查只保证「**同一个路径**」，不保证「**同一份代码**」。
+ * 实测（261001）：主树的台 `stage-console-43b626bc` 已 Up 22 小时，而主树当天改了 20+ 次——
+ * 场景一直是拿 22 小时前的控制台代码断言新代码。这跟 t260906-01「别的树」是同一个病，
+ * 只是发生在**时间维度**上：台不会因为树变了而重建。
+ * 受控 A/B（browser + browser-free 两池，46 条，同一条命令）：旧台 22 pass / 17 fail / 7 env；
+ * `down` 后重建再跑 = 29 pass / 11 fail / 6 env，**7 条由红转绿、0 条转红**，其中 6 条正是当天
+ * 被我按「环境抖动」挂账的名字。⇒ 复用前必须比对代码身份，不一致就拆台重建。
+ *
+ * 口径：`HEAD:sserver` 的 tree oid + HEAD sha + `server/` 下的脏改动清单；任一不可得=返回空串
+ * （调用方按「身份不可得」处理：保持今日行为但**响亮说明**，绝不静默假装一致）。 */
+function consoleCodeStamp(tree) {
+  const g = (args) => spawnSync('git', ['-C', tree, ...args], { encoding: 'utf8', timeout: 20000 });
+  const head = g(['rev-parse', 'HEAD']);
+  if (head.status !== 0) return '';
+  const treeOid = g(['rev-parse', 'HEAD:server']);
+  if (treeOid.status !== 0) return '';
+  const dirty = g(['status', '--porcelain', '--', 'server']);
+  if (dirty.status !== 0) return '';
+  return createHash('sha256')
+    .update(`${String(head.stdout).trim()}\n${String(treeOid.stdout).trim()}\n${String(dirty.stdout)}`)
+    .digest('hex').slice(0, 16);
+}
+
+/** 代码身份戳的落点：该树的 git 目录内（工作树状态不受影响——merge_check 的「工作区干净」
+ * 判据读的是工作树，戳住在 `.git/` 里天然不算脏改动）。git 不可得=返回空串。 */
+function consoleStampPath(tree) {
+  const gd = spawnSync('git', ['-C', tree, 'rev-parse', '--git-dir'],
+    { encoding: 'utf8', timeout: 20000 });
+  if (gd.status !== 0) return '';
+  const raw = String(gd.stdout).trim();
+  if (!raw) return '';
+  return path.join(path.resolve(tree, raw), 'sandbar-console-code-stamp');
 }
 
 export async function ensureStageConsole({ services = 'full', project = TREE_PROJECT } = {}) {
@@ -142,6 +178,24 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
   if (mounted && (mounted !== WANT_REPO || !existsSync(mounted))) {
     spawnSync('python3', [CLI, 'down', '--project', project],
       { encoding: 'utf8', env, timeout: 180000 });
+  }
+  // 261001：**内容身份**检查（时间维度上的「别的树」，见 consoleCodeStamp 头注）。
+  // 挂在面只答「同一个路径」，不答「同一份代码」；不一致 ⇒ 拆台重建（与上面那条同形）。
+  const stampPath = consoleStampPath(WANT_REPO);
+  const wantStamp = consoleCodeStamp(WANT_REPO);
+  if (mounted && stampPath && wantStamp) {
+    let have = '';
+    try { have = readFileSync(stampPath, 'utf8').trim(); } catch { have = ''; }
+    if (have !== wantStamp) {
+      console.error('[stage-console] 台的代码身份与当前树不一致（台=%s 树=%s）⇒ 拆台重建：'
+        + '复用旧台=拿旧代码判新代码（t260906-01「别的树」的时间维度同款）',
+      have || '(无戳)', wantStamp);
+      spawnSync('python3', [CLI, 'down', '--project', project],
+        { encoding: 'utf8', env, timeout: 180000 });
+    }
+  } else if (!wantStamp) {
+    console.error('[stage-console] 代码身份不可得（git 读不到）——按今日行为复用旧台，'
+      + '但这一轮**无法证明**台里的代码与树一致（不静默：此处点名）');
   }
   // Supply budget: default 600s, strictly below the executor's current 900s
   // per-scenario kill cap (see the header budget section; t260905-02 ruled:
@@ -253,6 +307,14 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
     await seedFixtures(st, FIXTURES_HOST);
   } catch (e) {
     console.warn(`[stage-console] fixture seeding failed (scenario fixture legs will name env_fail): ${e}`);
+  }
+  // 台起来了（且 base 由本项目容器持有）才写戳：写失败=下一轮多拆一次台，绝不放行假一致。
+  if (stampPath && wantStamp) {
+    try {
+      writeFileSync(stampPath, wantStamp + '\n', 'utf8');
+    } catch (e) {
+      console.warn(`[stage-console] 代码身份戳写不进去（${stampPath}）：${e}——下一轮会再拆一次台`);
+    }
   }
   return {
     base: `http://127.0.0.1:${st.ports.console}`,
