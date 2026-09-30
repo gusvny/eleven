@@ -2857,4 +2857,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 阈值不许收到 3（新结构下锚在 helper 恰 2 处，收到 3 就假红）。该弱点登记在此，未修。
 > **纪律**：①requirement 先过写集；②跨写集的锁/契约改动由 integration 做「两态容忍」或走带 `integration/` 写集的票，
 > 不得指望 developer 越权；③这类改动落地顺序写在交接/签字注记里（谁先谁后、为什么必须原子）。
+> **261001 追记二（integration 岗）**：本条登记的抖动族当日**又添三例**（`t260913-02-schedule-daily-deadman`、`t260916-25-stage-console-prepare-refresh`、
+> `metrics-donut-dom`），挂账册从 19 条增到 **22 条**，其中 13 条是这个「共享台/浏览器 DOM」环境族。每一例的处置都是「隔离复跑绿 → 按 isolated 挂账 → retry_qc」，
+> 也就是**每修一个抖动名要烧掉一整轮（约 25 分钟）+ 一次人审**。册子在长、每轮的面在缩——这正是修复方向①（进 blockers 之前自动定点复跑一级）
+> 该尽快落地的**代价证据**：目前是人在扮演那条自动化规则，一天扮演了 4 次。
 
