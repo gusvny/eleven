@@ -135,7 +135,18 @@ def main():
     try:
         # ---- G 接线面：守卫归位入口已挂进 agent 段双返回点（拼起来通不通） ----
         aa_src = (REPO / "server/engine/agent_activities.py").read_text("utf-8")
-        calls = len(re.findall(r"=\s*_apply_suite_budget\(", aa_src))
+        # 判据=「两个返回点各挂一次」，**不锚调用点的书写形态**（260930 教训，t261001-03 实案）：
+        # 旧形 `re.findall(r"=\s*_apply_suite_budget\(")` 只认 `res = _apply_suite_budget(...)`
+        # 这一种写法——把轮询循环抽成共享 helper 的那次**行为等价重构**里，真 spawn 路径的调用点
+        # 改写成了 `return _apply_suite_budget(...)`（语义逐字相同：同一个函数、同一个入参、
+        # 同一个返回点），正则立刻数成 1 处 ⇒ 场景红 ⇒ 闸把一张没改行为的票按「本票的账」挡住
+        # （整轮 25 分钟 + 人审）。这正是「契约不变的实现重构不得打破集成测试」的反面教材：
+        # **坏了就说明测试写错了**，改测试而不是改实现。
+        # 新判据仍要求「≥2 处调用点」（0=定义了没接线=护栏空转；1=只有一个返回点挂了），
+        # 只是把锚从「`= ` 写法」挪到「函数被调用」这一语义面（排除 def 那一行）。
+        calls = len([ln for ln in aa_src.splitlines()
+                     if "_apply_suite_budget(" in ln
+                     and "def _apply_suite_budget(" not in ln])
         check("G1 守卫已挂 agent 段返回点（缓存命中/真 spawn 双挂点）", calls >= 2,
               "接线调用 %d 处（0=函数定义了没接线=护栏整体空转）" % calls)
 
