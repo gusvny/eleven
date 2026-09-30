@@ -2810,5 +2810,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **定位**：`integration/run_scenarios.py`（池切分与 `conc_pools`）、`integration/lib_stage_fixture.mjs` / `stage_docker.py`
 > （共享台租约/重建）、`server/engine/shared.py:blockers_known_red_adoption`（`unknown` 判词）、
 > `server/engine/agent_activities.py`（归属判定写入 `blockers`）、`integration/known-red-baseline.json`（册子政策行）。
+> **260930 追记（同类新实例，integration 岗）**：`t260913-02-schedule-daily-deadman` 在泳道 `t261001-04`
+> 第 2 轮宽面（w=4，pool=main）报红 1 次，闸据此把票按「本票的账」挡住；**同一棵树隔离复跑 PASS ×4**
+> （1.3~1.4s），且该票第 1 轮宽面里这条是绿的 ⇒ 又是宽面争用/兄弟场景干扰，与票的写集（selfcheck 收敛 +
+> 退役演示面）无关。处置=按册子 `isolated` 临时挂账（第 20 条，观察位=每日巡检与合并前全量）+ `retry_qc`。
+> 这条的价值在于**把「宽面干扰」的判据钉得更死**：串行绿 + 宽面时红时绿 + 与本票写集无关 ⇒ 一律不得进 blockers
+> 的「本票的账」，必须走定点复跑那一级（本条的修复方向①）。
 > **回归（本条修复时必带）**：给「同 commit 同宽度两答案」造一条机械不可判定的用例——抖动名进 blockers 前必须经
 > 定点复跑一级，且票面把「抖动/复跑」与「本票的账」分成两个具名面。
