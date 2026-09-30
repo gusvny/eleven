@@ -1030,17 +1030,25 @@ class LightLaneWorkflow(DevLaneWorkflow):
         读回执的人能直接看到那些红被看见了、被记账了。"""
         head = "closing full run" if closing else "integration gate"
         rec = self._light_recorded_pre_existing(ir) if not ir.error else {}
+        # 宿主令 260930（B 档「谁验的」上票面）：服务本轮的 worker 身份 + 它的代码指纹
+        # （结构化两键 + 人面最多一行）。**不可得也是具名面**（明写 unavailable + 原因），
+        # 绝不留空让人误以为「验过了」。判据零改动：不参与 status/拦/记任何判定。
+        _wf_line = shared.worker_verified_line(getattr(ir, "worker_identity", ""),
+                                               getattr(ir, "code_stamp", None))
         out = {
             # status 跟**轻道判词**走（不是跟裸计数走）：判绿轮里若有 main-red-too，计数仍
             # 照实写进 summary、逐名进 recorded_pre_existing，但本段对票而言是绿的——
             # 否则控制台会出现「段 failed 却继续推进」的自相矛盾面。
             "status": "ok" if self._light_gate_verdict(ir) == "green" else "failed",
-            "summary": ("%s: %s ran / %s passed / %s failed / %s env-red%s"
+            "summary": ("%s: %s ran / %s passed / %s failed / %s env-red%s%s"
                         % (head, ir.ran, ir.passed, ir.failed, ir.env_fail,
-                           (" | " + str(ir.error)) if ir.error else "")),
+                           (" | " + str(ir.error)) if ir.error else "",
+                           (" | " + _wf_line) if _wf_line else "")),
             "report": "", "deliverables": [], "files_changed": [],
             "evidence": json.dumps(ir.details, ensure_ascii=False)[-4000:],
             "gen": gen,
+            "worker_identity": str(getattr(ir, "worker_identity", "") or ""),
+            "code_stamp": getattr(ir, "code_stamp", None) or {},
             "blockers": [str(b) for b in (getattr(ir, "blockers", None) or [])],
             "violations": self._light_red_names(ir),
             "recorded_pre_existing": rec,

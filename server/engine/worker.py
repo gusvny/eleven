@@ -84,7 +84,8 @@ import agent_runtime
 from agent_activities import ALL_AGENT_ACTIVITIES, make_stage_activity
 from dsh_pin import dsh_face_payload, enforce_expected
 from agent_activities import inflight_stage_snapshot, recent_stage_outcomes
-from shared import NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE, configured_task_queues
+from shared import (NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE,
+                    configured_task_queues, pid_alive, read_pidfile_state)
 from shared import write_worker_meta
 from workflows import ALL_WORKFLOWS
 from workflows_v2 import (ALL_WORKFLOWS_V2, PROJECT_TEMPLATE_PASSTHROUGH_MODULES,
@@ -326,73 +327,6 @@ WORKER_REFUSED_EXIT = 2
 #: 在飞 agent 活动被硬切会把票面带病（t260916-29 的停机宽限语义）。
 REPLACE_WAIT_SEC = 60.0
 REPLACE_POLL_SEC = 0.2
-
-
-def pid_alive(pid: int) -> bool:
-    """存活探测（守卫专用）：`kill(pid, 0)` + **僵尸面**修正。
-
-    `kill(pid, 0)` 对**僵尸**（已退出但父进程未收割）仍然成功——只按它判会把「已死的旧
-    worker」读成活，于是 --replace 白等到超时（installer 侧同款实缺陷）。所以能查就查：
-      · Linux：/proc/<pid>/stat 第三列 'Z' ⇒ 已死；
-      · **本进程自己的子进程**：waitpid(WNOHANG) 真收割（顺带防僵尸堆积）⇒ 已死；
-      · 其它情况（macOS 上非自家子进程，无法查状态）：按**活**处理（保守——宁可拒绝启动
-        让人看一眼，也不静默起第二颗；生产里 daemon worker 归 init 收养，退出即被收割，
-        不会长期停在僵尸态）。
-    EPERM（存在但非本用户）也算活。"""
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return True
-    # 僵尸修正
-    try:
-        with open("/proc/%d/stat" % pid, encoding="ascii", errors="replace") as f:
-            parts = f.read().split()
-        if len(parts) > 2 and parts[2] == "Z":
-            return False
-    except OSError:
-        pass
-    try:
-        reaped, _status = os.waitpid(pid, os.WNOHANG)
-        if reaped == pid:
-            return False
-    except ChildProcessError:
-        pass
-    except OSError:
-        pass
-    return True
-
-
-def read_pidfile_state(pidfile: str) -> dict:
-    """pidfile 四态（纯读、零副作用）：absent / malformed / stale / live。
-
-    live 是重启的**唯一合法拦截点**；malformed/stale 都按「陈旧可接管」处理但留痕
-    （读不懂 ≠ 没有——所以仍然点名，不静默当不存在）。"""
-    p = pathlib.Path(pidfile)
-    try:
-        raw = p.read_text(encoding="utf-8", errors="replace").strip()
-    except FileNotFoundError:
-        return {"state": "absent", "pid": None, "raw": "", "mtime": 0.0, "detail": "文件不存在"}
-    except OSError as e:
-        return {"state": "stale", "pid": None, "raw": "", "mtime": 0.0,
-                "detail": "读失败（%s: %s）——按陈旧接管" % (type(e).__name__, e)}
-    mtime = p.stat().st_mtime if p.exists() else 0.0
-    try:
-        pid = int(raw)
-        if pid <= 0:
-            raise ValueError(raw)
-    except (TypeError, ValueError):
-        return {"state": "malformed", "pid": None, "raw": raw[:40], "mtime": mtime,
-                "detail": "内容非正整数（%r）——按陈旧接管" % raw[:40]}
-    if pid_alive(pid):
-        return {"state": "live", "pid": pid, "raw": raw, "mtime": mtime, "detail": "进程存活"}
-    return {"state": "stale", "pid": pid, "raw": raw, "mtime": mtime,
-            "detail": "pid=%d 已不在" % pid}
 
 
 def _meta_of(pidfile: str) -> dict:

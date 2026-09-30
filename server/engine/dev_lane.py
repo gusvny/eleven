@@ -3220,14 +3220,23 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # =不加这段）。环境红不再是失败面（status 判据已摘 env_fail）——具名是
                 # 「不拦但不许静默」的兑现：票面答得出红的是哪几条，重跑不再当收敛手段。
                 _env_note_face = self._env_red_face_note(ir.env_red)
+                # 宿主令 260930（B 档「谁验的」上票面）：回执带**服务本轮的 worker 身份**
+                # 与它的**代码指纹**（additive 两键；人面摘要最多一行）。判据零改动：
+                # 这两个键只进结构化面与人面一行，不参与 status/放行/归因任何判定。
+                _wf_ident = str(getattr(ir, "worker_identity", "") or "")
+                _wf_stamp = getattr(ir, "code_stamp", None) or {}
+                _wf_line = shared.worker_verified_line(_wf_ident, _wf_stamp)
                 self.results["run_integration_tests"] = {
                     "status": "failed" if (ir.error or ir.failed) else "ok",
-                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s"
+                    "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s%s"
                                % (ir.ran, ir.passed, ir.failed, ir.env_fail,
                                   ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
-                                  _env_note_face, _ms_sum),
+                                  _env_note_face, _ms_sum,
+                                  ("｜" + _wf_line) if _wf_line else ""),
                     "report": "", "deliverables": [], "files_changed": [],
                     "evidence": _ms_evi + json.dumps(ir.details, ensure_ascii=False)[:4000],
+                    "worker_identity": _wf_ident,
+                    "code_stamp": _wf_stamp,
                     "gen": 0}
                 self._finish("run_integration_tests", by="run_integration_tests",
                              evidence="；".join("%s:%s" % (d.get("name"),

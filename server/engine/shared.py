@@ -556,6 +556,13 @@ class IntegrationRunResult:
     #              注入了 SANDBAR_KNOWN_RED_EXCLUDE；未跑 ≠ 判绿）。
     reuse: Dict[str, Any] = field(default_factory=dict)
     known_red: Dict[str, Any] = field(default_factory=dict)
+    # 宿主令 260930（B 档「谁验的」上票面）：**服务本轮的 worker 身份**与其**代码指纹**
+    # （additive；缺省 "" / {} = 老回放与老闸形态逐字节零漂移）。为什么要它：同一个队列上
+    # 若并存两颗 worker（或进程跑的是改动前的旧码），票面结果**不可归因到代码版本**——
+    # 宿主实报四轮对不上的根因面。取值面=闸活动本进程（identity=`pid@host`，与 SDK 的
+    # worker identity 同构；stamp=shared.worker_code_stamp 的唯一实现）。
+    worker_identity: str = ""
+    code_stamp: Dict[str, Any] = field(default_factory=dict)
     # 260930 宿主令（真票 t260930-09 实况：env_fail=2 而闸的具名通道 env_red=[]）：
     # **执行器侧**的具名环境红名单（runner 的 INTEG_SUMMARY env_red_names；闸回执经
     # verify_lane 搬运）。**纯观测面，绝不进判定**：豁免只认闸的权威通道 env_red
@@ -6366,6 +6373,82 @@ def _repo_root_from_shared() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[2]
 
 
+def pid_alive(pid: "int | None") -> bool:
+    """存活探测单点（stdlib-only）：`kill(pid, 0)` + **僵尸面**修正。
+
+    消费方=worker.py 的启动唯一性守卫与 server/tools/engine_ops.py 的「活 poller 计数」
+    （两处必须是同一判据：server 会保留刚退出 poller 的历史，按 kill(0) 数会把刚收掉的旧颗
+    读成第二颗 —— 假红；僵尸态同理）。
+
+    僵尸修正：`kill(pid, 0)` 对**已退出但父进程未收割**的进程仍然成功。
+      · Linux：/proc/<pid>/stat 第三列 'Z' ⇒ 已死；
+      · **本进程自己的子进程**：waitpid(WNOHANG) 真收割（顺带防僵尸堆积）⇒ 已死；
+      · 其它情况（macOS 上非自家子进程无法查状态）：按**活**处理（保守 —— 宁可让人看一眼，
+        也不静默当死）。
+    EPERM（存在但非本用户）算活。畸形入参=False。"""
+    try:
+        pid_i = int(pid) if pid is not None else 0
+    except (TypeError, ValueError):
+        return False
+    if pid_i <= 0:
+        return False
+    try:
+        os.kill(pid_i, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    try:
+        with open("/proc/%d/stat" % pid_i, encoding="ascii", errors="replace") as f:
+            parts = f.read().split()
+        if len(parts) > 2 and parts[2] == "Z":
+            return False
+    except OSError:
+        pass
+    try:
+        reaped, _status = os.waitpid(pid_i, os.WNOHANG)
+        if reaped == pid_i:
+            return False
+    except ChildProcessError:
+        pass
+    except OSError:
+        pass
+    return True
+
+
+def read_pidfile_state(pidfile: Any) -> Dict[str, Any]:
+    """pidfile 四态（纯读、零副作用）：absent / malformed / stale / live。
+
+    live 是「同队列已有活 worker」的**唯一合法拦截点**；malformed/stale 都按「陈旧可接管」
+    处理但留痕（读不懂 ≠ 没有 —— 点名，不静默当不存在）。消费方=worker.py 启动守卫 +
+    engine_ops 的 workers/drift 面。"""
+    p = pathlib.Path(str(pidfile))
+    try:
+        raw = p.read_text(encoding="utf-8", errors="replace").strip()
+    except FileNotFoundError:
+        return {"state": "absent", "pid": None, "raw": "", "mtime": 0.0, "detail": "文件不存在"}
+    except OSError as e:
+        return {"state": "stale", "pid": None, "raw": "", "mtime": 0.0,
+                "detail": "读失败（%s: %s）——按陈旧接管" % (type(e).__name__, e)}
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    try:
+        pid = int(raw)
+        if pid <= 0:
+            raise ValueError(raw)
+    except (TypeError, ValueError):
+        return {"state": "malformed", "pid": None, "raw": raw[:40], "mtime": mtime,
+                "detail": "内容非正整数（%r）——按陈旧接管" % raw[:40]}
+    if pid_alive(pid):
+        return {"state": "live", "pid": pid, "raw": raw, "mtime": mtime, "detail": "进程存活"}
+    return {"state": "stale", "pid": pid, "raw": raw, "mtime": mtime,
+            "detail": "pid=%d 已不在" % pid}
+
+
 def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
                       pid: Optional[int] = None,
                       repo_root: Any = None) -> Dict[str, Any]:
@@ -6427,6 +6510,33 @@ def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,
                           "pre-change code; conservative hint, never silent)")}
     out["stamp_line"] = code_stamp_line(out)
     return out
+
+
+def worker_verified_line(worker_identity: Any, code_stamp: Any) -> str:
+    """票面「谁验的」一行（英文、零 CJK，两车道共用单点）：
+    `Verified by worker <identity> (code stamp <line>; stale=<yes/no>)`。
+
+    **不可得也是具名面**：identity 或 stamp 取不到就明写 `unavailable: <原因>`——绝不留空
+    让人以为「验过了」（宿主令 260930：版本不可归因本身就是一条要能看见的面）。"""
+    ident = str(worker_identity or "").strip()
+    st = code_stamp if isinstance(code_stamp, dict) else {}
+    if not ident:
+        return "Verified by worker: unavailable (no worker_identity in the receipt)"
+    if not st:
+        return ("Verified by worker %s (code stamp unavailable: the receipt carried no "
+                "code_stamp)" % ident)
+    if st.get("available") is False:
+        return ("Verified by worker %s (code stamp unavailable: %s)"
+                % (ident, str(st.get("note") or "no reason given")[:160]))
+    stale = [str(x) for x in (st.get("stale") or [])]
+    parts = []
+    for name in ("agent_activities", "dev_lane", "light_lane", "shared", "verify_lane"):
+        m = (st.get("modules") or {}).get(name) or {}
+        if m:
+            parts.append("%s@%s" % (name, m.get("mtime") or "?"))
+    return ("Verified by worker %s (code stamp %s; started=%s; stale=%s)"
+            % (ident, " ".join(parts) or "?", st.get("worker_started_at") or "?",
+               ",".join(stale) if stale else "no"))
 
 
 def code_stamp_line(stamp: Dict[str, Any]) -> str:

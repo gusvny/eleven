@@ -7448,6 +7448,29 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         return out_err
     res = payload.get("result") or {}
     out = IntegrationRunResult()
+    # 宿主令 260930（B 档）：把「本轮是谁用哪份代码验的」钉进回执（additive，**不进判定**）。
+    # identity 与 SDK 的 worker identity 同构（`<pid>@<gethostname()>`，见 temporalio.service
+    # 的默认值），因此与 Temporal 事件历史里的 ActivityTaskStarted.identity 可直接对账；
+    # stamp 走 shared.worker_code_stamp 唯一实现，基准时刻=worker.py 入口钉的真启动时刻
+    # （worker.py 调 note_process_start）⇒ `stale` 语义=「模块在进程起来之后被改过」。
+    try:
+        import socket as _sock
+        out.worker_identity = "%d@%s" % (os.getpid(), _sock.gethostname())
+    except Exception as e:  # noqa: BLE001——身份面不可得=具名，绝不静默留空
+        out.worker_identity = ""
+        out.code_stamp = {"available": False,
+                          "note": "不可得：identity 计算失败 %s: %s"
+                                  % (type(e).__name__, str(e)[:120])}
+    if not out.code_stamp:
+        try:
+            _st = shared.worker_code_stamp(repo_root=REPO_ROOT, pid=os.getpid())
+            _st["available"] = True
+            _st["line"] = shared.code_stamp_line(_st)
+            out.code_stamp = _st
+        except Exception as e:  # noqa: BLE001
+            out.code_stamp = {"available": False,
+                              "note": "不可得：code_stamp 计算失败 %s: %s"
+                                      % (type(e).__name__, str(e)[:120])}
     out.warnings = list(_warnings) + [str(w) for w in (res.get("warnings") or [])]
     out.ran = int(res.get("ran") or 0)
     out.passed = int(res.get("pass") or 0)

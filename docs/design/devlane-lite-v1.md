@@ -344,6 +344,11 @@ Net effect: one fewer hand-off, one fewer failure family, and one fewer place wh
 to reason about "uncommitted work that is not the agent's". That is a **simplification** — which is
 why it belongs in this document even though containers do not, by themselves, shorten rounds.
 
+> Operations note: which worker process serves a ticket, how the lane snapshot relates to
+> `main`, and the three checks to run before pushing work (sync the lane, replace the
+> serving worker, verify exactly one live poller) are documented in
+> `docs/ops/engine-worker-and-lane-operations.md`.
+
 ### 4.5 Direct fix: intentionally rare, not a road
 
 Direct fixes were how this project kept moving while the lane was too slow, and they are the thing

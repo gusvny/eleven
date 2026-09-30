@@ -41,6 +41,19 @@ DATA_DIR = POC_DIR / 'data'
 VENV_PY = str(POC_DIR / '.venv' / 'bin' / 'python')
 
 
+def set_root(poc_dir) -> None:
+    """把本模块的「引擎根」指到别的仓（供 `server/tools/engine_ops.py --repo` 使用）。
+
+    为什么需要它：本模块的 pidfile/logfile/spawn 全按**自己所在仓**推导；运维工具要代管
+    「另一个仓」（多项目，或离线夹具）的泳道 worker 时，若不做这层重定向就会去起**本仓**的
+    worker —— 那正是宿主令里最怕的「动了不该动的仓」（实测：离线场景一次跑到真仓 data/ 下
+    留了个 worker-t-*.pid 与活进程）。缺省（不调本函数）= 行为逐字不变。"""
+    global POC_DIR, DATA_DIR, VENV_PY
+    POC_DIR = pathlib.Path(poc_dir).resolve()
+    DATA_DIR = POC_DIR / 'data'
+    VENV_PY = str(POC_DIR / '.venv' / 'bin' / 'python')
+
+
 def _pidfile(tid: str) -> pathlib.Path:
     return DATA_DIR / ('worker-%s.pid' % tid)
 
