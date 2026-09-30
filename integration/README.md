@@ -70,6 +70,24 @@ python3 integration/run_scenarios.py
   已知取舍：同提交上**抖动绿**会被如实复用（判据是账里那条绿行，不是运气复现）；换提交/
   脏树/换宽度即自动回退实跑。全复用轮（在册数全为复用）仍出正常绿回执——它说的是
   「这个确切的树已验证过」，不是「又验了一遍」。
+- **变更面查询**（t260930-02，治「任何 `server/plugins/` 下的改动都被引擎当共享基座 ⇒
+  每轮 438 条全量」）：只读查询面
+  `python3 integration/run_scenarios.py --print-surface-plan <改动清单文件|逗号分隔串>`
+  ——**不占同泳道单飞锁、不起任何场景、不写台账**，stdout 恰一行 JSON、退出码恒 0
+  （判定全在 JSON 里）：`{"mode","reason","surfaces","names","expected","notes"}`。
+  改动路径先要**有归属**：命中声明面 `integration/scenario-surfaces.json` 里某个 surface
+  的 `paths`（按目录段前缀；每面必须显式声明 `artifacts` 构建产物前缀，无产物面写 `[]`，
+  缺键=畸形），或落在 `ignored_paths`（运行产物域）里；两样都不是 ⇒ `mode=full` 并具名
+  `reason=unclassified-path:<path>`。同样 full 的还有：改动清单为空、声明面缺席/畸形、
+  选择器名不在册、算出的定点名单为空；`integration/**`（场景资产自身）改动一律 full。
+  否则 `mode=targeted`，`names` = 四路并集（排序去重、每条都在册）：①命中面 `console=true`
+  时**每一条会起产品控制台/舞台的在册场景**（机械派生：cmd 里的仓内文件 + 其 import/require
+  静态闭包，路径或正文命中标记集 `lib_stage_console`/`stage_console`/`bench_console`/
+  `with_stage.sh`/`stage_docker`；另加 `browser`/`browser-free` 两池整池）；②闭包/ cmd 正文
+  引用改动路径、命中面 `paths` 或 `artifacts` 前缀的场景（**改 src 连带改构建产物**，
+  只加载产物、不起控制台的场景族靠这半面才不漏）；③`always`（全仓不变量守卫）；④命中面
+  `names`。方向恒为**过近似**：多跑允许，漏一条禁止。声明面路径可用
+  `SANDBAR_SCENARIO_SURFACES` 覆盖（夹具/电池用；指向不存在的文件=具名 full，不回落默认面）。
 - 舞台纪律（t260904-19 定稿：自搭进程舞台退役，双轨并一轨）：一切需要舞台的场景
   经 **integration/stage_docker.py** 单点搭台（同一 compose 文件
   server/docker-compose.test.yml；每场景独立 compose 工程名+端口档，flock 原子

@@ -49,10 +49,14 @@ ENV_KEY = "SANDBAR_SCENARIO_EXCLUDE_POOLS"
 # 260930-01 登记一键（台账绿行复用）：reused = 本轮**未实跑**的复用条数（int，恒在场，
 #   零复用=0）——与 ran 分开计（ran 恒为实跑条数），完整性不变式升级为
 #   ran + reused == expected；老执行器无此键时闸按 0 处理（逐字节同改前）。
+# 260930 登记一键（在册红不进每轮路径）：known_red_skipped = 本轮按挂账册豁免**未跑**
+#   的在册红条数（int，恒在场，零豁免=0）；与其配套的 known_red_names（名单）只在非空
+#   时出现，故不进缺省键集。备注：运行期还会随豁免出现 INTEG_KNOWN_RED 专行（stdout，
+#   不属本键集）。
 DEFAULT_SUMMARY_KEYS = {
     "ran", "pass", "fail", "not_checked", "wall_s", "concurrency",
     "pool_config", "env_fingerprint", "expected", "budget_env", "timings",
-    "env_red_names", "env_red_count", "reused",
+    "env_red_names", "env_red_count", "reused", "known_red_skipped",
 }
 
 _spec = importlib.util.spec_from_file_location(

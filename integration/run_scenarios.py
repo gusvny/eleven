@@ -81,6 +81,32 @@ Conventions:
   semantics (strict serial everywhere — in-pool lanes AND pool-by-pool).
 - The registry only lists assets present in this repo (L4 rule: every cmd
   script must exist).
+- Changed-surface selector (t260930-02): `--print-surface-plan <file-or-CSV>`
+  is a READ-ONLY query (no run lock, no scenario started) answering "given
+  these changed files, which registered scenarios must run?". It reads the
+  integration-owned declaration `integration/scenario-surfaces.json` (env
+  override SANDBAR_SCENARIO_SURFACES for fixtures) and prints exactly one
+  JSON line with the frozen contract
+  {mode, reason, surfaces, names, expected, notes}; exit code is always 0.
+  mode=full carries a machine-readable reason from PLAN_REASON_TOKENS
+  (no-changed-files / surface-doc-missing / surface-doc-malformed /
+  unknown-selector / unclassified-path:<path> / empty-plan) and names=[];
+  mode=targeted (reason=ok) is the union of (a) every console-booting
+  scenario when a matched surface has console=true — derived mechanically
+  from the registry: cmd file tokens + their static import/require closure
+  (repo-local), matched against the console/stage marker set
+  {lib_stage_console, stage_console, bench_console, with_stage.sh,
+  stage_docker} on either the file path or its text, plus every entry in the
+  browser / browser-free pools; (b) every scenario whose cmd text or import
+  closure references a changed path, a matched surface's declared paths, or a
+  matched surface's **artifacts** prefix (a src change also changes the built
+  bundle scenarios load without booting the console — declaring artifacts is
+  mandatory, [] = explicitly none, a missing key is malformed ⇒ full);
+  (c) every name in `always` (repo-wide invariant guards); (d) every name in
+  the matched surfaces' `names`. Fail-closed everywhere: an unclassified
+  changed path, a changed path under integration/ (scenario assets are
+  shared), an unregistered selector name, or an empty resulting set all mean
+  full. The plan is an over-approximation and never an under-approximation.
 """
 import ast
 import datetime
@@ -95,6 +121,10 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t260930-02: 变更面查询（改动清单 → 本轮该跑哪些场景）的对外状态机 ----
+    ("t260930-02-surface-plan-query",
+     "变更面查询（--print-surface-plan）的端到端状态机（t260930-02，灰盒 L3，离线秒级零 docker 零端口零浏览器；真入口真子进程黑盒驱动，铁律=查询面不占锁、不起任何场景、不写台账）：A 插件改动 server/plugins/workbench/src/client/theme.ts → targeted/reason=ok/surfaces=[workbench-ui]，stdout 恰一行 JSON、退出码 0，名单排序去重且每条在册、非平凡但**严格窄于全量**（实测 186<438）、always 全仓守卫 28 条一条不少、expected==len(names)、同输入两次逐字节同输出（幂等）；B **产物派生**（本票补的欠近似缺口，parent 加严项）——改 src 连带改构建产物 lib/，只加载产物、从不起控制台的场景（t260903-13-workbench-bundle-loads、t260902-05-t06-ui-build-gate）仍在名单里，且情报行点名派生产物前缀；C console=false 的负向对照（watchdog 面 44<186，控制台 capture 链不被拖进来——防「谁起控制台」这条判据恒真）；D 场景资产 integration/**（含执行器自身）⇒ full + unclassified-path 具名；E 未声明路径 verify.yaml ⇒ full 具名（绝不因「看着无关」收窄）；F 空清单 ⇒ full/no-changed-files；G 声明面缺席 ⇒ full/surface-doc-missing；H 声明面畸形（含「有 paths 但缺 artifacts 键」同判畸形）⇒ full/surface-doc-malformed；I 选择器名不在册（always 与**未命中面**的 names 都查）⇒ full/unknown-selector，绝不静默跳过；J 只读面纪律=锁档零落盘、零规范行零汇总行、空入参也给合法单行 JSON。intent 分工（防重复）：执行器侧纯函数与计划组装的全部真值分支（路径归属/声明面三态/空名单/词表自证/假注册表上的产物派生）归 L1 server/engine/tests/test_t260930_02_surface_plan_query.py；引擎侧回执解析、surface_plan 活动四态回全量、接线结构锁归 server/engine/tests/test_t260930_02_surface_plan.py（同票并行件）；引擎侧「面计划并进快反馈轮、收口全量跑不动」的泳道行为归该票引擎侧——本条只锁查询出口自身的对外状态机。判据源=被测树内注册表（机械取册防手抄漂移），不锚内部实现；实现随本票落地，arbitrate/merge 期必须绿",
+     "python3 integration/t260930-02/sc_surface_plan_query.py", "ro", "serial"),
     # ---- t260929-18: 票面失败文案携带异常链真实消息（agent 段故障不再只剩「Activity task failed」包装） ----
     ("t260929-18-face-reason-real-wrap",
      "票面失败文案×真实 Temporal 包裹路（t260929-18，灰盒 L3，本机测试服务零 docker 零碰生产，工单 ACCEPTANCE 主面）：全部子用例经真实 Worker 真实执行 stub 活动、异常由 SDK 真实包裹成 ActivityError（工单明令禁止手搓 ActivityError+cause 顶替真路），工作流侧走生产唯一出口 format_agent_stage_failure：A 活动 raise RuntimeError(可行动 detail)（t260929-15 同形）→ 文案含 detail 且点名根因类型 RuntimeError、外层 ActivityError 如实在场（A1）；包装串话术仍在但不再是唯一内容（A2）；同形 history 再跑同文案=确定性契约（A3，要求②）；B 反向锁 ApplicationError(type=worker_terminated) → 「worker 被外部终止…」专用文案赢过链挖掘、不出现包装话术（B，t260916-29 契约）；C 零消息活动失败 → 不炸、绝不编造（实测定性：Temporal 服务端对空消息活动失败自动填占位消息「Application error」，真实链永不为空，「空消息→显式不可得」在真路不可达，该面由场景② M5 承接，占位行为作为发现上报）。intent 分工：developer L1 UT=formatter 纯函数矩阵（白盒）；场景②=SDK 造不出的畸形链契约面；本条=SDK 真包裹语义（UT 桩钉不住，正是本票缺陷原形）。temporalio/引擎 venv 缺席或本机测试服务起不来=ENV_FAIL exit 2；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
@@ -1962,9 +1992,9 @@ SCENARIOS = [
     ("t260930-01-ledger-reuse-round",
      "台账绿行复用端到端行为棒（t260930-01，灰盒 L3，离线秒级零 docker 零 Temporal，真 git 树纯 stdlib）：账里已存 76,558 次执行/41.5% 是同一 (scenario, commit) 重复——本条锁「同 commit 同环境指纹同宽的绿行可直接跳过实跑」这条新契约的用户可感知面。A 首轮零命中=实跑（规范行 PASS 在场、汇总 reused=0/ran=expected=1、SCENARIOS 行带 ` reused=0` 尾注、账里落一条同名绿行）；B 同 commit 第二轮=复用（stdout 专行「INTEG_REUSE 复用台账绿行 1 条…」点名、夹具标记文件未重造=确实没跑、零规范行、ran=0 且 reused==expected==1、rc=0 正常绿、**账行数不增=不重盖章**、报告 JSON 带 reused 与全名单与「启用」三态）；C 换 commit（同一棵树切到**内容逐字节相同、只有 sha 不同**的兄弟提交）=零复用实跑（判据第一键**精确相等**：祖先/别提交都不算；同内容兄弟提交这一形把「换的只有 commit 这一维」钉死，复用失败不可能被别的原因解释）；D kill switch SANDBAR_LEDGER_REUSE=0=零复用且 stderr 一行具名理由点名该 env；E 脏树（未跟踪件）=零复用且理由点名「工作树脏」（HEAD 单独描述不了被验证的树）；F 主账不可读（目录权限 000）=fail-closed 零复用且理由具名（绝不按空账静默放行）；G 真 verify_lane integ 道跑全复用轮=回执带 reuse.reused=1/all_reused=True/名单/在册数、并打 REUSE_FULL_ROUND 专行、闸判**绿**（完整性判据 ran+reused==expected 在复用轮与残缺轮两侧都成立）。intent 分工：四键真值表/畸形行容错/三态理由归 L1 server/engine/tests/test_t260930_01_ledger_reuse.py（白盒）；执行器三态出口与清单完整性归 t260904-12/t260910-13 电池（本条只锁 ` reused=` 尾注形状在场）；闸的台账采信（红名归属/基线免跑）归 t260922-12 家族，本条只锁复用面回执。真 git 树落本场景私有临时目录（finally+atexit 双路回收并 worktree prune，main 树 worktree 注册表零残留）；账目录经 SANDBAR_SCENARIO_LEDGER_DIR 隔离投影，真账零写入；红线零接触 3099。git 缺席=ENV_FAIL exit 2",
      "python3 integration/t260930-01/sc_ledger_reuse_round.py", "ro", "serial"),
-    ("t260930-01-known-red-round-skip",
+    ("t260930-01-known-red-round-exempt",
      "在册红不进每轮路径·黑盒契约（t260930-01，灰盒 L2/L3，真执行器子进程+夹具册子，离线秒级零 docker 零 Temporal 零端口；宿主裁 260930「B 档只摘在册」）：动机是实测——一轮全量的墙钟由一条串行链单独决定（9 条 460s ≈ 整轮 460s），而链上 9 条里 7 条是挂账册在册条目、6 条非绿灯，等于每轮都在等已知的、已记过账的故障慢慢跑。A 开关开（泳道轮注入）：在册红**不进本轮注册面**（expected 相应减一）、不在册的照旧跑，且必须出现三条具名面——INTEG_KNOWN_RED（跳过 N 条 + 名单 + 观察位=每日巡检与合并前全量）、INTEG_KNOWN_RED_NOTE（**未跑 ≠ 判绿**）、汇总 known_red_skipped/known_red_names，且具名面只认本轮注册面（点名轮之外的在册条目不进名单）；B 开关关（巡检/人工跑/合并前全量）：逐字节旧行为，零豁免行、注册面不缩；C fail-closed 三态：册子缺席/坏 JSON/形状不对 → **一条都不豁免**（照跑）且 stderr 具名点名原因；认不得的 verdict 词与畸形条目一律照跑（宁慢勿窄）；D 与台账复用的守恒：真册冒烟下 ran+reused==expected 仍成立。intent 分工：本条锁「已在册的不重跑」（判据=挂账册 verdict 词表），t260930-01-ledger-reuse-round 锁「同代码状态已验过的不重跑」（判据=台账四键），两条都改注册面构成但判据不同源、互不替；名册 schema 卫生归 integration/tests/test_t260923_known_red_baseline.py，闸侧豁免记账归 shared.blockers_known_red_adoption 与其 L1。安全红线：零端口零 docker 不触 3099/7233；真册只读、夹具册子经路径缝投临时目录",
-     "python3 integration/t260930-01/sc_known_red_round_skip.py", "ro", "serial"),
+     "python3 integration/t260930-01/sc_known_red_round_exempt.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900
@@ -2532,22 +2562,29 @@ def parse_only_scenarios(raw):
     return names
 
 
-def _cmd_asset_tokens(cmd):
-    """cmd 中形如仓内真实文件的 integration/ 路径 token（环境前缀 token 如
-    PY=server/… 不以 integration/ 开头，机械排除）。"""
+def _cmd_asset_tokens(cmd, repo_root=None, any_repo_file=False):
+    """cmd 中形如仓内真实文件的路径 token（缺省只认 integration/ 前缀——环境前缀
+    token 如 PY=server/… 不以 integration/ 开头，机械排除）。
+
+    repo_root 只在注入式电池（假仓树）里传；缺省=本仓根，既有调用面逐字不变。
+    any_repo_file=True（变更面选择器用）放开前缀：判据是「仓内真文件」而非「必须在
+    integration/」——场景脚本可以住别处，闭包面不该靠前缀漏掉它。"""
+    root = repo_root or _REPO_ROOT
     out = []
     for raw in re.split(r"[\s;|&()]+", str(cmd)):
         tok = raw.strip().strip("'\"")
-        if not tok.startswith("integration/") or tok in out:
+        if tok in out:
             continue
-        if os.path.isfile(os.path.join(_REPO_ROOT, tok)):
+        if not any_repo_file and not tok.startswith("integration/"):
+            continue
+        if os.path.isfile(os.path.join(root, tok)):
             out.append(tok)
     return out
 
 
-def _py_import_targets(rel):
+def _py_import_targets(rel, repo_root=None):
     """py 文件的 import 目标候选（框定 integration/ 前缀，存在性由调用方判）。"""
-    with open(os.path.join(_REPO_ROOT, rel), encoding="utf-8") as fh:
+    with open(os.path.join(repo_root or _REPO_ROOT, rel), encoding="utf-8") as fh:
         tree = ast.parse(fh.read())
     mods = set()
     for node in ast.walk(tree):
@@ -2578,8 +2615,8 @@ def _py_import_targets(rel):
 _MJS_IMPORT = re.compile(r"""(?:from|import|require)\s*\(?\s*['"](\.[^'"]+)['"]""")
 
 
-def _mjs_import_targets(rel):
-    with open(os.path.join(_REPO_ROOT, rel), encoding="utf-8") as fh:
+def _mjs_import_targets(rel, repo_root=None):
+    with open(os.path.join(repo_root or _REPO_ROOT, rel), encoding="utf-8") as fh:
         src = fh.read()
     base = os.path.dirname(rel)
     out = set()
@@ -2661,6 +2698,508 @@ def print_pool_assets(pool_arg):
     assets, warnings = collect_pool_assets(set(names))
     print(json.dumps({"pools": names, "assets": assets, "warnings": warnings},
                      ensure_ascii=False), flush=True)
+    return 0
+
+
+# ============================================================================
+# t260930-02：变更面选择器（--print-surface-plan，只读查询面）
+# ----------------------------------------------------------------------------
+# 问题：引擎侧把 server/plugins/ 整面当共享基座（shared.py 的 _SHARED_BASE_PREFIXES，
+# 本票不动），于是任何插件改动都强制全量 438 条、7.5~9.7 分钟一轮。本票在 integration
+# 侧补「改动 → 该跑哪些在册场景」的机械答案：声明面 = integration/scenario-surfaces.json
+# （integration 岗位所有），本模块只读地算出计划，**不改引擎、不占锁、不起任何场景**。
+#
+# 判据（方向恒为「宁宽勿窄」，任何一处判不出=full，绝不静默收窄）：
+#   1. fail-closed 四态：改动清单为空 / 声明面缺席 / 声明面畸形 / 选择器名不在册 →
+#      mode=full、names=[]，且 reason 走冻结词表（见 PLAN_REASON_TOKENS）具名。
+#   2. 改动路径必须先「有归属」：命中某个 surface 的 paths（目录前缀语义）、或落在
+#      ignored_paths 里（不可影响任何场景的运行产物域）。两样都不是=未声明路径 →
+#      full + reason=unclassified-path:<path>（绝不因为「看着无关」就放窄）。
+#   3. integration/** 是场景资产自身（共享面）：改动即 full，reason 仍走 unclassified-path
+#      词表（差别只在 notes 行点名「场景资产」——**词表冻结，不另造 token**）。
+#   4. 定点名单 = 下面四路并集（排序去重，每个名字都必须在册）：
+#      a) console=true 的命中面 → **每一条会起产品控制台/舞台的在册场景**。
+#         机械派生：取注册条目 cmd 里的**仓内真文件** token，walk 其 import/require 静态
+#         闭包（仓内相对路径；不进 node_modules/.venv），闭包里**文件路径或文件正文**命中
+#         控制台标记集即算；另把 browser / browser-free 两池的条目整池计入（它们按声明起
+#         隔离台/浏览器）。
+#         标记集（5 个，改这里等于改判据，须同批改本注释与 L1 电池）：
+#           · lib_stage_console —— integration/lib_stage_console.mjs（隔离测试台/共享控制台）
+#           · stage_console     —— stage_console.sh / 舞台控制台包装面
+#           · bench_console     —— integration/bench_console.mjs（基准控制台）
+#           · with_stage.sh     —— integration/with_stage.sh（舞台包装器）
+#           · stage_docker      —— integration/stage_docker.py|.mjs（起台单点）
+#         为什么是这个方向：插件改动可能改**渲染出来的东西**，而任何起控制台的场景都能
+#         看见它——按「谁起控制台」而非「谁 import 了插件」收面，才不漏观测方。
+#      b) 引用面：改动的**具体路径**、命中面的 paths 前缀、命中面的 artifacts 前缀三者
+#         都算「派生改动路径」；任何在册场景的 cmd 正文或 import 闭包正文里出现这些串
+#         就计入（直接消费该面的场景一定在册）。
+#         artifacts 的由来（本票补的欠近似缺口）：改 src/** 会连带改**构建产物**
+#         （lib/client.js|cjs），而一部分在册场景只加载/解析产物、从不起控制台
+#         ——只按 console 判会把它们整族漏掉。故 surface 必须显式声明 artifacts
+#         （无产物面写 []）；**缺 artifacts 键=surface-doc-malformed=full**：
+#         「有 paths 但产物面判不出」绝不静默放过。
+#      c) always：全仓不变量守卫（命名/术语/路径闸/合同冻结/写集与受保护路径执法/
+#         注册表自守/构建可复现…），任何改动都可能踩，每轮定点都要跑。
+#      d) 命中面的 names：人工追加的在册场景名（能机械派生就留空；填了也必须在册）。
+#   5. 名单算完为空=empty-plan → full（空名单绝不当「没什么可跑」放行）。
+#
+# 输出契约（冻结，引擎侧消费）：恰一行 JSON，键= mode/reason/surfaces/names/expected/notes；
+# 退出码恒 0（判定在 JSON 里）。expected=该计划蕴含的在册场景数（full=注册表总数，
+# targeted=len(names)）——消费方拿它跟注册表规模对账，防「少跑一轮冒充全绿」。
+SURFACES_DOC_REL = "integration/scenario-surfaces.json"
+#: 声明面路径覆盖（夹具/电池用假声明面；人工误配=指向不存在的文件=full，不静默回落）。
+SURFACES_DOC_ENV = "SANDBAR_SCENARIO_SURFACES"
+#: 控制台/舞台标记集（路径或正文命中即算，见上 4a）。
+CONSOLE_MARKERS = ("lib_stage_console", "stage_console", "bench_console",
+                   "with_stage.sh", "stage_docker")
+#: 整池计入控制台面的池名（按声明起隔离台/浏览器，不靠标记串判）。
+CONSOLE_POOLS = ("browser", "browser-free")
+#: reason 冻结词表（除 unclassified-path 外都是整词；消费方按前缀解析前者）。
+PLAN_REASON_TOKENS = ("ok", "no-changed-files", "unclassified-path",
+                      "surface-doc-missing", "surface-doc-malformed",
+                      "unknown-selector", "empty-plan")
+
+
+def surfaces_doc_path():
+    """变更面声明文件路径（env 覆盖优先，相对路径按仓根解析）。"""
+    raw = str(os.environ.get(SURFACES_DOC_ENV) or "").strip()
+    if not raw:
+        return os.path.join(_REPO_ROOT, SURFACES_DOC_REL)
+    return raw if os.path.isabs(raw) else os.path.join(_REPO_ROOT, raw)
+
+
+def _valid_str_list(value):
+    """「列表且每项非空字符串」——空列表合法（[] 是显式声明，不是缺失）。"""
+    if not isinstance(value, list):
+        return False
+    return all(isinstance(x, str) and x.strip() for x in value)
+
+
+def load_surfaces_doc(path=None):
+    """读并校验变更面声明 → (doc, error)。
+
+    error 只用冻结词表里的两个 token：surface-doc-missing / surface-doc-malformed。
+    校验面（任一条不过即畸形，绝不半信半疑地用半张表）：meta.policy 非空串、
+    meta.max_surfaces 正整数且 surfaces 不超帽、surfaces 非空且 id 唯一、
+    每面 paths 非空串列表、console 布尔、names 串列表、**artifacts 键必须在场**
+    （值可为 []）、always/ignored_paths 串列表、顶层必须是对象。"""
+    p = path or surfaces_doc_path()
+    try:
+        with open(p, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except FileNotFoundError:
+        return None, "surface-doc-missing"
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None, "surface-doc-malformed"
+    if not isinstance(raw, dict):
+        return None, "surface-doc-malformed"
+    meta, surfaces = raw.get("meta"), raw.get("surfaces")
+    if not isinstance(meta, dict) or not isinstance(meta.get("policy"), str) \
+            or not meta["policy"].strip():
+        return None, "surface-doc-malformed"
+    cap = meta.get("max_surfaces")
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
+        return None, "surface-doc-malformed"
+    if not _valid_str_list(raw.get("always")) or not _valid_str_list(raw.get("ignored_paths")):
+        return None, "surface-doc-malformed"
+    if not isinstance(surfaces, list) or not surfaces or len(surfaces) > cap:
+        return None, "surface-doc-malformed"
+    seen = set()
+    for s in surfaces:
+        if not isinstance(s, dict):
+            return None, "surface-doc-malformed"
+        sid, paths = s.get("id"), s.get("paths")
+        if not isinstance(sid, str) or not sid.strip() or sid in seen:
+            return None, "surface-doc-malformed"
+        if not _valid_str_list(paths) or not paths:
+            return None, "surface-doc-malformed"
+        if not isinstance(s.get("console"), bool):
+            return None, "surface-doc-malformed"
+        if not _valid_str_list(s.get("names")):
+            return None, "surface-doc-malformed"
+        if "artifacts" not in s or not _valid_str_list(s["artifacts"]):
+            return None, "surface-doc-malformed"
+        seen.add(sid)
+    return raw, None
+
+
+def _norm_rel(path):
+    """改动路径归一：去首尾空白、统一分隔符、剥 ./ 前缀（比较用的唯一口径）。"""
+    p = str(path or "").strip().replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def _prefix_hit(path, prefixes):
+    """目录前缀命中（**按段**，不是裸串前缀）：返回命中的前缀，未命中返回 ""。
+
+    按段判是防「server/plugins/ui/」误命中「server/plugins/ui-check/」这一族假绿。"""
+    path = _norm_rel(path)
+    for pref in prefixes:
+        pref = _norm_rel(pref).rstrip("/")
+        if not pref:
+            continue
+        if path == pref or path.startswith(pref + "/"):
+            return pref
+    return ""
+
+
+def _surface_of_path(path, doc):
+    """改动路径归属的 surface（声明序第一个命中者；未命中返回 None）。"""
+    for s in doc["surfaces"]:
+        if _prefix_hit(path, s["paths"]):
+            return s
+    return None
+
+
+#: 闭包正文读取面：只读这些后缀（二进制/依赖目录读进来只是噪音，判据面用不到）。
+_CLOSURE_TEXT_SUFFIXES = (".py", ".mjs", ".js", ".sh", ".json", ".ts", ".tsx",
+                          ".css", ".html", ".md", ".yaml", ".yml")
+#: 闭包不进的目录（依赖/虚拟环境/元数据）。
+_CLOSURE_SKIP_DIRS = ("node_modules/", ".venv/", ".git/", "__pycache__/")
+
+
+def _is_repo_local(rel, root):
+    """仓内相对路径（不出仓根、不进依赖目录）。"""
+    if not rel or rel.startswith("/") or rel.startswith(".."):
+        return False
+    if any("/" + d in "/" + rel for d in _CLOSURE_SKIP_DIRS):
+        return False
+    return os.path.isfile(os.path.join(root, rel))
+
+
+def _closure_files(entry, repo_root=None):
+    """注册条目的静态文件闭包（变更面判据面）：cmd 里的**仓内真文件** token ∪ 其
+    import/require 传递闭包（仓内相对路径；不进 node_modules/.venv）。
+
+    与 --print-pool-assets 的资产派生同族、但**不框 integration/ 前缀**：场景脚本
+    可以住别处，闭包面不该靠前缀漏掉它。解析失败（语法/编码/IO）=该文件不展开。
+    结果按 (仓根, 条目名, cmd) 记忆化——同一轮里 console 面与引用面各要走一遍，
+    ast.parse 全仓场景文件是本查询最贵的一步。"""
+    key = ((repo_root or _REPO_ROOT), entry[0], str(entry[2]))
+    if key in _CLOSURE_CACHE:
+        return _CLOSURE_CACHE[key]
+    root = repo_root or _REPO_ROOT
+    seen, queue = [], []
+    for tok in _cmd_asset_tokens(entry[2], root, any_repo_file=True):
+        if tok not in seen:
+            seen.append(tok)
+            queue.append(tok)
+    while queue:
+        rel = queue.pop()
+        try:
+            if rel.endswith(".py"):
+                cands = _py_import_targets(rel, root)
+            elif rel.endswith((".mjs", ".js")):
+                cands = _mjs_import_targets(rel, root)
+            else:
+                continue
+        except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+            continue
+        for cand in cands:
+            cand = os.path.normpath(cand)
+            if cand in seen or not _is_repo_local(cand, root):
+                continue
+            seen.append(cand)
+            queue.append(cand)
+    _CLOSURE_CACHE[key] = seen
+    return seen
+
+
+_CLOSURE_CACHE = {}
+_TEXT_CACHE = {}
+
+
+def _file_text(rel, repo_root=None):
+    """闭包正文读取（带缓存；读不到=空串，判据侧按「无正文」处理）。"""
+    key = ((repo_root or _REPO_ROOT), rel)
+    if key not in _TEXT_CACHE:
+        try:
+            with open(os.path.join(key[0], rel), encoding="utf-8",
+                      errors="replace") as fh:
+                _TEXT_CACHE[key] = fh.read()
+        except OSError:
+            _TEXT_CACHE[key] = ""
+    return _TEXT_CACHE[key]
+
+
+#: 自身声明面（自引用守卫）：执行器源码的正文里列着全仓路径与全部场景名，拿它的
+#: **正文**当「这个场景消费了该路径/起了控制台」的证据等于恒真（实测：不摘它，
+#: notes/ 一改的名单从 64 涨到 103）。故只扫它的**路径**——真在 cmd 里用了执行器
+#: 的场景，路径本就以 token 形态在场，不受影响。
+_DECLARATION_SELF = "integration/run_scenarios.py"
+
+
+def _entry_blob(entry, repo_root=None):
+    """条目判据面文本片：cmd 正文 ∪ 闭包文件路径 ∪ 闭包文件正文（**不拼接**——整段
+    拼接会把每个条目的 blob 撑到数百 KB，判定只需逐片 any）。"""
+    files = _closure_files(entry, repo_root)
+    parts = [str(entry[2])] + list(files)
+    parts.extend(_file_text(f, repo_root) for f in files
+                 if f.endswith(_CLOSURE_TEXT_SUFFIXES) and f != _DECLARATION_SELF)
+    return parts
+
+
+def _blob_has(parts, needles):
+    """判据面任一片含任一 needle（逐片 any，不拼大串）。"""
+    for part in parts:
+        if not part:
+            continue
+        for need in needles:
+            if need in part:
+                return True
+    return False
+
+
+def console_booting_names(registry=None, repo_root=None):
+    """会起产品控制台/舞台的在册场景名（机械派生，标记集见本节头注 4a）。
+
+    排序返回（消费方再并集去重）。"""
+    reg = SCENARIOS if registry is None else registry
+    out = set()
+    for entry in reg:
+        if pool_of(entry) in CONSOLE_POOLS:
+            out.add(entry[0])
+            continue
+        if _blob_has(_entry_blob(entry, repo_root), CONSOLE_MARKERS):
+            out.add(entry[0])
+    return sorted(out)
+
+
+def _reference_needles(paths):
+    """引用面的匹配式（编译后）：带尾斜杠形=裸串命中；去尾斜杠形=**词尾边界**命中。
+
+    词尾边界（后随非 [A-Za-z0-9_-]）是防「notes」这类短前缀把「notes-write-gate」
+    这种**别的名字**也算成命中——那是纯噪音（实测：不设边界，notes/ 一改的名单从
+    64 涨到 103，多出来的全是被当成词根的其它场景名）。反过来，`os.path.join(
+    "server/plugins/x/lib", ...)` 这种**不带尾斜杠**的消费写法仍抓得住（后随引号）。"""
+    pats = []
+    for p in paths:
+        p = _norm_rel(p)
+        if not p:
+            continue
+        if p.endswith("/"):
+            pats.append(re.compile(re.escape(p)))
+        bare = p.rstrip("/")
+        if bare:
+            pats.append(re.compile(re.escape(bare) + r"(?![A-Za-z0-9_\-])"))
+    return pats
+
+
+def names_referencing_paths(paths, registry=None, repo_root=None):
+    """闭包/ cmd 正文里出现这些路径串的在册场景名（排序返回）。
+
+    只增不减的保守方向——注释里的提及也算命中（宁宽勿窄）；匹配式见
+    _reference_needles。"""
+    reg = SCENARIOS if registry is None else registry
+    pats = _reference_needles(paths)
+    out = set()
+    if not pats:
+        return []
+    for entry in reg:
+        parts = _entry_blob(entry, repo_root)
+        hit = False
+        for part in parts:
+            if not part:
+                continue
+            if any(pat.search(part) for pat in pats):
+                hit = True
+                break
+        if hit:
+            out.add(entry[0])
+    return sorted(out)
+
+
+def _plan_notes_full(reason, extra=None):
+    """full 计划的 notes（点名「为什么没敢收窄」，每态一句话）。"""
+    base = {
+        "no-changed-files": "改动清单为空——无改动不放窄，也不当空跑放行",
+        "surface-doc-missing": "变更面声明文件缺席——判据面不在，按 fail-closed 全量",
+        "surface-doc-malformed": "变更面声明文件畸形——半张表不可信，按 fail-closed 全量",
+        "unknown-selector": "选择器名不在册——拼错的守卫名绝不静默跳过，按全量",
+        "empty-plan": "命中面算出的定点名单为空——空名单不放行，按全量",
+    }
+    note = base.get(reason.split(":", 1)[0])
+    notes = ["reason=%s：%s" % (reason, note)] if note else ["reason=%s" % reason]
+    return notes + list(extra or [])
+
+
+def build_surface_plan(changed_files, doc, doc_error=None, registry=None,
+                       repo_root=None):
+    """纯组装（不打印、不退出）：改动清单 × 声明面 × 注册表 → 冻结契约的 plan dict。
+
+    full 分支一律 names=[]、expected=注册表总数（消费方拿它对账「这一轮该有多少条」）；
+    targeted 分支 expected=len(names)。"""
+    reg = SCENARIOS if registry is None else registry
+    reg_names = [e[0] for e in reg]
+    total = len(reg_names)
+
+    def _full(reason, extra=None, surfaces=None):
+        return {"mode": "full", "reason": reason,
+                "surfaces": sorted(surfaces or []), "names": [],
+                "expected": total, "notes": _plan_notes_full(reason, extra)}
+
+    paths = []
+    for raw in (changed_files or []):
+        p = _norm_rel(raw)
+        if p and p not in paths:
+            paths.append(p)
+    if not paths:
+        return _full("no-changed-files")
+    if doc is None:
+        return _full(doc_error or "surface-doc-malformed")
+
+    # 选择器名在册校验：always 与**每个**面的 names 全查（不只看命中面——声明面里
+    # 的拼错是配置缺陷，越早响亮越好，绝不留到「恰好命中那一面」时才暴露）。
+    known = set(reg_names)
+    bad = [n for n in list(doc["always"])
+           + [n for s in doc["surfaces"] for n in s["names"]] if n not in known]
+    if bad:
+        bad = sorted(set(bad))
+        return _full("unknown-selector",
+                     ["不在册的选择器名：%s（共 %d 个）" % (",".join(bad[:8]), len(bad))])
+
+    kept, ignored_hit = [], []
+    for p in paths:
+        if _prefix_hit(p, doc["ignored_paths"]):
+            ignored_hit.append(p)
+        else:
+            kept.append(p)
+
+    # 场景资产自身（integration/**）=共享面：改动即全量（词表冻结，用 unclassified-path）。
+    asset = [p for p in kept if _prefix_hit(p, ["integration/"])]
+    if asset:
+        return _full("unclassified-path:%s" % asset[0],
+                     ["场景资产自身即共享面（integration/**，含场景/共享助手/执行器）",
+                      "命中的场景资产：%s" % ",".join(asset[:6])])
+
+    matched, unclassified = [], []
+    for p in kept:
+        s = _surface_of_path(p, doc)
+        if s is None:
+            unclassified.append(p)
+        elif s["id"] not in matched:
+            matched.append(s["id"])
+    if unclassified:
+        return _full("unclassified-path:%s" % unclassified[0],
+                     ["未声明路径（既不在任何 surface.paths，也不在 ignored_paths；"
+                      "共 %d 条）：%s" % (len(unclassified), ",".join(unclassified[:6]))],
+                     surfaces=matched)
+
+    hits = [s for s in doc["surfaces"] if s["id"] in matched]
+    names, notes = set(doc["always"]), []
+    notes.append("命中面=%s" % ",".join(sorted(matched)))
+    if ignored_hit:
+        notes.append("忽略路径 %d 条（运行产物域，不构成改动面）" % len(ignored_hit))
+    console_faces = [s["id"] for s in hits if s["console"]]
+    if console_faces:
+        console_names = console_booting_names(reg, repo_root)
+        names.update(console_names)
+        notes.append("console 面=%s：控制台/舞台在册场景 %d 条（标记集 ∪ browser"
+                     "/browser-free 池）" % (",".join(sorted(console_faces)),
+                                             len(console_names)))
+    needles, derived = [], []
+    for p in kept:
+        needles.append(p)
+    for s in hits:
+        needles.extend(s["paths"])
+        for art in s["artifacts"]:
+            needles.append(art)
+            derived.append(art)
+    ref_names = names_referencing_paths(needles, reg, repo_root)
+    names.update(ref_names)
+    if derived:
+        notes.append("派生产物前缀=%s（引用面共 %d 条在册场景）"
+                     % (",".join(sorted(set(derived))), len(ref_names)))
+    else:
+        notes.append("引用面 %d 条在册场景（改动路径 ∪ 命中面 paths）" % len(ref_names))
+    extra = sorted({n for s in hits for n in s["names"]})
+    if extra:
+        names.update(extra)
+        notes.append("命中面 names 追加 %d 条" % len(extra))
+    names = sorted(names)
+    if not names:
+        return _full("empty-plan", surfaces=matched)
+    notes.append("always 守卫 %d 条；在册总数 %d" % (len(set(doc["always"])), total))
+    return {"mode": "targeted", "reason": "ok", "surfaces": sorted(matched),
+            "names": names, "expected": len(names), "notes": notes}
+
+
+def _split_changed_files(text):
+    """改动清单切分：逗号/换行/空白切分（幂等去重保序）。"""
+    out = []
+    for tok in re.split(r"[,\n\r\t ]+", str(text or "")):
+        tok = tok.strip().strip("'\"")
+        if tok and tok not in out:
+            out.append(tok)
+    return out
+
+
+#: 「像改动路径」的 token：不含空格/引号/中文/标点开头（挡住源码正文里的 //、{、— …）。
+_PATH_TOKEN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-/]*$")
+
+
+def _looks_like_path_list(tokens):
+    """整段 token 是否**全部**形如改动路径（清单文件与源码文件的判别面）。
+
+    全过才算清单：一条不过即判「这不是清单」（判别失败的方向安全——退化路径是把
+    入参当**单个改动路径**，那会走到 unclassified-path ⇒ full，响亮不收窄）。"""
+    if not tokens:
+        return False
+    for t in tokens:
+        if not _PATH_TOKEN.match(t):
+            return False
+        if "/" not in t and "." not in t:
+            return False                      # 形如文件/目录的 token 才认
+    return True
+
+
+def _read_changed_files(arg):
+    """改动清单解析 → (路径列表, 一行来源说明)。
+
+    入参两形态（票面冻结）：**清单文件路径**或**逗号分隔串**。判别顺序——
+      1) 入参自带逗号/换行=CSV 形态，直接按串切（不读盘）；
+      2) 盘上确有该文件，且正文整段形如改动路径清单 → 逐条读（# 开头的注释行剔除）；
+      3) 其余（含「路径本身正好是个存在的源码文件」这一常见歧义形态）→ 当**单个
+         改动路径**。歧义往「单个路径」倒：源码文件正文混进清单会把名单炸成一堆
+         垃圾 token（实测：把 theme.ts 当清单读，439 条噪音里编不出任何可信面），
+         而单路径最坏只是 unclassified-path ⇒ full——收窄方向绝不因歧义松动。"""
+    raw = str(arg or "").strip()
+    if not raw:
+        return [], "改动清单：入参为空（无清单=full）"
+    if "," in raw or "\n" in raw or "\r" in raw:
+        return _split_changed_files(raw), "改动清单来源=CSV 入参"
+    if os.path.isfile(raw):
+        try:
+            with open(raw, encoding="utf-8") as fh:
+                text = fh.read()
+        except (OSError, UnicodeDecodeError) as ex:
+            return [], "改动清单文件不可读（%s: %s）=full" % (type(ex).__name__, ex)
+        # 注释按**行**剔除（`# 说明` 整行是注释；行内 # 不切，路径里本来就少见）。
+        body = "\n".join(ln for ln in text.splitlines()
+                         if not ln.strip().startswith("#"))
+        toks = _split_changed_files(body)
+        if _looks_like_path_list(toks):
+            return toks, "改动清单来源=文件 %s（%d 条）" % (raw, len(toks))
+        return [raw], ("改动清单来源=单个改动路径（%s 在盘上是文件，但正文不是改动清单"
+                       "形态——不当清单读）" % raw)
+    return _split_changed_files(raw), "改动清单来源=CSV 入参"
+
+
+def print_surface_plan(arg):
+    """--print-surface-plan：改动清单 → 变更面计划（只读查询面）。
+
+    纪律：**不占同泳道单飞锁**（与 --print-pool-assets 同类，闸要能并行查）、不起任何
+    场景、不写任何台账；stdout 恰一行 JSON（冻结契约），退出码恒 0——判定全在 JSON 的
+    mode/reason 里，调用方不必猜退出码语义。"""
+    paths, src = _read_changed_files(arg)
+    doc, err = load_surfaces_doc()
+    plan = build_surface_plan(paths, doc, err)
+    plan["notes"] = list(plan.get("notes") or []) + [src,
+                                                     "声明面=%s" % surfaces_doc_path()]
+    print(json.dumps(plan, ensure_ascii=False), flush=True)
     return 0
 
 
@@ -3687,6 +4226,11 @@ def _cli(argv):
     if "--print-pool-assets" in argv:
         i = argv.index("--print-pool-assets")
         return print_pool_assets(argv[i + 1] if i + 1 < len(argv) else "")
+    # --print-surface-plan（t260930-02）：变更面计划的只读查询面——与
+    # --print-pool-assets 同类，**不起场景、不占锁**，故同样在锁之前分流。
+    if "--print-surface-plan" in argv:
+        i = argv.index("--print-surface-plan")
+        return print_surface_plan(argv[i + 1] if i + 1 < len(argv) else "")
     # --reprobe（t260917-09）：探针出口自带单飞锁获取（reprobe_main 内），故在
     # 通用锁获取之前分流；名单 CSV 逗号分隔（注册表名=[a-z0-9-] 族 slug）。
     if "--reprobe" in argv:

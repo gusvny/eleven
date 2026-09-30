@@ -1,0 +1,105 @@
+{
+  "meta": {
+    "policy": "变更面声明（integration 岗位所有）：每一条改动路径必须**有归属**——命中某个 surface 的 paths（按目录段前缀），或落在 ignored_paths 里（运行产物域，任何场景都不把它当输入）；两样都不是即未声明路径 ⇒ 计划恒为 full（fail-closed，reason=unclassified-path:<path>）。同理：改动清单为空、本声明面缺席/畸形、always 或任一 surface.names 含不在册的场景名、算出的定点名单为空——全部 full 并带机读 reason，绝不静默收窄。计划的**方向恒为过近似**：命中面的 paths 与 artifacts 前缀都算派生改动路径，引用面命中即计入；console=true 的命中面把「每一条会起产品控制台/舞台的在册场景」整族拉进来（标记集 lib_stage_console/stage_console/bench_console/with_stage.sh/stage_docker 命中文件名或正文，另加 browser 与 browser-free 两池整池）；artifacts 是构建产物前缀，改 src 会连带改产物，只按 console 判会漏掉「只加载产物、不起控制台」的场景族，故每个面**必须显式声明 artifacts**（无产物面写 []，缺键=畸形=full）。漏一条=欠近似=禁止；多跑几条=允许。",
+    "max_surfaces": 16
+  },
+  "surfaces": [
+    {
+      "id": "workbench-ui",
+      "paths": ["server/plugins/workbench/"],
+      "artifacts": ["server/plugins/workbench/lib/"],
+      "console": true,
+      "names": []
+    },
+    {
+      "id": "executor-panel",
+      "paths": ["server/plugins/executor-panel/"],
+      "artifacts": [],
+      "console": true,
+      "names": []
+    },
+    {
+      "id": "admin-ui",
+      "paths": ["server/plugins/ui/"],
+      "artifacts": ["server/plugins/ui/lib/"],
+      "console": true,
+      "names": []
+    },
+    {
+      "id": "knowledge-plugin",
+      "paths": ["server/plugins/knowledge/"],
+      "artifacts": ["server/plugins/knowledge/lib/"],
+      "console": true,
+      "names": []
+    },
+    {
+      "id": "providers-plugin",
+      "paths": ["server/plugins/providers/"],
+      "artifacts": ["server/plugins/providers/lib/"],
+      "console": true,
+      "names": []
+    },
+    {
+      "id": "watchdog",
+      "paths": ["server/plugins/watchdog/"],
+      "artifacts": [],
+      "console": false,
+      "names": []
+    },
+    {
+      "id": "temporal-tools",
+      "paths": ["server/plugins/temporal-tools/"],
+      "artifacts": [],
+      "console": false,
+      "names": []
+    },
+    {
+      "id": "docs-kb",
+      "paths": ["docs/"],
+      "artifacts": [],
+      "console": false,
+      "names": []
+    },
+    {
+      "id": "notes-kb",
+      "paths": ["notes/"],
+      "artifacts": [],
+      "console": false,
+      "names": []
+    }
+  ],
+  "always": [
+    "scenario-guard-spec-landed",
+    "scenario-guard-doc-drift",
+    "t260920-03-terminology-l7-gate",
+    "t260920-03-terminology-baseline-floor",
+    "t260905-06-docs-wording-retired",
+    "t260907-10-engine-layout",
+    "t260903-03-paths-contract-doc-guard",
+    "t260921-06-batch-manifest-contract",
+    "t260904-12-deregistry-honest",
+    "t260928-13-registry-additive-keys",
+    "t260904-18-ki049-write-set-contract",
+    "notes-write-gate",
+    "t260912-03-authz-protected-path",
+    "t260911-03-protected-settle-reject",
+    "t260925-23-template-pathgate-load",
+    "t260925-23-template-pathgate-faces",
+    "t260926-02-pathgate-folded-untracked",
+    "t260907-01-path-hygiene",
+    "t260925-04-file-blast-radius",
+    "t260925-04-full-run-invariants",
+    "metrics-contract-api-freeze",
+    "metrics-contract-doc-structure",
+    "metrics-contract-schema-sync",
+    "t260903-13-metrics-golden-freeze",
+    "t260903-04-client-bundle-sync",
+    "t260910-15-toolchain-pinned",
+    "t260903-12-merge-checks-pairs",
+    "sandbar-contract-v1"
+  ],
+  "ignored_paths": [
+    "out/",
+    ".sandbar/"
+  ]
+}
