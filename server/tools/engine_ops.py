@@ -46,6 +46,7 @@ import json
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -377,7 +378,12 @@ def cmd_workers(args) -> dict:
                           "不可归因到代码版本" % (q["queue"], q["live_count"]))
     res = {"repo": str(REPO), "host": host, "namespace": ns,
            "workers": wks, "queues": queues, "alerts": alerts,
-           "live_poller_rule": "server 保留刚退出者的 poller 历史 ⇒ 只按活进程计数"}
+           "live_poller_rule": "server 保留刚退出者的 poller 历史 ⇒ 只按活进程计数",
+           "handover_rule": ("换手只有一种做法：按 pidfile TERM 现有 worker，等控制台 "
+                             "temporal-tools supervisor 自动拉起（keepalive 缺省 5s）再验"
+                             "「新 pid + 活 poller=1」。**不要自己起 worker**：从 agent 会话起的"
+                             "worker 继承该会话沙箱（workspace-write），工作区外写 fail-closed "
+                             "⇒ 票归档 EPERM（t260930-09 实案）")}
     if alerts:
         return {"ok": False, "exit": ALERT_EXIT, "error": "；".join(alerts), "result": res}
     return _ok(res)
@@ -625,7 +631,8 @@ def cmd_drift(args) -> dict:
     res = {"ticket": tid, "lane": lane, "verdict": "drift" if alerts else "clean",
            "alerts": alerts, **items,
            "rule": "推票前三条：①泳道无已落 main 的引擎漂移 ②泳道 worker 不是 stale "
-                   "③本票队列活 poller 恰 1"}
+                   "③本票队列活 poller 恰 1；引擎修要生效须**同步树 + 换进程**，而换进程"
+                   "=kill 后等 supervisor 自动拉起（不要自己起 worker）"}
     if alerts:
         return {"ok": False, "exit": ALERT_EXIT, "error": "；".join(alerts), "result": res}
     return _ok(res)
@@ -767,88 +774,211 @@ def _proof_single_poller(host, ns, queues, expect_pid=None) -> dict:
     return {"ok": ok, "queues": out}
 
 
+#: 旧 worker 排空（优雅停等在飞活动）的有界等待。为什么必须单独一段：优雅停**要等在飞
+#: 活动收口**，负载高的机器上可能几十秒；换手瞬间旧进程仍在排空是**合法中间态**，
+#: 不能当成「poller 数不为 1」判失败（宿主 260930 打回：同一场景两台机器一绿一红）。
+OLD_DRAIN_WAIT_S = 90.0
+#: 采样间隔（poller 面**轮询式**采样）：单次采样正是那个假红的来源。
+POLL_SAMPLE_S = 1.0
+
+
+def _poll_sample(host, ns, queues, old_pid=None) -> dict:
+    """一次 poller 面采样（活计数分栏）；面不可得=具名，不冒充。"""
+    rows = [_queue_pollers(host, ns, q) for q in queues]
+    live = [{"queue": r["queue"], "pid": int(x["identity"].split("@")[0]),
+             "identity": x["identity"]}
+            for r in rows if r.get("available")
+            for x in (r.get("live") or []) if x["identity"].split("@")[0].isdigit()]
+    return {"available": all(r.get("available") for r in rows),
+            "live": live, "live_count": len(live),
+            "queues": rows,
+            "note": "" if all(r.get("available") for r in rows)
+                    else "；".join("%s：%s" % (r["queue"], r.get("note")) for r in rows
+                                   if not r.get("available"))[:200],
+            "old_pid_in_live": bool(old_pid) and any(x["pid"] == old_pid for x in live)}
+
+
+def _kill_and_wait_for_respawn(host, ns, pf, queues, wait_s: float,
+                              old_drain_s: float = OLD_DRAIN_WAIT_S) -> dict:
+    """**只 kill、等自动拉起**（宿主 260930 纠正后的唯一换手口径）。
+
+    为什么不许自己起（今天实况）：从 agent 会话起的 worker 会**继承该会话的沙箱**
+    （workspace-write）——工作区外的写全部 fail-closed，真票 t260930-09 归档时直接
+    `PermissionError: [Errno 1] Operation not permitted:
+    '/Users/user/.sandbar/projects/sandbar/data/tickets/t260930-09'` → `merge/blocked`。
+    正确做法=按 pidfile TERM 现有 worker，**由控制台侧 temporal-tools supervisor 的
+    keepalive（缺省 5s）自动拉起**（它不受本会话沙箱约束）。
+
+    **四段有界序列**（宿主 260930 打回后定稿；每段各自有界、中间态具名、判据轮询式）：
+      ① TERM 旧（按 pidfile 定位，优雅信号）；
+      ② 等旧 pid **真的消失**（`pid_alive==false`，上界 `own_drain_s`=90s）——这期间若
+         supervisor 已把新 pid 写进 pidfile，是**合法中间态**：结果里具名
+         `phase=old-drain … new_pid=… still_alive=true`，**不判失败**；
+      ③ 旧消失后，等**新 pid 出现 ∧ 活 ∧ 在轮询本队列**（上界 `wait_s`=60s，**轮询式采样**）；
+      ④ 此刻才断言「本队列活 poller 恰 1 且就是新 pid」；仍有别的活 poller ⇒ 真失败
+         （把全部活 poller 逐个点名）。
+    任一段超时 ⇒ 失败，并点名**是哪一段**（old-drain / respawn / poller-face），绝不自己起 worker。
+    """
+    before = read_pidfile(pf)
+    old_pid = before.get("pid")
+    out = {"mode": "kill-and-wait-for-respawn", "pidfile": str(pf),
+           "armed_by": "console temporal-tools supervisor keepalive（缺省 5s）",
+           "before": before, "old_pid": old_pid, "new_pid": None,
+           "old_drain_wait_s": old_drain_s, "respawn_wait_s": wait_s,
+           "phases": [], "samples": [], "pollers_proof": None, "error": ""}
+    if before["state"] != "live":
+        out["error"] = ("无在册**活** worker（pidfile=%s 状态=%s：%s）——kill-only 换手无事可做。"
+                        "若这张票/这条队列应该有人在服务，先查控制台里 temporal-tools "
+                        "supervisor 是否在跑（它负责自动拉起）；本工具**绝不自己起 worker**"
+                        "（沙箱继承会让工作区外写 fail-closed：票归档 EPERM，t260930-09 实案）"
+                        % (pf, before["state"], before.get("detail") or ""))
+        out["phase_failed"] = "no-live-worker"
+        return out
+    try:
+        os.kill(int(old_pid), signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except OSError as e:
+        out["error"] = ("TERM 旧 worker pid=%s 失败（%s: %s）——未做任何其他动作"
+                        % (old_pid, type(e).__name__, e))
+        out["phase_failed"] = "term"
+        return out
+
+    # ---------------- ② 等旧 pid 排空（合法中间态具名，不判失败） ----------------
+    t0 = time.time()
+    new_pid_seen = None
+    while True:
+        still = shared.pid_alive(old_pid)
+        st = read_pidfile(pf)
+        cand = st.get("pid") if st["state"] == "live" else None
+        if cand and cand != old_pid:
+            new_pid_seen = cand
+        sample = _poll_sample(host, ns, queues, old_pid=old_pid)
+        out["samples"].append({"t": round(time.time() - t0, 1), "phase": "old-drain",
+                               "old_alive": still,
+                               "new_pid_seen_while_draining": new_pid_seen,
+                               "live_pollers": [x["identity"] for x in sample["live"]],
+                               "poller_face_available": sample["available"]})
+        if not still:
+            break
+        if time.time() - t0 >= old_drain_s:
+            out["phases"].append({"phase": "old-drain", "drained": False,
+                                  "waited_s": round(time.time() - t0, 1),
+                                  "new_pid_seen_while_draining": new_pid_seen})
+            out["error"] = ("旧 worker pid=%s 在 %.0fs 内未排空（优雅停要等在飞活动收口；"
+                            "换手**卡在这一段**）。它仍在跑 ⇒ 此刻不是失败于 poller 计数，"
+                            "而是旧进程还没退：查它的日志（data/worker*.log）看「停机点名」"
+                            "里的在飞活动，必要时人工处置。**本工具不自己起 worker**"
+                            % (old_pid, old_drain_s))
+            out["phase_failed"] = "old-drain"
+            return out
+        time.sleep(POLL_SAMPLE_S)
+    out["phases"].append({"phase": "old-drain", "drained": True,
+                          "waited_s": round(time.time() - t0, 1),
+                          "new_pid_seen_while_draining": new_pid_seen,
+                          "note": ("旧进程排空期间 supervisor 已起新 pid（合法中间态，不判失败）"
+                                   if new_pid_seen else "旧进程已排空")})
+
+    # ---------------- ③ 等新 pid 出现 ∧ 活 ∧ 在轮询本队列（轮询式采样） ----------------
+    t1 = time.time()
+    new_pid, polling = None, False
+    while time.time() - t1 < wait_s:
+        st = read_pidfile(pf)
+        pid = st.get("pid") if st["state"] == "live" else None
+        sample = _poll_sample(host, ns, queues)
+        polling = bool(pid and any(x["pid"] == pid for x in sample["live"]))
+        out["samples"].append({"t": round(time.time() - t1, 1), "phase": "respawn",
+                               "new_pid": pid, "poller_face_available": sample["available"],
+                               "live_pollers": [x["identity"] for x in sample["live"]]})
+        if pid and sample["available"] and polling:
+            new_pid = pid
+            break
+        if pid and not sample["available"]:
+            # 面不可得时无法证明「在轮询」——不冒充，等满后按 poller-face 段报
+            pass
+        new_pid = pid or new_pid
+        time.sleep(POLL_SAMPLE_S)
+    out["waited_s"] = round(time.time() - t1, 1)
+    out["new_pid"] = new_pid
+    out["after"] = read_pidfile(pf)
+    final = _poll_sample(host, ns, queues)
+    out["phases"].append({"phase": "respawn", "new_pid": new_pid,
+                          "polling": polling,
+                          "poller_face_available": final["available"],
+                          "waited_s": out["waited_s"]})
+    if not new_pid:
+        out["error"] = ("supervisor 未在 %.0fs 内拉起（pidfile=%s 里始终没出现新的活 pid；"
+                        "旧 pid=%s 已排空）。查控制台（3099 会话）里 temporal-tools supervisor "
+                        "是否在跑（其 keepalive 缺省 5s；它才是唯一的自动拉起面）。"
+                        "**本工具不自己起 worker**——从 agent 会话起会继承沙箱，工作区外写 "
+                        "fail-closed（票归档 EPERM，t260930-09 实案）"
+                        % (wait_s, pf, old_pid))
+        out["phase_failed"] = "respawn"
+        return out
+    if not final["available"]:
+        q0 = next((q for q in (final.get("queues") or []) if not q.get("available")), {})
+        out["error"] = ("换手已发生（新 pid=%r，旧 pid=%s 已排空）但 **poller 面不可得**："
+                        "不能证明「恰好一颗在轮询本队列」⇒ 不报成功（不冒充）。原因：%s"
+                        % (new_pid, old_pid, str((q0 or {}).get("note") or final.get("note"))[:160]))
+        out["phase_failed"] = "poller-face"
+        return out
+    if not (new_pid and polling):
+        out["error"] = ("supervisor 未在 %.0fs 内拉起（新 pid 出现但未在轮询本队列，或新 pid "
+                        "始终没出现）：pidfile=%s 里是 %r（旧 pid=%s 已排空）。"
+                        "查控制台（3099 会话）里 temporal-tools supervisor 是否在跑"
+                        "（其 keepalive 缺省 5s；它才是唯一的自动拉起面）。"
+                        "**本工具不自己起 worker**——从 agent 会话起会继承沙箱，"
+                        "工作区外写 fail-closed（票归档 EPERM，t260930-09 实案）"
+                        % (wait_s, pf, out["after"].get("pid"), old_pid))
+        out["phase_failed"] = "respawn"
+        return out
+
+    # ---------------- ④ 此刻才断言「活 poller 恰 1 且就是新 pid」 ----------------
+    proof = _proof_single_poller(host, ns, queues, expect_pid=new_pid)
+    out["pollers_proof"] = proof
+    if not proof["ok"]:
+        q0 = proof["queues"][0] if proof["queues"] else {}
+        out["error"] = ("换手后 poller 数不为 1 或不是新进程（本队列活 poller=%r，新 pid=%s，"
+                        "旧 pid=%s 已排空）：真失败，逐个点名"
+                        % ([x["identity"] for x in (q0.get("live") or [])
+                            + (q0.get("stale_history") or [])], new_pid, old_pid))
+        out["phase_failed"] = "poller-count"
+        return out
+    out["phases"].append({"phase": "verified", "live_poller": new_pid})
+    return out
+
+
 def cmd_restart(args) -> dict:
+    """**kill-only 换手**：TERM 现有 worker，等 supervisor 自动拉起并自证恰好一颗活 poller。
+
+    绝不自己起 worker（宿主 260930 纠正；理由见 `_kill_and_wait_for_respawn` 文档串与
+    docs/ops/engine-worker-and-lane-operations.md 的实况案例）。`--replace` 现在只是
+    「TERM 后等拉起」这件事的显式别名（旧语义「先停旧再起新的」已删除）。"""
     host = args.host or shared.TARGET_HOST
     ns = args.ns or shared.NAMESPACE
     scope = str(args.scope or "")
+    wait_s = float(getattr(args, "wait", 60) or 60)
+    old_drain_s = float(getattr(args, "old_drain", OLD_DRAIN_WAIT_S) or OLD_DRAIN_WAIT_S)
     if scope == "central":
-        wp = ENGINE / "worker.py"
-        if not wp.is_file():
-            return {"ok": False, "exit": ENV_EXIT,
-                    "error": "不可得：%s 不在（--repo 指错仓或缺件）——拒绝在别的仓上瞎起 worker"
-                             % wp}
-        pf = DATA / "worker.pid"
-        before = read_pidfile(pf) if pf.exists() else {"state": "absent", "pid": None}
-        argv = [tw.VENV_PY, str(ENGINE / "worker.py"), "--daemon",
-                "--pidfile", str(pf), "--logfile", str(DATA / "worker.log")]
-        if args.replace:
-            argv.insert(3, "--replace")
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=300, cwd=str(ENGINE))
-        after = read_pidfile(pf)
-        proof = _proof_single_poller(host, ns, shared.configured_task_queues(),
-                                     expect_pid=after.get("pid"))
-        res = {"scope": "central", "cmd": " ".join(argv),
-               "rc": p.returncode, "stderr": (p.stderr or "")[-400:],
-               "before": before, "after": after, "pollers_proof": proof,
-               "note": "走 worker.py 既有启动守卫（活进程拒启；--replace 才优雅回收；"
-                       "超时不 KILL）"}
-        if p.returncode != 0 or not proof["ok"]:
-            return {"ok": False, "exit": ALERT_EXIT,
-                    "error": "中央 worker 换手未自证：rc=%s%s" % (
-                        p.returncode, "；" + (p.stderr or "").strip()[-200:] if p.stderr else ""),
-                    "result": res}
-        return _ok(res)
-    if scope.startswith("lane:"):
+        pf, queues = DATA / "worker.pid", shared.configured_task_queues()
+    elif scope.startswith("lane:"):
         tid = scope.split(":", 1)[1].strip()
         if not tid:
-            return {"ok": False, "exit": ENV_EXIT, "error": "restart --scope lane:<ticket> 缺票号"}
-        pf = tw._pidfile(tid)
-        before = read_pidfile(pf) if pf.exists() else {"state": "absent", "pid": None}
-        queues = _queues_of(tid)
-        # 次序：**先拒绝**（有活进程且没给 --replace = 最便宜也最该给的答案），再查起件
-        # 在位（缺 worker.py=环境面不可得）。反过来的话「活进程在场」会被缺件掩盖。
-        if before.get("state") == "live" and not args.replace:
-            return {"ok": False, "exit": ALERT_EXIT,
-                    "error": "泳道 worker pid=%s 还活着——不给 --replace 就拒绝启动第二颗"
-                             "（同队列并存会让结果不可归因到代码版本）。出路：加 --replace，"
-                             "或先 kill -TERM %s" % (before.get("pid"), before.get("pid")),
-                    "result": {"ticket": tid, "pidfile": str(pf), "before": before}}
-        wp = ENGINE / "worker.py"
-        if not wp.is_file():
             return {"ok": False, "exit": ENV_EXIT,
-                    "error": "不可得：%s 不在（--repo 指错仓或缺件）——拒绝在别的仓上瞎起 worker"
-                             % wp}
-        steps = []
-        if before.get("state") == "live":
-            steps.append({"reap": tw.reap_ticket_worker(tid)})
-            dead = _wait_dead(before.get("pid"))
-            steps.append({"waited_dead": dead, "old_pid": before.get("pid")})
-            if not dead:
-                return {"ok": False, "exit": ALERT_EXIT,
-                        "error": "旧泳道 worker pid=%s 90s 内未退出（不 KILL）——请人工处置"
-                                 % before.get("pid"), "result": {"steps": steps}}
-        steps.append({"spawn": tw.spawn_ticket_worker(tid)})
-        t0 = time.time()
-        while time.time() - t0 < 90:
-            st = read_pidfile(pf)
-            if st["state"] == "live":
-                break
-            time.sleep(0.3)
-        after = read_pidfile(pf)
-        proof = _proof_single_poller(host, ns, queues, expect_pid=after.get("pid"))
-        res = {"scope": "lane:%s" % tid, "ticket": tid, "queues": queues,
-               "pidfile": str(pf), "before": before, "after": after, "steps": steps,
-               "pollers_proof": proof,
-               "note": "再起走既有 spawn 面 ticket_worker.spawn_ticket_worker（同一进程形态、"
-                       "同一 pidfile/logfile/queue/watch 约定；console supervisor 的 spawn 在"
-                       "node.ts 里，CLI 调不到）"}
-        if after.get("state") != "live" or not proof["ok"]:
-            return {"ok": False, "exit": ALERT_EXIT,
-                    "error": "泳道 worker 换手未自证（pidfile=%s，poller 证明=%s）"
-                             % (after.get("state"), proof["ok"]), "result": res}
-        return _ok(res)
-    return {"ok": False, "exit": ENV_EXIT,
-            "error": "restart --scope 只接受 central 或 lane:<ticket>（实得 %r）" % scope}
+                    "error": "restart --scope lane:<ticket> 缺票号"}
+        pf, queues = tw._pidfile(tid), _queues_of(tid)
+    else:
+        return {"ok": False, "exit": ENV_EXIT,
+                "error": "restart --scope 只接受 central 或 lane:<ticket>（实得 %r）" % scope}
+    res = _kill_and_wait_for_respawn(host, ns, pf, queues, wait_s, old_drain_s)
+    res["scope"] = scope
+    res["hint"] = ("换手后请用 `who <ticket>` 确认后续闸轮落**新 pid**；"
+                   "启动 worker 的唯一自动面=控制台 temporal-tools supervisor"
+                   "（本工具只 kill、不自己起：agent 会话起的 worker 会继承沙箱，"
+                   "工作区外写 fail-closed ⇒ 票归档 EPERM，t260930-09 实案）")
+    if res.get("error"):
+        return {"ok": False, "exit": ALERT_EXIT, "error": res["error"], "result": res}
+    return _ok(res)
 
 
 # ---------------------------------------------------------------- CLI
@@ -881,9 +1011,18 @@ def build_parser() -> argparse.ArgumentParser:
     s2.add_argument("ticket")
     s2.add_argument("--dry-run", action="store_true")
     s2.add_argument("--abort", action="store_true", help="复位半合并态（走既有 settle 单点）")
-    r = sub.add_parser("restart", parents=[common], help="换手 worker（走既有守卫与 spawn 面）")
+    r = sub.add_parser("restart", parents=[common],
+                       help="换手 worker（**只 kill**，等 supervisor 自动拉起并自证）")
     r.add_argument("--scope", required=True, help="central | lane:<ticket>")
-    r.add_argument("--replace", action="store_true", help="显式替换（先优雅停旧的再起）")
+    r.add_argument("--replace", action="store_true",
+                   help="（别名）TERM 现有 worker 后等 supervisor 自动拉起——这已是缺省语义；"
+                        "旧语义「先停旧再起新的」已删除：工具**绝不自己起 worker**"
+                        "（沙箱继承会让工作区外写 fail-closed：票归档 EPERM）")
+    r.add_argument("--wait", type=float, default=60.0,
+                   help="等自动拉起的上界秒数（缺省 60；超时=具名告警 + exit 1，点名哪一段）")
+    r.add_argument("--old-drain", type=float, default=OLD_DRAIN_WAIT_S,
+                   help="等**旧 worker 排空**（优雅停等在飞活动）的上界秒数（缺省 90）。"
+                        "排空期间 supervisor 已起新 pid 属合法中间态，不判失败")
     return p
 
 

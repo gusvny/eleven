@@ -16,8 +16,11 @@ intent（守护的用户可感知行为）：**一条命令答得出「这张票
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import pathlib
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -35,7 +38,11 @@ import engine_ops as eo  # noqa: E402
 
 
 def _spawn_sleeper() -> subprocess.Popen:
-    return subprocess.Popen([sys.executable, "-c", "import time\nwhile True: time.sleep(0.2)"])
+    """起一个活进程当夹具；stdio 一律 DEVNULL——否则子进程持有 pytest 的捕获管道，
+    残留时会让 pytest 收尾挂住（本文件实测过一次 600s 挂死）。"""
+    return subprocess.Popen([sys.executable, "-c", "import time\nwhile True: time.sleep(0.2)"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL)
 
 
 class PidfileParseTest(unittest.TestCase):
@@ -49,7 +56,6 @@ class PidfileParseTest(unittest.TestCase):
             if p.poll() is None:
                 p.kill()
                 p.wait(timeout=10)
-        import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_four_states_and_meta_started_at(self):
@@ -91,7 +97,6 @@ class StampCompareTest(unittest.TestCase):
             fp.write_text("# module\n", encoding="utf-8")
 
     def tearDown(self):
-        import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_not_stale_when_baseline_after_mtime(self):
@@ -215,6 +220,216 @@ class WhoParsingTest(unittest.TestCase):
         self.assertEqual(rows[1]["activity"], "append_event_ledger")
         self.assertEqual(rows[1]["attempt"], 2)
         self.assertEqual(rows[0]["at"], "2026-09-30T12:00:00")
+
+
+class RestartIsKillOnlyTest(unittest.TestCase):
+    """宿主 260930 纠正：`restart` **只 kill、等 supervisor 自动拉起**，绝不自己起 worker。
+
+    为什么（实况）：从 agent 会话起的 worker 会继承该会话沙箱（workspace-write）→ 工作区外
+    写 fail-closed，真票 t260930-09 归档直接
+    `PermissionError: [Errno 1] Operation not permitted: '…/.sandbar/projects/sandbar/data/tickets/t260930-09'`
+    → merge/blocked。所以「自己起」这条路必须在**源码面**被钉死（机械断言，不靠自觉）。"""
+
+    def test_restart_module_has_no_self_spawn_path(self):
+        src = pathlib.Path(eo.__file__).read_text("utf-8")
+        body = src[src.index("def _kill_and_wait_for_respawn"):
+                   src.index("# ---------------------------------------------------------------- CLI")]
+        for frag in ("spawn_ticket_worker", "reap_ticket_worker", "Popen(",
+                     "subprocess.run(", "--daemon", "worker.py"):
+            self.assertNotIn(frag, body,
+                             "restart 路径里出现自起 worker 的痕迹：%s" % frag)
+        # 全模块层面也不许再引用既有 spawn 面（`ticket_worker` 只用于 pidfile 定位）
+        for frag in ("spawn_ticket_worker", "reap_ticket_worker", "--daemon"):
+            self.assertNotIn(frag, src, "模块里残留自起面：%s" % frag)
+        # 纪律必须出现在输出提示里（人读到的话术不许再出现「自己起」的鼓励）
+        self.assertIn("绝不自己起 worker", src)
+        self.assertIn("kill-and-wait-for-respawn", src)
+
+    def _fixture(self, tmp, drain_s=0.0):
+        """夹具：一个「旧 worker」进程（TERM 后按 drain_s 慢排空）+ 一个假 supervisor 线程。
+
+        假 supervisor = console keepalive 的替身：看到 pidfile 里那颗死了 ⇒ 把**新**的活
+        进程 pid 写进去。poller 面在本 UT 里被注入（`eo._queue_pollers`）——真面要 Temporal，
+        而这里要钉的是**四段判据本身的时序**（宿主 26090 打回：单次采样 + 旧进程排空中
+        必然假红）。"""
+        (tmp / "server" / "engine" / "data").mkdir(parents=True, exist_ok=True)
+        pf = tmp / "server" / "engine" / "data" / "worker-t9.pid"
+
+        ready = tmp / "old-ready"
+
+        def _slow_old():
+            code = ("import signal, sys, time, pathlib\n"
+                    "signal.signal(signal.SIGTERM, lambda *a: (time.sleep(%r), sys.exit(0)))\n"
+                    "pathlib.Path(%r).write_text('ready')\n"
+                    "while True: time.sleep(0.1)\n" % (drain_s, str(ready)))
+            return subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+
+        old = _slow_old()
+        # 必须等它**装好信号处理**再发 TERM：否则 TERM 早到=默认动作直接杀死，
+        # 测的就不是「排空慢」（实测这条把「永不排空」子用例变成了 respawn）。
+        t_ready = time.time()
+        while not ready.exists() and time.time() - t_ready < 10:
+            time.sleep(0.05)
+        pf.write_text(str(old.pid), encoding="utf-8")
+        state = {"new": None}
+
+        def _supervisor():
+            """**旧进程还在排空时**就把新 worker 拉起来（宿主实报的那一帧）：
+
+            真 console keepalive 的判据是 pidfile 里的 pid 死没死；换手瞬间 pidfile 可能已被
+            新进程改写、而旧进程仍在优雅排空 ⇒「旧仍活 + 新已在」是**合法中间态**。
+            本替身直接模拟这一帧（不依赖旧进程何时死），因为 UT 要钉的是**工具的判据**。"""
+            time.sleep(0.5)
+            newp = _spawn_sleeper()                  # 本文件的 helper 返回 Popen
+            state["new"] = newp.pid
+            pf.write_text(str(newp.pid), encoding="utf-8")
+
+        state["stop"] = False
+        import threading
+        th = threading.Thread(target=_supervisor, daemon=True)
+        th.start()
+        return pf, old, state, th
+
+    def _patch_poller_face(self, live_pids_fn):
+        """注入 poller 面：活 poller = live_pids_fn() 给出的 pid 集（其余分栏照实现）。"""
+        orig = eo._queue_pollers
+
+        def _fake(host, ns, queue):
+            pids = [int(x.pid if hasattr(x, "pid") else x) for x in live_pids_fn()]
+            return {"queue": queue, "available": True,
+                    "live": [{"identity": "%d@127.0.0.1" % p, "last_access_time": "seconds: 1",
+                              "host": "127.0.0.1", "host_is_local_alias": True}
+                             for p in pids],
+                    "stale_history": [], "unverifiable": [], "live_count": len(pids),
+                    "note": "注入面（UT：只钉四段时序）"}
+
+        eo._queue_pollers = _fake
+        self.addCleanup(lambda: setattr(eo, "_queue_pollers", orig))
+
+    def test_slow_draining_old_worker_is_not_a_failure(self):
+        """宿主打回 ①：旧进程**慢排空**（排空期间新 pid 已在）⇒ 不判失败、中间态具名、最终成功。"""
+        import argparse
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="engine-ops-drain-"))
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        pf, old, state, th = self._fixture(tmp, drain_s=4.0)
+        self.addCleanup(lambda: state.update(stop=True))
+        # poller 面：新 pid 一出现就在轮询；旧 pid 在它活着时**也**算活 poller（真实世界如此）
+        self._patch_poller_face(lambda: ([state["new"]] if state["new"] else []) +
+                                ([old.pid] if shared.pid_alive(old.pid) else []))
+        data_backup, engine_backup = eo.DATA, eo.ENGINE
+        tw_backup = (eo.tw.POC_DIR, eo.tw.DATA_DIR, eo.tw.VENV_PY)
+        eo.DATA, eo.ENGINE = tmp, tmp / "server" / "engine"
+        eo.tw.set_root(tmp / "server" / "engine")
+        try:
+            ns = argparse.Namespace(host="127.0.0.1:1", ns="default", repo="", scope="lane:t9",
+                                    replace=True, wait=20.0, old_drain=30.0)
+            res = eo.cmd_restart(ns)
+        finally:
+            eo.DATA, eo.ENGINE = data_backup, engine_backup
+            eo.tw.POC_DIR, eo.tw.DATA_DIR, eo.tw.VENV_PY = tw_backup
+        if res.get("ok") is not True:
+            print("res:", str(res)[:700])
+        self.assertTrue(res["ok"], "慢排空 + supervisor 已起新 pid ⇒ 必须判成功（不给假红）")
+        r = res["result"]
+        self.assertEqual(r["phase_failed"] if "phase_failed" in r else "", "")
+        drain = next(p for p in r["phases"] if p["phase"] == "old-drain")
+        self.assertTrue(drain["drained"])
+        self.assertTrue(drain["new_pid_seen_while_draining"],
+                        "排空期间的「新 pid 已在」这一合法中间态必须具名")
+        # 采样序列里必须出现「旧仍在 + 新已见」那一帧（正是单次采样会误判的那一帧）
+        mid = [x for x in r["samples"]
+               if x["phase"] == "old-drain" and x["old_alive"]
+               and x["new_pid_seen_while_draining"]]
+        self.assertTrue(mid, "采样里没有中间态帧（判据不是轮询式）")
+        self.assertEqual(int(r["new_pid"]), int(state["new"]))
+        old.kill()
+        if state["new"]:
+            os.kill(int(state["new"]), signal.SIGKILL)
+
+    def test_old_worker_never_drains_names_that_phase_and_starts_nothing(self):
+        """宿主打回 ②：旧进程**永不排空** ⇒ 具名超时（点名 old-drain 段）且没起任何东西。"""
+        import argparse
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="engine-ops-nodrain-"))
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        (tmp / "server" / "engine" / "data").mkdir(parents=True, exist_ok=True)
+        pf = tmp / "server" / "engine" / "data" / "worker-t9.pid"
+        ready = tmp / "stubborn-ready"
+        code = ("import signal, time, pathlib\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "pathlib.Path(%r).write_text('ready')\n"
+                "while True: time.sleep(0.1)\n" % str(ready))
+        stubborn = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+        t_ready = time.time()
+        while not ready.exists() and time.time() - t_ready < 10:
+            time.sleep(0.05)
+        self.addCleanup(lambda: stubborn.kill() if stubborn.poll() is None else None)
+        pf.write_text(str(stubborn.pid), encoding="utf-8")
+        self._patch_poller_face(lambda: [stubborn.pid])
+        data_backup, engine_backup = eo.DATA, eo.ENGINE
+        tw_backup = (eo.tw.POC_DIR, eo.tw.DATA_DIR, eo.tw.VENV_PY)
+        eo.DATA, eo.ENGINE = tmp, tmp / "server" / "engine"
+        eo.tw.set_root(tmp / "server" / "engine")
+        try:
+            ns = argparse.Namespace(host="127.0.0.1:1", ns="default", repo="", scope="lane:t9",
+                                    replace=True, wait=2.0, old_drain=1.5)
+            res = eo.cmd_restart(ns)
+        finally:
+            eo.DATA, eo.ENGINE = data_backup, engine_backup
+            eo.tw.POC_DIR, eo.tw.DATA_DIR, eo.tw.VENV_PY = tw_backup
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["result"]["phase_failed"], "old-drain")
+        self.assertIn("未排空", res["error"])
+        self.assertIn("不自己起 worker", res["error"])
+        self.assertEqual(pf.read_text(encoding="utf-8").strip(), str(stubborn.pid))
+        self.assertEqual(sorted(p.name for p in pf.parent.iterdir()), [pf.name],
+                         "旧未排空路径不得产生任何新文件（没起东西）")
+
+    def test_absent_supervisor_times_out_named_and_starts_nothing(self):
+        """supervisor 缺席：有界等待超时 ⇒ 具名告警（点名查 supervisor）且**零新进程/文件**。"""
+        import argparse
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="engine-ops-killonly-"))
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        (tmp / "server" / "engine" / "data").mkdir(parents=True, exist_ok=True)
+        pf = tmp / "server" / "engine" / "data" / "worker-t9.pid"
+        proc = _spawn_sleeper()
+        self.addCleanup(lambda: proc.kill() if proc.poll() is None else None)
+        pf.write_text(str(proc.pid), encoding="utf-8")
+        data_backup, engine_backup = eo.DATA, eo.ENGINE
+        tw_mod = eo.tw
+        tw_backup = (tw_mod.POC_DIR, tw_mod.DATA_DIR, tw_mod.VENV_PY)
+        eo.DATA, eo.ENGINE = tmp, tmp / "server" / "engine"
+        # lane 档的 pidfile 由 ticket_worker 按「目标仓」推导 ⇒ 必须一起重定向（=--repo 的行为）
+        tw_mod.set_root(tmp / "server" / "engine")
+        try:
+            ns = argparse.Namespace(host="127.0.0.1:1", ns="default", repo="", scope="lane:t9",
+                                    replace=True, wait=1.5, old_drain=5.0)
+            res = eo.cmd_restart(ns)
+        finally:
+            eo.DATA, eo.ENGINE = data_backup, engine_backup
+            tw_mod.POC_DIR, tw_mod.DATA_DIR, tw_mod.VENV_PY = tw_backup
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["exit"], 1)
+        self.assertIn("supervisor 未在", res["error"])
+        self.assertEqual(res["result"]["phase_failed"], "respawn")
+        self.assertIn("不自己起 worker", res["error"])
+        self.assertEqual(pf.read_text(encoding="utf-8").strip(), str(proc.pid),
+                         "超时路径不得改写 pidfile（没起任何东西）")
+        self.assertEqual(sorted(p.name for p in pf.parent.iterdir()), [pf.name],
+                         "超时路径不得产生新文件（日志/pid/.meta 都不许有）")
+        # 旧 worker 确实收到了 TERM（kill-only 的那一半是真的）
+        self.assertTrue(_wait_gone(proc))
+
+
+def _wait_gone(proc, timeout=10.0) -> bool:
+    import time as _t
+    t0 = _t.time()
+    while _t.time() - t0 < timeout:
+        if proc.poll() is not None:
+            return True
+        _t.sleep(0.1)
+    return proc.poll() is not None
 
 
 if __name__ == "__main__":

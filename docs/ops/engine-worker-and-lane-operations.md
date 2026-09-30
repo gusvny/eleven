@@ -28,7 +28,8 @@ Two kinds of worker process exist, and a ticket is served by exactly one of them
 | pidfile | `server/engine/data/worker.pid` | `server/engine/data/worker-<tid>.pid` |
 | log | `server/engine/data/worker.log` | `server/engine/data/worker-<tid>.log` |
 | queue | the shared queue (`sandbar`) | the ticket's own queue (`sandbar-ticket-<tid>`) |
-| started by | the console supervisor (`server/plugins/temporal-tools/node.ts`) at boot and by its keepalive; or an operator via `worker.py --daemon` | the console supervisor's per-ticket ensure (a child process of the console); or the engine-side helper `server/engine/ticket_worker.py` |
+| started by | the console supervisor (`server/plugins/temporal-tools/node.ts`) at boot and by its keepalive | the console supervisor's per-ticket ensure (a child process of the console, started from the console's own repository) |
+| replaced by | killing it: the supervisor's keepalive brings it back within seconds | killing it: the same keepalive brings it back |
 | lifetime | long-running; keepalive restarts it if it dies | ends when the ticket's workflow settles (its watcher or the console disposes it) |
 
 Three properties follow, and every operational decision in this document is a consequence of them:
@@ -53,7 +54,7 @@ independent:
 | condition | what it fixes | how |
 |---|---|---|
 | **the lane tree is synced** | the **machine gate**: it runs the project's integration command *inside the lane* (`integration/run_scenarios.py` plus its fixtures, read from `.lane/<tid>`), so a fix that lives only in `main` is not the code the gate executes | `engine_ops.py sync <ticket>` — one merge of `main` into the lane, idempotent, through the engine's single "merge a ref into the lane" implementation (the `prepare_conflict_resolution` activity) |
-| **the serving worker process is replaced** | the **workflow and activity code**: the process that serves the ticket keeps the modules it imported at startup | `engine_ops.py restart --scope lane:<ticket> --replace` (or `--scope central`), then verify exactly one live poller |
+| **the serving worker process is replaced** | the **workflow and activity code**: the process that serves the ticket keeps the modules it imported at startup | kill the process (`engine_ops.py restart --scope lane:<ticket>`, or `--scope central`) and let the console supervisor's keepalive start a fresh one, then verify exactly one live poller |
 
 Neither condition implies the other. Syncing the lane without replacing the process leaves the
 ticket served by old code; replacing the process without syncing the lane leaves the gate
@@ -88,20 +89,74 @@ keeps a just-exited worker's entry in its poller history, so counting list entri
 worker that was replaced moments ago as a second poller. `engine_ops.py` classifies pollers into
 `live` / `stale_history` / `unverifiable` for exactly this reason.
 
-## 4. Restart discipline
+## 4. Restart discipline: kill it, do not start it
 
-* A daemon start **refuses** to run when the pidfile names a live process (named error, exit code
-  2). This is deliberate: a second process on the same queue is the failure mode this whole
-  document is about.
-* `--replace` is the explicit takeover: the old worker is asked to stop (`SIGTERM`, graceful), the
-  new start waits a bounded time for it to exit, and then takes the slot. A timeout is an error —
-  the path never KILLs silently, because cutting an in-flight agent activity in half leaves the
-  ticket carrying the damage.
-* A stale or malformed pidfile is taken over normally, with a log line saying so.
-* Foreground runs write no pidfile and therefore cannot be guarded. They are for debugging; one
-  that lands on a shared queue while a daemon worker is alive prints a loud warning naming the
-  process it would be doubling.
-* **After any restart, verify exactly one live poller before pushing a ticket.**
+- `--old-drain <sec>` (default 90): how long the tool waits for the **old** worker to actually disappear before waiting for the supervisor's replacement. A worker stops gracefully and may keep draining in-flight activities for a while; during that window "new pid already present while the old one still drains" is a **legitimate intermediate state**, named in the result, not a failure.
+
+**The only sanctioned handover is: kill the existing worker and let the console supervisor start
+a new one.** Operators and agents do not start workers; `engine_ops.py restart` implements exactly
+that and nothing else.
+
+```bash
+"$PY" server/tools/engine_ops.py restart --scope lane:t260930-09    # kill, then wait for respawn
+"$PY" server/tools/engine_ops.py restart --scope central
+```
+
+The command locates the worker through its pidfile, sends `SIGTERM` (graceful), and then waits —
+bounded, `--wait` seconds, 60 by default — for all three of:
+
+* the pidfile holds a **different** pid,
+* that pid is alive,
+* it is the **only live poller** on the queue (when the poller face is reachable).
+
+On success it reports the new pid, its start time and the poller proof. If nothing comes back in
+time it fails loudly (`exit 1`) naming the supervisor to check — it never starts a worker itself.
+The poller face being *unavailable* is also a failure: "cannot prove exactly one" is not a pass.
+`--replace` is now only an alias for this behaviour (the old "stop the old one and start a new one
+myself" semantics was removed).
+
+### Why not start it ourselves: the sandbox inheritance incident (t260930-09, 260930)
+
+A worker started from an agent session inherits that session's sandbox (`workspace-write`), and
+then **every write outside the workspace fails closed**. The failure surfaces far from the worker,
+in the ticket's last step:
+
+```
+PermissionError: [Errno 1] Operation not permitted:
+'/Users/user/.sandbar/projects/sandbar/data/tickets/t260930-09'
+```
+
+That is the archive step of `merge`, which runs in the serving worker. With two such workers
+(sandboxed central + sandboxed lane worker), the ticket that had already been signed could not
+finish: it sat in `merge/blocked` — fail-closed, so the lane and its branch were preserved rather
+than half-merged. The resolution was exactly the discipline above: those two workers were killed
+and left to the console supervisor, which started replacements (central `99016`, lane `98999`)
+outside the agent session; the ticket was signed again, the archive succeeded, and it closed with
+the lane and branch torn down.
+
+Consequences worth remembering:
+
+* "I started a worker to help" is how a ticket ends up unable to archive. Killing is cheap because
+  the supervisor restores service within its keepalive interval (5s by default).
+* A worker's environment is part of its identity. `server/engine/data/worker*.log` and the
+  ownership meta (`<pidfile>.meta`) both name what ran; the ticket face carries
+  `worker_identity` and `code_stamp` for the same reason.
+* Foreground workers write no pidfile, so nothing can find or replace them; they are for debugging
+  on a private queue only.
+
+### What if the supervisor is not running
+
+Then nothing brings the worker back, and `restart` says so: it exits 1 naming the pidfile, the old
+pid and the deadline, and tells the operator to check the console session (3099) and the
+`temporal-tools` supervisor. That is a genuine incident, not something the tool papers over.
+
+### Verifying the handover took effect
+
+1. `engine_ops.py restart ...` — new pid, alive, exactly one live poller.
+2. `engine_ops.py who <ticket>` after the next gate round — the round's activity `identity` should
+   be the **new** pid.
+3. `engine_ops.py drift <ticket>` — the lane worker is no longer `stale` (assuming the lane tree
+   was synced first; see §2).
 
 ## 5. Tool reference
 
@@ -123,9 +178,9 @@ PY=server/engine/.venv/bin/python
 "$PY" server/tools/engine_ops.py sync t260930-09               # do it
 "$PY" server/tools/engine_ops.py sync t260930-09 --abort       # reset a half-finished merge
 
-# replace a worker process (guarded; --replace is required when one is alive)
-"$PY" server/tools/engine_ops.py restart --scope lane:t260930-09 --replace
-"$PY" server/tools/engine_ops.py restart --scope central --replace
+# hand a worker over: **kill only** — the console supervisor's keepalive starts the new one
+"$PY" server/tools/engine_ops.py restart --scope lane:t260930-09    # --wait N bounds the wait
+"$PY" server/tools/engine_ops.py restart --scope central
 ```
 
 Output is a single line of JSON (`{"ok":…,"result"|"error":…}`), like the rest of the tool family.
@@ -170,8 +225,8 @@ unattributable version is itself a fact that must be visible, never a blank.
 ## 7. Boundaries
 
 * Default is read-only. The only mutating subcommands are `sync` (one merge of `main` into the
-  lane, through the engine's own implementation) and `restart` (through the engine's own spawn
-  face and startup guard).
+  lane, through the engine's own implementation) and `restart` (which kills a worker — and never
+  starts one: starting is the console supervisor's job, see §4).
 * `sync` never resolves conflicts on its own: a conflicting lane is reported with the file list,
   and resolution stays with the engine's existing conflict loop (the ticket face's
   `rework(to_stage=implement)`) or a human. `--abort` resets a half-finished merge through the
