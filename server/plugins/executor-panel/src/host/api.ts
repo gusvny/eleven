@@ -17,6 +17,7 @@ import {
 import { loadWatchdogConfig } from './settings.ts'
 import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settings.ts'
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
+import { provenanceKeys, readDeclaration, saveGrantsDecl } from './executor-grants.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
 
 export interface ApiResponse { status: number; json: Record<string, unknown> }
@@ -155,7 +156,10 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         if (op === 'revoke') {
           const res = revokeAll(key, env)
           if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
-          return { status: 200, json: { ok: true, saved: true, note: 'all grants revoked (derived list renders as all-revoked)' } }
+          // t260930-14：收回变真——同步清空执行器授权声明（全 op 未授予=引擎侧零授予）。
+          const g = saveGrantsDecl(key, { grants: {} }, String(parsed.body.by ?? 'host'), env, now(), String(parsed.body.caller_surface ?? ''))
+          if (!g.saved) return { status: 200, json: { ok: false, saved: false, error: g.reason, reason: g.reason } }
+          return { status: 200, json: { ok: true, saved: true, note: 'all grants revoked (watchdog enabled:false + executor grants declaration cleared)' } }
         }
         if (op === 'sleep') {
           const res = sleepToggle(key, parsed.body.policy as never, Number(parsed.body.until), env, now())
@@ -166,14 +170,35 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       }
       return bad(405, '仅 GET/POST')
     }
-    // ---- grants ----
+    // ---- grants（t260930-14：声明成为真源——GET 带声明+溯源；POST=编辑器写面）----
     if (path === '/sandbar-executor-panel/api/grants') {
-      if (method !== 'GET') return bad(405, '只读面：仅 GET')
       const key = query.get('project') ?? ''
       if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      if (method === 'POST') {
+        const parsed = parseJsonBody(bodyRaw)
+        if (!parsed.ok) return bad(400, parsed.error)
+        const b = parsed.body as Record<string, unknown>
+        // 保存被拒收=HTTP 200 + saved:false + 人话原因（拒收是「编辑面正常工作」，与 settings save 同口径）。
+        const res = saveGrantsDecl(key, b, String(b.by ?? ''), env, now(), String(b.caller_surface ?? ''))
+        if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
+        return { status: 200, json: { ok: true, saved: true, file: res.file, declaration: res.resolved } }
+      }
+      if (method !== 'GET') return bad(405, '仅 GET/POST（POST=声明编辑器写面）')
       const res = await grantsResult(key, origin)
+      // 声明面 + 逐 op 溯源（哪个声明哪条键定的——KI-148/149 同纪律）。
+      const decl = readDeclaration(key, env)
+      const auditNote = 'refusals and grant changes are audited to ' + key + '/executor-grants-audit.jsonl'
       // degraded 顶层显式位（消费方可不拆 grants 判定「模板事实不可得」）。
-      return { status: 200, json: { ok: true, grants: res, degraded: res.ok === false, reason: res.ok ? undefined : res.reason } }
+      return {
+        status: 200,
+        json: {
+          ok: true, grants: res, degraded: res.ok === false, reason: res.ok ? undefined : res.reason,
+          declaration: decl.ok ? decl.declaration : null,
+          declaration_state: { declared: decl.declared, kind: decl.kind ?? (decl.ok ? 'ok' : 'absent'), error: decl.error, file: decl.file },
+          provenance: { file: decl.file, keys: provenanceKeys(decl, now()) },
+          audit_note: auditNote,
+        },
+      }
     }
     // ---- projects (t260930-09 scope 8) ----
     if (path === '/sandbar-executor-panel/api/projects') {

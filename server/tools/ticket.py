@@ -253,6 +253,25 @@ def _audit_mod():
 _AUDIT_MOD = None
 
 
+def _caller_env(caller, caller_src=""):
+    """身份注入 env 键（纯函数，t260930-14 单测面）。
+
+    caller 非空时注入：SANDBAR_CALLER_PROJECT（身份）+ SANDBAR_CALLER_IDENTITY_SRC
+    （推导出处 arg|env|cwd——client 侧执行器授权闸 executor_grants 据此辨认「cwd
+    推导=本项目执行器会话」；arg/env 通道=泳道 agent/显式调用，不落 cwd 通道）。"""
+    if not caller:
+        return {}
+    s = _shared()
+    return {s.CALLER_PROJECT_ENV: caller,
+            s.CALLER_IDENTITY_SRC_ENV: str(caller_src or "env")}
+
+
+# 推导出处暂存（t260930-14）：_write_op_poc 在调 _poc 前写入、_poc 消费后清零。
+# 不走 _poc 形参——_poc 的 (subcmd, payload, caller) 形状是场景桩/registry 面的既有
+# 契约（t260922-10 等桩只认三参+裸串 caller），加形参会把桩打断（gen1 集成闸实录）。
+_PENDING_CALLER_SRC = ''
+
+
 def _poc(subcmd, payload, caller=None):
     """spawn engine/client.py，返回解析后的回执 dict（不判 ok）。
 
@@ -261,11 +280,15 @@ def _poc(subcmd, payload, caller=None):
     SANDBAR_CLIENT_CALL_ID（__main__ 直调路径生成，使双行审计可关联）。
     t260915-12：caller 非 None（写 op 的调用方项目身份推导结果）时注入
     SANDBAR_CALLER_PROJECT——client 侧跨项目闸按 env 来源消费（spawn 链注入，
-    身份有出处；空串=未声明身份，不注入、由 client 按策略记名/拒收）。"""
+    身份有出处；空串=未声明身份，不注入、由 client 按策略记名/拒收）。
+    t260930-14：随身份注入推导出处 SANDBAR_CALLER_IDENTITY_SRC——出处由
+    _write_op_poc 经 _PENDING_CALLER_SRC 暂存（模块级单调用面，ticket.py 每次
+    CLI 调用单线程消费；_poc 被桩替换时该键天然缺席=不透传，行为同旧）。"""
+    global _PENDING_CALLER_SRC
     env = dict(os.environ)
     env['SANDBAR_CLIENT_ENTRY'] = _audit_mod().ENTRY_MARK
-    if caller:
-        env[_shared().CALLER_PROJECT_ENV] = caller
+    env.update(_caller_env(caller, _PENDING_CALLER_SRC))
+    _PENDING_CALLER_SRC = ""
     cid = os.environ.get(_audit_mod().CALL_ID_ENV)
     if cid:
         env[_audit_mod().CALL_ID_ENV] = cid
@@ -302,12 +325,15 @@ def _poc_ok(out):
 def _resolve_caller(a):
     """调用方项目身份推导（单一入口，解析顺序=显式 > env 透传 > cwd 窄兜底）。
 
+    t260930-14：返回 (key, src) 二元组——src=推导出处（arg|env|cwd），随身份经
+    SANDBAR_CALLER_IDENTITY_SRC 透传给 client 侧执行器授权闸（executor_grants）。
+
     - 显式 caller_project / env SANDBAR_CALLER_PROJECT：须过 PROJECT_KEY_RE（形状非法
       =ValueError 显式暴露，不静默当未声明——review C2② 同口径）；
     - cwd 窄兜底：真人在项目工作区直跑时 cwd 可推导（出处=cwd×注册表）；**引擎仓树内
       一律不推导**（review C1：dsh 工具链 spawn cwd=repo、console 插件 cwd=engine 子目录，
       仓树内 cwd 标识「被调用的引擎」而非「调用方会话」）→ 返回 ''（未声明）。
-    返回 key 或 ''（''=未声明身份，_poc 不注入 env，client 按策略记名/拒收）。"""
+    返回 (key, src) 二元组（''=未声明身份，_poc 不注入 env，client 按策略记名/拒收）。"""
     s = _shared()
     explicit = str(a.get('caller_project') or '').strip()
     env_raw = str(os.environ.get(s.CALLER_PROJECT_ENV) or '').strip()
@@ -318,11 +344,11 @@ def _resolve_caller(a):
                 '调用方项目身份形状非法：%r（来源=%s；白名单 %s）——修正 caller_project '
                 '或注入链后重试' % (v[:64], 'caller_project' if explicit else s.CALLER_PROJECT_ENV,
                                     s.PROJECT_KEY_RE.pattern))
-        return v
+        return v, 'arg' if explicit else 'env'
     cwd = os.path.realpath(os.getcwd())
     repo_root = os.path.realpath(str(s.REPO_ROOT))
     key = s.project_key_for_dir(cwd, _projects(), (repo_root,))
-    return key or ''
+    return (key or '', 'cwd')
 
 
 def _cross_project_flag(a):
@@ -359,7 +385,13 @@ def _cross_project_flag(a):
 
 def _write_op_poc(subcmd, payload, a):
     """写 op 统一出口：推导身份+越权旗（payload 只带旗；身份走 env 注入）→ _poc。"""
-    return _poc(subcmd, payload, caller=_resolve_caller(a))
+    global _PENDING_CALLER_SRC
+    caller, caller_src = _resolve_caller(a)
+    _PENDING_CALLER_SRC = caller_src
+    try:
+        return _poc(subcmd, payload, caller=caller)
+    finally:
+        _PENDING_CALLER_SRC = ""
 
 
 class QueryError(ValueError):

@@ -849,6 +849,43 @@ arbitrate）；一期一票沿用期票去重。
   check-inspection-produce-chain）；单测
   server/engine/tests/test_t260925_01_produce_{decl,contract,activity,flow}.py。
 
+## 17. 执行器授权闸（t260930-14）：executor grant gate
+
+写路径在**调用方=本项目执行器会话**时按项目授权声明判定放行/拒收（最小权限默认、
+fail-closed）；其余调用方（泳道 agent / worker / 宿主控制台）零行为变化。
+
+### 17.1 身份缝（谁算执行器）
+
+| 通道 | 判定 | 处置 |
+|---|---|---|
+| `SANDBAR_CALLER_IDENTITY_SRC=cwd`（ticket.py 写 op 出口透传的 cwd 推导出处） | 执行器会话（watchdog 代建、宿主 Session API cwd=项目主目录；0.1.5 实证 SessionCreateRequest 无 env 字段、preset 组合注入不了 shell env——cwd 推导是唯一机器可观测缝） | 过授权闸 |
+| `arg`/`env` 通道（泳道 agent spawn 链注入、显式参数） | 非执行器 | 不设闸，行为不变 |
+| `none`（未声明） | 非执行器 | 不设闸（跨项目闸另有策略） |
+| 引擎仓树内 cwd | 不推导（C1 红线） | 不设闸 |
+
+残余风险如实记档：真人在项目目录直跑写路径同样落 cwd 通道，会受闸（受闸≠提权：
+未授予的操作被拒收并点名授予路径）——与 `injected_by` 同为「尽力面标签」信任档位。
+
+### 17.2 声明真源与判定
+
+- 声明：`<projects_root>/<key>/executor-grants.json`（root=SANDBAR_PROJECTS_DIR >
+  ~/.sandbar/projects；面板 executor-grants.ts 写、引擎 executor_grants.py 读判，
+  schema version 1 两侧镜像测试互锁）；
+- 固定授予面：sign / send-back / rerun / open-ticket / pause-resume / cleanup
+  （引擎 op 映射：authorize→sign、rework→send-back、retry_qc→rerun、
+  ticket-start→open-ticket、pause/resume→pause-resume、cancel/ticket-cancel→cleanup；
+  update/ruling 等面外操作对执行器=不可授予，结构化拒收）；
+- 判定：声明缺席/不可读/畸形/操作未知 → 拒收（kind=`executor_grant_refused`），
+  拒收文案点名声明文件、缺项与授予路径；授予在场或夜间档（night_tier 时间盒，≤7 天）
+  在盒内 → 放行，回执带 `executor_grant_op` / `executor_grant_source` 溯源键；
+- 元权限反锁：`manage-grants`（改/扩授予清单）对执行器通道恒拒收——先于声明读取，
+  夜间档也解不开；改授予只经面板 Grants 页（宿主操作）；
+- 审计：每次拒收与每次授予变更各记一行到
+  `<projects_root>/<key>/executor-grants-audit.jsonl`（who / when / from / to）。
+
+闸的接线点：client.py `_write_gate`（ticket 写 op 全集）+ ticket-start + cancel /
+ticket-cancel（`_executor_grant_gate`，唯一入口）。UT：`tests/test_t260930_14_executor_grants.py`。
+
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
 t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 sandbar 名。以下 7 条  # naming-compat

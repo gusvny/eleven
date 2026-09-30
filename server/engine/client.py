@@ -97,6 +97,8 @@ from workflows_v2 import TEMPLATE_CLASSES
 import audit
 # t260915-12：跨项目写操作闸的客户端身份解析/判定矩阵（同目录，import shared 单源）。
 import caller_gate
+# t260930-14：执行器授权声明装载/判定（同目录，import shared 单源）。
+import executor_grants
 
 # ---- Temporal regression runtime: proactive cleanup of closed-ticket history
 #      (ticket t260902-02, M1-3) ----
@@ -238,6 +240,7 @@ KIND_AUTHZ_FACE_ERROR = "authz_face_error"                  # 指纹 handler 自
 KIND_AUTHZ_FACE_WRONG_TEMPLATE = "authz_face_wrong_template"  # 非 dev-lane 模板无人授权面
 KIND_AUTHZ_SIGNAL_FAILED = "authz_signal_failed"            # signal 自身投递失败
 KIND_CROSS_PROJECT_REFUSED = "cross_project_refused"        # t260915-12：跨项目写操作闸拒收
+KIND_EXECUTOR_GRANT_REFUSED = "executor_grant_refused"      # t260930-14：执行器授权闸拒收（声明缺席/畸形/未授予/元权限反锁）
 KIND_AUTHZ_LANDING_UNCONFIRMED = "authz_landing_unconfirmed"  # 预算内无落账无拒收
 
 # ---- authorize 落账确认轮询参数（t260913-01）----
@@ -511,6 +514,44 @@ def _caller_identity(args: Dict[str, Any]) -> Dict[str, Any]:
         projects=projects)
 
 
+def _executor_channel(identity: Dict[str, Any]) -> str:
+    """执行器身份通道辨认（t260930-14）：ticket.py 写 op 出口经
+    SANDBAR_CALLER_IDENTITY_SRC 透传的推导出处优先；缺席回落本进程解析的 src。
+    只作执行器授权闸的通道辨认（executor_grants.EXECUTOR_CHANNEL），
+    不并入身份回执（identity dict 契约不变）。"""
+    return str(os.environ.get(shared.CALLER_IDENTITY_SRC_ENV, "")).strip() \
+        or str(identity.get("src") or "")
+
+
+def _with_channel(identity: Dict[str, Any]) -> Dict[str, Any]:
+    """身份副本带 channel_src（executor_grants.judge 消费键；不改调用方 dict）。"""
+    out = dict(identity)
+    out["channel_src"] = _executor_channel(identity)
+    return out
+
+
+def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str) -> Dict[str, Any]:
+    """执行器授权闸（t260930-14）：当且仅当调用方身份通道=cwd 推导（本项目执行器
+    会话，见 executor_grants 模块头「身份缝」节）时，按项目声明判定放行/拒收。
+
+    其余通道（arg 显式/env 注入=泳道 agent、none=未声明）一律放行不设闸——零回归
+    红线：lane agent / worker / 宿主控制台路径一个字节的行为都不变。返回
+    {"err": 回执|None, "keys": 并入成功回执的身份键}。"""
+    verdict = executor_grants.judge(_with_channel(identity), op, key)
+    channel = _executor_channel(identity)
+    if not verdict.get("allowed"):
+        return {"err": _err(verdict.get("why") or "执行器授权拒收", KIND_EXECUTOR_GRANT_REFUSED),
+                "keys": {}}
+    if not verdict.get("enforced"):
+        return {"err": None, "keys": {}}
+    # 通道来源观测键（与 identity_receipt injected_by 同档：尽力面标签，非安全断言）
+    prov = verdict.get("provenance") or {}
+    return {"err": None,
+            "keys": {"executor_grant_op": verdict.get("grant_op"),
+                     "executor_grant_source": (prov.get("keys") or {}).get(str(verdict.get("grant_op") or "")) or "",
+                     "executor_channel": channel}}
+
+
 def _registered_hint(key: str) -> Optional[bool]:
     """C2② 观测键：形状合法的 declared key 是否在注册表（不在=仍按 declared 判，
     误配显式暴露；None=undeclared/哨兵，无此键）。"""
@@ -534,7 +575,8 @@ def _gate_refusal(verdict: Dict[str, Any], identity: Dict[str, Any],
     return r
 
 
-async def _write_gate(handle: Any, tid: str, args: Dict[str, Any]) -> Dict[str, Any]:
+async def _write_gate(handle: Any, tid: str, args: Dict[str, Any],
+                      op_label: str = "") -> Dict[str, Any]:
     """ticket 写 op 闸前置（唯一入口）：读目标票 project（快照 meta）→ 判定矩阵。
 
     返回 {"err": 回执|None, "verdict", "keys", "snap", "stamp", "note", "notice"}——
@@ -563,7 +605,12 @@ async def _write_gate(handle: Any, tid: str, args: Dict[str, Any]) -> Dict[str, 
         # 人话点名带目标票号（值守第一眼就知道动的是哪张票）
         return {"err": _gate_refusal(verdict, identity,
                                      context="（目标票 %s，属项目 %s）" % (tid, target or "（无项目面）"))}
+    # t260930-14：执行器授权闸（仅 cwd 通道设闸；其余通道零行为变化）。
+    egate = _executor_grant_gate(identity, op_label, target)
+    if egate["err"] is not None:
+        return {"err": egate["err"]}
     keys = caller_gate.identity_receipt(identity, verdict)
+    keys.update(egate["keys"])
     reg = _registered_hint(str(verdict.get("stamp") or ""))
     if reg is not None:
         keys["caller_project_registered"] = reg
@@ -629,10 +676,15 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
     if verdict["decision"] == "refuse":
         return _gate_refusal(verdict, identity,
                              context="（目标 %s，属项目 %s）" % (wf_id, target or "（无项目面）"))
+    # t260930-14：裸 cancel 的执行器授权闸（仅 cwd 通道设闸）。
+    egate = _executor_grant_gate(identity, "cancel", target)
+    if egate["err"] is not None:
+        return egate["err"]
     gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
-            "keys": caller_gate.identity_receipt(
+            "keys": {**caller_gate.identity_receipt(
                 identity, verdict,
-                identity_class="engine-internal" if not target else "")}
+                identity_class="engine-internal" if not target else ""),
+                **egate["keys"]}}
     try:
         await handle.terminate(reason=reason)
     except Exception as e:  # already finished / missing etc. always produce a structured receipt, never a stack trace
@@ -710,7 +762,7 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
                             % (exec_status or "未知")})
     # 跨项目闸：与既有写 op 同一判定矩阵（_write_gate 三态，拒收单一出口）；快照瞬时
     # 不可得=transient 拒收不终结（fail-closed，C2① 同口径——绝不无闸放行 terminate）。
-    gate = await _write_gate(handle, tid, args)
+    gate = await _write_gate(handle, tid, args, op_label="ticket-cancel")
     if gate["err"] is not None:
         return gate["err"]
     # 先留痕：cancel_notice 事件先落事件历史（载荷含 who+reason 原文与盖章值）。
@@ -792,7 +844,7 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
                     "exec_status": exec_status or "未知", "reason": reason, "who": who,
                     "note": "已终态（%s），未执行任何动作（幂等回执，重试安全）"
                             % (exec_status or "未知")})
-    gate = await _write_gate(handle, tid, args)
+    gate = await _write_gate(handle, tid, args, op_label="close_out")
     if gate["err"] is not None:
         return gate["err"]
     try:
@@ -859,7 +911,7 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
     # workflow 侧消费盖章值做第二道校验+记名）。读 op（query）不设闸。
     gate = None
     if op in _GATED_TICKET_OPS:
-        gate = await _write_gate(handle, tid, args)
+        gate = await _write_gate(handle, tid, args, op_label=op)
         if gate["err"] is not None:
             return gate["err"]
 
@@ -1115,6 +1167,11 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                              context="（目标票 %s，属项目 %s）" % (tid, project))
     gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
             "keys": caller_gate.identity_receipt(identity, verdict)}
+    # t260930-14：创建面执行器授权闸（仅 cwd 通道设闸）。
+    egate = _executor_grant_gate(identity, "ticket-start", project)
+    if egate["err"] is not None:
+        return egate["err"]
+    gate["keys"].update(egate["keys"])
     reg = _registered_hint(str(verdict.get("stamp") or ""))
     if reg is not None:
         gate["keys"]["caller_project_registered"] = reg

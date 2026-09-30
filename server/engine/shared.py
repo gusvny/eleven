@@ -1522,6 +1522,11 @@ UNDECLARED_POLICIES = ("record", "refuse")
 # 「谁注入的」——手工旁路设了同名 env 也会带标签，审计不得单凭此键下「谁操作」断言。
 CALLER_SURFACE_ENV = "SANDBAR_CALLER_SURFACE"
 CALLER_SURFACE_LANE_AGENT = "lane-agent"
+# 身份推导出处透传 env（t260930-14）：ticket.py 包装层在写 op 出口把「调用方项目身份
+# 的推导出处」（arg/env/cwd，见 caller_gate.resolve_identity 的 src）随身份一并注入，
+# client 侧执行器授权闸（executor_grants）据此辨认「cwd 推导=本项目执行器会话」——
+# 泳道 agent（env 注入）与宿主控制台（仓树内不推导）不落此通道，行为不变。
+CALLER_IDENTITY_SRC_ENV = "SANDBAR_CALLER_IDENTITY_SRC"
 # 越权旗自由文本上限（review C4，intake 上限家族：与 PAUSE/HOST_RULING_NOTE_INPUT_LIMIT、
 # AUTHZ_WHO_MAX_LEN 同值不同源——独立常量，各自演进不互相绑死）。超限=结构化拒收。
 CROSS_PROJECT_NOTE_LIMIT = 20000

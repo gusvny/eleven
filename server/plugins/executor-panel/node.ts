@@ -104,7 +104,9 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
           kind: 'exact', path: PANEL_ROUTE + '/api/grants',
           handler: async (req, res) => {
             const q = new URL(req.url ?? '/', 'http://x').searchParams
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/grants', q, '', originOf(req))
+            // t260930-14：POST=声明编辑器写面（body 带 grants/night_tier/by/caller_surface）。
+            const body = req.method === 'POST' ? await readBody(req) : ''
+            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/grants', q, body, originOf(req))
             sendJson(res, r.status, r.json)
           },
         }),

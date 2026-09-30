@@ -96,8 +96,12 @@ assert(typeof r.json.grants.filtered === 'number', 'grants: filtered count expos
 // ---- 404/405 刚性 ----
 r = await api.handle('GET', '/sandbar-executor-panel/api/unknown', Q(), '')
 assert(r.status === 404, 'unknown panel route → 404')
+// t260930-14：grants 面从 GET-only 变成读写编辑器——POST=声明写面（合法），
+// 其余写方法仍 405；空体 POST=非 JSON → 400。
 r = await api.handle('POST', '/sandbar-executor-panel/api/grants', Q('project=alpha'), '')
-assert(r.status === 405, 'grants: non-GET → 405')
+assert(r.status === 400, 'grants: POST with non-JSON body → 400 (editor write face, t260930-14)')
+r = await api.handle('DELETE', '/sandbar-executor-panel/api/grants', Q('project=alpha'), '')
+assert(r.status === 405, 'grants: DELETE → 405')
 
 cleanup([wd, pan])
 n += 30
