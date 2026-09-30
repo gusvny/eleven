@@ -11,6 +11,27 @@ How to start:
     # Background (long-running)
     .venv/bin/python worker.py --daemon [--pidfile data/worker.pid] [--logfile data/worker.log]
 
+Restart discipline (host report 260930 — the one rule that keeps a restart
+deterministic):
+    **After a restart, verify exactly ONE poller on the queue before pushing any
+    ticket.** A duplicate poller is not a cosmetic problem: whichever worker claims
+    a workflow task executes it, so a result produced while two builds poll the same
+    queue cannot be attributed to a code version (observed: two "worker 起来了"
+    lines 3-5s apart in this log, and a ticket face whose text/counts came from two
+    different builds).
+    The tools for that rule:
+      * daemon starts are now guarded: if the pidfile names a LIVE process, the
+        start is REFUSED (named stderr, exit code 2) instead of silently adding a
+        second poller — a stale/absent pidfile is taken over normally;
+      * `--replace` is the explicit takeover: TERM the old worker, wait (bounded)
+        for its graceful exit, then start; a timeout is an error — this path never
+        KILLs silently (an in-flight activity would be cut off mid-write);
+      * foreground runs write no pidfile, so they cannot be guarded — they are for
+        debugging only, and one that lands on a shared queue prints a loud warning
+        naming the live daemon it is doubling;
+      * poller count is a server-side fact: `describe_task_queue` (or the console's
+        health row) is the check to run before pushing tickets.
+
     # Per-ticket dedicated worker (usually spawned as a child process by console
     # keepalive; no need to run by hand):
     #   SANDBAR_TASK_QUEUE=<queue> SANDBAR_WATCH_WORKFLOW=<ticket-id> \
@@ -290,12 +311,219 @@ def parse_args() -> argparse.Namespace:
                    help="PID 文件路径（后台模式写自己的 pid，优雅停用 kill -TERM $(cat pidfile)）")
     p.add_argument("--logfile", default=str(POC_DIR / "data" / "worker.log"),
                    help="日志文件路径（后台模式 stdout/stderr 重定向到这里）")
+    p.add_argument("--replace", action="store_true",
+                   help="显式接管：pidfile 里那颗 worker 还活着时，先 TERM 它、有界等待其"
+                        "优雅退出再起本进程（超时报错，绝不静默 KILL）。缺省=有活 worker"
+                        "就拒绝启动（同队列并存两颗会让结果不可归因到代码版本）")
     return p.parse_args()
 
 
-def daemonize(pidfile: str, logfile: str) -> bool:
+#: 拒绝启动的退出码（同队列已有活 worker / --replace 超时 / 不代杀他人进程）。
+#: 与场景「环境红=2」同档：这是运维面可机器识别的「没起来」，不是崩溃。
+WORKER_REFUSED_EXIT = 2
+
+#: --replace 等旧 worker 优雅退出的上界（秒）。到点报错、绝不静默 KILL：
+#: 在飞 agent 活动被硬切会把票面带病（t260916-29 的停机宽限语义）。
+REPLACE_WAIT_SEC = 60.0
+REPLACE_POLL_SEC = 0.2
+
+
+def pid_alive(pid: int) -> bool:
+    """存活探测（守卫专用）：`kill(pid, 0)` + **僵尸面**修正。
+
+    `kill(pid, 0)` 对**僵尸**（已退出但父进程未收割）仍然成功——只按它判会把「已死的旧
+    worker」读成活，于是 --replace 白等到超时（installer 侧同款实缺陷）。所以能查就查：
+      · Linux：/proc/<pid>/stat 第三列 'Z' ⇒ 已死；
+      · **本进程自己的子进程**：waitpid(WNOHANG) 真收割（顺带防僵尸堆积）⇒ 已死；
+      · 其它情况（macOS 上非自家子进程，无法查状态）：按**活**处理（保守——宁可拒绝启动
+        让人看一眼，也不静默起第二颗；生产里 daemon worker 归 init 收养，退出即被收割，
+        不会长期停在僵尸态）。
+    EPERM（存在但非本用户）也算活。"""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    # 僵尸修正
+    try:
+        with open("/proc/%d/stat" % pid, encoding="ascii", errors="replace") as f:
+            parts = f.read().split()
+        if len(parts) > 2 and parts[2] == "Z":
+            return False
+    except OSError:
+        pass
+    try:
+        reaped, _status = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return False
+    except ChildProcessError:
+        pass
+    except OSError:
+        pass
+    return True
+
+
+def read_pidfile_state(pidfile: str) -> dict:
+    """pidfile 四态（纯读、零副作用）：absent / malformed / stale / live。
+
+    live 是重启的**唯一合法拦截点**；malformed/stale 都按「陈旧可接管」处理但留痕
+    （读不懂 ≠ 没有——所以仍然点名，不静默当不存在）。"""
+    p = pathlib.Path(pidfile)
+    try:
+        raw = p.read_text(encoding="utf-8", errors="replace").strip()
+    except FileNotFoundError:
+        return {"state": "absent", "pid": None, "raw": "", "mtime": 0.0, "detail": "文件不存在"}
+    except OSError as e:
+        return {"state": "stale", "pid": None, "raw": "", "mtime": 0.0,
+                "detail": "读失败（%s: %s）——按陈旧接管" % (type(e).__name__, e)}
+    mtime = p.stat().st_mtime if p.exists() else 0.0
+    try:
+        pid = int(raw)
+        if pid <= 0:
+            raise ValueError(raw)
+    except (TypeError, ValueError):
+        return {"state": "malformed", "pid": None, "raw": raw[:40], "mtime": mtime,
+                "detail": "内容非正整数（%r）——按陈旧接管" % raw[:40]}
+    if pid_alive(pid):
+        return {"state": "live", "pid": pid, "raw": raw, "mtime": mtime, "detail": "进程存活"}
+    return {"state": "stale", "pid": pid, "raw": raw, "mtime": mtime,
+            "detail": "pid=%d 已不在" % pid}
+
+
+def _meta_of(pidfile: str) -> dict:
+    """读同槽旁车 meta（<pidfile>.meta）——只读、失败即空 dict（fail-open 读侧）。"""
+    try:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import shared as _shared
+        meta, _state, _detail = _shared.read_worker_meta_state(pidfile + ".meta")
+        return dict(meta or {})
+    except Exception:  # noqa: BLE001——旁车只是诊断面，读不到不拦启动
+        return {}
+
+
+def guard_single_worker(pidfile: str, replace: bool = False) -> "str | None":
+    """起 daemon worker **之前**的唯一性守卫（宿主 260930：重启必须确定）。
+
+    返回 None=放行（可启动）；返回字符串=拒绝原因（调用方 stderr 具名 + 非零退出）。
+
+    四态 × 两档：
+      · absent / 陈旧 / 畸形 → 放行，并把「接管」写进日志（留痕，不静默）；
+      · 活 pid 且未给 --replace → 拒绝启动（点名 pid/起于/pidfile/repo_root + 两条出路）；
+      · 活 pid 且给了 --replace → 先 TERM、**有界等待**其优雅退出；超时报错（绝不 KILL）；
+        旁车 meta 指向**别的仓** → 直接拒绝（不代杀他人进程）。
+    为什么必须（宿主实报）：两颗 worker 同队列并存数秒时，谁领到 workflow task 就谁执行，
+    票面结果于是不可归因到某个代码版本；pidfile 是单槽，写入即「最后一次覆盖」，
+    没有这道守卫第二个启动只会静默改写它。
+
+    已知边界（**具名不静默**）：①pid 被系统回收后可能指向一个无关进程 ⇒ 本守卫会保守地
+    拒绝启动并在文案里给 pid/时间/旁车归属（人可核对，绝不代杀）；②前台档不写 pidfile ⇒
+    不在本守卫射程内，改由 `foreground_shared_queue_warning` 响亮提示；③本机 `ps` 常被
+    沙箱拒，故按 pidfile+kill(0) 判定，不做命令行归属核对。"""
+    st = read_pidfile_state(pidfile)
+    log = logging.getLogger()
+    if st["state"] != "live":
+        if st["state"] == "absent":
+            log.info("pidfile 不在（%s）——首启放行", pidfile)
+        else:
+            log.warning("pidfile 陈旧已接管：%s（pidfile=%s）——旧进程不在位，本进程接管该槽",
+                        st["detail"], pidfile)
+        return None
+    pid = int(st["pid"])
+    meta = _meta_of(pidfile)
+    started = ""
+    if meta.get("ts"):
+        try:
+            started = "，起于 %s" % time.strftime("%Y-%m-%d %H:%M:%S",
+                                                time.localtime(int(meta["ts"])))
+        except (TypeError, ValueError, OSError):
+            started = ""
+    elif st.get("mtime"):
+        started = "，pidfile 落于 %s" % time.strftime("%Y-%m-%d %H:%M:%S",
+                                                     time.localtime(st["mtime"]))
+    where = str(meta.get("repo_root") or "（旁车 meta 缺失，归属未知）")
+    if not replace:
+        return ("同队列已有**活** worker（pid=%d%s；pidfile=%s；repo_root=%s）——拒绝启动，"
+                "绝不在同一队列上并存第二颗（谁领到 workflow task 就谁执行 ⇒ 结果不可归因到"
+                "代码版本）。出路：① 优雅停旧的：kill -TERM %d，等它退出后重起；"
+                "② 显式替换：本命令加 --replace（先 TERM 旧 worker、有界等待其优雅退出再起，"
+                "超时报错不静默 KILL）"
+                % (pid, started, pidfile, where, pid))
+    own_root = os.path.realpath(str(pathlib.Path(__file__).resolve().parents[2]))
+    if meta.get("repo_root") and os.path.realpath(str(meta["repo_root"])) != own_root:
+        return ("拒绝 --replace：pidfile 旁车 meta 指向**另一个仓**（repo_root=%s，本仓=%s）"
+                "——不代杀他人进程，请人工处置（核对 %s 里的 pid=%d）"
+                % (where, own_root, pidfile, pid))
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        log.warning("--replace：旧 worker pid=%d 在发信号前已退出——直接接管", pid)
+        return None
+    except OSError as e:
+        return ("--replace 失败：向旧 worker pid=%d 发 SIGTERM 出错（%s: %s）——未起新进程，"
+                "请人工处置" % (pid, type(e).__name__, e))
+    t0 = time.time()
+    while time.time() - t0 < REPLACE_WAIT_SEC:
+        if not pid_alive(pid):
+            log.info("--replace：旧 worker pid=%d 已优雅退出（等待 %.1fs）——本进程接管该槽",
+                     pid, time.time() - t0)
+            return None
+        time.sleep(REPLACE_POLL_SEC)
+    return ("--replace 超时：旧 worker pid=%d 在 %.0fs 内未退出——**不 KILL**（在飞 agent 活动"
+            "被硬切会让票面带病），本次不起新进程。请人工处置：查 data/worker.log 的"
+            "「停机点名」看在飞活动，或 kill -TERM %d 后再起"
+            % (pid, REPLACE_WAIT_SEC, pid))
+
+
+def foreground_shared_queue_warning(args: argparse.Namespace) -> str:
+    """前台启动的**响亮**提示：前台不写 pidfile ⇒ 不受唯一性守卫保护。
+
+    若这个前台 worker 会落在共享队列（默认 sandbar）上、而 pidfile 里那颗 daemon worker
+    还活着，就是宿主 260930 实报里「同一队列两颗 poller 并存」的另一种形态——
+    大声说出来（不拒绝：前台是调试面，测试栈也用它，拒绝会误伤）。"""
+    if args.daemon:
+        return ""
+    try:
+        queues = set(configured_task_queues())
+    except Exception:  # noqa: BLE001——队列名取不到不是拦点
+        return ""
+    if TASK_QUEUE not in queues:
+        return ""
+    st = read_pidfile_state(args.pidfile)
+    if st["state"] == "live":
+        return ("前台启动不写 pidfile，**不受唯一性守卫保护**：pidfile（%s）里那颗 worker"
+                "（pid=%d）仍活着，且本进程要落在同一个共享队列（%s）上 ⇒ 此刻同队列会有两个"
+                "poller，票面结果不可归因到代码版本。调试请继续（前台档的已知代价），"
+                "但要推票请先 kill -TERM %d，或改用 --daemon（后者有守卫）"
+                % (args.pidfile, int(st["pid"]), TASK_QUEUE, int(st["pid"])))
+    # pidfile 陈旧/缺席的前台档同样危险（宿主 260930 窗口一实测形态）：pidfile 是 console
+    # supervisor 判「worker 在不在」的唯一依据，读成死的 ⇒ 它的 keepalive（缺省 5s）会另起
+    # 一颗 daemon ⇒ 又是两颗 poller。响亮说出来（不拒绝：前台是调试面）。
+    return ("前台启动不写 pidfile，而 pidfile（%s）%s：console supervisor（keepalive 缺省 "
+            "5s）会据此判定「worker 不在位」并**另起一颗** ⇒ 本进程会与它同队列并存，"
+            "票面结果不可归因到代码版本。若这是常驻形态请改用 --daemon（写 pidfile、有守卫）；"
+            "调试用请只留一个前台进程并盯着 poller 面"
+            % (args.pidfile, "内容非数字" if st["state"] == "malformed"
+               else "指向已不在的 pid=%s" % st["pid"] if st["state"] == "stale"
+               else "不在"))
+
+
+def daemonize(pidfile: str, logfile: str, replace: bool = False) -> bool:
     """Single-fork detach from the session. Returns True if this is the parent
-    process (the caller should exit immediately)."""
+    process (the caller should exit immediately).
+
+    重启唯一性（宿主 260930）：fork **之前**先过 `guard_single_worker`——pidfile 里是活
+    进程就拒绝启动（除非显式 --replace，那条路先 TERM 后**有界等待**优雅退出，超时报错、
+    绝不 KILL）。守卫不通过时抛 SystemExit(WORKER_REFUSED_EXIT)：**不 fork、不改 pidfile**，
+    门口就把「同队列并存两颗」拦住。"""
+    refusal = guard_single_worker(pidfile, replace=replace)
+    if refusal:
+        print("worker 拒绝启动：%s" % refusal, file=sys.stderr)
+        raise SystemExit(WORKER_REFUSED_EXIT)
     pid = os.fork()
     if pid > 0:
         # Parent: record the child pid, then exit (setsid in the child keeps the pid)
@@ -458,8 +686,15 @@ def main() -> None:
             print("worker boot 自检失败：%s" % p, file=sys.stderr)
         raise SystemExit("worker 代码与 sign 信号面不匹配，拒绝上线（authorize 会被"
                          "解码端静默丢弃；修代码或换兼容转换器后再启动）")
+    if not args.daemon:
+        # 前台档：不写 pidfile ⇒ 不受唯一性守卫保护；落在共享队列且已有活 daemon 时
+        # 响亮点名（宿主 260930 实报的「同队列两颗 poller」前台形态）。不拒绝：前台是
+        # 调试面，测试栈也用它（各测试用私有队列+私有 bench，不触发本提示）。
+        _warn = foreground_shared_queue_warning(args)
+        if _warn:
+            print("⚠️  worker 唯一性提示：%s" % _warn, file=sys.stderr, flush=True)
     if args.daemon:
-        is_parent = daemonize(args.pidfile, args.logfile)
+        is_parent = daemonize(args.pidfile, args.logfile, replace=args.replace)
         if is_parent:
             return
     meta_path = worker_meta_path(args)

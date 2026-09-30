@@ -399,9 +399,24 @@ def build_fixture(fail):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
         copied.append(rel)
-    fail.check("server/engine/light_lane.py" in copied,
-               "夹具仓覆盖引擎工作树改动（含新模块 light_lane.py；共 %d 件）"
-               % len(copied))
+    # 断言面（260930 修正）：**夹具仓跑的就是被测工作树的代码** —— 逐文件字节一致。
+    # 原断言钉在「light_lane.py 出现在未提交改动清单里」，那是一个**瞬态前提**：该模块
+    # 一旦被提交，清单里就没有它 → 假红（本场景实测到过）。改为不依赖 git 状态的强判据：
+    # 被覆盖的文件 ∪ 车道模块，在夹具仓与工作树之间必须逐字节相同（含「全提交」时
+    # copied 为空、只剩 light_lane.py 的形态——那时夹具 clone 自 HEAD 也应当一致）。
+    watched = sorted(set(copied) | {"server/engine/light_lane.py"})
+    drift = []
+    for rel in watched:
+        a, b = os.path.join(REPO, rel), os.path.join(fixture, rel)
+        if not os.path.isfile(a) or not os.path.isfile(b):
+            drift.append("%s（缺）" % rel)
+            continue
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            if fa.read() != fb.read():
+                drift.append("%s（字节不一致）" % rel)
+    fail.check(not drift,
+               "夹具仓跑的就是被测工作树引擎代码（逐文件字节一致 %d 件；漂移=%r）"
+               % (len(watched), drift[:5]))
     # 基线：把夹具声明提交到 main（泳道 worktree 从 main 分叉，才看得见它们）
     git("add", "-A")
     rc, out = git("commit", "-qm", "light-lane e2e fixture: mini integration registry")

@@ -172,6 +172,32 @@ kill -TERM "$(cat data/worker.pid)"                             # 优雅停：�
 SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC=600 .venv/bin/python worker.py …   # 宽限可调（缺省 1800s；显式 "0"=立即取消旧行为）
 ```
 
+**重启纪律（宿主 260930 实报的运作缺陷，别跳）**：同一队列上并存两颗 worker 时，谁先领到
+workflow task 就谁执行 ⇒ 结果**不可归因到某个代码版本**（实测：真票票面文案旧格式 + 票面
+ran=0 而泳道报告 ran=13）。所以：
+
+1. **重启一律走 `--replace`**：先 TERM 旧 worker、有界等待其优雅退出再起；超时报错、绝不
+   静默 KILL。
+   `.venv/bin/python worker.py --daemon --replace --pidfile data/worker.pid --logfile data/worker.log`
+2. **起完先验「恰好一颗 poller」再推票**（跑着的才算数，server 会残留刚退出者的历史条目）：
+
+   ```python
+   import asyncio
+   from temporalio.client import Client
+   from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+   from temporalio.api.taskqueue.v1 import TaskQueue
+   async def main():
+       c = await Client.connect("127.0.0.1:7233")
+       r = await c.workflow_service.describe_task_queue(DescribeTaskQueueRequest(
+           namespace="default", task_queue=TaskQueue(name="sandbar"), report_pollers=True))
+       print([(p.identity) for p in (r.pollers or [])])
+   asyncio.run(main())
+   ```
+
+缺省（不给 `--replace`）时，pidfile 里那颗还活着就**拒绝启动**并具名报错（退出码 2）；
+pidfile 陈旧/畸形则照常接管并留痕。前台档不写 pidfile、不受守卫保护——落在共享队列且已有
+活 daemon 时会响亮点名（调试可以，推票不行）。
+
 worker 是「肌肉」，服务端是「骨架与记忆」：worker 挂了/换新进程，服务端里的 workflow
 状态与历史不丢，停机期间攒的活等重启后自动补跑（POC 证明点 D）。优雅停的宽限语义、
 在飞点名与运维口径见 §8.3.1（t260916-29）。
