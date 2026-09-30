@@ -103,15 +103,17 @@ _FIXTURE_TWO_STEP_NODES: Tuple[Dict[str, Any], ...] = (
 )
 
 # 宿主令 260930（devlane-lite §4.1，直修无票）：轻道模板（light-lane）——编码真源=
-# light_lane.py LightLaneWorkflow.STAGES（短段链、**无条件段**、无并行分叉）；本表是
-# 展示面导出数据，逐字段一致性锁=tests/test_light_lane_lane.py（「STAGES 改了不改本表，
-# 此处必红」，dev-lane/inspection-lite 同款范式）。
+# light_lane.py LightLaneWorkflow.STAGES（短段链、**条件段 ui_evidence**、无并行分叉）；
+# 本表是展示面导出数据，逐字段一致性锁=tests/test_light_lane_lane.py（「STAGES 改了不改
+# 本表，此处必红」，dev-lane/inspection-lite 同款范式）。
 _LIGHT_LANE_NODES: Tuple[Dict[str, Any], ...] = (
-    # 宿主 260930 裁定：轻道**不带 create_plan 段**（也不带 ui_evidence）——拓扑里不许留
-    # 幽灵节点。首段=implement；「活比想象的大」的发现时点后移到机器闸（完整违规集转人）。
+    # 宿主 260930 裁定①：轻道**不带 create_plan 段**——拓扑里不许留幽灵节点；首段=implement
+    # （「活比想象的大」的发现时点后移到机器闸，红则以完整违规集转人）。
     _node("implement", "实现", "developer", KIND_AGENT, ("agent", "script")),
-    # 宿主 260930 裁定：轻道**不带 ui_evidence 段**（不产 UI 证据）——拓扑里不许留幽灵
-    # 节点；UI 面改动由 merge_check 3.6 的 UI 证据闸具名挡住（见 light_lane.py 头注）。
+    # 宿主 260930 裁定②（第二轮）：**条件段 ui_evidence 加回轻道**——脚本段、仅 UI 票，
+    # 注记口径与 dev-lane 同一条（OPT_UI_TICKETS）。
+    _node("ui_evidence", "UI截图证据", "developer", KIND_AGENT, ("script",),
+          optional=OPT_UI_TICKETS),
     _node("run_integration_tests", "跑集成测试", "integration", KIND_GATE, ("script",)),
     _node("merge_check", "合并检查", "integration", KIND_GATE, ("script",)),
     # 人门：exit=human（sign 信号面），渲染器画虚线圈。轻道唯一人门=merge。

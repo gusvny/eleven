@@ -6,9 +6,14 @@ intent（守护的用户可感知行为）：**一条轻道票真的走完它自
   A. **段链就是轻道那条**：真 worker + 真活动 + 桩大脑（`SANDBAR_AGENT_CMD` 可编程桩）
      驱动一张真 `light-lane` 票：桩账本（agent 实收派单的唯一观测面）逐段记录
      **implement**（轻道首段），**且零** create_plan / review_plan /
-     design_integration_tests / arbitrate / acceptance_walkthrough / **ui_evidence** 派单
-     （宿主 260930 两道裁定：轻道不写方案、不产 UI 证据）；票面 timeline/handoffs 同样零
-     这六段痕迹，**并带正向断言：派单账本首条=implement（首段即实现）**。
+     design_integration_tests / arbitrate / acceptance_walkthrough 派单（宿主 260930 裁定：
+     轻道不写方案）；票面 timeline/handoffs 同样零这五段痕迹，**并带正向断言：派单账本
+     首条=implement（首段即实现）**。
+  A2. **UI 证据条件段两态**（宿主 260930 第二轮裁定「把 UI 证据步加回轻道」，脚本段、
+     仅 UI 票）：**非 UI 票**（主票 + 空写集票）ui_evidence 在派单面/时间线/交接面/全链
+     **四处零出现**；**UI 票**（写集命中夹具 verify.yaml 的 ui_evidence.dirs 前缀）该段
+     **出现且真跑**——时间线有 running/done、票据回执有记账（results.ui_evidence）、泳道
+     .sandbar/screenshots/ 有截图实物，且**它跑在机器闸之前**（段序）。
   B. **机器闸跑的是项目声明的集成命令**：夹具泳道的 `verify.yaml` 里
      `integration.cmd` 与主仓声明**逐字相同**（`python3 integration/run_scenarios.py`），
      且闸回执里出现夹具注册表里那三条场景名——只有真执行器读真注册表才可能产出。
@@ -83,6 +88,11 @@ TID = "lightlane-%d" % os.getpid()
 # 第二张票（宿主 260930 裁定的端到端面）：**空写集**轻道票——走 write_set_missing 红，
 # 用来验「轻道票面出路不指向 create_plan」在真链上成立（改写点在轻道自己的收敛点）。
 TID_NOWS = "lightlane-nows-%d" % os.getpid()
+# 第三张票（宿主 260930 第二轮裁定：UI 证据步加回轻道）：**UI 票**——写集命中夹具
+# verify.yaml 的 ui_evidence.dirs 前缀，用来验「该段出现且真跑，且跑在机器闸之前」。
+TID_UI = "lightlane-ui-%d" % os.getpid()
+UI_DIR = "server/plugins/workbench/src/client/"
+UI_FILE = UI_DIR + "LIGHTLANE_UI_PROBE.ts"
 #: 改前原文（真源=server/engine/path_gates.py `_NEXT_ACTION_HINTS["write_set_missing"]`；
 #: 字面量照抄——轻道票面必须已把它改写掉）。
 HINT_BEFORE = "工单写集为空/缺失——回 create_plan 补结构化回执后再实现"
@@ -90,15 +100,17 @@ WRITE_FILE = "LIGHT_LANE_PROBE.md"
 # 夹具注册表里的三条秒级场景（红轮=三条全红 → 完整违规集面；绿轮=三条全绿）
 GATE_NAMES = ("lightlane-fixture-alpha", "lightlane-fixture-beta", "lightlane-fixture-gamma")
 # 轻道被排除的段（出现即本票失效）：全车道有、轻道没有的那几条——被裁的四段（审方案/
-# 集测设计/仲裁/验收走查）+ **create_plan**（宿主 260930 裁定轻道不写方案）+
-# **ui_evidence**（同批裁定轻道不产 UI 证据）。段链/派单面/时间线/交接面四处都不许出现。
+# 集测设计/仲裁/验收走查）+ **create_plan**（宿主 260930 裁定轻道不写方案）。
+# **ui_evidence 不在这个集合里**：它是**条件段**（第二轮裁定加回轻道）——按票分两态判：
+#   · 非 UI 票（主票/空写集票）：四处（派单面/时间线/交接面/全链）**零出现**（负断言）；
+#   · UI 票（TID_UI）：**出现且真跑**（running/done + 回执 + 截图实物），且跑在机器闸之前。
 EXCLUDED_STAGES = ("review_plan", "design_integration_tests", "arbitrate",
-                   "acceptance_walkthrough", "create_plan", "ui_evidence")
+                   "acceptance_walkthrough", "create_plan")
 # 段链（真跑序；宿主 260930：无方案段、无 UI 证据段——首段即 implement）。
 LIGHT_STAGES = ("implement", "run_integration_tests", "merge_check", "merge")
 
 G = {"tmp": "", "fixture": "", "projects": "", "ctl": "", "gate_ledger": "",
-     "stub_ledger": "", "stub": "", "worker": None}
+     "stub_ledger": "", "stub": "", "workers": []}
 
 # 桩落盘（引擎 spawn 的 agent 命令）：argv 末位=prompt；阶段名与结果文件路径从 prompt 里取。
 # 同时①落一个写集内的真实文件（settle 才有物可提交）②把「实收派单」写进账本（断言面）。
@@ -117,12 +129,16 @@ if led:
 m = re.search(r"干完把结果写到 (\S+?\.json)", prompt)
 if m:
     rfile = m.group(1)
-    try:
-        with open(os.path.join(os.getcwd(), "LIGHT_LANE_PROBE.md"), "a",
-                  encoding="utf-8") as f:
-            f.write("- %s stage ran for the ticket\n" % stage)
-    except OSError:
-        pass
+    extra = [x.strip() for x in
+             (os.environ.get("LIGHTLANE_STUB_WRITE_FILES") or "").split(",") if x.strip()]
+    for rel in ["LIGHT_LANE_PROBE.md"] + extra:
+        p2 = os.path.join(os.getcwd(), rel)
+        try:
+            os.makedirs(os.path.dirname(p2), exist_ok=True)
+            with open(p2, "a", encoding="utf-8") as f:
+                f.write("- %s stage ran for the ticket\n" % stage)
+        except OSError:
+            pass
     with open(rfile, "w", encoding="utf-8") as f:
         json.dump({"status": "ok",
                    "summary": "[light-lane-e2e stub] %s done" % stage,
@@ -296,6 +312,11 @@ def build_fixture(fail):
     # 夹具泳道声明与 mini 注册表：复用 t260913-03 build_lane（真执行器 + 注入 mini 表 +
     # 最小 verify.yaml + 舞台桩）。它写的 integration.cmd 与主仓声明逐字相同：见 L2 断言。
     build_lane(fixture, [(n, "ro", True) for n in GATE_NAMES])
+    # ui_evidence 声明（宿主 260930 第二轮：UI 票那条分支要用它判「这是 UI 票」）。
+    # build_lane 写的是最小 verify.yaml，这里按既有键形状追加 ui_evidence.dirs
+    # （键名/缩进与主仓 verify.yaml 同款；声明是**数据**，判据仍只在引擎里）。
+    with open(os.path.join(fixture, "verify.yaml"), "a", encoding="utf-8") as f:
+        f.write("ui_evidence:\n  dirs:\n    - %s\n" % UI_DIR)
     # mini 场景脚本改成控档驱动（同一张泳道可红可绿，且把调用面落账）
     mini_dir = os.path.join(fixture, "integration", "mini")
     for n in GATE_NAMES:
@@ -335,30 +356,36 @@ def build_fixture(fail):
     return fixture
 
 
-def start_worker(py, stage):
+def start_worker(py, stage, queues=None, stub_files="", watch=None):
     extra = {
         # 一票一队列是引擎的既有形态（worker 只 poll 派给它的队列）；本场景两张票
         # （主票 TID + 空写集票 TID_NOWS）共用一个 worker，故队列面显式列两条。
-        "SANDBAR_TASK_QUEUES": "sandbar-ticket-%s,sandbar-ticket-%s" % (TID, TID_NOWS),
-        "SANDBAR_WATCH_WORKFLOW": TID,
+        "SANDBAR_TASK_QUEUES": queues or ("sandbar-ticket-%s,sandbar-ticket-%s"
+                                          % (TID, TID_NOWS)),
+        "SANDBAR_WATCH_WORKFLOW": watch or TID,
         "SANDBAR_WATCH_INTERVAL_SEC": "2",
         # 桩大脑（可编程）：逐段回合法回执 + 落写集内文件 + 把实收派单落账本
         "SANDBAR_AGENT_CMD": "%s %s" % (py, G["stub"]),
         "SANDBAR_UI_CAPTURE_STUB": "1",
     }
+    if stub_files:
+        extra["LIGHTLANE_STUB_WRITE_FILES"] = stub_files
     log = open(os.path.join(G["tmp"], "worker.log"), "wb")
     proc = subprocess.Popen([py, os.path.join(G["fixture"], "server", "engine", "worker.py")],
                             env=env_for(stage, extra), cwd=REPO, stdout=log,
                             stderr=subprocess.STDOUT, start_new_session=True)
-    G["worker"] = proc
+    G["workers"].append(proc)
     return proc
 
 
-def stop_worker(fail, label):
-    proc = G["worker"]
+def stop_worker(fail, label, proc=None):
+    """停一个 worker（缺省=最近起的那个）。多票各有专属 worker，台账在 G['workers']。"""
     if proc is None:
-        return
-    G["worker"] = None
+        if not G["workers"]:
+            return
+        proc = G["workers"].pop()
+    elif proc in G["workers"]:
+        G["workers"].remove(proc)
     if proc.poll() is not None:
         fail.check(True, "%s：worker 已自行退出（watch 收票即退，rc=%s）" % (label, proc.returncode))
         return
@@ -370,6 +397,13 @@ def stop_worker(fail, label):
         fail.check(False, "%s：worker TERM 20s 未退（kill 兜底前先计红）" % label)
         proc.kill()
         proc.wait(timeout=10)
+
+
+def stop_all_workers(fail, label):
+    """收尾：停掉本场景起过的**全部** worker（一票一 worker，逐个点名回收）。"""
+    procs, G["workers"] = list(G["workers"]), []
+    for i, proc in enumerate(procs):
+        stop_worker(fail, "%s#%d" % (label, i + 1), proc)
 
 
 def declared_integration_cmd(verify_yaml):
@@ -456,6 +490,65 @@ def main():
         if not good:
             fail.bail("建票未受理，后续子用例无从进行：%s" % why, 1)
 
+        # ---------- L2c UI 票：ui_evidence 条件段「出现且真跑，且在机器闸之前」 ----------
+        # 独立 worker（一票一队列）：该票的桩额外写 UI 路径文件，使改动面命中夹具
+        # verify.yaml 声明的 ui_evidence.dirs → helper 判为 UI 票 → 条件段真跑。
+        ui_worker = start_worker(py, stage, queues="sandbar-ticket-%s" % TID_UI,
+                                 stub_files=UI_FILE, watch=TID_UI)
+        _rc, _br2 = git("rev-parse", "--short", "HEAD")
+        _rc3, out3 = run_poc_client(py, "ticket-start", {
+            "ticket_id": TID_UI, "template_id": "light-lane", "project": PROJECT_KEY,
+            "base_ref": (_br2 or "").strip(),
+            "title": "[e2e] light-lane UI ticket (conditional ui_evidence stage)",
+            "user_request": "integration e2e: a UI-surface change must run the ui_evidence stage before the gate",
+            "write_set": [UI_FILE],
+            "caller_project": PROJECT_KEY,
+        }, env_for(stage), timeout=300)
+        good3, why3 = accepted(out3, TID_UI)
+        check(good3, "L2c UI 票受理（%s）" % why3)
+        if good3:
+            s3 = wait_snap(fail, py, stage, TID_UI,
+                           lambda x: x.get("stage") == "run_integration_tests"
+                           and x.get("stage_state") == "blocked",
+                           "L2c UI 票走到机器闸（先跑过 UI 证据段）", 420)
+            if s3 is not None:
+                tl_ui = [(str(e.get("stage")), str(e.get("state")))
+                         for e in (s3.get("timeline") or [])]
+                seq_ui = [st for st, _s in tl_ui]
+                check(("ui_evidence", "running") in tl_ui and ("ui_evidence", "done") in tl_ui,
+                      "L2c **UI 票**：ui_evidence 出现且真跑（时间线 running/done；实得 %r）"
+                      % [x for x in tl_ui if x[0] == "ui_evidence"])
+                rec_ui = (s3.get("results") or {}).get("ui_evidence") or {}
+                check(str(rec_ui.get("status")) == "ok" and bool(rec_ui.get("deliverables")),
+                      "L2c UI 票：票据回执有记账（results.ui_evidence status=%r shots=%r）"
+                      % (rec_ui.get("status"), rec_ui.get("deliverables")))
+                # 段序：ui_evidence 两条都排在 implement/done 之后、机器闸 running 之前
+                i_impl_done = tl_ui.index(("implement", "done")) if ("implement", "done") in tl_ui else -1
+                i_ui_run = (tl_ui.index(("ui_evidence", "running"))
+                            if ("ui_evidence", "running") in tl_ui else -1)
+                i_ui_done = (tl_ui.index(("ui_evidence", "done"))
+                             if ("ui_evidence", "done") in tl_ui else -1)
+                i_gate = (tl_ui.index(("run_integration_tests", "running"))
+                          if ("run_integration_tests", "running") in tl_ui else -1)
+                check(-1 < i_impl_done < i_ui_run <= i_ui_done < i_gate,
+                      "L2c UI 票段序：implement→ui_evidence→机器闸（下标 %r）"
+                      % [i_impl_done, i_ui_run, i_ui_done, i_gate])
+                check("handoffs" in s3 and any(str(h.get("stage")) == "ui_evidence"
+                                               for h in (s3.get("handoffs") or [])),
+                      "L2c UI 票：交接面有 ui_evidence 记账")
+                check(not (set(seq_ui) & set(EXCLUDED_STAGES)),
+                      "L2c UI 票仍零被裁段（实得 %r）" % sorted(set(seq_ui)))
+                # 截图实物：泳道 .sandbar/screenshots/ 下真有 png（隔离台桩写 1x1 PNG）
+                lane_ui = str(((s3.get("meta") or {}).get("workspace") or {}).get("path") or "")
+                shots = []
+                if lane_ui:
+                    import glob as _glob
+                    shots = _glob.glob(os.path.join(lane_ui, ".sandbar", "screenshots", "*.png"))
+                check(bool(shots), "L2c UI 票：泳道 .sandbar/screenshots/ 有截图实物（%d 张）"
+                      % len(shots))
+                print_timeline(s3, "UI ticket at the machine gate")
+            stop_worker(fail, "L2c UI 票 worker 收尾", ui_worker)
+
         # ---------- L2b write_set_missing 出路改写（宿主 260930 裁定的端到端面） ----------
         # 空写集票（显式声明 no_file_changes）+ 桩照旧落文件 → 落盘路径闸拒
         # (reason_code=write_set_missing)；轻道票面出路必须已改写掉指向 create_plan 的那句。
@@ -511,22 +604,21 @@ def main():
                        % (stub_stages[0] if stub_stages else None))
             check(not (set(stub_stages) & set(EXCLUDED_STAGES)),
                        "L3a 被排除段零派单（create_plan/review_plan/"
-                       "design_integration_tests/arbitrate/acceptance_walkthrough + "
-                       "ui_evidence）")
+                       "design_integration_tests/arbitrate/acceptance_walkthrough）")
             check("ui_evidence" not in stub_stages,
-                  "L3a **任何轻道票都不跑 ui_evidence**（派单面负断言）")
+                  "L3a **非 UI 票**：ui_evidence 零派单（条件段不适用；UI 票正向面见 L2c）")
             check("create_plan" not in stub_stages,
                   "L3a **轻道没有方案段**（派单面负断言）")
             check(not (set(tl_stages) & set(EXCLUDED_STAGES)),
                        "L3a 票面 timeline 零被排除段（实得 %r）" % sorted(set(tl_stages)))
             check("ui_evidence" not in tl_stages,
-                  "L3a **任何轻道票都不跑 ui_evidence**（时间线负断言）")
+                  "L3a **非 UI 票**：ui_evidence 零时间线痕迹（条件段不适用）")
             check("create_plan" not in tl_stages,
                   "L3a **轻道没有方案段**（时间线负断言）")
             check(not (set(hf_stages) & set(EXCLUDED_STAGES)),
                        "L3a 票面 handoffs 零被排除段（实得 %r）" % sorted(set(hf_stages)))
             check("ui_evidence" not in hf_stages,
-                  "L3a **任何轻道票都不跑 ui_evidence**（交接面负断言）")
+                  "L3a **非 UI 票**：ui_evidence 零交接面记账（条件段不适用）")
             check("create_plan" not in hf_stages,
                   "L3a **轻道没有方案段**（交接面负断言）")
             check("implement" in tl_stages,
@@ -651,9 +743,9 @@ def main():
                           and str(e.get("state")) == "done"]
             check(bool(done_marks), "L5 timeline 有 merge_check done（程序化四项通过）")
             check(all(str(e.get("stage")) not in EXCLUDED_STAGES for e in tl3),
-                       "L5 全链 timeline 零被排除段（含 ui_evidence）")
+                  "L5 全链 timeline 零被裁段（create_plan/审方案/集测设计/仲裁/走查）")
             check("ui_evidence" not in tl3,
-                  "L5 **任何轻道票都不跑 ui_evidence**（全链时间线负断言）")
+                  "L5 **非 UI 票**：全链时间线零 ui_evidence（条件段不适用；UI 票见 L2c）")
             tl3_ids = [str(e.get("stage")) for e in tl3]
             check("create_plan" not in tl3_ids and bool(tl3_ids)
                   and tl3_ids[0] == "implement",
@@ -714,7 +806,7 @@ def main():
         check(False, "场景中途异常：%s: %s" % (type(e).__name__, str(e)[:240]))
     finally:
         try:
-            stop_worker(fail, "L6 收尾")
+            stop_all_workers(fail, "L6 收尾")
         except Exception as e:  # noqa: BLE001
             check(False, "worker 收尾异常：%s" % str(e)[:160])
         if stage is not None and stage_mod is not None:

@@ -10,13 +10,18 @@
 
     prepare_workspace（无 agent，前置）
       → implement（developer：落地 + 单测；worker 代落盘 commit）
+      → [ui_evidence]（**脚本条件段**：仅 UI 票；worker 代跑隔离台截图，无 agent 无 LLM）
       → run_integration_tests（机器闸：项目声明的集成命令；一轮一判）
       → merge_check（程序化四项）
       → merge（人审签字 → 真合并 → 归档 → 拆道）
 
 **没有** create_plan、没有 plan review、没有 design_integration_tests、没有仲裁、
-没有验收走查，**也不产 UI 证据**（宿主 260930 两道裁定：轻道不带 create_plan 段与
-ui_evidence 段——段声明、派单面、时间线三处都不许出现这两段）。
+没有验收走查（宿主 260930 裁定：轻道不写方案）。
+
+UI 证据段的口径（宿主 260930 第二轮裁定「把 UI 证据步加回轻道」）：截图步是**脚本段**
+（worker 代跑隔离台，约 1 分钟/票），轻道真正省的大头是 agent 段——上一轮把「便宜但必需」
+的那步跟重活一起砍了，现加回。判据与截图**全部复用** dev_lane._ui_evidence_step（同一
+diff 源判据、同一 prepare_ui_evidence、同一软失败口径），**非 UI 票零活动零痕迹**。
 
 为什么没有 create_plan（宿主 260930 裁定，口径留档供后人复核）：轻道的适用面靠**人选**
 （人选时已经判过一次「这是小活」），需求的真源是**票面**（含写集声明），范围内的真源是
@@ -29,9 +34,10 @@ ui_evidence 段——段声明、派单面、时间线三处都不许出现这�
 
 UI 面改动的口径（连带后果，**具名不静默**）：merge_check 的 3.6「UI 证据闸」是
 **模板无关的全车道纪律**——改动面命中 UI 路径即要求 `.sandbar/screenshots/` 下有截图
-（reason_code=ui_evidence_missing）。轻道不产截图，所以「改到 UI 路径的轻道票」会在
-merge_check 被这条闸**具名挡住**：详见 §6 的口径注释与 _light_merge_blocked_text 的
-`ui_evidence_missing` 专段（出路=另开全车道票 / 人裁定豁免），绝不静默、绝不假绿。
+（reason_code=ui_evidence_missing），这条判据一个字不改。轻道**能产证据**（上面那个条件
+段）：所以这条红在轻道上的含义是「**本道能产证据，但这次没产生/没挂上**」——出路照旧
+具名且可行动（重跑截图步＝rework(to_stage=implement) 让条件段再跑一次，或截图已在泳道
+后 retry_qc 重验闸），见类尾 `_light_merge_blocked_text` 的 `ui_evidence_missing` 专段。
 
 红转人（宿主 260930 定案②）：机器闸不绿 ⇒ 票面进 blocked，带上**完整违规集**（全部失败场景名、
 计数、闸回执指针，绝不给样本）与具名出路清单（重跑闸 / 打回实现 / 为余下工作另开全道
@@ -150,11 +156,11 @@ LIGHT_REWORK_TARGETS = frozenset({
 #: 轻道段级补述：在 dev-lane 的同段补述**前面**加一段轻道契约说明；正文 import 复用，
 #: 纪律条文（英文报告义务 + developer 段集成禁跑执法）因此与 dev-lane 同源、不会漂移。
 LIGHT_LANE_PRELUDE = (
-    "【本票走轻道（light lane）】段链=implement → run_integration_tests（机器闸）"
-    "→ merge_check → merge（人审）。"
-    "本道**没有**方案段、没有方案复审、没有集测设计、没有仲裁、没有验收走查、"
-    "**也不产 UI 证据**（UI 面改动请走全车道）：范围的真源=票面声明的写集，"
-    "机器闸不绿就停下等人（不自动重跑、不自动仲裁），所以一轮交付要尽量把事做完。\n")
+    "【本票走轻道（light lane）】段链=implement →（UI 票才有 ui_evidence 截图步）"
+    "→ run_integration_tests（机器闸）→ merge_check → merge（人审）。"
+    "本道**没有**方案段、没有方案复审、没有集测设计、没有仲裁、没有验收走查："
+    "范围的真源=票面声明的写集，机器闸不绿就停下等人（不自动重跑、不自动仲裁），"
+    "所以一轮交付要尽量把事做完。\n")
 
 LIGHT_FLOW_BRIEF: Dict[str, str] = {
     # 轻道唯一 agent 段=implement（宿主 260930 删了 create_plan 与 ui_evidence）；正文
@@ -179,20 +185,20 @@ class LightLaneWorkflow(DevLaneWorkflow):
     PATH_GATE = True
     TEMPLATE_LANE = "worktree"
     TEMPLATE_WORKSPACE_DIR = False
-    TEMPLATE_DESC = ("轻道（light lane）：prepare_workspace→implement→run_integration_tests"
-                     "（机器闸，一轮一判）→merge_check→merge（人审）——红转人，不自动仲裁、"
-                     "不自动重跑；不产 UI 证据、不写方案（UI 面改动走全车道；范围=票面声明的写集）")
+    TEMPLATE_DESC = ("轻道（light lane）：prepare_workspace→implement→（UI 票 ui_evidence）"
+                     "→run_integration_tests（机器闸，一轮一判）→merge_check→merge（人审）"
+                     "——红转人，不自动仲裁、不自动重跑；不写方案（范围=票面声明的写集）")
     #: 段补述来源（dev-lane 的 _run_agent_step 读本属性；dev-lane 侧值=FLOW_BRIEF，
     #: 逐字不变——纯加法钩子）。
     FLOW_BRIEF_SET: Dict[str, str] = LIGHT_FLOW_BRIEF
 
-    # 段声明（角色/种类/人门标记与 run() 同序；acceptance 是**票面文字**，按 CLAUDE.md
-    # 规则 6 全英文）。**首段=implement**（宿主 260930 裁定删 create_plan：见模块头注
-    # 「为什么没有 create_plan」——口径与代价都在那里，含「发现时点后移到机器闸」）。
-    # **无条件段**（也不带 ui_evidence，UI 面改动由 merge_check 3.6 的 UI 证据闸具名
-    # 挡住，见类尾 `_light_merge_blocked_text`）。
+    # 段声明（角色/种类/人门标记/条件段注记与 run() 同序；acceptance 是**票面文字**，
+    # 按 CLAUDE.md 规则 6 全英文）。**首段=implement**（宿主 260930 裁定删 create_plan：
+    # 见模块头注「为什么没有 create_plan」——口径与代价都在那里）。
+    # **条件段 ui_evidence**（宿主 260930 第二轮裁定加回）：脚本段，仅 UI 票；判据=dev-lane
+    # 同一 diff 源（非 UI 票零活动零痕迹，见 `_light_record_ui_evidence` 的落痕口径）。
     STAGES = (
-        Stage(id="implement", name="实现", role="developer", next="run_integration_tests",
+        Stage(id="implement", name="实现", role="developer", next="ui_evidence",
               desc="按方案开发：写集白名单内；agent 沙箱写不了真 .git，commit 由 worker "
                    "代落盘；单测随实现交付",
               parts=("agent", "script"),
@@ -200,6 +206,16 @@ class LightLaneWorkflow(DevLaneWorkflow):
                           "Changes are committed to the lane branch (the worker settles "
                           "on the agent's behalf)",
                           "Unit tests for the change run green")),
+        # 条件段（仅 UI 票；非 UI 票零活动零痕迹）。真编排在 implement 段尾部 inline 调用
+        # dev_lane._ui_evidence_step（同一 helper、同一判据）；本类只做「段有没有跑」的记账。
+        Stage(id="ui_evidence", name="UI截图证据", role="developer",
+              next="run_integration_tests",
+              desc="条件段（仅 UI 票）：实现落盘/结算后 worker 代跑 ui-check 隔离台截图，落 "
+                   ".sandbar/screenshots/（脚本段、无 agent 无 LLM；软失败不拦主链，merge_check "
+                   "的 UI 证据闸兜底）",
+              parts=("script",),
+              acceptance=("UI tickets carry screenshots under .sandbar/screenshots/ "
+                          "(the merge_check UI-evidence gate checks it mechanically)",)),
         Stage(id="run_integration_tests", name="跑集成测试", role="integration",
               next="merge_check", agent=False,
               desc="程序化（无 agent）：泳道 0-commit 前置检查 → 改动清单 → 面计划收窄快反馈面 "
@@ -251,6 +267,37 @@ class LightLaneWorkflow(DevLaneWorkflow):
             await self._block_agent_failed(step_id, res)
             return None
         return res
+
+    # ------------------------------------------------- UI 证据条件段的票面记账
+    def _light_record_ui_evidence(self, started_epoch: int) -> bool:
+        """把**真跑过**的 UI 证据条件段落进票面；返回是否落痕。
+
+        判据来源=dev_lane._ui_evidence_step 的产物：它只在 UI 票上写
+        `self.results['ui_evidence']`（内部判据=diff 源 + 宣布门 + fail-closed，一字不重写）。
+        没这份回执（非 UI 票）→ **零条目零记账**（这是「非 UI 票 ui_evidence 四处零出现」
+        负断言的实现面）。
+
+        落痕口径（诚实声明，不铸假证据）：判据在 helper **内部**、且 helper 先判后拍，调用点
+        无法在拍之前知道是不是 UI 票，所以这里落的两条是**终态痕迹**——`running` 条目的
+        reason 明确写出「本段在 implement 分支 inline 跑完，这是终态痕迹」并带上**真实时长**
+        （调用点自己掐的墙钟），`done` 由 `_finish` 落（同时勾掉本段验收项）。段序仍然正确：
+        两条都排在 implement/done 之后、机器闸 `_enter` 之前。"""
+        rec = self.results.get("ui_evidence")
+        if not isinstance(rec, dict):
+            return False
+        dur = max(0, self._now_epoch() - int(started_epoch or 0))
+        self._mark("ui_evidence", "running",
+                   "conditional stage (UI ticket, diff source): the capture ran inline in the "
+                   "implement branch through the shared UI-evidence helper — this entry is its "
+                   "terminal trace (real duration %ds); the next station is the machine gate"
+                   % dur)
+        self._finish("ui_evidence", by="ui-capture",
+                     evidence=str(rec.get("summary") or ""))
+        self._handoff("ui_evidence",
+                      "UI evidence: %s" % (str(rec.get("summary") or "")[:200]),
+                      artifacts=list(rec.get("deliverables") or []),
+                      report=str(rec.get("evidence") or ""))
+        return True
 
     # ------------------------------------------------- 出路改写（轻道专有，宿主 260930）
     def _light_neutralize_next_action(self) -> None:
@@ -660,9 +707,13 @@ class LightLaneWorkflow(DevLaneWorkflow):
                              evidence=res.evidence or res.summary)
                 self._handoff("implement", res.summary or "Implementation landed",
                               artifacts=res.deliverables, report=res.report)
-                # 宿主 260930 裁定：轻道**不产 UI 证据**（无 ui_evidence 段，也不调
-                # dev_lane._ui_evidence_step）——UI 面改动由 merge_check 3.6 的证据闸
-                # 具名挡住（reason_code=ui_evidence_missing），出路见类尾那段口径。
+                # UI 证据（**脚本条件段**，宿主 260930 第二轮裁定加回）：判据与截图全在
+                # dev_lane._ui_evidence_step 里（同一 diff 源、同一 prepare_ui_evidence、
+                # 同一软失败口径）——它只在 UI 票上写 results['ui_evidence']，本类据此做
+                # 「段有没有跑」的票面记账（非 UI 票零活动零痕迹）。
+                _ui_t0 = self._now_epoch()
+                await self._ui_evidence_step()
+                self._light_record_ui_evidence(_ui_t0)
                 await self._breathe()
                 phase = "run_integration_tests"
                 continue
@@ -971,13 +1022,13 @@ class LightLaneWorkflow(DevLaneWorkflow):
     def _light_merge_blocked_text(self, mc: Any, red: str) -> str:
         """merge_check 阻断文案（票面英文；逐条红 + 处置 + 出路）。
 
-        **UI 证据闸专段**（宿主 260930：轻道不产 UI 证据的连带后果必须具名且可行动）：
-        3.6 那条闸是**模板无关的全车道纪律**——改动面命中 UI 路径即要求
-        `.sandbar/screenshots/` 下有截图（reason_code=ui_evidence_missing）。轻道没有
-        ui_evidence 段、也不调截图 helper，所以「改到 UI 路径的轻道票」必然被它挡住。
-        这里把它单独摊开：说明这是全车道纪律、轻道不产截图，出路=**另开全车道票**
-        （template dev-lane）或**人裁定豁免**——绝不静默、绝不假绿，也绝不把
-        「补截图」这条对轻道结构性不可满足的动作当成出路。"""
+        **UI 证据闸专段**（宿主 260930 两轮裁定：先「不产证据→另开全车道票」，后把
+        ui_evidence 条件段加回，本条口径随之改写）：3.6 那条闸是**模板无关的全车道纪律**
+        （reason_code=ui_evidence_missing，判据一个字不改）。轻道**现在能产证据**（条件段），
+        所以这条红的含义是「本道能产证据，但这次没产生/没挂上」。专段把它摊开：
+        说明这是全车道纪律、说明本道有截图步、列出命中的 UI 文件、给出**可行动**出路
+        （rework(to_stage=implement) 让条件段重跑；截图已在泳道后 retry_qc 重验闸），
+        绝不静默、绝不假绿，也不再把「另开全车道票」当作唯一出路。"""
         ui_reds = [c for c in (getattr(mc, "checks", None) or [])
                    if not c.get("green") and str(c.get("reason_code") or "") == self.UI_EVIDENCE_RED]
         parts = [
@@ -994,14 +1045,19 @@ class LightLaneWorkflow(DevLaneWorkflow):
                     if str(f) not in files:
                         files.append(str(f))
             parts.append(
-                "UI-surface change detected (the UI evidence gate, "
-                "reason_code=%s): this gate is a full-lane discipline applied to every "
-                "lane and it is template-independent — a change whose diff hits UI paths "
-                "must ship screenshots under .sandbar/screenshots/. The light lane does "
-                "not produce UI evidence (no ui_evidence stage, no capture step), so this "
-                "ticket cannot satisfy it here. Files hit: %s. Remedies: open a full-lane "
-                "ticket (template dev-lane) for this change, or have a human rule an "
-                "exemption — do not expect retry_qc to clear this item on the light lane."
+                "UI-surface change detected (the UI evidence gate, reason_code=%s): this gate "
+                "is a full-lane discipline applied to every lane and template-independent — a "
+                "change whose diff hits UI paths must ship screenshots under "
+                ".sandbar/screenshots/. This lane CAN produce that evidence: the ui_evidence "
+                "conditional stage captures it through the shared helper (script stage, no "
+                "agent), so this red means the capture did not run or its screenshots did not "
+                "land for this change (for example a blocked/aborted implement round, a stale "
+                "lane, or capture failure — the stage's own receipt under "
+                "results.ui_evidence says which). Files hit: %s. Remedies: re-run the capture "
+                "step by sending rework(to_stage=implement) (the conditional stage runs again "
+                "after the implementation lands); or, once the screenshots are in the lane, "
+                "send retry_qc to re-run the gate. If neither clears it, the receipt names "
+                "the failing segment — bring it to a human."
                 % (self.UI_EVIDENCE_RED, ", ".join(files[:20]) or "(not named in the receipt)"))
         return " ".join(parts)
 

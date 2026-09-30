@@ -1,12 +1,11 @@
 """light-lane 单测（宿主令 260930 直修，无票）：段/门声明、拓扑导出面、闸判词与 blocked 契约、注册面。
 
 覆盖口径（=宿主定案 devlane-lite §4.1 的可机械判面）：
-  A. 段声明与「不含被排除段」：LIGHT STAGES 恰为四段（implement/run_integration_tests/
-     merge_check/merge）——**首段=implement**。审方案 / 集测设计 / 仲裁 / 验收走查四段
-     **不在表内**，**create_plan 与 ui_evidence 也不在表内**（宿主 260930 两道裁定：
-     轻道不写方案、不产 UI 证据——段声明/派单面/时间线三处都不许出现这两段），且
-     create_plan 同时**不在可返工目标**里；段级 kind 投影与人门标记正确；
-     **无条件段**（拓扑 optional 注记必须为空）。
+  A. 段声明与「不含被排除段」：LIGHT STAGES 恰为五段（implement/ui_evidence/
+     run_integration_tests/merge_check/merge）——**首段=implement**，**ui_evidence 是条件段**
+     （宿主 260930 第二轮裁定加回；仅 UI 票）。审方案 / 集测设计 / 仲裁 / 验收走查四段与
+     **create_plan** 不在表内（轻道不写方案），create_plan 也**不在可返工目标**里；段级
+     kind 投影与人门标记正确；拓扑 optional 注记**恰为 ui_evidence 一条**。
   B. 拓扑导出面一致性锁：template_topology light-lane 节点逐字段（label/role/kind/
      parts/optional）等于 STAGES 投影，边=纯线性链，无并行组——「STAGES 改了不改导出面，
      此处必红」；并带变异自证（锁有牙）。
@@ -125,8 +124,9 @@ def _ir_red(names, **kw):
 
 def test_stage_declaration_is_the_short_walk():
     ids = [s.id for s in light_lane.LightLaneWorkflow.STAGES]
-    assert ids == ["implement", "run_integration_tests", "merge_check", "merge"]
-    for gone in list(EXCLUDED_STAGES) + ["create_plan", "ui_evidence"]:
+    assert ids == ["implement", "ui_evidence", "run_integration_tests",
+                   "merge_check", "merge"]
+    for gone in list(EXCLUDED_STAGES) + ["create_plan"]:
         assert gone not in ids, "轻道段链不得含被排除段 %s" % gone
     # 首段=建票推导取 role 的那一段（client.py/ticket.py 的 stage0 消费面）——
     # 宿主 260930 删 create_plan 后首段就是 implement（role 仍是 developer：建票面
@@ -138,6 +138,8 @@ def test_stage_declaration_is_the_short_walk():
 def test_stage_kinds_roles_and_human_marker():
     by_id = {s.id: s for s in light_lane.LightLaneWorkflow.STAGES}
     assert by_id["implement"].kind == "agent" and by_id["implement"].role == "developer"
+    assert by_id["ui_evidence"].kind == "agent" and by_id["ui_evidence"].role == "developer"
+    assert by_id["ui_evidence"].parts == ("script",), "UI 证据=脚本段（无 agent 无 LLM）"
     assert by_id["run_integration_tests"].kind == "gate"
     assert by_id["merge_check"].kind == "gate"
     assert by_id["merge"].kind == "human"
@@ -181,21 +183,24 @@ def test_human_gate_is_only_merge():
     assert humans == ["merge"], "轻道唯一人门=merge"
 
 
-def test_ui_evidence_is_absent_everywhere_in_the_lane():
-    """宿主 260930 裁定：**任何轻道票都不跑 ui_evidence**。
+def test_ui_evidence_stage_is_back_and_ordered_before_the_gate():
+    """宿主 260930 第二轮：ui_evidence 段加回，且段序=implement→ui_evidence→机器闸。
 
-    三处负断言（声明面/拓扑面/源码面）+ 段序自洽（implement 的下一段就是机器闸）：
-    段链里没有它、拓扑里没有它（连 optional 注记都不许有）、源码里不声明也不接线。"""
+    声明面/拓扑面/源码面三处**正向**断言 + 段序正向断言（上一轮那三条「永不出现」的
+    负断言按裁定反转——见 e2e 的两条分支：非 UI 票零出现、UI 票真跑）。"""
     ids = [st.id for st in light_lane.LightLaneWorkflow.STAGES]
-    assert "ui_evidence" not in ids
+    assert "ui_evidence" in ids
     impl = next(st for st in light_lane.LightLaneWorkflow.STAGES if st.id == "implement")
-    assert impl.next == "run_integration_tests", \
-        "implement 的下一段必须是机器闸（ui_evidence 段已被裁定删除）"
+    assert impl.next == "ui_evidence", "implement 的下一段=UI 证据条件段"
+    ui = next(st for st in light_lane.LightLaneWorkflow.STAGES if st.id == "ui_evidence")
+    assert ui.next == "run_integration_tests", "UI 证据之后才进机器闸（段序）"
     topo = tt.export_template_topology("light-lane")
-    assert "ui_evidence" not in {n["id"] for n in topo["nodes"]}
+    assert "ui_evidence" in {n["id"] for n in topo["nodes"]}
+    assert {n["id"]: n.get("optional") for n in topo["nodes"]}.get("ui_evidence") \
+        == tt.OPT_UI_TICKETS, "条件段注记必须在（UI 票才跑）"
     src = _light_src()
-    assert 'Stage(id="ui_evidence"' not in src
-    assert "_ui_evidence_step()" not in src
+    assert 'Stage(id="ui_evidence"' in src
+    assert "_ui_evidence_step()" in src
 
 
 def test_ui_surface_change_is_named_and_actionable_at_merge_check():
@@ -219,11 +224,13 @@ def test_ui_surface_change_is_named_and_actionable_at_merge_check():
     assert light_lane.LightLaneWorkflow.UI_EVIDENCE_RED == "ui_evidence_missing"
     assert "ui_evidence_missing" in text
     assert "full-lane discipline" in text and "template-independent" in text
-    assert "The light lane does not produce UI evidence" in text
-    assert "open a full-lane ticket (template dev-lane)" in text
-    assert "human rule an exemption" in text
+    # 口径改写（宿主 260930 第二轮）：本道**能**产证据（条件段），红=这次没产生/没挂上
+    assert "This lane CAN produce that evidence" in text
+    assert "ui_evidence conditional stage" in text
+    assert "rework(to_stage=implement)" in text and "retry_qc" in text
+    assert "open a full-lane ticket" not in text, "旧口径（另开全车道票=唯一出路）已作废"
     assert "server/plugins/workbench/src/client/a.ts" in text
-    assert "do not expect retry_qc to clear this item" in text
+    assert "results.ui_evidence" in text
     # 英文面判定只落**轻道自产那一段**：回执逐条红里的 item/detail 是 merge_check 的既有
     # 引擎数据（中文，属「数据不译」），原样透传不算票面文案漂移。
     assert not _has_cjk(text.split("UI-surface change detected", 1)[1]), \
@@ -265,11 +272,11 @@ def test_topology_lock_against_stages():
     assert topo is not None and topo["template"] == "light-lane"
     assert topo["version"] == tt.CONTRACT_VERSION
     assert _lock_problems(topo["nodes"], light_lane.LightLaneWorkflow.STAGES) == []
-    # 宿主 260930：轻道**无条件段**——拓扑里不得有 ui_evidence 幽灵节点，也不得有
-    # 任何 optional 注记
+    # 宿主 260930 第二轮：**条件段 ui_evidence 加回**——拓扑里恰有这一条 optional 注记
+    # （与 dev-lane 同一条口径），且节点在位
     optional = {n["id"]: n["optional"] for n in topo["nodes"] if n.get("optional")}
-    assert optional == {}, "轻道拓扑不得带条件段注记（实得 %r）" % optional
-    assert "ui_evidence" not in {n["id"] for n in topo["nodes"]}
+    assert optional == {"ui_evidence": tt.OPT_UI_TICKETS}, optional
+    assert "ui_evidence" in {n["id"] for n in topo["nodes"]}
     # 轻道无并行分叉：组为空、边=纯线性链
     assert topo["groups"] == []
     ids = [s.id for s in light_lane.LightLaneWorkflow.STAGES]
@@ -313,8 +320,9 @@ def test_excluded_stages_absent_from_stage_graph():
     都不存在（控制台泳道图由拓扑推导）。"""
     topo = tt.export_template_topology("light-lane")
     node_ids = {n["id"] for n in topo["nodes"]}
-    for gone in list(EXCLUDED_STAGES) + ["create_plan", "ui_evidence"]:
+    for gone in list(EXCLUDED_STAGES) + ["create_plan"]:
         assert gone not in node_ids
+    assert "ui_evidence" in node_ids, "UI 证据条件段须在拓扑里（宿主 260930 第二轮）"
     # dev-lane 那一面不受影响（零行为变化锚）
     dev = tt.export_template_topology("dev-lane")
     assert {n["id"] for n in dev["nodes"]} >= {"review_plan", "arbitrate",
@@ -333,13 +341,16 @@ def test_reuse_source_locks():
     src = _light_src()
     # 工作空间准备 / UI 证据：走 dev-lane 的共用 helper（不自己再写一遍）
     assert "await self._prepare_workspace_step()" in src
-    assert "_ui_evidence_step()" not in src, "轻道不产 UI 证据：不得调截图 helper"
-    assert 'Stage(id="ui_evidence"' not in src, "轻道不得声明 ui_evidence 段"
-    assert "UiEvidenceArgs(" not in src and "prepare_ui_evidence" not in src, \
-        "轻道不得接线截图活动/入参（UI 面改动走全车道）"
+    assert "await self._ui_evidence_step()" in src, \
+        "UI 证据条件段必须走 dev-lane 的同一个 helper（不新写逻辑）"
+    assert 'Stage(id="ui_evidence"' in src, "轻道必须声明 ui_evidence 条件段"
+    # 判据/截图实现只许有一份（dev_lane 的 helper）——判据=**调用/入参形态**，注释里的
+    # 名词不算（口径说明要能提这些名字，见头注）
+    for forbid in ("UiEvidenceArgs(", "prepare_ui_evidence(", "prepare_ui_evidence,",
+                   "ui_changed_paths"):
+        assert forbid not in src, "轻道不得重复接线截图面（命中 %r）" % forbid
     assert "lane_workspace_gate_error(" not in src, "工作空间准备体不得重抄"
     assert "UiChangedPathsArgs(" not in src, "UI 票判定体不得重抄"
-    assert "prepare_ui_evidence," not in src, "UI 证据活动不得在轻道里重复接线"
     assert "build_workspace_prep(" not in src, "工作空间构造点不得重抄"
     # agent 段：走父类 _run_agent_step（settle/回执归一/债表全在那边）
     assert "self._run_agent_step(step_id" in src
@@ -376,9 +387,12 @@ def test_light_flow_brief_reuses_discipline_clauses():
     sid = "implement"
     assert light_lane.LIGHT_FLOW_BRIEF[sid].startswith(light_lane.LIGHT_LANE_PRELUDE)
     assert dev_lane.FLOW_BRIEF[sid] in light_lane.LIGHT_FLOW_BRIEF[sid]
-    # 轻道契约句点名「没有」的那几段（免得 agent 等一个不存在的段）
-    for gone in ("方案段", "方案复审", "集测设计", "仲裁", "验收走查", "UI 证据"):
+    # 轻道契约句点名「没有」的那几段（免得 agent 等一个不存在的段）；UI 证据**是条件段**，
+    # 现在反向点名「UI 票才有」（宿主 260930 第二轮），不再列进「没有」里
+    for gone in ("方案段", "方案复审", "集测设计", "仲裁", "验收走查"):
         assert gone in light_lane.LIGHT_LANE_PRELUDE
+    assert "ui_evidence" in light_lane.LIGHT_LANE_PRELUDE
+    assert "UI 票才有" in light_lane.LIGHT_LANE_PRELUDE
 
 
 def test_create_plan_is_gone_and_not_a_rework_target():
@@ -607,6 +621,53 @@ def test_rework_admits_light_stages_and_records_landing():
     assert wf.meta["last_rework_note"] == "repair the reds"
     assert wf.meta["status"] == "rework"
     assert wf.timeline and wf.timeline[-1]["stage"] == "implement"
+
+
+# ======================================================================
+# F2. UI 证据条件段：两态（UI 票落痕 / 非 UI 票零痕迹）
+# ======================================================================
+
+def test_ui_evidence_stage_records_only_for_ui_tickets():
+    """条件判据两态：helper 只在 UI 票上写回执 → 只有 UI 票落段痕。
+
+    判据来源=dev_lane._ui_evidence_step 的产物（本类不重写判据）；这两条断言就是
+    「非 UI 票零痕迹 / UI 票真落痕」的单元面。"""
+    # 非 UI 票：没有回执 → 零条目零记账（返回 False）
+    wf = _mk_wf(meta={"checks": {"ui_evidence": [{"item": "x", "done": False, "by": ""}]},
+                      "handoffs": [], "stage": "implement"})
+    assert wf._light_record_ui_evidence(wf._now_epoch()) is False
+    assert wf.timeline == [] and wf.meta["handoffs"] == []
+    assert wf.meta["checks"]["ui_evidence"][0]["done"] is False
+
+    # UI 票：helper 写了回执 → running（终态痕迹，带真时长）+ done + 段验收勾选 + 交接
+    wf2 = _mk_wf(meta={"checks": {"ui_evidence": [{"item": "shots", "done": False, "by": ""}]},
+                       "handoffs": [], "stage": "implement", "role": "developer"})
+    wf2.results["ui_evidence"] = {
+        "status": "ok", "summary": "[stub] 假截图两张", "report": "",
+        "deliverables": ["console-default.png"], "files_changed": [],
+        "evidence": "【UI 票判定（diff 源）】命中 1 个 UI 路径", "gen": 0}
+    assert wf2._light_record_ui_evidence(wf2._now_epoch() - 3) is True
+    states = [(e["stage"], e["state"]) for e in wf2.timeline]
+    assert states == [("ui_evidence", "running"), ("ui_evidence", "done")], states
+    assert "terminal trace" in wf2.timeline[0]["reason"]
+    assert "real duration 3s" in wf2.timeline[0]["reason"], wf2.timeline[0]["reason"]
+    assert wf2.meta["checks"]["ui_evidence"][0]["done"] is True
+    assert wf2.meta["checks"]["ui_evidence"][0]["by"] == "ui-capture"
+    assert wf2.meta["handoffs"][-1]["stage"] == "ui_evidence"
+    assert wf2.meta["handoffs"][-1]["artifacts"] == ["console-default.png"]
+
+
+def test_ui_evidence_record_is_ordered_after_implement_before_the_gate():
+    """段序：落痕两条必须排在 implement/done 之后（机器闸 `_enter` 之前由 run() 保证）。"""
+    wf = _mk_wf(meta={"checks": {"ui_evidence": [{"item": "shots", "done": False, "by": ""}]},
+                      "handoffs": [], "stage": "implement", "role": "developer"})
+    wf._mark("implement", "done", "developer-agent：实现完成")
+    wf.results["ui_evidence"] = {"status": "ok", "summary": "shots", "report": "",
+                                 "deliverables": ["a.png"], "files_changed": [],
+                                 "evidence": "", "gen": 0}
+    wf._light_record_ui_evidence(wf._now_epoch())
+    seq = [(e["stage"], e["state"]) for e in wf.timeline]
+    assert seq == [("implement", "done"), ("ui_evidence", "running"), ("ui_evidence", "done")], seq
 
 
 # ======================================================================
