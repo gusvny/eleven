@@ -711,6 +711,148 @@ def lint_integration_gate_settlement():
         ok("L11 INTEG_SUMMARY 带 `%s` 键（环境红具名通道在场）" % _L11_ENV_RED_KEY)
 
 
+
+# ---- L12 收窄旋钮继承看守（260930：真票 t260930-09 全族缺陷的机械回归锁）----
+# 病根：泳道轮的闸环境带着本轮收窄面（SANDBAR_SCENARIO_ONLY=<改动面>）；场景/夹具自己
+# 再起**执行器或闸**时子进程（或进程内调用）继承了它 → 内层被收窄成不含夹具点名的面 →
+# 断言成片红（实测 4 条：t260913-03-* 的池排除族；同一轮里的
+# t260916-25-stage-console-selfcheck-red **不是**本族——A/B 实测（普通环境 vs 全旋钮
+# 收窄环境）两跑全绿，且该场景链上（stage_console.sh / lib_stage_ui_surface.mjs）不读
+# 任何本族旋钮，它的泳道轮红是台面/端口竞争，不归本看守）。
+# 纪律：**被测面必须由夹具显式声明，绝不继承外层泳道轮的收窄/策略旋钮**；清理单点=
+# integration/lib_env.clean_narrowing_env（子进程）/ no_narrowing_env（进程内）。
+# 本规则=**凡起执行器/闸的文件必须出现该单点名**（可白名单+理由），漏走即红。
+L12_WHITELIST = {
+    # 文件 → 理由（为什么它不需要清理）
+    "integration/run_scenarios.py": "执行器自身（被调用方，不是调用点）",
+    "integration/lib_env.py": "清理单点自身（定义处）",
+    # 误判面（含令牌但不起执行器/闸）：夹具**文本**里写的合成会话/声明串，不是调用点。
+    # 判据=这些字面量只进 write_session/tool_frame 这类夹具构造器，从不进 subprocess。
+    "integration/t260921-04/sc_discipline_receipt_journey.py":
+        "合成会话夹具文本里含 run_scenarios.py 字面量（不是 spawn；该场景零子进程执行器）",
+}
+L12_EXECUTOR_TOKENS = ("run_scenarios.py", "call", "verify_lane")
+L12_HELPER_MARKERS = ("clean_narrowing_env", "no_narrowing_env", "cleanNarrowingEnv",
+                      "lib_env")
+
+
+def _l12_balanced_call(text, open_paren_idx):
+    """从 `(` 起取括号配平的调用文本（任意嵌套）；畸形（未闭合）=取到文末。"""
+    depth = 0
+    for i in range(open_paren_idx, len(text)):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren_idx:i + 1]
+    return text[open_paren_idx:]
+
+
+def _l12_reasons_for(text, suffix):
+    """单文件检测面（纯函数，无 IO）：返回「为什么算起执行器/闸」的理由表。
+
+    抽出来是为了**自证可执行**——看守的牙必须能在合成文本上真跑一遍，而不是断言
+    「字面量在不在」（260930 修正：原来的自证只查字符串，等于没牙）。"""
+    why = []
+    calls = []
+    for m in re.finditer(
+            r"subprocess\.(?:run|Popen|call|check_output|check_call)\s*\(", text):
+        calls.append(_l12_balanced_call(text, text.index("(", m.start())))
+    for m in re.finditer(r"\b(?:spawnSync|spawn|execSync|execFileSync)\s*\(", text):
+        calls.append(_l12_balanced_call(text, text.index("(", m.start())))
+    for call in calls:
+        if "run_scenarios.py" in call or "verify_lane" in call:
+            why.append("子进程起执行器/闸")
+            break
+    # 间接形态（同族必须一并看守，否则新写法绕过）：
+    #  (c) 令牌出现在**命令向量字面量**被 subprocess 使用（EXEC = [..., "integration/
+    #      run_scenarios.py"]）；(d) 令牌经**本地包装壳**起（sh(...)/run_cli(...)/
+    #      call_gate(...) 家族）。两条都要求文件确实用 subprocess/spawnSync 才有可能算。
+    uses_proc = ("subprocess." in text) or ("spawnSync" in text)
+    if uses_proc and re.search(
+            r"\[[^\]]*(?:run_scenarios\.py|verify_lane)[^\]]*\]", text, re.S):
+        why.append("命令向量字面量起执行器/闸")
+    elif uses_proc and re.search(
+            r"\b(?:sh|run|run_cli|call_gate|callLane|call_verify_lane|run_executor|"
+            r"call_lane|run_gate)\s*\([^)]*(?:verify_lane|run_scenarios\.py)", text, re.S):
+        why.append("经包装壳起执行器/闸")
+    if suffix == ".py":
+        if re.search(r"verify_lane\.run\(", text):
+            why.append("进程内直调 verify_lane.run")
+        if re.search(r"\brs\.main\(|\bmod\.main\(|\bRS\.main\(", text):
+            why.append("进程内直调执行器 main()")
+    return why
+
+
+def _l12_spawn_sites():
+    """逐文件判定「是否起执行器/闸」：**按括号配平的整条调用**取文本（子进程形态 +
+    进程内直调形态 + mjs spawnSync），不做窗口模糊匹配——夹具文件里作为**字符串**出现
+    的 verify.yaml 文本不算调用点（检测面单点=`_l12_reasons_for`，其自证在
+    `lint_narrowing_env_inheritance` 里对合成文本做实跑）。"""
+    sites = []
+    for p in sorted(INTEG.rglob("*")):
+        if not p.is_file() or p.suffix not in (".py", ".mjs", ".js", ".sh"):
+            continue
+        rel = str(p.relative_to(REPO))
+        if rel in L12_WHITELIST:
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        why = _l12_reasons_for(text, p.suffix)
+        if why:
+            sites.append({"file": rel, "why": why, "clean": any(
+                mk in text for mk in L12_HELPER_MARKERS)})
+    return sites
+
+
+def lint_narrowing_env_inheritance():
+    """L12：起执行器/闸的文件必须走收窄旋钮清理单点（lib_env），否则内层面被继承收窄。"""
+    sites = _l12_spawn_sites()
+    naked = [s for s in sites if not s["clean"]]
+    # 自证（260930 修正：**真跑检测面**，不是查字面量）——合成犯例必被抓、带清理单点的
+    # 合成例必放行、无关 spawn 不得误报；三条都不碰真树。
+    fake_bad = ("import subprocess\n"
+                "subprocess.run([sys.executable, 'integration/run_scenarios.py'])\n")
+    fake_ok = ("import subprocess\n"
+               "from lib_env import clean_narrowing_env\n"
+               "subprocess.run([sys.executable, 'integration/run_scenarios.py'],"
+               " env=clean_narrowing_env())\n")
+    fake_inproc = ("import run_scenarios as rs\n"
+                   "rc = rs.main()\n")
+    fake_noise = ("import subprocess\n"
+                  "subprocess.run(['ls', '-la'])\n")
+    bad_why = _l12_reasons_for(fake_bad, ".py")
+    ok_why = _l12_reasons_for(fake_ok, ".py")
+    ip_why = _l12_reasons_for(fake_inproc, ".py")
+    noise_why = _l12_reasons_for(fake_noise, ".py")
+    proof = []
+    if not bad_why:
+        proof.append("合成犯例（子进程起执行器、无清理单点）没被抓")
+    if not ok_why:
+        proof.append("合成干净例（带 clean_narrowing_env）没被判为调用点")
+    if "clean_narrowing_env" not in fake_ok:
+        proof.append("合成例的清理标记判据不成立")
+    if not ip_why:
+        proof.append("合成犯例（进程内 rs.main()）没被抓")
+    if noise_why:
+        proof.append("无关 spawn 被误报=%r" % noise_why)
+    if proof:
+        err("L12 自证失败（看守没牙）：%s" % "；".join(proof))
+        return
+    if naked:
+        err("L12 收窄旋钮继承看守：%d 处起执行器/闸的调用点没走清理单点（继承外层泳道轮的"
+            " SANDBAR_SCENARIO_ONLY 等收窄旋钮会把内层被测面收窄——t260930-09 全族缺陷）"
+            "：%s | 修法：env=clean_narrowing_env(...)（子进程）或 with no_narrowing_env():"
+            "（进程内）；确有理由的登记到 lint_tests.L12_WHITELIST 并写理由"
+            % (len(naked), "；".join("%s（%s）" % (s["file"], "/".join(s["why"]))
+                                     for s in naked[:8])))
+        return
+    ok("L12 收窄旋钮继承看守：%d 处起执行器/闸的调用点全部走清理单点（lib_env）" % len(sites))
+
 def main():
     lint_syntax()
     lint_collect()
@@ -722,6 +864,7 @@ def main():
     lint_ticket_start_identity()
     lint_console_no_open()
     lint_integration_gate_settlement()
+    lint_narrowing_env_inheritance()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

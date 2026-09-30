@@ -13,6 +13,9 @@ import json
 import shutil
 import subprocess
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -77,7 +80,8 @@ def call_verify_lane(args):
     """黑盒走合并闸同一入口：server/admin.py call verify_lane。返回 (rc, payload dict)。"""
     p = subprocess.run([sys.executable, str(ADMIN), "call", "verify_lane",
                         json.dumps(args)],
-                       cwd=str(REPO), capture_output=True, text=True, timeout=120)
+                       cwd=str(REPO), capture_output=True, text=True, timeout=120,
+                       env=clean_narrowing_env())
     try:
         payload = json.loads(p.stdout)
     except json.JSONDecodeError:

@@ -19,6 +19,9 @@ import importlib.util
 import json
 import subprocess
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -38,8 +41,11 @@ def section(t):
     print("\n== " + t)
 
 
-def sh(*cmd, cwd=None):
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd) if cwd else None)
+def sh(*cmd, cwd=None, env=None):
+    """子进程壳。env 缺省=None → 继承本进程 env；**调执行器/闸的调用点必须显式传
+    clean_narrowing_env()**（260930：继承的收窄旋钮会把内层面收窄）。"""
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          cwd=str(cwd) if cwd else None, env=env)
 
 
 VERIFY_YAML = """schema: v1
@@ -82,7 +88,9 @@ def verify_lane(repo, base, write_set=None):
     payload = {"lane": "code", "path": str(repo), "base": base, "require_base": True}
     if write_set is not None:
         payload["write_set"] = write_set
-    r = sh(sys.executable, str(ADMIN), "call", "verify_lane", json.dumps(payload), cwd=repo)
+    # 260930：闸调用点清单点 helper（继承的收窄旋钮会把内层闸收窄）
+    r = sh(sys.executable, str(ADMIN), "call", "verify_lane", json.dumps(payload), cwd=repo,
+           env=clean_narrowing_env())
     try:
         out = json.loads(r.stdout)          # 整段 JSON（merge_check 同款，非末行）
     except (ValueError, IndexError):

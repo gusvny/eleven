@@ -33,6 +33,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env  # noqa: E402  (260930 收窄旋钮清理单点)
+
 REPO = Path(__file__).resolve().parents[2]
 ADMIN = REPO / "server" / "admin.py"
 RUNNER = REPO / "integration" / "run_scenarios.py"
@@ -130,9 +133,17 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
 # ---------------------------------------------------------------- 调用面
 
 def _env(extra=None):
-    env = dict(os.environ)
-    env.pop("SANDBAR_SCENARIO_EXCLUDE_POOLS", None)   # 夹具不继承外层开关，子用例级显式注入
+    # 260930（真票 t260930-09 实况）：**全部收窄/策略旋钮单点清理**，不再只清一个。
+    # 病根：泳道轮的闸环境带着本轮收窄面（SANDBAR_SCENARIO_ONLY=<改动面>），本夹具再起
+    # 内层执行器/闸时子进程继承了它 → 内层被收窄成不含夹具点名的面 → 断言成片红
+    # （t260913-03-* ×4 + t260916-25 五条的同时红）。清理单点=integration/lib_env
+    # .clean_narrowing_env（守卫=lint L12）；本夹具显式声明的那一档在下面 extra 里给。
+    env = clean_narrowing_env(extra)
     env["SANDBAR_GATE_BASELINE"] = "0"                # 零基线开销 + 判定确定性（不拉 worktree）
+    # 嵌套调用豁免（260930 同批）：本夹具是「泳道轮内再起一层执行器/闸」的黑盒调用，
+    # 外层泳道轮正持着泳道级单飞锁——不显式打开并发豁免，内层必抢锁失败 exit 2
+    # （环境红、零场景开跑）。t260924-09/t260925-12 两个先例同款、同一理由。
+    env["SANDBAR_INTEG_ALLOW_CONCURRENT"] = "1"
     env.update(extra or {})
     return env
 

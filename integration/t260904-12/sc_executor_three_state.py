@@ -24,6 +24,9 @@ import importlib.util
 import io
 import re
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -61,8 +64,9 @@ def drive(entries):
             table.append((name, "假场景（t260904-12 注入）", "python3 %s" % p))
         rs.SCENARIOS = table
         buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc = rs.main()
+        with no_narrowing_env():          # 260930：剥继承旋钮再跑内层执行器
+            with contextlib.redirect_stdout(buf):
+                rc = rs.main()
         return rc, buf.getvalue()
 
 

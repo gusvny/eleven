@@ -28,6 +28,7 @@
  * Reference: docs/design/sandbar-project-onboarding-contract-v1.md ②a/②d；verify_lane.py _code 装配。
  */
 
+import { cleanNarrowingEnv } from '../../lib_env.mjs'  // 260930 收窄旋钮清理单点
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -45,7 +46,7 @@ const REPO = process.cwd()
 function callCode(repo, extra) {
   const p = spawnSync('python3', ['server/admin.py', 'call', 'verify_lane',
     JSON.stringify({ lane: 'code', path: repo, ...extra })],
-    { cwd: REPO, encoding: 'utf8', timeout: 120000 })
+    { cwd: REPO, encoding: 'utf8', timeout: 120000, env: cleanNarrowingEnv() })
   if (p.error || p.status !== 0) return { ok: false, stderr: (p.stderr || String(p.error)).slice(-300) }
   try { return JSON.parse(p.stdout) } catch { return { ok: false, stderr: 'unparseable: ' + p.stdout.slice(-200) } }
 }

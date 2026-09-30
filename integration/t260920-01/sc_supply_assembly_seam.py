@@ -40,6 +40,8 @@ import os
 import shutil
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -90,7 +92,7 @@ def judge_receipt(shared, dev_lane, err_text):
 # ---------- 闸驱动（admin.py 真入口，t260904-12 同款） ----------
 
 def call_gate(fixture_repo, extra_env=None):
-    env = dict(os.environ, **(extra_env or {}))
+    env = clean_narrowing_env(extra_env or {})   # 260930：清继承旋钮（单点 helper）
     p = subprocess.run(
         [sys.executable, "server/admin.py", "call", "verify_lane",
          json.dumps({"lane": "integ", "path": str(fixture_repo)})],

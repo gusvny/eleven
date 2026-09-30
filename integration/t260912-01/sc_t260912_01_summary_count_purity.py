@@ -29,6 +29,9 @@ import io
 import json
 import re
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 from importlib import util as _ilu
 from pathlib import Path
 
@@ -71,7 +74,10 @@ def run_main(rs, scenarios):
     code = None
     with contextlib.redirect_stdout(buf):
         try:
-            code = rs.main()
+            # 260930：进程内直调执行器前先剥继承来的收窄旋钮（否则被外层泳道轮的
+            # 面计划收窄 → 本回归测的就不是本仓注册表了）
+            with no_narrowing_env():
+                code = rs.main()
         except SystemExit as ex:   # 兼容防御（main 不应 SystemExit）
             code = ex.code
     return code, buf.getvalue()

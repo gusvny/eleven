@@ -10,6 +10,9 @@ import json
 import shutil
 import subprocess
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -24,7 +27,8 @@ def run_verify(project_root, extra=None, skip_slow=False):
     if extra:
         args.update(extra)
     p = subprocess.run([PY, "server/admin.py", "call", "verify_lane", json.dumps(args)],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, timeout=120,
+                       env=clean_narrowing_env())   # 260930：闸调用点清单点 helper
     if p.returncode != 0:
         raise AssertionError("admin call verify_lane 非零退出: %s" % (p.stderr or p.stdout)[-300:])
     payload = json.loads(p.stdout)

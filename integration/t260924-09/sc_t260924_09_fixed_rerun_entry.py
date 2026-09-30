@@ -46,9 +46,9 @@ def run_cli(args, timeout=180):
     # 正是该旋钮的显式豁免语义（SANDBAR_INTEG_ALLOW_CONCURRENT=1），旋钮打开
     # 时执行器自身留痕（INTEG_RUN_LOCK 已显式关闭行），串台责任由调用方承担
     # ——本场景零起台零共享台面，无串台对象。
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("SANDBAR_STAGE_BATCH", "SANDBAR_SCENARIO_ONLY")}
-    env["SANDBAR_INTEG_ALLOW_CONCURRENT"] = "1"
+    # 260930：收窄/策略旋钮单点清理（原先只剥两个键，KNOWN_RED/GATE_*/POOL_CONC 等
+    # 仍会继承）；本夹具显式声明的那两档在下面给。
+    env = clean_narrowing_env({"SANDBAR_INTEG_ALLOW_CONCURRENT": "1"})
     p = subprocess.run(EXEC + args, cwd=str(REPO), capture_output=True,
                        text=True, timeout=timeout, env=env)
     return p.returncode, p.stdout + p.stderr, time.time() - t0

@@ -25,6 +25,9 @@ subprocess.run」改锚「条目面 spawn 调用点」（argv=[…, "/bin/sh", "
 import io
 import json
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import contextlib
 from pathlib import Path
 from importlib import util as _ilu
@@ -54,11 +57,12 @@ def load_rs():
 def run_main(rs):
     buf = io.StringIO()
     code = None
-    with contextlib.redirect_stdout(buf):
-        try:
-            code = rs.main()
-        except SystemExit as ex:   # 兼容防御（main 不应 SystemExit）
-            code = ex.code
+    with no_narrowing_env():              # 260930：剥继承旋钮再跑内层执行器
+        with contextlib.redirect_stdout(buf):
+            try:
+                code = rs.main()
+            except SystemExit as ex:   # 兼容防御（main 不应 SystemExit）
+                code = ex.code
     return code, buf.getvalue()
 
 

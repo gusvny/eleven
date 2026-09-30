@@ -21,6 +21,8 @@ import io
 import json
 import os
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -93,9 +95,11 @@ class Harness:
             buf = io.StringIO()
             try:
                 os.chdir(td)
-                with _env_stub(env):
-                    with contextlib.redirect_stdout(buf):
-                        rc = rs.main(only_scenarios=only_kw)
+                # 260930 次序：先剥继承旋钮，再上夹具显式档
+                with no_narrowing_env():
+                    with _env_stub(env):
+                        with contextlib.redirect_stdout(buf):
+                            rc = rs.main(only_scenarios=only_kw)
             finally:
                 (rs.SCENARIOS, rs._sweep_residue_stages, rs._docker_hygiene) = saved
                 if saved_pre:

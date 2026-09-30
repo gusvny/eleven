@@ -28,6 +28,7 @@
  * contract doc docs/design/sandbar-project-onboarding-contract-v1.md ②.
  */
 
+import { cleanNarrowingEnv } from '../../lib_env.mjs'  // 260930 收窄旋钮清理单点
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -51,8 +52,10 @@ function fx(repo, ...args) {
 
 /** The real execution API a project drives: admin.py call verify_lane. */
 function callLane(args) {
+  // 260930：闸调用点必须用清理过的 env（继承外层泳道轮的 SANDBAR_SCENARIO_ONLY 等收窄
+  // 旋钮会把内层被测面收窄——t260930-09 全族缺陷）；守卫=integration/lint_tests.py L12。
   const p = spawnSync('python3', ['server/admin.py', 'call', 'verify_lane', JSON.stringify(args)],
-    { cwd: REPO, encoding: 'utf8', timeout: 120000 })
+    { cwd: REPO, encoding: 'utf8', timeout: 120000, env: cleanNarrowingEnv() })
   if (p.error || p.status !== 0) {
     return { ok: false, stderr: (p.stderr || String(p.error)).slice(-300) }
   }

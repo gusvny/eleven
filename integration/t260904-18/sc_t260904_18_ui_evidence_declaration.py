@@ -28,6 +28,9 @@ temporalio 缺失=ENV_FAIL 点名（merge_check 行为子用例），verify_lane
 import json
 import shutil
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -63,7 +66,8 @@ check("R5 迁移等价 rod：legacy 五路径全部落入仓根 verify.yaml（�
 
 
 def run_code_lane(tmpdir):
-    return verify_lane.run({"lane": "code", "path": str(tmpdir)})
+    with no_narrowing_env():              # 260930：进程内调闸剥继承旋钮
+        return verify_lane.run({"lane": "code", "path": str(tmpdir)})
 
 
 # ---------- verify_lane 白名单/形态子用例（stdlib 处处可跑；真解析器） ----------

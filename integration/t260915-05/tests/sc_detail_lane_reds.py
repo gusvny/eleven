@@ -132,8 +132,8 @@ def _between(src, start, end):
 
 
 def _run_py(py, code, env_extra=None):
-    e = dict(os.environ)
-    e.update(env_extra or {})
+    # 260930：这些片段跑的是执行器/闸链（L12 判据）——剥掉继承来的收窄/策略旋钮再注入夹具档
+    e = clean_narrowing_env(env_extra or {})
     p = subprocess.run([py, "-c", code], cwd=REPO, env=e,
                        capture_output=True, text=True, timeout=180)
     return p.returncode, p.stdout, p.stderr

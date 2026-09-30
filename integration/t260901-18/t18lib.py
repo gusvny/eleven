@@ -9,6 +9,9 @@ import logging
 import shutil
 import subprocess
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 import types
 from pathlib import Path
@@ -77,9 +80,11 @@ def verify_lane_code(repo: Path, base: str, write_set):
     """真跑 verify_lane code 道（lane=code 白名单判定的真实现），返回 run() 结果 dict。"""
     sys.path.insert(0, str(lane_root() / "server" / "tools"))
     import verify_lane
-    return verify_lane.run({"lane": "code", "path": str(repo), "base": base,
-                            "require_base": True, "write_set": list(write_set),
-                            "skip_slow": True})
+    # 260930：进程内调闸同样吃继承旋钮——剥完再跑
+    with no_narrowing_env():
+        return verify_lane.run({"lane": "code", "path": str(repo), "base": base,
+                                "require_base": True, "write_set": list(write_set),
+                                "skip_slow": True})
 
 
 def whitelist_items(result):

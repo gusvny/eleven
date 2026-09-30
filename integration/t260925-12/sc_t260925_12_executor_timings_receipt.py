@@ -39,8 +39,9 @@ cases = []
 def run_cli(args, timeout=180):
     # 本场景随闸运行时，闸自身持有泳道级集成跑锁——定点子进程必须显式走并发
     # 豁免旋钮（与 t260924-09-fixed-rerun 同一先例），否则闸内恒 ENV_FAIL 假红。
-    env = dict(os.environ)
-    env["SANDBAR_INTEG_ALLOW_CONCURRENT"] = "1"
+    # 260930：继承来的收窄/策略旋钮必须在起执行器前清掉（否则被外层泳道轮的面计划
+    # 收窄 → 定点子进程跑成空面）；本夹具显式要的那一档在 extra 里给。
+    env = clean_narrowing_env({"SANDBAR_INTEG_ALLOW_CONCURRENT": "1"})
     try:
         p = subprocess.run(EXEC + args, cwd=str(REPO), capture_output=True,
                            text=True, timeout=timeout, env=env)

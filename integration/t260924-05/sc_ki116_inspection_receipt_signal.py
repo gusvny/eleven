@@ -23,6 +23,8 @@ import json
 import os
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -70,8 +72,8 @@ def make_fixture(default_names):
 
 def call_gate(repo, payload, extra_env=None, timeout=240):
     """真缝调闸：admin.py call verify_lane lane=integ（生产 spawn 同款入口）。"""
-    env = dict(os.environ)
-    env.update(extra_env or {})
+    # 260930：闸调用点清继承旋钮（同上，单点 helper）
+    env = clean_narrowing_env(extra_env or {})
     try:
         p = subprocess.run(
             [sys.executable, "server/admin.py", "call", "verify_lane",

@@ -39,6 +39,8 @@ import re
 import shutil
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 import time
 from pathlib import Path
@@ -229,7 +231,8 @@ _TREE = {"head": "", "other": ""}
 
 def _run_runner(wt: Path, ledger_dir: Path, extra_env=None, cwd=None):
     """真入口跑一轮（子进程），返回 (rc, stdout, stderr)。"""
-    env = dict(os.environ)
+    # 260930：继承来的收窄/策略旋钮单点清理（本夹具自己声明的那几档在下面显式给）
+    env = clean_narrowing_env()
     env["SANDBAR_SCENARIO_LEDGER_DIR"] = str(ledger_dir)
     env["SANDBAR_POOL_CONC"] = "4"
     env["SANDBAR_CONC_POOLS"] = "main:1"
@@ -239,8 +242,6 @@ def _run_runner(wt: Path, ledger_dir: Path, extra_env=None, cwd=None):
     # 单飞锁档落临时区（本场景逐轮串行，不需要真锁；锁档路径**独立于账目录**——
     # 「主账不可读」子用例会把账目录整棵 chmod 000，锁档不得跟着一起不可写）。
     env["SANDBAR_INTEG_RUN_LOCK_PATH"] = str(_TMP / "run.lock")
-    for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS"):
-        env.pop(k, None)
     env.update({k: str(v) for k, v in (extra_env or {}).items()})
     try:
         p = subprocess.run(["python3", "integration/run_scenarios.py"], cwd=str(cwd or wt),

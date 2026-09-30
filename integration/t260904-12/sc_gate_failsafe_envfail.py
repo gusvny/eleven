@@ -16,6 +16,9 @@ intent：t260904-07 实锤「场景干净 SKIP→exit 0→闸计过→收口放�
 import json
 import subprocess
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -38,7 +41,8 @@ def call_gate(fixture_repo):
     p = subprocess.run(
         [sys.executable, "server/admin.py", "call", "verify_lane",
          json.dumps({"lane": "integ", "path": str(fixture_repo)})],
-        cwd=str(REPO), capture_output=True, text=True, timeout=120)
+        cwd=str(REPO), capture_output=True, text=True, timeout=120,
+        env=clean_narrowing_env())
     if p.returncode != 0:
         return {"ok": False, "stderr": (p.stderr or "")[-300:]}
     try:

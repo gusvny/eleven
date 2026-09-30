@@ -33,6 +33,8 @@ import os
 import re
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 import tempfile
 from pathlib import Path
 
@@ -143,9 +145,11 @@ def drive(entries, exclude_env, mod=None, extra_env=None):
         buf = io.StringIO()
         try:
             os.chdir(td)
-            with env_stub(exclude_env, extra_env):
-                with contextlib.redirect_stdout(buf):
-                    rc = mod.main()
+            # 260930 次序：**先剥继承旋钮，再上夹具显式档**（反过来会把夹具自己的档剥掉）
+            with no_narrowing_env():
+                with env_stub(exclude_env, extra_env):
+                    with contextlib.redirect_stdout(buf):
+                        rc = mod.main()
         finally:
             mod.SCENARIOS = saved_scen
             mod._sweep_residue_stages = saved_sweep
@@ -255,7 +259,8 @@ for _path, _label in ((REPO / "integration/t260904-12/sc_executor_three_state.py
 def run_assets(arg):
     return subprocess.run([sys.executable, str(REPO / "integration" / "run_scenarios.py"),
                            "--print-pool-assets", arg],
-                          cwd=str(REPO), capture_output=True, text=True, timeout=300)
+                          cwd=str(REPO), capture_output=True, text=True, timeout=300,
+                          env=clean_narrowing_env())
 
 
 _p = run_assets("engine,exclusive")

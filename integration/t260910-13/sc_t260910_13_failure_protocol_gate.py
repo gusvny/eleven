@@ -37,6 +37,8 @@ import json
 import os
 import subprocess
 import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -60,8 +62,9 @@ def ok(cond, label):
 
 def call_gate(repo, extra_env=None, timeout=180):
     """真缝调闸：admin.py call verify_lane lane=integ（t260904-12 甲段同款入口）。"""
-    env = dict(os.environ)
-    env.update(extra_env or {})
+    # 260930：闸调用点必须清继承来的收窄/策略旋钮（外层泳道轮的面计划收窄会把内层闸
+    # 收窄）；夹具显式档经 extra 传入。
+    env = clean_narrowing_env(extra_env or {})
     try:
         p = subprocess.run(
             [sys.executable, "server/admin.py", "call", "verify_lane",

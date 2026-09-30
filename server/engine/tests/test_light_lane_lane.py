@@ -242,7 +242,13 @@ def test_ui_surface_change_is_named_and_actionable_at_merge_check():
                           conflict=False, conflict_files=[])
     text2 = wf._light_merge_blocked_text(mc2, "工作区干净（无未提交改动）: 红")
     assert "UI-surface change detected" not in text2
-    assert "Merge check is red" in text2 and "retry_qc" in text2
+    assert "the merge check is red" in text2 and "retry_qc" in text2
+    # 票面纪律（宿主 260930）：merge 阻断面同样是**一屏摘要**（行数/字数/无机器清单片段）
+    for _t in (text, text2):
+        assert len(_t.splitlines()) <= light_lane.LightLaneWorkflow.FACE_MAX_LINES, _t
+        assert len(_t) <= light_lane.LightLaneWorkflow.FACE_MAX_CHARS, len(_t)
+        assert _bulk_name_fragments(_t) == [], _bulk_name_fragments(_t)
+        assert "Outcome:" in _t and "Details: blocked_detail" in _t
 
 
 # ======================================================================
@@ -480,34 +486,102 @@ def test_red_names_are_the_complete_set_and_split():
 
 
 # ======================================================================
-# E. blocked 契约：完整违规集 + 跑面 + 出路
+# E. blocked 契约（宿主 260930 改口径后）：**票面=给人看的摘要**，机器清单进明细
 # ======================================================================
+# 宿主 260930 实报：阻断面是一大坨机器清单（收窄面 200+ 名、全量违例表、逐名归因表），
+# 人找不到「我该做什么」。新口径的机械判据（一个字不放宽）：
+#   ① blocked_reason 行数 ≤ FACE_MAX_LINES、字数 ≤ FACE_MAX_CHARS；
+#   ② 「逗号分隔 ≥6 项且总长 >400」的机器清单片段**不得**出现在 blocked_reason，
+#      但**必须**出现在 blocked_detail（全量仍在，消费方/审计面不丢）；
+#   ③ 本票的账最多 5 名 + 「(+N more)」；④ 存量红/环境红只给计数（不列名）。
 
-def test_blocked_text_names_every_violation_never_a_sample():
+def _bulk_name_fragments(text):
+    """机械判据：逗号分隔 ≥6 项、且该片段总长 >400 的片段（= 机器清单内联）。"""
+    out = []
+    for m in re.finditer(r"[^\s,;]+(?:\s*,\s*[^\s,;]+){5,}", str(text or "")):
+        frag = m.group(0)
+        if len(frag) > 400:
+            out.append(frag)
+    return out
+
+
+def test_bulk_fragment_detector_has_teeth():
+    """变异自证：检测器对「旧形态」（全量名单内联）必须报出来，否则锁是摆设。"""
+    old_style = "Complete violation set (15): %s" % ", ".join(T260930_09_VIOLATIONS)
+    assert _bulk_name_fragments(old_style), "检测器漏报旧形态=本锁无牙"
+    assert not _bulk_name_fragments("Counts: 115 ran / 101 passed; account: a, b, c.")
+
+
+def test_blocked_face_is_a_summary_and_detail_carries_every_violation():
     wf = _mk_wf()
     names = ["sc_alpha", "sc_beta", "sc_gamma"]
-    ir = _ir_red(names, excluded_pools=["engine"], excluded_count=7,
+    ir = _ir_red(names, blockers=list(names), excluded_pools=["engine"], excluded_count=7,
                  only_names=["sc_alpha"])
     text = wf._light_gate_blocked_text(ir, ["sc_alpha"], "gate round 2 of this attempt")
+    # ① 行数/字数上限（票面=一屏摘要）
+    assert len(text.splitlines()) <= light_lane.LightLaneWorkflow.FACE_MAX_LINES, text
+    assert len(text) <= light_lane.LightLaneWorkflow.FACE_MAX_CHARS, len(text)
+    # ② 机器清单片段不得内联
+    assert _bulk_name_fragments(text) == [], _bulk_name_fragments(text)
+    # ③ 本票的账（可行动）：≤5 名时逐个在票面
     for n in names:
-        assert n in text, "blocked 文案漏了违规项 %s（样本化=本票要治的病）" % n
-    assert "Complete violation set (3)" in text
+        assert n in text, "可行动面漏了 %s" % n
+    assert "Fix (this ticket's account): sc_alpha, sc_beta, sc_gamma" in text
     assert "3 ran / 0 passed / 3 failed / 0 env-red" in text
-    assert "results.run_integration_tests" in text            # 闸回执指针
-    assert "out/integration-report-*.json" in text
+    # ④ 计数 + 指针 + 出路（票面只给这些）
+    for ptr in ("results.run_integration_tests", "out/integration-report-*.json",
+                "blocked_detail"):
+        assert ptr in text, ptr
     assert "retry_qc" in text and "rework(to_stage=implement)" in text
     assert "dev-lane" in text                                  # 别的道=开全道票
     assert "no arbitration" in text and "no automatic re-run" in text
-    assert "narrowed to sc_alpha" in text                       # 跑面如实（本轮收窄）
-    assert "engine" in text and "7 entries" in text             # 跳过池如实
+    assert "Why red:" in text and "a human decides" in text
+    assert "narrowed to 1 entry" in text                        # 跑面只给计数
+    assert "engine" in text and "7 entries" in text             # 跳过池只给计数
+    # 全量违规集与逐名归因**仍在明细里**（票面瘦身 ≠ 数据丢失）
+    d = wf._light_gate_blocked_detail(ir, ["sc_alpha"], "light_gate_red", "r1")
+    assert d["violations"] == names and d["violations_complete"] is True
+    _attr = d["attribution"]
+    assert _attr["main_red_too"] == [] and _attr["lane_only"] == []
+    assert sorted(_attr["unknown"]) == sorted(names), "无基线答案=unknown（保守口径）"
+
+
+def test_blocked_face_caps_the_account_list_at_five_names():
+    """本票的账 >5 名 → 票面只列 5 个 + (+N more)；全量在明细里（机械判据）。"""
+    wf = _mk_wf()
+    names = ["sc_n%d" % i for i in range(9)]
+    ir = _ir_red(names, blockers=list(names))
+    text = wf._light_gate_blocked_text(ir, [], "gate round 3")
+    assert "(+4 more)" in text, text
+    assert "sc_n4" in text and "sc_n5" not in text, "第 6 名起只能以计数形式出现"
+    assert len(text.splitlines()) <= light_lane.LightLaneWorkflow.FACE_MAX_LINES
+    assert _bulk_name_fragments(text) == []
+    d = wf._light_gate_blocked_detail(ir, [], "light_gate_red", "gate round 3")
+    assert d["violations"] == names      # 全量在明细里（票面规则不吞数据）
+    dump = json.dumps(d, ensure_ascii=False)
+    for n in names:
+        assert n in dump, "明细面丢了红名 %s" % n
+
+
+def test_blocked_face_says_none_of_the_reds_are_the_ticket_account():
+    """blockers 空（红全是存量/他因）→ 明写「none of the reds are this ticket's account」。"""
+    wf = _mk_wf()
+    ir = _ir_red(["sc_x", "sc_y"], blockers=[])
+    ir.live_baseline_red = ["sc_x", "sc_y"]
+    text = wf._light_gate_blocked_text(ir, [], "gate round 1")
+    assert "none of the reds are this ticket's account" in text
+    assert "Recorded, not blocking: 2 pre-existing on main" in text
+    # 存量红**不列名**（只给计数）
+    assert "sc_x" not in text and "sc_y" not in text
 
 
 def test_blocked_text_reports_full_round_and_absent_reuse_face():
     wf = _mk_wf()
     text = wf._light_gate_blocked_text(_ir_red(["sc_x"]), [], "gate round 1")
     assert "full registry (not narrowed)" in text
-    # 老回执无复用块：如实记 absent，不冒充「零复用」（保守方向）
-    assert "reuse" not in text.lower() or "expected" not in text
+    # 老回执无复用块：如实记「没搬到」，不冒充「零复用」（保守方向）
+    assert "reuse/known-red: n/a (old receipt)" in text
+    assert "expected" not in text
 
 
 def test_blocked_detail_carries_complete_violation_set():
@@ -526,8 +600,31 @@ def test_blocked_detail_carries_complete_violation_set():
     assert d["receipt"] == "results.run_integration_tests"
     assert len(d["remedies"]) == 3
     assert d["check_id"] == "run_integration_tests" and d["red"] is True
+    # 显式指针键（宿主 260930：一键找到全量机器清单）
+    assert d["report_path"] == "out/integration-report-*.json"
+    assert d["receipt_ref"] == "results.run_integration_tests"
+    assert d["detail_ref"] == "blocked_detail"
     # 可 JSON 序列化（票面/控制台机读契约）
     json.dumps(d, ensure_ascii=False)
+
+
+def test_blocked_detail_evidence_is_counts_and_pointer_not_the_full_face():
+    """宿主 260930：`evidence` 字段里的收窄面/全表改成计数 + 指针（现在是全表）。"""
+    wf = _mk_wf()
+    names = ["sc_n%d" % i for i in range(12)]
+    ir = _ir_red(names, blockers=list(names), only_names=list(names),
+                 excluded_pools=["engine"], excluded_count=40)
+    d = wf._light_gate_blocked_detail(ir, list(names), "light_gate_red",
+                                      "gate round 2 of this attempt")
+    ev = d["evidence"]
+    assert len(ev) <= 600
+    assert "counts: 12 ran / 0 passed / 12 failed / 0 env-red" in ev
+    assert "narrowed entr" in ev and "pools skipped" in ev
+    assert "out/integration-report-*.json" in ev
+    assert "sc_n0" not in ev and "sc_n11" not in ev, "逐条名单不许内联进 evidence"
+    assert _bulk_name_fragments(ev) == []
+    # 全表仍在同块的结构化面上
+    assert d["violations"] == names and d["round"]["narrowed"] == names
 
 
 def test_blocked_detail_reuse_face_carried_when_present():
@@ -540,8 +637,11 @@ def test_blocked_detail_reuse_face_carried_when_present():
     assert d["round"]["reuse"]["expected"] == 8
     assert d["round"]["known_red"]["names"] == ["sc_k1", "sc_k2"]
     text = wf._light_gate_blocked_text(ir, [], "round 1")
-    assert "reused=5 of expected=8" in text and "sc_r1" in text
-    assert "sc_k1" in text
+    # 票面只给计数：复用/在册红的**名字**不许内联
+    assert "reused=5 of expected=8" in text
+    assert "known-red excluded: 2" in text
+    assert "sc_r1" not in text and "sc_k1" not in text, "复用/在册红名单进了票面"
+    assert _bulk_name_fragments(text) == []
 
 
 def test_run_face_absent_marks_are_honest():
@@ -563,8 +663,8 @@ def test_run_face_absent_marks_are_honest():
     assert face2["known_red"]["names"] == ["kd_a", "kd_b"]
 
 
-def test_face_note_names_what_was_not_run():
-    """票面注记（轻道自产那半）：少跑面必须可见——定点面/跳过池/台账复用三块。"""
+def test_face_note_counts_what_was_not_run_and_points_at_the_receipt():
+    """票面注记（轻道自产那半）：少跑面只给**计数 + 指针**——名单不进票面。"""
     wf = _mk_wf()
     assert wf._light_face_note(_ir(), []) == "", "全量且无少跑面=不加注记"
     ir = _ir_red(["sc_a"], only_names=["sc_a", "sc_b"], excluded_pools=["engine"],
@@ -572,10 +672,12 @@ def test_face_note_names_what_was_not_run():
     ir.reuse = {"reused": 2, "expected": 5}
     ir.known_red = {"skipped": 1, "names": ["sc_k"]}
     note = wf._light_face_note(ir, ["sc_a", "sc_b"])
-    assert "narrowed to 2 entries (sc_a, sc_b)" in note
-    assert "declared pools skipped: engine (4 entries)" in note
+    assert "narrowed to 2 entries (list in the receipt)" in note
+    assert "pools skipped: engine (4 entries)" in note
     assert "ledger reuse: reused=2 of expected=5 (not executed)" in note
     assert "known-red entries excluded: 1" in note
+    assert "sc_a" not in note and "sc_b" not in note and "sc_k" not in note, \
+        "少跑面的名单进了票面注记（宿主 260930：票面只给计数）"
     assert not _has_cjk(note)
 
 
@@ -744,28 +846,36 @@ def test_t260930_09_env_red_unnamable_is_named_explicitly():
     assert detail["env_red_count"] == 2
     assert "present but empty" in detail["env_red_note"]
     assert detail["env_red_note"], "不可具名的原因必须落在结构化面上（不许空串）"
+    assert "NOT NAMEABLE" in detail["env_red_face_note"]      # 可读句子留明细面
     text = wf._light_gate_blocked_text(ir, [], "gate round 1")
-    assert "Environment reds: 2 counted" in text
-    assert "NOT NAMEABLE" in text and "no name, no exemption" in text
-    assert "the gate's named channel is present but empty" in text
-    # 有名字的一路（执行器侧）→ named，且两路并列带出处
+    assert "Environment red(s): 2 NOT NAMEABLE" in text
+    assert "no name, no exemption" in text
+    # 票面=短句；全文（「the gate's named channel … present but empty」）在明细 env_red_note 里
+    assert "gate channel present but empty" in text
+    assert "the gate's named channel" in detail["env_red_note"]
+    # 不可具名的环境红是**判红原因**（不是「已记录、不阻断」）
+    assert "not nameable (no name, no exemption)" in text
+    assert "Recorded, not blocking" not in text
+    # 有名字的一路（执行器侧）→ named，且票面只给计数（名字在明细的 env_red_runner 里）
     ir2 = _t260930_09_ir()
     ir2.env_red_names = ["sc_env_a"]
     face2 = wf._light_env_red_face(ir2)
     assert face2["state"] == light_lane.ENV_RED_NAMED and face2["runner"] == ["sc_env_a"]
     text2 = wf._light_gate_blocked_text(ir2, [], "gate round 1")
-    assert "runner-side list (observation only" in text2 and "sc_env_a" in text2
-    # 无环境红 → none（票面不加那段）
+    assert "2 environment red(s)" in text2 and "NOT NAMEABLE" not in text2
+    d2 = wf._light_gate_blocked_detail(ir2, [], "light_gate_red", "gate round 1")
+    assert "sc_env_a" in d2["env_red_runner"] or "sc_env_a" in d2["env_red_face_note"]
+    # 无环境红 → none（票面不加环境红那段）
     ir3 = _t260930_09_ir()
     ir3.env_fail = 0
     assert wf._light_env_red_face(ir3)["state"] == light_lane.ENV_RED_NONE
-    assert "Environment reds" not in wf._light_gate_blocked_text(ir3, [], "r1")
+    assert "Environment red" not in wf._light_gate_blocked_text(ir3, [], "r1")
 
 
 def test_t260930_09_known_red_face_transport_and_injection_are_separated():
     """缺陷②回归：注入事实与运输事实分开点名（两态：在场 / 缺席且具名原因）。"""
     wf = _mk_wf()
-    # 在场（verify_lane/agent_activities 260930 起搬运）：真数字上票面
+    # 在场（verify_lane/agent_activities 260930 起搬运）：计数上票面，名单在明细
     ir = _t260930_09_ir()
     ir.known_red = {"injected": True, "skipped": 2, "names": ["kd_a", "kd_b"],
                     "note": "未跑 ≠ 判绿", "injection": "SANDBAR_KNOWN_RED_EXCLUDE=1"}
@@ -774,24 +884,28 @@ def test_t260930_09_known_red_face_transport_and_injection_are_separated():
     assert d["round"]["known_red"]["injected"] is True
     assert d["round"]["known_red"]["names"] == ["kd_a", "kd_b"]
     text = wf._light_gate_blocked_text(ir, [], "r1")
-    assert "Known-red entries excluded from this round: kd_a, kd_b" in text
+    assert "known-red excluded: 2" in text
+    assert "kd_a" not in text, "在册红名单进了票面（宿主 260930：只给计数）"
     # 「在场但本轮没豁免任何条」也要说清（不是「不可得」）
     ir3 = _t260930_09_ir()
     ir3.known_red = {"injected": True, "skipped": 0, "names": [], "note": ""}
     text3 = wf._light_gate_blocked_text(ir3, [], "r1")
-    assert "none (injected=True, nothing in the roster was in this round's register)" in text3
+    assert "known-red excluded: 0" in text3
     # 缺席（老回执）：不说「absent」了事——点名「没搬到」+ 注入未知
     ir2 = _t260930_09_ir()
     d2 = wf._light_gate_blocked_detail(ir2, [], "light_gate_red", "r1")
     kr2 = d2["round"]["known_red"]
     assert kr2["available"] is False and kr2["injected"] == "unknown"
     assert "carried no such block" in kr2["reason"]
+    text2 = wf._light_gate_blocked_text(ir2, [], "r1")
+    assert "reuse/known-red: n/a (old receipt)" in text2
 
 
 def test_t260930_09_attribution_three_labels_and_unknown_is_conservative():
     """缺陷③回归：三态标注（lane-only / main-red-too / unknown）+ unknown 的保守方向。
 
-    判据不许放宽：unknown 既不当 main 绿读（不给豁免），也不当放行读（仍 blocked）。"""
+    判据不许放宽：unknown 既不当 main 绿读（不给豁免），也不当放行读（仍 blocked）。
+    票面口径（宿主 260930）：归因表**逐名进 blocked_detail.attribution**，票面只给计数。"""
     wf = _mk_wf()
     ir = _t260930_09_ir()
     ir.live_baseline_red = ["t260905-03-decl-gate"]          # 存量：main 也红
@@ -806,16 +920,24 @@ def test_t260930_09_attribution_three_labels_and_unknown_is_conservative():
     assert attr["baseline_ref"] == "abc1234" and "in-round gate baseline" in attr["source"]
     assert "NEVER read as main-green" in attr["rule"]
     assert "NEVER as a landing permit" in attr["rule"]
+    assert "main-red-too" in attr["note"] and "unknown" in attr["note"]  # 明细可读计数句
     text = wf._light_gate_blocked_text(ir, [], "gate round 1")
-    assert "lane-only (this ticket's account, main is green): capture-chat-active" in text
-    assert "main-red-too (pre-existing on main" in text and "t260905-03-decl-gate" in text
-    assert "unknown (no baseline answer — NOT main-green and NOT a landing permit)" in text
-    # 分诊出路：lane-only → rework；main-red-too → 记录/人裁定豁免；unknown → 保守按本票的账
-    assert "this ticket's own regressions (lane-only, main is green)" in text
-    assert "pre-existing main reds (main-red-too)" in text
-    assert "unknown is NOT main-green and NOT a landing permit" in text
-    for n in T260930_09_VIOLATIONS:
-        assert n in text, "逐名归因面漏了 %s" % n
+    # 票面：计数 + 判断据，逐名归因表不内联
+    assert "1 pre-existing on main" in text
+    assert "13 red(s) with no baseline answer" in text
+    # 票面=短句；保守口径全文（NEVER read as main-green / NEVER as a landing permit）在明细 rule 里
+    assert "unknown is NOT main-green" in text
+    assert "NEVER as a landing permit" in attr["rule"]
+    assert "t260905-03-decl-gate" not in text, "存量红逐名进了票面（只许计数）"
+    # 本票的账=闸拦名单 − main-red-too（可行动面 ≤5 名）
+    assert "Fix (this ticket's account):" in text
+    # 拦名单 6 个 → 票面只列 ≤5 名 + 「(+N more)」（N=没列出的条数，机械复算不信自报）
+    _shown = [n for n in T260930_09_BLOCKERS if n in text]
+    assert 1 <= len(_shown) <= light_lane.LightLaneWorkflow.FACE_NAME_LIMIT, _shown
+    assert "(+%d more)" % (len(T260930_09_BLOCKERS) - len(_shown)) in text
+    assert "capture-chat-active" not in text, "非拦名单的红不许当「本票的账」列出"
+    for n in T260930_09_VIOLATIONS:                          # 逐名归因仍在明细面
+        assert n in json.dumps(d, ensure_ascii=False)
     # 保守方向：baseline 完全不可得 → 全部 unknown（=本票的账），一个都不许标成 main-red-too
     ir2 = _t260930_09_ir()
     ir2.live_baseline_green = []
@@ -830,16 +952,82 @@ def test_t260930_09_attribution_three_labels_and_unknown_is_conservative():
         == ["capture-chat-active"]
 
 
+def test_verdict_consumes_gate_attribution_not_raw_violations():
+    """t260930-09 判定缺陷回归（本条的判词面）：轻道必须**照闸的归因结论**判，不按 violations。
+
+    green ⟺ ① blockers 空 ② 无 unknown（每个产品红都有基线答案）③ env_fail 必须具名。
+    任一不成立 → red（现状口径不变）。"""
+    wf = _mk_wf()
+    # ① blockers 空 + 全有基线答案（全是 main-red-too）→ **绿**，且逐名记录在案
+    ir = _t260930_09_ir()
+    ir.blockers = []
+    ir.live_baseline_red = list(T260930_09_VIOLATIONS)      # main 也红（存量）
+    ir.live_baseline_green = []
+    ir.env_fail = 0
+    assert wf._light_gate_verdict(ir) == "green", "①+②+③ 全成立必须判绿"
+    rec = wf._light_recorded_pre_existing(ir)
+    assert rec["count"] == len(T260930_09_VIOLATIONS) and rec["names"] == T260930_09_VIOLATIONS
+    assert rec["baseline_ref"] == "abc1234"
+    assert "in-round gate baseline" in rec["source"], rec["source"]
+    assert "recorded, not blocking" in rec["note"] and "NOT a silent skip" in rec["note"]
+    receipt = wf._light_gate_receipt(ir, gen=0)
+    assert receipt["recorded_pre_existing"]["count"] == len(T260930_09_VIOLATIONS)
+    assert "recorded (main-red-too, not blocking)" in receipt["summary"]
+    assert receipt["blockers"] == [] and len(receipt["violations"]) == len(T260930_09_VIOLATIONS)
+    # ② 有 unknown（基线没答案）→ **仍红**（不许当绿）
+    ir2 = _t260930_09_ir()
+    ir2.blockers = []
+    ir2.env_fail = 0
+    ir2.live_baseline_red = [T260930_09_VIOLATIONS[0]]
+    ir2.live_baseline_green = [T260930_09_VIOLATIONS[1]]
+    assert wf._light_gate_verdict(ir2) == "red", "有不可归因的红必须红"
+    assert wf._light_recorded_pre_existing(ir2)["names"] == [T260930_09_VIOLATIONS[0]]
+    # ③ blockers 非空 → 红（本票的账照旧拦），即使全有基线答案
+    ir3 = _t260930_09_ir()
+    ir3.live_baseline_red = list(T260930_09_VIOLATIONS)
+    ir3.live_baseline_green = []
+    ir3.env_fail = 0
+    assert ir3.blockers and wf._light_gate_verdict(ir3) == "red"
+    # ③' env_fail>0 且不可具名 → 红
+    ir4 = _t260930_09_ir()
+    ir4.blockers = []
+    ir4.live_baseline_red = list(T260930_09_VIOLATIONS)
+    ir4.live_baseline_green = []
+    assert wf._light_gate_verdict(ir4) == "red", "unnameable 环境红仍判红"
+    # 真票当轮形状（blockers=6）→ 红（这就是「修后那轮仍是红」的依据）
+    assert wf._light_gate_verdict(_t260930_09_ir()) == "red"
+
+
+def test_verdict_shape_guards_stay_conservative():
+    """形状守卫（不许因判据改写而放走畸形回执）：计数读不懂 / 有计数无名单 ⇒ 红。"""
+    wf = _mk_wf()
+    assert wf._light_gate_verdict(_ir(failed="not-a-number")) == "red"
+    assert wf._light_gate_verdict(_ir(env_fail="??")) == "red"
+    assert wf._light_gate_verdict(_ir(failed=2)) == "red", "有失败计数却零红名=名单不可信"
+
+
 def test_t260930_09_rendered_face_example(capsys=None):
-    """把真票数据渲染出来的阻断面打出来（人工可读的证据面；断言只钉关键行在场）。"""
+    """把真票数据渲染出来的阻断面打出来（人工可读的证据面；断言钉「一屏摘要」口径）。
+
+    宿主 260930 要这串原文拿给人看：≤10 行、≤1200 字、无机器清单片段、全量仍在明细里。"""
     wf = _mk_wf()
     ir = _t260930_09_ir()
     ir.live_baseline_red = ["t260905-03-decl-gate"]
     ir.live_baseline_green = ["capture-chat-active"]
     text = wf._light_gate_blocked_text(ir, [], "gate round 1 of this attempt")
-    print("\n===== t260930-09 阻断面（真数据渲染）=====\n" + text + "\n")
-    assert "Complete violation set (15)" in text
+    print("\n===== t260930-09 阻断面（真数据渲染，宿主口径）=====\n" + text + "\n")
     assert "115 ran / 100 passed / 13 failed / 2 env-red" in text
+    assert "Fix (this ticket's account):" in text
+    assert len(text.splitlines()) <= light_lane.LightLaneWorkflow.FACE_MAX_LINES
+    assert len(text) <= light_lane.LightLaneWorkflow.FACE_MAX_CHARS
+    assert _bulk_name_fragments(text) == []
+    # 15 名全量 + 6 名拦名单 + 逐名归因：一条不丢，全在结构化明细里
+    d = wf._light_gate_blocked_detail(ir, [], "light_gate_red",
+                                      "gate round 1 of this attempt")
+    dump = json.dumps(d, ensure_ascii=False)
+    for n in T260930_09_VIOLATIONS:
+        assert n in dump, "设备面丢了红名 %s" % n
+    assert d["blockers"] == T260930_09_BLOCKERS
 
 
 # ======================================================================

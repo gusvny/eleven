@@ -39,10 +39,12 @@ UI 面改动的口径（连带后果，**具名不静默**）：merge_check 的 
 具名且可行动（重跑截图步＝rework(to_stage=implement) 让条件段再跑一次，或截图已在泳道
 后 retry_qc 重验闸），见类尾 `_light_merge_blocked_text` 的 `ui_evidence_missing` 专段。
 
-红转人（宿主 260930 定案②）：机器闸不绿 ⇒ 票面进 blocked，带上**完整违规集**（全部失败场景名、
-计数、闸回执指针，绝不给样本）与具名出路清单（重跑闸 / 打回实现 / 为余下工作另开全道
-票），等人发信号。**不调仲裁活动，不自动循环**——一个 attempt 只跑一轮机器闸，重跑由人
-（retry_qc）或打回（rework）显式触发。
+红转人（宿主 260930 定案②）：机器闸不绿 ⇒ 票面进 blocked，**票面是给人看的摘要**
+（一行结论 + 需要人做的决定 + 计数 + 本票的账最多 5 个可行动名字 + 出路 ≤3）；**全量机器
+清单**（收窄面全表、完整违规集、逐名归因表、台账复用面、在册红面）进 `blocked_detail` /
+闸回执 / 报告文件（宿主 260930 实报旧文案：一坨机器清单，人找不到「我该做什么」）。
+**不调仲裁活动，不自动循环**——一个 attempt 只跑一轮机器闸，重跑由人（retry_qc）或打回
+（rework）显式触发。
 
 复用面（本票的要点，逐项都不是抄的）：
   · 工作空间准备：dev_lane._prepare_workspace_step（本票从 dev-lane run() 原块逐字抽出的
@@ -209,6 +211,16 @@ class LightLaneWorkflow(DevLaneWorkflow):
     #: 逐字不变——纯加法钩子）。
     FLOW_BRIEF_SET: Dict[str, str] = LIGHT_FLOW_BRIEF
 
+    # 票面纪律（宿主 260930 实报：阻断面是一大坨机器清单，人找不到「我该做什么」）：
+    # 票面=给人看的摘要（一段结论 + 需要人做的决定 + 可行动的点名），机器清单进
+    # blocked_detail / 闸回执 / 报告文件。三条上限即机械判据（UT 钉死，判据一字不放宽）。
+    FACE_NAME_LIMIT = 5      # 「本票的账」最多列 5 个名字，多了给 (+N more)
+    FACE_SAMPLE_MAX_LEN = 200  # 名单片段字节上限（名字很长时自动少列，保证字数不爆）
+    FACE_MAX_LINES = 10      # blocked_reason 行数上限
+    FACE_MAX_CHARS = 1200    # blocked_reason 字数上限
+    FACE_BULK_MIN_ITEMS = 6  # 机械判据：逗号分隔 ≥6 项…
+    FACE_BULK_MIN_LEN = 400  # …且该片段总长 >400 = 机器清单内联（票面不得出现）
+
     # 段声明（角色/种类/人门标记/条件段注记与 run() 同序；acceptance 是**票面文字**，
     # 按 CLAUDE.md 规则 6 全英文）。**首段=implement**（宿主 260930 裁定删 create_plan：
     # 见模块头注「为什么没有 create_plan」——口径与代价都在那里）。
@@ -237,7 +249,8 @@ class LightLaneWorkflow(DevLaneWorkflow):
               next="merge_check", agent=False,
               desc="程序化（无 agent）：泳道 0-commit 前置检查 → 改动清单 → 面计划收窄快反馈面 "
                    "→ 跑项目声明的集成命令（与 dev-lane 同一条命令、同一个执行器）；不绿即 blocked "
-                   "并带完整违规集（不自动重跑、不调仲裁）；定点轮放行只认收口全量跑",
+                   "（票面=给人看的摘要：计数 + 本票的账最多 5 名 + 出路 ≤3；完整违规集在 "
+                   "blocked_detail/回执里）；不自动重跑、不调仲裁；定点轮放行只认收口全量跑",
               parts=("script",),
               gate=LIGHT_LANE_GATES[(LIGHT_LANE_TEMPLATE_ID, "run_integration_tests")],
               acceptance=("The project-declared integration command ran and produced a receipt",
@@ -405,28 +418,69 @@ class LightLaneWorkflow(DevLaneWorkflow):
         return bool(failed) or bool(self._tests_red_names(ir))
 
     def _light_gate_verdict(self, ir: Any) -> str:
-        """机器闸二态判定（轻道自己的判词，不引仲裁）：green / red。
+        """机器闸二态判定（轻道自己的判词，不引仲裁，但**照失败分类协议吃闸的归因结论**）：
+        green / red。
 
-        保守方向（与「判不了的绝不静默放行」一致）：
-          · 回执缺席或 error 非空（闸没产出可用结论）→ red；
-          · 产品红（红名单非空或 failed>0）→ red；
-          · env_fail>0 而具名环境红通道缺席/为空（老回执形态）→ red（**无具名即无豁免**）；
-          · 其余 → green（余红若全是具名环境红：不拦，但票面逐条点名）。"""
+        为什么必须消费 `blockers`（t260930-09 实况：violations=15 而 blockers=6）：全车道靠
+        仲裁段消化「本票的账 vs main 存量」这个差别；轻道没有仲裁，只能**机械地照闸已经算好
+        的归因结论**走——否则只要 main 上有存量红（常态），每一张轻道票每一轮都会被判红，
+        永远落不了地。闸的 `blockers` = 归因后「本票的账」（决策表 verdict=block），
+        `violations` 则含 main 存量与不可归因面，两者**不是一个集合**。
+
+        green ⟺ 三条同时成立（任一不成立 = red，保守方向一个字不放宽）：
+          ① `blockers` 为空（= 归因后本票无欠账）；
+          ② 本轮**没有不可归因的红** —— 每个 violation 都有基线答案（无 `unknown`；
+             「没跑到/基线不可得」不算答案，绝不当 main 绿）；
+          ③ `env_fail>0` 时必须**具名**（两路具名通道任一给出名字；unnameable 仍判红）。
+        判绿的轮次必须**记录在案**：调用方用 `_light_recorded_pre_existing()` 把「本轮被
+        记录而不阻断的存量红（逐名）+ 基线参考 + 来源」写进回执/票面，绝不静默变绿。"""
         if ir is None:
             return "red"
         if str(getattr(ir, "error", "") or ""):
             return "red"
-        if self._light_gate_has_product_red(ir):
+        # ① 本票的账（闸的归因结论）
+        if [str(b) for b in (getattr(ir, "blockers", None) or []) if str(b)]:
             return "red"
+        # 形状守卫（保守方向：计数读不懂 / 有计数无名单 ⇒ 红名单不可信，不许静默放行）
         try:
+            failed = int(getattr(ir, "failed", 0) or 0)
             env_fail = int(getattr(ir, "env_fail", 0) or 0)
         except (TypeError, ValueError):
             return "red"
+        prod_names = self._tests_product_red_names(ir)
+        if failed > 0 and not prod_names:
+            return "red"
+        # ② 不可归因的红不许当绿：**每个产品红名**都要有基线答案（环境红由 ③ 处置）
+        attr = self._light_gate_attribution(ir, prod_names)
+        if attr["unknown"]:
+            return "red"
+        # ③ 环境红必须具名
         if env_fail > 0:
-            env_names, channel_ok = self._tests_env_red_names(ir)
-            if not (channel_ok and env_names):
+            env_face = self._light_env_red_face(ir)
+            if env_face["state"] == ENV_RED_UNNAMEABLE:
                 return "red"
         return "green"
+
+    def _light_recorded_pre_existing(self, ir: Any) -> Dict[str, Any]:
+        """判绿轮次的「记录在案」面（自证：这些红被看见了、被记账了、不是漏跑）。
+
+        返回块（空 dict=本轮没有需要记录的存量红）：`names` 逐名 + `count` +
+        `baseline_ref` + `source` + 协议口径一句。消费方把它写进闸回执与票面（handoff/log）。"""
+        names = self._tests_product_red_names(ir)
+        if not names:
+            return {}
+        attr = self._light_gate_attribution(ir, names)
+        if not attr["main_red_too"]:
+            return {}
+        return {
+            "names": list(attr["main_red_too"]),
+            "count": len(attr["main_red_too"]),
+            "baseline_ref": attr["baseline_ref"],
+            "source": attr["source"],
+            "note": ("recorded, not blocking: these scenarios are red on the main baseline too "
+                     "(failure-classification protocol: main red ⇒ record, do not block). They "
+                     "were seen this round, booked here, and are NOT a silent skip."),
+        }
 
     def _light_run_face(self, ir: Any, run_only: Any) -> Dict[str, Any]:
         """本轮**跑面**（诚实面：跑了什么、没跑什么、有没有复用）——直接取闸回执的现成
@@ -547,107 +601,179 @@ class LightLaneWorkflow(DevLaneWorkflow):
             parts.append("source: %s" % face["note"])
         return ("; ".join(parts) + ".")
 
+    def _light_name_sample(self, names: Any, limit: Optional[int] = None,
+                           max_len: Optional[int] = None) -> str:
+        """票面具名样本：最多 `limit` 个 + `(+N more)`（全量名单在回执/明细里）。
+
+        宿主 260930：票面「本票的账」最多列 5 个可行动名字，多了给计数与指针——
+        人面对一屏场景名找不到「我该做什么」。**双重闸**：条数上限（`limit`）+ 片段字节
+        上限（`max_len`）——名字很长时自动少列几个，保证票面字数不爆（这是「票面 ≤1200
+        字」的机械保证，不是审美偏好）。"""
+        lim = int(self.FACE_NAME_LIMIT if limit is None else limit)
+        budget = int(self.FACE_SAMPLE_MAX_LEN if max_len is None else max_len)
+        items = [str(n).strip() for n in (names or []) if str(n or "").strip()]
+        if not items:
+            return "none"
+        picked: List[str] = []
+        used = 0
+        for n in items[:lim]:
+            add = len(n) + (2 if picked else 0)
+            if picked and used + add > budget:
+                break
+            picked.append(n)
+            used += add
+        if len(picked) == len(items):
+            return ", ".join(picked)
+        return "%s (+%d more)" % (", ".join(picked), len(items) - len(picked))
+
+    def _light_face_pointer(self) -> Dict[str, str]:
+        """机器清单的**指针面**（票面只给指针，清单本体进明细/回执/报告文件）。"""
+        return {"receipt_ref": "results.run_integration_tests",
+                "detail_ref": "blocked_detail",
+                "report_path": "out/integration-report-*.json"}
+
+    def _light_blocked_reasons(self, ir: Any) -> List[str]:
+        """本轮**为什么红**（与 `_light_gate_verdict` 的三条判据一一对应，只给原因不给清单）。
+
+        票面必须让人一眼看出是**哪条判据**把本轮按住的（判据一个字不改，只改呈现）。"""
+        if ir is None:
+            return ["no gate receipt at all"]
+        reasons: List[str] = []
+        if str(getattr(ir, "error", "") or ""):
+            reasons.append("no receipt (gate error: %s)" % str(ir.error)[:120])
+        blockers = [str(b) for b in (getattr(ir, "blockers", None) or []) if str(b)]
+        if blockers:
+            reasons.append("blockers non-empty (%d) — this ticket's account" % len(blockers))
+        try:
+            failed = int(getattr(ir, "failed", 0) or 0)
+            env_fail = int(getattr(ir, "env_fail", 0) or 0)
+        except (TypeError, ValueError):
+            return reasons + ["counts malformed — treated as red"]
+        prod_names = self._tests_product_red_names(ir)
+        if failed > 0 and not prod_names:
+            reasons.append("%d failure(s) counted but none named — an unnamed red is never "
+                           "green" % failed)
+        attr = self._light_gate_attribution(ir, prod_names)
+        if attr["unknown"]:
+            reasons.append("%d red(s) with no baseline answer (unknown is NOT main-green)"
+                           % len(attr["unknown"]))
+        if env_fail > 0 and self._light_env_red_face(ir)["state"] == ENV_RED_UNNAMEABLE:
+            reasons.append("%d env red(s) not nameable (no name, no exemption)" % env_fail)
+        if not reasons:
+            reasons.append("the round is not green — raw details in the receipt")
+        return reasons
+
     def _light_attribution_note(self, attr: Dict[str, Any]) -> str:
-        """归因面的票面句子（逐名带标签；unknown 的保守口径写明）。"""
-        bits = ["Red attribution against main (baseline ref %s; source: %s)"
-                % (attr["baseline_ref"] or "unavailable", attr["source"]),
-                "lane-only (this ticket's account, main is green): %s"
-                % (", ".join(attr["lane_only"]) or "none"),
-                "main-red-too (pre-existing on main, recorded, not this ticket's account): %s"
-                % (", ".join(attr["main_red_too"]) or "none"),
-                "unknown (no baseline answer — NOT main-green and NOT a landing permit): %s"
-                % (", ".join(attr["unknown"]) or "none")]
-        return "; ".join(bits) + "."
+        """归因面的**计数句**（票面口径，宿主 260930：逐名归因表不进票面）。
+
+        逐名归因表本体仍在 `blocked_detail.attribution`（审计/消费面）；票面只说
+        「几成是本票的账 / 几成是 main 存量 / 几条无基线答案」+ 指针。"""
+        return ("Red attribution against main (baseline ref %s; source: %s): %d lane-only "
+                "(this ticket's account, main is green); %d main-red-too (pre-existing on "
+                "main, recorded, not this ticket's account); %d unknown (no baseline answer — "
+                "NOT main-green and NOT a landing permit). Per-name table: blocked_detail."
+                % (attr["baseline_ref"] or "unavailable", attr["source"],
+                   len(attr["lane_only"]), len(attr["main_red_too"]), len(attr["unknown"])))
 
     def _light_gate_blocked_text(self, ir: Any, run_only: Any, phase_note: str) -> str:
-        """轻道机器闸 blocked 文案（票面英文；**完整违规集**，绝不给样本）。"""
+        """轻道机器闸 blocked 文案（票面英文）——**给人看的一屏摘要**，不是机器清单。
+
+        宿主 260930 实报：旧文案把收窄面全表（200+ 个场景名）、全量违例表、逐名归因表、
+        台账复用面、在册红面全内联进票面，人对着机器清单找不到「我该做什么」。本函数即
+        该口径的执法点，固定四段（行数上限 `FACE_MAX_LINES`、字数上限 `FACE_MAX_CHARS`）：
+          ① 一行结论 + 一行「需要你做什么」；
+          ② 本轮轮次与**判红原因**（哪条判据按住）+ 计数一行；
+          ③ 本票的账（可行动）：最多 `FACE_NAME_LIMIT` 个名字 + `(+N more)` + 指向回执；
+             空则明写「none of the reds are this ticket's account」；
+          ④ 存量红/环境红：**只给计数**与「已记录、不阻断（详见回执）」——不列名；不可具名
+             的环境红单独一行点名（它**阻断**，不是「已记录」）；
+          ⑤ 出路 ≤3（rework / retry_qc / 另开全车道票）。
+        机器清单（收窄面全表、全量违例表、逐名归因表、台账复用面、在册红面）一律只进
+        `_light_gate_blocked_detail` / 闸回执 / 报告文件——票面只留计数与指针。"""
         names = self._light_red_names(ir)
-        env_names, _ok = self._tests_env_red_names(ir)
+        env_face = self._light_env_red_face(ir)
+        attr = self._light_gate_attribution(ir, names)
         face = self._light_run_face(ir, run_only)
-        parts = [
-            "Machine gate is not green (light lane: one machine round per attempt — no "
-            "arbitration, no automatic re-run; a human decides).",
-            "Phase: %s." % (phase_note or "gate round"),
-            "Counts: %s ran / %s passed / %s failed / %s env-red.%s"
-            % (getattr(ir, "ran", 0), getattr(ir, "passed", 0), getattr(ir, "failed", 0),
-               getattr(ir, "env_fail", 0),
-               (" | gate error: %s" % str(ir.error)[:400])
-               if str(getattr(ir, "error", "") or "") else ""),
-            "Complete violation set (%d): %s"
-            % (len(names), ", ".join(names) if names else "(none named)"),
+        ptr = self._light_face_pointer()
+        blockers = [str(b) for b in (getattr(ir, "blockers", None) or [])
+                    if str(b) and not str(b).startswith("__")]
+        main_too = set(attr["main_red_too"])
+        # 本票的账（可行动）= 闸的拦名单 − 基线已证「main 也红」的名字；unknown 仍算本票的账
+        actionable = [b for b in blockers if b not in main_too]
+        lines = [
+            "Blocked: the machine gate is red — one machine round per attempt: no "
+            "arbitration, no automatic re-run; a human decides.",
+            "Round: %s. Why red: %s." % (phase_note or "gate round",
+                                         "; ".join(self._light_blocked_reasons(ir))),
+            "Counts: %s ran / %s passed / %s failed / %s env-red; this ticket's account: "
+            "%d red(s)." % (getattr(ir, "ran", 0), getattr(ir, "passed", 0),
+                            getattr(ir, "failed", 0), getattr(ir, "env_fail", 0),
+                            len(actionable)),
         ]
-        _env_face = self._light_env_red_face(ir)
-        _env_note = self._light_env_red_note(_env_face)
-        if _env_note:
-            parts.append(_env_note)
-        _attr = self._light_gate_attribution(ir, names)
-        parts.append(self._light_attribution_note(_attr))
-        parts.append("Round face: %s."
-                     % ("narrowed to %s" % ", ".join(face["narrowed"])
-                        if face["narrowed"] else "full registry (not narrowed)"))
+        if actionable:
+            lines.append("Fix (this ticket's account): %s."
+                         % self._light_name_sample(actionable))
+        else:
+            lines.append("This ticket's account: none of the reds are this ticket's account.")
+        recorded = []
+        if attr["main_red_too"]:
+            recorded.append("%d pre-existing on main" % len(attr["main_red_too"]))
+        if env_face["count"] > 0 and env_face["state"] != ENV_RED_UNNAMEABLE:
+            recorded.append("%d environment red(s)" % env_face["count"])
+        if recorded:
+            lines.append("Recorded, not blocking: %s — booked, never a silent skip."
+                         % "; ".join(recorded))
+        if env_face["state"] == ENV_RED_UNNAMEABLE:
+            lines.append("Environment red(s): %d NOT NAMEABLE (gate channel %s) — not "
+                         "exempt: no name, no exemption."
+                         % (env_face["count"],
+                            "present but empty" if env_face["gate_channel_ok"]
+                            else "absent/malformed"))
+        lines.append("Outcome: (1) rework(to_stage=implement) to repair; (2) retry_qc to "
+                     "re-run the gate; (3) open a full-lane ticket (dev-lane).")
+        face_bits = ["full registry (not narrowed)" if not face["narrowed"]
+                     else "narrowed to %d entr%s" % (len(face["narrowed"]),
+                                                     "y" if len(face["narrowed"]) == 1
+                                                     else "ies")]
         if face["excluded_pools"]:
-            parts.append("Declared pools skipped this round: %s (%d entries)."
-                         % (", ".join(face["excluded_pools"]), face["excluded_count"]))
-        if isinstance(face["reuse"], dict):
-            parts.append("Ledger reuse this round: reused=%s of expected=%s (reused "
-                         "entries were NOT executed; named: %s)."
-                         % (face["reuse"].get("reused"), face["reuse"].get("expected"),
-                            ", ".join(face["reuse"].get("names") or []) or "none named"))
-        elif face["reuse"]:
-            parts.append("Ledger reuse face: %s." % face["reuse"])
-        if isinstance(face["known_red"], dict):
-            _kr = face["known_red"]
-            if _kr.get("available") is False:
-                parts.append("Known-red entries excluded from this round: NOT AVAILABLE — "
-                             "injected=%s; %s (an unavailable face is not 'none excluded')."
-                             % (_kr.get("injected"), _kr.get("reason") or "no reason given"))
-            elif _kr.get("skipped"):
-                parts.append("Known-red entries excluded from this round: %s."
-                             % ", ".join(_kr.get("names") or ["%s entries" % _kr["skipped"]]))
-            else:
-                parts.append("Known-red entries excluded from this round: none "
-                             "(injected=%s, nothing in the roster was in this round's register)."
-                             % _kr.get("injected"))
-        elif face["known_red"]:
-            parts.append("Known-red exclusion face: %s." % face["known_red"])
-        parts.append("Gate receipt: results.run_integration_tests in this ticket's "
-                     "snapshot (its evidence holds the raw details), plus the lane's "
-                     "out/integration-report-*.json.")
-        _remedies = []
-        if _attr["lane_only"]:
-            _remedies.append("(1) this ticket's own regressions (lane-only, main is green) — "
-                             "send rework(to_stage=implement) with a note and repair exactly "
-                             "these: %s" % ", ".join(_attr["lane_only"]))
-        if _attr["main_red_too"]:
-            _remedies.append("(%d) pre-existing main reds (main-red-too) — recorded, not this "
-                             "ticket's account: %s — a human may rule an exemption; retry_qc "
-                             "re-runs the gate" % (len(_remedies) + 1,
-                                                   ", ".join(_attr["main_red_too"])))
-        if _attr["unknown"]:
-            _remedies.append("(%d) no baseline answer for: %s — unknown is NOT main-green and "
-                             "NOT a landing permit; treat them as this ticket's account until "
-                             "a baseline answer exists (source: %s)"
-                             % (len(_remedies) + 1, ", ".join(_attr["unknown"]),
-                                _attr["source"]))
-        if self._tests_red_names(ir):
-            _remedies.append("(%d) repair and re-run: rework(to_stage=implement) with a note"
-                             % (len(_remedies) + 1))
-        _remedies.append("(%d) re-run the gate on the same tree — send retry_qc"
-                         % (len(_remedies) + 1))
-        _remedies.append("(%d) if the remaining work is bigger than this lane carries, open a "
-                         "full-lane ticket (template dev-lane) for it — a running workflow "
-                         "cannot change lane" % (len(_remedies) + 1))
-        parts.append("Remedies (triaged by attribution): " + "; ".join(_remedies) + ".")
-        return " ".join(parts)
+            face_bits.append("pools skipped: %s (%d entries)"
+                             % (", ".join(face["excluded_pools"]), face["excluded_count"]))
+        # 复用面/在册红面：只给计数；老回执缺块=「n/a (old receipt)」（两块都缺时合成一句，
+        # 省票面字数——这两块都不是判据，只是「少跑面」的诚实计数）
+        _reuse_abs = not isinstance(face["reuse"], dict)
+        _kr_abs = face["known_red"].get("available") is False
+        if not _reuse_abs:
+            face_bits.append("ledger reuse: reused=%s of expected=%s"
+                             % (face["reuse"].get("reused"), face["reuse"].get("expected")))
+        if not _kr_abs:
+            face_bits.append("known-red excluded: %d"
+                             % int(face["known_red"].get("skipped") or 0))
+        if _reuse_abs and _kr_abs:
+            face_bits.append("reuse/known-red: n/a (old receipt)")
+        elif _reuse_abs:
+            face_bits.append("ledger reuse: n/a (old receipt)")
+        elif _kr_abs:
+            face_bits.append("known-red: n/a (old receipt)")
+        lines.append("Details: %s (full machine lists) + report %s (receipt %s). Round "
+                     "face: %s."
+                     % (ptr["detail_ref"], ptr["report_path"], ptr["receipt_ref"],
+                        "; ".join(face_bits)))
+        return "\n".join(lines)
 
     def _light_gate_blocked_detail(self, ir: Any, run_only: Any, reason_code: str,
                                    phase_note: str) -> Dict[str, Any]:
-        """机器闸 blocked 的结构化明细（键族与父类 blocked_detail 同形；additive 键承载
-        完整违规集与跑面，供票面/控制台机读）。"""
+        """机器闸 blocked 的结构化明细（**机器清单的家**；键族与父类 blocked_detail 同形；
+        additive 键承载完整违规集与跑面，供票面/控制台机读）。
+
+        宿主 260930 分面：票面（`_light_gate_blocked_text`）只留摘要与指针，**全量机器数据
+        全部留在本明细**（消费方与审计面），并给三个显式指针键
+        （`report_path` / `receipt_ref` / `detail_ref`）让人一键找到全量。"""
         names = self._light_red_names(ir)
         env_names, channel_ok = self._tests_env_red_names(ir)
         env_face = self._light_env_red_face(ir)
         attr = self._light_gate_attribution(ir, names)
+        face = self._light_run_face(ir, run_only)
+        ptr = self._light_face_pointer()
         return {
             "check_id": "run_integration_tests",
             "item": "machine gate (the project-declared integration command)",
@@ -657,7 +783,22 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "next_action": ("retry_qc re-runs the gate on the same tree; "
                             "rework(to_stage=implement) sends it back for repair; "
                             "open a dev-lane ticket for work beyond this lane"),
-            "evidence": str(getattr(ir, "error", "") or phase_note)[:400],
+            # evidence=**计数 + 指针**（宿主 260930：收窄面/全量违例/逐名归因是全表，
+            # 不许内联进票面；这里也只给计数与指针，全表在同块的 violations/attribution/
+            # round 与报告文件里）
+            "evidence": ("%s | counts: %s ran / %s passed / %s failed / %s env-red | "
+                         "round: %s | complete violation set, per-name attribution and the "
+                         "run face: this blocked_detail + the lane report %s"
+                         % (phase_note or "gate round",
+                            getattr(ir, "ran", 0), getattr(ir, "passed", 0),
+                            getattr(ir, "failed", 0), getattr(ir, "env_fail", 0),
+                            ("%d narrowed entr%s, pools skipped %d (%d entries)"
+                             % (len(face["narrowed"]),
+                                "y" if len(face["narrowed"]) == 1 else "ies",
+                                len(face["excluded_pools"]), face["excluded_count"]))
+                            if face["narrowed"] or face["excluded_pools"]
+                            else "full registry, no pools skipped",
+                            ptr["report_path"]))[:600],
             "violations": names,
             "violations_complete": True,
             "blockers": [str(b) for b in (getattr(ir, "blockers", None) or [])],
@@ -669,34 +810,45 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "env_red_count": env_face["count"],
             "env_red_runner": env_face["runner"],
             "env_red_note": env_face["note"],
+            # 三态各一句的可读句子（审计面；票面只给计数，句子留在这里）
+            "env_red_face_note": self._light_env_red_note(env_face),
             # 之③：逐名归因（lane-only / main-red-too / unknown）+ 来源与保守口径
-            "attribution": attr,
+            # （`note` 是同一块的计数句，供人读明细时不必自己数）
+            "attribution": dict(attr, note=self._light_attribution_note(attr)),
             "counts": {"ran": int(getattr(ir, "ran", 0) or 0),
                        "passed": int(getattr(ir, "passed", 0) or 0),
                        "failed": int(getattr(ir, "failed", 0) or 0),
                        "env_fail": int(getattr(ir, "env_fail", 0) or 0)},
-            "round": self._light_run_face(ir, run_only),
+            "round": face,
             "receipt": "results.run_integration_tests",
+            # 显式指针键（宿主 260930：让人一键找到全量机器清单）
+            "report_path": ptr["report_path"],
+            "receipt_ref": ptr["receipt_ref"],
+            "detail_ref": ptr["detail_ref"],
             "remedies": ["retry_qc: re-run the gate on the same tree",
                          "rework(to_stage=implement, note=...): repair, then the gate re-runs",
                          "open a full-lane ticket (template dev-lane) for the remaining work"],
         }
 
     def _light_face_note(self, ir: Any, run_only: Any) -> str:
-        """票面注记（票面英文）：本轮跑面**少跑的都必须可见**（定点面/跳过池/台账复用）。
-        空串=全量且无少跑面。只读回执，不改判定。"""
+        """票面注记（票面英文）：本轮**少跑面的计数**（定点面条数/跳过池/台账复用/在册红）。
+
+        宿主 260930：名单一律不进票面——这里只给计数与「名单在回执里」的指针
+        （全量在 `blocked_detail.round` / 闸回执 / 报告文件）。空串=全量且无少跑面。"""
         face = self._light_run_face(ir, run_only)
         bits = []
         if face["narrowed"]:
-            bits.append("narrowed to %d entries (%s)"
-                        % (len(face["narrowed"]), ", ".join(face["narrowed"])))
+            bits.append("narrowed to %d entr%s (list in the receipt)"
+                        % (len(face["narrowed"]),
+                           "y" if len(face["narrowed"]) == 1 else "ies"))
         if face["excluded_pools"]:
             bits.append("declared pools skipped: %s (%d entries)"
                         % (", ".join(face["excluded_pools"]), face["excluded_count"]))
         if isinstance(face["reuse"], dict) and int(face["reuse"].get("reused") or 0) > 0:
             bits.append("ledger reuse: reused=%s of expected=%s (not executed)"
                         % (face["reuse"].get("reused"), face["reuse"].get("expected")))
-        if isinstance(face["known_red"], dict) and int(face["known_red"].get("skipped") or 0):
+        if isinstance(face["known_red"], dict) \
+                and int(face["known_red"].get("skipped") or 0):
             bits.append("known-red entries excluded: %d"
                         % int(face["known_red"].get("skipped") or 0))
         return (" | " + "; ".join(bits)) if bits else ""
@@ -811,17 +963,32 @@ class LightLaneWorkflow(DevLaneWorkflow):
         return mc
 
     def _light_gate_receipt(self, ir: Any, gen: int, closing: bool = False) -> Dict[str, Any]:
-        """机器闸回执上台面（results.run_integration_tests 形状与 dev-lane 同族）。"""
+        """机器闸回执上台面（results.run_integration_tests 形状与 dev-lane 同族）。
+
+        260930 追加（additive 键）：`recorded_pre_existing` —— 判绿轮次里「被记录而不阻断」
+        的存量红逐名 + 基线参考 + 来源（空 dict=本轮无存量红）。这是「绝不静默变绿」的自证面：
+        读回执的人能直接看到那些红被看见了、被记账了。"""
         head = "closing full run" if closing else "integration gate"
-        return {
-            "status": "failed" if (ir.error or ir.failed) else "ok",
+        rec = self._light_recorded_pre_existing(ir) if not ir.error else {}
+        out = {
+            # status 跟**轻道判词**走（不是跟裸计数走）：判绿轮里若有 main-red-too，计数仍
+            # 照实写进 summary、逐名进 recorded_pre_existing，但本段对票而言是绿的——
+            # 否则控制台会出现「段 failed 却继续推进」的自相矛盾面。
+            "status": "ok" if self._light_gate_verdict(ir) == "green" else "failed",
             "summary": ("%s: %s ran / %s passed / %s failed / %s env-red%s"
                         % (head, ir.ran, ir.passed, ir.failed, ir.env_fail,
                            (" | " + str(ir.error)) if ir.error else "")),
             "report": "", "deliverables": [], "files_changed": [],
             "evidence": json.dumps(ir.details, ensure_ascii=False)[-4000:],
             "gen": gen,
+            "blockers": [str(b) for b in (getattr(ir, "blockers", None) or [])],
+            "violations": self._light_red_names(ir),
+            "recorded_pre_existing": rec,
         }
+        if rec:
+            out["summary"] += (" | recorded (main-red-too, not blocking): %d — %s"
+                               % (rec["count"], ", ".join(rec["names"])))
+        return out
 
     # ================================================================== 主流程
     @workflow.run
@@ -922,11 +1089,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 prev_red_names = self._tests_red_names(ir)
                 _face_note = self._light_face_note(ir, run_only)
                 self.results["run_integration_tests"] = self._light_gate_receipt(ir, gen0)
+                # 段 evidence=计数 + 指针（宿主 260930：票面/段面不许内联逐条机器清单；
+                # 逐条行仍在 results.run_integration_tests.evidence 与报告文件里）
                 self._finish("run_integration_tests", by="run_integration_tests",
-                             evidence="; ".join(
-                                 "%s:%s" % (d.get("name"),
-                                            "pass" if d.get("exit") == 0 else "fail")
-                                 for d in ir.details))
+                             evidence=("run_integration_tests: %s ran / %s passed / "
+                                       "%s failed / %s env-red (per-scenario rows: "
+                                       "results.run_integration_tests.evidence + the lane "
+                                       "report out/integration-report-*.json)"
+                                       % (ir.ran, ir.passed, ir.failed, ir.env_fail)))
                 self._handoff("run_integration_tests",
                               "gate round %d: ran=%s passed=%s failed=%s env_fail=%s%s%s"
                               % (gate_rounds, ir.ran, ir.passed, ir.failed, ir.env_fail,
@@ -969,22 +1139,38 @@ class LightLaneWorkflow(DevLaneWorkflow):
                         reason_code = "light_gate_env_unnamed"
                     else:
                         reason_code = "light_gate_red"
-                    note = ("gate round %d of this attempt" % gate_rounds
-                            + (" (narrowed face: %s)" % ", ".join(run_only)
-                               if run_only else " (full registry)")
-                            + (self._light_gate_note_tail(ir)))
+                    # 票面口径（宿主 260930）：轮次只给**计数**——收窄面 200+ 个名字不许内联
+                    # 进票面（全量在闸回执与 blocked_detail.round 里）。两个注记分工：
+                    #   round_desc = 票面用（轮次 + 跑面计数），
+                    #   note       = 明细 evidence 用（round_desc + 分类尾注，诊断面）。
+                    round_desc = ("gate round %d of this attempt" % gate_rounds
+                                  + (" (fast-feedback round narrowed to %d entr%s)"
+                                     % (len(run_only), "y" if len(run_only) == 1 else "ies")
+                                     if run_only else " (full registry)"))
+                    note = round_desc + self._light_gate_note_tail(ir)
                     if getattr(self, "_detail_face_on", False):
                         self.meta["blocked_detail"] = self._light_gate_blocked_detail(
                             ir, run_only, reason_code, note)
                         self._touch()
                     await self._blocked("run_integration_tests",
-                                        self._light_gate_blocked_text(ir, run_only, note))
+                                        self._light_gate_blocked_text(ir, run_only,
+                                                                      round_desc))
                     continue
                 env_names, _ok = self._tests_env_red_names(ir)
                 if env_names:
                     # 具名环境红不拦（供给面），但绝不静默：逐条进票面日志
                     self._log("named environment reds this round (not blocking): %s"
                               % ", ".join(env_names))
+                # 判绿 ≠ 无视红：把「被记录而不阻断」的存量红逐名记账（绝不静默变绿）
+                rec_face = self._light_recorded_pre_existing(ir)
+                if rec_face:
+                    self._log("green by protocol: %d red(s) are main-red-too and recorded, "
+                              "not blocking (baseline %s; source: %s): %s"
+                              % (rec_face["count"], rec_face["baseline_ref"],
+                                 rec_face["source"], ", ".join(rec_face["names"])))
+                    self._handoff("run_integration_tests",
+                                  "recorded, not blocking (%d main-red-too): %s"
+                                  % (rec_face["count"], ", ".join(rec_face["names"])))
                 phase = "merge_check"
                 continue
 
@@ -1183,23 +1369,23 @@ class LightLaneWorkflow(DevLaneWorkflow):
     UI_EVIDENCE_RED = "ui_evidence_missing"
 
     def _light_merge_blocked_text(self, mc: Any, red: str) -> str:
-        """merge_check 阻断文案（票面英文；逐条红 + 处置 + 出路）。
+        """merge_check 阻断文案（票面英文；**给人看的摘要**：结论 + 逐条红 + 决定 + 出路）。
 
         **UI 证据闸专段**（宿主 260930 两轮裁定：先「不产证据→另开全车道票」，后把
         ui_evidence 条件段加回，本条口径随之改写）：3.6 那条闸是**模板无关的全车道纪律**
         （reason_code=ui_evidence_missing，判据一个字不改）。轻道**现在能产证据**（条件段），
-        所以这条红的含义是「本道能产证据，但这次没产生/没挂上」。专段把它摊开：
-        说明这是全车道纪律、说明本道有截图步、列出命中的 UI 文件、给出**可行动**出路
-        （rework(to_stage=implement) 让条件段重跑；截图已在泳道后 retry_qc 重验闸），
-        绝不静默、绝不假绿，也不再把「另开全车道票」当作唯一出路。"""
+        所以这条红的含义是「本道能产证据，但这次没产生/没挂上」——专段说清这一点、给出
+        **可行动**出路（rework(to_stage=implement) 让条件段重跑；截图已在泳道后 retry_qc
+        重验闸），绝不静默、绝不假绿，也不再把「另开全车道票」当唯一出路。
+        宿主 260930 同一条票面纪律：机器清单不内联——命中的 UI 文件最多列 3 个 + 「(+N)」，
+        明细（哪一段失败/哪几条红）在 `blocked_detail` 与 `results.ui_evidence` 里。"""
         ui_reds = [c for c in (getattr(mc, "checks", None) or [])
                    if not c.get("green") and str(c.get("reason_code") or "") == self.UI_EVIDENCE_RED]
-        parts = [
-            "Merge check is red (light lane: every red goes to a human — no automatic "
-            "send-back). %s%s" % (red or "no per-item detail in the receipt",
-                                  " | error: %s" % mc.error if mc.error else ""),
-            "Remedies: fix the item named above and send retry_qc to re-run the check, "
-            "or rework(to_stage=implement) with a note to repair the lane.",
+        lines = [
+            "Blocked: the merge check is red — every red here goes to a human (no automatic "
+            "send-back in this lane).",
+            "What is red: %s%s." % (red or "no per-item detail in the receipt",
+                                    " | error: %s" % mc.error if mc.error else ""),
         ]
         if ui_reds:
             files = []
@@ -1207,33 +1393,34 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 for f in (c.get("files") or []):
                     if str(f) not in files:
                         files.append(str(f))
-            parts.append(
+            lines.append(
                 "UI-surface change detected (the UI evidence gate, reason_code=%s): this gate "
-                "is a full-lane discipline applied to every lane and template-independent — a "
-                "change whose diff hits UI paths must ship screenshots under "
-                ".sandbar/screenshots/. This lane CAN produce that evidence: the ui_evidence "
-                "conditional stage captures it through the shared helper (script stage, no "
-                "agent), so this red means the capture did not run or its screenshots did not "
-                "land for this change (for example a blocked/aborted implement round, a stale "
-                "lane, or capture failure — the stage's own receipt under "
-                "results.ui_evidence says which). Files hit: %s. Remedies: re-run the capture "
-                "step by sending rework(to_stage=implement) (the conditional stage runs again "
-                "after the implementation lands); or, once the screenshots are in the lane, "
-                "send retry_qc to re-run the gate. If neither clears it, the receipt names "
-                "the failing segment — bring it to a human."
-                % (self.UI_EVIDENCE_RED, ", ".join(files[:20]) or "(not named in the receipt)"))
-        return " ".join(parts)
+                "is a full-lane discipline that is template-independent (it applies to every "
+                "lane; screenshots must land under .sandbar/screenshots/). This lane CAN "
+                "produce that evidence — the ui_evidence conditional stage captures it — so "
+                "this red means the capture did not run or its screenshots did not land (a "
+                "blocked/aborted implement round, a stale lane, or a capture failure; "
+                "results.ui_evidence says which). UI paths hit: %s."
+                % (self.UI_EVIDENCE_RED, self._light_name_sample(files, limit=3)))
+        lines.append("Outcome: (1) rework(to_stage=implement) — re-run the capture step after "
+                     "the implementation lands; (2) retry_qc — re-run the check once the "
+                     "screenshots (or the fix) are in the lane; (3) if neither clears it, the "
+                     "receipt names the failing item — bring it to a human.")
+        lines.append("Details: blocked_detail (reds / next_action / files) + the receipt "
+                     "results.merge_check and results.ui_evidence.")
+        return "\n".join(lines)
 
     # ---------------------------------------------------------------- 判词小工具
     def _light_gate_note_tail(self, ir: Any) -> str:
-        """blocked 文案里的分类尾注（产品红/具名环境红/闸错误三类点名）。"""
+        """blocked 轮注记尾（票面英文）：**只给计数与分类**——具名清单在回执/明细里
+        （宿主 260930：票面不许内联机器清单）。"""
         names = self._tests_red_names(ir)
         env_names, _ok = self._tests_env_red_names(ir)
         bits = []
         if names:
-            bits.append("%d product red(s): %s" % (len(names), ", ".join(names)))
+            bits.append("%d product red(s)" % len(names))
         if env_names:
-            bits.append("%d named env red(s): %s" % (len(env_names), ", ".join(env_names)))
+            bits.append("%d named env red(s)" % len(env_names))
         if str(getattr(ir, "error", "") or ""):
             bits.append("gate error: %s" % str(ir.error)[:200])
         return ("; " + "; ".join(bits)) if bits else ""

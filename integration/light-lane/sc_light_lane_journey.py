@@ -18,7 +18,9 @@ intent（守护的用户可感知行为）：**一条轻道票真的走完它自
      `integration.cmd` 与主仓声明**逐字相同**（`python3 integration/run_scenarios.py`），
      且闸回执里出现夹具注册表里那三条场景名——只有真执行器读真注册表才可能产出。
   C. **红转人（不仲裁、不自动重跑）**：三条在册夹具场景被植成故意失败 ⇒ 票**进 blocked**
-     且票面带**完整违规集**（三条名全在，不是样本）+ 计数 + 闸回执指针 + 三条具名出路；
+     且票面=**给人看的摘要**（宿主 260930 实报口径）：行数 ≤10、字数 ≤1200、不含机器清单片段，
+     带计数 + 本票的账（≤5 名，超出以 (+N more) 计数）+ 闸回执/报告指针 + 三条出路；
+     全量违规集与逐名归因表**只在 blocked_detail 与回执里**；
      blocked_detail 的结构化面 `violations_complete=true`；blocked 之后账本在观察窗内
      **不再增长**（一个 attempt 只跑一轮，绝不自动循环）；timeline 零仲裁段。
   D. **人唤醒重跑闸**：blocked 态发人信号 `retry_qc` ⇒ 闸**真的重跑**（账本新增记录，
@@ -152,7 +154,7 @@ if m:
 # 调用（含 SANDBAR_SCENARIO_ONLY 收窄面）落进闸账本（跑面断言面）。占位符用 <<NAME>>
 # 形态而非 %-格式（脚本自身含 % 号，% 格式串会炸）。
 PROBE_SRC = r'''
-import json, os, sys, time
+import json, os, subprocess, sys, time
 NAME = "<<NAME>>"
 CTL = "<<CTL>>"
 LED = "<<LED>>"
@@ -162,15 +164,27 @@ try:
         mode = (f.read().strip() or "green")
 except OSError:
     mode = "green"
+# 本轮我在哪棵树里跑？闸的基线支路跑 main 侧的树（分支不是 lane/*），泳道轮跑 lane/*。
+# 探针据此区分「本票的账（lane-only）」与「main 存量（main-red-too）」两种夹具形态：
+#   lane-red = 只在泳道树里红（基线绿 ⇒ lane-only ⇒ 闸判 blockers 非空）
+#   all-red  = 两棵树都红（基线也红 ⇒ main-red-too ⇒ 闸判记录不阻断）
+try:
+    br = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=os.getcwd(),
+                        capture_output=True, text=True, timeout=30).stdout.strip()
+except Exception:
+    br = "?"
+in_lane = br.startswith("lane/")
+red = (mode == "all-red") or (mode == "lane-red" and in_lane)
 try:
     with open(LED, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"name": NAME, "mode": mode,
+        f.write(json.dumps({"name": NAME, "mode": mode, "branch": br,
+                            "in_lane": in_lane, "red": red,
                             "only": os.environ.get("SANDBAR_SCENARIO_ONLY", ""),
                             "cwd": os.getcwd(), "ts": time.time()},
                            ensure_ascii=False) + "\n")
 except OSError:
     pass
-if mode == "red":
+if red:
     sys.exit(1)
 '''
 
@@ -270,6 +284,19 @@ def read_jsonl(path):
             except ValueError:
                 rows.append({"raw": ln})
     return rows
+
+
+def bulk_name_fragments(text):
+    """票面纪律的机械判据：逗号分隔 ≥6 项、且该片段总长 >400 的片段（=机器清单内联）。
+
+    宿主 260930：这类片段**不得**出现在 blocked_reason（票面），但**必须**能在
+    blocked_detail 里找到（全量不丢）。本函数只做字面判，不解释语义。"""
+    out = []
+    for m in re.finditer(r"[^\s,;]+(?:\s*,\s*[^\s,;]+){5,}", str(text or "")):
+        frag = m.group(0)
+        if len(frag) > 400:
+            out.append(frag)
+    return out
 
 
 def git(*args, cwd=None):
@@ -445,8 +472,10 @@ def main():
     G["stub"] = os.path.join(G["tmp"], "ll_stub.py")
     with open(G["stub"], "w", encoding="utf-8") as f:
         f.write(STUB_SRC)
+    # 控档初值=lane-red：**只在泳道树里红**（基线支路跑 main ⇒ 绿）⇒ 归因 lane-only ⇒
+    # 闸的 blockers 非空 ⇒ 判红 → blocked（本票的账照旧拦）。
     with open(G["ctl"], "w", encoding="utf-8") as f:
-        f.write("red\n")
+        f.write("lane-red\n")
     try:
         # ---------- L0 环境与红线自证 ----------
         bench = require_bench(fail)
@@ -631,16 +660,33 @@ def main():
                        % sorted({r.get("name") for r in gate_rows}))
             check(all(r.get("only") == "" for r in round1),
                        "L3b 首轮=全量面（无 SANDBAR_SCENARIO_ONLY 收窄）")
-            # (c) 完整违规集 + 计数 + 回执指针 + 出路（不在文案里给样本）
-            for n in GATE_NAMES:
-                check(n in reason, "L3c blocked 文案点名违规项 %s（完整集，非样本）" % n)
-            check("Complete violation set (3)" in reason,
-                       "L3c blocked 文案给出完整集大小")
+            # (c) 票面=给人看的摘要（宿主 260930 实报口径）：计数 + 决定 + 可行动点名 ≤5
+            #     + 出路；机器清单（全量违例/逐名归因/收窄面全表）**只进明细与回执**。
+            _acct = [b for b in (detail.get("blockers") or [])
+                     if b and not str(b).startswith("__")
+                     and b not in set((detail.get("attribution") or {}).get("main_red_too") or [])]
+            _shown = [n for n in _acct if n in reason]
+            check(len(reason.splitlines()) <= 10,
+                  "L3c blocked_reason 行数 ≤10（一屏摘要；实得 %d 行）"
+                  % len(reason.splitlines()))
+            check(len(reason) <= 1200,
+                  "L3c blocked_reason 字数 ≤1200（实得 %d 字）" % len(reason))
+            check(bulk_name_fragments(reason) == [],
+                  "L3c **票面不含机器清单片段**（≥6 项且总长 >400 的名单）")
+            if _acct:
+                check(1 <= len(_shown) <= 5,
+                      "L3c 本票的账 ≤5 名（可行动；实得 %r）" % (_shown,))
+                if len(_acct) > len(_shown):
+                    check("(+%d more)" % (len(_acct) - len(_shown)) in reason,
+                          "L3c 超出部分以「(+N more)」计数出现（实得 %r）" % reason[-200:])
+            else:
+                check("none of the reds are this ticket's account" in reason,
+                      "L3c 本票无欠账时明写「none of the reds are this ticket's account」")
             check(re.search(r"3 ran / 0 passed / 3 failed / \d+ env-red", reason)
                        is not None, "L3c blocked 文案带计数（实得 %r）" % reason[:200])
             check("results.run_integration_tests" in reason
                        and "integration-report" in reason,
-                       "L3c blocked 文案带闸回执指针")
+                       "L3c blocked 文案带闸回执与报告指针")
             check("retry_qc" in reason and "rework(to_stage=implement)" in reason
                        and "dev-lane" in reason,
                        "L3c blocked 文案带三条具名出路（重跑/打回/另开全道票）")
@@ -651,6 +697,13 @@ def main():
             check(sorted(detail.get("violations") or [])[:3] == sorted(GATE_NAMES),
                        "L3c blocked_detail.violations=完整违规集（实得 %r）"
                        % (detail.get("violations"),))
+            _dump = json.dumps(detail, ensure_ascii=False)
+            check(all(n in _dump for n in GATE_NAMES),
+                  "L3c 全量违规集仍在明细里（票面瘦身 ≠ 吞数据）")
+            check(detail.get("report_path") == "out/integration-report-*.json"
+                  and detail.get("receipt_ref") == "results.run_integration_tests"
+                  and detail.get("detail_ref") == "blocked_detail",
+                  "L3c 明细带显式指针键（report_path/receipt_ref/detail_ref）")
             check(int((detail.get("counts") or {}).get("failed") or 0) == 3,
                        "L3c blocked_detail.counts.failed=3")
             check(len(detail.get("remedies") or []) == 3,
@@ -673,11 +726,10 @@ def main():
                   % (len(detail.get("violations") or []), len(labeled)))
             check("NEVER read as main-green" in str(attr_e2e.get("rule") or ""),
                   "L3c ③unknown 的保守口径在结构化面点名")
-            check("Red attribution against main" in (reason or ""),
-                  "L3c ③归因面进 blocked 文案")
-            check("unknown (no baseline answer — NOT main-green and NOT a landing permit)"
-                  in (reason or "") if attr_e2e.get("unknown") else True,
-                  "L3c ③有 unknown 时文案点名其保守读法")
+            check("attribution" in _dump and attr_e2e.get("note"),
+                  "L3c ③逐名归因表在**明细**里（票面只给计数）")
+            check(("no baseline answer" in reason) if attr_e2e.get("unknown") else True,
+                  "L3c ③有 unknown 时票面点名其计数与保守读法")
             kr_e2e = (detail.get("round") or {}).get("known_red")
             check(isinstance(kr_e2e, dict) and kr_e2e.get("injected") is True,
                   "L3c ②在册红豁免面：注入事实可见（实得 %r）" % (kr_e2e,))
@@ -718,8 +770,10 @@ def main():
                   % (n_disp_before, len(stub_stages_of(TID))))
 
         # ---------- L4 人唤醒：retry_qc 重跑闸（红转绿）→ 收口全量跑 → 人门 ----------
+        # 控档切 all-red：**两棵树都红**（基线支路也红）⇒ 归因 main-red-too ⇒
+        # 判词必须判**绿并照实记录**（判据=①blockers 空 ②无 unknown ③环境面具名）。
         with open(G["ctl"], "w", encoding="utf-8") as f:
-            f.write("green\n")
+            f.write("all-red\n")
         n_before = len(read_jsonl(G["gate_ledger"]))
         wake = cli(py, stage, "ticket", {"op": "retry_qc", "ticket_id": TID,
                                          "who": "e2e-human"})
@@ -744,10 +798,29 @@ def main():
               "L4 收窄跑面**如实进票面**（handoff 带 narrowed to 注记；实得 %r）"
               % (_hf[-3:],))
         _res = (snap2 or {}).get("results") or {}
-        check(str((_res.get("run_integration_tests") or {}).get("summary") or "")
-              .startswith("closing full run"),
+        _gate_rec = _res.get("run_integration_tests") or {}
+        check(str(_gate_rec.get("summary") or "").startswith("closing full run"),
               "L4 票面闸回执=收口全量跑那一次（summary 实得 %r）"
-              % str((_res.get("run_integration_tests") or {}).get("summary"))[:80])
+              % str(_gate_rec.get("summary"))[:80])
+        # 判词修后（260930）：blockers 空 + 全有基线答案 + 环境面具名 ⇒ 判绿，且
+        # **逐名记录在案**（绝不静默变绿）
+        _rec_face = _gate_rec.get("recorded_pre_existing") or {}
+        check(str(_gate_rec.get("status")) == "ok" and _gate_rec.get("blockers") == [],
+              "L4 判绿轮：回执 status=ok 且 blockers 空（本票的账已清；实得 %r/%r）"
+              % (_gate_rec.get("status"), _gate_rec.get("blockers")))
+        check((_rec_face.get("count") or 0) >= 3
+              and set(_rec_face.get("names") or []) >= set(GATE_NAMES),
+              "L4 存量红**逐名记录在案**（recorded_pre_existing=%r）"
+              % {k: _rec_face.get(k) for k in ("count", "names", "baseline_ref")})
+        check("main-red-too, not blocking" in str(_gate_rec.get("summary") or ""),
+              "L4 判绿轮的回执自证「记录不阻断」（summary 实得 %r）"
+              % str(_gate_rec.get("summary"))[:140])
+        check(any("recorded, not blocking" in str(h.get("summary") or "")
+                  for h in ((snap2 or {}).get("handoffs") or [])),
+              "L4 判绿轮的交接面自证「记录不阻断」")
+        _logs2 = str(((snap2 or {}).get("meta") or {}).get("log") or "")
+        check("green by protocol" in _logs2,
+              "L4 判绿轮在日志面自证（green by protocol … recorded, not blocking）")
         if snap2 is not None:
             check(snap2.get("stage") in ("merge_check", "merge")
                        or snap2.get("status") == "closed",
