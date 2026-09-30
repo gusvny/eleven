@@ -184,6 +184,31 @@ promoted to the full lane mid-flight — promotion is cheap, silent scope creep 
 
 ### 4.1 Profiles and routing
 
+**Settled (host decisions, 260930):**
+
+1. **The light lane is its own workflow, not a mode inside the existing one.** Sharing the existing
+   lane's stage machine would mean threading a profile branch through a very large, replay-sensitive
+   body of control flow, and would put every in-flight ticket's history at risk. The two lanes
+   instead **share the machinery that actually does work** (the activities: workspace preparation,
+   agent stages, the machine gate, merge check, merge, settlement, teardown — any workflow may call
+   them), and the light lane carries only its own short, simple stage walk. Registration is a
+   one-line addition to the workflow registry the engine already keeps, gates are already keyed per
+   (template, stage), the stage graph the console draws is already derived per template, and the
+   ticket-creation face already discovers templates from the engine rather than a hardcoded list —
+   so the surrounding product faces need no change.
+2. **A red in the light lane goes to a human, not to an arbitration round.** One machine round, the
+   complete violation list, then a person decides. This is deliberate: it keeps the lane light (the
+   arbitration loop is the most expensive part of the current lane by measurement) and it matches
+   what a light lane is for. If experience later shows that most reds are self-healing, a thin
+   arbitration call can be added — the machinery is an activity away.
+3. **Routing starts explicit, becomes mechanical later.** For the first phase a ticket is created
+   as a light-lane ticket on purpose; the mechanical rule (derived from the change surface, with
+   unclassified cases falling to the full lane) is added once there is field data on what the
+   light lane can actually carry. A light ticket that turns out to need the full lane is handled by
+   creating a full-lane ticket for the remaining work — lanes are not migrated mid-flight, because
+   a running workflow cannot change its class.
+
+
 A profile is defined by three things: which stages run, how wide the gate is, and which human
 gates are mandatory. Routing is derived from the change surface: files touched, contracts touched,
 repositories crossed, and whether engine internals are involved. The rule must be re-runnable
