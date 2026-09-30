@@ -75,7 +75,8 @@ ALL_NA_SCRIPT = ("import sys; sys.path.insert(0, %r); import lib_env; "
                  "lib_env.fail_if_all_na(2, 2)" % str(REPO / "integration"))
 
 SUMMARY_RE = re.compile(
-    r"^SCENARIOS ran=(\d+) pass=(\d+) fail=(\d+) env_fail=(\d+) na=(\d+) \(\d+s\)$",
+    r"^SCENARIOS ran=(\d+) pass=(\d+) fail=(\d+) env_fail=(\d+) na=(\d+) \(\d+s\)"
+    r"(?: reused=(\d+))?$",
     re.M)
 
 
@@ -96,10 +97,19 @@ def detail_counts(out):
 
 
 def check_invariant(label, out):
-    """双向净不变式：ran=pass+fail+env_fail，且汇总计数与明细行一致。"""
+    """双向净不变式：ran=pass+fail+env_fail，且汇总计数与明细行一致。
+
+    260930-01 追加：汇总行**必须**带 ` reused=N` 尾注（台账复用计数；本轮假表名不在
+    真账里 → 恒 0）。这是**加严**：既锁 additive 形状在场，又钉住「假表电池里零复用」
+    （复用条目不跑不计 ran，若哪天假表被复用，本断言先红再谈语义）。
+    """
     s = summary_of(out)
     d = detail_counts(out)
     ok(s is not None, label + "：SUMMARY 五计数形状在场")
+    m = SUMMARY_RE.search(out)
+    ok(bool(m) and m.group(6) == "0",
+       label + "：汇总行带 ` reused=0` 尾注（台账复用计数，additive；假表零复用）"
+       + ("" if m else " | 行未命中：%s" % out[-200:].replace("\n", "⏎")))
     if s:
         ok(s["ran"] == s["passed"] + s["failed"] + s["env_fail"],
            label + "：ran=pass+fail+env_fail（双向净不变式）")

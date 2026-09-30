@@ -37,6 +37,24 @@ Conventions:
   their import/require closure + the integration/ root shared-infra files)
   for the gate's forced-full-run exception leg. Default (no env, no flag) =
   every entry runs, byte-identical to before.
+- Ledger-based reuse (t260930-01, the 41.5% wasted-repeat fix): a scenario is
+  SKIPPED (not executed, never counted as freshly run) iff the results ledger
+  (`integration/scenario_ledger.py`) already holds a row with the same
+  scenario name, the same commit sha (exact equality with the HEAD of the tree
+  being verified — not an ancestor, not "recent"), the same env fingerprint,
+  the same conc_width and verdict=pass. Skipped entries are called 复用
+  (reused); `ran + reused == expected` replaces `ran == expected` as the
+  completeness invariant, and reuse is never silent: a dedicated
+  `INTEG_REUSE` stdout line, a `reused` key in INTEG_SUMMARY, `reused`/
+  `reused_names` in the report JSON, and ` reused=N` appended to the SCENARIOS
+  line. Reused names get NO new ledger row (a reused green must age out on its
+  own). Fail-closed — reuse is disabled for the whole round, with a loud
+  one-line reason, when the ledger module cannot be imported, reading raises,
+  the tree is dirty (HEAD alone then does not describe what is verified), the
+  commit sha or the env fingerprint cannot be determined, or the env kill
+  switch disables it. Kill switch: `SANDBAR_LEDGER_REUSE` — values 0/off/
+  false/no (case-insensitive) disable reuse; unset or anything else leaves it
+  enabled.
 - In-pool concurrency (260909 speedup campaign round 2): an entry may carry
   a fifth element "serial" — scenarios that must run one after another even
   inside a pool (process-shaped / fixed-port / pidfile-assumption families);
@@ -1939,6 +1957,11 @@ SCENARIOS = [
     ("t260929-19-acceptance-extra-face-survival",
      "create-time acceptance extras 台面存活回归棒（t260929-19，灰盒 L3，离线秒级零 docker）：工单实报 dev_lane._enter 每次段进入无条件 meta[\"acceptance\"]=模板列表，实例 extras 首段进入即丢（t260929-18 动态复现；全局清单仅 t260915-01 detail-face 族 extras 恒空，无同 intent 在册）。锁用户台面旅程：A 非空 extras 建票→_init 后台面含模板项+全部 extras，首段 _enter 后仍全可见且首段 checklist 同含（schema 承诺两落点）；B 反向锁=推进第 2 段后台面恰为第 2 段模板列表（stage-1 视图不冻结前携）；C 重入锁=首段第二次进入（gen>1 返工形态）后台面=首段模板列表（sibling base.py:1046-1049 声明语义，退场有规则非静默截断）；D 畸形用例=模板项重复/空串/纯空白/非字符串条目逐条显式降级不炸、台面无重复无空行、丢弃条目台账具名留痕（explicit 而非 silent）；E 接线锁=_enter 的 acceptance 覆盖在条件分支内（防测试在场闸被拆回潮，源码锁样式同 test_t260915_01 §E）。intent 分工：developer L1 守 sanitizer 真值表与 gen 分支细节；本条守台面旅程+畸形不炸。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio（引擎 venv）缺席=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache \"$PY\" -B integration/t260929-19/sc_acceptance_extra_face_survival.py", "ro", "serial"),
+
+    # ---- t260930-01: 台账绿行复用（同 commit 同环境指纹同宽才跳过实跑）----
+    ("t260930-01-ledger-reuse-round",
+     "台账绿行复用端到端行为棒（t260930-01，灰盒 L3，离线秒级零 docker 零 Temporal，真 git 树纯 stdlib）：账里已存 76,558 次执行/41.5% 是同一 (scenario, commit) 重复——本条锁「同 commit 同环境指纹同宽的绿行可直接跳过实跑」这条新契约的用户可感知面。A 首轮零命中=实跑（规范行 PASS 在场、汇总 reused=0/ran=expected=1、SCENARIOS 行带 ` reused=0` 尾注、账里落一条同名绿行）；B 同 commit 第二轮=复用（stdout 专行「INTEG_REUSE 复用台账绿行 1 条…」点名、夹具标记文件未重造=确实没跑、零规范行、ran=0 且 reused==expected==1、rc=0 正常绿、**账行数不增=不重盖章**、报告 JSON 带 reused 与全名单与「启用」三态）；C 换 commit（同一棵树切到**内容逐字节相同、只有 sha 不同**的兄弟提交）=零复用实跑（判据第一键**精确相等**：祖先/别提交都不算；同内容兄弟提交这一形把「换的只有 commit 这一维」钉死，复用失败不可能被别的原因解释）；D kill switch SANDBAR_LEDGER_REUSE=0=零复用且 stderr 一行具名理由点名该 env；E 脏树（未跟踪件）=零复用且理由点名「工作树脏」（HEAD 单独描述不了被验证的树）；F 主账不可读（目录权限 000）=fail-closed 零复用且理由具名（绝不按空账静默放行）；G 真 verify_lane integ 道跑全复用轮=回执带 reuse.reused=1/all_reused=True/名单/在册数、并打 REUSE_FULL_ROUND 专行、闸判**绿**（完整性判据 ran+reused==expected 在复用轮与残缺轮两侧都成立）。intent 分工：四键真值表/畸形行容错/三态理由归 L1 server/engine/tests/test_t260930_01_ledger_reuse.py（白盒）；执行器三态出口与清单完整性归 t260904-12/t260910-13 电池（本条只锁 ` reused=` 尾注形状在场）；闸的台账采信（红名归属/基线免跑）归 t260922-12 家族，本条只锁复用面回执。真 git 树落本场景私有临时目录（finally+atexit 双路回收并 worktree prune，main 树 worktree 注册表零残留）；账目录经 SANDBAR_SCENARIO_LEDGER_DIR 隔离投影，真账零写入；红线零接触 3099。git 缺席=ENV_FAIL exit 2",
+     "python3 integration/t260930-01/sc_ledger_reuse_round.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900
@@ -1976,6 +1999,186 @@ def _env_fp_parts():
                 h.update(f.encode() + b"\0" + fh.read() + b"\0")
     parts["integ_protocol_libs"] = h.hexdigest()
     return parts
+
+
+def _env_fp_value(cached=None):
+    """本轮环境指纹（64hex）。cached（前置复用检查算出的值）优先——同一轮里复用判据与
+    汇总行必须是**同一个**指纹值：重算两次会把「比的是哪个指纹」变成不可复核的隐含面
+    （协议库在跑面内被改动时两值还会分叉）。协议库缺席=上抛（调用点各有降级口径）。"""
+    if cached:
+        return cached
+    return _fp_mod.env_fingerprint(_env_fp_parts())["value"]
+
+
+# ---------------- t260930-01 台账绿行复用（同 commit 同指纹同宽才复用） ----------------
+#: 复用总开关（kill switch）：0/off/false/no（大小写不敏感）关；其余值（含缺席）=开。
+LEDGER_REUSE_ENV = "SANDBAR_LEDGER_REUSE"
+#: INTEG_REUSE 行打印的名字上限（更长的名单截断加 `…` + 总数；**全名单**只在报告 JSON）。
+REUSE_PRINT_CAP = 20
+_REUSE_OFF_WORDS = ("0", "off", "false", "no")
+
+_REUSE_LEDGER_MOD = None
+
+
+def _reuse_ledger_module():
+    """惰性装载本树 `integration/scenario_ledger.py`（台账库唯一真源，单加载器缓存）。
+
+    按**文件位**装载（本模块既当脚本跑也被 importlib 以异名装载，`import
+    scenario_ledger` 的 sys.path 前提不成立）；装载失败**上抛**——由调用点把
+    「台账库装不上=本轮禁用复用」的响亮理由打出去（fail-closed，绝不静默回退成
+    「账里没有绿行」）。"""
+    global _REUSE_LEDGER_MOD
+    if _REUSE_LEDGER_MOD is None:
+        import importlib.util as _ilu
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "scenario_ledger.py")
+        spec = _ilu.spec_from_file_location("_sandbar_reuse_ledger", p)
+        if spec is None or spec.loader is None:
+            raise ImportError("无法按文件位装载台账库：%s" % p)
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _REUSE_LEDGER_MOD = mod
+    return _REUSE_LEDGER_MOD
+
+
+def reusable_names(rows, commit, env_fp, width, candidates=None):
+    """纯函数（无 I/O、可直测）：从台账行里挑出**可复用**的场景名。
+
+    判据四键全等（t260930-01）：同一 scenario 名 + 同一 commit（与头部 sha 精确相等，
+    祖先不算）+ 同一 env_fp + 同一 conc_width，且该行 verdict == "pass"。
+
+    畸形行一律跳过、绝不抛（读取面不可信：多键/缺键/类型错/名字空/宽度非正整数都
+    不构成「可复用」证据）。返回**排序去重**后的名字列表（确定性输出）。
+    candidates 给出时只在该集合内取名（本轮在册面），None=不限。"""
+    picked = set()
+    for r in rows or ():
+        if not isinstance(r, dict):
+            continue
+        name = r.get("scenario")
+        if not isinstance(name, str) or not name or (candidates is not None
+                                                     and name not in candidates):
+            continue
+        if r.get("commit") != commit or r.get("env_fp") != env_fp:
+            continue
+        w = r.get("conc_width")
+        if isinstance(w, bool) or not isinstance(w, int) or w != width:
+            continue
+        if r.get("verdict") != "pass":
+            continue
+        picked.add(name)
+    return sorted(picked)
+
+
+def _tree_state(root):
+    """被验证树的状态判定：(head_sha, dirty)，任一判不了 = (空串, True)。
+
+    脏树判据=`git status --porcelain` 非空——HEAD 单独描述不了正在被验证的树
+    （未提交改动不在任何提交里），此时复用**必须**关掉：拿旧绿的账去顶未提交的改动
+    =静默假绿。git 缺件/非仓/超时一律按「判不了」处理（fail-closed）。"""
+    try:
+        h = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=30)
+        if h.returncode != 0:
+            return "", True
+        head = h.stdout.strip()
+        s = subprocess.run(["git", "-C", root, "status", "--porcelain"],
+                           capture_output=True, text=True, timeout=30)
+        if s.returncode != 0:
+            return head, True
+        return head, bool(s.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return "", True
+
+
+def _reuse_plan(candidates, conc_width, root, env_fp_value=None):
+    """本轮复用判定（main 的前置检查段；台账读取面唯一入口）。
+
+    返回 dict：enabled=本轮是否真的采信复用（`names` 只有 enabled 时才非空）、
+    names=可复用场景名（排序）、disabled_reason=**关掉**的具名理由（None=没被关掉）、
+    zero_reason=开着但零命中的具名理由（None=有命中或被关掉；零命中不是「关掉」——
+    「启用但账里没得复用」与「本轮禁用复用」在观测面必须可分辨）、
+    candidates/ledger_path/git_head/env_fp/width=观测面。
+
+    三态（fail-closed 的关一律带响亮一行理由——由调用点打 stderr）：
+      · 台账库装不上/读账抛错/主账不可读 → 关（理由点名异常或路径）；
+      · 工作树脏 / HEAD 或指纹判不出 → 关（HEAD 单独描述不了被验证的树）；
+      · `SANDBAR_LEDGER_REUSE` ∈ 0/off/false/no → 关（显式 kill switch）；
+      · 账里同 commit 同指纹同宽的绿行零命中 → **不关**（enabled 仍 True、names 空、
+        zero_reason 具名）——正常轮次里零命中是常态，不该每轮在 stderr 上刷「禁用」
+        的假信号（那不是降级，是本轮没有可复用的绿行）。
+
+    主账**缺席**不是错误（新机器=空账）——zero_reason 文案显式声明这一点，不冒充
+    「账里查过没有绿行」；主账**不可读**（权限/是目录等）才是 fail-closed 的关。"""
+    root = os.path.abspath(root)
+    plan = {"enabled": False, "names": [], "disabled_reason": None,
+            "zero_reason": None, "candidates": len(list(candidates or ())),
+            "ledger_path": "", "git_head": "", "env_fp": env_fp_value or "",
+            "width": conc_width}
+    # 指纹先算：kill switch/脏树关掉时也算（观测面「本轮若开复用会比的是哪个指纹」），
+    # 且它的键集（python/node + 集成协议库）与 git 面无关，属于独立的判不了面。
+    # 算法与闸/台账行同源（failure_protocol.env_fingerprint，与 `_env_fp_parts` 配套）：
+    # 协议库缺席=判不出（回落自算哈希会与台账行永远不等=静默恒不复用，故显式关）。
+    if env_fp_value:
+        env_fp = env_fp_value
+    elif _fp_mod is None:
+        plan["disabled_reason"] = ("环境指纹判不出（failure_protocol 协议库缺席，"
+                                   "与台账行无法比对）")
+        return plan
+    else:
+        try:
+            env_fp = _env_fp_value()
+        except Exception as e:   # noqa: BLE001 —— 指纹判不出=关（不猜）
+            plan["disabled_reason"] = ("环境指纹判不出（%s: %s）"
+                                       % (type(e).__name__, e))
+            return plan
+    if not env_fp:
+        plan["disabled_reason"] = "环境指纹判不出（协议库缺席或指纹为空）"
+        return plan
+    plan["env_fp"] = env_fp
+    if str(os.environ.get(LEDGER_REUSE_ENV, "")).strip().lower() in _REUSE_OFF_WORDS:
+        plan["disabled_reason"] = ("%s=%s 显式关闭复用（kill switch）"
+                                   % (LEDGER_REUSE_ENV,
+                                      os.environ.get(LEDGER_REUSE_ENV)))
+        return plan
+    head, dirty = _tree_state(root)
+    if not head:
+        plan["disabled_reason"] = ("HEAD sha 判不出（git 缺席/非仓/命令失败）——"
+                                   "没有可比对的提交面")
+        return plan
+    plan["git_head"] = head
+    if dirty:
+        plan["disabled_reason"] = ("工作树脏（git status 非空）——HEAD 单独描述不了"
+                                   "正在被验证的树，未提交改动不得由旧绿顶替")
+        return plan
+    try:
+        mod = _reuse_ledger_module()
+        plan["ledger_path"] = str(mod.ledger_path())
+        rows, bad = mod.read_rows()
+    except Exception as e:   # noqa: BLE001 —— 装不上/读不动=关（响亮点名，绝不静默）
+        plan["disabled_reason"] = ("台账库装载或主账读取失败（%s: %s）——本轮禁用复用"
+                                   % (type(e).__name__, e))
+        return plan
+    if rows and bad:
+        # 读取面不可信：畸形行自身不构成可复用证据（由 reusable_names 逐行跳过），
+        # 这里只把「账里有读不懂的行」写进观测面理由（不静默）。
+        plan["bad_lines"] = len(bad)
+    plan["enabled"] = True
+    plan["names"] = reusable_names(rows, head, env_fp, conc_width,
+                                   candidates=set(candidates or ()))
+    if not plan["names"]:
+        plan["zero_reason"] = ("台账无同 commit+同环境指纹+同宽绿行可复用"
+                               "（主账=%s；文件缺席=空账，非「查过没有」）"
+                               % plan["ledger_path"])
+    return plan
+
+
+def _reuse_names_face(names):
+    """INTEG_REUSE 行的名单面：超过 REUSE_PRINT_CAP 截断加 `…` + 总数。"""
+    shown = list(names)
+    if len(shown) > REUSE_PRINT_CAP:
+        shown = shown[:REUSE_PRINT_CAP]
+        return ",".join(shown) + "…（共 %d 条）" % len(names)
+    return ",".join(shown)
 
 
 def _spec_from_output(name, pool, out, exit_code, dur, started):
@@ -2667,7 +2870,8 @@ def _fmt_left(left):
 
 
 def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_failed,
-                           wall, expected, prelude_s=0.0, progress=None):
+                           wall, expected, prelude_s=0.0, progress=None,
+                           reused=0):
     """总预算耗尽收口（260927）：点名「跑了几条/还剩哪些没跑」后**立刻退出**。
 
     为什么是 os._exit 而不是正常返回：预算耗尽意味着外层截止近在眼前，而存活池线程
@@ -2684,9 +2888,11 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
         结构化），闸侧据此把「未跑完」当**独立可见发现**上报，不当零信号、不当产品红。
 
     计数口径：未跑条目计入 **env_fail**（容量面环境红），并**计入 ran**——这样
-    `ran == pass+fail+env_fail` 与 `ran == expected` 两条自洽不变式同时成立：既不给
-    「清单残缺」伪红，也不让未跑的条目冒充已跑（明细行逐条点名它的名字与原因）。
-    「**已跑**」在文案里只算到点前真正开跑的那些（ran 计入未跑条目之后 print 会撒谎）。"""
+    `ran == pass+fail+env_fail` 与 `ran + reused == expected` 两条自洽不变式同时成立
+    （t260930-01：复用条目已从 pools/exclusives 摘除、不在 run_unrun 里，只走 reused
+    那一项）：既不给「清单残缺」伪红，也不让未跑的条目冒充已跑（明细行逐条点名它的
+    名字与原因）。「**已跑**」在文案里只算到点前真正开跑的那些（ran 计入未跑条目之后
+    print 会撒谎）。"""
     executed = int(ran)                     # 到点时真正跑完的条数（未跑条**不计入此数**）
     if progress is not None:
         progress.flush()                    # 收口前把已完成面钉死（进度件与收口面同口径）
@@ -2698,14 +2904,17 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
     for name, pool in run_unrun:
         print("ENV_FAIL [%s] exit=2 (0.0s)\n    总预算耗尽：未开跑（池=%s）——"
               "本条不是跑红，是没验到（容量面）" % (name, pool), flush=True)
-    print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
-          % (ran, passed, failed, env_failed, wall), flush=True)
+    print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs) reused=%d"
+          % (ran, passed, failed, env_failed, wall, reused), flush=True)
     print("INTEG_BUDGET_EXHAUSTED 总预算耗尽：已跑 %d/%d 条、未跑 %d 条、墙钟 %.0fs／预算 %ds"
           % (executed, expected, len(run_unrun), wall, int(budget)), flush=True)
     try:
         print("INTEG_SUMMARY " + json.dumps(
             {"ran": ran, "pass": passed, "fail": failed, "not_checked": env_failed,
              "wall_s": round(wall, 1), "expected": expected,
+             # t260930-01：复用计数（additive，恒在场）——收口面同样带，闸的
+             # ran + reused == expected 判据在本路也成立（复用条目不在 run_unrun 里）。
+             "reused": reused,
              "timings": {"prelude_s": round(float(prelude_s), 1),
                          "scenarios_s": round(max(0.0, wall - float(prelude_s)), 1)},
              "budget_env": "present",
@@ -2766,10 +2975,21 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     width-2 herd already flaked under load, see the module docstring; the
     browser chain pool shares one console and stays strictly serial —
     registry order is its contract); SANDBAR_POOL_CONC=1 restores the old
-    semantics (strict serial everywhere, pools included — see Phase 2)."""
+    semantics (strict serial everywhere, pools included — see Phase 2).
+
+    Ledger reuse (t260930-01): the pre-run check may drop entries whose
+    (scenario, commit, env_fp, conc_width) already carries a verdict=pass row
+    in the results ledger — dropped entries are 复用 (reused), never run and
+    never counted as run; `ran + reused == expected` is the completeness
+    invariant. Any fail-closed condition (ledger unloadable/unreadable, dirty
+    tree, undeterminable HEAD or fingerprint, SANDBAR_LEDGER_REUSE kill switch)
+    disables reuse for the whole round with a loud named reason — see the
+    module docstring."""
     import threading
     from concurrent.futures import ThreadPoolExecutor
     ran = passed = failed = env_failed = 0
+    reused = 0
+    reused_names = []
     t0 = time.time()
     lock = threading.Lock()
     # ---- 260927 总预算（缺省零分支：env 缺席=0=本段一行不启用，逐字节同改前）----
@@ -2833,6 +3053,42 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
               flush=True)
         for e in registry:
             print("  点名 [%s]（池=%s）" % (e[0], pool_of(e)), flush=True)
+    try:
+        conc_width = max(1, int(os.environ.get("SANDBAR_POOL_CONC", "4")))
+    except ValueError:
+        conc_width = 4
+    # 本轮在册数（**单点算一次**，t260930-01）：复用条目只是没实跑、仍在册——它一旦
+    # 被从 registry 里摘掉，`len(registry)` 就不再等于在册数，故在摘除**之前**定死，
+    # 后续（预算收口/完整性不变式/汇总行）一律引用本值。口径与原式逐字同义
+    # （点名轮=点名∩非排除池；缺省轮=全表−被排除池），只是口径写成了「摘复用条目前的
+    # 那一次」——改成 `len(only_names)` 会**改变**既有语义（把「点名但属被排除池」也
+    # 算进在册），那是回归，不是本票的事（t260930-01 实锤：only+exclude 电池当场红）。
+    expected = len(registry) if only_names \
+        else (len(SCENARIOS) - len(excluded_entries))
+    # ---- t260930-01 台账绿行复用（本段只**判定**；跳过发生在池切分处，见下）----
+    # 前置检查一次性算出本轮复用名单；复用条目不进 pools/exclusives（既不跑也不计 ran），
+    # expected 仍是本轮在册数，故不变式是 ran + reused == expected（汇总/闸两处同口径）。
+    # 响亮纪律分两档：①**关掉**（fail-closed/kill switch/脏树/账读不动）=一行具名理由上
+    # stderr（降级绝不静默）；②**开着但零命中**=正常轮次（账里没有同键绿行），不打
+    # 「禁用」假信号，理由只进报告 JSON 的观测键（本轮没得复用这件事在报告里可读）。
+    _pre_t0 = time.time()   # t260925-12：套件前奏（清扫+台面卫生+批台预起）墙钟，闸段归因观测面
+    _reuse = _reuse_plan([e[0] for e in registry], conc_width, _REPO_ROOT)
+    reuse_env_fp = _reuse.get("env_fp") or None   # 汇总行复用同一指纹（同轮内一致）
+    if _reuse["names"]:
+        reused_names = list(_reuse["names"])
+        reused = len(reused_names)
+        print("INTEG_REUSE 复用台账绿行 %d 条（同 commit 同环境指纹同宽，未实跑）：%s"
+              % (reused, _reuse_names_face(reused_names)), flush=True)
+        print("  复用判据 commit=%s env_fp=%s width=%s 主账=%s（复用条目不重盖章，"
+              "绿行自行老化）"
+              % (_reuse.get("git_head"), _reuse.get("env_fp"), conc_width,
+                 _reuse.get("ledger_path")), flush=True)
+    elif _reuse.get("disabled_reason"):
+        print("INTEG_REUSE 本轮禁用复用：%s" % _reuse["disabled_reason"],
+              file=sys.stderr, flush=True)
+    if reused:
+        _reuse_set = set(reused_names)
+        registry = [e for e in registry if e[0] not in _reuse_set]
     pools, exclusives = {}, []
     for e in registry:
         if excluded and pool_of(e) in excluded:
@@ -2846,10 +3102,6 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         serial = opt == "serial" or fifth == "serial"
         pools.setdefault(pool, []).append((e, serial))
 
-    try:
-        conc_width = max(1, int(os.environ.get("SANDBAR_POOL_CONC", "4")))
-    except ValueError:
-        conc_width = 4
     # "name" -> SANDBAR_POOL_CONC lanes; "name:N" -> N lanes; absent -> 1.
     conc_pools = {}
     for x in os.environ.get(
@@ -2958,7 +3210,6 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             print("\n".join(block), flush=True)
 
     timings = []   # KI-060 prep 2: timing distribution (one row per scenario, with pool attribution)
-    _pre_t0 = time.time()   # t260925-12：套件前奏（清扫+台面卫生+批台预起）墙钟，闸段归因观测面
     _sweep_residue_stages()   # t260912-02 清理挂点①：套件前残台清扫（判拆点名；失败响亮不中止）
     _docker_hygiene()   # 起跑前台面卫生（t260910-14 arbitrate gen2/gen3：见函数注）
     # ---- 260927 前奏预算闸：前奏（清扫+卫生+预起）把预算吃掉了就在此收口，绝不开跑 ----
@@ -2970,8 +3221,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         print("FAIL [__budget__] 总预算在前奏（清扫+台面卫生+批台预起）里已耗尽——"
               "本轮零场景开跑（%s）" % _fmt_left(_prelude_left), flush=True)
         _budget_exhausted_exit(t_mono, run_budget, run_unrun, ran, passed, failed,
-                               env_failed, time.time() - t0, len(registry),
-                               prelude_s=time.time() - _pre_t0, progress=progress)
+                               env_failed, time.time() - t0, expected,
+                               prelude_s=time.time() - _pre_t0, progress=progress,
+                               reused=reused)
     # ---- t260921-06 批台预起（清扫后、场景前）：恰一批消费者轮=恰起 1 个批台 ----
     selected = list(exclusives) + [e for _lst in pools.values() for (e, _s) in _lst]
     consumers = batch_consumers(selected)
@@ -3036,12 +3288,10 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     _left_now = _budget_left(t_mono, run_budget)
     if run_unrun:
         # 真·耗尽：有条目**没开跑**（预算被前面的场景吃光）→ 未跑清单收口（exit 2）
-        expected_b = len(registry) if only_names \
-            else (len(SCENARIOS) - len(excluded_entries))
         wall_b = time.time() - t0
         _budget_exhausted_exit(t_mono, run_budget, run_unrun, ran, passed, failed,
-                               env_failed, wall_b, expected_b,
-                               prelude_s=_prelude_s, progress=progress)
+                               env_failed, wall_b, expected,
+                               prelude_s=_prelude_s, progress=progress, reused=reused)
     if _left_now is not None and _left_now <= 0:
         # 越窗（**不是**「没跑完」）：全部条目都跑了，只是墙钟越过了预算——观测面点名
         # （additive 行，绝不改判红绿：跑完且全绿就是绿）。与「耗尽」严格分流：混成一个
@@ -3054,16 +3304,18 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     # t260911 仲裁③：ran==在册数是唯一机械不变式（汇总自洽挡不住条目级丢失）
     # t260913-03：在册数=本轮在册（扣除被排除池条目——不在本轮在册，不冒充已跑）
     # t260922-12：点名轮的在册=点名∩非排除池（未被点名的条目不在本轮在册）
-    expected = len(registry) if only_names else (len(SCENARIOS) - len(excluded_entries))
-    complete = (ran == expected) and executor_error is None
-    if ran != expected:
-        print("FAIL [__executor__] 清单残缺：ran=%d != 在册 %d（条目静默丢失面，"
-              "fail-closed 红）" % (ran, expected), flush=True)
+    # t260930-01：在册数在本轮期间**不变**（复用条目只是没实跑，仍在册），不变式升级为
+    #   ran + reused == expected——既不许条目静默丢失，也不许复用轮冒充「实跑全绿」。
+    complete = (ran + reused == expected) and executor_error is None
+    if ran + reused != expected:
+        print("FAIL [__executor__] 清单残缺：ran=%d + reused=%d != 在册 %d"
+              "（条目静默丢失面，fail-closed 红；复用条目只算复用、不算实跑）"
+              % (ran, reused, expected), flush=True)
     if excluded:
         print("本轮跳过池=%s（少 %d 条）" % (",".join(excluded), len(excluded_entries)),
               flush=True)
-    print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs)"
-          % (ran, passed, failed, env_failed, wall), flush=True)
+    print("SCENARIOS ran=%d pass=%d fail=%d env_fail=%d na=0 (%.0fs) reused=%d"
+          % (ran, passed, failed, env_failed, wall, reused), flush=True)
     # t260925-12：前奏耗时单独点名（观测面 stdout 行+报告 JSON+INTEG_SUMMARY timings
     # 块，见下方汇总处）。归因口：套件 wall 含前奏；wall − prelude_s ≈ 纯场景跑面。
     print("执行器前奏（清扫+台面卫生+批台预起）墙钟 %.1fs" % _prelude_s, flush=True)
@@ -3086,8 +3338,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         _here = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, os.path.join(_here, "..", "server", "engine"))
         import failure_protocol as _fp
-        _parts = _env_fp_parts()
-        _fpv = _fp.env_fingerprint(_parts)
+        _fpv = {"value": _env_fp_value(cached=reuse_env_fp)}
         if spec_cases and _fp_mod is not None:
             _counts = _fp.recount(spec_cases)
             _ran, _p, _f, _nc = (_counts["ran"], _counts["pass"],
@@ -3104,6 +3355,10 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             "pool_config": ",".join(sorted("%s:%s" % kv for kv in conc_pools.items())),
             "env_fingerprint": _fpv["value"],
             "expected": expected,   # t260911 仲裁③：在册条数——闸复核 ran==expected
+            # t260930-01：复用计数（additive 键，恒在场：零复用=0 不是缺键），既有键
+            # 一个不动——闸的完整性判据用 ran + reused == expected，老执行器没这个键
+            # 时闸按 0 处理（逐字节同改前）。全名单只落报告 JSON（stdout 名单有上限）。
+            "reused": reused,
             # t260913-03：条件键——仅排除旋钮生效时出现（缺省键集逐字节不变）
         }
         if excluded:
@@ -3154,7 +3409,18 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
                    "generated": _dt.datetime.now().isoformat(),
                    "conc_width": conc_width,
                    "conc_pools": sorted("%s:%s" % kv for kv in conc_pools.items()),
-                   "timings": timings}
+                   "timings": timings,
+                   # t260930-01：复用观测面（additive）——计数 + **全名单**（stdout 的
+                   # INTEG_REUSE 名单有 20 条上限，报告里没有上限，仲裁读得全）+ 本轮
+                   # 复用的启用/禁用/零命中三态（「被禁用」与「没得复用」必须可分辨）。
+                   "reused": reused, "reused_names": list(reused_names),
+                   "reuse_enabled": bool(_reuse.get("enabled")),
+                   "reuse_disabled_reason": _reuse.get("disabled_reason"),
+                   "reuse_zero_reason": _reuse.get("zero_reason") if not reused else None,
+                   "reuse_judged_by": {"commit": _reuse.get("git_head"),
+                                       "env_fp": _reuse.get("env_fp"),
+                                       "conc_width": conc_width,
+                                       "ledger": _reuse.get("ledger_path")}}
         if excluded:
             _report["excluded_pools"] = list(excluded)
             _report["excluded_count"] = len(excluded_entries)

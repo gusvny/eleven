@@ -46,10 +46,13 @@ ENV_KEY = "SANDBAR_SCENARIO_EXCLUDE_POOLS"
 # 260929 登记两键（直修 B1·宿主令不开票）：环境红**具名**通道——
 #   env_red_names = 判为环境面的场景名（判据=执行器既有 env_like：exit 2 / spawn -8），
 #                   排序去重；env_red_count = 其条数（int）。恒在场（全绿时 []/0）。
+# 260930-01 登记一键（台账绿行复用）：reused = 本轮**未实跑**的复用条数（int，恒在场，
+#   零复用=0）——与 ran 分开计（ran 恒为实跑条数），完整性不变式升级为
+#   ran + reused == expected；老执行器无此键时闸按 0 处理（逐字节同改前）。
 DEFAULT_SUMMARY_KEYS = {
     "ran", "pass", "fail", "not_checked", "wall_s", "concurrency",
     "pool_config", "env_fingerprint", "expected", "budget_env", "timings",
-    "env_red_names", "env_red_count",
+    "env_red_names", "env_red_count", "reused",
 }
 
 _spec = importlib.util.spec_from_file_location(

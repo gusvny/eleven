@@ -53,6 +53,23 @@ python3 integration/run_scenarios.py
   据此放行。资产派生面（被排除条目 cmd token ∪ 其 import/require 传递闭包 ∪ `integration/`
   根共享基建面，sc_ 场景文件除外）保留，用于未知池/非法池名单点判红。已知缺口（动态导入、
   非 integration/ 且未声明的资产面、.sh 内容不遍历）登记在 t260913-03 结算，由定期全量轮兜底。
+- **台账绿行复用**（t260930-01，治「41.5% 的执行是同一 (场景, 提交) 重复」）：一轮里
+  某条场景**可不实跑**，当且仅当结果台账里已有一行**四键全等**的绿行——同 `scenario`
+  名、同 `commit`（与被验证树 HEAD **精确相等**：祖先不算、「最近跑过」不算）、同
+  `env_fp`、同 `conc_width`，且 `verdict=pass`。被跳过的条目叫**复用**：既不执行也**不
+  计入 ran**，完整性不变式升级为 `ran + reused == expected`（复用单独一列，绝不冒充
+  新鲜通过）；复用条目不落新账行（不刷新时间戳，绿行自行老化）。**绝不静默**：stdout
+  专行 `INTEG_REUSE 复用台账绿行 N 条（同 commit 同环境指纹同宽，未实跑）：<名单>`
+  （名单超 20 条截断加 `…（共 N 条）`）、`INTEG_SUMMARY` 的 `reused` 计数、报告 JSON 的
+  `reused`/`reused_names`（**全名单**）与本轮三态（启用/禁用/零命中）、`SCENARIOS …`
+  行尾追加 ` reused=N`；闸回执另有 `reuse{reused,names,expected,all_reused,accounted}`
+  面与全复用轮的 `REUSE_FULL_ROUND` 专行（仲裁不必读执行器 stdout）。**fail-closed 关掉
+  全轮复用并打一行具名理由（stderr）**：台账库装不上/读账抛错/主账不可读、工作树脏
+  （HEAD 单独描述不了被验证的树）、HEAD 或环境指纹判不出、显式关闸。总开关
+  `SANDBAR_LEDGER_REUSE`：`0`/`off`/`false`/`no`（大小写不敏感）=关，其余值（含缺席）=开。
+  已知取舍：同提交上**抖动绿**会被如实复用（判据是账里那条绿行，不是运气复现）；换提交/
+  脏树/换宽度即自动回退实跑。全复用轮（在册数全为复用）仍出正常绿回执——它说的是
+  「这个确切的树已验证过」，不是「又验了一遍」。
 - 舞台纪律（t260904-19 定稿：自搭进程舞台退役，双轨并一轨）：一切需要舞台的场景
   经 **integration/stage_docker.py** 单点搭台（同一 compose 文件
   server/docker-compose.test.yml；每场景独立 compose 工程名+端口档，flock 原子

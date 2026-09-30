@@ -737,6 +737,65 @@ def _parse_budget_signal(stdout):
     return out
 
 
+def _parse_reuse_counts(payload):
+    """执行器汇总里的复用面 → `(reused, names_or_None, had_key)`。
+
+    t260930-01：**additive** 读取——老执行器没有 `reused` 键时 had_key=False、
+    count=0，调用方据此走与改前**逐字节相同**的路径（清单完整性仍判 ran==expected）。
+    畸形值（负数/非整数/名单非列表）按 0/None 处理并保留 had_key=True：键在场却读不懂
+    属执行器撒谎面，由 recount 复核与 err 文案点名，不在此处静默当「没有这个特性」。"""
+    if not isinstance(payload, dict) or 'reused' not in payload:
+        return 0, None, False
+    raw = payload.get('reused')
+    count = raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else 0
+    names = payload.get('reused_names')
+    names = [str(x) for x in names] if isinstance(names, list) else None
+    return count, names, True
+
+
+def _reuse_accounted(reused, expected, header_seen):
+    """全复用轮的**可交代性**判据（t260930-01，纯函数、可直测）。
+
+    全复用轮 `ran=0` + `reused=N>0`：它之所以能算「有信号」而不是「零信号」，前提是
+    这笔复用**能对得上账**——否则就是新开的静默逃逸口（拿一句 reused=N 顶掉「什么
+    都没验到」）。三条件全中才算可交代，任一不中=红（由调用方落 detail_red）：
+      ① `expected` 在场且 **恰等于** reused（「N==本轮在册」：不是随手报一个数）；
+      ② `INTEG_REUSE` 专行在场（响亮的唯一 stdout 凭证）；
+      ③ 该专行**没有被截断**（截断时 stdout 名单不全——可交代性改由汇总行的
+         权威名单承担，此处不因截断判红）。
+    非全复用轮（reused==0）恒 True（本判据只针对「零实跑」这个特例）。"""
+    if not reused:
+        return True
+    if expected is None or int(expected) != int(reused):
+        return False
+    if not header_seen[0]:
+        return False
+    return True
+
+
+def _track_reuse_lines(stdout, reuse_lines, header_seen):
+    """跟读执行器的复用面行（t260930-01 回执取源）。
+
+    行形：`INTEG_REUSE 复用台账绿行 N 条（同 commit 同环境指纹同宽，未实跑）：<名,名…>`
+    ——按**公开行契约**取名字（全角冒号后逗号分隔；执行器把名单上限截断时行尾是
+    `…（共 N 条）`，此时置 header_seen[1]=截断标记）。汇总行的 `reused_names` 是权威
+    取源，本行只是 stdout 冗余面（读不到就少一份证据，不改任何判定）。"""
+    for ln in (stdout or '').splitlines():
+        if not ln.startswith('INTEG_REUSE '):
+            continue
+        header_seen[0] = True
+        if '：' not in ln:
+            continue
+        tail = ln.split('：', 1)[1].strip()
+        if '…' in tail:
+            header_seen[1] = True
+            tail = tail.split('…', 1)[0]
+        for nm in tail.split(','):
+            nm = nm.strip()
+            if nm and nm not in reuse_lines:
+                reuse_lines.append(nm)
+
+
 def _parse_integ_run(stdout, returncode):
     """解析执行器三态输出契约（PASS [ / FAIL [ / ENV_FAIL [ + 四空格缩进尾注）
     → (ran, passed, failed, env_failed, scen, err)。
@@ -746,19 +805,28 @@ def _parse_integ_run(stdout, returncode):
     首版只数文本行曾误杀规范行协议回执）：文本结果行 / '{'·'[' 开头规范行 /
     INTEG_SUMMARY 汇总行 ran>0，任一在场=有信号、不红（绿红交闸既有判定面）；
     三者全空且 exit==0 才是「零场景信号」红（执行器空转/坏面，不冒充绿）。
-    半截行（如 `PASS [x` 无闭括号）不计数不崩，随零信号面显式红。"""
+    半截行（如 `PASS [x` 无闭括号）不计数不崩，随零信号面显式红。
+
+    t260930-01：**全轮复用**是第四种合法信号（`ran=0` 但汇总声明 `reused=N>0`）——
+    它同样不是静默：执行器自报了「这 N 条按台账绿行跳过」。此处的判据只做**在场判定**
+    （reused>0 即算有信号），是否「可交代」（reused 与在册数/名单/专行对得上）由
+    `_reuse_accounted` + 复用回执面判——本层不提前 err，否则全复用轮永远到不了闸的
+    判定面（KI-116 逃逸口是「零信号静默绿」，不是「把有交代的复用当成信号」）。"""
     ran = passed = failed = env_failed = 0
     scen, cur = [], None
     has_signal_row = False
     summary_ran = 0
+    summary_reused = 0
     for line in stdout.splitlines():
         s = line.strip()
         if s[:1] in ('{', '['):
             has_signal_row = True     # 规范行协议在场=信号（解析权威在闸，此处只判在场）
         elif s.startswith('INTEG_SUMMARY '):
             try:
-                summary_ran = int(json.loads(s[len('INTEG_SUMMARY '):]).get('ran') or 0)
-            except (json.JSONDecodeError, ValueError, AttributeError):
+                _pl = json.loads(s[len('INTEG_SUMMARY '):])
+                summary_ran = int(_pl.get('ran') or 0)
+                summary_reused = int(_pl.get('reused') or 0)
+            except (json.JSONDecodeError, ValueError, AttributeError, TypeError):
                 pass                  # 畸形汇总由闸 malformed 面点名，此处不判
         line = line.rstrip()
         if line.startswith('PASS ['):
@@ -792,7 +860,7 @@ def _parse_integ_run(stdout, returncode):
             scen.append(cur)
         elif cur is not None and line.startswith('    '):
             cur['output_tail'] = (cur['output_tail'] + line + '\n')[-4000:]
-    if ran == 0 and (has_signal_row or summary_ran > 0):
+    if ran == 0 and (has_signal_row or summary_ran > 0 or summary_reused > 0):
         # 信号在场（规范行协议/汇总行计数面）——恒交闸既有判定面（t260910-13
         # 行权威口径），**先于 exit≠0 判定**：真红以 cases 承载、rc≠0 与用例红面的
         # 一致性由闸自检，台账写入面也消费同一用例面——本层提前 err 会连写账路径
@@ -1057,12 +1125,28 @@ def _integ(args):
                 executor_summary = json.loads(ln[len('INTEG_SUMMARY '):])
             except json.JSONDecodeError:
                 malformed.append(('INTEG_SUMMARY 畸形：' + ln)[:200])
+    # t260930-01：执行器复用了 N 条（`ran + reused == expected` 不变式的一半）。
+    # **additive**：老执行器（无 reused 键）→ reuse_n=0/reuse_had_key=False，本段
+    # 全部判据与回执形状与改前逐字节一致；键在场却读不懂 → 记 had_key=1、计数 0，
+    # 由下面的完整性判据响亮红（不静默当「没有这个特性」）。
+    reuse_n, reuse_names_summary, reuse_had_key = _parse_reuse_counts(executor_summary)
+    reuse_parsed, reuse_header = [], [False, False]
+    _track_reuse_lines(lane_out, reuse_parsed, reuse_header)
+    # 全复用轮（ran=0/reused>0）凭什么算「有信号」：**这笔复用得能交代**——见
+    # `_reuse_accounted`（expected 恰等于 reused + 专行在场 + 未截断）。不交代的
+    # 零实跑轮照旧红（新逃逸口不许开）。
+    reuse_ok = _reuse_accounted(
+        reuse_n, (executor_summary or {}).get('expected'), reuse_header)
 
     lane_fp = fp.env_fingerprint(_env_fp_parts(root))
 
     # 闸重算复核（C6/C8：权威=闸重算；执行器汇总只是前置快检）+
     # 清单完整性（t260911 仲裁③：expected 在场时 ran==expected 是唯一机械不变式，
     # 自洽性挡不住条目级丢失——执行器静默丢条面在此现形）
+    # t260930-01：复用条目不跑也不计 ran，故不变式升级为 **ran + reused == expected**
+    # ——「清单残缺」与「复用轮冒充实跑全绿」两侧同时封死（不改写 ran 的含义：
+    # ran 恒为**实跑**条数，复用单独一列）。老执行器（无 reused 键）reuse_n=0 →
+    # 判据退化成改前的 ran==expected，逐字节同改前。
     recount_mismatch = None
     if executor_summary is not None and cases_dedup:
         real = fp.recount(cases_dedup)
@@ -1074,11 +1158,29 @@ def _integ(args):
             recount_mismatch = ('gate recount %r does not match the executor summary %r '
                             '(a lying summary is red)' % (real, executor_summary))
         elif executor_summary.get('expected') is not None \
-                and int(executor_summary['expected']) != executor_summary.get('ran'):
-            recount_mismatch = ('manifest incomplete: ran=%s != registered expected=%s '
-                                '(silent item loss, t260911)'
+                and int(executor_summary['expected']) != \
+                (executor_summary.get('ran') or 0) + reuse_n:
+            recount_mismatch = ('manifest incomplete: ran=%s + reused=%s != registered '
+                                'expected=%s (silent item loss, or a partly-reused round '
+                                'passed off as a full fresh run; ledger reuse counted '
+                                'separately, t260911/t260930-01)'
                                 % (executor_summary.get('ran'),
+                                   executor_summary.get('reused'),
                                    executor_summary['expected']))
+    elif executor_summary is not None and not cases_dedup and reuse_n > 0:
+        # 执行器自报复用了 N 条却**零规范行**：唯一合法解释=全轮复用（ran=0）；此时
+        # 不变式仍必须自洽（expected == reused），否则是「零场景信号却自称复用」的
+        # 撒谎面——explicit 红，绝不当空转绿放过。
+        expected = executor_summary.get('expected')
+        if expected is not None and int(expected) != reuse_n:
+            recount_mismatch = ('fully-reused round inconsistent: reused=%s != expected=%s '
+                                '(nothing ran and the reuse count does not account for the '
+                                'whole register, t260930-01)'
+                                % (executor_summary.get('reused'), expected))
+        elif expected is None:
+            recount_mismatch = ('executor reports reuse (reused=%s) but carries no expected '
+                                'count and no case rows — unaccountable reuse is red '
+                                '(t260930-01)' % executor_summary.get('reused'))
 
     legacy_red = (failed + env_failed) > 0
     baseline_enabled = _os.environ.get('SANDBAR_GATE_BASELINE', '1').lower() \
@@ -1177,7 +1279,8 @@ def _integ(args):
                  and not malformed
                  and not recount_mismatch
                  and not dupes
-                 and not executor_crashed)
+                 and not executor_crashed
+                 and reuse_ok)
     else:
         green = (failed == 0 and env_failed == 0 and proc.returncode == 0
                  and not recount_mismatch and not compat_unparsed_red)
@@ -1215,6 +1318,14 @@ def _integ(args):
                               if isinstance(c, dict) and c.get('status') != 'pass'],
                              baseline_cases, lane_fp, baseline_fp, baseline_ok)},
             'detail_red': ([{'malformed': m} for m in malformed]
+                           + ([{'reuse_unaccounted': (
+                               'executor reports reused=%s with ran=0 but the reuse is '
+                               'not accounted for (expected=%s, INTEG_REUSE line '
+                               'present=%s) — a fully-reused round must name its count, '
+                               'the register size and print the loud line (t260930-01)'
+                               % (reuse_n, (executor_summary or {}).get('expected'),
+                                  reuse_header[0]))}]
+                              if not reuse_ok else [])
                            + ([{'executor_crashed': crash_note}] if executor_crashed else [])
                            + ([{'recount': recount_mismatch}] if recount_mismatch else [])
                            + ([{'compat_unparsed_red': 'legacy text rows are red with no spec rows; fail-closed, '
@@ -1252,6 +1363,50 @@ def _integ(args):
             pool_exclude['excluded_pools'] = \
                 executor_summary.get('excluded_pools') or []
         _out['pool_exclude'] = pool_exclude
+
+    # ---- t260930-01 复用面回执（**additive**：老执行器无 reused 键 → 键一个不加）----
+    # 仲裁读者不问执行器 stdout 就要能读出「N of M verified by ledger reuse at this
+    # exact commit」；全轮复用更要一眼可辨（all_reused + 专行）。判定语义零改动：
+    # 这段只读汇总/专行的观测面，绝不翻 green、不作 blocker、不进写账。
+    if reuse_had_key:
+        _expected_n = executor_summary.get('expected') if executor_summary else None
+        _names = list(reuse_names_summary or [])
+        if not _names and reuse_parsed and not reuse_header[1]:
+            _names = list(reuse_parsed)          # 汇总行名单缺失时的 stdout 冗余面
+        _out['reuse'] = {
+            'reused': reuse_n,
+            'names': _names,
+            'names_capped': bool(reuse_header[1]),
+            'expected': _expected_n,
+            'all_reused': bool(reuse_n > 0 and _expected_n is not None
+                               and reuse_n == int(_expected_n)),
+            'accounted': bool(reuse_ok),
+            'header_line': bool(reuse_header[0]),
+            'report': 'out/integration-report-*.json (reused/reused_names; the runner '
+                      'caps the INTEG_REUSE stdout name list (20) and the report JSON '
+                      'carries the full list)',
+            'note': ('reused scenarios were NOT executed in this round: the ledger '
+                     'already held verdict=pass at the same commit + env_fp + '
+                     'conc_width — reuse is counted separately from ran, never as a '
+                     'fresh pass'),
+        }
+        if reuse_n > 0 and not reuse_header[0]:
+            # 复用必须响亮：计数在场却连专行都没有=执行器自报的复用不可核（不改判定，
+            # 但绝不静默——回执上点名）。
+            sys.stderr.write('REUSE_WARN executor reports reused=%d but printed no '
+                             'INTEG_REUSE line — the reuse claim is unreadable on '
+                             'stdout (observation only; no judging change)\n' % reuse_n)
+            sys.stderr.flush()
+        if reuse_n > 0:
+            print('REUSE %d of %s scenario(s) verified by ledger reuse at commit %s '
+                  '(not executed: same commit + env_fp + width green row)'
+                  % (reuse_n, _expected_n if _expected_n is not None else '?',
+                     lane_head or '?'), flush=True)
+        if _out['reuse']['all_reused']:
+            print('REUSE_FULL_ROUND this round executed NOTHING: every one of the %d '
+                  'registered scenario(s) was reused from the ledger at commit %s — a '
+                  'green receipt here means "already verified at this exact tree", not '
+                  '"verified again"' % (reuse_n, lane_head or '?'), flush=True)
 
     # ---------------- t260922-12 写账（①⑦）+ 回执面 ----------------
     # lane 行 + 基线行一次成批；记账面≠判定面——写失败不翻 green，但必须响亮
