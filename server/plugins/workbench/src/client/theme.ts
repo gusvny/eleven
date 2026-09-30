@@ -87,39 +87,52 @@ export function epicChipMuted(): string {
  * 重复定义无害，保证任一组件独立挂载时令牌都在场）。
  */
 export const DERIVE_TOKENS_CSS = `:root{
-/* 文字系：45% 语义基色 × 55% 平台前景——浅档基色微加深（对比度↑），深档自动提亮 */
-/* t260929-22 gen9（对比度行级打回：平台 label 在浅底实测 rgb(122,122,133)≈4.24，
-   一切继承 fg 的正文都在线下）——fg 锁固定深墨；深壳主题启用时须连本块一起重订
-   （同 --dsw-derive-warn/muted 等 gen8 深墨家族口径，UT contrast-palette 看守）。 */
---dsw-derive-fg:#24292f;
---dsw-derive-ink-blue:#0550ae;
-/* t260929-22 gen8（对比度打回：平台 label 极性/取值不定，混不出保证对比度——
-   文字语义令牌改为浅档深墨声明位裸值；深壳主题若启用须连本块一起重订）。 */
---dsw-derive-muted:#57606a;
+/* 文字系：基色 × 平台前景混色——浅档基色微加深（对比度↑），深档自动提亮 */
+/* t260929-22 gen9 曾把 fg/muted/warn/ink-* 锁成「浅档深墨裸值」，理由是平台 label
+   在浅底实测 rgb(122,122,133)≈4.24。该做法的代价在集测**暗档档位**上暴露：固定深墨落在
+   暗底上整片不可读（t260905-08 contrast/dark 违例 375，首例 sidebar/wb-group-name
+   1.21）。定值无法同时满足两档——平台浅档底与暗档底互斥，而能翻转的只有 label。
+   故一律回到「深基色 P% × 平台 label」形态（与 main 既有形态同构，只把基色压深到
+   两档都够）：浅档混出足够深的墨，暗档随 label 提亮。P 与基色由四档位 × 白底/四族淡底
+   × 跨族淡底的 WCAG 模型定，悲观假设（浅档 label=真台中层灰）下最差 4.7~5.1、
+   乐观假设（闸注入 label=#1f2328）下最差 6.1~7.4；暗档同面 6.0~8.8。 */
+--dsw-derive-fg:color-mix(in srgb,#24292f 30%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-ink-blue:color-mix(in srgb,#0550ae 43%,var(--dsw-alias-label-primary,#1f2328));
+/* muted/active 的旧基色（#57606a / #7c3aed）偏浅，任何比例都够不着 4.5——基色一并压深。 */
+--dsw-derive-muted:color-mix(in srgb,#3d444d 42%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-border:var(--dsw-alias-border-l,#d0d7de);
 --dsw-derive-canvas:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
 --dsw-derive-surface:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 13%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-surface-2:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 26%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-accent:#0969da;
+/* t260929-22 直修（宿主令 260930，integration 执行）：accent/danger/success 三个**文字墨**
+   的定值不够深。它们不只落在自家淡底上，还落在**跨族淡底**上——blocked 行卡底色是
+   danger 12% 铺在旧平台面 #f5f8fa 上，而卡内的 wb-card-id 是蓝墨，实测 4.03。
+   两个方向都试过：① 压深「基色」但保留与 --dsw-alias-label-primary 的混色（本改法）；
+   ② 直接给浅档深墨定值——②在暗档必翻车（固定深墨落在暗底上不可读，闸的 light/dark 两个档位
+   是分别注入两档平台令牌实测的）。故取 ①：浅档混出足够深的墨，暗档自动随 label 提亮。
+   四档位 × 白底/三族淡底/跨族淡底全量模型（WCAG 相对亮度）最差：accent 5.06、danger 5.03、
+   success 4.75；暗档同面 5.5~6.5。判据真源=integration/t260905-08 与 t260907-08（全 DOM
+   扫描非抽样），改值后按四档位实跑复验。 */
+--dsw-derive-accent:color-mix(in srgb,#033d8b 40%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-solid:#1f6feb;
 --dsw-derive-on-solid:#ffffff;
---dsw-derive-active:#7c3aed;
+--dsw-derive-active:color-mix(in srgb,#5a2ea6 41%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-deep:color-mix(in srgb,#0550ae 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-bg:color-mix(in srgb,#0969da 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-accent-border:color-mix(in srgb,#0969da 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-danger:#cf222e;
+--dsw-derive-danger:color-mix(in srgb,#8f1a20 38%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-danger-solid:#d1242f;
 --dsw-derive-danger-bg:color-mix(in srgb,#cf222e 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-danger-border:color-mix(in srgb,#cf222e 40%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-success:color-mix(in srgb,#1a7f37 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-success:color-mix(in srgb,#0f5323 40%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-success-deep:color-mix(in srgb,#116329 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-success-solid:#2da44e;
 --dsw-derive-success-bg:color-mix(in srgb,#1a7f37 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 /* t260929-22 gen5（对比度红 4.24<4.5）：warn 文字加深——基色换 warn-deep 家族的
    #7d4e00、alias 只作 30% 少数项（极性不定时混不出保证对比度，见 UT contrast-palette）。 */
---dsw-derive-warn:#7d4e00;
---dsw-derive-ink-strong:#24292f;
+--dsw-derive-warn:color-mix(in srgb,#7d4e00 46%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-ink-strong:color-mix(in srgb,#24292f 30%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-deep:color-mix(in srgb,#7d4e00 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));

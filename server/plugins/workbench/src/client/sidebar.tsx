@@ -363,6 +363,12 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
+/* t260929-22 直修（宿主令 260930，integration 执行）：.wb-view-icon 静息档 0.55 透明度
+   用在**文字字符**图标（⋯ 更多视图）上时，合成后的有效色在白底只到 3.50、旧平台面
+   3.43——透明度压不出 AA（0.55 时即便纯黑也只 4.75，实际墨色达不到）。本元素改走
+   muted 墨色（极性自适应）：静息仍是弱化观感，两档都 ≥4.5，几何零改动。
+   其余 view icon 不用文字字符（SVG），不受本规则影响。 */
+.wb-view-icon[data-wb-more-views] { opacity:1; color:var(--dsw-derive-muted,#57606a); }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
 .wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
   color:var(--dsw-derive-danger-border,#ff8183); background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
