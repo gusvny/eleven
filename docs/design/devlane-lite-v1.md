@@ -211,9 +211,24 @@ overrides are recorded and, if they recur, are evidence that the rule is wrong.
 ### 4.3 Proportional gate
 
 The change surface is computed from what actually changed, then widened by dependencies and by any
-red inherited from the previous round. The full registry runs **once, at landing**. Red names may
-be added to a light-lane round only if the artifact shows they belong to the change surface; a name
-that appears for the first time at landing is recorded and attributed before it may block.
+red inherited from the previous round; a path that cannot be classified widens to the whole
+registry rather than being dropped. The full registry runs **once, at landing**.
+
+Two things worth stating precisely, because they are easy to get backwards:
+
+- **The authorization rule already works this way.** A round that ran a narrowed surface is
+  feedback only; when a verdict of "fine" is reached on such a round, a **closing full run** is
+  performed before it counts, and new reds from that run void the verdict. So narrowing a round
+  never narrows what authorizes progress — it only decides how much the *earlier* rounds cost and
+  what they can see.
+- **The gap worth fixing is the feedback surface, not the authorization.** Today's narrowed round
+  contains the previous round's reds and nothing else, so a change that breaks something **new**
+  cannot show up until the closing full run — a wasted cycle. Widening the feedback surface to
+  "what this change can actually affect ∪ previous reds" is therefore the point: it catches new
+  damage in the cheap round instead of the expensive one.
+
+A name that appears for the first time in the closing run is recorded and attributed before it may
+block.
 
 ### 4.4 Execution environment
 

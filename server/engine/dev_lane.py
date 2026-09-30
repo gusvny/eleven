@@ -73,6 +73,7 @@ with workflow.unsafe.imports_passed_through():
         prepare_workspace,
         reprobe_red_scenarios,
         run_integration_tests,
+        surface_plan,
         settle_conflict_resolution,
         settle_lane,
         teardown_lane,
@@ -105,6 +106,7 @@ with workflow.unsafe.imports_passed_through():
         AUTHZ_SIGNAL_GATE_MARKER,
         AgentStageArgs,
         ChangedFilesArgs,
+        SurfacePlanArgs,
         ConflictPrepArgs,
         ConflictPrepResult,
         ConflictSettleArgs,
@@ -386,6 +388,14 @@ TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
 # 空/畸形）→ fail-closed 恒全跑。同构布尔门：旧历史（无本 marker）走 v1 判据逐字
 # 旧行为，在途票不追溯。
 TARGETED_RERUN_FILE_RADIUS_PATCH_ID = "dev-lane-targeted-rerun-file-radius-v1"
+# t260930-02（宿主裁 260930「先 B」）：面计划——快反馈面从「只有上轮红名」扩成
+# 「本次改动面 ∪ 上轮红名」。旧判据的缺口是实打实的：定点轮只跑上轮红名，于是**这次
+# 改动新碰坏了什么**在快反馈里看不见，只能等收口全量跑才发现（白烧一轮）。判定面
+# 在 integration 侧单一真源（声明式 surface 映射 + 未归类即全量），本门只消费其回执：
+# mode=full / 查询失败 / 空名单一律按**全量**跑（fail-closed）。**收口全量跑一字不动**
+# （放行仍只认全量，见 _closing_full_run）——本门只改快反馈面，不改放行依据。
+# 同构布尔门：旧历史（无本 marker）逐字旧行为，在途票不追溯。
+SURFACE_PLAN_PATCH_ID = "dev-lane-surface-plan-v1"
 # t260922-18：主同步门（宿主拍板「只在机械验证前并一次」）——run_integration_tests 相位
 # 入口、0-commit 前置检查之后、跑闸之前，由 worker 活动（prepare_conflict_resolution，
 # 唯一「并 ref 进泳道」实现）把 main 并进泳道一次；已追平=is-ancestor 快路径零动作幂等。
@@ -2962,6 +2972,40 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             list(self.meta.get("write_set") or []), prev_red_names,
                             first_run=(self._gen("run_integration_tests") == 0))
                             if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
+                    if workflow.patched(SURFACE_PLAN_PATCH_ID) and not run_only \
+                            and _cf_files and not _cf_err:
+                        # 面计划：本改动面该跑哪些场景（integration 侧判定）
+                        _sp_t = self._now_epoch()   # t260925-12 归因面
+                        _sp = await workflow.execute_activity(
+                            surface_plan,
+                            SurfacePlanArgs(
+                                ticket_id=self.ticket_id,
+                                worktree=str(self.meta.get("worktree") or ""),
+                                changed_files=list(_cf_files),
+                                prev_red_names=list(prev_red_names or [])),
+                            start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+                        gate_cf_s += max(0, self._now_epoch() - _sp_t)
+                        _sp_names = list(getattr(_sp, "names", None) or [])
+                        _sp_mode = str(getattr(_sp, "mode", "") or "")
+                        self.meta["surface_plan_trace"] = {
+                            "mode": _sp_mode,
+                            "reason": str(getattr(_sp, "reason", "") or ""),
+                            "count": len(_sp_names),
+                            "surfaces": list(getattr(_sp, "surfaces", None) or []),
+                            "error": str(getattr(_sp, "error", "") or "")}
+                        if _sp_mode == "targeted" and _sp_names:
+                            run_only = _sp_names
+                            self._log("面计划：改动面 %d 文件 → 快反馈面 %d 条"
+                                      "（surfaces=%s；放行仍只认收口全量跑）"
+                                      % (len(_cf_files), len(run_only),
+                                         ",".join(self.meta["surface_plan_trace"]["surfaces"])
+                                         or "-"))
+                        else:
+                            self._log("面计划：回全量跑（mode=%s reason=%s%s）"
+                                      % (_sp_mode or "-",
+                                         self.meta["surface_plan_trace"]["reason"] or "-",
+                                         ("｜" + self.meta["surface_plan_trace"]["error"])
+                                         if self.meta["surface_plan_trace"]["error"] else ""))
                     if run_only:
                         self._log("两层复跑：定点复跑面（%s）——仅快反馈，放行只认收口全量跑"
                                   % ",".join(run_only))

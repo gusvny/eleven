@@ -19,6 +19,7 @@ in-flight old lanes — see the individual # naming-compat markers).
 
 from __future__ import annotations
 
+import json
 import dataclasses
 import datetime as _dt
 import hashlib
@@ -341,6 +342,91 @@ class ChangedFilesArgs:
     ticket_id: str
     worktree: str = ""                          # 泳道根（git 命令 cwd；空=REPO_ROOT）
     branch: str = ""                            # 泳道分支（merge-base 对象；空=fail-closed）
+
+
+#: 面计划 mode 词表（真源=执行器 `--print-surface-plan` 的 JSON 契约）
+SURFACE_PLAN_MODES = ("targeted", "full")
+
+
+@dataclass
+class SurfacePlanArgs:
+    """t260930-02 面计划查询入参：把「本次实际改了哪些文件」交给 execution 侧的只读
+    查询面，问「本轮该跑哪些场景」。判定面（声明式 surface 映射 + 未归类即全量）在
+    integration 侧单一真源，本处只传参不判定。prev_red_names=上轮红名（引擎侧不变式：
+    快反馈面必须含上轮红名，否则「改完没有」在下一轮看不出来）。"""
+
+    ticket_id: str
+    worktree: str = ""                          # 泳道根（查询进程 cwd；空=引擎仓根）
+    changed_files: List[str] = field(default_factory=list)
+    prev_red_names: List[str] = field(default_factory=list)
+
+
+@dataclass
+class SurfacePlanResult:
+    """t260930-02 面计划回执。mode="targeted" 时 names=本轮定点面（非空）；
+    mode="full"/error 非空=调用方必须**全量跑**（fail-closed：空名单绝不当「没有要跑
+    的」消费）。reason=机器 token（ok / no-changed-files / unclassified-path:<path> /
+    surface-doc-missing / …），surfaces=命中的面 id（留痕面）。"""
+
+    mode: str = "full"
+    names: List[str] = field(default_factory=list)
+    surfaces: List[str] = field(default_factory=list)
+    reason: str = ""
+    error: str = ""
+    wall_s: float = 0.0
+
+
+def parse_surface_plan(stdout, prev_red_names=()):
+    """纯函数（t260930-02）：解析执行器 `--print-surface-plan` 的单行 JSON。
+
+    返回 `(names, mode, reason, error)`：
+      - mode="targeted" → names = 改动面 ∪ 上轮红名（排序去重、非空）；
+      - mode="full" / 任何畸形（无输出、非 JSON、mode 不在词表、names 非列表、含非串、
+        targeted 却空名单）→ `names=[]、mode="full"`——**空名单=全量**，调用方据此按
+        全量跑，绝不按空名单收窄（fail-closed）。
+    红名只在 targeted 时并入，且畸形红名条目跳过（不因红名脏而放宽或收窄面）。
+    """
+    if not isinstance(stdout, str) or not stdout.strip():
+        return [], "full", "empty-stdout", "面计划查询无输出"
+    payload = None
+    for line in reversed(stdout.splitlines()):
+        t = line.strip()
+        if t.startswith("{") and t.endswith("}"):
+            try:
+                payload = json.loads(t)
+            except ValueError:  # 只吞**JSON 解析错**：代码错（NameError 等）必须炸出来，
+                # 否则「本函数写错了」会伪装成「输入畸形→全量」，判据面就被静默放宽了
+                # （t260930-02 实测：shared.py 漏 import json 时本条曾把 NameError 吞成
+                # malformed-json，八种输入全判畸形）。
+                payload = None
+            if isinstance(payload, dict):
+                break
+            payload = None
+    if not isinstance(payload, dict):
+        return [], "full", "malformed-json", "面计划输出不是单行 JSON 对象"
+    mode = str(payload.get("mode") or "")
+    reason = str(payload.get("reason") or "")
+    if mode not in SURFACE_PLAN_MODES:
+        return [], "full", "bad-mode:%s" % (mode or "empty"), \
+            "mode 不在词表 %s" % (SURFACE_PLAN_MODES,)
+    raw_names = payload.get("names")
+    if not isinstance(raw_names, list):
+        return [], "full", "bad-names-shape", "names 不是列表"
+    names = []
+    for n in raw_names:
+        if not isinstance(n, str):
+            return [], "full", "bad-name-element", "names 含非字符串元素"
+        n = n.strip()
+        if n and n not in names:
+            names.append(n)
+    if mode == "full":
+        return [], "full", reason or "full", ""
+    if not names:
+        return [], "full", "empty-plan", "targeted 但面为空（空面=全量，不收窄）"
+    for r in (prev_red_names or ()):
+        if isinstance(r, str) and r.strip() and r.strip() not in names:
+            names.append(r.strip())
+    return sorted(names), "targeted", reason or "ok", ""
 
 
 @dataclass

@@ -7586,6 +7586,90 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
 
 
 @activity.defn
+async def surface_plan(args: shared.SurfacePlanArgs) -> shared.SurfacePlanResult:
+    """t260930-02 面计划查询（只读、无锁、零场景启动）：把改动清单交给执行器的
+    `--print-surface-plan` 只读查询面，回「本轮该跑哪些场景」。
+
+    为什么要有：定点面过去只含**上轮红名**（快反馈），于是「这次改动**新**碰坏了什么」
+    在定点轮里看不见——只能等收口全量跑才发现，白烧一轮。面计划把「本次改动面」并进
+    快反馈轮，同时**不动**收口全量跑（放行仍只认全量）。
+
+    fail-closed（本活动绝不抛）：清单为空 / 子进程失败 / 超时 / 输出畸形 → 返回
+    mode="full"、names=[]、error 具名——调用方按**全量**跑，绝不按空名单收窄。
+    """
+    import asyncio as _aio
+    t0 = time.time()
+    files = [str(f).strip() for f in (args.changed_files or []) if str(f).strip()]
+    if not files:
+        return shared.SurfacePlanResult(
+            mode="full", reason="no-changed-files",
+            error="改动清单为空=面不可得（fail-closed 全量）")
+    cwd = str(args.worktree or REPO_ROOT)
+    # 混合版本缝（同「闸 wrapper 不认新旋钮」家族）：执行器是**泳道自己那份副本**——
+    # 旧泳道（本门落地前建的）里没有 --print-surface-plan；而不认识的 flag 被 _cli
+    # 宽容忽略，于是查询会**变一趟真全量跑**（既慢又把闸面搅浑）。故先做能力探测：
+    # 探测不到就回全量（fail-closed，零 spawn），并在 error 里点名版本缝。
+    _runner = os.path.join(cwd, "integration", "run_scenarios.py")
+    try:
+        with open(_runner, encoding="utf-8") as _fh:
+            _runner_src = _fh.read()
+    except Exception as e:  # noqa: BLE001 —— 读不到=能力未知=全量
+        return shared.SurfacePlanResult(
+            mode="full", reason="runner-unreadable",
+            error="读不到泳道执行器（%s: %s）——按全量跑（fail-closed）"
+                  % (type(e).__name__, e))
+    if "--print-surface-plan" not in _runner_src:
+        return shared.SurfacePlanResult(
+            mode="full", reason="runner-without-surface-query",
+            error="泳道执行器不认面计划查询（混合版本缝：泳道副本早于本门）——"
+                  "按全量跑（fail-closed，零 spawn）")
+    cmd = [sys.executable, "integration/run_scenarios.py", "--print-surface-plan",
+           ",".join(files)]
+    env = dict(os.environ)
+    # 查询面是只读的：把会改变执行器行为的旋钮剥掉，避免「查询顺带按点名/排除池缩表」
+    for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS",
+              "SANDBAR_KNOWN_RED_EXCLUDE"):
+        env.pop(k, None)
+    try:
+        proc = await _aio.create_subprocess_exec(
+            *cmd, cwd=cwd, stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+            env=env)
+        try:
+            out_b, err_b = await _aio.wait_for(proc.communicate(), timeout=SURFACE_PLAN_TO)
+        except _aio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return shared.SurfacePlanResult(
+                mode="full", reason="timeout",
+                error="面计划查询超时（%ds）——fail-closed 全量" % SURFACE_PLAN_TO)
+    except Exception as e:  # noqa: BLE001 —— 起不来/任何执行面异常=全量
+        return shared.SurfacePlanResult(
+            mode="full", reason="spawn-failed",
+            error="面计划查询起不来（%s: %s）——fail-closed 全量" % (type(e).__name__, e))
+    stdout = (out_b or b"").decode("utf-8", "replace")
+    stderr = (err_b or b"").decode("utf-8", "replace")
+    names, mode, reason, err = shared.parse_surface_plan(stdout, args.prev_red_names)
+    if proc.returncode != 0 and mode != "targeted":
+        # 非零退出且没给出可用的定点面=查询失败：如实上报，调用方按全量跑
+        err = (err or "查询退出码 %s" % proc.returncode) + \
+            ("｜stderr 摘要：%s" % stderr.strip()[:200] if stderr.strip() else "")
+    surfaces = []
+    for line in reversed(stdout.splitlines()):
+        t = line.strip()
+        if t.startswith("{") and t.endswith("}"):
+            try:
+                payload = json.loads(t)
+                if isinstance(payload, dict) and isinstance(payload.get("surfaces"), list):
+                    surfaces = [str(x) for x in payload["surfaces"] if isinstance(x, str)]
+            except Exception:  # noqa: BLE001
+                surfaces = []
+            break
+    return shared.SurfacePlanResult(
+        mode=mode, names=names, surfaces=surfaces, reason=reason, error=err,
+        wall_s=round(time.time() - t0, 1))
+
+
+@activity.defn
 async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesResult:
     """t260925-04 实际改动文件清单收集（文件级爆炸半径的输入面）：
     `git diff --name-only <merge-base>...<branch>` ∪ `git status --porcelain -z`
@@ -9119,6 +9203,10 @@ async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
         logf.close()
 
 
+#: 面计划只读查询的子进程上限（秒）：查询只走注册表+静态闭包扫描，正常秒级；
+#: 超时=全量（fail-closed）。
+SURFACE_PLAN_TO = 300
+
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
     # t260925-01 产出型巡检 produce 段（受限可写 agent + 机械自检四闸）
@@ -9126,6 +9214,8 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_conflict_resolution, settle_conflict_resolution,
     # t260925-04：实际改动文件清单收集（文件级爆炸半径输入面；漏注册=运行时才炸）
     changed_files,
+    # t260930-02：面计划只读查询（快反馈面 = 本次改动面 ∪ 上轮红名；漏注册=运行时才炸）
+    surface_plan,
     # M1-3 (t260902-02): the three-stage close-out — merge only books, archive_ticket
     # exports, teardown_lane tears the lane down.
     archive_ticket, teardown_lane,
