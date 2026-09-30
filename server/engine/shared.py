@@ -552,9 +552,16 @@ class IntegrationRunResult:
     # 只能说「跑了 N 条」。改法=在翻译层（agent_activities._run_scenarios）原样透传，
     # **不重判、不改任何计数、不进判定**：
     #   reuse    = 闸回执 reuse 块（reused/names/expected/all_reused/accounted/...）；
-    #   known_red= 在册红豁免面（skipped/names；未跑 ≠ 判绿）。
+    #   known_red= 在册红豁免面（skipped/names/note + **injected**：本轮闸调用面是否
+    #              注入了 SANDBAR_KNOWN_RED_EXCLUDE；未跑 ≠ 判绿）。
     reuse: Dict[str, Any] = field(default_factory=dict)
     known_red: Dict[str, Any] = field(default_factory=dict)
+    # 260930 宿主令（真票 t260930-09 实况：env_fail=2 而闸的具名通道 env_red=[]）：
+    # **执行器侧**的具名环境红名单（runner 的 INTEG_SUMMARY env_red_names；闸回执经
+    # verify_lane 搬运）。**纯观测面，绝不进判定**：豁免只认闸的权威通道 env_red
+    # （not-checked × external，B2）；本字段的作用是让票面能区分「没有环境红」与
+    # 「有环境红但具名通道是空的」两态——后者必须显式点名，不许静默给个空表。
+    env_red_names: List[str] = field(default_factory=list)
 
 
 @dataclass

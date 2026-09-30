@@ -655,6 +655,32 @@ def main():
                        "L3c blocked_detail.counts.failed=3")
             check(len(detail.get("remedies") or []) == 3,
                        "L3c blocked_detail 带三条出路")
+            # 260930 三处面缺陷的端到端面（真票 t260930-09 触发；本场景这轮无环境红、
+            # 无基线答案 → 正好验「none 态」与「unknown 保守方向」两半）
+            check(detail.get("env_red_state") in ("none", "named", "unnameable"),
+                  "L3c ①环境红面带三态标注（实得 %r）" % detail.get("env_red_state"))
+            check(int(detail.get("env_red_count") or 0)
+                  == int((detail.get("counts") or {}).get("env_fail") or 0),
+                  "L3c ①环境红计数与 counts.env_fail 一致")
+            if not int((detail.get("counts") or {}).get("env_fail") or 0):
+                check(detail.get("env_red_state") == "none",
+                      "L3c ①无环境红 → none（票面不加环境红段）")
+            attr_e2e = detail.get("attribution") or {}
+            labeled = (list(attr_e2e.get("lane_only") or []) + list(attr_e2e.get("main_red_too") or [])
+                       + list(attr_e2e.get("unknown") or []))
+            check(sorted(labeled) == sorted(detail.get("violations") or []),
+                  "L3c ③逐名归因覆盖**每一个**红名（%d 名；三类=%d）"
+                  % (len(detail.get("violations") or []), len(labeled)))
+            check("NEVER read as main-green" in str(attr_e2e.get("rule") or ""),
+                  "L3c ③unknown 的保守口径在结构化面点名")
+            check("Red attribution against main" in (reason or ""),
+                  "L3c ③归因面进 blocked 文案")
+            check("unknown (no baseline answer — NOT main-green and NOT a landing permit)"
+                  in (reason or "") if attr_e2e.get("unknown") else True,
+                  "L3c ③有 unknown 时文案点名其保守读法")
+            kr_e2e = (detail.get("round") or {}).get("known_red")
+            check(isinstance(kr_e2e, dict) and kr_e2e.get("injected") is True,
+                  "L3c ②在册红豁免面：注入事实可见（实得 %r）" % (kr_e2e,))
             check("arbitrate" not in tl_stages,
                        "L3c 红转人：timeline 零仲裁段（不调仲裁活动）")
             print_timeline(snap, "blocked at the machine gate")

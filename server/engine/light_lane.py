@@ -146,6 +146,23 @@ LIGHT_NEUTRAL_NEXT_ACTION = (
     "lane has no planning stage, so the write set never widens after creation "
     "(path gate reason: write_set_missing).")
 
+#: 环境红面的三态（票面用；判据零改动——**无具名通道即不豁免**，B2 口径）：
+#:   named      = 至少一路（闸权威 env_red / 执行器侧 env_red_names）给出了名字；
+#:   unnameable = env_fail>0 而两路都空/缺键/畸形 —— 必须**显式点名这一事实**；
+#:   none       = 本轮没有环境红计数。
+ENV_RED_NAMED = "named"
+ENV_RED_UNNAMEABLE = "unnameable"
+ENV_RED_NONE = "none"
+
+#: 逐名归因三态（t260930-09 真票教训：只给红名不给归因 = 让人对着存量红反复返工）：
+#:   lane-only    = 基线（main 尖端）该名是绿的 ⇒ 本票的账；
+#:   main-red-too = 基线该名也红 ⇒ 存量，记录不阻断（不是本票的账）；
+#:   unknown      = 基线**没有该名的答案**（没跑到/缺基线/指纹不等）——**绝不读作
+#:                  main 绿，也绝不读作「可以放行」**，保守按「本票的账」对待。
+ATTR_LANE_ONLY = "lane-only"
+ATTR_MAIN_RED_TOO = "main-red-too"
+ATTR_UNKNOWN = "unknown"
+
 #: 轻道可打回段（rework 词表）：比 PHASE_MAIN_CHAIN 窄——审方案/仲裁/验收走查在轻道
 #: **不存在**，打回它们只会在主循环落到「未知相位」。词表窄于闸＝拒收点名，绝不放进去。
 LIGHT_REWORK_TARGETS = frozenset({
@@ -417,7 +434,9 @@ class LightLaneWorkflow(DevLaneWorkflow):
           · narrowed：ir.only_names（非空=定点快反馈面，空=全量）；
           · excluded_pools/excluded_count：声明池跳过面；
           · reuse：闸回执的复用块（老回执缺键=如实记 absent，不冒充）；
-          · known_red：在册红豁免面（回执无此块=如实记 absent）。"""
+          · known_red：在册红豁免面——**260930 起给具名原因**（真票 t260930-09 的
+            "absent" 说不清是「没注入」还是「没搬到」）：在场=块（含 injected/skipped/
+            names）；缺席=标注 available=False + 原因（老闸回执没搬这一块 + 注入事实）。"""
         reuse = getattr(ir, "reuse", None)
         known_red = getattr(ir, "known_red", None)
 
@@ -427,14 +446,118 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 return dict(v) if v else "absent: the receipt carried no such block"
             return "absent: the receipt carried no such block" if v is None else str(v)
 
+        _kr_face = _face(known_red)
+        if not isinstance(_kr_face, dict):
+            # 缺席/畸形：把「注入事实」与「没搬到」分开点名（两者含义不同）
+            _kr_face = {"available": False, "injected": "unknown",
+                        "names": [], "skipped": 0, "reason": str(_kr_face)}
+
         return {
             "requested_only_names": [str(x) for x in (run_only or [])],
             "narrowed": [str(x) for x in (getattr(ir, "only_names", None) or [])],
             "excluded_pools": [str(x) for x in (getattr(ir, "excluded_pools", None) or [])],
             "excluded_count": int(getattr(ir, "excluded_count", 0) or 0),
             "reuse": _face(reuse),
-            "known_red": _face(known_red),
+            "known_red": _kr_face,
         }
+
+    def _light_env_red_face(self, ir: Any) -> Dict[str, Any]:
+        """环境红面（纯读，判据零改动）：两路具名通道并列 + 三态点名。
+
+        两路的分工（不许混读）：
+          · gate  = 闸的**权威**通道 `env_red`（not-checked × external；豁免只认它，B2）；
+          · runner= 执行器侧具名名单 `env_red_names`（观测面，**不是**豁免依据）。
+        env_fail>0 而两路都拿不出名字 → `unnameable`，票面**必须显式点名**（不许静默空表）。"""
+        gate_names, channel_ok = self._tests_env_red_names(ir)
+        runner_raw = getattr(ir, "env_red_names", None)
+        runner_names = [str(x).strip() for x in runner_raw
+                        if str(x or "").strip()] if isinstance(runner_raw, list) else []
+        try:
+            env_fail = int(getattr(ir, "env_fail", 0) or 0)
+        except (TypeError, ValueError):
+            env_fail = 0
+        if env_fail <= 0:
+            state = ENV_RED_NONE
+            note = "no environment red was counted this round"
+        elif gate_names or runner_names:
+            state = ENV_RED_NAMED
+            note = ("named by %s" % " + ".join(
+                [p for p, v in (("the gate channel (authoritative, B2)", gate_names),
+                                ("the runner-side list (observation only)", runner_names)) if v]))
+        else:
+            state = ENV_RED_UNNAMEABLE
+            note = ("the gate's named channel (env_red, B2 authoritative) is %s and the "
+                    "runner-side name list is empty"
+                    % ("present but empty" if channel_ok else "absent/malformed"))
+        return {"count": env_fail, "gate": gate_names, "gate_channel_ok": bool(channel_ok),
+                "runner": runner_names, "state": state, "note": note}
+
+    def _light_gate_attribution(self, ir: Any, names: List[str]) -> Dict[str, Any]:
+        """逐名归因（纯读）：`lane-only` / `main-red-too` / `unknown` + 来源点名。
+
+        数据面=闸回执的活基线证据（`live_baseline_green/red/source`，来源=本轮闸基线主跑
+        逐名答案 ∪ 场景台账可信行；合成单点=shared.live_baseline_evidence）——**不新增判据、
+        不改闸的拦/记**，只把「这条红是谁的账」搬到票面。
+
+        保守方向（t260930-09 教训）：两路都有名字时**绿优先**（按本票的账）；没有答案的
+        名字一律 `unknown`，并在票面写明「unknown ≠ main 绿 ≠ 可以放行」。"""
+        green, red = set(), set()
+        for raw, bucket in ((getattr(ir, "live_baseline_green", None), green),
+                            (getattr(ir, "live_baseline_red", None), red)):
+            if isinstance(raw, (list, tuple, set, frozenset)):
+                for x in raw:
+                    if isinstance(x, str) and x.strip():
+                        bucket.add(x.strip())
+        src = str(getattr(ir, "live_baseline_source", "") or "") or \
+            "no source named by the receipt"
+        lane_only, main_too, unknown = [], [], []
+        for n in names:
+            if n in green:
+                lane_only.append(n)
+            elif n in red:
+                main_too.append(n)
+            else:
+                unknown.append(n)
+        return {"lane_only": lane_only, "main_red_too": main_too, "unknown": unknown,
+                "baseline_ref": str(getattr(ir, "baseline_ref", "") or ""),
+                "source": src,
+                "rule": ("green wins when both lists name a red (conservative: it stays this "
+                         "ticket's account); unknown means the baseline produced no answer for "
+                         "that name and is NEVER read as main-green and NEVER as a landing "
+                         "permit")}
+
+    def _light_env_red_note(self, face: Dict[str, Any]) -> str:
+        """环境红面的票面句子（三态各一句；unnameable 必须说清为什么）。"""
+        if face["state"] == ENV_RED_NONE:
+            return ""
+        parts = ["Environment reds: %d counted" % face["count"]]
+        if face["gate"]:
+            parts.append("named by the gate channel (authoritative, B2): %s"
+                         % ", ".join(face["gate"]))
+        if face["runner"]:
+            parts.append("named by the runner-side list (observation only, not an exemption "
+                         "basis): %s" % ", ".join(face["runner"]))
+        if face["state"] == ENV_RED_UNNAMEABLE:
+            parts.append("**NOT NAMEABLE** — the gate's named channel is %s and the "
+                         "runner-side list is empty; an unnameable environment red is NOT "
+                         "exempt (no name, no exemption)"
+                         % ("present but empty" if face["gate_channel_ok"]
+                            else "absent/malformed"))
+        if face["state"] != ENV_RED_UNNAMEABLE:
+            parts.append("source: %s" % face["note"])
+        return ("; ".join(parts) + ".")
+
+    def _light_attribution_note(self, attr: Dict[str, Any]) -> str:
+        """归因面的票面句子（逐名带标签；unknown 的保守口径写明）。"""
+        bits = ["Red attribution against main (baseline ref %s; source: %s)"
+                % (attr["baseline_ref"] or "unavailable", attr["source"]),
+                "lane-only (this ticket's account, main is green): %s"
+                % (", ".join(attr["lane_only"]) or "none"),
+                "main-red-too (pre-existing on main, recorded, not this ticket's account): %s"
+                % (", ".join(attr["main_red_too"]) or "none"),
+                "unknown (no baseline answer — NOT main-green and NOT a landing permit): %s"
+                % (", ".join(attr["unknown"]) or "none")]
+        return "; ".join(bits) + "."
 
     def _light_gate_blocked_text(self, ir: Any, run_only: Any, phase_note: str) -> str:
         """轻道机器闸 blocked 文案（票面英文；**完整违规集**，绝不给样本）。"""
@@ -445,7 +568,7 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "Machine gate is not green (light lane: one machine round per attempt — no "
             "arbitration, no automatic re-run; a human decides).",
             "Phase: %s." % (phase_note or "gate round"),
-            "Counts: %s ran / %s passed / %s failed / %s env-red%s"
+            "Counts: %s ran / %s passed / %s failed / %s env-red.%s"
             % (getattr(ir, "ran", 0), getattr(ir, "passed", 0), getattr(ir, "failed", 0),
                getattr(ir, "env_fail", 0),
                (" | gate error: %s" % str(ir.error)[:400])
@@ -453,9 +576,12 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "Complete violation set (%d): %s"
             % (len(names), ", ".join(names) if names else "(none named)"),
         ]
-        if env_names:
-            parts.append("Named environment reds (not blocking, but named): %s."
-                         % ", ".join(env_names))
+        _env_face = self._light_env_red_face(ir)
+        _env_note = self._light_env_red_note(_env_face)
+        if _env_note:
+            parts.append(_env_note)
+        _attr = self._light_gate_attribution(ir, names)
+        parts.append(self._light_attribution_note(_attr))
         parts.append("Round face: %s."
                      % ("narrowed to %s" % ", ".join(face["narrowed"])
                         if face["narrowed"] else "full registry (not narrowed)"))
@@ -470,21 +596,48 @@ class LightLaneWorkflow(DevLaneWorkflow):
         elif face["reuse"]:
             parts.append("Ledger reuse face: %s." % face["reuse"])
         if isinstance(face["known_red"], dict):
-            parts.append("Known-red entries excluded from this round: %s."
-                         % (", ".join(face["known_red"].get("names") or [])
-                            or ("%s entries" % face["known_red"].get("skipped")
-                                if face["known_red"].get("skipped") else "none named")))
+            _kr = face["known_red"]
+            if _kr.get("available") is False:
+                parts.append("Known-red entries excluded from this round: NOT AVAILABLE — "
+                             "injected=%s; %s (an unavailable face is not 'none excluded')."
+                             % (_kr.get("injected"), _kr.get("reason") or "no reason given"))
+            elif _kr.get("skipped"):
+                parts.append("Known-red entries excluded from this round: %s."
+                             % ", ".join(_kr.get("names") or ["%s entries" % _kr["skipped"]]))
+            else:
+                parts.append("Known-red entries excluded from this round: none "
+                             "(injected=%s, nothing in the roster was in this round's register)."
+                             % _kr.get("injected"))
         elif face["known_red"]:
             parts.append("Known-red exclusion face: %s." % face["known_red"])
         parts.append("Gate receipt: results.run_integration_tests in this ticket's "
                      "snapshot (its evidence holds the raw details), plus the lane's "
                      "out/integration-report-*.json.")
-        parts.append("Remedies: (1) re-run the gate on the same tree — send retry_qc; "
-                     "(2) send the implementation back — send rework(to_stage=implement) "
-                     "with a note, and the gate re-runs after it lands; (3) if the "
-                     "remaining work is bigger than this lane carries, open a full-lane "
-                     "ticket (template dev-lane) for it — a running workflow cannot "
-                     "change lane.")
+        _remedies = []
+        if _attr["lane_only"]:
+            _remedies.append("(1) this ticket's own regressions (lane-only, main is green) — "
+                             "send rework(to_stage=implement) with a note and repair exactly "
+                             "these: %s" % ", ".join(_attr["lane_only"]))
+        if _attr["main_red_too"]:
+            _remedies.append("(%d) pre-existing main reds (main-red-too) — recorded, not this "
+                             "ticket's account: %s — a human may rule an exemption; retry_qc "
+                             "re-runs the gate" % (len(_remedies) + 1,
+                                                   ", ".join(_attr["main_red_too"])))
+        if _attr["unknown"]:
+            _remedies.append("(%d) no baseline answer for: %s — unknown is NOT main-green and "
+                             "NOT a landing permit; treat them as this ticket's account until "
+                             "a baseline answer exists (source: %s)"
+                             % (len(_remedies) + 1, ", ".join(_attr["unknown"]),
+                                _attr["source"]))
+        if self._tests_red_names(ir):
+            _remedies.append("(%d) repair and re-run: rework(to_stage=implement) with a note"
+                             % (len(_remedies) + 1))
+        _remedies.append("(%d) re-run the gate on the same tree — send retry_qc"
+                         % (len(_remedies) + 1))
+        _remedies.append("(%d) if the remaining work is bigger than this lane carries, open a "
+                         "full-lane ticket (template dev-lane) for it — a running workflow "
+                         "cannot change lane" % (len(_remedies) + 1))
+        parts.append("Remedies (triaged by attribution): " + "; ".join(_remedies) + ".")
         return " ".join(parts)
 
     def _light_gate_blocked_detail(self, ir: Any, run_only: Any, reason_code: str,
@@ -493,6 +646,8 @@ class LightLaneWorkflow(DevLaneWorkflow):
         完整违规集与跑面，供票面/控制台机读）。"""
         names = self._light_red_names(ir)
         env_names, channel_ok = self._tests_env_red_names(ir)
+        env_face = self._light_env_red_face(ir)
+        attr = self._light_gate_attribution(ir, names)
         return {
             "check_id": "run_integration_tests",
             "item": "machine gate (the project-declared integration command)",
@@ -508,6 +663,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "blockers": [str(b) for b in (getattr(ir, "blockers", None) or [])],
             "env_red": env_names,
             "env_red_channel_ok": bool(channel_ok),
+            # 260930（真票 t260930-09 三处面缺陷之①）：环境红面三态 + 两路并列；不可具名
+            # 必须显式点名（不许静默给空表）。
+            "env_red_state": env_face["state"],
+            "env_red_count": env_face["count"],
+            "env_red_runner": env_face["runner"],
+            "env_red_note": env_face["note"],
+            # 之③：逐名归因（lane-only / main-red-too / unknown）+ 来源与保守口径
+            "attribution": attr,
             "counts": {"ran": int(getattr(ir, "ran", 0) or 0),
                        "passed": int(getattr(ir, "passed", 0) or 0),
                        "failed": int(getattr(ir, "failed", 0) or 0),

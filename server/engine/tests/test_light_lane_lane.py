@@ -545,10 +545,22 @@ def test_blocked_detail_reuse_face_carried_when_present():
 
 
 def test_run_face_absent_marks_are_honest():
+    """缺席面必须**具名原因**（260930：真票 t260930-09 的 "absent" 说不清是没注入还是没搬到）。"""
     wf = _mk_wf()
     face = wf._light_run_face(_ir(), [])
     assert isinstance(face["reuse"], str) and "absent" in face["reuse"]
-    assert isinstance(face["known_red"], str) and "absent" in face["known_red"]
+    kr = face["known_red"]
+    assert isinstance(kr, dict), kr
+    assert kr["available"] is False and kr["names"] == [] and kr["skipped"] == 0
+    assert "injected" in kr, "缺席时必须把「注入事实」与「没搬到」分开点名"
+    assert "carried no such block" in kr["reason"]
+    # 在场（新回执）→ 原样带出（含 injected 事实）
+    wf2 = _mk_wf()
+    ir2 = _ir()
+    ir2.known_red = {"injected": True, "skipped": 2, "names": ["kd_a", "kd_b"], "note": "n"}
+    face2 = wf2._light_run_face(ir2, [])
+    assert face2["known_red"]["injected"] is True and face2["known_red"]["skipped"] == 2
+    assert face2["known_red"]["names"] == ["kd_a", "kd_b"]
 
 
 def test_face_note_names_what_was_not_run():
@@ -668,6 +680,166 @@ def test_ui_evidence_record_is_ordered_after_implement_before_the_gate():
     wf._light_record_ui_evidence(wf._now_epoch())
     seq = [(e["stage"], e["state"]) for e in wf.timeline]
     assert seq == [("implement", "done"), ("ui_evidence", "running"), ("ui_evidence", "done")], seq
+
+
+# ======================================================================
+# F3. t260930-09 真票形态夹具：环境红不可具名 / 在册红豁免面 / 逐名归因
+# ======================================================================
+# 数据真源（260930 实况，从该票 snapshot 的 blocked_detail 原样抄下）：
+#   闸轮：ran=115 / passed=100 / failed=13 / env_fail=2（6m08s）；violations 15 名；
+#   环境红具名通道 env_red=[]（闸具名通道在场但空）→ 这 2 条**不可具名**；
+#   round.known_red="absent: the receipt carried no such block"（那时还没搬这一块）。
+T260930_09_VIOLATIONS = [
+    "t260905-03-decl-gate",
+    "capture-chat-active",
+    "t260913-03-executor-pool-exclude-l1",
+    "t260913-03-pool-exclude-no-false-green",
+    "t260913-03-pool-exclude-force-assets",
+    "t260913-03-pool-exclude-switch-forms",
+    "capture-chat-e2e",
+    "lane-parallel-dom",
+    "t260904-06-spec-card-dom",
+    "t260915-08-board-ui",
+    "t260915-05-detail-lane-map-dom",
+    "t260916-04-lane-map-everblocked-dom",
+    "t260916-05-inspection-detail-lane-map-dom",
+    "t260916-25-stage-console-selfcheck-red",
+    "t260929-03-executor-panel-page",
+]
+T260930_09_BLOCKERS = [
+    "t260913-03-executor-pool-exclude-l1",
+    "t260913-03-pool-exclude-no-false-green",
+    "t260913-03-pool-exclude-force-assets",
+    "t260913-03-pool-exclude-switch-forms",
+    "t260916-25-stage-console-selfcheck-red",
+    "t260929-03-executor-panel-page",
+]
+
+
+def _t260930_09_ir():
+    """t260930-09 真票回执夹具：15 名违规（其中 2 条是**不可具名**的环境红行）、
+    基线逐名答案只覆盖 1 条（capture-chat-active 基线绿 = lane-only）。"""
+    det = [{"name": n, "cmd": "", "exit": 1, "output_tail": ""}
+           for n in T260930_09_VIOLATIONS]
+    return shared.IntegrationRunResult(
+        ran=115, passed=100, failed=13, env_fail=2, details=det, error="",
+        blockers=list(T260930_09_BLOCKERS), env_red=[],          # 闸具名通道在场但空
+        env_red_names=[],                                        # 执行器侧也没名单
+        live_baseline_red=[], live_baseline_green=["capture-chat-active"],
+        live_baseline_source=("in-round gate baseline (1 answered name(s), ref=abc1234)"),
+        baseline_ref="abc1234",
+        only_names=list(T260930_09_VIOLATIONS), excluded_pools=["engine", "exclusive"],
+        excluded_count=82)
+
+
+def test_t260930_09_env_red_unnamable_is_named_explicitly():
+    """缺陷①回归：env_fail>0 而两路具名通道都拿不出名字 → 必须**显式点名不可具名**。"""
+    wf = _mk_wf()
+    ir = _t260930_09_ir()
+    face = wf._light_env_red_face(ir)
+    assert face["count"] == 2 and face["gate"] == [] and face["runner"] == []
+    assert face["state"] == light_lane.ENV_RED_UNNAMEABLE
+    detail = wf._light_gate_blocked_detail(ir, [], "light_gate_red", "gate round 1")
+    assert detail["env_red_state"] == "unnameable"
+    assert detail["env_red_count"] == 2
+    assert "present but empty" in detail["env_red_note"]
+    assert detail["env_red_note"], "不可具名的原因必须落在结构化面上（不许空串）"
+    text = wf._light_gate_blocked_text(ir, [], "gate round 1")
+    assert "Environment reds: 2 counted" in text
+    assert "NOT NAMEABLE" in text and "no name, no exemption" in text
+    assert "the gate's named channel is present but empty" in text
+    # 有名字的一路（执行器侧）→ named，且两路并列带出处
+    ir2 = _t260930_09_ir()
+    ir2.env_red_names = ["sc_env_a"]
+    face2 = wf._light_env_red_face(ir2)
+    assert face2["state"] == light_lane.ENV_RED_NAMED and face2["runner"] == ["sc_env_a"]
+    text2 = wf._light_gate_blocked_text(ir2, [], "gate round 1")
+    assert "runner-side list (observation only" in text2 and "sc_env_a" in text2
+    # 无环境红 → none（票面不加那段）
+    ir3 = _t260930_09_ir()
+    ir3.env_fail = 0
+    assert wf._light_env_red_face(ir3)["state"] == light_lane.ENV_RED_NONE
+    assert "Environment reds" not in wf._light_gate_blocked_text(ir3, [], "r1")
+
+
+def test_t260930_09_known_red_face_transport_and_injection_are_separated():
+    """缺陷②回归：注入事实与运输事实分开点名（两态：在场 / 缺席且具名原因）。"""
+    wf = _mk_wf()
+    # 在场（verify_lane/agent_activities 260930 起搬运）：真数字上票面
+    ir = _t260930_09_ir()
+    ir.known_red = {"injected": True, "skipped": 2, "names": ["kd_a", "kd_b"],
+                    "note": "未跑 ≠ 判绿", "injection": "SANDBAR_KNOWN_RED_EXCLUDE=1"}
+    d = wf._light_gate_blocked_detail(ir, [], "light_gate_red", "r1")
+    assert d["round"]["known_red"]["skipped"] == 2
+    assert d["round"]["known_red"]["injected"] is True
+    assert d["round"]["known_red"]["names"] == ["kd_a", "kd_b"]
+    text = wf._light_gate_blocked_text(ir, [], "r1")
+    assert "Known-red entries excluded from this round: kd_a, kd_b" in text
+    # 「在场但本轮没豁免任何条」也要说清（不是「不可得」）
+    ir3 = _t260930_09_ir()
+    ir3.known_red = {"injected": True, "skipped": 0, "names": [], "note": ""}
+    text3 = wf._light_gate_blocked_text(ir3, [], "r1")
+    assert "none (injected=True, nothing in the roster was in this round's register)" in text3
+    # 缺席（老回执）：不说「absent」了事——点名「没搬到」+ 注入未知
+    ir2 = _t260930_09_ir()
+    d2 = wf._light_gate_blocked_detail(ir2, [], "light_gate_red", "r1")
+    kr2 = d2["round"]["known_red"]
+    assert kr2["available"] is False and kr2["injected"] == "unknown"
+    assert "carried no such block" in kr2["reason"]
+
+
+def test_t260930_09_attribution_three_labels_and_unknown_is_conservative():
+    """缺陷③回归：三态标注（lane-only / main-red-too / unknown）+ unknown 的保守方向。
+
+    判据不许放宽：unknown 既不当 main 绿读（不给豁免），也不当放行读（仍 blocked）。"""
+    wf = _mk_wf()
+    ir = _t260930_09_ir()
+    ir.live_baseline_red = ["t260905-03-decl-gate"]          # 存量：main 也红
+    ir.live_baseline_green = ["capture-chat-active"]         # 本票的账：main 绿
+    d = wf._light_gate_blocked_detail(ir, [], "light_gate_red", "gate round 1")
+    attr = d["attribution"]
+    assert attr["lane_only"] == ["capture-chat-active"]
+    assert attr["main_red_too"] == ["t260905-03-decl-gate"]
+    assert len(attr["unknown"]) == len(T260930_09_VIOLATIONS) - 2
+    assert set(attr["lane_only"]) | set(attr["main_red_too"]) | set(attr["unknown"]) \
+        == set(T260930_09_VIOLATIONS), "归因必须覆盖**每一个**红名（不漏项）"
+    assert attr["baseline_ref"] == "abc1234" and "in-round gate baseline" in attr["source"]
+    assert "NEVER read as main-green" in attr["rule"]
+    assert "NEVER as a landing permit" in attr["rule"]
+    text = wf._light_gate_blocked_text(ir, [], "gate round 1")
+    assert "lane-only (this ticket's account, main is green): capture-chat-active" in text
+    assert "main-red-too (pre-existing on main" in text and "t260905-03-decl-gate" in text
+    assert "unknown (no baseline answer — NOT main-green and NOT a landing permit)" in text
+    # 分诊出路：lane-only → rework；main-red-too → 记录/人裁定豁免；unknown → 保守按本票的账
+    assert "this ticket's own regressions (lane-only, main is green)" in text
+    assert "pre-existing main reds (main-red-too)" in text
+    assert "unknown is NOT main-green and NOT a landing permit" in text
+    for n in T260930_09_VIOLATIONS:
+        assert n in text, "逐名归因面漏了 %s" % n
+    # 保守方向：baseline 完全不可得 → 全部 unknown（=本票的账），一个都不许标成 main-red-too
+    ir2 = _t260930_09_ir()
+    ir2.live_baseline_green = []
+    attr2 = wf._light_gate_attribution(ir2, T260930_09_VIOLATIONS)
+    assert attr2["lane_only"] == [] and attr2["main_red_too"] == []
+    assert len(attr2["unknown"]) == len(T260930_09_VIOLATIONS)
+    # 两路都有该名时绿优先（保守：仍是本票的账）
+    ir3 = _t260930_09_ir()
+    ir3.live_baseline_green = ["capture-chat-active"]
+    ir3.live_baseline_red = ["capture-chat-active"]
+    assert wf._light_gate_attribution(ir3, ["capture-chat-active"])["lane_only"] \
+        == ["capture-chat-active"]
+
+
+def test_t260930_09_rendered_face_example(capsys=None):
+    """把真票数据渲染出来的阻断面打出来（人工可读的证据面；断言只钉关键行在场）。"""
+    wf = _mk_wf()
+    ir = _t260930_09_ir()
+    ir.live_baseline_red = ["t260905-03-decl-gate"]
+    ir.live_baseline_green = ["capture-chat-active"]
+    text = wf._light_gate_blocked_text(ir, [], "gate round 1 of this attempt")
+    print("\n===== t260930-09 阻断面（真数据渲染）=====\n" + text + "\n")
+    assert "Complete violation set (15)" in text
+    assert "115 ran / 100 passed / 13 failed / 2 env-red" in text
 
 
 # ======================================================================

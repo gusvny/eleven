@@ -42,6 +42,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, Dict, List
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -1130,6 +1131,29 @@ def _integ(args):
     # 全部判据与回执形状与改前逐字节一致；键在场却读不懂 → 记 had_key=1、计数 0，
     # 由下面的完整性判据响亮红（不静默当「没有这个特性」）。
     reuse_n, reuse_names_summary, reuse_had_key = _parse_reuse_counts(executor_summary)
+    # 260930：执行器侧的两块具名观测面（纯搬运，缺键=空，判据零改动）
+    _env_red_names_summary: List[str] = []
+    _known_red_face: Dict[str, Any] = {}
+    if isinstance(executor_summary, dict):
+        _raw_env_names = executor_summary.get('env_red_names')
+        if isinstance(_raw_env_names, list):
+            for _n in _raw_env_names:
+                if isinstance(_n, str) and _n.strip() and _n.strip() not in _env_red_names_summary:
+                    _env_red_names_summary.append(_n.strip())
+        _kr_skipped = executor_summary.get('known_red_skipped')
+        _kr_names = executor_summary.get('known_red_names')
+        if _kr_skipped is not None or _kr_names is not None:
+            try:
+                _kr_n = int(_kr_skipped or 0)
+            except (TypeError, ValueError):
+                _kr_n = 0
+            _known_red_face = {
+                'skipped': _kr_n,
+                'names': [str(x) for x in _kr_names if str(x).strip()]
+                         if isinstance(_kr_names, list) else [],
+                'note': ('未跑 ≠ 判绿：这些条目本轮没有被验证'
+                         if _kr_n else ''),
+            }
     reuse_parsed, reuse_header = [], [False, False]
     _track_reuse_lines(lane_out, reuse_parsed, reuse_header)
     # 全复用轮（ran=0/reused>0）凭什么算「有信号」：**这笔复用得能交代**——见
@@ -1306,6 +1330,16 @@ def _integ(args):
             'cases': cases_dedup, 'summary': summary,
             'affiliation': aff,
             'env_red': env_red,
+            # 260930 宿主令（真票 t260930-09 实况：env_fail=2 而本回执 env_red=[]）：
+            # **执行器侧**的具名环境红通道（runner 的 INTEG_SUMMARY env_red_names）——
+            # 纯加性观测键，判据零改动、不进任何判定：
+            #   · 与 'env_red' 的分工：后者=闸的**权威**判决面（not-checked × external，
+            #     B2 口径，豁免只认它）；前者=执行器自报表（exit=2 行的具名），
+            #     **不是**豁免依据——引擎票面把两路都亮出来，谁是空的也如实点名。
+            'env_red_names': _env_red_names_summary,
+            # 同在册红豁免面（runner 汇总的 known_red_skipped/known_red_names；t260930-01
+            # 「在册红不进每轮路径」）。同一加性口径：缺键/畸形 → 空块，老执行器零漂移。
+            'known_red': _known_red_face,
             'baseline_ref': baseline_ref,
             'baseline': {'ok': baseline_ok, 'err': baseline_err,
                          'enabled': baseline_enabled,

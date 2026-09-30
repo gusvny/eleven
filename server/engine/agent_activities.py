@@ -7490,12 +7490,26 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     _reuse = res.get("reuse")
     if isinstance(_reuse, dict) and _reuse:
         out.reuse = dict(_reuse)
-    if res.get("known_red_skipped") is not None or res.get("known_red_names") is not None:
-        out.known_red = {
-            "skipped": int(res.get("known_red_skipped") or 0),
-            "names": [str(x) for x in (res.get("known_red_names") or [])],
-            "note": ("未跑 ≠ 判绿：这些条目本轮没有被验证"
-                     if int(res.get("known_red_skipped") or 0) else "")}
+    # 执行器侧具名环境红（闸回执 additive 键；缺键/畸形 → 空 = 老回执零漂移）。
+    # 只搬运、不进判定：豁免只认闸的权威通道 env_red（B2）。
+    _env_names_runner = res.get("env_red_names")
+    if isinstance(_env_names_runner, list):
+        out.env_red_names = [str(x) for x in _env_names_runner if str(x or "").strip()]
+    # 在册红豁免面：优先读闸回执的 known_red 块（verify_lane 260930 起搬运），
+    # 兼容老的扁平键。**injected** = 本活动面确实注入了 SANDBAR_KNOWN_RED_EXCLUDE
+    # （每票集测段恒注入，见下方 _extra_env）——票面据此区分「没注入」与「没搬到」。
+    _kr = res.get("known_red") if isinstance(res.get("known_red"), dict) else {}
+    _kr_skipped = _kr.get("skipped") if _kr else res.get("known_red_skipped")
+    _kr_names = _kr.get("names") if _kr else res.get("known_red_names")
+    out.known_red = {
+        "injected": True,
+        "skipped": int(_kr_skipped or 0),
+        "names": [str(x) for x in (_kr_names or [])],
+        "note": (str(_kr.get("note") or "") if _kr else
+                 ("未跑 ≠ 判绿：这些条目本轮没有被验证"
+                  if int(_kr_skipped or 0) else "")),
+        "injection": "SANDBAR_KNOWN_RED_EXCLUDE=1 (engine in-lane round)",
+    }
     if _pe.get("applied"):
         _tail = "本轮跳过池=%s（少 %d 条）" % (
             "、".join(str(x) for x in (_pe.get("declared") or out.excluded_pools)),
