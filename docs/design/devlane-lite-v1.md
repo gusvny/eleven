@@ -240,6 +240,18 @@ overrides are recorded and, if they recur, are evidence that the rule is wrong.
   human is asked; re-running the same tree is not a strategy.
 - **Churn re-probe.** A red that passes when re-run alone on `main` is classified before it may
   occupy a blocker slot again, so load-sensitive names stop taxing every round.
+  *Status (261001): proposed, not built; today a human does it by hand.* The measured cost of
+  leaving it unbuilt: on 261001 four names in one day had to be hand-reprobed and booked one by
+  one (`t260913-02-schedule-daily-deadman`, `t260916-25-stage-console-prepare-refresh`,
+  `metrics-donut-dom`, plus the round-2 name of the same shape), each costing one whole round
+  (~25 min) plus a triage and a human read; the roster grew 19 → 22 entries, 13 of them this one
+  environment family. **Where it hooks**: in the gate's attribution, on the names that would
+  otherwise land in `unknown` (no baseline answer) — before the blocker list is sealed, re-run
+  that name once in isolation on `main`; green ⇒ record it (churn, with the run named in the
+  receipt), red ⇒ keep it as this ticket's account. **What it must not do**: stay bounded (one
+  isolated run per unknown name, never a second full round), never read a single green as
+  "main is green" (the width caveat still applies), and never silence a red it failed to
+  reproduce — an unreproducible red is recorded *with its run*, not deleted.
 - **Cheap verification of a fix.** The instructions handed to the developer must include the exact
   criteria a fix will be judged by (the measured values and the bar), so the repair is verifiable
   without waiting for the next full round.
