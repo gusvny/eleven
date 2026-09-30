@@ -78,6 +78,16 @@ try {
   // 钉英文原文的理由（宿主令 260925：控制台 UI 界面文案一律英文）——aria-label/title
   // 就是该入口**用户可感知的可见契约本身**（无障碍读屏名），不是实现细节；英文
   // "Docs" 是该契约的当前取值，真源=sidebar.tsx 视图入口行（原「文档」=迁移前旧取值）。
+
+// t260929-22 宿主裁 1（260929）：Docs/模型路由/项目设置收进组内「More views」展开位
+// （260823 常驻可见放宽为展开显现）——取用前先展开全部组的展开位（data-on 缺席=未展开）。
+async function expandMoreViews(page) {
+  const btns = page.locator('[data-wb-more-views]:not([data-on])')
+  const n = await btns.count().catch(() => 0)
+  for (let i = 0; i < n; i++) await btns.nth(i).click({ timeout: 4000 }).catch(() => {})
+  await page.waitForTimeout(300)
+}
+  await expandMoreViews(page)
   const docIcon = page.locator('[aria-label="Docs"]').first();
   const present = await docIcon.isVisible().catch(() => false);
   record('entry/icon-present', present, present ? 'aria-label="Docs" 图标在场' : '左列未见 aria-label="Docs" 图标（入口缺席或未实现）');

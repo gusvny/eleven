@@ -88,6 +88,9 @@ import { TicketRowCard } from './ticket-row-card.tsx'
 // t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
 // 四态单点投影 tier，不另起状态词表；node 可裸 import UT 直测）。
 import { sortMergedTickets } from './ticket-list-model.ts'
+// t260929-22 执行器入口视图（GAP A）：项目行=入口，中列 Executor/Chat 切换器；
+// 判定纯层在 executor-view-model.ts（tests/executor-entry-model.mjs 看守）。
+import { ExecutorView } from './executor-view.tsx'
 // t260915-19 左栏收录巡检票：分拣/降级/进展纯函数与端点串单点住 host 层
 // （node 可裸 import 黑盒单测，tests/t260915-19-sidebar-inspection.mjs 看守）。
 // 照搬取舍收拢（review gen2 落实项）：①viewProject 兜底首项目=openEpic 先例；
@@ -219,7 +222,7 @@ interface SidebarProps {
   views: MiddleViews
 }
 
-type RightView = 'board' | 'docs' | 'routes' | 'epics'
+type RightView = 'board' | 'docs' | 'routes' | 'epics' | 'executor'
 
 /** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
  *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
@@ -265,6 +268,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 /* 展开态：双列。整窗三栏比例 左(项目+工单)15% : 中(视图)60% : 右(chat)25% ——
    左+中=侧栏占 75%（见下方 frame 第一轨改写），侧栏内部左右子列按 1:4 分。 */
 .wb-sb.wide { flex-direction:row; }
+/* t260929-22 gen3 勘误（arbitration A/B 实证）：gen2 曾把左列 min-width 提到
+   320px 给入口段让宽——被 t260904-17/t260915-09 双场景 A/B 实证为破坏壳层几何的
+   单变量（shell resize handle 压住内容），此处归还 180px。gen4 勘误：gen3 的
+   行下悬停图标条同样改了行外命中面（t260915-09 A/B 实证），随之退役；可达性
+   最终落点=图标簇行内收纳（见 .wb-view-icons gen4 注）。 */
 .wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
@@ -295,8 +303,12 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
-.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+/* t260929-22 gen1（acceptance 打回）：入口段=名字+计数+弹性空档，flex:1 吃掉
+   行内非图标区——1280 宽默认窗下项目名可读可点（行中部点击落入口段不落图标）；
+   name min-width:0 只为 ellipsis 生效，宽度由入口段保证。 */
+.wb-group-entry { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
+.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
@@ -306,7 +318,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); }
 .wb-sb .wb-card[data-state=done] { opacity:0.72; } /* 对齐板面 .72：0.55 时次级字混底后 <3:1（看守实测） */
 .wb-sb .wb-card-title { color:inherit; font-weight:400; }
-.wb-sb .wb-card-state { color:inherit; }
+/* t260929-22 gen8（对比度打回实测 rgb(122,122,133)≈4.24 元凶）：左栏 mini 行卡
+   状态字曾一律 inherit（继承左栏弱化灰），改按四态消费语义令牌（gen8 起令牌为
+   浅档深墨声明位，白底全部 ≥4.5）。 */
+.wb-sb .wb-card-state { color:var(--dsw-derive-muted,#57606a); }
+.wb-sb .wb-card-state[data-state=waiting] { color:var(--dsw-derive-warn,#7d4e00); }
+.wb-sb .wb-card-state[data-state=blocked],.wb-sb .wb-card-state[data-state=failed] { color:var(--dsw-derive-danger,#cf222e); }
+.wb-sb .wb-card-state[data-state=active] { color:var(--dsw-derive-accent,#0969da); }
 /* t260905-08：原深档固定蓝字——平台浅档下失读（宿主实报同病），归主规则令牌 */
 .wb-sb .wb-card-id { color:var(--dsw-derive-accent,#0969da); }
 /* t260915-19 左栏「等你」黄调（巡检行）：与中列同 token（index.tsx
@@ -325,14 +343,32 @@ const CSS = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
-   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
+   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档）。
+   t260929-22 gen4（宿主 260929 裁决落地：260927 设计胜、260823 放宽由 developer 落地、
+   栏宽 180 冻结、行外不许有改命中面的层——gen3 的行下悬停条被 t260915-09 A/B 实证
+   截住 .wb-psess 会话行的点击，此形态整体退役）：行内常驻=工单+立项单两枚场景钉住的
+   图标 + 一枚「More views」展开钮；其余三枚（文档/模型路由/项目设置）收进展开位，
+   展开也在流内（行自身盒内，零绝对定位、零外溢命中面）；展开时入口段名字瞬态让位，
+   锚点行为不变。全部几何均 gen1 前同族：行高、列宽、命中区 26×26 冻结契约不动。 */
 .wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
+/* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
+   三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
+   语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。
+   t260929-22 gen2 勘误：gen1 曾把命中区缩到 20px 给入口段让宽——被 t260904-17
+   A/B 实证为该场景新红单变量，此处恢复冻结契约 26×26（入口可达性见 .wb-view-icons
+   gen3 注：悬停现形，不再动任何几何）。 */
 .wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
+/* t260929-22 直修（宿主令 260930，integration 执行）：.wb-view-icon 静息档 0.55 透明度
+   用在**文字字符**图标（⋯ 更多视图）上时，合成后的有效色在白底只到 3.50、旧平台面
+   3.43——透明度压不出 AA（0.55 时即便纯黑也只 4.75，实际墨色达不到）。本元素改走
+   muted 墨色（极性自适应）：静息仍是弱化观感，两档都 ≥4.5，几何零改动。
+   其余 view icon 不用文字字符（SVG），不受本规则影响。 */
+.wb-view-icon[data-wb-more-views] { opacity:1; color:var(--dsw-derive-muted,#57606a); }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
 .wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
   color:var(--dsw-derive-danger-border,#ff8183); background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
@@ -428,6 +464,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
    *  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
   const [listNonce, setListNonce] = useState(0)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  /* t260929-22 gen4：每项目的「More views」展开位（文档/模型路由/项目设置三枚的
+     行内收纳；展开也在流内，零外溢命中面）。 */
+  const [moreViews, setMoreViews] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
   // 项目生命周期弹层（票③面D，验收 11-13）：kind 区分四弹层；settings→remove 由
   // 设置弹层 danger 区切换（同弹层面，非叠层）。
@@ -691,6 +730,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
     setRightView(view)
   }, [])
 
+  // t260929-22（GAP A）：按面板声明的会话 id 打开 executor 对话——直接走平台
+  // sessions.open（项目内会话 tab 的 openSession 链收敛在 hook 内部，不外露）；
+  // throw（未列出 id）= false，ExecutorView 出显式提示，不静默。
+  const openExecutorSessionById = useCallback((sessionId: string): boolean => {
+    try { sessions.open(sessionId); return true } catch (err) {
+      console.warn('[workbench] open executor session failed:', err)
+      return false
+    }
+  }, [sessions])
+
   /** 项目组：注册表顺序。进行中工单常列；已完成工单在 sandbar 驻留窗口内也列（灰绿标记）。 */
   // 巡检行分拣（t260915-19 方案 v2）：按行 project（t260915-20 起=ProjectKey SA
   // 真源）归位——命中在册项目进对应组、空/不在册（20 之前老票、注册表隔离 key、
@@ -769,43 +818,65 @@ export function WorkbenchSidebar(props: SidebarProps) {
             <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>Loading…</div>
           ) : groups.map(g => (
             <div key={g.project.key}>
-              <div className="wb-group-head" onClick={() => setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] }))}>
-                <span className="wb-group-caret">{collapsed[g.project.key] ? '▸' : '▾'}</span>
+              {/* t260929-22（GAP A）：项目名行本身=执行器入口（设计稿 260927 §界面与命名：
+                  一个项目一行、项目名即 project executor 的入口，不单列 Tick 行）——
+                  折叠退到 caret 单独承担（一次点击只做一件事）；五个视图图标语义不变。 */}
+              <div className="wb-group-head" style={{ cursor: 'pointer' }}>
+                <span className="wb-group-caret" title={collapsed[g.project.key] ? 'Expand' : 'Collapse'}
+                  onClick={(e) => { e.stopPropagation(); setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] })) }}>{collapsed[g.project.key] ? '▸' : '▾'}</span>
                 {/* 项目色点（票② R7 拍板 5）：8px 常驻项目色标识，色=projectColor 确定性色板 */}
                 <span className="wb-group-dot" data-wb-psess-dot="" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, flex: 'none', background: projectColor(g.project.key) }} title={g.project.key} />
-                <span className="wb-group-name">{g.project.name}</span>
-                <span className="wb-group-count">{g.tickets.length || ''}</span>
-                {/* 视图入口 per 项目（用户拍板 260823：每个项目组头行都有，非全局）——
-                    按行项目分流：工单列表=该项目 ProjectKey 过滤、模型路由=该项目主目录
-                    model-routes.yaml；立项单（t260827-01）=全量立项清单（跨项目语义单元，
-                    不按项目过滤）；文档（t260905-06 立；t260915-10 接壳层）=点哪组图标
-                    默认开哪组 docs（初值/跟随=本行项目），页内选择器可手动切且手动优先
-                    （重开文档页=重新跟随壳层，收敛口径见 docs.tsx 头注）；
+                {/* gen1 可达性修（acceptance 打回）：入口=名字+计数+弹性空档整段
+                    （.wb-group-entry，flex:1 吃掉行内非图标区）——普通窗口宽度下项目名
+                    不再被图标簇挤成 0 宽、行中部点击必落入入口段而非图标；图标簇命中区
+                    26→20px（显形 svg 18px 不变）。 */}
+                <span className="wb-group-entry" data-wb-executor-entry=""
+                  role="button" tabIndex={0}
+                  title={`Open ${g.project.name} executor panel`}
+                  aria-label={`Open ${g.project.name} executor panel`}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'executor') }}
+                  onClick={() => handleViewIcon(g.project.key, 'executor')}>
+                  <span className="wb-group-name">{g.project.name}</span>
+                  <span className="wb-group-count">{g.tickets.length || ''}</span>
+                </span>
+                {/* 视图入口 per 项目（用户拍板 260823；t260929-22 gen4 宿主裁决落地：
+                    260823 的「五枚常驻」放宽——行内常驻=工单+立项单（两枚场景钉住：
+                    t260904-17 点工单、t260915-09 点立项单），文档/模型路由/项目设置
+                    三枚收进「More views」行内展开位（展开也在流内，零外溢命中面）；
                     active 高亮只判 rightView（跨组同亮，t260915-10 口径不变）。 */}
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
                   <span
                     className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
                     title="Tickets" aria-label="Tickets"
                     onClick={() => handleViewIcon(g.project.key, 'board')}><ProjectIcon name="board" /></span>
-                  {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
-                  <span
-                    className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
-                    role="button" tabIndex={0}
-                    title="Docs" aria-label="Docs"
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
-                    onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
-                  <span
-                    className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="Model Routes" aria-label="Model Routes"
-                    onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
                   <span
                     className={`wb-view-icon ${rightView === 'epics' && viewProject === g.project.key ? 'active' : ''}`}
                     title="Epics" aria-label="Epics"
                     onClick={() => handleViewIcon(g.project.key, 'epics')}><ProjectIcon name="epics" /></span>
-                  {/* 第五枚=项目设置（票③面D）：常驻可见，开设置弹层（只读+danger 区摘除）。 */}
-                  <span className="wb-view-icon" data-wb-project-settings-entry=""
-                    title="Project Settings" aria-label="Project Settings"
-                    onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
+                  {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
+                  {moreViews[g.project.key] && (<>
+                    <span
+                      className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
+                      role="button" tabIndex={0}
+                      title="Docs" aria-label="Docs"
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
+                      onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
+                    <span
+                      className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
+                      title="Model Routes" aria-label="Model Routes"
+                      onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
+                    <span className="wb-view-icon" data-wb-project-settings-entry=""
+                      title="Project Settings" aria-label="Project Settings"
+                      onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
+                  </>)}
+                  <span
+                    className="wb-view-icon"
+                    role="button" tabIndex={0}
+                    data-wb-more-views="" data-on={Boolean(moreViews[g.project.key]) || undefined}
+                    title={moreViews[g.project.key] ? 'Fewer views' : 'More views'}
+                    aria-label={moreViews[g.project.key] ? 'Fewer views' : 'More views'}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setMoreViews(m => ({ ...m, [g.project.key]: !m[g.project.key] })) }}
+                    onClick={() => setMoreViews(m => ({ ...m, [g.project.key]: !m[g.project.key] }))}><span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1, fontWeight: 700 }}>⋯</span></span>
                 </span>
               </div>
               {!collapsed[g.project.key] && (
@@ -922,8 +993,17 @@ export function WorkbenchSidebar(props: SidebarProps) {
             <div className="wb-placeholder">
               Open a view from a project row on the left:
               <br />Tickets · Docs · Model Routes · Epics · Project Settings
+              <br />or click a project name row to open its Executor panel
               <br />(routed by the row's project; Epics is a cross-project list — clicking its icon shows the list in the middle column)
             </div>
+          )}
+          {/* 执行器视图（t260929-22 GAP A）：项目行入口点进来；iframe 嵌同源面板页，
+              Chat 分支按声明开 executor 会话（判定在 executor-view-model，绝不自 declare）。 */}
+          {viewProject && rightView === 'executor' && (
+            <ExecutorView
+              projectKey={viewProject}
+              listedSessionIds={Object.keys((projectSessions.listState?.byId ?? {}) as Record<string, unknown>)}
+              openExecutorSession={openExecutorSessionById} />
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
           {/* 文档视图（t260905-06 立；t260915-10 接壳层 projectKey）：与 per-project 视图

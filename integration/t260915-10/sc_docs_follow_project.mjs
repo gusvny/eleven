@@ -151,6 +151,15 @@ try {
   // 入口钉 aria-label（无障碍名=入口用户可感知契约本身；宿主令 260925 控制台 UI 文案一律
   // 英文后取值 "Docs"，迁移前旧值为「文档」）；限定 span 是为排除 ProjectIcon svg 的同名
   // aria-label（project-icons.tsx role=img 恒同值）。
+
+// t260929-22 宿主裁 1（260929）：Docs/模型路由/项目设置收进组内「More views」展开位
+// （260823 常驻可见放宽为展开显现）——取用前先展开全部组的展开位（data-on 缺席=未展开）。
+async function expandMoreViews(page) {
+  const btns = page.locator('[data-wb-more-views]:not([data-on])')
+  const n = await btns.count().catch(() => 0)
+  for (let i = 0; i < n; i++) await btns.nth(i).click({ timeout: 4000 }).catch(() => {})
+  await page.waitForTimeout(300)
+}
   const docsIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="Docs"]');
   const boardIconOf = (name) => page.locator('.wb-group-head', { hasText: name }).locator('span[aria-label="Tickets"]');
   const projKeyOf = () => page.evaluate(() => document.querySelector('[data-wb-docs-root]')?.getAttribute('data-wb-doc-project-key') ?? null);
@@ -162,6 +171,7 @@ try {
   // ---- T1 跟随初值：经夹具甲组「文档」图标进入=初值 fixa ----
   {
     // 入口探针=deadline 内轮询不单点取样（KI-072 族，mock_v1 同款口径）
+    await expandMoreViews(page);
     let iconSeen = false;
     for (let i = 0; i < 12; i++) {
       if (await docsIconOf("夹具甲").isVisible().catch(() => false)) { iconSeen = true; break; }
@@ -171,6 +181,7 @@ try {
       record('ui/entry-present', 'fail', '夹具甲组 aria-label="Docs" 图标不在场（入口面由 t260905-06-doc-entry-present 专守，本场景链路无从走起）');
       summarize();
     }
+  await expandMoreViews(page)
     await docsIconOf("夹具甲").click();
     const keyOk = await waitProjKey('fixa');
     await page.waitForTimeout(1200);

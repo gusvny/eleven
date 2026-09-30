@@ -3910,7 +3910,7 @@ function startChatProjectBand(opts = {}) {
 * 行内注入（epicColorOf 结果，纯函数不动）。
 */
 function epicChipColor() {
-	return "color-mix(in srgb, var(--epic-c, #9ca3af) 45%, var(--dsw-alias-label-primary, #1f2328))";
+	return "color-mix(in srgb, var(--epic-c, var(--dsw-derive-ink-strong, #9ca3af)) 30%, var(--dsw-derive-ink-strong, #24292f))";
 }
 /** 弱化文字（审批区 epicLine 等此前恒走 --wb-muted fallback 的点位，t260905-08 收编）。 */
 function epicChipMuted() {
@@ -3921,30 +3921,52 @@ function epicChipMuted() {
 * 重复定义无害，保证任一组件独立挂载时令牌都在场）。
 */
 const DERIVE_TOKENS_CSS = `:root{
-/* 文字系：45% 语义基色 × 55% 平台前景——浅档基色微加深（对比度↑），深档自动提亮 */
---dsw-derive-fg:var(--dsw-alias-label-primary,#1f2328);
---dsw-derive-muted:color-mix(in srgb,var(--dsw-alias-label-primary,#1f2328) 72%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+/* 文字系：基色 × 平台前景混色——浅档基色微加深（对比度↑），深档自动提亮 */
+/* t260929-22 gen9 曾把 fg/muted/warn/ink-* 锁成「浅档深墨裸值」，理由是平台 label
+   在浅底实测 rgb(122,122,133)≈4.24。该做法的代价在集测**暗档档位**上暴露：固定深墨落在
+   暗底上整片不可读（t260905-08 contrast/dark 违例 375，首例 sidebar/wb-group-name
+   1.21）。定值无法同时满足两档——平台浅档底与暗档底互斥，而能翻转的只有 label。
+   故一律回到「深基色 P% × 平台 label」形态（与 main 既有形态同构，只把基色压深到
+   两档都够）：浅档混出足够深的墨，暗档随 label 提亮。P 与基色由四档位 × 白底/四族淡底
+   × 跨族淡底的 WCAG 模型定，悲观假设（浅档 label=真台中层灰）下最差 4.7~5.1、
+   乐观假设（闸注入 label=#1f2328）下最差 6.1~7.4；暗档同面 6.0~8.8。 */
+--dsw-derive-fg:color-mix(in srgb,#24292f 30%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-ink-blue:color-mix(in srgb,#0550ae 43%,var(--dsw-alias-label-primary,#1f2328));
+/* muted/active 的旧基色（#57606a / #7c3aed）偏浅，任何比例都够不着 4.5——基色一并压深。 */
+--dsw-derive-muted:color-mix(in srgb,#3d444d 42%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-border:var(--dsw-alias-border-l,#d0d7de);
 --dsw-derive-canvas:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
 --dsw-derive-surface:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 13%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-surface-2:color-mix(in srgb,var(--dsw-alias-border-l,#d0d7de) 26%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-accent:color-mix(in srgb,#0969da 45%,var(--dsw-alias-label-primary,#1f2328));
+/* t260929-22 直修（宿主令 260930，integration 执行）：accent/danger/success 三个**文字墨**
+   的定值不够深。它们不只落在自家淡底上，还落在**跨族淡底**上——blocked 行卡底色是
+   danger 12% 铺在旧平台面 #f5f8fa 上，而卡内的 wb-card-id 是蓝墨，实测 4.03。
+   两个方向都试过：① 压深「基色」但保留与 --dsw-alias-label-primary 的混色（本改法）；
+   ② 直接给浅档深墨定值——②在暗档必翻车（固定深墨落在暗底上不可读，闸的 light/dark 两个档位
+   是分别注入两档平台令牌实测的）。故取 ①：浅档混出足够深的墨，暗档自动随 label 提亮。
+   四档位 × 白底/三族淡底/跨族淡底全量模型（WCAG 相对亮度）最差：accent 5.06、danger 5.03、
+   success 4.75；暗档同面 5.5~6.5。判据真源=integration/t260905-08 与 t260907-08（全 DOM
+   扫描非抽样），改值后按四档位实跑复验。 */
+--dsw-derive-accent:color-mix(in srgb,#033d8b 40%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-solid:#1f6feb;
 --dsw-derive-on-solid:#ffffff;
---dsw-derive-active:#7c3aed;
+--dsw-derive-active:color-mix(in srgb,#5a2ea6 41%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-deep:color-mix(in srgb,#0550ae 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-accent-bg:color-mix(in srgb,#0969da 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-accent-border:color-mix(in srgb,#0969da 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-danger:color-mix(in srgb,#cf222e 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-danger:color-mix(in srgb,#8f1a20 38%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-danger-solid:#d1242f;
 --dsw-derive-danger-bg:color-mix(in srgb,#cf222e 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-danger-border:color-mix(in srgb,#cf222e 40%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-success:color-mix(in srgb,#1a7f37 45%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-success:color-mix(in srgb,#0f5323 40%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-success-deep:color-mix(in srgb,#116329 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-success-solid:#2da44e;
 --dsw-derive-success-bg:color-mix(in srgb,#1a7f37 12%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-success-border:color-mix(in srgb,#1a7f37 42%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
---dsw-derive-warn:color-mix(in srgb,#9a6700 45%,var(--dsw-alias-label-primary,#1f2328));
+/* t260929-22 gen5（对比度红 4.24<4.5）：warn 文字加深——基色换 warn-deep 家族的
+   #7d4e00、alias 只作 30% 少数项（极性不定时混不出保证对比度，见 UT contrast-palette）。 */
+--dsw-derive-warn:color-mix(in srgb,#7d4e00 46%,var(--dsw-alias-label-primary,#1f2328));
+--dsw-derive-ink-strong:color-mix(in srgb,#24292f 30%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-deep:color-mix(in srgb,#7d4e00 45%,var(--dsw-alias-label-primary,#1f2328));
 --dsw-derive-warn-bg:color-mix(in srgb,#eac54f 16%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
 --dsw-derive-warn-border:color-mix(in srgb,#d4a72c 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
@@ -4025,6 +4047,9 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   display:flex; align-items:center; justify-content:center; font:inherit;
   font-size:13px; line-height:1; padding:0; border-radius:4px;
   border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); background:none;
+  /* t260929-22 gen8 回归锁定派生（t260904-05 t3 契约未被宿主签发重归属）：45% 混
+     平台前景公式原样保留；该派生在 180px 台实测 2.64<4.5，与对比度纪律不可两全，
+     已按仲裁指引升级 DESIGN-CONFLICT（数学证明见 integration/t260929-22/）。 */
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); cursor:pointer; }
 .wb-psess-new:hover:not(:disabled) { background:var(--wb-psess-hover, rgba(255,255,255,0.1)); }
 /* 空态可发现性（t260906-01）：账册为空时 24px 无字小方块不可认出——换带文字
@@ -4043,6 +4068,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-psess-tab.active { background:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 14%,transparent);
   border-color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+  /* gen8：同上，回归 45% 锁定派生（同 t260904-05 契约）。 */
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
@@ -6620,6 +6646,224 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		]
 	});
 }
+//#endregion
+//#region src/client/executor-view-model.ts
+/**
+* Chat 分支裁决：声明了且在当前会话列表里 → 打开；否则给**点名原因**的提示
+* （未声明 / 声明的会话不在册 / 回执读不了）。列表缺席（快照无 byId）按不在册
+* 处理——畸形输入显式降级，不 throw、不猜。
+*/
+function chatLegVerdict(settings, listedSessionIds) {
+	if (typeof settings !== "object" || settings === null || settings.ok !== true) return {
+		action: "note",
+		reason: "Executor session unreadable: the panel settings endpoint did not return a usable payload (it may be degraded — see the panel Settings tab for the reason)."
+	};
+	const s = settings;
+	const declared = s.executor_session;
+	if (s.declared !== true || typeof declared !== "string" || declared === "") return {
+		action: "note",
+		reason: "No executor session declared for this project (declaring one is the host's call, in the panel's Settings tab — this entry never self-declares)."
+	};
+	if (!(Array.isArray(listedSessionIds) ? listedSessionIds : []).includes(declared)) return {
+		action: "note",
+		reason: `Declared executor session '${declared}' is not in this console's session list (it may have been settled). Re-declare it in the panel's Settings tab if needed.`
+	};
+	return {
+		action: "open",
+		sessionId: declared
+	};
+}
+/** 面板页同源 URL（深链 ?project=；空键不带参数=面板自己的选择器）。 */
+function executorPanelUrl(projectKey) {
+	return projectKey === "" ? "/sandbar-executor-panel/" : "/sandbar-executor-panel/?project=" + encodeURIComponent(projectKey);
+}
+//#endregion
+//#region src/client/executor-view.tsx
+/**
+* executor-view.tsx —— 中列执行器视图（t260929-22 GAP A）：设计稿 260927 §界面与命名
+* 的落地——左栏项目行即入口点进来后，中列顶部一个 `Executor / Chat` 切换器在
+* 「面板」与「对话」两个视图之间翻（机制同知识库页签那套；没有单独的「打开对话」钮）。
+*
+* - Executor 分支：同源 iframe 嵌面板页（`?project=<key>` 深链——panel-page.ts 消费该参数）。
+*   面板路由不可达=显式降级横幅（点名状态码），绝不渲染空白冒充常态。
+* - Chat 分支：判定在 executor-view-model.ts（chatLegVerdict）；打开动作由侧栏传入
+*   （sessions.open），打开的会话落在**现有对话 UI**（260903-07 裁定：右栏恒全局单会话，
+*   中列不再开对话——与设计稿「面板与对话是同一会话的两个视图」的落点差异已在
+*   交接报告点名，非静默替代）。
+* - 全终态：settings/可达性两个 fetch 都带 AbortController，卸载/换项目即中止；
+*   本组件无常驻定时器（轮询在面板页自己内部）。
+*
+* 测试锚：data-wb-executor-view / data-wb-executor-seg / data-wb-chat-seg /
+* data-wb-executor-frame / data-wb-chat-note（集成场景按锚断言，不按文案）。
+*/
+function ExecutorView({ projectKey, listedSessionIds, openExecutorSession }) {
+	const [seg, setSeg] = (0, react.useState)("executor");
+	const [panelState, setPanelState] = (0, react.useState)({
+		ok: false,
+		detail: "checking…"
+	});
+	const [settings, setSettings] = (0, react.useState)(null);
+	const [settingsState, setSettingsState] = (0, react.useState)("idle");
+	const [openedId, setOpenedId] = (0, react.useState)("");
+	(0, react.useEffect)(() => {
+		const ac = new AbortController();
+		setPanelState({
+			ok: false,
+			detail: "checking…"
+		});
+		fetch(executorPanelUrl(projectKey), { signal: ac.signal }).then((res) => {
+			if (res.ok) setPanelState({
+				ok: true,
+				detail: ""
+			});
+			else setPanelState({
+				ok: false,
+				detail: `panel route answered HTTP ${res.status} — the executor-panel plugin may not be loaded; reload the console after (re)starting it.`
+			});
+		}).catch((e) => {
+			if (ac.signal.aborted) return;
+			setPanelState({
+				ok: false,
+				detail: `panel route unreachable: ${e instanceof Error ? e.message : String(e)}`
+			});
+		});
+		return () => ac.abort();
+	}, [projectKey]);
+	(0, react.useEffect)(() => {
+		if (seg !== "chat" || settingsState !== "idle") return;
+		const ac = new AbortController();
+		setSettingsState("loading");
+		fetch("/sandbar-executor-panel/api/settings?project=" + encodeURIComponent(projectKey), { signal: ac.signal }).then(async (res) => {
+			if (!res.ok) {
+				setSettings({
+					ok: false,
+					error: `HTTP ${res.status}`
+				});
+				setSettingsState("loaded");
+				return;
+			}
+			setSettings(await res.json().catch(() => ({
+				ok: false,
+				error: "response body is not JSON"
+			})));
+			setSettingsState("loaded");
+		}).catch((e) => {
+			if (ac.signal.aborted) return;
+			setSettings({
+				ok: false,
+				error: e instanceof Error ? e.message : String(e)
+			});
+			setSettingsState("failed");
+		});
+		return () => ac.abort();
+	}, [
+		seg,
+		settingsState,
+		projectKey
+	]);
+	(0, react.useEffect)(() => {
+		if (seg !== "chat" || settingsState === "idle" || settingsState === "loading" || openedId !== "") return;
+		const v = chatLegVerdict(settings, listedSessionIds);
+		if (v.action === "open" && openExecutorSession(v.sessionId)) setOpenedId(v.sessionId);
+	}, [
+		seg,
+		settings,
+		settingsState,
+		listedSessionIds,
+		openExecutorSession,
+		openedId
+	]);
+	const chatVerdict = settingsState === "loaded" || settingsState === "failed" ? chatLegVerdict(settings, listedSessionIds) : null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-executor-view",
+		"data-wb-executor-view": "",
+		"data-project": projectKey,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: EXECUTOR_CSS }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-executor-switch",
+				role: "tablist",
+				"aria-label": "Executor panel / conversation",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						role: "tab",
+						"aria-selected": seg === "executor",
+						"data-wb-executor-seg": "",
+						"data-on": seg === "executor",
+						onClick: () => setSeg("executor"),
+						children: "Executor"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						role: "tab",
+						"aria-selected": seg === "chat",
+						"data-wb-chat-seg": "",
+						"data-on": seg === "chat",
+						onClick: () => setSeg("chat"),
+						children: "Chat"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-executor-switch-project",
+						title: projectKey,
+						children: projectKey
+					})
+				]
+			}),
+			seg === "executor" && (panelState.ok ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+				"data-wb-executor-frame": "",
+				className: "wb-executor-frame",
+				title: `Executor panel — ${projectKey}`,
+				src: executorPanelUrl(projectKey)
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-executor-note",
+				role: "alert",
+				"data-wb-executor-note": "",
+				children: ["Executor panel unavailable for this project. ", panelState.detail]
+			})),
+			seg === "chat" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-executor-chat",
+				"data-wb-chat-pane": "",
+				children: chatVerdict === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-executor-note",
+					children: "Resolving the declared executor session…"
+				}) : chatVerdict.action === "note" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-executor-note",
+					role: "alert",
+					"data-wb-chat-note": "",
+					children: chatVerdict.reason
+				}) : openedId === chatVerdict.sessionId ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-executor-note",
+					"data-wb-chat-note": "",
+					children: [
+						"Conversation opened in the chat column (right) — session ",
+						openedId,
+						". The conversation lives in the existing chat UI (per the 260903-07 single-global-chat ruling); this switcher stays here as the panel-side entry back."
+					]
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-executor-note",
+					role: "alert",
+					"data-wb-chat-note": "",
+					children: [
+						"Failed to open the declared session ",
+						chatVerdict.sessionId,
+						" (see the console for details)."
+					]
+				})
+			})
+		]
+	});
+}
+const EXECUTOR_CSS = `
+.wb-executor-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.wb-executor-switch { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--dsw-derive-border, #333); }
+.wb-executor-switch button { border: 1px solid var(--dsw-derive-border, #444); background: transparent; color: inherit;
+  padding: 3px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+.wb-executor-switch button[data-on="true"] { background: var(--dsw-derive-bg-accent, #2b2b2b); font-weight: 600; }
+.wb-executor-switch-project { margin-left: auto; color: var(--dsw-derive-fg-dim, #888); font-size: 12px; }
+.wb-executor-frame { flex: 1; width: 100%; border: 0; background: transparent; }
+.wb-executor-chat { padding: 16px; }
+.wb-executor-note { padding: 12px 14px; border: 1px solid var(--dsw-derive-border, #444); border-radius: 8px;
+  color: var(--dsw-derive-fg, #ccc); font-size: 13px; line-height: 1.5; max-width: 640px; }
+`;
 //#endregion
 //#region src/host/inspection-face.ts
 /**
@@ -47698,6 +47942,11 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 /* 展开态：双列。整窗三栏比例 左(项目+工单)15% : 中(视图)60% : 右(chat)25% ——
    左+中=侧栏占 75%（见下方 frame 第一轨改写），侧栏内部左右子列按 1:4 分。 */
 .wb-sb.wide { flex-direction:row; }
+/* t260929-22 gen3 勘误（arbitration A/B 实证）：gen2 曾把左列 min-width 提到
+   320px 给入口段让宽——被 t260904-17/t260915-09 双场景 A/B 实证为破坏壳层几何的
+   单变量（shell resize handle 压住内容），此处归还 180px。gen4 勘误：gen3 的
+   行下悬停图标条同样改了行外命中面（t260915-09 A/B 实证），随之退役；可达性
+   最终落点=图标簇行内收纳（见 .wb-view-icons gen4 注）。 */
 .wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
@@ -47728,8 +47977,12 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
-.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+/* t260929-22 gen1（acceptance 打回）：入口段=名字+计数+弹性空档，flex:1 吃掉
+   行内非图标区——1280 宽默认窗下项目名可读可点（行中部点击落入口段不落图标）；
+   name min-width:0 只为 ellipsis 生效，宽度由入口段保证。 */
+.wb-group-entry { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
+.wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
@@ -47739,7 +47992,13 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); }
 .wb-sb .wb-card[data-state=done] { opacity:0.72; } /* 对齐板面 .72：0.55 时次级字混底后 <3:1（看守实测） */
 .wb-sb .wb-card-title { color:inherit; font-weight:400; }
-.wb-sb .wb-card-state { color:inherit; }
+/* t260929-22 gen8（对比度打回实测 rgb(122,122,133)≈4.24 元凶）：左栏 mini 行卡
+   状态字曾一律 inherit（继承左栏弱化灰），改按四态消费语义令牌（gen8 起令牌为
+   浅档深墨声明位，白底全部 ≥4.5）。 */
+.wb-sb .wb-card-state { color:var(--dsw-derive-muted,#57606a); }
+.wb-sb .wb-card-state[data-state=waiting] { color:var(--dsw-derive-warn,#7d4e00); }
+.wb-sb .wb-card-state[data-state=blocked],.wb-sb .wb-card-state[data-state=failed] { color:var(--dsw-derive-danger,#cf222e); }
+.wb-sb .wb-card-state[data-state=active] { color:var(--dsw-derive-accent,#0969da); }
 /* t260905-08：原深档固定蓝字——平台浅档下失读（宿主实报同病），归主规则令牌 */
 .wb-sb .wb-card-id { color:var(--dsw-derive-accent,#0969da); }
 /* t260915-19 左栏「等你」黄调（巡检行）：与中列同 token（index.tsx
@@ -47758,14 +48017,32 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
-   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档） */
+   t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档）。
+   t260929-22 gen4（宿主 260929 裁决落地：260927 设计胜、260823 放宽由 developer 落地、
+   栏宽 180 冻结、行外不许有改命中面的层——gen3 的行下悬停条被 t260915-09 A/B 实证
+   截住 .wb-psess 会话行的点击，此形态整体退役）：行内常驻=工单+立项单两枚场景钉住的
+   图标 + 一枚「More views」展开钮；其余三枚（文档/模型路由/项目设置）收进展开位，
+   展开也在流内（行自身盒内，零绝对定位、零外溢命中面）；展开时入口段名字瞬态让位，
+   锚点行为不变。全部几何均 gen1 前同族：行高、列宽、命中区 26×26 冻结契约不动。 */
 .wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
    语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。 */
+/* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
+   三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
+   语境定稿——图标本体吃 currentColor，几何规格统一是本模块契约）。
+   t260929-22 gen2 勘误：gen1 曾把命中区缩到 20px 给入口段让宽——被 t260904-17
+   A/B 实证为该场景新红单变量，此处恢复冻结契约 26×26（入口可达性见 .wb-view-icons
+   gen3 注：悬停现形，不再动任何几何）。 */
 .wb-view-icon { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; opacity:0.55; }
 .wb-view-icon:hover { background:rgba(255,255,255,0.1); opacity:1; }
 .wb-view-icon.active { background:rgba(124,58,237,0.25); opacity:1; }
+/* t260929-22 直修（宿主令 260930，integration 执行）：.wb-view-icon 静息档 0.55 透明度
+   用在**文字字符**图标（⋯ 更多视图）上时，合成后的有效色在白底只到 3.50、旧平台面
+   3.43——透明度压不出 AA（0.55 时即便纯黑也只 4.75，实际墨色达不到）。本元素改走
+   muted 墨色（极性自适应）：静息仍是弱化观感，两档都 ≥4.5，几何零改动。
+   其余 view icon 不用文字字符（SVG），不受本规则影响。 */
+.wb-view-icon[data-wb-more-views] { opacity:1; color:var(--dsw-derive-muted,#57606a); }
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
 .wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
   color:var(--dsw-derive-danger-border,#ff8183); background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
@@ -47856,6 +48133,7 @@ function WorkbenchSidebar(props) {
 	*  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
 	const [listNonce, setListNonce] = (0, react.useState)(0);
 	const [collapsed, setCollapsed] = (0, react.useState)({});
+	const [moreViews, setMoreViews] = (0, react.useState)({});
 	const [loading, setLoading] = (0, react.useState)(true);
 	const [modal, setModal] = (0, react.useState)(null);
 	/** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
@@ -48053,6 +48331,15 @@ function WorkbenchSidebar(props) {
 		setViewProject(projectKey);
 		setRightView(view);
 	}, []);
+	const openExecutorSessionById = (0, react.useCallback)((sessionId) => {
+		try {
+			sessions.open(sessionId);
+			return true;
+		} catch (err) {
+			console.warn("[workbench] open executor session failed:", err);
+			return false;
+		}
+	}, [sessions]);
 	/** 项目组：注册表顺序。进行中工单常列；已完成工单在 sandbar 驻留窗口内也列（灰绿标记）。 */
 	const inspectionSplit = (0, react.useMemo)(() => inspectionSplitByProject(inspectionRows, projects.map((p) => p.key)), [inspectionRows, projects]);
 	const groups = (0, react.useMemo)(() => {
@@ -48110,13 +48397,18 @@ function WorkbenchSidebar(props) {
 							children: "Loading…"
 						}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-group-head",
-							onClick: () => setCollapsed((c) => ({
-								...c,
-								[g.project.key]: !c[g.project.key]
-							})),
+							style: { cursor: "pointer" },
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-group-caret",
+									title: collapsed[g.project.key] ? "Expand" : "Collapse",
+									onClick: (e) => {
+										e.stopPropagation();
+										setCollapsed((c) => ({
+											...c,
+											[g.project.key]: !c[g.project.key]
+										}));
+									},
 									children: collapsed[g.project.key] ? "▸" : "▾"
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -48132,13 +48424,24 @@ function WorkbenchSidebar(props) {
 									},
 									title: g.project.key
 								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-name",
-									children: g.project.name
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-count",
-									children: g.tickets.length || ""
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "wb-group-entry",
+									"data-wb-executor-entry": "",
+									role: "button",
+									tabIndex: 0,
+									title: `Open ${g.project.name} executor panel`,
+									"aria-label": `Open ${g.project.name} executor panel`,
+									onKeyDown: (e) => {
+										if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "executor");
+									},
+									onClick: () => handleViewIcon(g.project.key, "executor"),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-group-name",
+										children: g.project.name
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-group-count",
+										children: g.tickets.length || ""
+									})]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-view-icons",
@@ -48152,43 +48455,73 @@ function WorkbenchSidebar(props) {
 											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "board" })
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: `wb-view-icon ${rightView === "docs" ? "active" : ""}`,
-											role: "button",
-											tabIndex: 0,
-											title: "Docs",
-											"aria-label": "Docs",
-											onKeyDown: (e) => {
-												if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "docs");
-											},
-											onClick: () => handleViewIcon(g.project.key, "docs"),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "docs" })
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
-											title: "Model Routes",
-											"aria-label": "Model Routes",
-											onClick: () => handleViewIcon(g.project.key, "routes"),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: `wb-view-icon ${rightView === "epics" && viewProject === g.project.key ? "active" : ""}`,
 											title: "Epics",
 											"aria-label": "Epics",
 											onClick: () => handleViewIcon(g.project.key, "epics"),
 											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "epics" })
 										}),
+										moreViews[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: `wb-view-icon ${rightView === "docs" ? "active" : ""}`,
+												role: "button",
+												tabIndex: 0,
+												title: "Docs",
+												"aria-label": "Docs",
+												onKeyDown: (e) => {
+													if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "docs");
+												},
+												onClick: () => handleViewIcon(g.project.key, "docs"),
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "docs" })
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
+												title: "Model Routes",
+												"aria-label": "Model Routes",
+												onClick: () => handleViewIcon(g.project.key, "routes"),
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-view-icon",
+												"data-wb-project-settings-entry": "",
+												title: "Project Settings",
+												"aria-label": "Project Settings",
+												onClick: () => {
+													setModal({
+														kind: "settings",
+														project: g.project
+													});
+												},
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "settings" })
+											})
+										] }),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "wb-view-icon",
-											"data-wb-project-settings-entry": "",
-											title: "Project Settings",
-											"aria-label": "Project Settings",
-											onClick: () => {
-												setModal({
-													kind: "settings",
-													project: g.project
-												});
+											role: "button",
+											tabIndex: 0,
+											"data-wb-more-views": "",
+											"data-on": Boolean(moreViews[g.project.key]) || void 0,
+											title: moreViews[g.project.key] ? "Fewer views" : "More views",
+											"aria-label": moreViews[g.project.key] ? "Fewer views" : "More views",
+											onKeyDown: (e) => {
+												if (e.key === "Enter" || e.key === " ") setMoreViews((m) => ({
+													...m,
+													[g.project.key]: !m[g.project.key]
+												}));
 											},
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "settings" })
+											onClick: () => setMoreViews((m) => ({
+												...m,
+												[g.project.key]: !m[g.project.key]
+											})),
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												"aria-hidden": "true",
+												style: {
+													fontSize: 13,
+													lineHeight: 1,
+													fontWeight: 700
+												},
+												children: "⋯"
+											})
 										})
 									]
 								})
@@ -48319,8 +48652,15 @@ function WorkbenchSidebar(props) {
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
 									"Tickets · Docs · Model Routes · Epics · Project Settings",
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+									"or click a project name row to open its Executor panel",
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
 									"(routed by the row's project; Epics is a cross-project list — clicking its icon shows the list in the middle column)"
 								]
+							}),
+							viewProject && rightView === "executor" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExecutorView, {
+								projectKey: viewProject,
+								listedSessionIds: Object.keys(projectSessions.listState?.byId ?? {}),
+								openExecutorSession: openExecutorSessionById
 							}),
 							viewProject && rightView === "board" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Board, {
 								focusId: selectedId || void 0,
@@ -50944,7 +51284,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
   background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-fg,#1f2328);min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
   display:flex;flex-direction:column;gap:16px;height:100%;overflow-y:auto;font-size:13px;line-height:1.55}
 .wb-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:12px;position:relative}
-.wb-title{font-size:20px;font-weight:600;color:var(--dsw-derive-fg,#1f2328)}
+.wb-title{font-size:20px;font-weight:600;color:var(--dsw-derive-ink-strong,#24292f)}/* t260929-22 gen9：4.05→深墨 */
 .wb-sub{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
 .wb-err{background:var(--dsw-derive-danger-bg,#ffebe9);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);border-radius:6px;
   padding:8px 12px;font-size:12px;white-space:pre-wrap}
@@ -51017,7 +51357,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-dot[data-state=active]::before{background:var(--dsw-derive-accent,#0969da)}
 .wb-card-dot[data-state=done]::before{background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-state{font-size:11px;font-weight:600;flex:none}
-.wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#9a6700)}
+/* t260929-22 gen5（对比度红 4.24<4.5）：waiting 态文字锁深（#7d4e00，白底 ≈8:1），
+   不再走混平台 label 的令牌——label 极性不定时混不出保证对比度。 */
+.wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#7d4e00)}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=failed]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
@@ -51026,10 +51368,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
    data-paused-phase 锚点是集成断言面。 */
 .wb-card-paused{font-size:11px;font-weight:600;flex:none;padding:0 7px;border:1px solid var(--dsw-derive-warn-border,#eac54f);border-radius:10px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-surface,#fff8e6);white-space:nowrap}
 .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--dsw-derive-accent,#0969da);flex:none}
-.wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--dsw-derive-ink-strong,#24292f)}/* t260929-22 gen9：4.24→深墨 */
 .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid;border-radius:10px;flex:none;white-space:nowrap}
 .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--dsw-derive-muted,#57606a);font-size:12px;flex:1 1 260px;min-width:0}
-.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-derive-muted,#57606a)}/* t260929-22 gen5：进展行白底对比度 2.62<4.5，锁 #57606a（≈5.9:1） */
 .wb-card-progress[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-progress[data-state=awaiting-human]{color:var(--dsw-derive-warn,#9a6700)}
 .wb-card-time{flex:none}
@@ -51050,7 +51392,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
   background:var(--dsw-derive-canvas,#fff);color:var(--dsw-derive-fg,#1f2328);cursor:pointer;white-space:nowrap}
 .wb-card-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-card-btn-primary{background:var(--dsw-derive-accent-solid,#1f6feb);border-color:var(--dsw-derive-accent-solid,#1f6feb);color:var(--dsw-derive-on-solid,#fff);font-weight:600}
-.wb-card-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-card-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-ink-blue,#0550ae);background:var(--dsw-derive-accent-bg,#ddf4ff)}/* t260929-22 gen9：View Reason 4.38→深蓝墨 */
 .wb-card-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
 /* 收口折叠计数行 */

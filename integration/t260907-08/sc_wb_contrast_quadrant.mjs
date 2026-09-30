@@ -362,6 +362,12 @@ try {
     // 侧栏视图入口图标钉 title/aria-label（无障碍名=入口**用户可感知契约本身**；宿主令 260925
     // 控制台 UI 文案英文化后取值 "Docs"，迁移前旧值「文档」）——不是实现细节。
     const docsIcon = page.locator('[title="Docs"], [aria-label="Docs"]').first();
+    // t260929-22 宿主裁 1：Docs 图标收进组内「More views」展开位——入扫前先展开
+    // （260823 常驻可见放宽为展开显现；全部组一次展开，幂等：已展开组带 data-on）。
+    const moreBtns = page.locator('[data-wb-more-views]:not([data-on])');
+    const nMore = await moreBtns.count().catch(() => 0);
+    for (let i = 0; i < nMore; i++) await moreBtns.nth(i).click({ timeout: 4000 }).catch(() => {});
+    await page.waitForTimeout(300);
     for (let attempt = 0; attempt < 2 && !docsOpened; attempt++) {
       // 首版实跑偶发：壳 hydration 竞态下首击丢导航——重试一次（同 epics 面竞态修法精神）
       if (attempt > 0) { await page.waitForTimeout(800); }

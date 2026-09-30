@@ -156,7 +156,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
   background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-fg,#1f2328);min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
   display:flex;flex-direction:column;gap:16px;height:100%;overflow-y:auto;font-size:13px;line-height:1.55}
 .wb-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:12px;position:relative}
-.wb-title{font-size:20px;font-weight:600;color:var(--dsw-derive-fg,#1f2328)}
+.wb-title{font-size:20px;font-weight:600;color:var(--dsw-derive-ink-strong,#24292f)}/* t260929-22 gen9：4.05→深墨 */
 .wb-sub{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
 .wb-err{background:var(--dsw-derive-danger-bg,#ffebe9);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);border-radius:6px;
   padding:8px 12px;font-size:12px;white-space:pre-wrap}
@@ -229,7 +229,9 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-card-dot[data-state=active]::before{background:var(--dsw-derive-accent,#0969da)}
 .wb-card-dot[data-state=done]::before{background:var(--dsw-derive-muted,#8c959f)}
 .wb-card-state{font-size:11px;font-weight:600;flex:none}
-.wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#9a6700)}
+/* t260929-22 gen5（对比度红 4.24<4.5）：waiting 态文字锁深（#7d4e00，白底 ≈8:1），
+   不再走混平台 label 的令牌——label 极性不定时混不出保证对比度。 */
+.wb-card-state[data-state=waiting]{color:var(--dsw-derive-warn,#7d4e00)}
 .wb-card-state[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=failed]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-state[data-state=active]{color:var(--dsw-derive-accent,#0969da)}
@@ -238,10 +240,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
    data-paused-phase 锚点是集成断言面。 */
 .wb-card-paused{font-size:11px;font-weight:600;flex:none;padding:0 7px;border:1px solid var(--dsw-derive-warn-border,#eac54f);border-radius:10px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-surface,#fff8e6);white-space:nowrap}
 .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--dsw-derive-accent,#0969da);flex:none}
-.wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--dsw-derive-ink-strong,#24292f)}/* t260929-22 gen9：4.24→深墨 */
 .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid;border-radius:10px;flex:none;white-space:nowrap}
 .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--dsw-derive-muted,#57606a);font-size:12px;flex:1 1 260px;min-width:0}
-.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-derive-muted,#57606a)}/* t260929-22 gen5：进展行白底对比度 2.62<4.5，锁 #57606a（≈5.9:1） */
 .wb-card-progress[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e)}
 .wb-card-progress[data-state=awaiting-human]{color:var(--dsw-derive-warn,#9a6700)}
 .wb-card-time{flex:none}
@@ -262,7 +264,7 @@ const CSS = `${DERIVE_TOKENS_CSS}
   background:var(--dsw-derive-canvas,#fff);color:var(--dsw-derive-fg,#1f2328);cursor:pointer;white-space:nowrap}
 .wb-card-btn:disabled{cursor:default;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-card-btn-primary{background:var(--dsw-derive-accent-solid,#1f6feb);border-color:var(--dsw-derive-accent-solid,#1f6feb);color:var(--dsw-derive-on-solid,#fff);font-weight:600}
-.wb-card-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-card-btn-blue{border-color:var(--dsw-derive-accent-border,#96c8f2);color:var(--dsw-derive-ink-blue,#0550ae);background:var(--dsw-derive-accent-bg,#ddf4ff)}/* t260929-22 gen9：View Reason 4.38→深蓝墨 */
 .wb-card-btn-danger{border-color:var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-card-btn-green{border-color:var(--dsw-derive-success-border,#7dd9a0);color:var(--dsw-derive-success,#1a7f37);background:var(--dsw-derive-success-bg,#dafbe1)}
 /* 收口折叠计数行 */

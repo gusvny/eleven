@@ -18,15 +18,18 @@ function sendJson(res, status, json) {
   res.end(JSON.stringify(json))
 }
 
-export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchBase = '' } = {}) {
+// workbenchStub（t260929-22 GAP B 场景缝）：模拟「普通生产形态控制台」——
+// 同一台服务器上 workbench 只读端点在场、且**没有任何基址配置**（无 env 无 config），
+// grants 只能靠请求来源推同源基址解析。workflows 桩 payload 可注入（默认两条模板）。
+export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchBase = '', workbenchStub = false, sameOriginWorkbench = false, workflows = null } = {}) {
   if (!panelDir || !watchdogDir) throw new Error('startHarness 需要 panelDir 与 watchdogDir（隔离目录注入点）')
   const env = {
     HOME: '/nonexistent-home',
     SANDBAR_PANEL_DIR: panelDir,
     SANDBAR_WATCHDOG_DIR: watchdogDir,
-    SANDBAR_WORKBENCH_BASE: workbenchBase,
+    SANDBAR_WORKBENCH_BASE: (workbenchStub || sameOriginWorkbench) ? '' : workbenchBase,
   }
-  const api = createApi(env, { workbenchBase: workbenchBase || undefined })
+  const api = createApi(env, { workbenchBase: (workbenchStub || sameOriginWorkbench) ? undefined : (workbenchBase || undefined) })
 
   const server = createServer(async (req, res) => {
     try {
@@ -41,8 +44,15 @@ export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchB
         res.end(PANEL_PAGE_HTML)
         return
       }
+      if ((workbenchStub || sameOriginWorkbench) && method === 'GET' && u.pathname === '/sandbar-workbench/api/wf/workflows') {
+        sendJson(res, 200, workflows ?? { workflows: [
+          { name: 'dev-lane', kind: 'dev', has_human_gate: true },
+          { name: 'inspection', kind: 'inspection', has_human_gate: false },
+        ] })
+        return
+      }
       if (u.pathname.startsWith(PANEL_ROUTE + '/api/')) {
-        const r = await api.handle(method, u.pathname, u.searchParams, body)
+        const r = await api.handle(method, u.pathname, u.searchParams, body, 'http://' + (req.headers.host ?? ''))
         sendJson(res, r.status, r.json)
         return
       }

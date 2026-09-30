@@ -55,6 +55,12 @@ function readBody(req: IncomingMessage): Promise<string> {
   })
 }
 
+/** 请求来源基址（grants 同源缺省的取材点；t260929-22 GAP B）：`http://<Host 原样>`，无 Host=空。 */
+function originOf(req: IncomingMessage): string {
+  const host = req.headers.host
+  return typeof host === 'string' && host !== '' ? 'http://' + host : ''
+}
+
 export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): void {
   const api = createApi(process.env, {
     workbenchBase: config.workbenchBase ?? process.env.SANDBAR_WORKBENCH_BASE ?? undefined,
@@ -72,7 +78,7 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
           handler: async (req, res) => {
             const q = new URL(req.url ?? '/', 'http://x').searchParams
             const body = req.method === 'POST' ? await readBody(req) : ''
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/requests', q, body)
+            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/requests', q, body, originOf(req))
             sendJson(res, r.status, r.json)
           },
         }),
@@ -81,7 +87,7 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
           handler: async (req, res) => {
             if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: '应答面仅 POST' }); return }
             const q = new URL(req.url ?? '/', 'http://x').searchParams
-            const r = await api.handle('POST', PANEL_ROUTE + '/api/requests/answer', q, await readBody(req))
+            const r = await api.handle('POST', PANEL_ROUTE + '/api/requests/answer', q, await readBody(req), originOf(req))
             sendJson(res, r.status, r.json)
           },
         }),
@@ -90,7 +96,7 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
           handler: async (req, res) => {
             const q = new URL(req.url ?? '/', 'http://x').searchParams
             const body = req.method === 'POST' ? await readBody(req) : ''
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/settings', q, body)
+            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/settings', q, body, originOf(req))
             sendJson(res, r.status, r.json)
           },
         }),
@@ -98,7 +104,7 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
           kind: 'exact', path: PANEL_ROUTE + '/api/grants',
           handler: async (req, res) => {
             const q = new URL(req.url ?? '/', 'http://x').searchParams
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/grants', q, '')
+            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/grants', q, '', originOf(req))
             sendJson(res, r.status, r.json)
           },
         }),

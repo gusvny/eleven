@@ -17,6 +17,7 @@
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { malformedProjectMessage } from './project-key.ts'
 import {
   parseWatchdogConfig, loadWatchdogConfig, watchdogConfigDir, isValidProjectKey,
   FACTORY_DEFAULTS, type WatchdogConfig,
@@ -79,7 +80,7 @@ export const KNOB_PATHS = [
 
 /** Settings 读面：声明+溯源（未声明旋钮显式 factory-default）+config_error+夜间覆盖判定。 */
 export function readSettings(key: string, env: NodeJS.ProcessEnv, nowMs: number): Record<string, unknown> {
-  if (!isValidProjectKey(key)) return { ok: false, error: `project 形状不合法：${String(key)}` }
+  if (!isValidProjectKey(key)) return { ok: false, error: malformedProjectMessage(key) }
   const resolved = loadWatchdogConfig(key, env)
   const state = readPanelState(key, env)
   const override = nightOverrideVerdict(state, nowMs)
@@ -110,7 +111,7 @@ export interface SaveOutcome {
 
 /** 保存声明（写时回读校验，全失败路径原文件逐字节不动）。 */
 export function saveWatchdogDecl(key: string, next: unknown, env: NodeJS.ProcessEnv): SaveOutcome {
-  if (!isValidProjectKey(key)) return { saved: false, reason: `project 形状不合法：${String(key)}` }
+  if (!isValidProjectKey(key)) return { saved: false, reason: malformedProjectMessage(key) }
   if (typeof next !== 'object' || next === null || Array.isArray(next)) {
     return { saved: false, reason: '声明顶层必须是 JSON 对象' }
   }

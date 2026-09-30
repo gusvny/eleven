@@ -117,10 +117,18 @@ try {
   const board = page.locator('[title="Tickets"], [aria-label="Tickets"]').first();
   await clickish(page, board);
   await page.waitForTimeout(500);
-  const projBoardIcon = page.locator('.wb-group-head', { hasText: '夹具甲' })
-    .locator('span[title="Tickets"]').first();
-  if (await projBoardIcon.isVisible().catch(() => false)) {
-    await clickish(page, projBoardIcon);
+  // t260929-22 宿主裁决（260929，DESIGN-CONFLICT 裁决 1）合并两半（lane×main 同语义）：
+  // 项目名行=执行器入口（260927 胜；260823「五图标常驻可见」放宽）——「点项目名留在
+  // 看板」是入口前旧语义，选项目进看板改点该组「Tickets」视图图标（先悬停组头现形
+  // 图标条——gen3 悬停现形形态；gen4 行内常驻形态下悬停无害，两形态通吃）。定位取
+  // main 侧的 span[title=Tickets] 精确锚；组头形状漂移时回落旧点法（main 侧的
+  // nav/entry-affordance-fallback 留痕记录保留）。
+  const groupName = page.locator('.wb-group-head', { hasText: '夹具甲' }).first();
+  if (await groupName.count()) {
+    await groupName.hover().catch(() => {});
+    await page.waitForTimeout(400);
+    const ticketsIcon = groupName.locator('span[title="Tickets"], [aria-label="Tickets"]').first();
+    await clickish(page, ticketsIcon);
   } else {
     const byName = page.getByText('夹具甲', { exact: false }).first();
     if (await byName.isVisible().catch(() => false)) {
