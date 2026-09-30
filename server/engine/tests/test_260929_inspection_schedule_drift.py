@@ -70,10 +70,13 @@ def test_all_wired_and_running_is_clean():
 
 def test_non_inspection_schedules_are_out_of_scope():
     """dispatcher-scan 之流不属巡检对账面（别的机制有自己的对账）。"""
+    # 第三项用**旧名形态**的调度号：对账面必须一视同仁地「不属本面」——它正是退役前
+    # 那批调度在时间线上真实存在过的样子（naming-compat 显式标记行=守卫的合规豁免形态，
+    # t260907-04 判据：含该标记的行属契约锚，登记不豁免监督）。
     rep = trig.schedule_drift_report(
         [{"project": "sandbar", "id": "integration-tests", "enabled": True, "tz": "Asia/Shanghai"}],
         ["sandbar-inspection-integration-tests", "sandbar-dispatcher-scan",
-         "suyou-dispatcher-scan"], [])
+         "suyou-dispatcher-scan"], [])  # naming-compat fixture
     assert rep["alarmed"] is False and rep["orphan"] == []
 
 
