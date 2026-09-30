@@ -101,7 +101,16 @@ export interface WatchdogDeps {
   dataDir?: string
   /** 账本目录（缺省 env SANDBAR_EVENT_LEDGER_DIR 或 <repo>/server/ledger；测试缝）。 */
   ledgerDir?: string
+  /** 按需代建 executor 会话（t260930-09；未注入=不代建，行为与旧语义一致）。 */
+  sessionEnsure?: SessionEnsureFn
 }
+
+/** 会话代建回调形状（node.ts 注入 ensureExecutorSession 的闭包；UT 注入桩）。 */
+export type SessionEnsureFn = (args: { declaredSessionId: string; hasWork: boolean }) => Promise<SessionEnsureOutcome>
+export type SessionEnsureOutcome = import('./session-create.ts').EnsureOutcome
+
+/** 代建失败重试节流（同进程内拒绝后至少隔这么久再试一次；成功后不再试）。 */
+export const SESSION_ENSURE_RETRY_MS = 5 * 60_000
 
 export type CorePhase = 'idle' | 'full_reconcile' | 'running' | 'stopped' | 'config_error'
 
@@ -123,6 +132,8 @@ export interface WatchdogStatus {
   presumed_self_detail: string | null
   /** t260929-04 additive：队列镜像/投递通路状态串（null = 镜像面未注入）。 */
   queue_mirror: string | null
+  /** t260930-09 additive：按需代建面最近一次结果（null = 未注入代建面）。 */
+  executor_session: { session_id: string | null; last_action: string | null; reason: string | null; declared_written: boolean } | null
   wakes: Array<{ at: number; ticket: string; dedupe_key: string; mode: string | null; accepted: boolean | null }>
   alerts: Array<Record<string, unknown>>
   notify: { beep: boolean; unseen_redline: number }
@@ -141,6 +152,7 @@ export class Watchdog {
   private wakeIo: WakeIo | null
   private pendingProvider: PendingProvider
   private sessionStat: SessionStatFn
+  private sessionEnsure: SessionEnsureFn | null
   private now: () => number
   private dataDir: string
   private timer: ReturnType<typeof setInterval> | null = null
@@ -164,6 +176,10 @@ export class Watchdog {
   private alerts: Array<Record<string, unknown>> = []
   private unseenRedline = new Set<string>()
   private lastError: string | null = null
+  // 代建面（t260930-09）：收养每进程只记一次；失败重试节流；最近结果进状态面。
+  private ensureAdoptLogged = false
+  private lastEnsureFailAt = Number.NEGATIVE_INFINITY
+  private ensureState: WatchdogStatus['executor_session'] = null
   phase: CorePhase = 'idle'
 
   constructor(project: string, deps: WatchdogDeps = {}) {
@@ -175,6 +191,7 @@ export class Watchdog {
     this.wakeIo = deps.wakeIo ?? null
     this.pendingProvider = deps.pendingProvider ?? (async () => ({ available: false, pending: null, reason: '宿主侧待办交互面未接入（S1-probe 后续票落地）——显式 unknown' }))
     this.sessionStat = deps.sessionStat ?? (async () => ({ advanced: null, mtimeMs: null }))
+    this.sessionEnsure = deps.sessionEnsure ?? null
     this.dataDir = deps.dataDir ?? join(deps.configDirEnv?.SANDBAR_WATCHDOG_DATA || join(deps.configDirEnv?.HOME || '', '.sandbar'), 'watchdog')
     this.ledgerDirOpt = deps.ledgerDir
     this.cfg = (deps.configLoader ?? ((k, env) => loadWatchdogConfig(k, env)))(project, deps.configDirEnv)
@@ -266,6 +283,41 @@ export class Watchdog {
     this.unseenRedline.add(judged.key)
   }
 
+  /**
+   * 会话 id 确保面（t260930-09）：语义 =「未声明 = 按需创建；已声明 = 收养」。
+   *  - 项目「有活」= 账本有事件行 或 看板有票——冻结遗留项目（无账本、无票）不建会话；
+   *  - 已声明：只收养，进程生命周期内至多落一条 adopt 事件，绝不创建/绝不覆盖人的声明；
+   *  - 未声明且有活：交注入的 sessionEnsure（node.ts=宿主 Session API create）；
+   *    成功 = 会话 id 回写声明 + 记忆面就地生效；失败 = 显式 refused，节流重试；
+   *  - 代建面未注入 = 维持旧行为（用声明 id，绝不猜）。
+   */
+  private async ensureSession(board: { ok: boolean; rows: BoardRow[] }, ledgerAdvanced: boolean, nowMs: number): Promise<string> {
+    let sid = this.cfg.config.executor_session
+    if (this.sessionEnsure === null) return sid
+    const hasWork = this.ledgerRows.length > 0 || (board.ok && board.rows.length > 0)
+    if (sid !== '') {
+      if (this.ensureAdoptLogged) return sid
+      this.ensureAdoptLogged = true
+      const out = await this.sessionEnsure({ declaredSessionId: sid, hasWork })
+      this.ensureState = { session_id: out.sessionId, last_action: out.action, reason: out.reason, declared_written: out.declaredWritten }
+      return sid // 收养/重建判定不改本拍使用的 id（重建成功后声明已落盘，下一拍自然采用）
+    }
+    if (!hasWork) { this.ensureState = null; return sid }
+    if (nowMs - this.lastEnsureFailAt < SESSION_ENSURE_RETRY_MS) return sid
+    const out = await this.sessionEnsure({ declaredSessionId: '', hasWork })
+    if (out.sessionId) {
+      // 声明已回写（writeExecutorSession 过装载器校验）——内存面同步，本拍即可唤醒/观测。
+      this.cfg = { ...this.cfg, config: { ...this.cfg.config, executor_session: out.sessionId } }
+      sid = out.sessionId
+      this.ensureAdoptLogged = true
+      this.lastEnsureFailAt = Number.NEGATIVE_INFINITY
+    } else if (out.action.startsWith('refused')) {
+      this.lastEnsureFailAt = nowMs
+    }
+    this.ensureState = { session_id: out.sessionId, last_action: out.action, reason: out.reason, declared_written: out.declaredWritten }
+    return sid
+  }
+
   /** 一拍：beat → tail → reconcile → liveness → self-lock → exits。 */
   async tickOnce(): Promise<void> {
     if (this.disposed || !this.cfgEnabled) return
@@ -323,7 +375,7 @@ export class Watchdog {
         if (!board.ok) await this.raise({ rule: 'engine_down', target: this.project, level: 'redline', title: `引擎不可达（project ${this.project}）`, detail: board.error ?? '' })
       }
       // executor 会话推进探测（会话文件每拍查一次；失败=null 显式）。
-      const sid = this.cfg.config.executor_session
+      const sid = await this.ensureSession(board, ledgerAdvanced, nowMs)
       const sstat = await this.sessionStat(sid, this.lastSessionStatMs)
       if (this.aborted) return
       this.lastSessionStatMs = nowMs
@@ -404,6 +456,7 @@ export class Watchdog {
       presumed_self_rows: this.wakeMem.presumedSelfRows,
       presumed_self_detail: this.wakeMem.presumedSelfDetail,
       queue_mirror: this.wakeIo?.transportState?.() ?? null,
+      executor_session: this.ensureState,
       wakes: this.wakes.slice(-20),
       alerts: this.alerts.slice(-50),
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },

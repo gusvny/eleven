@@ -33,9 +33,10 @@ const engineRow = parseLedgerLine(ledgerLine({ ticket: 't1', kind: 'engine-maint
   const io3 = { prompt: async () => { touched = true; return { accepted: true } }, queueDepth: async () => 0 }
   const r3 = await wakeExecutor(io3, 'p1', 'executor-x', [engineRow], null)
   assert(r3.woke === false && touched === false, 'no wakeable rows = no delivery at all')
-  // 空 session id = 显式不作为（不代建会话）。
+  // 空 session id = 显式不作为（投递面不代建会话——代建已归 session-create.ts 的
+  // ensureSession 面，t260930-09：投递与代建两个出口各管各的，边界永不混装）。
   const r4 = await wakeExecutor(io3, 'p1', '', [transitionRow], null)
-  assert(r4.woke === false && r4.reason.includes('未声明 executor_session'), 'missing executor session = explicit no-op, never auto-create')
+  assert(r4.woke === false && r4.reason.includes('未声明 executor_session'), 'missing executor session = wake exit stays a no-op (creation lives in the session-create face, never here)')
   // 投递拒绝/异常 = accepted:false 显式。
   const io5 = { prompt: async () => ({ accepted: false, error: 'steer-unavailable' }), queueDepth: async () => 0 }
   const r5 = await wakeExecutor(io5, 'p1', 'executor-x', [transitionRow], null)

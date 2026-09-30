@@ -189,10 +189,27 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
       card('Reconcile', rc? (rc.state==='ok'?'<span class="good">ok</span>':'<span class="bad">'+esc(rc.state)+'</span>') + (rc.reason? '<br><span class="muted">'+esc(rc.reason)+'</span>':'') : '<span class="muted">no reconcile surface</span>') +
       card('Doing now', esc(doing)) +
       card('Startup replay', 'missing '+esc(st.startup&&st.startup.missing_rows)+' · replayed '+esc(st.startup&&st.startup.replayed_rows)) +
-      card('Wakes', (st.wakes||[]).length + ' wake(s) delivered');
+      card('Wakes', (st.wakes||[]).length + ' wake(s) delivered') +
+      executorSessionCard(st);
     el('ovFlow').innerHTML = flowHtml();
   }
   function card(t,h){ return '<div class="card"><h3>'+t+'</h3>'+h+'</div>'; }
+  // Executor-session provenance (t260930-09 scope 6): who created this session, when,
+  // with which preset — answered from the watchdog's per-project event ledger.
+  function executorSessionCard(st){
+    var es = st.executor_session || null;
+    var evs = (st.session_provenance && st.session_provenance.events) || [];
+    var last = evs.length? evs[evs.length-1] : null;
+    var sid = (es && es.session_id) || (last && last.session_id) || null;
+    var h = sid ? esc(sid) : '<span class="muted">none yet — the watchdog creates one on demand when this project has work</span>';
+    if(last){
+      var when = new Date(typeof last.at==='number'? last.at : Date.parse(last.at)||0).toISOString().slice(0,19);
+      h += '<br><span class="muted">'+esc(last.action)+' by '+esc(last.by||'?')+' · preset '+esc(last.preset||'?')+' · '+esc(when)+'</span>';
+    }
+    if(es && es.reason) h += '<br><span class="muted">'+esc(es.last_action||'')+' — '+esc(es.reason)+'</span>';
+    if(st.session_provenance && st.session_provenance.malformed_rows>0) h += '<br><span class="bad">provenance ledger has '+esc(st.session_provenance.malformed_rows)+' malformed row(s)</span>';
+    return card('Executor session', h);
+  }
   function flowHtml(){
     var wakes = 0; try{ wakes = state.status.wakes.length; }catch(e){}
     return ['ticket changes','event ledger','watchdog','executor'].map(function(n){ return '<span class="node">'+n+'</span>'; }).join('<span class="arr">&rarr;</span>')
@@ -407,10 +424,17 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
   }
 
   // ---- project selection + boot ----
+  // t260930-09 scope 8: the dropdown lists EVERY registered project (the watchdog status
+  // list endpoint now returns undeclared registry projects too, each carrying its
+  // declared flag) — a project can be inspected before anything is declared. The
+  // ?project=<key> deep link keeps working.
   function projects(){
     return fetch('/sandbar-watchdog/api/status').then(function(r){return r.json();}).then(function(j){
-      var keys=[]; if(j && j.ok===true && j.result && j.result.projects){ j.result.projects.forEach(function(p){ keys.push(p.project); }); }
-      return keys;
+      var list=[];
+      if(j && j.ok===true && j.result && Array.isArray(j.result.projects)){
+        j.result.projects.forEach(function(p){ if(p && p.project) list.push({project:p.project, declared:p.declared!==false}); });
+      }
+      return list;
     }).catch(function(){ return []; });
   }
   function setProject(p){
@@ -423,9 +447,11 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     var p = el('freeProject').value.trim() || el('project').value;
     setProject(p);
   };
-  projects().then(function(keys){
-    var html = '<option value="">— pick a declared project —</option>';
-    keys.forEach(function(k){ html += '<option>'+esc(k)+'</option>'; });
+  projects().then(function(list){
+    var html = '<option value="">— pick a project (declared or not) —</option>';
+    list.forEach(function(p){
+      html += '<option value="'+esc(p.project)+'">'+esc(p.project)+(p.declared? '' : ' · not declared')+'</option>';
+    });
     el('project').innerHTML = html;
   });
   // deep-link: /?project=<key> selects immediately (bench/scenario entry).

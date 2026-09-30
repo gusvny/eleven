@@ -11,13 +11,14 @@
  *  - 不保证：文件被并发改写的原子性（读到半截 = config_error，由写方自校验）。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /** 单项目配置形状（全部可缺省，缺省回落出厂默认）。 */
 export interface WatchdogConfig {
   enabled: boolean
-  /** 该项目 executor 会话 id（本票只唤醒/观测，不创建——身份是后续票）。 */
+  /** 该项目 executor 会话 id（t260930-09：'' = 未声明——守望者按需代建并回写；
+   *  非空 = 收养人的声明，绝不创建、绝不覆盖）。 */
   executor_session: string
   stall_minutes: number
   reconcile_seconds: number
@@ -32,7 +33,9 @@ export interface WatchdogConfig {
   }
 }
 
-/** 出厂默认（设计稿 260927 默认值表；改默认值改这里，不改代码逻辑）。 */
+/** 出厂默认（设计稿 260927 默认值表；改默认值改这里，不改代码逻辑）。
+ *  enabled=false = 本项目的总停开关（t260930-09 scope 5）：不代建、不唤醒、节拍全停
+ *  （面板 Settings 的 revoke 按钮就是它）——off 是显式人决策，机器不代拨。 */
 export const FACTORY_DEFAULTS: WatchdogConfig = {
   enabled: true,
   executor_session: '',
@@ -171,9 +174,65 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
   return { declared: true, enabled: cfg.enabled, config: cfg, provenance: { file, keys }, config_error: null }
 }
 
-/** 配置根目录（测试缝：SANDBAR_WATCHDOG_DIR 优先；缺省=~/.sandbar/projects）。 */
+/** 配置根目录（测试缝：SANDBAR_WATCHDOG_DIR 优先；缺省=~/.sandbar/projects）。
+ *  同一根也是项目注册表根（<key>/project.yaml）——守望者的声明与注册表同住。 */
 export function watchdogConfigDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.SANDBAR_WATCHDOG_DIR || join(env.HOME || '', '.sandbar', 'projects')
+}
+
+/**
+ * 只写 executor_session 一键的声明写入面（t260930-09：守望者按需代建会话后回写）。
+ *
+ * 纪律（与 panel settings.ts saveWatchdogDecl 同一正反面）：
+ *  - 序列化结果先过真装载器 parseWatchdogConfig，被拒收=不落盘（不留会静默弄坏
+ *    守望者的声明）；
+ *  - tmp 写 → 回读字节再过装载器 → 原子 rename；任一步失败原文件逐字节不动；
+ *  - 未声明项目（无 watchdog.json）：以空对象为基座落盘（只有 executor_session 一键，
+ *    其余旋钮全出厂默认）——「文件存在即声明」，代建回写本身就是首次入册；
+ *  - 畸形既有声明（config_error 非空）：拒绝回写并点名原因——绝不往一份坏声明上叠写。
+ */
+export function writeExecutorSession(
+  key: string, sessionId: string, env: NodeJS.ProcessEnv = process.env,
+): { written: boolean; file: string | null; reason?: string } {
+  if (!isValidProjectKey(key)) return { written: false, file: null, reason: `项目 key 形状不合法：${String(key)}` }
+  if (typeof sessionId !== 'string' || sessionId === '') {
+    return { written: false, file: null, reason: 'executor_session 必须是非空字符串（守望者绝不写空会话回声明）' }
+  }
+  const file = join(watchdogConfigDir(env), key, 'watchdog.json')
+  let base: Record<string, unknown> = {}
+  if (existsSync(file)) {
+    let raw: string
+    try {
+      raw = readFileSync(file, 'utf8')
+    } catch (e) {
+      return { written: false, file, reason: `watchdog.json 读取失败（拒绝回写）：${e instanceof Error ? e.message : String(e)}` }
+    }
+    const cur = parseWatchdogConfig(raw, file)
+    if (cur.config_error !== null) return { written: false, file, reason: `既有声明畸形（拒绝在其上回写）：${cur.config_error}` }
+    try {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) base = parsed
+    } catch { /* parseWatchdogConfig 已拒绝，走不到这里 */ }
+    if (cur.config.executor_session === sessionId) return { written: true, file } // 幂等：已是该 id，不重写
+  }
+  const next = JSON.stringify({ ...base, executor_session: sessionId }, null, 2) + '\n'
+  const pre = parseWatchdogConfig(next, file)
+  if (pre.config_error !== null) return { written: false, file, reason: `回写内容被装载器拒收：${pre.config_error}` }
+  const tmp = file + '.tmp'
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(tmp, next, 'utf8')
+    const post = parseWatchdogConfig(readFileSync(tmp, 'utf8'), file)
+    if (post.config_error !== null) {
+      unlinkSync(tmp)
+      return { written: false, file, reason: `回读校验被拒收（不落盘）：${post.config_error}` }
+    }
+    renameSync(tmp, file)
+    return { written: true, file }
+  } catch (e) {
+    try { unlinkSync(tmp) } catch { /* tmp 可能未建成 */ }
+    return { written: false, file, reason: `watchdog.json 写入失败：${e instanceof Error ? e.message : String(e)}` }
+  }
 }
 
 /** 单项目配置读面（存在即声明；读失败 = declared+config_error，不静默）。 */

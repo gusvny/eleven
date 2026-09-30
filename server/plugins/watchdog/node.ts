@@ -12,7 +12,11 @@
  *  - web profile：宿主半在 dsh webServer 上挂 GET /sandbar-watchdog/api/status（只读）。
  *  - headless profile：无 webServer，本插件待机（定时器面照常起——守望者本体不依赖
  *    webServer；只有状态读面缺席，且 headless 形态本来没有面板）。
- *  - 未声明项目（无 watchdog.json）= 零行为：不起定时器、不读账本、不占路由数据。
+ *  - 未声明项目（无 watchdog.json）：守望者本体不自动起（无配置=无节拍参数），
+ *    但**有活的未声明项目会被按需代建 executor 会话**（t260930-09 宿主决策：
+ *    「未声明 = 按需创建；已声明 = 收养」——人不供 id）。preset 缺失/注册表缺席
+ *    = 显式拒绝并点名，绝不猜、绝不拿默认会话充数；每次 create/recreate/adopt
+ *    落一条溯源事件（谁、何时、哪个 preset），面板可答「这会话谁建的」。
  *  - wake 投递通路（t260929-04）：真宿主 Session API——ctx.sessionController.prompt
  *    （queue 模式不丢）+ control() 队列镜像（已消化判定）；宿主服务缺席 = 显式不可用
  *    （wake: 原因进 status），绝不静默降级为「不醒 = 没事」。
@@ -37,6 +41,10 @@ import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type Pendi
 import type { PendingInteraction } from './src/host/self-lock.ts'
 import { QueueMirror } from './src/host/queue-mirror.ts'
 import type { WakeIo, WakeOutcome } from './src/host/exits.ts'
+import {
+  ensureExecutorSession, sessionEventPath, readSessionEvents,
+  type SessionCreateIo, type SessionProvenanceEvent,
+} from './src/host/session-create.ts'
 import { readRequests, fsLedgerIo } from '../executor-panel/src/host/requests.ts'
 
 const execFileP = promisify(execFile)
@@ -135,8 +143,8 @@ export function makeBoardReader(repo: string, python?: string) {
  *    不丢消息（agent 忙时入 inbox）；
  *  - control(signal): AsyncIterable<SessionControlFrame>（index.d.ts L177）——
  *    baseline + 每会话 queue 帧，是已消化判定的权威镜像（src/host/queue-mirror.ts）。
- * 会话身份：只认 watchdog.json 的 executor_session 声明；缺声明 = 出口显式不可用
- * （身份/槽位是 executor identity 票的面，本票绝不猜、绝不代建）。
+ * 会话身份：认 watchdog.json 的 executor_session 声明；空 id 时 wake 出口显式不可用
+ * （投递面不代建——代建是 session-create.ts 的 ensureSession 面的职责，t260930-09）。
  */
 export function makeWakeIo(ctx: Context): WakeIo {
   type ControllerLike = {
@@ -217,6 +225,76 @@ export function makeWakeIo(ctx: Context): WakeIo {
     },
   }
 }
+
+/**
+ * 代建通路（t260930-09，scope 7 定案）：宿主 Session API。
+ *  - create：ctx.sessionController.create({cwd, agentPreset})——0.1.5 实装类型原文
+ *    "Create or idempotently adopt one ordinary Session"（幂等收养语义）；preset 缺失
+ *    由宿主端显式点名（agent-preset/not-found：preset 名 + available 清单）；
+ *  - list：sessionController.list({})——重建判定（声明的 id 还在不在宿主清单）。
+ * 两个面缺席（headless/服务未注入）= 显式不可用（refused 事件点名原因），绝不静默。
+ */
+export function makeSessionCreateIo(ctx: Context): SessionCreateIo {
+  type ControllerLike = {
+    list?: (request: unknown, signal: AbortSignal) => Promise<{ items?: Array<{ sessionId?: string }> }>
+    create?: (request: { cwd?: string; agentPreset?: string }) => Promise<{ sessionId?: string; agentPreset?: string }>
+  }
+  const getController = (): ControllerLike | undefined =>
+    (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
+  return {
+    async create(input) {
+      const c = getController()
+      if (!c || typeof c.create !== 'function') {
+        return { ok: false, error: '宿主 sessionController.create 不可达（headless 或服务未注入）——代建显式不可用' }
+      }
+      try {
+        const res = await c.create({ cwd: input.cwd, agentPreset: input.agentPreset })
+        if (typeof res?.sessionId !== 'string' || res.sessionId === '') {
+          return { ok: false, error: `宿主 create 回执无 sessionId：${JSON.stringify(res).slice(0, 200)}` }
+        }
+        return { ok: true, sessionId: res.sessionId, agentPreset: res.agentPreset }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // 宿主的显式错误族（agent-preset/not-found 等）原样透传——点名 preset 的拒绝面。
+        return { ok: false, error: msg.slice(0, 300) }
+      }
+    },
+    async listSessionIds() {
+      const c = getController()
+      if (!c || typeof c.list !== 'function') return null
+      try {
+        const res = await c.list({}, AbortSignal.timeout(10_000))
+        if (!Array.isArray(res?.items)) return null
+        return res.items.map((it) => it.sessionId ?? '').filter((s) => s !== '')
+      } catch {
+        return null
+      }
+    },
+  }
+}
+
+/** 组一次「确保会话」调用的闭包（core 的 sessionEnsure 注入件；事件账=dataDir 下
+ *  <project>.executor-session.jsonl，面板经 status 的 session_provenance 消费）。 */
+export function makeSessionEnsure(ctx: Context, project: string) {
+  const createIo = makeSessionCreateIo(ctx)
+  const eventIo = {
+    append: (p: string, line: string) => defaultIo.appendAlerts(p, line),
+    read: async (p: string) => (await defaultIo.listAlerts(p)).join('\n'),
+  }
+  return async (args: { declaredSessionId: string; hasWork: boolean }) => {
+    return ensureExecutorSession({
+      project,
+      declaredSessionId: args.declaredSessionId,
+      hasWork: args.hasWork,
+      env: process.env,
+      io: createIo,
+      eventIo,
+      dataDir: process.env.SANDBAR_WATCHDOG_DATA || join(process.env.HOME || '', '.sandbar', 'watchdog'),
+      nowMs: Date.now(),
+    })
+  }
+}
+// 「确保会话」的 project 绑定在 ensureWatchdog 处按项目闭包（见下方 deps 组装）。
 
 /** executor 会话快照（t260929-08）：sessionStat 每拍刷新，pendingProvider 复用
  *  running 位（避免一拍两次 list()）；读不到 = 显式缺席，绝不冒充「没在跑」。 */
@@ -354,6 +432,7 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
       engineProbe,
       sessionStat: session.stat,
       pendingProvider: makePendingProvider(key, (sid) => session.snapshot.runningOf(sid)),
+      sessionEnsure: makeSessionEnsure(ctx, key),
       now: Date.now,
     })
     watch.set(key, w)
@@ -384,26 +463,32 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
     return new URL(req.url ?? '/', 'http://x').searchParams
   }
 
-  async function statusFor(key: string): Promise<WatchdogStatus & { heartbeat: Awaited<ReturnType<typeof readHeartbeatFile>> }> {
+  async function statusFor(key: string): Promise<WatchdogStatus & { heartbeat: Awaited<ReturnType<typeof readHeartbeatFile>>; session_provenance: { file: string; events: SessionProvenanceEvent[]; malformed_rows: number } }> {
+    // 溯源事件账独立于声明：未声明项目也能答「有没有代建史」（scope 6/8 检视面）。
+    const dataRoot = process.env.SANDBAR_WATCHDOG_DATA || join(process.env.HOME || '', '.sandbar', 'watchdog')
+    const evFile = sessionEventPath(dataRoot, key)
+    const provenance = await readSessionEvents({ read: async (p) => (await defaultIo.listAlerts(p)).join('\n') }, evFile)
+    const session_provenance = { file: evFile, events: provenance.events.slice(-20), malformed_rows: provenance.malformed_rows }
     const cfg = loadWatchdogConfig(key)
     if (!cfg.declared) {
       return {
         project: key, declared: false, enabled: false, phase: 'stopped', config_error: null,
         config_provenance: { file: null, keys: {} },
-        heartbeat: { last_beat: null, age_seconds: null, alive: false, reason: '项目未声明（无 watchdog.json）——零行为，不是一切正常' },
+        executor_session: null,
+        heartbeat: { last_beat: null, age_seconds: null, alive: false, reason: '项目未声明（无 watchdog.json）——守望者本体零行为；有活时按需代建（t260930-09）' },
         ledger: { path: '', watermark_offset: 0, rows_seen: 0, dupes_skipped: 0, malformed_rows: 0, gaps_seen: 0, last_row_at: null, unreadable: '项目未声明守望者' },
         liveness: { engine: { online: null, detail: '未探测', checked_at: null }, executor: null },
         self_lock: null, reconcile: null, startup: { missing_rows: null, replayed_rows: null, dedupe_keys: 0 },
         presumed_self_rows: 0, presumed_self_detail: null, queue_mirror: '项目未声明守望者（镜像未起）',
         wakes: [], alerts: [], notify: { beep: false, unseen_redline: 0 }, last_error: null,
+        session_provenance,
       } as never
     }
     const w = await ensureWatchdog(key)
     const st = w.status()
     const { join: j2 } = await import('node:path')
-    const dataRoot = process.env.SANDBAR_WATCHDOG_DATA || join(process.env.HOME || '', '.sandbar', 'watchdog')
     st.heartbeat = await readHeartbeatFile(defaultIo, j2(dataRoot, `${key}.heartbeat.json`), Date.now())
-    return st as never
+    return { ...(st as object), session_provenance } as never
   }
 
   /** 只读状态面（下一票面板的唯一消费口；键集=panel-contract.md，写集内交接件）。 */
@@ -423,9 +508,17 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
         sendJson(res, 200, { ok: true, result: await statusFor(key) })
         return
       }
-      const keys = await declaredProjects()
-      const projects = await Promise.all(keys.map(k => statusFor(k)))
-      sendJson(res, 200, { ok: true, result: { projects, note: '未列出的项目 = 未声明（零行为）' } })
+      // t260930-09 scope 8：清单不再只列已声明项目——注册表根下的每个合法 key 都列
+      // （declared=false 的条目走显式未声明状态，绝不空态冒充正常）。面板项目下拉的
+      // 数据源就是本清单：项目在「什么都没声明」之前就能被选中检视。
+      const { watchdogConfigDir } = await import('./src/host/config.ts')
+      const root = watchdogConfigDir()
+      let names: string[] = []
+      try {
+        names = (await readdir(root)).filter(k => isValidProjectKey(k))
+      } catch { names = [] } // 无配置根 = 零注册 = 真实空清单
+      const projects = (await Promise.all(names.sort().map(k => statusFor(k))))
+      sendJson(res, 200, { ok: true, result: { projects, note: 'declared=false 条目 = 尚未入册（可选可看；守望者本体零行为，有活时按需代建）' } })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }

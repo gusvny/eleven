@@ -175,6 +175,18 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       // degraded 顶层显式位（消费方可不拆 grants 判定「模板事实不可得」）。
       return { status: 200, json: { ok: true, grants: res, degraded: res.ok === false, reason: res.ok ? undefined : res.reason } }
     }
+    // ---- projects (t260930-09 scope 8) ----
+    if (path === '/sandbar-executor-panel/api/projects') {
+      if (method !== 'GET') return bad(405, '只读面：仅 GET')
+      // 面板已知的全量项目（注册表根下的目录），逐个标注声明状态——项目在「什么都没
+      // 声明」之前就能被选中检视（旧口径只列已声明项目，fresh machine 连第一只项目
+      // 都进不了下拉框）。?project=<key> 深链不受影响。
+      const projects = allPanelProjects(env).map((k) => {
+        const r = loadWatchdogConfig(k, env)
+        return { project: k, declared: r.declared, enabled: r.enabled, config_error: r.config_error }
+      })
+      return { status: 200, json: { ok: true, projects, note: 'declared=false = nothing enrolled yet — still selectable for inspection' } }
+    }
     return bad(404, `未知面板路由：${path}`)
   }
 
