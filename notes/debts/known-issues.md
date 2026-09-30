@@ -2844,7 +2844,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > `integration/t260901-25/t02_source_locks.py`（reap 双路径结构锁）打红——它是**结构锁**，必须随重构重写。
 > 但票的写集是 `server/engine/`，而锁脚本在 `integration/`：**越权守卫把 developer 的修改整段回滚**并留档
 > （`.sandbar/quarantine/unauth-implement-gen1/integration__t260901-25__t02_source_locks.py.diff`），
-> 于是「实现已改、锁仍红」，票卡在 merge_check（`verify_lane code` 腿 3117 中 1 红）。
+> 于是「实现已改、锁仍红」，票卡在 merge_check（`verify_lane code` 那道检查 3117 中 1 红）。
 > developer 的处置完全正确（改锁、本地全绿、报告里点名「已回滚」）；**错在我上一轮发的 rework 指令**——
 > 我要求「update that lock」，而那条路径它按纪律碰不得（写集外）。这是 integration 侧发指令时必须先问的一句：
 > **「这条要求落在票的写集里吗？」** 不在，就得换载体。

@@ -1102,6 +1102,32 @@ def test_light_lane_narrowed_face_empty_is_patch_gated_and_vocab_sourced():
     assert '"booked", "isolated"' not in src and "'booked', 'isolated'" not in src
 
 
+def test_light_lane_gate_rounds_enter_gate_runs_and_face_says_who_verified():
+    """261001 补的两件面（宿主令：每轮报要能读到「谁验的」；闸轮要有账）：
+
+    ① `gate_runs` 里必须有**机器闸**那一条（此前轻道只在 merge_check 处 append ⇒ 闸轮在这本账上是
+       空的，泳道图/回执面看不到这一轮跑了几条、绿不绿、窄面多少、豁免多少）；键族与 dev_lane 的
+       消费面同形（stage/label/green/red_count/counts/exit_code），并带轻道自己的窄面/豁免计数。
+    ② 人面（blocked_reason）必须带「谁验的」一行，且**单点复用** shared.worker_verified_line
+       （不许在轻道里另写一份文案，否则两处会漂移）；不可得时那一行也具名（不出现无主语「验过了」）。
+    两条都是纯内存追加/纯文本，**不新增命令** ⇒ 不需要 workflow.patched 门。"""
+    body = LIGHT_SRC[LIGHT_SRC.index("async def run("):]
+    gate_block = body[body.index("_light_gate_round("):body.index("verdict = self._light_gate_verdict")]
+    assert 'self.gate_runs.append({' in gate_block, "机器闸轮没有进 gate_runs"
+    for frag in ('"stage": "run_integration_tests"', '"green": self._light_gate_verdict(ir) == "green"',
+                 '"red_count": len(self._light_red_names(ir))', '"counts":', '"narrowed":',
+                 '"known_red_skipped":'):
+        assert frag in gate_block, "闸轮账缺键：%s" % frag
+    assert 'self.gate_runs.append({' in LIGHT_SRC[LIGHT_SRC.index("async def _light_merge_check"):][:2000], \
+        "merge_check 那一处既有账被动了"
+    # 人面：一行「谁验的」，单点复用 shared 的文案函数
+    face = LIGHT_SRC[LIGHT_SRC.index("def _light_gate_blocked_text"):LIGHT_SRC.index("def _light_gate_blocked_detail")]
+    assert 'shared.worker_verified_line(' in face, "人面没有「谁验的」一行（或没走单点）"
+    assert "lines.append(_vf)" in face, "具名行没有上台面"
+    assert light_lane.LightLaneWorkflow.FACE_MAX_LINES >= 9
+    assert light_lane.LightLaneWorkflow.FACE_MAX_CHARS >= 1200
+
+
 def test_light_lane_has_no_second_main_sync_implementation():
     """③ 结构锁：轻道不得出现第二份主同步实现（会话/活动/消解回路都只在 helper 里）。"""
     assert "async def _main_sync_before_gate" not in LIGHT_SRC, \

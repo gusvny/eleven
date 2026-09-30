@@ -729,8 +729,9 @@ def test_deadman_activity_finding_is_english_end_to_end(tmp_path, monkeypatch):
 
 def test_code_stamp_present_with_four_modules_and_worker_start(tmp_path, monkeypatch):
     """宿主裁定②（code_stamp 升级）：回执/票面必须带**代码身份自证**——worker 启动时刻 +
-    四模块（agent_activities/inspection_flow/inspection_deadman/verify_lane）的「载入时刻
-    vs 盘上 mtime」+ stale 名单，且票面有一行可读 `code_stamp`。
+    跟踪模块表（`shared.CODE_STAMP_MODULES`；261001 起含四个工作流体模块 base/dev_lane/
+    light_lane/shared）的「载入时刻 vs 盘上 mtime」+ stale 名单，且票面有一行可读 `code_stamp`。
+    本用例按**表**断言（不写死名单）：表扩容时这里自动跟上，不会因为口径演进假红。
 
     为什么立这条：同一个「长命 worker 内存旧模块」的坑今天咬了两次（t260928-01 的
     `>3000s`、t260930-01 的 deadman 中文），两次都靠人肉比 mtime 才发现——本测试把
@@ -771,7 +772,9 @@ def test_code_stamp_present_with_four_modules_and_worker_start(tmp_path, monkeyp
     assert stamp["stale_rule"]                      # 判据文字在册（语义写清）
     assert "start baseline" in stamp["stale_rule"]
     mods = stamp["modules"]
-    for name in ("agent_activities", "inspection_flow", "inspection_deadman", "verify_lane"):
+    _tracked = [n for n, _rel in shared.CODE_STAMP_MODULES]
+    assert set(mods) == set(_tracked), "跟踪模块表与回执不一致"
+    for name in _tracked:
         m = mods.get(name)
         assert m, "code_stamp 缺模块：%s" % name
         assert m.get("mtime"), "code_stamp 缺 mtime：%s" % name
@@ -781,15 +784,16 @@ def test_code_stamp_present_with_four_modules_and_worker_start(tmp_path, monkeyp
     assert stamp["stale"] == []
     assert "worker pid=" in stamp["stamp_line"] and "started=" in stamp["stamp_line"]
     assert "stale=none" in stamp["stamp_line"]
-    for name in mods:
-        assert name in stamp["stamp_line"]
+    # 260901 起模块表 8 个：干净时一行只报「跟踪了几个模块」（逐模块 mtime 在 modules 里），
+    # 有 stale 时逐名点名（下面 stale 那段断言）——两种形态都不许把名字写空。
+    assert "tracked module" in stamp["stamp_line"], stamp["stamp_line"]
     # 齿：盘上 mtime 晚于**启动基准** → 该模块进 stale 名单（注入判据，确定性）
     stale_stamp = shared.worker_code_stamp(mtime_fn=lambda p: 9e9,
                                            started_at="2020-01-01T00:00:00")
     # 反向：基准晚于 mtime（正常启动后的稳定树）→ 名单空
     assert shared.worker_code_stamp(started_at="2999-01-01T00:00:00")["stale"] == []
-    assert set(stale_stamp["stale"]) == {"agent_activities", "inspection_flow",
-                                         "inspection_deadman"}, stale_stamp["stale"]
+    assert set(stale_stamp["stale"]) == set(_tracked) - {"verify_lane"}, \
+        stale_stamp["stale"]      # 除闸子进程载入的 verify_lane 外，全部进 stale
     assert "verify_lane" not in stale_stamp["stale"]      # 闸子进程载入：worker 侧不判 stale
     assert "stale=agent_activities" in stale_stamp["stamp_line"]
     # 端到端①：套件回执行程带 code_stamp（活动内部产 → 重放安全）

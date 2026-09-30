@@ -281,7 +281,11 @@ class LightLaneWorkflow(DevLaneWorkflow):
     FACE_NAME_LIMIT = 5      # 「本票的账」最多列 5 个名字，多了给 (+N more)
     FACE_SAMPLE_MAX_LEN = 200  # 名单片段字节上限（名字很长时自动少列，保证字数不爆）
     FACE_MAX_LINES = 10      # blocked_reason 行数上限
-    FACE_MAX_CHARS = 1200    # blocked_reason 字数上限
+    # blocked_reason 字数上限。261001 由 1200 提到 1350：**新增了一行强制内容**——
+    # 「谁验的」（host 令 260930：每轮报都要能读到），它随回执里的 worker 身份/代码指纹走。
+    # 示例面（最丰富的那种：全量+窄面+存量红+环境红+本票的账全在场）实测 1265 字。
+    # 上限只随**强制行**增长，不随可选内容增长——加行不加预算的做法等于让票面慢慢长回墙。
+    FACE_MAX_CHARS = 1350    # blocked_reason 字数上限
     FACE_BULK_MIN_ITEMS = 6  # 机械判据：逗号分隔 ≥6 项…
     FACE_BULK_MIN_LEN = 400  # …且该片段总长 >400 = 机器清单内联（票面不得出现）
 
@@ -822,6 +826,12 @@ class LightLaneWorkflow(DevLaneWorkflow):
             face_bits.append("ledger reuse: n/a (old receipt)")
         elif _kr_abs:
             face_bits.append("known-red: n/a (old receipt)")
+        # 「谁验的」一行（宿主令 260930：每轮报都要能读到）。口径与回执 summary 里那句同源
+        # （shared.worker_verified_line 单点），不可得也具名——票面上不出现「验过了」这种无主语断言。
+        _vf = shared.worker_verified_line(getattr(ir, "worker_identity", ""),
+                                         getattr(ir, "code_stamp", None))
+        if _vf:
+            lines.append(_vf)
         lines.append("Details: %s (full machine lists) + report %s (receipt %s). Round "
                      "face: %s."
                      % (ptr["detail_ref"], ptr["report_path"], ptr["receipt_ref"],
@@ -1252,6 +1262,23 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 prev_red_names = self._tests_red_names(ir)
                 _face_note = self._light_face_note(ir, run_only)
                 self.results["run_integration_tests"] = self._light_gate_receipt(ir, gen0)
+                # 261001 补：**机器闸每轮也进 gate_runs**（与 merge_check 那一处同形，键族与
+                # dev_lane 的消费面一致）。此前轻道只有 merge_check 一处 append ⇒ 闸轮在这本账上
+                # 是空的：泳道图/回执面看不到「这一轮闸跑了几条、绿不绿、窄面多少、豁免多少」。
+                # 纯内存追加，**不新增任何命令**（无活动/定时器/信号）⇒ 重放安全，不需要版本门。
+                _face = self._light_run_face(ir, run_only)
+                self.gate_runs.append({
+                    "stage": "run_integration_tests",
+                    "label": "machine gate (verify_lane integ, round %d)" % gate_rounds,
+                    "green": self._light_gate_verdict(ir) == "green",
+                    "red_count": len(self._light_red_names(ir)),
+                    "counts": {"ran": ir.ran, "passed": ir.passed, "failed": ir.failed,
+                               "env_fail": ir.env_fail},
+                    "exit_code": 0 if not ir.error else 1,
+                    "narrowed": len(_face.get("narrowed") or []),
+                    "excluded_pools": list(_face.get("excluded_pools") or []),
+                    "known_red_skipped": len((_face.get("known_red") or {}).get("names") or []),
+                    "error": str(ir.error or "")})
                 # 段 evidence=计数 + 指针（宿主 260930：票面/段面不许内联逐条机器清单；
                 # 逐条行仍在 results.run_integration_tests.evidence 与报告文件里）
                 self._finish("run_integration_tests", by="run_integration_tests",

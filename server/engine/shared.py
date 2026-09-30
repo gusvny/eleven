@@ -6363,12 +6363,20 @@ def __getattr__(name):
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 
-#: 关键模块 → (模块名, 相对本仓根的路径)。前三个由 worker 直接载入，第四个由闸子进程载入
-#: （worker 侧只报盘上 mtime，`loaded_at=None`——不假装它载入过）。
+#: 关键模块 → (模块名, 相对本仓根的路径)。除 `verify_lane` 外都由 worker 直接载入
+#: （`verify_lane` 由闸子进程载入：worker 侧只报盘上 mtime，`loaded_at=None`——不假装它载入过）。
+#: **261001 补齐四个工作流体模块**（`base`/`dev_lane`/`light_lane`/`shared`）：`worker_verified_line`
+#: 里早就点名要看这四个（见该函数的白名单），但表里一直没有它们 —— 于是「改了工作流体代码要重启
+#: worker」这条纪律在指纹面上是**假绿**：integration 当天两次改 `light_lane.py`（收窄面回落 + 重放门），
+#: `drift` 始终报 `stale=[]`，操作者只能靠人工判断补重启。指纹面必须盖住「改了就一定要换进程」的那些文件。
 CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     ("agent_activities", "server/engine/agent_activities.py"),
     ("inspection_flow", "server/engine/inspection_flow.py"),
     ("inspection_deadman", "server/engine/inspection_deadman.py"),
+    ("base", "server/engine/base.py"),
+    ("dev_lane", "server/engine/dev_lane.py"),
+    ("light_lane", "server/engine/light_lane.py"),
+    ("shared", "server/engine/shared.py"),
     ("verify_lane", "server/tools/verify_lane.py"),
 )
 
@@ -6545,16 +6553,21 @@ def worker_verified_line(worker_identity: Any, code_stamp: Any) -> str:
 
 
 def code_stamp_line(stamp: Dict[str, Any]) -> str:
-    """可读一行（进巡检 face/receipt；英文、零 CJK、可 grep）。"""
+    """可读一行（进巡检 face/receipt；英文、零 CJK、可 grep）。
+
+    260901 起模块表扩到 8 个（含四个工作流体模块）——把 8 个 `name@mtime` 全塞进一行会让票面
+    的一行读不动。口径：**干净时只报跟踪了几个模块**（逐模块 mtime 仍在 `modules` 里，机器面
+    要细读就去那儿）；**有 stale 时把 stale 的那几个连同 mtime 逐个点名**（要看的正是它们）。
+    三种既有 grep 锚（`worker pid=`、`started=`、`stale=`）逐字不变。"""
     if not isinstance(stamp, dict) or not stamp:
         return ""
     mods = stamp.get("modules") or {}
-    parts = []
-    for name in ("agent_activities", "inspection_flow", "inspection_deadman", "verify_lane"):
-        m = mods.get(name) or {}
-        parts.append("%s@%s" % (name, m.get("mtime") or "?"))
     stale = [str(x) for x in (stamp.get("stale") or [])]
+    if stale:
+        face = " ".join("%s@%s" % (n, (mods.get(n) or {}).get("mtime") or "?") for n in stale)
+    else:
+        face = "%d tracked module(s)" % len(mods)
     return ("code_stamp: worker pid=%s started=%s | %s | stale=%s"
             % (stamp.get("worker_pid"), stamp.get("worker_started_at"),
-               " ".join(parts), ",".join(stale) if stale else "none"))
+               face, ",".join(stale) if stale else "none"))
 
