@@ -5003,7 +5003,8 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
 TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     "dev-lane": "DevLaneWorkflow",
     # 宿主令 260930（devlane-lite §4.1，直修无票）：轻道泳道——**独立 workflow 类**，段链更短
-    # （create_plan→implement→[ui_evidence]→run_integration_tests→merge_check→merge）。
+    # （宿主 260930 两道裁定后=implement→run_integration_tests→merge_check→merge：
+    # 轻道不写方案、不产 UI 证据）。
     # 内置面**有意**扩这一格：宿主 260930 令「轻道按模板 id 显式开票」，建票面
     # （client.py ticket-start / tools/ticket.py create 的内置快路径）读的本表，故必须在
     # 此登记。收窄守卫（sc_template_face_narrowing 等）随之把默认面由 {dev-lane} 更新为

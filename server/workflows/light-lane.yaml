@@ -4,22 +4,13 @@
 id: light-lane
 name: "Light Lane"
 lane: worktree
-description: "轻道（light lane）：prepare_workspace→create_plan→implement→（UI 票 ui_evidence）→run_integration_tests（机器闸，一轮一判）→merge_check→merge（人审）——红转人，不自动仲裁、不自动重跑"
+description: "轻道（light lane）：prepare_workspace→implement→run_integration_tests（机器闸，一轮一判）→merge_check→merge（人审）——红转人，不自动仲裁、不自动重跑；不产 UI 证据、不写方案（UI 面改动走全车道；范围=票面声明的写集）"
 stages:
-  - id: create_plan
-    role: developer
-    name: "做方案"
-    desc: "读需求出实现方案：改动文件清单、步骤、验收口径；不动代码"
-    next: implement
-    parts:
-      - agent
-    acceptance:
-      - "The plan lands in the stage result file (files to change + steps + acceptance criteria)"
   - id: implement
     role: developer
     name: "实现"
     desc: "按方案开发：写集白名单内；agent 沙箱写不了真 .git，commit 由 worker 代落盘；单测随实现交付"
-    next: ui_evidence
+    next: run_integration_tests
     parts:
       - agent
       - script
@@ -27,15 +18,6 @@ stages:
       - "Changes stay inside the write set"
       - "Changes are committed to the lane branch (the worker settles on the agent's behalf)"
       - "Unit tests for the change run green"
-  - id: ui_evidence
-    role: developer
-    name: "UI截图证据"
-    desc: "条件段（仅 UI 票）：实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截图落 .sandbar/screenshots/（软失败不拦主链，merge_check 闸兜底）"
-    next: run_integration_tests
-    parts:
-      - script
-    acceptance:
-      - "UI tickets carry before/after screenshots under .sandbar/screenshots/ (merge_check checks it mechanically)"
   - id: run_integration_tests
     role: integration
     name: "跑集成测试"

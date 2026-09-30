@@ -9,14 +9,29 @@
 段链（段 id 与 DevLaneWorkflow 同名同类语义，只是短）：
 
     prepare_workspace（无 agent，前置）
-      → create_plan（developer：出方案，不动代码）
-      → implement（developer：按方案落地 + 单测；worker 代落盘 commit）
-      → [ui_evidence]（仅 UI 票，inline，worker 代跑隔离台截图）
+      → implement（developer：落地 + 单测；worker 代落盘 commit）
       → run_integration_tests（机器闸：项目声明的集成命令；一轮一判）
       → merge_check（程序化四项）
       → merge（人审签字 → 真合并 → 归档 → 拆道）
 
-**没有** plan review、没有 design_integration_tests、没有仲裁、没有验收走查。
+**没有** create_plan、没有 plan review、没有 design_integration_tests、没有仲裁、
+没有验收走查，**也不产 UI 证据**（宿主 260930 两道裁定：轻道不带 create_plan 段与
+ui_evidence 段——段声明、派单面、时间线三处都不许出现这两段）。
+
+为什么没有 create_plan（宿主 260930 裁定，口径留档供后人复核）：轻道的适用面靠**人选**
+（人选时已经判过一次「这是小活」），需求的真源是**票面**（含写集声明），范围内的真源是
+**声明的写集**（引擎越权闸照旧咬）。全车道留 create_plan 的价值是「写码前发现活比想象
+的大」，而轻道已经放弃 review_plan 那道纪律，再留一个「自己写给自己的方案」收益不抵成本
+（实测该段 3~17 分钟/票）。**代价已写明**：这个「发现」时点后移到机器闸——活比想象的大
+时，闸会以**完整违规集**转人（那时人或打回实现、或另开全车道票）；将来若做机械选道，
+再补一个便宜的「范围自检」即可，不必恢复整段。写集不再随方案刷新（没有方案回执可读），
+声明的写集就是范围内的真源。
+
+UI 面改动的口径（连带后果，**具名不静默**）：merge_check 的 3.6「UI 证据闸」是
+**模板无关的全车道纪律**——改动面命中 UI 路径即要求 `.sandbar/screenshots/` 下有截图
+（reason_code=ui_evidence_missing）。轻道不产截图，所以「改到 UI 路径的轻道票」会在
+merge_check 被这条闸**具名挡住**：详见 §6 的口径注释与 _light_merge_blocked_text 的
+`ui_evidence_missing` 专段（出路=另开全车道票 / 人裁定豁免），绝不静默、绝不假绿。
 
 红转人（宿主 260930 定案②）：机器闸不绿 ⇒ 票面进 blocked，带上**完整违规集**（全部失败场景名、
 计数、闸回执指针，绝不给样本）与具名出路清单（重跑闸 / 打回实现 / 为余下工作另开全道
@@ -28,7 +43,6 @@
     共用 helper，dev-lane 同调用，命令序列逐字不变）；
   · agent 段派发与回执/落盘流转：dev_lane._run_agent_step（含 worker 代落盘 settle、
     结果文件归一、闸拒绝明细、环境信号、移交命令债表）——本类直接调用；
-  · UI 证据：dev_lane._ui_evidence_step（同 helper，dev-lane 在汇合点同调用）；
   · 机器闸：同一批活动与同一批纯函数单写者——changed_files / surface_plan /
     shared.targeted_rerun_plan / run_integration_tests / dev_lane._integ_run_args /
     dev_lane._closing_full_run（定点轮只作快反馈，放行只认收口全量跑）；
@@ -115,21 +129,36 @@ LIGHT_LANE_GATES: Dict[Any, GateSpec] = {
         label="verify_lane integ (the project-declared integration command)"),
 }
 
+#: 轻道专用出路改写（宿主 260930 裁定）：`path_gates` 的共享出路提示里有一条
+#: `write_set_missing` 指向 **create_plan**（「回 create_plan 补结构化回执后再实现」），
+#: 那是**全车道的票面文字**，轻道没有那个段 → 提示指空。做法取零风险侧：**不碰共享串**
+#: （dev-lane 票面逐字不变），只在**轻道自己的阻断面收敛点**做一次出路改写（见
+#: `_light_neutralize_next_action`）。改写的原文留在 `next_action_rewritten_from`
+#: 键里（可追溯，不静默丢）。
+LIGHT_NEUTRAL_NEXT_ACTION = (
+    "Put the files to change into the ticket's declared write set and land again — this "
+    "lane has no planning stage, so the write set never widens after creation "
+    "(path gate reason: write_set_missing).")
+
 #: 轻道可打回段（rework 词表）：比 PHASE_MAIN_CHAIN 窄——审方案/仲裁/验收走查在轻道
 #: **不存在**，打回它们只会在主循环落到「未知相位」。词表窄于闸＝拒收点名，绝不放进去。
 LIGHT_REWORK_TARGETS = frozenset({
-    "create_plan", "implement", "run_integration_tests", "merge_check", "merge"})
+    # 宿主 260930：create_plan 段已删——它**也不再是可返工目标**（打回一个不存在的段
+    # 只会把票打到未知相位；拒收面会具名点名「不是轻道段」）。
+    "implement", "run_integration_tests", "merge_check", "merge"})
 
 #: 轻道段级补述：在 dev-lane 的同段补述**前面**加一段轻道契约说明；正文 import 复用，
 #: 纪律条文（英文报告义务 + developer 段集成禁跑执法）因此与 dev-lane 同源、不会漂移。
 LIGHT_LANE_PRELUDE = (
-    "【本票走轻道（light lane）】段链=create_plan → implement →（UI 票才跑 ui_evidence）"
-    "→ run_integration_tests（机器闸）→ merge_check → merge（人审）。"
-    "本道**没有**方案复审、没有集测设计、没有仲裁、没有验收走查：机器闸不绿就停下等人"
-    "（不自动重跑、不自动仲裁），所以一轮交付要尽量把事做完。\n")
+    "【本票走轻道（light lane）】段链=implement → run_integration_tests（机器闸）"
+    "→ merge_check → merge（人审）。"
+    "本道**没有**方案段、没有方案复审、没有集测设计、没有仲裁、没有验收走查、"
+    "**也不产 UI 证据**（UI 面改动请走全车道）：范围的真源=票面声明的写集，"
+    "机器闸不绿就停下等人（不自动重跑、不自动仲裁），所以一轮交付要尽量把事做完。\n")
 
 LIGHT_FLOW_BRIEF: Dict[str, str] = {
-    "create_plan": LIGHT_LANE_PRELUDE + FLOW_BRIEF["create_plan"],
+    # 轻道唯一 agent 段=implement（宿主 260930 删了 create_plan 与 ui_evidence）；正文
+    # import 复用 dev-lane 同段条文，只有前缀是轻道自己的契约说明。
     "implement": LIGHT_LANE_PRELUDE + FLOW_BRIEF["implement"],
 }
 
@@ -150,22 +179,20 @@ class LightLaneWorkflow(DevLaneWorkflow):
     PATH_GATE = True
     TEMPLATE_LANE = "worktree"
     TEMPLATE_WORKSPACE_DIR = False
-    TEMPLATE_DESC = ("轻道（light lane）：prepare_workspace→create_plan→implement"
-                     "→（UI 票 ui_evidence）→run_integration_tests（机器闸，一轮一判）"
-                     "→merge_check→merge（人审）——红转人，不自动仲裁、不自动重跑")
+    TEMPLATE_DESC = ("轻道（light lane）：prepare_workspace→implement→run_integration_tests"
+                     "（机器闸，一轮一判）→merge_check→merge（人审）——红转人，不自动仲裁、"
+                     "不自动重跑；不产 UI 证据、不写方案（UI 面改动走全车道；范围=票面声明的写集）")
     #: 段补述来源（dev-lane 的 _run_agent_step 读本属性；dev-lane 侧值=FLOW_BRIEF，
     #: 逐字不变——纯加法钩子）。
     FLOW_BRIEF_SET: Dict[str, str] = LIGHT_FLOW_BRIEF
 
-    # 段声明（角色/种类/人门标记/条件段注记与 run() 同序；acceptance 是**票面文字**，
-    # 按 CLAUDE.md 规则 6 全英文）。条件段 ui_evidence=只对 UI 票开。
+    # 段声明（角色/种类/人门标记与 run() 同序；acceptance 是**票面文字**，按 CLAUDE.md
+    # 规则 6 全英文）。**首段=implement**（宿主 260930 裁定删 create_plan：见模块头注
+    # 「为什么没有 create_plan」——口径与代价都在那里，含「发现时点后移到机器闸」）。
+    # **无条件段**（也不带 ui_evidence，UI 面改动由 merge_check 3.6 的 UI 证据闸具名
+    # 挡住，见类尾 `_light_merge_blocked_text`）。
     STAGES = (
-        Stage(id="create_plan", name="做方案", role="developer", next="implement",
-              desc="读需求出实现方案：改动文件清单、步骤、验收口径；不动代码",
-              parts=("agent",),
-              acceptance=("The plan lands in the stage result file "
-                          "(files to change + steps + acceptance criteria)",)),
-        Stage(id="implement", name="实现", role="developer", next="ui_evidence",
+        Stage(id="implement", name="实现", role="developer", next="run_integration_tests",
               desc="按方案开发：写集白名单内；agent 沙箱写不了真 .git，commit 由 worker "
                    "代落盘；单测随实现交付",
               parts=("agent", "script"),
@@ -173,15 +200,6 @@ class LightLaneWorkflow(DevLaneWorkflow):
                           "Changes are committed to the lane branch (the worker settles "
                           "on the agent's behalf)",
                           "Unit tests for the change run green")),
-        # 条件段（仅 UI 票；非 UI 票零活动）。真编排在 implement 段尾部 inline 调用，
-        # 与 dev-lane 的汇合点调用是同一个 helper。
-        Stage(id="ui_evidence", name="UI截图证据", role="developer",
-              next="run_integration_tests",
-              desc="条件段（仅 UI 票）：实现落盘后 worker 代跑 ui-check/capture-lane.mjs "
-                   "隔离台，截图落 .sandbar/screenshots/（软失败不拦主链，merge_check 闸兜底）",
-              parts=("script",),
-              acceptance=("UI tickets carry before/after screenshots under "
-                          ".sandbar/screenshots/ (merge_check checks it mechanically)",)),
         Stage(id="run_integration_tests", name="跑集成测试", role="integration",
               next="merge_check", agent=False,
               desc="程序化（无 agent）：泳道 0-commit 前置检查 → 改动清单 → 面计划收窄快反馈面 "
@@ -233,6 +251,44 @@ class LightLaneWorkflow(DevLaneWorkflow):
             await self._block_agent_failed(step_id, res)
             return None
         return res
+
+    # ------------------------------------------------- 出路改写（轻道专有，宿主 260930）
+    def _light_neutralize_next_action(self) -> None:
+        """把轻道票面上的「指向 create_plan 的出路提示」改写成模板中立口径。
+
+        覆盖两处 pin 点写进 `meta['blocked_detail']` 的字段（顶层 `next_action` 与
+        逐条红的 `reds[*].next_action`，外加嵌套的 `gate_refusal`）；只改**含
+        create_plan** 的那些，其它出路一字不动；原文留在 `next_action_rewritten_from`
+        键（可追溯）。纯内存、零判定、幂等（改过的不再含 create_plan）。
+
+        为什么在轻道侧做：`path_gates._NEXT_ACTION_HINTS` 是**全车道共享**的票面文字——
+        改它=改 dev-lane 的既有票面（宿主「既有泳道零行为变化」那条）。轻道覆写自己的
+        pin 点（`self.` 动态派发，dev-lane 不受影响）＝零风险侧。"""
+        detail = self.meta.get("blocked_detail")
+        if not isinstance(detail, dict):
+            return
+        targets = [detail]
+        inner = detail.get("gate_refusal")
+        if isinstance(inner, dict):
+            targets.append(inner)
+        for red in (detail.get("reds") or []):
+            if isinstance(red, dict):
+                targets.append(red)
+        for t in targets:
+            na = t.get("next_action")
+            if isinstance(na, str) and "create_plan" in na:
+                t["next_action_rewritten_from"] = na
+                t["next_action"] = LIGHT_NEUTRAL_NEXT_ACTION
+
+    def _pin_agent_refusal(self, res) -> None:
+        """轻道覆写（纯加法）：先跑父类那套逐字记账，再做**轻道票专属**的出路改写。"""
+        super()._pin_agent_refusal(res)
+        self._light_neutralize_next_action()
+
+    def _pin_merge_red_detail(self, checks, fallback_files=None, disposition="") -> None:
+        """轻道覆写（纯加法）：同上——父类记账逐字不变，随后改写指向 create_plan 的出路。"""
+        super()._pin_merge_red_detail(checks, fallback_files, disposition)
+        self._light_neutralize_next_action()
 
     def _consume_light_rework(self, phase: str):
         """rework 信号消费（返回 (落点相位, 拒收文案)；拒收时落点=""）。
@@ -565,7 +621,9 @@ class LightLaneWorkflow(DevLaneWorkflow):
         # 1) 工作空间准备（dev-lane 同 helper：同活动/同失败转 blocked/同 rework 语义）
         await self._prepare_workspace_step()
 
-        phase = str(self.meta.get("stage") or "create_plan")
+        # 首段=implement（宿主 260930 删 create_plan）——相位默认值必须跟着首段走，
+        # 否则「票面初始态」会指向一个不存在的段。
+        phase = str(self.meta.get("stage") or self.STAGES[0].id)
         prev_ctx = ""
         run_only: List[str] = []          # 最近一轮跑面（空=全量）
         prev_red_names: List[str] = []    # 最近一轮红名（下一轮快反馈面来源）
@@ -588,24 +646,11 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 await self._breathe()
                 continue
 
-            # 2) create_plan（developer 出方案；轻道无审方案段 → 定稿即开工）
-            if phase == "create_plan":
-                res = await self._light_agent_step("create_plan", prev_ctx)
-                if res is None:
-                    continue
-                prev_ctx = ""
-                self._finish("create_plan", by="developer-agent",
-                             evidence=res.evidence or res.summary)
-                self._handoff("create_plan", res.summary or "Plan ready",
-                              artifacts=res.deliverables, report=res.report)
-                # 写集随方案定稿刷新（dev-lane 同一 helper、同一 KI-049 判据；
-                # dev-lane 在审方案通过点调用，轻道没有审方案段 → 定稿点即此处）
-                self._refresh_write_set_after_plan()
-                await self._breathe()
-                phase = "implement"
-                continue
-
-            # 3) implement（developer 落地 + 单测；worker 代落盘）→ UI 证据（inline）
+            # 2) implement（首段；developer 落地 + 单测；worker 代落盘）
+            #    轻道**没有方案段**（宿主 260930 裁定，见模块头注）——所以这里也**不调**
+            #    dev_lane._refresh_write_set_after_plan（它读的是 create_plan 回执的
+            #    files_changed；没有方案回执可读时调用只会刷出一条「跳过」日志）。
+            #    范围内的真源=建票时声明的写集（越权闸照旧咬）。
             if phase == "implement":
                 res = await self._light_agent_step("implement", prev_ctx)
                 if res is None:
@@ -615,16 +660,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
                              evidence=res.evidence or res.summary)
                 self._handoff("implement", res.summary or "Implementation landed",
                               artifacts=res.deliverables, report=res.report)
-                # UI 票证据（dev-lane 在汇合点调同一 helper）：软失败不拦主链，
-                # merge_check 的证据闸兜底；非 UI 票此处零活动。
-                ui_ctx = await self._ui_evidence_step()
-                if ui_ctx:
-                    self._log("UI evidence face prepared (%d chars)" % len(ui_ctx))
+                # 宿主 260930 裁定：轻道**不产 UI 证据**（无 ui_evidence 段，也不调
+                # dev_lane._ui_evidence_step）——UI 面改动由 merge_check 3.6 的证据闸
+                # 具名挡住（reason_code=ui_evidence_missing），出路见类尾那段口径。
                 await self._breathe()
                 phase = "run_integration_tests"
                 continue
 
-            # 4) 机器闸（项目声明的集成命令；一轮一判，红转人）
+            # 3) 机器闸（项目声明的集成命令；一轮一判，红转人）
             if phase == "run_integration_tests":
                 gen0 = self._gen("run_integration_tests")
                 self._enter("run_integration_tests")
@@ -731,7 +774,7 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 phase = "merge_check"
                 continue
 
-            # 5) merge_check（程序化四项；任一项红 → 转人）
+            # 4) merge_check（程序化四项；任一项红 → 转人）
             if phase == "merge_check":
                 self._enter("merge_check")
                 mc = await self._light_merge_check()
@@ -741,27 +784,30 @@ class LightLaneWorkflow(DevLaneWorkflow):
                     self._handoff("merge_check", "Merge check: all four items green")
                     phase = "merge"
                     continue
+                reds = [c for c in mc.checks if not c.get("green")]
+
+                def _handling(c):
+                    """逐条红的处置提示——指向 create_plan 的共享提示在轻道票面上改写
+                    （宿主 260930：轻道没有方案段，提示不许指空）。"""
+                    na = str(c.get("next_action") or "")
+                    if "create_plan" in na:
+                        return LIGHT_NEUTRAL_NEXT_ACTION
+                    return na
+
                 red = "; ".join(
                     "%s: %s%s" % (c.get("item"), c.get("detail"),
-                                  (" | handling: %s" % c.get("next_action"))
-                                  if c.get("next_action") else "")
-                    for c in mc.checks if not c.get("green"))
+                                  (" | handling: %s" % _handling(c)) if _handling(c) else "")
+                    for c in reds)
                 self._pin_merge_red_detail(
                     mc.checks, mc.conflict_files,
                     disposition="light lane: every merge_check red blocks for a human "
                                 "(this lane has no automatic conflict-resolution round); "
                                 "rework(to_stage=implement) or retry_qc re-runs the check")
-                await self._blocked(
-                    "merge_check",
-                    "Merge check is red (light lane: every red goes to a human — no "
-                    "automatic send-back). %s%s Remedies: fix the item named above and "
-                    "send retry_qc to re-run the check, or rework(to_stage=implement) "
-                    "with a note to repair the lane."
-                    % (red or "no per-item detail in the receipt",
-                       " | error: %s" % mc.error if mc.error else ""))
+                await self._blocked("merge_check",
+                                    self._light_merge_blocked_text(mc, red))
                 continue
 
-            # 6) merge（人审签字 → 真合并 → 归档 → 拆道）
+            # 5) merge（人审签字 → 真合并 → 归档 → 拆道）
             if phase == "merge":
                 self._enter("merge")
                 prep_ctx = await workflow.execute_activity(
@@ -916,6 +962,48 @@ class LightLaneWorkflow(DevLaneWorkflow):
         self._mark("merge", "closed", "workflow finished")
         await self._ledger_flush()
         return self._snapshot()
+
+    # ---------------------------------------------------------------- merge_check 阻断面
+    #: UI 证据闸的 reason_code（真源=agent_activities merge_check 3.6 两处产出，同一常量
+    #: 值；本类只**读**回执、不重判）。
+    UI_EVIDENCE_RED = "ui_evidence_missing"
+
+    def _light_merge_blocked_text(self, mc: Any, red: str) -> str:
+        """merge_check 阻断文案（票面英文；逐条红 + 处置 + 出路）。
+
+        **UI 证据闸专段**（宿主 260930：轻道不产 UI 证据的连带后果必须具名且可行动）：
+        3.6 那条闸是**模板无关的全车道纪律**——改动面命中 UI 路径即要求
+        `.sandbar/screenshots/` 下有截图（reason_code=ui_evidence_missing）。轻道没有
+        ui_evidence 段、也不调截图 helper，所以「改到 UI 路径的轻道票」必然被它挡住。
+        这里把它单独摊开：说明这是全车道纪律、轻道不产截图，出路=**另开全车道票**
+        （template dev-lane）或**人裁定豁免**——绝不静默、绝不假绿，也绝不把
+        「补截图」这条对轻道结构性不可满足的动作当成出路。"""
+        ui_reds = [c for c in (getattr(mc, "checks", None) or [])
+                   if not c.get("green") and str(c.get("reason_code") or "") == self.UI_EVIDENCE_RED]
+        parts = [
+            "Merge check is red (light lane: every red goes to a human — no automatic "
+            "send-back). %s%s" % (red or "no per-item detail in the receipt",
+                                  " | error: %s" % mc.error if mc.error else ""),
+            "Remedies: fix the item named above and send retry_qc to re-run the check, "
+            "or rework(to_stage=implement) with a note to repair the lane.",
+        ]
+        if ui_reds:
+            files = []
+            for c in ui_reds:
+                for f in (c.get("files") or []):
+                    if str(f) not in files:
+                        files.append(str(f))
+            parts.append(
+                "UI-surface change detected (the UI evidence gate, "
+                "reason_code=%s): this gate is a full-lane discipline applied to every "
+                "lane and it is template-independent — a change whose diff hits UI paths "
+                "must ship screenshots under .sandbar/screenshots/. The light lane does "
+                "not produce UI evidence (no ui_evidence stage, no capture step), so this "
+                "ticket cannot satisfy it here. Files hit: %s. Remedies: open a full-lane "
+                "ticket (template dev-lane) for this change, or have a human rule an "
+                "exemption — do not expect retry_qc to clear this item on the light lane."
+                % (self.UI_EVIDENCE_RED, ", ".join(files[:20]) or "(not named in the receipt)"))
+        return " ".join(parts)
 
     # ---------------------------------------------------------------- 判词小工具
     def _light_gate_note_tail(self, ir: Any) -> str:

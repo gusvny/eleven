@@ -5,8 +5,10 @@
 intent（守护的用户可感知行为）：**一条轻道票真的走完它自己那条短段链**——
   A. **段链就是轻道那条**：真 worker + 真活动 + 桩大脑（`SANDBAR_AGENT_CMD` 可编程桩）
      驱动一张真 `light-lane` 票：桩账本（agent 实收派单的唯一观测面）逐段记录
-     create_plan → implement，**且零** review_plan / design_integration_tests / arbitrate /
-     acceptance_walkthrough 派单；票面 timeline/handoffs 同样零这四段痕迹。
+     **implement**（轻道首段），**且零** create_plan / review_plan /
+     design_integration_tests / arbitrate / acceptance_walkthrough / **ui_evidence** 派单
+     （宿主 260930 两道裁定：轻道不写方案、不产 UI 证据）；票面 timeline/handoffs 同样零
+     这六段痕迹，**并带正向断言：派单账本首条=implement（首段即实现）**。
   B. **机器闸跑的是项目声明的集成命令**：夹具泳道的 `verify.yaml` 里
      `integration.cmd` 与主仓声明**逐字相同**（`python3 integration/run_scenarios.py`），
      且闸回执里出现夹具注册表里那三条场景名——只有真执行器读真注册表才可能产出。
@@ -17,6 +19,10 @@ intent（守护的用户可感知行为）：**一条轻道票真的走完它自
   D. **人唤醒重跑闸**：blocked 态发人信号 `retry_qc` ⇒ 闸**真的重跑**（账本新增记录，
      且第二轮以 `SANDBAR_SCENARIO_ONLY`=上轮三条红名收窄快反馈面），红转绿后引擎机械补
      **收口全量跑**（账本第三次记录，无点名面）。
+  F. **write_set_missing 出路改写（宿主 260930）**：另开一张**空写集**的轻道票 → 实现段
+     落盘被路径闸拒（reason_code=write_set_missing）→ 票面 `blocked_detail.next_action`
+     **不含 create_plan**（改写为模板中立口径），原文留在 `next_action_rewritten_from`
+     （可追溯）；dev-lane 的同一提示逐字不变（那条由 L1 负向锁守）。
   E. **绿路到人门**：票走到 `stage=merge / stage_state=awaiting-human`（轻道唯一人门），
      timeline 有 merge_check done；人签 approve → 票收口 closed + 泳道拆净（归档成功是
      拆道前置，与 dev-lane 同一批活动）。
@@ -74,14 +80,22 @@ import stage_docker  # noqa: E402
 LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORKFLOW")
 PROJECT_KEY = "lightlane-e2e"
 TID = "lightlane-%d" % os.getpid()
+# 第二张票（宿主 260930 裁定的端到端面）：**空写集**轻道票——走 write_set_missing 红，
+# 用来验「轻道票面出路不指向 create_plan」在真链上成立（改写点在轻道自己的收敛点）。
+TID_NOWS = "lightlane-nows-%d" % os.getpid()
+#: 改前原文（真源=server/engine/path_gates.py `_NEXT_ACTION_HINTS["write_set_missing"]`；
+#: 字面量照抄——轻道票面必须已把它改写掉）。
+HINT_BEFORE = "工单写集为空/缺失——回 create_plan 补结构化回执后再实现"
 WRITE_FILE = "LIGHT_LANE_PROBE.md"
 # 夹具注册表里的三条秒级场景（红轮=三条全红 → 完整违规集面；绿轮=三条全绿）
 GATE_NAMES = ("lightlane-fixture-alpha", "lightlane-fixture-beta", "lightlane-fixture-gamma")
-# 轻道被排除的段（出现即本票失效）
+# 轻道被排除的段（出现即本票失效）：全车道有、轻道没有的那几条——被裁的四段（审方案/
+# 集测设计/仲裁/验收走查）+ **create_plan**（宿主 260930 裁定轻道不写方案）+
+# **ui_evidence**（同批裁定轻道不产 UI 证据）。段链/派单面/时间线/交接面四处都不许出现。
 EXCLUDED_STAGES = ("review_plan", "design_integration_tests", "arbitrate",
-                   "acceptance_walkthrough")
-# 段链（真跑序）
-LIGHT_STAGES = ("create_plan", "implement", "run_integration_tests", "merge_check", "merge")
+                   "acceptance_walkthrough", "create_plan", "ui_evidence")
+# 段链（真跑序；宿主 260930：无方案段、无 UI 证据段——首段即 implement）。
+LIGHT_STAGES = ("implement", "run_integration_tests", "merge_check", "merge")
 
 G = {"tmp": "", "fixture": "", "projects": "", "ctl": "", "gate_ledger": "",
      "stub_ledger": "", "stub": "", "worker": None}
@@ -93,10 +107,12 @@ import json, os, re, sys, time
 prompt = sys.argv[-1] if len(sys.argv) > 1 else ""
 m = re.search(r"阶段：([a-z_]+)（", prompt)
 stage = m.group(1) if m else "unknown"
+mt = re.search(r"工单 (\S+?)（", prompt)
+ticket = mt.group(1) if mt else "unknown"
 led = os.environ.get("LIGHTLANE_STUB_LEDGER") or ""
 if led:
     with open(led, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"stage": stage, "ts": time.time(),
+        f.write(json.dumps({"stage": stage, "ticket": ticket, "ts": time.time(),
                             "cwd": os.getcwd()}, ensure_ascii=False) + "\n")
 m = re.search(r"干完把结果写到 (\S+?\.json)", prompt)
 if m:
@@ -141,6 +157,26 @@ except OSError:
 if mode == "red":
     sys.exit(1)
 '''
+
+
+def light_neutral_hint():
+    """轻道的中立出路口径（真源=引擎 light_lane.LIGHT_NEUTRAL_NEXT_ACTION）。
+
+    不抄字面量：真源改了这里跟着变（否则场景会拿旧文案假绿）。引擎模块 import 走
+    `light_lane`（它与 temporalio 同环境），失败时退回读源码常量并响亮点名。"""
+    sys.path.insert(0, os.path.join(REPO, "server", "engine"))
+    try:
+        import light_lane as _ll
+        return str(_ll.LIGHT_NEUTRAL_NEXT_ACTION)
+    except Exception as e:  # noqa: BLE001——不允许静默：退回源码抓取并把原因打出来
+        print("  (light_neutral_hint: import 失败，回落源码抓取：%s: %s)"
+              % (type(e).__name__, e), flush=True)
+        txt = open(os.path.join(REPO, "server", "engine", "light_lane.py"),
+                   encoding="utf-8").read()
+        m = re.search(r"LIGHT_NEUTRAL_NEXT_ACTION = \((.*?)\)\n", txt, re.S)
+        if not m:
+            return ""
+        return "".join(re.findall(r'"([^"]*)"', m.group(1)))
 
 
 def env_for(stage, extra=None):
@@ -197,6 +233,11 @@ def print_timeline(snap, tag):
     bad = sorted({str(e.get("stage")) for e in rows} & set(EXCLUDED_STAGES))
     print("  [timeline %s] excluded stages present: %s"
           % (tag, bad or "none"), flush=True)
+
+
+def stub_stages_of(tid):
+    """本**票**的 agent 派单序列（桩账本按票号过滤——同一 worker 服务多张票）。"""
+    return [r.get("stage") for r in read_jsonl(G["stub_ledger"]) if r.get("ticket") == tid]
 
 
 def read_jsonl(path):
@@ -296,7 +337,9 @@ def build_fixture(fail):
 
 def start_worker(py, stage):
     extra = {
-        "SANDBAR_TASK_QUEUES": "sandbar-ticket-%s" % TID,
+        # 一票一队列是引擎的既有形态（worker 只 poll 派给它的队列）；本场景两张票
+        # （主票 TID + 空写集票 TID_NOWS）共用一个 worker，故队列面显式列两条。
+        "SANDBAR_TASK_QUEUES": "sandbar-ticket-%s,sandbar-ticket-%s" % (TID, TID_NOWS),
         "SANDBAR_WATCH_WORKFLOW": TID,
         "SANDBAR_WATCH_INTERVAL_SEC": "2",
         # 桩大脑（可编程）：逐段回合法回执 + 落写集内文件 + 把实收派单落账本
@@ -413,6 +456,41 @@ def main():
         if not good:
             fail.bail("建票未受理，后续子用例无从进行：%s" % why, 1)
 
+        # ---------- L2b write_set_missing 出路改写（宿主 260930 裁定的端到端面） ----------
+        # 空写集票（显式声明 no_file_changes）+ 桩照旧落文件 → 落盘路径闸拒
+        # (reason_code=write_set_missing)；轻道票面出路必须已改写掉指向 create_plan 的那句。
+        _rc, br = git("rev-parse", "--short", "HEAD")
+        _rc2, out2 = run_poc_client(py, "ticket-start", {
+            "ticket_id": TID_NOWS, "template_id": "light-lane", "project": PROJECT_KEY,
+            "base_ref": (br or "").strip(),
+            "title": "[e2e] light-lane write-set gate face (no write set declared)",
+            "user_request": "integration e2e: the write_set_missing remedy must not point at a stage this lane does not have",
+            "write_set": [], "allow_empty_write_set": True,
+            "caller_project": PROJECT_KEY,
+        }, env_for(stage), timeout=300)
+        good2, why2 = accepted(out2, TID_NOWS)
+        check(good2, "L2b 空写集轻道票受理（%s）" % why2)
+        if good2:
+            s2 = wait_snap(fail, py, stage, TID_NOWS,
+                           lambda x: x.get("stage") == "implement"
+                           and x.get("stage_state") == "blocked",
+                           "L2b 空写集票在 implement 落盘被拒后 blocked", 420)
+            if s2 is not None:
+                d2 = s2.get("blocked_detail") or {}
+                check(str(d2.get("reason_code") or "") == "write_set_missing",
+                      "L2b 红灯 reason_code=write_set_missing（实得 %r）"
+                      % d2.get("reason_code"))
+                na2 = str(d2.get("next_action") or "")
+                check("create_plan" not in na2,
+                      "L2b **轻道票面出路不含 create_plan**（实得 %r）" % na2[:160])
+                check(na2 and na2 == light_neutral_hint(),
+                      "L2b 出路=本场景自算的模板中立口径（实得 %r）" % na2[:120])
+                check(str(d2.get("next_action_rewritten_from") or "") == HINT_BEFORE,
+                      "L2b 改写原文留痕=改前共享串（实得 %r）"
+                      % str(d2.get("next_action_rewritten_from"))[:80])
+                check("create_plan" not in str(s2.get("blocked_reason") or ""),
+                      "L2b blocked_reason 文本面同样不含 create_plan")
+
         # ---------- L3 红轮：闸不绿 → blocked（完整违规集，不仲裁不自动重跑） ----------
         snap = wait_snap(fail, py, stage, TID,
                          lambda x: x.get("stage") == "run_integration_tests"
@@ -425,18 +503,34 @@ def main():
             tl_stages = [str(e.get("stage") or "") for e in timeline]
             hf_stages = [str(e.get("stage") or "") for e in handoffs]
             # (a) 段链：轻道跑的段在，被排除的段一个都没有（派单/票面两面）
-            stub_stages = [r.get("stage") for r in read_jsonl(G["stub_ledger"])]
-            check(stub_stages == ["create_plan", "implement"],
-                       "L3a agent 派单账本恰为轻道前两段（实得 %r）" % stub_stages)
+            stub_stages = stub_stages_of(TID)
+            check(stub_stages == ["implement"],
+                       "L3a agent 派单账本恰为轻道唯一 agent 段（实得 %r）" % stub_stages)
+            check(bool(stub_stages) and stub_stages[0] == "implement",
+                       "L3a **首段就是 implement**（派单账本首条=%r；无方案段）"
+                       % (stub_stages[0] if stub_stages else None))
             check(not (set(stub_stages) & set(EXCLUDED_STAGES)),
-                       "L3a 被排除段零派单（review_plan/design_integration_tests/"
-                       "arbitrate/acceptance_walkthrough）")
+                       "L3a 被排除段零派单（create_plan/review_plan/"
+                       "design_integration_tests/arbitrate/acceptance_walkthrough + "
+                       "ui_evidence）")
+            check("ui_evidence" not in stub_stages,
+                  "L3a **任何轻道票都不跑 ui_evidence**（派单面负断言）")
+            check("create_plan" not in stub_stages,
+                  "L3a **轻道没有方案段**（派单面负断言）")
             check(not (set(tl_stages) & set(EXCLUDED_STAGES)),
                        "L3a 票面 timeline 零被排除段（实得 %r）" % sorted(set(tl_stages)))
+            check("ui_evidence" not in tl_stages,
+                  "L3a **任何轻道票都不跑 ui_evidence**（时间线负断言）")
+            check("create_plan" not in tl_stages,
+                  "L3a **轻道没有方案段**（时间线负断言）")
             check(not (set(hf_stages) & set(EXCLUDED_STAGES)),
                        "L3a 票面 handoffs 零被排除段（实得 %r）" % sorted(set(hf_stages)))
-            check("create_plan" in tl_stages and "implement" in tl_stages,
-                       "L3a timeline 含轻道前两段")
+            check("ui_evidence" not in hf_stages,
+                  "L3a **任何轻道票都不跑 ui_evidence**（交接面负断言）")
+            check("create_plan" not in hf_stages,
+                  "L3a **轻道没有方案段**（交接面负断言）")
+            check("implement" in tl_stages,
+                       "L3a timeline 含轻道首段 implement")
             # (b) 机器闸真跑项目声明的命令（三条夹具场景名只有真执行器读真注册表才有）
             gate_rows = read_jsonl(G["gate_ledger"])
             round1 = [r for r in gate_rows if r.get("mode")]
@@ -479,6 +573,31 @@ def main():
             check(n_before == n_after,
                        "L3d 一个 attempt 只跑一轮闸（blocked 后 12s 账本零增长：%d→%d）"
                        % (n_before, n_after))
+
+        # ---------- L3e rework 拒收面：打回已删段必须具名拒收（不落未知相位） ----------
+        n_disp_before = len(stub_stages_of(TID))
+        rw = cli(py, stage, "ticket", {"op": "rework", "ticket_id": TID,
+                                       "to_stage": "create_plan",
+                                       "note": "e2e: ask for a stage this lane does not have",
+                                       "by": "e2e-human"})
+        check(rw.get("ok") is True, "L3e rework 信号受理（%s）"
+              % str(rw.get("error") or "")[:120])
+        refused_snap = wait_snap(fail, py, stage, TID,
+                                 lambda x: any(str(r.get("want") or "") == "rework(create_plan)"
+                                               for r in (x.get("refused") or [])),
+                                 "L3e 已删段的 rework 落 refused 记录", 180)
+        if refused_snap is not None:
+            why = "; ".join(str(r.get("why") or "") for r in (refused_snap.get("refused") or []))
+            check("not a light-lane stage" in why and "create_plan" in why,
+                  "L3e 拒收面具名（点名目标不是轻道段；实得 %r）" % why[:200])
+            check("implement" in why,
+                  "L3e 拒收面列出合法目标（含 implement）")
+            check(str(refused_snap.get("stage")) in LIGHT_STAGES,
+                  "L3e 拒收后票仍在轻道段内（不落未知相位；实得 %r）"
+                  % refused_snap.get("stage"))
+            check(len(stub_stages_of(TID)) == n_disp_before,
+                  "L3e 拒收没有触发任何 agent 派单（本票账本零增长：%d→%d）"
+                  % (n_disp_before, len(stub_stages_of(TID))))
 
         # ---------- L4 人唤醒：retry_qc 重跑闸（红转绿）→ 收口全量跑 → 人门 ----------
         with open(G["ctl"], "w", encoding="utf-8") as f:
@@ -532,7 +651,37 @@ def main():
                           and str(e.get("state")) == "done"]
             check(bool(done_marks), "L5 timeline 有 merge_check done（程序化四项通过）")
             check(all(str(e.get("stage")) not in EXCLUDED_STAGES for e in tl3),
-                       "L5 全链 timeline 零被排除段")
+                       "L5 全链 timeline 零被排除段（含 ui_evidence）")
+            check("ui_evidence" not in tl3,
+                  "L5 **任何轻道票都不跑 ui_evidence**（全链时间线负断言）")
+            tl3_ids = [str(e.get("stage")) for e in tl3]
+            check("create_plan" not in tl3_ids and bool(tl3_ids)
+                  and tl3_ids[0] == "implement",
+                  "L5 **轻道没有方案段**且首段即 implement（全链时间线首项=%r）"
+                  % (tl3_ids[0] if tl3_ids else None))
+            # L5b rework 实证：打回 implement（首段）→ agent 真重跑 → 重走闸 → 回到人门
+            n_impl_before = len([st for st in stub_stages_of(TID) if st == "implement"])
+            rw2 = cli(py, stage, "ticket", {"op": "rework", "ticket_id": TID,
+                                            "to_stage": "implement",
+                                            "note": "e2e: send it back to the first stage",
+                                            "by": "e2e-human"})
+            check(rw2.get("ok") is True, "L5b rework(to_stage=implement) 受理（%s）"
+                  % str(rw2.get("error") or "")[:120])
+            back = wait_snap(fail, py, stage, TID,
+                             lambda x: x.get("stage") == "merge"
+                             and x.get("stage_state") == "awaiting-human"
+                             and len([e for e in (x.get("timeline") or [])
+                                      if str(e.get("stage")) == "implement"
+                                      and str(e.get("state")) == "running"]) >= 2,
+                             "L5b rework 后重走全链回到人门（implement 二次进入）", 420)
+            if back is not None:
+                n_impl_after = len([st for st in stub_stages_of(TID) if st == "implement"])
+                check(n_impl_after == n_impl_before + 1,
+                      "L5b rework **落到首段 implement**（agent 真重跑：派单账本 %d→%d）"
+                      % (n_impl_before, n_impl_after))
+                tl_back = [str(e.get("stage")) for e in (back.get("timeline") or [])]
+                check("create_plan" not in tl_back and "ui_evidence" not in tl_back,
+                      "L5b 重走后仍零被裁段（实得 %r）" % sorted(set(tl_back)))
             sig = cli(py, stage, "ticket", {"op": "sign", "ticket_id": TID,
                                             "input": {"who": "e2e-human", "gate": "merge",
                                                       "decision": "approve",
@@ -548,9 +697,11 @@ def main():
                 rc, out = git("worktree", "list")
                 check(lane and lane not in out,
                            "L5 合并成功后泳道拆净（worktree list 无该泳道）")
+                my_branch = str(((fin.get("meta") or {}).get("branch")) or "")
                 rc2, heads = git("branch", "--list", "lane/*")
-                check(rc2 == 0 and not heads.strip(),
-                           "L5 泳道分支已删（branch lane/* 为空，实得 %r）" % heads.strip()[:120])
+                check(rc2 == 0 and bool(my_branch) and my_branch not in heads,
+                      "L5 本票泳道分支已删（branch=%r；现存 lane/*=%r）"
+                      % (my_branch, heads.strip()[:120]))
                 rc3, log = git("log", "--oneline", "-3")
                 check(rc3 == 0 and bool(log.strip()),
                            "L5 夹具 main 有落地提交（合并真发生）")

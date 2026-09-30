@@ -1,10 +1,12 @@
 """light-lane 单测（宿主令 260930 直修，无票）：段/门声明、拓扑导出面、闸判词与 blocked 契约、注册面。
 
 覆盖口径（=宿主定案 devlane-lite §4.1 的可机械判面）：
-  A. 段声明与「不含被排除段」：LIGHT STAGES 恰为六段（create_plan/implement/
-     ui_evidence/run_integration_tests/merge_check/merge），审方案 / 集测设计 / 仲裁 /
-     验收走查四段**不在表内**（这是轻道的定义面，不是实现细节）；段级 kind 投影与
-     人门标记正确；ui_evidence 是条件段（可空）。
+  A. 段声明与「不含被排除段」：LIGHT STAGES 恰为四段（implement/run_integration_tests/
+     merge_check/merge）——**首段=implement**。审方案 / 集测设计 / 仲裁 / 验收走查四段
+     **不在表内**，**create_plan 与 ui_evidence 也不在表内**（宿主 260930 两道裁定：
+     轻道不写方案、不产 UI 证据——段声明/派单面/时间线三处都不许出现这两段），且
+     create_plan 同时**不在可返工目标**里；段级 kind 投影与人门标记正确；
+     **无条件段**（拓扑 optional 注记必须为空）。
   B. 拓扑导出面一致性锁：template_topology light-lane 节点逐字段（label/role/kind/
      parts/optional）等于 STAGES 投影，边=纯线性链，无并行组——「STAGES 改了不改导出面，
      此处必红」；并带变异自证（锁有牙）。
@@ -18,7 +20,10 @@
      老回执缺复用块=如实记 absent。
   F. rework 词表：轻道没有的段（arbitrate/review_plan/…）→ 显式拒收 + refused 记录；
      合法目标 → 落点相位与 meta 记账。
-  G. 注册面与 SDK 定义：workflows_v2 两表各含轻道；shared 两表/段门表按 (模板, 段) 键
+  G. 出路改写（宿主 260930）：`write_set_missing` 的共享出路提示指向 create_plan，轻道
+     在**自己的阻断面收敛点**改写它（不碰 path_gates 共享串）——轻道票面不含 create_plan
+     （正向），dev-lane 的提示**逐字等于改前**（负向锁，字面量断言）。
+  H. 注册面与 SDK 定义：workflows_v2 两表各含轻道；shared 两表/段门表按 (模板, 段) 键
      含轻道机器闸；`@workflow.defn` 门（本类显式重新装饰）后类型名=类名、run=自己那份、
      信号/查询/更新继承自 dev-lane；**父类定义一字不动**；yaml 快照在册且过子集解析。
 
@@ -43,6 +48,7 @@ sys.path.insert(0, str(POC))
 
 import dev_lane  # noqa: E402
 import light_lane  # noqa: E402
+import path_gates  # noqa: E402
 import shared  # noqa: E402
 import template_topology as tt  # noqa: E402
 
@@ -119,20 +125,19 @@ def _ir_red(names, **kw):
 
 def test_stage_declaration_is_the_short_walk():
     ids = [s.id for s in light_lane.LightLaneWorkflow.STAGES]
-    assert ids == ["create_plan", "implement", "ui_evidence", "run_integration_tests",
-                   "merge_check", "merge"]
-    for gone in EXCLUDED_STAGES:
+    assert ids == ["implement", "run_integration_tests", "merge_check", "merge"]
+    for gone in list(EXCLUDED_STAGES) + ["create_plan", "ui_evidence"]:
         assert gone not in ids, "轻道段链不得含被排除段 %s" % gone
-    # 首段=建票推导取 role 的那一段（client.py/ticket.py 的 stage0 消费面）
-    assert light_lane.LightLaneWorkflow.STAGES[0].id == "create_plan"
+    # 首段=建票推导取 role 的那一段（client.py/ticket.py 的 stage0 消费面）——
+    # 宿主 260930 删 create_plan 后首段就是 implement（role 仍是 developer：建票面
+    # 的 stage0.role 推导因此不变）
+    assert light_lane.LightLaneWorkflow.STAGES[0].id == "implement"
     assert light_lane.LightLaneWorkflow.STAGES[0].role == "developer"
 
 
 def test_stage_kinds_roles_and_human_marker():
     by_id = {s.id: s for s in light_lane.LightLaneWorkflow.STAGES}
-    assert by_id["create_plan"].kind == "agent" and by_id["create_plan"].role == "developer"
     assert by_id["implement"].kind == "agent" and by_id["implement"].role == "developer"
-    assert by_id["ui_evidence"].kind == "agent" and by_id["ui_evidence"].role == "developer"
     assert by_id["run_integration_tests"].kind == "gate"
     assert by_id["merge_check"].kind == "gate"
     assert by_id["merge"].kind == "human"
@@ -176,6 +181,63 @@ def test_human_gate_is_only_merge():
     assert humans == ["merge"], "轻道唯一人门=merge"
 
 
+def test_ui_evidence_is_absent_everywhere_in_the_lane():
+    """宿主 260930 裁定：**任何轻道票都不跑 ui_evidence**。
+
+    三处负断言（声明面/拓扑面/源码面）+ 段序自洽（implement 的下一段就是机器闸）：
+    段链里没有它、拓扑里没有它（连 optional 注记都不许有）、源码里不声明也不接线。"""
+    ids = [st.id for st in light_lane.LightLaneWorkflow.STAGES]
+    assert "ui_evidence" not in ids
+    impl = next(st for st in light_lane.LightLaneWorkflow.STAGES if st.id == "implement")
+    assert impl.next == "run_integration_tests", \
+        "implement 的下一段必须是机器闸（ui_evidence 段已被裁定删除）"
+    topo = tt.export_template_topology("light-lane")
+    assert "ui_evidence" not in {n["id"] for n in topo["nodes"]}
+    src = _light_src()
+    assert 'Stage(id="ui_evidence"' not in src
+    assert "_ui_evidence_step()" not in src
+
+
+def test_ui_surface_change_is_named_and_actionable_at_merge_check():
+    """轻道不产 UI 证据的**连带后果**必须具名且可行动：
+
+    merge_check 的 3.6 UI 证据闸（reason_code=ui_evidence_missing）是模板无关的**全车道
+    纪律**——改到 UI 路径的轻道票会被它挡住。阻断文案必须：①点名这是全车道纪律；
+    ②说明轻道不产截图（结构性不可满足，不许把「补截图」当轻道出路）；③给可行动出路=
+    另开全车道票 / 人裁定豁免；④带上命中的 UI 文件清单。"""
+    wf = _mk_wf()
+    mc = SimpleNamespace(
+        green=False, error="",
+        checks=[{"item": "泳道分支有 commit", "green": True},
+                {"item": "UI 截图证据（.sandbar/screenshots/）", "green": False,
+                 "id": "ui_evidence", "reason_code": light_lane.LightLaneWorkflow.UI_EVIDENCE_RED,
+                 "detail": "命中 2 个 UI 路径", "files": ["server/plugins/workbench/src/client/a.ts",
+                                                          "server/plugins/workbench/src/client/b.ts"],
+                 "next_action": "泳道内产出截图证据（server/ui-check/capture.mjs）后发 retry_qc"}],
+        conflict=False, conflict_files=[])
+    text = wf._light_merge_blocked_text(mc, "UI 截图证据（.sandbar/screenshots/）: 命中 2 个 UI 路径")
+    assert light_lane.LightLaneWorkflow.UI_EVIDENCE_RED == "ui_evidence_missing"
+    assert "ui_evidence_missing" in text
+    assert "full-lane discipline" in text and "template-independent" in text
+    assert "The light lane does not produce UI evidence" in text
+    assert "open a full-lane ticket (template dev-lane)" in text
+    assert "human rule an exemption" in text
+    assert "server/plugins/workbench/src/client/a.ts" in text
+    assert "do not expect retry_qc to clear this item" in text
+    # 英文面判定只落**轻道自产那一段**：回执逐条红里的 item/detail 是 merge_check 的既有
+    # 引擎数据（中文，属「数据不译」），原样透传不算票面文案漂移。
+    assert not _has_cjk(text.split("UI-surface change detected", 1)[1]), \
+        "轻道自产的 UI 闸专段必须英文"
+    # 非 UI 红的常规文案不变（专段只在命中该 reason_code 时出现）
+    mc2 = SimpleNamespace(green=False, error="",
+                          checks=[{"item": "工作区干净（无未提交改动）", "green": False,
+                                   "reason_code": "merge_dirty", "files": ["x.py"]}],
+                          conflict=False, conflict_files=[])
+    text2 = wf._light_merge_blocked_text(mc2, "工作区干净（无未提交改动）: 红")
+    assert "UI-surface change detected" not in text2
+    assert "Merge check is red" in text2 and "retry_qc" in text2
+
+
 # ======================================================================
 # B. 拓扑导出面一致性锁（+ 变异自证）
 # ======================================================================
@@ -203,9 +265,11 @@ def test_topology_lock_against_stages():
     assert topo is not None and topo["template"] == "light-lane"
     assert topo["version"] == tt.CONTRACT_VERSION
     assert _lock_problems(topo["nodes"], light_lane.LightLaneWorkflow.STAGES) == []
-    # 条件段：仅 ui_evidence
+    # 宿主 260930：轻道**无条件段**——拓扑里不得有 ui_evidence 幽灵节点，也不得有
+    # 任何 optional 注记
     optional = {n["id"]: n["optional"] for n in topo["nodes"] if n.get("optional")}
-    assert optional == {"ui_evidence": tt.OPT_UI_TICKETS}
+    assert optional == {}, "轻道拓扑不得带条件段注记（实得 %r）" % optional
+    assert "ui_evidence" not in {n["id"] for n in topo["nodes"]}
     # 轻道无并行分叉：组为空、边=纯线性链
     assert topo["groups"] == []
     ids = [s.id for s in light_lane.LightLaneWorkflow.STAGES]
@@ -227,11 +291,11 @@ def test_topology_lock_has_teeth():
     assert _lock_problems(mut_name, stages) != []
 
     mut_kind = [dict(n) for n in ok]
-    mut_kind[4]["kind"] = tt.KIND_AGENT
+    mut_kind[3]["kind"] = tt.KIND_AGENT
     assert _lock_problems(mut_kind, stages) != []
 
     mut_parts = [dict(n) for n in ok]
-    mut_parts[2]["parts"] = []
+    mut_parts[1]["parts"] = []
     assert _lock_problems(mut_parts, stages) != []
 
     swapped = [dict(n) for n in ok]
@@ -245,10 +309,11 @@ def test_topology_lock_has_teeth():
 
 
 def test_excluded_stages_absent_from_stage_graph():
-    """被排除段在**声明面与拓扑面**都不存在（控制台泳道图由拓扑推导）。"""
+    """被排除段（含 ui_evidence——宿主 260930 裁定轻道不产 UI 证据）在**声明面与拓扑面**
+    都不存在（控制台泳道图由拓扑推导）。"""
     topo = tt.export_template_topology("light-lane")
     node_ids = {n["id"] for n in topo["nodes"]}
-    for gone in EXCLUDED_STAGES:
+    for gone in list(EXCLUDED_STAGES) + ["create_plan", "ui_evidence"]:
         assert gone not in node_ids
     # dev-lane 那一面不受影响（零行为变化锚）
     dev = tt.export_template_topology("dev-lane")
@@ -268,7 +333,10 @@ def test_reuse_source_locks():
     src = _light_src()
     # 工作空间准备 / UI 证据：走 dev-lane 的共用 helper（不自己再写一遍）
     assert "await self._prepare_workspace_step()" in src
-    assert "await self._ui_evidence_step()" in src
+    assert "_ui_evidence_step()" not in src, "轻道不产 UI 证据：不得调截图 helper"
+    assert 'Stage(id="ui_evidence"' not in src, "轻道不得声明 ui_evidence 段"
+    assert "UiEvidenceArgs(" not in src and "prepare_ui_evidence" not in src, \
+        "轻道不得接线截图活动/入参（UI 面改动走全车道）"
     assert "lane_workspace_gate_error(" not in src, "工作空间准备体不得重抄"
     assert "UiChangedPathsArgs(" not in src, "UI 票判定体不得重抄"
     assert "prepare_ui_evidence," not in src, "UI 证据活动不得在轻道里重复接线"
@@ -289,8 +357,9 @@ def test_reuse_agent_step_template_is_parent_method():
     assert light_lane.LightLaneWorkflow._run_agent_step is dev_lane.DevLaneWorkflow._run_agent_step
     assert light_lane.LightLaneWorkflow._prepare_workspace_step \
         is dev_lane.DevLaneWorkflow._prepare_workspace_step
-    assert light_lane.LightLaneWorkflow._ui_evidence_step \
-        is dev_lane.DevLaneWorkflow._ui_evidence_step
+    # 宿主 260930：轻道不产 UI 证据——UI 证据 helper 仍留给 dev-lane（那里照旧），
+    # 但轻道不调；这里是「谁负责产证据」的分工锚
+    assert hasattr(dev_lane.DevLaneWorkflow, "_ui_evidence_step")
     assert light_lane.LightLaneWorkflow._blocked is dev_lane.DevLaneWorkflow._blocked
     assert light_lane.LightLaneWorkflow.snapshot is dev_lane.DevLaneWorkflow.snapshot
     # 段补述来源被轻道覆写（自己的补述表），dev-lane 那份不动
@@ -299,13 +368,42 @@ def test_reuse_agent_step_template_is_parent_method():
 
 
 def test_light_flow_brief_reuses_discipline_clauses():
-    """段补述=轻道前缀 + dev-lane 同段正文（纪律条文同源，绝不各写一份）。"""
-    for sid in ("create_plan", "implement"):
-        assert light_lane.LIGHT_FLOW_BRIEF[sid].startswith(light_lane.LIGHT_LANE_PRELUDE)
-        assert dev_lane.FLOW_BRIEF[sid] in light_lane.LIGHT_FLOW_BRIEF[sid]
-    # 轻道契约句点名「没有」的四段（免得 agent 等一个不存在的段）
-    for gone in ("方案复审", "集测设计", "仲裁", "验收走查"):
+    """段补述=轻道前缀 + dev-lane 同段正文（纪律条文同源，绝不各写一份）。
+
+    轻道唯一 agent 段=implement（宿主 260930 删 create_plan）：补述表里**只能有
+    implement**——多出 create_plan 键就等于给一个不存在的段备了文案。"""
+    assert set(light_lane.LIGHT_FLOW_BRIEF) == {"implement"}
+    sid = "implement"
+    assert light_lane.LIGHT_FLOW_BRIEF[sid].startswith(light_lane.LIGHT_LANE_PRELUDE)
+    assert dev_lane.FLOW_BRIEF[sid] in light_lane.LIGHT_FLOW_BRIEF[sid]
+    # 轻道契约句点名「没有」的那几段（免得 agent 等一个不存在的段）
+    for gone in ("方案段", "方案复审", "集测设计", "仲裁", "验收走查", "UI 证据"):
         assert gone in light_lane.LIGHT_LANE_PRELUDE
+
+
+def test_create_plan_is_gone_and_not_a_rework_target():
+    """宿主 260930：轻道删 create_plan 段——段链/补述/可返工目标三处一起摘干净，
+    且打回它必须**具名拒收**（不静默、不落到未知相位）。"""
+    ids = [st.id for st in light_lane.LightLaneWorkflow.STAGES]
+    assert "create_plan" not in ids
+    assert "create_plan" not in light_lane.LIGHT_FLOW_BRIEF
+    assert "create_plan" not in light_lane.LIGHT_REWORK_TARGETS
+    src = _light_src()
+    assert 'Stage(id="create_plan"' not in src
+    assert '"_light_agent_step("create_plan"' not in src
+    assert "_refresh_write_set_after_plan()" not in src, \
+        "轻道没有方案回执可读——不得调写集随方案刷新"
+    wf = _mk_wf(meta={"stage": "implement"})
+    wf._rework = _rework_req("create_plan", note="send it back to planning")
+    landing, refusal = wf._consume_light_rework("run_integration_tests")
+    assert landing == "" and "not a light-lane stage" in refusal
+    assert "implement" in refusal and "create_plan" in refusal
+    assert wf.refused[-1]["want"] == "rework(create_plan)"
+    # 合法目标照常可打回（回落目标=首段 implement）
+    wf2 = _mk_wf(meta={"stage": "merge_check"})
+    wf2._rework = _rework_req("implement", note="repair")
+    landing2, refusal2 = wf2._consume_light_rework("merge_check")
+    assert landing2 == "implement" and refusal2 == ""
 
 
 # ======================================================================
@@ -487,7 +585,7 @@ def _rework_req(target, note="n", who="human"):
 
 def test_rework_rejects_stages_this_lane_does_not_have():
     wf = _mk_wf()
-    for gone in ("review_plan", "design_integration_tests", "arbitrate",
+    for gone in ("create_plan", "review_plan", "design_integration_tests", "arbitrate",
                  "acceptance_walkthrough"):
         wf._rework = _rework_req(gone)
         landing, refusal = wf._consume_light_rework("run_integration_tests")
@@ -509,6 +607,104 @@ def test_rework_admits_light_stages_and_records_landing():
     assert wf.meta["last_rework_note"] == "repair the reds"
     assert wf.meta["status"] == "rework"
     assert wf.timeline and wf.timeline[-1]["stage"] == "implement"
+
+
+# ======================================================================
+# G. 出路改写：轻道票面不含 create_plan；dev-lane 逐字不变
+# ======================================================================
+
+#: 改前原文（真源=server/engine/path_gates.py `_NEXT_ACTION_HINTS["write_set_missing"]`，
+#: 字面量照抄）。dev-lane 的负向锁就钉在这串字上：**它一个字都不许变**。
+DEV_LANE_WRITE_SET_HINT_BEFORE = "工单写集为空/缺失——回 create_plan 补结构化回执后再实现"
+
+
+def _gate_refusal_res(reason_code="write_set_missing", next_action=None):
+    """闸拒绝回执壳（字段形状照 path_gates.gate_red_detail 的产出）。"""
+    return SimpleNamespace(
+        status="failed",
+        summary="阶段路径闸拒绝落盘（path_gate_reason=write_set_missing）：段 implement 无写集可判",
+        gate_refusal={"check_id": "path_gate@implement", "item": "段×允许面路径闸",
+                      "red": True, "reason_code": reason_code,
+                      "files": ["LIGHT_LANE_PROBE.md"],
+                      "next_action": next_action or path_gates.next_action_hint(reason_code)},
+        evidence="", files_changed=[], deliverables=[])
+
+
+def _dev_lane_shell():
+    """dev-lane 壳（验「共享串没被动」用；不跑 __init__）。"""
+    dev_lane.workflow = SimpleNamespace(
+        patched=lambda pid: True, now=lambda: NOW_DT,
+        logger=SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None,
+                               warn=lambda *a, **k: None),
+        wait_condition=_wake_immediately)
+    wf = object.__new__(dev_lane.DevLaneWorkflow)
+    wf.meta = {"blocked_detail": None}
+    wf.ticket_id = "t-ut-dev"
+    wf._detail_face_on = True
+    return wf
+
+
+def test_shared_hint_is_untouched_and_dev_lane_face_is_verbatim():
+    """负向锁：共享提示串与 dev-lane 票面**逐字等于改前**（这条裁定只对轻道生效）。"""
+    assert path_gates._NEXT_ACTION_HINTS["write_set_missing"] == DEV_LANE_WRITE_SET_HINT_BEFORE
+    assert path_gates.next_action_hint("write_set_missing") == DEV_LANE_WRITE_SET_HINT_BEFORE
+    wf = _dev_lane_shell()
+    dev_lane.DevLaneWorkflow._pin_agent_refusal(wf, _gate_refusal_res())
+    d = wf.meta["blocked_detail"]
+    assert d["next_action"] == DEV_LANE_WRITE_SET_HINT_BEFORE, \
+        "dev-lane 的出路提示被改动（应逐字不变）"
+    assert "next_action_rewritten_from" not in d
+
+
+def test_light_lane_face_does_not_point_at_create_plan():
+    """正向要求：轻道票在 write_set_missing 红上的出路**不含** create_plan。"""
+    wf = _mk_wf(meta={"blocked_detail": None, "stage": "implement"})
+    wf._pin_agent_refusal(_gate_refusal_res())
+    d = wf.meta["blocked_detail"]
+    assert "create_plan" not in str(d.get("next_action") or "")
+    assert d["next_action"] == light_lane.LIGHT_NEUTRAL_NEXT_ACTION
+    assert d["next_action_rewritten_from"] == DEV_LANE_WRITE_SET_HINT_BEFORE, \
+        "改写原文必须留痕（不静默丢）"
+    assert d["reason_code"] == "write_set_missing" and d["files"] == ["LIGHT_LANE_PROBE.md"]
+    # 幂等：再跑一次不叠加、不换新文
+    wf._pin_agent_refusal(_gate_refusal_res())
+    assert wf.meta["blocked_detail"]["next_action"] == light_lane.LIGHT_NEUTRAL_NEXT_ACTION
+    # 与该 reason_code 无关的出路一字不动
+    wf2 = _mk_wf(meta={"blocked_detail": None})
+    wf2._pin_agent_refusal(_gate_refusal_res("protected_path"))
+    na2 = wf2.meta["blocked_detail"]["next_action"]
+    assert na2 == path_gates.next_action_hint("protected_path") and "create_plan" not in na2
+
+
+def test_light_lane_merge_red_hint_is_rewritten_too():
+    """merge_check 红的结构化出路（顶层 + 逐条 reds）同样改写；非 create_plan 的不动。"""
+    wf = _mk_wf(meta={"blocked_detail": None})
+    checks = [
+        {"id": "ui_evidence", "item": "UI 截图证据", "green": False, "detail": "缺证据",
+         "reason_code": "ui_evidence_missing", "next_action": "泳道内产出截图证据后发 retry_qc"},
+        {"id": "path_gate", "item": "段×允许面路径闸", "green": False, "detail": "写集缺失",
+         "reason_code": "write_set_missing", "files": ["a.md"],
+         "next_action": path_gates.next_action_hint("write_set_missing")},
+        {"item": "泳道分支有 commit", "green": True},
+    ]
+    wf._pin_merge_red_detail(checks, None, disposition="light lane")
+    d = wf.meta["blocked_detail"]
+    assert "create_plan" not in str(d.get("next_action") or "")
+    # 出路文案（现行字段）不许含 create_plan；留痕键 next_action_rewritten_from 是**审计面**，
+    # 它必须保留原文（否则改写就成了静默丢证据）
+    for r in (d.get("reds") or []):
+        assert "create_plan" not in str(r.get("next_action") or ""), r.get("check_id")
+    assert any("create_plan" in str(r.get("next_action_rewritten_from") or "")
+               for r in (d.get("reds") or [])), "改写原文未留痕"
+    reds = {r["check_id"]: r for r in (d.get("reds") or [])}
+    assert reds["path_gate"]["next_action"] == light_lane.LIGHT_NEUTRAL_NEXT_ACTION
+    assert reds["path_gate"]["next_action_rewritten_from"] == DEV_LANE_WRITE_SET_HINT_BEFORE
+    assert reds["ui_evidence"]["next_action"] == "泳道内产出截图证据后发 retry_qc"
+    # merge_check 阻断文案（文本面）同样不带 create_plan
+    text = wf._light_merge_blocked_text(
+        SimpleNamespace(checks=checks, error="", conflict=False, conflict_files=[]),
+        "; ".join("%s: %s" % (c.get("item"), c.get("detail")) for c in checks if not c.get("green")))
+    assert "create_plan" not in text
 
 
 # ======================================================================
