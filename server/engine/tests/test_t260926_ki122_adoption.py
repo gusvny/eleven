@@ -103,9 +103,44 @@ SAMPLE_BOOKED = _SAMPLE["booked"]
 SAMPLE_ISOLATED = _SAMPLE["isolated"]
 #: 语义类用例的闸拦夹具（自造 roster，见上面取材纪律）：两条在同册的既有欠账名。
 REAL_BLOCKERS = ["t260926-05-incident-blocker-a", "t260926-05-incident-blocker-b"]
-#: 时间证据用例的基点：取真名册最晚戳的**次日**（严格晚于＝「早于本票基点」成立）。
-BASE_AFTER = "2026-09-30T00:00:00+00:00"
-BASE_BEFORE = "2026-09-01T00:00:00+00:00"
+
+
+def _stamp_dt(iso):
+    """名册戳 → 带时区 datetime（naive/畸形一律 fail：本文件不猜时区）。"""
+    from datetime import datetime
+    dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    assert dt.tzinfo is not None, "名册戳必须带时区（naive 不猜）：%r" % (iso,)
+    return dt
+
+
+def _base_point(entries, days):
+    """时间证据用例的基点 = 真名册**极值戳 ± N 日**，**动态推导**。
+
+    260930 实案（宿主直修令，main 直改不开票）：基点原先是写死的字面量
+    （`BASE_AFTER="2026-09-30T00:00:00+00:00"`，写下时=当时最晚戳的次日）。挂账册只增不改戳
+    ——新登一批存量红，最晚戳就前移，于是「戳晚于基点」在**全部**语义类夹具上同时成立，
+    6 条用例一起碎（真因藏在 `booked-after-base` 的判词里，读起来像判据坏了，其实是夹具基点
+    过期）。修法同 260929 那条取材纪律：凡与名册内容相关的量一律**从真名册推导**，不写字面量。
+    `days=+1` → 严格晚于全部戳（时间证据成立的基点）；`days=-1` → 严格早于全部戳（不成立的基点）。"""
+    from datetime import timedelta, timezone
+    stamps = [_stamp_dt(e["booked_at"]) for e in entries.values() if e.get("booked_at")]
+    assert stamps, "名册里没有任何带 booked_at 的条目（形状异常）"
+    fn = max if days > 0 else min
+    # 归一成 **UTC + 秒精度**：与引擎把基点呈现进审计锚的形式同形（`base_iso`），
+    # 否则「基点具名进票面」那条断言会因为同一个时刻换了写法而假红。
+    return (fn(stamps) + timedelta(days=days)).astimezone(timezone.utc).isoformat(
+        timespec="seconds")
+
+
+#: 时间证据用例的基点（严格晚于 / 早于真名册全部戳，见 `_base_point`）。
+BASE_AFTER = _base_point(_REAL_ENTRIES, 1)
+BASE_BEFORE = _base_point(_REAL_ENTRIES, -1)
+#: 推导结果的**自证锁**：基点必须真的落在全部戳的外侧——推导逻辑被改坏时这条立刻响，
+#: 而不是让 6 条语义用例以「判据坏了」的样子碎掉。
+assert _stamp_dt(BASE_AFTER) > max(_stamp_dt(e["booked_at"]) for e in _REAL_ENTRIES.values()
+                                   if e.get("booked_at"))
+assert _stamp_dt(BASE_BEFORE) < min(_stamp_dt(e["booked_at"]) for e in _REAL_ENTRIES.values()
+                                    if e.get("booked_at"))
 
 
 def _semantic_roster(verdicts=("booked", "booked")):
