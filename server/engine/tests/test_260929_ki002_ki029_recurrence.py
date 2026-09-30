@@ -14,6 +14,7 @@
       server/engine/tests/test_260929_ki002_ki029_recurrence.py -q
 """
 import ast
+import json
 import sys
 from pathlib import Path
 
@@ -62,12 +63,137 @@ def test_explicit_values_win_and_missing_values_fall_back():
     assert aa.effective_max_polls(C()) == 50
 
 
-def test_all_three_guards_use_the_single_helper():
+def test_all_three_stages_route_through_the_single_poll_helper():
+    """t261001-03：轮询循环三份逐字副本合一（_wait_for_agent_result）。
+
+    反证锚：修复前的代码里没有 _wait_for_agent_result 这个名字，且旧守卫
+    "if polls >= effective_max_polls(args):" 恰好出现 3 次 —— 本用例对修复前
+    源码为红（守卫计数断言失败），对修复后源码为绿。"""
+    import re
     src = Path(aa.__file__).read_text("utf-8")
-    assert src.count("if polls >= effective_max_polls(args):") == 3, \
-        "三处守卫（通用步/arbitrate/acceptance_walkthrough）都必须走单点兜底"
+    assert src.count("async def _wait_for_agent_result(") == 1, \
+        "轮询循环的实现必须恰有一份（复制=KI-002/KI-029 族修复漏改一处的温床）"
+    assert len(re.findall(r"await _wait_for_agent_result\(", src)) == 3, \
+        "三站（通用步/arbitrate/acceptance_walkthrough）都必须改走共享 helper"
+    assert src.count("if polls >= effective_max_polls(args):") == 1, \
+        "KI-002 上限守卫只住在共享 helper 里（旧三副本不许复活）"
     assert "if args.max_polls and polls >= args.max_polls:" not in src, \
         "旧的死分支（恒 0 ⇒ 恒不进入）不许复活"
+    # cap 仍逐段生效：各段超时文案自我点名（措辞逐字锁现状）
+    for wording in ("等结果文件超时（%d 次轮询 × %ds）：%s",
+                    "等仲裁结果超时（%d 轮询）：%s",
+                    "等验收报告超时（%d 轮询）：%s"):
+        assert wording in src, "段名超时文案漂移：%r" % wording
+
+
+class _FakeActivity:
+    beats = []
+
+    def heartbeat(self, payload):
+        self.beats.append(json.loads(payload))
+
+
+class _FakeProc:
+    def __init__(self):
+        self.reaped = []
+        self.rc = None
+
+    def poll(self):
+        return self.rc
+
+    def reap(self, *a):
+        self.reaped.append(a)
+
+
+def _stage_args(max_polls=3):
+    from types import SimpleNamespace
+    return SimpleNamespace(max_polls=max_polls, gen=1,
+                           ticket_id="t261001-03", log_file="")
+
+
+@pytest.fixture()
+def poll_env(monkeypatch):
+    """共享 helper 的行为级夹具：假 activity（心跳入账）+ 真 asyncio 睡 0 秒。"""
+    monkeypatch.setattr(aa, "activity", _FakeActivity())
+    monkeypatch.setattr(aa, "POLL_SEC", 0)
+    _FakeActivity.beats = []          # 类级入账，逐用例清零
+    return _FakeProc()
+
+
+@pytest.mark.parametrize("label,gone,wording", [
+    ("stage_impl", "headless", "等结果文件超时"),
+    ("arbitrate", "arbitrate", "等仲裁结果超时"),
+    ("acceptance_walkthrough", "acceptance", "等验收报告超时"),
+])
+def test_cap_fires_per_stage_through_the_shared_helper(poll_env, tmp_path,
+                                                       label, gone, wording):
+    """KI-002 复发杆的行为面：三站共享 helper 下，上限仍逐段触发且超时文案点名段名。"""
+    import asyncio
+    proc = poll_env
+    rfile = tmp_path / "result.json"          # 永不就绪
+    args = _stage_args(max_polls=3)
+
+    async def _run():
+        return await aa._wait_for_agent_result(
+            args, rfile, proc, {}, tmp_path, label, gone,
+            lambda r: r,
+            lambda polls: "%s（%d 轮询）" % (wording, polls))
+
+    with pytest.raises(RuntimeError) as ei:
+        asyncio.run(_run())
+    assert wording in str(ei.value)
+    assert proc.reaped == [(args.ticket_id, label)], \
+        "超时路径 finally 兜底 reap 必须在位（失败路径也收尸）"
+    beats = _FakeActivity.beats
+    assert [b["stage"] for b in beats] == [label] * 3
+    assert [b["polls"] for b in beats] == [0, 1, 2]
+    for b in beats:
+        assert set(b) == {"stage", "gen", "polls", "session_kb"}, \
+            "心跳 payload 键不许漂移"
+
+
+def test_shared_helper_settles_through_on_result(poll_env, tmp_path):
+    """结果文件就绪 → on_result 处理链 → 返回值即回执（成功路径 reap 在链内）。"""
+    import asyncio
+    proc = poll_env
+    rfile = tmp_path / "result.json"
+    rfile.write_text(json.dumps({
+        "status": "ok", "summary": "s", "report": "r",
+        "deliverables": [], "files_changed": []}), "utf-8")
+    args = _stage_args(max_polls=3)
+    touched = []
+
+    def _on_result(res):
+        touched.append(res.status)
+        proc.reap(args.ticket_id, "stage_impl")
+        return res
+
+    out = asyncio.run(aa._wait_for_agent_result(
+        args, rfile, proc, {}, tmp_path, "stage_impl", "headless",
+        _on_result, lambda polls: "t"))
+    assert out.status == "ok" and touched == ["ok"]
+    assert proc.reaped == [(args.ticket_id, "stage_impl")] * 2, \
+        "结果就绪路径：reap 发生在 on_result 链内（settle 前收尸，KI-009），finally 对已收尸 proc 幂等"
+
+
+def test_shared_helper_raises_named_when_proc_exits_without_result(poll_env, tmp_path):
+    """进程先退出且无结果文件 → raise（点名 where 标签），先 reap 再 raise，finally 二次 reap。"""
+    import asyncio
+    proc = poll_env
+    proc.rc = 7
+    args = _stage_args(max_polls=3)
+    # wedge 隔离面不属本票（t260922-11 自有复发杆）——此处静默桩掉，只看退出路径序
+    import unittest.mock as um
+    with um.patch.object(aa, "_wedge_quarantine_once", lambda *a, **k: None):
+        async def _run():
+            return await aa._wait_for_agent_result(
+                args, tmp_path / "missing.json", proc, {}, tmp_path,
+                "arbitrate", "arbitrate", lambda r: r, lambda polls: "t")
+
+        with pytest.raises(RuntimeError) as ei:
+            asyncio.run(_run())
+    assert "arbitrate" in str(ei.value) and "7" in str(ei.value)
+    assert proc.reaped == [("t261001-03", "arbitrate")] * 2
 
 
 def test_shared_comment_points_at_a_real_constant():

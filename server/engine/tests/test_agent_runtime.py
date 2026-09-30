@@ -371,16 +371,16 @@ def test_agent_activities_接线守卫():
     assert src.count("agent_runtime.spawn_agent(") == 5
     assert "subprocess.Popen(cmd" not in src
     assert "_reap_agent_proc(proc," not in src   # 调用形态清零（定义行签名不算）
-    assert src.count("proc.reap(") == 15         # 8+4（t260922-11 撕裂点名自动隔离：
-                                                 # 主面/arbitrate/acceptance/inspect 四处
-                                                 # 失败分支各加一处「先收尸再动档」的
-                                                 # 检疫前置 reap——隔离前排干晚写者，
-                                                 # 防 move 与活写者竞态；四处各自的既有
-                                                 # finally 兜底 reap（inspect 面为超时
-                                                 # 分支 reap）保持不变、不在本 +4 内）
-                                                 # +3（t260925-01 produce 段：超时分支/
-                                                 # 退出码分支/finally 兜底三处 reap，
-                                                 # KI-009 组粒度同纪律）
+    assert src.count("proc.reap(") == 11         # t261001-03：三站轮询循环合一（共享
+                                                 # helper _wait_for_agent_result）后由
+                                                 # 15 收敛到 11——通用步/arbitrate/
+                                                 # acceptance 各失去「rc 分支前置 reap +
+                                                 # finally 兜底 reap」各 2 处（搬进
+                                                 # helper，全站共用一份），各自保留
+                                                 # 「结果就绪路径 reap」（settle 前排干
+                                                 # 晚写者，KI-009）；inspect/produce 面
+                                                 # 7 处不动（t260922-11 检疫前置 reap 的
+                                                 # 语义随 helper 内「先收尸再动档」保留）
     assert "agent_runtime.sandbox_pin_yaml()" in src
     assert src.count("agent_runtime.remove_container(") == 2   # teardown_lane + 内联清理
     assert "agent_runtime.gc_stale_containers(" in src          # prepare_workspace 扫尾

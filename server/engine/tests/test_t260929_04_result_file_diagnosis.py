@@ -68,7 +68,12 @@ def test_detail_words_torn_as_unreadable_with_way_out(tmp_path):
 
 
 def test_three_sites_share_one_source(tmp_path):
-    """三处 raise（headless/arbitrate/acceptance）共用同一真源——不许各写一份文案。"""
+    """三处 raise（headless/arbitrate/acceptance）共用同一真源——不许各写一份文案。
+
+    t261001-03：三站轮询循环合一（_wait_for_agent_result）后，「调用 3」收敛为
+    helper 内调用 1——三站经由共享 helper 间接共用同一真源，锁语义不变。"""
     src = (Path(aa.__file__)).read_text("utf-8")
-    assert src.count("_result_gone_detail(") == 4, "定义 1 + 调用 3"
+    assert src.count("_result_gone_detail(") == 2, "定义 1 + helper 调用 1"
+    assert src.count("await _wait_for_agent_result(") == 3, \
+        "三站都必须改走共享 helper（否则即有站外泄自己的失败文案）"
     assert "但未写结果文件 %s（日志 %s）\"\n                          % (rc, rfile, args.log_file)" not in src

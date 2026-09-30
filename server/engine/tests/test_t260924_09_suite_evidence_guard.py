@@ -365,13 +365,16 @@ class TestPromptSync:
         assert "口径含非法 token" in v2[0]["detail"] and "裸全量" not in v2[0]["detail"]
 
     def test_hook_source_lock(self):
-        """挂点源码锁：双返回点都以赋值形链「执法 → 取证护栏」（赋值形=
-        L3 场景 G1 接线观测口径 `=\\s*_apply_suite_budget\\(`），防止后续改动
-        只留一处挂点（缓存命中路径漏执法）。"""
+        """挂点源码锁：真 spawn 返回点以赋值/返回形链「执法 → 取证护栏」，防止
+        后续改动漏挂（缓存命中路径漏执法）。"""
         src = Path(aa.__file__).read_text("utf-8")
         assert src.count("def _apply_suite_budget(") == 1
-        assert src.count("res = _apply_suite_budget(") == 2, \
-            "取证护栏必须挂满双返回点（缓存命中+真 spawn）"
+        # t261001-03：真 spawn 返回点随轮询循环合一改走「return _apply_suite_budget(
+        # …)」形——挂点仍在真 spawn 路径（_on_result），计数由 2 收敛到 1；缓存命中
+        # 路径（_stub_stage_shortcut 直 return stub）不经执法面，口径不变。
+        assert src.count("res = _apply_suite_budget(") == 1
+        assert src.count("return _apply_suite_budget(") == 1, \
+            "取证护栏必须挂在真 spawn 返回点（合一后的 _on_result 链尾）"
         assert src.count("_apply_integration_discipline(") == 3  # def + 2 调用点
 
     def test_shared_field_defaults_safe(self):

@@ -161,6 +161,65 @@ def effective_max_polls(args: Any) -> int:
     except (TypeError, ValueError):
         return DEFAULT_MAX_POLLS
     return v if v > 0 else DEFAULT_MAX_POLLS
+
+
+async def _wait_for_agent_result(
+    args: AgentStageArgs, rfile: Path, proc: Any, env: Dict[str, str],
+    cwd: Path, stage_label: str, gone_label: str,
+    on_result, timeout_message) -> StageResult:
+    """结果文件轮询循环单点（t261001-03：三处逐字副本合一）。
+
+    此前 _run_agent_stage_impl / _arbitrate_body / _acceptance_walkthrough_body
+    各自手写同一循环（heartbeat → polls+1 → KI-002 上限守卫 → sleep），任何
+    KI-002/KI-029 族修复都要三处同步改，漏一处=该段静默挂死。现在循环只有这一份，
+    三个站各自只传差异：
+
+    - stage_label    心跳 payload 的 stage 键 + reap/wedge 的段名（站 1=
+      args.stage_id，站 2/3=字面 "arbitrate"/"acceptance_walkthrough"——逐字
+      保持现状）；
+    - gone_label     进程退出无结果文件时 _result_gone_detail 的 where 字段
+      （"headless"/"arbitrate"/"acceptance"，现状逐字）；
+    - on_result      结果文件就绪后的段内处理链（reap→settle→挂点链…各站不同），
+      返回值即活动回执；
+    - timeout_message(polls) → 超时文案（各段自我点名的措辞逐字不变）。
+
+    不变量（与三份旧副本逐字对齐）：心跳 payload 键 {stage,gen,polls,session_kb}；
+    进程先退出 → 先 reap 再 wedge 隔离再 raise（wedge 注记拼进 detail）；上限触发
+    raise RuntimeError（不假绿）；finally 全终态 reap（normal/error/timeout/cancel
+    四条路径都到）。"""
+    polls = 0
+    try:
+        while True:
+            if rfile.is_file():
+                res = _read_result(rfile)
+                if res is not None:
+                    return on_result(res)
+            rc = proc.poll()
+            if rc is not None:
+                # t260922-11：先收尸再动档（reap 幂等——finally 的二次 reap 无害）；
+                # 撕裂点名 → 定点隔离一次，重试=本活动既有 retry 链下一轮 attempt。
+                proc.reap(args.ticket_id, stage_label)
+                wedge_note = _wedge_quarantine_once(
+                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
+                    _log_tail(args.log_file, 20000),
+                    args.ticket_id, stage_label, args.gen, _wedge_attempt())
+                detail = _result_gone_detail(gone_label, rc, rfile, args.log_file)
+                if wedge_note:
+                    detail += "；" + wedge_note
+                raise RuntimeError(detail)
+            activity.heartbeat(json.dumps(
+                {"stage": stage_label, "gen": args.gen, "polls": polls,
+                 "session_kb": _session_kb(cwd)}))
+            polls += 1
+            if polls >= effective_max_polls(args):   # KI-002：缺省兜底由活动侧常量给
+                raise RuntimeError(timeout_message(polls))
+            await asyncio.sleep(POLL_SEC)
+    finally:
+        # KI-009: 全终态兜底 reap（组粒度）——四条退出路径（normal/error/timeout/
+        # cancel）都到；已退出进程幂等跳过。
+        proc.reap(args.ticket_id, stage_label)
+
+
 INTEG_CMD_TIMEOUT_SEC = int(os.environ.get("SANDBAR_INTEG_CMD_TIMEOUT_SEC") or 900)
 DSH_CMD = shlex.split(os.environ.get("SANDBAR_AGENT_CMD") or "dsh --profile sandbar-headless")
 # ^ 缺省别名保留（import 行为逐字节不变，坏 shlex 依旧 import 时响亮死）。运行期真实
@@ -3320,84 +3379,49 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
         stage_tag="%s_gen%d" % (args.stage_id, args.gen), project=project,
         workspace_kind=_ws_kind, lane=cwd, log=activity.logger.info)
 
-    polls = 0
-    try:
-        while True:
-            if rfile.is_file():
-                res = _read_result(rfile)
-                if res is not None:
-                    activity.logger.info("[%s/%s] 结果文件就绪：status=%s",
-                                         args.ticket_id, args.stage_id, res.status)
-                    _patch_result_prompt(rfile, args.prompt)
-                    # KI-009 (ticket t260901-25): reap before settling (full
-                    # terminal-state reaping at process-group granularity) — after
-                    # delivering the result file the agent may still be late-writing
-                    # workspace files; settle without draining them and the late
-                    # write lands after the commit = dirty workspace = a false
-                    # merge_check red (the KI-009 root cause). The drain is bounded
-                    # (terminate 15s / kill 5s); see _reap_agent_proc.
-                    proc.reap(args.ticket_id, args.stage_id)
-                    # Worker-side settling (deterministic): the agent sandbox cannot
-                    # write the real .git, so the worker backs the commit up; fake
-                    # git directories are quarantined here; skip_settle (during the
-                    # parallel fork) is handled by the single settle_lane at the join
-                    # point
-                    note = ""
-                    if not args.skip_settle:
-                        refusal2: Dict[str, Any] = {}
-                        note = _settle_with_gate(args, cwd, refusal=refusal2)
-                        _apply_settle_note(res, note, refusal=refusal2 or None)
-                    # t260917-08（M1 挂点④真 spawn）：环境信号归位（自报优先，
-                    # 日志扫描补位）。lane_dsh 预检拒绝路径（上方独立 return）
-                    # 与 stub 路径（旋钮直注）有意不挂——见 _apply_env_signal。
-                    res = _apply_env_signal(res, args.log_file,
-                                            args.ticket_id, args.stage_id)
-                    # t260922-11（挂点②真 spawn）：会话楔死自动隔离注记归位
-                    # （同挂点①；成功恢复案例的票面可见痕）。
-                    res = _apply_session_wedge_note(res, cwd,
-                                                    args.ticket_id, args.stage_id)
-                    # t260921-04（挂点②真 spawn）：developer 段集成禁跑执法扫描
-                    # ——stub 与 lane_dsh 预检拒绝路径同样有意不挂（理由与取舍
-                    # 清单见 _apply_integration_discipline docstring）。
-                    # t260924-09（挂点②真 spawn）：取证面护栏同挂点链后
-                    # （stub 与 lane_dsh 预检拒绝路径有意不挂，理由同执法 docstring）。
-                    res = _apply_suite_budget(
-                        _apply_integration_discipline(res, cwd, args), cwd, args)
-                    return res
-            rc = proc.poll()
-            if rc is not None:
-                # t260922-11：先收尸再动档（reap 幂等——finally 的二次 reap 无害，
-                # 成功路径 :2520 已有双调先例），晚写者排干后再判定/隔离。
-                proc.reap(args.ticket_id, args.stage_id)
-                # t260922-11 分歧转动作：日志含 dsh 撕裂文案 → 按 dsh 所用会话 id
-                # 定点隔离一次（挪不删，成败以存在性核验落事件）；重试=本活动既有
-                # RETRY 链的下一轮 attempt（重进时 _quarantine_torn_sessions 扫不到
-                # 已挪档 → 干净 spawn）。无命中 → wedge 返回 None，下面的 raise 逐
-                # 字节保持现状。id 主锚=env（C4）：corrupt 可来自 flush/create 期
-                # 异步抛出，日志可解析行可能整条缺席，env 锚不受影响。
-                wedge_note = _wedge_quarantine_once(
-                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
-                    _log_tail(args.log_file, 20000),
-                    args.ticket_id, args.stage_id, args.gen, _wedge_attempt())
-                # The agent process exited without writing a result file = an
-                # infrastructure / usage fault → raise so Temporal retries
-                detail = _result_gone_detail("headless", rc, rfile, args.log_file)
-                if wedge_note:
-                    detail += "；" + wedge_note
-                raise RuntimeError(detail)
-            activity.heartbeat(json.dumps(
-                {"stage": args.stage_id, "gen": args.gen, "polls": polls,
-                 "session_kb": _session_kb(cwd)}))
-            polls += 1
-            if polls >= effective_max_polls(args):   # KI-002：缺省兜底由活动侧常量给
-                raise RuntimeError(
-                    "等结果文件超时（%d 次轮询 × %ds）：%s" % (polls, POLL_SEC, rfile))
-            await asyncio.sleep(POLL_SEC)
-    finally:
-        # KI-009: the finally block escalates to full terminal-state reaping at group
-        # granularity (all four paths — normal / error / timeout / cancel — reach
-        # here; an already-exited proc is skipped idempotently)
+    def _on_result(res: StageResult) -> StageResult:
+        activity.logger.info("[%s/%s] 结果文件就绪：status=%s",
+                             args.ticket_id, args.stage_id, res.status)
+        _patch_result_prompt(rfile, args.prompt)
+        # KI-009 (ticket t260901-25): reap before settling (full
+        # terminal-state reaping at process-group granularity) — after
+        # delivering the result file the agent may still be late-writing
+        # workspace files; settle without draining them and the late
+        # write lands after the commit = dirty workspace = a false
+        # merge_check red (the KI-009 root cause). The drain is bounded
+        # (terminate 15s / kill 5s); see _reap_agent_proc.
         proc.reap(args.ticket_id, args.stage_id)
+        # Worker-side settling (deterministic): the agent sandbox cannot
+        # write the real .git, so the worker backs the commit up; fake
+        # git directories are quarantined here; skip_settle (during the
+        # parallel fork) is handled by the single settle_lane at the join
+        # point
+        if not args.skip_settle:
+            refusal2: Dict[str, Any] = {}
+            note = _settle_with_gate(args, cwd, refusal=refusal2)
+            _apply_settle_note(res, note, refusal=refusal2 or None)
+        # t260917-08（M1 挂点④真 spawn）：环境信号归位（自报优先，
+        # 日志扫描补位）。lane_dsh 预检拒绝路径（上方独立 return）
+        # 与 stub 路径（旋钮直注）有意不挂——见 _apply_env_signal。
+        res = _apply_env_signal(res, args.log_file,
+                                args.ticket_id, args.stage_id)
+        # t260922-11（挂点②真 spawn）：会话楔死自动隔离注记归位
+        # （同挂点①；成功恢复案例的票面可见痕）。
+        res = _apply_session_wedge_note(res, cwd,
+                                        args.ticket_id, args.stage_id)
+        # t260921-04（挂点②真 spawn）：developer 段集成禁跑执法扫描
+        # ——stub 与 lane_dsh 预检拒绝路径同样有意不挂（理由与取舍
+        # 清单见 _apply_integration_discipline docstring）。
+        # t260924-09（挂点②真 spawn）：取证面护栏同挂点链后
+        # （stub 与 lane_dsh 预检拒绝路径有意不挂，理由同执法 docstring）。
+        return _apply_suite_budget(
+            _apply_integration_discipline(res, cwd, args), cwd, args)
+
+    return await _wait_for_agent_result(
+        args, rfile, proc, env, cwd, args.stage_id, "headless",
+        _on_result,
+        lambda polls: "等结果文件超时（%d 次轮询 × %ds）：%s"
+                      % (polls, POLL_SEC, rfile))
 
 
 # ---- worker 停机取消：在飞注册表 + 归因守卫（t260916-29）----
@@ -8344,50 +8368,27 @@ async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
         stage_tag="arbitrate_gen%d" % args.gen, project=project,
         workspace_kind=_ws_kind_of(args.workspace), lane=cwd,
         log=activity.logger.info)  # KI-009：host 形态内部仍 start_new_session（独立进程组）
-    polls = 0
-    try:
-        while True:
-            if rfile.is_file():
-                res = _read_result(rfile)
-                if res is not None:
-                    _patch_result_prompt(rfile, args.prompt)
-                    # KI-009: reap before settling — collect the late-written files
-                    # cleanly before landing them (the source of the race window)
-                    proc.reap(args.ticket_id, "arbitrate")
-                    # In the tests-fault case the test-set iteration lands with this
-                    # step's settle (committed code assets).
-                    # Ticket t260903-02: during the parallel fork skip_settle=True skips
-                    # it (so the walkthrough edge's half-finished work is not settled
-                    # along with it); the unified settle is handled by the workflow's
-                    # single settle_lane.
-                    if not args.skip_settle:
-                        refusal4: Dict[str, Any] = {}
-                        note = _settle_with_gate(args, cwd, refusal=refusal4)
-                        _apply_settle_note(res, note, refusal=refusal4 or None)
-                    return res
-            rc = proc.poll()
-            if rc is not None:
-                # t260922-11：先收尸再动档（幂等，finally 二次 reap 无害）；撕裂
-                # 点名 → 定点隔离一次，重试=本活动既有 retry 链下一轮 attempt。
-                proc.reap(args.ticket_id, "arbitrate")
-                wedge_note = _wedge_quarantine_once(
-                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
-                    _log_tail(args.log_file, 20000),
-                    args.ticket_id, "arbitrate", args.gen, _wedge_attempt())
-                detail = _result_gone_detail("arbitrate", rc, rfile, args.log_file)
-                if wedge_note:
-                    detail += "；" + wedge_note
-                raise RuntimeError(detail)
-            activity.heartbeat(json.dumps({"stage": "arbitrate", "gen": args.gen,
-                                           "polls": polls, "session_kb": _session_kb(cwd)}))
-            polls += 1
-            if polls >= effective_max_polls(args):   # KI-002
-                raise RuntimeError("等仲裁结果超时（%d 轮询）：%s" % (polls, rfile))
-            await asyncio.sleep(POLL_SEC)
-    finally:
-        # KI-009: the backstop reap is upgraded to group granularity (the old
-        # terminate+wait+kill only reaped the direct child)
+    def _on_result(res: StageResult) -> StageResult:
+        _patch_result_prompt(rfile, args.prompt)
+        # KI-009: reap before settling — collect the late-written files
+        # cleanly before landing them (the source of the race window)
         proc.reap(args.ticket_id, "arbitrate")
+        # In the tests-fault case the test-set iteration lands with this
+        # step's settle (committed code assets).
+        # Ticket t260903-02: during the parallel fork skip_settle=True skips
+        # it (so the walkthrough edge's half-finished work is not settled
+        # along with it); the unified settle is handled by the workflow's
+        # single settle_lane.
+        if not args.skip_settle:
+            refusal4: Dict[str, Any] = {}
+            note = _settle_with_gate(args, cwd, refusal=refusal4)
+            _apply_settle_note(res, note, refusal=refusal4 or None)
+        return res
+
+    return await _wait_for_agent_result(
+        args, rfile, proc, env, cwd, "arbitrate", "arbitrate",
+        _on_result,
+        lambda polls: "等仲裁结果超时（%d 轮询）：%s" % (polls, rfile))
 
 
 # ---- doc-lifecycle ticket ② (t260905-01): the two close-out questions — a sedimentation trigger plus a reverse-sync gate ----
@@ -8696,49 +8697,24 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
         stage_tag="acceptance_gen%d" % args.gen, project=project,
         workspace_kind=_ws_kind_of(args.workspace), lane=cwd,
         log=activity.logger.info)  # KI-009：host 形态内部仍 start_new_session（独立进程组）
-    polls = 0
-    try:
-        while True:
-            if rfile.is_file():
-                res = _read_result(rfile)
-                if res is not None:
-                    # doc-lifecycle ticket ②: judge both close-out questions + register +
-                    # assemble into the receipt (both ok and failed rounds are assembled,
-                    # since a contradiction found in a bounce round is just as real a debt
-                    # entry; status is never changed — the close-out is not blocked)
-                    apply_doc_gate(res, rfile, cwd, args.ticket_id)
-                    _patch_result_prompt(rfile, args.prompt)
-                    # KI-009: reap before returning — the walkthrough report is never
-                    # booked (inside the .sandbar stance), but unexpected workspace dirt
-                    # from a late write must not be left to race a live process at
-                    # merge_check
-                    proc.reap(args.ticket_id, "acceptance_walkthrough")
-                    return res
-            rc = proc.poll()
-            if rc is not None:
-                # t260922-11：先收尸再动档（幂等，finally 二次 reap 无害）；撕裂
-                # 点名 → 定点隔离一次（id 主锚=env 的 <ticket>-acceptance，:6802
-                # 注入）；重试=本活动既有 retry 链下一轮 attempt。
-                proc.reap(args.ticket_id, "acceptance_walkthrough")
-                wedge_note = _wedge_quarantine_once(
-                    cwd / ".dsh", env.get("DSH_HEADLESS_SESSION") or "",
-                    _log_tail(args.log_file, 20000),
-                    args.ticket_id, "acceptance_walkthrough", args.gen,
-                    _wedge_attempt())
-                detail = _result_gone_detail("acceptance", rc, rfile, args.log_file)
-                if wedge_note:
-                    detail += "；" + wedge_note
-                raise RuntimeError(detail)
-            activity.heartbeat(json.dumps({"stage": "acceptance_walkthrough", "gen": args.gen,
-                                           "polls": polls, "session_kb": _session_kb(cwd)}))
-            polls += 1
-            if polls >= effective_max_polls(args):   # KI-002
-                raise RuntimeError("等验收报告超时（%d 轮询）：%s" % (polls, rfile))
-            await asyncio.sleep(POLL_SEC)
-    finally:
-        # KI-009: the backstop reap is upgraded to group granularity (the old
-        # terminate+wait+kill only reaped the direct child)
+    def _on_result(res: StageResult) -> StageResult:
+        # doc-lifecycle ticket ②: judge both close-out questions + register +
+        # assemble into the receipt (both ok and failed rounds are assembled,
+        # since a contradiction found in a bounce round is just as real a debt
+        # entry; status is never changed — the close-out is not blocked)
+        apply_doc_gate(res, rfile, cwd, args.ticket_id)
+        _patch_result_prompt(rfile, args.prompt)
+        # KI-009: reap before returning — the walkthrough report is never
+        # booked (inside the .sandbar stance), but unexpected workspace dirt
+        # from a late write must not be left to race a live process at
+        # merge_check
         proc.reap(args.ticket_id, "acceptance_walkthrough")
+        return res
+
+    return await _wait_for_agent_result(
+        args, rfile, proc, env, cwd, "acceptance_walkthrough", "acceptance",
+        _on_result,
+        lambda polls: "等验收报告超时（%d 轮询）：%s" % (polls, rfile))
 
 
 

@@ -439,25 +439,26 @@ def test_apply_wedge_note_skips_corrupt_record(tmp_path):
 
 def test_wiring_source_level_four_faces():
     """四处失败分支接线在位且序正确（reap→wedge→raise/_err）；成功注记恰挂主面
-    两 return 点；无多接少接（模块级行为由四处函数源断言合围）。"""
+    两 return 点；无多接少接（模块级行为由四处函数源断言合围）。
+
+    t261001-03：三站（通用步/arbitrate/acceptance_walkthrough）的轮询循环已合一
+    （_wait_for_agent_result），失败分支 reap→wedge→raise 序随之只住在 helper 里——
+    源级断言改为锁 helper 一份 + 三站改走 helper（逐站重复接线=该段静默漏修的温床，
+    与 KI-002 复发杆 test_260929_ki002_ki029_recurrence 同口径）。"""
+    src_helper = inspect.getsource(aa._wait_for_agent_result)
+    assert src_helper.count("_wedge_quarantine_once(") == 1
+    assert src_helper.index("if rc is not None") < \
+        src_helper.index("_wedge_quarantine_once(") < \
+        src_helper.index("_result_gone_detail(") < \
+        src_helper.index("raise RuntimeError(")
     src_main = inspect.getsource(aa._run_agent_stage_impl)
-    assert src_main.count("_wedge_quarantine_once(") == 1
+    assert src_main.count("_wedge_quarantine_once(") == 0
     assert src_main.count("_apply_session_wedge_note(") == 2    # 幂等缓存+真 spawn
-    assert src_main.count("proc.reap(args.ticket_id, args.stage_id)") == 3  # 成功+rc分支+finally
-    assert src_main.index("if rc is not None") < \
-        src_main.index("_wedge_quarantine_once(") < \
-        src_main.index("_result_gone_detail(")
-    # 锚从**报错文案**（原为 "headless agent 退出"）改成**符号**（260929）：失败面文案已抽到
-    # 共享真源 _result_gone_detail（KI-157：要把「在场却读不出」与「未写」分开说），文案不再
-    # 出现在本函数体内。锁的意图不变——仍是「if rc 分支内：先 reap、再 wedge、最后才出终结
-    # 诊断」，但不再把措辞绑进断言（绑文案的锁会随文案改进误红，这正是灰盒「理解深、绑定浅」）。
-    for fn, label in ((aa._arbitrate_body, "arbitrate"),
-                      (aa._acceptance_walkthrough_body, "acceptance")):
+    assert src_main.count("await _wait_for_agent_result(") == 1
+    for fn in (aa._arbitrate_body, aa._acceptance_walkthrough_body):
         src = inspect.getsource(fn)
-        assert src.count("_wedge_quarantine_once(") == 1, label
-        assert src.index("if rc is not None") < \
-            src.index("_wedge_quarantine_once(") < \
-            src.index("raise RuntimeError("), label
+        assert src.count("_wedge_quarantine_once(") == 0, fn.__name__
+        assert src.count("await _wait_for_agent_result(") == 1, fn.__name__
     src_insp = inspect.getsource(aa.run_inspection_inspect)
     assert src_insp.count("_wedge_quarantine_once(") == 1
     assert src_insp.index("if rc != 0") < \
