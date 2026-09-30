@@ -2778,3 +2778,37 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（写进本岗自查）**：**凡在 workflow 体里新加命令（含 sleep/timer/signal/子工作流），必须同批上
 > `workflow.patched` 版本门 + 用 `replay_check.py` 对存量 history 实测**——「直修 main」不是跳过 replay 面的理由。
 
+## KI-165 宽度 4 下 console/staging 族场景的判词在**同 commit 同宽度**之间翻转 ⇒ 闸把「抖动」读成「本票的账」（260930-261001 实测，integration 岗登记；KI-078「多票各自跑整套互相争抢」同族 + KI-096「自毒化」同族）
+> **现象**：轻道/全车道的机器闸每轮报出一批「本票的账」红，逐名复跑（`--reprobe`，串行）与基线跑却常常是绿的；
+> 同一批票在无人改代码的情况下被打回 rework，一轮 7~12 分钟、重复 4~5 轮，`t260930-14` 与 `t261001-03/-04/-05`
+> 四票同日卡在同一族名字上。
+> **实证（账本 `~/.sandbar/projects/sandbar/ledger/scenario-results.jsonl`，逐行可查）**：同 commit 同宽度结论互相矛盾——
+> `t260925-18-ui-english-spec-markdown`：commit `00963ce0` + **w=1 基线** 在 01:02 = `fail`、01:19 = `pass`（同码同宽两答案）；
+> `metrics-donut-dom`：01:26 `lane:t261001-04` w=4 = `fail`，01:31 `lane:t261001-03` w=4 = `pass`，01:43 `lane:t260930-14` w=4 = `pass`；
+> `t260903-07-click-no-chat-switch`：w=4 十二次采样里 `fail 3 / env_fail 1 / pass 2`。四票的**重叠红名**（19~24 条里
+> 20 条三票全中）与各票写集无关（写集分别是 `server/engine/`、`server/plugins/executor-panel/`）。
+> **根因（当前证据能支持的判词）**：这批名字走的是**共享台/staging 面**（console 由「哪个泳道的树在建台」决定，
+> 见 `t260930-14` 实现段实证：stage 租约 `project-stage-console-*.json` 的 `owner_root` 指向**另一条泳道**、
+> `docker ps` 抓到 `stage-console-*` 容器「Up 8 seconds」= 正在被别的泳道重建）。闸以 `conc_width=4` 并发跑
+> 池（`conc_pools: browser-free:3 / main:3 / ro:3`），多条泳道的轮次叠加 ⇒ 读同一张台的场景判词随「台此刻是谁建的、
+> 有没有正在重建」翻转。**抖动不与「本票改了什么」相关**，却按下述规则记成本票的账。
+> **判据侧放大**：闸的归属判定把「基线无答案」记 `unknown`，轻道判词规定「unknown 永不算 main 绿、永不是放行凭证」
+> ⇒ 抖动直接进 `blockers`（真票 t260930-14 第 3/4 轮即此形态：`blockers` 4 条全在册/抖动，`lane_only=0`）。
+> **危害**：①假 red 变 rework（打回的是**没改过该文件的** developer，票面还点名要它修）；②真红被同类噪声淹没
+> （一屏 20+ 条，人挑不出本票的账）；③每轮烧 7~12 分钟共享台，越跑越抖（自毒化，KI-096 同款）；④integration
+> 岗的挂账动作被这条机制反向污染——我曾把这族名字当「存量红」登进挂账册（8 条），事后账本证明它们**串行也绿**，
+> 与册子政策「抖动绿（串行复跑绿）不入册」相抵触（见下「处置」）。
+> **处置（本轮已做）**：①直修轻道缺陷「收窄面被清空 ⇒ 回落全量」（commit `7f59c9f`，含重放门与豁免面重算）；
+> ②把 8 条抖动名**临时**登进 `known-red-baseline.json`（`isolated` / owner=集成面 / retire_when=连续 3 轮或 3 次
+> 隔离绿）当**止血**用，判词注明「非产品欠账」；③本条登记为**未修复**的机制面缺陷。
+> **建议修复方向（未动，属判据/机制改动，须宿主裁定）**：①`unknown` 的归属判定加**定点复跑**这一级
+> （t260930 提案：进 blockers 之前自动在 main 上再跑一次，绿=抖动记录不拦、红=本票的账）——本日 4 次人工
+> 复跑已证明它能把 4 条误归因纠回；②把 `browser` / `browser-free` 池的宽度在泳道轮钉成 1（台面争用是本条根因，
+> 串行即绿），代价是每轮变慢；③共享台的租约必须让「读台」也进同一把锁（现在只有「建台」进锁，
+> 台被兄弟泳道重建时读者照跑）；④挂账册与「抖动名册」分家：抖动名不进产品欠账册，但要有自己的具名面
+> （否则每轮重新发现、重新误归因）。
+> **定位**：`integration/run_scenarios.py`（池切分与 `conc_pools`）、`integration/lib_stage_fixture.mjs` / `stage_docker.py`
+> （共享台租约/重建）、`server/engine/shared.py:blockers_known_red_adoption`（`unknown` 判词）、
+> `server/engine/agent_activities.py`（归属判定写入 `blockers`）、`integration/known-red-baseline.json`（册子政策行）。
+> **回归（本条修复时必带）**：给「同 commit 同宽度两答案」造一条机械不可判定的用例——抖动名进 blockers 前必须经
+> 定点复跑一级，且票面把「抖动/复跑」与「本票的账」分成两个具名面。
