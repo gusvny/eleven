@@ -19,6 +19,10 @@
  *   - 引擎 timeline 条目带 gen（门开的新票）→ 按 gen 分组，一轮一格；
  *   - 老票无 gen → 回退「每条 running mark 开新轮」的计数口径
  *     （lane-durations 同款真值表），轮内证据无 gen 标注=如实缺省；
+ *   - 认领行（建票时的 `adopt …` / state=awaiting，带 gen=0 或不带 gen）**不是**
+ *     该段的一次入场 → 不进轮次带（否则首段凭空多一格 + 徽章 ×N 撒谎，实报
+ *     t260930-09：轻道首段 implement 被画成两轮）；真实重入（rework/retry_qc）
+ *     照旧逐轮成格，只剔认领行、不剔「同段首次出现」；
  *   - 轮结局=该轮内最后一条显式态（done/blocked/awaiting-human/rework），
  *     无显式态=running；hover title=该轮 at/结局/reason/phase/handoff 摘要。
  *
@@ -224,6 +228,22 @@ function timelineOf(detail: DetailLike): TimelineEntryLike[] {
   return out
 }
 
+/**
+ * 认领行（adopt）识别：建票时引擎在实例初始化里写的第一条条目
+ * （base.py:761 / dev_lane.py:980 的 `_mark(first.id, "awaiting", "adopt …")`）
+ * 把票面初段指向本道首段，**不是**该段的入场，不得计成一轮。
+ *
+ * 识别只认形状，不认位置（「第几个出现的」不是判据）：
+ *   state === 'awaiting' 且 reason 以词 'adopt' 起（引擎英文标识，两种模板同词
+ *   ——dev-lane「adopt dev-lane（步=…）」/ 基类「adopt v2（模版=…）」）。
+ * 形状不认识（awaiting 但 reason 不是 adopt 起头、或 reason 缺省）→ **保留现行口径**
+ * （如实成轮）：宁可多一格可见的疑点，也不静默丢行（畸形输入纪律）。
+ * 真实重入（rework 回打 / retry_qc 重跑）落的是 running/rework/done，形状不撞。
+ */
+function isAdoptionEntry(e: TimelineEntryLike): boolean {
+  return e.state === 'awaiting' && /^adopt\b/.test(e.reason ?? '')
+}
+
 function handoffsOf(detail: DetailLike): Array<{ stage: string; summary?: string; gen?: number }> {
   if (!Array.isArray(detail.handoffs)) return []
   const out: Array<{ stage: string; summary?: string; gen?: number }> = []
@@ -241,9 +261,11 @@ function handoffsOf(detail: DetailLike): Array<{ stage: string; summary?: string
   return out
 }
 
-/** 段→轮次带。gen 键在场按 gen 分组；缺省回退「running mark 切轮」计数口径。 */
+/** 段→轮次带。gen 键在场按 gen 分组；缺省回退「running mark 切轮」计数口径。
+ *  认领行（adopt）先剔除——它既会自成 gen=0 的一桶（新票），也会在无 gen 的
+ *  老票上被当成「首轮」，两种形态都会给首段凭空多出一格（实报 t260930-09）。 */
 export function deriveRounds(stageId: string, detail: DetailLike): LaneRound[] {
-  const entries = timelineOf(detail).filter(e => e.stage === stageId)
+  const entries = timelineOf(detail).filter(e => e.stage === stageId && !isAdoptionEntry(e))
   if (entries.length === 0) return []
   const hasGen = entries.some(e => typeof e.gen === 'number')
   const buckets: TimelineEntryLike[][] = []

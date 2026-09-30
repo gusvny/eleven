@@ -8,6 +8,9 @@
  *   B. buildLaneMap：主道渲染序（组折叠）、并行组 active（meta.parallel_stages 真源）、
  *      轮次带 gen 分组 + ×N 徽章 + rework 轮格、老票（无 gen）回退 running 计数切轮、
  *      handoff 按序消费、closed 终态全 done、人门到站 humanGateActive、畸形 detail 不抛。
+ *   B2. 受阻史接线（t260916-04）。
+ *   B3/B4/B5. 认领行（adopt/awaiting）不成轮（实报 t260930-09：首段凭空多一格 + ×N
+ *      徽章撒谎）、真重入照旧逐轮、无认领行的段逐字节不变、形状不认识不静默丢行。
  *   C. buildChecksDetail（检查明细区模型）：逐行 ✓/✗/item/detail/checkId/reasonCode/
  *      files/nextAction、绿项 id-only 可读、最新轮在前、畸形条目跳过。
  *   D. 渲染器通用性（模型半）：fixture-two-step 线性拓扑同组件建模——无组、
@@ -224,6 +227,100 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
   })
   ok(m3.nodes['create_plan'].vis === 'done' && m3.nodes['create_plan'].blockedHistory.resolvedBy === 'closed',
     'B2: closed 历史受阻=完成色+closed 解除史')
+}
+
+/* ── B3. 认领行（adopt）不成轮：实报 t260930-09 回归（轻道首段被画成两轮） ── */
+{
+  // 真票据形态＝server/ledger/sandbar.jsonl 里 t260930-09 的 seq1-4 逐字（gen 键原样）
+  const lightTicket = {
+    status: 'running', stage: 'implement', stage_state: 'running',
+    timeline: [
+      { at: '2026-09-30T08:09:09+00:00', stage: 'implement', state: 'awaiting',
+        reason: "adopt light-lane（步=['implement', 'ui_evidence', 'run_integration_tests', "
+                + "'merge_check', 'merge']）", gen: 0 },
+      { at: '2026-09-30T08:09:09+00:00', stage: 'workspace', state: 'ready',
+        reason: 'prepare_workspace: worktree/created+deps:server/engine/.venv', gen: 0 },
+      { at: '2026-09-30T08:09:09+00:00', stage: 'implement', state: 'running',
+        reason: '进入本步（第 1 次）', gen: 1 },
+      { at: '2026-09-30T08:26:25+00:00', stage: 'implement', state: 'done',
+        reason: '交接报告落盘', gen: 1 },
+    ],
+  }
+  const m = buildLaneMap(DEV_LANE_TOPOLOGY, lightTicket)
+  const iv = m.nodes['implement']
+  ok(m !== null && iv.rounds.length === 1 && iv.rounds[0].gen === 1 && iv.rounds[0].state === 'done',
+    'B3: 认领行不成轮——首段只余真入场那一轮（gen=1）')
+  ok(iv.badge === '', 'B3: 认领行不再把首段撑成 ×2 徽章（渲染层少一格）')
+  ok(!iv.rounds.some(r => r.gen === 0), 'B3: 无 gen=0 幽灵轮')
+  ok(deriveRounds('implement', lightTicket).length === 1, 'B3: deriveRounds 直调同口径')
+  // 老票同形（无 gen）：认领行过去被「running mark 切轮」口径当成首轮
+  const legacyAdopt = {
+    status: 'running', stage: 'implement', stage_state: 'running',
+    timeline: [
+      { at: 'T0', stage: 'implement', state: 'awaiting', reason: 'adopt v2（模版=dev-lane，stages=[...]）' },
+      { at: 'T1', stage: 'implement', state: 'running', reason: '进入' },
+      { at: 'T2', stage: 'implement', state: 'done', reason: '完事' },
+    ],
+  }
+  const lr = deriveRounds('implement', legacyAdopt)
+  ok(lr.length === 1 && lr[0].gen === 1 && lr[0].at === 'T1', 'B3: 无 gen 老票同形——认领行不占轮，真入场仍是第 1 轮')
+}
+
+/* ── B4. 真重入照旧逐轮（修不吞返工：只剔认领行，不剔「首次出现」） ── */
+{
+  const rework = {
+    status: 'running', stage: 'implement', stage_state: 'running',
+    timeline: [
+      { at: 'T0', stage: 'implement', state: 'awaiting', reason: 'adopt light-lane（步=[...]）', gen: 0 },
+      { at: 'T1', stage: 'implement', state: 'running', reason: '进入本步（第 1 次）', gen: 1 },
+      { at: 'T2', stage: 'implement', state: 'rework', reason: '验收打回：证据缺', gen: 1 },
+      { at: 'T3', stage: 'implement', state: 'running', reason: '进入本步（第 2 次）', gen: 2 },
+      { at: 'T4', stage: 'implement', state: 'done', reason: '第 2 次完成', gen: 2 },
+    ],
+  }
+  const rounds = deriveRounds('implement', rework)
+  ok(rounds.length === 2 && rounds[0].gen === 1 && rounds[1].gen === 2,
+    'B4: 真重入两轮仍在（认领行剔除不吃返工）')
+  ok(rounds[0].state === 'rework' && rounds[0].reason === '验收打回：证据缺', 'B4: 第 1 轮结局=rework+打回原因')
+  const m = buildLaneMap(DEV_LANE_TOPOLOGY, rework)
+  ok(m.nodes['implement'].badge === '×2', 'B4: 徽章=真轮数 ×2（不是含认领行的 ×3）')
+  const legacyRework = {
+    timeline: [
+      { at: 'T0', stage: 'implement', state: 'awaiting', reason: 'adopt dev-lane（步=[...]）' },
+      { at: 'T1', stage: 'implement', state: 'running' },
+      { at: 'T2', stage: 'implement', state: 'rework' },
+      { at: 'T3', stage: 'implement', state: 'running' },
+    ],
+  }
+  ok(deriveRounds('implement', legacyRework).length === 2, 'B4: 无 gen 老票重入仍两轮')
+}
+
+/* ── B5. 窄修锚：无认领行的段逐字节不变 + 形状不认识时保留现行口径 ── */
+{
+  const plain = {
+    status: 'running', stage: 'merge_check', stage_state: 'running',
+    timeline: [
+      { at: 'T1', stage: 'merge_check', state: 'running', reason: '进入', gen: 1 },
+      { at: 'T2', stage: 'merge_check', state: 'done', reason: '四项全绿', gen: 1 },
+    ],
+  }
+  const r = deriveRounds('merge_check', plain)
+  ok(r.length === 1 && r[0].gen === 1 && r[0].state === 'done' && r[0].at === 'T1'
+    && r[0].reason === '四项全绿' && r[0].handoffSummary === undefined,
+    'B5: 无认领行的段轮次带逐字节不变')
+  const unknownAwaiting = {
+    timeline: [
+      { at: 'T0', stage: 'merge_check', state: 'awaiting', reason: '等人放行（非 adopt 起头）' },
+      { at: 'T1', stage: 'merge_check', state: 'running', reason: '进入' },
+    ],
+  }
+  ok(deriveRounds('merge_check', unknownAwaiting).length === 2,
+    'B5: 非 adopt 形状的 awaiting 保留现行口径（形状不认识=如实成轮，不静默丢行）')
+  const adoptReasonRunning = {
+    timeline: [{ at: 'T0', stage: 'merge_check', state: 'running', reason: 'adopt 之后的真入场' }],
+  }
+  ok(deriveRounds('merge_check', adoptReasonRunning).length === 1,
+    'B5: state≠awaiting 不参与剔除（形状判据负锁）')
 }
 
 /* ── C. buildChecksDetail ── */
