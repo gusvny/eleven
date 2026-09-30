@@ -65,6 +65,8 @@ const STATUS_TABLE: Record<string, string> = {
 /** 工作流模板 id → 英文名（真源：模板注册 id；模板 name 字段是中文数据，不译不显）。 */
 const WORKFLOW_TABLE: Record<string, string> = {
   'dev-lane': 'Dev Lane',
+  // t260930-02：轻道泳道（engine light_lane.LightLaneWorkflow，模板 id light-lane）。
+  'light-lane': 'Light Lane',
   'inspection-lite': 'Inspection',
   'chore-lane': 'Chore Lane',
 }

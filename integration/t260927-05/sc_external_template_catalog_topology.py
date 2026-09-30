@@ -219,8 +219,11 @@ def main() -> int:
             check(False, "B 空注册根 list 退出码 0", "stderr=%s" % (r2.stderr or "")[-300:])
         else:
             rows2 = rows_by_id(r2.stdout)
-            check(set(rows2) == {"dev-lane"},
-                  "B 默认面 id 集合恰 {dev-lane}（收窄守卫同口径，零回归）",
+            # 宿主令 260930：内置面加一格 light-lane（轻道泳道）——「默认面=内置面全集、
+            # 未声明项目不泄漏」语义不变。
+            check(set(rows2) == {"dev-lane", "light-lane"},
+                  "B 默认面 id 集合恰内置面 {dev-lane, light-lane}"
+                  "（收窄守卫同口径，零回归）",
                   "ids=%r" % sorted(rows2))
             dl = rows2.get("dev-lane", {})
             check(bool(dl.get("stages")) and isinstance(dl.get("topology"), dict),

@@ -545,6 +545,16 @@ class IntegrationRunResult:
     # （not-checked × external），**不是**从 `ENV_FAIL [...] exit=N` 文本行反推。
     # 与 env_fail 分工：env_fail=int 计数（入闸口径），env_red=名单（观测面，不入判定）。
     env_red: List[str] = field(default_factory=list)
+    # 宿主令 260930（devlane-lite 轻道，直修无票）：**少跑面**的两块观测回执，**additive**（默认空
+    # dict=老回放/老执行器形态逐字节零漂移，缺键即空）。轻道的 blocked 文案必须如实交代
+    # 「本轮哪些条目**没跑**、被台账复用了几条」——此前这两块只存在于闸的 JSON 回执
+    # （verify_lane 的 reuse 块 / 执行器汇总的 known_red_* 键），工作流侧看不到，于是票面
+    # 只能说「跑了 N 条」。改法=在翻译层（agent_activities._run_scenarios）原样透传，
+    # **不重判、不改任何计数、不进判定**：
+    #   reuse    = 闸回执 reuse 块（reused/names/expected/all_reused/accounted/...）；
+    #   known_red= 在册红豁免面（skipped/names；未跑 ≠ 判绿）。
+    reuse: Dict[str, Any] = field(default_factory=dict)
+    known_red: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -1888,6 +1898,12 @@ def default_gate_for(template_id: str, stage_id: str) -> Optional["GateSpec"]:
             label="verify_lane content"),
         ("regression", "regress"): GateSpec(
             stage="regress", tool="verify_lane", args={"lane": "code"}, label="verify_lane code"),
+        # 宿主令 260930：轻道的机器闸（宿主定案 devlane-lite §4.1「段门按 (模板, 段) 键」）——
+        # 与 dev-lane 的机器闸**同一条命令、同一个执行器**（verify_lane lane=integ 读项目
+        # 声明的 integration.cmd）；本表是声明面，真跑走同一活动 run_integration_tests。
+        ("light-lane", "run_integration_tests"): GateSpec(
+            stage="run_integration_tests", tool="verify_lane", args={"lane": "integ"},
+            label="verify_lane integ"),
     }
     return table.get((template_id, stage_id))
 
@@ -4986,6 +5002,13 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
 # retired)
 TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     "dev-lane": "DevLaneWorkflow",
+    # 宿主令 260930（devlane-lite §4.1，直修无票）：轻道泳道——**独立 workflow 类**，段链更短
+    # （create_plan→implement→[ui_evidence]→run_integration_tests→merge_check→merge）。
+    # 内置面**有意**扩这一格：宿主 260930 令「轻道按模板 id 显式开票」，建票面
+    # （client.py ticket-start / tools/ticket.py create 的内置快路径）读的本表，故必须在
+    # 此登记。收窄守卫（sc_template_face_narrowing 等）随之把默认面由 {dev-lane} 更新为
+    # {dev-lane, light-lane}——退役模板仍不得复活，守卫语义不变。
+    "light-lane": "LightLaneWorkflow",
 }
 # 夹具模板环境门（工单 t260908-01）：SANDBAR_FIXTURE_TEMPLATES=1 时把测试夹具模板
 # fixture-two-step 挂进注册表——生产/闸内默认面恰为 {dev-lane}（sc_template_face
@@ -5423,6 +5446,9 @@ ARCHIVE_EXCLUDED_RULES = (
 # 功能退役，本表其余消费面（工单台展示等）不变。
 TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
     "dev-lane": "开发泳道",
+    # 宿主令 260930：轻道模板显示名（宿主 260930 明令英文——控制台界面文案一律英文，
+    # 既有英文标识为真源；集中映射表见 server/plugins/workbench/src/client/ui-labels.ts）。
+    "light-lane": "Light Lane",
 }
 if os.environ.get(FIXTURE_TEMPLATES_ENV) == "1":
     # 与 TEMPLATE_CLASS_NAMES 同门（上段）：收窄断言以默认面为准。

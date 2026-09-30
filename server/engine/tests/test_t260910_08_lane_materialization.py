@@ -166,14 +166,23 @@ def test_base_init_carries_project_root(mixedrepo, monkeypatch):
 
 def test_workspace_prep_construction_is_single_point():
     """「构造点绕开单点回退内联会红」：两族 workflow 的构造点必须走
-    build_workspace_prep 且不再内联 WorkspacePrep(（t260910-07 缺陷的结构性钉子）。"""
-    for obj, name in ((dev_lane.DevLaneWorkflow.run, "dev_lane.run"),
-                      (base.TicketWorkflowBase._prepare_workspace,
-                       "base._prepare_workspace")):
-        src = inspect.getsource(obj)
-        assert "build_workspace_prep(" in src, "%s 必须经单点构造" % name
-        assert "WorkspacePrep(" not in src, (
-            "%s 回退内联 WorkspacePrep(——t260910-07 缺陷形态复发，改回单点" % name)
+    build_workspace_prep 且不再内联 WorkspacePrep(（t260910-07 缺陷的结构性钉子）。
+
+    宿主令 260930（light-lane，直修无票）（宿主令 260930）：dev-lane 的构造块抽成共用 helper
+    `_prepare_workspace_step`（轻道同 helper），构造点随之落在那份 helper 里——
+    判据跟着构造点走，强度不减：①helper 必须走单点构造且不内联；②dev-lane 的
+    run() 必须经该 helper（构造点不得被绕过）；③base 那族逐字不变。"""
+    helper_src = inspect.getsource(dev_lane.DevLaneWorkflow._prepare_workspace_step)
+    assert "build_workspace_prep(" in helper_src, "共用构造 helper 必须经单点构造"
+    assert "WorkspacePrep(" not in helper_src, (
+        "共用构造 helper 回退内联 WorkspacePrep(——t260910-07 缺陷形态复发，改回单点")
+    run_src = inspect.getsource(dev_lane.DevLaneWorkflow.run)
+    assert "_prepare_workspace_step(" in run_src, (
+        "dev_lane.run 必须经共用构造 helper（构造点不得被绕过）")
+    src = inspect.getsource(base.TicketWorkflowBase._prepare_workspace)
+    assert "build_workspace_prep(" in src, "base._prepare_workspace 必须经单点构造"
+    assert "WorkspacePrep(" not in src, (
+        "base._prepare_workspace 回退内联 WorkspacePrep(——t260910-07 缺陷形态复发，改回单点")
 
 
 def test_build_workspace_prep_feeds_three_rings_and_replay_safe():

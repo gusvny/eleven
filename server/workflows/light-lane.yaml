@@ -1,0 +1,74 @@
+# ⚠️ 真源=代码，勿手改 —— M11 v2 模版即代码（t260822-m11）。
+# 本文件由 server/engine/gen_workflows_doc.py 从 light_lane.py 的
+# LightLaneWorkflow.STAGES 生成；改模版=改类定义并重跑生成器（重跑即覆盖手改）。
+id: light-lane
+name: "Light Lane"
+lane: worktree
+description: "轻道（light lane）：prepare_workspace→create_plan→implement→（UI 票 ui_evidence）→run_integration_tests（机器闸，一轮一判）→merge_check→merge（人审）——红转人，不自动仲裁、不自动重跑"
+stages:
+  - id: create_plan
+    role: developer
+    name: "做方案"
+    desc: "读需求出实现方案：改动文件清单、步骤、验收口径；不动代码"
+    next: implement
+    parts:
+      - agent
+    acceptance:
+      - "The plan lands in the stage result file (files to change + steps + acceptance criteria)"
+  - id: implement
+    role: developer
+    name: "实现"
+    desc: "按方案开发：写集白名单内；agent 沙箱写不了真 .git，commit 由 worker 代落盘；单测随实现交付"
+    next: ui_evidence
+    parts:
+      - agent
+      - script
+    acceptance:
+      - "Changes stay inside the write set"
+      - "Changes are committed to the lane branch (the worker settles on the agent's behalf)"
+      - "Unit tests for the change run green"
+  - id: ui_evidence
+    role: developer
+    name: "UI截图证据"
+    desc: "条件段（仅 UI 票）：实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截图落 .sandbar/screenshots/（软失败不拦主链，merge_check 闸兜底）"
+    next: run_integration_tests
+    parts:
+      - script
+    acceptance:
+      - "UI tickets carry before/after screenshots under .sandbar/screenshots/ (merge_check checks it mechanically)"
+  - id: run_integration_tests
+    role: integration
+    name: "跑集成测试"
+    desc: "程序化（无 agent）：泳道 0-commit 前置检查 → 改动清单 → 面计划收窄快反馈面 → 跑项目声明的集成命令（与 dev-lane 同一条命令、同一个执行器）；不绿即 blocked 并带完整违规集（不自动重跑、不调仲裁）；定点轮放行只认收口全量跑"
+    next: merge_check
+    parts:
+      - script
+    # 脚本门（代码内 Stage.gate，仅注释展示）: verify_lane {"lane": "integ"}
+    # 纯脚本门段（agent=False：无 agent 活动，只跑门）
+    acceptance:
+      - "The project-declared integration command ran and produced a receipt"
+      - "Any red is carried through in full — every failing scenario name, the counts, and the receipt pointer"
+  - id: merge_check
+    role: integration
+    name: "合并检查"
+    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；任一项红 → blocked 等人（轻道不做自动冲突消解轮）"
+    next: merge
+    parts:
+      - script
+    # 纯脚本门段（agent=False：无 agent 活动，只跑门）
+    acceptance:
+      - "Lane branch has commits"
+      - "Worktree is clean"
+      - "The in-lane verify_lane check is green"
+      - "merge dry-run has no conflict"
+  - id: merge
+    role: integration
+    name: "合并（人审）"
+    desc: "人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；归档失败 fail-closed 保留泳道"
+    exit: human
+    parts:
+      - human
+      - script
+    acceptance:
+      - "Human sign-off recorded"
+      - "Merge booked and the lane is torn down after a successful archive"

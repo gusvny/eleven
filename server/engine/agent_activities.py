@@ -7483,6 +7483,19 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     out.forced_by = [str(x) for x in (_pe.get("former_force_assets") or [])]
     # t260923 D：跑面回执回显（少跑必须可见）——空=全量；非空=定点复跑面。
     out.only_names = list(only_names)
+    # 宿主令 260930（devlane-lite 轻道，直修无票）：少跑面另两块**原样透传**（additive；缺键/畸形 = 空
+    # dict = 老回执/老闸形态逐字节零漂移）。此前它们只活在闸的 JSON 回执里，工作流侧
+    # （轻道的 blocked 文案）看不到「本轮没跑哪几条、被台账复用了几条」——票面于是只能
+    # 说「跑了 N 条」。只搬运不重判：计数与判定零改动。
+    _reuse = res.get("reuse")
+    if isinstance(_reuse, dict) and _reuse:
+        out.reuse = dict(_reuse)
+    if res.get("known_red_skipped") is not None or res.get("known_red_names") is not None:
+        out.known_red = {
+            "skipped": int(res.get("known_red_skipped") or 0),
+            "names": [str(x) for x in (res.get("known_red_names") or [])],
+            "note": ("未跑 ≠ 判绿：这些条目本轮没有被验证"
+                     if int(res.get("known_red_skipped") or 0) else "")}
     if _pe.get("applied"):
         _tail = "本轮跳过池=%s（少 %d 条）" % (
             "、".join(str(x) for x in (_pe.get("declared") or out.excluded_pools)),

@@ -19,14 +19,19 @@ from __future__ import annotations
 import os as _os
 
 from dev_lane import DevLaneWorkflow
+from light_lane import LightLaneWorkflow
 from shared import FIXTURE_TEMPLATES_ENV
 
+# 宿主令 260930（devlane-lite §4.1，直修无票）：**轻道是独立 workflow 类**——注册就是本表
+# 加一行；两条道共用真正干活的活动面，轻道只带自己那条短段链（详见 light_lane.py 头注）。
 TEMPLATE_CLASSES = {
     "dev-lane": DevLaneWorkflow,
+    "light-lane": LightLaneWorkflow,
 }
 
 ALL_WORKFLOWS_V2 = [
     DevLaneWorkflow,
+    LightLaneWorkflow,
 ]
 
 # 夹具模板环境门（工单 t260908-01，与 shared.TEMPLATE_CLASS_NAMES 同门同款）：

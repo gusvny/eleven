@@ -15,7 +15,8 @@
      （「启动于暂停功能上线前」）、who 非空、note 超限、已暂停幂等、未暂停空态；
   5. 人门通道锁：pause/resume 只出现在 client.py 信号通道与 base 通用层——grep 引擎
      面断言 agent_activities.py 零 pause/resume 信号发送面（agent 无发送入口，拍板②）；
-  6. 夹具模板 env 门：默认面 TEMPLATE_CLASS_NAMES 恰 {dev-lane}（收窄守卫不破）；
+  6. 夹具模板 env 门：默认面 TEMPLATE_CLASS_NAMES 恰为内置面 {dev-lane, light-lane}
+     （宿主令 260930 轻道登记令；收窄守卫同口径更新，退役模板复活仍必红）；
      SANDBAR_FIXTURE_TEMPLATES=1 子进程导入=含 fixture-two-step（同门感知）。
 
 退出码 0=全绿；非 0=有红（细节在 stdout）。
@@ -127,13 +128,14 @@ def main():
 
     print("== 6 夹具模板 env 门（收窄守卫同门感知）")
     # t260924-04 改判（扩锁不拆锁）：默认面语义 = 内置＋当项目显式登记。空注册根
-    # 注入（无项目声明 workflow_modules）下合并视图恰为 {dev-lane}＝零登记零漂移；
+    # 注入（无项目声明 workflow_modules）下合并视图＝内置面全集＝零登记零漂移；
     # 夹具门子进程探针同口径注入空注册根（夹具模板照常入表，语义不动）。
+    # 宿主令 260930：内置面加一格 light-lane（轻道泳道，宿主定案，直修无票）。
     import tempfile as _tmpmod
     _empty_root = _tmpmod.mkdtemp(prefix="t260924-04-empty-registry-")
     check(shared.project_template_names_merged(root=_empty_root)
-          == {"dev-lane": "DevLaneWorkflow"},
-          "默认面合并视图（空注册根）恰 {dev-lane}（=内置＋显式登记语义，收窄守卫不破）")
+          == {"dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"},
+          "默认面合并视图（空注册根）恰 {dev-lane, light-lane}（=内置＋显式登记语义，收窄守卫不破）")
     probe = subprocess.run(
         [sys.executable, "-c",
          "import sys; sys.path.insert(0, %r); import shared, workflows_v2;"

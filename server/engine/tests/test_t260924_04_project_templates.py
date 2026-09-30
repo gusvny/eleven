@@ -93,7 +93,9 @@ def _rejs(root):
 # ---- A2 零登记零漂移 ----
 
 def test_a2_empty_registry_default_face(empty_root):
-    assert _names(empty_root) == {"dev-lane": "DevLaneWorkflow"}
+    # 宿主令 260930：内置面加一格 light-lane（轻道）；「空注册根=恰为内置面全集」语义不变。
+    assert _names(empty_root) == {"dev-lane": "DevLaneWorkflow",
+                                  "light-lane": "LightLaneWorkflow"}
     assert _rejs(empty_root) == []
     res = shared.project_template_scan(import_classes=False, root=str(empty_root))
     res.merged_names({}, {})
@@ -240,8 +242,9 @@ def test_loader_is_import_neutral(empty_root):
     sys.modules["_poc_shared_alias"] = mod
     spec.loader.exec_module(mod)
     assert hasattr(mod, "project_template_names_merged")
+    # 宿主令 260930：内置面 = {dev-lane, light-lane}（轻道登记令）。
     assert mod.project_template_names_merged(root=str(empty_root)) == {
-        "dev-lane": "DevLaneWorkflow"}
+        "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"}
     # project_templates 模块源码零 shared import 语句（结构锁，防双装载裂表回归；
     # 只锁代码行不锁注释——docstring 里提到 "import shared" 不算）
     pt_src = pathlib.Path(pt.__file__).read_text("utf-8")

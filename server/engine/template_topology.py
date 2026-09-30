@@ -102,6 +102,21 @@ _FIXTURE_TWO_STEP_NODES: Tuple[Dict[str, Any], ...] = (
     _node("fx_step_two", "夹具段二", "integration", KIND_AGENT),
 )
 
+# 宿主令 260930（devlane-lite §4.1，直修无票）：轻道模板（light-lane）——编码真源=
+# light_lane.py LightLaneWorkflow.STAGES（短段链，无并行分叉）；本表是展示面导出数据，
+# 逐字段一致性锁=tests/test_light_lane_lane.py（「STAGES 改了不改本表，此处必红」，
+# dev-lane/inspection-lite 同款范式）。ui_evidence 同 dev-lane 是条件段（仅 UI 票）。
+_LIGHT_LANE_NODES: Tuple[Dict[str, Any], ...] = (
+    _node("create_plan", "做方案", "developer", KIND_AGENT, ("agent",)),
+    _node("implement", "实现", "developer", KIND_AGENT, ("agent", "script")),
+    _node("ui_evidence", "UI截图证据", "developer", KIND_AGENT, ("script",),
+          optional=OPT_UI_TICKETS),
+    _node("run_integration_tests", "跑集成测试", "integration", KIND_GATE, ("script",)),
+    _node("merge_check", "合并检查", "integration", KIND_GATE, ("script",)),
+    # 人门：exit=human（sign 信号面），渲染器画虚线圈。轻道唯一人门=merge。
+    _node("merge", "合并（人审）", "integration", KIND_HUMAN, ("human", "script")),
+)
+
 # t260916-05：巡检模板（inspection-lite）——编码真源=inspection_flow.py
 # InspectionPeriodicWorkflow.STAGES（机器可读阶段声明），本表是展示面导出数据；
 # 逐字段一致性锁=tests/test_t260916_05_inspection_topology.py B 段（「STAGES 改了
@@ -120,6 +135,9 @@ _INSPECTION_NODES: Tuple[Dict[str, Any], ...] = (
 
 _TOPOLOGIES: Dict[str, Dict[str, Any]] = {
     "dev-lane": {"name": "开发泳道", "nodes": _DEV_LANE_NODES, "groups": _DEV_LANE_GROUPS},
+    # 宿主令 260930：轻道泳道（light_lane.LightLaneWorkflow；无并行组——短段链是纯串行）。
+    # 段 id 与 dev-lane 同名（控制台段标签按 id 走前端映射表，天然有英文标签）。
+    "light-lane": {"name": "Light Lane", "nodes": _LIGHT_LANE_NODES, "groups": ()},
     # 巡检期票模板（inspection_flow.InspectionPeriodicWorkflow；非 dev-lane 票面，
     # 工作台详情经快照 topology 键消费本导出）。
     "inspection-lite": {"name": "巡检", "nodes": _INSPECTION_NODES, "groups": ()},

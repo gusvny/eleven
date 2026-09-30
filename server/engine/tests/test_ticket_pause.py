@@ -64,6 +64,9 @@ def test_default_template_tables_stay_narrow():
     零漂移」；视图按注入根计算，本机真实注册表有/无登记项目都不影响本断言。"""
     import tempfile
     empty_root = tempfile.mkdtemp(prefix="t260924-04-empty-registry-")
+    # 宿主令 260930：轻道泳道（light-lane）按宿主令登记为**内置**模板——默认面因此由
+    # {dev-lane} 扩为 {dev-lane, light-lane}；本断言仍钉「零登记零漂移」语义（空注册根
+    # 下合并视图恰为内置面全集），退役模板复活仍必红。
     assert shared.project_template_names_merged(root=empty_root) == {
-        "dev-lane": "DevLaneWorkflow"}
+        "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"}
     assert dict(shared.TEMPLATE_CLASS_NAMES).get("dev-lane") == "DevLaneWorkflow"

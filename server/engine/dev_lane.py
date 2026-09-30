@@ -692,6 +692,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                      "→implement∥design_integration_tests→汇合（ui_evidence/UI 票）"
                      "→run_integration_tests（验证前主同步 main）→arbitrate→acceptance_walkthrough"
                      "→merge_check（程序化）→merge（人审）")
+    #: 段补述来源（宿主令 260930（light-lane，直修无票） 钩子，**纯加法**）：_run_agent_step 读本属性取
+    #: 段补述文案。dev-lane 侧值=模块级 FLOW_BRIEF（逐字不变，行为零变化）；轻道
+    #: （light_lane.LightLaneWorkflow）覆写为自己的补述表（正文 import 复用同一批条文，
+    #: 只在前缀加一段轻道契约说明）。
+    FLOW_BRIEF_SET: Dict[str, str] = FLOW_BRIEF
     # Display/derivation metadata (the real orchestration lives in run(); same order
     # as run). parts = declaration of the executor mix (agent🤖/script⚙️/human👤,
     # static, feeds workbench badges): implement = agent + worker settle-on-behalf +
@@ -965,15 +970,15 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             "temporal_engine_version": self.engine_version,
             "engine": ENGINE_V2,
             "log": [{"ts": self._now_epoch(), "status": "dispatched",
-                     "note": "工单创建（dev-lane：activity 直编排，步=%s）"
-                             % [s.id for s in self.STAGES]}],
+                     "note": "工单创建（%s：activity 直编排，步=%s）"
+                             % (self.TEMPLATE_ID, [s.id for s in self.STAGES])}],
         }
         if _dropped:
             # t260929-19：畸形/重复增项显式降级——log 类台账点名（非 _mark 段状态，
             # 避免污染下游 snapshot/lane 读的段状态机）。
             self._log("acceptance_extra 丢弃畸形/重复项：%s" % ", ".join(_dropped))
-        self._mark("create_plan", "awaiting", "adopt dev-lane（步=%s）"
-                   % [s.id for s in self.STAGES])
+        self._mark(first.id, "awaiting", "adopt %s（步=%s）"
+                   % (self.TEMPLATE_ID, [s.id for s in self.STAGES]))
 
     # ---------- step entry (the meta/ledger trio) ----------
     def _enter(self, step_id: str) -> None:
@@ -1826,9 +1831,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         prompt = build_stage_prompt(self.ticket_id, self.meta, st,
                                     list(self.meta.get("handoffs") or []), rfile, gen + 1,
                                     previous_context)
-        brief = FLOW_BRIEF.get(step_id)
+        # 宿主令 260930（light-lane，直修无票）：补述来源与标签走类属性（dev-lane 侧=FLOW_BRIEF + "dev-lane"，
+        # 生成的文案逐字不变；轻道覆写两处得到自己的补述与标签）。
+        brief = self.FLOW_BRIEF_SET.get(step_id)
         if brief:
-            prompt += "\n%d. 本步契约（dev-lane 流程约定）：%s" % (_prompt_next_no(prompt), brief)
+            prompt += "\n%d. 本步契约（%s 流程约定）：%s" % (_prompt_next_no(prompt),
+                                                      self.TEMPLATE_ID, brief)
         args = AgentStageArgs(
             ticket_id=self.ticket_id, stage_id=step_id, role=st.role, prompt=prompt,
             workspace=ws, result_file=rfile,
@@ -2065,12 +2073,20 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "按回执出路处置越权文件或回 main 侧走票）" % self._gate_refusal_repeat)
         return ""
 
-    # ---------- main flow (direct activity orchestration) ----------
-    @workflow.run
-    async def run(self, inp: TicketInput) -> Dict[str, Any]:
-        self._init(inp)
+    # ---------- 两条泳道共用的段级 helper（宿主令 260930（light-lane，直修无票）：纯抽块，语义零变化） ----------
+    async def _prepare_workspace_step(self) -> bool:
+        """工作空间准备（循环到就绪为止；返回 True=已就绪。失败期间在 _blocked 等人，
+        醒来重试——原 run() 的 `while True: … break` 语义整段搬进本方法）。
 
-        # 1) prepare_workspace (code, no agent; failure → blocked waiting for retry/rework)
+        宿主令 260930（light-lane，直修无票）：本方法的内容**逐字**取自 DevLaneWorkflow.run() 原第一块
+        （同一 lane_workspace_gate_error 前置判、同一 shared.build_workspace_prep 单点
+        构造、同一 prepare_workspace 活动、同一 blocked 文案、同一 rework 处置），只把
+        「循环 + break」写成「循环 + return True」——命令序列（活动入参/顺序/等待点）与
+        抽取前逐字相同，dev-lane 的 run() 改为一行 `await self._prepare_workspace_step()`，
+        对在途实例重放同样是同一串命令。轻道（light_lane.py）直接复用本方法。
+
+        布尔返回面保留（恒 True）：两条泳道的调用点写法一致，将来加「放弃」出路时
+        调用方无需改形状。"""
         while True:
             # Lane field gate (t260824-04/-10/-11): the creation path validates at the
             # single ticket-start point; this catches bypasses from "old payloads /
@@ -2094,16 +2110,106 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 ok=bool(raw.get("ok", True)), kind=str(raw.get("kind") or ""),
                 action=str(raw.get("action") or ""), path=str(raw.get("path") or ""),
                 error=str(raw.get("error") or ""))
-            self.meta["workspace_prep"] = {"ok": res.ok, "kind": res.kind, "action": res.action,
+            self.meta["workspace_prep"] = {"ok": res.ok, "kind": res.kind,
+                                           "action": res.action,
                                            "path": res.path, "error": res.error}
             self._touch()
             if res.ok:
                 self._mark("workspace", "ready",
                            "prepare_workspace: %s/%s" % (res.kind, res.action))
-                break
+                return True
             await self._blocked("workspace", "工作空间准备失败：%s" % (res.error or "未知"))
             if self._rework is not None:
-                self._apply_rework("create_plan")  # target stage is taken over by the main loop
+                # target stage is taken over by the main loop
+                self._apply_rework(self.STAGES[0].id)
+
+    async def _ui_evidence_step(self) -> str:
+        """UI 票截图证据（条件步；非 UI 票零活动）。
+
+        宿主令 260930（light-lane，直修无票）：内容**逐字**取自 DevLaneWorkflow.run() 的汇合点块（同一
+        ui_changed_paths 判定活动、同一 prepare_ui_evidence、同一 self.results
+        ['ui_evidence'] 记账、同一软失败不拦主链口径、同一两条 patched 门——老在途实例
+        重放的命令序列逐字不变）。返回 ui_ctx（给下游 agent 上下文/票面用；非 UI 票或
+        失败时为空或含「证据缺失」说明）。"""
+        # UI evidence (UI tickets): the worker runs the isolated bench after the
+        # commit and before the mechanical tests (soft failures caught by the gate).
+        # UI-ticket judgment (t260904-13 KI-044): inside the patched gate the diff
+        # source switches — the activity shares a source with merge_check 3.6;
+        # unpatched (existing instances replaying) keeps the declaration-based old
+        # branch, with the command sequence strictly matching old history. The old
+        # chain tail (integration_review branch) freezes the old judgment.
+        ui_ctx = ""
+        ui_is_ticket = False
+        ui_judge_note = ""
+        if workflow.patched(UI_EVIDENCE_PATCH_ID):
+            if workflow.patched(UI_DIFF_PATCH_ID):
+                try:
+                    craw = await workflow.execute_activity(
+                        ui_changed_paths,
+                        UiChangedPathsArgs(
+                            ticket_id=self.ticket_id,
+                            worktree=str(self.meta.get("worktree") or ""),
+                            branch=str(self.meta.get("branch") or ""),
+                            base_ref=str(self.meta.get("base_ref") or "")),
+                        start_to_close_timeout=UI_EVIDENCE_TO,
+                        retry_policy=RETRY)
+                    cp = craw if isinstance(craw, UiChangedPathsResult) else UiChangedPathsResult(
+                        ui_paths=[str(x) for x in (craw.get("ui_paths") or [])],
+                        detail=str(craw.get("detail") or ""))
+                    ui_is_ticket = bool(cp.ui_paths)
+                    ui_judge_note = cp.detail or (
+                        "diff 未命中 UI 路径 → 非 UI 票，跳过实拍" if not ui_is_ticket else "")
+                except Exception as e:
+                    # fail-closed: an activity failure is treated as "UI ticket
+                    # unproven" (capture anyway, the gate catches it)
+                    ui_is_ticket = True
+                    ui_judge_note = ("ui_changed_paths 故障 fail-closed：%s: %s%s"
+                                     % (type(e).__name__, e,
+                                        shared.exception_chain_note(e)))
+                self._log("UI 票判定（diff 源）：%s" % ui_judge_note)
+            else:
+                # Unpatched branch (existing instances replaying): the
+                # declaration-based judgment is kept as-is
+                ui_is_ticket = is_ui_write_set(list(self.meta.get("write_set") or []))
+        if workflow.patched(UI_EVIDENCE_PATCH_ID) and ui_is_ticket:
+            try:
+                uiraw = await workflow.execute_activity(
+                    prepare_ui_evidence,
+                    UiEvidenceArgs(ticket_id=self.ticket_id,
+                                   worktree=str(self.meta.get("worktree") or "")),
+                    start_to_close_timeout=UI_EVIDENCE_TO, retry_policy=RETRY)
+                ui = uiraw if isinstance(uiraw, UiEvidenceResult) else UiEvidenceResult(
+                    ok=bool(uiraw.get("ok")), shots=[str(x) for x in (uiraw.get("shots") or [])],
+                    shot_lines=[str(x) for x in (uiraw.get("shot_lines") or [])],
+                    detail=str(uiraw.get("detail") or ""), skipped=bool(uiraw.get("skipped")))
+                self.results["ui_evidence"] = {
+                    "status": "ok" if ui.ok else "failed",
+                    "summary": ui.detail, "report": "", "deliverables": list(ui.shots),
+                    "files_changed": [],
+                    "evidence": (("【UI 票判定（diff 源）】%s\n" % ui_judge_note)
+                                 if ui_judge_note else "") + ui.detail,
+                    "gen": 0}
+                if ui.ok:
+                    ui_ctx = "【UI 截图证据（.sandbar/screenshots/，验收必看）】\n" + \
+                        "\n".join("- %s" % ln for ln in (ui.shot_lines or ui.shots))
+                else:
+                    ui_ctx = "【UI 截图证据缺失】%s（验收按「无截图证据」如实记录）" % ui.detail
+                self._log("prepare_ui_evidence：%s" % (ui.detail or ("ok" if ui.ok else "failed")))
+            except Exception as e:  # infra failure: noted, main chain unaffected, merge_check gate catches it
+                # t260929-18：ui_ctx 进 agent 上下文/人审面 → 链下钻。
+                ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s%s" % (
+                    type(e).__name__, e, shared.exception_chain_note(e))
+                self._log("prepare_ui_evidence 故障（不拦主链，merge_check 闸兜底）：%s" % str(e)[:200])
+        return ui_ctx
+
+    # ---------- main flow (direct activity orchestration) ----------
+    @workflow.run
+    async def run(self, inp: TicketInput) -> Dict[str, Any]:
+        self._init(inp)
+
+        # 1) prepare_workspace (code, no agent; failure → blocked waiting for retry/rework)
+        # 宿主令 260930（light-lane，直修无票）：原内联块抽为共用 helper（循环在 helper 内，命令序列逐字不变）
+        await self._prepare_workspace_step()
 
         # t260904-18 KI-050 gate 3: preload the ui_evidence declaration (the disk read
         # happens in an activity, the workflow only reads meta = replay safe).
@@ -2529,75 +2635,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     continue
                 self._log("汇合统一落盘：%s（泳道 commit 数 %s）"
                           % (s.note or "干净", s.lane_commits))
-                # UI evidence (UI tickets): the worker runs the isolated bench after the
-                # commit and before the mechanical tests (soft failures caught by the gate).
-                # UI-ticket judgment (t260904-13 KI-044): inside the patched gate the diff
-                # source switches — the activity shares a source with merge_check 3.6;
-                # unpatched (existing instances replaying) keeps the declaration-based old
-                # branch, with the command sequence strictly matching old history. The old
-                # chain tail (integration_review branch) freezes the old judgment.
-                ui_ctx = ""
-                ui_is_ticket = False
-                ui_judge_note = ""
-                if workflow.patched(UI_EVIDENCE_PATCH_ID):
-                    if workflow.patched(UI_DIFF_PATCH_ID):
-                        try:
-                            craw = await workflow.execute_activity(
-                                ui_changed_paths,
-                                UiChangedPathsArgs(
-                                    ticket_id=self.ticket_id,
-                                    worktree=str(self.meta.get("worktree") or ""),
-                                    branch=str(self.meta.get("branch") or ""),
-                                    base_ref=str(self.meta.get("base_ref") or "")),
-                                start_to_close_timeout=UI_EVIDENCE_TO,
-                                retry_policy=RETRY)
-                            cp = craw if isinstance(craw, UiChangedPathsResult) else UiChangedPathsResult(
-                                ui_paths=[str(x) for x in (craw.get("ui_paths") or [])],
-                                detail=str(craw.get("detail") or ""))
-                            ui_is_ticket = bool(cp.ui_paths)
-                            ui_judge_note = cp.detail or (
-                                "diff 未命中 UI 路径 → 非 UI 票，跳过实拍" if not ui_is_ticket else "")
-                        except Exception as e:
-                            # fail-closed: an activity failure is treated as "UI ticket
-                            # unproven" (capture anyway, the gate catches it)
-                            ui_is_ticket = True
-                            ui_judge_note = ("ui_changed_paths 故障 fail-closed：%s: %s%s"
-                                             % (type(e).__name__, e,
-                                                shared.exception_chain_note(e)))
-                        self._log("UI 票判定（diff 源）：%s" % ui_judge_note)
-                    else:
-                        # Unpatched branch (existing instances replaying): the
-                        # declaration-based judgment is kept as-is
-                        ui_is_ticket = is_ui_write_set(list(self.meta.get("write_set") or []))
-                if workflow.patched(UI_EVIDENCE_PATCH_ID) and ui_is_ticket:
-                    try:
-                        uiraw = await workflow.execute_activity(
-                            prepare_ui_evidence,
-                            UiEvidenceArgs(ticket_id=self.ticket_id,
-                                           worktree=str(self.meta.get("worktree") or "")),
-                            start_to_close_timeout=UI_EVIDENCE_TO, retry_policy=RETRY)
-                        ui = uiraw if isinstance(uiraw, UiEvidenceResult) else UiEvidenceResult(
-                            ok=bool(uiraw.get("ok")), shots=[str(x) for x in (uiraw.get("shots") or [])],
-                            shot_lines=[str(x) for x in (uiraw.get("shot_lines") or [])],
-                            detail=str(uiraw.get("detail") or ""), skipped=bool(uiraw.get("skipped")))
-                        self.results["ui_evidence"] = {
-                            "status": "ok" if ui.ok else "failed",
-                            "summary": ui.detail, "report": "", "deliverables": list(ui.shots),
-                            "files_changed": [],
-                            "evidence": (("【UI 票判定（diff 源）】%s\n" % ui_judge_note)
-                                         if ui_judge_note else "") + ui.detail,
-                            "gen": 0}
-                        if ui.ok:
-                            ui_ctx = "【UI 截图证据（.sandbar/screenshots/，验收必看）】\n" + \
-                                "\n".join("- %s" % ln for ln in (ui.shot_lines or ui.shots))
-                        else:
-                            ui_ctx = "【UI 截图证据缺失】%s（验收按「无截图证据」如实记录）" % ui.detail
-                        self._log("prepare_ui_evidence：%s" % (ui.detail or ("ok" if ui.ok else "failed")))
-                    except Exception as e:  # infra failure: noted, main chain unaffected, merge_check gate catches it
-                        # t260929-18：ui_ctx 进 agent 上下文/人审面 → 链下钻。
-                        ui_ctx = "【UI 截图证据缺失】activity 故障：%s: %s%s" % (
-                            type(e).__name__, e, shared.exception_chain_note(e))
-                        self._log("prepare_ui_evidence 故障（不拦主链，merge_check 闸兜底）：%s" % str(e)[:200])
+                # UI 证据（仅 UI 票）：宿主令 260930（light-lane，直修无票） 抽块——本处改为调用
+                # 共用 helper _ui_evidence_step()（内容逐字即原块，两条泳道同源；
+                # 老在途实例重放的命令序列逐字不变）。
+                ui_ctx = await self._ui_evidence_step()
                 phase = "run_integration_tests"
                 continue
 
