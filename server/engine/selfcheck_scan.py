@@ -42,24 +42,11 @@ from shared import (  # noqa: E402
     scan_summary,
 )
 
-PASS = 0
-FAIL = 0
-FAILURES = []
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok/section 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("  ok %s" % label)
-    else:
-        FAIL += 1
-        FAILURES.append(label)
-        print("  FAIL %s" % label)
-
-
-def section(t: str) -> None:
-    print("\n== %s" % t)
+_rep = Selfcheck(track_failures=True, section_fmt="\n== %s")
+ok = _rep.ok
+section = _rep.section
 
 
 NOW = 1_800_000_000  # 固定参照时间（自测不依赖 wall-clock）
@@ -214,9 +201,9 @@ async def _async_checks() -> ScanReport:
 
 asyncio.run(_async_checks())
 
-print("\n%d passed, %d failed" % (PASS, FAIL))
-if FAILURES:
-    print("FAILURES:", file=sys.stderr)
-    for f in FAILURES:
+print("\n%d passed, %d failed" % (_rep.passes, _rep.fails))
+if _rep.failures:
+    print("_rep.failures:", file=sys.stderr)
+    for f in _rep.failures:
         print("  - %s" % f, file=sys.stderr)
-sys.exit(0 if FAIL == 0 else 1)
+sys.exit(0 if _rep.fails == 0 else 1)

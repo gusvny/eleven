@@ -35,22 +35,11 @@ from shared import (
     validate_write_set_args,
 )
 
-PASS = 0
-FAIL = 0
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok/section 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("  ✓ %s" % label)
-    else:
-        FAIL += 1
-        print("  ✗ %s" % label)
-
-
-def section(title: str) -> None:
-    print("\n%s" % title)
+_rep = Selfcheck(ok_fmt="  ✓ %s", fail_fmt="  ✗ %s")
+ok = _rep.ok
+section = _rep.section
 
 
 # ---------- A. 建票写集校验 ----------
@@ -149,5 +138,5 @@ ok("降级" in aa and "capture.mjs" in aa, "capture-lane 失败软降级回退 c
 ok('validate_write_set_args' in (Path(__file__).parent / "client.py").read_text(encoding="utf-8"),
    "client.py 建票口接 validate_write_set_args")
 
-print("\n结果：%d 绿 / %d 红" % (PASS, FAIL))
-sys.exit(0 if FAIL == 0 else 1)
+print("\n结果：%d 绿 / %d 红" % (_rep.passes, _rep.fails))
+sys.exit(0 if _rep.fails == 0 else 1)

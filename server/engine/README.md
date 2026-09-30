@@ -17,10 +17,10 @@ cd server/engine
 ./setup.sh          # ① 装环境：下 temporal 单二进制 → bin/temporal；建 .venv 装 temporalio
 ./run_server.sh     # ② 另开一个 shell：temporal dev server（SQLite 落盘，免 docker/postgres）
                     #    gRPC 127.0.0.1:7233 / Web UI http://127.0.0.1:8233
-./demo.sh           # ③ 一键跑四个 demo（自己起停 worker，输出同时落 out/）
+./demo.sh           # ③ 一键跑 demo（持久性 demo D，demo_durability.sh 自己起停 worker，输出落 out/）
 ```
 
-只想手动玩：`./run_worker.sh`（另一个 shell 常驻）+ `.venv/bin/python demo_happy.py`。
+只想手动玩：`./run_worker.sh`（另一个 shell 常驻）。
 
 **为什么不是 `brew install temporal`**：本机 `/opt/homebrew` 对执行 agent 的沙箱只读
 （`touch /opt/homebrew/x` → Operation not permitted，且本会话审批被禁用无法升级权限）。
@@ -38,7 +38,7 @@ python 侧 `.venv`（系统 python 3.9.6）+ **temporalio 1.18.2**。
 | `activities.py` | 有副作用的动作：`machine_qc`（跑真 qc_run）/`ticket_scan`（只读 list）/加工·审校·发布占位 |
 | `worker.py` | worker（注册 workflow+activity 到 task queue `sandbar`，LEGACY `suyou-poc` 双 poll 过渡） |
 | `fixtures/qc_red_stub.py` | 红灯 fixture：印一份与 qc_run **同契约**的 green=false JSON（见 §4） |
-| `demo_happy.py` / `demo_fail.py` / `demo_schedule.py` / `demo_durability.sh` | 四个 demo |
+| `demo_durability.sh` / `demo_schedule.py` | 持久性 demo / 调度演示脚本（v1 交互演示面三个文件已退役删除，见 §8.4；demo_schedule.py 留守——integration/t260907-04 场景仍以它为仓内唯一在树建调度走廊） |
 | `demo.sh` | 一键全跑 + 存档 |
 | `out/` | **演示输出存档**（demo-A/B/C/D + demo-full.txt + git-baseline.txt） |
 
@@ -331,14 +331,18 @@ marker）→ SDK memo 固化 False（temporalio workflow_patch 语义：同 id �
 失败在案）；锁文件 b2 反例已机械钉住该机理。登记：KI-094（回放兼容故障族专条，
 merge 关卡落 notes/debts/known-issues.md）；处置＝follow-up 票门升级 per-entry。
 
-### 8.4 端到端演示（步1，260904 起演示面已断——属预期）
+### 8.4 端到端演示（步1——v1 交互演示面已退役，t261001-04 删除）
 
-`./demo_cli.sh`（输出落 `out/demo-step1-cli.txt`）：start content-pipeline → query 读 stage
-（approve/awaiting-human）→ signal 签 approve → 真 qc_run(260627) 绿灯 → 停在 final-review →
-signal 签 final-review → publish(dry-run) → COMPLETED；另跑 schedule-list + cancel，最后优雅停 worker。
-**260904 宿主令 content-pipeline 模板退役、signal 子命令退役后，demo_happy/demo_fail/
-demo_schedule/demo_cli.sh 等 v1 演示面的 start/signal 调用会被结构化拒收——属预期，
-演示脚本按原样保留作历史参考，不再维护。**
+步1 时代的 CLI 演示（start content-pipeline → query 读 stage → signal 签 approve →
+真 qc_run 绿灯 → 停在 final-review → signal 签 final-review → publish(dry-run) → COMPLETED，
+另跑 schedule-list + cancel，最后优雅停 worker）及配套交互演示脚本，在 260904 宿主令
+content-pipeline 模板退役、signal 子命令退役后，其 start/signal 调用会被结构化拒收——
+演示面已死。三个演示文件已于 t261001-04 删除（历史在 git），README/demo.sh 的相关引用
+同步清理。例外：demo_schedule.py 留守未删——integration/t260907-04 场景
+（dispatcher-scan schedule 旧 ID 退役）仍以 `demo_schedule.demo_schedule(client)` 为
+仓内唯一在树建调度走廊，删它会让该集成场景红；其退场随专门票处置（连同场景一起改）。
+仍在服务的演示资产是 demo_common.py 与 demo_durability.sh
+（`./demo.sh` 一键跑持久性 demo）。
 
 零改动证据：`out/zero-touch-step1.txt`（现有工单 / server/tools/ticket.py / books 零改动）。
 

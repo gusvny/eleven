@@ -212,18 +212,10 @@ STUBS = [
 
 # ---------- assertion framework ----------
 
-PASS = 0
-FAIL = 0
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok() 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("ok - %s" % label)
-    else:
-        FAIL += 1
-        print("FAIL - %s" % label, file=sys.stderr)
+_rep = Selfcheck(ok_fmt="ok - %s", fail_fmt="FAIL - %s", fail_stream=sys.stderr)
+ok = _rep.ok
 
 
 async def wait_for(handle, cond_fn, timeout_s: float, label: str) -> bool:
@@ -306,8 +298,8 @@ async def main() -> int:
             ok(snap["stage"] == "merge" and snap["stage_state"] == "awaiting-human",
                "相二：终态=merge 人审门挂起等 sign（awaiting-human）")
 
-    print("PASS=%d FAIL=%d" % (PASS, FAIL), file=sys.stderr)
-    return 0 if FAIL == 0 else 1
+    print("PASS=%d FAIL=%d" % (_rep.passes, _rep.fails), file=sys.stderr)
+    return 0 if _rep.fails == 0 else 1
 
 
 if __name__ == "__main__":

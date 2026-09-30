@@ -63,18 +63,10 @@ Q_C = "t26091629-selfcheck-c"
 
 # ---------- assertion framework（ki061 同款） ----------
 
-PASS = 0
-FAIL = 0
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok() 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("ok - %s" % label)
-    else:
-        FAIL += 1
-        print("FAIL - %s" % label, file=sys.stderr)
+_rep = Selfcheck(ok_fmt="ok - %s", fail_fmt="FAIL - %s", fail_stream=sys.stderr)
+ok = _rep.ok
 
 
 class _LogCapture(logging.Handler):
@@ -200,8 +192,8 @@ async def main() -> int:
            "C：停机取消后自动重跑一次成功（calls=%s，res=%s）"
            % (CTRL["calls"].get("t-selfcheck-c"), res_c))
 
-    print("PASS=%d FAIL=%d" % (PASS, FAIL), file=sys.stderr)
-    return 0 if FAIL == 0 else 1
+    print("PASS=%d FAIL=%d" % (_rep.passes, _rep.fails), file=sys.stderr)
+    return 0 if _rep.fails == 0 else 1
 
 
 if __name__ == "__main__":

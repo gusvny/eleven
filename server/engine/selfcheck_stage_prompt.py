@@ -31,24 +31,11 @@ sys.path.insert(0, str(POC))
 
 from shared import Stage, build_stage_prompt  # noqa: E402
 
-PASS = 0
-FAIL = 0
-FAILURES = []
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok/section 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("  ok %s" % label)
-    else:
-        FAIL += 1
-        FAILURES.append(label)
-        print("  FAIL %s" % label)
-
-
-def section(name: str) -> None:
-    print("\n%s" % name)
+_rep = Selfcheck(track_failures=True)
+ok = _rep.ok
+section = _rep.section
 
 
 ST = Stage(id="implement", name="实现", role="developer",
@@ -142,9 +129,9 @@ _old.write_text(_json.dumps({"status": "ok", "summary": "s", "evidence": "e"}), 
 r = _read_result(_old)
 ok(r.report == "" and r.summary == "s", "旧结果文件无 report → report 空串（回落不炸）")
 
-print("\n%d passed, %d failed" % (PASS, FAIL))
-if FAILURES:
-    print("FAILURES:", file=sys.stderr)
-    for f in FAILURES:
+print("\n%d passed, %d failed" % (_rep.passes, _rep.fails))
+if _rep.failures:
+    print("_rep.failures:", file=sys.stderr)
+    for f in _rep.failures:
         print("  - %s" % f, file=sys.stderr)
-sys.exit(0 if FAIL == 0 else 1)
+sys.exit(0 if _rep.fails == 0 else 1)

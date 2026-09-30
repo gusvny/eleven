@@ -43,24 +43,12 @@ from shared import (  # noqa: E402
     match_ui_paths,
 )
 
-PASS = 0
-FAIL = 0
-FAILURES = []
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok/section 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("  ok  %s" % label)
-    else:
-        FAIL += 1
-        FAILURES.append(label)
-        print("  RED %s" % label, file=sys.stderr)
-
-
-def section(name: str) -> None:
-    print("\n== %s ==" % name)
+_rep = Selfcheck(ok_fmt="  ok  %s", fail_fmt="  RED %s", fail_stream=sys.stderr,
+                 section_fmt="\n== %s ==", track_failures=True)
+ok = _rep.ok
+section = _rep.section
 
 
 # ---------- A. is_ui_write_set 口径 ----------
@@ -334,10 +322,10 @@ with tempfile.TemporaryDirectory() as td:
     ok(r.returncode == 0 and "NODE_SMOKE_GREEN" in r.stdout,
        "workbench 宿主半冒烟全绿（node 直测 TS）")
     if r.returncode != 0:
-        FAILURES.append("workbench 宿主半冒烟: %s" % (r.stderr or r.stdout)[-300:])
+        _rep.failures.append("workbench 宿主半冒烟: %s" % (r.stderr or r.stdout)[-300:])
 
 # 汇总
-print("\n%d 绿 / %d 红" % (PASS, FAIL))
-if FAILURES:
-    print("红灯：", *FAILURES, sep="\n  - ", file=sys.stderr)
+print("\n%d 绿 / %d 红" % (_rep.passes, _rep.fails))
+if _rep.failures:
+    print("红灯：", *_rep.failures, sep="\n  - ", file=sys.stderr)
     sys.exit(1)

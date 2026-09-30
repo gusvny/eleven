@@ -53,24 +53,11 @@ from shared import (  # noqa: E402
     parse_arbitration_summary,
 )
 
-PASS = 0
-FAIL = 0
-FAILURES = []
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok/section 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("  ok %s" % label)
-    else:
-        FAIL += 1
-        FAILURES.append(label)
-        print("  FAIL %s" % label)
-
-
-def section(name: str) -> None:
-    print("\n%s" % name)
+_rep = Selfcheck(track_failures=True)
+ok = _rep.ok
+section = _rep.section
 
 
 section("A parse_arbitration_summary（verdict 提取）")
@@ -327,9 +314,9 @@ ok(_k1 == "t-x-integration", "arbitrate 边默认会话 id=ticket-role（串行�
 ok(_k2 == "t-x-acceptance", "acceptance 边专用会话 id=ticket-stage")
 ok(_k1 != _k2, "并发双边会话 id 互斥（双进程不同写一个 session 文件）")
 
-print("\n%d passed, %d failed" % (PASS, FAIL))
-if FAILURES:
-    print("FAILURES:", file=sys.stderr)
-    for f in FAILURES:
+print("\n%d passed, %d failed" % (_rep.passes, _rep.fails))
+if _rep.failures:
+    print("_rep.failures:", file=sys.stderr)
+    for f in _rep.failures:
         print("  - %s" % f, file=sys.stderr)
-sys.exit(0 if FAIL == 0 else 1)
+sys.exit(0 if _rep.fails == 0 else 1)

@@ -76,20 +76,10 @@ from shared import (  # noqa: E402
     MergeCheckArgs,
 )
 
-PASS = 0
-FAIL = 0
-FAILURES = []
+from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok() 收敛到唯一定义，输出格式逐字不变
 
-
-def ok(cond: bool, label: str) -> None:
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        print("  ok %s" % label)
-    else:
-        FAIL += 1
-        FAILURES.append(label)
-        print("  FAIL %s" % label)
+_rep = Selfcheck(track_failures=True)
+ok = _rep.ok
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -485,12 +475,12 @@ def main() -> int:
     if not keep:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
-    print("\n%d 项过 / %d 项红" % (PASS, FAIL))
-    if FAILURES:
+    print("\n%d 项过 / %d 项红" % (_rep.passes, _rep.fails))
+    if _rep.failures:
         print("红灯明细：", file=sys.stderr)
-        for f in FAILURES:
+        for f in _rep.failures:
             print("  - %s" % f, file=sys.stderr)
-    return 0 if FAIL == 0 else 1
+    return 0 if _rep.fails == 0 else 1
 
 
 if __name__ == "__main__":
