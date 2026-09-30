@@ -42,6 +42,7 @@ updated: 2026-09-28
 | `design/design-doc-writing-guide.md` | Design document writing standard |
 | `design/sandbar-project-onboarding-contract-v1.md` | sandbar project onboarding contract v1 (key table / handover faces / append-style change log) |
 | `design/project-external-workflow-template-loader-v1.md` | Project external workflow template loader v1 (t260924-04: register-then-load / per-template isolated rejection / evolution discipline / determinism rules) |
+| `design/devlane-lite-v1.md` | Lightweight dev lane: effort proportional to risk (three profiles, round economy, proportional gate, scoped execution environments) — **draft, awaiting host decision** |
 
 ## ops (operations — build / deploy / monitor)
 
