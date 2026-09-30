@@ -1441,10 +1441,15 @@ def _result_gone_detail(where: str, rc, rfile, log_file) -> str:
     retry_qc（让本段重写）——旧文案只说「未写」，人无处下手。"""
     kind = _result_file_state(rfile)
     if kind == "unreadable":
+        # 260930（dengzhufpv E1 的 runbook 更正／批次 A）：**两步处置**。实测（t260929-15）
+        # 只发 retry_qc 就自愈——重跑落到**新一代号文件名**，agent 的「文件在场=本段已完成」
+        # 幂等锚点在新名字上自然失效；挪档要动泳道工作区，能不动就不动，故降为第二步。
         return ("%s agent 退出（rc=%s）但结果文件**在场却读不出**（JSON 坏/被撕裂/形状"
-                "不合法）：%s（日志 %s）——文件在场≠「没干活」；处置：把该文件挪走留证"
-                "（agent 的幂等判据是「文件在场=本段已完成」，不改名它会拒绝重写）"
-                "后发 retry_qc 让本段重写"
+                "不合法）：%s（日志 %s）——文件在场≠「没干活」。处置两步："
+                "①**先只发 retry_qc**（重跑会落到新一代号文件名，幂等锚点自然失效，实测"
+                "多数情况直接自愈）；②仅当**同一文件名上复现**同一失败时，才把该文件挪走留证"
+                "（agent 的幂等判据是「文件在场=本段已完成」，同名不改名它会拒绝重写）后再"
+                "发 retry_qc"
                 % (where, rc, rfile, log_file))
     return ("%s agent 退出（rc=%s）但未写结果文件 %s（日志 %s）"
             % (where, rc, rfile, log_file))
@@ -1462,6 +1467,12 @@ def _read_result(path: Path) -> Optional[StageResult]:
     # (absent/ok/malformed) so consumers can go visibly red on that basis.
     fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
     legs, leg_shape, leg_dropped = normalize_handover_runs(raw.get("handover_runs"))
+    # 260930（nusuyou N⑦／批次 B）：**入账前语法自检**。契约要求移交命令「可直接在泳道根
+    # 执行」，而 t260929-38 实案里 18/18 带字面 `cd <lane_root> && …`（`<` 是重定向）⇒
+    # 解析期即死、零执行，却因「单列计数、不进主口径」而**不拦票**（"一条都没跑"与"跑了但红"
+    # 同形）。此处逐条 `sh -n` 判语法，不过者打 `syntax_bad` 标（不改内容、不丢命令——债表
+    # 照记），执行面据此**不执行并三态具名**。
+    legs = _mark_handover_syntax(legs)
     # t260917-08（review N2）：回执若自带弃单名单（stub 路径成套落盘），读回时并集
     # 保留（保序去重）——重读路径的 normalize 只会再见到合法条目（dropped=[]），
     # 不并=名单蒸发；两源并存也不丢任一侧。
@@ -7044,6 +7055,35 @@ async def run_handover_leg(leg: Dict[str, str], cwd: Path,
     return {"name": name, "cmd": cmd_s, "exit": p.returncode, "output_tail": tail}
 
 
+def _handover_syntax_error(cmd: str) -> str:
+    """`/bin/sh -n` 语法自检：合法返回 ""，否则返回 shell 的 stderr 尾（260930 批次 B）。
+
+    为什么用 `-n`：只解析不执行（零副作用），正是「这条命令能不能在泳道根跑起来」这一问。
+    超时/异常一律返回**非空**说明（fail-closed：判不了就当不过，让人看见，而不是放它去跑）。"""
+    try:
+        p = subprocess.run(["/bin/sh", "-n", "-c", str(cmd or "")],
+                           capture_output=True, text=True, timeout=10)
+    except Exception as e:  # noqa: BLE001
+        return "语法自检不可执行：%s: %s" % (type(e).__name__, e)
+    if p.returncode == 0:
+        return ""
+    return ((p.stderr or p.stdout or "").strip() or "sh -n 退出码 %s" % p.returncode)[:240]
+
+
+def _mark_handover_syntax(legs: Any) -> Any:
+    """入账前逐条语法自检（就地打标，不改命令内容；畸形条目原样放过由既有归一化负责）。"""
+    if not isinstance(legs, list):
+        return legs
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        err = _handover_syntax_error(str(leg.get("cmd") or ""))
+        leg["syntax_bad"] = bool(err)
+        if err:
+            leg["syntax_note"] = err
+    return legs
+
+
 async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
     """移交命令整单执行（t260917-08）：_run_scenarios 尾部的消费路径抽成独立函数——
     验收②「移交清单被后续段消费并执行」的离线桩/场景可直调真实现，不必起真
@@ -7066,11 +7106,20 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
     async def _one(i: int, leg: Any) -> "tuple[int, Dict[str, Any]]":
         if not isinstance(leg, dict):
             # 前缀由段尾统一补（details 单点加 handover: 头，并发/串行同形）
-            return i, {"name": "<畸形分支>", "cmd": "", "exit": -1,
+            return i, {"name": "<畸形分支>", "cmd": "", "exit": -1, "state": "syntax-bad",
                        "output_tail": "移交命令非对象（记名不执行）"}
+        if leg.get("syntax_bad"):
+            # 260930（批次 B·三态具名）：语法不过的条目**不执行**——它跑起来必然是解析期即死
+            # （零字节验证），执行只会产出"跑了但红"的假象；如实报「语法坏」，并点名契约面。
+            return i, {"name": str(leg.get("name") or "<无名>"),
+                       "cmd": str(leg.get("cmd") or ""), "exit": -1,
+                       "state": "syntax-bad",
+                       "output_tail": ("未执行：移交命令**语法不过**（契约要求可直接在泳道根执行）："
+                                       "%s" % str(leg.get("syntax_note") or "")[:200])}
         try:
             async with sem:
                 r = await run_handover_leg(leg, cwd)
+                r["state"] = "executed-ok" if r.get("exit") == 0 else "executed-red"
         except Exception as e:                 # noqa: BLE001 —— 单条不毁整段（见 docstring）
             def _safe(v: Any) -> str:
                 """畸形成员读不动也不许再抛（例外分支自己再炸=白兜）。"""
@@ -7086,18 +7135,60 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
 
     _rs = await asyncio.gather(*[_one(i, leg)
                                  for i, leg in enumerate(handover_runs or [])])
+    # 260930（nusuyou E2／批次 A）：**非零退出条目串行复核一次，报告以复核为准**。
+    # 并发的前提是「移交命令彼此独立」（见 docstring），而「发布/安装 + 校验其产物」这类天然
+    # 有序的命令对在同批并发里必然对着**发布前**状态判 ⇒ 闸报假失败（t260929-20 实案：闸报
+    # 15 跑 7 过 8 败、交付全绿；把关人逐条手跑 12/12 exit 0；产物落地时刻在闸窗口最末尾）。
+    # 复核只在**失败**条目上发生（常态零成本：全绿批零复核），原始并发结果**两态留痕**在
+    # detail 里，绝不静默改判——真红复核后仍红。
+    for i, leg in enumerate(handover_runs or []):
+        r = next((x for j, x in _rs if j == i), None)
+        # 只复核「真跑出非零退出」的条目：起飞异常（exit=None）不是对命令结果的判定，
+        # 复核只会再炸一次；语法坏条目本就没执行，复核无意义。
+        if not isinstance(r, dict) or r.get("state") == "syntax-bad" \
+                or r.get("exit") in (0, None):
+            continue
+        if not isinstance(leg, dict):
+            continue
+        try:
+            r2 = await run_handover_leg(leg, cwd)          # 此时批已跑完，串行=无并发干扰
+        except Exception as e:                             # noqa: BLE001
+            def _sf(v: Any) -> str:
+                """畸形成员读不动也不许再抛（`__str__` 自身炸是 t260920-01 的形态）。"""
+                try:
+                    return str(v or "")
+                except Exception:                          # noqa: BLE001
+                    return "<不可读>"
+            r2 = {"name": _sf(leg.get("name")), "cmd": _sf(leg.get("cmd")),
+                  "exit": None, "output_tail": "串行复核起飞异常：%s: %s"
+                                               % (type(e).__name__, e)}
+        r["recheck"] = r2
     ran = passed = failed = 0
+    syntax_bad = 0
     details: List[Dict[str, Any]] = []
     for _i, r in sorted(_rs, key=lambda x: x[0]):   # 输入序回填（并发不乱序）
         ran += 1
-        if r["exit"] == 0:
+        rc = r.get("recheck") if isinstance(r.get("recheck"), dict) else r
+        ok = rc.get("exit") == 0
+        # state 一律按**最终判定**（复核为准）：并发窗内被判红的条目若复核转绿，state 就是
+        # executed-ok（两态差异由下行的尾注承担，不在 state 上留假红）。
+        state = "syntax-bad" if str(r.get("state")) == "syntax-bad" else \
+            ("executed-ok" if ok else "executed-red")
+        if state == "syntax-bad":
+            syntax_bad += 1
+        if ok:
             passed += 1
         else:
-            failed += 1
+            failed += 1                      # 语法坏照计 failed（fail-closed：绝不因"没执行"变绿）
+        tail = str(rc.get("output_tail") or "")
+        if isinstance(r.get("recheck"), dict):
+            tail += "｜并发首跑 exit=%s（%s）；串行复核 exit=%s → **以复核为准**" % (
+                r.get("exit"), "并发窗内误判" if ok else "真红", rc.get("exit"))
         details.append({"name": "handover:%s" % r["name"], "cmd": r["cmd"],
-                        "exit": r["exit"] if r["exit"] is not None else -1,
-                        "output_tail": r["output_tail"]})
-    return {"ran": ran, "passed": passed, "failed": failed, "details": details}
+                        "exit": rc.get("exit") if rc.get("exit") is not None else -1,
+                        "state": state, "output_tail": tail})
+    return {"ran": ran, "passed": passed, "failed": failed,
+            "syntax_bad": syntax_bad, "details": details}
 
 
 def _handover_conc() -> int:

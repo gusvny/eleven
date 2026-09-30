@@ -1884,6 +1884,39 @@ def _terminal_face_ts_txt(ts: int) -> str:
     return time.strftime("%m-%d %H:%M:%S", time.localtime(ts)) if ts else ""
 
 
+async def _terminal_face_last_signal(handle: Any) -> Dict[str, Any]:
+    """终态票「最后一个信号名」（260930 批次 B，E5 的取证栏）：只读事件历史，失败=不可得。
+
+    为什么是事件历史：终态后票面快照不可查（引擎有意如此），而信号事件**只**活在历史里——
+    「终结前有没有 cancel_notice 留痕」这个问题只有历史能答（dengzhufpv E4 实案：历史里
+    只有 pause，理由串却写着「宿主当面决定」，靠翻历史才发现）。"""
+    try:
+        hist = await asyncio.wait_for(handle.fetch_history(),
+                                      timeout=TERMINAL_FACE_RESULT_TIMEOUT_S)
+        names = []
+        for ev in getattr(hist, "events", None) or []:
+            attrs = getattr(ev, "workflow_execution_signaled_event_attributes", None)
+            if attrs is None:
+                continue
+            nm = str(getattr(attrs, "signal_name", "") or "")
+            if nm:
+                names.append(nm)
+        if not names:
+            return {"last_signal": "", "last_signal_available": False,
+                    "last_signal_note": "事件历史里零信号事件（本票从未收到任何信号）"}
+        return {"last_signal": names[-1], "last_signal_available": True,
+                "last_signal_note": "来源：事件历史最后一个 signal 事件的 signalName",
+                "signal_names": names[-10:]}
+    except asyncio.TimeoutError:
+        return {"last_signal": "", "last_signal_available": False,
+                "last_signal_note": ("不可得：事件历史读取超时（%ds）"
+                                     % int(TERMINAL_FACE_RESULT_TIMEOUT_S))}
+    except Exception as e:  # noqa: BLE001 —— 只读取证面绝不外抛
+        return {"last_signal": "", "last_signal_available": False,
+                "last_signal_note": "不可得：事件历史读取失败 %s: %s"
+                                    % (type(e).__name__, str(e)[:120])}
+
+
 async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
                                  exec_status: str) -> Dict[str, Any]:
     """终态票可渲染失败面（ticket-query kind=terminal 回执的 face 键，t260919-02）。
@@ -1947,6 +1980,7 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         inst = per = ""
     if not inst:
         inst, per = _legacy_inspection_instance_period_of(tid)
+    sig_face = await _terminal_face_last_signal(handle)
     return {
         "exec_status": exec_status or "未知",
         "ticket_id": tid,
@@ -1971,6 +2005,10 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         "close_ts": close_ts,
         "start_time_txt": _terminal_face_ts_txt(start_ts),
         "close_time_txt": _terminal_face_ts_txt(close_ts),
+        # 260930（dengzhufpv E5·批次 B）：**最后一个信号名**——复盘「谁终结的/终结前有没有
+        # 留痕」时第一眼要看的东西。读事件历史（只读），取不到=不可得（name 空 + note 说明），
+        # 绝不编造。
+        **sig_face,
     }
 
 
@@ -2823,6 +2861,145 @@ async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     return _ok({"count": len(running), "running": running})
 
 
+#: 终止票「先留痕、后终结」的合法留痕信号（两条正规路径；审计面据此判在场性）
+NOTICE_SIGNALS = ("cancel_notice", "close_out_notice")
+#: 留痕机制的落地日（bf85990 "t260922-10 squash 收口"，2026-09-23 起 cancel_notice 存在）。
+#: 早于该日终结的票**结构上无法**留痕，故单列 legacy 档——只有这一档才不告警，
+#: 之后的缺失一律算违规（否则 19 张里大半是考古，告警会被稀释成噪声）。
+NOTICE_MECHANISM_CUTOFF = "2026-09-23"
+
+
+async def cmd_cancel_audit(args: Dict[str, Any]) -> Dict[str, Any]:
+    """终结票「留痕对账」只读审计（260930 批次 B；dengzhufpv E4/E5 合并需求）。
+
+    契约（base.py::cancel_notice 的对账口径）：**先留痕、后终结**——`cancel_notice` 信号
+    （载荷含 who + reason 原文）恒先于 `terminated` 事件，且 terminate 的 reason=**同一串**。
+    于是「历史里有 terminated 却没有同串 notice」= 有人绕过正规入口（或引擎之外的 terminate）。
+
+    实案（dengzhufpv t260929-31）：历史里唯一的信号是 `pause`，而 terminate 的理由串却写着
+    「宿主经…当面决定停掉本票」——**不实归因**；当时没有工具入口读历史，只能自己写 SDK 脚本。
+
+    本命令只读：不发信号、不写状态、不推进任何票；`violations` 非空即 exit 1（fail-loud，
+    与 deadman 同款告警退出码语义）。同时也是 E5「读事件历史无工具入口」的答案：逐张给出
+    terminate 理由 / 最后信号名 / notice 是否在场与是否同串。
+    """
+    from datetime import datetime, timedelta, timezone
+    try:
+        limit = max(1, int(args.get("limit") or 20))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        days = max(1, int(args.get("days") or 7))
+    except (TypeError, ValueError):
+        days = 7
+    cutoff_s = str(args.get("cutoff") or NOTICE_MECHANISM_CUTOFF)
+    try:
+        cutoff = datetime.strptime(cutoff_s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        cutoff_s, cutoff = NOTICE_MECHANISM_CUTOFF, datetime.strptime(
+            NOTICE_MECHANISM_CUTOFF, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    client = await _connect()
+    type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
+                              for c in TEMPLATE_CLASSES.values())
+    since = (datetime.now(timezone.utc)
+             - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    query = '(%s) AND ExecutionStatus="Terminated" AND CloseTime > "%s"' % (type_filter, since)
+
+    def _signal_reason(attrs: Any) -> str:
+        """cancel_notice 载荷里的 reason 原文（解不出=空串，不猜）。"""
+        try:
+            payloads = getattr(getattr(attrs, "input", None), "payloads", None) or []
+            raw = payloads[0].data
+            doc = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray))
+                             else str(raw))
+            return str((doc or {}).get("reason") or "")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _same_reason(a: str, b: str) -> bool:
+        """terminate 理由与 notice 理由是否同串。
+
+        口径=**包含**而非全等：close_out 正规路径会给人看的理由加面首（"close_out（人工
+        记名收口·工作已完成）：<reason>"），而 notice 载荷里是 reason 原文——按全等比对会
+        把走正规路径的票判成违规（实测假阳性 t260928-32/-33）。两者互相包含即算同串。
+        """
+        x, y = (a or "").strip(), (b or "").strip()
+        return bool(x) and bool(y) and (x == y or x in y or y in x)
+
+    checked = 0
+    matched, missing, mismatch, legacy, unreadable = [], [], [], [], []
+    rows: List[Dict[str, Any]] = []
+    async for wf in client.list_workflows(query):
+        if checked >= limit:
+            break
+        wid = str(getattr(wf, "id", "") or "")
+        if not wid:
+            continue
+        checked += 1
+        try:
+            hist = await asyncio.wait_for(
+                client.get_workflow_handle(wid).fetch_history(),
+                timeout=TERMINAL_FACE_RESULT_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001 —— 读不到=不可得（如实入桶，不当成合规）
+            unreadable.append({"id": wid, "why": "%s: %s" % (type(e).__name__, str(e)[:120])})
+            continue
+        try:
+            close_dt = getattr(wf, "close_time", None)
+            term_time = close_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") \
+                if close_dt else ""
+            pre_mechanism = bool(close_dt and close_dt < cutoff)
+        except Exception:  # noqa: BLE001 —— 时间不可得=不猜，按「机制后」从严
+            term_time, pre_mechanism = "", False
+        term_reason, notice_reasons, last_signal = "", [], ""
+        notice_kinds: set = set()
+        for ev in getattr(hist, "events", None) or []:
+            ta = getattr(ev, "workflow_execution_terminated_event_attributes", None)
+            if ta is not None:
+                term_reason = str(getattr(ta, "reason", "") or "")
+            sa = getattr(ev, "workflow_execution_signaled_event_attributes", None)
+            if sa is None:
+                continue
+            nm = str(getattr(sa, "signal_name", "") or "")
+            if nm:
+                last_signal = nm
+            if nm in NOTICE_SIGNALS:
+                # 引擎有**两条**正规留痕路径：cancel_notice（清场）与 close_out_notice
+                # （记名收口）——两条都满足「先留痕、后终结、reason 同串」契约，故都算在场
+                # （只认一条会把 close_out 的票全判成违规＝假阳性）。
+                notice_kinds.add(nm)
+                notice_reasons.append(_signal_reason(sa))
+        row = {"id": wid, "terminate_reason": term_reason, "last_signal": last_signal,
+               "terminated_at": term_time, "notice_count": len(notice_reasons),
+               "notice_kinds": sorted(notice_kinds)}
+        if not notice_reasons:
+            (legacy if pre_mechanism else missing).append(row)
+        elif term_reason and not any(_same_reason(term_reason, r) for r in notice_reasons):
+            row["notice_reasons"] = notice_reasons[:3]
+            mismatch.append(row)
+        else:
+            matched.append(row)
+        rows.append(row)
+    # 注意：这里**不写**内层 "ok" —— 命令是否跑成功（外层 ok）与「查出违规」（alarmed）
+    # 是两件事，混用同一个键会让上游把「审计发现违规」误读成「命令失败」。分层包装
+    # （ticket.py::_poc_ok）见内层 ok=false 即当业务拒绝，正是这条混用的实际后果。
+    return _ok({
+        "checked": checked,
+        "since": since,
+        "limit": limit,
+        "cutoff": cutoff_s,
+        "matched": matched,
+        "missing_notice": missing,
+        "legacy_pre_mechanism": legacy,     # 早于 NOTICE_MECHANISM_CUTOFF：结构上无法留痕
+        "reason_mismatch": mismatch,
+        "history_unreadable": unreadable,
+        "violations": len(missing) + len(mismatch),
+        "alarmed": bool(missing or mismatch),      # → main 依此 exit 1（fail-loud）
+        "note": ("violations 非空＝留痕机制上线（%s）之后仍有终结票缺 notice 留痕或理由串"
+                 "对不上（绕过正规入口/引擎外 terminate 的可检形态）；legacy_pre_mechanism "
+                 "是机制上线前的旧账，单列不计违规。本命令只读，不动任何票") % cutoff_s,
+    })
+
+
 async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
     """t260926-03（KI-123）：权威模板面查询（只读、纯本地、**不连 Temporal**）。
 
@@ -2916,11 +3093,12 @@ COMMANDS = {
     "ticket-prune": cmd_ticket_prune,
     "ticket-archive-legacy": cmd_ticket_archive_legacy,
     "running-tickets": cmd_running_tickets,
+    "cancel-audit": cmd_cancel_audit,
     "template-faces": cmd_template_faces,
 }
 
 USAGE = (
-    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|template-faces> [argsJSON]\n"
+    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -3010,6 +3188,11 @@ def main() -> None:
         result = _classify_infra_error(e)
 
     _emit(sub, args, result)
+    # 告警类**只读**命令的退出码语义（同 inspection_trigger.deadman）：alarmed 非空=exit 1，
+    # 供 ops/巡检自动化踩；stdout 仍是单行 JSON（既有契约不变）。
+    if isinstance(result, dict) and isinstance(result.get("result"), dict) \
+            and result["result"].get("alarmed"):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

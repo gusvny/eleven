@@ -1051,9 +1051,16 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self.meta["write_set_refresh_fault"] = {
                     "stage": "create_plan", "reason": fault,
                     "ts": self._now_epoch()}
-                self._log("【红灯】写集刷新被拒：create_plan 回执 %s（KI-049：空/畸形"
-                          "回执=写集刷新静默 no-op 根因）——写集保持初始 %d 条零污染；"
-                          "处置：rework 回 create_plan 重交结构化回执"
+                # 260930（dengzhufpv E6／批次 A）：**两态区分 + 去掉会诱发空转的处方**。
+                # 实测（t260929-15/-29/-31/-33 四次）：写集零污染、票自行跑完、**零交付损失**，
+                # 四次都不需要 rework——旧文案的「处置：rework 回 create_plan」把人引去一轮空转
+                # （与「报错必须精确」相抵）。故：降级为**提醒（非阻塞红）** + 说明两态 + 明确劝止。
+                self._log("【提醒·非阻塞】create_plan 回执 %s（KI-049：空/畸形回执使写集刷新"
+                          "并集 no-op）——写集保持初始 %d 条。两态：①本段确实没改文件（正常，"
+                          "无需动作）；②agent 改了文件但没填结构化字段（回执形状缺口）。"
+                          "**不要为它 rework**：四次实案零交付损失、票自行推进；若后续段出现"
+                          "写集越界红，那属「写集建票后不可改」的通道缺口（走越界/授权流程），"
+                          "不是本红灯的处方"
                           % (fault, len(self.meta.get("write_set") or [])))
                 return
             if plan_files is None:

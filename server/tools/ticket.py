@@ -368,11 +368,18 @@ class QueryError(ValueError):
     404（not_found）/503（transient）/410（terminal）/500（internal）。
 
     红线：查询失败（超时/连接/取消）绝不伪造成「工单不存在」——不存在语义只有
-    client.py kind=not_found（describe 命中 NotFoundFailure）一个入水口。"""
+    client.py kind=not_found（describe 命中 NotFoundFailure）一个入水口。
 
-    def __init__(self, msg, kind='internal'):
+    face（260930 批次 B，dengzhufpv E5）：终态票的**可渲染失败面**随异常上送（additive：
+    缺省 None，老消费方零感知）。为什么加：终态后票面快照不可查（引擎有意如此），复盘
+    「谁终结的/终结前有没有留痕」此前只能自己写 Temporal SDK 脚本读历史；face 里带
+    terminate 理由原文 + **最后一个信号名**（`_terminal_failure_face` 现算），让正规入口
+    （ticket show）就能读到，不再要求人写脚本。"""
+
+    def __init__(self, msg, kind="internal", face=None):
         super().__init__(msg)
         self.kind = kind
+        self.face = face
 
 
 def _v2_query(tid):
@@ -387,7 +394,9 @@ def _v2_query(tid):
         kind = out.get('kind') if isinstance(out.get('kind'), str) and out.get('kind') else 'internal'
         if kind == 'not_found':
             return None
-        raise QueryError('工单查询失败（%s）：%s' % (kind, out.get('error') or '未知错误'), kind)
+        # 终态票：把引擎侧现算的失败面（含 terminate 理由与最后信号名）一并带出（260930）
+        raise QueryError('工单查询失败（%s）：%s' % (kind, out.get('error') or '未知错误'),
+                         kind, face=out.get('face') if kind == 'terminal' else None)
     res = out.get('result') or {}
     if res.get('engine') != _shared().ENGINE_V2:
         return None
@@ -954,6 +963,22 @@ def _cancel(a):
     return _poc_ok(out)
 
 
+def _cancel_audit(a):
+    """终结票「留痕对账」只读审计（260930 批次 B；dengzhufpv E4/E5 合并需求）。
+
+    转发 engine/client.py cancel-audit。为什么要有：跨项目会话此前**没有读事件历史的
+    工具入口**，遇到「terminate 理由写着宿主当面决定、历史里却只有 pause」这种不实归因，
+    只能自己写 SDK 脚本翻历史（E5 原文）。本 op 把它变成一条命令，且**只读**：不发信号、
+    不写状态、不推进任何票。
+
+    判定口径：留痕机制（cancel_notice／close_out_notice）上线日 2026-09-23 之后，终结票
+    若既无 notice 留痕、理由串也对不上，即计入 missing_notice 违规；机制上线前的旧账单列
+    legacy_pre_mechanism（结构上无法留痕，记而不告警）。alarmed=true 时本 CLI 退出码 1。
+    """
+    payload = {k: a[k] for k in ('limit', 'days', 'cutoff') if k in a}
+    return _poc_ok(_poc('cancel-audit', payload))
+
+
 def _close_out(a):
     """人工记名收口（t260927，宿主实报④）：把「票被误判 blocked、工作其实已完成」的
     完成态**记名收口**——一条 op 同时做三件：记名（who/reason 必填非空，进不可变事件
@@ -1116,6 +1141,8 @@ def run(args):
         return _cancel(args)
     if op == 'close_out':
         return _close_out(args)
+    if op == 'cancel-audit':
+        return _cancel_audit(args)
     if op in ('pause', 'resume'):
         return _pause_resume(args, op)
     raise ValueError('未知 op: %r' % (op,))
@@ -1134,6 +1161,20 @@ _TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，�
                      '/pause/resume/cancel'
                      '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
                      '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
+
+
+def _exit_code(out):
+    """CLI 退出码：失败=1；成功但回执带 alarmed=true（告警类只读命令）=1。
+
+    fail-loud 的意义：巡检/自动化靠退出码踩闸，不能只靠人去读 JSON——「查出来有问题却
+    退出 0」等于没查（同一语义见 inspection_trigger 的 deadman）。
+    """
+    if not out.get('ok'):
+        return 1
+    res = out.get('result')
+    if isinstance(res, dict) and res.get('alarmed'):
+        return 1
+    return 0
 
 
 def _cli(argv):
@@ -1162,11 +1203,14 @@ def _cli(argv):
         kind = getattr(e, 'kind', None)
         if isinstance(kind, str) and kind:
             out['kind'] = kind
+        face = getattr(e, 'face', None)
+        if isinstance(face, dict) and face:
+            out['face'] = face        # 260930 批次 B：终态票失败面随回执上送（缺省不写）
     # sub 记 'ticket.<op>'（带 ticket 前缀：与 client.py 行同族可检索，source 区分入口）
     audit.audit_call('ticket.%s' % (payload.get('op') or '(none)'), out,
                      call_id=call_id, source='ticket.py-direct')
     print(json.dumps(out, ensure_ascii=False))
-    return 0 if out.get('ok') else 1
+    return _exit_code(out)
 
 
 if __name__ == '__main__':

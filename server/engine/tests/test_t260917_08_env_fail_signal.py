@@ -191,7 +191,9 @@ def test_b10_read_result_passthrough_parse_point1(tmp_path):
     res = agent_activities._read_result(p)
     assert res is not None
     assert res.env_fail is True and res.env_reason == "沙箱 deny"
-    assert res.handover_runs == [{"name": "a", "cmd": "c"}]
+    # 260930（批次 B）：入账前逐条语法自检给每条**加** additive 标记 syntax_bad（不改命令，
+    # 债表照记）——形状锁随之纳入该键（本条改的是「契约新增了什么」，不是放宽判据）
+    assert res.handover_runs == [{"name": "a", "cmd": "c", "syntax_bad": False}]
     assert res.handover_dropped == ["条目9:cmd 超 500 字符整条丢弃（不截断执行）"]
 
 
@@ -301,7 +303,9 @@ def test_d6_stub_receipt_roundtrip_no_signal_loss_n2(tmp_path):
         "handover_dropped": [dropped_note]})
     res = agent_activities._read_result(p)
     assert res.env_fail is True and res.env_reason == "旋钮注入"
-    assert res.handover_runs == [{"name": "a", "cmd": "c"}]
+    # 260930（批次 B）：入账前逐条语法自检给每条**加** additive 标记 syntax_bad（不改命令，
+    # 债表照记）——形状锁随之纳入该键（本条改的是「契约新增了什么」，不是放宽判据）
+    assert res.handover_runs == [{"name": "a", "cmd": "c", "syntax_bad": False}]
     assert res.handover_dropped == [dropped_note]
 
 
