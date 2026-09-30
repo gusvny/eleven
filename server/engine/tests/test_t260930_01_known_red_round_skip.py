@@ -3,7 +3,7 @@
 分工：本文件锁**纯判据与读面**（挂账册哪些条目该跳、读不动时怎么办）；
 `integration/t260930-01/sc_known_red_round_skip.py` 锁**黑盒行为面**（真执行器子进程
 三态：开关开=具名跳过 / 开关关=照旧全跑 / 册子坏=fail-closed 照跑且具名）。
-台账绿行复用是另一条腿（判据=台账四键），其单测在 test_t260930_01_ledger_reuse.py。
+台账绿行复用是另一条判据线（判据=台账四键），其单测在 test_t260930_01_ledger_reuse.py。
 """
 import importlib.util
 import json

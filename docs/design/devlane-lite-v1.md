@@ -103,9 +103,17 @@ towards bypassing it — and a bypassed lane protects nothing.
    the same verdict regardless of host state (installed tools, occupied ports, leftover processes
    from earlier runs). A run must leave no process, port, or temporary directory behind when it
    ends — normally, in error, on timeout, and on cancellation alike.
-8. **R8 — Declared direct-fix path.** The no-ticket path exists as a first-class profile with a
-   minimum discipline (stated criteria, a regression case added, recorded attribution, and a green
-   proof on `main`) instead of being an informal exception.
+8. **R8 — Direct fixes are rare and accounted for.** A change reaches `main` through a lane; a
+   direct fix happens only under an explicit human order, carries the same minimum discipline as
+   any landing (stated criteria, affected-surface verification, a regression case, attribution, a
+   green proof on the shared branch), and its reason is recorded as evidence about the lane. The
+   measurable form of this requirement: for the classes the light lane covers, direct fixes go to
+   zero, and every remaining one carries a stated reason.
+9. **R9 — A working agent can finish its own work.** No stage may depend on a hand-off that exists
+   only because the execution environment withholds something the work needs (a commit, a build, an
+   environment-dependent check). Where such a hand-off exists today, removing it must not remove
+   the guarantees it currently carries: scope audit, one commit per stage, attribution, and the
+   clean-tree invariants the gate relies on.
 
 **Stakeholders.** Host — decides the profiles and their thresholds; cares that work finishes fast
 and that nothing lands without a reason. Integration (main gatekeeper) — owns the gate's meaning;
@@ -139,21 +147,27 @@ cares that the operator UI stays host-owned and that runs stop eating the machin
   containerised fleet is out of scope for this cycle.
 - **Not changing what a scenario asserts.** Coverage selection may shrink a round's *scope*; it
   may never relax an assertion or skip a case silently.
+- **Not keeping direct fixes as an equal road.** They are an escape hatch for the cases the lanes
+  still cannot serve; the measure of success is that those cases shrink, not that the hatch gets
+  more comfortable.
+- **Not trading the audit trail for agent autonomy.** If a working agent is empowered to finish its
+  own work (commit, build, verify), the checks that the environment used to enforce by refusing
+  access must be re-established as recorded, auditable contracts — never dropped.
 
 ## Proposal
 
 ### 4.0 High level
 
-Three profiles over one stage machinery, plus four disciplines that make the *existing* lane
-affordable:
+Two lane profiles over one stage machinery — plus an **emergency escape that is not a profile** —
+and four disciplines that make the *existing* lane affordable:
 
-| Profile | Who it is for | Stages it runs | Gate scope |
+| Road | Who it is for | Stages it runs | Gate scope |
 |---|---|---|---|
-| **Direct fix** | host-ordered, small, single-surface changes | none (no ticket) | affected scenarios only, on `main` |
 | **Light lane** | low-risk tickets (one plugin, presentation, wording, single-file routing) | plan → implement → gate → merge | change surface per round; full suite once before landing |
 | **Full lane** | engine internals, contracts, cross-repo, release faces | planning + plan review + implementation + test design + gate + arbitration + acceptance walkthrough + merge check + merge | full suite per round (unchanged) |
+| *Direct fix (escape)* | only under an explicit human order, when the lanes cannot serve; each use is recorded as evidence about the lane | none (no ticket) | affected scenarios only, on the shared branch |
 
-Four disciplines, applied to every profile:
+Four disciplines, applied to every road:
 
 1. **Round economy** — a repair list is always complete and grouped by fault family; a round that
    cannot change its verdict is not run; a round whose red set stopped moving escalates to a human.
@@ -216,7 +230,9 @@ Options considered:
 
 **Recommendation.** Adopt **B as the target shape, entered from C**: start by moving the *gate*
 into a disposable per-lane environment (highest isolation per unit of risk, no change to how
-agents think), then move agent execution in, one lane profile at a time. Non-negotiable properties
+agents think), then move agent execution in, one lane profile at a time. The second step carries a
+second payoff beyond isolation — it removes the hand-off described in §4.4.1, which exists only
+because the current environment cannot let the agent finish its own work. Non-negotiable properties
 of any containerised execution:
 
 - The trust boundary is the **container**, not the host: "full access" means full access *inside*,
@@ -238,26 +254,74 @@ Equally important: a full-access environment with a generous mount would make th
 the only remaining control, so attribution (who changed what, under whose order) becomes more
 important under containers, not less.
 
-### 4.5 Direct fix as a declared profile
+#### 4.4.1 One layer of hand-off that exists only because of the sandbox
 
-The road we have been using informally becomes explicit, with a minimum discipline rather than a
-free pass: state the criteria the change is judged by; verify the affected surface; add or extend a
-regression case so the fix cannot silently revert; record attribution (who, and under whose order);
-and show a green result on the shared branch. A direct fix that cannot satisfy these is a ticket,
-not a shortcut.
+There is a sharper reason to give the working agent a self-contained, fully empowered environment
+than "permissions are annoying": **today the agent cannot finish its own work, so another process
+has to finish it.**
+
+As the engine's own documentation states it: a lane's repository metadata lives *outside* the
+agent's writable scope, so the agent committing its own change is physically impossible; the
+stage's work is therefore settled on the agent's behalf by an unsandboxed process afterwards, and
+the engine documents the commit as "not part of the dispatch contract". In other words the
+hand-off is a **workaround for the execution environment, not a designed boundary** — and it is
+paid for on every single stage:
+
+- an extra hop whose semantics have to be re-derived (what counts as "the agent's work"; how to
+  isolate edits made outside the declared scope; what to do when the workspace is already clean,
+  is mid-merge, or contains engine runtime directories);
+- a failure family of its own (a settlement that produces nothing, the wrong thing, or the wrong
+  message), which then has to be diagnosed by reading the settling process's log rather than the
+  agent's;
+- a weaker answer to "what did the agent actually do?" — the agent's evidence and the settled
+  commit are produced by two different processes.
+
+A scoped container removes the *reason* for the hand-off: give the agent a self-contained writable
+view of its lane and it can commit, build, and test as one actor. What must **not** disappear with
+it (these move from "enforced by who is allowed to write" to "enforced by an audited contract"):
+
+1. **Scope audit** — the boundary is checked and violations named, before or immediately after the
+   change lands; gaining write access never means losing the write-scope check.
+2. **One commit per stage** — the single revert unit and the history convention survive; a stage
+   that scatters commits is a contract violation, not a style preference.
+3. **Attribution** — every commit says which stage produced it and under whose instruction. With
+   the mount no longer the control, the record is the control.
+4. **Clean-tree invariants** — whatever the gate and the merge check rely on (a committed, clean
+   lane tree) stays true by construction.
+
+Net effect: one fewer hand-off, one fewer failure family, and one fewer place where the engine has
+to reason about "uncommitted work that is not the agent's". That is a **simplification** — which is
+why it belongs in this document even though containers do not, by themselves, shorten rounds.
+
+### 4.5 Direct fix: intentionally rare, not a road
+
+Direct fixes were how this project kept moving while the lane was too slow, and they are the thing
+this document exists to make unnecessary: **the goal is that a change completes inside a lane fast
+enough that nobody wants to reach around it.** A direct fix is therefore an **emergency escape**,
+not a profile on equal footing with the lanes:
+
+- it is admissible only under an explicit human order, and the reason for going around the lane is
+  recorded with the change;
+- it carries the same minimum discipline as any other landing (stated criteria, affected-surface
+  verification, a regression case so the fix cannot silently revert, attribution, and a green
+  result on the shared branch) — a change that cannot satisfy these is a ticket, not a shortcut;
+- **each use is treated as evidence about the lane**, not as a neutral choice: the class of change
+  that needed bypassing becomes an input to profile thresholds and to the gate's scope rules, and
+  the success criterion is that bypasses for light-lane classes go to zero.
 
 ### 4.6 How we will know it worked
 
 Machine-time per ticket and rounds per ticket become recorded, comparable numbers (the same way the
 figures in Problem were obtained), together with the repeat rate of scenarios. Success looks like:
 low-risk tickets inside R1, full-suite repeats reduced by an order of magnitude, human gates
-triggered by risk signals, and environment-flavoured failures no longer appearing as a category.
+triggered by risk signals, environment-flavoured failures no longer appearing as a category, and
+**direct fixes for light-lane classes at zero** (with each remaining bypass carrying its reason).
 
 ### 4.7 Tie-back
 
 This proposal **solves** the Problem's round-count inflation (complete lists, family grouping,
 no-progress stop, churn re-probe), the per-round full-suite tax (proportional gate), the
 process-keyed human gate (risk-keyed gate), and the environment-dependent verdicts and residue
-(scoped, disposable execution environments) — while **satisfying** R1–R8 and **avoiding** the
+(scoped, disposable execution environments) — while **satisfying** R1–R9 and **avoiding** the
 Nongoals: risky work keeps the full lane, human signature points stay, a scenario's assertion is
 never relaxed, and no second orchestrator is built.
