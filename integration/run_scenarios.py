@@ -3708,6 +3708,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     # 那才是这些条目的观察位。读不动册子=一条都不豁免（照跑）并具名上报。
     _kr_flag = str(os.environ.get(KNOWN_RED_EXCLUDE_ENV) or "").strip().lower()
     known_red_skipped = []
+    _kr_names = []
     if _kr_flag in ("1", "on", "true", "yes"):
         _kr_names, _kr_err = read_known_red_roster(_REPO_ROOT)
         if _kr_err:
@@ -3726,6 +3727,43 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
                 print("INTEG_KNOWN_RED_NOTE 未跑 ≠ 判绿：这些条目本轮**没有**被验证，其状态"
                       "以巡检/合并前全量的回执为准（本行是避免「没跑」与「跑了判绿」长成"
                       "一个样子的具名通道）", flush=True)
+    # ---- 宿主 260930 实报（真票 t260930-14 第 4 轮 0 ran / 0 passed / 0 failed → blocked）：
+    # **收窄面被清空 = 面不可判，不是产品红**。快反馈面=上轮红名；本轮那批红名全被挂账册
+    # 豁免（或在被排除池里）⇒ 点名面扣完为空 ⇒ 执行器「一轮零场景」⇒ 闸判红。两个各自都对的
+    # 机制撞出空集，而空集原先没有定义。口径（与既有原则一致）：**空=更宽，不是更窄、不是红**——
+    # 扣完为空必须回落**全量注册面**，并在回执里具名（哪几条被豁免/排除、去哪了）。
+    # 「未跑 ≠ 判绿」纪律不变：回落跑出来的绿才是绿。
+    narrowed_face_empty = False
+    if only_names and not registry:
+        narrowed_face_empty = True
+        registry = [e for e in SCENARIOS if not (excluded and pool_of(e) in excluded)]
+        # 回落面=**全量路径**，在册豁免口径必须跟着面一起重算：豁免纪律本就是「按本轮的面
+        # 取交集」（上面的 `_kr_in_round`），面变宽了仍沿用旧窄面的那几条 ⇒ 「在册红不进每轮
+        # 路径」在回落轮上单独失效，回落轮会把那 19 条在册红原样再跑一遍（既烧时间，又让
+        # 「本轮跳过在册红 N 条」这句话与真实面不符）。重算后两侧口径一致。
+        if _kr_names:
+            _kr_wide = set(e[0] for e in registry)
+            known_red_skipped = [n for n in _kr_names if n in _kr_wide]
+            _kr_set2 = set(known_red_skipped)
+            registry = [e for e in registry if e[0] not in _kr_set2]
+        print("INTEG_NARROWED_EMPTY 收窄面扣除在册豁免/被排除池后为空（点名 %d 条：%s）"
+              "——回落**全量注册面**（全量 − 被排除池 %d 条 − 本轮在册豁免 %d 条）"
+              "（空=更宽：不判红；也不是绿，未跑 ≠ 判绿）"
+              % (len(only_names), _known_red_face(only_names[:20]),
+                 len(excluded_entries), len(known_red_skipped)), flush=True)
+        if known_red_skipped:
+            print("INTEG_KNOWN_RED 回落轮的豁免面按**全量面**重算：跳过在册红 %d 条"
+                  "（每轮路径豁免；观察位=每日巡检与合并前全量）：%s"
+                  % (len(known_red_skipped), _known_red_face(known_red_skipped)), flush=True)
+        # 回落面**仍然**为空（全员在册/被排除）= 面真空：跑不了任何东西，但这不是产品红。
+        # 具名成独立通道（`INTEG_FACE_VACUOUS`），让闸侧/消费方与「启动级 error/零信号」分开；
+        # 「未跑 ≠ 判绿」照旧（0 ran 永远不是绿）。
+        if not registry:
+            print("INTEG_FACE_VACUOUS 全量注册面扣除在册豁免/被排除池后**也为空**"
+                  "（在册 %d 条、被排除 %d 条、注册面 %d 条）——面真空：本轮未验证任何条目。"
+                  "这不是产品红；未跑 ≠ 判绿，请人裁定（或等合并前全量/每日巡检的观察位）"
+                  % (len(known_red_skipped), len(excluded_entries), len(SCENARIOS)),
+                  flush=True)
     expected = len(registry) if only_names \
         else (len(SCENARIOS) - len(excluded_entries) - len(known_red_skipped))
     # ---- t260930-01 台账绿行复用（本段只**判定**；跳过发生在池切分处，见下）----
@@ -4025,6 +4063,18 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             # t260913-03：条件键——仅排除旋钮生效时出现（缺省键集逐字节不变）
         }
         _summary["known_red_skipped"] = len(known_red_skipped)
+        if narrowed_face_empty:
+            _summary["narrowed_face_empty"] = True
+            _summary["narrowed_face_note"] = (
+                "收窄面扣除在册豁免/被排除池后为空 ⇒ 本轮跑的是**全量注册面**"
+                "（空=更宽，不判红；未跑 ≠ 判绿）")
+            _summary["narrowed_face_requested"] = list(only_names)[:50]
+        if only_names and not registry:
+            _summary["face_vacuous"] = True
+            _summary["face_vacuous_note"] = (
+                "全量注册面扣除在册豁免/被排除池后也为空：本轮**未验证任何条目**"
+                "（面真空，非产品红；未跑 ≠ 判绿）")
+            _summary["known_red_names"] = list(known_red_skipped)
         if known_red_skipped:
             _summary["known_red_names"] = list(known_red_skipped)
         if excluded:

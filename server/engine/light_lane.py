@@ -148,6 +148,14 @@ LIGHT_LANE_TEMPLATE_ID = "light-lane"
 #: 要救的那一轮）。机制本体=dev-lane 的 `_main_sync_before_gate`（唯一实现，不另造）。
 LIGHT_MAIN_SYNC_PATCH_ID = "light-lane-main-sync-v1"
 
+#: 空收窄面回落门（宿主 260930 实报：真票 t260930-14 第 4 轮「点名面全被在册豁免 ⇒ 跑 0 条
+#: ⇒ 判红」）。**必须走新门**，理由与上一条同源但更硬：本修法给 `_light_gate_plan` 里**新增
+#: 一次活动调用**（读挂账册的名册活动）。在飞老实例（t260930-14：历史里已有 4 个闸轮、没有
+#: 本标记）重放旧轮时，若无门 ⇒ 多出一条 ScheduleActivityTask 命令 ⇒ 与历史逐条对不上 ⇒
+#: NonDeterminismError，票直接卡死。有门 ⇒ 重放旧轮 `patched()`=False（旧命令序列逐字不变），
+#: 追平历史之后的新一轮 `patched()`=True ⇒ 记标记并真的走回落逻辑（正是要救的那一轮）。
+LIGHT_NARROWED_FACE_PATCH_ID = "light-lane-narrowed-face-empty-v1"
+
 #: 段门表（**按 (template_id, stage_id) 键**，与 shared.default_gate_for 同形同键）。
 #: 机器闸=项目声明的集成命令（verify_lane lane=integ）——与 dev-lane 的机器闸**同一条
 #: 命令、同一个执行器**；本表是声明面，真跑在 run() 里调同一活动 run_integration_tests。
@@ -932,6 +940,28 @@ class LightLaneWorkflow(DevLaneWorkflow):
             only_names=[str(x) for x in (rraw.get("only_names") or [])],
             env_red=[str(x) for x in (rraw.get("env_red") or [])])
 
+    async def _booked_red_names(self) -> List[str]:
+        """本轮挂账册（`booked`/`isolated`）里的名字——**只读**活动，用于「空收窄面回落全量」。
+
+        词表取 `shared.KNOWN_RED_VERDICTS`（唯一真源，与执行器侧 `known_red_names`、名册卫生
+        测试同源）：写死字面量会在词表演进时静默错位——引擎少认一个词=「面没空」而执行器照
+        豁免 ⇒ 又回到「跑 0 条」，正是本修法要堵的那个形态。
+
+        读不到/畸形 ⇒ 空集（读侧 fail-open）：豁免面不可得时**不得不窄**，而且执行器侧对
+        「扣完为空」还有一道回落（两侧互为兜底，任一侧单独失效都不会退化成「跑 0 条」）。"""
+        try:
+            out = await self._known_red_roster_payload()
+            payload = out.get("payload") or {}
+            entries = ((payload.get("result") or {}).get("entries") or {})
+            vocab = tuple(str(v).lower() for v in shared.KNOWN_RED_VERDICTS)
+            return [str(n) for n, v in entries.items()
+                    if str((v or {}).get("verdict") or "").lower() in vocab]
+        except Exception as e:  # noqa: BLE001——只读诊断面，绝不拦主链
+            self._log("known-red roster unavailable for the narrowed-face fallback (%s: %s) — "
+                      "treating it as no exemption (the executor still falls back to the full "
+                      "registry when a narrowed face empties)" % (type(e).__name__, str(e)[:120]))
+            return []
+
     async def _light_gate_plan(self, prev_red_names: List[str]) -> List[str]:
         """本轮快反馈面（决策单写者仍是 shared.targeted_rerun_plan + 面计划活动，与
         dev-lane 同源同 fail-closed 口径）：改动清单不可得/为空 → 恒全量跑。"""
@@ -957,6 +987,43 @@ class LightLaneWorkflow(DevLaneWorkflow):
             first_run=(self._gen("run_integration_tests") == 0),
             changed_files=cf_files, diff_error=cf_err)
         if run_only:
+            # 宿主 260930 实报（真票 t260930-14 第 4 轮）：快反馈面=上轮红名；那批红名若**全被
+            # 挂账册豁免**（或在被排除池里），点名面扣完为空 ⇒ 执行器「一轮零场景」⇒ 闸判红。
+            # 两个各自都对的机制（快反馈面=上轮红名 × 在册红不进每轮路径）撞出空集——空集必须
+            # **回落全量**（空 run_only 在本类的既有约定就是「全量跑」），**空=更宽，不是红**。
+            # 「未跑 ≠ 判绿」不变：回落跑出来的绿才是绿。
+            # **门**（LIGHT_NARROWED_FACE_PATCH_ID）：本块新增一次名册活动调用，无门会让在飞
+            # 老实例重放旧轮时多出命令 ⇒ NonDeterminismError（见该常量的注释）。
+            if workflow.patched(LIGHT_NARROWED_FACE_PATCH_ID):
+                _booked = set(await self._booked_red_names())
+                _kept = [n for n in run_only if n not in _booked]
+                if not _kept:
+                    self.meta["narrowed_face_trace"] = {
+                        "requested": list(run_only), "kept": [], "empty": True,
+                        "exempted": [n for n in run_only if n in _booked],
+                        "reason": "every member of the previous round's red list is "
+                                  "booked/validated this round (known-red exemption) ⇒ an "
+                                  "empty narrowed face is UNDECIDABLE, not a product red",
+                        "action": "fall back to the full registry"}
+                    self._log("the fast-feedback face is empty after this round's known-red "
+                              "exemptions (%d member(s): %s) — an empty face is undecidable, "
+                              "not a product red: falling back to the FULL registry (an empty "
+                              "run_only is this lane's existing 'full run' convention)"
+                              % (len(run_only), ", ".join(run_only[:12])))
+                    self._handoff("run_integration_tests",
+                                  "fast-feedback face empty after exemptions (%d) → full registry"
+                                  % len(run_only))
+                    return []
+                if len(_kept) != len(run_only):
+                    self.meta["narrowed_face_trace"] = {
+                        "requested": list(run_only), "kept": list(_kept), "empty": False,
+                        "exempted": [n for n in run_only if n in _booked],
+                        "reason": "known-red exemption removed member(s) from the narrowed face",
+                        "action": "run the kept members (fast feedback only)"}
+                    self._log("fast-feedback face: %d of %d member(s) survive this round's "
+                              "known-red exemptions: %s"
+                              % (len(_kept), len(run_only), ", ".join(_kept[:12])))
+                    run_only = _kept
             self._log("targeted re-run face: %s (fast feedback only — the landing "
                       "verdict still requires a closing full run)" % ", ".join(run_only))
             return run_only

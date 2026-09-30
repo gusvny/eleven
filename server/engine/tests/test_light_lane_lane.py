@@ -1074,6 +1074,34 @@ def test_light_lane_syncs_main_before_the_gate_via_the_shared_helper():
         assert frag in block, frag
 
 
+def test_light_lane_narrowed_face_empty_is_patch_gated_and_vocab_sourced():
+    """空收窄面回落（宿主 260930 实报，真票 t260930-14 第 4 轮）的**重放兼容**结构锁。
+
+    本修法给 `_light_gate_plan` 里新增了一次活动调用（读挂账册的名册活动）。在飞老实例
+    （历史里已有 4 个闸轮、没有本标记）重放旧轮时，无门 ⇒ 多出一条 ScheduleActivityTask
+    命令 ⇒ 与历史逐条对不上 ⇒ NonDeterminismError（票直接卡死，t260917-04 是同款事故）：
+    `workflow.patched()`=False ⇒ 旧命令序列逐字不变；追平历史之后的新一轮 =True ⇒ 真走回落。
+
+    另一条锁：豁免词表必须取 `shared.KNOWN_RED_VERDICTS`（唯一真源）——写死字面量会在词表
+    演进时静默错位成「引擎说面没空、执行器照豁免」= 又回到跑 0 条。"""
+    src = LIGHT_SRC
+    fn = src.index("async def _light_gate_plan(")
+    body = src[fn:src.index("\n    async def ", fn + 10)]
+    i_patch = body.index("workflow.patched(LIGHT_NARROWED_FACE_PATCH_ID)")
+    i_roster = body.index("await self._booked_red_names()")
+    assert i_patch < i_roster, "名册活动调用必须在门内（门外的活动调用=重放加命令）"
+    # 门内：缩进必须比 `if workflow.patched(...)` 那一行更深（结构锁，不用 AST 也用不着）
+    line = body[:i_roster].rsplit("\n", 1)[-1]
+    gate_line = body[:i_patch].rsplit("\n", 1)[-1]
+    assert len(line) - len(line.lstrip()) > len(gate_line) - len(gate_line.lstrip()), \
+        "名册活动调用不在 patched 门内（缩进不更深）"
+    assert src.count("await self._booked_red_names()") == 1, "调用点只此一处"
+    assert light_lane.LIGHT_NARROWED_FACE_PATCH_ID == "light-lane-narrowed-face-empty-v1"
+    assert "shared.KNOWN_RED_VERDICTS" in src, \
+        "豁免词表要取唯一真源（shared.KNOWN_RED_VERDICTS），不许写死字面量"
+    assert '"booked", "isolated"' not in src and "'booked', 'isolated'" not in src
+
+
 def test_light_lane_has_no_second_main_sync_implementation():
     """③ 结构锁：轻道不得出现第二份主同步实现（会话/活动/消解回路都只在 helper 里）。"""
     assert "async def _main_sync_before_gate" not in LIGHT_SRC, \

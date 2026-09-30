@@ -61,7 +61,8 @@ class Harness:
     def __init__(self):
         self.preboot_calls = []
 
-    def drive(self, entries, only_kw=None, only_env="__unset__", exclude=None):
+    def drive(self, entries, only_kw=None, only_env="__unset__", exclude=None,
+              known_red=False, roster_names=()):
         """only_kw=main() 关键字路（None=不传=读 env）；only_env=env 注入路
         （__unset__ 哨兵=清除该键，测缺省零分支）。"""
         with tempfile.TemporaryDirectory(prefix="t922only-") as td:
@@ -91,6 +92,16 @@ class Harness:
             env[ONLY_ENV] = None if only_env == "__unset__" else only_env
             if exclude is not None:
                 env["SANDBAR_SCENARIO_EXCLUDE_POOLS"] = exclude
+            if known_red:
+                # 夹具册子（booked）落临时目录，经 SANDBAR_KNOWN_RED_ROSTER 路径缝投喂
+                roster = td_path / "known-red.json"
+                # 册子 schema（真源=run_scenarios.known_red_names）：{"entries":[{name,verdict}]}
+                roster.write_text(json.dumps(
+                    {"meta": {"v": 1},
+                     "entries": [{"name": n, "verdict": "booked", "home": "lane"}
+                                 for n in roster_names]}), encoding="utf-8")
+                env["SANDBAR_KNOWN_RED_EXCLUDE"] = "1"
+                env["SANDBAR_KNOWN_RED_ROSTER"] = str(roster)
             cwd_saved = os.getcwd()
             buf = io.StringIO()
             try:
@@ -197,6 +208,78 @@ def test_f_env_injection_path(h):
 
 
 # ---------------- G 解析面 ----------------
+
+def test_h_empty_narrowed_face_falls_back_to_full_registry(h):
+    """宿主 260930 实报（真票 t260930-14 第 4 轮）：**收窄面被清空 = 面不可判，不是产品红**。
+
+    形态（与真票同形）：点名面 = 上轮红名（本例 a、b 两条，且**两条都在挂账册里**）⇒ 点名面
+    扣完为空。改前=「一轮零场景」→ 闸判红 → 票 blocked；改后=**回落全量注册面**
+    （全量 − 在册豁免 = 剩下那些照跑）并具名。
+    判据：①回落面真跑（marker 齐）；②`INTEG_NARROWED_EMPTY` 具名行在文、说清「扣完为空 →
+    全量」；③汇总 `ran == expected > 0`（**绝不许出现 0 ran**）；④回执带具名键。"""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a,t922-b", known_red=True,
+                           roster_names=["t922-a", "t922-b"])
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-c"], "收窄面清空后必须回落全量：未被豁免的那条要真跑（实得 %r）" % ran
+    assert "INTEG_NARROWED_EMPTY" in out, "必须具名（不许静默跑全量）"
+    assert "回落**全量注册面**" in out and "未跑 ≠ 判绿" in out
+    summ = summary_of(out)
+    assert summ and summ.get("ran") == 1 and summ.get("expected") == 1, summ
+    assert summ.get("narrowed_face_empty") is True, "回执要带具名键（消费方可判）"
+    assert summ.get("known_red_skipped") == 2, "豁免计数照实（去哪了要说得清）"
+
+
+def test_h1_vacuous_face_is_named_not_a_product_red(h):
+    """退化形态（全员在册/被排除）：回落面**也为空** ⇒ 具名「面真空」，与启动级零信号分开。
+
+    这一档跑不了任何东西（没有更宽的面可用）——它必须**具名**，让闸侧/人把「有意豁免」
+    与「执行器起不来/零信号」分开；**未跑 ≠ 判绿**在此照旧（0 ran 永远不是绿）。"""
+    names = [e[0] for e in TRIO]
+    rc, out, ran = h.drive(TRIO, only_env=",".join(names), known_red=True, roster_names=names)
+    assert rc == 0, out[-400:]
+    assert ran == [], "面真空：确实没有任何条目可跑"
+    assert "INTEG_NARROWED_EMPTY" in out and "INTEG_FACE_VACUOUS" in out, out[-500:]
+    assert "不是产品红" in out and "未跑 ≠ 判绿" in out
+    summ = summary_of(out)
+    assert summ and summ.get("ran") == 0 and summ.get("expected") == 0, summ
+    assert summ.get("face_vacuous") is True and summ.get("narrowed_face_empty") is True, summ
+
+
+def test_h2_partial_narrowing_still_narrows(h):
+    """负锁：点名面**部分**在册 ⇒ 仍然只跑剩下的那条（回落只在**空**时才发生）。"""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a,t922-b", known_red=True,
+                           roster_names=["t922-a"])
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-b"], "只跑未被豁免的那条（实得 %r）" % ran
+    assert "INTEG_NARROWED_EMPTY" not in out
+    summ = summary_of(out)
+    assert summ and summ.get("ran") == 1 and summ.get("expected") == 1, summ
+
+
+#: 四条假场景（比 TRIO 多一条）：用来把「回落轮的豁免面按全量面重算」与「按旧窄面算」分开——
+#: 三条册子不够（豁免全册 ⇒ 面真空），必须留下第四条真跑，两种口径才有可分辨的 ran 差。
+QUAD = TRIO + [("t922-d", None, "print('d')")]
+
+
+def test_h3_fallback_recomputes_the_exemption_scope_on_the_wide_face(h):
+    """回落轮的**在册豁免口径跟着面一起重算**（integration 复核发现，与 A/B 同源）。
+
+    豁免纪律本就是「按**本轮的面**取册子交集」（改宽之前的 `_kr_in_round`）。回落把面从
+    「点名 2 条」换成「全量 4 条」之后，若仍沿用旧窄面算出的 2 条，则：
+      ① 册子里第 3 条（t922-c）在回落轮被**原样再跑一遍**——「在册红不进每轮路径」这条纪律
+         在回落轮上单独失效（既烧一整轮的时间，又把在册红再红一遍）；
+      ② 回执里「本轮跳过在册红 N 条」与真实面不符（说 2 实为 3）。
+    判据：回落轮只跑真正不在册的那条（t922-d），豁免计数=3。"""
+    rc, out, ran = h.drive(QUAD, only_env="t922-a,t922-b", known_red=True,
+                           roster_names=["t922-a", "t922-b", "t922-c"])
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-d"], ("回落轮必须重算豁免面：册内三条都不该跑（实得 %r）" % ran)
+    assert "INTEG_NARROWED_EMPTY" in out and "回落轮的豁免面按**全量面**重算" in out
+    summ = summary_of(out)
+    assert summ and summ.get("ran") == 1 and summ.get("expected") == 1, summ
+    assert summ.get("known_red_skipped") == 3, summ
+    assert summ.get("narrowed_face_empty") is True, summ
+
 
 def test_g_parse_only_scenarios():
     assert rs.parse_only_scenarios(" a , b ,a,, ") == ["a", "b"]
