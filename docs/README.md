@@ -50,7 +50,7 @@ updated: 2026-09-28
 |---|---|
 | `ops/admin-dsh-application-plan.md` | admin × DeepSeek Harness (dsh) application plan |
 | `ops/project-lifecycle-runbook.md` | Project lifecycle operations runbook |
-| `ops/engine-worker-and-lane-operations.md` | Engine worker and lane operations: central vs lane worker, the two conditions for an engine fix to reach an in-flight ticket, the three pre-push checks, restart discipline, and `server/tools/engine_ops.py` |
+| `ops/engine-worker-and-lane-operations.md` | Engine worker and lane operations: central vs lane worker, the two conditions for an engine fix to reach an in-flight ticket, the three pre-push checks, restart discipline, what a green lane round does and does not cover (pool scope), and `server/tools/engine_ops.py` |
 
 ## Root level (cross-cutting standards)
 

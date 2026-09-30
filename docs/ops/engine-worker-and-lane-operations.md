@@ -6,6 +6,7 @@ tags:
   - lane
   - integration-gate
   - code-version-attribution
+  - gate-coverage
 status: active
 updated: 2026-09-30
 ---
@@ -207,8 +208,30 @@ Representative output (trimmed):
                     "stamp": {"stale": ["agent_activities"]}}}}
 ```
 
-## 6. Where the same facts appear on the ticket face
+## 6. What the lane gate does *not* cover: the pool scope of the round
 
+A green lane round is narrower than it looks, and the difference is deliberate (host ruling
+260914, implemented by `verify_lane._integ_pool_exclude`): **every ticket round skips the
+declared pools** (today `engine` + `exclusive` — 87 of ~362 entries, the heavy real-chain
+scenarios that boot stages and real workers). "Declared = skipped", with no per-ticket
+exception: the excluded pools are covered **only by the project-level full runs** (the daily
+inspection, a manual full run, or a replay).
+
+What that means when you read a green round:
+
+* the round proves the `ro` / `main` / `browser-free` / `browser` face — including every
+  scenario that reads the *engine modules* offline — is green on the lane tree;
+* it does **not** prove the real-chain (stage-booting) behaviour. For a ticket whose write set
+  is the agent/engine core (say `server/engine/agent_activities.py`), that half rests on the
+  developer's L1 plus whatever the gatekeeper runs by hand, and its observation post is the
+  daily inspection / the closing full run.
+
+So before signing a core-engine ticket, run the target's own unit surface yourself (and, when
+the change is in an agent stage, the engine suite), and say in the sign-off note which half is
+proven by this round and which half is not. "The gate is green" must never be read as "the real
+chain was exercised".
+
+## 7. Where the same facts appear on the ticket face
 The machine gate receipt carries two structured keys and one human line, so nobody has to
 remember them:
 
@@ -222,7 +245,7 @@ remember them:
 When either value cannot be obtained, the face says so explicitly (`unavailable: <reason>`) — an
 unattributable version is itself a fact that must be visible, never a blank.
 
-## 7. Boundaries
+## 8. Boundaries
 
 * Default is read-only. The only mutating subcommands are `sync` (one merge of `main` into the
   lane, through the engine's own implementation) and `restart` (which kills a worker — and never

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-01T00:27:32+08:00",
+  "generated_at": "2026-10-01T04:47:46+08:00",
   "total": 23,
   "categories": [
     "design",
@@ -294,7 +294,8 @@
         "worker",
         "lane",
         "integration-gate",
-        "code-version-attribution"
+        "code-version-attribution",
+        "gate-coverage"
       ],
       "status": "active",
       "updated": "2026-09-30",
