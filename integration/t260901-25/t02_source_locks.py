@@ -48,6 +48,26 @@ def fn_body(text, header):
     return text[i: i + len(header) + (m.start() + 1 if m else len(text))]
 
 
+def _code_view(body):
+    """把注释内容抹成空格（**保偏移**）后的源码视图——本锁的计数与位置断言都跑在它上面。
+
+    目的=**守卫判据不许被注释里的字样满足**（守的是代码，不是文档）。261001 integration 复核
+    时实测：当前真源里三个段体各有 **3 处真 reap 调用**（结果就绪 / 进程已退出分支 / finally
+    兜底），而注释里的字样**并没有**额外凑数（原文匹配 3 = 抹注释后 3），所以这次是**防御性
+    加固**：今天不改变任何判定，但往后有人在注释里写 `proc.reap(...)` 也不会变成「守卫已接线」。
+    只抹 `#` 之后的部分，**不改字节数、不改行序**，因此偏移与原文一一对应。
+
+    同批复核到的一条**真实弱点**（本函数不解决，登记在案）：判据是 `len(reap) >= 2`，而旧结构
+    每体有 3 处调用 ⇒ **删掉其中一处仍绿**（实测：删一处 exit=0）。可删窗口是阈值与调用点数的
+    关系，不是注释造成的；阈值不许收紧到 3——新结构（改走共享 helper）下每个段体只有 1 处
+    调用、helper 体 2 处，锚在 helper 上恰是 2，收紧即假红。"""
+    out = []
+    for ln in body.splitlines(keepends=True):
+        i = ln.find("#")
+        out.append((ln[:i] + "\n") if i >= 0 else ln)
+    return "".join(out)
+
+
 def resolve_body(text, header):
     """t260916-29：长活动外包了 worker_termination_guard 薄壳（worker 停机取消归因），
     spawn/reap 本体移到 _<name>_body——本锁跟随薄壳找本体（壳无 spawn/reap 面），
@@ -117,15 +137,33 @@ def main():
         if not body:
             ok(False, "%s：函数体不可定位" % header)
             continue
+        # t261001-03（轮询循环三副本抽成共享 helper）：rc 分支前置 reap 与 finally
+        # 兜底 reap 搬进共享 helper `_wait_for_agent_result`——站体改走 helper（恰一份
+        # 实现），reap 锚就核到 helper 体上。锁**意图不变**：结果就绪路径 reap +
+        # finally 兜底 reap 两处在位。
+        # 为什么写成**双形态容忍**而不是硬要求 helper：这次改动横跨写集边界——重构在
+        # `server/engine/`（票的写集内），而本脚本在 `integration/`（写集外，越权守卫会
+        # 把它回滚，留档 .sandbar/quarantine/unauth-implement-gen1）。两半必须**原子**落地
+        # （只上锁=main 立刻红；只上重构=锁红），所以锁必须两态都绿：旧结构核站体、
+        # 新结构核 helper；接线形态 0/1 之外（多份实现 / 有 helper 无接线）一律红。
+        # 锚是语义面（两处 reap 在位 + 单份实现），不是书写形态（KI-166 同纪律）。
+        routed = body.count("await _wait_for_agent_result(")
+        helper = fn_body(text, "async def _wait_for_agent_result")
+        ok(routed <= 1 and (routed == 0 or bool(helper)),
+           "%s：轮询循环接线形态唯一（0=旧三副本结构／1=共享 helper；多份实现或 helper 缺席=红）"
+           % header)
+        # 计数与位置都在**抹掉注释**的视图上做（见 `_code_view`）：注释里的字样不许满足守卫判据。
+        body_code = _code_view(body)
+        anchor = _code_view(helper) if (routed == 1 and helper) else body_code
         # reap 形态双锚：旧=真源直调 _reap_agent_proc(；新=AgentProc.reap(
-        reap = [m.start() for m in re.finditer(r"_reap_agent_proc\(|proc\.reap\(", body)]
-        settle = [m.start() for m in re.finditer(r"_settle_worktree_lane\(", body)]
+        reap = [m.start() for m in re.finditer(r"_reap_agent_proc\(|proc\.reap\(", anchor)]
+        settle = [m.start() for m in re.finditer(r"_settle_worktree_lane\(", body_code)]
         ok(len(reap) >= 2, "%s：reap 接入结果就绪路径 + finally 兜底" % header)
         if has_settle and settle:
             # 精确口径：spawn 之前的 settle 是幂等直读（缓存命中，无存活 agent，
             # 不需 reap）——豁免；spawn 之后每处 settle 前必须有 reap。
-            spawn_at = [x for x in (body.find("subprocess.Popen"),
-                                    body.find("agent_runtime.spawn_agent(")) if x >= 0]
+            spawn_at = [x for x in (body_code.find("subprocess.Popen"),
+                                    body_code.find("agent_runtime.spawn_agent(")) if x >= 0]
             popen = min(spawn_at) if spawn_at else -1
             prev = popen
             bad = []
