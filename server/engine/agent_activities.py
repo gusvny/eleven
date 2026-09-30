@@ -7302,6 +7302,12 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     only_names = [str(n).strip() for n in (only_names or []) if str(n).strip()]
     if only_names:
         _extra_env["SANDBAR_SCENARIO_ONLY"] = ",".join(only_names)
+    # t260930-01（宿主裁 260930：B 档只摘在册）在册红不进**每轮**路径：挂账册里的条目
+    # 已在册（每条带认领人与退场条件），每轮重跑它们只烧墙钟——实测一轮全量的墙钟由一条
+    # 串行链单独决定，而链上 9 条里 7 条在册、6 条非绿灯。开关**只在本处（泳道轮）注入**：
+    # 巡检与人工跑不注入=照旧全跑，那才是这些条目的观察位；未跑 ≠ 判绿，由回执的
+    # INTEG_KNOWN_RED 具名通道分开。**合并前的那次全量（B3）尚未做**，届时须显式不含本开关。
+    _extra_env["SANDBAR_KNOWN_RED_EXCLUDE"] = "1"
     # t260923 C 自愈·孤儿自动清扫（宿主直修令=F1 红线要求的宿主点头，限本项目
     # 测试台工程名族半径）：挂点孤儿清扫显式启用 + 半径 t26/sandbar-test/
     # stage-console 三族；租约在场/新鲜/在册三阀与年龄阀（缺省 1800s）照旧保护

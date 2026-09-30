@@ -1962,6 +1962,9 @@ SCENARIOS = [
     ("t260930-01-ledger-reuse-round",
      "台账绿行复用端到端行为棒（t260930-01，灰盒 L3，离线秒级零 docker 零 Temporal，真 git 树纯 stdlib）：账里已存 76,558 次执行/41.5% 是同一 (scenario, commit) 重复——本条锁「同 commit 同环境指纹同宽的绿行可直接跳过实跑」这条新契约的用户可感知面。A 首轮零命中=实跑（规范行 PASS 在场、汇总 reused=0/ran=expected=1、SCENARIOS 行带 ` reused=0` 尾注、账里落一条同名绿行）；B 同 commit 第二轮=复用（stdout 专行「INTEG_REUSE 复用台账绿行 1 条…」点名、夹具标记文件未重造=确实没跑、零规范行、ran=0 且 reused==expected==1、rc=0 正常绿、**账行数不增=不重盖章**、报告 JSON 带 reused 与全名单与「启用」三态）；C 换 commit（同一棵树切到**内容逐字节相同、只有 sha 不同**的兄弟提交）=零复用实跑（判据第一键**精确相等**：祖先/别提交都不算；同内容兄弟提交这一形把「换的只有 commit 这一维」钉死，复用失败不可能被别的原因解释）；D kill switch SANDBAR_LEDGER_REUSE=0=零复用且 stderr 一行具名理由点名该 env；E 脏树（未跟踪件）=零复用且理由点名「工作树脏」（HEAD 单独描述不了被验证的树）；F 主账不可读（目录权限 000）=fail-closed 零复用且理由具名（绝不按空账静默放行）；G 真 verify_lane integ 道跑全复用轮=回执带 reuse.reused=1/all_reused=True/名单/在册数、并打 REUSE_FULL_ROUND 专行、闸判**绿**（完整性判据 ran+reused==expected 在复用轮与残缺轮两侧都成立）。intent 分工：四键真值表/畸形行容错/三态理由归 L1 server/engine/tests/test_t260930_01_ledger_reuse.py（白盒）；执行器三态出口与清单完整性归 t260904-12/t260910-13 电池（本条只锁 ` reused=` 尾注形状在场）；闸的台账采信（红名归属/基线免跑）归 t260922-12 家族，本条只锁复用面回执。真 git 树落本场景私有临时目录（finally+atexit 双路回收并 worktree prune，main 树 worktree 注册表零残留）；账目录经 SANDBAR_SCENARIO_LEDGER_DIR 隔离投影，真账零写入；红线零接触 3099。git 缺席=ENV_FAIL exit 2",
      "python3 integration/t260930-01/sc_ledger_reuse_round.py", "ro", "serial"),
+    ("t260930-01-known-red-round-skip",
+     "在册红不进每轮路径·黑盒契约（t260930-01，灰盒 L2/L3，真执行器子进程+夹具册子，离线秒级零 docker 零 Temporal 零端口；宿主裁 260930「B 档只摘在册」）：动机是实测——一轮全量的墙钟由一条串行链单独决定（9 条 460s ≈ 整轮 460s），而链上 9 条里 7 条是挂账册在册条目、6 条非绿灯，等于每轮都在等已知的、已记过账的故障慢慢跑。A 开关开（泳道轮注入）：在册红**不进本轮注册面**（expected 相应减一）、不在册的照旧跑，且必须出现三条具名面——INTEG_KNOWN_RED（跳过 N 条 + 名单 + 观察位=每日巡检与合并前全量）、INTEG_KNOWN_RED_NOTE（**未跑 ≠ 判绿**）、汇总 known_red_skipped/known_red_names，且具名面只认本轮注册面（点名轮之外的在册条目不进名单）；B 开关关（巡检/人工跑/合并前全量）：逐字节旧行为，零豁免行、注册面不缩；C fail-closed 三态：册子缺席/坏 JSON/形状不对 → **一条都不豁免**（照跑）且 stderr 具名点名原因；认不得的 verdict 词与畸形条目一律照跑（宁慢勿窄）；D 与台账复用的守恒：真册冒烟下 ran+reused==expected 仍成立。intent 分工：本条锁「已在册的不重跑」（判据=挂账册 verdict 词表），t260930-01-ledger-reuse-round 锁「同代码状态已验过的不重跑」（判据=台账四键），两条都改注册面构成但判据不同源、互不替；名册 schema 卫生归 integration/tests/test_t260923_known_red_baseline.py，闸侧豁免记账归 shared.blockers_known_red_adoption 与其 L1。安全红线：零端口零 docker 不触 3099/7233；真册只读、夹具册子经路径缝投临时目录",
+     "python3 integration/t260930-01/sc_known_red_round_skip.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900
@@ -2008,6 +2011,91 @@ def _env_fp_value(cached=None):
     if cached:
         return cached
     return _fp_mod.env_fingerprint(_env_fp_parts())["value"]
+
+
+# ---------------- t260930-01 在册红不进每轮路径（宿主裁 260930：B 档） ----------------
+# 为什么：全量轮的墙钟由一条**串行链**单独决定（实测 9 条 460s ≈ 整轮 460s），而链上
+# 9 条里 7 条是本册在册条目、6 条非绿灯——每轮都在等已知的、已经记过账的故障慢慢跑。
+# 判据所指的「账」就是挂账册本身（integration/known-red-baseline.json，每条带认领人与
+# 退场条件）；**只摘在册**（B 档）：没在册的环境红照跑，环境坏了当轮就看得见。
+# 观察位：它们仍在**每日巡检**（自己的套件声明）与**合并前全量**里跑——本开关只由泳道轮
+# 注入（引擎侧 `_extra_env`），巡检/人工跑不注入=照旧全跑。
+# 边界：摘的是**每轮路径**，不是判据——回执必须**具名**列出「本轮未跑的在册红」，
+# 否则「没跑」与「跑了判绿」会长成一个样子（静默放行纪律）。
+KNOWN_RED_EXCLUDE_ENV = "SANDBAR_KNOWN_RED_EXCLUDE"
+#: 册子路径覆盖缝（缺省=本树 integration/known-red-baseline.json）
+KNOWN_RED_ROSTER_ENV = "SANDBAR_KNOWN_RED_ROSTER"
+#: 挂账册里「已挂账」的 verdict 词表（真源=册子 meta.policy 与名册卫生测试）；
+#: 其余值（如空/未来新增词）不参与豁免——认不得的词一律**跑**，宁慢勿窄。
+KNOWN_RED_BOOKED_VERDICTS = ("booked", "isolated")
+
+
+def known_red_names(roster, candidates=None):
+    """纯函数（无 I/O、可直测）：从挂账册 payload 里挑出**本轮该跳过**的在册场景名。
+
+    `roster` 期望册子文件的对象形（`{"meta":…,"entries":[{"name":…,"verdict":…},…]}`）；
+    畸形（非 dict / entries 非 list / 条目非 dict / name 空 / verdict 不在词表）= 该条
+    不参与豁免（跑，不跳），绝不抛——读取面不可信时一律回到「照跑」的保守侧。
+    `candidates` 给定时只保留其中真在册的名字（本轮注册面之外的条目与本次无关）。
+    """
+    if not isinstance(roster, dict):
+        return []
+    entries = roster.get("entries")
+    if not isinstance(entries, list):
+        return []
+    want = None
+    if candidates is not None:
+        want = {str(c).strip() for c in candidates if str(c).strip()}
+    out = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        # 名字/词都必须是**字符串**：非串一律按畸形条目拒（不 str() 强转——强转会把
+        # 123/None 之类变成「看起来合法」的名字混进豁免名单，那是放宽不是保守）。
+        raw_name, raw_verdict = e.get("name"), e.get("verdict")
+        if not isinstance(raw_name, str) or not isinstance(raw_verdict, str):
+            continue
+        name = raw_name.strip()
+        verdict = raw_verdict.strip()
+        if not name or verdict not in KNOWN_RED_BOOKED_VERDICTS:
+            continue
+        if want is not None and name not in want:
+            continue
+        if name not in out:
+            out.append(name)
+    return sorted(out)
+
+
+def _known_red_face(names, cap=None):
+    """具名面：名单超上限则截断加 `…（共 N 条）`（全名单进报告 JSON）。
+
+    上限取复用面同一个常量（定义在本段之后，故缺省在**调用时**解析，避免定义期取不到）。
+    """
+    cap = REUSE_PRINT_CAP if cap is None else cap
+    if len(names) <= cap:
+        return ",".join(names)
+    return "%s…（共 %d 条）" % (",".join(names[:cap]), len(names))
+
+
+def read_known_red_roster(root):
+    """读挂账册（唯一读面）。返回 (names, disabled_reason)：读不动=([], 具名理由)。
+
+    fail-closed 方向：文件缺席/不可读/坏 JSON/形状不对 → **一条都不豁免**（照旧全跑），
+    理由交给调用点打出去（关掉豁免这件事绝不静默）。
+    """
+    # 路径覆盖缝（测试与运维：夹具册子/换册子不必改树；缺省=本树挂账册）
+    path = (os.environ.get("SANDBAR_KNOWN_RED_ROSTER")
+            or os.path.join(root, "integration", "known-red-baseline.json"))
+    if not os.path.isfile(path):
+        return [], "挂账册不在场：%s" % path
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception as e:  # noqa: BLE001 —— 读/解失败=册子不可信，回到照跑
+        return [], "挂账册读取/解析失败（%s: %s）：%s" % (type(e).__name__, e, path)
+    if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
+        return [], "挂账册形状不合法（缺 entries 列表）：%s" % path
+    return known_red_names(payload), ""
 
 
 # ---------------- t260930-01 台账绿行复用（同 commit 同指纹同宽才复用） ----------------
@@ -3063,8 +3151,31 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     # （点名轮=点名∩非排除池；缺省轮=全表−被排除池），只是口径写成了「摘复用条目前的
     # 那一次」——改成 `len(only_names)` 会**改变**既有语义（把「点名但属被排除池」也
     # 算进在册），那是回归，不是本票的事（t260930-01 实锤：only+exclude 电池当场红）。
+    # ---- t260930-01 在册红不进每轮路径（宿主裁 260930：B 档只摘在册）----
+    # 开关只由**泳道轮**注入（引擎侧 _extra_env）；巡检与人工跑不注入=照旧全跑，
+    # 那才是这些条目的观察位。读不动册子=一条都不豁免（照跑）并具名上报。
+    _kr_flag = str(os.environ.get(KNOWN_RED_EXCLUDE_ENV) or "").strip().lower()
+    known_red_skipped = []
+    if _kr_flag in ("1", "on", "true", "yes"):
+        _kr_names, _kr_err = read_known_red_roster(_REPO_ROOT)
+        if _kr_err:
+            print("INTEG_KNOWN_RED_WARN 本轮**未**豁免任何在册红（%s）——按全跑处理"
+                  % _kr_err, file=sys.stderr, flush=True)
+        else:
+            _kr_in_round = set(e[0] for e in registry)
+            known_red_skipped = [n for n in _kr_names if n in _kr_in_round]
+            if known_red_skipped:
+                _kr_set = set(known_red_skipped)
+                registry = [e for e in registry if e[0] not in _kr_set]
+                print("INTEG_KNOWN_RED 本轮跳过在册红 %d 条（每轮路径豁免；观察位=每日巡检"
+                      "与合并前全量）：%s"
+                      % (len(known_red_skipped), _known_red_face(known_red_skipped)),
+                      flush=True)
+                print("INTEG_KNOWN_RED_NOTE 未跑 ≠ 判绿：这些条目本轮**没有**被验证，其状态"
+                      "以巡检/合并前全量的回执为准（本行是避免「没跑」与「跑了判绿」长成"
+                      "一个样子的具名通道）", flush=True)
     expected = len(registry) if only_names \
-        else (len(SCENARIOS) - len(excluded_entries))
+        else (len(SCENARIOS) - len(excluded_entries) - len(known_red_skipped))
     # ---- t260930-01 台账绿行复用（本段只**判定**；跳过发生在池切分处，见下）----
     # 前置检查一次性算出本轮复用名单；复用条目不进 pools/exclusives（既不跑也不计 ran），
     # expected 仍是本轮在册数，故不变式是 ran + reused == expected（汇总/闸两处同口径）。
@@ -3361,6 +3472,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             "reused": reused,
             # t260913-03：条件键——仅排除旋钮生效时出现（缺省键集逐字节不变）
         }
+        _summary["known_red_skipped"] = len(known_red_skipped)
+        if known_red_skipped:
+            _summary["known_red_names"] = list(known_red_skipped)
         if excluded:
             _summary["excluded_pools"] = list(excluded)
             _summary["excluded_count"] = len(excluded_entries)
@@ -3424,6 +3538,8 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         if excluded:
             _report["excluded_pools"] = list(excluded)
             _report["excluded_count"] = len(excluded_entries)
+            _report["known_red_skipped"] = len(known_red_skipped)
+            _report["known_red_names"] = list(known_red_skipped)
         if only_names:
             _report["only_scenarios"] = list(only_names)
         # 260929 直修 B1（宿主令·不开票）：报告落档同带环境红具名名单（与汇总行同名同源，
