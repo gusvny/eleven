@@ -936,3 +936,76 @@ def merge_lane_section(lane: Any, tmp: Any) -> Dict[str, Any]:
     new = str(t.get("max_severity") or "")
     out["max_severity"] = new if sev_rank.get(new, 0) > sev_rank.get(cur, 0) else cur
     return out
+
+
+# ========================================================================================
+# 读失败两分类发现（t261001-05）：lane/watchdog 扫描面的单票快照读失败不再并成一只桶
+# ========================================================================================
+
+#: 读失败两分类（活动侧 `_is_transient_read_error` 分类；本模块只吃已分类的回执清单）：
+#: transient=超时内无应答（扫描时 worker 缺位，属巡检期故障证据，可自愈；活动已重试一次）；
+#: permanent=工作流本体条件（如 "Workflow Task in failed state"，需要人处置）。
+UNREADABLE_TRANSIENT = "transient"
+UNREADABLE_PERMANENT = "permanent"
+
+#: 每条发现证据里逐票明细的条数上限（防票面洪泛；超出只报计数——与旧口径 errs[:10] 同量级）
+UNREADABLE_LIST_CAP = 10
+
+
+def _dominant_sentence(transient_n: int, permanent_n: int) -> str:
+    """一段话点名两类读失败的含义与本期主类（宿主令：一句话说明主类及其含义）。"""
+    dominant = (UNREADABLE_TRANSIENT if transient_n >= permanent_n
+                else UNREADABLE_PERMANENT)
+    return ("Read-failure classes this sweep: transient=%d (no worker answered the snapshot "
+            "query within the timeout at scan time — evidence of an outage while the sweep "
+            "ran; each was retried once with a longer per-ticket budget, re-running the "
+            "sweep after recovery clears these), permanent=%d (a permanent workflow "
+            "condition such as \"Workflow Task in failed state\" — this class needs a "
+            "human). Dominant class: %s."
+            % (transient_n, permanent_n, dominant))
+
+
+def unreadable_finding_specs(meta: Any) -> List[Dict[str, str]]:
+    """把活动回执 meta 的读失败清单变成**按类分开**的发现规格（纯函数；文案单点）。
+
+    返回 `[{"severity","subject","evidence"}]`（调用方经 make_finding 上发现条）：
+    - permanent → med（需要人）；transient → low（巡检期故障证据，非坏票）。
+    - 两类都保留逐票原始异常文本（fail-closed：读不到的票绝不当「没问题」）。
+    - **老回执**（无 transient/permanent 两键，在途回放形态）→ 单条旧形文案，不猜类。
+    - 空/畸形输入 → 空清单（不抛）。
+    """
+    if not isinstance(meta, dict):
+        return []
+    unreadable = [str(x) for x in (meta.get("unreadable") or []) if str(x)]
+    if not unreadable:
+        return []
+    trans = meta.get("unreadable_transient")
+    perm = meta.get("unreadable_permanent")
+    if not isinstance(trans, list) or not isinstance(perm, list):
+        # 老回执：分类键缺失 → 旧形单条（逐字同旧实现，重放确定性不破、不猜类）
+        return [{"severity": "med",
+                 "subject": "Lane/watchdog sweep had %d unreadable ticket(s)" % len(unreadable),
+                 "evidence": "in-scope non-terminal tickets whose timeline could not be read "
+                             "(their stuck-state verdict is unknown this period; a RUNNING "
+                             "ticket with no worker to answer the snapshot query is itself "
+                             "the KI-126 zombie shape): %s"
+                             % "; ".join(unreadable[:UNREADABLE_LIST_CAP])}]
+    trans_lines = [str(x) for x in trans if str(x)]
+    perm_lines = [str(x) for x in perm if str(x)]
+    head = _dominant_sentence(len(trans_lines), len(perm_lines))
+    specs: List[Dict[str, str]] = []
+    if perm_lines:
+        specs.append({
+            "severity": "med",
+            "subject": ("Lane/watchdog sweep: %d unreadable ticket(s) — permanent workflow "
+                        "condition (needs a human)" % len(perm_lines)),
+            "evidence": "%s Per-ticket raw detail: %s"
+                        % (head, "; ".join(perm_lines[:UNREADABLE_LIST_CAP]))})
+    if trans_lines:
+        specs.append({
+            "severity": "low",
+            "subject": ("Lane/watchdog sweep: %d unreadable ticket(s) — transient (no snapshot "
+                        "answer at scan time; not broken tickets)" % len(trans_lines)),
+            "evidence": "%s Per-ticket raw detail: %s"
+                        % (head, "; ".join(trans_lines[:UNREADABLE_LIST_CAP]))})
+    return specs

@@ -1798,13 +1798,16 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
             findings = findings + tmp_findings
         # 查询/枚举面的故障点名进票面（单票快照查不到=点名，绝不静默当「这票没问题」）
         errs = [str(x) for x in (meta.get("unreadable") or [])]
+        # 读失败分类点名（t261001-05，单点文案在 lw.unreadable_finding_specs）：两类分开
+        # 计数分开文案——瞬态（超时无应答，已重试一次）=巡检期故障证据；永久（如
+        # "Workflow Task in failed state"）=需要人。fail-closed 不变：读不到的票绝不静默
+        # 当「这票没问题」。老回执（无分类键）=单条旧形文案（不猜类，重放确定性不破）。
+        errs = [str(x) for x in (meta.get("unreadable") or [])]
         if errs:
+            from inspection_lane_watchdog import unreadable_finding_specs
             findings = findings + [make_finding(
-                "lane", "med", "Lane/watchdog sweep had %d unreadable ticket(s)" % len(errs),
-                "in-scope non-terminal tickets whose timeline could not be read (their "
-                "stuck-state verdict is unknown this period; a RUNNING ticket with no worker "
-                "to answer the snapshot query is itself the KI-126 zombie shape): %s"
-                % "; ".join(errs[:10]), suggest=False)]
+                "lane", s["severity"], s["subject"], s["evidence"], suggest=False)
+                for s in unreadable_finding_specs(meta)]
         skipped = [str(x) for x in (meta.get("errors") or [])]
         if skipped:
             findings = findings + [make_finding(

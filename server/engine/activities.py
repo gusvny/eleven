@@ -739,6 +739,21 @@ def _scan_tmp_fixture_cached(root: str, prefixes, ttl: float) -> Dict[str, Any]:
     return scan
 
 
+# t261001-05：读失败两分类 + 瞬态一次加预算重试。
+# 瞬态（transient）=快照 query 在超时内无人应答（扫描时 worker 缺位/控制台停机的巡检期
+# 形态，过后可自愈）；永久（permanent）=工作流本体条件（如 "Workflow Task in failed
+# state"，需要人处置）。两类分开计数、分开文案——「197 次超时」不许再被读成「197 张坏票」。
+# 重试：瞬态第一读超时后给**一次**更长单票预算的重试（总预算/并发闸不动——重试仍受
+# deadline 钳制，几百张无 worker 的票依旧拖不垮扫描面）；可用 snapshot_retry_timeout_sec
+# 显式覆盖倍算缺省。
+SNAPSHOT_RETRY_TIMEOUT_MULT = 4.0
+
+
+def _is_transient_read_error(exc: BaseException) -> bool:
+    """单票快照读失败分类：超时无应答=瞬态（t261001-05），其余按永久工作流条件点名。"""
+    return isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+
+
 @activity.defn
 async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
     """lane/watchdog 面（KI-122 追加面 / KI-126 同源）：扫**非终态票**的工作流快照与时间线。
@@ -788,6 +803,12 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
         scan_budget_sec = float(args.get("scan_budget_sec") or 90.0)
     except (TypeError, ValueError):
         scan_budget_sec = 90.0
+    try:
+        q_to_retry = float(args.get("snapshot_retry_timeout_sec"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        q_to_retry = 0.0
+    if q_to_retry <= 0:
+        q_to_retry = q_to * SNAPSHOT_RETRY_TIMEOUT_MULT
 
     # ---- 项目注册表（"全部项目"的真源；读不到=fail-closed 点名，不静默扫零票）----
     try:
@@ -844,24 +865,48 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
     deadline = time.monotonic() + scan_budget_sec
     sem = asyncio.Semaphore(concurrency)
     budget_note: List[str] = []
+    # t261001-05：读失败两分类台账。unreadable 仍是**全量**点名清单（fail-closed 不变，
+    # 老消费方零回归）；transient/permanent 是它的两个互斥子清单（计数与文案分开）。
+    unreadable_transient: List[str] = []
+    unreadable_permanent: List[str] = []
+
+    async def _read_once(tid: str, run_id: str, timeout_s: float):
+        return await asyncio.wait_for(
+            client.get_workflow_handle(tid, run_id=run_id).query("snapshot"),
+            timeout=timeout_s)
 
     async def _read(tid: str, run_id: str, project: str):
         async with sem:
             if time.monotonic() >= deadline:
                 budget_note.append(tid)
-                return tid, project, None, "scan budget (%ds) exhausted before this ticket "
+                # 预算耗尽=没读成，归瞬态（与「扫描时无应答」同性质），但不再重试（预算已尽）
+                return (tid, project, None,
+                        "scan budget (%ds) exhausted before this ticket " % int(scan_budget_sec),
+                        True)
             try:
-                snap = await asyncio.wait_for(
-                    client.get_workflow_handle(tid, run_id=run_id).query("snapshot"),
-                    timeout=q_to)
-            except Exception as e:  # noqa: BLE001 —— 查不到=点名，绝不当「无问题」
-                return tid, project, None, "snapshot query failed: %s: %s" % (type(e).__name__, e)
-            return tid, project, snap, ""
+                snap = await _read_once(tid, run_id, q_to)
+            except Exception as e:  # noqa: BLE001 —— 查不到=分类点名，绝不当「无问题」
+                if _is_transient_read_error(e) and time.monotonic() < deadline:
+                    # 瞬态：加长单票预算重试一次（仍受总预算 deadline 与并发闸钳制）
+                    left = max(0.05, deadline - time.monotonic())
+                    try:
+                        snap = await _read_once(tid, run_id, min(q_to_retry, left))
+                    except Exception as e2:  # noqa: BLE001 —— 重试仍败=按类点名
+                        transient2 = _is_transient_read_error(e2)
+                        return (tid, project, None,
+                                "snapshot query failed after 1 retry: %s: %s"
+                                % (type(e2).__name__, e2), transient2)
+                    return tid, project, snap, "", False
+                return (tid, project, None,
+                        "snapshot query failed: %s: %s" % (type(e).__name__, e), False)
+            return tid, project, snap, "", False
 
-    for tid, project, snap, err in await asyncio.gather(
+    for tid, project, snap, err, transient in await asyncio.gather(
             *[_read(*t) for t in targets]):
         if err:
-            unreadable.append("%s: %s" % (tid, err))
+            line = "%s: %s" % (tid, err)
+            unreadable.append(line)
+            (unreadable_transient if transient else unreadable_permanent).append(line)
             continue
         facts.append(facts_from_snapshot(tid, project, snap, workflow_id=tid, now_ts=now_ts))
     if budget_note:
@@ -903,6 +948,8 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
 
     meta["errors"] = errors
     meta["unreadable"] = unreadable
+    meta["unreadable_transient"] = unreadable_transient
+    meta["unreadable_permanent"] = unreadable_permanent
     meta["quarantined_projects"] = [str(q.get("dir") or "") for q in (quarantined or [])
                                     if isinstance(q, dict)]
     meta["enum_note"] = enum_note
