@@ -464,10 +464,15 @@ def main() -> int:
     # ---------- E. structural assertions (source-text anchors) ----------
     print("E. 结构性断言（S2 串行 / M2 注册 / 常量一致）")
     src = (POC / "dev_lane.py").read_text("utf-8")
-    i_prep = src.find("prepare_conflict_resolution,\n                    ConflictPrepArgs")
-    i_impl = src.find('self._run_agent_step("implement", solve_ctx)')
-    i_settle = src.find("settle_conflict_resolution,\n                    ConflictSettleArgs")
-    ok(-1 not in (i_prep, i_impl, i_settle) and i_prep < i_impl < i_settle,
+    # 260930：闸前主同步抽成共享 helper（同块还含一处分号观感的 prep 调用），本条锚点
+    # 因此收紧到**merge_check 分支内**——比原来的「全文首次出现」锚更强（它本来就只
+    # 想锁这一站：脏窗口里不跑 merge_check，S2）。缩进无关，位置相关。
+    i_mc = src.find('if phase == "merge_check":')
+    mc = src[i_mc:] if i_mc >= 0 else ""
+    i_prep = mc.find("prepare_conflict_resolution,")
+    i_impl = mc.find('self._run_agent_step("implement", solve_ctx)')
+    i_settle = mc.find("settle_conflict_resolution,")
+    ok(i_mc >= 0 and -1 not in (i_prep, i_impl, i_settle) and i_prep < i_impl < i_settle,
        "E-1 merge_check 分支内 prep→implement→settle 严格串行（脏窗口不跑 merge_check，S2）")
     names = [getattr(a, "__name__", "") for a in agent_activities.ALL_AGENT_ACTIVITIES]
     ok("prepare_conflict_resolution" in names and "settle_conflict_resolution" in names,

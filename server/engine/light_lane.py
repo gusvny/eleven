@@ -46,9 +46,22 @@ UI 面改动的口径（连带后果，**具名不静默**）：merge_check 的 
 **不调仲裁活动，不自动循环**——一个 attempt 只跑一轮机器闸，重跑由人（retry_qc）或打回
 （rework）显式触发。
 
+**段链之外的一步：闸相位入口的主同步**（宿主 260930 直修令，根因级）。段表里没有它，但
+它是闸相位的第一件事（0-commit 前置检查之后、跑闸之前）——把 `main` 并进泳道一次。为什么
+必须有：闸在**泳道自己的 worktree** 里跑项目声明的集成命令，而泳道=开票那一刻 `main` 的
+快照 ⇒ 开票之后落进 `main` 的修复**不会出现在泳道里**，闸于是把「`main` 的旧账」判成
+lane-only（本票的账），让 developer 去修根本不在它身上的东西（真票 t260930-09 实测：4 条
+pool-exclude 假红的根因就是如此）。同步一次 ⇒ **被验证树 = 被合并树**，归因才落回真正的
+责任人。机制=dev-lane 的 `_main_sync_before_gate`（本票从 dev-lane run() 原块抽出的共用
+helper，命令序列/入参/等待点逐字不变，已追平=is-ancestor 快路径幂等，冲突走既有消解回路，
+不可达响亮转人）——**轻道侧零第二份实现**；门=`LIGHT_MAIN_SYNC_PATCH_ID`（在飞老实例重放
+旧轮走旧路径，追平历史后的新一轮才真同步）。**判据零改动**：只改被验证的树。
+
 复用面（本票的要点，逐项都不是抄的）：
   · 工作空间准备：dev_lane._prepare_workspace_step（本票从 dev-lane run() 原块逐字抽出的
     共用 helper，dev-lane 同调用，命令序列逐字不变）；
+  · 闸前主同步：dev_lane._main_sync_before_gate（同上抽法；轻道传英文文案档
+    `LIGHT_MAIN_SYNC_TEXTS`，机制与命令序列走那一份）；
   · agent 段派发与回执/落盘流转：dev_lane._run_agent_step（含 worker 代落盘 settle、
     结果文件归一、闸拒绝明细、环境信号、移交命令债表）——本类直接调用；
   · 机器闸：同一批活动与同一批纯函数单写者——changed_files / surface_plan /
@@ -127,6 +140,13 @@ with workflow.unsafe.imports_passed_through():
 LIGHT_PATCH_ID = "light-lane-v1"
 
 LIGHT_LANE_TEMPLATE_ID = "light-lane"
+
+#: 闸前主同步门（宿主 260930 直修令，根因级）。为什么用**新门**而不是无条件执行：
+#: 在飞的老实例（如真票 t260930-09：历史里已有若干闸轮，但没有本标记）重放旧轮时
+#: `workflow.patched()`=False ⇒ 旧命令序列逐字不变（绝不撞 NonDeterminismError）；而
+#: 重放追平历史之后的**新一轮**执行 patched()=True ⇒ 记标记并真的同步一次（正是本修法
+#: 要救的那一轮）。机制本体=dev-lane 的 `_main_sync_before_gate`（唯一实现，不另造）。
+LIGHT_MAIN_SYNC_PATCH_ID = "light-lane-main-sync-v1"
 
 #: 段门表（**按 (template_id, stage_id) 键**，与 shared.default_gate_for 同形同键）。
 #: 机器闸=项目声明的集成命令（verify_lane lane=integ）——与 dev-lane 的机器闸**同一条
@@ -211,6 +231,42 @@ class LightLaneWorkflow(DevLaneWorkflow):
     #: 逐字不变——纯加法钩子）。
     FLOW_BRIEF_SET: Dict[str, str] = LIGHT_FLOW_BRIEF
 
+    #: 闸前主同步的**票面/提示文案**覆写档（宿主 260930）：机制与命令序列走 dev-lane 的
+    #: `_main_sync_before_gate` 那一份（唯一实现），只把「人读的那几句」换成英文——
+    #: 轻道票面与控制台文案一律英文（CLAUDE.md 规则 6 及 260925 补充令）。缺省（全车道）
+    #: 仍是 dev-lane 的中文历史原文，逐字不变。
+    LIGHT_MAIN_SYNC_TEXTS: Dict[str, str] = {
+        "unreachable": ("Main sync failed — a human has to take it: this lane never skips "
+                        "the sync (otherwise the verified tree is not the tree that would "
+                        "be merged): %s%s"),
+        "resolve_round": "Main sync conflict, resolution round %d (%s): %s",
+        "conflict_ctx": (
+            "【main-sync conflict round gen%d/cap%d】This round is NOT feature work: the "
+            "pre-gate main sync merged main into the lane (repo %s) and the worker already "
+            "ran git merge main. These files carry conflict markers (<<<<<<< lane / "
+            "======= / >>>>>>> main):\n%s\n"
+            "merge output summary (ours=lane / theirs=main):\n%s\n"
+            "Task: resolve the conflict markers file by file, keep both sides' semantics "
+            "(same as t260825-03); touch only the conflicted files, no unrelated edits; "
+            "**do NOT git commit** (the worker settles the merge commit after you deliver "
+            "your result file). Write the result file when done."),
+        "agent_failed_fmt": "Main sync conflict resolution round %d: %s",
+        "settle_unconverged": (
+            "Main sync conflict resolution round %d did not converge (the worker's settle "
+            "check failed) — a human has to take it: %s. The workspace is mid-merge: resolve "
+            "the conflicts and send rework(to_stage=implement) to continue, or run git merge "
+            "--abort in the lane and send retry_qc to re-verify"),
+        "back_to_implement": ("Main sync conflict resolved (round %d) — back to implement to "
+                              "adapt to the main changes"),
+        "synced_log": "main sync (%s): %s",
+        "reset_exception": (" | merge reset attempt raised (%s: %s) — the lane may still be "
+                            "mid-merge; a human has to finish it"),
+        "reset_ok": (" | merge reset done (MERGE_HEAD cleared) — the next main sync retries "
+                     "from a clean tree"),
+        "reset_failed": (" | merge reset failed: %s — the lane is still mid-merge; a human "
+                         "has to finish it"),
+    }
+
     # 票面纪律（宿主 260930 实报：阻断面是一大坨机器清单，人找不到「我该做什么」）：
     # 票面=给人看的摘要（一段结论 + 需要人做的决定 + 可行动的点名），机器清单进
     # blocked_detail / 闸回执 / 报告文件。三条上限即机械判据（UT 钉死，判据一字不放宽）。
@@ -245,9 +301,13 @@ class LightLaneWorkflow(DevLaneWorkflow):
               parts=("script",),
               acceptance=("UI tickets carry screenshots under .sandbar/screenshots/ "
                           "(the merge_check UI-evidence gate checks it mechanically)",)),
+        # 注：本段相位的第一件事是**闸前主同步**（把 main 并进泳道一次，机制=dev-lane 的
+        # `_main_sync_before_gate` 共享 helper，门=LIGHT_MAIN_SYNC_PATCH_ID）——它是**段链
+        # 之外的一步**（段表里没有它），却决定「被验证树=被合并树」；见模块头注与相位注释。
         Stage(id="run_integration_tests", name="跑集成测试", role="integration",
               next="merge_check", agent=False,
-              desc="程序化（无 agent）：泳道 0-commit 前置检查 → 改动清单 → 面计划收窄快反馈面 "
+              desc="程序化（无 agent）：泳道 0-commit 前置检查 → 闸前主同步（把 main 并进泳道一次，"
+                   "被验证树=被合并树）→ 改动清单 → 面计划收窄快反馈面 "
                    "→ 跑项目声明的集成命令（与 dev-lane 同一条命令、同一个执行器）；不绿即 blocked "
                    "（票面=给人看的摘要：计数 + 本票的账最多 5 名 + 出路 ≤3；完整违规集在 "
                    "blocked_detail/回执里）；不自动重跑、不调仲裁；定点轮放行只认收口全量跑",
@@ -1005,6 +1065,9 @@ class LightLaneWorkflow(DevLaneWorkflow):
         run_only: List[str] = []          # 最近一轮跑面（空=全量）
         prev_red_names: List[str] = []    # 最近一轮红名（下一轮快反馈面来源）
         gate_rounds = 0                   # 本 attempt 内机器闸轮次（每跑一趟 +1）
+        # 闸前主同步的跨轮反例守卫状态（与 dev-lane 同名同义；机制在共享 helper 里）
+        conflict_rounds = 0               # 冲突消解轮次（上限 MAX_CONFLICT_ROUNDS）
+        prev_conflict_files: List[str] = []   # 上一轮冲突文件签名（同批反复冲突守卫）
 
         while phase != "done":
             # 段间暂停门（t260908-01 通用骨架，本类只接线）：当前段（含在飞活动）
@@ -1080,7 +1143,32 @@ class LightLaneWorkflow(DevLaneWorkflow):
                     except Exception as e:  # noqa: BLE001——不拦主链（同 dev-lane 口径）
                         self._log("0-commit pre-check failed (not blocking the main "
                                   "chain): %s: %s" % (type(e).__name__, e))
-                # 4.2 快反馈面（改动清单 ∪ 面计划；不可得=全量）
+                # 4.2 闸前主同步（宿主 260930 直修，根因级）：把 main 并进泳道一次。
+                # **为什么必须**：闸在**泳道自己的 worktree** 里跑 `run_scenarios.py`，
+                # 而泳道=开票那一刻从 main 建的快照——开票之后落进 main 的修复**不会**
+                # 出现在泳道里（真票 t260930-09 实测：4 条 pool-exclude 假红的根因是
+                # main 上才提交的夹具清理修，泳道那份夹具还是旧的），闸于是把「main 的
+                # 旧账」判成 lane-only（本票的账）=让 agent 去修不在它身上的东西。
+                # 同步一次 ⇒ **被验证树 = 被合并树**，归因才落回真正的责任人。
+                # 机制=dev-lane 的 `_main_sync_before_gate`（抽出的共享 helper，唯一实现；
+                # 已追平=is-ancestor 快路径幂等，每轮一次）；冲突 → 既有冲突消解回路
+                # （rework 回 implement）/不可达 → 响亮转人——本道**不自造**打回。
+                # 位置=跑闸相位入口、0-commit 前置检查之后（同步落下的 merge 提交会让
+                # lane_commits +1，放前面=给「实现未落盘」放水）、跑闸之前（同轮直线
+                # 衔接、必重跑不复用旧报告）——与 dev-lane 同一同位点纪律。
+                # **判据零改动**：只改被验证的树，不改任何闸判据、不改归因口径、不放宽
+                # 任何理由（红仍红、拦仍拦）。
+                if workflow.patched(LIGHT_MAIN_SYNC_PATCH_ID):
+                    _ms = await self._main_sync_before_gate(
+                        conflict_rounds, prev_conflict_files,
+                        texts=self.LIGHT_MAIN_SYNC_TEXTS)
+                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
+                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
+                    if _ms.get("phase"):
+                        phase = str(_ms["phase"])
+                    if _ms.get("stop"):
+                        continue
+                # 4.3 快反馈面（改动清单 ∪ 面计划；不可得=全量）
                 run_only = await self._light_gate_plan(prev_red_names)
                 # 4.3 跑闸（一轮）
                 ir = await self._light_gate_round(run_only)

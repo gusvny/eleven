@@ -30,7 +30,7 @@ stages:
   - id: run_integration_tests
     role: integration
     name: "跑集成测试"
-    desc: "程序化（无 agent）：泳道 0-commit 前置检查 → 改动清单 → 面计划收窄快反馈面 → 跑项目声明的集成命令（与 dev-lane 同一条命令、同一个执行器）；不绿即 blocked （票面=给人看的摘要：计数 + 本票的账最多 5 名 + 出路 ≤3；完整违规集在 blocked_detail/回执里）；不自动重跑、不调仲裁；定点轮放行只认收口全量跑"
+    desc: "程序化（无 agent）：泳道 0-commit 前置检查 → 闸前主同步（把 main 并进泳道一次，被验证树=被合并树）→ 改动清单 → 面计划收窄快反馈面 → 跑项目声明的集成命令（与 dev-lane 同一条命令、同一个执行器）；不绿即 blocked （票面=给人看的摘要：计数 + 本票的账最多 5 名 + 出路 ≤3；完整违规集在 blocked_detail/回执里）；不自动重跑、不调仲裁；定点轮放行只认收口全量跑"
     next: merge_check
     parts:
       - script

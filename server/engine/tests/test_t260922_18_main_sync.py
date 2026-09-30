@@ -295,6 +295,18 @@ def _sync_phase_block():
     return src[start:end]
 
 
+def _sync_helper_block():
+    """闸前主同步**机制本体**（260930 抽成共享 helper；调用点见 _sync_phase_block）。
+
+    为什么两段分开取：抽 helper 的纪律是「命令序列/入参/等待点逐字不变，只换位置」——
+    源序锁（前置检查→同步→跑闸）落在**调用点**，会话序列锁（prep→agent→settle）落在
+    **helper 本体**。这样两条锁都还在，且各自锁的是它真正关心的那一段。"""
+    src = _dev_lane_src()
+    start = src.index("async def _main_sync_before_gate(")
+    end = src.index("    @workflow.run", start)
+    return src[start:end]
+
+
 def test_struct_patch_gate_wraps_sync_sequence():
     src = _dev_lane_src()
     assert src.count('MAIN_SYNC_PATCH_ID = "dev-lane-main-sync-v1"') == 1
@@ -304,21 +316,36 @@ def test_struct_patch_gate_wraps_sync_sequence():
 
 def test_struct_sync_source_order_gate_before_sync_before_run():
     """同步排在 0-commit 前置检查之后（不给「实现未落盘」放水）、跑闸之前
-    （同步与跑闸同轮直线衔接=必重跑不复用旧报告）——源序即机械锁。"""
+    （同步与跑闸同轮直线衔接=必重跑不复用旧报告）——源序即机械锁。
+
+    260930 抽 helper 后：源序锁落**调用点**，且机制只此一份（helper 内
+    prepare_conflict_resolution 在 dev_lane 全文恰 1 次 = 没有第二份实现）。"""
     block = _sync_phase_block()
     i_gate = block.index("graw = await workflow.execute_activity(")
-    i_prep = block.index("praw = await workflow.execute_activity(")
+    i_prep = block.index("self._main_sync_before_gate(")
     i_run = block.index("rraw = await workflow.execute_activity(")
     assert i_gate < i_prep < i_run
     assert block.index("verify_review_gate", i_gate) < i_prep
     assert block.index("run_integration_tests,", i_run) > i_prep
-    assert "if _sync_stop:\n                        continue" in block
+    # 处置面：stop 非空 ⇒ 本相位 continue（blocked/rework 都不在这里接着跑闸）
+    assert 'if _ms.get("stop"):\n                        continue' in block
+    helper = _sync_helper_block()
+    # 闸前主同步=helper 内单点调用（全文另有 merge_check 站的冲突 prep——那是另一站的
+    # S2 会话，不是「第二份主同步」；本条锁的是**闸前同步**只此一份、且相位块只经 helper）
+    assert helper.count("prepare_conflict_resolution,") == 1
+    assert block.count("self._main_sync_before_gate(") == 1
+    assert '"stop": _sync_stop' in helper and '"sync_s": _sync_s' in helper
 
 
 def test_struct_conflict_subloop_reuses_existing_trio_back_to_implement():
-    block = _sync_phase_block()
+    """冲突子回路的 prep→agent→settle 会话序列锁（260930 抽 helper 后落 helper 本体）。
+
+    agent 上下文变量名仍是 `msolve_ctx`（不是 `solve_ctx`）：selfcheck E-1 用
+    `_run_agent_step("implement", solve_ctx)`（merge_check 分支那处）作首现锚——主同步
+    子回路同名会让该锚错位（t260922-18 实测），故此文用 msolve_ctx 断言，保持两站可分。"""
+    block = _sync_helper_block()
     i_prep = block.index("prepare_conflict_resolution")
-    i_agent = block.index('_run_agent_step("implement", solve_ctx)')
+    i_agent = block.index('_run_agent_step("implement", msolve_ctx)')
     i_settle = block.index("settle_conflict_resolution", i_agent)
     assert i_prep < i_agent < i_settle
     assert 'who="workflow", fallback="run_integration_tests"' in block
@@ -332,8 +359,12 @@ def test_struct_conflict_subloop_reuses_existing_trio_back_to_implement():
 
 
 def test_struct_evidence_wiring_present():
+    """证据接线三面（260930 抽 helper 后按位置一一对应）：
+    helper=同步日志留痕；相位块=票面 summary 尾注 + 仲裁/走查上下文注入。"""
+    helper = _sync_helper_block()
+    assert "main_sync_note(" in helper                # 日志留痕（helper 内单点）
     block = _sync_phase_block()
-    assert block.count("main_sync_note(") >= 2        # 日志留痕 + 票面回执
+    assert block.count("main_sync_note(") >= 1        # 票面回执/尾注
     assert "【主同步证据】" in block                   # 仲裁/走查上下文注入
     assert "｜主同步=" in block                       # 票面 summary 尾注
 

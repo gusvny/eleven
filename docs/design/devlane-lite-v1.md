@@ -207,6 +207,17 @@ promoted to the full lane mid-flight — promotion is cheap, silent scope creep 
    light lane can actually carry. A light ticket that turns out to need the full lane is handled by
    creating a full-lane ticket for the remaining work — lanes are not migrated mid-flight, because
    a running workflow cannot change its class.
+4. **`main` is synced into the lane once, right before the machine gate.** The gate runs the
+   project's integration command inside the lane's own worktree, and that worktree is a snapshot of
+   `main` taken when the ticket was created — so a fix that lands in `main` afterwards is invisible
+   to the gate, and a red that is really `main`'s account gets attributed to this ticket (the
+   developer is then asked to repair something that is not theirs, and the same round repeats).
+   The pre-gate sync — the mechanism the full lane already uses, extracted into one shared helper:
+   merge `main` into the lane once per round, an is-ancestor fast path when the lane is already
+   level, the existing conflict-resolution loop when it conflicts, a loud block for a human when
+   the sync itself fails — makes the verified tree the tree that would be merged. It changes only
+   the tree under verification: no gate criterion, no attribution rule and no remedy is relaxed,
+   and it adds no second implementation of the sync to the light lane.
 
 
 A profile is defined by three things: which stages run, how wide the gate is, and which human

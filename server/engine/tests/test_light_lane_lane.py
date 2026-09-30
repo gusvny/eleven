@@ -1031,6 +1031,102 @@ def test_t260930_09_rendered_face_example(capsys=None):
 
 
 # ======================================================================
+# F4. 闸前主同步（宿主 260930 直修，根因级）：同一 helper / 同一同位点 / 只此一份
+# ======================================================================
+# 病根：闸在**泳道自己的 worktree** 里跑集成命令，泳道=开票那刻的 main 快照 ⇒ 开票后落进
+# main 的修复不在泳道里 ⇒ 闸把「main 的账」判成 lane-only（本票的账）。修法=照全车道既有
+# 机制走：闸相位入口（0-commit 前置检查之后、跑闸之前）把 main 并进泳道一次。
+
+LIGHT_SRC = (POC / "light_lane.py").read_text("utf-8")
+DEV_SRC = (POC / "dev_lane.py").read_text("utf-8")
+
+
+def _light_gate_phase_block():
+    src = LIGHT_SRC
+    start = src.index('if phase == "run_integration_tests":')
+    end = src.index('if phase == "merge_check":', start)
+    return src[start:end]
+
+
+def _dev_sync_helper_block():
+    src = DEV_SRC
+    start = src.index("async def _main_sync_before_gate(")
+    end = src.index("    @workflow.run", start)
+    return src[start:end]
+
+
+def test_light_lane_syncs_main_before_the_gate_via_the_shared_helper():
+    """① 轻道闸前确实调**同一个** helper，且排在 0-commit 前置检查之后、跑闸之前。"""
+    block = _light_gate_phase_block()
+    i_gate = block.index("verify_review_gate")
+    i_sync = block.index("self._main_sync_before_gate(")
+    i_run = block.index("self._light_gate_round(")
+    assert i_gate < i_sync < i_run, "闸前主同步的同位点错了（判据/必重跑纪律会破）"
+    assert "workflow.patched(LIGHT_MAIN_SYNC_PATCH_ID)" in block, \
+        "在飞老实例重放旧轮必须走旧路径（新门），不许无条件加命令"
+    assert "texts=self.LIGHT_MAIN_SYNC_TEXTS" in block, "轻道票面英文档没接上"
+    assert light_lane.LIGHT_MAIN_SYNC_PATCH_ID == "light-lane-main-sync-v1"
+    assert "async def _main_sync_before_gate" in DEV_SRC, "共享机制不在（dev-lane 那份）"
+    # 机制由 helper 给：轻道侧只做「回填计数/落点相位/stop 处置」
+    for frag in ('conflict_rounds = int(_ms.get("conflict_rounds") or 0)',
+                 'prev_conflict_files = list(_ms.get("prev_conflict_files") or [])',
+                 'if _ms.get("stop"):'):
+        assert frag in block, frag
+
+
+def test_light_lane_has_no_second_main_sync_implementation():
+    """③ 结构锁：轻道不得出现第二份主同步实现（会话/活动/消解回路都只在 helper 里）。"""
+    assert "async def _main_sync_before_gate" not in LIGHT_SRC, \
+        "轻道自己写了一份主同步（宿主令：照既有机制走，不许另造）"
+    for frag in ("prepare_conflict_resolution", "settle_conflict_resolution",
+                 "main_sync_conflict_route", "ConflictPrepArgs", "ConflictSettleArgs"):
+        assert frag not in LIGHT_SRC, "轻道侧出现主同步机制碎片：%s" % frag
+    # 同步入口只此一处（=调共享 helper）；「git merge main」只允许作为**提示词文本**出现
+    # （agent 上下文里描述 worker 已做过什么），不允许作为命令执行面出现——命令执行面
+    # （subprocess/git 调用）在 activity 里，轻道侧连 subprocess 都不 import。
+    # 源码面出现 4 次：3 处是文档/注释里的指针（说明「机制在那一份」），恰 1 处是调用
+    assert LIGHT_SRC.count("await self._main_sync_before_gate(") == 1
+    assert "subprocess" not in LIGHT_SRC
+    assert "os.system" not in LIGHT_SRC
+    # 「不自造打回」：主同步的落点相位由 helper 的既有回路给——轻道闸相位块里零 _auto_rework
+    # 调用（`_auto_rework` 在本类另有合法出现：信号 rework 的落点校验，见 _consume_light_rework）
+    assert "_auto_rework(" not in _light_gate_phase_block()
+
+
+def test_dev_lane_sync_command_sequence_is_verbatim_after_extraction():
+    """② 抽 helper 的纪律：命令序列/入参/等待点逐字不变（dev-lane 行为零变化）。"""
+    h = _dev_sync_helper_block()
+    for lit in ("prepare_conflict_resolution,", "ConflictPrepArgs(ticket_id=self.ticket_id,",
+                'base_ref="main"', "start_to_close_timeout=SHORT, retry_policy=RETRY",
+                "settle_conflict_resolution,", "ConflictSettleArgs(ticket_id=self.ticket_id,",
+                "round_no=conflict_rounds)", "MAX_CONFLICT_ROUNDS",
+                "main_sync_conflict_route(", 'fallback="run_integration_tests"'):
+        assert lit in h, "抽块丢了原命令序列字面量：%s" % lit
+    # 调用点仍是唯一同位点 + 计时面照旧累计（t260925-12）
+    block = DEV_SRC[DEV_SRC.index('if phase == "run_integration_tests":'):
+                    DEV_SRC.index("# 3.3) arbitration")]
+    assert block.count("self._main_sync_before_gate(") == 1
+    assert 'gate_sync_s += float(_ms.get("sync_s") or 0.0)' in block
+    # 旧内联块不残留（抽完只此一处）
+    assert "praw = await workflow.execute_activity(" not in block
+
+
+def test_light_lane_sync_texts_cover_every_hook_in_english():
+    """轻道票面英文（规则 6）：helper 里每个文案钩子键都要有英文覆写档，不漏键。"""
+    T = light_lane.LightLaneWorkflow.LIGHT_MAIN_SYNC_TEXTS
+    hooks = set(re.findall(r'\b(?:_abort_)?text\("([a-z_]+)"', DEV_SRC))
+    assert hooks, "文案钩子一个都没扫到（钩子形态变了？）"
+    missing = sorted(hooks - set(T))
+    assert not missing, "轻道英文档缺键（漏键=票面回落中文）：%s" % missing
+    for k, v in T.items():
+        assert str(v).strip(), k
+        assert not _has_cjk(v), "轻道主同步文案含中文：%s=%r" % (k, str(v)[:60])
+    # 缺省（全车道）仍是中文历史原文逐字：dev-lane 侧钩子默认值不动
+    assert "主同步失败（转人工，不静默跳过同步" in DEV_SRC
+    assert "主同步冲突消解完成（第 %d 轮），回实现段适配 main 变更" in DEV_SRC
+
+
+# ======================================================================
 # G. 出路改写：轻道票面不含 create_plan；dev-lane 逐字不变
 # ======================================================================
 

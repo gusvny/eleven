@@ -30,6 +30,13 @@ intent（守护的用户可感知行为）：**一条轻道票真的走完它自
      落盘被路径闸拒（reason_code=write_set_missing）→ 票面 `blocked_detail.next_action`
      **不含 create_plan**（改写为模板中立口径），原文留在 `next_action_rewritten_from`
      （可追溯）；dev-lane 的同一提示逐字不变（那条由 L1 负向锁守）。
+  G. **闸前主同步（宿主 260930 直修，根因级）**：轻道票的闸在**泳道自己的 worktree** 里跑，
+     而泳道=开票那一刻从 main 建的快照——开票之后落进 main 的修复不会出现在泳道里，闸会把
+     「main 的旧账」判成 lane-only（本票的账）。本子用例造「泳道落后 main」：开票 → 人暂停（票
+     停在段间门口、闸未跑）→ **main 落地一个会翻转闸结果的夹具修复**（仓内状态档
+     gate-state.txt=green）→ resume → 闸前主同步把 main 并进泳道 → **被验证树=被合并树**、
+     闸转绿、票推进到人门；回执 `meta.main_sync`（mode=merged + main_sha + detail）与泳道
+     HEAD 含修复两面互证。机制走 dev-lane 的共享 helper（轻道**不另造**）。
   E. **绿路到人门**：票走到 `stage=merge / stage_state=awaiting-human`（轻道唯一人门），
      timeline 有 merge_check done；人签 approve → 票收口 closed + 泳道拆净（归档成功是
      拆道前置，与 dev-lane 同一批活动）。
@@ -111,8 +118,12 @@ EXCLUDED_STAGES = ("review_plan", "design_integration_tests", "arbitrate",
 # 段链（真跑序；宿主 260930：无方案段、无 UI 证据段——首段即 implement）。
 LIGHT_STAGES = ("implement", "run_integration_tests", "merge_check", "merge")
 
+# L7（宿主 260930 闸前主同步）：落后票 + main 侧「夹具修复」的仓内落点
+TID_LAG = "t%07d-lag" % (os.getpid() % 1000000)
+LAG_STATE_REL = "integration/mini/gate-state.txt"
+
 G = {"tmp": "", "fixture": "", "projects": "", "ctl": "", "gate_ledger": "",
-     "stub_ledger": "", "stub": "", "workers": []}
+     "stub_ledger": "", "stub": "", "workers": [], "all_workers": []}
 
 # 桩落盘（引擎 spawn 的 agent 命令）：argv 末位=prompt；阶段名与结果文件路径从 prompt 里取。
 # 同时①落一个写集内的真实文件（settle 才有物可提交）②把「实收派单」写进账本（断言面）。
@@ -158,6 +169,7 @@ import json, os, subprocess, sys, time
 NAME = "<<NAME>>"
 CTL = "<<CTL>>"
 LED = "<<LED>>"
+STATE = "<<STATE>>"
 mode = "green"
 try:
     with open(CTL, encoding="utf-8") as f:
@@ -174,11 +186,25 @@ try:
 except Exception:
     br = "?"
 in_lane = br.startswith("lane/")
-red = (mode == "all-red") or (mode == "lane-red" and in_lane)
+# 仓内状态档（L7「泳道落后 main」子用例用）：main 落地一个夹具修复（写 gate-state.txt=green）
+# 后，**仅在并入该修复的树里**探针转绿。缺档=回落控档模式 ⇒ 既有子用例（L3 红轮 / L4 绿轮）
+# 行为逐字不变（它们从不在仓内放这个档）。
+state = ""
+try:
+    with open(os.path.join(os.getcwd(), STATE), encoding="utf-8") as f:
+        state = f.read().strip()
+except OSError:
+    state = ""
+if state == "green":
+    red = False
+elif state == "red":
+    red = True
+else:
+    red = (mode == "all-red") or (mode == "lane-red" and in_lane)
 try:
     with open(LED, "a", encoding="utf-8") as f:
         f.write(json.dumps({"name": NAME, "mode": mode, "branch": br,
-                            "in_lane": in_lane, "red": red,
+                            "in_lane": in_lane, "red": red, "state": state,
                             "only": os.environ.get("SANDBAR_SCENARIO_ONLY", ""),
                             "cwd": os.getcwd(), "ts": time.time()},
                            ensure_ascii=False) + "\n")
@@ -350,7 +376,8 @@ def build_fixture(fail):
         with open(os.path.join(mini_dir, "%s.py" % n), "w", encoding="utf-8") as f:
             f.write(PROBE_SRC.replace("<<NAME>>", n)
                     .replace("<<CTL>>", G["ctl"])
-                    .replace("<<LED>>", G["gate_ledger"]))
+                    .replace("<<LED>>", G["gate_ledger"])
+                    .replace("<<STATE>>", LAG_STATE_REL))
     # 引擎面覆盖：夹具仓 clone 自 **HEAD**，而本票被测的是**当前工作树**——把工作树里
     # server/engine 与 server/workflows 的改动（含未跟踪的新模块 light_lane.py 与
     # light-lane.yaml）逐文件覆盖进夹具仓。这才是「真跑被测代码」；不覆盖的话夹具 worker
@@ -402,6 +429,10 @@ def start_worker(py, stage, queues=None, stub_files="", watch=None):
                             env=env_for(stage, extra), cwd=REPO, stdout=log,
                             stderr=subprocess.STDOUT, start_new_session=True)
     G["workers"].append(proc)
+    # 台账（收尾复核用）：stop_all_workers 会 pop workers，这里另存一份不弹的，
+    # 收尾断言「每个起过的 worker 进程都真死了」——用 Popen.poll()，不依赖 ps
+    # （本机 ps 常被沙箱拒；见 stray_procs 的诚实回退）。
+    G["all_workers"].append(proc)
     return proc
 
 
@@ -431,6 +462,32 @@ def stop_all_workers(fail, label):
     procs, G["workers"] = list(G["workers"]), []
     for i, proc in enumerate(procs):
         stop_worker(fail, "%s#%d" % (label, i + 1), proc)
+
+
+def stray_procs(marker):
+    """全进程表里 cmdline 含 marker 的进程（排除自身）；`ps` 不可观测返回 None。
+
+    为什么要有：场景起过多个 worker（主票/UI 票/落后票），它们的停止面在 finally 的
+    `stop_all_workers`;本函数是**收尾后的独立复核**——真跑里发现过两个漏停的 worker
+    （早先失败轮次遗留，命令行里还挂着本场景的 tmp 前缀），所以把这件事从「看不见」
+    变成「收尾项红」。绝不自报为空集：ps 不可用就返回 None，由调用方按「未验」处理。"""
+    try:
+        buf = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True,
+                             text=True, timeout=60).stdout
+    except Exception:  # noqa: BLE001
+        return None
+    out = []
+    me = os.getpid()
+    for ln in (buf or "").splitlines():
+        m = re.match(r"^\s*(\d+)\s+(.*)$", ln)
+        if not m:
+            continue
+        pid, cmd = int(m.group(1)), m.group(2)
+        if pid == me:
+            continue
+        if marker in cmd:
+            out.append({"pid": pid, "cmd": cmd[:200]})
+    return out
 
 
 def declared_integration_cmd(verify_yaml):
@@ -897,6 +954,92 @@ def main():
                 check(rc3 == 0 and bool(log.strip()),
                            "L5 夹具 main 有落地提交（合并真发生）")
                 print_timeline(fin, "closed")
+
+        # ---------- L7 闸前主同步：泳道落后 main（宿主 260930 直修，根因级） ----------
+        # 场景（确定性，不靠竞速）：开票（泳道=此刻 main 的快照）→ 人暂停（票停在段间
+        # 门口、闸还没跑）→ **在 main 上落一个会翻转闸结果的夹具修复**（仓内状态档
+        # gate-state.txt=green：三条夹具场景见到它就转绿）→ resume → 闸前主同步把 main
+        # 并进泳道 → 闸读到的是**带修复的树** → 绿路推进到人门。
+        # 没有这条同步时：泳道仍是旧快照 → 三条夹具照旧红（lane-red 形态）→ 票 blocked
+        # 且归因 lane-only（把 main 的账算到本票头上）——正是本修法要消掉的那个面。
+        lag_worker = start_worker(py, stage, queues="sandbar-ticket-%s" % TID_LAG,
+                                  watch=TID_LAG)
+        _rc, br4 = git("rev-parse", "--short", "HEAD")
+        _rc5, out5 = run_poc_client(py, "ticket-start", {
+            "ticket_id": TID_LAG, "template_id": "light-lane", "project": PROJECT_KEY,
+            "base_ref": (br4 or "").strip(),
+            "title": "[e2e] light-lane pre-gate main sync (the lane snapshot lags main)",
+            "user_request": "integration e2e: a gate-affecting fixture fix lands in main after the lane was cut; the pre-gate main sync must bring it into the verified tree",
+            "write_set": [WRITE_FILE],
+            "caller_project": PROJECT_KEY,
+        }, env_for(stage), timeout=300)
+        good4, why4 = accepted(out5, TID_LAG)
+        check(good4, "L7 落后票受理（%s）" % why4)
+        if good4:
+            # ① 暂停在段间门口：确保「main 落修复」严格发生在闸跑之前（确定性）
+            pz = cli(py, stage, "ticket", {"op": "pause", "ticket_id": TID_LAG,
+                                           "who": "e2e-human",
+                                           "note": "e2e: hold so main can move ahead"})
+            check(pz.get("ok") is True,
+                  "L7 pause 受理（%s）" % str(pz.get("error") or "")[:120])
+            # 快照的暂停面顶层两键（base._pause_snapshot 投影）：paused=bool、
+            # paused_phase∈{pending(已受理待段间生效), at_gate(已停在段间门口)}
+            sp = wait_snap(fail, py, stage, TID_LAG,
+                           lambda x: x.get("paused") is True
+                           and x.get("paused_phase") == "at_gate",
+                           "L7 票停在段间门口（paused=True / paused_phase=at_gate）", 300)
+            lane_lag = ""
+            if sp is not None:
+                lane_lag = str(((sp.get("meta") or {}).get("workspace") or {}).get("path") or "")
+                check(bool(lane_lag) and not os.path.isfile(os.path.join(lane_lag,
+                                                                        LAG_STATE_REL)),
+                      "L7 前提：泳道快照里没有 main 的修复（落后在案；lane=%s）"
+                      % (lane_lag or "?"))
+                # ② main 落地「夹具修复」（泳道已切出去，故不在这棵树里）
+                _p = os.path.join(fx, LAG_STATE_REL)
+                os.makedirs(os.path.dirname(_p), exist_ok=True)
+                with open(_p, "w", encoding="utf-8") as f:
+                    f.write("green\n")
+                git("add", "-A")
+                rc6, cmsg = git("commit", "-qm",
+                                "fixture fix: gate-state=green (lands in main after the lane was cut)")
+                check(rc6 == 0, "L7 main 落地修复提交（%s）" % cmsg.strip()[:120])
+                _rc7, main_sha = git("rev-parse", "HEAD")
+                main_sha = (main_sha or "").strip()
+                # ③ 放行：闸相位入口的主同步应把 main 并进泳道
+                rz = cli(py, stage, "ticket", {"op": "resume", "ticket_id": TID_LAG,
+                                               "who": "e2e-human",
+                                               "note": "e2e: main has moved"})
+                check(rz.get("ok") is True,
+                      "L7 resume 受理（%s）" % str(rz.get("error") or "")[:120])
+                lag = wait_snap(fail, py, stage, TID_LAG,
+                                lambda x: x.get("stage") == "merge"
+                                and x.get("stage_state") == "awaiting-human",
+                                "L7 主同步后闸转绿 → 推进到人门", 420)
+                check(lag is not None,
+                      "L7 闸结果被主同步改变（无同步=旧快照三条红 → blocked）")
+                if lag is not None:
+                    ms = (lag.get("meta") or {}).get("main_sync") or {}
+                    check(str(ms.get("mode")) == "merged",
+                          "L7 回执带主同步证据且 mode=merged（实得 %r）" % ms.get("mode"))
+                    check(bool(main_sha) and str(ms.get("main_sha") or "").strip() == main_sha,
+                          "L7 同步目标=main 的新提交（回执 %r vs 真值 %r）"
+                          % (str(ms.get("main_sha"))[:12], main_sha[:12]))
+                    check(bool(ms.get("detail")),
+                          "L7 逐仓同步结果如实进回执（detail=%r）"
+                          % str(ms.get("detail"))[:80])
+                    lane2 = str(((lag.get("meta") or {}).get("workspace") or {}).get("path") or "")
+                    rc8, shown = git("show", "HEAD:%s" % LAG_STATE_REL, cwd=lane2)
+                    check(rc8 == 0 and (shown or "").strip() == "green",
+                          "L7 **被验证树=被合并树**：泳道 HEAD 已含 main 的修复（%s）"
+                          % LAG_STATE_REL)
+                    rows = [r for r in read_jsonl(G["gate_ledger"])
+                            if r.get("state") == "green"]
+                    check(len({r.get("name") for r in rows}) == len(GATE_NAMES),
+                          "L7 闸账本三条夹具都读到 state=green（实得 %r）"
+                          % sorted({r.get("name") for r in rows}))
+                    print_timeline(lag, "lane was behind main (pre-gate sync)")
+        stop_worker(fail, "L7 落后票 worker 收尾", lag_worker)
     except SystemExit:
         raise
     except Exception as e:  # noqa: BLE001 —— 崩溃路径必须留证据（点名 + 保全现场）
@@ -908,6 +1051,18 @@ def main():
             stop_all_workers(fail, "L6 收尾")
         except Exception as e:  # noqa: BLE001
             check(False, "worker 收尾异常：%s" % str(e)[:160])
+        try:
+            alive = [{"pid": pr.pid, "rc": pr.returncode}
+                     for pr in G.get("all_workers") or [] if pr.poll() is None]
+            check(not alive, "L6 收尾：本场景起过的 worker 全部真退出（实得存活 %r）" % alive)
+            left = stray_procs(G["tmp"])      # 进程表面加验（ps 不可用=显式记未验）
+            if left is None:
+                print("  (进程表残留复核未验：ps 被拒/不可用——不冒充干净；"
+                      "worker 存活面已由上一项钉住)", flush=True)
+            else:
+                check(not left, "L6 收尾：本场景零残留进程（实得 %r）" % left[:3])
+        except Exception as e:  # noqa: BLE001
+            check(False, "残留进程复核异常：%s" % str(e)[:160])
         if stage is not None and stage_mod is not None:
             try:
                 print("  stage_down: %s" % str(stage_down(stage_mod, stage))[:200], flush=True)
