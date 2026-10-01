@@ -15,7 +15,7 @@
 import { appendFile, mkdir, readFile, writeFile, stat, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { loadWatchdogConfig, type ResolvedConfig } from './config.ts'
+import { loadWatchdogConfig, watchdogDataDir, type ResolvedConfig } from './config.ts'
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
 import { compareStates, countMissingRows, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
@@ -192,7 +192,10 @@ export class Watchdog {
     this.pendingProvider = deps.pendingProvider ?? (async () => ({ available: false, pending: null, reason: '宿主侧待办交互面未接入（S1-probe 后续票落地）——显式 unknown' }))
     this.sessionStat = deps.sessionStat ?? (async () => ({ advanced: null, mtimeMs: null }))
     this.sessionEnsure = deps.sessionEnsure ?? null
-    this.dataDir = deps.dataDir ?? join(deps.configDirEnv?.SANDBAR_WATCHDOG_DATA || join(deps.configDirEnv?.HOME || '', '.sandbar'), 'watchdog')
+    // 260930 直修：数据根走 config.watchdogDataDir **单一真源**（与 node.ts 的执行器会话账 /
+    // 状态读侧同一个表达式）。旧写法读 `deps.configDirEnv`，而该 deps 生产恒不传 ⇒ HOME 取空
+    // ⇒ 退化成相对路径 `.sandbar/watchdog`（写进仓根），读侧看 ~/.sandbar/watchdog ⇒ 永不相见。
+    this.dataDir = deps.dataDir ?? watchdogDataDir(deps.configDirEnv ?? process.env)
     this.ledgerDirOpt = deps.ledgerDir
     this.cfg = (deps.configLoader ?? ((k, env) => loadWatchdogConfig(k, env)))(project, deps.configDirEnv)
     this.tailer = new LedgerTailer(this.ledgerDir(), project, this.io.tail)

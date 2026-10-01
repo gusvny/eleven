@@ -180,6 +180,19 @@ export function watchdogConfigDir(env: NodeJS.ProcessEnv = process.env): string 
   return env.SANDBAR_WATCHDOG_DIR || join(env.HOME || '', '.sandbar', 'projects')
 }
 
+/** 数据根目录（心跳 / 告警账 / 执行器会话账都落此根；测试缝：SANDBAR_WATCHDOG_DATA 优先）。
+ *
+ *  260930 直修（宿主令·不开票；真机实报）：**唯一真源**。此前"同一个数据根"在三处各算
+ *  一份（core.ts 的 Watchdog 实例、node.ts 的执行器会话账、node.ts 的状态读侧），其中
+ *  core 那份读 `deps.configDirEnv`，而该 deps **生产恒不传** ⇒ HOME 取空 ⇒ 退化成相对
+ *  路径 `.sandbar/watchdog`（落控制台进程 cwd = 仓根），与读侧的 `~/.sandbar/watchdog`
+ *  永不相见 ⇒ 面板恒报「无心跳文件（守望者从未起过或已死）」——**写侧活着、读侧说它死**。
+ *  为什么测试没抓住：测试一律注入 SANDBAR_WATCHDOG_DATA（tests/lib.mjs），生产那条兜底
+ *  表达式一次都没被执行（注入即绕过）。凡路径/形状，三处一律调本函数，禁再各算一份。 */
+export function watchdogDataDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.SANDBAR_WATCHDOG_DATA || join(env.HOME || '', '.sandbar', 'watchdog')
+}
+
 /**
  * 只写 executor_session 一键的声明写入面（t260930-09：守望者按需代建会话后回写）。
  *

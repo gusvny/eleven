@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 
-import { loadWatchdogConfig, isValidProjectKey } from './src/host/config.ts'
+import { loadWatchdogConfig, isValidProjectKey, watchdogDataDir } from './src/host/config.ts'
 import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type PendingProvider, type SessionStatFn } from './src/host/core.ts'
 import type { PendingInteraction } from './src/host/self-lock.ts'
 import { QueueMirror } from './src/host/queue-mirror.ts'
@@ -289,7 +289,7 @@ export function makeSessionEnsure(ctx: Context, project: string) {
       env: process.env,
       io: createIo,
       eventIo,
-      dataDir: process.env.SANDBAR_WATCHDOG_DATA || join(process.env.HOME || '', '.sandbar', 'watchdog'),
+      dataDir: watchdogDataDir(process.env),   // 260930 直修：数据根单一真源（见 config.watchdogDataDir）
       nowMs: Date.now(),
     })
   }
@@ -465,7 +465,7 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
 
   async function statusFor(key: string): Promise<WatchdogStatus & { heartbeat: Awaited<ReturnType<typeof readHeartbeatFile>>; session_provenance: { file: string; events: SessionProvenanceEvent[]; malformed_rows: number } }> {
     // 溯源事件账独立于声明：未声明项目也能答「有没有代建史」（scope 6/8 检视面）。
-    const dataRoot = process.env.SANDBAR_WATCHDOG_DATA || join(process.env.HOME || '', '.sandbar', 'watchdog')
+    const dataRoot = watchdogDataDir(process.env)   // 260930 直修：与写侧同一表达式（单一真源）
     const evFile = sessionEventPath(dataRoot, key)
     const provenance = await readSessionEvents({ read: async (p) => (await defaultIo.listAlerts(p)).join('\n') }, evFile)
     const session_provenance = { file: evFile, events: provenance.events.slice(-20), malformed_rows: provenance.malformed_rows }
