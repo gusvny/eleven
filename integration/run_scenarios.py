@@ -3577,6 +3577,13 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
 
 
 def main(exclude_pools=None, only_scenarios=None) -> int:
+    # 261001 递归护栏**也要在进程内入口**（`verify_lane._integ` 是 `import run_scenarios as rs`
+    # 后直调 `rs.main()` 的——那条路不过 `_cli`）：护栏只在「内层标记 + 收窄面都在场」时拦，
+    # 正常注入式电池（无标记）与合法嵌套（lib_env 清理后两键都被剥）都不受影响。
+    if not _recursion_guard():
+        print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+        return 2
+    os.environ[INNER_RUN_ENV] = str(os.getpid())
     # t260925-08：引擎缺省已翻 refuse（undeclared=拒收）。集成跑台是测试台：大量场景
     # 以仓内 cwd 直调 ticket/client（身份=undeclared）做同项目票操作，语义上并非跨项目
     # 越权——整台显式选入 record 记名策略，生产面（引擎 spawn 链已注入的 lane agent 与
