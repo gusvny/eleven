@@ -34,7 +34,7 @@
  * 解析循环与红绿判据）；review_plan gen1 F2（汇总行=参考性，不构成判据）。
  */
 
-import { cleanNarrowingEnv } from '../../lib_env.mjs'  // 260930 收窄旋钮清理单点
+import { cleanNarrowingEnv } from '../lib_env.mjs'  // 260930 收窄旋钮清理单点
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -105,7 +105,13 @@ try {
   await fx.cleanup()
 
   // ---------- B. malformed FAIL line ----------
-  section('B. 畸形 FAIL 行：不静默吞，name=整行、exit=-1 计红')
+  // 261001 契约修订（KI-171，integration 岗位判词）：畸形行的**名字**从「整行」改为
+  // **合成面** `__malformed__ …`——整行当名字会让一段人话经红名集进下一轮快反馈面，
+  // 而它不在册 ⇒ 执行器 fail-closed ⇒ 每轮复读同一个假名、票永远出不了 blocked
+  // （t261001-10 第 5/6/7 轮实案）。**「畸形可仲裁不丢失」的性质不变**：红照记
+  // （fail=1、exit=-1），原文逐字进 `output_tail`——本段 B2/B3 两条锁把它一起钉住：
+  // 名字必须是合成面（防回灌），原文必须可读（可仲裁）。
+  section('B. 畸形 FAIL 行：不静默吞，name=合成面（__malformed__）、原文进 output_tail')
   fx = await makeFixture()
   fx.write("print('FAIL [broken-no-exit-bracket')\nimport sys\nsys.exit(1)\n")
   {
@@ -114,8 +120,10 @@ try {
       const r = res.result
       ok(r.green === false && r.fail === 1, 'B1 畸形 FAIL 行仍计败（fail=1，整道红）')
       const s = (r.scenarios || [])[0]
-      ok(!!s && s.name === 'FAIL [broken-no-exit-bracket' && s.exit === -1,
-        'B2 fallback：name=整行、exit=-1（畸形可仲裁不丢失）')
+      ok(!!s && typeof s.name === 'string' && s.name.startsWith('__malformed__') && s.exit === -1,
+        'B2 合成名 + exit=-1（畸形不进面、仍计红）')
+      ok(!!s && (s.output_tail || '').includes('broken-no-exit-bracket'),
+        'B3 原文逐字进 output_tail（畸形可仲裁不丢失）')
     } else ok(false, 'B0 调用失败: ' + (res.stderr || ''))
   }
   await fx.cleanup()

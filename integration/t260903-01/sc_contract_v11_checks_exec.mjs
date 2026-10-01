@@ -28,7 +28,7 @@
  * Reference: docs/design/sandbar-project-onboarding-contract-v1.md ②a/②d；verify_lane.py _code 装配。
  */
 
-import { cleanNarrowingEnv } from '../../lib_env.mjs'  // 260930 收窄旋钮清理单点
+import { cleanNarrowingEnv } from '../lib_env.mjs'  // 260930 收窄旋钮清理单点
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

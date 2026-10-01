@@ -103,6 +103,13 @@ ALLOW = [
                                         # t260928-13/-20 交付面）——与 apply_skip_pools/skip_settle= 同类
     re.compile(r"/SKIP/\.test\("),                                      # 文档内容断言里的正则字面量（baselines 守「契约文档
                                         # 提到缺失态 SKIP」——读文档文本，非套件产出状态值）
+    # ---- 261001 新增一类（同族清账，integration 岗位判词）：中文**否定式**契约声明 ----
+    # `integration/engine-ops/sc_engine_ops_offline.py:375` 的
+    # "ENV_FAIL: 子用例A 需真 Temporal（…不可达）——该子用例具名不可得（不静默 skip）"：
+    # 语义=**声明不静默跳过**（环境不可得即具名 ENV_FAIL），与既有的「不写 SKIP」
+    # 「no SKIP / SKIP-free」是同一件事，只差语言与语气。只锚**否定式连写**（不静默/
+    # 不悄悄/不许 + skip），裸词 skip 与任何 skip 状态值照旧红——T1b 自证同组照旧咬得住。
+    re.compile(r"(?:不静默|不悄悄|不许|不得|不可)[^，。；\n]{0,8}skip", re.I),
 ]
 
 hits = []
