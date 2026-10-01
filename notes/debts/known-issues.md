@@ -3057,7 +3057,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 重入同一面 ⇒ 拒绝（合法电池的面各不相同，天然放行）；须与 `verify_lane` 的 env 重建面一起透传
 > （同 `INTEG_RUN_DEPTH` 的处理）。②帽值是否需要按「本轮面大小」自适应。
 
-## KI-174 markdown 渲染器**吃词内下划线** ⇒ 规格卡/文档里的路径与标识符被静默改写（261001 实报，integration 定位到 file:line；**产品面缺陷，待开票**）
+## KI-174 markdown 渲染器**吃词内下划线** ⇒ 规格卡/文档里的路径与标识符被静默改写（261001 实报，integration 定位到 file:line；**当日已修 + 场景回归转绿**）
 > **模式**：共享 markdown 渲染器把 `_…_` 当强调 ⇒ 词内下划线被吃掉。
 > **实况**：`t260904-06-spec-card-dom` 的规格样张含 `sc_session_top_entry.mjs`，spec 卡上屏成了
 > `scsessiontopentry.mjs`（归一化后 233 字 vs 235 字，第一处差异正是那两个下划线）。
@@ -3074,6 +3074,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > `a_b_c` 形状的标识符；以及未来若沿用同一正则解析 `**`/`*` 的其它标记。
 > **判据**：`integration/t260904-06/sc_spec_card_dom.mjs` 的 T1（逐字保真，空白归一后比对）
 > **保持严格、不迁就实现**——这条红是真信号，修好渲染器才会绿。
+
+> **261001 当日已修（integration 直修 + 场景回归）**：`server/plugins/knowledge/src/client/markdown.ts`
+> 的 `_` 强调正则加了 **CommonMark 侧翼卡边界**——开定界符前必须非字母数字（或行首）、收定界符后
+> 必须非字母数字（或行尾）：`/(^|[^0-9A-Za-z_])_([^_\n]+)_(?![0-9A-Za-z_])/g`；同族 `__…__` 粗体一并卡边界
+> （`foo__bar__baz` 在 CommonMark 里本来就不是粗体）。workbench 客户端 bundle 已重建（src→lib 同源）。
+> 证据：独立探针 5 例（`sc_session_top_entry.mjs` 原样保真、`a_b_c 与 _x_ 混排` 词内保真+边界强调仍生效、
+> `__bold__`/`foo__bar__baz` 符合 CommonMark）；`t260904-06-spec-card-dom` 由 **4 红 → 4/4 绿**
+> （断言保持严格：空白归一后逐字比对，逐字丢字照旧红）。
+> **已知限制（诚实登记，不假装已解决）**：短语内部含下划线时（`_samples/long_line.txt_`）本渲染器
+> **不再判强调**、字面下划线原样保留——优于旧行为的「半截强调 + 残留定界符」；CommonMark 在该形态下
+> 会整段强调，迷你实现未做（如需，另开票做完整 flanking 规则）。
+> **同族残留（未动）**：`markdown.ts:53` 的 `*` 词内强调——CommonMark **允许** `a*b*c` 成强调，
+> 故不算缺陷，仅记录在案。
+
 > **待办**：①开票（写集=`server/plugins/knowledge/`，可选 consumber 面）修词内强调判据
 > （按 CommonMark 的左右侧翼规则，或最小改法：`_` 强调要求两侧为空白/标点/行首行尾）；
 > ②同族清账：`*` 的同款正则在 `markdown.ts:53` 也有词内风险（`a*b*c`），须一并核；

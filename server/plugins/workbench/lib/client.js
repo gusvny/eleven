@@ -125,9 +125,9 @@ function inlineFormat(s) {
 	s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, txt, url) => `<a href="${safeUrl(url)}">${txt}</a>`);
 	s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
 	s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-	s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+	s = s.replace(/(^|[^0-9A-Za-z_])__([^_]+)__(?![0-9A-Za-z_])/g, "$1<strong>$2</strong>");
 	s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-	s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+	s = s.replace(/(^|[^0-9A-Za-z_])_([^_\n]+)_(?![0-9A-Za-z_])/g, "$1<em>$2</em>");
 	return s;
 }
 const KEYWORDS_JS = "const|let|var|function|return|if|else|for|while|import|export|from|class|interface|type|new|async|await|this|extends|implements|public|private|readonly|typeof|of|in|throw|try|catch|finally|switch|case|break|default";

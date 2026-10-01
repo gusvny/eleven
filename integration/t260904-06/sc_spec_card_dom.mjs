@@ -11,7 +11,8 @@
 //      本票的中文标签随 t260925-18 换成英文——契约意图「标题在场 + 徽标=全文字数」
 //      不变，只把被断言的字面量跟到实现面的英文文案上。）
 //     .txt 全文逐字保真（HTML 特殊字符以纯文本出现，零标签注入）、蓝左条 4px
-//     #0969da、white-space pre-wrap；
+//     #0969da、换行不丢（纯文本期=white-space pre-wrap；260925-18 起 markdown 渲染期=
+//     块元素 + <br>，判据按形态二选一）；
 //   - T2 无 spec 字段（老票）：卡整体不渲染，正文卡照旧，页面不崩；
 //   - T3 超长 spec：限高 260px 且内容**真可滚**（261001 口径同步：滚动容器可为卡片本身
 //     或内层 .txt，现行=t260925-18 落地后的 .txt；clientHeight 收敛不撑爆抽屉），
@@ -211,6 +212,14 @@ const domSpecCard = `(() => {
     // 261001（t260925-18 后口径同步）：spec 改走 markdown 渲染后，**滚动容器下移到 .txt**
     // （.wb-d2-spec .txt{max-height:230px;overflow-y:auto}）——卡片自身不再溢出，
     // 用户可感知行为（内容限高、区内可滚、抽屉不被撑爆）不变，故两层都量。
+    // 261001：markdown 渲染期（t260925-18 起）换行由**块元素 / br 元素**承载，
+    // 不再是纯文本期的 white-space: pre-wrap——故把「换行面」也量出来（意图=换行不丢）。
+    // 注意：本段是**模板字符串**（送进页面执行），注释里不得出现反引号。
+    txtBr: (() => { const t = el.querySelector('.txt'); return t ? t.querySelectorAll('br').length : 0 })(),
+    txtBlocks: (() => {
+      const t = el.querySelector('.txt')
+      return t ? t.querySelectorAll('p,div,li,pre,blockquote,h1,h2,h3').length : 0
+    })(),
     txtOverflowY: (() => { const t = el.querySelector('.txt'); return t ? getComputedStyle(t).overflowY : '' })(),
     txtClientH: (() => { const t = el.querySelector('.txt'); return t ? t.clientHeight : 0 })(),
     txtScrollH: (() => { const t = el.querySelector('.txt'); return t ? t.scrollHeight : 0 })(),
@@ -297,7 +306,16 @@ async function scenarioSpecCard(page) {
   // ±1 容差：color-mix 折算的 0.5 舍入方向两端可能差 1
   if (!got || got.some((v, i) => Math.abs(v - want[i]) > 1))
     return `blue bar color expected accent ${c.accentVar || '#0969da (fallback)'}, got ${JSON.stringify(c.borderLeftColor)}`
-  if (c.whiteSpace !== 'pre-wrap') return `white-space expected pre-wrap, got ${JSON.stringify(c.whiteSpace)}`
+  // 261001 口径同步（t260925-18「spec 走 markdown 渲染」）：换行的承载形态从
+  // 「纯文本 + white-space:pre-wrap」换成「markdown 块元素 + <br>」。契约意图「**换行不丢**」
+  // 不变，故判据改为**按形态二选一**：旧形态（pre-wrap）放行；新形态要求
+  // 块元素/`<br>` 把源文本的换行如实承载出来（本样张 4 行 ⇒ 至少 1 个块 + 3 个 <br>）。
+  const _wsOk = c.whiteSpace === 'pre-wrap'
+    || ((c.txtBlocks || 0) >= 1 && (c.txtBr || 0) >= (SPEC_A.split('\n').length - 1))
+  if (!_wsOk) {
+    return `line breaks not preserved (white-space=${JSON.stringify(c.whiteSpace)}, `
+      + `blocks=${c.txtBlocks}, br=${c.txtBr}, source lines=${SPEC_A.split('\n').length})`
+  }
   return null
 }
 

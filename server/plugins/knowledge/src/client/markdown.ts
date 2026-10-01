@@ -46,12 +46,18 @@ function inlineFormat(s: string): string {
     `<a href="${safeUrl(url)}">${txt}</a>`)
   // 删除线
   s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>')
-  // 粗体
+  // 粗体（261001：`__` 也要求**词边界**——`foo__bar__baz` 在 CommonMark 里不是粗体）
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>')
+  s = s.replace(/(^|[^0-9A-Za-z_])__([^_]+)__(?![0-9A-Za-z_])/g, '$1<strong>$2</strong>')
   // 斜体（避免吃掉粗体里的 *）
   s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
-  s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>')
+  // 261001 修（KI-174）：`_` 的强调**不得词内成对**——CommonMark 明确 `foo_bar_baz` 不是强调，
+  // 而旧式 `(^|[^_])_([^_\n]+)_(?!_)` 的 `[^_]` 会吃到字母，于是 `sc_session_top_entry.mjs`
+  // 这类标识符被判成强调、**下划线从上屏文本里消失**（规格卡/文档里路径被静默改写：
+  // `scsessiontopentry.mjs`，实测两处下划线丢）。修法=按 CommonMark 的侧翼判据卡词边界：
+  // 开定界符前必须是非字母数字（或行首）、收定界符后必须是非字母数字（或行尾）。
+  // 词里带下划线的标识符因此**原样保留**；真正的 `_强调_`（两侧为空白/标点）照旧生效。
+  s = s.replace(/(^|[^0-9A-Za-z_])_([^_\n]+)_(?![0-9A-Za-z_])/g, '$1<em>$2</em>')
   return s
 }
 
