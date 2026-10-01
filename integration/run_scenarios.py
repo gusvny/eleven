@@ -4292,31 +4292,35 @@ def _acquire_run_lock():
 INNER_RUN_ENV = "SANDBAR_INTEG_INNER_RUN"
 
 
+#: 嵌套深度上限（261001 递归事故的**止血判据**）：`INTEG_RUN_DEPTH` 记录「本进程是第几层执行器」。
+#: 为什么不按「标记+收窄面」判（第一版，已废）：合法嵌套也会带标记（t260904-12 的夹具自调执行器、
+#: verify_lane 的基线腿），一刀切会误伤 ⇒ 实测把 `t260904-12-no-skip-guard` 判红。
+#: 深度上限**只拦递归**：正常轮=1 层、夹具自调=2~3 层、自递归会无限增长 ⇒ 到帽即具名拒绝。
+#: 键名**不带 SANDBAR_ 前缀家族**（`SANDBAR_INTEG_*` 会被 lib_env 清理单点剥掉，深度会失真），
+#: 故用 `INTEG_RUN_DEPTH`——它必须跨「清理过 env 的合法嵌套」继续计数。
+INTEG_DEPTH_ENV = "INTEG_RUN_DEPTH"
+INTEG_DEPTH_MAX = 4
+_GUARD_OK = False
+
+
 def _recursion_guard() -> bool:
-    """递归护栏（261001 实报：进程风暴）。返回 False=本轮拒绝开跑（fail-closed）。
-
-    病灶：场景/夹具自己再起执行器时**继承了外层的收窄面**（`SANDBAR_SCENARIO_ONLY`）⇒ 内层
-    又被收窄成同一面 ⇒ 把那个「自己会起执行器」的场景再跑一遍 ⇒ 无限递归、进程翻倍
-    （实测：`--only t260924-05-inspection-suite-ran-parity` 同一条命令 17 个并发、2 分钟内
-    起了 4 个批台，把整机资源吃掉）。
-
-    判据（精确到「没清理」而不是「有收窄面」）：`SANDBAR_INTEG_INNER_RUN` 在场（=本进程是某个
-    执行器的子进程）**且**收窄面在场。合法嵌套（`lib_env.clean_narrowing_env(extra={...})`
-    自己声明面，如 t260921-06 的内层 runner）两键都被剥掉 ⇒ 不触发。
-    命中=exit 2（调用方 bug 类的环境红）+ 具名文案，绝不静默开跑。"""
-    if not os.environ.get(INNER_RUN_ENV):
+    """嵌套深度护栏：返回 False=本轮拒绝开跑（fail-closed，exit 2 + 具名）。"""
+    global _GUARD_OK
+    if _GUARD_OK:
         return True
-    narrow = [k for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS")
-              if os.environ.get(k)]
-    if not narrow:
-        return True
-    print("FAIL [__executor__] 递归护栏：内层执行器仍带着外层的收窄面（%s=%s）——"
-          "场景/夹具自己再起执行器时必须走 lib_env 清理单点（L12：先剥再按需注入）；"
-          "本层拒绝开跑（不静默、不递归）。若这是刻意嵌套，请用 "
-          "lib_env.clean_narrowing_env(extra={...}) 显式声明被测面。"
-          % (",".join(narrow), ",".join(str(os.environ.get(k))[:60] for k in narrow)),
-          flush=True)
-    return False
+    try:
+        depth = int(os.environ.get(INTEG_DEPTH_ENV) or 0)
+    except (TypeError, ValueError):
+        depth = INTEG_DEPTH_MAX + 1          # 畸形=按最深处理（拒）
+    if depth >= INTEG_DEPTH_MAX:
+        print("FAIL [__executor__] 递归护栏（深度上限 %d）：本进程是第 %d 层执行器——"
+              "场景/夹具再起执行器时层层嵌套（261001 实报：自递归把机器吃光）。"
+              "本层拒绝开跑（具名、不静默、不递归）。若确需更深嵌套，请显式调高 %s。"
+              % (INTEG_DEPTH_MAX, depth, INTEG_DEPTH_ENV), flush=True)
+        return False
+    os.environ[INTEG_DEPTH_ENV] = str(depth + 1)
+    _GUARD_OK = True
+    return True
 
 
 def _cli(argv):
