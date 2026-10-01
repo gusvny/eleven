@@ -2894,5 +2894,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ③同族名字（如 `t260905-03-decl-gate`）在泳道轮里的下一次真实出现即为复核面——若再红，先按代码身份戳确认台新鲜再归因；
 > ④`t260910-09-ms-decl-gate`、`t260913-02-schedule-daily-deadman` 两条当天在本机沙箱面报环境红（exit=2，0.5~1.0s 瞬红），
 > 需在非沙箱面（泳道轮）复核才能定性。
+> **同类面全量排查（宿主纪律「实报即全族线索」）**：`--keep`（常驻/跨轮复用）在这个仓里**只有一条**消费路径＝`lib_stage_console.mjs`（批台 `--kind batch` 的生命周期=单轮，起于批首、拆于批尾，不跨代码改动复用）；其余供台缝（`lib_gate.require_stage` / `with_stage.sh`）都是「ensure→跑→down」的单场景生命周期。⇒ 「长命台 + 只认路径不认代码」这一族**只有控制台一处**，已修；`stage_docker.py` 里同族的另一个面（锁根分裂导致活台被清扫）此前已 fail-closed 处置（只报告不真拆，`INFRA_FAMILY_PREFIX`）。
+**再加一道**：检查「无法执行」的两种情形（戳落点不可得=git-dir 读不到；身份值不可得=git 不可用）**都响亮上报**——原先只覆盖了后者，前者会静默跳过（等于把静默漏检请回来），当日补齐。
 > **定位**：`integration/lib_stage_console.mjs`（`consoleCodeStamp`/`consoleStampPath`/复用检查/写戳）、
 > `integration/stage_docker.py`（台的生命周期）、`integration/run_scenarios.py`（池与并发）。

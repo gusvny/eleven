@@ -193,9 +193,12 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
       spawnSync('python3', [CLI, 'down', '--project', project],
         { encoding: 'utf8', env, timeout: 180000 });
     }
-  } else if (!wantStamp) {
-    console.error('[stage-console] 代码身份不可得（git 读不到）——按今日行为复用旧台，'
-      + '但这一轮**无法证明**台里的代码与树一致（不静默：此处点名）');
+  } else if (mounted && !(stampPath && wantStamp)) {
+    // 两种「查不了」都要响：戳落点不可得（git-dir 读不到）或身份值不可得（git 不可用）。
+    // 覆盖式点名——**不静默**是这条检查的全部价值所在（静默跳过=又回到「拿旧代码判新代码」）。
+    console.error('[stage-console] 代码身份检查**无法执行**（%s）——按今日行为复用旧台，'
+      + '但这一轮无法证明台里的代码与树一致（不静默：此处点名）',
+    stampPath ? '身份值不可得（git 读不到 HEAD/HEAD:server/脏清单）' : '戳落点不可得（git-dir 读不到）');
   }
   // Supply budget: default 600s, strictly below the executor's current 900s
   // per-scenario kill cap (see the header budget section; t260905-02 ruled:
