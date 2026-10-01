@@ -19,6 +19,11 @@
   - **在用即不动**（260927 新增的第三条文件族判据）：删文件前先试 `flock(LOCK_EX|LOCK_NB)`
     ——抢得到 = 没人持有 = 可删；抢不到 = 有活进程正握着这把锁 = **保留并点名**
     （绝不删活锁档；无 `fcntl` 的平台跳过该判据并留痕）；
+  - **活载体即不动**（261001 新增，自递归风暴的机械网）：越龄白名单条目里若还有**活进程**
+    的 cwd 落在其中，该条目**保留、逐条点名**；`--kill-carriers` 才先收进程再删。
+    判据按 **cwd** 判而不是按命令行（风暴里那些进程的 args 是相对路径，按名字杀一律打偏）；
+    探测面（`pgrep`/`lsof`）缺席时**具名留痕**，绝不当「没有载体」——「扫不到」与「没有」
+    是两件事，混同会给出「机器干净」的假结论。
   - `EXCLUDED_PREFIXES` 里的族**永不参与**（别的程序的/别的项目的，如
     `com.google.Chrome.*`；以及 dsh 运行时自己的 spill 目录）——判据里**排除优先**，
     且在报告里逐族计数可见（不静默、也不误删）。
@@ -43,6 +48,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -93,6 +99,10 @@ TMP_FIXTURE_PREFIXES = (
     "sandbar-reg-",           #  1,529  305h  server/plugins/workbench/tests/registry-loader.mjs:47（JS 侧，零回收动词）
     "t260915-10-",            #  2,204  285h  integration/t260915-10/sc_docs_follow_project.mjs:87-88
     "t26092404-",             #  2,123   64h  integration/t260924-04/sc_project_template_{journey,gate}.py
+    "t26091004-sc-",          #      3  4.6h  integration/t260910-04/sc_console_paused_list.mjs:200（**261001 载体风暴的巢**：
+                              #               场景被 900s 执行器帽杀 → `finally` 的 rmSync 没跑 → 树 + 台内后代进程
+                              #               一起活过收口；2.5h 后那片冻结代码（克隆自修前的 main）重跑闸，
+                              #               自递归风暴。实测 3 条存量 / 最老 4.6h / ≈849MB）
     # 各期场景自建夹具族（前缀形态 = 本仓票号命名空间；有实命中的三条在前，其余为前瞻覆盖）
     "t260923-",               #    168    5h  integration/t260923-01 族场景夹具
     "t260925-",               #  1,053   55h  integration/t260925-* 族场景夹具
@@ -297,6 +307,116 @@ def lock_held(path: str):
         os.close(fd)
 
 
+def _all_pids():
+    """全机 pid 列表（`pgrep -f .`）。取不到 → (None, 原因串)：**具名留痕，绝不静默当 0**。
+
+    「扫不到」与「没有载体」是两件事：前者会让人以为机器干净（261001 风暴里正是这个幻觉
+    让人以为收口了）。所以工具缺席一律把原因写进报告。
+    """
+    try:
+        r = subprocess.run(["pgrep", "-f", "."], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "pgrep unavailable: %s: %s" % (type(e).__name__, e)
+    if r.returncode not in (0, 1):
+        return None, "pgrep exit=%d" % r.returncode
+    pids = tuple(int(x) for x in r.stdout.split() if x.strip().isdigit())
+    return pids, None
+
+
+def _pid_cwd(pid: int):
+    """该进程的 cwd（`lsof -a -p PID -d cwd -Fn`）；取不到=None（进程已死/无权限）。"""
+    try:
+        r = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in r.stdout.splitlines():
+        if line.startswith("n"):
+            return line[1:]
+    return None
+
+
+def live_carriers(root: str, entries):
+    """越龄夹具条目里还活着的进程（**载体**）→ ({条目名: [pid…]}, 扫描面错误或 None)。
+
+    为什么按 **cwd** 判、不按命令行：261001 自递归风暴里那些进程的 args 是**相对路径**
+    （`integration/run_scenarios.py --only …`，cwd 落在夹具泳道目录里），所以「按名字杀」
+    三轮都打偏——实测杀完还剩 156 个，且越杀越多（杀掉 worker 反而触发它自己的
+    supervisor 重拉）。**判据 = cwd 落在 `root/<白名单条目>/` 之下**，这才与「这条夹具里
+    是谁在跑」同义。
+
+    扫描面只取**越龄条目**（调用方传进来的是 `scan()` 的 stale 集合）：鲜条目里的活进程是
+    正常现场（场景/running 套件），报它只会把报告刷成噪音，判据就没人看了。
+
+    返回的第二种情况（错误串非 None）= 探测面不可用：**报告里必须具名**，
+    且此刻**不算「没有载体」**（宁可保守：条目按「可能有载体」处置）。
+    """
+    pids, err = _all_pids()
+    if err or not pids:
+        return {}, (err or "pgrep returned no pids (unexpected on a live machine)")
+    dirs = {}
+    for e in entries:
+        if e.kind == "dir":
+            dirs[os.path.join(root, e.name).rstrip("/") + os.sep] = e.name
+    if not dirs:
+        return {}, None
+    hits = {}
+    for pid in pids:
+        cwd = _pid_cwd(pid)
+        if not cwd:
+            continue
+        for prefix_path, name in dirs.items():
+            if cwd == prefix_path[:-1] or cwd.startswith(prefix_path):
+                hits.setdefault(name, []).append(pid)
+                break
+    return hits, None
+
+
+def kill_carriers(pids, grace_s: float = 5.0):
+    """TERM → 等 grace_s → KILL。返回 {"termed","killed","failed"}（逐条点名，不静默）。
+
+    **只由 `--kill-carriers` 显式开启**：杀进程不属于「清扫临时物料」的缺省语义——
+    白名单目录很容易正好是某个真在跑的套件的夹具，误杀就是把别人的跑打红。
+    调用点必须已确认「条目越龄」（与删除判据同一条线）。
+    """
+    import signal as _signal
+    res = {"termed": 0, "killed": 0, "failed": []}
+    alive = []
+    for pid in list(pids):
+        try:
+            os.kill(pid, _signal.SIGTERM)
+            res["termed"] += 1
+            alive.append(pid)
+        except ProcessLookupError:
+            continue
+        except OSError as e:
+            res["failed"].append("%d: TERM %s: %s" % (pid, type(e).__name__, e))
+    deadline = time.monotonic() + grace_s
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.2)
+        alive = [p for p in alive if _pid_alive(p)]
+    for pid in alive:
+        try:
+            os.kill(pid, _signal.SIGKILL)
+            res["killed"] += 1
+        except ProcessLookupError:
+            pass
+        except OSError as e:
+            res["failed"].append("%d: KILL %s: %s" % (pid, type(e).__name__, e))
+    return res
+
+
+def _pid_alive(pid: int) -> bool:
+    """liveness（`os.kill(pid, 0)`）：权限不允许时也算活着（保守——不假装杀掉了）。"""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+
+
 def estimate(root: str, per_prefix: dict, sample: int, budget_s: float):
     """每前缀采样估占用（目录族：最多 sample 个实测平均 × 命中数；文件族：实际字节求和）。
 
@@ -389,6 +509,9 @@ def run(argv=None) -> int:
     ap.add_argument("--sample-budget-s", type=float, default=DEFAULT_SAMPLE_BUDGET_S,
                     help="per-dir size-walk budget in seconds (default 8)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--kill-carriers", action="store_true",
+                    help="kill orphan processes whose cwd still lives inside an aged-out "
+                         "whitelisted fixture entry, then sweep it (default = report only)")
     args = ap.parse_args(argv)
 
     root = os.path.abspath(args.root or tempfile.gettempdir())
@@ -429,10 +552,25 @@ def run(argv=None) -> int:
     live_rows = by_prefix(sc["live"], prefixes)
     n_dirs = sum(1 for e in sc["stale"] if e.kind == "dir")
     n_files = len(sc["stale"]) - n_dirs
+    # 载体（第三条判据，261001 自递归风暴新增）：**越龄**夹具里还活着的进程。它们是
+    # 「宿主点名的实报」的承载者——树是死的、进程是活的，按名字杀打不中，只有按 cwd 才认得出。
+    carriers, carrier_err = live_carriers(root, sc["stale"])
+    carriers_n = sum(len(v) for v in carriers.values())
     log("scanned %d top-level entries in %.1fs: %d whitelisted stale (>=%sh: %d dirs / %d files), "
         "%d whitelisted live, %d untouched (outside whitelist), %d not swept"
         % (sc["entries"], time.monotonic() - t0, len(sc["stale"]), args.max_age_h,
            n_dirs, n_files, len(sc["live"]), sc["untouched"], len(sc["not_swept_named"])))
+    if carrier_err:
+        log("CARRIER SCAN UNAVAILABLE: %s —— 这批条目按「可能有载体」处置（不当作没有）" % carrier_err)
+    elif carriers:
+        log("LIVE CARRIERS: %d process(es) inside %d aged-out fixture entr(ies) —— 条目按在册"
+            "保留（不删）；这形态=生产者收口漏了后代进程（被 SIGKILL 掉的场景不跑 finally）"
+            % (carriers_n, len(carriers)))
+        for name in sorted(carriers)[:NAMED_CAP]:
+            log("  carrier %s: %d pid(s) %s" % (name, len(carriers[name]),
+                                                ",".join(str(p) for p in carriers[name][:8])))
+        if len(carriers) > NAMED_CAP:
+            log("  ... (%d more carrier entries suppressed; see the count)" % (len(carriers) - NAMED_CAP))
     for r in rows:
         live_n = len(live_rows.get(r["prefix"], []))
         log("  %-24s stale=%-7d (d=%-6d f=%-5d) live=%-5d oldest=%-8s est≈%s%s"
@@ -453,6 +591,7 @@ def run(argv=None) -> int:
     done = 0
     done_dirs = done_files = 0
     locked_kept, locked_named = 0, []
+    carriers_kept, carriers_killed, carriers_named, unverified_kept = 0, 0, [], 0
     if args.apply:
         # 目录族的实际释放量按「逐前缀实测平均 × 实删条数」重算（不直接抄全量估算）；
         # 文件族按实删字节累计（精确，无需采样）。
@@ -460,10 +599,40 @@ def run(argv=None) -> int:
         for r in rows:
             if r["dirs"] and r["sampled"]:
                 dir_avg_by_prefix[r["prefix"]] = r["dir_avg_bytes"]
-        log("APPLY: deleting %d entries (>=%sh, whitelist only, live locks kept) ..."
-            % (len(sc["stale"]), args.max_age_h))
+        log("APPLY: deleting %d entries (>=%sh, whitelist only, live locks kept, "
+            "carrier entries kept unless --kill-carriers) ..." % (len(sc["stale"]), args.max_age_h))
         for entry in sc["stale"]:
             p = match_prefix(entry.name, prefixes)
+            if carrier_err and entry.kind == "dir":
+                # 探测面不可用 = **不知道**有没有载体。不知道就不删目录（树里有活进程时删树
+                # 只留更脏的半态）；文件族与目录的判据不同（活锁判据独立可查），照旧处置。
+                unverified_kept += 1
+                if len(carriers_named) < NAMED_CAP:
+                    carriers_named.append("%s (carrier scan unavailable: %s)" % (entry.name, carrier_err))
+                log("  KEPT %s (carrier scan unavailable — refusing to assume 'no carriers')"
+                    % entry.name)
+                continue
+            if carriers.get(entry.name):
+                pids = carriers[entry.name]
+                if not args.kill_carriers:
+                    # 有活载体的条目**不删**：删树不杀进程 = 留下更脏的半态（进程继续在
+                    # 已被 unlink 的目录里跑，报告却显示「已清」）。这与文件族的活锁同一条纪律。
+                    carriers_kept += 1
+                    if len(carriers_named) < NAMED_CAP:
+                        carriers_named.append("%s (%d live pid(s) %s; --kill-carriers to reap)"
+                                              % (entry.name, len(pids),
+                                                 ",".join(str(x) for x in pids[:8])))
+                    log("  KEPT %s (%d live carrier pid(s); pass --kill-carriers to reap)"
+                        % (entry.name, len(pids)))
+                    continue
+                kr = kill_carriers(pids)
+                carriers_killed += kr["termed"]
+                if kr["failed"]:
+                    for m in kr["failed"][:NAMED_CAP]:
+                        if len(failed_named) < NAMED_CAP:
+                            failed_named.append("%s carrier reap failed: %s" % (entry.name, m))
+                log("  REAPED %s carriers: termed=%d killed=%d failed=%d"
+                    % (entry.name, kr["termed"], kr["killed"], len(kr["failed"])))
             if entry.kind == "file":
                 held = lock_held(os.path.join(root, entry.name))
                 if held is True:      # 在用的锁档绝不删（第三条文件族判据）
@@ -492,13 +661,29 @@ def run(argv=None) -> int:
                 log("  progress: %d/%d deleted, %d failed, %.1fs elapsed, freed≈%s"
                     % (done, len(sc["stale"]), failed, time.monotonic() - t0, human(freed)))
     else:
-        # dry-run：三个计数都是**候选**数（谁会被删；`kept live` 与 `locks kept` 另计）
-        done, done_dirs, done_files = len(sc["stale"]), n_dirs, n_files
+        # dry-run：三个计数都是**候选**数（谁会被删；`kept live` 与 `locks kept` 另计）。
+        # 有活载体的条目缺省**不删**（要 `--kill-carriers` 才动），所以候选里先摘掉它们——
+        # 否则 dry-run 报「要删 N 条」而 apply 只删 N-M 条，报告与行为分叉。
+        carriers_kept = len(carriers)
+        if carrier_err:
+            # 探测面不可用：目录族一律不算候选（不知道 ≠ 没有），文件族照旧
+            unverified_kept = n_dirs
+            carriers_kept = 0
+            done = len(sc["stale"]) - n_dirs
+            done_dirs, done_files = 0, n_files
+        elif carriers_kept and not args.kill_carriers:
+            done = len(sc["stale"]) - sum(1 for e in sc["stale"] if carriers.get(e.name))
+            done_dirs, done_files = n_dirs, n_files
+        else:
+            done = len(sc["stale"])
+            done_dirs, done_files = n_dirs, n_files
         freed = est_total
 
-    summary = ("%sswept %d (dirs %d / files %d) | kept %d live | failed %d | locks kept %d | "
-               "freed≈%s" % ("" if args.apply else "DRY-RUN: ", done, done_dirs, done_files,
-                             len(sc["live"]), failed, locked_kept, human(freed)))
+    summary = ("%sswept %d (dirs %d / files %d) | kept %d live | carriers %d in %d entr(ies) "
+               "(reaped %d, kept %d, unverified %d) | failed %d | locks kept %d | freed≈%s"
+               % ("" if args.apply else "DRY-RUN: ", done, done_dirs, done_files,
+                  len(sc["live"]), carriers_n, len(carriers), carriers_killed, carriers_kept,
+                  unverified_kept, failed, locked_kept, human(freed)))
     log(summary)
     log("done in %.1fs" % (time.monotonic() - t0))
     out.update({"entries": sc["entries"], "untouched": sc["untouched"],
@@ -507,6 +692,12 @@ def run(argv=None) -> int:
                 "kept_live": len(sc["live"]), "failed": failed,
                 "failed_named": failed_named,
                 "locks_kept": locked_kept, "locks_kept_named": locked_named,
+                "carriers": {k: sorted(v) for k, v in carriers.items()},
+                "carriers_count": carriers_n, "carriers_entries": len(carriers),
+                "carriers_scan_error": carrier_err, "carriers_reaped": carriers_killed,
+                "carriers_kept": carriers_kept, "carriers_unverified_kept": unverified_kept,
+                "carriers_named": carriers_named,
+                "kill_carriers": bool(args.kill_carriers),
                 "freed_est_bytes": freed, "swept_is_estimate": not args.apply,
                 "per_prefix": rows,
                 "live_per_prefix": {p: len(v) for p, v in live_rows.items()},
