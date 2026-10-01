@@ -245,7 +245,42 @@ remember them:
 When either value cannot be obtained, the face says so explicitly (`unavailable: <reason>`) — an
 unattributable version is itself a fact that must be visible, never a blank.
 
-## 8. Boundaries
+## 8. The console is a long-lived process too (plugin changes need its restart)
+
+The console (127.0.0.1:3099) is the host's operation surface and it holds the **host-side plugin
+code it imported at startup** (`server/plugins/*/node.ts` and their `src/` imports, resolved
+through `~/.dsh/profiles/sandbar` → `server/profile`). Merging a plugin fix into `main` therefore
+changes a file that a *running* console will not notice: the route keeps answering with the old
+logic. This is the same "long-lived process, stale code" class as the lane worker (sections 2 and
+4) and as the shared test console, and it has a real cost: on 261001 the executor panel kept
+answering the *pre-fix* degradation (`SANDBAR_WORKBENCH_BASE unset`) for a full day after the fix
+merged, and the host read that as "the panel still does not work".
+
+How to tell, without restarting anything (all read-only):
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3099/sandbar-executor-panel   # page: 200 = mounted
+curl -s 'http://127.0.0.1:3099/sandbar-executor-panel/api/grants?project=sandbar' | python3 -m json.tool
+```
+
+A `"degraded": true` whose reason names a **missing config** (`…unset`) is a fingerprint of
+pre-t260929-22 code: the current code resolves the base from the request origin and can only
+degrade for a **reachability** reason. Compare that against what the code on disk would answer
+(the panel's own L1 plus the registered scenario `t260929-22-grants-upstream-400-text` both pass
+on the current tree), and if the live answer is older than the tree, the conclusion is
+"the console needs a restart", not "the panel is broken".
+
+**Boundary**: restarting 3099 belongs to the host. It is the GUI's own process (and, for an agent
+session talking through it, its own connection); the repo rules forbid code, tests and installers
+from restarting, stopping or occupying it. An agent's job here is to name the staleness, name the
+evidence, and hand the restart over. A *second* console instance is not a workaround either: its
+temporal-tools supervisor would manage the same workers.
+
+Before a restart, the lower bound on a console's age can be read off its own routes: a panel route
+answering 200 proves the process started after that plugin's mount commit, while a pre-fix answer
+from one of its endpoints proves it started before that fix.
+
+## 9. Boundaries
 
 * Default is read-only. The only mutating subcommands are `sync` (one merge of `main` into the
   lane, through the engine's own implementation) and `restart` (which kills a worker — and never
