@@ -797,6 +797,21 @@ def _track_reuse_lines(stdout, reuse_lines, header_seen):
                 reuse_lines.append(nm)
 
 
+def _malformed_name(line: str) -> str:
+    """畸形 `FAIL [`/`ENV_FAIL [` 行的**名字**：合成面（`__malformed__ …`）。
+
+    261001 实证（t261001-10 第 5/6/7 轮）：畸形行此前把**整行**当名字——于是一段人话
+    （护栏拒绝开跑的说明）被当成「场景名」，经 `_tests_red_names` 进下一轮快反馈面，
+    而它不在册 ⇒ 执行器 fail-closed ⇒ 产出的又是同一段人话 ⇒ **每轮复读、票永远出不来**
+    （点名单不在册 fail-closed 是**对**的，被毒的是名字的来路）。
+
+    红照记（畸形输出不静默吞：ran+=1 / failed+=1 / exit=-1），但名字必须是**合成面**：
+    `shared.targeted_rerun_plan` 按设计剔 `__` 起首的合成条目（`__budget__`/`__executor__`
+    同族），故合成名**永远不会**被当成场景名带回下一轮。原文进 `output_tail`（诊断不丢）。
+    """
+    return "__malformed__ " + " ".join(str(line).split())[:160]
+
+
 def _parse_integ_run(stdout, returncode):
     """解析执行器三态输出契约（PASS [ / FAIL [ / ENV_FAIL [ + 四空格缩进尾注）
     → (ran, passed, failed, env_failed, scen, err)。
@@ -840,24 +855,32 @@ def _parse_integ_run(stdout, returncode):
             # 旧无尾注形态首 ] 即行尾 ]，向后兼容）
             scen.append({'name': line[6:line.index(']')], 'exit': 0, 'output_tail': ''})
         elif line.startswith('ENV_FAIL ['):
-            # 三态协议（t260904-12 契约 ②b-1）：环境红行；畸形（缺 exit=2）沿 FAIL 惯例
-            # name=整行、exit=-1 计——畸形输出不静默吞。
+            # 三态协议（t260904-12 契约 ②b-1）：环境红行；畸形（缺 exit=2）照记红
+            # （exit=-1，畸形输出不静默吞），名字走 `_malformed_name` 合成面（261001）。
             m = re.match(r'ENV_FAIL \[(.+?)\] exit=(-?\d+)', line)
             if m and int(m.group(2)) == 2:
                 name, exit_code = m.group(1), 2
+            elif m:
+                # 行**可解析**但契约畸形（ENV_FAIL 带非 2 退出码）：名字仍是名字（红照记）
+                name, exit_code = m.group(1), -1
             else:
-                name, exit_code = (line if not m else line, -1)
+                name, exit_code = _malformed_name(line), -1
             ran += 1
             env_failed += exit_code == 2
             failed += exit_code != 2
-            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
+            cur = {'name': name, 'exit': exit_code,
+                   'output_tail': ('' if m else line + '\n')}
             scen.append(cur)
         elif line.startswith('FAIL ['):
             m = re.match(r'FAIL \[(.+?)\] exit=(-?\d+)', line)
-            name, exit_code = (m.group(1), int(m.group(2))) if m else (line, -1)
+            if m:
+                name, exit_code = m.group(1), int(m.group(2))
+            else:
+                name, exit_code = _malformed_name(line), -1
             ran += 1
             failed += 1
-            cur = {'name': name, 'exit': exit_code, 'output_tail': ''}
+            cur = {'name': name, 'exit': exit_code,
+                   'output_tail': ('' if m else line + '\n')}
             scen.append(cur)
         elif cur is not None and line.startswith('    '):
             cur['output_tail'] = (cur['output_tail'] + line + '\n')[-4000:]

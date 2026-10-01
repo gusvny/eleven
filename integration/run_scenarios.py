@@ -3687,7 +3687,12 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         if missing_only:
             # fail-closed（reprobe 同族）：点名错=调用方 bug——一条不跑、零副作用，
             # 在任何起台/卫生钩子之前返回（不烧 docker 面）。
-            print("FAIL [__executor__] 点名名单含不在册条目：%s——一条都未跑"
+            # 261001 实证（**输出形状也是契约**）：本行曾经以 `FAIL [` 起首——而闸侧
+            # `_parse_integ_run` 把任何 `FAIL [` 行当**一条场景结果**收（畸形行=整行当名字），
+            # 于是这段人话被当成「场景名」写进红名集，下一轮又它做快反馈面 ⇒ 点名不在册 ⇒
+            # 再打这一段 ⇒ **每轮 fail-closed、票永远出不来**（t261001-10 第 5/6/7 轮实案）。
+            # 拒绝开跑=闸错误（不可判），不是场景红：一律 `REFUSED [` 起首，两件事各归各位。
+            print("REFUSED [__executor__] 点名名单含不在册条目：%s——一条都未跑"
                   "（--only fail-closed，t260922-12）" % ",".join(missing_only),
                   flush=True)
             print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
@@ -4363,9 +4368,12 @@ def _runner_cap_guard() -> bool:
         if pid != os.getpid():
             alive.append(pid)
     if len(alive) >= RUNNER_CAP_MACHINE:
-        print("FAIL [__executor__] 同树并发执行器超限（本树已有 %d 个在跑：%s；上限 %d）——"
+        print("REFUSED [__executor__] 同树并发执行器超限（本树已有 %d 个在跑：%s；上限 %d）——"
               "拒绝开跑。261001 自递归风暴的兜底判据：层级嵌套会反复重跑同一个面，"
-              "本护栏按**文件登记**判（env 计数值会被内层调用的「干净 env 重建」冲掉）"
+              "本护栏按**文件登记**判（env 计数值会被内层调用的「干净 env 重建」冲掉）。"
+              "`REFUSED [` 起首而非 `FAIL [`：拒绝开跑是闸错误、不是场景红——`FAIL [` 形状"
+              "会让这段人话被闸当成场景名（261001-10 第 5/6/7 轮实案：每轮把面收窄成这个"
+              "不在册的名字 ⇒ 每轮 fail-closed ⇒ 票永远出不来）"
               % (len(alive), ",".join(str(x) for x in sorted(alive)[:6]), RUNNER_CAP_MACHINE),
               flush=True)
         return False
@@ -4387,9 +4395,10 @@ def _recursion_guard() -> bool:
     except (TypeError, ValueError):
         depth = INTEG_DEPTH_MAX + 1          # 畸形=按最深处理（拒）
     if depth >= INTEG_DEPTH_MAX:
-        print("FAIL [__executor__] 递归护栏（深度上限 %d）：本进程是第 %d 层执行器——"
+        print("REFUSED [__executor__] 递归护栏（深度上限 %d）：本进程是第 %d 层执行器——"
               "场景/夹具再起执行器时层层嵌套（261001 实报：自递归把机器吃光）。"
               "本层拒绝开跑（具名、不静默、不递归）。若确需更深嵌套，请显式调高 %s。"
+              "`REFUSED [` 起首而非 `FAIL [`：拒绝开跑是闸错误、不是场景红。"
               % (INTEG_DEPTH_MAX, depth, INTEG_DEPTH_ENV), flush=True)
         return False
     os.environ[INTEG_DEPTH_ENV] = str(depth + 1)
