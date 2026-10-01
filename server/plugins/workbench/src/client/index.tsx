@@ -69,8 +69,10 @@
  * 注入锚），见两文件头注。工单会话入口（点工单 handleTicketClick 链路）不受影响。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Component, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
+// t261001-11：问题区行模型单写者（gate_runs 双形态容忍）+ 槽错误边界文案纯面。
+import { gateProblemRows, slotFaultMessage } from './problems-model.ts'
 import type { ClientContext, ConversationViewDefinition } from '@deepseek-ai/dsh-client-runtime/client'
 // 空具名 type import：把 dsh-client-ui-conversation 的 SlotMap 扩展（conversation.view 槽声明）
 // 带进 tsc 检查环境；纯类型副作用，构建时被剥离，不进 bundle。
@@ -776,6 +778,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-d2-problems .ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-danger,#cf222e);margin-bottom:4px}
 .wb-d2-problems .row{font-size:12px;color:var(--dsw-derive-danger,#7d2222);line-height:1.6;padding:1px 0}
 .wb-d2-problems .row .dim{color:var(--dsw-derive-danger,#b06060)}
+/* t261001-11：槽错误边界 fallback——崩了只在这一行点名故障，其余 UI 存活 */
+.wb-sb-crashed{margin:8px 10px;padding:8px 10px;border:1px dashed var(--dsw-derive-danger-border,#ffb3ad);
+  border-radius:6px;background:var(--dsw-derive-danger-bg,#fff5f5);font-size:12px;
+  color:var(--dsw-derive-danger,#7d2222);word-break:break-word}
 /* 工单正文（原始需求）：钉在详情最顶部，所有页签可见 */
 .wb-d2-body{margin-top:10px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-radius:8px;background:var(--dsw-derive-canvas,#fff);
   padding:10px 14px;font-size:13px;line-height:1.75;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;
@@ -1230,13 +1236,18 @@ interface AgentLiveResult {
   uncoveredTypes?: string[]
 }
 
-/** merge_check 等程序化门的一次运行记录（红绿 + 明细，问题区数据源）。 */
+/** merge_check 等程序化门的一次运行记录（红绿 + 明细，问题区数据源）。
+ *  t261001-11：`checks` 改可选——轻道 run_integration_tests 的闸记录无该键
+ *  （自带 counts/red_count/error/exit_code 等字段）；读者必须双形态容忍。 */
 interface GateRun {
   stage: string
   label: string
   green: boolean
   red_count?: number
-  checks: { item: string; green: boolean; detail?: string }[]
+  exit_code?: number
+  counts?: Record<string, number>
+  error?: string
+  checks?: { item: string; green: boolean; detail?: string }[]
 }
 
 /** 阶段流水一条（workflow _mark 落的时间线：running/blocked/rework/awaiting-human…）。 */
@@ -1918,30 +1929,49 @@ function AgentLivePanel({ ticketId }: { ticketId: string }) {
 }
 
 /** 问题区：只在有问题时渲染（blocked / 最近一次 merge_check 红）。数据源=gate_runs+timeline，
- *  这两个字段接口一直返回、旧版前端没用——「有没有问题一目了然」全靠把它们摆上来。 */
+ *  这两个字段接口一直返回、旧版前端没用——「有没有问题一目了然」全靠把它们摆上来。
+ *  t261001-11：行推导下沉 problems-model.gateProblemRows（gate_runs 双形态容忍——
+ *  dev-lane 的合门记录（带 checks）走逐项行、轻道闸记录无 checks 走自带字段；
+ *  此处旧读者曾在轻道 blocked 票上对无 checks 键的记录直接解引用抛 TypeError
+ *  打掉整个侧栏）。 */
 function D2Problems({ detail }: { detail: TicketDetail }) {
   if (detail.status === 'closed' || detail.stage_state !== 'blocked') return null
-  const rows: ReactNode[] = []
-  const lastBlocked = [...(detail.timeline ?? [])].reverse().find(t => t.state === 'blocked')
-  const g = detail.gate_runs?.[detail.gate_runs.length - 1]
-  if (g && !g.green) {
-    for (const c of g.checks.filter(x => !x.green)) {
-      rows.push(
-        <div className="row" key={c.item}>
-          merge_check red: {c.item}{c.detail ? <span className="dim"> — {c.detail}</span> : null}
-        </div>)
+  let rows: ReactNode[] = gateProblemRows(detail).map(r => (
+    <div className="row" key={r.key}>{r.text}{r.dim ? <span className="dim"> — {r.dim}</span> : null}</div>
+  ))
+  if (rows.length === 0) {
+    const lastBlocked = [...(detail.timeline ?? [])].reverse().find(t => t.state === 'blocked')
+    if (lastBlocked?.reason) {
+      rows = [<div className="row" key="why">{lastBlocked.reason}</div>]
+    } else {
+      rows = [<div className="row" key="w">Stuck at {stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || '—'}; reason not recorded</div>]
     }
   }
-  if (rows.length === 0 && lastBlocked?.reason) {
-    rows.push(<div className="row" key="why">{lastBlocked.reason}</div>)
-  }
-  if (rows.length === 0) rows.push(<div className="row" key="w">Stuck at {stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || '—'}; reason not recorded</div>)
   return (
     <div className="wb-d2-problems">
       <div className="ttl">⛔ Problems need attention</div>
       {rows}
     </div>
   )
+}
+
+/** t261001-11 第二缺陷：槽条目渲染崩溃曾把整个 sidebar.workspaces 条目打掉
+ *  （dsh 整条回收 → 退回默认 UI）。本地错误边界兜住：崩了只在本面板画一行
+ *  点名故障的 inline note（slotFaultMessage），其余 UI 存活；console.error 留痕。 */
+class SlotErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+  state = { message: null as string | null }
+  static getDerivedStateFromError(error: unknown) {
+    return { message: slotFaultMessage(error) }
+  }
+  componentDidCatch(error: unknown, info: unknown) {
+    console.error('[workbench] sidebar slot entry crashed (contained by SlotErrorBoundary):', error, info)
+  }
+  render() {
+    if (this.state.message !== null) {
+      return <div className="wb-sb-crashed" role="alert">{this.state.message}</div>
+    }
+    return this.props.children
+  }
 }
 
 /** agent-usage 端点（t260828-07）返回的 token 聚合：in/out/cacheRead 三列 + 按阶段/按模型分账。 */
@@ -4671,12 +4701,12 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('sidebar.workspaces', () => ctx.slots.register({
     name: 'sidebar.workspaces',
     priority: -10,
-  }, (props: any) => <WorkbenchSidebar
+  }, (props: any) => <SlotErrorBoundary><WorkbenchSidebar
     sessions={ctx.sessions}
     workspaces={ctx.workspaces as any}
     getService={getService}
     views={{ board: WorkbenchSection, docs: DocsSection, routes: ProvidersSection, epics: EpicSection }}
-    {...props} />))
+    {...props} /></SlotErrorBoundary>))
 
   // 度量入口进出厂 footer.action 槽（t260902-05①）：与 dsh settings 齿轮同排。
   // inject 回调体 try/catch（README 槽纪律：槽未声明时 throw 在 register() 内

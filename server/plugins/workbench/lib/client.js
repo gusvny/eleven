@@ -2,6 +2,98 @@ window.__ModuleLoader__.load({ id: "sandbar-workbench", factory: (require) => { 
 Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 let react = require("react");
 let react_jsx_runtime = require("react/jsx-runtime");
+//#region src/client/problems-model.ts
+const asString$1 = (v) => typeof v === "string" ? v : "";
+const asFinite = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
+/** gate_runs 末条（容忍 detail/gate_runs 畸形：非对象/非数组 → undefined）。 */
+function lastGateRun(detail) {
+	if (detail === null || typeof detail !== "object") return void 0;
+	const runs = detail.gate_runs;
+	if (!Array.isArray(runs) || runs.length === 0) return void 0;
+	const g = runs[runs.length - 1];
+	return g !== null && typeof g === "object" ? g : void 0;
+}
+/** gate 的展示标签：label 优先、stage 兜底，畸形 → 'gate'。 */
+function gateStageLabel(g) {
+	if (!g) return "gate";
+	return asString$1(g.label) || asString$1(g.stage) || "gate";
+}
+/** merge_check 形态：checks 数组里的红项 → 行（项内畸形逐条跳过不抛）。 */
+function rowsFromChecks(checks) {
+	if (!Array.isArray(checks)) return [];
+	const out = [];
+	for (let i = 0; i < checks.length; i++) {
+		const c = checks[i];
+		if (c === null || typeof c !== "object") continue;
+		const co = c;
+		if (co.green === true) continue;
+		const item = asString$1(co.item) || asString$1(co.id) || `check #${i}`;
+		out.push({
+			key: `check-${i}-${item}`,
+			text: `merge_check red: ${item}`,
+			dim: asString$1(co.detail) || void 0
+		});
+	}
+	return out;
+}
+/** 轻道闸形态（无 checks 键）：自带字段 → 人话原因行。 */
+function rowsFromLightGate(g) {
+	const out = [];
+	const err = asString$1(g.error);
+	if (err) out.push({
+		key: "error",
+		text: `gate error: ${err}`
+	});
+	const counts = g.counts;
+	if (counts !== null && typeof counts === "object" && !Array.isArray(counts)) {
+		const parts = [];
+		for (const [k, v] of Object.entries(counts)) {
+			const n = asFinite(v);
+			if (n !== null) parts.push(`${k}=${n}`);
+		}
+		if (parts.length > 0) out.push({
+			key: "counts",
+			text: `gate counts: ${parts.join(" / ")}`
+		});
+	}
+	const red = asFinite(g.red_count);
+	if (red !== null && red > 0) out.push({
+		key: "red_count",
+		text: `${red} red item(s) this round`
+	});
+	const exit = asFinite(g.exit_code);
+	if (exit !== null && exit !== 0) out.push({
+		key: "exit_code",
+		text: `exit_code=${exit}`
+	});
+	return out;
+}
+/**
+* gate_runs 末条 → 原因行（问题区主数据源，形态容忍）：
+* - red（green === false）：checks 形态走逐项行；否则走轻道自带字段；
+*   两面都空也要点名「该闸红但无明细」（绝不静默空白）。
+* - 非 red / 畸形 / 缺席：空数组（调用方回落 timeline reason / 兜底行）。
+*/
+function gateProblemRows(detail) {
+	const g = lastGateRun(detail);
+	if (!g || g.green !== false) return [];
+	const label = gateStageLabel(g);
+	const rows = Array.isArray(g.checks) ? rowsFromChecks(g.checks) : rowsFromLightGate(g);
+	if (rows.length === 0) rows.push({
+		key: "no-detail",
+		text: `${label}: red (no per-item detail recorded)`
+	});
+	return rows;
+}
+/**
+* 槽条目渲染崩溃 → 边界 fallback 文案（t261001-11 第二缺陷：一个坏记录
+* 曾能打掉整个侧栏——现在边界兜住，点名故障、其余 UI 存活）。
+* 畸形 error（非 Error/空 message）也有可读文案，绝不渲染空白。
+*/
+function slotFaultMessage(error) {
+	return `Workbench panel crashed while rendering: ${(error instanceof Error ? error.message : typeof error === "string" ? error : "") || "unknown fault"} — the rest of the console stays usable.`;
+}
+//#endregion
 //#region ../knowledge/src/client/markdown.ts
 /**
 * markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
@@ -51926,6 +52018,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-d2-problems .ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-danger,#cf222e);margin-bottom:4px}
 .wb-d2-problems .row{font-size:12px;color:var(--dsw-derive-danger,#7d2222);line-height:1.6;padding:1px 0}
 .wb-d2-problems .row .dim{color:var(--dsw-derive-danger,#b06060)}
+/* t261001-11：槽错误边界 fallback——崩了只在这一行点名故障，其余 UI 存活 */
+.wb-sb-crashed{margin:8px 10px;padding:8px 10px;border:1px dashed var(--dsw-derive-danger-border,#ffb3ad);
+  border-radius:6px;background:var(--dsw-derive-danger-bg,#fff5f5);font-size:12px;
+  color:var(--dsw-derive-danger,#7d2222);word-break:break-word}
 /* 工单正文（原始需求）：钉在详情最顶部，所有页签可见 */
 .wb-d2-body{margin-top:10px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-radius:8px;background:var(--dsw-derive-canvas,#fff);
   padding:10px 14px;font-size:13px;line-height:1.75;color:var(--dsw-derive-fg,#1f2328);white-space:pre-wrap;
@@ -52836,35 +52932,35 @@ function AgentLivePanel({ ticketId }) {
 	});
 }
 /** 问题区：只在有问题时渲染（blocked / 最近一次 merge_check 红）。数据源=gate_runs+timeline，
-*  这两个字段接口一直返回、旧版前端没用——「有没有问题一目了然」全靠把它们摆上来。 */
+*  这两个字段接口一直返回、旧版前端没用——「有没有问题一目了然」全靠把它们摆上来。
+*  t261001-11：行推导下沉 problems-model.gateProblemRows（gate_runs 双形态容忍——
+*  dev-lane 的合门记录（带 checks）走逐项行、轻道闸记录无 checks 走自带字段；
+*  此处旧读者曾在轻道 blocked 票上对无 checks 键的记录直接解引用抛 TypeError
+*  打掉整个侧栏）。 */
 function D2Problems({ detail }) {
 	if (detail.status === "closed" || detail.stage_state !== "blocked") return null;
-	const rows = [];
-	const lastBlocked = [...detail.timeline ?? []].reverse().find((t) => t.state === "blocked");
-	const g = detail.gate_runs?.[detail.gate_runs.length - 1];
-	if (g && !g.green) for (const c of g.checks.filter((x) => !x.green)) rows.push(/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+	let rows = gateProblemRows(detail).map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "row",
-		children: [
-			"merge_check red: ",
-			c.item,
-			c.detail ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: "dim",
-				children: [" — ", c.detail]
-			}) : null
-		]
-	}, c.item));
-	if (rows.length === 0 && lastBlocked?.reason) rows.push(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "row",
-		children: lastBlocked.reason
-	}, "why"));
-	if (rows.length === 0) rows.push(/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "row",
-		children: [
-			"Stuck at ",
-			stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || "—",
-			"; reason not recorded"
-		]
-	}, "w"));
+		children: [r.text, r.dim ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+			className: "dim",
+			children: [" — ", r.dim]
+		}) : null]
+	}, r.key));
+	if (rows.length === 0) {
+		const lastBlocked = [...detail.timeline ?? []].reverse().find((t) => t.state === "blocked");
+		if (lastBlocked?.reason) rows = [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "row",
+			children: lastBlocked.reason
+		}, "why")];
+		else rows = [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "row",
+			children: [
+				"Stuck at ",
+				stageDisplayLabel(detail.stage, detail.stage_name) || detail.stage || "—",
+				"; reason not recorded"
+			]
+		}, "w")];
+	}
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-d2-problems",
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -52873,6 +52969,26 @@ function D2Problems({ detail }) {
 		}), rows]
 	});
 }
+/** t261001-11 第二缺陷：槽条目渲染崩溃曾把整个 sidebar.workspaces 条目打掉
+*  （dsh 整条回收 → 退回默认 UI）。本地错误边界兜住：崩了只在本面板画一行
+*  点名故障的 inline note（slotFaultMessage），其余 UI 存活；console.error 留痕。 */
+var SlotErrorBoundary = class extends react.Component {
+	state = { message: null };
+	static getDerivedStateFromError(error) {
+		return { message: slotFaultMessage(error) };
+	}
+	componentDidCatch(error, info) {
+		console.error("[workbench] sidebar slot entry crashed (contained by SlotErrorBoundary):", error, info);
+	}
+	render() {
+		if (this.state.message !== null) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "wb-sb-crashed",
+			role: "alert",
+			children: this.state.message
+		});
+		return this.props.children;
+	}
+};
 /** token 数人话格式：≥1M 显 x.xxM、≥1k 显 x.xk，否则原值（悬停有精确值）。 */
 function fmtTok(n) {
 	if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
@@ -56223,7 +56339,7 @@ function apply(ctx) {
 	ctx.slots.inject("sidebar.workspaces", () => ctx.slots.register({
 		name: "sidebar.workspaces",
 		priority: -10
-	}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(WorkbenchSidebar, {
+	}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SlotErrorBoundary, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(WorkbenchSidebar, {
 		sessions: ctx.sessions,
 		workspaces: ctx.workspaces,
 		getService,
@@ -56234,7 +56350,7 @@ function apply(ctx) {
 			epics: EpicSection
 		},
 		...props
-	})));
+	}) })));
 	ctx.slots.inject("sidebar.footer.action", () => {
 		try {
 			const dispose = ctx.slots.register({
