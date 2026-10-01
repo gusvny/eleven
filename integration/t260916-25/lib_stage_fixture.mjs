@@ -28,10 +28,25 @@ export const FORBIDDEN_PORTS = [3099, 3199, 7233, 8233, 17233, 18233]
 
 // ---------------------------------------------------------------- 端口探针
 
-/** 从 3511 起挑一个本机空闲高位口；耗尽返回 0（场景记 env_fail——环境面）。 */
+/** 从 3511 起挑一个本机空闲高位口；耗尽返回 0（场景记 env_fail——环境面）。
+ *
+ *  260930 直修（宿主令，并发竞态）：原来是"从 3511 顺序扫到 3549、取第一个空的"——
+ *  并发宽度 4 时多条场景同时"先探后用"，完全可能挑中同一口；而被测脚本
+ *  `stage_console.sh` 对"端口已被占用"是**硬拒 exit 2**（绝不抢占，红线面），
+ *  于是后续断言整组变红。实况：t260916-25-stage-console-prepare-refresh 反复在闸里红，
+ *  而**同一脚本单独跑 8/8 全绿**——并发竞态，不是产品红。
+ *  两处收口：①本函数把范围加宽到 3511-3599 并**随机探测顺序**（撞面大幅下降）；
+ *  ②真正的消解面=runWithFreshPort（撞口就换口重做）。 */
 export async function pickFreePort() {
-  for (let p = 3511; p <= 3549; p++) {
-    if (FORBIDDEN_PORTS.includes(p)) continue
+  const ports = []
+  for (let p = 3511; p <= 3599; p++) {
+    if (!FORBIDDEN_PORTS.includes(p)) ports.push(p)
+  }
+  for (let i = ports.length - 1; i > 0; i--) {   // Fisher-Yates：并发下不再"同序同口"
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[ports[i], ports[j]] = [ports[j], ports[i]]
+  }
+  for (const p of ports) {
     // eslint-disable-next-line no-await-in-loop
     const free = await new Promise((done) => {
       const s = createServer()
@@ -41,6 +56,32 @@ export async function pickFreePort() {
     if (free) return p
   }
   return 0
+}
+
+/** `stage_console.sh` 的"端口已被占用"硬拒形态（exit 2 + 该文案）——并发竞态的唯一出口。 */
+export function isPortBusyRefusal(r) {
+  const s = `${(r && r.stdout) || ''}\n${(r && r.stderr) || ''}`
+  return !!r && r.code === 2 && /已被占用/.test(s)
+}
+
+/** 撞口重试步进器：每轮**重新挑口 + 重建桩根**（桩根里烤着端口），撞口即换口重做。
+ *
+ *  buildArgs(port, stubRoot) 造该轮参数；返回 { ...runStep 结果, port, stubRoot }。
+ *  高位口耗尽（port=0）=环境面，调用方按 env_fail 记——绝不静默当绿。 */
+export async function runWithFreshPort(ws, { mode = 'normal', buildArgs, attempts = 4, onRetry } = {}) {
+  let last = null
+  for (let i = 0; i < attempts; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    const port = await pickFreePort()
+    if (!port) return { code: -1, stdout: '', stderr: '高位口耗尽（3511-3599）', killed: false, port: 0, stubRoot: '' }
+    const stubRoot = makeStubRoot(ws, { port, mode })
+    // eslint-disable-next-line no-await-in-loop
+    const r = await runStep(buildArgs(port, stubRoot))
+    last = { ...r, port, stubRoot }
+    if (!isPortBusyRefusal(r)) return last
+    if (onRetry) onRetry(port, i)
+  }
+  return last
 }
 
 /** 端口是否有监听者（400ms 探测窗）。 */

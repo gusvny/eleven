@@ -20,7 +20,7 @@
 
 import {
   SCRIPT_PATH, PLUGIN_LINK_NAMES,
-  pickFreePort, makeWorkspace, rmRf, writeSrcHome, makeStubRoot,
+  runWithFreshPort, makeWorkspace, rmRf, writeSrcHome,
   runStep, pidsMatching, killPid,
   existsSync, readFileSync, readdirSync, writeFileSync, join,
 } from './lib_stage_fixture.mjs'
@@ -49,13 +49,7 @@ if (!existsSync(SCRIPT_PATH)) {
 }
 record('L0 交付物在位', 'pass', SCRIPT_PATH)
 
-const port = await pickFreePort()
-if (!port) {
-  record('端口可得', 'env_fail', '3511-3549 高位口全被占——环境面')
-  summarize()
-}
 const ws = makeWorkspace('prep')
-const stubRoot = makeStubRoot(ws, { port, mode: 'normal' })
 const src = join(ws, 'src-home')
 const home = join(ws, 'stage-home')
 const CREDS_V1 = 'providers:\n  fixture-key: sk-fixture-v1\n'
@@ -68,13 +62,25 @@ writeSrcHome(src, {
   sessionNames: ['--fixture-legacy-a--', '--fixture-legacy-b--'],
   sessionBody: SESSION_BODY_V1,
 })
-const prepArgs = ['prepare', '--dsh-root', stubRoot, '--port', String(port), '--home', home, '--src-home', src]
+// 260930 直修（宿主令，并发竞态）：端口不再"探一次钉死"——并发下别的场景会先探后占，
+// 而被测脚本对"端口已被占用"是硬拒 exit 2。故每一步都走 runWithFreshPort：撞口换口重做，
+// 后续断言一律用**实际生效的那个口**（p1.port / p1.stubRoot）。
+const prepArgsFor = (port, stubRoot) => ['prepare', '--dsh-root', stubRoot, '--port', String(port), '--home', home, '--src-home', src]
 const stagedCreds = () => readFileSync(join(home, '.credentials.yaml'), 'utf8')
 const stagedSettings = () => readFileSync(join(home, 'settings.yaml'), 'utf8')
 const stagedSessionA = () => readFileSync(join(home, 'sessions', '--fixture-legacy-a--', 'session.jsonl'), 'utf8')
 
 try {
-  const p1 = await runStep(prepArgs)
+  const p1 = await runWithFreshPort(ws, {
+    buildArgs: prepArgsFor,
+    onRetry: (p, i) => console.log(`[retry] 端口 ${p} 被并发占走——换口重做（第 ${i + 1} 次）`),
+  })
+  if (!p1.port) {
+    record('端口可得', 'env_fail', '3511-3599 高位口全被占/耗尽——环境面')
+    summarize()
+  }
+  const port = p1.port
+  const prepArgs = prepArgsFor(port, p1.stubRoot)
   const kitOk = p1.code === 0
     && existsSync(join(home, '.credentials.yaml'))
     && existsSync(join(home, 'profiles', 'sandbar-stage', 'cordis.patch.yml'))
