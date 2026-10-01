@@ -117,6 +117,7 @@ import re
 import signal
 import subprocess
 import sys
+import pathlib
 import tempfile
 import time
 
@@ -3580,6 +3581,9 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     # 261001 递归护栏**也要在进程内入口**（`verify_lane._integ` 是 `import run_scenarios as rs`
     # 后直调 `rs.main()` 的——那条路不过 `_cli`）：护栏只在「内层标记 + 收窄面都在场」时拦，
     # 正常注入式电池（无标记）与合法嵌套（lib_env 清理后两键都被剥）都不受影响。
+    if not _runner_cap_guard():
+        print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+        return 2
     if not _recursion_guard():
         print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
         return 2
@@ -4303,6 +4307,76 @@ INTEG_DEPTH_MAX = 4
 _GUARD_OK = False
 
 
+#: 同树并发执行器上限（261001 自递归风暴的**兜底判据**，与深度计数并存）。
+#: 为什么用**文件登记**而不是 env 计数：风暴里的内层调用是 verify_lane 用「进程启动时抓的干净
+#: env」再拼出来的 ⇒ 我在 env 里加的 INTEG_RUN_DEPTH 到不了内层（实测：12 层嵌套、护栏零命中）。
+#: 文件登记不受 env 重建影响，且天然给出「谁在跑」的名单。
+RUNNER_REG_DIR_ENV = "SANDBAR_INTEG_RUNNER_REG_DIR"
+#: 上限=**全机**在跑的执行器数（不按树分键）：风暴里的嵌套调用会在 tmp 夹具树里跑，
+#: 树键各不相同 ⇒ 按树计永远数不到（实测：12 个并发、按树护栏零命中）。安全阀口径=
+#: 正常并存（两个泳道轮 + 各自基线 + 巡检）≤6，故取 8 兜住「异常翻倍」而不误伤正常并存。
+RUNNER_CAP_MACHINE = int(os.environ.get("SANDBAR_INTEG_RUNNER_CAP") or 8)
+
+
+def _runner_reg_dir() -> str:
+    d = str(os.environ.get(RUNNER_REG_DIR_ENV) or "").strip()
+    if not d:
+        # **字面 /tmp**（不是 tempfile.gettempdir()）：夹具树会给子进程换 TMPDIR，用 $TMPDIR
+        # 会把登记表按层切开、计数永远到不了帽（实测：12 个并发、按树/TMPDIR 键零命中）。
+        d = "/tmp/sandbar-integ-runners"
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        return ""
+    return d
+
+
+def _runner_cap_guard() -> bool:
+    """同树并发执行器 ≤ `RUNNER_CAP_PER_TREE`；超限=具名拒绝（exit 2）。
+
+    登记文件名=sha1(树根)[:12]-<pid>；每次进入执行器登记一次、退出时（finally）清掉。
+    死活按 `os.kill(pid, 0)` 判（历史残留不算数），超过 6 小时的登记按陈旧忽略。"""
+    d = _runner_reg_dir()
+    if not d:
+        return True
+    alive = []
+    now = time.time()
+    try:
+        names = os.listdir(d)
+    except OSError:
+        names = []
+    for name in names:
+        if "-" not in name:
+            continue
+        fp = os.path.join(d, name)
+        try:
+            pid = int(name.rsplit("-", 1)[1])
+            age = now - os.path.getmtime(fp)
+        except (OSError, ValueError):
+            continue
+        if age > 6 * 3600:
+            continue
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        if pid != os.getpid():
+            alive.append(pid)
+    if len(alive) >= RUNNER_CAP_MACHINE:
+        print("FAIL [__executor__] 同树并发执行器超限（本树已有 %d 个在跑：%s；上限 %d）——"
+              "拒绝开跑。261001 自递归风暴的兜底判据：层级嵌套会反复重跑同一个面，"
+              "本护栏按**文件登记**判（env 计数值会被内层调用的「干净 env 重建」冲掉）"
+              % (len(alive), ",".join(str(x) for x in sorted(alive)[:6]), RUNNER_CAP_MACHINE),
+              flush=True)
+        return False
+    try:
+        pathlib.Path(os.path.join(d, "run-%d" % os.getpid())).write_text(
+            json.dumps({"pid": os.getpid(), "tree": _REPO_ROOT, "ts": now}), encoding="utf-8")
+    except OSError:
+        pass
+    return True
+
+
 def _recursion_guard() -> bool:
     """嵌套深度护栏：返回 False=本轮拒绝开跑（fail-closed，exit 2 + 具名）。"""
     global _GUARD_OK
@@ -4324,6 +4398,18 @@ def _recursion_guard() -> bool:
 
 
 def _cli(argv):
+    import atexit as _atexit
+
+    def _deregister():
+        d = _runner_reg_dir()
+        if not d:
+            return
+        try:
+            os.remove(os.path.join(d, "run-%d" % os.getpid()))
+        except OSError:
+            pass
+
+    _atexit.register(_deregister)
     """唯一 argv 解析点（t260913-03）：main() 缺省不读 sys.argv——既有注入式电池
     无参直调 rs.main() 必须字节兼容（全树无带参调用者：verify.yaml 的 integration.cmd
     无参数）。未知 flag 忽略（保持旧调用面宽容）。
@@ -4338,6 +4424,9 @@ def _cli(argv):
     if "--print-surface-plan" in argv:
         i = argv.index("--print-surface-plan")
         return print_surface_plan(argv[i + 1] if i + 1 < len(argv) else "")
+    if not _runner_cap_guard():
+        print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+        return 2
     if not _recursion_guard():
         print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
         return 2

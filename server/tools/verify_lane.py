@@ -1245,7 +1245,12 @@ def _integ(args):
             baseline_skipped_by_ledger = True
         elif len(ledger_ambiguous) < len(red_names):
             baseline_targeted = list(ledger_ambiguous)
-    baseline_env_extra = ({'SANDBAR_SCENARIO_ONLY': ','.join(baseline_targeted)}
+    # 261001：基线那一步的 env 是**重建**的（`cmd_env` + 本 extra）⇒ 执行器加在 env 里的
+    # 嵌套深度（INTEG_RUN_DEPTH）必须**显式透传**，否则内层每次都从 0 起算、深度护栏永远
+    # 到不了帽（实测：自递归 12 层、护栏零命中）。这是「层级嵌套跑同一个面」的判据面。
+    _depth_now = str(os.environ.get('INTEG_RUN_DEPTH') or '')
+    baseline_env_extra = ({'SANDBAR_SCENARIO_ONLY': ','.join(baseline_targeted),
+                           'INTEG_RUN_DEPTH': _depth_now}
                           if baseline_targeted else None)
     baseline_wall_s = None
     if need_baseline:
