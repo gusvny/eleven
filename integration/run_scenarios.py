@@ -4307,8 +4307,14 @@ INNER_RUN_ENV = "SANDBAR_INTEG_INNER_RUN"
 #: 深度上限**只拦递归**：正常轮=1 层、夹具自调=2~3 层、自递归会无限增长 ⇒ 到帽即具名拒绝。
 #: 键名**不带 SANDBAR_ 前缀家族**（`SANDBAR_INTEG_*` 会被 lib_env 清理单点剥掉，深度会失真），
 #: 故用 `INTEG_RUN_DEPTH`——它必须跨「清理过 env 的合法嵌套」继续计数。
+#: **帽值 4 → 8（261001 同日实证）**：4 太紧——`t260912-01-summary-count-purity` /
+#: `t260913-03-executor-pool-exclude-l1` 这两条**在册电池**本身就要自调执行器到 4 层
+#: （独立跑都要第 4 层、在轮里还要 +1），到帽即被拒 ⇒ 电池里 9~11 条子用例跟着红，
+#: 而且这些红被归成**票的账**（两张票被同一个帽子挡住）。风暴实测 12 层，
+#: 8 仍能兜住「异常翻倍」，同时放行「电池级自调」这一段合法深度；
+#: 精确判据（同一面重入）留给后续：见 notes/debts/known-issues.md 的对应 open 项。
 INTEG_DEPTH_ENV = "INTEG_RUN_DEPTH"
-INTEG_DEPTH_MAX = 4
+INTEG_DEPTH_MAX = 8
 _GUARD_OK = False
 
 

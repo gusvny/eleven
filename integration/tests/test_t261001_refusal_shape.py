@@ -77,8 +77,17 @@ def test_s1_only_unknown_refusal_is_not_scenario_shaped():
 
 
 def test_s2_depth_guard_refusal_is_not_scenario_shaped():
-    """①-b 深度护栏：同一形状纪律（这条在风暴现场最常出现）。"""
-    rc, out = _run_runner({"INTEG_RUN_DEPTH": "4"})
+    """①-b 深度护栏：同一形状纪律（这条在风暴现场最常出现）。
+
+    帽值取 `INTEG_DEPTH_MAX`（现为 8）：4 那个旧帽值会把在册电池
+    （`t260912-01-summary-count-purity` / `t260913-03-executor-pool-exclude-l1`
+    自身就要自调到第 4 层）判死——本用例从此**按常量取值**，帽值再动也不会静默失效。"""
+    sys.path.insert(0, str(REPO / "integration"))
+    import importlib.util  # noqa: PLC0415
+    spec = importlib.util.spec_from_file_location("rs_probe", str(REPO / "integration" / "run_scenarios.py"))
+    rs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rs)
+    rc, out = _run_runner({"INTEG_RUN_DEPTH": str(rs.INTEG_DEPTH_MAX)})
     assert rc == 2, out
     assert "REFUSED [__executor__]" in out and "递归护栏" in out
     bad = [ln for ln in out.splitlines() if ln.startswith(SCENARIO_SHAPED)]
