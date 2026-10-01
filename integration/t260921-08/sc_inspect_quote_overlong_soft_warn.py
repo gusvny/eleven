@@ -32,6 +32,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 import lib_overlong as fx  # noqa: E402
 
+#: 引擎**系统发现**的 subject 前缀（261001）：不是 agent 交上来的发现，而是引擎按台账范围
+#: 如实报的信号（本夹具无可用差分基点 ⇒ 必然出现 `Scope collapsed to 0 files` 一条）。
+SYSTEM_SUBJECT_PREFIX = "Scope collapsed to 0 files"
+
 PASS = 0
 FAIL = 0
 FAILURES = []
@@ -89,10 +93,21 @@ def main() -> int:
            "（旧码此处整份拒收=当日 findings=0 事故复现位）")
         result = (payload or {}).get("result") or {}
         findings = result.get("findings")
-        usable = isinstance(findings, list) and len(findings) == 3
-        ok(usable, "S1 三条发现全部在册（不陪葬，findings 非空）")
+        # 261001 诊断增强：失败时点名清单实况（条数 + 每条 subject 前缀）——「三条不在册」
+        # 与「三条都在册但多了一条引擎系统发现」是两件事，只报布尔等于没报。
+        # 261001 口径同步（integration 岗位判词）：本子用例要断言的是**夹具这三条**都在册
+        # （超长引文截断+标注、正常条零新键、坏引文照旧点名）。inspect 面还会追加**引擎系统
+        # 发现**——本夹具的合成树没有可差分基点，于是如实多出一条
+        # `Scope collapsed to 0 files: …`（无泳道实例的正常信号）。判据改为：夹具三条按各自
+        # subject 前缀取回（**缺一条照旧红**），系统发现**具名**计数并列示，不静默、不放宽。
+        _all = findings if isinstance(findings, list) else []
+        _sys = [f for f in _all if str((f or {}).get("subject") or "").startswith(SYSTEM_SUBJECT_PREFIX)]
+        _owned = [f for f in _all if f not in _sys]
+        usable = len(_owned) == 3
+        ok(usable, "S1 三条夹具发现全部在册（不陪葬，findings 非空；另有 %d 条引擎系统发现：%s）"
+           % (len(_sys), "; ".join(str((f or {}).get("subject"))[:40] for f in _sys) or "无"))
         if usable:
-            f0, f1, f2 = findings
+            f0, f1, f2 = _owned
             ev0 = (f0.get("evidence") or [{}])[0]
             ok(ev0.get("quote") == fx.LONG_LINE[:200],
                "S1 超长引文截到上限 200 且是原行前缀（report 段复核仍可校验）")
@@ -169,8 +184,15 @@ def main() -> int:
             ok(any("normal" in t for t in titles)
                and not any("mismatch" in t for t in titles),
                "S4 建议门对照：verified 进、unverified 不进")
-            ok(len(face.get("findings") or []) == 3,
-               "S4 三条发现全在票面（不静默丢，点名随行）")
+            # 261001：票面同样会带那条引擎系统发现（`Scope collapsed to 0 files`）——
+            # 判据改成「夹具三条全在票面」，系统发现**具名**计数（不静默、不放宽）。
+            _face_fs = [f for f in (face.get("findings") or []) if isinstance(f, dict)]
+            _face_sys = [f for f in _face_fs
+                         if str(f.get("subject") or "").startswith(SYSTEM_SUBJECT_PREFIX)]
+            _face_owned = [f for f in _face_fs if f not in _face_sys]
+            ok(len(_face_owned) == 3,
+               "S4 三条夹具发现全在票面（不静默丢，点名随行；另有 %d 条引擎系统发现）"
+               % len(_face_sys))
         else:
             ok(False, "S4 无法驱动（前置面未产出）")
     finally:
