@@ -272,9 +272,13 @@ async function runBrowser(pw, browser) {
     record('S1 row-on-board', 'pass', `巡检行在场：${rowText.replace(/\s+/g, ' ').slice(0, 120)}`)
 
     // ② 字段齐：实例/期号/发现数在行文本可见
+    // 261001 口径同步：宿主 260925「控制台 UI 界面文案一律英文」令之后，行上的阶段字变成
+    // "Awaiting your signature"（英文），发现数也从裸 `1/2/0` 变成带严重度的 `H1/M2/L0`。
+    // 契约意图不变：**行上要能看见 实例/期号/发现数/阶段**——判据改成认这两种形态（旧形态
+    // 仍放行，防回滚），并对英文文案做大小写不敏感匹配。
     const missingFields = [['期号 20260915', rowText.includes('20260915')],
-    ['发现数 1/2/0', /1\s*\/?\s*2|发现/.test(rowText)],
-    ['段 close/人门', /close|签|人审/.test(rowText)]]
+    ['发现数 H/M/L 或 1/2/0', /\bH\d+\s*\/\s*M\d+\s*\/\s*L\d+/i.test(rowText) || /1\s*\/?\s*2|发现|findings/i.test(rowText)],
+    ['段 close/人门/signature', /close|awaiting your signature|sign|签|人审/i.test(rowText)]]
       .filter(([, good]) => !good).map(([label]) => label)
     record('S1 row-fields', missingFields.length ? 'fail' : 'pass',
       missingFields.length ? `行文本缺字段：${missingFields.join(',')}；text=${rowText.slice(0, 160)}` : '实例/期号/发现数/段可见')
@@ -347,14 +351,31 @@ async function runBrowser(pw, browser) {
         `点巡检行后详情未渲染（drawer=${drawerOk} face=${faceOk}；text=${(await drawer.innerText().catch(() => '')).slice(0, 120)}）`)
       return
     }
-    const dText = await drawer.innerText().catch(() => '')
-    const missDetail = [['阶段时间线', /inspect|report|close|时间线|阶段/.test(dText)],
-    ['发现摘要', /发现/.test(dText) && dText.includes('1')],
+    // 261001（两处同修）：①逗号定位器 `.wb-drawer, [role=dialog]` 的 `.first()` 可能落到
+    // **不含详情体的那个壳**（实测 innerText 只有关闭钮 "×"），故断言取**装着 inspection-face
+    // 的那个抽屉**；②人门段标题随 260925 英文令写成 "Human gate (…) — what to sign"（句中
+    // 小写），故判据大小写不敏感。
+    const faceDrawer = page.locator(
+      '.wb-drawer:has([data-testid="inspection-face"]), [role="dialog"]:has([data-testid="inspection-face"])').first()
+    const drawerDiag = async () => {
+      const all = page.locator('.wb-drawer, [role="dialog"]')
+      const n = await all.count().catch(() => 0)
+      const parts = []
+      for (let i = 0; i < n; i++) {
+        const t = await all.nth(i).innerText().catch(() => '')
+        parts.push(`#${i}(${t.replace(/\s+/g, ' ').slice(0, 60)})`)
+      }
+      return `drawers=${n} [${parts.join(' | ')}]`
+    }
+    const dText = (await faceDrawer.count().catch(() => 0))
+      ? await faceDrawer.innerText().catch(() => '') : ''
+    const missDetail = [['阶段时间线', /inspect|report|close|时间线|阶段/i.test(dText)],
+    ['发现摘要', /发现|findings/i.test(dText) && dText.includes('1')],
     ['报告路径', dText.includes('out/inspection/')],
-    ['What to sign', /What to sign/.test(dText)]]
+    ['What to sign', /what to sign/i.test(dText)]]
       .filter(([, good]) => !good).map(([label]) => label)
     record('S1 detail-drilldown', missDetail.length ? 'fail' : 'pass',
-      missDetail.length ? `详情缺段：${missDetail.join(',')}；drawer text=${dText.slice(0, 200)}` : '时间线/发现摘要/报告路径/签什么齐')
+      missDetail.length ? `详情缺段：${missDetail.join(',')}；${await drawerDiag()}` : '时间线/发现摘要/报告路径/签什么齐')
 
     // ⑥ 「去签字→」锚点 → 签什么段可见（R6 anchor 衔接）
     if (hasSignBtn) {
@@ -383,8 +404,12 @@ async function runBrowser(pw, browser) {
       const gateOk = anchorEvidence === '' && await waitFor(
         async () => (await page.locator('[data-testid="inspection-gate"]').count()) > 0, 10000)
       const dText2 = gateOk ? await page.locator('[data-testid="inspection-gate"]').innerText().catch(() => '') : ''
-      record('S1 review-anchor', gateOk && /What to sign/.test(dText2) ? 'pass' : 'fail',
-        gateOk && /What to sign/.test(dText2) ? '去签字→落人门「签什么」段（review 锚点衔接）'
+      // 261001 口径同步：宿主 260925 令「控制台 UI 界面文案一律英文」，t260925-18（提交 645cc62）
+      // 把人门段标题写成 "Human gate (…) — what to sign"（句中，首字母小写）。契约意图
+      // 「锚点落在**说明在签什么**的人门段」不变，故判据改为**大小写不敏感**匹配该短语。
+      const signWhatOk = /what to sign/i.test(dText2)
+      record('S1 review-anchor', gateOk && signWhatOk ? 'pass' : 'fail',
+        gateOk && signWhatOk ? '去签字→落人门「签什么」段（review 锚点衔接）'
           : `去签字→未落签什么段：${anchorEvidence || `gate=${gateOk} text=${dText2.slice(0, 100)}`}`)
     } else {
       record('S1 review-anchor', 'na', '无「去签字→」钮可点（前子用例已红）')
