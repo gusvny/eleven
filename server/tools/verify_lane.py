@@ -1249,6 +1249,19 @@ def _integ(args):
     # 嵌套深度（INTEG_RUN_DEPTH）必须**显式透传**，否则内层每次都从 0 起算、深度护栏永远
     # 到不了帽（实测：自递归 12 层、护栏零命中）。这是「层级嵌套跑同一个面」的判据面。
     _depth_now = str(os.environ.get('INTEG_RUN_DEPTH') or '')
+    # 261001 **自指收窄护栏**（风暴根因面）：基线若把「本层正在跑的那个面」再点名一次，
+    # 就等于让「自己会起闸」的场景在内层再跑一遍 —— 而基线那一层的 env 是**重建**的，
+    # 所以任何基于 env 的深度计数都会在这里归零（实测：自递归 12 层、护栏零命中）。
+    # 判据=本层 `SANDBAR_SCENARIO_ONLY` ∩ 基线点名集 非空 ⇒ 从点名里摘掉并具名上报
+    # （摘掉=退回整跑，方向是**更宽**不是更窄：不假绿，只防递归）。
+    _self_face = {x.strip() for x in (os.environ.get('SANDBAR_SCENARIO_ONLY') or '').split(',')
+                  if x.strip()}
+    _self_drop = sorted(_self_face & set(baseline_targeted))
+    if _self_drop:
+        baseline_targeted = [n for n in baseline_targeted if n not in _self_face]
+        print("BASELINE_SELF_NARROW_DROP 基线点名里含本层正在跑的面（%s）——摘掉这几个名字改整跑："
+              "自指收窄会让内层再跑同一个面（261001 自递归风暴根因面）" % ",".join(_self_drop),
+              flush=True)
     baseline_env_extra = ({'SANDBAR_SCENARIO_ONLY': ','.join(baseline_targeted),
                            'INTEG_RUN_DEPTH': _depth_now}
                           if baseline_targeted else None)
