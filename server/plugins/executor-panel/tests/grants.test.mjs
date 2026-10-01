@@ -48,6 +48,15 @@ assert(extractTemplateFacts({ workflows: [{ id: 'dev-lane', name: 'Dev' }] }).fa
   assert(insp.has_human_gate === false && insp.kind === 'inspection', 'agent-only stages/topology = no gate; inspection family by id')
   // 派生联动：真形状模板必须出 sign 行（决定 10 的头条）。
   assert(deriveGrants([extractTemplateFacts({ workflows: [real] }).facts[0]], true, true).rows.some(r => r.op === 'sign'), 'derived grants include sign for the real-shape human-gate template')
+  // 260930 直修（宿主令，真机实报）：**真端点的信封形状是 `{ok:true, result:[…]}`——
+  // result 直接就是数组**。旧判据只认 result.workflows ⇒ 生产恒降级（Grants 页签永远
+  // 「unavailable（显式，不是空表）」）。此棒钉真信封形状，防再漂。
+  const envl = extractTemplateFacts({ ok: true, result: [real] })
+  assert(envl.ok === true && envl.facts.length === 1 && envl.facts[0].has_human_gate === true,
+    'real envelope shape {ok:true, result:[…]}: array at result itself must be accepted (the production shape)')
+  const envlInsp = extractTemplateFacts({ ok: true, result: [{ id: 'inspection-lite', name: 'Inspect', stages: [{ id: 'i1', role: 'agent', exit: null }] }] })
+  assert(envlInsp.ok === true && envlInsp.facts[0].kind === 'inspection',
+    'real envelope shape: inspection family recognized through the envelope too')
 }
 
 // 形状漂移：数组缺席 / 项缺 name / 非对象项 → 显式降级，不猜。

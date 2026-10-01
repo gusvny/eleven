@@ -37,8 +37,15 @@ export type GrantsResult =
   | { ok: false; reason: string; source: 'workbench-workflows' }
 
 /**
- * 从 workbench workflows 回执提取模板事实（容形状：数组可在 result / workflows /
- * 顶层；单项认 name/id + kind + 任意 human 门标记）。认不出的形状=显式降级，不猜。
+ * 从 workbench workflows 回执提取模板事实（容形状：数组可在 result / result.workflows /
+ * workflows / 顶层；单项认 name/id + kind + 任意 human 门标记）。认不出的形状=显式降级，不猜。
+ *
+ * 260930 直修（宿主令·不开票；真机实报）：**真端点的形状是 `{ok:true, result:[…]}`——
+ * `result` 直接就是数组**，而旧判据只认 `result.workflows`，于是本函数在生产上**恒**
+ * 判"无数组"，Grants 页签永远显示「unavailable（显式，不是空表）」。为什么测试没抓住：
+ * 夹具往桩里注入的是 `workflows:[…]` 形状（本函数恰好认的那种）——桩按实现假设塑形，
+ * 与真端点分歧不了（与 t260929-07 看板读取器同族：自证夹具）。故此处补 `result` 数组
+ * 一支，并在测试里钉**真端点回执形状**。
  */
 export function extractTemplateFacts(payload: unknown): { ok: true; facts: TemplateFact[] } | { ok: false; reason: string } {
   let list: unknown
@@ -46,6 +53,7 @@ export function extractTemplateFacts(payload: unknown): { ok: true; facts: Templ
   else if (typeof payload === 'object' && payload !== null) {
     const doc = payload as Record<string, unknown>
     if (Array.isArray(doc.workflows)) list = doc.workflows
+    else if (Array.isArray(doc.result)) list = doc.result // 真端点形状（260930 直修）
     else if (typeof doc.result === 'object' && doc.result !== null && Array.isArray((doc.result as Record<string, unknown>).workflows)) {
       list = (doc.result as Record<string, unknown>).workflows
     }

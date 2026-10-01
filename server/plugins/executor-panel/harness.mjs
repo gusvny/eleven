@@ -45,9 +45,12 @@ export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchB
         return
       }
       if ((workbenchStub || sameOriginWorkbench) && method === 'GET' && u.pathname === '/sandbar-workbench/api/wf/workflows') {
-        sendJson(res, 200, workflows ?? { workflows: [
-          { name: 'dev-lane', kind: 'dev', has_human_gate: true },
-          { name: 'inspection', kind: 'inspection', has_human_gate: false },
+        // 260930 直修（宿主令）：桩默认改成**真端点的形状** `{ok:true, result:[…]}`——
+        // 旧默认喂 `{workflows:[…]}`，恰是提取器认的那种 ⇒ 桩与真端点分歧不了，
+        // Grants 页签在生产恒降级而测试全绿（与 t260929-07 看板读取器同族）。
+        sendJson(res, 200, workflows ?? { ok: true, result: [
+          { id: 'dev-lane', name: 'dev-lane', kind: 'dev', has_human_gate: true },
+          { id: 'inspection', name: 'inspection', kind: 'inspection', has_human_gate: false },
         ] })
         return
       }
