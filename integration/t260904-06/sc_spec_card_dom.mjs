@@ -6,12 +6,16 @@
 // 三产物字符串契约；本场景只补 L1 锁不住的「payload→像素」真渲染面（若 JSX 运行时
 // 抛错/卡落错位/徽标算错/换行丢失/HTML 字符注入，只有真浏览器抓得住）：
 //   - T1 有 spec 票：.wb-d2-spec 恰 1 个、data-v=B、紧跟 .wb-d2-body 之后（正文卡
-//     正下方）、ttl 文本含「执行规格（spec）」、.cnt 徽标=spec.length+「 字」、
+//     正下方）、ttl 文本含 "Execution spec"、.cnt 徽标=spec.length+" chars"、
+//     （261001 integration 口径同步：宿主 260925 令「控制台 UI 界面文案一律英文」，
+//      本票的中文标签随 t260925-18 换成英文——契约意图「标题在场 + 徽标=全文字数」
+//      不变，只把被断言的字面量跟到实现面的英文文案上。）
 //     .txt 全文逐字保真（HTML 特殊字符以纯文本出现，零标签注入）、蓝左条 4px
 //     #0969da、white-space pre-wrap；
 //   - T2 无 spec 字段（老票）：卡整体不渲染，正文卡照旧，页面不崩；
-//   - T3 超长 spec：限高 260px 可滚动（overflow-y auto，scrollHeight>clientHeight
-//     且 clientHeight 收敛），全文仍在 DOM（badge 计全文长度）不撑爆抽屉；
+//   - T3 超长 spec：限高 260px 且内容**真可滚**（261001 口径同步：滚动容器可为卡片本身
+//     或内层 .txt，现行=t260925-18 落地后的 .txt；clientHeight 收敛不撑爆抽屉），
+//     全文仍在 DOM（badge 计全文长度）；
 //   - T4 全旅程零 pageerror / console.error。
 //
 // 分层纪律（防 intent 级重复）：本场景**无 S0 段**——bundle 字符串锁（wb-d2-spec
@@ -204,6 +208,12 @@ const domSpecCard = `(() => {
     whiteSpace: cs.whiteSpace,
     clientH: el.clientHeight,
     scrollH: el.scrollHeight,
+    // 261001（t260925-18 后口径同步）：spec 改走 markdown 渲染后，**滚动容器下移到 .txt**
+    // （.wb-d2-spec .txt{max-height:230px;overflow-y:auto}）——卡片自身不再溢出，
+    // 用户可感知行为（内容限高、区内可滚、抽屉不被撑爆）不变，故两层都量。
+    txtOverflowY: (() => { const t = el.querySelector('.txt'); return t ? getComputedStyle(t).overflowY : '' })(),
+    txtClientH: (() => { const t = el.querySelector('.txt'); return t ? t.clientHeight : 0 })(),
+    txtScrollH: (() => { const t = el.querySelector('.txt'); return t ? t.scrollHeight : 0 })(),
   };
 })()`
 const domSpecCount = `document.querySelectorAll('.wb-d2-spec').length`
@@ -242,9 +252,22 @@ async function scenarioSpecCard(page) {
   if (c.dataV !== 'B') return `data-v expected "B", got ${JSON.stringify(c.dataV)}`
   // 位置契约：正文卡正下方（钉顶区）——前一个兄弟恰为 wb-d2-body。
   if (!/\bwb-d2-body\b/.test(c.prevCls)) return `card must sit right below wb-d2-body, prev sibling class: ${JSON.stringify(c.prevCls)}`
-  if (!c.ttl.includes('执行规格（spec）')) return `ttl missing 执行规格（spec）: ${JSON.stringify(c.ttl)}`
-  if (c.cnt !== `${SPEC_A.length} 字`) return `badge expected "${SPEC_A.length} 字", got ${JSON.stringify(c.cnt)}`
-  if (c.txt !== SPEC_A) return `.txt text not verbatim (len ${c.txt.length} vs ${SPEC_A.length}; newline/escape loss?)`
+  if (!c.ttl.includes('Execution spec')) return `ttl missing "Execution spec": ${JSON.stringify(c.ttl)}`
+  if (c.cnt !== `${SPEC_A.length} chars`) return `badge expected "${SPEC_A.length} chars", got ${JSON.stringify(c.cnt)}`
+  // 261001 口径同步：spec 走 markdown 渲染（t260925-18「spec-markdown」）后，换行/空白会被
+  // 规范化——契约意图「**除了空白规范化之外不丢字**」不变，故按空白归一后逐字比对；
+  // 真丢字（如渲染层吃字符、转义面掉内容）照旧红。
+  const normWs = (t) => String(t).replace(/\s+/g, '')
+  const gotTxt = normWs(c.txt), wantTxt = normWs(SPEC_A)
+  if (gotTxt !== wantTxt) {
+    // 诊断面（261001 补）：报**第一处差异**的上下文，而不是只报长度——「少了 2 个字」
+    // 定位不到是哪 2 个（渲染层吃字符 / 转义面掉内容 / markdown 把某标记吃掉）。
+    let i = 0
+    while (i < Math.min(gotTxt.length, wantTxt.length) && gotTxt[i] === wantTxt[i]) i++
+    const win = (t, from) => JSON.stringify(t.slice(Math.max(0, from - 12), from + 20))
+    return `.txt content changed beyond whitespace normalisation (norm len ${gotTxt.length} vs ${wantTxt.length};`
+      + ` raw ${c.txt.length} vs ${SPEC_A.length}) — first diff at ${i}: got ${win(gotTxt, i)} want ${win(wantTxt, i)}`
+  }
   if (c.injected !== 0) return `HTML special chars leaked as elements: ${c.injected} injected tags inside card`
   if (c.borderLeftWidth !== '4px') return `blue bar width expected 4px, got ${JSON.stringify(c.borderLeftWidth)}`
   // 颜色断言：彩条走 var(--dsw-derive-accent, #0969da)。平台现在按主题派生
@@ -291,10 +314,20 @@ async function scenarioOversized(page) {
   await openDetail(page, FID_C)
   const c = await page.evaluate(domSpecCard)
   if (!c) return 'spec card missing on oversized fixture'
-  if (c.cnt !== `${SPEC_C.length} 字`) return `badge must count the full text (${SPEC_C.length}), got ${JSON.stringify(c.cnt)}`
+  if (c.cnt !== `${SPEC_C.length} chars`) return `badge must count the full text (${SPEC_C.length}), got ${JSON.stringify(c.cnt)}`
   if (c.maxHeight !== '260px') return `max-height expected 260px, got ${JSON.stringify(c.maxHeight)}`
   if (c.overflowY !== 'auto') return `overflow-y expected auto, got ${JSON.stringify(c.overflowY)}`
-  if (c.scrollH <= c.clientH) return `expected scrollable (scrollHeight ${c.scrollH} > clientHeight ${c.clientH})`
+  // 261001 口径同步（t260925-18）：滚动容器可以是卡片本身，也可以是卡片内层的 .txt
+  // （现行实现=后者：.wb-d2-spec .txt{max-height:230px;overflow-y:auto}）。用户可感知契约不变：
+  // **内容必须真能滚，且卡片高度必须收敛**（不撑爆抽屉）。
+  const cardScrolls = c.scrollH > c.clientH
+  const txtScrolls = (c.txtScrollH || 0) > (c.txtClientH || 0)
+  if (!cardScrolls) {
+    if (!(c.txtOverflowY === 'auto' || c.txtOverflowY === 'scroll')) {
+      return `expected a scroll container (card or .txt); card scrollH ${c.scrollH} <= clientH ${c.clientH}, .txt overflow-y ${JSON.stringify(c.txtOverflowY)}`
+    }
+    if (!txtScrolls) return `expected scrollable at some level (.txt scrollHeight ${c.txtScrollH} <= clientHeight ${c.txtClientH})`
+  }
   // 收敛面：未限高时 clientH 会是数千 px；限高生效则收敛在 260px+padding 量级。
   if (c.clientH > 320) return `card not height-contained (clientHeight ${c.clientH} > 320) — drawer blown open`
   return null
