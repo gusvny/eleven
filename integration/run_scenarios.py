@@ -4279,6 +4279,39 @@ def _acquire_run_lock():
     return fd
 
 
+#: 内层执行器标记（261001 递归护栏）：本执行器**给自己起的子进程**打这个标记；走
+#: `lib_env` 清理单点（`SANDBAR_INTEG_` 前缀在 NARROWING_ENV_PREFIXES 里）再起执行器的
+#: 调用方会把它与收窄面一起剥掉——所以「标记在场 + 收窄面在场」= 调用方**没清理**。
+INNER_RUN_ENV = "SANDBAR_INTEG_INNER_RUN"
+
+
+def _recursion_guard() -> bool:
+    """递归护栏（261001 实报：进程风暴）。返回 False=本轮拒绝开跑（fail-closed）。
+
+    病灶：场景/夹具自己再起执行器时**继承了外层的收窄面**（`SANDBAR_SCENARIO_ONLY`）⇒ 内层
+    又被收窄成同一面 ⇒ 把那个「自己会起执行器」的场景再跑一遍 ⇒ 无限递归、进程翻倍
+    （实测：`--only t260924-05-inspection-suite-ran-parity` 同一条命令 17 个并发、2 分钟内
+    起了 4 个批台，把整机资源吃掉）。
+
+    判据（精确到「没清理」而不是「有收窄面」）：`SANDBAR_INTEG_INNER_RUN` 在场（=本进程是某个
+    执行器的子进程）**且**收窄面在场。合法嵌套（`lib_env.clean_narrowing_env(extra={...})`
+    自己声明面，如 t260921-06 的内层 runner）两键都被剥掉 ⇒ 不触发。
+    命中=exit 2（调用方 bug 类的环境红）+ 具名文案，绝不静默开跑。"""
+    if not os.environ.get(INNER_RUN_ENV):
+        return True
+    narrow = [k for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS")
+              if os.environ.get(k)]
+    if not narrow:
+        return True
+    print("FAIL [__executor__] 递归护栏：内层执行器仍带着外层的收窄面（%s=%s）——"
+          "场景/夹具自己再起执行器时必须走 lib_env 清理单点（L12：先剥再按需注入）；"
+          "本层拒绝开跑（不静默、不递归）。若这是刻意嵌套，请用 "
+          "lib_env.clean_narrowing_env(extra={...}) 显式声明被测面。"
+          % (",".join(narrow), ",".join(str(os.environ.get(k))[:60] for k in narrow)),
+          flush=True)
+    return False
+
+
 def _cli(argv):
     """唯一 argv 解析点（t260913-03）：main() 缺省不读 sys.argv——既有注入式电池
     无参直调 rs.main() 必须字节兼容（全树无带参调用者：verify.yaml 的 integration.cmd
@@ -4294,6 +4327,12 @@ def _cli(argv):
     if "--print-surface-plan" in argv:
         i = argv.index("--print-surface-plan")
         return print_surface_plan(argv[i + 1] if i + 1 < len(argv) else "")
+    if not _recursion_guard():
+        print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+        return 2
+    # 本进程给**自己起的子进程**打标记（261001 递归护栏）：任何「场景→执行器」的内层调用
+    # 若走了 lib_env 清理单点，这个标记会被剥掉；没剥掉=没清理 ⇒ 内层拒绝开跑。
+    os.environ[INNER_RUN_ENV] = str(os.getpid())
     # --reprobe（t260917-09）：探针出口自带单飞锁获取（reprobe_main 内），故在
     # 通用锁获取之前分流；名单 CSV 逗号分隔（注册表名=[a-z0-9-] 族 slug）。
     if "--reprobe" in argv:
