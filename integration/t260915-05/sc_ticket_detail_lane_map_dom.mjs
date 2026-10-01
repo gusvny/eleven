@@ -474,22 +474,37 @@ async function withMap(page, name, fn) {
 
 async function scenarioLaneMapFork(page) {
   return withMap(page, 'L1', async (inv) => {
-    const text = inv.map(x => `${x.text} ${x.title}`).join(' | ')
-    for (const label of ['实现', '设计集成测试', '仲裁', '验收走查', '做方案', '合并']) {
-      if (!text.includes(label)) return `泳道图缺拓扑标签「${label}」（标签须全部来自拓扑）：${text.slice(0, 260)}`
+    // 261001 口径同步（宿主 260925「控制台 UI 界面文案一律英文」令，t260925-18）：
+    // 段名不再回显拓扑里的中文 label，而是经 `ui-labels.stageDisplayLabel(id)` 由**段 id**
+    // 映射成英文（`实现→Implement`、`做方案→Create Plan`…）。原判据「图上出现这些中文标签」
+    // 因此永不成立。契约意图「图面节点**全部来自拓扑**（不硬编码、不额外造段）」不变，
+    // 故改按 **data-id** 认身份（DOM 契约 data-id 已是既有形状），并加一条映射已应用的证据：
+    // 已知段 id 的可见标签**不得**再等于夹具里的中文 label（否则=映射没生效/页面上跑的是旧 bundle）。
+    const nodes = inv.filter(x => /wb-lm-node/.test(String(x.cls)) && x.dataId)
+    const ids = [...new Set(nodes.map(x => x.dataId))]
+    for (const id of ['create_plan', 'review_plan', 'implement', 'design_integration_tests',
+      'ui_evidence', 'run_integration_tests', 'arbitrate', 'acceptance_walkthrough',
+      'merge_check', 'merge']) {
+      if (!ids.includes(id)) return `泳道图缺拓扑段 id=${id}（节点 id 集=${JSON.stringify(ids)}）`
     }
-    // 并行双道虚线框 ×2（.wb-lm-parallel[data-group]，各自含双分支成员）
+    const cnLabels = ['实现', '设计集成测试', '仲裁', '验收走查', '做方案', '合并']
+    const leaked = nodes.filter(n => cnLabels.some(c => String(n.text).includes(c))).map(n => n.dataId)
+    if (leaked.length) {
+      return `段名未走 id→英文映射（仍回显夹具中文 label）：${JSON.stringify([...new Set(leaked)])}`
+    }
+    // 并行双道虚线框 ×2（.wb-lm-parallel[data-group]，各自含双分支成员）——按成员 id 认
     const groupish = inv.filter(x => /wb-lm-parallel|group/i.test(x.cls) || x.dataGroup)
-    const g1 = groupish.filter(x => x.text.includes('实现') && x.text.includes('设计集成测试'))
-    const g2 = groupish.filter(x => x.text.includes('仲裁') && x.text.includes('验收走查'))
+    const inGroup = (el, a, b) => `${el.text} ${el.title}`.includes(a) || `${el.text} ${el.title}`.includes(b)
+    const g1 = groupish.filter(x => inGroup(x, 'Implement', 'Design Integration Tests'))
+    const g2 = groupish.filter(x => inGroup(x, 'Arbitrate', 'Acceptance Walkthrough'))
     if (!g1.length || !g2.length) {
       return `并行双道虚线框缺席（组语义元素：${JSON.stringify(groupish).slice(0, 220)}）`
     }
-    // 人门虚线圈（merge kind=human：data-kind 契约＋👤 视觉词同族）
+    // 人门虚线圈（merge kind=human：data-kind 契约）
     const humanish = inv.filter(x => x.dataKind === 'human')
     if (!humanish.length) return `人门虚线圈缺席（merge 无 data-kind=human 标记）`
-    if (!humanish.some(x => `${x.text} ${x.title}`.includes('合并'))) {
-      return `人门标记未落在合并节点：${JSON.stringify(humanish).slice(0, 200)}`
+    if (!humanish.some(x => x.dataId === 'merge')) {
+      return `人门标记未落在 merge 节点：${JSON.stringify(humanish).slice(0, 200)}`
     }
     // 单向流守卫（组件头注点名的对抗断言）：返工弧类恒零
     const arcs = await page.evaluate(domArcCount)
@@ -591,7 +606,8 @@ async function scenarioRounds(page) {
 async function scenarioClosedVisible(page) {
   return withMap(page, 'L5', async (inv) => {
     const text = inv.map(x => `${x.text} ${x.title}`).join(' | ')
-    for (const label of ['做方案', '合并检查', '合并']) {
+    // 261001：段名走 id→英文映射，故按 id 认（原中文 label 断言见 L1 的说明）
+    for (const label of ['Create Plan', 'Merge Check', 'Merge']) {
       if (!text.includes(label)) return `关单票泳道图缺节点「${label}」（KI-027：关单后全图可见）`
     }
     if (!/×\s*\d/.test(text) && !inv.some(x => x.cls.includes('wb-lm-badge'))) {
@@ -607,10 +623,16 @@ async function scenarioClosedVisible(page) {
 async function scenarioGenerality(page) {
   return withMap(page, 'L6', async (inv) => {
     const text = inv.map(x => `${x.text} ${x.title}`).join(' | ')
-    for (const label of ['夹具段一', '夹具段二']) {
+    // 261001 口径同步：`ui-labels` 的成文规则是「未知 id 回落原始标识本身（永不空白、永不中文）」，
+    // 故外部模板的自定义段（id=fx_step_one/two，不是 dev-lane 段）**图上应显示 id 原文**，
+    // 而不是拓扑里的中文 label。这一条比原来更强：它同时证明「渲染器由拓扑驱动（认外部 id）」
+    // 与「未知 id 的回落规则生效」。
+    for (const label of ['fx_step_one', 'fx_step_two']) {
       if (!text.includes(label)) return `另一模板拓扑未按拓扑标签渲染（缺「${label}」）`
     }
-    for (const biz of ['做方案', '审方案', '合并检查']) {
+    // 零业务词契约（261001 双语加强）：外部拓扑上不得出现 dev-lane 的段名——中文 label 与
+    // 现行英文段名**都要**不出现（否则=渲染器把 dev-lane 段名硬编码进图面）。
+    for (const biz of ['做方案', '审方案', '合并检查', 'Create Plan', 'Review Plan', 'Merge Check']) {
       if (text.includes(biz)) return `渲染器泄漏 dev-lane 业务词「${biz}」（零业务词契约）`
     }
     return null
