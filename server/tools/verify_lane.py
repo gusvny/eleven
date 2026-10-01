@@ -98,6 +98,20 @@ def _check(name, items):
     return {'check': name, 'level': 'red' if items else 'green', 'items': items}
 
 
+def _note(msg):
+    """给人看的备注一律走 **stderr**（261001 实证，KI-172）。
+
+    为什么不是 stdout：本模块经 `admin.py call verify_lane` **进程内**执行
+    （`tools_registry.call` → `tools[name].run(args)`），而引擎活动把 admin 的
+    **stdout 当 JSON 信封**解析（`json.loads(p_stdout)`）。任何一行 stdout 备注都会
+    插在信封之前 ⇒ 信封解析失败 ⇒ 闸回执变成「no receipt (gate error: verify_lane integ
+    produced no valid output)」，**一整轮真跑出来的结果全被丢掉**（t261001-10 第 9 轮
+    实案：135 ran / 116 pass / 5 env-red 那一轮就是这么丢的）。
+    stdout = 机器通道（只放信封）；人话一律 stderr。"""
+    sys.stderr.write(str(msg) + "\n")
+    sys.stderr.flush()
+
+
 def _sh(cmd, cwd, timeout=300, crop=2000):
     """跑命令并把输出裁到最后 crop 字节（detail 供人读）。
     逐行解析文件清单的调用必须传 crop=None：按字节裁剪会把首行裁成半截路径——
@@ -1282,9 +1296,8 @@ def _integ(args):
     _self_drop = sorted(_self_face & set(baseline_targeted))
     if _self_drop:
         baseline_targeted = [n for n in baseline_targeted if n not in _self_face]
-        print("BASELINE_SELF_NARROW_DROP 基线点名里含本层正在跑的面（%s）——摘掉这几个名字改整跑："
-              "自指收窄会让内层再跑同一个面（261001 自递归风暴根因面）" % ",".join(_self_drop),
-              flush=True)
+        _note("BASELINE_SELF_NARROW_DROP 基线点名里含本层正在跑的面（%s）——摘掉这几个名字改整跑："
+              "自指收窄会让内层再跑同一个面（261001 自递归风暴根因面）" % ",".join(_self_drop))
     baseline_env_extra = ({'SANDBAR_SCENARIO_ONLY': ','.join(baseline_targeted),
                            'INTEG_RUN_DEPTH': _depth_now}
                           if baseline_targeted else None)
@@ -1473,15 +1486,15 @@ def _integ(args):
                              'stdout (observation only; no judging change)\n' % reuse_n)
             sys.stderr.flush()
         if reuse_n > 0:
-            print('REUSE %d of %s scenario(s) verified by ledger reuse at commit %s '
+            _note('REUSE %d of %s scenario(s) verified by ledger reuse at commit %s '
                   '(not executed: same commit + env_fp + width green row)'
                   % (reuse_n, _expected_n if _expected_n is not None else '?',
-                     lane_head or '?'), flush=True)
+                     lane_head or '?'))
         if _out['reuse']['all_reused']:
-            print('REUSE_FULL_ROUND this round executed NOTHING: every one of the %d '
+            _note('REUSE_FULL_ROUND this round executed NOTHING: every one of the %d '
                   'registered scenario(s) was reused from the ledger at commit %s — a '
                   'green receipt here means "already verified at this exact tree", not '
-                  '"verified again"' % (reuse_n, lane_head or '?'), flush=True)
+                  '"verified again"' % (reuse_n, lane_head or '?'))
 
     # ---------------- t260922-12 写账（①⑦）+ 回执面 ----------------
     # lane 行 + 基线行一次成批；记账面≠判定面——写失败不翻 green，但必须响亮

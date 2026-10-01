@@ -853,6 +853,74 @@ def lint_narrowing_env_inheritance():
         return
     ok("L12 收窄旋钮继承看守：%d 处起执行器/闸的调用点全部走清理单点（lib_env）" % len(sites))
 
+# ---- L13 工具面 stdout 通道（261001：verify_lane 的 stdout 备注把闸回执整轮打掉）----
+#: 经 `admin.py call <tool>` **进程内**执行、且引擎把 admin 的 stdout 当 JSON 信封解析的工具。
+#: 判据：这些模块里出现任何「能落到 stdout 的裸 print」= 信封被污染 ⇒ `json.loads` 失败 ⇒
+#: 那一轮真跑出来的结果全丢（t261001-10 第 9 轮实案：135 ran / 116 pass / 5 env-red 的
+#: 一轮变成 "no receipt (gate error: verify_lane integ produced no valid output)"）。
+L13_INPROC_TOOLS = ("server/tools/verify_lane.py",)
+#: 允许的出口：stderr 备注助手（`_note(...)`）——人话走 stderr，stdout 只放信封。
+L13_NOTE_HELPER = "_note("
+
+
+def _l13_bare_stdout_prints(text):
+    """返回裸 print 的行号（把括号前的续行参数也算进来判 `file=`；`print(` 后紧跟括号内的
+    参数里出现 `file=` 即视为走了 stderr）。"""
+    out, lines = [], text.splitlines()
+    for i, line in enumerate(lines):
+        if not re.match(r"\s*print\(", line):
+            continue
+        # 收集本 print 调用的整段（最多追 6 行或到括号配平）
+        depth, buf = 0, []
+        for j in range(i, min(i + 8, len(lines))):
+            buf.append(lines[j])
+            depth += lines[j].count("(") - lines[j].count(")")
+            if depth <= 0:
+                break
+        blob = "\n".join(buf)
+        if "file=" in blob:
+            continue
+        out.append(i + 1)
+    return out
+
+
+def lint_tool_stdout_channel():
+    """L13：进程内工具模块不得把备注打到 stdout（人话一律 stderr / `_note`）。"""
+    for rel in L13_INPROC_TOOLS:
+        f = REPO / rel
+        if not f.exists():
+            err("L13 %s 缺席——stdout 通道判据无法判定（fail-closed）" % rel)
+            return
+        txt = f.read_text(encoding="utf-8")
+        bare = _l13_bare_stdout_prints(txt)
+        # 自证（不碰真树）：合成犯例必被抓、stderr 形态必放行、多行 file= 形态必放行
+        fake_bad = "def f():\n    print('note')\n"
+        fake_ok = "def f():\n    print('note', file=sys.stderr)\n"
+        fake_multi = "def f():\n    print('note %s' % x,\n          file=sys.stderr)\n"
+        proof = []
+        if _l13_bare_stdout_prints(fake_bad) != [2]:
+            proof.append("合成犯例没被抓")
+        if _l13_bare_stdout_prints(fake_ok):
+            proof.append("stderr 形态被误报")
+        if _l13_bare_stdout_prints(fake_multi):
+            proof.append("多行 file= 形态被误报")
+        if proof:
+            err("L13 自证失败（看守没牙）：%s" % "；".join(proof))
+            return
+        if bare:
+            err("L13 进程内工具把备注打到了 stdout（%s 第 %s 行）——`admin.py call` 的信封会"
+                "被这行污染，引擎 `json.loads(stdout)` 直接失败，那一轮的闸结果整轮被丢"
+                "（t261001-10 第 9 轮实案）；修法：人话走 `%s`（stderr）"
+                % (rel, ",".join(str(x) for x in bare[:8]), L13_NOTE_HELPER))
+            return
+        if L13_NOTE_HELPER not in txt:
+            err("L13 %s 里找不到 stderr 备注出口 %s——本判据的「允许出口」被改名/删除，"
+                "判据形同虚设，请同步" % (rel, L13_NOTE_HELPER))
+            return
+    ok("L13 工具面 stdout 通道：%d 个进程内工具模块零裸 print（人话走 %s→stderr）"
+       % (len(L13_INPROC_TOOLS), L13_NOTE_HELPER))
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -865,6 +933,7 @@ def main():
     lint_console_no_open()
     lint_integration_gate_settlement()
     lint_narrowing_env_inheritance()
+    lint_tool_stdout_channel()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0
