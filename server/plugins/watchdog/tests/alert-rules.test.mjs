@@ -50,6 +50,27 @@ const spec = (rule, level) => ({ rule, target: 't1', level, title: 'x' })
   assert(j4.key === makeKey('stall', 't2'), 'key shape rule:target')
   n += 5
 }
+// 实例隔离域（t261001-19 缺陷 B 回归钉）：scope 进 key；临时 home 与真宿主互不静音；
+// 空/缺 scope 保持历史形状（旧账重放兼容）。
+{
+  assert(makeKey('r', 't', '/a') === 'r:t@/a', 'scoped key shape rule:target@scope')
+  assert(makeKey('r', 't') === 'r:t' && makeKey('r', 't', '') === 'r:t', 'missing/empty scope keeps historical key shape')
+  const state = new Map()
+  const clockAt = 1_700_000_000_000
+  const sa = { rule: 'executor_session_refused', target: 'sandbar', level: 'redline', title: 'x', scope: '/tmp/scene-home' }
+  const j1 = judgeAlert(baseCfg, sa, state, clockAt, 60_000)
+  assert(j1.record === true && j1.key === 'executor_session_refused:sandbar@/tmp/scene-home', 'scoped alert records with scoped key')
+  applyDedupe(state, j1.key, clockAt)
+  const sb = { ...sa, scope: '/Users/user/.dsh' }
+  const j2 = judgeAlert(baseCfg, sb, state, clockAt + 1000, 60_000)
+  assert(j2.record === true, 'same rule+target from a different instance scope still records (temp-home must not mute real host)')
+  applyDedupe(state, j2.key, clockAt + 1000)
+  const j3 = judgeAlert(baseCfg, sa, state, clockAt + 2000, 60_000)
+  assert(j3.record === false, 'same scope within cooldown stays deduped')
+  const j4 = judgeAlert(baseCfg, { rule: 'executor_session_refused', target: 'sandbar', level: 'redline', title: 'x' }, state, clockAt + 3000, 60_000)
+  assert(j4.record === true && j4.key === 'executor_session_refused:sandbar', 'unscoped (legacy) key independent of scoped keys')
+  n += 6
+}
 // 重放重建：重启不重播 12 小时；畸形行不入状态；保留窗外的行不进。
 {
   const now = 1_700_100_000_000

@@ -70,7 +70,13 @@ export function judgeExecutor(
       evidence: `有信号但 ${Math.round(silentMs / 60_000)} 分钟无推进（阈值 ${stallMinutes} 分钟；进展=账本/会话文件/唤醒三源任一），墙钟只作偏宽兜底`,
     }
   }
-  return { ...base, evidence: `无新推进但未达阈值（静默 ${Math.round(silentMs / 60_000)} < ${stallMinutes} 分钟）` }
+  // t261001-19 缺陷 A：宽限拍显式声明 state='advancing'（不再隐式吃 base 默认值）。
+  // 语义 =「有信号但在停摆宽限窗内」；state==='advancing' 在这里**不**意味着时钟可以
+  // 重新起算——静默计时以 last_progress_at 为准，由调用方从返回值回灌（core 侧修复）。
+  return {
+    ...base, state: 'advancing',
+    evidence: `无新推进但未达阈值（静默 ${Math.round(silentMs / 60_000)} < ${stallMinutes} 分钟）`,
+  }
 }
 
 /** 心跳文件的读写形状（io 注入；坏/缺文件显式 stale，不静默当新鲜）。 */

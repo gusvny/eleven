@@ -194,6 +194,9 @@ export function alertRecord(spec: AlertSpec, key: string, at: number, nightMuted
   return {
     at, key, rule: spec.rule, target: spec.target, level: spec.level,
     title: spec.title, detail: spec.detail ?? '', night_muted: nightMuted,
+    // 实例隔离域（t261001-19）：scope 随账落盘（缺省不落，保持历史行形状）——
+    // 审计面能答「这条报警是哪个 DSH_HOME 实例响的」。
+    ...(spec.scope !== undefined && spec.scope !== '' ? { scope: spec.scope } : {}),
     // 未答复 ≠ 已答：记录只有追加，没有任何「已答/自动处置」状态位——提醒不变成决定。
   }
 }

@@ -20,6 +20,10 @@ export interface AlertSpec {
   level: AlertLevel
   title: string
   detail?: string
+  /** 实例隔离域（t261001-19）：同一台机器上不同 DSH_HOME（如临时 home 的场景实例）
+   *  与真宿主必须各自独立节流——临时 home 的一次报警不得静音真宿主 12 小时。
+   *  缺省/空串 = 不隔离（保持历史 key 形状，旧账重放兼容）。 */
+  scope?: string
 }
 
 export interface AlertRecord extends AlertSpec {
@@ -28,9 +32,10 @@ export interface AlertRecord extends AlertSpec {
   night_muted: boolean
 }
 
-/** dedupe key：规则名 + 对象。同一规则对不同对象各自独立节流。 */
-export function makeKey(rule: string, target: string): string {
-  return `${rule}:${target}`
+/** dedupe key：规则名 + 对象（+ 可选实例隔离域）。不同对象/不同隔离域各自独立节流。
+ *  隔离域缺省时保持历史形状 `rule:target`（旧账重放兼容）；有隔离域为 `rule:target@scope`。 */
+export function makeKey(rule: string, target: string, scope?: string): string {
+  return scope === undefined || scope === '' ? `${rule}:${target}` : `${rule}:${target}@${scope}`
 }
 
 /** "HH:MM" → 当日分钟数。 */
@@ -92,7 +97,7 @@ export function judgeAlert(
   nowMs: number,
   cooldownMs?: number,
 ): { record: boolean; key: string; night_muted: boolean } {
-  const key = makeKey(spec.rule, spec.target)
+  const key = makeKey(spec.rule, spec.target, spec.scope)
   const record = cooldownExpired(state, key, nowMs, cooldownMs)
   return { record, key, night_muted: nightMuted(cfg, spec, nowMs) }
 }

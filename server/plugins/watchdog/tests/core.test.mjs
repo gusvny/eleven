@@ -31,6 +31,8 @@ function makeDeps({ clock, boardRows = [], ledgerLines = [], alertLines = [], wa
     now: clock.now,
     dataDir: '/memdata',
     ledgerDir: '/ledg',
+    // t261001-19：dedupe key 带实例隔离域——测试统一注入固定 DSH_HOME，scope 可预测。
+    configDirEnv: { DSH_HOME: '/memhome' },
   })
   return { w, files, core }
 }
@@ -70,7 +72,7 @@ function makeDeps({ clock, boardRows = [], ledgerLines = [], alertLines = [], wa
   assert(w.status().startup.missing_rows === 2, 'missing rows counted on startup replay')
   await w.tickOnce()
   const keys = w.status().alerts.filter(a => a.rule === 'ledger_missing_rows').map(a => a.key)
-  assert(keys.length === 1 && keys[0] === 'ledger_missing_rows:sandbar:2', 'same N does not re-alert (one beep discipline)')
+  assert(keys.length === 1 && keys[0] === 'ledger_missing_rows:sandbar:2@/memhome', 'same N does not re-alert (one beep discipline)')
   w.dispose(); n += 2
 }
 // ④ 唤醒链：启动重放不醒旧行；新迁移行醒一次；无新行不重醒。
@@ -149,7 +151,7 @@ function makeDeps({ clock, boardRows = [], ledgerLines = [], alertLines = [], wa
 // ⑦ 重启不重播：预置 alerts（1h 前 stall）→ start 后去重集含该 key，同事实不重响。
 {
   const clock = fakeClock()
-  const alertLine = JSON.stringify({ at: clock.now() - 3600_000, key: 'stall:executor-sb', rule: 'stall', target: 'executor-sb', level: 'redline', title: 'old', detail: '', night_muted: false })
+  const alertLine = JSON.stringify({ at: clock.now() - 3600_000, key: 'stall:executor-sb@/memhome', rule: 'stall', target: 'executor-sb', level: 'redline', title: 'old', detail: '', night_muted: false })
   const { w } = makeDeps({
     clock, ledgerLines: [ledgerLine({ seq: 1, ticket: 't1' })], boardRows: [{ id: 't1' }], alertLines: [alertLine], sessionAdvanced: false,
   })

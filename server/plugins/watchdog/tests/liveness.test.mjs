@@ -27,6 +27,21 @@ const M = 60_000
   assert(r3.state === 'stalled', 'host-sleep long jump with signal still judged by progress rule (no false kill on bare clock alone)')
   n += 3
 }
+// 宽限拍不得重置静默计时（t261001-19 缺陷 A 回归钉）：调用方按返回的 last_progress_at
+// 回灌基准点时，静默分钟数必须单调增长直至 stalled（每拍清零 = stall 永不可达）。
+{
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null }
+  const base = NOW - 60_000
+  let r = judgeExecutor(sig, NOW, 15, base)
+  let last = r.last_progress_at
+  r = judgeExecutor(sig, NOW + 5 * M, 15, last)
+  last = r.last_progress_at
+  assert(r.state === 'advancing' && r.evidence.includes('静默 6'), 'grace tick silence grows (6 min) across ticks')
+  assert(last === base, 'grace tick does NOT move last_progress_at (no clock reset)')
+  r = judgeExecutor(sig, NOW + 16 * M, 15, last)
+  assert(r.state === 'stalled', 'feedback loop reaches stalled once silence passes threshold')
+  n += 3
+}
 // 无信号 vs missing 分开报。
 {
   const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: null, lastWakeAt: null }

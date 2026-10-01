@@ -159,6 +159,7 @@ export class Watchdog {
   private disposed = false
   private inFlight = false
   private aborted = false
+  private configDirEnv: NodeJS.ProcessEnv | undefined
 
   private dedupe: DedupeState = new Map()
   private ledgerRows: LedgerRow[] = []
@@ -184,6 +185,7 @@ export class Watchdog {
 
   constructor(project: string, deps: WatchdogDeps = {}) {
     this.project = project
+    this.configDirEnv = deps.configDirEnv
     this.io = deps.io ?? defaultIo
     this.now = deps.now ?? Date.now
     this.boardReader = deps.boardReader ?? (async () => ({ ok: false, rows: [], error: 'boardReader 未注入（实现期由 node.ts 提供 engine client.py spawn）' }))
@@ -279,12 +281,23 @@ export class Watchdog {
     }
   }
 
+  /** 实例隔离域（t261001-19）：dedupe key 必须带 DSH_HOME 派生的 scope——同一台机器上
+   *  临时 home 的场景实例与真宿主共享 alerts.jsonl 时，不得互相静音（真机 261001 实证：
+   *  临时 home 一次报警把真宿主 18 次 refused 静音 12 小时）。 */
+  private instanceScope(): string {
+    const env = this.configDirEnv ?? process.env
+    return env.DSH_HOME || join(env.HOME || '', '.dsh')
+  }
+
   /** 落一条 alert（去重判定 → 落账 → 更新去重状态；夜间只影响发声不影响落账）。 */
   private async raise(spec: AlertSpec): Promise<void> {
     const nowMs = this.now()
-    const judged = judgeAlert(this.cfg.config, spec, this.dedupe, nowMs)
+    // scope：调用方未显式指定时统一按本实例隔离域隔离（口径一处定，全部规则生效）。
+    const scoped = spec.scope ?? this.instanceScope()
+    const full: AlertSpec = scoped === '' ? spec : { ...spec, scope: scoped }
+    const judged = judgeAlert(this.cfg.config, full, this.dedupe, nowMs)
     if (!judged.record) return
-    const rec = alertRecord(spec, judged.key, nowMs, judged.night_muted)
+    const rec = alertRecord(full, judged.key, nowMs, judged.night_muted)
     try {
       await this.io.appendAlerts(this.alertsPath(), JSON.stringify(rec))
     } catch (e) {
@@ -397,7 +410,12 @@ export class Watchdog {
         { sessionKnown: sid !== '', ledgerAdvanced, sessionProgress: sstat.advanced, lastWakeAt: this.wakes.length > 0 ? this.wakes[this.wakes.length - 1].at : null },
         nowMs, this.cfg.config.stall_minutes, this.lastProgressAt,
       )
-      if (this.liveness.state === 'advancing') this.lastProgressAt = nowMs
+      // t261001-19 缺陷 A 修复：基准点从判活结果的 last_progress_at 回灌——判活只在
+      // 真有进展（账本/会话文件/唤醒任一）时才把基准点拨到本拍。旧写法按
+      // state==='advancing' 刷新，而「无推进但未达阈值」的宽限拍也是 advancing ⇒
+      // 每拍把静默计时清零 ⇒ silentMs 永远从 0 重新起算 ⇒ stall 分支不可达（stall
+      // 规则在红线名单里却永远不可能响——挂死/死透的 executor 被永久报成健康）。
+      this.lastProgressAt = this.liveness.last_progress_at
       if (this.liveness.state === 'stalled') {
         await this.raise({ rule: 'stall', target: sid, level: 'redline', title: `executor 停摆（${sid}）`, detail: this.liveness.evidence })
       }
