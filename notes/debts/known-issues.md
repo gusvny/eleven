@@ -3005,3 +3005,30 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **未做（open）**：①毒名已由修法自然排空（下一轮面里不再出现），但**工作流状态里已存的毒名**
 > 是否需要一个显式的「面成员形状校验」在 `_tests_red_names`/面计划处拦一道（现由 `__` 前缀
 > 剔除间接兜住），待定；②`t2209xx` 类老票若也踩过同形（票面里出现过长句红名），须回扫一遍。
+
+## KI-172 进程内工具的 stdout 备注污染 admin 的 JSON 信封 ⇒ **整轮闸结果被丢**（261001 实报，同日修并登记；与 KI-171 同属「输出形状也是契约」族，但坏的是**通道**不是名字）
+> **模式**：引擎活动跑 `python3 server/admin.py call verify_lane <payload>`，而
+> `tools_registry.call` 是**进程内**执行（`tools[name].run(args)`）⇒ 工具里的 `print(...)`
+> 备注与 admin 自己那行 JSON 信封**同流 stdout** ⇒ 引擎 `json.loads(admin_stdout)` 失败 ⇒
+> 回执退化成「no receipt (gate error: verify_lane integ produced no valid output)」。
+> **实况损失是整轮的**：t261001-10 第 9 轮其实真跑了（`out/integration-report-261001-133242.json`：
+> 135 ran / 116 pass / 14 fail / 5 env-red / 面 191 名），票面却写 `0 ran` 且卡在 blocked；
+> 同一轮的耗时（~17 分钟）全部白烧。
+> **触发条件**：verify_lane 里任何一行 stdout 备注走到——实测三处：`BASELINE_SELF_NARROW_DROP`
+> （我 c5ea3dd 新加的，收窄轮几乎必触发）、`REUSE` / `REUSE_FULL_ROUND`（存量债，全复用轮触发）。
+> **什么样的改动会踩**：给进程内工具加 `print` 诊断（哪怕只是「给人看」的一行）；或把
+> `_note` 之类的 stderr 出口改回 `print`。
+> **已落 main 的修法**：①新增 `_note()`（stderr + flush）作为 verify_lane 唯一的人话出口，
+> 三处备注全改；模块内零裸 print。②lint **L13 工具面 stdout 通道**：进程内工具模块出现任何能落
+> stdout 的裸 print = error，带三条自证（合成犯例必抓、`file=sys.stderr`/多行 `file=` 必放行、
+> 「允许出口 `_note(` 仍存在」防止判据被改名后静默失效）。③回归
+> `integration/tests/test_t261001_tool_stdout_channel.py`（3 条：`_note` 只落 stderr / 零裸 print
+> 且复用 L13 判据 / `admin.py call verify_lane` 的 stdout 能整体 `json.loads`）。
+> **全族排查**：`server/tools/*.py` 里所有带 `TOOL`+`run(args)` 的进程内工具面逐个扫裸 print——
+> 除 verify_lane 外只有 `ticket.py`/`workflow.py` 命中，逐条核过：都在各自的 `_cli`/`__main__`
+> 出口（那是它们**自己**作为子进程时的信封，正确）或已带 `file=sys.stderr` ⇒ 真缺口只此一处。
+> **纪律**：**stdout = 机器通道，stderr = 人话**。凡「进程内被 registry 调用」的工具，加任何
+> 打印前先问：这行会不会跑到 admin 的信封前面？会 ⇒ 走 `_note`/stderr。
+> **未做（open）**：①`admin.py` 侧是否该在 `cmd_call` 里把工具自身的 stdout 重定向到 stderr
+> （结构性兜底，比逐模块纪律更硬）——待定，属于引擎面改动；②引擎那条「no valid output」错误
+> 文案应把 `stderr` 尾部也带上（现在只带 stdout 尾部，诊断被引向错误方向）。
