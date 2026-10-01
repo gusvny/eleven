@@ -109,12 +109,19 @@ function activeName(project: string): string {
   return `${project}.jsonl`
 }
 
+/** 活动文件名形状（t261001-12）：缺省=平铺 `<project>.jsonl`（env 缝/注入目录的
+ *  既有语义）；opts.activeFile 在场=逐项目目录形状的固定文件名 events.jsonl。 */
+export interface TailerOpts {
+  activeFile?: string
+}
+
 export class LedgerTailer {
   state: TailState = freshTailState()
   private readonly dir: string
   private readonly project: string
   private readonly io: TailIo
   private readonly seenCap: number
+  private readonly activeFile: string | undefined
 
   constructor(
     dir: string,
@@ -122,15 +129,17 @@ export class LedgerTailer {
     io: TailIo,
     /** 已见 idem 集的有界加速上限（照 event_ledger.py 的 FIFO 逐出语义，纯加速器：逐出只可能多一次全查，不会错压制）。 */
     seenCap = 4096,
+    opts?: TailerOpts,
   ) {
     this.dir = dir
     this.project = project
     this.io = io
     this.seenCap = seenCap
+    this.activeFile = opts?.activeFile
   }
 
   private activePath(): string {
-    return `${this.dir}/${activeName(this.project)}`
+    return `${this.dir}/${this.activeFile ?? activeName(this.project)}`
   }
 
   /** 一轮增量拉取。任何 io 失败 → unreadable 带原因，状态不动（下轮重试），绝不冒充读到 EOF。 */

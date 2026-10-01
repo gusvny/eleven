@@ -15,7 +15,7 @@
 import { appendFile, mkdir, readFile, writeFile, stat, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { loadWatchdogConfig, watchdogDataDir, type ResolvedConfig } from './config.ts'
+import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, type ResolvedConfig } from './config.ts'
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
 import { compareStates, countMissingRows, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
@@ -198,16 +198,26 @@ export class Watchdog {
     this.dataDir = deps.dataDir ?? watchdogDataDir(deps.configDirEnv ?? process.env)
     this.ledgerDirOpt = deps.ledgerDir
     this.cfg = (deps.configLoader ?? ((k, env) => loadWatchdogConfig(k, env)))(project, deps.configDirEnv)
-    this.tailer = new LedgerTailer(this.ledgerDir(), project, this.io.tail)
+    this.tailer = new LedgerTailer(this.ledgerDir(), project, this.io.tail, 4096, this.tailerOpts())
   }
 
   private ledgerDir(): string {
-    // 引擎账本目录（event_ledger.py 同源：注入 > env > <repo>/server/ledger）。
+    // 引擎账本目录（t261001-12 与 event_ledger.py 同源：注入 > env 平铺缝 >
+    // <projects_root>/<project>/ledger —— 活动文件名由事件账本文件路径给出，
+    // 缺省 events.jsonl、平铺缝 <project>.jsonl，两种形状见 config.eventLedgerFile）。
     if (this.ledgerDirOpt) return this.ledgerDirOpt
     const env = process.env
-    return env.SANDBAR_EVENT_LEDGER_DIR || join(env.SANDBAR_REPO || '', 'server', 'ledger')
+    return env.SANDBAR_EVENT_LEDGER_DIR || join(projectsRoot(env), this.project, 'ledger')
   }
   private ledgerDirOpt: string | undefined
+
+  /** 活动文件名形状（t261001-12，与 event_ledger.ledger_path 两种形状对齐）：
+   *  注入目录 / env 平铺缝 = `<project>.jsonl`（返回空 opts）；缺省逐项目目录
+   *  = 固定 events.jsonl。 */
+  private tailerOpts(): { activeFile?: string } {
+    if (this.ledgerDirOpt || process.env.SANDBAR_EVENT_LEDGER_DIR) return {}
+    return { activeFile: 'events.jsonl' }
+  }
 
   private get cfgEnabled(): boolean {
     return this.cfg.declared && this.cfg.enabled && this.cfg.config_error === null
@@ -227,7 +237,7 @@ export class Watchdog {
     if (!this.cfgEnabled) { this.phase = this.cfg.config_error ? 'config_error' : 'stopped'; return }
     this.phase = 'full_reconcile'
     // 账本全量重放（水位从零开始——不信任内存）。
-    this.tailer = new LedgerTailer(this.ledgerDir(), this.project, this.io.tail)
+    this.tailer = new LedgerTailer(this.ledgerDir(), this.project, this.io.tail, 4096, this.tailerOpts())
     const replay: LedgerRow[] = []
     for (;;) {
       const out = await this.tailer.poll()
@@ -443,7 +453,7 @@ export class Watchdog {
       config_provenance: this.cfg.provenance,
       heartbeat: { last_beat: null, age_seconds: null, alive: false, reason: 'status() 不读盘（心跳由 readHeartbeat 在 node.ts 路由面读）' },
       ledger: {
-        path: `${this.ledgerDir()}/${this.project}.jsonl`,
+        path: eventLedgerFile(this.project, process.env),
         watermark_offset: this.tailer.state.offset,
         rows_seen: this.tailer.state.rowsSeen,
         dupes_skipped: this.tailer.state.dupesSkipped,

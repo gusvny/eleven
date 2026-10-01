@@ -1,7 +1,15 @@
 """Event ledger（工单 t260928-13，epic project-executor 第一片）：每项目一条
-append-only JSONL 事件流（<引擎数据目录>/ledger/<project>.jsonl），逐行记票的
+append-only JSONL 事件流，逐行记票的
 段状态迁移（stage-state transition），供 watchdog / panel / request ledger /
 wake-ups 等后续 epic 件消费。
+
+落盘位置（工单 t261001-12 起，账本随项目走）：缺省=
+`<projects_root>/<project>/ledger/events.jsonl`（projects_root=注册表根，
+SANDBAR_PROJECTS_DIR || ~/.sandbar/projects，与 _projects_root() 同源）——
+项目的事件账与 scenario-results 账同住一个 ledger/ 目录，且不再随代码副本
+（主仓/lane worktree/拷贝）漂移。测试/场景后向兼容缝
+SANDBAR_EVENT_LEDGER_DIR 语义不变：一个平铺目录装 `<project>.jsonl`。
+两条形状由 tests 双向钉死，任一侧漂移即红。
 
 设计基准=已过审方案 .sandbar/plan_event_ledger.md（gen1，[R1]–[R6] 全落地）。
 借用面=audit.py 的 admin_log 先例（路径/env 覆盖、project.yaml 行式解析、
@@ -23,7 +31,8 @@ rolling+sweep 轮转、配置缓存键形状），借镜故障面 carried/droppe
     良性伪影（ledger_rebuild 只计数上报，绝不重复修复）。O_APPEND 保证单行自身
     原子。
   - fail-open 且 LOUD（[R5]）：账面写失败永不 raise。**保证面**（永远可得）=
-    点名 stderr 行 + 模块计数器 WRITE_FAILURES；**机会面** = <project>.gaps.jsonl
+    点名 stderr 行 + 模块计数器 WRITE_FAILURES；**机会面** = <活动文件名去扩展名>.gaps.jsonl
+    （缺省 events.gaps.jsonl；平铺缝 <project>.gaps.jsonl）
     补一条 {"gap": true,...}（磁盘满/目录只读时该补写也失败→再点一次 stderr 后
     吞掉）。绝无静默成功；对账路径按 timeline 跑 ledger_rebuild 补洞。
   - 未声明/停用（project.yaml 无 event_ledger: 或 enabled 非 true）⇒ 活动直接
@@ -62,8 +71,9 @@ REASON_TRUNC_MARK = "…(截断,原文不落盘)"
 IDEM_SET_CAP = 4096         # 每路径幂等键加速集容量（FIFO 逐出；纯加速器）
 DEFAULT_KEEP_DAYS = 14      # 保留窗内置缺省（event_ledger.keep_days 缺席兜底；≤0=永不删）
 DEFAULT_MAX_MB = 512        # rolling 阈值内置缺省；≤0=关 rolling
-ENGINE_DATA_DIR = Path(__file__).resolve().parent.parent   # server/
+ENGINE_DATA_DIR = Path(__file__).resolve().parent.parent   # server/（历史缺省根，仅为兼容保留常量）
 GAPS_SUFFIX = ".gaps.jsonl"
+EVENTS_BASENAME = 'events.jsonl'    # 缺省形状（t261001-12）：活动文件名固定，随项目目录走
 _ARCH_SUFFIX_RE = re.compile(r'^(\d{8})(?:-(\d{6}))?(?:-([0-9a-f]{1,8}))?$')
 
 # 活动重投/冷进程共享的幂等键加速集：path → (set(keys), deque(order))。
@@ -73,15 +83,30 @@ WRITE_FAILURES = 0
 GAPS_FAILURES = 0
 
 
-def _ledger_dir() -> Path:
-    """账本目录（测试隔离 env SANDBAR_EVENT_LEDGER_DIR 优先；缺省=引擎数据目录
-    server/ledger/，与 audit.ADMIN_LOG 同根）。"""
+def _env_ledger_dir() -> Optional[Path]:
+    """平铺测试缝（语义不变，t261001-12 钉死）：SANDBAR_EVENT_LEDGER_DIR 在场
+    ⇒ 一个平铺目录装 `<project>.jsonl`（场景/夹具存量形状）。缺席=None。"""
     env = os.environ.get('SANDBAR_EVENT_LEDGER_DIR')
-    return Path(env) if env else (ENGINE_DATA_DIR / 'ledger')
+    return Path(env) if env else None
+
+
+def _ledger_dir(project: str) -> Path:
+    """账本目录：env 平铺缝优先；缺省=注册表根下逐项目目录（<projects_root>/
+    <project>/ledger/，与 scenario-results 账同住，t261001-12）。"""
+    env = _env_ledger_dir()
+    return env if env else (_projects_root() / project / 'ledger')
 
 
 def ledger_path(project: str, ledger_dir: Optional[Path] = None) -> Path:
-    return (Path(ledger_dir) if ledger_dir else _ledger_dir()) / ('%s.jsonl' % project)
+    """项目活动账本文件路径。两种形状（tests 双向钉死）：
+    - 显式 ledger_dir / env SANDBAR_EVENT_LEDGER_DIR ⇒ 平铺 `<dir>/<project>.jsonl`
+      （后向兼容缝，语义不变）；
+    - 都缺席（生产缺省）⇒ `<projects_root>/<project>/ledger/events.jsonl`。
+    watchdog 读侧（core.ts eventLedgerFile）与本函数逐字同式，跨语言一致性锁
+    由 server/plugins/watchdog/tests/ledger-location.test.mjs 钉住。"""
+    if ledger_dir is not None or _env_ledger_dir() is not None:
+        return (Path(ledger_dir) if ledger_dir else _ledger_dir(project)) / ('%s.jsonl' % project)
+    return _ledger_dir(project) / EVENTS_BASENAME
 
 
 # ---- 配置面（借镜 audit.py：行式解析 + 三元缓存键；畸形逐键回落缺省） ----
@@ -275,18 +300,20 @@ def _announce_gap_failure(err: Any, project: str) -> None:
 
 def _write_gap_record(project: str, ticket: str, why: str,
                       ledger_dir: Optional[Path] = None) -> None:
-    """[R5] 机会面：向 <project>.gaps.jsonl 补一条 gap 记录。补写失败被吞
+    """[R5] 机会面：向活动文件同目录的 <活动文件名>.gaps.jsonl 补一条 gap 记录。补写失败被吞
     （先点 stderr）——缺口保底可见面=计数器+stderr。"""
     global GAPS_FAILURES
     try:
-        d = Path(ledger_dir) if ledger_dir else _ledger_dir()
-        d.mkdir(parents=True, exist_ok=True)
+        path = ledger_path(project, ledger_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps({"gap": True, "v": SCHEMA_V, "project": project,
                            "ticket": ticket, "at": time.strftime(
                                '%Y-%m-%dT%H:%M:%S', time.localtime()),
                            "why": str(why)[:REASON_LIMIT]},
                           ensure_ascii=False, separators=(',', ':'))
-        with open(d / (project + GAPS_SUFFIX), 'a', encoding='utf-8') as f:
+        # gaps 文件名跟活动文件名走（t261001-12）：events.jsonl ⇒ events.gaps.jsonl；
+        # 平铺缝保持 <project>.gaps.jsonl。
+        with open(path.with_name(path.stem + GAPS_SUFFIX), 'a', encoding='utf-8') as f:
             f.write(line + '\n')
     except Exception as e:      # noqa: BLE001——机会面失败吞掉（保底=announce）
         _announce_gap_failure(e, project)
@@ -337,8 +364,8 @@ def _sweep(project: str, cfg: Dict[str, Any], ledger_dir: Optional[Path] = None)
     keep = int(cfg.get('keep_days') or 0)
     if keep <= 0:
         return
-    d = Path(ledger_dir) if ledger_dir else _ledger_dir()
-    base = '%s.jsonl' % project
+    d = ledger_path(project, ledger_dir).parent
+    base = ledger_path(project, ledger_dir).name   # 归档名跟活动文件名走（events.jsonl.* / <project>.jsonl.*）
     cutoff = _day_key()
     try:
         names = os.listdir(d)

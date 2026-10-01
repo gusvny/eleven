@@ -193,6 +193,24 @@ export function watchdogDataDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.SANDBAR_WATCHDOG_DATA || join(env.HOME || '', '.sandbar', 'watchdog')
 }
 
+/** 注册表/项目根（t261001-12：与引擎 event_ledger._projects_root 同源同词表）。
+ *  SANDBAR_PROJECTS_DIR 覆盖 > ~/.sandbar/projects。 */
+export function projectsRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return env.SANDBAR_PROJECTS_DIR || join(env.HOME || '', '.sandbar', 'projects')
+}
+
+/** 事件账本活动文件路径（t261001-12 跨语言缝）：与引擎 event_ledger.ledger_path
+ *  逐字同式，两种形状（tests 双向钉死，任一侧漂移即红）：
+ *  - env SANDBAR_EVENT_LEDGER_DIR（平铺兼容缝，语义不变）⇒ `<dir>/<project>.jsonl`；
+ *  - 缺省（生产形状）⇒ `<projects_root>/<project>/ledger/events.jsonl`。
+ *  跨语言一致性锁：server/plugins/watchdog/tests/ledger-location.test.mjs 跑
+ *  python3 解析器逐字比对，共享字面量不算锁。 */
+export function eventLedgerFile(project: string, env: NodeJS.ProcessEnv = process.env): string {
+  const flat = env.SANDBAR_EVENT_LEDGER_DIR
+  if (flat) return join(flat, `${project}.jsonl`)
+  return join(projectsRoot(env), project, 'ledger', 'events.jsonl')
+}
+
 /**
  * 只写 executor_session 一键的声明写入面（t260930-09：守望者按需代建会话后回写）。
  *
