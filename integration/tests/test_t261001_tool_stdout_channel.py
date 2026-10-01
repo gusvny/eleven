@@ -23,13 +23,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib_env import clean_narrowing_env  # noqa: E402  (L12：起闸必须走清理单点)
+
 REPO = Path(__file__).resolve().parents[2]
 VERIFY_LANE = REPO / "server" / "tools" / "verify_lane.py"
 
 
 def _run_py(snippet: str, cwd: Path):
+    # L12 单点：剥掉继承来的收窄旋钮（本电池验的是通道，不是某个被收窄的面）
     return subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True,
-                          cwd=str(cwd))
+                          cwd=str(cwd), env=clean_narrowing_env())
 
 
 def test_n1_note_writes_to_stderr_only(tmp_path):
@@ -76,7 +80,8 @@ def test_n3_admin_call_envelope_parses_as_json(tmp_path):
     payload = json.dumps({"lane": "code", "path": str(tmp_path), "base": "HEAD"})
     r = subprocess.run([sys.executable, str(REPO / "server" / "admin.py"),
                         "call", "verify_lane", payload],
-                       capture_output=True, text=True, cwd=str(REPO))
+                       capture_output=True, text=True, cwd=str(REPO),
+                       env=clean_narrowing_env())
     try:
         env = json.loads(r.stdout)
     except json.JSONDecodeError as e:  # 信封被备注污染 = 本轮结果整轮丢失
