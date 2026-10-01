@@ -738,13 +738,37 @@ async function dismissNotice(page) {
  *  把「改名」这一真因彻底遮住，定位全靠手翻截图。 */
 async function openView(page, title, waitSelector, waitMs = 3000) {
   const icon = page.locator(`.wb-view-icon[title="${title}"]`).first();
+  let expanderTried = false;
   try {
     await icon.waitFor({ state: "visible", timeout: 5000 });
   } catch {
-    const present = await page.evaluate(() => [...new Set([...document.querySelectorAll(".wb-view-icon")]
-      .map((e) => e.getAttribute("title")).filter(Boolean))]).catch(() => []);
-    throw new Error(`侧栏视图图标不可见（[title="${title}"]）——工单台插件未挂载、侧栏收起，`
-      + `或图标 title 已改名（DOM 实有：${present.length ? present.join(",") : "无 .wb-view-icon"}）`);
+    // 261001 口径同步：侧栏做过「行内收纳」改造后，Docs / Model Routes / Project Settings
+    // 三枚图标**只在展开位展开后才渲染**（常驻 = 工单 Tickets + 立项单 Epics 两枚，
+    // 外加一枚 `data-wb-more-views` 的 ⋯ 展开钮；契约见
+    // server/plugins/workbench/tests/executor-entry-css-contract.mjs C5）。
+    // 故：目标图标不可见时**先展开收纳位再找一次**。只认 `data-wb-more-views` 属性、
+    // 不认文案（展开后 title 会切成 "Fewer views"），且仅在未展开态点击——避免把
+    // 后续视图调用变成「收起」。
+    const exp = page.locator(".wb-view-icon[data-wb-more-views]").first();
+    if (await exp.count().catch(() => 0)) {
+      const expTitle = await exp.getAttribute("title").catch(() => "");
+      if (expTitle === "More views") {
+        expanderTried = true;
+        await forceClick(exp).catch(() => {});
+        await page.waitForTimeout(200);
+        try {
+          await icon.waitFor({ state: "visible", timeout: 5000 });
+        } catch { /* 落到下面统一报错（诊断里带上「已展开过」这一事实） */ }
+      }
+    }
+    if (!(await icon.isVisible().catch(() => false))) {
+      const present = await page.evaluate(() => [...new Set([...document.querySelectorAll(".wb-view-icon")]
+        .map((e) => e.getAttribute("title")).filter(Boolean))]).catch(() => []);
+      throw new Error(`侧栏视图图标不可见（[title="${title}"]）——工单台插件未挂载、侧栏收起，`
+        + `或被收纳在「More views」展开位内/图标 title 已改名`
+        + (expanderTried ? "（已尝试展开「More views」收纳位）" : "")
+        + `（DOM 实有：${present.length ? present.join(",") : "无 .wb-view-icon"}）`);
+    }
   }
   await forceClick(icon);
   if (waitSelector) {
