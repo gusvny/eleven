@@ -3212,3 +3212,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②在 `merge_check` 侧对 `verify_lane_code` 的红做**单条复现**再判（与 KI-182 同一方向：先复验、再归因）；
 > ③同族排查：扫 `server/engine/tests/` 里"直接调 reprobe_main/run_scenarios 并断言 stdout"的样本，登记清单。
 > **本次处置**：判为**非本票账**（三条对照 + 19 只改 TS 插件），对 19 发 `retry_qc` 重验 merge_check。
+
+## KI-184 轮内并发宽度 × 本机内存枯竭 ⇒ 控制台族"502 / 连接被拒 / 传一半断"批量假红（261001 夜间实测；与 KI-182/183 合成"放行口径被机器噪声污染"三件套）
+> **现象（一晚累积）**：几乎每一轮闸都会在**控制台族**场景上出一批红，签名高度一致：
+> `the server responded with a status of 502 (Bad Gateway)`、`net::ERR_CONNECTION_REFUSED`、`net::ERR_INCOMPLETE_CHUNKED_ENCODING`；
+> 而**同一条场景单跑（机器静时）全绿**（今晚实证：`t260904-05-ledger-adversarial-boot` 7/0、`t260910-10-docs-ui-mock-v1` 29/0、
+> `t260915-10-docs-follow-project` 16/0、`t260926-05-inspection-report-ui-dom` 8/0、`t260915-08-board-ui` 13/0、`t260903-10-installer-lifecycle` exit 0）。
+> **自证**：`multi-tab-coexistence` 的输出自己写着「**多泳道争抢窗，重跑定判**」；`t260926-05` 写着「env-only console noise (stage console churn)」。
+> **机制**：闸的默认宽度是 `SANDBAR_CONC_POOLS=main:3,ro:3,browser-free:3`（`conc_width=4`，多池同时放）。
+> 每个控制台族场景都会 `bootConsole`（自带隔离台 + 浏览器 + token 兑换），而本机 `free≈0.1GB / swap 10.5/11GB`（261001 实测）——
+> 于是**同轮内**多个台/浏览器同时抢内存与端口，控制台上游（docker 里的 dsh）返回 502 或半截响应，场景判红。
+> **危害**：与 KI-182（归属不抗抖动）、KI-183（单测不密闭）叠加 ⇒ **放行口径被机器噪声污染**：真账假账混在一起，
+> 靠"多试几次"碰绿（昨夜 12/13 即此路径落地）。
+> **出路（宿主定，涉及项目级校准）**：①把 `verify.yaml` 的 integration cmd 或闸入参按机器状态收窄宽度（如 `SANDBAR_CONC_POOLS=main:2,ro:2,browser-free:2`）；
+> ②或在 runner 侧加**内存/负载准入**（free 低于阈值时自动降宽或诚实排队，不硬跑出假红）；
+> ③或让 `bootConsole` 的就绪判据更硬（现在 `bench/boot` 通过之后仍会 502 ⇒ 就绪探测不足，须"真能取到页面"才算 ready）；
+> ④宿主侧清场：残留台（见 §8）与 swap 压力。
+> **未做**：本轮**不动**项目级校准（宽度/内存准入属宿主面），先登记 + 逐条单跑复验以保账目可信。
