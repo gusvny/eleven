@@ -28,7 +28,7 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from lib_env import env_fail  # noqa: E402
+from lib_env import clean_narrowing_env, env_fail  # noqa: E402  (260930 直修：漏 import 致 NameError)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 EXEC = [sys.executable, "integration/run_scenarios.py"]
