@@ -3056,3 +3056,25 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **open**：①精确判据=「面指纹链」——每层执行器把自己的**点名面摘要**追加进 `INTEG_FACE_CHAIN`，
 > 重入同一面 ⇒ 拒绝（合法电池的面各不相同，天然放行）；须与 `verify_lane` 的 env 重建面一起透传
 > （同 `INTEG_RUN_DEPTH` 的处理）。②帽值是否需要按「本轮面大小」自适应。
+
+## KI-174 markdown 渲染器**吃词内下划线** ⇒ 规格卡/文档里的路径与标识符被静默改写（261001 实报，integration 定位到 file:line；**产品面缺陷，待开票**）
+> **模式**：共享 markdown 渲染器把 `_…_` 当强调 ⇒ 词内下划线被吃掉。
+> **实况**：`t260904-06-spec-card-dom` 的规格样张含 `sc_session_top_entry.mjs`，spec 卡上屏成了
+> `scsessiontopentry.mjs`（归一化后 233 字 vs 235 字，第一处差异正是那两个下划线）。
+> 用户可见后果：**宿主页面上看到的执行规格被静默改写**——路径/文件名/标识符失真，
+> 而规格是宿主读来判活的正文。
+> **机制（file:line 已核）**：`server/plugins/knowledge/src/client/markdown.ts:54`
+> `s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>')`——`[^_]` 能吃到字母，
+> 于是 `c_session_` 这种**词内**成对下划线也被判成强调。CommonMark 明确规定 `_` 的强调
+> **不得词内成对**（`foo_bar_baz` 不是强调），故这是渲染器不符合 CommonMark 的一处实现偏差。
+> **引入路径**：260925 起 spec 卡改走 markdown 渲染（`t260925-18`，`specMarkdownHtml` →
+> knowledge `renderMarkdown`），此前 spec 是纯文本上屏 ⇒ 同一渲染器在文档浏览器里也有此偏差，
+> 只是文档正文里 `_` 少、没人踩到。
+> **什么样的改动会踩**：任何「把纯文本正文改走 markdown 渲染」的改动；任何消费方正文里带
+> `a_b_c` 形状的标识符；以及未来若沿用同一正则解析 `**`/`*` 的其它标记。
+> **判据**：`integration/t260904-06/sc_spec_card_dom.mjs` 的 T1（逐字保真，空白归一后比对）
+> **保持严格、不迁就实现**——这条红是真信号，修好渲染器才会绿。
+> **待办**：①开票（写集=`server/plugins/knowledge/`，可选 consumber 面）修词内强调判据
+> （按 CommonMark 的左右侧翼规则，或最小改法：`_` 强调要求两侧为空白/标点/行首行尾）；
+> ②同族清账：`*` 的同款正则在 `markdown.ts:53` 也有词内风险（`a*b*c`），须一并核；
+> ③复核文档浏览器（knowledge）现有内容里是否已有被改写的历史渲染。
