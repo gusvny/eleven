@@ -17,7 +17,9 @@
 //          （兄弟段自身颜色走既有回退语义，非本票契约，不断言）；
 //      L3c authorized 授权条目单独不构成解除（人放了话≠活干成了，t260912-03 通道留痕）
 //          → 不亮完成色、不出角标；
-//   L4 关闭票子用例（④）：closed 票的历史受阻段 → 完成色＋角标（hover 出「已解除」）；
+//   L4 关闭票子用例（④）：closed 票的历史受阻段 → 完成色＋角标（hover 出「已解除」；
+//      261001：hover 文案随 260925 英文令为 `Blocked N× before · … · Resolved (…)`，
+//      判据按双语等价格匹配，四项语义（何时/何因/已解除/机制）一个不少）；
 //   L5 重跑解除子用例（E1）：本段受阻后重跑 done → 完成色＋角标（解除措辞出「重跑」或「推进」，
 //      E1/E2 双证时不锁机制词选择，只锁「已解除」必在场）；
 //   L6 降级面：拓扑缺席回落线性步骤条时吃**同一推导**——t260916-02 实证形态在该面同样不得
@@ -433,18 +435,37 @@ function noFalseBadge(inv) {
   return null
 }
 
-/** hover 经过断言：节点 title＋角标 title 拼接含 何时(at)＋何因(reason 片段)＋已解除＋机制词。 */
+/**
+ * hover 经过断言：节点 title＋角标 title 拼接含 何时(at)＋何因(reason 片段)＋**已解除**＋机制词。
+ *
+ * 261001 口径同步：宿主 260925「控制台 UI 界面文案一律英文」令之后，这段 hover 文案由
+ * `lane-map.everBlockedTitle()` 产出英文（`Blocked N× before · <at> · <reason> · Round N ·
+ * Resolved (<机制>)`；机制词表=RESOLVED_HOW：`stage rerun completed` / `workflow advanced to
+ * later stages` / `ticket closed`）。契约意图不变（**何时/何因/已解除/机制**四项都在场），
+ * 故判据按**双语等价格**匹配：中文期望值映射到对应英文形态（英文面大小写不敏感），
+ * `at` 与 `reasonFragment` 仍按**数据原文**比对（它们来自夹具数据，不随界面语言变）。
+ */
+const EVER_BILINGUAL = {
+  '曾受阻': /曾受阻|Blocked\s+\d+×\s+before|was blocked/i,
+  '已解除': /已解除|Resolved/i,
+  '推进': /推进|advanced/i,
+  '重跑': /重跑|rerun/i,
+}
+function _everHit(story, word) {
+  const re = EVER_BILINGUAL[word]
+  return re ? re.test(story) : story.includes(word)
+}
 function hoverHasStory(inv, id, { at, reasonFragment, mustWord, altWord }) {
   const node = nodeOf(inv, id)
   if (!node) return `未找到 ${id} 节点`
   const everTitles = inv.filter(x => String(x.cls).includes('wb-lm-ever')).map(x => x.title)
   const story = `${node.title} ${everTitles.join(' ')}`
   const miss = []
-  if (!story.includes('曾受阻')) miss.push('「曾受阻」字样')
+  if (!_everHit(story, '曾受阻')) miss.push('「曾受阻」字样')
   if (at && !story.includes(at)) miss.push(`受阻时刻 ${at}`)
   if (reasonFragment && !story.includes(reasonFragment)) miss.push(`受阻原因「${reasonFragment}」`)
-  if (!story.includes('已解除')) miss.push('「已解除」')
-  if (mustWord && !story.includes(mustWord) && !(altWord && story.includes(altWord))) {
+  if (!_everHit(story, '已解除')) miss.push('「已解除」')
+  if (mustWord && !_everHit(story, mustWord) && !(altWord && _everHit(story, altWord))) {
     miss.push(`解除机制词「${mustWord}」${altWord ? `（或「${altWord}」）` : ''}`)
   }
   return miss.length ? `hover 经过不全（title="${story.slice(0, 160)}"，缺 ${miss.join('、')}）` : null
@@ -573,8 +594,10 @@ async function scenarioFallbackNoTopo(page) {
   if (mapN !== 0) return `拓扑缺席时泳道图仍渲染（应回落步骤条）：.wb-lanemap=${mapN}`
   const steps = await page.evaluate(domSteps).catch(() => [])
   if (!steps.length) return `回落步骤条未渲染 @ ${await snap(page)}`
-  const step = steps.find(x => x.t.includes('实现'))
-  if (!step) return `步骤条缺「实现」步（steps=${JSON.stringify(steps).slice(0, 160)}）`
+  // 261001 口径同步：实施段名随 260925 英文令上屏为 "Implement"（旧形态中文「实现」仍在
+  // 老快照/老拓扑里）——契约意图「步骤条带实施段、且该段不再是 blocked」不变，判据双语。
+  const step = steps.find(x => /实现|Implement/i.test(String(x.t)))
+  if (!step) return `步骤条缺实施段（中文「实现」或英文 "Implement"）（steps=${JSON.stringify(steps).slice(0, 160)}）`
   if (step.s === 'blocked') {
     return `降级步骤条仍显示 blocked（data-s=${step.s}）——stale 红是一处推导两处消费，泳道图治了步骤条不能留`
   }
