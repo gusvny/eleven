@@ -562,12 +562,17 @@ async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
         # 「agent 有 N 条叙述字段没按英文写」是流程质量信号，suggest=False（不是代码缺陷，
         # 不开修码票）；逐条原因在各条的 unverified_reasons 里（可下钻）。
         from inspection_deadman import make_finding
+        # 261001 归因精确化：这条聚合条过去写「N **agent** finding(s) …」，而闸扫的是
+        # **所有**发现（含引擎自产的系统发现）——20261001 实案就是引擎自己那条
+        # 「Scope collapsed to 0 files」的 suggestion 写中文触发的。归因错会把排查引向
+        # agent/提示词，而真因在引擎文案。故改为按**事实**说「叙述字段非英文的发现」，
+        # 并逐条点名 id+字段（可下钻）。
         findings.append(make_finding(
             "agent", "med",
-            "%d agent finding(s) are not written in English" % len(lang_violations),
+            "%d finding(s) are not written in English" % len(lang_violations),
             "the report face and the ticket face are English-only: %s | each such finding is "
-            "marked unverified (%s) and opens no fix ticket; re-run the inspect stage or fix "
-            "the wording"
+            "marked unverified (%s) and opens no fix ticket; fix the wording (engine-generated "
+            "findings included) or re-run the inspect stage"
             % (", ".join("%s(%s)" % (v["id"] or v["index"], "/".join(v["fields"]))
                          for v in lang_violations[:10]), NON_ENGLISH_REASON),
             suggest=False))

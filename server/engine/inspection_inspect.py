@@ -255,11 +255,15 @@ def scope_collapse_findings(scope_meta: Any) -> List[Dict[str, Any]]:
     if m.get("diff_empty"):
         return []                      # 差分成功且零改动＝合法空范围
     if m.get("diff_error"):
-        why = "git 差分失败：%s" % str(m["diff_error"])[:200]
+        # 261001：引擎自产的发现也必须守「报告面英文」令——否则会被本仓自己的语言闸
+        # （activities.verify_findings → mark_non_english，扫 subject/why/suggestion）
+        # 判 unverified 并追加聚合条：**自己的系统信号被自己判成不合规**，
+        # 真机上表现为「本期没审代码」这条提示反而带 unverified + 一条 agent 归因的聚合条。
+        why = "git diff failed: %s" % str(m["diff_error"])[:200]
     elif m.get("scope_note"):
         why = str(m["scope_note"])[:240]
     elif m.get("base_error"):
-        why = "本期基点取不到：%s" % str(m["base_error"])[:200]
+        why = "this period's base point is unavailable: %s" % str(m["base_error"])[:200]
     if not why:
         return []
     # 证据=台账里那段范围 meta 本身（**不编造文件路径**：这条塌陷的证据就在台账字段里）
@@ -272,9 +276,11 @@ def scope_collapse_findings(scope_meta: Any) -> List[Dict[str, Any]]:
         "subject": ("Scope collapsed to 0 files: the change-surface diff was not made, so this "
                     "period did NOT review code (agent reviewed receipts/KI/previous ledger only)"),
         "evidence": ev,
-        "suggestion": ("给该实例一个可用的审查基点：无泳道实例（声明不带 suite）用「上期运行记录的 "
-                       "HEAD → 本期 HEAD」（已接线：本期取当前 HEAD 自播种并记进台账，下期起可差分）；"
-                       "基点仍缺时先修声明/泳道，别把「跑完」当「审过」。"),
+        "suggestion": ("Give this instance a usable review base point: for an instance without a "
+                       "lane (declaration carries no suite), use \"previous period's recorded HEAD → "
+                       "this period's HEAD\" (already wired: this period seeds the current HEAD into "
+                       "the ledger, so the next period can diff); if the base point is still missing, "
+                       "fix the declaration/lane first — do not treat \"ran\" as \"reviewed\"."),
         "suggest": False,
     }]
 

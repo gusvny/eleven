@@ -42,6 +42,11 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_inspect as lib  # noqa: E402
 
+#: 引擎**系统发现**的 subject 前缀白名单（261001）：这些不是 agent 交上来的发现，而是引擎
+#: 按台账范围如实报的信号（本夹具无可用差分基点 ⇒ 必然出现 `Scope collapsed to 0 files` 一条）。
+#: 判据把它们**具名**允许在场，但不许任何**未登记**的多余条目混进来（既不静默、也不放宽）。
+SYSTEM_SUBJECT_PREFIXES = ("Scope collapsed to 0 files",)
+
 PASS = 0
 FAIL = 0
 FAILURES = []
@@ -179,9 +184,23 @@ def main() -> int:
     ]
     payload = full(lib.fenced_message([c[1] for c in cases]))
     out_findings = lib.payload_findings(payload)
-    ok(isinstance(out_findings, list) and len(out_findings) == len(cases),
-       "复核链逐条回带（%d 进 %d 出，不静默丢）"
-       % (len(cases), len(out_findings) if isinstance(out_findings, list) else -1))
+    # 261001 口径同步（integration 岗位判词）：本子用例的意图是「**本子用例的每一条都回带、
+    # 不静默丢**」。inspect 面还会追加**引擎系统发现**——本夹具的合成树没有可差分基点，于是
+    # `inspection_inspect.scope_collapse_findings()` 如实报一条 `Scope collapsed to 0 files: …`
+    # （无泳道实例的正常信号，不是本子用例的 agent 发现）。故判据改为：①本子用例 8 条按 subject
+    # 逐条在场；②多出来的每一条都必须是**具名的系统发现**（前缀白名单），并在消息里点名。
+    _out = out_findings if isinstance(out_findings, list) else []
+    _case_subjects = [str(c[1].get("subject") or "") for c in cases]
+    _present_subjects = [str(f.get("subject") or "") for f in _out if isinstance(f, dict)]
+    _missing = [x for x in _case_subjects if x not in _present_subjects]
+    _sys = [f for f in _out if isinstance(f, dict)
+            and str(f.get("subject") or "").startswith(SYSTEM_SUBJECT_PREFIXES)]
+    _unexpected = [str(f.get("subject"))[:60] for f in _out if isinstance(f, dict)
+                   and f not in _sys and str(f.get("subject") or "") not in _case_subjects]
+    ok(not _missing and not _unexpected,
+       "复核链逐条回带（%d 进 %d 出：本子用例缺 %d / 预期外 %d；系统发现 %d 条——%s）"
+       % (len(cases), len(_out), len(_missing), len(_unexpected), len(_sys),
+          "; ".join(str(f.get("subject"))[:48] for f in _sys) or "无"))
     if isinstance(out_findings, list):
         subjects = {}
         for e in out_findings:
@@ -244,11 +263,22 @@ def main() -> int:
     # 心跳/summary 口径子用例单独跑：本期只有 recurring+压制（零新发现）→ heartbeat=true
     pay = full(lib.fenced_message([dup_f]))
     summary, heartbeat, _truncated = lib.tally_of(pay)
+    # 261001：本子用例的意图是「recurring/压制**不计新发现**」。夹具无可用基点 ⇒ 引擎会如实追加
+    # 系统发现（`Scope collapsed to 0 files: …`，med）——它**也是真信号**，参与汇总与心跳是正确
+    # 语义。故判据把系统发现**扣掉后**判意图，并把它具名出来（不静默、也不改产品语义）。
+    _fs2 = lib.payload_findings(pay) or []
+    _sys_n = len([f for f in _fs2 if isinstance(f, dict)
+                  and str(f.get("subject") or "").startswith(SYSTEM_SUBJECT_PREFIXES)])
     if isinstance(summary, dict) and summary:
-        ok(not any(summary.get(k) for k in ("high", "med", "low", "total")),
-           "summary 只计新发现（recurring/压制不累计）：%r" % (summary,))
+        _agent_new = sum(int(summary.get(k) or 0) for k in ("high", "med", "low", "total"))
+        _agent_new -= _sys_n
+        ok(_agent_new == 0,
+           "summary 只计新发现（recurring/压制不累计；已扣系统发现 %d 条）：%r"
+           % (_sys_n, summary))
     if heartbeat is not None:
-        ok(heartbeat is True, "新发现==0 → heartbeat=true（recurring/压制可见不破心跳）")
+        ok(bool(heartbeat) == (_sys_n == 0),
+           "心跳与「是否有新发现」一致（系统发现 %d 条 ⇒ 期望 heartbeat=%s；recurring/压制自身"
+           "不造新发现）：实得 %r" % (_sys_n, _sys_n == 0, heartbeat))
     else:
         ok("heartbeat" in json.dumps(pay, ensure_ascii=False), "心跳面在回执在场（键名容差）")
 
