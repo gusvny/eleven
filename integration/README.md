@@ -254,13 +254,13 @@ t260904-19 起必需；重建=`sh server/build-test-temporal.sh`）、temporalio
   引擎 merge 人门 reject 无轮次计数（dev_lane.py merge 段），构不出超限；场景改覆盖真实
   存在的同类上限（stub 仲裁 summary 缺 `verdict=`，3 次格式纠正轮 → blocked）并复活收口。
   merge reject 无计数属引擎发现，另开票处理。
-- lane-parallel-dom（t260901-09，泳道图并行分叉 DOM 级双边同亮断言）：S0 build-contract
-  纯 node 恒跑；S1 浏览器半依赖测试控制台（`SANDBAR_TEST_CONSOLE` 显式指台；缺省
-  泳道限定台自动 ensure，见舞台纪律段）+
-  playwright-core + 本机 chromium，缺任一 ENV_FAIL（exit 2）——与 session-tab-interactions 同款环境
-  取舍。S1 造数用 playwright `page.route()` 在 `/sandbar-workbench/api/wf/tickets` API 边界
-  打桩 fixture 快照（不进 Temporal、不写真工单）；泳道 worker 环境因 SANDBAR_TASK_QUEUE
-  特征机械 ENV_FAIL 属既有正确行为，真实覆盖在隔离台环境（3199 台 + 浏览器在场）跑。
+- ~~lane-parallel-dom（t260901-09，泳道图并行分叉 DOM 级双边同亮断言）~~ **261001 已删**
+  （宿主令：删场景与注册表条目）。删除理由与代价在案：功能断言 P1–P5 长期绿、红只在
+  P6 卫生面（页面资源 `ERR_INCOMPLETE_CHUNKED_ENCODING`，与台供给/负载面同签名），
+  判定力已由 `t260903-04-parallel-ui-truth`（真源优先契约，含双显真值表）与其
+  `t260903-04-client-bundle-sync`（S0 构建契约同面）分担；**代价=真浏览器渲染层的
+  双边同亮断言此后无场景，算法/真值层仍被覆盖**。同类 S0/S1 两层结构的先例仍见
+  `sc_evidence_lightbox_dom.mjs` / `sc_multi_tab_coexistence.mjs`。
 - capture-chat-e2e / capture-chat-active（t260901-03）自 t260901-09 起补泳道 worker 递归
   护栏（与 ticket-lifecycle 同款 SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW 探测）：两条的
   真实覆盖靠 boot 隔离台 + 真模型种子链路 + capture-lane 只拍**本次重建**的 bundle
@@ -388,7 +388,7 @@ write_set 而 verify_lane 丢了分支会静默退化回粗判据）；verify.ya
 
 `baselines/multi-tab-coexistence.mjs`。用户场景驱动：管理台常开多页签，三缺陷修复
 （①页签互见在看提示；②写操作交叉失效；③不可见页签暂停轮询）+「点 13 详情跳回 11」
-竞态收口。两层结构（同 lane-parallel-dom 先例）：S0 build-contract 纯 node 恒跑
+竞态收口。两层结构（同 sc_evidence_lightbox_dom 先例）：S0 build-contract 纯 node 恒跑
 （lib 双产物同步 + 多页签接线锚点在产物内；implement 前按设计恒红——验收棒）；
 S1 真浏览器双（多）页签场景（T1 互见/T2 写交叉失效+写守门 confirm/T3 隐藏零轮询/
 T4 过期在途响应不得覆盖抽屉/T5 恶意页签流量与 BC 缺席兜底/T6 关页签 viewer 摘除/

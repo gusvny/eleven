@@ -26,7 +26,9 @@
 // 分工（防 intent 级重复）：t260911-05 sc_ki048_status_card_dom 已锁 merge-dirty 族
 // 红卡四件 payload→pixel 与畸形 blocked_detail 不捏造文件——本条 L2 用 verify_red /
 // main_dirty 两族只锁「翻译层词条表驱动」这一新面，不复断其四件形状；t260901-09
-// lane-parallel-dom 锁现行步骤条并行双亮（本条 L7 反向守其降级回落不回归）；
+// lane-parallel-dom 曾锁现行步骤条并行双亮（261001 宿主令删除：其功能断言长期绿、红只在
+// P6 卫生面；本条 L7 的「反向对手面」随之缺位——降级回落不回归仍由本条守，正向双亮只剩
+// t260903-04-parallel-ui-truth 的真值层，真浏览器渲染层此后无场景）；
 // t260915-01 journey 锁数据面引擎半（本条全部数据为 API 桩夹具）；developer L1
 // （lane-map-model 纯函数矩阵/status-card 词条表 UT）不同层——L1 锁不住 JSX 运行时
 // 错/落位/降级渲染。

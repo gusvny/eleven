@@ -6,7 +6,7 @@
  * 加载的是仓内产物 lib/client.js（tsdown 构建，node.ts §5/§9）；改了 src/client/
  * 忘跑 `bash build-client.sh` 重建时（t260910-15 起为唯一构建入口），源码层测试（tsc/单测/
  * 数据级场景）全绿、真台面却仍是旧行为——KI-024 修复在真台面静默未交付。
- * lane-parallel-dom 的 S1（真渲染）在无浏览器环境恒环境红退 2、S0 anchors 断言旧 bundle
+ * lane-parallel-dom 的 S1（真渲染）在无浏览器环境恒环境红退 2（该场景 261001 已删）、S0 anchors 断言旧 bundle
  * 也有，均分不出 bundle 陈旧；本场景常驻守「用户实际被服务的产物含当前契约特征」。
  *
  * 断言：

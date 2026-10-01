@@ -26,8 +26,8 @@
 // intent 分界：与 t260915-19-sidebar-inspection-ui 不同面——彼守左栏分拣制（项目组归位/
 // 兜底组存在性/等你黄调/降级显式性）+反沉底烟测，本条守组内**合并排序口径全矩阵**
 // （tier 边界+级内 updated_ts 倒序+兜底组同口径）与**徽标可辨**（命中/可见/文本/dev 行
-// 零徽标对照），不复断彼任何一面；与 t260903-07-click-no-chat-switch 不同面（彼守点行
-// 不切会话）。排序纯函数真值表（状态×来源×畸形 ts/缺键/null 元素/未知状态缺省行）归
+// 零徽标对照），不复断彼任何一面；与 ticket-session-restore 的 browser 半不同面（彼守点行
+// 不切会话；原 t260903-07-click-no-chat-switch 场景 261001 已删并收编于此）。排序纯函数真值表（状态×来源×畸形 ts/缺键/null 元素/未知状态缺省行）归
 // developer L1 UT（server/plugins/workbench/tests/t260916-15-*）不同层，此处不重复。
 // KI 对齐：KI-052（S0 twin bundle 同步=盘上客户端新鲜锚）、KI-055（真浏览器断言防台面绿
 // 真机红）、KI-051（语义锚 data-testid/属性字面，不锚易漂移文案整句）。
