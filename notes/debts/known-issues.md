@@ -2886,8 +2886,13 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 随后 46 条跑出 29/11/6；戳一致 ⇒ 直接复用（第二次运行无重建、结果同）；改动一个 `server/` 下文件即触发重建。
 > 成本：重建约 30~60s，落在每轮前奏里；`server/` 之外的改动（文档/测试码）不触发。
 > **已做（261001 当日）**：①**干净台面上重判完毕**——挂账册 22 条逐条定点复跑一轮（`--reprobe` 每名一次）：11 绿 / 3 真红 / 8 环境红（本机沙箱面）。对其中 9 条满足「连续 3 次定点复跑绿」的名字**除名并下调 max_entries 22→13**（t13-evidence-lightbox、t260905-07-ticket-detail-panel、t260916-25-stage-console-selfcheck-red、t260911-05-ki048-status-card-dom、t260926-05-inspection-report-ui-dom、t260903-07-click-no-chat-switch、t260925-18-ui-english-spec-markdown、t260916-25-stage-console-prepare-refresh、metrics-donut-dom；三次连续 9/9 exit=0），并在册子 `meta.evidence` 里写明判词更正（这 9 条不是抖动，是旧台红）。
+> **②已完成（261001 当日，只读数不改判据）**：把当天各轮记为「main-red-too（存量、不阻断）」的 **19 个名字**在干净台面上逐条复跑：
+> **18 条仍红**（⇒ 闸那条归属是对的：存量红是真的，不是旧台造出来的），**1 条已绿** = `t260913-02-integ-run-singleflight`
+> （干净台面连跑四次全绿 ⇒ 它此前被记「存量红」是旧台/瞬时产物；因只记不阻断，没有任何票的结论被它伤到，
+> 但「存量红名单」被高估一条，留痕在此）。**结论：旧台污染集中在挂账册那 9 条（已删行），没有扩散到归属判定主体。**
 > **仍未做（留 open）**：
-> ②今天所有以「main-red-too」记录的归属结论要不要在干净台面上重跑一遍（尤其浏览器族）——**建议做**，但那是重跑历史轮次，成本较高；
-> ③`t260905-05-modal-dialog-semantics` 之外的 `t260905-03-decl-gate` 等同族名字一并复核。
+> ③同族名字（如 `t260905-03-decl-gate`）在泳道轮里的下一次真实出现即为复核面——若再红，先按代码身份戳确认台新鲜再归因；
+> ④`t260910-09-ms-decl-gate`、`t260913-02-schedule-daily-deadman` 两条当天在本机沙箱面报环境红（exit=2，0.5~1.0s 瞬红），
+> 需在非沙箱面（泳道轮）复核才能定性。
 > **定位**：`integration/lib_stage_console.mjs`（`consoleCodeStamp`/`consoleStampPath`/复用检查/写戳）、
 > `integration/stage_docker.py`（台的生命周期）、`integration/run_scenarios.py`（池与并发）。
