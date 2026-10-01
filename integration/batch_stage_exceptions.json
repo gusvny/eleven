@@ -141,14 +141,23 @@
   },
   {
     "entry": "t260905-02-worker-lifecycle",
-    "why": "被测对象=worker 起/退生命周期与**拆台后零残留/端口释放**（三处断言读 down 回执的 residue 与端口面）——批台恰是「不拆的共享台」，批模式下既无自有台可拆、批台端口也不会释放，形态与断言互斥（261001 实测）。"
+    "pool": "engine",
+    "project_pattern": "t26090502-*",
+    "reason": "被测对象=worker 起/退生命周期，且断言**拆台后零残留容器与 temporal 端口已释放**（三处读 down 回执 residue + 端口面）。批台恰是「不拆的共享台」：批模式下既无自有台可拆、批台端口也不会释放 ⇒ 断言与被测形态互斥，须自持台。",
+    "evidence": "261001 实测：--only t260904-02-worker-fingerprint-gate,t260905-02-worker-lifecycle → 本条目走批模式后 FAIL「舞台 down 后零残留容器（实得 None）／temporal 端口已释放（仍被占用）」；单独跑（旧缝面会 do_down 批台）才「过」。"
   },
   {
     "entry": "t260905-02-ticket-worker-watch-exit",
-    "why": "同族：断言拆台后零残留/端口释放（residue+端口三处）；批模式无「自有台已拆」这一事实可测。"
+    "pool": "engine",
+    "project_pattern": "t26090502-*",
+    "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
+    "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族，grep residue/端口 命中 3 处）；261001 加入本清单，切片实测 8 条 0 环境红。"
   },
   {
     "entry": "t260905-02-console-duplicate-guard",
-    "why": "同族：断言拆台后零残留/端口释放；批台不拆 ⇒ 断言不可满足，须自持台。"
+    "pool": "engine",
+    "project_pattern": "t26090502-*",
+    "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
+    "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族）；261001 加入本清单，切片实测本条目 PASS。"
   }
 ]
