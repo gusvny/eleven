@@ -18,7 +18,8 @@ client.py COMMANDS/USAGE + cmd_ticket_cancel 闸链（桩 handle）。
   C5 幂等闸口径：CONTINUED_AS_NEW（未收口换代态）+ 异项目无旗 → kind=
      cross_project_refused，绝不回「已终态」（_EXEC_ALIVE_OK 既有口径；KI-025
      家族红线「不许把活报成终」）；
-  C6 边界负锁：无批量清理 op/子命令（只做记名单票终结，危险默认不许上桌面）；
+  C6 边界负锁：无批量清理 op/子命令（只做记名单票终结，危险默认不许上桌面；
+     261001：只读审计面 cancel-audit 例外在册，且对它另做「零写动词调用」的机械负锁）；
   C7 裸 cancel 子命令仍在（本票不改裸入口的边界锚）。
 
 分工（防 intent 级重复）：pause/resume 的说明书漂移已由 KI-079 定性、暂无场景锁
@@ -101,10 +102,32 @@ def main():
     batch_like = [op for op in enums if op != 'cancel' and 'cancel' in str(op)]
     check('C6 schema 无批量清理 op（cancel 族只有单票 cancel）', batch_like == [],
           'cancel 族=%r' % (batch_like,))
+    # 261001 口径同步（integration 岗位判词）：260930 批次 B 新增 **只读审计**子命令
+    # `cancel-audit`（列近期 TERMINATED 票、逐张读事件历史，核「先留痕后终结」的对账；
+    # client.py::cmd_cancel_audit 文档明写「只读：不发信号、不写状态、不推进任何票」，
+    # 真源用例 server/engine/tests/test_260930_cancel_audit_and_terminal_face.py B5）。
+    # 契约意图——**危险默认（批量/自动清理）不许上桌面**——不变，故负锁改成：
+    # ① cancel 族里除单票 cancel/ticket-cancel 外只许登记在册的**只读审计面**；
+    # ② 对这个例外做**机械负锁**：其处理函数源码里零写动词调用（`.signal(` / `.terminate(` /
+    #    `handle.signal` / `handle.terminate`）——「文档说只读」不算证据，代码里没有写路径才算。
+    READ_ONLY_CANCEL_FACES = ('cancel-audit',)
     extra_cmd_cancel_like = [k for k in cmds
                              if 'cancel' in k and k not in ('cancel', 'ticket-cancel')]
-    check('C6 client 无批量/自动清理子命令', extra_cmd_cancel_like == [],
-          'cancel 族=%r' % (extra_cmd_cancel_like,))
+    unregistered = [k for k in extra_cmd_cancel_like if k not in READ_ONLY_CANCEL_FACES]
+    check('C6 client 无批量/自动清理子命令（只读审计面除外）', unregistered == [],
+          'cancel 族=%r（未登记=%r）' % (extra_cmd_cancel_like, unregistered))
+    import inspect as _inspect
+    for _face in READ_ONLY_CANCEL_FACES:
+        _fn = cmds.get(_face)
+        try:
+            _src = _inspect.getsource(_fn) if _fn else ''
+        except (OSError, TypeError):
+            _src = ''
+        _writes = [w for w in ('.signal(', '.terminate(', 'handle.signal', 'handle.terminate')
+                   if w in _src]
+        check('C6b 只读审计面 %s 真只读（处理函数零写动词调用）' % _face,
+              bool(_src) and _writes == [],
+              'src_len=%d writes=%r' % (len(_src), _writes))
 
     # ---- C7 裸入口原样（边界：不改裸 cancel）----
     check('C7 裸 cancel 子命令仍在（workflow_id 口径原样保留）', 'cancel' in cmds)
