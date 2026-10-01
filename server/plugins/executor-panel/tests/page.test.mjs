@@ -57,5 +57,33 @@ assert(PANEL_ROUTE === '/sandbar-executor-panel', 'panel route constant')
 // 轮询面：固定间隔 + watchdog 状态端点为唯一状态源（不重算）。
 assert(PANEL_PAGE_HTML.includes('/sandbar-watchdog/api/status'), 'page consumes the watchdog contract endpoint directly')
 
-n += 24
+// ---- t261001-10 回归锁（源级；浏览器行为面由 browser-save.test.mjs 真杆覆盖）----
+
+// 旋钮 id：唯一真源 idFor（split/join，不吃反斜杠），inputFor/readInput 共用不许漂移。
+assert(!PANEL_PAGE_HTML.includes("replace(/\\./g"), 'no regex-based knob id (the template literal eats the backslash)')
+assert(!PANEL_PAGE_HTML.includes("replace(/./g"), 'no wildcard regex reachable in the served page')
+{
+  const idForSrc = (PANEL_PAGE_HTML.match(/function idFor\(path\)\{[^}]*\}/) || [])[0] || ''
+  assert(idForSrc.includes("path.split('.').join('_')"), 'idFor uses split/join (no escape to lose)')
+  const uses = (PANEL_PAGE_HTML.match(/idFor\(path\)/g) || []).length
+  assert(uses >= 3, 'idFor is the single id source (definition + inputFor + readInput), found ' + uses)
+}
+
+// 保存结果不被刷新抹掉：结果存 saveMsg 变量且 renderSettings 每次重渲染后回写。
+assert(PANEL_PAGE_HTML.includes("el('saveResult').innerHTML = saveMsg"), 'save result re-written after every settings re-render')
+assert(PANEL_PAGE_HTML.includes("saveMsg = ''"), 'save result variable initialised (and reset on project switch)')
+
+// 每个 POST 路径都有传输层失败显示路径（saveFailHtml / 显式 .catch）。
+assert(PANEL_PAGE_HTML.includes('function saveFailHtml('), 'transport-failure renderer present')
+{
+  const posts = (PANEL_PAGE_HTML.match(/postJson\('/g) || []).length
+  const catches = (PANEL_PAGE_HTML.match(/\.catch\(function/g) || []).length
+  assert(posts === 5, 'all five POST paths accounted for, found ' + posts)
+  assert(catches >= 6, 'every POST path has a .catch (5 POST + read-path catches), found ' + catches)
+  assert((PANEL_PAGE_HTML.match(/\.catch\(function\(e\)\{ saveMsg = saveFailHtml\(e\)/g) || []).length === 4,
+    'all four settings POST paths display transport failures in #saveResult')
+  assert(PANEL_PAGE_HTML.includes("alert('Answer failed to send: ')") || PANEL_PAGE_HTML.includes("Answer failed to send"), 'answer POST has a visible transport-failure path')
+}
+
+n += 35
 done(n)

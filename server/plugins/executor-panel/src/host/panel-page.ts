@@ -109,6 +109,9 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
 ` + EMBEDDED + `
 (function(){
   var state = { project:'', status:null, reachable:null, requests:null, grants:null, settings:null, reqLimit:20, selected:null };
+  // 最近一次保存结果（t261001-10）：renderSettings 重建整个 settings 容器（含 #saveResult），
+  // 结果必须存在变量里、每次重渲染后回写——否则刷新一落就把引擎拒收理由抹掉（「点了没反应」）。
+  var saveMsg = '';
   var POLL_MS = 5000;
   // beep 计数持久化（同项目口径）：重轮询/刷新后计数不丢——「重轮询零增量」才能被
   // 真断言（计数器与真实发声同代码路径，persist 只是读数口径，不是第二真相源）。
@@ -291,7 +294,8 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     var btn = el('answerBtn');
     if(btn) btn.onclick = function(){
       postJson('/sandbar-executor-panel/api/requests/answer', {project:r.project, id:r.id, answer: el('answerBox').value, by:'host'})
-        .then(function(j){ if(j.ok!==true){ alert('Answer rejected: '+(j.error||'?')); } loadRequests(); });
+        .then(function(j){ if(j.ok!==true){ alert('Answer rejected: '+(j.error||'?')); } loadRequests(); })
+        .catch(function(e){ alert('Answer failed to send: '+((e&&e.message)||e)); });
     };
     renderRequests();
   }
@@ -365,36 +369,49 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
       + '<button id="sleepBtn">I am going to sleep (night-only policy + 8h expiry)</button> '
       + '<button id="wakeBtn">Revert night override</button></div><div id="saveResult" class="muted" style="margin-top:6px"></div>';
     el('setKnobs').innerHTML = html;
+    el('saveResult').innerHTML = saveMsg; // t261001-10：重渲染后回写保存结果（拒收理由不被刷新抹掉）
     el('saveBtn').onclick = function(){
       var next = JSON.parse(JSON.stringify(cfg));
       for(var i=0;i<KNOBS.length;i++){ setIn(next, KNOBS[i][0], readInput(KNOBS[i][0], KNOBS[i][1])); }
       postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config:next})
         .then(function(j){
-          el('saveResult').innerHTML = j.saved===true ? '<span class="good">saved & re-validated through the loader</span>' : '<span class="bad">REJECTED (file untouched): '+esc(j.error||j.reason)+'</span>';
+          saveMsg = j.saved===true ? '<span class="good">saved & re-validated through the loader</span>'
+            : '<span class="bad">REJECTED (file untouched): '+esc(j.error||j.reason||'?')+'</span>';
+          el('saveResult').innerHTML = saveMsg;
           loadSettings();
-        });
+        })
+        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
     };
     el('revokeBtn').onclick = function(){
-      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'revoke'}).then(function(){ loadSettings(); });
+      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'revoke'})
+        .then(function(){ loadSettings(); })
+        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
     };
     el('sleepBtn').onclick = function(){
       postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'sleep', policy:'redline-only', until: Date.now()+8*3600*1000})
-        .then(function(j){ if(j.ok!==true) alert('Sleep toggle rejected: '+(j.error||'?')); loadSettings(); });
+        .then(function(j){ if(j.ok!==true){ saveMsg = '<span class="bad">Sleep toggle rejected: '+esc(j.error||'?')+'</span>'; el('saveResult').innerHTML = saveMsg; } loadSettings(); })
+        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
     };
     el('wakeBtn').onclick = function(){
-      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config: (function(){ var n=JSON.parse(JSON.stringify(cfg)); setIn(n,'alerts.night.policy', st.factory_defaults? st.factory_defaults.alerts.night.policy : 'redline-only'); return n; })()}).then(function(){ loadSettings(); });
+      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config: (function(){ var n=JSON.parse(JSON.stringify(cfg)); setIn(n,'alerts.night.policy', st.factory_defaults? st.factory_defaults.alerts.night.policy : 'redline-only'); return n; })()})
+        .then(function(){ loadSettings(); })
+        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
     };
     renderGrants();
   }
+  // t261001-10：idFor 是 id 生成的唯一真源（inputFor 建面 + readInput 读面共用），
+  // 用 split/join 而不是正则——正则写法的反斜杠在本文件的外层模板字符串里会被吃掉，
+  // 浏览器拿到通配点号，路径逐字符变下划线 → 等长路径 id 撞车、读错字段。
+  function idFor(path){ return 'kb_'+path.split('.').join('_'); }
   function inputFor(path,type,v){
-    var id='kb_'+path.replace(/\./g,'_');
+    var id=idFor(path);
     if(type==='boolean') return '<input type="checkbox" id="'+id+'"'+(v?' checked':'')+'>';
     if(type==='policy'){ return '<select id="'+id+'">'+['silent','redline-only','normal'].map(function(p){return '<option'+(p===v?' selected':'')+'>'+p+'</option>';}).join('')+'</select>'; }
     if(type==='string[]') return '<input type="text" id="'+id+'" value="'+esc((v||[]).join(','))+'" size="40">';
     return '<input type="text" id="'+id+'" value="'+esc(v==null?'':v)+'" size="36">';
   }
   function readInput(path,type){
-    var id='kb_'+path.replace(/\./g,'_'), n=el(id);
+    var n=el(idFor(path));
     if(type==='boolean') return n.checked;
     if(type==='number'){ var x=Number(n.value); return Number.isFinite(x)?x:n.value; }
     if(type==='string[]') return n.value.split(',').map(function(s){return s.trim();}).filter(Boolean);
@@ -418,6 +435,11 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     el('setGrants').innerHTML = html;
   }
 
+  // t261001-10：传输层失败（网络断/非 JSON 响应）也必须显式可见——postJson 的 r.json()
+  // 解析失败会走 reject，各 POST 调用点都有 .catch 落到 #saveResult。
+  function saveFailHtml(e){
+    return '<span class="bad">SAVE FAILED (nothing written): '+esc((e&&e.message)||String(e))+'</span>';
+  }
   function postJson(url, obj){
     return fetch(url, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(obj)})
       .then(function(r){ return r.json(); });
@@ -438,7 +460,7 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     }).catch(function(){ return []; });
   }
   function setProject(p){
-    state.project = p; state.reqLimit = 20; state.selected = null;
+    state.project = p; state.reqLimit = 20; state.selected = null; saveMsg = '';
     try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
     if(!p){ el('pollNote').textContent='no project selected'; return; }
     poll(); loadRequests(); loadSettings();
