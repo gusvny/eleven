@@ -479,6 +479,12 @@ function client(sdkPython, op, args, extraEnv = {}) {
   const env = targetEnv()
   if (extraEnv.epicsDir) env.SANDBAR_EPICS_DIR = extraEnv.epicsDir
   if (extraEnv.projectsDir) env.SANDBAR_PROJECTS_DIR = extraEnv.projectsDir
+  // 261001 修（与 lib_stage_console.mjs 的同款口径）：跨项目闸（t260915-12 族）要求
+  // **调用方项目身份显式声明**且与目标票所属项目一致，否则 ticket-start / ticket op 一律
+  // fail-closed 拒收（实案：`跨项目写操作拒收：调用方项目身份未声明…目标票属项目 suyou`
+  // ⇒ 票根本没建起来 ⇒ 场景报「workflow disappeared」）。夹具票都建在 suyou 项目下，
+  // 故此处按夹具项目声明调用方身份（缺省不设=保持其它调用方原行为）。
+  if (extraEnv.callerProject) env.SANDBAR_CALLER_PROJECT = extraEnv.callerProject
   const r = run(sdkPython, [join(POC, 'client.py'), op, JSON.stringify(args)],
     { env, timeoutMs: extraEnv.timeoutMs ?? 120_000 })
   let body = null
@@ -488,7 +494,8 @@ function client(sdkPython, op, args, extraEnv = {}) {
 
 export function makeApi(sdkPython, fixture) {
   const epicsDir = join(fixture, 'notes', 'epics')
-  const env = { epicsDir, projectsDir: join(fixture, '.e2e-projects') }
+  // 夹具票一律建在 suyou 项目下（见 start() 的 project 字段）⇒ 调用方身份跟它对齐
+  const env = { epicsDir, projectsDir: join(fixture, '.e2e-projects'), callerProject: 'suyou' }
   return {
     async start(ticketId, writeSet) {
       return client(sdkPython, 'ticket-start', {

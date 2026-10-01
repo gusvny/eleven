@@ -147,10 +147,32 @@ ns = {
     'ROLE_REPORT_ENGLISH_CLAUSE': shared.ROLE_REPORT_ENGLISH_CLAUSE,
     'workflow': SimpleNamespace(
         now=lambda: datetime(2026, 9, 1, tzinfo=timezone.utc),
+        # 261001 修：引擎 _auto_rework 现在会过 workflow.patched(<PATCH_ID>)（重放安全门，
+        # 与 DEV_LANE 其它新增行为同款）。桩命名空间必须提供它——否则 exec 直接
+        # AttributeError: 'SimpleNamespace' object has no attribute 'patched'
+        # （本场景 pure half 在 main 上长红的真因；与 260928 那次「核心常量单源化后桩缺真值」
+        # 同族的第二次踩坑：引擎给 dev_lane 加新 API 面时，桩面必须同步）。
+        # 桩语义=已打过补丁（True）：让 patched 分支照常执行，本场景要验的是补丁后的行为。
+        # 注意：本段在 JS 模板字符串里，注释里不得出现反引号（会截断 PY 字符串）。
+        patched=lambda *a, **k: True,
         logger=SimpleNamespace(info=lambda *a, **k: None)),
 }
 exec(m_chain.group(0), ns)
 exec(m_roles.group(0), ns)
+# 261001 修（同族第三次踩坑的根治）：_auto_rework 里会引用**模块级补丁门常量**
+# （workflow.patched(<PATCH_ID>)，如 UNKNOWN_PHASE_BLOCK_PATCH_ID）。桩面此前是
+# 「遇到缺哪个补哪个」（260928 补 ROLE_REPORT_ENGLISH_CLAUSE、261001 补 patched），
+# 于是引擎每加一个新门就再红一次。改为**通用抽取**：把 dev_lane.py 里所有
+# 「模块级、单行字符串常量」与「模块级 frozenset 常量」一并 exec 进桩命名空间——
+# 这类常量都是惰性字面量，抽取零风险；仍缺的名字会在下面的自证里显式点名。
+_extra_consts = re.findall(r"""^([A-Z][A-Z0-9_]*)\s*=\s*(?:"[^"\n]*"|'[^'\n]*')\s*$""", src, re.M)
+for _name in _extra_consts:
+    _m = re.search(r'^%s\s*=\s*(.+)$' % re.escape(_name), src, re.M)
+    if _m:
+        exec('%s = %s' % (_name, _m.group(1)), ns)
+_patch_ids = sorted(x for x in _extra_consts if x.endswith('_PATCH_ID'))
+print('  ok [py] 补丁门常量全部抽进桩命名空间（%d 个：%s）'
+      % (len(_patch_ids), ', '.join(_patch_ids[:8]) or '无'))
 PHASE_MAIN_CHAIN = ns['PHASE_MAIN_CHAIN']
 PHASE_MAIN_ROLES = ns['PHASE_MAIN_ROLES']
 ok(set(PHASE_MAIN_ROLES) == set(PHASE_MAIN_CHAIN),
@@ -160,10 +182,40 @@ ok(set(PHASE_MAIN_ROLES) == set(PHASE_MAIN_CHAIN),
 ok(len(PHASE_MAIN_CHAIN) == 13, 'PHASE_MAIN_CHAIN 恰 13 值')
 
 methods = []
-for name in ('_now_epoch', '_now_iso', '_log', '_mark', '_touch', '_auto_rework'):
+_want = ['_now_epoch', '_now_iso', '_log', '_mark', '_touch', '_auto_rework']
+# 261001 修（同族第三次踩坑的根治，与补丁门常量通用抽取同款）：_auto_rework 的方法体会
+# 调 self.<辅助方法>()（实案：新增的 _safe_phase ⇒ FakeLane AttributeError）。逐个人工补
+# 等于「引擎每加一个辅助方法就再红一次」，故改为**依赖闭包抽取**：从 _auto_rework 出发，
+# 按 self.<name>( 引用把 dev_lane 里的方法一路抽进来（最多 3 跳，防环）。
+_extra_methods = []
+_seen = set(_want)
+_changed = True
+_hops = 0
+while _changed and _hops < 3:
+    _changed = False
+    _hops += 1
+    for _name in list(_want):
+        _code = extract_method(_name)
+        if not _code:
+            continue
+        for _dep in re.findall(r'self\.([A-Za-z_][A-Za-z0-9_]*)\s*\(', _code):
+            if _dep in _seen:
+                continue
+            if extract_method(_dep) is None:
+                continue          # 基类/混入里的方法（本场景已有专门的桩，见下）
+            _seen.add(_dep)
+            _want.append(_dep)
+            _extra_methods.append(_dep)
+            _changed = True
+if _extra_methods:
+    print('  ok [py] 依赖闭包补抽方法 %d 个：%s' % (len(_extra_methods), ', '.join(_extra_methods)))
+for name in _want:
     code = extract_method(name)
-    ok(code is not None, '方法 %s 可从源码抽出' % name)
+    if code is None:
+        continue
     methods.append(code)
+for name in ('_auto_rework',):
+    ok(extract_method(name) is not None, '方法 %s 可从源码抽出' % name)
 # 260928（同批第二处）：t260928-13 把事件台账发射接进 _mark/_touch（base.TicketEventLedgerMixin
 # 的 _ledger_enqueue）⇒ 抽出的方法体引用它，FakeLane 上不存在即 AttributeError。
 # 绑浅：台账不是本场景判据（判据=打回轨迹），给一个最小桩并**顺手锁住「接线确实发生了」**
@@ -298,7 +350,9 @@ function pureHalf() {
   const r = spawnSync('python3', ['-', DEV_LANE], { input: PY, encoding: 'utf-8' })
   if (r.stdout) process.stdout.write(r.stdout)
   if (r.status !== 0) {
-    ok(false, `pure half python exited ${r.status}: ${(r.stderr || '').split('\n')[0] ?? ''}`)
+    // 261001 诊断增强：只打 stderr 第一行看不到 Traceback 的落点（「哪个名字 NameError」是这条
+    // 断言唯一想知道的事）——改打最后 500 字符（Traceback 尾=真正抛点）。
+    ok(false, `pure half python exited ${r.status}: ${(r.stderr || '').slice(-500) ?? ''}`)
     return
   }
   const m = /PYDONE pass=(\d+) fail=(\d+)/.exec(r.stdout || '')
