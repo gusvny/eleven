@@ -40,8 +40,10 @@ const INTEG = resolve(HERE, "..");
 const REPO = resolve(INTEG, "..");            // 泳道仓根（本文件位置父二，位置无关合法面）
 const LIB = join(INTEG, "lib_pw_deps.mjs");
 
-const EIGHT = [
-  "t260903-07/sc_t01_click_no_chat_switch.mjs",
+// 单源消费方清单（原「八文件」）：261001 宿主令退休 sc_t01_click_no_chat_switch.mjs
+// 与其 baselines 兄弟后，本清单同步收窄——**退休一个场景必须同时扫这类在场清单**
+// （漏扫=本场景以「文件缺失」报红，2026-10-01 实案）。
+const CONSUMERS = [
   "t260903-07/sc_t02_chat_project_tag.mjs",
   "t260904-07/sc_session_charter_injection_journey.mjs",
   "t260905-09/sc_platform_context_fold_stacked.mjs",
@@ -111,8 +113,8 @@ if (gitProbe.status !== 0) {
   }
 }
 
-// ---------------- G1 读源断言（八文件 + lib 契约） ----------------
-for (const rel of EIGHT) {
+// ---------------- G1 读源断言（单源消费方清单 + lib 契约） ----------------
+for (const rel of CONSUMERS) {
   const f = join(INTEG, rel);
   if (!existsSync(f)) { ok(false, `G1 ${rel} 在场`, "文件缺失"); continue; }
   const text = readFileSync(f, "utf8");
