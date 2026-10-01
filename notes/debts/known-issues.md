@@ -2909,7 +2909,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （供给相位几乎没花时间）⇒ 批台预起要么没发生、要么起了随即收口/亡故，**没有把它供到消费它的那批场景手上**。
 > **后果**：①真链（engine/exclusive）这一面在**全量轮里也看不见**——不是「没跑」，是「跑了、全环境红」，人读报告会以为是环境问题而忽略这一面；
 > ②「被跳池只由全量轮覆盖」这条设计承诺（KI-078 的处置方向①）在**当前形态下并不成立**；③每条被跳池场景的真实状态仍然只能靠人工定点复跑（我今天为此烧了两轮）。
-> **定位（待专项）**：`integration/run_scenarios.py`（批台预起/消费缝判定与其「零批台消费者」分支、批台 id 的生成与跨相位一致性）、
+> **根因（261001 当日查实并已修，替换上文「预起没发生」的初判）**：**是场景把 runner 的批台拆了**，不是批台没起来。
+> 链条：`run_scenarios.batch_preboot` 起批台并把 `SANDBAR_STAGE_BATCH` 注入场景 → 消费缝 `lib_gate.require_stage` 走批模式、
+> 把自己**原始工程名**登记进 `_BATCH_REG`（返回态的 `project` 是**批台名**，另带 `request_project` 备查，其注释已写明这对分叉）；
+> 但一族场景收尾时调 `stage_down(stage_docker, state["project"])`——传进去的是**批台名** ⇒ `_BATCH_REG` 按键查不到（键是原始名）
+> ⇒ 落到 `do_down(批台名)` ⇒ **批台被拆** ⇒ 同轮后续每条批模式消费者全部 `ENV_FAIL 批台…不在位（runner 未预起/已收口/中途亡）`。
+> 复现（9 秒级，决定性）：`--only t260904-02-worker-fingerprint-gate,t260905-02-worker-lifecycle` → 第 2 条 env_fail「不在位」；
+> 单独跑第 2 条则 PASS——**因为它自己把批台拆了，断言（零残留/端口已释放）恰好成立**（这正暴露它是「拆批台族」的一员）。
+> **修法两处（261001 当日落 main）**：①缝面加固——`stage_down` 除按键查登记外，**再按值查**（返回态直接回传也认得），
+> 且工程名形状是批台（`batch-` 前缀）时**绝不 do_down**（拿不到 ns 就只报不拆；方向=宁可多认不可漏认）；
+> ②把「断言拆台语义」的批不兼容场景放进 `integration/batch_stage_exceptions.json`（它们必须自持台：`t260905-02-worker-lifecycle` /
+> `t260905-02-ticket-worker-watch-exit` / `t260905-02-console-duplicate-guard`，各附 why）。
+> **验收**：同一条 `--only` 两场景 → `pass=2 fail=0 env_fail=0`（批台只为 1 条消费者预起、收口干净）。
+> **初判更正留痕**：先前根据 `supply_used_sec=2.9` 猜「预起没发生」是错的——预起发生了，批台被同轮场景拆掉了；
+> 教训=别用聚合计数当机制证据，得追到调用点。
+> **仍未做（留 open）**：`t260916-24-dsh-face-meta` / `t260905-10-host-ruling-injection` / `t260907-07-epic-cli-ticket-start` 等
+> 同样传了返回态的 `project`（但不断言拆台语义）——缝面加固后它们不再拆批台，仍应逐条在带载轮里复核。
+> 定位（原线索保留）：`integration/run_scenarios.py`（批台预起/消费缝判定与其「零批台消费者」分支、批台 id 的生成与跨相位一致性）、
 > `integration/lib_gate.*`（require_stage / ns-acquire）、`integration/stage_docker.py`（`--kind batch` 生命周期与锁根新鲜度判据）。
 > **建议排查顺序**：①把「预起决策 + 批台 id + 消费缝失败时的具名原因」打进回执（现在只有场景侧的『不在位』，执行器侧零证据）；
 > ②同一泳道内多次调用执行器时批台 id/生命周期如何对齐（本次观察到进度文件被重写多次＝多相位调用）；③锁根「新鲜外来状态」判据是否该把**本轮自己的批台**排除。

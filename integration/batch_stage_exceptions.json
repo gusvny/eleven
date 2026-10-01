@@ -138,5 +138,17 @@
     "project_pattern": "t26092404-*",
     "reason": "被测对象=项目外置模板的建票全链＋续跑＋拒收面（真 Temporal＋真 worker＋桩大脑的 L3 旅程）：场景自持工程名 t260924-04-<pid> 调 require_stage（lib_gate 单点）——批模式下该调用走批台 ns-acquire 申请本场景命名空间（t260921-06 批级共享，零容器开销），批台不在位=exit 2 环境红（绝不静默回落）。故它是**批台消费者候选**，但注册池=main（第 4 元 serial=无池标注的串行条目，pool_of 归 main）：按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免（不擅自改他人条目的池=不改变闸的跑法范围），工程名前缀沿用清单既有约定。",
     "evidence": "integration/t260924-04/sc_project_template_ticket_journey.py:203 stage_mod, stage = require_stage(fail, \"t260924-04-%d\" % os.getpid(), \"t260924-04\")；require_stage=integration/t260904-02/lib_gate.py:137（SANDBAR_STAGE_BATCH 在场 ⇒ 不起台、向批台申请 ns）"
+  },
+  {
+    "entry": "t260905-02-worker-lifecycle",
+    "why": "被测对象=worker 起/退生命周期与**拆台后零残留/端口释放**（三处断言读 down 回执的 residue 与端口面）——批台恰是「不拆的共享台」，批模式下既无自有台可拆、批台端口也不会释放，形态与断言互斥（261001 实测）。"
+  },
+  {
+    "entry": "t260905-02-ticket-worker-watch-exit",
+    "why": "同族：断言拆台后零残留/端口释放（residue+端口三处）；批模式无「自有台已拆」这一事实可测。"
+  },
+  {
+    "entry": "t260905-02-console-duplicate-guard",
+    "why": "同族：断言拆台后零残留/端口释放；批台不拆 ⇒ 断言不可满足，须自持台。"
   }
 ]

@@ -133,6 +133,10 @@ def require_bench(fail):
 # 两者分叉——所以返回态另带 request_project 备查）。
 _BATCH_REG = {}
 
+#: 批台工程名前缀（单点，与 run_scenarios._batch_project_name() 同源）：形状即批台 ⇒
+#: stage_down 绝不 do_down（261001 KI-169：误拆批台=整池环境红）。
+BATCH_PROJECT_PREFIX = "batch-"
+
 
 def require_stage(fail, project, namespace):
     """起 temporal-only docker 舞台（stage_docker 单点入口）。
@@ -190,8 +194,25 @@ def stage_down(stage_mod, project):
     if isinstance(project, dict):
         project = project.get("request_project") or project.get("project")
     batch = _BATCH_REG.pop(project, None)
+    if batch is None:
+        # 宽容面（261001 实案，KI-169）：调用方直接回传 require_stage **返回态的 project**
+        # ——批模式下那个值是**批台工程名**，旧实现据此查不到登记 ⇒ 落到 do_down(批台名)
+        # ⇒ **把 runner 的批台拆了** ⇒ 同一轮里后续每条批模式消费者全部 env_fail
+        # 「批台不在位（runner 未预起/已收口/中途亡）」。巡检全量轮实测：429 条里 25 条
+        # 同一具名原因，engine+exclusive 整整一面看不见（KI-169）。
+        # 判据补两条：①按**值**在登记表里找（不只看键）；②形状即批台（batch- 前缀）时
+        # **绝不 do_down**——拿不到命名空间就只报不拆。方向=宁可多认，不可漏认。
+        for k, v in list(_BATCH_REG.items()):
+            if v[0] == project:
+                batch = _BATCH_REG.pop(k, None)
+                break
     if batch is not None:
         return stage_mod.ns_drop(batch[0], batch[1])
+    if str(project or "").startswith(BATCH_PROJECT_PREFIX):
+        sys.stderr.write("[lib_gate] stage_down 收到批台工程名 %r——不拆（批台生命周期归 runner；"
+                         "本次调用未持有其命名空间，只报不拆）\n" % project)
+        return {"skipped": True, "project": project, "residue": [],
+                "note": "批台工程名不拆（生命周期归 runner；见 KI-169）"}
     return stage_mod.do_down(project)
 
 
