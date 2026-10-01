@@ -3189,3 +3189,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 或②给 `blocked_detail` 增第三档 `unattributable`（带复验回执），闸只对"复验仍红"的记账。
 > 代价：每轮多 ~1-2 分钟单跑；收益：账目可信 + 不再冤枉 + 不再靠重跑碰运气。
 > **实测留痕**：261001 夜 23:40–23:45 integration 岗对 t261001-19 四条账逐条单跑（本段即回执）。
+
+## KI-183 引擎单测**不密闭**（顺序/全局状态依赖）⇒ 会在并发窗把 `merge_check` 判红，挡掉与它无关的票（261001 夜间实测，t261001-19 被它挡在合并门前）
+> **现象**：t261001-19（只改守望者插件 TS）的 `merge_check` 报红：`verify_lane_code` 跑 3136 条引擎单测，**挂 1 条**——
+> `server/engine/tests/test_t260917_09_tests_streak.py::test_g_summary_line_single_and_last`（`1 failed, 3136 passed, 1 skipped, 469.14s`）。
+> **对照实验（三条，同一测试）**：
+> ① 在 **19 的树里单跑** → `1 passed in 0.42s`；
+> ② 在 **main 上单跑整文件** → `37 passed in 3.67s`；
+> ③ 在 **main 上单跑该测试** → `1 failed`。
+> ⇒ 该测试**既不密闭也不稳定**：它的结果取决于"跟谁一起跑、在哪棵树跑"，而不是被测代码对不对。
+> **机理线索**：它 `monkeypatch` 掉 SCENARIOS 后直接调 `rs.reprobe_main([...])`，并断言 stdout 恰有一行 `REPROBE_SUMMARY`——
+> 而 reprobe 路径依赖运行期状态（锁/环境/树状态）；`_lock_off(monkeypatch)` 只关了锁这一维，其余全局状态（env、树脏、并发轮）仍会改变它的产出。
+> **危害**：①它会把**与它无关**的票挡在合并门前（今晚 19 实证；且闸把它记成"泳道内 verify_lane code 绿灯"这一条，看起来像票的问题）；
+> ②在并发窗（今晚常态 3 条闸）出错概率上升 ⇒ merge 门随机器负载而绿红翻转，**放行口径被机器噪声污染**；
+> ③它是"单测不密闭"这一族的一个样本——同族还会以别的形式出现（读全局 env/共享临时目录/依赖执行顺序）。
+> **出路**：①把该测试做成密闭（自带 env/临时根/显式注入，不依赖运行期锁与树状态；断言对象改为"该调用的返回结构"而非"整段 stdout 恰一行"）；
+> ②在 `merge_check` 侧对 `verify_lane_code` 的红做**单条复现**再判（与 KI-182 同一方向：先复验、再归因）；
+> ③同族排查：扫 `server/engine/tests/` 里"直接调 reprobe_main/run_scenarios 并断言 stdout"的样本，登记清单。
+> **本次处置**：判为**非本票账**（三条对照 + 19 只改 TS 插件），对 19 发 `retry_qc` 重验 merge_check。
