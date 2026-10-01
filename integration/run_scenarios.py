@@ -2003,6 +2003,21 @@ SCENARIOS = [
     ("t260930-01-known-red-round-exempt",
      "在册红不进每轮路径·黑盒契约（t260930-01，灰盒 L2/L3，真执行器子进程+夹具册子，离线秒级零 docker 零 Temporal 零端口；宿主裁 260930「B 档只摘在册」）：动机是实测——一轮全量的墙钟由一条串行链单独决定（9 条 460s ≈ 整轮 460s），而链上 9 条里 7 条是挂账册在册条目、6 条非绿灯，等于每轮都在等已知的、已记过账的故障慢慢跑。A 开关开（泳道轮注入）：在册红**不进本轮注册面**（expected 相应减一）、不在册的照旧跑，且必须出现三条具名面——INTEG_KNOWN_RED（跳过 N 条 + 名单 + 观察位=每日巡检与合并前全量）、INTEG_KNOWN_RED_NOTE（**未跑 ≠ 判绿**）、汇总 known_red_skipped/known_red_names，且具名面只认本轮注册面（点名轮之外的在册条目不进名单）；B 开关关（巡检/人工跑/合并前全量）：逐字节旧行为，零豁免行、注册面不缩；C fail-closed 三态：册子缺席/坏 JSON/形状不对 → **一条都不豁免**（照跑）且 stderr 具名点名原因；认不得的 verdict 词与畸形条目一律照跑（宁慢勿窄）；D 与台账复用的守恒：真册冒烟下 ran+reused==expected 仍成立。intent 分工：本条锁「已在册的不重跑」（判据=挂账册 verdict 词表），t260930-01-ledger-reuse-round 锁「同代码状态已验过的不重跑」（判据=台账四键），两条都改注册面构成但判据不同源、互不替；名册 schema 卫生归 integration/tests/test_t260923_known_red_baseline.py，闸侧豁免记账归 shared.blockers_known_red_adoption 与其 L1。安全红线：零端口零 docker 不触 3099/7233；真册只读、夹具册子经路径缝投临时目录",
      "python3 integration/t260930-01/sc_known_red_round_exempt.py", "ro", "serial"),
+    # ---- 执行器授权面（261001 夜间推进；integration 岗位资产，epic project-executor）----
+    ("executor-authority-gate",
+     "执行器授权闸的机械面（灰盒 L3，离线秒级零 docker 零 Temporal 零端口；261001 夜间由 integration 岗位建立）："
+     "锁「执行器能做什么只由项目级 grants 声明说了算」这组承诺——S1 声明缺席⇒拒收且文案点名声明文件路径、拒收落审计行；"
+     "S2 已授予⇒放行且带 enforced 与溯源（哪个键定了值）；S3 元权限 manage-grants 对执行器永久拒收且**先于**声明读取（声明缺席/畸形也锁得住）；"
+     "S4 畸形/不可读声明 fail-closed 绝不静默放行；S5 夜间时间盒窗口内放行、过期回落声明值；"
+     "S6 固定操作面外的 op 拒收 + 引擎 op→授予面映射值全 ∈ GRANT_OPS 且映射面不含元权限；"
+     "S7/S8 真 IO 端到端（子进程 + 临时 SANDBAR_PROJECTS_DIR + 真声明文件）：未授予拒收/已授予放行，拒收落真审计文件 executor-grants-audit.jsonl；"
+     "S9 写面反锁：执行器通道写自己的授予清单一律拒收、宿主通道可写；"
+     "S10 边界子用例：非执行器通道（env/none）不受闸＝零回归红线（变异自证实测——缺此子用例时把「只对执行器通道设闸」整条拆掉，本场景照样全绿）。"
+     "intent 分工：本条守引擎判定核的语义与边界；「身份缝」——声明 caller_project 即免闸的绕过（KI-177）归 t261001-20，"
+     "读出面「派生能力矩阵冒充已授予」归 t261001-21，守望者报警面（stall 不可达/去重键盖生产）归 t261001-19；"
+     "这三处修法落地后补对应断言**须走票**，不得为取绿放宽期望值。实案锚：261001 某常驻会话在项目零授予下签了两笔 merge。"
+     "零 docker/零 Temporal/零端口、不触 3099/7233；引擎模块导入失败=ENV_FAIL exit 2",
+     "python3 integration/executor-loop/sc_executor_authority_gate.py", "ro"),
 ]
 
 CMD_TIMEOUT = 900
