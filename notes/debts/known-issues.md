@@ -2946,4 +2946,38 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 护栏后不再成灾，但根因未查：是它的夹具隔离被环境侵入，还是它对「收窄面」本身敏感）——须专项读它两处 `vl._integ` 的返回差异；
 > ②`verify_lane._integ` 起子进程处是否也该走 `clean_narrowing_env`（若该处清理，则本护栏只作兜底）——按 L12 单点口径这更彻底，待定；
 > ③被中止的那条 engine 池观察轮（75/87）要不要在安静窗口重跑。
+>
+> **261001 第二轮复盘（13:0x，风暴复发并收口；本条的两个真缺**都已落机械网**）**：
+> **复发形态与第一轮不同，这才是要害**：上一轮的收口（按**名字**杀 `run_scenarios.py` / 场景进程 +
+> `stage_docker down` 每台批台）**只压住了水面**——13:03 复查时族内仍有 **156→266 个活进程**、
+> **19 台批台**，且杀掉 runner 后 25 秒内又长回 2 个（**越杀越多**：杀掉 worker 恰好触发它自己的
+> supervisor 重拉）。**判据打偏的根因**：那些进程的命令行是**相对路径**
+> （`integration/run_scenarios.py --only t260924-05-inspection-suite-ran-parity`），cwd 才是身份——
+> 实测全部落在 `/private/var/folders/…/T/t26091004-sc-tuUv2C/fixture/.lane/t260910-77/`。
+> **巢的来路（已核到 file:line）**：`integration/t260910-04/sc_console_paused_list.mjs` 在 10:37 建夹具树
+> （`mkdtempSync(tmpdir(), 't26091004-sc-')`，:200；正常路径 `finally` 里 `rmSync`，:521），
+> 克隆自 main@`a2f1548`（10:21）；场景被 **900s 执行器帽**杀掉 ⇒ `finally` 没跑 ⇒ **树 + 台内后代进程
+> 一起活过收口**（引擎 admin.log 止于 10:49，树活到 13:05，2 小时 16 分）。
+> 那棵树里的代码是**建树那一刻的副本**——逐字 grep 实测：`RUNNER_CAP_MACHINE` / `INTEG_RUN_DEPTH` /
+> `BASELINE_SELF_NARROW_DROP` 三个 KI-170 护栏**一个都不在**（三处计数皆 0）⇒ 我在 main 上加的护栏
+> **到不了冻结副本**，这也是前两版护栏在真实风暴里零命中的原因。
+> **收口（本轮有效的那一手）**：按 **cwd 族**枚举（`lsof -a -p PID -d cwd`）后整族 SIGKILL
+> （4 轮共 266 个，静默 10s 后族内=0），再 `stage_docker.py down --project` 逐台拆 19 个批台，
+> 清 `/tmp/sandbar-integ-runners` 的死登记（pid 已死的条目）。
+> **已落 main 的两条判据面修法**：
+> ① `c5ea3dd` —— `verify_lane` 基线点名的**自指收窄**护栏：点名集与本层 `SANDBAR_SCENARIO_ONLY`
+> 有交集 ⇒ 摘掉并具名（`BASELINE_SELF_NARROW_DROP`）+ 退回整跑（方向更宽、不假绿，只防递归）；
+> ② `056e460` —— 清扫器 `sweep_tmp_fixtures.py` 新增**活载体**判据（按 cwd；越龄条目里有活进程 =
+> 保留并点名；`--kill-carriers` 才先收后删；探测面缺席一律具名，不当作「没有载体」），
+> 并把漏掉的前缀 `t26091004-sc-` 补进白名单（前后端单源）——实测 3 条存量 / 最老 4.6h / ≈849MB 已扫除。
+> 回归：`integration/tests/test_t261001_fixture_carriers.py`（5 条）。
+> 全族排查（「实报即全族线索」）：grep 出 30 个未入白名单的 mkdtemp 前缀，逐个实测存量**全为 0**
+> （生产者侧各自回收，或前缀落在 `/tmp` 而非 `$TMPDIR`）——有存量的只此一族。
+> **仍 open（下一轮必须收）**：
+> ⓐ **帽杀的后代回收**：场景被 900s 帽杀时，台内后代进程为何活下来（组杀打偏？还是走了
+> 「pgid 坏档 → 跳过组杀留痕」那条路？`server/engine/tests` 里有该形态的用例名）——需要一条
+> **L3 断言**：「场景任一终态（正常/报错/超时/帽杀/取消）之后，其夹具树内不得有 cwd 落在其中的活进程」；
+> ⓑ **冻结副本**：新克隆会带上护栏，**老克隆不会**——现由载体判据兜底（6h 龄线），但是否要在
+> `run_scenarios` 起跑前对「本树代码副本缺护栏」具名告警，待定；
+> ⓒ 用**新建夹具**复现一次完整触发链（含 `--kill-carriers` 的实测收口），确认机械网在真风暴里命中。
 
