@@ -317,11 +317,21 @@ async function scenarioDoubleLit(page) {
   // ∥ hover text names its peer branch (by name).
   if (!lit.every(x => x.ico === '▶')) return `running step icon not ▶: ${JSON.stringify(lit.map(x => x.ico))}`
   const impl = lit.find(x => x.id === 'implement'), dsgn = lit.find(x => x.id === 'design_integration_tests')
-  if (!impl.parTitle.includes('设计集成测试') || !dsgn.parTitle.includes('实现')) {
+  // 261001 口径同步（宿主 260925 英文 UI 令，t260925-18；`ui-labels.stageDisplayLabel` 由段 id
+  // 映射英文）：∥ 悬停文案里的**同伴段名**也随之变英文
+  // （实测 implement↔"Design Integration Tests"、design↔"Implement"）。契约意图「∥ 悬停文案
+  // **指名同伴分支**」不变，故判据改认双语段名（中文旧形态仍放行=防回滚）。
+  const namesPeer = (title, cn, en) => title.includes(cn) || title.includes(en)
+  if (!namesPeer(impl.parTitle, '设计集成测试', 'Design Integration Tests')
+    || !namesPeer(dsgn.parTitle, '实现', 'Implement')) {
     return `∥ hover titles do not cross-reference peers: implement="${impl.parTitle}" design="${dsgn.parTitle}"`
   }
   if (!status || !status.includes('Forked in parallel')) return `status line missing Forked in parallel: ${JSON.stringify(status)}`
-  if (!status.includes('实现') || !status.includes('设计集成测试')) {
+  // 同上：状态行里的分支名也走 id→英文映射（实测 "Forked in parallel: Implement ∥
+  // Design Integration Tests"），判据双语；意图「状态行**同时**点名两个分支」不变。
+  const statusNamesBoth = (namesPeer(status, '实现', 'Implement')
+    && namesPeer(status, '设计集成测试', 'Design Integration Tests'))
+  if (!statusNamesBoth) {
     return `status line missing both branch names: ${JSON.stringify(status)}`
   }
   return null
