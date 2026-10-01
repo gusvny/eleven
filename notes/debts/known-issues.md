@@ -3092,3 +3092,52 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > （按 CommonMark 的左右侧翼规则，或最小改法：`_` 强调要求两侧为空白/标点/行首行尾）；
 > ②同族清账：`*` 的同款正则在 `markdown.ts:53` 也有词内风险（`a*b*c`），须一并核；
 > ③复核文档浏览器（knowledge）现有内容里是否已有被改写的历史渲染。
+
+## KI-175 报警去重键**不含 home/preset 路径** ⇒ 一个临时 DSH_HOME 的测试实例静音真宿主报警 12 小时（261001 实测并开票 t261001-19）
+> **现象**：真宿主上「执行器起不来」从 15:44:47 到 21:12:30 每 ~5 分钟 refused 一次（共 18+ 行，`~/.sandbar/watchdog/sandbar.executor-session.jsonl`），
+> 而 `sandbar.alerts.jsonl` 里对应规则**一条都没有**；唯二的 `executor_missing` / `executor_session_refused`（17:17:40）点名的是
+> **临时 home**（`/var/folders/…/suyou-capture-lane-…/.agent-presets/…`）——scenario/capture-lane 实例，但 target 同为 `project sandbar`。
+> **定位**：`server/plugins/watchdog/src/host/alert-rules.ts:31` 去重键 = 规则名 + 目标（项目），**不含 home/preset 路径**；冷却默认 12 小时（同文件 :66）。
+> ⇒ 测试实例响过一次，真宿主的同一键被静音到次日 ~05:17。
+> **危害**：**测试实例能盖住生产报警**——"该响不响"从单点故障升级为"报警通道可被无关实例污染"。
+> **出路**：去重键纳入 home/preset 路径；或禁止临时 home 实例写生产 alerts 文件。已开票 **t261001-19**。
+
+## KI-176 执行器 `stall` 报警**不可达**：静默计时每拍被自己刷新（261001 实测并开票 t261001-19）
+> **现象**：面板报 `liveness.executor.state='advancing'`，而它自己的 evidence 写着「**无新推进**但未达阈值（静默 **1** < 15 分钟）」——
+> 同一时刻事件账本已静止 4.5 小时（最后一行为 t261001-13 merge/closed 18:26:01）、执行器会话档自 21:17:30 创建后未动。
+> 「静默 1 分钟」永远不增长。
+> **定位**：`server/plugins/watchdog/src/host/liveness.ts:76-78` 的"未达阈值"支**不设 state**（继承 base 的 `advancing`）；
+> `server/plugins/watchdog/src/host/core.ts:390` 又 `if (state==='advancing') lastProgressAt = nowMs` ——
+> **刷新了静默计时所依赖的那个时间戳** ⇒ `silentMs >= stallMinutes*60_000` 那一支（state='stalled'）**永远进不去**。
+> **危害**：`stall` 还在项目 redline 名单里，但它是死代码：**执行器真挂了也报不出来**，面板还会一直显示"健康"。与 KI-175 互为镜像（一个是该响不响，一个是只响健康）。
+> **出路**：未达阈值给**独立状态**（idle/grace），且只在**真推进**（账本/会话档/唤醒三源）时刷新计时；补一条"真静默必达 stalled"的单测（当前构造上不可能过）。已开票 **t261001-19**。
+
+## KI-177 执行器授权闸**被"声明调用方身份"整条绕过** ⇒ 零授予下两笔代签（261001 实测并开票 t261001-20）
+> **现象**：项目 sandbar **没有** `executor-grants.json`（零授予），却有两笔以「宿主（经 sandbar 项目会话代签）」署名的 merge：t261001-12 → `16710fa`（17:58:22）、t261001-13 → `90dabd3`（18:26:01）；
+> 而 `executor-grants-audit.jsonl` **不存在** ⇒ 声明检查**零拒收**（= 那两次写从未过闸）。
+> **定位**：`server/tools/ticket.py::_identity_v` —— 传 `caller_project`（arg）或 `SANDBAR_CALLER_PROJECT`（env）即返回 src `arg`/`env`；
+> **只有完全不声明身份、从 cwd 推导时**才是 src `cwd`。而 `server/engine/client.py::_executor_channel` + `executor_grants.judge_core`（约 :224）
+> **只在 `channel == EXECUTOR_CHANNEL('cwd')` 时判定**，其余通道 `allowed, enforced=false`。
+> ⇒ **闸只防"不声明自己是谁"的调用方**；规范用法（声明 caller_project；light-lane 还强制要求）恰好整条绕过。
+> **危害**：面板/声明故事承诺的"谁能签的单一真源"在正常调用路径上**不成立**——一个 prompt 自带授权的会话可以零授予签、重跑、开票、暂停、取消。
+> **出路**：闸按**可信会话身份**（非可伪造的调用方声明）判定，机械地定义"谁是执行器"；零授予时该会话的写一律拒收并记审计。已开票 **t261001-20**。
+
+## KI-178 grants 读出面用「派生能力矩阵」冒充「已授予」⇒ 执行器第一轮即误读（261001 实测并开票 t261001-21）
+> **现象**：执行器会话（session-09ca0247）首轮自述原文：「acceptance says grants for project sandbar stay undeclared (zero-grant).
+> But the grants API shows grants exist for sandbar for three templates. Hmm, that's interesting」——它把面板返回的**能力矩阵**当成了**已授权**。人看同一页会得出同样结论。
+> **定位**：`GET /sandbar-executor-panel/api/grants` 返回 `grants.rows[]` = 逐模板的**派生能力**（`reason: derived: fixed op × template facts`，**无 granted 字段**），
+> 而真声明在顶层 `declaration`/`declaration_state`——表格渲染的是 rows，声明面不在表里。
+> **危害**：读错"已授予"的代价是**以为一个零授予的执行器可以签字**；也让人审无法一眼看出"到底授了什么"。
+> **出路**：每行带 `granted` 布尔（源自声明；未声明 ⇒ 全 false 且显式标 undeclared）+ 时间盒生效值；
+> 能力与已授予在 payload 与 UI 措辞上分家；未声明项目必须读成"零授予"而不是"有表"。已开票 **t261001-21**。
+
+## KI-179 事件账本迁移期的**双写分叉**：老 worker 写旧路径、新 worker 写新路径（261001 实测；迁移是 copy-only 快照，重启前必须补拷）
+> **现象**：t261001-12 把事件账本迁到 `~/.sandbar/projects/<项目>/ledger/events.jsonl`（本票 17:58 落地 `16710fa`）后，
+> **两个路径同时在写**：新路径 22:56:43 有 t261001-19 的 `implement/awaiting`+`workspace/ready` 行（新起的 worker 用新代码），
+> 旧路径 `server/ledger/sandbar.jsonl` 停在 18:26:01 / 1550 行（仍在跑的老 worker 用旧代码）。
+> **定位**：迁移是**按拷（copy-only）快照**——合并回执自己写明：`~/…/projects/<k>/ledger/events.jsonl` 是拷贝时刻的快照，
+> 而写者=引擎 worker、读者=控制台插件宿主，**两者都是长命进程**，不重启不会切到新路径。
+> **危害**：①同一份账本分叉成两本，谁读哪本取决于进程新旧（本夜实证：守望者读新本，所以唤醒链是通的；老 worker 的后续事件进旧本）；
+> ②若在补拷之前重启 worker，**17:35 之后、重启之前那批事件永久不在新本**（差 17 行 sandbar / 9 行 nusuyou，回执实测）。
+> **纪律（非代码缺陷，属操作顺序）**：**先补拷、再重启**；写者与读者**都要重启**；重启属宿主动作（integration 不得擅动控制台/引擎）。
+> **出路**：列入待宿主批准清单；迁移票收口时把"补拷+双重启"作为收口步骤写进报告，并在新本上核对行数连续（旧本尾行 == 新本可见尾行）。
