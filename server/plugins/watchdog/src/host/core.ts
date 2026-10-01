@@ -401,6 +401,26 @@ export class Watchdog {
       if (this.liveness.state === 'stalled') {
         await this.raise({ rule: 'stall', target: sid, level: 'redline', title: `executor 停摆（${sid}）`, detail: this.liveness.evidence })
       }
+      // t261001-13：executor 缺席必须响——「账本有事件/看板有票但 executor 从未起来」
+      // 不是正常态，是整个推进环的死寂（真机 261001 实证：18 次 refused 零报警）。
+      // liveness.state==='missing' 且项目有活 → executor_missing（redline 名单内）。
+      const hasWork = this.ledgerRows.length > 0 || (board.ok && board.rows.length > 0)
+      if (this.liveness.state === 'missing' && hasWork) {
+        await this.raise({
+          rule: 'executor_missing', target: this.project, level: 'redline',
+          title: `executor 会话缺失（project ${this.project}）`,
+          detail: this.ensureState?.reason ?? this.liveness.evidence,
+        })
+      }
+      // 代建/收养面被点名拒绝（refused-*）→ 独立规则响一次（去重冷却节流），
+      // 拒绝原因（如 preset 未安装）进 detail——拒绝不再是只有面板才看得见的静默。
+      if (this.ensureState !== null && typeof this.ensureState.last_action === 'string' && this.ensureState.last_action.startsWith('refused')) {
+        await this.raise({
+          rule: 'executor_session_refused', target: this.project, level: 'redline',
+          title: `executor 会话代建被拒（project ${this.project}）`,
+          detail: this.ensureState.reason ?? this.ensureState.last_action,
+        })
+      }
 
       // 自锁：provider 不可用 = unknown 显式（绝不冒充 none）。
       const pend = await this.pendingProvider()

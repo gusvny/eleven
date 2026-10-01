@@ -46,7 +46,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
     sound: true,
     desktop: true,
     night: { start: '23:00', end: '07:30', policy: 'redline-only' },
-    redline: ['reconcile_mismatch', 'ledger_unreadable', 'engine_down', 'self_lock', 'stall'],
+    redline: ['reconcile_mismatch', 'ledger_unreadable', 'engine_down', 'self_lock', 'stall', 'executor_missing'],
     keep_days: 14,
   },
 }
