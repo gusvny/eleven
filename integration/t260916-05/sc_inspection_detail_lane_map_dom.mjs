@@ -319,9 +319,19 @@ async function scenarioInflight(page) {
       return `节点集≠阶段声明全集：得 [${ids.join(',')}] 期望 [${want.join(',')}]`
     }
     const text = nodes.map(x => `${x.text} ${x.title}`).join(' | ')
+    // 261001 口径同步（宿主 260925 英文 UI 令，t260925-18）：段名不再回显拓扑里的中文 label，
+    // 而是经 `ui-labels.stageDisplayLabel(id)` 由**段 id** 映射成英文（setup→Setup、inspect→Inspect、
+    // suite→Suite、produce→Produce、report→Report、close→Close）。契约意图「图面节点与标签**全部
+    // 来自拓扑声明**（不硬编码、不额外造段）」不变：节点集已按 data-id 全等断言（上一行），
+    // 这里把「标签来自拓扑」补成**映射已生效**的证据——中文 label 不得再出现在图上
+    // （否则=映射没生效/页面跑的是旧 bundle），且每个节点必须有点名（不得空白）。
     for (const lbl of INSPECTION_LABELS) {
-      if (!text.includes(lbl)) return `节点标签缺拓扑词「${lbl}」（标签须全部来自拓扑）：${text.slice(0, 240)}`
+      if (text.includes(lbl)) {
+        return `段名未走 id→英文映射（仍回显拓扑中文 label「${lbl}」）：${text.slice(0, 240)}`
+      }
     }
+    const unnamed = nodes.filter(x => !String(x.text).replace(/[^A-Za-z0-9]/g, '').trim())
+    if (unnamed.length) return `有节点没有点名（空白标签）：${JSON.stringify(unnamed.map(x => x.dataId))}`
     const human = nodes.filter(n => n.dataKind === 'human')
     if (human.length !== 1 || human[0].dataId !== 'close') {
       return `人门虚线圈应恰落 close（data-kind=human）：${JSON.stringify(human).slice(0, 160)}`
