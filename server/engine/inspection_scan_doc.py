@@ -379,9 +379,9 @@ def main() -> None:
     try:
         result = run_doc_face_scan(
             Path(args.repo_root), Path(args.docs_root) if args.docs_root else None)
-        print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "result": result}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     except ScanError as e:
-        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
         sys.exit(1)
 
 

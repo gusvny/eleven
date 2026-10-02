@@ -487,5 +487,5 @@ def run(args):
 
 if __name__ == '__main__':
     import sys
-    print(json.dumps(run({'op': 'list'}), ensure_ascii=False, indent=1))
+    print(json.dumps(run({'op': 'list'}), ensure_ascii=False, indent=1).encode("utf-8", "backslashreplace").decode("utf-8"))
     sys.exit(0)

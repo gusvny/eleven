@@ -737,9 +737,9 @@ def main() -> None:
     roots = tuple(s.strip() for s in args.scan_roots.split(",") if s.strip()) if args.scan_roots else None
     try:
         result = run_face_scan(args.face, Path(args.repo_root), roots)
-        print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "result": result}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     except ScanError as e:
-        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
         sys.exit(1)
 
 

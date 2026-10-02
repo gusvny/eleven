@@ -227,9 +227,9 @@ def main(argv):
         else:
             raise ReviewError('未知 op: %r（save/show/rework）' % op)
     except (ReviewError, json.JSONDecodeError) as e:
-        print(json.dumps({'ok': False, 'error': str(e)}, ensure_ascii=False))
+        print(json.dumps({'ok': False, 'error': str(e)}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
         return 1
-    print(json.dumps({'ok': True, 'result': res}, ensure_ascii=False))
+    print(json.dumps({'ok': True, 'result': res}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     return 0
 
 

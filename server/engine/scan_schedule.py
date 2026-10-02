@@ -142,7 +142,7 @@ def main() -> None:
             note = argv[i + 1]
             i += 2
         else:
-            print(json.dumps(_err("未知参数 %r。%s" % (argv[i], USAGE)), ensure_ascii=False))
+            print(json.dumps(_err("未知参数 %r。%s" % (argv[i], USAGE)), ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
             return
     try:
         if sub == "describe":
@@ -160,7 +160,7 @@ def main() -> None:
             result = _err("未知子命令 %r。%s" % (sub, USAGE))
     except Exception as e:  # infrastructure failure -> structured receipt
         result = _err("%s: %s" % (type(e).__name__, e))
-    print(json.dumps(result, ensure_ascii=False))
+    print(json.dumps(result, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
 
 
 if __name__ == "__main__":

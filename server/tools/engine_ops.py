@@ -123,7 +123,7 @@ def _err(msg: str, **extra) -> dict:
 
 
 def _print(payload: dict) -> int:
-    print(json.dumps(payload, ensure_ascii=False, default=str))
+    print(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8", "backslashreplace").decode("utf-8"))
     if payload.get("ok"):
         return 0
     return int(payload.get("exit", ALERT_EXIT))

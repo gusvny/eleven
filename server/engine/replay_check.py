@@ -218,7 +218,7 @@ def main() -> int:
     except Exception as e:  # infrastructure failure (connect error etc.) -> structured receipt
         out = {"ok": False, "error": "%s: %s" % (type(e).__name__, e), "results": []}
     out.update(meta)
-    print(json.dumps(out, ensure_ascii=False))
+    print(json.dumps(out, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     return 0 if out.get("ok") else 1
 
 

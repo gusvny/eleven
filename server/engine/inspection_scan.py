@@ -846,9 +846,9 @@ def main() -> None:
     args = ap.parse_args()
     try:
         result = run_test_face_scan(Path(args.repo_root), Path(args.scenarios_path) if args.scenarios_path else None)
-        print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "result": result}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     except ScanError as e:
-        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
         sys.exit(1)
 
 

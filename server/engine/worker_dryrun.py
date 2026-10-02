@@ -89,7 +89,7 @@ def main() -> int:
         # 机器按退出码判红，混读面不被污染——场景 A2 契约）
         print("worker-dryrun: FAIL %s: %s" % (type(e).__name__, e))
         return 1
-    print(json.dumps(summary, ensure_ascii=False))
+    print(json.dumps(summary, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     return 0
 
 

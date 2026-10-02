@@ -88,7 +88,7 @@ def _err(msg: str) -> Dict[str, Any]:
 
 
 def _emit(payload: Dict[str, Any], exit_code: int = 0) -> None:
-    print(json.dumps(payload, ensure_ascii=False))
+    print(json.dumps(payload, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     if exit_code:
         sys.exit(exit_code)
 
