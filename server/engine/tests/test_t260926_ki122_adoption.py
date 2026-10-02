@@ -51,10 +51,19 @@ def _roster_payload(entries):
     return {"entries": [dict({"name": n}, **v) for n, v in entries.items()]}
 
 
-def _stamped(name, *, verdict="booked", home="h", booked_at="2026-09-23T19:59:23+08:00",
+def _stamped(name, *, verdict="booked", home="h", booked_at=None,
              booked_sha="f61f239c5e05ea691ae07e1abed25eb3f827ff77"):
     """单条带证据戳的名册条目（时间证据用例的最小载荷）。语义类用例一律用它自造夹具
-    （见下「夹具取材纪律」）。"""
+    （见下「夹具取材纪律」）。
+    `booked_at` 缺省=**从真名册极值推导**（取最晚戳），不写字面量（261002 修：原缺省
+    写死 2026-09-23T19:59:23+08:00——261002 退役批删掉全册最小戳行后 `BASE_BEFORE`
+    （min 戳−1 日）前移，该写死戳从「晚于基点」翻成「早于基点」，象限④⑤⑥ 同时碎，
+    真因读起来像判据坏了。补完「凡与名册内容相关的量一律从真名册推导」纪律的漏网
+    字面量：取最晚戳则恒在 BASE_BEFORE（min−1 日）之后、BASE_AFTER（max+1 日）之前，
+    「时间成立/不成立」两族象限都自适应，册子怎么缩涨都不碎。）"""
+    if booked_at is None:
+        _, e = _latest_stamp(_REAL_ENTRIES)
+        booked_at = e["booked_at"]
     return {"name": name, "verdict": verdict, "home": home, "note": "n",
             "booked_at": booked_at, "booked_sha": booked_sha}
 
@@ -390,10 +399,10 @@ def test_a8_time_evidence_quadrants_positive_and_negative():
     bad3 = blockers_known_red_adoption(["cap-a"], pl, ticket_base_at=BASE_BEFORE,
                                        ticket_base_source="test")
     assert bad3["adopt"] is False and bad3["why"] == "stale-evidence"
-    # ⑥ 边界：戳 == 基点（严格早于才算）→ 拦
+    # ⑥ 边界：戳 == 基点（严格早于才算）→ 拦（基点取夹具自身戳，261002 与缺省推导同源）
     same = {"entries": [_stamped("cap-a")]}
     eq = blockers_known_red_adoption(["cap-a"], same,
-                                     ticket_base_at="2026-09-23T19:59:23+08:00",
+                                     ticket_base_at=same["entries"][0]["booked_at"],
                                      ticket_base_source="test")
     assert eq["adopt"] is False and eq["why"] == "stale-evidence"
 
