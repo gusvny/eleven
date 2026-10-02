@@ -130,24 +130,61 @@ export function findSdkPython(t) {
 }
 
 /**
- * Make sure the Docker test Temporal (17233) is reachable: probe first, then
- * idempotent `docker compose up -d`, then probe again. Returns true/false.
+ * Make sure the Docker test Temporal (17233) is usable: reachable AND ready to
+ * serve RPCs AND the custom search attributes exist. Probe first, idempotent
+ * `docker compose up -d` when down, then a readiness/registration loop.
+ * Returns true/false.
+ *
+ * Why "port open" is not enough (flakes observed 261002): a freshly composed
+ * server opens the gRPC port before it serves RPCs — ticket-start then dies on
+ * a transient transport error ("broken pipe"), and a cold namespace has no
+ * ProjectKey/EpicCode search attribute mapping (docs/testing-guide.md test-env
+ * steps), so `ticket-start --epic` fails loudly ("立项 epic 打标失败"). Both
+ * were env-state-coupled false reds: warm runs passed, cold runs failed.
+ * `operator search-attribute create` is idempotent on the test server and its
+ * success doubles as the readiness proof.
  */
 export async function ensureTestTemporal(t) {
-  if (await portOpen('127.0.0.1', 17233)) return true
-  const docker = run('docker', ['--version'], { timeoutMs: 10_000 })
-  if (docker.status !== 0) {
-    t?.envFailNote?.(`docker CLI unavailable (test Temporal 17233 down and cannot be pulled up): ${docker.stderr.trim().slice(0, 120) || 'command not found'}`)
-    return false
+  if (!(await portOpen('127.0.0.1', 17233))) {
+    const docker = run('docker', ['--version'], { timeoutMs: 10_000 })
+    if (docker.status !== 0) {
+      t?.envFailNote?.(`docker CLI unavailable (test Temporal 17233 down and cannot be pulled up): ${docker.stderr.trim().slice(0, 120) || 'command not found'}`)
+      return false
+    }
+    console.log('  test Temporal 17233 down -> docker compose up -d (idempotent) ...')
+    run('docker', ['compose', '-f', COMPOSE, 'up', '-d'], { timeoutMs: 300_000 })
+    let opened = false
+    for (let i = 0; i < 60; i++) {
+      if (await portOpen('127.0.0.1', 17233)) { opened = true; break }
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    if (!opened) {
+      t?.envFailNote?.('docker compose up ran but test Temporal 17233 never opened: test env unavailable')
+      return false
+    }
   }
-  console.log('  test Temporal 17233 down -> docker compose up -d (idempotent) ...')
-  run('docker', ['compose', '-f', COMPOSE, 'up', '-d'], { timeoutMs: 300_000 })
-  for (let i = 0; i < 60; i++) {
-    if (await portOpen('127.0.0.1', 17233)) return true
-    await new Promise(r => setTimeout(r, 2000))
+  // Readiness + search-attribute registration (docs/testing-guide.md steps):
+  // retry on transport errors (server up but not serving yet), stop early on
+  // success. Idempotent on an already-warm server.
+  const cli = join(POC, 'bin', 'temporal')
+  const deadline = Date.now() + 90_000
+  for (const name of ['ProjectKey', 'EpicCode']) {
+    let done = false, lastErr = ''
+    while (Date.now() < deadline) {
+      const r = run(cli, ['operator', 'search-attribute', 'create',
+        '--name', name, '--type', 'Keyword', '--namespace', TEST_NS, '--address', TEST_ADDR],
+        { timeoutMs: 30_000 })
+      const out = `${r.stdout || ''}\n${r.stderr || ''}`
+      if (r.status === 0 || /already exists/i.test(out)) { done = true; break }
+      lastErr = out.trim().slice(-200) || `exit=${r.status}`
+      await new Promise(r2 => setTimeout(r2, 2000))
+    }
+    if (!done) {
+      t?.envFailNote?.(`test Temporal search attribute ${name} could not be registered (ticket-start --epic fails loudly without it; steps in docs/testing-guide.md): ${lastErr}`)
+      return false
+    }
   }
-  t?.envFailNote?.('docker compose up ran but test Temporal 17233 never opened: test env unavailable')
-  return false
+  return true
 }
 
 /**

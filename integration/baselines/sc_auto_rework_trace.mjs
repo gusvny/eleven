@@ -373,8 +373,12 @@ async function sceneF(t, api, sdkPython, fixture) {
   stamp('sceneF: ticket-start 开始')
   const started = await api.start(tid, ['integration/'])
   stamp('sceneF: ticket-start 回')
-  t.ok(started.ok !== false, `ticket ${tid} started (${(started.body?.error ?? 'ok')})`)
-  if (started.ok === false) return
+  // 判据对齐族内兄弟场景（body.ok===true）：起单失败必须当场点名真因
+  // （如「环境未注册 EpicCode」「transport broken pipe」），不许放行到下游
+  // 再报「workflow disappeared」——报错指错方向会把排查带偏（KI-146 同族）。
+  const startOk = started.body?.ok === true && !started.body?.error
+  t.ok(startOk, `ticket ${tid} started (${(started.body?.error ?? 'ok')})`)
+  if (!startOk) return
   const worker = startStubWorker(fixture, sdkPython, tid)
   stamp('sceneF: stub worker 已起')
   try {
