@@ -3235,3 +3235,22 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **量化实证（261001/02 夜间，64 份轮报告统计，已排除"轮规模"混淆）**：以"控制台族读侧场景出现红"为因变量，按 `conc_width` 分组——**宽度=1：5 轮 / 0 轮有红（0%）**；宽度=4：64 轮 / 31 轮有红（48%）。进一步**同规模分桶**（ran∈[100,299]）：**宽度=1 → 0/5（0%）**，**宽度=4 → 15/41（37%）** ⇒ 宽度是主因、规模不是。宽度=1 的那 5 轮恰是**基线跑**（`server/engine/failure_protocol.py:129` 把 `SANDBAR_POOL_CONC`/`SANDBAR_CONC_POOLS` 强制为 1：「并发面=口径非环境，基线强制 =1」），而闸跑继承默认 `main:3,ro:3,browser-free:3`。**同一套场景、宽度不同 ⇒ 红率 0% vs 37%**。
 > **旁证（本夜）**：活跃锁 hash 与树 hash 的映射显示，**轮内确实有"场景自建临时树"在跑套件**（锁 `9e0fdddd` 不属于任何泳道/main ⇒ 是场景起的树），
 > 这与场景自述的 `stage console churn` 吻合：**轮内自建树/台**是 churn 与内存压力的直接来源之一。
+
+## KI-185 票史/回执里的 **lone surrogate**（坏字符）会带走整条回执 ⇒ 整票不可读、归因被污染（261002 实证，t261001-23；已双向修复）
+> **现象**：`ticket.py show t261001-23` 整票面不可读——Temporal 历史里有 lone surrogate（\udcbc\udc89），凡 `print(json.dumps(..., ensure_ascii=False))` 直上 stdout 就 `UnicodeEncodeError` 崩掉整条回执（client.py:_emit 与 ticket.py 收口 print 连环炸，第一处修完坏字符在第二处再炸）。病源在**写入端**：retry_qc 的 reason 字符串自带坏字符（上游某工具按 surrogateescape 拆坏了字符）一路进票史存住。**连锁**：该坏票使 lane_audit 的 B 探针 query 崩→fail-closed 产出 `keep:unknown-owner`→realfacet 场景精确判词误红→**四张无辜票被同一坏字符污染挡闸**（与 KI-182 同族：真账假账混在一起）。
+> **危害**：①一张票坏字符=整票不可读（读侧任何一环不兜就崩整条回执，不是坏字符点名可见）；②归因污染波及同批多票（261002 实证 4 张）；③族面长尾——`print(json.dumps(..., ensure_ascii=False))` 出口全仓 24+7 处，个个是同款雷。
+> **铁律（本次定）**：坏字符只许变得可见（\udcXX 可见转义点名），不许带走整条回执/整段票史。**出界兜底**（.encode('utf-8','backslashreplace').decode('utf-8')）+ **入界消毒**（client.py args / ticket.py payload 递归归一，含 dict 键）一头一尾。
+> **处置（261002 宿主令「main 上直接修」）**：读链两处 9f7b8d3；出口族 24+7 处统一兜底（118bacc 及后续补批；固定文案 5 处按调色板豁免并入白名单）；入界消毒 3bcf921。存量史不回改（读侧已兜，坏字符点名可见可溯）。
+> **回归用例**：`emit-surrogate-guard`（integration/sc_emit_surrogate_guard.py，注册在册）——双侧黑盒 + 族面锚（新出口不带兜底即红）。
+
+## KI-186 断言词表与工具词表**不齐**（精确整串 vs「家族:后缀」）⇒ 把工具的保守答案误报成泳道误判（261002 实证，realfacet C 腿）
+> **现象**：lane_audit 的 verdict 是「家族:可选后缀」形状（keep / keep:unknown-owner=keep 家族 fail-closed 保守态，prune:*=可剪），而场景断言按整串精确相等判 `!= "keep"`——t261001-23 坏脸（KI-185）触发工具产出 `keep:unknown-owner` 即被误报成「非 closed 票未判 keep」。
+> **危害**：①误红且指向错误方向（工具 fail-closed 是对的，被说成工具误判）；②坏数据一来断言就翻，测试可信度受损（同族：任何「断言用一套词、工具用另一套词」的接缝）。
+> **处置（261002）**：C 判词改按家族判（`split(':')[0] == 'keep'`），abb8dfc。同族排查：`sc_lane_audit_realfacet_readonly` 内 D 腿精确判 keep 的场景是「本票 dispatched 期」自有面、语义本就要求干净 keep，不动。
+> **回归用例**：realfacet 场景 C 腿本身（261002 实证：t261001-23 的 keep:unknown-owner 在场时 C 绿 5/0；词表再不齐必红）。
+
+## KI-187 基线通道临时树的**身份判据耦合 repo 路径** ⇒ 通道假红 + 归因把「基线红」错记成「主面红」（261002 实证，t260928-13 A4 腿）
+> **现象**：`registry-additive-keys` 的 A4 腿按「仓库路径」判某路径属于哪个项目的 dirs；基线探针在 /tmp 下起 detached 临时树 ⇒ 路径匹配不上 ⇒ 命中=[] ⇒ 86/86 全红（泳道内 118/118 全绿）。
+> **危害**：①通道假红污染基线答案；②**归因毒性**：基线探针报「主面也红」⇒ 真回归会被 `main_red_too` 豁免掉（把红记错账=放行口径被污染，与 KI-182/184 合成三件套）。
+> **处置（261002）**：A4 腿身份判据改解析到主 checkout 根（git worktree 元数据判主根，路径解耦），0d61273；双通道 14/0 实证。
+> **回归用例**：t260928-13 场景 A4 腿自身（temp 工作树形态下 14/0——身份判据再耦合路径必红）。
