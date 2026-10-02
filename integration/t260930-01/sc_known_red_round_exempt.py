@@ -16,8 +16,10 @@ REPO = Path(__file__).resolve().parents[2]
 RUNNER = "integration/run_scenarios.py"
 EXCLUDE_ENV = "SANDBAR_KNOWN_RED_EXCLUDE"
 ROSTER_ENV = "SANDBAR_KNOWN_RED_ROSTER"
-# 一条真在册（真挂账册里 verdict=booked/isolated，**只用于「被跳过」断言**，故零成本）
-BOOKED = "t260903-07-chat-project-tag"
+# 一条真在册（真挂账册里 verdict=booked/isolated，**只用于「被跳过」断言**，故零成本）。
+# 261002 退役批后改指 ms-decl-gate（原指 t260903-07-chat-project-tag，已随退役批除名；
+# 本夹具只要求「真在册且零成本」，指哪条都守同一契约）。
+BOOKED = "t260910-09-ms-decl-gate"
 # 两条零依赖离线条目：开关对照档位用**夹具册子**把 FAST 标成在册，避免真跑 43 秒的
 # 浏览器条目（对照判据是「谁进注册面」，不是「它跑出什么」）。
 FAST = "t260905-08-hex-clean"

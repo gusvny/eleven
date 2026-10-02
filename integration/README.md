@@ -386,6 +386,9 @@ write_set 而 verify_lane 丢了分支会静默退化回粗判据）；verify.ya
 
 ## multi-tab-coexistence（t260901-15）—— 工单台多页签共存黑盒基线
 
+> **已退役（261002 宿主令）**：场景文件已删，留痕与四问（守什么/为什么退/
+> 移交/认赔）见 `integration/retired-scenarios.md`。以下正文仅存档供复活参考。
+
 `baselines/multi-tab-coexistence.mjs`。用户场景驱动：管理台常开多页签，三缺陷修复
 （①页签互见在看提示；②写操作交叉失效；③不可见页签暂停轮询）+「点 13 详情跳回 11」
 竞态收口。两层结构（同 sc_evidence_lightbox_dom 先例）：S0 build-contract 纯 node 恒跑
