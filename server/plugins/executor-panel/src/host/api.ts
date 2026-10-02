@@ -17,7 +17,7 @@ import {
 import { loadWatchdogConfig } from './settings.ts'
 import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settings.ts'
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
-import { provenanceKeys, readDeclaration, saveGrantsDecl } from './executor-grants.ts'
+import { isOpGranted, provenanceKeys, readDeclaration, saveGrantsDecl, GRANT_OPS, toGrantOp } from './executor-grants.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
 
 export interface ApiResponse { status: number; json: Record<string, unknown> }
@@ -187,12 +187,35 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       const res = await grantsResult(key, origin)
       // 声明面 + 逐 op 溯源（哪个声明哪条键定的——KI-148/149 同纪律）。
       const decl = readDeclaration(key, env)
+      // t261001-21（读出面诚实）：派生行 ≠ 已授予。此前 rows 是「派生能力矩阵」
+      // （这个动词在该模板上是什么意思），却顶着 grants 之名被渲染成「这些授权存在」
+      // ——零声明项目也显示 18 行，执行器第一轮就被它误导。现在：
+      //   ① 每行带 granted（真声明定的：grants.<op>=true 或活跃夜间档；缺席/坏声明=全 false）；
+      //   ② granted_count + readout_note 一眼可读「到底授了什么」；
+      //   ③ 顶层 declaration_summary 给声明状态与已授予 op 清单（消费方不用拆表）。
+      let grantsFace: Record<string, unknown> = res as never
+      let grantedOps: string[] = []
+      if (res.ok) {
+        const rows = res.rows.map((r) => ({ ...r, granted: isOpGranted(decl, r.op, now()) }))
+        grantedOps = rows.filter((r) => r.granted).map((r) => r.op)
+        grantsFace = {
+          ...res,
+          rows,
+          granted_count: grantedOps.length,
+          readout_note: grantedOps.length === 0
+            ? 'NOTHING is granted: rows below are the derived capability matrix (what each verb means per template), NOT existing grants — a row here is not a grant'
+            : `${grantedOps.length} of ${rows.length} row(s) actually GRANTED by declaration — the rest are capability rows only`,
+        }
+      } else {
+        grantedOps = GRANT_OPS.filter((op) => isOpGranted(decl, op, now()))
+      }
       const auditNote = 'refusals and grant changes are audited to ' + key + '/executor-grants-audit.jsonl'
       // degraded 顶层显式位（消费方可不拆 grants 判定「模板事实不可得」）。
       return {
         status: 200,
         json: {
-          ok: true, grants: res, degraded: res.ok === false, reason: res.ok ? undefined : res.reason,
+          ok: true, grants: grantsFace, degraded: res.ok === false, reason: res.ok ? undefined : res.reason,
+          granted_ops: grantedOps,
           declaration: decl.ok ? decl.declaration : null,
           declaration_state: { declared: decl.declared, kind: decl.kind ?? (decl.ok ? 'ok' : 'absent'), error: decl.error, file: decl.file },
           provenance: { file: decl.file, keys: provenanceKeys(decl, now()) },

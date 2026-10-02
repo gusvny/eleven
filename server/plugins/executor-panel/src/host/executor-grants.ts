@@ -186,6 +186,18 @@ export function readDeclaration(key: string, env: NodeJS.ProcessEnv = process.en
   return { ok: true, declared: true, file, declaration: decl }
 }
 
+/**
+ * 某 op 此刻是否被真声明授予（声明键 grants.<op>=true，或活跃夜间档）。
+ * t261001-21：读出面专用——派生能力矩阵每行带 granted，行存在≠已授予；
+ * 判定语义仍只在引擎写路径（本函数只回答「读出面显示什么」，不放行任何写操作）。
+ */
+export function isOpGranted(read: DeclRead, op: string, nowMs: number): boolean {
+  const key = toGrantOp(op)
+  if (read.ok && read.declaration?.grants?.[key as GrantOp] === true) return true
+  const nt = read.declaration?.night_tier
+  return !!(nt?.enabled && nt.until > nowMs)
+}
+
 /** 溯源面：「哪个声明键定了当前值」——逐 op 直接给键路径，不二次推导。 */
 export function provenanceKeys(read: DeclRead, nowMs: number): Record<string, string> {
   const keys: Record<string, string> = {}

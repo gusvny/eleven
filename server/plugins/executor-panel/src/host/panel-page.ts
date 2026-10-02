@@ -422,16 +422,31 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     if(!payload){ el('setGrants').innerHTML=''; return; }
     var g = payload.grants;
     if(g && g.ok===false){ el('setGrants').innerHTML = bannerHtml('Grants unavailable (explicit, NOT an empty list): '+g.reason); return; }
-    var rows = Array.isArray(g) ? g.map(function(x){ return { op:(x.ops||[]).join(', '), template:x.template, template_kind:x.kind||'', reason:'template facts' }; })
-      : (g && g.rows) || [];
-    var note = g && g.filtered_note;
-    var html = '<div class="card" style="margin-bottom:8px"><h3>Grants — derived from the template (decision 10/15), never hand-maintained</h3><table><tr><th>op</th><th>template</th><th>why shown</th></tr>';
+    // t261001-21（读出面诚实）：声明状态先讲清「到底授了什么」，派生能力矩阵只做背景。
+    // 行存在 ≠ 已授予：每行的 granted 位才是真授予（由 executor-grants 声明决定）。
+    var ds = payload.declaration_state || {};
+    var rows = (g && g.rows) || [];
+    var grantedCount = typeof g.granted_count === 'number' ? g.granted_count
+      : rows.filter(function(r){ return r.granted===true; }).length;
+    var html = '';
+    if(!ds.declared || ds.kind!=='ok'){
+      html += bannerHtml('NO usable executor declaration (state: '+(ds.kind||'absent')+'): NOTHING is granted for this project. The table below is the derived CAPABILITY MATRIX — what each verb would mean per template — NOT a list of existing grants.'+(ds.error? ' detail: '+ds.error : ''), true);
+    } else if(grantedCount===0){
+      html += bannerHtml('Declaration exists but grants NOTHING (zero-grant). The table below is the derived capability matrix, NOT a list of grants.', false);
+    } else {
+      html += bannerHtml(grantedCount+' op(s) currently GRANTED by declaration. Only rows marked GRANTED below are real grants; the rest of the table is the derived capability matrix.', false);
+    }
+    html += '<div class="card" style="margin-bottom:8px"><h3>Capability matrix derived from the template (decision 10/15), never hand-maintained — a row here does NOT mean granted</h3>'
+      + '<table><tr><th>op</th><th>template</th><th>granted</th><th>why shown</th></tr>';
     for(var i=0;i<rows.length;i++){
       var r=rows[i];
-      html += '<tr><td>'+esc(r.op)+'</td><td>'+esc(r.template)+(r.template_kind? ' ('+esc(r.template_kind)+')':'')+'</td><td class="muted">'+esc(r.reason||'derived: fixed op × template facts')+'</td></tr>';
+      html += '<tr><td>'+esc(r.op)+'</td><td>'+esc(r.template)+(r.template_kind? ' ('+esc(r.template_kind)+')':'')+'</td><td>'
+        + (r.granted===true ? '<span class="good">GRANTED</span>' : '<span class="muted">no</span>')
+        + '</td><td class="muted">'+esc(r.reason||'derived: fixed op × template facts')+'</td></tr>';
     }
-    if(rows.length===0) html += '<tr><td colspan="3" class="muted">no shown grants (all filtered or revoked)</td></tr>';
-    html += '</table>' + (note? '<div class="muted">'+esc(note)+'</div>':'') + '</div>';
+    if(rows.length===0) html += '<tr><td colspan="4" class="muted">no capability rows (all filtered or revoked)</td></tr>';
+    html += '</table>' + (g && g.readout_note? '<div class="muted">'+esc(g.readout_note)+'</div>':'')
+      + (g && g.filtered_note? '<div class="muted">'+esc(g.filtered_note)+'</div>':'') + '</div>';
     el('setGrants').innerHTML = html;
   }
 
