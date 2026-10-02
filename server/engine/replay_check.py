@@ -75,7 +75,7 @@ except ImportError:
         if py.is_file() and str(py) != sys.executable:
             os.execv(str(py), [str(py), str(Path(__file__).resolve())] + sys.argv[1:])
     print(json.dumps({"ok": False, "error": "import temporalio 失败且无候选解释器（试过 %s）"
-                      % [str(p) for p in _candidate_pythons()]}, ensure_ascii=False))
+                      % [str(p) for p in _candidate_pythons()]}, ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
     sys.exit(1)
 
 import asyncio  # noqa: E402
@@ -206,7 +206,7 @@ def main() -> int:
             i += 2
         else:
             print(json.dumps({"ok": False, "error": "未知参数 %r。%s" % (a, USAGE)},
-                             ensure_ascii=False))
+                             ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
             return 1
     meta = {"interpreter": sys.executable, "host": host, "ns": ns,
             "templates": sorted(TEMPLATE_TYPES)}

@@ -48,7 +48,7 @@ def cmd_call(name, args_json):
         print('args 不是合法 JSON: %s' % e, file=sys.stderr)
         sys.exit(2)
     res = tools_registry.call(name, args, actor='cli')
-    print(json.dumps(res, ensure_ascii=False, indent=1))
+    print(json.dumps(res, ensure_ascii=False, indent=1).encode("utf-8", "backslashreplace").decode("utf-8"))
     sys.exit(0 if res['ok'] else 1)
 
 

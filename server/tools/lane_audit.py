@@ -530,7 +530,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     records = [_entry_record(e) for e in entries]
     if args.json:
         print(json.dumps({"repo": repo_root, "lane_dir": lane_dir,
-                          "entries": records}, ensure_ascii=False, indent=2))
+                          "entries": records}, ensure_ascii=False, indent=2).encode("utf-8", "backslashreplace").decode("utf-8"))
     else:
         for rec in records:
             print(f"{rec['kind']:14} {rec['name']:44} {rec['verdict']:34} {rec['reason']}")
@@ -576,7 +576,7 @@ def cmd_prune(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"repo": repo_root, "base_ref": base_ref,
                           "touched": touched, "entries": records},
-                         ensure_ascii=False, indent=2))
+                         ensure_ascii=False, indent=2).encode("utf-8", "backslashreplace").decode("utf-8"))
     else:
         for rec in records:
             print(f"{rec['kind']:14} {rec['name']:44} {rec['verdict']:34} {rec['reason']}")

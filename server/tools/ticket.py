@@ -1234,11 +1234,11 @@ def _cli(argv):
         payload = _sanitize_text(json.loads(argv[0]))   # 入界消毒：坏字符不许进引擎/票史
     except json.JSONDecodeError as e:
         print(json.dumps({'ok': False, 'error': '参数不是合法 JSON：%s' % e},
-                         ensure_ascii=False))
+                         ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
         return 1
     if not isinstance(payload, dict):
         print(json.dumps({'ok': False, 'error': '参数需为 JSON 对象（含 op）'},
-                         ensure_ascii=False))
+                         ensure_ascii=False).encode("utf-8", "backslashreplace").decode("utf-8"))
         return 1
     audit = _audit_mod()
     call_id = uuid.uuid4().hex[:12]
