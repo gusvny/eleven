@@ -3213,7 +3213,13 @@ def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
                      identity_class=_pick("identity_class"),
                      identity_src=_pick("identity_src"),
                      override=bool(_pick("cross_project_used")))
-    print(json.dumps(result, ensure_ascii=False))
+    # 回执文本做「不可编码字符→可见转义」兜底（宿主令 261002 小修）：Temporal 历史
+    # 可能含 lone surrogate（写入端历史欠账），ensure_ascii=False 的 JSON 原文直上
+    # stdout 会以 UnicodeEncodeError 崩在整条回执上——t261001-23 整票不可读即此病
+    # （KI：坏字符只许变得可见，不许带走整条回执）。backslashreplace 把坏字符变成
+    # \udcXX 形状的可见转义，其余内容逐字节不变。
+    print(json.dumps(result, ensure_ascii=False)
+          .encode("utf-8", "backslashreplace").decode("utf-8"))
 
 
 def main() -> None:

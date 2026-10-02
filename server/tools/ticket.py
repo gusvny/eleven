@@ -1241,7 +1241,12 @@ def _cli(argv):
     # sub 记 'ticket.<op>'（带 ticket 前缀：与 client.py 行同族可检索，source 区分入口）
     audit.audit_call('ticket.%s' % (payload.get('op') or '(none)'), out,
                      call_id=call_id, source='ticket.py-direct')
-    print(json.dumps(out, ensure_ascii=False))
+    # 回执出口做「不可编码字符→可见转义」兜底（宿主令 261002，与 client.py:_emit
+    # 同族同修）：票面/历史可能带 lone surrogate，ensure_ascii=False 的 JSON 直上
+    # stdout 会 UnicodeEncodeError 崩掉整条回执（t261001-23 整票不可读的第二现场）。
+    # backslashreplace 把坏字符变 \udcXX 可见转义，其余内容逐字节不变。
+    print(json.dumps(out, ensure_ascii=False)
+          .encode("utf-8", "backslashreplace").decode("utf-8"))
     return _exit_code(out)
 
 
