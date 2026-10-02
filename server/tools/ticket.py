@@ -1209,13 +1209,29 @@ def _exit_code(out):
     return 0
 
 
+def _sanitize_text(obj):
+    """入界消毒（宿主令 261002，与 client.py:_sanitize_text 同文同铁律）：
+    调用方 payload 里的字符串先做「不可编码字符→可见转义」归一再进引擎——
+    实证案例：t261001-23 的 retry_qc reason 携 lone surrogate 入史，读侧一崩
+    就是整票不可读。坏字符只许变得可见（\\udcXX），不许带走整条回执/票史。"""
+    if isinstance(obj, str):
+        return obj.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(obj, list):
+        return [_sanitize_text(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_text(v) for v in obj)
+    if isinstance(obj, dict):
+        return {_sanitize_text(k): _sanitize_text(v) for k, v in obj.items()}
+    return obj
+
+
 def _cli(argv):
     """直 spawn 入口，返回进程退出码。"""
     if not argv or argv[0] in ('-h', '--help', 'help'):
         print(json.dumps({'ok': False, 'error': _TICKET_CLI_USAGE}, ensure_ascii=False))
         return 2
     try:
-        payload = json.loads(argv[0])
+        payload = _sanitize_text(json.loads(argv[0]))   # 入界消毒：坏字符不许进引擎/票史
     except json.JSONDecodeError as e:
         print(json.dumps({'ok': False, 'error': '参数不是合法 JSON：%s' % e},
                          ensure_ascii=False))

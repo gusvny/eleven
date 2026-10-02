@@ -3192,6 +3192,24 @@ USAGE = (
 )
 
 
+def _sanitize_text(obj: Any) -> Any:
+    """入界消毒（宿主令 261002「main 上直接修」）：调用方送进来的字符串先做
+    「不可编码字符→可见转义」归一，再进引擎/票史。实证案例：t261001-23 的
+    retry_qc reason 携 lone surrogate（\\udcbc\\udc89，上游按 surrogateescape
+    拆坏的字符）入史，读侧一崩就是整票不可读。坏字符只许变得可见（\\udcXX），
+    不许带走整条回执/整段票史（与 _emit 出口兜底同一铁律，一头一尾）。dict
+    连键一起归一——坏键同样能炸收口 print。"""
+    if isinstance(obj, str):
+        return obj.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(obj, list):
+        return [_sanitize_text(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_text(v) for v in obj)
+    if isinstance(obj, dict):
+        return {_sanitize_text(k): _sanitize_text(v) for k, v in obj.items()}
+    return obj
+
+
 def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
     """唯一回执出口（KI-067）：附 entry_hint（bare 待遇，含成功回执）→ 记
     admin.log 一行（claimed-source 可辨，连被拒收调用也记）→ 打印。审计**先于**
@@ -3240,7 +3258,7 @@ def main() -> None:
             if not isinstance(parsed, dict):
                 _emit(sub, {}, {"ok": False, "error": "argsJSON 需为 JSON 对象"})
                 return
-            args = parsed
+            args = _sanitize_text(parsed)   # 入界消毒：坏字符不许进引擎/票史
         except json.JSONDecodeError as e:
             _emit(sub, {}, {"ok": False, "error": f"argsJSON 不是合法 JSON：{e}"})
             return
