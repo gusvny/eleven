@@ -19,8 +19,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 
-import { createApi } from './src/host/api.ts'
+import { createApi, allPanelProjects } from './src/host/api.ts'
 import { PANEL_HTML, PANEL_ROUTE } from './src/host/panel-page.ts'
+import { createQuestionBridge, makeRegistryProjectResolver } from './src/host/question-bridge.ts'
+import { fsLedgerIo } from './src/host/requests.ts'
+import { readFileSync } from 'node:fs'
 
 export const name = 'sandbar-executor-panel'
 // webServer 只在 web profile 存在；headless 下待机（无面板面可挂）。
@@ -65,6 +68,28 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
   const api = createApi(process.env, {
     workbenchBase: config.workbenchBase ?? process.env.SANDBAR_WORKBENCH_BASE ?? undefined,
   })
+
+  // 问题桥（t261001-23，KI-181）：把会话级 ask_user_question 镜像进面板请求账——
+  // 「看和问」的问在这套部署上原本无处交付（真会话自锁 13+ 分钟，Requests 0 行）。
+  // 纯 cordis 监听者，不依赖 webServer：headless/web 都生效；面板缺席时账仍可经
+  // API/文件被消费。挂载失败（ctx.on 不可用）显式点名日志，绝不静默。
+  const bridge = createQuestionBridge({
+    io: fsLedgerIo,
+    env: process.env,
+    // 键清单与文件根同住 projects 根（allPanelProjects 的根=SANDBAR_PANEL_DIR||~/.sandbar/projects；
+    // 反查 project.yaml 也读同一根——SANDBAR_PROJECTS_DIR 的既有分叉是历史欠账，不在此票扩散）。
+    resolveProject: makeRegistryProjectResolver(process.env, (env) => allPanelProjects(env), (p) => readFileSync(p, 'utf8')),
+    onEvent: (ev) => ctx.logger.info('[question-bridge] %s %s', ev.kind, ev.detail),
+  })
+  if (typeof ctx.on === 'function') {
+    ctx.effect(() => {
+      const dispose = ctx.on('user-questions/request', bridge as never)
+      return () => { try { dispose() } catch { /* 宿主已卸载=已收口 */ } }
+    }, 'sandbar-executor-panel: question bridge（ask_user_question → 请求账）')
+    ctx.logger.info('sandbar-executor-panel: question bridge 已挂载（user-questions/request → requests.jsonl）')
+  } else {
+    ctx.logger.warn('sandbar-executor-panel: ctx.on 不可用——question bridge 未挂载（ask_user_question 将无处交付，KI-181 形态）')
+  }
 
   const attach = (ws: { register: (o: { kind: string; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void }): void => {
     ctx.effect(() => {
