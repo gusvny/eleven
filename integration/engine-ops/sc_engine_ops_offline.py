@@ -210,7 +210,15 @@ def wait_pidfile_change(pf, old_pid, timeout=90.0):
 
 
 def pollers_live(host, queue):
-    """私有队列的**活** poller 数（工具外的独立复算，防自证自洽）。"""
+    """私有队列的**活** poller 数（工具外的独立复算，防自证自洽）。
+
+    t261001-20 注：单发采样在负载下是竞态——pidfile 翻新后 poller 注册进
+    DescribeTaskQueue 有秒级迟滞，闸期机器上单发实测采到 0（本轮集测 6 红之一）。
+    wait_pollers 的有界等待不削弱独立复算口径（仍不走工具体，仍逐 poller 验活）。"""
+    return _pollers_live_once(host, queue)
+
+
+def _pollers_live_once(host, queue):
     snippet = (
         "import asyncio, os, sys\n"
         "from temporalio.client import Client\n"
@@ -235,6 +243,23 @@ def pollers_live(host, queue):
         return int((p.stdout or "0").strip().splitlines()[-1])
     except Exception:
         return -1
+
+
+def wait_pollers(host, queue, want=1, timeout=20.0):
+    """有界等待活 poller 达标（t261001-20：消 poller 注册迟滞竞态，见 pollers_live 注）。
+
+    每 0.5s 独立复算一次，达标即返；超时返最后一次实得值（由调用方 fail.check
+    按实得值点名，不静默放行）。负值（采样不可得）不达 want，照走超时路径。"""
+    import time as _time
+    deadline = _time.time() + timeout
+    seen = -1
+    while True:
+        seen = pollers_live(host, queue)
+        if seen >= want:
+            return seen
+        if _time.time() >= deadline:
+            return seen
+        _time.sleep(0.5)
 
 
 def build_fixture(tmp):
@@ -396,8 +421,15 @@ def main():
                        % first)
             if first:
                 p0 = int(first)
-                poll0 = pollers_live(real_temporal, private_q)
-                fail.check(poll0 == 1, "L6 前置：私有队列活 poller=1（实得 %r）" % poll0)
+                poll0 = wait_pollers(real_temporal, private_q, want=1, timeout=20)
+                try:
+                    os.kill(p0, 0)
+                    p0_alive = "alive"
+                except OSError as e:
+                    p0_alive = "dead(%s)" % type(e).__name__
+                fail.check(poll0 == 1,
+                           "L6 前置：私有队列活 poller=1（实得 %r；pidfile pid=%d %s）"
+                           % (poll0, p0, p0_alive))
                 rc, r6, _e6 = run_tool("restart", "--scope", "lane:%s" % TID,
                                        "--host", real_temporal, "--ns", "default",
                                        "--wait", "60", repo=repo)
@@ -411,7 +443,8 @@ def main():
                 fail.check(str(res6.get("mode")) == "kill-and-wait-for-respawn",
                            "L6A 模式=kill-and-wait-for-respawn（实得 %r）" % res6.get("mode"))
                 proof = res6.get("pollers_proof") or {}
-                fail.check(proof.get("ok") is True and pollers_live(real_temporal, private_q) == 1,
+                pollA = wait_pollers(real_temporal, private_q, want=1, timeout=20)
+                fail.check(proof.get("ok") is True and pollA == 1,
                            "L6A 换手后活 poller=1（工具自证=%r）" % proof.get("ok"))
                 fail.check("自己起" not in json.dumps(res6, ensure_ascii=False).replace(
                     "不自己起", "").replace("绝不自己起", ""),

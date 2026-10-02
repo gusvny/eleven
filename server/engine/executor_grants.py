@@ -14,19 +14,29 @@
    "night_tier": {"enabled": true, "until": <ms>, "note": "..."},   # 可选；时间盒全权
    "updated_by": "<who>", "updated_at": <ms>}
 
-身份缝（ticket scope 2 的定案，证据见交付报告）：
+身份缝（ticket scope 2 定案 + t261001-20 重定判据=受信会话身份）：
   - 引擎 spawn 链（agent_activities._prepare_agent_spawn）给泳道 agent 注入
     SANDBAR_CALLER_PROJECT + SANDBAR_CALLER_SURFACE="lane-agent" → 这些调用方的
-    identity_src=env，**不是执行器**，维持今天的行为（零回归红线）；
-  - 宿主控制台/CLI 跑在引擎仓树内，cwd 一律不推导身份（caller_gate C1 红线）
-    → 也不是执行器；
-  - watchdog 代建的执行器会话（宿主 Session API，cwd=项目主目录；0.1.5 实证
-    SessionCreateRequest 无 env 字段、preset 组合无法注入 shell env）调用写路径时
-    身份只能落 **cwd 推导**——ticket.py 把推导出处经
-    SANDBAR_CALLER_IDENTITY_SRC="cwd" 透传给 client.py，CHANNEL=cwd 即执行器身份。
-  - 残余风险如实记档：真人在项目目录手工直跑写路径同样落 CHANNEL=cwd，会被当作
-    执行器受闸（受闸≠提权：未被授予的操作被拒收并点名授予路径）。这与既有的
-    injected_by「尽力面标签非安全断言」同一信任档位。
+    identity_src=env 且 surface=lane-agent，**不是执行器**，零回归红线（闸豁免）；
+  - 未声明身份（identity_src=none/空）：不是执行器，不设闸——undeclared 写路径
+    由跨项目闸策略另管（t260925-08 缺省=refuse），宿主控制台/引擎仓树内 cwd
+    不推导身份（caller_gate C1 红线）正落此档，零回归；
+  - **声明了 caller_project 但会话未被点名**（arg/env-external，规范 CLI 用法、
+    light-lane 调用、集成场景夹具）：不设闸——t261001-20 gen0 曾把这一整档误闸，
+    集测 6 红（夹具项目 create/cancel 被拒）实证「通道形状≠执行器身份」，收回；
+  - **受闸两种形态（都锚在受信会话身份）**：
+    a) cwd 推导——watchdog 代建的执行器会话（宿主 Session API 注入不了 env，
+       cwd=项目主目录是唯一机器可观测缝）；零授予=拒收（t260930-14 原语义不变）；
+    b) 声明点名——调用方会话 id（env DSH_SESSION_ID > DSH_HEADLESS_SESSION，
+       dsh 工具链注入，调用方 prompt 改不了注入链）被项目声明 executor_sessions
+       点名。宿主在面板 Grants 页点名/除名执行器会话，「谁算本项目执行器」
+       由此声明单一真源回答（t261001-20 原始缺陷的收口：会话自设 caller_project
+       不再构成身份，只有被点名的会话才以执行器身份受闸受控）。
+  - 残余风险如实记档：真人在项目目录手工直跑写路径落 cwd 通道，会被当作执行器
+    受闸（受闸≠提权：未被授予的操作被拒收并点名授予路径）；手工旁路设
+    SANDBAR_CALLER_SURFACE=lane-agent 可冒充泳道 agent 豁免、伪造 DSH_SESSION_ID
+    冒充被点名会话——与既有 injected_by「尽力面标签非安全断言」同一信任档位
+    （安全断言归 spawn 链注入与会话宿主）。
 
 元权限反锁：改/扩授予清单本身是特权操作（META_OP），执行器身份永远不能做——
 先于声明读取判定（声明缺席/畸形也锁得住），夜间档也解不开。
@@ -44,9 +54,50 @@ DECL_FILE = "executor-grants.json"
 AUDIT_FILE = "executor-grants-audit.jsonl"
 DECL_VERSION = 1
 
-# 执行器身份通道：ticket.py 从 cwd 推导出的调用方项目身份（经
-# shared.CALLER_IDENTITY_SRC_ENV 透传）。其余通道（arg/env/none）一律不设闸。
+# 执行器身份通道基值：ticket.py 从 cwd 推导出的调用方项目身份（经
+# shared.CALLER_IDENTITY_SRC_ENV 透传）。t261001-20 起「是否执行器」不再单看本值，
+# 以 is_executor_channel() 为准（声明通道 arg/env-external 一并设闸）。
 EXECUTOR_CHANNEL = "cwd"
+
+
+def caller_session_id() -> str:
+    """调用方 dsh 会话 id（单一读口：DSH_SESSION_ID > DSH_HEADLESS_SESSION；
+    都缺席=空串）。判闸消费方经参数注入，本函数是真 IO 包装（judge() 用）。"""
+    for env_name in CALLER_SESSION_ENVS:
+        sid = str(os.environ.get(env_name) or "").strip()
+        if sid:
+            return sid
+    return ""
+
+
+def is_executor_channel(channel: str, lane_surface: str = "",
+                        declared_sessions: Any = (),
+                        caller_session: str = "") -> bool:
+    """「该调用方是否受执行器授权闸管」（t260930-14 立、t261001-20 重定判据）。
+
+    受闸（True）两种形态，都以**受信会话身份**为锚：
+      - cwd 推导（EXECUTOR_CHANNEL）：watchdog 代建的执行器会话（宿主 Session API
+        注入不了 shell env，cwd=项目主目录是唯一机器可观测缝）；
+      - 声明通道（arg 显式 / env 注入且 surface≠lane-agent）**且**调用方会话 id 被
+        项目声明的 executor_sessions 点名——「谁是本项目执行器」由宿主在声明里点名，
+        会话 id 由 dsh 工具链注入（调用方 prompt 改不了注入链）。
+
+    豁免（False）=零回归红线：
+      - env + surface=lane-agent（引擎 spawn 链注入的泳道 agent，一个字节不变）；
+      - 未声明身份（none/空——宿主控制台/引擎仓树内调用，跨项目闸另有策略）；
+      - 声明了 caller_project 但会话 id 未被点名/缺席（普通规范 CLI 用法、集成场景
+        夹具、light-lane 调用——旧版 gen0 曾把这一整档误闸，集测 6 红实证，收回）。
+    lane_surface 口径：strip 后全值比对 CALLER_SURFACE_LANE_AGENT（与
+    caller_gate.identity_receipt 同读口），非该值当 external-env。"""
+    ch = str(channel or "").strip()
+    if not ch or ch == "none":
+        return False
+    if ch == "env" and str(lane_surface or "").strip() == shared.CALLER_SURFACE_LANE_AGENT:
+        return False
+    if ch == EXECUTOR_CHANNEL:
+        return True
+    sid = str(caller_session or "").strip()
+    return bool(sid) and sid in tuple(declared_sessions or ())
 
 # 引擎固定授予操作面（设计稿词表；面板 grants.ts FIXED_OPS 同源——
 # 面板用 'reject' 命名打回，本模块用设计稿原文 'send-back'，TS 侧做别名映射）。
@@ -72,6 +123,14 @@ ENGINE_HOST_ONLY_OPS = ("update", "ruling")
 
 # 夜间档时间盒上限（毫秒；防「一觉睡到下辈子」的失锁声明——最长 7 天）。
 NIGHT_TIER_MAX_MS = 7 * 24 * 3600 * 1000
+
+# 执行器会话声明上限（防声明膨胀；watchdog 代建会话随生命周期会换 id，留余量）。
+EXECUTOR_SESSIONS_MAX = 8
+EXECUTOR_SESSION_ID_MAX = 128
+
+# 调用方会话 id 的 env 读口（dsh 工具链注入 DSH_SESSION_ID；引擎 spawn 链注入
+# DSH_HEADLESS_SESSION——前者优先，任一在场即可与声明比对）。
+CALLER_SESSION_ENVS = ("DSH_SESSION_ID", "DSH_HEADLESS_SESSION")
 
 
 def grants_root() -> str:
@@ -134,7 +193,26 @@ def validate_declaration(doc: Any) -> Tuple[Dict[str, Any], Optional[str]]:
         if not isinstance(note, str):
             return {}, "night_tier.note 必须是字符串（收到 %r）" % (note,)
         night_ok = {"enabled": en, "until": int(until), "note": note[:500]}
+    # t261001-20：声明可点名本项目执行器会话（dsh session id 列表）——「谁算本项目
+    # 执行器」由宿主在声明里点名，判闸用它做受信会话身份比对（不再只看 cwd 推导）。
+    sessions_in = doc.get("executor_sessions")
+    sessions: List[str] = []
+    if sessions_in is not None:
+        if not isinstance(sessions_in, list) or \
+                any(not isinstance(s, str) or not s.strip() for s in sessions_in):
+            return {}, "executor_sessions 必须是非空字符串数组（收到 %r）" % (sessions_in,)
+        for s in sessions_in:
+            sid = s.strip()
+            if len(sid) > EXECUTOR_SESSION_ID_MAX:
+                return {}, "executor_sessions 项超限（%d > %d 字符）" % (len(sid), EXECUTOR_SESSION_ID_MAX)
+            if sid not in sessions:
+                sessions.append(sid)
+        if len(sessions) > EXECUTOR_SESSIONS_MAX:
+            return {}, "executor_sessions 至多 %d 个会话 id（收到 %d）——缩表后再存" % (
+                EXECUTOR_SESSIONS_MAX, len(sessions))
     out: Dict[str, Any] = {"version": DECL_VERSION, "grants": grants}
+    if sessions:
+        out["executor_sessions"] = sessions
     if night_ok is not None:
         out["night_tier"] = night_ok
     for meta_k in ("updated_by", "updated_at"):
@@ -166,7 +244,8 @@ def load_declaration(key: str) -> Dict[str, Any]:
                 "file": path}
     return {"ok": True, "declared": True, "file": path, "decl": normalized,
             "grants": dict(normalized.get("grants") or {}),
-            "night_tier": normalized.get("night_tier")}
+            "night_tier": normalized.get("night_tier"),
+            "executor_sessions": list(normalized.get("executor_sessions") or [])}
 
 
 def provenance_of(load: Dict[str, Any], grant_op: str, now_ms: int) -> Dict[str, Any]:
@@ -213,15 +292,21 @@ def judge_core(channel: str, op: str, key: str,
                load_face: Callable[[str], Dict[str, Any]],
                now_ms: int,
                audit_sink: Optional[Callable[[str, Dict[str, Any]], None]] = append_audit,
+               lane_surface: str = "",
+               declared_sessions: Any = (),
+               caller_session: str = "",
                ) -> Dict[str, Any]:
     """执行器授权判定核（IO 注入式纯核；judge() 是真 IO 包装）。
 
-    channel != cwd（泳道 agent=env 注入 / 显式参数 / 引擎仓树内未推导）→ 放行不设闸
-    ——「零回归红线」：非执行器调用方一个字节的行为都不变。"""
+    t261001-20（gen2 判据）：受闸=is_executor_channel()——cwd 推导（watchdog 执行
+    器会话），或声明通道（arg/env-external）且调用方会话 id 被项目声明
+    executor_sessions 点名（受信会话身份，宿主点名）。豁免通道（lane-agent 注入、
+    未声明、声明了 caller_project 但会话未被点名的普通调用=集成夹具/light-lane）
+    → 放行不设闸——「零回归红线」。"""
     op_s = str(op or "")
     # op 双形接受：引擎写 op 名（映射）或授予面名（GRANT_OPS 原词）。
     grant_op = op_s if op_s in GRANT_OPS else ENGINE_OP_TO_GRANT.get(op_s)
-    if channel != EXECUTOR_CHANNEL:
+    if not is_executor_channel(channel, lane_surface, declared_sessions, caller_session):
         return {"allowed": True, "why": "", "grant_op": grant_op, "enforced": False,
                 "provenance": None}
     # 元权限反锁：先于声明读取（声明缺席/畸形也锁得住），夜间档也解不开。
@@ -264,7 +349,23 @@ def judge(identity: Dict[str, Any], op: str, key: str, now_ms: Optional[int] = N
     已由跨项目闸先行拒收，这里 key 只在 pass 之后消费）。"""
     channel = str(identity.get("channel_src") or identity.get("src") or "")
     ms = int(now_ms if now_ms is not None else time.time() * 1000)
-    return judge_core(channel, str(op or ""), str(key or ""), load_declaration, ms)
+    # t261001-20：泳道 agent 豁免标签与调用方会话 id 随进程 env 消费（与
+    # caller_gate.identity_receipt 的 injected_by 同一读口——ticket.py 的 _poc 以
+    # os.environ 为底 spawn，标签透传到位）。声明单次装载：executor_sessions 供
+    # 受闸判定，装载结果经闭包复用给判定核（零二次 IO）。
+    surface = str(os.environ.get(shared.CALLER_SURFACE_ENV) or "")
+    load = load_declaration(str(key or ""))
+    sessions = tuple(load.get("executor_sessions") or ()) if load.get("ok") else ()
+    return judge_core(channel, str(op or ""), str(key or ""), lambda k: load, ms,
+                      lane_surface=surface, declared_sessions=sessions,
+                      caller_session=caller_session_id())
+
+
+def session_matches_declaration(channel: str, lane_surface: str = "", key: str = "") -> bool:
+    """「该调用方按当前声明是否算本项目执行器」（真 IO；save_declaration 反锁消费）。"""
+    load = load_declaration(str(key or ""))
+    sessions = tuple(load.get("executor_sessions") or ()) if load.get("ok") else ()
+    return is_executor_channel(channel, lane_surface, sessions, caller_session_id())
 
 
 # ---------- 声明写面（面板 TS 侧是主编辑器；本函数=引擎侧同规则写口与测试/CLI 面） ----------
@@ -275,19 +376,23 @@ def judge(identity: Dict[str, Any], op: str, key: str, now_ms: Optional[int] = N
 #   退役前先删 TS 镜像，两侧一起退役。）
 def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      night_tier: Optional[Dict[str, Any]] = None,
+                     executor_sessions: Optional[List[str]] = None,
                      caller_channel: str = "",
+                     lane_surface: str = "",
                      audit_sink: Callable[[str, Dict[str, Any]], None] = append_audit,
                      ) -> Dict[str, Any]:
     """声明写入（原子：tmp → 校验 → 回读再校验 → rename；任一步失败原文件逐字节不动）。
 
-    反锁：caller_channel=cwd（执行器身份）一律拒收——执行器永远不能写自己的授予
-    清单，哪怕「缩小」。返回 {"saved": bool, "reason"?, "file", "resolved"?}。"""
+    反锁（t261001-20 口径）：执行器身份（cwd 通道，或声明通道且会话 id 被本项目
+    executor_sessions 点名）一律拒收——执行器不能改/扩/缩自己的授予清单，哪怕
+    「缩小」。返回 {"saved": bool, "reason"?, "file", "resolved"?}。"""
     if not str(key or ""):
         return {"saved": False, "reason": "缺项目 key", "file": None}
-    if caller_channel == EXECUTOR_CHANNEL:
+    if session_matches_declaration(caller_channel, lane_surface, str(key or "")):
         return {"saved": False, "file": declaration_path(key),
-                "reason": "执行器元权限反锁：执行器身份不能改/扩/缩自己的授予清单"
-                          "（manage-grants 是宿主特权）——由宿主在执行器面板 Grants 页操作"}
+                "reason": "执行器元权限反锁：执行器身份（通道=%s）不能改/扩/缩自己的授予清单"
+                          "（manage-grants 是宿主特权）——由宿主在执行器面板 Grants 页操作"
+                          % (str(caller_channel or "").strip() or EXECUTOR_CHANNEL)}
     who = str(by or "").strip()
     if not who:
         return {"saved": False, "reason": "缺 by（谁在改授予清单——授予变更必须记名）", "file": None}
@@ -298,6 +403,8 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                            "updated_by": who[:64], "updated_at": int(now_ms)}
     if night_tier is not None:
         doc["night_tier"] = night_tier
+    if executor_sessions is not None:
+        doc["executor_sessions"] = executor_sessions
     normalized, verr = validate_declaration(doc)
     if verr:
         return {"saved": False, "reason": verr, "file": declaration_path(key)}
@@ -329,5 +436,6 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
     audit_sink(key, {"at": int(now_ms), "action": "grant-change", "project": key,
                      "who": who[:64],
                      "from": prev_norm.get("grants") or {}, "to": normalized.get("grants") or {},
-                     "night_tier": normalized.get("night_tier")})
+                     "night_tier": normalized.get("night_tier"),
+                     "executor_sessions": normalized.get("executor_sessions")})
     return {"saved": True, "file": path, "resolved": normalized}

@@ -99,6 +99,25 @@ try {
     assert(GRANT_OPS.length === 6 && GRANT_OPS.includes('send-back') && GRANT_OPS.includes('open-ticket'),
         `ops: fixed six (${++n})`)
   }
+
+  // ---- t261001-20：executor_sessions 校验镜像（与引擎 validate_declaration 同规则） ----
+  {
+    const [ok1] = validateDeclaration({ version: 1, grants: {}, executor_sessions: [' s-1 ', 's-1', 's-2'] })
+    assert(JSON.stringify(ok1.executor_sessions) === JSON.stringify(['s-1', 's-2']),
+        `sessions: strip+dedupe keep order (${++n})`)
+    const [ok2] = validateDeclaration({ version: 1, grants: {} })
+    assert(ok2.executor_sessions === undefined, `sessions: absent stays absent (${++n})`)
+    const [, e1] = validateDeclaration({ version: 1, grants: {}, executor_sessions: 's-1' })
+    assert(e1 && e1.includes('executor_sessions'), `sessions: non-array refused (${++n})`)
+    const [, e2] = validateDeclaration({ version: 1, grants: {}, executor_sessions: [' '] })
+    assert(e2 && e2.includes('executor_sessions'), `sessions: blank item refused (${++n})`)
+    const [, e3] = validateDeclaration({ version: 1, grants: {}, executor_sessions: [7] })
+    assert(e3 && e3.includes('executor_sessions'), `sessions: non-string item refused (${++n})`)
+    const [, e4] = validateDeclaration({ version: 1, grants: {}, executor_sessions: ['x'.repeat(129)] })
+    assert(e4 && e4.includes('超限'), `sessions: id length cap refused (${++n})`)
+    const [, e5] = validateDeclaration({ version: 1, grants: {}, executor_sessions: Array.from({ length: 9 }, (_, i) => `s-${i}`) })
+    assert(e5 && e5.includes('至多'), `sessions: count cap refused (${++n})`)
+  }
 } finally {
   cleanup([wd, pan])
 }

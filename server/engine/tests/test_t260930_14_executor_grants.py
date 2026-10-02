@@ -153,11 +153,16 @@ def _full_decl(night=None):
 
 
 def test_non_executor_channels_never_gated(grants_root):
-    """零回归杆：arg/env/none 通道恒放行（lane agent / 宿主 / 未声明不设闸）。"""
+    """零回归杆（t261001-20 gen2 判据）：arg/env/none 通道无会话点名=恒放行
+    （lane agent / 宿主 / 集成夹具 / light-lane 不设闸）；会话被声明点名的杆见
+    test_t261001_20_executor_grant_declared_channel.py。"""
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {}})
     for channel in ("arg", "env", "none", ""):
         v = eg.judge_core(channel, "sign", "sandbar", eg.load_declaration, 1_000, audit_sink=_sink)
         assert v["allowed"] is True and v.get("enforced") is False, channel
+    v = eg.judge_core("env", "sign", "sandbar", eg.load_declaration, 1_000,
+                      audit_sink=_sink, lane_surface=shared.CALLER_SURFACE_LANE_AGENT)
+    assert v["allowed"] is True and v.get("enforced") is False
 
 
 def test_reverse_lock_manage_grants(grants_root):
@@ -331,12 +336,28 @@ def test_client_gate_kind_and_helper_exist():
 
 
 def test_client_gate_only_cwd_channel(grants_root, monkeypatch):
+    """通道端到端（t261001-20 gen2 判据）：arg/env-external 无会话点名=放行不设闸
+    （集成夹具/light-lane 零回归）；cwd 通道维持 t260930-14 原语义：未授予=结构化
+    拒收（kind=executor_grant_refused），授予后放行并带溯源观测键；会话点名受闸杆
+    见 test_t261001_20_executor_grant_declared_channel.py。"""
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {}})
-    # arg/env/none 通道：闸不设（err=None 且不带执行器键）
-    for channel in ("arg", "env", "none", ""):
+    monkeypatch.delenv(shared.CALLER_SURFACE_ENV, raising=False)
+    # 声明通道无会话点名：闸不设（err=None 且不带执行器键）
+    for channel in ("arg", "env"):
         g = cl._executor_grant_gate({"value": "sandbar", "src": channel, "channel_src": channel},
                                     "sign", "sandbar")
         assert g["err"] is None and g["keys"] == {}, channel
+    # 未声明：闸不设
+    for channel in ("none", ""):
+        g = cl._executor_grant_gate({"value": "sandbar", "src": channel, "channel_src": channel},
+                                    "sign", "sandbar")
+        assert g["err"] is None and g["keys"] == {}, channel
+    # lane-agent surface：闸不设（零回归红线）
+    monkeypatch.setenv(shared.CALLER_SURFACE_ENV, shared.CALLER_SURFACE_LANE_AGENT)
+    g = cl._executor_grant_gate({"value": "sandbar", "src": "env", "channel_src": "env"},
+                                "sign", "sandbar")
+    assert g["err"] is None and g["keys"] == {}
+    monkeypatch.delenv(shared.CALLER_SURFACE_ENV)
     # cwd 通道：未授予=结构化拒收（点名 kind）
     g = cl._executor_grant_gate({"value": "sandbar", "src": "cwd", "channel_src": "cwd"},
                                 "sign", "sandbar")

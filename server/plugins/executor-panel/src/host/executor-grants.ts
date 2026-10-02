@@ -49,6 +49,11 @@ export interface NightTier { enabled: boolean; until: number; note?: string }
 export interface GrantsDecl {
   version: number
   grants: Partial<Record<GrantOp, true>>
+  /** 本项目执行器会话 id（dsh session id，t261001-20）：宿主点名「谁算本项目执行器」
+   *  ——引擎判闸把调用方会话 id（env DSH_SESSION_ID / DSH_HEADLESS_SESSION）与本表
+   *  比对，被点名才以执行器身份受闸。与引擎 EXECUTOR_SESSIONS_MAX(8)/
+   *  EXECUTOR_SESSION_ID_MAX(128) 镜像。 */
+  executor_sessions?: string[]
   night_tier?: NightTier
   updated_by?: string
   updated_at?: number
@@ -101,6 +106,28 @@ export function validateDeclaration(doc: unknown): [GrantsDecl, string | null] {
     if (v) (grants as Record<string, true>)[k] = true
   }
   const out: GrantsDecl = { version: DECL_VERSION, grants }
+  // t261001-20：执行器会话点名（镜像引擎 validate_declaration 的 executor_sessions 规则：
+  // 非空字符串数组、去重保序、单 id ≤128 字符、至多 8 个）。
+  const MAX_SESSIONS = 8
+  const MAX_SESSION_ID = 128
+  const sessionsIn = d.executor_sessions
+  if (sessionsIn !== undefined && sessionsIn !== null) {
+    if (!Array.isArray(sessionsIn) || sessionsIn.some((s) => typeof s !== 'string' || !s.trim())) {
+      return [{} as GrantsDecl, `executor_sessions 必须是非空字符串数组（收到 ${JSON.stringify(sessionsIn)}）`]
+    }
+    const sessions: string[] = []
+    for (const s of sessionsIn as string[]) {
+      const sid = s.trim()
+      if (sid.length > MAX_SESSION_ID) {
+        return [{} as GrantsDecl, `executor_sessions 项超限（${sid.length} > ${MAX_SESSION_ID} 字符）`]
+      }
+      if (!sessions.includes(sid)) sessions.push(sid)
+    }
+    if (sessions.length > MAX_SESSIONS) {
+      return [{} as GrantsDecl, `executor_sessions 至多 ${MAX_SESSIONS} 个会话 id（收到 ${sessions.length}）——缩表后再存`]
+    }
+    out.executor_sessions = sessions
+  }
   const night = d.night_tier
   if (night !== undefined && night !== null) {
     if (typeof night !== 'object' || Array.isArray(night)) {

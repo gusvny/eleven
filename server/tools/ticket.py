@@ -257,8 +257,9 @@ def _caller_env(caller, caller_src=""):
     """身份注入 env 键（纯函数，t260930-14 单测面）。
 
     caller 非空时注入：SANDBAR_CALLER_PROJECT（身份）+ SANDBAR_CALLER_IDENTITY_SRC
-    （推导出处 arg|env|cwd——client 侧执行器授权闸 executor_grants 据此辨认「cwd
-    推导=本项目执行器会话」；arg/env 通道=泳道 agent/显式调用，不落 cwd 通道）。"""
+    （推导出处 arg|env|cwd——client 侧执行器授权闸 executor_grants 据此辨认调用方
+    通道；t261001-20 判据=受信会话身份：cwd 通道恒受闸，声明通道仅当调用方会话 id
+    被项目声明 executor_sessions 点名才受闸，其余（夹具/light-lane/泳道 agent）豁免）。"""
     if not caller:
         return {}
     s = _shared()

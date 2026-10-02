@@ -531,11 +531,12 @@ def _with_channel(identity: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str) -> Dict[str, Any]:
-    """执行器授权闸（t260930-14）：当且仅当调用方身份通道=cwd 推导（本项目执行器
-    会话，见 executor_grants 模块头「身份缝」节）时，按项目声明判定放行/拒收。
+    """执行器授权闸（t260930-14；t261001-20 判据=受信会话身份）：受闸由
+    executor_grants.is_executor_channel 判——cwd 推导（watchdog 执行器会话），或
+    声明通道（arg/env-external）且调用方会话 id 被项目声明 executor_sessions 点名。
 
-    其余通道（arg 显式/env 注入=泳道 agent、none=未声明）一律放行不设闸——零回归
-    红线：lane agent / worker / 宿主控制台路径一个字节的行为都不变。返回
+    豁免通道（lane-agent spawn 注入、未声明、声明了 caller_project 但会话未被
+    点名的普通调用=集成夹具/light-lane）一律放行不设闸——零回归红线。返回
     {"err": 回执|None, "keys": 并入成功回执的身份键}。"""
     verdict = executor_grants.judge(_with_channel(identity), op, key)
     channel = _executor_channel(identity)

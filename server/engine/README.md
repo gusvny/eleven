@@ -858,17 +858,26 @@ arbitrate）；一期一票沿用期票去重。
 写路径在**调用方=本项目执行器会话**时按项目授权声明判定放行/拒收（最小权限默认、
 fail-closed）；其余调用方（泳道 agent / worker / 宿主控制台）零行为变化。
 
-### 17.1 身份缝（谁算执行器）
+### 17.1 身份缝（谁算执行器；t261001-20 重定判据=受信会话身份）
 
-| 通道 | 判定 | 处置 |
+| 调用方形态 | 判定 | 处置 |
 |---|---|---|
 | `SANDBAR_CALLER_IDENTITY_SRC=cwd`（ticket.py 写 op 出口透传的 cwd 推导出处） | 执行器会话（watchdog 代建、宿主 Session API cwd=项目主目录；0.1.5 实证 SessionCreateRequest 无 env 字段、preset 组合注入不了 shell env——cwd 推导是唯一机器可观测缝） | 过授权闸 |
-| `arg`/`env` 通道（泳道 agent spawn 链注入、显式参数） | 非执行器 | 不设闸，行为不变 |
-| `none`（未声明） | 非执行器 | 不设闸（跨项目闸另有策略） |
+| 声明通道（arg 显式 `caller_project` / env 注入且 `SANDBAR_CALLER_SURFACE`≠`lane-agent`）且调用方会话 id（env `DSH_SESSION_ID` > `DSH_HEADLESS_SESSION`）被项目声明 `executor_sessions` 点名 | 执行器身份（t261001-20：宿主在面板 Grants 页点名「谁算本项目执行器」；会话 id 由 dsh 工具链注入，调用方 prompt 改不了注入链） | 过授权闸 |
+| 声明通道但会话未被点名/缺席（规范 CLI 用法、light-lane、集成场景夹具） | 非执行器（gen0 曾按「声明了 caller_project」整档误闸，集测 6 红实证收回——通道形状≠执行器身份） | 不设闸 |
+| `env` + `SANDBAR_CALLER_SURFACE=lane-agent`（引擎 spawn 链注入） | 非执行器（泳道 agent，零回归红线；豁免优先于会话点名） | 不设闸，行为不变 |
+| `none`（未声明） | 非执行器 | 不设闸（跨项目闸另有策略，t260925-08 缺省=refuse） |
 | 引擎仓树内 cwd | 不推导（C1 红线） | 不设闸 |
 
-残余风险如实记档：真人在项目目录直跑写路径同样落 cwd 通道，会受闸（受闸≠提权：
-未授予的操作被拒收并点名授予路径）——与 `injected_by` 同为「尽力面标签」信任档位。
+判据单点：`executor_grants.is_executor_channel(channel, lane_surface, declared_sessions,
+caller_session)`。`executor_sessions` 是声明新字段（非空字符串数组、去重保序、单 id
+≤128 字符、至多 8 个；Python `validate_declaration` 与面板 TS `validateDeclaration`
+镜像互锁）；会话 id 读口 `DSH_SESSION_ID` > `DSH_HEADLESS_SESSION`。
+
+残余风险如实记档：真人在项目目录直跑写路径落 cwd 通道，会受闸（受闸≠提权：未被授予
+的操作被拒收并点名授予路径）；手工旁路设 `SANDBAR_CALLER_SURFACE=lane-agent` 冒充泳道
+agent、伪造 `DSH_SESSION_ID` 冒充被点名会话——与 `injected_by` 同为「尽力面标签」信任
+档位（安全断言归 spawn 链注入与会话宿主）。
 
 ### 17.2 声明真源与判定
 
@@ -888,7 +897,8 @@ fail-closed）；其余调用方（泳道 agent / worker / 宿主控制台）零
   `<projects_root>/<key>/executor-grants-audit.jsonl`（who / when / from / to）。
 
 闸的接线点：client.py `_write_gate`（ticket 写 op 全集）+ ticket-start + cancel /
-ticket-cancel（`_executor_grant_gate`，唯一入口）。UT：`tests/test_t260930_14_executor_grants.py`。
+ticket-cancel（`_executor_grant_gate`，唯一入口）。UT：`tests/test_t260930_14_executor_grants.py`
++ `tests/test_t261001_20_executor_grant_declared_channel.py`（声明通道收口）。
 
 ## 退役账（t260907-04 命名清理①：7 条过渡兼容，撤任何一条前先对表）
 
