@@ -38,6 +38,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import { loadWatchdogConfig, isValidProjectKey, watchdogDataDir } from './src/host/config.ts'
 import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type PendingProvider, type SessionStatFn } from './src/host/core.ts'
+import { filterBoardRowsToProject, type BoardRow } from './src/host/reconcile.ts'
 import type { PendingInteraction } from './src/host/self-lock.ts'
 import { QueueMirror } from './src/host/queue-mirror.ts'
 import type { WakeIo, WakeOutcome } from './src/host/exits.ts'
@@ -114,18 +115,27 @@ export function parseTicketListDoc(raw: string): TicketListParse {
 }
 
 /** 看板真源读面：spawn 引擎 client.py ticket-list（visibility list，不依赖单票 worker）。
+ *  **可选按项目过滤**（t261001-22 / KI-180）：账本是 <projects_root>/<key>/ledger/
+ *  events.jsonl 本项目文件，守望者对账用的看板必须同 scope——不传 project 时
+ *  ticket-list 回全机票，别家票永不可能被本项目账本覆盖，ledger_missing_rows 的 N
+ *  恒等于全机票数（永不收敛的结构假警）。opts.project 在场时：服务端 project 过滤
+ *  （ProjectKey SA）为主 + 行级 filterBoardRowsToProject 兜底（防御引擎侧过滤被绕过/
+ *  回执混行；无 SA 标签的历史票两侧语义一致，保守保留）；缺席时（真形锁/全局视图
+ *  调用方，t260929-07 sc C 段契约：makeBoardReader(repo) 必须 rows>0）不做裁剪，
+ *  回全机行——scope 是调用方的选择，读器不擅自把全局读面裁空。
  *  结构化失败透传（不抛裸栈）；超时由 execFile timeout 收尸。 */
-export function makeBoardReader(repo: string, python?: string) {
+export function makeBoardReader(repo: string, opts: { python?: string; project?: string } = {}) {
+  const project = opts.project
   return async (): Promise<{ ok: boolean; rows: Array<Record<string, unknown>>; error?: string }> => {
     const engineDir = join(repo, 'server', 'engine')
-    const py = python ?? (existsSync(join(engineDir, '.venv', 'bin', 'python')) ? join(engineDir, '.venv', 'bin', 'python') : 'python3')
+    const py = opts.python ?? (existsSync(join(engineDir, '.venv', 'bin', 'python')) ? join(engineDir, '.venv', 'bin', 'python') : 'python3')
     try {
-      const { stdout } = await execFileP(py, ['client.py', 'ticket-list', JSON.stringify({})], {
+      const { stdout } = await execFileP(py, ['client.py', 'ticket-list', JSON.stringify(project ? { project } : {})], {
         cwd: engineDir, timeout: 30_000, maxBuffer: 32 * 1024 * 1024,
       })
       const parsed = parseTicketListDoc(stdout)
       if (!parsed.ok) return { ok: false, rows: [], error: parsed.error }
-      return { ok: true, rows: parsed.tickets }
+      return { ok: true, rows: project ? filterBoardRowsToProject(parsed.tickets as BoardRow[], project) : parsed.tickets }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return { ok: false, rows: [], error: `ticket-list 不可达（引擎离线/超时）：${msg.slice(0, 300)}` }
@@ -415,7 +425,9 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
 
   const watch = new Map<string, Watchdog>()
   const wakeIo = makeWakeIo(ctx)
-  const boardReader = makeBoardReader(repo, options.python)
+  // board reader 按项目实例化（t261001-22 / KI-180）：ticket-list 必须带本项目过滤，
+  // 一进程看多项目时各守望者各拿各的 scope，绝不共享一个全机 reader。
+  const boardReaderFor = (key: string) => makeBoardReader(repo, { project: key, python: options.python })
   // 真信号三面（t260929-08）：会话推进（list updatedAt）/ 自锁 pending（面板请求账）/
   // 引擎探针（7233 TCP）。快照由 sessionStat 每拍刷新，pendingProvider 复用 running 位。
   const session = makeSessionStat(ctx)
@@ -427,7 +439,7 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
     if (w) return w
     w = new Watchdog(key, {
       io: defaultIo,
-      boardReader,
+      boardReader: boardReaderFor(key),
       wakeIo,
       engineProbe,
       sessionStat: session.stat,

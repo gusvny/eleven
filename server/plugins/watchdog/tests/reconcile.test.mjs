@@ -41,4 +41,21 @@ const row = (ticket, stageState) => parseLedgerLine(ledgerLine({ ticket, stage_s
   assert(s5.level === 'warn', 'missing rows default warn level')
   n += 5
 }
+// 项目过滤（KI-180）：对账/缺行两侧必须同 scope——看板行裁到本项目。
+{
+  const { filterBoardRowsToProject } = await import('../src/host/reconcile.ts')
+  const mixed = [
+    { id: 'a', project: 'sandbar', stage_state: 'running' },
+    { id: 'b', project: 'dengzhufpv', stage_state: 'running' },
+    { id: 'c', stage_state: 'running' },            // 无 SA 标签的历史票
+    { id: 'd', project: null, stage_state: 'running' },
+  ]
+  const kept = filterBoardRowsToProject(mixed, 'sandbar')
+  assert(kept.length === 3 && kept.every(r => r.id !== 'b'), 'rows of other projects dropped; own + label-less kept')
+  assert(filterBoardRowsToProject(mixed, 'dengzhufpv').map(r => r.id).join(',') === 'b,c,d', 'per-project scope keeps only own + label-less rows')
+  assert(filterBoardRowsToProject([], 'sandbar').length === 0, 'empty board stays empty')
+  // 缺行计数消费过滤后的行：别家票不再恒等「缺行」。
+  const led = [row('a', 'running')]
+  assert(countMissingRows(kept, led) === 2, 'missing count now scoped to project (foreign tickets excluded)')
+  n += 4}
 done(n)

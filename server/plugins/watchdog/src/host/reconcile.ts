@@ -7,6 +7,8 @@
  *  - 缺行计数：以看板票面在账本应有序 vs 账本实有 idem 的差额 N 落
  *    `ledger_missing_rows:<project>` 专属 alert（N 变化即新事实重响——dedupe key
  *    的 target 带上 N，N 不变自然冷却，见 makeMissingRowsSpec）。
+ *  - 两侧必须同 scope：账本是**本项目**文件，看板行也必须裁到本项目
+ *    （filterBoardRowsToProject；KI-180：全机看板比项目账本 = 永不收敛的假警）。
  */
 
 import type { LedgerRow } from './ledger-tail.ts'
@@ -17,6 +19,8 @@ export interface BoardRow {
   ticket?: string
   stage?: string
   stage_state?: string
+  /** ticket.py list 行自带的项目 key（引擎 SA 投影；无标签的历史票缺席此字段）。 */
+  project?: string
 }
 
 function boardId(b: BoardRow): string {
@@ -95,4 +99,18 @@ export function countMissingRows(board: BoardRow[], ledgerRows: LedgerRow[]): nu
   // 覆盖 = 账本里有一行把该票带到看板当前状态（票有行但落后于看板 = 仍算缺行）。
   const covered = new Set(ledgerRows.map(r => `${r.ticket}|${ledgerState(r)}`))
   return board.filter(b => !covered.has(`${boardId(b)}|${boardState(b)}`)).length
+}
+
+/**
+ * 项目过滤（KI-180 防御纵深，纯函数）：对账与缺行计数都拿**本项目账本**比看板，
+ * 所以喂进来的看板行必须先裁到本项目——否则别家票永不可能被本项目账本覆盖，
+ * `ledger_missing_rows` 的 N 会恒等于全机票数（结构假警，永不收敛）。
+ * 规则：行带 project 字段时只留等于本项目的；字段缺席（无 SA 标签的历史票）
+ * 保守保留——引擎侧 project 过滤同样匹配不到它们，误删真源行比多算一行缺行更危险。
+ */
+export function filterBoardRowsToProject(rows: BoardRow[], project: string): BoardRow[] {
+  return rows.filter(b => {
+    const p = b.project
+    return p === undefined || p === null || String(p) === project
+  })
 }

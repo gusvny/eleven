@@ -7,10 +7,13 @@ assert(mod.name === 'sandbar-watchdog', 'plugin name exported')
 assert(Array.isArray(mod.inject) && mod.inject.length === 0, 'no hard inject dependencies (headless standby)')
 assert(typeof mod.apply === 'function', 'apply exported')
 assert(typeof mod.makeBoardReader === 'function' && typeof mod.makeWakeIo === 'function', 'host-API seams exported (t260929-04: real sessionController)')
-// boardReader：坏 repo → 结构化失败（不裸抛）。
+// boardReader：坏 repo → 结构化失败（不裸抛）；无 project 选项 = 全局读面（t260929-07
+// 真形锁 sc C 段契约：makeBoardReader(repo) 单参调用必须照常工作，rows 不被裁空）。
 {
   const r = await mod.makeBoardReader('/nonexistent-repo')()
   assert(r.ok === false && typeof r.error === 'string' && r.error.length > 0, 'boardReader failure = structured, never throw')
+  const r2 = await mod.makeBoardReader('/nonexistent-repo', { project: 'sandbar' })()
+  assert(r2.ok === false && typeof r2.error === 'string' && r2.error.length > 0, 'boardReader with project option: same structured failure')
 }
 // wakeIo：宿主服务不可达 → accepted:false + 点名（显式不可用，绝不静默）。
 {
