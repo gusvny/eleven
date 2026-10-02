@@ -123,9 +123,15 @@ def main():
         def verd(e):
             return str(e.get("verdict", ""))
 
+        # 词表契约（断言词表必须与工具词表对齐）：lane_audit 的 verdict 是
+        # 「家族:可选后缀」形状——keep 家族=keep / keep:unknown-owner（query
+        # 不可达时的 fail-closed 保守 keep），只有 prune:* 才是可剪。按家族判，
+        # 不按整串精确相等：t261001-23 坏脸（Temporal 历史带 lone surrogate，查询
+        # 端崩）使工具产出 keep:unknown-owner，精确判词把 keep 家族误报成泳道
+        # 误判——词表不齐是断言的错，不是工具的错（261002 修复）。
         bad = [e.get("ticket") for e in entries
                if statuses.get(e.get("ticket")) not in (None, "closed")
-               and verd(e) != "keep"]
+               and verd(e).split(":")[0] != "keep"]
         cases.append(("C live 泳道零误判（非 closed 票全 keep）", not bad))
         me = next((e for e in entries if e.get("ticket") == "t260925-13"), None)
         if statuses.get("t260925-13") == "dispatched":
