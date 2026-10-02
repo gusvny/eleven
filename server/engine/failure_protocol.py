@@ -257,6 +257,132 @@ def apply_affiliation(lane_cases, baseline_cases, lane_fp, baseline_fp,
             "violations": violations_all}
 
 
+# ---------------- 归属前复验（KI-182，t261002-02）----------------
+# 「lane 红 + main 绿 ⇒ 本票的账」这条归属规则假定 lane 与 main 的差异来自本票改动；
+# 但同一轮的台面抖动（轮内并发多台/浏览器抢内存端口、夹具播种竞争）同样能造出
+# lane-only 红，于是真账假账混记、放行口径被迫靠重跑碰绿（261001 夜 t261001-19/21/
+# 22/23 实证，KI-182/184）。本节把 KI-182 的出路落成纯函数机制：**归因前先复验**——
+# 对「本票的账」家族逐条以同树单跑回执复验，全绿 ⇒ 降级 unattributable（不记本票
+# 的账），未证全绿 ⇒ 维持 block（fail-closed：拦不松、账不丢）。
+# 判定纪律（不变式）：unattributable **不等于绿**——轮仍红、仍转人，闸的拦面一个
+# 不放；它只改账本（不冤枉），不改放行口径（不碰绿）。
+
+#: 只对这一族 block 做复验：why 以此开头 = lane 红 + main 绿/基线不可比 → 原规则
+#: 记成本票的账。协议违约 block（violation）与 not-checked 家族不走复验：前者是
+#: 铁拦（报错态本身违约），后者基线本就答不了锅、不是「被冤枉」的形状。
+RECHECK_BLOCK_WHY_PREFIX = "regression("
+
+#: 复验后降级档（KI-182 出路②，带复验回执）：同树单跑全绿 ⇒ 本轮该名不可归因
+#: （台面族），不记本票的账。
+VERDICT_UNATTRIBUTABLE = "unattributable"
+
+
+def reprobe_receipt_all_green(receipt):
+    """复验回执 → 全绿布尔。判据与 shared.ReprobeRedResult.all_green 同源（五条同时
+    成立：零 error、真跑 ≥1、零产品红、零环境红、零不在册）——这里收 dict/对象两种
+    形状（活动回执过 workflow 边界后可能是任一形态）。任何缺键/错型/畸形 → False
+    （fail-closed：未证全绿就不降级，绝不因回执读不懂而洗账）。"""
+    if receipt is None or isinstance(receipt, (str, bytes, int, float, bool, list)):
+        return False
+    if isinstance(receipt, dict):
+        def get(k, d=None):
+            return receipt.get(k, d)
+    elif hasattr(receipt, "get") or hasattr(receipt, "__dict__"):
+        def get(k, d=None):
+            return getattr(receipt, k, d)
+    else:
+        return False
+
+    def _int(k):
+        v = get(k)
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+    ran, failed, env_fail = _int("ran"), _int("failed"), _int("env_fail")
+    if ran is None or failed is None or env_fail is None:
+        return False
+    error = get("error")
+    missing = get("missing")
+    if not isinstance(error, str):
+        return False
+    if not isinstance(missing, (list, tuple)):
+        return False
+    return (error == "" and ran >= 1 and failed == 0 and env_fail == 0
+            and not list(missing))
+
+
+def apply_reprobe_recheck(verdicts, reprobe=None):
+    """归属前复验（KI-182 出路①②）：对「本票的账」家族（verdict=block × why 以
+    RECHECK_BLOCK_WHY_PREFIX 开头）以同树单跑回执逐条复验：
+    - 回执全绿（reprobe_receipt_all_green）→ 该条降级 verdict=unattributable，
+      why=reprobe_green(...)，条内带 recheck 回执面（ran/缺失面）；
+    - 未证全绿 / 回执畸形 / 缺席 → 该条判定**逐字节不动**（fail-closed：探针缺席
+      绝不放行、也绝不洗账），why 追加 reprobe 证据便于人审。
+    只碰该族 block；pass/record/unknown/violation 与非该族 block 一概不动（全绿
+    用例永不受牵连）。reprobe=None（探针没跑）→ 全部原样 + recheck.available=False。
+    返回 {verdicts, unattributable, rechecked, ticket_account, recheck}：
+    - unattributable = 降级名单；rechecked = 复验过（无论方向）的名单；
+    - ticket_account = 复验后仍记本票的账的名单；
+    - recheck = 票面/明细共用的面摘要（available/all_green/ran/error/计数）。"""
+    green = reprobe_receipt_all_green(reprobe)
+    available = reprobe is not None
+    ran = error = None
+    if available:
+        getter = reprobe.get if isinstance(reprobe, dict) else (
+            lambda k, d=None: getattr(reprobe, k, d))
+        ran = getter("ran")
+        error = str(getter("error") or "")
+    out, unattr, rechecked, kept = [], [], [], []
+    for v in verdicts or []:
+        if (not isinstance(v, dict) or v.get("verdict") != "block"
+                or not str(v.get("why") or "").startswith(RECHECK_BLOCK_WHY_PREFIX)):
+            out.append(v)
+            continue
+        name = v.get("name")
+        rechecked.append(name)
+        if green:
+            unattr.append(name)
+            nv = dict(v, verdict=VERDICT_UNATTRIBUTABLE,
+                      why="reprobe_green(standalone re-run in this lane: all green)",
+                      recheck={"ran": ran, "error": ""})
+        else:
+            kept.append(name)
+            nv = dict(v,
+                      why="%s | reprobe_not_green(%s)"
+                          % (v.get("why"), error or "reds remain on the re-run"),
+                      recheck={"error": error})
+        out.append(nv)
+    return {
+        "verdicts": out,
+        "unattributable": unattr,
+        "rechecked": rechecked,
+        "ticket_account": kept,
+        "recheck": {"available": bool(available), "all_green": bool(green),
+                    "ran": int(ran) if isinstance(ran, int)
+                    and not isinstance(ran, bool) else 0,
+                    "error": error or "",
+                    "unattributable": list(unattr),
+                    "ticket_account": list(kept)},
+    }
+
+
+def unattributable_face_sentence(unattributable, ticket_account):
+    """票面句子（英文，界面口径）：复验降级了谁、谁复验后仍红、轮仍红仍转人——
+    把「unattributable ≠ 绿、不自动放行」说在票面上（防「靠重跑碰绿」被误读成放行）。
+    unattributable 空 → 空串（票面零扰动）。"""
+    un = [str(n) for n in (unattributable or []) if str(n)]
+    kept = [str(n) for n in (ticket_account or []) if str(n)]
+    if not un:
+        return ""
+    parts = ["Re-check: %d red(s) re-ran standalone in this lane and passed → "
+             "unattributable (bench-family), NOT booked as this ticket's account"
+             % len(un)]
+    if kept:
+        parts.append("%d red(s) stayed red on the re-run (still this ticket's account)"
+                     % len(kept))
+    parts.append("the round is still red — a human decides")
+    return "; ".join(parts) + "."
+
+
 # ---------------- 汇总（闸重算复核权威） ----------------
 
 def recount(cases):

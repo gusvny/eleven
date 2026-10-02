@@ -96,17 +96,20 @@ with workflow.unsafe.imports_passed_through():
         MERGE_CHECK_TO,
         MERGE_TO,
         RETRY,
+        REPROBE_TO,
         SHORT,
         FLOW_BRIEF,
         DevLaneWorkflow,
     )
     import shared  # 纯函数面（exception_chain_note 等，零 IO）
+    import failure_protocol  # 纯函数面（归属前复验 KI-182，t261002-02）
     from agent_activities import (
         archive_ticket,
         changed_files,
         merge,
         merge_check,
         prepare_human_gate,
+        reprobe_red_scenarios,
         run_integration_tests,
         surface_plan,
         teardown_lane,
@@ -125,6 +128,8 @@ with workflow.unsafe.imports_passed_through():
         MergeResult,
         ReviewGateArgs,
         ReviewGateResult,
+        ReprobeRedArgs,
+        ReprobeRedResult,
         ReworkRequest,
         Signature,
         Stage,
@@ -155,6 +160,16 @@ LIGHT_MAIN_SYNC_PATCH_ID = "light-lane-main-sync-v1"
 #: NonDeterminismError，票直接卡死。有门 ⇒ 重放旧轮 `patched()`=False（旧命令序列逐字不变），
 #: 追平历史之后的新一轮 `patched()`=True ⇒ 记标记并真的走回落逻辑（正是要救的那一轮）。
 LIGHT_NARROWED_FACE_PATCH_ID = "light-lane-narrowed-face-empty-v1"
+
+#: 门=LIGHT_GATE_RECHECK_PATCH_ID（t261002-02，KI-182 落成机制）：闸红转人**之前**
+#: 新增一次 `reprobe_red_scenarios` 探针活动调用（对闸拦名单=「本票的账」家族在
+#: **同一棵泳道树**上单跑复验）。无门会让在飞老实例重放旧轮时多出一条命令 ⇒
+#: NonDeterminismError；门 False ⇒ 旧命令序列逐字不变（红轮直接 blocked，零探针）。
+#: 判定面（纯函数）=failure_protocol.apply_reprobe_recheck：探针全绿 ⇒ 该名降级
+#: unattributable（台面族，不记本票的账）；未证全绿 ⇒ 维持本票的账。**放行口径
+#: 零改动**：轮仍红、仍 blocked、仍转人——降级只改账本，不造「绿」（堵「靠重跑碰
+#: 绿」的放行路径：现在复验跑绿也是 blocked，人看到的是「不可归因」而不是「碰绿」）。
+LIGHT_GATE_RECHECK_PATCH_ID = "light-lane-gate-recheck-v1"
 
 #: 段门表（**按 (template_id, stage_id) 键**，与 shared.default_gate_for 同形同键）。
 #: 机器闸=项目声明的集成命令（verify_lane lane=integ）——与 dev-lane 的机器闸**同一条
@@ -652,6 +667,57 @@ class LightLaneWorkflow(DevLaneWorkflow):
                          "that name and is NEVER read as main-green and NEVER as a landing "
                          "permit")}
 
+    async def _light_gate_recheck(self, ir: Any) -> Dict[str, Any]:
+        """归属前复验（KI-182 / t261002-02）：闸拦名单（=「本票的账」家族，基线红
+        名单已在闸侧记 record 不在拦名单里）逐名在**同一棵泳道树**上单跑复验
+        （`reprobe_red_scenarios` 探针活动——与 dev-lane 计轮探针同一活动、同一执行
+        器语义，name→cmd 解析仍=执行器 SCENARIOS 单一真源）。判定面=
+        `failure_protocol.apply_reprobe_recheck`（纯函数）：探针全绿 ⇒ 该名降级
+        unattributable（台面族，不记本票的账）；未证全绿 ⇒ 维持本票的账。
+
+        fail-closed：活动故障/回执形状未知/名单空 ⇒ recheck.available=False，调用方
+        按零降级处理（绝不因探针缺席放行或洗账）。返回 apply_reprobe_recheck 的
+        输出形状（verdicts/unattributable/rechecked/ticket_account/recheck）。"""
+        names = [str(b).strip() for b in (getattr(ir, "blockers", None) or [])
+                 if str(b).strip()]
+        if not names:
+            return {"verdicts": [], "unattributable": [], "rechecked": [],
+                    "ticket_account": [],
+                    "recheck": {"available": False, "all_green": False, "ran": 0,
+                                "error": "", "unattributable": [],
+                                "ticket_account": [],
+                                "skipped": "no blockers to re-check"}}
+        try:
+            raw = await workflow.execute_activity(
+                reprobe_red_scenarios,
+                ReprobeRedArgs(ticket_id=self.ticket_id,
+                               worktree=str(self.meta.get("worktree") or ""),
+                               names=names),
+                start_to_close_timeout=REPROBE_TO, retry_policy=RETRY)
+            receipt = raw if isinstance(raw, ReprobeRedResult) else None
+            if receipt is None:
+                return failure_protocol.apply_reprobe_recheck(
+                    [{"name": n, "verdict": "block",
+                      "why": "regression(lane red; main green)"} for n in names],
+                    {"available": False, "error": "probe receipt shape unknown",
+                     "ran": 0, "failed": 0, "env_fail": 0, "missing": []})
+        except Exception as e:  # noqa: BLE001——探针故障=fail-closed，不洗账不放行
+            err = "probe activity fault: %s: %s" % (type(e).__name__, str(e)[:200])
+            return failure_protocol.apply_reprobe_recheck(
+                [{"name": n, "verdict": "block",
+                  "why": "regression(lane red; main green)"} for n in names],
+                {"available": False, "error": err, "ran": 0, "failed": 0,
+                 "env_fail": 0, "missing": []})
+        doc = {"error": str(receipt.error or ""), "ran": int(receipt.ran or 0),
+               "failed": int(receipt.failed or 0),
+               "env_fail": int(receipt.env_fail or 0),
+               "missing": list(receipt.missing or []),
+               "entries": [dict(x) for x in (receipt.entries or [])
+                           if isinstance(x, dict)]}
+        return failure_protocol.apply_reprobe_recheck(
+            [{"name": n, "verdict": "block",
+              "why": "regression(lane red; main green)"} for n in names], doc)
+
     def _light_env_red_note(self, face: Dict[str, Any]) -> str:
         """环境红面的票面句子（三态各一句；unnameable 必须说清为什么）。"""
         if face["state"] == ENV_RED_NONE:
@@ -747,7 +813,8 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 % (attr["baseline_ref"] or "unavailable", attr["source"],
                    len(attr["lane_only"]), len(attr["main_red_too"]), len(attr["unknown"])))
 
-    def _light_gate_blocked_text(self, ir: Any, run_only: Any, phase_note: str) -> str:
+    def _light_gate_blocked_text(self, ir: Any, run_only: Any, phase_note: str,
+                                 recheck: Optional[Dict[str, Any]] = None) -> str:
         """轻道机器闸 blocked 文案（票面英文）——**给人看的一屏摘要**，不是机器清单。
 
         宿主 260930 实报：旧文案把收窄面全表（200+ 个场景名）、全量违例表、逐名归因表、
@@ -770,8 +837,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
         blockers = [str(b) for b in (getattr(ir, "blockers", None) or [])
                     if str(b) and not str(b).startswith("__")]
         main_too = set(attr["main_red_too"])
-        # 本票的账（可行动）= 闸的拦名单 − 基线已证「main 也红」的名字；unknown 仍算本票的账
-        actionable = [b for b in blockers if b not in main_too]
+        # 归属前复验（t261002-02）：探针全绿的名字降级 unattributable，**不算本票
+        # 的账**（不进 Fix 面、不进计数）——但轮仍红仍 blocked（降级只改账本不造绿）。
+        unattr = [str(n) for n in ((recheck or {}).get("unattributable") or [])
+                  if str(n)]
+        # 本票的账（可行动）= 闸的拦名单 − 基线已证「main 也红」的名字 − 复验降级
+        # unattributable 的名字；unknown 仍算本票的账
+        actionable = [b for b in blockers
+                      if b not in main_too and b not in set(unattr)]
         lines = [
             "Blocked: the machine gate is red — one machine round per attempt: no "
             "arbitration, no automatic re-run; a human decides.",
@@ -787,6 +860,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
                          % self._light_name_sample(actionable))
         else:
             lines.append("This ticket's account: none of the reds are this ticket's account.")
+        _face_sent = failure_protocol.unattributable_face_sentence(
+            unattr, (recheck or {}).get("ticket_account") or [])
+        if _face_sent:
+            lines.append(_face_sent)
         recorded = []
         if attr["main_red_too"]:
             recorded.append("%d pre-existing on main" % len(attr["main_red_too"]))
@@ -839,7 +916,8 @@ class LightLaneWorkflow(DevLaneWorkflow):
         return "\n".join(lines)
 
     def _light_gate_blocked_detail(self, ir: Any, run_only: Any, reason_code: str,
-                                   phase_note: str) -> Dict[str, Any]:
+                                   phase_note: str,
+                                   recheck: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """机器闸 blocked 的结构化明细（**机器清单的家**；键族与父类 blocked_detail 同形；
         additive 键承载完整违规集与跑面，供票面/控制台机读）。
 
@@ -893,6 +971,17 @@ class LightLaneWorkflow(DevLaneWorkflow):
             # 之③：逐名归因（lane-only / main-red-too / unknown）+ 来源与保守口径
             # （`note` 是同一块的计数句，供人读明细时不必自己数）
             "attribution": dict(attr, note=self._light_attribution_note(attr)),
+            # 归属前复验（t261002-02，KI-182）：降级名单/复验后仍账名单/探针面——
+            # additive 键；探针没跑（门关/活动故障/零拦名单）= available=False 如实记。
+            "recheck": dict({"available": False, "all_green": False, "ran": 0,
+                             "error": "", "unattributable": [],
+                             "ticket_account": [],
+                             **((recheck or {}).get("recheck") or {})},
+                            verdicts=[{"name": str(v.get("name")),
+                                       "verdict": str(v.get("verdict")),
+                                       "why": str(v.get("why"))}
+                                      for v in (recheck or {}).get("verdicts", [])
+                                      if isinstance(v, dict)]),
             "counts": {"ran": int(getattr(ir, "ran", 0) or 0),
                        "passed": int(getattr(ir, "passed", 0) or 0),
                        "failed": int(getattr(ir, "failed", 0) or 0),
@@ -1338,13 +1427,23 @@ class LightLaneWorkflow(DevLaneWorkflow):
                                      % (len(run_only), "y" if len(run_only) == 1 else "ies")
                                      if run_only else " (full registry)"))
                     note = round_desc + self._light_gate_note_tail(ir)
+                    # 归属前复验（t261002-02，KI-182；门=LIGHT_GATE_RECHECK_PATCH_ID）：
+                    # 产品红转人之前，把闸拦名单（本票的账家族）在**同一棵泳道树**上
+                    # 逐名单跑复验——全绿 ⇒ 降级 unattributable（不记本票的账），
+                    # 未证全绿 ⇒ 维持。只改账本，不改放行口径：轮仍红仍 blocked 仍转人。
+                    recheck = None
+                    if (workflow.patched(LIGHT_GATE_RECHECK_PATCH_ID)
+                            and reason_code == "light_gate_red"):
+                        recheck = await self._light_gate_recheck(ir)
+                        self.meta["gate_recheck"] = recheck
                     if getattr(self, "_detail_face_on", False):
                         self.meta["blocked_detail"] = self._light_gate_blocked_detail(
-                            ir, run_only, reason_code, note)
+                            ir, run_only, reason_code, note, recheck=recheck)
                         self._touch()
                     await self._blocked("run_integration_tests",
                                         self._light_gate_blocked_text(ir, run_only,
-                                                                      round_desc))
+                                                                      round_desc,
+                                                                      recheck=recheck))
                     continue
                 env_names, _ok = self._tests_env_red_names(ir)
                 if env_names:
