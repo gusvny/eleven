@@ -228,7 +228,10 @@ def ensure_inspection_search_attributes(timeout=20):
     if not cli:
         return False, "temporal CLI 不可得（server/engine/bin/temporal 缺失，env SANDBAR_TEMPORAL_BIN 可指路）"
     notes = []
-    for name in ("ProjectKey", "EpicCode", "InspectionInstance", "InspectionPeriod"):
+    # t261002-11（KI-191）：+InspectionFixture/InspectionSlotTakenAt——夹具期标记与
+    # 占坑时刻；缺注册时一切新巡检起票显式失败（真班排程同灭），与老四项同链必注册。
+    for name in ("ProjectKey", "EpicCode", "InspectionInstance", "InspectionPeriod",
+                 "InspectionFixture", "InspectionSlotTakenAt"):
         try:
             p = _sp.run([cli, "operator", "search-attribute", "create",
                          "--namespace", TEST_NAMESPACE, "--name", name,

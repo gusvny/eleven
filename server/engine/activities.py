@@ -1113,6 +1113,7 @@ async def trigger_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
         repo_root=str(args.get("repo_root") or ""),
         scan_face=str(args.get("scan_face") or "test"),
         decl_path=str(args.get("decl_path") or ""),
+        fixture_mark=str(args.get("fixture_mark") or ""),
         task_queue=activity.info().task_queue)
     if res.get("ok"):
         res["result"]["period"] = period
@@ -1249,6 +1250,9 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
         repo_root=ident["repo_root"],
         scan_face=str(args.get("face") or plan.get("scan_face") or "test"),
         decl_path=str(args.get("decl_path") or ""),
+        # KI-191：夹具标记透传（cron 真班缺省空串=真班语义逐字不变；快进夹具经
+        # spawn payload 带 fixture_mark 即入隔离的夹具期空间）
+        fixture_mark=str(args.get("fixture_mark") or ""),
         task_queue=activity.info().task_queue)
     if res.get("ok"):
         res["result"]["period"] = period

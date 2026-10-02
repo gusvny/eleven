@@ -56,6 +56,10 @@ MAX_ALLOC_RETRIES = 5
 
 SA_INSTANCE_NAME = "InspectionInstance"
 SA_PERIOD_NAME = "InspectionPeriod"
+# KI-191（t261002-11）：夹具标记 + 期槽占用时刻（与 shared.py 同名常量；本模块自带
+# 一份沿用 SA_INSTANCE_NAME/SA_PERIOD_NAME 的本地常量先例——查询串与 describe 解析共用）。
+SA_FIXTURE_NAME = "InspectionFixture"
+SA_SLOT_TAKEN_NAME = "InspectionSlotTakenAt"
 
 
 class TicketingError(ValueError):
@@ -116,22 +120,27 @@ def pointer_age(path: Path, now_fn=time.time) -> float:
 
 def claim_pointer(path: Path, instance_id: str, period: str, ticket_id: str,
                   project_key: str, now_fn=time.time,
-                  supersedes_ticket_id: str = "") -> Tuple[str, Path]:
+                  supersedes_ticket_id: str = "", fixture_mark: str = "") -> Tuple[str, Path]:
     """原子抢占：O_CREAT|O_EXCL 写指针。返回 ("claimed", path) 抢到 / ("exists", path)
     已有人 claim。写失败（目录不可写等）→ OSError 上抛（开票面显式报错）。
-    supersedes_ticket_id 非空 = 本次开票是终止票重开（KI-114），指针链路留审计痕。"""
+    supersedes_ticket_id 非空 = 本次开票是终止票重开（KI-114），指针链路留审计痕。
+    fixture_mark 非空 = 本次 claim 是夹具开票（KI-191），指针 payload 留 `fixture` 痕
+    （并发窗内后来者在 describe 之前即可读到夹具身份；空=不加该键，行形状不变）。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"ticket_id": ticket_id, "instance_id": instance_id,
-                          "period": period, "project_key": project_key,
-                          "supersedes_ticket_id": str(supersedes_ticket_id or ""),
-                          "at": float(now_fn())}, ensure_ascii=False)
+    payload = {"ticket_id": ticket_id, "instance_id": instance_id,
+               "period": period, "project_key": project_key,
+               "supersedes_ticket_id": str(supersedes_ticket_id or ""),
+               "at": float(now_fn())}
+    if str(fixture_mark or "").strip():
+        payload["fixture"] = str(fixture_mark).strip()
+    body = json.dumps(payload, ensure_ascii=False)
     try:
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except FileExistsError:
         return "exists", path            # 已有人 claim——三态判定归调用方（绝不绕过）
     try:
-        os.write(fd, payload.encode("utf-8"))
+        os.write(fd, body.encode("utf-8"))
     finally:
         os.close(fd)
     return "claimed", path
@@ -530,17 +539,20 @@ def period_slot_verdict(status_name: Any) -> str:
     return "ambiguous"
 
 
-async def describe_period_run(client: Any, ticket_id: str) -> Tuple[Optional[bool], str, str, str]:
-    """验票存在 + 读执行状态 + (实例,期) 身份（KI-114：去重判定升级为状态感知）。
-    返回 (exists, status_name, instance, period)：exists 三态同 describe_period_identity
+async def describe_period_run(client: Any, ticket_id: str) -> Tuple[Optional[bool], str, str, str, str, str]:
+    """验票存在 + 读执行状态 + (实例,期) 身份（KI-114：去重判定升级为状态感知）
+    + 夹具标记/占坑时刻（KI-191）。返回 (exists, status_name, instance, period,
+    fixture_mark, slot_taken_at)：exists 三态同 describe_period_identity
     （True/False=确定结论，None=瞬态不可判，绝不猜）；status_name 取 describe 返回的
-    执行状态名（真 SDK WorkflowExecutionStatus 与 FakeClient 桩均读 .name），不可读=空串。"""
+    执行状态名（真 SDK WorkflowExecutionStatus 与 FakeClient 桩均读 .name），不可读=空串；
+    fixture_mark/slot_taken_at 从 SA 章照实读——老票/真班无章=空串（诚实降级面，
+    绝不伪造缺省值；slot_taken_at 消费方把空串呈报为 unknown）。"""
     try:
         handle = client.get_workflow_handle(ticket_id)
         desc = await handle.describe()
     except Exception as e:  # noqa: BLE001——三态翻译见 _describe_not_found
         verdict = _describe_not_found(e)
-        return ((False, "", "", "") if verdict is True else (None, "", "", ""))
+        return ((False, "", "", "", "", "") if verdict is True else (None, "", "", "", "", ""))
     status_name = getattr(getattr(desc, "status", None), "name", "")
     # tolerant：有的桩/形态把状态对象再包一层（status.name 仍是对象）——逐层取 .name
     for _ in range(3):
@@ -548,14 +560,18 @@ async def describe_period_run(client: Any, ticket_id: str) -> Tuple[Optional[boo
             break
         status_name = status_name.name
     status_name = str(status_name or "")
-    instance = period = ""
+    instance = period = fixture_mark = slot_taken_at = ""
     for name, val in _sa_pairs(getattr(desc, "typed_search_attributes", None)
                                or getattr(desc, "search_attributes", None)):
         if name == SA_INSTANCE_NAME:
             instance = val
         elif name == SA_PERIOD_NAME:
             period = val
-    return True, status_name, instance, period
+        elif name == SA_FIXTURE_NAME:
+            fixture_mark = val
+        elif name == SA_SLOT_TAKEN_NAME:
+            slot_taken_at = val
+    return True, status_name, instance, period, fixture_mark, slot_taken_at
 
 
 async def describe_period_identity(client: Any, ticket_id: str) -> Tuple[Optional[bool], str, str]:
@@ -563,7 +579,7 @@ async def describe_period_identity(client: Any, ticket_id: str) -> Tuple[Optiona
     exists=True/False=确定结论（describe 的 RPC 打 workflow 状态本身，不依赖可见性索引，
     NotFoundFailure=确定 not found）；None=瞬态不可判（调用方按不可判处理，绝不猜）。
     （KI-114 起为 describe_period_run 的投影薄壳；去重主判定请用带状态的后者。）"""
-    exists, _status, instance, period = await describe_period_run(client, ticket_id)
+    exists, _status, instance, period, _fx, _taken = await describe_period_run(client, ticket_id)
     return exists, instance, period
 
 
@@ -578,6 +594,7 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                              per_ticket_queue: bool = False,
                              workflow_cls: Any = None, input_cls: Any = None,
                              reopen_reason: str = "",
+                             fixture_mark: str = "",
                              grace_sec: Optional[float] = None,
                              now_fn=time.time) -> Dict[str, Any]:
     """铸号 → 显式去重 → 盖 SA → 起真票（t260916-02 三路起票单点）。
@@ -600,6 +617,14 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
     理由即与终止票同路重开（清残指针 → 铸新号 → 审计链接三处，journal 落 reason）；
     **在飞期（live）不接受重开**（重跑=双跑同一期；先等收口，或记名 cancel 后再来）。
     空串＝既有语义逐字不变。
+
+    fixture_mark（KI-191，t261002-11）：非空＝**夹具开票**——新票盖 InspectionFixture
+    SA 章 + InspectionSlotTakenAt（起票时刻 ISO-8601 UTC）+ 指针 payload `fixture` 痕，
+    回执带 `fixture=True`。去重认标记：真班（mark 空）视夹具票为**非去重对象**
+    （跳过并照常铸真票——夹具占坑不再吞真班）；夹具开票遇真票/异标票 = 具名报错
+    （夹具必须用自己的标记空间，绝不静默去重到真身上）。
+    空串＝既有语义逐字不变（真班回执也新增 `slot_taken_at`（起票时刻；deduped 时=被
+    去重票的占坑章，无章=空串由呈报层显式 "unknown"）与 `fixture=False`）。
 
     workflow_cls/input_cls 缺省=懒 import inspection_flow（CLI/worker 进程；单测注 fake
     免 temporalio 依赖）。grace_sec 缺省=CLAIM_GRACE_SEC（测试注入用）。"""
@@ -624,14 +649,21 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
     ppath = pointer_path(ledger_dir, iid, period)
     cleared: List[str] = []
     reason = str(reopen_reason or "").strip()   # 非空＝人工具名重跑（见 docstring）
+    mark = str(fixture_mark or "").strip()      # 非空＝夹具开票（KI-191，见 docstring）
 
     def _err(msg: str) -> Dict[str, Any]:
         return {"ok": False,
                 "error": "%s（实例 %s 期 %s）" % (msg, iid, period)}
 
+    def _slot_taken_str(v: Any) -> str:
+        # SA 章缺席（老票/真班旧票）→ 显式 "unknown"：诚实降级，绝不伪造时刻
+        return str(v or "").strip() or "unknown"
+
     # ---- ① dedup 主判定：SA 查询（KI-114：命中后必须 describe 验状态——SA 章在
-    #      ≠ 活票；终止票放行重开，活/已服务照旧 dedup，含糊态 fail-closed）----
+    #      ≠ 活票；终止票放行重开，活/已服务照旧 dedup，含糊态 fail-closed。
+    #      KI-191：夹具票对真班**不是去重对象**——逐张读夹具章过滤后再裁决）----
     superseded_ticket_id = ""
+    skipped_fixture_tickets: List[str] = []
     try:
         existing = await find_period_ticket_ids(client, iid, period)
     except TicketingError as e:
@@ -645,14 +677,30 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         freed_ids: List[str] = []
         served_ids: List[str] = []
         ambiguous_ids: List[str] = []
+        taken_by_tid: Dict[str, str] = {}
         for tid in existing:
-            exists, estatus, _einst, _eper = await describe_period_run(client, tid)
+            exists, estatus, _einst, _eper, emark, etaken = \
+                await describe_period_run(client, tid)
             if exists is None:
                 return _err("同期票 %s 验票暂不可判（瞬态）——稍后重试，不猜状态" % tid)
             if not exists:
                 # SA 说在、RPC 说不在：可见性与权威面矛盾，fail-closed 不猜
                 return _err("同期票 %s SA 命中但 describe 不存在——可见性/权威面矛盾，"
                             "人工处置" % tid)
+            # KI-191 夹具标记过滤（在槽位裁决之前）：
+            if emark and not mark:
+                # 真班遇夹具票：非去重对象——记录留痕后跳过（不进任何裁决集），
+                # 照常铸真票。这正是 t261002-01 占坑事故的回归锚。
+                skipped_fixture_tickets.append(tid)
+                continue
+            if mark and emark != mark:
+                # 夹具开票遇真票/异标票：夹具必须用自己的标记空间，绝不静默去重到
+                # 真身上（具名报错点名双方标记，检查名=fixture mark ownership check）
+                return _err(
+                    "fixture mark ownership check failed：本开票带夹具标记 %r，但同期票 %s "
+                    "的标记=%r（空=真票）——夹具不得去重到非本标记的期票，请改用本夹具"
+                    "专属标记或隔离 instance" % (mark, tid, emark or "空"))
+            taken_by_tid[tid] = _slot_taken_str(etaken)
             slot = period_slot_verdict(estatus)
             if slot == "live":
                 live_ids.append(tid)
@@ -682,6 +730,13 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                                            "ticket_id": live_ids[0],
                                            "dedup_source": "sa_query",
                                            "period_state": "live",
+                                           # KI-191：回执点名占坑时刻（无章=unknown）
+                                           "slot_taken_at": taken_by_tid.get(
+                                               live_ids[0], "unknown"),
+                                           "fixture": bool(mark),
+                                           **({"skipped_fixture_tickets":
+                                               sorted(skipped_fixture_tickets)}
+                                              if skipped_fixture_tickets else {}),
                                            "stale_pointer_cleared": cleared}}
         if freed_ids or ambiguous_ids or (served_ids and reason):
             # 重开三源：①终止票（KI-114 自动放行）；②FAILED/TIMED_OUT/未知 + 人工具名；
@@ -713,6 +768,12 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                                            "ticket_id": served_ids[0],
                                            "dedup_source": "sa_query",
                                            "period_state": "completed",
+                                           "slot_taken_at": taken_by_tid.get(
+                                               served_ids[0], "unknown"),
+                                           "fixture": bool(mark),
+                                           **({"skipped_fixture_tickets":
+                                               sorted(skipped_fixture_tickets)}
+                                              if skipped_fixture_tickets else {}),
                                            "reopen_hint": "该期已服务；要重跑请带"
                                                           " reopen_reason 具名重开",
                                            "stale_pointer_cleared": cleared}}
@@ -724,7 +785,8 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         ticket_id = ticket_id_from_seq(prefix, seq)
         state, cpath = claim_pointer(ppath, iid, period, ticket_id, str(project_key or ""),
                                      now_fn=now_fn,
-                                     supersedes_ticket_id=superseded_ticket_id)
+                                     supersedes_ticket_id=superseded_ticket_id,
+                                     fixture_mark=mark)
         if state == "exists":
             kind, data = read_pointer_state(ppath)
             age = pointer_age(ppath, now_fn=now_fn)
@@ -737,7 +799,34 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 return _err("去重指针畸形且在飞行窗内（%s：%s）——开票写窗中断嫌疑，"
                             "稍后重试；确认无并发可删该指针" % (ppath, (data or {}).get("reason")))
             ptid = str(data.get("ticket_id") or "")
-            exists, pstatus, pinst, pper = await describe_period_run(client, ptid)
+            pmark = str(data.get("fixture") or "")
+            # KI-191 指针层夹具归属检查（先于 describe——检查名=fixture mark ownership
+            # check，与 SA 层同名同义）：夹具指针不是真班的飞行锁。
+            if pmark and not mark:
+                exists_pfx, _s_pfx, _i_pfx, _per_pfx, sa_mark_pfx, _t_pfx = \
+                    await describe_period_run(client, ptid)
+                if exists_pfx is False:
+                    pass          # 票已不在：落下方陈旧指针路径处置（照旧）
+                elif sa_mark_pfx or exists_pfx is None:
+                    # 指针是夹具的飞行锁：真班不认——清痕重走铸号（票本体已由 SA 层
+                    # 过滤，绝不 dedup 到它）。瞬态不可判也放行清痕：指针属夹具，
+                    # 留着只会楔死真班；夹具票 SA 章仍在，幂等账不受影响。
+                    clear_pointer(ppath)
+                    cleared.append("%s（夹具指针归属检查：指针带 fixture=%r、本开票无"
+                                   "标记——清夹具飞行锁后重走铸号）" % (ppath, pmark))
+                    continue
+                # exists_pfx True 且 SA 无章：指针 payload 与票面矛盾（罕见）——按
+                # fail-closed 点名，不猜
+                if exists_pfx and not sa_mark_pfx:
+                    return _err("fixture mark ownership check failed：指针 %s 带 "
+                                "fixture=%r 但指向票 %s 无夹具 SA 章——指针/票面矛盾，"
+                                "人工处置" % (ppath, pmark, ptid))
+            if mark and pmark != mark:
+                return _err("fixture mark ownership check failed：本开票带夹具标记 %r，"
+                            "但飞行指针 %s 的标记=%r（空=真班 claim）——夹具不得复用"
+                            "非本标记的期槽空间" % (mark, ppath, pmark or "空"))
+            exists, pstatus, pinst, pper, pmark_sa, ptaken = \
+                await describe_period_run(client, ptid)
             if exists is None:
                 return _err("去重指针指向 %s 但验票暂不可判（瞬态）——稍后重试" % ptid)
             if not exists:
@@ -773,6 +862,8 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 if legacy_match:
                     return {"ok": True, "result": {"triggered": False, "deduped": True,
                                                    "ticket_id": ptid, "dedup_source": "pointer",
+                                                   "slot_taken_at": "unknown",
+                                                   "fixture": bool(mark),
                                                    "stale_pointer_cleared": cleared,
                                                    "scan_mode": scan_mode,
                                                    "legacy": True}}
@@ -780,6 +871,13 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                                                "ticket_id": ptid, "dedup_source": "pointer",
                                                "period_state": "live" if slot == "live"
                                                else "completed",
+                                               # KI-191：占坑时刻=被去重票的 SA 章，
+                                               # 无章=unknown（诚实，不伪造）
+                                               "slot_taken_at": _slot_taken_str(ptaken),
+                                               "fixture": bool(mark),
+                                               **({"skipped_fixture_tickets":
+                                                   sorted(skipped_fixture_tickets)}
+                                                  if skipped_fixture_tickets else {}),
                                                "reopen_hint": "" if slot == "live" else
                                                "该期已服务；要重跑请带 reopen_reason 具名重开",
                                                "stale_pointer_cleared": cleared,
@@ -818,13 +916,17 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
             payload = input_cls(instance_id=iid, period=period, repo_root=str(repo_root or ""),
                                 face=str(scan_face or "test"))
         try:
+            from datetime import datetime, timezone
+            slot_taken_iso = datetime.fromtimestamp(
+                float(now_fn()), tz=timezone.utc).isoformat()
             handle = await client.start_workflow(
                 workflow_cls, payload,
                 id=ticket_id,
                 task_queue=(ticket_task_queue(ticket_id) if per_ticket_queue
                             else task_queue),
                 search_attributes=inspection_search_attributes(
-                    str(project_key or ""), iid, str(period)))
+                    str(project_key or ""), iid, str(period),
+                    fixture_mark=mark, slot_taken_at=slot_taken_iso))
             if superseded_ticket_id:
                 # 审计链接第三处：reopen journal（append-only JSONL）。写失败=审计缺失
                 # 显式报错（票已起，报错点名双事实，绝不静默吞掉审计缺失）。
@@ -841,6 +943,11 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
             return {"ok": True, "result": {
                 "triggered": True, "deduped": False, "ticket_id": ticket_id,
                 "first_run_id": getattr(handle, "first_execution_run_id", ""),
+                # KI-191：本票占坑时刻 + 夹具标记 + 被跳过的夹具占坑票（真班回执可见
+                # 「谁曾占着这期」；空=无夹具占坑，不加键，既有形状不变）
+                "slot_taken_at": slot_taken_iso, "fixture": bool(mark),
+                **({"skipped_fixture_tickets": sorted(skipped_fixture_tickets)}
+                   if skipped_fixture_tickets else {}),
                 "dedup_source": "", "stale_pointer_cleared": cleared, "scan_mode": scan_mode,
                 "superseded_ticket_id": superseded_ticket_id,
                 # 人工具名重跑：理由随回执回显（对账锚；空串=不加该键，既有形状不变）
@@ -861,7 +968,10 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 clear_pointer(ppath)
                 return {"ok": True, "result": {
                     "triggered": False, "deduped": True, "ticket_id": ticket_id,
-                    "dedup_source": "already_started", "stale_pointer_cleared": cleared,
+                    "dedup_source": "already_started",
+                    # KI-191：并发窗内拿不到占坑 SA 章（票非本进程所起）——诚实 unknown
+                    "slot_taken_at": "unknown", "fixture": bool(mark),
+                    "stale_pointer_cleared": cleared,
                     "scan_mode": scan_mode}}
             clear_pointer(ppath)              # 撞了他人的号/验票不可判：删自建指针再让位
             if exists:
@@ -890,7 +1000,7 @@ async def resolve_period_ticket_id(client: Any, instance_id: str, period: str) -
         live: List[str] = []
         dead: List[str] = []
         for tid in ids:
-            exists, status, inst, per = await describe_period_run(client, tid)
+            exists, status, inst, per, _fx, _taken = await describe_period_run(client, tid)
             if exists is None:
                 return {"ok": False, "error": "（实例 %s 期 %s）同期票 %s 验票暂不可判"
                         "（瞬态）——稍后重试" % (instance_id, period, tid)}
@@ -909,7 +1019,7 @@ async def resolve_period_ticket_id(client: Any, instance_id: str, period: str) -
                 % (instance_id, period, "、".join(sorted(ids)))}
     if ids:
         # 单命中也如实报 live 标（KI-114：终止/已服务票存在≠活票；消费方自行裁量）
-        exists, status, _i, _p = await describe_period_run(client, ids[0])
+        exists, status, _i, _p, _fx, _taken = await describe_period_run(client, ids[0])
         return {"ok": True, "ticket_id": ids[0], "source": "sa",
                 "live": bool(exists) and period_slot_verdict(status) == "live"}
     legacy = "inspection-%s-%s" % (instance_id, period)   # legacy 只读探测（历史票兼容）
@@ -933,3 +1043,137 @@ async def open_produce_period_ticket(client: Any, **kw) -> Dict[str, Any]:
     kw.setdefault("workflow_cls", InspectionProduceWorkflow)
     kw.setdefault("input_cls", InspectionProduceInput)
     return await open_period_ticket(client, **kw)
+
+
+# ========================================================================================
+# 期槽诚实面（KI-191，t261002-11）：「谁占着这期」可查询 + 夹具清坑单点
+# ========================================================================================
+
+async def describe_period_slot(client: Any, instance_id: str, period: str) -> Dict[str, Any]:
+    """（实例,期）→ 期槽占用人诚实面（KI-191：queryable, not just a boolean）。
+
+    返回 {"ok": True, slot_state: live|served|freed|empty, ticket_id, status,
+          fixture_mark, slot_taken_at, all_tickets}：
+      - slot_taken_at 无 SA 章（老票/事故票 t261002-01 形态）= "unknown"——**照实呈报，
+        绝不伪造时刻**（review_plan 意见 2 的落地）；
+      - fixture_mark 空 = 真班占坑（或无章老票——由 slot_taken_at=unknown 伴生可辨）；
+      - all_tickets = 全部同期票（含被替代终止票）的 {ticket_id,status,fixture_mark,
+        slot_taken_at} 列表（重开史的完整诚实面）；
+      - 活票收敛同 resolve_period_ticket_id：活票恰一张；>1 = 具名报错（每期一票被破坏）。
+    失败（ok=False）：error 具名（检查名点名——期号形状 / 瞬态不可判 / 多活票）。"""
+    iid = str(instance_id or "").strip()
+    if not iid:
+        return {"ok": False, "error": "期槽查询缺 instance_id（期=%r）" % (period,)}
+    try:
+        ticket_prefix_from_period(period)     # 期号形状闭式检查（具名 TicketingError）
+    except TicketingError as e:
+        return {"ok": False, "error": "期槽查询：%s" % e}
+    try:
+        ids = await find_period_ticket_ids(client, iid, period)
+    except TicketingError as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "期槽查询异常：%s: %s" % (type(e).__name__, e)}
+    if not ids:
+        return {"ok": True, "slot_state": "empty", "ticket_id": "", "status": "",
+                "fixture_mark": "", "slot_taken_at": "", "all_tickets": []}
+    rows: List[Dict[str, Any]] = []
+    for tid in ids:
+        exists, status, _i, _p, fx, taken = await describe_period_run(client, tid)
+        if exists is None:
+            return {"ok": False, "error": "期槽查询：同期票 %s 验票暂不可判（瞬态）——"
+                    "稍后重试，不猜状态" % tid}
+        if not exists:
+            return {"ok": False, "error": "期槽查询：同期票 %s SA 命中但 describe 不存在"
+                    "——可见性/权威面矛盾，人工处置" % tid}
+        rows.append({"ticket_id": tid, "status": status,
+                     "slot_state": period_slot_verdict(status),
+                     "fixture_mark": fx,
+                     "slot_taken_at": str(taken or "").strip() or "unknown"})
+    lives = [r for r in rows if r["slot_state"] == "live"]
+    if len(lives) > 1:
+        return {"ok": False, "error": "期槽查询：（实例 %s 期 %s）出现多张**活**同期票："
+                "%s——每期一票被破坏，人工处置"
+                % (iid, period, "、".join(sorted(r["ticket_id"] for r in lives)))}
+    occ = lives[0] if lives else rows[0]
+    return {"ok": True, "slot_state": occ["slot_state"], "ticket_id": occ["ticket_id"],
+            "status": occ["status"], "fixture_mark": occ["fixture_mark"],
+            "slot_taken_at": occ["slot_taken_at"], "all_tickets": rows}
+
+
+async def release_period_slot(client: Any, *, instance_id: str, period: str,
+                              fixture_mark: str, now_fn=time.time) -> Dict[str, Any]:
+    """夹具清坑单点（KI-191 验收②：终态=期槽释放，不留占坑残骸）。
+
+    只放行**带本 fixture_mark 章**的活票：cancel 到终态（槽位裁决即 freed）+ 清该期
+    飞行指针（留痕）。返回 {"ok": True, released: [票号…], pointer_cleared: bool}。
+
+    具名失败（检查名逐条点名，绝不裸布尔，绝不静默）：
+      - fixture mark missing check：mark 空/纯空白 → 拒绝（无记名清坑=谁都能清真班）；
+      - period shape check：期号形状非法（复用 ticket_prefix_from_period）；
+      - double-clean check：该期无任何同期票（已清过）→ 点名「已释放」不谎报二次成功；
+      - ownership check：在场活票的夹具章≠本标记（含空章=真班票）→ 拒绝（真班占坑
+        绝不可被夹具清坑面释放）；
+      - cancel 失败（网络/权限）→ 点名异常类型，票保持原状。"""
+    iid = str(instance_id or "").strip()
+    mark = str(fixture_mark or "").strip()
+    if not mark:
+        return {"ok": False,
+                "error": "release: fixture mark missing check failed——清坑必须具名夹具"
+                         "标记（空标记=无记名清坑，拒绝；实例 %r 期 %r）" % (iid, period)}
+    if not iid:
+        return {"ok": False,
+                "error": "release: instance check failed——清坑缺 instance_id（期=%r）"
+                         % (period,)}
+    try:
+        ticket_prefix_from_period(period)
+    except TicketingError as e:
+        return {"ok": False, "error": "release: period shape check failed——%s" % e}
+    try:
+        ids = await find_period_ticket_ids(client, iid, period)
+    except TicketingError as e:
+        return {"ok": False, "error": "release: %s" % e}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "release: 同期票查询异常：%s: %s"
+                % (type(e).__name__, e)}
+    if not ids:
+        return {"ok": False,
+                "error": "release: double-clean check failed——（实例 %s 期 %s）无任何同期"
+                         "票，期槽已释放过（重复清坑）；如需核对请走 describe_period_slot"
+                         % (iid, period)}
+    released: List[str] = []
+    others: List[str] = []
+    for tid in ids:
+        exists, status, _i, _p, fx, _taken = await describe_period_run(client, tid)
+        if exists is None:
+            return {"ok": False, "error": "release: 同期票 %s 验票暂不可判（瞬态）——"
+                    "稍后重试，不猜状态" % tid}
+        if not exists or period_slot_verdict(status) != "live":
+            continue              # 已终态/已服务票：槽位已释放，无需也不能再 cancel
+        if fx != mark:
+            others.append("%s(标记=%s)" % (tid, fx or "空"))
+            continue
+        try:
+            await client.get_workflow_handle(tid).cancel()
+        except Exception as e:  # noqa: BLE001——cancel 失败点名，票保持原状
+            return {"ok": False, "error": "release: cancel 票 %s 失败（%s: %s）——"
+                    "期槽保持原状，人工处置" % (tid, type(e).__name__, e)}
+        released.append(tid)
+    if not released:
+        # 无带本标记的活票可放：或已清过（double-clean），或全是他人的坑——都具名点名，
+        # 绝不谎报二次成功（KI-191：清坑面的「终态=已释放」必须可辨）
+        if others:
+            return {"ok": False, "error": "release: mark ownership mismatch check "
+                    "failed——（实例 %s 期 %s）在场活票非本夹具标记（mark 不匹配）：%s——"
+                    "夹具不得释放真班/异标占坑，人工处置"
+                    % (iid, period, "、".join(sorted(others)))}
+        return {"ok": False, "error": "release: double-clean check failed——（实例 %s 期 %s）"
+                "无带本标记的活占坑票，期槽已释放过（重复清坑）；如需核对请走 "
+                "describe_period_slot" % (iid, period)}
+    # 清该期飞行指针（终态=槽位释放的一部分；幂等，不在=False）
+    ledger_dir = os.environ.get("SANDBAR_INSPECTION_DIR") or ""
+    if not ledger_dir:
+        ledger_dir = str(Path(__file__).resolve().parent / "out" / "inspection")
+    pointer_cleared = clear_pointer(pointer_path(ledger_dir, iid, period))
+    return {"ok": True, "released": sorted(released),
+            "others_refused": sorted(others), "pointer_cleared": pointer_cleared}

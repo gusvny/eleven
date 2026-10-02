@@ -2137,10 +2137,22 @@ class InspectionPeriodicSpawnWorkflow(TicketEventLedgerMixin):
             raise ApplicationError(str((res or {}).get("error") or "起票失败（无事由）"),
                                    non_retryable=True)
         result: Dict[str, Any] = (res or {}).get("result") or {}
-        self._ledger_note("spawn", "done",
-                          "Period ticket spawned (instance %s, ticket=%s, deduped=%s)"
-                          % (inp.instance_id, result.get("ticket") or "?",
-                             bool(result.get("deduped"))))
+        # KI-191（t261002-11）回执点名修：①根因=读错键（`ticket`，实际键是
+        # `ticket_id`）⇒ 每条回执都打 `ticket=?`，t261002-01 占坑事故多日无人发现——
+        # 现在必须点名去重到哪张票；②补占坑时刻（slot_taken_at；deduped 票无章时
+        # 如实 unknown，不伪造）；③夹具标记可见（fixture 占坑对真班透明）。
+        self._ledger_note(
+            "spawn", "done",
+            "Period ticket spawned (instance %s, ticket=%s, deduped=%s, "
+            "slot_taken_at=%s, fixture=%s%s)"
+            % (inp.instance_id,
+               str(result.get("ticket_id") or "?"),
+               bool(result.get("deduped")),
+               str(result.get("slot_taken_at") or "unknown"),
+               bool(result.get("fixture")),
+               (", skipped_fixture_tickets=%s"
+                % ",".join(result.get("skipped_fixture_tickets") or []))
+               if result.get("skipped_fixture_tickets") else ""))
         # t260928-20：return 前冲账（短命壳收口点=唯一冲刷点）
         await self._ledger_flush()
         return result

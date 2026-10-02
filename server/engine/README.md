@@ -637,6 +637,10 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
    旧直发 action 全部换绑 spawner；不重跑则旧调度仍按旧 payload 直发（票号旧形）。
 4. 存量在途旧形票：无需处理——legacy 查询路径照常上板（`match_via=legacy_id`），
    resolve 查询面兼容（SA 查无 → legacy 只读探测）。
+5. **t261002-11（KI-191）追加**：`InspectionFixture` / `InspectionSlotTakenAt` 两个
+   新 SA 同样必须走 13.4 三路径注册——缺注册时**一切**新巡检起票（真班排程含）都会在
+   `start_workflow` 显式失败（报错点名 `no mapping defined for search attribute`）。
+   这是**注册步未做**（配置），不是代码故障；补注册后重试即可。
 
 ### 13.3 去重指针生命周期（`<INSPECTION_DIR>/inspection-<实例>-<期>.ticket`）
 
@@ -654,7 +658,7 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 - 失败路径收口：非 dedup 失败删**自建**指针（只删本次 O_EXCL 建的）；SA 未注册、
   重试耗尽、ES 瞬态都显式报错点名。
 
-### 13.4 SA 注册三路径（InspectionInstance / InspectionPeriod = Keyword）
+### 13.4 SA 注册三路径（InspectionInstance / InspectionPeriod / InspectionFixture / InspectionSlotTakenAt = Keyword）
 
 ```bash
 # ① dev server（run_server.sh 已带启动参，重启即注册）
@@ -664,7 +668,13 @@ bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
   --name InspectionInstance --type Keyword
 bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
   --name InspectionPeriod --type Keyword
-# ③ docker 测试栈：integration/stage_docker.py precheck 幂等补建（含 ProjectKey/EpicCode 共四项）
+# t261002-11（KI-191）两个新 SA 同法补注册（缺注册=一切新巡检起票显式失败）
+bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
+  --name InspectionFixture --type Keyword
+bin/temporal operator search-attribute create --address 127.0.0.1:7233 \
+  --name InspectionSlotTakenAt --type Keyword
+# ③ docker 测试栈：integration/stage_docker.py precheck 幂等补建（含 ProjectKey/EpicCode
+#    与 KI-191 两新项共六项）
 ```
 
 **R3 归因指引**：SA 未注册时，dedup 快路径/板面 SA 查询路径的查询会显式失败，报错含

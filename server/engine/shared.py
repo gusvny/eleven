@@ -235,12 +235,21 @@ def ticket_search_attributes(project: str, epic: str = ""):
 # 幂等补建；在跑 server 用 `bin/temporal operator search-attribute create`（README §13）。
 INSPECTION_INSTANCE_SA_NAME = "InspectionInstance"
 INSPECTION_PERIOD_SA_NAME = "InspectionPeriod"
+# KI-191（t261002-11）：夹具标记 + 期槽占用时刻——快进夹具跑真流程时盖 InspectionFixture
+# 标记（去重认标记：真班不认夹具票为可去重对象），起票时刻盖 InspectionSlotTakenAt
+# （去重回执点名「去重到哪张票、何时占的坑」+ describe_period_slot 查询面）。
+# 空值不盖章（既有票/真班零变化；老票缺这两枚=诚实降级面，不伪造缺省值）。
+INSPECTION_FIXTURE_SA_NAME = "InspectionFixture"
+INSPECTION_SLOT_TAKEN_SA_NAME = "InspectionSlotTakenAt"
 
 
-def inspection_search_attributes(project: str, instance_id: str = "", period: str = ""):
+def inspection_search_attributes(project: str, instance_id: str = "", period: str = "",
+                                 fixture_mark: str = "", slot_taken_at: str = ""):
     """巡检票 typed SA（t260916-02）：ProjectKey（归属，与 dev-lane 同款）+
-    InspectionInstance/InspectionPeriod（实例/期号检索）。instance/period 空则不盖该对
-    （历史票兼容面：老票只可能有 ProjectKey）。temporalio 函数内 import（stdlib-only 纪律）。"""
+    InspectionInstance/InspectionPeriod（实例/期号检索）+ KI-191 的 InspectionFixture
+    （夹具标记）/InspectionSlotTakenAt（起票时刻，ISO-8601 UTC）。instance/period 空
+    则不盖该对（历史票兼容面：老票只可能有 ProjectKey）；fixture_mark/slot_taken_at
+    空则同样不盖（缺省=真班原语义逐字不变）。temporalio 函数内 import（stdlib-only 纪律）。"""
     from temporalio.common import SearchAttributeKey, SearchAttributePair, TypedSearchAttributes
     pairs = [SearchAttributePair(SearchAttributeKey.for_keyword(PROJECT_SA_NAME), project)]
     if instance_id:
@@ -249,6 +258,12 @@ def inspection_search_attributes(project: str, instance_id: str = "", period: st
     if period:
         pairs.append(SearchAttributePair(
             SearchAttributeKey.for_keyword(INSPECTION_PERIOD_SA_NAME), period))
+    if fixture_mark:
+        pairs.append(SearchAttributePair(
+            SearchAttributeKey.for_keyword(INSPECTION_FIXTURE_SA_NAME), fixture_mark))
+    if slot_taken_at:
+        pairs.append(SearchAttributePair(
+            SearchAttributeKey.for_keyword(INSPECTION_SLOT_TAKEN_SA_NAME), slot_taken_at))
     return TypedSearchAttributes(pairs)
 
 

@@ -63,9 +63,9 @@ from inspection_decl import (  # noqa: E402
 )
 from shared import list_registered_projects  # noqa: E402
 
-USAGE = ("用法：inspection_trigger.py <decl|trigger|sign|describe|schedule-up> …\n"
+USAGE = ("用法：inspection_trigger.py <decl|trigger|sign|describe|slot|schedule-up> …\n"
          "运维通道（不进模型工具面）；每期一票：按（实例,期号）显式去重，票号=工单号形式 "
-         "t<YYMMDD>-<NN>，重复触发返回既有票号。")
+         "t<YYMMDD>-<NN>，重复触发返回既有票号；slot=期槽占用人诚实面（KI-191）。")
 
 
 def _ok(result: Any) -> Dict[str, Any]:
@@ -192,6 +192,8 @@ async def cmd_trigger(args: argparse.Namespace) -> Dict[str, Any]:
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "test"),
         decl_path=abs_decl_path(args.decl_path), task_queue=TASK_QUEUE,
+        # KI-191：--fixture-mark 走夹具隔离期空间（缺省空串=真班语义逐字不变）
+        fixture_mark=str(getattr(args, "fixture_mark", "") or ""),
         reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
     # 260929（KI-129/131）：手动路径同样落裁决面（journal + admin.log）——自动班的静默
     # 跳过与手动起的去重命中在同一条审计线上可对照（失败也落，读数才不断链）。
@@ -241,6 +243,7 @@ async def cmd_trigger_produce(args: argparse.Namespace) -> Dict[str, Any]:
         client, instance_id=args.instance, period=period, project_key=project_key,
         repo_root=repo_root, scan_face=str(spec.get("scan_face") or "doc"),
         decl_path=abs_decl_path(args.decl_path),
+        fixture_mark=str(getattr(args, "fixture_mark", "") or ""),
         reopen_reason=str(getattr(args, "reopen_reason", "") or ""))
     # 260929：产出型手动路径同落裁决面（同类面全量排查——去重命中不许再无声）
     note = note_spawn_decision(_default_ledger_dir(), args.instance, period, res,
@@ -482,6 +485,29 @@ async def cmd_ticket(args: argparse.Namespace) -> Dict[str, Any]:
     receipt = ticket_receipt(snap, ticket_id)
     receipt["ticket_source"] = found.get("source")
     return _ok(receipt)
+
+
+async def cmd_slot(args: argparse.Namespace) -> Dict[str, Any]:
+    """期槽占用人诚实面（KI-191，t261002-11）：who occupies the period slot——票号/
+    状态/夹具标记/占坑时刻，queryable not just a boolean；单行 JSON 出（本通道契约④）。"""
+    from inspection_ticketing import describe_period_slot
+    period = args.period or datetime.now().strftime("%Y%m%d")
+    err = _valid_period(period)
+    if err:
+        return _err(err)
+    try:
+        client = await _connect()
+    except Exception as e:  # noqa: BLE001
+        return _err("temporal server 不可达：%s" % e)
+    face = await describe_period_slot(client, args.instance, period)
+    if not face.get("ok"):
+        return _err(str(face.get("error")))
+    return _ok({"instance": args.instance, "period": period,
+                "slot_state": face.get("slot_state"),
+                "ticket_id": face.get("ticket_id"), "status": face.get("status"),
+                "fixture_mark": face.get("fixture_mark"),
+                "slot_taken_at": face.get("slot_taken_at"),
+                "all_tickets": face.get("all_tickets")})
 
 
 async def cmd_describe(args: argparse.Namespace) -> Dict[str, Any]:
@@ -1060,6 +1086,8 @@ def main() -> None:
     p.add_argument("--reopen-reason", default="",
                    help="人工具名重跑理由（非空=允许对「已服务(COMPLETED)/FAILED/TIMED_OUT/未知」"
                         "槽位重开新票，审计链接三处并落 reason；在飞期仍拒。260926 宿主令）")
+    p.add_argument("--fixture-mark", default="",
+                   help="夹具标记（KI-191：测试夹具跑真流程必带——去重认标记不认假票）")
     p = sub.add_parser("trigger-produce", help="手动触发产出型巡检一期（per-ticket 队列，t260925-01）")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
@@ -1067,6 +1095,8 @@ def main() -> None:
     p.add_argument("--decl-path", default=None)
     p.add_argument("--reopen-reason", default="",
                    help="同 trigger：人工具名重跑理由（非空即允许重开已服务/失败槽位）")
+    p.add_argument("--fixture-mark", default="",
+                   help="夹具标记（KI-191：测试夹具跑真流程必带——去重认标记不认假票）")
     p = sub.add_parser("sign", help="人门签字（who=签字人；agent 角色名拒收）")
     p.add_argument("--instance", required=True)
     p.add_argument("--who", required=True)
@@ -1081,6 +1111,9 @@ def main() -> None:
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
     p.add_argument("--decl-path", default=None)
+    p = sub.add_parser("slot", help="期槽占用人诚实面（KI-191：谁占着这期/何时占的/是否夹具票）")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--period", default=None)
     p = sub.add_parser("watcher", help="计数 watcher 只读活性观测（快照回执）")
     p.add_argument("--instance", required=True)
     p.add_argument("--decl-path", default=None)
@@ -1128,6 +1161,7 @@ def main() -> None:
             result = asyncio.run({"trigger": cmd_trigger, "trigger-produce": cmd_trigger_produce,
                                   "sign": cmd_sign,
                                   "describe": cmd_describe, "ticket": cmd_ticket,
+                                  "slot": cmd_slot,
                                   "watcher": cmd_watcher, "deadman": cmd_deadman,
                                   "schedule-drift": cmd_schedule_drift,
                                   "schedule-up": cmd_schedule_up,

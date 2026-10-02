@@ -2569,7 +2569,10 @@ def register_namespace(ns, addr, timeout=30):
         return False, "namespace create 失败（ns=%s）：%s" % (ns, last_err)
     # t260916-02：巡检票显式去重（实例+期号）的两个新 SA 一并幂等注册（temporalite 无
     # start-dev 启动参，注册只能走 operator create；已注册=tolerate 已容）。
-    for name in ("ProjectKey", "EpicCode", "InspectionInstance", "InspectionPeriod"):
+    # t261002-11（KI-191）：+InspectionFixture/InspectionSlotTakenAt——夹具期标记与
+    # 占坑时刻；缺注册时一切新巡检起票显式失败（真班排程同灭），与老四项同链必注册。
+    for name in ("ProjectKey", "EpicCode", "InspectionInstance", "InspectionPeriod",
+                 "InspectionFixture", "InspectionSlotTakenAt"):
         if not cli_ok(["operator", "search-attribute", "create", "--namespace", ns,
                        "--name", name, "--type", "Keyword", "--address", addr],
                       ("already exist", "already defined", "already registered")):
