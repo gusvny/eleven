@@ -569,6 +569,10 @@ class IntegrationRunResult:
     # （not-checked × external，B2）；本字段的作用是让票面能区分「没有环境红」与
     # 「有环境红但具名通道是空的」两态——后者必须显式点名，不许静默给个空表。
     env_red_names: List[str] = field(default_factory=list)
+    # t261002-03 闸轮并发校准回执面（**additive**：默认空 dict=老回放/老执行器形态
+    # 逐字节零漂移）。记录本轮闸注入的池内并发宽度与校准依据（width / reason /
+    # injected env）——注入了什么、为什么，回执可见；空=本闸进程是老代码（未注入）。
+    conc_calibration: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

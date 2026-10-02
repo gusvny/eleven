@@ -7244,6 +7244,101 @@ def integ_subprocess_env(extra: Dict[str, str] = None) -> Dict[str, str]:
     return env
 
 
+# ---------------- 闸轮并发校准（t261002-03） ----------------
+# 根因：闸轮（泳道集测段）此前**继承**执行器缺省池内并发
+# （SANDBAR_CONC_POOLS=main:3,ro:3,browser-free:3），而归属基线主跑在
+# failure_protocol.py:129 把并发**强制 =1**（「并发是口径不是环境」）。261001/02
+# 夜闸实测：同套件同规模分桶，宽度 1 → 0/5 控制台族红（0%），宽度 4 → 15/41（37%）
+# ——红全部集中在低可用内存（~0.1GB free、swap 近满）的宿主上，且每个被挡的账号
+# 单独重跑即绿。落点因此变成「重跑到红恰好没发生」。
+# 方案：闸轮下单时按本机可用内存**校准**池内宽度并显式注入
+# （SANDBAR_POOL_CONC / SANDBAR_CONC_POOLS），使闸轮执行面贴着基线口径走：
+# 低内存宿主宽度收 1（与基线逐字同宽，台账 conc_width 亦如实记 1）；宽裕宿主保持
+# 宽 3（≈执行器缺省）。**不碰任何场景断言**——只改闸的执行剖面。
+CONC_CALIB_ENV = "SANDBAR_CONC_CALIB"   # auto（缺省）/ off / 显式正整数
+_GI = 1024 ** 3
+
+
+def mem_available_bytes() -> Optional[int]:
+    """本机可用内存探测（校准输入面，字节）。Linux 读 /proc/meminfo 的 MemAvailable；
+    macOS 用 `vm_stat`（free + speculative + inactive 页 × 页大小，available 的
+    常用近似）。探测失败/输出畸形 → None（调用方显式降级为「不校准」，绝不猜数）。
+    纯本地、有超时、无网络；子进程超时/异常由 subprocess.run 的 timeout 语义兜底回收。"""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    # macOS / 其它 Unix：vm_stat（可能不存在/非预期输出 → None）
+    try:
+        p = subprocess.run(["vm_stat"], capture_output=True, text=True,
+                           timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if p.returncode != 0:
+        return None
+    m = re.search(r"page size of (\d+) bytes", p.stdout or "")
+    if not m:
+        return None
+    page = int(m.group(1))
+    total = 0
+    for key in ("Pages free", "Pages speculative", "Pages inactive"):
+        mm = re.search(r"%s:\s*(\d+)" % re.escape(key), p.stdout or "")
+        if not mm:
+            return None
+        total += int(mm.group(1)) * page
+    return total or None
+
+
+def calibrated_pool_width(mem_available: Optional[int],
+                          cpu_count: Optional[int]) -> Optional[int]:
+    """纯函数：可用内存（字节）+ CPU 数 → 闸轮池内并发宽度（None=不校准）。
+    台阶：>=6GiB → 3（≈执行器缺省，宽裕宿主不降速）；2GiB..6GiB → 2；
+    <2GiB → 1（与归属基线的强制 =1 逐字同宽——实测 0% 假红的档位）。CPU 数只作
+    上限夹紧（width ≤ cpu），内存不可测 → None（继承执行器缺省，不猜）。"""
+    if mem_available is None:
+        return None
+    cap = max(1, min(3, int(cpu_count) if cpu_count else 3))
+    if mem_available >= 6 * _GI:
+        return cap
+    if mem_available >= 2 * _GI:
+        return min(2, cap)
+    return 1
+
+
+def conc_calibration_env() -> Tuple[Dict[str, str], str, Optional[int]]:
+    """闸轮并发校准单点：返回 (注入 env, 具名原因, 生效宽度或 None)。
+    优先级：操作员显式设置（SANDBAR_POOL_CONC / SANDBAR_CONC_POOLS 任一在场）
+    > SANDBAR_CONC_CALIB=off > SANDBAR_CONC_CALIB=<正整数> > auto（本机校准）。
+    返回空 env = 本轮不下发（继承执行器缺省，行为同改前）；原因串恒具名（回执可见）。"""
+    for k in ("SANDBAR_POOL_CONC", "SANDBAR_CONC_POOLS"):
+        if str(os.environ.get(k) or "").strip():
+            return ({}, "conc calibration skipped: %s set by operator" % k, None)
+    mode = str(os.environ.get(CONC_CALIB_ENV) or "auto").strip().lower() or "auto"
+    if mode == "off":
+        return ({}, "conc calibration off via %s=off" % CONC_CALIB_ENV, None)
+    if mode != "auto":
+        try:
+            w = max(1, int(mode))
+        except ValueError:
+            return ({}, "conc calibration skipped: malformed %s=%r"
+                    % (CONC_CALIB_ENV, os.environ.get(CONC_CALIB_ENV)), None)
+        return ({"SANDBAR_POOL_CONC": str(w),
+                 "SANDBAR_CONC_POOLS": "main:%d,ro:%d,browser-free:%d" % (w, w, w)},
+                "conc calibration pinned width=%d via %s" % (w, CONC_CALIB_ENV), w)
+    mem = mem_available_bytes()
+    w = calibrated_pool_width(mem, os.cpu_count())
+    if w is None:
+        return ({}, "conc calibration skipped: memory unmeasurable; "
+                    "inherited runner default", None)
+    return ({"SANDBAR_POOL_CONC": str(w),
+             "SANDBAR_CONC_POOLS": "main:%d,ro:%d,browser-free:%d" % (w, w, w)},
+            "conc calibration width=%d (mem_available=%s bytes, cpu=%s)"
+            % (w, mem, os.cpu_count()), w)
+
+
 def _integ_receipt_err(payload: Any) -> Optional[str]:
     """_run_scenarios 的 verify_lane 回执形状判定纯函数（t260924-05 KI-116 抽取）：
     ok=False / 顶层非映射 / 「ok=true 但 result 缺失或非映射」/ result.err 非空
@@ -7341,6 +7436,13 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     if "SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX" not in os.environ:
         _extra_env["SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX"] = \
             "t26,sandbar-test,stage-console"
+    # t261002-03：闸轮池内并发按本机容量校准（默认 auto，见 CONC_CALIB_ENV 注释块）。
+    # 注入面走 _extra_env（integ_subprocess_env 的显式注入通道，剥除不吞）；原因串
+    # 具名上回执 warnings——本轮闸到底跑多宽、为什么，票面可见，绝不静默。
+    _cal_env, _cal_reason, _cal_width = conc_calibration_env()
+    _extra_env.update(_cal_env)
+    if _cal_reason:
+        _warnings.append(_cal_reason)
     # t260924-05 KI-116：组装面统一走 integ_subprocess_env（剥两个封闭元组后并
     # 显式注入面），worker 自身路由旋钮不再漏进子进程链。
     # 260927：巡检套件段三笔预算经 env 下发给执行器与闸（缺省 0/None=不下发，每票集测段
@@ -7472,6 +7574,9 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         return out_err
     res = payload.get("result") or {}
     out = IntegrationRunResult()
+    # t261002-03：并发校准面回执（additive，纯观测）——本轮宽度/依据/注入 env。
+    out.conc_calibration = {"width": _cal_width, "reason": _cal_reason,
+                            "injected": dict(_cal_env)}
     # 宿主令 260930（B 档）：把「本轮是谁用哪份代码验的」钉进回执（additive，**不进判定**）。
     # identity 与 SDK 的 worker identity 同构（`<pid>@<gethostname()>`，见 temporalio.service
     # 的默认值），因此与 Temporal 事件历史里的 ActivityTaskStarted.identity 可直接对账；
