@@ -322,8 +322,25 @@ async function clickTab(page, label) {
   // Time/Delivery/Token/System Health；迁移前旧值「时间/交付/令牌/系统健康」）。
   const tab = page.locator('.wb-m-tab', { hasText: label }).first()
   if (!(await tab.count())) return false
-  await tab.click()
-  return true
+  // 两级点击（与 openMetricsPanel 的 Continue 钮同款先例）：真点击拿不到就回落
+  // DOM click——真 React 点击处理器照跑，D4/D5 的渲染断言（canvas 非透明像素/
+  // 空态文案）一个不弱化。实录两起点击挂死（261002 夜间闸宽面 D4/D5：元素
+  // visible+enabled+stable 但 locator.click 30s 超时；260915 工厂提示遮罩 z≈1000
+  // 拦截命中点）都发生在「到达视图」这一手段步上，不在被测契约上。回落时把命中
+  // 点的元素记进输出：产品级遮挡必须可见，不许被吞成静默绿。
+  try {
+    await tab.click({ timeout: 8000 })
+    return true
+  } catch {
+    const hit = await tab.evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return at ? `${at.tagName}.${String(at.className || '').slice(0, 60)}` : 'none'
+    }).catch(() => 'unprobed')
+    console.warn(`  [clickTab] real click on "${label}" tab not actionable (hit-test target: ${hit}) -- falling back to DOM click (the real handler still runs)`)
+    await tab.evaluate((el) => el.click())
+    return true
+  }
 }
 
 async function runBrowser(pw, browser) {
