@@ -88,6 +88,34 @@ def na(reason: str) -> None:
     print("N/A: %s" % reason)
 
 
+def _main_checkout_root(tree_root: Path) -> Path:
+    """本仓「主 checkout」根——身份解析用，与场景跑在哪棵树无关。
+
+    基线探针会把本场景放进 /tmp 下的临时 detached worktree 跑（verify_lane 的
+    _run_baseline，只软链依赖不保路径）。原先拿当前树路径认「引擎所属条目」，
+    临时树永远落在所有项目 dirs 之外 → 该腿在基线通道 100% 假红（主干明明绿），
+    既有 flaky 统计失真，也污染红绿归属（把主干绿记成主干红）。git 共享目录
+    （.git 是目录即主树；worktree 形态 .git 是文件，gitdir: 指到
+    <主根>/.git/worktrees/<name>）的父目录=主 checkout 根：主树 / 泳道
+    worktree / 基线临时树三种跑法同一答案。解析失败=回退当前树（旧口径），
+    不猜。"""
+    dot = tree_root / ".git"
+    try:
+        if dot.is_dir():
+            return tree_root
+        if dot.is_file():
+            raw = dot.read_text().strip()
+            if ":" in raw:
+                gd = Path(raw.split(":", 1)[1].strip())
+                if not gd.is_absolute():
+                    gd = tree_root / gd
+                if gd.parent.name == "worktrees" and gd.parent.parent.name == ".git":
+                    return gd.parent.parent.parent
+    except Exception:                            # noqa: BLE001
+        pass
+    return tree_root
+
+
 def _load_shared():
     """装载引擎注册表单一真源（shared.py 只依赖 stdlib，可独立加载）。"""
     spec = importlib.util.spec_from_file_location("sc_reg_shared",
@@ -244,11 +272,14 @@ else:
         ok(bool(keys), "真机注册表有可用条目（%s）" % keys)
         q_dirs = [str(q.get("dir") or "") for q in quarantined]
         ok(not q_dirs, "真机零隔离（隔离=%s）" % q_dirs)
+        # 身份根=主 checkout（见 _main_checkout_root）：基线临时树里的跑法也认得
+        # 出自己是哪个项目的引擎，该腿只对产品事实红（条目真被隔离/真消失）。
+        id_root = _main_checkout_root(ROOT)
         owners = [p.get("key") for p in projects
-                  if any(str(d).rstrip("/") == str(ROOT) or str(ROOT).startswith(str(d).rstrip("/") + "/")
+                  if any(str(d).rstrip("/") == str(id_root) or str(id_root).startswith(str(d).rstrip("/") + "/")
                          for d in (p.get("dirs") or []))]
-        ok(bool(owners), "引擎所属条目在可用清单里（宿主症状「sandbar 不显示」的机器级回归锁；命中=%s）"
-           % owners)
+        ok(bool(owners), "引擎所属条目在可用清单里（宿主症状「sandbar 不显示」的机器级回归锁；命中=%s，身份根=%s）"
+           % (owners, id_root))
 
 print("\n==== summary: PASS=%d FAIL=%d NA=%d" % (PASS, FAIL, NA))
 if NA >= TOTAL_LEGS:
