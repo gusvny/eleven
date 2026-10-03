@@ -29,7 +29,12 @@ assert(PANEL_PAGE_HTML.includes('No project is selected'), 'no-project state is 
 
 // ---- Overview 两栏 + 窄屏叠放 ----
 assert(PANEL_PAGE_HTML.includes('grid-template-columns:1fr 1fr'), 'overview two columns side by side')
-assert(PANEL_PAGE_HTML.includes('@media (max-width:760px){ .cols{grid-template-columns:1fr} }'), 'columns stack below 760px')
+// t261003-09 缺陷 1：断点按真实容器宽（container query），两栏各自限高内滚——
+// 展开只在自己那栏长高，另一栏与下方内容永不位移。
+assert(PANEL_PAGE_HTML.includes('@container (max-width:760px){ .cols{grid-template-columns:1fr} }'), 'columns stack below 760px of the real container (container query)')
+assert(PANEL_PAGE_HTML.includes('.cols>div{min-width:0;height:calc(100vh - 230px);overflow-y:auto'), 'each column has a FIXED height and scrolls on its own (an unfold can never grow the frame)')
+assert(PANEL_PAGE_HTML.includes('container-type:inline-size'), 'the wrap is the query container')
+assert(PANEL_PAGE_HTML.includes('max-height:170px;overflow:auto'), 'row detail keeps its own height cap (anchoring stable)')
 assert(PANEL_PAGE_HTML.includes('Needs your answer'), 'left column heading (STE: no idiom "Needs you")')
 assert(PANEL_PAGE_HTML.includes('Recent actions'), 'right column = recent actions')
 assert(PANEL_PAGE_HTML.includes('id="reqBadge"'), 'waiting-count badge on Overview')
@@ -60,6 +65,20 @@ for (const op of ['sign', 'send-back', 'rerun', 'open-ticket', 'pause-resume', '
 assert(PANEL_PAGE_HTML.includes('/sandbar-executor-panel/api/actions'), 'page consumes the actions read endpoint')
 assert(PANEL_PAGE_HTML.includes('No action list.'), 'actions degrade names the reason (never an empty list)')
 assert(PANEL_PAGE_HTML.includes('permission.'), 'action rows carry the permission pill title')
+
+// ---- t261003-09 缺陷 2：双调色板，无硬编码缺省 ----
+assert(!PANEL_PAGE_HTML.includes(':root{--bg:'), 'no hardcoded :root palette remains as the default')
+assert(PANEL_PAGE_HTML.includes('html[data-theme="light"]') && PANEL_PAGE_HTML.includes('html[data-theme="dark"]'), 'two palettes keyed on data-theme')
+assert(PANEL_PAGE_HTML.includes('@media (prefers-color-scheme: dark){ html:not([data-theme])'), 'absent/malformed ?theme= degrades explicitly to prefers-color-scheme')
+assert(PANEL_PAGE_HTML.includes('dataset.theme = themeParam'), 'boot applies the parsed theme param')
+assert(PANEL_PAGE_HTML.includes('function themeParamOf'), 'themeParamOf source embedded (page and unit tests share one implementation)')
+
+// ---- t261003-09 缺陷 3：Overview 唯一会话入口（小按钮） ----
+assert(PANEL_PAGE_HTML.includes('id="openSessionBtn"'), 'exactly one open-session entry: the small Overview button')
+assert(PANEL_PAGE_HTML.includes('window.parent === window'), 'standalone detection gates the button')
+assert(PANEL_PAGE_HTML.includes('Open this panel from the console to use this button.'), 'standalone disable says why in one STE sentence')
+assert(PANEL_PAGE_HTML.includes('No executor session is declared. Declare one in Settings.'), 'undeclared-session disable says why')
+assert(PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session'") && PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session-result'"), 'postMessage contract to the parent console (request + one-line result)')
 
 // ---- 显式降级文案 + beep 缝（沿用） ----
 for (const frag of ['Watchdog unreachable', 'Not enrolled', 'data possibly stale', 'REJECTED']) {

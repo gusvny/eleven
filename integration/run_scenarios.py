@@ -1957,13 +1957,27 @@ SCENARIOS = [
      "「最近动作」读源契约（t261003-06，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：R1 读源在位——GET /api/recent-actions 返回行，每行语义键齐（时间/动作/票号/结果/权限，键名实现定语义可对号=契约）；R2 权限归因非空——受闸写动作行必带「凭哪条权限」，无归因行不许静默出现（设计 §6「做了什么+凭哪条权限」红线）；R3 坏行纪律——账本畸形行计数上报不静默丢且合法行照常服务（t260929-03 R4 同族判据投影）；R4 显式降级——读源不可读=degraded 标记+人类可读原因，degraded:false+空 rows 冒充「最近没动作」=红线红（设计 §6）；R5 只读红线——读出面绝不写账本文件（读前后字节一致）。缝契约=startHarness 可选 eventsPath 注入（与 panelDir/watchdogDir 同款隔离注入）；缝缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：面板页呈现归 page-redesign L2b；读源选择若需引擎改口=越界，plan review 已裁定只读消费现账本不碰引擎",
      "node integration/t261003-06/sc_executor_panel_recent_actions.mjs", "ro"),
 
+    # ---- t261003-09: executor panel follow-ups（展开不推栏 / 主题跟随 / 顶部行退场恰一入口）----
+    # 与 t261003-06 族 intent 不同面：彼锁改版页结构（五页签/选项/折叠/最近动作）与 grants
+    # 读写语义；本组只锁宿主实报三缺陷的行为面。共享桩缝 integration/t261003-09/lib_panel_stub.mjs
+    # （转引 t261003-06 lib_panel_seam，同款缝协议不另立契约）。
+    ("t261003-09-executor-panel-unfold-layout",
+     "展开请求不推移另一栏/下方内容（t261003-09 缺陷①，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099；review_plan 附条件意见①：锁用户可感知不变量不锁 CSS 机制）：U1 窄容器~700px（叠放形态=console 中列 .wb-sb-right flex:4 1 0 min-width:200px 的真实再现）展开任一请求后 Recent actions 包围盒不动（±1px）；U2 宽容器~1000px（并列形态）同一不变量照旧；U3 展开详情仍限高≤220px 且内滚（t261003-06 cap 契约不回退）；全旅程零 pageerror。playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；页面模块/缝未落地=FAIL 点名（TDD 期红属预期）。intent 分工：页结构五页签归 t261003-06-executor-panel-page-redesign；主题面色归 t261003-09-executor-panel-theme-follow",
+     "node integration/t261003-09/sc_executor_panel_unfold_layout.mjs", "browser-free"),
+    ("t261003-09-executor-panel-theme-follow",
+     "面板主题跟随 console（t261003-09 缺陷②，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099；?theme= 是 workbench/面板两端公开缝，workbench 侧解析归 developer L1）：V1 theme=light→浅色标记+浅底（相对亮度>0.5）；V2 theme=dark→暗标记+暗底（<0.5）；V3 无参数→根元素无主题标记（=硬编码色板不再充缺省，工单红线 No hardcoded palette as default）；V4 畸形 theme=purple→与缺省同（fail-soft 不落半态）；V5 无参数+系统偏好 light→渲染底色非旧硬编码 #141a24 暗脸（回落 prefers-color-scheme）；零 pageerror。intent 分工：面板明暗呈现归本条；workbench 传参归 developer 单测；旧页结构归 t261003-06 族",
+     "node integration/t261003-09/sc_executor_panel_theme_follow.mjs", "browser-free"),
+    ("t261003-09-executor-panel-open-session",
+     "顶部行退场恰一入口：Overview 打开会话按钮×同源消息契约（t261003-09 缺陷③，灰盒 L3，真浏览器+同源父页替身+API 桩零 docker，红线零接触 3099）：W1 恰一个打开会话按钮（无页签行形状/无第二入口）；W2 已声明会话→点击后同源父页（console 替身）收到 open-session 消息带字符串 sessionId（打开动作留 workbench 侧）；W3 父页回执 ok→按钮旁非空回执文案（成功失败都显式无静默路）；W4 未声明会话→按钮禁用；W5 独立打开（无父页）→禁用+一句 STE 说明（提及从 console 打开、零缩略形式）；W6 父页回执畸形→面板不崩（外部输入畸形态）；零 pageerror。intent 分工：真 console 面行退场归 t260929-22-executor-entry-console（E2/E3 本票已改写）；面板页内按钮与消息契约归本条",
+     "node integration/t261003-09/sc_executor_panel_open_session.mjs", "browser-free"),
+
     # ---- t260929-22: console 执行器入口 + grants 上游生产者 + 400 文案点名判据 ----
     # 与 t260929-03 族 intent 不同面：彼锁面板页内/路由行为本身，本组锁「人怎么到达
     # 面板」（左栏项目名行=入口+Executor/Chat 切换器，真源=260927 设计稿 §界面与命名）、
     # 「生产形态下 grants 上游可由构造得出」（未设环境变量也不得出现缺配置类降级理由）
     # 与「畸形 project 的 400 文案三要素」（点名参数/要求/收到什么——t260929-18 家族）。
     ("t260929-22-executor-entry-console",
-     "console 左栏执行器入口 payload→像素（t260929-22，灰盒 L3，真浏览器+隔离台+API 桩，红线零接触 3099；真源=260927 设计稿 §界面与命名）：E1 入口=项目名行本身——点左栏项目组头（非组内图标）→中列打开该项目执行器面板（带该项目 project 标识）；E2 顶部 Executor/Chat 切换器双向翻（Chat=面板退场、Executor=面板回来）；E3 设计负形——项目组内不得出现单独 Tick 行或单独「打开对话」按钮（入口就是项目名行）；E4 既有五视图图标零回归（板图标仍出工单列表夹具行）；E5 全旅程零 pageerror/console.error。面板页内容用桩顶替（页内归 t260929-03-executor-panel-page）；grants/400 文案归 t260929-22-grants-upstream-400-text。playwright/chromium/隔离台缺席=ENV_FAIL exit 2（KI-036 家族）；入口未落地=FAIL 点名（TDD 红属预期=anti-proof，arbitrate/merge 期必须绿）",
+     "console 左栏执行器入口 payload→像素（t260929-22，灰盒 L3，真浏览器+隔离台+API 桩，红线零接触 3099；真源=260927 设计稿 §界面与命名）：E1 入口=项目名行本身——点左栏项目组头（非组内图标）→中列打开该项目执行器面板（带该项目 project 标识）；E2（t261003-09 改写为退场负脸）顶部 Executor/Chat 切换器行整体退役——两段锚与 tablist 形状不得再现，行移除后唯一面板视图保持挂载；E3 设计负形——项目组内不得出现单独 Tick 行或单独「打开对话」按钮（入口就是项目名行）；E4 既有五视图图标零回归（板图标仍出工单列表夹具行）；E5 全旅程零 pageerror/console.error。面板页内容用桩顶替（页内归 t260929-03-executor-panel-page）；grants/400 文案归 t260929-22-grants-upstream-400-text。playwright/chromium/隔离台缺席=ENV_FAIL exit 2（KI-036 家族）；入口未落地=FAIL 点名（TDD 红属预期=anti-proof，arbitrate/merge 期必须绿）",
      "node integration/t260929-22/sc_executor_entry_console.mjs", "browser-free"),
     ("t260929-22-grants-upstream-400-text",
      "grants 上游生产者×400 文案点名判据（t260929-22，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：B1 生产形态（未设 SANDBAR_WORKBENCH_BASE）下 grants 降级理由永远不得是缺配置类（unset/not wired）——基址须由构造（请求 origin）得出，可达性类降级（HTTP/网络错）仍合法（显式降级纪律保留）；B2 强形态——harness 同源挂 /sandbar-workbench/api/wf/workflows 桩（缝扩展 workbenchStub:true，向后兼容）后 grants 必须 ok:true+degraded:false 出推导行，绝不降级对象冒充；C1–C4 畸形/缺失 project 的 400 文案三要素契约（提及 project 参数∧写明要求形状∧写明收到什么、缺失时不得裸冒号收尾）逐面锁 GET settings 无参/非法键、GET grants 空键、POST answer 空键；C5 兄弟分支分级锚——未知 settings 操作 422 文案含收到的 op 值与合法集合 save|revoke|sleep（点名判据家族可接受先例，钉住防退化）。intent 分工：400 状态刚性归 t260929-03-executor-panel-api R5（彼锁状态本场景只锁文案层）；env base 显式指向桩的 ok:true 归同票 G1（彼锁显式基址、本条锁同源无环境变量生产形态）。harness/缝缺席=FAIL 点名（TDD 红属预期=anti-proof，arbitrate/merge 期必须绿）",

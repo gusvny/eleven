@@ -24,14 +24,14 @@
 
 import {
   beepDecision, pickDegraded, fmtProportion, fmtWaiting, fmtAge, groupByProject,
-  splitWaiting, hasOptions, chipLabel, masterOn,
+  splitWaiting, hasOptions, chipLabel, masterOn, themeParamOf,
 } from './page-logic.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
-  String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
+  String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn), String(themeParamOf),
 ].join('\n')
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
@@ -41,10 +41,15 @@ export const PANEL_PAGE_HTML = `<!doctype html>
 <meta charset="utf-8">
 <title>Executor</title>
 <style>
-:root{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--fg:#dbe4f0;--muted:#8ea0b8;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a}
+/* t261003-09 缺陷 2：双调色板，随 ?theme= 切（workbench 深链恒带）；缺席/畸形 →
+   不设 data-theme，落 prefers-color-scheme 显式降级（standalone 场景），浅色兜底。
+   词表对齐控制台 --dsw-alias/--dsw-derive 家族（light=GitHub 浅档、dark=原深档）。 */
+html[data-theme="light"],html:not([data-theme]){--bg:#ffffff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--fg-soft:#424a53;--muted:#57606a;--faint:#6e7781;--blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--badge-fg:#ffffff;--accent-soft:#dbe9ff;--accent-line:#7aa7e8;--dot-grey:#99a3ad;--sw-off:#d7dde3;--knob:#57606a;--warn-soft:#fff8c5;--danger-soft:#ffebe9;--pill-sign-bg:#ddf4ff;--pill-sign-fg:#0550ae;--pill-open-bg:#dafbe1;--pill-open-fg:#116329;--pill-retry-bg:#fff8c5;--pill-retry-fg:#7d4e00;--pill-send-bg:#fff1d6;--pill-send-fg:#9a5b00;--pill-cancel-bg:#ffebe9;--pill-cancel-fg:#cf222e;--pill-pause-bg:#e7ebef;--pill-pause-fg:#57606a}
+html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--fg-soft:#c3cfdf;--muted:#8ea0b8;--faint:#5b6880;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--badge-fg:#0e1420;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot-grey:#46536a;--sw-off:#39465c;--knob:#8ea0b8;--warn-soft:#2a2313;--danger-soft:#2a1414;--pill-sign-bg:#183153;--pill-sign-fg:#79b8ff;--pill-open-bg:#16351f;--pill-open-fg:#7ad48a;--pill-retry-bg:#3a2d13;--pill-retry-fg:#ffb454;--pill-send-bg:#3a2a13;--pill-send-fg:#ffc07a;--pill-cancel-bg:#3a1a1a;--pill-cancel-fg:#ff8b8b;--pill-pause-bg:#262f3d;--pill-pause-fg:#9fb0c8}
+@media (prefers-color-scheme: dark){ html:not([data-theme]){--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--fg-soft:#c3cfdf;--muted:#8ea0b8;--faint:#5b6880;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--badge-fg:#0e1420;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot-grey:#46536a;--sw-off:#39465c;--knob:#8ea0b8;--warn-soft:#2a2313;--danger-soft:#2a1414;--pill-sign-bg:#183153;--pill-sign-fg:#79b8ff;--pill-open-bg:#16351f;--pill-open-fg:#7ad48a;--pill-retry-bg:#3a2d13;--pill-retry-fg:#ffb454;--pill-send-bg:#3a2a13;--pill-send-fg:#ffc07a;--pill-cancel-bg:#3a1a1a;--pill-cancel-fg:#ff8b8b;--pill-pause-bg:#262f3d;--pill-pause-fg:#9fb0c8} }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
-.wrap{max-width:900px;margin:0 auto;padding:18px 16px 48px}
+.wrap{max-width:900px;margin:0 auto;padding:18px 16px 48px;container-type:inline-size}
 .top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .top h1{font-size:14px;font-weight:600;margin:0}
 .chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 9px;font-size:11px}
@@ -53,7 +58,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
 .seg label:hover{color:var(--fg)}
 #t-overview:checked~.seg label[for=t-overview],#t-grants:checked~.seg label[for=t-grants],#t-alerts:checked~.seg label[for=t-alerts],#t-ledger:checked~.seg label[for=t-ledger],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}
-.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:#0e1420;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sect.lead{margin-top:18px}
@@ -61,62 +66,68 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .row.wait{border-left:3px solid var(--amber)}
 .row.done{border-left:3px solid var(--line);background:transparent}
 .head{display:flex;align-items:baseline;gap:8px;padding:10px 12px;cursor:pointer;user-select:none}
-.head:hover{background:#1f2937}
+.head:hover{background:var(--hover)}
 .row.done .head .txt{color:var(--muted)}
 .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
-.dot.amber{background:var(--amber)}.dot.grey{background:#46536a}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
+.dot.amber{background:var(--amber)}.dot.grey{background:var(--dot-grey)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
 .meta{color:var(--muted);font-size:11px;white-space:nowrap}
 .chev{color:var(--muted);font-size:10px;flex:0 0 auto;transition:transform .15s}
 .row[data-open="true"] .chev{transform:rotate(90deg)}
-.body{display:none;padding:0 12px 11px 12px;border-top:1px solid #232c3a}
+.body{display:none;padding:0 12px 11px 12px;border-top:1px solid var(--line-soft)}
 .row[data-open="true"] .body{display:block}
-.detail{margin-top:9px;max-height:170px;overflow:auto;white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:#c3cfdf;font-size:12px}
+.detail{margin-top:9px;max-height:170px;overflow:auto;white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--fg-soft);font-size:12px}
 .opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
 .opts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 14px;font:inherit;cursor:pointer}
 .opts button:hover{border-color:var(--blue);color:var(--blue)}
-.opts button.primary{background:#1d3550;border-color:#2f5b8a}
-.other{border:0;background:transparent;color:#6d7c94;font:inherit;cursor:pointer;padding:6px 4px;text-decoration:underline dotted}
+.opts button.primary{background:var(--accent-soft);border-color:var(--accent-line)}
+.other{border:0;background:transparent;color:var(--faint);font:inherit;cursor:pointer;padding:6px 4px;text-decoration:underline dotted}
 .answer{display:flex;gap:8px;margin-top:10px}
 .answer input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:6px 9px;font:inherit}
 .answer input:focus{outline:0;border-color:var(--blue)}
 .answer button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
 .given{color:var(--green);font-size:12px;padding:0 12px 10px 12px}
-.trace{color:#5b6880;font-size:11px;margin-top:9px}
+.trace{color:var(--faint);font-size:11px;margin-top:9px}
 .strip{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);margin-bottom:14px;flex-wrap:wrap}
 .strip .live{color:var(--green)}
 .strip .ro{color:var(--amber)}
 .power{border:1px solid var(--line);border-radius:7px;padding:5px 12px;font:inherit;cursor:pointer;background:var(--panel2);color:var(--fg)}
 .power[data-on="true"]:hover{border-color:var(--red);color:var(--red)}
 .power[data-on="false"]:hover{border-color:var(--green);color:var(--green)}
+.openBtn{border:1px solid var(--line);border-radius:7px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer;background:var(--panel2);color:var(--fg)}
+.openBtn:disabled{opacity:.45;cursor:not-allowed}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-@media (max-width:760px){ .cols{grid-template-columns:1fr} }
-.act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid #232c3a}
+/* t261003-09 缺陷 1：断点按真实容器宽（container query——面板是 iframe/独立窗口，
+   视口宽≠内容盒宽），且两栏各自限高内滚——展开任何一条请求只在**自己那栏**长高，
+   另一栏与下方内容永不位移；行内 detail 的 170px 限高不变（滚动锚定稳定）。 */
+.cols>div{min-width:0;height:calc(100vh - 230px);overflow-y:auto;overscroll-behavior:contain}
+@container (max-width:760px){ .cols{grid-template-columns:1fr} }
+.act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid var(--line-soft)}
 .act:last-child{border-bottom:0}
 .act .t{color:var(--muted);font-size:11px;width:38px;flex:0 0 auto}
 .pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px;min-width:52px;text-align:center}
-.pill.sign{background:#183153;color:#79b8ff}
-.pill.open{background:#16351f;color:#7ad48a}
-.pill.retry{background:#3a2d13;color:#ffb454}
-.pill.sendback{background:#3a2a13;color:#ffc07a}
-.pill.cancel{background:#3a1a1a;color:#ff8b8b}
-.pill.pause{background:#262f3d;color:#9fb0c8}
+.pill.sign{background:var(--pill-sign-bg);color:var(--pill-sign-fg)}
+.pill.open{background:var(--pill-open-bg);color:var(--pill-open-fg)}
+.pill.retry{background:var(--pill-retry-bg);color:var(--pill-retry-fg)}
+.pill.sendback{background:var(--pill-send-bg);color:var(--pill-send-fg)}
+.pill.cancel{background:var(--pill-cancel-bg);color:var(--pill-cancel-fg)}
+.pill.pause{background:var(--pill-pause-bg);color:var(--pill-pause-fg)}
 .act .tk{font-weight:600}
 .act .say{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .cell{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
 .cell b{display:block;font-size:15px;font-weight:600}
 .cell span{color:var(--muted);font-size:11px}
-.file{color:#5b6880;font-size:11px;margin-top:8px}
+.file{color:var(--faint);font-size:11px;margin-top:8px}
 .grp{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
 .line{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #232c3a}
 .line:last-child{border-bottom:0}
 .line .lab{flex:1;min-width:0}
 .line .lab small{display:block;color:var(--muted);font-size:11px}
 .line input[type=text],.line input[type=number],.line input[type=time],.line select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit;width:150px}
-.sw{width:38px;height:21px;border-radius:11px;background:#39465c;border:1px solid var(--line);position:relative;cursor:pointer;flex:0 0 auto;transition:background .15s}
-.sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#8ea0b8;transition:left .15s,background .15s}
-.sw[data-on="true"]{background:#1d3550;border-color:#2f5b8a}
+.sw{width:38px;height:21px;border-radius:11px;background:var(--sw-off);border:1px solid var(--line);position:relative;cursor:pointer;flex:0 0 auto;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--knob);transition:left .15s,background .15s}
+.sw[data-on="true"]{background:var(--accent-soft);border-color:var(--accent-line)}
 .sw[data-on="true"]::after{left:18px;background:var(--blue)}
 .sw.locked{opacity:.35;cursor:not-allowed}
 .linkbtn{border:0;background:transparent;color:var(--muted);font:inherit;cursor:pointer;text-decoration:underline dotted;margin-left:auto}
@@ -131,15 +142,15 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .doneWrap[data-open="false"] .chev2{transform:rotate(-90deg)}
 .doneWrap[data-open="false"] .doneList{display:none}
 .empty{color:var(--muted);padding:22px 4px}
-.banner{border:1px solid var(--amber);color:var(--amber);background:#2a2313;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px}
-.banner.red{border-color:var(--red);color:var(--red);background:#2a1414}
+.banner{border:1px solid var(--amber);color:var(--amber);background:var(--warn-soft);border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px}
+.banner.red{border-color:var(--red);color:var(--red);background:var(--danger-soft)}
 .knob{display:grid;grid-template-columns:200px 1fr 240px;gap:6px;padding:5px 12px;border-bottom:1px solid #232c3a;align-items:center;font-size:12px}
 .knob .src{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
 table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600;font-size:11px}
 .good{color:var(--green)} .bad{color:var(--red)} .muted{color:var(--muted)}
-.foot{margin-top:26px;color:#5b6880;font-size:11px}
+.foot{margin-top:26px;color:var(--faint);font-size:11px}
 </style>
 </head>
 <body>
@@ -168,6 +179,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       <span id="stateTxt">The executor state is not known yet.</span>
       <span id="grantChip" class="chip">Permissions: 0 of 6</span>
       <span id="sessionChip" class="chip">Session: none</span>
+      <button class="openBtn" id="openSessionBtn" disabled>Open session</button><span class="meta" id="sessionMsg"></span>
       <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
     </div>
     <div id="ovBanners"></div>
@@ -250,7 +262,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 <script>
 ` + EMBEDDED + `
 (function(){
-  var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null };
+  var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'' };
   var saveMsg = '';
   var grantsSaveMsg = '';
   var POLL_MS = 5000;
@@ -350,8 +362,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('liveDot').className = on ? 'live' : 'ro';
     el('liveDot').textContent = on ? '● active' : '● read-only';
     var sr = g && g.session_readout ? g.session_readout : null;
-    var sess = sr && sr.sessions && sr.sessions.length ? sr.sessions[0] : '';
+    // 点名回落链：读出面 sessions → 声明顶层 executor_sessions（读出面缺席时的声明位）。
+    var sess = (sr && sr.sessions && sr.sessions.length ? sr.sessions[0] : '')
+      || (g && g.executor_sessions && g.executor_sessions.length ? g.executor_sessions[0] : '');
+    state.session = sess;
     el('sessionChip').textContent = 'Session: ' + (sess ? sess : 'none');
+    updateOpenBtn(sess);
     var stTxt = st && st.heartbeat ? (st.heartbeat.alive ? 'The watchdog is alive. Last beat: '+fmtAge(st.heartbeat.age_seconds) : 'The watchdog is not alive.') : 'The watchdog state is not known.';
     el('stateTxt').textContent = stTxt + (on ? '' : ' The executor can only read and ask. The watchdog keeps running.');
     renderWaitColumn();
@@ -417,6 +433,15 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     return '<div class="body"><div class="detail">'+esc(r.detail||'(no detail was given)')+'</div>'
       + controls
       + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
+  }
+  // t261003-09 缺陷 3：Overview 里唯一的会话入口。standalone（无父页）= 显式禁用
+  // 并一句话说明原因；无声明会话同样禁用点名去处。按钮只发一条 postMessage，
+  // 结果只落一行文案——不造轮询/重试/状态条（t261003-06 已删的形态不还魂）。
+  function updateOpenBtn(sess){
+    var btn = el('openSessionBtn');
+    if(window.parent === window){ btn.disabled = true; btn.title = 'Open this panel from the console to use this button.'; return; }
+    if(!sess){ btn.disabled = true; btn.title = 'No executor session is declared. Declare one in Settings.'; return; }
+    btn.disabled = false; btn.title = 'Open session ' + sess + ' in the console.';
   }
   function renderWaitColumn(){
     var st = state.requests;
@@ -765,11 +790,25 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   el('powerBtn').onclick = function(){
     masterSwitch(el('powerBtn').dataset.on !== 'true');
   };
+  el('openSessionBtn').onclick = function(){
+    if(window.parent === window || !state.session) return;
+    el('sessionMsg').textContent = 'Opening the session in the console.';
+    window.parent.postMessage({ type: 'sandbar-executor-panel:open-session', sessionId: state.session }, window.location.origin);
+  };
+  window.addEventListener('message', function(ev){
+    if(ev.origin !== window.location.origin) return;
+    var d = ev.data;
+    if(!d || d.type !== 'sandbar-executor-panel:open-session-result') return;
+    el('sessionMsg').textContent = d.ok === true ? 'The session is open in the console.' : 'The console could not open the session.';
+  });
   el('doneHeadBtn').onclick = function(){
     var w = el('doneWrap');
     w.dataset.open = w.dataset.open==='true' ? 'false' : 'true';
   };
   var urlProj = ''; try{ urlProj = new URLSearchParams(location.search).get('project') || ''; }catch(e){}
+  // t261003-09 缺陷 2：workbench 深链恒带 theme=light|dark；缺席/畸形 → 不设
+  // data-theme，落 prefers-color-scheme（themeParamOf 纯函数，单测与页面同一份实现）。
+  try{ var themeParam = themeParamOf(new URLSearchParams(location.search).get('theme')); if(themeParam) document.documentElement.dataset.theme = themeParam; }catch(e){}
   function setProject(p){
     state.project = p || '';
     el('projChip').textContent = state.project;

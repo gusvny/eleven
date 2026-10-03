@@ -137,3 +137,15 @@ export function chipLabel(count: number, total: number): string {
 export function masterOn(count: number): boolean {
   return Number.isFinite(count) && count > 0
 }
+
+/**
+ * 主题深链参数解析（t261003-09 缺陷 2，纯函数、经 String(fn) 嵌页）。
+ * 只认 'light' / 'dark'（大小写与首尾空白宽容）；缺席、畸形、非字符串一律 null——
+ * 页面对 null 不设 data-theme，交给 prefers-color-scheme 显式降级（面板永不自造
+ * 硬编码缺省调色板）。 */
+export function themeParamOf(v: unknown): 'light' | 'dark' | null {
+  const s = typeof v === 'string' ? v.trim().toLowerCase() : ''
+  if (s === 'light') return 'light'
+  if (s === 'dark') return 'dark'
+  return null
+}

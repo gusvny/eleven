@@ -6763,62 +6763,79 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 //#endregion
 //#region src/client/executor-view-model.ts
 /**
-* Chat 分支裁决：声明了且在当前会话列表里 → 打开；否则给**点名原因**的提示
-* （未声明 / 声明的会话不在册 / 回执读不了）。列表缺席（快照无 byId）按不在册
-* 处理——畸形输入显式降级，不 throw、不猜。
+* executor-view-model.ts —— 执行器入口视图的纯决策层（t261003-09 修订）。
+*
+* t260929-22 曾在这里放「Chat 分支裁决」（chatLegVerdict）；宿主实测该分支恒挂在
+* 「Resolving the declared executor session…」（无超时/无重试/无失败面），t261003-09
+* 把整行切换器连同 Chat 分支一起退役——本模块只剩面板 URL 构造与主题名解析两个纯面。
+*
+* 主题（t261003-09 缺陷 2）：面板是同源 iframe，父页 CSS 自定义属性穿不过边界，
+* 由父页解析出主题名后经 `?theme=` 深链传给面板页（面板侧双调色板，见 panel-page.ts）。
+* 主题名全仓统一词表 = 'light' | 'dark'（一词一义，不混第二种拼写）。
+* 解析纯函数 resolveThemeName 在 node 可裸 import 直测（tests/executor-entry-model.mjs）。
 */
-function chatLegVerdict(settings, listedSessionIds) {
-	if (typeof settings !== "object" || settings === null || settings.ok !== true) return {
-		action: "note",
-		reason: "Executor session unreadable: the panel settings endpoint did not return a usable payload (it may be degraded — see the panel Settings tab for the reason)."
-	};
-	const s = settings;
-	const declared = s.executor_session;
-	if (s.declared !== true || typeof declared !== "string" || declared === "") return {
-		action: "note",
-		reason: "No executor session declared for this project (declaring one is the host's call, in the panel's Settings tab — this entry never self-declares)."
-	};
-	if (!(Array.isArray(listedSessionIds) ? listedSessionIds : []).includes(declared)) return {
-		action: "note",
-		reason: `Declared executor session '${declared}' is not in this console's session list (it may have been settled). Re-declare it in the panel's Settings tab if needed.`
-	};
-	return {
-		action: "open",
-		sessionId: declared
-	};
-}
-/** 面板页同源 URL（深链 ?project=；空键不带参数=面板自己的选择器）。 */
-function executorPanelUrl(projectKey) {
-	return projectKey === "" ? "/sandbar-executor-panel/" : "/sandbar-executor-panel/?project=" + encodeURIComponent(projectKey);
-}
-//#endregion
-//#region src/client/executor-view.tsx
 /**
-* executor-view.tsx —— 中列执行器视图（t260929-22 GAP A）：设计稿 260927 §界面与命名
-* 的落地——左栏项目行即入口点进来后，中列顶部一个 `Executor / Chat` 切换器在
-* 「面板」与「对话」两个视图之间翻（机制同知识库页签那套；没有单独的「打开对话」钮）。
-*
-* - Executor 分支：同源 iframe 嵌面板页（`?project=<key>` 深链——panel-page.ts 消费该参数）。
-*   面板路由不可达=显式降级横幅（点名状态码），绝不渲染空白冒充常态。
-* - Chat 分支：判定在 executor-view-model.ts（chatLegVerdict）；打开动作由侧栏传入
-*   （sessions.open），打开的会话落在**现有对话 UI**（260903-07 裁定：右栏恒全局单会话，
-*   中列不再开对话——与设计稿「面板与对话是同一会话的两个视图」的落点差异已在
-*   交接报告点名，非静默替代）。
-* - 全终态：settings/可达性两个 fetch 都带 AbortController，卸载/换项目即中止；
-*   本组件无常驻定时器（轮询在面板页自己内部）。
-*
-* 测试锚：data-wb-executor-view / data-wb-executor-seg / data-wb-chat-seg /
-* data-wb-executor-frame / data-wb-chat-note（集成场景按锚断言，不按文案）。
+* 从控制台解析出的背景色推主题名（纯函数；畸形输入显式回落 'light'，不 throw、不猜暗色）。
+* 认 #rgb/#rrggbb 与 rgb()/rgba()；相对亮度 >= 0.5 判 light。解析失败（空串、截断值、
+* var() 链、'inherit' 等任何非字面色）一律 'light'——错误输入当浅色处理是显式降级，
+* 单测逐例锚定。
 */
-function ExecutorView({ projectKey, listedSessionIds, openExecutorSession }) {
-	const [seg, setSeg] = (0, react.useState)("executor");
+function resolveThemeName(bg) {
+	const s = typeof bg === "string" ? bg.trim().toLowerCase() : "";
+	let r = NaN, g = NaN, b = NaN;
+	const hex = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+	if (hex) {
+		const h = hex[1];
+		const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+		r = parseInt(full.slice(0, 2), 16);
+		g = parseInt(full.slice(2, 4), 16);
+		b = parseInt(full.slice(4, 6), 16);
+	} else {
+		const fn = s.match(/^rgba?\(([^)]*)\)$/);
+		if (fn) {
+			const parts = fn[1].split(/[,\s/]+/).filter(Boolean);
+			if (parts.length >= 3) {
+				const num = (v) => v.endsWith("%") ? Math.round(parseFloat(v) * 2.55) : parseFloat(v);
+				r = num(parts[0]);
+				g = num(parts[1]);
+				b = num(parts[2]);
+			}
+		}
+	}
+	if (![
+		r,
+		g,
+		b
+	].every((v) => Number.isFinite(v) && v >= 0 && v <= 255)) return "light";
+	return (.2126 * r + .7152 * g + .0722 * b) / 255 >= .5 ? "light" : "dark";
+}
+/**
+* 控制台当下主题名（组件侧薄壳读 computed 值，纯判定在 resolveThemeName）。
+* 平台外壳未暴露主题翻转事件：视图挂载时解析一次，翻主题后重开视图/刷新生效
+* （t261003-09 交接报告已声明的机制限制）。读不到/异常 → 显式 'light'。
+*/
+function consoleThemeName() {
+	try {
+		const cs = getComputedStyle(document.documentElement);
+		return resolveThemeName(cs.getPropertyValue("--dsw-alias-bg-base") || cs.getPropertyValue("--dsw-alias-bg-primary"));
+	} catch {
+		return "light";
+	}
+}
+/** 面板页同源 URL（深链 ?project=；空键不带项目参数；theme 恒随父页解析结果拼接；
+*  运行时畸形 theme 实参归一 'light'——类型层外的防御，不产出第三种主题名）。 */
+function executorPanelUrl(projectKey, theme = "light") {
+	const t = theme === "dark" ? "dark" : "light";
+	return projectKey === "" ? "/sandbar-executor-panel/?theme=" + t : "/sandbar-executor-panel/?project=" + encodeURIComponent(projectKey) + "&theme=" + t;
+}
+/** 宿主 → 面板的结果回执（面板只渲染一行 STE 文案，不做轮询/重试/状态条）。 */
+const OPEN_SESSION_RESULT_MSG_TYPE = "sandbar-executor-panel:open-session-result";
+function ExecutorView({ projectKey, openExecutorSession }) {
 	const [panelState, setPanelState] = (0, react.useState)({
 		ok: false,
 		detail: "checking…"
 	});
-	const [settings, setSettings] = (0, react.useState)(null);
-	const [settingsState, setSettingsState] = (0, react.useState)("idle");
-	const [openedId, setOpenedId] = (0, react.useState)("");
+	const frameRef = (0, react.useRef)(null);
 	(0, react.useEffect)(() => {
 		const ac = new AbortController();
 		setPanelState({
@@ -6844,138 +6861,44 @@ function ExecutorView({ projectKey, listedSessionIds, openExecutorSession }) {
 		return () => ac.abort();
 	}, [projectKey]);
 	(0, react.useEffect)(() => {
-		if (seg !== "chat" || settingsState !== "idle") return;
-		const ac = new AbortController();
-		setSettingsState("loading");
-		fetch("/sandbar-executor-panel/api/settings?project=" + encodeURIComponent(projectKey), { signal: ac.signal }).then(async (res) => {
-			if (!res.ok) {
-				setSettings({
-					ok: false,
-					error: `HTTP ${res.status}`
-				});
-				setSettingsState("loaded");
-				return;
-			}
-			setSettings(await res.json().catch(() => ({
-				ok: false,
-				error: "response body is not JSON"
-			})));
-			setSettingsState("loaded");
-		}).catch((e) => {
-			if (ac.signal.aborted) return;
-			setSettings({
-				ok: false,
-				error: e instanceof Error ? e.message : String(e)
-			});
-			setSettingsState("failed");
-		});
-		return () => ac.abort();
-	}, [
-		seg,
-		settingsState,
-		projectKey
-	]);
-	(0, react.useEffect)(() => {
-		if (seg !== "chat" || settingsState === "idle" || settingsState === "loading" || openedId !== "") return;
-		const v = chatLegVerdict(settings, listedSessionIds);
-		if (v.action === "open" && openExecutorSession(v.sessionId)) setOpenedId(v.sessionId);
-	}, [
-		seg,
-		settings,
-		settingsState,
-		listedSessionIds,
-		openExecutorSession,
-		openedId
-	]);
-	const chatVerdict = settingsState === "loaded" || settingsState === "failed" ? chatLegVerdict(settings, listedSessionIds) : null;
+		const onMessage = (e) => {
+			if (e.origin !== window.location.origin) return;
+			const frame = frameRef.current;
+			if (!frame || e.source !== frame.contentWindow) return;
+			const d = e.data;
+			if (!d || d.type !== "sandbar-executor-panel:open-session") return;
+			const ok = typeof d.sessionId === "string" && d.sessionId !== "" && openExecutorSession(d.sessionId);
+			frame.contentWindow?.postMessage({
+				type: OPEN_SESSION_RESULT_MSG_TYPE,
+				ok
+			}, window.location.origin);
+		};
+		window.addEventListener("message", onMessage);
+		return () => window.removeEventListener("message", onMessage);
+	}, [openExecutorSession]);
+	const theme = consoleThemeName();
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-executor-view",
 		"data-wb-executor-view": "",
 		"data-project": projectKey,
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: EXECUTOR_CSS }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-executor-switch",
-				role: "tablist",
-				"aria-label": "Executor panel / conversation",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						role: "tab",
-						"aria-selected": seg === "executor",
-						"data-wb-executor-seg": "",
-						"data-on": seg === "executor",
-						onClick: () => setSeg("executor"),
-						children: "Executor"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						role: "tab",
-						"aria-selected": seg === "chat",
-						"data-wb-chat-seg": "",
-						"data-on": seg === "chat",
-						onClick: () => setSeg("chat"),
-						children: "Chat"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-executor-switch-project",
-						title: projectKey,
-						children: projectKey
-					})
-				]
-			}),
-			seg === "executor" && (panelState.ok ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
-				"data-wb-executor-frame": "",
-				className: "wb-executor-frame",
-				title: `Executor panel — ${projectKey}`,
-				src: executorPanelUrl(projectKey)
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-executor-note",
-				role: "alert",
-				"data-wb-executor-note": "",
-				children: ["Executor panel unavailable for this project. ", panelState.detail]
-			})),
-			seg === "chat" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-executor-chat",
-				"data-wb-chat-pane": "",
-				children: chatVerdict === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-executor-note",
-					children: "Resolving the declared executor session…"
-				}) : chatVerdict.action === "note" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "wb-executor-note",
-					role: "alert",
-					"data-wb-chat-note": "",
-					children: chatVerdict.reason
-				}) : openedId === chatVerdict.sessionId ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-executor-note",
-					"data-wb-chat-note": "",
-					children: [
-						"Conversation opened in the chat column (right) — session ",
-						openedId,
-						". The conversation lives in the existing chat UI (per the 260903-07 single-global-chat ruling); this switcher stays here as the panel-side entry back."
-					]
-				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "wb-executor-note",
-					role: "alert",
-					"data-wb-chat-note": "",
-					children: [
-						"Failed to open the declared session ",
-						chatVerdict.sessionId,
-						" (see the console for details)."
-					]
-				})
-			})
-		]
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: EXECUTOR_CSS }), panelState.ok ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+			ref: frameRef,
+			"data-wb-executor-frame": "",
+			className: "wb-executor-frame",
+			title: `Executor panel — ${projectKey}`,
+			src: executorPanelUrl(projectKey, theme)
+		}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-executor-note",
+			role: "alert",
+			"data-wb-executor-note": "",
+			children: ["Executor panel unavailable for this project. ", panelState.detail]
+		})]
 	});
 }
 const EXECUTOR_CSS = `
 .wb-executor-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.wb-executor-switch { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--dsw-derive-border, #333); }
-.wb-executor-switch button { border: 1px solid var(--dsw-derive-border, #444); background: transparent; color: inherit;
-  padding: 3px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
-.wb-executor-switch button[data-on="true"] { background: var(--dsw-derive-bg-accent, #2b2b2b); font-weight: 600; }
-.wb-executor-switch-project { margin-left: auto; color: var(--dsw-derive-fg-dim, #888); font-size: 12px; }
 .wb-executor-frame { flex: 1; width: 100%; border: 0; background: transparent; }
-.wb-executor-chat { padding: 16px; }
-.wb-executor-note { padding: 12px 14px; border: 1px solid var(--dsw-derive-border, #444); border-radius: 8px;
+.wb-executor-note { margin: 16px; padding: 12px 14px; border: 1px solid var(--dsw-derive-border, #444); border-radius: 8px;
   color: var(--dsw-derive-fg, #ccc); font-size: 13px; line-height: 1.5; max-width: 640px; }
 `;
 //#endregion
@@ -48773,7 +48696,6 @@ function WorkbenchSidebar(props) {
 							}),
 							viewProject && rightView === "executor" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExecutorView, {
 								projectKey: viewProject,
-								listedSessionIds: Object.keys(projectSessions.listState?.byId ?? {}),
 								openExecutorSession: openExecutorSessionById
 							}),
 							viewProject && rightView === "board" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Board, {

@@ -3,8 +3,8 @@
 // Intent（用户可感知行为；真源=notes/discussions/260927-项目执行器-设计稿.md §界面与命名 + 工单 scope①）：
 //   E1 入口=项目名行本身：左栏一个项目一组，点**项目名行**（组头，不是组内某个图标）
 //      → 中列打开该项目的执行器面板（面板带该项目的 project 标识）。
-//   E2 顶部 `Executor / Chat` 切换器：Executor=面板视图；点 Chat 翻到对话视图
-//      （面板退场）；点回 Executor 面板回来——双向可翻。
+//   E2 （t261003-09 改写为退场负脸）顶部 Executor / Chat 切换器行整体退役——
+//      两段锚与 tablist 形状不得再现；行移除后唯一面板视图保持挂载。
 //   E3 设计负形：没有单独的「Tick 行」、没有单独「打开对话」按钮——入口就是项目名行
 //      （E1 已证），左栏项目组内不得再出现第二个执行器入口形状。
 //   E4 既有五视图图标零回归：点组内板视图图标仍出工单列表（夹具行在）。
@@ -189,36 +189,19 @@ async function scenarioEntryOpensPanel(page) {
   return null
 }
 
-// ---- E2 Executor / Chat 切换器
+// ---- E2 Executor / Chat 切换器（t261003-09 改写：切换器行退场——原「双向翻」正脸
+// 已随 t261003-09 缺陷③退役：该行整体移除，恰一个入口=Overview 里的打开会话按钮。
+// 本条改锁退场负脸：两段锚、tablist 形状都不得再出现，面板保持挂载不动）。
 
 async function scenarioSwitcherFlips(page) {
-  // 切换器两个段都必须在（设计定名 Executor / Chat——英文界面标签契约 260925）。
-  // 锚=data-wb-executor-seg / data-wb-chat-seg（developer 声明的测试锚；getByText 会
-  // 撞右栏 chat 面自身的「Chat」字样——定点复跑实锤）。
-  const ex = page.locator('[data-wb-executor-seg]').first()
-  const chat = page.locator('[data-wb-chat-seg]').first()
-  if (!(await ex.count())) return 'Executor segment of the switcher not found in the executor view'
-  if (!(await chat.count())) return 'Chat segment of the switcher not found in the executor view'
-  await chat.click()
-  const chatShown = await waitFor(async () => {
-    // 判「离开面板视图」只看面板 iframe 是否退场（marker 字样会经 iframe 历史装载
-    // 残留在序列化面——定点复跑实锤，iframe 在场性才是视图契约）。
-    const txt = await page.evaluate(() => ({
-      iframe: [...document.querySelectorAll('iframe')].some(f => /sandbar-executor-panel/.test(f.src || '')),
-      frame: !!document.querySelector('[data-wb-executor-frame]'),
-    }))
-    return !txt.iframe && !txt.frame
-  }, 8000)
-  if (!chatShown) {
-    const dump = await page.evaluate(() => ({
-      segs: [...document.querySelectorAll('[data-wb-executor-seg],[data-wb-chat-seg]')].map(b => [b.textContent, b.getAttribute('data-on')]),
-      frames: document.querySelectorAll('iframe').length,
-      exviews: document.querySelectorAll('[data-wb-executor-view]').length,
-    }))
-    return `clicking Chat did not leave the panel view (panel still mounted) — ${JSON.stringify(dump)}`
-  }
-  await ex.click()
-  if (!(await panelVisible(page, PROJ))) return 'clicking Executor did not bring the panel back (switcher is one-way)'
+  const neg = await page.evaluate(() => ({
+    segs: document.querySelectorAll('[data-wb-executor-seg],[data-wb-chat-seg]').length,
+    tablists: [...document.querySelectorAll('[role="tablist"]')].filter(t => /executor/i.test(t.getAttribute('aria-label') || '')).length,
+    frames: [...document.querySelectorAll('iframe')].filter(f => /sandbar-executor-panel/.test(f.src || '')).length,
+  }))
+  if (neg.segs !== 0) return `switcher segments still present after t261003-09 removal (${neg.segs} seg anchors)`
+  if (neg.tablists !== 0) return 'a tablist labelled Executor still present in the executor view (tab row must not be reintroduced)'
+  if (neg.frames === 0) return 'executor panel iframe not mounted (row removal must not drop the single panel view)'
   return null
 }
 

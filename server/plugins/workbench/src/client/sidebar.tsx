@@ -997,12 +997,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
               <br />(routed by the row's project; Epics is a cross-project list — clicking its icon shows the list in the middle column)
             </div>
           )}
-          {/* 执行器视图（t260929-22 GAP A）：项目行入口点进来；iframe 嵌同源面板页，
-              Chat 分支按声明开 executor 会话（判定在 executor-view-model，绝不自 declare）。 */}
+          {/* 执行器视图（t261003-09 修订）：项目行入口点进来；iframe 嵌同源面板页。
+              顶部 Executor/Chat 行随本票退役——「打开声明的 executor 会话」改为面板
+              Overview 小按钮经 postMessage 请求本组件 handler（openExecutorSessionById）；
+              主题名随深链传入面板。 */}
           {viewProject && rightView === 'executor' && (
             <ExecutorView
               projectKey={viewProject}
-              listedSessionIds={Object.keys((projectSessions.listState?.byId ?? {}) as Record<string, unknown>)}
               openExecutorSession={openExecutorSessionById} />
           )}
           {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}

@@ -1,51 +1,37 @@
 /**
- * executor-entry-model.mjs —— t260929-22 GAP A 的纯决策层 UT：
- * Executor/Chat 切换器 Chat 分支的裁决（chatLegVerdict）与面板页 URL 构造
- * （executorPanelUrl）——组件薄壳只做渲染，判定全在本模块（node 可裸 import）。
- *
- * 畸形输入用例内嵌（settings 回执非 JSON/缺键/空声明/会话不在册）——消费外部输入
- * 的实现单测必带畸形输入（工程惯例）。
+ * executor-entry-model.mjs —— 执行器入口视图纯决策层 UT（t261003-09 修订）：
+ *  - executorPanelUrl：?project= 深链 + theme 恒随父页解析结果拼接（缺陷 2 的缝）；
+ *  - resolveThemeName：从控制台背景色推主题名——字面色两族 + **畸形输入逐例**
+ *    （空/截断/var() 链/非字符串 → 显式 'light'，不 throw 不猜暗色）。
+ * chatLegVerdict 与 Chat 分支随 t261003-09 退役（宿主实测恒挂 resolving——行已删，
+ * 无第四态），其旧用例一并退役。
  */
 import assert from 'node:assert/strict'
-import { chatLegVerdict, executorPanelUrl } from '../src/client/executor-view-model.ts'
+import { executorPanelUrl, resolveThemeName } from '../src/client/executor-view-model.ts'
 
 let n = 0
 
-// ---- Chat 分支：已声明且在册 → 打开 ----
+// ---- 面板 URL：带 ?project= 与 theme=，键 encodeURIComponent ----
 {
-  const v = chatLegVerdict({ ok: true, declared: true, executor_session: 'sess-9' }, ['sess-9', 'sess-1'])
-  assert(v.action === 'open' && v.sessionId === 'sess-9', `declared+listed -> open (${++n})`)
-}
-// ---- 未声明（今天的现实：declared:false / 空串）→ 显式提示，绝不静默 ----
-{
-  const v = chatLegVerdict({ ok: true, declared: false, executor_session: '' }, [])
-  assert(v.action === 'note' && v.reason.includes('No executor session declared'), `undeclared -> explicit note (${++n})`)
-  const v2 = chatLegVerdict({ ok: true, declared: true, executor_session: '' }, [])
-  assert(v2.action === 'note' && v2.reason.includes('No executor session declared'), `empty session id -> explicit note (${++n})`)
-}
-// ---- 声明了但不在册 → 点名缺什么 ----
-{
-  const v = chatLegVerdict({ ok: true, declared: true, executor_session: 'sess-gone' }, ['sess-1'])
-  assert(v.action === 'note' && v.reason.includes('sess-gone') && v.reason.includes('not in this console'), `unlisted -> note names id (${++n})`)
-}
-// ---- 畸形回执（非对象 / ok:false / null）→ 点名数据不可读 ----
-{
-  for (const bad of [null, 'not-json', { ok: false, error: 'x' }, 42]) {
-    const v = chatLegVerdict(bad, [])
-    assert(v.action === 'note' && v.reason.includes('unreadable'), `malformed settings ${JSON.stringify(bad)} -> note (${++n})`)
-  }
-}
-// ---- 列表缺失（快照缺 byId）也按不在册处理，不 throw ----
-{
-  const v = chatLegVerdict({ ok: true, declared: true, executor_session: 's' }, undefined)
-  assert(v.action === 'note', `missing list tolerated (${++n})`)
+  assert(executorPanelUrl('alpha') === '/sandbar-executor-panel/?project=alpha&theme=light', `url plain key (${++n})`)
+  assert(executorPanelUrl('alpha', 'dark') === '/sandbar-executor-panel/?project=alpha&theme=dark', `url dark theme (${++n})`)
+  assert(executorPanelUrl('a b/c') === '/sandbar-executor-panel/?project=' + encodeURIComponent('a b/c') + '&theme=light', `url encodes odd key (${++n})`)
+  assert(executorPanelUrl('') === '/sandbar-executor-panel/?theme=light', `empty key -> project param omitted (${++n})`)
+  // 畸形 theme 实参（类型层外的运行时防御）→ 归一 light，不产出第三种主题名。
+  assert(executorPanelUrl('alpha', 'midnight') === '/sandbar-executor-panel/?project=alpha&theme=light', `malformed theme arg -> light (${++n})`)
 }
 
-// ---- 面板 URL：带 ?project=，键 encodeURIComponent ----
-{
-  assert(executorPanelUrl('alpha') === '/sandbar-executor-panel/?project=alpha', `url plain key (${++n})`)
-  assert(executorPanelUrl('a b/c') === '/sandbar-executor-panel/?project=' + encodeURIComponent('a b/c'), `url encodes odd key (${++n})`)
-  assert(executorPanelUrl('') === '/sandbar-executor-panel/', `empty key -> no param (${++n})`)
+// ---- resolveThemeName：字面深色 → dark ----
+for (const v of ['#141a24', '#141A24', '#000', '#182b3a', 'rgb(20, 26, 36)', 'rgba(20,26,36,0.4)']) {
+  assert(resolveThemeName(v) === 'dark', `dark literal ${JSON.stringify(v)} (${++n})`)
+}
+// ---- 字面浅色 → light ----
+for (const v of ['#ffffff', '#fff', '#f6f8fa', 'rgb(246, 248, 250)', 'rgb(100%, 100%, 100%)']) {
+  assert(resolveThemeName(v) === 'light', `light literal ${JSON.stringify(v)} (${++n})`)
+}
+// ---- 畸形/非字面输入（消费 computed 值的失败面）→ 显式 'light'，绝不 throw ----
+for (const bad of ['', '   ', 'inherit', 'var(--dsw-alias-bg-base, #fff)', '#12', '#12345', 'rgb(1,2)', 'rgb()', 'transparent', 'midnight', null, undefined, 42, {}]) {
+  assert(resolveThemeName(bad) === 'light', `malformed input ${JSON.stringify(bad)} -> light (${++n})`)
 }
 
 console.log(`done ${n}`)
