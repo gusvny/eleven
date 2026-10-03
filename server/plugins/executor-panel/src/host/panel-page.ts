@@ -24,14 +24,15 @@
 
 import {
   beepDecision, pickDegraded, fmtProportion, fmtWaiting, fmtAge, groupByProject,
-  splitWaiting, hasOptions, chipLabel, masterOn, themeParamOf,
+  splitWaiting, hasOptions, chipLabel, masterOn, hhmmLocal, wakeRowSentence, themeParamOf,
 } from './page-logic.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
-  String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn), String(themeParamOf),
+  String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
+  String(hhmmLocal), String(wakeRowSentence), String(themeParamOf),
 ].join('\n')
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
@@ -197,6 +198,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       </div>
       <div>
         <div class="sect">Recent actions</div>
+        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
         <div class="row" style="padding:2px 4px" id="actList"></div>
       </div>
     </div>
@@ -232,6 +234,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   <section id="paneAlert" style="display:none">
     <div id="alertBanner"></div>
     <div class="sect" id="alertHead">Recent · 0</div>
+    <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
     <div id="alertList"></div>
   </section>
 
@@ -239,7 +242,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div class="sect">Health</div>
     <div class="grid" id="ledgerGrid"></div>
     <div class="file" id="ledgerFile"></div>
-    <div class="sect lead">Last events</div>
+    <div class="sect lead">Last wakes</div>
+    <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
     <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
   </section>
 
@@ -298,7 +302,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   function el(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('span'); d.textContent=String(s==null?'':s); return d.innerHTML; }
   function bannerHtml(label,red){ return '<div class="banner'+(red?' red':'')+'">'+esc(label)+'</div>'; }
-  function hhmm(v){ var t=typeof v==='number'?v:Date.parse(v); if(!Number.isFinite(t)) return '—'; return String(new Date(t).toISOString()).slice(11,16); }
+  // 时间口径（t261003-13 Finding 3）：全部走 hhmmLocal（本地时区），页头带「Times are local.」标签。
 
   // ---- polling + beep ----
   function poll(){
@@ -520,7 +524,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       for(var i=0;i<a.actions.length;i++){
         var x = a.actions[i];
         var cls = {Sign:'sign','Send back':'sendback',Rerun:'retry','Open ticket':'open',Pause:'pause',Resume:'pause','Pause or resume':'pause',Cancel:'cancel'}[x.action]||'pause';
-        html += '<div class="act"><span class="t">'+esc(hhmm(x.at))+'</span>'
+        html += '<div class="act"><span class="t">'+esc(hhmmLocal(x.at))+'</span>'
           + '<span class="pill '+cls+'" title="Allowed by the '+esc(x.permission)+' permission.">'+esc(x.action)+'</span>'
           + '<span class="tk">'+esc(x.ticket)+'</span>'
           + '<span class="say">'+esc(x.result||'done')+'</span></div>';
@@ -546,7 +550,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       var cls = a2.level==='redline' ? 'red' : (a2.night_muted ? 'blue' : 'amber');
       html += '<div class="row"><div class="head" style="cursor:default"><span class="dot '+cls+'"></span>'
         + '<span class="txt">'+esc(a2.title)+'</span>'
-        + '<span class="meta">'+esc(hhmm(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
+        + '<span class="meta">'+esc(hhmmLocal(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
     }
     if(rows.length===0) html = '<div class="empty">No alerts exist. The watchdog writes an alert only when a rule fires.</div>';
     el('alertList').innerHTML = html;
@@ -562,10 +566,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var wakes = st.wakes||[];
     for(var k=0;k<Math.min(wakes.length,3);k++){
       var w2 = wakes[k];
-      ev += '<div class="act"><span class="t">'+esc(hhmm(w2.at))+'</span><span class="pill open">WAKE</span>'
-        + '<span class="tk">'+esc(w2.ticket||w2.id||'')+'</span><span class="say">'+esc(w2.stage||w2.stage_state||'sent')+'</span></div>';
+      ev += '<div class="act"><span class="t">'+esc(hhmmLocal(w2.at))+'</span><span class="pill open">WAKE</span>'
+        + '<span class="tk">'+esc(w2.ticket||w2.id||'')+'</span><span class="say">'+esc(wakeRowSentence(w2))+'</span></div>';
     }
-    if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">No recent events. The watchdog appends here when a ticket changes.</span></div>';
+    if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">No wakes yet. The watchdog adds a row here when it wakes an executor.</span></div>';
     el('ledgerEvents').innerHTML = ev;
   }
 

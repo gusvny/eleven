@@ -1957,6 +1957,11 @@ SCENARIOS = [
      "「最近动作」读源契约（t261003-06，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：R1 读源在位——GET /api/recent-actions 返回行，每行语义键齐（时间/动作/票号/结果/权限，键名实现定语义可对号=契约）；R2 权限归因非空——受闸写动作行必带「凭哪条权限」，无归因行不许静默出现（设计 §6「做了什么+凭哪条权限」红线）；R3 坏行纪律——账本畸形行计数上报不静默丢且合法行照常服务（t260929-03 R4 同族判据投影）；R4 显式降级——读源不可读=degraded 标记+人类可读原因，degraded:false+空 rows 冒充「最近没动作」=红线红（设计 §6）；R5 只读红线——读出面绝不写账本文件（读前后字节一致）。缝契约=startHarness 可选 eventsPath 注入（与 panelDir/watchdogDir 同款隔离注入）；缝缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：面板页呈现归 page-redesign L2b；读源选择若需引擎改口=越界，plan review 已裁定只读消费现账本不碰引擎",
      "node integration/t261003-06/sc_executor_panel_recent_actions.mjs", "ro"),
 
+    # ---- t261003-13: Ledger 页签诚实性（标题不谎报 / 无回退词 / 时间带标签）----
+    ("t261003-13-ledger-tab-honesty",
+     "Ledger 页签诚实性三缺陷回归（t261003-13，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099；缝与夹具复用 t261003-06 lib_panel_seam）：H1 唤醒区块标题=Last wakes、旧标题 Last events 与旧空态文案（appends here when a ticket changes）退场——标题许诺账本事件而展示唤醒=根缺陷；H2 零唤醒空态明说没有唤醒（No wakes yet 族）；H3 唤醒行展示 mode+accepted 的 STE 句、硬编码字面量 sent 不再作为行内容出现；H4 畸形行电池（缺 mode/缺 accepted/双缺/accepted 非布尔/at 非法/null 行）显式 unknown 或 — 顶位、零 pageerror、绝不静默变句状词；H5 唤醒时间渲染==本机 HH:MM（同机现算锚格式不锚字面）+ Ledger 与 Alerts 双页签可见 Times are local 标签、宿主 TZ≠UTC 时负形（渲染≠UTC 切片，TZ=UTC 主机该子用例按系统状态条件 vacuous 通过并点名）；S1 新文案零缩略形式/零马拉松句（STE §4）；X1 全旅程零 pageerror。playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；页面模块/缝未落地=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：五页签/布局/请求交互/全面板 STE 归 t261003-06-executor-panel-page-redesign；recent-actions 数据面归同票 recent-actions 条；本条只锁本票三缺陷",
+     "node integration/t261003-13/sc_ledger_tab_honesty.mjs", "browser-free"),
+
     # ---- t261003-09: executor panel follow-ups（展开不推栏 / 主题跟随 / 顶部行退场恰一入口）----
     # 与 t261003-06 族 intent 不同面：彼锁改版页结构（五页签/选项/折叠/最近动作）与 grants
     # 读写语义；本组只锁宿主实报三缺陷的行为面。共享桩缝 integration/t261003-09/lib_panel_stub.mjs

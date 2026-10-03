@@ -123,5 +123,20 @@ assert(PANEL_ROUTE === '/sandbar-executor-panel', 'panel route constant')
   assert(calls >= 3, 'alerts/ledger refresh on poll success and failure paths, found ' + calls)
 }
 
+// ---- t261003-13：Ledger 页诚实化（改名 + 去 'sent' 假数据 + 本地时间带标签） ----
+assert(PANEL_PAGE_HTML.includes('>Last wakes<'), 'ledger block renamed to what it shows (Last wakes)')
+assert(!PANEL_PAGE_HTML.includes('Last events'), 'no "Last events" title left (title must match rows)')
+assert(!PANEL_PAGE_HTML.includes('The watchdog appends here when a ticket changes.'), 'old empty copy gone')
+assert(PANEL_PAGE_HTML.includes('No wakes yet. The watchdog adds a row here when it wakes an executor.'), 'empty copy matches what the block really shows')
+assert(PANEL_PAGE_HTML.includes('function wakeRowSentence'), 'wake row sentence is the shared embedded implementation')
+assert(PANEL_PAGE_HTML.includes('wakeRowSentence(w2)'), 'wake rows render mode+accepted via wakeRowSentence')
+assert(!PANEL_PAGE_HTML.includes("||'sent'"), "no 'sent' literal fallback anywhere in the page")
+assert(PANEL_PAGE_HTML.includes('function hhmmLocal'), 'local-time formatter is the shared embedded implementation')
+assert(PANEL_PAGE_HTML.includes('esc(hhmmLocal(x.at))') && PANEL_PAGE_HTML.includes('esc(hhmmLocal(a2.at))') && PANEL_PAGE_HTML.includes('esc(hhmmLocal(w2.at))'), 'Overview, Alerts and wake rows all render local time')
+{
+  const caps = (PANEL_PAGE_HTML.match(/>Times are local\.</g) || []).length
+  assert(caps === 3, 'Times are local. caption on Overview, Alerts and Ledger tabs, found ' + caps)
+}
+
 n += 60
 done(n)

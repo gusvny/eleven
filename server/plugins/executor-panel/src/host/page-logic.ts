@@ -138,6 +138,38 @@ export function masterOn(count: number): boolean {
   return Number.isFinite(count) && count > 0
 }
 
+// ---------- t261003-13：Ledger 页诚实化（时间口径 + 唤醒行句，同纪律：零 DOM、经 String(fn) 嵌页） ----------
+
+/**
+ * 本地时间 HH:MM（t261003-13 Finding 3）。页面上所有时间一律**本地时区**，
+ * 且三个 tab（Overview 最近动作 / Alerts / Ledger）都带「Times are local.」屏上标签——
+ * 标签由 HTML 静态承载，函数只管格式。畸形输入（NaN/garbage/null）显式降级为「—」。
+ */
+export function hhmmLocal(v: unknown): string {
+  const t = typeof v === 'number' ? v : Date.parse(String(v))
+  if (!Number.isFinite(t)) return '—'
+  const d = new Date(t)
+  const p = (n: number) => (n < 10 ? '0' + n : String(n))
+  return p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
+/**
+ * 唤醒行句（t261003-13 Finding 2）。行上真实存在的字段只有 mode 与 accepted：
+ * 句子只由这两者构成；任一缺席/畸形都显式写成 unknown / 「未报告」——
+ * **绝不留一个兜底词**（旧实现 `stage||stage_state||'sent'` 把字面量当数据打印）。
+ */
+export function wakeRowSentence(wake: unknown): string {
+  if (typeof wake !== 'object' || wake === null || Array.isArray(wake)) {
+    return 'Mode: unknown. The watchdog did not report whether the executor accepted the wake.'
+  }
+  const w = wake as Record<string, unknown>
+  const mode = typeof w.mode === 'string' && w.mode.trim() !== '' ? w.mode : 'unknown'
+  const accepted = typeof w.accepted === 'boolean'
+    ? (w.accepted ? 'The executor accepted the wake.' : 'The executor did not accept the wake.')
+    : 'The watchdog did not report whether the executor accepted the wake.'
+  return 'Mode: ' + mode + '. ' + accepted
+}
+
 /**
  * 主题深链参数解析（t261003-09 缺陷 2，纯函数、经 String(fn) 嵌页）。
  * 只认 'light' / 'dark'（大小写与首尾空白宽容）；缺席、畸形、非字符串一律 null——
