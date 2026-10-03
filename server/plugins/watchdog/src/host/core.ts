@@ -15,7 +15,7 @@
 import { appendFile, mkdir, readFile, writeFile, stat, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, type ResolvedConfig } from './config.ts'
+import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, dshHome, type ResolvedConfig } from './config.ts'
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
 import { compareStates, countMissingRows, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
@@ -285,8 +285,8 @@ export class Watchdog {
    *  临时 home 的场景实例与真宿主共享 alerts.jsonl 时，不得互相静音（真机 261001 实证：
    *  临时 home 一次报警把真宿主 18 次 refused 静音 12 小时）。 */
   private instanceScope(): string {
-    const env = this.configDirEnv ?? process.env
-    return env.DSH_HOME || join(env.HOME || '', '.dsh')
+    // t261003-04：与 config.dshHome 同一词表（实例身份只算一份，禁再各算一版）。
+    return dshHome(this.configDirEnv ?? process.env)
   }
 
   /** 落一条 alert（去重判定 → 落账 → 更新去重状态；夜间只影响发声不影响落账）。 */

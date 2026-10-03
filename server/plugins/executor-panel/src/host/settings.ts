@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path'
 import { malformedProjectMessage } from './project-key.ts'
 import {
   parseWatchdogConfig, loadWatchdogConfig, watchdogConfigDir, isValidProjectKey,
-  FACTORY_DEFAULTS, type WatchdogConfig,
+  FACTORY_DEFAULTS, instanceProjectsRoot, type WatchdogConfig,
 } from '../../../watchdog/src/host/config.ts'
 
 export { FACTORY_DEFAULTS, isValidProjectKey, loadWatchdogConfig, watchdogConfigDir }
@@ -33,7 +33,8 @@ export interface PanelState {
 }
 
 export function panelStateFile(key: string, env: NodeJS.ProcessEnv = process.env): string {
-  const root = env.SANDBAR_PANEL_DIR || join(env.HOME || '', '.sandbar', 'projects')
+  // t261003-04：兜底走实例 projects 根（非缺省实例 = <DSH_HOME>/sandbar/projects）。
+  const root = env.SANDBAR_PANEL_DIR || instanceProjectsRoot(env)
   return join(root, key, 'panel.json')
 }
 

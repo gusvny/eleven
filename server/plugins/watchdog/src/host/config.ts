@@ -12,7 +12,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 /** 单项目配置形状（全部可缺省，缺省回落出厂默认）。 */
 export interface WatchdogConfig {
@@ -174,10 +174,60 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
   return { declared: true, enabled: cfg.enabled, config: cfg, provenance: { file, keys }, config_error: null }
 }
 
-/** 配置根目录（测试缝：SANDBAR_WATCHDOG_DIR 优先；缺省=~/.sandbar/projects）。
+/** 实例的 dsh home（t261003-04：实例身份真源）。env DSH_HOME 优先；缺省 ~/.dsh。
+ *  与 core.instanceScope（t261001-19 的 dedupe 隔离域）同一表达式——身份只算一份。 */
+export function dshHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.DSH_HOME || join(env.HOME || '', '.dsh')
+}
+
+/** 是否缺省实例（= 生产实例）：dsh home 解析后等于 ~/.dsh。场景/泳道实例带自己的
+ *  DSH_HOME（临时目录），resolve 后必然不同 ⇒ 判为非缺省实例。
+ *  resolve 归一（去尾斜杠/相对段），畸形 DSH_HOME 不至于把生产实例误判成隔离实例。
+ *
+ *  定案口径（t261003-04 打回，merge 人审Gate）：实例形态 = HOME 与 DSH_HOME **共同**
+ *  决定，规则确定性、与进程环境解耦——
+ *   - DSH_HOME 未设或即 $HOME/.dsh ⇒ 缺省实例（生产形态，根=$HOME/.sandbar，历史不变）；
+ *   - DSH_HOME 设为其它路径 ⇒ 非缺省实例，根一律 <DSH_HOME>/sandbar/…（它自己 dsh home
+ *     的树，绝不顺 $HOME 兜底摸进别人的树）。
+ *  推论：只隔离 HOME、不隔离 DSH_HOME 的进程形态不被支持——根跟着 DSH_HOME 走（确定
+ *  性、可预期）；测试构造「只有 HOME」的生产形态必须把 DSH_HOME 一并钉住（自夹具纪律，
+ *  见 tests/data-root-single-source.test.mjs——本条回归=ambient DSH_HOME 把根拽到
+ *  ~/.dsh/sandbar，套件在真会话里自红）。 */
+export function isDefaultInstance(env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolve(dshHome(env)) === resolve(join(env.HOME || '', '.dsh'))
+}
+
+/**
+ * 实例 sandbar 根（t261003-04 缺陷 A 的收口点）：**一个实例一个根**。
+ *
+ * 病灶（真机 261001-261003 实测）：声明根/账本根/数据根/请求账根是四个独立 env 旋钮、
+ * 全部兜底 $HOME——只注入 DSH_HOME + SANDBAR_PROJECTS_DIR 的场景实例因此①读到生产声明
+ * 起了守望者本体②盯自己不存在的账本每拍报 ledger_unreadable③把报警写进生产数据根
+ * ④读生产请求账把生产执行器判成 waiting_on_itself（802/843 条生产台账报警来自临时实例）。
+ *
+ * 方案：四个根的**兜底**统一从本函数推导——
+ *  - 缺省实例（生产，DSH_HOME 未设或即 ~/.dsh）：$HOME/.sandbar（历史路径逐字节不变，
+ *    追加式历史照读）；
+ *  - 非缺省实例（场景/泳道/并行台）：<DSH_HOME>/sandbar —— 与生产物理隔离，临时实例
+ *    从根上读不到生产声明/数据/请求账，也绝不往生产写。
+ * 显式 env 旋钮（SANDBAR_WATCHDOG_DIR / SANDBAR_WATCHDOG_DATA / SANDBAR_PROJECTS_DIR /
+ * SANDBAR_PANEL_DIR）仍然最优先——显式指定=听调用方的，本函数只管兜底这一层。 */
+export function instanceSandbarRoot(env: NodeJS.ProcessEnv = process.env): string {
+  if (isDefaultInstance(env)) return join(env.HOME || '', '.sandbar')
+  return join(dshHome(env), 'sandbar')
+}
+
+/** 实例的 projects 根兜底（声明/注册表/请求账/事件账共用的那一层）。
+ *  executor-panel 的 requests/settings/api 三处经此取兜底——四根一词表，禁再各算一份。 */
+export function instanceProjectsRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(instanceSandbarRoot(env), 'projects')
+}
+
+/** 配置根目录（测试缝：SANDBAR_WATCHDOG_DIR 优先；缺省=实例 projects 根，见
+ *  instanceSandbarRoot——t261003-04 前缺省恒为 ~/.sandbar/projects，生产形态不变）。
  *  同一根也是项目注册表根（<key>/project.yaml）——守望者的声明与注册表同住。 */
 export function watchdogConfigDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.SANDBAR_WATCHDOG_DIR || join(env.HOME || '', '.sandbar', 'projects')
+  return env.SANDBAR_WATCHDOG_DIR || instanceProjectsRoot(env)
 }
 
 /** 数据根目录（心跳 / 告警账 / 执行器会话账都落此根；测试缝：SANDBAR_WATCHDOG_DATA 优先）。
@@ -190,13 +240,14 @@ export function watchdogConfigDir(env: NodeJS.ProcessEnv = process.env): string 
  *  为什么测试没抓住：测试一律注入 SANDBAR_WATCHDOG_DATA（tests/lib.mjs），生产那条兜底
  *  表达式一次都没被执行（注入即绕过）。凡路径/形状，三处一律调本函数，禁再各算一份。 */
 export function watchdogDataDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.SANDBAR_WATCHDOG_DATA || join(env.HOME || '', '.sandbar', 'watchdog')
+  return env.SANDBAR_WATCHDOG_DATA || join(instanceSandbarRoot(env), 'watchdog')
 }
 
 /** 注册表/项目根（t261001-12：与引擎 event_ledger._projects_root 同源同词表）。
- *  SANDBAR_PROJECTS_DIR 覆盖 > ~/.sandbar/projects。 */
+ *  SANDBAR_PROJECTS_DIR 覆盖 > 实例 projects 根（t261003-04：非缺省实例兜底落在
+ *  <DSH_HOME>/sandbar/projects——临时实例不再顺生产兜底读到/写进真注册表根）。 */
 export function projectsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return env.SANDBAR_PROJECTS_DIR || join(env.HOME || '', '.sandbar', 'projects')
+  return env.SANDBAR_PROJECTS_DIR || instanceProjectsRoot(env)
 }
 
 /** 事件账本活动文件路径（t261001-12 跨语言缝）：与引擎 event_ledger.ledger_path

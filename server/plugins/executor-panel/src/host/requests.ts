@@ -15,6 +15,11 @@
 
 import * as fs from 'node:fs'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
+// t261003-04：请求账根兜底走 watchdog 的实例根（instanceProjectsRoot）——非缺省实例
+// （场景/泳道，自带 DSH_HOME）的请求账落 <DSH_HOME>/sandbar/projects，**绝不再顺
+// $HOME 兜底读生产请求账**（真机 261001-261003 实测：临时实例据此把生产执行器判成
+// waiting_on_itself，232 条 redline）。词表一处定，禁再各算一份。
+import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
 
 /**
  * 请求种类：开放词表（设计稿 260927 常见=决定/授权/签字/提问，但引擎事件种类不封口——
@@ -77,9 +82,11 @@ export const fsLedgerIo: LedgerIo = {
   mkdirSync: fs.mkdirSync,
 }
 
-/** 账本文件路径（形状白名单由调用方先过 isValidProjectKey）。 */
+/** 账本文件路径（形状白名单由调用方先过 isValidProjectKey）。
+ *  根 = env SANDBAR_PANEL_DIR > 实例 projects 根（t261003-04：非缺省实例 = <DSH_HOME>/
+ *  sandbar/projects——自锁判定只消费同实例 scope 的请求账，见 instanceProjectsRoot）。 */
 export function requestsLedgerFile(key: string, env: NodeJS.ProcessEnv = process.env): string {
-  const root = env.SANDBAR_PANEL_DIR || join2(env.HOME || '', '.sandbar', 'projects')
+  const root = env.SANDBAR_PANEL_DIR || instanceProjectsRoot(env)
   return join2(root, key, 'requests.jsonl')
 }
 

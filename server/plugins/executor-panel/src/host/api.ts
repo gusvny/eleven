@@ -15,6 +15,7 @@ import {
   fsLedgerIo, type LedgerIo,
 } from './requests.ts'
 import { loadWatchdogConfig } from './settings.ts'
+import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
 import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settings.ts'
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
 import { isOpGranted, provenanceKeys, readDeclaration, saveGrantsDecl, GRANT_OPS, toGrantOp } from './executor-grants.ts'
@@ -243,7 +244,8 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
 
 /** panel 自有项目集（有 requests.jsonl 或 watchdog 声明的项目；「按项目分组」的主列数据源）。 */
 export function allPanelProjects(env: NodeJS.ProcessEnv): string[] {
-  const root = env.SANDBAR_PANEL_DIR || join(env.HOME || '', '.sandbar', 'projects')
+  // t261003-04：兜底走实例 projects 根（非缺省实例 = <DSH_HOME>/sandbar/projects）。
+  const root = env.SANDBAR_PANEL_DIR || instanceProjectsRoot(env)
   try {
     return readdirSync(root, { withFileTypes: true })
       .filter(d => d.isDirectory() && PROJECT_KEY_RE.test(d.name))

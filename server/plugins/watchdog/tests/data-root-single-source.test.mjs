@@ -20,12 +20,19 @@ const home = mkdtempSync(join(tmpdir(), 'wd-data-root-'))
 const NOW = 1_700_000_000_000
 const savedHome = process.env.HOME
 const savedData = process.env.SANDBAR_WATCHDOG_DATA
+// t261003-04 打回修（merge 人审Gate）：实例形态由 HOME **与** DSH_HOME 共同决定
+// （config.isDefaultInstance）。本用例构造「只有 HOME」的生产形态时必须把环境里的
+// DSH_HOME 一并钉住（清掉）——否则套件跑在真会话（DSH_HOME 恒设）里时，实例被判成
+// 非缺省、根落到 <DSH_HOME>/sandbar/…（真机实测写到 ~/.dsh/sandbar 下）= 用例自红
+// 且往真用户树里写。自夹具纪律：环境缝自己封，不赌外部 env。finally 里逐项还原。
+const savedDshHome = process.env.DSH_HOME
 const writes = []
 
 try {
-  // —— 生产形态：只有 HOME、没有 SANDBAR_WATCHDOG_DATA；构造时不传 dataDir / configDirEnv ——
+  // —— 生产形态：只有 HOME、没有 SANDBAR_WATCHDOG_DATA / DSH_HOME；构造时不传 dataDir / configDirEnv ——
   process.env.HOME = home
   delete process.env.SANDBAR_WATCHDOG_DATA
+  delete process.env.DSH_HOME
 
   const io = {
     tail: { stat: async () => ({ size: 0, ino: 1 }), read: async () => '', listArchives: async () => [] },
@@ -62,6 +69,9 @@ try {
   const expected = join(root, `${project}.heartbeat.json`)
   assert(writes.includes(expected), '写侧落在单一真源（watchdogDataDir）推出的心跳路径上：' + expected)
   assert(writes.every((p) => p.startsWith(root)), '每一次写都落在同一数据根下（旧病灶=相对路径 .sandbar/watchdog 落仓根）')
+  // t261003-04 打回修：数据根必须落在本用例的临时 HOME 下——环境缝钉住后，任何
+  // ambient DSH_HOME 都不得把根拽去真用户树（真机回归=写到 ~/.dsh/sandbar 下）。
+  assert(writes.every((p) => p.startsWith(home)), '每一次写都落在临时 HOME 内（ambient DSH_HOME 不串根）')
 
   // 读侧 = 面板/状态接口同款（readHeartbeatFile + 同一表达式推出的路径）。
   const hb = await readHeartbeatFile(defaultIo, expected, NOW + 500)
@@ -71,6 +81,7 @@ try {
 } finally {
   if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome
   if (savedData === undefined) delete process.env.SANDBAR_WATCHDOG_DATA; else process.env.SANDBAR_WATCHDOG_DATA = savedData
+  if (savedDshHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = savedDshHome
   rmSync(home, { recursive: true, force: true })
 }
 

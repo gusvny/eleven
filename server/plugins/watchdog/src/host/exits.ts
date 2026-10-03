@@ -15,9 +15,36 @@
 import type { LedgerRow } from './ledger-tail.ts'
 import type { AlertSpec } from './alert-rules.ts'
 
-/** 值得唤醒的行：状态迁移类（带 stage/stage_state 的行）。纯 kind 行（如 engine 维护）不醒。 */
+/** 值得唤醒的行：状态迁移类（带 stage/stage_state 的行）。纯 kind 行（如 engine 维护）不醒。
+ *
+ * t261003-04 缺陷 B：零发现的周期巡检行（dispatcher scan / inspection dedup 回执）
+ * 也带 stage/stage_state，旧判定让它们把执行器白白叫醒——真机 261002 实测 17.4% 的
+ * 项目账行是 dispatcher-scan、全部 '0 tickets, 0 pending'、全部投递了 wake（15 秒一簇
+ * 的空醒）。行**留在审计账里**（本函数只影响 wake 门，不碰账本），只是不再值醒；
+ * 真迁移（任何真实 stage/stage_state 推进）照醒。 */
 export function worthWaking(row: LedgerRow): boolean {
-  return Boolean(row.stage || row.stage_state)
+  if (!Boolean(row.stage || row.stage_state)) return false
+  return !isZeroFindingPeriodicRow(row)
+}
+
+/** 零发现周期行识别（纯函数，只压「确认零发现」的行——判不出零发现就照旧醒，保守
+ *  不静默吞掉真信号）：
+ *  - dispatcher scan 收尾行（workflows.py DispatcherScanWorkflow `_ledger_note('scan',
+ *    'done', 'Scan report: N tickets, M pending (...)')`）：tickets 与 pending **都为 0**
+ *    才算零发现；有票/有待决 = 有真内容，照醒；
+ *  - inspection spawn dedup 回执（inspection_flow.py `spawn/done`，reason 带
+ *    `deduped=true`）：本期没起新票（去重复用旧票），对执行器零增量——不值醒；
+ *    `deduped=false`（真起了票）照醒——新票自己的迁移随后也会醒，不靠这行。 */
+export function isZeroFindingPeriodicRow(row: LedgerRow): boolean {
+  const reason = row.reason ?? ''
+  if (row.stage === 'scan') {
+    const m = /(\d+) tickets, (\d+) pending/.exec(reason)
+    return m !== null && m[1] === '0' && m[2] === '0'
+  }
+  if (row.stage === 'spawn') {
+    return /\bdeduped=true\b/.test(reason)
+  }
+  return false
 }
 
 /** steer 仅红线急停；本票的 wake 恒为 queue（红线急停面留给后续票接真源时启用）。 */

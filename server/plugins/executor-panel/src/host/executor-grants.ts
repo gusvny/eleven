@@ -26,6 +26,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { malformedProjectMessage } from './project-key.ts'
+import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
 
 /** 引擎固定授予操作面（真源=引擎 executor_grants.GRANT_OPS / 设计稿决定 10 词表；
  *  面板历史显示名 'reject' = 声明键 'send-back' 的别名，DISPLAY_ALIAS 双向映射）。 */
@@ -60,13 +61,14 @@ export interface GrantsDecl {
 }
 
 /**
- * 声明根（与引擎 perkey_projects_root 同根：生产形态两个 env 都缺席 →
- * ~/.sandbar/projects）。注入优先级仅服务隔离台测试（watchdog/panel 测试惯例
- * 已注入各自 env）：SANDBAR_PROJECTS_DIR（引擎注册表根语义）> SANDBAR_WATCHDOG_DIR
- * > SANDBAR_PANEL_DIR > 缺省 ~/.sandbar/projects。 */
+ * 声明根（与引擎 perkey_projects_root 同根）。注入优先级仅服务隔离台测试
+ * （watchdog/panel 测试惯例已注入各自 env）：SANDBAR_PROJECTS_DIR（引擎注册表根语义）
+ * > SANDBAR_WATCHDOG_DIR > SANDBAR_PANEL_DIR > 实例 projects 根。
+ * t261003-04：兜底改走 instanceProjectsRoot——非缺省实例（自带 DSH_HOME 的场景/泳道台）
+ * = <DSH_HOME>/sandbar/projects，生产形态（无 DSH_HOME）仍是 ~/.sandbar/projects 逐字节不变。 */
 export function grantsConfigDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.SANDBAR_PROJECTS_DIR || env.SANDBAR_WATCHDOG_DIR || env.SANDBAR_PANEL_DIR
-    || join(env.HOME || '', '.sandbar', 'projects')
+    || instanceProjectsRoot(env)
 }
 
 export function declarationPath(key: string, env: NodeJS.ProcessEnv = process.env): string {
