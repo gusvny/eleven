@@ -68,12 +68,43 @@ def register_tmp_path(path, label: str = "") -> Path:
     return p
 
 
+def _block_terminate_signals():
+    """铸目/登记窗口期屏蔽 SIGINT/SIGTERM（与引擎侧 `_tmp_reclaim` 同纪律、同理由）。
+
+    `mkdtemp` 返回到 `register` 入册之间的无保护窗口里落的信号，会让目录「已落盘、
+    未在册」，退出面（atexit / `install_signal_reclaim` / 显式 `reclaim_registered`）
+    全都看不见它——间歇泄漏（t261003 验收走查实测）。屏蔽后信号推迟到入册后才送达，
+    处置语义逐字不变；`pthread_sigmask` 缺席/被拒时回落旧形态。
+    """
+    sigs = tuple(s for s in (getattr(signal, "SIGINT", None),
+                             getattr(signal, "SIGTERM", None)) if s is not None)
+    if not sigs or not hasattr(signal, "pthread_sigmask"):
+        return None
+    try:
+        signal.pthread_sigmask(signal.SIG_BLOCK, sigs)
+        return sigs
+    except (OSError, ValueError):
+        return None
+
+
 def mkdtemp_reclaimed(prefix: str, root: str = None) -> Path:
     """`tempfile.mkdtemp` 的回收版：建目录 + 登记 + 本进程退出时必被回收。返回 `Path`。
 
     入册在**创建成功之后**——`mkdtemp` 抛异常时不留半条注册。
+    铸目+登记全程屏蔽 SIGINT/SIGTERM（见 `_block_terminate_signals`）：信号落在窗口内
+    也推迟到登记后才送达，KeyboardInterrupt 照常走，目录已在册、退出面必收。
     """
-    return register_tmp_path(Path(tempfile.mkdtemp(prefix=prefix, dir=root)))
+    blocked = _block_terminate_signals()
+    try:
+        p = register_tmp_path(Path(tempfile.mkdtemp(prefix=prefix, dir=root)))
+    finally:
+        sigs = blocked
+        if sigs:
+            try:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, sigs)
+            except (OSError, ValueError):
+                pass
+    return p
 
 
 def live_tmp_paths() -> list:

@@ -20,6 +20,8 @@ import tempfile
 
 import pytest
 
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （夹具注册表+atexit 回收，t261002-13）
+
 import shared
 import project_templates as pt
 
@@ -75,7 +77,7 @@ def _restore_shared_tables():
 
 @pytest.fixture()
 def empty_root():
-    return pathlib.Path(tempfile.mkdtemp(prefix="t260924-04-"))
+    return mkdtemp_reclaimed("t260924-04-")
 
 
 def _names(root):

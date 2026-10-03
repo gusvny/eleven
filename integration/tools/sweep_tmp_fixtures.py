@@ -91,7 +91,6 @@ TMP_FIXTURE_PREFIXES = (
     "t26090704-lock",         #  3,251  245h  integration/t260907-04/sc_dispatcher_lock_fallback.py:35
     "t260904-18-mg",          #  3,257  245h  integration/t260904-18/lib_t260904_18.py:153
     "t260910-10-",            #  5,785  346h  integration/t260910-10/{sc_docs_project_anchor.mjs:111, sc_docs_ui_mock_v1.mjs:121-122}
-    "t260908-02-ut",          #  2,119  245h  server/engine/tests/test_t260908_02_payload_roundtrip.py:55
     "t090506-",               #  3,230  346h  integration/t260905-06/sc_doc_{read_through,entry_present}.mjs
     "t260904-13-itest",       #  1,900  245h  integration/t260904-13/lib_ki044.py:47
     "sandbar-t26091202-",     #     35  321h  integration/t260912-02/lib_lifecycle_case.py:564（目录 + 文件混族）
@@ -99,6 +98,21 @@ TMP_FIXTURE_PREFIXES = (
     "sandbar-reg-",           #  1,529  305h  server/plugins/workbench/tests/registry-loader.mjs:47（JS 侧，零回收动词）
     "t260915-10-",            #  2,204  285h  integration/t260915-10/sc_docs_follow_project.mjs:87-88
     "t26092404-",             #  2,123   64h  integration/t260924-04/sc_project_template_{journey,gate}.py
+    # ---- 第三批（t261002-13 增补：t* 直方图 top 族的白名单缺口——逐条 = 命中数 / 生产者 file:line）----
+    "t260924-04-",            # 10,037  server/engine/tests/test_t260924_04_project_templates.py:78（261002-13 已修；
+                              #               巡检套件日跑，10k 存量主要来自它——261002 普查时误并入 t26092404- 桶）
+    # ---- 第三批续（t261002-13：短前缀尾族——生产者已点名；workbench .mjs 在写集外，清扫器兜底）----
+    "t01-",                   #  1,928  integration/t260902-02/t01_archive_paths.py:67（261002-13 已修）
+    "t02-sb-",                #  1,157  integration/t260902-02/sc_t02_archive_ticket.py:50（261002-13 已修）
+    "t03-",                   #  2,323  integration/t260902-02/sc_t03_merge_teardown.py:95（tag 变体 -old/-defer；261002-13 已修）
+    "t04-sb-",                #  1,157  integration/t260902-02/sc_t04_prune_archive_legacy.py:87（261002-13 已修）
+    "t08-guard-",             #  1,982  integration/t260905-08/sc_wb_contrast_guard.mjs（.mjs freshDir，写集外→清扫器兜底）
+    "t09-",                   #  3,492  server/plugins/workbench/tests/*.mjs freshDir（t09-{bump,donut,fast,kpi,pri}；写集外→清扫器兜底）
+    "t25-t03-",               #  1,130  integration/t260901-25/t03_reap_process_group.py:122（261002-13 已修）
+    "t26092523-",             #  4,599  integration/t260925-23/tests/sc_template_pathgate_{load_contract.py:134-189,faces.py:48}（261002-13 已修：mkdtemp_reclaimed）
+    "t260901-14-",            #  3,477  server/engine/tests/test_t260901_14_registry_loader.py:34-65（261002-13 已修：mkdtemp_reclaimed）
+    "t260908-02-",            #  1,982  server/engine/tests/test_t260908_02_payload_roundtrip.py:55/:66（261002-13 已修；
+                              #               原 "t260908-02-ut" 盖不住同文件 :67 的 -sg 变体——实测 653 条只因变体漏网）
     "t26091004-sc-",          #      3  4.6h  integration/t260910-04/sc_console_paused_list.mjs:200（**261001 载体风暴的巢**：
                               #               场景被 900s 执行器帽杀 → `finally` 的 rmSync 没跑 → 树 + 台内后代进程
                               #               一起活过收口；2.5h 后那片冻结代码（克隆自修前的 main）重跑闸，
@@ -116,7 +130,7 @@ TMP_FIXTURE_PREFIXES = (
 BATCH2_MERGED_PREFIXES = (
     "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
     "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
-    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t260908-02-ut", "t090506-",
+    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t090506-",
     "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
     "t260915-10-", "t26092404-", "t260923-", "t260925-", "t260922-", "t260921-",
     "t260916-", "t260917-", "t260918-", "t260919-", "t260920-",
@@ -354,10 +368,17 @@ def live_carriers(root: str, entries):
     pids, err = _all_pids()
     if err or not pids:
         return {}, (err or "pgrep returned no pids (unexpected on a live machine)")
+    # 两侧都按 realpath 归一后再比（t261002-13 仲裁实锤的失真点）：`--root` 是调用方
+    # 给的字面路径（macOS 上 `tempfile.gettempdir()` 给 `/var/folders/...`），而 pid cwd
+    # 报的是**已解析**路径（`/private/var/folders/...`）——字面对字面永远比不中，
+    # 「活载体保留」这条安全轨就在 symlinked temp 根下整条失效（而且静默失效）。
+    # 归一用 `realpath`：两侧同一种解析，`/var/...` 与 `/private/var/...` 折到同一条真路径；
+    # 不存在的条目 realpath 也能给出规范化形态（cwd 不可能落在不存在的目录里，无误伤）。
     dirs = {}
+    root_real = os.path.realpath(root)
     for e in entries:
         if e.kind == "dir":
-            dirs[os.path.join(root, e.name).rstrip("/") + os.sep] = e.name
+            dirs[os.path.realpath(os.path.join(root_real, e.name)).rstrip("/") + os.sep] = e.name
     if not dirs:
         return {}, None
     hits = {}
@@ -365,8 +386,9 @@ def live_carriers(root: str, entries):
         cwd = _pid_cwd(pid)
         if not cwd:
             continue
+        cwd_real = os.path.realpath(cwd)
         for prefix_path, name in dirs.items():
-            if cwd == prefix_path[:-1] or cwd.startswith(prefix_path):
+            if cwd_real == prefix_path[:-1] or cwd_real.startswith(prefix_path):
                 hits.setdefault(name, []).append(pid)
                 break
     return hits, None

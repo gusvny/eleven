@@ -19,6 +19,10 @@ import tempfile
 import types
 from pathlib import Path
 
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit，t261002-13）
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 POC = REPO / "server" / "engine"
@@ -47,7 +51,7 @@ from shared import ArchiveArgs  # noqa: E402
 import agent_activities as aa  # noqa: E402
 
 PASS = FAIL = ENV_FAIL = 0  # 三态契约：0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）
-ROOT = tempfile.mkdtemp(prefix="t02-sb-")
+ROOT = str(mkdtemp_reclaimed("t02-sb-"))
 
 
 def ok(cond, label):
@@ -61,7 +65,7 @@ def ok(cond, label):
 
 
 def make_lane(with_suyou=True, with_dsh=True):
-    lane = Path(tempfile.mkdtemp(prefix="t02-lane-"))
+    lane = mkdtemp_reclaimed("t02-lane-")
     if with_suyou:
         (lane / ".suyou" / "screenshots" / "sub").mkdir(parents=True)  # naming-compat
         (lane / ".suyou" / "stage_create_plan_gen0.json").write_text(  # naming-compat

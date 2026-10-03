@@ -15,6 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （夹具注册表+atexit 回收）
+
 import shared  # noqa: E402
 
 
@@ -30,8 +33,7 @@ _GOOD = "schema: v1\nproject:\n  - key: %s\n    name: n\n    dirs:\n      - /tmp
 
 class RegistryLoaderLegacyIntent(unittest.TestCase):
     def test_legacy_env_mode(self):
-        import tempfile
-        tmp = tempfile.mkdtemp(prefix="t260901-14-r-")
+        tmp = str(mkdtemp_reclaimed("t260901-14-r-"))
         legacy = os.path.join(tmp, "projects.yaml")
         with open(legacy, "w", encoding="utf-8") as f:
             f.write("projects:\n  - key: legacy\n    name: 旧档\n    dirs:\n      - /tmp/legacy\n")
@@ -44,8 +46,7 @@ class RegistryLoaderLegacyIntent(unittest.TestCase):
             del os.environ["SANDBAR_PROJECTS_YAML"]
 
     def test_per_key_scan_and_quarantine(self):
-        import tempfile
-        tmp = tempfile.mkdtemp(prefix="t260901-14-p-")
+        tmp = str(mkdtemp_reclaimed("t260901-14-p-"))
         _mk(tmp, "good-one", _GOOD % ("good-one", "g"))
         _mk(tmp, "sick-one", "schema: v1\nproject:\n  - key: sick-one\n    name: n\n    dirs:\n      - /tmp/s\nxxx-bad-line: 1\n")
         os.environ["SANDBAR_PROJECTS_DIR"] = tmp
@@ -61,8 +62,7 @@ class RegistryLoaderLegacyIntent(unittest.TestCase):
             del os.environ["SANDBAR_PROJECTS_DIR"]
 
     def test_unknown_and_empty(self):
-        import tempfile
-        tmp = tempfile.mkdtemp(prefix="t260901-14-u-")
+        tmp = str(mkdtemp_reclaimed("t260901-14-u-"))
         _mk(tmp, "only", _GOOD % ("only", "o"))
         os.environ["SANDBAR_PROJECTS_DIR"] = tmp
         try:

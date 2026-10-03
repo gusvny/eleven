@@ -36,6 +36,8 @@ sys.modules.setdefault("temporalio.activity", _amod)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server" / "engine"))
 import agent_activities as aa  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 FAILS = []
 
@@ -50,7 +52,7 @@ class Env:
     """tmp env 桩：with 块内 SANDBAR_PROJECTS_DIR/DSH_HOME/HOME 指向临时目录。"""
 
     def __init__(self):
-        self.tmp = tempfile.mkdtemp(prefix="t260901-21-t01-")
+        self.tmp = str(mkdtemp_reclaimed("t260901-21-t01-"))
         self.root = os.path.join(self.tmp, "projects")
         self.dsh = os.path.join(self.tmp, "dsh")
         self.home = os.path.join(self.tmp, "home")

@@ -32,7 +32,9 @@ B2-B7 实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须
 import pathlib
 import shutil
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 _ok = _fail = 0
 
@@ -131,44 +133,44 @@ def main():
 
     # ---- B8 基线：不声明 PATH_GATE → 接受、零行为变化（现状即绿） ----
     section("B8 不声明 PATH_GATE → 照常接受（KI-124 回落基线，现状即绿）")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b8-"))
+    root = mkdtemp_reclaimed("t26092523-load-b8-")
     case(shared, root, "b8", rules=None, expect_reject=False,
          label="无声明模板被接受")
 
     # ---- B1 合法声明 → 接受 ----
     section("B1 合法声明（键⊆STAGES、kind 合法、prefixes 带表）→ 接受")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b1-"))
+    root = mkdtemp_reclaimed("t26092523-load-b1-")
     case(shared, root, "b1",
          rules={"s1": {"kind": "result_files"}, "s2": {"kind": "prefixes", "prefixes": ("reports",)}},
          expect_reject=False, label="合法声明模板被接受")
 
     # ---- B2 键 ∉ STAGES ids → 拒收点名 ----
     section("B2 规则键不在 STAGES ids → 拒收点名双方")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b2-"))
+    root = mkdtemp_reclaimed("t26092523-load-b2-")
     case(shared, root, "b2", rules={"ghost_stage": {"kind": "result_files"}},
          expect_reject=True, label="越键声明")
 
     # ---- B3 kind 非法 → 拒收 ----
     section("B3 kind 不在词表 → 拒收点名")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b3-"))
+    root = mkdtemp_reclaimed("t26092523-load-b3-")
     case(shared, root, "b3", rules={"s1": {"kind": "no_such_kind"}},
          expect_reject=True, label="非法 kind")
 
     # ---- B4 prefixes 缺前缀表 → 拒收 ----
     section("B4 prefixes kind 缺 prefixes 表 → 拒收点名")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b4-"))
+    root = mkdtemp_reclaimed("t26092523-load-b4-")
     case(shared, root, "b4", rules={"s1": {"kind": "prefixes"}},
          expect_reject=True, label="prefixes 缺表")
 
     # ---- B5 RULES 有而 PATH_GATE 非 True（死配置）→ 拒收 ----
     section("B5 声明 RULES 但 PATH_GATE=False（死配置）→ 拒收点名")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b5-"))
+    root = mkdtemp_reclaimed("t26092523-load-b5-")
     case(shared, root, "b5", rules={"s1": {"kind": "result_files"}}, gate=False,
          expect_reject=True, label="死配置")
 
     # ---- B6 RULES 非 dict（畸形）→ 拒收 ----
     section("B6 PATH_GATE_RULES 非 dict → 拒收点名")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b6-"))
+    root = mkdtemp_reclaimed("t26092523-load-b6-")
     pd = root / "proj-x"
     pd.mkdir(parents=True, exist_ok=True)
     (pd / "project.yaml").write_text(
@@ -186,7 +188,7 @@ def main():
 
     # ---- B7 外置模板强 kind（self_heal）→ 拒收（弱面子集收口） ----
     section("B7 外置模板声明强 kind self_heal → 拒收点名（弱面子集）")
-    root = pathlib.Path(tempfile.mkdtemp(prefix="t26092523-load-b7-"))
+    root = mkdtemp_reclaimed("t26092523-load-b7-")
     case(shared, root, "b7", rules={"s1": {"kind": "self_heal"}},
          expect_reject=True, label="强 kind 越面")
 

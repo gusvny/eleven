@@ -23,6 +23,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
+sys.path.insert(0, str(HERE.parent))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 # ---- Python 侧装载（temporalio 桩，同 t01 口径：只挡模块级依赖，不碰被测函数语义） ----
 _tmod = types.ModuleType("temporalio")
@@ -63,7 +65,7 @@ class Env:
     """tmp env 桩：进入时 SANDBAR_PROJECTS_DIR/DSH_HOME/HOME 全指临时目录，退出恢复。"""
 
     def __init__(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="t260901-21-i01-"))
+        self.tmp = mkdtemp_reclaimed("t260901-21-i01-")
         self.root = self.tmp / "projects"
         self.dsh = self.tmp / "dsh"
         self.home = self.tmp / "home"

@@ -15,6 +15,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （夹具注册表+atexit 回收）
 
 import shared  # noqa: E402
 import worker  # noqa: E402
@@ -24,8 +26,7 @@ WORKER_SRC = Path(worker.__file__).read_text(encoding="utf-8")
 
 class MetaRoundTripTest(unittest.TestCase):
     def setUp(self):
-        import tempfile
-        self.tmp = Path(tempfile.mkdtemp(prefix="t260904-02-meta-"))
+        self.tmp = mkdtemp_reclaimed("t260904-02-meta-")
 
     def test_roundtrip(self):
         p = self.tmp / "worker-t1.meta"

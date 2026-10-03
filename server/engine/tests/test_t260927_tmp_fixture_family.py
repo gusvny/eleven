@@ -478,6 +478,13 @@ PRODUCER_PREFIXES = (
     ("t260904-13-itest-", "integration/t260904-13/lib_ki044.py"),
     ("t260904-18-mg-", "integration/t260904-18/lib_t260904_18.py"),
     ("t26092114-", "integration/t260921-14/lib_t26092114.py"),
+    # ---- t261002-13 第三批：t* 直方图 top 族的缺口闸 ----
+    ("t26092523-", "integration/t260925-23/tests/sc_template_pathgate_load_contract.py"),
+    ("t26092523-faces-", "integration/t260925-23/tests/sc_template_pathgate_faces.py"),
+    ("t260901-14-r-", "server/engine/tests/test_t260901_14_registry_loader.py"),
+    ("t260908-02-sg-", "server/engine/tests/test_t260908_02_payload_roundtrip.py"),
+    ("t26092404-probe-", "integration/t260924-04/sc_project_template_gate.py"),
+    ("t260901-21-t01-", "integration/t260901-21/t01_read_side_resolution.py"),
 )
 
 
@@ -496,13 +503,20 @@ def test_e1_producer_prefixes_are_all_covered_by_the_whitelist():
         POC / "tests" / "test_multirepo_root_activity.py").read_text(encoding="utf-8")
     assert 'mkdtemp_reclaimed("venv-compat-home-")' in (
         INTEG / "t260907-10" / "sc_engine_venv_compat.py").read_text(encoding="utf-8")
+    # t261002-13 第三批生产者逐字在场（防「登记了不存在的前缀」同型复发）
+    assert 'mkdtemp_reclaimed("t26092523-load-b1-")' in (
+        INTEG / "t260925-23" / "tests" / "sc_template_pathgate_load_contract.py").read_text(encoding="utf-8")
+    assert 'mkdtemp_reclaimed("t260901-14-r-")' in (
+        POC / "tests" / "test_t260901_14_registry_loader.py").read_text(encoding="utf-8")
+    assert 'mkdtemp_reclaimed("t260908-02-sg-")' in (
+        POC / "tests" / "test_t260908_02_payload_roundtrip.py").read_text(encoding="utf-8")
 
 
 def test_e2_batch2_prefixes_are_really_enabled_and_single_sourced():
     """第二批 28 个前缀**真已启用**（不再有「登记了但没启用」的半态），且两处同源。"""
     assert tuple(sw.TMP_FIXTURE_PREFIXES) == tuple(lw.TMP_FIXTURE_PREFIXES)
     assert set(sw.BATCH2_MERGED_PREFIXES) <= set(sw.TMP_FIXTURE_PREFIXES)
-    assert len(sw.BATCH2_MERGED_PREFIXES) == 28
+    assert len(sw.BATCH2_MERGED_PREFIXES) == 27   # t260908-02-ut 已并入更宽的 t260908-02-（t261002-13 第三批）
     assert not hasattr(sw, "CANDIDATE_PREFIXES_BATCH2")   # 半态常量已退役（只剩白名单）
     # 前缀表里不许有重复（重复=两处判据可能分叉的温床）
     assert len(set(sw.TMP_FIXTURE_PREFIXES)) == len(sw.TMP_FIXTURE_PREFIXES)

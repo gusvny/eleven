@@ -23,6 +23,10 @@ import tempfile
 import types
 from pathlib import Path
 
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit，t261002-13）
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 POC = REPO / "server" / "engine"
@@ -92,7 +96,7 @@ def git(repo, *args):
 
 def make_repo_with_lane(tag):
     """tmp 真 git 仓库：main 一提交 + lane 分支一提交 + worktree 挂出。"""
-    base = Path(tempfile.mkdtemp(prefix="t03-%s-" % tag))
+    base = mkdtemp_reclaimed("t03-%s-" % tag)
     repo = base / "repo"
     repo.mkdir()
     git(repo, "init", "-q", "-b", "main")

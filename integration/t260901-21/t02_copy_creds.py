@@ -13,6 +13,8 @@ import sys
 import tempfile
 import types
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 try:
     import yaml
@@ -69,7 +71,7 @@ def env_fail(name, reason):
 
 class Env:
     def __init__(self):
-        self.tmp = tempfile.mkdtemp(prefix="t260901-21-t02-")
+        self.tmp = str(mkdtemp_reclaimed("t260901-21-t02-"))
         self.root = os.path.join(self.tmp, "projects")
         self.dsh = os.path.join(self.tmp, "dsh")
         self.home = os.path.join(self.tmp, "home")

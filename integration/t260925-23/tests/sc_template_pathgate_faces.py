@@ -29,8 +29,10 @@ import inspect
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 REPO = Path(__file__).resolve().parents[3]
 TICKET = "t260925-23"
@@ -82,7 +84,7 @@ def head(repo):
 
 def mk_lane():
     """tmp 主仓（带本地 git 身份）+ 真注册泳道 worktree → (tmp, main, lane, 分叉sha)。"""
-    tmp = Path(tempfile.mkdtemp(prefix="t26092523-faces-"))
+    tmp = mkdtemp_reclaimed("t26092523-faces-")
     main = tmp / "main"
     main.mkdir()
     for rel, content in BASE.items():

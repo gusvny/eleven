@@ -964,6 +964,7 @@ async def run_inspection_lane_watchdog(args: Dict[str, Any]) -> Dict[str, Any]:
     meta["threshold_note"] = thr_note
     meta["scanned_at"] = now_ts
     meta["tmp_fixture"] = {"dirs": tmp_out["section"]["dirs"],
+                           "top_leakers": tmp_out["section"].get("top_leakers") or [],
                            "oldest_age_h": tmp_out["section"]["oldest_age_h"],
                            "finding_count": tmp_out["section"]["finding_count"],
                            "thresholds": tmp_out["section"]["thresholds"],

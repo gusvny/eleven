@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import atexit
 import shutil
+import signal
 import tempfile
 from pathlib import Path
 
@@ -35,13 +36,48 @@ _LIVE_DIRS: list = []
 REAP_FAILURES: int = 0
 
 
+def _block_terminate_signals():
+    """铸目/入册窗口期屏蔽 SIGINT/SIGTERM（返回是否成功屏蔽，供 finally 解除）。
+
+    为什么：`mkdtemp` 返回到 `append` 入册之间有几条字节的**无保护窗口**——Ctrl-C 的
+    KeyboardInterrupt 若恰落在窗口内，目录已落盘但注册表没有它，退出路径的 atexit
+    就永远看不见它（t261003 验收走查实测 ~1/5 复现率的间歇泄漏）。屏蔽而非装钩子：
+    信号在解除屏蔽时照常送达（KeyboardInterrupt 语义逐字不变），只是必落在**入册之后**
+    ——那时 atexit 兜底已经看得见这个目录。`pthread_sigmask` 缺席（Windows）/被拒时
+    原样回落旧形态（窗口仍在，但与历史行为一致，不新增故障面）。
+    """
+    sigs = tuple(s for s in (getattr(signal, "SIGINT", None),
+                             getattr(signal, "SIGTERM", None)) if s is not None)
+    if not sigs or not hasattr(signal, "pthread_sigmask"):
+        return None
+    try:
+        signal.pthread_sigmask(signal.SIG_BLOCK, sigs)
+        return sigs
+    except (OSError, ValueError):
+        return None
+
+
+def _unblock_terminate_signals(sigs):
+    if sigs:
+        try:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, sigs)
+        except (OSError, ValueError):
+            pass
+
+
 def mkdtemp_reclaimed(prefix: str, root: str = None) -> Path:
     """`mkdtemp` 的回收版：建目录 + 入册 + 本进程退出时必被回收。返回 `Path`。
 
     入册在创建成功之后——`mkdtemp` 抛异常时不留下半条注册（回收面不猜）。
+    铸目+入册全程屏蔽 SIGINT/SIGTERM（见 `_block_terminate_signals`）：信号落在窗口内
+    也会被推迟到入册之后才送达，KeyboardInterrupt 照样抛，但目录已在册、atexit 必收。
     """
-    path = Path(tempfile.mkdtemp(prefix=prefix, dir=root))
-    _LIVE_DIRS.append(path)
+    blocked = _block_terminate_signals()
+    try:
+        path = Path(tempfile.mkdtemp(prefix=prefix, dir=root))
+        _LIVE_DIRS.append(path)
+    finally:
+        _unblock_terminate_signals(blocked)
     return path
 
 

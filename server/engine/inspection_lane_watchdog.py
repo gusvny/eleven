@@ -108,13 +108,42 @@ TMP_FIXTURE_PREFIXES = (
     # ---- 第二批（260927 启用；逐条证据见 integration/tools/sweep_tmp_fixtures.py 的同名表）----
     "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
     "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
-    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t260908-02-ut", "t090506-",
+    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t090506-",
     "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
     "t260915-10-", "t26092404-",
+    "t260924-04-",            # t261002-13 增补（证据见 integration/tools/sweep_tmp_fixtures.py 同名表）
+    "t01-", "t02-sb-", "t03-", "t04-sb-", "t08-guard-", "t09-", "t25-t03-",  # t261002-13 尾族（证据见 sweep_tmp_fixtures 同名表）
+    "t26092523-", "t260901-14-", "t260908-02-",
     "t26091004-sc-",          # 261001 载体风暴的巢（证据见 integration/tools/sweep_tmp_fixtures.py 同名表）
     "t260923-", "t260925-", "t260916-", "t260922-", "t260921-", "t260917-",
     "t260918-", "t260919-", "t260920-",
 )
+
+#: 前缀 → 生产者（t261002-13「回执必须点名到族」）：水位发现里 `top_leakers[].owner`
+#: 的真源。只登记**已核实**的生产者（file:line 证据见 integration/tools/sweep_tmp_fixtures.py
+#: 同名白名单表）；不在这张表里的前缀一律 `owner=unknown`——宁可显式未知，绝不猜。
+TMP_FIXTURE_OWNERS = {
+    "t260904-02-": "server/engine/tests/test_t260904_02_{registry_anchor,worker_meta}.py (fixed 261002-13)",
+    "t260901-21-": "integration/t260901-21/{t01_read_side_resolution,sc_i01_parity_py_vs_mjs,t02_copy_creds}.py (fixed 261002-13)",
+    "t26092404-": "integration/t260924-04/sc_project_template_{gate,ticket_journey}.py (fixed 261002-13)",
+    "t26092523-": "integration/t260925-23/tests/sc_template_pathgate_{load_contract,faces}.py (fixed 261002-13)",
+    "t260901-14-": "server/engine/tests/test_t260901_14_registry_loader.py (fixed 261002-13)",
+    "t260908-02-": "server/engine/tests/test_t260908_02_payload_roundtrip.py (fixed 261002-13)",
+    "t260907-12-act-": "server/engine/tests/test_multirepo_root_activity.py (fixed 260926)",
+    "t260907-12-ch": "server/engine/tests/test_multirepo_root_activity.py (fixed 260926)",
+    "integ-e2e-fixture-": "integration ticket-lifecycle-scenes.mjs fixtures",
+    "pathgate-": "integration/t260911-03 pathgate scenarios",
+    "lease-ut-": "integration stage-lease unit fixtures",
+    # ---- t261002-13 尾族（短前缀；生产者已点名，.mjs 侧在写集外→清扫器兜底）----
+    "t260924-04-": "server/engine/tests/test_t260924_04_project_templates.py:78 (fixed 261002-13)",
+    "t01-": "integration/t260902-02/t01_archive_paths.py:67 (fixed 261002-13)",
+    "t02-sb-": "integration/t260902-02/sc_t02_archive_ticket.py:50 (fixed 261002-13)",
+    "t03-": "integration/t260902-02/sc_t03_merge_teardown.py:95 (fixed 261002-13)",
+    "t04-sb-": "integration/t260902-02/sc_t04_prune_archive_legacy.py:87 (fixed 261002-13)",
+    "t08-guard-": "integration/t260905-08/sc_wb_contrast_guard.mjs (sweep-only: .mjs out of dev write set)",
+    "t09-": "server/plugins/workbench/tests/*.mjs freshDir (sweep-only: out of dev write set)",
+    "t25-t03-": "integration/t260901-25/t03_reap_process_group.py:122 (fixed 261002-13)",
+}
 
 #: 模块缺省阈值（真源；声明侧同名键可覆盖）。rerun_rounds 缺省 3 = 抓得住今天这种
 #: 「同一票 5 轮 × ~2h 全量」的形态；两道时间阈值单位=分钟。
@@ -769,6 +798,22 @@ def tmp_fixture_prefix_text(facts: Dict[str, Any], cap: int = PREFIX_LIST_CAP) -
     return text
 
 
+def tmp_fixture_top_leakers(facts: Any, cap: int = 5) -> List[Dict[str, Any]]:
+    """水位事实 → top 泄漏族（纯函数；t261002-13「点名到族，不给光秃秃的数」）。
+
+    按 `by_prefix` 命中数降序取前 `cap` 族；owner 查 `TMP_FIXTURE_OWNERS`，查不到的
+    显式 `unknown`（绝不猜）。畸形 facts 不抛，返回空表（消费方照常渲染零发现）。
+    """
+    by = facts.get("by_prefix") if isinstance(facts, dict) else None
+    if not isinstance(by, dict):
+        return []
+    ranked = sorted(((p, c) for p, c in by.items() if isinstance(c, int) and c > 0),
+                    key=lambda kv: (-kv[1], kv[0]))
+    return [{"prefix": p, "dirs": c,
+             "owner": TMP_FIXTURE_OWNERS.get(p, "unknown")}
+            for p, c in ranked[:max(1, int(cap))]]
+
+
 def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[Dict[str, Any]]:
     """水位判定（纯函数）→ 命中族列表（0 或 1 条：这是**宿主级**面，不按票聚合）。
 
@@ -807,6 +852,10 @@ def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[
                    (facts.get("oldest_name") or "?")[:80],
                    per or "none", int(facts.get("entries_seen") or 0),
                    int(facts.get("untouched") or 0), where))
+    _top = tmp_fixture_top_leakers(facts)
+    if _top:
+        evidence += " | top leakers (name the family, not a number): %s" % "; ".join(
+            "%s x%d owner=%s" % (t["prefix"], t["dirs"], t["owner"]) for t in _top)
     if facts.get("age_unknown"):
         evidence += " | age unknown for some entries (not judged on age)"
     if facts.get("truncated"):
@@ -897,6 +946,7 @@ def tmp_fixture_section(facts: Any, findings: Any, thresholds: Any, *, source: s
         "root": str(fct.get("root") or ""),
         "dirs": int(fct.get("dirs") or 0),
         "by_prefix": dict(fct.get("by_prefix") or {}),
+        "top_leakers": tmp_fixture_top_leakers(fct),
         "oldest_age_h": float(fct.get("oldest_age_h") or 0.0),
         "oldest_name": str(fct.get("oldest_name") or ""),
         "entries_seen": int(fct.get("entries_seen") or 0),

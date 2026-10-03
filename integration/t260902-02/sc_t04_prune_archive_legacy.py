@@ -20,6 +20,10 @@ import tempfile
 import types
 from pathlib import Path
 
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit，t261002-13）
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 POC = REPO / "server" / "engine"
@@ -84,7 +88,7 @@ sys.path.insert(0, str(POC))
 import client  # noqa: E402
 
 PASS = FAIL = ENV_FAIL = 0  # 三态契约：0=PASS、1=FAIL（产品红）、2=ENV_FAIL（环境红）
-ROOT = tempfile.mkdtemp(prefix="t04-sb-")
+ROOT = str(mkdtemp_reclaimed("t04-sb-"))
 
 
 def ok(cond, label):

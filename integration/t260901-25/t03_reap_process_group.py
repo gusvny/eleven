@@ -25,6 +25,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit，t261002-13）
 from typing import Any, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
@@ -119,7 +123,7 @@ def main():
     ok(True, "_reap_agent_proc 抽取成功")
 
     import tempfile
-    tmp = Path(tempfile.mkdtemp(prefix="t25-t03-"))
+    tmp = mkdtemp_reclaimed("t25-t03-")
     late_file = tmp / "late-write.txt"
     late_file.write_text("", encoding="utf-8")
 

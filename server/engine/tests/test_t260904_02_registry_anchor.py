@@ -19,6 +19,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （夹具注册表+atexit 回收）
 
 import client  # noqa: E402
 import shared  # noqa: E402
@@ -60,8 +62,7 @@ class _Env:
 
 class LoaderTest(unittest.TestCase):
     def setUp(self):
-        import tempfile
-        self.tmp = tempfile.mkdtemp(prefix="t260904-02-reg-")
+        self.tmp = str(mkdtemp_reclaimed("t260904-02-reg-"))
 
     def test_per_key_good(self):
         home = os.path.join(self.tmp, "proj-home")
@@ -142,8 +143,7 @@ class LoaderTest(unittest.TestCase):
 
 class LookupTest(unittest.TestCase):
     def setUp(self):
-        import tempfile
-        self.tmp = tempfile.mkdtemp(prefix="t260904-02-lkp-")
+        self.tmp = str(mkdtemp_reclaimed("t260904-02-lkp-"))
         self.home = os.path.join(self.tmp, "proj-home")
         os.makedirs(self.home)
         _mk_registry(self.tmp, "bench-anchor", "锚定项目", [self.home])
@@ -215,8 +215,7 @@ class TicketStartGateTest(unittest.TestCase):
     拒收子用例在 connect 之前就返回，成功子用例断言 TicketInput 落参）。"""
 
     def setUp(self):
-        import tempfile
-        self.tmp = tempfile.mkdtemp(prefix="t260904-02-gate-")
+        self.tmp = str(mkdtemp_reclaimed("t260904-02-gate-"))
         self.home = os.path.join(self.tmp, "anchor-home")
         os.makedirs(os.path.join(self.home, ".lane"))
         _mk_registry(os.path.join(self.tmp, "reg"), "bench-anchor", "锚定项目", [self.home])

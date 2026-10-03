@@ -18,15 +18,16 @@ workflow 启动失败。t260907-06 族 UT 只夹具直调 prepare_workspace，�
 import asyncio
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 POC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(POC))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest  # noqa: E402
 import shared  # noqa: E402
 from shared import TicketInput, WorkspacePrep  # noqa: E402
+from _tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （夹具注册表+atexit 回收）
 from temporalio.converter import DataConverter  # noqa: E402
 
 
@@ -52,7 +53,7 @@ def _init_repo(path, commit=True):
 @pytest.fixture
 def mixedrepo():
     """混合形态夹具（dengzhufpv 形态，t260907-12 起）：根=git 仓且有子仓。"""
-    root = Path(tempfile.mkdtemp(prefix="t260908-02-ut-"))
+    root = mkdtemp_reclaimed("t260908-02-ut-")
     _init_repo(root)  # 根仓
     a = _init_repo(root / "repo_a")
     (a / "src").mkdir()
@@ -62,7 +63,7 @@ def mixedrepo():
 
 @pytest.fixture
 def singlerepo():
-    root = Path(tempfile.mkdtemp(prefix="t260908-02-sg-"))
+    root = mkdtemp_reclaimed("t260908-02-sg-")
     _init_repo(root)
     yield root
 

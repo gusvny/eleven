@@ -42,6 +42,8 @@ ENGINE = os.path.join(REPO, "server", "engine")
 sys.path.insert(0, os.path.join(INTEG, "t260904-02"))
 from lib_gate import (Fail, parse_out_json, poc_python, require_bench,  # noqa: E402
                       require_stage, run_poc_client, stage_down)
+sys.path.insert(0, INTEG)
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORKFLOW")
 EXT_ID = "journey-two-step"
@@ -195,7 +197,7 @@ def main():
     fail = Fail("t260924-04 场景②：外置模板建票全链＋续跑＋建票拒收面")
     bench = require_bench(fail)
     py = poc_python(bench)
-    G["tmp"] = tempfile.mkdtemp(prefix="t26092404-journey-")
+    G["tmp"] = str(mkdtemp_reclaimed("t26092404-journey-"))
     stage_mod = None
     workers = []
     _sfx = str(int(time.time()) % 100000)  # 票 id 唯一尾：桩脑结果文件幂等，跨轮复用=秒完假象

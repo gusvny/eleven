@@ -39,6 +39,8 @@ INTEG = os.path.dirname(HERE)
 REPO = os.path.dirname(INTEG)
 sys.path.insert(0, os.path.join(INTEG, "t260904-02"))
 from lib_gate import Fail, poc_python, require_bench  # noqa: E402
+sys.path.insert(0, INTEG)
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
 
 ENGINE = os.path.join(REPO, "server", "engine")
 LOAD_DOC = os.path.join(REPO, "docs", "design", "project-external-workflow-template-loader-v1.md")
@@ -181,7 +183,7 @@ def run_probe(py, registry, full=False, fixture_env=False):
         env["PROBE_FULL"] = "1"
     if fixture_env:
         env["SANDBAR_FIXTURE_TEMPLATES"] = "1"
-    probe = os.path.join(tempfile.mkdtemp(prefix="t26092404-probe-"), "probe.py")
+    probe = os.path.join(str(mkdtemp_reclaimed("t26092404-probe-")), "probe.py")
     with open(probe, "w", encoding="utf-8") as f:
         f.write(PROBE)
     p = subprocess.run([py, probe], env=env, cwd=REPO,
@@ -204,7 +206,7 @@ def main():
     fail = Fail("t260924-04 场景①：项目外置模板登记即加载＋逐模板隔离拒收")
     bench = require_bench(fail)
     py = poc_python(bench)
-    tmp = tempfile.mkdtemp(prefix="t26092404-gate-")
+    tmp = str(mkdtemp_reclaimed("t26092404-gate-"))
 
     # ---- 探针环境可用性（temporalio 缺=ENV_FAIL exit 2，绝不 exit 0 假绿）----
     rc, out = run_probe(py, os.path.join(tmp, "empty-registry-probe"), full=True)

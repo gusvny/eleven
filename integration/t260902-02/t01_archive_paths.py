@@ -16,6 +16,10 @@ import tempfile
 import types
 from pathlib import Path
 
+import sys as _s, pathlib as _p
+_s.path.insert(0, str(_p.Path(__file__).resolve().parents[1]))
+from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit，t261002-13）
+
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 POC = REPO / "server" / "engine"
@@ -64,7 +68,7 @@ def main():
 
     # 2) perkey_projects_root env 三分支
     saved = os.environ.get("SANDBAR_PROJECTS_DIR")
-    tmp = tempfile.mkdtemp(prefix="t01-")
+    tmp = str(mkdtemp_reclaimed("t01-"))
     try:
         os.environ["SANDBAR_PROJECTS_DIR"] = tmp
         ok(str(shared.perkey_projects_root()) == tmp, "env 绝对路径被尊重")
