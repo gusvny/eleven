@@ -135,6 +135,9 @@ export interface WatchdogStatus {
   /** t260930-09 additive：按需代建面最近一次结果（null = 未注入代建面）。 */
   executor_session: { session_id: string | null; last_action: string | null; reason: string | null; declared_written: boolean } | null
   wakes: Array<{ at: number; ticket: string; dedupe_key: string; mode: string | null; accepted: boolean | null }>
+  /** t261003-15 additive：最近一拍的唤醒裁决（醒没醒 / 为什么 / 考虑几行）。
+   *  null = 尚未有拍走到唤醒步（守望者未 start 或刚启动）；运行中的拍不留空。 */
+  last_wake_verdict: { at: number; woke: boolean; reason: string; considered: number; presumed_self: number } | null
   alerts: Array<Record<string, unknown>>
   notify: { beep: boolean; unseen_redline: number }
   last_error: string | null
@@ -172,6 +175,8 @@ export class Watchdog {
   private liveness: ExecutorLiveness | null = null
   private startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number } = { missing_rows: null, replayed_rows: null, dedupe_keys: 0 }
   private wakes: WatchdogStatus['wakes'] = []
+  /** 最近一拍唤醒裁决（t261003-15）：每条拍路径都显式落（见 tick 内 wake 步注释）。 */
+  private lastWakeVerdict: WatchdogStatus['last_wake_verdict'] = null
   /** 自醒排除记忆（t260929-04）：随实例存活；dispose 即随进程终态。 */
   private wakeMem: WakeMemory = freshWakeMemory()
   private alerts: Array<Record<string, unknown>> = []
@@ -449,10 +454,18 @@ export class Watchdog {
       }
 
       // 出口 (a) wake：值得醒才醒；我们自己的未消化简报不重发；自喂循环排除（WakeMemory）。
-      if (newRows.length > 0 && this.wakeIo) {
+      // t261003-15：本拍唤醒裁决（无论醒不醒）都落 lastWakeVerdict——状态面可答
+      // 「为什么没醒」，不再需要翻 executor 会话日志。每条路径（含无新行/无投递面/
+      // 无会话 id 的跳过拍）都给显式 reason，运行中的拍绝不留空裁决。
+      if (!this.wakeIo) {
+        this.lastWakeVerdict = { at: nowMs, woke: false, reason: '本实例未注入投递面（wakeIo=null）——显式不作为', considered: 0, presumed_self: 0 }
+      } else if (newRows.length === 0) {
+        this.lastWakeVerdict = { at: nowMs, woke: false, reason: '本拍无新账本行', considered: 0, presumed_self: this.wakeMem.presumedSelfRows }
+      } else {
         const level = this.selfLock.state === 'waiting_on_itself' || this.liveness.state === 'stalled' ? 'redline' : 'info'
         const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, newRows, this.selfLock.target, level, this.wakeMem)
         if (this.aborted) return
+        this.lastWakeVerdict = { at: nowMs, woke: r.woke, reason: r.reason, considered: r.considered ?? 0, presumed_self: r.presumedSelf ?? this.wakeMem.presumedSelfRows }
         if (r.woke) {
           this.wakes.push({ at: nowMs, ticket: newRows[newRows.length - 1].ticket, dedupe_key: makeKey('wake', sid), mode: r.mode, accepted: r.accepted })
           if (this.wakes.length > 100) this.wakes.splice(0, this.wakes.length - 100)
@@ -509,6 +522,7 @@ export class Watchdog {
       queue_mirror: this.wakeIo?.transportState?.() ?? null,
       executor_session: this.ensureState,
       wakes: this.wakes.slice(-20),
+      last_wake_verdict: this.lastWakeVerdict,
       alerts: this.alerts.slice(-50),
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },
       last_error: this.lastError,

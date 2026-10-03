@@ -110,20 +110,47 @@ export function freshWakeMemory(): WakeMemory {
   return { briefed: new Map(), fresh: new Map(), lastRequestId: null, presumedSelfRows: 0, presumedSelfDetail: null }
 }
 
+/**
+ * 决策态集合（t261003-15）：进入这些 stage_state 的迁移**无条件醒**——旁路 idem 规则
+ * （①）与疑似自规则（②）。取词来源（单一真源，禁止另抄第二份清单）：
+ *  - `blocked` / `awaiting-human`：server/tools/ticket.py 的 stage_state 枚举
+ *    （L18/L166：running | awaiting | awaiting-human | blocked）——「等机器重跑」与
+ *    「等人决策」的进度态；
+ *  - `refused`：引擎闸回执 landing='refused'（client.py 门面拒收语义）——防御性纳入，
+ *    引擎哪天把拒收落成账行原词也零漏醒。
+ * 漂移锁：tests/wake-decision-bypass-t261003-15.test.mjs 从引擎源码抽取 _mark /
+ * _ledger_note 的 state 字面量 + ticket.py 枚举，逐词断言分类，未知词即红——引擎
+ * 词表一变本集合必须被自觉更新，不能悄悄漂。
+ * **规则③（上一份简报未消化）对本集合照常生效**：决策态旁路的是 ①②，不旁路 ③——
+ * 对着未消化的队列无条件重发会把自喂循环的门重新打开（t260929-04 的教训）；被 ③
+ * 压下时 verdict reason 点名未消化简报，状态面仍可答「为什么不醒」。
+ * stall / self_lock 不是账本态而是红线 alert 规则（core.ts），它们的拍以
+ * level='redline' 进 wakeExecutor——红线拍同样整体旁路 ①②（见 wakeExecutor）。
+ */
+export const DECISION_STAGE_STATES: ReadonlySet<string> = new Set(['blocked', 'refused', 'awaiting-human'])
+
+/** 决策态行判定（纯函数；无 stage_state 的行不是决策态——判不出就不旁路，保守）。 */
+export function isDecisionRow(row: LedgerRow): boolean {
+  return row.stage_state !== undefined && DECISION_STAGE_STATES.has(row.stage_state)
+}
+
 function stageKeyOf(row: LedgerRow): string {
   return `${row.stage ?? ''}|${row.stage_state ?? ''}`
 }
 
-/** 值醒行 × 自醒排除（纯函数；mem.fresh 原地累积，其余只读）。 */
-export function splitLoopRows(rows: LedgerRow[], mem: WakeMemory): { wakeable: LedgerRow[]; presumed: LedgerRow[] } {
+/** 值醒行 × 自醒排除（纯函数；mem.fresh 原地累积，其余只读）。
+ *  bypass=true（红线拍 / 决策态行）跳过 ① idem 与 ② 疑似自，但保留同窗去重与
+ *  fresh 记账——决策行醒后照样进 briefed，下一拍普通迁移仍受 ② 约束，循环有界不变。 */
+export function splitLoopRows(rows: LedgerRow[], mem: WakeMemory, bypass = false): { wakeable: LedgerRow[]; presumed: LedgerRow[] } {
   const wakeable: LedgerRow[] = []
   const presumed: LedgerRow[] = []
   for (const row of rows) {
     const key = stageKeyOf(row)
+    const force = bypass || isDecisionRow(row)
     const fresh = mem.fresh.get(row.ticket) ?? new Set<string>()
-    if (mem.briefed.get(row.ticket)?.has(key)) continue // ① idem：简报讲过的迁移不讲第二遍
-    if (fresh.has(key)) continue // 同一观察窗内的重复行（重投/同批重复）不重复计数
-    if (mem.briefed.has(row.ticket) && fresh.size === 0) {
+    if (!force && mem.briefed.get(row.ticket)?.has(key)) continue // ① idem：简报讲过的迁移不讲第二遍
+    if (!force && fresh.has(key)) continue // 同一观察窗内的重复行（重投/同批重复）不重复计数
+    if (!force && mem.briefed.has(row.ticket) && fresh.size === 0) {
       // ② 首个新迁移 = 对上份简报的自身响应（疑似自），压下但响亮计数。
       fresh.add(key)
       mem.fresh.set(row.ticket, fresh)
@@ -149,12 +176,18 @@ export interface WakeOutcome {
   presumedSelfDetail?: string | null
   /** 本次被接受简报的 requestId（core 记进 WakeMemory.lastRequestId）。 */
   requestId?: string | null
+  /** t261003-15 additive：worthWaking 后进入自醒筛的行数（verdict「考虑了几行」；
+   *  零发现周期行在此计数之前就被 worthWaking 滤掉，不计入）。 */
+  considered?: number
 }
 
 /**
  * 唤醒决策 + 执行（io 注入）。纪律逐条落在这一个函数里，测试逐条钉：
  *  - 无值得醒的行 → 不醒（不每行醒）；
  *  - 自醒排除（splitLoopRows：idem + 疑似自 + 有界例外，见 WakeMemory 注）；
+ *  - 决策态旁路（t261003-15）：blocked/refused/awaiting-human 行与红线拍（level=
+ *    'redline'，即 stall / self_lock 拍）跳过 idem 与疑似自——需要人/执行器决策的态
+ *    绝不被自喂排除吞掉；规则③（未消化简报）仍生效，理由见 DECISION_STAGE_STATES 注；
  *  - 已消化判定（review C2 口径）：能按 requestId 认领时只认「我们的简报还在不在」
  *    （别人的队列输入不拦我们）；认领面缺失回落队列深度；镜像不可读（null）→
  *    照发但 reason 点名「队列态不可读」，绝不静默假设已消化；
@@ -169,13 +202,17 @@ export async function wakeExecutor(
   level: 'info' | 'warn' | 'redline' = 'info',
   mem: WakeMemory = freshWakeMemory(),
 ): Promise<WakeOutcome> {
-  const { wakeable, presumed } = splitLoopRows(rows.filter(worthWaking), mem)
-  const presumedMeta = { presumedSelf: mem.presumedSelfRows, presumedSelfDetail: mem.presumedSelfDetail }
+  const worthies = rows.filter(worthWaking)
+  // t261003-15：决策态行（或红线拍）旁路 ①②；规则③不旁路（见 DECISION_STAGE_STATES 注）。
+  const bypass = level === 'redline' || worthies.some(isDecisionRow)
+  const { wakeable, presumed } = splitLoopRows(worthies, mem, bypass)
+  const considered = worthies.length
+  const presumedMeta = { presumedSelf: mem.presumedSelfRows, presumedSelfDetail: mem.presumedSelfDetail, considered }
   if (wakeable.length === 0) {
     if (presumed.length > 0) {
       return { woke: false, reason: `全是疑似自产行，不醒（自喂循环排除：${mem.presumedSelfDetail}）`, accepted: null, mode: null, ...presumedMeta }
     }
-    return { woke: false, reason: '无状态迁移类行（不值得唤醒——不做每行唤醒的傻轮询）', accepted: null, mode: null }
+    return { woke: false, reason: '无状态迁移类行（不值得唤醒——不做每行唤醒的傻轮询）', accepted: null, mode: null, considered }
   }
   if (sessionId === '') {
     return { woke: false, reason: '该项目未声明 executor_session——不代建（身份/槽位是后续票），显式不作为', accepted: null, mode: null, ...presumedMeta }

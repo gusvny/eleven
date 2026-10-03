@@ -2016,6 +2016,14 @@ SCENARIOS = [
      "「不丢」的真机证明面（t260929-04 scope 6，灰盒 L3，隔离真宿主 temp DSH_HOME+临时端口，红线零接触 3099）：包装 developer 交付的 bench（server/plugins/watchdog/bench/host-prompt-bench.mjs，同一 host API 通路）——排队简报真落真会话（队列项 control 流可见、消化后消息会话内可读）、未消化窗第二事件被扣、消化后新事件再醒；判据=退出 0 且自报 PASS 汇总。intent 分工：桩面行为归同票三条秒级场景（TDD 期先行）；本条只锁桩够不到的真宿主端到端通路，互不顶替。三态：node 或 ~/.sandbar/dsh-015 缺席=ENV_FAIL exit 2；bench 缺席/红=FAIL exit 1 点名（TDD 红属预期，arbitrate/merge 期必须绿）",
      "python3 integration/t260929-04/sc_wake_real_session_bench.py", "ro", "serial"),
 
+    # ---- t261003-15: 决策态唤醒旁路 + 逐拍唤醒判定状态面（t261003-10 实案：blocked 45 分钟无人知晓）----
+    ("t261003-15-wake-decision-bypass",
+     "决策态唤醒旁路（t261003-15，灰盒 L3，离线秒级零 docker，harness 协议驱动）：A 已被简报点名的票依次进入 blocked/refused/awaiting-human 三个决策态=每次都产出唤醒（idem 规则①与疑似自规则②都不得吞决策态行——t261003-10 病灶主面）；B 对照（工单场景 b）简报后的第一个常规迁移=仍压制（旁路是选择性的）；C 决策简报消化后同票下一个常规首迁移=再压制（旁路不解绑排除环，环路保持有界）；D 零发现周期行（scan 0 tickets, 0 pending）=仍过滤（t261003-04 不回潮）；E 红线级周期（self_lock 判定在拍）已简报票常规迁移=照常唤醒（红线信号不静默；stall 红线拍遇新账行按判活语义翻回 advancing，红线旁路可达真面=self_lock 拍，本条锚 self_lock 并以前置子用例自证）。intent 分工：旁路真值表与决策集漂移锁归 developer L1（watchdog tests）；自喂环路一般形状归 t260929-04-wake-self-wake-loop；本条只锁「决策态恒旁路」契约面及其边界，不互替。实现未落地=FAIL exit 1 点名（TDD 红属预期，arbitrate/merge 期必须绿）",
+     "python3 integration/t261003-15/sc_wake_decision_state_bypass.py", "ro", "serial"),
+    ("t261003-15-wake-verdict-face",
+     "逐拍唤醒判定状态面（t261003-15，灰盒 L3，离线秒级零 docker）：A 无新账行一拍 status.last_wake_verdict=显式在场（woke=false/considered=0/reason 点名原因）——「没醒」必须自己说话不缺席装没事；B 真唤醒一拍 verdict=woke=true/considered≥1/reason 非空；C 被疑似自规则压制一拍 verdict=woke=false/considered≥1/reason 点名（压制也必须可从 API 复盘）；D additive-only：wakes 行键集恰=panel-contract 承诺集一个不改、历史照旧——新键只增不删。intent 分工：status 键集/时间戳/溯源全契约归 t260928-28-watchdog-status-surface；verdict 记录器内部真值表归 developer L1；唤醒行为本身归 t261003-15-wake-decision-bypass。实现未落地=FAIL exit 1 点名（TDD 红属预期，arbitrate/merge 期必须绿）",
+     "python3 integration/t261003-15/sc_wake_verdict_face.py", "ro", "serial"),
+
     # ---- t260929-08: watchdog 真信号接线（progress/self-lock/engine probe 的真输入锁）----
     ("t260929-08-watchdog-real-progress-signal",
      "停摆判据的真信号锁（t260929-08 验收 a/d，灰盒 L3，隔离真宿主 temp DSH_HOME+临时端口，红线零接触 3099）：包装 developer 交付的 bench（server/plugins/watchdog/bench/host-session-signals-bench.mjs --leg progress）——进展信号走真宿主 sessionController.list() 读 watchdog.json 声明的 executor_session：真会话静默推过 stall_minutes → stall alert 落账；真会话推进（updatedAt 前进）→ 同样时长不报 stalled；反证分支=同输入 deps 缺省（core 默认 advanced:null）恒 no_signal 不产 stall alert（ANTIPROOF=ok 标记必在场，缺=红）。intent 分工：注入桩判定真值表归 t260928-28-watchdog-liveness-selflock；本条锁桩够不到的「真会话面→真接线→判定」面（KI-152/KI-153 对治）。三态：node 或 ~/.sandbar/dsh-015 缺席=ENV_FAIL exit 2；bench 缺席/红=FAIL exit 1 点名（TDD 红属预期）",

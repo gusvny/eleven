@@ -35,15 +35,20 @@ function memTail() {
   return {
     files, archives, archiveCounter,
     io: {
+      // t261003-15 缺陷修：size/read 必须走**字节**语义，与 ledger-tail 的水位
+      // 推进（Buffer.byteLength）同单位——旧实现 stat 返回 UTF-16 字符数，账行
+      // 一含多字节字符（中文 reason，引擎真实输出常态）水位即错位，后续行被误判
+      // 截断而整拍丢失（sc_wake_decision_state_bypass 用例 A 实测复现）。
       async stat(p) {
         const f = files.get(p)
         if (!f) throw Object.assign(new Error('ENOENT: ' + p), { code: 'ENOENT' })
-        return { size: f.content.length, ino: f.ino }
+        return { size: Buffer.byteLength(f.content, 'utf8'), ino: f.ino }
       },
       async read(p, a, b) {
         const f = files.get(p)
         if (!f) throw Object.assign(new Error('ENOENT: ' + p), { code: 'ENOENT' })
-        return f.content.slice(a, Math.min(b, f.content.length))
+        const buf = Buffer.from(f.content, 'utf8')
+        return buf.slice(a, Math.min(b, buf.length)).toString('utf8')
       },
       async listArchives(activePath) {
         const project = projectOf(activePath)
