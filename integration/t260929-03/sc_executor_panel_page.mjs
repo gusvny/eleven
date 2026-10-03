@@ -138,7 +138,19 @@ const srv = createServer((req, res) => {
       night_override: null, effective_night_policy: 'normal' }); return
   }
   if (u.pathname === '/sandbar-executor-panel/api/grants' && req.method === 'GET') {
-    send(200, { grants: [{ template: 'dev-lane', ops: ['sign'] }] }); return
+    // t261003-06 改版后的 grants 读面契约（声明真源 + 三态读出）。
+    send(200, { ok: true, degraded: false, grants: { ok: true, rows: [], granted_count: 1 },
+      granted_ops: ['sign'], granted_total: 6,
+      readout_note: 'Permissions: 1 of 6 granted (distinct permissions, not capability rows)',
+      session_readout: { state: 'granted', sessions: ['exec-1'], sentence: 'The session is named. 1 of 6 permissions are granted.' },
+      declaration: { version: 1, grants: { sign: true }, executor_sessions: ['exec-1'] },
+      declaration_state: { declared: true, kind: 'ok' }, provenance: { keys: {} } })
+    return
+  }
+  if (u.pathname === '/sandbar-executor-panel/api/actions' && req.method === 'GET') {
+    // t261003-06 Overview 右栏「最近动作」读面。
+    send(200, { ok: true, actions: [{ at: Date.now() - 60e3, action: 'Sign', ticket: 't-1', result: 'merged by executor', permission: 'sign' }],
+      unmapped_rows: 0, malformed_rows: 0 }); return
   }
   res.writeHead(404); res.end('not found')
 })
@@ -162,15 +174,18 @@ const bodyText = (page) => page.evaluate(() => document.body.innerText)
   const { ctx, page } = await freshPage()
   await page.goto(URL_); await page.waitForTimeout(400)
   const t = await bodyText(page)
-  const tabs = ['Overview', 'Requests', 'Alerts', 'Ledger', 'Settings']
+  // t261003-06 改版定稿：五 tab = Overview/Grants/Alerts/Ledger/Settings；Requests 页签
+  // 退役并入 Overview（本场景的 tab 清单随之更新——旧清单钉的是已退役布局）。
+  const tabs = ['Overview', 'Grants', 'Alerts', 'Ledger', 'Settings']
   const missing = tabs.filter(x => !t.includes(x))
+  const requestsTabRetired = !/(^|\n)\s*Requests\s*(\n|$)/.test(t)
   const navEl = await page.evaluate(() => {
     const nav = document.querySelector('nav') || document.body
     return nav.innerText
   })
   const cjk = /[\u4e00-\u9fff]/.test(navEl)
-  C.case('T1-five-tabs-english-chrome', missing.length === 0 && !cjk,
-    missing.length ? 'missing tabs: ' + missing.join(',') : (cjk ? 'CJK in chrome nav' : 'ok'))
+  C.case('T1-five-tabs-english-chrome', missing.length === 0 && !cjk && requestsTabRetired,
+    missing.length ? 'missing tabs: ' + missing.join(',') : (!requestsTabRetired ? 'standalone Requests tab still present (retired by t261003-06)' : (cjk ? 'CJK in chrome nav' : 'ok')))
   await ctx.close()
 }
 
@@ -192,7 +207,9 @@ const bodyText = (page) => page.evaluate(() => document.body.innerText)
   const { ctx, page } = await freshPage()
   await page.goto(URL_); await page.waitForTimeout(400)
   const t = await bodyText(page)
-  const ok = /not enrolled|undeclared|not declared/i.test(t) && !/watermark/i.test(t)
+  // t261003-06 STE 改版措辞：declared:false 的显式降级句 = "No watchdog declaration exists."
+  // （旧锚 not enrolled/undeclared 随文案定稿退役——锚语义「显式非正常态」不变）。
+  const ok = /no watchdog declaration|not enrolled|undeclared|not declared/i.test(t) && !/watermark/i.test(t)
   C.case('D2-declared-false-not-normal-state', ok, ok ? 'ok' : 'body=' + t.slice(0, 120))
   await ctx.close()
 }
@@ -236,9 +253,13 @@ statusBody = { ok: true, result: statusFixture() }
   const { ctx, page } = await freshPage()
   await page.goto(URL_); await page.waitForTimeout(500)
   const t = await bodyText(page)
-  // Overview：水位/对账 ok/executor 一行话/唤醒计数
-  const ov = t.includes('120') && /reconcile/i.test(t) && /advancing/i.test(t) && /1/.test(t)
-  C.case('O1-overview-surface', ov, `has_watermark=${t.includes('120')} reconcile=${/reconcile/i.test(t)} executor_line=${/advancing/i.test(t)}`)
+  // Overview（t261003-06 改版）：两栏并列——左 Needs your answer 右 Recent actions；
+  // 状态条与等待请求同屏渲染（旧的 watermark/reconcile/advancing 三词锚随布局退役，
+  // 数据面存在性改锚到两栏区块 + 真实等待问题行——锚语义不锚字面，KI-051 纪律）。
+  const ov = t.includes('Needs your answer'.toLowerCase()) || /needs your answer/i.test(t)
+  const ov2 = /recent action/i.test(t)
+  const ov3 = t.includes('Sign ticket t-1?')
+  C.case('O1-overview-surface', ov && ov2 && ov3, `needs_you=${ov} recent_actions=${ov2} waiting_row=${ov3}`)
   // Alerts：night_muted 标记 + 无 answered/auto-action 位
   await page.click('text=Alerts').catch(() => {})
   await page.waitForTimeout(300)
@@ -251,15 +272,17 @@ statusBody = { ok: true, result: statusFixture() }
   const at2 = await bodyText(page)
   C.case('A1-night-muted-mark-visible', /night.?muted/i.test(at2), `/night.?muted/=${/night.?muted/i.test(at2)}`)
   C.case('A2-no-auto-action-field-invented', !/auto.?action|auto.?answered/i.test(at2), 'ok')
-  // Requests：分组/详情/show more 不丢尾
-  await page.click('text=Requests').catch(() => {})
+  // Requests（t261003-06 改版）：并入 Overview 两栏——waiting 行在左栏可见；
+  // answered 行收进折叠 Answered 区（答过的行不再常驻主视野——设计 §1 毛病 2 的修复面）。
+  await page.click('text=Overview').catch(() => {})
   await page.waitForTimeout(400)
   let rt = await bodyText(page)
   const detailOk = rt.includes('Sign ticket t-1?') && /sign/i.test(rt) && /waiting|waited|\d+[smh]/i.test(rt)
-  const more = page.getByText(/show more/i).first()
-  if (await more.count()) { await more.click(); await page.waitForTimeout(300) }
+  // Answered 区默认折叠：展开回看后 answered 行内容仍保留（审计链在页面上的投影）。
+  const answeredToggle = page.getByText(/answered/i).first()
+  if (await answeredToggle.count()) { await answeredToggle.click().catch(() => {}); await page.waitForTimeout(300) }
   rt = await bodyText(page)
-  const tailKept = rt.includes('Sign ticket t-1?') && rt.includes('Oldest')
+  const tailKept = rt.includes('Sign ticket t-1?') && /oldest/i.test(rt)
   C.case('Q1-requests-master-detail-tail-kept', detailOk && tailKept,
     `detail=${detailOk} tail_kept=${tailKept}`)
   // 答复仅显式动作：无 answer POST 发生在纯浏览时

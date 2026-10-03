@@ -38,6 +38,10 @@ export interface RequestRow {
   question: string
   detail: string
   default_action: string
+  /** t261003-06 选项数据面（设计 note §6）：提出方一并给出选项；有选项=页面渲染按钮，
+   *  没选项=才退回自由文本框。可缺省（历史行/开放问句）；给了就必须是非空短字符串
+   *  数组（≤8 项、单项 ≤80 字符、去重保序）——畸形在 append 时 fail-closed 拒收。 */
+  options?: string[]
   expires_at: number | null
   raised_by: string
 }
@@ -105,7 +109,7 @@ export function makeRequestId(nowMs: number): string {
 /** 追加一条请求（字段校验 fail-closed；id/时间戳服务端定，不信任消费方）。 */
 export function appendRequest(
   io: LedgerIo, env: NodeJS.ProcessEnv, key: string,
-  body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; expires_at?: unknown; raised_by?: unknown },
+  body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; options?: unknown; expires_at?: unknown; raised_by?: unknown },
   nowMs: number,
 ): { ok: true; row: RequestRow } | { ok: false; error: string } {
   if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
@@ -138,12 +142,32 @@ export function appendRequest(
     }
     raisedBy = body.raised_by
   }
+  // t261003-06 选项数据面：给了就必须是「非空短字符串数组」（≤8 项、单项 ≤80 字符、
+  // 去重保序）——畸形在提出时 fail-closed 拒收（页面渲染面拿到的选项恒可信）。
+  let options: string[] | undefined
+  if (body.options !== undefined && body.options !== null) {
+    if (!Array.isArray(body.options)) {
+      return { ok: false, error: `options 必须是字符串数组（收到 ${typeof body.options}）；不给 = 自由文本请求` }
+    }
+    options = []
+    for (const o of body.options as unknown[]) {
+      if (typeof o !== 'string' || o.trim() === '') {
+        return { ok: false, error: 'options 每项必须是非空字符串（空白项不给静默承认）' }
+      }
+      const label = o.trim()
+      if (label.length > 80) return { ok: false, error: `options 项超限（${label.length} > 80 字符）` }
+      if (!options.includes(label)) options.push(label)
+    }
+    if (options.length === 0) return { ok: false, error: 'options 空数组=无意义（不给 = 自由文本请求，不要传空表）' }
+    if (options.length > 8) return { ok: false, error: `options 至多 8 项（收到 ${options.length}）` }
+  }
   const row: RequestRow = {
     type: 'request', id: makeRequestId(nowMs), at: nowMs, project: key,
     kind: body.kind,
     question: body.question,
     detail: typeof body.detail === 'string' ? body.detail : '',
     default_action: typeof body.default_action === 'string' ? body.default_action : '',
+    ...(options ? { options } : {}),
     expires_at: expires,
     raised_by: raisedBy,
   }

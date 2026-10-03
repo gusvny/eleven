@@ -57,8 +57,8 @@ try {
     assert(sign.length >= 1 && sign.every((row) => row.granted === true), `grant sign: sign rows granted (${++n})`)
     assert(g.rows.filter((row) => row.op !== 'sign').every((row) => row.granted === false),
         `grant sign: non-sign rows stay not-granted (${++n})`)
-    assert(g.granted_count === sign.length, `grant sign: granted_count matches rows (${++n})`)
-    assert(g.readout_note.includes('GRANTED by declaration'), `grant sign: readout names granted count (${++n})`)
+    assert(g.granted_count === 1, `grant sign: granted_count counts DISTINCT ops, not rows (${++n})`)
+    assert(/Permissions: 1 of 6 granted/.test(g.readout_note), `grant sign: readout names 1 of 6 (${++n})`)
     assert(r.json.granted_ops.includes('sign') && r.json.granted_ops.every((op) => op === 'sign'),
         `grant sign: top-level granted_ops = [sign] (${++n})`)
   }
@@ -104,19 +104,17 @@ try {
     assert(/NOTHING is granted/.test(g.readout_note), `malformed: nothing-granted note present (${++n})`)
   }
 
-  // ---- ⑥ 页面源级锁：banner 先行 + granted 列 + 「行存在≠已授予」 ----
+  // ---- ⑥ 页面源级锁（t261003-06 改版）：读出句在案、矩阵≠授予 caveat、声明状态 banner 先行 ----
   {
-    assert(PANEL_PAGE_HTML.includes('<th>granted</th>'), `page: granted column header (${++n})`)
-    assert(PANEL_PAGE_HTML.includes('NOT a list of existing grants'), `page: no-usable-declaration banner (${++n})`)
-    assert(PANEL_PAGE_HTML.includes('grants NOTHING (zero-grant)'), `page: zero-grant banner (${++n})`)
-    assert(PANEL_PAGE_HTML.includes('GRANTED by declaration'), `page: granted-count banner (${++n})`)
-    assert(PANEL_PAGE_HTML.includes('a row here does NOT mean granted'), `page: matrix≠grant caveat (${++n})`)
-    assert(PANEL_PAGE_HTML.includes('derived from the template'), `page: derivation still stated (${++n})`)
-    assert(PANEL_PAGE_HTML.includes('readout_note'), `page: readout note surfaced (${++n})`)
-    // banner 必须在表格之前渲染（先看到「授了什么」再看矩阵）。
-    const bannerAt = PANEL_PAGE_HTML.indexOf('NO usable executor declaration')
-    const tableAt = PANEL_PAGE_HTML.indexOf('<th>granted</th>')
-    assert(bannerAt !== -1 && bannerAt < tableAt, `page: declaration banner precedes the table (${++n})`)
+    assert(PANEL_PAGE_HTML.includes('session_readout'), `page consumes the session readout (three-state face) (${++n})`)
+    assert(PANEL_PAGE_HTML.includes('A row here is not a grant'), `page: matrix≠grant caveat (${++n})`)
+    assert(PANEL_PAGE_HTML.includes('No grants declaration exists yet'), `page: absent-declaration banner (${++n})`)
+    assert(PANEL_PAGE_HTML.includes('cannot be read ('), `page: unusable-declaration banner (${++n})`)
+    assert(PANEL_PAGE_HTML.includes('Permissions: 0 of 6'), `page: distinct-permission chip (N of 6) (${++n})`)
+    // banner 必须在权限开关区之前渲染（先看到「授了什么」再操作开关）。
+    const bannerAt = PANEL_PAGE_HTML.indexOf('id="grantsBanner"')
+    const permsAt = PANEL_PAGE_HTML.indexOf('id="permList"')
+    assert(bannerAt !== -1 && bannerAt < permsAt, `page: grants banner precedes the switches (${++n})`)
   }
 } finally {
   restore()

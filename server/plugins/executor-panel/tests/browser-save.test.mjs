@@ -87,9 +87,10 @@ try {
   const reason = await page.textContent('#saveResult')
   assert(reason.includes('REJECTED') && reason.includes('keep_days'), 'engine rejection reason shown on the page: ' + reason.trim().slice(0, 120))
   // loadSettings 的重渲染会重建 #saveResult —— 理由必须在刷新落定后**仍在**。
+  // （t261003-06 改版：#saveBtn 移出 #setKnobs 到独立 .bar 行——刷新落定判据改为旋钮已重建。）
   await page.waitForFunction(() => {
     const t = document.getElementById('saveResult')
-    return t && t.textContent.includes('REJECTED') && document.querySelector('#setKnobs #saveBtn')
+    return t && t.textContent.includes('REJECTED') && document.querySelector('#setKnobs .knob')
   }, { polling: 200 })
   await page.waitForTimeout(800) // 等 settings+grants 两个 GET 的重渲染都落定
   const after = await page.textContent('#saveResult')

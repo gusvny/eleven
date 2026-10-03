@@ -18,7 +18,8 @@ import { loadWatchdogConfig } from './settings.ts'
 import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
 import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settings.ts'
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
-import { isOpGranted, provenanceKeys, readDeclaration, saveGrantsDecl, GRANT_OPS, toGrantOp } from './executor-grants.ts'
+import { clearGrants, grantAllOps, grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, saveGrantsDecl, GRANT_OPS, toGrantOp } from './executor-grants.ts'
+import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
 
 export interface ApiResponse { status: number; json: Record<string, unknown> }
@@ -34,6 +35,8 @@ export interface ApiDeps {
   ledgerIo?: LedgerIo
   /** grants 读取的声明开关面（缺省走 loadWatchdogConfig；测试可注入）。 */
   declaredEnabled?: (key: string) => { declared: boolean; enabled: boolean }
+  /** 最近动作账本 io（缺省 fs；测试注入内存桩）。 */
+  actionsIo?: ActionsIo
   /** workbench 端点基址（config 显式指定；缺省 env → 请求来源同源，见 resolveWorkbenchBase）。 */
   workbenchBase?: string
 }
@@ -158,7 +161,9 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           const res = revokeAll(key, env)
           if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
           // t260930-14：收回变真——同步清空执行器授权声明（全 op 未授予=引擎侧零授予）。
-          const g = saveGrantsDecl(key, { grants: {} }, String(parsed.body.by ?? 'host'), env, now(), String(parsed.body.caller_surface ?? ''))
+          // t261003-06：改走 clearGrants（仅授权面收回，保留会话点名）；守望者的
+          // enabled:false 语义由上面 revokeAll 承担，两个面各管各的（review C2）。
+          const g = clearGrants(key, String(parsed.body.by ?? 'host'), env, now(), String(parsed.body.caller_surface ?? ''))
           if (!g.saved) return { status: 200, json: { ok: false, saved: false, error: g.reason, reason: g.reason } }
           return { status: 200, json: { ok: true, saved: true, note: 'all grants revoked (watchdog enabled:false + executor grants declaration cleared)' } }
         }
@@ -179,6 +184,21 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         const parsed = parseJsonBody(bodyRaw)
         if (!parsed.ok) return bad(400, parsed.error)
         const b = parsed.body as Record<string, unknown>
+        // t261003-06 总开关（Overview 电源开关 = Grants 总开关，同一份状态）：
+        //   op:'master' + enabled:false → 仅授权面收回（clearGrants：清 grants、留会话点名、
+        //   绝不碰 watchdog.json——「收回授权只影响授权，守望者照常运行」）；
+        //   op:'master' + enabled:true  → 全部六操作授予（grantAllOps）。
+        // 旧 settings 的 op=revoke（enabled:false，禁守望者）是另一个面，语义不混用。
+        if (b.op === 'master') {
+          const by = String(b.by ?? 'host')
+          const surface = String(b.caller_surface ?? '')
+          const res = b.enabled === false
+            ? clearGrants(key, by, env, now(), surface)
+            : grantAllOps(key, by, env, now(), surface)
+          if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
+          return { status: 200, json: { ok: true, saved: true, file: res.file, declaration: res.resolved,
+            note: b.enabled === false ? 'all permissions revoked (session naming kept, watchdog untouched)' : 'all six permissions granted' } }
+        }
         // 保存被拒收=HTTP 200 + saved:false + 人话原因（拒收是「编辑面正常工作」，与 settings save 同口径）。
         const res = saveGrantsDecl(key, b, String(b.by ?? ''), env, now(), String(b.caller_surface ?? ''))
         if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
@@ -195,20 +215,23 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       //   ② granted_count + readout_note 一眼可读「到底授了什么」；
       //   ③ 顶层 declaration_summary 给声明状态与已授予 op 清单（消费方不用拆表）。
       let grantsFace: Record<string, unknown> = res as never
-      let grantedOps: string[] = []
+      // t261003-06 缺陷二修复：读出面的分子分母 = **去重的权限个数**（GRANT_OPS 6 个），
+      // 不再是派生行数（op × 模板：六操作 × 三模板会被报成 18）。
+      const grantedOps = GRANT_OPS.filter((op) => isOpGranted(decl, op, now()))
+      const grantedCount = grantedOps.length
+      const total = GRANT_OPS.length
+      const readout = grantsReadoutState(decl.declaration, decl.declared, decl.kind, now())
       if (res.ok) {
         const rows = res.rows.map((r) => ({ ...r, granted: isOpGranted(decl, r.op, now()) }))
-        grantedOps = rows.filter((r) => r.granted).map((r) => r.op)
         grantsFace = {
           ...res,
           rows,
-          granted_count: grantedOps.length,
-          readout_note: grantedOps.length === 0
+          granted_count: grantedCount,
+          granted_total: total,
+          readout_note: grantedCount === 0
             ? 'NOTHING is granted: rows below are the derived capability matrix (what each verb means per template), NOT existing grants — a row here is not a grant'
-            : `${grantedOps.length} of ${rows.length} row(s) actually GRANTED by declaration — the rest are capability rows only`,
+            : `Permissions: ${grantedCount} of ${total} granted (distinct permissions, not capability rows)`,
         }
-      } else {
-        grantedOps = GRANT_OPS.filter((op) => isOpGranted(decl, op, now()))
       }
       const auditNote = 'refusals and grant changes are audited to ' + key + '/executor-grants-audit.jsonl'
       // degraded 顶层显式位（消费方可不拆 grants 判定「模板事实不可得」）。
@@ -217,12 +240,28 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         json: {
           ok: true, grants: grantsFace, degraded: res.ok === false, reason: res.ok ? undefined : res.reason,
           granted_ops: grantedOps,
+          granted_total: total,
+          // t261003-06 缺陷三：读出面三态显式在顶层（没点名 / 点名了但零授予 / 已授予），
+          // 消费方不用从会话列表与授予清单自行推断。
+          session_readout: { state: readout.state, sessions: readout.sessions, sentence: readout.sentence },
           declaration: decl.ok ? decl.declaration : null,
           declaration_state: { declared: decl.declared, kind: decl.kind ?? (decl.ok ? 'ok' : 'absent'), error: decl.error, file: decl.file },
           provenance: { file: decl.file, keys: provenanceKeys(decl, now()) },
           audit_note: auditNote,
         },
       }
+    }
+    // ---- recent actions（t261003-06：Overview 右栏只读源——事件账本，显式降级不空表） ----
+    if (path === '/sandbar-executor-panel/api/actions') {
+      if (method !== 'GET') return bad(405, '只读面：仅 GET')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const read = readRecentActions(deps.actionsIo ?? fsActionsIo, env, key)
+      // 不可得=200 + ok:false + 原因（页面渲染显式降级卡）；绝不渲染成空列表冒充「没动作」。
+      if (!read.ok) return { status: 200, json: { ok: false, source: read.source, reason: read.reason } }
+      return { status: 200, json: { ok: true, source: read.source, actions: read.actions,
+        unmapped_rows: read.unmapped_rows, malformed_rows: read.malformed_rows,
+        note: read.unmapped_rows > 0 ? read.unmapped_rows + ' ledger row(s) use kinds outside the action table — they are not shown' : undefined } }
     }
     // ---- projects (t260930-09 scope 8) ----
     if (path === '/sandbar-executor-panel/api/projects') {

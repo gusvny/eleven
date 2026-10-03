@@ -1939,6 +1939,24 @@ SCENARIOS = [
      "面板节点半真实路由契约（t260929-03，灰盒 L2/L3，经 harness seam 驱动真实路由面，离线零 docker 零浏览器；seam 协议=lib_panel_harness.mjs 头注）：R1 请求台账 append-only 追加后 waiting 且绝不自动答复；R2 答复按 id 闭行不删原行（审计链完整）；R3 缝重启后未答行原样在（长保留不变式「未答请求永不消失」）；R4 畸形输入纪律——台账坏 JSON/半行计数上报不静默丢且合法行照常服务、POST 非 JSON 体 4xx 拒收不 500；R5 project 形状白名单 GET/POST 一律 400、非 GET 未知路由 405（契约刚性）；S1 settings 读面工厂默认溯源可答「谁定的」；S2 validate-on-write（KI-148/149+installer 先例）——坏声明（未知键）saved:false+人类可读原因+盘上 watchdog.json 字节不变，好声明落盘且 GET 回读新值、溯源翻转为 file#path（证明过了装载器）；G1 授权=模板推导（决定 10/15）——workbench 不可达显式降级对象绝不空列表冒充「无授权」，模板桩可达时 human 出口模板出 sign 行、inspection 族无 pause 行（capability 过滤）。harness 缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：页面渲染/降级态/beep 归 t260929-03-executor-panel-page；watchdog status 键集归 t260928-28-watchdog-status-surface",
      "node integration/t260929-03/sc_executor_panel_api.mjs", "ro", "serial"),
 
+    # ---- t261003-06: executor panel 改版（两栏 overview/Grants 页签/选项数据面/读写缺陷回归）----
+    # 与 t260929-03/t260929-22 族 intent 不同面：彼锁改版前面板（五 tab 旧布局、beep、
+    # 请求主从、入口/切换器），本组锁本票新契约——旧页面场景断言的旧布局（Requests
+    # 页签、选择器等）由本票改版退役，退役冲突在 merge 闸按结果处置（页面负形断言
+    # 归 t261003-06-executor-panel-page-redesign）。
+    ("t261003-06-executor-grants-session-roundtrip",
+     "grants 读写缺陷回归×总开关语义（t261003-06，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：A1 点名执行器会话保存后读出可见；A2 缺陷①回归——第二次保存（改一个权限）点名仍在（改动前 saveGrantsDecl 落盘从不带 executor_sessions，重存静默抹点名且回执报成功，review_plan C1 纠偏后回归面=Save 脸而非 settings op=revoke）；A3 总开关关（POST /api/grants {power:off} 契约缝，C2 裁定的 grants-only 新脸）→ 授予清零点名保留、读出呈 named-but-zero-grants 态；A4 红线=关后 Settings 读面守望者 enabled 仍 true（收回授权绝不停守望者，设计 §3；旧 op=revoke 的停守望者语义属另一张脸不归本脸）；B1/B2 缺陷②回归——3 模板×6 操作全授予 granted_count 恰 6 且「6 of 6」口径（改动前按 op×模板行数=18）、部分授予「N of 6」；C1–C4 缺陷③——没点名/点名零授予/已授予三态读出值互异，畸形授予值与未知操作键照旧 fail-closed 4xx。harness/契约缝缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：授权上游推导与 400 文案归 t260929-22 族；本条只锁读写缺陷与开关语义",
+     "node integration/t261003-06/sc_executor_grants_session_roundtrip.mjs", "ro", "serial"),
+    ("t261003-06-executor-panel-requests-options",
+     "请求选项数据面（t261003-06，灰盒 L2/L3，harness seam 驱动真实路由面，离线零 docker 零浏览器）：O1 带选项请求 append 后读出原样带选项（顺序保持）；O2 规整——去重/去空白/上限 8（拒收或截断皆可，脏值不落库）；O3 畸形 fail-closed——非数组/含空串/含非字符串/空数组一律 4xx 拒在 append 面，台账不落半行；O4 无选项请求照旧自由文本路径不报错；O5 选项行答复照常按 id 闭行且二次答复拒收（审计链不变量在选项面上的投影）。intent 分工：append-only/闭行不删/缝重启存活归 t260929-03-executor-panel-api R1–R3；页面按钮渲染归 t261003-06-executor-panel-page-redesign",
+     "node integration/t261003-06/sc_executor_panel_requests_options.mjs", "ro"),
+    ("t261003-06-executor-panel-page-redesign",
+     "面板改版页面契约 payload→pixel（t261003-06，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099；页面 HTML 取自插件真实页面模块 PANEL_PAGE_HTML seam）：T1 五页签 Overview/Grants/Alerts/Ledger/Settings 且独立 Requests 页签退场；L1 负形——项目选择器三件套（下拉/手填 key/Load）与轮询状态行不存在；L2 Overview 两栏并列（左 Needs your answer 右 recent actions）+CSS ~760px 断点；L3 请求条目收起一行点开展开出溯源行（raised by/request id/default action）；L4 带选项渲染按钮、无选项给自由文本框（兜底文案 Type an answer）；L5 已答项收进折叠 Answered 区；L6 Overview 电源开关呈现面（跨页签同状态的行为面归 grants-session-roundtrip A3/A4）；L7 Overview 等待数徽标；S1 STE 文案抽查（§4）——渲染文本零缩略形式（don't/won't 族）、定稿措辞「Needs your answer」「Type an answer」在场、裸习语标题「Needs you」退场、零 40+ 词马拉松句；X1 全旅程零 pageerror。playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；页面模块未落地=FAIL 点名（TDD 红属预期）。intent 分工：改版前旧页面契约（beep/降级态/旧五 tab）归 t260929-03-executor-panel-page——本票改版退役旧布局后，两条的冲突面在 merge 闸按本条为准处置；入口/切换器归 t260929-22 族",
+     "node integration/t261003-06/sc_executor_panel_page_redesign.mjs", "browser-free"),
+    ("t261003-06-executor-panel-recent-actions",
+     "「最近动作」读源契约（t261003-06，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：R1 读源在位——GET /api/recent-actions 返回行，每行语义键齐（时间/动作/票号/结果/权限，键名实现定语义可对号=契约）；R2 权限归因非空——受闸写动作行必带「凭哪条权限」，无归因行不许静默出现（设计 §6「做了什么+凭哪条权限」红线）；R3 坏行纪律——账本畸形行计数上报不静默丢且合法行照常服务（t260929-03 R4 同族判据投影）；R4 显式降级——读源不可读=degraded 标记+人类可读原因，degraded:false+空 rows 冒充「最近没动作」=红线红（设计 §6）；R5 只读红线——读出面绝不写账本文件（读前后字节一致）。缝契约=startHarness 可选 eventsPath 注入（与 panelDir/watchdogDir 同款隔离注入）；缝缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：面板页呈现归 page-redesign L2b；读源选择若需引擎改口=越界，plan review 已裁定只读消费现账本不碰引擎",
+     "node integration/t261003-06/sc_executor_panel_recent_actions.mjs", "ro"),
+
     # ---- t260929-22: console 执行器入口 + grants 上游生产者 + 400 文案点名判据 ----
     # 与 t260929-03 族 intent 不同面：彼锁面板页内/路由行为本身，本组锁「人怎么到达
     # 面板」（左栏项目名行=入口+Executor/Chat 切换器，真源=260927 设计稿 §界面与命名）、

@@ -256,6 +256,20 @@ export function saveGrantsDecl(
     updated_at: Math.trunc(nowMs),
   }
   if (b.night_tier !== undefined) doc.night_tier = b.night_tier
+  // t261003-06 缺陷一修复：会话点名必须随保存搬运——此前本函数只组
+  // {version, grants, updated_by, updated_at, night_tier?}，body 里即使带了
+  // executor_sessions 也被静默丢弃（保存回执报成功），且此后任何一次保存
+  // （包括一键收回授权）都把它一起抹掉。现在：body 给了就搬运（交给上面的
+  // validateDeclaration 按引擎同规则校验）；body 没给=「本次保存不动点名」——
+  // 从盘上现声明继承（这是「部分编辑不丢字段」的诚实语义，不是猜）。
+  if (b.executor_sessions !== undefined) {
+    doc.executor_sessions = b.executor_sessions
+  } else {
+    const prev = readDeclaration(key, env)
+    if (prev.ok && prev.declaration?.executor_sessions) {
+      doc.executor_sessions = prev.declaration.executor_sessions
+    }
+  }
   const [normalized, err] = validateDeclaration(doc)
   if (err) return { saved: false, file, reason: err }
   const prev = readDeclaration(key, env)
@@ -281,4 +295,76 @@ export function saveGrantsDecl(
     night_tier: normalized.night_tier ?? null,
   }, env)
   return { saved: true, file, resolved: normalized }
+}
+
+// ---------- t261003-06：总开关语义（关=收回全部授权，不动点名、不动守望者） ----------
+
+/**
+ * 仅授权面收回（clearGrants）：清空 grants（全 op 未授予），**保留 executor_sessions**
+ * （关掉=它只能看和问，不是忘记谁是执行器），**绝不碰 watchdog.json**（守望者照常运行
+ * ——设计 note §3 定稿语义）。与 settings 的 op=revoke（enabled:false，禁守望者）是两个
+ * 不同的面，代码与文案都分开命名，一个词不表两义（STE 规则 3）。
+ */
+export function clearGrants(
+  key: string, by: string, env: NodeJS.ProcessEnv, nowMs: number, callerSurface = '',
+): SaveOutcome {
+  const prev = readDeclaration(key, env)
+  const next: Record<string, unknown> = { grants: {} }
+  if (prev.ok && prev.declaration?.executor_sessions) next.executor_sessions = prev.declaration.executor_sessions
+  if (prev.ok && prev.declaration?.night_tier) next.night_tier = { ...prev.declaration.night_tier, enabled: false }
+  return saveGrantsDecl(key, next, by, env, nowMs, callerSurface)
+}
+
+/** 总开关打开=全部六个操作授予（与页面 Give all 同语义；会话点名不动）。 */
+export function grantAllOps(
+  key: string, by: string, env: NodeJS.ProcessEnv, nowMs: number, callerSurface = '',
+): SaveOutcome {
+  const prev = readDeclaration(key, env)
+  const grants: Record<string, true> = {}
+  for (const op of GRANT_OPS) grants[op] = true
+  const next: Record<string, unknown> = { grants }
+  if (prev.ok && prev.declaration?.executor_sessions) next.executor_sessions = prev.declaration.executor_sessions
+  return saveGrantsDecl(key, next, by, env, nowMs, callerSurface)
+}
+
+/** 现声明里真被授予的 op 集合（去重的声明键，含活跃夜间档——读出面的分子）。 */
+export function grantedOpKeys(decl: GrantsDecl | null, nowMs: number): string[] {
+  const out: string[] = []
+  const nt = decl?.night_tier
+  const nightActive = !!(nt?.enabled && nt.until > nowMs)
+  for (const op of GRANT_OPS) {
+    if (decl?.grants?.[op] === true || nightActive) out.push(op)
+  }
+  return out
+}
+
+/**
+ * 读出面三态（缺陷三）：点名缺席 / 点名了但零授予 / 已授予——一态一句人话，
+ * 绝不让「没点名」被读成「已授予」。状态机只看声明本体，不掺派生矩阵。
+ */
+export function grantsReadoutState(
+  decl: GrantsDecl | null, declared: boolean, kind: string | undefined, nowMs: number,
+): { state: 'no-declaration' | 'no-session' | 'named-zero-grants' | 'granted';
+    sessions: string[]; granted: string[]; total: number; sentence: string } {
+  const granted = grantedOpKeys(decl, nowMs)
+  const sessions = Array.isArray(decl?.executor_sessions) ? decl!.executor_sessions! : []
+  const total = GRANT_OPS.length
+  if (!declared || kind === 'absent') {
+    return { state: 'no-declaration', sessions, granted, total,
+             sentence: 'No declaration exists. Nothing is granted.' }
+  }
+  if (kind !== undefined && kind !== 'ok') {
+    return { state: 'no-declaration', sessions, granted, total,
+             sentence: 'The declaration cannot be read (' + kind + '). Nothing is granted.' }
+  }
+  if (sessions.length === 0) {
+    return { state: 'no-session', sessions, granted, total,
+             sentence: 'No executor session is named. Name one before you grant permissions.' }
+  }
+  if (granted.length === 0) {
+    return { state: 'named-zero-grants', sessions, granted, total,
+             sentence: 'The session is named. Zero permissions are granted.' }
+  }
+  return { state: 'granted', sessions, granted, total,
+           sentence: 'The session is named. ' + granted.length + ' of ' + total + ' permissions are granted.' }
 }

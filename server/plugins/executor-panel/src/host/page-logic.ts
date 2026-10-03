@@ -105,3 +105,35 @@ export function groupByProject<T extends { project: string }>(rows: T[]): Array<
   }
   return order.map(project => ({ project, rows: map.get(project)! }))
 }
+
+// ---------- t261003-06：改版页面纯逻辑面（与上面同纪律：零 DOM、经 String(fn) 嵌页） ----------
+
+/** 等待/已答切分（Overview 左栏：waiting 在上、answered 收进折叠区；组内新的在前）。 */
+export function splitWaiting<T extends { status?: string }>(rows: T[]): { waiting: T[]; answered: T[] } {
+  const waiting: T[] = []
+  const answered: T[] = []
+  for (const r of rows || []) {
+    if (r && r.status === 'answered') answered.push(r)
+    else if (r) waiting.push(r)
+  }
+  return { waiting, answered }
+}
+
+/** 选项判据（有选项=按钮，没选项=自由文本框；畸形选项项当没有——渲染面拿到的恒可信）。 */
+export function hasOptions(row: { options?: unknown }): boolean {
+  return Array.isArray(row?.options)
+    && row.options.length > 0
+    && (row.options as unknown[]).every((o) => typeof o === 'string' && o.trim() !== '')
+}
+
+/** 权限读出句（「Permissions: N of 6」口径——去重权限数，不是派生行数）。 */
+export function chipLabel(count: number, total: number): string {
+  const c = Number.isFinite(count) && count > 0 ? count : 0
+  const t = Number.isFinite(total) && total > 0 ? total : 0
+  return 'Permissions: ' + c + ' of ' + t
+}
+
+/** 总开关派生（同一份状态：任一权限开=总开关开；全关=总开关关）。 */
+export function masterOn(count: number): boolean {
+  return Number.isFinite(count) && count > 0
+}

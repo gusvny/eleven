@@ -1,24 +1,37 @@
 /**
- * panel-page.ts —— 面板静态页（t260929-03）：五个 tab、显式降级、页内一声 beep。
+ * panel-page.ts —— 面板静态页（t261003-06 按 261003 定稿 mock 全面改版）。
  *
  * 为什么是「插件自服务的静态页」而不是 tsdown 构建包：零构建步骤 → 宿主交接=
  * 控制台重启一次装载插件 + 之后纯浏览器刷新；且 beep 决策/降级挑选等纯逻辑
  * **从 page-logic.ts 经 String(fn) 原样嵌入**——单测与页面永远同一份实现，不漂移。
- * 界面文案全英文（宿主令 260925：英文界面+数据不译）；布局参考 mock 260927。
+ * 界面文案全英文（宿主令 260925：英文界面+数据不译），且全量按设计 note §4 的
+ * 80% ASD-STE100 口径改写（短句、主动语态、固定术语、无缩略、无行话）。
  *
- * 契约偏差（如实声明，review #1）：notify.beep 的已读清除走页面本地 seen-set
- * （localStorage per project）；watchdog 侧 per-key 清除端点属守望者插件改动，
- * 本票 out-of-scope——后果（第二台设备会再响一声）写进交接报告，后续票收口。
+ * 版面（设计 note §2 / mock 261003）：顶部只有 Executor + 项目标签——项目选择器
+ * （下拉/手填/Load）与轮询状态行**不存在**；项目来自 ?project= 深链（workbench
+ * 项目行进面板即该项目）。页签 Overview / Grants / Alerts / Ledger / Settings。
+ * Overview 两栏并列（左=等你回，右=最近动作），窄于 760px 叠放（.cols media query）。
+ *
+ * 语义（设计 note §3）：Overview 的 Disable executor 与 Grants 总开关是**同一份状态**
+ * （POST /api/grants op:'master'）——关=收回全部授权（只读和问），会话点名保留，
+ * watchdog.json 不动（守望者照常运行）。Settings 里的「Disable watchdog」是另一个面
+ * （enabled:false），文案与代码都分开命名，一个词不表两义。
+ *
+ * 契约偏差（如实声明，沿用 t260929-03 review #1）：notify.beep 的已读清除走页面本地
+ * seen-set（localStorage per project）；watchdog 侧 per-key 清除端点属守望者插件改动，
+ * out-of-scope——后果（第二台设备会再响一声）写进交接报告，后续票收口。
  */
 
 import {
   beepDecision, pickDegraded, fmtProportion, fmtWaiting, fmtAge, groupByProject,
+  splitWaiting, hasOptions, chipLabel, masterOn,
 } from './page-logic.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
+  String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
 ].join('\n')
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
@@ -26,95 +39,230 @@ export const PANEL_PAGE_HTML = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executor Panel</title>
+<title>Executor</title>
 <style>
 :root{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--fg:#dbe4f0;--muted:#8ea0b8;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,system-ui,sans-serif;padding:14px}
-h1{font-size:16px;margin:0 0 10px}
-.bar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
-select,input[type=text]{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
-button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
-button:hover{border-color:var(--blue)}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:18px 16px 48px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.top h1{font-size:14px;font-weight:600;margin:0}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 9px;font-size:11px}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;width:max-content;margin-bottom:16px;flex-wrap:wrap}
 input.tab{position:absolute;opacity:0;pointer-events:none}
-.tabs{display:flex;gap:3px;border-bottom:1px solid var(--line);margin-bottom:10px}
-.tabs label{padding:5px 10px;font-size:12px;color:var(--muted);border:1px solid transparent;border-bottom:none;cursor:pointer}
-.tabs label:hover{color:var(--fg)}
-#t-overview:checked~.tabs label[for=t-overview],#t-requests:checked~.tabs label[for=t-requests],#t-alerts:checked~.tabs label[for=t-alerts],#t-ledger:checked~.tabs label[for=t-ledger],#t-settings:checked~.tabs label[for=t-settings]{color:var(--fg);background:var(--panel);border-color:var(--line);border-radius:7px 7px 0 0}
-.pane{display:none}
-#t-overview:checked~.panes #p-overview,#t-requests:checked~.panes #p-requests,#t-alerts:checked~.panes #p-alerts,#t-ledger:checked~.panes #p-ledger,#t-settings:checked~.panes #p-settings{display:block}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:10px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
-.card h3{margin:0 0 4px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
-.banner{border:1px solid var(--amber);color:var(--amber);background:#2a2313;border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
+.seg label:hover{color:var(--fg)}
+#t-overview:checked~.seg label[for=t-overview],#t-grants:checked~.seg label[for=t-grants],#t-alerts:checked~.seg label[for=t-alerts],#t-ledger:checked~.seg label[for=t-ledger],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}
+.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:#0e1420;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
+.sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.sect.lead{margin-top:18px}
+.row{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.row.wait{border-left:3px solid var(--amber)}
+.row.done{border-left:3px solid var(--line);background:transparent}
+.head{display:flex;align-items:baseline;gap:8px;padding:10px 12px;cursor:pointer;user-select:none}
+.head:hover{background:#1f2937}
+.row.done .head .txt{color:var(--muted)}
+.txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
+.dot.amber{background:var(--amber)}.dot.grey{background:#46536a}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
+.meta{color:var(--muted);font-size:11px;white-space:nowrap}
+.chev{color:var(--muted);font-size:10px;flex:0 0 auto;transition:transform .15s}
+.row[data-open="true"] .chev{transform:rotate(90deg)}
+.body{display:none;padding:0 12px 11px 12px;border-top:1px solid #232c3a}
+.row[data-open="true"] .body{display:block}
+.detail{margin-top:9px;max-height:170px;overflow:auto;white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:#c3cfdf;font-size:12px}
+.opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.opts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 14px;font:inherit;cursor:pointer}
+.opts button:hover{border-color:var(--blue);color:var(--blue)}
+.opts button.primary{background:#1d3550;border-color:#2f5b8a}
+.other{border:0;background:transparent;color:#6d7c94;font:inherit;cursor:pointer;padding:6px 4px;text-decoration:underline dotted}
+.answer{display:flex;gap:8px;margin-top:10px}
+.answer input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:6px 9px;font:inherit}
+.answer input:focus{outline:0;border-color:var(--blue)}
+.answer button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
+.given{color:var(--green);font-size:12px;padding:0 12px 10px 12px}
+.trace{color:#5b6880;font-size:11px;margin-top:9px}
+.strip{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);margin-bottom:14px;flex-wrap:wrap}
+.strip .live{color:var(--green)}
+.strip .ro{color:var(--amber)}
+.power{border:1px solid var(--line);border-radius:7px;padding:5px 12px;font:inherit;cursor:pointer;background:var(--panel2);color:var(--fg)}
+.power[data-on="true"]:hover{border-color:var(--red);color:var(--red)}
+.power[data-on="false"]:hover{border-color:var(--green);color:var(--green)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media (max-width:760px){ .cols{grid-template-columns:1fr} }
+.act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid #232c3a}
+.act:last-child{border-bottom:0}
+.act .t{color:var(--muted);font-size:11px;width:38px;flex:0 0 auto}
+.pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px;min-width:52px;text-align:center}
+.pill.sign{background:#183153;color:#79b8ff}
+.pill.open{background:#16351f;color:#7ad48a}
+.pill.retry{background:#3a2d13;color:#ffb454}
+.pill.sendback{background:#3a2a13;color:#ffc07a}
+.pill.cancel{background:#3a1a1a;color:#ff8b8b}
+.pill.pause{background:#262f3d;color:#9fb0c8}
+.act .tk{font-weight:600}
+.act .say{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cell{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.cell b{display:block;font-size:15px;font-weight:600}
+.cell span{color:var(--muted);font-size:11px}
+.file{color:#5b6880;font-size:11px;margin-top:8px}
+.grp{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.line{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #232c3a}
+.line:last-child{border-bottom:0}
+.line .lab{flex:1;min-width:0}
+.line .lab small{display:block;color:var(--muted);font-size:11px}
+.line input[type=text],.line input[type=number],.line input[type=time],.line select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit;width:150px}
+.sw{width:38px;height:21px;border-radius:11px;background:#39465c;border:1px solid var(--line);position:relative;cursor:pointer;flex:0 0 auto;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#8ea0b8;transition:left .15s,background .15s}
+.sw[data-on="true"]{background:#1d3550;border-color:#2f5b8a}
+.sw[data-on="true"]::after{left:18px;background:var(--blue)}
+.sw.locked{opacity:.35;cursor:not-allowed}
+.linkbtn{border:0;background:transparent;color:var(--muted);font:inherit;cursor:pointer;text-decoration:underline dotted;margin-left:auto}
+.linkbtn:hover{color:var(--blue)}
+.bar{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.bar button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:7px 14px;font:inherit;cursor:pointer}
+.bar button.primary{background:#1d3550;border-color:#2f5b8a}
+.bar button:hover{border-color:var(--blue)}
+.doneWrap{margin-top:14px}
+.doneHead{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:4px 0}
+.chev2{color:var(--muted);transition:transform .15s}
+.doneWrap[data-open="false"] .chev2{transform:rotate(-90deg)}
+.doneWrap[data-open="false"] .doneList{display:none}
+.empty{color:var(--muted);padding:22px 4px}
+.banner{border:1px solid var(--amber);color:var(--amber);background:#2a2313;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px}
 .banner.red{border-color:var(--red);color:var(--red);background:#2a1414}
-table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.knob{display:grid;grid-template-columns:200px 1fr 240px;gap:6px;padding:5px 12px;border-bottom:1px solid #232c3a;align-items:center;font-size:12px}
+.knob .src{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
+table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600;font-size:11px}
-.tr-waiting{color:var(--amber)}
-.tr-answered{color:var(--muted)}
-.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px}
-.flow .node{border:1px solid var(--line);border-radius:6px;padding:3px 8px;background:var(--panel2)}
-.flow .arr{color:var(--muted)}
-.muted{color:var(--muted)}
-.master{display:grid;grid-template-columns:280px 1fr;gap:10px}
-.mlist{background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:60vh;overflow:auto}
-.mitem{padding:6px 9px;border-bottom:1px solid var(--line);cursor:pointer}
-.mitem:hover{background:var(--panel2)}
-.mitem.sel{background:var(--panel2);border-left:2px solid var(--blue)}
-.grp{padding:4px 9px;font-size:10px;color:var(--muted);text-transform:uppercase;background:var(--panel2)}
-.detail{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
-.knob{display:grid;grid-template-columns:180px 1fr 220px;gap:6px;padding:4px 0;border-bottom:1px solid var(--line);align-items:center}
-.knob .src{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
-.bad{color:var(--red)} .good{color:var(--green)}
-textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;min-height:60px;font:12px ui-monospace,monospace}
-.more{margin:8px 0;color:var(--blue);cursor:pointer}
+.good{color:var(--green)} .bad{color:var(--red)} .muted{color:var(--muted)}
+.foot{margin-top:26px;color:#5b6880;font-size:11px}
 </style>
 </head>
 <body>
-<h1>Executor Panel</h1>
-<div class="bar">
-  <label class="muted">Project</label>
-  <select id="project"><option value="">(loading projects)</option></select>
-  <input type="text" id="freeProject" placeholder="or type any key (undeclared demo)" size="28">
-  <button id="go">Load</button>
-  <span class="muted" id="pollNote"></span>
-</div>
-<input class="tab" type="radio" name="tb" id="t-overview" checked>
-<input class="tab" type="radio" name="tb" id="t-requests">
-<input class="tab" type="radio" name="tb" id="t-alerts">
-<input class="tab" type="radio" name="tb" id="t-ledger">
-<input class="tab" type="radio" name="tb" id="t-settings">
-<div class="tabs">
-  <label for="t-overview">Overview</label>
-  <label for="t-requests">Requests</label>
-  <label for="t-alerts">Alerts</label>
-  <label for="t-ledger">Ledger</label>
-  <label for="t-settings">Settings</label>
-</div>
-<div class="panes">
-  <div class="pane" id="p-overview"><div id="ovBanners"></div><div class="cards" id="ovCards"></div>
-    <div class="flow" id="ovFlow"></div></div>
-  <div class="pane" id="p-requests">
-    <div class="muted" style="margin-bottom:6px">Requests = the executor is asking YOU. Own ledger, never deleted by the machine, never answered by the machine. Alerts tell you; Requests wait for you.</div>
-    <div class="master"><div class="mlist" id="reqList"></div>
-    <div class="detail" id="reqDetail"><span class="muted">Select a request.</span></div></div>
-    <span class="more" id="reqMore">show more (keeps the tail)</span></div>
-  <div class="pane" id="p-alerts"><div id="alertBanner"></div><table id="alertTable"></table>
-    <div class="muted" style="margin-top:6px">Alerts = "you should know". An open alert stays information only — it never turns into a decision on its own.</div></div>
-  <div class="pane" id="p-ledger"><div id="ledgerHealth"></div><table id="ledgerTable"></table></div>
-  <div class="pane" id="p-settings"><div id="setBanners"></div><div id="setGrants"></div><div id="setKnobs"></div></div>
+<div class="wrap">
+  <div class="top"><h1>Executor</h1><span class="chip" id="projChip"></span></div>
+
+  <input class="tab" type="radio" name="tb" id="t-overview" checked>
+  <input class="tab" type="radio" name="tb" id="t-grants">
+  <input class="tab" type="radio" name="tb" id="t-alerts">
+  <input class="tab" type="radio" name="tb" id="t-ledger">
+  <input class="tab" type="radio" name="tb" id="t-settings">
+
+  <div class="seg">
+    <label for="t-overview">Overview <span id="reqBadge" class="badge zero">0</span></label>
+    <label for="t-grants">Grants</label>
+    <label for="t-alerts">Alerts</label>
+    <label for="t-ledger">Ledger</label>
+    <label for="t-settings">Settings</label>
+  </div>
+
+  <div id="noProject" class="banner red" style="display:none">No project is selected. Open this panel from a project row, or add ?project=&lt;project-key&gt; to the address.</div>
+
+  <section id="paneOv">
+    <div class="strip">
+      <span id="liveDot" class="ro">● read-only</span>
+      <span id="stateTxt">The executor state is not known yet.</span>
+      <span id="grantChip" class="chip">Permissions: 0 of 6</span>
+      <span id="sessionChip" class="chip">Session: none</span>
+      <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
+    </div>
+    <div id="ovBanners"></div>
+    <div class="cols">
+      <div>
+        <div class="sect" id="waitHead">Needs your answer · 0</div>
+        <div id="waitList"></div>
+        <div class="empty" id="waitEmpty" style="display:none">Nothing waits on you.</div>
+        <div class="doneWrap" data-open="false" id="doneWrap" style="display:none">
+          <div class="doneHead" id="doneHeadBtn">
+            <span class="chev2">&#9662;</span><span class="sect" style="margin:0" id="doneHead2">Answered · 0</span>
+          </div>
+          <div class="doneList" id="doneList"></div>
+        </div>
+      </div>
+      <div>
+        <div class="sect">Recent actions</div>
+        <div class="row" style="padding:2px 4px" id="actList"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="paneGrants" style="display:none">
+    <div id="grantsBanner"></div>
+    <div class="sect">Executor
+      <button class="linkbtn" id="giveAllBtn">Give all</button>
+      <button class="linkbtn" id="giveNoneBtn" style="margin-left:0">Give none</button>
+    </div>
+    <div class="grp">
+      <div class="line"><div class="lab">Executor permissions <small>Off: the executor can only read and ask. The watchdog keeps running.</small></div>
+        <div class="sw" id="masterSw" data-on="false"></div></div>
+      <div class="line"><div class="lab">Executor session <small>The session that works as the executor.</small></div>
+        <input type="text" id="grantSession" placeholder="session id"></div>
+    </div>
+    <div class="sect lead">Permissions you can give</div>
+    <div class="grp" id="permList"></div>
+    <div class="sect lead">Your permissions only</div>
+    <div class="grp">
+      <div class="line"><div class="lab">Change permissions <small>Only you can change this list.</small></div>
+        <div class="sw locked" data-on="false"></div></div>
+    </div>
+    <div class="bar">
+      <button class="primary" id="grantsSave">Save</button>
+      <span id="grantsSaveOut" class="meta"></span>
+    </div>
+    <div id="grantsReadout" class="muted" style="margin-top:10px"></div>
+    <div id="grantsMatrix"></div>
+  </section>
+
+  <section id="paneAlert" style="display:none">
+    <div id="alertBanner"></div>
+    <div class="sect" id="alertHead">Recent · 0</div>
+    <div id="alertList"></div>
+  </section>
+
+  <section id="paneLedger" style="display:none">
+    <div class="sect">Health</div>
+    <div class="grid" id="ledgerGrid"></div>
+    <div class="file" id="ledgerFile"></div>
+    <div class="sect lead">Last events</div>
+    <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
+  </section>
+
+  <section id="paneSet" style="display:none">
+    <div id="setBanners"></div>
+    <div class="sect lead">Watchdog</div>
+    <div class="grp" id="setKnobs"></div>
+    <div class="bar">
+      <button class="primary" id="saveBtn">Save</button>
+      <button id="sleepBtn">Sleep until morning</button>
+      <button id="wakeBtn">Revert the night policy</button>
+      <button id="revokeBtn">Disable watchdog</button>
+      <span id="saveResult" class="meta"></span>
+    </div>
+    <div class="muted" style="margin-top:8px;font-size:11px">Save writes the file only after the real loader accepts it. A rejected save does not change the file. Disable watchdog stops all watchdog behavior. It does not change the grants.</div>
+  </section>
+
+  <div class="foot" id="footNote"></div>
 </div>
 <script>
 ` + EMBEDDED + `
 (function(){
-  var state = { project:'', status:null, reachable:null, requests:null, grants:null, settings:null, reqLimit:20, selected:null };
-  // 最近一次保存结果（t261001-10）：renderSettings 重建整个 settings 容器（含 #saveResult），
-  // 结果必须存在变量里、每次重渲染后回写——否则刷新一落就把引擎拒收理由抹掉（「点了没反应」）。
+  var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null };
   var saveMsg = '';
+  var grantsSaveMsg = '';
   var POLL_MS = 5000;
-  // beep 计数持久化（同项目口径）：重轮询/刷新后计数不丢——「重轮询零增量」才能被
-  // 真断言（计数器与真实发声同代码路径，persist 只是读数口径，不是第二真相源）。
+  // 声明键（与引擎 GRANT_OPS 同一词表；'send-back' 是声明键，显示名 Send back）。
+  var PERMS = [
+    ['sign','Sign','Agree to a gate or a merge.'],
+    ['send-back','Send back','Send a ticket to the previous stage.'],
+    ['rerun','Rerun','Run the checks of a stage again.'],
+    ['open-ticket','Open ticket','Start a new ticket.'],
+    ['pause-resume','Pause and resume','Stop or continue a ticket between stages.'],
+    ['cleanup','Cleanup','Cancel a ticket.']
+  ];
   function beepCountKey(){ return 'sandbar-panel-beepcount-' + (state.project||'global'); }
   try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){ window.__panelBeepCount = 0; }
   function seenKey(p){ return 'sandbar-panel-seen-' + p; }
@@ -132,14 +280,15 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
       g.gain.setValueAtTime(0.08,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.35);
       o.stop(t+0.4);
     }catch(e){}
-    window.__panelBeepCount += 1; // testability seam: incremented by the SAME code path that plays audio
+    window.__panelBeepCount += 1;
     try{ localStorage.setItem(beepCountKey(), String(window.__panelBeepCount)); }catch(e){}
   }
   function el(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('span'); d.textContent=String(s==null?'':s); return d.innerHTML; }
   function bannerHtml(label,red){ return '<div class="banner'+(red?' red':'')+'">'+esc(label)+'</div>'; }
+  function hhmm(v){ var t=typeof v==='number'?v:Date.parse(v); if(!Number.isFinite(t)) return '—'; return String(new Date(t).toISOString()).slice(11,16); }
 
-  // ---- status polling + beep ----
+  // ---- polling + beep ----
   function poll(){
     if(!state.project) return;
     fetch('/sandbar-watchdog/api/status?project='+encodeURIComponent(state.project))
@@ -148,15 +297,14 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
         var okDoc = res.j && res.j.ok === true && res.j.result;
         state.status = okDoc ? res.j.result : null;
         state.reachable = !!okDoc;
-        renderOverview();
-        renderAlertsLedger(); // Alerts/Ledger tab 随每次轮询刷新（rework gen1：此前漏调用=两 tab 永空）
+        renderOverviewStrip();
+        renderAlertsLedger();
         tryBeep();
-        el('pollNote').textContent = 'polling every ' + (POLL_MS/1000) + 's · last ok ' + new Date().toISOString().slice(11,19);
       })
       .catch(function(){
         state.status = null; state.reachable = false;
-        renderOverview(); // route-down degraded banner — never an empty or normal state, never a beep
-        renderAlertsLedger(); // 不可达也点名进 Alerts/Ledger（显式降级，不是空态）
+        renderOverviewStrip();
+        renderAlertsLedger();
       });
   }
   function tryBeep(){
@@ -165,66 +313,52 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     var seen = seenSet(state.project);
     var d = beepDecision(st.notify, st.alerts, state.project, seen);
     if(d.play){
-      for(var i=0;i<d.keys.length;i++){ playBeepOnce(); seen.add(d.keys[i]); } // one beep per new unseen key; never on re-poll
+      for(var i=0;i<d.keys.length;i++){ playBeepOnce(); seen.add(d.keys[i]); }
       saveSeen(state.project, seen);
     }
   }
 
-  // ---- Overview ----
-  function renderOverview(){
+  // ---- Overview: strip + two columns ----
+  function degradedBanners(){
     var st = state.status, b='';
     var dg = pickDegraded({ reachable: state.reachable === true, declared: st?st.declared:undefined, alive: st&&st.heartbeat?st.heartbeat.alive:undefined, config_error: st?st.config_error:null });
     if(dg.kind==='route-down') b += bannerHtml(dg.label, true);
-    if(dg.kind==='not-declared'){ el('ovBanners').innerHTML = bannerHtml(dg.label, false); el('ovCards').innerHTML=''; el('ovFlow').innerHTML=''; return; }
-    if(dg.kind==='stale') b += bannerHtml(dg.label + ' — reason: ' + (st&&st.heartbeat?st.heartbeat.reason:''), true);
-    if(st && st.config_error) b += bannerHtml(dg.label, true);
-    if(st && st.last_error) b += bannerHtml('last_error: '+st.last_error, true);
-    if(st && st.ledger && st.ledger.unreadable) b += bannerHtml('Event ledger UNREADABLE: '+st.ledger.unreadable, true);
-    if(st && st.liveness && st.liveness.engine && st.liveness.engine.online === null) b += bannerHtml('Engine liveness UNKNOWN: '+(st.liveness.engine.detail||''), false);
-    if(st && st.self_lock && st.self_lock.state === 'unknown') b += bannerHtml('Self-lock UNKNOWN: '+(st.self_lock.reason||''), false);
-    el('ovBanners').innerHTML = b;
-    if(!st){ el('ovCards').innerHTML=''; el('ovFlow').innerHTML=''; return; }
-    var hb = st.heartbeat||{}, lg = st.ledger||{}, rc = st.reconcile||{}, ex = st.liveness&&st.liveness.executor||null;
-    var doing = ex ? (ex.state + (ex.evidence? ' — '+ex.evidence : '')) : 'executor liveness: no signal surface';
-    el('ovCards').innerHTML =
-      card('Watchdog alive', (hb.alive? '<span class="good">alive</span>' : '<span class="bad">NOT alive</span>') + '<br>last beat: '+esc(fmtAge(hb.age_seconds)) + (hb.reason? '<br><span class="muted">'+esc(hb.reason)+'</span>':'')) +
-      card('Ledger watermark', 'offset '+esc(lg.watermark_offset)+' · rows '+esc(lg.rows_seen)+'<br><span class="muted">dupes '+esc(fmtProportion(lg.dupes_skipped, lg.rows_seen))+' · malformed '+esc(fmtProportion(lg.malformed_rows, lg.rows_seen))+' · gaps '+esc(lg.gaps_seen)+'</span>') +
-      card('Reconcile', rc? (rc.state==='ok'?'<span class="good">ok</span>':'<span class="bad">'+esc(rc.state)+'</span>') + (rc.reason? '<br><span class="muted">'+esc(rc.reason)+'</span>':'') : '<span class="muted">no reconcile surface</span>') +
-      card('Doing now', esc(doing)) +
-      card('Startup replay', 'missing '+esc(st.startup&&st.startup.missing_rows)+' · replayed '+esc(st.startup&&st.startup.replayed_rows)) +
-      card('Wakes', (st.wakes||[]).length + ' wake(s) delivered') +
-      executorSessionCard(st);
-    el('ovFlow').innerHTML = flowHtml();
+    // t261003-06 rework（仲裁 code-fault D2）：not-declared 是显式非正常态，必须在
+    // Overview 落一条横幅——改版时这一支被漏掉，未声明项目首次到达只剩标题（读起来
+    // 像「一切正常但没数据」，正是 panel 契约禁止的冒充）。label 由 pickDegraded 给出
+    // （「Not enrolled — no watchdog.json … zero behavior by design」），单测有锚。
+    if(dg.kind==='not-declared') b += bannerHtml(dg.label, false);
+    if(dg.kind==='stale') b += bannerHtml(dg.label + '. Reason: ' + (st&&st.heartbeat?st.heartbeat.reason:''), true);
+    if(dg.kind==='config-error') b += bannerHtml(dg.label, true);
+    if(st && st.config_error && dg.kind!=='config-error') b += bannerHtml('The watchdog rejected the declaration: '+st.config_error, true);
+    if(st && st.last_error) b += bannerHtml('The last watchdog error: '+st.last_error, true);
+    if(st && st.ledger && st.ledger.unreadable) b += bannerHtml('The event ledger is unreadable: '+st.ledger.unreadable, true);
+    if(st && st.liveness && st.liveness.engine && st.liveness.engine.online === null) b += bannerHtml('Engine state unknown: '+(st.liveness.engine.detail||''), false);
+    if(st && st.self_lock && st.self_lock.state === 'unknown') b += bannerHtml('Self-lock state unknown: '+(st.self_lock.reason||''), false);
+    return b;
   }
-  function card(t,h){ return '<div class="card"><h3>'+t+'</h3>'+h+'</div>'; }
-  // Executor-session provenance (t260930-09 scope 6): who created this session, when,
-  // with which preset — answered from the watchdog's per-project event ledger.
-  function executorSessionCard(st){
-    var es = st.executor_session || null;
-    var evs = (st.session_provenance && st.session_provenance.events) || [];
-    var last = evs.length? evs[evs.length-1] : null;
-    var sid = (es && es.session_id) || (last && last.session_id) || null;
-    var h = sid ? esc(sid) : '<span class="muted">none yet — the watchdog creates one on demand when this project has work</span>';
-    if(last){
-      var when = new Date(typeof last.at==='number'? last.at : Date.parse(last.at)||0).toISOString().slice(0,19);
-      h += '<br><span class="muted">'+esc(last.action)+' by '+esc(last.by||'?')+' · preset '+esc(last.preset||'?')+' · '+esc(when)+'</span>';
-    }
-    if(es && es.reason) h += '<br><span class="muted">'+esc(es.last_action||'')+' — '+esc(es.reason)+'</span>';
-    if(st.session_provenance && st.session_provenance.malformed_rows>0) h += '<br><span class="bad">provenance ledger has '+esc(st.session_provenance.malformed_rows)+' malformed row(s)</span>';
-    return card('Executor session', h);
+  function renderOverviewStrip(){
+    el('ovBanners').innerHTML = degradedBanners();
+    var st = state.status;
+    var g = state.grants && state.grants.ok !== false ? state.grants : null;
+    var count = g && g.granted_ops ? g.granted_ops.length : null;
+    var total = g && typeof g.granted_total === 'number' ? g.granted_total : 6;
+    var on = count !== null ? masterOn(count) : false;
+    el('grantChip').textContent = chipLabel(count !== null ? count : 0, total);
+    el('powerBtn').dataset.on = String(on);
+    el('powerBtn').textContent = on ? 'Disable executor' : 'Enable executor';
+    el('liveDot').className = on ? 'live' : 'ro';
+    el('liveDot').textContent = on ? '● active' : '● read-only';
+    var sr = g && g.session_readout ? g.session_readout : null;
+    var sess = sr && sr.sessions && sr.sessions.length ? sr.sessions[0] : '';
+    el('sessionChip').textContent = 'Session: ' + (sess ? sess : 'none');
+    var stTxt = st && st.heartbeat ? (st.heartbeat.alive ? 'The watchdog is alive. Last beat: '+fmtAge(st.heartbeat.age_seconds) : 'The watchdog is not alive.') : 'The watchdog state is not known.';
+    el('stateTxt').textContent = stTxt + (on ? '' : ' The executor can only read and ask. The watchdog keeps running.');
+    renderWaitColumn();
+    renderActions();
   }
-  function flowHtml(){
-    var wakes = 0; try{ wakes = state.status.wakes.length; }catch(e){}
-    return ['ticket changes','event ledger','watchdog','executor'].map(function(n){ return '<span class="node">'+n+'</span>'; }).join('<span class="arr">&rarr;</span>')
-      + '<span class="arr">&rarr; exits:</span>'
-      + '<span class="node good">auto-advance</span><span class="arr">/</span>'
-      + '<span class="node">decision recorded</span><span class="arr">/</span>'
-      + '<span class="node" style="border-color:var(--amber);color:var(--amber)">call you ('+wakes+' wake(s), 1 beep each new alert)</span>';
-  }
-
-  // ---- Requests ----
+  // ---- requests (left column) ----
   function normalizeRequests(j){
-    // server returns {groups:[...]} (all projects) or {rows:[...]} (single project); page tolerates both.
     var rows = [];
     if(j && Array.isArray(j.rows)) rows = j.rows;
     else if(j && Array.isArray(j.groups)){
@@ -242,102 +376,287 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
       answered: r.status==='answered' };
   }
   function loadRequests(){
-    var url = '/sandbar-executor-panel/api/requests';
-    if(state.project) url += '?project='+encodeURIComponent(state.project);
-    fetch(url).then(function(r){return r.json();}).then(function(j){
+    if(!state.project){ state.requests=null; renderWaitColumn(); return; }
+    fetch('/sandbar-executor-panel/api/requests?project='+encodeURIComponent(state.project)).then(function(r){return r.json();}).then(function(j){
       state.requests = normalizeRequests(j);
-      renderRequests();
-    }).catch(function(){ state.requests = null; renderRequests(); });
+      renderWaitColumn();
+    }).catch(function(){ state.requests = null; renderWaitColumn(); });
   }
-  function renderRequests(){
-    var st = state.requests;
-    if(!st || st.ok!==true){ el('reqList').innerHTML = '<div class="mitem muted">requests ledger unreachable (explicit — not an empty inbox)</div>'; return; }
-    var rows = st.rows;
-    var groups = groupByProject(rows);
-    var shown = 0, html='';
-    for(var gi=0; gi<groups.length; gi++){
-      var g = groups[gi];
-      html += '<div class="grp">'+esc(g.project)+'</div>';
-      for(var i=0;i<g.rows.length && shown<state.reqLimit;i++,shown++){
-        var r = g.rows[i]; var u = urgencyOf(r);
-        var cls = r.status==='answered' ? 'tr-answered' : (u.expired ? 'bad' : 'tr-waiting');
-        html += '<div class="mitem '+cls+'" data-id="'+esc(r.id)+'" data-project="'+esc(r.project)+'">'
-          + esc(String(r.question).slice(0,90))
-          + '<br><span class="muted">'+esc(r.kind)+' · waiting '+esc(fmtWaiting(u.waiting_ms))
-          + (u.expired? ' · <span class="bad">EXPIRED (still waiting — never auto-closed)</span>':'')
-          + (r.status==='answered'? ' · answered by '+esc(r.answered_by||'?'):'')+'</span></div>';
-      }
+  function traceLine(r){
+    var t = 'Request id: ' + r.id;
+    if(r.raised_by) t = 'Raised by session ' + r.raised_by + '. ' + t;
+    t += '. Default action: ' + (r.default_action ? r.default_action : 'none') + '.';
+    return t;
+  }
+  function rowHead(r, cls){
+    var u = urgencyOf(r);
+    var meta = esc(r.kind) + ' · ' + esc(fmtWaiting(u.waiting_ms));
+    if(u.expired) meta += ' · expired. It still waits.';
+    if(r.status==='answered') meta = esc(r.kind);
+    return '<div class="head" data-id="'+esc(r.id)+'"><span class="dot '+cls+'"></span>'
+      + '<span class="txt">'+esc(r.question)+'</span>'
+      + '<span class="meta">'+meta+'</span><span class="chev">&#9656;</span></div>';
+  }
+  function rowBody(r){
+    if(r.status==='answered'){
+      return '<div class="body"><div class="detail">'+esc(r.detail||'(no detail was given)')+'</div>'
+        + '<div class="given">You answered: '+esc(r.answer||'')+'</div>'
+        + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
-    if(rows.length===0) html = '<div class="mitem muted">no requests in the ledger (nothing is waiting on you)</div>';
-    else if(shown<rows.length) html += '<div class="muted" style="padding:4px 9px">'+(rows.length-shown)+' older — use "show more" (tail is kept)</div>';
-    el('reqList').innerHTML = html;
-    Array.prototype.forEach.call(el('reqList').querySelectorAll('.mitem[data-id]'), function(n){
-      n.onclick = function(){ selectRequest(n.dataset.id); };
-      if(state.selected===n.dataset.id) n.className += ' sel';
+    var controls;
+    if(hasOptions(r)){
+      controls = '<div class="opts">';
+      var opts = r.options;
+      for(var i=0;i<opts.length;i++){
+        controls += '<button data-answer="'+esc(opts[i])+'"'+(i===0?' class="primary"':'')+'>'+esc(opts[i])+'</button>';
+      }
+      controls += '<button class="other" data-reveal="1">Type an answer</button></div>';
+    } else {
+      controls = '<div class="answer"><input placeholder="Type an answer" data-answerbox="1"><button data-sendbox="1">Send</button></div>';
+    }
+    return '<div class="body"><div class="detail">'+esc(r.detail||'(no detail was given)')+'</div>'
+      + controls
+      + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
+  }
+  function renderWaitColumn(){
+    var st = state.requests;
+    var waitHtml = '', doneHtml = '';
+    var waiting = [], answered = [];
+    if(st && st.ok===true){ var sp = splitWaiting(st.rows); waiting = sp.waiting; answered = sp.answered; }
+    else if(!st){ waitHtml = '<div class="act" style="border:0"><span class="say muted">The request ledger could not be reached. This is not an empty inbox.</span></div>'; }
+    for(var i=0;i<waiting.length;i++) waitHtml += '<div class="row wait" data-open="false" data-row="'+esc(waiting[i].id)+'">'+rowHead(waiting[i],'amber')+rowBody(waiting[i])+'</div>';
+    for(var j=0;j<answered.length;j++) doneHtml += '<div class="row done" data-open="false" data-row="'+esc(answered[j].id)+'">'+rowHead(answered[j],'grey')+rowBody(answered[j])+'</div>';
+    el('waitList').innerHTML = waitHtml;
+    el('doneList').innerHTML = doneHtml;
+    el('waitHead').textContent = 'Needs your answer · ' + waiting.length;
+    el('waitEmpty').style.display = (waiting.length===0 && st && st.ok===true) ? '' : 'none';
+    el('doneHead2').textContent = 'Answered · ' + answered.length;
+    el('doneWrap').style.display = answered.length===0 ? 'none' : '';
+    var badge = el('reqBadge');
+    badge.textContent = String(waiting.length);
+    badge.className = 'badge' + (waiting.length===0 ? ' zero' : '');
+    bindRows(el('waitList'));
+    bindRows(el('doneList'));
+  }
+  function bindRows(root){
+    Array.prototype.forEach.call(root.querySelectorAll('.head[data-id]'), function(h){
+      h.onclick = function(){
+        var row = h.parentElement;
+        row.dataset.open = row.dataset.open==='true' ? 'false' : 'true';
+      };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('button[data-answer]'), function(b){
+      b.onclick = function(){ sendAnswer(b.closest('[data-row]').dataset.row, b.dataset.answer); };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('button[data-reveal]'), function(b){
+      b.onclick = function(){
+        var opts = b.parentElement;
+        var box = document.createElement('div');
+        box.className = 'answer';
+        box.innerHTML = '<input placeholder="Type an answer"><button>Send</button>';
+        opts.replaceWith(box);
+        var input = box.querySelector('input');
+        box.querySelector('button').onclick = function(){ if(input.value.trim()!=='') sendAnswer(box.closest('[data-row]').dataset.row, input.value); else input.focus(); };
+        input.onkeydown = function(e){ if(e.key==='Enter' && input.value.trim()!=='') sendAnswer(box.closest('[data-row]').dataset.row, input.value); };
+        input.focus();
+      };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('button[data-sendbox]'), function(b){
+      b.onclick = function(){
+        var input = b.parentElement.querySelector('input');
+        if(input.value.trim()!=='') sendAnswer(b.closest('[data-row]').dataset.row, input.value); else input.focus();
+      };
     });
   }
-  function selectRequest(id){
-    state.selected = id;
-    var r = state.requests.rows.find(function(x){ return x.id===id; });
-    if(!r) return;
-    var u = urgencyOf(r);
-    el('reqDetail').innerHTML =
-      '<h3>'+esc(r.question)+'</h3>'
-      + '<p class="muted">'+esc(r.detail||'')+'</p>'
-      + '<p>Kind: '+esc(r.kind)+' · Default action: <b>'+esc(r.default_action||'(none)')+'</b></p>'
-      + '<p class="muted">Waiting '+esc(fmtWaiting(u.waiting_ms))+(r.expires_at? ' · expires at '+String(new Date(Date.parse(r.expires_at)).toISOString()).slice(0,19):' · no expiry')
-      + ' · project '+esc(r.project)+'</p>'
-      + (r.status==='answered'
-          ? '<p class="tr-answered">Answered by '+esc(r.answered_by||'?')+': '+esc(r.answer)+'</p>'
-          : '<textarea id="answerBox" placeholder="your answer"></textarea><button id="answerBtn">Answer (appends a closing row — the request row is never rewritten)</button>')
-      + '<p class="muted">derived · own ledger, never deleted by the machine, never answered by the machine</p>';
-    var btn = el('answerBtn');
-    if(btn) btn.onclick = function(){
-      postJson('/sandbar-executor-panel/api/requests/answer', {project:r.project, id:r.id, answer: el('answerBox').value, by:'host'})
-        .then(function(j){ if(j.ok!==true){ alert('Answer rejected: '+(j.error||'?')); } loadRequests(); })
-        .catch(function(e){ alert('Answer failed to send: '+((e&&e.message)||e)); });
-    };
-    renderRequests();
+  function sendAnswer(id, answer){
+    postJson('/sandbar-executor-panel/api/requests/answer', {project: state.project, id: id, answer: answer, by:'host'})
+      .then(function(j){
+        if(j.ok!==true){ alert('The answer was rejected: '+(j.error||'?')); }
+        loadRequests();
+      })
+      .catch(function(e){ alert('The answer failed to send: '+((e&&e.message)||e)); });
   }
-  el('reqMore').onclick = function(){ state.reqLimit += 20; renderRequests(); };
+  // ---- recent actions (right column) ----
+  function loadActions(){
+    if(!state.project){ state.actions=null; renderActions(); return; }
+    fetch('/sandbar-executor-panel/api/actions?project='+encodeURIComponent(state.project)).then(function(r){return r.json();}).then(function(j){
+      state.actions = j; renderActions();
+    }).catch(function(){ state.actions = {ok:false, reason:'the actions endpoint could not be reached'}; renderActions(); });
+  }
+  function renderActions(){
+    var a = state.actions, html = '';
+    if(!state.project){ html = ''; }
+    else if(!a || a.ok!==true){
+      // 显式降级：点名原因，绝不渲染成空列表冒充「最近没动作」。
+      html = '<div class="act" style="border:0"><span class="say muted">No action list. ' + esc(a&&a.reason ? a.reason : 'The source is not known.') + '</span></div>';
+    } else if(a.actions.length===0){
+      html = '<div class="act" style="border:0"><span class="say muted">The ledger holds no action of the six kinds. Rows: bad ' + esc(a.malformed_rows) + ' · other kinds ' + esc(a.unmapped_rows) + '.</span></div>';
+    } else {
+      for(var i=0;i<a.actions.length;i++){
+        var x = a.actions[i];
+        var cls = {Sign:'sign','Send back':'sendback',Rerun:'retry','Open ticket':'open',Pause:'pause',Resume:'pause','Pause or resume':'pause',Cancel:'cancel'}[x.action]||'pause';
+        html += '<div class="act"><span class="t">'+esc(hhmm(x.at))+'</span>'
+          + '<span class="pill '+cls+'" title="Allowed by the '+esc(x.permission)+' permission.">'+esc(x.action)+'</span>'
+          + '<span class="tk">'+esc(x.ticket)+'</span>'
+          + '<span class="say">'+esc(x.result||'done')+'</span></div>';
+      }
+    }
+    el('actList').innerHTML = html;
+  }
 
-  // ---- Alerts / Ledger ----
+  // ---- Alerts / Ledger (STE copy) ----
   function renderAlertsLedger(){
     var st = state.status;
-    if(!st){ el('alertBanner').innerHTML = bannerHtml(pickDegraded({reachable: state.reachable===true}).label, true); el('alertTable').innerHTML=''; el('ledgerTable').innerHTML=''; el('ledgerHealth').innerHTML=''; return; }
-    var rows = st.alerts||[];
-    var html = '<tr><th>at</th><th>level</th><th>rule</th><th>title</th><th>night</th></tr>';
-    for(var i=0;i<rows.length;i++){
-      var a = rows[i];
-      html += '<tr><td>'+String(new Date(typeof a.at==='number'?a.at:Date.parse(a.at)||0).toISOString()).slice(11,19)+'</td><td>'+esc(a.level)+'</td><td>'+esc(a.rule)+'</td><td>'+esc(a.title)+'</td><td>'+(a.night_muted?'<span class="muted">night-muted</span>':'')+'</td></tr>';
+    if(!st){
+      el('alertBanner').innerHTML = bannerHtml(pickDegraded({reachable: state.reachable===true}).label, true);
+      el('alertList').innerHTML=''; el('alertHead').textContent='Recent · 0';
+      el('ledgerGrid').innerHTML=''; el('ledgerFile').textContent=''; el('ledgerEvents').innerHTML='';
+      return;
     }
-    if(rows.length===0) html += '<tr><td colspan="5" class="muted">no alerts recorded (this is a real empty — alerts exist only when the watchdog wrote them)</td></tr>';
-    el('alertTable').innerHTML = html;
-    el('alertBanner').innerHTML = rows.some(function(a){return a.night_muted;}) ? bannerHtml('Rows marked night-muted were silenced per the night policy (redline exceptions still beep).') : '';
+    var rows = st.alerts||[];
+    el('alertHead').textContent = 'Recent · ' + rows.length;
+    var html = '';
+    for(var i=0;i<rows.length;i++){
+      var a2 = rows[i];
+      var cls = a2.level==='redline' ? 'red' : (a2.night_muted ? 'blue' : 'amber');
+      html += '<div class="row"><div class="head" style="cursor:default"><span class="dot '+cls+'"></span>'
+        + '<span class="txt">'+esc(a2.title)+'</span>'
+        + '<span class="meta">'+esc(hhmm(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
+    }
+    if(rows.length===0) html = '<div class="empty">No alerts exist. The watchdog writes an alert only when a rule fires.</div>';
+    el('alertList').innerHTML = html;
+    el('alertBanner').innerHTML = rows.some(function(x){return x.night_muted;}) ? bannerHtml('Rows marked night-muted were silenced by the night policy. Redline alerts still play a sound.') : '';
     var lg = st.ledger||{};
-    el('ledgerHealth').innerHTML = '<div class="cards">'
-      + card('Health (proportions, absolute numbers mislead)', 'dupes '+esc(fmtProportion(lg.dupes_skipped, lg.rows_seen))+'<br>malformed '+esc(fmtProportion(lg.malformed_rows, lg.rows_seen))+'<br>gaps '+esc(lg.gaps_seen)+' · watermark '+esc(lg.watermark_offset))
-      + card('Source', '<span class="muted">'+esc(lg.path||'—')+'</span><br>derived · not the source of truth')
-      + '</div>' + (lg.unreadable? bannerHtml('Ledger UNREADABLE: '+lg.unreadable, true) : '');
-    el('ledgerTable').innerHTML = '<tr><th colspan="4">raw event stream (paged view lives with the per-project ledger file; health above is from the watchdog status surface)</th></tr>'
-      + '<tr><td colspan="4" class="muted">rows_seen '+esc(lg.rows_seen)+' · last row '+esc(lg.last_row_at? String(new Date(typeof lg.last_row_at==='number'?lg.last_row_at:Date.parse(lg.last_row_at)).toISOString()).slice(0,19):'—')+'</td></tr>';
+    el('ledgerGrid').innerHTML =
+      '<div class="cell"><b>'+esc(lg.rows_seen!=null?lg.rows_seen:'—')+'</b><span>rows</span></div>'
+      + '<div class="cell"><b>'+esc(fmtProportion(lg.dupes_skipped, lg.rows_seen))+'</b><span>duplicates</span></div>'
+      + '<div class="cell"><b>'+esc(lg.malformed_rows!=null?lg.malformed_rows:'—')+'</b><span>bad rows</span></div>'
+      + '<div class="cell"><b>'+esc(lg.gaps_seen!=null?lg.gaps_seen:'—')+'</b><span>gaps</span></div>';
+    el('ledgerFile').textContent = lg.path || 'The ledger path is not known.';
+    var ev = '';
+    var wakes = st.wakes||[];
+    for(var k=0;k<Math.min(wakes.length,3);k++){
+      var w2 = wakes[k];
+      ev += '<div class="act"><span class="t">'+esc(hhmm(w2.at))+'</span><span class="pill open">WAKE</span>'
+        + '<span class="tk">'+esc(w2.ticket||w2.id||'')+'</span><span class="say">'+esc(w2.stage||w2.stage_state||'sent')+'</span></div>';
+    }
+    if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">No recent events. The watchdog appends here when a ticket changes.</span></div>';
+    el('ledgerEvents').innerHTML = ev;
   }
 
-  // ---- Settings ----
+  // ---- Grants tab ----
+  function loadGrants(){
+    if(!state.project){ state.grants=null; renderGrants(); return; }
+    fetch('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project)).then(function(r){return r.json();}).then(function(j){
+      state.grants = j; renderGrants(); renderOverviewStrip();
+    }).catch(function(){ state.grants = {ok:false, error:'the grants endpoint could not be reached'}; renderGrants(); });
+  }
+  function declaredSessions(){
+    var g = state.grants;
+    if(g && g.session_readout && Array.isArray(g.session_readout.sessions)) return g.session_readout.sessions;
+    var d = g && g.declaration;
+    return d && Array.isArray(d.executor_sessions) ? d.executor_sessions : [];
+  }
+  function renderGrants(){
+    if(state.grants && state.grants.ok===false){
+      el('grantsBanner').innerHTML = bannerHtml('Grants are not available. Reason: '+(state.grants.error||'?'), true);
+      return;
+    }
+    var g = state.grants || {};
+    var sr = g.session_readout || null;
+    var sessions = declaredSessions();
+    if(!el('grantSession').value) el('grantSession').value = sessions[0] || '';
+    // 有活跃夜间档=读出面的 granted_ops 已含全部六项——开关跟着 granted_ops 走。
+    var grantedSet = {};
+    (g.granted_ops||[]).forEach(function(op){ grantedSet[op]=1; });
+    var html = '';
+    for(var i=0;i<PERMS.length;i++){
+      var p = PERMS[i];
+      var on = grantedSet[p[0]]===1;
+      html += '<div class="line"><div class="lab">'+esc(p[1])+' <small>'+esc(p[2])+'</small></div>'
+        + '<div class="sw grant" data-op="'+esc(p[0])+'" data-on="'+String(on)+'"></div></div>';
+    }
+    el('permList').innerHTML = html;
+    Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){
+      s.onclick = function(){ s.dataset.on = s.dataset.on==='true' ? 'false' : 'true'; syncMaster(); };
+    });
+    var count = g.granted_ops ? g.granted_ops.length : 0;
+    el('masterSw').dataset.on = String(masterOn(count));
+    el('masterSw').onclick = function(){
+      var on = el('masterSw').dataset.on==='true';
+      setAllSwitches(!on);
+      syncMaster();
+    };
+    el('grantsReadout').textContent = sr ? sr.sentence : (g.grants && g.grants.readout_note ? g.grants.readout_note : '');
+    if(g.declaration_state && g.declaration_state.kind && g.declaration_state.kind!=='ok'){
+      el('grantsBanner').innerHTML = bannerHtml('The grants declaration cannot be read ('+g.declaration_state.kind+'). Nothing is granted. Detail: '+(g.declaration_state.error||'none'), true);
+    } else if(!g.declaration_state || g.declaration_state.declared===false){
+      el('grantsBanner').innerHTML = bannerHtml('No grants declaration exists yet. Save once to create it. Nothing is granted before that.', false);
+    } else {
+      el('grantsBanner').innerHTML = '';
+    }
+    el('grantsMatrix').innerHTML = g.grants && g.grants.rows && g.grants.rows.length
+      ? '<div class="sect lead">Capability matrix</div><div class="muted" style="font-size:11px">The list below shows what each permission means per template. A row here is not a grant. Only the switches above grant.</div><table style="margin-top:6px"><tr><th>Permission</th><th>Template</th><th>Granted</th></tr>'
+        + g.grants.rows.map(function(r){ return '<tr><td>'+esc(r.op)+'</td><td>'+esc(r.template)+'</td><td>'+(r.granted===true?'<span class="good">yes</span>':'<span class="muted">no</span>')+'</td></tr>'; }).join('') + '</table>'
+      : '';
+    el('grantsSaveOut').innerHTML = grantsSaveMsg;
+  }
+  function setAllSwitches(on){
+    Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){ s.dataset.on = String(on); });
+  }
+  function syncMaster(){
+    var n = el('permList').querySelectorAll('.sw.grant[data-on="true"]').length;
+    el('masterSw').dataset.on = String(masterOn(n));
+    el('grantChip').textContent = chipLabel(n, 6);
+  }
+  function saveGrants(){
+    if(!state.project) return;
+    var grants = {};
+    Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){
+      if(s.dataset.on==='true') grants[s.dataset.op] = true;
+    });
+    var body = { grants: grants, by: 'host' };
+    var sess = el('grantSession').value.trim();
+    if(sess) body.executor_sessions = [sess];
+    postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), body)
+      .then(function(j){
+        grantsSaveMsg = j.saved===true ? '<span class="good">Saved.</span>'
+          : '<span class="bad">The save was rejected. The file did not change. Reason: '+esc(j.error||j.reason||'?')+'</span>';
+        el('grantsSaveOut').innerHTML = grantsSaveMsg;
+        loadGrants();
+      })
+      .catch(function(e){ grantsSaveMsg = '<span class="bad">The save failed to send: '+esc((e&&e.message)||String(e))+'</span>'; el('grantsSaveOut').innerHTML = grantsSaveMsg; });
+  }
+  function masterSwitch(enabled){
+    if(!state.project) return;
+    postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), {op:'master', enabled: enabled, by:'host'})
+      .then(function(j){
+        if(j.saved!==true){ alert('The change was rejected: '+(j.error||j.reason||'?')); }
+        loadGrants();
+      })
+      .catch(function(e){ alert('The change failed to send: '+((e&&e.message)||e)); });
+  }
+
+  // ---- Settings (watchdog knobs; a different face from the executor switch) ----
   function loadSettings(){
     if(!state.project){ return; }
     fetch('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project)).then(function(r){return r.json();}).then(function(j){
       state.settings = j; renderSettings();
-    }).catch(function(){ state.settings={ok:false,error:'settings endpoint unreachable'}; renderSettings(); });
-    fetch('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project)).then(function(r){return r.json();}).then(function(j){
-      state.grants = j; renderSettings();
-    }).catch(function(){ state.grants=null; });
+    }).catch(function(){ state.settings={ok:false,error:'the settings endpoint could not be reached'}; renderSettings(); });
   }
   var KNOBS = [
-    ['enabled','boolean'],['executor_session','string'],['stall_minutes','number'],['reconcile_seconds','number'],
-    ['alerts.enabled','boolean'],['alerts.sound','boolean'],['alerts.desktop','boolean'],
-    ['alerts.night.start','hhmm'],['alerts.night.end','hhmm'],['alerts.night.policy','policy'],
-    ['alerts.redline','string[]'],['alerts.keep_days','number']
+    ['enabled','boolean','The watchdog runs.'],
+    ['executor_session','string','The session the watchdog serves.'],
+    ['stall_minutes','number','Minutes without motion raise a stall alert.'],
+    ['reconcile_seconds','number','Seconds between two reconciles.'],
+    ['alerts.enabled','boolean','The watchdog raises alerts.'],
+    ['alerts.sound','boolean','A new alert plays a sound.'],
+    ['alerts.desktop','boolean','A new alert shows on the desktop.'],
+    ['alerts.night.start','hhmm','Night starts at this time.'],
+    ['alerts.night.end','hhmm','Night ends at this time.'],
+    ['alerts.night.policy','policy','The night alert policy.'],
+    ['alerts.redline','string[]','These rules always alert, even at night.'],
+    ['alerts.keep_days','number','Days to keep alerts.']
   ];
   function getIn(o,path){ var parts=path.split('.'); for(var i=0;i<parts.length;i++){ if(o==null) return undefined; o=o[parts[i]]; } return o; }
   function setIn(o,path,v){ var parts=path.split('.'); var c=o; for(var i=0;i<parts.length-1;i++){ c[parts[i]]=c[parts[i]]||{}; c=c[parts[i]]; } c[parts[parts.length-1]]=v; }
@@ -345,63 +664,29 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     return (st && (st.config_provenance && st.config_provenance.keys || st.provenance && st.provenance.keys)) || {};
   }
   function provenanceFor(st, path){
-    // WHICH declaration key decided this value (KI-148/149: the host must be able to answer "what decided this").
-    if(st && st.night_override && st.night_override_active && path==='alerts.night.policy') return 'panel override (sleep toggle, until '+new Date(st.night_override.until).toISOString()+')';
+    if(st && st.night_override && st.night_override_active && path==='alerts.night.policy') return 'The sleep toggle set this. It ends at '+new Date(st.night_override.until).toISOString().slice(0,16)+'.';
     var m = provenanceMap(st);
-    return m[path] ? String(m[path]) : 'factory-default';
+    return m[path] ? String(m[path]) : 'The factory default sets this.';
   }
   function renderSettings(){
     var st = state.settings;
-    if(!st || st.ok===false){ var eb = bannerHtml(st && st.error ? st.error : 'settings endpoint unreachable', true); el('setBanners').innerHTML=eb; el('setKnobs').innerHTML=''; el('setGrants').innerHTML=''; return; }
+    if(!st || st.ok===false){ el('setBanners').innerHTML = bannerHtml(st && st.error ? st.error : 'The settings endpoint could not be reached.', true); el('setKnobs').innerHTML=''; return; }
     var b='';
-    if(st.config_error) b += bannerHtml('Declaration currently REJECTED by loader: '+st.config_error, true);
-    if(st.declared===false) b += bannerHtml('Not enrolled — saving below CREATES the declaration (file exists = enrolled).');
-    if(st.night_override_expired) b += bannerHtml('Night override EXPIRED (still "'+esc(st.night_override&&st.night_override.policy)+'") — revert or renew explicitly (no silent auto-revert).');
+    if(st.config_error) b += bannerHtml('The loader rejected the declaration: '+st.config_error, true);
+    if(st.declared===false) b += bannerHtml('No watchdog declaration exists. A save creates it.');
+    if(st.night_override_expired) b += bannerHtml('The night policy expired. The policy is still "'+esc(st.night_override&&st.night_override.policy)+'". Save to change it. Nothing reverts on its own.');
     el('setBanners').innerHTML=b;
     var cfg = st.config||{};
     var html = '';
     for(var i=0;i<KNOBS.length;i++){
       var path=KNOBS[i][0], type=KNOBS[i][1], v=getIn(cfg,path);
-      html += '<div class="knob"><div>'+esc(path)+'</div><div>'+inputFor(path,type,v)+'</div><div class="src">decided by: '+esc(provenanceFor(st,path))+'</div></div>';
+      html += '<div class="knob"><div>'+esc(path)+'</div><div>'+inputFor(path,type,v)+'</div><div class="src">'+esc(provenanceFor(st,path))+'</div></div>';
     }
-    html += '<div style="margin-top:8px"><button id="saveBtn">Save (validate-on-write: parsed back through the real loader; rejected saves never touch the file)</button> '
-      + '<button id="revokeBtn">One-click revoke (enabled:false)</button> '
-      + '<button id="sleepBtn">I am going to sleep (night-only policy + 8h expiry)</button> '
-      + '<button id="wakeBtn">Revert night override</button></div><div id="saveResult" class="muted" style="margin-top:6px"></div>';
     el('setKnobs').innerHTML = html;
-    el('saveResult').innerHTML = saveMsg; // t261001-10：重渲染后回写保存结果（拒收理由不被刷新抹掉）
-    el('saveBtn').onclick = function(){
-      var next = JSON.parse(JSON.stringify(cfg));
-      for(var i=0;i<KNOBS.length;i++){ setIn(next, KNOBS[i][0], readInput(KNOBS[i][0], KNOBS[i][1])); }
-      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config:next})
-        .then(function(j){
-          saveMsg = j.saved===true ? '<span class="good">saved & re-validated through the loader</span>'
-            : '<span class="bad">REJECTED (file untouched): '+esc(j.error||j.reason||'?')+'</span>';
-          el('saveResult').innerHTML = saveMsg;
-          loadSettings();
-        })
-        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
-    };
-    el('revokeBtn').onclick = function(){
-      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'revoke'})
-        .then(function(){ loadSettings(); })
-        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
-    };
-    el('sleepBtn').onclick = function(){
-      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'sleep', policy:'redline-only', until: Date.now()+8*3600*1000})
-        .then(function(j){ if(j.ok!==true){ saveMsg = '<span class="bad">Sleep toggle rejected: '+esc(j.error||'?')+'</span>'; el('saveResult').innerHTML = saveMsg; } loadSettings(); })
-        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
-    };
-    el('wakeBtn').onclick = function(){
-      postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config: (function(){ var n=JSON.parse(JSON.stringify(cfg)); setIn(n,'alerts.night.policy', st.factory_defaults? st.factory_defaults.alerts.night.policy : 'redline-only'); return n; })()})
-        .then(function(){ loadSettings(); })
-        .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
-    };
-    renderGrants();
+    el('saveResult').innerHTML = saveMsg;
   }
-  // t261001-10：idFor 是 id 生成的唯一真源（inputFor 建面 + readInput 读面共用），
-  // 用 split/join 而不是正则——正则写法的反斜杠在本文件的外层模板字符串里会被吃掉，
-  // 浏览器拿到通配点号，路径逐字符变下划线 → 等长路径 id 撞车、读错字段。
+  // idFor 是 id 生成的唯一真源（inputFor 建面 + readInput 读面共用）——
+  // 用 split/join 而不是正则（模板字符串吃反斜杠的教训，t261001-10）。
   function idFor(path){ return 'kb_'+path.split('.').join('_'); }
   function inputFor(path,type,v){
     var id=idFor(path);
@@ -417,85 +702,87 @@ textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid va
     if(type==='string[]') return n.value.split(',').map(function(s){return s.trim();}).filter(Boolean);
     return n.value;
   }
-  function renderGrants(){
-    var payload = state.grants;
-    if(!payload){ el('setGrants').innerHTML=''; return; }
-    var g = payload.grants;
-    if(g && g.ok===false){ el('setGrants').innerHTML = bannerHtml('Grants unavailable (explicit, NOT an empty list): '+g.reason); return; }
-    // t261001-21（读出面诚实）：声明状态先讲清「到底授了什么」，派生能力矩阵只做背景。
-    // 行存在 ≠ 已授予：每行的 granted 位才是真授予（由 executor-grants 声明决定）。
-    var ds = payload.declaration_state || {};
-    var rows = (g && g.rows) || [];
-    var grantedCount = typeof g.granted_count === 'number' ? g.granted_count
-      : rows.filter(function(r){ return r.granted===true; }).length;
-    var html = '';
-    if(!ds.declared || ds.kind!=='ok'){
-      html += bannerHtml('NO usable executor declaration (state: '+(ds.kind||'absent')+'): NOTHING is granted for this project. The table below is the derived CAPABILITY MATRIX — what each verb would mean per template — NOT a list of existing grants.'+(ds.error? ' detail: '+ds.error : ''), true);
-    } else if(grantedCount===0){
-      html += bannerHtml('Declaration exists but grants NOTHING (zero-grant). The table below is the derived capability matrix, NOT a list of grants.', false);
-    } else {
-      html += bannerHtml(grantedCount+' op(s) currently GRANTED by declaration. Only rows marked GRANTED below are real grants; the rest of the table is the derived capability matrix.', false);
-    }
-    html += '<div class="card" style="margin-bottom:8px"><h3>Capability matrix derived from the template (decision 10/15), never hand-maintained — a row here does NOT mean granted</h3>'
-      + '<table><tr><th>op</th><th>template</th><th>granted</th><th>why shown</th></tr>';
-    for(var i=0;i<rows.length;i++){
-      var r=rows[i];
-      html += '<tr><td>'+esc(r.op)+'</td><td>'+esc(r.template)+(r.template_kind? ' ('+esc(r.template_kind)+')':'')+'</td><td>'
-        + (r.granted===true ? '<span class="good">GRANTED</span>' : '<span class="muted">no</span>')
-        + '</td><td class="muted">'+esc(r.reason||'derived: fixed op × template facts')+'</td></tr>';
-    }
-    if(rows.length===0) html += '<tr><td colspan="4" class="muted">no capability rows (all filtered or revoked)</td></tr>';
-    html += '</table>' + (g && g.readout_note? '<div class="muted">'+esc(g.readout_note)+'</div>':'')
-      + (g && g.filtered_note? '<div class="muted">'+esc(g.filtered_note)+'</div>':'') + '</div>';
-    el('setGrants').innerHTML = html;
-  }
-
-  // t261001-10：传输层失败（网络断/非 JSON 响应）也必须显式可见——postJson 的 r.json()
-  // 解析失败会走 reject，各 POST 调用点都有 .catch 落到 #saveResult。
+  el('saveBtn').onclick = function(){
+    if(!state.project) return;
+    var st = state.settings; if(!st || st.ok===false) return;
+    var cfg = st.config||{};
+    var next = JSON.parse(JSON.stringify(cfg));
+    for(var i=0;i<KNOBS.length;i++){ setIn(next, KNOBS[i][0], readInput(KNOBS[i][0], KNOBS[i][1])); }
+    postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config:next})
+      .then(function(j){
+        saveMsg = j.saved===true ? '<span class="good">Saved. The loader accepted the file.</span>'
+          : '<span class="bad">REJECTED. The file did not change: '+esc(j.error||j.reason||'?')+'</span>';
+        el('saveResult').innerHTML = saveMsg;
+        loadSettings();
+      })
+      .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
+  };
+  el('revokeBtn').onclick = function(){
+    if(!state.project) return;
+    postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'revoke'})
+      .then(function(j){ if(j.saved!==true){ saveMsg='<span class="bad">REJECTED: '+esc(j.error||'?')+'</span>'; el('saveResult').innerHTML = saveMsg; } loadSettings(); })
+      .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
+  };
+  el('sleepBtn').onclick = function(){
+    if(!state.project) return;
+    postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'sleep', policy:'redline-only', until: Date.now()+8*3600*1000})
+      .then(function(j){ if(j.ok!==true){ saveMsg = '<span class="bad">The sleep toggle was rejected: '+esc(j.error||'?')+'</span>'; el('saveResult').innerHTML = saveMsg; } loadSettings(); })
+      .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
+  };
+  el('wakeBtn').onclick = function(){
+    if(!state.project) return;
+    var st = state.settings; if(!st || st.ok===false) return;
+    var cfg = st.config||{};
+    var next = JSON.parse(JSON.stringify(cfg));
+    setIn(next,'alerts.night.policy', st.factory_defaults? st.factory_defaults.alerts.night.policy : 'redline-only');
+    postJson('/sandbar-executor-panel/api/settings?project='+encodeURIComponent(state.project), {op:'save', config:next})
+      .then(function(){ loadSettings(); })
+      .catch(function(e){ saveMsg = saveFailHtml(e); el('saveResult').innerHTML = saveMsg; });
+  };
   function saveFailHtml(e){
-    return '<span class="bad">SAVE FAILED (nothing written): '+esc((e&&e.message)||String(e))+'</span>';
+    return '<span class="bad">SAVE FAILED. Nothing was written: '+esc((e&&e.message)||String(e))+'</span>';
   }
   function postJson(url, obj){
     return fetch(url, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(obj)})
       .then(function(r){ return r.json(); });
   }
 
-  // ---- project selection + boot ----
-  // t260930-09 scope 8: the dropdown lists EVERY registered project (the watchdog status
-  // list endpoint now returns undeclared registry projects too, each carrying its
-  // declared flag) — a project can be inspected before anything is declared. The
-  // ?project=<key> deep link keeps working.
-  function projects(){
-    return fetch('/sandbar-watchdog/api/status').then(function(r){return r.json();}).then(function(j){
-      var list=[];
-      if(j && j.ok===true && j.result && Array.isArray(j.result.projects)){
-        j.result.projects.forEach(function(p){ if(p && p.project) list.push({project:p.project, declared:p.declared!==false}); });
-      }
-      return list;
-    }).catch(function(){ return []; });
+  // ---- tab switching ----
+  var PANES = [['t-overview','paneOv'],['t-grants','paneGrants'],['t-alerts','paneAlert'],['t-ledger','paneLedger'],['t-settings','paneSet']];
+  function showTab(id){
+    for(var i=0;i<PANES.length;i++){
+      el(PANES[i][1]).style.display = (PANES[i][0]===id) ? '' : 'none';
+    }
   }
-  function setProject(p){
-    state.project = p; state.reqLimit = 20; state.selected = null; saveMsg = '';
-    try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
-    if(!p){ el('pollNote').textContent='no project selected'; return; }
-    poll(); loadRequests(); loadSettings();
-  }
-  el('go').onclick = function(){
-    var p = el('freeProject').value.trim() || el('project').value;
-    setProject(p);
-  };
-  projects().then(function(list){
-    var html = '<option value="">— pick a project (declared or not) —</option>';
-    list.forEach(function(p){
-      html += '<option value="'+esc(p.project)+'">'+esc(p.project)+(p.declared? '' : ' · not declared')+'</option>';
-    });
-    el('project').innerHTML = html;
+  Array.prototype.forEach.call(document.querySelectorAll('input.tab'), function(r){
+    r.onchange = function(){ if(r.checked) showTab(r.id); };
   });
-  // deep-link: /?project=<key> selects immediately (bench/scenario entry).
+
+  // ---- boot ----
+  el('giveAllBtn').onclick = function(){ setAllSwitches(true); syncMaster(); };
+  el('giveNoneBtn').onclick = function(){ setAllSwitches(false); syncMaster(); };
+  el('grantsSave').onclick = saveGrants;
+  el('powerBtn').onclick = function(){
+    masterSwitch(el('powerBtn').dataset.on !== 'true');
+  };
+  el('doneHeadBtn').onclick = function(){
+    var w = el('doneWrap');
+    w.dataset.open = w.dataset.open==='true' ? 'false' : 'true';
+  };
   var urlProj = ''; try{ urlProj = new URLSearchParams(location.search).get('project') || ''; }catch(e){}
-  setInterval(function(){ if(state.project){ poll(); loadRequests(); } }, POLL_MS);
+  function setProject(p){
+    state.project = p || '';
+    el('projChip').textContent = state.project;
+    el('noProject').style.display = state.project ? 'none' : '';
+    el('footNote').textContent = state.project ? ('Project: ' + state.project + '. The lists refresh every ' + (POLL_MS/1000) + ' seconds.') : '';
+    saveMsg=''; grantsSaveMsg=''; el('grantSession').value='';
+    try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
+    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); return; }
+    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants();
+  }
+  setInterval(function(){ if(state.project){ poll(); loadRequests(); loadActions(); } }, POLL_MS);
   window.__panelSelect = setProject; // testability seam (browser scenario drives project selection)
-  if(urlProj){ setProject(urlProj); }
+  setProject(urlProj);
 })();
 </script>
 </body>

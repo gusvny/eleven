@@ -17,7 +17,7 @@ try {
   // 页面路由 = 静态页常量（与 node.ts 挂载同一真源）。
   const page = await fetch(H.base + '/sandbar-executor-panel')
   const html = await page.text()
-  assert(page.status === 200 && html.startsWith('<!doctype html>') && html.includes('Executor Panel'), 'GET panel route serves the real page')
+  assert(page.status === 200 && html.startsWith('<!doctype html>') && html.includes('<title>Executor</title>'), 'GET panel route serves the real page')
   // API 面：append → read（top-level rows）→ answer。
   const app = await fetch(H.base + '/sandbar-executor-panel/api/requests', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: 'alpha', kind: 'sign', question: 'Sign t-1?' }) })
   assert(app.status === 200, 'harness append works over real HTTP')
