@@ -122,6 +122,13 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t261003-14: 面板展开态/草稿跨轮询存续（宿主实报：点开条目每个 5s 周期被重渲染折叠、半截回答被抹） ----
+    ("t261003-14-panel-expand-survives-poll",
+     "面板展开态跨轮询存续（t261003-14，灰盒 L3，真 executor-panel harness 端口 0 全隔离 + 真 Chromium，零碰 3099/7233，工单验收主面）：A1 无选项行点开跨**两个**真实轮询周期仍展开（arbitrary number of poll cycles 主面）；A2 宿主收起跨周期仍收起（收起也是宿主意志，渲染不得翻回）；A3 选项行同样跨周期保持；A4 长 detail 滚到一半跨周期滚动位置保持（宿主在读的面）；A5 刷新活性反向锚——面板开着时新投递请求一个周期内出现且徽标增长（修复不得靠停刷新/冻结渲染达成，否则 A1-A4 假绿）；A6 展开中的行被外部应答→干净迁移 Answered 无页错；A7 已答行展开跨周期保持（工单点名 wipe 同打 answered 行）；A8 全旅程零 pageerror。intent 分工：state Set/draft 键控渲染的真值分支与还原路径白盒归 developer L1（随实现交付），本条只锁浏览器级用户可感知契约。browser/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t261003-14/sc_panel_expand_survives_poll.mjs", "browser"),
+    ("t261003-14-panel-draft-survives-poll",
+     "面板草稿与揭示态跨轮询存续（t261003-14，灰盒 L3，真 harness 端口 0 全隔离 + 真 Chromium，零碰 3099/7233）：B1 无选项行半截回答跨真实周期保留（本票病灶主面）；B2 收起→再展开→再周期草稿仍在（工单口径 survives a poll and a later collapse）；B3 空白点 Send=无操作不吞字焦点回框（not silently lost 反面）；B4 发送成功行迁移 Answered 且答案可见（草稿销毁有因=显式动作）；B5 选项行「Type an answer」揭示态与其草稿各跨周期存续；B6 揭示草稿回车发送迁移成功；B7 空 options 畸形投递行渲染/展开/零页错（外部投递者数据畸形三态纪律）；B8 全旅程零 pageerror。intent 分工：草稿键控与 reveal 键控的单元矩阵归 developer L1，本条锁浏览器级草稿生命周期契约，与场景①展开态面不同 intent 不互替。browser 缺席=ENV_FAIL exit 2；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "node integration/t261003-14/sc_panel_draft_survives_poll.mjs", "browser"),
     # ---- t261002-13: 测试夹具临时目录泄漏（存量回收安全契约 / 告警点名家族 / 生产者零残留） ----
     ("t261002-13-tmp-backlog-sweep-safety",
      "存量夹具清扫器 CLI 安全契约（t261002-13，灰盒 L3，离线秒级零 docker，真子进程×真 --root 隔离沙盒零碰宿主 temp）：dry-run 只报不删；--apply 判据四象限=白名单×越龄真目录(含嵌套)/真文件(锁档族)删、新鲜(<6h=在跑套件持有)留、白名单外留、EXCLUDED_PREFIXES(com.google.Chrome.*)留、符号链接跳过不跟删、flock 被活进程持有的锁档留且回执点名、cwd 活载体目录留且回执点名（绝不拆活跑的台）；年龄闸不可绕（--max-age-h 0 拒收、<1h 硬地板拒收，点名 REFUSED）；白名单缺口钉=t26092523-/t260901-14-（ticket 直方图 #4/#5，4,599+3,477 存量）必须在 TMP_FIXTURE_PREFIXES。intent 分工：判定函数真值分支/文件族分流/BATCH2 回归锁归 developer L1 test_t260927_tmp_fixture_family.py 与 test_t261001_fixture_carriers.py，本条锁真 CLI 端到端行为。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",

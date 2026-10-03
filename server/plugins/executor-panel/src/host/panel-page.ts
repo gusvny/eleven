@@ -269,6 +269,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'' };
   var saveMsg = '';
   var grantsSaveMsg = '';
+  // t261003-14：UI 态搬到 JS state（键=请求 id），轮询重建 DOM 不再抹掉宿主视图。
+  // openIds=宿主展开的行；drafts=自由文本草稿（含展开出的「Type an answer」框）；
+  // revealedIds=点过「Type an answer」的行（下次渲染直接给输入框，不再给按钮排）；
+  // detailScroll=详情块滚动位置。id 从台账消失的行下一次渲染自然缺席，不会复活。
+  state.openIds = new Set();
+  state.drafts = {};
+  state.revealedIds = new Set();
+  state.detailScroll = {};
   var POLL_MS = 5000;
   // 声明键（与引擎 GRANT_OPS 同一词表；'send-back' 是声明键，显示名 Send back）。
   var PERMS = [
@@ -424,7 +432,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
     var controls;
-    if(hasOptions(r)){
+    // t261003-14（review #2）：宿主点过「Type an answer」的行，下次渲染直接给输入框，
+    // 不再给按钮排——否则 revealed 的草稿在重建时无处安放。
+    if(hasOptions(r) && !state.revealedIds.has(r.id)){
       controls = '<div class="opts">';
       var opts = r.options;
       for(var i=0;i<opts.length;i++){
@@ -453,8 +463,23 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var waiting = [], answered = [];
     if(st && st.ok===true){ var sp = splitWaiting(st.rows); waiting = sp.waiting; answered = sp.answered; }
     else if(!st){ waitHtml = '<div class="act" style="border:0"><span class="say muted">The request ledger could not be reached. This is not an empty inbox.</span></div>'; }
-    for(var i=0;i<waiting.length;i++) waitHtml += '<div class="row wait" data-open="false" data-row="'+esc(waiting[i].id)+'">'+rowHead(waiting[i],'amber')+rowBody(waiting[i])+'</div>';
-    for(var j=0;j<answered.length;j++) doneHtml += '<div class="row done" data-open="false" data-row="'+esc(answered[j].id)+'">'+rowHead(answered[j],'grey')+rowBody(answered[j])+'</div>';
+    // t261003-14：展开态来自 state.openIds（键=id），轮询重建不折叠宿主展开的行。
+    var openOf = function(id){ return state.openIds.has(String(id)) ? 'true' : 'false'; };
+    for(var i=0;i<waiting.length;i++) waitHtml += '<div class="row wait" data-open="'+openOf(waiting[i].id)+'" data-row="'+esc(waiting[i].id)+'">'+rowHead(waiting[i],'amber')+rowBody(waiting[i])+'</div>';
+    for(var j=0;j<answered.length;j++) doneHtml += '<div class="row done" data-open="'+openOf(answered[j].id)+'" data-row="'+esc(answered[j].id)+'">'+rowHead(answered[j],'grey')+rowBody(answered[j])+'</div>';
+    // 重建前快照焦点（输入框光标）与各详情块滚动位置，重建后原样放回。
+    // 滚动位置直接从 DOM 读——scroll 事件是异步派的，程序化滚动在重建前可能还没派到，
+    // 只靠监听器记会有竞态（t261003-14 截图证据里真实踩到过）。
+    var focusSnap = null;
+    var active = document.activeElement;
+    if(active && active.tagName === 'INPUT'){
+      var frow = active.closest('[data-row]');
+      if(frow) focusSnap = { id: frow.dataset.row, selStart: active.selectionStart, selEnd: active.selectionEnd };
+    }
+    var scrollSnap = {};
+    Array.prototype.forEach.call(document.querySelectorAll('[data-row] .detail'), function(d){
+      scrollSnap[d.closest('[data-row]').dataset.row] = d.scrollTop;
+    });
     el('waitList').innerHTML = waitHtml;
     el('doneList').innerHTML = doneHtml;
     el('waitHead').textContent = 'Needs your answer · ' + waiting.length;
@@ -466,13 +491,54 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     badge.className = 'badge' + (waiting.length===0 ? ' zero' : '');
     bindRows(el('waitList'));
     bindRows(el('doneList'));
+    restoreRowState(focusSnap, scrollSnap);
+  }
+  // t261003-14：重建后按 id 放回滚动位置、草稿文本与焦点光标。
+  // 滚动优先用重建前的 DOM 快照（无竞态），缺席才回落 onscroll 监听器记下的值。
+  function restoreRowState(focusSnap, scrollSnap){
+    Array.prototype.forEach.call(document.querySelectorAll('[data-row]'), function(row){
+      var id = row.dataset.row;
+      if(id in state.drafts){
+        var box = row.querySelector('input[data-answerbox]');
+        if(box) box.value = state.drafts[id];
+      }
+      var det = row.querySelector('.detail');
+      if(det){
+        var top = scrollSnap && (id in scrollSnap) ? scrollSnap[id] : state.detailScroll[id];
+        if(top) det.scrollTop = top;
+      }
+    });
+    if(focusSnap){
+      var escId = window.CSS && window.CSS.escape ? window.CSS.escape(focusSnap.id) : focusSnap.id.replace(/"/g, '\\"');
+      var frow = document.querySelector('[data-row="'+escId+'"]');
+      var input = frow && frow.querySelector('input');
+      if(input){
+        input.focus();
+        try{ input.setSelectionRange(focusSnap.selStart, focusSnap.selEnd); }catch(e){}
+      }
+    }
   }
   function bindRows(root){
     Array.prototype.forEach.call(root.querySelectorAll('.head[data-id]'), function(h){
       h.onclick = function(){
         var row = h.parentElement;
-        row.dataset.open = row.dataset.open==='true' ? 'false' : 'true';
+        // t261003-14：开合写进 state（真源），dataset 只是渲染投影。
+        var id = row.dataset.row;
+        if(state.openIds.has(id)){ state.openIds.delete(id); row.dataset.open = 'false'; }
+        else { state.openIds.add(id); row.dataset.open = 'true'; }
       };
+    });
+    // 详情块滚动位置：滚动即记，重建后放回（读长内容跨轮询不掉位）。
+    Array.prototype.forEach.call(root.querySelectorAll('.detail'), function(d){
+      d.onscroll = function(){ state.detailScroll[d.closest('[data-row]').dataset.row] = d.scrollTop; };
+    });
+    // 自由文本草稿：每敲一次记一次，轮询重建后原样填回；Enter=发送。
+    // t261003-14：Enter 绑定从「点开 reveal 那一刻的内联闭包」移到这里——否则轮询重建出
+    // 的输入框（含 restored 的 reveal 框）没有任何 Enter 处理，敲回车就没了。
+    Array.prototype.forEach.call(root.querySelectorAll('input[data-answerbox]'), function(inp){
+      var rowId = inp.closest('[data-row]').dataset.row;
+      inp.addEventListener('input', function(){ state.drafts[rowId] = inp.value; });
+      inp.onkeydown = function(e){ if(e.key==='Enter' && inp.value.trim()!=='') sendAnswer(rowId, inp.value); };
     });
     Array.prototype.forEach.call(root.querySelectorAll('button[data-answer]'), function(b){
       b.onclick = function(){ sendAnswer(b.closest('[data-row]').dataset.row, b.dataset.answer); };
@@ -485,8 +551,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         box.innerHTML = '<input placeholder="Type an answer"><button>Send</button>';
         opts.replaceWith(box);
         var input = box.querySelector('input');
-        box.querySelector('button').onclick = function(){ if(input.value.trim()!=='') sendAnswer(box.closest('[data-row]').dataset.row, input.value); else input.focus(); };
-        input.onkeydown = function(e){ if(e.key==='Enter' && input.value.trim()!=='') sendAnswer(box.closest('[data-row]').dataset.row, input.value); };
+        var rowId = box.closest('[data-row]').dataset.row;
+        // t261003-14：点开即记 revealedIds + 草稿监听——下一次轮询渲染直接给输入框并填回草稿。
+        state.revealedIds.add(rowId);
+        input.addEventListener('input', function(){ state.drafts[rowId] = input.value; });
+        box.querySelector('button').onclick = function(){ if(input.value.trim()!=='') sendAnswer(rowId, input.value); else input.focus(); };
+        input.onkeydown = function(e){ if(e.key==='Enter' && input.value.trim()!=='') sendAnswer(rowId, input.value); };
         input.focus();
       };
     });
@@ -501,6 +571,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     postJson('/sandbar-executor-panel/api/requests/answer', {project: state.project, id: id, answer: answer, by:'host'})
       .then(function(j){
         if(j.ok!==true){ alert('The answer was rejected: '+(j.error||'?')); }
+        else {
+          // t261003-14（review #3）：发送成功才清草稿与 reveal 态——被拒的草稿原样保留。
+          delete state.drafts[id];
+          state.revealedIds.delete(id);
+        }
         loadRequests();
       })
       .catch(function(e){ alert('The answer failed to send: '+((e&&e.message)||e)); });
@@ -825,6 +900,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   setInterval(function(){ if(state.project){ poll(); loadRequests(); loadActions(); } }, POLL_MS);
   window.__panelSelect = setProject; // testability seam (browser scenario drives project selection)
+  // t261003-14（review #1）：手动触发一轮轮询（poll+loadRequests+loadActions），浏览器
+  // 测试注入周期用它，不等真实 5s 墙钟。
+  window.__panelTick = function(){ if(state.project){ poll(); loadRequests(); loadActions(); } };
   setProject(urlProj);
 })();
 </script>
