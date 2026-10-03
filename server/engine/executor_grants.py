@@ -45,6 +45,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import json
 import os
+import re
 import time
 
 import shared
@@ -439,3 +440,90 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      "night_tier": normalized.get("night_tier"),
                      "executor_sessions": normalized.get("executor_sessions")})
     return {"saved": True, "file": path, "resolved": normalized}
+
+
+# ======================================================================================
+# t261002-14：授权操作词表**三面机械互锁**（纯函数，文本进/报告出）。
+# 病根：GRANT_OPS（本模块）/ GRANT_OPS（executor-grants.ts）/ FIXED_OPS（grants.ts）
+# 是同一词表的三份手抄；旧「漂移锁」（test_t260930_14_executor_grants.py 只 assert
+# 本模块成员）从不读 TS 两侧源码——锁没有牙。本函数把「三份必须同词表（含 'reject'
+# ↔'send-back' 别名与声明序）」变成可机械判定的真值，消费方=同票单测与
+# integration/t261002-14 守卫场景。
+# fail-closed 与 fail-visible 纪律：任一侧提不出字面量=报告行（绝不空报=假绿）；
+# 单侧独改/新词/别名漂移/仅乱序都点名侧与元素，不折叠成泛化的长度不等。
+# ======================================================================================
+
+import ast as _ast
+
+
+def _ts_array_strings(src: str, const_name: str):
+    """从 TS 源文本提 `const NAME = ['a', ...]`（含 export 前缀）的元素；提不出=None。
+
+    锚点必须是**赋值形态**（`NAME = [` 整词+赋值号）：改名/声明被写坏（如
+    `GRANT_OPS broken =`）都提不出 → fail-closed，绝不子串误命中假绿。"""
+    m = re.search(r"\b%s\s*=\s*\[" % re.escape(const_name), src)
+    if not m:
+        return None
+    start = m.end() - 1
+    end = src.find("]", start)
+    if end < 0:
+        return None
+    out = []
+    for mm in re.findall(r"'([^']*)'|\"([^\"]*)\"", src[start + 1:end]):
+        out.append(mm[0] or mm[1])
+    return out or None
+
+
+def grant_ops_lock_report(engine_src: str, panel_decl_src: str,
+                          panel_fixed_src: str) -> list:
+    """三面授权词表互锁报告（空 list=三面同词表同序=锁住）。
+
+    真源=本模块 GRANT_OPS 的声明序；executor-grants.ts GRANT_OPS 必须逐元素同序；
+    grants.ts FIXED_OPS 经显示别名（'reject'→'send-back'，同 DISPLAY_ALIAS 语义）
+    归一后逐元素同序；归一后仍认不出的词=单侧新词，点名。"""
+    report = []
+    try:
+        tree = _ast.parse(engine_src)
+    except SyntaxError:
+        tree = None
+    engine_ops = None
+    if tree is not None:
+        for node in _ast.walk(tree):
+            if (isinstance(node, _ast.Assign)
+                    and any(isinstance(t, _ast.Name) and t.id == "GRANT_OPS"
+                            for t in node.targets)
+                    and isinstance(node.value, _ast.Tuple)):
+                try:
+                    engine_ops = [str(_ast.literal_eval(el)) for el in node.value.elts]
+                except Exception:  # noqa: BLE001 —— 非 const=形态漂移
+                    engine_ops = None
+                break
+    decl_ops = _ts_array_strings(panel_decl_src, "GRANT_OPS")
+    fixed_ops = _ts_array_strings(panel_fixed_src, "FIXED_OPS")
+    if engine_ops is None:
+        report.append("engine-side GRANT_OPS literal not extractable (fail-closed)")
+    if decl_ops is None:
+        report.append("executor-grants.ts GRANT_OPS literal not extractable (fail-closed)")
+    if fixed_ops is None:
+        report.append("grants.ts FIXED_OPS literal not extractable (fail-closed)")
+    if engine_ops is None or decl_ops is None or fixed_ops is None:
+        return report
+    # 别名归一（与 DISPLAY_ALIAS 同表语义；面板显示名 'reject'=声明键 'send-back'）
+    alias = {"reject": "send-back"}
+    fixed_norm = []
+    for op in fixed_ops:
+        fixed_norm.append(alias.get(op, op))
+        if op not in engine_ops and alias.get(op, op) not in engine_ops:
+            report.append("grants.ts FIXED_OPS carries unknown op %r not in engine "
+                          "vocabulary" % op)
+    for op in decl_ops:
+        if op not in engine_ops:
+            report.append("executor-grants.ts GRANT_OPS carries unknown op %r not in "
+                          "engine vocabulary" % op)
+    for side, ops in (("executor-grants.ts", decl_ops), ("grants.ts", fixed_norm)):
+        for i in range(max(len(engine_ops), len(ops))):
+            e = engine_ops[i] if i < len(engine_ops) else "<absent>"
+            o = ops[i] if i < len(ops) else "<absent>"
+            if e != o:
+                report.append("op[%d] drift: engine=%r %s=%r" % (i, e, side, o))
+    return report

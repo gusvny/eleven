@@ -25,17 +25,13 @@ BOOKED = "t260910-09-ms-decl-gate"
 FAST = "t260905-08-hex-clean"
 FAST2 = "scenario-guard-doc-drift"
 
-pass_n = fail_n = 0
+# 断言助手走共享单点（t261002-14 收敛，原局部逐字拷贝已删）；
+# 本场景旧措辞：detail 截断 400、不 flush、汇总行不带 na 计数。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_result import ScenarioCheck  # noqa: E402
 
-
-def ok(cond, label, detail=""):
-    global pass_n, fail_n
-    if cond:
-        pass_n += 1
-        print("  ok " + label)
-    else:
-        fail_n += 1
-        print("  FAIL " + label + ((" | " + str(detail)[:400]) if detail else ""))
+_ck = ScenarioCheck(detail_cap=400, flush=False)
+ok = _ck.ok
 
 
 def run(extra_env, only=(FAST, FAST2), budget=None):
@@ -161,8 +157,8 @@ def main():
         leg_off(tmp)
         leg_bad_roster(tmp)
     leg_real_roster()
-    print("SUMMARY pass=%d fail=%d" % (pass_n, fail_n))
-    return 1 if fail_n else 0
+    print("SUMMARY pass=%d fail=%d" % (_ck.passes, _ck.fails))
+    return 1 if _ck.fails else 0
 
 
 if __name__ == "__main__":

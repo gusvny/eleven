@@ -52,39 +52,25 @@ NAME = "t260930-02-surface-plan-query"
 RUNNER = "integration/run_scenarios.py"
 DOC_REL = "integration/scenario-surfaces.json"
 
-PASS_N = FAIL_N = NA_N = 0
 _TMP = None
 _RECLAIMED = False
 
+# 断言助手走共享单点（t261002-14 收敛，原局部逐字拷贝已删；措辞逐字保留：
+# detail 截断 600、flush=True、SUMMARY 带 na 计数、全 N/A=红）。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib_result import ScenarioCheck  # noqa: E402
 
-def ok(cond, label, detail=""):
-    global PASS_N, FAIL_N
-    if cond:
-        PASS_N += 1
-        print("  ok " + label, flush=True)
-    else:
-        FAIL_N += 1
-        print("  FAIL " + label + (" | " + str(detail)[:600] if detail else ""), flush=True)
-
-
-def na(label, reason):
-    global NA_N
-    NA_N += 1
-    print("  N/A: %s（%s）" % (label, str(reason)[:400]), flush=True)
-
-
-def finish():
-    if NA_N and PASS_N == 0 and FAIL_N == 0:
-        print("FAIL [%s] exit=1\n    全部子用例 N/A=无可验对象（设计/覆盖问题）" % NAME,
-              flush=True)
-        sys.exit(1)
-    print("SUMMARY pass=%d fail=%d env_fail=0 na=%d" % (PASS_N, FAIL_N, NA_N), flush=True)
-    sys.exit(1 if FAIL_N else 0)
+_ck = ScenarioCheck(detail_cap=600, flush=True)
+ok = _ck.ok
+na = _ck.na
 
 
 def env_fail(reason):
-    print("ENV_FAIL [%s] exit=2\n    %s" % (NAME, reason), flush=True)
-    sys.exit(2)
+    _ck.env_fail(NAME, reason)
+
+
+def finish():
+    _ck.finish(NAME)
 
 
 def _cleanup():

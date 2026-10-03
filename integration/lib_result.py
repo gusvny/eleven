@@ -19,6 +19,7 @@ import datetime
 import json
 import os
 import subprocess
+import sys
 
 STATUSES = ("pass", "fail", "not-checked")
 CAUSES = ("self", "external", "unknown")
@@ -76,6 +77,60 @@ def emit_case(**kw):
 
 
 def sys_stdout_write(text):
-    import sys
     sys.stdout.write(text)
     sys.stdout.flush()
+
+
+class ScenarioCheck:
+    """场景内断言助手单点（t261002-14 收敛）：ok()/na()/finish()/env_fail() 四件套，
+    收编 sc_*.py 里逐字拷贝的局部定义（t261001-04 收敛 selfcheck_* 同族问题的
+    场景侧续作）。输出格式参数化以逐字保留各场景既有措辞（detail 截断上限、
+    flush 与否），只收敛定义点，不改任何一行断言行为。
+
+    退出码契约与 integration/lib_env 三态一致：finish() 有 FAIL=exit 1（含
+    「全部 N/A=设计/覆盖问题」判红）；env_fail() 恒 exit 2 并点名缺什么。
+    用法::
+
+        _ck = ScenarioCheck(detail_cap=600, flush=True)
+        ok, na, finish, env_fail = _ck.ok, _ck.na, _ck.finish, _ck.env_fail
+        ...
+        finish(NAME)          # 早退档自行 exit；正常返回后才收口
+    """
+
+    def __init__(self, ok_fmt="  ok %s", fail_fmt="  FAIL %s",
+                 detail_cap=600, flush=False):
+        self.passes = 0
+        self.fails = 0
+        self.nas = 0
+        self.ok_fmt = ok_fmt
+        self.fail_fmt = fail_fmt
+        self.detail_cap = detail_cap
+        self.flush = flush
+
+    def ok(self, cond, label, detail=""):
+        if cond:
+            self.passes += 1
+            print(self.ok_fmt % label, flush=self.flush)
+        else:
+            self.fails += 1
+            msg = self.fail_fmt % label
+            if detail:
+                msg += " | " + str(detail)[:self.detail_cap]
+            print(msg, flush=self.flush)
+
+    def na(self, label, reason=""):
+        self.nas += 1
+        print("  N/A: %s（%s）" % (label, str(reason)[:400]), flush=self.flush)
+
+    def env_fail(self, name, reason):
+        print("ENV_FAIL [%s] exit=2\n    %s" % (name, reason), flush=self.flush)
+        sys.exit(2)
+
+    def finish(self, name):
+        if self.nas and self.passes == 0 and self.fails == 0:
+            print("FAIL [%s] exit=1\n    全部子用例 N/A=无可验对象（设计/覆盖问题）" % name,
+                  flush=self.flush)
+            sys.exit(1)
+        print("SUMMARY pass=%d fail=%d env_fail=0 na=%d"
+              % (self.passes, self.fails, self.nas), flush=self.flush)
+        sys.exit(1 if self.fails else 0)

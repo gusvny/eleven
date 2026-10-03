@@ -1016,12 +1016,37 @@ def _dominant_sentence(transient_n: int, permanent_n: int) -> str:
             % (transient_n, permanent_n, dominant))
 
 
+def _unreadable_ticket_ids(lines: List[str]) -> List[str]:
+    """逐票明细行里提票号（t261002-14：subject 必须点名票号，数字后面藏票的猎名成本
+    第二次实付后收口）。活动侧明细行形状=`<tid>: <异常文本>`（activities.py 唯一产地）；
+    提不出「: 」分隔的行按原文整行当 token（畸形行不抛、不伪造、不静默丢）。"""
+    out: List[str] = []
+    for ln in lines:
+        head = str(ln).split(":", 1)[0].strip()
+        out.append(head if head else str(ln).strip())
+    return out
+
+
+def _named_ids_subject_suffix(ids: List[str]) -> str:
+    """subject 尾段的点名串：最多 UNREADABLE_LIST_CAP 个票号，超出「+N more」。
+    完整逐票异常明细仍在 evidence（fail-closed 不变，subject 只是点名面）。"""
+    shown = ids[:UNREADABLE_LIST_CAP]
+    suffix = ", ".join(shown)
+    extra = len(ids) - len(shown)
+    if extra > 0:
+        suffix += ", +%d more" % extra
+    return suffix
+
+
 def unreadable_finding_specs(meta: Any) -> List[Dict[str, str]]:
     """把活动回执 meta 的读失败清单变成**按类分开**的发现规格（纯函数；文案单点）。
 
     返回 `[{"severity","subject","evidence"}]`（调用方经 make_finding 上发现条）：
     - permanent → med（需要人）；transient → low（巡检期故障证据，非坏票）。
     - 两类都保留逐票原始异常文本（fail-closed：读不到的票绝不当「没问题」）。
+    - **subject 点名票号**（t261002-14）：permanent/transient 两类的 subject 尾段
+      携带逐票票号（帽=UNREADABLE_LIST_CAP，超出「+N more」）——「1 unreadable
+      ticket(s)」这种数字后面藏票号的形态两次逼人猎名，收口。
     - **老回执**（无 transient/permanent 两键，在途回放形态）→ 单条旧形文案，不猜类。
     - 空/畸形输入 → 空清单（不抛）。
     """
@@ -1049,14 +1074,18 @@ def unreadable_finding_specs(meta: Any) -> List[Dict[str, str]]:
         specs.append({
             "severity": "med",
             "subject": ("Lane/watchdog sweep: %d unreadable ticket(s) — permanent workflow "
-                        "condition (needs a human)" % len(perm_lines)),
+                        "condition (needs a human): %s"
+                        % (len(perm_lines), _named_ids_subject_suffix(
+                            _unreadable_ticket_ids(perm_lines)))),
             "evidence": "%s Per-ticket raw detail: %s"
                         % (head, "; ".join(perm_lines[:UNREADABLE_LIST_CAP]))})
     if trans_lines:
         specs.append({
             "severity": "low",
             "subject": ("Lane/watchdog sweep: %d unreadable ticket(s) — transient (no snapshot "
-                        "answer at scan time; not broken tickets)" % len(trans_lines)),
+                        "answer at scan time; not broken tickets): %s"
+                        % (len(trans_lines), _named_ids_subject_suffix(
+                            _unreadable_ticket_ids(trans_lines)))),
             "evidence": "%s Per-ticket raw detail: %s"
                         % (head, "; ".join(trans_lines[:UNREADABLE_LIST_CAP]))})
     return specs

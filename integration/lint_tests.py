@@ -921,6 +921,52 @@ def lint_tool_stdout_channel():
        % (len(L13_INPROC_TOOLS), L13_NOTE_HELPER))
 
 
+def _load_integ_module(name, rel):
+    """按文件位装载 integration/<rel>（不依赖包导入；t261002-14 起两处共用）。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, str(INTEG / rel))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def lint_vocab_cross_language_locks():
+    """L14（t261002-14）：跨语言词表机械互锁——
+      · integration/lib_env.py 的 NARROWING_ENV_PREFIXES/NAMES 必须 与
+        integration/lib_env.mjs 的 NARROWING_PREFIXES/NAMES 逐元素相同；
+      · server/engine/executor_grants.py 的 GRANT_OPS 必须与
+        executor-panel executor-grants.ts GRANT_OPS、grants.ts FIXED_OPS
+        （经 'reject'→'send-back' 别名归一）逐元素同序相同。
+    判据本体是纯函数（narrowing_lock_report / grant_ops_lock_report），
+    「单侧独改必被抓」的漂移面由 integration/t261002-14/test_vocab_locks.py
+    夹具单测钉住；本 lint 只吃真文件。判据函数提不出字面量=报告行（fail-closed）。"""
+    try:
+        lib_env_mod = _load_integ_module("_lint_lib_env_t261002_14", "lib_env.py")
+        sys.path.insert(0, str(REPO / "server" / "engine"))
+        import executor_grants as eg_mod
+    except Exception as e:  # noqa: BLE001 —— 判据装载失败=lint 面坏，fail-closed
+        err("L14 判据模块装载失败（fail-closed）：%s: %s" % (type(e).__name__, e))
+        return
+    rep = lib_env_mod.narrowing_lock_report(
+        (INTEG / "lib_env.py").read_text(encoding="utf-8"),
+        (INTEG / "lib_env.mjs").read_text(encoding="utf-8"))
+    if rep:
+        err("L14 收窄旋钮清单双语言漂移（lib_env.py vs lib_env.mjs）：%s；"
+            "改任一侧必须同轮改另一侧（词表真源注释见 lib_env.py 260930 组）"
+            % "; ".join(rep[:6]))
+        return
+    rep2 = eg_mod.grant_ops_lock_report(
+        (REPO / "server/engine/executor_grants.py").read_text(encoding="utf-8"),
+        (REPO / "server/plugins/executor-panel/src/host/executor-grants.ts").read_text(encoding="utf-8"),
+        (REPO / "server/plugins/executor-panel/src/host/grants.ts").read_text(encoding="utf-8"))
+    if rep2:
+        err("L14 授权操作词表三面漂移（executor_grants.py / executor-grants.ts / "
+            "grants.ts）：%s；改任一面必须同轮改其余两面（'reject'↔'send-back' "
+            "别名归一后比对，词表真源=引擎 GRANT_OPS 注释组）" % "; ".join(rep2[:6]))
+        return
+    ok("L14 词表互锁：收窄旋钮双语言逐元素相同；授权操作三面（含别名归一）同词表同序")
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -934,6 +980,7 @@ def main():
     lint_integration_gate_settlement()
     lint_narrowing_env_inheritance()
     lint_tool_stdout_channel()
+    lint_vocab_cross_language_locks()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

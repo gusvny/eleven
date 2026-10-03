@@ -55,37 +55,21 @@ _MAIN = None
 _WT = None
 _RECLAIMED = False
 
-PASS_N = FAIL_N = NA_N = 0
+# 断言助手走共享单点（t261002-14 收敛，原局部逐字拷贝已删；措辞逐字保留：
+# detail 截断 600、flush=True、SUMMARY 带 na 计数、全 N/A=红）。
+from lib_result import ScenarioCheck  # noqa: E402
 
-
-def ok(cond, label, detail=""):
-    global PASS_N, FAIL_N
-    if cond:
-        PASS_N += 1
-        print("  ok " + label, flush=True)
-    else:
-        FAIL_N += 1
-        print("  FAIL " + label + (" | " + str(detail)[:600] if detail else ""), flush=True)
-
-
-def na(label, reason):
-    global NA_N
-    NA_N += 1
-    print("  N/A: %s（%s）" % (label, str(reason)[:400]), flush=True)
-
-
-def finish():
-    if NA_N and PASS_N == 0 and FAIL_N == 0:
-        print("FAIL [%s] exit=1\n    全部子用例 N/A=无可验对象（设计/覆盖问题）" % NAME,
-              flush=True)
-        sys.exit(1)
-    print("SUMMARY pass=%d fail=%d env_fail=0 na=%d" % (PASS_N, FAIL_N, NA_N), flush=True)
-    sys.exit(1 if FAIL_N else 0)
+_ck = ScenarioCheck(detail_cap=600, flush=True)
+ok = _ck.ok
+na = _ck.na
 
 
 def env_fail(reason):
-    print("ENV_FAIL [%s] exit=2\n    %s" % (NAME, reason), flush=True)
-    sys.exit(2)
+    _ck.env_fail(NAME, reason)
+
+
+def finish():
+    _ck.finish(NAME)
 
 
 # ---------------------------------------------------------------- 夹具与回收
@@ -288,12 +272,23 @@ def _run_gate(wt: Path, ledger_dir: Path, base_sha: str):
     keys = ("SANDBAR_SCENARIO_LEDGER_DIR", "SANDBAR_INTEG_LEDGER_SOURCE",
             "SANDBAR_GATE_BASELINE", "SANDBAR_LEDGER_REUSE",
             "SANDBAR_INTEG_RUN_BUDGET_SEC", "SANDBAR_SCENARIO_ONLY",
-            "SANDBAR_SCENARIO_EXCLUDE_POOLS")
+            "SANDBAR_SCENARIO_EXCLUDE_POOLS",
+            # t261002-14 仲裁钉：宽度键必须与本场景内轮显式档（POOL_CONC=4 /
+            # CONC_POOLS=main:1，见 _run_runner）**同档**——账行四键里的 width 是
+            # 复用判据之一，闸轮若继承外层泳道轮的校准档（t261002-03 起引擎按内存
+            # 注入 SANDBAR_POOL_CONC，本进程内调用不经过子进程 env 清理缝），账行
+            # 就按外层档记账（实测 width=3 vs 内轮 4）→ B 轮四键 width 不等 →
+            # 复用被拒判实跑 → B2..B11 成片假红（260930 本票闸三轮连红实锤，
+            # main 树与其余泳道同红=非本票改动引入）。这里显式钉同档，进程内闸轮
+            # 与子进程 runner 轮永远同宽。
+            "SANDBAR_POOL_CONC", "SANDBAR_CONC_POOLS")
     saved = {k: os.environ.get(k) for k in keys}
     try:
         os.environ["SANDBAR_SCENARIO_LEDGER_DIR"] = str(ledger_dir)
         os.environ["SANDBAR_INTEG_LEDGER_SOURCE"] = "lane:" + NAME
         os.environ["SANDBAR_GATE_BASELINE"] = "0"
+        os.environ["SANDBAR_POOL_CONC"] = "4"
+        os.environ["SANDBAR_CONC_POOLS"] = "main:1"
         for k in ("SANDBAR_LEDGER_REUSE", "SANDBAR_INTEG_RUN_BUDGET_SEC",
                   "SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS"):
             os.environ.pop(k, None)

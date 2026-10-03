@@ -2016,6 +2016,23 @@ SCENARIOS = [
      "这三处修法落地后补对应断言**须走票**，不得为取绿放宽期望值。实案锚：261001 某常驻会话在项目零授予下签了两笔 merge。"
      "零 docker/零 Temporal/零端口、不触 3099/7233；引擎模块导入失败=ENV_FAIL exit 2",
      "python3 integration/executor-loop/sc_executor_authority_gate.py", "ro"),
+    # ---------------- t261002-14：场景资产卫生三张防漂移锁 + watchdog 点名票号 ----------------
+    ("t261002-14-vocab-drift-guards",
+     "场景资产卫生·防漂移锁（t261002-14，灰盒 L2，离线秒级零 docker 零 Temporal 零端口零临时文件；"
+     "巡检 t261001-08 四项实报的机械面）："
+     "A 三个具名场景（t260930-01/sc_known_red_round_exempt、t260930-01/sc_ledger_reuse_round、"
+     "t260930-02/sc_surface_plan_query）零逐字 ok() 副本、共享断言助手在 lib_result 单点可导入；"
+     "B 收窄旋钮词表跨语言锁 narrowing_lock_report：真 lib_env.py × lib_env.mjs 报告空（锁住），"
+     "只改 py 侧/只改 mjs 侧/任一侧字面量写坏 → 红（fail-closed 绝不空报告假绿）；"
+     "C 授予操作词表三面锁 grant_ops_lock_report：真引擎 py × executor-grants.ts × grants.ts 报告空，"
+     "引擎侧丢词/面板别名('reject')漂移/TS 侧次序漂移/字面量写坏 → 红（旧 drift test 只断言 python 侧＝没有锁，本条补齐三面）；"
+     "D watchdog unreadable 发现 subject 点名票号：permanent/transient 各含真票号、12 条超帽=最多 10 个票号+「+N more」、"
+     "畸形 detail 行=subject 结构完好不伪造票号、老回执单行形态逐字不动（重放确定性）。"
+     "intent 分工：守卫纯函数真值表/解析分支归 developer L1（随本票的两个 lock 测试文件）；"
+     "授权闸语义归 executor-authority-gate；watchdog 三族判定语义归 t261001-05 家族——本条只锁"
+     "「三面一致」漂移契约与 unreadable 发现的 subject 点名形状。被测文件缺席=ENV_FAIL exit 2；"
+     "文件在而守卫函数缺席=FAIL（交付物缺席是断言红不是环境红）",
+     "python3 integration/t261002-14/sc_vocab_drift_guards.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900

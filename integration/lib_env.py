@@ -25,6 +25,7 @@ mjs-side equivalent = integration/t260904-05/lib_browser.mjs makeResults()
 exit-code priority).
 """
 import os
+import re
 import sys
 
 EXIT_PASS = 0
@@ -143,3 +144,89 @@ class no_narrowing_env:
             os.environ.pop(k, None)
         os.environ.update(self._saved)
         return False
+
+
+# ======================================================================================
+# t261002-14：双语言收窄旋钮清单的**机械互锁**（纯函数，文本进/报告出）。
+# 病根：本文件的 NARROWING_ENV_PREFIXES/NAMES 与 lib_env.mjs 的 NARROWING_PREFIXES/
+# NAMES 是同一词表的两份手抄（260930 修正时已经对齐过一次——纯靠人盯）。本函数把
+# 「两份必须逐元素相同」变成可机械判定的真值，消费方=integration/lint_tests.py L14
+# 与单测（单测用夹具文本钉「单侧独改必被抓」的漂移面）。
+# fail-closed 纪律：任一侧提不出字面量（改名/改形态/语法坏）一律产报告行，**绝不**
+# 返回空报告（空=假绿，比漂移更危险）。
+# ======================================================================================
+
+import ast as _ast
+
+
+def _py_tuple_strings(src: str, assign_name: str):
+    """从 python 源文本提 `ASSIGN_NAME = ("a", "b")` 的元素；提不出/形态漂移=None。"""
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError:
+        return None
+    for node in _ast.walk(tree):
+        if (isinstance(node, _ast.Assign)
+                and any(isinstance(t, _ast.Name) and t.id == assign_name
+                        for t in node.targets)):
+            if isinstance(node.value, _ast.Tuple):
+                try:
+                    return [str(_ast.literal_eval(el)) for el in node.value.elts]
+                except Exception:  # noqa: BLE001 —— 非 const 元素=形态漂移，fail-closed
+                    return None
+            return None
+    return None
+
+
+def _mjs_array_strings(src: str, const_name: str):
+    """从 mjs 源文本提 `const NAME = ['a', 'b']` 的元素；提不出/形态漂移=None。
+
+    锚点必须是**赋值形态**（`NAME = [` 整词+赋值号）：改名（如 `NARROWING_NAMES_V2`）
+    不得被子串命中、声明写坏提不出 → 都 fail-closed（畸形面假绿防线，t261002-14
+    单测钉住）。"""
+    m = re.search(r"\b%s\s*=\s*\[" % re.escape(const_name), src)
+    if not m:
+        return None
+    start = m.end() - 1
+    if start < 0:
+        return None
+    end = src.find("]", start)
+    if end < 0:
+        return None
+    body = src[start + 1:end]
+    out = []
+    for m in re.findall(r"'([^']*)'|\"([^\"]*)\"", body):
+        out.append(m[0] or m[1])
+    return out or None     # 空括号=提不出（fail-closed），不当「空清单恰好相等」
+
+
+def narrowing_lock_report(py_src: str, mjs_src: str) -> list:
+    """跨语言收窄旋钮清单互锁报告（空 list=两侧逐元素相同=锁住）。
+
+    判据：NARROWING_ENV_PREFIXES/NAMES（py）与 NARROWING_PREFIXES/NAMES（mjs）
+    各自作为**有序清单**逐元素相同。漂移报告行点名侧与元素；单侧独改/单侧畸形
+    都必产行（fail-closed，见组注释）。"""
+    report = []
+    py_prefixes = _py_tuple_strings(py_src, "NARROWING_ENV_PREFIXES")
+    py_names = _py_tuple_strings(py_src, "NARROWING_ENV_NAMES")
+    mjs_prefixes = _mjs_array_strings(mjs_src, "NARROWING_PREFIXES")
+    mjs_names = _mjs_array_strings(mjs_src, "NARROWING_NAMES")
+    for side, val in (("py", py_prefixes), ("mjs", mjs_prefixes)):
+        if val is None:
+            report.append("%s-side prefixes literal not extractable (fail-closed)" % side)
+    for side, val in (("py", py_names), ("mjs", mjs_names)):
+        if val is None:
+            report.append("%s-side names literal not extractable (fail-closed)" % side)
+    if py_prefixes is not None and mjs_prefixes is not None:
+        for i in range(max(len(py_prefixes), len(mjs_prefixes))):
+            p = py_prefixes[i] if i < len(py_prefixes) else "<absent>"
+            m = mjs_prefixes[i] if i < len(mjs_prefixes) else "<absent>"
+            if p != m:
+                report.append("prefixes[%d] drift: py=%r mjs=%r" % (i, p, m))
+    if py_names is not None and mjs_names is not None:
+        for i in range(max(len(py_names), len(mjs_names))):
+            p = py_names[i] if i < len(py_names) else "<absent>"
+            m = mjs_names[i] if i < len(mjs_names) else "<absent>"
+            if p != m:
+                report.append("names[%d] drift: py=%r mjs=%r" % (i, p, m))
+    return report

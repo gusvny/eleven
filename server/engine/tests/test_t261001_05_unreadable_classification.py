@@ -264,3 +264,83 @@ def test_d1_budget_exhausted_ticket_is_transient_and_not_retried(monkeypatch):
     assert len(meta["unreadable"]) == 2 and len(meta["unreadable_transient"]) == 2
     assert meta["unreadable_permanent"] == []
     assert meta["enum_note"]        # 预算面点名（budget note）不丢
+
+
+# ---------------------------------------------------------------- E. subject 点名票号（t261002-14）
+# 背景：permanent 发现的 subject 只报计数（「1 unreadable ticket(s) — permanent …」），
+# 票号藏在 evidence——数字后面藏票名两次逼人猎名（巡检 t261001-08 实报，host 圈 261002）。
+# 收口：subject 尾段逐票点名（帽=UNREADABLE_LIST_CAP，超出「+N more」）；evidence 逐票
+# 原始异常文本不变（fail-closed 不动）。
+
+def test_e1_permanent_subject_names_ticket_id():
+    """permanent：fixture meta 造一张永久读失败票 → subject 点名该票号。"""
+    meta = {"unreadable": ["t260925-01: snapshot query failed: Exception: "
+                           "Workflow Task in failed state"],
+            "unreadable_transient": [],
+            "unreadable_permanent": ["t260925-01: snapshot query failed: Exception: "
+                                     "Workflow Task in failed state"]}
+    specs = lw.unreadable_finding_specs(meta)
+    assert len(specs) == 1 and specs[0]["severity"] == "med"
+    assert "t260925-01" in specs[0]["subject"], specs[0]["subject"]
+    assert ("1 unreadable ticket(s) — permanent workflow condition (needs a human): "
+            "t260925-01") in specs[0]["subject"]
+    # evidence 逐票原始异常文本不变（fail-closed 不动）
+    assert "t260925-01: snapshot query failed" in specs[0]["evidence"]
+
+
+def test_e2_transient_subject_names_ticket_id():
+    """transient：同一收口覆盖瞬态 subject（近零边际成本，review 条款 3）。"""
+    meta = {"unreadable": ["t260925-12: snapshot query failed after 1 retry: TimeoutError"],
+            "unreadable_transient": ["t260925-12: snapshot query failed after 1 retry: TimeoutError"],
+            "unreadable_permanent": []}
+    specs = lw.unreadable_finding_specs(meta)
+    assert len(specs) == 1 and specs[0]["severity"] == "low"
+    assert ("transient (no snapshot answer at scan time; not broken tickets): "
+            "t260925-12") in specs[0]["subject"], specs[0]["subject"]
+
+
+def test_e3_subject_id_cap_and_plus_n_more():
+    """帽面：13 张票 → subject 最多 UNREADABLE_LIST_CAP 个票号 + 「+3 more」。"""
+    lines = ["t-x-%02d: snapshot query failed: TimeoutError" % i for i in range(13)]
+    meta = {"unreadable": lines, "unreadable_transient": lines,
+            "unreadable_permanent": []}
+    specs = lw.unreadable_finding_specs(meta)
+    subject = specs[0]["subject"]
+    assert subject.count("t-x-") == lw.UNREADABLE_LIST_CAP
+    assert "+3 more" in subject
+    # 帽内票号不因截断而错位：第一张与第 10 张都在场，第 11 张不在
+    assert "t-x-00" in subject and "t-x-09" in subject and "t-x-10" not in subject
+    # evidence 仍按同一帽保留原始明细（不因 subject 点名扩而洪泛）
+    assert specs[0]["evidence"].count("t-x-") == lw.UNREADABLE_LIST_CAP
+
+
+def test_e4_malformed_detail_lines_never_break_subject():
+    """畸形明细行：无「: 」分隔/空头/非字符串 → 不抛、subject 结构完好、不伪造票号
+    （提不出就按原文整行点名，绝不编一个像票号的 token）。"""
+    meta = {"unreadable": ["no-colon-line", ": empty-head", 42],
+            "unreadable_transient": ["no-colon-line", ": empty-head", 42],
+            "unreadable_permanent": []}
+    specs = lw.unreadable_finding_specs(meta)
+    assert len(specs) == 1
+    subject = specs[0]["subject"]
+    assert "3 unreadable ticket(s)" in subject
+    assert "no-colon-line" in subject            # 提不出分隔=整行点名（不静默丢）
+    assert "empty-head" in subject               # 空头回落整行（": empty-head"）
+    assert "42" in subject                       # 非字符串先 str 化（不抛）
+
+
+def test_e5_legacy_receipt_subject_stays_verbatim():
+    """老回执单行形态逐字不动（重放确定性）：subject 仍是无票号旧形。"""
+    meta = {"unreadable": ["t9: snapshot query failed: TimeoutError"]}
+    specs = lw.unreadable_finding_specs(meta)
+    assert specs[0]["subject"] == "Lane/watchdog sweep had 1 unreadable ticket(s)"
+
+
+def test_e6_helpers_direct_truth_table():
+    """纯函数真值表（白盒）：提号/帽串两助手独立可判。"""
+    assert lw._unreadable_ticket_ids(
+        ["t-a: boom", "t-b: bang", "weird"]) == ["t-a", "t-b", "weird"]
+    ids = ["t-%d" % i for i in range(12)]
+    s = lw._named_ids_subject_suffix(ids)
+    assert s.endswith(", +2 more") and s.count("t-") == lw.UNREADABLE_LIST_CAP
+    assert lw._named_ids_subject_suffix(["only"]) == "only"
