@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Executor Panel — v6 mock (expandable requests)</title>
+<style>
+:root{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--fg:#dbe4f0;
+      --muted:#8ea0b8;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:18px 16px 48px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.top h1{font-size:14px;font-weight:600;margin:0}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);
+      border-radius:999px;padding:2px 9px;font-size:11px}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);
+     border-radius:9px;padding:2px;width:max-content;margin-bottom:16px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;color:var(--muted);font:inherit;cursor:pointer;
+     padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px}
+.seg button[data-on="true"]{background:var(--panel2);color:var(--fg)}
+.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:#0e1420;
+     font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
+.sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);
+     display:flex;align-items:center;gap:8px}
+.sect.lead{margin-top:18px}
+.row{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.row.wait{border-left:3px solid var(--amber)}
+.row.done{border-left:3px solid var(--line);background:transparent}
+.head{display:flex;align-items:baseline;gap:8px;padding:10px 12px;cursor:pointer;user-select:none}
+.head:hover{background:#1f2937}
+.row.done .head .txt{color:var(--muted)}
+.q{display:flex;align-items:baseline;gap:8px}
+.txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
+.dot.amber{background:var(--amber)}.dot.grey{background:#46536a}
+.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
+.meta{color:var(--muted);font-size:11px;white-space:nowrap}
+.chev{color:var(--muted);font-size:10px;flex:0 0 auto;transition:transform .15s}
+.row[data-open="true"] .chev{transform:rotate(90deg)}
+.body{display:none;padding:0 12px 11px 12px;border-top:1px solid #232c3a}
+.row[data-open="true"] .body{display:block}
+.detail{margin-top:9px;max-height:170px;overflow:auto;white-space:pre-wrap;
+     background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;
+     color:#c3cfdf;font-size:12px}
+.opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+.opts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);
+     border-radius:7px;padding:6px 14px;font:inherit;cursor:pointer}
+.opts button:hover{border-color:var(--blue);color:var(--blue)}
+.opts button.primary{background:#1d3550;border-color:#2f5b8a}
+.other{border:0;background:transparent;color:#6d7c94;font:inherit;cursor:pointer;
+     padding:6px 4px;text-decoration:underline dotted}
+.answer{display:flex;gap:8px;margin-top:10px}
+.answer input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+     border-radius:7px;padding:6px 9px;font:inherit}
+.answer input:focus{outline:0;border-color:var(--blue)}
+.answer input::placeholder{color:#6d7c94}
+.answer button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);
+     border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
+.given{color:var(--green);font-size:12px;padding:0 12px 10px 12px}
+.trace{color:#5b6880;font-size:11px;margin-top:9px}
+.strip{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);
+     border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);margin-bottom:14px}
+.strip .live{color:var(--green)}
+.strip .ro{color:var(--amber)}
+.power{border:1px solid var(--line);border-radius:7px;padding:5px 12px;font:inherit;
+     cursor:pointer;background:var(--panel2);color:var(--fg)}
+.power[data-on="true"]:hover{border-color:var(--red);color:var(--red)}
+.power[data-on="false"]:hover{border-color:var(--green);color:var(--green)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media (max-width:760px){ .cols{grid-template-columns:1fr} }
+.act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid #232c3a}
+.act:last-child{border-bottom:0}
+.act .t{color:var(--muted);font-size:11px;width:38px;flex:0 0 auto}
+.pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px;min-width:52px;text-align:center}
+.pill.sign{background:#183153;color:#79b8ff}
+.pill.open{background:#16351f;color:#7ad48a}
+.pill.retry{background:#3a2d13;color:#ffb454}
+.pill.sendback{background:#3a2a13;color:#ffc07a}
+.pill.cancel{background:#3a1a1a;color:#ff8b8b}
+.pill.pause{background:#262f3d;color:#9fb0c8}
+.act .tk{font-weight:600}
+.act .say{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cell{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.cell b{display:block;font-size:15px;font-weight:600}
+.cell span{color:var(--muted);font-size:11px}
+.file{color:#5b6880;font-size:11px;margin-top:8px}
+.grp{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.line{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #232c3a}
+.line:last-child{border-bottom:0}
+.line .lab{flex:1;min-width:0}
+.line .lab small{display:block;color:var(--muted);font-size:11px}
+.line input[type=text],.line input[type=number],.line input[type=time],.line select{
+     background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;
+     padding:5px 8px;font:inherit;width:150px}
+.sw{width:38px;height:21px;border-radius:11px;background:#39465c;border:1px solid var(--line);
+     position:relative;cursor:pointer;flex:0 0 auto;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+     background:#8ea0b8;transition:left .15s,background .15s}
+.sw[data-on="true"]{background:#1d3550;border-color:#2f5b8a}
+.sw[data-on="true"]::after{left:18px;background:var(--blue)}
+.linkbtn{border:0;background:transparent;color:var(--muted);font:inherit;cursor:pointer;
+     text-decoration:underline dotted;margin-left:auto}
+.linkbtn:hover{color:var(--blue)}
+.bar{display:flex;gap:8px;align-items:center;margin-top:12px}
+.bar button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;
+     padding:7px 14px;font:inherit;cursor:pointer}
+.bar button.primary{background:#1d3550;border-color:#2f5b8a}
+.bar button:hover{border-color:var(--blue)}
+.doneWrap{margin-top:14px}
+.doneHead{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:4px 0}
+.chev2{color:var(--muted);transition:transform .15s}
+.doneWrap[data-open="false"] .chev2{transform:rotate(-90deg)}
+.doneWrap[data-open="false"] .doneList{display:none}
+.empty{color:var(--muted);padding:22px 4px}
+.foot{margin-top:26px;color:#5b6880;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>Executor</h1><span class="chip">sandbar</span></div>
+
+  <div class="seg">
+    <button data-tab="ov" data-on="true">Overview <span id="reqBadge" class="badge">3</span></button>
+    <button data-tab="grants" data-on="false">Grants</button>
+    <button data-tab="alert" data-on="false">Alerts <span class="badge zero">3</span></button>
+    <button data-tab="ledger" data-on="false">Ledger</button>
+    <button data-tab="set" data-on="false">Settings</button>
+  </div>
+
+  <section id="paneOv">
+    <div class="strip">
+      <span id="liveDot" class="live">● active</span>
+      <span id="stateTxt">Last action: 2m ago</span>
+      <span id="grantChip" style="margin-left:auto">Permissions: 6 of 6</span>
+      <span class="chip" title="This session acts as the executor for this project.">Session: 09ca0247</span>
+      <button class="power" id="powerBtn" data-on="true" onclick="togglePower()">Disable executor</button>
+    </div>
+
+    <div class="cols">
+      <div>
+        <div class="sect" id="waitHead">Needs your answer · 3</div>
+        <div id="waitList">
+
+          <!-- expanded sample -->
+          <div class="row wait" data-open="true">
+            <div class="q head" onclick="toggleRow(this)">
+              <span class="dot amber"></span>
+              <span class="txt">Merge ticket t261002-14 into main?</span>
+              <span class="meta">sign · 12m</span><span class="chev">▸</span>
+            </div>
+            <div class="body">
+              <div class="detail">Ticket: t261002-14
+Branch: lane/t261002-14
+Check: merge_check passed. Conflicts: none. The worktree is clean.
+Changed files: 4. Added lines: 212. Removed lines: 58.
+  server/plugins/workbench/src/host/grants.ts
+  server/engine/executor_grants.py
+  server/plugins/executor-panel/src/host/executor-grants.ts
+  integration/scenarios/grants.yaml
+
+A shared test file locks two lists: the knob list and the permission words.
+If you change one name on one side, the build stops.
+The two lists cannot go out of step without a signal.</div>
+              <div class="opts">
+                <button class="primary" onclick="send(this,'Approve')">Approve</button>
+                <button onclick="send(this,'Reject')">Reject</button>
+                <button class="other" onclick="reveal(this)">Type an answer</button>
+              </div>
+              <div class="trace">Raised by session 09ca0247. Request id: req-1790950261961-0001. Default action: hold.</div>
+            </div>
+          </div>
+
+          <div class="row wait" data-open="false">
+            <div class="q head" onclick="toggleRow(this)">
+              <span class="dot amber"></span>
+              <span class="txt">Which permissions do you give to the executor?</span>
+              <span class="meta">approval · 3h</span><span class="chev">▸</span>
+            </div>
+            <div class="body">
+              <div class="detail">The executor can get six permissions:
+  sign a gate or a merge
+  send back a ticket
+  rerun a check
+  open a ticket
+  pause or resume a ticket
+  clean up a ticket
+You always keep the "manage grants" permission.</div>
+              <div class="opts">
+                <button class="primary" onclick="send(this,'All six ops')">All six</button>
+                <button onclick="send(this,'Sign only')">Sign only</button>
+                <button onclick="send(this,'No permission')">No permission</button>
+                <button class="other" onclick="reveal(this)">Type an answer</button>
+              </div>
+              <div class="trace">Raised by session 09ca0247. Default action: give no permission.</div>
+            </div>
+          </div>
+
+          <div class="row wait" data-open="false">
+            <div class="q head" onclick="toggleRow(this)">
+              <span class="dot amber"></span>
+              <span class="txt">Which night policy do you set for the watchdog?</span>
+              <span class="meta">decision · 20m</span><span class="chev">▸</span>
+            </div>
+            <div class="body">
+              <div class="detail">The watchdog uses the night policy.
+  Silent: no alerts at night.
+  Redline only: redline alerts only.
+  Normal: all alerts.</div>
+              <div class="opts">
+                <button onclick="send(this,'silent')">Silent</button>
+                <button class="primary" onclick="send(this,'redline-only')">Redline only</button>
+                <button onclick="send(this,'normal')">Normal</button>
+                <button class="other" onclick="reveal(this)">Type an answer</button>
+              </div>
+              <div class="trace">Raised by session 09ca0247. Default action: redline only.</div>
+            </div>
+          </div>
+
+          <div class="row wait" data-open="false">
+            <div class="q head" onclick="toggleRow(this)">
+              <span class="dot amber"></span>
+              <span class="txt">Do you have more instructions before the executor opens this ticket?</span>
+              <span class="meta">question · 4m</span><span class="chev">▸</span>
+            </div>
+            <div class="body">
+              <div class="detail">Ticket: "Inspection period-slot adjudication must honor supersede links" (KI-192).
+The executor opens the ticket after your answer.</div>
+              <div class="answer">
+                <input placeholder="Type an answer…" onkeydown="if(event.key==='Enter')send(this)">
+                <button onclick="send(this.previousElementSibling)">Send</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <div class="empty" id="waitEmpty" style="display:none">Nothing waiting on you.</div>
+
+        <div class="doneWrap" data-open="false" id="doneWrap">
+          <div class="doneHead" onclick="toggleDone()">
+            <span class="chev2">▾</span><span class="sect" style="margin:0" id="doneHead2">Answered · 2</span>
+          </div>
+          <div class="doneList" id="doneList">
+            <div class="row done" data-open="false">
+              <div class="q head" onclick="toggleRow(this)">
+                <span class="dot grey"></span>
+                <span class="txt">Declare the executor session?</span>
+                <span class="meta">question</span><span class="chev">▸</span>
+              </div>
+              <div class="body"></div>
+              <div class="given">you: session-09ca0247</div>
+            </div>
+            <div class="row done" data-open="false">
+              <div class="q head" onclick="toggleRow(this)">
+                <span class="dot grey"></span>
+                <span class="txt">Sound on redline alerts?</span>
+                <span class="meta">decision</span><span class="chev">▸</span>
+              </div>
+              <div class="body"></div>
+              <div class="given">you: Yes</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sect">Recent actions</div>
+        <div class="row" style="padding:2px 4px">
+          <div class="act"><span class="t">14:06</span><span class="pill sign" title="Allowed by the sign permission.">Sign</span>
+            <span class="tk">t261002-14</span><span class="say">merge → 08e669a</span></div>
+          <div class="act"><span class="t">14:03</span><span class="pill open" title="Allowed by the open ticket permission.">Open</span>
+            <span class="tk">t261003-03</span><span class="say">inspection adjudication</span></div>
+          <div class="act"><span class="t">13:52</span><span class="pill retry" title="Allowed by the rerun permission.">Rerun</span>
+            <span class="tk">t261002-10</span><span class="say">run_integration_tests</span></div>
+          <div class="act"><span class="t">13:20</span><span class="pill sendback" title="Allowed by the send back permission.">Send back</span>
+            <span class="tk">t261002-11</span><span class="say">→ implement</span></div>
+          <div class="act"><span class="t">12:41</span><span class="pill cancel" title="Allowed by the cleanup permission.">Cancel</span>
+            <span class="tk">t261001-17</span><span class="say">cleanup</span></div>
+          <div class="act"><span class="t">11:52</span><span class="pill pause" title="Allowed by the pause and resume permission.">Pause</span>
+            <span class="tk">t261001-17</span><span class="say">between stages</span></div>
+          <div class="act"><span class="t">11:20</span><span class="pill sign" title="Allowed by the sign permission.">Sign</span>
+            <span class="tk">t261001-21</span><span class="say">merge → 3f25134</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="paneGrants" style="display:none">
+    <div class="sect">Executor
+      <button class="linkbtn" onclick="allGrants(true)">Give all</button>
+      <button class="linkbtn" style="margin-left:0" onclick="allGrants(false)">Give none</button>
+    </div>
+    <div class="grp">
+      <div class="line"><div class="lab">Executor permissions <small>Off: the executor can only read and ask.</small></div>
+        <div class="sw" id="masterSw" data-on="true" onclick="masterToggle(this)"></div></div>
+      <div class="line"><div class="lab">Executor session <small>The session that works as the executor.</small></div>
+        <input type="text" value="session-09ca0247"></div>
+    </div>
+    <div class="sect lead">Permissions you can give</div>
+    <div class="grp">
+      <div class="line"><div class="lab">Sign <small>Agree to a gate or a merge.</small></div>
+        <div class="sw grant" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Send back <small>Send a ticket to the previous stage.</small></div>
+        <div class="sw grant" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Rerun <small>Run the machine checks of the stage again.</small></div>
+        <div class="sw grant" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Open ticket <small>Start a new ticket.</small></div>
+        <div class="sw grant" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Pause and resume <small>Stop or continue a ticket between stages.</small></div>
+        <div class="sw grant" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Cleanup <small>Cancel a ticket.</small></div>
+        <div class="sw grant" data-on="true" onclick="flip(this)"></div></div>
+    </div>
+    <div class="sect lead">Your permissions only</div>
+    <div class="grp">
+      <div class="line"><div class="lab">Change permissions <small>Change this list.</small></div>
+        <div class="sw" data-on="false" style="opacity:.35;cursor:not-allowed"></div></div>
+    </div>
+    <div class="bar">
+      <button class="primary" onclick="saveMsg()">Save</button>
+      <span id="saveOut" class="meta"></span>
+    </div>
+  </section>
+
+  <section id="paneAlert" style="display:none">
+    <div class="sect">Recent · 3</div>
+    <div class="row"><div class="q" style="padding:10px 12px"><span class="dot red"></span>
+      <span class="txt">Reconcile mismatch: 2 rows</span><span class="meta">14:02</span></div></div>
+    <div class="row"><div class="q" style="padding:10px 12px"><span class="dot amber"></span>
+      <span class="txt">Ticket t261002-10 did not move for 16 minutes.</span><span class="meta">13:41</span></div></div>
+    <div class="row"><div class="q" style="padding:10px 12px"><span class="dot blue"></span>
+      <span class="txt">Self-lock cleared.</span><span class="meta">13:07 · night-muted</span></div></div>
+  </section>
+
+  <section id="paneLedger" style="display:none">
+    <div class="sect">Health</div>
+    <div class="grid">
+      <div class="cell"><b>12,418</b><span>rows</span></div>
+      <div class="cell"><b>0.2%</b><span>duplicates</span></div>
+      <div class="cell"><b>0</b><span>bad rows</span></div>
+      <div class="cell"><b>0</b><span>gaps</span></div>
+    </div>
+    <div class="file">~/.sandbar/projects/sandbar/ledger/events.jsonl</div>
+    <div class="sect lead">Last events</div>
+    <div class="row" style="padding:2px 4px">
+      <div class="act"><span class="t">14:07</span><span class="pill open">CREATE_PLAN</span>
+        <span class="tk">t261003-03</span><span class="say">done</span></div>
+      <div class="act"><span class="t">14:06</span><span class="pill sign">MERGE</span>
+        <span class="tk">t261002-14</span><span class="say">closed</span></div>
+      <div class="act"><span class="t">14:06</span><span class="pill pause">WORKSPACE</span>
+        <span class="tk">t261003-03</span><span class="say">ready</span></div>
+    </div>
+  </section>
+
+  <section id="paneSet" style="display:none">
+    <div class="sect">Watchdog</div>
+    <div class="grp">
+      <div class="line"><div class="lab">Stall after (minutes)</div><input type="number" value="15"></div>
+      <div class="line"><div class="lab">Reconcile every (seconds)</div><input type="number" value="60"></div>
+    </div>
+    <div class="sect lead">Alerts</div>
+    <div class="grp">
+      <div class="line"><div class="lab">Alert sound</div><div class="sw" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Desktop alerts</div><div class="sw" data-on="true" onclick="flip(this)"></div></div>
+      <div class="line"><div class="lab">Night start</div><input type="time" value="23:00"></div>
+      <div class="line"><div class="lab">Night end</div><input type="time" value="07:30"></div>
+      <div class="line"><div class="lab">Night policy</div>
+        <select><option>silent</option><option selected>redline-only</option><option>normal</option></select></div>
+      <div class="line"><div class="lab">Redline alert rules</div><input type="text" value="reconcile_mismatch, ledger_unreadable, engine_down, self_lock, stall"></div>
+      <div class="line"><div class="lab">Keep alerts (days)</div><input type="number" value="14"></div>
+    </div>
+    <div class="bar">
+      <button class="primary" onclick="saveMsg(1)">Save</button>
+      <span id="saveOut2" class="meta"></span>
+    </div>
+  </section>
+
+  <div class="foot">Mock. No backend. Sample data.</div>
+</div>
+
+<script>
+function toggleRow(head){ var r = head.closest('.row'); r.dataset.open = (r.dataset.open === 'true') ? 'false' : 'true'; }
+function finish(row, text){
+  row.classList.remove('wait'); row.classList.add('done');
+  row.querySelector('.dot').className = 'dot grey';
+  var body = row.querySelector('.body');
+  var controls = body ? body.querySelector('.opts, .answer') : null;
+  if (controls) controls.remove();
+  var trace = body ? body.querySelector('.trace') : null;
+  if (trace) trace.remove();
+  var given = document.createElement('div');
+  given.className = 'given'; given.textContent = 'you: ' + text;
+  row.appendChild(given);
+  row.dataset.open = 'false';
+  var clone = row.cloneNode(true);
+  document.getElementById('doneList').prepend(clone);
+  row.remove();
+  var n = document.querySelectorAll('#waitList .row').length;
+  document.getElementById('waitHead').textContent = 'Needs your answer · ' + n;
+  var b = document.getElementById('reqBadge');
+  b.textContent = n; b.className = 'badge' + (n === 0 ? ' zero' : '');
+  if (n === 0) document.getElementById('waitEmpty').style.display = '';
+  document.getElementById('doneHead2').textContent =
+    'Answered · ' + document.querySelectorAll('#doneList .row').length;
+}
+function send(el, preset){
+  var row = el.closest('.row');
+  if (typeof preset === 'string') return finish(row, preset);
+  var v = (el.value || '').trim();
+  if (v === ''){ el.focus(); return; }
+  finish(row, v);
+}
+function reveal(btn){
+  var opts = btn.closest('.opts');
+  var box = document.createElement('div');
+  box.className = 'answer';
+  box.innerHTML = '<input placeholder="Type an answer…"><button>Send</button>';
+  opts.replaceWith(box);
+  var input = box.querySelector('input');
+  box.querySelector('button').onclick = function(){ send(input); };
+  input.onkeydown = function(e){ if (e.key === 'Enter') send(input); };
+  input.focus();
+}
+function toggleDone(){
+  var w = document.getElementById('doneWrap');
+  w.dataset.open = (w.dataset.open === 'true') ? 'false' : 'true';
+}
+function flip(el){ el.dataset.on = (el.dataset.on === 'true') ? 'false' : 'true'; sync(); }
+function allGrants(on){
+  document.querySelectorAll('.sw.grant').forEach(function(s){ s.dataset.on = String(on); });
+  sync();
+}
+function masterToggle(el){ allGrants(el.dataset.on !== 'true'); }
+function togglePower(){ masterToggle(document.getElementById('masterSw')); }
+function sync(){
+  var n = document.querySelectorAll('.sw.grant[data-on="true"]').length;
+  var off = n === 0;
+  document.getElementById('grantChip').textContent = 'Permissions: ' + n + ' of 6';
+  document.getElementById('liveDot').className = off ? 'ro' : 'live';
+  document.getElementById('liveDot').textContent = off ? '● read-only' : '● active';
+  document.getElementById('stateTxt').textContent = off ? 'The watchdog continues.' : 'Last action: 2m ago';
+  document.getElementById('powerBtn').dataset.on = String(!off);
+  document.getElementById('powerBtn').textContent = off ? 'Enable executor' : 'Disable executor';
+  document.getElementById('masterSw').dataset.on = String(!off);
+}
+function saveMsg(alt){
+  var o = document.getElementById(alt ? 'saveOut2' : 'saveOut');
+  o.textContent = 'Saved.';
+  setTimeout(function(){ o.textContent = ''; }, 1500);
+}
+sync();
+document.querySelectorAll('.seg button').forEach(function(btn){
+  btn.onclick = function(){
+    document.querySelectorAll('.seg button').forEach(function(b){ b.dataset.on = 'false'; });
+    btn.dataset.on = 'true';
+    var id = btn.dataset.tab;
+    [['ov','paneOv'],['grants','paneGrants'],['alert','paneAlert'],['ledger','paneLedger'],['set','paneSet']]
+      .forEach(function(p){ document.getElementById(p[1]).style.display = (p[0] === id) ? '' : 'none'; });
+  };
+});
+</script>
+</body>
+</html>
