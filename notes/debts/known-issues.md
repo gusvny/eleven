@@ -3287,3 +3287,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > · 261003 起：指针空位，自然恢复（明早 07:30 盯一眼）。
 > 另：指针目录还有大量夹具自造假实例残指针（integration-tests-<pid>-*、cnt-ok-<pid>-* 等，不碰真身幂等账但留垃圾）——清坑随 t261002-11 一并治。
 > **回归用例**：治本票沉淀（建议 L3：夹具跑快进流程→真排程触发一期→断言真票铸出且回执点名；夹具清坑后断言幂等账无假票残留）。
+
+## KI-192 巡检期槽「双已服务票」被 fail-closed 拒死且**无人工处置入口**（261003 实证，supersede 链不被采信＋blocked-completed 误判已服务）
+> **现象**：重开具名 trigger 被拒「同期已服务票出现多张：t261002-01、t261002-12——每期一票被破坏，人工处置」，而全仓**没有任何人工处置入口**（无 force/override/tombstone/状态手术面）——守卫点名了一个不存在的动作，该期永久无法重跑。
+> **两个子缺陷**：①**supersede 链不被采信**：t261002-01 已被 t261002-12 显式替代（指针 payload supersedes_ticket_id＋inspection-reopen.jsonl 双痕俱在），裁决仍逐张数 served 就一刀切拒；设计本意「终止旧票＋活新票可多张、收敛到活票裁决」漏了「已替代旧票」一类。②**blocked-completed 误判「已服务」**：t261002-12 的 workflow 早已 COMPLETED（blocked=终态），exec_status=COMPLETED→period_slot_verdict=served——但它没服务任何人（inspect 解析拒收、findings 零产出），cancel 恒空操作（already_terminal 幂等回执）＝槽位永占。
+> **连带后果**：巡检一期的产出（agent findings 报告）可被机械面永久吞掉而无补救；「记名 cancel＋重跑」这条文档承诺的正路对 blocked-completed 票是死路（文档/行为再错位，KI-189 同款）。
+> **出路**：①裁决采信 supersede 链（已替代票不占 served 席）；②blocked/解析拒收类终态归 freed/failed 类（具名可重开），不归 served；③给「人工处置」真实入口（具名 override 通道＋审计三痕），或把报错改为点名真实可行的动作。
+> **本次处置（261003）**：登记＋治本开票；20261002 期账面按「套件结果留档（期面文件在）、agent findings 缺失如实记」关闭——当日主面已前行（t261002-10 直修等），补跑意义有限；t261003-01 正常产出顶上。
+> **回归用例**：治本票沉淀（L3：造 superseded 旧票＋blocked 新票→断言具名重开成功且三痕齐；造 blocked-completed 票→断言具名可重开）。
