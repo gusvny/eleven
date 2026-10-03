@@ -100,6 +100,7 @@ with workflow.unsafe.imports_passed_through():
         SHORT,
         FLOW_BRIEF,
         DevLaneWorkflow,
+        MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID,
     )
     import shared  # 纯函数面（exception_chain_note 等，零 IO）
     import failure_protocol  # 纯函数面（归属前复验 KI-182，t261002-02）
@@ -346,7 +347,11 @@ class LightLaneWorkflow(DevLaneWorkflow):
         Stage(id="merge_check", name="合并检查", role="integration", next="merge",
               agent=False,
               desc="程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、"
-                   "merge-tree 无冲突；任一项红 → blocked 等人（轻道不做自动冲突消解轮）",
+                   "merge-tree 无冲突；phase entry re-merges main before the check "
+                   "(t261002-10: a retry_qc brings a main-side fix into the lane within "
+                   "one retry; up to date = zero action; re-merge conflict goes to the "
+                   "existing resolution loop, unreachable = loud blocked)；"
+                   "任一项红 → blocked 等人（轻道不做自动冲突消解轮）",
               parts=("script",),
               acceptance=("Lane branch has commits", "Worktree is clean",
                           "The in-lane verify_lane check is green",
@@ -1466,6 +1471,22 @@ class LightLaneWorkflow(DevLaneWorkflow):
             # 4) merge_check（程序化四项；任一项红 → 转人）
             if phase == "merge_check":
                 self._enter("merge_check")
+                # t261002-10：重并 main 再重跑在检——retry_qc 在 merge_check 唤醒的路径
+                # 由此到达；机制=dev-lane 同一条 `_main_sync_before_gate`（唯一实现，
+                # 英文文案档；已追平=零动作幂等）。否则开票后落进 main 的修复到不了停
+                # 在 merge_check 的票（t261001-20 实测）。本道无自动消解回路 ⇒ 重并冲突
+                # 仍走 helper 的既有回路（rework 回 implement），不可达=响亮 blocked
+                # （step_id 点名 merge_check），绝不静默跳过同步继续检查。判据零改动。
+                if workflow.patched(MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID):
+                    _ms = await self._main_sync_before_gate(
+                        conflict_rounds, prev_conflict_files,
+                        texts=self.LIGHT_MAIN_SYNC_TEXTS, step_id="merge_check")
+                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
+                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
+                    if _ms.get("phase"):
+                        phase = str(_ms["phase"])
+                    if _ms.get("stop"):
+                        continue
                 mc = await self._light_merge_check()
                 if mc.green:
                     self._finish("merge_check", by="merge_check",

@@ -404,6 +404,12 @@ SURFACE_PLAN_PATCH_ID = "dev-lane-surface-plan-v1"
 # KI-082 同族）；快路径让重复同步零成本。门内新路径：未 patched 的在途实例逐字旧行为
 # （回放安全）；门求值点在主循环直线段，无 KI-061 式唤醒重放路径，不需 #seq 后缀。
 MAIN_SYNC_PATCH_ID = "dev-lane-main-sync-v1"
+# t261002-10：merge_check 相位入口走同一条主同步（retry_qc 在 merge_check 唤醒后先重并
+# main 再重跑在检——否则开票之后落进 main 的修复永远到不了停在 merge_check 的票，
+# t261001-20 实测：main 修复 20:27 落，票 20:31 retry_qc 仍撞修复前旧红）。独立 patch id：
+# 在飞老历史回放时本点求值为未 patched ⇒ 逐字旧行为（KI-061 回放纪律）；两条车道共用
+# 同一 id（patched 判定按 workflow 实例各自 memoize，互不影响）。
+MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID = "t261002-10-merge-check-resync"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -763,6 +769,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                           "矛盾核对结论落回执（有矛盾则债条目已登记 pending-doc-sync）")),
         Stage(id="merge_check", name="合并检查", role="integration", next="merge", agent=False,
               desc="程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；"
+                   "相位入口先重并 main（t261002-10：retry_qc 重跑本段前把 main 修复带进泳道，"
+                   "已追平=零动作；重并冲突走既有消解回路，不可达响亮 blocked）；"
                    "仅预演冲突红 → 自动打回 implement 消解（上限 %d 轮），其它红灯 blocked 等人" % MAX_CONFLICT_ROUNDS,
               parts=("script",),
               acceptance=("泳道分支有 commit", "工作区干净（无未提交改动）",
@@ -2217,9 +2225,15 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
     # ---------- main flow (direct activity orchestration) ----------
     async def _main_sync_before_gate(self, conflict_rounds: int,
                                      prev_conflict_files: List[str],
-                                     texts: Optional[Dict[str, str]] = None
+                                     texts: Optional[Dict[str, str]] = None,
+                                     step_id: str = "run_integration_tests",
                                      ) -> Dict[str, Any]:
         """机器验证前把 main 并进泳道一次（宿主 260922-18 拍板此机制的**唯一实现**）。
+
+        t261002-10 加 `step_id` 参数（缺省="run_integration_tests"——闸相位调用点零变化）：
+        merge_check 相位入口同一条 helper 复用时传 "merge_check"，让 blocked 点名/交接
+        落点指明「哪个检查失败」，绝不让重并冲突读成一张裸的 not green（派单输入检查
+        纪律）。命令序列/合并机制/冲突回路逐字不动。
 
         为什么必须（宿主 260930 直修令，根因级）：闸在**泳道自己的 worktree** 里跑
         `integration/run_scenarios.py`，而泳道=开票那一刻从 main 建的快照——**开票之后
@@ -2297,7 +2311,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             if not prep.ok:
                 # 不可达/非冲突失败：响亮转人工，绝不静默跳过同步继续验证
                 await self._blocked(
-                    "run_integration_tests",
+                    step_id,
                     text("unreachable",
                          "主同步失败（转人工，不静默跳过同步——否则被验证树≠被合并树）："
                          "%s%s")
@@ -2315,7 +2329,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     conflict_rounds, files_sig, prev_conflict_files,
                     MAX_CONFLICT_ROUNDS)
                 if _route.startswith("blocked:"):
-                    await self._blocked("run_integration_tests",
+                    await self._blocked(step_id,
                                         _route.split(":", 1)[1])
                     _sync_stop = "blocked"
                     break
@@ -2323,7 +2337,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self._log("主同步检出 merge 冲突（%s，第 %d/%d 轮），走既有消解回路：%s"
                           % (_tag, conflict_rounds, MAX_CONFLICT_ROUNDS,
                              "、".join(prep.conflict_files)[:200]))
-                self._handoff("run_integration_tests",
+                self._handoff(step_id,
                               text("resolve_round",
                                    "主同步冲突消解第 %d 轮（%s）：%s")
                               % (conflict_rounds, _tag,
@@ -2391,7 +2405,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     _why = ("仍有未解冲突文件：%s" % "、".join(sres.remaining_files[:10])
                             ) if sres.remaining_files else (sres.error or "未知")
                     await self._blocked(
-                        "run_integration_tests",
+                        step_id,
                         text("settle_unconverged",
                              "主同步冲突消解第 %d 轮未收敛（worker 代落盘校验未过），"
                              "转人工处置：%s。工作区现为合并进行中态——人工解冲突后发 "
@@ -2413,7 +2427,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     text("back_to_implement",
                          "主同步冲突消解完成（第 %d 轮），回实现段适配 main 变更")
                     % conflict_rounds,
-                    who="workflow", fallback="run_integration_tests")
+                    who="workflow", fallback=step_id)
                 _sync_stop = "rework"
                 break
             self.meta["main_sync"] = {
@@ -4094,6 +4108,23 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # 4) merge_check (programmatic, no agent)
             if phase == "merge_check":
                 self._enter("merge_check")
+                # t261002-10：重并 main 再重跑在检（retry_qc 在 merge_check 唤醒的路径
+                # 由此到达；首轮到达时已追平=is-ancestor 快路径零动作幂等）。否则开票后
+                # 落进 main 的修复永远到不了停在 merge_check 的票（t261001-20 实测）。
+                # 顺序=同步**先于** merge_check 活动：四项检查（含泳道内 verify_lane 与
+                # merge 预演）都跑在被合并树上——「被验证树=被合并树」在两个机器段都成立。
+                # 冲突 → 既有消解回路（rework 回 implement）；不可达/非冲突失败 → 响亮
+                # blocked（step_id 点名 merge_check），绝不静默跳过同步继续检查。
+                # **判据零改动**：只改被检查的树，merge_check 四项判定一字不放宽。
+                if workflow.patched(MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID):
+                    _ms = await self._main_sync_before_gate(
+                        conflict_rounds, prev_conflict_files, step_id="merge_check")
+                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
+                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
+                    if _ms.get("phase"):
+                        phase = str(_ms["phase"])
+                    if _ms.get("stop"):
+                        continue
                 raw = await workflow.execute_activity(
                     merge_check,
                     MergeCheckArgs(ticket_id=self.ticket_id,

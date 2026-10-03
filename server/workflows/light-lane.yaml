@@ -42,7 +42,7 @@ stages:
   - id: merge_check
     role: integration
     name: "合并检查"
-    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；任一项红 → blocked 等人（轻道不做自动冲突消解轮）"
+    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；phase entry re-merges main before the check (t261002-10: a retry_qc brings a main-side fix into the lane within one retry; up to date = zero action; re-merge conflict goes to the existing resolution loop, unreachable = loud blocked)；任一项红 → blocked 等人（轻道不做自动冲突消解轮）"
     next: merge
     parts:
       - script

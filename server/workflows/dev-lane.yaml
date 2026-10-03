@@ -92,7 +92,7 @@ stages:
   - id: merge_check
     role: integration
     name: "合并检查"
-    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；仅预演冲突红 → 自动打回 implement 消解（上限 3 轮），其它红灯 blocked 等人"
+    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；相位入口先重并 main（t261002-10：retry_qc 重跑本段前把 main 修复带进泳道，已追平=零动作；重并冲突走既有消解回路，不可达响亮 blocked）；仅预演冲突红 → 自动打回 implement 消解（上限 3 轮），其它红灯 blocked 等人"
     next: merge
     parts:
       - script

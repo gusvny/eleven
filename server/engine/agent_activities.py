@@ -2323,6 +2323,65 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
 # slip that had written .sandbar twice and dropped the legacy name entirely.
 SETTLE_PATHSPEC = [".", ":!.dsh", ":!.sandbar", ":!.suyou"]  # naming-compat: .suyou = legacy coordination dir (shared.DOT_DIR_OLD)
 
+# t261002-10（三轮同因实案：gen_workflows_doc.py 的 yaml 快照落在写集外
+# server/workflows/，path_gate 自动处置把 M 态生成物回滚留档 ⇒ 快照三轮进不了
+# 泳道树，t23-yaml-chain-truth 三连红）。加固=走查点名的「worker 侧 freshness 检查」：
+# 脏文件**恰为生成器声明的输出**（server/workflows/*.yaml）且与当前代码生成逐字一致
+# （生成器 --check 退 0）时，视为合法代码生成产物随本段代落盘——真源是代码（已在
+# 写集纪律内落盘），快照与真源一致=永不该被回滚。判据必须先于任何 git add（与
+# 既有闸序一致）；--check 非 0 / 生成器缺席 / 超时 / 名单不含生成物 ⇒ 空豁免，
+# 走既有 unauthorized_path 处置（fail-closed 零放宽）。次序自洽：若同轮还夹带
+# 写集外代码脏文件，代码先被回滚 ⇒ 复判时快照与已回滚代码不再一致 ⇒ --check 转红
+# ⇒ 快照同样被拒——豁免永远不会替越权代码「运」产物出闸。
+WORKFLOW_SNAPSHOT_DIR = "server/workflows"
+GEN_WORKFLOWS_DOC = "gen_workflows_doc.py"
+GEN_FRESHNESS_TIMEOUT_SEC = 120
+
+
+def _engine_python_for_codegen(cwd: Path) -> str:
+    """代码生成检查的解释器选择（gen5 引入，gen6 收窄）：settle worker 的解释器
+    **不保证**是 engine venv——裸 python3 跑 gen_workflows_doc.py 会在
+    `import dev_lane` 处 ModuleNotFoundError: temporalio，检查永远假失败、豁免永远
+    不生效（gen1–gen4 四连败真根因）。gen6（宿主令）：只认**在役** engine venv
+    `server/engine/.venv/bin/python`；不在场=回 sys.executable 兜底（跑不成由调用方
+    具名诊断、fresh=[] fail-closed）。不再回落旧布局的 venv——那是已迁
+    移的陈旧路径（t260907-10-engine-layout 扫描器判红的同族），不硬编码。"""
+    cand = Path(cwd) / "server/engine/.venv/bin/python"
+    if cand.exists():
+        return str(cand)
+    return sys.executable
+
+
+def _codegen_fresh_snapshots(cwd: Path, files: List[str]) -> Tuple[List[str], str]:
+    """dirty 清单里**与代码生成逐字一致**的 workflow 快照路径与具名诊断（二元组）。
+
+    判定=跑 server/engine/gen_workflows_doc.py --check（解释器走
+    `_engine_python_for_codegen` 回落链；--check 读的正是工作区上的脏快照 vs 当前
+    代码）。返回 (fresh 路径名单, 诊断串)：诊断串非空=检查没跑成/没过（解释器、
+    生成器、退出码、stderr 尾具名）——**绝不静默 []**（gen4 仲裁定因：静默失败让
+    死豁免隐形四轮，违反具名报错纪律）。任何异常形态 fresh=[]，走既有
+    unauthorized_path 处置（fail-closed 零放宽）。"""
+    snap = sorted(f for f in files
+                  if str(f).startswith(WORKFLOW_SNAPSHOT_DIR + "/")
+                  and str(f).endswith(".yaml"))
+    if not snap:
+        return [], ""
+    engine_dir = Path(cwd) / "server" / "engine"
+    gen = engine_dir / GEN_WORKFLOWS_DOC
+    if not gen.is_file():
+        return [], ("代码生成物新鲜度检查未跑成：生成器缺席（%s）" % gen)
+    py = _engine_python_for_codegen(cwd)
+    try:
+        p = subprocess.run(
+            [py, GEN_WORKFLOWS_DOC, "--check"], cwd=str(engine_dir),
+            capture_output=True, text=True, timeout=GEN_FRESHNESS_TIMEOUT_SEC)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [], ("代码生成物新鲜度检查未跑成（解释器=%s：%s）" % (py, str(e)[:200]))
+    if p.returncode != 0:
+        return [], ("代码生成物新鲜度检查未过（解释器=%s exit=%s：%s）"
+                    % (py, p.returncode, ((p.stderr or p.stdout or "").strip())[-200:]))
+    return snap, ""
+
 # 协调目录撤下清单（add -A 之后的 reset 目标）：从 shared 真源派生，杜绝旧名/新名
 # 各抄一份（t260914-01；同族教训 KI-074/KI-077）。settle 与 settle_conflict_resolution
 # 共用同一元组，两处不再各写一份字面量。
@@ -2850,9 +2909,21 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         # 判红先按状态自动处置（??挪档/M回滚留档，只此一轮）再复判；protected/删除/
         # 暂存态不经处置、原样拒绝留人工。
         remediated = False
+        fresh: List[str] = []
+        fresh_diag = ""
         while True:
+            # t261002-10：代码生成物新鲜度豁免（判定严格先于 judge/处置——闸序纪律）。
+            # 豁免名单外的脏文件照旧进 judge；每轮复判都重算（处置回滚代码后
+            # --check 自然转红，豁免随之失效=fail-closed 收敛，见常量注释）。
+            # gen5：检查失败**具名留痕**（fresh_diag 进日志/回执），绝不静默 []——
+            # gen1–gen4 四连败的第二病根就是静默失败让死豁免隐形。
+            fresh, fresh_diag = _codegen_fresh_snapshots(cwd, dirty)
+            if fresh_diag:
+                activity.logger.warning("[%s/%s] %s-settle：%s",
+                                        ticket_id, stage_id, face, fresh_diag)
+            judged = [f for f in dirty if f not in fresh] if fresh else dirty
             allowed, violations, reason = path_gates.judge_stage_paths(
-                stage_id, dirty, write_set=write_set, ticket_id=ticket_id,
+                stage_id, judged, write_set=write_set, ticket_id=ticket_id,
                 template_rules=path_gate_rules)
             # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
             # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
@@ -2905,6 +2976,10 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             note = path_gates.gate_refusal_note(stage_id, violations, reason)
             if remediation:
                 note += "；本轮已自动处置：%s" % "；".join(remediation)
+            if fresh_diag:
+                # gen5：豁免检查没跑成/没过的具名诊断随拒绝回执上台面——四连败期间
+                # 「豁免为什么没生效」在票面上找不到答案，就是这里缺这一句。
+                note += "；%s" % fresh_diag
             # t260915-01 ②：结构化明细随拒绝收集（files=闸已判定的全量清单，不走
             # 文本解析——_fmt_files 的 cap 只作用于 note 文本，结构化面保真）；
             # t260916-19 ④：judged_files=本次实际判定清单（含未违规项，判定面可核对）
@@ -2914,6 +2989,10 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             activity.logger.warning("[%s/%s] %s-settle：%s",
                                     ticket_id, stage_id, face, note)
             return note
+        if fresh:
+            notes.append(
+                "代码生成物新鲜度豁免（t261002-10）：%s 与 %s --check 输出一致，"
+                "随本段代落盘" % ("、".join(fresh), GEN_WORKFLOWS_DOC))
         if passed:
             # 记名点名 + 机读键（谁批、何时、批的哪条路径）——进回执/时间线，审计可回溯
             authz_note = authz_gates.authorized_passage_note(passed)
@@ -4863,6 +4942,12 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     project repo and stops applying automatically when the project changes.
     Red lights don't raise: the receipt goes back to the workflow to turn blocked and
     wait for retry_qc / rework triage.
+    t261002-10: the CALLER (dev-lane / light-lane workflow) re-merges main into the lane
+    BEFORE this activity at every machine stage (gate rounds and merge_check re-entry
+    alike), so a fix that lands on main after the ticket passed its gate reaches the
+    lane within one retry_qc. This activity itself stays read-only / dry (the merge-tree
+    rehearsal makes no state change); the real merge and its conflict routing belong to
+    the workflow layer.
     """
     # Ticket B (t260907-06): scope-list driven — a single repo = 1 scope (the logic
     # below matches the old single-anchor implementation); multi-repo = run the core

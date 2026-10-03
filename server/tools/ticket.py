@@ -35,7 +35,12 @@ op:
   rework {id, to_stage?, note}  → 打回（signal 回目标段重跑），status=rework，log 记原因
   sign   {id, gate?, by(who), decision(approve|reject), note?}  → 人工审批签字（signal）
   retry_qc {id, by(who)}  → blocked 重跑请求（signal 裸串 who；不收 note——workflow
-                            契约只收 who，带话走 update pending_add / ruling）
+                            契约只收 who，带话走 update pending_add / ruling）。
+                            行为口径（t261002-10）：重跑的是**当前机器段**，且两个机器段
+                            （run_integration_tests 闸 / merge_check）在重跑前都会先把 main
+                            重并进泳道——开票之后落进 main 的修复，一次 retry_qc 即达。
+                            重并冲突 → 既有消解回路（回 implement）；重并不可达 → 响亮
+                            blocked（点名哪个检查失败），绝不静默跳过同步继续检查。
   cancel {id, by(who), reason(必填非空), cross_project?}  → 记名单票终结（t260922-10，
       清场 runbook 判据见下节）：先 signal cancel_notice 留痕（who+reason 入票面
       log/timeline 与跨项目记名面 cross_project_uses）后 terminate（reason 同串）；

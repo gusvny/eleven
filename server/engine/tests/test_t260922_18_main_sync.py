@@ -348,7 +348,8 @@ def test_struct_conflict_subloop_reuses_existing_trio_back_to_implement():
     i_agent = block.index('_run_agent_step("implement", msolve_ctx)')
     i_settle = block.index("settle_conflict_resolution", i_agent)
     assert i_prep < i_agent < i_settle
-    assert 'who="workflow", fallback="run_integration_tests"' in block
+    # t261002-10：字面量参数化为 fallback=step_id（缺省仍=闸相位原值，闸行为零变化）
+    assert 'who="workflow", fallback=step_id' in block
     assert "主同步冲突消解完成（第" in block          # 回实现段的 rework note 锚
     assert "**不要 git commit**" in block             # agent 零 git 元数据写入（提示词令）
     assert "主同步失败（转人工，不静默跳过同步" in block   # 不可达响亮转人工锚

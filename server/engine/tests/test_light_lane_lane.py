@@ -1138,8 +1138,9 @@ def test_light_lane_has_no_second_main_sync_implementation():
     # 同步入口只此一处（=调共享 helper）；「git merge main」只允许作为**提示词文本**出现
     # （agent 上下文里描述 worker 已做过什么），不允许作为命令执行面出现——命令执行面
     # （subprocess/git 调用）在 activity 里，轻道侧连 subprocess 都不 import。
-    # 源码面出现 4 次：3 处是文档/注释里的指针（说明「机制在那一份」），恰 1 处是调用
-    assert LIGHT_SRC.count("await self._main_sync_before_gate(") == 1
+    # 源码面出现次数=调用点数（t261002-10 起为 2：闸相位入口 + merge_check 相位入口，
+    # 都调同一条共享 helper——轻道不做第二份实现，只加调用点）
+    assert LIGHT_SRC.count("await self._main_sync_before_gate(") == 2
     assert "subprocess" not in LIGHT_SRC
     assert "os.system" not in LIGHT_SRC
     # 「不自造打回」：主同步的落点相位由 helper 的既有回路给——轻道闸相位块里零 _auto_rework
@@ -1154,7 +1155,10 @@ def test_dev_lane_sync_command_sequence_is_verbatim_after_extraction():
                 'base_ref="main"', "start_to_close_timeout=SHORT, retry_policy=RETRY",
                 "settle_conflict_resolution,", "ConflictSettleArgs(ticket_id=self.ticket_id,",
                 "round_no=conflict_rounds)", "MAX_CONFLICT_ROUNDS",
-                "main_sync_conflict_route(", 'fallback="run_integration_tests"'):
+                "main_sync_conflict_route(",
+                # t261002-10：blocked 点名改走 step_id 参数（缺省仍=闸相位原值，
+                # merge_check 入口传 "merge_check"——字面量被参数化，锚随语义更新）
+                "fallback=step_id"):
         assert lit in h, "抽块丢了原命令序列字面量：%s" % lit
     # 调用点仍是唯一同位点 + 计时面照旧累计（t260925-12）
     block = DEV_SRC[DEV_SRC.index('if phase == "run_integration_tests":'):
