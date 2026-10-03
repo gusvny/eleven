@@ -128,7 +128,9 @@ SCENARIOS = [
      "python3 integration/t261002-13/sc_tmp_backlog_sweep_safety.py", "ro", "serial"),
     ("t261002-13-tmp-alarm-owner-receipt",
      "水位告警点名泄漏家族（t261002-13，灰盒 L3，离线秒级零 docker，真扫描 IO 隔离 root 非注入 dict）：scan_tmp_fixture_dirs 真扫多家族越龄夹具→tmp_fixture_scan_result 回执组装——A 真扫描按家族可辨、缺口族 t26092523-* 在白名单可报警；B 越阈值触发 finding 且回执含 top_leakers（按计数降序、带最老年龄）——告警必须指向一个家族而不是一个数字（工单交付物 3 主面）；C 每条 leaker 带 owner 字段（生产者线索，未知=owner=unknown 绝不猜）；D EXCLUDED_PREFIXES 不进计数不进 top_leakers（不冤枉别的程序）、外来条目以 untouched/skipped 可见不静默；E 报数契约不回退（dirs/oldest_age_h/finding_count/threshold_source 具名在）。intent 分工：watchdog 纯函数真值分支矩阵（注入扫描/畸形条目降级点名/词表）归 developer L1 test_t260926_tmp_fixture_water.py，本条锁真扫描→回执端到端面。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t261002-13/sc_tmp_alarm_owner_receipt.py", "ro", "serial"),
+     # venv-fallback shim（t261003-05）：本条真扫引擎 activities.scan_tmp_fixture_dirs（需 temporalio），
+     # 裸 python3 在闸轮 import 即 ENV_FAIL（0.1s 幻影 env-red）；先走引擎 venv，venv 缺席仍 ENV_FAIL exit 2（三态契约不静默降级）
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261002-13/sc_tmp_alarm_owner_receipt.py", "ro", "serial"),
     ("t261002-13-tmp-producer-zero-residue",
      "夹具生产者全终态零残留（t261002-13，灰盒 L3，真子进程 pytest×隔离 TMPDIR 沙盒零碰宿主 temp；生产者=ticket 直方图 #1 家族 test_t260904_02_registry_anchor.py，15,640 存量/~437 每 24h 每日巡检重跑即增生）：A pass 终态=套件全绿退出后隔离 TMPDIR 里 t260904-02-* 残留恰 0（用户可感知契约：巡检重跑不再累积）；B cancel 终态=运行中 SIGINT（在夹具目录出现的瞬间打点）走完收口退出后残留恰 0（中断不是豁免口——261001 载体风暴「finally 没跑就漏」的对面）；C 生产者迁移钉=文件内零裸 tempfile.mkdtemp( 且经 mkdtemp_reclaimed（revert 即红；与 lint L8 baseline 互补：L8 管全仓新债、本条钉本票点名文件）。fail/env-fail 终态与 pass 同走解释器退出+atexit 同一条回收路，由 developer L1 helper 终态矩阵钉住，此处不重复（intent 分工：_tmp_reclaim 注册/幂等 reap/终态矩阵归 L1 白盒；其余家族同机制不逐家族重复本场景）。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t261002-13/sc_tmp_producer_zero_residue.py", "ro", "serial"),
