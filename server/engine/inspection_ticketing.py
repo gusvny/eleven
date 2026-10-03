@@ -181,12 +181,15 @@ REOPEN_JOURNAL_NAME = "inspection-reopen.jsonl"
 
 def append_reopen_journal(ledger_dir: Any, instance_id: str, period: str,
                           terminated_ticket_id: str, new_ticket_id: str,
-                          now_fn=time.time, reason: str = "") -> None:
+                          now_fn=time.time, reason: str = "",
+                          collapsed_ticket_ids: Optional[List[str]] = None) -> None:
     """重开票的审计链接落盘（append-only JSONL）。既有文件哪怕内容畸形（半截行/
     坏 JSON）也不阻断追加——本函数只写不读，畸形行留给未来消费方按行容错；写失败
     OSError 上抛，由调用方显式报错（审计缺失绝不静默）。
     reason（260926）：人工具名重跑时的理由；空串＝不加该键（终止票自动重开的既有
-    行形状逐字不变，老消费方零感知）。"""
+    行形状逐字不变，老消费方零感知）。
+    collapsed_ticket_ids（KI-192）：本次重开一并收敛掉的同期票（被 supersede 链
+    收敛的已服务旧票 / blocked-completed 票）；空/None＝不加该键（既有行形状不变）。"""
     p = Path(str(ledger_dir)) / REOPEN_JOURNAL_NAME
     p.parent.mkdir(parents=True, exist_ok=True)
     payload = {"at": float(now_fn()), "instance": str(instance_id),
@@ -195,9 +198,143 @@ def append_reopen_journal(ledger_dir: Any, instance_id: str, period: str,
                "new_ticket_id": str(new_ticket_id or "")}
     if str(reason or "").strip():
         payload["reason"] = str(reason).strip()   # 人工具名重跑：理由进审计行
+    if collapsed_ticket_ids:
+        payload["collapsed_ticket_ids"] = [str(t) for t in collapsed_ticket_ids]
     entry = json.dumps(payload, ensure_ascii=False)
     with open(p, "a", encoding="utf-8") as f:
         f.write(entry + "\n")
+
+
+def reopen_journal_rows(ledger_dir: Any) -> List[Dict[str, Any]]:
+    """读重开审计日志（只读；spawn_journal_rows 同纪律：文件缺席=空、坏行逐行跳过，
+    畸形行绝不炸整次核查——本面写时不读、读时容错，两半各自成立）。"""
+    try:
+        text = (Path(str(ledger_dir)) / REOPEN_JOURNAL_NAME).read_text("utf-8")
+    except (FileNotFoundError, OSError):
+        return []
+    rows: List[Dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+# ---- KI-192（t261003-03）：supersede 链采信 + blocked-completed 重分类 -------------
+#: supersede 链具名检查失败检查名（报错必带其一，绝不裸布尔）：
+#:   supersede-chain-double-supersede —— 同一旧票被两张不同新票替代（链分叉）
+#:   supersede-chain-journal-missing  —— 指针 payload 声明的替代链无 journal 行背书
+#:   supersede-chain-target-missing   —— 链一端不在同期候选票里（指向不存在的票）
+
+def supersede_links(journal_rows: List[Dict[str, Any]], instance_id: str, period: str,
+                    candidate_ids: List[str],
+                    pointer_payload: Optional[Dict[str, Any]] = None
+                    ) -> Tuple[Dict[str, str], List[str]]:
+    """supersede 链解析（纯函数）。返回 (links, errors)：
+    links = {new_ticket_id: old_ticket_id}（仅收录与本期候选相关的行）；
+    errors = 具名检查失败列表（每条带检查名，见上方常量注释；非空=链不被采信，
+    调用方 fail-closed 拒开，绝不静默降级成「无链」）。
+
+    三个具名检查（派单规格逐条）：①双替代（链分叉）；②payload 声明的链无
+    journal 行背书（双痕缺一）；③链一端不在同期候选（指向不存在的票）。"""
+    inst, per = str(instance_id or ""), str(period or "")
+    cand = {str(t) for t in candidate_ids}
+    links: Dict[str, str] = {}
+    errs: List[str] = []
+    for row in journal_rows:
+        if str(row.get("instance") or "") != inst or str(row.get("period") or "") != per:
+            continue
+        old = str(row.get("terminated_ticket_id") or "").strip()
+        new = str(row.get("new_ticket_id") or "").strip()
+        if not old or not new:
+            continue          # 畸形行：读取侧跳过（与 spawn_journal_rows 同纪律）
+        # 相关行过滤（t260925-09 仲裁回修）：两端都不在本期候选=惰性历史档案——
+        # journal 是跨次共享的 append-only 痕，绝不许不相关旧行 fail-closed 楔死
+        # 本期裁决（那正是 KI-192 的病形）。链检查只对「至少一端在候选」的相关行
+        # 负责；恰好一端在候选、另一端不在=断半链（承接票消失/从未起票），才是
+        # 危险真形态，落下方 target-missing 具名检查。
+        if old not in cand and new not in cand:
+            continue
+        if old in cand and old in set(links.values()):
+            # 双替代：同一旧票已被另一张新票声明替代（链分叉）——具名报错，不收录
+            prev_new = sorted(n for n, o in links.items() if o == old)[0]
+            errs.append("supersede-chain-double-supersede：票 %s 被两张票声明替代"
+                        "（%s 与 %s）——supersede 链分叉，人工核对 %s"
+                        % (old, prev_new, new, REOPEN_JOURNAL_NAME))
+            continue
+        prev = links.get(new)
+        if prev and prev != old:
+            errs.append("supersede-chain-double-supersede：票 %s 被两张票声明替代"
+                        "（%s 与 %s）——supersede 链分叉，人工核对 %s"
+                        % (prev, prev, old, REOPEN_JOURNAL_NAME))
+            continue
+        links[new] = old
+    if pointer_payload:
+        ptid = str(pointer_payload.get("ticket_id") or "").strip()
+        declared = str(pointer_payload.get("supersedes_ticket_id") or "")
+        for old in [s.strip() for s in declared.split(",") if s.strip()]:
+            if old not in cand and ptid not in cand:
+                continue
+            if links.get(ptid) != old:
+                errs.append("supersede-chain-journal-missing：指针 payload 声明 %s 替代"
+                            " %s，但 %s 无该链接行——链不被采信（fail-closed，人工核对"
+                            "双痕）" % (ptid, old, REOPEN_JOURNAL_NAME))
+    for new, old in sorted(links.items()):
+        if old not in cand:
+            errs.append("supersede-chain-target-missing：重开日志行 %s→%s 的被替代票 %s "
+                        "不在同期候选票中——链指向不存在的票，人工核对"
+                        % (old, new, old))
+        if new not in cand:
+            errs.append("supersede-chain-target-missing：重开日志行 %s→%s 的承接票 %s "
+                        "不在同期候选票中——链指向不存在的票，人工核对"
+                        % (old, new, new))
+    return links, errs
+
+
+def read_period_ledger_doc(ledger_dir: Any, instance_id: str, period: str) -> Optional[dict]:
+    """读期刊台账文档（只读；缺席/坏 JSON/非 dict → None = 证据读不出，调用方按
+    「未证实」处理，绝不猜——与 describe 三态同纪律）。"""
+    try:
+        doc = json.loads((Path(str(ledger_dir)) /
+                          ledger_file_name(instance_id, period)).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def period_ledger_face(doc: Optional[dict], ticket_id: str) -> str:
+    """期刊台账 → blocked 证据判读（纯函数）：仅当文档可读、`ticket_id` 与候选票
+    一致、且 `blocked_reason` 非空 → "blocked"（blocked-completed 的铁证：inspect
+    阶段解析拒收、零 findings，未服务任何人）；其余一律 "unproven"（保守：继续按
+    served 处置，具名重开路仍在）。无簿可查的 blocked 壳（write_ledger=False 的
+    重定向壳）也落 "unproven"——这是台账面唯一看不见的 blocked 形态，文档如实记。"""
+    if not isinstance(doc, dict):
+        return "unproven"
+    if str(doc.get("ticket_id") or "").strip() != str(ticket_id or "").strip():
+        return "unproven"
+    return "blocked" if str(doc.get("blocked_reason") or "").strip() else "unproven"
+
+
+def survivor_by_slot_stamp(ticket_ids: List[str],
+                           taken_by_tid: Dict[str, str]) -> Tuple[str, List[str]]:
+    """多张真已服务票的幸存者收敛（纯函数）：按 InspectionSlotTakenAt 取最新者。
+    任何不可比形态（unknown 章、缺章、时刻相等）→ ("", 全体)（fail-closed 具名报
+    slot-stamp-unresolvable，绝不猜谁是幸存者——review 意见3：unknown 对 known
+    同样判不可比）。返回 (survivor, tombstones)；survivor 空=不可收敛。"""
+    stamps = {str(t): str(taken_by_tid.get(t, "") or "").strip() for t in ticket_ids}
+    if any(not s or s == "unknown" for s in stamps.values()):
+        return "", sorted(stamps)
+    ranked = sorted(stamps.items(), key=lambda kv: kv[1])
+    if len({s for _, s in ranked}) != len(ranked):
+        return "", sorted(stamps)
+    survivor = ranked[-1][0]
+    return survivor, sorted(t for t, _ in ranked[:-1])
 
 
 # ========================================================================================
@@ -664,6 +801,10 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
     #      KI-191：夹具票对真班**不是去重对象**——逐张读夹具章过滤后再裁决）----
     superseded_ticket_id = ""
     skipped_fixture_tickets: List[str] = []
+    # KI-192：本次重开一并收敛掉的票（superseded 旧票 / blocked-completed 票）——
+    # 供审计三痕与回执点名；空=普通起票，零新增键（既有形状不变）。
+    reopen_collapsed: List[str] = []
+    reopen_blocked_completed: List[str] = []
     try:
         existing = await find_period_ticket_ids(client, iid, period)
     except TicketingError as e:
@@ -677,6 +818,10 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
         freed_ids: List[str] = []
         served_ids: List[str] = []
         ambiguous_ids: List[str] = []
+        blocked_completed_ids: List[str] = []   # KI-192②：COMPLETED 但期台账 blocked
+        # KI-192②：期台账 face 是 blocked-completed 的证据面（只读一次，循环内判读；
+        # 读不出=None=未证实→照旧按 served，绝不猜）。
+        ledger_doc = read_period_ledger_doc(ledger_dir, iid, period)
         taken_by_tid: Dict[str, str] = {}
         for tid in existing:
             exists, estatus, _einst, _eper, emark, etaken = \
@@ -705,7 +850,13 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
             if slot == "live":
                 live_ids.append(tid)
             elif slot == "served":
-                served_ids.append(tid)
+                # KI-192②：COMPLETED 但期台账记 blocked（inspect 解析拒收、零 findings
+                # =未服务任何人）→ 归 freed/failed 类（具名可重开），不占 served 席。
+                # 台账读不出=unproven→保守按 served（具名重开路仍在）。
+                if period_ledger_face(ledger_doc, tid) == "blocked":
+                    blocked_completed_ids.append(tid)
+                else:
+                    served_ids.append(tid)
             elif slot == "freed":
                 freed_ids.append(tid)
             else:
@@ -738,9 +889,59 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                                                sorted(skipped_fixture_tickets)}
                                               if skipped_fixture_tickets else {}),
                                            "stale_pointer_cleared": cleared}}
-        if freed_ids or ambiguous_ids or (served_ids and reason):
-            # 重开三源：①终止票（KI-114 自动放行）；②FAILED/TIMED_OUT/未知 + 人工具名；
-            # ③已服务（COMPLETED）+ 人工具名（260926 宿主令：手动重跑同期必须支持）。
+        # ---- KI-192①：supersede 链采信——被本期在册新票显式替代的已服务旧票不占
+        #      served 席（收敛到幸存票裁决）。链检查任一失败=具名报错 fail-closed，
+        #      绝不静默降级成「无链」。
+        ptr_kind, ptr_data = read_pointer_state(ppath)
+        sup_links, sup_errs = supersede_links(
+            reopen_journal_rows(ledger_dir), iid, period, existing,
+            ptr_data if ptr_kind == "valid" else None)
+        if sup_errs:
+            return _err("supersede 链检查失败：%s" % "；".join(sup_errs))
+        sup_new_ids = set(sup_links)
+        # 被 supersede 的 served 票 = 链里作为 old、且其承接票（new）在本期候选在册
+        # 的票（链检查已保证 new 在候选里）。
+        superseded_ids = sorted(
+            {t for t in served_ids
+             if any(old == t and new in sup_new_ids for new, old in sup_links.items())})
+        served_ids = [t for t in served_ids if t not in set(superseded_ids)]
+
+        # KI-192②：blocked-completed 无具名理由绝不重开（虽未服务，仍是终态票面，
+        # 机器不猜）；带理由走与 freed 同路的具名重开。
+        if blocked_completed_ids and not reason:
+            return _err(
+                "同期票 %s 执行状态=COMPLETED 但期台账记 blocked（%s face=blocked，"
+                "零 findings 未服务任何人）——归 freed/failed 类；重开请带 reopen_reason "
+                "具名（python3 server/engine/inspection_trigger.py trigger --instance %s "
+                "--period %s --reopen-reason \"<理由>\"）"
+                % ("、".join(sorted(blocked_completed_ids)),
+                   ledger_file_name(iid, period), iid, period))
+
+        if len(served_ids) > 1 and reason:
+            # KI-192③ override 通道：具名理由下多张真已服务票按占坑时刻收敛到最新
+            # 幸存者；不可比（unknown/缺章/相等）→ 具名报错，绝不猜。
+            survivor, tombstones = survivor_by_slot_stamp(served_ids, taken_by_tid)
+            if not survivor:
+                return _err("slot-stamp-unresolvable：同期已服务票 %s 占坑时刻不可比"
+                            "（%s）——具名理由也不可猜幸存者，人工核对 SA 章"
+                            % ("、".join(sorted(served_ids)),
+                               "；".join("%s=%s" % (t, taken_by_tid.get(t, "unknown"))
+                                         for t in sorted(served_ids))))
+            superseded_ids = sorted(set(superseded_ids) | set(tombstones))
+            served_ids = [survivor]
+        if len(served_ids) > 1:
+            # 无具名理由的多张真已服务票：仍 fail-closed，但报错点名**真实存在的**
+            # 人工入口（--reopen-reason 具名重开，审计三痕），不再虚指「人工处置」。
+            return _err("同期已服务票出现多张：%s——每期一票被破坏；人工处置入口="
+                        "trigger --reopen-reason 具名重开（按占坑时刻收敛到幸存票，"
+                        "审计三痕：reopen journal+指针 payload+回执）"
+                        % "、".join(sorted(served_ids)))
+
+        if (freed_ids or ambiguous_ids
+                or ((served_ids or blocked_completed_ids) and reason)):
+            # 重开源：①终止票（KI-114 自动放行）；②FAILED/TIMED_OUT/未知 + 人工具名；
+            # ③已服务（COMPLETED）+ 人工具名（260926 宿主令）；④blocked-completed +
+            # 人工具名（KI-192②）。
             # 清残指针（留痕带旧票号）→ 放行进铸号循环开新票；审计链接在 ④ 启动成功后
             # 落 reopen journal + 回执。已服务票而**无**具名＝「服务过又终止/含糊」复杂史，
             # 仍旧 fail-closed 人工判定（防台账双计）。
@@ -749,19 +950,16 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                             "判定；要重跑请带 reopen_reason 具名"
                             "（本面 fail-closed 不自动开票）"
                             % ("、".join(sorted(served_ids)), "、".join(sorted(freed_ids))))
-            if len(served_ids) > 1:
-                return _err("同期已服务票出现多张：%s——每期一票被破坏，人工处置"
-                            % "、".join(sorted(served_ids)))
-            superseded_ticket_id = ",".join(
-                sorted(freed_ids + served_ids + ambiguous_ids))
+            superseded_ticket_id = ",".join(sorted(
+                set(freed_ids + served_ids + ambiguous_ids + blocked_completed_ids)
+                | set(superseded_ids)))
             if clear_pointer(ppath):
                 cleared.append("%s（重开：清旧指针 %s）"
                                % (ppath, superseded_ticket_id))
+            reopen_collapsed = list(superseded_ids)
+            reopen_blocked_completed = list(blocked_completed_ids)
             # 落到 ② 铸号循环——不 return
         elif served_ids:
-            if len(served_ids) > 1:
-                return _err("同期已服务票出现多张：%s——每期一票被破坏，人工处置"
-                            % "、".join(sorted(served_ids)))
             # 该期已收口落账：dedup 照旧（重开=台账双计），回执如实报 period_state，
             # 并给出重跑入口提示（260926 宿主令：手动 trigger 应支持）。
             return {"ok": True, "result": {"triggered": False, "deduped": True,
@@ -933,7 +1131,8 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 try:
                     append_reopen_journal(ledger_dir, iid, period,
                                           superseded_ticket_id, ticket_id,
-                                          now_fn=now_fn, reason=reason)
+                                          now_fn=now_fn, reason=reason,
+                                          collapsed_ticket_ids=reopen_collapsed)
                 except OSError as e:
                     return {"ok": False,
                             "error": "新票 %s 已启动但 reopen journal 追加失败（%s: %s）——"
@@ -948,6 +1147,11 @@ async def open_period_ticket(client: Any, *, instance_id: str, period: str,
                 "slot_taken_at": slot_taken_iso, "fixture": bool(mark),
                 **({"skipped_fixture_tickets": sorted(skipped_fixture_tickets)}
                    if skipped_fixture_tickets else {}),
+                # KI-192：supersede 收敛 / blocked-completed 重分类的回执点名痕
+                **({"collapsed_superseded": reopen_collapsed}
+                   if reopen_collapsed else {}),
+                **({"blocked_completed": reopen_blocked_completed}
+                   if reopen_blocked_completed else {}),
                 "dedup_source": "", "stale_pointer_cleared": cleared, "scan_mode": scan_mode,
                 "superseded_ticket_id": superseded_ticket_id,
                 # 人工具名重跑：理由随回执回显（对账锚；空串=不加该键，既有形状不变）

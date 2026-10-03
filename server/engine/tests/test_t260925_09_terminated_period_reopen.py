@@ -298,6 +298,14 @@ def test_served_dedup_receipt_carries_reopen_hint(tmp_path):
 
 def test_reopen_reason_reruns_ambiguous_failed_period(tmp_path):
     for status in ("FAILED", "TIMED_OUT", "SOMETHING_ELSE"):
+        # KI-192（t261003-03）：上一轮重开落的 journal 链行与指针 payload（old→new）
+        # 在 fresh client 里 new 端不存在 → 会被新加的 supersede-chain-* 具名检查拦截。
+        # 本测意图是「含糊态具名重开」，轮间清审计痕保持用例独立。
+        for name in (tick.REOPEN_JOURNAL_NAME,
+                     "inspection-%s-%s.ticket" % (INST, PERIOD)):
+            p = tmp_path / "ledger" / name
+            if p.exists():
+                p.unlink()
         client = FakeClient([sa_ticket("t260916-03", status)])
         res = open_ticket(client, tmp_path, reopen_reason="人工裁定重跑 %s" % status)
         assert res["ok"] and res["result"]["triggered"] is True, status

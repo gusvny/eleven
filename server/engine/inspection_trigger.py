@@ -1078,14 +1078,15 @@ def main() -> None:
     sub = ap.add_subparsers(dest="op")
     p = sub.add_parser("decl", help="离线声明视图")
     p.add_argument("--decl-path", default=None)
-    p = sub.add_parser("trigger", help="手动触发一期（每期一票：同票号去重；--reopen-reason 可具名重跑已服务/失败期）")
+    p = sub.add_parser("trigger", help="手动触发一期（每期一票：同票号去重；--reopen-reason 可具名重跑已服务/失败/blocked-completed 期——这是唯一的人工处置入口，cancel 对终态票是空操作回执）")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
     p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
     p.add_argument("--reopen-reason", default="",
-                   help="人工具名重跑理由（非空=允许对「已服务(COMPLETED)/FAILED/TIMED_OUT/未知」"
-                        "槽位重开新票，审计链接三处并落 reason；在飞期仍拒。260926 宿主令）")
+                   help="人工具名重跑理由（非空=允许对「已服务(COMPLETED)/FAILED/TIMED_OUT/"
+                        "未知/blocked-completed」槽位重开新票，审计链接三处并落 reason；"
+                        "在飞期仍拒。260926 宿主令 + KI-192）")
     p.add_argument("--fixture-mark", default="",
                    help="夹具标记（KI-191：测试夹具跑真流程必带——去重认标记不认假票）")
     p = sub.add_parser("trigger-produce", help="手动触发产出型巡检一期（per-ticket 队列，t260925-01）")
@@ -1094,7 +1095,7 @@ def main() -> None:
     p.add_argument("--repo-root", default="")
     p.add_argument("--decl-path", default=None)
     p.add_argument("--reopen-reason", default="",
-                   help="同 trigger：人工具名重跑理由（非空即允许重开已服务/失败槽位）")
+                   help="同 trigger：人工具名重跑理由（非空即允许重开已服务/失败/blocked-completed 槽位，KI-192）")
     p.add_argument("--fixture-mark", default="",
                    help="夹具标记（KI-191：测试夹具跑真流程必带——去重认标记不认假票）")
     p = sub.add_parser("sign", help="人门签字（who=签字人；agent 角色名拒收）")

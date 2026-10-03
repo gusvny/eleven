@@ -617,6 +617,28 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
   含历史 COMPLETED）；②原子指针三态（见 13.3）；③`AlreadyStarted` 归属判定（本
   （实例,期）=deduped 收尾清指针；外来撞号=NN+1 让位重试 ≤`MAX_ALLOC_RETRIES`=5）。
   同期多张票=点名报错（有第二写入方，人工处置），绝不猜。
+- **期槽裁决表（KI-114/KI-191/KI-192，t261003-03）**：`period_slot_verdict` 按执行
+  枚举分类 `live`(RUNNING/CONTINUED_AS_NEW)/`served`(COMPLETED)/`freed`(CANCELED/
+  TERMINATED)/其余=ambiguous，再叠加三条修正：
+  ①**supersede 链采信**——被本期在册新票显式替代（`inspection-reopen.jsonl` 行＋
+  指针 payload `supersedes_ticket_id` 双痕）的 served 旧票不占 served 席，收敛到
+  幸存票裁决。链检查三named：`supersede-chain-double-supersede`（分叉）、
+  `supersede-chain-journal-missing`（payload 声明无 journal 背书）、
+  `supersede-chain-target-missing`（**本期相关行**（至少一端在同期候选）的链一端
+  不在候选=断半链；两端都不在候选的惰性历史行不背检查责任，绝不楔死本期裁决，
+  t260925-09 仲裁回修）——任一失败 fail-closed
+  拒开，绝不静默降级成「无链」。
+  ②**blocked-completed 不算已服务**——COMPLETED 但期台账 face（`ticket_id` 匹配且
+  `blocked_reason` 非空，`_blocked` 落账面）记 blocked 的票归 freed/failed 类：带
+  `reopen_reason` 具名重开；无理由 fail-closed 点名真实入口。台账读不出/票号不匹配
+  =`unproven`→保守按 served；`write_ledger=False` 的重定向 blocked 壳**无簿可查**，
+  同落 unproven（台账面唯一看不见的 blocked 形态，如实记）。
+  ③**多张真已服务票**——无理由：报错点名真实入口 `trigger --reopen-reason`（审计
+  三痕）；带理由（override 通道）：按 `InspectionSlotTakenAt` 收敛到最新幸存票，
+  不可比（unknown 章/缺章/时刻相等，含 unknown-vs-known）→ `slot-stamp-unresolvable`
+  具名报错。收敛掉的票在回执 `collapsed_superseded`/`blocked_completed` 与 journal 行
+  `collapsed_ticket_ids` 点名。「先记名 cancel 再重跑」对**终态**票是空操作回执
+  （already_terminal）——唯一人工重跑入口是 `--reopen-reason`（KI-189 同族文档纠偏）。
 - **聚合遍历**：板面白名单 / deadman 漏跑核查 / schedule-up 都遍历注册项目读各自声明；
   跨项目实例 id 重复=歧义实例剔除+点名两处（trigger 面多命中同样报错）。
 - **spawner**：Temporal Schedule 铸不了 t 形号（建 schedule 时未知当日序号）——调度
