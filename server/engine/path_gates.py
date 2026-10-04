@@ -142,6 +142,57 @@ _OUT_PROTECTED = "合法出路：人审放行或回 main 侧走票"
 _OUT_CONFIG = "合法出路：补配后重跑，或回 main 侧走票"
 
 
+# ---------------- Ticket test face (t261004-25: a lawful path for out-of-write-set deliverables) ----------------
+#
+# Failure on record (three instances in one day): a ticket's own engine-side unit
+# test (server/engine/tests/test_<ticket>_*.py) is not in the frozen write set, so
+# the stage path gate rules it unauthorized_path and auto-quarantines the untracked
+# new file (t261004-18: the test never reached a commit); a committed one is reded
+# by merge_check's in-lane verify_lane write-set whitelist (t261004-19: blocked with
+# everything else green). Repair stance = "the name is the proof": a test file whose
+# basename embeds the ticket's own slug has a blast radius of one tests directory
+# and is structurally a lawful deliverable of that ticket — the frozen write set
+# must not eat it. Every pass granted this way is NAMED (green note with file and
+# rule), never silent. The predicate is pure, zero IO, stdlib-only — the verify_lane
+# tool subprocess can import it directly (single source, no second copy).
+
+TICKET_TEST_FACE_NOTE = "lawful deliverable outside the write set (ticket-test-face rule)"
+
+
+def ticket_slug(ticket_id: Any) -> str:
+    """Ticket slug (t261004-19 -> t261004_19): strip, then replace '-' with '_'.
+    Malformed input (empty / path separators) returns "" = predicate always False
+    (fail-closed)."""
+    s = str(ticket_id or "").strip()
+    if not s or "/" in s or "\\" in s:
+        return ""
+    return s.replace("-", "_")
+
+
+def is_ticket_test_face(path: Any, ticket_id: str) -> bool:
+    """Is path a lawful ticket-test-face deliverable (t261004-25)?
+
+    All four conditions must hold (narrow by design):
+      1. ticket_id yields a slug (malformed id -> False; old tickets and unknown
+         ids keep byte-identical old behavior);
+      2. path is safe after normalization (reuses _norm_path/_is_safe_path so
+         equivalent spellings cannot bypass the judge);
+      3. basename starts with `test_`, ends with `.py`, and embeds the slug;
+      4. path sits on a test face: a `tests/` path segment, or under integration/.
+    """
+    slug = ticket_slug(ticket_id)
+    if not slug or not isinstance(path, str) or not path.strip():
+        return False
+    norm = _norm_path(path.strip())
+    if not _is_safe_path(norm):
+        return False
+    parts = norm.split("/")
+    base = parts[-1]
+    if not (base.startswith("test_") and base.endswith(".py") and slug in base):
+        return False
+    return "tests" in parts[:-1] or parts[0] == "integration"
+
+
 # ---------------- 基础判定（立场镜像 agent_activities 写集条目匹配，测试锁漂移） ----------------
 
 def _is_safe_path(path: Any) -> bool:
@@ -283,7 +334,8 @@ def _resolve_stage_rule(stage_id: str, template_rules: Any) -> Optional[Dict[str
 
 def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None,
                       ticket_id: str = "", ui_dirs: Any = None,
-                      template_rules: Any = None
+                      template_rules: Any = None,
+                      notes_out: Optional[List[str]] = None
                       ) -> Tuple[bool, List[str], str]:
     """段 × 允许面判定。返回 (allowed, violations, reason_code)；allowed=True 时
     violations 为空、reason_code 为 ""。
@@ -312,16 +364,30 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
     receipt = ("integration/" + str(ticket_id).strip("/")) if str(ticket_id or "").strip("/" ) else ""
 
     def face(f: str) -> str:
-        """单文件判定：返回 ""（允许）或原因码。"""
+        """Per-file verdict: "" (allowed) or a reason code. t261004-25: under the
+        write_set / join / self_heal kinds, a ticket-test-face file that loses the
+        write-set match is passed by the is_ticket_test_face fallback — and the
+        pass must be named (appended to notes_out; the caller joins it into the
+        settle receipt), never silent."""
+        def _test_face_ok() -> bool:
+            if not is_ticket_test_face(f, ticket_id):
+                return False
+            if notes_out is not None:
+                notes_out.append("%s: %s" % (TICKET_TEST_FACE_NOTE, f))
+            return True
         if kind == "result_files":
             return "unauthorized_path"
         if kind == "write_set":
-            return "" if (ws_ok and _within(f, ws)) else \
+            if ws_ok and _within(f, ws):
+                return ""
+            return "" if _test_face_ok() else \
                 ("write_set_missing" if not ws_ok else "unauthorized_path")
         if kind == "join":
             if _within(f, ("integration",)):
                 return ""
-            return "" if (ws_ok and _within(f, ws)) else \
+            if ws_ok and _within(f, ws):
+                return ""
+            return "" if _test_face_ok() else \
                 ("write_set_missing" if not ws_ok else "unauthorized_path")
         if kind == "prefixes":
             return "" if _within(f, rule.get("prefixes") or ()) else "unauthorized_path"
@@ -339,7 +405,8 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
                 return ""
             if receipt and _within(f, (receipt,)):
                 return ""
-            return "write_set_missing" if not ws_ok else "unauthorized_path"
+            return "" if _test_face_ok() else \
+                ("write_set_missing" if not ws_ok else "unauthorized_path")
         return "unknown_stage"  # 规则表内未知 kind：规则表自身配错，同样 fail-closed
 
     violations = [f for f in rest if face(f)]

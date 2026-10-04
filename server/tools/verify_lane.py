@@ -53,6 +53,20 @@ sys.path.insert(0, str(HERE.parent / 'engine'))
 from shared import (  # noqa: E402
     SUPPLY_FAIL_SIG, SUPPLY_SIDE_SIG, SUPPLY_STAGE_TIMEOUT_SIG, SUPPLY_TIMEOUT_SIG,
 )
+import path_gates  # noqa: E402  # t261004-25: ticket-test-face predicate (stdlib-only, single source)
+
+
+def _ws_refuse(f, judge, ticket_id):
+    """t261004-25: after a write-set miss, should the ticket-test-face rule admit
+    the file anyway? Single decision point — the caller does not distinguish the
+    judge source (ticket write_set vs verify.yaml write_allow); both branches apply
+    equally (review comment 2 of t261004-25: a test file named after its own ticket
+    is not out-of-bounds under either judge).
+    Returns (refuse, carve): refuse=False with carve=True means admit (the caller
+    must emit a named note, never a silent pass)."""
+    if not path_gates.is_ticket_test_face(f, ticket_id):
+        return True, False
+    return False, True
 
 TOOL = {
     'name': 'verify_lane',
@@ -81,6 +95,10 @@ TOOL = {
             'require_base': {'type': 'boolean',
                              'description': 'code 道：合并闸调用置 true——base 为空/未传时写集白名单 fail-closed 判红（不许静默跳过）'},
             'skip_slow': {'type': 'boolean', 'description': 'code 道：跳过全部命令检查（只验白名单与装配面）'},
+            'ticket_id': {'type': 'string',
+                          'description': 'code lane: ticket id — the write-set whitelist admits files whose basename '
+                                         'embeds this ticket slug (ticket-test-face rule, t261004-25) with a named green '
+                                         'note; absent/empty = byte-identical old behavior'},
         },
         'required': ['lane'],
         'additionalProperties': False,
@@ -90,6 +108,11 @@ TOOL = {
 # 引擎运行时目录：白名单 diff 一律不判（与 agent_activities.SETTLE_PATHSPEC 同口径——
 # worker 代落盘结果文件等不属工单写集，判进来会把合并闸变成永久红）。
 RUNTIME_PREFIXES = ('.sandbar/', '.suyou/', '.dsh/')  # .suyou=老泳道名粘滞回落（LEGACY 兼容，t260907-04）
+
+# t261004-25 (send-back round 2): stable ASCII machine key for the write-set
+# whitelist check record. The 'check' field stays the human display name; machine
+# consumers (tests, receipts parsing) select by 'id' so they never depend on copy.
+WS_CHECK_ID = 'write_set_whitelist'
 
 # v2：checks 为列表命令制（无专属类型词表）——每条 {id, cmd, cwd?, timeout?}。
 
@@ -461,9 +484,11 @@ def _code(a):
     if require_base and not base:
         items = [{'detail': 'base_ref 未登记（空），写集白名单 fail-closed：合并闸无法判写集边界，'
                             '先补工单 base_ref（meta.base_ref），不得静默放行'}]
-        checks.append(_check('写集白名单', items))
+        checks.append({**_check('写集白名单', items), 'id': WS_CHECK_ID})
     elif base:
         items = []
+        carved = []
+        ticket_id = str(a.get('ticket_id') or '')
         # name-status（非 name-only）：增/改/删分开判——删除敏感路径=正确清退
         # 不红（t260903-12：merge-base 漂移后清除运行时目录的 D 被误红成「入库」）；
         # 新增/修改敏感路径才是泄漏。
@@ -500,13 +525,24 @@ def _code(a):
                         # add -A 的必红项）；D=清退，放行。
                         items.append({'detail': '敏感/运行时路径入库（必须 untrack）：' + f})
                     continue
-                if not _in_write_set(f, judge):
+                if not _in_write_set(f, judge) and _ws_refuse(f, judge, ticket_id)[0]:
                     items.append({'detail': '越界写: %s（判据=%s：%s）' % (f, judge_src, '、'.join(judge[:6]))})
-        checks.append(_check('写集白名单', items))
+                    continue
+                if not _in_write_set(f, judge):
+                    # t261004-25: out of the write set but on the ticket test face —
+                    # admit, and name it (green note with file and rule, never a
+                    # silent pass).
+                    carved.append(f)
+        ws_check = {**_check('写集白名单', items), 'id': WS_CHECK_ID}
+        if carved:
+            ws_check['note'] = '%s: %s' % (path_gates.TICKET_TEST_FACE_NOTE,
+                                           ', '.join(carved))
+        checks.append(ws_check)
     else:
         # 手动/脚本调用未传 base：跳过是中性事实不是失败，但必须可见（260821 口径收窄：
         # 合并闸经 require_base=true 走上方 fail-closed 分支，不再落此处）。
         checks.append({'check': '写集白名单', 'level': 'green', 'items': [],
+                       'id': WS_CHECK_ID,
                        'note': '未传 base，写集白名单未验（要验就显式传 base；合并闸须传 require_base=true）'})
 
     # ② 检查装配（v2 列表命令制，宿主令 t260902）：checks=[{id,cmd,cwd?,timeout?}]，

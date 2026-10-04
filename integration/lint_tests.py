@@ -1030,6 +1030,41 @@ def lint_anchor_manifest():
               if not (REPO / k).exists() or (k not in scen_scripts)]
     if stale:
         err("L16 anchor 死条目（文件已删/场景已注销，清单须同步）：%s" % stale[:6])
+    # t261004-25: commit protection — every present engine_tests entry must be
+    # git-tracked. Failure on record: test_t261002_10_codegen_freshness.py is
+    # present-but-untracked on the gated main tree (exists() keeps it alive, no
+    # commit protects it), so any checkout or clean silently destroys a required
+    # in-registry file. Judge = `git ls-files` (static, seconds); judge only on a
+    # CLEAN tree — an in-development lane worktree legitimately holds uncommitted
+    # new tests, so the check skips with a named green note there (visible, not
+    # silent); at the gate time (merge_check verify) the tree is settled and clean,
+    # so the check always bites.
+    unstaged = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
+                              capture_output=True, text=True, timeout=30)
+    if unstaged.returncode != 0:
+        err("L16 commit-protection check could not run (git status failed, "
+            "fail-closed): %s" % (unstaged.stderr or "").strip()[-200:])
+    elif unstaged.stdout.strip():
+        ok("L16 commit-protection check skipped (worktree dirty mid-development — "
+           "re-judged at gate time after settle)")
+    else:
+        tracked = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files", "server/engine/tests"],
+            capture_output=True, text=True, timeout=30)
+        if tracked.returncode != 0:
+            err("L16 commit-protection check could not run (git ls-files failed, "
+                "fail-closed): %s" % (tracked.stderr or "").strip()[-200:])
+        else:
+            known = set(tracked.stdout.split())
+            unguarded = sorted(k for k in m["engine_tests"]
+                               if (REPO / k).exists() and k not in known)
+            if unguarded:
+                err("L16 anchor entries without commit protection (present but "
+                    "untracked — a checkout/clean silently destroys required "
+                    "registry files; land a commit): %s" % unguarded[:6])
+            else:
+                ok("L16 commit protection: every registered engine test is "
+                   "commit-tracked")
     # vocabulary + sync path
     bad_vocab, no_sync = [], []
     for tree in ("engine_tests", "scenarios"):

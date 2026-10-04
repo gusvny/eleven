@@ -2537,6 +2537,93 @@ def _remediate_unauthorized_violations(
     return handled, unhandled
 
 
+def _recover_quarantined_test_face(cwd: Path, ticket_id: str, notes: List[str]) -> None:
+    """t261004-25 (2): move ticket-test-face files back from the quarantine area to
+    their original paths.
+
+    Failure on record (t261004-18): a ticket's own engine unit test was not in the
+    frozen write set, so _remediate_unauthorized_violations moved the untracked new
+    file into `.sandbar/quarantine/unauth-*/` and the test never reached a commit —
+    the ticket would land without its own test. With the upstream gap closed by the
+    path_gates ticket-test-face rule, this function mechanically recovers the
+    historical quarantines: scan each batch manifest.json, and for items with
+    action="moved" whose original path matches is_ticket_test_face, restore the
+    file, mark the manifest item with recovered=true/recovered_ts, and name the
+    recovery in a note (what, from where, why).
+
+    Fault face (external-input discipline; every skip is named, never silent):
+      - manifest unreadable / malformed JSON / missing items list -> named skip,
+        batch left as-is;
+      - item not a dict / missing path|archive / action != "moved" -> untouched
+        (reverted items already have a diff archive; restoring them is a
+        human-review face);
+      - archived file missing / is a directory -> named skip (directories are never
+        moved automatically — mirrors the remediation matrix's "deletions and
+        staged states stay human" stance, review comment 4 of t261004-25);
+      - original path occupied -> named skip (no overwrite, left for human check);
+      - ticket_id empty/malformed -> predicate always False, the whole function is
+        a no-op (zero regression for old tickets).
+    Pure workspace-file IO (shutil.move, never delete), zero git writes; idempotent
+    — after recovery the target exists and the archive does not, so a rerun skips
+    naturally."""
+    if not path_gates.ticket_slug(ticket_id):
+        return
+    qroot = lane_dot_path(cwd, "quarantine", create=False)
+    if not qroot.is_dir():
+        return
+    for mf in sorted(qroot.glob("unauth-*/manifest.json")):
+        try:
+            m = json.loads(mf.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            notes.append("recovery skip (manifest unreadable, archive kept): %s: %s"
+                         % (mf.relative_to(cwd), str(e)[:120]))
+            continue
+        items = m.get("items") if isinstance(m, dict) else None
+        if not isinstance(items, list):
+            notes.append("recovery skip (manifest has no items list, archive kept): %s"
+                         % mf.relative_to(cwd))
+            continue
+        changed = False
+        for it in items:
+            if not isinstance(it, dict) or it.get("action") != "moved":
+                continue
+            f, archive = it.get("path"), it.get("archive")
+            if not (isinstance(f, str) and f) or not (isinstance(archive, str) and archive):
+                continue
+            if not path_gates.is_ticket_test_face(f, ticket_id):
+                continue
+            if it.get("recovered"):
+                continue
+            src = cwd / archive
+            dst = cwd / f
+            if src.is_dir():
+                notes.append("recovery skip (archive is a directory, not moved "
+                             "automatically, left human): %s" % f)
+                continue
+            if not src.is_file():
+                notes.append("recovery skip (archived file missing): %s <- %s" % (f, archive))
+                continue
+            if dst.exists():
+                notes.append("recovery skip (original path occupied, no overwrite, "
+                             "left human): %s" % f)
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            it["recovered"] = True
+            it["recovered_ts"] = int(time.time() * 1000)
+            changed = True
+            notes.append("recovered: ticket-test-face file %s restored from %s "
+                         "(lawful deliverable outside the write set)" % (f, archive))
+        if changed:
+            try:
+                mf.write_text(json.dumps(m, ensure_ascii=False, indent=2) + "\n",
+                              encoding="utf-8")
+            except OSError as e:
+                notes.append("recovery manifest rewrite failed (file restored, mark "
+                             "not written): %s: %s"
+                             % (mf.relative_to(cwd), str(e)[:120]))
+
+
 def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
     """Is every dirty file inside the ticket's write_set (KI-009 self-heal admission
     test; pure function)?
@@ -2884,6 +2971,12 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     # 2) Fold workspace changes into a commit
     #    t260911-03: status 改走 -z（与 KI-009 解析器 _dirty_files_from_status_z 同源，
     #    免 quotePath 引号歧义与 rename 箭头解析）；闸判定在任何 git add 之前。
+    #    t261004-25: when path_gate is active, recover quarantined ticket-test-face
+    #    files from historical quarantine batches FIRST — it must run before the
+    #    status pull so the recovered files enter this batch's dirty list and the
+    #    gate judges them under the new rule.
+    if path_gate:
+        _recover_quarantined_test_face(cwd, ticket_id, notes)
     #    t260926-02（KI-125）：加 --untracked-files=all——缺省折叠模式把全新未跟踪
     #    目录折叠成一条 `?? dir/`，与写集的文件级条目（dir/file.py）前缀不匹配，
     #    judge_stage_paths 误判 unauthorized_path 把合法交付隔离进 quarantine。
@@ -2922,9 +3015,15 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                 activity.logger.warning("[%s/%s] %s-settle：%s",
                                         ticket_id, stage_id, face, fresh_diag)
             judged = [f for f in dirty if f not in fresh] if fresh else dirty
+            # t261004-25: collect named notes for ticket-test-face passes (appended
+            # inside the gate; both the allow and the refuse paths surface them via
+            # remediation, never silent). Dedup, order kept — the remediation loop
+            # re-judges each round and would emit the same note again.
+            carve_notes: List[str] = []
             allowed, violations, reason = path_gates.judge_stage_paths(
                 stage_id, judged, write_set=write_set, ticket_id=ticket_id,
-                template_rules=path_gate_rules)
+                template_rules=path_gate_rules, notes_out=carve_notes)
+            remediation.extend(n for n in carve_notes if n not in remediation)
             # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
             # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
             # 随后按本票生效中的人授权做「豁免摘除」——无授权/不匹配时 violations 与
@@ -4641,7 +4740,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 "python3", admin_bin, "call", "verify_lane",
                 json.dumps({"lane": "code", "path": str(sc["tree"]),
                             "base": wl_base, "require_base": True,
-                            "write_set": list(sc["write_set"])}),
+                            "write_set": list(sc["write_set"]),
+                            # t261004-25: pass the ticket id down — verify_lane's
+                            # write-set whitelist then admits ticket-test-face files
+                            # via is_ticket_test_face (named green note).
+                            "ticket_id": str(args.ticket_id or "")}),
                 cwd=str(sc["tree"]), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 # t260908-01：剥除测试台桩旋钮族+worker 路由旋钮族
                 #（shared.TEST_STUB_ENV_KNOBS / WORKER_ROUTING_ENV_KNOBS）——
