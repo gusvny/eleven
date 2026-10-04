@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Console + Executor Panel — ticket order and running limit (mock v3)</title>
+<title>Console + Executor Panel — projects, ticket order, running limit (mock v4)</title>
 <style>
 :root{
   --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--fg-soft:#424a53;--muted:#57606a;--faint:#6e7781;
@@ -15,13 +15,23 @@ html[data-theme="dark"]{
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
-.shell{display:grid;grid-template-columns:380px minmax(0,1fr);height:100vh}
-/* ---- left: ticket list (its order is the queue order) ---- */
+.shell{display:grid;grid-template-columns:400px minmax(0,1fr);height:100vh}
+/* ---- left: projects, each with its ticket list (order = queue order) ---- */
 .side{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0}
 .sideHead{display:flex;align-items:center;gap:8px;padding:10px var(--gx);border-bottom:1px solid var(--line)}
 .sideHead .t{font-weight:600;font-size:12px}
 .sideHead .n{margin-left:auto;color:var(--muted);font-size:11px}
-.sideBody{overflow-y:auto;padding:6px 8px 18px}
+.sideBody{overflow-y:auto}
+.proj{border-bottom:1px solid var(--line-soft)}
+.prow{display:flex;align-items:center;gap:8px;padding:9px var(--gx);cursor:pointer}
+.prow:hover{background:var(--hover)}
+.proj[data-open="true"]>.prow{background:var(--panel2)}
+.pname{font-weight:600;font-size:12px}
+.pmeta{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.chev{color:var(--muted);font-size:10px;transition:transform .15s}
+.proj[data-open="true"] .chev{transform:rotate(90deg)}
+.plist{display:none;padding:2px 8px 10px}
+.proj[data-open="true"] .plist{display:block}
 .tk{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border:1px solid transparent;border-radius:8px;cursor:pointer}
 .tk:hover{background:var(--hover)}
 .tk[data-drag="true"]{opacity:.5}
@@ -80,13 +90,13 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 <body>
 <div class="shell">
   <div class="side">
-    <div class="sideHead"><span class="t">Tickets</span><span class="n" id="sideN">3 at work · 4 waiting</span></div>
-    <div class="sideBody" id="list"></div>
+    <div class="sideHead"><span class="t">Projects</span><span class="n" id="sideN">3 projects</span></div>
+    <div class="sideBody" id="projList"></div>
   </div>
 
   <div class="main">
     <div class="top">
-      <h1>Executor</h1><span class="chip">sandbar</span>
+      <h1>Executor</h1><span class="chip" id="projChip">sandbar</span>
       <span class="grow"></span>
       <button class="power" onclick="toggleTheme()">Light / dark</button>
     </div>
@@ -131,24 +141,59 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 </div>
 
 <script>
-// run = at work (holds a slot) / wait = queued (its order is the start order) / paused = you paused it (holds nothing)
-const ROWS = [
-  {id:'t261004-18', title:'Panel write endpoints carry no identity', stage:'acceptance_walkthrough', st:'run'},
-  {id:'t261004-17', title:'A request must be answerable', stage:'implement', st:'run'},
-  {id:'t261004-21', title:'Panel copy names the retired audit log', stage:'implement', st:'run'},
-  {id:'t261004-22', title:'Wait for the condition instead of a fixed sleep', stage:'design_integration_tests', st:'wait'},
-  {id:'t261004-23', title:'Give the executor an engine-side way to raise a request', stage:'create_plan', st:'wait'},
-  {id:'t261004-24', title:'Console-visible copy in Chinese', stage:'create_plan', st:'wait'},
-  {id:'t261004-20', title:'Anchor audit for test assertions', stage:'design_integration_tests', st:'wait'},
-  {id:'t261004-19', title:'Open-ticket authority is scoped by epic', stage:'create_plan', st:'paused'},
-];
-let cap = 3, dragId = null;
-const runCount = () => ROWS.filter(r => r.st === 'run').length;
-const waitCount = () => ROWS.filter(r => r.st === 'wait').length;
+// 每个项目自己一套：上限 + 队列。run=在跑（占额度）／wait=排队（顺序＝启动顺序）／paused=你暂停的（不占）
+const PROJECTS = {
+  sandbar: { cap: 3, tickets: [
+    {id:'t261004-18', title:'Panel write endpoints carry no identity', stage:'acceptance_walkthrough', epic:'project-executor', st:'run'},
+    {id:'t261004-17', title:'A request must be answerable', stage:'implement', epic:'project-executor', st:'run'},
+    {id:'t261004-25', title:'Inspection 20261004 · integration-tests', stage:'report', epic:'inspection', st:'run'},
+    {id:'t261004-22', title:'Wait for the condition instead of a fixed sleep', stage:'design_integration_tests', epic:'engine-hardening', st:'wait'},
+    {id:'t261004-24', title:'Console-visible copy in Chinese', stage:'create_plan', epic:'localization', st:'wait'},
+    {id:'t261004-20', title:'Anchor audit for test assertions', stage:'design_integration_tests', epic:'engine-hardening', st:'wait'},
+    {id:'t261004-23', title:'Give the executor an engine-side way to raise a request', stage:'create_plan', epic:'project-executor', st:'wait'},
+    {id:'t261004-19', title:'Open-ticket authority is scoped by epic', stage:'create_plan', epic:'project-executor', st:'paused'},
+  ]},
+  suyou: { cap: 2, tickets: [
+    {id:'t260904-02', title:'Cover the metrics API contract', stage:'implement', epic:'metrics', st:'run'},
+    {id:'t260905-01', title:'Panel list conventions', stage:'merge', epic:'doc-lifecycle', st:'wait'},
+  ]},
+  nusuyou: { cap: 1, tickets: [
+    {id:'t260930-04', title:'cs-publish pipeline: retry on 429', stage:'run_integration_tests', epic:'content', st:'run'},
+    {id:'t260930-07', title:'Site rebuild for the new hero', stage:'create_plan', epic:'content', st:'wait'},
+    {id:'t260930-09', title:'Move assets to the CDN', stage:'create_plan', epic:'content', st:'wait'},
+  ]},
+};
+let cur = 'sandbar', dragId = null;
+const T = () => PROJECTS[cur].tickets;
+const runCount = () => T().filter(t => t.st === 'run').length;
+const waitCount = () => T().filter(t => t.st === 'wait').length;
 function render(){
-  document.getElementById('sideN').textContent = runCount() + ' at work · ' + waitCount() + ' waiting';
+  const counts = Object.entries(PROJECTS).map(([k, p]) => {
+    const run = p.tickets.filter(t => t.st === 'run').length, wait = p.tickets.filter(t => t.st === 'wait').length;
+    return { k, run, wait };
+  });
+  document.getElementById('sideN').textContent = counts.length + ' projects';
+  document.getElementById('projList').innerHTML = counts.map(({k, run, wait}) => {
+    let q = 0;
+    const rows = PROJECTS[k].tickets.map(t => {
+      const fixed = t.st !== 'wait';
+      const prefix = t.st === 'wait' ? '<span class="pos">' + (++q) + '</span>'
+        : '<span class="mark ' + (t.st === 'run' ? 'run' : 'paused') + '"></span>';
+      const arrows = fixed ? '' : '<span class="arrows"><button onclick="event.stopPropagation();move(\'' + k + '\',\'' + t.id + '\',-1)">⌃</button><button onclick="event.stopPropagation();move(\'' + k + '\',\'' + t.id + '\',1)">⌄</button></span>';
+      return '<div class="tk' + (fixed ? ' fixed' : '') + '" data-id="' + t.id + '" draggable="' + (!fixed) + '">'
+        + '<span class="grip">⋮⋮</span>' + prefix
+        + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
+        + '<span class="l2">' + t.stage + ' · ' + t.epic + '</span></span>' + arrows + '</div>';
+    }).join('');
+    return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
+      + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
+      + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' at work · ' + wait + ' waiting') + '</span>'
+      + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
+  }).join('');
+  document.getElementById('projChip').textContent = cur;
   document.getElementById('atWork').textContent = runCount();
   document.getElementById('queued').textContent = waitCount();
+  const cap = PROJECTS[cur].cap;
   document.getElementById('cap').textContent = cap;
   document.getElementById('minus').disabled = cap <= 1;
   document.getElementById('plus').disabled = cap >= 10;
@@ -156,46 +201,36 @@ function render(){
   const chip = document.getElementById('stateChip');
   chip.className = 'chip' + (over ? ' warn' : '');
   chip.textContent = over ? 'over the limit' : (runCount() >= cap ? 'at the limit' : 'room to start one');
-
-  let q = 0;
-  document.getElementById('list').innerHTML = ROWS.map((r) => {
-    const fixed = r.st !== 'wait';
-    const prefix = r.st === 'wait' ? '<span class="pos">' + (++q) + '</span>'
-      : '<span class="mark ' + (r.st === 'run' ? 'run' : 'paused') + '"></span>';
-    const arrows = fixed ? '' : '<span class="arrows"><button onclick="move(\'' + r.id + '\',-1)">⌃</button><button onclick="move(\'' + r.id + '\',1)">⌄</button></span>';
-    return '<div class="tk' + (fixed ? ' fixed' : '') + '" data-id="' + r.id + '" draggable="' + (!fixed) + '">'
-      + '<span class="grip">⋮⋮</span>' + prefix
-      + '<span class="body"><span class="l1"><span class="id">' + r.id + '</span>'
-      + '<span class="ttl">' + r.title + '</span></span><span class="l2">' + r.stage + '</span></span>'
-      + arrows + '</div>';
-  }).join('');
   wire();
 }
-function move(id, d){
-  const i = ROWS.findIndex(r => r.id === id), j = i + d;
-  if (i < 0 || j < 0 || j >= ROWS.length) return;
-  if (ROWS[i].st !== 'wait' || ROWS[j].st !== 'wait') return;
-  const t = ROWS[i]; ROWS[i] = ROWS[j]; ROWS[j] = t;
+function pickProject(k){ cur = k; dragId = null; render(); }
+function move(k, id, d){
+  const arr = PROJECTS[k].tickets;
+  const i = arr.findIndex(t => t.id === id), j = i + d;
+  if (i < 0 || j < 0 || j >= arr.length) return;
+  if (arr[i].st !== 'wait' || arr[j].st !== 'wait') return;
+  const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
   render();
 }
 function wire(){
   document.querySelectorAll('.tk[draggable="true"]').forEach(el => {
-    el.addEventListener('dragstart', () => { dragId = el.dataset.id; el.dataset.drag = 'true' });
+    el.addEventListener('dragstart', e => { e.stopPropagation(); dragId = el.dataset.id; el.dataset.drag = 'true' });
     el.addEventListener('dragend', () => { dragId = null; document.querySelectorAll('.tk').forEach(x => { x.dataset.drag = 'false'; x.dataset.over = 'false' }) });
     el.addEventListener('dragover', e => { e.preventDefault(); el.dataset.over = 'true' });
     el.addEventListener('dragleave', () => { el.dataset.over = 'false' });
     el.addEventListener('drop', e => {
-      e.preventDefault(); el.dataset.over = 'false';
+      e.preventDefault(); e.stopPropagation(); el.dataset.over = 'false';
       if (!dragId || dragId === el.dataset.id) return;
-      const from = ROWS.findIndex(r => r.id === dragId), to = ROWS.findIndex(r => r.id === el.dataset.id);
-      if (ROWS[from].st !== 'wait' || ROWS[to].st !== 'wait') return;
-      const row = ROWS.splice(from, 1)[0];
-      ROWS.splice(to, 0, row);
+      const arr = T();
+      const from = arr.findIndex(t => t.id === dragId), to = arr.findIndex(t => t.id === el.dataset.id);
+      if (arr[from].st !== 'wait' || arr[to].st !== 'wait') return;
+      const row = arr.splice(from, 1)[0];
+      arr.splice(to, 0, row);
       render();
     });
   });
 }
-function bump(d){ const n = cap + d; if (n < 1 || n > 10) return; cap = n; render(); }
+function bump(d){ const n = PROJECTS[cur].cap + d; if (n < 1 || n > 10) return; PROJECTS[cur].cap = n; render(); }
 function save(){ document.getElementById('limitMeta').textContent = 'set by you just now'; }
 function toggleTheme(){ const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; }
 render();
