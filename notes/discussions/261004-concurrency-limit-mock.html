@@ -210,6 +210,14 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .sess .grow{flex:1}
 .sess .go{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:6px;padding:1px 7px;font:inherit;font-size:11px;cursor:pointer}
 .sess.new{border-style:dashed;color:var(--muted);cursor:pointer}
+.sess.on{background:color-mix(in srgb, var(--pc, var(--panel)) 8%, var(--bg));border-color:var(--pc, var(--line))}
+.sess .plus{color:var(--muted);font-weight:700}
+.chatBand{position:relative}
+.smenu{position:absolute;right:8px;top:34px;background:var(--bg);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;min-width:190px;z-index:5}
+.smi{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;font-size:12px;cursor:pointer}
+.smi:hover{background:var(--hover)}
+.smi.on{background:var(--panel2)}
+.smi .hk{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace;margin-left:auto}
 .chatBody{flex:1;overflow-y:auto;padding:12px}
 .msg{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:8px;background:var(--bg)}
 .msg.me{margin-left:36px}
@@ -349,6 +357,23 @@ function shapeSVG(shape, color, size){
 }
 const badge = (key, size) => shapeSVG(PROJ_SHAPE[key] || 'square', PROJ_COLOR[key] || '#9ca3af', size);
 const PROJ_COLOR = { sandbar: '#e76a6a', suyou: '#6a9ce7', nusuyou: '#83e76a' };
+const SESSIONS = {
+  sandbar: [{ code: '09ca', title: 'executor', role: 'executor' }, { code: '7f31', title: 'panel copy' }],
+  suyou: [{ code: '4b71', title: 'executor', role: 'executor' }, { code: 'a90d', title: 'metrics docs' }],
+  nusuyou: [{ code: 'b2e8', title: 'executor', role: 'executor' }],
+};
+let active = { sandbar: 0, suyou: 0, nusuyou: 0 };
+let segCode = 0x1a00;
+function newSession(k){
+  const codes = SESSIONS[k].map(x => x.code);
+  let code;
+  do { code = (segCode++).toString(16) } while (codes.includes(code));
+  SESSIONS[k].push({ code: code, title: 'new session' });
+  active[k] = SESSIONS[k].length - 1;
+  render();
+}
+function pickSession(k, i){ active[k] = i; render() }
+function toggleSessMenu(){ const m = document.getElementById('smenu'); if (m) m.hidden = !m.hidden }
 const PROJ_SESS = {
   sandbar: { handle: 'executor', code: '09ca' },
   suyou: { handle: 'metrics-docs', code: '4b71' },
@@ -376,9 +401,15 @@ function render(){
   document.querySelector('.chat').style.setProperty('--pc', pc);
   const ses = PROJ_SESS[cur] || { handle: 'session', code: '----' };
   const band = document.getElementById('chatBand');
-  if (band) band.innerHTML = '' + badge(cur, 13) + '<span class="pk">' + cur + '</span>'
-    + '<span class="hk">' + ses.handle + ' · ' + ses.code + '</span><span class="grow"></span>'
-    + '<button class="sbtn" title="Switch or create a project session">Sessions 2</button>';
+  const list = SESSIONS[cur] || [];
+  const act = list[active[cur]] || { code: '----' };
+  if (band) band.innerHTML = badge(cur, 13) + '<span class="pk">' + cur + '</span>'
+    + '<span class="hk">' + act.code + '</span><span class="grow"></span>'
+    + '<button class="sbtn" onclick="toggleSessMenu()">Sessions ' + list.length + '</button>'
+    + '<div class="smenu" id="smenu" hidden>' + list.map((ss, si) =>
+        '<div class="smi' + (si === active[cur] ? ' on' : '') + '" onclick="pickSession(' + '\'' + cur + '\'' + ',' + si + ');toggleSessMenu()">'
+        + badge(cur, 11) + '<span>' + (ss.title || 'session') + '</span><span class="hk">' + ss.code + '</span></div>').join('')
+      + '<div class="smi new" onclick="newSession(' + '\'' + cur + '\'' + ');toggleSessMenu()"><span class="plus">+</span><span>New session</span></div></div>';
   document.querySelectorAll('.proj').forEach(el => el.style.setProperty('--pc', PROJ_COLOR[el.dataset.key] || 'var(--line)'));
   renderSide(); renderMain(); renderDialog(); }
 
@@ -410,8 +441,11 @@ function renderSide(){
 
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">'
-      + '<div class="sess">' + badge(k, 11) + '<span>' + ((PROJ_SESS[k] || {}).handle || 'session') + '</span>'
-      + '<span class="hk">' + ((PROJ_SESS[k] || {}).code || '----') + '</span><span class="grow"></span><button class="go">open</button></div>'
+      + (SESSIONS[k] || []).map((ss, si) => '<div class="sess' + (si === active[k] ? ' on' : '') + '" onclick="pickSession(\'' + k + '\',' + si + ')">'
+          + badge(k, 11) + '<span>' + (ss.title || 'session') + '</span>'
+          + '<span class="hk">' + ss.code + '</span><span class="grow"></span>'
+          + (ss.role === 'executor' ? '<span class="hk">executor</span>' : '<button class="go">open</button>') + '</div>').join('')
+      + '<div class="sess new" onclick="newSession(\'' + k + '\')"><span class="plus">+</span><span>New session</span></div>'
       + rows + '</div></div>';
   }).join('');
   wire();
