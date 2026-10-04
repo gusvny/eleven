@@ -80,14 +80,22 @@ instances:
       inflight_silent_min: 120
       tmp_fixture_max_dirs: 1000
       tmp_fixture_max_age_h: 6
+  # 261004 宿主令（「doc 每天跑也行的」）：周一批次 → **每天 10:00**（与 07:30 全量集成、
+  # 09:30 simplify 错开）；文档库体量小（docs 25 篇 + notes 60 篇 ≈ 40 万 token），
+  # 文档面按「每期全量读」设计，不是代码面的切片轮读——所以它天天跑得起。
+  # skip_when_unchanged=true：整仓一点没动的那天只落一行裁决（skipped-no-change），
+  # 不铸票不重读（重读内容完全相同的文档没有信息增量）；有动静就全量读。
+  # 261004 同批修：这条 schedule 的 action 身份字段此前全空（instance/face/project_key/
+  # repo_root 都是 ""）→ 从来没产出过一期（台账只有 20260915）；本次 schedule-up 一并重铸。
   - id: docs-sync
     enabled: true
     project_key: sandbar
     scan_face: doc
+    skip_when_unchanged: true
     tz: Asia/Shanghai
     schedule:
       kind: cron
-      cron: 0 10 * * 1
+      cron: 0 10 * * *
     workflow: InspectionPeriodicWorkflow
     template: inspection-lite
   # ---- 票②（t260910-09）新面：能力已交付（inspection_scan_ms.py + face 分派），

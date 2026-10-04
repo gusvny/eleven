@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executor Panel — Inspection tab (mock v7, doc face)</title>
+<title>Executor Panel — Inspection tab (mock v8, rolling coverage)</title>
 <style>
 :root{
   --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;
@@ -31,6 +31,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .periods{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .periods .lbl{color:var(--muted);font-size:11px;padding-right:2px}
 #periodBtns{display:flex;gap:6px;flex-wrap:wrap}
+.ranges{margin-left:auto;display:flex;gap:4px}
+.ranges button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:1px 9px;font:inherit;font-size:11px;cursor:pointer;text-transform:none;letter-spacing:0}
+.ranges button[data-on="true"]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--fg)}
 .periods button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:3px 11px;font:inherit;font-size:12px;cursor:pointer;line-height:18px}
 .periods button[data-on="true"]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--fg)}
 
@@ -144,6 +147,7 @@ details[open] summary::before{transform:rotate(90deg)}
   <div class="periods"><span class="lbl">Period</span><span id="periodBtns"></span></div>
   <div class="note" id="rodnote"></div>
   <div id="periodBody"></div>
+  <div id="coverageWrap"></div>
 
   <div class="sect">Reviews you started</div>
   <div class="card table">
@@ -322,18 +326,42 @@ function renderBody(){
     </div>
     <div class="note">${p.findings.length} named of ${totalFindings(p)} counted · newest first
       · <button class="link" onclick="openReport('period','${period}')">Open the ${period} summary</button></div>
-    <div class="sect">Coverage</div>
+`;
+}
+function pick(key){ cur = key; renderPeriods(); renderBody(); renderCoverage(); }
+
+// 覆盖度＝滚动窗口，不是「本期」的快照：看「最近 7 天覆盖了多少」，才回答得了
+// 「这库到底有没有在被审」。数据源＝项目目录里的被审台账（一行一个文件＋期号/时间），
+// 所以任意范围都算得出来。队列（从没审过的）是当前状态，不随范围变。
+const COVER = {
+  'period': {code:60,  total:1298, docsTimes:1,  codeNote:'this period only'},
+  '7d':     {code:412, total:1298, docsTimes:5,  codeNote:'17 new-code files first, then the oldest in the queue'},
+  '30d':    {code:967, total:1298, docsTimes:22, codeNote:'17 new-code files first, then the oldest in the queue'},
+  'all':    {code:1104,total:1298, docsTimes:41, codeNote:'since the ledger started (20260915)'},
+};
+const RANGE_LABEL = {'period':'this period','7d':'7 days','30d':'30 days','all':'all'};
+let coverRange = '7d';
+function pickRange(k){ coverRange = k; renderCoverage(); }
+function renderCoverage(){
+  const c = COVER[coverRange];
+  const pct = Math.max(1, Math.round(c.code / c.total * 100));
+  const docsTotal = 78, docsRead = (coverRange === 'period') ? (entryOf(cur) && entryOf(cur).periods.length === 1 && PERIODS[entryOf(cur).from] && PERIODS[entryOf(cur).from].docs && PERIODS[entryOf(cur).from].docs.read ? 78 : 0) : 78;
+  document.getElementById('coverageWrap').innerHTML = `
+    <div class="sect">Coverage
+      <span class="ranges">${Object.keys(COVER).map(k =>
+        `<button data-on="${k===coverRange}" onclick="pickRange('${k}')">${RANGE_LABEL[k]}</button>`).join('')}</span>
+    </div>
     <div class="card">
-      <div class="row"><span class="txt">Code: ${p.coverage.reviewed} of ${p.coverage.total} source files reviewed</span><span class="meta">slice</span></div>
-      <div class="track"><i style="width:${Math.max(1, Math.round(p.coverage.reviewed / p.coverage.total * 100))}%"></i></div>
-      <div class="row" style="margin-top:12px"><span class="txt">Documents: ${p.docs && p.docs.read ? p.docs.read + ' read in full' : 'no report this period (weekly instance)'}</span><span class="meta">${p.docs && p.docs.read ? 'whole library, not a slice' : 'last report ' + (p.docs && p.docs.last || '—')}</span></div>
-      <div class="track"><i style="width:${p.docs && p.docs.read ? 100 : 0}%"></i></div>
+      <div class="row"><span class="txt">Code: ${c.code} of ${c.total} source files reviewed in ${RANGE_LABEL[coverRange]}</span><span class="meta">slice</span></div>
+      <div class="track"><i style="width:${pct}%"></i></div>
+      <div class="row" style="margin-top:12px"><span class="txt">Documents: ${docsRead} of ${docsTotal} read${coverRange==='period'?'':' · ' + c.docsTimes + ' times'} in ${RANGE_LABEL[coverRange]}</span><span class="meta">whole library, not a slice</span></div>
+      <div class="track"><i style="width:${docsRead ? 100 : 0}%"></i></div>
+      <div class="row" style="margin-top:12px"><span class="txt">Queue: 886 source files never reviewed · the oldest has waited 91 days</span><span class="meta">current state</span></div>
       <details><summary>Show the reviewed files and the queue</summary>
-        <div class="detail muted">${p.coverage.note}<br>Nothing is claimed as clean unless it was reviewed.</div>
+        <div class="detail muted">${c.codeNote}<br>Nothing is claimed as clean unless it was reviewed.</div>
       </details>
     </div>`;
 }
-function pick(key){ cur = key; renderPeriods(); renderBody(); }
 function toggleTheme(){ const h=document.documentElement; h.dataset.theme = h.dataset.theme==='dark'?'light':'dark'; }
 function openDialog(){ document.getElementById('dlg').dataset.open='true'; document.getElementById('dlgMsg').textContent=''; }
 function closeDialog(){ document.getElementById('dlg').dataset.open='false'; }
@@ -351,7 +379,7 @@ function startReview(){
   document.getElementById('dlgMsg').textContent='Started. The record is written.';
   setTimeout(closeDialog, 1200);
 }
-renderPeriods(); renderBody();
+renderPeriods(); renderBody(); renderCoverage();
 </script>
 </body>
 </html>
