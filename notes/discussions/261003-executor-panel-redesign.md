@@ -114,6 +114,11 @@
 6. **纯汇报占着待答位**：没有可答问题的条（原文写着「不必单独回复」）照样进请求账，
    面板把它算进「Needs your answer」——宿主点开发现无话可回。
 
+7. **写端点没有身份面（261004 实证，详见 KI-193）**：控制台首页要 token（`curl /` → 401），
+   插件路由不要（`/sandbar-executor-panel/api/...` → 200）；且 `by` 由调用方自报
+   （`src/host/api.ts:155/190/217/227`）。执行器会话同机有 shell ⇒ 一条 curl 即可自授六项权限、
+   伪造宿主应答。授权面的写必须回到引擎侧 `META_OP` 判定（面板只投递），审计要记来源。
+
 ## 6. 待定项（给实现方，别另拍）
 
 - **「最近动作」的数据来源**：必须能回答「做了什么 + 凭哪条权限」。引擎对受闸写动作已留下
@@ -156,3 +161,22 @@
 
 验收以本节 1–6 与上面四条判据为准；基线 mock：`notes/discussions/261003-executor-panel-redesign-mock.html`
 （本次要补「请求卡」一屏：多问、选项常显、默认动作、多行答框）。
+
+## 9. 请求的处置：Dismiss（261004 宿主裁定）
+
+宿主原话：「这个 request，是不是缺个 dismiss 之类的按钮，就是我看到了。不想处理。」
+
+**定稿**：请求卡加一个 **Dismiss** 动作，语义是「**看过了，不裁**」——不是同意，也不等于默认动作被触发。
+
+- **落账**：新增行类型 `dismiss`（`{type:'dismiss', dismiss_for:<id>, at, by:'host'}`），**与 `answer` 分开**——
+  answer 带决定内容，dismiss 不带。读出视图的 `status` 增第三态：`waiting | answered | dismissed`。
+- **界面**：点一下就从「Needs your answer」出去，落进**折叠的 `Dismissed · N` 组**（与 `Answered` 并列）；
+  卡上写「Dismissed by you. Your default action applies.」——**默认动作照旧由执行器执行**，
+  执行器不得把 dismiss 当批准。
+- **不许再问同一件事**：被 dismiss 的请求，执行器**不得原样重投**；同一件事有新证据要重提时，
+  必须在 question 里点名「上一条已被 dismiss + 新证据是什么」。
+- **可以改主意**：dismiss 之后仍可补一个 answer；answer 一到状态回 `answered`，
+  两条痕（dismiss 与 answer）按时间序留在 trace 里。
+- **谁能不能 dismiss**：宿主专属（与授权面同级）；执行器不得 dismiss 自己的请求。
+- **与「无决定的条」的关系**：源头仍然要治（§5 第 6 条：没有可裁的事不进请求账）；
+  dismiss 是宿主手里的**兜底出口**，不是给脏数据擦屁股的常态路径。

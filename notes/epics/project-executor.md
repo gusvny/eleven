@@ -57,3 +57,30 @@
 - 界面 mock：`notes/discussions/260927-项目执行器-mock.html`
 - 被本文取代的早期草稿：`notes/discussions/260927-会话哨兵-设计稿.md`（其提醒部分已并入设计稿）
 - 既有机制：`docs/design/ticket-workflow-console-design.md`、`docs/design/project-external-workflow-templates.md`
+
+## 五、开票授权的分级：**按 epic 授权**（261004 宿主裁定）
+
+宿主原话：「open-ticket 现在是个问题，我不想给这么大的权限，但是不给有时候又不太行，尤其是驱动
+epic 执行下去的情况，epic 定了，executor 应该是能自由开票的。但是让 executor 任意开票是我目前
+不想看到的。」
+
+**裁定：授权的单位是 epic，不是「开票」这个动词。**
+
+- **声明落点**：项目授权声明 `~/.sandbar/projects/<key>/executor-grants.json` 增一个
+  `open_ticket_epics` 列表；宿主专属，走面板 Grants 页，审计与其它授予同族。
+  **不动 epic 文件格式**——epic 正文是给人读的定稿记录，机器判据不塞进散文里。
+- **面板形态**：Grants 页在「Permissions you can give」下面加一节
+  「Open tickets in these epics」，列出 `notes/epics/*.md` 的**全部** epic
+  （代号 + 状态行原文 + 当前是否授权），逐条开关；没勾的 epic 就是不给。
+- **引擎判据**（`server/engine/executor_grants.py` 的 open-ticket 分支 + `client.py` 的闸调用）：
+  执行器发起的 `ticket-start` 必须**点名 epic**，且该 epic 在 `open_ticket_epics` 内；
+  否则**具名拒收**，说清是哪一条不满足（没点 epic / 该 epic 未授权 / 清单里的 epic 不存在）。
+  其它项目、其它通道（泳道 agent/夹具）不受此限。
+- **不许顺手扩权**：执行器开出的票，写集**不得**包含授权面与受保护真源
+  （`executor-grants.json`、`executor_grants.py`、`path_gates.py`、`server/roles/`、
+  `server/projects.yaml`、`docs/design/`）——命中即拒收。理由自明：能开票就能开一张「给我加权限」的票。
+- **上限**：同一 epic 下由执行器开出、**尚未终结**的票默认**最多 3 张**（缺省即 3，声明可覆盖）；
+  到顶具名拒收。这条直接兑现「不想看到任意开票」。
+- **不变量**：改这份清单永远是宿主的动作（`META_OP` 反锁不变）；执行器开票的记名
+  （谁、何时、哪个 epic、凭哪条授权）入不可变历史与项目动作账。
+- **前置**：面板写端点的身份面（KI-193）先修——否则「宿主专属」只是没人验证的假设。
