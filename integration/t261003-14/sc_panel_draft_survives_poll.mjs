@@ -38,8 +38,10 @@ try {
 const { page, post, waitPoll, close, pageErrors } = C
 
 async function inputValue(sel) { return page.locator(sel).inputValue() }
-const boxSel = (id) => waitRowEl(id) + ' input[data-answerbox]'
-const revealedSel = (id) => waitRowEl(id) + ' .opts ~ .answer input, ' + waitRowEl(id) + ' div.answer input'
+// t261004-17 改签（仲裁 gen0）：答案框按本票契约从单行 input 换成多行 textarea——
+// 锚从元素类型收窄改回属性 [data-answerbox]（input/textarea 皆中），断言面不变不弱化。
+const boxSel = (id) => waitRowEl(id) + ' [data-answerbox]'
+const revealedSel = (id) => waitRowEl(id) + ' .opts ~ .answer [data-answerbox], ' + waitRowEl(id) + ' div.answer [data-answerbox]'
 
 try {
   const list = await fetch(`${C.H.base}/sandbar-executor-panel/api/requests?project=${KEY}`).then((r) => r.json())
@@ -91,7 +93,9 @@ try {
   const rv = await inputValue(revealedSel(opt.id))
   record(results, 'B5 revealed input and its draft survive a poll', rv === 'revealed draft across polls' ? 'pass' : 'fail',
     'revealed input held: "' + rv + '"')
-  await page.press(revealedSel(opt.id), 'Enter')
+  // t261004-17 改签（仲裁 gen0）：多行答案框下 Enter=换行（本票契约面），
+  // 发送动作锚定 Send 按钮本体——断言面（发送→行迁移带答案）不变不弱化。
+  await page.click(waitRowEl(opt.id) + ' button[data-sendbox]')
   await waitPoll()
   const optMigrated = (await page.locator(doneRowEl(opt.id)).count()) === 1
   const optShown = await page.locator(doneRowEl(opt.id)).textContent()

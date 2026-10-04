@@ -63,13 +63,13 @@ try {
   const mergeRow = page.locator('[data-row]', { hasText: 'Merge ticket t261002-14' }).first()
   await mergeRow.locator('.head').click()
   await page.waitForSelector('[data-row] .opts button[data-answer]', { timeout: 5000 })
-  assert(await mergeRow.locator('.answer input').count() === 0, 'option request shows buttons, not a text box')
+  assert(await mergeRow.locator('.answer textarea').count() === 0, 'option request shows buttons, not a text box')
   assert(await mergeRow.locator('.trace').textContent().then((t) => t.includes('Request id:') && t.includes('Raised by session session-09ca0247') && t.includes('Default action: hold')), 'trace line carries raised-by / id / default action')
   // 无选项行：展开后是输入框。
   const qRow = page.locator('[data-row]', { hasText: 'Do you have more instructions' }).first()
   await qRow.locator('.head').click()
-  await page.waitForSelector('[data-row] .answer input', { timeout: 5000 })
-  assert(await qRow.locator('.opts').count() === 0, 'free-text request shows an input, not buttons')
+  await page.waitForSelector('[data-row] .answer textarea', { timeout: 5000 })
+  assert(await qRow.locator('.opts').count() === 0, 'free-text request shows an answer box, not buttons')
   n += 3
 
   // ③ 点选项按钮=应答：行进 Answered 折叠区，徽标回落。

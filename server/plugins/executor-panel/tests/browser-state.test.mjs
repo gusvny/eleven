@@ -65,21 +65,29 @@ try {
   n += 3
 
   // ② 长详情滚动位置跨轮询保持。
+  // 设桩带重试：满载顺序跑时，轮询重建可能恰好落在「设 scrollTop」与「读回」之间，
+  // 桩没立住就 tick 会把环境竞态误报成回归——重试到桩立住（before===300）再 tick，
+  // 断言本身（tick 后仍是 300）不减力。
   const qId = await idOf('Do you have more instructions')
-  await page.$eval('[data-row="' + qId + '"] .detail', (d) => { d.scrollTop = 300 })
-  const before = await page.$eval('[data-row="' + qId + '"] .detail', (d) => d.scrollTop)
+  const sel = '[data-row="' + qId + '"] .detail'
+  let before = 0
+  for (let attempt = 0; attempt < 5 && before !== 300; attempt++) {
+    await page.$eval(sel, (d) => { d.scrollTop = 300 })
+    before = await page.$eval(sel, (d) => d.scrollTop)
+    if (before !== 300) await tick()
+  }
   await tick()
-  const after = await page.$eval('[data-row="' + qId + '"] .detail', (d) => d.scrollTop)
+  const after = await page.$eval(sel, (d) => d.scrollTop)
   assert(before === 300 && after === 300, 'detail scroll position survives a poll cycle')
   n += 1
 
   // ③ 自由文本草稿跨轮询保持；收起再展开后仍在；焦点光标回到输入框。
-  const input = qRow.locator('input[data-answerbox]')
+  const input = qRow.locator('textarea[data-answerbox]')
   await input.click()
   await input.type('half typed answer')
   await tick()
   assert((await input.inputValue()) === 'half typed answer', 'a half-typed draft survives a poll cycle')
-  assert(await page.evaluate(() => document.activeElement && document.activeElement.tagName === 'INPUT'), 'focus returns to the answer input after a poll cycle')
+  assert(await page.evaluate(() => document.activeElement && document.activeElement.tagName === 'TEXTAREA'), 'focus returns to the answer box after a poll cycle')
   await qRow.locator('.head').click()
   await tick()
   await qRow.locator('.head').click()
@@ -90,23 +98,23 @@ try {
   const mRow = rowBy('Merge ticket t261003-14')
   await mRow.locator('.head').click()
   await mRow.locator('button[data-reveal]').click()
-  const rInput = mRow.locator('.answer input')
+  const rInput = mRow.locator('.answer textarea')
   await rInput.type('typed in revealed box')
   await tick()
-  assert((await mRow.locator('.answer input').count()) === 1, 'a revealed answer box stays a box across a poll cycle')
+  assert((await mRow.locator('.answer textarea').count()) === 1, 'a revealed answer box stays a box across a poll cycle')
   assert((await rInput.inputValue()) === 'typed in revealed box', 'the revealed-box draft survives a poll cycle')
   n += 2
 
-  // ⑤ 发送成功才清草稿与 reveal（review #3）：被拒草稿保留。
+  // ⑤ 发送成功才清草稿与 reveal（review #3；t261004-17 起 textarea 用 Ctrl+Enter 发送）：被拒草稿保留。
   await page.route('**/sandbar-executor-panel/api/requests/answer', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'the request already expired' }) }))
-  await rInput.press('Enter')
+  await rInput.press('Control+Enter')
   await tick()
-  assert((await mRow.locator('.answer input').inputValue()) === 'typed in revealed box', 'a rejected answer keeps its draft in the box')
+  assert((await mRow.locator('.answer textarea').inputValue()) === 'typed in revealed box', 'a rejected answer keeps its draft in the box')
   await page.unroute('**/sandbar-executor-panel/api/requests/answer')
   // 真发送（假路由已撤）：草稿清空，行进 Answered 且仍可展开回看。
-  await rInput.press('Enter')
+  await rInput.press('Control+Enter')
   await page.waitForFunction(() => document.getElementById('reqBadge') && document.getElementById('reqBadge').textContent === '2', { polling: 200 })
-  assert((await rowBy('Merge ticket t261003-14').locator('.answer input').count()) === 0, 'a successful send clears the answer box')
+  assert((await rowBy('Merge ticket t261003-14').locator('.answer textarea').count()) === 0, 'a successful send clears the answer box')
   await page.locator('#doneHeadBtn').click()
   assert((await page.textContent('#doneList')).includes('You answered: typed in revealed box'), 'the sent answer shows in the Answered section')
   n += 3
@@ -128,7 +136,7 @@ try {
   await badRow.locator('.head').click()
   await tick()
   assert((await badRow.getAttribute('data-open')) === 'true', 'a malformed-shape row expands without throwing')
-  assert((await badRow.locator('input[data-answerbox]').count()) === 1, 'a malformed row with empty options falls back to the text box')
+  assert((await badRow.locator('textarea[data-answerbox]').count()) === 1, 'a malformed row with empty options falls back to the text box')
   assert(pageErrors.length === 0, 'no page errors across all poll cycles and rows: ' + pageErrors.join(' | '))
   n += 3
 

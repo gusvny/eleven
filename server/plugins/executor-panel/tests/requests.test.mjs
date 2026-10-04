@@ -95,11 +95,22 @@ const betaRead = readRequests(io, env, "legacyproj")
 assert(betaRead.malformed_rows === 0 && betaRead.rows[0]?.raised_by === '', 'legacy row without raised_by reads back as unattributed, not malformed')
 assert(io.files[f('alpha')].split('\n').filter(Boolean).length === ledgerBeforeRbRej, 'rejected raised_by appends never landed on the ledger')
 
+// group_id 组面（t261004-17 一问一行镜像）：合法落账 / 缺省不落键 / 畸形 fail-closed。
+const g1 = appendRequest(io, env, 'alpha', { kind: 'question', question: 'Q1?', group_id: 'ask-42' }, clock.now())
+assert(g1.ok === true && g1.row.group_id === 'ask-42', 'append records the group id when given')
+const g2 = appendRequest(io, env, 'alpha', { kind: 'question', question: 'Q2?' }, clock.now())
+assert(g2.ok === true && g2.row.group_id === undefined, 'append without group_id leaves the key absent (single-question row)')
+assert(appendRequest(io, env, 'alpha', { kind: 'question', question: 'x', group_id: 42 }, 1).ok === false, 'non-string group_id rejected')
+assert(appendRequest(io, env, 'alpha', { kind: 'question', question: 'x', group_id: '   ' }, 1).ok === false, 'blank group_id rejected')
+assert(appendRequest(io, env, 'alpha', { kind: 'question', question: 'x', group_id: 'x'.repeat(121) }, 1).ok === false, 'oversized group_id (>120) rejected')
+const gRead = readRequests(io, env, 'alpha')
+assert(gRead.rows.find((r) => r.id === g1.row.id)?.group_id === 'ask-42', 'group id survives a read round-trip')
+
 // 未答复行长保留：读一百次也不消失。
 for (let i = 0; i < 5; i++) readRequests(io, env, 'alpha')
 const linesBeforeReads = io.files[f('alpha')].split('\n').filter(Boolean).length
 for (let i = 0; i < 5; i++) readRequests(io, env, 'alpha')
 assert(io.files[f('alpha')].split('\n').filter(Boolean).length === linesBeforeReads, 'reading never mutates the ledger (long retention)')
 
-n += 27
+n += 35
 done(n)

@@ -103,13 +103,18 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .qfull{margin-top:9px;font-size:13px;color:var(--fg)}
 .qfull p:first-child{margin-top:0}
 .opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+/* t261004-17：选项块可挂在收起行内（不展开也能一键答），默认动作行随卡在收起态可见。 */
+.opts.inline{margin-top:0;padding:9px 12px 11px 12px;border-top:1px solid var(--line-soft)}
+.dflt{color:var(--muted);font-size:11px;margin-top:8px}
+.gtag{color:var(--muted)}
 .opts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 14px;font:inherit;cursor:pointer}
 .opts button:hover{border-color:var(--blue);color:var(--blue)}
 .opts button.primary{background:var(--accent-soft);border-color:var(--accent-line)}
 .other{border:0;background:transparent;color:var(--faint);font:inherit;cursor:pointer;padding:6px 4px;text-decoration:underline dotted}
 .answer{display:flex;gap:8px;margin-top:10px}
-.answer input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:6px 9px;font:inherit}
-.answer input:focus{outline:0;border-color:var(--blue)}
+/* t261004-17：应答框从单行 input 换成多行 textarea（宿主要能贴多行答复）。 */
+.answer input,.answer textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:6px 9px;font:inherit;resize:vertical;min-height:44px}
+.answer input:focus,.answer textarea:focus{outline:0;border-color:var(--blue)}
 .answer button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
 .given{color:var(--green);font-size:12px;padding:0 12px 10px 12px}
 .trace{color:var(--faint);font-size:11px;margin-top:9px}
@@ -456,14 +461,33 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     t += '. Default action: ' + (r.default_action ? r.default_action : 'none') + '.';
     return t;
   }
-  function rowHead(r, cls){
+  function rowHead(r, cls, groupTag){
     var u = urgencyOf(r);
     var meta = esc(r.kind) + ' · ' + esc(fmtWaiting(u.waiting_ms));
+    if(groupTag) meta += ' · <span class="gtag">'+esc(groupTag)+'</span>';
     if(u.expired) meta += ' · expired. It still waits.';
     if(r.status==='answered') meta = esc(r.kind);
     return '<div class="head" data-id="'+esc(r.id)+'"><span class="dot '+cls+'"></span>'
       + '<span class="txt">'+esc(r.question)+'</span>'
       + '<span class="meta">'+meta+'</span><span class="chev">&#9656;</span></div>';
+  }
+  // t261004-17：waiting 行的选项块直接挂在收起行内（不展开就能一键答）；无选项时
+  // 收起行内给默认动作行。展开后的 body 不再重复选项块。
+  // t261004-16 Req3：选项标签走 renderMarkdown 的 inline 面（行内标记保留，块结构
+  // 对按钮无意义）——与 main 侧正文同一只渲染器。
+  function inlineBlock(r){
+    if(r.status!=='waiting') return '';
+    var html = '';
+    if(hasOptions(r) && !state.revealedIds.has(r.id)){
+      html += '<div class="opts inline">';
+      var opts = r.options;
+      for(var i=0;i<opts.length;i++){
+        html += '<button data-answer="'+esc(opts[i])+'"'+(i===0?' class="primary"':'')+'>'+renderMarkdown(opts[i],{inline:true})+'</button>';
+      }
+      html += '<button class="other" data-reveal="1">Type an answer</button></div>';
+    }
+    if(r.default_action) html += '<div class="dflt">If you do not answer: '+esc(r.default_action)+'.</div>';
+    return html;
   }
   // t261004-16 Req3：详情体与应答回显走唯一的 renderMarkdown（转义先行，敌意输入
   // 只能落成字面文本）；展开行把完整问题按格式渲染在正文顶部（行头收起态保持单行省略）。
@@ -474,19 +498,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         + '<div class="given">You answered: '+renderMarkdown(r.answer||'')+'</div>'
         + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
-    var controls;
+    var inlineOpts = hasOptions(r) && !state.revealedIds.has(r.id);
+    var controls = '';
     // t261003-14（review #2）：宿主点过「Type an answer」的行，下次渲染直接给输入框，
     // 不再给按钮排——否则 revealed 的草稿在重建时无处安放。
-    if(hasOptions(r) && !state.revealedIds.has(r.id)){
-      controls = '<div class="opts">';
-      var opts = r.options;
-      for(var i=0;i<opts.length;i++){
-        // 选项标签走同一渲染器的 inline 面（块结构对按钮无意义，行内标记保留）。
-        controls += '<button data-answer="'+esc(opts[i])+'"'+(i===0?' class="primary"':'')+'>'+renderMarkdown(opts[i],{inline:true})+'</button>';
-      }
-      controls += '<button class="other" data-reveal="1">Type an answer</button></div>';
-    } else {
-      controls = '<div class="answer"><input placeholder="Type an answer" data-answerbox="1"><button data-sendbox="1">Send</button></div>';
+    // t261004-17：有选项且未 reveal 时选项块已在收起行内（标签走 renderMarkdown
+    // inline 面），body 不重复；应答框是多行 textarea（Enter 换行，点 Send 发送）。
+    if(!inlineOpts){
+      controls = '<div class="answer"><textarea placeholder="Type an answer" data-answerbox="1"></textarea><button data-sendbox="1">Send</button></div>';
     }
     return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
       + controls
@@ -513,14 +532,32 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     else if(!st){ waitHtml = '<div class="act" style="border:0"><span class="say muted">The request ledger could not be reached. This is not an empty inbox.</span></div>'; }
     // t261003-14：展开态来自 state.openIds（键=id），轮询重建不折叠宿主展开的行。
     var openOf = function(id){ return state.openIds.has(String(id)) ? 'true' : 'false'; };
-    for(var i=0;i<waiting.length;i++) waitHtml += '<div class="row wait" data-open="'+openOf(waiting[i].id)+'" data-row="'+esc(waiting[i].id)+'">'+rowHead(waiting[i],'amber')+rowBody(waiting[i])+'</div>';
-    for(var j=0;j<answered.length;j++) doneHtml += '<div class="row done" data-open="'+openOf(answered[j].id)+'" data-row="'+esc(answered[j].id)+'">'+rowHead(answered[j],'grey')+rowBody(answered[j])+'</div>';
+    // t261004-17：同 group_id 的行=一次多问 ask，头上一枚「question i of n」组标签；
+    // 每行仍是独立卡、独立可答（一问一行镜像的面板半）。
+    var groupCount = {};
+    var groupTag = {};
+    Array.prototype.forEach.call(waiting.concat(answered), function(r){
+      if(!r.group_id) return;
+      groupCount[r.group_id] = (groupCount[r.group_id] || 0) + 1;
+    });
+    // 组内序号按提问时刻（at 升序）定，与行落在 waiting/answered 哪个区无关——
+    // 组里答掉一问，剩下那问的标签不变。
+    var grouped = waiting.concat(answered).filter(function(r){ return r.group_id && groupCount[r.group_id] > 1; });
+    grouped.sort(function(a,b){ return a.at - b.at; });
+    var groupSeen2 = {};
+    Array.prototype.forEach.call(grouped, function(r){
+      groupSeen2[r.group_id] = (groupSeen2[r.group_id] || 0) + 1;
+      groupTag[r.id] = 'question ' + groupSeen2[r.group_id] + ' of ' + groupCount[r.group_id];
+    });
+    var groupTagOf = function(r){ return groupTag[r.id] || ''; };
+    for(var i=0;i<waiting.length;i++) waitHtml += '<div class="row wait" data-open="'+openOf(waiting[i].id)+'" data-row="'+esc(waiting[i].id)+'">'+rowHead(waiting[i],'amber',groupTagOf(waiting[i]))+inlineBlock(waiting[i])+rowBody(waiting[i])+'</div>';
+    for(var j=0;j<answered.length;j++) doneHtml += '<div class="row done" data-open="'+openOf(answered[j].id)+'" data-row="'+esc(answered[j].id)+'">'+rowHead(answered[j],'grey',groupTagOf(answered[j]))+inlineBlock(answered[j])+rowBody(answered[j])+'</div>';
     // 重建前快照焦点（输入框光标）与各详情块滚动位置，重建后原样放回。
     // 滚动位置直接从 DOM 读——scroll 事件是异步派的，程序化滚动在重建前可能还没派到，
     // 只靠监听器记会有竞态（t261003-14 截图证据里真实踩到过）。
     var focusSnap = null;
     var active = document.activeElement;
-    if(active && active.tagName === 'INPUT'){
+    if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')){
       var frow = active.closest('[data-row]');
       if(frow) focusSnap = { id: frow.dataset.row, selStart: active.selectionStart, selEnd: active.selectionEnd };
     }
@@ -548,7 +585,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     Array.prototype.forEach.call(document.querySelectorAll('[data-row]'), function(row){
       var id = row.dataset.row;
       if(id in state.drafts){
-        var box = row.querySelector('input[data-answerbox]');
+        var box = row.querySelector('[data-answerbox]');
         if(box) box.value = state.drafts[id];
       }
       var det = row.querySelector('.detail');
@@ -560,7 +597,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(focusSnap){
       var escId = window.CSS && window.CSS.escape ? window.CSS.escape(focusSnap.id) : focusSnap.id.replace(/"/g, '\\"');
       var frow = document.querySelector('[data-row="'+escId+'"]');
-      var input = frow && frow.querySelector('input');
+      var input = frow && frow.querySelector('[data-answerbox]');
       if(input){
         input.focus();
         try{ input.setSelectionRange(focusSnap.selStart, focusSnap.selEnd); }catch(e){}
@@ -581,13 +618,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     Array.prototype.forEach.call(root.querySelectorAll('.detail'), function(d){
       d.onscroll = function(){ state.detailScroll[d.closest('[data-row]').dataset.row] = d.scrollTop; };
     });
-    // 自由文本草稿：每敲一次记一次，轮询重建后原样填回；Enter=发送。
-    // t261003-14：Enter 绑定从「点开 reveal 那一刻的内联闭包」移到这里——否则轮询重建出
-    // 的输入框（含 restored 的 reveal 框）没有任何 Enter 处理，敲回车就没了。
-    Array.prototype.forEach.call(root.querySelectorAll('input[data-answerbox]'), function(inp){
+    // 自由文本草稿：每敲一次记一次，轮询重建后原样填回。t261004-17：应答框是多行
+    // textarea——Enter=换行（宿主要能贴多行答复），Ctrl/Cmd+Enter=发送。
+    Array.prototype.forEach.call(root.querySelectorAll('textarea[data-answerbox]'), function(inp){
       var rowId = inp.closest('[data-row]').dataset.row;
       inp.addEventListener('input', function(){ state.drafts[rowId] = inp.value; });
-      inp.onkeydown = function(e){ if(e.key==='Enter' && inp.value.trim()!=='') sendAnswer(rowId, inp.value); };
+      inp.onkeydown = function(e){ if(e.key==='Enter' && (e.ctrlKey || e.metaKey) && inp.value.trim()!=='') sendAnswer(rowId, inp.value); };
     });
     Array.prototype.forEach.call(root.querySelectorAll('button[data-answer]'), function(b){
       b.onclick = function(){ sendAnswer(b.closest('[data-row]').dataset.row, b.dataset.answer); };
@@ -597,21 +633,21 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         var opts = b.parentElement;
         var box = document.createElement('div');
         box.className = 'answer';
-        box.innerHTML = '<input placeholder="Type an answer"><button>Send</button>';
+        box.innerHTML = '<textarea placeholder="Type an answer"></textarea><button>Send</button>';
         opts.replaceWith(box);
-        var input = box.querySelector('input');
+        var input = box.querySelector('textarea');
         var rowId = box.closest('[data-row]').dataset.row;
         // t261003-14：点开即记 revealedIds + 草稿监听——下一次轮询渲染直接给输入框并填回草稿。
         state.revealedIds.add(rowId);
         input.addEventListener('input', function(){ state.drafts[rowId] = input.value; });
         box.querySelector('button').onclick = function(){ if(input.value.trim()!=='') sendAnswer(rowId, input.value); else input.focus(); };
-        input.onkeydown = function(e){ if(e.key==='Enter' && input.value.trim()!=='') sendAnswer(rowId, input.value); };
+        input.onkeydown = function(e){ if(e.key==='Enter' && (e.ctrlKey || e.metaKey) && input.value.trim()!=='') sendAnswer(rowId, input.value); };
         input.focus();
       };
     });
     Array.prototype.forEach.call(root.querySelectorAll('button[data-sendbox]'), function(b){
       b.onclick = function(){
-        var input = b.parentElement.querySelector('input');
+        var input = b.parentElement.querySelector('textarea');
         if(input.value.trim()!=='') sendAnswer(b.closest('[data-row]').dataset.row, input.value); else input.focus();
       };
     });

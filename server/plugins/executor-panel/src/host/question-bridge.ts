@@ -30,9 +30,13 @@ export interface AskQuestionLike {
   readonly detail?: unknown
   readonly options?: unknown
   readonly multiSelect?: unknown
+  /** t261004-17：默认动作与到期随问镜像（缺省=无）。畸形值 = 镜像拒绝，绝不静默丢。 */
+  readonly default_action?: unknown
+  readonly expires_at?: unknown
 }
 
 export interface AskRequestLike {
+  readonly id?: unknown
   readonly questions?: unknown
   readonly agent?: { readonly id?: unknown; readonly cwd?: unknown } | null
   readonly signal?: AbortSignal | null
@@ -63,7 +67,7 @@ export interface BridgeDeps {
   onEvent?: (ev: BridgeEvent) => void
 }
 
-// ── 请求校验与镜像 ─────────────────────────────────────────────────────────────
+// ── 请求校验与镜像（t261004-17：一问一行）────────────────────────────────────
 
 /** 请求形状校验（fail-closed）：questions 必须是非空数组，每问 question 非空字符串。 */
 export function validateAskRequest(request: AskRequestLike): { ok: true } | { ok: false; error: string } {
@@ -80,80 +84,132 @@ export function validateAskRequest(request: AskRequestLike): { ok: true } | { ok
   return { ok: true }
 }
 
-/** 镜像文本：question=第一问；detail=逐问编号拼装（含各问 detail）。 */
-export function askRequestText(request: AskRequestLike): { question: string; detail: string } {
-  const qs = request.questions as AskQuestionLike[]
-  const detail = qs
-    .map((q, i) => `${i + 1}. ${q.question}${typeof q.detail === 'string' && q.detail !== '' ? ` —— ${q.detail}` : ''}`)
-    .join('\n')
-  return { question: String(qs[0].question), detail }
+/** 单问字段预检（fail-closed，append 前拦下）：options 须是 {label:string} 数组、
+ *  default_action 须是字符串、expires_at 须是毫秒数/ISO 串/null——任一畸形整单拒绝，
+ *  绝不把畸形值静默丢掉再落账。appendRequest 会再校验一遍（账是最后防线）。 */
+export function validateQuestionFields(q: AskQuestionLike): { ok: true; options?: string[]; default_action?: string } | { ok: false; error: string } {
+  let options: string[] | undefined
+  if (q.options !== undefined && q.options !== null) {
+    if (!Array.isArray(q.options)) return { ok: false, error: `options 必须是 {label} 数组（收到 ${typeof q.options}）` }
+    options = []
+    for (const o of q.options) {
+      if (typeof o !== 'object' || o === null || typeof (o as { label?: unknown }).label !== 'string' || (o as { label: string }).label.trim() === '') {
+        return { ok: false, error: `options 每项必须是带非空 label 的对象（收到 ${JSON.stringify(o)?.slice(0, 60)}）` } // LIST-CAP-OK: error-message preview truncation, not a list cap
+      }
+      options.push((o as { label: string }).label)
+    }
+    if (options.length > 8) return { ok: false, error: `options 至多 8 项（收到 ${options.length}）` }
+    for (const label of options) {
+      if (label.length > 80) return { ok: false, error: `options 项超限（${label.length} > 80 字符）` }
+    }
+  }
+  if (q.default_action !== undefined && q.default_action !== null && typeof q.default_action !== 'string') {
+    return { ok: false, error: `default_action 必须是字符串（收到 ${typeof q.default_action}）` }
+  }
+  if (q.expires_at !== undefined && q.expires_at !== null) {
+    const v: unknown = q.expires_at
+    const okNum = typeof v === 'number' && Number.isFinite(v) && v >= 0
+    const okStr = typeof v === 'string' && Number.isFinite(Date.parse(v))
+    if (!okNum && !okStr) return { ok: false, error: 'expires_at 必须是毫秒时间戳、ISO 8601 字符串或 null' }
+  }
+  return { ok: true, options }
 }
 
-/** 镜像一次：追加一条请求账行（kind='question'，raised_by=发起会话 id）。
- *  形状校验不过 = ok:false（调用方透传下游并留痕）；绝不写畸形行进账。 */
+/** 镜像结果：一问一行——rows 与 questions 同序；组 id 把同一次 ask 的行系在一起。 */
+export type MirrorResult =
+  | { ok: true; rows: Array<{ id: string }>; group_id: string }
+  | { ok: false; error: string; landed_ids: string[] }
+
+/** 镜像一次（t261004-17）：每个 question 落一行（question/detail/options/
+ *  default_action/expires_at 随问），共享 kind='question'、raised_by、group_id。
+ *  预检不过 = ok:false 不碰账；追加中途被账拒 = ok:false 并点名已落账的行 id
+ *  （账是 append-only，回滚不可能——显式点名留给人与下一棒，绝不静默半单）。 */
 export function mirrorToLedger(
   io: LedgerIo, env: NodeJS.ProcessEnv, project: string, request: AskRequestLike, nowMs: number,
-): { ok: true; row: { id: string } } | { ok: false; error: string } {
+): MirrorResult {
   const v = validateAskRequest(request)
-  if (!v.ok) return v
+  if (!v.ok) return { ok: false, error: v.error, landed_ids: [] }
   const raised = request.agent && typeof request.agent.id === 'string' ? request.agent.id : ''
   if (raised !== '' && (typeof raised !== 'string' || raised.trim() === '' || raised.length > 120)) {
-    return { ok: false, error: `agent.id 形状不合法（须 ≤120 字符非空）：${JSON.stringify(raised).slice(0, 60)}` } // LIST-CAP-OK: error-message preview truncation, not a list cap
+    return { ok: false, error: `agent.id 形状不合法（须 ≤120 字符非空）：${JSON.stringify(raised).slice(0, 60)}`, landed_ids: [] } // LIST-CAP-OK: error-message preview truncation, not a list cap
   }
-  const text = askRequestText(request)
-  const res = appendRequest(io, env, project, {
-    kind: 'question', question: text.question, detail: text.detail, raised_by: raised || undefined,
-  }, nowMs)
-  if (!res.ok) return res
-  return { ok: true, row: { id: res.row.id } }
+  const qs = request.questions as AskQuestionLike[]
+  const bodies = qs.map((q) => {
+    const f = validateQuestionFields(q)
+    if (!f.ok) return f
+    return {
+      ok: true as const,
+      body: {
+        kind: 'question',
+        question: q.question as string,
+        detail: typeof q.detail === 'string' ? q.detail : '',
+        default_action: typeof q.default_action === 'string' ? q.default_action : undefined,
+        ...(f.options ? { options: f.options } : {}),
+        expires_at: q.expires_at ?? undefined,
+        raised_by: raised || undefined,
+      },
+    }
+  })
+  const bad = bodies.find((b) => !b.ok)
+  if (bad && !bad.ok) return { ok: false, error: bad.error, landed_ids: [] }
+  const groupId = typeof request.id === 'string' && request.id.trim() !== '' && request.id.length <= 120
+    ? request.id
+    : `group-${nowMs}`
+  const landed: string[] = []
+  for (const b of bodies) {
+    if (!b.ok) continue
+    const res = appendRequest(io, env, project, { ...b.body, group_id: groupId }, nowMs)
+    if (!res.ok) return { ok: false, error: `第 ${landed.length + 1} 问落账被拒：${res.error}（已落账 ${landed.length} 行：${landed.join(', ')}）`, landed_ids: landed } // LIST-CAP-OK: error message naming landed rows, not a list cap
+    landed.push(res.row.id)
+  }
+  return { ok: true, rows: landed.map((id) => ({ id })), group_id: groupId }
 }
 
 // ── 应答映射 ──────────────────────────────────────────────────────────────────
 
-/** 账上的自由文本应答 → AskUserQuestionAnswer：
- *  按行拆；整行恰等于某问某 option.label 的行进 selected；其余文本（custom）落在
- *  第一问「没有命中任何 option」的问上（没有则落在第一问）——一份自由文本只归属一处，
- *  不往每问都复制。UI 侧约定：answer 写 option 原文=选它；写别的=自定义答复。 */
-export function mapLedgerAnswer(request: AskRequestLike, answerText: string): AskAnswer {
+/** 账上应答 → AskUserQuestionAnswer（t261004-17 一问一行版）：
+ *  answers[i] = 第 i 问自己那行的应答原文（行 id 把答案钉死在一问上——同一标签出现在
+ *  两问里也只在被答的那问生效，跨问误选结构性不可能）。行内规则不变：整行恰等于该问
+ *  某 option.label = 选中；其余文本 = 该问的 custom。 */
+export function mapLedgerAnswer(request: AskRequestLike, answers: readonly string[]): AskAnswer {
   const qs = (request.questions ?? []) as AskQuestionLike[]
-  const lines = answerText.split('\n').map(l => l.trim()).filter(l => l !== '')
   const per = qs.map((q, i) => {
     const id = typeof q.id === 'string' ? q.id : `q${i}`
     const labels: string[] = Array.isArray(q.options)
       ? (q.options as Array<{ label?: unknown }>).map(o => (typeof o?.label === 'string' ? o.label : '')).filter(Boolean)
       : []
-    return { id, labels, selected: lines.filter(l => labels.includes(l)) }
+    const text = typeof answers[i] === 'string' ? answers[i] : ''
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l !== '')
+    const selected = lines.filter(l => labels.includes(l))
+    const customLines = lines.filter(l => !labels.includes(l))
+    const custom = customLines.length > 0 ? customLines.join('\n') : undefined
+    return { id, selected, custom }
   })
-  const customLines = lines.filter(l => !per.some(p => p.labels.includes(l)))
-  const customJoined = customLines.join('\n')
-  if (customJoined !== '') {
-    let target = per.findIndex(p => p.selected.length === 0)
-    if (target < 0) target = 0
-    per[target].custom = customJoined
-  }
   return { answers: per.map(({ id, selected, custom }) => (custom === undefined ? { id, selected } : { id, selected, custom })) }
 }
 
 // ── 账上应答等待 ───────────────────────────────────────────────────────────────
 
 export type LedgerWaitOutcome =
-  | { state: 'answered'; answer: string }
+  | { state: 'answered'; answers: string[] }
   | { state: 'aborted' }
   | { state: 'deadline'; error: string }
 
-/** 等账上出现对 requestId 的 answer 行。全终态：应答/abort/deadline 三条路都清掉
- *  定时器与 abort 监听，绝不悬挂。坏账行=显式计数（readRequests 内建），不崩轮询。 */
+/** 等账上一组请求行（一问一行）全部出现 answer。answers 与 requestIds 同序。
+ *  全终态：应答/abort/deadline 三条路都清掉定时器与 abort 监听，绝不悬挂。
+ *  坏账行=显式计数（readRequests 内建），不崩轮询。 */
 export function waitForLedgerAnswer(deps: {
   io: LedgerIo
   env: NodeJS.ProcessEnv
   project: string
-  requestId: string
+  /** 要等的一组行 id（同一次 ask 的全部问题行）。 */
+  requestIds: readonly string[]
   signal?: AbortSignal | null
   pollMs: number
   deadlineMs: number
   now: () => number
 }): Promise<LedgerWaitOutcome> {
-  const { io, env, project, requestId, signal, pollMs, deadlineMs, now } = deps
+  const { io, env, project, requestIds, signal, pollMs, deadlineMs, now } = deps
   let cancelExternal: (() => void) | null = null
   const promise = new Promise<LedgerWaitOutcome>((resolve) => {
     let timer: NodeJS.Timeout | null = null
@@ -172,7 +228,7 @@ export function waitForLedgerAnswer(deps: {
     signal?.addEventListener('abort', onAbort, { once: true })
     const poll = (): void => {
       if (settled) return
-      if (now() >= deadlineAt) { finish({ state: 'deadline', error: `等待账上应答超过 ${Math.round(deadlineMs / 1000)}s（请求 ${requestId}）——收口，不悬挂` }); return }
+      if (now() >= deadlineAt) { finish({ state: 'deadline', error: `等待账上应答超过 ${Math.round(deadlineMs / 1000)}s（请求 ${requestIds.join(', ')}）——收口，不悬挂` }); return }
       let read
       try {
         read = readRequests(io, env, project)
@@ -181,8 +237,11 @@ export function waitForLedgerAnswer(deps: {
         timer = setTimeout(poll, pollMs)
         return
       }
-      const row = read.rows.find(r => r.id === requestId)
-      if (row && row.status === 'answered') { finish({ state: 'answered', answer: row.answer ?? '' }); return }
+      const byId = new Map(read.rows.filter(r => r.status === 'answered').map(r => [r.id, r.answer ?? '']))
+      if (requestIds.every(id => byId.has(id))) {
+        finish({ state: 'answered', answers: requestIds.map(id => byId.get(id) ?? '') })
+        return
+      }
       timer = setTimeout(poll, pollMs)
     }
     poll()
@@ -251,7 +310,8 @@ export function createQuestionBridge(deps: BridgeDeps = {}): (request: AskReques
       onEvent({ at, kind: 'mirror-failed', detail: `镜像被拒：${mirrored.error}——透传下游，不镜像` })
       return next()
     }
-    onEvent({ at, kind: 'mirrored', detail: `请求 ${mirrored.row.id} 已镜像进 ${pr.project} 的请求账（人在 Requests tab 可见可答）` })
+    const rowIds = mirrored.rows.map(r => r.id)
+    onEvent({ at, kind: 'mirrored', detail: `请求 ${rowIds.join(', ')}（组 ${mirrored.group_id}，${rowIds.length} 问）已镜像进 ${pr.project} 的请求账（人在 Requests tab 可见可答）` })
 
     // 两路并行：账上应答 vs 下游（真 UI）应答。先到先得；全终态收口见 waitForLedgerAnswer。
     const downstream = next().then(
@@ -259,7 +319,7 @@ export function createQuestionBridge(deps: BridgeDeps = {}): (request: AskReques
       (e) => ({ ok: false as const, e }),
     )
     const ledgerWait = waitForLedgerAnswer({
-      io, env, project: pr.project, requestId: mirrored.row.id,
+      io, env, project: pr.project, requestIds: rowIds,
       signal: request.signal ?? null, pollMs, deadlineMs, now,
     })
 
@@ -269,13 +329,13 @@ export function createQuestionBridge(deps: BridgeDeps = {}): (request: AskReques
     ])
 
     if (ledgerOutcome.state === 'answered') {
-      onEvent({ at: now(), kind: 'answered-by-ledger', detail: `请求 ${mirrored.row.id} 由人经应答面答复——映射回会话，解锁` })
+      onEvent({ at: now(), kind: 'answered-by-ledger', detail: `请求 ${rowIds.join(', ')} 由人经应答面答复——映射回会话，解锁` })
       // 下游可能还挂着：吞掉它的终局（答案不再采信——先到先得），但绝不留 unhandled rejection。
       downstream.then(() => {}, () => {})
-      return mapLedgerAnswer(request, ledgerOutcome.answer)
+      return mapLedgerAnswer(request, ledgerOutcome.answers)
     }
     if (ledgerOutcome.state === 'aborted') {
-      onEvent({ at: now(), kind: 'aborted', detail: `请求 ${mirrored.row.id} 的调用方信号已 abort——立即收口，不等下游` })
+      onEvent({ at: now(), kind: 'aborted', detail: `请求 ${rowIds.join(', ')} 的调用方信号已 abort——立即收口，不等下游` })
       // 下游可能永不返回（无 UI 形态）：不 await——挂空终局，绝不留 unhandled rejection。
       downstream.then(() => {}, () => {})
       throw new Error('ask_user_question was aborted before the user answered (question-bridge)')
@@ -287,18 +347,25 @@ export function createQuestionBridge(deps: BridgeDeps = {}): (request: AskReques
       ledgerWait.cancel?.()
       throw new Error(ledgerOutcome.error)
     }
-    // downstream-first：真 UI 答了（或显式拒绝）。答案补一条 answer 行（审计留痕）；
-    // 补账失败只留痕（应答本身已送达会话，不能因为它回滚会话侧结果）。
+    // downstream-first：真 UI 答了（或显式拒绝）。答案逐问补 answer 行（账是审计真源；
+    // 一问一行=一行 answer 对一行 question，不再并成一坨）。补账失败只留痕（应答本身
+    // 已送达会话，不能因为它回滚会话侧结果）。
     const r = await downstream
     if (r.ok) {
-      const text = (r.a.answers ?? [])
-        .map(x => [ ...(x.selected ?? []), x.custom ?? '' ].filter(Boolean).join('\n'))
-        .filter(Boolean).join('\n')
-      if (text !== '') {
-        const ans = answerRequest(io, env, pr.project, mirrored.row.id, text, 'downstream-ui', now())
-        onEvent({ at: now(), kind: ans.ok ? 'answered-downstream' : 'mirror-failed',
-          detail: ans.ok ? `下游 UI 应答请求 ${mirrored.row.id}，已补 answer 行留痕` : `下游应答了但补账被拒：${ans.error}` })
+      const items = r.a.answers ?? []
+      const landedIds: string[] = []
+      let lastError = ''
+      for (let i = 0; i < items.length && i < rowIds.length; i++) {
+        const text = [ ...(items[i].selected ?? []), items[i].custom ?? '' ].filter(Boolean).join('\n')
+        if (text === '') continue
+        const ans = answerRequest(io, env, pr.project, rowIds[i], text, 'downstream-ui', now())
+        if (ans.ok) landedIds.push(rowIds[i])
+        else lastError = ans.error
       }
+      onEvent({ at: now(), kind: landedIds.length > 0 ? 'answered-downstream' : 'mirror-failed',
+        detail: landedIds.length > 0
+          ? `下游 UI 应答请求 ${landedIds.join(', ')}，已补 answer 行留痕`
+          : `下游应答了但补账被拒：${lastError}` })
       // 等待面立即显式收口（定时器+abort 监听），不等 deadline——全终态不靠进程退出兜底。
       ledgerWait.cancel?.()
       return r.a
@@ -308,8 +375,8 @@ export function createQuestionBridge(deps: BridgeDeps = {}): (request: AskReques
     onEvent({ at: now(), kind: 'downstream-refused', detail: `下游无应答者接受（${r.e instanceof Error ? r.e.message : String(r.e)}）——继续等账上应答` })
     const out = await ledgerWait
     if (out.state === 'answered') {
-      onEvent({ at: now(), kind: 'answered-by-ledger', detail: `请求 ${mirrored.row.id} 由人经应答面答复——映射回会话，解锁` })
-      return mapLedgerAnswer(request, out.answer)
+      onEvent({ at: now(), kind: 'answered-by-ledger', detail: `请求 ${rowIds.join(', ')} 由人经应答面答复——映射回会话，解锁` })
+      return mapLedgerAnswer(request, out.answers)
     }
     if (out.state === 'aborted') throw new Error('ask_user_question was aborted before the user answered (question-bridge)')
     throw new Error(out.error)

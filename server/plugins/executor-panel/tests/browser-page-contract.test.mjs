@@ -116,7 +116,7 @@ async function openPage(rowsOverride) {
 
     // L4b：兜底控件在场（无选项行的输入框 + 有选项行的 reveal 按钮；均在折叠行体内）。
     n++
-    assert(await page.$$eval('#paneOv input[data-answerbox][placeholder="Type an answer"]', e => e.length) === 1, 'L4b free-text fallback input present in collapsed row')
+    assert(await page.$$eval('#paneOv textarea[data-answerbox][placeholder="Type an answer"]', e => e.length) === 1, 'L4b free-text fallback input present in collapsed row')
     n++
     assert(await page.$$eval('#paneOv button[data-reveal]', b => b.length) === 1, 'L4b reveal button present on the options row')
 

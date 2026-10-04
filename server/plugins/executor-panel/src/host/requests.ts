@@ -44,6 +44,10 @@ export interface RequestRow {
   options?: string[]
   expires_at: number | null
   raised_by: string
+  /** t261004-17（一问一行镜像）：同一 ask_user_question 镜像出的多行共享一个组 id，
+   *  面板据此把多问渲染成一张多问卡；单问行/历史行可缺省。给了就必须是非空短字符串
+   *  （≤120 字符，同 raised_by 口径）——畸形在 append 时 fail-closed 拒收。 */
+  group_id?: string
 }
 
 /** 应答行（按 id 关联；追加不改写）。 */
@@ -109,7 +113,7 @@ export function makeRequestId(nowMs: number): string {
 /** 追加一条请求（字段校验 fail-closed；id/时间戳服务端定，不信任消费方）。 */
 export function appendRequest(
   io: LedgerIo, env: NodeJS.ProcessEnv, key: string,
-  body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; options?: unknown; expires_at?: unknown; raised_by?: unknown },
+  body: { kind: unknown; question: unknown; detail?: unknown; default_action?: unknown; options?: unknown; expires_at?: unknown; raised_by?: unknown; group_id?: unknown },
   nowMs: number,
 ): { ok: true; row: RequestRow } | { ok: false; error: string } {
   if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
@@ -142,6 +146,15 @@ export function appendRequest(
     }
     raisedBy = body.raised_by
   }
+  // t261004-17 组 id（一问一行镜像）：可缺省；给了就必须是非空短字符串（≤120 字符），
+  // 畸形显式拒绝——绝不静默丢组让多问卡散架。
+  let groupId: string | undefined
+  if (body.group_id !== undefined && body.group_id !== null) {
+    if (typeof body.group_id !== 'string' || body.group_id.trim() === '' || body.group_id.length > 120) {
+      return { ok: false, error: 'group_id 必须是非空短字符串（≤120 字符）；不给 = 单问行（不进多问卡）' }
+    }
+    groupId = body.group_id
+  }
   // t261003-06 选项数据面：给了就必须是「非空短字符串数组」（≤8 项、单项 ≤80 字符、
   // 去重保序）——畸形在提出时 fail-closed 拒收（页面渲染面拿到的选项恒可信）。
   let options: string[] | undefined
@@ -170,6 +183,7 @@ export function appendRequest(
     ...(options ? { options } : {}),
     expires_at: expires,
     raised_by: raisedBy,
+    ...(groupId ? { group_id: groupId } : {}),
   }
   const file = requestsLedgerFile(key, env)
   io.mkdirSync(file.slice(0, file.lastIndexOf('/')), { recursive: true })
