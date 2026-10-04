@@ -1,0 +1,99 @@
+# -*- coding: utf-8 -*-
+"""t261004-18（KI-193）executor-grants-write 引擎侧入口——单测。
+
+覆盖（工单 requirement 3/4 逐条）：
+- 正面杆：宿主写（by=host）经 cmd_executor_grants_write 落盘，审计行带 source
+  （surface/transport/guarded 原样进账）；
+- 元权限反锁：执行器身份通道（SANDBAR_CALLER_IDENTITY_SRC=cwd）调用同一入口
+  = 拒收，盘上声明不存在/逐字节不动，且落一行 refuse 审计（带 source）；
+- 拒收也留痕：缺 by / grants 非对象 → saved:false + refuse 审计行；
+- 校验拒收透传：未知 op 键 → 引擎 validate 拒收原文返回；
+- 无 key / grants 缺失的畸形 args：结构化拒收，绝不半写。
+全程零 Temporal/零网络/零 git；声明根经 SANDBAR_PROJECTS_DIR 注入临时目录。
+"""
+import asyncio
+import json
+import os
+
+import pytest
+
+import client as cl  # noqa: E402
+import executor_grants as eg  # noqa: E402
+
+
+@pytest.fixture()
+def projects_root(monkeypatch, tmp_path):
+    root = tmp_path / "projects"
+    root.mkdir()
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(root))
+    # 干净身份通道（缺省 env：非执行器通道）。
+    monkeypatch.delenv("SANDBAR_CALLER_IDENTITY_SRC", raising=False)
+    monkeypatch.delenv("SANDBAR_CALLER_SURFACE", raising=False)
+    return root
+
+
+def _call(**args):
+    return asyncio.run(cl.cmd_executor_grants_write(args))
+
+
+def _audit(root, key):
+    path = root / key / eg.AUDIT_FILE
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def test_host_write_saves_and_audits_source(projects_root):
+    res = _call(key="alpha", by="host", grants={"sign": True},
+                source={"surface": "panel-api", "transport": "http", "guarded": True})
+    assert res["saved"] is True
+    decl = json.loads((projects_root / "alpha" / eg.DECL_FILE).read_text(encoding="utf-8"))
+    assert decl["grants"] == {"sign": True}
+    rows = _audit(projects_root, "alpha")
+    assert len(rows) == 1 and rows[0]["action"] == "grant-change"
+    assert rows[0]["source"] == {"surface": "panel-api", "transport": "http", "guarded": True}
+
+
+def test_executor_channel_refused_with_refuse_audit(projects_root, monkeypatch):
+    monkeypatch.setenv("SANDBAR_CALLER_IDENTITY_SRC", eg.EXECUTOR_CHANNEL)
+    res = _call(key="alpha", by="executor", grants={"open-ticket": True},
+                source={"surface": "executor-cli"})
+    assert res["saved"] is False and "反锁" in res["reason"]
+    assert not (projects_root / "alpha" / eg.DECL_FILE).exists()
+    rows = _audit(projects_root, "alpha")
+    assert len(rows) == 1 and rows[0]["action"] == "refuse" and rows[0]["op"] == eg.META_OP
+    assert rows[0]["source"] == {"surface": "executor-cli"}
+
+
+def test_named_session_channel_refused(projects_root, monkeypatch):
+    # 声明点名通道：调用方会话 id 被点名 → 执行器身份 → 反锁（先于声明读取也成立：
+    # 本例先写一份带点名的声明，再以同名会话身份走入口）。
+    eg.save_declaration("beta", {"sign": True}, "host", 1, executor_sessions=["sess-1"])
+    before = (projects_root / "beta" / eg.DECL_FILE).read_bytes()
+    monkeypatch.setenv("SANDBAR_CALLER_IDENTITY_SRC", "arg")
+    monkeypatch.setenv("DSH_SESSION_ID", "sess-1")
+    res = _call(key="beta", by="executor", grants={"sign": True, "rerun": True})
+    assert res["saved"] is False
+    assert (projects_root / "beta" / eg.DECL_FILE).read_bytes() == before
+
+
+def test_missing_by_and_bad_grants_refused_and_audited(projects_root):
+    res = _call(key="alpha", by="", grants={"sign": True}, source={"surface": "probe"})
+    assert res["saved"] is False and "by" in res["reason"]
+    res2 = _call(key="alpha", by="host", grants="not-a-dict", source={"surface": "probe"})
+    assert res2["saved"] is False and "grants" in res2["reason"]
+    assert not (projects_root / "alpha" / eg.DECL_FILE).exists()
+    rows = _audit(projects_root, "alpha")
+    assert len(rows) == 2 and all(r["action"] == "refuse" for r in rows)
+    assert all(r["source"] == {"surface": "probe"} for r in rows)
+
+
+def test_unknown_op_key_passes_through_validation_refusal(projects_root):
+    res = _call(key="alpha", by="host", grants={"fly": True}, source={"surface": "probe"})
+    assert res["saved"] is False and "fly" in res["reason"]
+    assert not (projects_root / "alpha" / eg.DECL_FILE).exists()
+
+
+def test_missing_key_structured_refusal(projects_root):
+    res = _call(key="", by="host", grants={})
+    assert res["saved"] is False and "key" in res["reason"]
