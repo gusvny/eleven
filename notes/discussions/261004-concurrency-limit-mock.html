@@ -335,6 +335,19 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
+const PROJ_SHAPE = { sandbar: 'square', suyou: 'diamond', nusuyou: 'hexagon' };
+// 颜色 + 形状双通道：同 key 恒同色同形；形状在色盲/灰度下仍可辨（只留短码，不再有短名）
+function shapeSVG(shape, color, size){
+  const S = size, h = S / 2, pad = S * 0.06;
+  const wrap = inner => '<svg width="' + S + '" height="' + S + '" viewBox="0 0 ' + S + ' ' + S + '" style="flex:0 0 auto;display:block">' + inner + '</svg>';
+  if (shape === 'circle') return wrap('<circle cx="' + h + '" cy="' + h + '" r="' + (h - pad) + '" fill="' + color + '"/>');
+  if (shape === 'diamond') return wrap('<rect x="' + (S * 0.2) + '" y="' + (S * 0.2) + '" width="' + (S * 0.6) + '" height="' + (S * 0.6) + '" rx="1.5" fill="' + color + '" transform="rotate(45 ' + h + ' ' + h + ')"/>');
+  if (shape === 'triangle') return wrap('<path d="M' + h + ' ' + pad + ' L' + (S - pad) + ' ' + (S - pad) + ' L' + pad + ' ' + (S - pad) + ' Z" fill="' + color + '"/>');
+  if (shape === 'hexagon') return wrap('<path d="M' + (S * 0.25) + ' ' + pad + ' H' + (S * 0.75) + ' L' + (S - pad) + ' ' + h + ' L' + (S * 0.75) + ' ' + (S - pad) + ' H' + (S * 0.25) + ' L' + pad + ' ' + h + ' Z" fill="' + color + '"/>');
+  if (shape === 'pill') return wrap('<rect x="' + (pad + S * 0.08) + '" y="' + (h * 0.55) + '" width="' + (S - pad * 2 - S * 0.16) + '" height="' + (h * 0.9) + '" rx="' + (h * 0.45) + '" fill="' + color + '"/>');
+  return wrap('<rect x="' + pad + '" y="' + pad + '" width="' + (S - pad * 2) + '" height="' + (S - pad * 2) + '" rx="2" fill="' + color + '"/>');
+}
+const badge = (key, size) => shapeSVG(PROJ_SHAPE[key] || 'square', PROJ_COLOR[key] || '#9ca3af', size);
 const PROJ_COLOR = { sandbar: '#e76a6a', suyou: '#6a9ce7', nusuyou: '#83e76a' };
 const PROJ_SESS = {
   sandbar: { handle: 'executor', code: '09ca' },
@@ -363,7 +376,7 @@ function render(){
   document.querySelector('.chat').style.setProperty('--pc', pc);
   const ses = PROJ_SESS[cur] || { handle: 'session', code: '----' };
   const band = document.getElementById('chatBand');
-  if (band) band.innerHTML = '<span class="pdot"></span><span class="pk">' + cur + '</span>'
+  if (band) band.innerHTML = '' + badge(cur, 13) + '<span class="pk">' + cur + '</span>'
     + '<span class="hk">' + ses.handle + ' · ' + ses.code + '</span><span class="grow"></span>'
     + '<button class="sbtn" title="Switch or create a project session">Sessions 2</button>';
   document.querySelectorAll('.proj').forEach(el => el.style.setProperty('--pc', PROJ_COLOR[el.dataset.key] || 'var(--line)'));
@@ -393,11 +406,11 @@ function renderSide(){
     const icon = (v, glyph, title) => '<span class="vi' + (k === cur && view === v ? ' on' : '') + '" title="' + title
       + '" onclick="pickProject(\'' + k + '\');setView(\'' + v + '\')">' + glyph + '</span>';
     return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
-      + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
+      + '<div class="prow" onclick="pickProject(\'' + k + '\')">' + badge(k, 14) + '<span class="pname">' + k + '</span>'
 
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">'
-      + '<div class="sess"><span class="pdot"></span><span>' + ((PROJ_SESS[k] || {}).handle || 'session') + '</span>'
+      + '<div class="sess">' + badge(k, 11) + '<span>' + ((PROJ_SESS[k] || {}).handle || 'session') + '</span>'
       + '<span class="hk">' + ((PROJ_SESS[k] || {}).code || '----') + '</span><span class="grow"></span><button class="go">open</button></div>'
       + rows + '</div></div>';
   }).join('');
