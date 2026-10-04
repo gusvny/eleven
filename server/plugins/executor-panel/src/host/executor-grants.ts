@@ -40,6 +40,10 @@ export function toGrantOp(name: string): string {
 }
 
 export const DECL_VERSION = 1
+/** t261004-19: open-ticket per-epic authorization constants (mirrors the engine's executor_grants.py values). */
+export const OPEN_TICKET_CAP_DEFAULT = 3
+export const OPEN_TICKET_EPICS_MAX = 64
+const EPIC_CODE_RE = /^[a-z0-9][a-z0-9-]{0,40}$/
 /** 执行器身份通道标记（POST body 顶层；引擎侧同名语义=SANDBAR_CALLER_IDENTITY_SRC='cwd'）。 */
 export const EXECUTOR_SURFACE = 'executor-session'
 /** 夜间档时间盒上限（毫秒，与引擎 NIGHT_TIER_MAX_MS 镜像：最长 7 天）。 */
@@ -55,6 +59,13 @@ export interface GrantsDecl {
    *  比对，被点名才以执行器身份受闸。与引擎 EXECUTOR_SESSIONS_MAX(8)/
    *  EXECUTOR_SESSION_ID_MAX(128) 镜像。 */
   executor_sessions?: string[]
+  /** t261004-19: open-ticket authorized per epic — the epic code list plus the
+   *  per-epic cap on open tickets (default 3). Host-only keys: a save carrying the
+   *  executor identity is always refused (EXECUTOR_SURFACE lock). Rules mirror the
+   *  engine's validate_declaration (same OPEN_TICKET_CAP_DEFAULT /
+   *  OPEN_TICKET_EPICS_MAX / shared.EPIC_CODE_RE values). */
+  open_ticket_epics?: string[]
+  open_ticket_cap?: number
   night_tier?: NightTier
   updated_by?: string
   updated_at?: number
@@ -129,6 +140,37 @@ export function validateDeclaration(doc: unknown): [GrantsDecl, string | null] {
       return [{} as GrantsDecl, `executor_sessions 至多 ${MAX_SESSIONS} 个会话 id（收到 ${sessions.length}）——缩表后再存`]
     }
     out.executor_sessions = sessions
+  }
+  // t261004-19: open_ticket_epics (epic code list) and open_ticket_cap (positive
+  // int, default 3). Same rules as the engine's validate_declaration: non-empty
+  // string array, code shape, order-preserving dedupe, 64 cap; malformed input is a
+  // named refusal (fail-closed), never silently accepted.
+  const epicsIn = d.open_ticket_epics
+  const openEpics: string[] = []
+  if (epicsIn !== undefined && epicsIn !== null) {
+    if (!Array.isArray(epicsIn) || epicsIn.some((c) => typeof c !== 'string' || !c.trim())) {
+      return [{} as GrantsDecl, `open_ticket_epics must be a non-empty string array (epic code list; got ${JSON.stringify(epicsIn)})`]
+    }
+    for (const c of epicsIn as string[]) {
+      const code = c.trim()
+      if (!EPIC_CODE_RE.test(code)) {
+        return [{} as GrantsDecl, `open_ticket_epics entry '${code}' is not a valid epic code (expected ${EPIC_CODE_RE.source}: lowercase letters/digits/hyphens)`]
+      }
+      if (!openEpics.includes(code)) openEpics.push(code)
+    }
+    if (openEpics.length > OPEN_TICKET_EPICS_MAX) {
+      return [{} as GrantsDecl, `open_ticket_epics holds more than ${OPEN_TICKET_EPICS_MAX} epic codes (got ${openEpics.length}) — shrink the list before saving`]
+    }
+  }
+  out.open_ticket_epics = openEpics
+  const capIn = d.open_ticket_cap
+  if (capIn !== undefined && capIn !== null) {
+    if (typeof capIn !== 'number' || !Number.isInteger(capIn) || capIn < 1) {
+      return [{} as GrantsDecl, `open_ticket_cap must be a positive integer (the per-epic cap on open executor-started tickets; got ${String(capIn)})`]
+    }
+    out.open_ticket_cap = capIn
+  } else {
+    out.open_ticket_cap = OPEN_TICKET_CAP_DEFAULT
   }
   const night = d.night_tier
   if (night !== undefined && night !== null) {
@@ -270,6 +312,25 @@ export function saveGrantsDecl(
       doc.executor_sessions = prev.declaration.executor_sessions
     }
   }
+  // t261004-19: the epic authorization list travels with the save (same semantics
+  // as session naming: given -> move it, absent -> inherit the on-disk value —
+  // otherwise a partial edit silently wipes authorized epics); the cap moves too.
+  if (b.open_ticket_epics !== undefined) {
+    doc.open_ticket_epics = b.open_ticket_epics
+  } else {
+    const prev = readDeclaration(key, env)
+    if (prev.ok && prev.declaration?.open_ticket_epics) {
+      doc.open_ticket_epics = prev.declaration.open_ticket_epics
+    }
+  }
+  if (b.open_ticket_cap !== undefined) {
+    doc.open_ticket_cap = b.open_ticket_cap
+  } else {
+    const prev = readDeclaration(key, env)
+    if (prev.ok && typeof prev.declaration?.open_ticket_cap === 'number') {
+      doc.open_ticket_cap = prev.declaration.open_ticket_cap
+    }
+  }
   const [normalized, err] = validateDeclaration(doc)
   if (err) return { saved: false, file, reason: err }
   const prev = readDeclaration(key, env)
@@ -293,6 +354,8 @@ export function saveGrantsDecl(
     at: Math.trunc(nowMs), action: 'grant-change', project: key, who: who.slice(0, 64), // LIST-CAP-OK: storage field length limit on who, not a list cap
     from: prev.declaration?.grants ?? {}, to: normalized.grants,
     night_tier: normalized.night_tier ?? null,
+    open_ticket_epics: normalized.open_ticket_epics ?? [],
+    open_ticket_cap: normalized.open_ticket_cap ?? OPEN_TICKET_CAP_DEFAULT,
   }, env)
   return { saved: true, file, resolved: normalized }
 }

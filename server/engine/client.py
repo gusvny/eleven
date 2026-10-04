@@ -535,14 +535,25 @@ def _with_channel(identity: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
-                         ticket: str = "") -> Dict[str, Any]:
+                         ticket: str = "", epic: str = "", write_set=None,
+                         open_count: int = 0) -> Dict[str, Any]:
     """执行器授权闸（t260930-14；t261001-20 判据=受信会话身份）：受闸由
     executor_grants.is_executor_channel 判——cwd 推导（watchdog 执行器会话），或
     声明通道（arg/env-external）且调用方会话 id 被项目声明 executor_sessions 点名。
 
     豁免通道（lane-agent spawn 注入、未声明、声明了 caller_project 但会话未被
     点名的普通调用=集成夹具/light-lane）一律放行不设闸——零回归红线。返回
-    {"err": 回执|None, "keys": 并入成功回执的身份键}。
+    {"err": receipt|None, "keys": identity keys merged into the success receipt,
+     "enforced": whether the gate actually judged,
+     "provenance": the epic-level verdict provenance (with the open-ticket context)}.
+
+    t261004-19: the open-ticket judgment takes the epic/write_set/open_count
+    context — when the verb-level switch (grants.open-ticket) passes on an enforced
+    channel, the epic-level judgment runs inside the same funnel (no epic named /
+    epic not authorized / a stale list entry / authority surface in the write set /
+    per-epic cap), every refusal named, recorded into both ledgers (executor-actions
+    row + executor-grants audit row). open_count comes from the create face (the
+    Temporal per-epic open count; the funnel itself does no counting IO).
 
     t261004-11：每次【闸真实裁决】（enforced 放行/一切拒收）后向项目自己的
     executor-actions 账落一行（record_from_gate；豁免放行不落行）。记账是尽力面：
@@ -550,6 +561,34 @@ def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
     在 executor_actions 内部）。"""
     verdict = executor_grants.judge(_with_channel(identity), op, key)
     channel = _executor_channel(identity)
+    if verdict.get("allowed") and verdict.get("enforced") \
+            and verdict.get("grant_op") == "open-ticket":
+        # Epic-level judgment (single point in the same funnel): the epic file
+        # existence / write set / cap are closed inside judge_open_ticket; an absent
+        # or corrupt declaration is fail-closed here.
+        scope = executor_grants.judge_open_ticket(
+            executor_grants.load_declaration(str(key or "")), str(key or ""),
+            epic, write_set or [], int(open_count or 0))
+        try:
+            executor_actions.record_from_gate(op=str(op or ""), key=str(key or ""),
+                                              ticket=str(ticket or ""),
+                                              verdict=scope, channel=channel)
+        except Exception as e:  # noqa: BLE001 — bookkeeping is best-effort; a crash never moves the write verdict
+            executor_actions.WRITE_FAILURES += 1
+            executor_actions._announce(e, str(key or ""),
+                                       "record_from_gate(scope) raised (recording skipped)")
+        prov = scope.get("provenance") or {}
+        if not scope.get("allowed"):
+            return {"err": _err(scope.get("why") or "executor ticket-start refused", KIND_EXECUTOR_GRANT_REFUSED),
+                    "keys": {}, "enforced": True, "provenance": prov}
+        prov_keys = prov.get("keys") or {}
+        return {"err": None, "enforced": True, "provenance": prov,
+                "keys": {"executor_grant_op": "open-ticket",
+                         "executor_grant_source": prov_keys.get("open-ticket", ""),
+                         "executor_open_epic": scope.get("epic", ""),
+                         "executor_open_ticket_source": prov_keys.get(
+                             "open_ticket_epics.%s" % scope.get("epic", ""), ""),
+                         "executor_channel": channel}}
     try:
         executor_actions.record_from_gate(op=str(op or ""), key=str(key or ""),
                                           ticket=str(ticket or ""),
@@ -560,15 +599,56 @@ def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
                                    "record_from_gate raised (recording skipped)")
     if not verdict.get("allowed"):
         return {"err": _err(verdict.get("why") or "执行器授权拒收", KIND_EXECUTOR_GRANT_REFUSED),
-                "keys": {}}
+                "keys": {}, "enforced": False}
     if not verdict.get("enforced"):
-        return {"err": None, "keys": {}}
+        return {"err": None, "keys": {}, "enforced": False}
     # 通道来源观测键（与 identity_receipt injected_by 同档：尽力面标签，非安全断言）
     prov = verdict.get("provenance") or {}
-    return {"err": None,
+    return {"err": None, "enforced": True, "provenance": prov,
             "keys": {"executor_grant_op": verdict.get("grant_op"),
                      "executor_grant_source": (prov.get("keys") or {}).get(str(verdict.get("grant_op") or "")) or "",
                      "executor_channel": channel}}
+
+
+#: Terminal execution statuses (Temporal ExecutionStatus as
+#: WorkflowExecutionStatus.name) — the t261004-19 "not yet terminal" test: not in
+#: this set = still running and occupying a per-epic cap slot.
+_TICKET_TERMINAL_STATUSES = frozenset((
+    "COMPLETED", "FAILED", "CANCELED", "TERMINATED", "CONTINUED_AS_NEW", "TIMED_OUT"))
+
+
+async def _executor_open_epic_count(project: str, epic: str) -> "Tuple[int, Optional[str]]":
+    """Per-epic count of tickets started by the executor and not yet terminal (the
+    counting face of the t261004-19 cap).
+
+    The id list comes from the project action account (op=ticket-start with
+    decision=allowed, via executor_grants.read_executor_started_ids — one ledger
+    truth); the terminal test uses the Temporal visibility face (a ProjectKey x
+    EpicCode search-attribute listing, per-ticket status). A counting failure is
+    fail-closed (a named error for the caller to refuse — an unreadable count is
+    never treated as 0, otherwise blinding the visibility face becomes an unlimited
+    ticket bypass)."""
+    epic_s = str(epic or "").strip()
+    if not epic_s:
+        return 0, None
+    try:
+        started = executor_grants.read_executor_started_ids(str(project or ""))
+        if not started:
+            return 0, None
+        cl = await _connect()
+        n = 0
+        query = '%s="%s" AND %s="%s"' % (PROJECT_SA_NAME, project, EPIC_SA_NAME, epic_s)
+        async for wf in cl.list_workflows(query):
+            if str(wf.id) not in started:
+                continue
+            status = getattr(wf, "status", None)
+            name = status.name if status is not None else "RUNNING"
+            if name not in _TICKET_TERMINAL_STATUSES:
+                n += 1
+        return n, None
+    except Exception as e:  # noqa: BLE001 — fail-closed: an unavailable count is a named refusal, never 0
+        return 0, ("executor ticket cap counting failed (fail-closed, never treated "
+                   "as 0): %s: %s" % (type(e).__name__, e))
 
 
 def _registered_hint(key: str) -> Optional[bool]:
@@ -1186,24 +1266,37 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
                              context="（目标票 %s，属项目 %s）" % (tid, project))
     gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
             "keys": caller_gate.identity_receipt(identity, verdict)}
-    # t260930-14：创建面执行器授权闸（仅 cwd 通道设闸）。
-    egate = _executor_grant_gate(identity, "ticket-start", project, ticket=str(tid or ""))
-    if egate["err"] is not None:
-        return egate["err"]
-    gate["keys"].update(egate["keys"])
-    reg = _registered_hint(str(verdict.get("stamp") or ""))
-    if reg is not None:
-        gate["keys"]["caller_project_registered"] = reg
     # Epic linkage (epic-linkage): the single strict-validation point for --epic — a
     # code-shape whitelist + the epic archive existing. The validation directory comes
     # from resolve_epics_dir(project) — anchored to the project registry entry's main
     # directory notes/epics (same source as the workbench UI's resolveEpicsDir); the
     # SANDBAR_EPICS_DIR env wins, keeping the self-test semantics. Empty = no epic
     # linkage (allowed).
+    # t261004-19 (arbitrate gen1 code-fault fix): this block must sit before the
+    # executor gate — the gate's open-ticket judgment consumes epic (a missing epic is
+    # a named refusal, not an UnboundLocalError).
     try:
         epic = validate_epic_code(str(args.get("epic") or ""), resolve_epics_dir(project))
     except ValueError as e:
         return _err(str(e))
+    # t260930-14: the create-face executor gate. Since t261004-19 the single call
+    # carries the open-ticket context (epic/write_set/open_count) — placed after the
+    # epic and write-set validation because the judgment consumes both, so every
+    # epic-level refusal (no epic named / not authorized / stale list entry /
+    # authority surface / cap reached) is named and recorded inside the same funnel
+    # (see _executor_grant_gate).
+    open_count, count_err = await _executor_open_epic_count(project, epic)
+    if count_err:
+        return _err(count_err, KIND_EXECUTOR_GRANT_REFUSED)
+    egate = _executor_grant_gate(identity, "ticket-start", project, ticket=str(tid or ""),
+                                 epic=epic, write_set=[str(x) for x in (args.get("write_set") or [])],
+                                 open_count=open_count)
+    if egate["err"] is not None:
+        return egate["err"]
+    gate["keys"].update(egate["keys"])
+    reg = _registered_hint(str(verdict.get("stamp") or ""))
+    if reg is not None:
+        gate["keys"]["caller_project_registered"] = reg
     # Lane-parameter derivation + validation single point (consolidated after the three
     # incidents t260824-04/-10/-11): for lane=worktree, workspace/worktree/branch are
     # derived when absent, filled in one by one, and refused outright on inconsistency

@@ -149,7 +149,14 @@ async function expandMoreViews(page) {
 }
   await expandMoreViews(page)
   const docIcon = page.locator('[aria-label="Docs"]').first();
-  const present = await docIcon.isVisible().catch(() => false);
+  // 入口探针=deadline 内轮询不单点取样（KI-072 族，t260915-10 同款口径）：
+  // t261004-19 仲裁 gen2 实锤——闸窗负载下单点 isVisible 会把「渲染慢」误判成
+  // 「入口不在场」（同树定点复跑 28.4s PASS vs 闸内 8.5s FAIL）。
+  let present = false;
+  for (let i = 0; i < 16 && !present; i++) {
+    present = await docIcon.isVisible().catch(() => false);
+    if (!present) await page.waitForTimeout(500);
+  }
   if (!present) {
     record('ui/entry-present', 'fail', 'aria-label="Docs" 图标不在场（场景①已钉入口，本场景链路无从走起）');
     summarize();

@@ -20,6 +20,7 @@ import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settin
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
 import { clearGrants, grantAllOps, grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, saveGrantsDecl, GRANT_OPS, toGrantOp } from './executor-grants.ts'
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
+import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
 
 export interface ApiResponse { status: number; json: Record<string, unknown> }
@@ -271,6 +272,10 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           declaration: decl.ok ? decl.declaration : null,
           declaration_state: { declared: decl.declared, kind: decl.kind ?? (decl.ok ? 'ok' : 'absent'), error: decl.error, file: decl.file },
           provenance: { file: decl.file, keys: provenanceKeys(decl, now()) },
+          // t261004-19：epic 授权读面（「Open tickets in these epics」节的数据源）——
+          // 全部 epic + 当前是否在名单；解析不出=ok:false + 原因（显式降级卡）。
+          open_ticket_epics: listOpenTicketEpics(key, env),
+          open_ticket_cap: decl.ok ? (decl.declaration?.open_ticket_cap ?? 3) : 3,
           audit_note: auditNote,
         },
       }

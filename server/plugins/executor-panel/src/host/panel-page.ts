@@ -260,6 +260,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     </div>
     <div id="grantsReadout" class="muted" style="margin-top:10px"></div>
     <div id="grantsMatrix"></div>
+    <div id="openEpics"></div>
   </section>
 
   <section id="paneAlert" style="display:none">
@@ -701,6 +702,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
           + '<span class="t">'+esc(localDateTime(x.at))+'</span>'
           + '<span class="pill '+cls+'" title='+titleAttr+'>'+esc(x.action)+'</span>'
           + '<span class="tk">'+esc(x.ticket)+'</span>'
+          // t261004-19：open-ticket 行带 epic（行数据缺席/旧行=不渲染标签，不吞行）。
+          + (x.epic ? '<span class="say muted">· epic '+esc(x.epic)+'</span>' : '')
           + '<span class="say">'+esc(x.result||'done')+'</span></div>';
       }
       if(a.older_rows>0 && a.note){ html += '<div class="act" style="border:0"><span class="say muted">'+esc(a.note)+'</span></div>'; }
@@ -812,7 +815,42 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       ? '<div class="sect lead">Capability matrix</div><div class="muted" style="font-size:11px">The list below shows what each permission means per template. A row here is not a grant. Only the switches above grant.</div><table style="margin-top:6px"><tr><th>Permission</th><th>Template</th><th>Granted</th></tr>'
         + g.grants.rows.map(function(r){ return '<tr><td>'+esc(r.op)+'</td><td>'+esc(r.template)+'</td><td>'+(r.granted===true?'<span class="good">yes</span>':'<span class="muted">no</span>')+'</td></tr>'; }).join('') + '</table>'
       : '';
+    renderOpenEpics(g);
     el('grantsSaveOut').innerHTML = grantsSaveMsg;
+  }
+  // ---- t261004-19：「Open tickets in these epics」节（宿主专属授权面） ----
+  // 数据源=GET /api/grants 的 open_ticket_epics 读面（全部 epic + 状态行原文 +
+  // 当前是否授权）。解析不出=显式降级卡（点名原因），绝不渲染成「无 epic」空表。
+  function renderOpenEpics(g){
+    var face = g && g.open_ticket_epics;
+    if(!face){ el('openEpics').innerHTML = ''; return; }
+    if(face.ok !== true){
+      el('openEpics').innerHTML = '<div class="sect lead">Open tickets in these epics</div>'
+        + '<div class="muted" style="font-size:11px">The epic list cannot be read. Reason: '+esc(face.reason||'?')+'</div>';
+      return;
+    }
+    var cap = (typeof g.open_ticket_cap === 'number') ? g.open_ticket_cap : 3;
+    var html = '<div class="sect lead">Open tickets in these epics</div>'
+      + '<div class="muted" style="font-size:11px">An executor ticket-start must name one of these epics; every other epic stays closed. Cap: '+cap+' open ticket(s) per epic. Saving here goes through the audited grants declaration.</div>';
+    for(var i=0;i<face.epics.length;i++){
+      var e = face.epics[i];
+      html += '<div class="line"><div class="lab">'+esc(e.code)+' <small>'+esc(e.status||'(no status line)')+'</small></div>'
+        + '<div class="sw grant" data-epic="'+esc(e.code)+'" data-on="'+String(e.authorized===true)+'"></div></div>';
+    }
+    if(face.epics.length===0){
+      html += '<div class="muted" style="font-size:11px">This project has no epic yet (notes/epics/ is empty or absent). Nothing can be authorized.</div>';
+    }
+    el('openEpics').innerHTML = html;
+    Array.prototype.forEach.call(el('openEpics').querySelectorAll('.sw.grant'), function(s){
+      s.onclick = function(){ s.dataset.on = s.dataset.on==='true' ? 'false' : 'true'; };
+    });
+  }
+  function selectedOpenEpics(){
+    var out = [];
+    Array.prototype.forEach.call(el('openEpics').querySelectorAll('.sw.grant'), function(s){
+      if(s.dataset.on==='true' && s.dataset.epic && out.indexOf(s.dataset.epic)<0) out.push(s.dataset.epic);
+    });
+    return out;
   }
   function setAllSwitches(on){
     Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){ s.dataset.on = String(on); });
@@ -831,6 +869,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var body = { grants: grants, by: 'host' };
     var sess = el('grantSession').value.trim();
     if(sess) body.executor_sessions = [sess];
+    body.open_ticket_epics = selectedOpenEpics();
     postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), body)
       .then(function(j){
         grantsSaveMsg = j.saved===true ? '<span class="good">Saved.</span>'

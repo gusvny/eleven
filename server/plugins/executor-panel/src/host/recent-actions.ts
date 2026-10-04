@@ -54,7 +54,9 @@ export const ACTION_BY_OP: Record<string, string> = {
   'manage-grants': 'Change grants',   // 元权限反锁的拒收行（宿主特权操作）
 }
 
-/** 面板动作行（Overview 右栏一条）。reason 只在 refused 行在场。 */
+/** One panel action row (Overview right column). reason is present only on refused
+ *  rows. epic is present only on open-ticket rows (t261004-19; see
+ *  epicFromGrantSource). */
 export interface RecentAction {
   at: number
   action: string
@@ -63,6 +65,24 @@ export interface RecentAction {
   permission: string
   session: string
   reason?: string
+  epic?: string
+}
+
+/**
+ * Parse the epic code out of a row's grant_source / reason text (t261004-19;
+ * C3 fail-soft). The source shape = the engine provenance key
+ * `open_ticket_epics.<code> @ <file>` (an allowed row's grant_source); a refused
+ * row's reason also names `epic <code>` (the engine refusal copy). Unparseable
+ * (absent / legacy row / shape drift) returns '' — never throws, never drops the
+ * row: a missing epic is a missing label on that row, not a row failure. */
+export function epicFromGrantSource(grantSource: string, reason: string): string {
+  const m = /\bopen_ticket_epics\.([a-z0-9][a-z0-9-]{0,40})\b/.exec(String(grantSource ?? ''))
+  if (m) return m[1]
+  // The reason fallback only accepts the engine's three exact named-refusal
+  // phrasings ("epic X is not on", "epic X has no epic file", "epic X already has")
+  // — a loose "epic X" would mistake English prose (e.g. "epic mentioned") for a code.
+  const r = /\bepic ([a-z0-9][a-z0-9-]{0,40})(?: is not on| has no epic file| already has)/.exec(String(reason ?? ''))
+  return r ? r[1] : ''
 }
 
 export type RecentActionsRead =
@@ -167,6 +187,12 @@ export function parseActionLine(line: string, seenIdems?: Set<string>): ActionLi
   if (decision === 'refused') {
     row.reason = typeof r.reason === 'string' && r.reason !== '' ? r.reason : 'refused (no reason recorded)'
   }
+  // t261004-19: an open-ticket row carries the epic (allowed = the grant_source
+  // shape; refused = named in the reason). Fail-soft: unparseable = no key set, the
+  // row renders as usual (C3).
+  const epic = epicFromGrantSource(typeof r.grant_source === 'string' ? r.grant_source : '',
+                                   row.reason ?? '')
+  if (epic !== '') row.epic = epic
   return { kind: 'action', row }
 }
 

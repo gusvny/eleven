@@ -45,6 +45,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import json
 import os
+import pathlib
 import re
 import time
 
@@ -129,6 +130,28 @@ NIGHT_TIER_MAX_MS = 7 * 24 * 3600 * 1000
 EXECUTOR_SESSIONS_MAX = 8
 EXECUTOR_SESSION_ID_MAX = 128
 
+# t261004-19: open-ticket is authorized per epic. Declaration keys: open_ticket_epics
+# (list of epic codes, host-only — the executor can never write it; the META_OP lock
+# stands) and open_ticket_cap (default 3). The judgment reads the declaration, not the
+# epic prose (the epic file format is unchanged; notes/epics/*.md stays prose for people).
+OPEN_TICKET_CAP_DEFAULT = 3
+OPEN_TICKET_EPICS_MAX = 64
+
+# t261004-19 "no self-widening": a ticket opened by the executor must not carry an
+# authority surface or a protected source of truth in its write set — a hit is a named
+# refusal at create time. If it can open tickets, it can open one that widens its own
+# grants; this closes that road at creation. Comparison is segment-based (directory
+# boundaries are honored) and catches relative and absolute spellings alike
+# (see authority_surface_violation).
+AUTHORITY_SURFACE_PATHS = (
+    "executor-grants.json",
+    "server/engine/executor_grants.py",
+    "server/engine/path_gates.py",
+    "server/roles/",
+    "server/projects.yaml",
+    "docs/design/",
+)
+
 # 调用方会话 id 的 env 读口（dsh 工具链注入 DSH_SESSION_ID；引擎 spawn 链注入
 # DSH_HEADLESS_SESSION——前者优先，任一在场即可与声明比对）。
 CALLER_SESSION_ENVS = ("DSH_SESSION_ID", "DSH_HEADLESS_SESSION")
@@ -211,7 +234,40 @@ def validate_declaration(doc: Any) -> Tuple[Dict[str, Any], Optional[str]]:
         if len(sessions) > EXECUTOR_SESSIONS_MAX:
             return {}, "executor_sessions 至多 %d 个会话 id（收到 %d）——缩表后再存" % (
                 EXECUTOR_SESSIONS_MAX, len(sessions))
-    out: Dict[str, Any] = {"version": DECL_VERSION, "grants": grants}
+    # t261004-19: open-ticket per-epic authorization — open_ticket_epics (epic code
+    # list) and open_ticket_cap (positive int, default 3). Host-only keys: the
+    # executor's write path is locked by META_OP; this layer only checks shape,
+    # fail-closed. Code shape mirrors shared.EPIC_CODE_RE (a code that drifts is caught
+    # by the judgment core's existence check — a listed-but-missing epic is a named
+    # refusal at ticket-start, never a silent bypass).
+    epics_in = doc.get("open_ticket_epics")
+    open_epics: List[str] = []
+    if epics_in is not None:
+        if not isinstance(epics_in, list) or \
+                any(not isinstance(c, str) or not c.strip() for c in epics_in):
+            return {}, ("open_ticket_epics must be a non-empty string array (epic code "
+                        "list; got %r)" % (epics_in,))
+        for c in epics_in:
+            code = c.strip()
+            if not shared.EPIC_CODE_RE.match(code):
+                return {}, ("open_ticket_epics entry %r is not a valid epic code "
+                            "(expected %s: lowercase letters/digits/hyphens)"
+                            % (code, shared.EPIC_CODE_RE.pattern))
+            if code not in open_epics:
+                open_epics.append(code)
+        if len(open_epics) > OPEN_TICKET_EPICS_MAX:
+            return {}, ("open_ticket_epics holds more than %d epic codes (got %d) — "
+                        "shrink the list before saving"
+                        % (OPEN_TICKET_EPICS_MAX, len(open_epics)))
+    cap_in = doc.get("open_ticket_cap")
+    cap = OPEN_TICKET_CAP_DEFAULT
+    if cap_in is not None:
+        if not isinstance(cap_in, int) or isinstance(cap_in, bool) or cap_in < 1:
+            return {}, ("open_ticket_cap must be a positive integer (the per-epic cap "
+                        "on open executor-started tickets; got %r)" % (cap_in,))
+        cap = int(cap_in)
+    out: Dict[str, Any] = {"version": DECL_VERSION, "grants": grants,
+                           "open_ticket_epics": open_epics, "open_ticket_cap": cap}
     if sessions:
         out["executor_sessions"] = sessions
     if night_ok is not None:
@@ -246,12 +302,21 @@ def load_declaration(key: str) -> Dict[str, Any]:
     return {"ok": True, "declared": True, "file": path, "decl": normalized,
             "grants": dict(normalized.get("grants") or {}),
             "night_tier": normalized.get("night_tier"),
-            "executor_sessions": list(normalized.get("executor_sessions") or [])}
+            "executor_sessions": list(normalized.get("executor_sessions") or []),
+            "open_ticket_epics": list(normalized.get("open_ticket_epics") or []),
+            "open_ticket_cap": int(normalized.get("open_ticket_cap") or OPEN_TICKET_CAP_DEFAULT)}
 
 
-def provenance_of(load: Dict[str, Any], grant_op: str, now_ms: int) -> Dict[str, Any]:
-    """「哪个声明键定了当前值」的溯源面（与 config-provenance 同纪律：透传不二次推导）。"""
-    if not load.get("ok"):
+def provenance_of(load: Dict[str, Any], grant_op: str, now_ms: int,
+                  epic: str = "") -> Dict[str, Any]:
+    """Provenance face: "which declaration key decided the current value" (same
+    discipline as config-provenance: pass through, never re-derive).
+
+    t261004-19: for grant_op=open-ticket with a target epic, the key value carries the
+    epic and the list key (open_ticket_epics.<code>) — this string flows into the
+    project action account's grant_source with the verdict, and the panel actions list
+    reads it to show "which epic, under which authorization"."""
+    if load.get("ok") is False:   # explicit not-ok (absent/malformed face); a normalized doc has no ok key = usable
         return {"file": load.get("file"), "keys": {grant_op: "no-usable-declaration (%s)" % load.get("kind")}}
     keys: Dict[str, str] = {}
     if (load.get("grants") or {}).get(grant_op) is True:
@@ -260,6 +325,12 @@ def provenance_of(load: Dict[str, Any], grant_op: str, now_ms: int) -> Dict[str,
     if isinstance(night, dict) and night.get("enabled") and float(night.get("until") or 0) > now_ms:
         keys.setdefault(grant_op, "night_tier.until=%s @ %s" % (night.get("until"), load.get("file")))
     keys.setdefault(grant_op, "not-declared (default: refuse) @ %s" % load.get("file"))
+    epic_s = str(epic or "").strip()
+    if grant_op == "open-ticket" and epic_s:
+        listed = epic_s in tuple(load.get("open_ticket_epics") or ())
+        keys["open_ticket_epics.%s" % epic_s] = (
+            "open_ticket_epics: %s is authorized @ %s" % (epic_s, load.get("file"))
+            if listed else "open_ticket_epics: %s is NOT on the list @ %s" % (epic_s, load.get("file")))
     return {"file": load.get("file"), "keys": keys}
 
 
@@ -307,7 +378,29 @@ def judge_core(channel: str, op: str, key: str,
     op_s = str(op or "")
     # op 双形接受：引擎写 op 名（映射）或授予面名（GRANT_OPS 原词）。
     grant_op = op_s if op_s in GRANT_OPS else ENGINE_OP_TO_GRANT.get(op_s)
+    lane_agent_env = (str(channel or "").strip() == "env"
+                      and str(lane_surface or "").strip() == shared.CALLER_SURFACE_LANE_AGENT)
     if not is_executor_channel(channel, lane_surface, declared_sessions, caller_session):
+        # t261004-19 defense (scenario A8): a declared-channel caller with a trusted
+        # session id, but a corrupt declaration on disk (malformed/unreadable,
+        # declared=True) — "declaration unreadable" must never degrade into "gate
+        # exempt" (breaking the declaration must not open the gate). Fail-closed named
+        # refusal. Exemption red lines unchanged: the lane-agent injection channel
+        # (env+surface) is untouched byte for byte; the cwd channel keeps the original
+        # is_executor_channel verdict; an absent declaration (declared=False) keeps the
+        # t261001-20 exemption semantics (zero regression for fixtures/light-lane).
+        cs = str(caller_session or "").strip()
+        if cs and not lane_agent_env and grant_op is not None:
+            peek = load_face(key)
+            if (not peek.get("ok")) and peek.get("declared") \
+                    and peek.get("kind") in ("malformed", "unreadable"):
+                return _refuse(
+                    "executor grant refused (corrupt declaration, fail-closed): the "
+                    "declaration of project %s is unreadable (%s) while the caller "
+                    "carries a trusted session id — a broken declaration never opens "
+                    "the gate; the host repairs the declaration in the panel Grants "
+                    "page first" % (key, peek.get("kind")),
+                    grant_op, peek, now_ms, audit_sink, key, op_s)
         return {"allowed": True, "why": "", "grant_op": grant_op, "enforced": False,
                 "provenance": None}
     # 元权限反锁：先于声明读取（声明缺席/畸形也锁得住），夜间档也解不开。
@@ -378,6 +471,8 @@ def session_matches_declaration(channel: str, lane_surface: str = "", key: str =
 def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      night_tier: Optional[Dict[str, Any]] = None,
                      executor_sessions: Optional[List[str]] = None,
+                     open_ticket_epics: Optional[List[str]] = None,
+                     open_ticket_cap: Optional[int] = None,
                      caller_channel: str = "",
                      lane_surface: str = "",
                      audit_sink: Callable[[str, Dict[str, Any]], None] = append_audit,
@@ -406,6 +501,17 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
         doc["night_tier"] = night_tier
     if executor_sessions is not None:
         doc["executor_sessions"] = executor_sessions
+    # t261004-19: the epic authorization list travels with the save (same semantics
+    # as executor_sessions: given -> move it, absent -> inherit the on-disk value);
+    # an explicit cap overrides (the validation layer defaults to 3).
+    if open_ticket_epics is not None:
+        doc["open_ticket_epics"] = open_ticket_epics
+    else:
+        _prev_epics, _ = _read_json(declaration_path(key)) if os.path.exists(declaration_path(key)) else (None, None)
+        if isinstance(_prev_epics, dict) and "open_ticket_epics" in _prev_epics:
+            doc["open_ticket_epics"] = _prev_epics["open_ticket_epics"]
+    if open_ticket_cap is not None:
+        doc["open_ticket_cap"] = open_ticket_cap
     normalized, verr = validate_declaration(doc)
     if verr:
         return {"saved": False, "reason": verr, "file": declaration_path(key)}
@@ -438,8 +544,221 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      "who": who[:64],
                      "from": prev_norm.get("grants") or {}, "to": normalized.get("grants") or {},
                      "night_tier": normalized.get("night_tier"),
-                     "executor_sessions": normalized.get("executor_sessions")})
+                     "executor_sessions": normalized.get("executor_sessions"),
+                     "open_ticket_epics": normalized.get("open_ticket_epics") or [],
+                     "open_ticket_cap": normalized.get("open_ticket_cap")})
     return {"saved": True, "file": path, "resolved": normalized}
+
+
+# ======================================================================================
+# t261004-19: open-ticket authorized per epic (judgment core, IO-injected pure
+# functions — the same discipline as judge()). The unit of authorization is the epic,
+# not the verb "open-ticket": grants.open-ticket stays the verb-level master switch,
+# open_ticket_epics is the epic list (host-only), open_ticket_cap is the per-epic cap
+# on open executor-started tickets. Every refusal names the exact failed condition
+# (no epic named / epic not authorized / a listed epic without its file / authority
+# surface in the write set / cap reached) and never collapses into a generic refusal.
+# ======================================================================================
+
+def normalize_ws_entry(entry: str) -> str:
+    """Normalize a write-set entry (pure): backslashes to slashes, strip leading "./"
+    segments, collapse duplicate slashes, and resolve "." and ".." segment by segment
+    (guards against the ./a/../b disguise — the segment compare misses hits when ".."
+    is left unresolved). Normalization only serves the segment compare; it never
+    touches the real disk (the comparison happens in memory)."""
+    s = str(entry or "").strip().replace("\\", "/")
+    while s.startswith("./"):
+        s = s[2:]
+    while "//" in s:
+        s = s.replace("//", "/")
+    parts: List[str] = []
+    for seg in s.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == ".." and parts and parts[-1] != "..":
+            parts.pop()
+            continue
+        parts.append(seg)
+    return "/".join(parts)
+
+
+def _path_parts_hit(norm: str, marker: str) -> bool:
+    """True when the marker ('a/b/c' or 'a/b/') appears at any depth of norm as whole
+    path segments (directory-boundary sensitive: 'server/roles/' must not match
+    'server/roleset/...'; relative, absolute and deep entries are all covered)."""
+    m_parts = [p for p in marker.split("/") if p]
+    parts = norm.split("/")
+    n = len(m_parts)
+    for i in range(len(parts) - n + 1):
+        if parts[i:i + n] == m_parts:
+            return True
+    return False
+
+
+def authority_surface_violation(write_set: Any) -> Optional[str]:
+    """Does the write set carry an authority surface / a protected source of truth
+    (pure)? On a hit, returns the offending entry verbatim; otherwise None. Consumer =
+    judge_open_ticket_core (the executor ticket-start create face)."""
+    if not isinstance(write_set, (list, tuple)):
+        return None
+    for raw in write_set:
+        entry = str(raw or "").strip()
+        if not entry:
+            continue
+        norm = normalize_ws_entry(entry)
+        for marker in AUTHORITY_SURFACE_PATHS:
+            if _path_parts_hit(norm, marker):
+                return ("%s hits the protected surface %s — a ticket opened by the "
+                        "executor must not carry an authority-surface write set"
+                        % (entry, marker.rstrip("/")))
+    return None
+
+
+def executor_started_ids(lines: Any) -> set:
+    """Filter the executor-started ticket ids out of action-account row texts (pure;
+    the file IO lives in read_executor_started_ids). Row schema =
+    executor_actions.record_executor_action: only op=ticket-start with
+    decision=allowed counts. Malformed rows are skipped, never raised."""
+    out: set = set()
+    for line in lines or ():
+        try:
+            doc = json.loads(str(line or ""))
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("op") == "ticket-start" and doc.get("decision") == "allowed":
+            tid = str(doc.get("ticket") or "").strip()
+            if tid:
+                out.add(tid)
+    return out
+
+
+def read_executor_started_ids(key: str) -> set:
+    """Real IO: read this project's action account (same source as
+    executor_actions.actions_path) and return the set of executor-started ticket ids.
+    Unreadable = empty set (an absent ledger means the executor has not opened a
+    ticket in this project yet)."""
+    try:
+        import executor_actions
+        path = executor_actions.actions_path(str(key or ""))
+        with open(path, "r", encoding="utf-8") as f:
+            return executor_started_ids(f)
+    except (OSError, ValueError):
+        return set()
+
+
+def judge_open_ticket_core(load: Dict[str, Any], epic: str, write_set: Any,
+                           open_count: int, epic_file_exists: bool,
+                           now_ms: int, key: str,
+                           audit_sink: Optional[Callable[[str, Dict[str, Any]], None]] = append_audit,
+                           op: str = "ticket-start") -> Dict[str, Any]:
+    """Open-ticket epic-level judgment core (pure; precondition: the verb-level
+    switch grants.open-ticket already passed — the caller is client.py's gate, entered
+    only when the first verdict is enforced).
+
+    Fixed order, one name per refusal: no epic named -> epic not on the list -> a
+    listed epic without its file -> authority surface in the write set -> cap reached.
+    The allowed verdict carries the epic and the provenance key (the epic is recorded
+    into the action account)."""
+    grant_op = "open-ticket"
+    epic_s = str(epic or "").strip()
+    open_epics = tuple((load or {}).get("open_ticket_epics") or ())
+    cap = int((load or {}).get("open_ticket_cap") or OPEN_TICKET_CAP_DEFAULT)
+
+    def _refuse(why: str) -> Dict[str, Any]:
+        if audit_sink is not None:
+            audit_sink(str(key or ""), {"at": int(now_ms), "action": "refuse",
+                                        "project": str(key or ""), "op": op,
+                                        "grant_op": grant_op, "epic": epic_s,
+                                        "why": why[:500]})
+        return {"allowed": False, "why": why, "grant_op": grant_op, "epic": epic_s,
+                "provenance": provenance_of(load, grant_op, now_ms, epic_s)}
+
+    if not epic_s:
+        return _refuse(
+            "executor ticket-start refused (open-ticket is authorized per epic, "
+            "261004): ticket-start must name an epic (--epic) — a ticket without an "
+            "epic is outside every authorization; add the target epic to "
+            "open_ticket_epics in the host panel Grants page ('Open tickets in these "
+            "epics') and create the ticket with the epic")
+    if epic_s not in open_epics:
+        return _refuse(
+            "executor ticket-start refused (open-ticket is authorized per epic, "
+            "261004): epic %s is not on project %s's open_ticket_epics list "
+            "(current list: %s) — an unauthorized epic stays closed; granting is a "
+            "host action (panel Grants page, 'Open tickets in these epics')"
+            % (epic_s, key, ", ".join(open_epics) if open_epics else "(empty — no epic is authorized yet)"))
+    if not epic_file_exists:
+        return _refuse(
+            "executor ticket-start refused (open-ticket is authorized per epic, "
+            "261004): open_ticket_epics entry epic %s has no epic file "
+            "(notes/epics/%s.md does not exist) — a stale list entry neither opens a "
+            "ticket nor is silently skipped; the host fixes the list first (drop the "
+            "stale entry or restore the file)" % (epic_s, epic_s))
+    bad = authority_surface_violation(write_set)
+    if bad:
+        return _refuse(
+            "executor ticket-start refused (no self-widening): the write set carries "
+            "an authority surface / protected source of truth — %s. Being able to "
+            "open tickets is not the power to widen one's own grants (host ruling, "
+            "261004)" % bad)
+    if int(open_count) >= cap:
+        return _refuse(
+            "executor ticket-start refused (per-epic cap): epic %s already has %d "
+            "open ticket(s) started by the executor, at the cap of %d "
+            "(open_ticket_cap, default %d) — close out the running tickets first, or "
+            "have the host raise open_ticket_cap in the declaration"
+            % (epic_s, int(open_count), cap, OPEN_TICKET_CAP_DEFAULT))
+    return {"allowed": True, "why": "", "grant_op": grant_op, "epic": epic_s,
+            "enforced": True,
+            "provenance": _open_ticket_provenance(load, epic_s, now_ms)}
+
+
+def _open_ticket_provenance(load: Dict[str, Any], epic_s: str, now_ms: int) -> Dict[str, Any]:
+    """Provenance face for an allowed open-ticket: the grant_op key value carries the
+    epic (this string flows into the action account's grant_source — "which
+    authorization" is answerable verbatim, and the panel's epic label parses the same
+    source), plus a dedicated open_ticket_epics.<code> key."""
+    prov = provenance_of(load, "open-ticket", now_ms, epic_s)
+    keys = prov.get("keys") or {}
+    base = keys.get("open-ticket", "")
+    keys["open-ticket"] = "open_ticket_epics.%s @ %s (via %s)" % (
+        epic_s, load.get("file"), base)
+    prov["keys"] = keys
+    return prov
+
+
+def judge_open_ticket(load: Dict[str, Any], key: str, epic: str, write_set: Any,
+                      open_count: int, now_ms: Optional[int] = None) -> Dict[str, Any]:
+    """Real IO wrapper (consumed by client.py's gate): the epic file existence check
+    lives here (shared.resolve_epics_dir project anchor, SANDBAR_EPICS_DIR wins);
+    open_count comes from the caller (the Temporal listing face — only client can
+    connect). An unreadable declaration = fail-closed refusal."""
+    ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    # Two load shapes are accepted: load_declaration's ok face (absent/malformed ->
+    # fail-closed), or validate_declaration's normalized doc (no ok key = usable face).
+    load_ok = load.get("ok", True)
+    if not load_ok:
+        return judge_open_ticket_core(load, epic, write_set, open_count, False, ms, key)
+    epic_s = str(epic or "").strip()
+    exists = False
+    if epic_s:
+        try:
+            epics_dir = shared.resolve_epics_dir(str(key or ""))
+            exists = (pathlib.Path(epics_dir) / (epic_s + ".md")).is_file()
+        except (ValueError, OSError):
+            # Fallback anchor for an unregistered key / a broken registry:
+            # <projects_root>/<key>/notes/epics (the per-key project home — same root
+            # as the declaration; isolated/fixture projects judge file existence here,
+            # matching the integration scenario's resolver fallback chain). A fallback
+            # miss = nonexistent -> refusal.
+            try:
+                fallback = pathlib.Path(shared.perkey_projects_root()) / str(key or "") / "notes" / "epics"
+                exists = (fallback / (epic_s + ".md")).is_file()
+            except (ValueError, OSError):
+                exists = False
+    return judge_open_ticket_core(load, epic_s, write_set, open_count, exists, ms, key)
 
 
 # ======================================================================================

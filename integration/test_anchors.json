@@ -959,6 +959,11 @@
       "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261004_25_test_face_gate.py": {
+      "anchor": "behaviour",
+      "note": "developer L1: predicate truth table (t261004-25)",
+      "sync_path": ""
+    },
     "server/engine/tests/test_template_topology.py": {
       "anchor": "behaviour",
       "note": "",
@@ -2386,26 +2391,6 @@
       "note": "",
       "sync_path": ""
     },
-    "integration/t261004-25/sc_t26100425_test_face_gate.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/t261004-25/sc_t26100425_quarantine_recover.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/t261004-25/sc_t26100425_mergecheck_carveout.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/t261004-25/sc_t26100425_anchor_presence.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
     "integration/t260916-19/sc_t26091619_disposal_matrix.py": {
       "anchor": "behaviour",
       "note": "",
@@ -3336,6 +3321,16 @@
       "note": "real browser journey",
       "sync_path": ""
     },
+    "integration/t261004-19/sc_open_ticket_epic_gate_verdicts.py": {
+      "anchor": "behaviour",
+      "note": "drives the public gate funnel client._executor_grant_gate with the open-ticket context: named verdicts, per-epic cap, no-self-widening, audit rows",
+      "sync_path": ""
+    },
+    "integration/t261004-19/sc_open_ticket_panel_section.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser: Grants page epic-authorization section, audited save, actions epic face",
+      "sync_path": ""
+    },
     "integration/t261004-20/sc_rewritten_decl_tests_lane_green.py": {
       "anchor": "behaviour",
       "note": "",
@@ -3374,6 +3369,26 @@
     "integration/t261004-24/sc_copy_language_per_diff_gate.py": {
       "anchor": "behaviour",
       "note": "fault-injection brake: plants copy violations, asserts the L15 gate bites",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_anchor_presence.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_mergecheck_carveout.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_quarantine_recover.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_test_face_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
       "sync_path": ""
     },
     "integration/tests/test_fixture_reclaim.mjs": {
