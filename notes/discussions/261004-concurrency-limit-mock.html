@@ -126,8 +126,16 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .ep .n{margin-left:auto;color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
 .ep .go{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}
 /* 泳道图（拓扑驱动）：节点 + 返工弧 + 轮次徽标 + 人门虚线圈 */
+.spec{font-size:12.5px;line-height:1.5;margin:0 0 9px}
+.acc{margin:0;padding-left:16px;font-size:12px}
+.acc li{margin:2px 0}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.chip2{border:1px solid var(--line);background:var(--panel2);border-radius:6px;padding:1px 7px;font-size:10.5px;font-family:ui-monospace,monospace;color:var(--muted)}
 .lane{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px 4px;margin:0 0 var(--cardgap);overflow:hidden}
 .lane svg{display:block;width:100%;height:auto}
+.lane .lhead{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);padding:0 2px 4px}
+.lane .lhead b{font-size:12px;color:var(--fg)}
+.lane .lhead .lsum{margin-left:auto;font-family:ui-monospace,monospace;font-size:10px}
 .lane .lgd{display:flex;gap:12px;color:var(--muted);font-size:10px;padding:0 2px 2px}
 .lane .lgd i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 /* 票详情：住主区（中栏），右栏 chat 永不被占用 */
@@ -402,53 +410,75 @@ const LANE_META = {
 };
 const REVISIONS = [['merge_check','implement','rework ×1'],['review_plan','create_plan','rework ×1']];
 const LANE_SHORT = {
-  create_plan:['create','plan'], review_plan:['review','plan'], implement:['implement',''],
-  design_integration_tests:['design','tests'], ui_evidence:['ui','evidence'],
-  run_integration_tests:['run','tests'], arbitrate:['arbitrate',''],
-  acceptance_walkthrough:['walk','through'], merge_check:['merge','check'], merge:['merge',''],
+  create_plan:'create', review_plan:'review', implement:'implement',
+  design_integration_tests:'design', ui_evidence:'ui evid.',
+  run_integration_tests:'run tests', arbitrate:'arbitrate',
+  acceptance_walkthrough:'walk', merge_check:'merge chk', merge:'merge',
 };
+// 泳道图（拓扑驱动）：一条轨道 + 穿在轨道上的节点。去掉返工虚线弧（改由轮次徽标 ×n 表达）。
 function laneMap(t){
-  const at = stepIdx(t), W = 62, GAP = 8, X0 = 10, ROW = 78, H = 34, VH = ROW + H + 26;
+  const at = stepIdx(t), W = 66, GAP = 6, X0 = 12, TRACK = 62, PH = 26;
   const cx = i => X0 + i * (W + GAP) + W / 2;
+  const total = STEPS.length * W + (STEPS.length - 1) * GAP;
+  const upto = cx(at);
   const nodes = STEPS.map((s, i) => {
     const m = LANE_META[s] || {kind:'agent',role:'-',min:0};
-    const lab = LANE_SHORT[s] || [s, ''];
     const done = i < at, now = i === at;
     const skipped = m.skipped && !now && !DONE_UI(t);
-    const fill = skipped ? 'var(--panel2)' : now ? (m.kind === 'human' ? 'var(--warn-soft)' : 'var(--accent-soft)') : done ? 'var(--panel)' : 'var(--panel2)';
+    const x = X0 + i * (W + GAP), y = TRACK - PH / 2;
+    const fill = skipped ? 'var(--bg)' : now ? (m.kind === 'human' ? 'var(--warn-soft)' : 'var(--accent-soft)') : done ? 'var(--panel)' : 'var(--bg)';
     const stroke = skipped ? 'var(--line)' : now ? (m.kind === 'human' ? 'var(--amber)' : 'var(--accent-line)') : done ? 'var(--green)' : 'var(--line)';
-    const dash = m.kind === 'human' ? ' stroke-dasharray="4 3"' : skipped ? ' stroke-dasharray="2 3"' : '';
-    const x = X0 + i * (W + GAP);
-    const badge = m.rounds ? '<text x="' + (x + W - 2) + '" y="' + (ROW - 4) + '" text-anchor="end" font-size="9" fill="var(--muted)">×' + m.rounds + '</text>' : '';
-    const warn = m.blocked ? '<text x="' + (x + 2) + '" y="' + (ROW - 4) + '" font-size="9" fill="var(--amber)">⚠</text>' : '';
-    const dur = skipped ? 'skipped' : ((done || now) && m.min) ? m.min + 'm' : '—';
-    const sub = now && m.kind === 'human' ? 'waiting for you' : (m.role + ' · ' + dur);
-    return '<g>'
-      + '<rect x="' + x + '" y="' + ROW + '" width="' + W + '" height="' + H + '" rx="6" fill="' + fill + '" stroke="' + stroke + '"' + dash + '/>'
-      + '<text x="' + cx(i) + '" y="' + (ROW + 14) + '" text-anchor="middle" font-size="9" fill="var(--fg)">' + lab[0] + '</text>'
-      + (lab[1] ? '<text x="' + cx(i) + '" y="' + (ROW + 25) + '" text-anchor="middle" font-size="9" fill="var(--fg)">' + lab[1] + '</text>' : '')
-      + '<text x="' + cx(i) + '" y="' + (ROW + H + 11) + '" text-anchor="middle" font-size="8" fill="' + (now ? 'var(--amber)' : 'var(--muted)') + '">' + sub + '</text>'
-      + badge + warn + '</g>';
+    const dash = skipped ? ' stroke-dasharray="2 3"' : '';
+    const rounds = m.rounds ? '<text x="' + (x + W - 3) + '" y="' + (y - 4) + '" text-anchor="end" font-size="8" fill="var(--muted)">×' + m.rounds + '</text>' : '';
+    const flag = m.blocked ? '<circle cx="' + (x + 6) + '" cy="' + (TRACK - 4) + '" r="2.2" fill="var(--amber)"><title>' + m.blocked + '</title></circle>' : '';
+    const dur = skipped ? 'skipped' : now ? 'now' : done ? (m.min + 'm') : '—';
+    const durFill = now ? 'var(--blue)' : 'var(--faint)';
+    const caret = now ? '<path d="M' + cx(i) + ' ' + (TRACK + PH / 2 + 2) + ' l-4 -5 h8 z" fill="' + (m.kind === 'human' ? 'var(--amber)' : 'var(--accent-line)') + '"/>' : '';
+    return '<g>' + rounds
+      + '<rect x="' + x + '" y="' + y + '" width="' + W + '" height="' + PH + '" rx="13" fill="' + fill + '" stroke="' + stroke + '"' + dash + '/>'
+      + '<text x="' + cx(i) + '" y="' + (TRACK + 3.5) + '" text-anchor="middle" font-size="9.5" fill="var(--fg)">' + (LANE_SHORT[s] || s) + '</text>'
+      + flag + caret
+      + '<text x="' + cx(i) + '" y="' + (TRACK + PH / 2 + 18) + '" text-anchor="middle" font-size="8.5" fill="' + durFill + '">' + dur + '</text>'
+      + '</g>';
   }).join('');
-  let conn = '';
-  for (let i = 0; i < STEPS.length - 1; i++) conn += '<path d="M' + (X0 + i * (W + GAP) + W) + ' ' + (ROW + H / 2) + ' H' + (X0 + (i + 1) * (W + GAP)) + '" stroke="var(--line)" stroke-width="1.5" marker-end="url(#ar)"/>';
-  const arcs = REVISIONS.map((r, k) => {
-    const a = STEPS.indexOf(r[0]), b = STEPS.indexOf(r[1]);
-    const y = 12 + k * 13;
-    return '<path d="M' + cx(a) + ' ' + (ROW - 3) + ' C' + cx(a) + ' ' + y + ', ' + cx(b) + ' ' + y + ', ' + cx(b) + ' ' + (ROW - 3) + '" stroke="var(--amber)" stroke-width="1.2" fill="none" stroke-dasharray="4 3" marker-end="url(#ar2)"/>'
-      + '<text x="' + ((cx(a) + cx(b)) / 2) + '" y="' + (y + 3) + '" text-anchor="middle" font-size="8" fill="var(--amber)">' + r[2] + '</text>';
-  }).join('');
-  return '<div class="lane"><div class="lgd">'
-    + '<span><i style="background:var(--green)"></i>done</span><span><i style="background:var(--accent-line)"></i>now</span>'
-    + '<span><i style="background:var(--panel2);border:1px solid var(--line)"></i>pending / skipped</span>'
-    + '<span><i style="background:var(--amber)"></i>rework &amp; human gate</span></div>'
-    + '<svg viewBox="0 0 720 ' + VH + '" preserveAspectRatio="xMinYMin meet">'
-    + '<defs><marker id="ar" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--line)"/></marker>'
-    + '<marker id="ar2" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--amber)"/></marker></defs>'
-    + arcs + conn + nodes + '</svg></div>';
+  const viewW = total + X0 * 2, viewH = TRACK + PH / 2 + 28;
+  return '<div class="lane">'
+    + '<div class="lhead"><b>' + cur + '</b><span>development lane · 10 stages</span>'
+    + '<span class="lsum">done ' + at + ' · now 1 · left ' + (STEPS.length - at - 1) + '</span></div>'
+    + '<svg viewBox="0 0 ' + viewW + ' ' + viewH + '" preserveAspectRatio="xMinYMin meet">'
+    + '<line x1="' + X0 + '" y1="' + TRACK + '" x2="' + (X0 + total) + '" y2="' + TRACK + '" stroke="var(--line)" stroke-width="2" stroke-linecap="round"/>'
+    + '<line x1="' + X0 + '" y1="' + TRACK + '" x2="' + upto + '" y2="' + TRACK + '" stroke="var(--accent-line)" stroke-width="2" stroke-linecap="round"/>'
+    + nodes + '</svg></div>';
 }
+// 票面：要它干什么（spec）、验收口径、写集、原始请求（逐字）
+const SPEC = {
+  't261004-18': { spec:'Panel write endpoints must carry identity: the console token gate covers plugin routes, and the writer name is not supplied by the caller. A refused write changes nothing on disk.',
+    acc:['An unauthenticated write is refused with 401 and writes nothing.','The writer name comes from the authenticated identity; a forged name is recorded as a mismatch.','Authority writes pass the engine META_OP judgment.','The panel page still loads and answering still works from the console.'],
+    ws:['server/plugins/executor-panel/','server/engine/executor_grants.py','server/engine/client.py'],
+    req:'写端点的身份面：token 闸要覆盖插件路由，by 不能由调用方自填' },
+  't261004-17': { spec:'A request must be answerable: the mirror keeps options and the default action, a multi-question ask stays multi-question, and the card lets you answer without typing prose.',
+    acc:['Options are visible without expanding, and one click answers.','Each question of a multi-question ask is answerable on its own.','A dismissal is not an approval and does not re-ask.'],
+    ws:['server/plugins/executor-panel/','server/session_charter.md'],
+    req:'这么写我能回吗' },
+  't261004-25': { spec:'Inspection period 20261004 of the integration-tests instance: run the suite, inspect the change surface, and report what is new.',
+    acc:['The suite receipt is recorded in the period ledger.','Every finding carries path, line and a verbatim quote.','A period with no change writes one decision row, not a report.'],
+    ws:['report only: this ticket writes no repository file'],
+    req:'每天跑一次，看看这期有什么新病灶' },
+  't261004-22': { spec:'An intermittent engine test blocks any ticket at merge_check and looks like a code fault: wait for the condition instead of a fixed sleep, and name the reason on timeout.',
+    acc:['No fixed sleep gates an assertion.','A timeout names the condition that did not hold.','Five consecutive runs are green under load.'],
+    ws:['server/engine/tests/'], req:'抖动会随机拦每一张票' },
+};
 const DONE_UI = t => true;   // mock：本票是 UI 票，ui_evidence 段真跑过
 
+function specBlock(t){
+  const d = SPEC[t.id] || { spec:'(spec not shown in this mock)', acc:[], ws:[], req:'' };
+  return '<div class="panelbox"><h3>Spec</h3>'
+    + '<p class="spec">' + d.spec + '</p>'
+    + (d.acc.length ? '<ul class="acc">' + d.acc.map(a => '<li>' + a + '</li>').join('') + '</ul>' : '')
+    + '<div class="chips">' + d.ws.map(w => '<span class="chip2">' + w + '</span>').join('') + '</div>'
+    + (d.req ? '<details><summary>Original request (verbatim)</summary><div class="detail">' + d.req + '</div></details>' : '')
+    + '</div>';
+}
 function ticketView(){
   const t = openId ? TICKET(openId) : null;
   if (!t) return '<button class="back" onclick="goBack()">← Back</button><div class="vhead"><h1>Ticket</h1></div>';
@@ -477,6 +507,7 @@ function ticketView(){
     + '<span class="state ' + stateCls + '">' + label + '</span></div>'
     + '<div class="acts"><button class="pri">Sign</button><button>Send back</button><button>Retry check</button><button>Pause</button></div>'
     + decide
+    + specBlock(t)
     + laneMap(t)
     + '<div class="two">'
     + '<div><div class="panelbox"><h3>Timeline</h3><ul class="tl">' + timeline + '</ul></div>'
