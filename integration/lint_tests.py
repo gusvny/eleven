@@ -44,6 +44,14 @@ practice:
         on engine tests — an undeclared snapshot assertion (label without marker,
         or marker without label) is refused; the marker names the file to update
         when the production value changes (sync_path in the manifest).
+  L19 runtime-state location (host order 261004): a project ledger file
+        (requests.jsonl) under a .sandbar/projects/ tree INSIDE the repo — other
+        than the repo's own .sandbar/ evidence area — is an error. Measured fault
+        (261004): the delivery activity resolved a RELATIVE ledger root, wrote
+        server/engine/.sandbar/projects/sandbar/requests.jsonl, and returned
+        ok:true — the writer declared success, the reader (instance projects
+        root) saw nothing. .gitignore hides such a path from git status, so the
+        tree needs its own probe: a hidden path is not an absent path.
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
@@ -1280,6 +1288,49 @@ def lint_snapshot_discipline():
         ok("L18 快照纪律：标记与清单标签成对（%d 个已申报快照测试）" % len(marked))
 
 
+# ---- L19 runtime-state location (host order 261004) -------------------------
+
+#: Directories never walked for L19: VCS metadata, lane worktrees (each is a
+#: separate working tree with its own root), dependencies, caches, build output.
+L19_SKIP_DIRS = {".git", ".lane", "node_modules", ".venv", "__pycache__",
+                 "dist", "build", ".pytest_cache"}
+#: The only sanctioned home for runtime state inside the repo tree.
+L19_SANCTIONED_PREFIX = ".sandbar/"
+#: The instance projects root tree, as it appears when a relative root is resolved.
+L19_LEDGER_MARK = "/.sandbar/projects/"
+
+
+def lint_runtime_state_location():
+    """L19 (host order 261004): runtime state must not land inside the repo tree.
+
+    Fault on record (261004): the engine-side delivery activity resolved a
+    relative ledger root (the worker env was never forwarded), appended
+    server/engine/.sandbar/projects/sandbar/requests.jsonl, and reported ok:true.
+    The reader — the panel and the watchdog, which use the instance projects root
+    — never saw the row. .gitignore hides that path from `git status`, so this
+    probe is the tree's own detector: only the repo's .sandbar/ evidence area may
+    hold a projects tree. A hidden path is not an absent path.
+    """
+    hits = []
+    for root, dirs, files in os.walk(str(REPO)):
+        dirs[:] = [d for d in dirs if d not in L19_SKIP_DIRS]
+        rel_root = os.path.relpath(root, str(REPO)).replace(os.sep, "/")
+        for name in files:
+            if name != "requests.jsonl":
+                continue
+            rel = name if rel_root == "." else rel_root + "/" + name
+            if rel.startswith(L19_SANCTIONED_PREFIX):
+                continue
+            if L19_LEDGER_MARK not in "/" + rel:
+                continue
+            hits.append(rel)
+    if hits:
+        err("L19 运行时状态落进仓内（写面解析出相对根；实例根之外只许仓根 .sandbar/ 证据区）：%s"
+            % hits[:6])
+    else:
+        ok("L19 运行时状态位置：仓内无错位账本（写面须落实例根，不落 cwd）")
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -1303,6 +1354,7 @@ def main():
     lint_anchor_manifest()
     lint_home_paths()
     lint_snapshot_discipline()
+    lint_runtime_state_location()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0
