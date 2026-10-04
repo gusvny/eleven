@@ -215,7 +215,12 @@ def test_recovery_idempotent(tmp_path):
     notes = []
     _aa()._recover_quarantined_test_face(tmp_path, "t261004-18", notes)
     _aa()._recover_quarantined_test_face(tmp_path, "t261004-18", notes)
-    assert len(notes) == 1  # second round already recovered: zero action, zero new note
+    # t261004-34: the second round performs zero action (no restore, archive
+    # untouched) and names the skip once via the processed-path ledger — the
+    # deliberate-removal intent is respected visibly, never a silent no-op.
+    assert not any(n.startswith("recovered:") for n in notes[1:])
+    assert sum(n.startswith("recovery skip (path already in processed-path "
+                            "ledger") for n in notes) == 1
 
 
 def test_recovery_missing_archive_named_skip(tmp_path):

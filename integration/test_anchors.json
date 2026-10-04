@@ -994,14 +994,19 @@
       "note": "",
       "sync_path": ""
     },
-    "server/engine/tests/test_t261004_25_test_face_gate.py": {
-      "anchor": "behaviour",
-      "note": "developer L1: predicate truth table (t261004-25)",
-      "sync_path": ""
-    },
     "server/engine/tests/test_t261004_27_executor_delivery.py": {
       "anchor": "behaviour",
       "note": "t261004-27: delivery face refusal matrix + identity survival are the file's asserted behaviour",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_25_test_face_gate.py": {
+      "anchor": "behaviour",
+      "note": "developer L1: predicate truth table (t261004-25; t261004-34 updated the idempotence pin to the named processed-path-ledger skip)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_34_recovery_idempotent.py": {
+      "anchor": "behaviour",
+      "note": "t261004-34: recovery idempotence truth tables (developer L1, landed with implement)",
       "sync_path": ""
     }
   },
@@ -3440,6 +3445,26 @@
       "anchor": "behaviour",
       "note": "fault-injection brake: -23 wrap shape bites the statement-level surrogate predicate; planted L7 mention probes bite the term gate",
       "sync_path": ""
+    },
+    "integration/t261004-34/sc_copy_language_comment_blind_spot.py": {
+      "anchor": "behaviour",
+      "note": "wired per-diff gate face: whole-line comments fire, marker exemptions hold (tmp-repo probe, no shared-tree writes)",
+      "sync_path": ""
+    },
+    "integration/t261004-34/sc_quarantine_recovery_idempotent.py": {
+      "anchor": "behaviour",
+      "note": "multi-batch idempotence + deliberate-removal respect of the quarantine recovery (real lane fixture, direct settle)",
+      "sync_path": ""
+    },
+    "integration/t261004-34/sc_no_concurrent_shared_tree_planting.py": {
+      "anchor": "source-text",
+      "note": "registry/source pin: shared-tree planters may only run from the exclusive pool",
+      "sync_path": ""
+    },
+    "integration/t261004-34/sc_lint_battery_wired_into_code_lane.py": {
+      "anchor": "contract",
+      "note": "verify.yaml lanes.code.checks actively wires integration/lint_tests.py (real YAML parse; commented-out is not wired)",
+      "sync_path": "verify.yaml"
     }
   }
 }

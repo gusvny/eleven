@@ -165,7 +165,15 @@ def lint_diff(diff_text: str, emit, exempt_out):
             marker = MARKER_RE.search(prev_carry[path])
             exempt_out.append("%s:%d copy-lang-allow:%s (marker on line above)"
                               % (path, lineno, marker.group(1)))
-        elif _in_scope(path) and not _is_comment_only(text, path) and CJK_RE.search(text):
+        # Whole-line comments count too (t261004-34, executor -0002): the host
+        # order 261004 puts code comments in the English column, so a comment-only
+        # added line fires like any other copy line. The docstring promises this;
+        # dropping the old `not _is_comment_only` term is the tighten — it can
+        # never loosen the gate. `_strip_comment`/`_is_comment_only` stay: the
+        # marker-carry logic below still uses them, so `copy-lang-allow` on the
+        # same line or the line directly above keeps exempting legitimately
+        # exempt lines (including comment-only ones).
+        elif _in_scope(path) and CJK_RE.search(text):
             emit("%s:%d new copy carries CJK text: %s" % (path, lineno, text.strip()[:120]))
         prev_carry[path] = text if _is_comment_only(text, path) or marker_here else None
 

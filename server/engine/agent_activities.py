@@ -2537,6 +2537,78 @@ def _remediate_unauthorized_violations(
     return handled, unhandled
 
 
+def _load_recovered_paths_ledger(cwd: Path, notes: List[str]):
+    """t261004-34 (-0004): the processed-path ledger of the quarantine area.
+
+    File: `<cwd>/.sandbar/quarantine/recovered-paths.json` =
+    `{"paths": {<relpath>: {"ticket": ..., "recovered_ts": ms}}}`. Once a path is
+    in the ledger the recovery never auto-restores it again — that is the
+    explicit-intent face: after the lane deliberately removes a recovered file,
+    no later unmarked batch can resurrect it (observed restore->delete->restore
+    loop on t261004-18: five historical batches, only the consumed one was ever
+    marked, so every settle restored from the next one).
+
+    Fail direction: malformed/unreadable ledger -> the WHOLE recovery is skipped
+    this round with a named note. Skipping means "do not restore", the direction
+    that respects removals; restoring while the ledger state is untrusted could
+    resurrect deliberately removed files. Never a silent no-op — every skip is
+    named in notes.
+    """
+    ledger_path = lane_dot_path(cwd, "quarantine", "recovered-paths.json",
+                                create=False)
+    if not ledger_path.is_file():
+        return {"paths": {}}
+    try:
+        data = json.loads(ledger_path.read_text(encoding="utf-8"))
+        paths = data.get("paths") if isinstance(data, dict) else None
+        if isinstance(paths, dict):
+            return {"paths": paths, "_file": ledger_path}
+        notes.append("recovery skip (processed-path ledger has no paths object, "
+                     "whole recovery held back this round): %s"
+                     % ledger_path.relative_to(cwd))
+        return None
+    except (OSError, ValueError) as e:
+        notes.append("recovery skip (processed-path ledger unreadable, whole "
+                     "recovery held back this round — a removal must win over an "
+                     "untrusted restore): %s: %s"
+                     % (ledger_path.relative_to(cwd), str(e)[:120]))
+        return None
+
+
+def _mark_recovered_everywhere(cwd: Path, f: str, ts: int) -> int:
+    """Mark recovered=true on EVERY manifest item carrying path `f` across ALL
+    `unauth-*/manifest.json` batches (t261004-34, executor -0004). The t261004-25
+    recovery marked only the item of the batch it consumed, so the same path in
+    the next unmarked batch came back on every settle. Returns the number of
+    manifest files whose marking changed. Per-file errors are tolerated with a
+    named print, never raised: the ledger, not the marks, is the authority."""
+    qroot = lane_dot_path(cwd, "quarantine", create=False)
+    if not qroot.is_dir():
+        return 0
+    changed = 0
+    for mf in sorted(qroot.glob("unauth-*/manifest.json")):
+        try:
+            m = json.loads(mf.read_text(encoding="utf-8"))
+            items = m.get("items") if isinstance(m, dict) else None
+            if not isinstance(items, list):
+                continue
+            dirty = False
+            for it in items:
+                if (isinstance(it, dict) and it.get("action") == "moved"
+                        and it.get("path") == f and not it.get("recovered")):
+                    it["recovered"] = True
+                    it["recovered_ts"] = ts
+                    dirty = True
+            if dirty:
+                mf.write_text(json.dumps(m, ensure_ascii=False, indent=2) + "\n",
+                              encoding="utf-8")
+                changed += 1
+        except (OSError, ValueError) as e:
+            print("[recovery] manifest re-mark skipped (%s): %s"
+                  % (mf, str(e)[:120]), flush=True)
+    return changed
+
+
 def _recover_quarantined_test_face(cwd: Path, ticket_id: str, notes: List[str]) -> None:
     """t261004-25 (2): move ticket-test-face files back from the quarantine area to
     their original paths.
@@ -2551,6 +2623,17 @@ def _recover_quarantined_test_face(cwd: Path, ticket_id: str, notes: List[str]) 
     file, mark the manifest item with recovered=true/recovered_ts, and name the
     recovery in a note (what, from where, why).
 
+    t261004-34 (executor -0004, idempotence): a path that was quarantined N times
+    has N batches; marking only the consumed batch made every settle restore the
+    path again from the next unmarked batch, so a deliberate removal was
+    impossible. Two mechanisms close it: (1) on restore, recovered=true is marked
+    on every manifest item with the same path across ALL historical batches
+    (_mark_recovered_everywhere); (2) a processed-path ledger
+    (.sandbar/quarantine/recovered-paths.json) records each restored path, and a
+    ledgered path is never auto-restored again (named skip) — an intentional
+    removal is a distinct, explicit intent the recovery respects. A later
+    quarantine of the same path is a new human face, not an automatic restore.
+
     Fault face (external-input discipline; every skip is named, never silent):
       - manifest unreadable / malformed JSON / missing items list -> named skip,
         batch left as-is;
@@ -2561,16 +2644,23 @@ def _recover_quarantined_test_face(cwd: Path, ticket_id: str, notes: List[str]) 
         moved automatically — mirrors the remediation matrix's "deletions and
         staged states stay human" stance, review comment 4 of t261004-25);
       - original path occupied -> named skip (no overwrite, left for human check);
+      - path already in the processed-path ledger -> named skip (intentional-
+        removal / already-recovered intent, never restored again);
+      - ledger itself unreadable / malformed -> whole recovery held back this
+        round, named (fail toward do-not-restore);
       - ticket_id empty/malformed -> predicate always False, the whole function is
         a no-op (zero regression for old tickets).
-    Pure workspace-file IO (shutil.move, never delete), zero git writes; idempotent
-    — after recovery the target exists and the archive does not, so a rerun skips
-    naturally."""
+    Pure workspace-file IO (shutil.move, never delete), zero git writes."""
     if not path_gates.ticket_slug(ticket_id):
         return
     qroot = lane_dot_path(cwd, "quarantine", create=False)
     if not qroot.is_dir():
         return
+    ledger = _load_recovered_paths_ledger(cwd, notes)
+    if ledger is None:
+        return
+    ledger_paths: Dict[str, Any] = ledger["paths"]
+    ledger_dirty = False
     for mf in sorted(qroot.glob("unauth-*/manifest.json")):
         try:
             m = json.loads(mf.read_text(encoding="utf-8"))
@@ -2592,6 +2682,16 @@ def _recover_quarantined_test_face(cwd: Path, ticket_id: str, notes: List[str]) 
                 continue
             if not path_gates.is_ticket_test_face(f, ticket_id):
                 continue
+            if f in ledger_paths:
+                # t261004-34: the ledger is the FIRST, authoritative check — a
+                # processed path is never auto-restored again (intentional-
+                # removal / earlier-recovery intent), and the skip is NAMED:
+                # a deliberate removal must be visibly respected, never a
+                # silent no-op (scenario C3b/C4b face).
+                notes.append("recovery skip (path already in processed-path "
+                             "ledger — intentional removal / earlier recovery "
+                             "is respected): %s" % f)
+                continue
             if it.get("recovered"):
                 continue
             src = cwd / archive
@@ -2609,19 +2709,38 @@ def _recover_quarantined_test_face(cwd: Path, ticket_id: str, notes: List[str]) 
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
+            ts = int(time.time() * 1000)
             it["recovered"] = True
-            it["recovered_ts"] = int(time.time() * 1000)
+            it["recovered_ts"] = ts
             changed = True
+            # mark the same path in ALL historical batches, not just this one
+            _mark_recovered_everywhere(cwd, f, ts)
+            ledger_paths[f] = {"ticket": ticket_id, "recovered_ts": ts}
+            ledger_dirty = True
             notes.append("recovered: ticket-test-face file %s restored from %s "
                          "(lawful deliverable outside the write set)" % (f, archive))
         if changed:
             try:
                 mf.write_text(json.dumps(m, ensure_ascii=False, indent=2) + "\n",
+
                               encoding="utf-8")
             except OSError as e:
                 notes.append("recovery manifest rewrite failed (file restored, mark "
                              "not written): %s: %s"
                              % (mf.relative_to(cwd), str(e)[:120]))
+    if ledger_dirty:
+        # persist the processed-path ledger AFTER the loop: one write per settle,
+        # and only when something was actually recovered
+        try:
+            lp = lane_dot_path(cwd, "quarantine", "recovered-paths.json",
+                               create=True)
+            lp.write_text(json.dumps(
+                {"paths": ledger_paths}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
+        except OSError as e:
+            notes.append("recovery ledger write failed (files restored, marks "
+                         "written; a later settle may re-offer these paths): %s: %s"
+                         % (str(e)[:200], ""))
 
 
 def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
