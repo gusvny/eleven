@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executor Panel — Inspection tab (mock v3, layout pass)</title>
+<title>Executor Panel — Inspection tab (mock v4, states pass)</title>
 <style>
 :root{
   --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;
@@ -64,6 +64,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .tbl .ticket{width:112px;text-align:right}
 .tbl .state{width:84px}
 .tbl .who{width:64px}
+.tbl .why{width:auto;color:var(--muted)}
 code{background:var(--panel2);border-radius:4px;padding:1px 5px;font-size:11px}
 
 /* controls */
@@ -86,6 +87,8 @@ summary{cursor:pointer;color:var(--muted);font-size:12px}
 .pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px}
 .pill.run{background:var(--accent-soft);color:var(--blue)}
 .pill.done{background:var(--panel2);color:var(--muted)}
+.link{color:var(--blue);background:none;border:0;padding:0;font:inherit;cursor:pointer;text-decoration:underline}
+.dlg .sect{padding-left:0}
 .foot{margin:28px 0 0;padding-left:var(--gx);color:var(--muted);font-size:11px}
 </style>
 </head>
@@ -112,7 +115,7 @@ summary{cursor:pointer;color:var(--muted);font-size:12px}
   <div class="hostnote">Only you can start a full review. The executor cannot. A review is recorded when it starts.</div>
 
   <div class="dlg" id="dlg" data-open="false">
-    <div class="sect first" style="padding-left:0">Run a full-codebase review</div>
+    <div class="sect first">Run a full-codebase review</div>
     <div class="fld">
       <label for="scope">Scope</label>
       <select id="scope">
@@ -138,9 +141,9 @@ summary{cursor:pointer;color:var(--muted);font-size:12px}
   <div class="sect">Reviews you started</div>
   <div class="card table">
     <table class="tbl" id="reviews">
-      <tr><th class="when">when</th><th class="who">who</th><th>scope</th><th class="state">state</th><th>result</th></tr>
-      <tr><td class="when">10-04 10:41</td><td class="who">host</td><td>server/plugins only</td><td class="state"><span class="pill run">running</span></td><td class="muted">—</td></tr>
-      <tr><td class="when">10-03 09:30</td><td class="who">host</td><td>everything</td><td class="state"><span class="pill done">done</span></td><td>9 findings, 3 tickets</td></tr>
+      <tr><th class="when">when</th><th class="who">who</th><th>scope</th><th>reason</th><th class="state">state</th><th>result</th></tr>
+      <tr><td class="when">10-04 10:41</td><td class="who">host</td><td>server/plugins only</td><td>check the new panel code</td><td class="state"><span class="pill run">running</span></td><td class="muted">—</td></tr>
+      <tr><td class="when">10-03 09:30</td><td class="who">host</td><td>everything</td><td>first full pass after the baseline broke</td><td class="state"><span class="pill done">done</span></td><td>9 findings, 3 tickets</td></tr>
     </table>
   </div>
   <div class="note">Newest first · kept after the review ends</div>
@@ -165,10 +168,11 @@ const PERIODS = {
     simp:{high:4,med:3,low:4,newcode:0,slice:74},
     coverage:{reviewed:74,total:1203,note:'No baseline this period. The test face scope counted as 1 file, so it found nothing.'},
     findings:[
-      ['10-03 03:20','test','Suite red: scenario-guard-pipeline-landed','t261003-01'],
-      ['10-03 03:20','test','Suite red: t260910-04-console-paused-list — later re-checked as already green',''],
+      ['10-03 03:20','test','Test run failed: scenario-guard-pipeline-landed','t261003-01'],
+      ['10-03 03:20','test','Test run failed: t260910-04-console-paused-list — a later check found it green',''],
       ['10-03 02:58','simplify','A guard still watches a file the retirement batch deleted (unverified: narrative not in English)',''],
     ]},
+  '20261001': { current:false, skipped:true },
   '20261002': { current:false,
     test:{high:12,med:2,low:3,reds:4,env:12,newcases:9,notrun:'',run:'run 22:10–23:55'},
     simp:{high:2,med:3,low:6,newcode:13,slice:60},
@@ -184,15 +188,25 @@ let cur = '20261004';
 // 期号顺序必须显式倒序（纯数字键会被 JS 按数值升序枚举——靠数据顺序=最老在最前）
 function periodOrder(){ return Object.keys(PERIODS).sort((a,b) => b.localeCompare(a)); }
 
+function totalFindings(p){ if(p.skipped) return 0; const t=p.test,s=p.simp; return t.high+t.med+t.low+s.high+s.med+s.low; }
+function openReport(){ document.getElementById('rodnote').textContent = 'Mock: this opens the period report file.'; }
 function renderPeriods(){
   document.getElementById('periodBtns').innerHTML = periodOrder().map(p =>
-    `<button data-on="${p===cur}" onclick="pick('${p}')">${p}${PERIODS[p].current?' (this period)':''}</button>`).join('');
+    `<button data-on="${p===cur}" onclick="pick('${p}')">${p}${PERIODS[p].current?' (this period)':PERIODS[p].skipped?' (no report)':''}</button>`).join('');
   document.getElementById('rodnote').textContent = PERIODS[cur].current
     ? 'This period is open. Rows below come from the running report.' : 'This period is closed. Shown read-only from its report.';
 }
 function kv(k,v){ return `<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`; }
 function renderBody(){
-  const p = PERIODS[cur], t = p.test, s = p.simp;
+  const p = PERIODS[cur];
+  if (p.skipped){
+    document.getElementById('periodBody').innerHTML = `
+      <div class="sect">${cur}</div>
+      <div class="card"><div class="row"><span class="dot grey"></span><span class="txt">No report for this period.</span></div>
+      <div class="detail muted">The change set was too small. The run left one decision row and stopped.</div></div>`;
+    return;
+  }
+  const t = p.test, s = p.simp;
   const rows = p.findings.map(([w,face,txt,tk]) =>
     `<tr><td class="when">${w}</td><td class="face">${face}</td><td>${txt}</td><td class="ticket">${tk?'<code>'+tk+'</code>':'<span class="muted">—</span>'}</td></tr>`).join('');
   document.getElementById('periodBody').innerHTML = `
@@ -201,7 +215,7 @@ function renderBody(){
       <div class="row"><span class="dot red"></span><span class="txt">Integration tests</span><span class="meta">${t.run}</span></div>
       <div class="nums">
         ${kv('high', t.high)}${kv('med', t.med)}${kv('low', t.low)}
-        ${kv('suite reds', t.reds)}${kv('environment only', t.env)}${kv('new test cases reviewed', t.newcases)}
+        ${kv('suite failures', t.reds)}${kv('environment failures', t.env)}${kv('new test cases reviewed', t.newcases)}
       </div>
       ${t.notrun?`<div class="detail muted">Not run or not reviewed: ${t.notrun}</div>`:''}
     </div>
@@ -213,11 +227,12 @@ function renderBody(){
       </div>
       <div class="detail muted">Mechanical checks ran on everything: lint, compile, term list, cross-language lists.</div>
     </div>
-    <div class="sect">Findings</div>
+    <div class="sect">Named findings</div>
     <div class="card table">
       <table class="tbl"><tr><th class="when">when</th><th class="face">face</th><th>finding</th><th class="ticket">ticket</th></tr>${rows}</table>
     </div>
-    <div class="note">Newest first · up to 20 rows · older rows are in the period report</div>
+    <div class="note">${p.findings.length} named of ${totalFindings(p)} counted · newest first
+      · <button class="link" onclick="openReport()">Open the ${cur} report</button></div>
     <div class="sect">Coverage</div>
     <div class="card">
       <div class="row"><span class="txt">${p.coverage.reviewed} of ${p.coverage.total} source files reviewed in ${cur}</span></div>
