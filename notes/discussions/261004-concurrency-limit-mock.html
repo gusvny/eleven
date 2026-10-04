@@ -78,6 +78,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .scrim{position:absolute;inset:0;background:rgba(12,18,28,.16)}
 .dialog{position:absolute;inset:12px;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.22);overflow-y:auto;padding:14px 18px 44px}
 .dialog .dh{position:sticky;top:0;background:var(--bg);padding:2px 0 8px;z-index:2}
+.dialog .back.small{border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:6px;padding:2px 8px;font:inherit;font-size:11px;cursor:pointer;margin:0 8px 6px 0}
 .dialog .x{border:0;background:transparent;color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px;margin-left:6px}
 .grow{flex:1}
 .top{display:flex;align-items:center;gap:10px;margin:0 0 14px}
@@ -151,7 +152,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .lane{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px 4px;margin:0 0 var(--cardgap);overflow:hidden}
 .lane svg{display:block;width:100%;height:auto}
 .lane .lhead{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);padding:0 2px 4px}
-.lane .lhead b{font-size:12px;color:var(--fg)}
+.lane .lhead b{font-size:12px;color:var(--fg);white-space:nowrap}
+.lane .lhead span{white-space:nowrap}
 .lane .lkind{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--faint)}
 .lane .lkind i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-left:6px}
 .lane .lkind .ka{background:var(--green);opacity:.35;margin-left:0}
@@ -321,7 +323,7 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
-let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = null, prog = 'dots', panelTab = 'overview', epicCode = null;
+let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = null, prog = 'dots', panelTab = 'overview', epicCode = null, dlgKind = null, fromEpic = false;
 function cycleProg(){ prog = prog === 'dots' ? 'bar' : prog === 'bar' ? 'off' : 'dots'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
 const T = () => PROJECTS[cur].tickets;
 const pctOf = t => Math.round((stepIdx(t) + (t.st === 'wait' ? 0 : 0.5)) / STEPS.length * 100);
@@ -382,22 +384,6 @@ function renderMain(){
   }
   const title = view === 'board' ? 'Ticket Board' : view === 'epics' ? 'Epics' : 'More';
   const head = '<div class="vhead"><h1>' + title + '</h1><span class="chip">' + cur + '</span></div>';
-  if (view === 'epic'){
-    const code = epicCode || T()[0].epic;
-    const items = T().filter(t => t.epic === code);
-    const done = items.filter(t => t.st !== 'wait' && t.st !== 'run' && t.st !== 'hold').length;
-    const hold = items.filter(t => t.st === 'hold').length;
-    const rows = items.map(t => '<div class="tk" data-id="' + t.id + '" onclick="openTicket(\'' + t.id + '\')">'
-      + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
-      + '<span class="l2"><span class="meta2">' + t.stage + ' · ' + t.st + '</span>' + pdots(t) + '</span></span></div>').join('');
-    el.innerHTML = '<button class="back" onclick="goBack()">← Back</button>'
-      + '<div class="vhead"><h1>' + code + '</h1><span class="chip">epic</span>'
-      + '<span class="meta" style="margin-left:auto">' + items.length + ' tickets · ' + hold + ' waiting for you</span></div>'
-      + '<div class="panelbox"><h3>Tickets in this epic</h3>' + rows + '</div>'
-      + '<div class="panelbox"><h3>Source</h3><div class="kv2"><span class="k">note</span><span>notes/epics/' + code + '.md</span>'
-      + '<span class="k">status</span><span>active · ' + done + ' finished</span></div></div>';
-    return;
-  }
   el.innerHTML = head
     + '<div class="ep"><span class="code">Docs</span><span class="st">read-only library</span><span class="n">docs/ + notes/</span><span class="go">Open</span></div>'
     + '<div class="ep"><span class="code">Model routes</span><span class="st">moved into the panel</span><span class="n">Settings tab</span><span class="go" onclick="setView(\'executor\')">Go</span></div>'
@@ -405,19 +391,34 @@ function renderMain(){
 }
 
 // 驾驶舱里的动态数字（模板克隆之后才有这些元素）
+function epicView(){
+  const code = epicCode || T()[0].epic;
+  const items = T().filter(t => t.epic === code);
+  const done = items.filter(t => t.st !== 'wait' && t.st !== 'run' && t.st !== 'hold').length;
+  const hold = items.filter(t => t.st === 'hold').length;
+  const rows = items.map(t => '<div class="tk" data-id="' + t.id + '" onclick="openTicket(\'' + t.id + '\')">'
+    + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
+    + '<span class="l2"><span class="meta2">' + t.stage + ' · ' + t.st + '</span>' + pdots(t) + '</span></span></div>').join('');
+  return '<div class="dh"><span class="id">epic</span><h2>' + code + '</h2>'
+    + '<span class="state">' + items.length + ' tickets · ' + hold + ' waiting for you</span>'
+    + '<button class="x" onclick="closeTicket()" title="Close (Esc)">×</button></div>'
+    + '<div class="panelbox"><h3>Tickets in this epic</h3>' + rows + '</div>'
+    + '<div class="panelbox"><h3>Source</h3><div class="kv2"><span class="k">note</span><span>notes/epics/' + code + '.md</span>'
+    + '<span class="k">status</span><span>active · ' + done + ' finished</span></div></div>';
+}
 function renderDialog(){
   const d = document.getElementById('dialog'), sc = document.getElementById('scrim');
   if (!d) return;
-  const open = Boolean(openId);
+  const open = Boolean(openId) || dlgKind === 'epic';
   d.hidden = !open; sc.hidden = !open;
-  d.innerHTML = open ? ticketView() : '';
+  d.innerHTML = !open ? '' : (dlgKind === 'epic' ? epicView() : ticketView());
 }
 function stepTicket(d){
   const i = T().findIndex(t => t.id === openId), j = i + d;
   if (i >= 0 && j >= 0 && j < T().length) openTicket(T()[j].id);
 }
 document.addEventListener('keydown', e => {
-  if (!openId) return;
+  if (!dlgKind) return;
   if (e.key === 'Escape') closeTicket();
   if (e.key === 'ArrowDown'){ e.preventDefault(); stepTicket(1) }
   if (e.key === 'ArrowUp'){ e.preventDefault(); stepTicket(-1) }
@@ -458,11 +459,11 @@ function paintExecutor(){
   chip.textContent = cap === null ? 'no limit' : over ? 'over the limit' : (n >= cap ? 'at the limit' : 'room to start one');
 }
 
-// 泳道图 v3：**按时间比例**画的管道（不是一排等宽按钮）。
-// 每段宽度 ∝ 实际耗时 → 「时间花在哪」一眼可见；标签上下交错 + 引线，短段也有名字；
-// 人门用菱形标记，当前段带 now 游标与已耗时；轮次 ×n 写在耗时行。不画返工弧。
+// 泳道图 v5：按**真拓扑里的两处并行叉**画（dev_lane.py：implement ∥ design_integration_tests，
+// arbitrate ∥ acceptance_walkthrough）。两条道：主道画串行链，并行伙伴画在主道下方同一时间窗里，
+// 外面虚线框 + ∥ 标记。段宽 ∝ 耗时；未开始的段按名义时长占位（不会被第一段吃光）。
 const LANE_LABEL = {
-  create_plan:'create plan', review_plan:'review plan', implement:'implement',
+  create_plan:'create', review_plan:'review', implement:'implement',
   design_integration_tests:'design tests', ui_evidence:'ui evidence',
   run_integration_tests:'run tests', arbitrate:'arbitrate',
   acceptance_walkthrough:'walkthrough', merge_check:'merge check', merge:'merge',
@@ -479,82 +480,87 @@ const LANE_META = {
   merge_check:{kind:'gate',role:'integration',min:3},
   merge:{kind:'human',role:'you',min:0,nowMin:26},
 };
+const LANE_ITEMS = [
+  { s: 'create_plan' }, { s: 'review_plan' },
+  { par: ['implement', 'design_integration_tests'] },
+  { s: 'ui_evidence' }, { s: 'run_integration_tests' },
+  { par: ['arbitrate', 'acceptance_walkthrough'] },
+  { s: 'merge_check' }, { s: 'merge' },
+];
 const DONE_UI = t => true;
 function laneMap(t){
   const at = stepIdx(t);
-  const W = 720, PAD = 8, BAND_Y = 46, BAND_H = 18, MINW = 12, RPAD = 26;
-  const rows = STEPS.map((s, i) => {
-    const m = LANE_META[s] || {kind:'agent',role:'-',min:0};
-    const now = i === at, done = i < at;
-    const skipped = m.skipped && !now && !DONE_UI(t);
-    const dur = now ? (m.nowMin || 10) : done ? (m.min || 1) : 0;
-    return { s, m, now, done, skipped, dur, rounds: m.rounds || 0 };
+  const W = 700, PAD = 8, RPAD = 30, AY = 30, AH = 12, BY = 46, BH = 12, MINW = 12, NOMINAL = 6;
+  const durOf = st => {
+    const i = STEPS.indexOf(st), m = LANE_META[st] || {};
+    if (i < at) return m.min || 1;
+    if (i === at) return m.nowMin || 10;
+    return NOMINAL;
+  };
+  const items = LANE_ITEMS.map(it => {
+    const stages = it.par || [it.s];
+    const parts = stages.map(st => ({ st, m: LANE_META[st] || {}, dur: durOf(st), done: STEPS.indexOf(st) < at, now: STEPS.indexOf(st) === at }));
+    const time = Math.max.apply(null, parts.map(p => p.dur));
+    return { par: Boolean(it.par), parts, time, now: parts.some(p => p.now) };
   });
-  const totalMin = rows.reduce((a, r) => a + r.dur, 0) || 1;
-  const fixed = MINW * rows.length;
-  const flex = W - PAD - RPAD - fixed - (rows.length - 1) * 2;
+  const totalMin = items.reduce((a, r) => a + r.time, 0) || 1;
+  const usable = W - PAD - RPAD;
+  const flex = usable - MINW * items.length;
   let x = PAD;
-  rows.forEach(r => { r.w = MINW + Math.round(flex * (r.dur / totalMin)); r.x = x; x += r.w + 2; });
+  items.forEach(r => { r.w = MINW + Math.round(flex * (r.time / totalMin)); r.x = x; x += r.w + 4 });
 
-  const segs = rows.map(r => {
-    const kindColor = r.m.kind === 'human' ? 'var(--amber)' : r.m.kind === 'gate' ? 'var(--blue)' : 'var(--green)';
-    const fill = r.skipped ? 'var(--bg)' : r.now ? kindColor : r.done ? kindColor : 'var(--panel2)';
-    const op = r.now ? '1' : r.done ? '0.22' : '1';
-    const stroke = r.skipped ? 'var(--line)' : 'none';
-    return '<rect x="' + r.x + '" y="' + BAND_Y + '" width="' + r.w + '" height="' + BAND_H + '" rx="3" fill="' + fill
-      + '" fill-opacity="' + op + '" stroke="' + stroke + '" stroke-dasharray="2 2">'
-      + '<title>' + LANE_LABEL[r.s] + ' · ' + r.m.role + ' · ' + (r.now ? 'running ' + r.dur + 'm' : r.done ? r.dur + 'm' : 'not started')
-      + (r.rounds ? ' · ran ' + r.rounds + ' rounds' : '') + (r.m.blocked ? ' · ' + r.m.blocked : '') + '</title></rect>';
-  }).join('');
-
-  // 标签：上下两行交错 + 引线；两行都挤时截断
-  const labels = [];
-  const lastRight = { up: -999, down: -999 };
-  rows.forEach((r, i) => {
-    const name = LANE_LABEL[r.s];
-    const durTxt = r.skipped ? 'skipped' : !r.done && !r.now ? '' : r.dur + 'm' + (r.rounds ? ' · ×' + r.rounds : '');
-    const wName = name.length * 5.4, wDur = durTxt.length * 4.6;
-    const wLab = Math.max(wName, wDur) + 6;
-    const cx = r.x + r.w / 2;
-    let side = (i % 2 === 0) ? 'up' : 'down';
-    if (cx - wLab / 2 < lastRight[side] + 6) side = side === 'up' ? 'down' : 'up';
-    let label = name;
-    const room = side === 'up' ? lastRight : lastRight;
-    if (cx - wLab / 2 < room + 6){ /* 仍挤：截断 */ }
-    lastRight[side] = cx + wLab / 2;
-    const y = side === 'up' ? BAND_Y - 14 : BAND_Y + BAND_H + 20;
-    const yDur = side === 'up' ? y - 9 : y + 9;
-    const lx = Math.max(26, Math.min(cx, W + RPAD - 26));
-    labels.push('<line x1="' + cx + '" y1="' + (side === 'up' ? BAND_Y - 2 : BAND_Y + BAND_H + 2) + '" x2="' + cx + '" y2="' + (side === 'up' ? y + 3 : y - 3) + '" stroke="var(--line)"/>'
-      + '<text x="' + lx + '" y="' + y + '" text-anchor="middle" font-size="9.5" fill="' + (r.now ? 'var(--fg)' : 'var(--muted)') + '">' + label + '</text>'
-      + (durTxt ? '<text x="' + lx + '" y="' + yDur + '" text-anchor="middle" font-size="8.5" fill="' + (r.now ? 'var(--blue)' : 'var(--faint)') + '">' + durTxt + '</text>' : ''));
+  const colour = m => m.kind === 'human' ? 'var(--amber)' : m.kind === 'gate' ? 'var(--blue)' : 'var(--green)';
+  const segs = [];
+  items.forEach(r => {
+    const head = r.parts[0], tail = r.parts[1];
+    // 主道
+    const hp = head.done ? '0.22' : '1';
+    const hf = (head.done || head.now) ? colour(head.m) : 'var(--panel2)';
+    segs.push('<rect x="' + r.x + '" y="' + AY + '" width="' + r.w + '" height="' + AH + '" rx="3" fill="' + hf + '" fill-opacity="' + hp + '">'
+      + '<title>' + LANE_LABEL[head.st] + ' · ' + (head.m.role || '-') + ' · ' + (head.now ? 'running ' + head.dur + 'm' : head.done ? head.dur + 'm' : 'not started')
+      + (head.m.rounds ? ' · ran ' + head.m.rounds + ' rounds' : '') + (head.m.blocked ? ' · ' + head.m.blocked : '') + '</title></rect>');
+    if (head.now) segs.push('<rect x="' + (r.x - 1.5) + '" y="' + (AY - 1.5) + '" width="' + (r.w + 3) + '" height="' + (AH + 3) + '" rx="4" fill="none" stroke="var(--amber)" stroke-width="1.5"/>');
+    if (head.m.kind === 'human') segs.push('<path d="M' + (r.x + 5) + ' ' + (AY + AH / 2) + ' l3.5 3.5 l-3.5 3.5 l-3.5 -3.5 z" fill="var(--bg)" stroke="var(--amber)"/>');
+    // 并行伙伴：同一时间窗、下面一道；它自己的宽度按自己的耗时
+    if (tail){
+      const tw = Math.max(MINW, Math.round(r.w * Math.min(1, tail.dur / Math.max(head.dur, tail.dur))));
+      const tp = tail.done ? '0.22' : '1';
+      const tf = (tail.done || tail.now) ? colour(tail.m) : 'var(--panel2)';
+      segs.push('<rect x="' + r.x + '" y="' + BY + '" width="' + tw + '" height="' + BH + '" rx="3" fill="' + tf + '" fill-opacity="' + tp + '">'
+        + '<title>' + LANE_LABEL[tail.st] + ' · ' + (tail.m.role || '-') + ' · ' + (tail.now ? 'running ' + tail.dur + 'm' : tail.done ? tail.dur + 'm' : 'not started') + '</title></rect>');
+      segs.push('<rect x="' + (r.x - 4) + '" y="' + (AY - 4) + '" width="' + (r.w + 8) + '" height="' + (BY + BH - AY + 8) + '" rx="6" fill="none" stroke="var(--line)" stroke-dasharray="3 3"/>');
+      segs.push('<text x="' + (r.x + 5) + '" y="' + (BY + BH - 1) + '" font-size="8" fill="var(--faint)">∥</text>');
+    }
   });
-
-  // 人门菱形 + 当前段 now 游标
-  const gates = rows.filter(r => r.m.kind === 'human').map(r => {
-    const gx = r.x + 6, gy = BAND_Y + BAND_H / 2;
-    return '<path d="M' + gx + ' ' + (gy - 4) + ' l4 4 l-4 4 l-4 -4 z" fill="var(--amber)"/>';
-  }).join('');
-  const cur = rows[at];
-  const nowX = cur.x + cur.w;
-  const nowMark = '<line x1="' + nowX + '" y1="' + (BAND_Y - 4) + '" x2="' + nowX + '" y2="' + (BAND_Y + BAND_H + 4) + '" stroke="var(--accent-line)" stroke-width="1.5" stroke-dasharray="3 2"/>'
-    + '<path d="M' + nowX + ' ' + (BAND_Y - 10) + ' l-4 5 h8 z" fill="var(--accent-line)"/>';
-
-  const t0 = 13 * 60 + 5;                     // 起始时刻（mock：13:05）
+  // 标签：主道名字在上（两级交错），并行伙伴名字在下面那道之下
+  const labels = [];
+  items.forEach((r, i) => {
+    const y = (i % 2 === 0) ? AY - 4 : AY - 13;
+    const head = r.parts[0];
+    const txt = LANE_LABEL[head.st] + (head.done ? ' ' + head.dur + 'm' + (head.m.rounds ? ' ×' + head.m.rounds : '') : head.now ? ' now' : '');
+    labels.push('<text x="' + Math.max(20, Math.min(r.x + r.w / 2, W + RPAD - 20)) + '" y="' + y + '" text-anchor="middle" font-size="8" fill="' + (head.now ? 'var(--fg)' : 'var(--muted)') + '">' + txt + '</text>');
+    if (r.parts[1]){
+      const tail = r.parts[1];
+      labels.push('<text x="' + Math.max(20, Math.min(r.x + 6, W + RPAD - 20)) + '" y="' + (BY + BH + 9) + '" font-size="7.5" fill="var(--muted)">' + LANE_LABEL[tail.st] + (tail.done ? ' ' + tail.dur + 'm' : tail.now ? ' now' : '') + '</text>');
+    }
+  });
+  const curItem = items.find(r => r.now) || items[items.length - 1];
+  const nowX = curItem.x + curItem.w;
+  const nowMark = '<line x1="' + nowX + '" y1="' + (AY - 8) + '" x2="' + nowX + '" y2="' + (BY + BH + 3) + '" stroke="var(--accent-line)" stroke-width="1.5" stroke-dasharray="3 2"/>';
+  const t0 = 13 * 60 + 5;
   const hhmm = m => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
-  const used = totalMin;
-  const totalTxt = Math.floor(used / 60) + 'h' + String(used % 60).padStart(2, '0') + 'm';
+  const totalTxt = Math.floor(totalMin / 60) + 'h' + String(totalMin % 60).padStart(2, '0') + 'm';
+  const NOW_LABEL = curItem.parts.map(p => LANE_LABEL[p.st]).join(' ∥ ');
+  const human = curItem.parts.some(p => p.m.kind === 'human');
   return '<div class="lane">'
-    + '<div class="lhead"><b>' + t.id + '</b><span>development lane · ' + STEPS.length + ' stages</span>'
+    + '<div class="lhead"><b>' + t.id + '</b><span>dev lane · ' + STEPS.length + ' stages · 2 parallel forks</span>'
     + '<span class="lkind"><i class="ka"></i>agent<i class="kg"></i>gate<i class="ky"></i>you</span>'
-    + '<span class="lsum">elapsed ' + totalTxt + ' · now at <b>' + LANE_LABEL[cur.s] + '</b>' + (cur.m.kind === 'human' ? ' (waiting for you)' : '') + '</span></div>'
-    + '<svg viewBox="0 0 ' + (W + RPAD) + ' 116" preserveAspectRatio="xMinYMin meet">'
-    + '<line x1="' + PAD + '" y1="' + (BAND_Y + BAND_H / 2) + '" x2="' + (W + RPAD - 8) + '" y2="' + (BAND_Y + BAND_H / 2) + '" stroke="var(--line-soft)" stroke-width="1"/>'
-    + segs + gates + nowMark + labels.join('')
-    + '<line x1="' + PAD + '" y1="108" x2="' + (W + RPAD - 8) + '" y2="108" stroke="var(--line-soft)"/>'
-    + '<text x="' + PAD + '" y="116" font-size="8.5" fill="var(--faint)">' + hhmm(t0) + '</text>'
-    + '<text x="' + (W + RPAD - 8) + '" y="116" text-anchor="end" font-size="8.5" fill="var(--faint)">' + hhmm(t0 + totalMin) + '</text>'
-    
+    + '<span class="lsum">elapsed ' + totalTxt + ' · now at <b>' + NOW_LABEL + '</b>' + (human ? ' (waiting for you)' : '') + '</span></div>'
+    + '<svg viewBox="0 0 ' + (W + RPAD) + ' 96" preserveAspectRatio="xMinYMin meet">'
+    + segs.join('') + nowMark + labels.join('')
+    + '<line x1="' + PAD + '" y1="88" x2="' + (W + RPAD - 10) + '" y2="88" stroke="var(--line-soft)"/>'
+    + '<text x="' + PAD + '" y="94" font-size="7.5" fill="var(--faint)">' + hhmm(t0) + '</text>'
+    + '<text x="' + (W + RPAD - 10) + '" y="94" text-anchor="end" font-size="7.5" fill="var(--faint)">' + hhmm(t0 + totalMin) + '</text>'
     + '</svg></div>';
 }
 const SPEC = {
@@ -607,7 +613,8 @@ function ticketView(){
     ['13:52', 'merge_check: lane branch has commits, tree clean, dry run green'],
     ['13:40', 'implement: handoff written, 3 files changed'],
   ].map(r => '<li><span class="at">' + r[0] + '</span><span>' + r[1] + '</span></li>').join('');
-  return '<div class="dh"><span class="id">' + t.id + '</span><h2>' + t.title + '</h2>'
+  const crumb = fromEpic ? '<button class="back small" onclick="openEpic(\'' + epicCode + '\')">← ' + epicCode + '</button>' : '';
+  return crumb + '<div class="dh"><span class="id">' + t.id + '</span><h2>' + t.title + '</h2>'
     + '<span class="state ' + stateCls + '">' + label + '</span>'
     + '<button class="x" onclick="closeTicket()" title="Close (Esc)">×</button></div>'
     + '<div class="acts"><button class="pri">Sign</button><button>Send back</button><button>Retry check</button><button>Pause</button></div>'
@@ -645,14 +652,14 @@ function move(k, id, d){
 function epicChip(code){
   return '<span class="epiclink" onclick="event.stopPropagation();openEpic(\'' + code + '\')">' + code + '</span>';
 }
-function openEpic(code){ if (view !== 'epic') prevView = view; epicCode = code; openId = null; view = 'epic'; render(); }
+function openEpic(code){ epicCode = code; openId = null; dlgKind = 'epic'; fromEpic = false; renderDialog(); renderSide(); }
 function setPanelTab(t){ panelTab = t; if (view !== 'executor'){ prevView = view; view = 'executor'; } render(); }
 function pickProject(k, v){ cur = k; dragId = null; openId = null; view = v || 'executor'; render(); }
 function setView(v){ view = v; openId = null; render(); }
 function setFilter(f){ filter = f; render(); }
 function filterEpic(code){ view = 'board'; filter = 'all'; const i = T().findIndex(t => t.epic === code); openId = i >= 0 ? T()[i].id : null; render(); }
-function openTicket(id){ openId = id; renderDialog(); renderSide(); }
-function closeTicket(){ openId = null; renderDialog(); renderSide(); }
+function openTicket(id){ fromEpic = dlgKind === 'epic'; openId = id; dlgKind = 'ticket'; renderDialog(); renderSide(); }
+function closeTicket(){ openId = null; epicCode = null; dlgKind = null; fromEpic = false; renderDialog(); renderSide(); }
 function goBack(){ view = prevView || 'board'; openId = null; render(); }
 function bump(d){
   const key = cur, c = PROJECTS[key].cap;
