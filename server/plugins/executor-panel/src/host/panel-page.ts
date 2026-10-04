@@ -643,7 +643,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       // 显式降级：点名原因（新源缺席=「记录启动以来无动作」+文件路径），绝不冒充空列表。
       html = '<div class="act" style="border:0"><span class="say muted">' + esc(a&&a.reason ? a.reason : 'The action record is not known.') + '</span></div>';
     } else if(a.actions.length===0){
-      html = '<div class="act" style="border:0"><span class="say muted">This project has no recorded executor action. Older and newer rows live in ' + esc(a.source) + '.</span></div>';
+      // t261004-21：空态文案取自契约（emptyCopyOf），不再内联重复——契约改词即页面
+      // 改词，渲染面守卫（b5 的 innerText 断言）才看得见契约文案。
+      html = '<div class="act" style="border:0"><span class="say muted">' + esc(emptyCopyOf('overview_recent_actions')) + ' Full history: ' + esc(a.source) + '.</span></div>';
     } else {
       for(var i=0;i<a.actions.length;i++){
         var x = a.actions[i];

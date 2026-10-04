@@ -3,7 +3,11 @@
 // machine-wide admin.log read is gone.
 //
 // Grey-box L3, production route shell driven (startPluginHarness, port 0),
-// offline: zero docker, zero browser, zero contact with 3099/7233.
+// offline: zero docker, zero contact with 3099/7233. B5's render-face leg
+// (t261004-21) is the one browser leg: it renders PANEL_PAGE_HTML with
+// playwright-core (same pattern as t261004-14), because the guard must read
+// what the user SEES, not the page source — stripping scripts from the source
+// hollowed it (t261004-16). playwright missing = ENV_FAIL, never a silent green.
 //
 // Intent (user-perceivable contract of ticket t261004-11 Part 2):
 //   B1 source swap: rows seeded in the project record appear in the feed; a
@@ -17,7 +21,11 @@
 //   B4 cap ~50: 60 seeded rows -> exactly 50 newest shown and the response
 //      points at the project record for older ones.
 //   B5 empty state: record absent -> the copy says the project has no recorded
-//      executor action and names the record file (no admin.log wording).
+//      executor action and names the record file. t261004-21: the no-audit-log
+//      wording check runs on the RENDERED text (document.body.innerText), and
+//      a planted negative (audit-log wording injected into the served contract
+//      copy) proves the guard still bites — the planted copy must reach
+//      innerText and the forbidden-word regex must match.
 //   B6 degraded: record unreadable -> explicit degradation naming the path.
 //   B7 gaps surfaced: rows in executor-actions.gaps.jsonl make the failed
 //      recording visible in the status face (gaps counter > 0).
@@ -39,10 +47,12 @@
 // (t261003-10-recent-actions-real-source) is retired by the implement stage
 // per plan Step 5 — this scenario replaces its consumer-side intent.
 import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { join, dirname } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { join, dirname, resolve } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:http'
+import { execFileSync } from 'node:child_process'
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url))
 const HARNESS_PATH = join(REPO, 'server/plugins/executor-panel/harness.mjs')
@@ -93,6 +103,54 @@ function seedRows(rows) {
   return p
 }
 
+// ---- B5 render-face harness (t261004-21) ----
+// playwright-core loader, same probe order as t261004-14 (main repo checkout
+// first, then bare import). Null = ENV_FAIL for the render legs, never FAIL.
+function mainRepoRoot() {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
+    if (common) return join(resolve(common), '..')
+  } catch { /* not a worktree */ }
+  return REPO
+}
+async function loadPlaywright() {
+  const main = mainRepoRoot()
+  for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs', 'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
+    const p = join(main, sub)
+    if (existsSync(p)) { try { return await import(pathToFileURL(p).href) } catch { /* next */ } }
+  }
+  try { return await import('playwright-core') } catch { return null }
+}
+
+// Render PANEL_PAGE_HTML (optionally a mutated variant for the planted
+// negative) with /api/actions stubbed to a canned payload; return the rendered
+// body innerText. Full terminal-state cleanup: browser closed, stub server
+// closed on every path (normal, error, timeout via awaits).
+async function renderPanelText(pw, html, apiActionsResponse) {
+  const stub = createServer((req, res) => {
+    if ((req.url || '').includes('/api/actions')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(apiActionsResponse))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end(html)
+  })
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r))
+  const base = 'http://127.0.0.1:' + stub.address().port
+  let browser = null
+  try {
+    browser = await pw.chromium.launch({ headless: true })
+    const page = await browser.newPage()
+    await page.goto(base + '/?project=proj-empty', { timeout: 15000 })
+    await page.waitForTimeout(500)
+    return await page.evaluate(() => document.body.innerText)
+  } finally {
+    if (browser) { try { await browser.close() } catch { /* already gone */ } }
+    stub.close()
+  }
+}
+
 async function main() {
   if (typeof process === 'undefined' || !process.versions?.node) {
     envFail('node-runtime', 'node absent'); return exitAll()
@@ -108,6 +166,17 @@ async function main() {
     rows = readFileSync(FIXTURE, 'utf8').split('\n').filter(l => l.trim())
   }
   const fixtureNote = rows ? '' : ' (fixture fixtures/executor-actions-engine-produced.jsonl absent — engine battery has not produced it yet; B1/B3 assertions cannot run against synthetic rows)'
+
+  // B5 render-face harness load (t261004-21). Missing page module = named FAIL;
+  // missing playwright-core = ENV_FAIL for the render legs (KI-036 family).
+  const PAGE_PATH = join(REPO, 'server/plugins/executor-panel/src/host/panel-page.ts')
+  let pageHtml = null
+  const pageMod = await import(pathToFileURL(PAGE_PATH).href).catch(() => null)
+  leg('b5-panel-page-module',
+    !!pageMod && typeof pageMod.PANEL_PAGE_HTML === 'string',
+    pageMod && typeof pageMod.PANEL_PAGE_HTML === 'string' ? '' : 'PANEL_PAGE_HTML export missing from panel-page.ts')
+  if (pageMod && typeof pageMod.PANEL_PAGE_HTML === 'string') pageHtml = pageMod.PANEL_PAGE_HTML
+  const pw = await loadPlaywright()
 
   // --- B1/B2/B3/B7/B8/B9: seeded record, harness pointed at the projects dir
   const actionsPath = seedRows(rows ?? [])
@@ -210,14 +279,49 @@ async function main() {
       leg('b5-copy-says-no-recorded-action-and-names-file',
         bodyText.includes('executor-actions.jsonl') && !/admin\.log/i.test(bodyText),
         bodyText.slice(0, 200))
-      const page = await fetch(base + PANEL_ROUTE).then(r => r.text()).catch(() => '')
-      // t261004-16 仲裁修订：本断言守的是「用户可见文案」，不是原始 HTML——页面
-      // 现内嵌 LIST_CONTRACTS 契约 JSON（t261004-14，source/empty_copy 字段含
-      // "audit log" 字样，属脚本内惰性数据、不渲染）。先剥 <script> 块再查词，
-      // 只对渲染面执行措辞禁令（更准而非放松：渲染面出现该词仍红）。
-      const visible = String(page).replace(/<script[\s\S]*?<\/script>/gi, '')
-      leg('b5-page-copy-free-of-audit-log-wording',
-        !/admin\.log|audit log/i.test(visible), '')
+      // B5 render face (t261004-21): the guard reads what the user SEES.
+      // The old form regexed the raw page source — and after t261004-16
+      // stripped every <script> block it went near-always-true, missing
+      // exactly the contract-copy leak this leg exists to catch. The rendered
+      // innerText sees the contract empty_copy (now wired into renderActions)
+      // and the degraded reason copy alike. (Merge note: main carried
+      // t261004-16's strip-scripts b5; this render-face form supersedes it —
+      // stripping scripts removes nearly all user-visible copy on a
+      // single-inline-script page, which is how the guard went hollow.)
+      const FORBIDDEN = /admin\.log|audit log/i
+      if (!pw || !pageHtml) {
+        if (!pw) envFail('b5-render-face-harness', 'playwright-core missing (KI-036 family) — render-face guard could not run')
+        else leg('b5-render-empty-names-record-no-audit-log', false, 'page module missing (see b5-panel-page-module)')
+      } else {
+        const emptyApi = { ok: true, source: emptyPath, actions: [], malformed_rows: 0,
+          unknown_op_rows: 0, deduped_rows: 0, older_rows: 0, gaps_recent: 0 }
+        const degradedApi = { ok: false, source: emptyPath,
+          reason: 'This project has no readable executor action record: seeded for the guard — the file is ' + emptyPath + '.' }
+        const tEmpty = await renderPanelText(pw, pageHtml, emptyApi)
+        leg('b5-render-empty-names-record-no-audit-log',
+          tEmpty.includes('executor-actions.jsonl') && !FORBIDDEN.test(tEmpty),
+          'names-record=' + tEmpty.includes('executor-actions.jsonl') + ' forbidden-hit=' + FORBIDDEN.test(tEmpty))
+        const tDegraded = await renderPanelText(pw, pageHtml, degradedApi)
+        leg('b5-render-degraded-names-record-no-audit-log',
+          tDegraded.includes('executor-actions.jsonl') && !FORBIDDEN.test(tDegraded),
+          'names-record=' + tDegraded.includes('executor-actions.jsonl') + ' forbidden-hit=' + FORBIDDEN.test(tDegraded))
+
+        // Planted negative (deliverable 3, made permanent): inject audit-log
+        // wording into the served contract copy and require the guard to see
+        // it — the copy must reach the render face and the regex must match.
+        const plantMarker = 'No executor action is recorded for this project yet.'
+        const plantedHtml = pageHtml.includes(plantMarker)
+          ? pageHtml.replace(plantMarker, plantMarker + ' The executor audit log is unavailable.')
+          : null
+        if (!plantedHtml) {
+          leg('b5-negative-guard-bites', false,
+            'plant marker absent from the served page — the contract copy no longer reaches the page source; fix the marker before trusting this leg')
+        } else {
+          const tPlanted = await renderPanelText(pw, plantedHtml, emptyApi)
+          leg('b5-negative-guard-bites', FORBIDDEN.test(tPlanted),
+            'planted "audit log" into the contract copy; guard red=' + FORBIDDEN.test(tPlanted))
+        }
+      }
     })
   } catch (e) { leg('b5-empty-state-names-record-no-admin-log', false, String(e).slice(0, 200)) }
 
