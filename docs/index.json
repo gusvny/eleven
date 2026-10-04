@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-10-01T09:18:30+08:00",
-  "total": 23,
+  "generated_at": "2026-10-04T08:55:41+08:00",
+  "total": 24,
   "categories": [
     "design",
     "content",
@@ -327,6 +327,21 @@
       ],
       "status": "active",
       "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "reference/writing-standard.md",
+      "file": "writing-standard.md",
+      "title": "Project Writing Standard (80% ASD-STE100 and controlled Chinese)",
+      "category": "reference",
+      "tags": [
+        "writing-standard",
+        "asd-ste100",
+        "controlled-chinese",
+        "style"
+      ],
+      "status": "active",
+      "updated": "2026-10-04",
       "has_frontmatter": true
     },
     {

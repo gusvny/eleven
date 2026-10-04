@@ -57,6 +57,7 @@ updated: 2026-09-28
 | File | Content |
 |---|---|
 | `terminology.md` | Project terminology table (maintained by the integration role, additions/removals go through human review; migrated whole from suyou, with a few project-domain entries still to be cleaned up). **Chinese by design** — it is the machine-read source of truth for the banned-jargon lint gate |
+| `writing-standard.md` | Project writing standard (t261004-04): the 80% ASD-STE100 checklist for English artifacts and the matching controlled-Chinese checklist, promoted project-wide from the executor preset (source: 261003 executor panel redesign §4). Scope, language map, self-check list, before/after samples, enforcement — adds no machine gate; L7 and the terminology table stay the mechanical faces. Framing in English; the Chinese checklist is quoted in Chinese by design (second deliberate language exception after `terminology.md`) |
 | `testing-guide.md` | Test environment isolation guide (3099/7233 red lines, Docker isolated test environment) |
 
 ## Maintenance conventions
