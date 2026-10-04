@@ -30,7 +30,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .sideHead{display:flex;align-items:center;gap:8px;padding:10px var(--gx);border-bottom:1px solid var(--line)}
 .sideHead .t{font-weight:600;font-size:12px}
 .sideHead .n{margin-left:auto;color:var(--muted);font-size:11px}
-.sideBody{overflow-y:auto}
+.sideBody{overflow-y:auto;flex:1;min-height:0}
+.sideFoot{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid var(--line);background:var(--panel)}
+.footbtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+.footbtn:hover{border-color:var(--blue)}
+.footnote{color:var(--faint);font-size:10.5px}
 .proj{border-bottom:1px solid var(--line-soft)}
 .prow{display:flex;align-items:center;gap:8px;padding:9px var(--gx);cursor:pointer}
 .prow:hover{background:var(--hover)}
@@ -239,14 +243,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 <div class="shell">
   <div class="appbar">
     <span class="brand" title="sandbar">
-      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-        <rect x="1" y="8.4" width="12" height="2.4" rx="1.2" fill="#e7933f"/>
-        <rect x="2.4" y="5.4" width="9.2" height="2.4" rx="1.2" fill="#e7b95f" opacity=".85"/>
-        <rect x="3.8" y="2.4" width="6.4" height="2.4" rx="1.2" fill="#e7d98f" opacity=".7"/>
-      </svg>
-      <span class="word">sandbar</span>
+      <span id="logoMark" onclick="cycleLogo()" title="Logo candidate — click to cycle" style="cursor:pointer"></span>
+      <span class="word">Sandbar</span>
     </span>
-    <span class="sub">ticket engine</span>
     <span class="grow"></span>
     <button class="ico" onclick="toggleTheme()" title="Light / dark">◐</button>
     <button class="ico" onclick="foldMid()" title="Fold the left column (drag the divider to resize)">«</button>
@@ -257,6 +256,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
       <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Progress shown per ticket: dots / bar / off">dots</button>
       <span class="n" id="sideN">3 projects</span></div>
     <div class="sideBody" id="projList"></div>
+    <div class="sideFoot">
+      <button class="footbtn" title="DeepSeek Harness settings (platform)">⚙ Settings</button>
+      <span class="grow"></span>
+      <span class="footnote" title="Metrics moved into the executor panel">metrics → panel</span>
+    </div>
   </div>
 
   <div class="mid" id="mid">
@@ -284,7 +288,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     </div>
 
     <div class="seg">
-<label data-tab="overview" class="on" onclick="setPanelTab('overview')">Overview</label><label data-tab="epics" onclick="setPanelTab('epics')">Epics</label><label data-tab="grants" onclick="setPanelTab('grants')">Grants</label><label data-tab="alerts" onclick="setPanelTab('alerts')">Alerts</label><label data-tab="ledger" onclick="setPanelTab('ledger')">Ledger</label><label data-tab="inspection" onclick="setPanelTab('inspection')">Inspection</label><label data-tab="docs" onclick="setPanelTab('docs')">Docs</label><label data-tab="settings" onclick="setPanelTab('settings')">Settings</label>
+<label data-tab="overview" class="on" onclick="setPanelTab('overview')">Overview</label><label data-tab="epics" onclick="setPanelTab('epics')">Epics</label><label data-tab="grants" onclick="setPanelTab('grants')">Grants</label><label data-tab="alerts" onclick="setPanelTab('alerts')">Alerts</label><label data-tab="ledger" onclick="setPanelTab('ledger')">Ledger</label><label data-tab="inspection" onclick="setPanelTab('inspection')">Inspection</label><label data-tab="metrics" onclick="setPanelTab('metrics')">Metrics</label><label data-tab="docs" onclick="setPanelTab('docs')">Docs</label><label data-tab="settings" onclick="setPanelTab('settings')">Settings</label>
     </div>
 
     <div class="strip">
@@ -369,6 +373,17 @@ const STEPS = ['create_plan','review_plan','implement','design_integration_tests
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
 // 项目徽标：**非常见形状**（避开圆点/方块/三角——那些与状态点、复选框、警告符同形容易误读）。
 // 6 种轮廓 × 3 种结构（实心 / 空心环 / 半明暗）+ 12 色 = 216 种身份；灰度下靠轮廓与结构仍可分。
+const LOGOS = [
+  // A 沙脊拱 + 水线（实心拱坐在水线上）
+  '<svg width="14" height="14" viewBox="0 0 14 14"><path d="M2.3 10.4 A4.7 4.7 0 0 1 11.7 10.4 Z" fill="#d99a4e"/><path d="M1.6 12.2 H12.4" stroke="#93a1b3" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  // B 两道波（上细下粗）
+  '<svg width="14" height="14" viewBox="0 0 14 14"><path d="M1.6 6.2 Q4 4.2 7 6.2 T12.4 6.2" fill="none" stroke="#93a1b3" stroke-width="1.5" stroke-linecap="round"/><path d="M1.6 10.2 Q4 7.6 7 10.2 T12.4 10.2" fill="none" stroke="#d99a4e" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  // C 斜沙洲（两枚错开的圆角斜条）
+  '<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1.2" y="7.6" width="11.6" height="3.4" rx="1.7" fill="#d99a4e" transform="rotate(-12 7 9.3)"/><rect x="3.2" y="3.6" width="7.6" height="2.6" rx="1.3" fill="#93a1b3" opacity=".55" transform="rotate(-12 7 4.9)"/></svg>',
+];
+let logoIdx = 0;
+function renderLogo(){ const el = document.getElementById('logoMark'); if (el) el.innerHTML = LOGOS[logoIdx] }
+function cycleLogo(){ logoIdx = (logoIdx + 1) % LOGOS.length; renderLogo() }
 const PROJ_SHAPE = { sandbar: ['pentagon', 'ring'], suyou: ['sparkle', 'solid'], nusuyou: ['shield', 'half'] };
 const PALETTE12 = ['#e76a6a','#e7936a','#e7c36a','#c6e76a','#8ae76a','#6ae79c','#6ae7d4','#6aabe7','#7f6ae7','#b56ae7','#e76ad0','#e76a92'];
 function polyPath(c, R, n, rot){
@@ -448,6 +463,7 @@ const waitCount = () => T().filter(t => t.st === 'wait').length;
 const TICKET = id => { for (const k in PROJECTS) { const t = PROJECTS[k].tickets.find(x => x.id === id); if (t) return Object.assign({ project: k }, t) } return null; };
 
 function render(){
+  renderLogo();
   const pc = PROJ_COLOR[cur] || 'var(--line)';
   document.querySelector('.chat').style.setProperty('--pc', pc);
   const ses = PROJ_SESS[cur] || { handle: 'session', code: '----' };
@@ -561,6 +577,15 @@ function epicsTabHtml(){
       + '<button class="go" onclick="openEpic(\'' + c + '\')">Open</button></div>';
   }).join('');
 }
+function metricsTabHtml(){
+  const kpi = [['tickets closed', '38'], ['median lane', '2h10m'], ['inspection findings', '64'], ['open KIs', '7']];
+  return '<div class="sect first">Metrics</div>'
+    + '<div class="nums" style="margin-top:0">' + kpi.map(x => '<div class="kv"><span>' + x[0] + '</span><b>' + x[1] + '</b></div>').join('') + '</div>'
+    + '<div class="panelbox" style="margin-top:12px"><h3>Charts</h3><div class="kv2">'
+    + '<span class="k">lanes per day</span><span>(chart from the project metrics API)</span>'
+    + '<span class="k">stage duration</span><span>(chart)</span>'
+    + '<span class="k">gate reds</span><span>(chart)</span></div></div>';
+}
 function docsTabHtml(){
   return '<div class="sect first">Docs</div>'
     + '<div class="ep"><span class="code">docs/</span><span class="st">the library</span><span class="n">25 pages</span><span class="go">Open</span></div>'
@@ -573,7 +598,7 @@ function paintExecutor(){
   if (ov) ov.hidden = panelTab !== 'overview';
   if (tb){
     tb.hidden = panelTab === 'overview';
-    tb.innerHTML = panelTab === 'epics' ? epicsTabHtml() : panelTab === 'docs' ? docsTabHtml() : '<div class="foot">This mock shows Overview, Epics and Docs. The other tabs are unchanged in the real panel.</div>';
+    tb.innerHTML = panelTab === 'epics' ? epicsTabHtml() : panelTab === 'docs' ? docsTabHtml() : panelTab === 'metrics' ? metricsTabHtml() : '<div class="foot">This mock shows Overview, Epics and Docs. The other tabs are unchanged in the real panel.</div>';
   }
   const cap = PROJECTS[cur].cap, n = inFlight();
   document.getElementById('projChip').textContent = cur;
