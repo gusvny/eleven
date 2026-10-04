@@ -90,6 +90,43 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .req .id{color:var(--faint);font-size:11px;font-family:ui-monospace,monospace}
 .req .meta{color:var(--muted);font-size:11px;white-space:nowrap}
 .foot{margin:24px 0 0;padding-left:var(--gx);color:var(--muted);font-size:11px}
+/* 主区视图：工单板 / 立项单 / 读面 */
+.vhead{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.vhead h1{font-size:14px;font-weight:600;margin:0}
+.bcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px var(--gx);margin-bottom:var(--cardgap);cursor:pointer}
+.bcard:hover{background:var(--hover)}
+.bcard .r1{display:flex;align-items:baseline;gap:8px}
+.bcard .r1 .id{font-size:11px;color:var(--muted);font-family:ui-monospace,monospace}
+.bcard .r1 .ttl{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bcard .r2{display:flex;align-items:center;gap:8px;margin-top:5px;color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
+.bcard .bar{height:3px;border-radius:2px;background:var(--panel2);margin-top:8px;overflow:hidden}
+.bcard .bar i{display:block;height:100%;background:var(--accent-line)}
+.filters{display:flex;gap:6px;margin:0 0 10px}
+.filters button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 10px;font:inherit;font-size:11px;cursor:pointer}
+.filters button[data-on="true"]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--fg)}
+.ep{display:flex;align-items:baseline;gap:10px;padding:9px var(--gx);border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:var(--cardgap)}
+.ep .code{font-weight:600;font-size:13px}
+.ep .st{color:var(--muted);font-size:11px}
+.ep .n{margin-left:auto;color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
+.ep .go{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}
+/* 票详情抽屉 */
+.drawer{position:fixed;top:0;right:0;bottom:0;width:460px;background:var(--bg);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .15s;overflow-y:auto;padding:16px 18px 40px}
+.drawer[data-open="true"]{transform:none}
+.drawer .dh{display:flex;align-items:baseline;gap:8px}
+.drawer .dh .id{font-size:11px;color:var(--muted);font-family:ui-monospace,monospace}
+.drawer .dh h2{font-size:14px;margin:0;flex:1;min-width:0}
+.drawer .x{border:0;background:transparent;color:var(--muted);font:inherit;font-size:16px;cursor:pointer;padding:0 4px}
+.drawer .acts{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+.drawer .acts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:5px 12px;font:inherit;cursor:pointer}
+.drawer .acts button.pri{background:var(--accent-soft);border-color:var(--accent-line)}
+.drawer dl{margin:12px 0 0;font-size:12px}
+.drawer dt{color:var(--muted);font-size:11px;margin-top:9px}
+.drawer dd{margin:2px 0 0}
+.steps{margin-top:14px}
+.step{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;color:var(--muted)}
+.step.done .dot{background:var(--green)}
+.step.now .dot{background:var(--blue)}
+.step .dot{width:7px;height:7px;border-radius:50%;background:var(--panel2);flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -99,7 +136,10 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     <div class="sideBody" id="projList"></div>
   </div>
 
-  <div class="main">
+  <div class="main" id="main"></div>
+  <div class="drawer" id="drawer" data-open="false"></div>
+
+  <template id="tpl-executor">
     <div class="top">
       <h1>Executor</h1><span class="chip" id="projChip">sandbar</span>
       <span class="grow"></span>
@@ -142,14 +182,14 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     <div class="req"><div class="h"><span class="txt">Open a small fix ticket for the Chinese alert copy?</span><span class="id">#b7c1</span><span class="meta">finding · 4 min</span></div></div>
 
     <div class="foot">Mock. No backend. Sample data.</div>
-  </div>
+  </template>
 </div>
 
 <script>
-// 每个项目自己一套：上限 + 队列。run=在跑（占额度）／wait=排队（顺序＝启动顺序）／paused=你暂停的（不占）
+// 每个项目自己一套：上限 + 队列。run=在跑／hold=等你签字（也占额度）／wait=排队（顺序＝启动顺序）／paused=你暂停的（不占）
 const PROJECTS = {
   sandbar: { cap: 3, tickets: [
-    {id:'t261004-18', title:'Panel write endpoints carry no identity', stage:'merge · awaiting your signature', epic:'project-executor', st:'hold'},
+    {id:'t261004-18', title:'Panel write endpoints carry no identity', stage:'merge', epic:'project-executor', st:'hold'},
     {id:'t261004-17', title:'A request must be answerable', stage:'implement', epic:'project-executor', st:'run'},
     {id:'t261004-25', title:'Inspection 20261004 · integration-tests', stage:'report', epic:'inspection', st:'run'},
     {id:'t261004-22', title:'Wait for the condition instead of a fixed sleep', stage:'design_integration_tests', epic:'engine-hardening', st:'wait'},
@@ -160,7 +200,7 @@ const PROJECTS = {
   ]},
   suyou: { cap: 2, tickets: [
     {id:'t260904-02', title:'Cover the metrics API contract', stage:'implement', epic:'metrics', st:'run'},
-    {id:'t260905-01', title:'Panel list conventions', stage:'merge · awaiting your signature', epic:'doc-lifecycle', st:'hold'},
+    {id:'t260905-01', title:'Panel list conventions', stage:'merge', epic:'doc-lifecycle', st:'hold'},
     {id:'t260905-06', title:'Index the new reference page', stage:'create_plan', epic:'doc-lifecycle', st:'wait'},
   ]},
   nusuyou: { cap: 1, tickets: [
@@ -169,16 +209,20 @@ const PROJECTS = {
     {id:'t260930-09', title:'Move assets to the CDN', stage:'create_plan', epic:'content', st:'wait'},
   ]},
 };
-let cur = 'sandbar', dragId = null;
+let cur = 'sandbar', dragId = null, view = 'executor', filter = 'all', openId = null;
 const T = () => PROJECTS[cur].tickets;
-// 占额度 = 在跑 + 等你签字（宿主 261004 裁定：等签字的票「占着吧」——额度被人的关口吃掉，逼着处理）
 const inFlight = () => T().filter(t => t.st === 'run' || t.st === 'hold').length;
 const waitCount = () => T().filter(t => t.st === 'wait').length;
-function render(){
-  const counts = Object.entries(PROJECTS).map(([k, p]) => {
-    const run = p.tickets.filter(t => t.st === 'run' || t.st === 'hold').length, wait = p.tickets.filter(t => t.st === 'wait').length;
-    return { k, run, wait };
-  });
+const TICKET = id => { for (const k in PROJECTS) { const t = PROJECTS[k].tickets.find(x => x.id === id); if (t) return Object.assign({ project: k }, t) } return null; };
+
+function render(){ renderSide(); renderMain(); renderDrawer(); }
+
+function renderSide(){
+  const counts = Object.keys(PROJECTS).map(k => ({
+    k,
+    run: PROJECTS[k].tickets.filter(t => t.st === 'run' || t.st === 'hold').length,
+    wait: PROJECTS[k].tickets.filter(t => t.st === 'wait').length,
+  }));
   document.getElementById('sideN').textContent = counts.length + ' projects';
   document.getElementById('projList').innerHTML = counts.map(({k, run, wait}) => {
     let q = 0;
@@ -187,38 +231,99 @@ function render(){
       const prefix = t.st === 'wait' ? '<span class="pos">' + (++q) + '</span>'
         : '<span class="mark ' + (t.st === 'run' ? 'run' : t.st === 'hold' ? 'hold' : 'paused') + '"></span>';
       const arrows = fixed ? '' : '<span class="arrows"><button onclick="event.stopPropagation();move(\'' + k + '\',\'' + t.id + '\',-1)">⌃</button><button onclick="event.stopPropagation();move(\'' + k + '\',\'' + t.id + '\',1)">⌄</button></span>';
-      return '<div class="tk' + (fixed ? ' fixed' : '') + '" data-id="' + t.id + '" draggable="' + (!fixed) + '">'
+      const hi = (k === cur && openId === t.id) ? ' sel' : '';
+      return '<div class="tk' + (fixed ? ' fixed' : '') + hi + '" data-id="' + t.id + '" draggable="' + (!fixed) + '" onclick="pickProject(\'' + k + '\');openTicket(\'' + t.id + '\')">'
         + '<span class="grip">⋮⋮</span>' + prefix
         + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
         + '<span class="l2">' + t.stage + ' · ' + t.epic + '</span></span>' + arrows + '</div>';
     }).join('');
+    const icon = (v, glyph, title) => '<span class="vi' + (k === cur && view === v ? ' on' : '') + '" title="' + title
+      + '" onclick="pickProject(\'' + k + '\');setView(\'' + v + '\')">' + glyph + '</span>';
     return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
       + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
       + '<span class="views" onclick="event.stopPropagation()">'
-      + '<span class="vi' + (k === cur ? ' on' : '') + '" title="Tickets">▤</span>'
-      + '<span class="vi" title="Epics">◆</span>'
-      + '<span class="vi" title="Executor (this project)">▶</span>'
-      + '<span class="vi" title="More: Docs, Model routes, Settings">⋯</span></span>'
+      + icon('board', '▤', 'Ticket board') + icon('epics', '◆', 'Epics') + icon('executor', '▶', 'Executor panel')
+      + icon('more', '⋯', 'More: Docs; model routes and settings moved into the panel') + '</span>'
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
   }).join('');
+  wire();
+}
+
+function renderMain(){
+  const el = document.getElementById('main');
+  if (view === 'executor'){
+    el.innerHTML = '';
+    el.appendChild(document.getElementById('tpl-executor').content.cloneNode(true));
+    paintExecutor();
+    return;
+  }
+  const title = view === 'board' ? 'Ticket Board' : view === 'epics' ? 'Epics' : 'More';
+  const head = '<div class="vhead"><h1>' + title + '</h1><span class="chip">' + cur + '</span></div>';
+  if (view === 'board'){
+    const rows = T().filter(t => filter === 'all' ? true : filter === 'wait' ? t.st === 'wait' : (t.st === 'run' || t.st === 'hold'))
+      .map(t => {
+        const pct = t.st === 'wait' ? 20 : t.st === 'hold' ? 60 : t.st === 'run' ? 80 : 40;
+        const label = t.st === 'run' ? 'at work' : t.st === 'hold' ? 'waiting for you' : t.st === 'wait' ? 'queued' : 'paused';
+        return '<div class="bcard" onclick="openTicket(\'' + t.id + '\')"><div class="r1"><span class="id">' + t.id + '</span>'
+          + '<span class="ttl">' + t.title + '</span></div>'
+          + '<div class="r2"><span>' + t.stage + '</span><span>·</span><span>' + t.epic + '</span>'
+          + '<span style="margin-left:auto">' + label + '</span></div>'
+          + '<div class="bar"><i style="width:' + pct + '%"></i></div></div>';
+      }).join('');
+    el.innerHTML = head + '<div class="filters">'
+      + '<button data-on="' + (filter === 'all') + '" onclick="setFilter(\'all\')">All ' + T().length + '</button>'
+      + '<button data-on="' + (filter === 'wait') + '" onclick="setFilter(\'wait\')">Queued ' + waitCount() + '</button>'
+      + '<button data-on="' + (filter === 'live') + '" onclick="setFilter(\'live\')">In flight ' + inFlight() + '</button></div>' + rows;
+    return;
+  }
+  if (view === 'epics'){
+    const codes = [...new Set(T().map(t => t.epic))];
+    el.innerHTML = head + codes.map(c => {
+      const n = T().filter(t => t.epic === c).length;
+      return '<div class="ep"><span class="code">' + c + '</span><span class="st">active</span>'
+        + '<span class="n">' + n + ' ticket' + (n > 1 ? 's' : '') + '</span>'
+        + '<button class="go" onclick="filterEpic(\'' + c + '\')">Filter the list</button></div>';
+    }).join('');
+    return;
+  }
+  el.innerHTML = head
+    + '<div class="ep"><span class="code">Docs</span><span class="st">read-only library</span><span class="n">docs/ + notes/</span><span class="go">Open</span></div>'
+    + '<div class="ep"><span class="code">Model routes</span><span class="st">moved into the panel</span><span class="n">Settings tab</span><span class="go" onclick="setView(\'executor\')">Go</span></div>'
+    + '<div class="ep"><span class="code">Project settings</span><span class="st">moved into the panel</span><span class="n">Settings tab</span><span class="go" onclick="setView(\'executor\')">Go</span></div>';
+}
+
+// 驾驶舱里的动态数字（模板克隆之后才有这些元素）
+function paintExecutor(){
+  const cap = PROJECTS[cur].cap, n = inFlight();
   document.getElementById('projChip').textContent = cur;
-  const n = inFlight();
   document.getElementById('atWork').textContent = n;
   document.getElementById('queued').textContent = waitCount();
-  const cap = PROJECTS[cur].cap;             // cap === null 表示「不限」
   document.getElementById('cap').textContent = cap === null ? 'Unlimited' : cap;
   document.getElementById('minus').disabled = cap === 1;
-  document.getElementById('plus').disabled = false;
   const over = cap !== null && n > cap;
   const chip = document.getElementById('stateChip');
   chip.className = 'chip' + (over ? ' warn' : '');
-  chip.textContent = cap === null ? 'no limit'
-    : over ? 'over the limit'
-    : (n >= cap ? 'at the limit' : 'room to start one');
-  wire();
+  chip.textContent = cap === null ? 'no limit' : over ? 'over the limit' : (n >= cap ? 'at the limit' : 'room to start one');
 }
-function pickProject(k){ cur = k; dragId = null; render(); }
+
+function renderDrawer(){
+  const d = document.getElementById('drawer');
+  const t = openId ? TICKET(openId) : null;
+  if (!t){ d.dataset.open = 'false'; d.innerHTML = ''; return; }
+  const steps = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
+  const at = steps.indexOf(String(t.stage).split(' ')[0]);
+  const label = t.st === 'run' ? 'at work' : t.st === 'hold' ? 'waiting for your signature' : t.st === 'wait' ? 'queued' : 'paused by you';
+  d.dataset.open = 'true';
+  d.innerHTML = '<div class="dh"><span class="id">' + t.id + '</span><h2>' + t.title + '</h2>'
+    + '<button class="x" onclick="openTicket(null)">×</button></div>'
+    + '<div class="acts"><button class="pri">Sign</button><button>Send back</button><button>Retry check</button><button>Pause</button></div>'
+    + '<dl><dt>Project</dt><dd>' + t.project + '</dd><dt>Epic</dt><dd>' + t.epic + '</dd>'
+    + '<dt>Stage</dt><dd>' + t.stage + '</dd><dt>State</dt><dd>' + label + '</dd></dl>'
+    + '<div class="steps">' + steps.map((s, i) => '<div class="step ' + (i < at ? 'done' : i === at ? 'now' : '') + '"><span class="dot"></span>' + s + '</div>').join('') + '</div>'
+    + '<div class="foot">Mock drawer: changes, timeline and the run receipt live here.</div>';
+}
+
 function move(k, id, d){
   const arr = PROJECTS[k].tickets;
   const i = arr.findIndex(t => t.id === id), j = i + d;
@@ -227,6 +332,20 @@ function move(k, id, d){
   const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
   render();
 }
+function pickProject(k){ cur = k; dragId = null; openId = null; render(); }
+function setView(v){ view = v; openId = null; render(); }
+function setFilter(f){ filter = f; render(); }
+function filterEpic(code){ view = 'board'; filter = 'all'; const i = T().findIndex(t => t.epic === code); openId = i >= 0 ? T()[i].id : null; render(); }
+function openTicket(id){ openId = id; renderSide(); renderDrawer(); }
+function bump(d){
+  const key = cur, c = PROJECTS[key].cap;
+  if (d > 0) PROJECTS[key].cap = (c === null) ? null : (c >= 10 ? null : c + 1);
+  else if (c === null) PROJECTS[key].cap = 10;
+  else if (c > 1) PROJECTS[key].cap = c - 1;
+  render();
+}
+function save(){ const m = document.getElementById('limitMeta'); if (m) m.textContent = 'set by you just now'; }
+function toggleTheme(){ const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; }
 function wire(){
   document.querySelectorAll('.tk[draggable="true"]').forEach(el => {
     el.addEventListener('dragstart', e => { e.stopPropagation(); dragId = el.dataset.id; el.dataset.drag = 'true' });
@@ -245,15 +364,6 @@ function wire(){
     });
   });
 }
-function bump(d){
-  const key = cur, c = PROJECTS[key].cap;    // c === null 表示不限
-  if (d > 0) PROJECTS[key].cap = (c === null) ? null : (c >= 10 ? null : c + 1);
-  else if (c === null) PROJECTS[key].cap = 10;   // 从不限降回 10
-  else if (c > 1) PROJECTS[key].cap = c - 1;
-  render();
-}
-function save(){ document.getElementById('limitMeta').textContent = 'set by you just now'; }
-function toggleTheme(){ const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; }
 render();
 </script>
 </body>
