@@ -122,6 +122,13 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t261004-13: Alerts 面：最新在前×时间带日期×ledger 覆盖告警收敛（KI-180 同族改契） ----
+    ("t261004-13-alert-face-order-dates",
+     "Alerts 面显示契约（t261004-13，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099/7233，缝复用 t261003-06/lib_panel_seam）：A1 两条不同时刻 alert 中较晚者先渲染（工单病灶=守望者 oldest-first 尾巴照序沉底）；A2 alert 行时间=本机 MM-DD HH:MM 短本地形（同机同 TZ 现算期望，锚格式不锚字面，跨天不再长得一样）；A3 跨天两条渲染出不同时间串；A4 Ledger 页签 wakes 行同用日期化 helper（工单点名两处一致）；A5「Times are local.」标签仍在；A6 畸形 at（null）渲染显式 — 绝不 NaN 且零页错（Overview recent-actions 留 HH:MM 是方案声明的合法例外，不在断言面）；X1 全旅程零 pageerror。intent 分工：面板展开/草稿归 t261003-14、Ledger 页签诚实性归 t261003-13、告警两出口纪律归 t260928-28，本条只锁 Part A。playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；页面模块缺席=FAIL 点名（TDD 期红属预期，arbitrate/merge 期必须绿）",
+     "node integration/t261004-13/sc_alert_face_order_and_dates.mjs", "browser"),
+    ("t261004-13-ledger-coverage-alert-converge",
+     "ledger 覆盖告警收敛契约（t261004-13，灰盒 L3，离线秒级零 docker，复用 t260928-28 harness 缝；KI-180 同族改契主面）：A any-row 覆盖——账本有该票任意一行即覆盖，尾行落后看板不再报缺行且仍由 reconcile_mismatch 点名（一事一声不双报）；B 终态票（status=closed）账本零行只进 status 面终态桶不触发告警（不可行动的事实不响）；C 在飞票账本零行才落 ledger_missing_rows；D 按未覆盖集合去重——计数变化集合不变不重响（工单病灶「每 +1 票重响」对面），新增未覆盖在飞票才以新 key 重响；E status 面双桶可读（在飞未覆盖/终态未覆盖，键名随实现缺键=FAIL 点名）；F 全覆盖后告警收敛（两个节拍零新增）；G KI-180 回归棒两层（仲裁 gen0 改签）——G1 源码锁（生产 board reader 仍以 filterBoardRowsToProject×parsed.tickets 裁剪本项目，接线不漂移；过滤真值表归 developer L1）+ G2 行为面（生产同形看板=外项目行已裁 → 缺口集合不变不重响；项目裁剪真位=board reader 缝而非 core，core 只数喂进来的行）；H 看板行缺 status 字段保守按在飞处理且不崩。intent 分工：t260928-28 旧「N 变化重响」契由本条 D 接管（该票场景 B 随本票改签）；纯函数真值表归 developer L1。node 缺席=ENV_FAIL exit 2；harness 缺席=FAIL exit 1 点名（TDD 期红属预期，arbitrate/merge 期必须绿）",
+     "python3 integration/t261004-13/sc_ledger_coverage_alert_converge.py", "ro", "serial"),
     # ---- t261003-14: 面板展开态/草稿跨轮询存续（宿主实报：点开条目每个 5s 周期被重渲染折叠、半截回答被抹） ----
     ("t261003-14-panel-expand-survives-poll",
      "面板展开态跨轮询存续（t261003-14，灰盒 L3，真 executor-panel harness 端口 0 全隔离 + 真 Chromium，零碰 3099/7233，工单验收主面）：A1 无选项行点开跨**两个**真实轮询周期仍展开（arbitrary number of poll cycles 主面）；A2 宿主收起跨周期仍收起（收起也是宿主意志，渲染不得翻回）；A3 选项行同样跨周期保持；A4 长 detail 滚到一半跨周期滚动位置保持（宿主在读的面）；A5 刷新活性反向锚——面板开着时新投递请求一个周期内出现且徽标增长（修复不得靠停刷新/冻结渲染达成，否则 A1-A4 假绿）；A6 展开中的行被外部应答→干净迁移 Answered 无页错；A7 已答行展开跨周期保持（工单点名 wipe 同打 answered 行）；A8 全旅程零 pageerror。intent 分工：state Set/draft 键控渲染的真值分支与还原路径白盒归 developer L1（随实现交付），本条只锁浏览器级用户可感知契约。browser/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",

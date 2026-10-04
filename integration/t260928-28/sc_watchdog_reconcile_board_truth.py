@@ -6,9 +6,12 @@ intent（用户可感知行为，工单 scope 2/3 + 设计稿需求 12「不静�
 - A 启动即全量对账：夹具账本缺一行而看板（可见性列表桩）有对应状态 → tick 过
   节拍后 reconcile 报 mismatch 且 mismatches 点名到票——「看板是真源、账本是
   派生投影」；
-- B 缺 N 行本身是 alertable event：差额 N 落一条专属 alert（ledger_missing_rows
-  族），N 变化重响、N 不变冷却内不重响——「曾缺失 N 条」被记进账而非只修不记
-  （工单 scope 2 原话 + 验收演示 §7.3）；
+- B 缺 N 行本身是 alertable event：真缺（在飞票账本零行）落一条专属 alert
+  （ledger_missing_rows 族），缺因不变不重响——「曾缺失」被记进账而非只修不记
+  （工单 scope 2 原话 + 验收演示 §7.3；「N 变化重响」旧契已由 t261004-13 改为
+  **按未覆盖集合去重、any-row 覆盖**，本条 B 随之改签：落后的 t-1 仍是 covered
+  只报 mismatch 不报缺行，告警缺席由账本零行的 t-3 承担；去重语义改由
+  t261004-13 场景②守）；
 - C 看板真源不依赖 worker 在线：board 桩是可见性列表（无任何在线 worker 信号）
   仍可完成对账——「绝不要求某票 worker 在线」承诺；
 - D 对账失败=显式 degraded：board 桩故障（超时）→ reconcile.state=degraded
@@ -44,9 +47,11 @@ def main():
     h = Harness()
     h.start()
     try:
-        # 看板桩：t-1 已到 integ；账本只写到 review_plan（缺后续行）
+        # 看板桩：t-1 已到 integ；账本只写到 review_plan（缺后续行）；
+        # t-3 在飞且账本零行（t261004-13 改契后的「真缺」承担者——t-1/t-2 any-row 即覆盖）
         h.cmd("board_set", rows=[{"ticket": "t-1", "stage_state": "integ"},
-                                 {"ticket": "t-2", "stage_state": "review_plan"}])
+                                 {"ticket": "t-2", "stage_state": "review_plan"},
+                                 {"ticket": "t-3", "stage_state": "integ"}])
         h.cmd("append_ledger", project="p1",
               row=ledger_row("p1", "t-1", 1, "review_plan", stage="review_plan"))
         h.cmd("append_ledger", project="p1",
@@ -62,14 +67,14 @@ def main():
         mm = rec.get("mismatches") or []
         ok(any(m.get("ticket") == "t-1" and m.get("board_state") == "integ" for m in mm),
            "A/E mismatch 点名到 t-1 且以看板状态呈现", mm)
-        ok(bool(missing_rows_alerts(st)), "B 缺 N 行落专属 alert", missing_rows_alerts(st))
+        ok(bool(missing_rows_alerts(st)), "B 缺行落专属 alert（t-3 账本零行）", missing_rows_alerts(st))
 
-        # B N 不变冷却内不重响
+        # B 缺因不变（集合不变）不重响（t261004-13 改契：按未覆盖集合去重）
         n1 = len(missing_rows_alerts(st))
         h.cmd("tick", seconds=65)
         st = h.cmd("status", project="p1")["status"]
         n2 = len(missing_rows_alerts(st))
-        ok(n2 == n1, "B N 不变冷却内不重响", (n1, n2))
+        ok(n2 == n1, "B 集合不变不重响", (n1, n2))
 
         # E 补齐路径：把缺的行补进账本 → mismatch 消除回 ok
         h.cmd("append_ledger", project="p1",

@@ -64,15 +64,41 @@ function makeDeps({ clock, boardRows = [], ledgerLines = [], alertLines = [], wa
   assert(st.alerts.some(a => a.rule === 'reconcile_mismatch'), 'mismatch is itself alertable')
   w.dispose(); n += 2
 }
-// ③ 缺行计数：看板有票账本零覆盖 → ledger_missing_rows，N 不变不重响。
+// ③ 缺行覆盖：看板在飞票账本零行覆盖 → ledger_missing_rows；去重键带集合指纹——
+// 同集合不重响（即使新票使另一桶计数变化）；终态缺口只进状态面，不响（t261004-13）。
 {
   const clock = fakeClock()
   const { w } = makeDeps({ clock, ledgerLines: [], boardRows: [{ id: 't1' }, { id: 't2' }] })
   await w.start()
-  assert(w.status().startup.missing_rows === 2, 'missing rows counted on startup replay')
+  const st = w.status()
+  assert(st.startup.missing_rows === 2, 'in-flight missing counted on startup replay')
+  assert(st.ledger_coverage && st.ledger_coverage.in_flight_missing.join(',') === 't1,t2' && st.ledger_coverage.terminal_missing.length === 0, 'status face exposes both coverage buckets')
   await w.tickOnce()
   const keys = w.status().alerts.filter(a => a.rule === 'ledger_missing_rows').map(a => a.key)
-  assert(keys.length === 1 && keys[0] === 'ledger_missing_rows:sandbar:2@/memhome', 'same N does not re-alert (one beep discipline)')
+  assert(keys.length === 1, 'same uncovered set does not re-alert (one beep discipline)')
+  assert(/ledger_missing_rows:sandbar:2:[0-9a-f]{8}@\/memhome$/.test(keys[0]), 'dedupe key = rule:project:N:sethash@scope')
+  w.dispose(); n += 4
+}
+// ③b 终态票不进告警：closed/verified 零覆盖 → 只在 ledger_coverage.terminal_missing。
+{
+  const clock = fakeClock()
+  const { w } = makeDeps({ clock, ledgerLines: [ledgerLine({ seq: 1, ticket: 't2', stage_state: 'running' })], boardRows: [{ id: 't1', status: 'closed' }, { id: 't2', status: 'rework' }] })
+  await w.start()
+  const st = w.status()
+  assert(st.startup.missing_rows === 0 && st.ledger_coverage.in_flight_missing.length === 0, 'covered in-flight ticket is not missing')
+  assert(st.ledger_coverage.terminal_missing.join(',') === 't1', 'terminal gap lands on the status face only')
+  assert(w.status().alerts.every(a => a.rule !== 'ledger_missing_rows'), 'terminal-only gap raises no alert')
+  w.dispose(); n += 3
+}
+// ③c 空缺口：账本全覆盖（含分叉状态行）→ 无告警、coverage 两桶皆空。
+{
+  const clock = fakeClock()
+  const lines = [ledgerLine({ seq: 1, ticket: 't1', stage_state: 'running' }), ledgerLine({ seq: 2, ticket: 't2', stage_state: 'done' })]
+  const { w } = makeDeps({ clock, ledgerLines: lines, boardRows: [{ id: 't1', stage_state: 'done' }, { id: 't2', stage_state: 'running' }] })
+  await w.start()
+  const st = w.status()
+  assert(st.startup.missing_rows === 0 && st.ledger_coverage.in_flight_missing.length === 0 && st.ledger_coverage.terminal_missing.length === 0, 'every board ticket has a ledger row → both buckets empty (divergent states still cover)')
+  assert(w.status().alerts.every(a => a.rule !== 'ledger_missing_rows'), 'no gap → no alert at all')
   w.dispose(); n += 2
 }
 // ④ 唤醒链：启动重放不醒旧行；新迁移行醒一次；无新行不重醒。

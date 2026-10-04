@@ -154,6 +154,19 @@ export function hhmmLocal(v: unknown): string {
 }
 
 /**
+ * 本地时间 MM-DD HH:MM（t261004-13）。Alerts 列表与 Ledger 唤醒行跨天可辨——旧
+ * hhmmLocal 只有 HH:MM，不同天的两条告警在屏上无法区分。同一本地时区口径，屏上
+ * 仍由静态「Times are local.」标签承载。畸形输入与 hhmmLocal 同契约：显式降级「—」。
+ */
+export function dateTimeLocal(v: unknown): string {
+  const t = typeof v === 'number' ? v : Date.parse(String(v))
+  if (!Number.isFinite(t)) return '—'
+  const d = new Date(t)
+  const p = (n: number) => (n < 10 ? '0' + n : String(n))
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
+/**
  * 唤醒行句（t261003-13 Finding 2）。行上真实存在的字段只有 mode 与 accepted：
  * 句子只由这两者构成；任一缺席/畸形都显式写成 unknown / 「未报告」——
  * **绝不留一个兜底词**（旧实现 `stage||stage_state||'sent'` 把字面量当数据打印）。

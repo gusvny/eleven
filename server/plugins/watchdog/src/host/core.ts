@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path'
 
 import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, dshHome, type ResolvedConfig } from './config.ts'
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
-import { compareStates, countMissingRows, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
+import { compareStates, ledgerCoverage, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
 import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from './self-lock.ts'
 import { applyDedupe, judgeAlert, makeKey, replayDedupe, type AlertSpec, type DedupeState } from './alert-rules.ts'
@@ -127,6 +127,8 @@ export interface WatchdogStatus {
   self_lock: SelfLockVerdict | null
   reconcile: ReconcileResult | null
   startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number }
+  /** t261004-13 additive：缺行覆盖两桶（在飞缺口进告警；终态缺口只在此可见）。 */
+  ledger_coverage: { in_flight_missing: string[]; terminal_missing: string[] } | null
   /** t260929-04 additive：自醒排除的响亮计数与最近证据（review C1 的审计面）。 */
   presumed_self_rows: number
   presumed_self_detail: string | null
@@ -174,6 +176,7 @@ export class Watchdog {
   private selfLock: SelfLockVerdict | null = null
   private liveness: ExecutorLiveness | null = null
   private startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number } = { missing_rows: null, replayed_rows: null, dedupe_keys: 0 }
+  private ledgerCoverageState: WatchdogStatus['ledger_coverage'] = null
   private wakes: WatchdogStatus['wakes'] = []
   /** 最近一拍唤醒裁决（t261003-15）：每条拍路径都显式落（见 tick 内 wake 步注释）。 */
   private lastWakeVerdict: WatchdogStatus['last_wake_verdict'] = null
@@ -384,15 +387,17 @@ export class Watchdog {
         await this.raise({ rule: 'reconcile_degraded', target: this.project, level: 'redline', title: `对账降级（project ${this.project}）`, detail: this.reconcileState.reason ?? '' })
       } else {
         const mism = compareStates(deriveTicketStates(this.ledgerRows), board.rows)
-        const missing = countMissingRows(board.rows, this.ledgerRows)
-        this.startup.missing_rows = missing
+        // 缺行覆盖（t261004-13）：只有账本**零行**覆盖的在飞票进告警；终态缺口只进状态面。
+        const coverage = ledgerCoverage(board.rows, this.ledgerRows)
+        this.ledgerCoverageState = coverage
+        this.startup.missing_rows = coverage.in_flight_missing.length
         if (mism.length > 0) {
           this.reconcileState = { state: 'mismatch', reason: `${mism.length} 票账本推演与看板不一致（以看板为准）`, since: nowMs, mismatches: mism.slice(0, 50) }
           await this.raise({ rule: 'reconcile_mismatch', target: this.project, level: 'redline', title: `对账不一致 ${mism.length} 票（project ${this.project}）`, detail: mism.slice(0, 5).map(m => `${m.ticket}: board=${m.board_state} ledger=${m.ledger_state}`).join('；') })
         } else {
           this.reconcileState = { state: 'ok', reason: null, since: nowMs, mismatches: [] }
         }
-        if (missing > 0) await this.raise(makeMissingRowsSpec(this.project, missing))
+        if (coverage.in_flight_missing.length > 0) await this.raise(makeMissingRowsSpec(this.project, coverage.in_flight_missing))
       }
 
       // liveness：引擎存活（独立探针优先；无探针时板面读成功本身是在线的强证据）。
@@ -517,6 +522,7 @@ export class Watchdog {
       self_lock: this.selfLock,
       reconcile: this.reconcileState,
       startup: this.startup,
+      ledger_coverage: this.ledgerCoverageState,
       presumed_self_rows: this.wakeMem.presumedSelfRows,
       presumed_self_detail: this.wakeMem.presumedSelfDetail,
       queue_mirror: this.wakeIo?.transportState?.() ?? null,

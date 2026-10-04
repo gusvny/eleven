@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, done } from './lib.mjs'
-import { hhmmLocal, wakeRowSentence } from '../src/host/page-logic.ts'
+import { hhmmLocal, dateTimeLocal, wakeRowSentence } from '../src/host/page-logic.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 let n = 0
@@ -50,6 +50,19 @@ assert(sh === '19:50', 'TZ=Asia/Shanghai renders 19:50 (got ' + sh + ')')
 // ---- hhmmLocal：畸形输入 ----
 for (const bad of [NaN, 'not a time', null, undefined, '', {}, new Date('garbage')]) {
   assert(hhmmLocal(bad) === '—', 'hhmmLocal degrades to — for ' + JSON.stringify(bad))
+}
+
+// ---- dateTimeLocal（t261004-13）：本地时区 MM-DD HH:MM，跨天可辨 ----
+const expectedDated = p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+assert(/^\d{2}-\d{2} \d{2}:\d{2}$/.test(dateTimeLocal(FIXED)), 'dateTimeLocal returns MM-DD HH:MM')
+assert(dateTimeLocal(FIXED) === expectedDated, 'dateTimeLocal matches local MM-DD HH:MM of the same Date (' + expectedDated + ')')
+assert(dateTimeLocal(FIXED) === dateTimeLocal(new Date(FIXED).toISOString()), 'number and ISO string inputs agree')
+// 跨天两条告警在屏上必然可辨（日期部分不同，或至少格式带日期字段）。
+assert(dateTimeLocal(FIXED) !== hhmmLocal(FIXED), 'dated form differs from the bare HH:MM form')
+assert(/^\d{2}-\d{2} \d{2}:\d{2}$/.test(dateTimeLocal(Date.UTC(2026, 2, 29, 0, 30))), 'DST-boundary timestamp still formats MM-DD HH:MM')
+// 畸形输入与 hhmmLocal 同契约：显式「—」。
+for (const bad of [NaN, 'not a time', null, undefined, '', {}, new Date('garbage')]) {
+  assert(dateTimeLocal(bad) === '—', 'dateTimeLocal degrades to — for ' + JSON.stringify(bad))
 }
 
 // ---- wakeRowSentence：真实字段组合 ----

@@ -24,7 +24,7 @@
 
 import {
   beepDecision, pickDegraded, fmtProportion, fmtWaiting, fmtAge, groupByProject,
-  splitWaiting, hasOptions, chipLabel, masterOn, hhmmLocal, wakeRowSentence, themeParamOf,
+  splitWaiting, hasOptions, chipLabel, masterOn, hhmmLocal, dateTimeLocal, wakeRowSentence, themeParamOf,
 } from './page-logic.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
@@ -32,7 +32,7 @@ const EMBEDDED = [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
   String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
-  String(hhmmLocal), String(wakeRowSentence), String(themeParamOf),
+  String(hhmmLocal), String(dateTimeLocal), String(wakeRowSentence), String(themeParamOf),
 ].join('\n')
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
@@ -105,7 +105,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 @container (max-width:760px){ .cols{grid-template-columns:1fr} }
 .act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid var(--line-soft)}
 .act:last-child{border-bottom:0}
-.act .t{color:var(--muted);font-size:11px;width:38px;flex:0 0 auto}
+.act .t{color:var(--muted);font-size:11px;width:74px;flex:0 0 auto}
 .pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px;min-width:52px;text-align:center}
 .pill.sign{background:var(--pill-sign-bg);color:var(--pill-sign-fg)}
 .pill.open{background:var(--pill-open-bg);color:var(--pill-open-fg)}
@@ -618,6 +618,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       return;
     }
     var rows = st.alerts||[];
+    // t261004-13：最新在上（watchdog 按账本序给最老在前，展示面负责倒序；按 at 降序，
+    // at 缺席/畸形的行按 0 处理沉底）。时间带日期（dateTimeLocal），跨天可辨。
+    rows = rows.slice().sort(function(a,b){
+      var ta = typeof a.at==='number' ? a.at : (Date.parse(a.at)||0);
+      var tb = typeof b.at==='number' ? b.at : (Date.parse(b.at)||0);
+      return tb - ta;
+    });
     el('alertHead').textContent = 'Recent · ' + rows.length;
     var html = '';
     for(var i=0;i<rows.length;i++){
@@ -625,7 +632,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       var cls = a2.level==='redline' ? 'red' : (a2.night_muted ? 'blue' : 'amber');
       html += '<div class="row"><div class="head" style="cursor:default"><span class="dot '+cls+'"></span>'
         + '<span class="txt">'+esc(a2.title)+'</span>'
-        + '<span class="meta">'+esc(hhmmLocal(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
+        + '<span class="meta">'+esc(dateTimeLocal(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
     }
     if(rows.length===0) html = '<div class="empty">No alerts exist. The watchdog writes an alert only when a rule fires.</div>';
     el('alertList').innerHTML = html;
@@ -641,7 +648,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var wakes = st.wakes||[];
     for(var k=0;k<Math.min(wakes.length,3);k++){
       var w2 = wakes[k];
-      ev += '<div class="act"><span class="t">'+esc(hhmmLocal(w2.at))+'</span><span class="pill open">WAKE</span>'
+      ev += '<div class="act"><span class="t">'+esc(dateTimeLocal(w2.at))+'</span><span class="pill open">WAKE</span>'
         + '<span class="tk">'+esc(w2.ticket||w2.id||'')+'</span><span class="say">'+esc(wakeRowSentence(w2))+'</span></div>';
     }
     if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">No wakes yet. The watchdog adds a row here when it wakes an executor.</span></div>';
