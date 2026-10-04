@@ -73,7 +73,12 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .tk:hover .arrows button{color:var(--muted)}
 .arrows button:hover{color:var(--blue);background:var(--panel2)}
 /* ---- right: executor panel ---- */
-.main{overflow-y:auto;padding:18px clamp(16px,2vw,28px) 40px}
+.mid{position:relative;overflow:hidden;min-width:0}
+.main{height:100%;overflow-y:auto;padding:18px clamp(16px,2vw,28px) 40px}
+.scrim{position:absolute;inset:0;background:rgba(12,18,28,.16)}
+.dialog{position:absolute;inset:12px;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.22);overflow-y:auto;padding:14px 18px 44px}
+.dialog .dh{position:sticky;top:0;background:var(--bg);padding:2px 0 8px;z-index:2}
+.dialog .x{border:0;background:transparent;color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer;padding:0 4px;margin-left:6px}
 .grow{flex:1}
 .top{display:flex;align-items:center;gap:10px;margin:0 0 14px}
 .top h1{font-size:14px;font-weight:600;margin:0}
@@ -208,7 +213,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     <div class="sideBody" id="projList"></div>
   </div>
 
-  <div class="main" id="main"></div>
+  <div class="mid" id="mid">
+    <div class="main" id="main"></div>
+    <div class="scrim" id="scrim" hidden></div>
+    <div class="dialog" id="dialog" hidden></div>
+  </div>
 
   <div class="chat">
     <!-- chat 占位：右栏是**平台的**会话面（dsh-client-ui-conversation，平台自声明锚 [data-conversation-scroll]）。
@@ -312,7 +321,7 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
-let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = 't261004-18', prog = 'dots', panelTab = 'overview', epicCode = null;
+let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = null, prog = 'dots', panelTab = 'overview', epicCode = null;
 function cycleProg(){ prog = prog === 'dots' ? 'bar' : prog === 'bar' ? 'off' : 'dots'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
 const T = () => PROJECTS[cur].tickets;
 const pctOf = t => Math.round((stepIdx(t) + (t.st === 'wait' ? 0 : 0.5)) / STEPS.length * 100);
@@ -329,7 +338,7 @@ const inFlight = () => T().filter(t => t.st === 'run' || t.st === 'hold').length
 const waitCount = () => T().filter(t => t.st === 'wait').length;
 const TICKET = id => { for (const k in PROJECTS) { const t = PROJECTS[k].tickets.find(x => x.id === id); if (t) return Object.assign({ project: k }, t) } return null; };
 
-function render(){ renderSide(); renderMain(); }
+function render(){ renderSide(); renderMain(); renderDialog(); }
 
 function renderSide(){
   const counts = Object.keys(PROJECTS).map(k => ({
@@ -365,7 +374,6 @@ function renderSide(){
 
 function renderMain(){
   const el = document.getElementById('main');
-  if (view === 'ticket'){ el.innerHTML = ticketView(); return; }
   if (view === 'executor'){
     el.innerHTML = '';
     el.appendChild(document.getElementById('tpl-executor').content.cloneNode(true));
@@ -397,6 +405,23 @@ function renderMain(){
 }
 
 // 驾驶舱里的动态数字（模板克隆之后才有这些元素）
+function renderDialog(){
+  const d = document.getElementById('dialog'), sc = document.getElementById('scrim');
+  if (!d) return;
+  const open = Boolean(openId);
+  d.hidden = !open; sc.hidden = !open;
+  d.innerHTML = open ? ticketView() : '';
+}
+function stepTicket(d){
+  const i = T().findIndex(t => t.id === openId), j = i + d;
+  if (i >= 0 && j >= 0 && j < T().length) openTicket(T()[j].id);
+}
+document.addEventListener('keydown', e => {
+  if (!openId) return;
+  if (e.key === 'Escape') closeTicket();
+  if (e.key === 'ArrowDown'){ e.preventDefault(); stepTicket(1) }
+  if (e.key === 'ArrowUp'){ e.preventDefault(); stepTicket(-1) }
+});
 function epicsTabHtml(){
   const codes = [...new Set(T().map(t => t.epic))];
   return '<div class="sect first">Epics</div>' + codes.map(c => {
@@ -561,7 +586,7 @@ function specBlock(t){
 }
 function ticketView(){
   const t = openId ? TICKET(openId) : null;
-  if (!t) return '<button class="back" onclick="goBack()">← Back</button><div class="vhead"><h1>Ticket</h1></div>';
+  if (!t) return '';
   const at = stepIdx(t);
   const label = t.st === 'run' ? 'at work' : t.st === 'hold' ? 'waiting for your signature' : t.st === 'wait' ? 'queued' : 'paused by you';
   const stateCls = t.st === 'hold' ? 'hold' : t.st === 'run' ? 'run' : 'wait';
@@ -582,9 +607,9 @@ function ticketView(){
     ['13:52', 'merge_check: lane branch has commits, tree clean, dry run green'],
     ['13:40', 'implement: handoff written, 3 files changed'],
   ].map(r => '<li><span class="at">' + r[0] + '</span><span>' + r[1] + '</span></li>').join('');
-  return '<button class="back" onclick="goBack()">← Back</button>'
-    + '<div class="dh"><span class="id">' + t.id + '</span><h2>' + t.title + '</h2>'
-    + '<span class="state ' + stateCls + '">' + label + '</span></div>'
+  return '<div class="dh"><span class="id">' + t.id + '</span><h2>' + t.title + '</h2>'
+    + '<span class="state ' + stateCls + '">' + label + '</span>'
+    + '<button class="x" onclick="closeTicket()" title="Close (Esc)">×</button></div>'
     + '<div class="acts"><button class="pri">Sign</button><button>Send back</button><button>Retry check</button><button>Pause</button></div>'
     + decide
     + specBlock(t)
@@ -626,7 +651,8 @@ function pickProject(k, v){ cur = k; dragId = null; openId = null; view = v || '
 function setView(v){ view = v; openId = null; render(); }
 function setFilter(f){ filter = f; render(); }
 function filterEpic(code){ view = 'board'; filter = 'all'; const i = T().findIndex(t => t.epic === code); openId = i >= 0 ? T()[i].id : null; render(); }
-function openTicket(id){ if (view !== 'ticket') prevView = view; openId = id; view = 'ticket'; render(); }
+function openTicket(id){ openId = id; renderDialog(); renderSide(); }
+function closeTicket(){ openId = null; renderDialog(); renderSide(); }
 function goBack(){ view = prevView || 'board'; openId = null; render(); }
 function bump(d){
   const key = cur, c = PROJECTS[key].cap;
