@@ -6404,6 +6404,11 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     ("integration_discipline", "server/engine/integration_discipline.py"),
     ("path_gates", "server/engine/path_gates.py"),
     ("authz_gates", "server/engine/authz_gates.py"),
+    # t261004-27: the delivery face decides authority verdicts (forged raised_by /
+    # unknown face / missing identity block / key-identity mismatch / a declared
+    # caller_project are each named refusals) — an enforcement module, so it must
+    # be visible on the code-stamp fingerprint (tripwire criterion (a)).
+    ("executor_delivery", "server/engine/executor_delivery.py"),
     ("dsh_pin", "server/engine/dsh_pin.py"),
     ("failure_protocol", "server/engine/failure_protocol.py"),
     ("inspection_flow", "server/engine/inspection_flow.py"),

@@ -993,6 +993,11 @@
       "anchor": "behaviour",
       "note": "developer L1: predicate truth table (t261004-25)",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_27_executor_delivery.py": {
+      "anchor": "behaviour",
+      "note": "t261004-27: delivery face refusal matrix + identity survival are the file's asserted behaviour",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -3354,6 +3359,11 @@
     "integration/t261004-23/sc_panel_engine_row_old_door.mjs": {
       "anchor": "behaviour",
       "note": "t261004-20 backfill: the panel shows an engine-filed row with its source; the old door refuses and names the engine path",
+      "sync_path": ""
+    },
+    "integration/t261004-27/sc_engine_delivery.py": {
+      "anchor": "contract",
+      "note": "t261004-27: the executor's ledger writes run in the engine process - identity survival, named refusals, no self-authorization",
       "sync_path": ""
     },
     "integration/t261004-24/sc_copy_language_console_english.py": {

@@ -36,6 +36,8 @@ with workflow.unsafe.imports_passed_through():
         InspectionProduceWorkflow,
         InspectionTicketCountWatcherWorkflow,
     )
+    # t261004-27：执行器项目账投递薄壳（一投一跑，引擎进程代写账本）入注册表。
+    from executor_delivery import ExecutorDeliveryWorkflow  # noqa: F401
     # t260928-20：DispatcherScanWorkflow 的账面发射 mixin（机制在 base，本文件只接线）
     from base import TicketEventLedgerMixin
     from shared import (
@@ -321,4 +323,6 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
 # t260925-01：产出型巡检（InspectionProduceWorkflow，独立链）入注册表。
 ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow, InspectionPeriodicWorkflow,
                  InspectionPeriodicSpawnWorkflow, InspectionTicketCountWatcherWorkflow,
-                 InspectionProduceWorkflow]
+                 InspectionProduceWorkflow,
+                 # t261004-27：执行器项目账投递（引擎进程代写）。
+                 ExecutorDeliveryWorkflow]

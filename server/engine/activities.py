@@ -33,6 +33,8 @@ from temporalio.client import Client
 # t260928-13：事件账本写活动的注册转发（活动体真源在 event_ledger.py；worker 经
 # ALL_ACTIVITIES 注册，保持「活动单一注册面」纪律）。
 from event_ledger import append_event_ledger as _append_event_ledger
+# t261004-27：执行器项目账投递活动（活动体真源在 executor_delivery.py；此处只注册）。
+from executor_delivery import delivery_activity as _executor_delivery_activity
 
 from shared import (
     ADMIN_PY,
@@ -1264,6 +1266,9 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
 ALL_ACTIVITIES = [
     admin_call,
     script_gate,
+    # t261004-27：执行器项目账投递（引擎进程代写账本；None 值面只在无 temporalio
+    # 解释器出现，worker 侧恒有 temporalio，恒为真活动）。
+    *([_executor_delivery_activity] if _executor_delivery_activity is not None else []),
     machine_qc,
     process_stage,
     ai_review_stub,

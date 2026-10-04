@@ -101,6 +101,8 @@ import caller_gate
 import executor_grants
 # t261004-11：执行器动作项目账（每次闸真实裁决一行；面板 Recent-actions 唯一读源）。
 import executor_actions
+# t261004-27：引擎进程代执行的执行器项目账投递（deliver 子命令的身份三关复用面）。
+import executor_requests
 
 # ---- Temporal regression runtime: proactive cleanup of closed-ticket history
 #      (ticket t260902-02, M1-3) ----
@@ -3152,6 +3154,80 @@ async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+async def cmd_deliver(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Engine-process delivery of an executor project-ledger write (t261004-27;
+    host decision 261004 option 1). The caller only SUBMITS: identity is resolved
+    once here, caller-side (env > cwd, repo tree excluded — never declared by an
+    argument), shipped in the payload's identity block, and the ledger append is
+    performed by the ENGINE worker (executor_delivery.perform_delivery), which
+    can reach ~/.sandbar/projects/<key>/ where this session's sandbox cannot
+    (executor request -0020). Every refusal is named; `face=request` has NO
+    in-process fallback — an engine-unreachable refusal names the transport
+    error verbatim instead of re-creating the sandbox-blocked local append.
+
+    Usage: client.py deliver '{"face":"request","body":{...}}'
+    Faces: request | actions-record | grants-audit (fixed; fail-closed).
+    """
+    import executor_delivery
+    face = str(args.get("face") or "")
+    body = args.get("body")
+    if face not in executor_delivery.FACES:
+        return _err("deliver: unknown face %r — allowed faces: %s" % (face[:40], list(executor_delivery.FACES)))
+    if not isinstance(body, dict):
+        return _err("deliver: body must be a JSON object")
+    if body.get("caller_project"):
+        return _err("deliver: identity is derived from the environment and working "
+                    "directory, not declared by the caller (drop caller_project)")
+    # Caller-side identity resolution, ONCE (who, and the derivation source).
+    try:
+        cwd = os.path.realpath(os.getcwd())
+    except OSError:
+        cwd = ""
+    try:
+        projects, _quarantined = load_projects_registry()
+    except Exception:  # noqa: BLE001 — registry failure falls back to env identity
+        projects = None
+    caller = executor_requests.resolve_caller(
+        "", env=dict(os.environ), cwd=cwd, projects=projects,
+        exclude_trees=(os.path.realpath(str(REPO_ROOT)),))
+    if not caller.get("ok"):
+        return _err("deliver: %s" % caller.get("reason", "caller identity refused"))
+    identity = executor_delivery.identity_block(
+        caller["project"], caller["session"], caller["channel"], caller["channel"])
+    # Exempt gated writes never reach the engine (row 6 of the plan tradeoff
+    # table): no delivery run, no fabricated row for a non-gated write.
+    if face == "actions-record":
+        verdict = body.get("verdict")
+        if isinstance(verdict, dict) and verdict.get("allowed") and not verdict.get("enforced"):
+            return _ok({"delivered": False, "exempt": True, "face": face,
+                        "who": identity["session"], "identity_src": identity["identity_src"]})
+    now_ms = int(time.time() * 1000)
+    idem = executor_delivery.delivery_idem(face, identity["project"], identity["session"],
+                                           body, now_ms)
+    wf_id = executor_delivery.workflow_id_for(identity["project"], idem)
+    payload = executor_delivery.delivery_payload(face, identity["project"], identity, body)
+    try:
+        client = await _connect()
+    except TransientConnectError as e:
+        return _err("engine-unreachable: %s" % e, kind=KIND_TRANSIENT)
+    try:
+        handle = await client.start_workflow(
+            "ExecutorDeliveryWorkflow", payload, id=wf_id, task_queue=TASK_QUEUE)
+        receipt = await handle.result()
+    except Exception as e:  # noqa: BLE001 — duplicate id (bucket retry) → first receipt
+        text = str(e)
+        if "already started" in text or "already exists" in text or "ExecutionAlreadyStarted" in text:
+            try:
+                receipt = await client.get_workflow_handle(wf_id).result()
+            except Exception as e2:  # noqa: BLE001
+                return _err("deliver: first receipt unavailable: %s: %s"
+                            % (type(e2).__name__, e2), kind=KIND_TRANSIENT)
+        else:
+            return _err("deliver: workflow failed: %s: %s" % (type(e).__name__, e),
+                        kind=KIND_TRANSIENT)
+    return _ok(receipt)
+
+
 COMMANDS = {
     "start": cmd_start,
     "query": cmd_query,
@@ -3169,10 +3245,11 @@ COMMANDS = {
     "running-tickets": cmd_running_tickets,
     "cancel-audit": cmd_cancel_audit,
     "template-faces": cmd_template_faces,
+    "deliver": cmd_deliver,
 }
 
 USAGE = (
-    "用法：python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces> [argsJSON]\n"
+    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces|deliver> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -3286,6 +3363,12 @@ def main() -> None:
         result = _classify_infra_error(e)
 
     _emit(sub, args, result)
+    # deliver (t261004-27): a refusal is a machine-consumable named receipt AND a
+    # non-zero exit — a sandboxed executor scripts against the exit code, and the
+    # D1/D2 contract is "unreachable engine / sessionless caller refuses, rc != 0".
+    if sub == "deliver" and isinstance(result, dict) and not result.get("ok"):
+        sys.stdout.flush()
+        os._exit(2)
     # 告警类**只读**命令的退出码语义（同 inspection_trigger.deadman）：alarmed 非空=exit 1，
     # 供 ops/巡检自动化踩；stdout 仍是单行 JSON（既有契约不变）。
     if isinstance(result, dict) and isinstance(result.get("result"), dict) \

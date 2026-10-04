@@ -242,8 +242,16 @@ def append_request(body: Dict[str, Any], now_ms: int, seq: int = 1,
                    projects: Optional[Sequence[Dict[str, Any]]] = None,
                    exclude_trees: Sequence[str] = (),
                    load_decl: Optional[Callable[[str], Dict[str, Any]]] = None,
+                   delivered_via: Optional[str] = None,
                    ) -> Dict[str, Any]:
-    """引擎侧投递：身份三关 + 契约校验 + 一行 O_APPEND。返回回执（含 row 或 field）。"""
+    """Engine-side filing: caller identity gates + contract validation + one
+    O_APPEND line. Returns a receipt (with row) or a refusal (with field).
+
+    delivered_via (t261004-27): optional write-channel stamp on the row —
+    None = key omitted (the direct-CLI row shape is unchanged); "engine-process"
+    = the row was appended by the engine process on behalf of the caller
+    (client.py deliver). Row construction stays single-sourced in this module;
+    wrappers must not post-stamp."""
     env = dict(os.environ if env is None else env)
     body = _sanitize(body)  # 入界消毒：坏字符可见化，不崩进程、不写坏账本行
     caller = resolve_caller(str(body.get("caller_project") or ""), env=env, cwd=cwd,
@@ -281,6 +289,8 @@ def append_request(body: Dict[str, Any], now_ms: int, seq: int = 1,
     }
     if fields["options"] is not None:
         row["options"] = fields["options"]
+    if delivered_via:
+        row["delivered_via"] = delivered_via
     path = ledger_file(key, env)
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(row, ensure_ascii=False) + "\n"
