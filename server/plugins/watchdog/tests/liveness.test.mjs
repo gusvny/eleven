@@ -25,7 +25,7 @@ const M = 60_000
   assert(r.evidence.includes('running=false'), 'stalled evidence names the running bit as the check source')
   assert(r.session_running === false, 'liveness exposes session_running on the status face')
   const r2 = judgeExecutor(sig, NOW, 15, NOW - 10 * M)
-  assert(r2.state === 'advancing' && r2.evidence.includes('未达阈值'), 'silent but under threshold = not stalled (wide upper bound)')
+  assert(r2.state === 'advancing' && r2.evidence.includes('under the threshold'), 'silent but under threshold = not stalled (wide upper bound)')
   const r3 = judgeExecutor(sig, NOW, 15, NOW - 16 * M - 8 * 3600_000)
   assert(r3.state === 'stalled', 'host-sleep long jump with signal still judged by progress rule (no false kill on bare clock alone)')
   n += 5
@@ -39,7 +39,7 @@ const M = 60_000
   let last = r.last_progress_at
   r = judgeExecutor(sig, NOW + 5 * M, 15, last)
   last = r.last_progress_at
-  assert(r.state === 'advancing' && r.evidence.includes('静默 6'), 'grace tick silence grows (6 min) across ticks')
+  assert(r.state === 'advancing' && r.evidence.includes('silence 6'), 'grace tick silence grows (6 min) across ticks')
   assert(last === base, 'grace tick does NOT move last_progress_at (no clock reset)')
   r = judgeExecutor(sig, NOW + 16 * M, 15, last)
   assert(r.state === 'stalled', 'feedback loop reaches stalled once silence passes threshold')
@@ -49,7 +49,7 @@ const M = 60_000
 {
   const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: null, lastWakeAt: null, sessionRunning: false }
   const r = judgeExecutor(sig, NOW, 15, null)
-  assert(r.state === 'no_signal' && r.evidence.includes('数据可能过期'), 'no signal at all = no_signal (data may be stale), not stalled')
+  assert(r.state === 'no_signal' && r.evidence.includes('Data may be stale'), 'no signal at all = no_signal (data may be stale), not stalled')
   const r2 = judgeExecutor({ ...sig, sessionKnown: false }, NOW, 15, null)
   assert(r2.state === 'missing', 'undeclared session = explicit missing')
   n += 2
@@ -60,7 +60,7 @@ const M = 60_000
   const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: true }
   const r = judgeExecutor(sig, NOW, 15, NOW - 16 * M, 45)
   assert(r.state === 'advancing', 'running=true silence under long-turn threshold is NOT stalled (old code redlined here)')
-  assert(r.evidence.includes('running=true') && r.evidence.includes('非停摆'), 'evidence names running bit as the check source')
+  assert(r.evidence.includes('running=true') && r.evidence.includes('Not stalled'), 'evidence names running bit as the check source')
   assert(r.session_running === true, 'liveness exposes session_running=true')
   n += 3
 }
@@ -69,7 +69,7 @@ const M = 60_000
   const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: true }
   const r = judgeExecutor(sig, NOW, 15, NOW - 45 * M, 45)
   assert(r.state === 'long_turn', 'silence past long_turn threshold = distinct long_turn state')
-  assert(r.evidence.includes('长回合阈值 45'), 'long_turn evidence names its own threshold')
+  assert(r.evidence.includes('Long-turn threshold: 45'), 'long_turn evidence names its own threshold')
   const rUnder = judgeExecutor(sig, NOW, 15, NOW - 45 * M + 1, 45)
   assert(rUnder.state === 'advancing', 'one ms under the threshold stays advancing (boundary)')
   // 缺省阈值 = stall_minutes × 3（调用方不显式传时）。
@@ -94,11 +94,11 @@ const M = 60_000
   const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: null }
   const r = judgeExecutor(sig, NOW, 15, NOW - 60 * M, 45)
   assert(r.state === 'no_signal', 'unreadable running bit = explicit unknown, never stalled even past stall_minutes')
-  assert(r.evidence.includes('running 位不可读'), 'evidence names the unreadable bit specifically')
+  assert(r.evidence.includes('running bit is not readable'), 'evidence names the unreadable bit specifically')
   assert(r.session_running === null, 'status face shows session_running=null (unknown stays unknown)')
   // 与「会话文件不可读」是两条 no_signal 来源，措辞必须分得开（review 条件 2）。
   const r2 = judgeExecutor({ ...sig, sessionRunning: false, sessionProgress: null }, NOW, 15, NOW - 60 * M, 45)
-  assert(r2.state === 'no_signal' && r2.evidence.includes('会话推进信号'), 'session-file unreadable path keeps its own wording')
+  assert(r2.state === 'no_signal' && r2.evidence.includes('session progress signal'), 'session-file unreadable path keeps its own wording')
   assert(r2.evidence !== r.evidence, 'the two no_signal sources have distinct evidence')
   // 畸形输入：sessionRunning 非布尔（undefined 等）一律按 unknown 走，不抛、不冒充。
   const r3 = judgeExecutor({ ...sig, sessionRunning: undefined }, NOW, 15, NOW - 60 * M, 45)

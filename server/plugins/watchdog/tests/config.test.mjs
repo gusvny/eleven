@@ -58,7 +58,7 @@ let n = 0
   const bad5 = parseWatchdogConfig(JSON.stringify({ alerts: { night: { start: '24:00', end: '07:00', policy: 'sometimes' } } }), 'f5')
   assert(bad5.config_error !== null && bad5.config_error.includes('night'), 'cfg bad night window rejected')
   const bad6 = parseWatchdogConfig(JSON.stringify({ mystery: true }), 'f6')
-  assert(bad6.config_error !== null && bad6.config_error.includes('未知键'), 'cfg unknown key rejected (KI-149 family guard)')
+  assert(bad6.config_error !== null && bad6.config_error.includes('Unknown keys'), 'cfg unknown key rejected (KI-149 family guard)')
   const bad7 = parseWatchdogConfig(JSON.stringify({ executor_session: '' }), 'f7')
   assert(bad7.config_error !== null, 'cfg empty executor_session rejected')
   const bad8 = parseWatchdogConfig(JSON.stringify({ alerts: { redline: [1, 2] } }), 'f8')

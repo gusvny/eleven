@@ -488,7 +488,7 @@ export class Watchdog {
       if (this.liveness.state === 'long_turn') {
         await this.raise({
           rule: 'executor_long_turn', target: sid, level: 'warn',
-          title: `executor 长回合进行中（${sid}）`,
+          title: `executor long turn in progress (${sid})`,
           detail: this.liveness.evidence,
         })
       }
@@ -668,7 +668,7 @@ export class Watchdog {
       phase: this.phase,
       config_error: this.cfg.config_error,
       config_provenance: this.cfg.provenance,
-      heartbeat: { last_beat: null, age_seconds: null, alive: false, reason: 'status() 不读盘（心跳由 readHeartbeat 在 node.ts 路由面读）' },
+      heartbeat: { last_beat: null, age_seconds: null, alive: false, reason: 'status() does not touch disk (the heartbeat is read by readHeartbeat in the node.ts routing face)' },
       ledger: {
         path: eventLedgerFile(this.project, process.env),
         watermark_offset: this.tailer.state.offset,
@@ -704,3 +704,6 @@ export async function readHeartbeatFile(io: CoreIo, path: string, nowMs: number)
   const { readHeartbeat } = await import('./liveness.ts')
   return readHeartbeat({ write: io.heartbeat.write, read: io.heartbeat.read, mtimeMs: io.heartbeat.mtimeMs }, path, nowMs, HEARTBEAT_STALE_MS)
 }
+
+
+

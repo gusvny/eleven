@@ -64,15 +64,15 @@ export function judgeExecutor(
     evidence: '', checked_at: nowMs,
   }
   if (!signals.sessionKnown) {
-    return { ...base, state: 'missing', evidence: '该项目未声明 executor_session（或会话尚未建立）——显式 missing，不冒充正常' }
+    return { ...base, state: 'missing', evidence: 'No executor_session declared for this project (or the session does not exist yet). State: missing.' }
   }
   const progressed = signals.ledgerAdvanced || signals.sessionProgress === true ||
     (signals.lastWakeAt !== null && (lastProgressAt === null || signals.lastWakeAt > lastProgressAt))
   if (progressed) {
     const ev = [
-      signals.ledgerAdvanced ? '账本新行' : null,
-      signals.sessionProgress === true ? '会话文件前进' : null,
-      signals.lastWakeAt !== null && (lastProgressAt === null || signals.lastWakeAt > lastProgressAt) ? '最近有唤醒' : null,
+      signals.ledgerAdvanced ? 'new ledger row' : null,
+      signals.sessionProgress === true ? 'session file advanced' : null,
+      signals.lastWakeAt !== null && (lastProgressAt === null || signals.lastWakeAt > lastProgressAt) ? 'recent wake' : null,
     ].filter(Boolean).join(' + ')
     return { ...base, state: 'advancing', last_progress_at: nowMs, evidence: ev }
   }
@@ -81,13 +81,13 @@ export function judgeExecutor(
   // running 位读不到 = 显式 unknown：绝不据读不到的位判 stalled（假红线反方向），
   // 也不冒充正常；真死的会话由 missing/executor_missing 规则另报。
   if (signals.sessionRunning !== true && signals.sessionRunning !== false) {
-    return { ...base, state: 'no_signal', evidence: '无推进且会话 running 位不可读（本拍 list 缺席/调用失败/会话不在列）——显式 unknown，不判停摆也不冒充正常' }
+    return { ...base, state: 'no_signal', evidence: 'No progress and the session running bit is not readable (absent from the list, call failed, or session not listed). State: unknown. Not stalled.' }
   }
   if (lastProgressAt === null) {
-    return { ...base, state: 'no_signal', evidence: '从无推进记录——历史不可读，数据可能过期' }
+    return { ...base, state: 'no_signal', evidence: 'No progress record ever. History is not readable. Data may be stale.' }
   }
   if (signals.sessionProgress === null) {
-    return { ...base, state: 'no_signal', evidence: '守望者读不到会话推进信号（会话文件不可读）且账本无新行——数据可能过期（宿主休眠/守望者停摆），不等于它卡住了' }
+    return { ...base, state: 'no_signal', evidence: 'No session progress signal (session file not readable) and no new ledger row. Data may be stale (host asleep or watchdog stalled). This does not mean the session is stuck.' }
   }
   const silentMs = nowMs - lastProgressAt
   const silentMin = Math.round(silentMs / 60_000)
@@ -97,19 +97,19 @@ export function judgeExecutor(
     if (silentMs >= longTurnMinutes * 60_000) {
       return {
         ...base, state: 'long_turn',
-        evidence: `会话 running=true 且 ${silentMin} 分钟无消息/账本推进（长回合阈值 ${longTurnMinutes} 分钟；stall 阈值 ${stallMinutes} 分钟）——判定来源：running 位，非停摆，长回合偏长需人看一眼`,
+        evidence: `Session running=true. No message or ledger progress for ${silentMin} minutes. Long-turn threshold: ${longTurnMinutes} minutes. Stall threshold: ${stallMinutes} minutes. Source: running bit. Not stalled; a long turn needs a human look.`,
       }
     }
     return {
       ...base, state: 'advancing',
-      evidence: `无新推进但会话 running=true（长回合进行中；静默 ${silentMin} < 长回合阈值 ${longTurnMinutes} 分钟）——判定来源：running 位，非停摆`,
+      evidence: `No new progress but session running=true (long turn in progress; silence ${silentMin} < long-turn threshold ${longTurnMinutes} minutes). Source: running bit. Not stalled.`,
     }
   }
   // running=false：旧的 stall 路径逐字保留（真卡住照报，不因新信号弱化）。
   if (silentMs >= stallMinutes * 60_000) {
     return {
       ...base, state: 'stalled',
-      evidence: `会话 running=false 且 ${silentMin} 分钟无推进（阈值 ${stallMinutes} 分钟；进展=账本/会话文件/唤醒三源任一），墙钟只作偏宽兜底——判定来源：running=false 位`,
+      evidence: `Session running=false and no progress for ${silentMin} minutes. Threshold: ${stallMinutes} minutes. Progress = a new ledger row, the session file, or a wake. Wall clock is a wide backstop. Source: running=false bit.`,
     }
   }
   // t261001-19 缺陷 A：宽限拍显式声明 state='advancing'（不再隐式吃 base 默认值）。
@@ -117,7 +117,7 @@ export function judgeExecutor(
   // 重新起算——静默计时以 last_progress_at 为准，由调用方从返回值回灌（core 侧修复）。
   return {
     ...base, state: 'advancing',
-    evidence: `无新推进但未达阈值（静默 ${silentMin} < ${stallMinutes} 分钟；会话 running=false）`,
+    evidence: `No new progress and under the threshold (silence ${silentMin} < ${stallMinutes} minutes; session running=false).`,
   }
 }
 

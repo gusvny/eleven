@@ -53,7 +53,7 @@ async function seeded(stat, clock) {
   await w.tickOnce()
   const face2 = w.status().liveness.executor
   assert(face2.state === 'advancing', 'running=true silence 20min is NOT stalled (old code redlined here)')
-  assert(face2.evidence.includes('running=true') && face2.evidence.includes('非停摆'), 'evidence names the check (running bit)')
+  assert(face2.evidence.includes('running=true') && face2.evidence.includes('Not stalled'), 'evidence names the check (running bit)')
   assert(face2.session_running === true, 'status face still shows the running bit')
   assert(w.status().alerts.filter(a => a.rule === 'stall').length === 0, 'no false stall redline was recorded')
   w.dispose()
@@ -74,7 +74,7 @@ async function seeded(stat, clock) {
   await w.tickOnce()
   const face = w.status().liveness.executor
   assert(face.state === 'long_turn', 'past long_turn threshold the state is the distinct long_turn case')
-  assert(face.evidence.includes('长回合阈值 45'), 'long_turn wording names its own threshold')
+  assert(face.evidence.includes('Long-turn threshold: 45'), 'long_turn wording names its own threshold')
   const lt = w.status().alerts.filter(a => a.rule === 'executor_long_turn')
   assert(lt.length === 1, 'executor_long_turn raised exactly once (dedupe path)')
   assert(lt[0].level === 'warn', 'executor_long_turn is warn, NOT a redline (not in the redline list)')

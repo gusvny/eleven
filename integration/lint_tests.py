@@ -981,6 +981,12 @@ def main():
     lint_narrowing_env_inheritance()
     lint_tool_stdout_channel()
     lint_vocab_cross_language_locks()
+    # L15 copy-language gate (t261004-24): new product copy must stay English
+    # (writing-standard §1/§2). Implementation lives in integration/lint_copy_language.py
+    # (standalone entry there); wired here in-process like L7 so every lane that runs
+    # this static gate carries the rule.
+    from lint_copy_language import lint_copy_language as _l15
+    _l15(errors)
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

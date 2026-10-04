@@ -52,7 +52,7 @@ function makeDeps({ clock, dshHome, executorSession = 'executor-sb', ledgerLines
   const l1 = w.status().liveness.executor
   assert(l1.state === 'advancing', 'grace tick stays advancing (under threshold)')
   assert(l1.last_progress_at === p0, 'grace tick does NOT reset the silence clock (last_progress_at unchanged)')
-  assert(l1.evidence.includes('静默 2'), 'evidence silence minutes grow across ticks (no more 永远静默 1)')
+  assert(l1.evidence.includes('silence 2'), 'evidence silence minutes grow across ticks (no more 永远静默 1)')
   clock.advance(13 * 60_000 + 1000)
   await w.tickOnce()
   const l2 = w.status().liveness.executor
