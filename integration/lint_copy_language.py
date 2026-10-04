@@ -185,6 +185,13 @@ def lint_copy_language(errors, base=None):
                       % diff_text.strip()[:200])
         return
     print("L15 copy-language gate: base = %s (%s)" % (base_ref, how))
+    # Host ruling -0008: untracked-but-not-ignored in-scope files ride the same
+    # added-line face (a new file is all added lines by definition).
+    untracked = untracked_diff(git)
+    if untracked:
+        diff_text = diff_text + "\n" + untracked
+        print("L15 copy-language gate: untracked in-scope files judged: %d"
+              % untracked.count("+++ b/"))
     violations: list[str] = []
     exempt: list[str] = []
     lint_diff(diff_text, violations.append, exempt)
@@ -206,6 +213,28 @@ def lint_copy_language(errors, base=None):
         print("L15 copy-language gate: clean")
 
 
+def untracked_diff(git):
+    """Synthesized added-line diff for UNTRACKED-but-not-ignored in-scope files
+    (host ruling on -0008, t261004-26): `git diff <base>` never shows a file git
+    does not track, so a brand-new file carrying Chinese would dodge the gate
+    entirely. Each such file is rendered as a /dev/null -> file unified diff —
+    every line is an added line, exactly the per-diff face. Unreadable files are
+    skipped here (the L1 syntax gate owns unreadable sources); the tracked-file
+    face is unchanged."""
+    rc, out = git("ls-files", "-o", "--exclude-standard", "-z")
+    if rc != 0:
+        return ""
+    chunks = []
+    for rel in (p for p in out.split("\0") if p and _in_scope(p)):
+        try:
+            lines = Path(rel).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        chunks.append("--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n" % (rel, len(lines))
+                      + "".join("+" + ln + "\n" for ln in lines))
+    return "\n".join(chunks)
+
+
 def main(argv):
     base = None
     if "--base" in argv:
@@ -223,6 +252,13 @@ def main(argv):
     if rc != 0:
         print("ENV_FAIL: git diff failed: %s" % diff_text.strip()[:300], file=sys.stderr)
         return 2
+    # Host ruling -0008: untracked-but-not-ignored in-scope files ride the same
+    # added-line face (a new file is all added lines by definition).
+    untracked = untracked_diff(git)
+    if untracked:
+        diff_text = diff_text + "\n" + untracked
+        n_files = untracked.count("+++ b/")
+        print("copy-language gate: untracked in-scope files judged: %d" % n_files)
     print("copy-language gate: scope = %s" % ", ".join(SCOPE_GLOBS + SCOPE_FILES))
     print("copy-language gate: base = %s (%s); added lines only" % (base_ref, how))
     violations: list[str] = []

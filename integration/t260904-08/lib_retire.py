@@ -186,10 +186,16 @@ def load_ticket_tool():
 
 
 def run_client(py, sub, args, env=None, timeout=60):
-    """spawn <py> client.py <sub> <argsJSON>（node.ts cli 同款口径）。返回 (rc, out)。"""
+    """spawn <py> client.py <sub> <argsJSON>（node.ts cli 同款口径）。返回 (rc, out)。
+
+    身份纪律（t261004-26，-0023）：调用方身份显式声明=票面自身 project，绝不继承
+    外层泳道轮 env 的 SANDBAR_CALLER_PROJECT（继承身份会让跨项目闸抢在断言面前拒收）。"""
     e = dict(os.environ)
     if env:
         e.update(env)
+    e.pop("SANDBAR_CALLER_IDENTITY_SRC", None)
+    if isinstance(args, dict) and args.get("project"):
+        e["SANDBAR_CALLER_PROJECT"] = str(args["project"])
     p = subprocess.run([py, str(POC / "client.py"), sub, json.dumps(args)],
                        env=e, cwd=str(REPO), capture_output=True, text=True, timeout=timeout)
     return p.returncode, (p.stdout or "") + (p.stderr or "")

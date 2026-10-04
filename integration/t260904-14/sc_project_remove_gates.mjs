@@ -58,10 +58,23 @@ const mkEntry = (root, key, ids) => {
 // client.py 直呼（真通道，仅真票子用例用；cwd=仓根，消费 SANDBAR_TARGET_HOST/NAMESPACE env）。
 // 解释器与 provisionRealRig 的依赖①同款解析（enginePy）——系统 python3 无 SDK 时
 // 直呼必炸，260908 前此子用例恒 env_fail。
+// 身份纪律（t261004-26，-0023）：调用方身份显式声明=票面自身 project（从 argsJSON 读，
+// 覆写继承值），绝不继承外层泳道轮的 SANDBAR_CALLER_PROJECT——继承身份会让跨项目闸
+// 抢在要断言的具名面之前拒收。
 function pyTicket(clientArgs, env) {
   const py = enginePy() || 'python3';
+  const declared = { ...env };
+  delete declared.SANDBAR_CALLER_IDENTITY_SRC;
+  for (const a of clientArgs) {
+    try {
+      const p = JSON.parse(a);
+      if (p && typeof p === 'object' && p.project) {
+        declared.SANDBAR_CALLER_PROJECT = String(p.project);
+      }
+    } catch { /* non-JSON arg (subcommand name etc.) — not a payload */ }
+  }
   const r = spawnSync(py, ['server/engine/client.py', ...clientArgs],
-    { cwd: REPO_ROOT, env, encoding: 'utf8', timeout: 60000 });
+    { cwd: REPO_ROOT, env: declared, encoding: 'utf8', timeout: 60000 });
   return { code: r.status === null ? -1 : r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
 

@@ -87,6 +87,20 @@ NARROWING_ENV_NAMES = (
     "SANDBAR_STAGE_SWEEP_ORPHANS",           # 引擎每轮注入：挂点孤儿清扫总闸
     "SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX",     # 引擎每轮注入：清扫半径前缀
 )
+# 261004（执行器请求 -0023，t261004-26）：继承的**调用方身份**与本表同族同纪律——
+# ticket.py/client.py 的 spawn 链往下注入 SANDBAR_CALLER_PROJECT +
+# SANDBAR_CALLER_IDENTITY_SRC；夹具自己起票入口时不剥它，继承来的身份会让跨项目闸
+# 抢在要断言的具名面之前一步拒收（79e4cb6 手修的两条场景即此族，此处收编为纪律）。
+# 判据同样是「被测面由夹具声明，绝不继承」：要测身份闸本身，用 extra 显式注入敌对值。
+INHERITED_IDENTITY_NAMES = (
+    "SANDBAR_CALLER_PROJECT",
+    "SANDBAR_CALLER_IDENTITY_SRC",
+)
+
+
+def _inherited_names() -> tuple:
+    """清理时要剥的具名旋钮全集（收窄 + 身份）——四个清理出口共用一份。"""
+    return NARROWING_ENV_NAMES + INHERITED_IDENTITY_NAMES
 
 
 def narrow_env_names() -> tuple:
@@ -95,23 +109,26 @@ def narrow_env_names() -> tuple:
 
 
 def inherited_narrowing_knobs(env=None) -> dict:
-    """env 里**还带着**的收窄旋钮（诊断/守卫自证用；空 dict = 干净）。"""
+    """env 里**还带着**的继承旋钮（收窄 + 调用方身份；诊断/守卫自证用；空 dict = 干净）。"""
     src = os.environ if env is None else env
+    named = _inherited_names()
     out = {}
     for k, v in src.items():
-        if k in NARROWING_ENV_NAMES or k.startswith(NARROWING_ENV_PREFIXES):
+        if k in named or k.startswith(NARROWING_ENV_PREFIXES):
             out[k] = v
     return out
 
 
 def clean_narrowing_env(extra=None, base=None) -> dict:
-    """副本 env：剥掉**继承来的窄化/策略旋钮**，再并入调用方显式声明的 extra。
+    """副本 env：剥掉**继承来的窄化/策略旋钮与调用方身份**，再并入调用方显式声明的 extra。
 
-    所有「场景/夹具自己起执行器或闸」的地方都必须走这里（守卫=integration/lint_tests.py
-    L12）：子进程只该看见夹具自己声明的那一档，绝不继承外层泳道轮的收窄面。"""
+    所有「场景/夹具自己起执行器/闸/票入口」的地方都必须走这里（守卫=integration/
+    lint_tests.py L12）：子进程只该看见夹具自己声明的那一档，绝不继承外层泳道轮的
+    收窄面或身份（SANDBAR_CALLER_PROJECT 族，t261004-26 起）。"""
     env = dict(os.environ if base is None else base)
+    named = _inherited_names()
     for k in list(env):
-        if k in NARROWING_ENV_NAMES or k.startswith(NARROWING_ENV_PREFIXES):
+        if k in named or k.startswith(NARROWING_ENV_PREFIXES):
             env.pop(k, None)
     for k, v in (extra or {}).items():
         env[str(k)] = str(v)
@@ -131,8 +148,9 @@ class no_narrowing_env:
         self._added = []
 
     def __enter__(self):
+        named = _inherited_names()
         for k in list(os.environ):
-            if k in NARROWING_ENV_NAMES or k.startswith(NARROWING_ENV_PREFIXES):
+            if k in named or k.startswith(NARROWING_ENV_PREFIXES):
                 self._saved[k] = os.environ.pop(k)
         for k, v in self.extra.items():
             os.environ[str(k)] = str(v)
@@ -209,8 +227,21 @@ def narrowing_lock_report(py_src: str, mjs_src: str) -> list:
     report = []
     py_prefixes = _py_tuple_strings(py_src, "NARROWING_ENV_PREFIXES")
     py_names = _py_tuple_strings(py_src, "NARROWING_ENV_NAMES")
+    py_idn = _py_tuple_strings(py_src, "INHERITED_IDENTITY_NAMES")
     mjs_prefixes = _mjs_array_strings(mjs_src, "NARROWING_PREFIXES")
     mjs_names = _mjs_array_strings(mjs_src, "NARROWING_NAMES")
+    mjs_idn = _mjs_array_strings(mjs_src, "INHERITED_IDENTITY_NAMES")
+    # 调用方身份清单与收窄清单同锁（t261004-26：身份收编进同一份纪律后，两份手抄
+    # 同样不许漂移；缺一侧=fail-closed 产行，不当相等）。
+    for side, val in (("py", py_idn), ("mjs", mjs_idn)):
+        if val is None:
+            report.append("%s-side identity names literal not extractable (fail-closed)" % side)
+    if py_idn is not None and mjs_idn is not None:
+        for i in range(max(len(py_idn), len(mjs_idn))):
+            p = py_idn[i] if i < len(py_idn) else "<absent>"
+            m = mjs_idn[i] if i < len(mjs_idn) else "<absent>"
+            if p != m:
+                report.append("identity-names[%d] drift: py=%r mjs=%r" % (i, p, m))
     for side, val in (("py", py_prefixes), ("mjs", mjs_prefixes)):
         if val is None:
             report.append("%s-side prefixes literal not extractable (fail-closed)" % side)

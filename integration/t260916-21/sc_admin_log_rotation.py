@@ -458,7 +458,10 @@ check("C3b max_mb 畸形回落缺省 512（不炸不误切）",
 print("---- D 段：审计写失败可感（真子进程 stdout/stderr） ----")
 fresh_registry("seg-d-reg")  # 干净空桩：D 命令子进程不掺配置变量
 blocker = fresh_dir("seg-d-blocker")  # 目录本身 = open('a') 的 OSError 桩（跨平台稳定）
-env_d = stub_env({"SANDBAR_ADMIN_LOG": str(blocker)})
+# 身份纪律（t261004-26，-0023）：D 段子进程显式声明调用方身份（fixture 桩项目），绝不
+# 继承外层泳道轮的 SANDBAR_CALLER_PROJECT——该段断言的是审计写失败错误面，不是身份闸。
+env_d = stub_env({"SANDBAR_ADMIN_LOG": str(blocker),
+                  "SANDBAR_CALLER_PROJECT": "t26091621"})
 
 
 def temporalio_available():

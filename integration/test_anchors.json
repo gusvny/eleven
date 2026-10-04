@@ -3415,6 +3415,21 @@
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
+    },
+    "integration/t261004-26/sc_hostile_identity_fixture_chain.py": {
+      "anchor": "behaviour",
+      "note": "fault-injection chain: hostile inherited caller identity must not flip identity-gated guard scenarios; cleaning point strips identity; planted L12 probes bite",
+      "sync_path": ""
+    },
+    "integration/t261004-26/sc_panel_flake_stability.py": {
+      "anchor": "behaviour",
+      "note": "stability face: the two de-flaked panel tests run 3/3 consecutive green rounds through their declared node --test entries",
+      "sync_path": ""
+    },
+    "integration/t261004-26/sc_guard_statement_level_faces.py": {
+      "anchor": "behaviour",
+      "note": "fault-injection brake: -23 wrap shape bites the statement-level surrogate predicate; planted L7 mention probes bite the term gate",
+      "sync_path": ""
     }
   }
 }

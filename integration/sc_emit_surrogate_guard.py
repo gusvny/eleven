@@ -34,6 +34,11 @@ ALLOW = {
     ("lane_audit.py", '{"dry_run": True}'),        # 常量回执
     ("scan_schedule.py", "_err(USAGE)"),           # 用法文案
     ("review_store.py", "'error': __doc__"),       # 文档串常量
+    # t261004-26：statement-level 谓词（lib_emit_anchor）看得见旧子串守卫漏掉的出口，
+    # 以下三处是它新抓的——判词如下；修复（加兜底）属产品面欠账，随专门票处置：
+    ("admin.py", "调工具 %s"),      # admin 运维工具的人读轮次轨迹 print，非机器回执路径
+    ("verify_m6.py", "巡检完成"),   # 离线 M6 验收脚本的人读报告输出，非回执路径
+    ("verify_m6.py", "三档计数"),   # 同上（离线验收脚本人读输出）
 }
 
 pass_n = fail_n = 0
@@ -74,7 +79,14 @@ def leg(label, script, args_obj):
 
 
 def leg_family_anchor():
-    """C 族面锚：动态载荷 print(json.dumps(...)) 出口必须带兜底（豁免白名单外）。"""
+    """C 族面锚：动态载荷 print(json.dumps(...)) 出口必须带兜底（豁免白名单外）。
+
+    t261004-26（-0013）：判据从子串形状升级为**语句级**（integration/lib_emit_anchor.py
+    的 AST 谓词）——旧判据锚 `print(json.dumps(` 字面量 + 3 行窗，一层包裹括号就逃逸
+    （-23 修法恰是这种包裹=守卫看不见自己的目标）；AST 天然无视包裹括号，且能看见
+    `print("x" + json.dumps(...))` / `print('...' % ..., json.dumps(...))` 等出口。
+    语法坏文件 fail-closed 红（点名文件），绝不静默跳过。"""
+    import lib_emit_anchor
     viol = []
     for root, dirs, files in os.walk(os.path.join(REPO, "server")):
         dirs[:] = [d for d in dirs if d not in (".venv", "node_modules", "__pycache__")]
@@ -82,19 +94,18 @@ def leg_family_anchor():
             if not fn.endswith(".py"):
                 continue
             path = os.path.join(root, fn)
-            with open(path, encoding="utf-8") as f:
-                lines = f.readlines()
-            for i, ln in enumerate(lines):
-                if "print(json.dumps(" not in ln:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            lines = text.splitlines()
+            for v in lib_emit_anchor.emit_anchor_violations(text, fn):
+                # 豁免=（文件名, 语句行内锚）：看违约行±1 行的源码段（可折行语句）。
+                lineno_s = v.split(":")[1]
+                lineno = int(lineno_s) if lineno_s.isdigit() else 0
+                segment = "\n".join(lines[max(0, lineno - 2):lineno + 1])
+                if any(a_fn == fn and a_anchor in segment for a_fn, a_anchor in ALLOW):
                     continue
-                stmt = "".join(lines[i:i + 3])          # 语句可折行，看 3 行窗
-                if "ensure_ascii=False" not in stmt:
-                    continue                            # ensure_ascii=True 天然转义，无坏字符面
-                allowed = any(fn == a_fn and a_anchor in ln
-                              for a_fn, a_anchor in ALLOW)
-                if not allowed and "backslashreplace" not in stmt:
-                    viol.append("%s:%d" % (fn, i + 1))
-    ok(viol == [], "C 动态载荷出口全带坏字符兜底（豁免仅白名单 5 处）",
+                viol.append(v)
+    ok(viol == [], "C 动态载荷出口全带坏字符兜底（语句级判据；豁免仅白名单 8 处）",
        viol)
 
 

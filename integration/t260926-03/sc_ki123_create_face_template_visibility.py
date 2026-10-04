@@ -84,6 +84,9 @@ def has_temporalio(py: str) -> bool:
 
 
 LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORKFLOW")
+# t261004-26（-0023）：调用方身份同属「绝不继承」面——继承的 SANDBAR_CALLER_PROJECT
+# 会让跨项目闸抢在断言面之前拒收。清理后再由各 spawn 按票面自身 project 显式声明。
+LANE_MARKERS = LANE_MARKERS + ("SANDBAR_CALLER_PROJECT", "SANDBAR_CALLER_IDENTITY_SRC")
 
 EXT_ID = "ki123-real-flow"
 
@@ -133,11 +136,13 @@ class Ki123BrokenFlow:
 BARE_OLD_REFUSAL = "create 需要 workflow（模板 id，可用：dev-lane）"
 
 
-def clean_env(root: pathlib.Path) -> dict:
+def clean_env(root: pathlib.Path, caller=None) -> dict:
     env = dict(os.environ)
     for m in LANE_MARKERS:
         env.pop(m, None)
     env["SANDBAR_PROJECTS_DIR"] = str(root)
+    if caller:
+        env["SANDBAR_CALLER_PROJECT"] = caller      # 显式声明，先剥后注入（t261004-26）
     return env
 
 
@@ -160,17 +165,21 @@ def make_project(root: pathlib.Path, key: str, modules: dict | None) -> pathlib.
 
 
 def run_faces(epy: str, root: pathlib.Path, payload: str = "{}"):
+    try:
+        caller = (json.loads(payload) or {}).get("project")
+    except ValueError:
+        caller = None
     return subprocess.run(
         [epy, str(ENGINE / "client.py"), "template-faces", payload],
-        cwd=str(REPO), env=clean_env(root), capture_output=True, text=True,
-        timeout=300)
+        cwd=str(REPO), env=clean_env(root, caller=caller), capture_output=True,
+        text=True, timeout=300)
 
 
 def run_create(root: pathlib.Path, workflow: str, key: str):
     payload = json.dumps({"op": "create", "project": key, "workflow": workflow,
                           "title": "ki123 offline probe"}, ensure_ascii=False)
     return subprocess.run([sys.executable, str(TICKET), payload],
-                          cwd=str(REPO), env=clean_env(root),
+                          cwd=str(REPO), env=clean_env(root, caller=key),
                           capture_output=True, text=True, timeout=300)
 
 

@@ -64,22 +64,41 @@ try {
   await qRow.locator('.head').click()
   n += 3
 
-  // ② 长详情滚动位置跨轮询保持。
-  // 设桩带重试：满载顺序跑时，轮询重建可能恰好落在「设 scrollTop」与「读回」之间，
-  // 桩没立住就 tick 会把环境竞态误报成回归——重试到桩立住（before===300）再 tick，
-  // 断言本身（tick 后仍是 300）不减力。
+  // ② 长详情滚动位置跨轮询保持（t261004-26 de-flake，requests -0006/-0011/-0019 族）：
+  // 重试维与断言维分离。设桩在**同一次 evaluate** 里完成「设 scrollTop → 等两帧 →
+  // 读回」，读回不是 300 的尝试是环境竞态（轮询重建恰好落在设与读之间），可重试——
+  // 每次重试都打印在案，超过上限=FAIL 且报「负载下桩立不住」，绝不静默吞成绿；
+  // 桩**已验证立住**之后才 tick，tick 后丢失=产品红，不重试（对抗姿态不减力）。
   const qId = await idOf('Do you have more instructions')
   const sel = '[data-row="' + qId + '"] .detail'
-  let before = 0
-  for (let attempt = 0; attempt < 5 && before !== 300; attempt++) {
-    await page.$eval(sel, (d) => { d.scrollTop = 300 })
-    before = await page.$eval(sel, (d) => d.scrollTop)
-    if (before !== 300) await tick()
+  const setStub = () => page.$eval(sel, async (d) => {
+    d.scrollTop = 300
+    await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)))
+    return d.scrollTop
+  })
+  let held = 0
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    held = await setStub()
+    if (held === 300) break
+    console.log(`    scroll-stub attempt ${attempt}/5 did not hold (read back ${held}) — environment race, retrying`)
+    await tick()
   }
+  assert(held === 300, 'scroll stub established and verifiably held (5 attempts, under-load exhaustion is a FAIL that says so, last read=' + held + ')')
   await tick()
+  // Settle condition for the post-tick dimension (t261004-26 rework round 4):
+  // the panel restores the scroll position AFTER the poll re-render (rAF /
+  // post-render restore), so reading d.scrollTop immediately after tick()
+  // races the restore — gate evidence: stub assert PASSED at :86, rounds died
+  // here at :89. Wait until the restored value is observable, THEN read and
+  // assert. Timeout here means the restore never happened → the assert below
+  // names it a product red; no timeout is raised to hide it.
+  await page.waitForFunction((s) => {
+    const d = document.querySelector(s)
+    return d && d.scrollTop === 300
+  }, sel, { polling: 'raf' })
   const after = await page.$eval(sel, (d) => d.scrollTop)
-  assert(before === 300 && after === 300, 'detail scroll position survives a poll cycle')
-  n += 1
+  assert(after === 300, 'detail scroll position survives a poll cycle (stub verified-held, read after a verified settle: a failure here is product red, not a race)')
+  n += 2
 
   // ③ 自由文本草稿跨轮询保持；收起再展开后仍在；焦点光标回到输入框。
   const input = qRow.locator('textarea[data-answerbox]')

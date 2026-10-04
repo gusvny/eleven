@@ -52,6 +52,17 @@ try {
   await page.waitForSelector('#saveBtn', { state: 'attached' })
   await page.evaluate(() => document.getElementById('t-settings').click()) // 切到 Settings tab（pane 才可见）
   await page.waitForSelector('#saveBtn')
+  // t261004-26 de-flake：#saveBtn 在场 ≠ settings 数据已渲染——旋钮是 settings GET
+  // 的**异步**结果（renderSettings 落在 fetch 回调里）。不条件等待就读 #setKnobs，
+  // 读到的可能是空容器（本地实证 0 knobs；集测机上则表现为 fill 等 kb_ 选择器
+  // 15s 超时 = rc=1 TimeoutError ~26s）。同一族纪律：断言面不得抢在异步前置落定
+  // 之前——等待条件（旋钮在场）而不是等一段定值时间。
+  // 30s explicit budget on the FIRST wait only: a cold Chrome launch + first
+  // settings GET can exceed the 15s default under load — the contract is
+  // "knobs render when the settings GET lands", not "within 15s"; the later
+  // settle re-check keeps the default budget.
+  await page.waitForFunction(() => document.querySelectorAll('#setKnobs .knob').length > 0,
+    undefined, { polling: 200, timeout: 30000 })
 
   // (a) 无重复 id：读端 getElementById 读第一个 → 重复 id = 读错字段的根因。
   const dupes = await page.evaluate(() => {
@@ -88,11 +99,16 @@ try {
   assert(reason.includes('REJECTED') && reason.includes('keep_days'), 'engine rejection reason shown on the page: ' + reason.trim().slice(0, 120))
   // loadSettings 的重渲染会重建 #saveResult —— 理由必须在刷新落定后**仍在**。
   // （t261003-06 改版：#saveBtn 移出 #setKnobs 到独立 .bar 行——刷新落定判据改为旋钮已重建。）
-  await page.waitForFunction(() => {
+  // t261004-26 de-flake：定值睡 800ms 换成条件判据——「拒绝文案在场 + 旋钮已重建 +
+  // 再跨一次 200ms 轮询仍稳定」=settings+grants 两个 GET 的重渲染都落定；负载下
+  // 800ms 是掷硬币，条件不是。全部路径（正常/超时）由 waitForFunction 的超时收口。
+  const reasonSettled = () => {
     const t = document.getElementById('saveResult')
     return t && t.textContent.includes('REJECTED') && document.querySelector('#setKnobs .knob')
-  }, { polling: 200 })
-  await page.waitForTimeout(800) // 等 settings+grants 两个 GET 的重渲染都落定
+  }
+  await page.waitForFunction(reasonSettled, undefined, { polling: 200 })
+  await new Promise((res) => setTimeout(res, 250)) // one more poll period: proves the reason survived a re-render pass, not just the first paint
+  await page.waitForFunction(reasonSettled, undefined, { polling: 200 })
   const after = await page.textContent('#saveResult')
   assert(after.includes('REJECTED') && after.includes('keep_days'), 'rejection reason survives the settings refresh')
   assert(readFileSync(declFile, 'utf8') === savedBytes, 'rejected save left the declaration file byte-identical')

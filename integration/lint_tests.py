@@ -51,6 +51,7 @@ Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
 """
 import atexit
 import json
+import os
 import py_compile
 import re
 import shutil
@@ -302,6 +303,15 @@ def _lint_targets():
     return [p for p in REPO.rglob("*") if p.is_file()]
 
 
+#: L7 提及标记（t261004-26，-0014 note）：sanctioned way to mention a banned term。
+#: 有些产物的职责就是点名被禁词（术语表本身、本族守卫的文档与测试）——以前只能靠
+#: 基线 -1 豁免硬编码。带本标记的**行**上的出现不计数，但逐条列进门输出（file:line，
+#: 给评审看，不是静默吞掉）；未标记行的计数与基线判法完全不变。按行不按文件：
+#: 一份文档只在需要点名的行上打标记，其余正文照旧受基线约束。语义偏移（合法收缩向）：
+#: 给既有已计数行打标记会把该文件的有效计数降下来——基线是上限，只降不升，允许。
+L7_TERM_MENTION = "terminology-mention"
+
+
 def lint_terminology():
     """L7 术语废止看守（宿主令 260920）：行话旧称（被禁词，真源=docs/terminology.md「禁用对照」）不得新增。
 
@@ -344,7 +354,22 @@ def lint_terminology():
             text = p.read_text(encoding="utf-8", errors="replace")
         except Exception:                        # noqa: BLE001 —— 读不动=不判它，不改判
             continue
-        n = text.count(term)
+        mentions = []                            # 提及清单（评审可见，不计数）
+        counted = 0
+        for i, ln in enumerate(text.splitlines()):
+            c = ln.count(term)
+            if not c:
+                continue
+            if L7_TERM_MENTION in ln:
+                mentions.append("%s:%d" % (rel, i + 1))
+            else:
+                counted += c
+        if mentions:
+            # Not prefixed "L7": the verdict line must stay the only L7 row, and
+            # a marked mention must never read as a violation there.
+            print("sanctioned-mention (%s): %s" % (L7_TERM_MENTION,
+                                                   ", ".join(mentions)))
+        n = counted
         if not n:
             continue
         total += n
@@ -753,6 +778,13 @@ L12_WHITELIST = {
 L12_EXECUTOR_TOKENS = ("run_scenarios.py", "call", "verify_lane")
 L12_HELPER_MARKERS = ("clean_narrowing_env", "no_narrowing_env", "cleanNarrowingEnv",
                       "lib_env")
+# t261004-26（执行器请求 -0023）：票入口 spawn 同族看守——夹具起 ticket.py / client.py
+# 时，继承的 SANDBAR_CALLER_PROJECT 会让跨项目闸抢在要断言的具名面之前拒收（79e4cb6
+# 手修两条场景即此族）。判据与执行器看守同形：**按括号配平的整条调用**取文本，
+# 调用文本里没有 caller_project= 的票入口 spawn 即红；文件级豁免只有「走了清理单点」
+# （lib_env 自 t261004-26 起连身份一起剥）。注释/夹具字符串里的 caller_project= 不算
+# 声明——**call-scoped**，与执行器令牌同一纪律。
+L12_TICKET_TOKENS = ("ticket.py", "client.py")
 
 
 def _l12_balanced_call(text, open_paren_idx):
@@ -767,6 +799,32 @@ def _l12_balanced_call(text, open_paren_idx):
             if depth == 0:
                 return text[open_paren_idx:i + 1]
     return text[open_paren_idx:]
+
+
+def _l12_process_calls(text):
+    """文件里全部「起子进程」的括号配平调用文本（subprocess.* / node spawn 族）。"""
+    calls = []
+    for m in re.finditer(
+            r"subprocess\.(?:run|Popen|call|check_output|check_call)\s*\(", text):
+        calls.append(_l12_balanced_call(text, text.index("(", m.start())))
+    for m in re.finditer(r"\b(?:spawnSync|spawn|execSync|execFileSync)\s*\(", text):
+        calls.append(_l12_balanced_call(text, text.index("(", m.start())))
+    return calls
+
+
+def _l12_identity_facts(text):
+    """票入口身份判定面（纯函数，无 IO）：返回
+    {"ticket_spawn": 票入口 spawn 调用数, "declared": 身份已显式声明}。
+    声明通道（两条，与 L9 同源；review 条件 C2 的 call-scoped 纪律）：
+      1. call-scoped：`caller_project` 出现在**某条括号配平 spawn 调用的文本内**；
+      2. 赋值形态：文件里出现 `SANDBAR_CALLER_PROJECT` 的**赋值/字典项**（= 或 : 跟随）
+         ——夹具把身份写进传给子进程的 env，与 L9 的 head-env 通道同义。
+    注释/夹具字符串里的任何令牌都不算声明（无可执行语义）——合成犯例在自证里钉住。"""
+    calls = _l12_process_calls(text)
+    ticket = [c for c in calls if any(tok in c for tok in L12_TICKET_TOKENS)]
+    declared = (any("caller_project" in c for c in calls)
+                or re.search(r"SANDBAR_CALLER_PROJECT['\"\]]*\s*[:=]", text) is not None)
+    return {"ticket_spawn": len(ticket), "declared": declared}
 
 
 def _l12_reasons_for(text, suffix):
@@ -822,16 +880,30 @@ def _l12_spawn_sites():
         except OSError:
             continue
         why = _l12_reasons_for(text, p.suffix)
-        if why:
-            sites.append({"file": rel, "why": why, "clean": any(
-                mk in text for mk in L12_HELPER_MARKERS)})
+        ident = _l12_identity_facts(text)
+        clean = any(mk in text for mk in L12_HELPER_MARKERS)
+        # 红判据（t261004-26 起，两个分支各自点名，报错必须精确）：声明面 = 走清理单点
+        # （lib_env 自 t261004-26 起连身份一起剥）**或**某条 spawn 调用文本内带
+        # caller_project（call-scoped）；两样都没有且确有调用点 → 各缺什么缺什么。
+        declared = clean or ident["declared"]
+        missing = []
+        if why and not declared:
+            missing.append("clean point")
+        if ident["ticket_spawn"] and not declared:
+            missing.append("caller_project in %d ticket-entry spawn call(s)"
+                           % ident["ticket_spawn"])
+        if why or ident["ticket_spawn"]:
+            sites.append({"file": rel, "why": why, "clean": clean,
+                          "missing": missing, "ident": ident})
     return sites
 
 
 def lint_narrowing_env_inheritance():
-    """L12：起执行器/闸的文件必须走收窄旋钮清理单点（lib_env），否则内层面被继承收窄。"""
+    """L12：起执行器/闸的文件必须走收窄旋钮清理单点（lib_env），否则内层面被继承收窄；
+    起票入口的调用文本里必须带 caller_project（或走清理单点——lib_env 连身份一起剥，
+    t261004-26），否则继承的 SANDBAR_CALLER_PROJECT 抢在断言面之前拒收。"""
     sites = _l12_spawn_sites()
-    naked = [s for s in sites if not s["clean"]]
+    naked = [s for s in sites if s["missing"]]
     # 自证（260930 修正：**真跑检测面**，不是查字面量）——合成犯例必被抓、带清理单点的
     # 合成例必放行、无关 spawn 不得误报；三条都不碰真树。
     fake_bad = ("import subprocess\n"
@@ -844,10 +916,33 @@ def lint_narrowing_env_inheritance():
                    "rc = rs.main()\n")
     fake_noise = ("import subprocess\n"
                   "subprocess.run(['ls', '-la'])\n")
-    bad_why = _l12_reasons_for(fake_bad, ".py")
-    ok_why = _l12_reasons_for(fake_ok, ".py")
-    ip_why = _l12_reasons_for(fake_inproc, ".py")
-    noise_why = _l12_reasons_for(fake_noise, ".py")
+    # t261004-26 身份面自证：票入口 spawn 的 call-scoped caller_project 判据——
+    # 敌对继承身份在检测器自己的 env 里时判定不得翻转（结果不依赖被测环境之外的面）。
+    fake_ticket_bad = ("import subprocess, os\n"
+                       "subprocess.run([PY, 'server/tools/ticket.py', 'create'],"
+                       " env=dict(os.environ))\n")
+    fake_ticket_ok = ("import subprocess, os\n"
+                      "subprocess.run([PY, 'server/tools/ticket.py', 'create'],"
+                      " env=clean_narrowing_env({'caller_project': 'fixproj'}))\n")
+    fake_ticket_comment = ("import subprocess, os\n"
+                           "# caller_project=fixproj  (a comment must NOT count)\n"
+                           "subprocess.run([PY, 'server/tools/ticket.py', 'create'],"
+                           " env=dict(os.environ))\n")
+    prev_identity = os.environ.get("SANDBAR_CALLER_PROJECT")
+    os.environ["SANDBAR_CALLER_PROJECT"] = "hostile-other-project"
+    try:
+        bad_why = _l12_reasons_for(fake_bad, ".py")
+        ok_why = _l12_reasons_for(fake_ok, ".py")
+        ip_why = _l12_reasons_for(fake_inproc, ".py")
+        noise_why = _l12_reasons_for(fake_noise, ".py")
+        t_bad = _l12_identity_facts(fake_ticket_bad)
+        t_ok = _l12_identity_facts(fake_ticket_ok)
+        t_comment = _l12_identity_facts(fake_ticket_comment)
+    finally:
+        if prev_identity is None:
+            os.environ.pop("SANDBAR_CALLER_PROJECT", None)
+        else:
+            os.environ["SANDBAR_CALLER_PROJECT"] = prev_identity
     proof = []
     if not bad_why:
         proof.append("合成犯例（子进程起执行器、无清理单点）没被抓")
@@ -859,18 +954,31 @@ def lint_narrowing_env_inheritance():
         proof.append("合成犯例（进程内 rs.main()）没被抓")
     if noise_why:
         proof.append("无关 spawn 被误报=%r" % noise_why)
+    if not (t_bad["ticket_spawn"] == 1 and not t_bad["declared"]):
+        proof.append("合成犯例（票入口 spawn 无 caller_project）没被抓=%r" % t_bad)
+    if not (t_ok["ticket_spawn"] == 1 and t_ok["declared"]):
+        proof.append("合成干净例（票入口 spawn 带 caller_project）声明没被认出=%r" % t_ok)
+    if not (t_comment["ticket_spawn"] == 1 and not t_comment["declared"]):
+        proof.append("注释里的 caller_project= 被误当声明（call-scoped 判据没牙）=%r"
+                     % t_comment)
     if proof:
         err("L12 自证失败（看守没牙）：%s" % "；".join(proof))
         return
     if naked:
-        err("L12 收窄旋钮继承看守：%d 处起执行器/闸的调用点没走清理单点（继承外层泳道轮的"
-            " SANDBAR_SCENARIO_ONLY 等收窄旋钮会把内层被测面收窄——t260930-09 全族缺陷）"
-            "：%s | 修法：env=clean_narrowing_env(...)（子进程）或 with no_narrowing_env():"
-            "（进程内）；确有理由的登记到 lint_tests.L12_WHITELIST 并写理由"
-            % (len(naked), "；".join("%s（%s）" % (s["file"], "/".join(s["why"]))
+        err("L12 继承旋钮/身份看守：%d 处调用点缺声明（继承外层泳道轮的 SANDBAR_SCENARIO_ONLY"
+            " 等收窄旋钮会收窄内层被测面——t260930-09 全族缺陷；继承的 SANDBAR_CALLER_PROJECT"
+            " 会让跨项目闸抢在断言面之前拒收——t261004-26）：%s | 缺什么见各条 missing——"
+            "「clean point」=env=clean_narrowing_env(...)（子进程）或 with no_narrowing_env():"
+            "（进程内）；「caller_project in N ticket-entry spawn call(s)」=在**同一条**票入口"
+            " spawn 调用的参数里写 caller_project=<夹具项目>（注释/文件别处出现不算，"
+            "call-scoped）；确有理由的登记到 lint_tests.L12_WHITELIST 并写理由"
+            % (len(naked), "；".join("%s（%s）missing: %s"
+                                     % (s["file"], "/".join(s["why"] or ["ticket-entry"]),
+                                        "; ".join(s["missing"]))
                                      for s in naked[:8])))
         return
-    ok("L12 收窄旋钮继承看守：%d 处起执行器/闸的调用点全部走清理单点（lib_env）" % len(sites))
+    ok("L12 继承旋钮/身份看守：%d 处起执行器/闸/票入口的调用点全部带声明（清理单点或"
+       " call-scoped caller_project）" % len(sites))
 
 # ---- L13 工具面 stdout 通道（261001：verify_lane 的 stdout 备注把闸回执整轮打掉）----
 #: 经 `admin.py call <tool>` **进程内**执行、且引擎把 admin 的 stdout 当 JSON 信封解析的工具。

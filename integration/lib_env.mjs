@@ -18,12 +18,20 @@ const NARROWING_NAMES = [
   'SANDBAR_POOL_CONC', 'SANDBAR_CONC_POOLS', 'SANDBAR_UNDECLARED_POLICY',
   'SANDBAR_STAGE_SWEEP_ORPHANS', 'SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX',
 ]
+// 261004（执行器请求 -0023，t261004-26）：继承的**调用方身份**与收窄旋钮同族同纪律——
+// ticket.py/client.py 的 spawn 链往下注入这两个；夹具起票入口不剥它们时，继承来的身份
+// 让跨项目闸抢在要断言的面之前拒收（79e4cb6 手修两条场景即此族）。要测身份闸本身，
+// 用 extra 显式注入敌对值（与 lib_env.py 的 INHERITED_IDENTITY_NAMES 逐元素同序，L14 锁）。
+const INHERITED_IDENTITY_NAMES = [
+  'SANDBAR_CALLER_PROJECT', 'SANDBAR_CALLER_IDENTITY_SRC',
+]
 
-/** 副本 env：剥掉继承来的窄化/策略旋钮，再并入调用方显式声明的 extra。 */
+/** 副本 env：剥掉继承来的窄化/策略旋钮与调用方身份，再并入调用方显式声明的 extra。 */
 export function cleanNarrowingEnv(extra = {}, base = process.env) {
   const env = { ...base }
   for (const k of Object.keys(env)) {
-    if (NARROWING_NAMES.includes(k) || NARROWING_PREFIXES.some((p) => k.startsWith(p))) {
+    if (NARROWING_NAMES.includes(k) || INHERITED_IDENTITY_NAMES.includes(k)
+        || NARROWING_PREFIXES.some((p) => k.startsWith(p))) {
       delete env[k]
     }
   }
@@ -31,11 +39,12 @@ export function cleanNarrowingEnv(extra = {}, base = process.env) {
   return env
 }
 
-/** env 里还带着的收窄旋钮（诊断/自证用；空对象=干净）。 */
+/** env 里还带着的继承旋钮（收窄 + 调用方身份；诊断/自证用；空对象=干净）。 */
 export function inheritedNarrowingKnobs(env = process.env) {
   const out = {}
   for (const [k, v] of Object.entries(env)) {
-    if (NARROWING_NAMES.includes(k) || NARROWING_PREFIXES.some((p) => k.startsWith(p))) {
+    if (NARROWING_NAMES.includes(k) || INHERITED_IDENTITY_NAMES.includes(k)
+        || NARROWING_PREFIXES.some((p) => k.startsWith(p))) {
       out[k] = v
     }
   }

@@ -222,9 +222,17 @@ def poc_python(bench):
 
 
 def run_poc_client(py, sub, args, env, timeout=180):
-    """spawn <py> client.py <sub> <argsJSON>（node.ts cli 同款口径）。返回 (rc, out)。"""
+    """spawn <py> client.py <sub> <argsJSON>（node.ts cli 同款口径）。返回 (rc, out)。
+
+    身份纪律（t261004-26，-0023）：调用方身份显式声明=票面自身 project（先剥后注入，
+    覆写继承值），绝不继承外层泳道轮 env 的 SANDBAR_CALLER_PROJECT——继承身份会让
+    跨项目闸抢在要断言的具名面之前拒收（KI-032 锚定面同理）。"""
+    declared = dict(env or {})
+    declared.pop("SANDBAR_CALLER_IDENTITY_SRC", None)
+    if isinstance(args, dict) and args.get("project"):
+        declared["SANDBAR_CALLER_PROJECT"] = str(args["project"])
     p = subprocess.run([py, os.path.join(POC, "client.py"), sub, json.dumps(args)],
-                       env=env, cwd=REPO, capture_output=True, text=True, timeout=timeout)
+                       env=declared, cwd=REPO, capture_output=True, text=True, timeout=timeout)
     return p.returncode, ((p.stdout or "") + (p.stderr or ""))
 
 

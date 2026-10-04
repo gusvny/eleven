@@ -97,10 +97,15 @@ def main():
     # ---------- A 真入口在场探针（拿逐字节原样 stdout） ----------
     section("A 真入口探针：client.py ticket-list {}（只读）")
     py = pick_python()
+    # 身份纪律（t261004-26，-0023）：本子用例读的是「真入口实际 stdout 形状」，与调用方
+    # 身份无关——继承旋钮/身份走清理单点剥净（先剥后注入；本探针零声明=中性 env）。
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from lib_env import clean_narrowing_env
+    probe_env = clean_narrowing_env(base=dict(os.environ))
     try:
         proc = subprocess.run(
             [py, "client.py", "ticket-list", json.dumps({})],
-            cwd=str(ENGINE), capture_output=True, text=True, timeout=90,
+            cwd=str(ENGINE), env=probe_env, capture_output=True, text=True, timeout=90,
         )
     except subprocess.TimeoutExpired:
         env_fail("client.py ticket-list 超时 90s（引擎/Temporal 不可达）")
