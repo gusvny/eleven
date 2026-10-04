@@ -144,7 +144,10 @@ def test_real_decl_parses_and_existing_instances_unchanged():
     assert it.suite == "full" and it.tz == "Asia/Shanghai"
     assert it.scan_face == "test", "票①实例不声明面（缺省 test 归一）"
     ds = by_id["docs-sync"]
-    assert ds.scan_face == "doc" and ds.enabled is True and ds.cron == "0 10 * * 1"
+    # 261004 宿主令：文档面改每天 10:00（原每周一）。此处仍是**字段快照锚**——
+    # 合法变更必须同步本行；把它改写成不变量（cron 可解析 + tz 显式 + 与调度器一致）
+    # 是 t261004-20 的交付项之一，改完本行不再是负担。
+    assert ds.scan_face == "doc" and ds.enabled is True and ds.cron == "0 10 * * *"
     assert by_id["mechanism-face"].enabled is False
     assert by_id["simplify-face"].scan_face == "simplify"
     assert by_id["simplify-face"].enabled is True
