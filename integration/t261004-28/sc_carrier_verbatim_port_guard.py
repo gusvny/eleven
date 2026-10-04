@@ -95,7 +95,7 @@ def run(cmd):
 
 def venv_py():
     for cand in ("server/engine/.venv/bin/python",
-                 "server/dsh/temporal-poc/.venv/bin/python",
+                 "server/dsh/temporal-poc/.venv/bin/python",  # engine-venv-compat: lawful fallback leg (t260907-10 marker; removal ticket drops this line)
                  "python3"):
         if (REPO / cand).exists() or cand == "python3":
             return cand

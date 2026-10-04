@@ -253,6 +253,62 @@ export async function wakeExecutor(
   }
 }
 
+/**
+ * Synthetic wake-source rows (t261004-29): an answered request and a cleared alert are
+ * wake-worthy events. They are shaped as ledger rows so they flow through the existing
+ * `wakeExecutor` path unchanged — worthWaking gate, self-feed guard ①②③, queue-mode
+ * delivery — never rebuilt beside it. They are NOT written to any ledger; they exist
+ * only as wake inputs (the event ledger stays engine-owned, single writer).
+ *
+ * - `requestAnswerRow`: `ticket` embeds the request id and `answerRequest` already
+ *   rejects a second answer of the same request, so one answered request wakes at most
+ *   once through this path (guard ① would suppress an exact repeat anyway).
+ * - `alertClearedRow`: `ticket` embeds the alert dedupe key AND the fire-episode id
+ *   (the alert's last raise timestamp). A re-fired alert starts a new episode id, so
+ *   its later clear is a fresh ticket and wakes again — one wake per (alert key × fire
+ *   episode), not one per memory lifetime.
+ */
+export function requestAnswerRow(project: string, requestId: string, by = 'host', detail = ''): LedgerRow {
+  const clean = String(requestId || '')
+  return {
+    idem: `request-answer:${clean}`,
+    project,
+    ticket: `request-${clean}`,
+    seq: 0,
+    stage: 'request',
+    stage_state: 'answered',
+    reason: `request ${clean} answered by ${by}${detail ? `: ${detail}` : ''}`,
+    raw: {},
+  }
+}
+
+export function alertClearedRow(project: string, alertKey: string, episodeAtMs: number, detail = ''): LedgerRow {
+  const episode = Number.isFinite(episodeAtMs) ? episodeAtMs : 0
+  return {
+    idem: `alert-clear:${alertKey}:${episode}`,
+    project,
+    ticket: `alert-${alertKey}-${episode}`,
+    seq: 0,
+    stage: 'alert',
+    stage_state: 'cleared',
+    reason: `alert ${alertKey} cleared (last raised at ${new Date(episode).toISOString()})${detail ? `: ${detail}` : ''}`,
+    raw: {},
+  }
+}
+
+/** Wake receipt (t261004-29): every push-path wake attempt answers "was a wake
+ *  attempted, did it wake, and why" — `attempted:false` always carries the reason. */
+export interface WakeReceipt {
+  at: number
+  source: 'request-answer' | 'alert-clear'
+  request_id: string | null
+  attempted: boolean
+  woke: boolean
+  reason: string
+  mode: 'queue' | 'steer' | null
+  accepted: boolean | null
+}
+
 /** alert 落账行形状（alerts.jsonl 一行一条；去重状态由它重放重建）。 */
 export function alertRecord(spec: AlertSpec, key: string, at: number, nightMuted: boolean): Record<string, unknown> {
   return {

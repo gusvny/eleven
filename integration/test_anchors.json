@@ -954,21 +954,6 @@
    "note": "",
    "sync_path": ""
   },
-  "server/engine/tests/test_t261004_18_grants_write_entry.py": {
-   "anchor": "contract",
-   "note": "t261004-28 carrier: port of the t261004-18 entry-contract test (host write saves+audits source, executor-channel/meta-op refusals, malformed args structured refusal); docstrings/comments translated per host L15 ruling, engine-coupled refusal literals kept as marked data; engine entry cmd_executor_grants_write landed via t261004-18 squash",
-   "sync_path": ""
-  },
-  "server/engine/tests/test_t261004_19_open_ticket_gate.py": {
-   "anchor": "behaviour",
-   "note": "t261004-28 carrier: port of the t261004-19 open-ticket gate judgement-core matrix (declaration face, authority surface, five refusals one allow, per-epic cap, audit rows); docstrings/comments translated per host L15 ruling; asserted refusal substrings re-anchored to the landed engine texts (the t261004-19 squash anglicized the open-ticket refusal messages; adaptation named in the carrier guard's ADAPTED_LITERALS table); engine face landed via t261004-19 squash",
-   "sync_path": ""
-  },
-  "server/engine/tests/test_t261004_19_source_order_lock.py": {
-   "anchor": "source-text",
-   "note": "t261004-28 carrier: the t261004-19 source-order lock (epic assignment must precede the executor gate's consumption in cmd_ticket_start; UnboundLocalError defect class); author text preserved at integration/t261004-28/evidence/t261004-19_source_order_lock.py.txt",
-   "sync_path": ""
-  },
   "server/engine/tests/test_t261004_23_executor_requests.py": {
    "anchor": "contract",
    "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
@@ -977,16 +962,6 @@
   "server/engine/tests/test_t261004_25_test_face_gate.py": {
    "anchor": "behaviour",
    "note": "developer L1: predicate truth table (t261004-25; t261004-34 updated the idempotence pin to the named processed-path-ledger skip)",
-   "sync_path": ""
-  },
-  "server/engine/tests/test_t261004_27_executor_delivery.py": {
-   "anchor": "behaviour",
-   "note": "t261004-27: delivery face refusal matrix + identity survival are the file's asserted behaviour",
-   "sync_path": ""
-  },
-  "server/engine/tests/test_t261004_34_recovery_idempotent.py": {
-   "anchor": "behaviour",
-   "note": "t261004-34: recovery idempotence truth tables (developer L1, landed with implement)",
    "sync_path": ""
   },
   "server/engine/tests/test_template_topology.py": {
@@ -1017,6 +992,31 @@
   "server/engine/tests/test_write_set_args.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_27_executor_delivery.py": {
+   "anchor": "behaviour",
+   "note": "t261004-27: delivery face refusal matrix + identity survival are the file's asserted behaviour",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_34_recovery_idempotent.py": {
+   "anchor": "behaviour",
+   "note": "t261004-34: recovery idempotence truth tables (developer L1, landed with implement)",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_18_grants_write_entry.py": {
+   "anchor": "contract",
+   "note": "t261004-28 carrier: port of the t261004-18 entry-contract test (host write saves+audits source, executor-channel/meta-op refusals, malformed args structured refusal); docstrings/comments translated per host L15 ruling, engine-coupled refusal literals kept as marked data; engine entry cmd_executor_grants_write landed via t261004-18 squash",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_19_open_ticket_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261004-28 carrier: port of the t261004-19 open-ticket gate judgement-core matrix (declaration face, authority surface, five refusals one allow, per-epic cap, audit rows); docstrings/comments translated per host L15 ruling; asserted refusal substrings re-anchored to the landed engine texts (the t261004-19 squash anglicized the open-ticket refusal messages; adaptation named in the carrier guard's ADAPTED_LITERALS table); engine face landed via t261004-19 squash",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_19_source_order_lock.py": {
+   "anchor": "source-text",
+   "note": "t261004-28 carrier: the t261004-19 source-order lock (epic assignment must precede the executor gate's consumption in cmd_ticket_start; UnboundLocalError defect class); author text preserved at integration/t261004-28/evidence/t261004-19_source_order_lock.py.txt",
    "sync_path": ""
   }
  },
@@ -3336,16 +3336,6 @@
    "note": "real browser journey",
    "sync_path": ""
   },
-  "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
-   "anchor": "behaviour",
-   "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
-   "sync_path": ""
-  },
-  "integration/t261004-18/sc_ki193_writer_identity_and_audit_source.mjs": {
-   "anchor": "behaviour",
-   "note": "KI-193: with a valid console-shaped credential, a forged body by records the server-derived writer host with a visible by_claimed/writer_mismatch, a grants master write records updated_by=host, the authority-write audit names its source face, and the grants readout stays consistent after the engine-routed write.",
-   "sync_path": ""
-  },
   "integration/t261004-19/sc_open_ticket_epic_gate_verdicts.py": {
    "anchor": "behaviour",
    "note": "drives the public gate funnel client._executor_grant_gate with the open-ticket context: named verdicts, per-epic cap, no-self-widening, audit rows",
@@ -3381,6 +3371,11 @@
    "note": "t261004-20 backfill: the panel shows an engine-filed row with its source; the old door refuses and names the engine path",
    "sync_path": ""
   },
+  "integration/t261004-27/sc_engine_delivery.py": {
+   "anchor": "contract",
+   "note": "t261004-27: the executor's ledger writes run in the engine process - identity survival, named refusals, no self-authorization",
+   "sync_path": ""
+  },
   "integration/t261004-24/sc_copy_language_console_english.py": {
    "anchor": "behaviour",
    "note": "real console surface, English-copy check on live DOM",
@@ -3411,51 +3406,6 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t261004-26/sc_guard_statement_level_faces.py": {
-   "anchor": "behaviour",
-   "note": "fault-injection brake: -23 wrap shape bites the statement-level surrogate predicate; planted L7 mention probes bite the term gate",
-   "sync_path": ""
-  },
-  "integration/t261004-26/sc_hostile_identity_fixture_chain.py": {
-   "anchor": "behaviour",
-   "note": "fault-injection chain: hostile inherited caller identity must not flip identity-gated guard scenarios; cleaning point strips identity; planted L12 probes bite",
-   "sync_path": ""
-  },
-  "integration/t261004-26/sc_panel_flake_stability.py": {
-   "anchor": "behaviour",
-   "note": "stability face: the two de-flaked panel tests run 3/3 consecutive green rounds through their declared node --test entries",
-   "sync_path": ""
-  },
-  "integration/t261004-27/sc_engine_delivery.py": {
-   "anchor": "contract",
-   "note": "t261004-27: the executor's ledger writes run in the engine process - identity survival, named refusals, no self-authorization",
-   "sync_path": ""
-  },
-  "integration/t261004-28/sc_carrier_verbatim_port_guard.py": {
-   "anchor": "contract",
-   "note": "t261004-28 carrier delivery contract: the three ported engine unit tests stay code-identical to their author sources (comments/docstrings/non-ASCII literals aside, test names+count kept), the source-order lock keeps a byte-identical evidence copy under integration/t261004-28/evidence/, all are registered, and the three files run under pytest (C1-C6 faces of the carrier itself)",
-   "sync_path": ""
-  },
-  "integration/t261004-34/sc_copy_language_comment_blind_spot.py": {
-   "anchor": "behaviour",
-   "note": "wired per-diff gate face: whole-line comments fire, marker exemptions hold (tmp-repo probe, no shared-tree writes)",
-   "sync_path": ""
-  },
-  "integration/t261004-34/sc_lint_battery_wired_into_code_lane.py": {
-   "anchor": "contract",
-   "note": "verify.yaml lanes.code.checks actively wires integration/lint_tests.py (real YAML parse; commented-out is not wired)",
-   "sync_path": "verify.yaml"
-  },
-  "integration/t261004-34/sc_no_concurrent_shared_tree_planting.py": {
-   "anchor": "source-text",
-   "note": "registry/source pin: shared-tree planters may only run from the exclusive pool",
-   "sync_path": ""
-  },
-  "integration/t261004-34/sc_quarantine_recovery_idempotent.py": {
-   "anchor": "behaviour",
-   "note": "multi-batch idempotence + deliberate-removal respect of the quarantine recovery (real lane fixture, direct settle)",
-   "sync_path": ""
-  },
   "integration/tests/test_fixture_reclaim.mjs": {
    "anchor": "behaviour",
    "note": "",
@@ -3479,6 +3429,76 @@
   "integration/worker-restart/sc_worker_single_poller.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
+   "anchor": "behaviour",
+   "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
+   "sync_path": ""
+  },
+  "integration/t261004-18/sc_ki193_writer_identity_and_audit_source.mjs": {
+   "anchor": "behaviour",
+   "note": "KI-193: with a valid console-shaped credential, a forged body by records the server-derived writer host with a visible by_claimed/writer_mismatch, a grants master write records updated_by=host, the authority-write audit names its source face, and the grants readout stays consistent after the engine-routed write.",
+   "sync_path": ""
+  },
+  "integration/t261004-26/sc_hostile_identity_fixture_chain.py": {
+   "anchor": "behaviour",
+   "note": "fault-injection chain: hostile inherited caller identity must not flip identity-gated guard scenarios; cleaning point strips identity; planted L12 probes bite",
+   "sync_path": ""
+  },
+  "integration/t261004-26/sc_panel_flake_stability.py": {
+   "anchor": "behaviour",
+   "note": "stability face: the two de-flaked panel tests run 3/3 consecutive green rounds through their declared node --test entries",
+   "sync_path": ""
+  },
+  "integration/t261004-26/sc_guard_statement_level_faces.py": {
+   "anchor": "behaviour",
+   "note": "fault-injection brake: -23 wrap shape bites the statement-level surrogate predicate; planted L7 mention probes bite the term gate",
+   "sync_path": ""
+  },
+  "integration/t261004-29/sc_wake_on_answer.mjs": {
+   "anchor": "contract",
+   "note": "answer response must carry wake outcome; answer never lost to wake failure",
+   "sync_path": ""
+  },
+  "integration/t261004-29/sc_wake_route_receipt.mjs": {
+   "anchor": "contract",
+   "note": "wake route mount/degrade + named input validation beside status route",
+   "sync_path": ""
+  },
+  "integration/t261004-29/sc_alert_clear_wake.mjs": {
+   "anchor": "behaviour",
+   "note": "clear wakes once per fire episode; restart raises no phantom clear",
+   "sync_path": ""
+  },
+  "integration/t261004-29/sc_wake_self_feed_guard.mjs": {
+   "anchor": "contract",
+   "note": "self-feed guard stays on new sources; every outcome is an explicit receipt",
+   "sync_path": ""
+  },
+  "integration/t261004-34/sc_copy_language_comment_blind_spot.py": {
+   "anchor": "behaviour",
+   "note": "wired per-diff gate face: whole-line comments fire, marker exemptions hold (tmp-repo probe, no shared-tree writes)",
+   "sync_path": ""
+  },
+  "integration/t261004-34/sc_quarantine_recovery_idempotent.py": {
+   "anchor": "behaviour",
+   "note": "multi-batch idempotence + deliberate-removal respect of the quarantine recovery (real lane fixture, direct settle)",
+   "sync_path": ""
+  },
+  "integration/t261004-34/sc_no_concurrent_shared_tree_planting.py": {
+   "anchor": "source-text",
+   "note": "registry/source pin: shared-tree planters may only run from the exclusive pool",
+   "sync_path": ""
+  },
+  "integration/t261004-34/sc_lint_battery_wired_into_code_lane.py": {
+   "anchor": "contract",
+   "note": "verify.yaml lanes.code.checks actively wires integration/lint_tests.py (real YAML parse; commented-out is not wired)",
+   "sync_path": "verify.yaml"
+  },
+  "integration/t261004-28/sc_carrier_verbatim_port_guard.py": {
+   "anchor": "contract",
+   "note": "t261004-28 carrier delivery contract: the three ported engine unit tests stay code-identical to their author sources (comments/docstrings/non-ASCII literals aside, test names+count kept), the source-order lock keeps a byte-identical evidence copy under integration/t261004-28/evidence/, all are registered, and the three files run under pytest (C1-C6 faces of the carrier itself)",
    "sync_path": ""
   }
  }

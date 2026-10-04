@@ -621,6 +621,7 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
         reconcile: null, startup: { missing_rows: null, replayed_rows: null, dedupe_keys: 0 },
         presumed_self_rows: 0, presumed_self_detail: null, queue_mirror: '项目未声明守望者（镜像未起）',
         wakes: [], alerts: [], notify: { beep: false, unseen_redline: 0 }, last_error: null,
+        wake_receipts: [],
         session_provenance,
       } as never
     }
@@ -664,10 +665,54 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
     }
   }
 
+  /**
+   * t261004-29 wake push face: the host answered a request on the panel → the panel
+   * POSTs here → the watchdog wakes the executor through the same wakeExecutor path
+   * and returns one receipt (attempted/woke/reason). POST-only; project shape and
+   * non-empty request_id are explicit 4xx; an undeclared project returns 404 (the
+   * watchdog body stays zero-behavior and no instance is started for it). Headless
+   * profile has no webServer → this route does not exist, and its only caller (the
+   * panel answer endpoint) does not exist either — the pair degrades together, no
+   * dangling caller.
+   */
+  async function handleWake(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'wake push face is POST-only (write operation, explicit trace)' })
+      return
+    }
+    let raw = ''
+    req.on('data', (chunk: Buffer) => { raw += chunk.toString('utf8') })
+    req.on('error', () => sendJson(res, 400, { ok: false, error: 'request body read failed' }))
+    req.on('end', () => {
+      void (async () => {
+        let body: Record<string, unknown>
+        try { body = JSON.parse(raw) as Record<string, unknown> } catch { sendJson(res, 400, { ok: false, error: 'non-JSON body — explicitly refused' }); return }
+        const key = typeof body.project === 'string' ? body.project : ''
+        if (!isValidProjectKey(key)) { sendJson(res, 400, { ok: false, error: `project shape is not valid: ${key || '(absent)'}` }); return }
+        const requestId = typeof body.request_id === 'string' ? body.request_id : ''
+        if (requestId === '') { sendJson(res, 400, { ok: false, error: 'request_id must be a non-empty string' }); return }
+        const cfg = loadWatchdogConfig(key)
+        if (!cfg.declared) { sendJson(res, 404, { ok: false, error: `project has no watchdog declaration: ${key} — wake push face zero-behavior (explicit)` }); return }
+        try {
+          const w = await ensureWatchdog(key)
+          const receipt = await w.requestWake({
+            requestId,
+            by: typeof body.by === 'string' ? body.by : 'host',
+            detail: typeof body.detail === 'string' ? body.detail : '',
+          })
+          sendJson(res, 200, { ok: true, wake: receipt })
+        } catch (err) {
+          sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+        }
+      })()
+    })
+  }
+
   const attach = (ws: { register: (o: { kind: string; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void }): void => {
     ctx.effect(() => {
       const disposers = [
         ws.register({ kind: 'exact', path: '/sandbar-watchdog/api/status', handler: handleStatus }),
+        ws.register({ kind: 'exact', path: '/sandbar-watchdog/api/wake', handler: handleWake }),
       ]
       return () => { for (const d of disposers) d() }
     }, 'sandbar-watchdog: status route')

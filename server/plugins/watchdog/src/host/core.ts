@@ -23,7 +23,7 @@ import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from '.
 import { detectWaitingFace, type WaitingFace } from './waiting-face.ts'
 import { decideProseBackstop, journalLine, replayJournal } from './prose-backstop.ts'
 import { applyDedupe, judgeAlert, makeKey, replayDedupe, type AlertSpec, type DedupeState } from './alert-rules.ts'
-import { alertRecord, freshWakeMemory, wakeExecutor, type WakeIo, type WakeMemory, type WakeOutcome } from './exits.ts'
+import { alertRecord, freshWakeMemory, wakeExecutor, requestAnswerRow, alertClearedRow, type WakeIo, type WakeMemory, type WakeOutcome, type WakeReceipt } from './exits.ts'
 
 export interface BoardReader {
   (): Promise<{ ok: boolean; rows: BoardRow[]; error?: string }>
@@ -172,6 +172,10 @@ export interface WatchdogStatus {
   /** t261003-15 additive：最近一拍的唤醒裁决（醒没醒 / 为什么 / 考虑几行）。
    *  null = 尚未有拍走到唤醒步（守望者未 start 或刚启动）；运行中的拍不留空。 */
   last_wake_verdict: { at: number; woke: boolean; reason: string; considered: number; presumed_self: number } | null
+  /** t261004-29 additive: push-path wake receipt ring (last 20). Every
+   *  attempted:false carries its reason — "was a wake attempted and why not" stays
+   *  answerable from the status face, not only inside the HTTP response. */
+  wake_receipts: WakeReceipt[]
   alerts: Array<Record<string, unknown>>
   notify: { beep: boolean; unseen_redline: number }
   last_error: string | null
@@ -222,6 +226,20 @@ export class Watchdog {
   private lastWakeVerdict: WatchdogStatus['last_wake_verdict'] = null
   /** 自醒排除记忆（t260929-04）：随实例存活；dispose 即随进程终态。 */
   private wakeMem: WakeMemory = freshWakeMemory()
+  /** t261004-29 push-path wake receipt ring (one entry per requestWake / clear tick, keep 20). */
+  private wakeReceipts: WakeReceipt[] = []
+  /** t261004-29 alert-clear detection: dedupe keys whose alert rule was touched by
+   *  raise() this tick (the condition still holds). A cooldown-muted raise still
+   *  counts — "condition holds but muted" is not "condition cleared". */
+  private condActive = new Set<string>()
+  /** Previous tick's condition-active key set; the diff between the two = clears.
+   *  Empty before the first tick, so a restart can never emit a phantom clear. */
+  private lastCondActive = new Set<string>()
+  /** t261004-29 fire-episode id per key: the timestamp of the latest touch (raise
+   *  call) while the condition holds. Every touch refreshes it — so a re-fire after
+   *  a clear starts a NEW episode even inside the alert cooldown (no ledger record
+   *  needed), and its later clear is a fresh ticket that wakes again. */
+  private episodeBy = new Map<string, number>()
   private alerts: Array<Record<string, unknown>> = []
   private unseenRedline = new Set<string>()
   private lastError: string | null = null
@@ -358,6 +376,12 @@ export class Watchdog {
     const scoped = spec.scope ?? this.instanceScope()
     const full: AlertSpec = scoped === '' ? spec : { ...spec, scope: scoped }
     const judged = judgeAlert(this.cfg.config, full, this.dedupe, nowMs)
+    // t261004-29: register that this key's alert condition was touched this tick
+    // (before the cooldown verdict) — a cooldown-muted tick still counts as active;
+    // clear detection consumes this holds/does-not-hold fact, not the ledger fact.
+    // The touch timestamp is the fire-episode id (see episodeBy / takeAlertClears).
+    this.condActive.add(judged.key)
+    this.episodeBy.set(judged.key, nowMs)
     if (!judged.record) return
     const rec = alertRecord(full, judged.key, nowMs, judged.night_muted)
     try {
@@ -406,11 +430,117 @@ export class Watchdog {
     return sid
   }
 
+  /** t261004-29: alert-clear detection + key-set rotation (called exactly once per
+   *  tick, before the wake step). Keys active last tick but not this tick = cleared;
+   *  the episode id is the key's latest touch timestamp (episodeBy — refreshed on
+   *  every raise while the condition holds, cooldown-independent, so a re-fire after
+   *  a clear starts a NEW episode and its later clear is a fresh ticket that wakes
+   *  again; a second clear of the same episode cannot happen — the condition no
+   *  longer holds, raise() never registers it). No episode fact on record = no
+   *  synthetic row — an episode is never invented. lastCondActive is empty before
+   *  the first tick, so a restart emits no phantom clear. */
+  private takeAlertClears(): LedgerRow[] {
+    const cleared: LedgerRow[] = []
+    for (const key of this.lastCondActive) {
+      if (this.condActive.has(key)) continue
+      const episode = this.episodeBy.get(key)
+      if (typeof episode !== 'number' || !Number.isFinite(episode)) continue
+      cleared.push(alertClearedRow(this.project, key, episode))
+    }
+    this.lastCondActive = this.condActive
+    return cleared
+  }
+
+  /** t261004-29: session-ensure face for the push path — same semantics as
+   *  ensureSession (undeclared = create on demand; declared = use it; the failure
+   *  retry shares SESSION_ENSURE_RETRY_MS, so an answer inside the throttle window
+   *  gets woke=false with ensureState naming the reason — no second retry discipline
+   *  is invented beside it). */
+  private async sessionIdForWake(nowMs: number): Promise<string> {
+    if (this.cfg.config.executor_session !== '' || this.sessionEnsure === null) return this.cfg.config.executor_session
+    if (nowMs - this.lastEnsureFailAt < SESSION_ENSURE_RETRY_MS) return this.cfg.config.executor_session
+    const out = await this.sessionEnsure({ declaredSessionId: '', hasWork: true })
+    if (out.sessionId) {
+      // Declaration written back (writeExecutorSession passed the loader check) —
+      // in-memory face synced so this very call can wake.
+      this.cfg = { ...this.cfg, config: { ...this.cfg.config, executor_session: out.sessionId } }
+      this.lastEnsureFailAt = Number.NEGATIVE_INFINITY
+    } else if (out.action.startsWith('refused')) {
+      this.lastEnsureFailAt = nowMs
+    }
+    this.ensureState = { session_id: out.sessionId, last_action: out.action, reason: out.reason, declared_written: out.declaredWritten }
+    return this.cfg.config.executor_session
+  }
+
+  private rememberReceipt(r: WakeReceipt): WakeReceipt {
+    this.wakeReceipts.push(r)
+    if (this.wakeReceipts.length > 20) this.wakeReceipts.splice(0, this.wakeReceipts.length - 20)
+    return r
+  }
+
+  /** t261004-29: push-path wake (the host answered a request). The same wakeExecutor
+   *  path — the synthetic row passes the worthWaking gate and the self-feed guard
+   *  ①②③ still governs; mode is always queue (an answer is not a redline interrupt;
+   *  steer stays redline-only). The receipt's attempted/woke/reason are explicit on
+   *  every path: project not declared, transport not injected, session not ensurable
+   *  (attempted:false quoting the refusal — nothing was delivered), brief still
+   *  undigested, delivery refused / transport failed — each lands a reason, never silence. */
+  async requestWake(args: { requestId: string; by?: string; detail?: string }): Promise<WakeReceipt> {
+    const nowMs = this.now()
+    if (!this.cfgEnabled) {
+      return this.rememberReceipt({ at: nowMs, source: 'request-answer', request_id: args.requestId, attempted: false, woke: false, mode: null, accepted: null,
+        reason: this.cfg.config_error !== null ? `config_error: ${this.cfg.config_error}` : 'project not declared/enabled — watchdog body zero-behavior' })
+    }
+    if (typeof args.requestId !== 'string' || args.requestId === '') {
+      return this.rememberReceipt({ at: nowMs, source: 'request-answer', request_id: null, attempted: false, woke: false, mode: null, accepted: null,
+        reason: 'request_id must be a non-empty string — malformed push refused, nothing delivered' })
+    }
+    if (!this.wakeIo) {
+      return this.rememberReceipt({ at: nowMs, source: 'request-answer', request_id: args.requestId, attempted: false, woke: false, mode: null, accepted: null,
+        reason: 'no wake transport injected (wakeIo=null) — explicit no-op' })
+    }
+    const sid = await this.sessionIdForWake(nowMs)
+    if (sid === '') {
+      return this.rememberReceipt({ at: nowMs, source: 'request-answer', request_id: args.requestId, attempted: false, woke: false, mode: null, accepted: null,
+        reason: `no executor session to wake (declared id empty and ensure did not produce one)${this.ensureState?.reason ? `: ${this.ensureState.reason}` : ' — wake not attempted'}` })
+    }
+    // Self-feed guard, mirror-first leg (t261004-29 arbitrate round 1): the push path
+    // consults the queue mirror BEFORE deciding, even when no brief id is on record
+    // yet — a mirror that says our brief is still pending suppresses the push with a
+    // named reason (an answer must not stack on top of an undigested brief; this is
+    // rule ③'s source-agnostic face, not a second guard). The production mirror face
+    // is requestId-keyed, so with no id on record it answers false/null and the
+    // decision falls through to wakeExecutor's own guard unchanged.
+    if (typeof this.wakeIo!.ourBriefPending === 'function') {
+      let pending: boolean | null = null
+      try {
+        pending = await this.wakeIo!.ourBriefPending(sid, this.wakeMem.lastRequestId ?? '')
+      } catch (e) {
+        // Mirror throw = unreadable (explicit no-signal): fall through to wakeExecutor's
+        // guard, which re-consults and lands its own no-signal honesty in the reason.
+        this.lastError = `wake push queue-mirror probe failed (falling through to the wake gate): ${e instanceof Error ? e.message : String(e)}`
+      }
+      if (pending === true) {
+        return this.rememberReceipt({ at: nowMs, source: 'request-answer', request_id: args.requestId, attempted: false, woke: false, mode: null, accepted: null,
+          reason: `queue mirror reports our brief still undigested (last brief on record: ${this.wakeMem.lastRequestId ?? 'none'}) — not re-delivering on top of it` })
+      }
+    }
+    const row = requestAnswerRow(this.project, args.requestId, args.by ?? 'host', args.detail ?? '')
+    const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, [row], this.selfLock?.target ?? null, 'info', this.wakeMem)
+    if (r.woke) {
+      this.wakes.push({ at: nowMs, ticket: row.ticket, dedupe_key: makeKey('wake', sid), mode: r.mode, accepted: r.accepted })
+      if (this.wakes.length > 100) this.wakes.splice(0, this.wakes.length - 100)
+      this.lastProgressAt = nowMs
+    }
+    return this.rememberReceipt({ at: nowMs, source: 'request-answer', request_id: args.requestId, attempted: true, woke: r.woke, reason: r.reason, mode: r.mode, accepted: r.accepted })
+  }
+
   /** 一拍：beat → tail → reconcile → liveness → self-lock → exits。 */
   async tickOnce(): Promise<void> {
     if (this.disposed || !this.cfgEnabled) return
     this.inFlight = true
     this.aborted = false
+    this.condActive = new Set() // t261004-29: this tick's condition-active set collected from zero (see raise / takeAlertClears)
     const nowMs = this.now()
     try {
       await this.beat()
@@ -538,20 +668,27 @@ export class Watchdog {
       await this.runProseBackstop(sid, sstat.mtimeMs, nowMs)
 
       // 出口 (a) wake：值得醒才醒；我们自己的未消化简报不重发；自喂循环排除（WakeMemory）。
+      // t261004-29: beyond new ledger rows, an alert key active last tick but not
+      // this tick = cleared — also a wake-worthy event. Its synthetic row joins the
+      // same wake cycle (same wakeIo, same WakeMemory, same verdict face).
+      // takeAlertClears also rotates "this tick -> last tick"; lastCondActive is
+      // empty on the first tick, so a restart never emits a phantom clear.
+      const clearRows = this.takeAlertClears()
+      const wakeRows = [...newRows, ...clearRows]
       // t261003-15：本拍唤醒裁决（无论醒不醒）都落 lastWakeVerdict——状态面可答
       // 「为什么没醒」，不再需要翻 executor 会话日志。每条路径（含无新行/无投递面/
       // 无会话 id 的跳过拍）都给显式 reason，运行中的拍绝不留空裁决。
       if (!this.wakeIo) {
         this.lastWakeVerdict = { at: nowMs, woke: false, reason: '本实例未注入投递面（wakeIo=null）——显式不作为', considered: 0, presumed_self: 0 }
-      } else if (newRows.length === 0) {
+      } else if (wakeRows.length === 0) {
         this.lastWakeVerdict = { at: nowMs, woke: false, reason: '本拍无新账本行', considered: 0, presumed_self: this.wakeMem.presumedSelfRows }
       } else {
         const level = this.selfLock.state === 'waiting_on_itself' || this.liveness.state === 'stalled' ? 'redline' : 'info'
-        const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, newRows, this.selfLock.target, level, this.wakeMem)
+        const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, wakeRows, this.selfLock.target, level, this.wakeMem)
         if (this.aborted) return
         this.lastWakeVerdict = { at: nowMs, woke: r.woke, reason: r.reason, considered: r.considered ?? 0, presumed_self: r.presumedSelf ?? this.wakeMem.presumedSelfRows }
         if (r.woke) {
-          this.wakes.push({ at: nowMs, ticket: newRows[newRows.length - 1].ticket, dedupe_key: makeKey('wake', sid), mode: r.mode, accepted: r.accepted })
+          this.wakes.push({ at: nowMs, ticket: wakeRows[wakeRows.length - 1].ticket, dedupe_key: makeKey('wake', sid), mode: r.mode, accepted: r.accepted })
           if (this.wakes.length > 100) this.wakes.splice(0, this.wakes.length - 100)
           this.lastProgressAt = nowMs
         } else if (r.accepted === false) {
@@ -692,6 +829,7 @@ export class Watchdog {
       executor_session: this.ensureState,
       wakes: this.wakes.slice(-20),
       last_wake_verdict: this.lastWakeVerdict,
+      wake_receipts: this.wakeReceipts.slice(-20),
       alerts: this.alerts.slice(-50),
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },
       last_error: this.lastError,

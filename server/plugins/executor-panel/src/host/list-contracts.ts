@@ -24,6 +24,16 @@ export interface ListContract {
   empty_copy: string
 }
 
+/**
+ * t261004-29: declared bound for the wake-push detail (the answer text quoted into
+ * the watchdog wake push). Declared here by name per the t261004-14 binding rule —
+ * cap-like truncations in merge paths must reference a declared constant, never an
+ * inline integer literal. This is a payload bound, not a list cap: the wake push
+ * carries a one-line quote of why the executor is woken, not the full answer (the
+ * full answer stays in the requests ledger, which is the source of record).
+ */
+export const WAKE_PUSH_DETAIL_CAP = 200
+
 export const LIST_CONTRACTS: Record<string, ListContract> = {
   overview_waits: {
     id: 'overview_waits',

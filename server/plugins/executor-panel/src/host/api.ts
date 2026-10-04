@@ -39,6 +39,7 @@ import { grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, GRANT
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
+import { WAKE_PUSH_DETAIL_CAP } from './list-contracts.ts'
 
 export interface ApiResponse { status: number; json: Record<string, unknown> }
 
@@ -116,11 +117,21 @@ export interface ApiDeps {
   actionsIo?: ActionsIo
   /** workbench 端点基址（config 显式指定；缺省 env → 请求来源同源，见 resolveWorkbenchBase）。 */
   workbenchBase?: string
+  /** t261004-29 wake-caller seam: after a successful answer, push a wake to the
+   *  watchdog wake endpoint (default = same-origin fetch, see defaultWakeCaller;
+   *  tests inject a stub). */
+  wakeCaller?: (args: { project: string; requestId: string; detail: string }) => Promise<WakeCallResult>
   /** Write credential verdict face (default defaultAuthFace; test stub injection, KI-193). */
   authFace?: AuthFace
   /** Authority-declaration write face (default spawnEngineGrantsWrite via the engine CLI; test stub, KI-193). */
   engineGrantsWrite?: EngineGrantsWriteFace
 }
+
+/** Wake-call result (ok:false always carries a human-readable reason — the receipt
+ *  is never silently absent). */
+export type WakeCallResult =
+  | { ok: true; receipt: { attempted: boolean; woke: boolean; reason: string; mode?: string | null; accepted?: boolean | null; at?: number } }
+  | { ok: false; reason: string }
 
 /**
  * grants 上游基址解析（t260929-22 GAP B：给上游一个真生产者，失败在构造上不可能）：
@@ -195,6 +206,37 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
     }
   }
 
+  /**
+   * t261004-29 default wake caller: POST to the watchdog /sandbar-watchdog/api/wake
+   * route (panel and watchdog mount on the same console web server; base resolution
+   * follows the same resolveWorkbenchBase trusted-origin discipline — the Host header
+   * verbatim, no credentials, no path following, no outbound rewrite). The receipt
+   * shape is never trusted blindly — non-200 / non-JSON / non-receipt bodies are all
+   * normalized into ok:false with the reason named. An unresolvable base is an
+   * explicit no-op (no guessing, no send).
+   */
+  async function defaultWakeCaller(args: { project: string; requestId: string; detail: string }, origin: string): Promise<WakeCallResult> {
+    const base = resolveWorkbenchBase(undefined, env, origin)
+    if (base === '') return { ok: false, reason: 'watchdog wake endpoint base not resolvable (no SANDBAR_WORKBENCH_BASE, request origin absent) — wake not attempted' }
+    try {
+      const res = await fetch(base + '/sandbar-watchdog/api/wake', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project: args.project, request_id: args.requestId, detail: args.detail, by: 'host-panel' }),
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!res.ok) return { ok: false, reason: `watchdog wake endpoint HTTP ${res.status}` }
+      const doc = await res.json().catch(() => null) as { ok?: boolean; wake?: unknown } | null
+      const w = doc?.wake as { attempted?: unknown; woke?: unknown; reason?: unknown } | undefined
+      if (doc?.ok === true && w && typeof w.attempted === 'boolean' && typeof w.woke === 'boolean' && typeof w.reason === 'string') {
+        return { ok: true, receipt: { attempted: w.attempted, woke: w.woke, reason: w.reason, mode: typeof w.mode === 'string' ? w.mode : null, accepted: typeof w.accepted === 'boolean' ? w.accepted : null } }
+      }
+      return { ok: false, reason: 'watchdog wake response is not a receipt shape — normalized to explicit failure, never trusted blindly' }
+    } catch (e) {
+      return { ok: false, reason: `watchdog wake call failed: ${e instanceof Error ? e.message : String(e)}` }
+    }
+  }
+
   async function handle(method: string, path: string, query: URLSearchParams, bodyRaw: string, origin = '', auth: AuthInput = {}): Promise<ApiResponse> {
     // ---- 路由表准入守卫（t261003-10）：表外一律 404，表内每条都必须在下方有处理分支
     // （route-parity UT 双向锁死）——这是「未知面板路由」的唯一出口。
@@ -260,7 +302,28 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           : res.error.startsWith('无此请求') ? 404 : 409
         return bad(status, res.error)
       }
-      return { status: 200, json: { ok: true, answered: res.answerRow,
+      // t261004-29: the wake is pushed only after the answer has landed (the answer
+      // is never lost to a wake failure). The receipt is merged additively into the
+      // response (attempted/woke/reason) — "was a wake attempted and why" travels
+      // back with the answer. The receipt shape is validated HERE, for injected
+      // callers too: a non-receipt-shaped result is normalized into an explicit
+      // failure, never trusted blindly and never echoed verbatim.
+      const caller = deps.wakeCaller ?? ((a: { project: string; requestId: string; detail: string }) => defaultWakeCaller(a, origin))
+      let wake: Record<string, unknown>
+      try {
+        const r = await caller({ project: String(b.project ?? ''), requestId: String(b.id ?? ''), detail: typeof b.answer === 'string' ? b.answer.slice(0, WAKE_PUSH_DETAIL_CAP) : '' })
+        const rc = r.ok ? r.receipt : null
+        if (rc !== null && typeof rc.attempted === 'boolean' && typeof rc.woke === 'boolean' && typeof rc.reason === 'string' && rc.reason.length > 0) {
+          wake = { attempted: rc.attempted, woke: rc.woke, reason: rc.reason }
+        } else {
+          wake = { attempted: false, woke: false, reason: r.ok
+            ? 'wake caller returned a non-receipt-shaped result — normalized to explicit failure, never trusted blindly'
+            : r.reason }
+        }
+      } catch (e) {
+        wake = { attempted: false, woke: false, reason: `wake caller threw: ${e instanceof Error ? e.message : String(e)}` }
+      }
+      return { status: 200, json: { ok: true, answered: res.answerRow, wake,
         ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
     }
     // ---- settings ----
