@@ -27,6 +27,10 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .prow:hover{background:var(--hover)}
 .proj[data-open="true"]>.prow{background:var(--panel2)}
 .pname{font-weight:600;font-size:12px}
+.views{display:flex;gap:1px;margin-left:2px}
+.vi{width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:5px;color:var(--faint);font-size:11px;cursor:pointer;opacity:.7}
+.vi:hover{background:var(--hover);opacity:1}
+.vi.on{background:var(--accent-soft);color:var(--blue);opacity:1}
 .pmeta{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
 .chev{color:var(--muted);font-size:10px;transition:transform .15s}
 .proj[data-open="true"] .chev{transform:rotate(90deg)}
@@ -190,6 +194,11 @@ function render(){
     }).join('');
     return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
       + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
+      + '<span class="views" onclick="event.stopPropagation()">'
+      + '<span class="vi' + (k === cur ? ' on' : '') + '" title="Tickets">▤</span>'
+      + '<span class="vi" title="Epics">◆</span>'
+      + '<span class="vi" title="Executor (this project)">▶</span>'
+      + '<span class="vi" title="More: Docs, Model routes, Settings">⋯</span></span>'
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
   }).join('');
