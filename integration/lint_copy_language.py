@@ -17,6 +17,13 @@ Legacy lines are never inspected (per-diff by construction). A line that
 rewrites a legacy Chinese comment/copy line surfaces as an added line and
 fails — that is intended: modified text must comply with the standard.
 
+Comments count, and the source is the same standard: §2 puts code comments in
+the English column (host order 261004, recorded in server/session_charter.md —
+CLAUDE.md rule 3 "modern Chinese" is retired; existing Chinese comments stay as
+they are until touched). So a new or touched Chinese comment line inside the
+scope below fires like any other copy line. `notes/` prose is Chinese by design
+and stays out of scope.
+
 Exemption (visible to a reviewer, keyed by rule id):
   put `copy-lang-allow:<id>` in a comment on the same line, or in a comment on
   the line directly above. Known ids:
@@ -189,6 +196,10 @@ def lint_copy_language(errors, base=None):
         print("L15 copy-language gate: exempt lines: none")
     if violations:
         for v in violations:
+            # Report each failing line: a bare count is not a report (t261004-24
+            # follow-up — the wired-in run printed only "N violation(s)", so a lane
+            # could not see which line failed).
+            print("FAIL: " + v)
             errors.append("L15 copy-language gate: " + v)
         print("L15 copy-language gate: %d violation(s)" % len(violations))
     else:

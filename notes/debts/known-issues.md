@@ -58,7 +58,7 @@
 | KI-043 | metrics 聚合宇宙双洞：①跨项目 repo 错位——node.ts 前门 repo 恒按本文件位置推导（=sandbar），传 project=suyou 时 git/会话解析仍指 sandbar 仓，suyou 50 张票历史（缓存 50 条记录俱在）不可见或按错仓回落数字，多项目引擎实际只聚合得出 sandbar 6 票；②模板过滤静默吞票——t260903-10（workflow=''）被 template 过滤丢弃，reason 无任何记载，宇宙缩水（list 7→聚合 6）对用户不可见 | 非阻塞（观测层） | fixed（t260904-04 收口：per-project repo seam + 吞票显式 notice 场景在册全绿；token 出仓欠账由 t260904-09 settle 快照承接） | metrics.ts template 过滤（L678）；node.ts repo 推导（config.repo→SUYOU_REPO→本文件上三级）；token 维账本缝 SUYOU_USAGE_LEDGER_DIR 未设=KI-017③ 引擎侧欠账延续（token 出仓快照另立票） |
 | KI-044 | UI 截图证据闸可被粗粒度写集声明绕过（260904 实证=t260904-05）：merge_check 的 UI 票判定 shared.is_ui_write_set 按**声明条目**前缀匹配 UI_WRITE_PREFIXES（src/client/、lib/、app/src/…）——t260904-04 逐文件声明（含 src/client/metrics.tsx）命中→闸生效被卡；t260904-05 声明整个 server/dsh/workbench/ 父目录（实际改的就是会话区 UI，写集甚至含 ui-check/ 截图工具本身）→不满足 startswith→判「非 UI 票」，五项检查里根本没有截图项，全绿直过 merge。声明口径≠实际写面，粒度越粗关卡越弱；迁移以来无任何票真正产过截图（05 绕过、04 卡 KI-036 playwright-core 缺失）。根治方向=按泳道分支**实际 diff 路径**判定 UI 票（260904 与宿主对齐定稿：共享谓词 ui_changed_paths=diff --name-only base...branch × UI 前缀表，两处调用同一源——ui_evidence 段算一次定拍不拍、merge_check 再算一次定要不要证据，结果各自落闸记录；「目录条目展开」备选废弃——对工作区展开误伤、对 diff 展开多余、冻结声明追不上票内新增文件；两时点 diff 变化由 fail-closed 补拍循环兜住，证据必须覆盖最终 diff），属引擎写集需另开票 | 非阻塞（关卡完整性漏洞：不产生错误交付，但削弱 UI 验收面） | open（环境侧 playwright-core 已装 260904；闸判定根修另开票） | shared.py UI_WRITE_PREFIXES/is_ui_write_set（L1207-1241）；agent_activities.py merge_check 3.6 UI 证据闸（L1722-1741）；实证=t260904-05 gate_runs（无截图项全绿）vs t260904-04（截图项红 blocked） |
 | KI-045 | capture 视图清单缺 metrics 面板专属视图（260904 补拍 t260904-04 证据时发现）：capture.mjs 的 VIEWS 停在 t260829-07 六视图+立项单（t260901-24 仅 fixture 态 +2），metrics 面板（M2 四视图）上线以来的 UI 改动只有间接覆盖（default/board 里见侧栏入口），筛选行/图表本体无直拍证据。宿主令 260904：**后面做 metrics 票时再加**。补法建议：新增 console-metrics.png——锚=下栏「📊 度量」按钮 → 面板开态，断言=筛选行收敛后形态（时间窗+项目两下拉，泳道/立项选择器不在场）+ 主图容器非空；随票更新 capture.mjs 契约注释与视图计数 | 非阻塞（证据覆盖缺口） | open（挂下一张 metrics 票） | server/dsh/ui-check/capture.mjs VIEWS 数组（L636-652）+文件头视图清单注释；关联=t260904-04 补拍实况（6/7 视图，无 metrics 直拍） |
-| KI-046 | t260904-07 会话开局注入上线即坏（宿主 260904 报障：新建会话报 `invalid payload for session prompt`）：客户端 `session.prompt(charter, 'queue')` 传**裸字符串**，平台 wire 契约要求 `content: PromptContentPart[]`（`[{type:'text',text}]`），apiproxy zod 拒收；放大器=平台 prompt 失败**不抛错**只回 RpcResult（写 snapshot.promptError→toast），票内 R3「就地 catch 兜底」从未触发，无 console.error 无 notify，会话保持 blank。为何闸没拦：唯一能抓住它的注入旅程场景在合并闸**干净 SKIP**（lane 无 playwright-core=KI-036 族、无 3199 隔离台），闸按 exit 0 计过，arbitrate 注记「干净 SKIP」放行；反事实验证=journey 真跑必红（30s 无 charter+零 console error→FAIL）。缺口三层：lane 环境缺 browser 依赖（browser 池 16+ 条同类退化）／核心旅程 SKIP 无人工复判阻断门（KI-044 同族）／SessionsFace any 面+tsc 无从校验签名。定位报告=notes/discussions/260904-charter-injection-invalid-payload.md | 阻塞（已造成错误交付：07 票核心功能 100% 失效） | open（待开修复票：分片数组+result.ok 检查+any 面收窄；验收=隔离台真跑 journey 三腿） | session-entry.tsx L313（违规调用）/L155-164（any 面）；dsh-host-apiproxy lib/index.js L614-620 schema+L4824-4831 文案；dsh-client-runtime lib/client.js L7196-7240（透传+不抛错）；闸实证=worker-t260904-07.log L54/L61/L85/L93-94；失败现场=~/.dsh/sessions/…sandbar--/session-c5ea997f-*（4 行转录零注入） |
+| KI-046 | t260904-07 会话开局注入上线即坏（宿主 260904 报障：新建会话报 `invalid payload for session prompt`）：客户端 `session.prompt(charter, 'queue')` 传**裸字符串**，平台 wire 契约要求 `content: PromptContentPart[]`（`[{type:'text',text}]`），apiproxy zod 拒收；放大器=平台 prompt 失败**不抛错**只回 RpcResult（写 snapshot.promptError→toast），票内 R3「就地 catch 兜底」从未触发，无 console.error 无 notify，会话保持 blank。为何闸没拦：唯一能抓住它的注入旅程场景在合并闸**干净 SKIP**（lane 无 playwright-core=KI-036 族、无 3199 隔离台），闸按 exit 0 计过，arbitrate 注记「干净 SKIP」放行；反事实验证=journey 真跑必红（30s 无 charter+零 console error→FAIL）。缺口三层：lane 环境缺 browser 依赖（browser 池 16+ 条同类退化）／核心旅程 SKIP 无人工复判阻断门（KI-044 同族）／SessionsFace any 面+tsc 无从校验签名。定位报告=notes/discussions/260904-charter-injection-invalid-payload.md | 阻塞（已造成错误交付：07 票核心功能 100% 失效） | open（待开修复票：分片数组+result.ok 检查+any 面收窄；验收=隔离台真跑 journey 三个子用例） | session-entry.tsx L313（违规调用）/L155-164（any 面）；dsh-host-apiproxy lib/index.js L614-620 schema+L4824-4831 文案；dsh-client-runtime lib/client.js L7196-7240（透传+不抛错）；闸实证=worker-t260904-07.log L54/L61/L85/L93-94；失败现场=~/.dsh/sessions/…sandbar--/session-c5ea997f-*（4 行转录零注入） |
 | KI-047 | merge_check mixed-red 排序缺口（t260904-11 实证，260904 登记；**260904 晚归因修正**：当时 verify red=2 实为两个 integration/ 文件越界——票面写集精确枚举缺 integration/，非「写集外过时守卫」；smoke 守卫红只在 agent 手跑面，verify.yaml 无 smoke 引用不进引擎闸——见 KI-049）：冲突自动消解回路触发条件 `conflict = (not green) and (not other_red) and …`（agent_activities.py:1821，注释「基础问题先交人，不带病消解」）——当「基础问题」（verify 红等）**恰是 merge 本身才能治愈的**，构成设计性死锁：verify 红→压制消解回路→无法并 main→verify 红永存。当日处置=main 侧代行引擎消解（git merge main 进泳道+机械冲突并集 4f46eff+rework 回 run_integration_tests 重验，宿主令「11走A吧」，全程留痕）。属 KI-021（写集冻结无修订通道）+KI-044（声明口径执法）家族；根治面=写集改革（notes/discussions/260904-write-set-reform.md） | 非阻塞（有代行解法，但每次需人肉介入） | open（挂写集改革讨论档，随其立项） | agent_activities.py:1821（conflict 判定压制）；dev_lane.py:1554（not mc.conflict→blocked 分支）；死锁现场=worker-t260904-11.log 19:16/20:16 两轮同象；解法现场=lane/t260904-11 4f46eff（并 main） |
 | KI-048 | merge squash 被 main 脏工作区拒绝后：①误归类为「merge 失败（conflict）」回卷重验（实为 git 本地改动保护，非冲突）；②重架人门但**无任何原因展示**——首签被静默消费、票看似原地不动，真相只在 worker log WARNING 一行（t260904-14 实证：宿主未提交的契约 v1.8 编辑挡 squash，20:39 首签蒸发；处置=v1.8 确认代提交 26f174c+main 预并泳道 d1c933f+重签，3f99dce 落账）。运营面 root cause=「main 侧随时可能有无主未提交编辑」（当前即常态：notes/ 批次、宿主草稿），引擎 squash 在 main 工作区执行=每次落账都暴露于此 | 非阻塞（可恢复但费一轮人肉+签名浪费） | open（观测面：squash 拒绝分类修正+人门上下文带失败原因；预防面=merge 前 main 脏检查提示） | dev_lane.py merge 失败分支（「merge 失败（conflict）自动打回重验」文案）；worker-t260904-14.log 20:39:18.412 WARNING（squash 失败原文） |
 | KI-049 | dev-lane 写集与流水线自身产出结构性错位（t260904-11 实证 red=3，260904 登记；**260904 深夜加重：写集跟随方案机制实践性死亡**——`refresh_write_set` 依赖 create_plan 结果 JSON 的 `files_changed` 字段，而 11 号两代方案该字段均为**空数组 []**（叙述里写了补列、结构化字段没填）→ 并集静默 no-op（只记 None 的「跳过」，空数组零日志）；grep 全工单史「授权扩展」日志=**0 条**，t260829-07 立的机制从未生效过，agent prompt 返回形状（agent_activities.py:18）虽列了 files_changed 但无强制）——修复面：①create_plan 段 prompt/校验强制 files_changed 非空（或从 plan 文本机械抽取）；②refresh 对空数组记告警日志（空≠None 的观测缺口，KI-048 同族）；③**缝上契约场景**：run_tests 增测——以真实 agent 回执形状（files_changed 空数组）喂 refresh 链路，断言「空回执=可见红/告警」（本条实践性死亡单测为何全绿：mock 恰当填字段，生产 agent 不填——引擎函数测试无法覆盖缝契约，KI-046 干净 SKIP 同族：测试在场≠测试生效）；④**机制活性断言**（dead-man's switch）：巡检项 grep 工单史「授权扩展」日志非零——机制的 liveness 至今无人监测，本条死了 N 天靠人肉盯两轮同象红灯才发现；本票当日第二輪 rework 用外科手术式指令强制填写验证通路（留档））：design_integration_tests 段**必然**写 integration/（场景文件+run_scenarios.py 登记+守卫修正），但写集刷新只有一个时点——review_plan 放行后 `refresh_write_set(plan_files)`（dev_lane.py:566/876）——集成段产出不在刷新面；票面写集若建票时未列 integration/（t260904-11 精确枚举五项漏列），merge_check verify_lane 判越界红，且**无 band 内通道**事后扩写集（update op 无 write_set 面；rework 只能回 create_plan 让方案重declare 再走一次 refresh——当日晚即用此路：rework→create_plan 补列三文件）。同日三连击：11 号先后撞 KI-047（压制消解）→软链环境债→本条（越界红），全是写集家族。结构性根治=写集改革「验证资产默认开」柱（integration/ 场景/smoke/tests 属验证资产，默认放行+守卫改动进必审项）——本条即其 P0 活证据；次选=引擎在 design_integration_tests settle 后追加一次 refresh | 非阻塞（rework→create_plan 可解但整链重跑约 1h；机制死亡使每次都要人肉盯 files_changed） | open（挂写集改革讨论档；①②为引擎小修票） | dev_lane.py:566（refresh 单时点）/876（调用位）/571-573（files_changed 读取与 None-only 日志）；shared.py:1312（refresh_write_set 纯并集语义）；agent_activities.py:18（返回形状列了字段无强制）/469（解析）；现场=worker-t260904-11.log 21:00:42 与 21:38:19 两轮 red=3 同象+两代 stage_create_plan_gen*.json files_changed=[]；对照=同日 t260904-10/14/15 建票均带 integration/ 无此象 |
@@ -686,7 +686,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 ## KI-072 负载敏感的不稳定检查（并发下假红，单跑全绿）——260910 夜 三实证
 - 现象：同一检查在并发环境（merge_check/全量套件内）红、安静面单跑全绿：
   ①`integration/t260901-25/t03_reap_process_group.py`：t260910-11 merge_check 内 `pass=7 fail=1`，
-  泳道与 main 单独复跑均 `pass=8 fail=0`（进程组回收/幂等容错腿对时序敏感）；
+  泳道与 main 单独复跑均 `pass=8 fail=0`（进程组回收/幂等容错分支对时序敏感）；
   ②`scenario-guard-pipeline-landed`：t260910-08 套件内红，泳道安静面复跑 `GUARD ran=3 fail=0`、main 基线亦绿；
   ③`ticket-session-restore`：t260910-08 套件内红，泳道安静面复跑 `pass=10 fail=0`、main 基线亦绿。
 - 危害：为环境瞬态反复触发仲裁迭代（260910 05/08 各撞 6 轮上限转人工），并诱导「改测试集」的错误处置。
@@ -892,7 +892,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   ②接收侧加**可见失败**——authorize 载荷存在但解析为 None 时须 refused 点名，不得静默走普通签字路径；
   ③补真往返守卫：至少一条经真实信号投递的集成场景（受保护路径放行 + 仲裁超限推进），含过期/错票号/自签/畸形四条负锁。
 - 定位：`server/engine/client.py:387-400`；`server/engine/dev_lane.py:2140-2187`；`server/engine/shared.py:350-363,650`；
-  已立案修复票 **t260913-01**（验收 F 腿：修好后 t260911-05 与 t260912-01 至少一张必须实际被解开）。
+  已立案修复票 **t260913-01**（验收 F 用例：修好后 t260911-05 与 t260912-01 至少一张必须实际被解开）。
 
 ## KI-079 说明书与实际入口不符：`ticket.py` 无 pause/resume（且旁路丢身份）
 - 现象：会话宪章（`session_charter.md`「引擎操作面」）列了
@@ -1070,7 +1070,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   「本轮 agent 用的是哪个 provider/model」，事后只能逐一翻 `.sandbar/model_patch_*.yml`；③老进程存活越久
   越容易踩（与 KI-081/KI-082 同族：引擎已改，在跑实例不重载）。
 - **260914 补充（dengzhufpv 项目会话首验移交，与上条同源、互为佐证）**：容器化首验实跑（五条容器场景 85 断言 0 红、
-  A 腿 A3「implement 期容器真在场、会话恢复成功」通过）时，**真 agent 段撞 429**；根因链比上条更深一层——
+  A 用例 A3「implement 期容器真在场、会话恢复成功」通过）时，**真 agent 段撞 429**；根因链比上条更深一层——
   ① 真源（机器级表）是对的；② 但**测试台/隔离场景用隔离注册表**（`SANDBAR_PROJECTS_DIR`，脚本生成的 project.yaml
   只写 key/name/dirs、**无 `paths` 声明**）→ `resolve_routes_table` 判 `decl_missing` → 按设计**读侧兜底回落仓内
   `server/model-routes.yaml`**；③ 仓内那份是**迁移前旧口径**（developer/default 仍 `provider: zai` = 主账号余额已尽）
@@ -1081,7 +1081,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   ②**缺表行为绝不静默**（三态可辨 + 票面/日志告警：声明缺失/文件缺失/内容坏）；③**引用点一并改**
   （`shared.MODEL_ROUTES_FILE` 常量退场、UI `routes.ts` 两处 `join(repo,'server','model-routes.yaml')`、
   守卫场景、node.ts 注释与「模型」页）。当前状态＝真源已迁机器级且声明在位（做了一半），仓内旧表仍在并仍被兜底消费。
-- 处置方向（按 260910 裁决直接执行，非新设计）：删仓内旧表 + 兜底腿命名化告警（带表路径与内容指纹）+ 引用点退场；
+- 处置方向（按 260910 裁决直接执行，非新设计）：删仓内旧表 + 兜底分支命名化告警（带表路径与内容指纹）+ 引用点退场；
   另建议测试台基座生成的隔离 project.yaml **声明自己的路由表**（或注入可用模型），使场景与生产口径同源。
 - 处置方向（建议，未实施）：①**把「本轮 agent 实际路由」显示到票面/回执**（provider/model 逐轮留痕），
   让「用错模型」不必靠翻日志；②解析非 ok 的兜底改为**响亮**（现仅 WARNING）——或至少在票面时间线落一条
@@ -1149,7 +1149,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   ③每票单轮集测 30~40 分钟（engine+exclusive 占 57%+18% 的机时），这是当前最贵的一笔固定开销；
   ④表象有欺骗性：排除「看起来已实施」却毫无效果，需要翻 `pool_exclude` 回执才能发现（本次即靠报告键
   有无 `excluded_pools` 才定位）。
-- **已处置（宿主管 260914 令「一律全跳过，engine 池只在巡检跑」）**：撤除例外腿——`apply=true`（每票段）
+- **已处置（宿主管 260914 令「一律全跳过，engine 池只在巡检跑」）**：撤除例外分支——`apply=true`（每票段）
   时**声明即跳过**；被跳池只由项目级全量轮（巡检/手动/回放，均不传 apply）覆盖；旧命中面改写进回执
   `pool_exclude.former_force_assets` 留痕（少跑仍可见，不再据此放行）。落地面＝`server/tools/verify_lane.py`
   `_integ_pool_exclude` + TOOL schema 描述、回执消费面 `server/engine/agent_activities.py` /
@@ -1173,7 +1173,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   `t260914-01` 泳道**同一份闸**下的整轮序列（09-14）：08:21 ran=246/1794s 无排除 → 10:20 ran=246/4995s 无排除
   → 10:26 ran=246/1740s 无排除 → **11:19 ran=200/133.7s 有排除** → 12:19 ran=246/2367s 无排除 →
   13:10 ran=246/1835s 无排除。**同一泳道、同一份闸，跳过与否逐轮横跳**——若真是内存码版本差异，不可能在
-  11:19 出现、又在 12:19 消失。故真因＝例外腿判据**逐轮可变**（票面 write_set 在不同段/轮次不同：写集带
+  11:19 出现、又在 12:19 消失。故真因＝例外分支判据**逐轮可变**（票面 write_set 在不同段/轮次不同：写集带
   `integration/` 即命中整个测试目录 → 判强制全跑；不带则正常跳过），即 KI-089 的主体结论；「内存码」只解释
   了 04 泳道在 09-14 11:05 前后那一次跨越，不解释同泳道横跳。连带更正：`.lane/t260913-01|02` 的闸文件我先前
   用字符数判断版本，**判错了**——精确匹配显示 `t260914-01` 泳道四件齐全（`verify.yaml` 声明 1、`dev_lane`
@@ -1278,7 +1278,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   `段 arbitrate 不允许改 <文件>（本段只许：测试面…）——合法出路：打回目标段或回 main 侧走票`。
 - 三例实证（260913 同日）：①`integration/baselines/capture-ensure-build.mjs`（界面场景共享构建助手）；
   ②`server/engine/dev_lane.py`（仲裁要修集测段活动超时，属引擎代码面）；③
-  `integration/t260912-02/lib_lifecycle_case.py`（起台腿三态归类的单源函数落点）。
+  `integration/t260912-02/lib_lifecycle_case.py`（起台用例三态归类的单源函数落点）。
 - 结构性原因：仲裁被设计成「可迭代测试集」，而**测试集的主体恰恰是助手库与共享资产**（sc_* 只是入口薄壳）；
   「测试面＝脚本」这个定义与实际形态不符，于是**每一次「仲裁要修测试基建」都会撞墙**。
   现实处置＝每次给该文件签一张 `protected_path` 授权再打回实现段（260913 三次均如此），
@@ -1303,7 +1303,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 取证（按 DSH 官方手册的四项证据法，集成侧实测）：
   ①环境＝macOS 26.4.1 / 内核 25.4.0、dsh 0.1.1-rc.2、Node v26.5.0、`/usr/bin/sandbox-exec` 在位；
   ②Node 直接 spawn 裸名与绝对路径**都成功**（排除 issue #4849 那种 `spawn ENOENT` 环境桥故障）；
-  ③provider 链＝`darwin: ["seatbelt"]` 唯一一条腿，可用性探测＝用真实 read-only profile 跑
+  ③provider 链＝`darwin: ["seatbelt"]` 唯一一条路径，可用性探测＝用真实 read-only profile 跑
   `sandbox-exec -p … -- true` 要求 status===0 → **实测退出码 71（`sandbox_apply: Operation not permitted`）**
   → 判定 unusable → **fail-closed**；连最小 profile `(version 1)(allow default)` 也返回 71
   （即本机**无法应用任何 Seatbelt profile**，非 profile 语法问题）；
@@ -3243,17 +3243,17 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **处置（261002 宿主令「main 上直接修」）**：读链两处 9f7b8d3；出口族 24+7 处统一兜底（118bacc 及后续补批；固定文案 5 处按调色板豁免并入白名单）；入界消毒 3bcf921。存量史不回改（读侧已兜，坏字符点名可见可溯）。
 > **回归用例**：`emit-surrogate-guard`（integration/sc_emit_surrogate_guard.py，注册在册）——双侧黑盒 + 族面锚（新出口不带兜底即红）。
 
-## KI-186 断言词表与工具词表**不齐**（精确整串 vs「家族:后缀」）⇒ 把工具的保守答案误报成泳道误判（261002 实证，realfacet C 腿）
+## KI-186 断言词表与工具词表**不齐**（精确整串 vs「家族:后缀」）⇒ 把工具的保守答案误报成泳道误判（261002 实证，realfacet C 用例）
 > **现象**：lane_audit 的 verdict 是「家族:可选后缀」形状（keep / keep:unknown-owner=keep 家族 fail-closed 保守态，prune:*=可剪），而场景断言按整串精确相等判 `!= "keep"`——t261001-23 坏脸（KI-185）触发工具产出 `keep:unknown-owner` 即被误报成「非 closed 票未判 keep」。
 > **危害**：①误红且指向错误方向（工具 fail-closed 是对的，被说成工具误判）；②坏数据一来断言就翻，测试可信度受损（同族：任何「断言用一套词、工具用另一套词」的接缝）。
-> **处置（261002）**：C 判词改按家族判（`split(':')[0] == 'keep'`），abb8dfc。同族排查：`sc_lane_audit_realfacet_readonly` 内 D 腿精确判 keep 的场景是「本票 dispatched 期」自有面、语义本就要求干净 keep，不动。
-> **回归用例**：realfacet 场景 C 腿本身（261002 实证：t261001-23 的 keep:unknown-owner 在场时 C 绿 5/0；词表再不齐必红）。
+> **处置（261002）**：C 判词改按家族判（`split(':')[0] == 'keep'`），abb8dfc。同族排查：`sc_lane_audit_realfacet_readonly` 内 D 用例精确判 keep 的场景是「本票 dispatched 期」自有面、语义本就要求干净 keep，不动。
+> **回归用例**：realfacet 场景 C 用例本身（261002 实证：t261001-23 的 keep:unknown-owner 在场时 C 绿 5/0；词表再不齐必红）。
 
-## KI-187 基线通道临时树的**身份判据耦合 repo 路径** ⇒ 通道假红 + 归因把「基线红」错记成「主面红」（261002 实证，t260928-13 A4 腿）
-> **现象**：`registry-additive-keys` 的 A4 腿按「仓库路径」判某路径属于哪个项目的 dirs；基线探针在 /tmp 下起 detached 临时树 ⇒ 路径匹配不上 ⇒ 命中=[] ⇒ 86/86 全红（泳道内 118/118 全绿）。
+## KI-187 基线通道临时树的**身份判据耦合 repo 路径** ⇒ 通道假红 + 归因把「基线红」错记成「主面红」（261002 实证，t260928-13 A4 用例）
+> **现象**：`registry-additive-keys` 的 A4 用例按「仓库路径」判某路径属于哪个项目的 dirs；基线探针在 /tmp 下起 detached 临时树 ⇒ 路径匹配不上 ⇒ 命中=[] ⇒ 86/86 全红（泳道内 118/118 全绿）。
 > **危害**：①通道假红污染基线答案；②**归因毒性**：基线探针报「主面也红」⇒ 真回归会被 `main_red_too` 豁免掉（把红记错账=放行口径被污染，与 KI-182/184 合成三件套）。
-> **处置（261002）**：A4 腿身份判据改解析到主 checkout 根（git worktree 元数据判主根，路径解耦），0d61273；双通道 14/0 实证。
-> **回归用例**：t260928-13 场景 A4 腿自身（temp 工作树形态下 14/0——身份判据再耦合路径必红）。
+> **处置（261002）**：A4 用例身份判据改解析到主 checkout 根（git worktree 元数据判主根，路径解耦），0d61273；双通道 14/0 实证。
+> **回归用例**：t260928-13 场景 A4 用例自身（temp 工作树形态下 14/0——身份判据再耦合路径必红）。
 
 ## KI-188 同树并发执行器护栏的**登记账不回收**（死进程占坑）⇒ 上限误拒、闸整轮零实跑（261002 实证，t261001-21）
 > **现象**：闸 round 5 被跑批器自拒（exit=2 零实跑）：「REFUSED [__executor__] 同树并发执行器超限（本树已有 8 个在跑：9481,10762,10774,10788,84708,88761；上限 8）」——清单 6 个 PID 却报 8 个在跑，且彼时机器并无 8 个活跃执行器。护栏按**文件登记**判数（261001 自递归风暴兜底，env 计数会被内层清 env 冲掉，故弃 env 用文件），但**登记的销账没人做**：执行器任何终态（正常退出/崩溃/被杀/轮次换代）都不清自己的登记行 ⇒ 死进程占坑、计数只增不减。

@@ -166,6 +166,37 @@ def main():
     else:
         check(False, "G7 integration/lint_tests.py present")
 
+    # G9: the wired entry reports which line failed, not just a count. A lane that
+    # runs lint_tests.py must be able to act on the failure (t261004-24 follow-up:
+    # the in-process entry appended to the shared error list without printing the
+    # detail, so "1 error" arrived with no cause).
+    tmp2 = tempfile.mkdtemp(prefix="t261004-24-wired-")
+    try:
+        root = pathlib.Path(tmp2) / "repo"
+        root.mkdir()
+        base, prod = build_throwaway(root)
+        (prod / "face.ts").write_text(
+            (prod / "face.ts").read_text(encoding="utf-8") + 'const t = "长回合进行中"\n',
+            encoding="utf-8")
+        e = dict(os.environ)
+        e["COPY_LANGUAGE_BASE"] = base
+        driver = (
+            "import sys; sys.path.insert(0, 'integration');\n"
+            "import lint_copy_language as g;\n"
+            "errs = [];\n"
+            "g.lint_copy_language(errs);\n"
+            "print('WIRED_ERRORS=%d' % len(errs))\n")
+        r = subprocess.run(["python3", "-c", driver], cwd=str(root), env=e,
+                           capture_output=True, text=True, timeout=120)
+        out = (r.stdout or "") + (r.stderr or "")
+        check("WIRED_ERRORS=1" in out,
+              "G9 wired entry counts the violation (1 error on the shared list)")
+        check("face.ts" in out and ":2" in out,
+              "G9 wired entry prints the failing file:line, so the error is actionable")
+        print("---- gate output under G9 ----\n" + out[-800:])
+    finally:
+        shutil.rmtree(tmp2, ignore_errors=True)
+
     print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (PASS, FAIL))
     sys.exit(1 if FAIL else 0)
 

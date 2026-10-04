@@ -57,7 +57,7 @@ registration change in run_scenarios.py SCENARIOS is needed (no new file).
 ## Carry-back (not caused by this ticket)
 
 `python3 integration/lint_tests.py` on the untouched worktree reports 1 error:
-L7 banned-term「腿」in 6 files outside this ticket's scope (notes/debts/
+the L7 banned-term gate fired on the retired jargon word for a sub-case (source of truth: `docs/terminology.md` §三) in six files outside this ticket's scope (notes/debts/
 known-issues.md, notes/discussions/…, server/plugins/watchdog/harness.mjs,
 server/plugins/workbench/src/client/executor-view.tsx, integration/
 known-red-baseline.json, integration/sc_emit_surrogate_guard.py,

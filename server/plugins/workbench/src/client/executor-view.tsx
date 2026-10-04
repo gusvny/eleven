@@ -1,23 +1,31 @@
 /**
- * executor-view.tsx —— 中列执行器视图（t261003-09 修订）。
+ * executor-view.tsx — the middle-column executor view (revised by t261003-09).
  *
- * t260929-22 曾在顶部放 `Executor / Chat` 切换器：宿主实测 Chat 分支恒挂在
- * 「Resolving the declared executor session…」（无超时/无重试/无失败面，而它打的
- * 端点实测 HTTP 200 ≈1ms），t261003-09 按票面把**整行退役**（页签+项目名一起删，
- * 不给这条腿加第四态）——「打开声明的 executor 会话」改由面板 Overview 里的一枚
- * 小按钮经 postMessage 请父控制台代开（同源 iframe；本组件即宿主侧 handler，
- * 校验 origin 与来源 frame 后走既有 sessions.open 通路，回复一行 STE 结果）。
- * 不再引入第二个入口：本文件是唯一的会话代开 handler，面板按钮是唯一的入口。
+ * t260929-22 put an `Executor / Chat` switch at the top. The host measured the Chat
+ * branch stuck on "Resolving the declared executor session…": no timeout, no retry,
+ * no failure face, while the endpoint it calls answers HTTP 200 in about 1 ms. So
+ * t261003-09 retired the whole row per the ticket face (tab and project name both
+ * gone, no fourth state on this branch). "Open the declared executor session" now
+ * runs from one small button in the panel Overview, which asks the parent console to
+ * open it over postMessage (same-origin iframe; this component is the host-side
+ * handler: it checks the origin and the source frame, then takes the existing
+ * sessions.open path and replies with one result line). No second entry point: this
+ * file is the only session-opening handler and the panel button is the only entry.
  *
- * - 同源 iframe 嵌面板页（`?project=<key>&theme=<light|dark>` 深链——panel-page.ts 消费）。
- *   面板路由不可达 = 显式降级横幅（点名状态码），绝不渲染空白冒充常态。
- * - 主题（缺陷 2）：父页解析出的主题名拼进 iframe URL；主题翻转事件平台不暴露，
- *   挂载时解析一次，翻转后重开视图/刷新生效（交接报告已声明）。
- * - 全终态：可达性 fetch 带 AbortController（换项目/卸载即中止）；message 监听
- *   随组件卸载 removeEventListener；本组件无常驻定时器（轮询在面板页内部）。
+ * - The same-origin iframe embeds the panel page (`?project=<key>&theme=<light|dark>`
+ *   deep link, consumed by panel-page.ts). An unreachable panel route = an explicit
+ *   degraded banner naming the status code, never a blank page posing as normal.
+ * - Theme (defect 2): the theme name the parent page resolved goes into the iframe
+ *   URL. The platform exposes no theme-flip event, so the name is resolved once at
+ *   mount and takes effect when the view reopens or the page reloads (declared in
+ *   the handover report).
+ * - Every terminal state: the reachability fetch carries an AbortController (project
+ *   switch or unmount aborts it); the message listener is removed on unmount; this
+ *   component keeps no timer (polling lives inside the panel page).
  *
- * 测试锚：data-wb-executor-view / data-wb-executor-frame / data-wb-executor-note
- * （t261003-06 的 seg/chat 锚随行退役；集成场景按锚断言，不按文案）。
+ * Test anchors: data-wb-executor-view / data-wb-executor-frame / data-wb-executor-note
+ * (t261003-06's seg/chat anchors retired with their row; the integration scenarios
+ * assert on anchors, never on copy).
  */
 
 import { useEffect, useRef, useState } from 'react'

@@ -67,7 +67,7 @@ def ok(cond, label):
 
 def venv_python():
     for cand in (REPO / "server/engine/.venv/bin/python",
-                 REPO / "server/dsh/temporal-poc/.venv/bin/python"):  # engine-venv-compat 回落腿（t260907-10；摘除票删旧腿）
+                 REPO / "server/dsh/temporal-poc/.venv/bin/python"):  # engine-venv-compat 回落路径（t260907-10；摘除票删旧路径）
         if cand.is_file():
             return str(cand)
     return None

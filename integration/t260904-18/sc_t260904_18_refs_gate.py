@@ -19,6 +19,15 @@ intent（守护的用户可感知行为/合同）：
 
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
 temporalio 缺失=ENV_FAIL 点名（入口装配子用例），stdlib 闸行为子用例照跑。
+
+Isolation (executor request 261004 -0023, C3 determinism): the entry sub-cases
+declare the caller project explicitly (`caller_project=fixproj`, the fixture
+project the target ticket belongs to). Identity precedence is explicit arg > env
+`SANDBAR_CALLER_PROJECT` > cwd, so an inherited identity can no longer make the
+cross-project gate refuse first — that refusal swallowed the named refs refusal
+these sub-cases assert, and turned this guard scenario red by environment alone.
+L4 pins the property: with a hostile inherited identity the asserted face is
+still reached.
 """
 import asyncio
 import json
@@ -103,6 +112,11 @@ try:
 
         async def start_with(refs):
             args = {"ticket_id": "t26090418scgate", "template_id": "dev-lane",
+                    # Explicit caller identity (see the isolation note in the header):
+                    # the target ticket belongs to this fixture project, so the
+                    # cross-project gate passes and the refs gate is the face under
+                    # test — whatever identity the environment happens to carry.
+                    "caller_project": "fixproj",
                     "project": "fixproj", "title": "场景夹具票（闸面验证，不落引擎）",
                     "write_set": ["notes/bg.md"]}
             if refs is not None:
@@ -123,6 +137,24 @@ try:
             err = str(res.get("error") or "")
             check("L3 越界引用建单被拒且点名", res.get("ok") is False and "escape.md" in err,
                   "err=%r" % err[:200])
+            # L4 (executor request 261004 -0023): the result must not depend on the
+            # inherited caller identity. With a hostile value in the environment the
+            # same named refusal must still come back — if the identity gate refuses
+            # first, that env dependence is back (C3 isolation).
+            prev_identity = os.environ.get("SANDBAR_CALLER_PROJECT")
+            os.environ["SANDBAR_CALLER_PROJECT"] = "hostile-other-project"
+            try:
+                res = asyncio.run(start_with(["../escape.md"]))
+                err_hostile = str(res.get("error") or "")
+            finally:
+                if prev_identity is None:
+                    os.environ.pop("SANDBAR_CALLER_PROJECT", None)
+                else:
+                    os.environ["SANDBAR_CALLER_PROJECT"] = prev_identity
+            check("L4 入口子用例不随继承的 SANDBAR_CALLER_PROJECT 翻转（隔离确定性）",
+                  res.get("ok") is False and "escape.md" in err_hostile
+                  and "跨项目" not in err_hostile,
+                  "err=%r" % err_hostile[:200])
         else:
             check("L0 被测承诺面在场（client refs 闸接线）→ 入口子用例可跑", False,
                   "client.py 未接 validate_background_refs（TDD 红属预期）")

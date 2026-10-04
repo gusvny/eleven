@@ -3,8 +3,8 @@
 
 intent（守护的用户可感知行为/契约）：
   C1 调度由**声明面**驱动且是「每天一次」：integration-tests 实例声明 `suite: full`
-     与每日 cron（五字段、minute/hour 固定 ⇒ 每天恰好一次）；其余实例（docs-sync）
-     cadence 未被顺手改动（零回归面）；
+     与每日 cron（五字段、minute/hour 固定 ⇒ 每天恰好一次）；**其余实例的 cadence 只断言形状**
+     （五字段 + 显式时区）——261004 宿主令把 docs-sync 改成每天一次，值锁已退役；
   C2 正规入口 `inspection_trigger.py schedule-up` 能把该实例**真建成 Temporal
      Schedule**（回执给 next_action_times＝次日；`describe` 可再查），且**可清场**
      （场景不遗留常驻定时器）；
@@ -157,10 +157,13 @@ def main() -> int:
     r.check("C1c 该实例声明 suite=full（本期在自有泳道跑全集）",
             it.suite == "full", "suite=%r（词表 %r）" % (it.suite, decl_mod.WIRED_SUITES))
     docs = decl.instance("docs-sync")
-    r.check("C1d 其余实例 cadence 未被顺手改动（docs-sync 仍是周 cron）",
+    # 261004 宿主令把 docs-sync 改成每天一次 ⇒ 本子用例不再锁「它必须是周 cron」（值锁会让
+    # 每一次合法的 cadence 变更都红一次，实测 261004 就红了一次）。改为**形状断言**：
+    # 五字段可解析 + 时区显式；值本身由声明面负责，变更须具名申报（见 §7.3 纪律）。
+    r.check("C1d 其余实例 cadence 只做形状断言（五字段 + 显式时区，不锁具体值）",
             docs is not None and len((docs.cron or "").split()) == 5
-            and (docs.cron or "").split()[2:] != ["*", "*", "*"],
-            "docs-sync cron=%r" % (getattr(docs, "cron", None)))
+            and bool(str(getattr(docs, "tz", "") or "").strip()),
+            "docs-sync cron=%r tz=%r" % (getattr(docs, "cron", None), getattr(docs, "tz", None)))
     r.check("C1e suite 词表外值 fail-closed（不得悄悄降级成不跑）",
             "half" not in decl_mod.WIRED_SUITES and decl_mod.WIRED_SUITES == ("full",),
             str(decl_mod.WIRED_SUITES))

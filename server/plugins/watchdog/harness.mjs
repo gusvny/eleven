@@ -187,7 +187,7 @@ function sessionStat() {
   // t261004-12 桩保真：产品判定吃会话 running 位，缺席=unknown（显式 no_signal，永不
   // stalled）——桩必须给确定布尔。缺省映射：progressStopped=false ⇒ 在跑（true，
   // 长回合静默的语义归 long_turn 旋钮管）；session_progress stop=True ⇒ 不再落消息
-  // = 不在跑（false，legacy 停摆腿照旧 stalled）。显式旋钮 sessionStub.running 优先
+  // = 不在跑（false，legacy 停摆分支照旧 stalled）。显式旋钮 sessionStub.running 优先
   // （t261004-12 场景可用它直接注入位）。
   return async () => ({
     advanced: !sessionStub.progressStopped,

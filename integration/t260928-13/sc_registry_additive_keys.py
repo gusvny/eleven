@@ -93,7 +93,7 @@ def _main_checkout_root(tree_root: Path) -> Path:
 
     基线探针会把本场景放进 /tmp 下的临时 detached worktree 跑（verify_lane 的
     _run_baseline，只软链依赖不保路径）。原先拿当前树路径认「引擎所属条目」，
-    临时树永远落在所有项目 dirs 之外 → 该腿在基线通道 100% 假红（主干明明绿），
+    临时树永远落在所有项目 dirs 之外 → 该子用例在基线通道 100% 假红（主干明明绿），
     既有 flaky 统计失真，也污染红绿归属（把主干绿记成主干红）。git 共享目录
     （.git 是目录即主树；worktree 形态 .git 是文件，gitdir: 指到
     <主根>/.git/worktrees/<name>）的父目录=主 checkout 根：主树 / 泳道
@@ -273,7 +273,7 @@ else:
         q_dirs = [str(q.get("dir") or "") for q in quarantined]
         ok(not q_dirs, "真机零隔离（隔离=%s）" % q_dirs)
         # 身份根=主 checkout（见 _main_checkout_root）：基线临时树里的跑法也认得
-        # 出自己是哪个项目的引擎，该腿只对产品事实红（条目真被隔离/真消失）。
+        # 出自己是哪个项目的引擎，该子用例只对产品事实红（条目真被隔离/真消失）。
         id_root = _main_checkout_root(ROOT)
         owners = [p.get("key") for p in projects
                   if any(str(d).rstrip("/") == str(id_root) or str(id_root).startswith(str(d).rstrip("/") + "/")

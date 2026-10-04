@@ -1,4 +1,18 @@
 {
+ "_header": {
+  "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
+  "labelled_counts": {
+   "engine_tests": 10,
+   "scenarios": 17
+  },
+  "vocab": [
+   "behaviour",
+   "contract",
+   "production-snapshot",
+   "source-text"
+  ],
+  "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
+ },
  "engine_tests": {
   "server/engine/tests/test_260929_env_red_named_channel.py": {
    "anchor": "behaviour",
@@ -900,6 +914,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261002_10_codegen_freshness.py": {
+   "anchor": "contract",
+   "note": "t261004-20 backfill: asserts the path-gate codegen-freshness exemption (M-state reverted generated files are exempt), not a user-facing flow",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261002_10_merge_check_resync.py": {
    "anchor": "behaviour",
    "note": "",
@@ -933,6 +952,11 @@
   "server/engine/tests/test_t261004_11_executor_actions.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_23_executor_requests.py": {
+   "anchor": "contract",
+   "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
    "sync_path": ""
   },
   "server/engine/tests/test_template_topology.py": {
@@ -3252,6 +3276,36 @@
    "note": "",
    "sync_path": ""
   },
+  "integration/t261004-16/sc_panel_markdown_render.mjs": {
+   "anchor": "behaviour",
+   "note": "real browser + API stubs; markdown render contract on live DOM",
+   "sync_path": ""
+  },
+  "integration/t261004-16/sc_panel_width_columns.mjs": {
+   "anchor": "behaviour",
+   "note": "real browser geometry checks",
+   "sync_path": ""
+  },
+  "integration/t261004-17/sc_t26100417_answer_routes_per_question.mjs": {
+   "anchor": "behaviour",
+   "note": "real browser journey",
+   "sync_path": ""
+  },
+  "integration/t261004-17/sc_t26100417_bridge_mirror_carries_options.mjs": {
+   "anchor": "behaviour",
+   "note": "real browser journey",
+   "sync_path": ""
+  },
+  "integration/t261004-17/sc_t26100417_charter_request_discipline.py": {
+   "anchor": "contract",
+   "note": "verbatim clause checks against server/session_charter.md",
+   "sync_path": ""
+  },
+  "integration/t261004-17/sc_t26100417_request_card_answerable.mjs": {
+   "anchor": "behaviour",
+   "note": "real browser journey",
+   "sync_path": ""
+  },
   "integration/t261004-20/sc_rewritten_decl_tests_lane_green.py": {
    "anchor": "behaviour",
    "note": "",
@@ -3260,6 +3314,31 @@
   "integration/t261004-20/sc_test_anchor_brakes.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "integration/t261004-22/sc_d2b_carrier_wait_contract.py": {
+   "anchor": "behaviour",
+   "note": "t261004-20 backfill: the carrier test must wait to a deadline and name its cause on a genuine failure",
+   "sync_path": ""
+  },
+  "integration/t261004-23/sc_engine_request_filing.py": {
+   "anchor": "contract",
+   "note": "t261004-20 backfill: who may file a request through the engine (identity + named refusals)",
+   "sync_path": ""
+  },
+  "integration/t261004-23/sc_panel_engine_row_old_door.mjs": {
+   "anchor": "behaviour",
+   "note": "t261004-20 backfill: the panel shows an engine-filed row with its source; the old door refuses and names the engine path",
+   "sync_path": ""
+  },
+  "integration/t261004-24/sc_copy_language_console_english.py": {
+   "anchor": "behaviour",
+   "note": "real console surface, English-copy check on live DOM",
+   "sync_path": ""
+  },
+  "integration/t261004-24/sc_copy_language_per_diff_gate.py": {
+   "anchor": "behaviour",
+   "note": "fault-injection brake: plants copy violations, asserts the L15 gate bites",
    "sync_path": ""
   },
   "integration/tests/test_fixture_reclaim.mjs": {
@@ -3286,60 +3365,6 @@
    "anchor": "behaviour",
    "note": "",
    "sync_path": ""
-  },
-  "integration/t261004-16/sc_panel_markdown_render.mjs": {
-   "anchor": "behaviour",
-   "note": "real browser + API stubs; markdown render contract on live DOM",
-   "sync_path": ""
-  },
-  "integration/t261004-16/sc_panel_width_columns.mjs": {
-   "anchor": "behaviour",
-   "note": "real browser geometry checks",
-   "sync_path": ""
-  },
-  "integration/t261004-17/sc_t26100417_bridge_mirror_carries_options.mjs": {
-   "anchor": "behaviour",
-   "note": "real browser journey",
-   "sync_path": ""
-  },
-  "integration/t261004-17/sc_t26100417_request_card_answerable.mjs": {
-   "anchor": "behaviour",
-   "note": "real browser journey",
-   "sync_path": ""
-  },
-  "integration/t261004-17/sc_t26100417_answer_routes_per_question.mjs": {
-   "anchor": "behaviour",
-   "note": "real browser journey",
-   "sync_path": ""
-  },
-  "integration/t261004-17/sc_t26100417_charter_request_discipline.py": {
-   "anchor": "contract",
-   "note": "verbatim clause checks against server/session_charter.md",
-   "sync_path": ""
-  },
-  "integration/t261004-24/sc_copy_language_per_diff_gate.py": {
-   "anchor": "behaviour",
-   "note": "fault-injection brake: plants copy violations, asserts the L15 gate bites",
-   "sync_path": ""
-  },
-  "integration/t261004-24/sc_copy_language_console_english.py": {
-   "anchor": "behaviour",
-   "note": "real console surface, English-copy check on live DOM",
-   "sync_path": ""
   }
- },
- "_header": {
-  "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20",
-  "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
-  "labelled_counts": {
-   "engine_tests": 10,
-   "scenarios": 17
-  },
-  "vocab": [
-   "behaviour",
-   "contract",
-   "production-snapshot",
-   "source-text"
-  ]
  }
 }

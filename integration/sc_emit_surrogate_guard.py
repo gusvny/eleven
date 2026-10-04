@@ -2,7 +2,7 @@
 """坏字符回执契约·回归网（KI-185/KI-186 族，261002 直修批沉淀）。
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为执行体）：坏字符（lone
-surrogate）只许变得可见，不许带走整条回执或整段票史——三腿钉死双向契约：
+surrogate）只许变得可见，不许带走整条回执或整段票史——三个子用例钉死双向契约：
 A 入界消毒黑盒：带 lone surrogate 的畸形 op payload 进 ticket.py → 回执必须
   完整（合法 JSON、ok:false）、坏字符以 \\udcXX 可见转义点名、stderr 无
   Traceback、进程受控退出（不崩不 signal）。

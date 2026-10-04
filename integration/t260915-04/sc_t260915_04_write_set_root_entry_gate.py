@@ -35,6 +35,13 @@ stdlib 替代子用例）；无 docker、无真 Temporal——SANDBAR_TARGET_HOS
 发生在连接之前＝零 Temporal 依赖，过闸子用例以「连接失败而非拒收」为放行判别面。
 红线：绝不触生产 7233/8233/3099；夹具全在测试 tmp 目录自建。
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+
+隔离确定性（执行器请求 261004 -0023，C3）：A 族**同时**声明调用方身份（`caller_project`
+=本次要开的夹具项目）。身份优先级=显式 arg > env `SANDBAR_CALLER_PROJECT` > cwd，故继承来的
+身份再也抢不到前面：此前 A 族不声明身份 ⇒ 身份闸先拒（undeclared=refuse），把 A3/A5/A6 要
+断言的「过闸放行判别面」和「建票期形态拒收」文案全挡住，场景随环境由绿转红。B 族早已按
+KI-142 补声明，A 族是漏网的第二处。A7 子用例把这条性质钉住：环境里带敌对身份时，A 族断言
+的具名面照旧可达。
 """
 import json
 import os
@@ -115,6 +122,11 @@ def main():
             with stage_env(SANDBAR_PROJECTS_DIR=str(regdir)):
                 return try_create(tk, {
                     "op": "create", "project": project, "workflow": "dev-lane",
+                    # Explicit caller identity (t261004 -0023 isolation fix): the
+                    # fixture project under test is the caller, so the identity gate
+                    # passes and the write-set face is the one under test even when
+                    # the environment carries an inherited SANDBAR_CALLER_PROJECT.
+                    "caller_project": project,
                     "title": "t260915-04 场景子用例", "write_set": list(write_set),
                     "id": payload_tid})
 
@@ -145,6 +157,28 @@ def main():
         check("A6 单仓 create：条目=='.'（项目根）建票即拒（与闸同口径）+点名项目根",
               _res is None and _is_refusal(err) and "." in err
               and ("项目根" in err or "整仓" in err), "err=%r" % err[:220])
+
+        # A7 (executor request 261004 -0023, C3): the A family must not flip with an
+        # inherited caller identity. Hostile value in the environment -> the same two
+        # faces (a pass-through and a named refusal) must still be reached; an
+        # identity refusal here means the env dependence came back.
+        prev_identity = os.environ.get("SANDBAR_CALLER_PROJECT")
+        os.environ["SANDBAR_CALLER_PROJECT"] = "hostile-other-project"
+        try:
+            _res, err_h1 = create("t26091504a7", "utmr", ["docs/kb.md"])
+            _res2, err_h2 = create("t26091504a8", "utmr", ["repo_a/"])
+        finally:
+            if prev_identity is None:
+                os.environ.pop("SANDBAR_CALLER_PROJECT", None)
+            else:
+                os.environ["SANDBAR_CALLER_PROJECT"] = prev_identity
+        check("A7 A 族不随继承的 SANDBAR_CALLER_PROJECT 翻转（放行面仍可达）",
+              _res is None and _is_pass_through(err_h1) and "跨项目" not in err_h1,
+              "err=%r" % err_h1[:220])
+        check("A7 A 族不随继承的 SANDBAR_CALLER_PROJECT 翻转（拒收面仍具名）",
+              _res2 is None and _is_refusal(err_h2) and "repo_a/" in err_h2
+              and all(k in err_h2 for k in FIX_KEYWORDS),
+              "err=%r" % err_h2[:220])
 
         # ---- B 裸入口（client.py ticket-start 子进程；连接桩=过闸判别面） ----
         def start(tid, project, write_set, worktree=None):
