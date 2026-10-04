@@ -112,5 +112,20 @@ const linesBeforeReads = io.files[f('alpha')].split('\n').filter(Boolean).length
 for (let i = 0; i < 5; i++) readRequests(io, env, 'alpha')
 assert(io.files[f('alpha')].split('\n').filter(Boolean).length === linesBeforeReads, 'reading never mutates the ledger (long retention)')
 
-n += 35
+// t261004-23：引擎侧投递的行（server/engine/executor_requests.py 落账，带
+// surface:"engine"）在面板读出视图里原样可见——读侧零改动透传未知键；来源、
+// 归属会话、waiting 状态三样都断言，不碰应答/dismiss 读路径（t261004-17 属地）。
+const engineFile = f('gammaproj')
+io.appendFileSync(engineFile, JSON.stringify({
+  type: 'request', id: 'req-1000-0001', at: 1000, project: 'gammaproj', kind: 'decision',
+  question: 'Which plan should the executor adopt?', detail: '', default_action: '',
+  expires_at: null, raised_by: 'sess-exec-1', surface: 'engine',
+}) + '\n')
+const engineRead = readRequests(io, env, 'gammaproj')
+const engineRow = engineRead.rows.find(x => x.id === 'req-1000-0001')
+assert(engineRow && engineRow.status === 'waiting', 'engine-filed row shows in the waiting list')
+assert(engineRow.raised_by === 'sess-exec-1', 'engine-filed row carries the executor session as raised_by')
+assert(engineRow.surface === 'engine', 'engine-filed row carries the surface source marker')
+
+n += 38
 done(n)
