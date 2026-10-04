@@ -482,9 +482,12 @@ def session_matches_declaration(channel: str, lane_surface: str = "", key: str =
 # ---------- 声明写面（面板 TS 侧是主编辑器；本函数=引擎侧同规则写口与测试/CLI 面） ----------
 
 # dead-man-exempt: save_declaration
-# （引擎侧声明写口=反锁与原子写的单一真源：t261004-18（KI-193）起面板授权写也走
-#   本函数（client.py executor-grants-write 入口，source 随载荷进审计），TS 侧
-#   saveGrantsDecl 降级为测试缝写核（harness/UT 桩）与镜像校验面；非死码。
+# (Engine-side declaration write face = the single source of truth for the
+# anti-lockout and atomic write: since t261004-18 (KI-193) the panel's grant
+# writes also go through this function (client.py executor-grants-write entry,
+# source enters the audit with the payload); the TS-side saveGrantsDecl is
+# demoted to a test-seam write (harness/UT stub) and a mirror-validation face;
+# not dead code.
 #   退役前先删 TS 镜像，两侧一起退役。）
 def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      night_tier: Optional[Dict[str, Any]] = None,

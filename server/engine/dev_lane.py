@@ -55,6 +55,21 @@ with workflow.unsafe.imports_passed_through():
     # 渲染器只认节点+边+kind——KI-019 线性近似泳道图的真拓扑承载）。
     import template_topology
     import shared   # t260925-12：gate_phase_timings 纯函数（零 IO，沙箱安全）
+    # t261004-32 (CL-1 engine half): project-level concurrency cap. The semantic
+    # source of truth (fail-closed declaration loading, lock-guarded ledger)
+    # lives in concurrency.py - this file only wires it: judge the slot before a
+    # stage, account at the four points (stage boundary / human gate = atomic
+    # renew, pause / terminal = real release), queue visibility.
+    from concurrency import (
+        AcquireArgs,
+        CAUSE_HUMAN_GATE,
+        CAUSE_PAUSED,
+        CAUSE_TERMINATED,
+        ReleaseArgs,
+        concurrency_acquire,
+        concurrency_release,
+        concurrency_renew,
+    )
     # t260921-04：developer 段验证纪律文案（宿主令 260921「单测可跑、集成禁跑」）
     # ——FLOW_BRIEF 的 clause 由其 prompt_clause() 从 FORBIDDEN_ENTRIES 渲染，
     # 文案与执法匹配器同源（声明=执法，两侧必须同批改）。
@@ -1099,9 +1114,121 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                               % "、".join(str(d) for d in dropped))
                 self._log("写集已随方案定稿刷新：现 %d 条" % len(merged))
 
+    # ---------- concurrency slot gate (t261004-32, CL-1 engine half) ----------
+    # Decision truth lives in concurrency.py (this file only wires it, no
+    # duplicated semantics): the slot unit is one ticket's lane run. The slot is
+    # judged before the first stage (queue, never start-then-pause). Real
+    # releases at exactly two points: paused (stage boundary) and terminated.
+    # The other two rule points (stage end, human-gate transition) are atomic
+    # renews - the holder record's reason is rewritten under the same lock
+    # (running / human-hold), no window opens, a running ticket never loses its
+    # slot to a queued one (the human gate eats the slot on purpose; no
+    # re-queue after the signature - the review ruling, pinned in
+    # test_t261004_32_concurrency.py). Leak face: the 5s re-poll backstop
+    # protects WAITERS only, never the holder - a zombie holder whose workflow
+    # was killed mid-stage is cleared by ticket.py op=concurrency reconcile.
+
+    CONC_GATE_POLL = timedelta(seconds=5)   # waiter re-poll backstop
+
+    def _conc_project(self) -> str:
+        return str(self.meta.get("project") or "")
+
+    async def _concurrency_gate(self) -> None:
+        """Judge the slot BEFORE a stage starts (rule 1). Not granted → the
+        ticket WAITS in the queue (stage_state=queued) and re-polls; it never
+        starts first and pauses afterwards. A declaration refusal propagates
+        from the activity and fails the workflow by name (rule 9, fail
+        closed) — an unreadable limit never becomes an unbounded machine."""
+        proj = self._conc_project()
+        if not proj:
+            raise ValueError(
+                "Concurrency gate refused: ticket %s has no project key - the "
+                "limit is judged per project, an empty key is never admitted "
+                "(fail-closed, t261004-32 rule 9)" % self.ticket_id)
+        last_pos = None
+        while True:
+            r = await workflow.execute_activity(
+                concurrency_acquire,
+                AcquireArgs(project=proj, ticket=self.ticket_id),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+            if r.get("granted"):
+                if self.meta.get("stage_state") == "queued":
+                    self.meta["stage_state"] = "running"
+                self.meta["queue_face"] = None
+                # Face reset on wake: the blocked wait recorded human-hold; back in the
+                # main loop the holder record flips back to running (atomic renew, no window).
+                if r.get("reason") == "human-hold":
+                    await self._concurrency_renew("stage-end")
+                self._touch()
+                return
+            pos = r.get("position")
+            if pos != last_pos:
+                self._log("Queued for a slot: position %s (limit=%s, holding %s) "
+                          "- the slot is judged before a stage starts; the first "
+                          "stage never jumps the queue"
+                          % (pos, r.get("limit"), r.get("holders")))
+                last_pos = pos
+            self.meta["stage_state"] = "queued"
+            self.meta["queue_face"] = {"position": pos, "limit": r.get("limit"),
+                                       "waiting": r.get("waiting")}
+            self._touch()
+            await workflow.sleep(self.CONC_GATE_POLL)
+
+    async def _concurrency_renew(self, reason: str) -> None:
+        """Atomic holder-record refresh (stage end / human-gate transition).
+        Local no-op without a project key — the gate already refused such a
+        ticket at start, so there is nothing to renew."""
+        proj = self._conc_project()
+        if not proj:
+            return
+        r = await workflow.execute_activity(
+            concurrency_renew,
+            ReleaseArgs(project=proj, ticket=self.ticket_id, cause=reason),
+            start_to_close_timeout=SHORT, retry_policy=RETRY)
+        if r.get("holding") and r.get("reason") == "human-hold":
+            # Ledger source of the panel's amber dot (design section 3.1): a ticket
+            self.meta["queue_face"] = None
+            self._touch()
+
+    async def _concurrency_release(self, cause: str) -> None:
+        """Real release (paused / terminated) + queue-head promotion. Local
+        no-op without a project key (nothing was ever acquired)."""
+        proj = self._conc_project()
+        if not proj:
+            return
+        r = await workflow.execute_activity(
+            concurrency_release,
+            ReleaseArgs(project=proj, ticket=self.ticket_id, cause=cause),
+            start_to_close_timeout=SHORT, retry_policy=RETRY)
+        self.meta["queue_face"] = None
+        self._touch()
+        if cause == CAUSE_PAUSED and r.get("released"):
+            self._log("Pause accounting: slot released (%s waiting)" % (r.get("waiting"),))
+        elif cause == CAUSE_TERMINATED:
+            self._log("Terminal accounting: slot released%s" % (
+                "; queue head %s promoted" % r.get("promoted")
+                if r.get("promoted") else ""))
+
+    async def _concurrency_release_if_paused(self) -> None:
+        """Rule 4: a paused ticket does not hold a slot. Called at the stage
+        boundary before the pause gate engages — the in-flight stage held its
+        slot to the end (stage-boundary pause semantics), the boundary itself
+        hands it back."""
+        if not self._paused:
+            return
+        await self._concurrency_release(CAUSE_PAUSED)
+
     # ---------- blocked wait (retry_qc re-runs this step / rework jumps) ----------
     async def _blocked(self, step_id: str, why: str) -> None:
         self.meta["stage_state"] = "blocked"
+        # t261004-32 (rule 3): blocked = waiting for a human (retry_qc/rework are
+        # both human actions) - holding the slot is deliberate; the ledger says
+        # human-hold (source of the panel's amber dot). A ledger-refresh failure
+        try:
+            await self._concurrency_renew(CAUSE_HUMAN_GATE)
+        except Exception as e:  # noqa: BLE001
+            self._log("Concurrency ledger renew failed (not blocking the main "
+                      "chain): %s: %s" % (type(e).__name__, e))
         # KI-048 (t260911-05): the blocked why is pinned on meta so the snapshot can
         # surface it top-level (blocked_reason / blocked_detail) — the ticket face
         # and the human gate must see WHY without diving into worker logs.
@@ -2469,6 +2596,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
     async def run(self, inp: TicketInput) -> Dict[str, Any]:
         self._init(inp)
 
+        # t261004-32: concurrency gate - judge the slot before the first stage
+        # (prepare_workspace included). No slot = wait in the queue
+        # (stage_state=queued), never start-then-pause; an absent/malformed
+        await self._concurrency_gate()
+
         # 1) prepare_workspace (code, no agent; failure → blocked waiting for retry/rework)
         # 宿主令 260930（light-lane，直修无票）：原内联块抽为共用 helper（循环在 helper 内，命令序列逐字不变）
         await self._prepare_workspace_step()
@@ -2543,7 +2675,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # （含在飞 activity）自然跑完后，每轮循环先过门——已暂停则停住等
             # resume，不推进下一相位。门在 rework 分支之前（显式语义：暂停期间
             # 到达的 rework 压在门口，resume 后先打回再派段）。
+            # t261004-32: pause accounting happens before the gate - the in-flight
+            # stage hands the slot back as soon as it finishes (rule 4: a paused
+            await self._concurrency_release_if_paused()
             await self._pause_gate()
+            # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal
+            # (reason reset to running), not holding (first run / after a pause) =
+            await self._concurrency_gate()
             # t260928-13：主相循环每轮先冲账（同步 signal 里的迁移由本边界冲走）
             await self._ledger_flush()
             if self._rework is not None:
@@ -4349,6 +4487,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self.human_context["merge"] = {"context_text": ctx_text}
                 self.meta["stage_state"] = "awaiting-human"
                 self._touch()
+                # t261004-32 (rule 3): the human gate eats the slot on purpose - the
+                # ledger atomically flips to human-hold (no window, nothing handed to
+                await self._concurrency_renew(CAUSE_HUMAN_GATE)
                 self._log("merge 人审挂起，等 sign signal（merge_check 已全绿）")
                 self._mark("merge", "awaiting-human", "等人签字：sign(gate=merge)")
                 # t260928-13：人门是无限期等待，先冲账再挂起（事件账本 flush 点）
@@ -4530,6 +4671,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"
         self._touch()
+        # t261004-32 (rule 2): terminal = real slot release, queue head promoted.
+        # The only terminal reachable inside run(); an external kill (terminate or
+        # cancel, the workflow dies) has no code-execution chance - those zombie
+        await self._concurrency_release(CAUSE_TERMINATED)
         self._log("merge 落账，工单收口（closed）")
         self._mark("merge", "closed", "workflow 完成")
         # t260928-13：收口前最后冲账——正常完单零 pending（行为验收口径）

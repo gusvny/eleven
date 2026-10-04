@@ -6417,6 +6417,10 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     ("dev_lane", "server/engine/dev_lane.py"),
     ("light_lane", "server/engine/light_lane.py"),
     ("shared", "server/engine/shared.py"),
+    # t261004-32: the concurrency cap decides whether a ticket may start a stage
+    # at all (declaration fail-closed + slot ledger) — an enforcement module, so
+    # it must be visible on the code-stamp fingerprint (tripwire criterion (a)).
+    ("concurrency", "server/engine/concurrency.py"),
     ("verify_lane", "server/tools/verify_lane.py"),
 )
 

@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 10,
-   "scenarios": 17
+   "engine_tests": 202,
+   "scenarios": 494
   },
   "vocab": [
    "behaviour",
@@ -14,6 +14,11 @@
   "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
  },
  "engine_tests": {
+  "server/engine/tests/test_t261004_32_concurrency.py": {
+   "anchor": "contract",
+   "note": "t261004-32 concurrency limit engine half: declaration fail-closed truth table + slot ledger contract + lane wiring source-scan guards",
+   "sync_path": ""
+  },
   "server/engine/tests/test_260929_env_red_named_channel.py": {
    "anchor": "behaviour",
    "note": "",
@@ -1026,6 +1031,16 @@
   }
  },
  "scenarios": {
+  "integration/t261004-32/sc_t26100432_decl_fail_closed.py": {
+   "anchor": "contract",
+   "note": "declaration refusal matrix + read-face shape (host rules 6/7/8/9)",
+   "sync_path": ""
+  },
+  "integration/t261004-32/sc_t26100432_slot_ledger.py": {
+   "anchor": "behaviour",
+   "note": "slot ledger semantics: judge-before-start, four release points, human-hold, pause, lower, order, reconcile (rules 1-5,8; KI-188 family)",
+   "sync_path": ""
+  },
   "integration/baselines/sc_auto_rework_trace.mjs": {
    "anchor": "behaviour",
    "note": "",

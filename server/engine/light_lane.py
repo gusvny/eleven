@@ -103,6 +103,9 @@ with workflow.unsafe.imports_passed_through():
         MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID,
     )
     import shared  # 纯函数面（exception_chain_note 等，零 IO）
+    # t261004-32: rule-point constants of the concurrency slot gate (the gate
+    # helpers themselves live in the parent DevLaneWorkflow).
+    from concurrency import CAUSE_HUMAN_GATE, CAUSE_TERMINATED  # noqa: F401
     import failure_protocol  # 纯函数面（归属前复验 KI-182，t261002-02）
     from agent_activities import (
         archive_ticket,
@@ -1246,6 +1249,11 @@ class LightLaneWorkflow(DevLaneWorkflow):
     async def run(self, inp: TicketInput) -> Dict[str, Any]:
         self._init(inp)
 
+        # t261004-32: concurrency gate - same face as dev-lane (helpers in the
+        # parent): judge the slot before the first stage, queue when not granted;
+        # a declaration refusal fails the ticket here by name (rule 9).
+        await self._concurrency_gate()
+
         # 1) 工作空间准备（dev-lane 同 helper：同活动/同失败转 blocked/同 rework 语义）
         await self._prepare_workspace_step()
 
@@ -1263,7 +1271,13 @@ class LightLaneWorkflow(DevLaneWorkflow):
         while phase != "done":
             # 段间暂停门（t260908-01 通用骨架，本类只接线）：当前段（含在飞活动）
             # 自然跑完，主循环走到下一个段间门口时门把它停住。
+            # t261004-32: pause accounting before the gate (rule 4: a paused ticket holds
+            # nothing); after resume the slot gate below re-acquires.
+            await self._concurrency_release_if_paused()
             await self._pause_gate()
+            # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal,
+            # not holding = queued acquire.
+            await self._concurrency_gate()
             # 事件账本：主相循环每轮先冲账（机制在 base.TicketEventLedgerMixin）
             await self._ledger_flush()
             if self._rework is not None:
@@ -1544,6 +1558,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 self.human_context["merge"] = {"context_text": ctx_text}
                 self.meta["stage_state"] = "awaiting-human"
                 self._touch()
+                # t261004-32 (rule 3): the human gate eats the slot on purpose - the ledger
+                # atomically flips to human-hold; post-signature continuation never
+                # re-queues (no window).
+                await self._concurrency_renew(CAUSE_HUMAN_GATE)
                 self._log("merge gate parked: waiting for the human sign signal "
                           "(merge_check is green)")
                 self._mark("merge", "awaiting-human",
@@ -1680,6 +1698,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"
         self._touch()
+        # t261004-32 (rule 2): terminal = real slot release, queue head promoted. An
+        # external kill (terminate/cancel) leaves no code path - zombie holders
+        # are cleared by ticket.py op=concurrency reconcile, by name.
+        await self._concurrency_release(CAUSE_TERMINATED)
         self._log("merge booked, ticket closed")
         self._mark("merge", "closed", "workflow finished")
         await self._ledger_flush()

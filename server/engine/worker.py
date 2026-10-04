@@ -82,6 +82,9 @@ from temporalio.worker import Worker
 from activities import ALL_ACTIVITIES
 import agent_runtime
 from agent_activities import ALL_AGENT_ACTIVITIES, make_stage_activity
+# t261004-32 (CL-1): the three thin concurrency-cap activities (decision
+# logic lives in concurrency.py; this layer only enters the Temporal registry).
+from concurrency import CONCURRENCY_ACTIVITIES
 from dsh_pin import dsh_face_payload, enforce_expected
 from agent_activities import inflight_stage_snapshot, recent_stage_outcomes
 from shared import (NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE,
@@ -115,8 +118,9 @@ def compose_worker_activities(extra_stage_ids=()):
     ValueError（无点名、崩栈在第三方深处）。这里 fail-loud 点名「活动名＋
     两个来源模块」。正常路径下加载口（workflows_v2 合并期「活动名撞引擎注册面」
     检查）已拒收撞名模板——本断言是 Worker 构造前的最后一道防线，不信任上游。"""
-    acts = list(ALL_ACTIVITIES) + list(ALL_AGENT_ACTIVITIES) + [
-        make_stage_activity(s) for s in extra_stage_ids]
+    acts = (list(ALL_ACTIVITIES) + list(ALL_AGENT_ACTIVITIES)
+            + list(CONCURRENCY_ACTIVITIES) + [
+        make_stage_activity(s) for s in extra_stage_ids])
     seen = {}
     for a in acts:
         name = activity_registered_name(a)

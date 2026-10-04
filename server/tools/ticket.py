@@ -141,7 +141,7 @@ TOOL = {
                                               'advance', 'dispatch-next', 'rework',
                                               'sign', 'retry_qc', 'pause', 'resume',
                                               'authorize', 'ruling', 'cancel',
-                                              'close_out']},
+                                              'close_out', 'concurrency']},
             'caller_project': {'type': 'string', 'description': '调用方项目身份（t260915-12 跨项目闸）：显式声明优先于 env/cwd 推导；写操作身份与目标票项目不符=拒收（cross_project_refused），确需跨项目带 cross_project 旗。引擎仓树内 cwd 不推导（防间接调用凭空造身份）'},
             'cross_project': {'type': 'object', 'properties': {'by': {'type': 'string', 'description': '谁在越权（记名）'}, 'reason': {'type': 'string', 'description': '为什么跨项目（理由必填入账）'}}, 'required': ['by', 'reason'], 'description': '越权豁免旗（记名留痕可查）：declared 身份跨项目写操作的显式放行钥匙；缺理由=拒收'},
             'cross_project_reason': {'type': 'string', 'description': '越权旗扁平形（理由必填；by 缺省取 by|who）——与 cross_project.reason 互斥'},
@@ -253,6 +253,28 @@ def _audit_mod():
         spec.loader.exec_module(mod)
         _AUDIT_MOD = mod
     return _AUDIT_MOD
+
+
+_CONC_POC = None
+
+
+def _concurrency_mod():
+    """加载 engine/concurrency.py（t261004-32：项目级并发上限——声明装载/额度账本
+    单一真源）。stdlib + engine.shared 依赖，可独立加载；声明拒收在这里原样上抛。"""
+    global _CONC_POC
+    if _CONC_POC is None:
+        import importlib.util
+        import sys
+        spec = importlib.util.spec_from_file_location(
+            '_poc_concurrency', TEMP_POC / 'concurrency.py')
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules['_poc_concurrency'] = mod
+        # concurrency.py 顶部 `import shared`——把 shared 装载单例注入该名，两侧
+        # （engine 进程 / ticket.py 直 spawn）用同一份注册表装载器，不双份。
+        sys.modules.setdefault('shared', _shared())
+        spec.loader.exec_module(mod)
+        _CONC_POC = mod
+    return _CONC_POC
 
 
 _AUDIT_MOD = None
@@ -1149,6 +1171,36 @@ def validate_write_set_no_notes(write_set):
                 '待落账项（KI/epic/决策档）写进结算 note，由 integration 在 main 落。' % e)
 
 
+def _concurrency(args):
+    """t261004-32：项目并发上限的只读面 + 僵尸 holder 清账（CL-2/CL-3 面板消费）。
+
+    - 缺省（reconcile 缺省 false）：read_state——上限、在持（含 human-hold）、
+      队列位次与已等时长。面板只读账，不自己算队列（规则8）。
+    - reconcile=true：逐个 holder 用只读 query 探活（workflow 已消亡=僵尸），
+      具名清账并递补队首。声明缺席/畸形在这里具名拒收（规则9），绝不静默 unlimited。
+    """
+    project = str(args.get('project') or '').strip()
+    if not project:
+        raise ValueError('op=concurrency 需要 project（项目 key，声明按项目逐份判读）')
+    conc = _concurrency_mod()
+    if not args.get('reconcile'):
+        return conc.read_state(project)
+    state = conc.read_state(project)
+    alive = []
+    probe_errors = {}
+    for h in state.get('holders') or []:
+        tid = str(h.get('ticket') or '')
+        try:
+            _poc_ok(_poc('query', {'workflow_id': tid}))
+            alive.append(tid)
+        except Exception as e:  # noqa: BLE001——探活失败=该 holder 视为僵尸（具名留底）
+            probe_errors[tid] = '%s: %s' % (type(e).__name__, str(e)[:160])
+    out = conc.reconcile(project, alive)
+    out['probe_errors'] = probe_errors
+    out['decl'] = state.get('decl')
+    return out
+
+
 def run(args):
     op = args.get('op')
     if op == 'create':
@@ -1183,6 +1235,8 @@ def run(args):
         return _cancel_audit(args)
     if op in ('pause', 'resume'):
         return _pause_resume(args, op)
+    if op == 'concurrency':
+        return _concurrency(args)
     raise ValueError('未知 op: %r' % (op,))
 
 
