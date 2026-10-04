@@ -81,11 +81,19 @@ try {
 
 // t260929-22 宿主裁 1（260929）：Docs/模型路由/项目设置收进组内「More views」展开位
 // （260823 常驻可见放宽为展开显现）——取用前先展开全部组的展开位（data-on 缺席=未展开）。
+// t261004-43 闸红消解（261005）：组头是异步渲染的——固定 500ms 后计数可能仍为 0，
+// 一组按钮都没点就断言 Docs 在场=竞态假红（闸回执 entry/icon-present FAIL，而源码
+// sidebar.tsx 与 lib 构建产物均带 aria-label="Docs"）。改为：先 waitForSelector 等
+// 展开位在世，再循环展开至无未展开位（有界 ≤3 轮防死循环；断言不变——图标仍缺席=真红）。
 async function expandMoreViews(page) {
-  const btns = page.locator('[data-wb-more-views]:not([data-on])')
-  const n = await btns.count().catch(() => 0)
-  for (let i = 0; i < n; i++) await btns.nth(i).click({ timeout: 4000 }).catch(() => {})
-  await page.waitForTimeout(300)
+  await page.waitForSelector('[data-wb-more-views]', { timeout: 8000 }).catch(() => {})
+  for (let round = 0; round < 3; round++) {
+    const btns = page.locator('[data-wb-more-views]:not([data-on])')
+    const n = await btns.count().catch(() => 0)
+    if (n === 0) return
+    for (let i = 0; i < n; i++) await btns.nth(i).click({ timeout: 4000 }).catch(() => {})
+    await page.waitForTimeout(300)
+  }
 }
   await expandMoreViews(page)
   const docIcon = page.locator('[aria-label="Docs"]').first();

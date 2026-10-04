@@ -268,6 +268,117 @@ def test_workflow_id_shape():
     assert ed.workflow_id_for(PROJECT, "abcd1234") == "executor-delivery-%s-abcd1234" % PROJECT
 
 
+# ---------- t261004-43: the activity shell forwards the executing-process env ----------
+#
+# The live defect (261004 23:41): delivery_activity called perform_delivery with
+# env=None, so the ledger root resolved RELATIVE to the worker cwd
+# ('.sandbar/projects/...' — receipt result.file was the tell). These cases
+# exercise the REAL activity shell (the line that had zero coverage) through the
+# real production env path (dict(os.environ) with HOME pointed at a tmp root) —
+# they deliberately do NOT reuse the _handlers/_deliver env-injection seam that
+# hid the bug.
+
+import asyncio  # noqa: E402
+import os  # noqa: E402
+
+
+def _activity_env(monkeypatch, tmp_path, extra=None):
+    """Point the process env at a tmp instance: HOME under tmp_path, the
+    explicit location seams cleared so the default root must resolve through
+    HOME. `extra` adds decoy worker-env values (identity-poison probes)."""
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    for k in ("DSH_HOME", "SANDBAR_PANEL_DIR", "SANDBAR_PROJECTS_DIR"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in (extra or {}).items():
+        monkeypatch.setenv(k, v)
+    return home
+
+
+def _stub_declaration(monkeypatch):
+    """Host names the executor session in executor_sessions (same stub shape as
+    the other cases) — no real grant files read. Patched on the shared
+    executor_grants module object that append_request reaches by default."""
+    monkeypatch.setattr(executor_grants_module(), "load_declaration",
+                        lambda key: {"ok": True, "executor_sessions": [SESSION]})
+
+
+def _run_activity(payload):
+    return asyncio.run(ed.delivery_activity(payload))
+
+
+def test_activity_shell_files_into_instance_projects_root_absolute(monkeypatch, tmp_path):
+    """t261004-43 Required (1)+(2)+(4): the activity forwards the executing
+    process env (location keys only), so the row lands in the instance projects
+    root and the receipt path is ABSOLUTE. Pre-fix this failed: env=None made
+    the root relative to cwd and both asserts below tripped."""
+    home = _activity_env(monkeypatch, tmp_path)
+    _stub_declaration(monkeypatch)
+    out = _run_activity(_payload("request", dict(REQUEST_BODY)))
+    assert out["ok"] is True, out
+    expected = er.ledger_file(PROJECT, {"HOME": str(home)})
+    assert out["result"]["file"] == str(expected)
+    assert os.path.isabs(out["result"]["file"])  # Required (4): receipt tripwire
+    lines = expected.read_text().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["raised_by"] == SESSION
+
+
+def test_activity_shell_worker_env_cannot_touch_identity(monkeypatch, tmp_path):
+    """t261004-43 Required (3): decoy identity values in the worker env never
+    reach the row — identity comes only from the payload identity block."""
+    _activity_env(monkeypatch, tmp_path, extra={
+        "DSH_SESSION_ID": "sess-decoy",
+        shared.CALLER_PROJECT_ENV: "proj-decoy",
+        "DSH_HEADLESS_SESSION": "sess-decoy-headless",
+    })
+    _stub_declaration(monkeypatch)
+    out = _run_activity(_payload("request", dict(REQUEST_BODY)))
+    assert out["ok"] is True, out
+    blob = json.dumps(out, ensure_ascii=False)
+    assert "sess-decoy" not in blob and "proj-decoy" not in blob
+    assert out["result"]["row"]["raised_by"] == SESSION
+    assert out["who"] == SESSION
+
+
+def test_stripped_env_resolves_relative_root_guard(monkeypatch):
+    """Pins the pre-condition the fix removes: with NO env at all the default
+    root is relative to cwd — this is what made the live row vanish. If the
+    activity ever stops forwarding env, the absolute-path assert above fails
+    and this case explains the mechanism."""
+    root = er.instance_projects_root({})
+    assert not os.path.isabs(root)
+    assert root == os.path.join(".sandbar", "projects")
+
+
+def test_perform_delivery_receipt_absolutization_noop_on_odd_results(tmp_path):
+    """The defensive abspath post-process is a no-op on non-dict results and on
+    results without a file field — receipt shape unchanged."""
+    def stub(body, now_ms, env):
+        return {"ok": True, "unusual": True}
+
+    hs = dict(ed.default_handlers())
+    hs["request"] = stub
+    out = ed.perform_delivery(_payload("request", dict(REQUEST_BODY)), 1000, handlers=hs)
+    assert out["ok"] is True and "file" not in out["result"] and out["result"]["unusual"] is True
+
+
+def test_perform_delivery_absolutizes_relative_receipt_file(tmp_path, monkeypatch):
+    """Belt-and-braces (Required 4): a relative result.file is stored absolute
+    in the receipt — a future stripped-env worker still exposes mis-location."""
+    def stub(body, now_ms, env):
+        return {"ok": True, "row": {}, "file": ".sandbar/projects/%s/requests.jsonl" % PROJECT}
+
+    hs = dict(ed.default_handlers())
+    hs["request"] = stub
+    monkeypatch.chdir(tmp_path)
+    out = ed.perform_delivery(_payload("request", dict(REQUEST_BODY)), 1000, handlers=hs)
+    assert out["ok"] is True
+    assert os.path.isabs(out["result"]["file"])
+    assert out["result"]["file"] == str(tmp_path / ".sandbar" / "projects" / PROJECT / "requests.jsonl")
+
+
 # ---------- registration (worker registry single source) ----------
 
 def test_delivery_workflow_registered_in_all_workflows():

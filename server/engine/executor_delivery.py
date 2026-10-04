@@ -198,6 +198,11 @@ def perform_delivery(payload: Any, now_ms: int,
         out: Dict[str, Any] = {"ok": False, "field": result.get("field") or "body"}
         out["error"] = result.get("error") or result.get("reason") or "delivery refused"
         return out
+    # t261004-43 Required (4): the receipt must expose mis-location by itself —
+    # a relative result.file (the tell of the live 261004 defect) is stored
+    # absolute. No-op on results without a file field; row content untouched.
+    if isinstance(result, dict) and result.get("file"):
+        result["file"] = os.path.abspath(str(result["file"]))
     return {"ok": True, "face": face, "who": session,
             "identity_src": str(identity.get("identity_src") or ""),
             "channel_src": str(identity.get("channel") or ""),
@@ -220,9 +225,13 @@ try:  # noqa: SIM105 — guarded light import; the core above stays temporalio-f
 
     @_activity.defn(name="executor_delivery_activity")
     async def delivery_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Runs in the worker: the append happens in the ENGINE process."""
+        """Runs in the worker: the append happens in the ENGINE process.
+        t261004-43: this shell is the ledger-LOCATION forwarding point — the
+        executing-process env rides in (filtered to LEDGER_ROOT_ENV_KEYS) so
+        the row lands in the instance projects root, never relative to the
+        worker cwd. Identity still comes only from the payload block."""
         import time as _time
-        return perform_delivery(payload, int(_time.time() * 1000))
+        return perform_delivery(payload, int(_time.time() * 1000), env=dict(os.environ))
 
     @_workflow.defn
     class ExecutorDeliveryWorkflow:

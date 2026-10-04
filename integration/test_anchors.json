@@ -3456,6 +3456,11 @@
    "note": "",
    "sync_path": ""
   },
+  "integration/t261004-43/sc_activity_ledger_root.py": {
+   "anchor": "contract",
+   "note": "t261004-43: the delivery ACTIVITY forwards the executing-process env so rows land in the instance projects root and the receipt exposes mis-location (absolute result.file)",
+   "sync_path": ""
+  },
   "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
    "anchor": "behaviour",
    "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
