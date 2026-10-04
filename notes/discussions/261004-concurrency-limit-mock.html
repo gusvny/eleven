@@ -343,19 +343,46 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
-const PROJ_SHAPE = { sandbar: 'square', suyou: 'diamond', nusuyou: 'hexagon' };
-// 颜色 + 形状双通道：同 key 恒同色同形；形状在色盲/灰度下仍可辨（只留短码，不再有短名）
-function shapeSVG(shape, color, size){
-  const S = size, h = S / 2, pad = S * 0.06;
-  const wrap = inner => '<svg width="' + S + '" height="' + S + '" viewBox="0 0 ' + S + ' ' + S + '" style="flex:0 0 auto;display:block">' + inner + '</svg>';
-  if (shape === 'circle') return wrap('<circle cx="' + h + '" cy="' + h + '" r="' + (h - pad) + '" fill="' + color + '"/>');
-  if (shape === 'diamond') return wrap('<rect x="' + (S * 0.2) + '" y="' + (S * 0.2) + '" width="' + (S * 0.6) + '" height="' + (S * 0.6) + '" rx="1.5" fill="' + color + '" transform="rotate(45 ' + h + ' ' + h + ')"/>');
-  if (shape === 'triangle') return wrap('<path d="M' + h + ' ' + pad + ' L' + (S - pad) + ' ' + (S - pad) + ' L' + pad + ' ' + (S - pad) + ' Z" fill="' + color + '"/>');
-  if (shape === 'hexagon') return wrap('<path d="M' + (S * 0.25) + ' ' + pad + ' H' + (S * 0.75) + ' L' + (S - pad) + ' ' + h + ' L' + (S * 0.75) + ' ' + (S - pad) + ' H' + (S * 0.25) + ' L' + pad + ' ' + h + ' Z" fill="' + color + '"/>');
-  if (shape === 'pill') return wrap('<rect x="' + (pad + S * 0.08) + '" y="' + (h * 0.55) + '" width="' + (S - pad * 2 - S * 0.16) + '" height="' + (h * 0.9) + '" rx="' + (h * 0.45) + '" fill="' + color + '"/>');
-  return wrap('<rect x="' + pad + '" y="' + pad + '" width="' + (S - pad * 2) + '" height="' + (S - pad * 2) + '" rx="2" fill="' + color + '"/>');
+// 项目徽标：**非常见形状**（避开圆点/方块/三角——那些与状态点、复选框、警告符同形容易误读）。
+// 6 种轮廓 × 3 种结构（实心 / 空心环 / 半明暗）+ 12 色 = 216 种身份；灰度下靠轮廓与结构仍可分。
+const PROJ_SHAPE = { sandbar: ['pentagon', 'ring'], suyou: ['sparkle', 'solid'], nusuyou: ['shield', 'half'] };
+const PALETTE12 = ['#e76a6a','#e7936a','#e7c36a','#c6e76a','#8ae76a','#6ae79c','#6ae7d4','#6aabe7','#7f6ae7','#b56ae7','#e76ad0','#e76a92'];
+function polyPath(c, R, n, rot){
+  const pts = [];
+  for (let k = 0; k < n; k++){ const a = rot + k * 2 * Math.PI / n; pts.push((c + R * Math.cos(a)).toFixed(2) + "," + (c + R * Math.sin(a)).toFixed(2)) }
+  return "M" + pts.join(" L") + " Z";
 }
-const badge = (key, size) => shapeSVG(PROJ_SHAPE[key] || 'square', PROJ_COLOR[key] || '#9ca3af', size);
+function glyphPath(name, S){
+  const c = S / 2, R = S * 0.47, R2 = S * 0.30;
+  if (name === "pentagon") return polyPath(c, R, 5, -Math.PI / 2 + Math.PI / 5);
+  if (name === "hexagon") return polyPath(c, R, 6, -Math.PI / 2 + Math.PI / 6);
+  if (name === "octagon") return polyPath(c, R, 8, -Math.PI / 2 + Math.PI / 8);
+  if (name === "shield"){ const t = S * 0.08, b = S * 0.94; return "M" + (S * 0.14) + " " + t + " H" + (S * 0.86) + " V" + (S * 0.52) + " Q" + (S * 0.86) + " " + b + " " + c + " " + b + " Q" + (S * 0.14) + " " + b + " " + (S * 0.14) + " " + (S * 0.52) + " Z" }
+  if (name === "sparkle"){ const p = []; for (let k = 0; k < 8; k++){ const r = k % 2 === 0 ? R : R2; const a = -Math.PI / 2 + k * Math.PI / 4; p.push((c + r * Math.cos(a)).toFixed(2) + "," + (c + r * Math.sin(a)).toFixed(2)) } return "M" + p.join(" L") + " Z" }
+  if (name === "tag") return "M" + (S * 0.12) + " " + (S * 0.12) + " H" + (S * 0.66) + " L" + (S * 0.88) + " " + (S * 0.34) + " V" + (S * 0.88) + " H" + (S * 0.12) + " Z";
+  return polyPath(c, R, 5, -Math.PI / 2 + Math.PI / 5);
+}
+function shapeSVG(spec, color, size){
+  const name = spec[0], variant = spec[1] || "solid";
+  const S = size, c = S / 2;
+  const d = glyphPath(name, S);
+  const wrap = html => '<svg width="' + S + '" height="' + S + '" viewBox="0 0 ' + S + ' ' + S + '" style="flex:0 0 auto;display:block">' + html + '</svg>';
+  const uid = "g" + Math.random().toString(36).slice(2, 8);
+  if (variant === "ring"){
+    // 空心：以中心缩放的小号同形挖洞（mask，几何正确，不做坐标 hack）
+    return wrap('<mask id="' + uid + '"><rect x="0" y="0" width="' + S + '" height="' + S + '" fill="#fff"/>'
+      + '<g transform="translate(' + c + ',' + c + ') scale(0.46) translate(' + (-c) + ',' + (-c) + ')"><path d="' + d + '" fill="#000"/></g></mask>'
+      + '<path d="' + d + '" fill="' + color + '" mask="url(#' + uid + ')"/>');
+  }
+  if (variant === "half"){
+    // 双色：同色 55% 打底 + 右半 100%（明暗结构在灰度下也分得开）
+    return wrap('<defs><clipPath id="' + uid + '"><path d="' + d + '"/></clipPath></defs>'
+      + '<path d="' + d + '" fill="' + color + '" fill-opacity="0.55"/>'
+      + '<rect x="' + c + '" y="0" width="' + c + '" height="' + S + '" fill="' + color + '" clip-path="url(#' + uid + ')"/>');
+  }
+  return wrap('<path d="' + d + '" fill="' + color + '"/>');
+}
+const badge = (key, size) => shapeSVG(PROJ_SHAPE[key] || ['pentagon', 'solid'], PROJ_COLOR[key] || '#9ca3af', size);
 const PROJ_COLOR = { sandbar: '#e76a6a', suyou: '#6a9ce7', nusuyou: '#83e76a' };
 const SESSIONS = {
   sandbar: [{ code: '09ca', title: 'executor', role: 'executor' }, { code: '7f31', title: 'panel copy' }],
