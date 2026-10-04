@@ -224,11 +224,71 @@ def test_decl_rejects_a_non_boolean_switch(tmp_path):
     assert "skip_when_unchanged" in str(ei.value)
 
 
-def test_production_declaration_has_the_switch_off_everywhere_but_simplify_face():
-    """生产声明：只有 simplify-face 开空转（别的实例每天/每周必须真跑）。"""
-    decl = decl_mod.load_inspection_decl("/Users/user/Documents/sandbar/inspection.yaml")
-    on = {i.id for i in decl.instances if i.skip_when_unchanged}
-    assert on == {INST}, on
-    sf = decl.instance(INST)
-    assert sf.cron == "30 9 * * *" and sf.tz == "Asia/Shanghai", \
-        "宿主令：每天一次 + 显式时区（缺 tz 会落 UTC，人读时刻错位）"
+# ---------------- 生产声明：空转开关不变量（t261004-20 改写） ----------------
+
+# Change-driven scan faces (260929 host order): the skip switch means "no new
+# change since the last run ⇒ idle", which is only meaningful for a face whose
+# workload IS the change stream. Vocabulary owned here until the production
+# decl module grows the constant (write-set boundary; see lane handoff).
+CHANGE_DRIVEN_FACES = ("simplify",)
+
+
+def assert_skip_flags_lawful(decl, raw_text=None):
+    """Invariant seam (t261004-20): takes a parsed declaration, never a machine
+    path — the deliberate-red demo runs this against a tmp-path decl copy.
+
+    Locked (the 260929 decision itself): a skip_when_unchanged flag is lawful
+    only on an instance whose scan face is change-driven, and the reason for the
+    flag is written in the declaration (a full-line comment inside the instance
+    block — the zero-dependency parser drops comments, so the reason is checked
+    on the raw text). NOT locked: WHICH instances carry the flag, nor any
+    current cron string — that set is a production snapshot and changes lawfully.
+    """
+    for it in decl.instances:
+        if not it.skip_when_unchanged:
+            continue
+        assert it.scan_face in CHANGE_DRIVEN_FACES, (
+            "instance %s: skip_when_unchanged is only lawful on a change-driven "
+            "face %s, got %r" % (it.id, CHANGE_DRIVEN_FACES, it.scan_face))
+        if raw_text is not None:
+            lines = raw_text.splitlines()
+            for no, line in enumerate(lines):
+                if line.strip() == "skip_when_unchanged: true":
+                    # the reason lives anywhere in this instance's block: scan up to
+                    # the block head (the "- id:" line that opens the item)
+                    start = no
+                    while start > 0 and not lines[start].lstrip().startswith("- id:"):
+                        start -= 1
+                    # the reason may also sit in the comment banner right above the
+                    # "- id:" line (the usual place a rule is quoted) — include it
+                    head = start - 1
+                    while head >= 0 and (lines[head].strip().startswith("#")
+                                         or not lines[head].strip()):
+                        head -= 1
+                    block = lines[head + 1:no + 1]
+                    assert any(l.strip().startswith("#") for l in block), (
+                        "instance %s: the skip flag needs its reason written in the "
+                        "declaration (a comment inside the instance block)" % it.id)
+                    break
+            else:
+                raise AssertionError("skip_when_unchanged: true not found in raw text")
+
+
+def test_production_declaration_skip_flags_are_lawful():
+    """Production declaration: the skip switch lands only on change-driven faces,
+    and its reason is written in the declaration (the 260929 decision itself).
+
+    Path resolved from the repository root (t261004-20): this test inspects the
+    tree it runs in; binding the writing host's machine-absolute path would make
+    a lane worktree read the main checkout instead (wrong tree).
+    """
+    repo = POC.parent.parent
+    decl_path = repo / "inspection.yaml"
+    raw = decl_path.read_text(encoding="utf-8")
+    decl = decl_mod.load_inspection_decl(decl_path)
+    assert_skip_flags_lawful(decl, raw_text=raw)
+    # tz invariant kept (same 260929 batch: missing tz falls to UTC and shifts the
+    # human clock) — locked on flagged instances only, not on any clock literal.
+    for it in decl.instances:
+        if it.skip_when_unchanged:
+            assert it.tz, "instance %s: explicit tz required" % it.id

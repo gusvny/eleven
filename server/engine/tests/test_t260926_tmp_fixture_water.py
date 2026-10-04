@@ -368,6 +368,8 @@ def test_d6_merge_section_keeps_counts_and_findings_in_lockstep():
     assert lw.merge_lane_section(None, None) == {}
 
 
+# t261004-20 anchor: production-snapshot — t261004-20: the decl-value half of this test is a production snapshot; marker + sync path in integration/test_anchors.json
+@pytest.mark.production_snapshot
 def test_d7_declaration_side_validates_the_water_keys():
     """声明侧（fail-closed）：新增两键在闸内；越界/非数字/未知键照旧点名拒收。"""
     txt = (REPO / "inspection.yaml").read_text(encoding="utf-8")

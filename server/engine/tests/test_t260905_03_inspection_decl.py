@@ -59,6 +59,8 @@ def test_schedule_specs_only_enabled_instances():
     assert specs[0]["overlap"] == "SKIP" and specs[0]["cron"] == "0 9 * * 1"
 
 
+# t261004-20 anchor: production-snapshot — t261004-20: value snapshot of the production declaration, kept behind the explicit snapshot marker; sync path in integration/test_anchors.json
+@pytest.mark.production_snapshot
 def test_real_decl_file_loads_and_test_face_enabled():
     # t260911-02：docs-sync 收编启用（第二实例，scan_face=doc）——两实例进 specs
     # 260915 宿主令：simplify-face 启用试跑（enabled=true，scan_face=simplify；

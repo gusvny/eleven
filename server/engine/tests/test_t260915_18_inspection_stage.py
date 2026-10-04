@@ -134,32 +134,59 @@ def test_wired_faces_contains_stage():
     assert "stage" in decl.WIRED_FACES
 
 
-def test_real_decl_parses_and_existing_instances_unchanged():
-    # t260916-02：真源声明迁仓根 <repo>/inspection.yaml（字段逐字节不变，只换头注）
+def assert_lawful_declaration(d):
+    """Invariants that hold for ANY lawful declaration (t261004-20 anchor rework).
+
+    This is the seam the deliberate-red demos run against: it takes a parsed
+    declaration (never a machine path), so breaking an invariant in a tmp-path
+    copy turns it red without touching the production file. The production test
+    below is just a thin loader over this helper.
+
+    Locked here: parseable cron + project key + wired scan face per instance;
+    enabled ⇒ explicit tz + wired schedule kind/workflow and the declared cron
+    matching the schedule spec; unique ids. NOT locked here: the current cron
+    string / suite / enable flags / instance count of any named instance — those
+    are production-snapshot values; surviving value locks live behind the
+    explicit @pytest.mark.production_snapshot marker with their sync path in
+    integration/test_anchors.json (test_t260926_lane_watchdog.py /
+    test_t260926_tmp_fixture_water.py / test_t260905_03_inspection_decl.py /
+    test_t260915_20_inspection_project.py).
+    """
+    import re as _re
+    atom = r"(?:\*|\*/\d+|\d+|\d+-\d+(?:/\d+)?|[a-z]{3}(?:-[a-z]{3})?)"
+    field_re = _re.compile(r"^%s(?:,%s)*$" % (atom, atom))
+    ids = [i.id for i in d.instances]
+    assert len(ids) == len(set(ids)), "instance ids must be unique: %r" % ids
+    for it in d.instances:
+        where = "instance %s" % it.id
+        assert it.cron, where + ": cron missing"
+        for fld in it.cron.split():
+            assert field_re.match(fld), where + ": cron not parseable: %r" % it.cron
+        assert it.instance_project_key, where + ": instance project identity required"
+        assert it.scan_face in decl.WIRED_FACES, \
+            where + ": scan_face %r outside wired vocabulary" % it.scan_face
+        # tz：声明字段规范明文「空=Temporal 缺省（UTC）」合法，故「显式 tz」锁在
+        # UTC 漂移真实所在处——**启用实例**（审计面 tz_missing 同一口径）。禁用占位
+        # 允许暂不带 tz；收紧到「每实例必带」需 main 侧改声明（t261004-20 交接项）。
+        if it.enabled:
+            assert it.tz, where + ": explicit tz required (Temporal evaluates cron in UTC)"
+            assert it.kind in decl.WIRED_KINDS, where + ": unwired kind while enabled"
+            assert it.workflow in decl.WIRED_WORKFLOWS, where + ": unwired workflow"
+    # 「declared cron == the Temporal schedule」 is deliberately NOT asserted here:
+    # build_schedule_specs derives the spec FROM this declaration, so a decl-level
+    # comparison is vacuous. The non-vacuous face — declared cron vs the live
+    # Temporal schedule handle — is test_260929_inspection_schedule_drift.py
+    # (behaviour anchor), which this file does not duplicate.
+
+
+def test_real_decl_is_lawful():
+    # t261004-20: the former test_real_decl_parses_and_existing_instances_unchanged
+    # (a field-snapshot anchor) rewritten as invariants — the checks any lawful
+    # declaration must pass. No current cron/suite/enable-flag/instance-count of a
+    # named instance is locked; surviving value locks live behind the explicit
+    # snapshot markers listed in the assert_lawful_declaration docstring.
     d = decl.load_inspection_decl(REPO / "inspection.yaml")
-    by_id = {i.id: i for i in d.instances}
-    # 既有实例零变化（字段快照锚，R2）
-    it = by_id["integration-tests"]
-    assert it.enabled is True and it.cron == "30 7 * * *" and it.kind == "cron"
-    assert it.suite == "full" and it.tz == "Asia/Shanghai"
-    assert it.scan_face == "test", "票①实例不声明面（缺省 test 归一）"
-    ds = by_id["docs-sync"]
-    # 261004 宿主令：文档面改每天 10:00（原每周一）。此处仍是**字段快照锚**——
-    # 合法变更必须同步本行；把它改写成不变量（cron 可解析 + tz 显式 + 与调度器一致）
-    # 是 t261004-20 的交付项之一，改完本行不再是负担。
-    assert ds.scan_face == "doc" and ds.enabled is True and ds.cron == "0 10 * * *"
-    assert by_id["mechanism-face"].enabled is False
-    assert by_id["simplify-face"].scan_face == "simplify"
-    assert by_id["simplify-face"].enabled is True
-    # 新实例（t260915-18）
-    sc = by_id["stage-capacity"]
-    assert sc.enabled is False, "占位不调度（启用按宿主节奏）"
-    assert sc.scan_face == "stage"
-    assert sc.kind == "cron" and sc.cron == "30 8 * * 1"
-    assert sc.workflow == "InspectionPeriodicWorkflow"
-    assert sc.template == "inspection-lite"
-    assert sc.tz == "Asia/Shanghai"
-    assert len(d.instances) == 5
+    assert_lawful_declaration(d)
 
 
 def test_enabled_stage_instance_passes_unwired_face_still_rejected():

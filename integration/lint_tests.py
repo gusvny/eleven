@@ -25,6 +25,25 @@ practice:
         recorded by name, never a failure face / never a re-run reason), and
         run_scenarios' INTEG_SUMMARY must carry `env_red_names` (the named
         channel without which "not blocked" would become "silent").
+  L16 anchor manifest (t261004-20): every engine test file and every registered
+        scenario script must carry an anchor label in integration/test_anchors.json
+        (behaviour | contract | production-snapshot | source-text); a
+        production-snapshot label must name its sync_path; stale entries are
+        errors. This is the assertion-anchor judgement made machine-readable —
+        different face from the old-repo-literal migration-path-hygiene scenario
+        family (that one guards retired repo paths; this one guards what each
+        test's assertions are anchored to).
+  L17 home-path ban (t261004-20): an absolute /Users/<name>/ or /home/<name>/
+        path inside an engine test or scenario script is an error — tests must
+        inspect the tree they run in (repo-root resolution), not the machine
+        that wrote them. Exemptions are explicit per file:line with a reason.
+        Different face from the migration-path-hygiene scenario (old-repo literal
+        guard) — see L16 note; the two are complementary, not duplicates.
+  L18 snapshot discipline (t261004-20): a production-snapshot label in the
+        manifest and a `@pytest.mark.production_snapshot` marker must go together
+        on engine tests — an undeclared snapshot assertion (label without marker,
+        or marker without label) is refused; the marker names the file to update
+        when the production value changes (sync_path in the manifest).
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
@@ -967,6 +986,154 @@ def lint_vocab_cross_language_locks():
     ok("L14 词表互锁：收窄旋钮双语言逐元素相同；授权操作三面（含别名归一）同词表同序")
 
 
+# ---- L16/L17/L18 assertion anchors (t261004-20) -------------------------------
+
+ANCHOR_MANIFEST = INTEG / "test_anchors.json"
+ANCHOR_VOCAB = ("behaviour", "contract", "production-snapshot", "source-text")
+
+
+def _load_anchor_manifest():
+    try:
+        return json.loads(ANCHOR_MANIFEST.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 —— 清单缺失/畸形=fail-closed 点名
+        err("L16 anchor 清单不可读（fail-closed）：%s: %s" % (ANCHOR_MANIFEST.name, e))
+        return None
+
+
+def lint_anchor_manifest():
+    """L16（t261004-20）：anchor 清单覆盖面/词表/同步路径。覆盖两棵树：
+    server/engine/tests/test_*.py 与 SCENARIOS 在册场景脚本；每个文件必须有词表内
+    标签；production-snapshot 必须给 sync_path（值变时改哪个文件）；清单里的死条目
+    同样报错（防清单腐烂）。"""
+    m = _load_anchor_manifest()
+    if m is None:
+        return
+    for tree in ("engine_tests", "scenarios"):
+        if tree not in m or not isinstance(m[tree], dict):
+            err("L16 anchor 清单缺 %s 节" % tree)
+            return
+    covered = set(m["engine_tests"]) | set(m["scenarios"])
+    # coverage: engine tests
+    missing = [str(p.relative_to(REPO)) for p in sorted((REPO / "server/engine/tests").glob("test_*.py"))
+               if str(p.relative_to(REPO)) not in m["engine_tests"]]
+    # coverage: registered scenario scripts (same extraction as L4)
+    sys.path.insert(0, str(INTEG))
+    import run_scenarios as rs  # noqa: E402
+    scen_scripts = sorted({p for e in rs.SCENARIOS for p in str(e[2]).split()
+                           if p.startswith("integration/") and (REPO / p).exists()})
+    missing += [p for p in scen_scripts if p not in m["scenarios"]]
+    if missing:
+        err("L16 anchor 缺标签（新文件进两棵树必须申报 anchor）：%s" % missing[:6])
+    # stale entries
+    stale = [k for k in m["engine_tests"] if not (REPO / k).exists()]
+    stale += [k for k in m["scenarios"]
+              if not (REPO / k).exists() or (k not in scen_scripts)]
+    if stale:
+        err("L16 anchor 死条目（文件已删/场景已注销，清单须同步）：%s" % stale[:6])
+    # vocabulary + sync path
+    bad_vocab, no_sync = [], []
+    for tree in ("engine_tests", "scenarios"):
+        for k, v in m[tree].items():
+            a = (v or {}).get("anchor")
+            if a not in ANCHOR_VOCAB:
+                bad_vocab.append("%s=%r" % (k, a))
+            if a == "production-snapshot" and not (v or {}).get("sync_path"):
+                no_sync.append(k)
+    if bad_vocab:
+        err("L16 anchor 词表外标签（只认 %s）：%s" % ("/".join(ANCHOR_VOCAB), bad_vocab[:6]))
+    if no_sync:
+        err("L16 production-snapshot 缺 sync_path（值变时改哪个文件必须具名）：%s" % no_sync[:6])
+    if not (missing or stale or bad_vocab or no_sync):
+        ok("L16 anchor 清单：%d 引擎测试 + %d 场景全覆盖，词表内，快照项均具名 sync_path"
+           % (len(m["engine_tests"]), len(m["scenarios"])))
+
+
+# L17 exemptions: file → list of (line-anchor, reason). An exemption entry whose
+# anchor line no longer exists is itself an error (the list cannot rot silently).
+HOME_PATH_RE = re.compile(r"(?<![\w.])/(?:Users|home)/[A-Za-z0-9._-]+/")
+L17_IN_SCOPE = ("server/engine/tests/", "integration/")
+L17_EXEMPT = {
+    "server/engine/tests/test_t260915_12_t01_caller_gate.py":
+        [("/Users/user/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
+    "server/engine/tests/test_t260916_21_admin_log_rotation.py":
+        [("/Users/user/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
+    "server/engine/tests/test_260929_inspection_lane_residue_repair.py":
+        [("git worktree add /Users/user/Documents/sandbar", "verbatim quoted REAL_OCCUPIED failure message")],
+    "server/engine/tests/test_t260917_02_inspection_redirect.py":
+        [("Users/x/Documents/sandbar", "synthetic identity fixture (deliberately fake username), compared for equality, never resolved")],
+    "server/engine/tests/test_t260921_14_dsh_path_pin.py":
+        [("Users/x/.sandbar/dsh-015", "synthetic dsh-runner fixture (deliberately fake username), never resolved against the tree")],
+    "integration/t260907-01/sc_migration_path_hygiene.mjs":
+        [("Users/user/Documents/", "the old-repo hygiene guard's own NEEDLE (split-constructed) and its docstring story — exempt by file: regex-blind by design")],
+    "integration/t261004-20/sc_test_anchor_brakes.py":
+        [("Users/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the /Users shape this ticket's brake scenario plants and removes)"),
+         ("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the /home shape, same brake scenario)")],
+    "integration/t261004-20/sc_rewritten_decl_tests_lane_green.py":
+        [("Users/user/Documents/sandbar", "the regression-pin needle itself (R3 asserts the two incident files no longer contain it)")],
+    "integration/t260929-03/sc_executor_panel_page.mjs":
+        [("home/x/.sandbar/projects/alpha", "synthetic config fixture (deliberately fake username), rendered as provenance text, never resolved")],
+}
+
+
+def lint_home_paths():
+    """L17（t261004-20）：引擎测试/场景脚本内禁绝对家目录路径——测试必须检查它所跑的
+    那棵树（仓根解析），不得绑写测试时的机器。豁免表逐条带理由；豁免条目失配即报
+    （豁免不许静默腐烂）。"""
+    targets = sorted((REPO / "server/engine/tests").glob("test_*.py"))
+    targets += [p for pat in ("sc_*.py", "sc_*.mjs", "*/sc_*.py", "*/sc_*.mjs")
+                for p in INTEG.glob(pat)]
+    fired, exempt_seen = [], set()
+    for p in targets:
+        rel = str(p.relative_to(REPO))
+        allowed = L17_EXEMPT.get(rel, [])
+        for no, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in HOME_PATH_RE.finditer(line):
+                hit = line.strip()[:120]
+                excuse = next((a for a, _ in allowed if a in line), None)
+                if excuse:
+                    exempt_seen.add((rel, excuse))
+                else:
+                    fired.append("%s:%d %s" % (rel, no, hit))
+    stale_exempt = [(rel, a) for rel, pairs in L17_EXEMPT.items()
+                    for a, _why in pairs if (rel, a) not in exempt_seen]
+    if stale_exempt:
+        err("L17 豁免条目失配（锚行已不在，豁免须同步删除）：%s"
+            % ["%s :: %s" % s for s in stale_exempt[:4]])
+    if fired:
+        err("L17 测试/场景内绝对家目录路径（改仓根解析；豁免须逐条具名理由）：%s"
+            % fired[:6])
+    if not fired and not stale_exempt:
+        ok("L17 家目录路径： %d 个测试/场景文件零命中（豁免 %d 条均在位）"
+           % (len(targets), len(exempt_seen)))
+
+
+def lint_snapshot_discipline():
+    """L18（t261004-20）：production-snapshot 申报纪律——引擎测试里的
+    @pytest.mark.production_snapshot 标记与清单里的 production-snapshot 标签必须
+    成对出现：有标记无标签=未申报的快照断言（拒收）；有标签无标记=申报了却不肯
+    戴标记（同样拒收）。场景脚本不适用（非 pytest，走 L16 覆盖）。"""
+    m = _load_anchor_manifest()
+    if m is None:
+        return
+    marked = set()
+    for p in sorted((REPO / "server/engine/tests").glob("test_*.py")):
+        if re.search(r"^@pytest\.mark\.production_snapshot\b",
+                     p.read_text(encoding="utf-8", errors="replace"), re.M):
+            marked.add(str(p.relative_to(REPO)))
+    labelled = {k for k, v in m.get("engine_tests", {}).items()
+                if (v or {}).get("anchor") == "production-snapshot"}
+    undeclared = sorted(marked - labelled)
+    unmarked = sorted(labelled - marked)
+    if undeclared:
+        err("L18 未申报快照断言（有 snapshot 标记、清单无 production-snapshot 标签）：%s"
+            % undeclared[:6])
+    if unmarked:
+        err("L18 申报不落实（清单 production-snapshot 但测试缺 @pytest.mark.production_snapshot）：%s"
+            % unmarked[:6])
+    if not undeclared and not unmarked:
+        ok("L18 快照纪律：标记与清单标签成对（%d 个已申报快照测试）" % len(marked))
+
+
 def main():
     lint_syntax()
     lint_collect()
@@ -987,6 +1154,9 @@ def main():
     # this static gate carries the rule.
     from lint_copy_language import lint_copy_language as _l15
     _l15(errors)
+    lint_anchor_manifest()
+    lint_home_paths()
+    lint_snapshot_discipline()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

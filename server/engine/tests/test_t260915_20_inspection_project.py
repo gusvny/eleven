@@ -141,6 +141,8 @@ def test_error_order_identity_checked_last():
     assert "未知实例字段" in str(ei.value)
 
 
+# t261004-20 anchor: production-snapshot — t261004-20: value snapshot (project identity of every real instance), explicit snapshot marker; sync path in integration/test_anchors.json
+@pytest.mark.production_snapshot
 def test_real_decl_all_instances_have_identity():
     # 迁移④：真源四实例显式归属 sandbar（enabled 与否都不豁免）
     # t260916-02：真源声明迁仓根 <repo>/inspection.yaml（路径换，断言照旧=零回归锚）

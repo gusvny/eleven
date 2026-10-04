@@ -129,6 +129,8 @@ def test_a3_malformed_falls_back_per_key_and_names_every_reason():
     assert src3 == lw.THRESHOLD_SOURCE_DEFAULT and any("unknown" in p for p in probs3)
 
 
+# t261004-20 anchor: production-snapshot — t261004-20: the decl-value half of this test is a production snapshot; marker + sync path in integration/test_anchors.json
+@pytest.mark.production_snapshot
 def test_a4_declaration_side_validation_is_failclosed():
     """声明侧三键词法/范围闸（与 inspect 预算键同款 fail-closed；范围单源=本模块）。"""
     src = (POC / "inspection_decl.py").read_text(encoding="utf-8")

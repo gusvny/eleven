@@ -257,9 +257,10 @@ if (needFn(buildStatusCard, 'buildStatusCard', 'U6')) {
   // 真形）的「缺了什么」必须与引擎 reason 同口径——旧实现输出「报告已在（本卡不该
   // 出现…）」与异常原因行自相矛盾=异常收口看起来没问题（票义红线）。上面的主夹具
   // report_path=''，此子用例专钉该形态防回潮。
+  // t261004-20：report_path 展示值从仓根推导（镜像本树产物的真实落点），不绑宿主机器路径。
   const mirrorCard = buildStatusCard({
     ...detail,
-    report_path: '/Users/user/Documents/sandbar/server/engine/out/inspection/inspection-integration-tests-20260920.json',
+    report_path: new URL('../../server/engine/out/inspection/inspection-integration-tests-20260920.json', import.meta.url).pathname,
     close_health_reason: '面快照 blocked：agent 退出码 1（未完成）；发现 0 条（落账文件为受阻面镜像）',
   })
   const mirrorAll = JSON.stringify(mirrorCard ?? {})

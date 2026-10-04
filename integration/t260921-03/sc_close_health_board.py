@@ -317,8 +317,10 @@ def snap_blocked_with_ledger_mirror(tid):
     在场而文件内容=受阻面镜像（status=blocked、findings 0）。健康度看面不看文件名，
     report_path 在场≠报告在。"""
     snap = snap_blocked_no_report(tid)
-    snap["face"]["report_path"] = (
-        "/Users/user/Documents/sandbar/server/engine/out/inspection/"
+    # t261004-20：report_path 展示值从仓根推导（镜像本树产物的真实落点），
+    # 不绑宿主机器路径——泳道 worktree 里也对得上自己这棵树。
+    snap["face"]["report_path"] = str(
+        REPO / "server" / "engine" / "out" / "inspection" /
         "inspection-integration-tests-20260920.json")
     return snap
 
