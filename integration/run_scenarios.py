@@ -1964,6 +1964,19 @@ SCENARIOS = [
      "「最近动作」读源契约（t261003-06，灰盒 L2，harness seam 驱动真实路由面，离线零 docker 零浏览器）：R1 读源在位——GET /api/recent-actions 返回行，每行语义键齐（时间/动作/票号/结果/权限，键名实现定语义可对号=契约）；R2 权限归因非空——受闸写动作行必带「凭哪条权限」，无归因行不许静默出现（设计 §6「做了什么+凭哪条权限」红线）；R3 坏行纪律——账本畸形行计数上报不静默丢且合法行照常服务（t260929-03 R4 同族判据投影）；R4 显式降级——读源不可读=degraded 标记+人类可读原因，degraded:false+空 rows 冒充「最近没动作」=红线红（设计 §6）；R5 只读红线——读出面绝不写账本文件（读前后字节一致）。缝契约=startHarness 可选 eventsPath 注入（与 panelDir/watchdogDir 同款隔离注入）；缝缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：面板页呈现归 page-redesign L2b；读源选择若需引擎改口=越界，plan review 已裁定只读消费现账本不碰引擎",
      "node integration/t261003-06/sc_executor_panel_recent_actions.mjs", "ro"),
 
+    # ---- t261003-10: Recent actions 生产死面修复（路由注册壳 + 真实审计读源）----
+    # 工单点名缺陷：/api/actions、/api/projects 生产 404（node.ts 注册表 5 条 exact）；
+    # recent-actions 读逐项目 events.jsonl 的 kind 字段而真账本无此字段（0/2403 行）；
+    # 旧缝直通 api.handle 看不见生产注册表 + 手写 kind 夹具（缺陷族 t260929-07/260930）。
+    # 裁定读源=admin.log 审计行；授权键（executor_grant_op 等）在 **summary 解析后
+    # 对象顶层**（gen5 实测裁定：行级 0、summary 层 15 行——gen1/gen4 读错了层；
+    # 无需引擎改动，面板按键名取数即得）。
+    ("t261003-10-route-shell-parity",
+     "生产路由注册壳可达性（t261003-10，灰盒 L3，真实插件注册壳驱动非 api.handle 直通，离线零 docker 零浏览器；工单 Required outcome 2/3）：P1 经真实 node.ts 注册壳访问 /api/actions、/api/projects 均≠404（改动前双 404=本票点名缺陷回归面）；P2 既有 /api/grants、/api/settings、/api/requests 经同一壳不 regress；P3 未知路径照旧 404（巡检不放松 404 语义）；P4 /api/projects 分类=接线（gen1 方案裁定，真消费面 page-projects/projects 单测在案）。缝契约=harness.mjs 新增 startPluginHarness（真实 apply() + 捕捉式 register 架真 http.Server）；缝缺席=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：api.handle 自身行为归 t260929-03 族（直通缝）；本条只锁「handle 认的路径生产壳可达」",
+     "node integration/t261003-10/sc_t26100310_route_shell_parity.mjs", "ro"),
+    ("t261003-10-recent-actions-real-source",
+     "「最近动作」真实读源契约（t261003-10，灰盒 L2/L3，生产注册壳驱动，离线零 docker 零浏览器；设计 §6 + 工单 Required outcome 1/4/5）：A1 中间态诚实——只有现行形状真实审计行（无顶层授权字段，fixtures verbatim 拷贝自真 admin.log）时不得 ok:true+空 actions 冒充「最近没动作」，须显式降级点名「源尚不逐动作记录授权」；A2 归因（fixtures/admin-log-post-widening-line.jsonl=真实引擎产出审计行 verbatim 拷贝，已落位）——锁归因面：动作+票号+权限行（permission=summary 顶层 executor_grant_op）且计数器显式；夹具若缺场则回锁中间态诚实面（ok:false 原因点名授权缺口+源路径），两面都是硬断言、闸内无 SKIP；A3 坏行纪律——非 JSON/数组/标量/caller_project 不匹配/空授权键：ok:true 面计数显式上报（counted>=3）不静默丢且不编造动作，中间态降级面要求原因点名授权缺口（工单外部输入三态钩子）；A4 显式降级——源缺席与不可读均 ok:false 点名解析路径；A5 只读红线——读前后源文件字节一致；A6 尾部半行不崩不冒充。夹具铁律：一切读源夹具来自真实文件 verbatim 拷贝，手写合成=红（本票点名缺陷族）。intent 分工：路由可达归 t261003-10-route-shell-parity；t261003-06 recent-actions 的 R 面随本票由 developer 按 gen1 方案改造到新读源后由本条承接",
+     "node integration/t261003-10/sc_t26100310_recent_actions_real_source.mjs", "ro"),
     # ---- t261003-13: Ledger 页签诚实性（标题不谎报 / 无回退词 / 时间带标签）----
     ("t261003-13-ledger-tab-honesty",
      "Ledger 页签诚实性三缺陷回归（t261003-13，灰盒 L3，真浏览器+API 桩零 docker，红线零接触 3099；缝与夹具复用 t261003-06 lib_panel_seam）：H1 唤醒区块标题=Last wakes、旧标题 Last events 与旧空态文案（appends here when a ticket changes）退场——标题许诺账本事件而展示唤醒=根缺陷；H2 零唤醒空态明说没有唤醒（No wakes yet 族）；H3 唤醒行展示 mode+accepted 的 STE 句、硬编码字面量 sent 不再作为行内容出现；H4 畸形行电池（缺 mode/缺 accepted/双缺/accepted 非布尔/at 非法/null 行）显式 unknown 或 — 顶位、零 pageerror、绝不静默变句状词；H5 唤醒时间渲染==本机 HH:MM（同机现算锚格式不锚字面）+ Ledger 与 Alerts 双页签可见 Times are local 标签、宿主 TZ≠UTC 时负形（渲染≠UTC 切片，TZ=UTC 主机该子用例按系统状态条件 vacuous 通过并点名）；S1 新文案零缩略形式/零马拉松句（STE §4）；X1 全旅程零 pageerror。playwright/chromium 缺席=ENV_FAIL exit 2（KI-036 家族）；页面模块/缝未落地=FAIL 点名（TDD 红属预期，arbitrate/merge 期必须绿）。intent 分工：五页签/布局/请求交互/全面板 STE 归 t261003-06-executor-panel-page-redesign；recent-actions 数据面归同票 recent-actions 条；本条只锁本票三缺陷",

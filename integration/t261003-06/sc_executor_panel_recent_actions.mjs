@@ -1,41 +1,37 @@
-// sc_executor_panel_recent_actions.mjs — t261003-06「最近动作」读源契约（灰盒 L2，
-// harness 缝驱动真实路由面，离线零 docker 零浏览器）。
+// sc_executor_panel_recent_actions.mjs — t261003-06 引入；t261003-10 换源重写
+// （灰盒 L2，**生产路由壳**缝：startPluginHarness 经 node.ts 真 apply() 注册面起服务，
+// 离线零 docker 零浏览器）。
 //
 // Intent（用户可感知行为；设计 note §2/§3/§6）：宿主在 Overview 右栏看到执行器最近
-// 做了什么——每条 = 时间 + 动作 + 票号 + 一句话结果 + 凭哪条权限。读源 = 逐项目事件
-// 账本（SANDBAR_WATCHDOG_DIR/<project>/ledger/events.jsonl，与 watchdog 只读消费同
-// 一份；plan review N4 裁定：只读消费，不碰引擎），不可得时显式降级点名原因，
-// **绝不用空列表冒充「最近没动作」**（设计 §6 红线）。
+// 做了什么——每条 = 时间 + 动作 + 票号 + 一句话结果 + 凭哪条权限。读源 = 引擎自审计
+// admin.log（t261003-10 plan gen1 定稿：行自带「做了什么」；「凭哪条权限」= 顶层
+// executor_grant_op，引擎侧落键由扩围票承接；落键前全部生产行显式降级，绝不空表
+// 冒充「最近没动作」）。SANDBAR_ADMIN_LOG 注入隔离夹具（真行逐字拷贝）。
+//   R0 生产路由壳：/api/actions、/api/projects 经 apply() 注册面可达（旧实现漏注册
+//      = 生产 404，直转 api.handle 的缝看不见）；
 //   R1 读源在位：GET /api/actions?project=… 返回动作行，每行语义键齐
-//      {at, action, ticket, result, permission}。
-//   R2 权限归因：受闸写动作行带「凭哪条权限」（非空，且落在固定词表=grants 面一致）。
-//   R3 坏行纪律：畸形行计数（malformed_rows）不静默丢；形状合法但认不出的 kind 计数
-//      （unmapped_rows）不编造动作；合法行照常服务。
-//   R4 显式降级：账本缺席/不可读 → ok:false + 人类可读原因（点名源路径）；
-//      ok:true + 空 actions 的组合=红（空列表冒充「最近没动作」）。
-//   R5 只读红线：读出面绝不写账本文件（读前后字节一致）。
+//      {at, action, ticket, result, permission}（落键后形状，合同夹具注入）；
+//   R2 权限归因：展示行 permission 非空且落在 grants 词表；
+//   R3 坏行纪律：畸形行 / sub 认不出 / 缺授权键 分别计数（malformed_rows /
+//      unmapped_rows / missing_authorization_rows），不静默丢、不编造；
+//   R4 显式降级：源缺席 / 全是缺授权键行 → ok:false + 人类可读原因（点名源路径与
+//      待落键事实）；ok:true + 空 actions 的组合=红；
+//   R5 只读红线：读出面绝不写 admin.log（读前后字节一致）。
 //
-// 三态：harness 缝缺席=FAIL exit 1 且点名（TDD 期红属预期，arbitrate/merge 期必须绿）。
-// intent 分工：面板页呈现归 sc_executor_panel_page_redesign L2b；grants 授权面归
-// sc_executor_grants_session_roundtrip。
-import { mkdirSync, writeFileSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
-import { loadPanelHarness, makeIsoDir, makeCase } from './lib_panel_seam.mjs'
+// 三态：harness 缝缺席=FAIL exit 1 且点名。intent 分工：面板页呈现归
+// sc_executor_panel_page_redesign L2b；grants 授权面归 sc_executor_grants_session_roundtrip。
+import { readFileSync, statSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { loadPanelHarness, makeCase } from './lib_panel_seam.mjs'
 
+const HERE = dirname(fileURLToPath(import.meta.url))
 const C = makeCase()
-const PROJ = 'alpha'
+const PROJ = 'sandbar'
 
-function fixtureLedger(root) {
-  const dir = join(root, PROJ, 'ledger')
-  mkdirSync(dir, { recursive: true })
-  const lines = [
-    JSON.stringify({ idem: 'e1', project: PROJ, ticket: 't261002-10', seq: 1, kind: 'sign', stage: 'merge', reason: 'merged by executor', at: 1700000000000 }),
-    'this line is not json',
-    JSON.stringify({ idem: 'e2', project: PROJ, ticket: 't261002-13', seq: 2, kind: 'retry', reason: 'worker restarted', at: 1700000001000 }),
-    JSON.stringify({ idem: 'e3', project: PROJ, ticket: 't261002-14', seq: 3, kind: 'teleport', reason: 'unknown kind row', at: 1700000002000 }),
-  ]
-  writeFileSync(join(dir, 'events.jsonl'), lines.join('\n') + '\n')
-}
+/** 真行夹具（逐字拷贝自主仓 live server/admin.log，见 fixtures 头注）。 */
+const realLines = readFileSync(join(HERE, 'fixtures', 'admin-log-real-lines.jsonl'), 'utf8').trim().split('\n')
 
 async function jfetch(base, url) {
   const r = await fetch(base + url)
@@ -46,48 +42,58 @@ async function jfetch(base, url) {
 
 async function main() {
   const harness = await loadPanelHarness().catch((e) => { C.case('harness-loadable', false, String(e).slice(0, 200)); return null })
-  if (!harness || typeof harness.startHarness !== 'function') {
-    C.case('harness-loadable', false, 'server/plugins/executor-panel/harness.mjs 缺 startHarness（缝契约见 lib_panel_seam.mjs 头注；TDD 期红属预期）')
+  if (!harness || typeof harness.startPluginHarness !== 'function') {
+    C.case('harness-loadable', false, 'server/plugins/executor-panel/harness.mjs 缺 startPluginHarness（生产路由壳缝，t261003-10；见 lib_panel_seam.mjs 头注）')
     return C.exit()
   }
-  const iso = makeIsoDir()
-  const wdDir = join(iso.dir, 'watchdog')
-  fixtureLedger(wdDir)
-  const H = await harness.startHarness({ panelDir: join(iso.dir, 'panel'), watchdogDir: wdDir })
+  const iso = mkdtempSync(join(tmpdir(), 't261003-10-'))
+  const clean = () => rmSync(iso, { recursive: true, force: true })
+  process.on('exit', clean)
+  process.on('SIGINT', () => { clean(); process.exit(130) })
+  const panelDir = join(iso, 'panel')
+  const adminLog = join(iso, 'admin.log')
+  const fixturePath = join(HERE, 'fixtures', 'admin-log-real-lines.jsonl')
+  copyFileSync(fixturePath, adminLog)
+  const H = await harness.startPluginHarness({ panelDir, watchdogDir: join(iso, 'watchdog'), adminLogPath: adminLog })
   try {
     const api = '/sandbar-executor-panel/api/actions?project=' + PROJ
-    const srcFile = join(wdDir, PROJ, 'ledger', 'events.jsonl')
-    const before = statSync(srcFile).size + ':' + readFileSync(srcFile, 'utf8').length
+    const before = statSync(adminLog).size + ':' + readFileSync(adminLog, 'utf8').length
 
-    // R1 行语义齐全
-    const g = await jfetch(H.base, api)
-    const rows = (g.body && g.body.actions) || []
-    const okRow = rows.find(r => r && typeof r.at === 'number' && r.action && r.ticket && 'result' in r && r.permission)
-    C.case('R1-mapped-rows-full-semantics', g.status < 300 && g.body && g.body.ok === true && rows.length >= 2 && !!okRow,
-      `status=${g.status} ok=${g.body && g.body.ok} rows=${rows.length} full-row=${JSON.stringify(okRow).slice(0, 140)}`)
+    // R0 生产路由壳：漏注册面可达 + 表外 404
+    const act = await jfetch(H.base, api)
+    C.case('R0-actions-route-reachable-through-plugin-shell', act.status < 500,
+      `status=${act.status} ok=${act.body && act.body.ok}（旧实现此路径 404：只 handle 未注册）`)
+    const prj = await jfetch(H.base, '/sandbar-executor-panel/api/projects')
+    C.case('R0-projects-route-reachable-through-plugin-shell', prj.status < 500 && prj.body && prj.body.ok === true,
+      `status=${prj.status} ok=${prj.body && prj.body.ok}（t260930-09 起同病）`)
+    const nf = await jfetch(H.base, '/sandbar-executor-panel/api/definitely-not-a-route')
+    C.case('R0-off-table-404-production-shape', nf.status === 404, `status=${nf.status}`)
 
-    // R2 权限归因非空
-    const allAttributed = rows.length > 0 && rows.every(r => typeof r.permission === 'string' && r.permission !== '')
-    C.case('R2-permission-attribution-nonempty', allAttributed,
-      `rows=${rows.length} attributed=${rows.filter(r => r.permission).length}`)
+    // 今天形状的真行（无顶层授权键）→ 显式降级点名待落键，绝不空表冒充
+    const b = act.body || {}
+    const explicitDegraded = b.ok === false && typeof b.reason === 'string' && b.reason.includes('executor_grant_op')
+      && b.reason.includes(adminLog)
+    const fakeCalm = b.ok === true && (b.actions || []).length === 0
+    C.case('R4-current-shape-explicit-degraded-never-fake-calm', act.status < 500 && explicitDegraded && !fakeCalm,
+      `payload=${JSON.stringify(b).slice(0, 200)}（ok:true+空列表=冒充「最近没动作」=红线）`)
 
-    // R3 坏行不静默丢：malformed_rows / unmapped_rows 显式在案，合法行照常
-    const b = g.body || {}
-    C.case('R3-bad-lines-counted-not-silent',
-      b.malformed_rows === 1 && b.unmapped_rows === 1 && rows.length === 2,
-      `malformed=${JSON.stringify(b.malformed_rows)} unmapped=${JSON.stringify(b.unmapped_rows)} rows=${rows.length}（期望 1/1/2）`)
-
-    // R4 显式降级：账本缺席的项目
-    const gh = await jfetch(H.base, '/sandbar-executor-panel/api/actions?project=beta-2')
-    const bh = JSON.stringify(gh.body || {})
-    const explicitDegraded = gh.body && gh.body.ok === false && typeof gh.body.reason === 'string' && gh.body.reason.length > 0
-    const fakeCalm = gh.body && gh.body.ok === true && (gh.body.actions || []).length === 0
-    C.case('R4-missing-ledger-explicit-degraded-never-fake-calm', gh.status < 500 && explicitDegraded && !fakeCalm,
-      `payload=${bh.slice(0, 160)}（ok:true+空列表=冒充「最近没动作」=红线）`)
+    // 源缺席 → 显式降级点名路径
+    const H2 = await harness.startPluginHarness({ panelDir: join(iso, 'panel2'), watchdogDir: join(iso, 'watchdog2'), adminLogPath: join(iso, 'absent.log') })
+    try {
+      const gh = await jfetch(H2.base, api)
+      const ok2 = gh.body && gh.body.ok === false && typeof gh.body.reason === 'string' && gh.body.reason.length > 0
+      C.case('R4-absent-source-explicit-degraded', ok2 && !fakeCalm, `payload=${JSON.stringify(gh.body).slice(0, 160)}`)
+    } finally { await H2.close() }
 
     // R5 只读红线
-    const after = statSync(srcFile).size + ':' + readFileSync(srcFile, 'utf8').length
+    const after = statSync(adminLog).size + ':' + readFileSync(adminLog, 'utf8').length
     C.case('R5-read-face-never-writes-source', before === after, `bytes-before=${before} bytes-after=${after}`)
+
+    // R1/R2/R3（落键后形状）在插件单测侧用合同夹具锁死（recent-actions.test.mjs）；
+    // 引擎扩围票落键后，把真引擎产出的行换进 fixtures 即可在本场景点亮这三断言——
+    // 现在先在场缺席检查：夹具文件存在且非空（防夹具被静默删）。
+    C.case('F1-real-line-fixture-present', realLines.length >= 4 && realLines.every((l) => l.startsWith('{')),
+      `rows=${realLines.length}（逐字拷贝自 live admin.log）`)
   } finally {
     await H.close()
   }

@@ -28,6 +28,25 @@ function bad(status: number, error: string): ApiResponse {
   return { status, json: { ok: false, error } }
 }
 
+/**
+ * 面板自有 API 路由表（单一真源，t261003-10）：node.ts 的注册循环与 handle 的
+ * 准入守卫共用这一份常量——handle 对不在表内的 path 一律 404（表⊇可处理），
+ * 注册循环对表内每条都挂路由（表⊆可达），两侧永不漂移；tests/route-parity.test.mjs
+ * 机械锁两侧。t260930-09 起 /api/actions、/api/projects 只在 handle 里、从未注册
+ * （生产 404）正是缺这张表的直接后果。
+ * /api/projects 处置决定（票面要求记录）：**接通**——tests/projects.test.mjs 在用、
+ * 深链检视语义仍在（页面选择器虽已于 t261003-06 移除，端点仍是程序化选项目的
+ * 数据面）；删它会回归面。
+ */
+export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }> = [
+  { path: '/sandbar-executor-panel/api/requests', methods: ['GET', 'POST'] },
+  { path: '/sandbar-executor-panel/api/requests/answer', methods: ['POST'] },
+  { path: '/sandbar-executor-panel/api/settings', methods: ['GET', 'POST'] },
+  { path: '/sandbar-executor-panel/api/grants', methods: ['GET', 'POST'] },
+  { path: '/sandbar-executor-panel/api/actions', methods: ['GET'] },
+  { path: '/sandbar-executor-panel/api/projects', methods: ['GET'] },
+]
+
 export interface ApiDeps {
   /** 模板事实读面（缺省同源 fetch workbench 只读端点；测试注入桩）。 */
   fetchTemplateFacts?: () => Promise<GrantsResult>
@@ -90,6 +109,11 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
   }
 
   async function handle(method: string, path: string, query: URLSearchParams, bodyRaw: string, origin = ''): Promise<ApiResponse> {
+    // ---- 路由表准入守卫（t261003-10）：表外一律 404，表内每条都必须在下方有处理分支
+    // （route-parity UT 双向锁死）——这是「未知面板路由」的唯一出口。
+    if (!(PANEL_API_ROUTES as ReadonlyArray<{ path: string }>).some((r) => r.path === path)) {
+      return bad(404, `未知面板路由：${path}`)
+    }
     // ---- requests ----
     if (path === '/sandbar-executor-panel/api/requests') {
       if (method === 'GET') {
@@ -251,7 +275,7 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         },
       }
     }
-    // ---- recent actions（t261003-06：Overview 右栏只读源——事件账本，显式降级不空表） ----
+    // ---- recent actions（t261003-06 引入；t261003-10 换源=引擎自审计 admin.log，显式降级不空表） ----
     if (path === '/sandbar-executor-panel/api/actions') {
       if (method !== 'GET') return bad(405, '只读面：仅 GET')
       const key = query.get('project') ?? ''
@@ -261,7 +285,8 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       if (!read.ok) return { status: 200, json: { ok: false, source: read.source, reason: read.reason } }
       return { status: 200, json: { ok: true, source: read.source, actions: read.actions,
         unmapped_rows: read.unmapped_rows, malformed_rows: read.malformed_rows,
-        note: read.unmapped_rows > 0 ? read.unmapped_rows + ' ledger row(s) use kinds outside the action table — they are not shown' : undefined } }
+        missing_authorization_rows: read.missing_authorization_rows,
+        note: read.unmapped_rows > 0 ? read.unmapped_rows + ' audit row(s) use subs outside the action table — they are not shown' : undefined } }
     }
     // ---- projects (t260930-09 scope 8) ----
     if (path === '/sandbar-executor-panel/api/projects') {

@@ -19,7 +19,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 
-import { createApi, allPanelProjects } from './src/host/api.ts'
+import { createApi, allPanelProjects, PANEL_API_ROUTES } from './src/host/api.ts'
 import { PANEL_HTML, PANEL_ROUTE } from './src/host/panel-page.ts'
 import { createQuestionBridge, makeRegistryProjectResolver } from './src/host/question-bridge.ts'
 import { fsLedgerIo } from './src/host/requests.ts'
@@ -93,48 +93,25 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
 
   const attach = (ws: { register: (o: { kind: string; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void }): void => {
     ctx.effect(() => {
+      // 路由注册=路由表循环（t261003-10）：不再逐条手写（旧写法漏挂 /api/actions、
+      // /api/projects——生产 404 的根因）。表=api.ts PANEL_API_ROUTES 单一真源，
+      // route-parity UT 机械锁「表内每条都可达、表外每条都 404」。
       const disposers = [
         // 静态页（零构建步骤：页面即本文件产出的 HTML；宿主交接=重启装载后纯浏览器刷新）。
         ws.register({ kind: 'exact', path: PANEL_ROUTE, handler: async (_req, res) => sendHtml(res, PANEL_HTML) }),
         ws.register({ kind: 'exact', path: PANEL_ROUTE + '/', handler: async (_req, res) => sendHtml(res, PANEL_HTML) }),
-        // 自有 API（requests 账 / settings 写面 / grants 派生面；核在 api.ts，UT 直打）。
-        ws.register({
-          kind: 'exact', path: PANEL_ROUTE + '/api/requests',
-          handler: async (req, res) => {
-            const q = new URL(req.url ?? '/', 'http://x').searchParams
-            const body = req.method === 'POST' ? await readBody(req) : ''
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/requests', q, body, originOf(req))
-            sendJson(res, r.status, r.json)
-          },
-        }),
-        ws.register({
-          kind: 'exact', path: PANEL_ROUTE + '/api/requests/answer',
-          handler: async (req, res) => {
-            if (req.method !== 'POST') { sendJson(res, 405, { ok: false, error: '应答面仅 POST' }); return }
-            const q = new URL(req.url ?? '/', 'http://x').searchParams
-            const r = await api.handle('POST', PANEL_ROUTE + '/api/requests/answer', q, await readBody(req), originOf(req))
-            sendJson(res, r.status, r.json)
-          },
-        }),
-        ws.register({
-          kind: 'exact', path: PANEL_ROUTE + '/api/settings',
-          handler: async (req, res) => {
-            const q = new URL(req.url ?? '/', 'http://x').searchParams
-            const body = req.method === 'POST' ? await readBody(req) : ''
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/settings', q, body, originOf(req))
-            sendJson(res, r.status, r.json)
-          },
-        }),
-        ws.register({
-          kind: 'exact', path: PANEL_ROUTE + '/api/grants',
-          handler: async (req, res) => {
-            const q = new URL(req.url ?? '/', 'http://x').searchParams
-            // t260930-14：POST=声明编辑器写面（body 带 grants/night_tier/by/caller_surface）。
-            const body = req.method === 'POST' ? await readBody(req) : ''
-            const r = await api.handle(req.method ?? 'GET', PANEL_ROUTE + '/api/grants', q, body, originOf(req))
-            sendJson(res, r.status, r.json)
-          },
-        }),
+        ...PANEL_API_ROUTES.map((route) =>
+          ws.register({
+            kind: 'exact', path: route.path,
+            handler: async (req, res) => {
+              const method = req.method ?? 'GET'
+              const q = new URL(req.url ?? '/', 'http://x').searchParams
+              const body = (method === 'POST' || method === 'PUT' || method === 'DELETE') ? await readBody(req) : ''
+              const r = await api.handle(method, route.path, q, body, originOf(req))
+              sendJson(res, r.status, r.json)
+            },
+          }),
+        ),
       ]
       return () => { for (const d of disposers) d() }
     }, 'sandbar-executor-panel: panel routes')

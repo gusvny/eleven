@@ -1,80 +1,147 @@
 /**
- * recent-actions.test.mjs —— t261003-06 Overview 右栏「最近动作」UT：
- *  - 事件账本（event-ledger-v1 行）按固定映射表 → 动作行（时间/动作/票号/结果/权限）；
- *  - 新的在前、上限 max 条；未进映射表的 kind 计数显式（unmapped_rows），绝不编造动作；
- *  - 坏行计数显式（malformed_rows）；
- *  - 账本缺席 / 不可读 = 显式降级对象（点名原因），绝不渲染成空列表冒充「没动作」；
- *  - API 面 GET /api/actions：降级透传 reason；key 形状白名单。
- * 全部内存桩，零外部源、零 3099。
+ * recent-actions.test.mjs —— 「最近动作」读源 UT（t261003-10 换源重写；gen5 按
+ * rework 裁定改层：授权键与 caller_project 在 **summary 解析后对象顶层**）。
+ * 夹具纪律：**真行逐字拷贝**——admin-log-real-current.jsonl（真行旧形状）与
+ * admin-log-real-grant-rows.jsonl（真行带 summary 顶层授权键，摘自主仓
+ * server/admin.log.20261003）皆零改动拷贝；畸形输入全桩化，零真外部源依赖。
  */
-import { assert, done, freshDir, cleanup, memLedgerIo } from './lib.mjs'
-import { createApi } from '../src/host/api.ts'
-import { readRecentActions, parseActionLine, ACTION_BY_KIND, fsActionsIo } from '../src/host/recent-actions.ts'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { assert, done, freshDir, cleanup } from './lib.mjs'
+import { readRecentActions, parseAdminLine, adminLogFile, fsActionsIo, TAIL_BYTES } from '../src/host/recent-actions.ts'
 
-const dir = freshDir()
+const here = dirname(fileURLToPath(import.meta.url))
+const realLines = readFileSync(join(here, 'fixtures', 'admin-log-real-current.jsonl'), 'utf8')
+const grantRows = readFileSync(join(here, 'fixtures', 'admin-log-real-grant-rows.jsonl'), 'utf8').trim().split('\n')
+
 let n = 0
-const file = dir + '/rodalpha/ledger/events.jsonl'
-const L = (o) => JSON.stringify(o)
-const ledger = [
-  L({ idem: 'a|t1|1', project: 'rodalpha', ticket: 't261002-14', seq: 1, kind: 'merge', stage: 'merge', stage_state: 'closed', ts: '2026-10-03T14:06:00Z' }),
-  L({ idem: 'a|t2|2', project: 'rodalpha', ticket: 't261003-03', seq: 2, kind: 'open_ticket', ts: '2026-10-03T14:03:00Z' }),
-  L({ idem: 'a|t3|3', project: 'rodalpha', ticket: 't261002-10', seq: 3, kind: 'stage_started', stage: 'run_integration_tests', ts: '2026-10-03T13:52:00Z' }),
-  'not json at all',
-  L({ nope: 1 }),
-].join('\n')
+const dirs = []
 
-const io = memLedgerIo({ [file]: ledger })
-
-try {
-  // ① 映射表：固定词表（六操作族），权限位回答「凭哪条权限」。
-  assert(ACTION_BY_KIND['merge'].permission === 'sign', `merge maps to sign permission (${++n})`)
-  assert(ACTION_BY_KIND['send_back'].permission === 'send-back', `send_back maps to send-back (${++n})`)
-
-  // ② 读出：动作行字段齐全、新的在前、unmapped/malformed 计数显式。
-  {
-    const r = readRecentActions(io, { SANDBAR_PROJECTS_DIR: dir }, 'rodalpha')
-    assert(r.ok === true, `ledger readable (${++n})`)
-    assert(r.actions.length === 2, `only mapped kinds become actions (2, not 4) (${++n})`)
-    assert(r.unmapped_rows === 1 && r.malformed_rows === 2, `unmapped=1 malformed=2 counted explicitly (${++n})`)
-    assert(r.actions[0].ticket === 't261002-14' && r.actions[1].ticket === 't261003-03', `newest first (${++n})`)
-    const a = r.actions[0]
-    assert(a.action === 'Sign' && a.permission === 'sign' && a.result === 'closed', `mapped fields: action/permission/result (${++n})`)
-    assert(typeof a.at === 'number' && a.at > 0, `ts ISO parsed to epoch (${++n})`)
+function memIo(files) {
+  return {
+    files,
+    existsSync: (f) => f in files,
+    readFileSync: (f) => { if (!(f in files)) throw new Error('ENOENT ' + f); return files[f] },
   }
-
-  // ③ 单行解析：缺票号 / 认不出的 kind → null（不抛、不编造）。
-  assert(parseActionLine(L({ idem: 'x', ticket: 't1', seq: 1, kind: 'unknown_kind' })) === null, `unknown kind → null (${++n})`)
-  assert(parseActionLine(L({ idem: 'x', ticket: '', seq: 1, kind: 'sign' })) === null, `empty ticket → null (${++n})`)
-  assert(parseActionLine('[') === null, `bad json → null (${++n})`)
-
-  // ④ 显式降级：缺席 / 不可读 / 坏 key。
-  {
-    const miss = readRecentActions(io, { SANDBAR_PROJECTS_DIR: dir }, 'otherproj')
-    assert(miss.ok === false && /does not exist yet/.test(miss.reason), `absent ledger = degraded with reason (${++n})`)
-    const badIo = { existsSync: () => true, readFileSync: () => { throw new Error('EACCES') } }
-    const un = readRecentActions(badIo, { SANDBAR_PROJECTS_DIR: dir }, 'rodalpha')
-    assert(un.ok === false && /unreadable/.test(un.reason) && /EACCES/.test(un.reason), `unreadable ledger = degraded with cause (${++n})`)
-    const badKey = readRecentActions(io, { SANDBAR_PROJECTS_DIR: dir }, 'BAD_KEY!')
-    assert(badKey.ok === false && /key/.test(badKey.reason), `bad project key = degraded (${++n})`)
-  }
-
-  // ⑤ API 面：降级透传 reason（页面渲染显式降级卡）；坏 key 400；上限 max 生效。
-  {
-    const api = createApi({ HOME: dir, SANDBAR_PANEL_DIR: dir, SANDBAR_PROJECTS_DIR: dir }, { actionsIo: io })
-    const Q = (s) => new URLSearchParams(s)
-    let r = await api.handle('GET', '/sandbar-executor-panel/api/actions', Q('project=otherproj'), '', '')
-    assert(r.status === 200 && r.json.ok === false && r.json.reason, `api degraded face carries the reason (${++n})`)
-    r = await api.handle('GET', '/sandbar-executor-panel/api/actions', Q('project=BAD!'), '', '')
-    assert(r.status === 400, `api rejects bad key with 400 (${++n})`)
-    r = await api.handle('GET', '/sandbar-executor-panel/api/actions', Q('project=rodalpha'), '', '')
-    assert(r.json.ok === true && r.json.actions.length === 2 && r.json.unmapped_rows === 1, `api happy path (${++n})`)
-    r = await api.handle('POST', '/sandbar-executor-panel/api/actions', Q('project=rodalpha'), '', '')
-    assert(r.status === 405, `actions face is GET-only (${++n})`)
-  }
-
-  // ⑥ fs 版 io 存在（生产缺省面）且指向账本路径。
-  assert(typeof fsActionsIo.existsSync === 'function' && typeof fsActionsIo.readFileSync === 'function', `fs io face present (${++n})`)
-} finally {
-  cleanup([dir])
 }
+function envFor(file) { return { HOME: '/nonexistent-home', SANDBAR_ADMIN_LOG: file } }
+
+// ---- 单行判定（真行）----
+{
+  const v = parseAdminLine(realLines.split('\n')[0], 'sandbar') // 真 sign 行（无授权键=旧窗口行）
+  assert(v.kind === 'missing_auth', 'real old-shape sign row → missing_auth (no grant key anywhere in the row)')
+  const bad = parseAdminLine('this line is not json')
+  assert(bad.kind === 'malformed', 'non-JSON line → malformed')
+  assert(parseAdminLine('[1,2,3]').kind === 'malformed', 'JSON array line → malformed')
+  assert(parseAdminLine('42').kind === 'malformed', 'JSON scalar line → malformed')
+  assert(parseAdminLine('   ').kind === 'other', 'blank line → other (not counted)')
+  n += 5
+}
+
+// ---- 真授权行（summary 顶层键）：动作行全语义 ----
+{
+  const g0 = JSON.parse(grantRows[0]) // sub=ticket, grant op=sign, caller=sandbar, t261002-14
+  const v = parseAdminLine(JSON.stringify(g0), 'sandbar')
+  assert(v.kind === 'action', 'real grant row → action')
+  assert(v.row.action === 'Sign' && v.row.permission === 'sign', 'action=Sign permission=sign (op vocabulary, recorded not invented)')
+  assert(v.row.ticket === 't261002-14', 'ticket parsed from summary.result.ticket_id')
+  assert(v.row.at === g0.ts * 1000, 'at = ts*1000 (epoch s → ms)')
+  assert(v.row.result === 'ok', 'result reflects the audit ok flag')
+  const g1 = JSON.parse(grantRows[1]) // sub=ticket-start, op=open-ticket, t261003-04
+  const v1 = parseAdminLine(JSON.stringify(g1), 'sandbar')
+  assert(v1.kind === 'action' && v1.row.action === 'Open ticket' && v1.row.permission === 'open-ticket' && v1.row.ticket === 't261003-04',
+    'real ticket-start row → Open ticket / open-ticket / id from summary (generic sub does not win)')
+  // caller_project 过滤读 summary 顶层：别的项目的授权行 → other
+  const gX = JSON.parse(grantRows[0]); const sdX = JSON.parse(gX.summary); sdX.caller_project = 'other-project'; gX.summary = JSON.stringify(sdX); delete gX.caller_project
+  assert(parseAdminLine(JSON.stringify(gX), 'sandbar').kind === 'other', 'summary-level caller_project of another project → other (filter reads the right level)')
+  // summary 缺 caller_project → 行级兜底
+  const gL = JSON.parse(grantRows[0]); const sdL = JSON.parse(gL.summary); delete sdL.caller_project; gL.summary = JSON.stringify(sdL); gL.caller_project = 'other-project'
+  assert(parseAdminLine(JSON.stringify(gL), 'sandbar').kind === 'other', 'line-level caller_project fallback still filters')
+  // 行级授权键兜底（非 summary 层）也认
+  const lineLevel = parseAdminLine(JSON.stringify({ sub: 'ticket', ok: true, executor_grant_op: 'send-back', summary: '{"ok":true,"result":{"ticket_id":"t9"}}' }), 'sandbar')
+  assert(lineLevel.kind === 'action' && lineLevel.row.action === 'Send back' && lineLevel.row.permission === 'send-back', 'line-level grant key fallback → Send back')
+  // unknown sub AND unknown op → unmapped（计数，不编造）
+  const unknownBoth = parseAdminLine(JSON.stringify({ sub: 'ticket.teleport', executor_grant_op: 'teleport', summary: '{}' }))
+  assert(unknownBoth.kind === 'unmapped' && unknownBoth.permission === 'teleport', 'unknown sub AND unknown op → unmapped (counted, not invented)')
+  n += 9
+}
+
+// ---- 读面：真行旧形状 → 显式降级，绝不空表冒充 ----
+{
+  const file = '/nonexistent/admin.log'
+  const r1 = readRecentActions(memIo({}), envFor(file), 'sandbar')
+  assert(r1.ok === false && r1.reason.includes(file), 'absent source → ok:false naming the resolved path')
+  const errIo = { existsSync: () => true, readFileSync: () => { throw new Error('EACCES') } }
+  const r2 = readRecentActions(errIo, envFor(file), 'sandbar')
+  assert(r2.ok === false && r2.reason.includes('unreadable') && r2.reason.includes('EACCES'), 'unreadable source → ok:false naming the reason')
+  const r3 = readRecentActions(memIo({ [file]: realLines }), envFor(file), 'sandbar')
+  assert(r3.ok === false && r3.reason.includes('none of them records which permission authorized it'),
+    'real old-shape rows → degraded card naming the missing per-row authorization')
+  const readOnlyRows = realLines.split('\n').filter((l) => l.includes('ticket-list') || l.includes('ticket-query')).join('\n') + '\n'
+  const r4 = readRecentActions(memIo({ [file]: readOnlyRows }), envFor(file), 'sandbar')
+  assert(r4.ok === false && r4.reason.includes('no gated executor actions'), 'read-only rows only → explicit no-gated-actions degradation')
+  n += 4
+}
+
+// ---- 读面：真授权行 → 动作行出列，坏行计数，排序，max 截断 ----
+{
+  const file = '/nonexistent/admin.log'
+  const lines = [
+    ...grantRows,
+    'garbage line',
+    JSON.stringify({ sub: 'ticket.teleport', executor_grant_op: 'teleport', caller_project: 'sandbar', summary: '{}' }),
+    realLines.split('\n')[0], // 真行旧形状 → missing_auth
+    '',
+  ]
+  const io = memIo({ [file]: lines.join('\n') + '\n' })
+  const r = readRecentActions(io, envFor(file), 'sandbar')
+  assert(r.ok === true, 'real grant rows → ok:true with rows')
+  assert(r.actions.length === 3, 'the three permission-bearing rows shown')
+  assert(r.actions.every((a) => a.permission !== ''), 'every shown row names its permission')
+  assert(r.actions[0].ticket === 't261003-05' && r.actions[2].ticket === 't261002-14', 'newest first (real ts ordering)')
+  assert(r.malformed_rows === 1 && r.unmapped_rows === 1 && r.missing_authorization_rows === 1, 'bad/unknown/missing-auth all counted, none silent')
+  const rMax = readRecentActions(io, envFor(file), 'sandbar', 1)
+  assert(rMax.ok === true && rMax.actions.length === 1, 'max truncation works')
+  n += 6
+}
+
+// ---- 项目过滤：别的项目（summary 层 caller_project）绝不混入 ----
+{
+  const file = '/nonexistent/admin.log'
+  const g0 = JSON.parse(grantRows[0]); const sd = JSON.parse(g0.summary); sd.caller_project = 'other-project'; g0.summary = JSON.stringify(sd); delete g0.caller_project
+  const io = memIo({ [file]: JSON.stringify(g0) + '\n' + grantRows[0] + '\n' })
+  const r = readRecentActions(io, envFor(file), 'sandbar')
+  assert(r.ok === true && r.actions.length === 1 && r.actions[0].ticket === 't261002-14', 'foreign-project gated row excluded, own row kept')
+  n += 1
+}
+
+// ---- 尾读窗口（fs 版真文件）：fd 收口 + 残首行丢弃 ----
+{
+  const dir = freshDir()
+  dirs.push(dir)
+  const file = join(dir, 'admin.log')
+  const pad = 'x'.repeat(200) + '\n'
+  writeFileSync(file, pad.repeat(TAIL_BYTES / 200) + grantRows[0] + '\n')
+  const r = readRecentActions(fsActionsIo, envFor(file), 'sandbar')
+  assert(r.ok === true && r.actions.length === 1 && r.actions[0].permission === 'sign', 'tail read over real fs file parses the trailing real grant row (window fits)')
+  const ioSmall = {
+    existsSync: fsActionsIo.existsSync,
+    readFileSync: fsActionsIo.readFileSync,
+    readTail: (f, b) => fsActionsIo.readTail(f, 120),
+  }
+  const r2 = readRecentActions(ioSmall, envFor(file), 'sandbar')
+  assert(r2.ok === false && !r2.reason.includes('unreadable'), 'partial first line dropped by tail read (no crash, no miscount)')
+  n += 2
+}
+
+// ---- adminLogFile 路径解析 ----
+{
+  assert(adminLogFile({ SANDBAR_ADMIN_LOG: '/tmp/x.log' }) === '/tmp/x.log', 'env override wins (engine-audit.py same key)')
+  const fallback = adminLogFile({})
+  assert(fallback.endsWith('/server/admin.log'), 'module-relative fallback resolves to <repo>/server/admin.log (got ' + fallback + ')')
+  n += 2
+}
+
+cleanup(dirs)
 done(n)

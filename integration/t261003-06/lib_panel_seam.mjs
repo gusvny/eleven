@@ -4,7 +4,11 @@
 // `server/plugins/executor-panel/harness.mjs`，导出 startHarness({...}) ->
 // Promise<{ base, close() }>，把插件真实路由处理面架在临时端口（缺省 0=内核
 // 分配，永不接触 3099）。t261003-06 扩展两项注入（向后兼容，均可选）：
-//   eventsPath —— 「最近动作」读源的每项目事件账本路径（sc_executor_panel_recent_actions）。
+//   eventsPath —— （t261003-06，已被 t261003-10 取代）「最近动作」读源的每项目事件账本路径。
+//   t261003-10 扩展：startPluginHarness —— 生产路由壳缝（node.ts 真 apply() + stub
+//   webServer 起 http 服务，请求流经生产注册面；漏注册的路径在此 404 与生产同形），
+//   选项 { panelDir, watchdogDir, adminLogPath }——adminLogPath 注入「最近动作」读源
+//   （引擎自审计 admin.log，SANDBAR_ADMIN_LOG 同键），close() 还原 env 零残留。
 // 本文件只做装载/夹具/三态出口，零行为断言。三态纪律（t260904-12）：
 // node 缺席=ENV_FAIL exit 2；harness/契约面未落地=FAIL exit 1 且点名（TDD 期红属
 // 预期，arbitrate/merge 期必须绿）。

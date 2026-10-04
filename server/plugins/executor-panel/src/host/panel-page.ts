@@ -594,7 +594,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       // 显式降级：点名原因，绝不渲染成空列表冒充「最近没动作」。
       html = '<div class="act" style="border:0"><span class="say muted">No action list. ' + esc(a&&a.reason ? a.reason : 'The source is not known.') + '</span></div>';
     } else if(a.actions.length===0){
-      html = '<div class="act" style="border:0"><span class="say muted">The ledger holds no action of the six kinds. Rows: bad ' + esc(a.malformed_rows) + ' · other kinds ' + esc(a.unmapped_rows) + '.</span></div>';
+      html = '<div class="act" style="border:0"><span class="say muted">The audit log holds no showable action. Rows: bad ' + esc(a.malformed_rows) + ' · unknown kind ' + esc(a.unmapped_rows) + ' · missing permission ' + esc(a.missing_authorization_rows) + '.</span></div>';
     } else {
       for(var i=0;i<a.actions.length;i++){
         var x = a.actions[i];
