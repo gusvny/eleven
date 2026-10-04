@@ -3386,3 +3386,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①`deliver` 有界等待 + 具名拒收（rc≠0、文案点名「工人不认识这个工作流类」）；
 > ②重启纪律已有（单实例守卫），补「代码新于 worker ⇒ 可查」的版本指纹面。
 > **回归用例**：L1：工人注册表缺类时 deliver 具名拒收且 rc≠0（不是挂死）。
+
+## KI-198 声明类配置**保存成功但运行态不重载**：面板/CLI 报 saved，运行中的插件仍按启动时读到的旧值走（261005 实证，换执行器会话）
+
+> **现象**：清空 `watchdog.json` 的 `executor_session`（未声明态）后，运行中的守望者**继续按旧会话走**——
+> 90 秒里状态面一直是 `last_action=adopt, session_id=<旧 id>`；只有**重启控制台**之后，第一拍才
+> 走 `create` 并回写新 id。也就是说「面板/文件说改好了」与「运行态真的改了」是两件事。
+> **机制（代码级）**：守望者在构造时读一次配置（`server/plugins/watchdog/src/host/core.ts:253`），
+> 项目守望者在插件 apply 时起（`server/plugins/watchdog/node.ts:690`）；面板 Settings 的写面只落盘、
+> 不通知运行中的插件（`server/plugins/executor-panel/src/host/settings.ts:114-134`：tmp 写 → 回读过装载器
+> → 原子 rename，全程无热重载）。
+> **危害**：正是本晚 B9 那条形态的又一实例——**写者宣布成功、读者（运行态）没变**。换执行器会话、
+> 调并发上限、开关守望者这类声明改动都会「看起来做了、其实没做」，而且没有任何面提示「要重启才生效」。
+> **出路**：①声明写面回执显式带「生效需重启」（或面板挂一条 staleness 横幅，与 KI-052 同族）；
+> ②守望者每拍按 mtime 重读声明（与「人的声明只收养、绝不替换」的铁律不冲突——重读不改写人的声明）；
+> ③runbook 记死「换执行器会话 = 两处声明（watchdog.json + executor-grants.json）+ 一次重启」。
+> **本次处置（261005）**：登记。本次换会话已按此流程走完（清声明 → 重启 → 守望者代建 → 写 grants → 验证）。
