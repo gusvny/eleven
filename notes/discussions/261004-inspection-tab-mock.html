@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Executor Panel — Inspection tab (mock)</title>
+<style>
+:root{--bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;
+      --blue:#0969da;--green:#1a7f37;--amber:#9a6700;--red:#cf222e;--accent-soft:#dbe9ff;--accent-line:#7aa7e8;--dot-grey:#99a3ad}
+html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--muted:#8ea0b8;
+      --blue:#4da3ff;--green:#7ad48a;--amber:#ffb454;--red:#ff6b6b;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot-grey:#46536a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:18px 16px 48px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.top h1{font-size:14px;font-weight:600;margin:0}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 9px;font-size:11px}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;width:max-content;margin-bottom:16px;flex-wrap:wrap}
+.seg label{padding:5px 12px;border-radius:7px;color:var(--muted);cursor:pointer;font-size:12px}
+.seg label.on{background:var(--panel2);color:var(--fg)}
+.sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.sect.lead{margin-top:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.row{display:flex;align-items:baseline;gap:8px}
+.row .txt{flex:1;min-width:0}
+.meta{color:var(--muted);font-size:11px;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.dot.red{background:var(--red)}.dot.amber{background:var(--amber)}.dot.green{background:var(--green)}.dot.grey{background:var(--dot-grey)}
+.nums{display:flex;gap:14px;color:var(--muted);font-size:11px;margin-top:4px}
+.nums b{color:var(--fg);font-weight:600}
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
+.btn.primary{background:var(--accent-soft);border-color:var(--accent-line)}
+.btn:hover{border-color:var(--blue)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.bar{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.hostnote{color:var(--muted);font-size:11px}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;color:var(--muted);font-weight:500;padding:4px 6px;border-bottom:1px solid var(--line-soft)}
+.tbl td{padding:5px 6px;border-bottom:1px solid var(--line-soft)}
+.pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px}
+.pill.run{background:var(--accent-soft);color:var(--blue)}
+.pill.done{background:var(--panel2);color:var(--muted)}
+details{margin-top:6px}
+summary{cursor:pointer;color:var(--muted);font-size:12px}
+code{background:var(--panel2);border-radius:4px;padding:1px 4px;font-size:11px}
+.dlg{display:none;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px;margin-bottom:10px}
+.dlg[data-open="true"]{display:block}
+.dlg label{display:block;margin:6px 0;color:var(--muted);font-size:12px}
+.dlg select,.dlg input{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit}
+.muted{color:var(--muted)}
+.foot{margin-top:26px;color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Executor</h1><span class="chip">sandbar</span>
+    <button class="btn" style="margin-left:auto" onclick="toggleTheme()">Light / dark</button>
+  </div>
+
+  <div class="seg">
+    <label>Overview</label><label>Grants</label><label>Alerts</label><label>Ledger</label><label>Settings</label>
+    <label class="on">Inspection</label>
+  </div>
+
+  <!-- ================= Inspection tab ================= -->
+  <div class="card" style="display:flex;align-items:center;gap:10px">
+    <span class="dot green"></span>
+    <span>Full-codebase review</span>
+    <span class="meta">host action</span>
+    <span style="margin-left:auto"></span>
+    <button class="btn primary" onclick="openDialog()">Run a full review…</button>
+  </div>
+  <div class="hostnote">Only you can start a full review. The executor cannot. A review is recorded when it starts.</div>
+
+  <div class="dlg" id="dlg" data-open="false">
+    <div class="sect" style="margin:0 0 4px">Run a full-codebase review</div>
+    <label>Scope
+      <select id="scope">
+        <option>Everything (1,298 source files)</option>
+        <option>server/plugins only (353 files)</option>
+        <option>server/engine only (61 files + 197 tests)</option>
+        <option>integration/ only (756 files)</option>
+      </select>
+    </label>
+    <label>Reason (recorded)<input id="reason" size="40" placeholder="why now"></label>
+    <div class="bar">
+      <button class="btn primary" onclick="startReview()">Start</button>
+      <button class="btn" onclick="closeDialog()">Cancel</button>
+      <span class="meta" id="dlgMsg"></span>
+    </div>
+  </div>
+
+  <div class="sect lead">This period · 20261004</div>
+
+  <div class="card">
+    <div class="row"><span class="dot red"></span><span class="txt">Integration tests</span><span class="meta">run 02:30–04:10</span></div>
+    <div class="nums">
+      <span>high <b>4</b></span><span>med <b>2</b></span><span>low <b>3</b></span>
+      <span>suite reds <b>2</b></span><span>environment-only <b>38</b></span>
+      <span>new test cases reviewed <b>12</b></span>
+    </div>
+    <div class="muted" style="margin-top:4px">Not run: 1 ticket had no receipt (t261004-03, blocked).</div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="dot amber"></span><span class="txt">Simplify</span><span class="meta">new code first, then the oldest slice</span></div>
+    <div class="nums">
+      <span>high <b>1</b></span><span>med <b>2</b></span><span>low <b>4</b></span>
+      <span>new code reviewed <b>17</b> files</span><span>slice reviewed <b>48</b> files</span>
+    </div>
+    <div class="muted" style="margin-top:4px">Mechanical checks ran on everything: lint, compile, term list, cross-language lists.</div>
+  </div>
+
+  <div class="sect lead">Findings</div>
+  <div class="card" style="padding:2px 6px">
+    <table class="tbl">
+      <tr><th>when</th><th>sur</th><th>finding</th><th>ticket</th></tr>
+      <tr><td>10-04 03:12</td><td>test</td><td>The open-session button has no reason text when the panel stands alone</td><td><code>t261004-09</code></td></tr>
+      <tr><td>10-04 03:12</td><td>test</td><td>Behaviour is green but one row is counted twice in the pause list</td><td><span class="muted">—</span></td></tr>
+      <tr><td>10-04 02:58</td><td>simplify</td><td>A guard still watches a file that the retirement batch deleted</td><td><code>t261004-09</code></td></tr>
+      <tr><td>10-04 02:58</td><td>simplify</td><td>The same cap constant appears in three render paths, two of them wrong</td><td><code>t261004-14</code></td></tr>
+    </table>
+    <div class="muted" style="padding:6px 4px">Newest first · 20 shown · older rows are in the period report</div>
+  </div>
+
+  <div class="sect lead">Coverage</div>
+  <div class="card">
+    <div class="row"><span class="txt">60 of 1,298 source files reviewed this period (35% of the slice target is new code)</span></div>
+    <details>
+      <summary>Show the reviewed files and the queue</summary>
+      <div class="muted" style="margin-top:6px">
+        Reviewed: 17 new-code files + 43 oldest-unreviewed files (48 queued, 43 new).
+        Oldest never-reviewed file: <code>server/plugins/ui/src/host/page.ts</code>, last reviewed — never.
+        Nothing is claimed as clean unless it was reviewed.
+      </div>
+    </details>
+  </div>
+
+  <div class="sect lead">Reviews you started</div>
+  <div class="card" style="padding:2px 6px">
+    <table class="tbl">
+      <tr><th>when</th><th>who</th><th>scope</th><th>state</th><th>result</th></tr>
+      <tr><td>10-04 10:41</td><td>host</td><td>server/plugins only</td><td><span class="pill run">running</span></td><td class="muted">—</td></tr>
+      <tr><td>10-03 09:30</td><td>host</td><td>everything</td><td><span class="pill done">done</span></td><td>9 findings, 3 tickets</td></tr>
+    </table>
+    <div class="muted" style="padding:6px 4px">Newest first · kept after the review ends</div>
+  </div>
+
+  <div class="foot">Mock. No backend. Sample data.</div>
+</div>
+
+<script>
+function toggleTheme(){
+  var h=document.documentElement;
+  h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark';
+}
+function openDialog(){ document.getElementById('dlg').dataset.open='true'; document.getElementById('dlgMsg').textContent=''; }
+function closeDialog(){ document.getElementById('dlg').dataset.open='false'; }
+function startReview(){
+  var scope=document.getElementById('scope').value;
+  var why=(document.getElementById('reason').value||'').trim();
+  if(why===''){ document.getElementById('dlgMsg').textContent='Add a reason. It is recorded.'; return; }
+  var tbl=document.querySelectorAll('.tbl')[1];
+  var tr=document.createElement('tr');
+  tr.innerHTML='<td>just now</td><td>host</td><td>'+scope.replace(/ \(.*/,'')+'</td><td><span class="pill run">running</span></td><td class="muted">—</td>';
+  tbl.insertBefore(tr, tbl.rows[1]);
+  document.getElementById('dlgMsg').textContent='Started. The record is written.';
+  setTimeout(closeDialog, 700);
+}
+</script>
+</body>
+</html>
