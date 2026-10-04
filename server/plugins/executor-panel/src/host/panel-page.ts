@@ -121,7 +121,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .cell span{color:var(--muted);font-size:11px}
 .file{color:var(--faint);font-size:11px;margin-top:8px}
 .grp{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
-.line{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #232c3a}
+.line{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line-soft)}
 .line:last-child{border-bottom:0}
 .line .lab{flex:1;min-width:0}
 .line .lab small{display:block;color:var(--muted);font-size:11px}
@@ -135,7 +135,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .linkbtn:hover{color:var(--blue)}
 .bar{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
 .bar button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:7px 14px;font:inherit;cursor:pointer}
-.bar button.primary{background:#1d3550;border-color:#2f5b8a}
+.bar button.primary{background:var(--accent-soft);border-color:var(--accent-line)}
 .bar button:hover{border-color:var(--blue)}
 .doneWrap{margin-top:14px}
 .doneHead{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:4px 0}
@@ -145,7 +145,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .empty{color:var(--muted);padding:22px 4px}
 .banner{border:1px solid var(--amber);color:var(--amber);background:var(--warn-soft);border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px}
 .banner.red{border-color:var(--red);color:var(--red);background:var(--danger-soft)}
-.knob{display:grid;grid-template-columns:200px 1fr 240px;gap:6px;padding:5px 12px;border-bottom:1px solid #232c3a;align-items:center;font-size:12px}
+.knob{display:grid;grid-template-columns:200px 1fr 240px;gap:6px;padding:5px 12px;border-bottom:1px solid var(--line-soft);align-items:center;font-size:12px}
 .knob .src{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
 table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}

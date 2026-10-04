@@ -10,15 +10,78 @@
 //   V5 无参数 + 系统偏好 light（emulateMedia）→ 渲染底色非旧硬编码暗色 #141a24
 //      （亮度>0.3，即回落系统偏好而非旧缺省暗脸）。
 //   V6 全旅程零 pageerror。
+// t261004-10（primary 按钮明色主题对比度缺陷 1.26:1）新增：
+//   C1 light + dark 两主题下 #grantsSave / #saveBtn 的标签色×底色对比度各 ≥4.5:1（4 组合）。
+//   C2 .line / .knob 分隔线颜色跟随 --line-soft（token-follow，装饰线不适用 4.5:1）。
+//   C3 静态扫：主题定义块（明/暗/系统偏好镜像）之外零硬编码十六进制色。
+//   V6 全旅程零 pageerror。
 //
 // intent 分工：workbench 侧主题解析/URL 带参归 developer L1（executor-entry-model
 // 单测）；本场景只锁面板页消费端契约（?theme= 是两端的公开缝）。
 import { PANEL_PAGE_PATH, makeCase, loadPw, serveApiStub, openPanel, luminance, REPO } from './lib_panel_stub.mjs'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const C = makeCase()
 const PROJ = 'alpha'
+
+/** WCAG 对比度（两相对亮度之比；AA 正文门槛 4.5:1）。 */
+function contrastRatio(fg, bg) {
+  const a = luminance(fg); const b = luminance(bg)
+  if (a == null || b == null) return null
+  const [hi, lo] = a >= b ? [a, b] : [b, a]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/** 静态扫：只看 <style> 块；主题定义行（--bg:# = 明/暗/系统偏好镜像）之外零十六进制色。
+ *  先剥掉 &#NNNN; 形态的 HTML 实体（数字恰是十六进制合法字符，会误报）。 */
+function hardcodedHexOutsideThemeBlocks(source) {
+  const style = /<style>([\s\S]*?)<\/style>/.exec(source)
+  if (!style) return ['no <style> block found']
+  const offenders = []
+  style[1].split('\n').forEach((l, i) => {
+    if (/--bg:#/.test(l)) return
+    const m = l.replace(/&#\w+;/g, '').match(/#[0-9a-fA-F]{3,8}\b/g)
+    if (m) offenders.push(`style line ${i + 1}: ${m.join(',')}`)
+  })
+  return offenders
+}
+
+/** 打开面板并取控制件计算态（标签/底色、分隔线颜色、--line-soft 解析值）。 */
+async function probeControls(pw, query) {
+  const api = await serveApiStub()
+  const env = await openPanel(pw, {
+    html: (await import(pathToFileURL(PANEL_PAGE_PATH).href)).PANEL_PAGE_HTML,
+    apiPort: api.port, query: `?project=${PROJ}${query}`,
+  })
+  try {
+    await env.page.waitForTimeout(400)
+    return await env.page.evaluate(() => {
+      const resolveToken = (tok) => {
+        const d = document.createElement('div')
+        d.style.display = 'none'; d.style.borderBottomColor = `var(${tok})`
+        document.documentElement.appendChild(d)
+        const v = getComputedStyle(d).borderBottomColor
+        d.remove(); return v
+      }
+      const btn = (id) => {
+        const el = document.getElementById(id)
+        if (!el) return null
+        const cs = getComputedStyle(el)
+        return { color: cs.color, bg: cs.backgroundColor }
+      }
+      const borderColor = (sel) => {
+        const el = document.querySelector(sel)
+        return el ? getComputedStyle(el).borderBottomColor : null
+      }
+      return {
+        grantsSave: btn('grantsSave'), saveBtn: btn('saveBtn'),
+        lineBorder: borderColor('.line'), knobBorder: borderColor('.knob'),
+        lineSoft: resolveToken('--line-soft'),
+      }
+    })
+  } finally { await env.closeAll(); api.close() }
+}
 
 async function probe(pw, query, opts = {}) {
   const api = await serveApiStub()
@@ -66,6 +129,41 @@ async function main() {
     }
   }
   C.case('V6-scenario-ran', true, 'theme legs executed')
+
+  // ---- t261004-10：primary 按钮对比度 + 分隔线 token-follow + 硬编码色静态扫 ----
+  for (const theme of ['light', 'dark']) {
+    try {
+      const r = await probeControls(pw, `&theme=${theme}`)
+      const fails = []
+      const pairs = []
+      for (const [id, v] of [['grantsSave', r.grantsSave], ['saveBtn', r.saveBtn]]) {
+        if (!v) { fails.push(`${id} absent`); continue }
+        const ratio = contrastRatio(v.color, v.bg)
+        pairs.push(`${id}=${ratio ? ratio.toFixed(2) : 'null'}`)
+        if (ratio == null || ratio < 4.5) fails.push(`${id} ${ratio} < 4.5 (${v.color} on ${v.bg})`)
+      }
+      const div = []
+      if (r.lineBorder !== r.lineSoft) fails.push(`.line ${r.lineBorder} != --line-soft ${r.lineSoft}`)
+      else div.push(`.line ok`)
+      if (r.knobBorder != null) {
+        if (r.knobBorder !== r.lineSoft) fails.push(`.knob ${r.knobBorder} != --line-soft ${r.lineSoft}`)
+        else div.push('.knob ok')
+      } else div.push('.knob not rendered (guarded by static sweep)')
+      const passed = fails.length === 0
+      C.case(`C1C2-${theme}-contrast-and-dividers`, passed,
+        (passed ? 'ok: ' : 'FAIL: ') + fails.concat(pairs, div).join(' | '))
+    } catch (e) {
+      const msg = String(e).slice(0, 200)
+      if (/browser|executable|chromium|launch/i.test(msg)) { C.envFail('chromium-launch', msg); break }
+      C.case(`C1C2-${theme}-contrast-and-dividers`, false, msg)
+    }
+  }
+  try {
+    const offenders = hardcodedHexOutsideThemeBlocks(readFileSync(PANEL_PAGE_PATH, 'utf8'))
+    C.case('C3-static-no-hardcoded-hex-outside-theme-blocks', offenders.length === 0,
+      offenders.length ? offenders.join(' ; ') : 'style block clean outside theme definition lines')
+  } catch (e) { C.case('C3-static-no-hardcoded-hex-outside-theme-blocks', false, String(e).slice(0, 200)) }
+
   C.exit()
 }
 
