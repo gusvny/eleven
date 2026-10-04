@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-10-04T08:55:41+08:00",
-  "total": 24,
+  "generated_at": "2026-10-04T12:33:29+08:00",
+  "total": 26,
   "categories": [
     "design",
     "content",
@@ -327,6 +327,34 @@
       ],
       "status": "active",
       "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "reference/code-review-checklist.md",
+      "file": "code-review-checklist.md",
+      "title": "Code Review Checklist",
+      "category": "reference",
+      "tags": [
+        "code-review",
+        "review-checklist",
+        "quality"
+      ],
+      "status": "active",
+      "updated": "2026-10-04",
+      "has_frontmatter": true
+    },
+    {
+      "path": "reference/panel-list-conventions.md",
+      "file": "panel-list-conventions.md",
+      "title": "Panel list conventions",
+      "category": "reference",
+      "tags": [
+        "executor-panel",
+        "list-contract",
+        "frontend"
+      ],
+      "status": "active",
+      "updated": "2026-10-04",
       "has_frontmatter": true
     },
     {
