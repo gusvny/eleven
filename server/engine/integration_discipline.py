@@ -25,6 +25,11 @@
   `bash -c 'python3 integration/run_scenarios.py'` 判红；
   `bash -c 'ls integration/baselines'` 不判（递归后只读动词照样豁免）；
 - `python3 -c "<代码>"`：内联代码不解析（导入式间接执行不可静态判定）——已知局限；
+- `node --check <文件>`（t261004-05）：node 族静态语法自检——其后实参是被解析而非
+  被执行，本段剩余实参不判（与 -m 静态白名单同向豁免，t260922-08）；仅对 node/nodejs
+  本身生效；`node <入口>` 真跑照判红，执行锚点不松；声明侧 prompt_clause() 同批点名
+  两种语言的合法静态自检形（NODE_STATIC_CHECK_FLAGS，仅对 NODE_STATIC_CHECK_VERBS
+  即 node/nodejs 生效）；
 - `-m` 模块形（t260922-08）：模块名命中入口表（run_scenarios/sc_* 尾名）→ 判红
   （`-m run_scenarios`、`-m pytest <入口文件>`——pytest 收集即 import 执行，真跑）；
   `-m <STATIC_TOOL_MODULES 成员>`（py_compile/compileall/ast/tokenize/dis）→ 其后
@@ -89,6 +94,12 @@ SHELL_VERBS = frozenset({"bash", "sh", "zsh", "dash"})
 STATIC_TOOL_MODULES = frozenset({
     "py_compile", "compileall", "ast", "tokenize", "dis",
 })
+# node 族静态语法自检 flag（t261004-05）：`node --check <文件>` 只解析不执行，
+# 其后实参不再参与入口表匹配（与 -m 静态白名单 t260922-08 同向豁免）。只收静态
+# 解析面；扩展本表须同批带 UT + docstring 落字（声明=执法）。
+NODE_STATIC_CHECK_FLAGS = frozenset({"--check"})
+# node 静态自检 flag 仅对 node/nodejs 本身生效（bun/deno 同形语义未核实，不豁免）。
+NODE_STATIC_CHECK_VERBS = frozenset({"node", "nodejs"})
 # 透明包装 token（跳过）：其后直至程序 token 之前的 flag/数字/VAR=… 一并跳过。
 WRAPPER_TOKENS = frozenset({
     "sudo", "nohup", "env", "timeout", "time", "nice", "stdbuf", "exec",
@@ -377,6 +388,11 @@ def _scan_tokens(tokens, segment, command, depth):
         # 泛化 flag 跳过——既有已知漏判，docstring 边界清单已落字（t260922-08）。
         if arg.startswith("-m") and len(arg) > 2 and arg[2:] in STATIC_TOOL_MODULES:
             break
+        # node --check 静态语法自检（t261004-05）：其后文件实参是被解析而非被执行，
+        # 不再匹配入口表（此前已记的命中保留，豁免不追溯；仅 node/nodejs 本身）。
+        if (arg in NODE_STATIC_CHECK_FLAGS
+                and prog.lower() in NODE_STATIC_CHECK_VERBS):
+            break
         if arg.startswith("-"):
             k += 1
             continue
@@ -420,6 +436,7 @@ def prompt_clause():
         "【单测可跑】受影响面 pytest（指定文件/--lf，勿全量）、"
         "python3 integration/lint_tests.py（秒级静态检查）、"
         "python3 -m py_compile <文件>（静态语法自检，t260922-08）、"
+        "node --check <文件>（JS 场景静态语法自检，t261004-05，合法不算执行）、"
         "只读侦察（read/grep/cat/sed/ls/git log/diff）——"
         "读集成代码/文档做诊断合法，不算违规；"
         "【集成禁跑】不得在本段执行集成入口（点名）：" + entries + "——"
