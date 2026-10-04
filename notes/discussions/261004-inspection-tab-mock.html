@@ -145,9 +145,13 @@ const PERIODS = {
 let cur = '20261004';
 
 function sevClass(face){ return face==='test' ? 'amber' : 'amber'; }
+// 期号顺序必须显式倒序：纯数字样式的对象键会被 JS 按数值升序枚举（靠数据顺序=最老在最前）。
+function periodOrder(){
+  return Object.keys(PERIODS).sort((a, b) => b.localeCompare(a));
+}
 function renderPeriods(){
   const box = document.getElementById('periods');
-  box.innerHTML = '<span class="meta">Period</span>' + Object.keys(PERIODS).map(p =>
+  box.innerHTML = '<span class="meta">Period</span>' + periodOrder().map(p =>
     `<button data-on="${p===cur}" onclick="pick('${p}')">${p}${PERIODS[p].current?' (this period)':''}</button>`).join('');
   document.getElementById('rodnote').textContent = PERIODS[cur].current
     ? '' : 'This period is closed. Shown read-only from its report.';
@@ -186,7 +190,11 @@ function renderBody(){
       </details>
     </div>`;
 }
-function pick(p){ cur = p; renderPeriods(); renderBody(); }
+function pick(p){ cur = p; renderPeriods(); renderBody();
+// 排序断言：新的一期必须排在最前（防回归）
+{ const first = periodOrder()[0];
+  if (first !== '20261004') document.getElementById('rodnote').textContent =
+    'ORDER BUG: newest period is not first (' + periodOrder().join('|') + ')'; } }
 function toggleTheme(){ const h=document.documentElement; h.dataset.theme = h.dataset.theme==='dark'?'light':'dark'; }
 function openDialog(){ document.getElementById('dlg').dataset.open='true'; document.getElementById('dlgMsg').textContent=''; }
 function closeDialog(){ document.getElementById('dlg').dataset.open='false'; }
@@ -202,6 +210,10 @@ function startReview(){
   setTimeout(closeDialog, 700);
 }
 renderPeriods(); renderBody();
+// 排序断言：新的一期必须排在最前（防回归）
+{ const first = periodOrder()[0];
+  if (first !== '20261004') document.getElementById('rodnote').textContent =
+    'ORDER BUG: newest period is not first (' + periodOrder().join('|') + ')'; }
 </script>
 </body>
 </html>
