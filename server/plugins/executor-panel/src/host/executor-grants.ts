@@ -142,7 +142,7 @@ export function validateDeclaration(doc: unknown): [GrantsDecl, string | null] {
     if (n.note !== undefined && typeof n.note !== 'string') {
       return [{} as GrantsDecl, `night_tier.note 必须是字符串（收到 ${String(n.note)}）`]
     }
-    out.night_tier = { enabled: n.enabled, until: Math.trunc(n.until), ...(typeof n.note === 'string' ? { note: n.note.slice(0, 500) } : {}) }
+    out.night_tier = { enabled: n.enabled, until: Math.trunc(n.until), ...(typeof n.note === 'string' ? { note: n.note.slice(0, 500) } : {}) } // LIST-CAP-OK: storage field length limit on the note, not a list cap
   }
   if (typeof d.updated_by === 'string') out.updated_by = d.updated_by
   if (typeof d.updated_at === 'number') out.updated_at = d.updated_at
@@ -252,7 +252,7 @@ export function saveGrantsDecl(
   const doc: Record<string, unknown> = {
     version: DECL_VERSION,
     grants: b.grants ?? {},
-    updated_by: who.slice(0, 64),
+    updated_by: who.slice(0, 64), // LIST-CAP-OK: storage field length limit on who, not a list cap
     updated_at: Math.trunc(nowMs),
   }
   if (b.night_tier !== undefined) doc.night_tier = b.night_tier
@@ -290,7 +290,7 @@ export function saveGrantsDecl(
     return { saved: false, file, reason: `写盘失败：${e instanceof Error ? e.message : String(e)}` }
   }
   appendAudit(key, {
-    at: Math.trunc(nowMs), action: 'grant-change', project: key, who: who.slice(0, 64),
+    at: Math.trunc(nowMs), action: 'grant-change', project: key, who: who.slice(0, 64), // LIST-CAP-OK: storage field length limit on who, not a list cap
     from: prev.declaration?.grants ?? {}, to: normalized.grants,
     night_tier: normalized.night_tier ?? null,
   }, env)

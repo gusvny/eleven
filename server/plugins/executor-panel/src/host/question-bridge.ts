@@ -98,7 +98,7 @@ export function mirrorToLedger(
   if (!v.ok) return v
   const raised = request.agent && typeof request.agent.id === 'string' ? request.agent.id : ''
   if (raised !== '' && (typeof raised !== 'string' || raised.trim() === '' || raised.length > 120)) {
-    return { ok: false, error: `agent.id 形状不合法（须 ≤120 字符非空）：${JSON.stringify(raised).slice(0, 60)}` }
+    return { ok: false, error: `agent.id 形状不合法（须 ≤120 字符非空）：${JSON.stringify(raised).slice(0, 60)}` } // LIST-CAP-OK: error-message preview truncation, not a list cap
   }
   const text = askRequestText(request)
   const res = appendRequest(io, env, project, {

@@ -141,16 +141,33 @@ export function masterOn(count: number): boolean {
 // ---------- t261003-13：Ledger 页诚实化（时间口径 + 唤醒行句，同纪律：零 DOM、经 String(fn) 嵌页） ----------
 
 /**
- * 本地时间 HH:MM（t261003-13 Finding 3）。页面上所有时间一律**本地时区**，
- * 且三个 tab（Overview 最近动作 / Alerts / Ledger）都带「Times are local.」屏上标签——
- * 标签由 HTML 静态承载，函数只管格式。畸形输入（NaN/garbage/null）显式降级为「—」。
+ * 本地时间「YYYY-MM-DD HH:MM」（t261004-14：行时间必须带日期——旧 hhmmLocal 只出
+ * HH:MM，跨天的列表行看不出是哪天；随票更名 localDateTime，旧名不留）。页面上所有
+ * 时间一律**本地时区**，且三个 tab（Overview 最近动作 / Alerts / Ledger）都带
+ * 「Times are local.」屏上标签——标签由 HTML 静态承载，函数只管格式。畸形输入
+ * （NaN/garbage/null）显式降级为「—」。
  */
-export function hhmmLocal(v: unknown): string {
+export function localDateTime(v: unknown): string {
   const t = typeof v === 'number' ? v : Date.parse(String(v))
   if (!Number.isFinite(t)) return '—'
   const d = new Date(t)
   const p = (n: number) => (n < 10 ? '0' + n : String(n))
-  return p(d.getHours()) + ':' + p(d.getMinutes())
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+    + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
+/**
+ * 列表行「最新在前」排序（t261004-14）：按 at 降序的统一实现——at 缺席/畸形排最后
+ * （负无穷），at 相等保持原相对顺序（Array.sort 自 ES2019 起稳定）。不改动入参，
+ * 返回副本；外部账本数据是消费侧输入，任何畸形行都不许让排序抛错。
+ */
+export function newestFirst<T>(rows: T[]): T[] {
+  const key = (r: T): number => {
+    const v = (r as Record<string, unknown> | null)?.at
+    const t = typeof v === 'number' ? v : Date.parse(String(v))
+    return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY
+  }
+  return rows.slice().sort((a, b) => key(b) - key(a))
 }
 
 /**

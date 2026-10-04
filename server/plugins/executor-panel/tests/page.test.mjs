@@ -140,14 +140,9 @@ assert(PANEL_PAGE_HTML.includes('No wakes yet. The watchdog adds a row here when
 assert(PANEL_PAGE_HTML.includes('function wakeRowSentence'), 'wake row sentence is the shared embedded implementation')
 assert(PANEL_PAGE_HTML.includes('wakeRowSentence(w2)'), 'wake rows render mode+accepted via wakeRowSentence')
 assert(!PANEL_PAGE_HTML.includes("||'sent'"), "no 'sent' literal fallback anywhere in the page")
-assert(PANEL_PAGE_HTML.includes('function hhmmLocal'), 'local-time formatter is the shared embedded implementation')
-assert(PANEL_PAGE_HTML.includes('function dateTimeLocal'), 'dated local-time formatter is embedded too (t261004-13)')
-// t261004-13：Overview（当天列表）保持 HH:MM；Alerts 行与 Ledger 唤醒行带日期。
-assert(PANEL_PAGE_HTML.includes('esc(hhmmLocal(x.at))'), 'Overview recent actions render HH:MM')
-assert(PANEL_PAGE_HTML.includes('esc(dateTimeLocal(a2.at))') && PANEL_PAGE_HTML.includes('esc(dateTimeLocal(w2.at))'), 'Alerts rows and Ledger wake rows render dated local time')
-// t261004-13：告警列表最新在上（按 at 降序排序后再渲染）。
-assert(PANEL_PAGE_HTML.includes('rows.slice().sort(function(a,b)'), 'alert rows are sorted newest-first in the page')
-assert(!PANEL_PAGE_HTML.includes('esc(hhmmLocal(a2.at))') && !PANEL_PAGE_HTML.includes('esc(hhmmLocal(w2.at))'), 'no dateless timestamp left on Alerts/wake rows')
+assert(PANEL_PAGE_HTML.includes('function localDateTime'), 'dated local-time formatter is the shared embedded implementation')
+assert(!PANEL_PAGE_HTML.includes('hhmmLocal'), 'no stale hhmmLocal name left anywhere in the page')
+assert(PANEL_PAGE_HTML.includes('esc(localDateTime(x.at))') && PANEL_PAGE_HTML.includes('esc(localDateTime(a2.at))') && PANEL_PAGE_HTML.includes('esc(localDateTime(w2.at))'), 'Overview, Alerts and wake rows all render local time')
 {
   const caps = (PANEL_PAGE_HTML.match(/>Times are local\.</g) || []).length
   assert(caps === 3, 'Times are local. caption on Overview, Alerts and Ledger tabs, found ' + caps)

@@ -26,9 +26,15 @@ import * as fs from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { PROJECT_KEY_RE } from './project-key.ts'
+import { LIST_CONTRACTS } from './list-contracts.ts'
+
+/** 列表上限一处声明（t261004-14）：默认截断数=契约 overview_recent_actions.cap，不再内联 12。 */
+export const RECENT_ACTIONS_CAP: number = LIST_CONTRACTS.overview_recent_actions.cap as number
 
 /** 上限行数（票面口径「约 50 行」）；更早的行在源文件里，响应带指针。 */
-export const MAX_ROWS = 50
+/** 上限一处声明（t261004-14 × t261004-11 合并）：MAX_ROWS 与 RECENT_ACTIONS_CAP 同源，
+ *  均取契约 overview_recent_actions.cap——上限数字不内联两份。 */
+export const MAX_ROWS: number = RECENT_ACTIONS_CAP
 
 /** 引擎 op（授予面原词 + 引擎写 op 名）→ 面板动作显示名。认不出的 op 计数不编造。 */
 export const ACTION_BY_OP: Record<string, string> = {

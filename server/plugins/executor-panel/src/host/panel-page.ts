@@ -24,15 +24,16 @@
 
 import {
   beepDecision, pickDegraded, fmtProportion, fmtWaiting, fmtAge, groupByProject,
-  splitWaiting, hasOptions, chipLabel, masterOn, hhmmLocal, dateTimeLocal, wakeRowSentence, themeParamOf,
+  splitWaiting, hasOptions, chipLabel, masterOn, localDateTime, newestFirst, wakeRowSentence, themeParamOf,
 } from './page-logic.ts'
+import { LIST_CONTRACTS } from './list-contracts.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
   String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
-  String(hhmmLocal), String(dateTimeLocal), String(wakeRowSentence), String(themeParamOf),
+  String(localDateTime), String(newestFirst), String(wakeRowSentence), String(themeParamOf),
 ].join('\n')
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
@@ -265,6 +266,20 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 </div>
 <script>
 ` + EMBEDDED + `
+  // t261004-14：列表契约一处声明（list-contracts.ts 编译期校验，此处 JSON 嵌页）。
+  // 渲染代码只经 capOf/emptyCopyOf 引用上限与空态文案——上限数字不再内联在渲染路径里
+  //（机械检查 check_list_caps.mjs 扫渲染源码里的截断形状整数常量）。
+  var LIST_CONTRACTS = ${JSON.stringify(LIST_CONTRACTS)};
+  function capOf(id){
+    var c = LIST_CONTRACTS[id];
+    if(!c || typeof c.cap !== 'number') throw new Error('numeric list cap not declared: '+id);
+    return c.cap;
+  }
+  function emptyCopyOf(id){
+    var c = LIST_CONTRACTS[id];
+    return (c && c.empty_copy) || '';
+  }
+
 (function(){
   var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'' };
   var saveMsg = '';
@@ -310,7 +325,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   function el(id){ return document.getElementById(id); }
   function esc(s){ var d=document.createElement('span'); d.textContent=String(s==null?'':s); return d.innerHTML; }
   function bannerHtml(label,red){ return '<div class="banner'+(red?' red':'')+'">'+esc(label)+'</div>'; }
-  // 时间口径（t261003-13 Finding 3）：全部走 hhmmLocal（本地时区），页头带「Times are local.」标签。
+  // 时间口径（t261004-14）：全部走 localDateTime（本地时区、带日期），页头带「Times are local.」标签。
 
   // ---- polling + beep ----
   function poll(){
@@ -461,7 +476,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var st = state.requests;
     var waitHtml = '', doneHtml = '';
     var waiting = [], answered = [];
-    if(st && st.ok===true){ var sp = splitWaiting(st.rows); waiting = sp.waiting; answered = sp.answered; }
+    if(st && st.ok===true){
+      // t261004-14：两个列表都最新在前（at 降序，at 畸形排最后）——契约见 LIST_CONTRACTS。
+      var sp = splitWaiting(st.rows);
+      waiting = newestFirst(sp.waiting); answered = newestFirst(sp.answered);
+    }
     else if(!st){ waitHtml = '<div class="act" style="border:0"><span class="say muted">The request ledger could not be reached. This is not an empty inbox.</span></div>'; }
     // t261003-14：展开态来自 state.openIds（键=id），轮询重建不折叠宿主展开的行。
     var openOf = function(id){ return state.openIds.has(String(id)) ? 'true' : 'false'; };
@@ -483,6 +502,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('waitList').innerHTML = waitHtml;
     el('doneList').innerHTML = doneHtml;
     el('waitHead').textContent = 'Needs your answer · ' + waiting.length;
+    el('waitEmpty').textContent = emptyCopyOf('overview_waits');
     el('waitEmpty').style.display = (waiting.length===0 && st && st.ok===true) ? '' : 'none';
     el('doneHead2').textContent = 'Answered · ' + answered.length;
     el('doneWrap').style.display = answered.length===0 ? 'none' : '';
@@ -600,9 +620,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         var x = a.actions[i];
         var refused = x.result==='refused';
         var cls = {Sign:'sign','Send back':'sendback',Rerun:'retry','Open ticket':'open',Pause:'pause',Resume:'pause','Pause or resume':'pause',Cancel:'cancel'}[x.action]||'pause';
-        // hover 文案带权限+执行会话（票面 Part 2）；refused 行=红点标记（不靠文字辨认）。
+        // hover 文案带权限+执行会话（t261004-11）；refused 行=红点标记（不靠文字辨认）。
         // 文案前缀写在属性字面量里（title="Allowed by the … / title="Refused: …），
         // 页面源码即可断言 hover 形状（场景 B3 的锁定面）。
+        // 时间口径走 localDateTime（t261004-14：行时间带日期，旧的时分格式已退役）。
         var attr = function(v){ return esc(v).replace(/"/g,'&quot;'); };  // 属性面：引号也逃
         var perm = attr(x.permission||'declared default');
         var sess = attr(x.session||'none');
@@ -610,7 +631,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
           ? '"Refused: '+attr(x.reason||'no reason recorded')+' · session '+sess+'."'
           : '"Allowed by the '+perm+' permission · session '+sess+'."';
         html += '<div class="act">' + (refused ? '<span class="dot red" title="Refused"></span>' : '')
-          + '<span class="t">'+esc(hhmmLocal(x.at))+'</span>'
+          + '<span class="t">'+esc(localDateTime(x.at))+'</span>'
           + '<span class="pill '+cls+'" title='+titleAttr+'>'+esc(x.action)+'</span>'
           + '<span class="tk">'+esc(x.ticket)+'</span>'
           + '<span class="say">'+esc(x.result||'done')+'</span></div>';
@@ -633,14 +654,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       el('ledgerGrid').innerHTML=''; el('ledgerFile').textContent=''; el('ledgerEvents').innerHTML='';
       return;
     }
-    var rows = st.alerts||[];
-    // t261004-13：最新在上（watchdog 按账本序给最老在前，展示面负责倒序；按 at 降序，
-    // at 缺席/畸形的行按 0 处理沉底）。时间带日期（dateTimeLocal），跨天可辨。
-    rows = rows.slice().sort(function(a,b){
-      var ta = typeof a.at==='number' ? a.at : (Date.parse(a.at)||0);
-      var tb = typeof b.at==='number' ? b.at : (Date.parse(b.at)||0);
-      return tb - ta;
-    });
+    // t261004-14：alerts 最新在前（payload 可能是追加序）；cap='all'，契约见 LIST_CONTRACTS。
+    var rows = newestFirst(st.alerts||[]);
     el('alertHead').textContent = 'Recent · ' + rows.length;
     var html = '';
     for(var i=0;i<rows.length;i++){
@@ -648,9 +663,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       var cls = a2.level==='redline' ? 'red' : (a2.night_muted ? 'blue' : 'amber');
       html += '<div class="row"><div class="head" style="cursor:default"><span class="dot '+cls+'"></span>'
         + '<span class="txt">'+esc(a2.title)+'</span>'
-        + '<span class="meta">'+esc(dateTimeLocal(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
+        + '<span class="meta">'+esc(localDateTime(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
     }
-    if(rows.length===0) html = '<div class="empty">No alerts exist. The watchdog writes an alert only when a rule fires.</div>';
+    if(rows.length===0) html = '<div class="empty">'+esc(emptyCopyOf('alerts'))+'</div>';
     el('alertList').innerHTML = html;
     el('alertBanner').innerHTML = rows.some(function(x){return x.night_muted;}) ? bannerHtml('Rows marked night-muted were silenced by the night policy. Redline alerts still play a sound.') : '';
     var lg = st.ledger||{};
@@ -661,13 +676,17 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       + '<div class="cell"><b>'+esc(lg.gaps_seen!=null?lg.gaps_seen:'—')+'</b><span>gaps</span></div>';
     el('ledgerFile').textContent = lg.path || 'The ledger path is not known.';
     var ev = '';
-    var wakes = st.wakes||[];
-    for(var k=0;k<Math.min(wakes.length,3);k++){
+    // t261004-14 事故修复：last wakes 先排最新在前，再取**声明过的**上限
+    // （LIST_CONTRACTS.ledger_last_wakes.cap=3，事故原状是内联的取前三行循环上界
+    // 取追加序前三行）。上限以名字引用——机械检查扫渲染路径里的截断形状整数常量。
+    var wakes = newestFirst(st.wakes||[]);
+    var wcap = capOf('ledger_last_wakes');
+    for(var k=0;k<Math.min(wakes.length,wcap);k++){
       var w2 = wakes[k];
-      ev += '<div class="act"><span class="t">'+esc(dateTimeLocal(w2.at))+'</span><span class="pill open">WAKE</span>'
+      ev += '<div class="act"><span class="t">'+esc(localDateTime(w2.at))+'</span><span class="pill open">WAKE</span>'
         + '<span class="tk">'+esc(w2.ticket||w2.id||'')+'</span><span class="say">'+esc(wakeRowSentence(w2))+'</span></div>';
     }
-    if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">No wakes yet. The watchdog adds a row here when it wakes an executor.</span></div>';
+    if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">'+esc(emptyCopyOf('ledger_last_wakes'))+'</span></div>';
     el('ledgerEvents').innerHTML = ev;
   }
 
@@ -791,7 +810,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     return (st && (st.config_provenance && st.config_provenance.keys || st.provenance && st.provenance.keys)) || {};
   }
   function provenanceFor(st, path){
-    if(st && st.night_override && st.night_override_active && path==='alerts.night.policy') return 'The sleep toggle set this. It ends at '+new Date(st.night_override.until).toISOString().slice(0,16)+'.';
+    if(st && st.night_override && st.night_override_active && path==='alerts.night.policy') return 'The sleep toggle set this. It ends at '+new Date(st.night_override.until).toISOString().slice(0,16)+'.'; // LIST-CAP-OK: date string formatting cut, not a list cap
     var m = provenanceMap(st);
     return m[path] ? String(m[path]) : 'The factory default sets this.';
   }

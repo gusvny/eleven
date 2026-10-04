@@ -1,6 +1,6 @@
 /**
  * wake-and-time.test.mjs —— t261003-13 Ledger 页诚实化 UT：
- *  - hhmmLocal：本地时区 HH:MM 格式锁定（固定时间戳，期望值用同一套本地 Date API 推出，
+ *  - localDateTime：本地时区「YYYY-MM-DD HH:MM」格式锁定（t261004-14 起带日期）（固定时间戳，期望值用同一套本地 Date API 推出，
  *    不写死字面量——review 意见 #2）；另起子进程在 TZ=UTC / TZ=Asia/Shanghai 下各验一次，
  *    与 UTC 切片的差值方向断言时区真的生效（锁口径，不锁机器）。
  *  - 畸形输入：NaN / garbage 字符串 / null / undefined / 空串 → 显式「—」。
@@ -14,42 +14,64 @@ import { spawnSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, done } from './lib.mjs'
-import { hhmmLocal, dateTimeLocal, wakeRowSentence } from '../src/host/page-logic.ts'
+import { localDateTime, newestFirst, dateTimeLocal, wakeRowSentence } from '../src/host/page-logic.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 let n = 0
 
-// ---- hhmmLocal：格式锁定（期望值由同一套本地 API 推出，防时区依赖假红/假绿） ----
+// ---- localDateTime：格式锁定（期望值由同一套本地 API 推出，防时区依赖假红/假绿） ----
+// t261004-14：行时间必须带日期（旧 hhmmLocal 只出 HH:MM），更名 localDateTime，旧名不留。
 const FIXED = Date.UTC(2026, 9, 3, 11, 50, 0) // 2026-10-03 11:50 UTC
 const d = new Date(FIXED)
 const p2 = (x) => (x < 10 ? '0' + x : String(x))
-const expected = p2(d.getHours()) + ':' + p2(d.getMinutes())
-assert(/^\d{2}:\d{2}$/.test(hhmmLocal(FIXED)), 'hhmmLocal returns HH:MM')
-assert(hhmmLocal(FIXED) === expected, 'hhmmLocal matches local HH:MM of the same Date (' + expected + ')')
-assert(hhmmLocal(FIXED) === hhmmLocal(new Date(FIXED).toISOString()), 'number and ISO string inputs agree')
-// DST 边界（3 月最后一个周日附近，本地与 UTC 普遍相差非整日）——仍须是合法 HH:MM 且非 UTC 字面值格式逃逸
-assert(/^\d{2}:\d{2}$/.test(hhmmLocal(Date.UTC(2026, 2, 29, 0, 30))), 'DST-boundary timestamp still formats HH:MM')
-// hhmmLocal 不得再走 UTC 切片：至少存在一个固定时间戳在 TZ≠UTC 机器上两者必然不同
+const expected = d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+  + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes())
+assert(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(localDateTime(FIXED)), 'localDateTime returns YYYY-MM-DD HH:MM')
+assert(localDateTime(FIXED) === expected, 'localDateTime matches local date+time of the same Date (' + expected + ')')
+assert(localDateTime(FIXED) === localDateTime(new Date(FIXED).toISOString()), 'number and ISO string inputs agree')
+// DST 边界（3 月最后一个周日附近，本地与 UTC 普遍相差非整日）——仍须是合法「日期 时间」且非 UTC 字面值格式逃逸
+assert(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(localDateTime(Date.UTC(2026, 2, 29, 0, 30))), 'DST-boundary timestamp still formats date+time')
+// localDateTime 不得再走 UTC 切片：至少存在一个固定时间戳在 TZ≠UTC 机器上两者必然不同
 // （此处仅锁「非 toISOString().slice(11,16) 的实现痕迹」——嵌入页的源码里不再有该切片）
 const { readFileSync } = await import('node:fs')
 const pageSrc = readFileSync(join(here, '../src/host/panel-page.ts'), 'utf8')
 assert(!pageSrc.includes('toISOString()).slice(11,16)'), 'page no longer slices UTC from toISOString for row times')
 assert(!pageSrc.includes("||'sent'"), "page no longer carries the 'sent' fallback")
 
-// ---- hhmmLocal：时区真生效（子进程钉 TZ）----
+// ---- localDateTime：时区真生效（子进程钉 TZ）----
 function runWithTz(tz) {
   const r = spawnSync(process.execPath, ['--experimental-strip-types', join(here, 'tzprobe.mjs'), String(FIXED)],
     { env: { ...process.env, TZ: tz }, encoding: 'utf8' })
   assert(r.status === 0, 'tz probe exits 0 under TZ=' + tz)
   return r.stdout.trim()
 }
-assert(runWithTz('UTC') === '11:50', 'TZ=UTC renders 11:50')
+assert(runWithTz('UTC') === '2026-10-03 11:50', 'TZ=UTC renders 2026-10-03 11:50')
 const sh = runWithTz('Asia/Shanghai')
-assert(sh === '19:50', 'TZ=Asia/Shanghai renders 19:50 (got ' + sh + ')')
+assert(sh === '2026-10-03 19:50', 'TZ=Asia/Shanghai renders 2026-10-03 19:50 (got ' + sh + ')')
 
-// ---- hhmmLocal：畸形输入 ----
+// ---- localDateTime：畸形输入 ----
 for (const bad of [NaN, 'not a time', null, undefined, '', {}, new Date('garbage')]) {
-  assert(hhmmLocal(bad) === '—', 'hhmmLocal degrades to — for ' + JSON.stringify(bad))
+  assert(localDateTime(bad) === '—', 'localDateTime degrades to — for ' + JSON.stringify(bad))
+}
+
+// ---- newestFirst：最新在前统一排序（t261004-14；review 条件 4：并列稳定、畸形 at 排最后） ----
+{
+  const rows = [
+    { id: 'a', at: 2000 },
+    { id: 'b', at: 3000 },
+    { id: 'c', at: 2000 },           // 与 a 并列——保持原相对顺序（稳定）
+    { id: 'd', at: 'not a time' },   // 畸形 at——排最后，不抛错
+    { id: 'e' },                     // 缺 at——排最后
+    { id: 'f', at: '2026-10-03T00:00:00Z' }, // 字符串形式照常解析参与排序
+  ]
+  const out = newestFirst(rows)
+  const ids = out.map((r) => r.id)
+  assert(ids.join(',') === 'f,b,a,c,d,e', 'full newest-first order (f=' + ids.join(',') + ')')
+  assert(out[0].id === 'f', 'parsed ISO-string at competes on the same clock as numeric at')
+  assert(ids.indexOf('a') < ids.indexOf('c'), 'equal at keeps original relative order (stable)')
+  assert(rows[0].id === 'a', 'newestFirst does not mutate the input array')
+  assert(newestFirst([]).length === 0, 'empty list sorts to empty')
+  assert(newestFirst([{ id: 'x', at: null }, { id: 'y' }, { id: 'z', at: 1 }]).map((r) => r.id).join('') === 'zxy', 'null at sorts last like missing')
 }
 
 // ---- dateTimeLocal（t261004-13）：本地时区 MM-DD HH:MM，跨天可辨 ----
@@ -58,7 +80,10 @@ assert(/^\d{2}-\d{2} \d{2}:\d{2}$/.test(dateTimeLocal(FIXED)), 'dateTimeLocal re
 assert(dateTimeLocal(FIXED) === expectedDated, 'dateTimeLocal matches local MM-DD HH:MM of the same Date (' + expectedDated + ')')
 assert(dateTimeLocal(FIXED) === dateTimeLocal(new Date(FIXED).toISOString()), 'number and ISO string inputs agree')
 // 跨天两条告警在屏上必然可辨（日期部分不同，或至少格式带日期字段）。
-assert(dateTimeLocal(FIXED) !== hhmmLocal(FIXED), 'dated form differs from the bare HH:MM form')
+// 跨天两条告警在屏上必然可辨（t261004-14 起行时间统一走 localDateTime 的 YYYY-MM-DD 形，
+// 日期部分必然不同；此处锁「日期字段在场」的可判对面——hhmmLocal 已随 t261004-14 退役）。
+assert(dateTimeLocal(Date.UTC(2026, 0, 5, 8, 0)) !== dateTimeLocal(Date.UTC(2025, 11, 30, 8, 0)),
+  'cross-day timestamps render distinguishable dated strings')
 assert(/^\d{2}-\d{2} \d{2}:\d{2}$/.test(dateTimeLocal(Date.UTC(2026, 2, 29, 0, 30))), 'DST-boundary timestamp still formats MM-DD HH:MM')
 // 畸形输入与 hhmmLocal 同契约：显式「—」。
 for (const bad of [NaN, 'not a time', null, undefined, '', {}, new Date('garbage')]) {
