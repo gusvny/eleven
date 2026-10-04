@@ -29,6 +29,18 @@ export interface WatchdogConfig {
    *  的停摆判定仍用 stall_minutes，两条阈值互不借用。 */
   long_turn_minutes: number
   reconcile_seconds: number
+  /** t261004-08: self-lock escalation threshold (minutes) — an unanswered request
+   *  raised by the executor session itself escalates to `waiting_on_itself` (redline)
+   *  only past this threshold; inside it the verdict is `waiting` (status face only,
+   *  no alert, no wake-level raise). It tunes "how long is too long", not the match
+   *  predicate itself. Distinct knob from prose_backstop.idle_minutes: this one gates
+   *  the escalation of an existing ledger row; that one gates how long a prose ask
+   *  may sit in round text before the backstop files a row. */
+  waiting_minutes: number
+  /** t261004-08: prose backstop (prose-ask filing) switch + idle threshold.
+   *  enabled=false = the whole filing face stops (no session text read, no row
+   *  filed, no prose_ask_filed alert). */
+  prose_backstop: { enabled: boolean; idle_minutes: number }
   alerts: {
     enabled: boolean
     /** 面板消费位：本票不发声，只暴露「该响」的意图（dsh 无发声能力，已实证）。 */
@@ -49,6 +61,8 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
   stall_minutes: 15,
   long_turn_minutes: 45,
   reconcile_seconds: 60,
+  waiting_minutes: 5,
+  prose_backstop: { enabled: true, idle_minutes: 10 },
   alerts: {
     enabled: true,
     sound: true,
@@ -130,6 +144,28 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       problems.push('reconcile_seconds 必须是 ≥5 的数（秒）——低于 5 秒的对账节拍只会空转')
     } else { cfg.reconcile_seconds = doc.reconcile_seconds; keys.reconcile_seconds = `${file}#reconcile_seconds` }
   }
+  if ('waiting_minutes' in doc) {
+    if (typeof doc.waiting_minutes !== 'number' || !Number.isFinite(doc.waiting_minutes) || doc.waiting_minutes <= 0) {
+      problems.push('waiting_minutes must be a positive number (minutes)')
+    } else { cfg.waiting_minutes = doc.waiting_minutes; keys.waiting_minutes = `${file}#waiting_minutes` }
+  }
+  if ('prose_backstop' in doc) {
+    if (!isPlainObject(doc.prose_backstop)) {
+      problems.push('prose_backstop must be an object ({enabled, idle_minutes})')
+    } else {
+      const pb = doc.prose_backstop
+      const out = cfg.prose_backstop
+      if ('enabled' in pb) {
+        if (typeof pb.enabled !== 'boolean') problems.push('prose_backstop.enabled must be a boolean')
+        else { out.enabled = pb.enabled; keys['prose_backstop.enabled'] = `${file}#prose_backstop.enabled` }
+      }
+      if ('idle_minutes' in pb) {
+        if (typeof pb.idle_minutes !== 'number' || !Number.isFinite(pb.idle_minutes) || pb.idle_minutes <= 0) {
+          problems.push('prose_backstop.idle_minutes must be a positive number (minutes)')
+        } else { out.idle_minutes = pb.idle_minutes; keys['prose_backstop.idle_minutes'] = `${file}#prose_backstop.idle_minutes` }
+      }
+    }
+  }
   if ('alerts' in doc) {
     if (!isPlainObject(doc.alerts)) problems.push('alerts 必须是对象')
     else {
@@ -174,7 +210,7 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       }
     }
   }
-  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'alerts'].includes(k))
+  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'alerts'].includes(k))
   if (unknown.length > 0) problems.push(`未知键被拒收（fail-closed，防 KI-149 同族静默失效）：${unknown.join('、')}`)
 
   if (problems.length > 0) {

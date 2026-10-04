@@ -20,6 +20,8 @@ import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from '.
 import { compareStates, ledgerCoverage, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
 import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from './self-lock.ts'
+import { detectWaitingFace, type WaitingFace } from './waiting-face.ts'
+import { decideProseBackstop, journalLine, replayJournal } from './prose-backstop.ts'
 import { applyDedupe, judgeAlert, makeKey, replayDedupe, type AlertSpec, type DedupeState } from './alert-rules.ts'
 import { alertRecord, freshWakeMemory, wakeExecutor, type WakeIo, type WakeMemory, type WakeOutcome } from './exits.ts'
 
@@ -104,6 +106,29 @@ export interface WatchdogDeps {
   ledgerDir?: string
   /** 按需代建 executor 会话（t260930-09；未注入=不代建，行为与旧语义一致）。 */
   sessionEnsure?: SessionEnsureFn
+  /** t261004-08: the executor session's running bit this cycle (session snapshot;
+   *  null = snapshot missing — the waiting face goes explicitly unknown, never idle).
+   *  Not injected = null (face reads unknown, never fakes normal). */
+  waitingRunningLookup?: (sessionId: string) => boolean | null
+  /** t261004-08: recent-round-text reader (host page/follow; failure = ok:false with an explicit reason). */
+  recentText?: (sessionId: string) => Promise<RecentTextResult>
+  /** t261004-08: prose-backstop ledger face (request-ledger read/write + journal; assembled in node.ts). */
+  proseBackstopIo?: ProseBackstopIo
+}
+
+/** Recent-round-text read result (ok:false = host history face absent / call failed / malformed receipt — named explicitly). */
+export type RecentTextResult = { ok: true; text: string } | { ok: false; reason: string }
+
+/** Prose-backstop ledger seam (orchestrated by core, implemented in node.ts over the
+ *  panel request ledger + the watchdog data root; UTs inject in-memory stubs). */
+export interface ProseBackstopIo {
+  /** Attribution projection of all unanswered (waiting) rows; ok:false = ledger read failed (fail loud, never file blind). */
+  readWaiting(): Promise<{ ok: true; rows: Array<{ id: string; raisedBy: string }> } | { ok: false; reason: string }>
+  /** File one backstop request row attributed to the session (kind=question, detail quotes the sentence and names the session). */
+  append(args: { sessionId: string; sentence: string }): Promise<{ ok: true; requestId: string } | { ok: false; reason: string }>
+  /** Journal (idempotency log) read/write. */
+  readJournal(): Promise<string[]>
+  appendJournal(line: string): Promise<void>
 }
 
 /** 会话代建回调形状（node.ts 注入 ensureExecutorSession 的闭包；UT 注入桩）。 */
@@ -126,6 +151,12 @@ export interface WatchdogStatus {
   ledger: { path: string; watermark_offset: number; rows_seen: number; dupes_skipped: number; malformed_rows: number; gaps_seen: number; last_row_at: number | null; unreadable: string | null }
   liveness: { engine: { online: boolean | null; detail: string; checked_at: number | null }; executor: ExecutorLiveness | null }
   self_lock: SelfLockVerdict | null
+  /** t261004-08 additive: the "executor waiting on the host" observation face
+   *  (observe-only, no alert; alerting goes through the self_lock escalation — one
+   *  rule, one key, review C1 ruling). unknown = face absent, never reads as normal. */
+  waiting_on_host: WaitingFace
+  /** t261004-08 additive: prose backstop (prose-ask filing) latest decision. */
+  prose_backstop: { state: string; last_request_id: string | null; reason: string | null }
   reconcile: ReconcileResult | null
   startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number }
   /** t261004-13 additive：缺行覆盖两桶（在飞缺口进告警；终态缺口只在此可见）。 */
@@ -175,6 +206,14 @@ export class Watchdog {
   private engineOnline: { online: boolean | null; detail: string; checked_at: number | null } = { online: null, detail: '尚未探测', checked_at: null }
   private reconcileState: ReconcileResult | null = null
   private selfLock: SelfLockVerdict | null = null
+  /** t261004-08：waiting-on-host 观测面（首拍前 = unknown，绝不冒充正常）。 */
+  private waitingOnHost: WaitingFace = { state: 'unknown', asks: [], sinceMs: null, reason: 'not yet evaluated (watchdog not started / first tick pending) — explicitly unknown' }
+  /** t261004-08：prose backstop 最近一次评判定语。 */
+  private proseBackstop: WatchdogStatus['prose_backstop'] = { state: 'unknown', last_request_id: null, reason: 'not yet evaluated (watchdog not started / first tick pending) — explicitly unknown' }
+  private proseJournal: Array<{ key: string; requestId: string }> = []
+  private waitingRunningLookup: ((sessionId: string) => boolean | null) | null
+  private recentText: (() => Promise<RecentTextResult>) | null
+  private proseIo: ProseBackstopIo | null
   private liveness: ExecutorLiveness | null = null
   private startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number } = { missing_rows: null, replayed_rows: null, dedupe_keys: 0 }
   private ledgerCoverageState: WatchdogStatus['ledger_coverage'] = null
@@ -203,6 +242,9 @@ export class Watchdog {
     this.pendingProvider = deps.pendingProvider ?? (async () => ({ available: false, pending: null, reason: '宿主侧待办交互面未接入（S1-probe 后续票落地）——显式 unknown' }))
     this.sessionStat = deps.sessionStat ?? (async () => ({ advanced: null, mtimeMs: null, running: null }))
     this.sessionEnsure = deps.sessionEnsure ?? null
+    this.waitingRunningLookup = deps.waitingRunningLookup ?? null
+    this.recentText = deps.recentText ?? null
+    this.proseIo = deps.proseBackstopIo ?? null
     // 260930 直修：数据根走 config.watchdogDataDir **单一真源**（与 node.ts 的执行器会话账 /
     // 状态读侧同一个表达式）。旧写法读 `deps.configDirEnv`，而该 deps 生产恒不传 ⇒ HOME 取空
     // ⇒ 退化成相对路径 `.sandbar/watchdog`（写进仓根），读侧看 ~/.sandbar/watchdog ⇒ 永不相见。
@@ -267,6 +309,17 @@ export class Watchdog {
     this.dedupe = replayDedupe(rows, this.cfg.config.alerts.keep_days, this.now())
     this.startup.dedupe_keys = this.dedupe.size
     this.alerts = rows.slice(-200)
+    // t261004-08: prose-backstop journal replay (a restart does not re-file the same ask — facts are read from the ledger, not memory).
+    if (this.proseIo !== null) {
+      try {
+        const replayed = replayJournal(await this.proseIo.readJournal())
+        this.proseJournal = replayed.entries
+        if (replayed.malformed > 0) this.lastError = `prose backstop journal has ${replayed.malformed} malformed row(s) (skipped; remaining rows keep muting)`
+      } catch (e) {
+        // Journal unreadable = idempotency layer (b) missing, only the ledger coverage check remains — named explicitly, never silent.
+        this.lastError = `prose backstop journal read failed (the same sentence may file one more row after a restart): ${e instanceof Error ? e.message : String(e)}`
+      }
+    }
     await this.beat()
     await this.tickOnce()
     if (this.disposed || !this.cfgEnabled) return
@@ -460,13 +513,29 @@ export class Watchdog {
         })
       }
 
-      // 自锁：provider 不可用 = unknown 显式（绝不冒充 none）。
+      // Self-lock: provider unavailable = explicit unknown (never fakes none).
+      // t261004-08: escalation threshold = config.waiting_minutes (waiting_on_itself
+      // fires only past the threshold; inside it `waiting` is status-face only).
+      // Alert dedupe target is now the request id — one alert per ask, asks independent.
       const pend = await this.pendingProvider()
       if (this.aborted) return
-      this.selfLock = detectSelfLock(pend.pending, sid, nowMs, pend.reason)
+      // Old config shapes lack waiting_minutes (in-memory stubs / existing declarations) → threshold 0 = immediate escalation (legacy semantics).
+      const waitingThresholdMs = (typeof this.cfg.config.waiting_minutes === 'number' ? this.cfg.config.waiting_minutes : 0) * 60_000
+      this.selfLock = detectSelfLock(pend.pending, sid, nowMs, pend.reason, { waitingThresholdMs })
       if (this.selfLock.state === 'waiting_on_itself') {
-        await this.raise({ rule: 'self_lock', target: sid, level: 'redline', title: `executor 在等自己（${sid}）`, detail: this.selfLock.reason })
+        await this.raise({ rule: 'self_lock', target: this.selfLock.target ?? sid, level: 'redline', title: `executor waiting on itself (${sid})`, detail: this.selfLock.reason })
       }
+
+      // waiting-on-host observation face (t261004-08): always-on status key, no
+      // alert, no level raise — a below-threshold wait and a cooldown-muted wait both
+      // stay visible here. Snapshot missing = explicit unknown.
+      const waitingRunning = this.waitingRunningLookup !== null ? this.waitingRunningLookup(sid) : null
+      this.waitingOnHost = detectWaitingFace({ pending: pend.pending, sessionId: sid, running: waitingRunning, nowMs })
+
+      // prose backstop (t261004-08): files a prose ask as a request row (decision in
+      // the pure core prose-backstop.ts; row write / alerting / journal orchestrated
+      // here; every unknown shape raises prose_backstop_unknown, never silence).
+      await this.runProseBackstop(sid, sstat.mtimeMs, nowMs)
 
       // 出口 (a) wake：值得醒才醒；我们自己的未消化简报不重发；自喂循环排除（WakeMemory）。
       // t261003-15：本拍唤醒裁决（无论醒不醒）都落 lastWakeVerdict——状态面可答
@@ -492,6 +561,88 @@ export class Watchdog {
     } finally {
       this.inFlight = false
     }
+  }
+
+  /** prose-backstop orchestration (t261004-08): the decision lives in the pure core;
+   *  this only reads the ledger, writes the row, appends the journal, raises alerts.
+   *  Fail loud: unreadable text / ledger read failure / row-write failure → status
+   *  key unknown + one prose_backstop_unknown (dedupe-throttled), never "nothing to
+   *  report". */
+  private async runProseBackstop(sid: string, mtimeMs: number | null, nowMs: number): Promise<void> {
+    // Old config shapes lack the prose_backstop key (in-memory stubs / existing
+    // declarations) → the backstop face is explicitly off (not silently broken).
+    const cfg = this.cfg.config.prose_backstop ?? { enabled: false, idle_minutes: 10 }
+    if (!cfg.enabled) {
+      this.proseBackstop = { state: 'off', last_request_id: null, reason: 'prose_backstop.enabled=false — backstop explicitly off' }
+      return
+    }
+    if (this.proseIo === null || this.recentText === null) {
+      this.proseBackstop = { state: 'off', last_request_id: null, reason: 'backstop face not injected (headless or not wired) — explicitly off, not "no prose asks"' }
+      return
+    }
+    let text: string | null = null
+    let faceFailure: string | null = null
+    try {
+      const r = await this.recentText(sid)
+      if (r.ok) text = r.text
+      else faceFailure = r.reason
+    } catch (e) {
+      faceFailure = `recent-round-text reader threw: ${e instanceof Error ? e.message : String(e)}`
+    }
+    const idleMinutes = mtimeMs !== null && Number.isFinite(mtimeMs) ? (nowMs - mtimeMs) / 60_000 : null
+    const waiting = await this.proseIo.readWaiting().catch((e: unknown) => ({ ok: false as const, reason: `request ledger read failed: ${e instanceof Error ? e.message : String(e)}` }))
+    if (!waiting.ok) {
+      this.proseBackstop = { state: 'unknown', last_request_id: null, reason: waiting.reason }
+      await this.raise({ rule: 'prose_backstop_unknown', target: this.project, level: 'warn', title: `prose backstop: request ledger unreadable (project ${this.project})`, detail: waiting.reason })
+      return
+    }
+    const decision = decideProseBackstop({
+      cfg: { enabled: cfg.enabled, idleMinutes: cfg.idle_minutes },
+      sessionId: sid,
+      text,
+      idleMinutes,
+      waitingRows: waiting.rows,
+      journal: this.proseJournal,
+    })
+    if (decision.action === 'filed') {
+      const appended = await this.proseIo.append({ sessionId: sid, sentence: decision.sentence })
+      if (!appended.ok) {
+        this.proseBackstop = { state: 'unknown', last_request_id: null, reason: `failed to file the request row: ${appended.reason}` }
+        await this.raise({ rule: 'prose_backstop_unknown', target: this.project, level: 'warn', title: `prose backstop: failed to file the request row (project ${this.project})`, detail: appended.reason })
+        return
+      }
+      try {
+        await this.proseIo.appendJournal(journalLine(decision.key, appended.requestId, nowMs))
+      } catch (e) {
+        // Journal write failure = the same ask may file one more row after a restart (idempotency layer b missing) — named, the ledger row is not rolled back.
+        this.lastError = `prose backstop journal write failed: ${e instanceof Error ? e.message : String(e)}`
+      }
+      this.proseJournal.push({ key: decision.key, requestId: appended.requestId })
+      this.proseBackstop = { state: 'filed', last_request_id: appended.requestId, reason: `prose ask filed (quote: ${decision.sentence.slice(0, 80)})` }
+      await this.raise({
+        rule: 'prose_ask_filed', target: appended.requestId, level: 'warn',
+        title: `executor prose ask filed as a request (${sid})`,
+        detail: `Quote: "${decision.sentence}" (session ${sid}) — prose backstop heuristic hit (marker list in prose-backstop.ts)`,
+      })
+      return
+    }
+    if (decision.action === 'no-marker' && faceFailure !== null) {
+      const reason = `${faceFailure}${idleMinutes === null ? '; idle duration unreadable (snapshot missing)' : ''} — explicitly unknown, never "nothing to report"`
+      this.proseBackstop = { state: 'unknown', last_request_id: null, reason }
+      await this.raise({ rule: 'prose_backstop_unknown', target: this.project, level: 'warn', title: `prose backstop: host face unreadable (project ${this.project})`, detail: reason })
+      return
+    }
+    if (decision.action === 'no-marker' && idleMinutes === null) {
+      const reason = 'recent round text readable but idle duration unreadable (snapshot missing) — explicitly unknown, never fakes "not waiting"'
+      this.proseBackstop = { state: 'unknown', last_request_id: null, reason }
+      await this.raise({ rule: 'prose_backstop_unknown', target: this.project, level: 'warn', title: `prose backstop: session snapshot missing (project ${this.project})`, detail: reason })
+      return
+    }
+    const stateMap: Record<string, string> = {
+      'not-idle': 'idle', 'no-marker': 'clear', 'skipped-covered-by-ledger': 'covered',
+      'already-filed': 'covered', 'no-session': 'off', off: 'off',
+    }
+    this.proseBackstop = { state: stateMap[decision.action] ?? 'unknown', last_request_id: null, reason: decision.reason }
   }
 
   /** dispose：全终态（定时器清、在飞拍标记 abort、投递面后台循环收口、心跳停）。 */
@@ -530,6 +681,8 @@ export class Watchdog {
       },
       liveness: { engine: this.engineOnline, executor: this.liveness },
       self_lock: this.selfLock,
+      waiting_on_host: this.waitingOnHost,
+      prose_backstop: this.proseBackstop,
       reconcile: this.reconcileState,
       startup: this.startup,
       ledger_coverage: this.ledgerCoverageState,

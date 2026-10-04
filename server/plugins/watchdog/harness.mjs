@@ -26,6 +26,41 @@ function parseIso(s, fallback) {
   return Number.isFinite(t) ? t : fallback
 }
 
+// ---------- t261004-08 seam（integration/t261004-08/lib_waiting_harness.py 头注=契约）----------
+// requests_seed / requests_rows / session_stat_set / session_text_set。这是测试缝，
+// 不是产品行为：面板账走 REAL readRequests（fs，SANDBAR_PANEL_DIR 指向夹具目录），
+// pending/落账走 REAL makePendingProvider / makeProseBackstopIo——夹具只隔离路径，
+// 不抄产品逻辑。unreadable 注入=provider 级 available:false（readRequests 把读失败
+// 吞成 malformed 计数，读异常到不了 provider——缝里给 provider 的失败形态，不装 fs 状态）。
+// row.at=0 =「夹具时钟刚发起」（阈值计时语义的夹具约定）。任何新缝命令一到位即启用
+// v2 deps；v1 场景（t260928-28 / t260929-04 / t261003-15）不触发新命令，行为逐字节不变。
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { makePendingProvider, makeProseBackstopIo } from './node.ts'
+import { readRequests, fsLedgerIo } from '../executor-panel/src/host/requests.ts'
+
+const waitingSeam = { v2: false, unreadable: false, panelDir: null, stat: { missing: true, running: false, updatedAtMs: null }, text: { mode: 'absent', text: '' } }
+const seamTmpRoots = []
+function seamPanelDir() {
+  if (waitingSeam.panelDir === null) {
+    const dir = mkdtempSync(join('/tmp', 'wd-seam-'))
+    seamTmpRoots.push(dir)
+    waitingSeam.panelDir = dir
+    process.env.SANDBAR_PANEL_DIR = dir
+    process.env.SANDBAR_WATCHDOG_DATA = join(dir, 'watchdog-data')
+  }
+  return waitingSeam.panelDir
+}
+process.on('exit', () => { for (const d of seamTmpRoots) { try { rmSync(d, { recursive: true, force: true }) } catch { /* best effort */ } } })
+
+function seamPendingProvider(project) {
+  const real = makePendingProvider(project)
+  return async () => {
+    if (waitingSeam.unreadable) return { available: false, pending: null, reason: 'requests.jsonl 读失败（EISDIR 注入）——provider 显式不可用' }
+    return real()
+  }
+}
+
 // ---------- 内存账本 io（harness 持有文件真值；轮转=真 rename 语义模拟） ----------
 function memTail() {
   const files = new Map() // path -> {ino, content}
@@ -141,6 +176,14 @@ function pendingProvider() {
   }
 }
 function sessionStat() {
+  // v2 seam：mtime 真源=session_stat_set 注入的 updatedAtMs（快照缺席=显式 no_signal）。
+  // running 位随 t261004-12 桩保真纪律一并提供：missing ⇒ false（配 advanced:null，
+  // 判定=unknown/no_signal，永不 stalled）；在场 ⇒ seam 注入位。
+  if (waitingSeam.v2) {
+    return async () => waitingSeam.stat.missing
+      ? { advanced: null, mtimeMs: null, running: false }
+      : { advanced: true, mtimeMs: waitingSeam.stat.updatedAtMs ?? clock.now(), running: waitingSeam.stat.running }
+  }
   // t261004-12 桩保真：产品判定吃会话 running 位，缺席=unknown（显式 no_signal，永不
   // stalled）——桩必须给确定布尔。缺省映射：progressStopped=false ⇒ 在跑（true，
   // 长回合静默的语义归 long_turn 旋钮管）；session_progress stop=True ⇒ 不再落消息
@@ -235,6 +278,12 @@ function configLoaderFor(project, cfg) {
   for (const k of ['enabled', 'executor_session', 'stall_minutes', 'reconcile_seconds']) {
     keys[k] = cfg[k] !== undefined ? `${file}#${k}` : 'factory-default'
   }
+  // t261004-08 旋钮：夹具显式给了才透传（不给 = 旧形状 → 产品侧 waiting 阈 0/补落 off，
+  // 老场景语义逐字节保持；t261004-08 场景由 lib_waiting_harness.fixture_config 显式给 5/10）
+  if (cfg.waiting_minutes !== undefined) keys['waiting_minutes'] = `${file}#waiting_minutes`
+  if (cfg.prose_backstop !== undefined) {
+    for (const k of Object.keys(cfg.prose_backstop)) keys[`prose_backstop.${k}`] = `${file}#prose_backstop.${k}`
+  }
   for (const k of Object.keys(cfg.alerts || {})) keys[`alerts.${k}`] = `${file}#alerts.${k}`
   return () => ({
     declared: true, enabled: cfg.enabled !== false, config_error: null,
@@ -243,6 +292,8 @@ function configLoaderFor(project, cfg) {
       executor_session: cfg.executor_session !== undefined ? cfg.executor_session : ('executor-' + project),
       stall_minutes: cfg.stall_minutes ?? 15,
       reconcile_seconds: cfg.reconcile_seconds ?? 60,
+      ...(cfg.waiting_minutes !== undefined ? { waiting_minutes: cfg.waiting_minutes } : {}),
+      ...(cfg.prose_backstop !== undefined ? { prose_backstop: cfg.prose_backstop } : {}),
       alerts: {
         enabled: cfg.alerts?.enabled !== false,
         sound: cfg.alerts?.sound !== false,
@@ -273,8 +324,17 @@ async function ensureInstance(project, cfgOverride = null) {
       boardReader: boardReader(),
       engineProbe: engineProbe(),
       wakeIo: wakeIoFactory(),
-      pendingProvider: pendingProvider(),
+      pendingProvider: waitingSeam.v2 ? seamPendingProvider(project) : pendingProvider(),
       sessionStat: sessionStat(),
+      waitingRunningLookup: waitingSeam.v2
+        ? () => (waitingSeam.stat.missing ? null : waitingSeam.stat.running)
+        : undefined,
+      recentText: waitingSeam.v2
+        ? async () => waitingSeam.text.mode === 'ok'
+          ? { ok: true, text: waitingSeam.text.text }
+          : { ok: false, reason: waitingSeam.text.mode === 'malformed' ? 'fixture injected malformed transcript' : 'fixture text source absent' }
+        : undefined,
+      proseBackstopIo: waitingSeam.v2 ? makeProseBackstopIo(project) : undefined,
       now: clock.now,
       dataDir: '/memdata',
       ledgerDir: '/ledg',
@@ -296,6 +356,8 @@ function statusPayload(project) {
       ledger: { path: '', watermark_offset: 0, rows_seen: 0, dupes_skipped: 0, malformed_rows: 0, gaps_seen: 0, last_row_at: null, unreadable: '项目未声明守望者' },
       liveness: { engine: { online: null, detail: '未探测', checked_at: null }, executor: null },
       self_lock: null, reconcile: null,
+      waiting_on_host: { state: 'unknown', asks: [], sinceMs: null, reason: '项目未声明守望者——waiting 面零行为（显式 unknown）' },
+      prose_backstop: { state: 'unknown', last_request_id: null, reason: '项目未声明守望者——prose backstop 零行为（显式 unknown）' },
       startup: { missing_rows: null, replayed_rows: null, dedupe_keys: 0 },
       wakes: [], alerts: [], notify: { beep: false, unseen_redline: 0 }, last_error: null,
     }
@@ -389,6 +451,62 @@ async function handle(cmd) {
   }
   if (op === 'session_progress') {
     sessionStub.progressStopped = Boolean(cmd.stop)
+    return { ok: true }
+  }
+  // ---- t261004-08 seam（契约=integration/t261004-08/lib_waiting_harness.py 头注）----
+  if (op === 'requests_seed') {
+    waitingSeam.v2 = true
+    const dir = seamPanelDir()
+    const key = cmd.project || currentProject
+    if (!key) return { ok: false, error: 'requests_seed before start (no project)' }
+    const ledgerFile = join(dir, key, 'requests.jsonl')
+    if (cmd.unreadable) {
+      // provider 级不可用注入：readRequests 把读失败吞成 malformed 计数（面板账纪律），
+      // 读异常到不了 provider——缝里直接给 provider 的 available:false 失败形态
+      waitingSeam.unreadable = true
+    } else {
+      waitingSeam.unreadable = false
+      try { rmSync(ledgerFile, { recursive: true, force: true }) } catch { /* absent ok */ }
+      mkdirSync(join(dir, key), { recursive: true })
+      const lines = (cmd.rows || []).map(r => {
+        if (r.type === 'answer') {
+          return JSON.stringify({ type: 'answer', answer_for: r.answer_for,
+            at: r.at === 0 || r.at === undefined ? clock.now() : r.at,
+            answer: r.answer || 'yes', by: r.by || 'host' })
+        }
+        return JSON.stringify({
+          type: 'request', id: String(r.id), kind: r.kind || 'question',
+          question: r.question || '', detail: r.detail || '',
+          default_action: '', expires_at: null, raised_by: r.raised_by || '',
+          project: key, status: r.status || 'waiting',
+          at: r.at === 0 || r.at === undefined ? clock.now() : r.at,
+        })
+      })
+      writeFileSync(ledgerFile, lines.length > 0 ? lines.join('\n') + '\n' : '')
+    }
+    return { ok: true, project: key }
+  }
+  if (op === 'requests_rows') {
+    const dir = seamPanelDir()
+    const key = cmd.project || currentProject
+    if (!key) return { ok: false, error: 'requests_rows before start (no project)' }
+    try {
+      const rows = readRequests(fsLedgerIo, { SANDBAR_PANEL_DIR: dir }, key).rows
+      return { ok: true, rows }
+    } catch (e) {
+      return { ok: false, error: String(e instanceof Error ? e.message : e) }
+    }
+  }
+  if (op === 'session_stat_set') {
+    waitingSeam.v2 = true
+    waitingSeam.stat = { missing: Boolean(cmd.missing), running: cmd.running === true, updatedAtMs: typeof cmd.updatedAtMs === 'number' ? cmd.updatedAtMs : null }
+    return { ok: true }
+  }
+  if (op === 'session_text_set') {
+    waitingSeam.v2 = true
+    if (cmd.malformed) waitingSeam.text = { mode: 'malformed', text: '' }
+    else if (cmd.absent) waitingSeam.text = { mode: 'absent', text: '' }
+    else waitingSeam.text = { mode: 'ok', text: String(cmd.text ?? '') }
     return { ok: true }
   }
   if (op === 'session_digest') {

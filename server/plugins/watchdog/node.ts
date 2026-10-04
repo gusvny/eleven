@@ -28,7 +28,7 @@
 import { execFile } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { existsSync } from 'node:fs'
-import { readdir } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, readdir } from 'node:fs/promises'
 import * as net from 'node:net'
 import { randomUUID } from 'node:crypto'
 import { join, dirname, resolve } from 'node:path'
@@ -46,7 +46,8 @@ import {
   ensureExecutorSession, sessionEventPath, readSessionEvents,
   type SessionCreateIo, type SessionProvenanceEvent,
 } from './src/host/session-create.ts'
-import { readRequests, fsLedgerIo } from '../executor-panel/src/host/requests.ts'
+import { readRequests, fsLedgerIo, appendRequest } from '../executor-panel/src/host/requests.ts'
+import type { RecentTextResult, ProseBackstopIo } from './src/host/core.ts'
 
 const execFileP = promisify(execFile)
 
@@ -379,13 +380,13 @@ export function makePendingProvider(projectKey: string, runningLookup?: (session
   const env = process.env
   return async (): Promise<{ available: boolean; pending: PendingInteraction[] | null; reason?: string }> => {
     if (!isValidProjectKey(projectKey)) {
-      return { available: false, pending: null, reason: `project 形状不合法：${projectKey}——请求账不读` }
+      return { available: false, pending: null, reason: `invalid project key shape: ${projectKey} — request ledger not read` }
     }
     let rows: Awaited<ReturnType<typeof readRequests>>['rows']
     try {
       rows = readRequests(fsLedgerIo, env, projectKey).rows.filter(r => r.status === 'waiting')
     } catch (e) {
-      return { available: false, pending: null, reason: `请求账读失败：${String(e instanceof Error ? e.message : e)}` }
+      return { available: false, pending: null, reason: `request ledger read failed: ${String(e instanceof Error ? e.message : e)}` }
     }
     return {
       available: true,
@@ -393,11 +394,129 @@ export function makePendingProvider(projectKey: string, runningLookup?: (session
         raisedBy: r.raised_by ?? '',
         kind: r.kind,
         target: r.id,
+        // t261004-08：发起时刻（账本行 at）——自锁升级阈值的计时真源；畸形行缺 at 时
+        // 判定按「刚发起」算（宁可晚报不冒报）。
+        raisedAt: typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : undefined,
         // 发起方会话 running 位：真源是同拍的 list 快照；发起方未知/未读到 = false
         // （证据面靠 raisedBy 归属说话，running 只是辅助位，缺席不冒充）。
         sessionRunning: r.raised_by ? runningLookup?.(r.raised_by) === true : false,
       })),
     }
+  }
+}
+
+/**
+ * Recent-round-text reader (t261004-08): the host Session API history page/follow —
+ * the authorized path on the real 0.1.5 host (types verified at index.d.ts L163/L171).
+ * On-disk transcript files are NOT used: their dirs are keyed by a cwd slug and the
+ * payload is zstd jsonl, so resolving a path from a sessionId would be a guess and
+ * would need a new dependency; an absent host face = explicitly unavailable
+ * (ok:false with the reason) — no file guessing, no silence.
+ *
+ * Two steps: one follow() opening frame to get the cursor (abort + return() right
+ * after — normal/error/timeout/cancel paths all tear the iterator down), then
+ * page({address, throughSeq, maxMessages:12}) for the most recent message-aligned
+ * page. Text extraction is a shape-agnostic deep walk (all string values inside
+ * records[].data concatenated) — no event-type guessing; depth/count caps guard
+ * against malformed oversized payloads. Heuristic disclosure: prose-backstop.ts header.
+ */
+export function makeRecentTextIo(ctx: Context): (sessionId: string) => Promise<RecentTextResult> {
+  type RecordLike = { type?: unknown; data?: unknown }
+  type ControllerLike = {
+    page?: (request: unknown, signal: AbortSignal) => Promise<{ records?: RecordLike[] }>
+    follow?: (request: unknown, signal: AbortSignal) => AsyncIterable<unknown>
+  }
+  const getController = (): ControllerLike | undefined =>
+    (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
+  return async (sessionId: string): Promise<RecentTextResult> => {
+    if (sessionId === '') return { ok: false, reason: 'executor session id not declared/adopted — no session to read recent round text from' }
+    const c = getController()
+    if (!c || typeof c.follow !== 'function' || typeof c.page !== 'function') {
+      return { ok: false, reason: 'host sessionController history page/follow face unreachable (headless or service not injected) — recent round text explicitly unavailable' }
+    }
+    const address = { kind: 'session', sessionId }
+    let throughSeq: number | null = null
+    const ac = new AbortController()
+    try {
+      const iter = c.follow({ address, maxMessages: 1 }, ac.signal)[Symbol.asyncIterator]()
+      const first = await iter.next()
+      const frame = first.value as { cursor?: unknown } | undefined
+      if (frame !== null && typeof frame === 'object' && typeof frame.cursor === 'number') throughSeq = frame.cursor
+      ac.abort() // window closed as soon as the cursor is in hand; the stream is no longer needed (residual consumer paths are torn down by return())
+      try { await iter.return?.(undefined) } catch { /* iterator already terminal = already torn down */ }
+    } catch (e) {
+      ac.abort()
+      return { ok: false, reason: `host follow window failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)} — recent round text explicitly unavailable` }
+    }
+    if (throughSeq === null) {
+      return { ok: false, reason: 'follow opening frame has no cursor (host receipt shape differs from the 0.1.5 types) — recent round text explicitly unavailable' }
+    }
+    try {
+      const page = await c.page({ address, throughSeq, maxMessages: 12 }, AbortSignal.timeout(10_000))
+      const records = Array.isArray(page?.records) ? page.records : null
+      if (records === null) return { ok: false, reason: 'page receipt lacks the records array (malformed host receipt) — recent round text explicitly unavailable' }
+      const parts: string[] = []
+      collectStrings(records, parts, 0)
+      return { ok: true, text: parts.join('\n') }
+    } catch (e) {
+      return { ok: false, reason: `host page read failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)} — recent round text explicitly unavailable` }
+    }
+  }
+}
+
+/** Deep string collection (shape-agnostic; depth ≤6, total ≤2000 — malformed deep nesting / oversized receipts never stall the tick). */
+function collectStrings(v: unknown, out: string[], depth: number): void {
+  if (out.length >= 2000 || depth > 6) return
+  if (typeof v === 'string') { if (v !== '') out.push(v); return }
+  if (Array.isArray(v)) { for (const item of v) collectStrings(item, out, depth + 1); return }
+  if (v !== null && typeof v === 'object') { for (const k of Object.keys(v as Record<string, unknown>)) collectStrings((v as Record<string, unknown>)[k], out, depth + 1) }
+}
+
+/**
+ * Prose-backstop ledger face (t261004-08): the panel request ledger (read unanswered
+ * rows / file a question row) + a journal under the watchdog data root
+ * (<project>.prose-backstop.jsonl, the idempotency log). The ledger is the panel's
+ * source of truth (readRequests/appendRequest reused as-is, no second copy); a
+ * missing journal file = empty set (truly read, truly nothing filed); a read failure
+ * is named explicitly by core's startup replay.
+ */
+export function makeProseBackstopIo(projectKey: string): ProseBackstopIo {
+  const env = process.env
+  const journalPath = join(watchdogDataDir(env), `${projectKey}.prose-backstop.jsonl`)
+  return {
+    async readWaiting() {
+      if (!isValidProjectKey(projectKey)) return { ok: false as const, reason: `invalid project key shape: ${projectKey} — request ledger not read` }
+      try {
+        const rows = readRequests(fsLedgerIo, env, projectKey).rows.filter(r => r.status === 'waiting')
+        return { ok: true as const, rows: rows.map(r => ({ id: r.id, raisedBy: r.raised_by ?? '' })) }
+      } catch (e) {
+        return { ok: false as const, reason: `request ledger read failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)}` }
+      }
+    },
+    async append(args) {
+      // Row fields (new copy in English STE per the 261004 order): a one-line
+      // question + a detail quoting the sentence and naming the session, attributed
+      // via raised_by — consumed directly by the panel Requests tab and the
+      // self-lock attribution face.
+      const out = appendRequest(fsLedgerIo, env, projectKey, {
+        kind: 'question',
+        question: 'Executor is waiting on the host',
+        detail: `Quote: "${args.sentence}" — session ${args.sessionId}`,
+        raised_by: args.sessionId,
+      }, Date.now())
+      return out.ok ? { ok: true as const, requestId: out.row.id } : { ok: false as const, reason: out.error }
+    },
+    async readJournal() {
+      try {
+        return (await readFile(journalPath, 'utf8')).split('\n').filter(l => l !== '')
+      } catch {
+        return [] // missing file = truly nothing filed (the append side always mkdirs first); read failures are named by core's startup replay
+      }
+    },
+    async appendJournal(line) {
+      await mkdir(dirname(journalPath), { recursive: true })
+      await appendFile(journalPath, line + '\n')
+    },
   }
 }
 
@@ -447,6 +566,10 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
       sessionStat: session.stat,
       pendingProvider: makePendingProvider(key, (sid) => session.snapshot.runningOf(sid)),
       sessionEnsure: makeSessionEnsure(ctx, key),
+      // t261004-08：waiting-on-host 观测面 + prose backstop 落账面（逐项目闭包）。
+      waitingRunningLookup: (sid) => session.snapshot.runningOf(sid),
+      recentText: makeRecentTextIo(ctx),
+      proseBackstopIo: makeProseBackstopIo(key),
       now: Date.now,
     })
     watch.set(key, w)
@@ -492,7 +615,10 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
         heartbeat: { last_beat: null, age_seconds: null, alive: false, reason: '项目未声明（无 watchdog.json）——守望者本体零行为；有活时按需代建（t260930-09）' },
         ledger: { path: '', watermark_offset: 0, rows_seen: 0, dupes_skipped: 0, malformed_rows: 0, gaps_seen: 0, last_row_at: null, unreadable: '项目未声明守望者' },
         liveness: { engine: { online: null, detail: '未探测', checked_at: null }, executor: null },
-        self_lock: null, reconcile: null, startup: { missing_rows: null, replayed_rows: null, dedupe_keys: 0 },
+        self_lock: null,
+        waiting_on_host: { state: 'unknown', asks: [], sinceMs: null, reason: '项目未声明守望者——waiting 面零行为（显式 unknown）' },
+        prose_backstop: { state: 'off', last_request_id: null, reason: '项目未声明守望者——补落面零行为' },
+        reconcile: null, startup: { missing_rows: null, replayed_rows: null, dedupe_keys: 0 },
         presumed_self_rows: 0, presumed_self_detail: null, queue_mirror: '项目未声明守望者（镜像未起）',
         wakes: [], alerts: [], notify: { beep: false, unseen_redline: 0 }, last_error: null,
         session_provenance,

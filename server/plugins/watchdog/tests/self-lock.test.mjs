@@ -39,4 +39,20 @@ const EX = 'executor-sandbar'
   assert(matchAmongUnattr.state === 'waiting_on_itself' && matchAmongUnattr.target === 'req-3', 'attributed own request still fires even among unattributed rows')
   n += 4
 }
+// t261004-08 升级阈值：阈内 waiting（只上状态面），过阈 waiting_on_itself；
+// 时间戳缺席按「刚发起」算（绝不因缺数据提前升级）。
+{
+  const RAISED = NOW - 30_000
+  const own = { raisedBy: EX, kind: 'question', target: 'req-8', sessionRunning: false, raisedAt: RAISED }
+  const below = detectSelfLock([own], EX, NOW, undefined, { waitingThresholdMs: 5 * 60_000 })
+  assert(below.state === 'waiting' && below.target === 'req-8', 'below threshold = waiting (status-only), target still names the ask')
+  assert(below.reason.includes('threshold') && below.since === RAISED, 'waiting reason names the threshold and since = raisedAt')
+  const past = detectSelfLock([own], EX, NOW + 6 * 60_000, undefined, { waitingThresholdMs: 5 * 60_000 })
+  assert(past.state === 'waiting_on_itself' && past.target === 'req-8', 'past threshold escalates to waiting_on_itself')
+  const noStamp = detectSelfLock([{ raisedBy: EX, kind: 'question', target: 'req-9', sessionRunning: false }], EX, NOW + 99 * 60_000, undefined, { waitingThresholdMs: 5 * 60_000 })
+  assert(noStamp.state === 'waiting', 'missing raisedAt counts as just-raised — never escalates early')
+  const zero = detectSelfLock([own], EX, NOW, undefined, { waitingThresholdMs: 0 })
+  assert(zero.state === 'waiting_on_itself', 'threshold 0 (legacy callers) keeps immediate escalation')
+  n += 5
+}
 done(n)

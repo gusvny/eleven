@@ -93,4 +93,23 @@ let n = 0
   assert(isValidProjectKey('sandbar'), 'cfg project key whitelist accepts kebab')
   n += 3
 }
+
+// t261004-08 新旋钮：waiting_minutes / prose_backstop（N2 条件——出厂默认 + 旧文件兼容 +
+// 畸形 fail-closed）。
+{
+  const d = parseWatchdogConfig('{}', 'f-new')
+  assert(d.config_error === null, 'new knobs: empty declaration still parses')
+  assert(d.config.waiting_minutes === FACTORY_DEFAULTS.waiting_minutes && d.config.waiting_minutes === 5, 'old watchdog.json without waiting_minutes → factory default 5 (backcompat)')
+  assert(d.config.prose_backstop.enabled === true && d.config.prose_backstop.idle_minutes === 10, 'old watchdog.json without prose_backstop → factory {true,10} (backcompat)')
+  const over = parseWatchdogConfig(JSON.stringify({ waiting_minutes: 2, prose_backstop: { enabled: false, idle_minutes: 3 } }), 'f-over')
+  assert(over.config.waiting_minutes === 2 && over.config.prose_backstop.enabled === false && over.config.prose_backstop.idle_minutes === 3, 'new knobs pass through with values')
+  assert(over.provenance.keys['waiting_minutes']?.endsWith('#waiting_minutes') && over.provenance.keys['prose_backstop.idle_minutes']?.endsWith('prose_backstop.idle_minutes'), 'new knobs carry per-key provenance')
+  const bad = parseWatchdogConfig(JSON.stringify({ waiting_minutes: -1 }), 'f-bad')
+  assert(bad.config_error !== null && bad.config_error.includes('waiting_minutes'), 'malformed waiting_minutes fails closed')
+  const bad2 = parseWatchdogConfig(JSON.stringify({ prose_backstop: { idle_minutes: 0 } }), 'f-bad2')
+  assert(bad2.config_error !== null && bad2.config_error.includes('idle_minutes'), 'malformed prose_backstop.idle_minutes fails closed')
+  const bad3 = parseWatchdogConfig(JSON.stringify({ prose_backstop: 'yes' }), 'f-bad3')
+  assert(bad3.config_error !== null && bad3.config_error.includes('prose_backstop'), 'malformed prose_backstop shape fails closed')
+  n += 8
+}
 done(n)
