@@ -1,49 +1,36 @@
 /**
- * recent-actions.ts —— Overview 右栏「最近动作」只读源（t261003-06 引入；t261003-10 换源重写）。
+ * recent-actions.ts —— Overview 右栏「最近动作」只读源（t261003-06 引入；
+ * t261004-11 换源=项目自己的执行器动作账，机器级 admin.log 读取在此退役）。
  *
- * 数据来源（t261003-10 plan gen1 定稿，review 通过）：引擎自审计 admin.log
- * （server/engine/audit.py 唯一写口 `_append_line`，轮转/保留窗同文件文档化；面板只读，
- * 绝不写；env SANDBAR_ADMIN_LOG 覆盖与引擎同键，测试隔离用）。选它的理由：审计行自带
- * 「做了什么」（source/sub + summary.result）与 caller_project，同处一行；
- * 「凭哪条权限」= executor_grant_op / executor_grant_source / executor_channel——
- * 这三键与 caller_project 同在 **summary 解析后对象的顶层**（gen5 实测裁定，纠正
- * gen1/gen4 的层读错：引擎把 API 回执整体序列化进 summary；行级确实没有，但行级
- * 不是正确的读层）。带键行展示动作+权限；summary 无键的行（旧窗口/未带键直调）进
- * missing_authorization_rows，面板渲染**显式降级卡**（点名该窗口无可归因行），
- * 绝不渲染成空列表冒充「最近没动作」，也绝不给行编造权限。
+ * 数据来源：引擎在执行器授权闸真实裁决时逐行落账的
+ * `<projects_root>/<key>/ledger/executor-actions.jsonl`（写口=server/engine/
+ * executor_actions.py，schema v1；本文件只读，绝不写，R5 只读红线不变）。
+ * 选它的理由（票面裁定）：账随项目走、行自带 op/ticket/decision/grant/
+ * grant_source/session/channel——「凭哪条权限」与「谁在动」同处一行，不再依赖
+ * 机器级审计行的 summary 解析层（该层曾因行形漂移静默打碎读方）。
  *
- * 行语义（t261003-06 R1-R5 保持）：
- *   R1 每行 {at, action, ticket, result, permission}；
- *   R2 permission 非空才展示（词表=grants 面 GRANT_OPS 同族）；
- *   R3 畸形行 / sub 认不出 / 缺授权键 分别计数，绝不静默丢、绝不编造；
- *   R4 不可得（文件缺席/不可读/无可展示行）→ ok:false + 人类可读原因点名源路径；
+ * 行语义：
+ *   R1 每行 {at, action, ticket, result, permission, session, reason?}；
+ *   R2 permission/grant 缺席显式展示为 none（绝不编造）；
+ *   R3 畸形行 / 认不出的 op / 重复 idem 分别计数，绝不静默丢、绝不编造；
+ *   R4 不可得（文件缺席/不可读）→ ok:false + 人类可读原因点名源路径；
  *   R5 只读：读前后文件字节一致（场景红线）。
+ *   新增（t261004-11）：refused 行带 reason（hover 用）；gaps 旁账
+ *   （executor-actions.gaps.jsonl）尾计数作 gaps_recent 上报——引擎落账失败
+ *   的「status face」；上限 50 行，更早的行指向项目账本文件。
  *
  * io 全注入（测试内存桩；缺省 fs + 尾读）。零引擎改动、零 3099 触碰。
  */
 
 import * as fs from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { PROJECT_KEY_RE } from './project-key.ts'
 
-/** sub（引擎审计的操作名）→ 面板动作显示名。固定表；认不出的 sub 计数不编造。 */
-export const ACTION_BY_SUB: Record<string, string> = {
-  'ticket.sign': 'Sign',
-  'ticket-start': 'Open ticket',
-  'ticket.create': 'Open ticket',
-  'ticket.update': 'Update',
-  'ticket.pause': 'Pause',
-  'ticket.resume': 'Resume',
-  'worker-restart': 'Rerun',
-  'ticket.send-back': 'Send back',
-  'ticket.cancel': 'Cancel',
-}
+/** 上限行数（票面口径「约 50 行」）；更早的行在源文件里，响应带指针。 */
+export const MAX_ROWS = 50
 
-/**
- * executor_grant_op（授权词表，与 grants 面 GRANT_OPS 同族）→ 面板动作显示名。
- * 优先于 sub：实测在案（gen4 rework 点名样本）存在 sub='ticket'（泛化名）+
- * executor_grant_op='send-back'（真授权操作）的授权行——动作名从授权键取才不误计。
- */
+/** 引擎 op（授予面原词 + 引擎写 op 名）→ 面板动作显示名。认不出的 op 计数不编造。 */
 export const ACTION_BY_OP: Record<string, string> = {
   'sign': 'Sign',
   'send-back': 'Send back',
@@ -51,27 +38,36 @@ export const ACTION_BY_OP: Record<string, string> = {
   'rerun': 'Rerun',
   'open-ticket': 'Open ticket',
   'open_ticket': 'Open ticket',
+  'ticket-start': 'Open ticket',
+  'ticket.create': 'Open ticket',
   'pause-resume': 'Pause or resume',
   'cleanup': 'Cancel',
+  'ticket-cancel': 'Cancel',
+  'cancel': 'Cancel',
+  'close_out': 'Cancel',
+  'manage-grants': 'Change grants',   // 元权限反锁的拒收行（宿主特权操作）
 }
 
-/** 面板动作行（Overview 右栏一条）。 */
+/** 面板动作行（Overview 右栏一条）。reason 只在 refused 行在场。 */
 export interface RecentAction {
   at: number
   action: string
   ticket: string
   result: string
   permission: string
+  session: string
+  reason?: string
 }
 
 export type RecentActionsRead =
   | {
-      ok: true; source: string; actions: RecentAction[]
-      unmapped_rows: number; malformed_rows: number; missing_authorization_rows: number
+      ok: true; source: string; gapsFile: string; actions: RecentAction[]
+      malformed_rows: number; unknown_op_rows: number; deduped_rows: number
+      older_rows: number; gaps_recent: number
     }
   | { ok: false; source: string; reason: string }
 
-/** io 缝（测试注入内存版；缺省 fs 版 + 尾读，绝不整读 242MB 生产文件）。 */
+/** io 缝（测试注入内存版；缺省 fs 版 + 尾读）。 */
 export interface ActionsIo {
   existsSync(file: string): boolean
   readFileSync(file: string): string
@@ -79,7 +75,7 @@ export interface ActionsIo {
   readTail?(file: string, maxBytes: number): string
 }
 
-/** 尾读窗口：约 512KB，足够覆盖近期动作；更早的动作不展示（窗口语义，代码内文档化）。 */
+/** 尾读窗口：项目账本行小（≤4KB/行），512KB 覆盖数百行，远超 50 行展示上限。 */
 export const TAIL_BYTES = 512 * 1024
 
 function fsReadTail(file: string, maxBytes: number): string {
@@ -105,138 +101,119 @@ export const fsActionsIo: ActionsIo = {
   readTail: fsReadTail,
 }
 
-/** 审计文件路径：env SANDBAR_ADMIN_LOG（与引擎 audit.py 同键）→ 模块相对 <repo>/server/admin.log。 */
-export function adminLogFile(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.SANDBAR_ADMIN_LOG) return env.SANDBAR_ADMIN_LOG
-  // 本文件在 <repo>/server/plugins/executor-panel/src/host/ → 上跳四级 = <repo>/server。
-  return fileURLToPath(new URL('../../../../admin.log', import.meta.url))
-}
-
-function parseTicketFromSummary(summary: unknown): string {
-  if (typeof summary !== 'string' || summary === '') return ''
-  try {
-    const doc = JSON.parse(summary) as { result?: { ticket_id?: unknown; ticket?: unknown; id?: unknown } }
-    const r = doc?.result
-    if (!r || typeof r !== 'object') return ''
-    for (const k of ['ticket_id', 'ticket', 'id'] as const) {
-      if (typeof r[k] === 'string' && (r[k] as string) !== '') return r[k] as string
-    }
-  } catch { /* summary 不是合法 JSON：票号留空（计数照常，不编造） */ }
-  return ''
-}
-
 /**
- * summary 解析后对象顶层的 caller_project / executor_grant_op（gen5 实测裁定，纠正
- * gen1/gen4 的层读错）：引擎把 API 回执整体序列化进 summary，caller_project 与三个
- * 授权键（executor_grant_op / executor_grant_source / executor_channel）在 **summary
- * 顶层**，不在 admin.log 行级。行级 caller_project 作老形状兜底；读不到 = 缺席，
- * 走既有显式计数，绝不静默丢行。
+ * 项目动作账文件路径（与引擎 executor_actions.actions_path 逐字同式，跨语言
+ * 漂移由两侧 tests 双向钉死）：
+ * - env SANDBAR_EXECUTOR_ACTIONS_FILE ⇒ 直连文件路径（最高优先；场景/壳缝）；
+ * - env SANDBAR_EXECUTOR_ACTIONS_DIR ⇒ 平铺 `<dir>/<key>.jsonl`（测试缝）；
+ * - 缺省 ⇒ `<projects_root>/<key>/ledger/executor-actions.jsonl`
+ *   （projects_root=SANDBAR_PROJECTS_DIR || ~/.sandbar/projects）。
  */
-function summaryKeys(summary: unknown): { caller_project: string; executor_grant_op: string } {
-  const out = { caller_project: '', executor_grant_op: '' }
-  if (typeof summary !== 'string' || summary === '') return out
-  try {
-    const sd = JSON.parse(summary) as unknown
-    if (sd && typeof sd === 'object' && !Array.isArray(sd)) {
-      const o = sd as Record<string, unknown>
-      if (typeof o.caller_project === 'string') out.caller_project = o.caller_project
-      if (typeof o.executor_grant_op === 'string') out.executor_grant_op = o.executor_grant_op
-    }
-  } catch { /* summary 不合法：授权键视同缺席（显式计数，不编造） */ }
-  return out
+export function executorActionsFile(env: NodeJS.ProcessEnv = process.env, key = ''): string {
+  const direct = env.SANDBAR_EXECUTOR_ACTIONS_FILE
+  if (direct) return direct
+  const dir = env.SANDBAR_EXECUTOR_ACTIONS_DIR
+  if (dir) return join(dir, key + '.jsonl')
+  const root = env.SANDBAR_PROJECTS_DIR || join(homedir(), '.sandbar', 'projects')
+  return join(root, key, 'ledger', 'executor-actions.jsonl')
 }
 
-export type AdminLineVerdict =
+/** gaps 旁账路径（status face；引擎落点=账本文件同目录固定名）。 */
+export function executorActionsGapsFile(source: string): string {
+  return join(source, '..', 'executor-actions.gaps.jsonl')
+}
+
+export type ActionLineVerdict =
+  | { kind: 'blank' }
   | { kind: 'action'; row: RecentAction }
-  | { kind: 'missing_auth' }
-  | { kind: 'unmapped'; permission: string }
-  | { kind: 'other' }
+  | { kind: 'unknown_op'; op: string }
+  | { kind: 'deduped' }
   | { kind: 'malformed' }
 
 /**
- * 单行 → 判定（受闸写动作 / 缺授权键 / sub 认不出 / 非执行器写行 / 畸形）。
- * 项目过滤：caller_project 在场且 ≠ key → other（别的项目的行）；缺席 = 引擎进程内
- * 直调（ticket.py-direct 行无此键，实测在案）= 本项目（引擎进程本身的服务对象），
- * 不据此丢行——丢行必须显式，不静默。
+ * 单行 → 判定（动作 / op 认不出 / 重复 idem / 畸形）。项目过滤不需要：
+ * 文件本身就是 per-project 的（这正是本票换源的意义）。
+ * seenIdems（调用方逐窗携带）：重复 idem 行=良性伪影，显式计数不渲染。
  */
-export function parseAdminLine(line: string, key = ''): AdminLineVerdict {
-  if (line.trim() === '') return { kind: 'other' }
+export function parseActionLine(line: string, seenIdems?: Set<string>): ActionLineVerdict {
+  if (line.trim() === '') return { kind: 'blank' }   // 空行/文件尾：跳过不计
   let doc: unknown
   try { doc = JSON.parse(line) } catch { return { kind: 'malformed' } }
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return { kind: 'malformed' }
   const r = doc as Record<string, unknown>
-  const sKeys = summaryKeys(r.summary)
-  // caller_project：summary 顶层优先（现行引擎形状），行级兜底（老形状）；两者都缺席 =
-  // 引擎进程内直调 = 本项目（引擎进程本身的服务对象），不据此丢行。
-  const caller = sKeys.caller_project !== ''
-    ? sKeys.caller_project
-    : (typeof r.caller_project === 'string' ? r.caller_project : '')
-  if (key !== '' && caller !== '' && caller !== key) return { kind: 'other' }
-  const sub = typeof r.sub === 'string' ? r.sub : ''
-  const grantOp = sKeys.executor_grant_op !== ''
-    ? sKeys.executor_grant_op
-    : (typeof r.executor_grant_op === 'string' ? r.executor_grant_op : '')
-  // 只展示「执行器受闸写动作」：有授权键的行才谈得上「凭哪条权限」。
-  if (grantOp === '') {
-    // 缺授权键但 sub 在动作词表 = 该行无授权可归因（旧窗口行/未带键的直调行），显式计数。
-    if (sub !== '' && ACTION_BY_SUB[sub] !== undefined) return { kind: 'missing_auth' }
-    return { kind: 'other' }
+  if (r.gap === true) return { kind: 'malformed' }  // gaps 行混进活动文件=形状外，计数不渲染
+  const decision = r.decision === 'allowed' || r.decision === 'refused' ? r.decision : ''
+  if (!decision) return { kind: 'malformed' }
+  const idem = typeof r.idem === 'string' ? r.idem : ''
+  if (!idem) return { kind: 'malformed' }
+  if (seenIdems) {
+    if (seenIdems.has(idem)) return { kind: 'deduped' }
+    seenIdems.add(idem)
   }
-  // 动作名：授权词表优先（executor_grant_op 是真授权操作；sub 可能是泛化名如 'ticket'），
-  // sub 表兜底；两者都认不出 → unmapped（计数，不编造）。
-  const action = ACTION_BY_OP[grantOp] ?? ACTION_BY_SUB[sub]
-  if (action === undefined) return { kind: 'unmapped', permission: grantOp }
-  const at = typeof r.ts === 'number' && Number.isFinite(r.ts) ? r.ts * 1000 : 0
-  const result = (r.ok === false ? 'refused' : 'ok')
-  return {
-    kind: 'action',
-    row: { at, action, ticket: parseTicketFromSummary(r.summary), result, permission: grantOp },
+  const op = typeof r.op === 'string' ? r.op : ''
+  const action = ACTION_BY_OP[op]
+  if (action === undefined) return { kind: 'unknown_op', op }
+  const grant = typeof r.grant === 'string' ? r.grant : ''
+  const session = typeof r.session === 'string' ? r.session : ''
+  const ticket = typeof r.ticket === 'string' ? r.ticket : ''
+  const at = typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : 0
+  const row: RecentAction = { at, action, ticket, result: decision, permission: grant, session }
+  if (decision === 'refused') {
+    row.reason = typeof r.reason === 'string' && r.reason !== '' ? r.reason : 'refused (no reason recorded)'
   }
+  return { kind: 'action', row }
 }
 
 /**
- * 读最近动作（新的在前，上限 max 条）。R4 纪律：任何「无可展示」都有点名原因，
- * 绝不返回 ok:true + 空列表冒充「最近没动作」。
+ * 读最近动作（新的在前，上限 MAX_ROWS）。R4 纪律：任何「无可展示」都有点名
+ * 原因；文件缺席=「记录启动以来本项目无执行器动作」（不冒充读得动）。
  */
 export function readRecentActions(
-  io: ActionsIo, env: NodeJS.ProcessEnv, key: string, max = 12,
+  io: ActionsIo, env: NodeJS.ProcessEnv, key: string, max = MAX_ROWS,
 ): RecentActionsRead {
-  const source = adminLogFile(env)
+  const source = executorActionsFile(env, key)
   if (!PROJECT_KEY_RE.test(key)) {
-    return { ok: false, source, reason: 'project key 形状不合法——读不出动作账' }
+    return { ok: false, source, reason: 'the project key is malformed — no action record can be read' }
   }
   if (!io.existsSync(source)) {
     return { ok: false, source,
-             reason: 'the executor audit log does not exist (' + source + ') — no recorded actions to show' }
+             reason: 'This project has no recorded executor action. The record started with this change; the file is ' + source + '.' }
   }
   let raw = ''
   try {
     raw = io.readTail ? io.readTail(source, TAIL_BYTES) : io.readFileSync(source)
   } catch (e) {
     return { ok: false, source,
-             reason: 'the executor audit log is unreadable: ' + (e instanceof Error ? e.message : String(e)) }
+             reason: 'This project has no readable executor action record: ' +
+               (e instanceof Error ? e.message : String(e)) + ' — the file is ' + source + '.' }
   }
   const actions: RecentAction[] = []
   let malformed = 0
-  let unmapped = 0
-  let missingAuth = 0
+  let unknownOp = 0
+  let deduped = 0
+  const seenIdems = new Set<string>()
   for (const line of raw.split('\n')) {
-    const v = parseAdminLine(line, key)
+    const v = parseActionLine(line, seenIdems)
     if (v.kind === 'action') actions.push(v.row)
     else if (v.kind === 'malformed') malformed++
-    else if (v.kind === 'unmapped') unmapped++
-    else if (v.kind === 'missing_auth') missingAuth++
+    else if (v.kind === 'unknown_op') unknownOp++
+    else if (v.kind === 'deduped') deduped++
   }
   actions.sort((a, b) => b.at - a.at)
   const shown = actions.slice(0, max)
-  if (shown.length === 0) {
-    if (missingAuth > 0) {
-      return { ok: false, source,
-        reason: missingAuth + ' executor action row(s) exist in ' + source
-          + ' but none of them records which permission authorized it (no executor_grant_op in the parsed summary of these rows). Nothing is shown rather than permission-less rows.' }
-    }
-    return { ok: false, source,
-             reason: 'no gated executor actions (nothing in the recent window records a permission-bearing executor write) in ' + source }
+  // gaps 尾计数（status face）：引擎落账失败在此可见；读不到/缺席=0，不致命。
+  const gapsFile = executorActionsGapsFile(source)
+  let gapsRecent = 0
+  if (io.existsSync(gapsFile)) {
+    try {
+      const g = io.readTail ? io.readTail(gapsFile, 64 * 1024) : io.readFileSync(gapsFile)
+      gapsRecent = g.split('\n').filter((l) => l.trim() !== '').length
+    } catch { gapsRecent = 0 }
   }
-  return { ok: true, source, actions: shown, unmapped_rows: unmapped, malformed_rows: malformed, missing_authorization_rows: missingAuth }
+  return {
+    ok: true, source, gapsFile, actions: shown,
+    malformed_rows: malformed, unknown_op_rows: unknownOp,
+    deduped_rows: deduped, older_rows: Math.max(0, actions.length - shown.length),
+    gaps_recent: gapsRecent,
+  }
 }

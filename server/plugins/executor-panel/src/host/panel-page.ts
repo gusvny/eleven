@@ -591,19 +591,35 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var a = state.actions, html = '';
     if(!state.project){ html = ''; }
     else if(!a || a.ok!==true){
-      // 显式降级：点名原因，绝不渲染成空列表冒充「最近没动作」。
-      html = '<div class="act" style="border:0"><span class="say muted">No action list. ' + esc(a&&a.reason ? a.reason : 'The source is not known.') + '</span></div>';
+      // 显式降级：点名原因（新源缺席=「记录启动以来无动作」+文件路径），绝不冒充空列表。
+      html = '<div class="act" style="border:0"><span class="say muted">' + esc(a&&a.reason ? a.reason : 'The action record is not known.') + '</span></div>';
     } else if(a.actions.length===0){
-      html = '<div class="act" style="border:0"><span class="say muted">The audit log holds no showable action. Rows: bad ' + esc(a.malformed_rows) + ' · unknown kind ' + esc(a.unmapped_rows) + ' · missing permission ' + esc(a.missing_authorization_rows) + '.</span></div>';
+      html = '<div class="act" style="border:0"><span class="say muted">This project has no recorded executor action. Older and newer rows live in ' + esc(a.source) + '.</span></div>';
     } else {
       for(var i=0;i<a.actions.length;i++){
         var x = a.actions[i];
+        var refused = x.result==='refused';
         var cls = {Sign:'sign','Send back':'sendback',Rerun:'retry','Open ticket':'open',Pause:'pause',Resume:'pause','Pause or resume':'pause',Cancel:'cancel'}[x.action]||'pause';
-        html += '<div class="act"><span class="t">'+esc(hhmmLocal(x.at))+'</span>'
-          + '<span class="pill '+cls+'" title="Allowed by the '+esc(x.permission)+' permission.">'+esc(x.action)+'</span>'
+        // hover 文案带权限+执行会话（票面 Part 2）；refused 行=红点标记（不靠文字辨认）。
+        // 文案前缀写在属性字面量里（title="Allowed by the … / title="Refused: …），
+        // 页面源码即可断言 hover 形状（场景 B3 的锁定面）。
+        var attr = function(v){ return esc(v).replace(/"/g,'&quot;'); };  // 属性面：引号也逃
+        var perm = attr(x.permission||'declared default');
+        var sess = attr(x.session||'none');
+        var titleAttr = refused
+          ? '"Refused: '+attr(x.reason||'no reason recorded')+' · session '+sess+'."'
+          : '"Allowed by the '+perm+' permission · session '+sess+'."';
+        html += '<div class="act">' + (refused ? '<span class="dot red" title="Refused"></span>' : '')
+          + '<span class="t">'+esc(hhmmLocal(x.at))+'</span>'
+          + '<span class="pill '+cls+'" title='+titleAttr+'>'+esc(x.action)+'</span>'
           + '<span class="tk">'+esc(x.ticket)+'</span>'
           + '<span class="say">'+esc(x.result||'done')+'</span></div>';
       }
+      if(a.older_rows>0 && a.note){ html += '<div class="act" style="border:0"><span class="say muted">'+esc(a.note)+'</span></div>'; }
+    }
+    // status face：引擎落账失败（gaps 旁账非空）在此可见，绝不静默。
+    if(a && a.ok===true && a.gaps_recent>0){
+      html += '<div class="act" style="border:0"><span class="say muted">The engine failed to record ' + esc(a.gaps_recent) + ' action(s). See ' + esc(a.gaps_file||'the gap file') + '.</span></div>';
     }
     el('actList').innerHTML = html;
   }

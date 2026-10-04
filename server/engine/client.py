@@ -99,6 +99,8 @@ import audit
 import caller_gate
 # t260930-14：执行器授权声明装载/判定（同目录，import shared 单源）。
 import executor_grants
+# t261004-11：执行器动作项目账（每次闸真实裁决一行；面板 Recent-actions 唯一读源）。
+import executor_actions
 
 # ---- Temporal regression runtime: proactive cleanup of closed-ticket history
 #      (ticket t260902-02, M1-3) ----
@@ -530,16 +532,30 @@ def _with_channel(identity: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str) -> Dict[str, Any]:
+def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
+                         ticket: str = "") -> Dict[str, Any]:
     """执行器授权闸（t260930-14；t261001-20 判据=受信会话身份）：受闸由
     executor_grants.is_executor_channel 判——cwd 推导（watchdog 执行器会话），或
     声明通道（arg/env-external）且调用方会话 id 被项目声明 executor_sessions 点名。
 
     豁免通道（lane-agent spawn 注入、未声明、声明了 caller_project 但会话未被
     点名的普通调用=集成夹具/light-lane）一律放行不设闸——零回归红线。返回
-    {"err": 回执|None, "keys": 并入成功回执的身份键}。"""
+    {"err": 回执|None, "keys": 并入成功回执的身份键}。
+
+    t261004-11：每次【闸真实裁决】（enforced 放行/一切拒收）后向项目自己的
+    executor-actions 账落一行（record_from_gate；豁免放行不落行）。记账是尽力面：
+    回执永不读它的返回值，记账失败也绝不改变闸结局（fail-open 且 LOUD 的保证面
+    在 executor_actions 内部）。"""
     verdict = executor_grants.judge(_with_channel(identity), op, key)
     channel = _executor_channel(identity)
+    try:
+        executor_actions.record_from_gate(op=str(op or ""), key=str(key or ""),
+                                          ticket=str(ticket or ""),
+                                          verdict=verdict, channel=channel)
+    except Exception as e:  # noqa: BLE001——记账是尽力面：崩了也不许动写结局（LOUD 兜底）
+        executor_actions.WRITE_FAILURES += 1
+        executor_actions._announce(e, str(key or ""),
+                                   "record_from_gate raised (recording skipped)")
     if not verdict.get("allowed"):
         return {"err": _err(verdict.get("why") or "执行器授权拒收", KIND_EXECUTOR_GRANT_REFUSED),
                 "keys": {}}
@@ -607,7 +623,7 @@ async def _write_gate(handle: Any, tid: str, args: Dict[str, Any],
         return {"err": _gate_refusal(verdict, identity,
                                      context="（目标票 %s，属项目 %s）" % (tid, target or "（无项目面）"))}
     # t260930-14：执行器授权闸（仅 cwd 通道设闸；其余通道零行为变化）。
-    egate = _executor_grant_gate(identity, op_label, target)
+    egate = _executor_grant_gate(identity, op_label, target, ticket=str(tid or ""))
     if egate["err"] is not None:
         return {"err": egate["err"]}
     keys = caller_gate.identity_receipt(identity, verdict)
@@ -678,7 +694,7 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
         return _gate_refusal(verdict, identity,
                              context="（目标 %s，属项目 %s）" % (wf_id, target or "（无项目面）"))
     # t260930-14：裸 cancel 的执行器授权闸（仅 cwd 通道设闸）。
-    egate = _executor_grant_gate(identity, "cancel", target)
+    egate = _executor_grant_gate(identity, "cancel", target, ticket=str(wf_id or ""))
     if egate["err"] is not None:
         return egate["err"]
     gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
@@ -1169,7 +1185,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
             "keys": caller_gate.identity_receipt(identity, verdict)}
     # t260930-14：创建面执行器授权闸（仅 cwd 通道设闸）。
-    egate = _executor_grant_gate(identity, "ticket-start", project)
+    egate = _executor_grant_gate(identity, "ticket-start", project, ticket=str(tid or ""))
     if egate["err"] is not None:
         return egate["err"]
     gate["keys"].update(egate["keys"])

@@ -25,14 +25,17 @@ function sendJson(res, status, json) {
  * 环境注入走 process.env（node.ts 直接读 process.env）——start 时设置、close 时还原，
  * 绝不残留。端口缺省 0=内核分配，永不撞 3099/7233；close() 收口服务器并还原 env。
  */
-export async function startPluginHarness({ port = 0, panelDir, watchdogDir, adminLogPath } = {}) {
+export async function startPluginHarness({ port = 0, panelDir, watchdogDir, executorActionsDir, executorActionsPath } = {}) {
   if (!panelDir) throw new Error('startPluginHarness 需要 panelDir（隔离目录注入点；watchdogDir 可选）')
   const saved = {}
   const setEnv = (k, v) => { saved[k] = process.env[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v }
   setEnv('HOME', '/nonexistent-home')
   setEnv('SANDBAR_PANEL_DIR', panelDir)
   setEnv('SANDBAR_WATCHDOG_DIR', watchdogDir)
-  if (adminLogPath !== undefined) setEnv('SANDBAR_ADMIN_LOG', adminLogPath)
+  // t261004-11：actions 读源=项目执行器动作账；缝=引擎同键的平铺目录
+  // SANDBAR_EXECUTOR_ACTIONS_DIR（场景往里放 <project>.jsonl，schema v1）。
+  if (executorActionsPath !== undefined) setEnv('SANDBAR_EXECUTOR_ACTIONS_FILE', executorActionsPath)
+  if (executorActionsDir !== undefined) setEnv('SANDBAR_EXECUTOR_ACTIONS_DIR', executorActionsDir)
 
   const mod = await import('./node.ts')
   const routes = new Map()

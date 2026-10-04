@@ -69,10 +69,13 @@ async function main() {
     const nf = await jfetch(H.base, '/sandbar-executor-panel/api/definitely-not-a-route')
     C.case('R0-off-table-404-production-shape', nf.status === 404, `status=${nf.status}`)
 
-    // 今天形状的真行（无顶层授权键）→ 显式降级点名待落键，绝不空表冒充
+    // 显式降级纪律（t261004-11 读源换血后语义更新，arbitration 修订）：
+    // 该项目无执行器动作记录 → ok:false + 原因点名项目记录文件，绝不空表冒充。
+    // 旧断言（reason 含 executor_grant_op + adminLog 路径）锁的是被本票取代的
+    // admin.log 读源中间态；归因/坏行/上限等数据面由 t261004-11 场景族承接。
     const b = act.body || {}
-    const explicitDegraded = b.ok === false && typeof b.reason === 'string' && b.reason.includes('executor_grant_op')
-      && b.reason.includes(adminLog)
+    const explicitDegraded = b.ok === false && typeof b.reason === 'string' && b.reason.length > 0
+      && typeof b.source === 'string' && b.source.includes('executor-actions.jsonl')
     const fakeCalm = b.ok === true && (b.actions || []).length === 0
     C.case('R4-current-shape-explicit-degraded-never-fake-calm', act.status < 500 && explicitDegraded && !fakeCalm,
       `payload=${JSON.stringify(b).slice(0, 200)}（ok:true+空列表=冒充「最近没动作」=红线）`)

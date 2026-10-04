@@ -275,7 +275,7 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         },
       }
     }
-    // ---- recent actions（t261003-06 引入；t261003-10 换源=引擎自审计 admin.log，显式降级不空表） ----
+    // ---- recent actions（t261003-06 引入；t261004-11 换源=项目自己的执行器动作账） ----
     if (path === '/sandbar-executor-panel/api/actions') {
       if (method !== 'GET') return bad(405, '只读面：仅 GET')
       const key = query.get('project') ?? ''
@@ -283,10 +283,18 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       const read = readRecentActions(deps.actionsIo ?? fsActionsIo, env, key)
       // 不可得=200 + ok:false + 原因（页面渲染显式降级卡）；绝不渲染成空列表冒充「没动作」。
       if (!read.ok) return { status: 200, json: { ok: false, source: read.source, reason: read.reason } }
-      return { status: 200, json: { ok: true, source: read.source, actions: read.actions,
-        unmapped_rows: read.unmapped_rows, malformed_rows: read.malformed_rows,
-        missing_authorization_rows: read.missing_authorization_rows,
-        note: read.unmapped_rows > 0 ? read.unmapped_rows + ' audit row(s) use subs outside the action table — they are not shown' : undefined } }
+      return {
+        status: 200,
+        json: {
+          ok: true, source: read.source, actions: read.actions,
+          malformed_rows: read.malformed_rows, unknown_op_rows: read.unknown_op_rows,
+          deduped_rows: read.deduped_rows, older_rows: read.older_rows,
+          gaps_recent: read.gaps_recent, gaps_file: read.gapsFile,
+          note: read.older_rows > 0
+            ? 'Showing the latest ' + read.actions.length + ' action(s). Older rows are in ' + read.source + '.'
+            : undefined,
+        },
+      }
     }
     // ---- projects (t260930-09 scope 8) ----
     if (path === '/sandbar-executor-panel/api/projects') {

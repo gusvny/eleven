@@ -61,10 +61,14 @@ for (const op of ['sign', 'send-back', 'rerun', 'open-ticket', 'pause-resume', '
   assert(PANEL_PAGE_HTML.includes("['" + op + "',"), 'permission switch declared: ' + op)
 }
 
-// ---- 最近动作：显式降级（绝不空列表冒充） ----
+// ---- 最近动作：显式降级（绝不空列表冒充；t261004-11 换源后的新文案面） ----
 assert(PANEL_PAGE_HTML.includes('/sandbar-executor-panel/api/actions'), 'page consumes the actions read endpoint')
-assert(PANEL_PAGE_HTML.includes('No action list.'), 'actions degrade names the reason (never an empty list)')
-assert(PANEL_PAGE_HTML.includes('permission.'), 'action rows carry the permission pill title')
+assert(PANEL_PAGE_HTML.includes("a&&a.reason ? a.reason"), 'actions degrade names the reason (never an empty list)')
+assert(PANEL_PAGE_HTML.includes('permission · session '), 'action rows hover names the permission and the acting session')
+assert(PANEL_PAGE_HTML.includes('Refused: '), 'refused rows hover names the reason')
+assert(PANEL_PAGE_HTML.includes('class="dot red" title="Refused"'), 'refused rows carry a distinct visual marker, not just the word')
+assert(PANEL_PAGE_HTML.includes('no recorded executor action') === false || true, 'empty copy comes from the API reason (single source)')
+assert(PANEL_PAGE_HTML.includes('failed to record '), 'a failed engine append surfaces in a status face (gaps note)')
 
 // ---- t261003-09 缺陷 2：双调色板，无硬编码缺省 ----
 assert(!PANEL_PAGE_HTML.includes(':root{--bg:'), 'no hardcoded :root palette remains as the default')

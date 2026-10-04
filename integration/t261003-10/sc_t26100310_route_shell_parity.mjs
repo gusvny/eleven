@@ -16,7 +16,7 @@
 //      形状为项目列表承诺（非 404 即可判 P1；本条只锁「可达」不锁列表内容）。
 //
 // 缝契约（developer 随本票实现）：server/plugins/executor-panel/harness.mjs 新增
-// startPluginHarness({ panelDir, adminLogPath, port? }) -> { base, close() }——
+// startPluginHarness({ panelDir, executorActionsDir, port? }) -> { base, close() }——
 // 用真实 node.ts apply() + 捕捉式 webServer.register 架真 http.Server。缝缺席或
 // 仍只有直通 startHarness = FAIL exit 1 且点名（TDD 期红属预期，arbitrate/merge
 // 期必须绿）。三态纪律：node 缺席=ENV_FAIL exit 2；闸内无 SKIP。
@@ -49,7 +49,7 @@ async function main() {
   const iso = makeIsoDir()
   const H = await mod.startPluginHarness({
     panelDir: join(iso.dir, 'panel'),
-    adminLogPath: join(iso.dir, 'admin-log-does-not-exist.jsonl'), // 本场景只锁路由可达，读源缺席属场景 B 面
+    executorActionsDir: join(iso.dir, 'no-such-ledger'), // 本场景只锁路由可达，读源缺席属场景 B 面
   })
   try {
     // P1 + P4：改动前生产 404 的两条路径，经生产壳必须可达

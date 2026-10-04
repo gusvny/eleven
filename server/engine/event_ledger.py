@@ -62,6 +62,8 @@ from typing import Any, Dict, List, Optional
 
 from temporalio import activity
 
+from ledger_retention import (  # t261004-11：保留策略本体（temporalio-free 单一真源）
+    _ARCH_SUFFIX_RE, _day_key, _maybe_rotate, _parse_archive_day, sweep_archives)
 from shared import ENGINE_VERSION_V2
 
 SCHEMA_V = "event-ledger-v1"
@@ -74,7 +76,6 @@ DEFAULT_MAX_MB = 512        # rolling 阈值内置缺省；≤0=关 rolling
 ENGINE_DATA_DIR = Path(__file__).resolve().parent.parent   # server/（历史缺省根，仅为兼容保留常量）
 GAPS_SUFFIX = ".gaps.jsonl"
 EVENTS_BASENAME = 'events.jsonl'    # 缺省形状（t261001-12）：活动文件名固定，随项目目录走
-_ARCH_SUFFIX_RE = re.compile(r'^(\d{8})(?:-(\d{6}))?(?:-([0-9a-f]{1,8}))?$')
 
 # 活动重投/冷进程共享的幂等键加速集：path → (set(keys), deque(order))。
 _SEEN: Dict[str, tuple] = {}
@@ -319,74 +320,13 @@ def _write_gap_record(project: str, ticket: str, why: str,
         _announce_gap_failure(e, project)
 
 
-def _day_key(ts=None):
-    return time.strftime('%Y%m%d', time.localtime(time.time() if ts is None else ts))
-
-
-def _parse_archive_day(name: str, base: str):
-    """归档名 → 当日 day-key（借镜 audit 命名面：<base>.<YYYYMMDD>[-<HHMMSS>[-hex]]）；
-    命名面外 → None（清扫面跳过）。"""
-    if not name.startswith(base + '.'):
-        return None
-    suf = name[len(base) + 1:]
-    m = _ARCH_SUFFIX_RE.match(suf)
-    return m.group(1) if m else None
-
-
-def _maybe_rotate(path: Path, cfg: Dict[str, Any]) -> None:
-    """rolling：活动文件 ≥ max_mb → rename 到 <name>.<YYYYMMDD>-<HHMMSS>-<hex6>
-    （纯命名面；O_APPEND 语义下对并发写者安全）。≤0=关。重名碰撞补 hex 重试
-    三次，仍撞=本轮放弃轮转（下轮再试，事件照写不丢）。"""
-    mb = int(cfg.get('max_mb') or 0)
-    if mb <= 0:
-        return
-    try:
-        st = path.stat()
-    except OSError:
-        return      # 活动文件还不存在：无需轮转
-    if st.st_size < mb * 1024 * 1024:
-        return
-    stamp = time.strftime('%Y%m%d-%H%M%S')
-    for _ in range(3):
-        dst = path.with_name('%s.%s-%s' % (path.name, stamp, os.urandom(3).hex()))
-        if not dst.exists():
-            try:
-                os.rename(path, dst)
-            except OSError:
-                pass    # 轮转失败不阻断事件写（下轮再试）
-            return
-    # 三次全撞（概率≈0）：放弃本轮轮转，活动文件继续追加。
-
-
-def _sweep(project: str, cfg: Dict[str, Any], ledger_dir: Optional[Path] = None) -> None:
-    """保留窗清扫：只删 <today - keep_days> 的归档；活动文件与 gaps 永不碰。
-    keep_days ≤0=永不删。归档日解析不出=命名面外，跳过。"""
-    keep = int(cfg.get('keep_days') or 0)
-    if keep <= 0:
-        return
-    d = ledger_path(project, ledger_dir).parent
-    base = ledger_path(project, ledger_dir).name   # 归档名跟活动文件名走（events.jsonl.* / <project>.jsonl.*）
-    cutoff = _day_key()
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return
-    today = time.strftime('%Y%m%d', time.localtime())
-    for name in names:
-        day = _parse_archive_day(name, base)
-        if day is None or day >= today:
-            continue
-        try:
-            import datetime as _dt
-            age = (_dt.datetime.strptime(today, '%Y%m%d')
-                   - _dt.datetime.strptime(day, '%Y%m%d')).days
-        except ValueError:
-            continue
-        if age > keep:
-            try:
-                (d / name).unlink()
-            except OSError:
-                pass    # 删不掉留给下轮清扫，不阻断事件写
+def _sweep(project: str, cfg: Dict[str, Any], ledger_dir: Optional[Path] = None,
+           base_path: Optional[Path] = None) -> None:
+    """保留窗清扫（t261004-11 起本体在 ledger_retention.sweep_archives，本模块只
+    做活动文件定位：events 账从 ledger_path 推导；base_path=executor-actions 账
+    复用同一策略时显式给路径。策略语义见 ledger_retention，逐字节同源）。"""
+    sweep_archives(cfg, base_path if base_path is not None
+                   else ledger_path(project, ledger_dir))
 
 
 def _ensure_trailing_newline(path: Path) -> None:

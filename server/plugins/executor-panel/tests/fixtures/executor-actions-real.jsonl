@@ -1,0 +1,4 @@
+{"at":1791000000000,"channel":"cwd","decision":"allowed","grant":"sign","grant_source":"grants.sign @ /home/x/.sandbar/projects/sandbar/executor-grants.json","idem":"985211bb36afcaa8","op":"sign","session":"sess-exec-01","ticket":"T-261","v":1}
+{"at":1791000090000,"channel":"cwd","decision":"refused","grant":"","grant_source":"","idem":"2c07c882fc98cda2","op":"rerun","reason":"执行器授权拒收：声明未授予 rerun（grants.rerun 缺席或=false）","session":"sess-exec-01","ticket":"T-259","v":1}
+{"at":1791000120000,"channel":"cwd","decision":"refused","grant":"","grant_source":"","idem":"c63836db5a4de9b5","op":"manage-grants","reason":"执行器元权限反锁：改/扩授予清单是宿主特权操作","session":"sess-exec-01","ticket":"","v":1}
+{"at":1791000300000,"channel":"env","decision":"allowed","grant":"open-ticket","grant_source":"night_tier.until=1791000000000 @ /x/executor-grants.json","idem":"dd09b6ab6b19591e","op":"open-ticket","session":"sess-exec-02","ticket":"","v":1}
