@@ -24,7 +24,7 @@ GET /sandbar-watchdog/api/status                 # 全项目汇总 {projects:[..
 | `heartbeat` | `{last_beat, age_seconds, alive, reason}` | `alive:false` 或 `age_seconds` > 阈值 → 面板必须显式标注「守望者数据可能过期」+ reason |
 | `ledger` | `{path, watermark_offset, rows_seen, dupes_skipped, malformed_rows, gaps_seen, last_row_at, unreadable}` | `unreadable` 非空 = 显式降级横幅（绝不是「一切正常」）；Ledger tab 健康度取此 |
 | `liveness.engine` | `{online, detail, checked_at}` | `online:null` = 未知（显式），false = down + detail |
-| `liveness.executor` | `{state: advancing\|stalled\|no_signal\|missing, last_progress_at, stall_minutes, evidence, checked_at}` | stalled/no_signal/missing 三态视觉必须可分辨（「它卡住了」≠「数据可能过期」） |
+| `liveness.executor` | `{state: advancing\|stalled\|no_signal\|missing\|long_turn, last_progress_at, stall_minutes, session_running, evidence, checked_at}`（t261004-12：`long_turn` 态与 `session_running` 位为 additive 新增） | stalled/no_signal/missing/long_turn 四态视觉必须可分辨（「它卡住了」≠「数据可能过期」≠「在跑但回合长」）；`session_running`（true/false/null）与 state 同显，让人不翻会话日志就能分辨真停摆（running=false）与长回合（running=true）；evidence 措辞点名判定来源（哪条 check 产出该结论） |
 | `self_lock` | `{state: none\|waiting_on_itself\|unknown, reason, target, since}` | `unknown` 必须显示 reason（绝不渲染成「无自锁」） |
 | `reconcile` | `{state: ok\|mismatch\|degraded\|never_run, reason, since, mismatches:[{ticket, board_state, ledger_state}]}` | degraded ≠ ok；mismatch 表格以看板列为准（board 是真源） |
 | `startup` | `{missing_rows, replayed_rows, dedupe_keys}` | 「曾缺 N 行」的留痕读数（Overview 卡） |

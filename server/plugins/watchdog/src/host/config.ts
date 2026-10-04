@@ -21,6 +21,13 @@ export interface WatchdogConfig {
    *  非空 = 收养人的声明，绝不创建、绝不覆盖）。 */
   executor_session: string
   stall_minutes: number
+  /** 长回合阈值（t261004-12）：会话 running=true 期间的静默上限。rationale——executor
+   *  在一个长回合内整段不落消息，守望者又不补发简报（上条未消化），账本也不动，静默
+   *  是**预期形态**；所以 running=true 时不能按 stall_minutes（15）判停摆，要给一条
+   *  明显更长的上限。默认 45 = 3×stall_minutes：远超实测正常回合长度（不至于每回合
+   *  都报），又有界（真挂死但 running 位仍 true 的循环不会永远无声）。running=false
+   *  的停摆判定仍用 stall_minutes，两条阈值互不借用。 */
+  long_turn_minutes: number
   reconcile_seconds: number
   alerts: {
     enabled: boolean
@@ -40,6 +47,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
   enabled: true,
   executor_session: '',
   stall_minutes: 15,
+  long_turn_minutes: 45,
   reconcile_seconds: 60,
   alerts: {
     enabled: true,
@@ -112,6 +120,11 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       problems.push('stall_minutes 必须是正数（分钟）')
     } else { cfg.stall_minutes = doc.stall_minutes; keys.stall_minutes = `${file}#stall_minutes` }
   }
+  if ('long_turn_minutes' in doc) {
+    if (typeof doc.long_turn_minutes !== 'number' || !Number.isFinite(doc.long_turn_minutes) || doc.long_turn_minutes <= 0) {
+      problems.push('long_turn_minutes 必须是正数（分钟）')
+    } else { cfg.long_turn_minutes = doc.long_turn_minutes; keys.long_turn_minutes = `${file}#long_turn_minutes` }
+  }
   if ('reconcile_seconds' in doc) {
     if (typeof doc.reconcile_seconds !== 'number' || !Number.isFinite(doc.reconcile_seconds) || doc.reconcile_seconds < 5) {
       problems.push('reconcile_seconds 必须是 ≥5 的数（秒）——低于 5 秒的对账节拍只会空转')
@@ -161,7 +174,7 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       }
     }
   }
-  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'reconcile_seconds', 'alerts'].includes(k))
+  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'alerts'].includes(k))
   if (unknown.length > 0) problems.push(`未知键被拒收（fail-closed，防 KI-149 同族静默失效）：${unknown.join('、')}`)
 
   if (problems.length > 0) {

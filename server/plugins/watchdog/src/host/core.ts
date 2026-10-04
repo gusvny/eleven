@@ -37,8 +37,9 @@ export interface PendingProvider {
 }
 
 export interface SessionStatFn {
-  /** executor 会话文件的 (size,mtime) 前进探测；null = 会话文件不可读。 */
-  (sessionId: string, sinceMs: number): Promise<{ advanced: boolean | null; mtimeMs: number | null }>
+  /** executor 会话文件的 (size,mtime) 前进探测；null = 会话文件不可读。
+   *  running = 会话本拍是否在跑（宿主 running 位，t261004-12）；null = 本拍没读到。 */
+  (sessionId: string, sinceMs: number): Promise<{ advanced: boolean | null; mtimeMs: number | null; running: boolean | null }>
 }
 
 export interface CoreIo {
@@ -200,7 +201,7 @@ export class Watchdog {
     this.engineProbe = deps.engineProbe ?? null
     this.wakeIo = deps.wakeIo ?? null
     this.pendingProvider = deps.pendingProvider ?? (async () => ({ available: false, pending: null, reason: '宿主侧待办交互面未接入（S1-probe 后续票落地）——显式 unknown' }))
-    this.sessionStat = deps.sessionStat ?? (async () => ({ advanced: null, mtimeMs: null }))
+    this.sessionStat = deps.sessionStat ?? (async () => ({ advanced: null, mtimeMs: null, running: null }))
     this.sessionEnsure = deps.sessionEnsure ?? null
     // 260930 直修：数据根走 config.watchdogDataDir **单一真源**（与 node.ts 的执行器会话账 /
     // 状态读侧同一个表达式）。旧写法读 `deps.configDirEnv`，而该 deps 生产恒不传 ⇒ HOME 取空
@@ -417,8 +418,8 @@ export class Watchdog {
       this.lastSessionStatMs = nowMs
       this.lastSessionAdvanced = sstat.advanced
       this.liveness = judgeExecutor(
-        { sessionKnown: sid !== '', ledgerAdvanced, sessionProgress: sstat.advanced, lastWakeAt: this.wakes.length > 0 ? this.wakes[this.wakes.length - 1].at : null },
-        nowMs, this.cfg.config.stall_minutes, this.lastProgressAt,
+        { sessionKnown: sid !== '', ledgerAdvanced, sessionProgress: sstat.advanced, lastWakeAt: this.wakes.length > 0 ? this.wakes[this.wakes.length - 1].at : null, sessionRunning: sstat.running },
+        nowMs, this.cfg.config.stall_minutes, this.lastProgressAt, this.cfg.config.long_turn_minutes,
       )
       // t261001-19 缺陷 A 修复：基准点从判活结果的 last_progress_at 回灌——判活只在
       // 真有进展（账本/会话文件/唤醒任一）时才把基准点拨到本拍。旧写法按
@@ -428,6 +429,15 @@ export class Watchdog {
       this.lastProgressAt = this.liveness.last_progress_at
       if (this.liveness.state === 'stalled') {
         await this.raise({ rule: 'stall', target: sid, level: 'redline', title: `executor 停摆（${sid}）`, detail: this.liveness.evidence })
+      }
+      // t261004-12：running=true 的长静默是独立 case（long_turn）——不是停摆，不进
+      // 红线名单，但超长回合阈值该让人看一眼：warn 级、同一去重/冷却路径。
+      if (this.liveness.state === 'long_turn') {
+        await this.raise({
+          rule: 'executor_long_turn', target: sid, level: 'warn',
+          title: `executor 长回合进行中（${sid}）`,
+          detail: this.liveness.evidence,
+        })
       }
       // t261001-13：executor 缺席必须响——「账本有事件/看板有票但 executor 从未起来」
       // 不是正常态，是整个推进环的死寂（真机 261001 实证：18 次 refused 零报警）。

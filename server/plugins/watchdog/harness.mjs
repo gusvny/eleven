@@ -111,7 +111,7 @@ const instances = new Map() // project -> Watchdog
 // ---- 桩面（每个项目可覆写） ----
 const boardStub = { rows: [], failMode: 'off' } // failMode: off | timeout
 const engineStub = { fail: false }
-const sessionStub = { pending: null, unreadable: false, reason: '', progressStopped: false, queueOccupied: false }
+const sessionStub = { pending: null, unreadable: false, reason: '', progressStopped: false, queueOccupied: false, running: undefined }
 
 function boardReader() {
   return async () => {
@@ -141,7 +141,16 @@ function pendingProvider() {
   }
 }
 function sessionStat() {
-  return async () => ({ advanced: !sessionStub.progressStopped, mtimeMs: clock.now() })
+  // t261004-12 桩保真：产品判定吃会话 running 位，缺席=unknown（显式 no_signal，永不
+  // stalled）——桩必须给确定布尔。缺省映射：progressStopped=false ⇒ 在跑（true，
+  // 长回合静默的语义归 long_turn 旋钮管）；session_progress stop=True ⇒ 不再落消息
+  // = 不在跑（false，legacy 停摆腿照旧 stalled）。显式旋钮 sessionStub.running 优先
+  // （t261004-12 场景可用它直接注入位）。
+  return async () => ({
+    advanced: !sessionStub.progressStopped,
+    mtimeMs: clock.now(),
+    running: sessionStub.running !== undefined ? Boolean(sessionStub.running) : !sessionStub.progressStopped,
+  })
 }
 
 // ---- t260929-04 协议缝：桩 sessionController（真实 makeWakeIo 的驱动对象） ----

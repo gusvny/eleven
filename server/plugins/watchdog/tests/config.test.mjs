@@ -63,7 +63,18 @@ let n = 0
   assert(bad7.config_error !== null, 'cfg empty executor_session rejected')
   const bad8 = parseWatchdogConfig(JSON.stringify({ alerts: { redline: [1, 2] } }), 'f8')
   assert(bad8.config_error !== null, 'cfg non-string redline rejected')
-  n += 8
+  // t261004-12：long_turn_minutes 旋钮（默认 / 透传 / 畸形 / 白名单）。
+  assert(FACTORY_DEFAULTS.long_turn_minutes === 45, 'cfg long_turn factory default 45 (= 3x stall 15)')
+  const okLt = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 90 }), 'oklt')
+  assert(okLt.config_error === null && okLt.config.long_turn_minutes === 90, 'cfg long_turn_minutes passes through')
+  assert(okLt.provenance.keys['long_turn_minutes']?.endsWith('#long_turn_minutes'), 'cfg long_turn provenance per-key')
+  const bad9 = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 0 }), 'f9')
+  assert(bad9.config_error !== null && bad9.config_error.includes('long_turn_minutes'), 'cfg long_turn_minutes<=0 rejected')
+  const bad10 = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 'soon' }), 'f10')
+  assert(bad10.config_error !== null && bad10.config_error.includes('long_turn_minutes'), 'cfg non-number long_turn_minutes rejected')
+  const ok2 = parseWatchdogConfig(JSON.stringify({ stall_minutes: 15, long_turn_minutes: 45 }), 'ok2')
+  assert(ok2.config_error === null, 'cfg long_turn_minutes is in the known-key whitelist (not rejected as unknown)')
+  n += 6
 }
 // enabled=false：声明了但停（显式 stopped 的素材）。
 {

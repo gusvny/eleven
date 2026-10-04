@@ -30,7 +30,7 @@ function makeDeps({ clock, dshHome, executorSession = 'executor-sb', ledgerLines
     io: { tail: memTailIo(files), heartbeat: coreIo.heartbeat, appendAlerts: coreIo.appendAlerts, listAlerts: coreIo.listAlerts },
     boardReader: async () => ({ ok: true, rows: [{ id: 't1', stage_state: 'running' }] }),
     pendingProvider: async () => ({ available: true, pending: [] }),
-    sessionStat: async () => ({ advanced: sessionAdvanced, mtimeMs: clock.now() }),
+    sessionStat: async () => ({ advanced: sessionAdvanced, mtimeMs: clock.now(), running: false }),
     sessionEnsure,
     now: clock.now,
     dataDir: '/memdata',

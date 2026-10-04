@@ -17,20 +17,23 @@ const M = 60_000
   n += 3
 }
 // 有信号无推进 + 墙钟超阈 = stalled；未达阈 = 静默但不判死（偏宽兜底语义）。
+// t261004-12：stall 路径要求 running=false 位（新加法信号），语义与旧路径逐字同。
 {
-  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null }
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: false }
   const r = judgeExecutor(sig, NOW, 15, NOW - 16 * M)
   assert(r.state === 'stalled' && r.stall_minutes === 15, 'signal but no progress past threshold = stalled')
+  assert(r.evidence.includes('running=false'), 'stalled evidence names the running bit as the check source')
+  assert(r.session_running === false, 'liveness exposes session_running on the status face')
   const r2 = judgeExecutor(sig, NOW, 15, NOW - 10 * M)
   assert(r2.state === 'advancing' && r2.evidence.includes('未达阈值'), 'silent but under threshold = not stalled (wide upper bound)')
   const r3 = judgeExecutor(sig, NOW, 15, NOW - 16 * M - 8 * 3600_000)
   assert(r3.state === 'stalled', 'host-sleep long jump with signal still judged by progress rule (no false kill on bare clock alone)')
-  n += 3
+  n += 5
 }
 // 宽限拍不得重置静默计时（t261001-19 缺陷 A 回归钉）：调用方按返回的 last_progress_at
 // 回灌基准点时，静默分钟数必须单调增长直至 stalled（每拍清零 = stall 永不可达）。
 {
-  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null }
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: false }
   const base = NOW - 60_000
   let r = judgeExecutor(sig, NOW, 15, base)
   let last = r.last_progress_at
@@ -44,12 +47,63 @@ const M = 60_000
 }
 // 无信号 vs missing 分开报。
 {
-  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: null, lastWakeAt: null }
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: null, lastWakeAt: null, sessionRunning: false }
   const r = judgeExecutor(sig, NOW, 15, null)
   assert(r.state === 'no_signal' && r.evidence.includes('数据可能过期'), 'no signal at all = no_signal (data may be stale), not stalled')
   const r2 = judgeExecutor({ ...sig, sessionKnown: false }, NOW, 15, null)
   assert(r2.state === 'missing', 'undeclared session = explicit missing')
   n += 2
+}
+// —— t261004-12：running 位进判定 ——
+// running=true 且无推进：不是停摆。静默未超长回合阈值照常 advancing（措辞点名来源）。
+{
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: true }
+  const r = judgeExecutor(sig, NOW, 15, NOW - 16 * M, 45)
+  assert(r.state === 'advancing', 'running=true silence under long-turn threshold is NOT stalled (old code redlined here)')
+  assert(r.evidence.includes('running=true') && r.evidence.includes('非停摆'), 'evidence names running bit as the check source')
+  assert(r.session_running === true, 'liveness exposes session_running=true')
+  n += 3
+}
+// running=true 静默超长回合阈值 = 独立态 long_turn（不是 stalled，自有措辞）。
+{
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: true }
+  const r = judgeExecutor(sig, NOW, 15, NOW - 45 * M, 45)
+  assert(r.state === 'long_turn', 'silence past long_turn threshold = distinct long_turn state')
+  assert(r.evidence.includes('长回合阈值 45'), 'long_turn evidence names its own threshold')
+  const rUnder = judgeExecutor(sig, NOW, 15, NOW - 45 * M + 1, 45)
+  assert(rUnder.state === 'advancing', 'one ms under the threshold stays advancing (boundary)')
+  // 缺省阈值 = stall_minutes × 3（调用方不显式传时）。
+  const rDefault = judgeExecutor(sig, NOW, 15, NOW - 45 * M)
+  assert(rDefault.state === 'long_turn', 'default long-turn threshold is stall_minutes * 3')
+  n += 4
+}
+// long_turn 拍不得重置静默计时（review 条件 1，t261001-19 同形雷）：回灌 last_progress_at
+// 再走一拍（越过阈值），必须到 long_turn —— 时钟若被宽限拍清零就永远到不了。
+{
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: true }
+  const base = NOW - 40 * M
+  let r = judgeExecutor(sig, NOW, 15, base, 45)
+  assert(r.state === 'advancing' && r.last_progress_at === base, 'pre-threshold tick keeps baseline untouched')
+  r = judgeExecutor(sig, NOW + 10 * M, 15, r.last_progress_at, 45) // 静默 50min > 45min
+  assert(r.state === 'long_turn', 'one beat PAST long_turn threshold still reaches long_turn (clock was not reset)')
+  assert(r.last_progress_at === base, 'long_turn beat does NOT move last_progress_at either')
+  n += 3
+}
+// running 位读不到（null）：显式 unknown = no_signal，绝不 stalled，也绝不冒充正常。
+{
+  const sig = { sessionKnown: true, ledgerAdvanced: false, sessionProgress: false, lastWakeAt: null, sessionRunning: null }
+  const r = judgeExecutor(sig, NOW, 15, NOW - 60 * M, 45)
+  assert(r.state === 'no_signal', 'unreadable running bit = explicit unknown, never stalled even past stall_minutes')
+  assert(r.evidence.includes('running 位不可读'), 'evidence names the unreadable bit specifically')
+  assert(r.session_running === null, 'status face shows session_running=null (unknown stays unknown)')
+  // 与「会话文件不可读」是两条 no_signal 来源，措辞必须分得开（review 条件 2）。
+  const r2 = judgeExecutor({ ...sig, sessionRunning: false, sessionProgress: null }, NOW, 15, NOW - 60 * M, 45)
+  assert(r2.state === 'no_signal' && r2.evidence.includes('会话推进信号'), 'session-file unreadable path keeps its own wording')
+  assert(r2.evidence !== r.evidence, 'the two no_signal sources have distinct evidence')
+  // 畸形输入：sessionRunning 非布尔（undefined 等）一律按 unknown 走，不抛、不冒充。
+  const r3 = judgeExecutor({ ...sig, sessionRunning: undefined }, NOW, 15, NOW - 60 * M, 45)
+  assert(r3.state === 'no_signal', 'malformed (undefined) running bit treated as unknown, no throw')
+  n += 6
 }
 // 心跳写读：新鲜/过期/坏内容/缺文件。
 {

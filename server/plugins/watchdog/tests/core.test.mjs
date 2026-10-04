@@ -27,7 +27,7 @@ function makeDeps({ clock, boardRows = [], ledgerLines = [], alertLines = [], wa
     boardReader: async () => ({ ok: true, rows: boardRows }),
     wakeIo,
     pendingProvider: async () => ({ available: true, pending }),
-    sessionStat: async () => ({ advanced: sessionAdvanced, mtimeMs: clock.now() }),
+    sessionStat: async () => ({ advanced: sessionAdvanced, mtimeMs: clock.now(), running: false }),
     now: clock.now,
     dataDir: '/memdata',
     ledgerDir: '/ledg',

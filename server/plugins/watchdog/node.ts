@@ -356,12 +356,14 @@ export function makeSessionStat(ctx: Context): { stat: SessionStatFn; snapshot: 
         const fresh = await fetchList()
         if (fresh !== null) { cache = fresh; cacheAt = nowMs }
       }
-      if (sessionId === '') return { advanced: null, mtimeMs: null }
+      if (sessionId === '') return { advanced: null, mtimeMs: null, running: null }
       const hit = cache.find(s => s.sessionId === sessionId)
       if (!hit || typeof hit.updatedAt !== 'number' || !Number.isFinite(hit.updatedAt)) {
-        return { advanced: null, mtimeMs: null }
+        return { advanced: null, mtimeMs: null, running: null }
       }
-      return { advanced: hit.updatedAt > sinceMs, mtimeMs: hit.updatedAt }
+      // t261004-12：同一拍顺带把 running 位带回去（同一次 list 缓存，不加第二读）——
+      // core 的 stall/long_turn 判定与自锁判定消费同一个位。
+      return { advanced: hit.updatedAt > sinceMs, mtimeMs: hit.updatedAt, running: hit.running === true }
     },
   }
 }
