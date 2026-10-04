@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executor Panel — Inspection tab (mock v5, layout and width pass)</title>
+<title>Executor Panel — Inspection tab (mock v6, empty-period merge)</title>
 <style>
 :root{
   --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;
@@ -181,6 +181,9 @@ const PERIODS = {
       ['10-03 02:58','simplify','A guard still watches a file the retirement batch deleted (unverified: narrative not in English)',''],
     ]},
   '20261001': { current:false, skipped:true },
+  '20260930': { current:false, skipped:true },
+  '20260929': { current:false, skipped:true },
+  '20260928': { current:false, missing:true },
   '20261002': { current:false,
     test:{high:12,med:2,low:3,reds:4,env:12,newcases:9,notrun:'',run:'run 22:10–23:55'},
     simp:{high:2,med:3,low:6,newcode:13,slice:60},
@@ -192,33 +195,75 @@ const PERIODS = {
     ]},
 };
 
-let cur = '20261004';
+let cur = '20261004';   // 选中一项：连续没报告的期会合并成一项，key 用「跨度」
 // 期号顺序必须显式倒序（纯数字键会被 JS 按数值升序枚举——靠数据顺序=最老在最前）
 function periodOrder(){ return Object.keys(PERIODS).sort((a,b) => b.localeCompare(a)); }
+// 这一期没有报告可看：跑过但差集过小（skipped），或归档里根本没有（missing）
+function barePeriod(p){ return !!(PERIODS[p].skipped || PERIODS[p].missing); }
+function emptyReason(p){
+  return PERIODS[p].missing
+    ? 'The report archive has no entry for this period.'
+    : 'The change set was too small. The run left one decision row and stopped.';
+}
+// 连续「没报告」的期合并成一项（宿主 261004：连着好几天都是 no report 就并成一项）：
+// 跨度与条数进期号标签，逐期因由进详情——合并的是显示，不是事实。
+// 「相邻即连续」的前提：期号序列本身连续（缺期也显式占位，见草稿 §7），故无须做日期算术。
+function entries(){
+  const out = [];
+  for (const p of periodOrder()){
+    const last = out[out.length - 1];
+    if (barePeriod(p) && last && last.bare){ last.periods.push(p); last.to = p; last.key = last.from + '..' + p; continue; }
+    out.push({ bare: barePeriod(p), periods: [p], from: p, to: p, key: p });
+  }
+  return out;
+}
+function entryOf(key){ const es = entries(); return es.find(e => e.key === key) || es[0]; }
 
-function totalFindings(p){ if(p.skipped) return 0; const t=p.test,s=p.simp; return t.high+t.med+t.low+s.high+s.med+s.low; }
-function openReport(){ document.getElementById('rodnote').textContent = 'Mock: this opens the period report file.'; }
+function totalFindings(p){ if (!p.test) return 0; const t=p.test,s=p.simp; return t.high+t.med+t.low+s.high+s.med+s.low; }
+function openReport(period){ document.getElementById('rodnote').textContent = 'Mock: this opens the ' + period + ' report file.'; }
 function renderPeriods(){
-  document.getElementById('periodBtns').innerHTML = periodOrder().map(p =>
-    `<button data-on="${p===cur}" onclick="pick('${p}')">${p}${PERIODS[p].current?' (this period)':PERIODS[p].skipped?' (no report)':''}</button>`).join('');
-  document.getElementById('rodnote').textContent = PERIODS[cur].current
-    ? 'This period is open. Rows below come from the running report.' : 'This period is closed. Shown read-only from its report.';
+  document.getElementById('periodBtns').innerHTML = entries().map(e => {
+    const label = e.periods.length === 1
+      ? e.from + (PERIODS[e.from].current ? ' (this period)' : e.bare ? ' (no report)' : '')
+      : e.from + '–' + e.to + ' · ' + e.periods.length + ' without a report'
+        + (PERIODS[e.from].current ? ' (this period)' : '');
+    return `<button data-on="${e.key===cur}" onclick="pick('${e.key}')">${label}</button>`;
+  }).join('');
+  const e = entryOf(cur);
+  document.getElementById('rodnote').textContent =
+      e.periods.length > 1 ? 'These periods are closed. Shown read-only from the archive.'
+    : e.bare ? 'This period is closed. There is no report to show.'
+    : PERIODS[e.from].current ? 'This period is open. Rows below come from the running report.'
+    : 'This period is closed. Shown read-only from its report.';
 }
 function kv(k,v){ return `<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`; }
 function renderBody(){
-  const p = PERIODS[cur];
-  if (p.skipped){
+  const e = entryOf(cur);
+  // 合并项：一期一行，如实分述各自的因由（哪些是差集过小、哪些是归档缺失）
+  if (e.periods.length > 1){
+    const erows = e.periods.map(p => `<tr><td class="when">${p}</td><td class="why">${emptyReason(p)}</td></tr>`).join('');
     document.getElementById('periodBody').innerHTML = `
-      <div class="sect">${cur}</div>
-      <div class="card"><div class="row"><span class="dot grey"></span><span class="txt">No report for this period.</span></div>
-      <div class="detail muted">The change set was too small. The run left one decision row and stopped.</div></div>`;
+      <div class="sect">${e.from}–${e.to} · ${e.periods.length} periods</div>
+      <div class="card"><div class="row"><span class="dot grey"></span><span class="txt">No report for these periods.</span></div>
+      <div class="detail muted">Consecutive periods without a report are shown as one item.</div></div>
+      <div class="card table">
+        <table class="tbl"><thead><tr><th class="when">period</th><th>why</th></tr></thead><tbody>${erows}</tbody></table>
+      </div>`;
+    return;
+  }
+  const period = e.from, p = PERIODS[period];
+  if (barePeriod(period)){
+    document.getElementById('periodBody').innerHTML = `
+      <div class="sect">${period}</div>
+      <div class="card"><div class="row"><span class="dot grey"></span><span class="txt">${p.missing ? 'The report is not available for this period.' : 'No report for this period.'}</span></div>
+      <div class="detail muted">${emptyReason(period)}</div></div>`;
     return;
   }
   const t = p.test, s = p.simp;
   const rows = p.findings.map(([w,face,txt,tk]) =>
     `<tr><td class="when">${w}</td><td class="face">${face}</td><td>${txt}</td><td class="ticket">${tk?'<code>'+tk+'</code>':'<span class="muted nonetk">—</span>'}</td></tr>`).join('');
   document.getElementById('periodBody').innerHTML = `
-    <div class="sect">${cur}${p.current?' · this period':''}</div>
+    <div class="sect">${period}${p.current?' · this period':''}</div>
     <div class="card">
       <div class="row"><span class="dot red"></span><span class="txt">Integration tests</span><span class="meta">${t.run}</span></div>
       <div class="nums">
@@ -237,20 +282,20 @@ function renderBody(){
     </div>
     <div class="sect">Named findings</div>
     <div class="card table">
-      <table class="tbl"><tr><th class="when">when</th><th class="face">face</th><th>finding</th><th class="ticket">ticket</th></tr>${rows}</table>
+      <table class="tbl"><thead><tr><th class="when">when</th><th class="face">face</th><th>finding</th><th class="ticket">ticket</th></tr></thead><tbody>${rows}</tbody></table>
     </div>
     <div class="note">${p.findings.length} named of ${totalFindings(p)} counted · newest first
-      · <button class="link" onclick="openReport()">Open the ${cur} report</button></div>
+      · <button class="link" onclick="openReport('${period}')">Open the ${period} report</button></div>
     <div class="sect">Coverage</div>
     <div class="card">
-      <div class="row"><span class="txt">${p.coverage.reviewed} of ${p.coverage.total} source files reviewed in ${cur}</span></div>
+      <div class="row"><span class="txt">${p.coverage.reviewed} of ${p.coverage.total} source files reviewed in ${period}</span></div>
       <div class="track"><i style="width:${Math.max(1, Math.round(p.coverage.reviewed / p.coverage.total * 100))}%"></i></div>
       <details><summary>Show the reviewed files and the queue</summary>
         <div class="detail muted">${p.coverage.note}<br>Nothing is claimed as clean unless it was reviewed.</div>
       </details>
     </div>`;
 }
-function pick(p){ cur = p; renderPeriods(); renderBody(); }
+function pick(key){ cur = key; renderPeriods(); renderBody(); }
 function toggleTheme(){ const h=document.documentElement; h.dataset.theme = h.dataset.theme==='dark'?'light':'dark'; }
 function openDialog(){ document.getElementById('dlg').dataset.open='true'; document.getElementById('dlgMsg').textContent=''; }
 function closeDialog(){ document.getElementById('dlg').dataset.open='false'; }
