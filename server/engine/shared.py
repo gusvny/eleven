@@ -6388,8 +6388,24 @@ def __getattr__(name):
 #: 里早就点名要看这四个（见该函数的白名单），但表里一直没有它们 —— 于是「改了工作流体代码要重启
 #: worker」这条纪律在指纹面上是**假绿**：integration 当天两次改 `light_lane.py`（收窄面回落 + 重放门），
 #: `drift` 始终报 `stale=[]`，操作者只能靠人工判断补重启。指纹面必须盖住「改了就一定要换进程」的那些文件。
+#: **261004 补齐执法面五个模块**（`integration_discipline`/`path_gates`/`authz_gates`/
+#: `dsh_pin`/`failure_protocol`，票 t261004-07）：这五个都被 worker 入口链在启动时顶层
+#: 载入（`agent_activities.py` 顶层 import 这些），且都直接决定红线或闸判定——
+#: `integration_discipline` 是 developer 段集成禁跑执法匹配器（t260921-04），
+#: `path_gates`/`authz_gates` 是写集/授权闸，`dsh_pin.enforce_expected` 是版本硬闸，
+#: `failure_protocol` 决定失败归属面。t261004-05 落了执法匹配器修复，但表里没有
+#: `integration_discipline` → 修复落地前启动的 worker 继续按旧红线执法，而 stamp 照报
+#: `stale=none`（假绿）。「改了就必须换进程」的文件必须在指纹面上看得见。
+#: 其余被 worker 载入但**不做执法**的模块（`agent_runtime`=执行传输层、
+#: `event_ledger`=只追加台账写、`ui_capture_stage`=UI 台起拆原语）不进表：
+#: 它们的改动不需要换进程才生效，列入只会稀释 stale 名单的信号。
 CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     ("agent_activities", "server/engine/agent_activities.py"),
+    ("integration_discipline", "server/engine/integration_discipline.py"),
+    ("path_gates", "server/engine/path_gates.py"),
+    ("authz_gates", "server/engine/authz_gates.py"),
+    ("dsh_pin", "server/engine/dsh_pin.py"),
+    ("failure_protocol", "server/engine/failure_protocol.py"),
     ("inspection_flow", "server/engine/inspection_flow.py"),
     ("inspection_deadman", "server/engine/inspection_deadman.py"),
     ("base", "server/engine/base.py"),
