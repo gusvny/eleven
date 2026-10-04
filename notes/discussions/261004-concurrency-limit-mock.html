@@ -27,7 +27,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .appbar .ico:hover{background:var(--hover);color:var(--fg)}
 /* ---- left: projects, each with its ticket list (order = queue order) ---- */
 .side{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0}
-.sideHead{display:flex;align-items:center;gap:8px;padding:10px var(--gx);border-bottom:1px solid var(--line)}
+.sideHead{display:flex;align-items:center;gap:8px;padding:9px var(--gx);border-bottom:1px solid var(--line)}
+.sideHead .brand{display:flex;align-items:center;gap:6px;cursor:default}
+.sideHead .word{font-weight:600;font-size:12.5px;letter-spacing:.2px}
 .sideHead .t{font-weight:600;font-size:12px}
 .sideHead .n{margin-left:auto;color:var(--muted);font-size:11px}
 .sideBody{overflow-y:auto;flex:1;min-height:0}
@@ -241,23 +243,17 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 </head>
 <body>
 <div class="shell">
-  <div class="appbar">
-    <span class="brand" title="sandbar">
-      <span id="logoMark" title="Sandbar" style="cursor:pointer"></span>
-      <span class="word">Sandbar</span>
-    </span>
-    <span class="grow"></span>
-  </div>
   <div class="cols3">
   <div class="side">
-    <div class="sideHead"><span class="t">Projects</span>
-      <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Progress shown per ticket: dots / bar / off">dots</button>
+    <div class="sideHead">
+      <span class="brand" title="Sandbar"><span id="logoMark"></span><span class="word">Sandbar</span></span>
       <span class="n" id="sideN">3 projects</span></div>
     <div class="sideBody" id="projList"></div>
     <div class="sideFoot">
       <button class="footbtn" title="DeepSeek Harness settings (platform)">⚙ Settings</button>
       <span class="grow"></span>
       <span class="footnote" title="Metrics moved into the executor panel">metrics → panel</span>
+      <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Mock only: per-ticket progress style (dots / bar / off)">dots</button>
       <button class="footbtn" onclick="toggleTheme()" title="Mock only: the real theme comes from the DeepSeek Harness settings">mock: theme</button>
     </div>
   </div>
@@ -287,7 +283,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     </div>
 
     <div class="seg">
-<label data-tab="overview" class="on" onclick="setPanelTab('overview')">Overview</label><label data-tab="epics" onclick="setPanelTab('epics')">Epics</label><label data-tab="grants" onclick="setPanelTab('grants')">Grants</label><label data-tab="alerts" onclick="setPanelTab('alerts')">Alerts</label><label data-tab="ledger" onclick="setPanelTab('ledger')">Ledger</label><label data-tab="inspection" onclick="setPanelTab('inspection')">Inspection</label><label data-tab="metrics" onclick="setPanelTab('metrics')">Metrics</label><label data-tab="docs" onclick="setPanelTab('docs')">Docs</label><label data-tab="settings" onclick="setPanelTab('settings')">Settings</label>
+<label data-tab="overview" class="on" onclick="setPanelTab('overview')">Overview</label><label data-tab="epics" onclick="setPanelTab('epics')">Epics</label><label data-tab="ledger" onclick="setPanelTab('ledger')">Ledger</label><label data-tab="alerts" onclick="setPanelTab('alerts')">Alerts</label><label data-tab="inspection" onclick="setPanelTab('inspection')">Inspection</label><label data-tab="metrics" onclick="setPanelTab('metrics')">Metrics</label><label data-tab="docs" onclick="setPanelTab('docs')">Docs</label><label data-tab="grants" onclick="setPanelTab('grants')">Grants</label><label data-tab="settings" onclick="setPanelTab('settings')">Settings</label>
     </div>
 
     <div class="strip">
