@@ -243,12 +243,10 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 <div class="shell">
   <div class="appbar">
     <span class="brand" title="sandbar">
-      <span id="logoMark" onclick="cycleLogo()" title="Logo candidate — click to cycle" style="cursor:pointer"></span>
+      <span id="logoMark" title="Sandbar" style="cursor:pointer"></span>
       <span class="word">Sandbar</span>
     </span>
     <span class="grow"></span>
-    <button class="ico" onclick="toggleTheme()" title="Light / dark">◐</button>
-    <button class="ico" onclick="foldMid()" title="Fold the left column (drag the divider to resize)">«</button>
   </div>
   <div class="cols3">
   <div class="side">
@@ -260,6 +258,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
       <button class="footbtn" title="DeepSeek Harness settings (platform)">⚙ Settings</button>
       <span class="grow"></span>
       <span class="footnote" title="Metrics moved into the executor panel">metrics → panel</span>
+      <button class="footbtn" onclick="toggleTheme()" title="Mock only: the real theme comes from the DeepSeek Harness settings">mock: theme</button>
     </div>
   </div>
 
@@ -381,9 +380,8 @@ const LOGOS = [
   // C 斜沙洲（两枚错开的圆角斜条）
   '<svg width="14" height="14" viewBox="0 0 14 14"><rect x="1.2" y="7.6" width="11.6" height="3.4" rx="1.7" fill="#d99a4e" transform="rotate(-12 7 9.3)"/><rect x="3.2" y="3.6" width="7.6" height="2.6" rx="1.3" fill="#93a1b3" opacity=".55" transform="rotate(-12 7 4.9)"/></svg>',
 ];
-let logoIdx = 0;
+let logoIdx = 2;   // 宿主 261004 选定：候选 C（斜沙洲）
 function renderLogo(){ const el = document.getElementById('logoMark'); if (el) el.innerHTML = LOGOS[logoIdx] }
-function cycleLogo(){ logoIdx = (logoIdx + 1) % LOGOS.length; renderLogo() }
 const PROJ_SHAPE = { sandbar: ['pentagon', 'ring'], suyou: ['sparkle', 'solid'], nusuyou: ['shield', 'half'] };
 const PALETTE12 = ['#e76a6a','#e7936a','#e7c36a','#c6e76a','#8ae76a','#6ae79c','#6ae7d4','#6aabe7','#7f6ae7','#b56ae7','#e76ad0','#e76a92'];
 function polyPath(c, R, n, rot){
