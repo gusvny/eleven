@@ -1206,6 +1206,9 @@ L17_EXEMPT = {
         [("Users/x/Documents/sandbar", "synthetic identity fixture (deliberately fake username), compared for equality, never resolved")],
     "server/engine/tests/test_t260921_14_dsh_path_pin.py":
         [("Users/x/.sandbar/dsh-015", "synthetic dsh-runner fixture (deliberately fake username), never resolved against the tree")],
+    "server/engine/tests/test_t261004_19_open_ticket_gate.py":
+        [("/Users/x/sandbar/server/engine/executor_grants.py",
+          "author's verbatim probing case for the ../-escape/absolute-path authority-surface shapes, compared as a string against the protected-surface verdict, never opened")],
     "integration/t260907-01/sc_migration_path_hygiene.mjs":
         [("Users/user/Documents/", "the old-repo hygiene guard's own NEEDLE (split-constructed) and its docstring story — exempt by file: regex-blind by design")],
     "integration/t261004-20/sc_test_anchor_brakes.py":
