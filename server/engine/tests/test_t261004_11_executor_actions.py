@@ -331,3 +331,41 @@ def test_record_from_gate_allowed_row_fields(iso):
     assert row['decision'] == 'allowed' and row['grant'] == 'sign'
     assert row['grant_source'].startswith('grants.sign @ ')
     assert row['session'] == 's-9'
+
+
+# ---------- t261004-31 declared-executor-session seam: recording boundary (channel=declared-session) ----------
+
+def test_seam_channel_enforced_allowance_writes_one_row(iso):
+    load = {'ok': True, 'file': '/x/executor-grants.json', 'decl': {},
+            'grants': {'sign': True}, 'night_tier': None, 'executor_sessions': ['s-1']}
+    v = eg.judge_core('declared-session', 'sign', 'p1', lambda k: load, NOW_MS,
+                      audit_sink=None, declared_sessions=('s-1',), caller_session='s-1')
+    assert v['allowed'] is True and v['enforced'] is True
+    ea.record_from_gate('sign', 'p1', 'T-1', v, 'declared-session',
+                        now_ms=NOW_MS, session='s-1')
+    rows = _rows(iso)
+    assert len(rows) == 1 and rows[0]['decision'] == 'allowed'
+    assert rows[0]['channel'] == 'declared-session' and rows[0]['grant'] == 'sign'
+
+
+def test_seam_channel_refusal_writes_one_row(iso):
+    load = {'ok': True, 'file': '/x/executor-grants.json', 'decl': {},
+            'grants': {}, 'night_tier': None, 'executor_sessions': ['s-1']}
+    v = eg.judge_core('declared-session', 'sign', 'p1', lambda k: load, NOW_MS,
+                      audit_sink=None, declared_sessions=('s-1',), caller_session='s-1')
+    assert v['allowed'] is False
+    ea.record_from_gate('sign', 'p1', 'T-1', v, 'declared-session',
+                        now_ms=NOW_MS, session='s-1')
+    rows = _rows(iso)
+    assert len(rows) == 1 and rows[0]['decision'] == 'refused'
+    assert rows[0]['channel'] == 'declared-session'
+
+
+def test_seam_exempt_pass_still_records_nothing(iso):
+    # Exempt channel (src=none, seam not open): no row — the recording boundary of
+    # this ledger is unchanged (gen1 C3 ruling).
+    v = eg.judge_core('none', 'sign', 'p1', lambda k: {'ok': True, 'grants': {}},
+                      NOW_MS, audit_sink=None)
+    assert v['allowed'] is True and v['enforced'] is False
+    ea.record_from_gate('sign', 'p1', 'T-1', v, 'none', now_ms=NOW_MS, session='s-1')
+    assert _rows(iso) == []

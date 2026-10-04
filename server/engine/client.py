@@ -498,11 +498,40 @@ _GATED_TICKET_OPS = ("sign", "authorize", "rework", "retry_qc", "ruling",
 _UNSTAMPED_NOTICE_OPS = ("retry_qc", "update", "cancel", "ticket-start")
 
 
+def _declared_executor_sessions_by_key(projects: Optional[list]) -> Dict[str, tuple]:
+    """Per-project declared executor sessions (the declaration anchor of the
+    t261004-31 seam; loaded lazily, once per call).
+
+    Each registered project goes through executor_grants.load_declaration; absent,
+    malformed and unreadable declarations all count as an empty session list — the
+    seam stays closed, identity falls through to undeclared, and a broken declaration
+    file never escalates. A registry read failure means an empty map (the seam is
+    absent as a whole; the arg/env/cwd main channels are untouched)."""
+    out: Dict[str, tuple] = {}
+    for p in projects or ():
+        key = str((p or {}).get("key") or "")
+        if not key or not shared.PROJECT_KEY_RE.match(key):
+            continue
+        load = executor_grants.load_declaration(key)
+        if load.get("ok"):
+            out[key] = tuple(load.get("executor_sessions") or ())
+    return out
+
+
 def _caller_identity(args: Dict[str, Any]) -> Dict[str, Any]:
-    """调用方身份解析（arg > env > cwd 窄兜底 > none）。cwd 兜底带仓树排除（C1）：
-    本进程被 spawn 于仓树内（dsh 工具链/console 插件）时 cwd 指向引擎自身=不推导；
-    被真人在注册项目工作区直跑时推导（出处=cwd×注册表）。注册表读不到=cwd 兜底
-    缺席（身份退回 arg/env/undeclared），不让注册表故障放大成全写面拒收。"""
+    """Caller identity resolution (arg > env > narrow cwd fallback >
+    declared-executor-session seam > none). The cwd fallback carries the repo-tree
+    exclusion (C1): a process spawned inside the repo tree (dsh toolchain, console
+    plugins) sees a cwd pointing at the engine itself = no derivation; a run inside a
+    registered project workspace derives (source = cwd x registry). The single
+    exception (t261004-31): a cwd swallowed by the repo-tree exclusion that still
+    resolves, ignoring the exclusion, to this project, with the caller session id named
+    in that project's executor-grants.json executor_sessions — this project's executor
+    session has cwd = the engine repo tree (the project main directory IS the repo),
+    and without the seam its grants were never gated and its action ledger never
+    written. A registry read failure disables the cwd fallback and the seam together
+    (identity falls back to arg/env/undeclared); a registry outage never escalates into
+    a blanket write refusal."""
     try:
         cwd = os.path.realpath(os.getcwd())
     except Exception:  # noqa: BLE001
@@ -515,7 +544,9 @@ def _caller_identity(args: Dict[str, Any]) -> Dict[str, Any]:
         str(args.get("caller_project") or ""),
         os.environ.get(CALLER_PROJECT_ENV, ""),
         cwd=cwd, exclude_trees=(os.path.realpath(str(REPO_ROOT)),),
-        projects=projects)
+        projects=projects,
+        caller_session=executor_grants.caller_session_id(),
+        declared_sessions_by_key=_declared_executor_sessions_by_key(projects))
 
 
 def _executor_channel(identity: Dict[str, Any]) -> str:

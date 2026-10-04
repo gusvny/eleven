@@ -192,12 +192,32 @@ def resolve_caller(explicit_project: str = "",
     session-not-named。env/cwd/projects/exclude_trees/load_decl 全注入（测试零真环境）。"""
     env = dict(os.environ if env is None else env)
     load_decl = load_decl or executor_grants.load_declaration
+    session = ""
+    for env_name in executor_grants.CALLER_SESSION_ENVS:
+        sid = str(env.get(env_name) or "").strip()
+        if sid:
+            session = sid
+            break
+    # Declaration anchor of the declared-executor-session seam (t261004-31): load
+    # executor_sessions per registered project; absent/malformed all count as empty
+    # (the seam stays closed; a broken declaration file never escalates). When the cwd
+    # sits inside an exclude tree, resolve_identity uses this to judge a named session;
+    # empty projects = no seam at all.
+    declared_by_key: Dict[str, tuple] = {}
+    for p in projects or ():
+        pkey = str((p or {}).get("key") or "")
+        if pkey and shared.PROJECT_KEY_RE.match(pkey):
+            load = load_decl(pkey)
+            if load.get("ok"):
+                declared_by_key[pkey] = tuple(load.get("executor_sessions") or ())
     try:
         identity = caller_gate.resolve_identity(
             str(explicit_project or ""),
             str(env.get(shared.CALLER_PROJECT_ENV) or ""),
             cwd=str(cwd or ""), exclude_trees=tuple(exclude_trees or ()),
-            projects=list(projects or []) or None)
+            projects=list(projects or []) or None,
+            caller_session=session,
+            declared_sessions_by_key=declared_by_key)
     except caller_gate.CallerIdentityError as e:
         return {"ok": False, "field": "caller",
                 "reason": "caller-identity-malformed: %s" % e}
@@ -207,12 +227,6 @@ def resolve_caller(explicit_project: str = "",
                 "reason": "caller-undeclared: no caller project identity "
                           "(set %s, pass caller_project, or run inside the project directory)"
                           % shared.CALLER_PROJECT_ENV}
-    session = ""
-    for env_name in executor_grants.CALLER_SESSION_ENVS:
-        sid = str(env.get(env_name) or "").strip()
-        if sid:
-            session = sid
-            break
     if not session:
         return {"ok": False, "field": "caller",
                 "reason": "session-absent: no caller session id in %s — the row must record who raised it"

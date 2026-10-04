@@ -1018,6 +1018,11 @@
    "anchor": "source-text",
    "note": "t261004-28 carrier: the t261004-19 source-order lock (epic assignment must precede the executor gate's consumption in cmd_ticket_start; UnboundLocalError defect class); author text preserved at integration/t261004-28/evidence/t261004-19_source_order_lock.py.txt",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_31_declared_session_seam.py": {
+   "anchor": "behaviour",
+   "note": "t261004-31: declared-executor-session seam — new identity tier fires only for a session named in the project declaration; exempt/absent/unnamed stay undeclared",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -3504,6 +3509,11 @@
   "integration/t261004-28/sc_carrier_verbatim_port_guard.py": {
    "anchor": "contract",
    "note": "t261004-28 carrier delivery contract: the three ported engine unit tests stay code-identical to their author sources (comments/docstrings/non-ASCII literals aside, test names+count kept), the source-order lock keeps a byte-identical evidence copy under integration/t261004-28/evidence/, all are registered, and the three files run under pytest (C1-C6 faces of the carrier itself)",
+   "sync_path": ""
+  },
+  "integration/t261004-31/sc_t26100431_declared_session_gate.py": {
+   "anchor": "behaviour",
+   "note": "declared-executor-session seam behavior: real gate funnel, isolated registry, no value lock on the production declaration",
    "sync_path": ""
   }
  }

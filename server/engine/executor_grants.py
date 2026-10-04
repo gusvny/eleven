@@ -21,12 +21,22 @@
   - 未声明身份（identity_src=none/空）：不是执行器，不设闸——undeclared 写路径
     由跨项目闸策略另管（t260925-08 缺省=refuse），宿主控制台/引擎仓树内 cwd
     不推导身份（caller_gate C1 红线）正落此档，零回归；
-  - **声明了 caller_project 但会话未被点名**（arg/env-external，规范 CLI 用法、
-    light-lane 调用、集成场景夹具）：不设闸——t261001-20 gen0 曾把这一整档误闸，
-    集测 6 红（夹具项目 create/cancel 被拒）实证「通道形状≠执行器身份」，收回；
-  - **受闸两种形态（都锚在受信会话身份）**：
-    a) cwd 推导——watchdog 代建的执行器会话（宿主 Session API 注入不了 env，
-       cwd=项目主目录是唯一机器可观测缝）；零授予=拒收（t260930-14 原语义不变）；
+      - **caller_project declared but the session not named** (arg/env-external: regular
+    CLI usage, light-lane calls, integration scenario fixtures): no gate — the
+    t261001-20 gen0 round mis-gated this whole class; 6 red integration tests (fixture
+    project create/cancel refused) proved "channel shape != executor identity" and the
+    rule was withdrawn;
+  - **Three gated forms (all anchored on trusted session identity)**:
+    a) cwd derivation — the watchdog-created executor session (the host Session API
+       cannot inject shell env; cwd = the project main directory is the only
+       machine-observable seam); zero grants = refuse (t260930-14 semantics unchanged);
+    a2) declared-executor-session seam (t261004-31, src="declared-session") — the cwd
+       sits inside the engine repo tree and the exclusion swallows it, but ignoring the
+       exclusion it still resolves to exactly this project (this project's main
+       directory IS the repo), AND the caller session id is named in this project's
+       executor_sessions. Both anchors (cwd x host declaration) must hold; an unnamed
+       session or a missing session id stays undeclared and the repo-tree red line is
+       unchanged;
     b) 声明点名——调用方会话 id（env DSH_SESSION_ID > DSH_HEADLESS_SESSION，
        dsh 工具链注入，调用方 prompt 改不了注入链）被项目声明 executor_sessions
        点名。宿主在面板 Grants 页点名/除名执行器会话，「谁算本项目执行器」
@@ -77,12 +87,19 @@ def is_executor_channel(channel: str, lane_surface: str = "",
                         caller_session: str = "") -> bool:
     """「该调用方是否受执行器授权闸管」（t260930-14 立、t261001-20 重定判据）。
 
-    受闸（True）两种形态，都以**受信会话身份**为锚：
-      - cwd 推导（EXECUTOR_CHANNEL）：watchdog 代建的执行器会话（宿主 Session API
-        注入不了 shell env，cwd=项目主目录是唯一机器可观测缝）；
-      - 声明通道（arg 显式 / env 注入且 surface≠lane-agent）**且**调用方会话 id 被
-        项目声明的 executor_sessions 点名——「谁是本项目执行器」由宿主在声明里点名，
-        会话 id 由 dsh 工具链注入（调用方 prompt 改不了注入链）。
+    Gated (True), three forms, all anchored on **trusted session identity**:
+      - cwd derivation (EXECUTOR_CHANNEL): the watchdog-created executor session (the
+        host Session API cannot inject shell env; cwd = the project main directory is
+        the only machine-observable seam);
+      - declared-executor-session seam (t261004-31, "declared-session"): the cwd sits
+        inside the engine repo tree and the exclusion swallows it, but ignoring the
+        exclusion it still resolves to this project, AND the caller session id is named
+        in this project's executor_sessions (caller_gate.resolve_identity already
+        judged the identity seam; this function only reads the channel value);
+      - declaration channel (explicit arg / env-injected with surface != lane-agent)
+        AND the caller session id is named in the project's executor_sessions — the
+        host names executor sessions in the declaration; the session id is injected by
+        the dsh toolchain (the calling prompt cannot alter the injection chain).
 
     豁免（False）=零回归红线：
       - env + surface=lane-agent（引擎 spawn 链注入的泳道 agent，一个字节不变）；

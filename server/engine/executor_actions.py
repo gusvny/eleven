@@ -12,8 +12,10 @@
 行边界（方案 gen1 C3 裁决）：只记「闸真实裁决」——enforced 放行 + 一切拒收
 （元权限反锁/面外 op/声明缺席畸形/未授予）；豁免通道放行（enforced=false，
 judge_core 声明读取前即返回）**不落行**——票面定义「一行一次 gated write
-attempt」，闸没设上的写不是 gated write。由此行内 channel 恒属
-arg/env/cwd（is_executor_channel 真值集）。
+attempt"; a write the gate never set is not a gated write. The in-row channel is
+therefore always arg/env/cwd/declared-session (the is_executor_channel truth set;
+declared-session = the t261004-31 declared-executor-session seam, a new
+caller_gate.resolve_identity channel).
 
 启用闸（方案 gen1 C2 裁决）：**无条件落账**——票面口径「引擎记录每一次受闸
 写」，无 per-project opt-in。event_ledger_config() 只取 keep_days/max_mb 作

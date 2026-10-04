@@ -154,7 +154,29 @@ def test_cwd_channel_executor_accepted(tmp_path):
 
 
 def test_cwd_inside_engine_tree_not_derived(tmp_path):
-    # 引擎仓树排除：仓内 cwd（dsh 工具链 spawn）绝不凭空造身份（review C1）。
+    # Repo-tree exclusion + declared-executor-session seam (t261004-31): a repo-tree
+    # cwd yields an identity only when it still resolves, ignoring the exclusion, to
+    # exactly one registered project AND the caller session is named in that project's
+    # executor_sessions. An unnamed session (indirect calls, dsh toolchain spawn)
+    # stays caller-undeclared — the C1 red line is unchanged.
+    env = _env(tmp_path)
+    env.pop(shared.CALLER_PROJECT_ENV)
+    env[shared.CALLER_IDENTITY_SRC_ENV] = ""
+    env["DSH_SESSION_ID"] = "sess-other"          # not named in the declaration
+    engine_dir = Path(__file__).resolve().parents[1]
+    projects = [{"key": "proj-alpha", "dirs": [str(engine_dir)]}]
+    out = er.append_request(dict(VALID_BODY), 1000, env=env, cwd=str(engine_dir),
+                            projects=projects, exclude_trees=(str(engine_dir),),
+                            load_decl=_decl_loader(["sess-exec-1"]))
+    assert out["ok"] is False and out["field"] == "caller"
+    assert out["reason"].startswith("caller-undeclared")
+
+
+def test_cwd_inside_engine_tree_declared_session_resolves(tmp_path):
+    # Seam positive case (t261004-31): this ticket's root cause — this project's main
+    # directory IS the engine repo tree, so its named executor session used to be
+    # undeclared forever; with both anchors (cwd x naming) holding, identity resolves
+    # and the request can be filed.
     env = _env(tmp_path)
     env.pop(shared.CALLER_PROJECT_ENV)
     env[shared.CALLER_IDENTITY_SRC_ENV] = ""
@@ -163,6 +185,42 @@ def test_cwd_inside_engine_tree_not_derived(tmp_path):
     out = er.append_request(dict(VALID_BODY), 1000, env=env, cwd=str(engine_dir),
                             projects=projects, exclude_trees=(str(engine_dir),),
                             load_decl=_decl_loader(["sess-exec-1"]))
+    assert out["ok"] is True
+    assert out["row"]["project"] == "proj-alpha"
+    assert out["row"]["raised_by"] == "sess-exec-1"
+
+
+def test_cwd_inside_engine_tree_session_absent_still_undeclared(tmp_path):
+    # Fail-closed (review #3): the seam requires a session id — with the env absent,
+    # a repo-tree cwd never derives.
+    env = _env(tmp_path)
+    env.pop(shared.CALLER_PROJECT_ENV)
+    env[shared.CALLER_IDENTITY_SRC_ENV] = ""
+    env["DSH_SESSION_ID"] = ""
+    engine_dir = Path(__file__).resolve().parents[1]
+    projects = [{"key": "proj-alpha", "dirs": [str(engine_dir)]}]
+    out = er.append_request(dict(VALID_BODY), 1000, env=env, cwd=str(engine_dir),
+                            projects=projects, exclude_trees=(str(engine_dir),),
+                            load_decl=_decl_loader(["sess-exec-1"]))
+    assert out["ok"] is False and out["field"] == "caller"
+    assert out["reason"].startswith("caller-undeclared")
+
+
+def test_cwd_inside_engine_tree_malformed_decl_still_undeclared(tmp_path):
+    # Malformed declaration (input discipline): a failed declaration load keeps the
+    # seam closed, identity stays undeclared — no crash, no escalation.
+    env = _env(tmp_path)
+    env.pop(shared.CALLER_PROJECT_ENV)
+    env[shared.CALLER_IDENTITY_SRC_ENV] = ""
+    engine_dir = Path(__file__).resolve().parents[1]
+    projects = [{"key": "proj-alpha", "dirs": [str(engine_dir)]}]
+
+    def bad_decl(key):
+        return {"ok": False, "kind": "malformed", "reason": "bad decl file"}
+
+    out = er.append_request(dict(VALID_BODY), 1000, env=env, cwd=str(engine_dir),
+                            projects=projects, exclude_trees=(str(engine_dir),),
+                            load_decl=bad_decl)
     assert out["ok"] is False and out["field"] == "caller"
     assert out["reason"].startswith("caller-undeclared")
 

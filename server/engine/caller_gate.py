@@ -3,12 +3,20 @@
 层次与真源：
   - 常量与 workflow 侧纯判定在 shared.py（CALLER_PROJECT_ENV / CALLER_UNDECLARED_MARK /
     UNDECLARED_POLICY / 上限常量 / cross_project_judge）——worker 沙箱只依赖 shared；
-  - 本模块=**client 侧**的解析与判定：身份解析顺序（显式参数 > env > cwd 窄兜底 >
-    未声明）。cwd 兜底带**仓树排除**（shared.project_key_for_dir）：client 直跑于真实
-    项目工作区时 cwd 可推导身份（出处=cwd×注册表）；cwd 落在引擎仓树内（dsh 工具链
-    spawn、console 插件等间接调用）一律不推导——仓内 cwd 标识「被调用的引擎」而非
-    「调用方会话」，宁 undeclared 不凭空造身份（review C1 行为红线）。纯函数为主，
-    shared 以外零依赖（KI-032 单一真源纪律）。
+  - This module = the **client-side** resolution and matrix. Identity priority order:
+    explicit arg > env > narrow cwd fallback > declared-executor-session seam >
+    undeclared. The cwd fallback carries the **repo-tree exclusion**
+    (shared.project_key_for_dir): a client run inside a real project workspace derives
+    identity from cwd (source = cwd x registry); a cwd inside the engine repo tree
+    (dsh toolchain spawn, console plugins, other indirect calls) never derives — a
+    repo-tree cwd names "the engine being called", not "the calling session", and the
+    gate prefers undeclared over an invented identity (review C1 behaviour red line).
+    The single exception is the declared-executor-session seam (t261004-31): a cwd
+    swallowed by the repo-tree exclusion that still resolves, ignoring the exclusion,
+    to exactly one registered project, AND whose caller session id is named in that
+    project's executor_sessions — both anchors (cwd x host declaration) must hold;
+    an unnamed session or a missing session id stays undeclared. Pure functions;
+    shared is the only dependency (KI-032 single-source discipline).
 
 口径（工单验收与 review 条件的落点）：
   - 身份不许凭空自认：值必须过 PROJECT_KEY_RE 形状白名单；形状非法的显式声明/env
@@ -61,24 +69,52 @@ def _check_shape(value: str, origin: str) -> str:
 
 def resolve_identity(explicit: str, env_raw: str,
                      cwd: str = "", exclude_trees: Tuple[str, ...] = (),
-                     projects: Optional[list] = None) -> Dict[str, Any]:
-    """调用方身份解析（单一入口）。优先级：显式参数 > env > cwd 窄兜底（cwd 落在
-    排除树（引擎仓树）内=不推导）> 未声明。
+                     projects: Optional[list] = None,
+                     caller_session: str = "",
+                     declared_sessions_by_key: Optional[Dict[str, Any]] = None,
+                     ) -> Dict[str, Any]:
+    """Caller identity resolution (single entry). Priority: explicit arg > env >
+    narrow cwd fallback (a cwd under an exclude tree — the engine repo tree — never
+    derives) > declared-executor-session seam (t261004-31) > undeclared.
 
-    返回 {"value": key|shared.CALLER_UNDECLARED_MARK 对应前的原始空, "src": "arg"|"env"|"cwd"|"none",
-          "identity_class": "declared"|"undeclared"}——value 为 "" 即 undeclared（盖章时
-    由调用方换成 shared.CALLER_UNDECLARED_MARK 哨兵）。形状非法即刻 raise（fail-closed）。"""
+    Declared-executor-session seam: with the cwd under an exclude tree (the exclusion
+    itself stays fully in force for anyone not named), if (a) the cwd still resolves,
+    ignoring the exclusion, to exactly one registered project, and (b) the caller
+    session id is named in that project's executor_sessions — identity = that project,
+    src="declared-session". Both anchors must hold: cwd anchors which project, the
+    host-written declaration anchors who may claim it. An indirect call with no session
+    id, or a session id not named, still resolves to none; the repo-tree red line is
+    unchanged. Pure parameter injection: caller_session and declared_sessions_by_key
+    are loaded and passed by the caller (client._caller_identity /
+    executor_requests.resolve_caller); this function does no IO.
+
+    Returns {"value": raw key before the shared.CALLER_UNDECLARED_MARK swap, "src":
+    "arg"|"env"|"cwd"|"declared-session"|"none", "identity_class":
+    "declared"|"undeclared"} — an empty value means undeclared (the caller swaps in the
+    shared.CALLER_UNDECLARED_MARK sentinel at stamp time). A malformed shape raises
+    immediately (fail-closed)."""
     if str(explicit or "").strip():
         return {"value": _check_shape(explicit, "显式参数 caller_project"),
                 "src": "arg", "identity_class": "declared"}
     if str(env_raw or "").strip():
         return {"value": _check_shape(env_raw, "env %s" % shared.CALLER_PROJECT_ENV),
                 "src": "env", "identity_class": "declared"}
-    if str(cwd or "").strip():
-        key = shared.project_key_for_dir(_norm(cwd), projects or [],
-                                         tuple(_norm(t) for t in exclude_trees))
+    ncwd = _norm(cwd)
+    if ncwd:
+        trees = tuple(_norm(t) for t in exclude_trees)
+        key = shared.project_key_for_dir(ncwd, projects or [], trees)
         if key:
             return {"value": key, "src": "cwd", "identity_class": "declared"}
+        # t261004-31 declared-executor-session seam: opens only for a cwd the repo-tree
+        # exclusion swallowed, and only for a session the project declaration names —
+        # nobody named (declaration absent/malformed, session id absent) stays src=none.
+        if trees:
+            raw_key = shared.project_key_for_dir(ncwd, projects or [], ())
+            sessions = (declared_sessions_by_key or {}).get(raw_key) or ()
+            sid = str(caller_session or "").strip()
+            if raw_key and sid and sid in tuple(sessions):
+                return {"value": raw_key, "src": "declared-session",
+                        "identity_class": "declared"}
     return {"value": "", "src": "none", "identity_class": "undeclared"}
 
 
