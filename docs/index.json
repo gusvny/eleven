@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-10-04T17:27:00+08:00",
-  "total": 27,
+  "generated_at": "2026-10-04T12:33:29+08:00",
+  "total": 26,
   "categories": [
     "design",
     "content",
@@ -87,21 +87,6 @@
       ],
       "status": "active",
       "updated": "2026-09-28",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/epic-documents-in-docs.md",
-      "file": "epic-documents-in-docs.md",
-      "title": "Epic Documents Move into the Docs Library",
-      "category": "design",
-      "tags": [
-        "epic",
-        "docs structure",
-        "knowledge base",
-        "ticket linkage"
-      ],
-      "status": "draft",
-      "updated": "2026-10-04",
       "has_frontmatter": true
     },
     {
