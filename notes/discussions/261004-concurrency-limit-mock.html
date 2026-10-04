@@ -126,6 +126,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .ep .n{margin-left:auto;color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
 .ep .go{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}
 /* 泳道图（拓扑驱动）：节点 + 返工弧 + 轮次徽标 + 人门虚线圈 */
+.epiclink{color:var(--blue);cursor:pointer;text-decoration:underline dotted}
+.epiclink:hover{text-decoration:underline}
 .spec{font-size:12.5px;line-height:1.5;margin:0 0 9px}
 .acc{margin:0;padding-left:16px;font-size:12px}
 .acc li{margin:2px 0}
@@ -213,7 +215,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     </div>
 
     <div class="seg">
-      <label class="on">Overview</label><label>Grants</label><label>Alerts</label><label>Ledger</label><label>Settings</label><label>Inspection</label>
+<label data-tab="overview" class="on" onclick="setPanelTab('overview')">Overview</label><label data-tab="epics" onclick="setPanelTab('epics')">Epics</label><label data-tab="grants" onclick="setPanelTab('grants')">Grants</label><label data-tab="alerts" onclick="setPanelTab('alerts')">Alerts</label><label data-tab="ledger" onclick="setPanelTab('ledger')">Ledger</label><label data-tab="inspection" onclick="setPanelTab('inspection')">Inspection</label><label data-tab="docs" onclick="setPanelTab('docs')">Docs</label><label data-tab="settings" onclick="setPanelTab('settings')">Settings</label>
     </div>
 
     <div class="strip">
@@ -225,6 +227,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
       <button class="power" style="margin-left:auto">Disable executor</button>
     </div>
 
+    <section id="ovBody">
     <div class="sect first">Running tickets <span class="chip" id="stateChip">at the limit</span><span class="meta" id="limitMeta">set by you 10-04 14:02</span></div>
     <div class="card">
       <div class="line">
@@ -247,6 +250,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     <div class="req"><div class="h"><span class="txt">May the executor open tickets for the inspection epic?</span><span class="id">#a3f2</span><span class="meta">decision · 12 min</span></div></div>
     <div class="req"><div class="h"><span class="txt">Open a small fix ticket for the Chinese alert copy?</span><span class="id">#b7c1</span><span class="meta">finding · 4 min</span></div></div>
 
+    </section>
+    <section id="tabBody" hidden></section>
     <div class="foot">Mock. No backend. Sample data.</div>
   </template>
 </div>
@@ -277,7 +282,7 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
-let cur = 'sandbar', dragId = null, view = 'ticket', prevView = 'executor', filter = 'all', openId = 't261004-18', prog = 'dots';
+let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = 't261004-18', prog = 'dots', panelTab = 'overview', epicCode = null;
 function cycleProg(){ prog = prog === 'dots' ? 'bar' : prog === 'bar' ? 'off' : 'dots'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
 const T = () => PROJECTS[cur].tickets;
 const pctOf = t => Math.round((stepIdx(t) + (t.st === 'wait' ? 0 : 0.5)) / STEPS.length * 100);
@@ -314,16 +319,14 @@ function renderSide(){
       return '<div class="tk' + (fixed ? ' fixed' : '') + hi + '" data-id="' + t.id + '" draggable="' + (!fixed) + '" onclick="pickProject(\'' + k + '\');openTicket(\'' + t.id + '\')">'
         + '<span class="grip">⋮⋮</span>' + prefix
         + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
-        + '<span class="l2"><span class="meta2">' + t.stage + ' · ' + t.epic + '</span>' + pdots(t) + '</span>'
+        + '<span class="l2"><span class="meta2">' + t.stage + ' · </span>' + epicChip(t.epic) + pdots(t) + '</span>'
         + pbar(t) + '</span>' + arrows + '</div>';
     }).join('');
     const icon = (v, glyph, title) => '<span class="vi' + (k === cur && view === v ? ' on' : '') + '" title="' + title
       + '" onclick="pickProject(\'' + k + '\');setView(\'' + v + '\')">' + glyph + '</span>';
     return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
       + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
-      + '<span class="views" onclick="event.stopPropagation()">'
-      + icon('board', '▤', 'Ticket board') + icon('epics', '◆', 'Epics')
-      + icon('more', '⋯', 'More: Docs; model routes and settings moved into the panel') + '</span>'
+
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
   }).join('');
@@ -341,36 +344,20 @@ function renderMain(){
   }
   const title = view === 'board' ? 'Ticket Board' : view === 'epics' ? 'Epics' : 'More';
   const head = '<div class="vhead"><h1>' + title + '</h1><span class="chip">' + cur + '</span></div>';
-  if (view === 'board'){
-    // 状态看板：四列＝排队（有序）/ 在跑 / 等你签字 / 你暂停的。
-    // 它不是左栏列表的复制：左栏是「一个有序队列」，这里是「谁占着额度、谁在等我」的分布。
-    const cols = [
-      { k: 'wait', t: 'Queued', ordered: true },
-      { k: 'run', t: 'At work' },
-      { k: 'hold', t: 'Waiting for you' },
-      { k: 'paused', t: 'Paused' },
-    ];
-    const queued = T().filter(x => x.st === 'wait');
-    el.innerHTML = head + '<div class="kb">' + cols.map(c => {
-      const items = T().filter(x => x.st === c.k);
-      const cards = items.map(x => {
-        const pos = c.ordered ? (queued.findIndex(q => q.id === x.id) + 1) + '. ' : '';
-        return '<div class="kcard" onclick="openTicket(\'' + x.id + '\')">'
-          + '<div class="kid">' + pos + x.id + '</div><div class="kttl">' + x.title + '</div>'
-          + '<div class="kbot"><span>' + x.stage + '</span>' + pdots(x) + '</div></div>';
-      }).join('') || '<div class="kbot" style="color:var(--faint)">—</div>';
-      return '<div class="kcol"><div class="kh">' + c.t + '<b>' + items.length + '</b></div>' + cards + '</div>';
-    }).join('') + '</div>';
-    return;
-  }
-  if (view === 'epics'){
-    const codes = [...new Set(T().map(t => t.epic))];
-    el.innerHTML = head + codes.map(c => {
-      const n = T().filter(t => t.epic === c).length;
-      return '<div class="ep"><span class="code">' + c + '</span><span class="st">active</span>'
-        + '<span class="n">' + n + ' ticket' + (n > 1 ? 's' : '') + '</span>'
-        + '<button class="go" onclick="filterEpic(\'' + c + '\')">Filter the list</button></div>';
-    }).join('');
+  if (view === 'epic'){
+    const code = epicCode || T()[0].epic;
+    const items = T().filter(t => t.epic === code);
+    const done = items.filter(t => t.st !== 'wait' && t.st !== 'run' && t.st !== 'hold').length;
+    const hold = items.filter(t => t.st === 'hold').length;
+    const rows = items.map(t => '<div class="tk" data-id="' + t.id + '" onclick="openTicket(\'' + t.id + '\')">'
+      + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
+      + '<span class="l2"><span class="meta2">' + t.stage + ' · ' + t.st + '</span>' + pdots(t) + '</span></span></div>').join('');
+    el.innerHTML = '<button class="back" onclick="goBack()">← Back</button>'
+      + '<div class="vhead"><h1>' + code + '</h1><span class="chip">epic</span>'
+      + '<span class="meta" style="margin-left:auto">' + items.length + ' tickets · ' + hold + ' waiting for you</span></div>'
+      + '<div class="panelbox"><h3>Tickets in this epic</h3>' + rows + '</div>'
+      + '<div class="panelbox"><h3>Source</h3><div class="kv2"><span class="k">note</span><span>notes/epics/' + code + '.md</span>'
+      + '<span class="k">status</span><span>active · ' + done + ' finished</span></div></div>';
     return;
   }
   el.innerHTML = head
@@ -380,7 +367,30 @@ function renderMain(){
 }
 
 // 驾驶舱里的动态数字（模板克隆之后才有这些元素）
+function epicsTabHtml(){
+  const codes = [...new Set(T().map(t => t.epic))];
+  return '<div class="sect first">Epics</div>' + codes.map(c => {
+    const n = T().filter(t => t.epic === c).length;
+    const hold = T().filter(t => t.epic === c && t.st === 'hold').length;
+    return '<div class="ep"><span class="code">' + c + '</span><span class="st">active</span>'
+      + '<span class="n">' + n + ' ticket' + (n > 1 ? 's' : '') + (hold ? ' · ' + hold + ' waiting for you' : '') + '</span>'
+      + '<button class="go" onclick="openEpic(\'' + c + '\')">Open</button></div>';
+  }).join('');
+}
+function docsTabHtml(){
+  return '<div class="sect first">Docs</div>'
+    + '<div class="ep"><span class="code">docs/</span><span class="st">the library</span><span class="n">25 pages</span><span class="go">Open</span></div>'
+    + '<div class="ep"><span class="code">notes/</span><span class="st">the ledger</span><span class="n">60 pages</span><span class="go">Open</span></div>';
+}
 function paintExecutor(){
+  // tab 高亮
+  document.querySelectorAll('#main .seg label').forEach(l => { l.className = (l.dataset.tab === panelTab ? 'on' : '') });
+  const ov = document.getElementById('ovBody'), tb = document.getElementById('tabBody');
+  if (ov) ov.hidden = panelTab !== 'overview';
+  if (tb){
+    tb.hidden = panelTab === 'overview';
+    tb.innerHTML = panelTab === 'epics' ? epicsTabHtml() : panelTab === 'docs' ? docsTabHtml() : '<div class="foot">This mock shows Overview, Epics and Docs. The other tabs are unchanged in the real panel.</div>';
+  }
   const cap = PROJECTS[cur].cap, n = inFlight();
   document.getElementById('projChip').textContent = cur;
   document.getElementById('atWork').textContent = n;
@@ -537,6 +547,11 @@ function move(k, id, d){
   const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
   render();
 }
+function epicChip(code){
+  return '<span class="epiclink" onclick="event.stopPropagation();openEpic(\'' + code + '\')">' + code + '</span>';
+}
+function openEpic(code){ if (view !== 'epic') prevView = view; epicCode = code; openId = null; view = 'epic'; render(); }
+function setPanelTab(t){ panelTab = t; if (view !== 'executor'){ prevView = view; view = 'executor'; } render(); }
 function pickProject(k, v){ cur = k; dragId = null; openId = null; view = v || 'executor'; render(); }
 function setView(v){ view = v; openId = null; render(); }
 function setFilter(f){ filter = f; render(); }
