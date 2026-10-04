@@ -41,7 +41,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .pos{flex:0 0 auto;margin-top:1px;min-width:18px;height:17px;border-radius:5px;background:var(--panel2);color:var(--muted);font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 4px}
 .mark{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--dot);margin-top:5px}
 .mark.run{background:var(--green)}
-.mark.paused{background:var(--amber)}
+.mark.hold{background:var(--amber)}
+.mark.paused{background:transparent;border:1.5px solid var(--faint)}
 .tk .body{flex:1;min-width:0}
 .tk .l1{display:flex;align-items:baseline;gap:6px}
 .tk .id{flex:0 0 auto;font-size:11px;color:var(--muted);font-family:ui-monospace,monospace}
@@ -124,7 +125,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
           <button id="plus" onclick="bump(1)">+</button>
         </span>
         <span class="sep">·</span>
-        <span class="live"><b id="atWork">3</b> at work</span>
+        <span class="live"><b id="atWork">3</b> in flight</span>
         <span class="sep">·</span>
         <span class="live"><b id="queued">4</b> waiting</span>
         <span class="grow"></span>
@@ -144,7 +145,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 // 每个项目自己一套：上限 + 队列。run=在跑（占额度）／wait=排队（顺序＝启动顺序）／paused=你暂停的（不占）
 const PROJECTS = {
   sandbar: { cap: 3, tickets: [
-    {id:'t261004-18', title:'Panel write endpoints carry no identity', stage:'acceptance_walkthrough', epic:'project-executor', st:'run'},
+    {id:'t261004-18', title:'Panel write endpoints carry no identity', stage:'merge · awaiting your signature', epic:'project-executor', st:'hold'},
     {id:'t261004-17', title:'A request must be answerable', stage:'implement', epic:'project-executor', st:'run'},
     {id:'t261004-25', title:'Inspection 20261004 · integration-tests', stage:'report', epic:'inspection', st:'run'},
     {id:'t261004-22', title:'Wait for the condition instead of a fixed sleep', stage:'design_integration_tests', epic:'engine-hardening', st:'wait'},
@@ -155,7 +156,8 @@ const PROJECTS = {
   ]},
   suyou: { cap: 2, tickets: [
     {id:'t260904-02', title:'Cover the metrics API contract', stage:'implement', epic:'metrics', st:'run'},
-    {id:'t260905-01', title:'Panel list conventions', stage:'merge', epic:'doc-lifecycle', st:'wait'},
+    {id:'t260905-01', title:'Panel list conventions', stage:'merge · awaiting your signature', epic:'doc-lifecycle', st:'hold'},
+    {id:'t260905-06', title:'Index the new reference page', stage:'create_plan', epic:'doc-lifecycle', st:'wait'},
   ]},
   nusuyou: { cap: 1, tickets: [
     {id:'t260930-04', title:'cs-publish pipeline: retry on 429', stage:'run_integration_tests', epic:'content', st:'run'},
@@ -165,11 +167,12 @@ const PROJECTS = {
 };
 let cur = 'sandbar', dragId = null;
 const T = () => PROJECTS[cur].tickets;
-const runCount = () => T().filter(t => t.st === 'run').length;
+// 占额度 = 在跑 + 等你签字（宿主 261004 裁定：等签字的票「占着吧」——额度被人的关口吃掉，逼着处理）
+const inFlight = () => T().filter(t => t.st === 'run' || t.st === 'hold').length;
 const waitCount = () => T().filter(t => t.st === 'wait').length;
 function render(){
   const counts = Object.entries(PROJECTS).map(([k, p]) => {
-    const run = p.tickets.filter(t => t.st === 'run').length, wait = p.tickets.filter(t => t.st === 'wait').length;
+    const run = p.tickets.filter(t => t.st === 'run' || t.st === 'hold').length, wait = p.tickets.filter(t => t.st === 'wait').length;
     return { k, run, wait };
   });
   document.getElementById('sideN').textContent = counts.length + ' projects';
@@ -178,7 +181,7 @@ function render(){
     const rows = PROJECTS[k].tickets.map(t => {
       const fixed = t.st !== 'wait';
       const prefix = t.st === 'wait' ? '<span class="pos">' + (++q) + '</span>'
-        : '<span class="mark ' + (t.st === 'run' ? 'run' : 'paused') + '"></span>';
+        : '<span class="mark ' + (t.st === 'run' ? 'run' : t.st === 'hold' ? 'hold' : 'paused') + '"></span>';
       const arrows = fixed ? '' : '<span class="arrows"><button onclick="event.stopPropagation();move(\'' + k + '\',\'' + t.id + '\',-1)">⌃</button><button onclick="event.stopPropagation();move(\'' + k + '\',\'' + t.id + '\',1)">⌄</button></span>';
       return '<div class="tk' + (fixed ? ' fixed' : '') + '" data-id="' + t.id + '" draggable="' + (!fixed) + '">'
         + '<span class="grip">⋮⋮</span>' + prefix
@@ -187,20 +190,23 @@ function render(){
     }).join('');
     return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
       + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
-      + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' at work · ' + wait + ' waiting') + '</span>'
+      + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
   }).join('');
   document.getElementById('projChip').textContent = cur;
-  document.getElementById('atWork').textContent = runCount();
+  const n = inFlight();
+  document.getElementById('atWork').textContent = n;
   document.getElementById('queued').textContent = waitCount();
-  const cap = PROJECTS[cur].cap;
-  document.getElementById('cap').textContent = cap;
-  document.getElementById('minus').disabled = cap <= 1;
-  document.getElementById('plus').disabled = cap >= 10;
-  const over = runCount() > cap;
+  const cap = PROJECTS[cur].cap;             // cap === null 表示「不限」
+  document.getElementById('cap').textContent = cap === null ? 'Unlimited' : cap;
+  document.getElementById('minus').disabled = cap === 1;
+  document.getElementById('plus').disabled = false;
+  const over = cap !== null && n > cap;
   const chip = document.getElementById('stateChip');
   chip.className = 'chip' + (over ? ' warn' : '');
-  chip.textContent = over ? 'over the limit' : (runCount() >= cap ? 'at the limit' : 'room to start one');
+  chip.textContent = cap === null ? 'no limit'
+    : over ? 'over the limit'
+    : (n >= cap ? 'at the limit' : 'room to start one');
   wire();
 }
 function pickProject(k){ cur = k; dragId = null; render(); }
@@ -230,7 +236,13 @@ function wire(){
     });
   });
 }
-function bump(d){ const n = PROJECTS[cur].cap + d; if (n < 1 || n > 10) return; PROJECTS[cur].cap = n; render(); }
+function bump(d){
+  const key = cur, c = PROJECTS[key].cap;    // c === null 表示不限
+  if (d > 0) PROJECTS[key].cap = (c === null) ? null : (c >= 10 ? null : c + 1);
+  else if (c === null) PROJECTS[key].cap = 10;   // 从不限降回 10
+  else if (c > 1) PROJECTS[key].cap = c - 1;
+  render();
+}
 function save(){ document.getElementById('limitMeta').textContent = 'set by you just now'; }
 function toggleTheme(){ const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; }
 render();
