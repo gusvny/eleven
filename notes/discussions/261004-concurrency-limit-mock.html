@@ -195,9 +195,21 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .step.now .dot{background:var(--blue)}
 .step .dot{width:7px;height:7px;border-radius:50%;background:var(--panel2);flex:0 0 auto}
 /* 右栏 chat */
-.chat{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0}
-.chatHead{display:flex;align-items:center;gap:8px;padding:10px var(--gx);border-bottom:1px solid var(--line);font-weight:600;font-size:12px}
-.chatHead .chip{margin-left:auto;font-weight:400}
+.chat{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;background:color-mix(in srgb, var(--pc, var(--panel)) 5%, var(--panel))}
+.chatBand{display:flex;align-items:center;gap:8px;padding:7px var(--gx);border-bottom:3px solid var(--pc, var(--line));background:color-mix(in srgb, var(--pc, var(--panel)) 14%, var(--panel));position:sticky;top:0;z-index:2}
+.chatBand .pdot{width:9px;height:9px;border-radius:2px;background:var(--pc, var(--dot))}
+.chatBand .pk{font-weight:600;font-size:12px}
+.chatBand .hk{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
+.chatBand .grow{flex:1}
+.chatBand .sbtn{border:1px solid var(--line);background:var(--bg);color:var(--muted);border-radius:6px;padding:2px 8px;font:inherit;font-size:11px;cursor:pointer}
+.chatFoot input:focus{outline:0;border-color:var(--pc, var(--accent-line))}
+.chatFoot .power:hover{border-color:var(--pc, var(--accent-line));color:var(--pc, var(--fg))}
+.sess{display:flex;align-items:center;gap:7px;padding:6px 8px;margin:0 0 6px;border:1px solid var(--line-soft);border-radius:8px;background:var(--bg);font-size:12px}
+.sess .pdot{width:8px;height:8px;border-radius:2px;background:var(--pc, var(--dot));flex:0 0 auto}
+.sess .hk{font-family:ui-monospace,monospace;color:var(--muted);font-size:11px}
+.sess .grow{flex:1}
+.sess .go{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:6px;padding:1px 7px;font:inherit;font-size:11px;cursor:pointer}
+.sess.new{border-style:dashed;color:var(--muted);cursor:pointer}
 .chatBody{flex:1;overflow-y:auto;padding:12px}
 .msg{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:8px;background:var(--bg)}
 .msg.me{margin-left:36px}
@@ -224,7 +236,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
   <div class="chat">
     <!-- chat 占位：右栏是**平台的**会话面（dsh-client-ui-conversation，平台自声明锚 [data-conversation-scroll]）。
         本仓只做装饰（项目色带/消息 tag，零侵入 React 容器），**不做也不替换这个界面**。画在这里只是让三栏版面诚实。 -->
-    <div class="chatHead">Chat<span class="chip">platform</span><span class="chip">session-09ca0247</span></div>
+    <div class="chatBand" id="chatBand"></div>
     <div class="chatBody">
       <div class="msg them">t261004-18 is at the merge gate. The merge check is green; sign it or send it back.</div>
       <div class="msg me">let me look at the diff first</div>
@@ -323,6 +335,12 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
+const PROJ_COLOR = { sandbar: '#e76a6a', suyou: '#6a9ce7', nusuyou: '#83e76a' };
+const PROJ_SESS = {
+  sandbar: { handle: 'executor', code: '09ca' },
+  suyou: { handle: 'metrics-docs', code: '4b71' },
+  nusuyou: { handle: 'cs-publish', code: 'b2e8' },
+};
 let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = null, prog = 'dots', panelTab = 'overview', epicCode = null, dlgKind = null, fromEpic = false;
 function cycleProg(){ prog = prog === 'dots' ? 'bar' : prog === 'bar' ? 'off' : 'dots'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
 const T = () => PROJECTS[cur].tickets;
@@ -340,7 +358,16 @@ const inFlight = () => T().filter(t => t.st === 'run' || t.st === 'hold').length
 const waitCount = () => T().filter(t => t.st === 'wait').length;
 const TICKET = id => { for (const k in PROJECTS) { const t = PROJECTS[k].tickets.find(x => x.id === id); if (t) return Object.assign({ project: k }, t) } return null; };
 
-function render(){ renderSide(); renderMain(); renderDialog(); }
+function render(){
+  const pc = PROJ_COLOR[cur] || 'var(--line)';
+  document.querySelector('.chat').style.setProperty('--pc', pc);
+  const ses = PROJ_SESS[cur] || { handle: 'session', code: '----' };
+  const band = document.getElementById('chatBand');
+  if (band) band.innerHTML = '<span class="pdot"></span><span class="pk">' + cur + '</span>'
+    + '<span class="hk">' + ses.handle + ' · ' + ses.code + '</span><span class="grow"></span>'
+    + '<button class="sbtn" title="Switch or create a project session">Sessions 2</button>';
+  document.querySelectorAll('.proj').forEach(el => el.style.setProperty('--pc', PROJ_COLOR[el.dataset.key] || 'var(--line)'));
+  renderSide(); renderMain(); renderDialog(); }
 
 function renderSide(){
   const counts = Object.keys(PROJECTS).map(k => ({
@@ -369,7 +396,10 @@ function renderSide(){
       + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
 
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
-      + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
+      + '<span class="chev">▸</span></div><div class="plist">'
+      + '<div class="sess"><span class="pdot"></span><span>' + ((PROJ_SESS[k] || {}).handle || 'session') + '</span>'
+      + '<span class="hk">' + ((PROJ_SESS[k] || {}).code || '----') + '</span><span class="grow"></span><button class="go">open</button></div>'
+      + rows + '</div></div>';
   }).join('');
   wire();
 }
