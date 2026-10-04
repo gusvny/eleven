@@ -453,7 +453,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // 结果只落一行文案——不造轮询/重试/状态条（t261003-06 已删的形态不还魂）。
   function updateOpenBtn(sess){
     var btn = el('openSessionBtn');
-    if(window.parent === window){ btn.disabled = true; btn.title = 'Open this panel from the console to use this button.'; return; }
+    if(window.parent === window){ btn.disabled = true; var hint = 'Open this panel from the console to use this button.'; btn.title = hint; el('sessionMsg').textContent = hint; return; }
     if(!sess){ btn.disabled = true; btn.title = 'No executor session is declared. Declare one in Settings.'; return; }
     btn.disabled = false; btn.title = 'Open session ' + sess + ' in the console.';
   }

@@ -77,6 +77,11 @@ assert(PANEL_PAGE_HTML.includes('function themeParamOf'), 'themeParamOf source e
 assert(PANEL_PAGE_HTML.includes('id="openSessionBtn"'), 'exactly one open-session entry: the small Overview button')
 assert(PANEL_PAGE_HTML.includes('window.parent === window'), 'standalone detection gates the button')
 assert(PANEL_PAGE_HTML.includes('Open this panel from the console to use this button.'), 'standalone disable says why in one STE sentence')
+// t261004-09：STE 提示必须落在**可见文案**（sessionMsg），不只在 title 属性——
+// 浏览器场景 W5 断言 body.innerText，title 不算数（261004 写法政策主面）。
+assert(/window\.parent === window\)\{[^\n]*sessionMsg[^\n]*return; \}/.test(PANEL_PAGE_HTML) &&
+  PANEL_PAGE_HTML.includes("el('sessionMsg').textContent = hint"),
+  'standalone STE hint is rendered as visible copy (sessionMsg), not title-only')
 assert(PANEL_PAGE_HTML.includes('No executor session is declared. Declare one in Settings.'), 'undeclared-session disable says why')
 assert(PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session'") && PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session-result'"), 'postMessage contract to the parent console (request + one-line result)')
 

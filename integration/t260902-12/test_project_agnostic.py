@@ -33,8 +33,21 @@ yml_text = YML.read_text(encoding="utf-8")
 lane_text = LANE.read_text(encoding="utf-8")
 vy_text = VY.read_text(encoding="utf-8")
 
-# ① 硬约束：项目专属路径零命中（真正的项目无关不变量）
-check("yml 全文零项目专属路径", not re.search(r"notes/|known-issues|baselines|\.worktrees/", yml_text))
+# ① 硬约束：项目专属路径零命中（真正的项目无关不变量）。
+# 261004 宿主令把「notes/ 知识库账本保持中文」写进角色 yml 的写法政策条目——
+# 宿主令是真源， Persona 政策引文不是路径绑定（不指引擎读写任何仓内路径）。
+# 判据不改宽：裸命中仍逐个红，只有恰好落在这一句政策引文里的 notes/ 被点名豁免；
+# 引文措辞漂移（引文不在场或命中落到引文外）照样红。
+SANCTIONED_POLICY_QUOTE = "`notes/` 知识库账本保持中文"
+
+
+def path_hits_outside_sanctioned(text: str) -> int:
+    hits = [m for m in re.finditer(r"notes/|known-issues|baselines|\.worktrees/", text)]
+    quotes = [m for m in re.finditer(re.escape(SANCTIONED_POLICY_QUOTE), text)]
+    return sum(1 for h in hits if not any(q.start() <= h.start() and h.end() <= q.end() for q in quotes))
+
+
+check("yml 全文零项目专属路径（261004 政策引文除外）", path_hits_outside_sanctioned(yml_text) == 0)
 check("dev_lane 零 notes/known-issues/baselines",
       not re.search(r"notes/|known-issues|baselines|\.worktrees/", lane_text))
 
