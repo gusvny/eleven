@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executor Panel — Inspection tab (mock v4, states pass)</title>
+<title>Executor Panel — Inspection tab (mock v5, layout and width pass)</title>
 <style>
 :root{
   --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;
@@ -17,7 +17,7 @@ html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e
   --blue:#4da3ff;--green:#7ad48a;--amber:#ffb454;--red:#ff6b6b;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot:#46536a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
-.wrap{max-width:880px;margin:0 auto;padding:18px 16px 48px}
+.wrap{max-width:1440px;margin:0 auto;padding:18px clamp(16px,2vw,28px) 48px}
 
 /* header */
 .top{display:flex;align-items:center;gap:10px;height:24px;margin:0 0 14px}
@@ -30,6 +30,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 /* period row: container edge at 0, controls share one baseline */
 .periods{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .periods .lbl{color:var(--muted);font-size:11px;padding-right:2px}
+#periodBtns{display:flex;gap:6px;flex-wrap:wrap}
 .periods button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:3px 11px;font:inherit;font-size:12px;cursor:pointer;line-height:18px}
 .periods button[data-on="true"]{background:var(--accent-soft);border-color:var(--accent-line);color:var(--fg)}
 
@@ -48,10 +49,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .dot.red{background:var(--red)}.dot.amber{background:var(--amber)}.dot.green{background:var(--green)}.dot.grey{background:var(--dot)}
 
 /* metrics: even grid, key column does the aligning */
-.nums{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 18px;margin-top:8px}
-.kv{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--muted)}
-.kv .k{min-width:132px}
-.kv b{color:var(--fg);font-weight:600}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 20px;margin-top:10px}
+.kv{display:flex;flex-direction:column;gap:1px;font-size:11px;color:var(--muted)}
+.kv b{color:var(--fg);font-weight:600;font-size:15px;line-height:1.2}
 
 /* tables: cells carry the same gutter as the text */
 .tbl{width:100%;border-collapse:collapse;font-size:12px}
@@ -62,6 +62,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .tbl td.when,.tbl th.when{width:104px;white-space:nowrap;color:var(--muted)}
 .tbl .face{width:70px}
 .tbl .ticket{width:112px;text-align:right}
+.tbl .ticket .nonetk{display:inline-block;padding:1px 5px}
 .tbl .state{width:84px}
 .tbl .who{width:64px}
 .tbl .why{width:auto;color:var(--muted)}
@@ -72,7 +73,7 @@ code{background:var(--panel2);border-radius:4px;padding:1px 5px;font-size:11px}
 .btn.primary{background:var(--accent-soft);border-color:var(--accent-line)}
 .btn:hover{border-color:var(--blue)}
 .strip{display:flex;align-items:center;gap:10px}
-.strip .grow{flex:1}
+.grow{flex:1}
 .hostnote{padding-left:var(--gx);color:var(--muted);font-size:11px;margin:8px 0 0}
 .dlg{display:none;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:var(--gy) var(--gx);margin:0 0 var(--cardgap)}
 .dlg[data-open="true"]{display:block}
@@ -81,7 +82,10 @@ code{background:var(--panel2);border-radius:4px;padding:1px 5px;font-size:11px}
 .dlg select,.dlg input{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit;width:100%;max-width:340px}
 .dlg .bar{display:flex;gap:8px;align-items:center;margin-top:12px}
 details{margin:6px 0 0}
-summary{cursor:pointer;color:var(--muted);font-size:12px}
+summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none;display:flex;align-items:center;gap:6px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"\25B8";font-size:10px;color:var(--muted);transition:transform .15s}
+details[open] summary::before{transform:rotate(90deg)}
 .detail{margin-top:6px}
 .muted{color:var(--muted)}
 .pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px}
@@ -89,6 +93,8 @@ summary{cursor:pointer;color:var(--muted);font-size:12px}
 .pill.done{background:var(--panel2);color:var(--muted)}
 .link{color:var(--blue);background:none;border:0;padding:0;font:inherit;cursor:pointer;text-decoration:underline}
 .dlg .sect{padding-left:0}
+.track{height:3px;border-radius:2px;background:var(--panel2);margin-top:10px;overflow:hidden}
+.track i{display:block;height:100%;background:var(--blue)}
 .foot{margin:28px 0 0;padding-left:var(--gx);color:var(--muted);font-size:11px}
 </style>
 </head>
@@ -141,9 +147,11 @@ summary{cursor:pointer;color:var(--muted);font-size:12px}
   <div class="sect">Reviews you started</div>
   <div class="card table">
     <table class="tbl" id="reviews">
-      <tr><th class="when">when</th><th class="who">who</th><th>scope</th><th>reason</th><th class="state">state</th><th>result</th></tr>
-      <tr><td class="when">10-04 10:41</td><td class="who">host</td><td>server/plugins only</td><td>check the new panel code</td><td class="state"><span class="pill run">running</span></td><td class="muted">—</td></tr>
-      <tr><td class="when">10-03 09:30</td><td class="who">host</td><td>everything</td><td>first full pass after the baseline broke</td><td class="state"><span class="pill done">done</span></td><td>9 findings, 3 tickets</td></tr>
+      <thead><tr><th class="when">when</th><th class="who">who</th><th>scope</th><th>reason</th><th class="state">state</th><th>result</th></tr></thead>
+      <tbody>
+        <tr><td class="when">10-04 10:41</td><td class="who">host</td><td>server/plugins only</td><td class="why">check the new panel code</td><td class="state"><span class="pill run">running</span></td><td class="muted">—</td></tr>
+        <tr><td class="when">10-03 09:30</td><td class="who">host</td><td>everything</td><td class="why">first full pass after the baseline broke</td><td class="state"><span class="pill done">done</span></td><td>9 findings, 3 tickets</td></tr>
+      </tbody>
     </table>
   </div>
   <div class="note">Newest first · kept after the review ends</div>
@@ -208,7 +216,7 @@ function renderBody(){
   }
   const t = p.test, s = p.simp;
   const rows = p.findings.map(([w,face,txt,tk]) =>
-    `<tr><td class="when">${w}</td><td class="face">${face}</td><td>${txt}</td><td class="ticket">${tk?'<code>'+tk+'</code>':'<span class="muted">—</span>'}</td></tr>`).join('');
+    `<tr><td class="when">${w}</td><td class="face">${face}</td><td>${txt}</td><td class="ticket">${tk?'<code>'+tk+'</code>':'<span class="muted nonetk">—</span>'}</td></tr>`).join('');
   document.getElementById('periodBody').innerHTML = `
     <div class="sect">${cur}${p.current?' · this period':''}</div>
     <div class="card">
@@ -236,6 +244,7 @@ function renderBody(){
     <div class="sect">Coverage</div>
     <div class="card">
       <div class="row"><span class="txt">${p.coverage.reviewed} of ${p.coverage.total} source files reviewed in ${cur}</span></div>
+      <div class="track"><i style="width:${Math.max(1, Math.round(p.coverage.reviewed / p.coverage.total * 100))}%"></i></div>
       <details><summary>Show the reviewed files and the queue</summary>
         <div class="detail muted">${p.coverage.note}<br>Nothing is claimed as clean unless it was reviewed.</div>
       </details>
@@ -245,16 +254,19 @@ function pick(p){ cur = p; renderPeriods(); renderBody(); }
 function toggleTheme(){ const h=document.documentElement; h.dataset.theme = h.dataset.theme==='dark'?'light':'dark'; }
 function openDialog(){ document.getElementById('dlg').dataset.open='true'; document.getElementById('dlgMsg').textContent=''; }
 function closeDialog(){ document.getElementById('dlg').dataset.open='false'; }
+function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function startReview(){
   const scope=document.getElementById('scope').value;
   const why=(document.getElementById('reason').value||'').trim();
   if(why===''){ document.getElementById('dlgMsg').textContent='Add a reason. It is recorded.'; return; }
   const tbl=document.getElementById('reviews');
   const tr=document.createElement('tr');
-  tr.innerHTML=`<td class="when">just now</td><td class="who">host</td><td>${scope.replace(/ \(.*/,'')}</td><td class="state"><span class="pill run">running</span></td><td class="muted">—</td>`;
-  tbl.insertBefore(tr, tbl.rows[1]);
+  // six cells, matching the header: when | who | scope | reason | state | result
+  tr.innerHTML=`<td class="when">just now</td><td class="who">host</td><td>${esc(scope.replace(/ \(.*/,''))}</td>`
+    + `<td class="why">${esc(why)}</td><td class="state"><span class="pill run">running</span></td><td class="muted">—</td>`;
+  tbl.tBodies[0].insertBefore(tr, tbl.rows[1]);
   document.getElementById('dlgMsg').textContent='Started. The record is written.';
-  setTimeout(closeDialog, 700);
+  setTimeout(closeDialog, 1200);
 }
 renderPeriods(); renderBody();
 </script>
