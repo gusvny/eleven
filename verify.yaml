@@ -30,6 +30,11 @@ lanes:
       # t260904-12 乙段：test 道（t260902-10 场景消费面）——venv 回落链，pytest 缺即红（fail-closed）。
       - id: test
         cmd: PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache "$PY" -m pytest server/engine/tests -q  # engine-venv-compat（t260907-10：新路径优先、旧路径一轮回落，摘除票删旧腿）
+      # 261004 宿主令（执行器请求 -0001 实测：merge_check 4/4 全绿而手工 lint 152 error）：
+      # L1–L18 整条静态电池接进 code 道。此前它**不在任何合并闸里**，全靠执行器签字前手工跑——
+      # 「靠人不靠机器」的单一防线。接线后每轮 merge_check 多跑一次 lint（秒级）。
+      - id: lint
+        cmd: python3 integration/lint_tests.py
 integration:
   cmd: python3 integration/run_scenarios.py
   # supply 简化为一条「确保测试台在位」（t260904-19，宿主令「既然用 docker 就都用」）：
