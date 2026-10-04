@@ -90,11 +90,18 @@ Quoted rule text stays in the language of its source file (see
 - This page adds no machine gate. It collects rows for human and agent review.
 - Rows a script already checks: B8 (the banned-jargon lint, L7; machine-read source is
   `docs/terminology.md`), C7 (the integration gate reclassifies failures mechanically).
-  Partial face: `docs/scripts/build_index.py` flags missing frontmatter and staleness
-  across the doc library, but it does not check the 9-item design-doc self-check list.
-- Rows that stay human only: A3, B1, B2, B3, B4, B5, B6, B7, C1–C6, D1–D3. In
-  particular the design-doc self-check list (row A3) is a human judgement; no script
-  ticks it. No script replaces reading the diff.
+  Partial face: A4 (the words follow the writing standard) is partly scripted by the
+  copy-language gate (L15, `integration/lint_copy_language.py`): it reads added lines
+  of a diff and covers CJK text in `server/plugins/*/src/**`, `server/engine/**` and
+  two integration face libs. Its boundary is narrow — added lines only, those paths
+  only, language only — so style, structure, terminology and every untouched legacy
+  line stay human. Other partial face: `docs/scripts/build_index.py` flags missing
+  frontmatter and staleness across the doc library, but it does not check the 9-item
+  design-doc self-check list.
+- Rows that stay human only: A3, B1, B2, B3, B4, B5, B6, B7, C1–C6, D1–D3, and the
+  part of A4 that L15 does not reach (language outside its paths, style, structure,
+  terminology). In particular the design-doc self-check list (row A3) is a human
+  judgement; no script ticks it. No script replaces reading the diff.
 - The eight rules in `server/roles/integration.yml` (section 评审的失败模式纪律)
   keep their home there. This page points at them; it does not delete or change them.
 

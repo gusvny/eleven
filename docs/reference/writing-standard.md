@@ -133,8 +133,14 @@ Source: `notes/discussions/261003-executor-panel-redesign.md` section 4.2.
 
 ## 6. Enforcement and precedence
 
-This standard adds no machine gate. The mechanical faces stay as they are:
+This standard has one machine face of its own, and it keeps the older ones:
 
+- The copy-language gate (L15, `integration/lint_copy_language.py`, wired into
+  `integration/lint_tests.py`) reads the added lines of a diff and fails a new or
+  touched line that carries CJK text inside its declared scope:
+  `server/plugins/*/src/**`, `server/engine/**`, and two integration face libs. It
+  covers code comments too, because section 2 puts them in the English column. A
+  reviewer-visible exemption marker (`copy-lang-allow:<id>`) is the declared way out.
 - The banned-jargon lint (L7) keeps its gate role; its machine-read source is
   `docs/terminology.md`.
 - `docs/terminology.md` keeps its role as the word-choice table.
