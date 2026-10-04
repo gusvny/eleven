@@ -43,6 +43,7 @@ updated: 2026-09-28
 | `design/sandbar-project-onboarding-contract-v1.md` | sandbar project onboarding contract v1 (key table / handover faces / append-style change log) |
 | `design/project-external-workflow-template-loader-v1.md` | Project external workflow template loader v1 (t260924-04: register-then-load / per-template isolated rejection / evolution discipline / determinism rules) |
 | `design/devlane-lite-v1.md` | Lightweight dev lane: effort proportional to risk (three profiles, round economy, proportional gate, scoped execution environments) — **draft, awaiting host decision** |
+| `design/epic-documents-in-docs.md` | Epic documents move into the docs library (host decision 261004): one directory per epic (date prefix + code, no hash), finished documents only, status in the frontmatter and no progress in the body, progress read from tickets by epic code, one atomic migration — **draft; one open item inside (the ticket roster and engine pruning)** |
 
 ## ops (operations — build / deploy / monitor)
 
