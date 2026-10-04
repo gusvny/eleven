@@ -1,6 +1,18 @@
 // sc_executor_panel_page_redesign.mjs — t261003-06 面板改版页面契约（灰盒 L3，真浏览器
 // + API 桩，零 docker，红线零接触 3099；t260929-03-executor-panel-page 同款架构缝）。
 //
+// t261004-03 修编（五个假红断言的处置，面板无缺陷、全是场景侧锚/桩形漂移）：
+//   桩形：行形状对齐 requests.ts RequestView（status/at）；status 端口=/{ok,result} 信封、
+//         路径=/sandbar-watchdog/api/status；actions 端口=/api/actions（页面真拉的面）。
+//   L1：负形收窄到 #paneOv（Settings 夜间策略下拉是合法 <select>，全文档扫描误判）。
+//   L2：两栏锚 .cols > div；断点锚 @container max-width:7xx（视口 media 锚过时，
+//       t261003-09 缺陷 1 定稿=按容器宽折叠）。
+//   L4b：兜底锚=兜底控件本体（折叠行体 display:none 不进 innerText，文案锚必假红）。
+//   L5：锚 #doneHead2 textContent + data-open（.sect 的 uppercase 使 innerText 锚随
+//       Chromium 版本漂）；分栏由修正后的桩形驱动。
+//   X1 的两条 404 同源（桩形）；宿主 node.ts 是否漏注册 /api/actions 属 t261003-10，
+//   本场景不经宿主路由面，不在此重复修。
+//
 // Intent（用户可感知行为；工单派发规格 + 设计 note §2/§3/§4 + mock 视觉基准）：
 //   T1 五页签 Overview/Grants/Alerts/Ledger/Settings；Requests 页签退场（并入 Overview）。
 //   L1 负形：项目选择器（下拉 / 手填 key 框 / Load 按钮）与轮询状态行（"polling…"）
@@ -66,19 +78,27 @@ async function main() {
   if (!pw) { C.envFail('playwright-present', 'playwright-core 缺失（KI-036 家族）'); return C.exit() }
 
   // ---- page 边界桩（形状=panel-contract + 本票新增面） ----
+  // t261004-03 桩形修正：行形状对齐 requests.ts 的 RequestView 真读出视图——
+  // status('waiting'|'answered')/at(毫秒)。旧桩的 state/created_at 是不存在的字段，
+  // 页面按 status 分栏，answered 行永远进不了 Answered 区（L5 假红的根因）。
+  const NOW = Date.now()
   const waiting = [
-    { id: 'req-1', project: PROJ, question: 'Which ticket does the executor verify first?', detail: 'Two tickets wait. Ticket t1 blocks ticket t2. Pick the first one.', raised_by: 'bench:plan', default_action: 'verify t1', state: 'waiting', created_at: 1 },
-    { id: 'req-2', project: PROJ, question: 'How should the executor proceed?', detail: 'two viable paths', raised_by: 'bench', default_action: 'Open a new ticket', state: 'waiting', created_at: 2, options: ['Open a new ticket', 'Extend the current ticket'] },
+    { type: 'request', id: 'req-1', at: NOW - 120_000, project: PROJ, kind: 'question', question: 'Which ticket does the executor verify first?', detail: 'Two tickets wait. Ticket t1 blocks ticket t2. Pick the first one.', raised_by: 'bench:plan', default_action: 'verify t1', expires_at: null, status: 'waiting' },
+    { type: 'request', id: 'req-2', at: NOW - 60_000, project: PROJ, kind: 'decision', question: 'How should the executor proceed?', detail: 'two viable paths', raised_by: 'bench', default_action: 'Open a new ticket', options: ['Open a new ticket', 'Extend the current ticket'], expires_at: null, status: 'waiting' },
   ]
-  const answered = [{ id: 'req-0', project: PROJ, question: 'Old question?', detail: 'done', raised_by: 'bench', default_action: 'x', state: 'answered', answer: 'Open a new ticket', created_at: 0 }]
+  const answered = [{ type: 'request', id: 'req-0', at: NOW - 3_600_000, project: PROJ, kind: 'question', question: 'Old question?', detail: 'done', raised_by: 'bench', default_action: 'x', expires_at: null, status: 'answered', answer: 'Open a new ticket' }]
   const stub = createServer((req, res) => {
     const u = new URL(req.url, 'http://x')
     const json = (b) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)) }
     if (u.pathname.endsWith('/api/requests')) return json({ rows: [...waiting, ...answered] })
-    if (u.pathname.endsWith('/api/settings')) return json({ config: { enabled: true }, provenance: {} })
-    if (u.pathname.endsWith('/api/grants')) return json({ granted_count: 4, total: 6, executor_sessions: ['exec-1'], session_state: 'granted', note: 'Permissions: 4 of 6' })
-    if (u.pathname.endsWith('/api/recent-actions')) return json({ rows: [{ time: 1, action: 'sign', ticket: 't261002-10', result: 'ok', permission: 'merge' }] })
-    if (u.pathname.endsWith('/api/watchdog/status') || u.pathname === '/status') return json({ declared: true, enabled: true, heartbeat: { alive: true }, ledger: { path: '/x', unreadable: false, counts: { lines: 3, duplicates: 0, bad: 0, gaps: 0 } }, liveness: { executor: { alive: true } } })
+    if (u.pathname.endsWith('/api/settings')) return json({ ok: true, config: { enabled: true }, provenance: {} })
+    if (u.pathname.endsWith('/api/grants')) return json({ ok: true, granted_count: 4, total: 6, executor_sessions: ['exec-1'], session_state: 'granted', note: 'Permissions: 4 of 6' })
+    // t261004-03 桩形修正：页面拉的是 /sandbar-executor-panel/api/actions（recent-actions
+    // 读源），不是 /api/recent-actions；行形状对齐 api.ts 的 actions 出面（action 用显示名）。
+    if (u.pathname.endsWith('/api/actions')) return json({ ok: true, source: 'stub', actions: [{ at: NOW, action: 'Sign', ticket: 't261002-10', result: 'ok', permission: 'merge' }], malformed_rows: 0, unmapped_rows: 0 })
+    // t261004-03 桩形修正：真实路由是 /sandbar-watchdog/api/status（不是
+    // /api/watchdog/status）；且页面按 { ok, result } 信封解包（poll()），裸对象=不可达假象。
+    if (u.pathname.endsWith('/api/status')) return json({ ok: true, result: { declared: true, enabled: true, heartbeat: { alive: true, age_seconds: 12 }, ledger: { path: '/x', unreadable: false, counts: { lines: 3, duplicates: 0, bad: 0, gaps: 0 } }, liveness: { executor: { alive: true } } } })
     res.writeHead(404); res.end('{}')
   })
   await new Promise(r => stub.listen(0, '127.0.0.1', r))
@@ -121,20 +141,33 @@ async function main() {
     })
     C.case('T2-requests-tab-gone', !hasRequestsTab, '独立 Requests 页签应退场')
 
-    // L1 负形：选择器三件套 + 轮询行
-    const inputs = await page.evaluate(() => [...document.querySelectorAll('input[type=text],input:not([type]),select,button')].map(e => (e.placeholder || e.value || e.textContent || '').trim()))
-    const joined = inputs.join('|')
-    const negForm = !/load/i.test(joined) && !/polling/i.test(text) && (await page.$$eval('select', s => s.length)) === 0
-    C.case('L1-picker-and-poll-line-absent', negForm, `controls=${joined.slice(0, 120)} pollText=${/polling/i.test(text)}`)
-
-    // L2 两栏 + 760px 断点
-    const twoCol = await page.evaluate(() => {
-      const cols = document.querySelectorAll('[class*="col"],[class*="column"],[class*="overview"] > div')
-      const css = [...document.styleSheets].flatMap(s => { try { return [...s.cssRules].map(r => r.cssText) } catch { return [] } }).join('\n')
-      return { cols: cols.length >= 2, mq: /max-width:\s*7\d\dpx/.test(css) }
+    // L1 负形：选择器三件套 + 轮询行。
+    // t261004-03 锚修正：负形断言收窄到 Overview 面（#paneOv）——Settings 页签的夜间
+    // 策略下拉是合法 <select>，全文档扫描把它误判成「选择器还在」；选择器本是 Overview
+    // 控件，退役与否只该看这一面。轮询行仍查整页渲染文本（它在哪都不该出现）。
+    const ovNeg = await page.evaluate(() => {
+      const pane = document.getElementById('paneOv')
+      if (!pane) return null
+      const els = [...pane.querySelectorAll('input[type=text],input:not([type]),select,button')]
+      return { joined: els.map(e => (e.placeholder || e.value || e.textContent || '').trim()).join('|'), selects: pane.querySelectorAll('select').length }
     })
-    C.case('L2-two-columns-with-breakpoint', twoCol.cols && twoCol.mq, `cols>=2=${twoCol.cols} media-760=${twoCol.mq}`)
-    C.case('L2b-section-wording', t.includes('needs your answer') && t.includes('recent action'), '左栏 Needs your answer / 右栏 recent actions 措辞')
+    const negForm = ovNeg !== null && !/load/i.test(ovNeg.joined) && !/polling/i.test(text) && ovNeg.selects === 0
+    C.case('L1-picker-and-poll-line-absent', negForm, `ovControls=${ovNeg ? ovNeg.joined.slice(0, 120) : 'NO-PANE'} ovSelects=${ovNeg ? ovNeg.selects : '?'} pollText=${/polling/i.test(text)}`)
+
+    // L2 两栏 + ~760px 断点。
+    // t261004-03 锚修正：两栏锚 .cols > div（旧 [class*="col"] 只命中 .cols 容器本身，
+    // 计数恒 1）；断点锚容器查询 @container (max-width:760px)——面板按设计（t261003-09
+    // 缺陷 1）以容器宽而非视口宽折叠，media-query 锚是过时预期。
+    const twoCol = await page.evaluate(() => {
+      const cols = document.querySelectorAll('.cols > div')
+      const css = [...document.styleSheets].flatMap(s => { try { return [...s.cssRules].map(r => r.cssText) } catch { return [] } }).join('\n')
+      return { cols: cols.length >= 2, mq: /@(container|media)[^{]*max-width:\s*7\d\dpx/.test(css) }
+    })
+    C.case('L2-two-columns-with-breakpoint', twoCol.cols && twoCol.mq, `cols>=2=${twoCol.cols} container-760=${twoCol.mq}`)
+    // 措辞锚走 waitHead 的 textContent：.sect 有 text-transform:uppercase，innerText 是否
+    // 随之变形随 Chromium 版本漂（main 复现=不随、新 headless=随），textContent 恒稳定。
+    const waitHeadTxt = (await page.textContent('#waitHead')) || ''
+    C.case('L2b-section-wording', /needs your answer/i.test(waitHeadTxt) && t.includes('recent action'), `waitHead="${waitHeadTxt.trim()}" rightCol=${t.includes('recent action')}`)
 
     // L3 展开条目：收起一行 → 点击出现溯源行
     const before = await page.evaluate(() => document.body.innerText.includes('raised by') || document.body.innerText.toLowerCase().includes('raised by'))
@@ -152,10 +185,20 @@ async function main() {
       return !!ta
     })
     C.case('L4-options-render-as-buttons', optionButtons >= 2, `option-buttons=${optionButtons}`)
-    C.case('L4b-free-text-fallback-present', t.includes('type an answer'), '兜底文案 Type an answer')
+    // t261004-03 锚修正：兜底文案长在折叠行体内 + placeholder 上——display:none 的文本
+    // 不进 innerText（行默认收起是设计行为，非缺陷）。锚改钉兜底控件本身：无选项行给
+    // input[data-answerbox][placeholder="Type an answer"]，有选项行给 reveal 按钮。
+    const freeFallback = await page.evaluate(() =>
+      !!document.querySelector('#paneOv input[data-answerbox][placeholder="Type an answer"], #paneOv button[data-reveal]'))
+    C.case('L4b-free-text-fallback-present', freeFallback, '兜底控件（Type an answer 输入框/reveal 按钮）在等待列')
 
-    // L5 answered 折叠区
-    C.case('L5-answered-collapsed-section', t.includes('answered'), 'Answered 折叠区在文档流（默认收起不算 FAIL，可展开回看由 L1 单元面守）')
+    // L5 answered 折叠区。
+    // t261004-03：锚走 #doneHead2 的 textContent（textContent 不随 text-transform:uppercase
+    // 变形，innerText 随版本漂）；同时钉默认收起（data-open="false"）。行分栏由修正后的
+    // RequestView 桩形（status:'answered'）驱动。
+    const doneHeadTxt = (await page.textContent('#doneHead2')) || ''
+    const doneCollapsed = await page.getAttribute('#doneWrap', 'data-open')
+    C.case('L5-answered-collapsed-section', /answered\s*·\s*\d/i.test(doneHeadTxt) && doneCollapsed === 'false', `head="${doneHeadTxt.trim()}" collapsed=${doneCollapsed}`)
 
     // L6 电源开关 ≡ Grants 总开关（同一状态两处呈现）
     C.case('L6-power-and-master-one-state', t.includes('disable') || t.includes('enable'),
@@ -172,7 +215,9 @@ async function main() {
       const els = [...document.querySelectorAll('h1,h2,h3,h4,label,button,th,[class*="title"],[class*="header"]')]
       return els.some(e => /^\s*needs you\s*$/i.test(e.textContent || ''))
     })
-    C.case('S1b-fixed-terms', !bareIdiom && t.includes('needs your answer'), `bare "Needs you" heading=${bareIdiom}`)
+    // t261004-03：定稿措辞锚同步换 textContent（#waitHead），理由同 L2b——innerText 的
+    // text-transform 行为随 Chromium 版本漂，不定锚会整段间歇红。
+    C.case('S1b-fixed-terms', !bareIdiom && /needs your answer/i.test(waitHeadTxt), `bare "Needs you" heading=${bareIdiom}`)
     const longSentence = text.split(/[.!?\n]/).map(s => s.trim()).filter(s => s.split(/\s+/).length > 40)
     C.case('S1c-no-marathon-sentences', longSentence.length === 0, `over-40-word sentences=${longSentence.length}: ${JSON.stringify(longSentence).slice(0, 120)}`)
 
