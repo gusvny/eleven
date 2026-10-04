@@ -38,6 +38,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .proj[data-open="true"] .plist{display:block}
 .tk{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border:1px solid transparent;border-radius:8px;cursor:pointer}
 .tk:hover{background:var(--hover)}
+.tk.sel{background:var(--panel2);border-color:var(--line)}
 .tk[data-drag="true"]{opacity:.5}
 .tk[data-over="true"]{border-color:var(--accent-line);background:var(--accent-soft)}
 .grip{flex:0 0 auto;color:var(--faint);font-size:11px;letter-spacing:-1px;cursor:grab;user-select:none}
@@ -148,7 +149,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 <div class="shell">
   <div class="side">
     <div class="sideHead"><span class="t">Projects</span>
-      <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Progress shown per ticket: bar / dots / off">bar</button>
+      <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Progress shown per ticket: dots / bar / off">dots</button>
       <span class="n" id="sideN">3 projects</span></div>
     <div class="sideBody" id="projList"></div>
   </div>
@@ -228,8 +229,8 @@ const PROJECTS = {
 };
 const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
 const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
-let cur = 'sandbar', dragId = null, view = 'executor', filter = 'all', openId = null, prog = 'bar';
-function cycleProg(){ prog = prog === 'bar' ? 'dots' : prog === 'dots' ? 'off' : 'bar'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
+let cur = 'sandbar', dragId = null, view = 'executor', filter = 'all', openId = 't261004-18', prog = 'dots';
+function cycleProg(){ prog = prog === 'dots' ? 'bar' : prog === 'bar' ? 'off' : 'dots'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
 const T = () => PROJECTS[cur].tickets;
 const pctOf = t => Math.round((stepIdx(t) + (t.st === 'wait' ? 0 : 0.5)) / STEPS.length * 100);
 function pdots(t){
