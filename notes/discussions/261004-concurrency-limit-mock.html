@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Executor Panel — Overview with a running-ticket limit (mock v1)</title>
+<style>
+:root{
+  --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--fg-soft:#424a53;--muted:#57606a;--faint:#6e7781;
+  --blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--accent-soft:#dbe9ff;--accent-line:#7aa7e8;--dot:#99a3ad;--warn-soft:#fff8c5;
+  --gx:14px;--gy:12px;--cardgap:8px;--sectgap:22px;--notegap:6px;
+}
+html[data-theme="dark"]{
+  --bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--fg-soft:#c3cfdf;--muted:#8ea0b8;--faint:#5b6880;
+  --blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot:#46536a;--warn-soft:#2a2313;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
+.wrap{max-width:1440px;margin:0 auto;padding:18px clamp(16px,2vw,28px) 48px}
+.grow{flex:1}
+.top{display:flex;align-items:center;gap:10px;margin:0 0 14px}
+.top h1{font-size:14px;font-weight:600;margin:0}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 9px;font-size:11px}
+.chip.warn{border-color:var(--amber);color:var(--amber);background:var(--warn-soft)}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;width:max-content;margin:0 0 16px;flex-wrap:wrap}
+.seg label{padding:5px 12px;border-radius:7px;color:var(--muted);font-size:12px}
+.seg label.on{background:var(--panel2);color:var(--fg)}
+.strip{display:flex;align-items:center;gap:10px;padding:9px var(--gx);border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);margin:0 0 var(--cardgap);flex-wrap:wrap}
+.strip .live{color:var(--green)}
+.power{border:1px solid var(--line);border-radius:7px;padding:5px 12px;font:inherit;cursor:pointer;background:var(--panel2);color:var(--fg)}
+.openBtn{border:1px solid var(--line);border-radius:7px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer;background:var(--panel2);color:var(--fg)}
+
+.sect{margin:var(--sectgap) 0 8px;padding-left:var(--gx);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.sect.first{margin-top:0}
+.sect .meta{margin-left:auto;text-transform:none;letter-spacing:0;font-size:11px;color:var(--muted);font-weight:400}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:var(--gy) var(--gx);margin:0 0 var(--cardgap)}
+.row{display:flex;align-items:baseline;gap:8px}
+.row .txt{flex:1;min-width:0}
+.row .meta{color:var(--muted);font-size:11px;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.dot.amber{background:var(--amber)}.dot.grey{background:var(--dot)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
+.note{padding-left:var(--gx);color:var(--muted);font-size:11px;margin:var(--notegap) 0 0}
+.card .note{padding-left:0}
+.muted{color:var(--muted)}
+
+/* the limit control: one row — label, stepper, consequence */
+.limit{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.stepper{display:flex;align-items:center;gap:2px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px}
+.stepper button{border:0;background:transparent;color:var(--fg);font:inherit;font-size:15px;line-height:1;width:26px;height:24px;cursor:pointer;border-radius:6px}
+.stepper button:hover{background:var(--hover);color:var(--blue)}
+.stepper button:disabled{color:var(--faint);cursor:not-allowed;background:transparent}
+.stepper .val{min-width:34px;text-align:center;font-weight:600}
+.limit .say{color:var(--muted);font-size:12px}
+
+/* metrics: even grid, label above value */
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 20px;margin-top:12px}
+.kv{display:flex;flex-direction:column;gap:1px;font-size:11px;color:var(--muted)}
+.kv b{color:var(--fg);font-weight:600;font-size:15px;line-height:1.2}
+.kv b.dim{color:var(--muted);font-weight:500}
+
+/* queue */
+.q{border-top:1px solid var(--line-soft);margin-top:12px;padding-top:8px}
+.qrow{display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid var(--line-soft);font-size:12px}
+.qrow:last-child{border-bottom:0}
+.qrow .pos{flex:0 0 auto;min-width:20px;height:18px;border-radius:5px;background:var(--panel2);color:var(--muted);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.qrow .tk{font-weight:600;color:var(--fg)}
+.qrow .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg-soft)}
+.qrow .wait{color:var(--muted);font-size:11px;white-space:nowrap}
+details{margin:10px 0 0}
+summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none;display:flex;align-items:center;gap:6px}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"\25B8";font-size:10px;color:var(--muted);transition:transform .15s}
+details[open] summary::before{transform:rotate(90deg)}
+.detail{margin-top:6px;color:var(--fg-soft);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+.detail ul{margin:0;padding-left:18px}
+.detail li{margin:3px 0}
+
+/* two columns: requests wide, actions narrow */
+.cols{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);gap:16px;align-items:start;margin-top:var(--sectgap)}
+.cols>div{min-width:0}
+.h{display:flex;align-items:baseline;gap:8px;padding:9px var(--gx);cursor:pointer}
+.h:hover{background:var(--hover)}
+.h .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.h .id{color:var(--faint);font-size:11px;font-family:ui-monospace,monospace}
+.item{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:var(--cardgap)}
+.item.wait{border-left:3px solid var(--amber)}
+.act{display:flex;align-items:center;gap:9px;padding:7px var(--gx);border-bottom:1px solid var(--line-soft)}
+.act:last-child{border-bottom:0}
+.act .t{color:var(--muted);font-size:11px;width:74px;flex:0 0 auto}
+.act .tk{font-weight:600;white-space:nowrap}
+.act .say{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px;min-width:52px;text-align:center;background:var(--panel2);color:var(--muted)}
+.foot{margin:28px 0 0;padding-left:var(--gx);color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Executor</h1><span class="chip">sandbar</span>
+    <span class="grow"></span>
+    <button class="power" onclick="toggleTheme()">Light / dark</button>
+  </div>
+
+  <div class="seg">
+    <label class="on">Overview</label><label>Grants</label><label>Alerts</label><label>Ledger</label><label>Settings</label><label>Inspection</label>
+  </div>
+
+  <div class="strip">
+    <span class="live">● live</span>
+    <span>The executor is working.</span>
+    <span class="chip">Permissions: 5 of 6</span>
+    <span class="chip">Session: session-09ca0247</span>
+    <button class="openBtn">Open session</button>
+    <button class="power" style="margin-left:auto">Disable executor</button>
+  </div>
+
+  <!-- ── 新增块：并发上限（宿主专属，项目级） ───────────────────────────── -->
+  <div class="sect first">Running tickets <span class="chip" id="stateChip">at the limit</span> <span class="meta" id="limitMeta">limit 3 · last changed by you 10-04 14:02</span></div>
+  <div class="card">
+    <div class="row">
+      <span class="txt">How many tickets may be at work at the same time</span>
+      <span class="meta">project: sandbar</span>
+    </div>
+    <div class="limit">
+      <span class="muted">Limit</span>
+      <span class="stepper">
+        <button id="minus" onclick="bump(-1)">−</button>
+        <span class="val" id="cap">3</span>
+        <button id="plus" onclick="bump(1)">+</button>
+      </span>
+      <span class="say" id="say">A new ticket waits when this many are at work.</span>
+      <span class="grow"></span>
+      <button class="power" id="save" onclick="save()">Save</button>
+      <span class="meta" id="saved"></span>
+    </div>
+    <div class="nums">
+      <div class="kv"><span>at work now</span><b id="runNow">3</b></div>
+      <div class="kv"><span>waiting to start</span><b id="queued">4</b></div>
+      <div class="kv"><span>waiting for you</span><b class="dim">2</b></div>
+      <div class="kv"><span>paused by you</span><b class="dim">1</b></div>
+    </div>
+    <div class="note" id="limitNote">A ticket waits when the limit is reached. The next one starts when a ticket at work finishes, fails, or stops for you.</div>
+    <div class="q" id="queue"></div>
+    <details>
+      <summary>What counts against the limit</summary>
+      <div class="detail">
+        <ul>
+          <li><b>Counts:</b> a ticket whose stage is running (an agent is thinking, or a check is running).</li>
+          <li><b>Does not count:</b> a ticket waiting for your signature, a ticket you paused, and a ticket that is finished.
+            They hold no machine time, so they must not hold a slot.</li>
+          <li><b>Order:</b> the queue is first in, first out. You can pause a queued ticket or move it up in the Ledger tab.</li>
+          <li><b>Who can change it:</b> only you. The executor sees the limit and obeys it, and cannot raise it —
+            that is the same rule as permissions.</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+  <div class="note">Why this exists: five tickets at work at once made checks slow and timing tests fail.</div>
+
+  <div class="cols">
+    <div>
+      <div class="sect first">Needs your answer · 2</div>
+      <div class="item wait">
+        <div class="h"><span class="txt">May the executor open tickets for the inspection epic?</span>
+          <span class="id">#a3f2</span><span class="meta">decision · 12 min</span></div>
+      </div>
+      <div class="item wait">
+        <div class="h"><span class="txt">Open a small fix ticket for the Chinese alert copy?</span>
+          <span class="id">#b7c1</span><span class="meta">finding · 4 min</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="sect first">Recent actions</div>
+      <div class="item" style="padding:2px 4px">
+        <div class="act"><span class="t">14:02</span><span class="pill">pause</span><span class="tk">t261004-23</span><span class="say">you paused this ticket (concurrency)</span></div>
+        <div class="act"><span class="t">13:52</span><span class="pill">sign</span><span class="tk">t261004-16</span><span class="say">panel width and markdown merged</span></div>
+        <div class="act"><span class="t">13:40</span><span class="pill">open</span><span class="tk">t261004-24</span><span class="say">copy language ticket</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">Mock. No backend. Sample data.</div>
+</div>
+
+<script>
+const QUEUE = [
+  ['t261004-22','Wait for the condition instead of a fixed sleep in a timing test','11 min'],
+  ['t261004-23','Give the executor an engine-side way to raise a request','8 min'],
+  ['t261004-24','Console-visible copy in Chinese, and a per-diff language check','6 min'],
+  ['t261004-20','Anchor audit for test assertions','3 min'],
+];
+let cap = 3;
+const AT_WORK = 3;
+function render(){
+  document.getElementById('cap').textContent = cap;
+  document.getElementById('minus').disabled = cap <= 1;
+  document.getElementById('plus').disabled = cap >= 10;
+  const over = AT_WORK > cap;
+  document.getElementById('limitMeta').textContent = 'limit ' + cap + ' · last changed by you 10-04 14:02';
+  const chip = document.getElementById('stateChip');
+  chip.className = 'chip' + (over ? ' warn' : '');
+  chip.textContent = over ? 'over the limit' : (AT_WORK >= cap ? 'at the limit' : 'room to start one');
+  document.getElementById('say').textContent = over
+    ? 'Over the limit: ' + AT_WORK + ' tickets are at work. New tickets wait until one finishes.'
+    : 'A new ticket waits when this many are at work.';
+  document.getElementById('runNow').textContent = AT_WORK;
+  document.getElementById('queued').textContent = QUEUE.length;
+  document.getElementById('limitNote').textContent = cap >= AT_WORK
+    ? 'A ticket waits when the limit is reached. The next one starts when a ticket at work finishes, fails, or stops for you.'
+    : 'You lowered the limit below what is at work. Nothing is stopped; the next ticket starts only after the count drops below ' + cap + '.';
+  document.getElementById('queue').innerHTML = QUEUE.map((q, i) =>
+    '<div class="qrow"><span class="pos">' + (i + 1) + '</span><span class="tk">' + q[0] + '</span>'
+    + '<span class="ttl">' + q[1] + '</span><span class="wait">waited ' + q[2] + '</span></div>').join('')
+    + '<div class="note" style="padding-left:0">First in, first out. A queued ticket holds no machine time.</div>';
+}
+function bump(d){
+  const next = cap + d;
+  if (next < 1 || next > 10) return;
+  cap = next;
+  document.getElementById('saved').textContent = '';
+  render();
+}
+function save(){ document.getElementById('saved').textContent = 'Saved. Recorded in this project.'; }
+function toggleTheme(){ const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; }
+render();
+</script>
+</body>
+</html>
