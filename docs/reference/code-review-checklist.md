@@ -62,6 +62,8 @@ Quoted rule text stays in the language of its source file (see
 | B6 | Reported symptom: was the whole family swept? | A reported symptom is a family lead; the same-pattern files, same-mechanism faces are swept, each hit is classified, and the list lands in the acceptance report. Fixing only the named spot fails acceptance | `server/roles/integration.yml` line 91: 「实报即全族线索：宿主点名的每个症状只是样本，不是工单范围。凡实报类工单，」 (KB ruling 260907, KI-055) |
 | B7 | Dead code, duplication, single source of truth? | No dead code in the diff; no intent-level duplication (same intent already covered is not covered again); one fact has one home — a rule with a source page stays a pointer | `docs/terminology.md` line 49 (意图级重复 / intent-level duplication); `docs/testing-guide.md` line 153 (「Since 260823 the single source of truth for tickets is always the Temporal」) |
 | B8 | Do terms match the word table? | No banned jargon (see the banned column of the table); word choice follows the table | `docs/terminology.md` lines 87–95 (禁用对照) and line 122 (the L7 mechanical face). Pointer; the table stays the machine-read source |
+| B9 | Does the evidence come from the reader's side? | For every write or delivery face (ledger, receipt, file, cross-process delivery) the evidence is read back through the reader's real path; a writer's `ok` or receipt is not evidence, and the ticket names the face and the command that shows it | `server/roles/integration.yml` line 95: 「读者侧验收：凡写入面/投递面（账本、回执、文件、跨进程投递），验收证据必须从」 |
+| B10 | Are paths across a boundary absolute, and are ignored areas probed? | Every path in a cross-process or cross-directory write face and receipt is absolute and starts at the instance root; anything `.gitignore` hides has its own probe — `git status` not seeing it is not proof it is absent | `server/roles/integration.yml` line 99: 「边界上不许相对路径：跨进程/跨目录的写面与回执里的路径必须绝对、且以实例根」; machine face: L19 `integration/lint_tests.py` |
 
 ### 3.3 Tests judgement
 
@@ -74,6 +76,7 @@ Quoted rule text stays in the language of its source file (see
 | C5 | Does one red point at one cause? | Failure messages name the object and the expectation | `docs/testing-guide.md` line 338: 「- **One red points to one cause**: failure messages must name the object and the expectation;」 |
 | C6 | Does a new external call site carry a shape assertion? | A mock shape assertion validates the call against the counterpart contract; malformed-input cases ride along | `docs/testing-guide.md` lines 205–215 (KI-046 clause) |
 | C7 | How is a red judged and classified? | Read the failure classification protocol: canonical line, three states, fail-closed, main-baseline decision table | `docs/design/failure-classification-protocol-v1.md` (whole page; the contract surface starts at line 33). Pointer; do not copy it here |
+| C8 | Does every seam have a case through its outermost real entry? | At least one case per seam runs the real entry (the real activity shell, route, or CLI) with the input production supplies, and asserts an environment-tied outcome (an absolute path under the instance root, never a relative one); injecting that input into a unit case alone does not count | `docs/testing-guide.md` line 341 (clause 10: A seam case must go through the outermost real entry) |
 
 ### 3.4 Report quality
 
@@ -89,7 +92,10 @@ Quoted rule text stays in the language of its source file (see
   (same precedence rule as `docs/reference/writing-standard.md` line 149).
 - This page adds no machine gate. It collects rows for human and agent review.
 - Rows a script already checks: B8 (the banned-jargon lint, L7; machine-read source is
-  `docs/terminology.md`), C7 (the integration gate reclassifies failures mechanically).
+  `docs/terminology.md`), C7 (the integration gate reclassifies failures mechanically),
+  and the "no path inside the repo" half of B10 (L19 runtime-state location,
+  `integration/lint_tests.py`: a project ledger under a `.sandbar/projects/` tree inside the
+  repo, outside the repo's own `.sandbar/` evidence area, is an error).
   Partial face: A4 (the words follow the writing standard) is partly scripted by the
   copy-language gate (L15, `integration/lint_copy_language.py`): it reads added lines
   of a diff and covers CJK text in `server/plugins/*/src/**`, `server/engine/**` and
@@ -98,14 +104,15 @@ Quoted rule text stays in the language of its source file (see
   line stay human. Other partial face: `docs/scripts/build_index.py` flags missing
   frontmatter and staleness across the doc library, but it does not check the 9-item
   design-doc self-check list.
-- Rows that stay human only: A3, B1, B2, B3, B4, B5, B6, B7, C1–C6, D1–D3, and the
+- Rows that stay human only: A3, B1, B2, B3, B4, B5, B6, B7, B9, B10 (the receipt-path half;
+  its "no path inside the repo" half is L19), C1–C6, C8, D1–D3, and the
   part of A4 that L15 does not reach (language outside its paths, style, structure,
   terminology). In particular the design-doc self-check list (row A3) is a human
   judgement; no script ticks it. No script replaces reading the diff.
 - The eight rules in `server/roles/integration.yml` (section 评审的失败模式纪律)
   keep their home there. This page points at them; it does not delete or change them.
 
-## 5. Self-check (the last 10 rows before a verdict)
+## 5. Self-check (the rows to tick before a verdict)
 
 1. A1: the diff matches the ticket body.
 2. A2: no conflict with a design page, or the conflict is filed.
@@ -114,9 +121,12 @@ Quoted rule text stays in the language of its source file (see
 5. B3: every spawn, listener, timer, and fd has a recovery path per end state.
 6. B5: every error text names the check that failed.
 7. B6: the family sweep ran; the hit list is in the acceptance report.
-8. C1: at least one assertion lands on the end state.
-9. B8/A4: terms and language pass the word table and the writing standard.
-10. D1: every claim in the report has evidence; unrun checks are declared.
+8. B9: the evidence for each write face was read back from the reader's side.
+9. B10: boundary paths are absolute; ignored areas have their own probe.
+10. C1: at least one assertion lands on the end state.
+11. C8: every seam has a case through its outermost real entry.
+12. B8/A4: terms and language pass the word table and the writing standard.
+13. D1: every claim in the report has evidence; unrun checks are declared.
 
 ## Related documents
 

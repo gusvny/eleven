@@ -6,7 +6,7 @@ tags:
   - isolation
   - docker
 status: active
-updated: 2026-09-28
+updated: 2026-10-04
 ---
 
 # Sandbar test environment isolation guide (M17)
@@ -337,3 +337,18 @@ integration side's job.
   "exactly N items".
 - **One red points to one cause**: failure messages must name the object and the expectation;
   don't make people reverse-engineer it.
+
+**10. A seam case must go through the outermost real entry (host order 261004)**
+
+A seam is any place where the production path supplies something the callee cannot invent: the
+process environment, the working directory, a credential, the instance root. A unit test that
+injects that input proves the callee only — it says nothing about the call site that forgot to pass
+it. Every seam therefore needs at least one case through its outermost real entry (the real activity
+shell, the real route, the real CLI), and that case must assert an outcome tied to the environment:
+an absolute path under the instance root, never a relative one.
+
+Measured fault (261004): the delivery activity called `perform_delivery(payload, now_ms)` with no
+environment. Every unit case injected `env=` explicitly, and the only case touching the activity
+shell asserted registration only. The row landed under a path relative to the worker's cwd while the
+receipt said `ok` — the writer declared success and the reader saw nothing. Green on paper,
+invisible in production.
