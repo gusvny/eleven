@@ -15,7 +15,16 @@ html[data-theme="dark"]{
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
-.shell{display:grid;grid-template-columns:400px minmax(0,1fr) 320px;height:100vh}
+.shell{display:flex;flex-direction:column;height:100vh}
+.cols3{flex:1;min-height:0;display:grid;grid-template-columns:400px minmax(0,1fr) 320px}
+/* 项目/产品横幅：一条 26px 的细带，只放字标与两个图标钮（宿主：别占空间） */
+.appbar{height:26px;flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+.appbar .brand{display:flex;align-items:center;gap:6px}
+.appbar .word{font-weight:600;font-size:12.5px;letter-spacing:.2px}
+.appbar .sub{color:var(--faint);font-size:10.5px}
+.appbar .grow{flex:1}
+.appbar .ico{border:0;background:transparent;color:var(--muted);cursor:pointer;font:inherit;line-height:1;padding:3px 5px;border-radius:5px}
+.appbar .ico:hover{background:var(--hover);color:var(--fg)}
 /* ---- left: projects, each with its ticket list (order = queue order) ---- */
 .side{border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0}
 .sideHead{display:flex;align-items:center;gap:8px;padding:10px var(--gx);border-bottom:1px solid var(--line)}
@@ -228,6 +237,21 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 </head>
 <body>
 <div class="shell">
+  <div class="appbar">
+    <span class="brand" title="sandbar">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <rect x="1" y="8.4" width="12" height="2.4" rx="1.2" fill="#e7933f"/>
+        <rect x="2.4" y="5.4" width="9.2" height="2.4" rx="1.2" fill="#e7b95f" opacity=".85"/>
+        <rect x="3.8" y="2.4" width="6.4" height="2.4" rx="1.2" fill="#e7d98f" opacity=".7"/>
+      </svg>
+      <span class="word">sandbar</span>
+    </span>
+    <span class="sub">ticket engine</span>
+    <span class="grow"></span>
+    <button class="ico" onclick="toggleTheme()" title="Light / dark">◐</button>
+    <button class="ico" onclick="foldMid()" title="Fold the left column (drag the divider to resize)">«</button>
+  </div>
+  <div class="cols3">
   <div class="side">
     <div class="sideHead"><span class="t">Projects</span>
       <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Progress shown per ticket: dots / bar / off">dots</button>
@@ -257,7 +281,6 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     <div class="top">
       <h1>Executor</h1><span class="chip" id="projChip">sandbar</span>
       <span class="grow"></span>
-      <button class="power" onclick="toggleTheme()">Light / dark</button>
     </div>
 
     <div class="seg">
@@ -315,6 +338,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
     <section id="tabBody" hidden></section>
     <div class="foot">Mock. No backend. Sample data.</div>
   </template>
+  </div>
 </div>
 
 <script>
@@ -773,6 +797,7 @@ function bump(d){
   render();
 }
 function save(){ const m = document.getElementById('limitMeta'); if (m) m.textContent = 'set by you just now'; }
+function foldMid(){ const cols = document.querySelector('.cols3'); const on = cols.dataset.folded === 'true'; cols.dataset.folded = String(!on); cols.style.gridTemplateColumns = on ? '400px minmax(0,1fr) 320px' : '0px minmax(0,1fr) 320px' }
 function toggleTheme(){ const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; }
 function wire(){
   document.querySelectorAll('.tk[draggable="true"]').forEach(el => {
