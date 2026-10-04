@@ -137,6 +137,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .lane svg{display:block;width:100%;height:auto}
 .lane .lhead{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--muted);padding:0 2px 4px}
 .lane .lhead b{font-size:12px;color:var(--fg)}
+.lane .lkind{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--faint)}
+.lane .lkind i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-left:6px}
+.lane .lkind .ka{background:var(--green);opacity:.35;margin-left:0}
+.lane .lkind .kg{background:var(--blue);opacity:.35}
+.lane .lkind .ky{background:var(--amber)}
 .lane .lhead .lsum{margin-left:auto;font-family:ui-monospace,monospace;font-size:10px}
 .lane .lgd{display:flex;gap:12px;color:var(--muted);font-size:10px;padding:0 2px 2px}
 .lane .lgd i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:-1px}
@@ -403,64 +408,105 @@ function paintExecutor(){
   chip.textContent = cap === null ? 'no limit' : over ? 'over the limit' : (n >= cap ? 'at the limit' : 'room to start one');
 }
 
-// 泳道图：真拓扑（节点+边+kind），节点状态由 stage 推导；返工弧来自 revision_to。
-// 改进点（相对现行卡片上的迷你泳道）：① 画返工弧（现行版明确不画）② 节点带实际耗时
-// ③ 人门虚线且「等你」时转琥珀 ④ 轮次徽标 ×n ⑤ 曾受阻 ⚠ 角标 ⑥ 非本票的段显示为 skipped
+// 泳道图 v3：**按时间比例**画的管道（不是一排等宽按钮）。
+// 每段宽度 ∝ 实际耗时 → 「时间花在哪」一眼可见；标签上下交错 + 引线，短段也有名字；
+// 人门用菱形标记，当前段带 now 游标与已耗时；轮次 ×n 写在耗时行。不画返工弧。
+const LANE_LABEL = {
+  create_plan:'create plan', review_plan:'review plan', implement:'implement',
+  design_integration_tests:'design tests', ui_evidence:'ui evidence',
+  run_integration_tests:'run tests', arbitrate:'arbitrate',
+  acceptance_walkthrough:'walkthrough', merge_check:'merge check', merge:'merge',
+};
 const LANE_META = {
   create_plan:{kind:'agent',role:'developer',min:4},
   review_plan:{kind:'agent',role:'integration',min:2},
   implement:{kind:'agent',role:'developer',min:38,rounds:2},
   design_integration_tests:{kind:'agent',role:'integration',min:6},
-  ui_evidence:{kind:'gate',role:'script',min:1,skipped:true},
+  ui_evidence:{kind:'gate',role:'script',min:1},
   run_integration_tests:{kind:'gate',role:'integration',min:19},
-  arbitrate:{kind:'agent',role:'integration',min:12,blocked:'once: a check measured the same thing twice'},
+  arbitrate:{kind:'agent',role:'integration',min:12,blocked:'blocked once: a check measured the same thing twice'},
   acceptance_walkthrough:{kind:'agent',role:'integration',min:5},
   merge_check:{kind:'gate',role:'integration',min:3},
-  merge:{kind:'human',role:'you',min:0},
+  merge:{kind:'human',role:'you',min:0,nowMin:26},
 };
-const REVISIONS = [['merge_check','implement','rework ×1'],['review_plan','create_plan','rework ×1']];
-const LANE_SHORT = {
-  create_plan:'create', review_plan:'review', implement:'implement',
-  design_integration_tests:'design', ui_evidence:'ui evid.',
-  run_integration_tests:'run tests', arbitrate:'arbitrate',
-  acceptance_walkthrough:'walk', merge_check:'merge chk', merge:'merge',
-};
-// 泳道图（拓扑驱动）：一条轨道 + 穿在轨道上的节点。去掉返工虚线弧（改由轮次徽标 ×n 表达）。
+const DONE_UI = t => true;
 function laneMap(t){
-  const at = stepIdx(t), W = 66, GAP = 6, X0 = 12, TRACK = 62, PH = 26;
-  const cx = i => X0 + i * (W + GAP) + W / 2;
-  const total = STEPS.length * W + (STEPS.length - 1) * GAP;
-  const upto = cx(at);
-  const nodes = STEPS.map((s, i) => {
+  const at = stepIdx(t);
+  const W = 720, PAD = 8, BAND_Y = 46, BAND_H = 18, MINW = 12, RPAD = 26;
+  const rows = STEPS.map((s, i) => {
     const m = LANE_META[s] || {kind:'agent',role:'-',min:0};
-    const done = i < at, now = i === at;
+    const now = i === at, done = i < at;
     const skipped = m.skipped && !now && !DONE_UI(t);
-    const x = X0 + i * (W + GAP), y = TRACK - PH / 2;
-    const fill = skipped ? 'var(--bg)' : now ? (m.kind === 'human' ? 'var(--warn-soft)' : 'var(--accent-soft)') : done ? 'var(--panel)' : 'var(--bg)';
-    const stroke = skipped ? 'var(--line)' : now ? (m.kind === 'human' ? 'var(--amber)' : 'var(--accent-line)') : done ? 'var(--green)' : 'var(--line)';
-    const dash = skipped ? ' stroke-dasharray="2 3"' : '';
-    const rounds = m.rounds ? '<text x="' + (x + W - 3) + '" y="' + (y - 4) + '" text-anchor="end" font-size="8" fill="var(--muted)">×' + m.rounds + '</text>' : '';
-    const flag = m.blocked ? '<circle cx="' + (x + 6) + '" cy="' + (TRACK - 4) + '" r="2.2" fill="var(--amber)"><title>' + m.blocked + '</title></circle>' : '';
-    const dur = skipped ? 'skipped' : now ? 'now' : done ? (m.min + 'm') : '—';
-    const durFill = now ? 'var(--blue)' : 'var(--faint)';
-    const caret = now ? '<path d="M' + cx(i) + ' ' + (TRACK + PH / 2 + 2) + ' l-4 -5 h8 z" fill="' + (m.kind === 'human' ? 'var(--amber)' : 'var(--accent-line)') + '"/>' : '';
-    return '<g>' + rounds
-      + '<rect x="' + x + '" y="' + y + '" width="' + W + '" height="' + PH + '" rx="13" fill="' + fill + '" stroke="' + stroke + '"' + dash + '/>'
-      + '<text x="' + cx(i) + '" y="' + (TRACK + 3.5) + '" text-anchor="middle" font-size="9.5" fill="var(--fg)">' + (LANE_SHORT[s] || s) + '</text>'
-      + flag + caret
-      + '<text x="' + cx(i) + '" y="' + (TRACK + PH / 2 + 18) + '" text-anchor="middle" font-size="8.5" fill="' + durFill + '">' + dur + '</text>'
-      + '</g>';
+    const dur = now ? (m.nowMin || 10) : done ? (m.min || 1) : 0;
+    return { s, m, now, done, skipped, dur, rounds: m.rounds || 0 };
+  });
+  const totalMin = rows.reduce((a, r) => a + r.dur, 0) || 1;
+  const fixed = MINW * rows.length;
+  const flex = W - PAD - RPAD - fixed - (rows.length - 1) * 2;
+  let x = PAD;
+  rows.forEach(r => { r.w = MINW + Math.round(flex * (r.dur / totalMin)); r.x = x; x += r.w + 2; });
+
+  const segs = rows.map(r => {
+    const kindColor = r.m.kind === 'human' ? 'var(--amber)' : r.m.kind === 'gate' ? 'var(--blue)' : 'var(--green)';
+    const fill = r.skipped ? 'var(--bg)' : r.now ? kindColor : r.done ? kindColor : 'var(--panel2)';
+    const op = r.now ? '1' : r.done ? '0.22' : '1';
+    const stroke = r.skipped ? 'var(--line)' : 'none';
+    return '<rect x="' + r.x + '" y="' + BAND_Y + '" width="' + r.w + '" height="' + BAND_H + '" rx="3" fill="' + fill
+      + '" fill-opacity="' + op + '" stroke="' + stroke + '" stroke-dasharray="2 2">'
+      + '<title>' + LANE_LABEL[r.s] + ' · ' + r.m.role + ' · ' + (r.now ? 'running ' + r.dur + 'm' : r.done ? r.dur + 'm' : 'not started')
+      + (r.rounds ? ' · ran ' + r.rounds + ' rounds' : '') + (r.m.blocked ? ' · ' + r.m.blocked : '') + '</title></rect>';
   }).join('');
-  const viewW = total + X0 * 2, viewH = TRACK + PH / 2 + 28;
+
+  // 标签：上下两行交错 + 引线；两行都挤时截断
+  const labels = [];
+  const lastRight = { up: -999, down: -999 };
+  rows.forEach((r, i) => {
+    const name = LANE_LABEL[r.s];
+    const durTxt = r.skipped ? 'skipped' : !r.done && !r.now ? '' : r.dur + 'm' + (r.rounds ? ' · ×' + r.rounds : '');
+    const wName = name.length * 5.4, wDur = durTxt.length * 4.6;
+    const wLab = Math.max(wName, wDur) + 6;
+    const cx = r.x + r.w / 2;
+    let side = (i % 2 === 0) ? 'up' : 'down';
+    if (cx - wLab / 2 < lastRight[side] + 6) side = side === 'up' ? 'down' : 'up';
+    let label = name;
+    const room = side === 'up' ? lastRight : lastRight;
+    if (cx - wLab / 2 < room + 6){ /* 仍挤：截断 */ }
+    lastRight[side] = cx + wLab / 2;
+    const y = side === 'up' ? BAND_Y - 14 : BAND_Y + BAND_H + 20;
+    const yDur = side === 'up' ? y - 9 : y + 9;
+    const lx = Math.max(26, Math.min(cx, W + RPAD - 26));
+    labels.push('<line x1="' + cx + '" y1="' + (side === 'up' ? BAND_Y - 2 : BAND_Y + BAND_H + 2) + '" x2="' + cx + '" y2="' + (side === 'up' ? y + 3 : y - 3) + '" stroke="var(--line)"/>'
+      + '<text x="' + lx + '" y="' + y + '" text-anchor="middle" font-size="9.5" fill="' + (r.now ? 'var(--fg)' : 'var(--muted)') + '">' + label + '</text>'
+      + (durTxt ? '<text x="' + lx + '" y="' + yDur + '" text-anchor="middle" font-size="8.5" fill="' + (r.now ? 'var(--blue)' : 'var(--faint)') + '">' + durTxt + '</text>' : ''));
+  });
+
+  // 人门菱形 + 当前段 now 游标
+  const gates = rows.filter(r => r.m.kind === 'human').map(r => {
+    const gx = r.x + 6, gy = BAND_Y + BAND_H / 2;
+    return '<path d="M' + gx + ' ' + (gy - 4) + ' l4 4 l-4 4 l-4 -4 z" fill="var(--amber)"/>';
+  }).join('');
+  const cur = rows[at];
+  const nowX = cur.x + cur.w;
+  const nowMark = '<line x1="' + nowX + '" y1="' + (BAND_Y - 4) + '" x2="' + nowX + '" y2="' + (BAND_Y + BAND_H + 4) + '" stroke="var(--accent-line)" stroke-width="1.5" stroke-dasharray="3 2"/>'
+    + '<path d="M' + nowX + ' ' + (BAND_Y - 10) + ' l-4 5 h8 z" fill="var(--accent-line)"/>';
+
+  const t0 = 13 * 60 + 5;                     // 起始时刻（mock：13:05）
+  const hhmm = m => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  const used = totalMin;
+  const totalTxt = Math.floor(used / 60) + 'h' + String(used % 60).padStart(2, '0') + 'm';
   return '<div class="lane">'
-    + '<div class="lhead"><b>' + cur + '</b><span>development lane · 10 stages</span>'
-    + '<span class="lsum">done ' + at + ' · now 1 · left ' + (STEPS.length - at - 1) + '</span></div>'
-    + '<svg viewBox="0 0 ' + viewW + ' ' + viewH + '" preserveAspectRatio="xMinYMin meet">'
-    + '<line x1="' + X0 + '" y1="' + TRACK + '" x2="' + (X0 + total) + '" y2="' + TRACK + '" stroke="var(--line)" stroke-width="2" stroke-linecap="round"/>'
-    + '<line x1="' + X0 + '" y1="' + TRACK + '" x2="' + upto + '" y2="' + TRACK + '" stroke="var(--accent-line)" stroke-width="2" stroke-linecap="round"/>'
-    + nodes + '</svg></div>';
+    + '<div class="lhead"><b>' + t.id + '</b><span>development lane · ' + STEPS.length + ' stages</span>'
+    + '<span class="lkind"><i class="ka"></i>agent<i class="kg"></i>gate<i class="ky"></i>you</span>'
+    + '<span class="lsum">elapsed ' + totalTxt + ' · now at <b>' + LANE_LABEL[cur.s] + '</b>' + (cur.m.kind === 'human' ? ' (waiting for you)' : '') + '</span></div>'
+    + '<svg viewBox="0 0 ' + (W + RPAD) + ' 116" preserveAspectRatio="xMinYMin meet">'
+    + '<line x1="' + PAD + '" y1="' + (BAND_Y + BAND_H / 2) + '" x2="' + (W + RPAD - 8) + '" y2="' + (BAND_Y + BAND_H / 2) + '" stroke="var(--line-soft)" stroke-width="1"/>'
+    + segs + gates + nowMark + labels.join('')
+    + '<line x1="' + PAD + '" y1="108" x2="' + (W + RPAD - 8) + '" y2="108" stroke="var(--line-soft)"/>'
+    + '<text x="' + PAD + '" y="116" font-size="8.5" fill="var(--faint)">' + hhmm(t0) + '</text>'
+    + '<text x="' + (W + RPAD - 8) + '" y="116" text-anchor="end" font-size="8.5" fill="var(--faint)">' + hhmm(t0 + totalMin) + '</text>'
+    
+    + '</svg></div>';
 }
-// 票面：要它干什么（spec）、验收口径、写集、原始请求（逐字）
 const SPEC = {
   't261004-18': { spec:'Panel write endpoints must carry identity: the console token gate covers plugin routes, and the writer name is not supplied by the caller. A refused write changes nothing on disk.',
     acc:['An unauthenticated write is refused with 401 and writes nothing.','The writer name comes from the authenticated identity; a forged name is recorded as a mismatch.','Authority writes pass the engine META_OP judgment.','The panel page still loads and answering still works from the console.'],
@@ -478,7 +524,6 @@ const SPEC = {
     acc:['No fixed sleep gates an assertion.','A timeout names the condition that did not hold.','Five consecutive runs are green under load.'],
     ws:['server/engine/tests/'], req:'抖动会随机拦每一张票' },
 };
-const DONE_UI = t => true;   // mock：本票是 UI 票，ui_evidence 段真跑过
 
 function specBlock(t){
   const d = SPEC[t.id] || { spec:'(spec not shown in this mock)', acc:[], ws:[], req:'' };
