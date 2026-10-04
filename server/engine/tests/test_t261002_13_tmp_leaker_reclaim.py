@@ -164,7 +164,66 @@ def test_d1b_integration_sigint_in_mint_window_still_reaps(tmp_path):
 
 # =====================================================================================
 # D2b 活载体安全轨（仲裁 code-fault 回归）：root 未解析 vs pid cwd 已解析的路径失真
-# =====================================================================================
+#
+# 载体等待用**轮询到 deadline**，不是固定 sleep（t261004-22：固定 sleep(1.0) 在五泳道
+# 并发负载下间歇红——子进程尚未完成 chdir / 尚未被进程枚举看到，扫描空手而归，把
+# 「慢子进程」误读成「归一化回归」）。deadline=15s：绿色路径第一个 0.1s 轮次即命中
+# （成本与 sleep(1.0) 相比反而更低），只有真正出问题的跑法才花满 15s。
+CARRIER_WAIT_DEADLINE_S = 15.0
+CARRIER_WAIT_INTERVAL_S = 0.1
+
+
+def _wait_carrier(link_root, entry, deadline_s=CARRIER_WAIT_DEADLINE_S,
+                  interval_s=CARRIER_WAIT_INTERVAL_S):
+    """轮询 live_carriers 直到命中或 deadline；返回 (hits, err, waited)。
+
+    - err 非 None = 进程枚举面不可用（沙箱拒 /bin/ps、缺 lsof 等）——具名返回，
+      调用方降级，绝不把它当「没有载体」。
+    - 整个 deadline 内没有任何 pid 解析出 cwd = 枚举工具半坏（pgrep 活、lsof 缺），
+      err 给具名串，不当「慢子进程」。
+    """
+    import time as _t
+    start = _t.monotonic()
+    first_err = None
+    any_cwd_seen = False
+    probes_done = 0
+
+    def _probe_any_cwd():
+        # lsof 半坏探测：本测试进程自己是零成本探针；再抽样前 20 个 pid（兜住
+        # 「lsof 只认个别 pid」的桩环境）。命中即止，全 wait 至多探 3 轮。
+        pids, perr = sw._all_pids()
+        if perr or not pids:
+            return False
+        for pid in (os.getpid(),) + tuple(pids[:20]):
+            if sw._pid_cwd(pid):
+                return True
+        return False
+
+    while True:
+        hits, err = sw.live_carriers(str(link_root), [entry])
+        now = _t.monotonic()
+        if err:
+            # 瞬时抖动容忍（review 三分支 b）：记住第一个错误，deadline 内恢复则清零
+            if first_err is None:
+                first_err = err
+        else:
+            first_err = None
+            if hits.get(entry.name):
+                return hits, None, now - start
+            progress = (now - start) / deadline_s
+            if not any_cwd_seen and probes_done < 3 and progress >= probes_done * 0.4:
+                any_cwd_seen = _probe_any_cwd()
+                probes_done += 1
+        if now - start >= deadline_s:
+            if first_err:
+                return hits, first_err, now - start
+            if not any_cwd_seen:
+                return hits, ("no pid had a resolvable cwd for the whole %.1fs wait "
+                              "(enumeration tool half-broken? pgrep alive but lsof missing?)"
+                              % deadline_s), now - start
+            return hits, None, now - start
+        _t.sleep(interval_s)
+
 
 def test_d2b_carrier_detected_through_unresolved_root(tmp_path):
     """symlink 化的 temp 根下（macOS `/var/...` vs cwd 报 `/private/var/...`），
@@ -178,17 +237,30 @@ def test_d2b_carrier_detected_through_unresolved_root(tmp_path):
     link_root = tmp_path / "link"          # root 的符号别名 = 未解析形态
     link_root.symlink_to(real_root, target_is_directory=True)
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-    p = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(20)"],
+    # sleep(120)：子进程必须活过 deadline + 收尾探测（曾用 sleep(20)，15s 轮询耗满后
+    # 子进程已自行退出，慢子进程分支误报「lsof 看不到」——t261004-22 实测教训）
+    p = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(120)"],
                          cwd=str(carrier), env=env,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        _t.sleep(1.0)                       # 等子进程 chdir 完成
-        hits, err = sw.live_carriers(str(link_root),
-                                     [sw.FixtureEntry("t260904-02-carrier",
-                                                      _t.time() - 8 * 3600, "dir")])
-        assert err is None
-        assert hits.get("t260904-02-carrier"), \
-            "carrier invisible through unresolved root (the arbitrated defect)"
+        entry = sw.FixtureEntry("t260904-02-carrier", _t.time() - 8 * 3600, "dir")
+        hits, err, waited = _wait_carrier(link_root, entry)
+        # 枚举面不可用/半坏 = 具名降级为 skip（工单 R3 选择：skip with named reason，
+        # 不假红也不伪造通过——执行沙箱拒 /bin/ps，此路径实际可达）
+        if err:
+            pytest.skip("process enumeration unavailable after %.1fs: %s" % (waited, err))
+        if hits.get("t260904-02-carrier"):
+            pass                                   # 命中：归一化安全轨成立
+        elif sw._pid_cwd(p.pid) is None or p.poll() is not None:
+            pytest.fail("child process never became enumerable by cwd scan within "
+                        "%.1fs (child %s: dead or lsof cannot see it) — slow child / "
+                        "environment, NOT the unresolved-root regression"
+                        % (waited, p.pid))
+        else:
+            pytest.fail("carrier invisible through unresolved root after %.1fs poll "
+                        "(child %s alive with resolvable cwd=%s, enumeration healthy "
+                        "-> the arbitrated realpath-normalization regression)"
+                        % (waited, p.pid, sw._pid_cwd(p.pid)))
     finally:
         p.terminate()
         p.wait(timeout=10)
