@@ -99,6 +99,16 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .stepper button:hover{background:var(--hover);color:var(--blue)}
 .stepper button:disabled{color:var(--faint);cursor:not-allowed;background:transparent}
 .stepper .val{min-width:32px;text-align:center;font-weight:600}
+.ov2{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:14px;align-items:start}
+.feed{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.feed .r{display:flex;align-items:center;gap:8px;padding:7px var(--gx);border-bottom:1px solid var(--line-soft);font-size:12px}
+.feed .r:last-child{border-bottom:0}
+.feed .at{color:var(--muted);font-size:11px;width:42px;flex:0 0 auto;font-family:ui-monospace,monospace}
+.feed .pill{font-size:10px;font-weight:700;letter-spacing:.5px;border-radius:5px;padding:2px 6px;min-width:46px;text-align:center;background:var(--panel2);color:var(--muted);flex:0 0 auto}
+.feed .pill.sign{background:var(--pill-sign-bg,#ddf4ff);color:var(--blue)}
+.feed .pill.pause{background:var(--panel2);color:var(--muted)}
+.feed .tk{font-weight:600;white-space:nowrap;font-size:11px}
+.feed .say{flex:1;min-width:0;color:var(--muted);font-size:11px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .req{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:10px;margin-bottom:var(--cardgap)}
 .req .h{display:flex;align-items:baseline;gap:8px;padding:9px var(--gx);cursor:pointer}
 .req .h:hover{background:var(--hover)}
@@ -251,9 +261,24 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
       </div>
     </div>
 
-    <div class="sect">Needs your answer · 2</div>
-    <div class="req"><div class="h"><span class="txt">May the executor open tickets for the inspection epic?</span><span class="id">#a3f2</span><span class="meta">decision · 12 min</span></div></div>
-    <div class="req"><div class="h"><span class="txt">Open a small fix ticket for the Chinese alert copy?</span><span class="id">#b7c1</span><span class="meta">finding · 4 min</span></div></div>
+    <div class="ov2">
+      <div>
+        <div class="sect first">Needs your answer · 2</div>
+        <div class="req"><div class="h"><span class="txt">May the executor open tickets for the inspection epic?</span><span class="id">#a3f2</span><span class="meta">decision · 12 min</span></div></div>
+        <div class="req"><div class="h"><span class="txt">Open a small fix ticket for the Chinese alert copy?</span><span class="id">#b7c1</span><span class="meta">finding · 4 min</span></div></div>
+      </div>
+      <div>
+        <div class="sect first">Recent actions</div>
+        <div class="feed">
+          <div class="r"><span class="at">14:02</span><span class="pill pause">pause</span><span class="tk">t261004-23</span><span class="say" title="you paused it for concurrency (over the limit)">you paused it for concurrency (over the limit)</span></div>
+          <div class="r"><span class="at">13:52</span><span class="pill sign">sign</span><span class="tk">t261004-16</span><span class="say" title="merge booked: panel width, columns and markdown">merge booked: panel width, columns and markdown</span></div>
+          <div class="r"><span class="at">13:40</span><span class="pill">open</span><span class="tk">t261004-24</span><span class="say">copy language ticket</span></div>
+          <div class="r"><span class="at">13:22</span><span class="pill">rerun</span><span class="tk">t261004-15</span><span class="say" title="retry requested before the merge gate">retry requested before the merge gate</span></div>
+          <div class="r"><span class="at">13:05</span><span class="pill">pause</span><span class="tk">t261004-20</span><span class="say">queued behind the limit</span></div>
+        </div>
+        <div class="foot">Last 5 from this project's action record. The full list is in the Ledger tab.</div>
+      </div>
+    </div>
 
     </section>
     <section id="tabBody" hidden></section>
