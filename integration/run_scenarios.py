@@ -2103,6 +2103,13 @@ SCENARIOS = [
      "「三面一致」漂移契约与 unreadable 发现的 subject 点名形状。被测文件缺席=ENV_FAIL exit 2；"
      "文件在而守卫函数缺席=FAIL（交付物缺席是断言红不是环境红）",
      "python3 integration/t261002-14/sc_vocab_drift_guards.py", "ro", "serial"),
+    # ---- t261004-02: 机械冲突 blocked 文案点名执行器出路 × 执行器 preset 升级教义/STE 产出标准 ----
+    ("t261004-02-block-text-executor-escape",
+     "机械冲突 blocked 文案点名执行器自己的出路（t261004-02 Part A，灰盒 L2，离线秒级零 docker 零 Temporal，t261003-10 实案回归棒：执行器被唤醒、诊断正确、却因文案只说「转人工处置」而让步）：A dev_lane merge_check 干跑态两文案（超限/同批）human 锚「转人工处置」逐字保留且同句点名 rework 打回 implement 出路、不把 git 操作指派给执行器（干跑态泳道 .git 是 gitfile 执行器跑不了 git）；B 合并进行中态 settle 两文案（merge_check/主同步缺省）：执行器可自解子句（rework(to_stage=implement)）与人工半句（git merge --abort 复位后 retry_qc）同段在场、各自归位；C light_lane settle_unconverged：rework(to_stage=implement) 与 retry_qc 点名、human 的 abort 复位半句保留、开场「a human has to take it」整块归人矛盾形态拆除；D 真人工分支零污染——unreachable/reset_exception/reset_failed 仍如实指人且不伪造执行器出路；E 负控=实发的那条同批文案必带出路；selfcheck 文案锚（冲突消解 N 轮未收敛/同批文件反复冲突）零漂移。intent 分工：冲突回路机制/重入编排归 t261002-10 与 selfcheck（L1/编排面），本条只锁「文案在 block 时刻告诉执行器怎么自救」的用户可感知文本契约。实现未落地红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t261004-02/sc_block_text_executor_escape.py", "ro", "serial"),
+    ("t261004-02-executor-preset-doctrine",
+     "执行器 preset 升级教义×STE 产出标准×安装缝如实报态（t261004-02 Part B，灰盒 L2，离线秒级零 docker）：A 教义面——agent.cordis.yml 点名「转人工处置」措辞（与引擎文案同词可检索）、先自解后报告语义在案、四类升级条件（新授权/更大范围、保护路径、跨项目、宿主拍板）≥3/4 点名；B 产出标准面——ASD-STE100 标准点名、绑定 261003-executor-panel-redesign.md §4 定稿清单（文档真实存在）、清单要点（词长/语态/行话任一）携带、中文分工在案（聊天平实中文/文档现代中文不随 STE）；C 安装缝——install_executor_preset.py --check 退出码在声明词汇表（0=已装/3=未装）且输出具名 live copy 路径、本泳道不代装（宿主步骤留证）。intent 分工：面板 UI/唤醒投递归 t261003-14/-15 族，本条只锁常驻人设的教义与产出标准文本契约。实现未落地红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "python3 integration/t261004-02/sc_executor_preset_doctrine.py", "ro", "serial"),
 ]
 
 CMD_TIMEOUT = 900

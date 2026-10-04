@@ -277,9 +277,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
         "agent_failed_fmt": "Main sync conflict resolution round %d: %s",
         "settle_unconverged": (
             "Main sync conflict resolution round %d did not converge (the worker's settle "
-            "check failed) — a human has to take it: %s. The workspace is mid-merge: resolve "
-            "the conflicts and send rework(to_stage=implement) to continue, or run git merge "
-            "--abort in the lane and send retry_qc to re-verify"),
+            "check failed): %s. The workspace is mid-merge. The executor can settle this: "
+            "send rework(to_stage=implement). The implement stage resolves the conflict "
+            "markers, then the gate re-runs. A human has to run git merge --abort in the "
+            "lane if a reset is needed; send retry_qc after that reset"),
         "back_to_implement": ("Main sync conflict resolved (round %d) — back to implement to "
                               "adapt to the main changes"),
         "synced_log": "main sync (%s): %s",

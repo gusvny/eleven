@@ -2410,7 +2410,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                              "主同步冲突消解第 %d 轮未收敛（worker 代落盘校验未过），"
                              "转人工处置：%s。工作区现为合并进行中态——人工解冲突后发 "
                              "rework 回 implement 续解，或泳道内 git merge --abort "
-                             "复位后发 retry_qc 重验") % (conflict_rounds, _why))
+                             "复位后发 retry_qc 重验。执行器自己的出路：这条 "
+                             "rework(to_stage=implement) 用已持有的 send-back 权直接发，"
+                             "不必等人工"
+                             ) % (conflict_rounds, _why))
                     _sync_stop = "blocked"
                     break
                 self._log("主同步冲突消解第 %d 轮落盘 %s（%d 个文件），回实现段适配 main 变更"
@@ -4197,6 +4200,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     await self._blocked(
                         "merge_check",
                         "冲突消解 %d 轮未收敛（上限 %d），转人工处置：冲突文件 %s"
+                        "。执行器自己的出路（不必等人工）：发 rework(to_stage=implement)，"
+                        "实现段适配 main 后自动回 merge_check 重验"
                         % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS, files_txt))
                     continue
                 if prev_conflict_files and files_sig == prev_conflict_files:
@@ -4207,6 +4212,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     await self._blocked(
                         "merge_check",
                         "同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"
+                        "。执行器自己的出路（不必等人工）：发 rework(to_stage=implement)，"
+                        "实现段适配 main 后自动回 merge_check 重验"
                         % (conflict_rounds, files_txt))
                     continue
                 prev_conflict_files = files_sig
@@ -4291,7 +4298,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         "merge_check",
                         "冲突消解第 %d 轮未收敛（worker 代落盘校验未过），转人工处置：%s。"
                         "工作区现为合并进行中态——人工解冲突后发 rework 回 implement 续解，"
-                        "或泳道内 git merge --abort 复位后发 retry_qc 重验"
+                        "或泳道内 git merge --abort 复位后发 retry_qc 重验。"
+                        "执行器自己的出路：这条 rework(to_stage=implement) 用已持有的 "
+                        "send-back 权直接发，不必等人工"
                         % (conflict_rounds, why))
                     continue
                 self._log("冲突消解第 %d 轮落盘 %s（%d 个文件），回 merge_check 重验"

@@ -48,7 +48,7 @@
 
       - 你的授权由执行器面板 Grants 页的项目声明（executor-grants.json）承载，引擎在写入口按声明判定（t260930-14 起）：零授予＝你没有任何写授权，只能看和问；未被授予的操作会被拒收，拒收信息会点名缺哪条声明、如何授予。不要推断存在别的许可来源，也绝不绕闸（换入口/改环境变量伪装成别的调用方都是越权）。面板当前只有授权声明与守望者设置面：请求/告警 tab 的面板落地与页面级编辑控件属后续票，此刻以 API 面（GET/POST /sandbar-executor-panel/api/grants）为编辑真源。
       - 授权永远只能由宿主（或可查证的在案锚）开出。你绝不：自己给自己授权或扩大自己的范围；重启/停止/占用控制台（127.0.0.1:3099，它是用户的操作面）；无显式跨项目旗标并升级给对方项目宿主就碰其他项目的任何面；替用户拍板属于用户的设计决定（设计定稿权归用户）；在任何文档里手工维护进度表（进度查引擎，不养死表）；在 main 分支上直修（除非本会话有用户明示的授权锚，且动作留证）。
-      - 文字纪律：工单票面一律英文；文档与代码注释用现代中文；控制台 UI 界面文案一律英文。
+      - 文字纪律：工单票面与代码注释一律英文（代码注释按 docs/reference/writing-standard.md 的 8 条 STE 口径；261004 宿主令，规则 3「现代中文」退役）；notes/ 知识库保持中文（同文件受控中文 8 条）；控制台 UI 界面文案一律英文。
 
       ## 问（提问的交付面纪律，t261001-23 / KI-181）
 
@@ -59,6 +59,14 @@
       ## 开局
 
       你收到的第一条注入消息是本项目的会话 charter（含项目专属操作面、纪律与执行器身份段）：以它为准，先做它要求的开工动作。
+
+      ## 转人工处置不是禁令
+
+      引擎文案里的「转人工处置」只是把这个阻塞暴露给人看，不是禁止你自己处理。当一个阻塞可以机械解决、且你已握有所需权限（例如同步/合并冲突场景的 send-back 打回权）时：先自解后报告（t261003-10 实案教训：诊断正确却停在「已转人工」，从未动用手上已有的打回权）。只在以下情况升级给宿主：需要新授权或更大范围；涉及受保护路径；动作跨项目；或该决定按设计就属于宿主。
+
+      ## English output standard
+
+      Every English artifact you write follows the 80 percent ASD-STE100 checklist (定稿清单见 notes/discussions/261003-executor-panel-redesign.md §4)：panel requests and questions, sign and rework notes, ticket-face text, handoff and result files. The rules: sentences of at most about 25 words; one idea per sentence; active voice（主动语态）; one fixed term per concept; no idioms（不用习语）; no contractions (write do not, not dont); no jargon（不用行话）; noun clusters of at most three words. Chinese chat replies stay plain Chinese, because STE is an English standard. Code comments follow the project writing standard (docs/reference/writing-standard.md, the 8-rule STE list). Knowledge-base documents under notes/ stay Chinese (controlled Chinese 8 rules, same file).
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
