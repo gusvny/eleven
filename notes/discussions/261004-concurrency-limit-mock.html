@@ -51,7 +51,22 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .tk .l1{display:flex;align-items:baseline;gap:6px}
 .tk .id{flex:0 0 auto;font-size:11px;color:var(--muted);font-family:ui-monospace,monospace}
 .tk .ttl{flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tk .l2{font-size:10px;color:var(--faint);font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk .l2{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--faint);font-family:ui-monospace,monospace}
+.tk .l2 .meta2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pbar{display:block;height:3px;border-radius:2px;background:var(--panel2);margin-top:5px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--accent-line)}
+.pdots{display:flex;gap:2px;flex:0 0 auto}
+.pdots i{width:6px;height:3px;background:var(--panel2);border-radius:1px}
+.pdots i.on{background:var(--accent-line)}
+.progbtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;padding:1px 7px;font:inherit;font-size:10px;cursor:pointer}
+/* 抽屉：决策面（要你签的那件事 + 回执 + 变更 + 时间线） */
+.decide{border:1px solid var(--amber);background:var(--warn-soft);border-radius:10px;padding:10px 12px;margin:12px 0;font-size:12px}
+.decide b{display:block;margin-bottom:3px}
+.kv2{display:grid;grid-template-columns:110px 1fr;gap:2px 10px;font-size:12px;margin-top:10px}
+.kv2 .k{color:var(--muted);font-size:11px}
+.tl{margin:10px 0 0;padding-left:0;list-style:none;font-size:12px}
+.tl li{display:flex;gap:8px;padding:3px 0;color:var(--fg-soft)}
+.tl .at{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace;flex:0 0 auto}
 .arrows{flex:0 0 auto;display:flex;gap:2px;margin-top:1px}
 .arrows button{border:0;background:transparent;color:var(--faint);cursor:pointer;font:inherit;font-size:11px;padding:0 2px;border-radius:4px}
 .tk:hover .arrows button{color:var(--muted)}
@@ -132,7 +147,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 <body>
 <div class="shell">
   <div class="side">
-    <div class="sideHead"><span class="t">Projects</span><span class="n" id="sideN">3 projects</span></div>
+    <div class="sideHead"><span class="t">Projects</span>
+      <button class="progbtn" id="progBtn" onclick="cycleProg()" title="Progress shown per ticket: bar / dots / off">bar</button>
+      <span class="n" id="sideN">3 projects</span></div>
     <div class="sideBody" id="projList"></div>
   </div>
 
@@ -209,8 +226,21 @@ const PROJECTS = {
     {id:'t260930-09', title:'Move assets to the CDN', stage:'create_plan', epic:'content', st:'wait'},
   ]},
 };
-let cur = 'sandbar', dragId = null, view = 'executor', filter = 'all', openId = null;
+const STEPS = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
+const stepIdx = t => Math.max(0, STEPS.indexOf(String(t.stage).split(' ')[0]));
+let cur = 'sandbar', dragId = null, view = 'executor', filter = 'all', openId = null, prog = 'bar';
+function cycleProg(){ prog = prog === 'bar' ? 'dots' : prog === 'dots' ? 'off' : 'bar'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }
 const T = () => PROJECTS[cur].tickets;
+const pctOf = t => Math.round((stepIdx(t) + (t.st === 'wait' ? 0 : 0.5)) / STEPS.length * 100);
+function pdots(t){
+  if (prog !== 'dots') return '';
+  const i = stepIdx(t);
+  return '<span class="pdots">' + STEPS.map((s, k) => '<i class="' + (k <= i ? 'on' : '') + '"></i>').join('') + '</span>';
+}
+function pbar(t){
+  if (prog !== 'bar') return '';
+  return '<span class="pbar"><i style="width:' + pctOf(t) + '%"></i></span>';
+}
 const inFlight = () => T().filter(t => t.st === 'run' || t.st === 'hold').length;
 const waitCount = () => T().filter(t => t.st === 'wait').length;
 const TICKET = id => { for (const k in PROJECTS) { const t = PROJECTS[k].tickets.find(x => x.id === id); if (t) return Object.assign({ project: k }, t) } return null; };
@@ -235,7 +265,8 @@ function renderSide(){
       return '<div class="tk' + (fixed ? ' fixed' : '') + hi + '" data-id="' + t.id + '" draggable="' + (!fixed) + '" onclick="pickProject(\'' + k + '\');openTicket(\'' + t.id + '\')">'
         + '<span class="grip">⋮⋮</span>' + prefix
         + '<span class="body"><span class="l1"><span class="id">' + t.id + '</span><span class="ttl">' + t.title + '</span></span>'
-        + '<span class="l2">' + t.stage + ' · ' + t.epic + '</span></span>' + arrows + '</div>';
+        + '<span class="l2"><span class="meta2">' + t.stage + ' · ' + t.epic + '</span>' + pdots(t) + '</span>'
+        + pbar(t) + '</span>' + arrows + '</div>';
     }).join('');
     const icon = (v, glyph, title) => '<span class="vi' + (k === cur && view === v ? ' on' : '') + '" title="' + title
       + '" onclick="pickProject(\'' + k + '\');setView(\'' + v + '\')">' + glyph + '</span>';
@@ -314,14 +345,34 @@ function renderDrawer(){
   const steps = ['create_plan','review_plan','implement','design_integration_tests','ui_evidence','run_integration_tests','arbitrate','acceptance_walkthrough','merge_check','merge'];
   const at = steps.indexOf(String(t.stage).split(' ')[0]);
   const label = t.st === 'run' ? 'at work' : t.st === 'hold' ? 'waiting for your signature' : t.st === 'wait' ? 'queued' : 'paused by you';
+  const decide = t.st === 'hold'
+    ? '<div class="decide"><b>Waiting for you: sign the merge</b>'
+      + 'Merge this lane into main. The merge check is green (all four items). '
+      + 'Send it back instead if the diff is wrong.</div>'
+    : t.st === 'run'
+      ? '<div class="decide" style="border-color:var(--accent-line);background:var(--accent-soft)"><b>At work: ' + t.stage + '</b>'
+        + 'A check or an agent is running. Nothing to decide yet.</div>'
+      : '<div class="decide" style="border-color:var(--line);background:var(--panel)"><b>'
+        + (t.st === 'wait' ? 'Queued, position ' + (T().filter(x => x.st === 'wait').findIndex(x => x.id === t.id) + 1) : 'Paused by you')
+        + '</b>' + (t.st === 'wait' ? 'It starts when a slot frees. Nothing to decide yet.' : 'It stops after the current stage ends.') + '</div>';
   d.dataset.open = 'true';
   d.innerHTML = '<div class="dh"><span class="id">' + t.id + '</span><h2>' + t.title + '</h2>'
     + '<button class="x" onclick="openTicket(null)">×</button></div>'
     + '<div class="acts"><button class="pri">Sign</button><button>Send back</button><button>Retry check</button><button>Pause</button></div>'
-    + '<dl><dt>Project</dt><dd>' + t.project + '</dd><dt>Epic</dt><dd>' + t.epic + '</dd>'
-    + '<dt>Stage</dt><dd>' + t.stage + '</dd><dt>State</dt><dd>' + label + '</dd></dl>'
+    + decide
+    + '<div class="kv2"><span class="k">Project</span><span>' + t.project + '</span>'
+    + '<span class="k">Epic</span><span>' + t.epic + '</span>'
+    + '<span class="k">Stage</span><span>' + t.stage + '</span>'
+    + '<span class="k">State</span><span>' + label + '</span>'
+    + '<span class="k">Changes</span><span>3 files · +128 −12 (lane vs main)</span>'
+    + '<span class="k">Last receipt</span><span>' + (t.st === 'wait' ? 'none yet' : 'merge_check: 4 of 4 green · 2 min ago') + '</span></div>'
     + '<div class="steps">' + steps.map((s, i) => '<div class="step ' + (i < at ? 'done' : i === at ? 'now' : '') + '"><span class="dot"></span>' + s + '</div>').join('') + '</div>'
-    + '<div class="foot">Mock drawer: changes, timeline and the run receipt live here.</div>';
+    + '<ul class="tl">'
+    + '<li><span class="at">14:02</span><span>you paused the ticket before it advanced</span></li>'
+    + '<li><span class="at">13:52</span><span>merge_check: lane branch has commits, tree clean, dry run green</span></li>'
+    + '<li><span class="at">13:40</span><span>implement: ' + (t.st === 'wait' ? 'not started' : 'handoff written, 3 files changed') + '</span></li>'
+    + '</ul>'
+    + '<div class="foot">Mock drawer: this is where changes, the run receipt and the timeline live.</div>';
 }
 
 function move(k, id, d){
