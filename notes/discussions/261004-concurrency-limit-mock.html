@@ -322,7 +322,7 @@ function renderSide(){
     return '<div class="proj" data-open="' + (k === cur) + '" data-key="' + k + '">'
       + '<div class="prow" onclick="pickProject(\'' + k + '\')"><span class="pname">' + k + '</span>'
       + '<span class="views" onclick="event.stopPropagation()">'
-      + icon('board', '▤', 'Ticket board') + icon('epics', '◆', 'Epics') + icon('executor', '▶', 'Executor panel')
+      + icon('board', '▤', 'Ticket board') + icon('epics', '◆', 'Epics')
       + icon('more', '⋯', 'More: Docs; model routes and settings moved into the panel') + '</span>'
       + '<span class="pmeta">' + (run + wait === 0 ? '—' : run + ' in flight · ' + wait + ' waiting') + '</span>'
       + '<span class="chev">▸</span></div><div class="plist">' + rows + '</div></div>';
@@ -537,7 +537,7 @@ function move(k, id, d){
   const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
   render();
 }
-function pickProject(k){ cur = k; dragId = null; openId = null; render(); }
+function pickProject(k, v){ cur = k; dragId = null; openId = null; view = v || 'executor'; render(); }
 function setView(v){ view = v; openId = null; render(); }
 function setFilter(f){ filter = f; render(); }
 function filterEpic(code){ view = 'board'; filter = 'all'; const i = T().findIndex(t => t.epic === code); openId = i >= 0 ? T()[i].id : null; render(); }
