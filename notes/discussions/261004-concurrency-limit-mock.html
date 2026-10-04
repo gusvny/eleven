@@ -125,6 +125,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 .ep .st{color:var(--muted);font-size:11px}
 .ep .n{margin-left:auto;color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
 .ep .go{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}
+/* 泳道图（拓扑驱动）：节点 + 返工弧 + 轮次徽标 + 人门虚线圈 */
+.lane{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px 4px;margin:0 0 var(--cardgap);overflow:hidden}
+.lane svg{display:block;width:100%;height:auto}
+.lane .lgd{display:flex;gap:12px;color:var(--muted);font-size:10px;padding:0 2px 2px}
+.lane .lgd i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 /* 票详情：住主区（中栏），右栏 chat 永不被占用 */
 .kb{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:start}
 .kcol{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px}
@@ -378,6 +383,70 @@ function paintExecutor(){
   chip.textContent = cap === null ? 'no limit' : over ? 'over the limit' : (n >= cap ? 'at the limit' : 'room to start one');
 }
 
+// 泳道图：真拓扑（节点+边+kind），节点状态由 stage 推导；返工弧来自 revision_to。
+// 改进点（相对现行卡片上的迷你泳道）：① 画返工弧（现行版明确不画）② 节点带实际耗时
+// ③ 人门虚线且「等你」时转琥珀 ④ 轮次徽标 ×n ⑤ 曾受阻 ⚠ 角标 ⑥ 非本票的段显示为 skipped
+const LANE_META = {
+  create_plan:{kind:'agent',role:'developer',min:4},
+  review_plan:{kind:'agent',role:'integration',min:2},
+  implement:{kind:'agent',role:'developer',min:38,rounds:2},
+  design_integration_tests:{kind:'agent',role:'integration',min:6},
+  ui_evidence:{kind:'gate',role:'script',min:1,skipped:true},
+  run_integration_tests:{kind:'gate',role:'integration',min:19},
+  arbitrate:{kind:'agent',role:'integration',min:12,blocked:'once: a check measured the same thing twice'},
+  acceptance_walkthrough:{kind:'agent',role:'integration',min:5},
+  merge_check:{kind:'gate',role:'integration',min:3},
+  merge:{kind:'human',role:'you',min:0},
+};
+const REVISIONS = [['merge_check','implement','rework ×1'],['review_plan','create_plan','rework ×1']];
+const LANE_SHORT = {
+  create_plan:['create','plan'], review_plan:['review','plan'], implement:['implement',''],
+  design_integration_tests:['design','tests'], ui_evidence:['ui','evidence'],
+  run_integration_tests:['run','tests'], arbitrate:['arbitrate',''],
+  acceptance_walkthrough:['walk','through'], merge_check:['merge','check'], merge:['merge',''],
+};
+function laneMap(t){
+  const at = stepIdx(t), W = 62, GAP = 8, X0 = 10, ROW = 78, H = 34, VH = ROW + H + 26;
+  const cx = i => X0 + i * (W + GAP) + W / 2;
+  const nodes = STEPS.map((s, i) => {
+    const m = LANE_META[s] || {kind:'agent',role:'-',min:0};
+    const lab = LANE_SHORT[s] || [s, ''];
+    const done = i < at, now = i === at;
+    const skipped = m.skipped && !now && !DONE_UI(t);
+    const fill = skipped ? 'var(--panel2)' : now ? (m.kind === 'human' ? 'var(--warn-soft)' : 'var(--accent-soft)') : done ? 'var(--panel)' : 'var(--panel2)';
+    const stroke = skipped ? 'var(--line)' : now ? (m.kind === 'human' ? 'var(--amber)' : 'var(--accent-line)') : done ? 'var(--green)' : 'var(--line)';
+    const dash = m.kind === 'human' ? ' stroke-dasharray="4 3"' : skipped ? ' stroke-dasharray="2 3"' : '';
+    const x = X0 + i * (W + GAP);
+    const badge = m.rounds ? '<text x="' + (x + W - 2) + '" y="' + (ROW - 4) + '" text-anchor="end" font-size="9" fill="var(--muted)">×' + m.rounds + '</text>' : '';
+    const warn = m.blocked ? '<text x="' + (x + 2) + '" y="' + (ROW - 4) + '" font-size="9" fill="var(--amber)">⚠</text>' : '';
+    const dur = skipped ? 'skipped' : ((done || now) && m.min) ? m.min + 'm' : '—';
+    const sub = now && m.kind === 'human' ? 'waiting for you' : (m.role + ' · ' + dur);
+    return '<g>'
+      + '<rect x="' + x + '" y="' + ROW + '" width="' + W + '" height="' + H + '" rx="6" fill="' + fill + '" stroke="' + stroke + '"' + dash + '/>'
+      + '<text x="' + cx(i) + '" y="' + (ROW + 14) + '" text-anchor="middle" font-size="9" fill="var(--fg)">' + lab[0] + '</text>'
+      + (lab[1] ? '<text x="' + cx(i) + '" y="' + (ROW + 25) + '" text-anchor="middle" font-size="9" fill="var(--fg)">' + lab[1] + '</text>' : '')
+      + '<text x="' + cx(i) + '" y="' + (ROW + H + 11) + '" text-anchor="middle" font-size="8" fill="' + (now ? 'var(--amber)' : 'var(--muted)') + '">' + sub + '</text>'
+      + badge + warn + '</g>';
+  }).join('');
+  let conn = '';
+  for (let i = 0; i < STEPS.length - 1; i++) conn += '<path d="M' + (X0 + i * (W + GAP) + W) + ' ' + (ROW + H / 2) + ' H' + (X0 + (i + 1) * (W + GAP)) + '" stroke="var(--line)" stroke-width="1.5" marker-end="url(#ar)"/>';
+  const arcs = REVISIONS.map((r, k) => {
+    const a = STEPS.indexOf(r[0]), b = STEPS.indexOf(r[1]);
+    const y = 12 + k * 13;
+    return '<path d="M' + cx(a) + ' ' + (ROW - 3) + ' C' + cx(a) + ' ' + y + ', ' + cx(b) + ' ' + y + ', ' + cx(b) + ' ' + (ROW - 3) + '" stroke="var(--amber)" stroke-width="1.2" fill="none" stroke-dasharray="4 3" marker-end="url(#ar2)"/>'
+      + '<text x="' + ((cx(a) + cx(b)) / 2) + '" y="' + (y + 3) + '" text-anchor="middle" font-size="8" fill="var(--amber)">' + r[2] + '</text>';
+  }).join('');
+  return '<div class="lane"><div class="lgd">'
+    + '<span><i style="background:var(--green)"></i>done</span><span><i style="background:var(--accent-line)"></i>now</span>'
+    + '<span><i style="background:var(--panel2);border:1px solid var(--line)"></i>pending / skipped</span>'
+    + '<span><i style="background:var(--amber)"></i>rework &amp; human gate</span></div>'
+    + '<svg viewBox="0 0 720 ' + VH + '" preserveAspectRatio="xMinYMin meet">'
+    + '<defs><marker id="ar" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--line)"/></marker>'
+    + '<marker id="ar2" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 L6 3 L0 6 z" fill="var(--amber)"/></marker></defs>'
+    + arcs + conn + nodes + '</svg></div>';
+}
+const DONE_UI = t => true;   // mock：本票是 UI 票，ui_evidence 段真跑过
+
 function ticketView(){
   const t = openId ? TICKET(openId) : null;
   if (!t) return '<button class="back" onclick="goBack()">← Back</button><div class="vhead"><h1>Ticket</h1></div>';
@@ -406,9 +475,14 @@ function ticketView(){
     + '<span class="state ' + stateCls + '">' + label + '</span></div>'
     + '<div class="acts"><button class="pri">Sign</button><button>Send back</button><button>Retry check</button><button>Pause</button></div>'
     + decide
+    + laneMap(t)
     + '<div class="two">'
-    + '<div><div class="panelbox"><h3>Progress</h3>' + steps + '</div>'
-    + '<div class="panelbox"><h3>Timeline</h3><ul class="tl">' + timeline + '</ul></div></div>'
+    + '<div><div class="panelbox"><h3>Timeline</h3><ul class="tl">' + timeline + '</ul></div>'
+    + '<div class="panelbox"><h3>Stage notes</h3><ul class="tl">'
+    + '<li><span class="at">implement</span><span>ran twice (first try was sent back at review_plan)</span></li>'
+    + '<li><span class="at">arbitrate</span><span>blocked once: a check measured the same thing twice, then converged</span></li>'
+    + '<li><span class="at">ui_evidence</span><span>this ticket touches UI files, so the stage ran</span></li>'
+    + '</ul></div></div>'
     + '<div><div class="panelbox"><h3>Receipts</h3><div class="kv2">'
     + '<span class="k">merge_check</span><span>4 of 4 green · 2 min ago</span>'
     + '<span class="k">suite</span><span>' + (t.st === 'wait' ? 'not run yet' : '224 ran / 220 passed / 4 known') + '</span>'
