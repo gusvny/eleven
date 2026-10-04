@@ -27,6 +27,7 @@ import {
   splitWaiting, hasOptions, chipLabel, masterOn, localDateTime, newestFirst, wakeRowSentence, themeParamOf,
 } from './page-logic.ts'
 import { LIST_CONTRACTS } from './list-contracts.ts'
+import { renderMarkdown } from './markdown.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
@@ -34,6 +35,8 @@ const EMBEDDED = [
   String(fmtWaiting), String(fmtAge), String(groupByProject),
   String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
   String(localDateTime), String(newestFirst), String(wakeRowSentence), String(themeParamOf),
+  // t261004-16：markdown 渲染器同样单实现嵌入（UT 与页面同一份函数源码）。
+  String(renderMarkdown),
 ].join('\n')
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
@@ -51,7 +54,9 @@ html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e
 @media (prefers-color-scheme: dark){ html:not([data-theme]){--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--fg-soft:#c3cfdf;--muted:#8ea0b8;--faint:#5b6880;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--badge-fg:#0e1420;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot-grey:#46536a;--sw-off:#39465c;--knob:#8ea0b8;--warn-soft:#2a2313;--danger-soft:#2a1414;--pill-sign-bg:#183153;--pill-sign-fg:#79b8ff;--pill-open-bg:#16351f;--pill-open-fg:#7ad48a;--pill-retry-bg:#3a2d13;--pill-retry-fg:#ffb454;--pill-send-bg:#3a2a13;--pill-send-fg:#ffc07a;--pill-cancel-bg:#3a1a1a;--pill-cancel-fg:#ff8b8b;--pill-pause-bg:#262f3d;--pill-pause-fg:#9fb0c8} }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
-.wrap{max-width:900px;margin:0 auto;padding:18px 16px 48px;container-type:inline-size}
+/* t261004-16 Req1：页面用满窗宽（1600 视口两侧留白各 ≤5%），超宽屏 1440 封顶，
+   左右 padding 随窗宽缩放（16–28px）。container-type 保留（两栏断点按容器宽）。 */
+.wrap{max-width:min(1440px,100%);margin:0 auto;padding:18px clamp(16px,2vw,28px) 48px;container-type:inline-size}
 .top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .top h1{font-size:14px;font-weight:600;margin:0}
 .chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 9px;font-size:11px}
@@ -78,7 +83,25 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .row[data-open="true"] .chev{transform:rotate(90deg)}
 .body{display:none;padding:0 12px 11px 12px;border-top:1px solid var(--line-soft)}
 .row[data-open="true"] .body{display:block}
-.detail{margin-top:9px;max-height:170px;overflow:auto;white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--fg-soft);font-size:12px}
+/* t261004-16 Req4：详情限高 170→440px（票面要求 ≥420），字号 12→13px；内部滚动保留。
+   正文行长封顶 90ch——限的是内容，不是页面。markdown 元素全部只用既有主题词表
+   （t261004-10 教训：零硬编码色）。 */
+.detail{margin-top:9px;max-height:440px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--fg-soft);font-size:13px}
+.detail>*{max-width:90ch}
+.detail h1,.detail h2,.detail h3,.detail h4,.qfull h1,.qfull h2,.qfull h3,.qfull h4{margin:8px 0 4px;font-weight:600;line-height:1.3}
+.detail h1,.qfull h1{font-size:15px}.detail h2,.qfull h2{font-size:14px}.detail h3,.qfull h3,.detail h4,.qfull h4{font-size:13px}
+.detail p,.qfull p{margin:4px 0;white-space:pre-wrap}
+.detail ul,.detail ol,.qfull ul,.qfull ol{margin:4px 0;padding-left:22px}
+.detail li,.qfull li{margin:2px 0;white-space:pre-wrap}
+.detail code,.qfull code{font-family:ui-monospace,monospace;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.detail pre{margin:6px 0;padding:8px 10px;background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:auto}
+.detail pre code{background:transparent;border:0;padding:0;white-space:pre}
+.detail blockquote,.qfull blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--muted)}
+.detail a,.qfull a{color:var(--blue)}
+.md-clipped{color:var(--muted);font-size:11px}
+/* t261004-16 Req3：展开行的完整问题放正文顶部，按格式渲染（行头收起态仍是单行省略）。 */
+.qfull{margin-top:9px;font-size:13px;color:var(--fg)}
+.qfull p:first-child{margin-top:0}
 .opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
 .opts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 14px;font:inherit;cursor:pointer}
 .opts button:hover{border-color:var(--blue);color:var(--blue)}
@@ -98,7 +121,9 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .power[data-on="false"]:hover{border-color:var(--green);color:var(--green)}
 .openBtn{border:1px solid var(--line);border-radius:7px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer;background:var(--panel2);color:var(--fg)}
 .openBtn:disabled{opacity:.45;cursor:not-allowed}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+/* t261004-16 Req2：请求/应答栏拿宽侧（1.85fr），Recent actions 拿窄侧（1fr）。
+   容器断点、两栏各自限高内滚（展开只长自己那栏）两条既有规则不动。 */
+.cols{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);gap:16px;align-items:start}
 /* t261003-09 缺陷 1：断点按真实容器宽（container query——面板是 iframe/独立窗口，
    视口宽≠内容盒宽），且两栏各自限高内滚——展开任何一条请求只在**自己那栏**长高，
    另一栏与下方内容永不位移；行内 detail 的 170px 限高不变（滚动锚定稳定）。 */
@@ -440,10 +465,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       + '<span class="txt">'+esc(r.question)+'</span>'
       + '<span class="meta">'+meta+'</span><span class="chev">&#9656;</span></div>';
   }
+  // t261004-16 Req3：详情体与应答回显走唯一的 renderMarkdown（转义先行，敌意输入
+  // 只能落成字面文本）；展开行把完整问题按格式渲染在正文顶部（行头收起态保持单行省略）。
   function rowBody(r){
+    var qfull = '<div class="qfull">'+renderMarkdown(r.question||'')+'</div>';
     if(r.status==='answered'){
-      return '<div class="body"><div class="detail">'+esc(r.detail||'(no detail was given)')+'</div>'
-        + '<div class="given">You answered: '+esc(r.answer||'')+'</div>'
+      return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
+        + '<div class="given">You answered: '+renderMarkdown(r.answer||'')+'</div>'
         + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
     var controls;
@@ -453,13 +481,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       controls = '<div class="opts">';
       var opts = r.options;
       for(var i=0;i<opts.length;i++){
-        controls += '<button data-answer="'+esc(opts[i])+'"'+(i===0?' class="primary"':'')+'>'+esc(opts[i])+'</button>';
+        // 选项标签走同一渲染器的 inline 面（块结构对按钮无意义，行内标记保留）。
+        controls += '<button data-answer="'+esc(opts[i])+'"'+(i===0?' class="primary"':'')+'>'+renderMarkdown(opts[i],{inline:true})+'</button>';
       }
       controls += '<button class="other" data-reveal="1">Type an answer</button></div>';
     } else {
       controls = '<div class="answer"><input placeholder="Type an answer" data-answerbox="1"><button data-sendbox="1">Send</button></div>';
     }
-    return '<div class="body"><div class="detail">'+esc(r.detail||'(no detail was given)')+'</div>'
+    return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
       + controls
       + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
   }

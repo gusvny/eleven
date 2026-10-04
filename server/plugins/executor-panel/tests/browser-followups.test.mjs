@@ -73,7 +73,8 @@ try {
   assert(afterWide.pageH === beforeWide.pageH, 'wide/side-by-side: the page does not grow under the columns')
   // 行内 detail 仍限高内滚（t261003-06 回归锚）。
   const detailH = await page.evaluate(() => document.querySelector('[data-row][data-open="true"] .detail').getBoundingClientRect().height)
-  assert(detailH <= 171, 'row detail stays height-capped and scrollable')
+  // t261004-16：限高 170→440px（票面要求 ≥420）。
+  assert(detailH <= 441, 'row detail stays height-capped and scrollable')
   n += 7
   await page.close()
 

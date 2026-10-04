@@ -211,8 +211,13 @@ async function main() {
         bodyText.includes('executor-actions.jsonl') && !/admin\.log/i.test(bodyText),
         bodyText.slice(0, 200))
       const page = await fetch(base + PANEL_ROUTE).then(r => r.text()).catch(() => '')
+      // t261004-16 仲裁修订：本断言守的是「用户可见文案」，不是原始 HTML——页面
+      // 现内嵌 LIST_CONTRACTS 契约 JSON（t261004-14，source/empty_copy 字段含
+      // "audit log" 字样，属脚本内惰性数据、不渲染）。先剥 <script> 块再查词，
+      // 只对渲染面执行措辞禁令（更准而非放松：渲染面出现该词仍红）。
+      const visible = String(page).replace(/<script[\s\S]*?<\/script>/gi, '')
       leg('b5-page-copy-free-of-audit-log-wording',
-        !/admin\.log|audit log/i.test(page), '')
+        !/admin\.log|audit log/i.test(visible), '')
     })
   } catch (e) { leg('b5-empty-state-names-record-no-admin-log', false, String(e).slice(0, 200)) }
 

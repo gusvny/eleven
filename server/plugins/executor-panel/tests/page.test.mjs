@@ -28,20 +28,21 @@ assert(PANEL_PAGE_HTML.includes("location.search).get('project'"), '?project=<ke
 assert(PANEL_PAGE_HTML.includes('No project is selected'), 'no-project state is explicit (never a silent empty page)')
 
 // ---- Overview 两栏 + 窄屏叠放 ----
-assert(PANEL_PAGE_HTML.includes('grid-template-columns:1fr 1fr'), 'overview two columns side by side')
+// t261004-16：请求/应答栏拿宽侧（1.85fr），Recent actions 拿窄侧。
+assert(PANEL_PAGE_HTML.includes('grid-template-columns:minmax(0,1.85fr) minmax(0,1fr)'), 'overview: requests column takes the wide side')
 // t261003-09 缺陷 1：断点按真实容器宽（container query），两栏各自限高内滚——
 // 展开只在自己那栏长高，另一栏与下方内容永不位移。
 assert(PANEL_PAGE_HTML.includes('@container (max-width:760px){ .cols{grid-template-columns:1fr} }'), 'columns stack below 760px of the real container (container query)')
 assert(PANEL_PAGE_HTML.includes('.cols>div{min-width:0;height:calc(100vh - 230px);overflow-y:auto'), 'each column has a FIXED height and scrolls on its own (an unfold can never grow the frame)')
 assert(PANEL_PAGE_HTML.includes('container-type:inline-size'), 'the wrap is the query container')
-assert(PANEL_PAGE_HTML.includes('max-height:170px;overflow:auto'), 'row detail keeps its own height cap (anchoring stable)')
+assert(PANEL_PAGE_HTML.includes('max-height:440px;overflow:auto'), 'row detail keeps its own height cap (anchoring stable)')
 assert(PANEL_PAGE_HTML.includes('Needs your answer'), 'left column heading (STE: no idiom "Needs you")')
 assert(PANEL_PAGE_HTML.includes('Recent actions'), 'right column = recent actions')
 assert(PANEL_PAGE_HTML.includes('id="reqBadge"'), 'waiting-count badge on Overview')
 
 // ---- 交互：可展开、选项按钮 vs 自由文本、Answered 折叠、trace 行 ----
 assert(PANEL_PAGE_HTML.includes('data-open="false"') && PANEL_PAGE_HTML.includes("dataset.open==='true' ? 'false' : 'true'"), 'rows expand and collapse in place')
-assert(PANEL_PAGE_HTML.includes('max-height:170px;overflow:auto'), 'detail height-capped and scrollable')
+assert(PANEL_PAGE_HTML.includes('max-height:440px;overflow:auto'), 'detail height-capped and scrollable')
 assert(PANEL_PAGE_HTML.includes('hasOptions('), 'page calls the SAME hasOptions implementation the unit tests drive')
 assert(PANEL_PAGE_HTML.includes('data-answer='), 'options render as buttons')
 assert(PANEL_PAGE_HTML.includes('Type an answer'), 'free-text fallback control present')

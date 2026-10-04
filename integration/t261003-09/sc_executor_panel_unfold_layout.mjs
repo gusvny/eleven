@@ -8,8 +8,9 @@
 //      的真实再现）：展开任一请求条目后，「Recent actions」区块包围盒不动（±1px），
 //      其下方内容不被推下。
 //   U2 宽容器（~900px，两栏并列形态）：同一不变量照旧成立（另一列不动）。
-//   U3 展开详情仍限高且可内滚（t261003-06 契约面不回退：详情块高度 ≤200px 且
-//      scrollHeight>clientHeight=可滚）。
+//   U3 展开详情仍限高且可内滚（t261003-06 契约面不回退；t261004-16 仲裁修订：
+//      不再锚 ≤220 旧值——该票把详情上限抬到 ≥420，此处只锁「有限高 + 可内滚」
+//      不变量，上限数值随当期验收口径走）。
 //   U4 全旅程零 pageerror。
 //
 // intent 分工：页面结构/五页签/选项按钮归 t261003-06-executor-panel-page-redesign；
@@ -23,7 +24,7 @@ const C = makeCase()
 const PROJ = 'alpha'
 
 const WAITING = [
-  { id: 'req-1', project: PROJ, question: 'Which ticket does the executor verify first?', detail: ('Two tickets wait. Pick the first one. This detail text is long enough to fill the capped detail block. ').repeat(12) + 'The cap must hold.', raised_by: 'bench:plan', default_action: 'verify t1', state: 'waiting', created_at: 1 },
+  { id: 'req-1', project: PROJ, question: 'Which ticket does the executor verify first?', detail: ('Two tickets wait. Pick the first one. This detail text is long enough to fill the capped detail block. ').repeat(40) + 'The cap must hold.', raised_by: 'bench:plan', default_action: 'verify t1', state: 'waiting', created_at: 1 },
   { id: 'req-2', project: PROJ, question: 'How should the executor proceed?', detail: 'two viable paths', raised_by: 'bench', default_action: 'Open a new ticket', state: 'waiting', created_at: 2 },
 ]
 
@@ -54,13 +55,19 @@ async function run(viewport, label) {
     })
     const moved = Math.abs(rect1.top - rect0.top) > 1 || Math.abs(rect1.height - rect0.height) > 1
     if (moved) return `unfold moved the other column: top ${rect0.top}->${rect1.top}, height ${rect0.height}->${rect1.height} (${label})`
-    // U3 详情限高可滚（只在窄容器这趟顺带查，避免重复断言面）
+    // U3 详情限高可滚（只在窄容器这趟顺带查，避免重复断言面）。
+    // t261004-16 仲裁修订：上限数值不再锚旧 170px 时代的 ≤220 硬数（该票 Req 4 把
+    // 详情上限抬高到 ≥420，现实现 440px——旧界把新验收钉成假红）。不变量照旧：
+    // 详情块被限高（clientHeight 有界）且内容超高时可内滚；夹具文本加长到超过
+    // 当期上限（t261004-16 抬帽后 12 次重复在窄宽重排下装得下，滚动面不再触发
+    // ——夹具跟帽走，断言不放松）。
+    // 详情块被限高（clientHeight 有界）且内容超高时可内滚（scrollHeight>clientHeight）。
     if (label === 'narrow') {
       const detail = await env.page.evaluate(() => {
-        const els = [...document.querySelectorAll('*')].filter(e => e.scrollHeight > e.clientHeight + 4 && e.clientHeight > 0 && e.clientHeight <= 220)
+        const els = [...document.querySelectorAll('*')].filter(e => e.scrollHeight > e.clientHeight + 4 && e.clientHeight > 0 && e.clientHeight <= 600)
         return els.length > 0
       })
-      if (!detail) return 'unfolded detail is neither height-capped nor inner-scrollable (t261003-06 cap regressed)'
+      if (!detail) return 'unfolded detail is neither height-capped nor inner-scrollable (cap/inner-scroll contract regressed)'
     }
     return null
   } finally { await env.closeAll(); api.close() }
