@@ -3334,3 +3334,55 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **根因待查、不拍**（已把它改成每天 10:00 并重铸 action，明早第一期即是检验）。
 > **回归用例**：治本票沉淀（L1：造一条带 args 身份的 schedule → 断言回执里身份可读，
 > 或显式声明「不解析」，绝不以空串冒充）。
+
+## KI-195 引擎侧投递面**丢 env ⇒ 相对根**：回执 ok:true，行落在仓内没人读的目录（261004 实证，t261004-27 交付物）
+
+> **现象**：`client.py deliver` 投出的行由引擎工人代写账（t261004-27 的执行器交付面）。
+> worker 进程里跑的 activity 调 `perform_delivery(payload, now_ms)` **没有传 env** ⇒
+> `_injected_env(identity, None)` 一个账本位置键都没有（HOME/DSH_HOME/SANDBAR_PANEL_DIR/
+> SANDBAR_PROJECTS_DIR）⇒ `executor_requests.instance_projects_root({})` 算出 home='' →
+> dsh_home='.dsh' → is_default True → 根 `.sandbar/projects`（**相对**）⇒ 行落在 worker 的
+> cwd 下：`server/engine/.sandbar/projects/sandbar/requests.jsonl`。
+> **实证**：工作流 `executor-delivery-sandbar-09380406eb72585b` COMPLETED、回执 `ok:true`，
+> 回执里的 `result.file` 就是那条**相对路径**（线索就在回执里）；真账本
+> `~/.sandbar/projects/sandbar/requests.jsonl` 纹丝不动（90 行、mtime 停在 22:32）。
+> **危害**：写者宣布成功、读者（面板/守望者）永远看不见——比挂死更坏（挂死至少响）。
+> 同族面：任何「引擎进程代写、位置靠 env 解析」的面都会踩；实测三个 face 里只命中
+> `request`（它接了注入 env），`actions-record`/`grants-audit` 不接 env、走进程 env，恰好是对的。
+> **出路**：activity 透传执行进程 env（只位置键，身份仍只来自 payload 的 identity 块）；
+> 回执路径必须绝对且以实例根开头；L19 静态探针守仓内错位账本（`.gitignore` 遮住≠不存在）。
+> **本次处置（261004）**：开票 **t261004-43**（P0，不暂停）修 activity 的 env 透传 + 活体路径用例；
+> 错位的那一行已并进真账本（原位文件挪 `.sandbar/quarantine/261004-delivery-relative-root/` 留档）。
+> **回归用例**：①L1：走**真 activity 壳**（不注入 env）断言落账文件 == 实例根（相对路径=红）；
+> ②L0/静态：L19 `integration/lint_tests.py`（261004 落地，红在本条错位文件上验证过）。
+
+## KI-196 问题桥（t261001-23）在**生产路径上从未触发**：会话级「问」无落点，静默挂起 35 分钟（261004 实证）
+
+> **现象**：执行器会话 23:09:11 调 `ask_user_question`（两问）。此后账本零新行、面板零新卡、
+> 会话文件 23:09:12 起零写入；守望者也只能看账本，于是 `self_lock=waiting_on_itself` 之外的
+> `waiting_on_host` 一直是 clear —— **没有任何面报出「有一个人在等答案」**。
+> **硬证据**：账本有史以来**没有一行是桥镜像的**（桥必写 `group_id`；唯一那行 `question`
+> 是执行器 10-02 用面板 POST 手工投的，无 `group_id`）。控制台 22:42:40 才重启、跑的是今天
+> 14:22 的桥代码 ⇒ 不是「旧进程没加载」。
+> **危害**：KI-181「问无处可去」并未关闭，只是换了个形态（从「自锁」变成「静默挂起 + 零告警」）。
+> 桥不触发是**静默**的：没有告警、没有降级点名、没有计数可查。
+> **出路**：①桥的**活体路径用例**（真 cordis、真 scope，不是注入依赖的单元用例）；
+> ②桥的状态面（挂载与否 / 最近事件 / 镜像计数）暴露给人可读处，守望者读它：
+> 会话有待答 ask 而 N 秒内账上无行 ⇒ 直接红线；③`deliver` 同理要有具名拒收。
+> **本次处置（261004）**：登记；拟开票（桥状态面 + 具名拒收），按宿主规矩先暂停等放行。
+> **回归用例**：活体路径用例 + 「有 ask 无行 ⇒ 红线」的守望者判据各一条。
+
+## KI-197 常驻 worker 陈旧 ⇒ 跨进程投递**无界等待、无具名拒收**，deliver 永久挂死（261004 实证）
+
+> **现象**：常驻 worker 起于 10:20:27，而 `ExecutorDeliveryWorkflow` 19:30 才注册进
+> `workflows.py` ⇒ 工人不认识这个类，每次 activation 都抛
+> `NotFoundError: Workflow class ExecutorDeliveryWorkflow is not registered on this worker`，
+> Temporal 按退避无限重试。调用方（执行器）两次投递（60s 上限、900s 上限）**都没有回执、
+> 没有落账**，`requests.jsonl` mtime 停在 22:32。
+> **危害**：跨进程调用没有 deadline、没有「工人不认识这个类」的具名拒收 ⇒ 调用方分不清
+> 「慢」和「永远不会成」；实测起来像「投递面很慢」，真因是「这条面在你起的那一刻就是死的」。
+> **本次处置（261004）**：宿主授权重启常驻 worker（23:40:58 起新 pid 82908）；投递面复活
+> （卡了 51 分钟的工作流秒级 COMPLETED）——但立刻暴露 KI-195。
+> **出路**：①`deliver` 有界等待 + 具名拒收（rc≠0、文案点名「工人不认识这个工作流类」）；
+> ②重启纪律已有（单实例守卫），补「代码新于 worker ⇒ 可查」的版本指纹面。
+> **回归用例**：L1：工人注册表缺类时 deliver 具名拒收且 rc≠0（不是挂死）。
