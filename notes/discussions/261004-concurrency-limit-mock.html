@@ -242,6 +242,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 </style>
 </head>
 <body>
+<div style="background:#fff8c5;border-bottom:1px solid #d4a72c;color:#4d2d00;font:12px/1.5 -apple-system,system-ui,sans-serif;padding:6px 12px">
+  <b>SAMPLE DATA</b> — this page is a layout mock. Every list on it (requests, recent actions, tickets, sessions) shows hand-written sample rows so the layout can be judged; nothing here is read from a ledger. The real panel reads the project action record at <code>&lt;projects_root&gt;/&lt;key&gt;/ledger/executor-actions.jsonl</code>.
+</div>
 <div class="shell">
   <div class="cols3">
   <div class="side">
@@ -329,7 +332,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
           <div class="r"><span class="at">13:22</span><span class="pill">rerun</span><span class="tk">t261004-15</span><span class="say" title="retry requested before the merge gate">retry requested before the merge gate</span></div>
           <div class="r"><span class="at">13:05</span><span class="pill">pause</span><span class="tk">t261004-20</span><span class="say">queued behind the limit</span></div>
         </div>
-        <div class="foot">Last 5 from this project's action record. The full list is in the Ledger tab.</div>
+        <div class="foot">SAMPLE ROWS — the real block shows the last 5 from this project's action record; the full list is in the Ledger tab.</div>
       </div>
     </div>
 
