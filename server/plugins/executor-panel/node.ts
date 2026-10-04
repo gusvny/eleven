@@ -107,7 +107,9 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
               const method = req.method ?? 'GET'
               const q = new URL(req.url ?? '/', 'http://x').searchParams
               const body = (method === 'POST' || method === 'PUT' || method === 'DELETE') ? await readBody(req) : ''
-              const r = await api.handle(method, route.path, q, body, originOf(req))
+              // KI-193：凭据原料原样进 API 层（写面凭据门在 api.handle，GET 不设门）。
+              const auth = { cookie: req.headers.cookie, host: req.headers.host }
+              const r = await api.handle(method, route.path, q, body, originOf(req), auth)
               sendJson(res, r.status, r.json)
             },
           }),

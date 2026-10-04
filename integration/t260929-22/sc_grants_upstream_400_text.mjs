@@ -28,6 +28,7 @@
 //
 // 三态纪律：node/harness 缺席=FAIL 点名（TDD 红属预期）；全部离线，无 ENV 面。
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { loadPanelHarness, makeIsoDir, makeCase } from '../t260929-03/lib_panel_harness.mjs'
 
@@ -134,8 +135,14 @@ async function main() {
   const h3 = await boot()
   try {
     const get = async (p) => { const r = await fetch(h3.base + p); return { r, j: await r.json().catch(() => ({})) } }
+
+// t261004-18 (KI-193): panel writes require the console session credential;
+// fixtures present the same-shaped cookie the console browser carries.
+function consoleCookie(base) {
+  return 'dsh-auth-' + Buffer.from(createHash('sha256').update(new URL(base).host).digest()).toString('base64url') + '=v1.AAAA.BBBB'
+}
     const post = async (p, body) => {
-      const r = await fetch(h3.base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const r = await fetch(h3.base + p, { method: 'POST', headers: { 'content-type': 'application/json', cookie: consoleCookie(h3.base) }, body: JSON.stringify(body) })
       return { r, j: await r.json().catch(() => ({})) }
     }
     const msgOf = (x) => String(x.j.error ?? x.j.reason ?? '')

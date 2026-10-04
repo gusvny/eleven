@@ -13,7 +13,7 @@
 import { createRequire } from 'node:module'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { assert, done, freshDir, cleanup } from './lib.mjs'
+import { assert, done, freshDir, cleanup, panelCookieFor } from './lib.mjs'
 
 const require = createRequire(import.meta.url)
 function findPlaywrightCore() {
@@ -37,11 +37,14 @@ const mod = await import('../harness.mjs')
 const H = await mod.startHarness({ port: 0, panelDir: pan, watchdogDir: wd, workbenchBase: 'http://127.0.0.1:9' })
 const browser = await launchBrowser()
 const KEY = 'rodalpha'
+  // KI-193：harness 上的 POST 与浏览器上下文都要带控制台会话 cookie（写面凭据门）。
+  const CRED = (() => { const c = panelCookieFor(new URL(H.base).host); const i = c.indexOf('='); return { header: c, cookies: [{ name: c.slice(0, i), value: c.slice(i + 1), url: H.base }] } })()
+  const newAuthedPage = async (viewport) => { const ctx = await browser.newContext(viewport ? { viewport } : {}); await ctx.addCookies(CRED.cookies); return ctx.newPage() }
 let n = 0
 try {
   mkdirSync(join(wd, KEY), { recursive: true })
   writeFileSync(join(wd, KEY, 'watchdog.json'), JSON.stringify({ enabled: true, stall_minutes: 15 }) + '\n', 'utf8')
-  const post = (path, body) => fetch(H.base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+  const post = (path, body) => fetch(H.base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie: CRED.header }, body: JSON.stringify(body) }).then((r) => r.json())
   // 一次两问 ask（镜像落账后的形状：同 group_id，逐问 options/default_action），加一条
   // 无选项有默认动作的行，和一条 1600 字符 detail 的行。
   await post('/sandbar-executor-panel/api/requests', { project: KEY, kind: 'question', question: 'Restart the stalled worker?', detail: 'queue depth 340, no progress for 12 minutes.', default_action: 'leave it running', raised_by: 'session-09ca0247', options: ['Restart now', 'Leave it'], group_id: 'ask-17' })
@@ -52,7 +55,7 @@ try {
   const longRow = await post('/sandbar-executor-panel/api/requests', { project: KEY, kind: 'decision', question: 'Keep the interim lock?', detail: longDetail })
   assert(longRow.ok === true, 'long-detail row seeded')
 
-  const page = await browser.newPage({ viewport: { width: 1200, height: 900 } })
+  const page = await newAuthedPage({ width: 1200, height: 900 })
   page.setDefaultTimeout(15000)
   await page.goto(H.base + '/sandbar-executor-panel?project=' + KEY + '&theme=light')
   await page.waitForFunction(() => document.getElementById('reqBadge') && document.getElementById('reqBadge').textContent === '4', { polling: 200 })

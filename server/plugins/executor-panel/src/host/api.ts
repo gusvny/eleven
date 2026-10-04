@@ -6,9 +6,25 @@
  * 二次应答都在 API 级有显式拒绝用例），不必起真服务；形状与真路由同源。
  *
  * 只读刚性：除 requests append/answer 与 settings save 三个 POST 外一律 GET-only（405）。
+ *
+ * Write credential gate (t261004-18, KI-193): the console root unauthenticated-request gate lives
+ * inside the dsh package (@deepseek-ai/dsh-client-connection browserAuth) and does
+ * NOT cover this plugin's webServer routes — the strongest guard available in this
+ * repo: every write method (POST/PUT/DELETE) must carry the dsh browser session
+ * cookie (name computable from Host, value shape v1.<b64>.<b64>); without it the
+ * request is refused unauthorized and nothing is written. Honest boundary: the cookie HMAC
+ * secret is process-private to dsh, so this repo cannot verify signatures — the gate
+ * stops credential-less requests, not a local process that forges headers.
+ * Writer identity (requirement 2): the recorded writer is the fixed 'host' (the only
+ * identity the credential proves); a body `by` is no longer trusted — if present and
+ * != 'host', the row/audit carry by_claimed + writer_mismatch:true (visible, not
+ * silent). Authority-declaration writes (grants save/master, the grants-clearing half
+ * of settings revoke) all go through the engine entry client.py
+ * executor-grants-write (single truth for META_OP judgment + audit).
  */
 
 import { readdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
   appendRequest, answerRequest, readRequests, parseJsonBody, requestUrgency,
@@ -18,7 +34,8 @@ import { loadWatchdogConfig } from './settings.ts'
 import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
 import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settings.ts'
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
-import { clearGrants, grantAllOps, grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, saveGrantsDecl, GRANT_OPS, toGrantOp } from './executor-grants.ts'
+import { grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, GRANT_OPS, toGrantOp,
+  spawnEngineGrantsWrite, type EngineGrantsWriteFace, type EngineGrantsWritePayload } from './executor-grants.ts'
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
@@ -27,6 +44,46 @@ export interface ApiResponse { status: number; json: Record<string, unknown> }
 
 function bad(status: number, error: string): ApiResponse {
   return { status, json: { ok: false, error } }
+}
+
+// ---- KI-193 write credential gate ----
+
+/** Raw credential material carried by the request (node.ts passes req.headers verbatim). */
+export interface AuthInput { cookie?: string; host?: string }
+
+export type AuthFace = (input: AuthInput) => { ok: boolean; why: string }
+
+/**
+ * dsh browser session cookie name (source of truth: dsh 0.1.5 dsh-client-connection
+ * cookieName(authority) = 'dsh-auth-' + base64url(sha256(Host)) — the name is
+ * computable; the HMAC secret for the value is process-private and unverifiable in
+ * this repo. Three checks here: present / name matches the authority / value shape.
+ * Any failure = unauthorized and nothing is written.
+ */
+export function defaultAuthFace({ cookie, host }: AuthInput): { ok: boolean; why: string } {
+  if (!host) return { ok: false, why: 'request has no Host header — cannot bind the console session cookie' }
+  const name = 'dsh-auth-' + createHash('sha256').update(host).digest('base64url')
+  const segment = String(cookie ?? '')
+    .split(';')
+    .map((s) => s.trim())
+    .find((s) => s.startsWith(name + '='))
+  if (!segment) {
+    return { ok: false, why: `no console session credential (${name}) — file requests via server/engine/executor_requests` }
+  }
+  const value = segment.slice(name.length + 1)
+  if (!/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value)) {
+    return { ok: false, why: 'console session credential has an unexpected shape — file requests via server/engine/executor_requests' }
+  }
+  return { ok: true, why: '' }
+}
+
+/** Audit source face for authority writes (KI-193 requirement 4): panel origin + visible writer mismatch. */
+function auditSource(byClaimed: unknown): Record<string, unknown> {
+  const mismatch = byClaimed !== undefined && byClaimed !== null && byClaimed !== 'host'
+  return {
+    surface: 'panel-api', transport: 'http', guarded: true, by: 'host',
+    ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}),
+  }
 }
 
 /**
@@ -59,6 +116,10 @@ export interface ApiDeps {
   actionsIo?: ActionsIo
   /** workbench 端点基址（config 显式指定；缺省 env → 请求来源同源，见 resolveWorkbenchBase）。 */
   workbenchBase?: string
+  /** Write credential verdict face (default defaultAuthFace; test stub injection, KI-193). */
+  authFace?: AuthFace
+  /** Authority-declaration write face (default spawnEngineGrantsWrite via the engine CLI; test stub, KI-193). */
+  engineGrantsWrite?: EngineGrantsWriteFace
 }
 
 /**
@@ -97,6 +158,31 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
     return { declared: r.declared, enabled: r.enabled }
   }
 
+  /**
+   * Authority-declaration write (KI-193 requirement 3): grants save / master / the
+   * grants-clearing half of settings revoke all go through deps.engineGrantsWrite
+   * (default: spawn the engine CLI `client.py executor-grants-write`) — single
+   * truth for META_OP judgment + audit, whatever surface asked. The writer is the
+   * fixed 'host'; a caller-reported by lands only in the source mismatch fields.
+   * Engine unreachable / malformed receipt = saved:false named explicitly (never a
+   * fallback to direct file write).
+   */
+  async function engineGrantsWrite(key: string, doc: Record<string, unknown>, byClaimed: unknown) {
+    const payload: EngineGrantsWritePayload = {
+      key, by: 'host',
+      grants: (doc.grants ?? {}) as Record<string, unknown>,
+      ...(doc.night_tier !== undefined ? { night_tier: doc.night_tier } : {}),
+      ...(doc.executor_sessions !== undefined ? { executor_sessions: doc.executor_sessions } : {}),
+      source: auditSource(byClaimed),
+    }
+    return (deps.engineGrantsWrite ?? spawnEngineGrantsWrite)(payload)
+  }
+
+  /** Read the current declaration (source for executor_sessions / night_tier inheritance). */
+  function prevDecl(key: string) {
+    return readDeclaration(key, env)
+  }
+
   async function defaultTemplateFacts(origin: string): Promise<GrantsResult> {
     const base = resolveWorkbenchBase(deps.workbenchBase, env, origin)
     if (base === '') return grantsUnavailable('workbench endpoint base not resolvable (no config workbenchBase, no SANDBAR_WORKBENCH_BASE, request origin absent) — template facts unavailable, shown explicitly')
@@ -109,11 +195,19 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
     }
   }
 
-  async function handle(method: string, path: string, query: URLSearchParams, bodyRaw: string, origin = ''): Promise<ApiResponse> {
+  async function handle(method: string, path: string, query: URLSearchParams, bodyRaw: string, origin = '', auth: AuthInput = {}): Promise<ApiResponse> {
     // ---- 路由表准入守卫（t261003-10）：表外一律 404，表内每条都必须在下方有处理分支
     // （route-parity UT 双向锁死）——这是「未知面板路由」的唯一出口。
     if (!(PANEL_API_ROUTES as ReadonlyArray<{ path: string }>).some((r) => r.path === path)) {
       return bad(404, `未知面板路由：${path}`)
+    }
+    // ---- 写面凭据门（KI-193）：一切写方法先过门再碰任何解析/写盘——401 时
+    // 账本与声明逐字节不动。GET 不设门（读面开放，页面要能加载）。
+    if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+      const verdict = (deps.authFace ?? defaultAuthFace)(auth)
+      if (!verdict.ok) {
+        return bad(401, `panel write refused (401): ${verdict.why} — file requests via server/engine/executor_requests (engine entry); the panel does not mint credentials (KI-193)`)
+      }
     }
     // ---- requests ----
     if (path === '/sandbar-executor-panel/api/requests') {
@@ -153,14 +247,21 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       const parsed = parseJsonBody(bodyRaw)
       if (!parsed.ok) return bad(400, parsed.error)
       const b = parsed.body
-      const res = answerRequest(ledgerIo, env, String(b.project ?? ''), b.id, b.answer, String(b.by ?? 'host'), now())
+      // KI-193：写者不由调用方自报——凭据能证明的唯一身份就是 'host'（固定值）。
+      // body.by 只作兼容保留：带了且 ≠'host' → 应答行带 by_claimed + writer_mismatch，
+      // 台账里「host 的决定」不再能被任意命名（错配可见，不静默）。
+      const byClaimed = typeof b.by === 'string' ? b.by : undefined
+      const mismatch = byClaimed !== undefined && byClaimed !== 'host'
+      const res = answerRequest(ledgerIo, env, String(b.project ?? ''), b.id, b.answer, 'host', now(),
+        mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : undefined)
       if (!res.ok) {
         const status = res.error.startsWith('project 形状') || res.error.startsWith('id 必须') || res.error.startsWith('answer 必须')
           ? 400
           : res.error.startsWith('无此请求') ? 404 : 409
         return bad(status, res.error)
       }
-      return { status: 200, json: { ok: true, answered: res.answerRow } }
+      return { status: 200, json: { ok: true, answered: res.answerRow,
+        ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
     }
     // ---- settings ----
     if (path === '/sandbar-executor-panel/api/settings') {
@@ -186,9 +287,15 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           const res = revokeAll(key, env)
           if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
           // t260930-14：收回变真——同步清空执行器授权声明（全 op 未授予=引擎侧零授予）。
-          // t261003-06：改走 clearGrants（仅授权面收回，保留会话点名）；守望者的
-          // enabled:false 语义由上面 revokeAll 承担，两个面各管各的（review C2）。
-          const g = clearGrants(key, String(parsed.body.by ?? 'host'), env, now(), String(parsed.body.caller_surface ?? ''))
+          // t261003-06：仅授权面收回（保留会话点名）；守望者的 enabled:false 语义由上面
+          // revokeAll 承担。t261004-18（KI-193 review #1）：清权半边同走引擎入口
+          // （META_OP 判定+审计），不再直写声明文件。
+          const prev = prevDecl(key)
+          const g = await engineGrantsWrite(key, {
+            grants: {},
+            ...(prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
+            ...(prev.ok && prev.declaration?.night_tier ? { night_tier: { ...prev.declaration.night_tier, enabled: false } } : {}),
+          }, parsed.body.by)
           if (!g.saved) return { status: 200, json: { ok: false, saved: false, error: g.reason, reason: g.reason } }
           return { status: 200, json: { ok: true, saved: true, note: 'all grants revoked (watchdog enabled:false + executor grants declaration cleared)' } }
         }
@@ -210,24 +317,42 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         if (!parsed.ok) return bad(400, parsed.error)
         const b = parsed.body as Record<string, unknown>
         // t261003-06 总开关（Overview 电源开关 = Grants 总开关，同一份状态）：
-        //   op:'master' + enabled:false → 仅授权面收回（clearGrants：清 grants、留会话点名、
+        //   op:'master' + enabled:false → 仅授权面收回（清 grants、留会话点名、
         //   绝不碰 watchdog.json——「收回授权只影响授权，守望者照常运行」）；
-        //   op:'master' + enabled:true  → 全部六操作授予（grantAllOps）。
-        // 旧 settings 的 op=revoke（enabled:false，禁守望者）是另一个面，语义不混用。
+        //   op:'master' + enabled:true  → 全部六操作授予。
+        // t261004-18（KI-193）：三个写面（save/master/clear）一律走引擎入口
+        // executor-grants-write（META_OP 判定+审计单一真源），不再直写声明文件；
+        // 写者固定 'host'，body.by 只作错配记录。
+        const prev = prevDecl(key)
+        let doc: Record<string, unknown>
         if (b.op === 'master') {
-          const by = String(b.by ?? 'host')
-          const surface = String(b.caller_surface ?? '')
-          const res = b.enabled === false
-            ? clearGrants(key, by, env, now(), surface)
-            : grantAllOps(key, by, env, now(), surface)
-          if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
-          return { status: 200, json: { ok: true, saved: true, file: res.file, declaration: res.resolved,
-            note: b.enabled === false ? 'all permissions revoked (session naming kept, watchdog untouched)' : 'all six permissions granted' } }
+          doc = b.enabled === false
+            ? {
+                grants: {},
+                ...(prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
+                ...(prev.ok && prev.declaration?.night_tier ? { night_tier: { ...prev.declaration.night_tier, enabled: false } } : {}),
+              }
+            : {
+                grants: Object.fromEntries(GRANT_OPS.map((op) => [op, true])),
+                ...(prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
+              }
+        } else {
+          // 部分编辑不丢字段：body 没给 executor_sessions = 从盘上现声明继承
+          //（与旧 saveGrantsDecl 同语义，t261003-06 缺陷一）。
+          doc = {
+            grants: (b.grants ?? {}) as Record<string, unknown>,
+            ...(b.night_tier !== undefined ? { night_tier: b.night_tier } : {}),
+            ...(b.executor_sessions !== undefined
+              ? { executor_sessions: b.executor_sessions }
+              : prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
+          }
         }
-        // 保存被拒收=HTTP 200 + saved:false + 人话原因（拒收是「编辑面正常工作」，与 settings save 同口径）。
-        const res = saveGrantsDecl(key, b, String(b.by ?? ''), env, now(), String(b.caller_surface ?? ''))
+        const res = await engineGrantsWrite(key, doc, b.by)
         if (!res.saved) return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
-        return { status: 200, json: { ok: true, saved: true, file: res.file, declaration: res.resolved } }
+        const mismatch = b.by !== undefined && b.by !== null && b.by !== 'host'
+        return { status: 200, json: { ok: true, saved: true, file: res.file, declaration: res.resolved,
+          ...(b.op === 'master' ? { note: b.enabled === false ? 'all permissions revoked (session naming kept, watchdog untouched)' : 'all six permissions granted' } : {}),
+          ...(mismatch ? { by_claimed: b.by, writer_mismatch: true } : {}) } }
       }
       if (method !== 'GET') return bad(405, '仅 GET/POST（POST=声明编辑器写面）')
       const res = await grantsResult(key, origin)

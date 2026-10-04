@@ -10,6 +10,7 @@
 // 不锚渲染字符串形状。POLL_MS=5000 是页面公开口径（页脚自述「refresh every 5 seconds」），
 // 等一个真实轮询周期（5.7s）即等一个用户真实会遇到的刷新边界。
 
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs'
@@ -59,9 +60,15 @@ export async function openPanel({ KEY, seed = [], viewport = { width: 1280, heig
   const pan = freshDir('t26100314-panel-')
   const wd = freshDir('t26100314-wd-')
   const H = await startHarness({ port: 0, panelDir: pan, watchdogDir: wd, workbenchBase: 'http://127.0.0.1:9' })
+  // t261004-18 (KI-193): panel writes require the console session credential;
+  // fixtures and the browser context present the same-shaped cookie the
+  // console browser carries (name = dsh-auth- + base64url(sha256(host))).
+  const consoleCookie = (base) => 'dsh-auth-' +
+    Buffer.from(createHash('sha256').update(new URL(base).host).digest()).toString('base64url') +
+    '=v1.AAAA.BBBB'
   const post = async (path, body) => {
     const r = await fetch(H.base + path, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) }, body: JSON.stringify(body),
     })
     return { status: r.status, json: await r.json() }
   }
@@ -76,7 +83,15 @@ export async function openPanel({ KEY, seed = [], viewport = { width: 1280, heig
     const err = new Error('chromium launch failed: ' + (e?.message || String(e))); err.envMissing = true; throw err
   }
   const pageErrors = []
-  const page = await browser.newPage({ viewport })
+  // t261004-18 (KI-193): the page's own fetches are panel writes now, so the
+  // browser context carries the same console credential the fixtures use.
+  const u = new URL(H.base)
+  const context = await browser.newContext({ viewport })
+  await context.addCookies([{
+    name: 'dsh-auth-' + Buffer.from(createHash('sha256').update(u.host).digest()).toString('base64url'),
+    value: 'v1.AAAA.BBBB', domain: u.hostname, path: '/',
+  }])
+  const page = await context.newPage()
   page.setDefaultTimeout(15000)
   page.on('pageerror', (e) => pageErrors.push(String(e)))
   await page.goto(H.base + '/sandbar-executor-panel?project=' + KEY)

@@ -5,13 +5,15 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { assert, done, freshDir, cleanup, isolatedEnv, fakeClock } from './lib.mjs'
+import { assert, done, freshDir, cleanup, isolatedEnv, fakeClock, authPass, engineWriteStub } from './lib.mjs'
 import { createApi } from '../src/host/api.ts'
 
 const wd = freshDir(), pan = freshDir()
 const env = isolatedEnv(wd, pan)
 const clock = fakeClock()
-const api = createApi(env, { now: () => clock.now(), fetchTemplateFacts: async () => ({ ok: false, reason: 'stub: template facts unavailable', source: 'workbench-workflows' }) })
+// KI-193：写面要过凭据门（defaultAuthFace 的拒绝路径由 auth-gate.test.mjs 专测）；
+// 授权写面走引擎入口的桩（spawn 面由 engine-grants-write.test.mjs 专测）。
+const api = createApi(env, { now: () => clock.now(), fetchTemplateFacts: async () => ({ ok: false, reason: 'stub: template facts unavailable', source: 'workbench-workflows' }), authFace: authPass, engineGrantsWrite: engineWriteStub(env, () => clock.now()) })
 let n = 0
 const Q = (s = '') => new URLSearchParams(s)
 

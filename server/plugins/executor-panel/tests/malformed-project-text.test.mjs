@@ -7,7 +7,7 @@
  *   - 家族面：requests.ts（append/answer）、settings.ts（read/save）同文案单源。
  * 畸形输入用例（空参/大写/斜杠穿越/非字符串）全打桩，不触真实外部源。
  */
-import { assert, done, freshDir, cleanup, isolatedEnv, fakeClock } from './lib.mjs'
+import { assert, done, freshDir, cleanup, isolatedEnv, fakeClock, authPass } from './lib.mjs'
 import { createApi } from '../src/host/api.ts'
 import { appendRequest } from '../src/host/requests.ts'
 import { readSettings } from '../src/host/settings.ts'
@@ -17,7 +17,7 @@ import { memLedgerIo } from './lib.mjs'
 const wd = freshDir(), pan = freshDir()
 const env = isolatedEnv(wd, pan)
 const clock = fakeClock()
-const api = createApi(env, { now: () => clock.now(), fetchTemplateFacts: async () => ({ ok: false, reason: 'stub', source: 'workbench-workflows' }) })
+const api = createApi(env, { now: () => clock.now(), fetchTemplateFacts: async () => ({ ok: false, reason: 'stub', source: 'workbench-workflows' }), authFace: authPass })
 const Q = (s = '') => new URLSearchParams(s)
 let n = 0
 

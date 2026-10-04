@@ -12,7 +12,7 @@
 import { createRequire } from 'node:module'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { assert, done, freshDir, cleanup } from './lib.mjs'
+import { assert, done, freshDir, cleanup , panelCookieFor } from './lib.mjs'
 
 let n = 0
 const require = createRequire(import.meta.url)
@@ -42,11 +42,16 @@ async function launchBrowser() {
 const wd = freshDir(), pan = freshDir()
 const mod = await import('../harness.mjs')
 const H = await mod.startHarness({ port: 0, panelDir: pan, watchdogDir: wd, workbenchBase: 'http://127.0.0.1:9' })
+
+  // KI-193：浏览器上下文也带会话 cookie（dsh cookieName 算法；形状门可过）——
+  // 页面 JS 的 POST 与测试侧 fetch 走同一凭据面。
+  const CRED = (() => { const c = panelCookieFor(new URL(H.base).host); const i = c.indexOf('='); return { header: c, cookies: [{ name: c.slice(0, i), value: c.slice(i + 1), url: H.base }] } })()
+  const newAuthedPage = async (viewport) => { const ctx = await browser.newContext(viewport ? { viewport } : {}); await ctx.addCookies(CRED.cookies); return ctx.newPage() }
 const browser = await launchBrowser()
 const declFile = join(wd, 'rodalpha', 'watchdog.json')
 let savedBytes = ''
 try {
-  const page = await browser.newPage()
+  const page = await newAuthedPage()
   page.setDefaultTimeout(15000)
   await page.goto(H.base + '/sandbar-executor-panel?project=rodalpha')
   await page.waitForSelector('#saveBtn', { state: 'attached' })

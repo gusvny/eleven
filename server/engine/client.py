@@ -3169,6 +3169,80 @@ async def cmd_cancel_audit(args: Dict[str, Any]) -> Dict[str, Any]:
     })
 
 
+async def cmd_executor_grants_write(args: Dict[str, Any]) -> Dict[str, Any]:
+    """executor-grants-write -- engine-side entry for executor authority-declaration writes (t261004-18, KI-193).
+
+    Why it exists: the executor panel (server/plugins/executor-panel) used to write
+    executor-grants.json directly, bypassing the engine's META_OP judgment and audit —
+    anything that could POST on the panel routes could change authority. This entry
+    routes save/clear/grant-all, whatever surface asked, through one judgment and one
+    audit (requirement 3: whatever surface asked).
+
+    args (JSON object):
+      key                project key (required)
+      by                 recorded name (required; fixed 'host' on the panel side — the caller cannot self-name)
+      grants             {op: boolean} object (required; clear = empty object {})
+      night_tier         optional {enabled, until, note?}
+      executor_sessions  optional list of non-empty strings
+      now_ms             optional timestamp in ms (defaults to now)
+      source             optional source-face object (lands verbatim in the audit row, e.g. surface/transport/guarded)
+
+    Judgment: executor_grants.save_declaration — META_OP lock (executor identity
+    refused before the declaration is even read), declaration validation, atomic
+    write, and audit all live in that one place. The caller identity channel comes
+    from process env (SANDBAR_CALLER_IDENTITY_SRC / SANDBAR_CALLER_SURFACE); an
+    executor session running this CLI directly is locked out the same way. Refusals
+    (including the lock) also land a refuse audit row (when key is present).
+    Purely local; never connects to Temporal."""
+    key = str(args.get("key") or "")
+    by = str(args.get("by") or "")
+    source = args.get("source") if isinstance(args.get("source"), dict) else None
+    grants = args.get("grants")
+    night_tier = args.get("night_tier") if isinstance(args.get("night_tier"), dict) else None
+    sessions_in = args.get("executor_sessions")
+    executor_sessions = sessions_in if isinstance(sessions_in, list) else None
+    try:
+        now_ms = int(args.get("now_ms")) if args.get("now_ms") is not None else int(time.time() * 1000)
+    except (TypeError, ValueError):
+        now_ms = int(time.time() * 1000)
+
+    def _refuse(reason: str) -> Dict[str, Any]:
+        if key:
+            row: Dict[str, Any] = {"at": now_ms, "action": "refuse", "project": key,
+                                   "op": executor_grants.META_OP, "who": by[:64], "why": reason[:500]}
+            if source is not None:
+                row["source"] = source
+            executor_grants.append_audit(key, row)
+        return {"saved": False, "reason": reason, "file": executor_grants.declaration_path(key) if key else None}
+
+    if not key:
+        return {"saved": False, "reason": "missing project key", "file": None}
+    if not by:
+        return _refuse("missing by (who is changing the grant list — every grant change must be named)")
+    if not isinstance(grants, dict):
+        return _refuse("grants must be an object {op: boolean} (got %s)" % type(grants).__name__)
+    caller_channel = str(os.environ.get(shared.CALLER_IDENTITY_SRC_ENV) or "")
+    lane_surface = str(os.environ.get(shared.CALLER_SURFACE_ENV) or "")
+    res = executor_grants.save_declaration(
+        key, grants, by, now_ms,
+        night_tier=night_tier, executor_sessions=executor_sessions,
+        caller_channel=caller_channel, lane_surface=lane_surface, source=source)
+    if not res.get("saved") and res.get("reason"):
+        # save_declaration already audits the META_OP lock internally; the other
+        # refusals (validation / missing by) get their refuse row here, so every
+        # attempted authority change is queryable (requirement 4). The lock marker
+        # is matched on the stable 'manage-grants' token present in that reason.
+        already = "manage-grants" in str(res.get("reason") or "")
+        if not already:
+            row = {"at": now_ms, "action": "refuse", "project": key,
+                   "op": executor_grants.META_OP, "who": by[:64],
+                   "why": str(res.get("reason"))[:500]}
+            if source is not None:
+                row["source"] = source
+            executor_grants.append_audit(key, row)
+    return res
+
+
 async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
     """t260926-03（KI-123）：权威模板面查询（只读、纯本地、**不连 Temporal**）。
 
@@ -3338,11 +3412,12 @@ COMMANDS = {
     "running-tickets": cmd_running_tickets,
     "cancel-audit": cmd_cancel_audit,
     "template-faces": cmd_template_faces,
+    "executor-grants-write": cmd_executor_grants_write,
     "deliver": cmd_deliver,
 }
 
 USAGE = (
-    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces|deliver> [argsJSON]\n"
+    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces|executor-grants-write|deliver> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"

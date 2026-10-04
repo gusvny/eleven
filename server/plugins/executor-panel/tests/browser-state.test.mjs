@@ -11,7 +11,7 @@
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { assert, done, freshDir, cleanup } from './lib.mjs'
+import { assert, done, freshDir, cleanup , panelCookieFor } from './lib.mjs'
 
 let n = 0
 const require = createRequire(import.meta.url)
@@ -33,11 +33,16 @@ async function launchBrowser() {
 const wd = freshDir(), pan = freshDir()
 const mod = await import('../harness.mjs')
 const H = await mod.startHarness({ port: 0, panelDir: pan, watchdogDir: wd, workbenchBase: 'http://127.0.0.1:9' })
+
+  // KI-193：浏览器上下文也带会话 cookie（dsh cookieName 算法；形状门可过）——
+  // 页面 JS 的 POST 与测试侧 fetch 走同一凭据面。
+  const CRED = (() => { const c = panelCookieFor(new URL(H.base).host); const i = c.indexOf('='); return { header: c, cookies: [{ name: c.slice(0, i), value: c.slice(i + 1), url: H.base }] } })()
+  const newAuthedPage = async (viewport) => { const ctx = await browser.newContext(viewport ? { viewport } : {}); await ctx.addCookies(CRED.cookies); return ctx.newPage() }
 const browser = await launchBrowser()
 const KEY = 'rodalpha'
 const LONG_DETAIL = Array.from({ length: 40 }, (_, i) => 'Line ' + (i + 1) + ' of the detail block for the scroll check.').join('\n')
 try {
-  const post = (path, body) => fetch(H.base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+  const post = (path, body) => fetch(H.base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie: CRED.header }, body: JSON.stringify(body) }).then((r) => r.json())
   // 无选项（自由文本）+ 有选项（按钮/展开框）+ 畸形（空 options、缺 detail、null 字段）。
   await post('/sandbar-executor-panel/api/requests', { project: KEY, kind: 'question', question: 'Do you have more instructions before the executor opens this ticket?', detail: LONG_DETAIL })
   await post('/sandbar-executor-panel/api/requests', { project: KEY, kind: 'sign', question: 'Merge ticket t261003-14 into main?', detail: 'Check passed. Conflicts: none.', default_action: 'hold', options: ['Approve', 'Reject'] })
@@ -45,7 +50,7 @@ try {
   await post('/sandbar-executor-panel/api/requests', { project: KEY, kind: 'question', question: 'Malformed shape probe', options: null, detail: null, default_action: null, raised_by: null })
   const idOf = (text) => page.$$eval('[data-row]', (rows, t) => rows.find((r) => r.textContent.includes(t))?.dataset.row, text)
 
-  const page = await browser.newPage({ viewport: { width: 1200, height: 900 } })
+  const page = await newAuthedPage({ width: 1200, height: 900 })
   page.setDefaultTimeout(15000)
   await page.goto(H.base + '/sandbar-executor-panel?project=' + KEY)
   await page.waitForFunction(() => document.getElementById('reqBadge') && document.getElementById('reqBadge').textContent === '3', { polling: 200 })

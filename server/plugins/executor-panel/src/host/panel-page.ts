@@ -654,7 +654,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
   }
   function sendAnswer(id, answer){
-    postJson('/sandbar-executor-panel/api/requests/answer', {project: state.project, id: id, answer: answer, by:'host'})
+    // t261004-18（KI-193）：不发送 by——写者由服务端凭据定名（'host'），调用方
+    // 自报不再被信任；发了也会被记成 by_claimed 错配位。
+    postJson('/sandbar-executor-panel/api/requests/answer', {project: state.project, id: id, answer: answer})
       .then(function(j){
         if(j.ok!==true){ alert('The answer was rejected: '+(j.error||'?')); }
         else {
@@ -866,7 +868,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){
       if(s.dataset.on==='true') grants[s.dataset.op] = true;
     });
-    var body = { grants: grants, by: 'host' };
+    // t261004-18（KI-193）：不带 by——写者由服务端凭据定名。
+    var body = { grants: grants };
     var sess = el('grantSession').value.trim();
     if(sess) body.executor_sessions = [sess];
     body.open_ticket_epics = selectedOpenEpics();
@@ -881,7 +884,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   function masterSwitch(enabled){
     if(!state.project) return;
-    postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), {op:'master', enabled: enabled, by:'host'})
+    postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), {op:'master', enabled: enabled})
       .then(function(j){
         if(j.saved!==true){ alert('The change was rejected: '+(j.error||j.reason||'?')); }
         loadGrants();

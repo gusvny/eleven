@@ -3416,6 +3416,16 @@
       "note": "",
       "sync_path": ""
     },
+    "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
+      "anchor": "behaviour",
+      "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
+      "sync_path": ""
+    },
+    "integration/t261004-18/sc_ki193_writer_identity_and_audit_source.mjs": {
+      "anchor": "behaviour",
+      "note": "KI-193: with a valid console-shaped credential, a forged body by records the server-derived writer host with a visible by_claimed/writer_mismatch, a grants master write records updated_by=host, the authority-write audit names its source face, and the grants readout stays consistent after the engine-routed write.",
+      "sync_path": ""
+    },
     "integration/t261004-26/sc_hostile_identity_fixture_chain.py": {
       "anchor": "behaviour",
       "note": "fault-injection chain: hostile inherited caller identity must not flip identity-gated guard scenarios; cleaning point strips identity; planted L12 probes bite",

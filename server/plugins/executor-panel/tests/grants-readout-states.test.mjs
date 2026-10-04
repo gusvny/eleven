@@ -5,7 +5,7 @@
  *  - 缺声明 / 坏声明 = 各自显式态，绝不冒充「已授予」；
  *  - 纯函数面 grantsReadoutState 表驱动（含夜间档活跃=全授予）。
  */
-import { assert, done, freshDir, cleanup, fakeClock } from './lib.mjs'
+import { assert, done, freshDir, cleanup, fakeClock, authPass, engineWriteStub } from './lib.mjs'
 import { createApi } from '../src/host/api.ts'
 import { declarationPath, grantsReadoutState, GRANT_OPS } from '../src/host/executor-grants.ts'
 import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
@@ -29,7 +29,8 @@ const restore = (() => {
   return () => { globalThis.fetch = orig }
 })()
 
-const api = createApi(env, { now: () => clock.now(), declaredEnabled: () => ({ declared: true, enabled: true }) })
+// KI-193：凭据桩 + 引擎写面桩（真判定/回执透传由 grants-declaration 与 engine-grants-write 专测）。
+const api = createApi(env, { now: () => clock.now(), declaredEnabled: () => ({ declared: true, enabled: true }), authFace: authPass, engineGrantsWrite: engineWriteStub(env, () => clock.now()) })
 
 try {
   // ---- 缺陷二：六操作全授予 → 6 of 6（不是 12 行也不是 18） ----

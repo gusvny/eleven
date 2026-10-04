@@ -11,7 +11,7 @@
 import { createRequire } from 'node:module'
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { assert, done, freshDir, cleanup } from './lib.mjs'
+import { assert, done, freshDir, cleanup , panelCookieFor } from './lib.mjs'
 
 let n = 0
 const require = createRequire(import.meta.url)
@@ -33,16 +33,21 @@ async function launchBrowser() {
 const wd = freshDir(), pan = freshDir()
 const mod = await import('../harness.mjs')
 const H = await mod.startHarness({ port: 0, panelDir: pan, watchdogDir: wd, workbenchBase: 'http://127.0.0.1:9' })
+
+  // KI-193：浏览器上下文也带会话 cookie（dsh cookieName 算法；形状门可过）——
+  // 页面 JS 的 POST 与测试侧 fetch 走同一凭据面。
+  const CRED = (() => { const c = panelCookieFor(new URL(H.base).host); const i = c.indexOf('='); return { header: c, cookies: [{ name: c.slice(0, i), value: c.slice(i + 1), url: H.base }] } })()
+  const newAuthedPage = async (viewport) => { const ctx = await browser.newContext(viewport ? { viewport } : {}); await ctx.addCookies(CRED.cookies); return ctx.newPage() }
 const browser = await launchBrowser()
 const KEY = 'rodalpha'
 mkdirSync(join(wd, KEY), { recursive: true })
 writeFileSync(join(wd, KEY, 'watchdog.json'), JSON.stringify({ enabled: true, stall_minutes: 15 }) + '\n', 'utf8')
 try {
-  const post = (path, body) => fetch(H.base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+  const post = (path, body) => fetch(H.base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie: CRED.header }, body: JSON.stringify(body) }).then((r) => r.json())
   await post('/sandbar-executor-panel/api/requests', { project: KEY, kind: 'sign', question: 'Merge ticket t261002-14 into main?', detail: 'Check line one.\n'.repeat(40) + 'Check passed.', default_action: 'hold', raised_by: 'session-09ca0247', options: ['Approve', 'Reject'] })
 
   // ---- 缺陷 1：展开不动另一栏 / 不动下方内容（窄=叠放，宽=并列） ----
-  const page = await browser.newPage({ viewport: { width: 700, height: 900 } })
+  const page = await newAuthedPage({ width: 700, height: 900 })
   page.setDefaultTimeout(15000)
   await page.goto(H.base + '/sandbar-executor-panel?project=' + KEY)
   await page.waitForFunction(() => document.getElementById('reqBadge') && document.getElementById('reqBadge').textContent === '1', { polling: 200 })
@@ -79,7 +84,7 @@ try {
   await page.close()
 
   // ---- 缺陷 2：主题深链 + 显式降级（无硬编码缺省调色板） ----
-  const tp = await browser.newPage({ viewport: { width: 1200, height: 900 } })
+  const tp = await newAuthedPage({ width: 1200, height: 900 })
   tp.setDefaultTimeout(15000)
   const bg = () => tp.evaluate(() => getComputedStyle(document.body).backgroundColor)
   await tp.emulateMedia({ colorScheme: 'dark' })
@@ -99,7 +104,7 @@ try {
   await tp.close()
 
   // ---- 缺陷 3：standalone → 唯一入口按钮禁用 + 一句话原因（STE） ----
-  const sp = await browser.newPage({ viewport: { width: 1200, height: 900 } })
+  const sp = await newAuthedPage({ width: 1200, height: 900 })
   sp.setDefaultTimeout(15000)
   await sp.goto(H.base + '/sandbar-executor-panel?project=' + KEY + '&theme=light')
   await sp.waitForSelector('#openSessionBtn')

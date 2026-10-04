@@ -8,7 +8,7 @@
  *  - settings 的 op=revoke（禁守望者面）→ 授权声明也清 grants、点名保留（两面不混）。
  * 畸形输入（坏会话 id 数组）在保存面被拒收、盘上原文件逐字节不动。
  */
-import { assert, done, freshDir, cleanup, fakeClock } from './lib.mjs'
+import { assert, done, freshDir, cleanup, fakeClock, authPass, engineWriteStub } from './lib.mjs'
 import { createApi } from '../src/host/api.ts'
 import { declarationPath } from '../src/host/executor-grants.ts'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
@@ -22,7 +22,8 @@ const GRANTS = '/sandbar-executor-panel/api/grants'
 const SETTINGS = '/sandbar-executor-panel/api/settings'
 let n = 0
 
-const api = createApi(env, { now: () => clock.now(), declaredEnabled: () => ({ declared: true, enabled: true }) })
+// KI-193：凭据桩 + 引擎写面桩（真判定/回执透传由 grants-declaration 与 engine-grants-write 专测）。
+const api = createApi(env, { now: () => clock.now(), declaredEnabled: () => ({ declared: true, enabled: true }), authFace: authPass, engineGrantsWrite: engineWriteStub(env, () => clock.now()) })
 const declFile = () => declarationPath('rodalpha', env)
 const readDecl = () => JSON.parse(readFileSync(declFile(), 'utf8'))
 

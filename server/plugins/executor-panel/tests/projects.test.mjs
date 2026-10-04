@@ -2,12 +2,14 @@
 // 全量项目（注册表根下目录）并逐个标注 declared/enabled/config_error；405/坏 key 面。
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { assert, done, freshDir, cleanup, isolatedEnv } from './lib.mjs'
+import { assert, done, freshDir, cleanup, isolatedEnv, authPass } from './lib.mjs'
 import { createApi } from '../src/host/api.ts'
 
 const wd = freshDir()
 const env = isolatedEnv(wd)
-const api = createApi(env, { now: () => 1, fetchTemplateFacts: async () => ({ ok: false, reason: 'stub', source: 'stub' }) })
+// KI-193：本文件测项目清单与 405 面，不测凭据门（auth-gate.test.mjs 专测）——写方法
+// 用例带凭据桩，让 405（方法不许）语义与 401（无凭据）语义各归各的测试。
+const api = createApi(env, { now: () => 1, fetchTemplateFacts: async () => ({ ok: false, reason: 'stub', source: 'stub' }), authFace: authPass })
 // 注册表根与面板根同目录（isolatedEnv 第一参）——声明与项目目录同住一个根。
 const Q = (s = '') => new URLSearchParams(s)
 let n = 0
@@ -41,7 +43,7 @@ n += 1
 
 // 空注册表根：真实空清单（不是报错冒充空，也不是空冒充报错）。
 const wd2 = freshDir()
-const api2 = createApi(isolatedEnv(wd2), { now: () => 1 })
+const api2 = createApi(isolatedEnv(wd2), { now: () => 1, authFace: authPass })
 r = await api2.handle('GET', '/sandbar-executor-panel/api/projects', Q(), '')
 assert(r.status === 200 && r.json.projects.length === 0, 'empty registry root = real empty list')
 n += 1

@@ -7,7 +7,7 @@
  *  - 页面源级锁：声明状态 banner 先行 + granted 列 + 「行存在≠已授予」文案。
  * 畸形输入用例（声明 JSON 坏 / 未知形状）走桩文件，不靠真外部源。零真网络、零 3099。
  */
-import { assert, done, freshDir, cleanup, fakeClock } from './lib.mjs'
+import { assert, done, freshDir, cleanup, fakeClock, authPass, engineWriteStub } from './lib.mjs'
 import { createApi } from '../src/host/api.ts'
 import { declarationPath } from '../src/host/executor-grants.ts'
 import { PANEL_PAGE_HTML } from '../src/host/panel-page.ts'
@@ -29,7 +29,8 @@ const restore = (() => {
   return () => { globalThis.fetch = orig }
 })()
 
-const api = createApi(env, { now: () => clock.now(), declaredEnabled: () => ({ declared: true, enabled: true }) })
+// KI-193：凭据桩 + 引擎写面桩（真判定/回执透传由 grants-declaration 与 engine-grants-write 专测）。
+const api = createApi(env, { now: () => clock.now(), declaredEnabled: () => ({ declared: true, enabled: true }), authFace: authPass, engineGrantsWrite: engineWriteStub(env, () => clock.now()) })
 
 try {
   // ---- ① 零声明项目：派生行照常（能力矩阵），但全部 granted:false + 「NOTHING is granted」 ----

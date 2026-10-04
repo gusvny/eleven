@@ -15,6 +15,7 @@
 // intent 分工：append-only/答复闭行不删原行/缝重启存活归 t260929-03-executor-panel-api
 // R1–R3；本条只锁「选项」这一新增数据面。
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { loadPanelHarness, makeIsoDir, makeCase } from './lib_panel_seam.mjs'
 
 const C = makeCase()
@@ -37,7 +38,13 @@ async function main() {
   const H = await harness.startHarness({ panelDir: join(iso.dir, 'panel'), watchdogDir: join(iso.dir, 'watchdog') })
   try {
     const reqApi = '/sandbar-executor-panel/api/requests'
-    const post = (body, url = reqApi) => jfetch(H.base, url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+// t261004-18 (KI-193): panel writes require the console session credential;
+// fixtures present the same-shaped cookie the console browser carries.
+function consoleCookie(base) {
+  return 'dsh-auth-' + Buffer.from(createHash('sha256').update(new URL(base).host).digest()).toString('base64url') + '=v1.AAAA.BBBB'
+}
+    const post = (body, url = reqApi) => jfetch(H.base, url, { method: 'POST', headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) }, body: JSON.stringify(body) })
     const read = async () => jfetch(H.base, reqApi + '?project=' + PROJ)
 
     // O1 带选项写入 → 原样读出

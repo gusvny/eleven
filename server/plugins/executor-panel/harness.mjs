@@ -81,7 +81,19 @@ export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchB
     SANDBAR_WATCHDOG_DIR: watchdogDir,
     SANDBAR_WORKBENCH_BASE: (workbenchStub || sameOriginWorkbench) ? '' : workbenchBase,
   }
-  const api = createApi(env, { workbenchBase: (workbenchStub || sameOriginWorkbench) ? undefined : (workbenchBase || undefined) })
+  const api = createApi(env, {
+    workbenchBase: (workbenchStub || sameOriginWorkbench) ? undefined : (workbenchBase || undefined),
+    // t261004-18（KI-193）：测试缝不真 spawn 引擎 CLI（python 解释器/venv 不属 UT 面），
+    // 授权写落回真 TS 写核（同校验/原子写/审计）；引擎侧判定由 pytest 专测。
+    engineGrantsWrite: async (p) => {
+      const { saveGrantsDecl } = await import('./src/host/executor-grants.ts')
+      return saveGrantsDecl(p.key, {
+        grants: p.grants,
+        ...(p.night_tier !== undefined ? { night_tier: p.night_tier } : {}),
+        ...(p.executor_sessions !== undefined ? { executor_sessions: p.executor_sessions } : {}),
+      }, p.by, env, Date.now(), '', p.source)
+    },
+  })
 
   const server = createServer(async (req, res) => {
     try {
@@ -107,7 +119,10 @@ export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchB
         return
       }
       if (u.pathname.startsWith(PANEL_ROUTE + '/api/')) {
-        const r = await api.handle(method, u.pathname, u.searchParams, body, 'http://' + (req.headers.host ?? ''))
+        // t261004-18（KI-193）：凭据原料原样进 API 层——写面凭据门与生产壳 node.ts
+        // 同位生效，测试缝保持同形（不带 cookie 的 POST 在这里也 401）。
+        const r = await api.handle(method, u.pathname, u.searchParams, body,
+          'http://' + (req.headers.host ?? ''), { cookie: req.headers.cookie, host: req.headers.host })
         sendJson(res, r.status, r.json)
         return
       }

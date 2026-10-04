@@ -57,6 +57,11 @@ export interface AnswerRow {
   at: number
   answer: string
   by: string
+  /** t261004-18 (KI-193): writer-mismatch visibility — when the caller self-reports a
+   *  different writer in the body, the row keeps both the claim (by_claimed) and the
+   *  mismatch sentinel; the recorded `by` is always the server-derived name. */
+  by_claimed?: string
+  writer_mismatch?: boolean
 }
 
 export type LedgerLine = RequestRow | AnswerRow
@@ -197,6 +202,7 @@ export function appendRequest(
  */
 export function answerRequest(
   io: LedgerIo, env: NodeJS.ProcessEnv, key: string, id: unknown, answer: unknown, by: string, nowMs: number,
+  writerMeta?: { by_claimed?: string; writer_mismatch?: boolean },
 ): { ok: true; answerRow: AnswerRow } | { ok: false; error: string } {
   if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
     return { ok: false, error: malformedProjectMessage(key) }
@@ -209,7 +215,7 @@ export function answerRequest(
   if (target.status === 'answered') {
     return { ok: false, error: `请求 ${id} 已于 ${new Date(target.answered_at ?? 0).toISOString()} 由 ${target.answered_by ?? '?'} 应答——拒绝二次应答（留痕不可改写）` }
   }
-  const answerRow: AnswerRow = { type: 'answer', answer_for: id, at: nowMs, answer, by }
+  const answerRow: AnswerRow = { type: 'answer', answer_for: id, at: nowMs, answer, by, ...writerMeta }
   io.appendFileSync(requestsLedgerFile(key, env), JSON.stringify(answerRow) + '\n')
   return { ok: true, answerRow }
 }

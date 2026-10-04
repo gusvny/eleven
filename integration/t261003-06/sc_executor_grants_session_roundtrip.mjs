@@ -20,6 +20,7 @@
 //
 // 三态：harness.mjs 缝缺席/新契约面未落地=FAIL exit 1 且点名（TDD 期红属预期）。
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { loadPanelHarness, makeIsoDir, makeCase } from './lib_panel_seam.mjs'
 
 const C = makeCase()
@@ -42,12 +43,18 @@ async function main() {
   const iso = makeIsoDir()
   const H = await harness.startHarness({ panelDir: join(iso.dir, 'panel'), watchdogDir: join(iso.dir, 'watchdog'), workbenchStub: true })
   try {
+
+// t261004-18 (KI-193): panel writes require the console session credential;
+// fixtures present the same-shaped cookie the console browser carries.
+function consoleCookie(base) {
+  return 'dsh-auth-' + Buffer.from(createHash('sha256').update(new URL(base).host).digest()).toString('base64url') + '=v1.AAAA.BBBB'
+}
     const api = '/sandbar-executor-panel/api/grants?project=' + PROJ
     // 前置（用户旅程）：宿主先在 Settings 页声明守望者——授权推导面要求项目已声明
     // （未声明=授权面显式「未接入」，不是空表）。
     await jfetch(H.base, '/sandbar-executor-panel/api/settings?project=' + PROJ,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op: 'save', config: { enabled: true } }) })
-    const save = (body) => jfetch(H.base, api, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'host-sc', ...body }) })
+      { method: 'POST', headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) }, body: JSON.stringify({ op: 'save', config: { enabled: true } }) })
+    const save = (body) => jfetch(H.base, api, { method: 'POST', headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) }, body: JSON.stringify({ by: 'host-sc', ...body }) })
     const get = () => jfetch(H.base, api)
     const stateOf = (g) => (g.body && g.body.session_readout && g.body.session_readout.state) || (g.body && g.body.readout && g.body.readout.state) || null
     const sessionsOf = (g) => (g.body && g.body.session_readout && g.body.session_readout.sessions) || (g.body && g.body.executor_sessions) || []
@@ -97,7 +104,7 @@ async function main() {
 
     // C1 没点名（另一项目：声明在、零点名）
     // C1 没点名（beta-2 项目：声明在、零点名）
-    await jfetch(H.base, '/sandbar-executor-panel/api/grants?project=beta-2', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ by: 'host-sc', grants: { sign: true } }) })
+    await jfetch(H.base, '/sandbar-executor-panel/api/grants?project=beta-2', { method: 'POST', headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) }, body: JSON.stringify({ by: 'host-sc', grants: { sign: true } }) })
     const gNS = await jfetch(H.base, '/sandbar-executor-panel/api/grants?project=beta-2')
     C.case('C1-no-session-named-state-explicit', stateOf(gNS) === 'no-session',
       `state=${stateOf(gNS)}`)

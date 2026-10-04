@@ -465,8 +465,9 @@ def session_matches_declaration(channel: str, lane_surface: str = "", key: str =
 # ---------- 声明写面（面板 TS 侧是主编辑器；本函数=引擎侧同规则写口与测试/CLI 面） ----------
 
 # dead-man-exempt: save_declaration
-# （引擎侧声明写口=反锁与原子写的单一真源：面板 TS 侧 saveGrantsDecl 是主编辑器，
-#   本函数是同规则镜像写口——消费面=本模块 UT 与后续宿主 CLI/代理接线；非死码。
+# （引擎侧声明写口=反锁与原子写的单一真源：t261004-18（KI-193）起面板授权写也走
+#   本函数（client.py executor-grants-write 入口，source 随载荷进审计），TS 侧
+#   saveGrantsDecl 降级为测试缝写核（harness/UT 桩）与镜像校验面；非死码。
 #   退役前先删 TS 镜像，两侧一起退役。）
 def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      night_tier: Optional[Dict[str, Any]] = None,
@@ -476,15 +477,25 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      caller_channel: str = "",
                      lane_surface: str = "",
                      audit_sink: Callable[[str, Dict[str, Any]], None] = append_audit,
+                     source: Optional[Dict[str, Any]] = None,
                      ) -> Dict[str, Any]:
     """声明写入（原子：tmp → 校验 → 回读再校验 → rename；任一步失败原文件逐字节不动）。
 
     反锁（t261001-20 口径）：执行器身份（cwd 通道，或声明通道且会话 id 被本项目
     executor_sessions 点名）一律拒收——执行器不能改/扩/缩自己的授予清单，哪怕
-    「缩小」。返回 {"saved": bool, "reason"?, "file", "resolved"?}。"""
+    "narrowing" included. Returns {"saved": bool, "reason"?, "file", "resolved"?}.
+
+    source (t261004-18, KI-193): the source face of the authority write (e.g.
+    {"surface": "panel-api", "transport": "http", "guarded": true}) — lands verbatim
+    in the audit row so a later reader can tell a host action through the panel from
+    any other origin. Absent = the field is absent (existing audit rows unchanged)."""
     if not str(key or ""):
         return {"saved": False, "reason": "缺项目 key", "file": None}
     if session_matches_declaration(caller_channel, lane_surface, str(key or "")):
+        audit_sink(str(key), {"at": int(now_ms), "action": "refuse", "project": str(key),
+                              "op": META_OP, "who": str(by or "")[:64],
+                              "why": "executor identity refused (META_OP lock)",
+                              **({"source": source} if isinstance(source, dict) else {})})
         return {"saved": False, "file": declaration_path(key),
                 "reason": "执行器元权限反锁：执行器身份（通道=%s）不能改/扩/缩自己的授予清单"
                           "（manage-grants 是宿主特权）——由宿主在执行器面板 Grants 页操作"
@@ -546,7 +557,8 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                      "night_tier": normalized.get("night_tier"),
                      "executor_sessions": normalized.get("executor_sessions"),
                      "open_ticket_epics": normalized.get("open_ticket_epics") or [],
-                     "open_ticket_cap": normalized.get("open_ticket_cap")})
+                     "open_ticket_cap": normalized.get("open_ticket_cap"),
+                     **({"source": source} if isinstance(source, dict) else {})})
     return {"saved": True, "file": path, "resolved": normalized}
 
 

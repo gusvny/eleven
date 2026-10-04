@@ -27,6 +27,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, join } from 'node:path'
 import { malformedProjectMessage } from './project-key.ts'
 import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
+import { execFile as execFileCb } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 /** 引擎固定授予操作面（真源=引擎 executor_grants.GRANT_OPS / 设计稿决定 10 词表；
  *  面板历史显示名 'reject' = 声明键 'send-back' 的别名，DISPLAY_ALIAS 双向映射）。 */
@@ -272,10 +274,14 @@ export interface SaveOutcome {
 /**
  * 声明保存（写时回读校验，全失败路径原文件逐字节不动）。
  * 反锁：callerSurface=executor-session 一律拒收（元权限归宿主）。
+ * t261004-18 (KI-193): the production write path now goes through the engine entry (spawnEngineGrantsWrite ->
+ * client.py executor-grants-write, single truth for META_OP judgment + audit); this function is demoted to
+ * the test-seam write core (harness/UT stubs use it as the engine stand-in) and the engine-mirrored validation face.
  */
 export function saveGrantsDecl(
   key: string, next: unknown, by: string, env: NodeJS.ProcessEnv, nowMs: number,
   callerSurface = '',
+  source?: Record<string, unknown>,
 ): SaveOutcome {
   const file = declarationPath(key, env)
   if (callerSurface === EXECUTOR_SURFACE) {
@@ -356,6 +362,7 @@ export function saveGrantsDecl(
     night_tier: normalized.night_tier ?? null,
     open_ticket_epics: normalized.open_ticket_epics ?? [],
     open_ticket_cap: normalized.open_ticket_cap ?? OPEN_TICKET_CAP_DEFAULT,
+    ...(source ? { source } : {}), // KI-193: source face (surface/transport/guarded/by_claimed...) lands verbatim in the audit
   }, env)
   return { saved: true, file, resolved: normalized }
 }
@@ -430,4 +437,101 @@ export function grantsReadoutState(
   }
   return { state: 'granted', sessions, granted, total,
            sentence: 'The session is named. ' + granted.length + ' of ' + total + ' permissions are granted.' }
+}
+
+// ---------- t261004-18（KI-193）：授权写走引擎入口（META_OP 判定+审计单一真源） ----------
+//
+// 面板不再直写 executor-grants.json：save/master/clear 一律 spawn 引擎 CLI
+//   python3 <repo>/server/engine/client.py executor-grants-write '<json>'
+// 判定（执行器身份反锁先于声明读取）、声明校验、原子写、审计全在引擎侧一处；
+// 任何失败路径（spawn 失败/超时/非零退出/回执畸形）= saved:false 显式点名，
+// **绝不回退直写**——回退就是把绕开判定的门重新打开。
+
+/** Engine write payload (args contract of client.py cmd_executor_grants_write). */
+export interface EngineGrantsWritePayload {
+  key: string
+  /** Fixed 'host' — the only identity the credential proves; a caller-reported by lands only in the source mismatch fields. */
+  by: string
+  grants: Record<string, unknown>
+  night_tier?: unknown
+  executor_sessions?: unknown
+  /** Source face (lands verbatim in the engine audit row: surface/transport/guarded/by_claimed...). */
+  source?: Record<string, unknown>
+}
+
+export type EngineGrantsWriteFace = (payload: EngineGrantsWritePayload) => Promise<SaveOutcome>
+
+/** Engine CLI path (same-repo relative resolution: src/host -> server/engine/client.py, guards against a foreign repo). */
+export function engineClientPath(): string {
+  return fileURLToPath(new URL('../../../../engine/client.py', import.meta.url))
+}
+
+/**
+ * Engine interpreter: the engine's own venv (server/engine/.venv, where the temporalio dependency lives) first,
+ * then env SANDBAR_ENGINE_PYTHON, then system python3 (a missing temporalio makes the engine exit non-zero with an
+ * import error — the spawn face turns that faithfully into saved:false, never silently).
+ */
+export function enginePython(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.SANDBAR_ENGINE_PYTHON) return env.SANDBAR_ENGINE_PYTHON
+  const venv = fileURLToPath(new URL('../../../../engine/.venv/bin/python', import.meta.url))
+  if (existsSync(venv)) return venv
+  return 'python3'
+}
+
+/** Engine receipt parsing (single-line JSON on stdout; any malformed receipt = explicit refusal, no guessing). */
+export function parseEngineReceipt(stdout: string): SaveOutcome {
+  let doc: unknown
+  try {
+    doc = JSON.parse(String(stdout).trim() || 'null')
+  } catch {
+    return { saved: false, file: null,
+             reason: 'engine receipt is not valid JSON (KI-193: no fallback, declaration untouched)' }
+  }
+  if (typeof doc !== 'object' || doc === null || typeof (doc as Record<string, unknown>).saved !== 'boolean') {
+    return { saved: false, file: null,
+             reason: 'engine receipt has an unexpected shape (KI-193: no fallback, declaration untouched)' }
+  }
+  const d = doc as { saved: boolean; reason?: string; file?: string | null; resolved?: unknown }
+  return { saved: d.saved, reason: d.reason, file: d.file ?? null, resolved: d.resolved as GrantsDecl | undefined }
+}
+
+/**
+ * spawn engine write face (full-termination recovery: success = parse receipt; non-zero exit / timeout kill / spawn
+ * error / malformed receipt = saved:false with the reason). execFile auto-kills at the timeout
+ * and fires the callback — all four paths settle this Promise, no dangling handles.
+ */
+export function spawnEngineGrantsWrite(
+  payload: EngineGrantsWritePayload,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<SaveOutcome> {
+  const run = opts.execFileFn ?? execFileCb
+  const noFallback = ' (KI-193: no fallback, declaration untouched)'
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (r: SaveOutcome): void => {
+      if (!settled) { settled = true; resolve(r) }
+    }
+    try {
+      run(enginePython(opts.env), [engineClientPath(), 'executor-grants-write', JSON.stringify(payload)],
+        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000 },
+        (err, stdout) => {
+          // 非零退出时 stdout 可能仍带完整 JSON 回执（引擎 _emit 先打印再退出）——
+          // 回执可解析就如实透传，解析不出才走错误路径。
+          const out = String(stdout ?? '')
+          if (err && out.trim() === '') {
+            const killed = (err as NodeJS.ErrnoException & { killed?: boolean }).killed === true
+            finish({
+              saved: false, file: null,
+              reason: (killed ? 'engine grants write timed out and was killed: ' : 'engine grants write failed: ')
+                + String(err.message ?? err).slice(0, 300) + noFallback, // LIST-CAP-OK: error-message length limit, not a list cap
+            })
+            return
+          }
+          finish(parseEngineReceipt(out))
+        })
+    } catch (e) {
+      finish({ saved: false, file: null,
+               reason: 'engine grants write could not spawn: ' + (e instanceof Error ? e.message : String(e)) + noFallback })
+    }
+  })
 }

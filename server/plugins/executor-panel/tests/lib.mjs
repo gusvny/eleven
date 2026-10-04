@@ -51,3 +51,42 @@ export function isolatedEnv(...dirs) {
     SANDBAR_PANEL_DIR: dirs[1] || dirs[0],
   }
 }
+
+/**
+ * KI-193 测试凭据：按 dsh cookieName 算法拼一枚形状合法的会话 cookie
+ * （'dsh-auth-' + base64url(sha256(host))；值 v1.<b64>.<b64> 只过形状门——
+ * 本仓不验 HMAC，UT 里形状合法即可过 defaultAuthFace）。
+ */
+import { createHash } from 'node:crypto'
+export function panelCookieFor(host) {
+  const name = 'dsh-auth-' + createHash('sha256').update(host).digest('base64url')
+  return name + '=v1.cGFuZWwtdGVzdA.c2lnbmF0dXJlLXNoYXBlLW9ubHk'
+}
+
+/** KI-193：API 级 UT 的凭据桩（defaultAuthFace 的判定本身由 auth-gate.test.mjs 专测）。 */
+export const authPass = () => ({ ok: true, why: '' })
+
+/**
+ * KI-193：引擎写面桩——面板 POST /api/grants、settings revoke 走引擎入口；
+ * UT 里用它把载荷落回真 TS 写核（saveGrantsDecl：同校验/原子写/审计），
+ * 不真 spawn python3。引擎 spawn 面与引擎侧判定由 engine-grants-write 测试与
+ * pytest 各自专测。
+ */
+export function engineWriteStub(env, nowMs = () => Date.now()) {
+  return async (p) => {
+    const { saveGrantsDecl } = await import('../src/host/executor-grants.ts')
+    return saveGrantsDecl(
+      p.key,
+      {
+        grants: p.grants,
+        ...(p.night_tier !== undefined ? { night_tier: p.night_tier } : {}),
+        ...(p.executor_sessions !== undefined ? { executor_sessions: p.executor_sessions } : {}),
+      },
+      p.by,
+      env,
+      nowMs(),
+      '',
+      p.source,
+    )
+  }
+}

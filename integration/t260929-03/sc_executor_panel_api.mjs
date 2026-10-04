@@ -19,8 +19,15 @@
 // watchdog status 键集归 t260928-28-watchdog-status-surface；developer L1 守纯函数。
 // 实现未落地（harness.mjs 缺席）=FAIL 点名，TDD 期红属预期。
 import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { loadPanelHarness, makeIsoDir, makeCase, REPO } from './lib_panel_harness.mjs'
+
+// t261004-18 (KI-193): panel writes require the console session credential;
+// fixtures present the same-shaped cookie the console browser carries.
+function consoleCookie(base) {
+  return 'dsh-auth-' + Buffer.from(createHash('sha256').update(new URL(base).host).digest()).toString('base64url') + '=v1.AAAA.BBBB'
+}
 
 const C = makeCase()
 
@@ -68,7 +75,7 @@ let B = H.base.replace(/\/$/, '')
 // R1 追加未答请求
 {
   const r = await fetch(B + '/sandbar-executor-panel/api/requests', { method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: consoleCookie(B) },
     body: JSON.stringify({ project: 'alpha', question: 'Sign ticket t-1?', kind: 'sign',
       default_action: 'sign', expires_at: iso(-3600e3) }) })
   const ok = r.status >= 200 && r.status < 300
@@ -84,8 +91,8 @@ const first = (await j(await fetch(B + '/sandbar-executor-panel/api/requests?pro
 // R2 答复闭行不删原行
 {
   const r = await fetch(B + '/sandbar-executor-panel/api/requests/answer', { method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ project: 'alpha', id: first?.id, answer: 'approved by host' }) })
+    headers: { 'content-type': 'application/json', cookie: consoleCookie(B) },
+    body: JSON.stringify({ project: 'alpha', id: first?.id, answer: 'approved by host', by: 'host' }) })
   const out = await j(await fetch(B + '/sandbar-executor-panel/api/requests?project=alpha'))
   const rows = out.rows || out.requests || []
   const orig = rows.find(x => x.id === first?.id)
@@ -97,7 +104,7 @@ const first = (await j(await fetch(B + '/sandbar-executor-panel/api/requests?pro
 // R3 长保留：重启缝后未答行仍在
 {
   const r2 = await fetch(B + '/sandbar-executor-panel/api/requests', { method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: consoleCookie(B) },
     body: JSON.stringify({ project: 'alpha', question: 'Rerun t-2?', kind: 'rerun', default_action: 'rerun' }) })
   await H.close()
   H = await boot(iso1.dir)
@@ -132,9 +139,11 @@ const first = (await j(await fetch(B + '/sandbar-executor-panel/api/requests?pro
 // R5 project 白名单 + 405
 {
   const g = await fetch(H.base + '/sandbar-executor-panel/api/requests?project=Bad_Key!')
+  // t261004-18: the identity gate runs before validation (401 with no credential),
+  // so R5's whitelist/405 faces carry the fixture credential to reach their checks.
   const p = await fetch(H.base + '/sandbar-executor-panel/api/requests', { method: 'POST',
-    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project: 'BAD', question: 'x' }) })
-  const m = await fetch(H.base + '/sandbar-executor-panel/api/requests', { method: 'DELETE' })
+    headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) }, body: JSON.stringify({ project: 'BAD', question: 'x' }) })
+  const m = await fetch(H.base + '/sandbar-executor-panel/api/requests', { method: 'DELETE', headers: { cookie: consoleCookie(H.base) } })
   C.case('R5-whitelist-and-405', g.status === 400 && p.status === 400 && m.status === 405,
     `bad_get=${g.status} bad_post=${p.status} delete=${m.status}`)
 }
@@ -151,9 +160,15 @@ const first = (await j(await fetch(B + '/sandbar-executor-panel/api/requests?pro
 
 // S2 validate-on-write：坏声明字节不变；好声明落盘且回读翻转
 {
+
+// t261004-18 (KI-193): panel writes require the console session credential;
+// fixtures present the same-shaped cookie the console browser carries.
+function consoleCookie(base) {
+  return 'dsh-auth-' + Buffer.from(createHash('sha256').update(new URL(base).host).digest()).toString('base64url') + '=v1.AAAA.BBBB'
+}
   const before = readFileSync(W, 'utf8')
   const bad = await fetch(B + '/sandbar-executor-panel/api/settings?project=alpha', { method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) },
     body: JSON.stringify({ op: 'save', declaration: { ...DECL, totally_unknown_key: 1 } }) })
   const after = readFileSync(W, 'utf8')
   const badOut = await bad.json().catch(() => ({}))
@@ -162,7 +177,7 @@ const first = (await j(await fetch(B + '/sandbar-executor-panel/api/requests?pro
   C.case('S2a-rejected-save-reason-file-untouched', badOk,
     `http=${bad.status} saved=${badOut.saved} file_unchanged=${after === before}`)
   const good = await fetch(H.base + '/sandbar-executor-panel/api/settings?project=alpha', { method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: consoleCookie(H.base) },
     body: JSON.stringify({ op: 'save', declaration: { ...DECL, stall_minutes: 7 } }) })
   const goodOut = await good.json().catch(() => ({}))
   const back = await j(await fetch(H.base + '/sandbar-executor-panel/api/settings?project=alpha'))
