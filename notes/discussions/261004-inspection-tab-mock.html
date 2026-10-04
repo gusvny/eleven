@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Executor Panel — Inspection tab (mock v6, empty-period merge)</title>
+<title>Executor Panel — Inspection tab (mock v7, doc face)</title>
 <style>
 :root{
   --bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;
@@ -129,6 +129,7 @@ details[open] summary::before{transform:rotate(90deg)}
         <option>server/plugins only (353 files)</option>
         <option>server/engine only (61 files + 197 tests)</option>
         <option>integration/ only (756 files)</option>
+        <option>docs/ + notes/ only (85 documents)</option>
       </select>
       <label for="reason">Reason</label>
       <input id="reason" placeholder="why now — recorded">
@@ -164,16 +165,24 @@ const PERIODS = {
   '20261004': { current:true,
     test:{high:4,med:2,low:3,reds:2,env:38,newcases:12,notrun:'1 ticket had no receipt (t261004-03, blocked).',run:'run 02:30–04:10'},
     simp:{high:1,med:2,low:4,newcode:17,slice:48},
+    docs:{high:1,med:2,low:1,run:'run 10:00–10:22',read:'78 of 78',shards:2,
+          classes:'normative 9 · history 17 · notes 60',
+          driver:'17 changed code surfaces → 6 documents on the must-check list',
+          must:'6 docs', gap:1},
     coverage:{reviewed:60,total:1298,note:'Reviewed: 17 new-code files + 43 oldest-unreviewed files.'},
     findings:[
       ['10-04 03:12','test','The open-session button has no reason text when the panel stands alone','t261004-09'],
       ['10-04 03:12','test','Behaviour is green but one row is counted twice in the pause list',''],
       ['10-04 02:58','simplify','A guard still watches a file that the retirement batch deleted','t261004-09'],
       ['10-04 02:58','simplify','The same cap constant appears in three render paths, two of them wrong','t261004-14'],
+      ['10-04 10:18','doc','docs/reference/panel-list-conventions.md is not registered in the index',''],
+      ['10-04 10:18','doc','docs/testing-guide.md points at notes/epics/epic-linkage.md, which does not exist',''],
+      ['10-04 10:12','doc','A changed authority surface has no page that describes it','t261004-18'],
     ]},
   '20261003': { current:false,
     test:{high:15,med:3,low:3,reds:10,env:38,newcases:0,notrun:'8 high findings were environment-only (no chromium, bench port mismatch).',run:'run 23:30–01:32'},
     simp:{high:4,med:3,low:4,newcode:0,slice:74},
+    docs:{none:true,last:'20260929',next:'20261005'},
     coverage:{reviewed:74,total:1203,note:'No baseline this period. The test face scope counted as 1 file, so it found nothing.'},
     findings:[
       ['10-03 03:20','test','Test run failed: scenario-guard-pipeline-landed','t261003-01'],
@@ -187,11 +196,16 @@ const PERIODS = {
   '20261002': { current:false,
     test:{high:12,med:2,low:3,reds:4,env:12,newcases:9,notrun:'',run:'run 22:10–23:55'},
     simp:{high:2,med:3,low:6,newcode:13,slice:60},
+    docs:{high:0,med:3,low:2,run:'run 10:00–10:19',read:'78 of 78',shards:2,
+          classes:'normative 9 · history 17 · notes 60',
+          driver:'9 changed code surfaces → 4 documents on the must-check list',
+          must:'4 docs', gap:0},
     coverage:{reviewed:73,total:1180,note:'Agent scope was 9 files; 4 code findings came from it.'},
     findings:[
       ['10-02 23:40','simplify','The language gate reads only the Han block, narrower than the rule it states','t261002-01'],
       ['10-02 23:40','simplify','The gate appends its rows before dedupe and budget, so real findings lose the budget','t261002-01'],
       ['10-02 23:20','test','code_stamp misses an enforcing module, so a stale worker keeps the old rule','t261002-01'],
+      ['10-02 10:14','doc','The panel redesign note still describes the retired request shape',''],
     ]},
 };
 
@@ -220,7 +234,7 @@ function entries(){
 function entryOf(key){ const es = entries(); return es.find(e => e.key === key) || es[0]; }
 
 function totalFindings(p){ if (!p.test) return 0; const t=p.test,s=p.simp; return t.high+t.med+t.low+s.high+s.med+s.low; }
-function openReport(period){ document.getElementById('rodnote').textContent = 'Mock: this opens the ' + period + ' report file.'; }
+function openReport(face, period){ document.getElementById('rodnote').textContent = 'Mock: this opens the ' + period + ' ' + face + ' report for that face.'; }
 function renderPeriods(){
   document.getElementById('periodBtns').innerHTML = entries().map(e => {
     const label = e.periods.length === 1
@@ -237,6 +251,26 @@ function renderPeriods(){
     : 'This period is closed. Shown read-only from its report.';
 }
 function kv(k,v){ return `<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`; }
+// 文档面：全量读（不是切片），另加两个只有文档面才有的计分位——代码变化面里被点名要校的文档数、缺口数
+function docsCard(period, p){
+  const d = p.docs || {};
+  if (d.none){
+    return `<div class="card">
+      <div class="row"><span class="dot grey"></span><span class="txt">Documents</span><span class="meta">weekly instance</span></div>
+      <div class="nums">${kv('documents read','—')}${kv('must-check list','—')}${kv('gaps','—')}</div>
+      <div class="detail muted">No report for this period. The document instance runs weekly (Mondays 10:00). Last report ${d.last}; next run ${d.next}.</div>
+    </div>`;
+  }
+  return `<div class="card">
+    <div class="row"><span class="dot blue"></span><span class="txt">Documents</span><span class="meta">${d.run}</span></div>
+    <div class="nums">
+      ${kv('high', d.high)}${kv('med', d.med)}${kv('low', d.low)}
+      ${kv('documents read', d.read)}${kv('must-check list', d.must)}${kv('gaps', d.gap)}
+    </div>
+    <div class="detail muted">Read in full this period (${d.shards} shards): ${d.classes}. ${d.driver}${d.gap ? ' · 1 changed surface has no page' : ''}.
+      · <button class="link" onclick="openReport('t-docs','${period}')">Open this face's report</button></div>
+  </div>`;
+}
 function renderBody(){
   const e = entryOf(cur);
   // 合并项：一期一行，如实分述各自的因由（哪些是差集过小、哪些是归档缺失）
@@ -270,7 +304,7 @@ function renderBody(){
         ${kv('high', t.high)}${kv('med', t.med)}${kv('low', t.low)}
         ${kv('suite failures', t.reds)}${kv('environment failures', t.env)}${kv('new test cases reviewed', t.newcases)}
       </div>
-      ${t.notrun?`<div class="detail muted">Not run or not reviewed: ${t.notrun}</div>`:''}
+      <div class="detail muted">${t.notrun?('Not run or not reviewed: ' + t.notrun + ' · '):''}<button class="link" onclick="openReport('t-test','${period}')">Open this face's report</button></div>
     </div>
     <div class="card">
       <div class="row"><span class="dot amber"></span><span class="txt">Simplify</span><span class="meta">new code first, then the oldest slice</span></div>
@@ -278,18 +312,22 @@ function renderBody(){
         ${kv('high', s.high)}${kv('med', s.med)}${kv('low', s.low)}
         ${kv('new code reviewed', s.newcode + ' files')}${kv('slice reviewed', s.slice + ' files')}
       </div>
-      <div class="detail muted">Mechanical checks ran on everything: lint, compile, term list, cross-language lists.</div>
+      <div class="detail muted">Mechanical checks ran on everything: lint, compile, term list, cross-language lists.
+        · <button class="link" onclick="openReport('t-simplify','${period}')">Open this face's report</button></div>
     </div>
+    ${docsCard(period, p)}
     <div class="sect">Named findings</div>
     <div class="card table">
       <table class="tbl"><thead><tr><th class="when">when</th><th class="face">face</th><th>finding</th><th class="ticket">ticket</th></tr></thead><tbody>${rows}</tbody></table>
     </div>
     <div class="note">${p.findings.length} named of ${totalFindings(p)} counted · newest first
-      · <button class="link" onclick="openReport('${period}')">Open the ${period} report</button></div>
+      · <button class="link" onclick="openReport('period','${period}')">Open the ${period} summary</button></div>
     <div class="sect">Coverage</div>
     <div class="card">
-      <div class="row"><span class="txt">${p.coverage.reviewed} of ${p.coverage.total} source files reviewed in ${period}</span></div>
+      <div class="row"><span class="txt">Code: ${p.coverage.reviewed} of ${p.coverage.total} source files reviewed</span><span class="meta">slice</span></div>
       <div class="track"><i style="width:${Math.max(1, Math.round(p.coverage.reviewed / p.coverage.total * 100))}%"></i></div>
+      <div class="row" style="margin-top:12px"><span class="txt">Documents: ${p.docs && p.docs.read ? p.docs.read + ' read in full' : 'no report this period (weekly instance)'}</span><span class="meta">${p.docs && p.docs.read ? 'whole library, not a slice' : 'last report ' + (p.docs && p.docs.last || '—')}</span></div>
+      <div class="track"><i style="width:${p.docs && p.docs.read ? 100 : 0}%"></i></div>
       <details><summary>Show the reviewed files and the queue</summary>
         <div class="detail muted">${p.coverage.note}<br>Nothing is claimed as clean unless it was reviewed.</div>
       </details>
