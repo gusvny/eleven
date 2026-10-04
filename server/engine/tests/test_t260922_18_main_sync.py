@@ -359,6 +359,56 @@ def test_struct_conflict_subloop_reuses_existing_trio_back_to_implement():
     assert '"主同步冲突消解第 %d 轮：%s"' in block
 
 
+def test_struct_resolution_round_clauses_present():
+    """t261004-35: the two new clauses in the resolution-round context (no
+    integration entry + parse-level self-check).
+
+    review_plan comment 1 landed as: the entry list is NOT hand-written — dev_lane
+    renders it from integration_discipline.FORBIDDEN_ENTRIES into the %s
+    placeholder (the declaration is the enforcement, same source). This test pins
+    two layers: (source) the helper block carries the render expression and the
+    clause anchors; (product) the expected name list is recomputed with the same
+    join and compared, and the four recommended self-check commands are asserted
+    to score zero hits on the enforcement matcher scan_bash_command — the
+    recommended self-check must not self-inflict a round red. That includes
+    python3 -m json.tool: it is not in STATIC_TOOL_MODULES, but its non-flag args
+    are a .json basename that can never match a FORBIDDEN_ENTRIES pattern, so a
+    future table/scanner extension that changes this must land in the same batch."""
+    import integration_discipline as idp
+    block = _sync_helper_block()
+    # source layer: the render expression (single truth, no hand-written list)
+    assert "integration_discipline.FORBIDDEN_ENTRIES" in block
+    assert "_forbidden_entries_names" in block
+    # clause 1: no integration entry + whole-round-fail consequence
+    assert "must NOT run any integration entry" in block
+    assert "fails the entire round" in block
+    # clause 2: parse-level self-check, never the suite
+    assert "git diff --check" in block
+    assert "never by running the suite" in block
+    # light-lane English override carries the same clauses in the same batch
+    light = (POC / "light_lane.py").read_text("utf-8")
+    assert "must NOT run any integration entry" in light
+    assert "fails the entire round" in light
+    assert "never by running the suite" in light
+    ictx = light[light.index('"conflict_ctx"'):light.index('"agent_failed_fmt"')]
+    ictx_code = "\n".join(l for l in ictx.splitlines()
+                          if not l.lstrip().startswith("#"))  # drop comment lines
+    assert ictx_code.count("%s") == 4  # repo/file list/merge output/no-run list
+    # product layer: expected list = same-source render (drift fails here). The
+    # keys tuple is pinned ASCII-only (the human-readable labels carry CJK as
+    # historical data in integration_discipline.py — data is not translated).
+    assert len(idp.FORBIDDEN_ENTRIES) == 5
+    assert tuple(k for k, _n in idp.FORBIDDEN_ENTRIES) == (
+        "run_scenarios.py", "sc_*", "baselines", "with_stage.sh", "verify_lane")
+    names = [n for _k, n in idp.FORBIDDEN_ENTRIES]
+    rendered = "、".join(names)  # same join as dev_lane's render expression
+    assert all(n in rendered for n in names)
+    # the recommended self-check commands score zero on the enforcement matcher
+    for cmd in ("python3 -m json.tool a.json", "python3 -m py_compile a.py",
+                "git diff --check", "node --check a.mjs"):
+        assert idp.scan_bash_command(cmd) == [], cmd
+
+
 def test_struct_evidence_wiring_present():
     """证据接线三面（260930 抽 helper 后按位置一一对应）：
     helper=同步日志留痕；相位块=票面 summary 尾注 + 仲裁/走查上下文注入。"""

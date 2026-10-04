@@ -273,7 +273,18 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "Task: resolve the conflict markers file by file, keep both sides' semantics "
             "(same as t260825-03); touch only the conflicted files, no unrelated edits; "
             "**do NOT git commit** (the worker settles the merge commit after you deliver "
-            "your result file). Write the result file when done."),
+            "your result file). "
+            # t261004-35: same two clauses as the default text — the forbidden-entry
+            # list is rendered by dev_lane from FORBIDDEN_ENTRIES (same source as the
+            # matcher), filled into the extra %s below.
+            "This round must NOT run any integration entry (named: %s) — running any "
+            "one of them fails the entire round and the resolved work is discarded "
+            "(mechanical scan at settle; the declaration is the enforcement). "
+            "Self-check only at parse level: python3 -m py_compile <file> (python "
+            "syntax), python3 -m json.tool <file> (JSON validity), "
+            "git diff --check (leftover conflict markers / whitespace), "
+            "node --check <file> (JS syntax) — never by running the suite. "
+            "Write the result file when done."),
         "agent_failed_fmt": "Main sync conflict resolution round %d: %s",
         "settle_unconverged": (
             "Main sync conflict resolution round %d did not converge (the worker's settle "

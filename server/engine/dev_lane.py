@@ -2281,6 +2281,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         ] or [{"name": "root", "rel": "",
                "branch": str(self.meta.get("branch") or "")}]
         _sync_outcomes: List[str] = []
+        # t261004-35: entry names for the resolution-round no-run clause — rendered
+        # from FORBIDDEN_ENTRIES, never hand-written (same source as the matcher,
+        # so a rename lands on prompt and matcher in one batch).
+        _forbidden_entries_names = "、".join(
+            name for _key, name in integration_discipline.FORBIDDEN_ENTRIES)
         for _st in _sync_targets:
             _wt_base = str(self.meta.get("worktree") or "")
             _st_wt = (_wt_base + "/" + _st["rel"]) if _st["rel"] else _wt_base
@@ -2354,10 +2359,26 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "merge 输出摘要（ours=泳道 / theirs=main）：\n%s\n"
                     "任务：逐个文件解掉冲突标记，保持两边语义（t260825-03 同款）；"
                     "只动冲突文件，不做无关改动；**不要 git commit**"
-                         "（你交付结果文件后 worker 会代落盘合并提交）。解完写结果文件交付。")
+                    "(the worker settles the merge commit after you deliver "
+                    "your result file). "
+                    # t261004-35: the resolution round lacked two discipline clauses
+                    # (measured on t261004-29: the lane ran integration/run_scenarios.py
+                    # to self-check and the settle scan failed the whole round). The
+                    # entry list is rendered from FORBIDDEN_ENTRIES — same source as
+                    # the matcher, never hand-written.
+                    "This round must NOT run any integration entry (named: %s) — "
+                    "running any one of them fails the entire round and the resolved "
+                    "work is discarded (mechanical scan at settle; the declaration is "
+                    "the enforcement). Self-check only at parse level: "
+                    "python3 -m py_compile <file> (python syntax), "
+                    "python3 -m json.tool <file> (JSON validity), "
+                    "git diff --check (leftover conflict markers / whitespace), "
+                    "node --check <file> (JS syntax) — never by running the suite. "
+                    "Write the result file when done.")
                     % (conflict_rounds, MAX_CONFLICT_ROUNDS, _tag,
                        "\n".join("- %s" % f for f in prep.conflict_files),
-                       (prep.merge_output or "（无输出）")[:1200]))
+                       (prep.merge_output or "(no output)")[:1200],
+                       _forbidden_entries_names))
                 try:
                     cres = await self._run_agent_step("implement", msolve_ctx)
                 except Exception as e:

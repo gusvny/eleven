@@ -268,7 +268,8 @@ async def _f_checks(env, tmp: Path) -> None:
     orig_root = agent_activities.REPO_ROOT
     agent_activities.REPO_ROOT = repo
     try:
-        note = agent_activities._settle_worktree_lane(wt, "t-self", "implement", 2)
+        note = agent_activities._settle_worktree_lane(wt, "t-self", "implement", 2,
+                                                     face="heal")
     finally:
         agent_activities.REPO_ROOT = orig_root
     ok("合并进行中" in note and "settle_conflict_resolution" in note,
@@ -292,7 +293,8 @@ async def _f_checks(env, tmp: Path) -> None:
     head_before = _git(wt, "rev-parse", "HEAD").stdout.strip()
     agent_activities.REPO_ROOT = repo
     try:
-        note = agent_activities._settle_worktree_lane(wt, "t-self", "implement", 2)
+        note = agent_activities._settle_worktree_lane(wt, "t-self", "implement", 2,
+                                                     face="heal")
     finally:
         agent_activities.REPO_ROOT = orig_root
     ok("合并进行中" in note
@@ -319,7 +321,8 @@ async def _f_checks(env, tmp: Path) -> None:
     (wt / "normal.txt").write_text("正常开发改动\n", "utf-8")
     agent_activities.REPO_ROOT = repo
     try:
-        note = agent_activities._settle_worktree_lane(wt, "t-self", "implement", 1)
+        note = agent_activities._settle_worktree_lane(wt, "t-self", "implement", 1,
+                                                     face="heal")
     finally:
         agent_activities.REPO_ROOT = orig_root
     ok("代落盘 commit" in note and "normal.txt" in note,

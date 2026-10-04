@@ -3406,6 +3406,11 @@
    "note": "",
    "sync_path": ""
   },
+  "integration/t261004-35/sc_t26100435_msolve_context_contract.py": {
+   "anchor": "contract",
+   "note": "the agent-facing conflict-resolution text carries the red line + parse-level self-check and stays same-source with FORBIDDEN_ENTRIES",
+   "sync_path": ""
+  },
   "integration/tests/test_fixture_reclaim.mjs": {
    "anchor": "behaviour",
    "note": "",
