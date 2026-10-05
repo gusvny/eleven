@@ -1245,6 +1245,176 @@ def agent_image_present():
         return False
 
 
+# ---- t261006-02 rework: persona schema adapter for the pinned test-dsh image ----
+
+def _test_dsh_image_version():
+    """Pinned test-dsh image version from server/docker-compose.test.yml, as a
+    comparable tuple of ints (e.g. "dsh-0.1.1-rc.2" -> (0, 1, 1)); unparseable ->
+    None (caller skips the adapter, verbatim copy — fail-safe to today's behavior)."""
+    try:
+        text = COMPOSE_FILE.read_text(encoding="utf8")
+    except OSError:
+        return None
+    import re
+    m = re.search(r"image:\s*test-dsh:dsh-([0-9][0-9.]*)", text)
+    if not m:
+        return None
+    try:
+        return tuple(int(p) for p in m.group(1).split(".")[:3])
+    except ValueError:
+        return None
+
+
+def _yaml_scalar_at(lines, idx):
+    """Read the scalar value of the `key:` line `lines[idx]` (block scalar `>`/`|`
+    forms with a more-indented body, or a plain/quoted inline scalar).
+    Returns (value, next_idx). Stdlib only — the system interpreter running
+    stage_docker has no pyyaml (t260922-08 compile-face discipline)."""
+    header = lines[idx]
+    indent = len(header) - len(header.lstrip())
+    inline = header.split(":", 1)[1].strip()
+    if inline and inline not in (">-", "|-", ">", "|"):
+        return inline.strip("'\""), idx + 1
+    body = []
+    j = idx + 1
+    while j < len(lines):
+        line = lines[j]
+        if not line.strip():
+            body.append("")
+            j += 1
+            continue
+        if len(line) - len(line.lstrip()) <= indent:
+            break
+        body.append(line.strip())
+        j += 1
+    while body and body[-1] == "":
+        body.pop()
+    return "\n".join(body), j
+
+
+def _preset_persona_to_text_schema(yaml_text):
+    """Convert a 0.1.5-schema persona entry (config: prefix/suffix) into the
+    0.1.1-schema persona entry (config: text) — the inverse of the 260923 preset
+    rebuild, applied to the STAGE-TEMP COPY only. Returns
+    (new_text, changed, reason). Line-based; only rewrites the persona entry when
+    its config block holds EXACTLY prefix/suffix scalars (any other config key in
+    the block = shape this adapter does not own -> verbatim copy + reason, no
+    silent config invention)."""
+    lines = yaml_text.splitlines()
+    start = next((i for i, l in enumerate(lines) if l.rstrip() == "- id: persona"), None)
+    if start is None:
+        return yaml_text, False, "persona entry not found"
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("- id:")),
+               len(lines))
+    block = lines[start:end]
+    if any(l.lstrip().startswith("text:") for l in block):
+        return yaml_text, False, "persona already text schema"
+    cfg = next((i for i, l in enumerate(block)
+                if (len(l) - len(l.lstrip())) == 2 and l.lstrip().startswith("config:")), None)
+    if cfg is None:
+        return yaml_text, False, "persona config block not found"
+    body = block[cfg + 1:]
+    consumed = []       # (start,end) intervals of prefix/suffix scalars inside body
+    values = {}
+    for key in ("prefix", "suffix"):
+        ki = next((i for i, l in enumerate(body)
+                   if (len(l) - len(l.lstrip())) == 4 and l.lstrip().startswith(key + ":")),
+                  None)
+        if ki is None:
+            continue
+        val, nxt = _yaml_scalar_at(body, ki)
+        values[key] = val
+        consumed.append((ki, nxt))
+    if not values:
+        return yaml_text, False, "no prefix/suffix keys in persona config"
+    # Shape guard: every non-blank, non-comment line of the config body must belong
+    # to one of the consumed scalar intervals.
+    for i, l in enumerate(body):
+        if not l.strip() or l.lstrip().startswith("#"):
+            continue
+        if not any(a <= i < b for a, b in consumed):
+            return yaml_text, False, "persona config has keys beyond prefix/suffix (%r)" % l.strip()[:40]
+    text = "\n\n".join(values[k] for k in ("prefix", "suffix") if values.get(k))
+    kept = [l for i, l in enumerate(body)
+            if l.strip().startswith("#") and not any(a <= i < b for a, b in consumed)]
+    new_block = block[:cfg + 1] + ["    text: |-"]
+    new_block += [("      " + ln) if ln else "      " for ln in text.splitlines()]
+    new_block += kept
+    return "\n".join(lines[:start] + new_block + lines[end:]) + "\n", True, "adapted 0.1.5 prefix/suffix -> 0.1.1 text"
+
+
+def _minimal_persona_preset(yaml_text):
+    """Build a MINIMAL persona-only preset composition from a 0.1.5-schema source
+    (config: prefix/suffix). Returns (new_text, persona_text, reason); persona_text
+    is "" when the source shape is not owned (caller keeps the verbatim copy).
+    Rationale (t261006-02 rework, 261006 04:0x fixed-point): in-place schema
+    conversion is whack-a-mole — after the persona entry mounts, the NEXT loader
+    entry fails ("Cannot find package '@deepseek-ai/dsh-tool-present'"): the
+    0.1.5 standard composition references plugin packages the pinned dsh-0.1.1
+    image does not ship, and enumerating them host-side is unknowable. The bench
+    session only needs the preset to MOUNT and the model round-trip to answer the
+    seed message — persona only is sufficient there; full standard capability is
+    the host artifact's job (the bench is an isolated screenshot stage, not a
+    capability stage)."""
+    persona_text, changed, reason = _preset_persona_to_text_schema(yaml_text)
+    if not changed:
+        return yaml_text, "", reason
+    start = persona_text.index("- id: persona")
+    end = persona_text.find("\n- id:", start + 1)
+    if end == -1:
+        end = len(persona_text.rstrip("\n"))
+    persona_entry = persona_text[start:end].rstrip("\n")
+    header = (
+        "# MINIMAL bench preset — materialized by stage_docker for the pinned dsh-%s\n"
+        "# test image (0.1.1 persona schema `text`). NOT the host artifact: the 0.1.5\n"
+        "# standard composition references plugin packages this image does not ship\n"
+        "# (first failure: @deepseek-ai/dsh-tool-present), so the bench mounts\n"
+        "# persona only — enough for session mount + the capture seed round-trip.\n"
+    )
+    return header, persona_entry, "minimal persona-only preset built"
+
+
+def _adapt_preset_persona_for_image(preset_dir, image_version, source):
+    """Entry point used by compose_env: adapt the materialized preset copy to the
+    pinned image's dsh generation. image >= 0.1.5 (or version unreadable, or
+    artifact shape not owned) = verbatim copy stands, marker names why — no silent
+    config invention, host artifact never touched."""
+    marker = preset_dir / "_persona-schema-adapter.txt"
+    try:
+        agent_yml = preset_dir / "agent.cordis.yml"
+        yaml_text = agent_yml.read_text(encoding="utf8")
+    except OSError as e:
+        marker.write_text("adapter skipped: agent.cordis.yml unreadable: %s\n" % e, encoding="utf8")
+        return
+    if image_version is None:
+        marker.write_text("adapter skipped: test-dsh image version unreadable from %s\n" % COMPOSE_FILE.name,
+                          encoding="utf8")
+        return
+    if image_version >= (0, 1, 5):
+        marker.write_text("adapter skipped: image dsh-%s mounts the 0.1.5 persona schema natively\n"
+                          % ".".join(map(str, image_version)), encoding="utf8")
+        return
+    header, persona_entry, reason = _minimal_persona_preset(yaml_text)
+    if not persona_entry:
+        marker.write_text("adapter skipped: %s\n" % reason, encoding="utf8")
+        if "beyond prefix/suffix" in reason or "not found" in reason:
+            print("警告：preset 未做旧代镜像适配（%s）——容器台新建会话可能挂载失败" % reason,
+                  file=sys.stderr)
+        return
+    agent_yml.write_text(header % ".".join(map(str, image_version)) + persona_entry + "\n",
+                         encoding="utf8")
+    marker.write_text(
+        "preset REPLACED with a minimal persona-only composition for the pinned test-dsh\n"
+        "image (dsh-%s: 0.1.1 persona schema `text`; the 0.1.5 standard composition\n"
+        "references plugin packages this image does not ship).\nsource: %s\n"
+        "scope: this stage-temp COPY only; the host artifact is untouched.\n"
+        "capability tradeoff: bench sessions carry persona only (no standard tools) —\n"
+        "the capture seed round-trip does not need them.\n"
+        % (".".join(map(str, image_version)), source), encoding="utf8")
+    print("注：preset 已按镜像代际物化为最小 persona-only 组合（dsh-%s）；源=%s（宿主工件未动）"
+          % (".".join(map(str, image_version)), source))
+
+
 def compose_env(project, services, ports, opts):
     """Env for rendering compose (the SANDBAR_TEST_* knobs of
     docker-compose.test.yml)."""
@@ -1305,6 +1475,21 @@ def compose_env(project, services, ports, opts):
     # sandbar-integration preset; source = host ~/.dsh/.agent-presets/<project>
     # or the in-repo .dsh sibling). Missing = an empty directory (preset
     # absence shown honestly), boot not blocked.
+    # t261006-02 rework: the materialized copy is ADAPTED to the container image's
+    # dsh generation before mount. Incident (261006 03:4x, arbitrated code-fault on
+    # this ticket): the host artifact is the 260923 0.1.5-schema rebuild (persona
+    # config prefix/suffix) while the pinned test image is dsh-0.1.1-rc.2 (persona
+    # config text; the SAME generation whose web surface is browser-trust, no token
+    # — KI-205 layer 6). Mounting the 0.1.5 artifact on the 0.1.1 container throws
+    # "agent-preset-invalid" at EVERY new session (first the persona schema, then
+    # unimportable 0.1.5-only plugin packages), so the capture bench's chat view
+    # could never go live on the docker stage (capture exit 1; t261006-02 G1 /
+    # t261005-16 J1 red). For an old image the stage-temp copy is REPLACED with a
+    # MINIMAL persona-only composition (text schema, content from the source's
+    # prefix+suffix) — enough to mount and answer the capture seed; the host
+    # artifact is never touched, and the copy carries a marker file naming what was
+    # adapted, from what source, with what capability tradeoff. Shape mismatch =
+    # verbatim copy + loud warning (no silent config invention).
     presets_dir = stage_tmp_artifact_paths(project)["presets"]
     presets_dir.mkdir(parents=True, exist_ok=True)
     preset_name = "sandbar-integration"  # naming-compat
@@ -1317,6 +1502,7 @@ def compose_env(project, services, ports, opts):
             if dst.exists():
                 shutil.rmtree(dst)
             shutil.copytree(cand, dst)
+            _adapt_preset_persona_for_image(dst, _test_dsh_image_version(), str(cand))
             break
     env["SANDBAR_TEST_AGENT_PRESETS"] = str(presets_dir)
     # 受管网段（t260912-02 病灶三）：compose 文件的 default 网络 ipam.subnet 由本

@@ -3719,6 +3719,16 @@
       "anchor": "behaviour",
       "note": "t261004-36: zero data-id copy-language exemptions under server/engine and integration",
       "sync_path": ""
+    },
+    "integration/t261006-02/sc_auth_surface_probe_contract.mjs": {
+      "anchor": "contract",
+      "note": "t261006-02: the auth-surface answer is probed, not assumed — 200 bare entry browser-trust, 401+token legacy entry, 401/303 tokenless refusal names the missing surface and generation facts, unknown status refuses, and the refusal is reachable via the real --stage-json seam (KI-205 layer 6)",
+      "sync_path": ""
+    },
+    "integration/t261006-02/sc_capture_auth_surface_real_stage.mjs": {
+      "anchor": "behaviour",
+      "note": "t261006-02: one real capture run on the production pathway exits 0 with flat top-level PNGs and an auth-surface receipt whose observed token source agrees with the producer token_source=none (KI-205 layer 6)",
+      "sync_path": ""
     }
   }
 }

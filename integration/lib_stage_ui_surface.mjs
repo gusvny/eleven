@@ -190,22 +190,29 @@ function sessionDirCheck(dir) {
   return { state: 'pass', detail: `${entries.length} 项（会话目录 ${dirs}，文件引用 ${fileRefs}）` };
 }
 
-// 认证 + 取首页：200 → {ok,html}；401/303 且可兑换 → 兑换后重取；失败带明细。
+// Auth + homepage fetch: anonymous 200 → {ok,html,anonymous} (this dsh generation's
+// browser-trust fence, t261006-02: token_source=none, bare URL passes); 401/303 with a
+// token → exchange then refetch (previous generation's token gate, legacy path kept);
+// failures carry detail. An anonymous 303 is NOT treated as pass (it may be a login
+// redirect; same cautious rule as capture-lane resolveAuthEntry) — 303 only takes the
+// exchange path when a token exists, otherwise authRequired.
 export async function ensureAuthedHome(base, ctx) {
   const jar = ctx.jar;
   let r = await fetchRaw(base + '/', ctx.timeoutMs, jar);
-  if (r.ok && r.status === 200) return { ok: true, html: r.buf.toString('utf8'), bytes: r.buf.length };
+  if (r.ok && r.status === 200) return { ok: true, anonymous: true, html: r.buf.toString('utf8'), bytes: r.buf.length };
   if ((r.status === 401 || r.status === 303) && ctx.token) {
     await fetchRaw(`${base}/?token=${encodeURIComponent(ctx.token)}`, ctx.timeoutMs, jar);
     r = await fetchRaw(base + '/', ctx.timeoutMs, jar);
-    if (r.ok && r.status === 200) return { ok: true, html: r.buf.toString('utf8'), bytes: r.buf.length };
-    return { ok: false, detail: `token 兑换后首页仍 ${r.ok ? r.status : 'ERR ' + r.err}` };
+    if (r.ok && r.status === 200) return { ok: true, anonymous: false, html: r.buf.toString('utf8'), bytes: r.buf.length };
+    return { ok: false, detail: `homepage still ${r.ok ? r.status : 'ERR ' + r.err} after token exchange` };
   }
   if (r.status === 401 || r.status === 303) {
-    return { authRequired: true, ok: false, detail: '首页要求认证（401）且未提供 --token——selfcheck 会自动从 console.log 提取 token；独立跑请传 --token' };
+    return { authRequired: true, ok: false, detail: `homepage requires auth (HTTP ${r.status} = the PREVIOUS dsh generation's token-gate surface) and no --token given.`
+      + 'This dsh generation is a browser-trust fence (--trusted-host; token_source=none): anonymous 200 passes and never lands here — '
+      + 'a 401 against a current-generation stage is generation drift (KI-205 layer 6). For a genuine legacy stage: selfcheck extracts the token from console.log automatically; standalone runs pass --token' };
   }
-  if (!r.ok) return { connFail: true, ok: false, detail: `连接失败：${r.err}` };
-  return { ok: false, detail: `首页 HTTP ${r.status}` };
+  if (!r.ok) return { connFail: true, ok: false, detail: `connection failed: ${r.err}` };
+  return { ok: false, detail: `homepage HTTP ${r.status}` };
 }
 
 // 主跑面：返回 { checks: [{id,label,state,detail}] }。state ∈ pass|red|env_red|info。
@@ -223,13 +230,15 @@ export async function runChecks(opts) {
   const sess = sessionDirCheck(sessDir);
   rec('sessions-fs', '拷入旧会话数据面（FS 口径）', sess.state, sess.detail);
 
-  // 2) 首页（含 token 兑换认证）
-  const home = base ? await ensureAuthedHome(base, ctx) : { connFail: true, ok: false, detail: '未提供 --base-url' };
+  // 2) Homepage (anonymous 200 = this generation's browser-trust fence, direct pass;
+  //    401/303 = previous generation's token gate, incl. token exchange)
+  const home = base ? await ensureAuthedHome(base, ctx) : { connFail: true, ok: false, detail: 'no --base-url' };
   const reachable = home.ok === true;
-  if (!base) rec('homepage', 'GET /（含 token 兑换）', 'env_red', home.detail);
-  else if (home.ok) rec('homepage', 'GET /（含 token 兑换）', 'pass', `200（${home.bytes} bytes）`);
-  else if (home.connFail || home.authRequired) rec('homepage', 'GET /（含 token 兑换）', 'env_red', home.detail);
-  else rec('homepage', 'GET /（含 token 兑换）', 'red', home.detail);
+  if (!base) rec('homepage', 'GET / (auth-surface aware)', 'env_red', home.detail);
+  else if (home.ok) rec('homepage', 'GET / (auth-surface aware)', 'pass',
+    home.anonymous ? `200 (${home.bytes} bytes, anonymous direct pass = browser-trust fence, token_source=none)` : `200 (${home.bytes} bytes, after token exchange)`);
+  else if (home.connFail || home.authRequired) rec('homepage', 'GET / (auth-surface aware)', 'env_red', home.detail);
+  else rec('homepage', 'GET / (auth-surface aware)', 'red', home.detail);
 
   // 3) 组合包逐名探测（review R1 口径：逐名报告，必过下限=实测回填）
   const srcs = reachable ? extractAssetUrls(home.html, base) : [];
@@ -529,6 +538,23 @@ async function selftest() {
       expect('S10 401无token: homepage env_red', states(r)['homepage'] === 'env_red');
       expect('S10 401无token: 零产品红（必过名归 env_red）', r.checks.every((c) => c.state !== 'red'));
       expect('S10 401无token: 退出码 2', summarize(r.checks).code === 2);
+    });
+  }
+  // S10b this generation's browser-trust fence (t261006-02, KI-205 layer 6): anonymous
+  //   200 passes = pass, no token, no exchange; detail names the auth surface.
+  {
+    const home = makeTempHome(); tmpHomes.push(home);
+    await withStub({
+      '/': { body: '<!doctype html><html><head><link href="/plugins/??sandbar-workbench/client.js" rel="modulepreload"></head><body></body></html>' },
+      '/plugins/': { body: '/* combo */ sandbar-workbench client code' },
+      '/sandbar-workbench/api/build-info': { body: JSON.stringify({ ok: 1 }) },
+    }, async (base) => {
+      const r = await runChecks({ baseUrl: base, home, requireBundleNames: ['sandbar-workbench'], timeoutMs: 3000 });
+      const s = states(r);
+      expect('S10b browser-trust: homepage pass (anonymous 200 direct)', s['homepage'] === 'pass');
+      expect('S10b browser-trust: detail names the auth surface', /anonymous direct pass/i.test(r.checks.find((c) => c.id === 'homepage')?.detail || ''), r.checks.find((c) => c.id === 'homepage')?.detail);
+      expect('S10b browser-trust: required bundle still hits', s['bundle:sandbar-workbench'] === 'pass');
+      expect('S10b browser-trust: exit code 0', summarize(r.checks).code === 0);
     });
   }
   // S11 sessions 空目录 → 红；缺目录 → 环境红

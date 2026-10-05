@@ -1005,6 +1005,109 @@ class BatchNsTest(StageCLIBase):
         self.cli("down", "--project", "utbc")
 
 
+class PersonaSchemaAdapterTest(unittest.TestCase):
+    """t261006-02 rework: the stage-temp preset copy must be adapted to the pinned
+    test-dsh image's persona schema (0.1.5 prefix/suffix -> 0.1.1 text), or every
+    new session on the docker bench fails 'agent-preset-invalid' and the capture
+    chat view can never go live (KI-205 layer-6 family, arbitrated code-fault)."""
+
+    FIVE = """# header comment stays
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    suffix: ''
+    prefix: >-
+      你是 integration。工作目录 {{cwd}}。
+
+      ## 职责
+
+      - 把关。
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+"""
+
+    def test_five_schema_converted_to_text(self):
+        new, changed, reason = sd._preset_persona_to_text_schema(self.FIVE)
+        self.assertTrue(changed, reason)
+        self.assertIn("    text: |-", new)
+        self.assertNotIn("prefix:", new[new.index("- id: persona"):new.index("- id: agent-instructions")])
+        self.assertNotIn("suffix:", new[new.index("- id: persona"):new.index("- id: agent-instructions")])
+        # content preserved, entry order preserved, other entries untouched
+        self.assertIn("你是 integration。工作目录 {{cwd}}。", new)
+        self.assertIn("## 职责", new)
+        self.assertIn("- 把关。", new)
+        self.assertIn("- id: agent-instructions", new)
+        self.assertIn("maxBytes: 65536", new)
+        self.assertTrue(new.startswith("# header comment stays"))
+
+    def test_already_text_schema_untouched(self):
+        one = "- id: persona\n  name: '@deepseek-ai/dsh-persona'\n  config:\n    text: |\n      hi\n"
+        new, changed, reason = sd._preset_persona_to_text_schema(one)
+        self.assertFalse(changed)
+        self.assertIn("already text schema", reason)
+        self.assertEqual(new, one)
+
+    def test_foreign_config_shape_skips_not_invents(self):
+        # a config key the adapter does not own -> verbatim copy, named reason
+        five_plus = self.FIVE.replace("    suffix: ''\n", "    suffix: ''\n    maxBytes: 1\n")
+        new, changed, reason = sd._preset_persona_to_text_schema(five_plus)
+        self.assertFalse(changed)
+        self.assertIn("beyond prefix/suffix", reason)
+        self.assertEqual(new, five_plus)
+
+    def test_no_persona_entry_skips(self):
+        new, changed, reason = sd._preset_persona_to_text_schema("- id: tool-bash\n  name: x\n")
+        self.assertFalse(changed)
+        self.assertIn("persona entry not found", reason)
+
+    def test_adapt_for_image_gates_on_version(self):
+        import tempfile
+        import pathlib as _pl
+        with tempfile.TemporaryDirectory(prefix="persona-adapter-") as d:
+            pdir = _pl.Path(d) / "sandbar-integration"
+            pdir.mkdir()
+            (pdir / "agent.cordis.yml").write_text(self.FIVE, encoding="utf8")
+            # old image: replaced with the minimal persona-only composition
+            sd._adapt_preset_persona_for_image(pdir, (0, 1, 1), "/src/artifact")
+            out = (pdir / "agent.cordis.yml").read_text(encoding="utf8")
+            self.assertIn("    text: |-", out)
+            self.assertIn("- id: persona", out)
+            # no 0.1.5-only loader entries survive (they cannot import on 0.1.1)
+            self.assertNotIn("- id: tool-bash", out)
+            self.assertNotIn("- id: agent-instructions", out)
+            marker = (pdir / "_persona-schema-adapter.txt").read_text(encoding="utf8")
+            self.assertIn("0.1.1", marker)
+            self.assertIn("/src/artifact", marker)
+            self.assertIn("persona-only", marker)
+            # new image: verbatim (0.1.5 schema mounts natively)
+            (pdir / "agent.cordis.yml").write_text(self.FIVE, encoding="utf8")
+            sd._adapt_preset_persona_for_image(pdir, (0, 1, 5), "/src/artifact")
+            self.assertIn("prefix: >-", (pdir / "agent.cordis.yml").read_text(encoding="utf8"))
+            self.assertIn("mounts the 0.1.5 persona schema natively",
+                          (pdir / "_persona-schema-adapter.txt").read_text(encoding="utf8"))
+            # unreadable version: fail-safe verbatim
+            (pdir / "agent.cordis.yml").write_text(self.FIVE, encoding="utf8")
+            sd._adapt_preset_persona_for_image(pdir, None, "/src/artifact")
+            self.assertIn("prefix: >-", (pdir / "agent.cordis.yml").read_text(encoding="utf8"))
+
+    def test_minimal_preset_is_persona_only(self):
+        header, entry, reason = sd._minimal_persona_preset(self.FIVE)
+        self.assertTrue(entry, reason)
+        self.assertIn("- id: persona", entry)
+        self.assertIn("text: |-", entry)
+        self.assertIn("你是 integration。工作目录 {{cwd}}。", entry)
+        self.assertNotIn("- id:", entry.replace("- id: persona", ""))
+        self.assertIn("MINIMAL bench preset", header)
+
+    def test_compose_image_version_parsed(self):
+        v = sd._test_dsh_image_version()
+        # the pinned image in server/docker-compose.test.yml is dsh-0.1.1-rc.2
+        self.assertEqual(v, (0, 1, 1))
+
+
 if __name__ == "__main__":
     busy = _shared_plane_busy()
     if busy:

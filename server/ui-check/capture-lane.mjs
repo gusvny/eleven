@@ -13,6 +13,9 @@
 // 输出契约（t261005-13，与 ui_evidence 证据闸同契）：全部 PNG 落 --out **顶层
 // （TOP LEVEL）**，非递归——证据闸只吃 <lane>/.sandbar/screenshots/ 顶层的
 // *.png，before/、after/ 等子目录里的截图一律算缺证据（host ruling 261005-B）。
+// 认证面回执（t261006-02，KI-205 第六层）：--out 顶层另落 auth-surface.json
+// （auth_mode / probed_status / token_source_observed / 与舞台回执 token_source 的
+// 一致性 / dsh 指纹）——钉住「capture 依赖的 dsh 认证面」，升级漂移可读可审计。
 //
 // 前置（拒跑语义，t260829-07 方案 0.4）：
 //   - 泳道 lib/client.js 缺失 → 拒跑非零退出（指路先 build）；
@@ -242,28 +245,103 @@ export async function buildBenchRegistry(tmpHome, opts = {}) {
 }
 
 /**
- * 等台就绪，并返回**带 token 的首页地址**（260928 修，KI-156）。
- *
- * dsh 0.1.5 起 web 走**浏览器会话门**：匿名 `GET /` 恒 401（body=`dsh web authentication
- * required; …`）。旧判据只认 `res.ok` ⇒ 台其实已经起来、却永远判「未就绪」→ 45s 超时 →
- * 截图族全缺（实案：capture-chat-e2e / -active 两条场景红，日志尾部就是台自己打的 token 行）。
- * 新判据：**响应可达即算服务在场**（200/303/401 都收，连接被拒不收）；同时从 console.log
- * 抓 `dsh web: http://…/?token=…` 那行，把带 token 的地址当作导航入口（首次跳转兑换 cookie）。
- * 先例：`server/tools/stage_console.sh:640` 的自动认证（从 console.log 提 token 传给断言库）。
+ * dsh 认证面指纹（t261006-02，KI-205 第六层钉面）：跑一次 `<bin> --profile web --help`
+ * （15s 超时；缺席/失败容忍 → source:"unavailable"，绝不因此拒跑），记录两个事实：
+ *   fence       —— 帮助文本含 --trusted-host（本代「浏览器信任栅」的标记面）；
+ *   tokenOption —— 帮助文本含 token 选项（上一代 token 面的标记；本代恒 false）。
+ * 指纹随 <out>/auth-surface.json 落盘：dsh 升级让认证面漂移时，「哪一代的哪个面」
+ * 可读可审计，而不是让所有 UI 票静默不可过（ticket required outcome 3）。
+ * 已知盲区（review 条件 3，有意不钉）：本钉面只覆盖「有栅无 token」→「回 token 门」
+ * 这一漂移方向；反向（token 门代带 token 回归）走 legacy 兑换路径照常绿——回执不是
+ * 完备漂移检测器，只是方向性钉子。
  */
-function authUrlFromLog(logPath) {
+export function dshAuthFingerprint({ bin = "dsh", helpArgs = ["--profile", "web", "--help"] } = {}) {
+  try {
+    const p = spawnSync(bin, helpArgs, { encoding: "utf8", timeout: 15000 });
+    const text = `${p.stdout ?? ""}${p.stderr ?? ""}`;
+    if (p.error || (p.status !== 0 && text.trim() === "")) {
+      return { fence: null, tokenOption: null, source: `unavailable (${bin})` };
+    }
+    return {
+      fence: text.includes("--trusted-host"),
+      tokenOption: /(^|\s)--[a-z-]*token/i.test(text),
+      source: `${bin} --profile web --help`,
+    };
+  } catch {
+    return { fence: null, tokenOption: null, source: "unavailable" };
+  }
+}
+
+/**
+ * 认证面裁决（t261006-02 纯函数；selftest 8/8 与 UT 直测同一张表）：给「探测到的
+ * 首页 HTTP 状态 + 日志里提出的 token」，裁出 capture 的导航入口。
+ *   200                 → 本代浏览器信任栅：裸 URL 即入口（authMode=browser-trust）。
+ *   401/303 且有 token   → 上一代 token 门：带 token 地址首次跳转兑换 cookie
+ *                        （authMode=token-gate，legacy 路径原样保留）。
+ *   401/303 且无 token   → 拒绝（代际漂移）：点名「缺的是上一代 token 门的面，而这一代
+ *                        构建只宣布浏览器信任栅（--trusted-host；token_source=none）」。
+ *   其它状态             → 拒绝：不认识的面不猜。
+ * review 条件 2（303 语义未实证）：303 可能是登录跳转，只在**真 200** 上走裸 URL
+ * 分支；303 落谨慎路径（有 token 走兑换，无 token 拒绝）。
+ * 拒绝不是时序问题：提高 SANDBAR_CAPTURE_LANE_BOOT_MS 无济于事（KI-205 02:5x，
+ * 120000 阈值实测同败）。
+ */
+export function resolveAuthEntry({ port, status, token = "", fingerprint = null }) {
+  const fp = fingerprint
+    ? `（dsh 指纹：fence=${fingerprint.fence} tokenOption=${fingerprint.tokenOption} source=${fingerprint.source}）`
+    : "";
+  if (status === 200) {
+    return { ok: true, entryUrl: `http://127.0.0.1:${port}/`, authMode: "browser-trust", status };
+  }
+  if (status === 401 || status === 303) {
+    if (token) {
+      return { ok: true, entryUrl: `http://127.0.0.1:${port}/?token=${token}`, authMode: "token-gate", status };
+    }
+    return { ok: false, authMode: "token-gate-no-token", status, refusal:
+      `dsh 控制台要求认证（HTTP ${status}＝上一代 token 门面：/?token= 兑换 cookie）但本台取不到任何 token`
+      + `——这是 dsh 代际漂移（KI-205 第六层）：缺的是「上一代 dsh 的 token 门面」，而安装的这一代构建只宣布`
+      + `浏览器信任栅（--trusted-host；舞台回执 token_source=none，CLI 与启动行均无 token）。不是时序问题：提高 `
+      + `SANDBAR_CAPTURE_LANE_BOOT_MS 无济于事（120000 实测同败）。${fp} `
+      + `出路：确认目标台确实是这一代 dsh（token_source=none）后重跑；确要拍旧代 token 门台，须在该台日志可读处提供 token。` };
+  }
+  return { ok: false, authMode: `http-${status}`, status, refusal:
+    `dsh 控制台首页返回未认识的状态 HTTP ${status}（既非 200 浏览器信任栅、也非 401/303 token 门）——不猜测，拒绝拍摄${fp}` };
+}
+
+/**
+ * producer/gate 一致性比对（t261006-02，review 条件 1）：gate 观测面（authMode）vs
+ * 舞台回执 token_source（producer 读点，integration/stage_docker.py 2306/2355 落的
+ * none|docker-logs|cli）。不一致=漂移信号（scenario 断言红），返回值进
+ * auth-surface.json 的 producer_agreement 字段。
+ */
+export function compareTokenSource(authMode, producerTokenSource) {
+  if (producerTokenSource == null) return "receipt-without-token_source";
+  const gateSaysNone = authMode === "browser-trust";
+  return gateSaysNone === (producerTokenSource === "none") ? "agree" : "mismatch";
+}
+
+/**
+ * 本地 console.log 的 token 提取（260928 引入，t261006-02 改语义）：上一代 dsh 0.1.5
+ * 会话门在 console.log 打 `dsh web: http://…/?token=…`；取**最后一个** token 值
+ * （多次启动取最近）。本代（浏览器信任栅）日志根本没有该行 → 返回 ""，交
+ * resolveAuthEntry 裁决，不再把「取不到 token」当独立失败面。畸形输入（二进制垃圾、
+ * 超长单行、文件不可读）一律安全返回 ""，不炸栈（selftest 8/8 覆盖）。
+ */
+function tokenFromLocalLog(logPath) {
   try {
     const log = readFileSync(logPath, "utf8");
-    const m = log.match(/https?:\/\/[^\s"'<>]*[?&]token=[A-Za-z0-9._~-]+/g);
-    return m ? m[m.length - 1] : "";
+    const m = log.match(/[?&]token=([A-Za-z0-9._~-]+)/g);
+    if (!m) return "";
+    const last = m[m.length - 1];
+    return last.slice(last.indexOf("=") + 1);
   } catch { return ""; }
 }
 
-/** 舞台通路的带 token 入口（t261005-16 仲裁第四轮）：boot-local 从本地 console.log
- * 取 token（authUrlFromLog），docker 舞台的 dsh 跑在容器里，日志经 `docker logs
- * <project>-dsh` 同源提取（先例 stage_docker._plugins_token_from_logs / PLUGINS_TOKEN_RE
- * 同款正则）。取不到返回空串（调用方 fail-loud，不静默回落裸 URL——会话门下裸 URL
- * 让 app 停在 inert 相位，chat 态必死，t261005-16 验收实锤）。 */
+/** 舞台通路 token 提取（t261005-16 引入；t261006-02 起仅服务 token 门代）：docker
+ * 舞台的 dsh 跑在容器里，日志经 `docker logs <project>-dsh` 提 token（先例
+ * stage_docker._plugins_token_from_logs 同款正则）。取不到返回空串交
+ * resolveAuthEntry 裁决——本代（token_source=none）本就无 token，空串是合法事实
+ * 而非失败面。 */
 function tokenFromDockerLogs(project) {
   try {
     const p = spawnSync("docker", ["logs", "--tail", "200", `${project}-dsh`],
@@ -273,48 +351,56 @@ function tokenFromDockerLogs(project) {
   } catch { return ""; }
 }
 
-/** 舞台模式等台就绪：HTTP 可达 + docker logs 里出现 token 行，拼带 token 首页地址。
- * 超时=ENV_FAIL 语义的 Error（调用方点名词退出，不静默降级裸 URL）。 */
-async function waitReadyStage(port, timeoutMs, project, tickMs = 500) {
+/** 舞台通路等台就绪（t261006-02 认证面裁决版）：轮询首页，首个可达响应交
+ * resolveAuthEntry 裁决——200（本代浏览器信任栅）立即出裸 URL 入口；401/303
+ * （上一代 token 门）等 docker logs 里的 token 现身（token 可能晚于端口可达）。
+ * 超时=ENV_FAIL 语义的 Error：拒绝文案由 resolveAuthEntry 生成（点名哪一代的
+ * 哪个面），不静默回落裸 URL。 */
+export async function waitReadyStage(port, timeoutMs, project, fingerprint, tickMs = 500) {
   const t0 = Date.now();
   let reachable = false;
+  let lastStatus = 0;
   while (Date.now() - t0 < timeoutMs) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/`);
-      if (res.ok || res.status === 401 || res.status === 303) reachable = true;
-      if (reachable) {
-        const token = tokenFromDockerLogs(project);
-        if (token) return `http://127.0.0.1:${port}/?token=${token}`;
+      lastStatus = res.status;
+      // 200=浏览器信任栅在场；401/303=token 门在场。只有连不上才继续等。
+      if (res.ok || res.status === 401 || res.status === 303) {
+        reachable = true;
+        const verdict = resolveAuthEntry({ port, status: res.status, token: tokenFromDockerLogs(project), fingerprint });
+        if (verdict.ok) return verdict;
+        // !ok（token 门但 token 未现）→ 继续轮询
       }
     } catch { /* 未就绪，继续轮询 */ }
     await new Promise(r => setTimeout(r, tickMs));
   }
-  throw new Error(reachable
-    ? `docker 舞台 ${timeoutMs}ms 内已可达但 docker logs 里取不到 dsh web token 行`
-      + `（${project}-dsh；会话门需 /?token= 兑换 cookie，拿不到 capture 只会停在 inert 相位）`
-      + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
-      + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000；token 行可能晚于端口可达——`
-      + `设为如 120000 再试）；②确认日志权限：当前用户能跑 docker logs ${project}-dsh 且输出里`
-      + `确有 token 行（手动验证命令：docker logs ${project}-dsh 2>&1 | grep -o 'token=[A-Za-z0-9._~-]*'）；`
-      + `③若多个舞台同时在起，串行化起台（token 行可能被并起日志冲掉/滞后）后重跑。不回落裸 URL。`
-    : `docker 舞台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`
-      + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
-      + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000，可设如 120000）；`
-      + `②确认舞台容器在跑（docker ps | grep ${project}-dsh）与 docker logs ${project}-dsh 可读；`
-      + `③多个舞台并起时串行化起台后重跑。不回落裸 URL。`);
+  if (reachable) {
+    const verdict = resolveAuthEntry({ port, status: lastStatus, token: "", fingerprint });
+    throw new Error(`docker 舞台 ${timeoutMs}ms 内已可达但拿不到可用导航入口（127.0.0.1:${port}，project=${project}-dsh；`
+      + `手动验证：docker logs ${project}-dsh 2>&1 | grep -o 'token=[A-Za-z0-9._~-]*'；若多个舞台并起请串行化后重跑）`
+      + `——${verdict.refusal}`);
+  }
+  throw new Error(`docker 舞台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`
+    + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
+    + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000，可设如 120000）；`
+    + `②确认舞台容器在跑（docker ps | grep ${project}-dsh）与 docker logs ${project}-dsh 可读；`
+    + `③多个舞台并起时串行化起台后重跑。不回落裸 URL。`);
 }
 
-async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
+export async function waitReady(port, timeoutMs, logPath, fingerprint, tickMs = 500) {
   const t0 = Date.now();
   let reachable = false;
+  let lastStatus = 0;
   while (Date.now() - t0 < timeoutMs) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/`);
-      // 401=会话门（服务已在场）；303/200=已放行。只有连不上才继续等。
-      if (res.ok || res.status === 401 || res.status === 303) reachable = true;
-      if (reachable) {
-        const auth = authUrlFromLog(logPath);
-        if (auth) return auth;
+      lastStatus = res.status;
+      // 200=本代浏览器信任栅（服务在场）；401/303=上一代 token 门在场。连不上才继续等。
+      if (res.ok || res.status === 401 || res.status === 303) {
+        reachable = true;
+        const verdict = resolveAuthEntry({ port, status: res.status, token: tokenFromLocalLog(logPath), fingerprint });
+        if (verdict.ok) return verdict;
+        // !ok（token 门但 token 未现）→ 继续轮询：token 行可能晚于端口可达
       }
     } catch { /* 未就绪，继续轮询 */ }
     await new Promise(r => setTimeout(r, tickMs));
@@ -323,22 +409,25 @@ async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
   try {
     tail = readFileSync(logPath, "utf8").slice(-1200);
   } catch { /* 日志读不到 */ }
-  throw new Error(reachable
-    ? `dsh 控制台 ${timeoutMs}ms 内**已可达但取不到带 token 首页地址**（127.0.0.1:${port}；`
-      + `会话门需 /?token= 兑换 cookie，拿不到就不该按匿名 401 页继续截图）`
-      + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
-      + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000，可设如 120000）；`
-      + `②查看 console.log 尾部（下方附），确认 dsh web 行是否打出 token；`
-      + `③确认当前用户对该 console.log 有读权限。不回落裸 URL。console.log 尾部：\n${tail || "（无日志）"}`
-    : `dsh 控制台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`
-      + `——ENV_FAIL 可行动出路：①提高等待阈值后重跑同一命令`
-      + `（env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000）；②检查端口 127.0.0.1:${port}`
-      + `是否被占用/防火墙拦截。console.log 尾部：\n${tail || "（无日志）"}`);
+  if (reachable) {
+    const verdict = resolveAuthEntry({ port, status: lastStatus, token: "", fingerprint });
+    throw new Error(`dsh 控制台 ${timeoutMs}ms 内已可达但拿不到可用导航入口（127.0.0.1:${port}）`
+      + `——${verdict.refusal}\nconsole.log 尾部：\n${tail || "（无日志）"}`);
+  }
+  throw new Error(`dsh 控制台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`
+    + `——ENV_FAIL 可行动出路：①提高等待阈值后重跑同一命令`
+    + `（env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000）；②检查端口 127.0.0.1:${port}`
+    + `是否被占用/防火墙拦截。console.log 尾部：\n${tail || "（无日志）"}`);
 }
 
 export async function main() {
-  // 260928：带 token 的首页入口（会话门兑换用；见 waitReady 头注）
+  // 261006：导航入口由认证面裁决（resolveAuthEntry）给出——本代浏览器信任栅下是
+  // 裸 URL（token_source=none），上一代 token 门下是带 token 地址（见 waitReady 头注）。
   let navUrl = "";
+  let authMode = "";
+  let probedStatus = 0;
+  let fingerprint = null;       // dsh 认证面指纹（进 auth-surface.json 回执）
+  let stagePath = false;        // 台来源：docker/stage-json=true，boot-local=false
   let args;
   try {
     args = parseArgs(process.argv.slice(2));
@@ -541,26 +630,64 @@ export async function main() {
         detached: true,
         stdio: ["ignore", logFd, logFd],
       });
-    // 260928：waitReady 现在回**带 token 的首页地址**（dsh 0.1.5 会话门）——它既是
-    // 「台真就绪」的判据，也是下游 capture.mjs 的导航入口（见 capArgs 的 --url）。
-    navUrl = await waitReady(port, bootTimeoutMs, path.join(tmpHome, "console.log"));
+    // 261006：waitReady 现在回认证面裁决结果（{entryUrl, authMode, status}）——
+    // 本代浏览器信任栅下裸 URL 即入口；它既是「台真就绪」的判据，也是下游
+    // capture.mjs 的导航入口（见 capArgs 的 --url）。
+    fingerprint = dshAuthFingerprint({ bin: consoleCmd[0] });
+    const vLocal = await waitReady(port, bootTimeoutMs, path.join(tmpHome, "console.log"), fingerprint);
+    navUrl = vLocal.entryUrl; authMode = vLocal.authMode; probedStatus = vLocal.status;
     console.log(`[capture-lane] 隔离台就绪：127.0.0.1:${port}（DSH_HOME=${tmpHome}；`
-      + `带 token 入口=${navUrl ? "已取到" : "缺"}）`);
+      + `auth surface=${authMode}，probed HTTP ${probedStatus}，入口=${navUrl}）`);
     } else {
-      // 舞台通路（外部 stage-json 或自起 docker）：同样要带 token 首页地址——
-      // 会话门（KI-156，dsh 0.1.5）下裸 URL 让 app 停在 inert 相位，chat 态必死
-      //（t261005-16 验收实锤：boot-local 绿/舞台红唯一差异就是 tokened entry）。
-      // token 从容器日志同源提取（先例 stage_docker），取不到=ENV_FAIL 点名退出，
-      // 不静默回落裸 URL 假跑。
+      stagePath = true;
+      // 舞台通路（外部 stage-json 或自起 docker）：同样由认证面裁决——本代
+      // （token_source=none）200 直接过裸 URL；上一代 token 门（401/303）等容器日志
+      // 里的 token 现身（legacy 兑换路径原样保留）。取不到且超时=ENV_FAIL 点名退出
+      //（拒绝文案点名哪一代的哪个面），不静默回落裸 URL 假跑。
       try {
-        navUrl = await waitReadyStage(port, bootTimeoutMs, stageProject);
+        fingerprint = dshAuthFingerprint();
+        const vStage = await waitReadyStage(port, bootTimeoutMs, stageProject, fingerprint);
+        navUrl = vStage.entryUrl; authMode = vStage.authMode; probedStatus = vStage.status;
       } catch (e) {
         console.error(`[capture-lane] ENV_FAIL: ${e.message}——不静默回落裸 URL 假跑（docker 缺席/容器日志不可读属环境面）`);
         process.exit(2);
       }
-      console.log(`[capture-lane] 舞台就绪：127.0.0.1:${port}（带 token 入口已取到，project=${stageProject}）`);
+      console.log(`[capture-lane] 舞台就绪：127.0.0.1:${port}（auth surface=${authMode}，probed HTTP ${probedStatus}，project=${stageProject}）`);
     }
     await mkdir(args.out, { recursive: true });
+    // 认证面回执（t261006-02 钉面，ticket required outcome 2/3）：gate 观测面 + dsh
+    // 指纹 + 与舞台回执 token_source（producer 读点）的一致性比对（review 条件 1）。
+    // 回执路径可由 env SANDBAR_CAPTURE_STAGE_RECEIPT 指入舞台租约/回执 JSON；不一致
+    // =漂移信号：大声告警并写进回执（scenario 断言以此为准），不硬退——硬退会让
+    // 纯回执缺字段的环境形态也拍不了照。
+    let producerTokenSource = null;
+    let producerAgreement = "not-provided";
+    const receiptPath = process.env.SANDBAR_CAPTURE_STAGE_RECEIPT || "";
+    if (receiptPath) {
+      try {
+        producerTokenSource = JSON.parse(readFileSync(receiptPath, "utf8"))?.token_source ?? null;
+        producerAgreement = compareTokenSource(authMode, producerTokenSource);
+        if (producerAgreement === "mismatch") {
+          console.error(`[capture-lane] ⚠ 认证面漂移信号：舞台回执 token_source=${producerTokenSource}`
+            + ` 但 gate 观测 auth surface=${authMode}（${receiptPath}）——代际漂移，scenario 断言将红`);
+        }
+      } catch (e) {
+        producerAgreement = `receipt-unreadable: ${e.message}`;
+      }
+    }
+    const surfReceipt = {
+      auth_mode: authMode,
+      probed_status: probedStatus,
+      token_source_observed: authMode === "browser-trust"
+        ? "none" : (stagePath ? "docker-logs" : "console-log"),
+      producer_token_source: producerTokenSource,
+      producer_agreement: producerAgreement,
+      dsh_fingerprint: fingerprint,
+      _ticket: "t261006-02 (KI-205 layer 6): capture bench adapted to this dsh generation's auth surface",
+    };
+    await (await import("node:fs/promises")).writeFile(
+      path.join(args.out, "auth-surface.json"), JSON.stringify(surfReceipt, null, 1), "utf8");
+    console.log(`[capture-lane] auth surface 回执 → ${path.join(args.out, "auth-surface.json")}`);
     // 状态注入 opt-in（t260901-24）：env SANDBAR_CAPTURE_FIXTURES=1（bench 级开关，
     // 本脚本只认这一个名字）才向 capture.mjs 追加 --fixtures；缺省不传=7 视图口径
     // 逐字节不变，agent_activities 两处调用方的 ui_evidence 证据永不含虚构票。
@@ -570,7 +697,7 @@ export async function main() {
     const fixtureOptIn = process.env.SANDBAR_CAPTURE_FIXTURES === "1";
     if (fixtureOptIn) console.log("[capture-lane] 状态注入已 opt-in（SANDBAR_CAPTURE_FIXTURES=1）：本次截图含 fixture 注入态视图，证据以 fixture-manifest.json 为准");
     const capArgs = [path.join(HERE, "capture.mjs"),
-      // 260928：优先用带 token 的地址（首次跳转兑换会话 cookie；否则 capture.mjs 拍到的是 401 页）
+      // 261006：--url 由认证面裁决给出（browser-trust=裸 URL；token-gate=带 token 地址）
       "--url", navUrl || `http://127.0.0.1:${port}/`, "--out", args.out, "--allow-seed"];
     // 旗必须带目录值：capture.mjs 把裸 --fixtures 的缺省值解析成 ""（falsy），
     // 静默不注入——台内显式传本目录 fixtures/ 包（t260901-24 真拍实测发现）。
@@ -626,11 +753,11 @@ async function selftest() {
     await utimes(path.join(wb, "lib", "client.js"), fresh, fresh);
     const r3 = laneBuildRejectReason(wb);
     if (r3) throw new Error(`新鲜 build 不应拒跑：${r3}`);
-    console.log("[capture-lane] selftest 1/7 绿：build 前置三态（缺失/陈旧拒跑、新鲜放行）");
+    console.log("[capture-lane] selftest 1/8 绿：build 前置三态（缺失/陈旧拒跑、新鲜放行）");
     // 2. 挑端口
     const p = await pickFreePort();
     if (!(p > 0 && p < 65536)) throw new Error(`端口异常：${p}`);
-    console.log(`[capture-lane] selftest 2/7 绿：空闲端口挑选（${p}）`);
+    console.log(`[capture-lane] selftest 2/8 绿：空闲端口挑选（${p}）`);
     // 3. 临时 profile 组装（真跑一次，检查 sandbar-workbench 软链指到假泳道）
     const fakeLaneWb = path.join(tmp, "fakelane", "workbench");
     await mkdir(path.join(fakeLaneWb, "lib"), { recursive: true });
@@ -639,7 +766,7 @@ async function selftest() {
     const real = realpathSync(path.join(profDir, "node_modules", "sandbar-workbench"));
     const want = realpathSync(fakeLaneWb);
     if (real !== want) throw new Error(`sandbar-workbench 软链未指向泳道：${real}（期望 ${want}）`);
-    console.log("[capture-lane] selftest 3/7 绿：临时 profile 组装（workbench 软链指向泳道）");
+    console.log("[capture-lane] selftest 3/8 绿：临时 profile 组装（workbench 软链指向泳道）");
     // 4. preset 物化三态（t260901-02）：真源实体落地 / 畸形源拒跑 / 缺失源拒跑。
     //    全部用临时桩目录，不依赖真源在（CI/新机器可跑）；env 覆盖路径不在此测
     //    （materializePresets 直接收参，main() 的 SANDBAR_CAPTURE_PRESET_SOURCE 由基线测）。
@@ -661,7 +788,7 @@ async function selftest() {
       const p = path.join(matDst, f);
       if (!existsSync(p) || statSync(p).isSymbolicLink()) throw new Error(`物化后 ${f} 应为实体文件`);
     }
-    console.log("[capture-lane] selftest 4/7 绿：preset 物化三态（缺失/畸形拒跑、完整源实体落地）");
+    console.log("[capture-lane] selftest 4/8 绿：preset 物化三态（缺失/畸形拒跑、完整源实体落地）");
     // 5/6（t260901-24）：状态注入 loadFixtures 三态——真 fixture 包放行；缺目录/坏 JSON/
     // 缺 _fixture 标记/软链桩各自人话拒因。真包路径=本目录 fixtures/（与脚本同树，
     // 泳道 worktree 也带同一份）；畸形桩全用临时目录，不污染真包。
@@ -696,7 +823,7 @@ async function selftest() {
     rFx = null;
     try { cap.loadFixtures(linkProbe); } catch (e) { rFx = e.message; }
     if (!rFx || !/软链/.test(rFx)) throw new Error("软链 fixture 应拒跑");
-    console.log("[capture-lane] selftest 5/7 绿：状态注入 loadFixtures 三态（真包放行；缺目录/坏 JSON/缺标记/软链各自人话拒因）");
+    console.log("[capture-lane] selftest 5/8 绿：状态注入 loadFixtures 三态（真包放行；缺目录/坏 JSON/缺标记/软链各自人话拒因）");
     // 6/6（t260901-24）：routeDecision 只拦 GET（R3）+ query 不参与匹配（C3）+
     // contentType 恒 application/json（R4）。
     const realFx2 = await cap.loadFixtures(path.join(HERE, "fixtures"));
@@ -711,7 +838,7 @@ async function selftest() {
     }
     const proj = cap.routeDecision("GET", "http://x/sandbar-workbench/api/wf/projects", realFx2);
     if (!proj.passthrough) throw new Error("projects 端点应放行走真数据");
-    console.log("[capture-lane] selftest 6/7 绿：routeDecision（GET 命中/查询串不影响/POST 恒放行/contentType 硬条款）");
+    console.log("[capture-lane] selftest 6/8 绿：routeDecision（GET 命中/查询串不影响/POST 恒放行/contentType 硬条款）");
     // 7/7（t261005-16，KI-204 ③）：台内注册表——正常构造落齐三件（.migrated 标记 /
     // project.yaml schema v1 / 工作区目录），畸形输入（project.yaml 落点位已有同名
     // 目录）fail-loud 具名拒因，不静默吞。
@@ -754,7 +881,45 @@ async function selftest() {
     if (!statSync(path.join(benchStage, "bench-registry", "workspace")).isDirectory()) {
       throw new Error("舞台通路宿主工作区目录未真实创建");
     }
-    console.log(`[capture-lane] selftest 7/7 绿：台内注册表（.migrated 标记 + ${BENCH_PROJECT_KEY} schema v1 + 工作区在场；落点位被占 fail-loud；舞台两路分离 declare=/fixtures/workspace）`);
+    console.log(`[capture-lane] selftest 7/8 绿：台内注册表（.migrated 标记 + ${BENCH_PROJECT_KEY} schema v1 + 工作区在场；落点位被占 fail-loud；舞台两路分离 declare=/fixtures/workspace）`);
+    // 8/8（t261006-02，KI-205 第六层）：认证面裁决表 + 畸形日志输入。同一张表由
+    // integration/tests/test_capture_auth_surface.py 以子进程复测（两侧同源）。
+    const A = resolveAuthEntry({ port: 3199, status: 200 });
+    if (!A.ok || A.authMode !== "browser-trust" || A.entryUrl !== "http://127.0.0.1:3199/") {
+      throw new Error("200 应裁 browser-trust 裸 URL 入口");
+    }
+    const B = resolveAuthEntry({ port: 3199, status: 401, token: "tok123" });
+    if (!B.ok || B.authMode !== "token-gate" || B.entryUrl !== "http://127.0.0.1:3199/?token=tok123") {
+      throw new Error("401+token 应裁 token-gate 带 token 入口");
+    }
+    for (const st of [401, 303]) {
+      const C = resolveAuthEntry({ port: 3199, status: st, token: "" });
+      if (C.ok) throw new Error(`${st} 无 token 应拒绝`);
+      for (const need of ["token 门面", "这一代构建", "--trusted-host", "token_source=none", "SANDBAR_CAPTURE_LANE_BOOT_MS"]) {
+        if (!C.refusal.includes(need)) throw new Error(`${st} 拒绝文案缺「${need}」（须点名哪一代的哪个面）`);
+      }
+    }
+    const D = resolveAuthEntry({ port: 3199, status: 500 });
+    if (D.ok || !/未认识的状态/.test(D.refusal)) throw new Error("未认识状态应拒绝且不猜");
+    const E = resolveAuthEntry({ port: 3199, status: 200, fingerprint: { fence: true, tokenOption: false, source: "x" } });
+    if (!E.ok || E.authMode !== "browser-trust") throw new Error("带指纹的 200 裁决应不受影响");
+    // 畸形日志输入：token 提取安全返回空串，不炸栈。
+    const garbageLog = path.join(tmp, "garbage.log");
+    await (await import("node:fs/promises")).writeFile(garbageLog, Buffer.from([0x00, 0xff, 0xfe, 0x10, 0x80]) + "x".repeat(200000));
+    if (tokenFromLocalLog(garbageLog) !== "") throw new Error("二进制垃圾日志应返回空 token");
+    if (tokenFromLocalLog(path.join(tmp, "no-such.log")) !== "") throw new Error("不可读日志应返回空 token");
+    const legacyLog = path.join(tmp, "legacy.log");
+    await (await import("node:fs/promises")).writeFile(legacyLog,
+      "boot\ndsh web: http://127.0.0.1:3199/?token=abc_def12345678901234\n");
+    if (tokenFromLocalLog(legacyLog) !== "abc_def12345678901234") throw new Error("legacy 日志应提出 token");
+    // 指纹：可注入桩（真 dsh 缺席容忍 → unavailable，不抛）。
+    const fpStub = dshAuthFingerprint({ bin: process.execPath, helpArgs: ["-e", "console.log('--trusted-host <a> --port <p>')"] });
+    if (fpStub.fence !== true || fpStub.tokenOption !== false) throw new Error(`指纹桩面不符：${JSON.stringify(fpStub)}`);
+    const fpTok = dshAuthFingerprint({ bin: process.execPath, helpArgs: ["-e", "console.log('--token <t>')"] });
+    if (fpTok.tokenOption !== true) throw new Error("指纹应认出 token 选项（上一代面）");
+    const fpMiss = dshAuthFingerprint({ bin: "definitely-not-a-real-binary-t26100602" });
+    if (fpMiss.source.indexOf("unavailable") !== 0) throw new Error(`缺席二进制应容忍为 unavailable：${JSON.stringify(fpMiss)}`);
+    console.log("[capture-lane] selftest 8/8 绿：认证面裁决表（200 裸 URL / 401+token 兑换 / 401·303 无 token 拒绝点名代际面 / 未知状态不猜）+ 畸形日志安全 + 指纹可注入桩");
     console.log("[capture-lane] selftest 全绿（未 boot 控制台/浏览器）");
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});

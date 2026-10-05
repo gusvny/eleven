@@ -166,7 +166,14 @@ else:
     # the reachable-but-no-token docker-branch error (KI-205 probe, exit 2)
     m = re.search(r"token[^\\n]*", txt)
     window = txt
-    hit = txt.find("取不到 dsh web token")
+    # t261006-02 rework: the auth surface is now PROBED (resolveAuthEntry), so the
+    # token-missing face lives at the "token-gate-no-token" refusal, not at the old
+    # "取不到 dsh web token" log line — re-anchored to the new contract point without
+    # weakening the assertion (same named-exit contract, current anchor; fallback
+    # chain keeps the old anchors for a future refactor of the marker string).
+    hit = txt.find("token-gate-no-token")
+    if hit < 0:
+        hit = txt.find("取不到 dsh web token")
     if hit < 0:
         hit = txt.find("token")
     if hit >= 0:
@@ -178,12 +185,32 @@ else:
           "the reachable-but-no-token error must name what the operator can do "
           "(log access / re-run / wait budget / serialised boots); window=%s"
           % window[:300].replace("\n", " "))
-    after = txt[hit:hit + 900]
+    # The refusal Error is consumed at the shared auth-path catch: the bench must map
+    # it to the named ENV_FAIL exit-2 channel (never a green with fewer shots, never a
+    # bare-URL continue). Asserted structurally at the consumption point — the marker
+    # and the channel are far apart in the file by design (resolveAuthEntry is a pure
+    # seam; the exit happens where the readiness error propagates).
+    marker = txt.find("token-gate-no-token")
+    close = False
+    chan = -1
+    chan_exit = -1
+    pos = 0
+    while True:
+        chan = txt.find("不静默回落裸 URL 假跑", pos)
+        if chan < 0:
+            break
+        e = txt.find("process.exit(2)", chan)
+        if 0 <= e - chan < 200:
+            close = True
+            chan_exit = e
+            break
+        pos = chan + 1
     check("C2 token failure stays on the ENV_FAIL channel (exit 2), no product red",
-          bool(envchan.search(after)),
-          "the token-missing branch must terminate as a named ENV_FAIL exit 2 "
-          "(never a green with fewer shots, never a bare-URL continue); "
-          "after=%s" % after[:300].replace("\n", " "))
+          marker >= 0 and chan >= 0 and close,
+          "the token-missing branch must terminate as a named ENV_FAIL exit 2: the "
+          "token-gate-no-token refusal marker must exist and the auth-path catch must "
+          "map its error to process.exit(2) with the no-bare-URL-fallback wording; "
+          "marker=%s chan=%s chan_exit=%s" % (marker, chan, chan_exit))
 
 _act = POC / "agent_activities.py"
 if not _act.is_file():
