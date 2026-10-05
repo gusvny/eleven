@@ -3583,3 +3583,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ⇒ **`t261006-01` 交付的是"具名可行动出路"（它做对了），但 token 提取假设本身仍未适配本代 dsh**：
 > 采集台在本机**依旧一张图拍不出来**。**下一张票的正确 scope 是"适配本代认证面"**（验证裸 URL + 信任栅是否已足；
 > 若足则去掉 token 硬要求；不足则找本代真正的开关），或把 dsh 版本与该假设钉在一起（升级即红，不许静默漂）。
+
+> **261006 04:5x 追加（引擎路径的残留，第三层没修净）**：`t261006-02` 合并后，采集台**自起**探针（`capture-lane.mjs --lane . --out /tmp/…`）**exit 0 / 10 张平铺 PNG**——
+> 但**引擎自己的路径仍然失败**，本轮流水的原文（`t261005-06` 的 workflow log）：
+> `prepare_ui_evidence：capture-lane（引擎台） → ui-shot-t261005-06-g0 capture exit code 1: 新建会话失败：工作区创建失败：/Users/user/Documents/sandbar
+>  WorkspaceCreateError: workspace create failed: workspace-invalid-path: cannot create a …`
+> 即：引擎用 `run_capture_stage(services="full", …)` 起台后，`capture.mjs` 仍按**注册表里的宿主绝对路径**建会话，而那个路径在**容器内**不存在（KI-204 第三层）。
+> 为什么自起探针能过、引擎路径不能过：两者**起台形态不同**（自起=dsh-only + `capture-lane` 自管；引擎=full 台 + 引擎持有 + 引擎的 stage-json 契约），
+> 差别落在**容器内可见的项目注册表/工作区解析**上。⇒ **这是三张 UI 票最后的堵点**，也是 KI-204 第三层在引擎路径上的残留。
+> **归**：新票 `t261006-03`（要求：让引擎路径的会话工作区在容器内可解析；并对"自起台过、引擎台不过"这一形态差给出根因与回归）。
