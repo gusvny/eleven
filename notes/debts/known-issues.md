@@ -3498,3 +3498,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②或在 workflow 顶部写一枚**启动版本标记**并在守卫里读它（新票有、两代旧票都没有——仍需与 ① 合判）；
 > ③或对窗口 ② 的存量票走一次性处置（reset/重开），但那是付历史代价，非首选出路。
 > **回归用例（待补）**：L1/场景——三段历史各一（无闸、有闸无标记、有闸有标记）在当前代码下重放，断言三段全部无 `NonDeterministicError`。
+
+## KI-204 UI 证据供给**第三层**：采集台的新家**重播历史种子**，把已退役的 `suyou` 项目（目录已不存在）重新种回注册表 ⇒ 建会话 ENOENT、capture exit 1（261005 20:5x 实证）
+
+> **现象**：`t261005-13` 修好起台回执（`ports.dsh`）之后，`t261005-06` 的采集**前进了一层但仍旧失败**，
+> worker 日志原文：`Capture: bench '新建会话失败：工作区创建失败 /Users/user/Documents/suyou … workspace-invalid-path … ENOENT' (capture exit 1); 9 best-effort PNGs archived to main tree`
+> ⇒ merge_check 的 UI 截图证据项照旧红（当轮 7 项检查里只有它是红）。
+> **机制（代码级）**：`/Users/user/Documents/suyou` **已不存在**（`ls` 实测 No such file or directory），
+> 而仓内 `server/projects.yaml:14-17` 的**历史迁移种子**仍以 `key: suyou` + `dirs: [/Users/user/Documents/suyou]` 打头；
+> `server/engine/shared.py:5823 ensure_registry_migrated(root)` 在新家（无 `.migrated` 标记）时会**从该种子文件重播迁移**
+> （`:5816-5818` 写 `.migrated`）。采集台（`server/ui-check/capture-lane.mjs:342-355`，临时 DSH_HOME + 临时 profile，
+> 且注释里写明「UI 检查台固定服务 suyou 项目」）正是**新家**——于是临时控制台里注册表被重新种上死项目 suyou，
+> 其后的「新建会话」按该项目的工作区建 → 目录不存在 → ENOENT → capture 退出 1。
+> **危害**：UI 证据供给的第三层断点，且**任何新家**（新装、临时台、隔离台、另一台机器）都会重现——
+> 不是本机特例，是"仓内种子与机器现实脱钩"的机制面。票面表现=UI 票的 merge_check 永远红（靠人肉平铺兜底）。
+> **出路**：①种子文件不再种已退役项目（`server/projects.yaml` 在受保护名单内 ⇒ main 侧改或人审放行）；
+> ②`ensure_registry_migrated` 对 dirs 不存在的条目**具名跳过/告警**而不是闷头种下（与「畸形=该项目隔离」同族，
+> 但当前判据不看目录存在性）；③采集台不再"固定服务 suyou"（`capture-lane.mjs` 的历史命名与绑定随迁移票处置，
+> 不随手改：CLAUDE.md 规则 5）。
+> **次要面（同族排查）**：`server/ui-check/dbg-chat.mjs:31` 与 `capture-lane.mjs:353` 均 `resolveCredentialsSource("suyou")`——
+> 同一处历史绑定，修的时候一并判。
