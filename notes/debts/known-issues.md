@@ -3402,3 +3402,24 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②守望者每拍按 mtime 重读声明（与「人的声明只收养、绝不替换」的铁律不冲突——重读不改写人的声明）；
 > ③runbook 记死「换执行器会话 = 两处声明（watchdog.json + executor-grants.json）+ 一次重启」。
 > **本次处置（261005）**：登记。本次换会话已按此流程走完（清声明 → 重启 → 守望者代建 → 写 grants → 验证）。
+
+## KI-199 并发上限被**僵尸清账误伤**：探活查询一超时，占着槽位的在跑票被当僵尸摘除 ⇒ 声明上限 4 实测跑 6（261005 实证）
+
+> **现象**：261005 14:35–14:36 连读两次 `~/.sandbar/projects/sandbar/concurrency-state.json`（mtime 14:34，新鲜、
+> 两次一致）：holders = `t261005-09 / -10 / -12 / -13`（4 条，reason=running）、limit=4、queue 空；
+> 而同刻工单台面 `t261004-36`（implement/running）与 `t261005-02`（implement→run_integration_tests/running）
+> **都在跑却不占槽**——声明的上限 4、实际在跑 6，且状态文件与台面互相矛盾而无任何告警面。
+> **机制（代码级）**：`server/engine/concurrency.py:431 reconcile(project_key, alive_tickets)` 把**不在 alive 集里的
+> holder 一律摘除**；alive 集由 `server/tools/ticket.py op=concurrency --reconcile` 逐 holder 用 Temporal 查询探活构造
+> （探活成功才进 alive，失败落 `probe_errors` 并按僵尸处理）。而查询超时是本项目在册老毛病（KI-003 偶发超时、
+> KI-008 无重试期；261005 当日实测过 25.8 s 超时）——探活一失败，正在干活的票被当僵尸清账，槽位回池、
+> 队列立刻递补（`promote`），上限被**静默**突破。
+> **危害**：宿主用来控制并发的那一个旋钮（CL-1）在查询抖动时会自己失效，且**朝放开的方向**失效；
+> 面板持有人视图与台面同时显示两套事实，值班人无法据此判断。与 KI-003/KI-008 同族：观测面故障被当成事实。
+> **出路**：①reconcile 探活失败**不得**当死亡——失败与「workflow 真没了」必须分级（失败=保留 holder 并具名上报，
+> 只有 Temporal 明确 NotFound 才摘除），与 KI-025「查询失败≠不存在」同一纪律；②摘除动作写审计行（谁被摘、依据是什么），
+> 让「上限被突破」有痕；③面板/台面加一致性告警（holder 集 ≠ 在跑集时点名）。
+> **本次处置（261005）**：登记。上面是可判的机制面，未定因到具体某一次 reconcile 调用（不当成实锤因果链）。
+> **下一步探针**：跑一次 `ticket.py op=concurrency --reconcile`，比对回执里的 `probe_errors`/`dropped` 与同刻在跑票集合；
+> 若 `dropped` 含在跑票即实锤（该探针自身会清账，须在可接受的时窗内做）。
+> **回归用例（待补）**：L1 单测——探活抛超时/异常时 holder 保留且具名；只有 NotFound 才摘除并写审计行。
