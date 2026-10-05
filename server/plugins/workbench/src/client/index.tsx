@@ -104,6 +104,14 @@ import { WorkbenchSidebar } from './sidebar.tsx'
 import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
+// UI-3 (t261005-04): ticket detail as a middle-column overlay — single-layer
+// invariant / breadcrumb / arrow-key ticket walk pure-function layer + Spec block.
+import {
+  EMPTY_OVERLAY, breadcrumbBack, closeOverlay, crumbOf, drillToEpic, drillToTicketFromEpic,
+  neighborTicketId, openTicket,
+} from './ticket-overlay-model.ts'
+import type { OverlayNav } from './ticket-overlay-model.ts'
+import { SpecBlock } from './spec-block.tsx'
 import { STATE_LABEL, stageDisplayLabel, workflowLabel } from './ui-labels.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
@@ -322,6 +330,33 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-drawer{position:absolute;top:0;right:0;bottom:0;left:0;background:var(--dsw-derive-canvas,#ffffff);z-index:90;
   border-left:1px solid var(--dsw-derive-border,#d0d7de);box-shadow:-12px 0 32px rgba(31,35,40,.18);overflow-y:auto;padding:18px 22px 40px;
   display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--dsw-derive-fg,#1f2328)}
+/* UI-3 (t261005-04): the drawer becomes a middle-column overlay — a 12px gap on
+   all sides lets the underlying view show through; closing restores it exactly
+   (design 261004 §7.5.1). Still absolute inside .wb-sb-right; the left and right
+   columns stay usable throughout (the right-column chat is never touched). The
+   overlay is always exactly one layer deep (content replacement, no stacking). */
+.wb-drawer.wb-overlay{top:12px;right:12px;bottom:12px;left:12px;
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:10px;
+  box-shadow:0 12px 40px rgba(31,35,40,.35)}
+/* Breadcrumb (epic drill walk-back): a '← code' button at the head's left; same layer, content swap, no stacking. */
+.wb-overlay-crumb{flex:none;font:inherit;font-size:12px;border:1px solid var(--dsw-derive-border,#d0d7de);
+  background:transparent;color:var(--dsw-derive-accent,#0969da);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap}
+.wb-overlay-crumb:hover{background:var(--dsw-derive-surface,#f6f8fa)}
+/* Spec block (t261005-04): execution spec card + acceptance checklist + write-set chips + collapsed verbatim original request. */
+.wb-spec-block{display:flex;flex-direction:column;gap:8px}
+.wb-spec-block .ttl{font-size:11px;font-weight:700;color:var(--dsw-derive-muted,#57606a);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+.wb-spec-acc ul{margin:0;padding-left:18px;font-size:12.5px;line-height:1.7}
+.wb-spec-ws .chips{display:flex;flex-wrap:wrap;gap:4px}
+.wb-spec-ws .ws-chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;
+  background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-muted,#57606a)}
+.wb-spec-redline{font-size:12px;color:var(--dsw-derive-danger,#cf222e)}
+.wb-spec-orig summary{cursor:pointer;font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-spec-orig summary:hover{color:var(--dsw-derive-accent,#0969da)}
+.wb-spec-orig pre{white-space:pre-wrap;word-break:break-word;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:8px 10px;max-height:220px;overflow:auto;margin:6px 0 0}
+/* Overlay epic content (same-layer content swap, t261005-04): embeds the existing EpicSection inside a padded wrapper. */
+.wb-overlay-epic{border-top:1px solid var(--dsw-derive-border,#d0d7de);padding-top:12px}
+.wb-overlay-epic-empty{font-size:12.5px;color:var(--dsw-derive-muted,#57606a)}
 /* flex 列布局里子元素默认可缩——带 overflow 的卡（正文 max-height+scroll）会被压到不足一行
    （260824 实测塌陷）；抽屉自己滚，子元素一律不缩。 */
 .wb-drawer>*{flex-shrink:0}
@@ -3439,6 +3474,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   // 无标题票首句映射（t260905-07）：enrichment 通道 title_or_first 的行级缓存。
   const [titleFirstMap, setTitleFirstMap] = useState<Record<string, string>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // UI-3 (t261005-04) overlay navigation: a non-null epic entry = the overlay
+  // content becomes the epic detail (same layer; the ticket detail does not
+  // render); a non-null crumb = the ticket detail on show was drilled into from
+  // that epic → the head shows `← code`. Runtime carrier of the single-layer
+  // invariant: ticket and epic content are mutually exclusive at the render
+  // site, and close clears both in one step.
+  const [overlayNav, setOverlayNav] = useState<OverlayNav>(EMPTY_OVERLAY)
   const [detail, setDetail] = useState<TicketDetail | undefined>(undefined)
   const [detailLoading, setDetailLoading] = useState(false)
   const [opBusy, setOpBusy] = useState(false)
@@ -3596,7 +3638,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   // focusNonce 表达「又点了一次」——focusId 同值（× 关抽屉后再点同一行）时也要重开（t260825-05）；
   // openDetail 幂等（重拉详情覆盖旧态），连点无害。
   useEffect(() => {
-    if (focusId) void openDetail(focusId)
+    if (focusId) openTicketOverlay(focusId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId, focusNonce])
 
@@ -3611,6 +3653,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     setPage('tickets')
     selectedIdRef.current = null
     setSelectedId(null)
+    setOverlayNav(EMPTY_OVERLAY)
     setDetail(undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listNonce])
@@ -3695,6 +3738,73 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       if (selectedIdRef.current === id) setDetailLoading(false)
     }
   }
+
+  /* ---- UI-3 (t261005-04) overlay navigation wrappers: openDetail keeps its
+     existing data-fetch duty; the overlay state (content entry / crumb) goes
+     through the ticket-overlay-model pure layer, the two states move together. */
+
+  /** Click a row in the list/board: overlay content = ticket detail, no breadcrumb (the model is inert on malformed ids: no state change). */
+  function openTicketOverlay(id: string): void {
+    setOverlayNav(nav => openTicket(nav, id))
+    void openDetail(id)
+  }
+
+  /** Click the epic badge inside a ticket detail: same layer, content becomes the epic detail (the source ticket id stays in selectedId, but the crumb records the epic code — the breadcrumb goes back to the epic, not the ticket). */
+  function drillOverlayToEpic(code: string): void {
+    setOverlayNav(nav => drillToEpic(nav, code))
+  }
+
+  /** Click a ticket row inside the epic detail: same layer, content becomes the ticket detail; crumb = that epic (the model is inert on a malformed code). */
+  function drillOverlayToTicket(id: string, epicCode: string): void {
+    setOverlayNav(nav => drillToTicketFromEpic(nav, id, epicCode))
+    void openDetail(id)
+  }
+
+  /** The `← code` breadcrumb: same layer, back to the epic detail. */
+  function overlayBreadcrumbBack(): void {
+    setOverlayNav(nav => breadcrumbBack(nav))
+  }
+
+  /** ×/Esc: close the overlay all the way — epic content and crumb are cleared together; the underlying view is exactly as it was. */
+  function closeTicketOverlay(): void {
+    selectedIdRef.current = null
+    setSelectedId(null)
+    setOverlayNav(nav => closeOverlay(nav))
+    setDetail(undefined)
+    setTerminalFace(null)
+  }
+
+  /** ArrowUp/Down ticket walk (only while the overlay is open; no walk in the epic content state — the list-walk semantics apply to the ticket detail only).
+   *  A walk = a fresh open from the list context: the crumb is cleared (an arrow jump carries no epic origin). */
+  function overlayStepTicket(dir: 'up' | 'down'): void {
+    const next = neighborTicketId(tickets, selectedIdRef.current, dir)
+    if (next === null || next === selectedIdRef.current) return
+    setOverlayNav(nav => openTicket(nav, next))
+    void openDetail(next)
+  }
+
+  // Overlay keyboard: Esc closes, arrows walk tickets. The listener mounts on
+  // window and is removed on close/unmount — full end-state cleanup (no leaked
+  // listener).
+  useEffect(() => {
+    const overlayOpen = selectedId !== null || overlayNav.current !== null
+    if (!overlayOpen) return
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault()
+        closeTicketOverlay()
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault()
+        overlayStepTicket('up')
+      } else if (ev.key === 'ArrowDown') {
+        ev.preventDefault()
+        overlayStepTicket('down')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId !== null || overlayNav.current !== null, selectedId, overlayNav.current, tickets])
 
   /** t260901-15 写前守门：远端页签守门窗口内写过该工单、或正有其它页签在看 →
    *  confirm 二次确认（管理台宁提醒不强禁，写后广播兑现读后失效）。返回 true=可继续写。
@@ -4217,7 +4327,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
               // 巡检行（t260915-08）：无变更页签，review/blocked 一律落「进展」（巡检面）。
               if (anchor === 'review' && !insp) setDrawerTab('changes')
               if (anchor === 'blocked' || anchor === undefined || insp) setDrawerTab('detail')
-              void openDetail(t.id)
+              openTicketOverlay(t.id)
             }}
             onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
             onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}
@@ -4245,7 +4355,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       {doneAbn.map(t => (
         <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]} compact={false}
           active={t.id === selectedId} busy={opBusy} ops={[]}
-          onOpen={() => { setDrawerTab('detail'); void openDetail(t.id) }}
+          onOpen={() => openTicketOverlay(t.id) }
           onOpenEpic={onOpenEpic} />
       ))}
 
@@ -4259,7 +4369,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             {doneOk.map(t => (
               <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]} compact={false}
                 active={t.id === selectedId} busy={opBusy} ops={[]}
-                onOpen={() => { setDrawerTab('detail'); void openDetail(t.id) }}
+                onOpen={() => openTicketOverlay(t.id) }
                 onOpenEpic={onOpenEpic} />
             ))}
           </>
@@ -4284,13 +4394,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
           <div className="wb-scan-backbar">
             <button className="wb-btn" onClick={() => setPage('tickets')}>← Back to ticket list</button>
           </div>
-          <ScanReportSection scan={scan} onOpen={(id) => { setPage('tickets'); void openDetail(id) }} />
+          <ScanReportSection scan={scan} onOpen={(id) => { setPage('tickets'); openTicketOverlay(id) }} />
         </>
       )}
 
-      {selectedId !== null && (
-        <div className="wb-drawer">
-          <button className="wb-close" onClick={() => { selectedIdRef.current = null; setSelectedId(null); setDetail(undefined); setTerminalFace(null) }}>×</button>
+      {(selectedId !== null || overlayNav.current !== null) && (
+        <div className="wb-drawer wb-overlay" data-testid="ticket-overlay">
+          <button className="wb-close" onClick={closeTicketOverlay}>×</button>
           {peerNote !== '' && (
             <div style={{ background: 'var(--dsw-derive-warn-bg,#fff8c5)', border: '1px solid var(--dsw-derive-warn-border,#d4a72c)', borderRadius: 6,
               padding: '6px 10px', fontSize: 12, color: 'var(--dsw-derive-warn-deep,#7d4e00)', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -4299,19 +4409,44 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 onClick={() => { setPeerNote('') }}>×</button>
             </div>
           )}
-          {detailLoading && <div className="wb-empty">Loading detail…</div>}
+          {/* UI-3 (t261005-04): overlay content is one-or-the-other (single-layer
+              invariant) — while the epic detail is on show the ticket detail does
+              not render at all (same-layer content swap, never two overlays). The
+              epic face reuses the existing EpicSection (truth source / empty
+              states / error rows are its single caliber); clicking a ticket row
+              drills back to the ticket detail through the model, and the
+              `← code` breadcrumb walks back in the same layer. */}
+          {overlayNav.current !== null && overlayNav.current.kind === 'epic' && (
+            <div className="wb-overlay-epic" data-testid="overlay-epic">
+              <div className="wb-drawer-head">
+                <span className="wb-title">Epic</span>
+                <code className="wb-d2-id">{overlayNav.current.id}</code>
+              </div>
+              <EpicSection epicCode={overlayNav.current.id} projectKey={projectKey}
+                onOpenTicket={(tid) => drillOverlayToTicket(tid, overlayNav.current !== null ? overlayNav.current.id : '')} />
+            </div>
+          )}
+          {detailLoading && overlayNav.current?.kind !== 'epic' && <div className="wb-empty">Loading detail…</div>}
           {/* t260919-02：终态失败票详情面——kind=terminal 时 detail 恒 undefined，
               本面板是抽屉唯一详情体（绝不空面板）；零操作入口（组件契约见定义处）。 */}
-          {!detailLoading && terminalFace !== null && (
+          {!detailLoading && overlayNav.current?.kind !== 'epic' && terminalFace !== null && (
             <TerminalFailurePanel view={terminalFace} />
           )}
           {/* t260901-15 跳单守卫：详情与当前选中不一致不渲染（防在途旧响应顶替新详情）。 */}
-          {!detailLoading && detail !== undefined && detail.id === selectedId && (
+          {!detailLoading && overlayNav.current?.kind !== 'epic' && detail !== undefined && detail.id === selectedId && (
             <>
               <div className="wb-drawer-head">
                 {/* 无标题票首句兜底（t260905-07）：详情通道从 show body 直接裁（列表
                     通道走 enrichment title_or_first，两通道同口径 firstSentenceOf）；
                     body 也空 → 回退工单号，宁显编号不显空白。 */}
+                {(() => {
+                  const c = crumbOf(overlayNav)
+                  return c !== null ? (
+                    <button className="wb-overlay-crumb" data-testid="overlay-crumb"
+                      title={`Back to epic ${c}`}
+                      onClick={overlayBreadcrumbBack}>← {c}</button>
+                  ) : null
+                })()}
                 <span className="wb-title" data-title-src={detail.title?.trim() ? 'title' : 'first-or-id'}>
                   {detail.title?.trim() || firstSentenceOf(detail.body) || detail.id}
                 </span>
@@ -4334,7 +4469,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                     （引擎 name 是中文数据不动）；未知模板 id 由 labelOf 回落原 id。 */}
                 <span className="wb-sub">{selWf ? workflowLabel(selWf.id) : 'no template'}</span>
                 {/* 所属立项徽标（t260826-02）：点击跳中列立项单详情；无 epic 显灰「未归档」 */}
-                <EpicBadge epic={detail.epic} onNavigate={onOpenEpic} />
+                <EpicBadge epic={detail.epic} onNavigate={(code) => drillOverlayToEpic(code)} />
                 {/* token 一行合计（t260828-07，验收 3）：agent 段数 + in/out 总量 + 模型 */}
                 <UsageSummaryLine detail={detail} wf={selWf} usage={usage} />
               </div>
@@ -4426,24 +4561,19 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                   👀 Another tab is viewing this ticket: {drawerPeerViewers.map(v => v.who).join(', ')}
                 </div>
               )}
-              {/* 详情页 v2.1（260824 二轮）：工单正文钉最顶（所有页签可见）→ 打回横幅 →
-                  步骤条/一句话现状/问题区/操作条——任何页签都能看到状态、直接操作。 */}
-              {detail.body && (
-                <div className="wb-d2-body">
-                  <div className="ttl">Body (original request)</div>
-                  {detail.body}
-                </div>
-              )}
-              {/* 执行规格卡（t260904-06）：正文卡正下方钉顶区，所有页签可见；spec 空/缺省整卡不渲染
-                  （老票兼容）。B 形态=默认展开+限高 260px 滚动；字数徽标取 .length（UTF-16 码元）。 */}
-              {detail.spec && (
-                <div className="wb-d2-spec" data-v="B">
-                  <div className="ttl">Execution spec<span className="cnt">{detail.spec.length} chars</span></div>
-                  {/* t260925-18：spec 基本格式化——renderMarkdown 转义先行（knowledge 浏览器半
-                      同款，index.tsx 顶部既有 import），spec 内容来自 agent/用户，无裸注入面。 */}
-                  <div className="txt wb-md" dangerouslySetInnerHTML={{ __html: specMarkdownHtml(detail.spec) }} />
-                </div>
-              )}
+              {/* UI-3 (t261005-04) Spec block (design 261004 §7.5 final block order:
+                  read it before deciding — what you sign is this, nothing else):
+                  execution spec card + acceptance checklist + write-set chips +
+                  collapsed verbatim original request (the old always-expanded
+                  pinned body card moved in here, same as mock v11). Missing keys
+                  render nothing (old tickets untouched); structured red lines /
+                  branch dimensions / queue position belong to the prerequisite
+                  ticket (plan-detail data face) — this ticket renders the
+                  existing single keys only and fabricates no placeholder. */}
+              <SpecBlock body={detail.body} spec={detail.spec}
+                acceptance={detail.acceptance} writeSet={detail.write_set}
+                redLine={detail.red_line}
+                specHtml={typeof detail.spec === 'string' ? specMarkdownHtml(detail.spec) : ''} />
               {/* t260915-08 巡检票：详情面直接进巡检面（时间线/发现/人门签字，R6）——
                   dev-lane 专属面板（步骤条/变更页签/检查明细）对巡检票零渲染。
                   t260916-05：泳道图不再随巡检一并守卫——引擎已登记 inspection-lite

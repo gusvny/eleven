@@ -151,8 +151,8 @@ ok(panelSrc.includes('view.instanceId'), '巡检实例/期号进面板（票身�
 ok(!/#[0-9a-fA-F]{3,8}\b/.test(panelSrc.replace(/var\(--[a-z0-9-]+,\s*#?[0-9a-fA-F]*/g, 'var(')),
   '面板 JSX 消费位零裸 hex（色全走令牌 var()）')
 
-ok(idxSrc.includes('{!detailLoading && terminalFace !== null && (\n            <TerminalFailurePanel view={terminalFace} />'),
-  '抽屉接线：terminalFace 非空渲染失败面板（绝不空面板）')
+ok(idxSrc.includes('{!detailLoading && overlayNav.current?.kind !== \'epic\' && terminalFace !== null && (\n            <TerminalFailurePanel view={terminalFace} />'),
+  '抽屉接线：terminalFace 非空渲染失败面板（绝不空面板；t261005-04 浮层化后带 epic 排他守卫）')
 ok(idxSrc.includes('setTerminalFace(terminalFaceView('), 'openDetail 捕获 face 装配视图')
 ok(idxSrc.includes("e.face = data?.face"), '错误对象挂 face（apiGet 410 返回 body 通路）')
 ok((idxSrc.match(/setTerminalFace\(null\)/g) || []).length >= 2, '切单/重开/关抽屉清态（≥2 处，不串票）')

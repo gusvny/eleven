@@ -22,6 +22,9 @@ import { join } from 'node:path'
 
 const REPO = process.cwd()
 const SRC = join(REPO, 'server', 'plugins', 'workbench', 'src', 'client', 'index.tsx')
+// t261005-04：spec 卡渲染体从 index.tsx 迁入 spec-block.tsx（UI-3 Spec 块，
+// 执行规格卡成为块内一件）——卡片契约锁改指新单点家，消费面仍锁 index.tsx。
+const SPEC_TSX = join(REPO, 'server', 'plugins', 'workbench', 'src', 'client', 'spec-block.tsx')
 const LIB_JS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.js')
 const LIB_CJS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.cjs')
 // 后端零改动断言面（只读引用，不属写集）
@@ -36,29 +39,31 @@ function ok(cond, label) {
 function section(t) { console.log(`\n== ${t}`) }
 
 const src = readFileSync(SRC, 'utf8')
+const specTsx = readFileSync(SPEC_TSX, 'utf8')
 const libJs = readFileSync(LIB_JS, 'utf8')
 const libCjs = readFileSync(LIB_CJS, 'utf8')
 
 // ---- A. 有 spec 渲染卡：三产物同源锁 ----
 section('A. spec 卡渲染分支在 src + lib(client.js/client.cjs) 三产物同源在场')
-for (const [name, art] of [['src', src], ['lib/client.js', libJs], ['lib/client.cjs', libCjs]]) {
+for (const [name, art] of [['spec-block.tsx', specTsx], ['lib/client.js', libJs], ['lib/client.cjs', libCjs]]) {
   ok(art.includes('wb-d2-spec'), `${name}: 卡类名 wb-d2-spec 在场`)
   ok(art.includes('Execution spec'), `${name}: ttl 英文文案「Execution spec」在场（t260925-18 UI 英文化）`)
   ok(art.includes('data-v": "B"') || art.includes('data-v="B"'), `${name}: B 形态标记 data-v=B 在场`)
-  ok(name === 'src' ? art.includes('className="txt wb-md"') : art.includes('txt wb-md'), `${name}: 正文 .txt 包裹在场（t260925-18 起与 wb-md 并用）`)
-  ok(art.includes('specMarkdownHtml(detail.spec)'), `${name}: spec 经 specMarkdownHtml→renderMarkdown 渲染（t260925-18 markdown 格式化，转义先行无裸注入）`)
-  ok(art.includes('detail.spec.length'), `${name}: 字数徽标取 spec.length 在场`)
-  ok(name === 'src' ? /\{detail\.spec\.length\} chars/.test(art) : art.includes('" chars"'),
+  ok(name === 'spec-block.tsx' ? art.includes('className="txt wb-md"') : art.includes('txt wb-md'), `${name}: 正文 .txt 包裹在场（t260925-18 起与 wb-md 并用）`)
+  ok(art.includes('specText.length'), `${name}: 字数徽标取 spec 长度在场（守卫净化后的 specText）`)
+  ok(name === 'spec-block.tsx' ? /\{specText\.length\} chars/.test(art) : art.includes('" chars"'),
     `${name}: 徽标「chars」单位字面在场（src=JSX 形态 / lib=字符串字面形态；t260925-18 英文化）`)
 }
+// 渲染转义仍走 index.tsx 消费面：specMarkdownHtml(detail.spec) 预备 HTML 再入 SpecBlock。
+ok(src.includes('specMarkdownHtml(detail.spec)'), 'index.tsx: spec 经 specMarkdownHtml→renderMarkdown 渲染（t260925-18 markdown 格式化，转义先行无裸注入）')
 // 接口字段（src 侧白盒；lib 类型擦除不查）
 ok(/spec\?: string/.test(src), 'src: TicketDetail 补 spec?: string 字段')
 
 // ---- B. 空 spec 不渲染：truthy 守卫（老票/缺字段/空串整卡消失） ----
-section('B. 空 spec 整卡不渲染（detail.spec && 守卫，src 与编译产物都在场）')
-ok(src.includes('detail.spec && ('), 'src: 渲染块被 detail.spec && ( 守卫包裹')
-ok(libJs.includes('detail.spec &&'), 'lib/client.js: 守卫经 JSX 编译后在场')
-ok(libCjs.includes('detail.spec &&'), 'lib/client.cjs: 守卫经 JSX 编译后在场')
+section('B. 空 spec 不渲染：守卫净化后的非空判定（spec-block.tsx 单点 + 编译产物同源）')
+ok(specTsx.includes("specText !== ''"), 'spec-block.tsx: 卡渲染分支被 specText 非空守卫包裹（undefined/空串整卡消失）')
+ok(libJs.includes('specText !== ""'), 'lib/client.js: 守卫经 JSX 编译后在场')
+ok(libCjs.includes('specText !== ""'), 'lib/client.cjs: 守卫经 JSX 编译后在场')
 
 // ---- C. B 形态 CSS 锁：默认展开 + 限高滚动 + 蓝左条 + 徽标 ----
 section('C. .wb-d2-spec 样式锁（三产物 CSS 逐项）')
@@ -100,12 +105,12 @@ ok(nodeTs.includes('/sandbar-workbench/api/wf/tickets/<id>') || /wf\/tickets\/\$
 
 // ---- E. 畸形输入守卫：徽标取值在守卫内；超长走限高滚动 ----
 section('E. 畸形输入：spec undefined/空串不触达 .length；超长 spec 限高滚动')
-ok(src.indexOf('detail.spec && (') < src.indexOf('detail.spec.length'),
-  'src: .length 取值在 truthy 守卫之后（undefined/空串不触达，不抛 TypeError）')
-ok(libJs.indexOf('detail.spec &&') < libJs.indexOf('detail.spec.length'),
+ok(specTsx.indexOf("specText !== ''") < specTsx.indexOf('specText.length'),
+  'spec-block.tsx: .length 取值在非空守卫之后（undefined/空串不触达，不抛 TypeError）')
+ok(libJs.indexOf('specText !== ""') < libJs.indexOf('specText.length'),
   'lib/client.js: 编译后取值顺序保持守卫在前')
-ok(src.indexOf('detail.spec && (') < src.indexOf('<D2Reworks'),
-  'src: spec 卡位于正文卡正下方、打回横幅之前（钉顶区位置契约）')
+ok(src.indexOf('<SpecBlock') < src.indexOf('<D2Reworks'),
+  'index.tsx: Spec 块位于打回横幅/泳道图之前（v11 块序：决策之前先看它）')
 
 console.log(`\nspec-card-ui: pass=${pass} fail=${fail}`)
 process.exit(fail === 0 ? 0 : 1)

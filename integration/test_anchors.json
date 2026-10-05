@@ -1050,6 +1050,11 @@
   }
  },
  "scenarios": {
+  "integration/t261005-04/sc_ticket_detail_overlay.mjs": {
+   "anchor": "behaviour",
+   "note": "",
+   "sync_path": ""
+  },
   "integration/t261004-32/sc_t26100432_decl_fail_closed.py": {
    "anchor": "contract",
    "note": "declaration refusal matrix + read-face shape (host rules 6/7/8/9)",

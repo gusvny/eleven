@@ -49657,6 +49657,177 @@ function EpicSection({ epicCode, epicNonce, projectKey, onOpenTicket }) {
 	});
 }
 //#endregion
+//#region src/client/ticket-overlay-model.ts
+const EMPTY_OVERLAY = {
+	current: null,
+	crumb: null
+};
+/** Click a row in the ticket list: open the ticket detail (no breadcrumb; any epic content on show is replaced wholesale). */
+function openTicket(nav, ticketId) {
+	const id = cleanId(ticketId);
+	if (id === null) return nav;
+	return {
+		current: {
+			kind: "ticket",
+			id
+		},
+		crumb: null
+	};
+}
+/** Click the epic badge inside a ticket detail: same layer, content becomes the epic detail (the source ticket stays in selectedId; the walk-back goes to the epic). */
+function drillToEpic(nav, epicCode) {
+	const code = cleanId(epicCode);
+	if (code === null) return nav;
+	if (nav.current === null || nav.current.kind !== "ticket") return nav;
+	return {
+		current: {
+			kind: "epic",
+			id: code
+		},
+		crumb: null
+	};
+}
+/** Click a ticket row inside the epic detail: same layer, content becomes the ticket detail; crumb = that epic, the head shows the breadcrumb. */
+function drillToTicketFromEpic(nav, ticketId, epicCode) {
+	const id = cleanId(ticketId);
+	const code = cleanId(epicCode);
+	if (id === null) return nav;
+	return {
+		current: {
+			kind: "ticket",
+			id
+		},
+		crumb: code
+	};
+}
+/** Click the breadcrumb `← <epic>`: same layer, back to the epic detail; crumb cleared. */
+function breadcrumbBack(nav) {
+	if (nav.crumb === null) return nav;
+	return {
+		current: {
+			kind: "epic",
+			id: nav.crumb
+		},
+		crumb: null
+	};
+}
+/** Close (×/Esc): back to null = the underlying view is exactly as it was. */
+function closeOverlay(_nav) {
+	return EMPTY_OVERLAY;
+}
+/** Single visibility decision for the breadcrumb: only "ticket detail + a source epic" renders `← code`. */
+function crumbOf(nav) {
+	return nav.current !== null && nav.current.kind === "ticket" ? nav.crumb : null;
+}
+/**
+* ArrowUp/ArrowDown walks the tickets of the current project.
+*
+* End behavior (pinned explicitly, review condition 2): **stop at the end, no
+* wrap-around** — ArrowUp on the first ticket and ArrowDown on the last both
+* stay put. Why: this list is "the current project's ticket list"; jumping to
+* the other end is a long-distance teleport the eye loses track of; for the
+* read-several-tickets flow, "reached the end" is more predictable than
+* "wrapped around". A malformed direction (not 'up'/'down') and a malformed
+* list (non-strings / empty strings / duplicate ids) are skipped and
+* deduplicated, never thrown. Current ticket missing from the list (removed by
+* a list refresh) → stay put.
+*/
+function neighborTicketId(rows, currentId, direction) {
+	if (direction !== "up" && direction !== "down") return cleanId(currentId);
+	const cur = cleanId(currentId);
+	if (cur === null) return null;
+	const ids = [];
+	if (Array.isArray(rows)) for (const r of rows) {
+		const id = cleanId(typeof r === "object" && r !== null ? r.id : r);
+		if (id !== null && !ids.includes(id)) ids.push(id);
+	}
+	const i = ids.indexOf(cur);
+	if (i === -1) return cur;
+	const j = direction === "up" ? i - 1 : i + 1;
+	if (j < 0 || j >= ids.length) return cur;
+	return ids[j];
+}
+/** Accept only a non-empty string; everything else (null/undefined/number/object/empty string) is malformed → null. */
+function cleanId(v) {
+	return typeof v === "string" && v.trim() !== "" ? v : null;
+}
+//#endregion
+//#region src/client/spec-block.tsx
+function strList(v) {
+	if (!Array.isArray(v)) return [];
+	const out = [];
+	for (const x of v) if (typeof x === "string" && x.trim() !== "") out.push(x);
+	return out;
+}
+function SpecBlock({ body, spec, acceptance, writeSet, redLine, specHtml }) {
+	const specText = typeof spec === "string" && spec.trim() !== "" ? spec : "";
+	const bodyText = typeof body === "string" && body.trim() !== "" ? body : "";
+	const acc = strList(acceptance);
+	const ws = strList(writeSet);
+	const rl = typeof redLine === "string" && redLine.trim() !== "" ? redLine : "";
+	if (specText === "" && bodyText === "" && acc.length === 0 && ws.length === 0 && rl === "") return null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-spec-block",
+		"data-testid": "spec-block",
+		children: [
+			specText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-d2-spec",
+				"data-v": "B",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "ttl",
+					children: ["Execution spec", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "cnt",
+						children: [specText.length, " chars"]
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "txt wb-md",
+					dangerouslySetInnerHTML: { __html: specHtml ?? "" }
+				})]
+			}),
+			acc.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-spec-acc",
+				"data-testid": "spec-acceptance",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "ttl",
+					children: [
+						"Acceptance (",
+						acc.length,
+						")"
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", { children: acc.map((a, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("li", { children: a }, i)) })]
+			}),
+			ws.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-spec-ws",
+				"data-testid": "spec-write-set",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "ttl",
+					children: [
+						"Write set (",
+						ws.length,
+						")"
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "chips",
+					children: ws.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+						className: "ws-chip",
+						children: w
+					}, w))
+				})]
+			}),
+			rl !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-spec-redline",
+				"data-testid": "spec-red-line",
+				children: ["Red line: ", rl]
+			}),
+			bodyText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+				className: "wb-spec-orig",
+				"data-testid": "spec-original",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "Original request (verbatim)" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: bodyText })]
+			})
+		]
+	});
+}
+//#endregion
 //#region src/client/docs-view-model.ts
 /** On this page 锚点 id 前缀（组件侧按 DOM 顺序赋 `doc-h-<i>`，本前缀单源）。 */
 const HEADING_ID_PREFIX = "doc-h-";
@@ -51484,6 +51655,33 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-drawer{position:absolute;top:0;right:0;bottom:0;left:0;background:var(--dsw-derive-canvas,#ffffff);z-index:90;
   border-left:1px solid var(--dsw-derive-border,#d0d7de);box-shadow:-12px 0 32px rgba(31,35,40,.18);overflow-y:auto;padding:18px 22px 40px;
   display:flex;flex-direction:column;gap:14px;font-size:13px;color:var(--dsw-derive-fg,#1f2328)}
+/* UI-3 (t261005-04): the drawer becomes a middle-column overlay — a 12px gap on
+   all sides lets the underlying view show through; closing restores it exactly
+   (design 261004 §7.5.1). Still absolute inside .wb-sb-right; the left and right
+   columns stay usable throughout (the right-column chat is never touched). The
+   overlay is always exactly one layer deep (content replacement, no stacking). */
+.wb-drawer.wb-overlay{top:12px;right:12px;bottom:12px;left:12px;
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:10px;
+  box-shadow:0 12px 40px rgba(31,35,40,.35)}
+/* Breadcrumb (epic drill walk-back): a '← code' button at the head's left; same layer, content swap, no stacking. */
+.wb-overlay-crumb{flex:none;font:inherit;font-size:12px;border:1px solid var(--dsw-derive-border,#d0d7de);
+  background:transparent;color:var(--dsw-derive-accent,#0969da);border-radius:6px;padding:2px 8px;cursor:pointer;white-space:nowrap}
+.wb-overlay-crumb:hover{background:var(--dsw-derive-surface,#f6f8fa)}
+/* Spec block (t261005-04): execution spec card + acceptance checklist + write-set chips + collapsed verbatim original request. */
+.wb-spec-block{display:flex;flex-direction:column;gap:8px}
+.wb-spec-block .ttl{font-size:11px;font-weight:700;color:var(--dsw-derive-muted,#57606a);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+.wb-spec-acc ul{margin:0;padding-left:18px;font-size:12.5px;line-height:1.7}
+.wb-spec-ws .chips{display:flex;flex-wrap:wrap;gap:4px}
+.wb-spec-ws .ws-chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;padding:1px 6px;border-radius:4px;
+  background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);color:var(--dsw-derive-muted,#57606a)}
+.wb-spec-redline{font-size:12px;color:var(--dsw-derive-danger,#cf222e)}
+.wb-spec-orig summary{cursor:pointer;font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-spec-orig summary:hover{color:var(--dsw-derive-accent,#0969da)}
+.wb-spec-orig pre{white-space:pre-wrap;word-break:break-word;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:8px 10px;max-height:220px;overflow:auto;margin:6px 0 0}
+/* Overlay epic content (same-layer content swap, t261005-04): embeds the existing EpicSection inside a padded wrapper. */
+.wb-overlay-epic{border-top:1px solid var(--dsw-derive-border,#d0d7de);padding-top:12px}
+.wb-overlay-epic-empty{font-size:12.5px;color:var(--dsw-derive-muted,#57606a)}
 /* flex 列布局里子元素默认可缩——带 overflow 的卡（正文 max-height+scroll）会被压到不足一行
    （260824 实测塌陷）；抽屉自己滚，子元素一律不缩。 */
 .wb-drawer>*{flex-shrink:0}
@@ -54733,6 +54931,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 	const [inspectionNote, setInspectionNote] = (0, react.useState)("");
 	const [titleFirstMap, setTitleFirstMap] = (0, react.useState)({});
 	const [selectedId, setSelectedId] = (0, react.useState)(null);
+	const [overlayNav, setOverlayNav] = (0, react.useState)(EMPTY_OVERLAY);
 	const [detail, setDetail] = (0, react.useState)(void 0);
 	const [detailLoading, setDetailLoading] = (0, react.useState)(false);
 	const [opBusy, setOpBusy] = (0, react.useState)(false);
@@ -54853,7 +55052,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		if (getViewProject()) pollOnce();
 	}, [projectKey]);
 	(0, react.useEffect)(() => {
-		if (focusId) openDetail(focusId);
+		if (focusId) openTicketOverlay(focusId);
 	}, [focusId, focusNonce]);
 	const listNonceRef = (0, react.useRef)(listNonce);
 	(0, react.useEffect)(() => {
@@ -54862,6 +55061,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 		setPage("tickets");
 		selectedIdRef.current = null;
 		setSelectedId(null);
+		setOverlayNav(EMPTY_OVERLAY);
 		setDetail(void 0);
 	}, [listNonce]);
 	(0, react.useEffect)(() => {
@@ -54923,6 +55123,64 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 			if (selectedIdRef.current === id) setDetailLoading(false);
 		}
 	}
+	/** Click a row in the list/board: overlay content = ticket detail, no breadcrumb (the model is inert on malformed ids: no state change). */
+	function openTicketOverlay(id) {
+		setOverlayNav((nav) => openTicket(nav, id));
+		openDetail(id);
+	}
+	/** Click the epic badge inside a ticket detail: same layer, content becomes the epic detail (the source ticket id stays in selectedId, but the crumb records the epic code — the breadcrumb goes back to the epic, not the ticket). */
+	function drillOverlayToEpic(code) {
+		setOverlayNav((nav) => drillToEpic(nav, code));
+	}
+	/** Click a ticket row inside the epic detail: same layer, content becomes the ticket detail; crumb = that epic (the model is inert on a malformed code). */
+	function drillOverlayToTicket(id, epicCode) {
+		setOverlayNav((nav) => drillToTicketFromEpic(nav, id, epicCode));
+		openDetail(id);
+	}
+	/** The `← code` breadcrumb: same layer, back to the epic detail. */
+	function overlayBreadcrumbBack() {
+		setOverlayNav((nav) => breadcrumbBack(nav));
+	}
+	/** ×/Esc: close the overlay all the way — epic content and crumb are cleared together; the underlying view is exactly as it was. */
+	function closeTicketOverlay() {
+		selectedIdRef.current = null;
+		setSelectedId(null);
+		setOverlayNav((nav) => closeOverlay(nav));
+		setDetail(void 0);
+		setTerminalFace(null);
+	}
+	/** ArrowUp/Down ticket walk (only while the overlay is open; no walk in the epic content state — the list-walk semantics apply to the ticket detail only).
+	*  A walk = a fresh open from the list context: the crumb is cleared (an arrow jump carries no epic origin). */
+	function overlayStepTicket(dir) {
+		const next = neighborTicketId(tickets, selectedIdRef.current, dir);
+		if (next === null || next === selectedIdRef.current) return;
+		setOverlayNav((nav) => openTicket(nav, next));
+		openDetail(next);
+	}
+	(0, react.useEffect)(() => {
+		if (!(selectedId !== null || overlayNav.current !== null)) return;
+		const onKey = (ev) => {
+			if (ev.key === "Escape") {
+				ev.preventDefault();
+				closeTicketOverlay();
+			} else if (ev.key === "ArrowUp") {
+				ev.preventDefault();
+				overlayStepTicket("up");
+			} else if (ev.key === "ArrowDown") {
+				ev.preventDefault();
+				overlayStepTicket("down");
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => {
+			window.removeEventListener("keydown", onKey);
+		};
+	}, [
+		selectedId !== null || overlayNav.current !== null,
+		selectedId,
+		overlayNav.current,
+		tickets
+	]);
 	/** t260901-15 写前守门：远端页签守门窗口内写过该工单、或正有其它页签在看 →
 	*  confirm 二次确认（管理台宁提醒不强禁，写后广播兑现读后失效）。返回 true=可继续写。
 	*  在场通道不可用（presenceRef=null）→ 退化为旧行为不阻断，降级写明不静默。 */
@@ -55496,7 +55754,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 						onOpen: (anchor) => {
 							if (anchor === "review" && !insp) setDrawerTab("changes");
 							if (anchor === "blocked" || anchor === void 0 || insp) setDrawerTab("detail");
-							openDetail(t.id);
+							openTicketOverlay(t.id);
 						},
 						onAdvance: () => {
 							doAdvance(t.id, t.stage_state, t.epic);
@@ -55543,10 +55801,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					active: t.id === selectedId,
 					busy: opBusy,
 					ops: [],
-					onOpen: () => {
-						setDrawerTab("detail");
-						openDetail(t.id);
-					},
+					onOpen: () => openTicketOverlay(t.id),
 					onOpenEpic
 				}, t.id)),
 				doneOk.length > 0 && (showDone ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
@@ -55567,10 +55822,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 					active: t.id === selectedId,
 					busy: opBusy,
 					ops: [],
-					onOpen: () => {
-						setDrawerTab("detail");
-						openDetail(t.id);
-					},
+					onOpen: () => openTicketOverlay(t.id),
 					onOpenEpic
 				}, t.id))] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 					className: "wb-done-row",
@@ -55622,20 +55874,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 				scan,
 				onOpen: (id) => {
 					setPage("tickets");
-					openDetail(id);
+					openTicketOverlay(id);
 				}
 			})] }),
-			selectedId !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-drawer",
+			(selectedId !== null || overlayNav.current !== null) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-drawer wb-overlay",
+				"data-testid": "ticket-overlay",
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-close",
-						onClick: () => {
-							selectedIdRef.current = null;
-							setSelectedId(null);
-							setDetail(void 0);
-							setTerminalFace(null);
-						},
+						onClick: closeTicketOverlay,
 						children: "×"
 					}),
 					peerNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -55662,15 +55910,43 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							children: "×"
 						})]
 					}),
-					detailLoading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					overlayNav.current !== null && overlayNav.current.kind === "epic" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-overlay-epic",
+						"data-testid": "overlay-epic",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-drawer-head",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-title",
+								children: "Epic"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+								className: "wb-d2-id",
+								children: overlayNav.current.id
+							})]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EpicSection, {
+							epicCode: overlayNav.current.id,
+							projectKey,
+							onOpenTicket: (tid) => drillOverlayToTicket(tid, overlayNav.current !== null ? overlayNav.current.id : "")
+						})]
+					}),
+					detailLoading && overlayNav.current?.kind !== "epic" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-empty",
 						children: "Loading detail…"
 					}),
-					!detailLoading && terminalFace !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TerminalFailurePanel, { view: terminalFace }),
-					!detailLoading && detail !== void 0 && detail.id === selectedId && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					!detailLoading && overlayNav.current?.kind !== "epic" && terminalFace !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TerminalFailurePanel, { view: terminalFace }),
+					!detailLoading && overlayNav.current?.kind !== "epic" && detail !== void 0 && detail.id === selectedId && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-drawer-head",
 							children: [
+								(() => {
+									const c = crumbOf(overlayNav);
+									return c !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										className: "wb-overlay-crumb",
+										"data-testid": "overlay-crumb",
+										title: `Back to epic ${c}`,
+										onClick: overlayBreadcrumbBack,
+										children: ["← ", c]
+									}) : null;
+								})(),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-title",
 									"data-title-src": detail.title?.trim() ? "title" : "first-or-id",
@@ -55701,7 +55977,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EpicBadge, {
 									epic: detail.epic,
-									onNavigate: onOpenEpic
+									onNavigate: (code) => drillOverlayToEpic(code)
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UsageSummaryLine, {
 									detail,
@@ -55818,26 +56094,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
 							},
 							children: ["👀 Another tab is viewing this ticket: ", drawerPeerViewers.map((v) => v.who).join(", ")]
 						}),
-						detail.body && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-d2-body",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "ttl",
-								children: "Body (original request)"
-							}), detail.body]
-						}),
-						detail.spec && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-d2-spec",
-							"data-v": "B",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "ttl",
-								children: ["Execution spec", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "cnt",
-									children: [detail.spec.length, " chars"]
-								})]
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "txt wb-md",
-								dangerouslySetInnerHTML: { __html: specMarkdownHtml(detail.spec) }
-							})]
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SpecBlock, {
+							body: detail.body,
+							spec: detail.spec,
+							acceptance: detail.acceptance,
+							writeSet: detail.write_set,
+							redLine: detail.red_line,
+							specHtml: typeof detail.spec === "string" ? specMarkdownHtml(detail.spec) : ""
 						}),
 						detail.kind === "inspection" && laneModel && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMap, { model: laneModel }),
 						detail.kind === "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectionDetailFace, {
