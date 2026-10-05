@@ -5041,14 +5041,23 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     "green": not ui_gate_red,
                     "detail": ("%s｜%d 张截图在位：%s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
                               if pngs else
-                              ("%s｜UI 票缺截图证据：跑 server/ui-check/capture.mjs "
-                               "--out <worktree>/%s（worker 代跑，只读控制台页面）" % (judge, UI_EVIDENCE_DIR)),
+                              ("%s｜UI ticket lacks screenshot evidence: the gate reads only "
+                               "TOP-LEVEL non-recursive *.png under <worktree>/%s — shots in "
+                               "subdirectories (before/, after/, ...) count as missing "
+                               "(host ruling 261005-B; seen on t261005-04/05). Run "
+                               "server/ui-check/capture.mjs --out <worktree>/%s "
+                               "(worker-run, read-only console pages; output lands flat)"
+                               % (judge, UI_EVIDENCE_DIR, UI_EVIDENCE_DIR)),
                     "id": "ui_evidence",
                     **({} if not ui_gate_red else {
                         "reason_code": "ui_evidence_missing",
                         # 命中的 UI 路径清单已在手（diff 判定产物），逐字带上
                         "files": [str(x) for x in ui_paths[:20]],
-                        "next_action": "泳道内产出截图证据（server/ui-check/capture.mjs）后发 retry_qc"})})
+                        "next_action": "produce TOP-LEVEL screenshot evidence in the lane "
+                                       "(server/ui-check/capture.mjs --out "
+                                       "<worktree>/%s; output lands flat, never in "
+                                       "subdirectories), then send retry_qc"
+                                       % UI_EVIDENCE_DIR})})
             # ② Declaration present + a miss + healthy diff: no item emitted (noise
             # reduction; the current stance is unchanged)
     except Exception as e:
@@ -6906,7 +6915,10 @@ async def _capture_lane_owned(args, wt: Path, shots_dir: Path,
             if pngs:
                 return {"fail": "", "pngs": pngs, "red": False, "env_degrade": False,
                         "note": "；".join(p for p in note_parts if p)}
-            return {"fail": "%s 报成功但 screenshots 无 png：%s"
+            return {"fail": "%s reported success but no TOP-LEVEL png under screenshots "
+                            "(evidence contract = non-recursive *.png at TOP LEVEL; shots "
+                            "in before/, after/, ... count as missing, host ruling "
+                            "261005-B): %s"
                             % (label, (r.get("capture_out") or "")[-300:]),
                     "pngs": [], "red": True, "env_degrade": False,
                     "note": "；".join(p for p in note_parts if p)}
@@ -7028,7 +7040,11 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
                 if not run_fail:
                     pngs = sorted(p.name for p in shots_dir.glob("*.png")) if shots_dir.is_dir() else []
                     if not pngs:
-                        run_fail = "%s 报成功但 %s 无 png：%s" % (label, UI_EVIDENCE_DIR, out[-300:])
+                        run_fail = ("%s reported success but no TOP-LEVEL png under %s "
+                                    "(evidence contract = non-recursive *.png at TOP "
+                                    "LEVEL; shots in before/, after/, ... count as "
+                                    "missing, host ruling 261005-B): %s"
+                                    % (label, UI_EVIDENCE_DIR, out[-300:]))
             if not run_fail:
                 activity.logger.info("[%s] ui_evidence（%s）：%s", args.ticket_id, label, "、".join(pngs))
                 # Transitional mirror for the plugin face (retirement debt #5): the

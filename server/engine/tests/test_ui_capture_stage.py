@@ -389,6 +389,62 @@ def test_receipt_temporal_missing_own_port_red():
     assert "ports.temporal" in str(ei.value)
 
 
+# ---- t261005-13 regression: contract pins for a full-bench receipt ----------
+# Producer contract (stage_docker._flip_lease_up): port keys are
+# temporal/ui/console; ports.dsh does not exist — the dsh service exposes the
+# console port. Two incidents (260929, 261005): the old validator looked up
+# ports.dsh 1:1 by service name and red-flagged a valid full receipt.
+
+FULL_PORTS = {"temporal": 27081, "ui": 27082, "console": 27083}
+
+
+def test_receipt_full_shape_passes_via_dsh_console_mapping():
+    """The production shape seen on 260929/261005: services declare dsh, the
+    port face holds only temporal/ui/console — this must pass (dsh→console)."""
+    r = uis.validate_stage_receipt(json.dumps({
+        "project": "ui-shot-t261005-06-g0",
+        "services": ["temporal", "dsh"], "ports": dict(FULL_PORTS)}))
+    assert r["project"] == "ui-shot-t261005-06-g0"
+
+
+@pytest.mark.parametrize("ports", [
+    {k: v for k, v in FULL_PORTS.items() if k != "console"},   # dsh bench misses its own port
+    {k: v for k, v in FULL_PORTS.items() if k != "temporal"},  # temporal bench misses its own port
+    {"temporal": FULL_PORTS["temporal"], "console": 0},        # console not a positive int
+    {"temporal": FULL_PORTS["temporal"], "console": -3},
+    {"temporal": FULL_PORTS["temporal"], "console": "27083"},  # string
+    {"temporal": FULL_PORTS["temporal"], "console": True},     # bool (int subclass)
+])
+def test_receipt_full_missing_required_port_still_red(ports):
+    """Fail-closed unchanged: a full receipt missing any required port stays red."""
+    with pytest.raises(uis.UiStageError):
+        uis.validate_stage_receipt(json.dumps({
+            "project": "p", "services": ["temporal", "dsh"], "ports": ports}))
+
+
+def test_receipt_phantom_dsh_key_stays_red():
+    """The phantom key must not slip through the new mapping: services declare
+    dsh while the port face holds only ports.dsh (a key the producer contract
+    never emits) → still red — proves the fix did not loosen into "any
+    same-named key passes"."""
+    with pytest.raises(uis.UiStageError) as ei:
+        uis.validate_stage_receipt(json.dumps({
+            "project": "p", "services": ["temporal", "dsh"],
+            "ports": {"temporal": 1, "dsh": 2}}))
+    assert "ports.console" in str(ei.value)
+
+
+def test_receipt_red_message_names_service_and_port_key():
+    """The red face names both sides: the missing port key is console, the
+    service demanding it is dsh."""
+    with pytest.raises(uis.UiStageError) as ei:
+        uis.validate_stage_receipt(json.dumps({
+            "project": "p", "services": ["temporal", "dsh"],
+            "ports": {"temporal": 1}}))
+    assert "ports.console" in str(ei.value) and "dsh" in str(ei.value)
+
+
+
 def test_receipt_legacy_no_services_requires_console():
     with pytest.raises(uis.UiStageError):
         uis.validate_stage_receipt(json.dumps({

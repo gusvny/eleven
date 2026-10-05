@@ -10,6 +10,10 @@
 //   node capture-lane.mjs --lane <worktree> --out <dir>   # 隔离台截图
 //   node capture-lane.mjs --selftest                      # 干跑：不起控制台/浏览器
 //
+// 输出契约（t261005-13，与 ui_evidence 证据闸同契）：全部 PNG 落 --out **顶层
+// （TOP LEVEL）**，非递归——证据闸只吃 <lane>/.sandbar/screenshots/ 顶层的
+// *.png，before/、after/ 等子目录里的截图一律算缺证据（host ruling 261005-B）。
+//
 // 前置（拒跑语义，t260829-07 方案 0.4）：
 //   - 泳道 lib/client.js 缺失 → 拒跑非零退出（指路先 build）；
 //   - build 陈旧（lib/client.js mtime 早于 src/client|src/host 最新 mtime）→ 拒跑。

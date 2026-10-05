@@ -110,14 +110,29 @@ def capture_stage_project(ticket: str, gen: int = 0) -> str:
     return name
 
 
+# service→port-key contract map (t261005-13): stage_docker receipts carry port
+# keys temporal/ui/console (_flip_lease_up); ports.dsh does not exist — the dsh
+# service exposes the console port (capture-lane reads st.ports.console,
+# ns_acquire reads ports.temporal; one contract repo-wide). Two incidents
+# (260929, 261005): the validator looked up ports.dsh 1:1 by service name and
+# red-flagged a valid full-bench receipt ("up 回执缺 ports.dsh"). Fix the  # copy-lang-allow:data — quotes the legacy red text verbatim
+# consumer mapping; the producer contract stands. Unknown service names keep
+# the 1:1 mapping (fail-closed: they demand their own port key).
+SERVICE_PORT_KEY = {"temporal": "temporal", "dsh": "console"}
+
+
 def validate_stage_receipt(text: str, services: Optional[List[str]] = None
                            ) -> Dict[str, Any]:
-    """up 回执校验（纯函数）：stdout 末个非空行=JSON 且 project 非空 str、
-    回执声明 services 里每个服务的端口都是正 int（services="temporal" 的台
-    没有 console——按需校验，不把 full 台的端口面强加给精简台；回执没带
-    services 列表时保守要求 console，兼容旧格式）。畸形=UiStageError（契约
-    面直红——回执是我们自己写给消费者的，交付前必须自证，不能等消费侧
-    ENV_FAIL 才暴露）。"""
+    """Boot-receipt check (pure function): last non-blank stdout line = JSON
+    with a non-empty str project, and every declared service maps through
+    SERVICE_PORT_KEY to a positive-int port (dsh→console; a services="temporal"
+    bench has no console — validate on demand, never force the full-bench port
+    face onto a slim bench; a receipt without a services list conservatively
+    requires console, for legacy-format compatibility). Malformed =
+    UiStageError (contract red — we write this receipt for our own consumers;
+    it must prove itself before delivery, not surface as a consumer-side
+    ENV_FAIL). Fail-closed is unchanged: a full-bench receipt still missing
+    ports.console or ports.temporal stays red (t261005-13 regression pins)."""
     lines = [ln for ln in str(text or "").strip().splitlines() if ln.strip()]
     if not lines:
         raise UiStageError("up 回执为空（stdout 无输出）")
@@ -135,9 +150,12 @@ def validate_stage_receipt(text: str, services: Optional[List[str]] = None
     if not isinstance(wanted, list) or not wanted:
         wanted = list(services) if services else ["console"]
     for svc in wanted:
-        v = ports.get(str(svc))
+        port_key = SERVICE_PORT_KEY.get(str(svc), str(svc))
+        v = ports.get(port_key)
         if not isinstance(v, int) or isinstance(v, bool) or v <= 0:
-            raise UiStageError("up 回执缺 ports.%s（正整数）：%r" % (svc, receipt))
+            raise UiStageError("up receipt missing ports.%s (required by "
+                               "service %s, positive int): %r"
+                               % (port_key, svc, receipt))
     return receipt
 
 

@@ -4,6 +4,12 @@ UI 改动票的验收证据：headless 浏览器截控制台关键视图，落�
 （旧泳道 `.suyou/screenshots/` 粘滞保留，naming-compat），审读判定的诚实口径见
 「流水线接线」节：截图**存在性**由机械闸核验，**像素质量归人门**。
 
+**输出布局契约（t261005-13，与 ui_evidence 证据闸同契）**：全部 PNG 落
+`.sandbar/screenshots/` **顶层（TOP LEVEL）**，证据闸只吃顶层**非递归**的
+`*.png`——`before/`、`after/` 等子目录里的截图一律算缺证据
+（host ruling 261005-B；t261005-04/05 实证）。capture.mjs / capture-lane.mjs
+的 `--out` 即目标目录本身，本通道不产生任何子目录。
+
 ## 用法
 
 ```bash
