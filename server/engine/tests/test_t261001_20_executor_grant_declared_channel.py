@@ -24,6 +24,7 @@ gen0 教训（集测 6 红实证）：按「声明了 caller_project」设闸会
 
 全程零 Temporal/零网络/零 git；声明根经 SANDBAR_PROJECTS_DIR 注入临时目录。
 """
+import asyncio
 import json
 import os
 
@@ -264,20 +265,20 @@ def test_client_gate_session_scoped(grants_root, monkeypatch):
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {},
                                          "executor_sessions": ["sess-exec"]})
     # 夹具形（arg + 未点名会话）：放行零键
-    g = cl._executor_grant_gate({"value": "sandbar", "src": "arg", "channel_src": "arg"},
-                                "sign", "sandbar")
+    g = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": "arg", "channel_src": "arg"},
+                                "sign", "sandbar"))
     assert g["err"] is None and g["keys"] == {}
     # 点名会话：结构化拒收
     monkeypatch.setenv("DSH_SESSION_ID", "sess-exec")
-    g2 = cl._executor_grant_gate({"value": "sandbar", "src": "arg", "channel_src": "arg"},
-                                 "sign", "sandbar")
+    g2 = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": "arg", "channel_src": "arg"},
+                                 "sign", "sandbar"))
     assert g2["err"] is not None and g2["err"]["kind"] == "executor_grant_refused"
     assert not g2["keys"]
     # 授予后放行并带溯源键
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {"sign": True},
                                          "executor_sessions": ["sess-exec"]})
-    g3 = cl._executor_grant_gate({"value": "sandbar", "src": "arg", "channel_src": "arg"},
-                                 "sign", "sandbar")
+    g3 = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": "arg", "channel_src": "arg"},
+                                 "sign", "sandbar"))
     assert g3["err"] is None
     assert g3["keys"]["executor_grant_op"] == "sign"
     assert "grants.sign" in g3["keys"]["executor_grant_source"]
@@ -379,3 +380,13 @@ def test_fixture_calls_not_gated_under_harness_session_env(grants_root):
             os.environ.pop("DSH_SESSION_ID", None)
         else:
             os.environ["DSH_SESSION_ID"] = monkey_env_back
+
+
+@pytest.fixture(autouse=True)
+def _engine_submit_stub(monkeypatch):
+    """t261005-12: gate recording now runs in the ENGINE process — install the
+    in-process engine stand-in per test (production perform_delivery dispatch,
+    rows land via the real record_from_gate; zero Temporal). Single source:
+    test_t261005_12_gate_engine_recording.install_fake_engine."""
+    from test_t261005_12_gate_engine_recording import install_fake_engine
+    install_fake_engine(monkeypatch)

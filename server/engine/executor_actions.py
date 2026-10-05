@@ -9,6 +9,18 @@
 （27/25000 行带键、512KB 窗 4.5 分钟、邻居淹没、行形漂移打碎读方，见票面）。
 
 写入点：client._executor_grant_gate（执行器授权闸唯一漏斗，三处调用源共用）。
+t261005-12: the row is now written by the ENGINE process — the gate submits via
+the deliver face actions-record (executor_delivery) and the worker side still
+runs this module's record_from_gate (the single row-boundary enforcement point).
+Reason: the executor session is a workspace-write sandbox and
+<projects_root>/<key>/ledger/ sits outside it, so in-process direct writes
+always hit PermissionError and fail open, silently (the live 261005 empty-panel
+root cause). Companion named last-failure face: on a recording failure the
+engine writes executor-actions.last-failure.json at the PROJECT ROOT
+(last_failure_path/record_last_failure, last failure only, atomic overwrite; not
+inside ledger/ because that directory is the usual thing that is unwritable) —
+readable by the panel/watchdog, so a failure no longer lives only on the
+caller's stderr.
 行边界（方案 gen1 C3 裁决）：只记「闸真实裁决」——enforced 放行 + 一切拒收
 （元权限反锁/面外 op/声明缺席畸形/未授予）；豁免通道放行（enforced=false，
 judge_core 声明读取前即返回）**不落行**——票面定义「一行一次 gated write
@@ -143,6 +155,45 @@ def actions_path(project: str, actions_dir: Optional[Path] = None) -> Path:
 def gaps_path(path: Path) -> Path:
     """gaps 旁账路径（status face）：账本文件同目录固定名，平铺/缺省两形状同名。"""
     return path.parent / GAPS_BASENAME
+
+
+FAILURE_BASENAME = 'executor-actions.last-failure.json'
+
+
+def last_failure_path(project: str) -> Path:
+    """t261005-12 named last-failure face: `<projects_root>/<project>/`
+    executor-actions.last-failure.json (project root, NOT the ledger/ subdir —
+    a failure usually means the ledger directory itself is unwritable, so the
+    readable marker must sit where the panel/watchdog can still reach it)."""
+    return _projects_root() / str(project or '') / FAILURE_BASENAME
+
+
+def record_last_failure(project: str, why: str, error: str = "",
+                        op: str = "", ticket: str = "") -> None:
+    """Write the last-recording-failure marker (t261005-12 requirement 2: a
+    recording failure must be visible to a READER, not only to the caller's
+    stderr — the pre-ticket caller process could not reach the ledger directory
+    at all, not even for the gaps sidecar, so the panel only saw the empty
+    state). Called in the ENGINE process (gate recording now lands via the
+    deliver face actions-record), so this write is reachable. Atomic
+    tmp+rename, single marker keeping the LAST failure only; a marker write
+    failure is announced on stderr — this face itself never raises and never
+    moves the write verdict."""
+    global WRITE_FAILURES
+    row = {'v': SCHEMA_V, 'at': int(time.time() * 1000),
+           'project': str(project or ''), 'op': str(op or ''),
+           'ticket': str(ticket or ''), 'why': str(why or '')[:500],
+           'error': str(error or '')[:500]}
+    fp = last_failure_path(project)
+    tmp = fp.with_name(fp.name + '.tmp')
+    try:
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + '\n')
+        os.replace(tmp, fp)
+    except Exception as e:      # noqa: BLE001 — best-effort marker face; named, then swallowed
+        WRITE_FAILURES += 1
+        _announce(e, project, 'last-failure marker write failed at %s' % fp)
 
 
 def idem_key(project: str, op: str, ticket: str, session: str, channel: str,
@@ -341,14 +392,19 @@ def record_executor_action(project: str, op: str, ticket: str = "",
         return {'appended': True, 'path': str(path), 'bytes': len(data)}
     except Exception as e:      # noqa: BLE001——fail-open 且 LOUD：绝不向闸抛
         WRITE_FAILURES += 1
+        err = '%s: %s' % (type(e).__name__, e)
         _announce(e, key, 'append to %s failed' % path)
+        record_last_failure(key, 'append failed at %s' % path, err,
+                            op=str(op or ''), ticket=str(ticket or ''))
         try:
             _write_gap_record(path, key, '%s: %s' % (type(e).__name__, e))
         except Exception as e2:  # noqa: BLE001——gaps 再失败：再点名后吞掉（R5）
             WRITE_FAILURES += 1
             _announce(e2, key, 'gap record failed at %s' % gaps_path(path))
-        return {'appended': False, 'failed': True,
-                'error': '%s: %s' % (type(e).__name__, e)}
+            record_last_failure(key, 'gap record failed at %s' % gaps_path(path),
+                                '%s: %s' % (type(e2).__name__, e2),
+                                op=str(op or ''), ticket=str(ticket or ''))
+        return {'appended': False, 'failed': True, 'error': err}
 
 
 def record_from_gate(op: str, key: str, ticket: str, verdict: Dict[str, Any],

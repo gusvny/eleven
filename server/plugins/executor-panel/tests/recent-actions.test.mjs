@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { assert, done, memLedgerIo } from './lib.mjs'
 import {
   MAX_ROWS, ACTION_BY_OP, executorActionsFile, executorActionsGapsFile,
-  parseActionLine, readRecentActions,
+  parseActionLine, readRecentActions, executorActionsFailureFile,
 } from '../src/host/recent-actions.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -107,5 +107,39 @@ for (const op of ['sign', 'send-back', 'rerun', 'open-ticket', 'pause-resume', '
   assert(ACTION_BY_OP[op] !== undefined, 'grant-op ' + op + ' has a display name')
 }
 n += 1
+
+// ---- t261005-12: the engine-written last-failure marker face (reader-visible
+// recording failure; malformed marker = absent, never a crash, never fabricated) ----
+const MARKER = join('/iso-ledger', 'executor-actions.last-failure.json')
+const WHY = 'append failed at /iso-ledger/sandbar.jsonl'
+const ERR = 'OSError: Errno 1'
+const okMarker = JSON.stringify({ at: 1_700_000_000_000, why: WHY, error: ERR })
+
+// F1 an empty ledger WITH a marker is never plain silence: the failure rides the
+// ok:false read (the empty-state face) AND the ok:true read
+const f1 = readRecentActions(memLedgerIo({ [MARKER]: okMarker }), ENV, 'sandbar')
+assert(f1.ok === false && f1.last_record_failure && f1.last_record_failure.why === WHY
+  && f1.last_record_failure.error === ERR,
+  'empty ledger + marker: the failure surfaces on the ok:false read (t261005-12 R1)')
+const f1b = readRecentActions(memLedgerIo({ [SRC]: realRows, [MARKER]: okMarker }), ENV, 'sandbar')
+assert(f1b.ok === true && f1b.actions.length > 0 && f1b.last_record_failure
+  && f1b.last_record_failure.why === WHY,
+  'rows + marker: rows served unchanged AND the failure stays visible (R4)')
+n += 2
+
+// F2 marker path shapes mirror the engine (flat seam = same dir; default = project root)
+assert(executorActionsFailureFile(ENV, 'sandbar', SRC) === MARKER,
+  'flat seam: the marker sits next to the ledger (engine last_failure_path mirror)')
+assert(executorActionsFailureFile({ SANDBAR_PROJECTS_DIR: '/prj' }, 'sandbar', '') === '/prj/sandbar/executor-actions.last-failure.json',
+  'default shape: the marker sits at the PROJECT ROOT (not ledger/)')
+n += 2
+
+// F3 malformed markers (bad JSON / array / scalar / no why+error) read as absent
+for (const [name, bad] of [['not-json', '{oops'], ['array', '[]'], ['scalar', '42'], ['empty-why-error', '{"at":1}']]) {
+  const r = readRecentActions(memLedgerIo({ [SRC]: realRows, [MARKER]: bad }), ENV, 'sandbar')
+  assert(r.ok === true && r.last_record_failure === null,
+    'malformed marker (' + name + ') treated as absent — no crash, no fabricated failure')
+}
+n += 3
 
 done(n)

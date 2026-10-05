@@ -783,6 +783,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(a && a.ok===true && a.gaps_recent>0){
       html += '<div class="act" style="border:0"><span class="say muted">The engine failed to record ' + esc(a.gaps_recent) + ' action(s). See ' + esc(a.gaps_file||'the gap file') + '.</span></div>';
     }
+    // t261005-12: the engine-written last-failure marker (last_record_failure) is
+    // visible here — an empty record with a marker present = the failure is named
+    // explicitly, never the silent "no actions" empty state (this ticket's defect
+    // face).
+    if(a && a.last_record_failure){
+      var lf = a.last_record_failure;
+      html += '<div class="act" style="border:0"><span class="say muted">The engine failed to record the latest action at ' + esc(localDateTime(lf.at)) + ': ' + esc(lf.why||'no reason recorded') + (lf.error ? ' (' + esc(lf.error) + ')' : '') + '.</span></div>';
+    }
     el('actList').innerHTML = html;
   }
 

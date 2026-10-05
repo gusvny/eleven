@@ -17,6 +17,7 @@
 
 全程零 Temporal/零网络/零 git；声明根经 SANDBAR_PROJECTS_DIR 注入临时目录。
 """
+import asyncio
 import json
 import os
 
@@ -344,29 +345,29 @@ def test_client_gate_only_cwd_channel(grants_root, monkeypatch):
     monkeypatch.delenv(shared.CALLER_SURFACE_ENV, raising=False)
     # 声明通道无会话点名：闸不设（err=None 且不带执行器键）
     for channel in ("arg", "env"):
-        g = cl._executor_grant_gate({"value": "sandbar", "src": channel, "channel_src": channel},
-                                    "sign", "sandbar")
+        g = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": channel, "channel_src": channel},
+                                    "sign", "sandbar"))
         assert g["err"] is None and g["keys"] == {}, channel
     # 未声明：闸不设
     for channel in ("none", ""):
-        g = cl._executor_grant_gate({"value": "sandbar", "src": channel, "channel_src": channel},
-                                    "sign", "sandbar")
+        g = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": channel, "channel_src": channel},
+                                    "sign", "sandbar"))
         assert g["err"] is None and g["keys"] == {}, channel
     # lane-agent surface：闸不设（零回归红线）
     monkeypatch.setenv(shared.CALLER_SURFACE_ENV, shared.CALLER_SURFACE_LANE_AGENT)
-    g = cl._executor_grant_gate({"value": "sandbar", "src": "env", "channel_src": "env"},
-                                "sign", "sandbar")
+    g = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": "env", "channel_src": "env"},
+                                "sign", "sandbar"))
     assert g["err"] is None and g["keys"] == {}
     monkeypatch.delenv(shared.CALLER_SURFACE_ENV)
     # cwd 通道：未授予=结构化拒收（点名 kind）
-    g = cl._executor_grant_gate({"value": "sandbar", "src": "cwd", "channel_src": "cwd"},
-                                "sign", "sandbar")
+    g = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": "cwd", "channel_src": "cwd"},
+                                "sign", "sandbar"))
     assert g["err"] is not None and g["err"]["kind"] == "executor_grant_refused"
     assert eg.DECL_FILE in g["err"]["error"] and "grants.sign" in g["err"]["error"]
     # cwd 通道：授予后放行并带溯源观测键
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {"sign": True}})
-    g2 = cl._executor_grant_gate({"value": "sandbar", "src": "cwd", "channel_src": "cwd"},
-                                 "sign", "sandbar")
+    g2 = asyncio.run(cl._executor_grant_gate({"value": "sandbar", "src": "cwd", "channel_src": "cwd"},
+                                 "sign", "sandbar"))
     assert g2["err"] is None
     assert g2["keys"]["executor_grant_op"] == "sign"
     assert "grants.sign" in g2["keys"]["executor_grant_source"]
@@ -407,3 +408,13 @@ def test_ticket_resolve_caller_returns_pair(ticket_mod, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     k, src = ticket_mod._resolve_caller({"caller_project": "sandbar"})
     assert (k, src) == ("sandbar", "arg")
+
+
+@pytest.fixture(autouse=True)
+def _engine_submit_stub(monkeypatch):
+    """t261005-12: gate recording now runs in the ENGINE process — install the
+    in-process engine stand-in per test (production perform_delivery dispatch,
+    rows land via the real record_from_gate; zero Temporal). Single source:
+    test_t261005_12_gate_engine_recording.install_fake_engine."""
+    from test_t261005_12_gate_engine_recording import install_fake_engine
+    install_fake_engine(monkeypatch)

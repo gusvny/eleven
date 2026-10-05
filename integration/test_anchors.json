@@ -2,8 +2,9 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 208,
-   "scenarios": 505  },
+   "engine_tests": 211,
+   "scenarios": 514
+  },
   "vocab": [
    "behaviour",
    "contract",
@@ -1056,9 +1057,24 @@
   },
   "server/engine/tests/test_t261005_03_named_read_degrade.py": {
    "anchor": "contract"
+  },
+  "server/engine/tests/test_t261005_12_gate_engine_recording.py": {
+   "anchor": "contract",
+   "note": "t261005-12 gate-recording routing contract: the gate submits actions-record through the _submit_engine_delivery seam, the production delivery dispatch lands the row, an exempt pass submits nothing, every recording failure is named in record_note, and the engine-written last-failure marker keeps the last failure only",
+   "sync_path": ""
   }
  },
  "scenarios": {
+  "integration/t261005-12/sc_gate_recording_engine_route.py": {
+   "anchor": "contract",
+   "note": "t261005-12 routing contract: caller writes no ledger row, engine-side delivery dispatch lands the row, fail-open named failure, exempt zero-row, last-failure marker face",
+   "sync_path": ""
+  },
+  "integration/t261005-12/sc_recent_actions_failure_face.mjs": {
+   "anchor": "contract",
+   "note": "t261005-12 reader face: last-failure marker surfaces through the panel actions read; malformed marker treated absent; rows and failure both visible; read-only red line",
+   "sync_path": ""
+  },
   "integration/t261005-04/sc_ticket_detail_overlay.mjs": {
    "anchor": "behaviour",
    "note": "",

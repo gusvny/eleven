@@ -16,6 +16,15 @@ Faces (fixed, fail-closed — anything else is a named refusal):
   actions-record  record one gated-write verdict via executor_actions.record_from_gate
   grants-audit    append one grants audit row via executor_grants.append_audit
 
+Callers (t261005-12): the executor grant gate (client._executor_grant_gate ->
+_record_gate_engine_side -> _submit_engine_delivery) now submits face
+`actions-record` so the verdict row is written by THIS engine process — the
+sandboxed executor session cannot reach the project ledger (live 261005: every
+in-process append failed silently, the Recent-actions pane stayed empty). The
+CLI subcommand `deliver` keeps its own env>cwd identity resolution and
+delegates submission to the same client helper. Body keys for
+`actions-record`: {op, ticket, verdict, channel}.
+
 Hard boundary: no self-authorization. This face performs no grant judgment,
 never touches the declaration file, and cannot widen to non-ledger files.
 Authority still comes only from the host (Grants page) or an on-record anchor.
@@ -165,9 +174,19 @@ def perform_delivery(payload: Any, now_ms: int,
     key = str(payload.get("key") or "")
     project = str(identity.get("project") or "")
     session = str(identity.get("session") or "")
-    if not project or not session:
+    if not project:
         return {"ok": False, "field": "identity",
-                "error": "identity block must carry a non-empty project and session "
+                "error": "identity block must carry a non-empty project "
+                         "(who, and the derivation source)"}
+    if not session and face != "actions-record":
+        # t261005-12: the gate verdict row keeps the pre-ticket session semantics —
+        # the session column is best-effort identity (the old in-process
+        # record_from_gate wrote '' when no env session existed, and the row was
+        # still the gate's on-record verdict). Refusing the row for an absent
+        # session would silently unrecord every sessionless gated write. Every
+        # other face keeps the strict non-empty session rule.
+        return {"ok": False, "field": "identity",
+                "error": "identity block must carry a non-empty session "
                          "(who, and the derivation source)"}
     if not key:
         return {"ok": False, "field": "key", "error": "delivery target project key missing"}

@@ -138,6 +138,27 @@ for k in ("SANDBAR_CALLER_PROJECT", "SANDBAR_CALLER_IDENTITY_SRC", "SANDBAR_CALL
 
 import client, executor_grants, executor_requests
 
+# t261005-12 arbitrate adaptation: the gate funnel is async now and the row
+# lands via the ENGINE delivery face, not in-process (the caller-side append is
+# the sandbox-blocked path this ticket closes). Assertions unchanged: the gate
+# is awaited, and the engine-side recording is executed through the PRODUCTION
+# delivery dispatch (executor_delivery.perform_delivery) — the same engine half
+# the t261005-12 routing scenario pins; the real Temporal transport stays the
+# arbitrate-stage live-path proof.
+import asyncio as _asyncio
+import time as _time
+import executor_delivery as _executor_delivery
+
+def gate(*a, **k):
+    return _asyncio.run(client._executor_grant_gate(*a, **k))
+
+def _local_engine_delivery(identity, face, body):
+    payload = _executor_delivery.delivery_payload(
+        face, str((identity or {}).get("project") or ""), identity, body)
+    return _executor_delivery.perform_delivery(payload, int(_time.time() * 1000))
+
+client._submit_engine_delivery = _local_engine_delivery
+
 out = {}
 def rows():
     p = os.path.join(ROOT, KEY, "ledger", "executor-actions.jsonl")
@@ -152,7 +173,7 @@ i1 = client._caller_identity({})
 out["s1_src"] = i1.get("src")
 out["s1_value"] = i1.get("value")
 out["s1_class"] = i1.get("identity_class")
-g1 = client._executor_grant_gate(dict(i1), "sign", KEY, ticket="t31a")
+g1 = gate(dict(i1), "sign", KEY, ticket="t31a")
 out["s1_err"] = g1.get("err")
 out["s1_keys"] = g1.get("keys")
 p, rs = rows()
@@ -160,7 +181,7 @@ out["s1_rows"] = rs
 out["s1_path"] = p
 
 # S2 refusal through the same seam
-g2 = client._executor_grant_gate(dict(i1), "cancel", KEY, ticket="t31a")
+g2 = gate(dict(i1), "cancel", KEY, ticket="t31a")
 out["s2_err"] = g2.get("err")
 _, rs2 = rows()
 out["s2_refused"] = [r for r in (rs2 or []) if r.get("decision") == "refused"]
@@ -169,7 +190,7 @@ out["s2_refused"] = [r for r in (rs2 or []) if r.get("decision") == "refused"]
 os.environ.pop("DSH_SESSION_ID", None)
 i3 = client._caller_identity({})
 out["s3_src"] = i3.get("src")
-g3 = client._executor_grant_gate(dict(i3), "sign", KEY, ticket="t31b")
+g3 = gate(dict(i3), "sign", KEY, ticket="t31b")
 out["s3_err"] = g3.get("err")
 out["s3_keys_empty"] = g3.get("keys") == {}
 _, rs3 = rows()
@@ -179,7 +200,7 @@ out["s3_total"] = len(rs3 or [])
 os.environ["DSH_SESSION_ID"] = STRANGER
 i4 = client._caller_identity({})
 out["s4_src"] = i4.get("src")
-g4 = client._executor_grant_gate(dict(i4), "sign", KEY, ticket="t31b")
+g4 = gate(dict(i4), "sign", KEY, ticket="t31b")
 out["s4_err"] = g4.get("err")
 out["s4_keys_empty"] = g4.get("keys") == {}
 _, rs4 = rows()
@@ -193,7 +214,7 @@ if write_malformed:
 os.environ["DSH_SESSION_ID"] = SESSION
 i5 = client._caller_identity({})
 out["s5_src"] = i5.get("src")
-g5 = client._executor_grant_gate(dict(i5), "sign", KEY, ticket="t31c")
+g5 = gate(dict(i5), "sign", KEY, ticket="t31c")
 out["s5_err"] = g5.get("err")
 out["s5_err_kind"] = (g5.get("err") or {}).get("kind") if isinstance(g5.get("err"), dict) else None
 out["s5_keys_empty"] = g5.get("keys") == {}

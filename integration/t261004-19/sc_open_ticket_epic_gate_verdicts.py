@@ -137,6 +137,23 @@ os.environ.pop("SANDBAR_CALLER_SURFACE", None)
 
 import client, executor_grants
 
+# t261005-12 arbitrate adaptation: the gate funnel is async (awaited above) and
+# the audit rows land via the ENGINE delivery face, not in-process — the
+# caller-side append is the sandbox-blocked path this ticket closes. The
+# engine-side recording is executed through the PRODUCTION delivery dispatch
+# (executor_delivery.perform_delivery); assertions unchanged. The real Temporal
+# transport stays the arbitrate-stage live-path proof.
+import time as _time19
+import executor_delivery as _executor_delivery19
+
+def _local_engine_delivery19(identity, face, body):
+    payload = _executor_delivery19.delivery_payload(
+        face, str((identity or {}).get("project") or ""), identity, body)
+    return _executor_delivery19.perform_delivery(payload, int(_time19.time() * 1000))
+
+client._submit_engine_delivery = _local_engine_delivery19
+
+
 out = {"gate_legs": {}, "decl_legs": {}, "rows": None, "face_absent": []}
 
 def gate(op, **kw):
@@ -144,8 +161,11 @@ def gate(op, **kw):
     not accept the context yet, record the absent face and degrade to a plain
     call so the battery keeps producing data for the other legs."""
     try:
-        return client._executor_grant_gate({"src": "arg", "value": KEY}, op, KEY,
-                                           ticket=kw.pop("ticket", "t1"), **kw)
+        # t261005-12: the gate funnel records through the engine, so it is async
+        # now (signature adaptation only — assertions untouched).
+        import asyncio
+        return asyncio.run(client._executor_grant_gate({"src": "arg", "value": KEY}, op, KEY,
+                                                       ticket=kw.pop("ticket", "t1"), **kw))
     except TypeError as e:
         out["face_absent"].append(str(e))
         return {"err": "FACE_ABSENT", "keys": {}}
@@ -230,8 +250,10 @@ os.environ["SANDBAR_CALLER_IDENTITY_SRC"] = "env"
 ident_env = {"src": "env", "value": KEY}
 try:
     # L9-allow: expects-refusal (gate verdict probe, not a bare creation)
-    e1 = client._executor_grant_gate(dict(ident_env), "ticket-start", KEY, ticket="t7", epic="", write_set=[])
-    e2 = client._executor_grant_gate(dict(ident_env), "ticket-start", KEY, ticket="t7", epic="localization", write_set=["server/engine/executor_grants.py"])
+    # t261005-12: the funnel is async now (signature adaptation only).
+    import asyncio as _asyncio_a7
+    e1 = _asyncio_a7.run(client._executor_grant_gate(dict(ident_env), "ticket-start", KEY, ticket="t7", epic="", write_set=[]))
+    e2 = _asyncio_a7.run(client._executor_grant_gate(dict(ident_env), "ticket-start", KEY, ticket="t7", epic="localization", write_set=["server/engine/executor_grants.py"]))
     G["a7"] = [not e1.get("err"), not e2.get("err"), str(e1.get("err")), str(e2.get("err"))]
 except TypeError as e:
     out["face_absent"].append("a7:" + str(e))

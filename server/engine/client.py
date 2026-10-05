@@ -677,9 +677,9 @@ def _with_channel(identity: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
-                         ticket: str = "", epic: str = "", write_set=None,
-                         open_count: int = 0) -> Dict[str, Any]:
+async def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
+                               ticket: str = "", epic: str = "", write_set=None,
+                               open_count: int = 0) -> Dict[str, Any]:
     """执行器授权闸（t260930-14；t261001-20 判据=受信会话身份）：受闸由
     executor_grants.is_executor_channel 判——cwd 推导（watchdog 执行器会话），或
     声明通道（arg/env-external）且调用方会话 id 被项目声明 executor_sessions 点名。
@@ -688,7 +688,11 @@ def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
     点名的普通调用=集成夹具/light-lane）一律放行不设闸——零回归红线。返回
     {"err": receipt|None, "keys": identity keys merged into the success receipt,
      "enforced": whether the gate actually judged,
-     "provenance": the epic-level verdict provenance (with the open-ticket context)}.
+     "provenance": the epic-level verdict provenance (with the open-ticket context),
+     "record_note": named recording-failure note, present only on failure
+     (t261005-12: the row is written by the ENGINE process via
+     _record_gate_engine_side; this note is the caller-side receipt face when
+     the submission is refused — it names the exact check that failed)}.
 
     t261004-19: the open-ticket judgment takes the epic/write_set/open_count
     context — when the verb-level switch (grants.open-ticket) passes on an enforced
@@ -698,10 +702,17 @@ def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
     row + executor-grants audit row). open_count comes from the create face (the
     Temporal per-epic open count; the funnel itself does no counting IO).
 
-    t261004-11：每次【闸真实裁决】（enforced 放行/一切拒收）后向项目自己的
-    executor-actions 账落一行（record_from_gate；豁免放行不落行）。记账是尽力面：
-    回执永不读它的返回值，记账失败也绝不改变闸结局（fail-open 且 LOUD 的保证面
-    在 executor_actions 内部）。"""
+    t261004-11: every REAL gate verdict (an enforced pass and every refusal) lands
+    one row in the project executor-actions ledger. t261005-12: the row is now
+    written by the ENGINE process (_record_gate_engine_side -> deliver face
+    actions-record -> record_from_gate) — the executor session's workspace-write
+    sandbox cannot reach <projects_root>/<key>/ledger/, so the pre-ticket
+    in-process append failed on every attempt, silently. The row boundary is
+    unchanged (record_from_gate stays the single enforcement point; an exempt
+    pass writes no row AND starts no delivery). Recording stays best-effort:
+    the receipt never reads its return value, a recording failure never moves
+    the gate verdict (fail-open; the failure is named in the receipt's
+    record_note)."""
     verdict = executor_grants.judge(_with_channel(identity), op, key)
     channel = _executor_channel(identity)
     if verdict.get("allowed") and verdict.get("enforced") \
@@ -712,45 +723,50 @@ def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
         scope = executor_grants.judge_open_ticket(
             executor_grants.load_declaration(str(key or "")), str(key or ""),
             epic, write_set or [], int(open_count or 0))
-        try:
-            executor_actions.record_from_gate(op=str(op or ""), key=str(key or ""),
-                                              ticket=str(ticket or ""),
-                                              verdict=scope, channel=channel)
-        except Exception as e:  # noqa: BLE001 — bookkeeping is best-effort; a crash never moves the write verdict
-            executor_actions.WRITE_FAILURES += 1
-            executor_actions._announce(e, str(key or ""),
-                                       "record_from_gate(scope) raised (recording skipped)")
+        # Engine-process recording (t261005-12): best-effort, never moves the verdict.
+        record_note = await _record_gate_engine_side(identity, str(op or ""),
+                                                     str(key or ""), str(ticket or ""),
+                                                     scope, channel)
         prov = scope.get("provenance") or {}
         if not scope.get("allowed"):
-            return {"err": _err(scope.get("why") or "executor ticket-start refused", KIND_EXECUTOR_GRANT_REFUSED),
-                    "keys": {}, "enforced": True, "provenance": prov}
+            out = {"err": _err(scope.get("why") or "executor ticket-start refused", KIND_EXECUTOR_GRANT_REFUSED),
+                   "keys": {}, "enforced": True, "provenance": prov}
+            if record_note:
+                out["record_note"] = record_note
+            return out
         prov_keys = prov.get("keys") or {}
-        return {"err": None, "enforced": True, "provenance": prov,
-                "keys": {"executor_grant_op": "open-ticket",
-                         "executor_grant_source": prov_keys.get("open-ticket", ""),
-                         "executor_open_epic": scope.get("epic", ""),
-                         "executor_open_ticket_source": prov_keys.get(
-                             "open_ticket_epics.%s" % scope.get("epic", ""), ""),
-                         "executor_channel": channel}}
-    try:
-        executor_actions.record_from_gate(op=str(op or ""), key=str(key or ""),
-                                          ticket=str(ticket or ""),
-                                          verdict=verdict, channel=channel)
-    except Exception as e:  # noqa: BLE001——记账是尽力面：崩了也不许动写结局（LOUD 兜底）
-        executor_actions.WRITE_FAILURES += 1
-        executor_actions._announce(e, str(key or ""),
-                                   "record_from_gate raised (recording skipped)")
+        out = {"err": None, "enforced": True, "provenance": prov,
+               "keys": {"executor_grant_op": "open-ticket",
+                        "executor_grant_source": prov_keys.get("open-ticket", ""),
+                        "executor_open_epic": scope.get("epic", ""),
+                        "executor_open_ticket_source": prov_keys.get(
+                            "open_ticket_epics.%s" % scope.get("epic", ""), ""),
+                        "executor_channel": channel}}
+        if record_note:
+            out["record_note"] = record_note
+        return out
+    # Engine-process recording (t261005-12): best-effort, never moves the verdict;
+    # an exempt pass short-circuits inside the helper (zero row, zero workflow).
+    record_note = await _record_gate_engine_side(identity, str(op or ""),
+                                                 str(key or ""), str(ticket or ""),
+                                                 verdict, channel)
     if not verdict.get("allowed"):
-        return {"err": _err(verdict.get("why") or "执行器授权拒收", KIND_EXECUTOR_GRANT_REFUSED),
-                "keys": {}, "enforced": False}
+        out = {"err": _err(verdict.get("why") or "executor grant refused (gate)", KIND_EXECUTOR_GRANT_REFUSED),
+               "keys": {}, "enforced": False}
+        if record_note:
+            out["record_note"] = record_note
+        return out
     if not verdict.get("enforced"):
         return {"err": None, "keys": {}, "enforced": False}
     # 通道来源观测键（与 identity_receipt injected_by 同档：尽力面标签，非安全断言）
     prov = verdict.get("provenance") or {}
-    return {"err": None, "enforced": True, "provenance": prov,
-            "keys": {"executor_grant_op": verdict.get("grant_op"),
-                     "executor_grant_source": (prov.get("keys") or {}).get(str(verdict.get("grant_op") or "")) or "",
-                     "executor_channel": channel}}
+    out = {"err": None, "enforced": True, "provenance": prov,
+           "keys": {"executor_grant_op": verdict.get("grant_op"),
+                    "executor_grant_source": (prov.get("keys") or {}).get(str(verdict.get("grant_op") or "")) or "",
+                    "executor_channel": channel}}
+    if record_note:
+        out["record_note"] = record_note
+    return out
 
 
 #: Terminal execution statuses (Temporal ExecutionStatus as
@@ -856,7 +872,7 @@ async def _write_gate(handle: Any, tid: str, args: Dict[str, Any],
         return {"err": _gate_refusal(verdict, identity,
                                      context="（目标票 %s，属项目 %s）" % (tid, target or "（无项目面）"))}
     # t260930-14：执行器授权闸（仅 cwd 通道设闸；其余通道零行为变化）。
-    egate = _executor_grant_gate(identity, op_label, target, ticket=str(tid or ""))
+    egate = await _executor_grant_gate(identity, op_label, target, ticket=str(tid or ""))
     if egate["err"] is not None:
         return {"err": egate["err"]}
     keys = caller_gate.identity_receipt(identity, verdict)
@@ -927,7 +943,7 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
         return _gate_refusal(verdict, identity,
                              context="（目标 %s，属项目 %s）" % (wf_id, target or "（无项目面）"))
     # t260930-14：裸 cancel 的执行器授权闸（仅 cwd 通道设闸）。
-    egate = _executor_grant_gate(identity, "cancel", target, ticket=str(wf_id or ""))
+    egate = await _executor_grant_gate(identity, "cancel", target, ticket=str(wf_id or ""))
     if egate["err"] is not None:
         return egate["err"]
     gate = {"verdict": verdict, "notice": str(verdict.get("notice") or ""),
@@ -1445,7 +1461,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     open_count, count_err = await _executor_open_epic_count(project, epic)
     if count_err:
         return _err(count_err, KIND_EXECUTOR_GRANT_REFUSED)
-    egate = _executor_grant_gate(identity, "ticket-start", project, ticket=str(tid or ""),
+    egate = await _executor_grant_gate(identity, "ticket-start", project, ticket=str(tid or ""),
                                  epic=epic, write_set=[str(x) for x in (args.get("write_set") or [])],
                                  open_count=open_count)
     if egate["err"] is not None:
@@ -3692,53 +3708,106 @@ async def cmd_template_faces(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
-async def cmd_deliver(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Engine-process delivery of an executor project-ledger write (t261004-27;
-    host decision 261004 option 1). The caller only SUBMITS: identity is resolved
-    once here, caller-side (env > cwd, repo tree excluded — never declared by an
-    argument), shipped in the payload's identity block, and the ledger append is
-    performed by the ENGINE worker (executor_delivery.perform_delivery), which
-    can reach ~/.sandbar/projects/<key>/ where this session's sandbox cannot
-    (executor request -0020). Every refusal is named; `face=request` has NO
-    in-process fallback — an engine-unreachable refusal names the transport
-    error verbatim instead of re-creating the sandbox-blocked local append.
+async def _record_gate_engine_side(gate_identity: Dict[str, Any], op: str, key: str,
+                                   ticket: str, verdict: Dict[str, Any],
+                                   channel: str) -> Optional[str]:
+    """Gate recording performed by the ENGINE process (t261005-12).
 
-    Usage: client.py deliver '{"face":"request","body":{...}}'
-    Faces: request | actions-record | grants-audit (fixed; fail-closed).
+    The gate's verdict row must land in the project ledger
+    (<projects_root>/<key>/ledger/executor-actions.jsonl), which the executor
+    session's workspace-write sandbox cannot reach — the pre-261005 in-process
+    record_from_gate append failed on every attempt, silently (fail-open +
+    stderr-only). This helper SUBMITS face actions-record; the engine worker
+    performs the append via executor_actions.record_from_gate, which stays the
+    single row-boundary enforcement point (an exempt pass = no row; here it
+    short-circuits before any workflow starts).
+
+    Identity discipline (t261004-27 R2/R3, kept): the identity block is built
+    ONLY from gate-resolved values — project = the gate's resolved key,
+    channel = the gate's channel derivation, session = the caller's env session
+    (the same source record_from_gate read in-process before this ticket; the
+    delivery face forbids the worker env, so the caller ships it). Never a
+    caller-asserted argument.
+
+    Best-effort, fail-open: the return value is a named failure note or None —
+    it NEVER changes the gate verdict. Every failure names the exact check that
+    failed (review-plan condition 3: the note must not assert success or guess
+    a cause; the gate receipt's record_note is the only reader-visible face
+    when the engine is unreachable, because the sandboxed caller cannot write
+    any durable face near the ledger).
+    """
+    v = verdict if isinstance(verdict, dict) else {}
+    if v.get("allowed") and not v.get("enforced"):
+        return None  # exempt pass: zero row, zero delivery (t261004-11 row boundary)
+    import executor_delivery
+    ident = executor_delivery.identity_block(
+        str(key or ""), str(executor_grants.caller_session_id() or ""),
+        str(channel or ""), str(channel or ""))
+    body = {"op": str(op or ""), "ticket": str(ticket or ""),
+            "verdict": v, "channel": str(channel or "")}
+    try:
+        out = await _submit_engine_delivery(ident, "actions-record", body)
+    except Exception as e:  # noqa: BLE001 — bookkeeping never moves the write verdict
+        executor_actions.WRITE_FAILURES += 1
+        note = ("recording not submitted (check: delivery-submission): "
+                "%s: %s" % (type(e).__name__, e))
+        executor_actions._announce(e, str(key or ""), note)
+        return note
+    if not (isinstance(out, dict) and out.get("ok")):
+        text = str((out or {}).get("error") if isinstance(out, dict) else out)
+        executor_actions.WRITE_FAILURES += 1
+        note = ("recording refused by the delivery face (row not written): %s"
+                % (text or "no receipt"))
+        executor_actions._announce(RuntimeError(text or "no receipt"), str(key or ""), note)
+        return note
+    result = out.get("result")
+    if not isinstance(result, dict):
+        # Receipt present but not the expected shape (review-plan condition 2):
+        # named refusal — never a fabricated success, never a crash.
+        executor_actions.WRITE_FAILURES += 1
+        note = ("recording receipt malformed (check: delivery-receipt-shape): "
+                "result is %s" % type(result).__name__)
+        executor_actions._announce(RuntimeError(note), str(key or ""), note)
+        return note
+    if result.get("failed"):
+        # Receipt ok but the engine-side append itself failed; the engine also
+        # wrote the executor-actions.last-failure.json marker for readers.
+        executor_actions.WRITE_FAILURES += 1
+        note = ("engine-side append failed (check: executor-actions append): %s"
+                % str(result.get("error") or result.get("why") or "unknown"))
+        executor_actions._announce(RuntimeError(note), str(key or ""), note)
+        return note
+    return None
+
+
+async def _submit_engine_delivery(identity: Dict[str, str], face: str,
+                                  body: Dict[str, Any]) -> Dict[str, Any]:
+    """One engine-process delivery, identity already resolved (t261005-12).
+
+    Borrowed machinery extracted verbatim from cmd_deliver (t261004-27/-44), with
+    an explicit fault-mode ledger for the reuse (review-plan condition 2):
+
+      kept as-is:
+        - worker-registration fingerprint pre-flight -> named refusal
+          (check: worker-registration-fingerprint), before any workflow starts;
+        - bounded wait (start+result, plus the already-started duplicate receipt
+          read) -> refusal on delivery-deadline / delivery-deadline-first-receipt,
+          remote zombie cancelled;
+        - transport failure -> named engine-unreachable refusal (transient kind);
+        - fail-open audit row (_record_deliver_refusal) for every refusal — the
+          refusal is never withheld because its audit failed.
+      dropped (and why):
+        - CLI identity re-resolution (env>cwd via resolve_caller) — the caller of
+          this helper passes an ALREADY-RESOLVED identity block (the gate's
+          identity; never re-derived, never caller-asserted), so the caller_project
+          refusal stays in cmd_deliver where a caller-asserted key can appear;
+        - the exempt-verdict short-circuit — enforced at the recording helper
+          (zero row AND zero workflow for an exempt pass, t261004-11 boundary).
+
+    Returns _ok(receipt) on success or _err(named refusal) — never raises for a
+    delivery-level failure.
     """
     import executor_delivery
-    face = str(args.get("face") or "")
-    body = args.get("body")
-    if face not in executor_delivery.FACES:
-        return _err("deliver: unknown face %r — allowed faces: %s" % (face[:40], list(executor_delivery.FACES)))
-    if not isinstance(body, dict):
-        return _err("deliver: body must be a JSON object")
-    if body.get("caller_project"):
-        return _err("deliver: identity is derived from the environment and working "
-                    "directory, not declared by the caller (drop caller_project)")
-    # Caller-side identity resolution, ONCE (who, and the derivation source).
-    try:
-        cwd = os.path.realpath(os.getcwd())
-    except OSError:
-        cwd = ""
-    try:
-        projects, _quarantined = load_projects_registry()
-    except Exception:  # noqa: BLE001 — registry failure falls back to env identity
-        projects = None
-    caller = executor_requests.resolve_caller(
-        "", env=dict(os.environ), cwd=cwd, projects=projects,
-        exclude_trees=(os.path.realpath(str(REPO_ROOT)),))
-    if not caller.get("ok"):
-        return _err("deliver: %s" % caller.get("reason", "caller identity refused"))
-    identity = executor_delivery.identity_block(
-        caller["project"], caller["session"], caller["channel"], caller["channel"])
-    # Exempt gated writes never reach the engine (row 6 of the plan tradeoff
-    # table): no delivery run, no fabricated row for a non-gated write.
-    if face == "actions-record":
-        verdict = body.get("verdict")
-        if isinstance(verdict, dict) and verdict.get("allowed") and not verdict.get("enforced"):
-            return _ok({"delivered": False, "exempt": True, "face": face,
-                        "who": identity["session"], "identity_src": identity["identity_src"]})
     now_ms = int(time.time() * 1000)
     idem = executor_delivery.delivery_idem(face, identity["project"], identity["session"],
                                            body, now_ms)
@@ -3808,6 +3877,64 @@ async def cmd_deliver(args: Dict[str, Any]) -> Dict[str, Any]:
             return _err("deliver: workflow failed: %s: %s" % (type(e).__name__, e),
                         kind=KIND_TRANSIENT)
     return _ok(receipt)
+
+
+async def cmd_deliver(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Engine-process delivery of an executor project-ledger write (t261004-27;
+    host decision 261004 option 1). The caller only SUBMITS: identity is resolved
+    once here, caller-side (env > cwd, repo tree excluded — never declared by an
+    argument), shipped in the payload's identity block, and the ledger append is
+    performed by the ENGINE worker (executor_delivery.perform_delivery), which
+    can reach ~/.sandbar/projects/<key>/ where this session's sandbox cannot
+    (executor request -0020). Every refusal is named; `face=request` has NO
+    in-process fallback — an engine-unreachable refusal names the transport
+    error verbatim instead of re-creating the sandbox-blocked local append.
+
+    t261005-12: the submission machinery (registration pre-flight, bounded
+    wait, duplicate-started receipt read, timeout cancel) is shared with the
+    gate's engine-side recording via _submit_engine_delivery; this face keeps
+    its own CLI identity resolution (env > cwd) and the caller_project refusal.
+
+    Usage: client.py deliver '{"face":"request","body":{...}}'
+    Faces: request | actions-record | grants-audit (fixed; fail-closed).
+    """
+    import executor_delivery
+    face = str(args.get("face") or "")
+    body = args.get("body")
+    if face not in executor_delivery.FACES:
+        return _err("deliver: unknown face %r — allowed faces: %s" % (face[:40], list(executor_delivery.FACES)))
+    if not isinstance(body, dict):
+        return _err("deliver: body must be a JSON object")
+    if body.get("caller_project"):
+        return _err("deliver: identity is derived from the environment and working "
+                    "directory, not declared by the caller (drop caller_project)")
+    # Caller-side identity resolution, ONCE (who, and the derivation source).
+    try:
+        cwd = os.path.realpath(os.getcwd())
+    except OSError:
+        cwd = ""
+    try:
+        projects, _quarantined = load_projects_registry()
+    except Exception:  # noqa: BLE001 — registry failure falls back to env identity
+        projects = None
+    caller = executor_requests.resolve_caller(
+        "", env=dict(os.environ), cwd=cwd, projects=projects,
+        exclude_trees=(os.path.realpath(str(REPO_ROOT)),))
+    if not caller.get("ok"):
+        return _err("deliver: %s" % caller.get("reason", "caller identity refused"))
+    identity = executor_delivery.identity_block(
+        caller["project"], caller["session"], caller["channel"], caller["channel"])
+    # Exempt gated writes never reach the engine (row 6 of the plan tradeoff
+    # table): no delivery run, no fabricated row for a non-gated write.
+    if face == "actions-record":
+        verdict = body.get("verdict")
+        if isinstance(verdict, dict) and verdict.get("allowed") and not verdict.get("enforced"):
+            return _ok({"delivered": False, "exempt": True, "face": face,
+                        "who": identity["session"], "identity_src": identity["identity_src"]})
+    # Submission machinery (registration pre-flight, bounded wait, duplicate-started
+    # receipt read, timeout cancel) extracted into _submit_engine_delivery
+    # (t261005-12) and shared with the gate's engine-side recording.
+    return await _submit_engine_delivery(identity, face, body)
 
 
 # ---- Orphan lane-worker probe / guarded reclaim (t261005-03, clause C) ----

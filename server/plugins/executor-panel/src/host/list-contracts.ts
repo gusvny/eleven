@@ -54,7 +54,7 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
   overview_recent_actions: {
     id: 'overview_recent_actions',
     title: 'Overview — Recent actions',
-    source: 'readRecentActions over the project executor action record <projects_root>/<key>/ledger/executor-actions.jsonl (src/host/recent-actions.ts, permission-bearing rows only)',
+    source: 'readRecentActions over the project executor action record <projects_root>/<key>/ledger/executor-actions.jsonl (src/host/recent-actions.ts, permission-bearing rows only); plus the engine-written last-failure marker <projects_root>/<key>/executor-actions.last-failure.json read on every path (t261005-12: an empty record with a marker surfaces the recording failure, never the silent empty state)',
     order: 'Newest first by at, sorted in recent-actions.ts before the page receives rows. Missing or malformed at sorts last. Equal at keeps record order (stable).',
     cap: 50,
     cap_reason: 'The source is a tail window over recent gated executor actions, not a full history. 50 rows fill the Overview column without paging, and rows beyond the window are not silently hidden: the read returns an older_rows pointer that the page shows as a note, and the full history stays in the project executor action record (executor-actions.jsonl).',

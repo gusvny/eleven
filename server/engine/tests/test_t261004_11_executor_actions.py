@@ -19,6 +19,7 @@
 全程零 Temporal/零网络/零 git；projects 根/账本目录经 env 注入临时目录，
 绝不触 3099/7233、绝不写真 ~/.sandbar。
 """
+import asyncio
 import json
 import os
 import time
@@ -271,12 +272,12 @@ def test_gate_records_enforced_and_refused_but_not_exempt(iso, monkeypatch):
     ident = {'src': 'cwd', 'channel_src': 'cwd'}
 
     # 豁免通道（none）：零行零文件行为
-    g0 = cl._executor_grant_gate({'src': 'none'}, 'sign', 'p1', ticket='T-1')
+    g0 = asyncio.run(cl._executor_grant_gate({'src': 'none'}, 'sign', 'p1', ticket='T-1'))
     assert g0['err'] is None and _rows(iso) == [], 'exempt pass writes no row (C3)'
 
     # enforced 放行：一行 allowed，channel=cwd（op 用授予面原词 'sign'——
     # 引擎写 op 走 op_label，'ticket.sign' 不在固定授予面，会 fail-closed 拒收）
-    g1 = cl._executor_grant_gate(ident, 'sign', 'p1', ticket='T-1')
+    g1 = asyncio.run(cl._executor_grant_gate(ident, 'sign', 'p1', ticket='T-1'))
     assert g1['err'] is None
     rows = _rows(iso)
     assert len(rows) == 1 and rows[0]['decision'] == 'allowed'
@@ -285,7 +286,7 @@ def test_gate_records_enforced_and_refused_but_not_exempt(iso, monkeypatch):
     # 拒收：再一行 refused（rerun 是另一 op=另一 idem，正常成行）
     _declare(iso, {'grants': {'sign': False}})
     ea.reset_for_test()
-    g2 = cl._executor_grant_gate(ident, 'rerun', 'p1', ticket='T-1')
+    g2 = asyncio.run(cl._executor_grant_gate(ident, 'rerun', 'p1', ticket='T-1'))
     assert g2['err'] is not None
     rows = _rows(iso)
     assert len(rows) == 2 and rows[-1]['decision'] == 'refused'
@@ -295,15 +296,23 @@ def test_gate_records_enforced_and_refused_but_not_exempt(iso, monkeypatch):
 def test_gate_receipt_identical_with_recording_on_off(iso, monkeypatch, capsys):
     _declare(iso, {'grants': {}})
     ident = {'src': 'cwd', 'channel_src': 'cwd'}
-    receipt_off = cl._executor_grant_gate(ident, 'sign', 'p1', ticket='T-1')
+    receipt_off = asyncio.run(cl._executor_grant_gate(ident, 'sign', 'p1', ticket='T-1'))
     rows = _rows(iso)
     assert len(rows) == 1, 'recording happened'
-    # 记账关闭（模拟 sink 失败面）=闸回执不变（fail-open：记账不动写结局）
+    # Recording off (simulated sink failure) = the gate write verdict is unchanged
+    # (fail-open). t261005-12: the failure adds one NAMED record_note to the
+    # receipt (requirement 2, the failure-visible face) — err/keys/provenance stay
+    # field-identical; record_note is present only on the failing receipt.
     def _boom(*a, **k):
         raise RuntimeError('sink exploded')
     monkeypatch.setattr(ea, 'record_from_gate', _boom)
-    receipt_on = cl._executor_grant_gate(ident, 'sign', 'p1', ticket='T-1')
-    assert receipt_on == receipt_off, 'gate receipt byte-identical regardless of recording'
+    receipt_on = asyncio.run(cl._executor_grant_gate(ident, 'sign', 'p1', ticket='T-1'))
+    assert receipt_off.get('record_note') is None, 'success carries no note (no fabricated claim)'
+    assert receipt_on.get('err') == receipt_off.get('err')
+    assert receipt_on.get('keys') == receipt_off.get('keys')
+    note = receipt_on.get('record_note') or ''
+    assert 'delivery-submission' in note and 'sink exploded' in note, \
+        'the note names the failed check verbatim'
     ea.reset_for_test()  # restore the module attr cleanup order (monkeypatch reverts)
     assert capsys.readouterr().err != '', 'a raised sink is announced on stderr, not silent'
 
@@ -313,8 +322,8 @@ def test_gate_row_carries_caller_session_from_env(iso, monkeypatch):
     monkeypatch.setenv(eg.CALLER_SESSION_ENVS[0], 'sess-from-env')
     monkeypatch.setattr(ea, '_retention_cfg',
                         lambda: {'enabled': False, 'keep_days': 14, 'max_mb': 512})
-    g = cl._executor_grant_gate({'src': 'cwd', 'channel_src': 'cwd'}, 'sign', 'p1',
-                                ticket='T-1')
+    g = asyncio.run(cl._executor_grant_gate({'src': 'cwd', 'channel_src': 'cwd'}, 'sign', 'p1',
+                                ticket='T-1'))
     assert g['err'] is None
     row = _rows(iso)[0]
     assert row['session'] == 'sess-from-env', \
@@ -369,3 +378,13 @@ def test_seam_exempt_pass_still_records_nothing(iso):
     assert v['allowed'] is True and v['enforced'] is False
     ea.record_from_gate('sign', 'p1', 'T-1', v, 'none', now_ms=NOW_MS, session='s-1')
     assert _rows(iso) == []
+
+
+@pytest.fixture(autouse=True)
+def _engine_submit_stub(monkeypatch):
+    """t261005-12: gate recording now runs in the ENGINE process — install the
+    in-process engine stand-in per test (production perform_delivery dispatch,
+    rows land via the real record_from_gate; zero Temporal). Single source:
+    test_t261005_12_gate_engine_recording.install_fake_engine."""
+    from test_t261005_12_gate_engine_recording import install_fake_engine
+    install_fake_engine(monkeypatch)

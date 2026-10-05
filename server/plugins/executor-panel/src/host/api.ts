@@ -510,8 +510,12 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       const key = query.get('project') ?? ''
       if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
       const read = readRecentActions(deps.actionsIo ?? fsActionsIo, env, key)
-      // 不可得=200 + ok:false + 原因（页面渲染显式降级卡）；绝不渲染成空列表冒充「没动作」。
-      if (!read.ok) return { status: 200, json: { ok: false, source: read.source, reason: read.reason } }
+      // Unavailable = 200 + ok:false + a named reason (the page renders an explicit
+      // degraded card); never render an empty list pretending "no actions".
+      // t261005-12: last_record_failure rides EVERY branch — an empty record with a
+      // failure marker must surface the failure, never the silent empty state (the
+      // ticket's headline defect face).
+      if (!read.ok) return { status: 200, json: { ok: false, source: read.source, reason: read.reason, last_record_failure: read.last_record_failure } }
       return {
         status: 200,
         json: {
@@ -519,6 +523,7 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           malformed_rows: read.malformed_rows, unknown_op_rows: read.unknown_op_rows,
           deduped_rows: read.deduped_rows, older_rows: read.older_rows,
           gaps_recent: read.gaps_recent, gaps_file: read.gapsFile,
+          last_record_failure: read.last_record_failure,
           note: read.older_rows > 0
             ? 'Showing the latest ' + read.actions.length + ' action(s). Older rows are in ' + read.source + '.'
             : undefined,

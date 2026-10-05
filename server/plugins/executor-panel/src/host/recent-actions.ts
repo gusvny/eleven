@@ -90,8 +90,70 @@ export type RecentActionsRead =
       ok: true; source: string; gapsFile: string; actions: RecentAction[]
       malformed_rows: number; unknown_op_rows: number; deduped_rows: number
       older_rows: number; gaps_recent: number
+      last_record_failure: LastRecordFailure | null
     }
-  | { ok: false; source: string; reason: string }
+  | { ok: false; source: string; reason: string
+      last_record_failure: LastRecordFailure | null }
+
+/** t261005-12: the engine-written last-failure marker face (reader-visible
+ *  recording failure; the engine writes it at the PROJECT ROOT in the default
+ *  shape because the ledger directory itself is the usual thing that is
+ *  unwritable). The panel only READS it — the R5 read-only red line is
+ *  unchanged. */
+export interface LastRecordFailure {
+  at: number
+  why: string
+  error: string
+}
+
+/** Engine marker basename (server/engine/executor_actions.py FAILURE_BASENAME;
+ *  cross-language drift pinned by tests on both sides). */
+export const LAST_FAILURE_BASENAME = 'executor-actions.last-failure.json'
+
+/**
+ * Marker path (mirrors the engine's last_failure_path shape exactly):
+ * - env SANDBAR_EXECUTOR_ACTIONS_DIR (flat test seam) ⇒ `<dir>/<marker>`;
+ * - env SANDBAR_EXECUTOR_ACTIONS_FILE ⇒ next to that file;
+ * - default ⇒ `<projects_root>/<key>/executor-actions.last-failure.json`
+ *   (project root, NOT the ledger/ subdir — see the interface comment).
+ */
+export function executorActionsFailureFile(
+  env: NodeJS.ProcessEnv = process.env, key = '', source = '',
+): string {
+  const dir = env.SANDBAR_EXECUTOR_ACTIONS_DIR
+  if (dir) return join(dir, LAST_FAILURE_BASENAME)
+  if (env.SANDBAR_EXECUTOR_ACTIONS_FILE) return join(source, '..', LAST_FAILURE_BASENAME)
+  const root = env.SANDBAR_PROJECTS_DIR || join(homedir(), '.sandbar', 'projects')
+  return join(root, key, LAST_FAILURE_BASENAME)
+}
+
+/**
+ * Read the last-failure marker. Fail-soft three-state: absent / unreadable /
+ * MALFORMED (bad JSON, array, scalar, or no why+error text) all read as
+ * `null` — a broken marker never crashes the read and never fabricates a
+ * failure claim (external-input discipline; the empty-state copy stays honest).
+ */
+export function readLastRecordFailure(
+  io: ActionsIo, env: NodeJS.ProcessEnv, key: string, source: string,
+): LastRecordFailure | null {
+  const file = executorActionsFailureFile(env, key, source)
+  if (!io.existsSync(file)) return null
+  let raw = ''
+  try {
+    raw = io.readFileSync(file)
+  } catch { return null }
+  let doc: unknown
+  try { doc = JSON.parse(raw) } catch { return null }
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return null
+  const r = doc as Record<string, unknown>
+  const why = typeof r.why === 'string' ? r.why : ''
+  const error = typeof r.error === 'string' ? r.error : ''
+  if (!why && !error) return null
+  return {
+    at: typeof r.at === 'number' && Number.isFinite(r.at) ? r.at : 0,
+    why, error,
+  }
+}
 
 /** io 缝（测试注入内存版；缺省 fs 版 + 尾读）。 */
 export interface ActionsIo {
@@ -205,17 +267,22 @@ export function readRecentActions(
 ): RecentActionsRead {
   const source = executorActionsFile(env, key)
   if (!PROJECT_KEY_RE.test(key)) {
-    return { ok: false, source, reason: 'the project key is malformed — no action record can be read' }
+    return { ok: false, source, last_record_failure: null,
+             reason: 'the project key is malformed — no action record can be read' }
   }
+  // t261005-12: the engine-written last-failure marker is read on EVERY path —
+  // an empty ledger with a marker must surface the failure, not the silent
+  // empty-state copy (the ticket's headline defect face).
+  const lastRecordFailure = readLastRecordFailure(io, env, key, source)
   if (!io.existsSync(source)) {
-    return { ok: false, source,
+    return { ok: false, source, last_record_failure: lastRecordFailure,
              reason: 'This project has no recorded executor action. The record started with this change; the file is ' + source + '.' }
   }
   let raw = ''
   try {
     raw = io.readTail ? io.readTail(source, TAIL_BYTES) : io.readFileSync(source)
   } catch (e) {
-    return { ok: false, source,
+    return { ok: false, source, last_record_failure: lastRecordFailure,
              reason: 'This project has no readable executor action record: ' +
                (e instanceof Error ? e.message : String(e)) + ' — the file is ' + source + '.' }
   }
@@ -247,5 +314,6 @@ export function readRecentActions(
     malformed_rows: malformed, unknown_op_rows: unknownOp,
     deduped_rows: deduped, older_rows: Math.max(0, actions.length - shown.length),
     gaps_recent: gapsRecent,
+    last_record_failure: lastRecordFailure,
   }
 }

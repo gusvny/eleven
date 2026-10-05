@@ -124,6 +124,28 @@ os.environ["DSH_SESSION_ID"] = SESSION
 
 import client, executor_grants
 
+# t261005-12 arbitrate adaptation: the gate funnel is async now and the row
+# lands via the ENGINE delivery face, not in-process (the caller-side append is
+# the sandbox-blocked path this ticket closes). Assertions unchanged: the gate
+# is awaited, and the engine-side recording is executed through the PRODUCTION
+# delivery dispatch (executor_delivery.perform_delivery) — the same engine half
+# the t261005-12 routing scenario pins; the real Temporal transport stays the
+# arbitrate-stage live-path proof.
+import asyncio as _asyncio
+import time as _time
+import executor_delivery as _executor_delivery
+
+def gate(*a, **k):
+    return _asyncio.run(client._executor_grant_gate(*a, **k))
+
+def _local_engine_delivery(identity, face, body):
+    payload = _executor_delivery.delivery_payload(
+        face, str((identity or {}).get("project") or ""), identity, body)
+    return _executor_delivery.perform_delivery(payload, int(_time.time() * 1000))
+
+client._submit_engine_delivery = _local_engine_delivery
+
+
 out = {}
 def rows():
     p = os.path.join(ROOT, KEY, "ledger", "executor-actions.jsonl")
@@ -135,7 +157,7 @@ def rows():
 ident = {"src": "arg", "value": KEY}
 
 # A1 allowed gated write
-g1 = client._executor_grant_gate(dict(ident), "sign", KEY, ticket="t1")
+g1 = gate(dict(ident), "sign", KEY, ticket="t1")
 out["a1_keys"] = g1.get("keys")
 out["a1_err"] = g1.get("err")
 p, rs = rows()
@@ -145,15 +167,15 @@ if rs:
     out["a1_len"] = max(len(json.dumps(r)) for r in rs)
 
 # A2 refusals: ungranted op (cleanup) + meta-op
-g2 = client._executor_grant_gate(dict(ident), "cancel", KEY, ticket="t1")
-g2b = client._executor_grant_gate(dict(ident), "manage-grants", KEY, ticket="t1")
+g2 = gate(dict(ident), "cancel", KEY, ticket="t1")
+g2b = gate(dict(ident), "manage-grants", KEY, ticket="t1")
 out["a2_err_cancel"] = bool(g2.get("err"))
 out["a2_err_meta"] = bool(g2b.get("err"))
 _, rs2 = rows()
 out["a2_rows"] = [r for r in (rs2 or []) if r.get("decision") == "refused"]
 
 # A3 replay: same attempt again -> no second row
-client._executor_grant_gate(dict(ident), "sign", KEY, ticket="t1")
+gate(dict(ident), "sign", KEY, ticket="t1")
 _, rs3 = rows()
 out["a3_allowed_count"] = len([r for r in (rs3 or []) if r.get("decision") == "allowed"
                                and r.get("ticket") == "t1"])
@@ -167,7 +189,7 @@ out["a3_total"] = len(rs3 or [])
 os.environ["SANDBAR_CALLER_SURFACE"] = "lane-agent"
 os.environ["SANDBAR_CALLER_IDENTITY_SRC"] = "env"
 ident_env = {"src": "env", "value": KEY}
-g4 = client._executor_grant_gate(dict(ident_env), "sign", KEY, ticket="t1")
+g4 = gate(dict(ident_env), "sign", KEY, ticket="t1")
 _, rs4 = rows()
 out["a4_err"] = g4.get("err")
 out["a4_keys_empty"] = g4.get("keys") == {}
@@ -182,7 +204,7 @@ os.environ["SANDBAR_CALLER_IDENTITY_SRC"] = "arg"
 ld = os.path.join(ROOT, KEY, "ledger")
 ap = os.path.join(ld, "executor-actions.jsonl")
 os.chmod(ap, 0o400)
-g5 = client._executor_grant_gate(dict(ident), "sign", KEY, ticket="t2")
+g5 = gate(dict(ident), "sign", KEY, ticket="t2")
 os.chmod(ap, 0o600)
 out["a5_allowed"] = g5.get("err") is None and bool(g5.get("keys"))
 gap = os.path.join(ld, "executor-actions.gaps.jsonl")
