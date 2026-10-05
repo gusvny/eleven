@@ -3727,6 +3727,34 @@ function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKe
 	};
 }
 //#endregion
+//#region src/shared/session-handle.ts
+/** Placeholder for an empty/unusable id (visible, clearly not a real code). */
+const HANDLE_PLACEHOLDER = "----";
+/** Lowercase-alphanumeric tail characters used by the beyond-6 fallback. */
+function tail4(id) {
+	return id.replace(/[^0-9a-zA-Z]/g, "").slice(-4) || "0000";
+}
+/**
+* Derive the display handle for one session id.
+* @param id session uuid as carried by the ledger (`session-…`) — never empty in
+*        practice, but tolerated (placeholder).
+* @param taken handles already used in the same project (read-only).
+*/
+function sessionHandle(id, taken = []) {
+	if (typeof id !== "string" || id.length === 0) return HANDLE_PLACEHOLDER;
+	const body = id.startsWith("session-") ? id.slice(8) : id;
+	const hex = body.replace(/[^0-9a-fA-F]/g, "");
+	if (hex.length === 0) return HANDLE_PLACEHOLDER;
+	const lower = hex.toLowerCase();
+	const takenSet = new Set(taken);
+	for (const width of [4, 6]) {
+		const candidate = lower.slice(0, width);
+		if (!takenSet.has(candidate)) return candidate;
+	}
+	const suffix = `${lower.slice(0, 6)}-${tail4(body.toLowerCase())}`;
+	return takenSet.has(suffix) ? `${suffix}-${tail4(lower + body.toLowerCase())}` : suffix;
+}
+//#endregion
 //#region src/shared/project-identity.ts
 /**
 * project-identity.ts — single-source pure module for the project identity badge
@@ -4412,6 +4440,16 @@ function ProjectSessionRow(props) {
 		current,
 		byId
 	]);
+	const handles = (0, react.useMemo)(() => {
+		const map = /* @__PURE__ */ new Map();
+		const assigned = [];
+		for (const t of tabs) {
+			const h = sessionHandle(t.id, assigned);
+			map.set(t.id, h);
+			assigned.push(h);
+		}
+		return map;
+	}, [tabs]);
 	const [confirmId, setConfirmId] = (0, react.useState)(null);
 	/** 正在确认的 tab 锚（ref 回调按 confirmId 条件挂到对应 tab 上）。 */
 	const tabRef = (0, react.useRef)(null);
@@ -4493,7 +4531,7 @@ function ProjectSessionRow(props) {
 				"data-active": t.active,
 				role: "button",
 				tabIndex: 0,
-				title: `${projectName} session ${t.seq}: ${t.title}\n${t.id}`,
+				title: `${projectName} session ${t.seq} (${handles.get(t.id) ?? ""}): ${t.title}\n${t.id}`,
 				onClick: () => {
 					setConfirmId(null);
 					onOpen(t.id);
@@ -4507,13 +4545,13 @@ function ProjectSessionRow(props) {
 				},
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					className: "wb-psess-num",
-					children: t.seq
+					children: handles.get(t.id) ?? ""
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 					type: "button",
 					className: "wb-psess-close",
 					"data-wb-psess-close": "",
 					title: "Close this session entry (needs confirmation; session content is not deleted)",
-					"aria-label": `Close session entry ${t.seq}`,
+					"aria-label": `Close session entry ${handles.get(t.id) ?? t.seq}`,
 					onClick: (e) => {
 						e.stopPropagation();
 						setConfirmId(t.id);
@@ -4532,7 +4570,7 @@ function ProjectSessionRow(props) {
 						className: "wb-psess-confirm-t",
 						children: [
 							"Close session ",
-							confirmTab.seq,
+							confirmTab ? handles.get(confirmTab.id) : "",
 							"?"
 						]
 					}),
@@ -48204,6 +48242,24 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-sb-setpop .m2c{font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
 /* 项目组 */
 .wb-ticket-list { flex:1; overflow-y:auto; }
+/* UI-1 (t261005-09): brand first row — replaces the old "Projects" header slot.
+   26px, zero extra height (the row *is* the header; no separate top banner is
+   added). Mark = the "slanting sandbar" logo (261004 topbar-banner design note
+   section 3, candidate C: two offset rounded slanted bars; Chinese-named file in
+   notes/discussions/). No fold button, no theme button (both
+   ruled out in the same design note). Hiding the platform's own topbar banner is
+   a named follow-up (anchor+guard discipline), NOT done here — worst accepted
+   case is the platform banner remaining visible, never a blank sidebar. */
+.wb-brand-row { display:flex; align-items:center; gap:6px; height:26px; flex:none;
+  padding:0 10px; border-bottom:1px solid var(--dsw-alias-border-l1,#333); }
+.wb-brand-mark { display:inline-flex; flex:none; line-height:0; }
+.wb-brand-word { font-weight:600; font-size:12px; }
+.wb-brand-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+/* UI-1 (t261005-09): per-project block — 3px left bar in the project colour,
+   selected block gets a 6% colour wash (multi-project screens stay legible at a
+   glance; colour is not the only channel — the badge + name carry the identity). */
+.wb-project-block { border-left:3px solid var(--wb-proj-color, transparent); }
+.wb-project-block[data-selected=true] { background:color-mix(in srgb, var(--wb-proj-color, transparent) 6%, transparent); }
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
@@ -48608,9 +48664,49 @@ function WorkbenchSidebar(props) {
 		className: "wb-sb wide",
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: CSS$2 }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-sb-left",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-brand-row",
+					"data-wb-brand-row": "",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-brand-mark",
+							"aria-hidden": "true",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+								width: "14",
+								height: "14",
+								viewBox: "0 0 14 14",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+									x: "1.2",
+									y: "2.6",
+									width: "9",
+									height: "3.4",
+									rx: "1.7",
+									transform: "rotate(-18 5.7 4.3)",
+									fill: "var(--dsw-alias-brand-primary,#7c3aed)"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+									x: "3.8",
+									y: "7.6",
+									width: "9",
+									height: "3.4",
+									rx: "1.7",
+									transform: "rotate(-18 8.3 9.3)",
+									fill: "var(--dsw-alias-brand-primary,#7c3aed)",
+									opacity: "0.55"
+								})]
+							})
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-brand-word",
+							children: "Sandbar"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-brand-count",
+							children: loading ? "" : `${groups.length} project${groups.length === 1 ? "" : "s"}`
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-ticket-list",
 					children: [
 						inspectionNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -48625,173 +48721,179 @@ function WorkbenchSidebar(props) {
 								color: "var(--dsw-derive-fg,#888)"
 							},
 							children: "Loading…"
-						}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-group-head",
-							style: { cursor: "pointer" },
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-caret",
-									title: collapsed[g.project.key] ? "Expand" : "Collapse",
-									onClick: (e) => {
-										e.stopPropagation();
-										setCollapsed((c) => ({
-											...c,
-											[g.project.key]: !c[g.project.key]
-										}));
-									},
-									children: collapsed[g.project.key] ? "▸" : "▾"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-dot",
-									"data-wb-psess-dot": "",
-									"data-wb-identity-badge": "",
-									style: {
-										display: "inline-flex",
-										flex: "none",
-										lineHeight: 0
-									},
-									title: g.project.key,
-									"aria-label": `${g.project.name} identity badge`,
-									dangerouslySetInnerHTML: { __html: projectBadgeSvg(g.project.key, 14, groups.map((x) => x.project.key)) }
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "wb-group-entry",
-									"data-wb-executor-entry": "",
-									role: "button",
-									tabIndex: 0,
-									title: `Open ${g.project.name} executor panel`,
-									"aria-label": `Open ${g.project.name} executor panel`,
-									onKeyDown: (e) => {
-										if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "executor");
-									},
-									onClick: () => handleViewIcon(g.project.key, "executor"),
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-group-name",
-										children: g.project.name
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-group-count",
-										children: g.tickets.length || ""
-									})]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "wb-view-icons",
-									onClick: (e) => e.stopPropagation(),
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: `wb-view-icon ${rightView === "board" && viewProject === g.project.key ? "active" : ""}`,
-											title: "Tickets",
-											"aria-label": "Tickets",
-											onClick: () => handleViewIcon(g.project.key, "board"),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "board" })
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: `wb-view-icon ${rightView === "epics" && viewProject === g.project.key ? "active" : ""}`,
-											title: "Epics",
-											"aria-label": "Epics",
-											onClick: () => handleViewIcon(g.project.key, "epics"),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "epics" })
-										}),
-										moreViews[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+						}) : groups.map((g) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-project-block",
+							"data-wb-project-block": "",
+							"data-selected": viewProject === g.project.key,
+							style: { "--wb-proj-color": projectColor(g.project.key) },
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-group-head",
+								style: { cursor: "pointer" },
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-group-caret",
+										title: collapsed[g.project.key] ? "Expand" : "Collapse",
+										onClick: (e) => {
+											e.stopPropagation();
+											setCollapsed((c) => ({
+												...c,
+												[g.project.key]: !c[g.project.key]
+											}));
+										},
+										children: collapsed[g.project.key] ? "▸" : "▾"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-group-dot",
+										"data-wb-psess-dot": "",
+										"data-wb-identity-badge": "",
+										style: {
+											display: "inline-flex",
+											flex: "none",
+											lineHeight: 0
+										},
+										title: g.project.key,
+										"aria-label": `${g.project.name} identity badge`,
+										dangerouslySetInnerHTML: { __html: projectBadgeSvg(g.project.key, 14, groups.map((x) => x.project.key)) }
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "wb-group-entry",
+										"data-wb-executor-entry": "",
+										role: "button",
+										tabIndex: 0,
+										title: `Open ${g.project.name} executor panel`,
+										"aria-label": `Open ${g.project.name} executor panel`,
+										onKeyDown: (e) => {
+											if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "executor");
+										},
+										onClick: () => handleViewIcon(g.project.key, "executor"),
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-group-name",
+											children: g.project.name
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-group-count",
+											children: g.tickets.length || ""
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "wb-view-icons",
+										onClick: (e) => e.stopPropagation(),
+										children: [
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: `wb-view-icon ${rightView === "docs" ? "active" : ""}`,
-												role: "button",
-												tabIndex: 0,
-												title: "Docs",
-												"aria-label": "Docs",
-												onKeyDown: (e) => {
-													if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "docs");
-												},
-												onClick: () => handleViewIcon(g.project.key, "docs"),
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "docs" })
+												className: `wb-view-icon ${rightView === "board" && viewProject === g.project.key ? "active" : ""}`,
+												title: "Tickets",
+												"aria-label": "Tickets",
+												onClick: () => handleViewIcon(g.project.key, "board"),
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "board" })
 											}),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
-												title: "Model Routes",
-												"aria-label": "Model Routes",
-												onClick: () => handleViewIcon(g.project.key, "routes"),
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
+												className: `wb-view-icon ${rightView === "epics" && viewProject === g.project.key ? "active" : ""}`,
+												title: "Epics",
+												"aria-label": "Epics",
+												onClick: () => handleViewIcon(g.project.key, "epics"),
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "epics" })
 											}),
+											moreViews[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: `wb-view-icon ${rightView === "docs" ? "active" : ""}`,
+													role: "button",
+													tabIndex: 0,
+													title: "Docs",
+													"aria-label": "Docs",
+													onKeyDown: (e) => {
+														if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "docs");
+													},
+													onClick: () => handleViewIcon(g.project.key, "docs"),
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "docs" })
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
+													title: "Model Routes",
+													"aria-label": "Model Routes",
+													onClick: () => handleViewIcon(g.project.key, "routes"),
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: "wb-view-icon",
+													"data-wb-project-settings-entry": "",
+													title: "Project Settings",
+													"aria-label": "Project Settings",
+													onClick: () => {
+														setModal({
+															kind: "settings",
+															project: g.project
+														});
+													},
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "settings" })
+												})
+											] }),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 												className: "wb-view-icon",
-												"data-wb-project-settings-entry": "",
-												title: "Project Settings",
-												"aria-label": "Project Settings",
-												onClick: () => {
-													setModal({
-														kind: "settings",
-														project: g.project
-													});
+												role: "button",
+												tabIndex: 0,
+												"data-wb-more-views": "",
+												"data-on": Boolean(moreViews[g.project.key]) || void 0,
+												title: moreViews[g.project.key] ? "Fewer views" : "More views",
+												"aria-label": moreViews[g.project.key] ? "Fewer views" : "More views",
+												onKeyDown: (e) => {
+													if (e.key === "Enter" || e.key === " ") setMoreViews((m) => ({
+														...m,
+														[g.project.key]: !m[g.project.key]
+													}));
 												},
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "settings" })
-											})
-										] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-view-icon",
-											role: "button",
-											tabIndex: 0,
-											"data-wb-more-views": "",
-											"data-on": Boolean(moreViews[g.project.key]) || void 0,
-											title: moreViews[g.project.key] ? "Fewer views" : "More views",
-											"aria-label": moreViews[g.project.key] ? "Fewer views" : "More views",
-											onKeyDown: (e) => {
-												if (e.key === "Enter" || e.key === " ") setMoreViews((m) => ({
+												onClick: () => setMoreViews((m) => ({
 													...m,
 													[g.project.key]: !m[g.project.key]
-												}));
-											},
-											onClick: () => setMoreViews((m) => ({
-												...m,
-												[g.project.key]: !m[g.project.key]
-											})),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												"aria-hidden": "true",
-												style: {
-													fontSize: 13,
-													lineHeight: 1,
-													fontWeight: 700
-												},
-												children: "⋯"
+												})),
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													"aria-hidden": "true",
+													style: {
+														fontSize: 13,
+														lineHeight: 1,
+														fontWeight: 700
+													},
+													children: "⋯"
+												})
 											})
-										})
-									]
-								})
-							]
-						}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
-							projectKey: g.project.key,
-							projectName: g.project.name,
-							projectDir: g.project.primary,
-							ledger: projectSessions.ledger,
-							current: projectSessions.listState?.current,
-							byId: projectSessions.listState?.byId,
-							creating: projectSessions.creating,
-							notice: projectSessions.entryNotice,
-							noticeProject: projectSessions.noticeProject,
-							onNew: () => {
-								projectSessions.handleNew({
-									key: g.project.key,
-									dir: g.project.primary
-								});
-							},
-							onOpen: (id) => {
-								projectSessions.handleOpen(id);
-							},
-							onClose: projectSessions.handleClose
-						}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "wb-group-empty",
-							children: "No active tickets"
-						}) : g.tickets.map((t) => {
-							const insp = isInspectionRow(t);
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
-								t,
-								compact: true,
-								wf: insp ? INSPECTION_WF_LIKE : void 0,
-								progress: insp ? inspectionProgressOf(t) : void 0,
-								kindBadge: insp ? { text: "Inspection" } : void 0,
-								active: selectedId === t.id,
-								updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
-								onOpen: () => handleTicketClick(t, g.project.key)
-							}, t.id);
-						})] })] }, g.project.key)),
+										]
+									})
+								]
+							}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
+								projectKey: g.project.key,
+								projectName: g.project.name,
+								projectDir: g.project.primary,
+								ledger: projectSessions.ledger,
+								current: projectSessions.listState?.current,
+								byId: projectSessions.listState?.byId,
+								creating: projectSessions.creating,
+								notice: projectSessions.entryNotice,
+								noticeProject: projectSessions.noticeProject,
+								onNew: () => {
+									projectSessions.handleNew({
+										key: g.project.key,
+										dir: g.project.primary
+									});
+								},
+								onOpen: (id) => {
+									projectSessions.handleOpen(id);
+								},
+								onClose: projectSessions.handleClose
+							}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-group-empty",
+								children: "No active tickets"
+							}) : g.tickets.map((t) => {
+								const insp = isInspectionRow(t);
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+									t,
+									compact: true,
+									wf: insp ? INSPECTION_WF_LIKE : void 0,
+									progress: insp ? inspectionProgressOf(t) : void 0,
+									kindBadge: insp ? { text: "Inspection" } : void 0,
+									active: selectedId === t.id,
+									updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
+									onOpen: () => handleTicketClick(t, g.project.key)
+								}, t.id);
+							})] })]
+						}, g.project.key)),
 						!loading && inspectionSplit.unowned.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-group-head",
 							"data-testid": "sidebar-inspection-head",
@@ -48847,7 +48949,7 @@ function WorkbenchSidebar(props) {
 							}), "Add project"]
 						})
 					]
-				})
+				})]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-sb-right",

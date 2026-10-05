@@ -46,7 +46,7 @@
  */
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
-import type { ComponentType } from 'react'
+import type { ComponentType, CSSProperties } from 'react'
 // 会话列表快照类型（t260828-02 起只取 displayTitle/current 两字段）：ctx.sessions.list 的面。
 import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 // 会话动作层与出厂钮语义锚（票② R8 后 session-entry.tsx 只剩动作层，无渲染面；
@@ -82,6 +82,12 @@ import { startContextFoldEffect } from './context-fold.ts'
 // UI-4 (t261005-05): project identity badge single source (colour x outline x
 // structure, same identity as the panel).
 import { projectBadgeSvg } from '../shared/project-identity.ts'
+// UI-1 (t261005-09): project colour for the group block (3px left bar + 6% selected
+// wash, design source: 261004 chat-identity-and-session-handles note section 2.5,
+// Chinese-named file in notes/discussions/). projectColor re-exports
+// the UI-4 single-source palette/fallback (same key, same colour).
+import { projectColor } from '../shared/project-color.ts'
+import { hexToRgba } from './chat-project-band.ts'
 // 项目组头图标族（票③验收 11b）：五枚 SVG 线性图标（规格单源见模块头注）。
 import { ProjectIcon } from './project-icons.tsx'
 import type { ProjectIconName } from './project-icons.tsx'
@@ -304,6 +310,24 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-sb-setpop .m2c{font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
 /* 项目组 */
 .wb-ticket-list { flex:1; overflow-y:auto; }
+/* UI-1 (t261005-09): brand first row — replaces the old "Projects" header slot.
+   26px, zero extra height (the row *is* the header; no separate top banner is
+   added). Mark = the "slanting sandbar" logo (261004 topbar-banner design note
+   section 3, candidate C: two offset rounded slanted bars; Chinese-named file in
+   notes/discussions/). No fold button, no theme button (both
+   ruled out in the same design note). Hiding the platform's own topbar banner is
+   a named follow-up (anchor+guard discipline), NOT done here — worst accepted
+   case is the platform banner remaining visible, never a blank sidebar. */
+.wb-brand-row { display:flex; align-items:center; gap:6px; height:26px; flex:none;
+  padding:0 10px; border-bottom:1px solid var(--dsw-alias-border-l1,#333); }
+.wb-brand-mark { display:inline-flex; flex:none; line-height:0; }
+.wb-brand-word { font-weight:600; font-size:12px; }
+.wb-brand-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
+/* UI-1 (t261005-09): per-project block — 3px left bar in the project colour,
+   selected block gets a 6% colour wash (multi-project screens stay legible at a
+   glance; colour is not the only channel — the badge + name carry the identity). */
+.wb-project-block { border-left:3px solid var(--wb-proj-color, transparent); }
+.wb-project-block[data-selected=true] { background:color-mix(in srgb, var(--wb-proj-color, transparent) 6%, transparent); }
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
 .wb-group-caret { font-size:9px; color:var(--dsw-derive-muted,#57606a); width:10px; }
@@ -806,6 +830,19 @@ export function WorkbenchSidebar(props: SidebarProps) {
       {/* 左列：项目分组（可折叠）+ 插件入口。顶部会话入口行已随票② R8 退役
           （t260904-05）：入口收口为各组的项目内会话区，出厂全局钮由注入 effect 压制。 */}
       <div className="wb-sb-left">
+        {/* UI-1 (t261005-09): brand first row (26px; see .wb-brand-row CSS note). */}
+        <div className="wb-brand-row" data-wb-brand-row="">
+          <span className="wb-brand-mark" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14">
+              <rect x="1.2" y="2.6" width="9" height="3.4" rx="1.7" transform="rotate(-18 5.7 4.3)"
+                fill="var(--dsw-alias-brand-primary,#7c3aed)" />
+              <rect x="3.8" y="7.6" width="9" height="3.4" rx="1.7" transform="rotate(-18 8.3 9.3)"
+                fill="var(--dsw-alias-brand-primary,#7c3aed)" opacity="0.55" />
+            </svg>
+          </span>
+          <span className="wb-brand-word">Sandbar</span>
+          <span className="wb-brand-count">{loading ? '' : `${groups.length} project${groups.length === 1 ? '' : 's'}`}</span>
+        </div>
         <div className="wb-ticket-list">
           {/* t260915-19 巡检板面降级横幅：端点 ok:false/网络失败=保快照+显式原文
               （不吞成空列表，KI-008/t260910-04 R3）。单点挂左栏顶部——巡检行分散
@@ -821,7 +858,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
           {loading ? (
             <div style={{padding:16,color:'var(--dsw-derive-fg,#888)'}}>Loading…</div>
           ) : groups.map(g => (
-            <div key={g.project.key}>
+            <div key={g.project.key}
+              className="wb-project-block"
+              data-wb-project-block=""
+              data-selected={viewProject === g.project.key}
+              style={{ '--wb-proj-color': projectColor(g.project.key) } as CSSProperties}>
               {/* t260929-22（GAP A）：项目名行本身=执行器入口（设计稿 260927 §界面与命名：
                   一个项目一行、项目名即 project executor 的入口，不单列 Tick 行）——
                   折叠退到 caret 单独承担（一次点击只做一件事）；五个视图图标语义不变。 */}
@@ -915,6 +956,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   {g.tickets.length === 0 ? (
                     <div className="wb-group-empty">No active tickets</div>
                   ) : g.tickets.map(t => {
+                    // UI-1 (t261005-09) boundary with concurrency-limit CL-2/CL-3:
+                    // queue position numbers and drag/arrow ordering of QUEUED
+                    // tickets belong to CL. The ticket-list face supplies no queue
+                    // field today (CL-1 landed engine-side only, t261004-32), so
+                    // this list renders order-free rows and invents no order
+                    // locally. When CL-2/CL-3 add the face, the position number and
+                    // ordering controls land here and nowhere else.
                     // t260915-19：组内巡检行（t260915-20 起带项目身份，ProjectKey SA
                     // 归组）走最小适配——行1 标题引擎已给「巡检 <实例> · 期 <期号>」
                     // 零适配；行2 传本地纯函数合成进展（等你签字 · 发现 高x/中y/低z，

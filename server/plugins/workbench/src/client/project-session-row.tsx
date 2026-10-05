@@ -39,6 +39,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties } from 'react'
 import { pickProjectTabs } from '../shared/sessions.ts'
 import type { OpenedEntry, TitleRowLike } from '../shared/sessions.ts'
+// UI-1 (t261005-09): session handles — short codes replace the numeric seq as the
+// visible reference (design source: 261004 chat-identity-and-session-handles note,
+// section 2.3, Chinese-named file in notes/discussions/). The seq
+// stays in tooltips/history only. The fixed `executor` handle is NOT applied here:
+// no console face marks a session as the executor session yet (that face is
+// `<projects_root>/<key>/sessions.json`, epic item UI-5) — we do not guess locally.
+import { sessionHandle } from '../shared/session-handle.ts'
 // 项目色（票② R7）：确定性色板 + hex→rgba 展开（hover 淡底，避免 color-mix 赌注）。
 import { projectColor } from '../shared/project-color.ts'
 import { projectBadgeSvg } from '../shared/project-identity.ts'
@@ -155,6 +162,20 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
     [ledger, projectKey, current, byId],
   )
 
+  // UI-1 (t261005-09): handle per tab, deduped within this project — derived in
+  // registration order (tabs are seq-ascending), each tab excluding the codes
+  // already assigned to earlier tabs. Deterministic for a given ledger state.
+  const handles = useMemo(() => {
+    const map = new Map<string, string>()
+    const assigned: string[] = []
+    for (const t of tabs) {
+      const h = sessionHandle(t.id, assigned)
+      map.set(t.id, h)
+      assigned.push(h)
+    }
+    return map
+  }, [tabs])
+
   /* ── 确认弹层（R5）：confirmId=等确认的 tab；弹层 position:fixed（见文件头注）── */
   const [confirmId, setConfirmId] = useState<string | null>(null)
   /** 正在确认的 tab 锚（ref 回调按 confirmId 条件挂到对应 tab 上）。 */
@@ -246,7 +267,7 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
           data-active={t.active}
           role="button"
           tabIndex={0}
-          title={`${projectName} session ${t.seq}: ${t.title}\n${t.id}`}
+          title={`${projectName} session ${t.seq} (${handles.get(t.id) ?? ''}): ${t.title}\n${t.id}`}
           onClick={() => { setConfirmId(null); onOpen(t.id) }}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -256,13 +277,13 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
             }
           }}
         >
-          <span className="wb-psess-num">{t.seq}</span>
+          <span className="wb-psess-num">{handles.get(t.id) ?? ''}</span>
           <button
             type="button"
             className="wb-psess-close"
             data-wb-psess-close=""
             title="Close this session entry (needs confirmation; session content is not deleted)"
-            aria-label={`Close session entry ${t.seq}`}
+            aria-label={`Close session entry ${handles.get(t.id) ?? t.seq}`}
             onClick={e => { e.stopPropagation(); setConfirmId(t.id) }}
           >×</button>
         </div>
@@ -275,7 +296,7 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
           aria-label="Confirm closing the session entry"
           ref={popRef}
         >
-          <div className="wb-psess-confirm-t">Close session {confirmTab.seq}?</div>
+          <div className="wb-psess-confirm-t">Close session {confirmTab ? handles.get(confirmTab.id) : ''}?</div>
           <div className="wb-psess-confirm-d" title={confirmTab.title}>{confirmTab.title}</div>
           <div className="wb-psess-confirm-m">Only the entry is closed; the session content is not deleted.</div>
           <div className="wb-psess-confirm-btns">

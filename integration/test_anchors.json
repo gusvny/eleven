@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 216,
-      "scenarios": 526
+      "scenarios": 532
     },
     "vocab": [
       "behaviour",
@@ -3738,6 +3738,16 @@
     "integration/t261006-03/sc_engine_path_capture_journey.py": {
       "anchor": "behaviour",
       "note": "t261006-03: capture through the engine own path (run_capture_stage services=full -> capture-lane --stage-json) exits 0 with flat PNGs at the shared.ui_evidence_dir read point, teardown reclaimed, no workspace-invalid-path or seed host-path leak; live anti-proof: pre-fix fixtures-dir level fails with the same named error",
+      "sync_path": ""
+    },
+    "integration/t261005-09/sc_left_column_ui_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "UI-1 left-column journey: brand first row, project identity + colour block, order-free ticket rows (no invented queue face), session handles with new-session entrance, executor handle only when a face marks it, inspection rows still present",
+      "sync_path": ""
+    },
+    "integration/t261005-09/sc_session_handle_contract.mjs": {
+      "anchor": "contract",
+      "note": "UI-1 session handle public contract: first-4-hex derivation, collision ladder to the tail form, malformed-input no-throw, purity, executor constant single source, client single-source import",
       "sync_path": ""
     }
   }
