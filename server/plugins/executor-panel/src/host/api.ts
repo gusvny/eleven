@@ -37,6 +37,7 @@ import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResul
 import { grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, GRANT_OPS, toGrantOp,
   spawnEngineGrantsWrite, type EngineGrantsWriteFace, type EngineGrantsWritePayload } from './executor-grants.ts'
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
+import { readOneShotFace, fsOneShotIo, type OneShotIo } from './one-shot-view.ts'
 import type { BridgeStatusSnapshot } from './question-bridge.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
@@ -104,6 +105,7 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   { path: '/sandbar-executor-panel/api/settings', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/grants', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/actions', methods: ['GET'] },
+  { path: '/sandbar-executor-panel/api/one-shot', methods: ['GET'] },
   { path: '/sandbar-executor-panel/api/projects', methods: ['GET'] },
   // t261004-44 (KI-196 way out (2)): the question-bridge state face -- mounted flag /
   // per-kind counters / recent event ring. GET-only (read face); the read source is
@@ -120,6 +122,8 @@ export interface ApiDeps {
   declaredEnabled?: (key: string) => { declared: boolean; enabled: boolean }
   /** 最近动作账本 io（缺省 fs；测试注入内存桩）。 */
   actionsIo?: ActionsIo
+  /** One-shot read-face io (default fs; tests inject an in-memory stub). */
+  oneShotIo?: OneShotIo
   /** workbench 端点基址（config 显式指定；缺省 env → 请求来源同源，见 resolveWorkbenchBase）。 */
   workbenchBase?: string
   /** t261004-29 wake-caller seam: after a successful answer, push a wake to the
@@ -520,6 +524,14 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
             : undefined,
         },
       }
+    }
+    // ---- one-shot sessions (t261004-30 read-only face: settles / locks / runs / cap) ----
+    if (path === '/sandbar-executor-panel/api/one-shot') {
+      if (method !== 'GET') return bad(405, 'read-only: GET only')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const face = readOneShotFace(deps.oneShotIo ?? fsOneShotIo, env, key)
+      return { status: 200, json: { ok: true, one_shot: face, note: 'read-only; settles come from the engine settle ledger, locks/runs from the watchdog data dir' } }
     }
     // ---- projects (t260930-09 scope 8) ----
     if (path === '/sandbar-executor-panel/api/projects') {

@@ -2,9 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 206,
-   "scenarios": 503
-  },
+   "engine_tests": 208,
+   "scenarios": 505  },
   "vocab": [
    "behaviour",
    "contract",
@@ -1012,6 +1011,11 @@
   "server/engine/tests/test_write_set_args.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_30_executor_oneshot.py": {
+   "anchor": "contract",
+   "note": "t261004-30 settle-note CLI: row schema, identity gate, malformed-argv fail-closed, object-key drift lock",
    "sync_path": ""
   },
   "server/engine/tests/test_t261004_42_inspect_tier_criteria.py": {
@@ -3498,6 +3502,11 @@
   "integration/worker-restart/sc_worker_single_poller.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "integration/t261004-30/sc_executor_one_shot_session.py": {
+   "anchor": "contract",
+   "note": "t261004-30 one-shot executor session: per-object lock, single-knob cap, exit-path release, reference-protected retention",
    "sync_path": ""
   },
   "integration/t261004-44/sc_question_bridge_live_path.mjs": {

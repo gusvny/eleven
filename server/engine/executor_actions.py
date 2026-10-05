@@ -67,6 +67,11 @@ IDEM_SET_CAP = 4096         # 每路径幂等键加速集容量（FIFO 逐出；
 DEFAULT_KEEP_DAYS = 14      # 保留窗内置缺省（与 event_ledger 内置缺省同值；见 _retention_cfg）
 DEFAULT_MAX_MB = 512        # rolling 阈值内置缺省（同上）
 
+# t261004-30: additive schema keys allowed via record_executor_action(extra=...).
+# Whitelist, fail-closed: readers tolerate unknown keys, but the writer only
+# stamps declared additive keys. channel_kind in {resident, one_shot}.
+EXTRA_ROW_KEYS = ("channel_kind",)
+
 WRITE_FAILURES = 0          # 保证面计数器（写失败/坏行扫描共用可见面，event_ledger 同名先例）
 
 _CFG_FALLBACK_ANNOUNCED = False   # temporalio-free 进程的一次性点名（见 _retention_cfg）
@@ -169,6 +174,9 @@ def build_line(row: Dict[str, Any]) -> bytes:
         'decision': str(r.get('decision') or ''),
         'idem': str(r.get('idem') or ''),
     }
+    for k in EXTRA_ROW_KEYS:     # t261004-30: additive keys, absent unless given
+        if k in r and r[k] not in (None, ''):
+            out[k] = str(r[k])
     if str(r.get('decision') or '') == 'refused':
         out['reason'] = reason       # C4：reason 键只在 refused 行在场
     line = json.dumps(out, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
@@ -266,6 +274,7 @@ def record_executor_action(project: str, op: str, ticket: str = "",
                            session: str = "", channel: str = "",
                            decision: str = "", reason: str = "",
                            now_ms: Optional[int] = None,
+                           extra: Optional[Dict[str, Any]] = None,
                            actions_dir: Optional[Path] = None) -> Dict[str, Any]:
     """落一行执行器动作账（真 IO 包装；从不 raise、从不反向影响写结局）。
 
@@ -313,6 +322,10 @@ def record_executor_action(project: str, op: str, ticket: str = "",
            'decision': dec, 'idem': idem}
     if dec == 'refused':
         row['reason'] = rs
+    if extra:
+        for k, v in extra.items():
+            if k in EXTRA_ROW_KEYS and v not in (None, ''):
+                row[k] = v   # additive schema keys only (whitelist, fail-closed)
     data = build_line(row)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

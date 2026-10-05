@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 
-import { loadWatchdogConfig, isValidProjectKey, watchdogDataDir } from './src/host/config.ts'
+import { loadWatchdogConfig, isValidProjectKey, watchdogDataDir, watchdogConfigDir } from './src/host/config.ts'
 import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type PendingProvider, type SessionStatFn } from './src/host/core.ts'
 import { filterBoardRowsToProject, type BoardRow } from './src/host/reconcile.ts'
 import type { PendingInteraction } from './src/host/self-lock.ts'
@@ -46,6 +46,7 @@ import {
   ensureExecutorSession, sessionEventPath, readSessionEvents,
   type SessionCreateIo, type SessionProvenanceEvent,
 } from './src/host/session-create.ts'
+import { runOneShotUnit, readConcurrencyLimit, type OneShotUnit, type OneShotOutcome } from './src/host/one-shot.ts'
 import { readRequests, fsLedgerIo, appendRequest } from '../executor-panel/src/host/requests.ts'
 import type { RecentTextResult, ProseBackstopIo } from './src/host/core.ts'
 
@@ -306,6 +307,66 @@ export function makeSessionEnsure(ctx: Context, project: string) {
   }
 }
 // 「确保会话」的 project 绑定在 ensureWatchdog 处按项目闭包（见下方 deps 组装）。
+
+/** One-shot session path (t261004-30): create reuses the host Session API
+ *  (makeSessionCreateIo, create face only -- a one-shot session has no adopt);
+ *  runTurn delivers one bounded unit through the host prompt and waits for the
+ *  receipt. The receipt proves DELIVERY, not completion -- the real result is
+ *  filed by the session itself (engine settle port executor_oneshot.py +
+ *  request/action ledgers), so the summary honestly says "delivered" and never
+ *  pretends the unit finished. Host service absent = explicit refused. */
+export function makeOneShotRunner(ctx: Context, project: string) {
+  const createIo = makeSessionCreateIo(ctx)
+  const io = {
+    readText: (p: string) => readFile(p, 'utf8'),
+    writeText: (p: string, data: string) => { mkdir(dirname(p), { recursive: true }); return writeFileB(p, data) },
+    append: (p: string, line: string) => appendFile(p, line, 'utf8'),
+  }
+  return async function runUnit(input: {
+    unit: OneShotUnit
+    projectMainDir: string
+  }): Promise<OneShotOutcome> {
+    const cfg = loadWatchdogConfig(project, process.env)
+    const oneShot = cfg.config.one_shot
+    const limit = await readConcurrencyLimit(io, join(watchdogConfigDir(process.env), project, 'concurrency.json'))
+    return runOneShotUnit({
+      project,
+      dataDir: watchdogDataDir(process.env),
+      cwd: input.projectMainDir,
+      unit: input.unit,
+      limit: limit.ok ? limit.limit : null,
+      lockTimeoutMs: oneShot.lock_timeout_ms,
+      io,
+      sessions: {
+        create: (req) => createIo.create({ cwd: req.cwd, agentPreset: req.agentPreset }),
+        runTurn: async (sessionId) => {
+          type ControllerLike = { prompt?: (req: unknown, signal: AbortSignal) => Promise<{ accepted: true }> }
+          const c = (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
+          if (!c || typeof c.prompt !== 'function') {
+            return { ok: false, summary: 'host sessionController.prompt unreachable (headless) — one-shot turn not delivered' }
+          }
+          await c.prompt({ sessionId, message: ONE_SHOT_TURN_PROMPT }, AbortSignal.timeout(10_000))
+          return { ok: true, summary: 'bounded unit prompt delivered' }
+        },
+      },
+      nowMs: Date.now(),
+    })
+  }
+}
+
+/** The one-shot turn prompt: wake, read the ledgers, do EXACTLY one bounded
+ *  unit, write the result, exit. */
+export const ONE_SHOT_TURN_PROMPT =
+  'One-shot bounded unit. Read the ledgers first, do EXACTLY the one bounded unit ' +
+  'you were woken for, write the result (action row / request row / engine settle ' +
+  'note), then stop. Do not start other work. To ask the human anything, file a ' +
+  'request row — never wait for a direct reply.'
+
+async function writeFileB(p: string, data: string): Promise<void> {
+  const { writeFile } = await import('node:fs/promises')
+  await writeFile(p, data, 'utf8')
+}
+
 
 /** executor 会话快照（t260929-08）：sessionStat 每拍刷新，pendingProvider 复用
  *  running 位（避免一拍两次 list()）；读不到 = 显式缺席，绝不冒充「没在跑」。 */

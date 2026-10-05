@@ -41,6 +41,11 @@ export interface WatchdogConfig {
    *  enabled=false = the whole filing face stops (no session text read, no row
    *  filed, no prose_ask_filed alert). */
   prose_backstop: { enabled: boolean; idle_minutes: number }
+  /** t261004-30: one-shot executor sessions (bounded small work). retention_days =7
+   *  (host default), lock_timeout_ms reclaims a dead session's object lock. The
+   *  parallel cap is NOT here — it reads the project concurrency declaration via
+   *  one-shot.ts readConcurrencyLimit (one knob, host decision 261004). */
+  one_shot: { enabled: boolean; retention_days: number; lock_timeout_ms: number }
   /** t261004-44 (KI-196 judgement): the ask-mirror watch deadline (seconds) -- a
    *  session sitting on ask_user_question with no question row past this deadline
    *  raises the ask_unmirrored redline (message names the session and the ask face). */
@@ -67,6 +72,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
   reconcile_seconds: 60,
   waiting_minutes: 5,
   prose_backstop: { enabled: true, idle_minutes: 10 },
+  one_shot: { enabled: true, retention_days: 7, lock_timeout_ms: 30 * 60 * 1000 },
   ask_mirror_deadline_s: 120,
   alerts: {
     enabled: true,
@@ -177,6 +183,36 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       }
     }
   }
+  if ('one_shot' in doc) {
+    if (!isPlainObject(doc.one_shot)) {
+      problems.push('one_shot must be an object ({enabled, retention_days, lock_timeout_ms})')
+    } else {
+      const os = doc.one_shot
+      const out = cfg.one_shot
+      if ('enabled' in os) {
+        if (typeof os.enabled !== 'boolean') problems.push('one_shot.enabled must be a boolean')
+        else { out.enabled = os.enabled; keys['one_shot.enabled'] = `${file}#one_shot.enabled` }
+      }
+      if ('retention_days' in os) {
+        if (typeof os.retention_days !== 'number' || !Number.isFinite(os.retention_days) || os.retention_days < 0) {
+          problems.push('one_shot.retention_days must be a number >= 0 (0 = never expire by age)')
+        } else { out.retention_days = os.retention_days; keys['one_shot.retention_days'] = `${file}#one_shot.retention_days` }
+      }
+      if ('lock_timeout_ms' in os) {
+        if (typeof os.lock_timeout_ms !== 'number' || !Number.isFinite(os.lock_timeout_ms) || os.lock_timeout_ms <= 0) {
+          problems.push('one_shot.lock_timeout_ms must be a positive number (milliseconds)')
+        } else { out.lock_timeout_ms = os.lock_timeout_ms; keys['one_shot.lock_timeout_ms'] = `${file}#one_shot.lock_timeout_ms` }
+      }
+      // Unknown keys inside the block fail closed (KI-149 family). The parallel
+      // cap deliberately has no key here: it lives only in the shared project
+      // concurrency declaration (one knob, host decision 261004) -- a cap key
+      // hiding in one_shot would be a second knob and is refused.
+      const osUnknown = Object.keys(os).filter(k => !['enabled', 'retention_days', 'lock_timeout_ms'].includes(k))
+      if (osUnknown.length > 0) {
+        problems.push(`one_shot: Unknown keys rejected (fail-closed; the parallel cap lives only in the shared concurrency declaration, not here): ${osUnknown.join(', ')}`)
+      }
+    }
+  }
   if ('alerts' in doc) {
     if (!isPlainObject(doc.alerts)) problems.push('alerts must be an object')
     else {
@@ -221,7 +257,7 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       }
     }
   }
-  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'ask_mirror_deadline_s', 'alerts'].includes(k))
+  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'one_shot', 'ask_mirror_deadline_s', 'alerts'].includes(k))
   if (unknown.length > 0) problems.push(`Unknown keys rejected (fail-closed, KI-149 family): ${unknown.join(', ')}`)
 
   if (problems.length > 0) {

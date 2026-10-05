@@ -15,6 +15,7 @@
 import { createInterface } from 'node:readline'
 import { Watchdog, defaultIo, readHeartbeatFile } from './src/host/core.ts'
 import { makeWakeIo } from './node.ts'
+import { deriveObjectKey, admitUnit, releaseLock, reclaimStaleLocks, reapSessions, validateOneShotBlock, collectReferencedSessions } from './src/host/one-shot.ts'
 
 // ---------- 注入式时钟（ISO 字符串 ↔ ms；跨午夜/夜间窗用它拨） ----------
 function makeClock(startMs) {
@@ -594,6 +595,67 @@ async function handle(cmd) {
     await core.appendAlerts(`/memdata/${project}.alerts.jsonl`, JSON.stringify(rec))
     return { ok: true, spoken: !muted, rec }
   }
+  // ---- t261004-30 seam: one-shot executor sessions ----
+  // Contract = integration/t261004-30/sc_executor_one_shot_session.py header.
+  // These commands drive the REAL pure core (src/host/one-shot.ts) with
+  // harness-held state: per-project lock table + config block. Test seam, not
+  // product behavior; zero real host, zero ports.
+  if (op === 'oneshot_admit') {
+    const st = oneShotOf(cmd.project || currentProject)
+    const key = deriveObjectKey({ kind: cmd.unit?.kind, id: cmd.unit?.id ?? cmd.unit?.key })
+    if (!key.ok) return { ok: false, reason: key.error }
+    const cleaned = reclaimStaleLocks(st.table, Number(cmd.now ?? 0), st.cfg.lock_timeout_ms)
+    st.table = cleaned.table
+    // limit <= 0 / null = unlimited (the declared unlimited form); anything
+    // else must be the shared declaration's value -- no second knob.
+    const limit = typeof cmd.limit === 'number' && cmd.limit > 0 ? cmd.limit : null
+    const verdict = admitUnit({ objectKey: key.key, table: st.table, limit, nowMs: Number(cmd.now ?? 0) })
+    if (verdict.action !== 'start') return { ok: false, action: verdict.action, reason: verdict.reason }
+    st.seq = (st.seq || 0) + 1
+    const sessionId = 'os-' + st.seq
+    st.table.locks.push({ object_key: key.key, session_id: sessionId, acquired_at: Number(cmd.now ?? 0), heartbeat_at: Number(cmd.now ?? 0) })
+    st.holders.set(key.key, sessionId)
+    return { ok: true, object_key: key.key, session_id: sessionId }
+  }
+  if (op === 'oneshot_release') {
+    const st = oneShotOf(cmd.project || currentProject)
+    const holder = st.holders.get(cmd.object_key) || ''
+    const rel = releaseLock(st.table, cmd.object_key, holder)
+    if (!rel.ok) return { ok: false, error: rel.error }
+    st.table = rel.table
+    st.holders.delete(cmd.object_key)
+    return { ok: true, mode: cmd.mode || 'normal' }
+  }
+  if (op === 'oneshot_reclaim') {
+    const st = oneShotOf(cmd.project || currentProject)
+    const lock = st.table.locks.find(l => l.object_key === cmd.object_key)
+    if (!lock) return { ok: false, error: 'no lock on ' + cmd.object_key }
+    const cleaned = reclaimStaleLocks(st.table, Number(cmd.now ?? 0), st.cfg.lock_timeout_ms)
+    const reclaimed = cleaned.reclaimed.some(r => r.startsWith(cmd.object_key + ' '))
+    st.table = cleaned.table
+    return { ok: true, reclaimed }
+  }
+  if (op === 'oneshot_config') {
+    const st = oneShotOf(cmd.project || currentProject)
+    const v = validateOneShotBlock(cmd.one_shot)
+    if (!v.ok) return { ok: false, error: v.error }
+    st.cfg = { ...st.cfg, ...cmd.one_shot }
+    return { ok: true }
+  }
+  if (op === 'oneshot_reap') {
+    const refs = cmd.references || {}
+    const referenced = collectReferencedSessions([
+      refs.watchdog_config, refs.authz_declarations, refs.open_request_owners,
+    ])
+    const r = reapSessions({
+      sessions: (cmd.sessions || []).map(s => ({ session_id: String(s.id ?? ''), ended_at: Number(s.ended_at ?? 0) })),
+      nowMs: Number(cmd.now ?? 0),
+      retentionDays: Number(cmd.retention_days ?? 7),
+      referencedSessionIds: referenced,
+      summarizeOk: !cmd.summarize_fail,
+    })
+    return { ok: true, deleted: r.deleted, summaries: r.summaries, skipped: r.skipped }
+  }
   return { ok: false, error: '未知命令：' + op }
 }
 
@@ -606,6 +668,16 @@ ensureInstance = async function (project, cfgOverride = null) {
 }
 function currentCfgOf(project) {
   return cfgByProject.get(project) || null
+}
+
+const oneShotState = new Map() // project -> { table, cfg, holders, seq }
+function oneShotOf(project) {
+  let st = oneShotState.get(project)
+  if (!st) {
+    st = { table: { v: 1, locks: [] }, cfg: { enabled: true, retention_days: 7, lock_timeout_ms: 30 * 60 * 1000 }, holders: new Map(), seq: 0 }
+    oneShotState.set(project, st)
+  }
+  return st
 }
 
 // ---------- stdin 主循环（EOF = 全终态收口） ----------
