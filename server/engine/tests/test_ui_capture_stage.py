@@ -168,6 +168,73 @@ def test_up_stage_ok_and_command_shape(fake_repo):
     assert fr.calls[0]["env"].get("SANDBAR_STAGE_TICKET") == "t1/gen0", "attempt 映射进租约"
 
 
+@pytest.fixture
+def pinned_bench_dir(tmp_path, monkeypatch):
+    """Pin up_stage's bench dir under tmp_path so tests can inspect the written
+    tree (FakeRunner never really runs; a real mkdtemp would drop the tree in
+    $TMPDIR — tests must not leave host litter)."""
+    bench = tmp_path / "bench"
+    bench.mkdir()
+    monkeypatch.setattr(uis.tempfile, "mkdtemp", lambda **kw: str(bench))
+    return bench
+
+
+def test_up_stage_fixtures_dir_is_mount_root(fake_repo, pinned_bench_dir):
+    """t261006-03 main regression: --fixtures-dir must be the FIXTURES ROOT (the
+    level compose mounts at /fixtures), not the registry root. Pre-fix, the call
+    site passed _write_bench_registry's return value (<bench>/projects); the
+    container's SANDBAR_PROJECTS_DIR=/fixtures/projects then resolved to
+    <mount>/projects/projects — nonexistent -> the loader replays the in-repo
+    seed (host-absolute dir) -> workspace-invalid-path inside the container."""
+    fr = FakeRunner(rc=0, out=GOOD_RECEIPT + "\n")
+    uis.up_stage("ui-shot-x-g0", repo_root=fake_repo, runner=fr)
+    cmd = fr.calls[0]["cmd"]
+    fixtures_val = cmd[cmd.index("--fixtures-dir") + 1]
+    assert fixtures_val == str(pinned_bench_dir), (
+        "--fixtures-dir = the fixtures root (the bench dir itself), never the "
+        "registry subdir")
+    # Under the fixtures root: projects/ (the registry, with .migrated) and
+    # workspace/ (the declared container workspace).
+    root = pinned_bench_dir / "projects"
+    assert (root / ".migrated").is_file(), "registry root carries .migrated (loader skips the seed)"
+    assert (root / uis._BENCH_PROJECT_KEY / "project.yaml").is_file()
+    yaml = (root / uis._BENCH_PROJECT_KEY / "project.yaml").read_text(encoding="utf-8")
+    assert "dirs:" in yaml and "/fixtures/workspace" in yaml, (
+        "the project workspace is declared as a container-visible path")
+    assert (pinned_bench_dir / "workspace").is_dir(), (
+        "the declared workspace /fixtures/workspace really exists inside the mount tree")
+
+
+def test_up_stage_registry_env_matches_mount_layout(fake_repo, pinned_bench_dir):
+    """The container-visible contract agrees on both sides: the env-pointed
+    registry root /fixtures/projects is exactly the projects/ dir under the
+    --fixtures-dir mount point — producer and gate on one read point."""
+    fr = FakeRunner(rc=0, out=GOOD_RECEIPT + "\n")
+    uis.up_stage("p", repo_root=fake_repo, runner=fr)
+    assert fr.calls[0]["env"].get("SANDBAR_TEST_PROJECTS_DIR") == "/fixtures/projects"
+    assert (pinned_bench_dir / "projects" / ".migrated").is_file()
+
+
+def test_up_stage_pre_fix_layout_antiproof(fake_repo, tmp_path):
+    """Anti-proof (pure layout): reproduce the pre-fix shape — the registry
+    subdir mounted as the fixtures root — and show the container-visible
+    registry root is then necessarily missing (seed replay unavoidable; the
+    live named error workspace-invalid-path is filmed by the integration
+    gate's journey scenario)."""
+    bench = tmp_path / "bench"
+    uis._write_bench_registry(str(bench))
+    pre_fix_mount = bench / "projects"     # the value pre-fix code passed as --fixtures-dir
+    # container SANDBAR_PROJECTS_DIR=/fixtures/projects <-> host <mount>/projects
+    container_registry_host_view = pre_fix_mount / "projects"
+    assert not container_registry_host_view.exists(), (
+        "pre-fix shape: the container registry root does not exist -> no .migrated "
+        "-> the loader replays the seed (sandbar host-absolute path -> "
+        "workspace-invalid-path)")
+    # And the declared workspace is missing too: /fixtures/workspace <-> <mount>/workspace
+    assert not (pre_fix_mount / "workspace").exists(), (
+        "pre-fix shape: the declared workspace is absent from the mount tree as well")
+
+
 def test_up_stage_env_fail_degradable(fake_repo):
     fr = FakeRunner(rc=2, err="[stage-up] ENV_FAIL: docker 不可用")
     with pytest.raises(uis.UiStageEnvError, match="ENV_FAIL"):

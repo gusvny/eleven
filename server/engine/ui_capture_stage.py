@@ -180,9 +180,14 @@ def _write_bench_registry(fixtures_dir: str) -> str:
     """Write the bench registry (a Python mirror; the shape true source is
     capture-lane.mjs buildBenchRegistry — schema v1 top-level `project:` LIST
     form; never fall back to a flat top-level key:/name:/dirs: block, both
-    parsers quarantine that shape, t261005-16 arbitrate round 1). Returns the
-    registry root (the projects/ dir under the --fixtures-dir mount point,
-    i.e. /fixtures/projects inside the container).
+    parsers quarantine that shape, t261005-16 arbitrate round 1). `fixtures_dir`
+    is the FIXTURES ROOT (= the `--fixtures-dir` value, mounted at /fixtures in
+    the container); returns the registry root (the projects/ dir under it, i.e.
+    /fixtures/projects inside the container). t261006-03: the up_stage call site
+    must pass the ROOT here and to --fixtures-dir alike — passing this return
+    value as --fixtures-dir mounted the tree one level too deep and the
+    container's registry root resolved to nothing (seed replay →
+    workspace-invalid-path; see the up_stage comment).
 
     The workspace is created INSIDE the mounted tree and declared as its
     container path (/fixtures/workspace, t261005-16 arbitrate round 3): the
@@ -267,17 +272,30 @@ def up_stage(project: str, *, repo_root: Optional[str] = None,
     # it into the container as SANDBAR_PROJECTS_DIR); the loader sees the marker
     # and skips the seed. The host temp dir is registered in _BENCH_TMP_DIRS and
     # reclaimed idempotently by down_stage.
+    #
+    # t261006-03 (KI-204 layer-3 residual on the engine path): --fixtures-dir is
+    # the FIXTURES ROOT (compose mounts it at /fixtures), NOT the registry root.
+    # Passing _write_bench_registry's RETURN value (the registry root
+    # <bench_dir>/projects) mounted the tree one level too deep: the container's
+    # SANDBAR_PROJECTS_DIR=/fixtures/projects resolved to
+    # <bench_dir>/projects/projects — nonexistent → no .migrated → the loader
+    # replayed the in-repo seed (project sandbar, host-absolute dir) →
+    # new-session workspace create failed inside the container with
+    # workspace-invalid-path, while capture-lane's own docker path (which passes
+    # the PARENT dir) went green. Pass the bench dir itself: it must contain
+    # projects/ (the registry, with .migrated) and workspace/ (the declared
+    # container workspace /fixtures/workspace).
     try:
         bench_dir = tempfile.mkdtemp(prefix="sandbar-bench-registry-")
     except OSError as e:
         raise UiStageEnvError("failed to create the host bench-registry dir (%s) — "
                               "never silently fall back to a registry-less stage" % e)
-    bench_fixtures = _write_bench_registry(bench_dir)
+    _write_bench_registry(bench_dir)  # registry root returned; mount root = bench_dir
     _BENCH_TMP_DIRS[key] = bench_dir
     rc, out, err = run([ "python3", cli, "up", "--project", key,
                          "--services", str(services or "full"),
                          "--timeout", str(int(cap)),
-                         "--fixtures-dir", bench_fixtures ],
+                         "--fixtures-dir", bench_dir ],
                        cap, {**extra, "SANDBAR_TEST_PROJECTS_DIR": "/fixtures/projects"})
     if rc != 0:
         # A failed up means no stage is mounted; reclaim the host registry dir

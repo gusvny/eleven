@@ -9,8 +9,10 @@ Faces under test (server/engine/ui_capture_stage.py):
   form (a flat top-level key:/name:/dirs: block is quarantined by both
   parsers, t261005-16 arbitrate round 1), .migrated marker present,
   dirs[0] really existing, occupied target fails loud (O_EXCL);
-- up_stage wiring: the cmd carries --fixtures-dir (the created projects root)
-  and the runner env carries SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects
+- up_stage wiring: the cmd carries --fixtures-dir (the FIXTURES ROOT — the bench
+  dir containing projects/ and workspace/; t261006-03 fixed the pre-fix level
+  bug that passed the registry root here) and the runner env carries
+  SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects
   (compose passes it into the container as SANDBAR_PROJECTS_DIR); a failed up
   reclaims the host dir in place;
 - down_stage reclaim: the host dir is removed after a successful teardown
@@ -120,10 +122,17 @@ def test_up_stage_injects_bench_registry(tmp_path):
     cmd = r.calls[0]["cmd"]
     i = cmd.index("--fixtures-dir")
     fixtures = cmd[i + 1]
-    assert os.path.isfile(os.path.join(fixtures, "capture-bench", "project.yaml"))
+    # t261006-03: --fixtures-dir is the FIXTURES ROOT (mounted at /fixtures); the
+    # registry lives one level under it at projects/ — the container's
+    # SANDBAR_PROJECTS_DIR=/fixtures/projects must resolve inside the mount.
+    # (Pre-fix this asserted the REGISTRY ROOT here, which mounted the tree one
+    # level too deep and starved the container's registry root -> seed replay.)
+    assert os.path.isfile(os.path.join(fixtures, "projects", "capture-bench", "project.yaml"))
+    assert os.path.isfile(os.path.join(fixtures, "projects", ".migrated"))
+    assert os.path.isdir(os.path.join(fixtures, "workspace"))
     assert r.calls[0]["env"]["SANDBAR_TEST_PROJECTS_DIR"] == "/fixtures/projects"
     # The dir lives until teardown (registered).
-    assert uis._BENCH_TMP_DIRS.get("ui-shot-x-g0") == str(Path(fixtures).parent)
+    assert uis._BENCH_TMP_DIRS.get("ui-shot-x-g0") == fixtures
 
 
 def test_up_stage_failure_cleans_bench_dir(tmp_path):

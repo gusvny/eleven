@@ -3729,6 +3729,16 @@
       "anchor": "behaviour",
       "note": "t261006-02: one real capture run on the production pathway exits 0 with flat top-level PNGs and an auth-surface receipt whose observed token source agrees with the producer token_source=none (KI-205 layer 6)",
       "sync_path": ""
+    },
+    "integration/t261006-03/sc_engine_path_mount_contract.py": {
+      "anchor": "contract",
+      "note": "t261006-03: the engine stage boot passes the FIXTURES ROOT as --fixtures-dir - fixtures root directly contains projects/ (.migrated + container-path declared workspace) and workspace/, SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects inside the mount, no host-absolute declared dir, pre-fix layout control (KI-204 layer-3 residual)",
+      "sync_path": ""
+    },
+    "integration/t261006-03/sc_engine_path_capture_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261006-03: capture through the engine own path (run_capture_stage services=full -> capture-lane --stage-json) exits 0 with flat PNGs at the shared.ui_evidence_dir read point, teardown reclaimed, no workspace-invalid-path or seed host-path leak; live anti-proof: pre-fix fixtures-dir level fails with the same named error",
+      "sync_path": ""
     }
   }
 }
