@@ -3528,3 +3528,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 所以这一层不是"换掉死条目"能修的：归 `t261005-16`（候选出路：采集台不再用种子项目的 dir 建会话 /
 > 迁移按世界改写 dirs / 种子留空且台内自建工作区）。
 > **复现命令**：`node server/ui-check/capture-lane.mjs --lane . --out /tmp/<dir>`（约 3–4 分钟；自起自拆 docker 舞台）。
+
+## KI-205 UI 证据链**第五层**：采集产物落点与闸的读点不一致（子目录 / 旧名目录 / 硬编码文案），外加 token 读取 ENV_FAIL（261006 01:0x 实测）
+
+> **现象**（三张 UI 票同时卡在同一条红上，逐个查现场后坐实）：
+> - `t261005-06`：**9 张已拍出**，但落在 `.lane/t261005-06/.sandbar/screenshots/**acceptance/**`（**子目录**里，20:46–20:47）
+>   ⇒ 闸按「**顶层**非递归 `*.png`」判 ⇒ 等于没有。
+> - `t261005-10`：3 张落在 **旧名** `.lane/t261005-10/.suyou/screenshots/`（19:43–19:44）⇒ 同样不计。
+> - 同一时刻闸的**拒绝文案**却写死「under `<worktree>/.sandbar/screenshots`」——文案用的是
+>   `UI_EVIDENCE_DIR` 常量，而判定与采集都走 `shared.ui_evidence_dir()` 的**粘滞解析**
+>   （`lane_dot_path`：老泳道解析回旧名 `.suyou`）。⇒ **文案与实际读点会分叉**，把操作员指向错目录。
+> - 探针复跑（`capture-lane.mjs --lane . --out /tmp/...`，-16 之后）这次是 **ENV_FAIL（exit 2）**：
+>   「docker 舞台 45000ms 内已可达但 docker logs 里取不到 dsh web token 行」——环境面，不是产品红。
+> **危害**：UI 票的 merge_check 可以**永远红**，即使采集已经成功、图就在泳道里——这正是「人肉平铺」兜底反复出现的机制根。
+> 且操作员按文案去 `.sandbar/screenshots` 找/放，而判定可能在 `.suyou/screenshots`，两边永远对不上。
+> **出路**：①采集产出**必须**落在判定读的那个目录的**顶层**（禁止子目录；或在判定侧显式承认声明目录的已知子目录形态，
+> 二选一，不许两边各说各话）；②拒绝文案与判定**同源**：文案里的路径由 `ui_evidence_dir()` 现算，不再用常量硬编码；
+> ③`ENV_FAIL` 的 token 读取失败给可行动出路（等待阈值/日志权限/容器启动串行化），并按 `env_fail` 具名通道记账，不搅进产品红。
+> **回归**：L3 场景——泳道里造「图在子目录」「图在旧名目录」两形态，断言闸的判词与文案**指向同一处**且给出可执行出路。
