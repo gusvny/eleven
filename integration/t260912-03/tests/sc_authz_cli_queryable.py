@@ -268,7 +268,7 @@ def main():
 
         def _refused():
             rc2, d2, _ = show(py, env)
-            if "已过期" in json.dumps(d2.get("refused") or [], ensure_ascii=False):
+            if "already passed" in json.dumps(d2.get("refused") or [], ensure_ascii=False):
                 return d2
             return None
         dr = poll(_refused, 90)
@@ -279,7 +279,7 @@ def main():
                       % json.dumps(s.get("refused") or [], ensure_ascii=False)[:300])
         print("  相二 证据：refused尾=%s"
               % json.dumps(dr.get("refused") or [], ensure_ascii=False)[-200:], flush=True)
-        check("已过期" in json.dumps(dr.get("refused") or [], ensure_ascii=False),
+        check("already passed" in json.dumps(dr.get("refused") or [], ensure_ascii=False),
               "拒收文案点名原因是「已过期」（不说没有 X，说哪个检查失败）")
         check(len(dr.get("authz") or []) == 1 and dr.get("authz_active") == 1,
               "死授权不进可查面（authz=%d authz_active=%s）"

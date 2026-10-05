@@ -108,7 +108,7 @@ def main():
     t4, err = face(deep)
     reachable = any((MARKER % i) in (t4 or "") for i in range(10))
     case("M4-overdeep-chain",
-         err is None and t4 and (reachable or "不可得" in t4)
+         err is None and t4 and (reachable or "unavailable" in t4)
          and "不存在的消息" not in t4,
          "text=%r err=%r" % (t4, err))
 
@@ -118,7 +118,7 @@ def main():
     e5.__cause__ = inner
     t5, err = face(e5)
     case("M5-all-empty-messages-explicit-unavailable",
-         err is None and t5 and "不可得" in t5,
+         err is None and t5 and "unavailable" in t5,
          "text=%r err=%r" % (t5, err))
 
     # M6 反向锁 × 成环链（worker_terminated type 藏在环里）
@@ -131,7 +131,7 @@ def main():
     c6.__cause__ = e6                          # 成环
     t6, err = face(e6)
     case("M6-worker-terminated-wins-on-cyclic-chain",
-         err is None and t6 and "worker 被外部终止" in t6
+         err is None and t6 and "worker terminated externally" in t6
          and "Activity task failed" not in t6,
          "text=%r err=%r" % (t6, err))
 

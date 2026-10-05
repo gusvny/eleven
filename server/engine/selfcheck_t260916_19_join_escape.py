@@ -314,7 +314,7 @@ async def main() -> int:
             await handle.signal("rework", dev_lane.ReworkRequest(
                 who="selfcheck", note="反用例：词表外目标",
                 target_stage="acceptance_walkthrough"))
-            ok(await wait_for(handle, lambda s: "【rework 拒收】" in str(s.get("blocked_reason") or ""),
+            ok(await wait_for(handle, lambda s: "[rework refused]" in str(s.get("blocked_reason") or ""),
                               30, "相二非法目标显式拒收"),
                "相二：rework(to_stage=acceptance_walkthrough) → 显式拒收上台面（【rework 拒收】前缀）")
             snap = await handle.query(dev_lane.DevLaneWorkflow.snapshot)

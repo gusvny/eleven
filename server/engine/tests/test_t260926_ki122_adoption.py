@@ -711,7 +711,7 @@ def test_d1_streak_rounds_survive_external_handling_to_the_cap():
         assert rounds == 1 or rounds > 1
     assert rounds == MAX_TESTS_FAULT_ROUNDS + 1
     route = integration_route("tests-fault", rounds, 0)
-    assert route.startswith("blocked:测试集迭代 %d 轮超限" % (MAX_TESTS_FAULT_ROUNDS + 1))
+    assert route.startswith("blocked:test-set iterations %d exceed the cap" % (MAX_TESTS_FAULT_ROUNDS + 1))
     # 反证（旧口径形态不被本面复用）：streak-reset 会把连续轮次清零 → 上限永不触发
     r0, e0, _, _ = step_rounds("streak-reset", MAX_TESTS_FAULT_ROUNDS, 0)
     assert (r0, e0) == (0, 0)
@@ -755,17 +755,17 @@ def test_e1_cap_audit_text_names_judge_basis_and_next_step():
 def test_e2_cap_cover_prefix_byte_compat_and_audit_appended():
     """④既有封面前缀逐字节不变（零 re-point），具名审计只在尾注追加。"""
     r = integration_route("tests-fault", MAX_TESTS_FAULT_ROUNDS + 1, 0)
-    assert r.startswith("blocked:测试集迭代 6 轮超限（上限 5），转人工判读")
+    assert r.startswith("blocked:test-set iterations 6 exceed the cap (cap 5); needs human review")
     for kw in ("authorize", "ruling", "rework", "pause"):
         assert kw in r
     assert "super-limit basis" not in r, "route 纯函数零改动（审计尾注由调用方追加）"
     cover = r.split(":", 1)[1] + cap_audit_text(
         MAX_TESTS_FAULT_ROUNDS + 1, MAX_TESTS_FAULT_ROUNDS, 0, MAX_TESTS_EXEMPT_ROUNDS)
-    assert cover.startswith("测试集迭代 6 轮超限（上限 5），转人工判读")
+    assert cover.startswith("test-set iterations 6 exceed the cap (cap 5); needs human review")
     assert "does NOT re-run the suite automatically" in cover
     # 豁免封面同族：缺省位逐字节不变，audit 位追加
     assert exempt_cap_text(MAX_TESTS_EXEMPT_ROUNDS + 1) == \
-        "测试集连续 6 轮红项均属环境面/负载抖动（连续豁免超限，上限 5），转人工判读" + \
+        "6 consecutive rounds of test-set reds are all environment-side/load jitter (consecutive-exemption over cap, cap 5); needs human review" + \
         shared._ARBITRATION_CAP_EXITS
     assert "super-limit basis" in exempt_cap_text(6, audit=cap_audit_text(6, 5))
 

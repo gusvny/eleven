@@ -161,7 +161,7 @@ else:
     })
     check("M2 声明缺省+diff 健康 → 截图项 green+可见 note（未声明）",
           len(items) == 1 and items[0].get("green") is True
-          and "未声明" in str(items[0].get("detail", "")),
+          and "not declared" in str(items[0].get("detail", "")),
           "items=%r" % (items,))
 
     # 声明畸形：红且点名（畸形≠缺省）

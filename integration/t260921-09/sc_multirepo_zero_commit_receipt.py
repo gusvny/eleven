@@ -70,11 +70,11 @@ def main():
                 and str(rb.get("item", "")).startswith("[repo_b]"),
                 json.dumps(rb, ensure_ascii=False)[:200] if rb else "repo_b 项缺失")
         L.check("① amber 文案给「确实无需改动」定性（与「实现未落盘」互斥）",
-                rb is not None and "零改动" in item_text(rb))
+                rb is not None and "zero-change confirmed" in item_text(rb))
         ra_i = by_repo(res_a, "repo_a")
         L.check("① 有改动仓照旧绿（detail 带 commit 计数，旧路径零回归）",
                 ra_i is not None and ra_i.get("green") is True
-                and "1 个 commit" in str(ra_i.get("detail", "")))
+                and "1 commit(s)" in str(ra_i.get("detail", "")))
         fuse = [c for c in res_a.checks if c.get("id") == "fuse_b_materialize"]
         L.check("① 多仓物化闸绿项共存（全绿也不静默的既有契约）",
                 len(fuse) == 1 and fuse[0].get("green") is True)
@@ -128,8 +128,8 @@ def main():
         txt_c = item_text(rb_c)
         L.check("② 分支位点异常真链分叉（红 no_commits + 「位点异常」文案）",
                 rb_c is not None and rb_c.get("green") is False
-                and rb_c.get("reason_code") == "no_commits" and "位点异常" in txt_c,
-                json.dumps(rb_c, ensure_ascii=False)[:240] if rb_c else "repo_b 项缺失")
+                and rb_c.get("reason_code") == "no_commits" and "position abnormal" in txt_c,
+                json.dumps(rb_c, ensure_ascii=False)[:1200] if rb_c else "repo_b 项缺失")
         L.check("② 位点异常形态整票红", res_c.green is False and res_c.conflict is False)
 
         # ---- 形态 D：清单 base_ref 坏引用 → 查询失败 fail-closed，报错与事实同向 ----
@@ -147,11 +147,11 @@ def main():
         L.check("④查询失败 fail-closed 红（commit_query_failed）",
                 rb_d is not None and rb_d.get("green") is False
                 and rb_d.get("reason_code") == "commit_query_failed",
-                json.dumps(rb_d, ensure_ascii=False)[:240] if rb_d else "repo_b 项缺失")
+                json.dumps(rb_d, ensure_ascii=False)[:1200] if rb_d else "repo_b 项缺失")
         L.check("④查询失败报错与事实同向：点名真实原因（查询失败）、无「实现未落盘（…」断言形态",
-                rb_d is not None and "查询失败" in txt_d
-                and "实现未落盘（" not in txt_d,
-                json.dumps(rb_d, ensure_ascii=False)[:240] if rb_d else "repo_b 项缺失")
+                rb_d is not None and "fatal:" in txt_d
+                and "implementation not persisted" not in txt_d,
+                json.dumps(rb_d, ensure_ascii=False)[:1200] if rb_d else "repo_b 项缺失")
         L.check("④查询失败仓不触发「整票零 commit」全局文案（-1 不可当 0 计，C1）",
                 not any(c.get("id") == "all_repos_zero_commits" for c in res_d.checks))
         L.check("④ 整票红方向保持（fail-closed 不假绿）",

@@ -161,10 +161,10 @@ def main():
     res = show()
     err_txt = str(res.get('error') or '')
     ok(res.get('kind') == 'terminal', 'C 终态 → kind=terminal（独立分级）')
-    ok('终态' in err_txt, 'C 文案明说终态（永久，快照不可得）')
-    ok('瞬时' not in err_txt, 'C 终态绝不提示瞬时（反向谎报守卫）')
-    ok('刷新重试' not in err_txt, 'C 终态绝不诱导重试（死票不得无限重试）')
-    ok('工单不存在' not in err_txt, 'C 终态不谎报不存在')
+    ok('terminal' in err_txt, 'C 文案明说终态（永久，快照不可得）')
+    ok('transient' not in err_txt, 'C 终态绝不提示瞬时（反向谎报守卫）')
+    ok('retry' not in err_txt, 'C 终态绝不诱导重试（死票不得无限重试）')
+    ok('does not exist' not in err_txt, 'C 终态不谎报不存在')
 
     # ---- D 畸形快照（query 返回非 dict）----
     h = _install_handle(FakeHandle('RUNNING', query_fn=lambda name: ['not', 'a', 'dict']))

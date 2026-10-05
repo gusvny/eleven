@@ -181,7 +181,7 @@ def test_build_topology_malformed_declarations_fail_closed():
         try:
             tt.build_topology("t-ut", "夹具", nodes, groups)
         except ValueError as e:
-            assert "拓扑声明非法" in str(e)
+            assert "invalid topology declaration" in str(e)
         else:
             raise AssertionError("畸形声明未 fail-closed：%s" % label)
     # 非字典节点同样拦下

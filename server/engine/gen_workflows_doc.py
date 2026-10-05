@@ -51,7 +51,7 @@ def _q(s: str) -> str:
     """Quote every string scalar with double quotes (the workflow.py subset
     parser supports this; it avoids ambiguity from ':' or ' #' inside values)."""
     if '"' in s:
-        raise ValueError("值内不允许双引号（子集解析器限制）: %r" % s)
+        raise ValueError("double quotes not allowed inside value (subset parser limit): %r" % s)
     return '"%s"' % s
 
 
@@ -87,11 +87,11 @@ def render(tid: str) -> str:
         # "Every stage declares parts" is checked mechanically by this
         # generator, not by human discipline.
         if not st.parts:
-            raise ValueError("%s.%s 缺 parts 执行主体声明（agent/script/human 可组合）"
+            raise ValueError("%s.%s missing parts executor declaration (agent/script/human combinable)"
                              % (cls.__name__, st.id))
         bad = [p for p in st.parts if p not in PART_KINDS]
         if bad:
-            raise ValueError("%s.%s parts 含非法值 %r（可用: %s）"
+            raise ValueError("%s.%s parts contains an invalid value %r (allowed: %s)"
                              % (cls.__name__, st.id, bad, "/".join(PART_KINDS)))
         lines.append("    parts:")
         for p in st.parts:

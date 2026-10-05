@@ -79,7 +79,8 @@ ok(DL.count("plan_rounds += 1") == 1,
 
 section("D 打回环回归锁 + 纯函数真接线")
 ok("【方案审读打回（第 %d 轮）】" in DL, "reject 打回文案原样保留")
-ok("方案审读打回 %d 轮超限" in DL, "超限 blocked 文案原样保留")
+ok("design review send-back %d rounds over " in DL and
+   "\"limit (cap %d)\"" in DL, "超限 blocked 文案原样保留")
 ok("parse_review_plan_verdict(res.status, res.summary)" in DL,
    "解析函数按 (status, summary) 真接线（矛盾态保守侧入口）")
 ok("review_plan_route(" in DL, "路由走 shared 纯函数（与 integration_route 同风格）")

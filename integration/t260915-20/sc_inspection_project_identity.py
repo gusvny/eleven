@@ -518,7 +518,7 @@ def j3_unknown_key(decl_path: str):
     check("J3 未知项目键 fail-closed 点名（不冒充网络错）",
           (parsed or {}).get("ok") is not True
           and GHOST_KEY in err
-          and ("未知项目" in err or "注册表" in err or "registry" in err)
+          and ("unknown project" in err or "注册表" in err or "registry" in err)
           and "不可达" not in err and "unreachable" not in err.lower(),
           "ok=%r error=%r" % ((parsed or {}).get("ok"), err[:200]))
 

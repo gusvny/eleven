@@ -112,15 +112,15 @@ STAGE_PATH_RULES = {
 
 # 段允许面的人读描述（拒绝回执用）。
 _STAGE_FACE_DESC = {
-    "result_files": "仅结果/回执文件（零代码改动段）",
-    "write_set": "写集内文件 + 结果文件",
-    "join": "写集内文件 ∪ integration/ + 结果文件（并行汇合段）",
-    "ui_dirs": "ui_evidence 声明目录 + 结果文件",
-    "ticket_receipts": "本票场景回执（integration/<ticket_id>/）+ 结果文件",
-    "test_face": "测试面（tests/ 目录、test_*.py、integration/ 下场景脚本 sc_*.py/.mjs、"
-                 "场景登记表 integration/README.md 与 integration/run_scenarios.py）"
-                 "∪ 本票场景 + 结果文件",
-    "self_heal": "写集内文件 ∪ 本票场景 + 结果文件（自愈收场）",
+    "result_files": "result/receipt files only (zero-code-change stage)",
+    "write_set": "write-set files + result files",
+    "join": "write-set files ∪ integration/ + result files (parallel-join stage)",
+    "ui_dirs": "ui_evidence declared dirs + result files",
+    "ticket_receipts": "this ticket's scenario receipts (integration/<ticket_id>/) + result files",
+    "test_face": "test face (tests/ dirs, test_*.py, integration/ scenario scripts sc_*.py/.mjs, "
+                 "scenario roster integration/README.md and integration/run_scenarios.py)"
+                 " ∪ this ticket's scenarios + result files",
+    "self_heal": "write-set files ∪ this ticket's scenarios + result files (self-heal closeout)",
     "prefixes": None,  # prefixes 用规则里的前缀拼
 }
 
@@ -136,10 +136,11 @@ TEMPLATE_WEAK_KINDS: Tuple[str, ...] = ("result_files", "write_set", "join", "pr
 # design_integration_tests 只对 integration/ 面内容成立（design 段允许面=
 # prefixes("integration",)）；其它面内容（如 server/ 文件在仲裁段被改）的出路是
 # 建票把文件列入写集。保持限定语，不让泛化读法误导操作员。
-_OUT_Unauthorized = ("合法出路：rework 打回 design_integration_tests 修 integration/ 面内容"
-                     "（场景/登记表/共享测试工具），或建票把文件列入写集，或回 main 侧走票")
-_OUT_PROTECTED = "合法出路：人审放行或回 main 侧走票"
-_OUT_CONFIG = "合法出路：补配后重跑，或回 main 侧走票"
+_OUT_Unauthorized = ("sanctioned way out: rework back to design_integration_tests to fix the "
+                     "integration/ face (scenarios/registry/shared test tools), or open a ticket "
+                     "listing the file in its write set, or take the main-tree ticket route")
+_OUT_PROTECTED = "sanctioned way out: human-review approval, or the main-tree ticket route"
+_OUT_CONFIG = "sanctioned way out: complete the configuration and rerun, or take the main-tree ticket route"
 
 
 # ---------------- Ticket test face (t261004-25: a lawful path for out-of-write-set deliverables) ----------------
@@ -449,7 +450,7 @@ def judge_protected_paths(files: Iterable[Any],
 
 def _fmt_files(files: Sequence[str], cap: int = 3) -> str:
     shown = list(files[:cap])
-    tail = "" if len(files) <= cap else "（等 %d 项）" % len(files)
+    tail = "" if len(files) <= cap else " (+%d more)" % len(files)
     return "、".join(shown) + tail
 
 
@@ -458,36 +459,42 @@ def gate_refusal_note(stage_id: str, violations: Sequence[str], reason_code: str
     点名段与文件 + 合法出路。行内不含换行（settle note 以「；」拼接进 evidence）。"""
     names = _fmt_files(violations)
     if reason_code == "protected_path":
-        return ("受保护路径闸拒绝落盘（%sprotected_path）：%s 属保护名单（真源与期望值，"
-                "基点已存在），任何泳道不得改——%s"
+        return ("Protected-path gate refused the write (%sprotected_path): %s is on the "
+                "protected list (source of truth and expected values, baseline already "
+                "exists); no lane may change it — %s"
                 % (PATH_GATE_REASON_KEY, names, _OUT_PROTECTED))
     if reason_code == "unknown_stage":
-        return ("阶段路径闸拒绝落盘（%sunknown_stage）：段 %s 未配置允许改动面"
-                "（fail-closed，不静默免检）——合法出路：在该模板类补声明 "
-                "PATH_GATE_RULES[\"%s\"]=<允许面 kind>（外置模板只收弱面：%s），"
-                "或改用已配置段；%s"
+        return ("Stage path gate refused the write (%sunknown_stage): stage %s has no "
+                "configured allowed face (fail-closed, never silently exempted) — lawful "
+                "way out: declare PATH_GATE_RULES[\"%s\"]=<allowed-face kind> on that "
+                "template class (external templates accept only weak faces: %s), or use "
+                "a configured stage; %s"
                 % (PATH_GATE_REASON_KEY, stage_id, stage_id,
                    "/".join(TEMPLATE_WEAK_KINDS), _OUT_CONFIG))
     if reason_code == "write_set_missing":
-        return ("阶段路径闸拒绝落盘（%swrite_set_missing）：段 %s 无写集可判（写集空/缺失），"
-                "改动 %s 出白名单面——%s"
+        return ("Stage path gate refused the write (%swrite_set_missing): stage %s has "
+                "no write set to judge (write set empty/missing); change %s falls "
+                "outside the whitelist face — %s"
                 % (PATH_GATE_REASON_KEY, stage_id, names, _OUT_CONFIG))
     if reason_code == "ui_dirs_missing":
-        return ("阶段路径闸拒绝落盘（%sui_dirs_missing）：段 %s 读不到 ui_evidence 声明目录，"
-                "改动 %s 无白名单可判——%s"
+        return ("Stage path gate refused the write (%sui_dirs_missing): stage %s cannot "
+                "read the ui_evidence declared dirs; change %s has no whitelist to "
+                "judge against — %s"
                 % (PATH_GATE_REASON_KEY, stage_id, names, _OUT_CONFIG))
     if reason_code == "status_failed":
-        return ("路径闸无法判定（%sstatus_failed）：git status 失败，改动清单未知，"
-                "fail-closed 不落盘——出路：修复环境后重跑（环境类，进协议三态之「环境」）"
+        return ("Path gate could not judge (%sstatus_failed): git status failed, change "
+                "list unknown, fail-closed no write — way out: fix the environment and "
+                "rerun (environment class, filed as the environment state of the "
+                "protocol tri-state)"
                 % PATH_GATE_REASON_KEY)
     rule = STAGE_PATH_RULES.get(str(stage_id or ""))
     desc = _STAGE_FACE_DESC.get(rule.get("kind")) if rule else None
     if rule and rule.get("kind") == "prefixes":
-        desc = "仅 %s" % "、".join(rule.get("prefixes") or ())
-    return ("阶段路径闸拒绝落盘（%sunauthorized_path）：段 %s 不允许改 %s（本段只许：%s）"
-            "——%s"
+        desc = "only %s" % "、".join(rule.get("prefixes") or ())
+    return ("Stage path gate refused the write (%sunauthorized_path): stage %s does not "
+            "allow changing %s (this stage allows only: %s) — %s"
             % (PATH_GATE_REASON_KEY, stage_id, names,
-               desc or "规则表声明面", _OUT_Unauthorized))
+               desc or "faces declared by the rules table", _OUT_Unauthorized))
 
 
 def is_gate_refusal(note: str) -> bool:
@@ -498,23 +505,33 @@ def is_gate_refusal(note: str) -> bool:
 # ---------------- 结构化红灯明细（t260915-01；只结构化既有结论，零新判定） ----------------
 
 _NEXT_ACTION_HINTS = {
-    "unauthorized_path": "越权文件由引擎按状态自动处置（新建挪档/未暂存修改回滚并留档，"
-                         "删除与暂存态留人工）；内容确需改动：integration/ 面走 rework "
-                         "打回 design_integration_tests，其余面建票把文件列入写集",
-    "protected_path": "共享真源与守卫的改动走 main 侧专用票；本票只读不写",
-    "unknown_stage": "给该段补声明模板类 PATH_GATE_RULES[\"<段id>\"]=<允许面 kind>"
-                     "（外置模板只收弱面 result_files/write_set/join/prefixes），"
-                     "或改用已配置段",
-    "write_set_missing": "工单写集为空/缺失——回 create_plan 补结构化回执后再实现",
-    "ui_dirs_missing": "补 verify.yaml 的 ui_evidence.dirs 声明（或按项目口径补截图证据）",
-    "status_failed": "修复泳道 git 环境（git status 失败=改动清单未知，fail-closed）后发 retry_qc 重验",
+    "unauthorized_path": "Out-of-scope files are auto-disposed by the engine per git "
+                         "state (new files moved aside, unstaged edits rolled back and "
+                         "archived; deletions and staged states left to humans); if the "
+                         "content truly needs the change: integration/-face content "
+                         "goes through rework back to design_integration_tests, other "
+                         "faces file a ticket to add the file to the write set",
+    "protected_path": "Changes to shared source of truth and guards go through a "
+                      "dedicated main-side ticket; this ticket reads only, writes "
+                      "nothing",
+    "unknown_stage": "Declare on the template class for this stage: "
+                     "PATH_GATE_RULES[\"<stage id>\"]=<allowed-face kind> (external "
+                     "templates accept only weak faces result_files/write_set/join/"
+                     "prefixes), or use a configured stage",
+    "write_set_missing": "Ticket write set is empty/missing — return to create_plan to "
+                         "restore the structured receipt before implementing",
+    "ui_dirs_missing": "Add the ui_evidence.dirs declaration to verify.yaml (or supply "
+                       "screenshot evidence per the project's convention)",
+    "status_failed": "Repair the lane git environment (git status failure = change "
+                     "list unknown, fail-closed), then send retry_qc to re-verify",
 }
 
 
 def next_action_hint(reason_code: str) -> str:
     """reason_code → 人话下一步动作（与 gate_refusal_note 的出路文案同向，不改 note）。"""
     return _NEXT_ACTION_HINTS.get(
-        str(reason_code or ""), "按 worker 日志核对该拒绝原因后处置")
+        str(reason_code or ""), "Verify this refusal cause against the worker log "
+        "before acting")
 
 
 def gate_red_detail(stage_id: str, violations: Sequence[str],
@@ -540,7 +557,7 @@ def gate_red_detail(stage_id: str, violations: Sequence[str],
     rc = str(reason_code or "").strip() or "gate_refusal_unknown"
     return {
         "check_id": "path_gate@%s" % (str(stage_id or "") or "unknown_stage"),
-        "item": "受保护路径闸" if rc == "protected_path" else "段×允许面路径闸",
+        "item": "Protected-path gate" if rc == "protected_path" else "Stage × allowed-face path gate",
         "red": True,
         "reason_code": rc,
         "files": files,

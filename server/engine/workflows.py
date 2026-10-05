@@ -99,13 +99,13 @@ class ContentPipelineWorkflow:
             process_stage, f"提案 {inp.proposal_id} 已登记：{inp.title}",
             start_to_close_timeout=short, retry_policy=retry)
 
-        self._enter("approve", "awaiting-human", "等人签字：sign(gate=approve)")
+        self._enter("approve", "awaiting-human", "awaiting signature: sign(gate=approve)")
         await workflow.wait_condition(lambda: "approve" in self._sigs)
         sig = self._sigs["approve"]
         await workflow.execute_activity(
             record_signature, sig, start_to_close_timeout=short, retry_policy=retry)
         if sig.decision != "approve":
-            self._enter("approve", "blocked", f"人否决：{sig.note}")
+            self._enter("approve", "blocked", f"human veto: {sig.note}")
             self.result = "rejected-at-approve"
             return self.snapshot()
 
@@ -136,7 +136,7 @@ class ContentPipelineWorkflow:
 
             self._sigs.pop("final-review", None)
             self.signatures.pop("final-review", None)
-            self._enter("final-review", "awaiting-human", "等人终审：sign(gate=final-review)")
+            self._enter("final-review", "awaiting-human", "awaiting final review: sign(gate=final-review)")
             await workflow.wait_condition(lambda: "final-review" in self._sigs)
             fsig = self._sigs["final-review"]
             await workflow.execute_activity(
@@ -165,13 +165,15 @@ class ContentPipelineWorkflow:
         if getattr(sig, "authorize", None) is not None:
             self.refused_attempts.append(
                 {"who": sig.who, "want": "sign(authorize)",
-                 "why": "本模板无人授权面，authorize 载荷拒收（不落签字）"})
+                 "why": "this template has no authorization face; authorize "
+                        "payload refused (no signature recorded)"})
             workflow.logger.warn("拒绝 authorize 载荷：本模板无人授权面")
             return
         if sig.gate not in HUMAN_GATES:
             self.refused_attempts.append(
-                {"who": sig.who, "want": f"sign({sig.gate})", "why": "非人门，签字无效"})
-            workflow.logger.warn("拒绝签字：%s 不是人门", sig.gate)
+                {"who": sig.who, "want": f"sign({sig.gate})",
+                 "why": "not a human gate; signature invalid"})
+            workflow.logger.warn("signature refused: %s is not a human gate", sig.gate)
             return
         # t260915-12 跨项目闸（第二道，统一接闸不留分叉）：本模板 meta 无 project 面
         # →judge 对 target="" 恒放行；未来模板补项目面时此处自动升级为拒收/记名。
@@ -195,13 +197,14 @@ class ContentPipelineWorkflow:
         self.timeline.append(
             {"at": workflow.now().isoformat(timespec="seconds"), "stage": self.stage,
              "state": "retry-requested",
-             "reason": f"{who} 请求重跑机器门（第 {self.qc_retry_token} 次）"})
+             "reason": f"{who} requests machine-gate rerun (attempt {self.qc_retry_token})"})
 
     @workflow.signal
     def force_stage(self, attempt: StageAttempt) -> None:
         self.refused_attempts.append(
             {"who": attempt.who, "want": attempt.want_stage,
-             "why": "状态只由 workflow 代码推进；越过门的写状态请求无效",
+             "why": "state advances only via workflow code; write-state requests "
+                    "that bypass the gate are invalid",
              "stage_when_asked": self.stage})
         workflow.logger.warn("拒绝改状态：%s 想把 %s 改成 %s", attempt.who, self.stage, attempt.want_stage)
 

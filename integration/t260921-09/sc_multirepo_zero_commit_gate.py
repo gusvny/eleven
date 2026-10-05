@@ -112,7 +112,7 @@ def main():
         check("①-零改动仓不红且点名",
               item1["green"] is True and n1 == 0
               and item1.get("reason_code") == "no_changes_no_diff"
-              and "零改动" in item1["item"] and "无需改动" in item1["detail"],
+              and "zero-change confirmed" in item1["item"] and "no changes genuinely needed" in item1["detail"],
               json.dumps(item1, ensure_ascii=False)[:200])
         check("①-有改动仓仍绿（旧路径零回归）",
               item2["green"] is True and n2 == 1 and "reason_code" not in item2,
@@ -140,7 +140,7 @@ def main():
         check("②-仅提交面红=位点异常（文案分叉）",
               item4["green"] is False and n4 == 0
               and item4.get("reason_code") == "no_commits"
-              and "位点异常" in item4.get("next_action", "")
+              and "position abnormal" in item4.get("next_action", "")
               and "树与 base 有差异" in item4.get("detail", ""),
               json.dumps(item4, ensure_ascii=False)[:240])
 

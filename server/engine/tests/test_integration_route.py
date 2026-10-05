@@ -18,7 +18,7 @@ def test_tests_fault_within_limit():
 def test_tests_fault_over_limit_blocked():
     r = integration_route("tests-fault", MAX_TESTS_FAULT_ROUNDS + 1, 0)
     assert r.startswith("blocked:")
-    assert "测试集迭代" in r and str(MAX_TESTS_FAULT_ROUNDS) in r  # 文案含上限
+    assert "test-set iterations" in r and str(MAX_TESTS_FAULT_ROUNDS) in r  # copy carries the cap
 
 
 def test_code_fault_within_limit():

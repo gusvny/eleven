@@ -128,9 +128,12 @@ def compose_worker_activities(extra_stage_ids=()):
         src = getattr(a, "__module__", "?")
         if name in seen:
             raise ValueError(
-                "活动名撞车（worker 注册前置断言，KI-121）：活动 %s 已由 %s 注册，"
-                "再来件 %s —— 外置模板段 id 不得与引擎注册活动同名（同名=注册期崩，"
-                "工人起不来）；加载口应已在合并期拒收，此处为最后防线"
+                "activity name collision (worker registration pre-assert, KI-121): "
+                "activity %s is already registered by %s, and %s offers it again — "
+                "external template segment ids must not share a name with a "
+                "registered engine activity (same name = crash at registration, "
+                "the worker cannot start); the load gate should have refused this "
+                "at merge time, this is the last line of defense"
                 % (name, seen[name], src))
         seen[name] = src
     return acts
@@ -298,7 +301,9 @@ def verify_signal_transport() -> list:
                 problems.append("Signature.%s 解码丢失（转换器静默丢弃未知字段）" % f.name)
         got = getattr(out, "authorize", None)
         if got is None:
-            problems.append("authorize 载荷解码后为空——sign 信号面会静默回落普通签字路径")
+            problems.append("authorize payload is empty after decode — the sign "
+                            "signal face would silently fall back to the plain "
+                            "signature path")
         else:
             for f in _dc.fields(_HA):
                 if not hasattr(got, f.name):
@@ -448,17 +453,19 @@ def guard_single_worker(pidfile: str, replace: bool = False) -> "str | None":
                 % (pid, started, pidfile, where, pid))
     own_root = os.path.realpath(str(pathlib.Path(__file__).resolve().parents[2]))
     if meta.get("repo_root") and os.path.realpath(str(meta["repo_root"])) != own_root:
-        return ("拒绝 --replace：pidfile 旁车 meta 指向**另一个仓**（repo_root=%s，本仓=%s）"
-                "——不代杀他人进程，请人工处置（核对 %s 里的 pid=%d）"
-                % (where, own_root, pidfile, pid))
+        return ("--replace refused: the pidfile sidecar meta points at another repo "
+                "(repo_root=%s, this repo=%s) — this process will not kill another "
+                "repo's process; handle it manually (check pid=%d in %s)"
+                % (where, own_root, pid, pidfile))
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         log.warning("--replace：旧 worker pid=%d 在发信号前已退出——直接接管", pid)
         return None
     except OSError as e:
-        return ("--replace 失败：向旧 worker pid=%d 发 SIGTERM 出错（%s: %s）——未起新进程，"
-                "请人工处置" % (pid, type(e).__name__, e))
+        return ("--replace failed: error sending SIGTERM to old worker pid=%d "
+                "(%s: %s) — no new process was started; handle it manually"
+                % (pid, type(e).__name__, e))
     t0 = time.time()
     while time.time() - t0 < REPLACE_WAIT_SEC:
         if not pid_alive(pid):
@@ -466,9 +473,11 @@ def guard_single_worker(pidfile: str, replace: bool = False) -> "str | None":
                      pid, time.time() - t0)
             return None
         time.sleep(REPLACE_POLL_SEC)
-    return ("--replace 超时：旧 worker pid=%d 在 %.0fs 内未退出——**不 KILL**（在飞 agent 活动"
-            "被硬切会让票面带病），本次不起新进程。请人工处置：查 data/worker.log 的"
-            "「停机点名」看在飞活动，或 kill -TERM %d 后再起"
+    return ("--replace timed out: old worker pid=%d did not exit within %.0fs — "
+            "NO KILL (hard-cutting in-flight agent activities would leave tickets "
+            "in a half-done state); no new process was started this time. Handle it "
+            "manually: check data/worker.log for the shutdown roll-call to see "
+            "in-flight activities, or kill -TERM %d and start again"
             % (pid, REPLACE_WAIT_SEC, pid))
 
 

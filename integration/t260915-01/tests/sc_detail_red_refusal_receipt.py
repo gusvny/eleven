@@ -169,7 +169,7 @@ def main():
                                      face="join")
     ok("path_gate_reason=protected_path" in str(note3), "note 带受保护原因码")
     ok(refusal3.get("reason_code") == "protected_path", "结构化 reason_code=protected_path")
-    ok(refusal3.get("item") == "受保护路径闸", "人话名=受保护路径闸")
+    ok(refusal3.get("item") == "Protected-path gate", "人话名=受保护路径闸（Protected-path gate）")
     ok(refusal3.get("evidence") == note3, "evidence 与 note 逐字相同")
 
     # ---- L4 接线子用例：真回执+真 refusal 喂 _apply_settle_note → 挂载 ----

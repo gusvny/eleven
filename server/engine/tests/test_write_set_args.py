@@ -23,7 +23,7 @@ def test_string_write_set_rejected():
     """字符串写集拒收：不拒会被 for 迭代成单字符列表（"app"→['a','p','p']）变假护栏
     （t260902-10 新增形态校验）。"""
     ok, flags, err = v("app", False)
-    assert ok is False and flags == {} and "列表" in err
+    assert ok is False and flags == {} and "character-by-character" in err
     ok, _, _ = v("app/", False)  # 含斜杠字符串旧实现碰巧被拒（巧合），现属显式校验
     assert ok is False
     assert v(42, False)[0] is False

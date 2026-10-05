@@ -458,9 +458,9 @@ def main() -> int:
                "回执 ok:false + kind=terminal（KI-025 分级零退化；got kind=%r）"
                % res.get("kind"))
             errtxt = str(res.get("error") or "")
-            ok("终态" in errtxt and "刷新无效" in errtxt,
+            ok("already terminal" in errtxt and "refreshing will not help" in errtxt,
                "文案仍明说终态/刷新无效（诚实口径红线；got=%r)" % errtxt[:80])
-            for bad in ("刷新重试", "瞬时", "工单不存在"):
+            for bad in ("retry", "transient", "ticket does not exist"):
                 ok(bad not in errtxt,
                    "文案不含「%s」（终态绝不伪装可重试/瞬时/不存在——含否定形式也算）"
                    % bad)

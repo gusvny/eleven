@@ -198,7 +198,7 @@ def _read_json(path: str) -> Tuple[Optional[Any], Optional[str]]:
     except (OSError, UnicodeDecodeError) as e:
         return None, "unreadable: %s: %s" % (type(e).__name__, e)
     except json.JSONDecodeError as e:
-        return None, "malformed: JSON 解析失败（%s）" % e
+        return None, "malformed: JSON parse failed (%s)" % e
 
 
 def validate_declaration(doc: Any) -> Tuple[Dict[str, Any], Optional[str]]:
@@ -208,31 +208,31 @@ def validate_declaration(doc: Any) -> Tuple[Dict[str, Any], Optional[str]]:
     grants 键不在 GRANT_OPS / night_tier 形状坏 / until 非未来合理时间盒 → 点名拒收。
     """
     if not isinstance(doc, dict):
-        return {}, "声明顶层必须是 JSON 对象（收到 %s）" % type(doc).__name__
+        return {}, "declaration top level must be a JSON object (got %s)" % type(doc).__name__
     if doc.get("version") != DECL_VERSION:
-        return {}, "声明 version 必须是 %d（收到 %r）" % (DECL_VERSION, doc.get("version"))
+        return {}, "declaration version must be %d (got %r)" % (DECL_VERSION, doc.get("version"))
     grants_in = doc.get("grants", {})
     if not isinstance(grants_in, dict):
-        return {}, "grants 必须是 JSON 对象（收到 %s）" % type(grants_in).__name__
+        return {}, "grants must be a JSON object (got %s)" % type(grants_in).__name__
     grants: Dict[str, bool] = {}
     for k, v in grants_in.items():
         if k not in GRANT_OPS:
-            return {}, "grants 键 %r 不在固定操作面 %s 内——未知操作不给静默承认" % (k, list(GRANT_OPS))
+            return {}, "grants key %r is not in the fixed op surface %s — unknown ops are never silently accepted" % (k, list(GRANT_OPS))
         if not isinstance(v, bool):
-            return {}, "grants.%s 必须是 boolean（收到 %r）" % (k, v)
+            return {}, "grants.%s must be a boolean (got %r)" % (k, v)
         if v:
             grants[k] = True
     night = doc.get("night_tier")
     night_ok: Optional[Dict[str, Any]] = None
     if night is not None:
         if not isinstance(night, dict):
-            return {}, "night_tier 必须是对象 {enabled, until, note?}（收到 %s）" % type(night).__name__
+            return {}, "night_tier must be an object {enabled, until, note?} (got %s)" % type(night).__name__
         en, until = night.get("enabled"), night.get("until")
         if not isinstance(en, bool) or not isinstance(until, (int, float)) or isinstance(until, bool):
-            return {}, "night_tier 需 {enabled: boolean, until: 毫秒时间戳}（收到 enabled=%r until=%r）" % (en, until)
+            return {}, "night_tier needs {enabled: boolean, until: millisecond timestamp} (got enabled=%r until=%r)" % (en, until)
         note = night.get("note", "")
         if not isinstance(note, str):
-            return {}, "night_tier.note 必须是字符串（收到 %r）" % (note,)
+            return {}, "night_tier.note must be a string (got %r)" % (note,)
         night_ok = {"enabled": en, "until": int(until), "note": note[:500]}
     # t261001-20：声明可点名本项目执行器会话（dsh session id 列表）——「谁算本项目
     # 执行器」由宿主在声明里点名，判闸用它做受信会话身份比对（不再只看 cwd 推导）。
@@ -241,15 +241,15 @@ def validate_declaration(doc: Any) -> Tuple[Dict[str, Any], Optional[str]]:
     if sessions_in is not None:
         if not isinstance(sessions_in, list) or \
                 any(not isinstance(s, str) or not s.strip() for s in sessions_in):
-            return {}, "executor_sessions 必须是非空字符串数组（收到 %r）" % (sessions_in,)
+            return {}, "executor_sessions must be an array of non-empty strings (got %r)" % (sessions_in,)
         for s in sessions_in:
             sid = s.strip()
             if len(sid) > EXECUTOR_SESSION_ID_MAX:
-                return {}, "executor_sessions 项超限（%d > %d 字符）" % (len(sid), EXECUTOR_SESSION_ID_MAX)
+                return {}, "executor_sessions entry too long (%d > %d chars)" % (len(sid), EXECUTOR_SESSION_ID_MAX)
             if sid not in sessions:
                 sessions.append(sid)
         if len(sessions) > EXECUTOR_SESSIONS_MAX:
-            return {}, "executor_sessions 至多 %d 个会话 id（收到 %d）——缩表后再存" % (
+            return {}, "executor_sessions holds at most %d session ids (got %d) — shrink the list before saving" % (
                 EXECUTOR_SESSIONS_MAX, len(sessions))
     # t261004-19: open-ticket per-epic authorization — open_ticket_epics (epic code
     # list) and open_ticket_cap (positive int, default 3). Host-only keys: the
@@ -305,16 +305,16 @@ def load_declaration(key: str) -> Dict[str, Any]:
     if doc is None:
         if err == "absent":
             return {"ok": False, "kind": "absent", "declared": False,
-                    "reason": "项目 %s 尚无执行器授权声明（缺 %s）——零授予=只读与问" % (key, path),
+                    "reason": "project %s has no executor grant declaration yet (missing %s) — zero grants = read and ask only" % (key, path),
                     "file": path}
         kind = "unreadable" if str(err).startswith("unreadable") else "malformed"
         return {"ok": False, "kind": kind, "declared": True,
-                "reason": "执行器授权声明不可判定（%s：%s）——fail-closed 拒收，绝不静默放行" % (kind, err),
+                "reason": "executor grant declaration unreadable (%s: %s) — refused fail-closed, never silently allowed" % (kind, err),
                 "file": path}
     normalized, verr = validate_declaration(doc)
     if verr:
         return {"ok": False, "kind": "malformed", "declared": True,
-                "reason": "执行器授权声明被拒收（%s：%s）——fail-closed 拒收，绝不静默放行" % (path, verr),
+                "reason": "executor grant declaration rejected (%s: %s) — refused fail-closed, never silently allowed" % (path, verr),
                 "file": path}
     return {"ok": True, "declared": True, "file": path, "decl": normalized,
             "grants": dict(normalized.get("grants") or {}),
@@ -423,20 +423,24 @@ def judge_core(channel: str, op: str, key: str,
     # 元权限反锁：先于声明读取（声明缺席/畸形也锁得住），夜间档也解不开。
     if op_s == META_OP:
         return _refuse(
-            "执行器元权限反锁：改/扩授予清单（%s）是宿主特权操作，执行器永远不能自己做"
-            "（声明缺席/畸形/夜间档均不解锁）——由宿主在执行器面板 Grants 页操作" % META_OP,
+            "executor meta-permission lock: changing or extending the grant list (%s) "
+            "is a host-privileged op, the executor can never do it itself (absent/"
+            "malformed declaration and night tier never unlock it) — the host does "
+            "this in the executor panel Grants page" % META_OP,
             META_OP, None, now_ms, audit_sink, key, op_s)
     if grant_op is None:
-        hint = "（%s 属宿主/引擎件操作面）" % op_s if op_s in ENGINE_HOST_ONLY_OPS else ""
+        hint = " (%s belongs to the host/engine-internal op surface)" % op_s if op_s in ENGINE_HOST_ONLY_OPS else ""
         return _refuse(
-            "执行器授权拒收：操作 %s 不在可授予的固定操作面 %s 内%s——固定面外没有"
-            "「执行器可做」这回事（fail-closed）" % (op_s, list(GRANT_OPS), hint),
+            "executor grant refused: op %s is not in the grantable fixed surface %s%s "
+            "— outside the fixed surface there is no \"what the executor may do\" "
+            "(fail-closed)" % (op_s, list(GRANT_OPS), hint),
             grant_op or "(unmapped)", None, now_ms, audit_sink, key, op)
     load = load_face(key)
     if not load.get("ok"):
         return _refuse(
-            "%s——要在执行器面板 Grants 页为项目 %s 授予 %s（声明文件 %s）"
-            % (load.get("reason"), key, grant_op, load.get("file")),
+            "%s — the host grants %s for project %s in the executor panel Grants "
+            "page (declaration file %s)"
+            % (load.get("reason"), grant_op, key, load.get("file")),
             grant_op, load, now_ms, audit_sink, key, op)
     if (load.get("grants") or {}).get(grant_op) is True:
         return {"allowed": True, "why": "", "grant_op": grant_op, "enforced": True,
@@ -446,8 +450,9 @@ def judge_core(channel: str, op: str, key: str,
         return {"allowed": True, "why": "", "grant_op": grant_op, "enforced": True,
                 "provenance": provenance_of(load, grant_op, now_ms)}
     return _refuse(
-        "执行器授权拒收：声明 %s 未授予 %s（grants.%s 缺席或=false）——要授予请在"
-        "执行器面板 Grants 页保存 {\"grants\": {\"%s\": true}}（宿主操作）"
+        "executor grant refused: declaration %s does not grant %s (grants.%s absent "
+        "or false) — to grant it, the host saves {\"grants\": {\"%s\": true}} in the "
+        "executor panel Grants page (host action)"
         % (load.get("file"), grant_op, grant_op, grant_op),
         grant_op, load, now_ms, audit_sink, key, op)
 
@@ -510,21 +515,23 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
     in the audit row so a later reader can tell a host action through the panel from
     any other origin. Absent = the field is absent (existing audit rows unchanged)."""
     if not str(key or ""):
-        return {"saved": False, "reason": "缺项目 key", "file": None}
+        return {"saved": False, "reason": "missing project key", "file": None}
     if session_matches_declaration(caller_channel, lane_surface, str(key or "")):
         audit_sink(str(key), {"at": int(now_ms), "action": "refuse", "project": str(key),
                               "op": META_OP, "who": str(by or "")[:64],
                               "why": "executor identity refused (META_OP lock)",
                               **({"source": source} if isinstance(source, dict) else {})})
         return {"saved": False, "file": declaration_path(key),
-                "reason": "执行器元权限反锁：执行器身份（通道=%s）不能改/扩/缩自己的授予清单"
-                          "（manage-grants 是宿主特权）——由宿主在执行器面板 Grants 页操作"
+                "reason": "executor meta-permission lock: an executor identity "
+                          "(channel=%s) cannot change, extend, or shrink its own "
+                          "grant list (manage-grants is a host privilege) — the host "
+                          "does this in the executor panel Grants page"
                           % (str(caller_channel or "").strip() or EXECUTOR_CHANNEL)}
     who = str(by or "").strip()
     if not who:
-        return {"saved": False, "reason": "缺 by（谁在改授予清单——授予变更必须记名）", "file": None}
+        return {"saved": False, "reason": "missing by (who changes the grant list — a grant change must be named)", "file": None}
     if not isinstance(grants, dict):
-        return {"saved": False, "reason": "grants 必须是对象 {op: boolean}", "file": None}
+        return {"saved": False, "reason": "grants must be an object {op: boolean}", "file": None}
     doc: Dict[str, Any] = {"version": DECL_VERSION,
                            "grants": {k: bool(v) for k, v in grants.items() if v is True},
                            "updated_by": who[:64], "updated_at": int(now_ms)}
@@ -567,7 +574,7 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
         re_norm, re_err = validate_declaration(back)
         if re_err:
             os.unlink(tmp)
-            return {"saved": False, "reason": "回读校验被拒收（不落一份坏声明）：%s" % re_err, "file": path}
+            return {"saved": False, "reason": "read-back validation refused (never land a bad declaration): %s" % re_err, "file": path}
         os.replace(tmp, path)
     except OSError as e:
         try:
@@ -575,7 +582,7 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
                 os.unlink(tmp)
         except OSError:
             pass
-        return {"saved": False, "reason": "写盘失败：%s: %s" % (type(e).__name__, e), "file": path}
+        return {"saved": False, "reason": "write to disk failed: %s: %s" % (type(e).__name__, e), "file": path}
     audit_sink(key, {"at": int(now_ms), "action": "grant-change", "project": key,
                      "who": who[:64],
                      "from": prev_norm.get("grants") or {}, "to": normalized.get("grants") or {},

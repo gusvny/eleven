@@ -234,7 +234,7 @@ def leg5_no_fallback(workdir):
     err = str(out.get("error") or "")
     check("子用例5c 空注册表显式报错（不冒充全绿无巡检面）",
           out.get("ok") is False
-          and ("没有任何项目条目" in err or "注册表为空" in err),
+          and ("no project entries at all" in err),
           "out=%s" % json.dumps(out, ensure_ascii=False)[:160])
     root = os.path.join(workdir, "reg1")   # 子用例1 夹具：proj-a/b/c/d，无样例实例
     out2 = run_trig({"SANDBAR_PROJECTS_DIR": root}, "decl")

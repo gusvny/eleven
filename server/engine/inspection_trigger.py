@@ -113,14 +113,15 @@ def _enabled_spec(decl_path: Optional[Path], instance_id: str) -> Dict[str, Any]
     if explicit:
         decl = load_inspection_decl(Path(explicit))
         if decl.instance(instance_id) is None:
-            raise ValueError("实例 %r 未在声明中（在册：%s）"
-                             % (instance_id, "、".join(i.id for i in decl.instances)))
+            raise ValueError("instance %r not in declaration (registered: %s)"
+                             % (instance_id, ", ".join(i.id for i in decl.instances)))
     else:
         decl, _project_key = load_decl_for_instance(instance_id)
     spec = next((s for s in build_schedule_specs(decl) if s["instance_id"] == instance_id), None)
     if spec is None:
-        raise ValueError("实例 %r 在声明中未启用（enabled=false 不触发）；已启用：%s——改声明即改行为"
-                         % (instance_id, "、".join(i.id for i in decl.enabled_instances()) or "无"))
+        raise ValueError("instance %r declared but not enabled (enabled=false does not trigger); enabled: %s — "
+                         "change the declaration to change behavior"
+                         % (instance_id, ", ".join(i.id for i in decl.enabled_instances()) or "none"))
     return spec
 
 
@@ -137,8 +138,9 @@ def resolve_repo_root(spec: Dict[str, Any], explicit_repo_root: str) -> str:
         return explicit
     identity = str((spec or {}).get("instance_project_key") or "").strip()
     if not identity:
-        raise ValueError("实例 %r 无项目身份且未给 --repo-root：repo_root 无解析依据"
-                         "（无项目身份的巡检=无主票，绝不静默回落引擎仓）"
+        raise ValueError("instance %r has no project identity and no --repo-root: nothing to resolve repo_root "
+                         "from (an inspection without project identity = an unowned ticket; "
+                         "never silently fall back to the engine repo)"
                          % (spec or {}).get("instance_id", "?"))
     from shared import resolve_project_root
     return str(resolve_project_root(identity))
@@ -802,8 +804,8 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
         return _err("声明不可用：%s" % e)
     it = decl.instance(args.instance)
     if it is None:
-        return _err("实例 %r 未在声明中（在册：%s）"
-                    % (args.instance, "、".join(i.id for i in decl.instances)))
+        return _err("instance %r not in declaration (registered: %s)"
+                    % (args.instance, ", ".join(i.id for i in decl.instances)))
     if it.kind != "cron":
         return _err("实例 %r 的调度 kind=%r 不是 cron（漏跑核查只对 cron 期有定义）"
                     % (args.instance, it.kind))

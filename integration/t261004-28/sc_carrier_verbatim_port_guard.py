@@ -14,8 +14,8 @@
   C2 代码面同一（宿主 L15 裁定后的重基判据；不许降级成「文件在」或自declare）：
      每份文件与其作者源在「剥离注释与 docstring、字符串字面量去非 ASCII 归一」
      后 token 流逐项相等，且测试函数名集合与个数不变。允许的差异面=译文注释/
-     docstring 与被归一的非 ASCII 字面量（断言里的引擎拒收文案保留中文、逐行
-     copy-lang-allow:data 标记——那是数据耦合不是文案）。源不可达=ENV_FAIL
+     docstring 与被归一的非 ASCII 字面量（断言里的引擎拒收文案已随 t261004-36 译英、
+     不再带 copy-lang-allow: data 标记（拆写避免本场景自体携带该标记字面）（标记退役是 t261004-36 的票面要求）。源不可达=ENV_FAIL
      exit 2 点名缺哪只源，不判 FAIL。
      源基准：t19 闸 ← blob 8cee0cd（票面 12772 B 源，lane 分支退役后对象库即
      真源）；t18 写入口 ← integration/t261004-25/evidence/...gen5 证据副本；
@@ -78,6 +78,13 @@ ADAPTED_LITERALS = {
         ('"上限 3" in v["why"] and "缺省即 3" in v["why"]',
          '"at the cap of 3" in v["why"] and "default 3" in v["why"]'),
         ('"没有立项档案" in v2["why"]', '"no epic file" in v2["why"]'),
+        # t261004-36 copy translation: the meta-permission-lock refusal reason and
+        # the fixture charter header were anglicized in the landed file too.
+        ('"反锁" in (r.get("reason") or "")', '"meta-permission lock" in (r.get("reason") or "")'),
+        ('write_text("# 立项单\\n"', 'write_text("# epic charter\\n"'),
+    ],
+    "t261004-18-write-entry": [
+        ('"反锁" in res["reason"]', '"meta-permission lock" in res["reason"]'),
     ],
 }
 SRC_18 = pathlib.Path("integration/t261004-25/evidence/t261004-18_grants_write_entry.py.txt")

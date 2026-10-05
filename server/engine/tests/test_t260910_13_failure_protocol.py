@@ -73,7 +73,7 @@ def test_violation_fail_with_prepare_reason():
              evidence="ENV_FAIL: docker 不可用")))
     assert c["status"] == "not-checked" and c.get("violation") is True
     assert c["reason"] == "connect_refused"          # reason 原样保留
-    assert viols and "不许报 fail" in viols[0]
+    assert viols and "must not report fail" in viols[0]
 
 
 def test_unbacked_env_fail_becomes_fail():
@@ -130,7 +130,7 @@ def test_true_regression_blocks():
 def test_baseline_red_records_not_block():
     v = fp.decide(fp.normalize_case(case(name="doc-contrast")),
                   _red(["doc-contrast"]), True, True)
-    assert v["verdict"] == "record" and "既有欠账" in v["why"]
+    assert v["verdict"] == "record" and "existing debt" in v["why"]
 
 
 def test_not_checked_self_main_green_blocks():

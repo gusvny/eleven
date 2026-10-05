@@ -102,7 +102,7 @@ def main():
         # （runAdminCli「成功/结构化失败原样透传」），断言锚 payload 不锚 rc。
         env0 = client_env(reg)
         rc, payload, out = start_ticket(py, env0, "t26090707-cli-n1", "external", "missing-code")
-        check(payload.get("ok") is False and "立项代号不存在" in out and ext_epics in out,
+        check(payload.get("ok") is False and "epic code not found" in out and ext_epics in out,
               "N1 external 确缺 epic：连接前拒收且文案带 external 实际目录", out[-240:])
         rc, payload, out = start_ticket(py, env0, "t26090707-cli-n2", "external", "engine-only")
         check(payload.get("ok") is False and eng_epics not in out,

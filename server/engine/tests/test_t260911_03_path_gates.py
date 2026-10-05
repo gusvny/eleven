@@ -298,7 +298,7 @@ def test_note_single_line_and_names_files():
                       "server/engine/d.py"], "unauthorized_path")
     assert "\n" not in note
     assert "path_gate_reason=unauthorized_path" in note
-    assert "arbitrate" in note and "server/engine/a.py" in note and "等 4 项" in note
+    assert "arbitrate" in note and "server/engine/a.py" in note and "(+4 more)" in note
     assert "main" in note  # 出路文案在场
     assert pg.is_gate_refusal(note)
     assert not pg.is_gate_refusal("工作区已干净，无需代落盘")

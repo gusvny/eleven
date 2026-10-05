@@ -103,7 +103,7 @@ def test_validate_malformed_refused(grants_root, doc):
 
 def test_validate_top_level_not_object():
     _, err = eg.validate_declaration([1, 2])
-    assert err and "JSON 对象" in err
+    assert err and "JSON object" in err
 
 
 # ---------- load_declaration：absent / malformed / unreadable / ok ----------
@@ -170,7 +170,7 @@ def test_reverse_lock_manage_grants(grants_root):
     """元权限反锁杆：声明全授予+夜间档在盒内，manage-grants 仍拒收。"""
     _write_decl(grants_root, "sandbar", _full_decl(night={"enabled": True, "until": 9_999}))
     v = eg.judge_core("cwd", "manage-grants", "sandbar", eg.load_declaration, 1_000, audit_sink=_sink)
-    assert v["allowed"] is False and "反锁" in v["why"]
+    assert v["allowed"] is False and "meta-permission lock" in v["why"]
     assert any(r[1]["op"] == "manage-grants" for r in SINK)
     SINK.clear()
 
@@ -186,7 +186,7 @@ def test_refuse_names_declaration_and_item_and_how_to_grant(grants_root):
 
 def test_absent_declaration_refused_with_path(grants_root):
     v = eg.judge_core("cwd", "rerun", "sandbar", eg.load_declaration, 1_000, audit_sink=_sink)
-    assert v["allowed"] is False and eg.DECL_FILE in v["why"] and "零授予" in v["why"]
+    assert v["allowed"] is False and eg.DECL_FILE in v["why"] and "zero grants" in v["why"]
     SINK.clear()
 
 
@@ -247,7 +247,7 @@ def test_save_requires_by(grants_root):
 
 def test_save_reverse_lock_executor_channel(grants_root):
     r = eg.save_declaration("sandbar", {"sign": True}, "executor", 1_000, caller_channel="cwd")
-    assert r["saved"] is False and "反锁" in r["reason"]
+    assert r["saved"] is False and "meta-permission lock" in r["reason"]
     assert not (grants_root / "sandbar" / eg.DECL_FILE).exists()
 
 

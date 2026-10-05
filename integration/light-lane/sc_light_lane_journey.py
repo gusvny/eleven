@@ -104,7 +104,8 @@ UI_DIR = "server/plugins/workbench/src/client/"
 UI_FILE = UI_DIR + "LIGHTLANE_UI_PROBE.ts"
 #: 改前原文（真源=server/engine/path_gates.py `_NEXT_ACTION_HINTS["write_set_missing"]`；
 #: 字面量照抄——轻道票面必须已把它改写掉）。
-HINT_BEFORE = "工单写集为空/缺失——回 create_plan 补结构化回执后再实现"
+HINT_BEFORE = ("Ticket write set is empty/missing — return to create_plan to "
+               "restore the structured receipt before implementing")
 WRITE_FILE = "LIGHT_LANE_PROBE.md"
 # 夹具注册表里的三条秒级场景（红轮=三条全红 → 完整违规集面；绿轮=三条全绿）
 GATE_NAMES = ("lightlane-fixture-alpha", "lightlane-fixture-beta", "lightlane-fixture-gamma")

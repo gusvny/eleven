@@ -171,15 +171,15 @@ def leg2_env_signal_and_face_text(tmp):
     wf._handover_debt_put("implement", bad)
     asyncio.run(wf._block_agent_failed("implement", bad))
     blocked = [e for e in wf.timeline if e.get("state") == "blocked"]
-    check("子用例2：blocked 文案点名「agent 沙箱不可用（环境）」",
-          len(blocked) == 1 and "agent 沙箱不可用（环境）" in blocked[0]["reason"],
+    check("子用例2：blocked 文案点名「agent sandbox unavailable (environment)」",
+          len(blocked) == 1 and "agent sandbox unavailable (environment)" in blocked[0]["reason"],
           blocked and blocked[0].get("reason"))
     reason = blocked[0]["reason"]
-    check("子用例2：文案与实现缺位分开（明示非实现缺位）", "非实现缺位" in reason, reason)
+    check("子用例2：文案与实现缺位分开（明示非实现缺位）", "not an implementation gap" in reason, reason)
     check("子用例2：给出后续出路（retry_qc/rework）", "retry_qc" in reason
           and "rework" in reason, reason)
     check("子用例2：票不停摆声明（验证交由后续段 worker 执行面承接）",
-          "不停摆" in reason and "worker 执行面承接" in reason, reason)
+          "does not stall" in reason and "worker execution face" in reason, reason)
     # blocked 段无命令可交时债表保持空（不造垃圾债；put 的语义分支见 G4/G5 UT）
     check("子用例2：无命令可交时债表不造垃圾条目",
           wf.meta.get("env_handover_pending") in (None, []),
@@ -203,11 +203,11 @@ def leg3_empty_legs_not_washed_green():
     print("—— 子用例3 R4 空清单语义")
     note = shared.env_note_for(StageResult(status="ok", env_fail=True))
     check("子用例3：空清单注记点名「不当作已验证」",
-          "未验证且无移交命令" in note and "不当作已验证" in note, note)
+          "no handover commands" in note and "not treated as verified" in note, note)
     note2 = shared.env_note_for(StageResult(
         status="ok", env_fail=True,
         handover_dropped=["条目0:非对象", "条目1:cmd 缺失或非字符串"]))
-    check("子用例3：弃单记名进注记（不静默丢）", "弃 2 条" in note2, note2)
+    check("子用例3：弃单记名进注记（不静默丢）", "dropped 2" in note2, note2)
     check("子用例3：ok+env_fail 不误报失败文案（信号与 status 不混同）",
           shared.agent_env_failed_reason(
               StageResult(status="ok", env_fail=True)) == "")
@@ -215,7 +215,7 @@ def leg3_empty_legs_not_washed_green():
         status="ok", env_fail=True,
         handover_runs=[{"name": "a", "cmd": "c"}, {"name": "b", "cmd": "d"}]))
     check("子用例3：有命令注记=移交语义（票面可见）",
-          "移交 2 条命令待执行" in note3 and "a" in note3, note3)
+          "2 handover commands pending execution" in note3 and "a" in note3, note3)
     arb = dev_lane.FLOW_BRIEF["arbitrate"]
     check("子用例3：仲裁契约句在场（env_fail 段=验证未闭环不得当已验证）",
           "验证未闭环" in arb and "不得当已验证" in arb)

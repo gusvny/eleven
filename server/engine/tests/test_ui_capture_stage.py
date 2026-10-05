@@ -128,7 +128,7 @@ def test_knob_defaults_and_overrides():
                                      ("SANDBAR_CAPTURE_STAGE_DOWN_CAP_S", "1..2")])
 def test_knob_malformed_usage_red(key, val):
     os.environ[key] = val
-    with pytest.raises(uis.UiStageError, match="usage 红"):
+    with pytest.raises(uis.UiStageError, match="usage red"):
         (uis.up_cap_s if key.endswith("UP_CAP_S") else uis.down_cap_s)()
 
 
@@ -227,7 +227,7 @@ def test_down_stage_missing_cli_never_raises(tmp_path):
 
 def test_down_stage_empty_project_usage(fake_repo):
     r = uis.down_stage("  ", repo_root=fake_repo, runner=FakeRunner())
-    assert r["ok"] is False and "usage 红" in r["detail"]
+    assert r["ok"] is False and "usage red" in r["detail"]
     r2 = uis.down_stage(None, repo_root=fake_repo, runner=FakeRunner())
     assert r2["ok"] is False
 
@@ -307,7 +307,7 @@ def test_run_capture_stage_timeout_names_and_downs(monkeypatch, tmp_path):
         project="p", capture_cmd=[sys.executable, "-c", "import time; time.sleep(30)"],
         capture_timeout_s=0.6, stage_up_timeout_s=10, repo_root=str(tmp_path)))
     assert r["ok"] is False and r["timed_out"] is True
-    assert "超时" in r["detail"], "fail-visible：超时必须点名"
+    assert "timed out" in r["detail"], "fail-visible: the timeout must be named"
     assert down_calls == ["p"], "超时路拆台"
 
 

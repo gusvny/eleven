@@ -236,9 +236,15 @@ def main() -> int:
     section("C. named-error discipline (never a bare 'not green')")
     _helper = dl_src.split("def _main_sync_before_gate", 1)
     _helper = _helper[1][:26000] if len(_helper) > 1 else ""
-    ok("主同步失败" in _helper and "主同步检出 merge 冲突" in _helper,
+    ok("main sync failed" in _helper and "main sync detected merge conflict" in _helper,
        "C loud-blocked texts name the failed mechanism (main sync / conflict)")
-    ok("不静默跳过" in _helper or "不静默" in _helper,
+    # The blocked copy is wrapped across source lines as adjacent literals
+    # ("never silently " "skip the sync"), so glue the literal seams and
+    # normalize whitespace before matching — same semantic property: the
+    # block names its sanctioned way out (hand over to a human) instead of
+    # silently skipping.
+    _helper_norm = " ".join(re.sub(r'"\s*"', " ", _helper).split())
+    ok("never silently skip the sync" in _helper_norm,
        "C no silent skip on sync failure")
     ok(re.search(r'_blocked\([^)]*,\s*"(?:not green|未产出结果)"', _helper) is None,
        "C no _blocked call in the sync passes a bare placeholder message")

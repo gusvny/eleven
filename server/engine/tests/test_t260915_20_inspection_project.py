@@ -184,9 +184,9 @@ def fixture_registry(tmp_path, monkeypatch):
 def test_resolve_project_root_empty_key_raises(fixture_registry):
     # 比先例 resolve_epics_dir 更严：**无空 key 回落分支**（静默回落引擎仓=本票要杀的族）
     from shared import resolve_project_root
-    with pytest.raises(ValueError, match="项目身份为空"):
+    with pytest.raises(ValueError, match="empty project identity"):
         resolve_project_root("")
-    with pytest.raises(ValueError, match="项目身份为空"):
+    with pytest.raises(ValueError, match="empty project identity"):
         resolve_project_root(None)
 
 
@@ -258,7 +258,7 @@ def test_resolve_repo_root_identity_leg_unknown_key_named(fixture_registry):
 def test_resolve_repo_root_defense_leg_raises():
     # ③ 防御子用例：解析层已必填身份，正常不可达；可达即旁路绕过声明面——绝不静默回落
     from inspection_trigger import resolve_repo_root
-    with pytest.raises(ValueError, match="无项目身份"):
+    with pytest.raises(ValueError, match="no project identity"):
         resolve_repo_root({"instance_id": "x", "instance_project_key": ""}, "")
 
 

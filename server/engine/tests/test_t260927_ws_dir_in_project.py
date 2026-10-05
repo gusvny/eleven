@@ -55,7 +55,7 @@ def test_legacy_base_would_be_refused_by_that_gate(project):
     legacy = {"type": "dir", "path": "/tmp/sandbar-ws/t-1"}
     with pytest.raises(ValueError) as ei:
         shared.check_paths_under_project(project, legacy, "")
-    assert "不在项目" in str(ei.value)
+    assert "is not inside the registered directories" in str(ei.value)
 
 
 def test_env_override_still_wins(monkeypatch, project):

@@ -81,11 +81,11 @@ def _run_inventory(repo_root: Path, runner=None) -> Dict[str, Any]:
         raise RuntimeError("inventory rc=%s：%s" % (rc, (err or "").strip()[-300:]))
     lines = [ln for ln in out.strip().splitlines() if ln.strip()]
     if not lines:
-        raise ValueError("inventory 回执为空")
+        raise ValueError("inventory receipt is empty")
     try:
         receipt = json.loads(lines[-1])
     except ValueError as e:
-        raise ValueError("inventory 回执末行非 JSON（%s…）：%s" % (lines[-1][:60], e))
+        raise ValueError("inventory receipt last line is not JSON (%s...): %s" % (lines[-1][:60], e))
     if not isinstance(receipt, dict) or not receipt.get("ok"):
         raise RuntimeError("inventory 回执 ok≠true：%s" %
                            str(receipt.get("error") or receipt)[:300])

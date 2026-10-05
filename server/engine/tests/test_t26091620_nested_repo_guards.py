@@ -287,7 +287,7 @@ def test_gitlink_check_item_red_names_gitlink(lane_repo):
     item = aa._gitlink_check_item(base, "lane/t26091620ut", root)
     assert item["green"] is False and item["reason_code"] == "gitlink_present"
     assert item["files"] == ["content"]
-    assert "勿摘 gitlink 绕行" in item["next_action"]
+    assert "never strip the gitlink to work around it" in item["next_action"]
 
 
 def test_gitlink_check_item_skip_and_fault(lane_repo):

@@ -190,8 +190,8 @@ def check_write_set(paths: Iterable[Any], docs_root: str = "") -> List[Dict[str,
             out.append({"path": p, "reason": reason})
             continue
         if p != root and not p.startswith(root + "/"):
-            out.append({"path": p, "reason": "越出文档根 %s（doc change 只限文档根，"
-                                             "代码/注释/integration/notes 一律不在写集）" % root})
+            out.append({"path": p, "reason": "outside doc root %s (doc change is limited to the doc root; "
+                                             "code/comments/integration/notes are never in the write set)" % root})
     return out
 
 

@@ -315,8 +315,8 @@ def validate_period_key(instance_id: str, period: str) -> None:
     去重键/台账键，体内在铸期回落分支后照旧闭式校验（形状非法=ValueError，与旧铸号
     校验同语义，replay 面对合法期零影响）。"""
     if not instance_id or not PERIOD_RE.match(period or ""):
-        raise ValueError("票号组成非法：instance=%r period=%r（期号须 YYYYMMDD 或 "
-                         "YYYYMMDD-<bucket>）" % (instance_id, period))
+        raise ValueError("invalid ticket id composition: instance=%r period=%r (period must be YYYYMMDD or "
+                         "YYYYMMDD-<bucket>)" % (instance_id, period))
 
 
 def inspection_ledger_name(instance_id: str, period: str) -> str:
@@ -326,8 +326,8 @@ def inspection_ledger_name(instance_id: str, period: str) -> str:
     （inspection_deadman.LEDGER_NAME_RE），键名稳定=漏跑核查零改动。老票重放同名——
     旧实现恰好就是这个名字（旧票号=旧形 id=实例+期），逐字节不变。"""
     if not instance_id or not PERIOD_RE.match(str(period or "")):
-        raise ValueError("落账名组成非法：instance=%r period=%r（期号须 YYYYMMDD 或 "
-                         "YYYYMMDD-<bucket>）" % (instance_id, period))
+        raise ValueError("invalid ledger name composition: instance=%r period=%r (period must be YYYYMMDD or "
+                         "YYYYMMDD-<bucket>)" % (instance_id, period))
     return "inspection-%s-%s.json" % (instance_id, period)
 
 
@@ -336,7 +336,7 @@ def watcher_workflow_id(instance_id: str) -> str:
     重跑 schedule-up 必命中同一 workflow（幂等拉起/复活的前提）。形状变更=运维契约
     变更，须带单测锁定（test_t260911_02_watcher.py）。"""
     if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
-        raise ValueError("watcher id 组成非法：instance=%r（小写 slug）" % instance_id)
+        raise ValueError("invalid watcher id composition: instance=%r (lowercase slug)" % instance_id)
     return "inspection-watcher-%s" % instance_id
 
 
@@ -599,9 +599,9 @@ def build_ticket_face(
         无这些键 → 循环结果与旧实现同值）。"""
     from inspection_inspect import SUGGEST_CONFIDENCE, is_counted
     if not ticket_id or not instance_id:
-        raise ValueError("票面缺票号/实例")
+        raise ValueError("ticket face missing ticket_id/instance")
     if not isinstance(scan_result, dict) or not isinstance(scan_result.get("findings"), list):
-        raise ValueError("扫描结果畸形：缺 findings 列表（fail-closed，不渲染）")
+        raise ValueError("malformed scan result: missing findings list (fail-closed, no rendering)")
     findings = list(scan_result.get("findings") or [])
     # 追加发现（t260913-02：套件红/环境红/漏跑）——defaulted 空=None 时旧路径逐字段不变
     extra = [f for f in (extra_findings or []) if isinstance(f, dict)]
@@ -832,7 +832,7 @@ def write_inspection_report_impl(face: Dict[str, Any], out_dir: Path,
     instance_id = str(face.get("instance_id") or "")
     period = str(face.get("period") or "")
     if not instance_id or not period:
-        raise ValueError("落账缺实例/期号（face.instance_id/period）")
+        raise ValueError("ledger entry missing instance/period (face.instance_id/period)")
     name = inspection_ledger_name(instance_id, period)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -875,7 +875,7 @@ def write_inspection_suite_receipt_impl(instance_id: str, period: str,
         m = re.match(r"^inspection-(.+)-(\d{8}(?:-[1-9]\d*)?)$",
                      str((receipt or {}).get("ticket_id") or ""))
         if not m:
-            raise ValueError("套件回执缺实例/期号（且 ticket_id 非旧形可解析）")
+            raise ValueError("suite receipt missing instance/period (and ticket_id not parseable as the legacy form)")
         instance_id, period = m.group(1), m.group(2)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2095,7 +2095,7 @@ def spawn_workflow_id(instance_id: str) -> str:
     """spawner workflow id（形状单点，同 watcher_workflow_id 纪律：同声明重跑 schedule-up
     必命中同一 workflow——幂等 update 的前提）。"""
     if not instance_id or not re.match(r"^[a-z0-9][a-z0-9-]{0,63}$", instance_id):
-        raise ValueError("spawn id 组成非法：instance=%r（小写 slug）" % instance_id)
+        raise ValueError("invalid spawn id composition: instance=%r (lowercase slug)" % instance_id)
     return "inspection-spawn-%s" % instance_id
 
 

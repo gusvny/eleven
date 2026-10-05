@@ -429,7 +429,7 @@ def main() -> int:
        "D-3 3 轮内 resolve、第 4 次超限 blocked：%s" % seq)
     _, d = _mc_decision({"rounds": 3, "prev_files": ["x"]},
                         {"green": False, "conflict": True, "conflict_files": ["y"]})
-    ok("冲突消解 3 轮未收敛" in d, "D-4 超限 blocked 文案锚点「冲突消解 N 轮未收敛」带轮数（S3）")
+    ok("main-sync conflict resolution did not converge in 3 rounds" in d, "D-4 over-cap blocked text anchor carries the round count (S3)")
     # D-5 non-conflict red regression: all three shapes -> blocked-nonconflict
     a, _ = _mc_decision({"rounds": 0, "prev_files": []},
                         {"green": False, "conflict": False, "conflict_files": []})

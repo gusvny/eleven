@@ -287,10 +287,10 @@ def test_enabled_spec_helper_offline_gates():
     from inspection_trigger import _enabled_spec, _valid_period
     spec = _enabled_spec(REPO / "inspection.yaml", "integration-tests")
     assert spec["workflow"] == "InspectionPeriodicWorkflow"
-    with pytest.raises(ValueError, match="未启用"):
+    with pytest.raises(ValueError, match="not enabled"):
         # t260910-09 占位实例仍禁用——fail-closed 负例迁移到它
         _enabled_spec(REPO / "inspection.yaml", "mechanism-face")
-    with pytest.raises(ValueError, match="未在声明"):
+    with pytest.raises(ValueError, match="not in declaration"):
         _enabled_spec(REPO / "inspection.yaml", "nope")
     assert _valid_period("20260905") is None
     assert _valid_period("20260905-2") is None          # t260911-02：计数期形态放行

@@ -125,7 +125,7 @@ meta_new_bad = {"lane": "worktree", "workspace": dict(ws_mx),
                 "repo_worktrees": [_good_entry("a", "lane/one"), _good_entry("b", "lane/one")]}
 err_new = gate(meta_new_bad)
 check("M2a 闸新位：meta 顶层 repo_worktrees 分支碰撞 → 拒且文案可辨（fail-closed 新位不漏）",
-      bool(err_new) and "碰撞" in err_new,
+      bool(err_new) and "collision" in err_new,
       "err=%r" % (err_new,))
 meta_new_ok = dict(meta_new_bad)
 meta_new_ok["repo_worktrees"] = [_good_entry("a", "lane/one"), _good_entry("b", "lane/two")]
@@ -137,7 +137,7 @@ meta_old_bad = {"lane": "worktree",
                 "worktree": ws_mx.get("path", ""), "branch": "lane/x"}
 err_old = gate(meta_old_bad)
 check("M2b 闸旧位回落：workspace 内嵌旧形状畸形 → 仍拒（回落兼容不弱化检）",
-      bool(err_old) and "碰撞" in err_old,
+      bool(err_old) and "collision" in err_old,
       "err=%r" % (err_old,))
 
 # ---------- M3 编解码缝子用例（temporalio 面） ----------

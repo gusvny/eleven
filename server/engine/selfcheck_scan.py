@@ -76,9 +76,9 @@ ok(is_pending_decision(tk(status="verified", stage_state="awaiting")) is False,
 section("B build_scan_item 建议规则")
 
 it = build_scan_item(tk(status="rework", stage="final-review", stage_state="awaiting-human",
-                        pending=[{"ts": NOW - 600, "note": "待审批"}]),
+                        pending=[{"ts": NOW - 600, "note": "awaiting approval"}]),
                      now_ts=NOW)
-ok(it.suggestion == "可签" and any("人门" in r for r in it.reasons), "人门挂起 → 可签")
+ok(it.suggestion == "\u53ef\u7b7e" and any("human gate" in r for r in it.reasons), "human gate pending -> signable")
 ok(it.pending_count == 1 and any("pending" in r for r in it.reasons), "pending 条数进条目")
 
 it = build_scan_item(tk(acceptance=["a", "b", "c"],
@@ -90,14 +90,14 @@ ok(any("1/3" in r for r in it.reasons), "待补理由带勾选率")
 
 it = build_scan_item(tk(acceptance=["a"], checks={"verify": [{"item": "a", "done": True}]}),
                      gate_label="verify_lane code", gate_green=False, now_ts=NOW)
-ok(it.suggestion == "待补" and any("红灯" in r for r in it.reasons), "脚本门红 → 待补")
+ok(it.suggestion == "\u5f85\u8865" and any("latest result red" in r for r in it.reasons), "script gate red -> to-complete")
 
 it = build_scan_item(tk(acceptance=["a"], checks={"verify": [{"item": "a", "done": True}]}),
                      gate_label="verify_lane code", gate_green=True, now_ts=NOW)
-ok(it.suggestion == "可签" and any("绿灯" in r for r in it.reasons), "验收全勾+脚本门绿 → 可签")
+ok(it.suggestion == "\u53ef\u7b7e" and any("latest result green" in r for r in it.reasons), "acceptance done + gate green -> signable")
 
 it = build_scan_item(tk(), now_ts=NOW)
-ok(it.suggestion == "可签" and any("无验收清单" in r for r in it.reasons),
+ok(it.suggestion == "\u53ef\u7b7e" and any("no acceptance checklist" in r for r in it.reasons),
    "settled 无验收清单 → 可签（可验收收口）")
 
 it = build_scan_item(tk(acceptance=["a"],
@@ -115,17 +115,17 @@ ok(it.suggestion == "疑似卡死" and abs(it.dwell_hours - 50.0) < 0.05,
 ok(it.dwell_hours == 50.0, "停留时长=updated 起算 50.0h")
 
 it = build_scan_item(tk(updated=NOW - 100 * 3600,
-                        log=[{"ts": NOW - 2 * 3600, "note": "投影刷新"}],
+                        log=[{"ts": NOW - 2 * 3600, "note": "projection refresh"}],
                         pending=[{"ts": NOW - 10 * 3600, "note": "x"}]),
                      now_ts=NOW, stuck_hours=48)
 ok(abs(it.dwell_hours - 2.0) < 0.05, "停留取 max(updated/log/pending)=2.0h → 不判卡死")
 
 # ---- C. gate_from_log 兜底 ----
 section("C gate_from_log 兜底")
-g = gate_from_log(tk(log=[{"ts": 1, "note": "脚本门 verify_lane code 红灯 2 项 → 不推进"}]))
+g = gate_from_log(tk(log=[{"ts": 1, "note": "script gate verify_lane code red items 2 → no advance"}]))
 ok(g["green"] is False and g["source"] == "log", "log 红灯记录 → green=False")
-g = gate_from_log(tk(log=[{"ts": 1, "note": "advance: develop → verify（handoff 已记）"}]))
-ok(g["green"] is None and g["source"] == "无脚本门记录", "无脚本门记录 → None")
+g = gate_from_log(tk(log=[{"ts": 1, "note": "advance: develop → verify (handoff recorded)"}]))
+ok(g["green"] is None and g["source"] == "no script-gate record", "no script-gate record -> None")
 
 # ---- D+E. 同一事件循环内跑（python3.9 的 asyncio.run 关循环后 Event 拿不到 loop）----
 
@@ -168,7 +168,7 @@ async def _async_checks() -> ScanReport:
     ok([i.ticket_id for i in rep.items] == ["t-stuck", "t-fill", "t-human"],
        "过滤 closed/running + 排序 疑似卡死→待补→可签")
     ok(rep.summary == {"疑似卡死": 1, "待补": 1, "可签": 1}, "summary 三档计数")
-    ok("脚本门" in "".join(rep.items[0].reasons),
+    ok("script gate" in "".join(rep.items[0].reasons),
        "temporal 不可达 → log 兜底理由进条目")
     # 未归档清单（epic-linkage 验收标准 3）：无 epic 的在途工单进清单
     ok(rep.unfiled == ["t-fill", "t-stuck"],

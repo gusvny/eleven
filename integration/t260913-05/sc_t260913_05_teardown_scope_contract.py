@@ -166,7 +166,7 @@ def leg_e(tmp):
           res.ok is False and getattr(res, "action", "") == "failed",
           "ok=%r action=%r error=%r" % (res.ok, getattr(res, "action", ""), res.error))
     check("E3 点名损坏对象（清单/损坏字样在回执里）",
-          ("损坏" in str(res.error or "")), "error=%r" % res.error)
+          ("corrupted" in str(res.error or "")), "error=%r" % res.error)
     r = residue_state(fx, lane)
     check("E4 零动作：损坏态下两个仓的注册/分支/目录原样不动",
           r["root"]["worktree_registered"] and r["repo_a"]["worktree_registered"]

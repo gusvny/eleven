@@ -146,7 +146,7 @@ def test_b4_non_list_is_malformed_named():
     for junk in ("pytest -q", 42, {"name": "a", "cmd": "b"}, 3.14):
         legs, shape, dropped = shared.normalize_handover_runs(junk)
         assert legs == [] and shape == "malformed"
-        assert dropped == ["handover_runs 非列表"]
+        assert dropped == ["handover_runs is not a list"]
 
 
 def test_b5_per_item_validation_named_drops_never_silent():
@@ -166,15 +166,15 @@ def test_b5_per_item_validation_named_drops_never_silent():
     assert legs[0]["cmd"] == "echo ok"
     assert len(dropped) == 8                                        # 逐条记名，不静默丢
     # （条目0-5 与条目7 共 7 条整条丢弃 + 条目6 截断保留仍记名 1 条）
-    assert any("条目7" in d and "不截断执行" in d for d in dropped)
-    assert any("条目0" in d for d in dropped)
+    assert any("item7:" in d and "never truncated and run" in d for d in dropped)
+    assert any("item0:" in d for d in dropped)
 
 
 def test_b8_leg_cap_tail_dropped_named():
     raw = [{"name": "l%d" % i, "cmd": "echo %d" % i} for i in range(25)]
     legs, shape, dropped = shared.normalize_handover_runs(raw)
     assert shape == "ok" and len(legs) == shared.HANDOVER_MAX_LEGS
-    assert len(dropped) == 5 and dropped[0].startswith("条目20")
+    assert len(dropped) == 5 and dropped[0].startswith("item20:")
 
 
 def test_b9_whitespace_stripped():
@@ -322,10 +322,10 @@ def test_e1_env_failed_reason_full_text():
                       env_reason="sandbox_apply: Operation not permitted")
     why = shared.agent_env_failed_reason(res)
     assert "\n" not in why
-    assert "agent 沙箱不可用（环境）" in why                    # 点名环境（要求②）
+    assert "agent sandbox unavailable (environment)" in why                    # names the environment (requirement 2)
     assert "sandbox_apply" in why                              # 真因摘录在场
-    assert "不停摆" in why and "retry_qc" in why and "rework" in why  # 后续出路
-    assert "非实现缺位" in why                                  # 与实现缺位分开（要求①）
+    assert "does not stall" in why and "retry_qc" in why and "rework" in why  # the way out
+    assert "not an implementation gap" in why                                  # kept apart from an implementation gap (requirement 1)
 
 
 def test_e2_zero_change_for_non_env_or_non_failed():
@@ -341,7 +341,7 @@ def test_e3_malformed_never_raise_and_reason_missing_fallback():
         assert shared.agent_env_failed_reason(junk) == ""
     duck = SimpleNamespace(status="failed", env_fail=True)      # 无 env_reason 属性
     why = shared.agent_env_failed_reason(duck)
-    assert "agent 沙箱不可用（环境）" in why and "原因未声明" in why
+    assert "agent sandbox unavailable (environment)" in why and "cause not declared" in why
 
 
 def test_e4_env_note_single_source_matrix():
@@ -351,29 +351,29 @@ def test_e4_env_note_single_source_matrix():
     # 有命令 → 交接语义 + 前 3 名
     note = shared.env_note_for(StageResult(status="ok", env_fail=True,
                                            handover_runs=legs[:2]))
-    assert "移交 2 条命令待执行" in note and "n0" in note and "n1" in note and "等" not in note
+    assert "2 handover commands pending execution" in note and "n0" in note and "n1" in note and "\u7b49" not in note
     note = shared.env_note_for(StageResult(status="ok", env_fail=True,
                                            handover_runs=legs))
-    assert "移交 4 条命令待执行" in note and note.endswith("等") and "n3" not in note
+    assert "4 handover commands pending execution" in note and note.endswith("et al.") and "n3" not in note
     # 空清单 → R4 fail-closed：不当已验证
     note = shared.env_note_for(StageResult(status="ok", env_fail=True))
-    assert "未验证且无移交命令" in note and "不当作已验证" in note
+    assert "unverified, and no handover commands" in note and "not treated as verified" in note
     # 空清单 + 弃单 → 弃 N 条记名（M4 三面落面的单源措辞）
     note = shared.env_note_for(StageResult(
         status="ok", env_fail=True,
-        handover_dropped=["条目0:非对象", "条目1:cmd 缺失", "条目2:非对象"]))
-    assert "弃 3 条" in note and "条目0:非对象" in note and "条目2" not in note  # 只摘前 2
+        handover_dropped=["item0:not an object", "item1:cmd missing", "item2:not an object"]))
+    assert "dropped 3" in note and "item0:not an object" in note and "item2" not in note  # only the first 2 kept
 
 
 # ---------- F. dev_lane 路由 + 源码锁（要求②） ----------
 
 def test_f1_env_failure_routed_to_env_text():
     wf = _mk_wf()
-    res = StageResult(status="failed", summary="实现未完成",
-                      env_fail=True, env_reason="沙箱三种模式均拒")
+    res = StageResult(status="failed", summary="implementation incomplete",
+                      env_fail=True, env_reason="\u6c99\u7bb1\u4e09\u79cd\u6a21\u5f0f\u5747\u62d2")
     why = wf._agent_failed_why(res)
-    assert "agent 沙箱不可用（环境）" in why
-    assert "沙箱三种模式均拒" in why and "不停摆" in why
+    assert "agent sandbox unavailable (environment)" in why
+    assert "\u6c99\u7bb1\u4e09\u79cd\u6a21\u5f0f\u5747\u62d2" in why and "does not stall" in why
 
 
 def test_f2_legacy_text_preserved_verbatim_for_non_env():
@@ -392,7 +392,7 @@ def test_f3_block_agent_failed_lands_blocked_with_env_text():
     asyncio.run(wf._block_agent_failed("implement", res))
     entries = [e for e in wf.timeline if e.get("state") == "blocked"]
     assert len(entries) == 1 and entries[0]["stage"] == "implement"
-    assert "agent 沙箱不可用（环境）" in entries[0]["reason"]
+    assert "agent sandbox unavailable (environment)" in entries[0]["reason"]
 
 
 def test_f4_source_locks_routing_sites_and_m3_variant():
@@ -403,7 +403,7 @@ def test_f4_source_locks_routing_sites_and_m3_variant():
     assert src.count("self._agent_failed_why(") == 5            # _block_agent_failed+3 站+M3
     assert 'await self._blocked("create_plan", self._agent_failed_why(res))' in src
     # M3：冲突消解变体一并路由——轮次前缀保留、后半路由（旧内联变体不得复辟）
-    assert '"冲突消解第 %d 轮：%s"' in src
+    assert '"main-sync conflict resolution round %d: %s"' in src
     assert '"冲突消解第 %d 轮 agent 报失败' not in src
 
 

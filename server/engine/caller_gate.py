@@ -58,11 +58,13 @@ def _check_shape(value: str, origin: str) -> str:
     v = str(value or "").strip()
     if not v:
         raise CallerIdentityError(
-            "调用方项目身份（%s）为空/纯空白——要么删除该声明（=未声明身份，按策略记名/拒收），"
-            "要么给合法项目 key（白名单：小写字母/数字/中划线）" % origin)
+            "caller project identity (%s) is empty/blank only — either drop the "
+            "declaration (= undeclared identity, recorded or refused per policy), "
+            "or give a valid project key (allowlist: lowercase letters/digits/hyphen)" % origin)
     if len(v) > 64 or not shared.PROJECT_KEY_RE.match(v):
         raise CallerIdentityError(
-            "调用方项目身份形状非法：%r（来自 %s；白名单 %s）——修正 %s 或调用方注入链后重试"
+            "caller project identity has an invalid shape: %r (from %s; allowlist %s) "
+            "— fix %s or the caller injection chain and retry"
             % (v[:64], origin, shared.PROJECT_KEY_RE.pattern, origin))
     return v
 
@@ -94,7 +96,7 @@ def resolve_identity(explicit: str, env_raw: str,
     shared.CALLER_UNDECLARED_MARK sentinel at stamp time). A malformed shape raises
     immediately (fail-closed)."""
     if str(explicit or "").strip():
-        return {"value": _check_shape(explicit, "显式参数 caller_project"),
+        return {"value": _check_shape(explicit, "explicit arg caller_project"),
                 "src": "arg", "identity_class": "declared"}
     if str(env_raw or "").strip():
         return {"value": _check_shape(env_raw, "env %s" % shared.CALLER_PROJECT_ENV),
@@ -136,21 +138,21 @@ def validate_override(args: Dict[str, Any]) -> Tuple[Optional[Dict[str, str]], s
         by = str(flag.get("by") or "").strip()
         reason = str(flag.get("reason") or "").strip()
     elif flag is not None:
-        return None, ("越权旗 cross_project 需为对象 {by, reason}（收到 %s）——"
+        return None, ("override flag cross_project must be an object {by, reason} (got %s) — "
                       % type(flag).__name__)
     if flat_reason:
         if reason:
-            return None, "越权旗理由重复：cross_project.reason 与 cross_project_reason 只给其一"
+            return None, "duplicate override reason: give only one of cross_project.reason and cross_project_reason"
         reason = flat_reason
         by = str(args.get("by") or args.get("who") or "").strip()  # 扁平形才兜底
     if not by:
-        return None, "越权旗缺 by（谁在越权——旗必须记名）；也可用 flat 形 cross_project_reason 让 by 取操作人 by|who"
+        return None, "override flag missing by (who overrides — the flag must be named); or use the flat form cross_project_reason so by takes the operator by|who"
     if not reason:
-        return None, "越权旗缺 reason（为什么跨项目——理由必填，记名留痕可查）"
+        return None, "override flag missing reason (why cross-project — reason is required; the record stays auditable)"
     if len(by) > shared.CROSS_PROJECT_BY_LIMIT:
-        return None, "越权旗 by 超限（%d > %d 字符）" % (len(by), shared.CROSS_PROJECT_BY_LIMIT)
+        return None, "override flag by over limit (%d > %d chars)" % (len(by), shared.CROSS_PROJECT_BY_LIMIT)
     if len(reason) > shared.CROSS_PROJECT_NOTE_LIMIT:
-        return None, ("越权旗 reason 超限（%d > %d 字符）——拆条后在目标票 ruling/pending 补充"
+        return None, ("override flag reason over limit (%d > %d chars) — split it and add the rest in the target ticket's ruling/pending"
                       % (len(reason), shared.CROSS_PROJECT_NOTE_LIMIT))
     return {"by": by, "reason": reason}, ""
 
@@ -182,19 +184,22 @@ def judge_caller(identity: Dict[str, Any], target: str,
             policy = shared.undeclared_policy()
         except ValueError as e:
             return {"decision": "refuse",
-                    "why": "跨项目闸：%s（策略误配 fail-closed 拒收）" % e,
+                    "why": "cross-project gate: %s (refused fail-closed on a malformed policy value)" % e,
                     "stamp": "", "notice": "", "override_used": False}
         if policy == "refuse":
             return {"decision": "refuse",
-                    "why": "跨项目闸：调用方项目身份未声明（%s 未注入且无显式参数），"
-                           "引擎策略=拒收——经注入链/包装层声明调用方项目后再操作"
+                    "why": "cross-project gate: caller project identity undeclared "
+                           "(%s not injected and no explicit arg); engine policy = "
+                           "refuse — declare the caller project through the injection "
+                           "chain/wrapper, then operate"
                            % shared.CALLER_PROJECT_ENV,
                     "stamp": "", "notice": "", "override_used": False}
         return {"decision": "record_undeclared", "why": "",
                 "stamp": shared.CALLER_UNDECLARED_MARK,
-                "notice": ("未声明调用方项目身份（%s 未注入且无显式参数），本次写操作按"
-                           "记名放行策略处理（经旋钮 %s=record 显式选入；缺省策略=拒收；"
-                           "注入契约见 server/engine/README.md）"
+                "notice": ("caller project identity undeclared (%s not injected and no "
+                           "explicit arg); this write passes under the record policy "
+                           "(explicitly opted in via knob %s=record; default policy = "
+                           "refuse; injection contract in server/engine/README.md)"
                            % (shared.CALLER_PROJECT_ENV, shared.UNDECLARED_POLICY_ENV)),
                 "override_used": False}
     # declared
@@ -206,13 +211,16 @@ def judge_caller(identity: Dict[str, Any], target: str,
                 "notice": "", "override_used": False}
     if override is None:
         return {"decision": "refuse",
-                "why": "跨项目写操作拒收：调用方项目身份 %s 与目标票所属项目 %s 不符，"
-                       "且未带越权旗——只操作本项目的票；确需跨项目走显式越权旗"
-                       " cross_project={by, reason 必填}（记名留痕可查）" % (value, target),
+                "why": "cross-project write refused: caller project identity %s does "
+                       "not match the target ticket's project %s and no override flag "
+                       "is present — operate only on this project's tickets; for a true "
+                       "cross-project need use the explicit override flag "
+                       "cross_project={by, reason required} (the record stays auditable)" % (value, target),
                 "stamp": "", "notice": "", "override_used": False}
     return {"decision": "pass_override", "why": "",
             "stamp": value,
-            "notice": ("跨项目越权记名：调用方项目 %s 操作项目 %s 的票（by=%s，理由=%s）"
+            "notice": ("cross-project override recorded: caller project %s operates on "
+                       "project %s tickets (by=%s, reason=%s)"
                        % (value, target, override["by"], override["reason"][:120])),
             "override_used": True}
 

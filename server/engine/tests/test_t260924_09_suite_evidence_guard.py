@@ -53,7 +53,7 @@ class TestClassifier:
         """裸全量（未传 --exclude-pools）=口径漂移，点名零排除与闸口径。"""
         v, _ = aa._classify_suite_calls([BARE])
         assert _kinds(v) == ["drift"]
-        assert "裸全量" in v[0]["detail"]
+        assert "bare full run" in v[0]["detail"]
         assert "engine,exclusive" in v[0]["detail"]
 
     def test_gate_caliber_full_counted_once_green(self):
@@ -66,8 +66,8 @@ class TestClassifier:
         """R2 用例：合法形态全量第 2 趟=「全量超上限」违规（合法形态同样入上限）。"""
         v, _ = aa._classify_suite_calls(["%s %s" % (BARE, GATE)] * 2)
         assert _kinds(v) == ["over_limit"]
-        assert "全量超上限" in v[0]["detail"]
-        assert "第 2 趟" in v[0]["detail"]
+        assert "full run over limit" in v[0]["detail"]
+        assert "run #2" in v[0]["detail"]
 
     def test_targeted_does_not_consume_full_limit(self):
         """定点与全量分账：定点 N 趟 + 合规全量 1 趟 = 绿。"""
@@ -88,7 +88,7 @@ class TestClassifier:
         assert _kinds(v) == ["drift"]
         # engin 语法合法（[a-z0-9-]+）但不在册=未知池不排除任何条目=实际全量
         # ——判漂移（缺闸池），不凭「传了 exclude」豁免
-        assert "不构成闸口径" in v[0]["detail"]
+        assert "is not the gate scope" in v[0]["detail"]
         assert "exclusive" in v[0]["detail"]
 
     def test_gate_plus_extra_bad_token_distinct_kind(self):
@@ -98,8 +98,8 @@ class TestClassifier:
         v, _ = aa._classify_suite_calls(
             [BARE + " --exclude-pools engine,exclusive,engin"])
         assert _kinds(v) == ["malformed_token"]
-        assert "口径含非法 token" in v[0]["detail"]
-        assert "裸全量" not in v[0]["detail"]
+        assert "contains illegal token" in v[0]["detail"]
+        assert "bare full run" not in v[0]["detail"]
 
     def test_empty_exclude_value_is_drift(self):
         """空串 exclude（executor 语义=全量）→ 漂移。"""
@@ -115,7 +115,7 @@ class TestClassifier:
         v, _ = aa._classify_suite_calls(
             [BARE + " --exclude-pools=engine,exclusive"])
         assert _kinds(v) == ["drift"]
-        assert "裸全量" in v[0]["detail"]
+        assert "bare full run" in v[0]["detail"]
 
     def test_only_missing_value_means_full(self):
         """`--only` 缺值=空名单=executor 语义全量，不走豁免。"""
@@ -287,8 +287,8 @@ class TestApply:
         res = shared.StageResult(status="ok", summary="走查完成")
         out = aa._apply_suite_budget(res, tmp_path, _mk_args(result_file=str(rfile)))
         assert out.status == "failed"
-        assert "取证面超限" in out.summary
-        assert "裸全量" in out.summary
+        assert "[evidence-face budget exceeded]" in out.summary
+        assert "bare full run" in out.summary
         # t260924-09 缺陷③：summary 必点名首条命令原文（同 t260921-04 执法
         # 契约——台面一行可定位是哪条命令越界，kind/detail 只作归因）。
         assert BARE in out.summary
@@ -361,8 +361,8 @@ class TestPromptSync:
         v1, _ = aa._classify_suite_calls([BARE])
         v2, _ = aa._classify_suite_calls(
             [BARE + " --exclude-pools engine,exclusive,engin"])
-        assert "裸全量" in v1[0]["detail"] and "非法 token" not in v1[0]["detail"]
-        assert "口径含非法 token" in v2[0]["detail"] and "裸全量" not in v2[0]["detail"]
+        assert "bare full run" in v1[0]["detail"] and "illegal token" not in v1[0]["detail"]
+        assert "contains illegal token" in v2[0]["detail"] and "bare full run" not in v2[0]["detail"]
 
     def test_hook_source_lock(self):
         """挂点源码锁：真 spawn 返回点以赋值/返回形链「执法 → 取证护栏」，防止

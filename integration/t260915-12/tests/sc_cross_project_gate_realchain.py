@@ -374,7 +374,7 @@ def main():
                                             "cross_project": bad}, env_o)
             doc = receipt(out)
             err = str(doc.get("error") or "")
-            check(doc.get("ok") is False and ("越权旗" in err or ("by" in err and "reason" in err)),
+            check(doc.get("ok") is False and ("override flag" in err or ("by" in err and "reason" in err)),
                   "%s 拒收且人话点名（%s）" % (label, err[:120]))
         s = query_snapshot(py, env, TID)
         check(len(cpu_uses(s)) == base_uses + 2, "畸形旗不记名不放行")

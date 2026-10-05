@@ -91,7 +91,7 @@ def test_intake_accepts_and_records():
     assert r["expires"] == int(NOW_DT.timestamp()) + 3600
     assert wf.refused == []
     assert any(t.get("state") == "authorized" for t in wf.timeline)
-    assert any("人授权签发" in (e.get("note") or "") for e in wf.meta.get("log") or [])
+    assert any("human authorization issued" in (e.get("note") or "") for e in wf.meta.get("log") or [])
     # 任意态可投：merge 人门未等待/段非 merge 也照样受理（与 host_ruling 同族）
     assert wf._sigs == {}
 
@@ -103,15 +103,15 @@ def test_intake_overwrites_caller_issued():
 
 
 @pytest.mark.parametrize("auth,frag", [
-    (_auth(kind="bogus"), "kind 非法"),
-    (_auth(who="developer"), "agent 不得自签"),
-    (_auth(who="INTEGRATION "), "agent 不得自签"),
-    (_auth(who="integration-agent"), "agent 不得自签"),
-    (_auth(reason="  "), "缺 reason"),
-    (_auth(scope=[]), "scope 空"),
-    (_auth(expires=int(NOW_DT.timestamp()) - 1), "已过期"),
-    (_auth(expires=int(NOW_DT.timestamp()) + shared.AUTHZ_EXPIRES_MAX_SEC + 1), "expires 超上限"),
-    (_auth(kind=AUTH_ARBITRATION_VERDICT, scope=["t-other"]), "必须恰为本票票号"),
+    (_auth(kind="bogus"), "invalid kind"),
+    (_auth(who="developer"), "must not self-authorize"),
+    (_auth(who="INTEGRATION "), "must not self-authorize"),
+    (_auth(who="integration-agent"), "must not self-authorize"),
+    (_auth(reason="  "), "missing reason"),
+    (_auth(scope=[]), "empty scope"),
+    (_auth(expires=int(NOW_DT.timestamp()) - 1), "already passed"),
+    (_auth(expires=int(NOW_DT.timestamp()) + shared.AUTHZ_EXPIRES_MAX_SEC + 1), "expires over the cap"),
+    (_auth(kind=AUTH_ARBITRATION_VERDICT, scope=["t-other"]), "must be exactly this ticket's id"),
 ])
 def test_intake_refuses_do_not_enter_history(auth, frag):
     wf = _mk_wf()
@@ -198,7 +198,7 @@ def test_base_sign_guard_refuses_authorize():
     fn = base.TicketWorkflowBase.__dict__["sign"]
     fn = getattr(fn, "__func__", fn)
     fn(wf, _authz_sig(_auth()))
-    assert len(wf.refused) == 1 and "无人授权面" in wf.refused[0]["why"]
+    assert len(wf.refused) == 1 and "no authorization face" in wf.refused[0]["why"]
     assert getattr(wf, "_sigs", {}) == {}
 
 
@@ -218,7 +218,7 @@ def test_workflows_sign_guard_refuses_authorize():
     finally:
         workflows.workflow = old
     assert len(wf.refused_attempts) == 1
-    assert "无人授权面" in wf.refused_attempts[0]["why"]
+    assert "no authorization face" in wf.refused_attempts[0]["why"]
     assert wf._sigs == {} and wf.signatures == {}
 
 

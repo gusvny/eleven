@@ -286,7 +286,7 @@ function pyTicket(clientArgs, env) {
     yes.out.includes('零条目') || yes.out.includes('空'), yes.out.slice(-400));
   const probe = pyLookupRaw(root, 'rmlast');
   c.check('摘除后按 key 查询面空表抛错（契约①a 零条目=抛错列原因，assert_registry_nonempty）',
-    probe.code !== 0 && probe.out.includes('没有任何项目条目'),
+    probe.code !== 0 && probe.out.includes('no project entries at all'),
     `code=${probe.code} out=${probe.out.slice(-200)}`);
 }
 

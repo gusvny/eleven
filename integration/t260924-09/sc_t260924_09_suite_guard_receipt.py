@@ -185,8 +185,8 @@ def main():
               % (res.status, bool(v), note_of(res) or "无"))
         allface = json.dumps(v, ensure_ascii=False) + (res.summary or "") + \
             (res.report or "")
-        check("C2 归因含『非法 token』分诊语义（不与裸全量同级混诊）",
-              "非法" in allface,
+        check("C2 attribution names the illegal-token triage (never mis-filed as a bare full run)",
+              "illegal" in allface,
               "报告面无非法 token 分诊=归因把诊断引向『零排除裸全量』错误方向（T1）")
 
         # ---- D 次数上限（R2：合规全量同样入计数） ----
@@ -204,9 +204,9 @@ def main():
         check("D2 同口径全量第二趟命中超上限", res.status == "failed" and bool(v),
               "status=%s 键=%s（合规形态不计数=护栏对 KI-117 实案形态零拦截，R2）｜扫描注记=%s"
               % (res.status, bool(v), note_of(res) or "无"))
-        check("D3 超上限归因含『上限/超』语义点名",
+        check("D3 over-limit attribution names the cap semantics",
               bool(v) and any(k in json.dumps(v, ensure_ascii=False) + (res.summary or "")
-                              for k in ("上限", "超")),
+                              for k in ("limit", "over")),
               "命中但未说为什么红=报错不精确")
 
         # ---- E 幂等 + 畸形既有结果文件 ----

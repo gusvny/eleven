@@ -160,7 +160,7 @@ def test_targeted_sweep_refuses_a_shell_with_an_embedded_repo(repo):
     (shell / ".git").mkdir()
     res = _sweep(repo, P)
     assert shell.is_dir(), "内嵌 .git 目录＝独立仓根，绝不能拆"
-    assert any("人工处置" in e for e in res["result"]["errors"]), res["result"]["errors"]
+    assert any("handle manually" in e for e in res["result"]["errors"]), res["result"]["errors"]
     assert res["ok"] is False, "拒拆必须如实报错（不许假成功）"
 
 

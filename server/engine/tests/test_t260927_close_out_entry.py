@@ -65,7 +65,7 @@ def test_terminate_reason_prefix_roundtrip():
     assert shared.is_close_out_reason("普通清场理由") is False
     assert shared.is_close_out_reason("") is False
     # 前缀必须与「清场」可辨——这是终态面/admin.log 唯一的机器可读标记
-    assert "收口" in shared.CLOSE_OUT_PREFIX
+    assert "close-out" in shared.CLOSE_OUT_PREFIX
 
 
 def test_notice_records_close_out_and_sets_closed_from_blocked():
@@ -83,7 +83,7 @@ def test_notice_records_close_out_and_sets_closed_from_blocked():
     assert rec["who"] == "宿主" and "人工收口" in rec["reason"]
     # 被覆盖的状态如实留痕（A3.5 的「不许掩盖」在收口语义下靠留证成立）
     assert rec["was_state"] == "blocked" and rec["was_stage"] == "cs-publish"
-    assert any("人工记名收口" in x for x in wf.logs)
+    assert any("named close-out (close_out)" in x for x in wf.logs)
     assert any(st == "closed" for _s, st, _r in wf.marks)
     assert wf.refused == []
 

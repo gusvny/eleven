@@ -236,7 +236,7 @@ def drive_to_overlimit_blocked(py, fail, tmp, tid, state, proj_key, audit_env,
         #（与 selfcheck 相一 _stuck 同口径；260908 首跑实证 stage=acceptance_walkthrough）。
         if (s.get("stage") in ("arbitrate", "arb_acc_parallel", "acceptance_walkthrough")
                 and s.get("stage_state") == "blocked"
-                and "超限" in json.dumps(s, ensure_ascii=False)):
+                and "exceed the cap" in json.dumps(s, ensure_ascii=False)):
             return s
         return None
     snap = poll(_blocked, poll_s)

@@ -70,8 +70,8 @@ from lib_t260915_04 import (  # noqa: E402
 # 拒收标记与改法关键词（锚「拒+点名+改法关键词」，不锚整串措辞——文案可演进）。
 # 注：client 回执的对外契约=JSON {ok:false, error}——部分检查点的 error 不含
 # 「拒收/参数非法」字样，B 组判别一律锚 ok:false+检查家族词，不锚包装字样。
-REFUSE_MARKERS = ("参数非法", "拒收")
-FIX_KEYWORDS = ("整仓", "逐个子目录", ".gitignore")
+REFUSE_MARKERS = ("write-set entry", "illegal write-set entry")
+FIX_KEYWORDS = ("whole repo", "subdirectory by subdirectory", ".gitignore")
 
 
 def _is_refusal(text):
@@ -93,12 +93,13 @@ def _is_pass_through_out(out):
     if payload.get("ok") is not False:
         return False
     err = str(payload.get("error") or "")
-    return not any(m in err for m in ("非法", "拒收", "整仓", "参数"))
+    return not any(m in err for m in ("write-set entry", "illegal write-set entry", "whole repo"))
 
 
 def _is_pass_through(err):
     """A 组放行判别面：create 异常文本不含任何闸标记（过闸败于连接/未知项目不算闸红）。"""
-    return not any(m in err for m in ("非法", "拒收", "整仓", "未知项目"))
+    return not any(m in err for m in ("write-set entry", "illegal write-set entry",
+                                     "whole repo", "unknown project"))
 
 
 def main():
@@ -156,7 +157,7 @@ def main():
         _res, err = create("t26091504a5", "utsr", ["."])
         check("A6 单仓 create：条目=='.'（项目根）建票即拒（与闸同口径）+点名项目根",
               _res is None and _is_refusal(err) and "." in err
-              and ("项目根" in err or "整仓" in err), "err=%r" % err[:220])
+              and ("project root" in err or "whole repo" in err), "err=%r" % err[:220])
 
         # A7 (executor request 261004 -0023, C3): the A family must not flip with an
         # inherited caller identity. Hostile value in the environment -> the same two
@@ -173,7 +174,7 @@ def main():
             else:
                 os.environ["SANDBAR_CALLER_PROJECT"] = prev_identity
         check("A7 A 族不随继承的 SANDBAR_CALLER_PROJECT 翻转（放行面仍可达）",
-              _res is None and _is_pass_through(err_h1) and "跨项目" not in err_h1,
+              _res is None and _is_pass_through(err_h1) and "cross-project" not in err_h1,
               "err=%r" % err_h1[:220])
         check("A7 A 族不随继承的 SANDBAR_CALLER_PROJECT 翻转（拒收面仍具名）",
               _res2 is None and _is_refusal(err_h2) and "repo_a/" in err_h2
@@ -195,33 +196,33 @@ def main():
         rc, out = start("t26091504b1", "utmr", ["repo_a/"],
                         worktree=mixed / ".lane" / "t26091504b1")
         check("B1 裸入口×显式 worktree：'repo_a/' 仍建票即拒（显式 worktree 不能绕过）",
-              refused(out, "repo_a/", "整仓", "逐个子目录", ".gitignore"),
+              refused(out, "repo_a/", "whole repo", "subdirectory by subdirectory", ".gitignore"),
               "out=%r" % out[-240:])
 
         rc, out = start("t26091504b2", "utmr", ["repo_a/"])
         check("B2 裸入口（无显式 worktree）：'repo_a/' 建票即拒（derive 路径先拦）",
-              refused(out, "repo_a/", "整仓"), "out=%r" % out[-240:])
+              refused(out, "repo_a/", "whole repo"), "out=%r" % out[-240:])
 
         rc, out = start("t26091504b3", "utsr", ["."])
         check("B3 裸入口单仓：'.' 建票即拒（经保险丝A 归属解析可达，非孤岛）+点名项目根",
-              refused(out, "写集", ".") and ("项目根" in out or "整仓" in out),
+              refused(out, "write-set entry", ".") and ("project root" in out or "whole repo" in out),
               "out=%r" % out[-240:])
 
         rc, out = start("t26091504b4", "utsr", ["**"])
         check("B4 裸入口单仓：'**' 建票期不再判合法（写集闸拒收并点名）",
-              refused(out, "写集", "**"), "out=%r" % out[-240:])
+              refused(out, "illegal entries", "**"), "out=%r" % out[-240:])
         rc, out = start("t26091504b5", "utsr", ["*"])
         check("B5 裸入口单仓：'*' 建票期不再判合法（与闸哨兵立场对齐）",
-              refused(out, "写集", "*"), "out=%r" % out[-240:])
+              refused(out, "illegal entries", "*"), "out=%r" % out[-240:])
         rc, out = start("t26091504b6", "utsr", [""])
         check("B6 裸入口单仓：空串条目建票即拒（工单点名形态，不静默清洗）",
-              refused(out, "写集条目非法"), "out=%r" % out[-240:])
+              refused(out, "illegal write-set entry"), "out=%r" % out[-240:])
         rc, out = start("t26091504b7", "utsr", ["  "])
         check("B7 裸入口单仓：纯空白条目建票即拒（既有立场不因新判定漂移）",
-              refused(out, "写集条目非法"), "out=%r" % out[-240:])
+              refused(out, "illegal write-set entry"), "out=%r" % out[-240:])
         rc, out = start("t26091504b8", "utsr", ["src/x?.txt"])
         check("B8 裸入口单仓：含哨兵字符 '?' 的条目建票即拒（口径对齐样本，不锚措辞）",
-              refused(out, "写集", "src/x?.txt"), "out=%r" % out[-240:])
+              refused(out, "illegal entries", "src/x?.txt"), "out=%r" % out[-240:])
         # 测试资产变更审查（arbitrate tests-fault 修正）：逃逸条目值改由 join 构造——
         # 连续字面量（目录名、两点、文件名直拼）会被 inspection_scan 的路径引用提取
         # 命中，其归一化分支存在未守卫解包，真仓扫描整体崩溃（t260905-03 子用例8 机械轮
@@ -229,10 +230,10 @@ def main():
         escape_entry = "/".join(["repo_a", "..", "escape.md"])
         rc, out = start("t26091504b9", "utmr", [escape_entry])
         check("B9 '..' 段既有拒收不因新判定失序（先于形态判定照旧拦）",
-              refused(out, "逃逸", escape_entry), "out=%r" % out[-240:])
+              refused(out, "escape the project root", escape_entry), "out=%r" % out[-240:])
         rc, out = start("t26091504b10", "utmr", "repo_a/src/a.py")
         check("B10 畸形输入：写集=字符串（逐字符假清单形态）fail-closed 拒收不假放行",
-              refused(out, "写集"), "out=%r" % out[-240:])
+              refused(out, "write-set entry"), "out=%r" % out[-240:])
         rc, out = start("t26091504b11", "utsr", ["server/", "server/engine/x.py"])
         check("B11 对照：单仓目录形子目录条目（'server/'）不误伤（存量兼容，过闸判别面）",
               _is_pass_through_out(out), "out=%r" % out[-240:])

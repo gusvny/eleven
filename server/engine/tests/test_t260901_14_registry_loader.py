@@ -57,7 +57,7 @@ class RegistryLoaderLegacyIntent(unittest.TestCase):
             # 隔离条目按 key 可见原因
             with self.assertRaises(ValueError) as cm:
                 shared.lookup_project("sick-one")
-            self.assertIn("已隔离", str(cm.exception))
+            self.assertIn("is quarantined", str(cm.exception))
         finally:
             del os.environ["SANDBAR_PROJECTS_DIR"]
 
@@ -68,12 +68,12 @@ class RegistryLoaderLegacyIntent(unittest.TestCase):
         try:
             with self.assertRaises(ValueError) as cm:
                 shared.lookup_project("ghost")
-            self.assertIn("未知项目", str(cm.exception))
+            self.assertIn("unknown project", str(cm.exception))
         finally:
             del os.environ["SANDBAR_PROJECTS_DIR"]
         with self.assertRaises(ValueError) as cm2:
             shared.assert_registry_nonempty([], [])
-        self.assertIn("没有任何项目条目", str(cm2.exception))
+        self.assertIn("no project entries at all", str(cm2.exception))
 
 
 if __name__ == "__main__":

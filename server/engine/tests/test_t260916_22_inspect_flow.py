@@ -190,7 +190,7 @@ def test_verdict_payload_validation():
         (flow.FindingVerdict(finding_id="x", verdict="to-fix", who="宿主",
                              gate="other-gate"), "gate"),
         (flow.FindingVerdict(finding_id="", verdict="to-fix", who="宿主"), "finding-id"),
-        (flow.FindingVerdict(finding_id="x", verdict="maybe", who="宿主"), "越域"),
+        (flow.FindingVerdict(finding_id="x", verdict="maybe", who="host"), "out of range"),
         ("not-a-payload", "类型"),
     ]:
         _, err = flow.validate_finding_verdict_payload(sig)

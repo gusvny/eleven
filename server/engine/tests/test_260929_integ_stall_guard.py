@@ -101,7 +101,7 @@ def test_stall_note_names_the_state_and_the_human_exit():
     s = _Stub()
     s.stall(_Receipt())
     note = s.stall(_Receipt())["note"]
-    assert "连续 2 轮" in note and "零变化" in note and "→ 人审" in note.replace("转人审", "→ 人审")
+    assert "2 consecutive rounds" in note and "byte-identical" in note and "human" in note
     assert "retry_qc" in note, "出路必须可执行（人裁后 retry_qc 复活）"
 
 

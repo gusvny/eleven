@@ -572,10 +572,10 @@ def append_verdict_entry(path: Any, entry: Dict[str, Any],
         try:
             doc = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
-            raise ValueError("裁定台账 %s 不可读（%s: %s）——不覆盖重建，人工处置"
+            raise ValueError("verdict ledger %s unreadable (%s: %s) — no overwrite rebuild, manual handling"
                              % (p, type(e).__name__, e))
         if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list):
-            raise ValueError("裁定台账 %s 形状坏（缺 entries 列表）——不覆盖重建" % p)
+            raise ValueError("verdict ledger %s malformed (missing entries list) — no overwrite rebuild" % p)
     else:
         doc = {"entries": []}
     if dedupe:
@@ -625,7 +625,7 @@ def normalize_verdict(raw: Any) -> str:
         return v
     if v in VERDICT_ALIASES:
         return VERDICT_ALIASES[v]
-    raise ValueError("verdict %r 越域（合法：%s 或中文别名 %s）"
+    raise ValueError("verdict %r out of range (valid: %s or Chinese alias %s)"
                      % (raw, "|".join(VERDICTS), "|".join(VERDICT_ALIASES)))
 
 
@@ -888,7 +888,7 @@ def build_inspect_prompt(instance_id: str, period: str, face: str, base_dir: str
     scope_block（t260924-06 缩面）：活动侧给定的本期变化面清单段；空=回落旧全仓骨架
     （老调用点/回放形态兼容——生产活动必传，测试可断言两形态）。"""
     if face not in PROFILE_FACES:
-        raise ValueError("inspect_profile %r 未接线（可指名：%s）" % (face, "、".join(PROFILE_FACES)))
+        raise ValueError("inspect_profile %r not wired (valid names: %s)" % (face, ", ".join(PROFILE_FACES)))
     if scope_block:
         # 缩面形态：审查范围=给定清单（scope_block 自带硬上限与禁子代理规则），
         # 旧 suite/prev 块并入清单段，不再单列——避免同一事实两处口径漂移。

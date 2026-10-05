@@ -90,7 +90,7 @@ def test_judge_undeclared_record_via_knob(monkeypatch):
     v = caller_gate.judge_caller(_ident(), "sandbar", None)
     assert v["decision"] == "record_undeclared"
     assert v["stamp"] == shared.CALLER_UNDECLARED_MARK
-    assert "未声明" in v["notice"]
+    assert "undeclared" in v["notice"]
 
 
 def test_judge_undeclared_targetless_pass_zero_regression(monkeypatch):

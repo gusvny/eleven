@@ -183,7 +183,7 @@ def test_cancel_already_terminal_idempotent(monkeypatch, status):
     r = _run(client.cmd_ticket_cancel({"ticket_id": "t1", "who": "ops", "reason": "r"}))
     assert r["ok"] and r["result"]["already_terminal"] is True
     assert r["result"]["exec_status"] == status
-    assert "已终态" in r["result"]["note"]
+    assert "already terminal" in r["result"]["note"]
     assert h.events == []      # 不改动任何东西：零信号、零终结、零闸读取副作用
     assert r["result"]["reason"] == "r"   # 回执与请求一致（不吞不改编）
 
@@ -249,7 +249,7 @@ def test_cancel_malformed_args_refused_before_connect(monkeypatch, ):
     for args in missing:
         r = _run(client.cmd_ticket_cancel(args))
         assert r["ok"] is False and r.get("error")
-        assert r["error"].startswith("ticket-cancel 需要")   # 单一文案出口，人话点名
+        assert r["error"].startswith("ticket-cancel requires")   # single copy exit, named in plain words
     for args in ({"ticket_id": "t1", "who": "x", "reason": []},
                  {"ticket_id": "t1", "who": "x", "reason": {"a": 1}},
                  {"ticket_id": "t1", "who": "x", "reason": 123}):
@@ -265,7 +265,7 @@ def test_cancel_reason_over_limit_refused(monkeypatch):
                         lambda: (_ for _ in ()).throw(AssertionError("must not connect")))
     r = _run(client.cmd_ticket_cancel({"ticket_id": "t1", "who": "x",
                                        "reason": "长" * (shared.CROSS_PROJECT_NOTE_LIMIT + 1)}))
-    assert r["ok"] is False and "超限" in r["error"]
+    assert r["ok"] is False and "exceeds limit" in r["error"]
 
 
 def test_cancel_terminate_failure_after_stamp(monkeypatch):

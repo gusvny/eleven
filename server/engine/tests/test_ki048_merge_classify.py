@@ -330,7 +330,7 @@ def test_merge_check_clean_main_item_green(repo_lane, monkeypatch):
     core = asyncio.run(_run_scope(root, lane, br))
     dirty = [c for c in core["checks"] if "合并前脏检查" in c["item"]]
     assert len(dirty) == 1 and dirty[0]["green"]
-    assert "干净" in dirty[0]["detail"]
+    assert "clean" in dirty[0]["detail"]
 
 
 # ---------- R3 源码锁（dev_lane 回执重建/分流形状，守卫同款源码断言） ----------

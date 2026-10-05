@@ -751,7 +751,7 @@ async def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
                                                  str(key or ""), str(ticket or ""),
                                                  verdict, channel)
     if not verdict.get("allowed"):
-        out = {"err": _err(verdict.get("why") or "executor grant refused (gate)", KIND_EXECUTOR_GRANT_REFUSED),
+        out = {"err": _err(verdict.get("why") or "executor authorization refused", KIND_EXECUTOR_GRANT_REFUSED),
                "keys": {}, "enforced": False}
         if record_note:
             out["record_note"] = record_note
@@ -998,15 +998,18 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
                     "可对账，非串不做静默归一" % type(raw_reason).__name__)
     reason = str(raw_reason or "").strip()
     if not tid:
-        return _err("ticket-cancel 需要 ticket_id")
+        return _err("ticket-cancel requires ticket_id")
     if not who:
-        return _err("ticket-cancel 需要 who（操作人必填非空——记名清场不留 op-local）")
+        return _err("ticket-cancel requires who (the operator identity is required and must be non-empty — a named cleanup never stays op-local)")
     if not reason:
-        return _err("ticket-cancel 需要 reason（清场理由必填非空——终结后 admin.log 与 "
-                    "workflow 事件历史按此串精确对账，空=结构化拒收）")
+        return _err("ticket-cancel requires reason (the cancel reason is required "
+                    "and must be non-empty — after termination admin.log and the "
+                    "workflow event history are reconciled against this exact "
+                    "string; empty = structured refusal)")
     if len(reason) > CROSS_PROJECT_NOTE_LIMIT:
-        return _err("ticket-cancel reason 超限（%d > %d 字符）——拆短后重试（建议 ≤300 "
-                    "字符，保跨项目记名条目 cross_project_uses 全文入账）"
+        return _err("ticket-cancel reason exceeds limit (%d > %d chars) — shorten "
+                    "it and retry (≤300 chars recommended, so the cross-project "
+                    "named entry in cross_project_uses fits in full)"
                     % (len(reason), CROSS_PROJECT_NOTE_LIMIT))
     client = await _connect()
     handle = client.get_workflow_handle(tid)
@@ -1024,8 +1027,8 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
         return _ok({"ticket_id": tid, "already_terminal": True,
                     "exec_status": exec_status or "未知",
                     "reason": reason, "who": who,
-                    "note": "已终态（%s），未执行任何动作（幂等回执，重试安全）"
-                            % (exec_status or "未知")})
+                    "note": "already terminal (%s), no action taken (idempotent receipt, safe to retry)"
+                            % (exec_status or "unknown")})
     # 跨项目闸：与既有写 op 同一判定矩阵（_write_gate 三态，拒收单一出口）；快照瞬时
     # 不可得=transient 拒收不终结（fail-closed，C2① 同口径——绝不无闸放行 terminate）。
     gate = await _write_gate(handle, tid, args, op_label="ticket-cancel", client=client)
@@ -1088,12 +1091,17 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
     if not tid:
         return _err("ticket-close-out 需要 ticket_id")
     if not who:
-        return _err("ticket-close-out 需要 who（操作人必填非空——记名收口不留 op-local）")
+        return _err("ticket-close-out requires who (the operator is required and "
+                    "must be non-empty — a named close-out leaves no op-local "
+                    "record)")
     if not reason:
-        return _err("ticket-close-out 需要 reason（收口依据必填非空：说清凭什么认定工作"
-                    "已完成——这是事后审计的唯一锚点，空=结构化拒收）")
+        return _err("ticket-close-out requires reason (the close-out basis is "
+                    "required and must be non-empty: state why the work counts as "
+                    "done — it is the only anchor for later audit; empty = "
+                    "structured refusal)")
     if len(reason) > CROSS_PROJECT_NOTE_LIMIT:
-        return _err("ticket-close-out reason 超限（%d > %d 字符）——拆短后重试"
+        return _err("ticket-close-out reason exceeds limit (%d > %d chars) — "
+                    "shorten it and retry"
                     % (len(reason), CROSS_PROJECT_NOTE_LIMIT))
     client = await _connect()
     handle = client.get_workflow_handle(tid)
@@ -1108,8 +1116,8 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
     if exec_status not in _TICKET_CANCEL_ALIVE:
         return _ok({"ticket_id": tid, "already_terminal": True,
                     "exec_status": exec_status or "未知", "reason": reason, "who": who,
-                    "note": "已终态（%s），未执行任何动作（幂等回执，重试安全）"
-                            % (exec_status or "未知")})
+                    "note": "already terminal (%s), no action taken (idempotent receipt, safe to retry)"
+                            % (exec_status or "unknown")})
     gate = await _write_gate(handle, tid, args, op_label="close_out", client=client)
     if gate["err"] is not None:
         return gate["err"]
@@ -1260,9 +1268,11 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             if str(it.get("want") or "") != "sign(authorize)":
                 plain = "want=%s why=%s" % (it.get("want"), it.get("why"))
                 break
-        hint = "face=match 但预算内既无落账也无 sign(authorize) 拒收"
+        hint = "face=match but neither a ledger landing nor sign(authorize) within " \
+               "the budget; refused"
         if plain:
-            hint += "；却出现普通签字拒收（%s）——与 face=match 矛盾，优先核该票 worker 血统" % plain
+            hint += "; yet a plain-signature refusal appeared (%s) — contradicts " \
+                    "face=match; check that ticket's worker lineage first" % plain
         return _err("授权送达确认超时（%s）。请核该票专属 worker（data/worker-<票号>.pid.meta"
                     " 的 repo_root 必须本仓，KI-033）并重启后重试" % hint,
                     KIND_AUTHZ_LANDING_UNCONFIRMED)
@@ -1361,12 +1371,15 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         if rerr is not None:
             return rerr
         if not isinstance(snap, dict) or not snap:
-            return _err("ledger_rebuild 拒收：票面快照不可得（票不存在或非 v2 工作流）",
+            return _err("ledger_rebuild refused: ticket snapshot unavailable "
+                        "(ticket does not exist or is not a v2 workflow)",
                         KIND_NOT_FOUND)
         meta = snap.get("meta") or {}
         project = str((meta.get("project") if isinstance(meta, dict) else "") or "")
         if not project:
-            return _err("ledger_rebuild 拒收：快照缺 project（票面无项目归属，无法定位账本）")
+            return _err("ledger_rebuild refused: snapshot has no project (the "
+                        "ticket carries no project attribution; the ledger cannot "
+                        "be located)")
         from event_ledger import ledger_rebuild
         report = ledger_rebuild(
             project,
@@ -1409,9 +1422,11 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("ticket-start 需要 ticket_id")
     project = str(args.get("project") or "")
     if not project:
-        return _err("ticket-start 需要 project（projects.yaml 注册表 key，无默认值）——"
-                    "无 project 即拒收：泳道落仓禁止退化为「由执行 worker 的 REPO_ROOT 决定」"
-                    "的相对路径（t260904-01 首开脑裂形态，宁可拒收不静默降级）")
+        return _err("ticket-start requires project (a projects.yaml registry key; "
+                    "no default) — without project the ticket is refused: the lane "
+                    "landing repo must not degrade into a path relative to the "
+                    "executing worker's REPO_ROOT (the t260904-01 split-brain "
+                    "shape; refuse rather than silently degrade)")
     # Hard gate (KI-032): as soon as a project arrives, self-check the machine-level
     # registry to anchor project_root, same source as ticket.py create (single source of
     # truth = the shared loader; the SANDBAR_PROJECTS_DIR env override semantics are
@@ -1422,7 +1437,9 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     try:
         proj = lookup_project(project)
     except ValueError as e:
-        return _err("ticket-start 拒收（project 未锚定，开票走正规入口请先注册项目）：%s" % e)
+        return _err("ticket-start refused (project not anchored; register the "
+                    "project first, then open the ticket through the regular "
+                    "entry): %s" % e)
     project_root = str(proj["dirs"][0])
     # t260915-12：创建面进闸（caller 身份 vs 目标 args.project）。创建载荷（TicketInput）
     # 不盖章（钉死业务属性面不掺调用方身份）——记名分档=admin.log + 回执（C3）。
@@ -1520,7 +1537,8 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         fuse_a_err = multirepo_fuse_a_error(project_root,
                                             args.get("write_set"), repo_worktrees)
     except ValueError as e:
-        return _err("ticket-start 拒收（写集归属解析 fail-closed）：%s" % e)
+        return _err("ticket-start refused (write-set attribution resolution is "
+                    "fail-closed): %s" % e)
     if fuse_a_err:
         return _err(fuse_a_err)
     overrides: Dict[str, Any] = {}
@@ -1552,7 +1570,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:  # an exception in the validator itself also refuses (fail-closed, never silently allowed)
         return _err("背景文件闸故障（fail-closed）：%s: %s" % (type(e).__name__, e))
     if not ok_refs:
-        return _err("ticket-start 拒收：%s" % refs_err)
+        return _err("ticket-start refused: %s" % refs_err)
     inp = TicketInput(
         ticket_id=tid, template_id=tpl,
         project=project,
@@ -1660,7 +1678,8 @@ def normalize_authorize_args(args: Dict[str, Any]):
                 return (None, "authorize 的 expires 非法：%r（收 epoch 秒或 ISO8601）"
                               % (exp_raw,))
     if exp is None or exp <= 0:
-        return (None, "authorize 需要 expires（epoch 秒或 ISO8601，必填——授权必须到期作废）")
+        return (None, "authorize requires expires (epoch seconds or ISO8601; "
+                      "mandatory — an authorization must expire)")
     who = str(raw.get("who") or "")
     if not who.strip():
         return (None, "authorize 需要 who（授权人身份由调用方注入，不得留空）")
@@ -2515,8 +2534,10 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         "terminate_reason": terminated_reason,
         "terminate_reason_available": bool(terminated_reason),
         "snapshot_available": False,
-        "snapshot_note": ("无快照：终态工作流不再运行，snapshot 查询没有执行方承接"
-                          "（终态的确定性结论，不是瞬时故障，刷新无效）"),
+        "snapshot_note": ("no snapshot: a terminal workflow no longer runs and no "
+                          "worker serves the snapshot query (a deterministic "
+                          "conclusion of the terminal state, not a transient "
+                          "fault; refreshing will not help)"),
         "last_stage": None,
         "last_stage_note": ("最后已知阶段不可得：引擎未在阶段迁移时把阶段写入 Temporal "
                             "memo，终态后快照亦不可查询——宁缺不猜"),
@@ -2595,7 +2616,8 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         # KI-025 review C2).
         # t260919-02：文案与 kind 一字不改（410 分级/诚实口径零退化），只**加** face
         # 载荷——结构化失败面让终端能把「为什么失败」渲染出来，而不是一面空白。
-        return _err("工单已终态（%s），快照不可得——终态票不再推进，刷新无效"
+        return _err("ticket is already terminal (%s); snapshot unavailable — a "
+                    "terminal ticket no longer advances; refreshing will not help"
                     % (exec_status or "未知"), KIND_TERMINAL,
                     face=await _terminal_failure_face(tid, handle, desc, exec_status))
     # Malformed-input defense (t260901-23): a non-dict query result (old code/stub/bad
@@ -3190,17 +3212,17 @@ def _read_archive_manifest(ticket_id: str, project_key: str) -> Dict[str, Any]:
     try:
         mpath = ticket_data_dir(project_key, ticket_id) / "archive.json"
     except ValueError as e:
-        return {"state": "error", "legacy": False, "detail": "键形状非法：%s" % e}
+        return {"state": "error", "legacy": False, "detail": "illegal key shape: %s" % e}
     if not mpath.is_file():
         return {"state": "missing", "legacy": False, "detail": str(mpath)}
     try:
         data = _json.loads(mpath.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         return {"state": "malformed", "legacy": False,
-                "detail": "%s 不可解析：%s: %s" % (mpath, type(e).__name__, e)}
+                "detail": "%s unparseable: %s: %s" % (mpath, type(e).__name__, e)}
     if not isinstance(data, dict) or str(data.get("schema") or "") != "v1":
         return {"state": "malformed", "legacy": False,
-                "detail": "%s 缺 schema=v1（灰面，人工处置）" % mpath}
+                "detail": "%s is missing schema=v1 (gray face; handle manually)" % mpath}
     return {"state": "ok", "legacy": bool(data.get("legacy")), "detail": str(mpath)}
 
 
@@ -3298,7 +3320,7 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
             await asyncio.wait_for(deleter(tid), timeout=per_ticket_timeout)
             deleted.append(tid)
         except asyncio.TimeoutError:
-            failed.append({"id": tid, "why": "删除超时（%ss）" % per_ticket_timeout})
+            failed.append({"id": tid, "why": "delete timed out (%ss)" % per_ticket_timeout})
         except Exception as ex:
             failed.append({"id": tid, "why": "%s: %s" % (type(ex).__name__, str(ex)[:300])})
     return _ok({"dry_run": dry_run, "allow_legacy": allow_legacy, "project": project or None,
@@ -3370,7 +3392,7 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
                         "archived_at": _dt.datetime.now(
                             _dt.timezone.utc).isoformat(timespec="seconds"),
                         "meta": meta, "files": [], "absent": ["worktree"],
-                        "reason": "归档前泳道已拆除，stage 报告不可恢复（存量工单诚实过账）",
+                        "reason": "lane torn down before archiving, stage report unrecoverable (legacy tickets posted honestly)",
                         "excluded_rules": []}
             (dpath / "archive.json").write_text(
                 _json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -3539,9 +3561,11 @@ async def cmd_cancel_audit(args: Dict[str, Any]) -> Dict[str, Any]:
         "history_unreadable": unreadable,
         "violations": len(missing) + len(mismatch),
         "alarmed": bool(missing or mismatch),      # → main 依此 exit 1（fail-loud）
-        "note": ("violations 非空＝留痕机制上线（%s）之后仍有终结票缺 notice 留痕或理由串"
-                 "对不上（绕过正规入口/引擎外 terminate 的可检形态）；legacy_pre_mechanism "
-                 "是机制上线前的旧账，单列不计违规。本命令只读，不动任何票") % cutoff_s,
+        "note": ("non-empty violations = after the audit mechanism went live (%s), a terminal "
+                 "ticket still lacks a notice record or its reason string does not match (a "
+                 "detectable form of bypassing the normal entry / terminating outside the "
+                 "engine); legacy_pre_mechanism is the pre-mechanism backlog, listed separately "
+                 "and not counted as violations. This command is read-only and touches no tickets") % cutoff_s,
     })
 
 

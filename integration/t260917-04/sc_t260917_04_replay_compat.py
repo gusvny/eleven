@@ -243,7 +243,7 @@ def main():
                       "历史代码 worker 未复刻事故旅程或驱动链断"
                       % (s.get("stage"), s.get("stage_state")))
         why1 = str(snap1.get("blocked_reason") or "")
-        fail.check("次缺 verdict= 标记" in why1,
+        fail.check("times missing verdict= marker" in why1,
                    "子用例一前提：闸拒按旧路径计入格式轮次（-19/-21 现形态误导脸留证）：%s"
                    % why1[:120])
         gens1 = arb_gens(read_stub_log(stub_log))

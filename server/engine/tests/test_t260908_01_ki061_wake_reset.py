@@ -203,15 +203,15 @@ def test_b_prompt_without_rulings_has_no_section():
 def test_c_route_boundary_tests_fault():
     assert integration_route("tests-fault", MAX_TESTS_FAULT_ROUNDS, 0) == "run_integration_tests"
     assert integration_route(
-        "tests-fault", MAX_TESTS_FAULT_ROUNDS + 1, 0).startswith("blocked:测试集迭代 6 轮超限")
+        "tests-fault", MAX_TESTS_FAULT_ROUNDS + 1, 0).startswith("blocked:test-set iterations 6 exceed the cap")
 
 
 def test_c_route_boundary_code_fault():
     assert integration_route("code-fault", 0, MAX_CODE_FAULT_ROUNDS) == "implement"
     assert integration_route(
-        "code-fault", 0, MAX_CODE_FAULT_ROUNDS + 1).startswith("blocked:打回 developer")
+        "code-fault", 0, MAX_CODE_FAULT_ROUNDS + 1).startswith("blocked:bounced to developer")
 
 
 def test_c_route_pass_and_unknown():
     assert integration_route("pass", 99, 99) == "acceptance"
-    assert integration_route("??", 0, 0).startswith("blocked:仲裁结论未知")
+    assert integration_route("??", 0, 0).startswith("blocked:arbitration verdict unknown")

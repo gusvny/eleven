@@ -152,13 +152,13 @@ def read_pointer_state(path: Path) -> Tuple[str, Dict[str, Any]]:
     try:
         raw = Path(path).read_text("utf-8")
     except OSError as e:
-        return "corrupt", {"reason": "指针不可读：%s: %s" % (type(e).__name__, e)}
+        return "corrupt", {"reason": "pointer unreadable: %s: %s" % (type(e).__name__, e)}
     try:
         data = json.loads(raw)
     except ValueError as e:
-        return "corrupt", {"reason": "指针内容不是合法 JSON（写窗中断残痕）：%s" % str(e)[:80]}
+        return "corrupt", {"reason": "pointer content is not valid JSON (leftover of an interrupted write window): %s" % str(e)[:80]}
     if not isinstance(data, dict) or not str(data.get("ticket_id") or ""):
-        return "corrupt", {"reason": "指针内容形状非法（缺 ticket_id）"}
+        return "corrupt", {"reason": "pointer content malformed (missing ticket_id)"}
     return "valid", data
 
 
@@ -457,9 +457,9 @@ def no_change_skip(last_base: str, head: str, last_period: str = "") -> Dict[str
     if not (_SHA_RE.match(a) and _SHA_RE.match(b)) or a != b:
         return {"unchanged": False, "why": ""}
     return {"unchanged": True,
-            "why": "main 无新变更（HEAD 仍为 %s，与上次运行%s的基点相同）——按声明 "
-                   "skip_when_unchanged 空转不干活" %
-                   (b[:7], ("（期 %s）" % last_period) if last_period else "")}
+            "why": "main has no new changes (HEAD still %s, same base as last run%s) — skip_when_unchanged "
+                   "idle per declaration, no work done" %
+                   (b[:7], ("(period %s)" % last_period) if last_period else "")}
 
 
 def spawn_decision_of(res: Any, ledger_dir: Any = None,

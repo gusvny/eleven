@@ -221,7 +221,7 @@ def test_inspect_route_meta_recompute_failure_degrades_not_breaks(
     assert res["ok"] is True, res
     assert calls["n"] >= 2
     rm = res["result"]["meta"]["model_route"]
-    assert rm.get("defaulted") is True and "路由复算失败" in rm.get("reason", "")
+    assert rm.get("defaulted") is True and "route recomputation failed" in rm.get("reason", "")
 
     raw = dump.read_text(encoding="utf-8")
     argv = raw.split("ARGV=")[1].split("\n")[0].split(chr(31))

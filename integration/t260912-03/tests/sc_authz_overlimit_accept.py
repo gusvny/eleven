@@ -74,7 +74,7 @@ TID = "t26091203b-authz-ol"
 PROJ_KEY = "t26091203b"
 WHO = "宿主"
 REASON = "t260912-03 场景：已逐条复现并裁定接受本轮仲裁判决（测试集迭代超限），准予推进验收走查"
-HANDOFF_MARK = "经人授权接受判决"
+HANDOFF_MARK = "verdict accepted under human authorization"
 # 超限 blocked 可能挂在三条边之一（分叉期 snapshot 的 stage 字段会借位成单边名——
 # lib_ki061 头注同源教训）：宽松判据集合防假红；负锁一律锚 stage_state=="blocked"，
 # **不得**只锚 stage 名。
@@ -172,7 +172,7 @@ def wait_overlimit_blocked(py, env, worker, wlog, fail, poll_s=600):
             wait_worker_alive(fail, worker, wlog)  # bail：worker 提前退出即时点名
         s = query_snapshot(py, env, TID)
         if (s.get("stage") in OVER_LIMIT_STAGES and s.get("stage_state") == "blocked"
-                and "超限" in snap_text(s)):
+                and "exceed the cap" in snap_text(s)):
             return s
         return None
     snap = poll(_blocked, poll_s)
@@ -270,7 +270,7 @@ def main():
         print("  相一 证据：stage=%s state=%s arb_rounds=%d authorizations=%d uses=%d"
               % (snap.get("stage"), snap.get("stage_state"), rounds1,
                  len(authz_items(snap)), uses_total(snap)), flush=True)
-        check(snap.get("stage_state") == "blocked" and "超限" in snap_text(snap)
+        check(snap.get("stage_state") == "blocked" and "exceed the cap" in snap_text(snap)
               and snap.get("stage") in OVER_LIMIT_STAGES,
               "B① 无授权 tests-fault 超限 → 仍 blocked（stage=%s state=%s；含「超限」）"
               % (snap.get("stage"), snap.get("stage_state")))
@@ -291,7 +291,7 @@ def main():
         check(rc == 0 and doc.get("ok") is True,
               "B③ CLI op=authorize（过期授权）送达（rc=%s ok=%s out尾=%s）"
               % (rc, doc.get("ok"), (out or "")[-140:]))
-        ref = poll(lambda: (lambda s: s if "已过期" in refused_text(s) else None)(
+        ref = poll(lambda: (lambda s: s if "already passed" in refused_text(s) else None)(
             query_snapshot(py, env, TID)), 90)
         if ref is None:
             wait_worker_alive(fail, worker, wlog)
@@ -301,7 +301,7 @@ def main():
         print("  相二 证据：refused尾=%s authorizations=%d uses=%d"
               % (refused_text(ref)[-200:], len(authz_items(ref)), uses_total(ref)),
               flush=True)
-        check("已过期" in refused_text(ref),
+        check("already passed" in refused_text(ref),
               "B③ 过期授权落 refused 且文案含「已过期」（死授权不进事件历史）")
         check(not authz_items(ref),
               "B③ meta 里没有该授权条目（authorizations=%d）" % len(authz_items(ref)))
@@ -397,8 +397,8 @@ def main():
               % json.dumps(hit[-1] if hit else {}, ensure_ascii=False)[:420], flush=True)
         check(HANDOFF_MARK in ho and "acceptance_walkthrough" in ho,
               "B② handoff 含「%s」且点名 acceptance_walkthrough" % HANDOFF_MARK)
-        check("测试集迭代" in ho and "超限" in ho,
-              "B② handoff 带判决原文关键词（测试集迭代 / 超限）")
+        check("test-set iterations" in ho and "exceed the cap" in ho,
+              "B② handoff 带判决原文关键词（test-set iterations / exceed the cap）")
         check(WHO in ho, "B② handoff 点名授权人 %r" % WHO)
         check("tests-fault" in ho, "B② handoff 带判决三态 verdict=tests-fault")
         check(uses_total(snap3) >= 1,

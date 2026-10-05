@@ -146,15 +146,15 @@ def test_override_struct_ok_and_flat_ok():
 
 
 @pytest.mark.parametrize("args,frag", [
-    ({"cross_project": {"reason": "r"}}, "缺 by"),
-    ({"who": "宿主", "cross_project": {"reason": "r"}}, "缺 by"),  # 结构形缺 by 不从 who 兜底（真链路相六子用例）
-    ({"cross_project": {"by": "x"}}, "缺 reason"),
-    ({"cross_project_reason": "r"}, "缺 by"),
+    ({"cross_project": {"reason": "r"}}, "missing by"),
+    ({"who": "host", "cross_project": {"reason": "r"}}, "missing by"),  # struct form: missing by never falls back to who (real-chain phase-6 case)
+    ({"cross_project": {"by": "x"}}, "missing reason"),
+    ({"cross_project_reason": "r"}, "missing by"),
     ({"who": "w", "cross_project_reason": ""}, ""),  # 空扁平理由=无旗（非错误）
-    ({"cross_project": "yes"}, "对象"),
-    ({"cross_project": {"by": "a", "reason": "r"}, "cross_project_reason": "r"}, "只给其一"),
-    ({"cross_project": {"by": "x" * 65, "reason": "r"}}, "by 超限"),
-    ({"cross_project": {"by": "x", "reason": "r" * 20001}}, "reason 超限"),
+    ({"cross_project": "yes"}, "must be an object"),
+    ({"cross_project": {"by": "a", "reason": "r"}, "cross_project_reason": "r"}, "only one of"),
+    ({"cross_project": {"by": "x" * 65, "reason": "r"}}, "by over limit"),
+    ({"cross_project": {"by": "x", "reason": "r" * 20001}}, "reason over limit"),
 ])
 def test_override_malformed(args, frag):
     got, err = caller_gate.validate_override(args)
@@ -202,7 +202,7 @@ def test_judge_undeclared_record_and_refuse_flip(monkeypatch):
     v = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar", None)
     assert v["decision"] == "record_undeclared"
     assert v["stamp"] == shared.CALLER_UNDECLARED_MARK
-    assert "未声明" in v["notice"]
+    assert "undeclared" in v["notice"]
     # C2②：undeclared 时即便带旗也按 undeclared 记名（旗不升格身份）
     v2 = caller_gate.judge_caller(_ident("", "undeclared", "none"), "sandbar",
                                   {"by": "x", "reason": "r"})

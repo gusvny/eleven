@@ -1179,9 +1179,9 @@ def test_light_lane_sync_texts_cover_every_hook_in_english():
     for k, v in T.items():
         assert str(v).strip(), k
         assert not _has_cjk(v), "轻道主同步文案含中文：%s=%r" % (k, str(v)[:60])
-    # 缺省（全车道）仍是中文历史原文逐字：dev-lane 侧钩子默认值不动
-    assert "主同步失败（转人工，不静默跳过同步" in DEV_SRC
-    assert "主同步冲突消解完成（第 %d 轮），回实现段适配 main 变更" in DEV_SRC
+    # defaults (both lanes) = dev-lane hook defaults (t261004-36 translated; pinned verbatim in English)
+    assert "main sync failed (hand over to a human" in DEV_SRC
+    assert "main-sync conflict resolution completed (round %d)" in DEV_SRC
 
 
 # ======================================================================
@@ -1190,7 +1190,8 @@ def test_light_lane_sync_texts_cover_every_hook_in_english():
 
 #: 改前原文（真源=server/engine/path_gates.py `_NEXT_ACTION_HINTS["write_set_missing"]`，
 #: 字面量照抄）。dev-lane 的负向锁就钉在这串字上：**它一个字都不许变**。
-DEV_LANE_WRITE_SET_HINT_BEFORE = "工单写集为空/缺失——回 create_plan 补结构化回执后再实现"
+DEV_LANE_WRITE_SET_HINT_BEFORE = ("Ticket write set is empty/missing — return to "
+    "create_plan to restore the structured receipt before implementing")
 
 
 def _gate_refusal_res(reason_code="write_set_missing", next_action=None):
@@ -1198,7 +1199,7 @@ def _gate_refusal_res(reason_code="write_set_missing", next_action=None):
     return SimpleNamespace(
         status="failed",
         summary="阶段路径闸拒绝落盘（path_gate_reason=write_set_missing）：段 implement 无写集可判",
-        gate_refusal={"check_id": "path_gate@implement", "item": "段×允许面路径闸",
+        gate_refusal={"check_id": "path_gate@implement", "item": "Stage × allowed-face path gate",
                       "red": True, "reason_code": reason_code,
                       "files": ["LIGHT_LANE_PROBE.md"],
                       "next_action": next_action or path_gates.next_action_hint(reason_code)},
@@ -1257,7 +1258,7 @@ def test_light_lane_merge_red_hint_is_rewritten_too():
     checks = [
         {"id": "ui_evidence", "item": "UI 截图证据", "green": False, "detail": "缺证据",
          "reason_code": "ui_evidence_missing", "next_action": "泳道内产出截图证据后发 retry_qc"},
-        {"id": "path_gate", "item": "段×允许面路径闸", "green": False, "detail": "写集缺失",
+        {"id": "path_gate", "item": "Stage × allowed-face path gate", "green": False, "detail": "write set missing",
          "reason_code": "write_set_missing", "files": ["a.md"],
          "next_action": path_gates.next_action_hint("write_set_missing")},
         {"item": "泳道分支有 commit", "green": True},

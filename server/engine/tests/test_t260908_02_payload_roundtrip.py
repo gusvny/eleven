@@ -156,7 +156,7 @@ _GOOD_RWS = [{"repo": "", "name": "root", "branch": "lane/tx-root"},
 def test_gate_semantic_rejects_meta_toplevel():
     bad = [dict(_GOOD_RWS[0]),
            dict(_GOOD_RWS[0], repo="repo_a", name="repo_a")]  # branch 碰撞
-    assert "碰撞" in shared.lane_workspace_gate_error(
+    assert "branch name collision" in shared.lane_workspace_gate_error(
         {"lane": "worktree", "workspace": dict(_BASE_WS),
          "worktree": _BASE_WS["path"], "branch": "lane/tx",
          "repo_worktrees": bad})
@@ -178,7 +178,7 @@ def test_gate_fallback_embedded_ws_position():
                dict(_GOOD_RWS[0]),
                dict(_GOOD_RWS[0], repo="repo_a", name="repo_a")]),
            "worktree": _BASE_WS["path"], "branch": "lane/tx"}
-    assert "碰撞" in shared.lane_workspace_gate_error(bad)
+    assert "branch name collision" in shared.lane_workspace_gate_error(bad)
 
 
 def test_gate_empty_list_and_single_repo_pass():

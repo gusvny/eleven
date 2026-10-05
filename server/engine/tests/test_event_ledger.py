@@ -264,7 +264,7 @@ def test_undeclared_zero_behaviour(tmp_path):
     # 注册表空（未声明）⇒ emitted:false，零文件
     res = el.append_event(_payload(tmp_path), tmp_path / 'ledger')
     assert res == {'emitted': False, 'why': res['why']}
-    assert '未声明' in res['why']
+    assert 'not declared' in res['why']
     assert not (tmp_path / 'ledger' / 'alpha.jsonl').exists()
     assert not (tmp_path / 'ledger').exists() or not list((tmp_path / 'ledger').iterdir())
 

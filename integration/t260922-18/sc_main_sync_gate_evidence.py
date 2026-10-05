@@ -302,12 +302,13 @@ async def main() -> int:
                 snap = await handle.query(dev_lane.DevLaneWorkflow.snapshot)
                 ri = (snap.get("results") or {}).get("run_integration_tests") or {}
                 blob = str(ri.get("summary") or "") + str(ri.get("evidence") or "")
-                ok("主同步" in blob and "main@" in blob,
-                   "G5 主同步证据上台面（票面 summary/evidence 含「主同步」与「main@」）",
+                ok("[main sync" in blob and "main@" in blob,
+                   "G5 main-sync evidence on the ticket face "
+                   "（summary/evidence 含「[main sync」与「main@」）",
                    blob[:200])
                 tl = str(snap.get("timeline") or "") + str(snap.get("handoffs") or "")
-                ok("主同步冲突消解" in tl,
-                   "G6 冲突消解轨迹进 timeline/handoffs", tl[-200:])
+                ok("main-sync conflict resolution" in tl,
+                   "G6 main-sync conflict resolution 轨迹进 timeline/handoffs", tl[-200:])
             ok(len(c["resolve_prompts"]) == 1
                and "冲突标记" in c["resolve_prompts"][0]
                and "不要 git commit" in c["resolve_prompts"][0],

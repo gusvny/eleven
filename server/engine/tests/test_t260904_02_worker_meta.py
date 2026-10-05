@@ -48,7 +48,7 @@ class MetaRoundTripTest(unittest.TestCase):
         meta, state, detail = shared.read_worker_meta_state(str(self.tmp / "nope.meta"))
         self.assertIsNone(meta)
         self.assertEqual(state, "missing")
-        self.assertIn("文件不存在", detail)
+        self.assertIn("file does not exist", detail)
 
     def test_malformed_json(self):
         p = self.tmp / "bad.meta"

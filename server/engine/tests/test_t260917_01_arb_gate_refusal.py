@@ -147,25 +147,25 @@ def test_b1_face_text_main_cause_dual_clause_real_exit_single_line():
         {"reason_code": "unauthorized_path", "note": REFUSAL_NOTE,
          "next_action": path_gates.next_action_hint("unauthorized_path"), "files": [PROBE]})
     assert "\n" not in text
-    assert "仲裁段落盘被闸拒（主因）" in text
+    assert "blocked by the path gate (main cause)" in text
     assert REFUSAL_NOTE in text                      # 回执原文（含点名与合法出路）逐字在
-    assert "下一步：" in text
-    assert "仲裁结论未能落盘" in text and "不计「缺 verdict=」格式轮次" in text  # 双因从句
-    assert "还原越界改动" in text and "回 main 侧走票" in text and "retry_qc" in text
-    assert "无需补 verdict 标记" in text              # 出路绝不指向补标记
+    assert "next step: " in text
+    assert "the arbitration verdict failed to land" in text and "not counted as a missing verdict= format round" in text  # dual clause
+    assert "revert the out-of-bounds changes" in text and "file a ticket on the main side" in text and "retry_qc" in text
+    assert "no verdict= marker needed" in text              # the way out never points at adding a marker
 
 
 def test_b2_verdict_missing_false_drops_dual_clause():
     text = shared.arbitrate_blocked_reason(
         {"reason_code": "unauthorized_path", "note": REFUSAL_NOTE}, verdict_missing=False)
     assert "仲裁结论未能落盘" not in text
-    assert "仲裁段落盘被闸拒（主因）" in text
+    assert "blocked by the path gate (main cause)" in text
 
 
 def test_b3_malformed_refusal_still_readable_never_raises():
     text = shared.arbitrate_blocked_reason({})
     assert "gate_refusal_unknown" in text
-    assert "下一步：" in text
+    assert "next step: " in text
     assert shared.arbitrate_blocked_reason(None)  # 不抛且非空
 
 
@@ -185,8 +185,8 @@ def test_c1_gate_refusal_well_formed_conclusion_blocked_with_gate_main_cause():
         entries = _blocked_entries(wf)
         assert len(entries) == 1 and entries[0]["stage"] == "arbitrate"
         why = entries[0]["reason"]
-        assert "仲裁段落盘被闸拒（主因）" in why and REFUSAL_NOTE in why
-        assert "无需补 verdict 标记" in why
+        assert "blocked by the path gate (main cause)" in why and REFUSAL_NOTE in why
+        assert "no verdict= marker needed" in why
         if detail_face:
             assert wf.meta.get("blocked_reason") == ""   # 门开：唤醒即清（t260915-01 ①）
         else:

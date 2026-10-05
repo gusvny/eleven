@@ -80,7 +80,7 @@ def main():
         L.check("⑤ 单仓有 commit → 整票照旧绿", res_c.green is True and res_c.conflict is False)
         L.check("⑤ 旧绿项契约零回归：只带 id/detail，不带 reason_code（新形状不外溢）",
                 item_c is not None and item_c.get("green") is True
-                and "1 个 commit" in str(item_c.get("detail", ""))
+                and "1 commit(s)" in str(item_c.get("detail", ""))
                 and "reason_code" not in item_c,
                 json.dumps(item_c, ensure_ascii=False)[:200] if item_c else "项缺失")
         L.check("⑤ 有 commit 票不受豁免开关影响（no_file_changes=True 仍绿）",
@@ -101,7 +101,7 @@ def main():
         L.check("④查询失败 fail-closed 红（commit_query_failed），报错与事实同向（无「实现未落盘（…」断言形态）",
                 item_d is not None and item_d.get("green") is False
                 and item_d.get("reason_code") == "commit_query_failed"
-                and "查询失败" in txt_d and "实现未落盘（" not in txt_d,
+                and "fatal:" in txt_d and "implementation not persisted" not in txt_d,
                 json.dumps(item_d, ensure_ascii=False)[:240] if item_d else "项缺失")
         L.check("④ -1 哨兵不可当 0 计：全局闸不出「整票零 commit」文案（C1）",
                 not any(c.get("id") == "all_repos_zero_commits" for c in res_d.checks)

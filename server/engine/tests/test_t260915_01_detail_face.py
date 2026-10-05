@@ -156,7 +156,7 @@ def test_gate_red_detail_full_files_and_note_verbatim():
     note = "阶段路径闸拒绝落盘（path_gate_reason=unauthorized_path）：……"
     d = path_gates.gate_red_detail("implement", files, "unauthorized_path", note)
     assert d["check_id"] == "path_gate@implement"
-    assert d["item"] == "段×允许面路径闸"
+    assert d["item"] == "Stage × allowed-face path gate"
     assert d["red"] is True
     assert d["files"] == files                         # 全量逐字，不经 _fmt_files cap
     assert d["evidence"] == note                       # 与 worker 日志同一字符串
@@ -165,7 +165,7 @@ def test_gate_red_detail_full_files_and_note_verbatim():
 
 def test_gate_red_detail_protected_and_malformed_inputs():
     d = path_gates.gate_red_detail("arbitrate", ["x"], "protected_path", "note")
-    assert d["item"] == "受保护路径闸" and d["reason_code"] == "protected_path"
+    assert d["item"] == "Protected-path gate" and d["reason_code"] == "protected_path"
     for bad in (None, 42, "a.py", {"f": 1}):           # 畸形 violations → files=[] 不抛
         assert path_gates.gate_red_detail("implement", bad, "unauthorized_path", "n")["files"] == []
     assert path_gates.gate_red_detail("implement", [1, None, "ok.py"], "unauthorized_path", "n")["files"] == ["ok.py"]

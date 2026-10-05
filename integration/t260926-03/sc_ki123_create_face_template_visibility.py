@@ -262,7 +262,7 @@ def main() -> int:
         out5 = (r5.stdout or "") + (r5.stderr or "")
         ok(r5.returncode != 0, "畸形注册根下建票被拒（fail-closed）")
         ok(BARE_OLD_REFUSAL not in out5, "畸形注册根不静默回落裸内置拒收（点名原因）")
-        ok(("解析" in out5) or ("失败" in out5) or ("注册" in out5) or ("加载" in out5),
+        ok(("quarantined" in out5) or ("registry" in out5) or ("project.yaml" in out5),
            "拒收点名注册根原因（解析/失败/注册类关键词）")
 
         section("E6 内置面不受扰：dev-lane 快路径")

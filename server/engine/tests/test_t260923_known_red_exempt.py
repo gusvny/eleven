@@ -65,7 +65,7 @@ def test_human_trigger_never_zero_exempt_cap():
         assert counted is False
     assert exempts == MAX_TESTS_EXEMPT_ROUNDS
     text = exempt_cap_text(exempts)
-    assert "超限" in text
+    assert "consecutive-exemption over cap" in text
     for op in ("authorize", "ruling", "rework", "pause"):
         assert op in text          # 四条真实出路（ticket.py 在册 op，无 terminate）
 
@@ -78,7 +78,7 @@ def test_human_trigger_never_zero_tests_cap():
         assert counted is True
     route = integration_route("tests-fault", rounds, 0)
     assert route.startswith("blocked:")
-    assert "超限" in route
+    assert "exceed the cap" in route
     for op in ("authorize", "ruling", "rework", "pause"):
         assert op in route
 

@@ -295,7 +295,7 @@ def _host_global_dsh() -> Dict[str, Any]:
         if not bin_path:
             face = {"bin": None,
                     "probe": {"version": None, "state": "error",
-                              "detail": "宿主 PATH 上无 dsh（which 落空）——宿主全局面缺席"}}
+                              "detail": "dsh not found on host PATH (which came up empty) — host global face absent"}}
         else:
             face = {"bin": bin_path, "probe": dsh_pin.probe_dsh_version(bin_path)}
         _HOST_GLOBAL_DSH[key] = face
@@ -953,7 +953,8 @@ def _wedge_quarantine_once(local_dsh: Path, env_session_id: str, log_text: str,
         activity.logger.warning(
             "[sessions] dsh 撕裂点名但无法定位会话档（env 无 DSH_HEADLESS_SESSION "
             "且日志无可解析 id；不隔离只告警，行为同现状）：%s", hits)
-        return "dsh 点名撕裂但无法定位会话档（两源皆缺，未隔离）：%s" % hits[0]
+        return "dsh named a torn session but no session file could be located " \
+               "(both sources missing; not quarantined): %s" % hits[0]
     target = _newest_session_file_for_id(local_dsh, sid)
     if target is None:
         activity.logger.warning(
@@ -985,7 +986,8 @@ def _wedge_quarantine_once(local_dsh: Path, env_session_id: str, log_text: str,
     activity.logger.warning(
         "[sessions] dsh 点名撕裂会话档隔离未发生（move-failed，原位仍在，留待"
         "下轮 attempt/人工）：file=%s：%s", target, hits[0])
-    return ("dsh 点名撕裂档隔离未发生（move-failed，file=%s，未隔离）：%s"
+    return ("dsh named-torn session file was NOT quarantined (move-failed, "
+            "file=%s, not quarantined): %s"
             % (target, hits[0]))
 
 
@@ -1957,8 +1959,8 @@ def _classify_suite_calls(cmds):
             if not pools_seen:
                 violations.append({
                     "cmd": excerpt, "cmd_index": ci, "kind": "drift",
-                    "detail": "口径漂移：裸全量（未传 --exclude-pools，零排除；"
-                              "闸口径为 --exclude-pools %s）"
+                    "detail": "suite-scope drift: bare full run (no --exclude-pools passed, "
+                              "zero exclusions; gate scope is --exclude-pools %s)"
                               % ",".join(GATE_EXCLUDE_POOLS)})
                 continue
             names, bad = _suite_split_pools(pools_raw)
@@ -1967,13 +1969,14 @@ def _classify_suite_calls(cmds):
             if missing:
                 violations.append({
                     "cmd": excerpt, "cmd_index": ci, "kind": "drift",
-                    "detail": "口径漂移：--exclude-pools=%r 不构成闸口径"
-                              "（缺闸池 %s%s；闸为 %s）"
+                    "detail": "suite-scope drift: --exclude-pools=%r is not the gate scope "
+                              "(missing gate pools %s%s; gate is %s)"
                               % (pools_raw, missing,
-                                 ("，含非法 token %r" % bad) if bad else "",
+                                 (", contains illegal token %r" % bad) if bad else "",
                                  ",".join(GATE_EXCLUDE_POOLS))
-                              + "（执行器对闸外/非法 token 只剥离不判红，"
-                                "凭「传了 exclude」不豁免）"})
+                              + " (the executor only strips out-of-gate/illegal tokens "
+                                "without judging red; passing an exclude does not grant "
+                                "exemption)"})
                 continue
             if bad or extra:
                 # T1 分诊：闸池都在册生效 + 闸外 token（语法非法或未知池名，
@@ -1981,17 +1984,19 @@ def _classify_suite_calls(cmds):
                 # 记独立 kind，归因文案不得把诊断引向零排除方向。
                 violations.append({
                     "cmd": excerpt, "cmd_index": ci, "kind": "malformed_token",
-                    "detail": "口径含非法 token %r（闸口径 engine/exclusive 排除"
-                              "已生效，非零排除型漂移；闸外 token 只剥离不判红的"
-                              "语义见 run_scenarios.parse_exclude_pools）"
+                    "detail": "suite scope contains illegal token %r (gate scope "
+                              "engine/exclusive exclusions are in effect, a non-zero-exclusion "
+                              "drift; the semantics of out-of-gate tokens being stripped "
+                              "without judging red are in run_scenarios.parse_exclude_pools)"
                               % (bad + extra)})
                 continue
             fulls += 1
             if fulls > _SUITE_FULL_LIMIT:
                 violations.append({
                     "cmd": excerpt, "cmd_index": ci, "kind": "over_limit",
-                    "detail": "全量超上限：本段非定点全套第 %d 趟（上限 %d 趟；"
-                              "闸回执即全量证据，复现单条红用 --only 定点）"
+                    "detail": "full run over limit: run #%d of this segment's non-targeted "
+                              "full suite (limit %d runs; the gate receipt is itself the "
+                              "full evidence, use --only to reproduce a single red)"
                               % (fulls, _SUITE_FULL_LIMIT)})
     notes.append("套件调用分类：定点 %d 趟（豁免）、合规全量 %d 趟（上限 %d）、"
                  "违规 %d 条" % (targeted, fulls, _SUITE_FULL_LIMIT, len(violations)))
@@ -2153,7 +2158,8 @@ def _apply_suite_budget(res: "StageResult", cwd: Path,
     res.status = "failed"
     # summary 必点名首条命令原文（t260924-09 缺陷③）：与 t260921-04 禁跑执法
     # 同族契约——人读台面一行须能定位是哪条命令越界，kind/detail 只作归因。
-    res.summary = ("【取证面超限】%s：`%s`（%s）｜ 原摘要：%s"
+    res.summary = ("[evidence-face budget exceeded] %s: `%s` (%s) | original "
+                   "summary: %s"
                    % (first.get("kind", "?"), first.get("cmd", ""),
                       first.get("detail", ""), res.summary))[:500]
     res.report = (res.report or "") + "\n\n## 取证面护栏命中（t260924-09）\n" + "\n".join(
@@ -2279,20 +2285,23 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         real = _lane_repo_root(cwd) / ".git" / "worktrees" / cwd.name
         if not (real / "HEAD").is_file():
             raise RuntimeError(
-                "settle: gitfile 被改写（指向 %s）且真 gitdir %s 不存在，无法自动修复——人工处置"
+                "settle: the gitfile was rewritten (points at %s) and the real "
+                "gitdir %s does not exist; cannot auto-repair — handle manually"
                 % (fake, real))
     else:
         real = _registered_gitdir(repo, cwd)
         if real is None or not (real / "HEAD").is_file():
             raise RuntimeError(
-                "settle: gitfile 被改写（指向 %s）且仓 %s 的注册表里找不到反向指回本树"
-                "（%s）的 gitdir，无法自动修复——人工处置" % (fake, repo, cwd))
+                "settle: the gitfile was rewritten (points at %s) and repo %s's "
+                "registry has no gitdir pointing back at this tree (%s); cannot "
+                "auto-repair — handle manually" % (fake, repo, cwd))
     # Back-pointer check on the real gitdir (its gitdir file should point back at
     # cwd/.git); a mismatch means the registration is already scrambled
     back = (real / "gitdir").read_text("utf-8").strip() if (real / "gitdir").is_file() else ""
     if back and Path(back).resolve() != (cwd / ".git").resolve():
         raise RuntimeError(
-            "settle: 真 gitdir %s 的反向指针指向 %s（非本泳道），注册混乱——人工处置" % (real, back))
+            "settle: the real gitdir %s's back-pointer points at %s (not this "
+            "lane); registration scrambled — handle manually" % (real, back))
     (cwd / ".git").write_text("gitdir: %s\n" % real, "utf-8")
     note = "gitfile 被 agent 改写（指向主库外 %s），已恢复指向真 gitdir" % fake
     # Quarantine the fake repo for the record (moved only if it sits inside the lane and is a git directory)
@@ -2847,9 +2856,11 @@ def gitlink_risk_from_dirty(files: List[Any], tree: Path) -> List[Dict[str, str]
 
 
 _GITLINK_NEXT_ACTION = (
-    "把嵌套仓搬到项目根（复制保留对象库）后按普通多仓票登记 meta.repo_worktrees，"
-    "或人工确认删除；勿摘 gitlink 绕行（nusuyou t260916-08 实案：摘掉后 600 文件"
-    "随拆道不可恢复）")
+    "move the nested repo to the project root (copy, keeping the object store), "
+    "then register meta.repo_worktrees as a normal multi-repo ticket, or confirm "
+    "the deletion manually; never strip the gitlink to work around it (nusuyou "
+    "t260916-08 real case: after stripping, 600 files were unrecoverable with the "
+    "lane split)")
 
 
 def _gitlink_refusal_note(names: List[str]) -> str:
@@ -3654,9 +3665,9 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
             status="failed",
             # 裸人话，不带「agent 报失败：」前缀——generic 站既有两分与六使用点
             # 落点（_block_agent_failed）都统一拼前缀，activity 侧再拼会双前缀。
-            summary=(refusal.get("evidence") or "泳道 .dsh 缺件"),
-            report=("泳道 .dsh 预检拒绝（t260916-28）\n\n候选链=%s\n\n修复=%s\n\n"
-                    "明细=%s" % (" → ".join(refusal.get("candidates") or []),
+            summary=(refusal.get("evidence") or "lane .dsh file missing"),
+            report=("lane .dsh precheck refused (t260916-28)\n\ncandidate chain=%s\n\nfix=%s\n\n"
+                    "details=%s" % (" → ".join(refusal.get("candidates") or []),
                                  refusal.get("next_action") or "",
                                  refusal.get("evidence") or "")),
             deliverables=[], files_changed=[], files_changed_shape="ok",
@@ -3889,10 +3900,13 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
         try:
             entries = json.loads(mf.read_text("utf-8"))
         except Exception as e:
-            raise RuntimeError("多仓泳道清单损坏（%s: %s）——人工处置，不静默回落单仓锚" % (mf, e))
-    src = "meta.repo_worktrees 明细" if from_entries else str(mf)
+            raise RuntimeError("multi-repo lane manifest corrupted (%s: %s) — "
+                               "handle manually; never silently fall back to the "
+                               "single-repo anchor" % (mf, e))
+    src = "meta.repo_worktrees details" if from_entries else str(mf)
     if not isinstance(entries, list) or not entries:
-        raise RuntimeError("多仓泳道清单为空或非列表（%s）——人工处置" % src)
+        raise RuntimeError("multi-repo lane manifest is empty or not a list (%s) — "
+                           "handle manually" % src)
     project_root = wt.parent.parent
     scopes: List[Dict[str, Any]] = []
     for e in entries:
@@ -3901,13 +3915,16 @@ def _lane_scopes(wt: Path, branch: str = "", base_ref: str = "",
         # non-string branch is still rejected (fail-closed, not weakened; the message
         # names the genuinely missing field).
         if not isinstance(e, dict):
-            raise RuntimeError("多仓泳道清单条目须为对象（%r in %s）——人工处置" % (e, src))
+            raise RuntimeError("multi-repo lane manifest entries must be objects "
+                               "(%r in %s) — handle manually" % (e, src))
         if not isinstance(e.get("repo"), str):
-            raise RuntimeError("多仓泳道清单条目 repo 字段缺失或非字符串（%r in %s）"
-                               "——人工处置" % (e, src))
+            raise RuntimeError("multi-repo lane manifest entry is missing the repo "
+                               "field or it is not a string (%r in %s)"
+                               " — handle manually" % (e, src))
         if not (isinstance(e.get("branch"), str) and e["branch"]):
-            raise RuntimeError("多仓泳道清单条目 branch 字段缺失或为空（%r in %s）"
-                               "——人工处置" % (e, src))
+            raise RuntimeError("multi-repo lane manifest entry is missing the "
+                               "branch field or it is empty (%r in %s)"
+                               " — handle manually" % (e, src))
         scopes.append({
             "name": str(e.get("name") or e["repo"] or "root"),
             "tree": wt / e["repo"],
@@ -4062,9 +4079,9 @@ def multirepo_materialization_error(lane_root: Path, write_set: Optional[List[st
     try:
         mapping = resolve_repos_for_paths(project_root, entries)
     except ValueError as e:
-        if "未发现任何 git 仓" in str(e):
+        if "\u672a\u53d1\u73b0\u4efb\u4f55 git \u4ed3" in str(e) or "no git repo found under" in str(e):
             return ""  # 仓集合为空=无成员仓可言，保险丝不适用（存量无 .git 注册目录面）
-        return ("写集归属解析 fail-closed（t260910-03 保险丝B）：%s" % e)
+        return ("write-set attribution fail-closed (t260910-03 fuse B): %s" % e)
     root_abs = str(project_root.resolve())
     member = {repo: paths for repo, paths in mapping.items()
               if str(Path(repo).resolve()) != root_abs}
@@ -4204,7 +4221,9 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
         repo = project_root / e["repo"]
         tree = lane_root / e["repo"]
         if not (repo / ".git").exists():
-            errors.append("[%s] 归属仓 %s 不存在（建票后被删/挪？人工处置，不代建仓）"
+            errors.append("[%s] owning repo %s does not exist (deleted/moved after "
+                          "ticket creation? handle manually; do not create the repo "
+                          "on its behalf)"
                           % (e["repo"], repo))
             continue
         ident_err = _check_git_identity(repo)
@@ -4215,8 +4234,9 @@ def _prepare_multirepo_lane(lane_root: Path, entries: Any,
             notes.append("[%s] reused" % e["repo"])
             continue
         if tree.exists():
-            errors.append("[%s] 树目录已存在但非仓 %s 的已注册 worktree？请人工处置"
-                          "（不回滚不删除）" % (e["repo"], repo))
+            errors.append("[%s] tree directory already exists but is not a "
+                          "registered worktree of repo %s? handle manually"
+                          "(no rollback, no deletion)" % (e["repo"], repo))
             continue
         cmd = ["git", "-C", str(repo), "worktree", "add", "-b", e["branch"], str(tree)]
         try:
@@ -4325,7 +4345,8 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
                 rws = build_repo_worktrees(_pr, prep.write_set, p.name)
             except ValueError as e:
                 return WorkspacePrepResult(ok=False, kind="worktree", action="failed",
-                                           path=str(p), error="多仓泳道推导拒收：%s" % e)
+                                           path=str(p), error="multi-repo lane "
+                                           "derivation refused: %s" % e)
         else:
             rws = None  # single-repo project: ignore the channel field, take the old single-repo path (regression surface)
     if isinstance(rws, list) and rws:
@@ -4359,7 +4380,8 @@ async def prepare_workspace(prep: WorkspacePrep) -> WorkspacePrepResult:
                                    action="created" + _ensure_lane_deps(p), path=str(p))
     return WorkspacePrepResult(
         ok=False, kind="worktree", action="failed", path=str(p),
-        error="git worktree add %s -b %s 失败（目录已存在但非本仓库 worktree？请人工处置）:\n%s"
+        error="git worktree add %s -b %s failed (directory exists but is not a "
+              "worktree of this repo? handle manually):\n%s"
               % (p, branch, (proc.stderr or proc.stdout or "").strip()[-600:]))
 
 
@@ -4414,7 +4436,7 @@ async def prepare_human_gate(prep: HumanGatePrep) -> HumanGateContext:
     """Human-gate mechanical preparation: assemble the review context (proposal
     excerpt / workspace listing / diff stat) — purely mechanical, zero judgement."""
     parts: List[str] = [
-        "工单 %s（%s）人门段 %s 待签字" % (prep.ticket_id, prep.title, prep.stage_id)]
+        "ticket %s (%s) human-gate stage %s awaiting signature" % (prep.ticket_id, prep.title, prep.stage_id)]
     for chunk in (_proposal_excerpt(prep.proposal_id),
                   _workspace_listing(prep.workspace),
                   _diff_stat(prep.worktree, prep.base_ref)):
@@ -4562,7 +4584,7 @@ def _parse_bundle_pairs(text: str) -> List[tuple]:
         elif s.startswith("out:") and cur is not None:
             cur["out"] = s[len("out:"):].strip()
         else:
-            raise ValueError("merge-checks.yaml 无法解析行: %s" % s)
+            raise ValueError("merge-checks.yaml has an unparseable line: %s" % s)
     return [(p["src"], p["out"]) for p in pairs if p["src"] and p["out"]]
 
 
@@ -4576,18 +4598,18 @@ def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any
     item = {"item": "泳道差集无 gitlink（嵌套仓）", "id": "no_gitlink"}
     if not base_ref:
         return {**item, "green": False,
-                "detail": "base_ref 缺失，gitlink 判定未跑（第 1 项已因基线缺失红点名）",
+                "detail": "base_ref missing, gitlink check not run (item 1 already named red for the missing baseline)",
                 "reason_code": "gitlink_check_skipped"}
     base_sha, base_err = _merge_base_ref(branch, repo)
     if not base_sha:
         return {**item, "green": False,
-                "detail": "merge-base 失败，gitlink 判定不可判（fail-closed）：%s" % base_err,
+                "detail": "merge-base failed, gitlink verdict undecidable (fail-closed): %s" % base_err,
                 "reason_code": "gitlink_check_failed"}
     p = _git(["-c", "core.quotepath=false", "diff", "--raw",
               "%s...%s" % (base_sha, branch)], repo)
     if p.returncode != 0:
         return {**item, "green": False,
-                "detail": "git diff --raw 失败（fail-closed）：%s"
+                "detail": "git diff --raw failed (fail-closed): %s"
                           % (p.stderr or p.stdout or "").strip()[-200:],
                 "reason_code": "gitlink_check_failed"}
     links = staged_gitlinks(p.stdout)
@@ -4595,7 +4617,7 @@ def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any
         return {**item, "green": False, "detail": _gitlink_refusal_note(links),
                 "reason_code": "gitlink_present", "files": links,
                 "next_action": _GITLINK_NEXT_ACTION}
-    return {**item, "green": True, "detail": "泳道差集无 gitlink（嵌套仓）"}
+    return {**item, "green": True, "detail": "no gitlink (nested repo) in lane diff"}
 
 
 def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path):
@@ -4621,7 +4643,7 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
         p = _git(["log", "--oneline", "%s..%s" % (base_ref, branch)], repo)
         if p.returncode != 0:
             return ({"item": item_base, "green": False,
-                     "detail": (p.stderr or p.stdout or "git log 失败").strip()[-300:],
+                     "detail": (p.stderr or p.stdout or "git log failed").strip()[-300:],
                      "id": "lane_commits", "reason_code": "commit_query_failed",
                      "next_action": "泳道 commit 查询失败（git 环境类）——排查泳道仓后发 "
                                     "retry_qc；查询失败不得断言实现未落盘"},
@@ -4629,7 +4651,7 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
         n = len([ln for ln in p.stdout.splitlines() if ln.strip()])
         if n > 0:
             return ({"item": item_base, "green": True,
-                     "detail": "%d 个 commit" % n, "id": "lane_commits"}, n)
+                     "detail": "%d commit(s)" % n, "id": "lane_commits"}, n)
         # 0 commit：查两差异面（提交面=base↔branch 树差；未提交面=SETTLE_PATHSPEC 脏，
         # 与第 2 项同口径）——面查询失败记 -1，判定层按「不可证无差异」fail-closed
         committed = shared.LANE_COMMITS_QUERY_FAILED
@@ -4642,16 +4664,18 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
             uncommitted = len(_dirty_files_from_status_z(ps.stdout))
         green, reason = shared.lane_commit_verdict(n, committed, uncommitted)
         if green:  # no_changes_no_diff：确实零改动=合法终态（不红但点名，不静默）
-            return ({"item": item_base + "——零改动确认", "green": True,
-                     "detail": "0 个 commit 且提交面/未提交面均无差异——本仓确无本票改动"
-                               "（确实无需改动，非假绿；整票零 commit 另由全局闸把关）",
+            return ({"item": item_base + " — zero-change confirmed", "green": True,
+                     "detail": "0 commits and no diff on the committed face or the uncommitted face — "
+                               "this repo truly has no changes for this ticket "
+                               "(no changes genuinely needed, not a false green; a whole-ticket "
+                               "zero commit is still guarded by the global gate)",
                      "id": "lane_commits",
                      # 绿项点名=新形状（见函数 docstring，review C2）
                      "reason_code": "no_changes_no_diff"}, n)
         if reason == "commit_query_failed":
             return ({"item": item_base, "green": False,
-                     "detail": "0 个 commit 但差异面查询失败（git 故障）——不可判定，"
-                               "不得据此断言实现未落盘",
+                     "detail": "0 commits but the diff-face query failed (git fault) — undecidable, "
+                               "do not conclude from this that the implementation was not persisted",
                      "id": "lane_commits", "reason_code": "commit_query_failed",
                      "next_action": "泳道 diff/status 查询失败（git 环境类）——排查泳道仓"
                                     "后发 retry_qc"}, n)
@@ -4665,15 +4689,16 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
             next_action = ("实现未落盘（有改动未入轨）——排查实现段 settle 代落盘后发 "
                            "retry_qc；若脏文件越写集，按「工作区干净」项处置（收回写集内）")
         else:
-            next_action = ("泳道分支位点异常（0 commit 但树≠base）——人工排查分支指向后"
-                           "发 retry_qc")
+            next_action = ("lane branch position abnormal (0 commits but tree ≠ "
+                           "base) — inspect the branch target manually, then send "
+                           "retry_qc")
         return ({"item": item_base, "green": False,
-                 "detail": "0 个 commit；%s——实现未落盘" % "；".join(faces),
+                 "detail": "0 commits; %s — implementation not persisted" % "；".join(faces),
                  "id": "lane_commits", "reason_code": "no_commits",
                  "next_action": next_action}, n)
     except Exception as e:  # 查询异常同查询失败：fail-closed 红，不断言未落盘
         return ({"item": "泳道分支有 commit", "green": False,
-                 "detail": "git 查询异常: %s" % e, "id": "lane_commits",
+                 "detail": "git query error: %s" % e, "id": "lane_commits",
                  "reason_code": "commit_query_failed",
                  "next_action": "泳道 commit 查询异常——排查泳道仓后发 retry_qc"},
                 shared.LANE_COMMITS_QUERY_FAILED)
@@ -4750,7 +4775,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     auto_settle_note = ("[auto-settle] settle 异常（转红不抛）: %s: %s"
                                         % (type(e).__name__, e))[-300:]
             else:
-                auto_settle_note = "脏文件在 write_set 外，不自愈（越界改动交人工）"
+                auto_settle_note = "dirty files are outside the write_set; no " \
+                                   "self-heal (out-of-bounds changes go to a human)"
     except Exception as e:  # a fault in this pre-check itself never blocks the chain: later items still go red as usual
         auto_settle_note = "自愈前置检查异常: %s: %s" % (type(e).__name__, e)
     if auto_settle_note:
@@ -4798,11 +4824,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             checks.append(item)
         else:
             checks.append({"item": "工作区干净（无未提交改动）", "green": False,
-                           "detail": "git status 失败: %s" % (p.stderr or "")[-200:],
+                           "detail": "git status failed: %s" % (p.stderr or "")[-200:],
                            "id": "worktree_clean", "reason_code": "status_failed",
                            "next_action": path_gates.next_action_hint("status_failed")})
     except Exception as e:
-        checks.append({"item": "工作区干净", "green": False, "detail": "git status 异常: %s" % e,
+        checks.append({"item": "worktree clean", "green": False, "detail": "git status error: %s" % e,
                        "id": "worktree_clean", "reason_code": "status_failed"})
 
     # 2.5) 泳道差集 gitlink 红灯（t260916-20）：泳道分支含 160000（嵌套仓）=泳道内从零
@@ -4905,7 +4931,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                "next_action": "按 detail 里的红灯项修复后发 retry_qc 重验"})})
     except Exception as e:
         checks.append({"item": "泳道内 verify_lane code 绿灯", "green": False,
-                       "detail": "verify_lane 异常: %s" % e,
+                       "detail": "verify_lane error: %s" % e,
                        "id": "verify_lane_code", "reason_code": "verify_red"})
 
     # 3.5 Project-level extra checks (policy follows the project repo: read the lane's
@@ -4935,8 +4961,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     rebuilt = any(f.startswith(out) for f in changed)
                     checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),
                                    "green": rebuilt,
-                                   "detail": "src 改动已同批重建产物" if rebuilt else
-                                             "src 有改动但产物未同批重建（泳道内 tsdown 重建，settle 代落盘）",
+                                   "detail": "src changed and build output rebuilt in the same batch" if rebuilt else
+                                             "src changed but build output not rebuilt in the same batch (tsdown rebuild in-lane, settle persists it on behalf)",
                                    "id": "bundle_freshness",
                                    **({} if rebuilt else {
                                        "reason_code": "bundle_stale",
@@ -4944,7 +4970,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                        "next_action": "泳道内重建产物（tsdown）后发 retry_qc 重验"})})
     except Exception as e:
         checks.append({"item": "bundle 新鲜度（%s）" % MERGE_CHECKS_CFG, "green": False,
-                       "detail": "扩展检查异常: %s" % e,
+                       "detail": "extended check error: %s" % e,
                        "id": "bundle_freshness", "reason_code": "bundle_stale"})
 
     # 3.6 UI 证据闸（票 t260828-09，纯机械查、无 agent）。KI-044 根修（票 t260904-13）：
@@ -5000,8 +5026,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             checks.append({
                 "item": "UI 截图证据（ui_evidence 声明）",
                 "green": False,
-                "detail": "ui_evidence 声明畸形 fail-closed：%s（修 verify.yaml 的 "
-                          "ui_evidence.dirs 或删声明走缺省态）" % decl_note,
+                "detail": "ui_evidence declaration malformed fail-closed: %s (fix ui_evidence.dirs "
+                          "in verify.yaml, or remove the declaration to fall back to the "
+                          "default state)" % decl_note,
                 "id": "ui_evidence", "reason_code": "ui_evidence_malformed",
                 "next_action": path_gates.next_action_hint("ui_dirs_missing")})
         else:
@@ -5013,9 +5040,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 checks.append({
                     "item": "UI 截图证据（ui_evidence 声明）",
                     "green": True,
-                    "detail": "ui_evidence 未声明：截图证据项按项目声明缺席"
-                              "（KI-050 声明制；要启用截图闸在 verify.yaml 声明 "
-                              "ui_evidence.dirs）",
+                    "detail": "ui_evidence not declared: screenshot evidence item absent per project "
+                              "declaration (KI-050 declaration system; to enable the screenshot "
+                              "gate declare ui_evidence.dirs in verify.yaml)",
                     "id": "ui_evidence"})
             elif decl_mode == "absent" and diff_fault:
                 # ④b Declaration absent but the diff is faulty: a mechanism fault is
@@ -5023,7 +5050,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 checks.append({
                     "item": "UI 截图证据（ui_evidence 声明）",
                     "green": False,
-                    "detail": "ui_evidence 未声明且 diff 故障 fail-closed：%s" % (diff_err or "基线缺失"),
+                    "detail": "ui_evidence not declared and diff faulty fail-closed: %s" % (diff_err or "baseline missing"),
                     "id": "ui_evidence", "reason_code": "ui_evidence_missing",
                     "next_action": "排查泳道 git diff/基线后发 retry_qc 重验"})
             elif ui_paths or diff_fault:
@@ -5039,9 +5066,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 checks.append({
                     "item": "UI 截图证据（%s）" % UI_EVIDENCE_DIR,
                     "green": not ui_gate_red,
-                    "detail": ("%s｜%d 张截图在位：%s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
+                    "detail": ("%s | %d screenshots in place: %s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
                               if pngs else
-                              ("%s｜UI ticket lacks screenshot evidence: the gate reads only "
+                              ("%s | UI ticket lacks screenshot evidence: the gate reads only "
                                "TOP-LEVEL non-recursive *.png under <worktree>/%s — shots in "
                                "subdirectories (before/, after/, ...) count as missing "
                                "(host ruling 261005-B; seen on t261005-04/05). Run "
@@ -5061,7 +5088,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # ② Declaration present + a miss + healthy diff: no item emitted (noise
             # reduction; the current stance is unchanged)
     except Exception as e:
-        checks.append({"item": "UI 截图证据", "green": False, "detail": "证据闸异常: %s" % e,
+        checks.append({"item": "UI screenshot evidence", "green": False, "detail": "evidence gate error: %s" % e,
                        "id": "ui_evidence", "reason_code": "ui_evidence_missing"})
 
     # 3.7 KI-048 (t260911-05): pre-merge main-workspace dirty check (active, not
@@ -5083,7 +5110,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         human = _dirty_block_note(dirty_verdict)
         checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
                        "green": not dirty_kind,
-                       "detail": ("干净（无未提交改动、无与本单收口路径相撞的未跟踪文件）"
+                       "detail": ("clean (no uncommitted changes, no untracked files colliding with this ticket's close-out paths)"
                                   if not dirty_kind else human),
                        "id": "main_untouched",
                        **({} if not dirty_kind else {
@@ -5092,7 +5119,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                           "发 retry_qc 重验（引擎不自动 stash/提交）"})})
     except Exception as e:  # a fault in this read-only pre-check goes red honestly, the activity never raises
         checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
-                       "green": False, "detail": "脏检查异常: %s" % e,
+                       "green": False, "detail": "dirty check error: %s" % e,
                        "id": "main_untouched", "reason_code": "main_dirty"})
 
     # 4. merge-tree 预演无冲突（不落地——只把合并结果写成 tree 对象判冲突，
@@ -5113,17 +5140,20 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             merge_tree_excerpt = out.strip()[:1500]
         checks.append({"item": "%s（merge-tree main × %s）" % (MERGE_REHEARSAL_ITEM, sc["branch"]),
                        "green": rehearsal_green,
-                       "detail": "无冲突" if rehearsal_green else
-                                 ("冲突文件：%s" % "、".join(conflict_files) if conflict_files
-                                  else (p.stdout or p.stderr or "有冲突").strip()[-300:]),
+                       "detail": "no conflict" if rehearsal_green else
+                                 ("conflict files: %s" % "、".join(conflict_files) if conflict_files
+                                  else (p.stdout or p.stderr or "conflict detected").strip()[-300:]),
                        "id": "merge_rehearsal",
                        **({} if rehearsal_green else {
                            "reason_code": "merge_conflict",
                            "files": [str(f) for f in conflict_files[:20]],
-                           "next_action": "冲突自动消解（引擎自动打回 implement）；消解失败转人工时"
-                                          "按票面 blocked 文案处置"})})
+                           "next_action": "conflicts auto-resolved (the engine "
+                                          "sends the ticket back to implement "
+                                          "automatically); if resolution fails and "
+                                          "it goes to a human, handle it per the "
+                                          "ticket's blocked copy"})})
     except Exception as e:
-        checks.append({"item": MERGE_REHEARSAL_ITEM, "green": False, "detail": "merge-tree 异常: %s" % e,
+        checks.append({"item": MERGE_REHEARSAL_ITEM, "green": False, "detail": "merge-tree error: %s" % e,
                        "id": "merge_rehearsal", "reason_code": "merge_conflict"})
     return {"checks": checks, "rehearsal_green": rehearsal_green,
             "conflict_files": conflict_files,
@@ -5223,7 +5253,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         checks.insert(max(len(checks) - 1, 0),
                       {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
                        "green": True,
-                       "detail": "多仓写集逐仓物化齐全（%d 仓）" % len(scopes),
+                       "detail": "multi-repo write set materialized per repo (%d repos)" % len(scopes),
                        "id": "fuse_b_materialize"})
     # t260921-09 整票零 commit 全局闸（对齐 shared.review_gate_verdict 整票级口径）：
     # 逐仓三态把「某仓确实零改动」转成合法终态后，由本闸保住宿主裁定②「整票至少一个
@@ -5398,15 +5428,19 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
             p2 = _git(["reset", "--merge", "HEAD"], wt)
             if p2.returncode != 0:
                 return ConflictSettleResult(
-                    ok=False, error="merge --abort 失败（%s），reset --merge 兜底亦失败（%s）——"
-                                    "泳道仍是合并进行中态，需人工处置"
+                    ok=False, error="merge --abort failed (%s) and the reset "
+                                    "--merge fallback also failed (%s) — the lane "
+                                    "is still in a merge-in-progress state; needs "
+                                    "manual handling"
                                     % ((p1.stderr or "").strip()[-160:],
                                        (p2.stderr or "").strip()[-160:]),
                     remaining_files=[])
         p3 = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
         if p3.returncode == 0:
             return ConflictSettleResult(ok=False,
-                                        error="复位后 MERGE_HEAD 仍在场（合并态未清）——需人工处置")
+                                        error="MERGE_HEAD still present after the "
+                                              "reset (merge state not cleared) — "
+                                              "needs manual handling")
         return ConflictSettleResult(ok=True, commit="", error="", remaining_files=[])
     # No MERGE_HEAD = no merge in progress (the agent mistook ordinary workspace
     # changes for conflicts, or prep's merge left nothing behind) — report honestly,
@@ -5414,7 +5448,9 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
     if p.returncode != 0:
         return ConflictSettleResult(ok=False,
-                                    error="无进行中的合并（MERGE_HEAD 不存在），无法落盘合并提交")
+                                    error="no merge in progress (MERGE_HEAD does "
+                                          "not exist); cannot record a merge "
+                                          "commit")
     # The files this merge touches (taken before add; the diff HEAD MERGE_HEAD stance
     # is unchanged afterwards)
     p = _git(["diff", "--name-only", "HEAD", "MERGE_HEAD"], wt)
@@ -6060,8 +6096,9 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
         c = _git(["commit", "-m", msg], repo, timeout=60)
         if c.returncode != 0:
             return MergeResult(ok=False, action="failed", reason="merge_fault",
-                               error="squash 已暂存但 git commit 失败：%s"
-                                     "（主树带着暂存改动，需人工处置）"
+                               error="squash staged but git commit failed: %s"
+                                     "(the main tree is left with staged changes; "
+                                     "needs manual handling)"
                                      % ((c.stderr or c.stdout or "")[-300:]))
         head = _git(["rev-parse", "--short", "HEAD"], repo)
         merge_commit = head.stdout.strip() if head.returncode == 0 else ""
@@ -6335,26 +6372,30 @@ async def archive_ticket(args: ArchiveArgs) -> ArchiveResult:
             prev = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
             raise ArchiveManifestError(
-                "manifest 已存在但不可解析（%s）——不静默重产（消灭证据），"
-                "人工处置：%s: %s" % (manifest_path, type(e).__name__, e))
+                "manifest exists but is unparseable (%s) — never silently "
+                "regenerate (that would destroy evidence); handle manually: "
+                "%s: %s" % (manifest_path, type(e).__name__, e))
         prev_files = prev.get("files") if isinstance(prev, dict) else None
         if prev_files is None or not isinstance(prev_files, list) \
                 or any(not isinstance(x, dict) for x in prev_files):
             raise ArchiveManifestError(
-                "manifest 已存在但 file 字段非 dict 清单（灰面，可能已覆写本单归档）"
-                "——不静默重产，人工处置：%s" % manifest_path)
+                "manifest exists but its files field is not a list of dicts (gray "
+                "face; this manifest's archive may already have been overwritten)"
+                " — never silently regenerate; handle manually: %s" % manifest_path)
         # Reference verification + self-heal: are all the dst files the manifest
         # references still there? If not, copy them again
         for ent in prev_files:
             drel = str(ent.get("dst") or "")
             if not drel:
                 raise ArchiveManifestError(
-                    "manifest 条目缺 dst（%s）——灰面，人工处置" % manifest_path)
+                    "manifest entry is missing dst (%s) — gray face; handle "
+                    "manually" % manifest_path)
             dfile = dst / drel
             if not dfile.is_file():
                 raise ArchiveManifestError(
-                    "manifest 引用缺失（%s 无 %s）——可能已被覆写/删，不静默重产，"
-                    "人工处置" % (dst, drel))
+                    "manifest reference missing (%s has no %s) — possibly already "
+                    "overwritten/deleted; never silently regenerate; handle "
+                    "manually" % (dst, drel))
     dst.mkdir(parents=True, exist_ok=True)
     for src, drel in staged_specs:
         dfile = dst / drel
@@ -6706,7 +6747,8 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
             moved.append(n)
         note = "；capture 失败，尽力视图 %d 张已归档主树并移出泳道（机械闸维持红灯）" % len(moved) if moved else ""
         if kept:
-            note += "；归档/移出失败 %d 张留泳道（可人工捞回）：%s" % (len(kept), "、".join(kept))
+            note += "; archive/move-out failed for %d image(s) left in the lane " \
+                    "(a human can retrieve them): %s" % (len(kept), "、".join(kept))
         return moved, kept, note
     except OSError as e:
         # A directory-level archive failure: everything stays in the lane (gate red +
@@ -7911,7 +7953,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     except Exception as e:  # noqa: BLE001——身份面不可得=具名，绝不静默留空
         out.worker_identity = ""
         out.code_stamp = {"available": False,
-                          "note": "不可得：identity 计算失败 %s: %s"
+                          "note": "unavailable: identity computation failed %s: %s"
                                   % (type(e).__name__, str(e)[:120])}
     if not out.code_stamp:
         try:
@@ -7921,7 +7963,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
             out.code_stamp = _st
         except Exception as e:  # noqa: BLE001
             out.code_stamp = {"available": False,
-                              "note": "不可得：code_stamp 计算失败 %s: %s"
+                              "note": "unavailable: code_stamp computation failed %s: %s"
                                       % (type(e).__name__, str(e)[:120])}
     out.warnings = list(_warnings) + [str(w) for w in (res.get("warnings") or [])]
     out.ran = int(res.get("ran") or 0)
@@ -7981,7 +8023,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         "skipped": int(_kr_skipped or 0),
         "names": [str(x) for x in (_kr_names or [])],
         "note": (str(_kr.get("note") or "") if _kr else
-                 ("未跑 ≠ 判绿：这些条目本轮没有被验证"
+                 ("not run ≠ green: these items were not verified this round"
                   if int(_kr_skipped or 0) else "")),
         "injection": "SANDBAR_KNOWN_RED_EXCLUDE=1 (engine in-lane round)",
     }
@@ -8381,7 +8423,7 @@ def resolve_main_head_impl(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"ok": True, "result": {"repo": str(repo), "ref": ref,
                                            "sha": p.stdout.strip().splitlines()[0]}}
         last = (p.stderr or p.stdout or "").strip()[-200:]
-    return {"ok": False, "error": "无法解析 %s 的 HEAD（repo=%s）：%s" % (ref, repo, last)}
+    return {"ok": False, "error": "cannot resolve HEAD of %s (repo=%s): %s" % (ref, repo, last)}
 
 
 def parse_worktree_porcelain(text: str) -> List[Dict[str, Any]]:
@@ -8473,8 +8515,9 @@ def sweep_inspection_lanes_impl(args: Dict[str, Any]) -> Dict[str, Any]:
             # .git 目录=独立仓根、嵌套 .git=未注册嵌套仓（t260916-20）→ 拒拆点名。
             bad = stub_embedded_repo(cand)
             if bad is not None:
-                errors.append("目录壳 %s 内嵌真仓痕迹 %s（未注册嵌套仓形态，t260916-20："
-                              "不静默销毁，人工处置）" % (cand, bad))
+                errors.append("directory shell %s embeds a real repo (%s) — "
+                              "unregistered nested-repo shape (t260916-20: never "
+                              "destroy silently; handle manually)" % (cand, bad))
                 continue
             try:
                 shutil.rmtree(cand)
@@ -8779,9 +8822,9 @@ async def _arbitrate_body(args: AgentStageArgs) -> StageResult:
                                 refusal.get("evidence") or "")
         return StageResult(
             status="failed",
-            summary=(refusal.get("evidence") or "泳道 .dsh 缺件"),
-            report=("泳道 .dsh 预检拒绝（t260916-28）\n\n候选链=%s\n\n修复=%s\n\n"
-                    "明细=%s" % (" → ".join(refusal.get("candidates") or []),
+            summary=(refusal.get("evidence") or "lane .dsh file missing"),
+            report=("lane .dsh precheck refused (t260916-28)\n\ncandidate chain=%s\n\nfix=%s\n\n"
+                    "details=%s" % (" → ".join(refusal.get("candidates") or []),
                                  refusal.get("next_action") or "",
                                  refusal.get("evidence") or "")),
             deliverables=[], files_changed=[], files_changed_shape="ok",
@@ -9108,9 +9151,9 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
                                 refusal.get("evidence") or "")
         return StageResult(
             status="failed",
-            summary=(refusal.get("evidence") or "泳道 .dsh 缺件"),
-            report=("泳道 .dsh 预检拒绝（t260916-28）\n\n候选链=%s\n\n修复=%s\n\n"
-                    "明细=%s" % (" → ".join(refusal.get("candidates") or []),
+            summary=(refusal.get("evidence") or "lane .dsh file missing"),
+            report=("lane .dsh precheck refused (t260916-28)\n\ncandidate chain=%s\n\nfix=%s\n\n"
+                    "details=%s" % (" → ".join(refusal.get("candidates") or []),
                                  refusal.get("next_action") or "",
                                  refusal.get("evidence") or "")),
             deliverables=[], files_changed=[], files_changed_shape="ok",
@@ -9234,7 +9277,7 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
                 for f in (prev_doc.get("findings") or [])[:20] if isinstance(f, dict)]
         prev_summary = "\n".join(rows) or "（上期台账零发现）"
     if fake_notes:
-        prev_summary += "\n（裁定台账注意：%s）" % "；".join(fake_notes[:5])
+        prev_summary += "\n(adjudication ledger note: %s)" % "；".join(fake_notes[:5])
 
     # ---- 缩面：本期变化面清单由活动侧机械给定（t260924-06；不靠 agent 自律） ----
     # 四路输入逐路 fail-closed（不抛出、不回落全仓）：①上期基点→本期基点 git diff；
@@ -9387,12 +9430,12 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
                                  routes_file=_resolved["path"])
             route_meta = ({"provider": _r["provider"], "model": _r["model"]} if _r else
                           {"defaulted": True,
-                           "reason": "路由表无命中 role=inspection（本轮=profile 默认）"})
+                           "reason": "no route-table hit for role=inspection (this round = profile default)"})
         else:
-            route_meta = {"defaulted": True, "reason": "无路由表可查（state=%s）"
+            route_meta = {"defaulted": True, "reason": "no route table to consult (state=%s)"
                           % _resolved.get("state")}
     except Exception as e:  # noqa: BLE001——meta 复算面永不弄挂 inspect
-        route_meta = {"defaulted": True, "reason": "路由复算失败 %s: %s"
+        route_meta = {"defaulted": True, "reason": "route recomputation failed %s: %s"
                       % (type(e).__name__, e)}
     out_f = home / "inspect_agent_output.log"
     activity.logger.info("[inspection/%s] spawn 只读 agent（face=%s profile=%s 基座=%s 路由=%s）",

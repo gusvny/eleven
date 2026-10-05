@@ -73,13 +73,13 @@ def test_refs_untracked_named(repo):
     (repo / "notes" / "fresh.md").parent.mkdir(parents=True)
     (repo / "notes" / "fresh.md").write_text("未提交\n", encoding="utf-8")
     ok, err = validate_background_refs(["notes/fresh.md"], repo)
-    assert not ok and "notes/fresh.md" in err and "未提交" in err
+    assert not ok and "notes/fresh.md" in err and "not committed" in err
 
 
 def test_refs_dirty_tracked_named(repo):
     (repo / "docs" / "note.md").write_text("脏改\n", encoding="utf-8")
     ok, err = validate_background_refs(["docs/note.md"], repo)
-    assert not ok and "docs/note.md" in err and "未提交改动" in err
+    assert not ok and "docs/note.md" in err and "carrying uncommitted changes" in err
 
 
 def test_refs_staged_new_file_named(repo):
@@ -99,19 +99,19 @@ def test_refs_multiple_problems_all_named(repo):
 
 def test_refs_malformed_inputs(repo):
     ok, err = validate_background_refs("docs/note.md", repo)  # 字符串=假清单判例
-    assert not ok and "假清单" in err
+    assert not ok and "fake list" in err
     ok, err = validate_background_refs(["/abs/note.md"], repo)
-    assert not ok and "非法条目" in err
+    assert not ok and "illegal entries" in err
     ok, err = validate_background_refs(["../escape.md"], repo)
-    assert not ok and "非法条目" in err
+    assert not ok and "illegal entries" in err
     ok, err = validate_background_refs([42], repo)
-    assert not ok and "非法条目" in err
+    assert not ok and "illegal entries" in err
 
 
 def test_refs_git_broken_fail_closed(repo):
     """git 不可用（非仓目录）=拒收 fail-closed，不静默放行。"""
     ok, err = validate_background_refs(["docs/note.md"], tempfile.mkdtemp())
-    assert not ok and ("未提交" in err or "fail-closed" in err)
+    assert not ok and ("not committed" in err or "fail-closed" in err)
 
 
 # ---------- 门②：normalize_files_changed ----------

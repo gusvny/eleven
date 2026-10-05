@@ -950,7 +950,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         legacy = _LEGACY_STEPS.get(step_id)
         if legacy:
             return legacy
-        raise ValueError("未知步骤 %r" % step_id)
+        raise ValueError("unknown step %r" % step_id)
 
     def _gen(self, step_id: str) -> int:
         return self._gens.get(step_id, 0)
@@ -1062,7 +1062,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             "temporal_engine_version": self.engine_version,
             "engine": ENGINE_V2,
             "log": [{"ts": self._now_epoch(), "status": "dispatched",
-                     "note": "工单创建（%s：activity 直编排，步=%s）"
+                     "note": "ticket created (%s: activity direct orchestration, steps=%s)"
                              % (self.TEMPLATE_ID, [s.id for s in self.STAGES])}],
         }
         if _dropped:
@@ -1149,7 +1149,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 "files_changed_shape") or "absent"
             fault = None
             if plan_shape == "malformed" and workflow.patched(WRITE_SET_FAULT_PATCH_ID):
-                fault = ("files_changed 形状非法（%s，非字符串数组——解析层拒收毁形）"
+                fault = ("files_changed shape invalid (%s, not a string array — "
+                         "parse layer refused the mangled payload)"
                          % plan_shape)
             elif plan_files == [] and workflow.patched(WRITE_SET_FAULT_PATCH_ID) \
                     and not bool(self.meta.get("no_file_changes")):
@@ -1475,10 +1476,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             rounds += 1
             self.meta["integ_signature_rounds"] = rounds
             return {"stall": True, "rounds": rounds, "sig": sig,
-                    "note": ("连续 %d 轮闸测量面逐字相同（same gate blockers / named env-red / "
-                             "counts / failure detail / baseline ref）：本票写集与红面零变化 ⇒ "
-                             "重跑全套不可能产生新信息。转人审（读仲裁判词与 DESIGN-CONFLICT "
-                             "类交接件后裁）；人裁后 retry_qc 可复活。" % rounds)}
+                    "note": ("%d consecutive rounds with a byte-identical gate measurement face "
+                             "(same gate blockers / named env-red / counts / failure detail / "
+                             "baseline ref): this ticket's write set and red face are unchanged, "
+                             "so a full rerun cannot produce new information. Route to human review "
+                             "(decide after reading the arbitration verdict and the "
+                             "DESIGN-CONFLICT handover); after the human ruling, retry_qc can revive it." % rounds)}
         self.meta["integ_signature"] = sig
         self.meta["integ_signature_rounds"] = 1
         return {"stall": False, "rounds": 1, "sig": sig, "note": ""}
@@ -1880,7 +1883,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         except Exception as e:  # noqa: BLE001——复位失败不许遮蔽原失败原因
             return _abort_text(
                 "reset_exception",
-                "｜merge 复位尝试异常（%s: %s）——泳道可能仍是合并进行中态，需人工处置") % (
+                "| merge reset attempt raised (%s: %s) — lane may still be in a "
+                "merging state, needs human handling") % (
                 type(e).__name__, e)
         res = raw if isinstance(raw, ConflictSettleResult) else ConflictSettleResult(
             ok=bool(getattr(raw, "ok", False)) if not isinstance(raw, dict) else bool(raw.get("ok")),
@@ -1888,10 +1892,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                       else (raw.get("error") or "")))
         if res.ok:
             return _abort_text("reset_ok",
-                              "｜merge 已复位（MERGE_HEAD 已清），下一轮主同步从干净树重试")
+                              "| merge reset done (MERGE_HEAD cleared), next main sync "
+                              "retries from a clean tree")
         return _abort_text(
             "reset_failed",
-            "｜merge 复位失败：%s——泳道仍是合并进行中态，需人工处置") % (res.error or "未知")
+            "| merge reset failed: %s — lane is still in a merging state, "
+            "needs human handling") % (res.error or "unknown")
 
     # ---------- t260917-08：移交命令债表（meta['env_handover_pending']） ----------
     # agent 段沙箱受限期间交接的验证命令，等后续机械段（run_integration_tests 的
@@ -1973,7 +1979,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             detail = {"check_id": "merge_check", "item": "", "red": True,
                       "reason_code": "merge_conflict",
                       "files": [str(f) for f in fallback_files[:20]],
-                      "next_action": "冲突消解失败转人工——按票面 blocked 文案处置",
+                      "next_action": "conflict resolution failed, hand over to human — "
+                                     "handle per the ticket's blocked text",
                       "evidence": ""}
         else:
             files = red.get("files")
@@ -2167,7 +2174,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             if c and c in PHASE_MAIN_CHAIN and c != "done":
                 return c
         self.refused.append({"who": "", "want": "phase-clamp",
-                             "why": "候选相位全部非法 %r → 夹到 %s"
+                             "why": "all candidate phases illegal %r -> clamped to %s"
                                     % (candidates, REWORK_PHASE_FALLBACK)})
         self._log("相位兜底：候选 %r 全部非法（空串/未知）→ 夹到 %s（绝不把空值交回主循环）"
                   % (candidates, REWORK_PHASE_FALLBACK))
@@ -2196,7 +2203,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         if fallback == "done" or fallback not in PHASE_MAIN_CHAIN:
             self.refused.append({"who": who,
                                  "want": "rework(%s) fallback(%s)" % (target, fallback),
-                                 "why": "fallback 不在打回词表（纯防呆，字面量不应出现）"})
+                                 "why": "fallback is not in the rework vocabulary (pure guard, this literal should never appear)"})
             self._log("rework 拒绝：fallback %r 非法，停 meta 现步（%s）" % (fallback, who))
             if workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
                 return self._safe_phase(str(self.meta.get("stage") or ""), fallback)
@@ -2225,7 +2232,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # rework — otherwise phase would land on a step with no orchestration and the
             # main loop would raise "unknown stage"
             self.refused.append({"who": req.who, "want": "rework(%s)" % target,
-                                 "why": "%s 非主链步，不接受 rework" % target})
+                                 "why": "%s is not a main-chain step; rework not accepted" % target})
             self._log("rework 拒绝：%s 非主链步（%s）" % (target, req.who))
             return fallback
         return self._auto_rework(target, req.note, req.who, fallback)
@@ -2251,11 +2258,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self._rework = None
         target = req.target_stage or fallback
         if target in ("ui_evidence",):
-            why = "%s 非主链步，不接受 rework" % target
+            why = "%s is not a main-chain step; rework not accepted" % target
             self.refused.append({"who": req.who, "want": "rework(%s)" % target,
                                  "why": why})
-            self._log("【rework 拒收】%s 非主链步（%s）" % (target, req.who))
-            return "", None, ("【rework 拒收】目标 %s 不可打回：%s" % (target, why))
+            self._log("[rework refused] %s is not a main-chain step (%s)" % (target, req.who))
+            return "", None, ("[rework refused] target %s cannot be sent back: %s" % (target, why))
         alias = REWORK_STAGE_ALIASES.get(target)
         if alias is not None:
             landing, edge = alias
@@ -2277,14 +2284,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         % "、".join(sorted((PHASE_MAIN_CHAIN - {"done"}) & REWORK_ADMISSIBLE_PHASES)))
             self.refused.append({"who": req.who, "want": "rework(%s)" % target,
                                  "why": why})
-            self._log("【rework 拒收】%s（%s）" % (why, req.who))
-            return "", None, ("【rework 拒收】目标 %s 不可打回：%s" % (target, why))
+            self._log("[rework refused] %s (%s)" % (why, req.who))
+            return "", None, ("[rework refused] target %s cannot be sent back: %s" % (target, why))
         new_phase = self._auto_rework(target, req.note, req.who, fallback)
         if new_phase != target:
             # 防御：_auto_rework 拒绝（fallback 非法等内部形态）——同款显式拒收，
             # 拒收记录已由 _auto_rework 落账。
-            return "", None, ("【rework 拒收】目标 %s 不可打回（落地校验未过，"
-                              "见 refused 记录）" % target)
+            return "", None, ("[rework refused] target %s cannot be sent back (landing "
+                              "validation failed, see refused records)" % target)
         return target, None, ""
 
     def _gate_refusal_repeat_suffix(self, files: Any) -> str:
@@ -2346,7 +2353,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self._mark("workspace", "ready",
                            "prepare_workspace: %s/%s" % (res.kind, res.action))
                 return True
-            await self._blocked("workspace", "工作空间准备失败：%s" % (res.error or "未知"))
+            await self._blocked("workspace", "workspace preparation failed: %s" % (res.error or "unknown"))
             if self._rework is not None:
                 # target stage is taken over by the main loop
                 self._apply_rework(self.STAGES[0].id)
@@ -2526,7 +2533,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 await self._blocked(
                     step_id,
                     text("unreachable",
-                         "主同步失败（转人工，不静默跳过同步——否则被验证树≠被合并树）："
+                         "main sync failed (hand over to a human — never silently "
+                         "skip the sync, otherwise the verified tree ≠ the merged "
+                         "tree): "
                          "%s%s")
                     % (prep.error or "未知",
                        ("｜各仓同步结果：%s" % "、".join(_sync_outcomes))
@@ -2547,12 +2556,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     _sync_stop = "blocked"
                     break
                 prev_conflict_files = files_sig
-                self._log("主同步检出 merge 冲突（%s，第 %d/%d 轮），走既有消解回路：%s"
+                self._log("main sync detected merge conflict (%s, round %d/%d), "
+                          "entering the existing resolution loop: %s"
                           % (_tag, conflict_rounds, MAX_CONFLICT_ROUNDS,
                              "、".join(prep.conflict_files)[:200]))
                 self._handoff(step_id,
                               text("resolve_round",
-                                   "主同步冲突消解第 %d 轮（%s）：%s")
+                                   "main-sync conflict resolution round %d (%s): %s")
                               % (conflict_rounds, _tag,
                                  "、".join(prep.conflict_files)[:200]))
                 # 变量名 msolve_ctx（非 solve_ctx）：selfcheck E-1 用
@@ -2606,7 +2616,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     # 与 M3 变体站共用，源码锁字面量/调用计数恒 2/5）
                     _why = self._conflict_failed_note(
                         cres,
-                        text("agent_failed_fmt", "主同步冲突消解第 %d 轮：%s"),
+                        text("agent_failed_fmt", "main-sync conflict resolution round %d: %s"),
                         conflict_rounds)
                     if workflow.patched(MAIN_SYNC_RECOVERY_PATCH_ID):
                         _why += await self._main_sync_abort(_st_wt, conflict_rounds, T)
@@ -2631,33 +2641,39 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                          (sraw.get("remaining_files") or [])],
                         error=str(sraw.get("error") or ""))
                 if not sres.ok:
-                    _why = ("仍有未解冲突文件：%s" % "、".join(sres.remaining_files[:10])
+                    _why = ("unresolved conflict files remain: %s"
+                            % "、".join(sres.remaining_files[:10])
                             ) if sres.remaining_files else (sres.error or "未知")
                     await self._blocked(
                         step_id,
                         text("settle_unconverged",
-                             "主同步冲突消解第 %d 轮未收敛（worker 代落盘校验未过），"
-                             "转人工处置：%s。工作区现为合并进行中态——人工解冲突后发 "
-                             "rework 回 implement 续解，或泳道内 git merge --abort "
-                             "复位后发 retry_qc 重验。执行器自己的出路：这条 "
-                             "rework(to_stage=implement) 用已持有的 send-back 权直接发，"
-                             "不必等人工"
+                             "main-sync conflict resolution round %d did not converge "
+                             "(worker-side commit verification failed), handing over "
+                             "to a human: %s. The worktree is now in a merging state — "
+                             "after resolving conflicts by hand send rework back to "
+                             "implement to continue, or run git merge --abort inside "
+                             "the lane to reset, then send retry_qc for re-verification. "
+                             "The executor's own way out: send this "
+                             "rework(to_stage=implement) directly using the send-back "
+                             "power you already hold, no need to wait for a human"
                              ) % (conflict_rounds, _why))
                     _sync_stop = "blocked"
                     break
-                self._log("主同步冲突消解第 %d 轮落盘 %s（%d 个文件），回实现段适配 main 变更"
+                self._log("main-sync conflict resolution round %d committed %s "
+                          "(%d files), back to implement to adapt to main changes"
                           % (conflict_rounds, sres.commit, len(prep.conflict_files)))
                 self.meta["main_sync"] = {
                     "mode": "merged", "main_sha": prep.target_sha,
                     "lane_head": sres.commit, "scope": _tag,
                     "detail": "；".join(_sync_outcomes),
-                    "note": "冲突经既有消解回路落盘"}
+                    "note": "conflict persisted via the existing resolution loop"}
                 # 回实现段（宿主指定）：main 增量可能与票改动有语义耦合，
                 # 实现段适配后经 join 重走验证；下一轮主同步已追平=快路径
                 _sync_phase = self._auto_rework(
                     "implement",
                     text("back_to_implement",
-                         "主同步冲突消解完成（第 %d 轮），回实现段适配 main 变更")
+                         "main-sync conflict resolution completed (round %d), back "
+                         "to implement to adapt to main changes")
                     % conflict_rounds,
                     who="workflow", fallback=step_id)
                 _sync_stop = "rework"
@@ -2666,7 +2682,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 "mode": _mode, "main_sha": prep.target_sha,
                 "lane_head": prep.lane_head, "scope": _tag,
                 "detail": "；".join(_sync_outcomes)}
-            self._log(text("synced_log", "主同步（%s）：%s") % (
+            self._log(text("synced_log", "main sync (%s): %s") % (
                 _tag, main_sync_note(self.meta["main_sync"]) or "回执缺证据键（点名）"))
 
         return {"stop": _sync_stop, "conflict_rounds": conflict_rounds,
@@ -2895,7 +2911,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                               report=res.report)
                 if plan_rounds > MAX_REVIEW_ROUNDS:
                     await self._blocked("review_plan",
-                                        "方案审读打回 %d 轮超限（上限 %d）"
+                                        "design review send-back %d rounds over "
+                                        "limit (cap %d)"
                                         % (plan_rounds, MAX_REVIEW_ROUNDS))
                     continue
                 self._log("review_plan 打回 → create_plan（第 %d 轮）：%s"
@@ -3029,7 +3046,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                                   res.report or res.summary or "")
                         if impl_rounds > MAX_REVIEW_ROUNDS:
                             await self._blocked("integration_review",
-                                                "机械复核打回 %d 轮超限（上限 %d）"
+                                                "machine re-check send-back %d rounds "
+                                                "over limit (cap %d)"
                                                 % (impl_rounds, MAX_REVIEW_ROUNDS))
                             continue
                         phase = self._auto_rework("implement", gate_rework,
@@ -3050,7 +3068,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                               report=res.report)
                 if impl_rounds > MAX_REVIEW_ROUNDS:
                     await self._blocked("integration_review",
-                                        "集成审读打回 %d 轮超限（上限 %d）"
+                                        "integration review send-back %d rounds "
+                                        "over limit (cap %d)"
                                         % (impl_rounds, MAX_REVIEW_ROUNDS))
                     continue
                 note = "集成审读打回（第 %d 轮）" % impl_rounds
@@ -3441,9 +3460,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 ir.details.append({
                     "name": "__gate_timings__", "cmd": "", "exit": 0,
                     "output_tail": (
-                        "闸段分相（s）：段=%.0f｜前置=%.0f 主同步=%.0f 改动清单=%.0f "
-                        "跑闸=%.0f（执行面 %.0f，其中子进程 %.0f）｜Σ相位=%.0f "
-                        "unattributed=%.0f（段−Σ相位，排队/调度/段内非活动面）")
+                        "gate phase timings (s): segment=%.0f | pre-check=%.0f "
+                        "main-sync=%.0f changed-files=%.0f "
+                        "suite=%.0f (executor %.0f, subprocess %.0f within) | "
+                        "Σphases=%.0f "
+                        "unattributed=%.0f (segment−Σphases, queuing/scheduling/"
+                        "in-segment non-activity)")
                     % (_gate_phases["unattributed_s"] + _gate_sum_s,
                        _gate_phases.get("pre_check_s", 0.0),
                        _gate_phases.get("main_sync_s", 0.0),
@@ -3479,9 +3501,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # 同轮互证——开跑时 main@sha 一致）。回执畸形/缺键=空文案，票面不铸假证据
                 #（同步被 blocked 打断时根本到不了这里）。
                 _ms_note = main_sync_note(self.meta.get("main_sync") or {})
-                _ms_sum = ("｜主同步=%s" % _ms_note) if _ms_note else ""
-                _ms_evi = ("【主同步】%s（时点=机械验证前；同步与跑闸同轮直线衔接，"
-                           "未复用旧报告）\n" % _ms_note) if _ms_note else ""
+                _ms_sum = ("| main-sync=%s" % _ms_note) if _ms_note else ""
+                _ms_evi = ("[main sync] %s (taken before machine verification; sync "
+                           "and gate run joined in the same round, no reuse of stale "
+                           "reports)\n" % _ms_note) if _ms_note else ""
                 # B2（260929 宿主令）：环境红**具名**进票面/交接（前 5 个 + 总数；名单空
                 # =不加这段）。环境红不再是失败面（status 判据已摘 env_fail）——具名是
                 # 「不拦但不许静默」的兑现：票面答得出红的是哪几条，重跑不再当收敛手段。
@@ -3568,8 +3591,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # 据此把红项归属对着「main+票改动」的验证树判，而不是旧基线）。同样追加
                 # 在装配块之后，不挤进 [-4000:] 尾保窗（T2 静态 pin 纪律同上）。
                 if _ms_note:
-                    _ms_ctx = ("【主同步证据】本轮验证树已并入 %s（时点=机械验证前；"
-                               "同步与跑闸同轮直线衔接，未复用旧报告）" % _ms_note)
+                    _ms_ctx = ("[main sync evidence] this round's verification tree "
+                               "already includes %s (taken before machine verification; "
+                               "sync and gate run joined in the same round, no reuse "
+                               "of stale reports)" % _ms_note)
                     arb_ctx += "\n" + _ms_ctx
                     acc_ctx += _ms_ctx + "\n"
                 # B2（260929 宿主令）：环境面归因上下文——具名环境红是**供给/共享台面**，
@@ -3632,8 +3657,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     arb_format_rounds += 1
                     if arb_format_rounds > 2:
                         await self._blocked("arbitrate",
-                                            "仲裁结论 %d 次缺 verdict= 标记（契约：summary 含 "
-                                            "verdict=pass|tests-fault|code-fault）" % arb_format_rounds)
+                                            "arbitration summary %d times missing "
+                                            "verdict= marker (contract: summary "
+                                            "contains verdict=pass|tests-fault|"
+                                            "code-fault)" % arb_format_rounds)
                         continue
                     arb_ctx = ("【格式纠正】你的上一份结论缺少 verdict= 标记。请严格输出三态之一："
                                "verdict=pass / verdict=tests-fault / verdict=code-fault，并重判。")
@@ -3688,22 +3715,26 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         tests_rounds, tests_exempt_rounds, _, _ = \
                             tests_round_step("accept-reset", tests_rounds,
                                              tests_exempt_rounds)
-                        self._log("tests_rounds 计数复位（人工接受判决，连续语义）")
+                        self._log("tests_rounds counter reset (human-accepted verdict, "
+                                  "streak semantics)")
                     self._append_authz_use(
                         arb_authz, "arbitrate",
-                        "接受仲裁判决：verdict=%s（%s）→ acceptance_walkthrough"
+                        "accept arbitration verdict: verdict=%s (%s) → acceptance_walkthrough"
                         % (verdict, cap_reason))
                     self._finish("arbitrate", by="integration-agent",
                                  evidence=res.evidence or res.summary)
                     self._handoff(
                         "arbitrate",
-                        "仲裁超限封面经人授权接受判决（接受仲裁判决）→ acceptance_walkthrough：verdict=%s，%s"
-                        "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                        "arbitration over-limit cover: verdict accepted under "
+                        "human authorization (accept arbitration verdict) → "
+                        "acceptance_walkthrough: verdict=%s, %s"
+                        " (authorized by %s, issued %s, expires %s, reason %s)"
                         % (verdict, cap_reason,
                            arb_authz.get("who"), arb_authz.get("issued"),
                            arb_authz.get("expires"), arb_authz.get("reason")),
                         report=res.report)
-                    self._log("仲裁超限经人授权接受判决（%s）→ acceptance_walkthrough"
+                    self._log("arbitration over-limit: verdict accepted under human "
+                              "authorization (%s) → acceptance_walkthrough"
                               % arb_authz.get("who"))
                     phase = "acceptance"
                     continue
@@ -3764,7 +3795,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             if arb_authz is not None:
                                 self._append_authz_use(
                                     arb_authz, "arbitrate",
-                                    "接受仲裁判决：verdict=tests-fault（连续豁免超限面，%s）"
+                                    "accept arbitration verdict: verdict=tests-fault "
+                                    "(exemption streak over limit, %s)"
                                     "→ acceptance_walkthrough" % note)
                                 tests_rounds, tests_exempt_rounds, _, _ = \
                                     tests_round_step("accept-reset", tests_rounds,
@@ -3773,17 +3805,19 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                              evidence=res.evidence or res.summary)
                                 self._handoff(
                                     "arbitrate",
-                                    "连续豁免超限封面经人授权接受判决（豁免面，"
-                                    "接受仲裁判决）→ "
-                                    "acceptance_walkthrough：verdict=tests-fault，%s"
-                                    "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                                    "exemption-streak over-limit cover: verdict "
+                                    "accepted under human authorization (exemption "
+                                    "face, accept arbitration verdict) → "
+                                    "acceptance_walkthrough: verdict=tests-fault, %s"
+                                    " (authorized by %s, issued %s, expires %s, reason %s)"
                                     % (note, arb_authz.get("who"),
                                        arb_authz.get("issued"),
                                        arb_authz.get("expires"),
                                        arb_authz.get("reason")),
                                     report=res.report)
-                                self._log("仲裁连续豁免超限经人授权接受判决（%s）→ "
-                                          "acceptance_walkthrough"
+                                self._log("arbitration exemption-streak over limit: "
+                                          "verdict accepted under human authorization "
+                                          "(%s) → acceptance_walkthrough"
                                           % arb_authz.get("who"))
                                 phase = "acceptance"
                                 continue
@@ -3848,7 +3882,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         tests_rounds += 1
                         acct_note = ""
                         adoption_note = ""
-                    self._handoff("arbitrate", "测试集迭代（第 %d 轮）%s：%s%s"
+                    self._handoff("arbitrate", "test suite iteration (round %d)%s: %s%s"
                                   % (tests_rounds, acct_note,
                                      (res.summary or "")[:120],
                                      (" " + adoption_note) if adoption_note else ""),
@@ -4000,8 +4034,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     arb_format_rounds += 1
                     if arb_format_rounds > 2:
                         await self._blocked("arbitrate",
-                                            "仲裁结论 %d 次缺 verdict= 标记（契约：summary 含 "
-                                            "verdict=pass|tests-fault|code-fault）" % arb_format_rounds)
+                                            "arbitration summary %d times missing "
+                                            "verdict= marker (contract: summary "
+                                            "contains verdict=pass|tests-fault|"
+                                            "code-fault)" % arb_format_rounds)
                         # t260905-10: waking resets that single edge — arb_res is
                         # discarded, arb_done back to False, and the main loop genuinely
                         # re-runs the arbitrate edge (the prompt is rebuilt, so a ruling
@@ -4084,9 +4120,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         tests_rounds, tests_exempt_rounds, _, _ = \
                             tests_round_step("accept-reset", tests_rounds,
                                              tests_exempt_rounds)
-                        self._log("tests_rounds 计数复位（%s，连续语义）"
-                                  % ("仲裁 pass" if verdict == "pass"
-                                     else "人工接受判决"))
+                        self._log("tests_rounds counter reset (%s, streak semantics)"
+                                  % ("arbitration pass" if verdict == "pass"
+                                     else "human-accepted verdict"))
                     if authz_advance:
                         reason_txt = integration_route(verdict, tests_rounds,
                                                        code_rounds).split(":", 1)[-1]
@@ -4095,8 +4131,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             "接受仲裁判决：verdict=%s（%s）→ acceptance_walkthrough"
                             % (verdict, reason_txt))
                         arb_note = (
-                            "仲裁超限封面经人授权接受判决（接受仲裁判决）→ acceptance_walkthrough：verdict=%s，%s"
-                            "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                                "arbitration over-limit cover: verdict accepted under "
+                            "human authorization (accept arbitration verdict) → "
+                            "acceptance_walkthrough: verdict=%s, %s"
+                            " (authorized by %s, issued %s, expires %s, reason %s)"
                             % (verdict, reason_txt, arb_authz.get("who"),
                                arb_authz.get("issued"), arb_authz.get("expires"),
                                arb_authz.get("reason")))
@@ -4107,7 +4145,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     self._handoff("arbitrate", arb_note,
                                   artifacts=arb_res.deliverables, report=arb_res.report)
                     if authz_advance:
-                        self._log("仲裁超限经人授权接受判决（%s）→ acceptance_walkthrough"
+                        self._log("arbitration over-limit: verdict accepted under human "
+                                  "authorization (%s) → acceptance_walkthrough"
                                   % arb_authz.get("who"))
                     # Consume the parallel walkthrough result (valid only on
                     # verdict=pass; non-pass is discarded below)
@@ -4139,7 +4178,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                       report=acc_res.report)
                         if acc_rounds > MAX_ACCEPTANCE_ROUNDS:
                             await self._blocked("acceptance",
-                                                "验收走查打回 %d 轮超限（上限 %d）"
+                                                "acceptance walkthrough send-back "
+                                                "%d rounds over limit (cap %d)"
                                                 % (acc_rounds, MAX_ACCEPTANCE_ROUNDS))
                             continue
                         self._log("acceptance 打回 → implement（第 %d 轮）" % acc_rounds)
@@ -4208,7 +4248,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             if arb_authz is not None:
                                 self._append_authz_use(
                                     arb_authz, "arbitrate",
-                                    "接受仲裁判决：verdict=tests-fault（连续豁免超限面，%s）"
+                                    "accept arbitration verdict: verdict=tests-fault "
+                                    "(exemption streak over limit, %s)"
                                     "→ acceptance_walkthrough" % note)
                                 tests_rounds, tests_exempt_rounds, _, _ = \
                                     tests_round_step("accept-reset", tests_rounds,
@@ -4217,17 +4258,19 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                              evidence=arb_res.evidence or arb_res.summary)
                                 self._handoff(
                                     "arbitrate",
-                                    "连续豁免超限封面经人授权接受判决（豁免面，"
-                                    "接受仲裁判决）→ "
-                                    "acceptance_walkthrough：verdict=tests-fault，%s"
-                                    "（授权人 %s，签发 %s，到期 %s，理由 %s）"
+                                    "exemption-streak over-limit cover: verdict "
+                                    "accepted under human authorization (exemption "
+                                    "face, accept arbitration verdict) → "
+                                    "acceptance_walkthrough: verdict=tests-fault, %s"
+                                    " (authorized by %s, issued %s, expires %s, reason %s)"
                                     % (note, arb_authz.get("who"),
                                        arb_authz.get("issued"),
                                        arb_authz.get("expires"),
                                        arb_authz.get("reason")),
                                     report=arb_res.report)
-                                self._log("仲裁连续豁免超限经人授权接受判决（%s）→ "
-                                          "acceptance_walkthrough"
+                                self._log("arbitration exemption-streak over limit: "
+                                          "verdict accepted under human authorization "
+                                          "(%s) → acceptance_walkthrough"
                                           % arb_authz.get("who"))
                                 phase = "acceptance"
                                 continue
@@ -4287,7 +4330,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         tests_rounds += 1
                         acct_note = ""
                         adoption_note = ""
-                    self._handoff("arbitrate", "测试集迭代（第 %d 轮）%s：%s%s"
+                    self._handoff("arbitrate", "test suite iteration (round %d)%s: %s%s"
                                   % (tests_rounds, acct_note,
                                      (arb_res.summary or "")[:120],
                                      (" " + adoption_note) if adoption_note else ""),
@@ -4345,7 +4388,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                               report=res.report)
                 if acc_rounds > MAX_ACCEPTANCE_ROUNDS:
                     await self._blocked("acceptance",
-                                        "验收走查打回 %d 轮超限（上限 %d）"
+                                        "acceptance walkthrough send-back %d "
+                                        "rounds over limit (cap %d)"
                                         % (acc_rounds, MAX_ACCEPTANCE_ROUNDS))
                     continue
                 self._log("acceptance 打回 → implement（第 %d 轮）" % acc_rounds)
@@ -4431,7 +4475,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     # 260927 ⑥：同时逐条结构化全部红 + 本轮路由结论（纯加法）。
                     self._pin_merge_red_detail(
                         mc.checks,
-                        disposition="本轮=非冲突红 → blocked 等人；逐条处置见 reds")
+                        disposition="this round = non-conflict red → blocked, waiting "
+                                    "for a human; per-item handling in reds")
                     await self._blocked("merge_check", "merge_check 红灯：%s" % (red or mc.error))
                     continue
                 # ---- conflict-class reds: round counting + loop protection (the blocked
@@ -4444,25 +4489,33 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     # /conflict_files 结构化，紧邻 _blocked（C6 口径：消解常态路径不写）
                     self._pin_merge_red_detail(
                         mc.checks, mc.conflict_files,
-                        disposition="本轮=冲突类红，消解 %d 轮未收敛（上限 %d）→ 转人工处置"
+                        disposition="this round = conflict-class red, resolution did not "
+                                    "converge in %d rounds (cap %d) → hand over to a human"
                                     % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS))
                     await self._blocked(
                         "merge_check",
-                        "冲突消解 %d 轮未收敛（上限 %d），转人工处置：冲突文件 %s"
-                        "。执行器自己的出路（不必等人工）：发 rework(to_stage=implement)，"
-                        "实现段适配 main 后自动回 merge_check 重验"
+                        "conflict resolution did not converge in %d rounds "
+                        "(cap %d), handing over to a human: conflicting files %s."
+                        " The executor's own way out (no need to wait for a human): "
+                        "send rework(to_stage=implement); after implement adapts to "
+                        "main it automatically returns to merge_check for "
+                        "re-verification"
                         % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS, files_txt))
                     continue
                 if prev_conflict_files and files_sig == prev_conflict_files:
                     self._pin_merge_red_detail(
                         mc.checks, mc.conflict_files,
-                        disposition="本轮=同批文件连续 2 轮相同冲突（第 %d 轮）→ 转人工处置"
+                        disposition="this round = the same file set conflicts 2 rounds in "
+                                    "a row (round %d) → hand over to a human"
                                     % conflict_rounds)
                     await self._blocked(
                         "merge_check",
-                        "同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"
-                        "。执行器自己的出路（不必等人工）：发 rework(to_stage=implement)，"
-                        "实现段适配 main 后自动回 merge_check 重验"
+                        "the same batch of files keeps conflicting (same set for 2 "
+                        "consecutive rounds, round %d), handing over to a human: %s."
+                        " The executor's own way out (no need to wait for a human): "
+                        "send rework(to_stage=implement); after implement adapts to "
+                        "main it automatically returns to merge_check for "
+                        "re-verification"
                         % (conflict_rounds, files_txt))
                     continue
                 prev_conflict_files = files_sig
@@ -4537,7 +4590,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     remaining_files=[str(x) for x in (sraw.get("remaining_files") or [])],
                     error=str(sraw.get("error") or ""))
                 if not sres.ok:
-                    why = ("仍有未解冲突文件：%s" % "、".join(sres.remaining_files[:10])
+                    why = ("unresolved conflict files remain: %s"
+                           % "、".join(sres.remaining_files[:10])
                            ) if sres.remaining_files else (sres.error or "未知")
                     # The worktree is in a "merge in progress" state here (MERGE_HEAD
                     # present) — a retry_qc would make merge_check block again on a
@@ -4545,16 +4599,21 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     # handling instructions directly
                     await self._blocked(
                         "merge_check",
-                        "冲突消解第 %d 轮未收敛（worker 代落盘校验未过），转人工处置：%s。"
-                        "工作区现为合并进行中态——人工解冲突后发 rework 回 implement 续解，"
-                        "或泳道内 git merge --abort 复位后发 retry_qc 重验。"
-                        "执行器自己的出路：这条 rework(to_stage=implement) 用已持有的 "
-                        "send-back 权直接发，不必等人工"
+                        "conflict resolution round %d did not converge (worker-side "
+                        "commit verification failed), handing over to a human: %s."
+                        " The worktree is now in a merging state — after resolving "
+                        "conflicts by hand send rework back to implement to continue, "
+                        "or run git merge --abort inside the lane to reset, then send "
+                        "retry_qc for re-verification."
+                        " The executor's own way out: send this "
+                        "rework(to_stage=implement) directly using the send-back "
+                        "power you already hold, no need to wait for a human"
                         % (conflict_rounds, why))
                     continue
-                self._log("冲突消解第 %d 轮落盘 %s（%d 个文件），回 merge_check 重验"
+                self._log("conflict resolution round %d committed %s (%d files), "
+                          "back to merge_check for re-verification"
                           % (conflict_rounds, sres.commit, len(prep.conflict_files)))
-                self._handoff("implement", "冲突消解第 %d 轮落盘 %s"
+                self._handoff("implement", "conflict resolution round %d committed %s"
                               % (conflict_rounds, sres.commit))
                 # (4) the resolution goes straight back to merge_check for re-verification
                 #     (the mechanical gate re-checks the worktree and the dry run)
@@ -4581,7 +4640,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # ledger atomically flips to human-hold (no window, nothing handed to
                 await self._concurrency_renew(CAUSE_HUMAN_GATE)
                 self._log("merge 人审挂起，等 sign signal（merge_check 已全绿）")
-                self._mark("merge", "awaiting-human", "等人签字：sign(gate=merge)")
+                self._mark("merge", "awaiting-human", "waiting for signature: sign(gate=merge)")
                 # t260928-13：人门是无限期等待，先冲账再挂起（事件账本 flush 点）
                 await self._ledger_flush()
                 await workflow.wait_condition(
@@ -4594,7 +4653,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 if sig.decision != "approve":
                     self._rework = ReworkRequest(
                         who=sig.who, target_stage="implement",
-                        note="人在 merge 打回：%s（签字人 %s）" % (sig.note, sig.who))
+                        note="human send-back at merge: %s (signed by %s)" % (sig.note, sig.who))
                     continue
                 # Approved signature → real merge
                 self.meta["stage_state"] = "running"
@@ -4646,7 +4705,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         "next_action": ("在 main 提交或暂存（git stash）这些改动，"
                                         "或票面说明后发 retry_qc 重验；引擎不自动 stash/提交")
                                        if mr.action == "dirty" else
-                                       "合并执行故障（非冲突），人工处置后发 retry_qc 重验",
+                                       "merge execution fault (non-conflict), handle "
+                                       "with a human, then send retry_qc for "
+                                       "re-verification",
                     }
                     self._touch()
                     note = ("merge 未收口（%s/%s）： %s"
@@ -4721,18 +4782,20 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     except Exception as e:
                         await self._blocked(
                             "merge",
-                            "泳道拆除故障（本体已归档，泳道残留待人工）：%s: %s%s"
+                            "lane teardown fault (ticket body archived, lane residue "
+                            "awaiting human): %s: %s%s"
                             % (type(e).__name__, str(e)[:400],
                                shared.exception_chain_note(e)))
                         continue
                     if not isinstance(tr, MergeResult) or not tr.ok:
                         await self._blocked(
                             "merge",
-                            "泳道拆除回执异常（本体已归档，泳道残留待人工）：%s"
+                            "lane teardown receipt abnormal (ticket body archived, "
+                            "lane residue awaiting human): %s"
                             % ((getattr(tr, "error", "") or repr(tr))[:400]))
                         continue
                     if tr.error:
-                        self._log("泳道拆除告警（残留可回收，本体已归档）：%s"
+                        self._log("lane teardown warning (residue recoverable, ticket body archived): %s"
                                   % tr.error)
                 self._finish("merge", by=sig.who,
                              evidence="merge 落账 %s（人审 %s：%s）"
@@ -4742,7 +4805,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 continue
 
             if not workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
-                raise ValueError("未知阶段 %r" % phase)  # unreachable (the step chain is closed)
+                raise ValueError("unknown phase %r" % phase)  # unreachable (the step chain is closed)
             # 260930（宿主令·nusuyou 需求⑥）：未知相位**绝不 raise**——本文件自己写着「主循环
             # 是裸 while True，抛出去=打断工作流实例」，而 raise 的后果就是票面 status=None、
             # 快照/show/query 全不可读（t260929-28 实案，票作废不可恢复）。改成 blocked：
@@ -4790,10 +4853,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         if str(getattr(sig, "gate", "") or "") == AUTHZ_SIGNAL_GATE_MARKER:
             self.refused.append(
                 {"who": sig.who, "want": "sign(authorize)",
-                 "why": "authorize 载荷解析失败：gate 标记在场但载荷为空（传输/反序列化"
-                        "一跳丢失——疑似该票 worker 代码过期，重启该票专属 worker 后重试）；"
-                        "不按普通签字处理"})
-            self._log("人授权拒收（%s）：authorize 载荷解析失败（gate 标记在场但载荷为空）"
+                 "why": "authorize payload parse failed: gate marker present but "
+                        "payload empty (lost on a transport/deserialization hop — "
+                        "suspected stale worker code for this ticket; restart the "
+                        "ticket's dedicated worker and retry); "
+                        "not treated as a plain signature"})
+            self._log("human authorization refused (%s): authorize payload parse "
+                      "failed (gate marker present but payload empty)"
                       % (sig.who or "?"))
             return
         # t260915-12 跨项目闸（第二道，先于人门语义检查）：盖章值 vs 本票项目——
@@ -4806,11 +4872,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         stage = str(self.meta.get("stage") or "")
         if stage != "merge" or self.meta.get("stage_state") != "awaiting-human":
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
-                                 "why": "当前步 %s 非人审等待中，签字无效" % stage})
+                                 "why": "current step %s is not awaiting human "
+                                        "review; signature invalid" % stage})
             return
         if sig.gate and sig.gate != "merge":
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
-                                 "why": "gate 与当前等待步 merge 不符"})
+                                 "why": "gate does not match the currently waiting step merge"})
             return
         self._sigs["merge"] = sig
 
@@ -4828,11 +4895,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         if err:
             self.refused.append({"who": who, "want": "sign(authorize)",
                                  "why": err})
-            self._log("人授权拒收（%s）：%s" % (who or "?", err))
+            self._log("human authorization refused (%s): %s" % (who or "?", err))
             return
         rec = authz_gates.authorization_record(auth, now)
         self.meta.setdefault("authorizations", []).append(rec)
-        note = ("人授权签发（%s）：kind=%s scope=%s 到期=%s 理由=%s"
+        note = ("human authorization issued (%s): kind=%s scope=%s expires=%s reason=%s"
                 % (rec["who"], rec["kind"], "、".join(rec["scope"]),
                    authz_gates.fmt_ts(rec["expires"]), rec["reason"]))
         self.timeline.append({"at": self._now_iso(),
@@ -4897,7 +4964,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
-             "reason": "%s 请求重跑（第 %d 次）" % (who, self._retry_token)})
+             "reason": "%s requests rerun (attempt %d)" % (who, self._retry_token)})
 
     @workflow.signal
     def host_ruling(self, req: HostRulingRequest) -> None:
@@ -4913,7 +4980,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         note = str(req.note or "").strip()
         if not who or not note:
             self.refused.append({"who": who, "want": "host_ruling",
-                                 "why": "who/note 均必填非空（空/纯空白拒收）"})
+                                 "why": "who/note are both required and non-empty "
+                                        "(empty/whitespace-only refused)"})
             return
         # t260915-12 跨项目闸（第二道）：intake 通过后、落账前的项目归属校验。
         if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
@@ -4922,8 +4990,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             return
         if len(note) > HOST_RULING_NOTE_INPUT_LIMIT:
             self.refused.append({"who": who, "want": "host_ruling",
-                                 "why": "note 超限（%d > %d 字符），不进事件历史——"
-                                        "拆条后重发" % (len(note), HOST_RULING_NOTE_INPUT_LIMIT)})
+                                 "why": "note over limit (%d > %d chars), not entering "
+                                        "event history — split and resend"
+                                        % (len(note), HOST_RULING_NOTE_INPUT_LIMIT)})
             return
         self.meta.setdefault("host_rulings", []).append(
             {"ts": self._now_iso(), "who": who, "note": note})

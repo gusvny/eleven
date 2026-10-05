@@ -65,10 +65,10 @@ def test_a_face_carries_real_activity_message():
     msg = format_agent_stage_failure("t260929-15", "implement", exc, gen=2)
     assert REAL_DETAIL in msg
     assert "Activity task failed" in msg          # 最外层壳仍如实呈现（不丢真）
-    assert "根因（链上第 1 层 RuntimeError）" in msg
-    assert "worker 被外部终止" not in msg
+    assert "root cause (level 1 on the chain, RuntimeError)" in msg
+    assert "worker terminated externally" not in msg
     # 旧文案本就不含票号/段号/次数（仅 worker 停机分支有）——维持该形状不扩面。
-    assert "（票 " not in msg
+    assert "(ticket " not in msg
 
 
 def test_a_cause_first_walk_finds_temporal_cause_attr():
@@ -82,7 +82,7 @@ def test_a_cause_first_walk_finds_temporal_cause_attr():
     found = chain_failure_reason(duck)
     assert found[0] == 2 and found[2] == REAL_DETAIL
     note = exception_chain_note(duck)
-    assert REAL_DETAIL in note and "第 2 层 RuntimeError" in note
+    assert REAL_DETAIL in note and "level 2 on the chain, RuntimeError" in note
 
 
 def test_a_deepest_of_three_level_chain_wins():
@@ -103,8 +103,8 @@ def test_b_worker_terminated_wording_beats_chain_digging():
                           msg="Activity task failed")
     exc.__cause__.__cause__ = RuntimeError(REAL_DETAIL)
     msg = format_agent_stage_failure("t-x", "implement", exc)
-    assert msg.startswith("worker 被外部终止（停机/重载），活动已取消")
-    assert REAL_DETAIL not in msg and "根因" not in msg
+    assert msg.startswith("worker terminated externally (shutdown/reload); the activity was cancelled")
+    assert REAL_DETAIL not in msg and "root cause" not in msg
 
 
 def test_b_classify_negative_still_digs_chain():
@@ -118,18 +118,18 @@ def test_b_classify_negative_still_digs_chain():
 
 def test_c_no_chain_keeps_legacy_wording_byte_for_byte():
     """根=最外层（无链/level 0）：逐字维持旧文案（防同句双打，review 意见③）。"""
-    exc = RuntimeError("headless agent 退出（rc=1）")
+    exc = RuntimeError("headless agent exited (rc=1)")
     assert format_agent_stage_failure("t-1", "create_plan", exc) == \
-        "agent 活动故障（已重试）：RuntimeError: headless agent 退出（rc=1）"
+        "agent activity failure (already retried): RuntimeError: headless agent exited (rc=1)"
     assert exception_chain_note(exc) == ""
 
 
 def test_c_none_and_non_exception_input():
     """None / 非异常输入：不进链下钻，旧文案保底，不炸。"""
     assert format_agent_stage_failure("t-1", "s", None) == \
-        "agent 活动故障（已重试）：NoneType: None"
-    assert format_agent_stage_failure("t-1", "s", "野字符串") == \
-        "agent 活动故障（已重试）：str: 野字符串"
+        "agent activity failure (already retried): NoneType: None"
+    assert format_agent_stage_failure("t-1", "s", "stray-string") == \
+        "agent activity failure (already retried): str: stray-string"
     assert chain_failure_reason(None) is None
 
 
@@ -141,7 +141,7 @@ def test_c_cause_not_an_exception():
     found = chain_failure_reason(_WeirdCause("outer msg"))
     assert found[0] == 0 and found[2] == "outer msg"
     assert format_agent_stage_failure("t-1", "s", _WeirdCause("outer msg")) == \
-        "agent 活动故障（已重试）：_WeirdCause: outer msg"
+        "agent activity failure (already retried): _WeirdCause: outer msg"
 
 
 def test_c_cyclic_chain_no_hang_no_fabrication():
@@ -166,9 +166,9 @@ def test_c_all_empty_messages_reason_unobtainable():
     empty.__cause__ = RuntimeError("   ")
     assert chain_failure_reason(empty) is None
     msg = format_agent_stage_failure("t-1", "s", empty)
-    assert "根因不可得" in msg
-    assert "agent 活动故障（已重试）" in msg
-    assert "根因（链上第" not in msg          # 不编造
+    assert "root cause unavailable" in msg
+    assert "agent activity failure (already retried)" in msg
+    assert "root cause (level" not in msg          # never fabricated
 
 
 def test_c_over_deep_chain_returns_deepest_reachable():
@@ -183,7 +183,7 @@ def test_c_over_deep_chain_returns_deepest_reachable():
     assert found is not None
     assert found[0] == REASON_CHAIN_MAX_DEPTH - 1
     assert found[2] == "level%d" % (REASON_CHAIN_MAX_DEPTH - 1)
-    assert "根因不可得" not in format_agent_stage_failure("t-1", "s", cur)
+    assert "root cause unavailable" not in format_agent_stage_failure("t-1", "s", cur)
 
 
 def test_c_truncation_cap():
@@ -192,7 +192,7 @@ def test_c_truncation_cap():
     found = chain_failure_reason(_activity_error(huge))
     assert len(found[2]) == REASON_MAX_CHARS
     msg = format_agent_stage_failure("t-1", "s", _activity_error(huge))
-    assert "根因（链上第 1 层 RuntimeError）" in msg
+    assert "root cause (level 1 on the chain, RuntimeError)" in msg
 
 
 def test_c_duck_typed_namespace_chain():
@@ -226,7 +226,7 @@ def test_exception_chain_note_shared_by_side_channels():
     """侧通道后缀：level>0 给「根因」段；level 0 / 无消息给空串（不加空尾巴）。"""
     exc = _activity_error(RuntimeError(REAL_DETAIL))
     note = exception_chain_note(exc)
-    assert note.startswith("；根因（链上第 1 层 RuntimeError）：")
+    assert note.startswith("; root cause (level 1 on the chain, RuntimeError): ")
     assert REAL_DETAIL in note
     assert exception_chain_note(RuntimeError("plain")) == ""
     empty = RuntimeError("  ")

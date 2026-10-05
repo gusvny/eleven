@@ -181,7 +181,7 @@ def main():
             "ticket_id": "t26090402-anchor-u", "template_id": "dev-lane",
             "project": "bench-nope", "title": "未知 key 子用例", "write_set": ["docs/"]}, env_a)
         j_u = parse_out_json(out_u)
-        fail.check(j_u.get("ok") is not True and "未知项目" in out_u,
+        fail.check(j_u.get("ok") is not True and "unknown project" in out_u,
                    "未知 project key 拒收且回执点名「未知项目」（rc=%s out=%s）"
                    % (rc_u, out_u.strip()[:100]))
         # L9-allow: expects-refusal —— 负例：缺 project 在建票入口即拒（「需要 project」），

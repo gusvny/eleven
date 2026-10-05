@@ -504,7 +504,7 @@ def append_event(payload: Dict[str, Any], ledger_dir: Optional[Path] = None,
                 'why': 'project-scope row has empty project key (rejected)'}
     cfg = event_ledger_config()
     if not skip_enabled_gate and not cfg.get('enabled'):
-        return {'emitted': False, 'why': 'event_ledger 未声明或未启用（零行为）'}
+        return {'emitted': False, 'why': 'event_ledger not declared or not enabled (zero behaviour)'}
     path = ledger_path(project, ledger_dir)
     idem = str(ev.get('idem') or '')
     if idem:

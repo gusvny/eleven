@@ -143,7 +143,7 @@ def test_probe_version_ok(tmp_path):
 
 def test_probe_version_missing_binary():
     pv = dsh_pin.probe_dsh_version("/nonexistent/dsh/bin", timeout=5)
-    assert pv["state"] == "error" and "起不了" in pv["detail"]
+    assert pv["state"] == "error" and "cannot start" in pv["detail"]
 
 
 def test_probe_version_nonzero_exit(tmp_path):
@@ -157,7 +157,7 @@ def test_probe_version_timeout_reaps(tmp_path):
     t0 = time.monotonic()
     pv = dsh_pin.probe_dsh_version(stub, timeout=0.6)
     elapsed = time.monotonic() - t0
-    assert pv["state"] == "error" and "超时" in pv["detail"]
+    assert pv["state"] == "error" and "timed out" in pv["detail"]
     assert elapsed < 10  # 超时路径必须快速返回（进程组已收割，不留挂尸）
 
 
@@ -171,7 +171,7 @@ def test_probe_version_malformed_output(tmp_path):
         stub = _stub(tmp_path, body, name="stub_%s.py" % name)
         pv = dsh_pin.probe_dsh_version(stub, timeout=10)
         assert pv["state"] == "error", name
-        assert "非单行版本样" in pv["detail"], name
+        assert "not a single version-like line" in pv["detail"], name
 
 
 def test_probe_version_orphan_reaped(tmp_path):

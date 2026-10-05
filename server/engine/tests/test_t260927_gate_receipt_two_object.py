@@ -76,16 +76,16 @@ def test_unparsable_receipt_is_named_not_silently_red_zero():
         v = gate_verdict(gate_receipt_parse(bad), 0)
         assert v["parsed"] is False and v["red_count"] == 0
         note = gate_failure_note("发布账对账", v, 0, raw_head=bad[:80])
-        assert "回执不可解析" in note and "红灯 0 项" not in note, note
+        assert "receipt unparseable" in note and "0 red items" not in note, note
 
 
 def test_failure_note_distinguishes_real_red_from_parse_failure():
     """三态各写各的：真红点名项数、解析失败点名解析、要素没过点名三个值。"""
     real_red = gate_verdict(gate_receipt_parse(REAL_TWO_OBJECT), 0)
     note_red = gate_failure_note("发布账对账", real_red, 0)
-    assert "红灯 1 项" in note_red, note_red
+    assert "1 red items" in note_red, note_red
     note_parse = gate_failure_note("发布账对账", gate_verdict({}, 0), 0)
-    assert "回执不可解析" in note_parse
+    assert "receipt unparseable" in note_parse
     note_elem = gate_failure_note(
         "发布账对账", gate_verdict({"ok": False, "result": {"green": True}}, 0), 0)
     assert "ok=False" in note_elem and "result.green=True" in note_elem, note_elem

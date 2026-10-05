@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 214,
-      "scenarios": 523
+      "engine_tests": 215,
+      "scenarios": 525
     },
     "vocab": [
       "behaviour",
@@ -1076,6 +1076,11 @@
     "server/engine/tests/test_t261005_16_bench_registry_stage.py": {
       "anchor": "contract",
       "note": "t261005-16: the engine-owned production stage path must not replay the retired seed - python bench-registry mirror (schema-v1 project list, .migrated marker, live workspace, occupied-target fail-loud), up_stage wires --fixtures-dir + SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects, up-failure and down_stage cleanup, product loads exactly capture-bench (KI-204 acceptance rework)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_36_copy_marker_retirement.py": {
+      "anchor": "behaviour",
+      "note": "t261004-36: zero temporary copy-lang-allow data markers (retirement guard)",
       "sync_path": ""
     }
   },
@@ -3693,6 +3698,16 @@
     "integration/t261005-16/sc_capture_fresh_home_journey.mjs": {
       "anchor": "behaviour",
       "note": "t261005-16: the capture bench journey is independent of the host registry - a hostile SANDBAR_PROJECTS_DIR (retired entry, dead probe dir) must not leak into the bench (exit 0, no workspace-creation failure, probe never appears, PNGs flat), clean fresh-home journey opt-in, no temp-home residue (KI-204)",
+      "sync_path": ""
+    },
+    "integration/t261004-36/sc_engine_refusal_copy_english.py": {
+      "anchor": "behaviour",
+      "note": "t261004-36: operator-readable refusal/receipt copy is English and refusals stay precise",
+      "sync_path": ""
+    },
+    "integration/t261004-36/sc_no_data_marker.py": {
+      "anchor": "behaviour",
+      "note": "t261004-36: zero data-id copy-language exemptions under server/engine and integration",
       "sync_path": ""
     }
   }

@@ -90,7 +90,7 @@ def test_cron_malformed_named():
 
 def test_cron_never_firing_named_within_four_years():
     # 2 月 30 日：可解析词法但四年内无命中 → 显式报错（不静默返回远期）
-    with pytest.raises(ValueError, match="四年内无命中"):
+    with pytest.raises(ValueError, match="no firing within four years"):
         tc.next_cron_fire("0 0 30 2 *", datetime(2026, 1, 1))
 
 

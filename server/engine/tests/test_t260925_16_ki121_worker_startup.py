@@ -102,7 +102,7 @@ def test_incident_stage_id_collision_rejected_at_load(monkeypatch, tmp_path):
     assert "incident-tmpl" not in shared.TEMPLATE_CLASS_NAMES
     # 拒收记录点名：检查名＋活动名＋引擎来源＋来件方
     hits = [r for r in shared.PROJECT_TEMPLATE_REJECTIONS
-            if r.get("check") == "活动名撞引擎注册面"]
+            if r.get("check") == "activity name collides with the engine registry face"]
     assert hits, shared.PROJECT_TEMPLATE_REJECTIONS
     r = hits[-1]
     assert r["stage"] == "ai-review"
@@ -222,7 +222,7 @@ def test_unavailable_engine_face_fail_closed(monkeypatch, tmp_path):
     wv._filter_activity_name_collisions(res)
     assert res.classes == {} and res.accepted == {}
     checks = [r["check"] for r in res.rejections]
-    assert "活动名唯一性检查不可用" in checks
+    assert "activity-name uniqueness check unavailable" in checks
 
 
 # ---- ⑦ worker_dryrun CLI：桩根自持，绿/红两态 ----

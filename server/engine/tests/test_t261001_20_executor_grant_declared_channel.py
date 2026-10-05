@@ -204,7 +204,7 @@ def test_fixture_like_calls_never_gated(grants_root):
 def test_cwd_channel_zero_grants_refused(grants_root):
     """零授予执行器会话（cwd 通道）=拒收（t260930-14 原语义，rework 回归杆②）。"""
     v = eg.judge_core("cwd", "sign", "sandbar", eg.load_declaration, 1_000)
-    assert v["allowed"] is False and "零授予" in v["why"]
+    assert v["allowed"] is False and "zero grants" in v["why"]
 
 
 def test_cwd_channel_with_grant_passes(grants_root):
@@ -291,10 +291,10 @@ def test_meta_op_locked_for_executor_identities(grants_root):
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {"sign": True},
                                          "executor_sessions": ["s-1"]})
     v1 = eg.judge_core("cwd", eg.META_OP, "sandbar", eg.load_declaration, 1_000)
-    assert v1["allowed"] is False and "反锁" in v1["why"]
+    assert v1["allowed"] is False and "meta-permission lock" in v1["why"]
     v2 = eg.judge_core("arg", eg.META_OP, "sandbar", eg.load_declaration, 1_000,
                        declared_sessions=("s-1",), caller_session="s-1")
-    assert v2["allowed"] is False and "反锁" in v2["why"]
+    assert v2["allowed"] is False and "meta-permission lock" in v2["why"]
 
 
 def test_meta_op_not_locked_for_non_executor_callers(grants_root):
@@ -309,12 +309,12 @@ def test_save_declaration_locked_for_executor_identities(grants_root, monkeypatc
     monkeypatch.setenv("DSH_SESSION_ID", "s-1")
     # cwd 通道：拒收
     r1 = eg.save_declaration("sandbar", {"sign": True}, "executor", 1_000, caller_channel="cwd")
-    assert r1["saved"] is False and "反锁" in r1["reason"]
+    assert r1["saved"] is False and "meta-permission lock" in r1["reason"]
     # 被点名会话（arg 通道）：拒收
     _write_decl(grants_root, "sandbar", {"version": 1, "grants": {},
                                          "executor_sessions": ["s-1"]})
     r2 = eg.save_declaration("sandbar", {"sign": True}, "executor", 1_000, caller_channel="arg")
-    assert r2["saved"] is False and "反锁" in r2["reason"]
+    assert r2["saved"] is False and "meta-permission lock" in r2["reason"]
     # 盘上只有测试自写的点名声明，反锁未落新文件（mtime/内容由 saved=False 保证）
 
 

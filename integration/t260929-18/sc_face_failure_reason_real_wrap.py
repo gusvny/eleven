@@ -123,7 +123,7 @@ async def main_async():
             rb = await run_probe("worker_terminated", "t260929-18b")
             textb = rb.get("text", "")
             case("B-worker-terminated-wording-wins",
-                 "worker 被外部终止" in textb
+                 "worker terminated externally" in textb
                  and ACTIONABLE_DETAIL not in textb
                  and "Activity task failed" not in textb,
                  "text=%r" % textb[:300])

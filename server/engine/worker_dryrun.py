@@ -47,7 +47,7 @@ def run_dryrun() -> dict:
         n = _workflow_registered_name(cls)
         src = getattr(cls, "__module__", "?")
         if n in seen_wf:
-            raise ValueError("工作流定义名撞车（dry-run）：%s 已由 %s 注册，再来件 %s"
+            raise ValueError("workflow definition name collision (dry-run): %s already registered by %s, got another %s"
                              % (n, seen_wf[n], src))
         seen_wf[n] = src
 
@@ -57,19 +57,19 @@ def run_dryrun() -> dict:
     for tid, mod_name in sorted(_wv.PROJECT_TEMPLATE_MODULE_NAMES.items()):
         mod = sys.modules.get(mod_name)
         if mod is None:
-            raise ValueError("外置模板模块未装载（dry-run）：%s（模板 %s）" % (mod_name, tid))
+            raise ValueError("external template module not loaded (dry-run): %s (template %s)" % (mod_name, tid))
         cls = _wv.TEMPLATE_CLASSES.get(tid)
         cls_mod = sys.modules.get(getattr(cls, "__module__", ""))
         if cls_mod is not mod:
-            raise ValueError("外置模板类与装载模块身份分裂（dry-run）：模板 %s 类在 %s，"
-                             "装载名 %s 指向另一对象" % (tid, getattr(cls, "__module__", "?"), mod_name))
+            raise ValueError("external template class and loading module split identity (dry-run): template %s class "
+                             "lives in %s, loading name %s points to another object" % (tid, getattr(cls, "__module__", "?"), mod_name))
         ext[tid] = mod_name
 
     from shared import PROJECT_TEMPLATE_REJECTIONS, project_template_rejection_note
     # 加载口拒收在场=dry-run 红（fail-loud 点名）：模板级拒收虽不炸工人，但「声明了
     # 却跑不了」必须显性可见，不得静默当绿——闸据此把这类缺陷挡在合并前。
     if PROJECT_TEMPLATE_REJECTIONS:
-        raise ValueError("加载口拒收在场（dry-run 红，不静默）："
+        raise ValueError("loader-gate refusal present (dry-run red, never silent): "
                          + project_template_rejection_note())
     return {
         "ok": True,

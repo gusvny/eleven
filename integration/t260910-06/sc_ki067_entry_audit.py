@@ -427,7 +427,7 @@ try:
         check("C1 正规入口 retry_qc：delivered + timeline 以 who 记（裸串契约）+ 双行审计",
               p.returncode == 0 and r1.get("ok") and p2.returncode == 0
               and r2.get("ok")
-              and "请求重跑" in dump1 and "ut-integ" in dump1 and not garbage
+              and "requests rerun" in dump1 and "ut-integ" in dump1 and not garbage
               and len(paired) >= 1,
               "rc=%r ok=%r garbage=%s 双行组=%d 全行=%r dump片=%r"
               % (p.returncode, r1.get("ok"), garbage, len(paired),

@@ -309,7 +309,7 @@ def test_merge_check_no_declaration_green_note():
         items = ui_items(res.checks)
         assert len(items) == 1, res.checks
         assert items[0]["green"] is True
-        assert "未声明" in items[0]["detail"] and "缺席" in items[0]["detail"]
+        assert "not declared" in items[0]["detail"] and "absent" in items[0]["detail"]
     finally:
         g.rmtree(tmp, ignore_errors=True)
 

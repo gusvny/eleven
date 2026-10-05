@@ -155,8 +155,9 @@ def resolve_project_root(project_key):
     """
     key = str(project_key or "").strip()
     if not key:
-        raise ValueError("项目身份为空：repo_root 按项目解析需要非空 project_key"
-                         "（无项目身份的巡检=无主票，绝不静默回落引擎仓）")
+        raise ValueError("empty project identity: repo_root resolves per project and needs a "
+                         "non-empty project_key (an inspection without a project identity = an "
+                         "ownerless ticket; never silently falls back to the engine repo)")
     proj = lookup_project(key)
     return pathlib.Path(str(proj["dirs"][0]))
 
@@ -207,14 +208,14 @@ def validate_epic_code(code: str, epics_dir=None) -> str:
         return ""
     if not EPIC_CODE_RE.match(code):
         raise ValueError(
-            "立项代号形状非法：%r（要求 %s，小写字母/数字/连字符）" % (code, EPIC_CODE_RE.pattern))
+            "illegal epic code shape: %r (required %s, lowercase letters/digits/hyphens)" % (code, EPIC_CODE_RE.pattern))
     base = pathlib.Path(epics_dir) if epics_dir is not None else EPICS_DIR
     path = base / (code + ".md")
     if not path.is_file():
         existing = sorted(p.stem for p in base.glob("*.md")) if base.is_dir() else []
         raise ValueError(
-            "立项代号不存在：%r（%s 无此档案）。现有代号：%s"
-            % (code, path, "、".join(existing) if existing else "（目录为空或不存在）"))
+            "epic code not found: %r (%s has no such file). Existing codes: %s"
+            % (code, path, "、".join(existing) if existing else "(directory empty or missing)"))
     return code
 
 
@@ -402,7 +403,7 @@ def parse_surface_plan(stdout, prev_red_names=()):
     红名只在 targeted 时并入，且畸形红名条目跳过（不因红名脏而放宽或收窄面）。
     """
     if not isinstance(stdout, str) or not stdout.strip():
-        return [], "full", "empty-stdout", "面计划查询无输出"
+        return [], "full", "empty-stdout", "surface-plan query produced no output"
     payload = None
     for line in reversed(stdout.splitlines()):
         t = line.strip()
@@ -418,26 +419,26 @@ def parse_surface_plan(stdout, prev_red_names=()):
                 break
             payload = None
     if not isinstance(payload, dict):
-        return [], "full", "malformed-json", "面计划输出不是单行 JSON 对象"
+        return [], "full", "malformed-json", "surface-plan output is not a single-line JSON object"
     mode = str(payload.get("mode") or "")
     reason = str(payload.get("reason") or "")
     if mode not in SURFACE_PLAN_MODES:
         return [], "full", "bad-mode:%s" % (mode or "empty"), \
-            "mode 不在词表 %s" % (SURFACE_PLAN_MODES,)
+            "mode not in vocabulary %s" % (SURFACE_PLAN_MODES,)
     raw_names = payload.get("names")
     if not isinstance(raw_names, list):
-        return [], "full", "bad-names-shape", "names 不是列表"
+        return [], "full", "bad-names-shape", "names is not a list"
     names = []
     for n in raw_names:
         if not isinstance(n, str):
-            return [], "full", "bad-name-element", "names 含非字符串元素"
+            return [], "full", "bad-name-element", "names contains a non-string element"
         n = n.strip()
         if n and n not in names:
             names.append(n)
     if mode == "full":
         return [], "full", reason or "full", ""
     if not names:
-        return [], "full", "empty-plan", "targeted 但面为空（空面=全量，不收窄）"
+        return [], "full", "empty-plan", "targeted but the face is empty (empty face = full; never narrows)"
     for r in (prev_red_names or ()):
         if isinstance(r, str) and r.strip() and r.strip() not in names:
             names.append(r.strip())
@@ -634,16 +635,16 @@ def parse_reprobe_summary(stdout_text: str, returncode: int) -> ReprobeRedResult
         if ln.startswith(REPROBE_SUMMARY_MARK):
             line = ln[len(REPROBE_SUMMARY_MARK):].strip()
     if not line:
-        out.error = "探针回执缺 REPROBE_SUMMARY 行（执行器提前退出？）rc=%s" % returncode
+        out.error = "reprobe receipt lacks a REPROBE_SUMMARY line (executor exited early?) rc=%s" % returncode
         return out
     import json as _json  # 函数内延迟 import（单文件加载面纪律，见文件头注）
     try:
         doc = _json.loads(line)
     except ValueError:  # JSONDecodeError ⊂ ValueError（单文件加载面不引 json 全名）
-        out.error = "探针回执 REPROBE_SUMMARY 非法 JSON：%s" % line[:160]
+        out.error = "reprobe receipt REPROBE_SUMMARY is not valid JSON: %s" % line[:160]
         return out
     if not isinstance(doc, dict):
-        out.error = "探针回执 REPROBE_SUMMARY 非对象：%s" % line[:160]
+        out.error = "reprobe receipt REPROBE_SUMMARY is not an object: %s" % line[:160]
         return out
     out.ran = int(doc.get("ran") or 0)
     out.passed = int(doc.get("passed") or 0)
@@ -654,8 +655,8 @@ def parse_reprobe_summary(stdout_text: str, returncode: int) -> ReprobeRedResult
                    if isinstance(x, dict)]
     row_error = str(doc.get("error") or "")
     if returncode != 0 or row_error or out.missing:
-        out.error = row_error or ("探针 exit=%s（missing=%s）"
-                                  % (returncode, ",".join(out.missing) or "无"))
+        out.error = row_error or ("reprobe exit=%s (missing=%s)"
+                                  % (returncode, ",".join(out.missing) or "none"))
     return out
 
 
@@ -723,13 +724,16 @@ def parse_arbitration_summary(summary: str) -> str:
 # 不发明出口）；前缀文案逐字保持既有断言兼容（test_integration_route / KI-061
 # startswith / 场景关键词「测试集迭代」「超限」）。
 _ARBITRATION_CAP_EXITS = (
-    "。出路：① op=authorize（kind=arbitration_verdict，scope=[本票票号]）"
-    "接受本判决→推进验收（判据：产品面已收口、余红属环境/负载抖动）"
-    "【重要：blocked 态下 authorize 不发唤醒，必须随后再发一次 retry_qc 才会重驱"
-    "（260927 实案 t260926-05：只发 authorize 卡住约 2 小时；引擎协议见 dev_lane 的"
-    "「authorize+retry_qc 唤醒后 pend 恒空」）】；"
-    "② op=ruling 宿主终裁改判；③ op=rework 打回 implement/create_plan 修正；"
-    "④ op=pause 暂停交人工处置")
+    ". Way out: (1) op=authorize (kind=arbitration_verdict, scope=[this ticket's id]) "
+    "accepts this verdict -> advance to acceptance (criteria: the product face is "
+    "closed out and the remaining reds are environment/load jitter)"
+    "[IMPORTANT: in the blocked state authorize sends no wake-up; you must afterwards "
+    "send retry_qc once more to re-drive it"
+    "(260927 live case t260926-05: sending only authorize stalled for about 2 hours; "
+    "engine contract in dev_lane: after the authorize+retry_qc wake-up, pend stays empty)]; "
+    "(2) op=ruling: the host's final ruling re-judges; (3) op=rework: bounce back to "
+    "implement/create_plan for a fix; "
+    "(4) op=pause: pause and hand to a human")
 
 
 #: 集成轮「测量面」签名的域分隔标记（防字段拼接歧义）
@@ -797,13 +801,13 @@ def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
         return "acceptance"
     if verdict == "tests-fault":
         return "run_integration_tests" if tests_rounds <= MAX_TESTS_FAULT_ROUNDS else \
-            "blocked:测试集迭代 %d 轮超限（上限 %d），转人工判读%s" % (
+            "blocked:test-set iterations %d exceed the cap (cap %d); needs human review%s" % (
                 tests_rounds, MAX_TESTS_FAULT_ROUNDS, _ARBITRATION_CAP_EXITS)
     if verdict == "code-fault":
         return "implement" if code_rounds <= MAX_CODE_FAULT_ROUNDS else \
-            "blocked:打回 developer %d 轮超限（上限 %d），转人工判读%s" % (
+            "blocked:bounced to developer %d rounds exceed the cap (cap %d); needs human review%s" % (
                 code_rounds, MAX_CODE_FAULT_ROUNDS, _ARBITRATION_CAP_EXITS)
-    return "blocked:仲裁结论未知 verdict=%r，转人工判读" % verdict
+    return "blocked:arbitration verdict unknown verdict=%r; needs human review" % verdict
 
 
 def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
@@ -1005,8 +1009,9 @@ def tests_supply_assembly_note(error: Any) -> str:
     共同消费本函数，文案只此一份。畸形 error（非 str/空）不抛：保守截断为可读
     前缀，绝不静默丢证据（消费外部输入的 fail-closed 纪律）。"""
     e = error if isinstance(error, str) else ""
-    return ("供给面装配失败（零跑，error 命中供给装配签名：%s）——不计入 tests-fault 轮次"
-            % ((e or "<空>")[:120]))
+    return ("supply-side assembly failure (zero runs, error hits the supply-assembly "
+            "signature: %s) — not counted as a tests-fault round"
+            % ((e or "<empty>")[:120]))
 
 
 def tests_exempt_cap_blocked_text(exempt_rounds: int, audit: str = "") -> str:
@@ -1015,8 +1020,8 @@ def tests_exempt_cap_blocked_text(exempt_rounds: int, audit: str = "") -> str:
     消费点在 dev_lane 豁免超限分支（授权在场=接受本判决复位推进，不落本封面）。
     audit（KI-122② 追加位，缺省空=既有文案逐字节不变）：具名审计尾注，由调用方给
     tests_fault_cap_audit_text 的产出——谁判的/依据/下一步，不在本函数内造。"""
-    return ("测试集连续 %d 轮红项均属环境面/负载抖动（连续豁免超限，上限 %d），"
-            "转人工判读%s%s" % (exempt_rounds, MAX_TESTS_EXEMPT_ROUNDS,
+    return ("%d consecutive rounds of test-set reds are all environment-side/load "
+            "jitter (consecutive-exemption over cap, cap %d); needs human review%s%s" % (exempt_rounds, MAX_TESTS_EXEMPT_ROUNDS,
                                 _ARBITRATION_CAP_EXITS, audit))
 
 
@@ -1468,12 +1473,15 @@ def arbitrate_blocked_reason(refusal: Dict[str, Any], verdict_missing: bool = Tr
     rc = str(r.get("reason_code") or "gate_refusal_unknown")
     note = str(r.get("note") or "").strip()
     act = str(r.get("next_action") or "").strip() or path_gates.next_action_hint(rc)
-    parts = ["仲裁段落盘被闸拒（主因）：%s" % (note or "路径闸拒绝（%s）" % rc),
-             "下一步：%s" % act]
+    parts = ["arbitration segment failed to land, blocked by the path gate "
+                 "(main cause): %s" % (note or "path-gate refusal (%s)" % rc),
+             "next step: %s" % act]
     if verdict_missing:
-        parts.append("仲裁结论未能落盘（不计「缺 verdict=」格式轮次）——出路：还原越界改动/"
-                     "回 main 侧走票后 retry_qc 重跑本段，无需补 verdict 标记")
-    return "；".join(parts)
+        parts.append("the arbitration verdict failed to land (not counted as a missing "
+                     "verdict= format round) — way out: revert the out-of-bounds changes, "
+                     "or file a ticket on the main side and then retry_qc to re-run this "
+                     "segment; no verdict= marker needed")
+    return "; ".join(parts)
 
 
 # ---- 人授权例外通道（工单 t260912-03）----
@@ -1565,7 +1573,7 @@ def undeclared_policy(env_raw: Optional[str] = None) -> str:
     if raw in UNDECLARED_POLICIES:  # 严格等值：不 strip 纠偏——带空白包边=误配，fail-closed
         return raw
     raise ValueError(
-        "undeclared 策略旋钮 %s=%r 非法（合法值：%s）——修正或删除该 env 后重试"
+        "undeclared policy knob %s=%r is illegal (legal values: %s) — fix or remove the env and retry"
         % (UNDECLARED_POLICY_ENV, raw.strip()[:64], "|".join(UNDECLARED_POLICIES)))
 
 
@@ -1652,7 +1660,7 @@ def cross_project_judge(caller: str, target: str, note: str,
             policy = undeclared_policy()
         except ValueError as e:
             return {"action": "refuse", "record": None,
-                    "why": "跨项目闸：%s（策略误配 fail-closed 拒收）" % e}
+                    "why": "cross-project gate: %s (policy misconfiguration, fail-closed refusal)" % e}
     caller = str(caller or "")
     target = str(target or "")
     note = str(note or "").strip()
@@ -1663,23 +1671,30 @@ def cross_project_judge(caller: str, target: str, note: str,
     if caller == CALLER_UNDECLARED_MARK:
         if policy == "refuse":
             return {"action": "refuse", "record": None,
-                    "why": "跨项目闸：本票属项目 %s，调用未声明身份且引擎策略=拒收"
-                           "（undeclared-policy=refuse）——请经注入链声明调用方项目后再操作" % target}
+                    "why": "cross-project gate: this ticket belongs to project %s, the call "
+                           "declares no identity, and the engine policy = refuse "
+                           "(undeclared-policy=refuse) — declare the caller project via the "
+                           "injection chain before operating" % target}
         return {"action": "allow_record",
                 "record": {"caller_project": CALLER_UNDECLARED_MARK, "note": note[:300]},
-                "why": "跨项目闸记名：未声明调用方身份的操作落在项目 %s 的票上"
-                       "%s（策略=记名放行，经旋钮 %s=record 显式选入；缺省策略=拒收）"
-                       % (target, "，理由=%s" % note[:120] if note else "",
+                "why": "cross-project gate record: an operation with an undeclared caller "
+                       "identity landed on a ticket of project %s"
+                       "%s (policy = record-and-allow, explicitly opted in via knob "
+                       "%s=record; the default policy = refuse)"
+                       % (target, ", reason=%s" % note[:120] if note else "",
                           UNDECLARED_POLICY_ENV)}
     if note:
         return {"action": "allow_record",
                 "record": {"caller_project": caller, "note": note[:300]},
-                "why": "跨项目越权记名：调用方项目 %s 操作项目 %s 的票（越权旗理由=%s）"
+                "why": "cross-project overreach record: caller project %s operated on a "
+                       "ticket of project %s (overreach flag reason=%s)"
                        % (caller, target, note[:120])}
     return {"action": "refuse", "record": None,
-            "why": "跨项目写操作拒收：调用方项目身份 %s 与本票所属项目 %s 不符，且未带"
-                   "越权旗（cross_project 理由必填）——只操作本项目的票，确需跨项目走"
-                   "越权旗+理由（记名留痕可查）" % (caller, target)}
+            "why": "cross-project write refused: caller project identity %s does not "
+                   "match the ticket's project %s and no overreach flag is attached (a "
+                   "cross_project reason is required) — operate only on this project's "
+                   "tickets; a genuine cross-project operation goes through the "
+                   "overreach flag + reason (named, auditable)" % (caller, target)}
 
 
 @dataclass
@@ -1824,9 +1839,9 @@ def review_plan_route(verdict: str, plan_rounds: int) -> str:
     if verdict == "reject":
         if plan_rounds <= MAX_REVIEW_ROUNDS:
             return "create_plan"
-        return "blocked:方案审读打回 %d 轮超限（上限 %d）" % (
+        return "blocked:plan-review bounces %d rounds exceed the cap (cap %d)" % (
             plan_rounds + 1, MAX_REVIEW_ROUNDS)
-    return "blocked:审读结论未知 verdict=%r，转人工判读" % verdict
+    return "blocked:review verdict unknown verdict=%r; needs human review" % verdict
 
 
 # ---- t260922-18：泳道「主动同步 main」（机械验证前 worker 并一次）纯函数面 ----
@@ -1849,12 +1864,14 @@ def main_sync_conflict_route(rounds: int, files: List[str], prev_files: List[str
         rounds_i, cap_i = 10 ** 9, 0   # 畸形=视同超限，保守转人工
     files_sig = sorted(str(f) for f in (files if isinstance(files, (list, tuple)) else []))
     prev_sig = sorted(str(f) for f in (prev_files if isinstance(prev_files, (list, tuple)) else []))
-    files_txt = "、".join(files_sig)[:200]
+    files_txt = ", ".join(files_sig)[:200]
     if rounds_i > cap_i:
-        return ("blocked:主同步冲突消解 %d 轮未收敛（上限 %d），转人工处置：冲突文件 %s"
+        return ("blocked:main-sync conflict resolution did not converge in %d rounds "
+                "(cap %d); needs human handling: conflicting files %s"
                 % (rounds_i - 1, cap_i, files_txt))
     if prev_sig and files_sig == prev_sig:
-        return ("blocked:主同步同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"
+        return ("blocked:main-sync keeps conflicting on the same batch of files (same set "
+                "for 2 consecutive rounds, round %d); needs human handling: %s"
                 % (rounds_i, files_txt))
     return "resolve"
 
@@ -1872,10 +1889,10 @@ def main_sync_note(receipt: Any) -> str:
     head = str(receipt.get("lane_head") or "").strip()
     if mode not in ("merged", "up_to_date") or not sha:
         return ""
-    head_txt = ("，lane HEAD=%s" % head) if head else ""
+    head_txt = (", lane HEAD=%s" % head) if head else ""
     if mode == "merged":
-        return "main@%s 已并入泳道（验证前主同步%s）" % (sha[:7], head_txt)
-    return "main@%s 已追平（快路径零动作%s）" % (sha[:7], head_txt)
+        return "main@%s merged into the lane (pre-verification main sync%s)" % (sha[:7], head_txt)
+    return "main@%s already up to date (fast path, zero action%s)" % (sha[:7], head_txt)
 
 
 # ---- Singleton workflow id conventions ----
@@ -2039,7 +2056,9 @@ class GateResult:
 # 三件：记名（who/reason 进不可变历史与 admin.log）、置票面终态（closed）、终止工作流
 # （复用 cancel 的「先留痕后终结」次序纪律）。terminate 的 reason 带固定前缀，使终态面
 # 与 admin.log 一眼可辨是「人工收口」而不是「清场」。
-CLOSE_OUT_PREFIX = "close_out（人工记名收口·工作已完成）："
+CLOSE_OUT_PREFIX = "close_out (human close-out, work complete): "
+# Legacy Chinese face (261004 copy sweep); is_close_out_reason accepts both.
+_CLOSE_OUT_PREFIX_LEGACY = "close_out\uff08\u4eba\u5de5\u8bb0\u540d\u6536\u53e3\u00b7\u5de5\u4f5c\u5df2\u5b8c\u6210\uff09\uff1a"
 
 
 def close_out_terminate_reason(reason: str) -> str:
@@ -2049,7 +2068,8 @@ def close_out_terminate_reason(reason: str) -> str:
 
 def is_close_out_reason(text: str) -> bool:
     """该终结理由是否出自人工记名收口（纯函数；面/看板据它区分清场与收口）。"""
-    return str(text or "").startswith(CLOSE_OUT_PREFIX)
+    t = str(text or "")
+    return t.startswith(CLOSE_OUT_PREFIX) or t.startswith(_CLOSE_OUT_PREFIX_LEGACY)
 
 
 def gate_receipt_parse(stdout: str) -> Dict[str, Any]:
@@ -2128,12 +2148,15 @@ def gate_failure_note(label: str, v: Dict[str, Any], exit_code: int, raw_head: s
     可解析的回执对象）；③回执在但要素没过（点名 ok/green/exit 三者各自的值）。
     """
     if not v.get("parsed"):
-        return ("脚本门 %s 判定非绿：**回执不可解析**（stdout 里没有可解析的 JSON 回执对象；"
-                "门脚本必须把回执打到 stdout——末行或含 ok 键的那个对象）｜exit=%s｜stdout 头=%r"
+        return ("script gate %s is not green: **receipt unparseable** (no parseable JSON "
+                "receipt object in stdout; the gate script must print its receipt to "
+                "stdout — the last line, or the object containing the ok key)"
+                " | exit=%s | stdout head=%r"
                 % (label, exit_code, (raw_head or "")[:180]))
     if int(v.get("red_count") or 0) > 0:
-        return "脚本门 %s 红灯 %d 项" % (label, int(v["red_count"]))
-    return ("脚本门 %s 判定非绿：回执说 0 红但要素未过（ok=%s, result.green=%s, exit=%s）"
+        return "script gate %s: %d red items" % (label, int(v["red_count"]))
+    return ("script gate %s is not green: the receipt says 0 red but the elements "
+            "fail (ok=%s, result.green=%s, exit=%s)"
             % (label, v.get("receipt_ok"), v.get("receipt_green"), exit_code))
 
 
@@ -2216,7 +2239,8 @@ SCAN_STUCK_HOURS = float(os.environ.get("SANDBAR_SCAN_STUCK_HOURS") or 48)
 SCAN_SUGGESTIONS = ("疑似卡死", "待补", "可签")
 # The report red-line statement (written into every report, shown the same way in the
 # console).
-SCAN_RED_LINE = "巡检只出建议不出决定；签字只能人（sign who=用户/总管）。"
+SCAN_RED_LINE = ("Inspection suggests, never decides; only a human signs "
+                 "(sign who=user/host).")
 
 
 @dataclass
@@ -2284,10 +2308,11 @@ def gate_from_log(t: Dict[str, Any]) -> Dict[str, Any]:
     reverse for a 「脚本门」 record and read its red/green."""
     for l in reversed(t.get("log") or []):
         note = str((l or {}).get("note") or "")
-        if "脚本门" in note:
-            return {"label": note[:60], "green": (False if "红灯" in note else None),
+        if "\u811a\u672c\u95e8" in note or "script gate" in note:
+            return {"label": note[:60],
+                    "green": (False if ("\u7ea2\u706f" in note or "red items" in note) else None),
                     "source": "log"}
-    return {"label": "", "green": None, "source": "无脚本门记录"}
+    return {"label": "", "green": None, "source": "no script-gate record"}
 
 
 def build_scan_item(t: Dict[str, Any], gate_label: str = "",
@@ -2325,34 +2350,35 @@ def build_scan_item(t: Dict[str, Any], gate_label: str = "",
     reasons: List[str] = []
     if dwell >= stuck_hours:
         suggestion = "疑似卡死"
-        reasons.append("停留 %.1fh ≥ 阈值 %.0fh，期间无任何进展" % (dwell, stuck_hours))
+        reasons.append("dwell %.1fh >= threshold %.0fh with no progress in between" % (dwell, stuck_hours))
     elif state == "awaiting-human":
         suggestion = "可签"
-        reasons.append("人门 %s 挂起待人签字（sign 只能人：approve/reject）" % (stage or "?"))
+        reasons.append("human gate %s pending a signature (sign is human-only: approve/reject)" % (stage or "?"))
         if pend:
-            reasons.append("另有 %d 条 pending 待裁决说明，签字前过目" % len(pend))
+            reasons.append("%d more pending ruling note(s); review before signing" % len(pend))
     elif status == "settled":
         issues: List[str] = []
         if total and done < total:
-            issues.append("验收清单勾选 %d/%d 未齐（总管验收打勾后可推进）" % (done, total))
+            issues.append("acceptance checklist %d/%d checked, incomplete "
+                          "(advances after the host checks acceptance off)" % (done, total))
         if gate_green is False:
-            issues.append("脚本门 %s 最近一次红灯（修好重跑）" % (gate_label or "?"))
+            issues.append("script gate %s latest result red (fix and re-run)" % (gate_label or "?"))
         if issues:
             suggestion = "待补"
             reasons.extend(issues)
         else:
             suggestion = "可签"
             if total:
-                reasons.append("已交付且验收 %d/%d 全勾，可 advance 推进" % (done, total))
+                reasons.append("delivered and acceptance %d/%d all checked; advance can proceed" % (done, total))
             else:
-                reasons.append("已交付（无验收清单），可验收收口")
+                reasons.append("delivered (no acceptance checklist); can close out via acceptance")
     else:
         suggestion = "待补"
-        reasons.append("状态 %s/%s 非常规待决，需人工判读" % (status, state))
+        reasons.append("status %s/%s is an unusual pending state; needs human review" % (status, state))
     if gate_green is True:
-        reasons.append("脚本门 %s 最近绿灯" % (gate_label or "?"))
+        reasons.append("script gate %s latest result green" % (gate_label or "?"))
     elif gate_green is None and gate_source:
-        reasons.append("脚本门：%s" % gate_source)
+        reasons.append("script gate: %s" % gate_source)
     return ScanTicketItem(
         ticket_id=str(t.get("id") or ""),
         title=str(t.get("title") or ""),
@@ -2707,8 +2733,9 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
     root = pathlib.Path(project_root).resolve()
     repos = repos_under(root)
     if not repos:
-        raise ValueError("项目根 %s 下未发现任何 git 仓（多 repo 项目=父目录作根，"
-                         "需先建/clone 子仓再开票；引擎不代建仓）" % root)
+        raise ValueError("no git repo found under project root %s (a multi-repo project "
+                         "= the parent directory as root; create/clone the child repos "
+                         "before opening tickets; the engine does not create repos)" % root)
     # Repo → project-root-relative posix prefix (the root repo = the empty string —
     # relative_to produces "." for the root itself, which must be normalized; longer
     # prefixes first, so ownership lands on the innermost registered repo)
@@ -2718,11 +2745,12 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
     for raw in paths:
         if not isinstance(raw, str) or not raw.strip():
-            raise ValueError("写集条目非法（非字符串或空白）: %r" % (raw,))
+            raise ValueError("illegal write-set entry (non-string or blank): %r" % (raw,))
         entry = raw.strip()
         pp = pathlib.PurePosixPath(entry)
         if pp.is_absolute() or ".." in pp.parts:
-            raise ValueError("写集条目必须为项目根相对路径且不得逃逸项目根: %r" % raw)
+            raise ValueError("write-set entry must be a project-root-relative path and must not "
+                             "escape the project root: %r" % raw)
         # t260915-04（建票期拒收「整仓根形态」，宿主 260915 口径：写集一律列举、
         # 不得把某个 repo 的整个根目录作为写集）：条目归一（PurePosixPath 消尾斜杠/
         # 内嵌 './'）后等于项目根（"."——单仓=整仓；混合形态=根仓）或等于任一成员仓
@@ -2735,16 +2763,18 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
         norm = pp.as_posix()
         if norm == "." or any(rel and norm == rel for _r, rel in rels):
             if norm == ".":
-                target = "项目根本体（单仓=整仓；混合形态=根仓）"
+                target = "the project root itself (single repo = whole repo; mixed shape = the root repo)"
                 example = _repo_root_entry_example(root)
             else:
-                target = "成员仓 %s 的整仓根目录" % norm
+                target = "the whole-repo root directory of member repo %s" % norm
                 example = _repo_root_entry_example(root / norm, norm)
             raise ValueError(
-                "写集条目 %r 等于%s——整仓条目运行期会被剥前缀成空串，写集闸 "
-                "fail-closed 判整仓禁写（dengzhufpv/t260911-07 整票作废形态）。"
-                "要覆盖整仓＝逐个子目录+根文件列举（参照该仓 .gitignore）%s"
-                % (raw, target, ("，例：" + example) if example else ""))
+                "write-set entry %r equals %s — at runtime a whole-repo entry is "
+                "stripped by prefix into an empty string and the write-set gate "
+                "fail-closed bans the whole repo (dengzhufpv/t260911-07 voided-ticket "
+                "shape). To cover a whole repo, enumerate subdirectory by subdirectory "
+                "plus root files (see that repo's .gitignore) %s"
+                % (raw, target, (", e.g. " + example) if example else ""))
         owner = None
         for repo, rel in rels:
             # rel="" (the root repo, the mixed shape) → matches everything under the
@@ -2754,8 +2784,9 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
                 owner = repo
                 break
         if owner is None:
-            raise ValueError("写集条目 %r 不落在项目根 %s 下任何 git 仓内"
-                             "（嵌套仓 fail-closed：嵌套仓内文件不可开票）" % (entry, root))
+            raise ValueError("write-set entry %r falls inside no git repo under project "
+                             "root %s (nested-repo fail-closed: files inside a nested repo "
+                             "cannot open tickets)" % (entry, root))
         # Nested-repo test: if an intermediate directory of the owned path has its own
         # .git and is not in the repo set → the entry really belongs to an out-of-set
         # nested repo, reject (never silently attribute it to the outer repo = the
@@ -2765,8 +2796,10 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
             cursor = cursor / part
             if part and (cursor / ".git").exists() and str(cursor.resolve()) not in owner_set:
                 raise ValueError(
-                    "写集条目 %r 落在集合外嵌套仓 %s 内（嵌套仓 fail-closed："
-                    "嵌套仓语义属另票，不静默归外层仓 %s）" % (entry, cursor, owner))
+                    "write-set entry %r falls inside out-of-set nested repo %s "
+                    "(nested-repo fail-closed: a nested repo belongs to another ticket; "
+                    "never silently attribute it to the outer repo %s)"
+                    % (entry, cursor, owner))
         out.setdefault(str(owner.resolve()), []).append(entry)
     return out
 
@@ -2806,7 +2839,8 @@ def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Di
     lane/<lane directory name>-<flattened segment>. Any illegal input → ValueError
     propagates (resolve_repos_for_paths' fail-closed stance)."""
     if not write_set or not isinstance(write_set, list):
-        raise ValueError("多仓泳道推导需要非空写集（write_set 为归属推导唯一输入）")
+        raise ValueError("multi-repo lane derivation needs a non-empty write_set "
+                         "(write_set is the only input of the ownership derivation)")
     root = pathlib.Path(project_root).resolve()  # macOS /var → /private/var normalization
     base = sanitize_branch_segment(lane_dir_name)
     entries: List[Dict[str, str]] = []
@@ -2821,11 +2855,13 @@ def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Di
         name = flatten_branch_suffix(repo_rel) if repo_rel else "root"
         branch = "lane/%s-%s" % (base, name)
         if branch in seen_branch:
-            raise ValueError("多仓分支名碰撞: %s（压平清洗后仍同名的仓路径需人工改名）" % branch)
+            raise ValueError("multi-repo branch name collision: %s (repo paths still colliding "
+                             "after flattening need a manual rename)" % branch)
         seen_branch.add(branch)
         entries.append({"repo": repo_rel, "name": name, "branch": branch})
     if not entries:
-        raise ValueError("多仓泳道推导产出空仓集合（写集 %r）" % (write_set,))
+        raise ValueError("multi-repo lane derivation produced an empty repo set "
+                         "(write set %r)" % (write_set,))
     return entries
 
 
@@ -2863,17 +2899,20 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
     # entry is an offender → fail-closed reject naming the entries (no repo scan,
     # no cwd dependency — 真纯函数承诺兑现).
     if not project_root:
-        return ("保险丝A拒收（t260910-03）：写集条目命中成员仓路径但 project_root 缺失"
-                "（归属锚不在）且派生结果 repo_worktrees 为空——无法证伪多仓票缺逐仓"
-                "明细=成员仓零落仓（dengzhufpv 260910 缺陷形态），fail-closed 拒收。"
-                "%s。请走正规创建链（不显式传 workspace/worktree），由 "
-                "derive_lane_workspace 按写集归属产出逐仓明细。"
-                % "；".join("<-%s" % e for e in entries))
+        return ("fuse A refusal (t260910-03): write-set entries hit member-repo paths "
+                "but project_root is missing (no ownership anchor) and the derived "
+                "repo_worktrees is empty — a multi-repo ticket without per-repo details "
+                "cannot be falsified = member repos land nowhere (the dengzhufpv 260910 "
+                "defect shape); fail-closed refusal. %s. Use the regular creation chain "
+                "(do not pass workspace/worktree explicitly) and let "
+                "derive_lane_workspace produce the per-repo details from write-set "
+                "ownership."
+                % "; ".join("<-%s" % e for e in entries))
     root = str(pathlib.Path(project_root).resolve())
     try:
         mapping = resolve_repos_for_paths(project_root, entries)
     except ValueError as e:
-        if "未发现任何 git 仓" in str(e):
+        if "\u672a\u53d1\u73b0\u4efb\u4f55 git \u4ed3" in str(e) or "no git repo found under" in str(e):
             return ""  # 仓集合为空=无成员仓可言，保险丝不适用（存量无 .git 注册目录面）
         raise  # 逃逸/嵌套仓/条目畸形：fail-closed 照旧拒收
     offenders = []
@@ -2883,11 +2922,13 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
         offenders.append((pathlib.Path(repo_abs).name or str(repo_abs), paths))
     if not offenders:
         return ""
-    return ("保险丝A拒收（t260910-03）：写集条目命中成员仓路径但派生结果 "
-            "repo_worktrees 为空——多仓票缺逐仓明细=成员仓零落仓（dengzhufpv "
-            "260910 缺陷形态），拒收。%s。请走正规创建链（不显式传 "
-            "workspace/worktree），由 derive_lane_workspace 按写集归属产出逐仓明细。"
-            % "；".join("[%s]<-%s" % (name, ",".join(paths)) for name, paths in offenders))
+    return ("fuse A refusal (t260910-03): write-set entries hit member-repo paths but "
+            "the derived repo_worktrees is empty — a multi-repo ticket without per-repo "
+            "details = member repos land nowhere (the dengzhufpv 260910 defect shape); "
+            "refused. %s. Use the regular creation chain (do not pass "
+            "workspace/worktree explicitly) and let derive_lane_workspace produce the "
+            "per-repo details from write-set ownership."
+            % "; ".join("[%s]<-%s" % (name, ",".join(paths)) for name, paths in offenders))
 
 
 def derive_lane_workspace(
@@ -2934,8 +2975,8 @@ def derive_lane_workspace(
         if not isinstance(workspace, dict) or workspace.get("type") not in WORKSPACE_TYPES \
                 or not isinstance(workspace.get("path"), str) or not workspace.get("path"):
             raise ValueError(
-                "workspace 必须形如 {\"type\":\"worktree|dir\",\"path\":\"...\"}，实际 %r"
-                % (workspace,))
+                "workspace must be shaped {\"type\":\"worktree|dir\",\"path\":\"...\"}; "
+                "actual %r" % (workspace,))
         ws = {"type": str(workspace["type"]), "path": str(workspace["path"])}
         # t260910-03：上游（ticket.py 正规入口）经同一本函数派生的多仓明细挂在
         # workspace dict 上，这里重建 dict 时必须保留——否则明细在创建链第二跳被
@@ -2947,12 +2988,14 @@ def derive_lane_workspace(
     if lane == LANE_WORKTREE:
         if ws is not None and ws["type"] != LANE_WORKTREE:
             raise ValueError(
-                "lane=worktree 的工单 workspace.type 必须是 worktree（实际 %r）——"
-                "不给 dir/主树静默降级的机会（t260824-04 教训）" % ws["type"])
+                "a lane=worktree ticket's workspace.type must be worktree (actual %r) "
+                "— no silent downgrade to dir/main tree (t260824-04 lesson)"
+                % ws["type"])
         if ws is not None and worktree and ws["path"] != worktree:
             raise ValueError(
-                "workspace.path（%s）与 worktree（%s）不一致——两字段必须同指一个泳道，"
-                "否则 merge_check/merge 与 prepare_workspace 各跑各的（t260824-11 教训）"
+                "workspace.path (%s) and worktree (%s) disagree — the two fields must "
+                "name the same lane, otherwise merge_check/merge and prepare_workspace "
+                "each run their own (t260824-11 lesson)"
                 % (ws["path"], worktree))
         # Ticket t260907-06 multi-repo derivation: activates only in a **genuine
         # multi-repo shape** (the test converges on the single is_multi_repo_layout
@@ -3010,17 +3053,20 @@ def lane_workspace_gate_error(meta: Dict[str, Any]) -> str:
         return ""
     ws = meta.get("workspace")
     if not (isinstance(ws, dict) and ws.get("type") == LANE_WORKTREE and ws.get("path")):
-        return ("lane=worktree 但 workspace 未登记 worktree 泳道（实际 %r）——创建链路漏推导，"
-                "拒跑。请核对 ticket-start/create 入参（t260824-04 教训）" % (ws,))
+        return ("lane=worktree but workspace registers no worktree lane (actual %r) — "
+                "the creation chain skipped derivation; refusing to run. Check the "
+                "ticket-start/create arguments (t260824-04 lesson)" % (ws,))
     wt = str(meta.get("worktree") or "")
     if not wt:
-        return ("lane=worktree 但 worktree 字段为空——merge_check/merge 会静默回落主树"
-                "（t260824-11 教训），拒跑。正确值应为 %s" % ws["path"])
+        return ("lane=worktree but the worktree field is empty — merge_check/merge "
+                "would silently fall back to the main tree (t260824-11 lesson); "
+                "refusing to run. The correct value is %s" % ws["path"])
     if wt != str(ws["path"]):
-        return ("workspace.path（%s）与 worktree（%s）不一致——两字段必须同指一个泳道，拒跑"
+        return ("workspace.path (%s) and worktree (%s) disagree — the two fields must "
+                "name the same lane; refusing to run"
                 % (ws["path"], wt))
     if not str(meta.get("branch") or ""):
-        return "lane=worktree 但 branch 字段为空——泳道分支缺失，拒跑"
+        return "lane=worktree but the branch field is empty — lane branch missing; refusing to run"
     # Ticket t260907-06 multi-repo lanes: repo_worktrees present = a multi-repo ticket —
     # validate the shape per repo (repo is a project-root-relative path string, **an
     # empty string allowed = the root-repo tree** (the mixed shape, where the tree = the
@@ -3044,22 +3090,27 @@ def _repo_worktrees_gate_error(rw):
     if rw is None:
         return ""
     if not isinstance(rw, list) or not rw:
-        return ("workspace.repo_worktrees 形状非法（须非空列表，实际 %r）——多仓泳道"
-                "明细缺失，拒跑（t260907-06 票B：meta.repo_worktrees=唯一真源）" % (rw,))
+        return ("workspace.repo_worktrees has an illegal shape (must be a non-empty "
+                "list, actual %r) — multi-repo lane details missing; refusing to run "
+                "(t260907-06 ticket B: meta.repo_worktrees is the single source of "
+                "truth)" % (rw,))
     seen = set()
     for e in rw:
         if not isinstance(e, dict):
-            return ("workspace.repo_worktrees 条目须为对象，实际 %r——拒跑" % (e,))
+            return ("a workspace.repo_worktrees entry must be an object, actual %r — "
+                "refusing to run" % (e,))
         if not isinstance(e.get("repo"), str):
-            return ("workspace.repo_worktrees 条目 repo 字段缺失或非字符串（%r）——"
-                    "拒跑" % (e,))
+            return ("a workspace.repo_worktrees entry has a repo field missing or "
+                    "non-string (%r) — refusing to run" % (e,))
         if not (isinstance(e.get("name"), str) and e["name"]):
-            return ("workspace.repo_worktrees 条目 name 字段缺失或为空（%r）——拒跑" % (e,))
+            return ("a workspace.repo_worktrees entry has a name field missing or empty "
+                    "(%r) — refusing to run" % (e,))
         if not (isinstance(e.get("branch"), str) and e["branch"]):
-            return ("workspace.repo_worktrees 条目 branch 字段缺失或为空（%r）——拒跑"
-                    % (e,))
+            return ("a workspace.repo_worktrees entry has a branch field missing or "
+                    "empty (%r) — refusing to run" % (e,))
         if e["branch"] in seen:
-            return ("workspace.repo_worktrees 分支名碰撞: %s——拒跑" % e["branch"])
+            return ("workspace.repo_worktrees branch name collision: %s — refusing to run"
+                % e["branch"])
         seen.add(e["branch"])
     return ""
 
@@ -3197,8 +3248,9 @@ def routes_fingerprint(path: Any) -> str:
 
 def _routes_landing_hint() -> str:
     """缺表点名时给的建表建议落点与模板指引（人可见话术，防「不知道去哪建表」）。"""
-    return ("建表建议落点 ~/.sandbar/projects/<key>/model-routes.yaml"
-            "（模板=docs/model-routes-sample.yaml，落 paths.model_routes 声明后生效）")
+    return ("create the table at ~/.sandbar/projects/<key>/model-routes.yaml "
+            "(template = docs/model-routes-sample.yaml; takes effect once declared at "
+            "paths.model_routes)")
 
 
 def _log_routes_state(state: str, path: Any, fingerprint: str, error: str) -> None:
@@ -3218,13 +3270,13 @@ def _routes_table_shape_error(table: Dict[str, Any]) -> Optional[str]:
     防语义漂移）。"""
     roles = table.get("roles")
     if roles is not None and not isinstance(roles, dict):
-        return "roles 段不是映射（yaml 顶层 roles=%s）" % type(roles).__name__
+        return "the roles section is not a mapping (yaml top-level roles=%s)" % type(roles).__name__
     for name, entry in (roles or {}).items():
         if entry is not None and not isinstance(entry, dict):
-            return "roles.%s 条目不是映射（=%s）" % (name, type(entry).__name__)
+            return "roles.%s entry is not a mapping (= %s)" % (name, type(entry).__name__)
         tasks = (entry or {}).get("tasks")
         if tasks is not None and not isinstance(tasks, dict):
-            return "roles.%s.tasks 不是映射（=%s）" % (name, type(tasks).__name__)
+            return "roles.%s.tasks is not a mapping (= %s)" % (name, type(tasks).__name__)
     return None
 
 
@@ -3245,7 +3297,8 @@ def resolve_routes_table(project_key: str) -> Dict[str, Any]:
     info = project_paths(project_key)
     declared = info["model_routes"]
     if declared is None:
-        err = ("未声明 paths.model_routes（读侧不再回落仓内表；条目=%s）；%s"
+        err = ("paths.model_routes not declared (the read side no longer falls back to "
+               "an in-repo table; entry=%s); %s"
                % (info["entry"] or "（条目缺失/未注册）", _routes_landing_hint()))
         _log_routes_state("decl_missing", "", "", err)
         return {"state": "decl_missing", "declared": None, "path": "", "table": None,
@@ -3254,12 +3307,12 @@ def resolve_routes_table(project_key: str) -> Dict[str, Any]:
     try:
         raw = declared.read_bytes()
     except FileNotFoundError:
-        err = "声明指向的路由表文件缺失：%s；%s" % (declared, _routes_landing_hint())
+        err = "the declared routes-table file is missing: %s; %s" % (declared, _routes_landing_hint())
         _log_routes_state("file_missing", declared, "", err)
         return {"state": "file_missing", "declared": declared, "path": declared,
                 "table": None, "error": err, "fingerprint": ""}
     except Exception as e:  # 目录当表/权限/不可读：坏表族（无字节可指纹）
-        err = "声明指向的路由表不可解析（读取失败）：%s（%s）" % (declared, str(e)[:160])
+        err = "the declared routes table is unparseable (read failed): %s (%s)" % (declared, str(e)[:160])
         _log_routes_state("bad_content", declared, "", err)
         return {"state": "bad_content", "declared": declared, "path": declared,
                 "table": None, "error": err, "fingerprint": ""}
@@ -3267,7 +3320,7 @@ def resolve_routes_table(project_key: str) -> Dict[str, Any]:
     try:
         parsed = yaml.safe_load(raw.decode("utf-8"))
     except Exception as e:
-        err = "声明指向的路由表不可解析：%s（%s）" % (declared, str(e)[:160])
+        err = "the declared routes table is unparseable: %s (%s)" % (declared, str(e)[:160])
         _log_routes_state("bad_content", declared, fp, err)
         return {"state": "bad_content", "declared": declared, "path": declared,
                 "table": None, "error": err, "fingerprint": fp}
@@ -3276,7 +3329,8 @@ def resolve_routes_table(project_key: str) -> Dict[str, Any]:
         # 可解析但顶层非映射（标量/列表）：UI 半一直判 bad_content（行式解析器拒收），
         # py 半若放行，消费方 model_route_for 会在 .get 处 AttributeError 晦涩崩溃——
         # 统一收进 bad_content 点名态（py/TS 同判，t260914-05 P5 收紧）。
-        err = ("声明指向的路由表不是映射结构（yaml 顶层=%s）：%s（须为 default:/roles: 键值映射）"
+        err = ("the declared routes table is not a mapping (yaml top-level=%s): %s "
+               "(must be a default:/roles: key-value mapping)"
                % (type(parsed).__name__, declared))
         _log_routes_state("bad_content", declared, fp, err)
         return {"state": "bad_content", "declared": declared, "path": declared,
@@ -3285,7 +3339,7 @@ def resolve_routes_table(project_key: str) -> Dict[str, Any]:
     if shape_err:
         # 形状坏表（roles/条目/tasks 值非映射）：同族收口（260915 gen2）——消费方沿链
         # .get 必崩，与顶层非映射一样收进 bad_content 点名，禁晦涩堆栈。
-        err = "声明指向的路由表形状不可用：%s：%s" % (shape_err, declared)
+        err = "the declared routes table has an unusable shape: %s: %s" % (shape_err, declared)
         _log_routes_state("bad_content", declared, fp, err)
         return {"state": "bad_content", "declared": declared, "path": declared,
                 "table": None, "error": err, "fingerprint": fp}
@@ -3306,8 +3360,9 @@ def model_route_for(role: str, kind: str = "",
     容错（缺条目/缺字段→default→None）语义不变。"""
     if table is None:
         if routes_file is None:
-            raise ValueError("model_route_for: routes_file 必选（t260910-14 单点化）——"
-                             "或传 resolve_routes_table 的 table")
+            raise ValueError("model_route_for: routes_file is required "
+                             "(t260910-14 single-point) — or pass the table from "
+                             "resolve_routes_table")
         try:
             import yaml  # pyyaml (engine venv)
             loaded = yaml.safe_load(pathlib.Path(routes_file).read_text("utf-8"))
@@ -3673,28 +3728,28 @@ def normalize_handover_runs(raw: Any):
     if raw is None:
         return [], "absent", []
     if not isinstance(raw, list):
-        return [], "malformed", ["handover_runs 非列表"]
+        return [], "malformed", ["handover_runs is not a list"]
     legs: List[Dict[str, str]] = []
     dropped: List[str] = []
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
-            dropped.append("条目%d:非对象" % i)
+            dropped.append("item%d:not an object" % i)
             continue
         name = item.get("name")
         cmd = item.get("cmd")
         if not isinstance(name, str) or not name.strip() \
                 or not isinstance(cmd, str) or not cmd.strip():
-            dropped.append("条目%d:name/cmd 缺失或非字符串" % i)
+            dropped.append("item%d:name/cmd missing or not a string" % i)
             continue
         if len(cmd) > HANDOVER_CMD_MAX:
-            dropped.append("条目%d:cmd 超 %d 字符整条丢弃（不截断执行）"
+            dropped.append("item%d:cmd over %d chars, dropped whole (never truncated and run)"
                            % (i, HANDOVER_CMD_MAX))
             continue
         if len(name) > HANDOVER_NAME_MAX:
-            dropped.append("条目%d:name 超 %d 字符截断保留" % (i, HANDOVER_NAME_MAX))
+            dropped.append("item%d:name over %d chars, truncated and kept" % (i, HANDOVER_NAME_MAX))
             name = name[:HANDOVER_NAME_MAX]
         if len(legs) >= HANDOVER_MAX_LEGS:
-            dropped.append("条目%d:超上限 %d 条丢弃" % (i, HANDOVER_MAX_LEGS))
+            dropped.append("item%d:over the %d-leg cap, dropped" % (i, HANDOVER_MAX_LEGS))
             continue
         legs.append({"name": name.strip(), "cmd": cmd.strip()})
     # 形状判定：空列表=合法形状（agent 显式声明「无可交接」，与缺键 absent 相区分；
@@ -3718,10 +3773,12 @@ def agent_env_failed_reason(res: Any) -> str:
     if str(getattr(res, "status", "")) != "failed":
         return ""
     reason = str(getattr(res, "env_reason", "") or "").replace("\n", " ")[:160]
-    return ("agent 沙箱不可用（环境）：%s。该段验证未运行，非实现缺位；"
-            "验证交由后续段 worker 执行面承接（移交命令），票不停摆。"
-            "出路：retry_qc 重跑 / rework 打回 / 修复执行面（容器形态）"
-            % (reason or "原因未声明"))
+    return ("agent sandbox unavailable (environment): %s. This stage's verification did "
+            "not run; it is not an implementation gap. Verification is carried by the next "
+            "stage's worker execution face (handover commands); the ticket does not stall. "
+            "Way out: retry_qc rerun / rework send-back / fix the execution face "
+            "(container form)"
+            % (reason or "cause not declared"))
 
 
 def env_note_for(res: Any) -> str:
@@ -3739,11 +3796,11 @@ def env_note_for(res: Any) -> str:
     dropped = getattr(res, "handover_dropped", None) or []
     if legs:
         names = [str(l.get("name") or "") for l in legs[:3]]
-        more = "等" if len(legs) > 3 else ""
-        return "环境受限未验证；移交 %d 条命令待执行：%s%s" % (len(legs), "、".join(names), more)
-    note = "环境受限未验证且无移交命令（不当作已验证）"
+        more = " et al." if len(legs) > 3 else ""
+        return "environment-restricted, unverified; %d handover commands pending execution: %s%s" % (len(legs), ", ".join(names), more)
+    note = "environment-restricted, unverified, and no handover commands (not treated as verified)"
     if dropped:
-        note += "；弃 %d 条：%s" % (len(dropped), "; ".join(dropped[:2]))
+        note += "; dropped %d: %s" % (len(dropped), "; ".join(dropped[:2]))
     return note
 
 
@@ -4144,7 +4201,7 @@ def load_ui_evidence(root: Any):
         base = pathlib.Path(root)
         text = (base / "verify.yaml").read_text("utf-8")
     except Exception:
-        return "absent", [], "verify.yaml 不可读（声明缺省态）"
+        return "absent", [], "verify.yaml unreadable (treated as declaration-absent)"
     lines = text.replace("\t", "  ").splitlines()
     in_block = False
     in_dirs = False
@@ -4163,7 +4220,7 @@ def load_ui_evidence(root: Any):
                 saw_block = True
             if stripped.startswith("ui_evidence:") and stripped != "ui_evidence:":
                 # An inline value (e.g. `ui_evidence: foo`) = a non-mapping declaration, the malformed state
-                return "malformed", [], ("ui_evidence 须为映射（实际行内标量 %r）"
+                return "malformed", [], ("ui_evidence must be a mapping (inline scalar %r found)"
                                          % stripped.split(":", 1)[1].strip())
             continue
         if not in_block:
@@ -4177,12 +4234,12 @@ def load_ui_evidence(root: Any):
                     inner = inline[1:-1].strip()
                     dirs = [t.strip().strip("\"'") for t in inner.split(",") if t.strip()]
                     return "ok", dirs, ""
-                return "malformed", [], "ui_evidence.dirs 须为列表（实际 %r）" % inline
+                return "malformed", [], "ui_evidence.dirs must be a list (found %r)" % inline
             continue
         if stripped.startswith("- ") and in_dirs and indent >= 2:
             item = stripped[2:].strip().strip("\"'")
             if not item:
-                return "malformed", [], "ui_evidence.dirs 含空条目"
+                return "malformed", [], "ui_evidence.dirs contains an empty entry"
             dirs.append(item)
             continue
         # Other keys inside the block (supply etc.): this engine version doesn't consume
@@ -4190,13 +4247,13 @@ def load_ui_evidence(root: Any):
         # deeper than the block header without being a key-value line) are treated as
         # malformed
         if ":" not in stripped and not stripped.startswith("- "):
-            return "malformed", [], "ui_evidence 块含无法解析的行: %s" % stripped
+            return "malformed", [], "ui_evidence block has an unparseable line: %s" % stripped
         in_dirs = False
     if not saw_block:
         # No ui_evidence key in the file = the declaration-absent state, not malformed
-        return "absent", [], "verify.yaml 无 ui_evidence 声明（截图证据项按项目声明缺席）"
+        return "absent", [], "verify.yaml declares no ui_evidence (the screenshot evidence item is absent per the project declaration)"
     if not saw_dirs:
-        return "malformed", [], "ui_evidence 声明缺 dirs 列表"
+        return "malformed", [], "the ui_evidence declaration lacks a dirs list"
     return "ok", dirs, ""
 
 
@@ -4228,13 +4285,16 @@ def validate_background_refs(refs: Any, project_root: Any):
     if refs is None or refs == []:
         return True, ""
     if not isinstance(refs, list):
-        return False, ("refs 须为路径列表（实际 %s：%r——字符串会被逐字符迭代成假清单）"
+        return False, ("refs must be a list of paths (found %s: %r - a string would be "
+                       "iterated character-by-character into a fake list)"
                        % (type(refs).__name__, str(refs)[:80]))
     bad_shape = [r for r in refs if not _valid_write_set_entry(r)]
     if bad_shape:
-        return False, ("背景文件引用含非法条目（须为仓库内相对路径；禁绝对路径、'..'、"
-                       "'.' 整仓形态与通配哨兵 ?!*[]——t260915-04 与写集闸同口径）："
-                       + "、".join(str(b) for b in bad_shape[:8]))
+        return False, ("background-file refs contain illegal entries (must be repo-relative "
+                       "paths; absolute paths, '..', the whole-repo '.' form, and the git "
+                       "wildcard sentinels ?!*[] are forbidden - same stance as the "
+                       "write-set gate, t260915-04): "
+                       + ", ".join(str(b) for b in bad_shape[:8]))
     problems = []
     for r in refs:
         rel = str(r).strip()
@@ -4246,18 +4306,19 @@ def validate_background_refs(refs: Any, project_root: Any):
                 ["git", "-C", str(project_root), "status", "--porcelain", "--", rel],
                 capture_output=True, text=True, timeout=30)
         except Exception as e:
-            return False, "背景文件校验失败（git 不可用，fail-closed）：%s: %s" % (
+            return False, "background-file validation failed (git unavailable, fail-closed): %s: %s" % (
                 type(e).__name__, e)
         if p1.returncode != 0:
-            problems.append("%s（未提交：不在 HEAD 跟踪清单——先提交再建票）" % rel)
+            problems.append("%s (not committed: absent from the HEAD tracking list - commit first, then open the ticket)" % rel)
             continue
         dirty = (p2.stdout or "").strip()
         if p2.returncode != 0 or dirty:
-            problems.append("%s（带未提交改动：%s——先提交再建票）" % (
-                rel, dirty.replace("\n", "；")[:120] if dirty else "status 查询失败"))
+            problems.append("%s (carrying uncommitted changes: %s - commit first, then open the ticket)" % (
+                rel, dirty.replace("\n", "; ")[:120] if dirty else "status query failed"))
     if problems:
-        return False, ("工单引用的背景文件未过「已提交且干净」闸（KI-049 同源宿主令）："
-                       + "；".join(problems))
+        return False, ("the ticket's background files did not pass the committed-and-clean gate "
+                       "(KI-049 host order): "
+                       + "; ".join(problems))
     return True, ""
 
 
@@ -4309,22 +4370,27 @@ def validate_write_set_args(write_set: Any, allow_empty: bool):
     no silent cleaning); an empty set + allow_empty_write_set → pass and record
     no_file_changes; an empty set with no declaration → refuse."""
     if write_set is not None and not isinstance(write_set, list):
-        return False, {}, ("写集须为列表（实际 %s）：字符串会被逐字符迭代成假护栏，"
-                           "请传 [\"路径\", …] 或 None" % type(write_set).__name__)
+        return False, {}, ("the write set must be a list (found %s): a string would be iterated "
+                           "character-by-character into a fake guard; pass [\"path\", ...] or None"
+                           % type(write_set).__name__)
     ws = [w.strip() for w in (write_set or []) if isinstance(w, str)]
     bad = [w for w in (write_set or []) if not _valid_write_set_entry(w)]
     if bad:
-        return False, {}, ("写集含非法条目（须为仓库内相对路径；禁绝对路径、'..'、"
-                           "'.' 整仓形态与通配哨兵 ?!*[]——t260915-04 与写集闸同口径）：%s"
-                           % "、".join(str(b) for b in bad[:5]))
+        return False, {}, ("the write set contains illegal entries (must be repo-relative paths; "
+                           "absolute paths, '..', the whole-repo '.' form, and the git wildcard "
+                           "sentinels ?!*[] are forbidden - same stance as the write-set gate, "
+                           "t260915-04): %s"
+                           % ", ".join(str(b) for b in bad[:5]))
     if ws:
         return True, {"no_file_changes": False}, ""
     if allow_empty:
         return True, {"no_file_changes": True}, ""
     return False, {}, (
-        "写集为空：agent 将没有白名单护栏、UI 票判定失效。两条出路："
-        "① 传 write_set 列出本票预计改动文件清单；"
-        "② 确实无文件改动时传 allow_empty_write_set=true 显式声明（meta 记 no_file_changes）。")
+        "the write set is empty: the agent would have no whitelist guard and UI-ticket "
+        "judgement would break. Two ways out: "
+        "(1) pass write_set listing the files this ticket expects to change; "
+        "(2) when there really are no file changes, pass allow_empty_write_set=true "
+        "to declare it explicitly (meta records no_file_changes).")
 
 
 def refresh_write_set(initial: Any, plan_files: Any):
@@ -4412,13 +4478,13 @@ def review_gate_verdict(git_error: str, lane_commits: int, shots_path_error: str
     failed query may never assert 「not landed / evidence missing」 — an assertion must
     point the same way as the facts."""
     if git_error:
-        return "", "机械复核跳过：git 查询失败：%s" % git_error
+        return "", "mechanical review skipped: git query failed: %s" % git_error
     if lane_commits == 0 and not no_file_changes:
-        return "机械复核：实现未落盘（泳道 0 commit）", ""
+        return "mechanical review: the implementation never landed (0 commits on the lane)", ""
     if shots_path_error:
-        return "", "机械复核跳过：截图路径异常：%s" % shots_path_error
+        return "", "mechanical review skipped: screenshots path is broken: %s" % shots_path_error
     if png_count == 0 and is_ui:
-        return "机械复核：UI 证据缺失（screenshots 无 png）", ""
+        return "mechanical review: UI evidence missing (no png under screenshots)", ""
     return "", ""
 
 
@@ -4493,9 +4559,11 @@ def multirepo_zero_commit_error(per_repo_commits, no_file_changes):
         if (not isinstance(n, int)) or isinstance(n, bool) or n != 0:
             return ""  # 有 commit / 查询失败(-1) / 畸形 → 全局闸不可判「全零」，跳过
         zero_repos.append(str(name))
-    return ("整票零 commit（%s）——若各仓确无本票改动，建票时应以 allow_empty_write_set "
-            "声明（no_file_changes）；否则排查实现段 settle 代落盘后发 retry_qc"
-            % "、".join(zero_repos))
+    return ("zero commits across the whole ticket (%s) - if no repo really has changes for "
+            "this ticket, creation should have declared allow_empty_write_set "
+            "(no_file_changes); otherwise investigate the implement stage's settle "
+            "ghost-commits and then send retry_qc"
+            % ", ".join(zero_repos))
 
 
 @dataclass
@@ -5095,10 +5163,10 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
     splicing."""
     key = str(project_key or "").strip()
     if not PROJECT_KEY_RE.match(key):
-        raise ValueError("project_key 形状非法：%r（白名单 %s）" % (key, PROJECT_KEY_RE.pattern))
+        raise ValueError("malformed project_key: %r (whitelist %s)" % (key, PROJECT_KEY_RE.pattern))
     tid = str(ticket_id or "").strip()
     if not PROJECT_KEY_RE.match(tid):
-        raise ValueError("ticket_id 形状非法：%r（白名单 %s）" % (tid, PROJECT_KEY_RE.pattern))
+        raise ValueError("malformed ticket_id: %r (whitelist %s)" % (tid, PROJECT_KEY_RE.pattern))
     return perkey_projects_root() / key / "data" / "tickets" / tid
 
 
@@ -5180,26 +5248,26 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
             m = re.match(r"^([a-z_]+):(.*)$", line)
             if not m:
                 raise ProjectPathsError(
-                    "%s:%d 顶层无法解析（只认 schema:/project:/paths:/%s:）：%s"
+                    "%s:%d unparseable top-level line (only schema:/project:/paths:/%s: are recognized): %s"
                     % (label, i, "/".join(ADDITIVE_TOP_LEVEL_SECTIONS), line.strip()[:60]))
             key, val = m.group(1), m.group(2).strip()
             if key in ADDITIVE_TOP_LEVEL_SECTIONS:
                 if val:
-                    raise ProjectPathsError("%s:%d %s: 后必须换行给内容" % (label, i, key))
+                    raise ProjectPathsError("%s:%d %s: must be followed by a newline with content" % (label, i, key))
                 section = key        # 其缩进块整体透传（形状归该段的读面，本解析器不看）
                 continue
             if key not in ("schema", "project", "paths"):
                 raise ProjectPathsError(
-                    "%s:%d 顶层只认 schema:/project:/paths:/%s:，见 %s:"
+                    "%s:%d top level only accepts schema:/project:/paths:/%s:; found %s:"
                     % (label, i, "/".join(ADDITIVE_TOP_LEVEL_SECTIONS), key))
             if key in ("project", "paths") and val:
-                raise ProjectPathsError("%s:%d %s: 后必须换行给内容" % (label, i, key))
+                raise ProjectPathsError("%s:%d %s: must be followed by a newline with content" % (label, i, key))
             if key == "schema":
                 if schema is not None:
-                    raise ProjectPathsError("%s:%d schema: 重复" % (label, i))
+                    raise ProjectPathsError("%s:%d duplicate schema:" % (label, i))
                 schema = val
             elif section == key:
-                raise ProjectPathsError("%s:%d %s: 重复" % (label, i, key))
+                raise ProjectPathsError("%s:%d duplicate %s:" % (label, i, key))
             if key == "paths":
                 paths = {}
             section = key
@@ -5210,13 +5278,13 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
             m = re.match(r"^  ([a-z_]+):\s*(.*)$", line)
             if not m:
                 raise ProjectPathsError(
-                    "%s:%d paths 节只认两空格缩进的 key: value（键值同行标量）：%s" % (label, i, line.strip()[:60]))
+                    "%s:%d the paths section only accepts two-space-indented key: value lines (scalar on the same line as the key): %s" % (label, i, line.strip()[:60]))
             k, v = m.group(1), m.group(2).strip()
             if k not in PATHS_DECL_KEYS:
                 raise ProjectPathsError(
-                    "%s:%d paths 节不认的键: %s（只认 %s——未知键不静默过滤，同 ②c 纲）" % (label, i, k, "、".join(PATHS_DECL_KEYS)))
+                    "%s:%d unknown key in the paths section: %s (only %s are accepted - unknown keys are never silently filtered, per outline 2c)" % (label, i, k, ", ".join(PATHS_DECL_KEYS)))
             if k in paths:
-                raise ProjectPathsError("%s:%d paths.%s 重复" % (label, i, k))
+                raise ProjectPathsError("%s:%d duplicate paths.%s" % (label, i, k))
             paths[k] = v
         elif section == "project":
             # The entry fields' shape belongs to the loader; here we only grab the first
@@ -5226,11 +5294,11 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
                 if m_item and m_item.group(1).strip().startswith("/"):
                     main_dir = m_item.group(1).strip()
         else:
-            raise ProjectPathsError("%s:%d 缩进行出现在任何顶层键之前（结构不合法）" % (label, i))
+            raise ProjectPathsError("%s:%d an indented line appears before any top-level key (illegal structure)" % (label, i))
     if schema is None:
-        raise ProjectPathsError("%s: schema: 缺失（版本是接入前提，不猜）" % label)
+        raise ProjectPathsError("%s: schema: missing (the version is the onboarding premise; none is guessed)" % label)
     if schema != "v1":
-        raise ProjectPathsError("%s: schema 版本不支持：声明 %s，支持集 {v1}" % (label, schema))
+        raise ProjectPathsError("%s: unsupported schema version: declared %s, supported set {v1}" % (label, schema))
     return paths, main_dir
 
 
@@ -5239,13 +5307,13 @@ def _decl_rel(key: str, v: str, label: str) -> str:
     absolute / out-of-bounds / non-scalar are forbidden."""
     v = v.strip()
     if not v:
-        raise ProjectPathsError("%s: paths.%s 声明值为空或纯空白（strip 后判空，畸形）" % (label, key))
+        raise ProjectPathsError("%s: paths.%s declared value is empty or pure whitespace (emptiness judged after strip; malformed)" % (label, key))
     if v[:1] in "{[":
-        raise ProjectPathsError("%s: paths.%s 声明值非标量: %s" % (label, key, v[:40]))
+        raise ProjectPathsError("%s: paths.%s declared value is not a scalar: %s" % (label, key, v[:40]))
     if v.startswith(("/", "~")) or (len(v) > 1 and v[1] == ":"):
-        raise ProjectPathsError("%s: paths.%s 必须是相对项目根的路径，见绝对路径: %s" % (label, key, v[:60]))
+        raise ProjectPathsError("%s: paths.%s must be a path relative to the project root; found an absolute path: %s" % (label, key, v[:60]))
     if any(p == ".." for p in pathlib.PurePosixPath(v).parts):
-        raise ProjectPathsError("%s: paths.%s 禁止 .. 越界: %s" % (label, key, v))
+        raise ProjectPathsError("%s: paths.%s forbids the .. escape: %s" % (label, key, v))
     return v
 
 
@@ -5255,15 +5323,15 @@ def _decl_routes_path(key: str, v: str, label: str) -> str:
     展开后仍拒绝 `..` 逃逸与空/非标量。返回原声明串（解析成绝对路径由调用方做）。"""
     v = v.strip()
     if not v:
-        raise ProjectPathsError("%s: paths.%s 声明值为空或纯空白（strip 后判空，畸形）" % (label, key))
+        raise ProjectPathsError("%s: paths.%s declared value is empty or pure whitespace (emptiness judged after strip; malformed)" % (label, key))
     if v[:1] in "{[":
-        raise ProjectPathsError("%s: paths.%s 声明值非标量: %s" % (label, key, v[:40]))
+        raise ProjectPathsError("%s: paths.%s declared value is not a scalar: %s" % (label, key, v[:40]))
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
         v = v[1:-1]  # 引号包裹的标量：剥引号后判空/解析（与 TS 解析器同判，t260910-14）
         if v == "":
             raise ProjectPathsError("%s: paths.%s 声明值为空（strip 后判空，畸形）" % (label, key))
     if any(p == ".." for p in pathlib.PurePosixPath(v).parts):
-        raise ProjectPathsError("%s: paths.%s 禁止 .. 越界（机器级形态同样适用）: %s" % (label, key, v))
+        raise ProjectPathsError("%s: paths.%s forbids the .. escape (machine-level forms included): %s" % (label, key, v))
     return v
 
 
@@ -5313,9 +5381,9 @@ def project_paths(project_key: str, roles_base: str = "",
     try:
         text = entry.read_text("utf-8")
     except UnicodeDecodeError as e:
-        raise ProjectPathsError("%s 非 UTF-8 不可解析（fail-closed，契约①d）：%s" % (label, str(e)[:120]))
+        raise ProjectPathsError("%s is not UTF-8 and cannot be parsed (fail-closed, contract (1)d): %s" % (label, str(e)[:120]))
     except OSError as e:
-        raise ProjectPathsError("%s 不可读（fail-closed，契约①d）：%s" % (label, str(e)[:200]))
+        raise ProjectPathsError("%s is unreadable (fail-closed, contract (1)d): %s" % (label, str(e)[:200]))
     paths, main_dir = _entry_paths_parse(text, label)
     info["main_dir"] = main_dir
     if not paths:
@@ -5324,7 +5392,7 @@ def project_paths(project_key: str, roles_base: str = "",
         base = routes_base or main_dir
         if not base:
             raise ProjectPathsError(
-                "%s: paths.model_routes 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+                "%s: paths.model_routes is declared but the entry lacks a usable first dirs item; the project home directory cannot be determined (malformed)" % label)
         raw = _decl_routes_path("model_routes", paths["model_routes"], label)
         resolved = _resolve_decl_routes_path(raw)
         if resolved.is_absolute():
@@ -5341,7 +5409,7 @@ def project_paths(project_key: str, roles_base: str = "",
         base = routes_base or main_dir
         if not base:
             raise ProjectPathsError(
-                "%s: paths.inspection_decl 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+                "%s: paths.inspection_decl is declared but the entry lacks a usable first dirs item; the project home directory cannot be determined (malformed)" % label)
         raw = _decl_routes_path("inspection_decl", paths["inspection_decl"], label)
         resolved = _resolve_decl_routes_path(raw)
         if resolved.is_absolute():
@@ -5358,7 +5426,7 @@ def project_paths(project_key: str, roles_base: str = "",
         base = routes_base or main_dir
         if not base:
             raise ProjectPathsError(
-                "%s: paths.dsh_bin 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+                "%s: paths.dsh_bin is declared but the entry lacks a usable first dirs item; the project home directory cannot be determined (malformed)" % label)
         raw = _decl_routes_path("dsh_bin", paths["dsh_bin"], label)
         resolved = _resolve_decl_routes_path(raw)
         if resolved.is_absolute():
@@ -5377,10 +5445,10 @@ def project_paths(project_key: str, roles_base: str = "",
         base = main_dir
         if not base:
             raise ProjectPathsError(
-                "%s: paths.workflow_modules 已声明但条目缺可用 dirs 首项，无法定项目主目录（畸形）" % label)
+                "%s: paths.workflow_modules is declared but the entry lacks a usable first dirs item; the project home directory cannot be determined (malformed)" % label)
         raw_items: List[str] = []
         for i, item in enumerate(str(paths["workflow_modules"]).split(","), 1):
-            rel_item = _decl_rel("workflow_modules", item, "%s 第 %d 项" % (label, i))
+            rel_item = _decl_rel("workflow_modules", item, "%s item %d" % (label, i))
             raw_items.append(rel_item)
         info["workflow_modules"] = [pathlib.Path(base) / it for it in raw_items]
         info["workflow_modules_rel"] = ",".join(raw_items)
@@ -5395,11 +5463,11 @@ def _require_anchor(label: str, key: str, p: pathlib.Path, want: str) -> None:
     judged; existence of fallback paths belongs to each consumer's existing soft semantics
     (missing while undeclared = a soft skip / tolerance, not a hard failure)."""
     if not p.exists():
-        raise ProjectPathsError("%s: paths.%s 声明锚点不存在（fail-closed 红）：%s" % (label, key, p))
+        raise ProjectPathsError("%s: paths.%s declared anchor does not exist (fail-closed red): %s" % (label, key, p))
     if want == "dir" and not p.is_dir():
-        raise ProjectPathsError("%s: paths.%s 声明锚点不是目录（类型错位，fail-closed 红）：%s" % (label, key, p))
+        raise ProjectPathsError("%s: paths.%s declared anchor is not a directory (kind mismatch, fail-closed red): %s" % (label, key, p))
     if want == "file" and not p.is_file():
-        raise ProjectPathsError("%s: paths.%s 声明锚点不是文件（类型错位，fail-closed 红）：%s" % (label, key, p))
+        raise ProjectPathsError("%s: paths.%s declared anchor is not a file (kind mismatch, fail-closed red): %s" % (label, key, p))
 
 
 def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
@@ -5431,8 +5499,9 @@ def dsh_bin_for_spawn(project_key: str) -> Optional[pathlib.Path]:
     _require_anchor(info["entry"], "dsh_bin", p, "file")
     if not os.access(p, os.X_OK):
         raise ProjectPathsError(
-            "%s: paths.dsh_bin 声明锚点不可执行（fail-closed 红；翻钉坏了不回落裸 dsh，"
-            "回退=删/注释该声明行）：%s" % (info["entry"], p))
+            "%s: paths.dsh_bin declared anchor is not executable (fail-closed red; a broken "
+            "pin never falls back to bare dsh - the way back is to delete/comment out the "
+            "declaration line): %s" % (info["entry"], p))
     return p
 
 
@@ -5550,14 +5619,14 @@ def parse_legacy_registry_file(text, label):
         if line is None:
             continue
         if not raw[:1].isspace() and line != 'projects:' and i > 1:
-            raise ValueError('%s:%d 顶层只认 projects:' % (label, i))
+            raise ValueError('%s:%d top level only accepts projects:' % (label, i))
         if line == 'projects:':
             if saw_root:
-                raise ValueError('%s:%d projects: 重复' % (label, i))
+                raise ValueError('%s:%d duplicate projects:' % (label, i))
             saw_root = True
             continue
         if not saw_root:
-            raise ValueError('%s:%d 首行必须是 projects:' % (label, i))
+            raise ValueError('%s:%d the first line must be projects:' % (label, i))
         m_item = re.match(r'^\s+-\s+(.+)$', line)
         m_kv = re.match(r'^\s+([a-z]+):\s*(.*)$', line)
         if m_item:
@@ -5565,18 +5634,18 @@ def parse_legacy_registry_file(text, label):
             kv = re.match(r'^([a-z]+):\s*(.*)$', content)
             if kv:
                 if kv.group(1) != 'key' or not kv.group(2):
-                    raise ValueError('%s:%d 条目首键必须是 key' % (label, i))
+                    raise ValueError("%s:%d the entry's first key must be key" % (label, i))
                 key = kv.group(2).strip()
                 if not PROJECT_KEY_RE.match(key):
-                    raise ValueError('%s:%d key 不合法: %s' % (label, i, key))
+                    raise ValueError('%s:%d illegal key: %s' % (label, i, key))
                 cur = {'key': key, 'name': '', 'dirs': []}
                 projects.append(cur)
                 in_dirs = False
                 continue
             if cur is None or not in_dirs:
-                raise ValueError('%s:%d 列表项出现位置不对: %s' % (label, i, content))
+                raise ValueError('%s:%d a list item appears in the wrong place: %s' % (label, i, content))
             if not content.startswith('/'):
-                raise ValueError('%s:%d dirs 必须是绝对路径: %s' % (label, i, content))
+                raise ValueError('%s:%d dirs entries must be absolute paths: %s' % (label, i, content))
             cur['dirs'].append(content)
             continue
         if m_kv and cur is not None:
@@ -5587,21 +5656,21 @@ def parse_legacy_registry_file(text, label):
                 continue
             if k == 'dirs':
                 if v.strip():
-                    raise ValueError('%s:%d dirs: 后必须换行给列表' % (label, i))
+                    raise ValueError('%s:%d dirs: must be followed by a newline with the list' % (label, i))
                 in_dirs = True
                 continue
-            raise ValueError('%s:%d 不认的键: %s' % (label, i, k))
-        raise ValueError('%s:%d 解析失败: %s' % (label, i, line.strip()))
+            raise ValueError('%s:%d unrecognized key: %s' % (label, i, k))
+        raise ValueError('%s:%d parse failed: %s' % (label, i, line.strip()))
     if not projects:
-        raise ValueError('%s: 没有任何项目条目' % label)
+        raise ValueError('%s: no project entries at all' % label)
     for p in projects:
         if not p['name']:
-            raise ValueError('%s: 项目 %s 缺 name' % (label, p['key']))
+            raise ValueError('%s: project %s lacks name' % (label, p['key']))
         if not p['dirs']:
-            raise ValueError('%s: 项目 %s 缺 dirs' % (label, p['key']))
+            raise ValueError('%s: project %s lacks dirs' % (label, p['key']))
     keys = set(p['key'] for p in projects)
     if len(keys) != len(projects):
-        raise ValueError('%s: key 重复' % label)
+        raise ValueError('%s: duplicate key' % label)
     return projects
 
 
@@ -5657,22 +5726,22 @@ def parse_project_file(text, label):
             in_event_ledger = True
             continue
         if not raw[:1].isspace() and line != 'project:' and not line.startswith('schema:') and i > 1:
-            raise ValueError('%s:%d 顶层只认 schema:/project:/paths:/admin_log:/event_ledger:' % (label, i))
+            raise ValueError('%s:%d top level only accepts schema:/project:/paths:/admin_log:/event_ledger:' % (label, i))
         if line == 'project:':
             if saw_project:
-                raise ValueError('%s:%d project: 重复' % (label, i))
+                raise ValueError('%s:%d duplicate project:' % (label, i))
             saw_project = True
             continue
         m_top = re.match(r'^([a-z]+):\s*(.+)$', line)
         if m_top and not saw_project and not raw[:1].isspace():
             if m_top.group(1) != 'schema':
-                raise ValueError('%s:%d 顶层只认 schema: 与 project:' % (label, i))
+                raise ValueError('%s:%d top level only accepts schema: and project:' % (label, i))
             schema = m_top.group(2).strip()
             if schema != 'v1':
-                raise ValueError('%s:%d schema 版本不支持：声明 %s，支持集 {v1}' % (label, i, schema))
+                raise ValueError('%s:%d unsupported schema version: declared %s, supported set {v1}' % (label, i, schema))
             continue
         if not saw_project:
-            raise ValueError('%s:%d 顶层只认 schema: 与 project:' % (label, i))
+            raise ValueError('%s:%d top level only accepts schema: and project:' % (label, i))
         m_item = re.match(r'^\s+-\s+(.+)$', line)
         m_kv = re.match(r'^\s+([a-z]+):\s*(.*)$', line)
         if m_item:
@@ -5680,19 +5749,19 @@ def parse_project_file(text, label):
             kv = re.match(r'^([a-z]+):\s*(.*)$', content)
             if kv:
                 if cur is not None:
-                    raise ValueError('%s:%d 单条目文件出现第二个条目' % (label, i))
+                    raise ValueError('%s:%d a second entry appears in a single-entry file' % (label, i))
                 if kv.group(1) != 'key' or not kv.group(2):
-                    raise ValueError('%s:%d 条目首键必须是 key' % (label, i))
+                    raise ValueError("%s:%d the entry's first key must be key" % (label, i))
                 key = kv.group(2).strip()
                 if not PROJECT_KEY_RE.match(key):
-                    raise ValueError('%s:%d key 不合法: %s' % (label, i, key))
+                    raise ValueError('%s:%d illegal key: %s' % (label, i, key))
                 cur = {'key': key, 'name': '', 'dirs': []}
                 in_dirs = False
                 continue
             if cur is None or not in_dirs:
-                raise ValueError('%s:%d 列表项出现位置不对: %s' % (label, i, content))
+                raise ValueError('%s:%d a list item appears in the wrong place: %s' % (label, i, content))
             if not content.startswith('/'):
-                raise ValueError('%s:%d dirs 必须是绝对路径: %s' % (label, i, content))
+                raise ValueError('%s:%d dirs entries must be absolute paths: %s' % (label, i, content))
             cur['dirs'].append(content)
             continue
         if m_kv and cur is not None:
@@ -5703,19 +5772,19 @@ def parse_project_file(text, label):
                 continue
             if k == 'dirs':
                 if v.strip():
-                    raise ValueError('%s:%d dirs: 后必须换行给列表' % (label, i))
+                    raise ValueError('%s:%d dirs: must be followed by a newline with the list' % (label, i))
                 in_dirs = True
                 continue
-            raise ValueError('%s:%d 不认的键: %s' % (label, i, k))
-        raise ValueError('%s:%d 解析失败: %s' % (label, i, line.strip()))
+            raise ValueError('%s:%d unrecognized key: %s' % (label, i, k))
+        raise ValueError('%s:%d parse failed: %s' % (label, i, line.strip()))
     if schema is None:
-        raise ValueError('%s: schema: 缺失（版本是接入前提，不猜）' % label)
+        raise ValueError('%s: schema: missing (the version is the onboarding premise; none is guessed)' % label)
     if cur is None:
-        raise ValueError('%s: 没有任何项目条目' % label)
+        raise ValueError('%s: no project entries at all' % label)
     if not cur['name']:
-        raise ValueError('%s: 项目 %s 缺 name' % (label, cur['key']))
+        raise ValueError('%s: project %s lacks name' % (label, cur['key']))
     if not cur['dirs']:
-        raise ValueError('%s: 项目 %s 缺 dirs' % (label, cur['key']))
+        raise ValueError('%s: project %s lacks dirs' % (label, cur['key']))
     return cur
 
 
@@ -5742,13 +5811,13 @@ def scan_registry(root):
         label = str(f)
         if not PROJECT_KEY_RE.match(child.name):
             quarantined.append({'dir': str(child),
-                                'error': '%s: 目录名不合法（key 白名单：小写字母/数字/中划线）：%s'
+                                'error': '%s: illegal directory name (key whitelist: lowercase letters/digits/hyphens): %s'
                                          % (label, child.name)})
             continue
         try:
             p = parse_project_file(f.read_text('utf-8'), label)
             if p['key'] != child.name:
-                raise ValueError('%s: key 与目录名不等：%s ≠ %s' % (label, p['key'], child.name))
+                raise ValueError('%s: key does not equal the directory name: %s != %s' % (label, p['key'], child.name))
             projects.append(p)
         except ValueError as e:
             quarantined.append({'dir': str(child), 'error': str(e)})
@@ -5765,8 +5834,9 @@ def migrate_registry(root, seed):
     for p in projects:
         for field, value in [('key', p['key']), ('name', p['name'])] + [('dirs', d) for d in p['dirs']]:
             if '#' in value or '\n' in value:
-                raise ValueError('迁移源 %s：项目 %s 的 %s 含 # 或换行，严格子集无法表示，'
-                                 '拒绝迁移（请人工改源表）' % (seed_label, p['key'], field))
+                raise ValueError('migration source %s: project %s field %s contains # or a newline, '
+                                 'which the strict subset cannot represent; migration refused '
+                                 '(fix the source table by hand)' % (seed_label, p['key'], field))
     root.mkdir(parents=True, exist_ok=True)
     for p in projects:
         d = root / p['key']
@@ -5838,7 +5908,7 @@ def ensure_registry_migrated(root):
     on_disk = len(projects) + len(quarantined)
     if on_disk == 0:
         if not PROJECTS_YAML.is_file():
-            raise ValueError('注册表根目录不存在：%s，且无迁移源 %s（fail-closed，不静默视为空注册表）'
+            raise ValueError('the registry root directory does not exist: %s, and there is no migration source %s (fail-closed; never silently treated as an empty registry)'
                              % (root, PROJECTS_YAML))
         migrate_registry(root, PROJECTS_YAML)
         return
@@ -5848,8 +5918,10 @@ def ensure_registry_migrated(root):
         expected = _expected_registry_entries(
             parse_legacy_registry_file(PROJECTS_YAML.read_text('utf-8'), str(PROJECTS_YAML)), str(PROJECTS_YAML))
     except ValueError as e:
-        raise ValueError('注册表现场无法判定：%s 有 %d 个项目条目但无 .migrated 标记，'
-                         '且迁移源 %s 不可解析（%s）。处置：修复或移除迁移源后重试。拒绝静默跳过。'
+        raise ValueError('registry state cannot be judged: %s has %d project entries but no '
+                         '.migrated marker, and the migration source %s is unparseable (%s). '
+                         'Disposition: fix or remove the migration source, then retry. A '
+                         'silent skip is refused.'
                          % (root, on_disk, PROJECTS_YAML, e))
     seed_keys = set(expected.keys())
     on_disk_keys = set([p['key'] for p in projects] + [pathlib.Path(q['dir']).name for q in quarantined])
@@ -5862,9 +5934,12 @@ def ensure_registry_migrated(root):
     if pure_subset:
         _resume_registry_migration(root, expected, on_disk_keys)
         return
-    raise ValueError('注册表现场无法判定：%s 有 %d 个项目条目、无 .migrated 标记，'
-                     '且内容与迁移源 %s 部分相关但不能完全复现（混合现场：可能是崩溃残留叠了人工改动）。'
-                     '处置：确认后补写标记、清除该目录重迁，或移除/修复迁移源。拒绝静默跳过。'
+    raise ValueError('registry state cannot be judged: %s has %d project entries and no '
+                     '.migrated marker, and its content is partly related to the migration '
+                     'source %s but not fully reproducible (mixed scene: likely crash '
+                     'leftovers stacked with manual edits). Disposition: after confirming, '
+                     'write the marker, wipe the directory and re-migrate, or remove/fix '
+                     'the migration source. A silent skip is refused.'
                      % (root, on_disk, PROJECTS_YAML))
 
 
@@ -5878,7 +5953,7 @@ def load_projects_registry():
     root = registry_root()
     if not root.is_dir():
         if not PROJECTS_YAML.is_file():
-            raise ValueError('注册表根目录不存在：%s，且无迁移源 %s（fail-closed，不静默视为空注册表）'
+            raise ValueError('the registry root directory does not exist: %s, and there is no migration source %s (fail-closed; never silently treated as an empty registry)'
                              % (root, PROJECTS_YAML))
         migrate_registry(root, PROJECTS_YAML)
     else:
@@ -5893,9 +5968,9 @@ def assert_registry_nonempty(projects, quarantined):
         return
     if quarantined:
         reasons = '；'.join('%s（%s）' % (q['dir'], q['error']) for q in quarantined)
-        raise ValueError('注册表没有任何可用项目条目：全部 %d 条被隔离——%s'
+        raise ValueError('the registry has no usable project entries: all %d were quarantined - %s'
                          % (len(quarantined), reasons))
-    raise ValueError('注册表没有任何项目条目')
+    raise ValueError('the registry has no project entries at all')
 
 
 def list_registered_projects():
@@ -5914,7 +5989,7 @@ def lookup_project(key):
     When the key matches a quarantined entry, the error carries the directory + reason
     (visibly fail-closed rather than silently treated as unknown)."""
     if not key or not PROJECT_KEY_RE.match(key):
-        raise ValueError('project 不合法（注册表 key 白名单：小写字母/数字/中划线），实际 %r' % (key,))
+        raise ValueError('illegal project (registry key whitelist: lowercase letters/digits/hyphens); found %r' % (key,))
     projects, quarantined = load_projects_registry()
     assert_registry_nonempty(projects, quarantined)
     for p in projects:
@@ -5922,9 +5997,9 @@ def lookup_project(key):
             return p
     for q in quarantined:
         if pathlib.Path(q['dir']).name == key:
-            raise ValueError('项目 %s 注册条目已隔离：%s：%s' % (key, q['dir'], q['error']))
-    known = '、'.join(p['key'] for p in projects)
-    raise ValueError('未知项目 %r（已注册：%s）' % (key, known))
+            raise ValueError("project %s's registry entry is quarantined: %s: %s" % (key, q['dir'], q['error']))
+    known = ', '.join(p['key'] for p in projects)
+    raise ValueError('unknown project %r (registered: %s)' % (key, known))
 
 
 def check_paths_under_project(proj, ws, worktree):
@@ -5933,8 +6008,8 @@ def check_paths_under_project(proj, ws, worktree):
     are not blocked (the executing side resolves them against the project home)."""
     for label, p in (('workspace', (ws or {}).get('path') or ''), ('worktree', worktree or '')):
         if p.startswith('/') and not any(p == d or p.startswith(d.rstrip('/') + '/') for d in proj['dirs']):
-            raise ValueError('%s 路径 %s 不在项目 %s 的注册目录内（%s）'
-                             % (label, p, proj['key'], '、'.join(proj['dirs'])))
+            raise ValueError('%s path %s is not inside the registered directories of project %s (%s)'
+                             % (label, p, proj['key'], ', '.join(proj['dirs'])))
 
 
 # ---- Worker ownership fingerprint (KI-033, ticket t260904-02) ----
@@ -6021,17 +6096,17 @@ def read_worker_meta_state(path) -> Tuple[Optional[Dict[str, Any]], str, str]:
     try:
         raw = pathlib.Path(path).read_text('utf-8')
     except FileNotFoundError:
-        return None, 'missing', '文件不存在：%s' % path
+        return None, 'missing', 'file does not exist: %s' % path
     except OSError as e:
         return None, 'read_error', '%s: %s' % (type(e).__name__, e)
     try:
         data = _json.loads(raw)
     except ValueError as e:
-        return None, 'malformed', 'JSON 不可解析：%s' % e
+        return None, 'malformed', 'JSON unparseable: %s' % e
     if not isinstance(data, dict) or not isinstance(data.get('repo_root'), str) \
             or not data.get('repo_root') or not isinstance(data.get('pid'), int) \
             or isinstance(data.get('pid'), bool):
-        return None, 'malformed', '形状不符（需 version/pid:int/repo_root:str）'
+        return None, 'malformed', 'wrong shape (needs version/pid:int/repo_root:str)'
     # t261005-03: the slot state key is read on demand — a meta written before the key
     # existed (old worker) reads as 'serving', which keeps every consumer's behavior
     # unchanged; an unknown value is surfaced as-is (consumers treat anything that is
@@ -6165,7 +6240,7 @@ def exception_chain_note(exc) -> str:
     found = chain_failure_reason(exc)
     if not found or found[0] == 0:
         return ""
-    return "；根因（链上第 %d 层 %s）：%s" % found
+    return "; root cause (level %d on the chain, %s): %s" % found
 
 
 def format_agent_stage_failure(ticket_id, stage_id, exc, gen=None) -> str:
@@ -6183,21 +6258,22 @@ def format_agent_stage_failure(ticket_id, stage_id, exc, gen=None) -> str:
     （并行边等不便取代数的点位）。
     """
     if classify_worker_termination(exc):
-        gen_part = "" if gen is None else "，第 %s 次" % gen
-        return ("worker 被外部终止（停机/重载），活动已取消（票 %s 段 %s%s）"
+        gen_part = "" if gen is None else ", attempt %s" % gen
+        return ("worker terminated externally (shutdown/reload); the activity was cancelled "
+                "(ticket %s stage %s%s)"
                 % (ticket_id, stage_id, gen_part))
-    outer = "agent 活动故障（已重试）：%s: %s" % (type(exc).__name__, exc)
+    outer = "agent activity failure (already retried): %s: %s" % (type(exc).__name__, exc)
     if not isinstance(exc, BaseException):
         # 非异常输入（None/桩）：不进链下钻，逐字维持旧文案（老语义字节兼容）。
         return outer
     found = chain_failure_reason(exc)
     if found is None:
         # 全链没有任何层带消息：显式「不可得」，不编造。
-        return outer + "；根因不可得（异常链无层携带可读消息）"
+        return outer + "; root cause unavailable (no level on the exception chain carries a readable message)"
     if found[0] == 0:
         # 根=最外层（消息已在主文案里）：不加「根因」段，防同句双打。
         return outer
-    return outer + "；根因（链上第 %d 层 %s）：%s" % found
+    return outer + "; root cause (level %d on the chain, %s): %s" % found
 
 
 async def retry_once_on_worker_termination(run_once, *, gate, on_retry=None):
@@ -6327,7 +6403,7 @@ def project_template_rejection_note(project_key: str = "", root=None) -> str:
         rejs = [r for r in rejs if r.get("project") == project_key]
     if not rejs:
         return ""
-    return "；项目模板拒收明细：" + "；".join(
+    return "; project template rejection details: " + "; ".join(
         "[%s/%s] %s：%s" % (r.get("project", ""), r.get("module", ""),
                             r.get("check", ""), r.get("detail", ""))
         for r in rejs)
@@ -6347,7 +6423,7 @@ try:
     _pt_res.merged_names(TEMPLATE_CLASS_NAMES, TEMPLATE_DISPLAY_NAMES)
 except Exception as _pt_err:  # 加载器故障：点名挂账，不静默、不炸共享装载
     PROJECT_TEMPLATE_REJECTIONS = [{"project": "", "module": "",
-                                    "check": "加载器故障",
+                                    "check": "loader failure",
                                     "detail": str(_pt_err)[:240]}]
 
 
@@ -6522,10 +6598,10 @@ def read_pidfile_state(pidfile: Any) -> Dict[str, Any]:
     try:
         raw = p.read_text(encoding="utf-8", errors="replace").strip()
     except FileNotFoundError:
-        return {"state": "absent", "pid": None, "raw": "", "mtime": 0.0, "detail": "文件不存在"}
+        return {"state": "absent", "pid": None, "raw": "", "mtime": 0.0, "detail": "file does not exist"}
     except OSError as e:
         return {"state": "stale", "pid": None, "raw": "", "mtime": 0.0,
-                "detail": "读失败（%s: %s）——按陈旧接管" % (type(e).__name__, e)}
+                "detail": "read failed (%s: %s) - taken over as stale" % (type(e).__name__, e)}
     try:
         mtime = p.stat().st_mtime
     except OSError:
@@ -6536,11 +6612,11 @@ def read_pidfile_state(pidfile: Any) -> Dict[str, Any]:
             raise ValueError(raw)
     except (TypeError, ValueError):
         return {"state": "malformed", "pid": None, "raw": raw[:40], "mtime": mtime,
-                "detail": "内容非正整数（%r）——按陈旧接管" % raw[:40]}
+                "detail": "content is not a positive integer (%r) - taken over as stale" % raw[:40]}
     if pid_alive(pid):
-        return {"state": "live", "pid": pid, "raw": raw, "mtime": mtime, "detail": "进程存活"}
+        return {"state": "live", "pid": pid, "raw": raw, "mtime": mtime, "detail": "process alive"}
     return {"state": "stale", "pid": pid, "raw": raw, "mtime": mtime,
-            "detail": "pid=%d 已不在" % pid}
+            "detail": "pid=%d is gone" % pid}
 
 
 def worker_code_stamp(mtime_fn=None, started_at: Optional[str] = None,

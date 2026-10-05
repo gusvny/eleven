@@ -128,9 +128,9 @@ def test_abort_helper_reports_honestly_on_failure():
     src = Path(dev_lane.__file__).read_text("utf-8")
     helper = src.split("async def _main_sync_abort(", 1)[1].split(
         "# ---------- t260917-08", 1)[0]
-    assert "merge 已复位（MERGE_HEAD 已清）" in helper
-    assert "merge 复位失败" in helper and "需人工处置" in helper
-    assert "merge 复位尝试异常" in helper
+    assert "merge reset done (MERGE_HEAD cleared)" in helper
+    assert "merge reset failed" in helper and "needs human handling" in helper
+    assert "merge reset attempt raised" in helper
 
 
 def test_payload_key_is_additive():

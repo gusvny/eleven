@@ -279,7 +279,7 @@ def test_engine_row_disabled_project_zero_files(monkeypatch, tmp_path):
     got = el.append_event({'scope': 'engine', 'project': '', 'ticket': 'wf',
                            'stage': 's', 'state': 'st', 'reason': '', 'seq': 1,
                            'run_id': 'r', 'idem': '|wf|r|1'}, tmp_path / 'ledger')
-    assert got['emitted'] is False and '未声明' in got['why']
+    assert got['emitted'] is False and 'not declared' in got['why']
 
 
 # ---------- 每类重放安全（规格 item 6）：patched=False ⇒ 五类全零行为 ----------

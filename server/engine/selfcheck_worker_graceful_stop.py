@@ -174,10 +174,10 @@ async def main() -> int:
         ok(res_b.get("status") == "failed" and res_b.get("classified") is True,
            "B：停机取消被分类为 worker_terminated（%s）" % res_b)
         txt = res_b.get("text") or ""
-        ok("worker 被外部终止（停机/重载）" in txt and "t-selfcheck-b" in txt
+        ok("worker terminated externally (shutdown/reload)" in txt and "t-selfcheck-b" in txt
            and "slow_stage_b" in txt,
            "B：票面文案点名 worker 终止+票号段号（%s）" % txt)
-        ok("活动故障（已重试）" not in txt, "B：不再出现无信息旧文案")
+        ok("activity failure (already retried)" not in txt, "B: the uninformative legacy wording is gone")
         outcomes_b = [e for e in agent_activities.recent_stage_outcomes()
                       if e.get("ticket") == "t-selfcheck-b"]
         ok(bool(outcomes_b) and outcomes_b[0]["outcome"] == "worker_terminated",

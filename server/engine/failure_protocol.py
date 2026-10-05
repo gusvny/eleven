@@ -108,13 +108,15 @@ def enforce_semantics(case):
     if case["status"] == "fail" and case["reason"] in PREPARE_REASONS:
         case = dict(case, status="not-checked", violation=True)
         violations.append(
-            "violation: status=fail 配 prepare 型 reason=%s（未跑到断言不许报 fail）"
+            "violation: status=fail with a prepare-type reason=%s (a case that never "
+            "reached its assertions must not report fail)"
             % case["reason"])
         case = dict(case, reason=case["reason"])  # reason 原样保留供归属
     if case["status"] == "not-checked" and not case["evidence"].strip():
         case = dict(case, status="fail", unbacked_env_fail=True)
         violations.append(
-            "violation: not-checked 无 evidence（无证据的环境红按 FAIL 处理，fail-closed）")
+            "violation: not-checked without evidence (an unevidenced environment red "
+            "is treated as FAIL, fail-closed)")
     return case, violations
 
 
@@ -181,19 +183,19 @@ def decide(case, baseline_red, fp_equal=True, fp_diffs=None):
     if case["status"] == "fail":
         if in_baseline:
             return {"name": name, "verdict": "record",
-                    "why": "baseline_red(既有欠账)"}
+                    "why": "baseline_red(existing debt)"}
         return {"name": name, "verdict": "block",
-                "why": "regression(main绿或基线不可比，保守拦)"}
+                "why": "regression(main green or baseline not comparable; block conservatively)"}
     # not-checked（带证据）
     if not fp_equal:
         return {"name": name, "verdict": "unknown", "why": "fingerprint_mismatch",
                 "fp_diffs": fp_diffs or []}
     if case["cause"] == "self":
         return {"name": name, "verdict": "record" if in_baseline else "block",
-                "why": "not_checked_self(main%s)" % ("红" if in_baseline else "绿")}
+                "why": "not_checked_self(main%s)" % ("red" if in_baseline else "green")}
     if case["cause"] == "external":
         return {"name": name, "verdict": "record",
-                "why": "not_checked_external(促治理不堵)"}
+                "why": "not_checked_external(record for governance; does not block)"}
     return {"name": name, "verdict": "unknown", "why": "cause_unknown"}
 
 
@@ -572,7 +574,7 @@ def apply_affiliation_ledger(lane_cases, baseline_cases, lane_fp, baseline_fp,
         case = cases_by_name.get(name) or {}
         out["verdicts"][idx] = {
             "name": name, "verdict": "record",
-            "why": "ledger_red(既有欠账·台账)",
+            "why": "ledger_red(existing debt · ledger)",
             "ledger": {"ts": str(la.get("ts") or ""),
                        "source": str(la.get("source") or "")},
             "lane_status": case.get("status", ""),

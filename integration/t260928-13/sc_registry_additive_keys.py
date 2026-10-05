@@ -252,7 +252,7 @@ with tempfile.TemporaryDirectory() as td:
     ok(len(quarantined) == 1, "坏条目进隔离清单（隔离面在场，控制台红行有源）")
     if quarantined:
         err = str(quarantined[0].get("error") or "")
-        ok("project.yaml:" in err and "顶层只认" in err,
+        ok("project.yaml:" in err and "top level only accepts" in err,
            "隔离原因点名 file:line 与允许集（报错精确，可自修）：%s" % err[:110])
         ok(str(quarantined[0].get("dir") or "").endswith("probe-bad"),
            "隔离条目带 dir（渲染锚在场）")

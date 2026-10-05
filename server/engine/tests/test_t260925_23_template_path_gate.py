@@ -177,7 +177,7 @@ def test_unknown_stage_note_names_stage_and_remedy():
     assert "ext_stage" in note, "回执须点名缺规则的段"
     assert 'PATH_GATE_RULES["ext_stage"]' in note, "回执须点名补法"
     assert "result_files" in note, "回执须点名弱面白名单"
-    assert "合法出路" in note, "出路文案在场（fail-closed 但给合法出路，对齐 faces 场景 A3）"
+    assert "lawful way out" in note, "the way-out copy is present (fail-closed but names a lawful exit, faces scenario A3)"
 
 
 def test_next_action_hint_unknown_stage_names_remedy():

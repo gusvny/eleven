@@ -383,15 +383,15 @@ try:
             "write_set": ["integration/"]}, env_stub)
         check("G5 对照：纯根仓写集不被拒收（不误伤，无成员仓点名）",
               "repo_a/src/a.py" not in out and "repo_b/lib/b.py" not in out
-              and "跨项目" not in out,          # 260927（KI-142）：身份拒收不算「过闸」
+              and "cross-project" not in out,    # 260927（KI-142）：身份拒收不算「过闸」
               "out=%r" % (out[-240:],))
         # 对照2：多仓写集合法派生（无显式 worktree，明细在）→ 放行过闸
         rc, out = run_client(py, "ticket-start", {
             "ticket_id": TICKET + "fc", "template_id": "dev-lane", "project": "utmr",
             "title": "fuseA-ctl-derive", "write_set": list(WS)}, env_stub)
         check("G5b 对照：多仓写集合法派生不被拒收（明细在场=闸放行）",
-              "参数非法" not in out and "repo_a/src/a.py" not in out
-              and "跨项目" not in out,          # 260927（KI-142）：同上，堵身份拒收假绿
+              "write-set entry" not in out and "repo_a/src/a.py" not in out
+              and "cross-project" not in out,    # 260927（KI-142）：同上，堵身份拒收假绿
               "out=%r" % (out[-240:],))
 
     # ---------- 隔离台面：正规入口 CLI 全链 + 裸入口持久化契约 ----------

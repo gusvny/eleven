@@ -242,7 +242,7 @@ def test_c_terminal_face_full():
     # 诚实口径（KI-025 红线）：kind=terminal、文案一字不改。
     assert res.get("ok") is False and res.get("kind") == "terminal"
     msg = str(res.get("error") or "")
-    assert "终态" in msg and "刷新无效" in msg
+    assert "already terminal" in msg and "refreshing will not help" in msg
     assert "刷新重试" not in msg and "瞬时" not in msg and "工单不存在" not in msg
     # face 结构化失败面（验收②全字段）。
     face = res.get("face")
@@ -252,7 +252,7 @@ def test_c_terminal_face_full():
     assert "Temporal" in face["reason_source"]
     assert face["instance_id"] == "integration-tests" and face["period"] == "20260919"
     assert face["project"] == "sandbar" and face["epic"] == "engine-hardening"
-    assert face["snapshot_available"] is False and "无快照" in face["snapshot_note"]
+    assert face["snapshot_available"] is False and "no snapshot" in face["snapshot_note"]
     assert face["last_stage"] is None and face["last_stage_note"]
     assert face["reason_source"] != ""
 
@@ -367,7 +367,7 @@ def test_c_terminal_wording_other_states():
                    result_fn=lambda: (_ for _ in ()).throw(WorkflowFailureError("torn down")))
     res = _query(TID, h)
     assert res["kind"] == "terminal" and res["face"]["exec_status"] == "TERMINATED"
-    assert "TERMINATED" in res["error"] and "刷新无效" in res["error"]
+    assert "TERMINATED" in res["error"] and "refreshing will not help" in res["error"]
 
 
 # ---------------------------------------------------------------- D 板面失败行

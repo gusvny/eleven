@@ -162,7 +162,7 @@ def test_oversized_note_refused_not_in_history():
     _signal_ruling(wf, "宿主", big)
     assert "host_rulings" not in wf.meta
     assert len(wf.refused) == 1
-    assert "超限" in wf.refused[0]["why"]
+    assert "over limit" in wf.refused[0]["why"]
     assert "log" not in wf.meta              # 拒收不留痕（连日志都不进）
 
 

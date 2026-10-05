@@ -97,7 +97,7 @@ def test_verdict_ledger_leg_books_face_and_receipts(ledger: Path):
 
 def test_verdict_ledger_leg_rejections(ledger: Path):
     for mut, why in [
-        ({"verdict": "maybe"}, "越域"),
+        ({"verdict": "maybe"}, "out of range"),
         ({"who": "developer"}, "agent"),
         ({"who": ""}, "who"),
         ({"finding_id": ""}, "finding-id"),

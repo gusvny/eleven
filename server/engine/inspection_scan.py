@@ -259,9 +259,9 @@ def parse_scenarios(path: Path) -> Tuple[List[Dict[str, str]], List[str]]:
         try:
             parts = [ast.literal_eval(x) for x in el.elts]  # non-tuple / non-constant member → ValueError
             if not isinstance(el, ast.Tuple):
-                raise ValueError("条目不是元组")
+                raise ValueError("entry is not a tuple")
             if len(parts) < 3:
-                raise ValueError("字段数 %d<3" % len(parts))
+                raise ValueError("field count %d<3" % len(parts))
             entries.append({"name": str(parts[0]), "intent": str(parts[1]),
                             "cmd": " ".join(str(p) for p in parts[2:])})
         except Exception as e:  # noqa: BLE001 — each malformed manifest entry degrades on its own; one bad item must not ruin the whole scan
@@ -834,7 +834,7 @@ def run_test_face_scan(
             "guards_non_ui": anchor_meta.get("guards_non_ui", 0),
             "stale_refs_checked": stale_meta.get("refs_checked", 0),
             "stale_refs_external": stale_meta.get("refs_external", 0),
-            "red_line": "巡检只出报告与开票建议，绝不直接改码",
+            "red_line": "Inspection only produces reports and ticket-opening suggestions; it never changes code.",
         },
     }
 

@@ -99,8 +99,9 @@ def _filter_activity_name_collisions(res) -> None:
         engine = _engine_activity_name_sources()
     except Exception as e:
         res.rejections.append(_act_name_rej(
-            "", "", "", None, "活动名唯一性检查不可用",
-            "引擎活动注册表导入失败（fail-closed，外置模板全部拒收）：%s: %s"
+            "", "", "", None, "activity-name uniqueness check unavailable",
+            "engine activity registry import failed (fail-closed; all external "
+            "templates refused): %s: %s"
             % (type(e).__name__, str(e)[:160])))
         engine = {}
         withdraw = sorted(res.classes)
@@ -108,7 +109,8 @@ def _filter_activity_name_collisions(res) -> None:
             acc = res.accepted.get(tid, {})
             res.rejections.append(_act_name_rej(
                 acc.get("project", ""), acc.get("module", ""), tid, None,
-                "活动名唯一性检查不可用", "模板 %s 因上条原因一并拒收" % tid))
+                "activity-name uniqueness check unavailable",
+                "template %s refused for the same reason as above" % tid))
     else:
         for tid in sorted(res.classes):
             cls = res.classes[tid]
@@ -122,9 +124,12 @@ def _filter_activity_name_collisions(res) -> None:
                 if sid in engine:
                     res.rejections.append(_act_name_rej(
                         acc.get("project", ""), acc.get("module", ""), tid, sid,
-                        "活动名撞引擎注册面",
-                        "活动名 %s 已被引擎注册（%s）× 来件模板 %s（%s/%s）——外置段 id "
-                        "不得与引擎注册活动同名（同名=活动双注册，工人注册期崩，KI-121）"
+                        "activity name collides with the engine registry face",
+                        "activity name %s is already registered by the engine (%s) "
+                        "× incoming template %s (%s/%s) — external segment ids must "
+                        "not share a name with a registered engine activity (same "
+                        "name = double activity registration; the worker crashes "
+                        "during registration, KI-121)"
                         % (sid, engine[sid], tid, acc.get("project", ""), acc.get("module", ""))))
                     withdraw.append(tid)
                     break

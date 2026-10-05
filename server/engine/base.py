@@ -167,21 +167,25 @@ class TicketPauseMixin:
         # 「已暂停」而 workflow 照跑（KI-018 误导信号同族）——改为一处可辨拒绝。
         if not workflow.patched(PAUSE_PATCH_ID):
             self.refused.append({"who": who, "want": "pause",
-                                 "why": "该工单启动于暂停功能上线前，不支持暂停"
-                                        "（事件历史无 ticket-pause-v1 marker）"})
+                                 "why": "this ticket predates the pause feature; "
+                                        "pause is not supported (no ticket-pause-v1 "
+                                        "marker in the event history)"})
             return
         if not who:
             self.refused.append({"who": who, "want": "pause",
-                                 "why": "who 必填非空（空/纯空白拒收）"})
+                                 "why": "who is required and must be non-empty "
+                                        "(empty/whitespace-only is refused)"})
             return
         if len(note) > PAUSE_NOTE_INPUT_LIMIT:
             self.refused.append({"who": who, "want": "pause",
-                                 "why": "note 超限（%d > %d 字符），不进事件历史——"
-                                        "拆条后重发" % (len(note), PAUSE_NOTE_INPUT_LIMIT)})
+                                 "why": "note exceeds limit (%d > %d chars); not "
+                                        "written to event history — split it and "
+                                        "resend" % (len(note), PAUSE_NOTE_INPUT_LIMIT)})
             return
         if self._paused:
             self.refused.append({"who": who, "want": "pause",
-                                 "why": "已处于暂停（幂等拒绝，重复 pause 不重复置位）"})
+                                 "why": "already paused (idempotent refusal; a "
+                                        "repeated pause does not re-set the flag)"})
             return
         # t260915-12 跨项目闸（第二道）：受理置位前的项目归属校验（记名/拒收）。
         if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
@@ -190,7 +194,8 @@ class TicketPauseMixin:
             return
         self._paused = True
         self._paused_at_gate = False
-        self._log("pause 受理（%s）%s——当前段自然跑完，停在段间门口等 resume"
+        self._log("pause accepted (%s)%s — the current segment runs to completion, "
+                  "then stops at the between-segment gate awaiting resume"
                   % (who, "：%s" % note if note else ""))
         self._mark(str(self.meta.get("stage") or ""), "paused",
                    "%s（%s）" % (note, who) if note else who)
@@ -204,16 +209,18 @@ class TicketPauseMixin:
         # 自然落「未处于暂停」空态拒绝——一处分支不重复。
         if not who:
             self.refused.append({"who": who, "want": "resume",
-                                 "why": "who 必填非空（空/纯空白拒收）"})
+                                 "why": "who is required and must be non-empty "
+                                        "(empty/whitespace-only is refused)"})
             return
         if len(note) > PAUSE_NOTE_INPUT_LIMIT:
             self.refused.append({"who": who, "want": "resume",
-                                 "why": "note 超限（%d > %d 字符），不进事件历史——"
-                                        "拆条后重发" % (len(note), PAUSE_NOTE_INPUT_LIMIT)})
+                                 "why": "note exceeds limit (%d > %d chars); not "
+                                        "written to event history — split it and "
+                                        "resend" % (len(note), PAUSE_NOTE_INPUT_LIMIT)})
             return
         if not self._paused:
             self.refused.append({"who": who, "want": "resume",
-                                 "why": "未处于暂停（空态拒绝）"})
+                                 "why": "not paused (empty-state refusal)"})
             return
         # t260915-12 跨项目闸（第二道）：同 pause 口径。
         if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
@@ -239,7 +246,7 @@ class TicketPauseMixin:
             return
         self._paused_at_gate = True
         self._mark(str(self.meta.get("stage") or ""), "paused-waiting",
-                   "段间暂停生效，等 resume signal")
+                   "between-segment pause in effect; waiting for resume signal")
         await workflow.wait_condition(lambda: not self._paused)
         self._paused_at_gate = False
         self._mark(str(self.meta.get("stage") or ""), "resumed",
@@ -286,7 +293,7 @@ class TicketCrossProjectMixin:
             self.timeline.append({"at": self._now_iso(),
                                   "stage": str(self.meta.get("stage") or ""),
                                   "state": "cross-project-recorded",
-                                  "reason": g["why"] or ("跨项目写操作记名（op=%s）" % op)})
+                                  "reason": g["why"] or ("cross-project write recorded (op=%s)" % op)})
             self._log(g["why"] or "跨项目写操作记名（op=%s）" % op)
             self._touch()
         return True
@@ -319,11 +326,16 @@ class TicketCrossProjectMixin:
         reason = str(req.get("reason") or "").strip()
         if not who:
             self.refused.append({"who": who, "want": "close_out_notice",
-                                 "why": "who 必填非空（空/纯空白拒收，零副作用）"})
+                                 "why": "who is required and must be non-empty "
+                                        "(empty/whitespace-only is refused; zero "
+                                        "side effects)"})
             return
         if not reason:
             self.refused.append({"who": who, "want": "close_out_notice",
-                                 "why": "reason 必填非空（收口理由是记名对账锚，空=拒收零副作用）"})
+                                 "why": "reason is required and must be non-empty "
+                                        "(the close-out reason is the named "
+                                        "reconciliation anchor; empty = refused "
+                                        "with zero side effects)"})
             return
         if not self._cross_project_gate(str(req.get("caller_project") or ""),
                                         str(req.get("cross_project_note") or ""),
@@ -339,10 +351,11 @@ class TicketCrossProjectMixin:
         meta["stage_state"] = "awaiting"
         meta["blocked_reason"] = ""
         meta["blocked_detail"] = None
-        self._log("人工记名收口（close_out）：%s——原状态 stage=%s state=%s（who=%s，at=%s）"
+        self._log("named close-out (close_out): %s — previous state stage=%s "
+                  "state=%s (who=%s, at=%s)"
                   % (reason, was_stage or "（无）", was_state or "（无）", who, at))
         self._mark(was_stage or "close_out", "closed",
-                   "人工记名收口（工作已完成）：%s" % reason)
+                   "named close-out (work already done): %s" % reason)
         self._touch()
 
     # ---------- t260922-10：记名清场信号（cancel 前置留痕，先留痕后终结） ----------
@@ -373,11 +386,16 @@ class TicketCrossProjectMixin:
         reason = str(req.get("reason") or "").strip()
         if not who:
             self.refused.append({"who": who, "want": "cancel_notice",
-                                 "why": "who 必填非空（空/纯空白拒收，零副作用）"})
+                                 "why": "who is required and must be non-empty "
+                                        "(empty/whitespace-only is refused; zero "
+                                        "side effects)"})
             return
         if not reason:
             self.refused.append({"who": who, "want": "cancel_notice",
-                                 "why": "reason 必填非空（清场理由是记名对账锚，空=拒收零副作用）"})
+                                 "why": "reason is required and must be non-empty "
+                                        "(the cancel reason is the named "
+                                        "reconciliation anchor; empty = refused "
+                                        "with zero side effects)"})
             return
         # 跨项目闸第二道（与 pause/sign 同口径）：refuse→已落 refused/log 点名，False
         # 即 return；allow_record→cross_project_uses+timeline+log 已落（by/reason 原文）。
@@ -390,7 +408,7 @@ class TicketCrossProjectMixin:
         self.timeline.append({"at": self._now_iso(),
                               "stage": str(self.meta.get("stage") or ""),
                               "state": "cancel-noticed",
-                              "reason": "%s 请求清场：%s" % (who, reason)})
+                              "reason": "%s requests cleanup: %s" % (who, reason)})
         self._touch()
 
 
@@ -754,7 +772,7 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             "temporal_engine_version": self.engine_version,
             "engine": ENGINE_V2,
             "log": [{"ts": self._now_epoch(), "status": "dispatched",
-                     "note": "工单创建（v2 模版即代码：%s → %s，stage=%s）"
+                     "note": "ticket created (v2 template-as-code: %s -> %s, stage=%s)"
                              % (inp.template_id, type(self).__name__, first.id)}],
         }
         self._gate_overrides = dict(inp.gate_overrides or {})
@@ -890,7 +908,7 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
         self.meta["stage_state"] = "awaiting-human"
         self._touch()
         self._log("人门挂起（%s），等 sign signal；%s" % (st.id, prep.note or "审查上下文已备妥"))
-        self._mark(st.id, "awaiting-human", "等人签字：sign(gate=%s)" % st.id)
+        self._mark(st.id, "awaiting-human", "awaiting signature: sign(gate=%s)" % st.id)
         await workflow.wait_condition(
             lambda: (st.id in self._sigs) or (self._rework is not None))
         if self._rework is not None:
@@ -900,16 +918,17 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
                                   "note": sig.note, "at": self._now_iso()}
         if sig.decision == "approve":
             self._finish_stage(st, by=sig.who,
-                               evidence="人门签字：%s（%s，经 Temporal signal）"
+                               evidence="human-gate signature: %s (%s, via Temporal "
+                                        "signal)"
                                         % (sig.note, sig.who))
-            self._handoff(st, "人门签字通过（签字人 %s：%s）" % (sig.who, sig.note))
+            self._handoff(st, "human-gate signature approved (signer %s: %s)" % (sig.who, sig.note))
             self._log("sign approve: %s 放行（%s）" % (st.id, sig.who))
             return "next"
         # reject = send-back: default target is revision_to / the previous stage
         target = st.revision_to or (self.STAGES[idx - 1].id if idx > 0 else "")
         self._rework = ReworkRequest(
             who=sig.who, target_stage=target,
-            note="人在 %s 打回：%s（签字人 %s）" % (st.id, sig.note, sig.who))
+            note="human sent back %s: %s (signer %s)" % (st.id, sig.note, sig.who))
         return "rework"
 
     # ---------- Bookkeeping: checks/handoff ----------
@@ -947,11 +966,11 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             self.meta["revision_count"] = int(self.meta.get("revision_count") or 0) + 1
             if self.meta["revision_count"] > self.REVISION_LIMIT:
                 target = self.REVISION_OVERFLOW or target
-                extra = "（修订 %d 轮超限，回 %s）" % (self.meta["revision_count"], target)
+                extra = "(revision round %d over limit, back to %s)" % (self.meta["revision_count"], target)
         tidx = self._stage_idx(target)
         if tidx < 0:
             self.refused.append({"who": req.who, "want": "rework(%s)" % target,
-                                 "why": "目标段不在本模版 stage 链中"})
+                                 "why": "target stage is not in this template's stage chain"})
             self._log("rework 拒绝：目标段 %r 不存在（%s）" % (target, req.who))
             return cur_idx
         tdef = self.STAGES[tidx]
@@ -1126,7 +1145,9 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
         # 人门族）无授权面——显式拒收（误投不得被当作普通人门签字按 approve 放行）。
         if getattr(sig, "authorize", None) is not None:
             self.refused.append({"who": sig.who, "want": "sign(authorize)",
-                                 "why": "本模板无人授权面，authorize 载荷拒收（不落签字）"})
+                                 "why": "this template has no authorization face; "
+                                        "authorize payload refused (no signature "
+                                        "recorded)"})
             return
         # t260915-12 跨项目闸（第二道）：不符无旗=refused 不落签字；哨兵/旗=记名放行。
         if not self._cross_project_gate(str(getattr(sig, "caller_project", "") or ""),
@@ -1137,11 +1158,12 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
         st = self.STAGES[self._stage_idx(stage)] if self._stage_idx(stage) >= 0 else None
         if not (st and st.exit == "human"):
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
-                                 "why": "当前段 %s 非人门，签字无效" % stage})
+                                 "why": "current stage %s is not a human gate; "
+                                        "signature invalid" % stage})
             return
         if sig.gate and sig.gate != stage:
             self.refused.append({"who": sig.who, "want": "sign(%s)" % sig.gate,
-                                 "why": "gate 与当前等待段 %s 不符" % stage})
+                                 "why": "gate does not match the currently waiting stage %s" % stage})
             return
         self._sigs[stage] = sig
 
@@ -1164,7 +1186,7 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
-             "reason": "%s 请求重跑（第 %d 次）" % (who, self._retry_token)})
+             "reason": "%s requests rerun (attempt %d)" % (who, self._retry_token)})
 
     # ---------- update: status maintenance (external protocol same name and payload as the old class) ----------
     @workflow.update

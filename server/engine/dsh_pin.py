@@ -134,7 +134,7 @@ def probe_dsh_version(cmd0: str, timeout: float = PROBE_TIMEOUT_DEFAULT_SEC,
             stdin=subprocess.DEVNULL, env=full_env, start_new_session=True)
     except OSError as e:
         return {"version": None, "state": "error",
-                "detail": "起不了 %s --version：%s" % (cmd0, e)}
+                "detail": "cannot start %s --version: %s" % (cmd0, e)}
     killed = False
     try:
         out, _ = proc.communicate(timeout=timeout)
@@ -142,22 +142,22 @@ def probe_dsh_version(cmd0: str, timeout: float = PROBE_TIMEOUT_DEFAULT_SEC,
         _kill_proc_group(proc)
         killed = True
         return {"version": None, "state": "error",
-                "detail": "%s --version 超时（>%ss），进程组已收割" % (cmd0, timeout)}
+                "detail": "%s --version timed out (>%ss), process group reaped" % (cmd0, timeout)}
     except BaseException:
         _kill_proc_group(proc)
         raise
     text = (out or b"").decode("utf-8", "replace").strip()
     if proc.returncode != 0:
         return {"version": None, "state": "error",
-                "detail": "%s --version 退出码 %s，输出=%r" % (cmd0, proc.returncode, text[:200])}
+                "detail": "%s --version exit code %s, output=%r" % (cmd0, proc.returncode, text[:200])}
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if len(lines) != 1 or not _VERSION_RE.match(lines[0]):
         return {"version": None, "state": "error",
-                "detail": "%s --version 输出非单行版本样（%d 行）：%r" % (cmd0, len(lines), text[:200])}
+                "detail": "%s --version output is not a single version-like line (%d lines): %r" % (cmd0, len(lines), text[:200])}
     if killed:  # pragma: no cover - 防御位，communicate 正常返回时不会置位
-        return {"version": None, "state": "error", "detail": "进程被收割，输出不可信"}
+        return {"version": None, "state": "error", "detail": "process reaped, output untrusted"}
     return {"version": lines[0], "state": "ok",
-            "detail": "%s 实证 %s" % (cmd0, lines[0])}
+            "detail": "%s verified %s" % (cmd0, lines[0])}
 
 
 def _kill_proc_group(proc: subprocess.Popen) -> None:
@@ -184,14 +184,16 @@ def image_tag_version(image: str) -> Dict[str, Any]:
     m = _IMAGE_TAG_RE.match(image or "")
     if not m:
         return {"version": None, "state": "unknown",
-                "detail": "镜像 tag %r 不含 dsh-<version>-s<seq> 约定，无法从 tag 判版"
-                          "（tag-derived 非实证；容器内实测见 tri_face 自检，t260921-14）" % image}
+                "detail": "image tag %r does not follow the dsh-<version>-s<seq> convention, "
+                          "version cannot be derived from the tag (tag-derived is not proof; "
+                          "in-container measurement is covered by the tri-face self-check, t260921-14)" % image}
     ver = m.group(1)
     if not _VERSION_RE.match(ver):
         return {"version": None, "state": "unknown",
-                "detail": "镜像 tag %r 提取段 %r 非版本样" % (image, ver)}
+                "detail": "image tag %r extracted segment %r is not version-like" % (image, ver)}
     return {"version": ver, "state": "ok",
-            "detail": "镜像 tag 提取 %s（tag-derived 非实证；容器内实测由三面自检承担，t260921-14）" % ver}
+            "detail": "image tag extracted %s (tag-derived is not proof; in-container measurement "
+                      "is covered by the tri-face self-check, t260921-14)" % ver}
 
 
 def expected_state_of(version: Optional[str], env: Optional[Dict[str, str]] = None) -> str:

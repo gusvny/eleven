@@ -111,7 +111,7 @@ def test_resolve_normal_and_longest_prefix(multirepo):
 
 def test_resolve_escape_rejected(multirepo):
     root, _, _ = multirepo
-    with pytest.raises(ValueError, match="逃逸"):
+    with pytest.raises(ValueError, match="escape the project root"):
         shared.resolve_repos_for_paths(root, ["../escape.md"])
 
 
@@ -124,7 +124,7 @@ def test_resolve_absolute_rejected(multirepo):
 def test_resolve_nested_repo_rejected_named(multirepo):
     root, a, _ = multirepo
     _init_repo(a / "nested")
-    with pytest.raises(ValueError, match="嵌套"):
+    with pytest.raises(ValueError, match="nested repo"):
         shared.resolve_repos_for_paths(root, ["repo_a/nested/n.txt"])
 
 
@@ -137,7 +137,7 @@ def test_resolve_malformed_entries_rejected(multirepo):
 
 def test_resolve_empty_repo_set_rejected():
     empty = mkdtemp_reclaimed("t260907-06-ut-norepo-")
-    with pytest.raises(ValueError, match="未发现任何 git 仓"):
+    with pytest.raises(ValueError, match="no git repo found under"):
         shared.resolve_repos_for_paths(empty, ["x.py"])
 
 
@@ -262,7 +262,7 @@ def test_gate_error_repo_worktrees_shapes():
     dup = dict(base_ws, repo_worktrees=[
         {"repo": "a", "name": "a", "branch": "lane/t1-x"},
         {"repo": "b", "name": "b", "branch": "lane/t1-x"}])
-    assert "碰撞" in shared.lane_workspace_gate_error(dict(meta, workspace=dup))
+    assert "branch name collision" in shared.lane_workspace_gate_error(dict(meta, workspace=dup))
     # 无 repo_worktrees 的单仓票不受影响
     plain = dict(meta, workspace=base_ws)
     assert shared.lane_workspace_gate_error(plain) == ""
@@ -326,12 +326,12 @@ def test_resolve_mixed_root_and_children_paths(mixedrepo):
 def test_resolve_mixed_unowned_and_nested_rejected(mixedrepo):
     root, a, _ = mixedrepo
     _init_repo(root / "repo_a" / "nested")  # 子仓内的仓中仓
-    with pytest.raises(ValueError, match="嵌套"):
+    with pytest.raises(ValueError, match="nested repo"):
         shared.resolve_repos_for_paths(root, ["repo_a/nested/n.txt"])
     # 无主路径（不在任何仓内——根仓与子仓之外不存在，逃逸/绝对路径仍拒）
     with pytest.raises(ValueError):
         shared.resolve_repos_for_paths(root, ["/abs/x"])
-    with pytest.raises(ValueError, match="逃逸"):
+    with pytest.raises(ValueError, match="escape the project root"):
         shared.resolve_repos_for_paths(root, ["../x"])
 
 

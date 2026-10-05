@@ -119,8 +119,8 @@ async def leg1_stub_knobs_to_activity_boundary(tmp):
           names == ["pytest-engine", "lint"], res.handover_runs)
     dropped = res.handover_dropped or []
     check("子用例1：畸形条目逐条记名不静默丢（空白 cmd + 非对象）",
-          any("条目2" in d and "name/cmd" in d for d in dropped)
-          and any("非对象" in d for d in dropped),
+          any("item2" in d and "name/cmd" in d for d in dropped)
+          and any("not an object" in d for d in dropped),
           dropped)
     try:
         raw = json.loads(Path(rf).read_text("utf-8"))

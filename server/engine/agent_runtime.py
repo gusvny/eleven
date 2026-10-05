@@ -146,7 +146,7 @@ def probe_image_dsh_version(image: str, docker_bin_override: Optional[str] = Non
     except OSError as e:
         _force_remove()
         return {"version": None, "state": "error",
-                "detail": "起不了 docker run（镜像=%s）：%s" % (image, e)}
+                "detail": "cannot start docker run (image=%s): %s" % (image, e)}
     try:
         out, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -163,7 +163,8 @@ def probe_image_dsh_version(image: str, docker_bin_override: Optional[str] = Non
             pass
         _force_remove()
         return {"version": None, "state": "error",
-                "detail": "容器内 dsh --version 超时（>%ss，镜像=%s），进程组已收割+容器按名强拆"
+                "detail": "in-container dsh --version timed out (>%ss, image=%s), "
+                          "process group reaped + container force-removed by name"
                           % (timeout, image)}
     except BaseException:
         _force_remove()
@@ -171,15 +172,15 @@ def probe_image_dsh_version(image: str, docker_bin_override: Optional[str] = Non
     text = (out or b"").decode("utf-8", "replace").strip()
     if proc.returncode != 0:
         return {"version": None, "state": "error",
-                "detail": "容器内 dsh --version 退出码 %s（镜像=%s），输出=%r"
+                "detail": "in-container dsh --version exit code %s (image=%s), output=%r"
                           % (proc.returncode, image, text[:200])}
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if len(lines) != 1 or not _VERSION_LIKE_RE.match(lines[0]):
         return {"version": None, "state": "error",
-                "detail": "容器内 dsh --version 输出非单行版本样（%d 行，镜像=%s）：%r"
+                "detail": "in-container dsh --version output is not a single version-like line (%d lines, image=%s): %r"
                           % (len(lines), image, text[:200])}
     return {"version": lines[0], "state": "ok",
-            "detail": "容器内实测 %s（镜像=%s）" % (lines[0], image)}
+            "detail": "measured in container %s (image=%s)" % (lines[0], image)}
 
 
 def sandbox_pin_yaml() -> str:

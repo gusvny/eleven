@@ -61,7 +61,7 @@ def make_finding(scan: str, severity: str, subject: str, evidence: str,
     from inspection_scan import SEVERITY_ORDER, finding_id  # 懒 import：形状单点，不在本模块重造 id
 
     if severity not in SEVERITY_ORDER:
-        raise ValueError("未登记严重度：%r" % severity)
+        raise ValueError("unregistered severity: %r" % severity)
     return {"id": finding_id(scan, subject), "scan": scan, "severity": severity,
             "subject": subject, "evidence": evidence, "suggestion": suggestion,
             "suggest": suggest}

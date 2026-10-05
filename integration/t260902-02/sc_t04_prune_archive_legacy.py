@@ -166,7 +166,7 @@ def main():
             {"execute": True, "timeout_sec": 0.2},
             entries=[{"id": "t04-archived", "sa_project": "suyou", "close_ts": 1}],
             deleter=slow_deleter))
-        ok(r2["result"]["failed"] and "超时" in r2["result"]["failed"][0]["why"],
+        ok(r2["result"]["failed"] and "timed out" in r2["result"]["failed"][0]["why"],
            "deleter 超时 → wait_for 回收计入 failed")
         r3 = asyncio.run(client.cmd_ticket_prune(
             {"execute": True}, entries=list(entries2), deleter=deleter))
@@ -216,7 +216,7 @@ def main():
             encoding="utf-8"))
         ok(m1["legacy"] is True and m1["files"] == [] and m1["schema"] == "v1",
            "legacy manifest：schema v1 + files 空")
-        ok("不可恢复" in (m1.get("reason") or ""), "legacy reason 明牌")
+        ok("unrecoverable" in (m1.get("reason") or ""), "legacy reason 明牌")
         ok(m1["meta"].get("ticket") == "t04-old-1", "meta 快照来自 result_of")
         m2 = json.loads((Path(ROOT) / "suyou/data/tickets/t04-old-2/archive.json").read_text(
             encoding="utf-8"))

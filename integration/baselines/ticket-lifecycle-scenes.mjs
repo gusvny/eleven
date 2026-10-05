@@ -844,7 +844,7 @@ export async function sceneD(t, api, sdkPython, fixture) {
     if (!blocked) return
     const logs = (blocked.meta?.log || []).map(l => l.note).join('｜')
     t.ok(blocked.stage === 'arbitrate', 'blocked at arbitrate (stage preserved)')
-    t.ok(logs.includes('缺 verdict= 标记'), 'blocked note names the missing verdict= marker')
+    t.ok(logs.includes('times missing verdict= marker'), 'blocked note names the missing verdict= marker')
     t.ok((blocked.timeline || []).filter(e => e.stage === 'arbitrate').length >= 3,
       'three arbitrate format rounds in the timeline (round limit reached)')
     // Revive: rework -> implement; seed the next arbitrate when the manifest re-runs

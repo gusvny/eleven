@@ -404,11 +404,11 @@ def test_verdicts_file_roundtrip_and_malformed(tmp_path: Path):
     bad = tmp_path / "bad.json"
     bad.write_text("nonsense{", encoding="utf-8")
     assert ins.read_verdicts_file(bad)["error"]
-    with pytest.raises(ValueError, match="不覆盖重建"):
+    with pytest.raises(ValueError, match="no overwrite rebuild"):
         ins.append_verdict_entry(bad, {"finding_id": "c", "verdict": "doubt", "who": "x"})
     bad2 = tmp_path / "bad2.json"
     bad2.write_text('{"entries": "x"}', encoding="utf-8")
-    with pytest.raises(ValueError, match="形状坏"):
+    with pytest.raises(ValueError, match=r"malformed \(missing entries list\)"):
         ins.append_verdict_entry(bad2, {})
 
 
@@ -437,7 +437,7 @@ def test_normalize_verdict_tokens_and_aliases():
     assert ins.normalize_verdict(" 假报 ") == "false-positive"
     assert ins.normalize_verdict("待修") == "to-fix"
     assert ins.normalize_verdict("存疑") == "doubt"
-    with pytest.raises(ValueError, match="越域"):
+    with pytest.raises(ValueError, match="out of range"):
         ins.normalize_verdict("maybe")
 
 
@@ -476,7 +476,7 @@ def test_prompt_contains_contract_and_budget():
 
 
 def test_prompt_unknown_face_fails_closed():
-    with pytest.raises(ValueError, match="未接线"):
+    with pytest.raises(ValueError, match="not wired"):
         ins.build_inspect_prompt("i", "p", "typo", "b", "h", 10)
 
 

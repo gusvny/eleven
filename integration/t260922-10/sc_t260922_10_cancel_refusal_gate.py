@@ -195,7 +195,7 @@ def main():
     check('R12 回执 identity_class=undeclared 如实记名（身份键在 client 面顶层）',
           rc12.get('identity_class') == 'undeclared', '键=%r' % (rc12.get('identity_class'),))
     check('R12 回执零「列不出」谎报 + 诚实 notice 在场（新入口真盖章/真记名）',
-          '列不出' not in blob12 and '记名放行' in str(rc12.get('cross_project_notice') or ''))
+          '列不出' not in blob12 and 'record policy' in str(rc12.get('cross_project_notice') or ''))
 
     # ---- R13 CLI 子进程：reason 空 → 退出非零+一行 JSON+被拒留痕 ----
     log13 = fx.tmp_admin_log()

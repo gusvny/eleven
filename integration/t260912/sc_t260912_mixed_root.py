@@ -113,7 +113,7 @@ else:
               "未拒收（嵌套仓 fail-closed 原样语义失守=错仓落账前奏）")
     except ValueError as e:
         check("M1e 真嵌套仓（已登记仓内部套仓）路径拒收点名",
-              "集合外嵌套仓" in str(e), "e=%s" % e)
+              "out-of-set nested repo" in str(e), "e=%s" % e)
     except Exception as e:
         check("M1e 集合外嵌套仓（根仓名下二层）路径拒收", False,
               "异常类型错: %s: %s" % (type(e).__name__, e))
@@ -144,7 +144,7 @@ else:
         {"repo": "repo_a", "name": "repo_a", "branch": "lane/%s-root" % w_rt},
     ]
     meta_dup = dict(meta_ok, workspace=ws_dup)
-    check("M2c 闸：分支碰撞照旧点名拒收", "碰撞" in gate(meta_dup), "gate=%r" % (gate(meta_dup),))
+    check("M2c 闸：分支碰撞照旧点名拒收", "collision" in gate(meta_dup), "gate=%r" % (gate(meta_dup),))
 
 # ---------- temporalio 面 M3-M5：prepare 三态/复用幂等/settle 逐树 ----------
 if not temporalio_available():

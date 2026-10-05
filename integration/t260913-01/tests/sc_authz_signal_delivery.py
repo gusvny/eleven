@@ -362,7 +362,7 @@ def main():
         check(doc.get("ok") is True, "负锁① 过期授权送达（回执 ok；权威判定在 workflow intake）")
         outcome, s, entry = poll_negative(
             py, env, worker, os.path.join(tmp, "worker.log"), base1,
-            lambda r: "已过期" in str(r.get("why") or ""))
+            lambda r: "already passed" in str(r.get("why") or ""))
         check(outcome == "hit",
               "负锁① 拒收点名「已过期」（outcome=%s；refused尾=%s）"
               % (outcome, json.dumps(refused_items(s)[-1:], ensure_ascii=False)[:220]))
@@ -414,8 +414,8 @@ def main():
         outcome, s, entry = poll_negative(
             py, env, worker, os.path.join(tmp, "worker.log"), base4,
             lambda r: (str(r.get("want") or "") == "sign(authorize)"
-                       and "载荷解析失败" in str(r.get("why") or "")
-                       and "非人审等待中" not in str(r.get("why") or "")))
+                       and "authorize payload parse failed" in str(r.get("why") or "")
+                       and "not awaiting human review" not in str(r.get("why") or "")))
         check(outcome == "hit",
               "负锁④ marker 在场而载荷缺失 → refused 点名「载荷解析失败」且与"
               "「非人审等待中」可辨（outcome=%s；refused尾=%s）——静默回落普通签字=本票事故形态"
@@ -433,7 +433,7 @@ def main():
             py, env, worker, os.path.join(tmp, "worker.log"), base5,
             lambda r: (str(r.get("want") or "") == "sign(authorize)"
                        and bool(str(r.get("why") or "").strip())
-                       and "非人审等待中" not in str(r.get("why") or "")))
+                       and "not awaiting human review" not in str(r.get("why") or "")))
         check(outcome == "hit",
               "负锁⑤ 畸形载荷到 intake 被语义拒收（outcome=%s；want=sign(authorize) why非空；"
               "毒载荷 authorize=123 不用=value_to_type TypeError 会进 workflow task 重试循环）"

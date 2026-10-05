@@ -93,26 +93,26 @@ def test_validate_ok_both_kinds():
 
 
 def test_validate_rejects_malformed():
-    assert "kind 非法" in authz_gates.validate_authorization(_auth(kind="x"), NOW, "t1")
+    assert "invalid kind" in authz_gates.validate_authorization(_auth(kind="x"), NOW, "t1")
     assert authz_gates.validate_authorization(None, NOW, "t1")
-    assert "缺 who" in authz_gates.validate_authorization(_auth(who="  "), NOW, "t1")
-    assert "who 超长" in authz_gates.validate_authorization(
+    assert "missing who" in authz_gates.validate_authorization(_auth(who="  "), NOW, "t1")
+    assert "who too long" in authz_gates.validate_authorization(
         _auth(who="人" * (AUTHZ_WHO_MAX_LEN + 1)), NOW, "t1")
-    assert "缺 reason" in authz_gates.validate_authorization(_auth(reason=" \n "), NOW, "t1")
-    assert "reason 超长" in authz_gates.validate_authorization(
+    assert "missing reason" in authz_gates.validate_authorization(_auth(reason=" \n "), NOW, "t1")
+    assert "reason too long" in authz_gates.validate_authorization(
         _auth(reason="x" * (AUTHZ_REASON_MAX_LEN + 1)), NOW, "t1")
-    assert "scope 空" in authz_gates.validate_authorization(_auth(scope=[]), NOW, "t1")
-    assert "scope 条目超限" in authz_gates.validate_authorization(
+    assert "empty scope" in authz_gates.validate_authorization(_auth(scope=[]), NOW, "t1")
+    assert "too many scope entries" in authz_gates.validate_authorization(
         _auth(scope=["a/b"] * (AUTHZ_SCOPE_MAX_ITEMS + 1)), NOW, "t1")
-    assert "scope 条目超长" in authz_gates.validate_authorization(
+    assert "scope entry too long" in authz_gates.validate_authorization(
         _auth(scope=["a" * (AUTHZ_SCOPE_ITEM_MAX_LEN + 1)]), NOW, "t1")
-    assert "scope 含空白条目" in authz_gates.validate_authorization(
+    assert "scope carries a blank entry" in authz_gates.validate_authorization(
         _auth(scope=["  "]), NOW, "t1")
 
 
 @pytest.mark.parametrize("bad", ["/abs/x", "../x", "a/../../b", "a*b", "a?b", "a\\b", "a[1]"])
 def test_validate_rejects_unsafe_scope(bad):
-    assert "scope 条目非法路径" in authz_gates.validate_authorization(
+    assert "scope entry is not a safe path" in authz_gates.validate_authorization(
         _auth(scope=[bad]), NOW, "t1")
 
 
@@ -122,7 +122,7 @@ def test_validate_rejects_unsafe_scope(bad):
 def test_anti_self_sign(who):
     """反自签红线：五角色名（含大小写/空白变体）与 agent 显示名后缀一律拒收。"""
     err = authz_gates.validate_authorization(_auth(who=who), NOW, "t1")
-    assert "agent 不得自签" in err
+    assert "must not self-authorize" in err
 
 
 @pytest.mark.parametrize("who", ["宿主", "op-local", "张三", "human", "integrations"])
@@ -131,24 +131,24 @@ def test_human_names_pass(who):
 
 
 def test_validate_expires_bounds():
-    assert "expires 缺失或非法" in authz_gates.validate_authorization(
+    assert "expires missing or invalid" in authz_gates.validate_authorization(
         _auth(expires=0), NOW, "t1")
-    assert "已过期" in authz_gates.validate_authorization(_auth(expires=NOW), NOW, "t1")
-    assert "已过期" in authz_gates.validate_authorization(_auth(expires=NOW - 1), NOW, "t1")
+    assert "already passed" in authz_gates.validate_authorization(_auth(expires=NOW), NOW, "t1")
+    assert "already passed" in authz_gates.validate_authorization(_auth(expires=NOW - 1), NOW, "t1")
     assert authz_gates.validate_authorization(
         _auth(expires=NOW + AUTHZ_EXPIRES_MAX_SEC), NOW, "t1") == ""
-    assert "expires 超上限" in authz_gates.validate_authorization(
+    assert "expires over the cap" in authz_gates.validate_authorization(
         _auth(expires=NOW + AUTHZ_EXPIRES_MAX_SEC + 1), NOW, "t1")
 
 
 def test_arbitration_scope_must_be_this_ticket():
     err = authz_gates.validate_authorization(
         _auth(kind=AUTH_ARBITRATION_VERDICT, scope=["t-other"]), NOW, "t1")
-    assert "必须恰为本票票号" in err
+    assert "must be exactly this ticket's id" in err
     err = authz_gates.validate_authorization(
         _auth(kind=AUTH_ARBITRATION_VERDICT, scope=["t1", "t2"]), NOW, "t1")
-    assert "必须恰为本票票号" in err
-    assert "缺本票票号上下文" in authz_gates.validate_authorization(
+    assert "must be exactly this ticket's id" in err
+    assert "is missing this ticket's id context" in authz_gates.validate_authorization(
         _auth(kind=AUTH_ARBITRATION_VERDICT, scope=["t1"]), NOW, "")
 
 
@@ -373,7 +373,7 @@ def test_authorized_passage_note_sanitized():
     passed = [{"path": "verify.yaml", "who": "宿主", "issued": NOW, "reason": long_reason}]
     note = authz_gates.authorized_passage_note(passed)
     assert "\n" not in note and "\r" not in note            # 单行（settle note 以「；」拼接）
-    assert "…（全文见 meta.authorizations）" in note
+    assert "(full text in meta.authorizations)" in note
     assert authz_gates.authorized_passage_note([]) == ""
     assert authz_gates.authorized_passage_note(None) == ""
     keys = shared.parse_authz_used(note)

@@ -149,7 +149,7 @@ def test_a_e2e_exit2_receipt_exempt_and_named(tmp_path, monkeypatch):
     # 计路面：不计轮 + 豁免账 + 留痕（要求①：含「不计入」+ 点名供给面）
     tr, ex, counted, note = asyncio.run(wf._tests_round_account(3, 0, ir))
     assert (tr, ex, counted) == (3, 1, False)
-    assert "不计入" in note and "供给" in note and shared.SUPPLY_FAIL_SIG in note
+    assert "not counted as a tests-fault round" in note and "supply-side" in note and shared.SUPPLY_FAIL_SIG in note
     # 原始证据随留痕上台面：留痕带 error 前缀截断窗（既有口径 [:120]），
     # 窗内是 STAGE_WAIT 点名头（真实负载），完整 ENV_FAIL 尾在 err 全文已断言
     assert "仍在等 docker daemon" in note
@@ -166,7 +166,7 @@ def test_a_timeout_state_signature_and_note():
     wf = _devlane_wf()
     tr, ex, counted, note = asyncio.run(wf._tests_round_account(0, 0, ir))
     assert (tr, ex, counted) == (0, 1, False)
-    assert "不计入" in note and shared.SUPPLY_TIMEOUT_SIG in note
+    assert "not counted as a tests-fault round" in note and shared.SUPPLY_TIMEOUT_SIG in note
 
 
 def test_a_signature_gate_exit_drift_lock():
@@ -219,8 +219,8 @@ def test_a_supply_note_single_writer_and_malformed():
     # 畸形 error 不抛、保守可读（消费外部输入纪律）
     for bad in (None, "", 3.5, b"supply"):
         n = supply_note(bad)
-        assert "不计入" in n and "供给" in n
-    assert supply_note("").endswith("：<空>）——不计入 tests-fault 轮次")
+        assert "not counted as a tests-fault round" in n and "supply-side" in n
+    assert supply_note("").endswith("<empty>) — not counted as a tests-fault round")
     long_err = (shared.SUPPLY_FAIL_SIG + ": supply assembly failed (need=x, exit=2): "
                 + "x" * 300 + " — supply-side red, named, not silent " + shared.SUPPLY_SIDE_SIG)
     assert len(supply_note(long_err)) < len(long_err)
@@ -448,7 +448,7 @@ def test_e_exempt_cap_cover_family_untouched():
     """豁免账封面家族不回退：供给轮吃豁免上限封面（防活循环上限仍在）。"""
     from shared import MAX_TESTS_EXEMPT_ROUNDS, tests_exempt_cap_blocked_text
     cover = tests_exempt_cap_blocked_text(MAX_TESTS_EXEMPT_ROUNDS + 1)
-    assert "超限" in cover
+    assert "consecutive-exemption over cap" in cover
     for kw in ("authorize", "ruling", "rework", "pause"):
         assert kw in cover, kw
 

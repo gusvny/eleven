@@ -88,7 +88,7 @@ def test_verdict_query_failed_sentinel_and_malformed():
 
 def test_global_gate_all_zero_names_repos():
     err = shared.multirepo_zero_commit_error({"a": 0, "b": 0}, False)
-    assert "a" in err and "b" in err and "整票零 commit" in err
+    assert "a" in err and "b" in err and "zero commits across the whole ticket" in err
     assert "allow_empty_write_set" in err  # 出路一：确无改动走建票声明
 
 
@@ -123,7 +123,7 @@ def test_item_green_keeps_old_shape(tmp_path):
     _git("commit", "-aqm", "lane work", cwd=repo)
     item, n = aa._lane_commits_check_item("main", "lane/x", repo, repo)
     assert item["green"] is True and n == 1
-    assert "1 个 commit" in item["detail"]
+    assert "1 commit(s)" in item["detail"]
     # 旧契约：绿项只带 id，不带 reason_code（has_commits 路径零回归）
     assert "reason_code" not in item
 
@@ -134,7 +134,7 @@ def test_item_amber_names_no_change(tmp_path):
     item, n = aa._lane_commits_check_item("main", "lane/x", repo, repo)
     assert item["green"] is True and n == 0
     assert item["reason_code"] == "no_changes_no_diff"
-    assert "零改动确认" in item["item"] and "无需改动" in item["detail"]
+    assert "zero-change confirmed" in item["item"] and "no changes genuinely needed" in item["detail"]
 
 
 def test_item_red_uncommitted_face_names_not_landed(tmp_path):
@@ -159,7 +159,7 @@ def test_item_red_committed_face_names_position_anomaly(tmp_path):
     item, n = aa._lane_commits_check_item("main", "lane/x", repo, repo)
     assert item["green"] is False and n == 0
     assert item["reason_code"] == "no_commits"
-    assert "位点异常" in item["next_action"]
+    assert "position abnormal" in item["next_action"]
     assert "树与 base 有差异" in item["detail"]
 
 
@@ -286,7 +286,7 @@ def test_merge_check_all_repos_zero_commit_global_red(tmp_path, monkeypatch):
                   _scope_stub([_amber_item(), _rehearsal_item()], lane_commits=0))
     assert res.green is False and res.conflict is False
     gate = [c for c in res.checks if c.get("id") == "all_repos_zero_commits"]
-    assert len(gate) == 1 and "整票零 commit" in gate[0]["detail"]
+    assert len(gate) == 1 and "zero commits across the whole ticket" in gate[0]["detail"]
     assert gate[0]["reason_code"] == "all_repos_zero_commits"
     assert "allow_empty_write_set" in gate[0]["next_action"]
     assert res.checks[-1]["id"] == "merge_rehearsal"

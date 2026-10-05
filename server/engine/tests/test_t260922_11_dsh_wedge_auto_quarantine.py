@@ -324,7 +324,7 @@ def test_wedge_both_ids_missing_warn_only(tmp_path):
     f = dsh / "sessions" / "lane1" / SID / "session.jsonl.zstd"
     log = "corrupt Zstandard session log: complete frame contains a torn JSONL record\n"
     note = _wedge_quarantine_once(dsh, "", log, "t", "s", 0, 0)
-    assert note is not None and "未隔离" in note
+    assert note is not None and "not quarantined" in note
     assert f.is_file()
     assert not _qdir(tmp_path).exists()         # 未隔离也不留假事件
 
@@ -352,7 +352,7 @@ def test_wedge_move_failed_recorded_not_claimed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(aa.shutil, "move", _boom)
     note = _wedge_quarantine_once(dsh, SID, INCIDENT_LOG, "t", "s", 0, 0)
-    assert note is not None and "move-failed" in note and "未隔离" in note
+    assert note is not None and "move-failed" in note and "NOT quarantined" in note
     assert f.is_file()                          # 原位仍在=隔离未发生
     rec = json.loads(sorted(_qdir(tmp_path).glob(
         "session-wedge-t-s-*.json"))[0].read_text("utf-8"))

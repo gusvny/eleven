@@ -64,9 +64,9 @@ def _cap_s(env_key: str, default_s: float) -> float:
     try:
         val = float(raw)
     except ValueError:
-        raise UiStageError("usage 红：%s 必须是秒数（浮点），得 %r" % (env_key, raw))
+        raise UiStageError("usage red: %s must be a number of seconds (float), got %r" % (env_key, raw))
     if not math.isfinite(val) or val <= 0:   # inf/nan/零/负=usage 红（畸形不静默）
-        raise UiStageError("usage 红：%s 必须为正有限秒数，得 %r" % (env_key, raw))
+        raise UiStageError("usage red: %s must be a positive finite number of seconds, got %r" % (env_key, raw))
     return val
 
 
@@ -97,7 +97,7 @@ def capture_stage_project(ticket: str, gen: int = 0) -> str:
     `^[a-z][a-z0-9-]{1,40}$` 闸；归一后不合法=UiStageError（票号全空等畸形）。"""
     raw = re.sub(r"[^a-z0-9-]+", "-", str(ticket).strip().lower()).strip("-")
     if not raw:
-        raise UiStageError("usage 红：ticket 归一后为空（得 %r）——无法映射 project 名"
+        raise UiStageError("usage red: ticket normalizes to empty (got %r) — cannot map the project name"
                            % ticket)
     name = "ui-shot-%s-g%d" % (raw, max(0, int(gen)))
     if len(name) > 45:
@@ -105,7 +105,7 @@ def capture_stage_project(ticket: str, gen: int = 0) -> str:
         h = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
         name = "ui-shot-%s-g%d" % (h, max(0, int(gen)))
     if not _PROJECT_RE.match(name):
-        raise UiStageError("usage 红：project 名 %r 不过 stage 闸（正则 %s）"
+        raise UiStageError("usage red: project name %r fails the stage gate (regex %s)"
                            % (name, _PROJECT_RE.pattern))
     return name
 
@@ -115,7 +115,8 @@ def capture_stage_project(ticket: str, gen: int = 0) -> str:
 # service exposes the console port (capture-lane reads st.ports.console,
 # ns_acquire reads ports.temporal; one contract repo-wide). Two incidents
 # (260929, 261005): the validator looked up ports.dsh 1:1 by service name and
-# red-flagged a valid full-bench receipt ("up 回执缺 ports.dsh"). Fix the  # copy-lang-allow:data — quotes the legacy red text verbatim
+# red-flagged a valid full-bench receipt ("up receipt missing ports.dsh" — the
+# legacy red text, paraphrased in English so this line carries no marker). Fix the
 # consumer mapping; the producer contract stands. Unknown service names keep
 # the 1:1 mapping (fail-closed: they demand their own port key).
 SERVICE_PORT_KEY = {"temporal": "temporal", "dsh": "console"}
@@ -248,7 +249,7 @@ def up_stage(project: str, *, repo_root: Optional[str] = None,
     自身的起台失败清理分支负责就地拆；外部击杀的残面交 down_stage 幂等补刀
     + sweep crit_iii 兜底——三层都响亮，不静默）。"""
     if not project or not str(project).strip():
-        raise UiStageError("usage 红：project 为空")
+        raise UiStageError("usage red: project is empty")
     run = runner or _default_runner
     cap = float(up_cap) if up_cap is not None else up_cap_s()
     cli = stage_cli_path(repo_root)
@@ -302,7 +303,7 @@ def down_stage(project: str, *, repo_root: Optional[str] = None,
     detail = ""
     if not project or not str(project).strip():
         log.error("[down_stage] project 为空——无从拆（usage 红不静默）")
-        return {"ok": False, "detail": "usage 红：project 为空"}
+        return {"ok": False, "detail": "usage red: project is empty"}
     run = runner or _default_runner
     cap = float(down_cap) if down_cap is not None else down_cap_s()
     try:
@@ -315,7 +316,7 @@ def down_stage(project: str, *, repo_root: Optional[str] = None,
                            cap, {})
     except UiStageEnvError as e:   # runner 超上限被杀——拆台未证实完成，响亮
         log.error("[down_stage] 拆台超上限 %ss：%s", cap, e)
-        return {"ok": False, "detail": "拆台超上限 %ss：%s" % (cap, e)}
+        return {"ok": False, "detail": "teardown exceeded cap %ss: %s" % (cap, e)}
     if rc == 0:
         # Stage down: the container bind mount no longer reads; reclaim the host
         # registry dir here (t261005-16).
@@ -401,7 +402,7 @@ async def run_capture_stage(*, project: str, services: str = "temporal",
             proc.kill()
             await proc.wait()
             capture_rc = None
-            capture_out, capture_err = "", "capture 超时（>%ss），进程已 kill" % capture_timeout_s
+            capture_out, capture_err = "", "capture timed out (>%ss), process killed" % capture_timeout_s
         down = await loop.run_in_executor(
             None, lambda: down_stage(project, repo_root=repo_root, down_cap=down_cap))
         reclaimed = bool(down.get("ok"))
@@ -410,18 +411,18 @@ async def run_capture_stage(*, project: str, services: str = "temporal",
             log.error("[run_capture_stage] %s", note)
         if capture_rc is None:
             return {"ok": False, "timed_out": True, "reclaimed": reclaimed,
-                    "detail": "%s capture 超时（>%ss），进程已 kill；台已拆（终态回收）"
+                    "detail": "%s capture timed out (>%ss), process killed; stage torn down (final-state reclaim)"
                               % (project, capture_timeout_s),
                     "project": project, "capture_rc": None,
                     "capture_out": capture_out, "capture_err": capture_err,
                     "up": receipt, "note": note}
         if capture_rc == 0:
             return {"ok": True, "timed_out": False, "reclaimed": reclaimed,
-                    "detail": "capture 成功；台已拆（终态回收）", "project": project,
+                    "detail": "capture succeeded; stage torn down (final-state reclaim)", "project": project,
                     "capture_rc": 0, "capture_out": capture_out,
                     "capture_err": capture_err, "up": receipt, "note": note}
         return {"ok": False, "timed_out": False, "reclaimed": reclaimed,
-                "detail": "%s capture 退出码 %s：%s" % (project, capture_rc,
+                "detail": "%s capture exit code %s: %s" % (project, capture_rc,
                                                         (capture_err or capture_out)[-400:]),
                 "project": project, "capture_rc": capture_rc,
                 "capture_out": capture_out, "capture_err": capture_err,

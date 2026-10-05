@@ -207,6 +207,8 @@ const t5 = await getJson(`${DOC_API}/tree?project=no-such-key-9x&scope=docs`);
 const t5raw = JSON.stringify(t5.body ?? {});
 record('inject/unknown-key-400', t5.status === 400,
   `未知 key → ${t5.status}（期望 400；200=静默回落或忽略键=串仓面，实现落地前红属预期）`);
+// workbench anchor refusal copy (project-anchor.ts) is still Chinese as served;
+// the pinned property is precision — the error names the unknown key verbatim.
 record('inject/unknown-key-reason', t5raw.includes('未知项目'),
   `error 点名未知项目=${t5raw.includes('未知项目')}（报错精确纪律：不伪装「越出」/「不存在」）`);
 record('inject/unknown-key-no-resolved', (t5.body?.resolved ?? null) === null,

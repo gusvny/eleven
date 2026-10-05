@@ -91,7 +91,7 @@ class LoaderTest(unittest.TestCase):
         with _Env(SANDBAR_PROJECTS_DIR=self.tmp):
             _, quarantined = shared.load_projects_registry()
         self.assertEqual(len(quarantined), 1)
-        self.assertIn("目录名不合法", quarantined[0]["error"])
+        self.assertIn("illegal directory name", quarantined[0]["error"])
 
     def test_empty_registry_rejected(self):
         root = os.path.join(self.tmp, "empty-root")
@@ -106,7 +106,7 @@ class LoaderTest(unittest.TestCase):
                     shared.load_projects_registry()
         finally:
             shared.PROJECTS_YAML = real_seed
-        self.assertIn("注册表根目录不存在", str(cm.exception))
+        self.assertIn("registry root directory does not exist", str(cm.exception))
 
     def test_all_quarantined_reports_reasons(self):
         _mk_registry(self.tmp, "alpha", "甲", ["/x"], bad=True)
@@ -114,7 +114,7 @@ class LoaderTest(unittest.TestCase):
             projects, quarantined = shared.load_projects_registry()
             with self.assertRaises(ValueError) as cm:
                 shared.assert_registry_nonempty(projects, quarantined)
-        self.assertIn("全部 1 条被隔离", str(cm.exception))
+        self.assertIn("no usable project entries: all 1 were quarantined", str(cm.exception))
 
     def test_legacy_env_mode(self):
         legacy = os.path.join(self.tmp, "projects.yaml")
@@ -157,7 +157,7 @@ class LookupTest(unittest.TestCase):
         with _Env(SANDBAR_PROJECTS_DIR=self.tmp):
             with self.assertRaises(ValueError) as cm:
                 shared.lookup_project("no-such")
-        self.assertIn("未知项目", str(cm.exception))
+        self.assertIn("unknown project", str(cm.exception))
         self.assertIn("bench-anchor", str(cm.exception))  # 已注册清单指路
 
     def test_quarantined_key_names_reason(self):
@@ -165,14 +165,14 @@ class LookupTest(unittest.TestCase):
         with _Env(SANDBAR_PROJECTS_DIR=self.tmp):
             with self.assertRaises(ValueError) as cm:
                 shared.lookup_project("sick")
-        self.assertIn("已隔离", str(cm.exception))
+        self.assertIn("is quarantined", str(cm.exception))
 
     def test_malformed_keys(self):
         for bad in ("", "UPPER", "带中文", "a" * 50, "sp ace", None):
             with _Env(SANDBAR_PROJECTS_DIR=self.tmp):
                 with self.assertRaises(ValueError) as cm:
                     shared.lookup_project(bad)
-            self.assertIn("不合法", str(cm.exception))
+            self.assertIn("illegal project", str(cm.exception))
 
 
 class CheckPathsTest(unittest.TestCase):
@@ -188,7 +188,7 @@ class CheckPathsTest(unittest.TestCase):
     def test_foreign_absolute_rejected(self):
         with self.assertRaises(ValueError) as cm:
             shared.check_paths_under_project(self.proj, {"path": "/repos/beta/.lane/t1"}, "")
-        self.assertIn("不在项目", str(cm.exception))
+        self.assertIn("is not inside the registered directories", str(cm.exception))
 
     def test_prefix_trick_rejected(self):
         # /repos/alpha2 不是 /repos/alpha 子路径（rstrip+sep 语义）
@@ -265,7 +265,7 @@ class TicketStartGateTest(unittest.TestCase):
     def test_missing_project_rejected(self):
         out = asyncio.run(client.cmd_ticket_start(self._args(project="")))
         self.assertFalse(out.get("ok"))
-        self.assertIn("需要 project", out.get("error", ""))
+        self.assertIn("requires project", out.get("error", ""))
         self.assertIsNone(self.fake.started)
 
     def test_unknown_project_rejected_before_connect(self):
@@ -273,8 +273,8 @@ class TicketStartGateTest(unittest.TestCase):
             out = asyncio.run(client.cmd_ticket_start(self._args(project="ghost")))
         self.assertFalse(out.get("ok"))
         err = out.get("error", "")
-        self.assertIn("未锚定", err)
-        self.assertIn("未知项目", err)
+        self.assertIn("not anchored", err)
+        self.assertIn("unknown project", err)
         self.assertIsNone(self.fake.started)
 
     def test_foreign_workspace_rejected(self):
@@ -282,7 +282,7 @@ class TicketStartGateTest(unittest.TestCase):
             out = asyncio.run(client.cmd_ticket_start(self._args(
                 workspace={"type": "worktree", "path": "/repos/other/.lane/evil"})))
         self.assertFalse(out.get("ok"))
-        self.assertIn("不在项目", out.get("error", ""))
+        self.assertIn("is not inside the registered directories", out.get("error", ""))
         self.assertIsNone(self.fake.started)
 
     def test_explicit_in_project_workspace_ok(self):

@@ -118,7 +118,7 @@ def test_missing_notice_is_a_violation(fake_client):
     bad = out["missing_notice"][0]
     assert bad["id"] == "t260929-31" and bad["last_signal"] == "pause"
     assert "宿主经" in bad["terminate_reason"], "理由串原文必须带出（不实归因要可读）"
-    assert "只读" in out["note"] and "不动任何票" in out["note"]
+    assert "read-only" in out["note"] and "touches no tickets" in out["note"]
 
 
 def test_notice_with_a_different_reason_is_a_mismatch(fake_client):

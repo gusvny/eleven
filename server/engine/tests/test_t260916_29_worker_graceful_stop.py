@@ -163,7 +163,7 @@ def test_classify_negative_ki093_sibling_reap_is_not_worker_termination():
     exc = _activity_error(RuntimeError(
         "headless agent 退出（rc=-9）但未写结果文件 result.json（日志 worker.log）"))
     assert classify_worker_termination(exc) is False
-    assert "活动故障（已重试）" in format_agent_stage_failure("t-x", "implement", exc)
+    assert "activity failure (already retried)" in format_agent_stage_failure("t-x", "implement", exc)
 
 
 def test_classify_malformed_inputs_fail_closed():
@@ -200,25 +200,25 @@ def test_classify_depth_cap_still_finds_shallow_chain():
 def test_format_worker_terminated_names_ticket_stage_gen():
     msg = format_agent_stage_failure("t260916-29", "implement",
                                      _worker_terminated_error(), gen=2)
-    assert "worker 被外部终止（停机/重载）" in msg
-    assert "活动已取消" in msg
+    assert "worker terminated externally (shutdown/reload)" in msg
+    assert "the activity was cancelled" in msg
     assert "t260916-29" in msg and "implement" in msg
-    assert "第 2 次" in msg
+    assert "attempt 2" in msg
 
 
 def test_format_worker_terminated_without_gen():
     msg = format_agent_stage_failure("t-1", "arbitrate", _worker_terminated_error())
-    assert "worker 被外部终止" in msg and "t-1" in msg and "arbitrate" in msg
-    assert "第" not in msg
+    assert "worker terminated externally" in msg and "t-1" in msg and "arbitrate" in msg
+    assert "attempt" not in msg
 
 
 def test_format_legacy_text_unchanged_for_other_failures():
     """改文案不改旧语义：非 worker 停机失败逐字维持旧文案（票面老读者兼容）。"""
-    exc = RuntimeError("headless agent 退出（rc=1）")
+    exc = RuntimeError("headless agent exited (rc=1)")
     assert format_agent_stage_failure("t-1", "create_plan", exc) == \
-        "agent 活动故障（已重试）：RuntimeError: headless agent 退出（rc=1）"
+        "agent activity failure (already retried): RuntimeError: headless agent exited (rc=1)"
     assert format_agent_stage_failure("t-1", "create_plan", None) == \
-        "agent 活动故障（已重试）：NoneType: None"
+        "agent activity failure (already retried): NoneType: None"
 
 
 # ---------- retry_once_on_worker_termination ----------
@@ -456,7 +456,7 @@ def test_blocked_reason_surface_names_worker_termination(monkeypatch):
                                      gen=wf._gen("implement"))
     asyncio.new_event_loop().run_until_complete(wf._blocked("implement", msg))
     reason = wf.meta["blocked_reason"]
-    assert "worker 被外部终止（停机/重载）" in reason
+    assert "worker terminated externally (shutdown/reload)" in reason
     assert "t260916-29" in reason and "implement" in reason
     assert wf.meta["stage_state"] == "blocked"
     # 非 worker 停机失败：blocked_reason 维持旧文案（不误点名）
@@ -466,7 +466,7 @@ def test_blocked_reason_surface_names_worker_termination(monkeypatch):
     asyncio.new_event_loop().run_until_complete(wf2._blocked(
         "implement", format_agent_stage_failure("t-2", "implement",
                                                 RuntimeError("boom"))))
-    assert wf2.meta["blocked_reason"].startswith("agent 活动故障（已重试）：RuntimeError")
+    assert wf2.meta["blocked_reason"].startswith("agent activity failure (already retried): RuntimeError")
 
 
 async def _noop():

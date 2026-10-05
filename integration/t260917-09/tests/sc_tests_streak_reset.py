@@ -102,7 +102,7 @@ def wait_terminal(py, env, tid, worker, wlog, stub_log, fail, budget):
             return None  # 由调用方 wait_worker_alive 点名
         s = query_snapshot(py, env, tid)
         if (s.get("stage") in OVER_LIMIT_STAGES
-                and s.get("stage_state") == "blocked" and "超限" in t09.snap_text(s)):
+                and s.get("stage_state") == "blocked" and "exceed the cap" in t09.snap_text(s)):
             return ("blocked", s)
         if ("仲裁通过" in t09.handoff_text(s)
                 and s.get("stage") in ("merge_check", "merge")):
@@ -159,7 +159,7 @@ def phase_drive(py, env, tid, worker, wlog, stub_log, fail, check):
         check(kind == "blocked" and snap.get("stage_state") == "blocked",
               "相二 恒 tests-fault → 撞上限 blocked（第 7 判决；kind=%s state=%s）"
               % (kind, snap.get("stage_state")))
-        check("超限" in txt, "相二 回执含「超限」（上限语义仍在，非拆上限）")
+        check("exceed the cap" in txt, "相二 回执含超限封据（上限语义仍在，非拆上限）")
         for kw in ("authorize", "rework", "ruling", "pause"):
             check(kw in txt, "相二 超限回执出路关键词 %r 在（要求④出路可执行）" % kw)
         return
@@ -170,9 +170,9 @@ def phase_drive(py, env, tid, worker, wlog, stub_log, fail, check):
           "（kind=%s stage=%s state=%s，arb_rounds=%d；旧累计语义第 8 判决必 blocked）"
           % (kind, snap.get("stage"), snap.get("stage_state"), rounds))
     check("超限" not in ho, "相一 全程无超限封（handoff 无「超限」）")
-    check(ho.count("测试集迭代（第 1 轮）") >= 2,
-          "相一 复位签名：「测试集迭代（第 1 轮）」出现 %d 次 ≥2（code-fault 后清零重计）"
-          % ho.count("测试集迭代（第 1 轮）"))
+    check(ho.count("test suite iteration (round 1)") >= 2,
+          "相一 复位签名：「test suite iteration (round 1)」出现 %d 次 ≥2（code-fault 后清零重计）"
+          % ho.count("test suite iteration (round 1)"))
     check("code-fault 打回 implement" in ho,
           "相一 code-fault 打回边在场（复位触发前提）")
     check(rounds >= 8, "相一 arbitrate 桩账本 %d 轮 ≥8（8 序列判决+回落 pass）" % rounds)
@@ -231,9 +231,9 @@ def phase_rework(py, env, tid, worker, wlog, stub_log, fail, check):
           "（kind=%s stage=%s state=%s；旧语义重入不清零第 7 判决必 blocked）"
           % (kind, snap.get("stage"), snap.get("stage_state")))
     check("超限" not in ho, "相三 全程无超限封（handoff 无「超限」）")
-    check(ho.count("测试集迭代（第 1 轮）") >= 2,
-          "相三 复位签名：「测试集迭代（第 1 轮）」出现 %d 次 ≥2（重入清零重计）"
-          % ho.count("测试集迭代（第 1 轮）"))
+    check(ho.count("test suite iteration (round 1)") >= 2,
+          "相三 复位签名：「test suite iteration (round 1)」出现 %d 次 ≥2（重入清零重计）"
+          % ho.count("test suite iteration (round 1)"))
     check(stages.count("implement") >= 1 and rounds >= 7,
           "相三 重入证据：implement 段在桩账本（%d 次）且 arbitrate ≥7 轮（%d）"
           % (stages.count("implement"), rounds))

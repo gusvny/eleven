@@ -169,7 +169,7 @@ def main():
             ok(False, "D3 子用例异常：%s" % e)
         if note is not None:
             ok("path_gate_reason=unknown_stage" in note, "未知段拒绝+机读原因码")
-            ok("合法出路" in note, "出路文案在场（合法出路前缀）")
+            ok("sanctioned way out" in note, "出路文案在场（sanctioned way out 前缀）")
             ok(head(lane2) == before2, "0 新 commit")
         else:
             ok(False, "D3 驱动失败：settle 未返回拒绝 note")

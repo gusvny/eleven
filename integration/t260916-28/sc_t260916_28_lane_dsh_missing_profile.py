@@ -330,7 +330,7 @@ def main():
         reason = str(snap.get("blocked_reason") or "")
         fail.check("泳道 .dsh 缺" in reason and "sandbar-headless" in reason,
                    "子用例A：blocked_reason 点名（含「泳道 .dsh 缺」+「sandbar-headless」）")
-        fail.check("agent 活动故障" not in reason,
+        fail.check("agent activity failure" not in reason,
                    "子用例A：绝不压成「agent 活动故障」（本票要杀的形态）")
         bd = snap.get("blocked_detail")
         fail.check(isinstance(bd, dict) and bd.get("reason_code") == "lane_dsh_profile_missing",
@@ -416,8 +416,9 @@ def main():
         reason = str(snap.get("blocked_reason") or "")
         fail.check("agent 报失败" in reason and "泳道 .dsh 缺" in reason,
                    "子用例C：blocked_reason 含「agent 报失败」+「泳道 .dsh 缺」")
-        fail.check("缺 verdict= 标记" not in reason,
-                   "子用例C：绝无「缺 verdict= 标记」虚报（failed 回执不进格式纠正循环）")
+        fail.check("times missing verdict= marker" not in reason,
+                   "子用例C：绝无「times missing verdict= marker」虚报"
+                   "（failed 回执不进格式纠正循环）")
         log_notes = "｜".join(str(e.get("note") or "") for e in ((snap.get("meta") or {}).get("log") or []))
         fail.check("格式纠正" not in log_notes,
                    "子用例C：meta.log 无「格式纠正」账（计数不被污染）")
@@ -458,8 +459,9 @@ def main():
         reason = str(snap.get("blocked_reason") or "")
         fail.check("agent 报失败" in reason,
                    "子用例C：acceptance blocked 点名（含「agent 报失败」，滞留 failed 回执被门消费）")
-        fail.check("验收走查打回" not in reason,
-                   "子用例C：绝无「验收走查打回」假叙事（不污染 acc_rounds、不白烧 implement）")
+        fail.check("acceptance walkthrough send-back" not in reason,
+                   "子用例C：绝无「acceptance walkthrough send-back」假叙事"
+                   "（不污染 acc_rounds、不白烧 implement）")
         fail.check(not [e for e in (snap.get("timeline") or []) if e.get("state") == "rework"],
                    "子用例C：全程绝无 rework 条目")
         rows = read_stub_log(stub_log)

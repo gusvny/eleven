@@ -82,11 +82,11 @@ def test_marker_gate_without_authorize_is_named_parse_failure():
     _sign(wf, Signature(who="宿主", gate=MARKER))
     assert len(wf.refused) == 1
     assert wf.refused[0]["want"] == "sign(authorize)"
-    assert "载荷解析失败" in wf.refused[0]["why"]  # 与「非人审等待中」可辨（验收 C）
-    assert "不按普通签字处理" in wf.refused[0]["why"]
+    assert "authorize payload parse failed" in wf.refused[0]["why"]  # distinguishable from the not-awaiting-human refusal (acceptance C)
+    assert "not treated as a plain signature" in wf.refused[0]["why"]
     assert wf._sigs == {}                          # 不落签字
     assert "authorizations" not in wf.meta         # 不落账
-    assert any("载荷解析失败" in (e.get("note") or "") for e in wf.meta.get("log", []))
+    assert any("authorize payload parse failed" in (e.get("note") or "") for e in wf.meta.get("log", []))
 
 
 def test_marker_gate_with_authorize_takes_intake():
@@ -109,7 +109,7 @@ def test_plain_sign_refusal_wording_unchanged():
     wf = _mk_wf(BLOCKED)
     _sign(wf, Signature(who="宿主", gate="merge"))
     assert wf.refused[0]["want"] == "sign(merge)"
-    assert wf.refused[0]["why"] == "当前步 arbitrate 非人审等待中，签字无效"
+    assert wf.refused[0]["why"] == "current step arbitrate is not awaiting human review; signature invalid"
 
 
 def test_empty_gate_plain_sign_refusal_wording_unchanged():
@@ -118,7 +118,7 @@ def test_empty_gate_plain_sign_refusal_wording_unchanged():
     wf = _mk_wf(BLOCKED)
     _sign(wf, Signature(who="宿主", gate=""))
     assert wf.refused[0]["want"] == "sign()"
-    assert wf.refused[0]["why"] == "当前步 arbitrate 非人审等待中，签字无效"
+    assert wf.refused[0]["why"] == "current step arbitrate is not awaiting human review; signature invalid"
     assert "authorizations" not in wf.meta
 
 

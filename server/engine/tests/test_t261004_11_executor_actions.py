@@ -118,7 +118,7 @@ def test_meta_op_refusal_recorded_with_empty_grant(iso):
     ea.record_from_gate(eg.META_OP, 'p1', 'T-9', v, 'cwd', now_ms=NOW_MS, session='s')
     row = _rows(iso)[0]
     assert row['decision'] == 'refused' and row['grant'] == ''
-    assert '反锁' in row['reason'] and row['ticket'] == 'T-9'
+    assert 'meta-permission lock' in row['reason'] and row['ticket'] == 'T-9'
 
 
 def test_unmapped_op_refusal_recorded(iso):

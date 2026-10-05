@@ -85,7 +85,7 @@ def main():
             cross_ok, msg = False, "未拒收"
         except ValueError as e:
             msg = str(e)
-            cross_ok = ("立项代号不存在" in msg and ext_epics in msg and eng_epics not in msg)
+            cross_ok = ("epic code not found" in msg and ext_epics in msg and eng_epics not in msg)
         check(cross_ok, "C3 engine 异名对 external 拒收且文案带 external 实际目录（诊断信息）", msg)
 
         # ---- D 未知项目 fail-closed（不静默退引擎仓） ----
@@ -128,7 +128,7 @@ def main():
             g_ok, g_msg = False, "未拒收"
         except ValueError as e:
             g_msg = str(e)
-            g_ok = "目录为空或不存在" in g_msg
+            g_ok = "directory empty or missing" in g_msg
         finally:
             os.environ.pop("SANDBAR_EPICS_DIR", None)
         check(g_ok, "G env 指不存在目录：报错含「目录为空或不存在」", g_msg)

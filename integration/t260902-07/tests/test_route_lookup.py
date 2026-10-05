@@ -179,7 +179,7 @@ def main():
               and rr_decl["table"] is None and rr_decl["fingerprint"] == "",
               "未声明 → decl_missing：path=\"\" + 无表 + 无指纹（实得 %r/%r）"
               % (rr_decl["state"], rr_decl["path"]))
-        check("未声明" in rr_decl["error"] and "docs/model-routes-sample.yaml" in rr_decl["error"],
+        check("not declared" in rr_decl["error"] and "docs/model-routes-sample.yaml" in rr_decl["error"],
               "decl_missing error 点名原因+建表指引（%s）" % rr_decl["error"][:60])
         check(rr_file["state"] == "file_missing" and rr_file["table"] is None
               and Path(rr_file["path"]) == absent and rr_file["fingerprint"] == "",

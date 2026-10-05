@@ -235,14 +235,14 @@ def test_route_matrix_cap_and_anchors():
     assert main_sync_conflict_route(3, ["a"], ["b"], cap=3) == "resolve"
     over = main_sync_conflict_route(4, ["a"], ["b"], cap=3)
     assert over.startswith("blocked:")
-    assert "主同步冲突消解 3 轮未收敛（上限 3）" in over
-    assert "冲突文件 a" in over
+    assert "main-sync conflict resolution did not converge in 3 rounds (cap 3)" in over
+    assert "conflicting files a" in over
 
 
 def test_route_same_batch_files_blocked():
     out = main_sync_conflict_route(2, ["b", "a"], ["a", "b"], cap=3)
     assert out.startswith("blocked:")
-    assert "同批文件反复冲突" in out
+    assert "keeps conflicting on the same batch of files" in out
     # 同一裸文件名、先后两轮落在不同仓（带仓标识后集合不同）= 不同批，
     # 不构成「同批反复」（review 建议④：不误判提前 blocked）
     assert main_sync_conflict_route(2, ["repoA:f"], ["repoB:f"], cap=3) == "resolve"
@@ -264,9 +264,9 @@ def test_route_malformed_inputs_fail_closed(rounds, files, prev, cap):
 def test_note_shaping_merged_and_up_to_date():
     assert main_sync_note({"mode": "merged", "main_sha": "0123456789abcdef",
                            "lane_head": "abc1234"}) == \
-        "main@0123456 已并入泳道（验证前主同步，lane HEAD=abc1234）"
+        "main@0123456 merged into the lane (pre-verification main sync, lane HEAD=abc1234)"
     assert main_sync_note({"mode": "up_to_date", "main_sha": "0123456789abcdef"}) == \
-        "main@0123456 已追平（快路径零动作）"
+        "main@0123456 already up to date (fast path, zero action)"
 
 
 @pytest.mark.parametrize("bad", [
@@ -350,13 +350,13 @@ def test_struct_conflict_subloop_reuses_existing_trio_back_to_implement():
     assert i_prep < i_agent < i_settle
     # t261002-10：字面量参数化为 fallback=step_id（缺省仍=闸相位原值，闸行为零变化）
     assert 'who="workflow", fallback=step_id' in block
-    assert "主同步冲突消解完成（第" in block          # 回实现段的 rework note 锚
+    assert "main-sync conflict resolution completed (round" in block          # the rework-note anchor back to implement
     assert "**不要 git commit**" in block             # agent 零 git 元数据写入（提示词令）
-    assert "主同步失败（转人工，不静默跳过同步" in block   # 不可达响亮转人工锚
+    assert "main sync failed (hand over to a human" in block   # the loud unreachable-sync hands-over-to-human anchor
     # gen3（源码锁 t260917-08 F4 回归）：本站归因构造走与 M3 变体站共用的单点
     # helper（_agent_failed_why 调用点/字面量计数恒 5/2），站文案逐字在位
     assert "self._conflict_failed_note(" in block
-    assert '"主同步冲突消解第 %d 轮：%s"' in block
+    assert '"main-sync conflict resolution round %d: %s"' in block
 
 
 def test_struct_resolution_round_clauses_present():
@@ -416,8 +416,8 @@ def test_struct_evidence_wiring_present():
     assert "main_sync_note(" in helper                # 日志留痕（helper 内单点）
     block = _sync_phase_block()
     assert block.count("main_sync_note(") >= 1        # 票面回执/尾注
-    assert "【主同步证据】" in block                   # 仲裁/走查上下文注入
-    assert "｜主同步=" in block                       # 票面 summary 尾注
+    assert "[main sync evidence]" in block                   # injected into arbitrate/walkthrough context
+    assert "| main-sync=" in block                       # ticket summary tail note
 
 
 def test_struct_activities_registered_and_display_meta_updated():
@@ -460,5 +460,5 @@ def test_forbidden_entries_untouched():
         ("sc_*", "integration/**/sc_*.py|.mjs"),
         ("baselines", "integration/baselines/*"),
         ("with_stage.sh", "integration/with_stage.sh"),
-        ("verify_lane", "verify_lane（含 admin.py call verify_lane）"),
+        ("verify_lane", "verify_lane (incl. admin.py call verify_lane)"),
     )

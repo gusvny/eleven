@@ -169,13 +169,13 @@ def test_c_note_wording_matches_judged_face():
     # note 描述面与判定面逐项对齐（desc 措辞枚举每项都有合法样本背书）
     assert "sc_*.py/.mjs" in pg._STAGE_FACE_DESC["test_face"]
     assert "integration/README.md" in pg._STAGE_FACE_DESC["test_face"]
-    assert note.startswith("阶段路径闸拒绝落盘（path_gate_reason=unauthorized_path）")
+    assert note.startswith("Stage path gate refused the write (path_gate_reason=unauthorized_path)")
     # 出路点名可达动作且带限定语（review gen1 备注1：不泛化）
-    assert "rework 打回 design_integration_tests" in note
-    assert "修 integration/ 面内容" in note
-    assert "建票把文件列入写集" in note
+    assert "rework back to design_integration_tests" in note
+    assert "integration/ face (scenarios/registry/shared test tools)" in note
+    assert "open a ticket listing the file in its write set" in note
     assert pg.next_action_hint("unauthorized_path").startswith(
-        "越权文件由引擎按状态自动处置")
+        "Out-of-scope files are auto-disposed by the engine")
 
 
 def test_c_malformed_inputs_fail_closed():
@@ -221,7 +221,7 @@ def test_a_out_of_vocab_target_refused_loudly():
     wf._rework = _req("acceptance_walkthrough")
     phase, edge, refusal = wf._consume_rework("arb_acc_parallel")
     assert (phase, edge) == ("", None)
-    assert refusal.startswith("【rework 拒收】")
+    assert refusal.startswith("[rework refused] ")
     assert "design_integration_tests" in refusal  # 点名别名出路
     assert wf.refused and wf._rework is None      # 拒收留账、信号已消费
     # meta 相位不被改写（拒收不留副作用）
@@ -233,7 +233,7 @@ def test_a_done_and_ui_evidence_refused():
         wf = _mk_wf({"status": "running"})
         wf._rework = _req(target)
         phase, _, refusal = wf._consume_rework("arb_acc_parallel")
-        assert phase == "" and refusal.startswith("【rework 拒收】"), target
+        assert phase == "" and refusal.startswith("[rework refused] "), target
         assert wf.refused
 
 

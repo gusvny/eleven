@@ -195,7 +195,7 @@ def main():
         ok("path_gate_reason=unknown_stage" in note, "未声明段拒绝+机读原因码")
         ok("never_declared_stage" in note, "文案点名段 id")
         ok("PATH_GATE_RULES" in note, "文案点名补法（在模板类声明 PATH_GATE_RULES）")
-        ok("合法出路" in note, "出路文案在场（fail-closed 但给合法出路）")
+        ok("sanctioned way out" in note, "出路文案在场（fail-closed 但给合法出路/sanctioned way out）")
         ok(head(lane) == before, "0 新 commit")
 
     print("\nSC sc_template_pathgate_faces pass=%d fail=%d" % (_ok, _fail))

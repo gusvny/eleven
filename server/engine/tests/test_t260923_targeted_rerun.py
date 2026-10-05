@@ -68,7 +68,7 @@ def test_human_trigger_rod_caps_intact():
         rounds, exempts, counted, _n = step_rounds("tests-fault", rounds, exempts)
         assert counted is True
     route = integration_route("tests-fault", rounds, 0)
-    assert route.startswith("blocked:") and "超限" in route
+    assert route.startswith("blocked:") and "exceed the cap" in route
 
 
 def test_wiring_structural_locks():

@@ -150,7 +150,7 @@ def test_sign_undeclared_sentinel_and_notice(monkeypatch):
     r = _run(client.cmd_ticket({"op": "sign", "ticket_id": "t1",
                                 "input": {"who": "宿主"}}))
     assert r["ok"] and r["identity_class"] == "undeclared"
-    assert "未声明" in r["cross_project_notice"]
+    assert "undeclared" in r["cross_project_notice"]
     _, payload = h.signals[0]
     assert payload.caller_project == shared.CALLER_UNDECLARED_MARK  # 哨兵送达（C3 记名靠它）
 

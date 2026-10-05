@@ -158,7 +158,7 @@ def test_forbidden_entries_untouched():
         ("sc_*", "integration/**/sc_*.py|.mjs"),
         ("baselines", "integration/baselines/*"),
         ("with_stage.sh", "integration/with_stage.sh"),
-        ("verify_lane", "verify_lane（含 admin.py call verify_lane）"),
+        ("verify_lane", "verify_lane (incl. admin.py call verify_lane)"),
     )
 
 

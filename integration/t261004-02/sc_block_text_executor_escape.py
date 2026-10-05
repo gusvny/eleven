@@ -9,14 +9,14 @@ same block text must also name the executor's own path out — send-back
 where only a human can act (git merge --abort / reset, executor cannot write the
 lane's .git gitfile) keep truthful human-only wording. The t261003-10 incident:
 the executor was woken, diagnosed correctly, and still deferred because the text
-said only "转人工处置".
+said only "handing over to a human".
 
 Gray-box anchoring: message content only — no internal function names, no line
 numbers, no execution order. Assertions pin the user-visible message faces plus
-the selfcheck anchor substrings (「冲突消解 %d 轮未收敛」/「同批文件反复冲突」), which
-must survive unchanged. The executor-clause wording is tolerant across the two
-landed shapes (「执行器可自解」/「执行器自己的出路」) — the contract, not the phrase, is
-pinned.
+the selfcheck anchor substrings ("conflict resolution %d rounds did not
+converge" / "the same batch of files keeps conflicting"), which must survive
+unchanged. The executor-clause wording is tolerant across the landed shapes of
+"The executor's own way out ..." — the contract, not the phrase, is pinned.
 
 Stdlib-only, zero docker, zero Temporal, no ENV_FAIL face.
 """
@@ -32,6 +32,15 @@ DEV = (ROOT / "server/engine/dev_lane.py").read_text("utf-8")
 LIGHT = (ROOT / "server/engine/light_lane.py").read_text("utf-8")
 
 PASS = FAIL = 0
+
+
+def src_find(hay, needle, start=0):
+    """Find a runtime message in raw source, tolerating the landed split-literal
+    shape ("...fragments " / "joined across lines"). Word-flexible on the join
+    only; the pinned words themselves stay verbatim."""
+    pat = r'(?:["\s]+| )'.join(re.escape(w) for w in needle.split(" "))
+    m = re.compile(pat).search(hay, start)
+    return m.start() if m else -1
 
 
 def ok(cond, label):
@@ -50,17 +59,19 @@ def section(t):
 
 # Executor-escape clause, wording-tolerant across landed shapes; the message must
 # name rework(to_stage=implement) as the executor's own send-back path.
-EXEC_CLAUSE = (r"执行器(?:可自解|自己的出路)[\s\"'\n]*[：:，,]?[\s\"'\n]*"
-               r"(?:发|这条)?[\s\"'\n]*\"?\n?\s*\"?rework\(to_stage=implement\)")
+EXEC_CLAUSE = (r"The executor's own way out[\s\"'\n]*"
+               r"(?:\(no need to wait for a human\))?[\s\"'\n]*:?[\s\"'\n]*"
+               r"send[\s\"'\n]*(?:this[\s\"'\n]+)?rework\(to_stage=implement\)")
 
 # ---------- A. dev_lane merge_check dry-run block texts (over-cap + same-batch) ----------
 section("A dev_lane merge_check 干跑态 blocked 文案：人路径保留 + 执行器出路点名")
 for name, anchor in (
-    ("超限", "转人工处置：冲突文件 %s"),
-    ("同批", "同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s"),
+    ("over-cap", "handing over to a human: conflicting files %s."),
+    ("same-batch", "the same batch of files keeps conflicting (same set for 2 "
+                    "consecutive rounds, round %d), handing over to a human: %s."),
 ):
-    i = DEV.find(anchor)
-    ok(i >= 0, "%s 文案可定位且 human 锚「转人工处置」保留" % name)
+    i = src_find(DEV, anchor)
+    ok(i >= 0, "%s 文案可定位且 human 锚「handing over to a human」保留" % name)
     if i >= 0:
         tail = DEV[i:i + 600]
         ok(re.search(r"rework\(to_stage=implement\)", tail) is not None,
@@ -75,12 +86,20 @@ ok(n_exec >= 2, "settle 文案带执行器出路子句（rework(to_stage=impleme
 for kw in ("git merge --abort", "retry_qc"):
     ok(kw in DEV, "人工半句保留：%s" % kw)
 # The reset half must stay attributed to the human (executor cannot run git):
-# 「人工」 must sit in the same sentence as git merge --abort / retry_qc.
+# the human-attribution fragment ("handing over to a human") must sit in the
+# same message as git merge --abort / retry_qc.
 m_exec = re.search(EXEC_CLAUSE, DEV)
-abort_at = DEV.find("git merge --abort", m_exec.start()) if m_exec else -1
-zone = DEV[m_exec.start():abort_at] if (m_exec and abort_at > 0) else ""
-ok("人工" in zone, "abort/reset 半句归人工（执行器跑不了 git，不越权点名）")
-ok(re.search(r"执行器[^。]{0,40}rework", DEV) is not None,
+msg_start = src_find(DEV, "handing over to a human", 0) if m_exec else -1
+while msg_start >= 0 and msg_start < m_exec.start():
+    nxt = src_find(DEV, "handing over to a human", msg_start + 1)
+    if nxt < 0 or nxt >= m_exec.start():
+        break
+    msg_start = nxt
+abort_at = DEV.find("git merge --abort", msg_start) if msg_start >= 0 else -1
+zone = DEV[msg_start:m_exec.start()] if (m_exec and msg_start >= 0) else ""
+ok(abort_at > 0 and "retry_qc" in zone,
+   "abort/reset 半句归人工（执行器跑不了 git，不越权点名）")
+ok(re.search(r"The executor's own way out", DEV) is not None,
    "settle 文案带执行器第一人称出路子句（非仅归人）")
 
 # ---------- C. light_lane settle text (English, ticket-face) ----------
@@ -106,12 +125,14 @@ for key in ("unreachable", "reset_exception", "reset_failed"):
            "%s 仍如实指向人" % key)
         ok("rework(" not in re.sub(r'["\s]+', " ", m2.group(1)),
            "%s 不伪造执行器出路" % key)
-ok("同批文件反复冲突" in DEV and "冲突消解" in DEV,
-   "selfcheck 文案锚（冲突消解/同批文件反复冲突）零漂移")
+ok("the same batch of files keeps conflicting" in DEV and "冲突消解" in DEV,
+   "selfcheck 文案锚（冲突消解/同批文件 keeps conflicting）零漂移")
 
 # ---------- E. negative control: the t261003-10 fire point is covered ----------
 section("E 负控：t261003-10 实发的那条文案必须带出路（事故回归棒）")
-i = DEV.find(ANCHOR_SAMEBATCH) if (ANCHOR_SAMEBATCH := "同批文件反复冲突（连续 2 轮集合相同，第 %d 轮），转人工处置：%s") else -1
+ANCHOR_SAMEBATCH = ("the same batch of files keeps conflicting (same set for 2 "
+                    "consecutive rounds, round %d), handing over to a human: %s")
+i = src_find(DEV, ANCHOR_SAMEBATCH)
 ok(i >= 0 and "rework" in DEV[i:i + 600],
    "同批文案（实发条目）点名执行器出路——事故不复现")
 

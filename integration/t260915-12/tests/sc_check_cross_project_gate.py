@@ -163,10 +163,10 @@ for bad, frag in (({"cross_project": {"reason": "r"}}, "by"),
     got, err = caller_gate.validate_override(bad)
     ok(got is None and frag in err, "畸形旗拒收：%s…→%s" % (list(bad)[0][:28], err[:24]))
 got, err = caller_gate.validate_override({"cross_project": ["by", "reason"]})
-ok(got is None and "对象" in err, "畸形：旗=非对象（list）拒收")
+ok(got is None and "must be an object" in err, "畸形：旗=非对象（list）拒收")
 got, err = caller_gate.validate_override(
     {"cross_project": {"by": "a", "reason": "r"}, "cross_project_reason": "dup"})
-ok(got is None and "只给其一" in err, "畸形：双形理由同给=拒收")
+ok(got is None and "only one of" in err, "畸形：双形理由同给=拒收")
 for bad_id in ("SANDBAR", "x" * 65, "../evil", "a b", ""):
     try:
         caller_gate.resolve_identity(bad_id, "", projects=[])

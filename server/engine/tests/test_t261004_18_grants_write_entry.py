@@ -25,9 +25,8 @@ lane's next settle commit must
 `git add server/engine/tests/test_t261004_18_grants_write_entry.py`.
 
 Translation note (t261004-28 carrier, host L15 ruling): comments and docstrings
-are translated to English; asserted refusal substrings that must match the
-engine's refusal message text stay in Chinese (data coupling, not copy), marked
-inline with copy-lang-allow:data.
+are translated to English; the assertions below match the engine's English
+refusal copy verbatim (t261004-36) and carry no copy-language markers.
 """
 import asyncio
 import json
@@ -76,7 +75,7 @@ def test_executor_channel_refused_with_refuse_audit(projects_root, monkeypatch):
     monkeypatch.setenv("SANDBAR_CALLER_IDENTITY_SRC", eg.EXECUTOR_CHANNEL)
     res = _call(key="alpha", by="executor", grants={"open-ticket": True},
                 source={"surface": "executor-cli"})
-    assert res["saved"] is False and "反锁" in res["reason"]  # copy-lang-allow:data -- engine refusal text
+    assert res["saved"] is False and "meta-permission lock" in res["reason"]
     assert not (projects_root / "alpha" / eg.DECL_FILE).exists()
     rows = _audit(projects_root, "alpha")
     assert len(rows) == 1 and rows[0]["action"] == "refuse" and rows[0]["op"] == eg.META_OP

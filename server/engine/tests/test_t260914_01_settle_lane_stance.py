@@ -290,7 +290,7 @@ def test_corrupt_manifest_still_raises(tmp_path):
     mf = lane / OLD / shared.MULTI_MANIFEST_NAME
     mf.parent.mkdir(parents=True)
     mf.write_text("{ not json", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="清单损坏"):
+    with pytest.raises(RuntimeError, match="manifest corrupted"):
         aa._lane_scopes(lane)
 
 

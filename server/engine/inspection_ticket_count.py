@@ -56,7 +56,7 @@ def _parse_atom(atom: str, limit: int, names: Optional[Dict[str, int]], floor: i
     if "/" in atom:
         body, _, step_raw = atom.partition("/")
         if not step_raw.isdigit() or int(step_raw) < 1:
-            raise ValueError("步进非法：%r" % atom)
+            raise ValueError("invalid step: %r" % atom)
         step = int(step_raw)
     if body == "*":
         return floor, limit, step
@@ -67,7 +67,7 @@ def _parse_atom(atom: str, limit: int, names: Optional[Dict[str, int]], floor: i
     else:
         lo = hi = _field_value(body, names)
     if lo > limit or hi > limit or lo > hi:
-        raise ValueError("域值越界/倒序：%r" % atom)
+        raise ValueError("range value out of bounds or inverted: %r" % atom)
     return lo, hi, step
 
 
@@ -76,7 +76,7 @@ def _field_value(raw: str, names: Optional[Dict[str, int]]) -> int:
     if names and raw in names:
         return names[raw]
     if not raw.isdigit():
-        raise ValueError("域值非法：%r" % raw)
+        raise ValueError("invalid range value: %r" % raw)
     return int(raw)
 
 
@@ -84,7 +84,7 @@ def parse_cron(expr: str) -> Tuple[set, set, set, set, set]:
     """五字段 cron → 每域允许值集合（与 decl 词法一致；词法不符=ValueError 点名）。"""
     fields = expr.split()
     if len(fields) != 5:
-        raise ValueError("cron 须五字段（got %d）：%r" % (len(fields), expr))
+        raise ValueError("cron must have five fields (got %d): %r" % (len(fields), expr))
     out = []
     for pos, f in enumerate(fields):
         names = {0: None, 1: None, 2: None, 3: _MONTH_NAMES, 4: _DOW_NAMES}[pos]
@@ -131,7 +131,7 @@ def next_cron_fire(expr: str, after: datetime) -> datetime:
                     return cand
         day = (day + timedelta(days=1)).replace(hour=0, minute=0)
         # 月份位数在换日后重查（上循环已含 month 判定）
-    raise ValueError("cron %r 四年内无命中（声明可解析但永不触发=显式报错）" % expr)
+    raise ValueError("cron %r has no firing within four years (parseable declaration but never fires = explicit error)" % expr)
 
 
 def count_archived_tickets(projects_root: str, project_key: str) -> Dict[str, Any]:
@@ -179,9 +179,9 @@ def decide(count: int, baseline: int, n: int, cron_due: bool, now: datetime) -> 
       - 都不满足 → 不触发，状态原样。
     触发事件定义期界：桶号随基线复位单调、不必连续（review_plan gen1 已核自洽）。"""
     if n < 1:
-        raise ValueError("n 必须 ≥1（got %d）" % n)
+        raise ValueError("n must be >=1 (got %d)" % n)
     if count < 0 or baseline < 0:
-        raise ValueError("count/baseline 非负（got count=%r baseline=%r）" % (count, baseline))
+        raise ValueError("count/baseline must be non-negative (got count=%r baseline=%r)" % (count, baseline))
     count_bucket = count // n
     base_bucket = baseline // n
     if count_bucket > base_bucket:

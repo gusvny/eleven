@@ -153,7 +153,7 @@ try:
                     os.environ["SANDBAR_CALLER_PROJECT"] = prev_identity
             check("L4 入口子用例不随继承的 SANDBAR_CALLER_PROJECT 翻转（隔离确定性）",
                   res.get("ok") is False and "escape.md" in err_hostile
-                  and "跨项目" not in err_hostile,
+                  and "cross-project" not in err_hostile,
                   "err=%r" % err_hostile[:200])
         else:
             check("L0 被测承诺面在场（client refs 闸接线）→ 入口子用例可跑", False,

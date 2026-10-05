@@ -162,41 +162,41 @@ def validate_topology(nodes: Sequence[Dict[str, Any]],
     order: List[str] = []
     for n in nodes:
         if not isinstance(n, dict):
-            problems.append("节点不是对象: %r" % (n,))
+            problems.append("node is not an object: %r" % (n,))
             continue
         nid = n.get("id")
         if not isinstance(nid, str) or not nid:
-            problems.append("节点 id 缺失或非串: %r" % (nid,))
+            problems.append("node id missing or not a string: %r" % (nid,))
             continue
         if nid in seen:
-            problems.append("节点 id 重复: %s" % nid)
+            problems.append("duplicate node id: %s" % nid)
             continue
         seen.add(nid)
         order.append(nid)
         if n.get("kind") not in _KINDS:
-            problems.append("节点 %s kind 越词表: %r" % (nid, n.get("kind")))
+            problems.append("node %s kind outside the vocabulary: %r" % (nid, n.get("kind")))
         if not isinstance(n.get("label"), str) or not n.get("label"):
-            problems.append("节点 %s label 缺失" % nid)
+            problems.append("node %s label missing" % nid)
     g_of: Dict[str, str] = {}
     for g in groups:
         if not isinstance(g, dict):
-            problems.append("组不是对象: %r" % (g,))
+            problems.append("group is not an object: %r" % (g,))
             continue
         members = g.get("members")
         if not isinstance(members, list) or len(members) < 2:
-            problems.append("组 %r members 非二元以上列表" % (g.get("id"),))
+            problems.append("group %r members is not a list of two or more" % (g.get("id"),))
             continue
         for m in members:
             if m not in seen:
-                problems.append("组 %s 成员越表: %r" % (g.get("id"), m))
+                problems.append("group %s member outside the node list: %r" % (g.get("id"), m))
             elif m in g_of:
-                problems.append("节点 %s 属于多个组（%s/%s）" % (m, g_of[m], g.get("id")))
+                problems.append("node %s belongs to multiple groups (%s/%s)" % (m, g_of[m], g.get("id")))
             else:
                 g_of[m] = str(g.get("id"))
         # 连续性：成员在节点声明顺序里必须连续
         idx = [order.index(m) for m in members if m in order]
         if len(idx) == len(members) and idx != list(range(min(idx), min(idx) + len(idx))):
-            problems.append("组 %s 成员在节点顺序中不连续: %r" % (g.get("id"), members))
+            problems.append("group %s members are not contiguous in the node order: %r" % (g.get("id"), members))
     return problems
 
 
@@ -246,7 +246,7 @@ def build_topology(template_id: str, name: str,
     """导出一个模板的拓扑契约。声明非法 → ValueError（fail-closed，不静默出图）。"""
     problems = validate_topology(nodes, groups)
     if problems:
-        raise ValueError("拓扑声明非法（%s）：%s" % (template_id, "；".join(problems)))
+        raise ValueError("invalid topology declaration (%s): %s" % (template_id, "；".join(problems)))
     return {
         "version": CONTRACT_VERSION,
         "template": template_id,
@@ -300,7 +300,7 @@ def topology_from_stages(template_id: str, name: str, stages: Any) -> Dict[str, 
     for s in (stages or ()):
         sid = str(_field(s, "id") or "")
         if not sid:
-            raise ValueError("阶段声明缺 id（template=%s）" % template_id)
+            raise ValueError("stage declaration missing id (template=%s)" % template_id)
         parts = tuple(str(p) for p in (_field(s, "parts") or ()) if str(p))
         exit_ = str(_field(s, "exit") or "")
         if exit_ == "human":
@@ -312,5 +312,5 @@ def topology_from_stages(template_id: str, name: str, stages: Any) -> Dict[str, 
         nodes.append(_node(sid, str(_field(s, "name") or sid),
                            str(_field(s, "role") or ""), kind, parts))
     if not nodes:
-        raise ValueError("STAGES 空序列（template=%s）" % template_id)
+        raise ValueError("STAGES empty sequence (template=%s)" % template_id)
     return build_topology(str(template_id), str(name or template_id), nodes, ())

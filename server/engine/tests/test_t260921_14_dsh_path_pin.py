@@ -165,7 +165,7 @@ def test_越界红(registry):
 def test_相对声明但条目缺主目录红(registry, tmp_path):
     root, write, _ = registry
     write(root, "proj", None, dsh_bin="tools/dsh")   # 无 dirs → 无 main_dir
-    with pytest.raises(shared.ProjectPathsError, match="无法定项目主目录"):
+    with pytest.raises(shared.ProjectPathsError, match="home directory cannot be determined"):
         shared.project_paths("proj")
 
 
@@ -180,14 +180,14 @@ def test_重复键红(registry, tmp_path):
 def test_未知键仍红_回归(registry, tmp_path):
     root, write, home = registry
     write(root, "proj", home, unknown_key="dsh_binx")
-    with pytest.raises(shared.ProjectPathsError, match="不认的键"):
+    with pytest.raises(shared.ProjectPathsError, match="unknown key in the paths section"):
         shared.project_paths("proj")
 
 
 def test_锚点缺失红(registry, tmp_path):
     root, write, home = registry
     write(root, "proj", home, dsh_bin="%s/nope/dsh" % tmp_path)
-    with pytest.raises(shared.ProjectPathsError, match="不存在"):
+    with pytest.raises(shared.ProjectPathsError, match="does not exist"):
         shared.dsh_bin_for_spawn("proj")
 
 
@@ -196,7 +196,7 @@ def test_锚点是目录红(registry, tmp_path):
     d = tmp_path / "dshdir"
     d.mkdir()
     write(root, "proj", home, dsh_bin=str(d))
-    with pytest.raises(shared.ProjectPathsError, match="不是文件"):
+    with pytest.raises(shared.ProjectPathsError, match="is not a file"):
         shared.dsh_bin_for_spawn("proj")
 
 
@@ -405,7 +405,7 @@ def test_probe容器畸形输出红(tmp_path, monkeypatch):
     dbin = _fake_docker(tmp_path, ledger)
     monkeypatch.setenv("FAKE_DOCKER_MODE", "malformed")
     r = agent_runtime_probe("sandbar-agent:x", dbin)
-    assert r["state"] == "error" and "非单行版本样" in r["detail"]
+    assert r["state"] == "error" and "not a single version-like line" in r["detail"]
 
 
 def test_probe容器超时_进程组收割加按名强拆(tmp_path, monkeypatch):
@@ -415,7 +415,7 @@ def test_probe容器超时_进程组收割加按名强拆(tmp_path, monkeypatch)
     dbin = _fake_docker(tmp_path, ledger)
     monkeypatch.setenv("FAKE_DOCKER_MODE", "timeout")
     r = agent_runtime_probe("sandbar-agent:x", dbin, timeout=0.5)
-    assert r["state"] == "error" and "超时" in r["detail"]
+    assert r["state"] == "error" and "timed out" in r["detail"]
     lines = _ledger_lines(ledger)
     assert any(ln[:1] == ["rm"] and "-f" in ln for ln in lines)   # 按名强拆已执行
     assert _os.path.exists(ledger)

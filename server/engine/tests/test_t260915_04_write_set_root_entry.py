@@ -74,13 +74,13 @@ def test_member_repo_root_rejected_all_forms(mixed7):
         with pytest.raises(ValueError) as ei:
             shared.resolve_repos_for_paths(root, [entry])
         msg = str(ei.value)
-        assert "整仓" in msg, (entry, msg)
-        assert "逐个子目录" in msg and ".gitignore" in msg, (entry, msg)
+        assert "whole-repo" in msg, (entry, msg)
+        assert "subdirectory by subdirectory" in msg and ".gitignore" in msg, (entry, msg)
         assert "fpv-toolchain" in msg, (entry, msg)
     # 列举式改法带例句=仓顶层真实条目（目录带尾斜杠），可直接粘进写集
     with pytest.raises(ValueError) as ei:
         shared.resolve_repos_for_paths(root, ["fpv-toolchain"])
-    assert "例：fpv-toolchain/Cargo.toml" in str(ei.value)
+    assert "e.g. fpv-toolchain/Cargo.toml" in str(ei.value)
 
 
 # ---------- 层2：项目根形态（单仓与混合形态同拒，与闸同口径） ----------
@@ -93,7 +93,7 @@ def test_project_root_dot_rejected_mixed_and_single(mixed7, single):
             msg = str(ei.value)
             # 断言命中的是新判定（'项目根'），不是既有的空白拒收（'非字符串或空白'）
             # ——锁定「先归一后判定」的次序。
-            assert "项目根" in msg and "逐个子目录" in msg, (entry, msg)
+            assert "the project root itself" in msg and "subdirectory by subdirectory" in msg, (entry, msg)
 
 
 # ---------- 零回归对照：仓内子目录/文件条目照常受理、归属不变 ----------
@@ -121,15 +121,15 @@ def test_regression_unchanged_refusals(tmp_path):
     """既有拒收三态文案不变：空仓集/逃逸/嵌套仓（验收 4：resolve 既有行为不变）。"""
     bare = tmp_path / "bare"
     bare.mkdir()
-    with pytest.raises(ValueError, match="未发现任何 git 仓"):
+    with pytest.raises(ValueError, match="no git repo found under"):
         shared.resolve_repos_for_paths(bare, ["x.py"])
     root = tmp_path / "r"
     root.mkdir()
     (root / ".git").mkdir()
-    with pytest.raises(ValueError, match="不得逃逸项目根"):
+    with pytest.raises(ValueError, match="must not escape the project root"):
         shared.resolve_repos_for_paths(root, ["../escape.md"])
     (root / "outer" / "nested" / ".git").mkdir(parents=True)
-    with pytest.raises(ValueError, match="集合外嵌套仓"):
+    with pytest.raises(ValueError, match="out-of-set nested repo"):
         shared.resolve_repos_for_paths(root, ["outer/nested/in.txt"])
 
 
@@ -138,21 +138,21 @@ def test_regression_unchanged_refusals(tmp_path):
 def test_fuse_a_carries_dot_refusal_on_single_repo(single):
     """单仓建票（client ticket-start）repo_worktrees 恒空 → 保险丝A 必调 resolve →
     '.' 拒收经既有 fail-closed 转发上抛（验收 2：单仓与闸同口径）。"""
-    with pytest.raises(ValueError, match="整仓"):
+    with pytest.raises(ValueError, match="whole-repo"):
         shared.multirepo_fuse_a_error(str(single), ["."], [])
-    with pytest.raises(ValueError, match="整仓"):
+    with pytest.raises(ValueError, match="whole-repo"):
         shared.multirepo_fuse_a_error(str(single), ["./"], [])
 
 
 def test_fuse_a_carries_member_root_refusal_on_multirepo(mixed7):
     """多仓明细缺失形态（repo_worktrees=[]）→ 保险丝A 走 resolve → 根形态条目上抛。"""
-    with pytest.raises(ValueError, match="整仓"):
+    with pytest.raises(ValueError, match="whole-repo"):
         shared.multirepo_fuse_a_error(str(mixed7), ["fpv-toolchain/"], [])
 
 
 def test_derive_lane_workspace_rejects_member_root_entry(mixed7):
     """多仓正规链（derive→build_repo_worktrees→resolve）建票第一跳即拒。"""
-    with pytest.raises(ValueError, match="整仓"):
+    with pytest.raises(ValueError, match="whole-repo"):
         shared.derive_lane_workspace(
             "t-ut", shared.LANE_WORKTREE, project_root=str(mixed7),
             repo_write_set=["fpv-toolchain/", "fpv-toolchain/app/"])
@@ -171,16 +171,16 @@ def test_member_repo_named_integration(tmp_path):
     (root / "integration" / ".git").mkdir(parents=True)
     with pytest.raises(ValueError) as ei:
         shared.resolve_repos_for_paths(root, ["integration/"])
-    assert "整仓" in str(ei.value)
+    assert "whole-repo" in str(ei.value)
 
 
 # ---------- 层1 联动：背景文件闸形态拒 / refresh_write_set 进 dropped ----------
 
 def test_background_refs_shape_rejects_dot_and_glob(tmp_path):
     ok, err = shared.validate_background_refs(["."], tmp_path)
-    assert ok is False and "非法条目" in err
+    assert ok is False and "illegal entries" in err
     ok, err = shared.validate_background_refs(["src/*"], tmp_path)
-    assert ok is False and "非法条目" in err
+    assert ok is False and "illegal entries" in err
 
 
 def test_refresh_write_set_drops_dot_and_glob():
@@ -197,7 +197,7 @@ def test_fuse_b_root_entry_turns_red_not_raise(mixed7):
     lane_root = mixed7 / ".lane" / "t-ut"  # 保险丝B 约定 project_root=lane_root.parent.parent
     red = aa.multirepo_materialization_error(
         lane_root, ["fpv-toolchain/"], [], is_worktree_of=lambda tree, repo: True)
-    assert "fail-closed" in red and "整仓" in red
+    assert "fail-closed" in red and "whole-repo" in red
 
 
 # ---------- 工单点名的畸形输入面（含 review 意见1 空串） ----------
@@ -208,7 +208,7 @@ def test_empty_string_entry_rejected_everywhere(mixed7):
     ok, flags, err = shared.validate_write_set_args([""], False)
     assert ok is False and flags == {} and err
     # 归属口（层2）——既有「非字符串或空白」拒收，不因本票改动漂移
-    with pytest.raises(ValueError, match="非字符串或空白"):
+    with pytest.raises(ValueError, match="non-string or blank"):
         shared.resolve_repos_for_paths(root, [""])
     # 运行期闸同立场（fail-closed 兜底，锁定防漂移）
     okws, pats = path_gates._entries([""])

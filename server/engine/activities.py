@@ -173,7 +173,7 @@ async def process_stage(note: str) -> str:
 @activity.defn
 async def ai_review_stub(scope: str) -> Dict[str, Any]:
     activity.logger.info("ai_review_stub scope=%s", scope)
-    return {"findings": 0, "note": f"AI 审校占位（未调模型），scope={scope}"}
+    return {"findings": 0, "note": f"AI review stub (model not called), scope={scope}"}
 
 
 @activity.defn
@@ -1164,7 +1164,7 @@ def _no_change_skip(instance_id: str, repo_root: str) -> Dict[str, Any]:
     head = resolve_main_head_impl({"repo_root": repo_root, "ref": "main"})
     if not head.get("ok"):
         return {"unchanged": False, "why": "", "head": "",
-                "note": "HEAD 解析不出（%s）——不跳，照常起票" % str(head.get("error"))[:160]}
+                "note": "HEAD unresolvable (%s) — not skipping, ticket will be raised as usual" % str(head.get("error"))[:160]}
     sha = str((head.get("result") or {}).get("sha") or "")
     last = last_run_base(_inspection_ledger_dir(), instance_id)
     verdict = no_change_skip(last.get("base_ref", ""), sha, last.get("period", ""))

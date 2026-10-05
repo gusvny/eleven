@@ -120,7 +120,7 @@ def test_decl_missing_no_fallback_even_if_repo_table_present(routes_env, tmp_pat
     assert r["state"] == "decl_missing"
     assert r["declared"] is None and r["path"] == "" and r["table"] is None
     assert r["fingerprint"] == ""
-    assert "未声明" in r["error"]
+    assert "not declared" in r["error"]
     assert str(entry) in r["error"], "error 须点名注册条目路径"
     assert "docs/model-routes-sample.yaml" in r["error"], "error 须给建表模板指引"
     # 反毒断言：仓内表即使在位也不接管读（(a) 删除后本断言同样成立）
@@ -149,7 +149,7 @@ def test_file_missing(routes_env, tmp_path):
     assert r["state"] == "file_missing"
     assert r["table"] is None and r["fingerprint"] == ""
     assert Path(r["path"]) == absent and Path(r["declared"]) == absent
-    assert "文件缺失" in r["error"] and str(absent) in r["error"]
+    assert "file is missing" in r["error"] and str(absent) in r["error"]
     assert any("state=file_missing" in m and "指纹=" in m for m in cap.texts())
 
 
@@ -164,7 +164,7 @@ def test_bad_content_unparseable_keeps_fingerprint(routes_env, tmp_path):
     assert r["table"] is None
     assert Path(r["path"]) == bad
     assert r["fingerprint"] == _sha(bad), "坏文件的字节指纹可读，用于定位坏版本"
-    assert "不可解析" in r["error"] and str(bad) in r["error"]
+    assert "unparseable" in r["error"] and str(bad) in r["error"]
     assert any("state=bad_content" in m and "sha256:" in m for m in cap.texts())
 
 
@@ -176,7 +176,7 @@ def test_bad_content_dir_as_table(routes_env, tmp_path):
     r = shared.resolve_routes_table("dirt")
     assert r["state"] == "bad_content" and r["table"] is None
     assert r["fingerprint"] == "", "目录读不出字节=指纹空串"
-    assert "不可解析" in r["error"]
+    assert "unparseable" in r["error"]
     assert any("state=bad_content" in m for m in cap.texts())
 
 
@@ -194,7 +194,7 @@ def test_non_mapping_table_is_bad_content(routes_env, tmp_path, text, shape):
     assert r["state"] == "bad_content", "顶层=%s 须判坏表（实得 %s）" % (shape, r["state"])
     assert r["table"] is None
     assert r["fingerprint"] == _sha(f), "可读字节的坏文件照指纹"
-    assert "不是映射结构" in r["error"] and shape in r["error"] and str(f) in r["error"]
+    assert "is not a mapping" in r["error"] and shape in r["error"] and str(f) in r["error"]
     assert any("state=bad_content" in m and "sha256:" in m for m in cap.texts())
     # 消费面两条路都不再崩：
     # ① table=None（resolve 判坏后的形态）→ 回落 None（profile 默认）；
@@ -219,10 +219,10 @@ def test_empty_table_file_stays_ok(routes_env, tmp_path):
 
 @pytest.mark.parametrize("key,text,why", [
     ("shape-roles", "roles: just-a-string\ndefault:\n  provider: p\n  model: m\n",
-     "roles 段不是映射"),
-    ("shape-entry", "roles:\n  developer: oops\n", "roles.developer 条目不是映射"),
+     "the roles section is not a mapping"),
+    ("shape-entry", "roles:\n  developer: oops\n", "roles.developer entry is not a mapping"),
     ("shape-tasks", "roles:\n  developer:\n    tasks: not-a-map\n",
-     "roles.developer.tasks 不是映射"),
+     "roles.developer.tasks is not a mapping"),
 ])
 def test_shape_broken_table_is_bad_content(routes_env, tmp_path, key, text, why):
     """roles/条目/tasks 值非映射：消费方沿链 .get 必崩（260915 独立探针实证
@@ -234,11 +234,11 @@ def test_shape_broken_table_is_bad_content(routes_env, tmp_path, key, text, why)
     assert r["state"] == "bad_content", why
     assert r["table"] is None
     assert r["fingerprint"] == _sha(f), "可读字节的形状坏表照指纹"
-    assert "形状不可用" in r["error"] and why in r["error"] and str(f) in r["error"]
+    assert "unusable shape" in r["error"] and why in r["error"] and str(f) in r["error"]
     assert any("state=bad_content" in m and "sha256:" in m for m in cap.texts())
     # 消费面不再崩：直读路径留痕回落 None（=profile 默认，禁静默口径不变）
     assert shared.model_route_for("developer", "implement", routes_file=f) is None
-    assert any("形状不可用" in m for m in cap.texts()), "直读路径留痕点名形状坏"
+    assert any("unusable shape" in m for m in cap.texts()), "direct-read path logs the unusable shape"
 
 
 def test_shape_broken_direct_table_tolerance(routes_env):

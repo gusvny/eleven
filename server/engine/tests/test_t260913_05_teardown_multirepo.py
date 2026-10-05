@@ -215,7 +215,7 @@ def test_teardown_malformed_entries_fail_closed_nothing_touched(mixed):
     res = _run(MergeArgs(ticket_id="utt05f", worktree=str(lane),
                          branch="lane/utt05f-root", repo_worktrees=bad))
     assert not res.ok and res.action == "failed"
-    assert "branch 字段缺失" in res.error and "meta.repo_worktrees" in res.error, res.error
+    assert "missing the branch field" in res.error and "meta.repo_worktrees" in res.error, res.error
     assert lane.exists()
     assert any(str(lane) in p for p in _worktrees(mixed / "repo_a")), _worktrees(mixed / "repo_a")
     assert _lane_branches(mixed / "repo_a") == ["+ lane/utt05f-repo_a"]
@@ -237,7 +237,7 @@ def test_teardown_corrupt_manifest_fail_closed_nothing_touched(mixed):
     (lane / aa.MULTI_MANIFEST_REL).write_text("{ not json", encoding="utf-8")
     res = _run(MergeArgs(ticket_id="utt05g", worktree=str(lane), branch="lane/utt05g-root"))
     assert not res.ok and res.action == "failed"
-    assert "清单损坏" in res.error, res.error
+    assert "manifest corrupted" in res.error, res.error
     assert lane.exists()
     assert any(str(lane) in p for p in _worktrees(mixed)), _worktrees(mixed)
     assert any(str(lane) in p for p in _worktrees(mixed / "repo_a"))
@@ -362,8 +362,8 @@ def test_source_lock_dev_lane_teardown_carries_repo_worktrees():
 def test_source_lock_teardown_receipt_failclosed_branch_precedes_warn_branch():
     """回执 ok=False → _blocked 必须排在「只记 warn」之前：删/改序=静默化风险。"""
     src = _src("dev_lane.py")
-    at = src.find("泳道拆除回执异常")
-    warn_at = src.find("泳道拆除告警")
+    at = src.find("lane teardown receipt abnormal")
+    warn_at = src.find("lane teardown warning")
     assert 0 < at < warn_at, (at, warn_at)
     assert "_blocked" in src[max(0, at - 200):at], src[max(0, at - 200):at]
 
@@ -372,8 +372,8 @@ def test_source_lock_timeline_row_carries_receipt_error_verbatim():
     """时间线「泳道拆除告警」行必须原样透传回执 error——逐仓点名才能到巡检读面
     （验收 C 的时间线面；改成笼统文案=点名丢失）。"""
     src = _src("dev_lane.py")
-    at = src.find("泳道拆除告警")
-    assert at > 0, "时间线告警行找不到"
+    at = src.find("lane teardown warning")
+    assert at > 0, "timeline warning line not found"
     seg = src[at:at + 200]
     assert "tr.error" in seg, seg
 

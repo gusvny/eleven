@@ -122,8 +122,8 @@ def test_loop_tail_blocks_instead_of_raising_behind_the_gate():
     assert len(seg) == 2, "主循环尾必须挂门"
     body = seg[1].split('# Close out', 1)[0]          # 门开后的这段就是新行为
     # 老历史（门关）逐字保留 raise；门开后不得再有 raise
-    assert body.count('raise ValueError("未知阶段') == 1, "门关分支保留 raise 且只有一处"
-    after_gate = body.split('raise ValueError("未知阶段', 1)[1]
+    assert body.count('raise ValueError("unknown phase') == 1, "the gate-closed branch keeps its single raise"
+    after_gate = body.split('raise ValueError("unknown phase', 1)[1]
     import re as _re
     pre_block = after_gate.split("await self._blocked(", 1)[0]
     assert not _re.search(r"^\s*raise\b", pre_block, _re.M), \

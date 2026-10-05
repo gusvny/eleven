@@ -76,7 +76,7 @@ def test_a_contrast_cumulative_still_caps():
         assert counted
     assert tr == MAX_TESTS_FAULT_ROUNDS + 1
     assert integration_route("tests-fault", tr, 0).startswith(
-        "blocked:测试集迭代 %d 轮超限" % tr)
+        "blocked:test-set iterations %d exceed the cap" % tr)
 
 
 # ---------- B. 复位点全表（要求①②） ----------
@@ -210,10 +210,10 @@ def test_c2_supply_shape_exempt_ledger_names_supply_face():
     tr, ex, counted, note = asyncio.run(
         wf._tests_round_account(3, 0, _supply_receipt()))
     assert (tr, ex, counted) == (3, 1, False)
-    assert "供给" in note and "不计入" in note and shared.SUPPLY_TIMEOUT_SIG in note
+    assert "supply-side" in note and "not counted as a tests-fault round" in note and shared.SUPPLY_TIMEOUT_SIG in note
     _, _, counted2, note2 = asyncio.run(
         wf._tests_round_account(0, 0, _supply_receipt(error=SUPPLY_FAIL_ERR)))
-    assert not counted2 and "供给" in note2
+    assert not counted2 and "supply-side" in note2
 
 
 def test_c2_supply_shape_exempt_cap_cover_intact():
@@ -228,7 +228,7 @@ def test_c2_supply_shape_exempt_cap_cover_intact():
         assert not counted and tr == 0
     assert ex == MAX_TESTS_EXEMPT_ROUNDS
     cover = exempt_cap_text(ex + 1)
-    assert "超限" in cover
+    assert "consecutive-exemption over cap" in cover
     for kw in ("authorize", "ruling", "rework", "pause"):
         assert kw in cover, kw
 
@@ -237,7 +237,7 @@ def test_c2_supply_shape_exempt_cap_cover_intact():
 
 def test_d_exempt_cap_text():
     t = exempt_cap_text(MAX_TESTS_EXEMPT_ROUNDS + 1)
-    assert "超限" in t and str(MAX_TESTS_EXEMPT_ROUNDS) in t
+    assert "consecutive-exemption over cap" in t and str(MAX_TESTS_EXEMPT_ROUNDS) in t
     for kw in ("authorize", "ruling", "rework", "pause"):
         assert kw in t, kw
     assert "terminate" not in t  # 无此 op，不发明出口
@@ -250,18 +250,18 @@ def test_d_exempt_loop_bound():
         tr, ex, counted, _ = step_rounds("tests-fault", tr, ex,
                                               jitter_green=True)
     assert tr == 0 and ex == MAX_TESTS_EXEMPT_ROUNDS + 2 and not counted
-    assert "超限" in exempt_cap_text(ex)
+    assert "consecutive-exemption over cap" in exempt_cap_text(ex)
 
 
 # ---------- E. integration_route 超限文案（零回归 + 出路在场） ----------
 
 def test_e_route_text_prefix_byte_compat():
     r = integration_route("tests-fault", MAX_TESTS_FAULT_ROUNDS + 1, 0)
-    assert r.startswith("blocked:测试集迭代 6 轮超限（上限 5），转人工判读")
-    for kw in ("authorize", "ruling", "rework", "pause", "超限"):
+    assert r.startswith("blocked:test-set iterations 6 exceed the cap (cap 5); needs human review")
+    for kw in ("authorize", "ruling", "rework", "pause", "exceed the cap"):
         assert kw in r
     r2 = integration_route("code-fault", 0, MAX_CODE_FAULT_ROUNDS + 1)
-    assert r2.startswith("blocked:打回 developer 6 轮超限（上限 5），转人工判读")
+    assert r2.startswith("blocked:bounced to developer 6 rounds exceed the cap (cap 5); needs human review")
     assert "authorize" in r2
     # 未超限路由不受影响；route 签名未变（3 位置参）
     assert integration_route("tests-fault", MAX_TESTS_FAULT_ROUNDS, 0) == \

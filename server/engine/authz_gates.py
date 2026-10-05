@@ -41,53 +41,55 @@ def validate_authorization(auth: Any, now_epoch: int, ticket_id: str) -> str:
     """intake 校验（纯函数）：返回 "" = 合法，否则人话拒收原因（调用方落 refused，
     不进 Temporal 事件历史——与 host_ruling/pause 同款双形态）。"""
     if auth is None:
-        return "授权载荷缺失"
+        return "authorization payload missing"
     kind = str(_get(auth, "kind") or "")
     if kind not in shared.AUTH_KINDS:
-        return "kind 非法：%r（只认 %s）" % (kind, "|".join(shared.AUTH_KINDS))
+        return "invalid kind: %r (only %s accepted)" % (kind, "|".join(shared.AUTH_KINDS))
     who_raw = _get(auth, "who")
     who = str(who_raw or "")
     if not who.strip():
-        return "缺 who（授权人身份由调用方注入）"
+        return "missing who (the authorizer identity is injected by the caller)"
     if len(who) > shared.AUTHZ_WHO_MAX_LEN:
-        return "who 超长（%d > %d）" % (len(who), shared.AUTHZ_WHO_MAX_LEN)
+        return "who too long (%d > %d)" % (len(who), shared.AUTHZ_WHO_MAX_LEN)
     norm = who.strip().lower()
     if norm in shared.AUTHZ_AGENT_ROLE_NAMES:
-        return "agent 不得自签（who=%r 是 agent 角色名；授权只能人签发）" % who
+        return "an agent must not self-authorize (who=%r is an agent role name; only a human issues authorization)" % who
     if norm.endswith("-agent"):
-        return "agent 不得自签（who=%r 是 agent 显示名家族：-agent 后缀）" % who
+        return "an agent must not self-authorize (who=%r is in the agent display-name family: the -agent suffix)" % who
     reason = str(_get(auth, "reason") or "")
     if not reason.strip():
-        return "缺 reason（必须能回答「基于什么理由批准」）"
+        return "missing reason (it must answer \"approved on what grounds\")"
     if len(reason) > shared.AUTHZ_REASON_MAX_LEN:
-        return "reason 超长（%d > %d）" % (len(reason), shared.AUTHZ_REASON_MAX_LEN)
+        return "reason too long (%d > %d)" % (len(reason), shared.AUTHZ_REASON_MAX_LEN)
     scope = _scope_list(auth)
     if not scope:
-        return "scope 空（授权必须限定路径或票号）"
+        return "empty scope (an authorization must name paths or a ticket id)"
     if len(scope) > shared.AUTHZ_SCOPE_MAX_ITEMS:
-        return "scope 条目超限（%d > %d）" % (len(scope), shared.AUTHZ_SCOPE_MAX_ITEMS)
+        return "too many scope entries (%d > %d)" % (len(scope), shared.AUTHZ_SCOPE_MAX_ITEMS)
     for s in scope:
         if not s.strip():
-            return "scope 含空白条目"
+            return "scope carries a blank entry"
         if len(s) > shared.AUTHZ_SCOPE_ITEM_MAX_LEN:
-            return "scope 条目超长（%d > %d）：%s…" % (
+            return "scope entry too long (%d > %d): %s…" % (
                 len(s), shared.AUTHZ_SCOPE_ITEM_MAX_LEN, s[:40])
         if not path_gates._is_safe_path(s):
-            return "scope 条目非法路径：%r" % s
+            return "scope entry is not a safe path: %r" % s
     if kind == shared.AUTH_ARBITRATION_VERDICT:
         if not str(ticket_id or ""):
-            return "arbitration_verdict 缺本票票号上下文（拒绝无主授权）"
+            return "arbitration_verdict is missing this ticket's id context (an ownerless authorization is refused)"
         if [s.strip() for s in scope] != [str(ticket_id)]:
-            return ("arbitration_verdict 的 scope 必须恰为本票票号 %r（别票不受影响，"
-                    "一次授权只对指定票生效）" % str(ticket_id))
+            return ("arbitration_verdict scope must be exactly this ticket's id %r "
+                    "(other tickets are untouched; one authorization covers only the "
+                    "named ticket)" % str(ticket_id))
     exp = shared._authz_int(_get(auth, "expires"))
     now = shared._authz_int(now_epoch)
     if exp <= 0:
-        return "expires 缺失或非法（epoch 秒，必填——授权必须到期作废）"
+        return "expires missing or invalid (epoch seconds, required — an authorization must expire)"
     if exp <= now:
-        return "expires 已过期（%d ≤ 签发时刻 %d），死授权不进历史" % (exp, now)
+        return "expires already passed (%d <= issue time %d); a dead authorization never enters history" % (exp, now)
     if exp > now + shared.AUTHZ_EXPIRES_MAX_SEC:
-        return ("expires 超上限（距签发 %d 秒 > %d 秒）——单张授权有效期不得超 %d 天"
+        return ("expires over the cap (%d s after issue > %d s) — one authorization may "
+                "not last more than %d days"
                 % (exp - now, shared.AUTHZ_EXPIRES_MAX_SEC,
                    shared.AUTHZ_EXPIRES_MAX_SEC // 86400))
     return ""
@@ -206,7 +208,7 @@ def authorized_passage_note(passed: Sequence[Dict[str, Any]]) -> str:
                 break
         else:
             groups.append((key[0], key[1], [str(p.get("path") or "")]))
-    names = "、".join(str(p.get("path") or "") for p in passed)
+    names = ", ".join(str(p.get("path") or "") for p in passed)
     details = []
     for who, issued, files in groups:
         reason = ""
@@ -216,12 +218,12 @@ def authorized_passage_note(passed: Sequence[Dict[str, Any]]) -> str:
                 break
         reason = reason.replace("\n", " ").replace("\r", " ").strip()
         if len(reason) > 120:
-            reason = reason[:120] + "…（全文见 meta.authorizations）"
-        details.append("授权人 %s @ %s，理由 %s"
-                       % (who, fmt_ts(issued), reason or "（未记）"))
-    keys = "；".join("%s%s@%d:%s" % (shared.AUTHZ_USED_KEY, who, issued, ",".join(files))
-                    for who, issued, files in groups)
-    return "受保护路径经人授权放行：%s（%s）；%s" % (names, "；".join(details), keys)
+            reason = reason[:120] + "… (full text in meta.authorizations)"
+        details.append("authorizer %s @ %s, reason %s"
+                       % (who, fmt_ts(issued), reason or "(not recorded)"))
+    keys = "; ".join("%s%s@%d:%s" % (shared.AUTHZ_USED_KEY, who, issued, ",".join(files))
+                     for who, issued, files in groups)
+    return "protected paths passed under human authorization: %s (%s); %s" % (names, "; ".join(details), keys)
 
 
 def fmt_ts(epoch: int) -> str:

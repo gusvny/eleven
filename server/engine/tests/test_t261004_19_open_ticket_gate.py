@@ -21,9 +21,8 @@ IO, no Temporal, no real ~/.sandbar):
     SANDBAR_EPICS_DIR anchor.
 
 Translation note (t261004-28 carrier, host L15 ruling): comments and docstrings
-are translated to English; the asserted refusal substrings stay in Chinese on
-purpose -- they must match the engine's refusal message text (data coupling,
-not copy), each marked inline with copy-lang-allow:data.
+are translated to English; the assertions below match the engine's English
+refusal copy verbatim (t261004-36) and carry no copy-language markers.
 """
 import json
 
@@ -132,7 +131,7 @@ def test_meta_op_still_host_only_with_new_keys(grants_root):
     (cwd channel) can never change them."""
     r = eg.save_declaration("sandbar", {}, "executor", 1234, open_ticket_epics=["proj-exec"],
                             caller_channel="cwd")
-    assert r["saved"] is False and "反锁" in (r.get("reason") or "")  # copy-lang-allow:data -- engine refusal text
+    assert r["saved"] is False and "meta-permission lock" in (r.get("reason") or "")
 
 
 # ---------- no authority grab: authority_surface_violation ----------
@@ -262,7 +261,7 @@ def test_refusal_appends_audit_row_with_epic():
 
 def test_judge_open_ticket_io_checks_file(epics_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path))
-    (epics_dir / "proj-exec.md").write_text("# 立项单\n", encoding="utf-8")  # copy-lang-allow:data -- fixture domain text
+    (epics_dir / "proj-exec.md").write_text("# epic charter\n", encoding="utf-8")  # fixture domain text
     v = eg.judge_open_ticket(_ok_load(), "sandbar", "proj-exec", ["app/x.py"], 0)
     assert v["allowed"] is True
     v2 = eg.judge_open_ticket(_ok_load(open_ticket_epics=["ghost"]), "sandbar", "ghost",

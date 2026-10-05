@@ -12,7 +12,7 @@ workflow task 就谁执行 ⇒ 真票 t260930-09 第 4 轮出现「票面文案�
   `guard_single_worker` 三态 × {缺省拒绝 / --replace 接管 / 旁车指向他仓=不代杀}；
 - 真进程面（真 worker.py 子进程 + 真 pidfile）：活 pid 拒绝启动（退出码 2 + 具名 stderr +
   **pidfile 内容不被改写** + 旧进程仍活着）、陈旧 pidfile 正常接管、`--replace` 先 TERM
-  旧 worker（见到它真退出）再起新的且 pidfile 指向新 pid、超时路径报错且**不 KILL**。
+  old worker (observed to really exit) then a new one starts with the pidfile pointing at the new pid; the timeout path reports and never kills (see the NO KILL wording).
 - 零 Temporal 依赖：daemon 子进程连不上 TARGET_HOST 就在 connect 处死掉，但**守卫与
   pidfile 写入都发生在 connect 之前**——正是被测面；因此本 UT 无台可跑、秒级。
 
@@ -114,13 +114,13 @@ class PidfileStateTest(unittest.TestCase):
             self.pf.write_text(bad, encoding="utf-8")
             st = worker.read_pidfile_state(str(self.pf))
             self.assertEqual(st["state"], "malformed", bad)
-            self.assertIn("按陈旧接管", st["detail"])
+            self.assertIn("taken over as stale", st["detail"])
         # stale（合法 pid 但已不在）
         self.pf.write_text("999999", encoding="utf-8")
         st = worker.read_pidfile_state(str(self.pf))
         self.assertEqual(st["state"], "stale")
         self.assertEqual(st["pid"], 999999)
-        self.assertIn("已不在", st["detail"])
+        self.assertIn("is gone", st["detail"])
         # live（真活进程）
         pid = _spawn_sleeper()
         self.procs.append(pid)
@@ -180,7 +180,7 @@ class PidfileStateTest(unittest.TestCase):
             % (pid, int(time.time())), encoding="utf-8")
         msg = worker.guard_single_worker(str(self.pf), replace=True)
         self.assertTrue(msg, "旁车指向他仓时 --replace 必须拒绝（不代杀他人进程）")
-        self.assertIn("另一个仓", msg)
+        self.assertIn("another repo", msg)
         self.assertIn("/tmp/some-other-repo", msg)
         self.assertTrue(_alive(pid), "拒绝路径不得杀掉他仓进程")
 
@@ -196,7 +196,7 @@ class PidfileStateTest(unittest.TestCase):
             worker.REPLACE_WAIT_SEC = saved
         self.assertTrue(msg, "超时路径必须报错（不放行）")
         self.assertIn(str(pid), msg)
-        self.assertIn("不 KILL", msg)
+        self.assertIn("NO KILL", msg)
         self.assertTrue(_alive(pid), "超时路径绝不许静默 KILL")
         _kill(pid)
 

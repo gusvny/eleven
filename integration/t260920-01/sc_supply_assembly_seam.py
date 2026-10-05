@@ -149,8 +149,8 @@ if res.get("ok"):
     sig, counted, note = judge_receipt(shared, dev_lane, err)
     ok(sig is True, "A1e 真出口 err 命中引擎供给签名")
     ok(counted is False, "A1f 该轮不计入 tests-fault（counted=False）")
-    ok("不计入" in note and "供给" in note,
-       "A1g 留痕含「不计入」且点名供给面（got: %s）" % note[:80])
+    ok("not counted" in note and "supply-side assembly" in note,
+       "A1g 留痕含不计轮豁免记名+点名供给面（got: %s）" % note[:80])
 else:
     ok(False, "A1 调用失败: " + str(res.get("stderr")))
 shutil.rmtree(repo, ignore_errors=True)
@@ -170,7 +170,7 @@ if res.get("ok"):
     ok(shared.SUPPLY_TIMEOUT_SIG in err and shared.SUPPLY_SIDE_SIG in err,
        "A2b 超时态出口含双标记（got: %s）" % err[:80])
     sig, counted, note = judge_receipt(shared, dev_lane, err)
-    ok(sig is True and counted is False and "不计入" in note,
+    ok(sig is True and counted is False and "not counted" in note,
        "A2c 超时态同样命中豁免不计轮")
 else:
     ok(False, "A2 调用失败: " + str(res.get("stderr")))

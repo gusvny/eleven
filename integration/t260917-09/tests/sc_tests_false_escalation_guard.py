@@ -125,7 +125,7 @@ def wait_cap_blocked(py, env, tid, worker, wlog, fail, budget):
             return None
         s = query_snapshot(py, env, tid)
         if (s.get("stage") in OVER_LIMIT_STAGES
-                and s.get("stage_state") == "blocked" and "超限" in t09.snap_text(s)):
+                and s.get("stage_state") == "blocked" and "exceed the cap" in t09.snap_text(s)):
             return s
         return None
     snap = poll(_probe, budget)
@@ -235,9 +235,9 @@ def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
     # 零新增红，260923 口径），故不发抖动探针（探针只服务「红项名单非空且不在已知红
     # 车道」的轮）——真正要守的是**留痕同面**：豁免结论（「不计入」）、「不在册」结论
     # 与陈旧红项名三者都必须可读，死源绝不静默当全绿。
-    check("不计入" in txt and "不在册" in txt and "ghost_stale_name" in txt,
+    check("不计入" in txt and "outside the known-red roster" in txt and "ghost_stale_name" in txt,
           "不在册子用例 豁免轮留痕同面（不计入 + 不在册 + 红项名，死源不静默）")
-    check("不在册" in txt,
+    check("outside the known-red roster" in txt,
           "不在册子用例 票面点名「不在册」（fail-closed 可见，绝不静默当全绿）；本夹具轮"
           "闸拦为空 ⇒ 红面走已知红豁免车道（不计轮），上限照旧兜底——留痕不因外置道而减")
     check("ghost_stale_name" in txt,
@@ -281,7 +281,7 @@ def phase_env(py, env, tid, worker, wlog, stub_log, fail, check):
     # 误报，报错精确纪律）。两条上限文案的**逐字前缀**才是超限封据面。
     ho_sum = " ".join(str(h.get("summary") or "") for h in (adv.get("handoffs") or [])
                       if isinstance(h, dict))
-    check("连续豁免超限" not in ho_sum and "轮超限" not in ho_sum,
+    check("consecutive-exemption over cap" not in ho_sum and "exceed the cap" not in ho_sum,
           "环境失败分支 不再撞豁免超限封面（交接留痕无上限文案；summary 面=%r）"
           % ho_sum[-160:])
 

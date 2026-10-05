@@ -120,8 +120,8 @@ async function legGateRefusal(t, api, sdkPython, fixture) {
     const notes1 = allNotes(blocked1)
     t.ok(notes1.includes('path_gate_reason=unauthorized_path'),
       'face keeps the machine-readable path_gate_reason= key')
-    t.ok(notes1.includes('合法出路'), 'face carries the sanctioned way-out text')
-    t.ok(!notes1.includes('缺 verdict= 标记'),
+    t.ok(notes1.includes('sanctioned way out'), 'face carries the sanctioned way-out text')
+    t.ok(!notes1.includes('times missing verdict= marker'),
       'gate refusal is NOT misreported as "missing verdict= marker" (main cause honest)')
     const arbBlocked1 = (blocked1.timeline || []).filter(e => e.stage === 'arbitrate' && e.state === 'blocked')
     t.ok(arbBlocked1.length === 1,
@@ -151,7 +151,7 @@ async function legGateRefusal(t, api, sdkPython, fixture) {
     t.ok(!!lastBlocked2, 'a blocked timeline entry exists for the second block')
     const why2 = String(lastBlocked2?.reason || '')
     const notes2 = allNotes(blocked2)
-    t.ok(why2.includes('缺 verdict= 标记') && notes2.includes('缺 verdict= 标记'),
+    t.ok(why2.includes('times missing verdict= marker') && notes2.includes('times missing verdict= marker'),
       'with no refusal anywhere, "missing verdict= marker" stays the stated cause (zero regression)')
     t.ok(!why2.includes('path_gate_reason='),
       'refusal-free re-entry shows no gate language on the current blocked face')
