@@ -3441,3 +3441,27 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②或清扫前要求显式声明「当前无在跑段」，无声明 fail-closed 拒扫；③回执里把「condemned 且 holder 心跳新鲜」单列成「疑似在跑」面。
 > **本次处置（261005）**：登记；**只跑 dry-run，未真拆**。真拆的是另一条确证残台 `stage-console-f919ebd3`
 > （5.3 天前为已终态票 t260929-22 起、无主人无心跳，`stage_docker down` 已拆净，residue 为空）。
+
+## KI-201 **CL-1 并发闸缺回溯守卫 ⇒ 重启后 07:20 之前开的在飞票全部不可重放**（工作流任务永久失败、票冻结，261005 实证）
+
+> **现象**：261005 15:07–15:11，`t261005-02` / `t261005-06` / `t261004-36` 三票查询全红——
+> `QueryError: 工单查询失败（transient）：… RPCError: Unable to query workflow due to Workflow Task in failed state.`；
+> 逐票 worker 日志（`server/engine/data/worker-<票>.log`）指名根因原文：
+> `[TMPRL1100] Nondeterminism error: Activity type of scheduled event 'prepare_workspace' does not match activity type of activity command 'concurrency_acquire'`。
+> **机制（代码级）**：CL-1（`t261004-32`，**07:20** 合并 `775bdb1`）在 `DevLaneWorkflow.run` 顶部
+> **无条件**插入 `await self._concurrency_gate()`（`server/engine/dev_lane.py:2596-2601`），位置在 `_prepare_workspace_step()` **之前**，
+> 且该调用**没有 `workflow.patched(...)` 守卫**（该文件其它特性都有：`INTEG_LOOP_PATCH_ID` / `UI_EVIDENCE_PATCH_ID` …）。
+> 于是 07:20 之前开出的 DevLane 票——历史里第一个被调度的是 `prepare_workspace`——在跑新代码的 worker 上重放时命令序列不匹配，
+> 工作流任务**确定性失败**：查询进不去、信号（含 `retry_qc`/`sign`）也进不去，票冻结。
+> **为什么今天才炸**：重启前在跑的 worker 进程是 07:20 之前启动的（内存里是旧代码），重放走旧代码所以一切正常；
+> 14:59:42 控制台重启 → 新 worker 载入新代码 → 旧票立刻不可重放。**这是「重启才暴露」形态**，不是重启本身的错。
+> **影响（实测）**：`-02`（run_integration_tests/gen4）、`-06`（merge_check blocked/gen2）、`-36`（implement/gen4）三票冻结；
+> 停止位就是重启前快照的位置，未回退也未前进；三票当前**无法被任何 ops 推进**（含重跑请求与签字）。
+> **族面排查（实报即全族）**：全部 `server/engine/data/worker-*.log` grep `Nondeterminism error`，
+> **当日仅这三票命中**；跨项目在飞票（nusuyou `t261005-01`、dengzhufpv `t261005-11`）未命中；
+> 历史同类先例：`worker-t260925-05.log` 11656 次（另一处改动引起的同族不匹配）——**该故障模式是复发的，不是首次**。
+> **出路**：①**首选**：给该 gate 补回溯守卫 `if workflow.patched("t261004-32-cl1-gate"): await self._concurrency_gate()`
+> ——旧历史跳过闸（它们本就不受闸约束），新票照常受闸；改完这三票可正常重放缓过来，不必重开票；
+> ②不补则只能 `cancel`（记名终结）+ 重开票，丢历史、重付全链成本。
+> **回归用例（待补）**：L1——构造「历史首个活动 = prepare_workspace」的既有实例，用当前代码重放，
+> 断言无 `NonDeterministicError`（或断言 patched 守卫在场且旧历史不调用闸）。
