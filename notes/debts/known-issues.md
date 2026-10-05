@@ -3480,3 +3480,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①安装/升级后留可查指纹（如 `~/.dsh/.agent-presets/<name>/.installed-from.json` 记仓内 sha + 时刻），
 > 面板/守望者状态面比 sha 报漂移；②或把「人设改动 = 仓内改 + 重装」写成机械步进升级 runbook；③台账口径同步。
 > **本次处置（261005）**：登记。本次写入的「诊断读图」段与章程措辞限定**需重装才生效**（宿主授权或宿主亲手 `cp -R`）。
+
+## KI-203 **KI-201 的修法本身漏了中间窗口**：CL-1 落地后、守卫落地前开的票被守卫**跳过并发闸** ⇒ 同样不可重放（261005 20:2x 实证，`-09`/`-10` 冻结）
+
+> **现象**：261005 20:2x，`t261005-09` 与 `t261005-10` 查询红（`Unable to query workflow due to Workflow Task in failed state`），
+> worker 日志（`server/engine/data/worker-t261005-09.log` / `-10.log`）给的原文与 KI-201 **方向相反**：
+> `[TMPRL1100] Nondeterminism error: Activity type of scheduled event 'concurrency_acquire' does not match activity type of activity command 'prepare_workspace'`
+> —— 历史里**第一个**调度事件是 `concurrency_acquire`，而当前代码先调度 `prepare_workspace`。
+> **机制**：`t261005-14`（`5f520b5`）的守卫按 `workflow.patched("dev-lane-concurrency-gate-v1")` 判定，注释写明标记语义是
+> 「this run was STARTED with CL-1 present」，**但该标记只有含 `patched()` 调用的代码才会写入**——于是存在**三个窗口**：
+> ①CL-1（07:20）之前开的票：历史无闸、无标记 → 跳过 = 正确；
+> ②CL-1 之后、守卫（16:15）之前开的票：**历史有闸，但也没标记** → 守卫同样跳过 → 与历史不符 → 不可重放（本条实测面）；
+> ③守卫之后开的票：标记在位 → 走闸 = 正确。守卫只覆盖了 ①③，漏了 ②。
+> **影响（实测）**：窗口 ② 内尚在飞的票即 `t261005-09`、`t261005-10`（其余同窗口票已收口），两票**冻结**：
+> 查询/信号全进不去。窗口内已收口的 `-13`（15:36 开票）未受影响（其在守卫落地前已走完并合并），属运气不是机制。
+> **出路**：判定必须覆盖三窗口且**重放确定**——①用 `workflow.info().start_time` 与 CL-1 落地时刻比较（同一历史重放取值恒定，可判）；
+> ②或在 workflow 顶部写一枚**启动版本标记**并在守卫里读它（新票有、两代旧票都没有——仍需与 ① 合判）；
+> ③或对窗口 ② 的存量票走一次性处置（reset/重开），但那是付历史代价，非首选出路。
+> **回归用例（待补）**：L1/场景——三段历史各一（无闸、有闸无标记、有闸有标记）在当前代码下重放，断言三段全部无 `NonDeterministicError`。
