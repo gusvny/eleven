@@ -218,11 +218,17 @@ def test_t5_static_lock_family_guarded():
         for i, line in enumerate(lines):
             if "await self._concurrency_gate()" in line:
                 window = "\n".join(lines[max(0, i - 4):i + 1])
-                assert "workflow.patched(" in window, (
+                # t261005-15: the guard reads the shared predicate now - the
+                # marker arm lives inside it; a bare patched() call here
+                # would silently drop the window-(b) time arm.
+                assert ("workflow.patched(" in window
+                        or "_concurrency_gate_active(" in window), (
                     "unguarded gate call at %s line %d" % (i + 1,))
     # The emitting helpers open with the patched early return (shared by both
     # lanes - this is what covers the light-lane renew/release sites).
+    # t261005-15: the predicate call satisfies the same lock.
     for helper in ("async def _concurrency_release(", "async def _concurrency_renew("):
         idx = dl.index(helper)
         body = dl[idx:idx + 600]
-        assert "if not workflow.patched(" in body, helper
+        assert ("if not workflow.patched(" in body
+                or "if not _concurrency_gate_active(" in body), helper

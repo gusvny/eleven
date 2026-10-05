@@ -15,8 +15,10 @@ t261005-02/-06/t261004-36）。修复=每 lane 一个 patch id 罩住全族。�
 - R2 新票面（正证，防「门把新票也静默关掉」）：patched()=True 时 run 入口第一条
   就是 concurrency_acquire；两 helper 真发射 concurrency_release / concurrency_renew。
 - R3 守卫完整性（家族面，对抗「未来新调用点逃出守卫」）：两 lane 文件各含本 lane
-  patch id 常量；每个 `await self._concurrency_gate()` 调用位都落在
-  workflow.patched(<lane id>) 门内（调用位逐一被罩，源码形状契约）。
+  patch id 常量；每个 `await self._concurrency_gate()` 调用位都落在守卫判定内
+  （t261005-14 形=workflow.patched 门；t261005-15 形=_concurrency_gate_active
+  谓词，谓词自身保有 marker 臂（先判）+ 时锚臂 + 防御回落——R3b）。
+  （源码形状契约；t261005-15 重排守卫形状后本条接受两形，契约不变。）
 - R4 畸形输入：重放面 + 空 project key 不抛不发射（门从未进）；新票面 + 空 key
   fail-closed 具名 ValueError（rule 9 既有契约跨守卫重钉）。
 
@@ -158,13 +160,42 @@ def helper_emits(cls, helper_name, patched_value, project_key="t26100514-proj"):
 
 def gate_guard_scan(path):
     """Contract scan: every bare gate call site in the lane file sits inside a
-    workflow.patched(<this lane's gate id>) guard. Returns (total, guarded)."""
+    guard verdict. Two accepted shapes (t261005-15 rewired the sites to the
+    shared replay predicate; the contract — no call site escapes the sweep —
+    is unchanged, only the source shape moved):
+      - the t261005-14 shape: workflow.patched(<this lane's gate id>): directly
+        above the call;
+      - the t261005-15 shape: _concurrency_gate_active(workflow, <id>) directly
+        above the call (the predicate itself keeps the marker arm - asserted
+        separately in R3b against dev_lane, where it physically lives).
+    Returns (total, guarded)."""
     text = path.read_text(encoding="utf-8")
     total = len(re.findall(r"^\s*await self\._concurrency_gate\(\)", text, re.M))
-    guarded = len(re.findall(
-        r"workflow\.patched\([A-Z_]*GATE_PATCH_ID\):\s*\n\s*await self\._concurrency_gate\(\)",
-        text))
+    shape = (r"(?:workflow\.patched\([A-Z_]*GATE_PATCH_ID\)"
+             r"|_concurrency_gate_active\(workflow, [A-Z_]*GATE_PATCH_ID\))"
+             r":\s*\n\s*await self\._concurrency_gate\(\)")
+    guarded = len(re.findall(shape, text))
     return total, guarded
+
+
+def predicate_marker_arm_scan(dev_lane_path):
+    """R3b contract scan: the shared predicate keeps the marker discipline —
+    it consults the patch marker (arm 1) and keeps the time anchor (arm 2)
+    with a defensive fallback, so a marked run is never narrowed and a
+    degenerate info() never raises. Returns list of (label, ok)."""
+    text = dev_lane_path.read_text(encoding="utf-8")
+    m = re.search(r"def _concurrency_gate_active\(.*?\n(?=\n\S|\Z)", text, re.S)
+    if m is None:
+        return [("predicate _concurrency_gate_active exists in dev_lane", False)]
+    body = m.group(0)
+    return [
+        ("predicate keeps the marker arm: wf.patched(patch_id) consulted",
+         "wf.patched(patch_id)" in body),
+        ("predicate keeps the time arm: CL1_GATE_LANDED_AT referenced",
+         "CL1_GATE_LANDED_AT" in body),
+        ("predicate is defensive: non-datetime start_time falls back",
+         "isinstance" in body),
+    ]
 
 
 def main():
@@ -207,7 +238,7 @@ def main():
                   emits is True)
 
     # ---------------- R3 guard completeness (both lanes, call sites) ---------
-    print("\n== R3 guard completeness: every gate call site is patched-guarded")
+    print("\n== R3 guard completeness: every gate call site is guard-verdicted")
     ids = {"dev-lane": "dev-lane-concurrency-gate-v1",
            "light-lane": "light-lane-concurrency-gate-v1"}
     for lane, path in (("dev-lane", DEV_LANE), ("light-lane", LIGHT_LANE)):
@@ -216,6 +247,12 @@ def main():
               % (lane, total, guarded), total >= 2 and total == guarded)
         check("%s: patch id literal %s present" % (lane, ids[lane]),
               ids[lane] in path.read_text(encoding="utf-8"))
+    # R3b (t261005-15): the shared predicate that now fronts the sweep keeps
+    # the marker discipline - arm 1 patched(), arm 2 time anchor, defensive
+    # fallback. The marker arm must stay PRIMARY (checked first), so a marked
+    # run can never be narrowed by the time arm.
+    for label, ok_flag in predicate_marker_arm_scan(DEV_LANE):
+        check("predicate contract: %s" % label, ok_flag)
 
     # ---------------- R4 malformed input -------------------------------------
     print("\n== R4 malformed project key across the guard")

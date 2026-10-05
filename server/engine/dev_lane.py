@@ -35,7 +35,7 @@ import asyncio
 import json
 import os
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import workflow
@@ -447,6 +447,53 @@ MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID = "t261002-10-merge-check-resync"
 #: One shared id for both lanes: patched markers are judged against each
 #: workflow instance's own history, so there is no cross-lane collision face.
 CONCURRENCY_GATE_PATCH_ID = "dev-lane-concurrency-gate-v1"
+
+#: Replay anchor for the CL-1 gate family (t261005-15): the instant CL-1
+#: (775bdb1) landed, 2026-10-05 07:20:14 +0800. A workflow's
+#: ``info().start_time`` is part of its history - constant for a given
+#: instance across every replay - so comparing it against this frozen
+#: constant yields one verdict per history forever. This closes replay
+#: window (b) of the t261005-14 guard: a run STARTED after CL-1 but before
+#: the guard landed carries ``concurrency_acquire`` in its history yet no
+#: marker (the ``patched()`` call did not exist), so the marker arm alone
+#: would skip the gate and diverge (TMPRL1100, live freeze of
+#: t261005-09/-10). Boundary note, both directions symmetric: any time
+#: anchor can misclassify a run started inside the deploy lag (after the
+#: commit instant, before workers actually loaded the new code) - such a
+#: history would be gate-less but classified as gated and diverge. The
+#: residual is accepted (the 14:59 console restart already loaded post-CL-1
+#: code; no such ticket is alive) and recorded in the known-issue ledger.
+CL1_GATE_LANDED_AT = datetime(2026, 10, 4, 23, 20, 14, tzinfo=timezone.utc)
+
+
+def _concurrency_gate_active(wf, patch_id: str) -> bool:
+    """Replay-safe verdict for the whole CL-1 command family (t261005-15).
+
+    ``wf`` is the calling module's ``workflow`` facade (each lane passes its
+    own, so stubbed test harnesses stay honest).
+    Arm 1 (primary, marker discipline of t261005-14 kept): a run started
+    under the guard carries the patch marker -> gate on. Arm 2 (the window
+    (b) fix): a run whose history start_time is at/after the CL-1 landing
+    instant was started with CL-1 present, marker or not -> gate on. A
+    pre-CL-1 history (window (a)) fails both arms -> skip == the exact
+    historical replay. Deterministic: both inputs (history marker,
+    history start_time) are constant per instance; the anchor is a frozen
+    module constant. Defensive on shape: a missing/None/non-datetime
+    start_time falls back to the marker verdict and never raises - a
+    degenerate ``info()`` must not break the replay leg.
+    """
+    if wf.patched(patch_id):
+        return True
+    try:
+        start = getattr(wf.info(), "start_time", None)
+    except Exception:
+        return False
+    if not isinstance(start, datetime):
+        return False
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start >= CL1_GATE_LANDED_AT
+
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -1203,7 +1250,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # t261005-14: same replay guard as _concurrency_release - covers the
         # blocked renew, the merge human-gate renew and the gate's stage-end
         # renew with one early return (shared by both lanes).
-        if not workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+        # t261005-15: predicate adds the window-(b) time arm.
+        if not _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
             return
         proj = self._conc_project()
         if not proj:
@@ -1223,7 +1271,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # t261005-14: pre-CL-1 replay never emitted this command - skip it
         # entirely (one guard here covers every caller: stage-boundary pause
         # accounting, terminal release; both lanes share this helper).
-        if not workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+        # t261005-15: predicate adds the window-(b) time arm.
+        if not _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
             return
         proj = self._conc_project()
         if not proj:
@@ -2633,7 +2682,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # (stage_state=queued), never start-then-pause; an absent/malformed
         # t261005-14: patched guard - a pre-CL-1 history carries no marker, so
         # its replay must not schedule concurrency_acquire at all (TMPRL1100).
-        if workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+        # t261005-15: the time arm closes replay window (b) - a history that
+        # started after CL-1 but before the guard HAS the gate and no marker;
+        # the predicate runs it (see _concurrency_gate_active).
+        if _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
             await self._concurrency_gate()
 
         # 1) prepare_workspace (code, no agent; failure → blocked waiting for retry/rework)
@@ -2717,7 +2769,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal
             # (reason reset to running), not holding (first run / after a pause) =
             # t261005-14: patched guard (same id, same reasoning as run entry).
-            if workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+            # t261005-15: predicate adds the window-(b) time arm.
+            if _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
                 await self._concurrency_gate()
             # t260928-13：主相循环每轮先冲账（同步 signal 里的迁移由本边界冲走）
             await self._ledger_flush()

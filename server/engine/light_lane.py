@@ -101,6 +101,10 @@ with workflow.unsafe.imports_passed_through():
         FLOW_BRIEF,
         DevLaneWorkflow,
         MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID,
+        # t261005-15: replay predicate for the concurrency family (window-(b)
+        # time arm); judged against THIS module's workflow facade at the two
+        # gate sites below, the shared dev-lane id at the inherited helpers.
+        _concurrency_gate_active,
     )
     import shared  # 纯函数面（exception_chain_note 等，零 IO）
     # t261004-32: rule-point constants of the concurrency slot gate (the gate
@@ -1266,7 +1270,7 @@ class LightLaneWorkflow(DevLaneWorkflow):
         # a declaration refusal fails the ticket here by name (rule 9).
         # t261005-14: patched guard - a pre-CL-1 history carries no marker, so
         # its replay must not schedule concurrency_acquire at all (TMPRL1100).
-        if workflow.patched(LIGHT_CONCURRENCY_GATE_PATCH_ID):
+        if _concurrency_gate_active(workflow, LIGHT_CONCURRENCY_GATE_PATCH_ID):
             await self._concurrency_gate()
 
         # 1) 工作空间准备（dev-lane 同 helper：同活动/同失败转 blocked/同 rework 语义）
@@ -1293,7 +1297,8 @@ class LightLaneWorkflow(DevLaneWorkflow):
             # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal,
             # not holding = queued acquire.
             # t261005-14: patched guard (same id, same reasoning as run entry).
-            if workflow.patched(LIGHT_CONCURRENCY_GATE_PATCH_ID):
+            # t261005-15: predicate adds the window-(b) time arm.
+            if _concurrency_gate_active(workflow, LIGHT_CONCURRENCY_GATE_PATCH_ID):
                 await self._concurrency_gate()
             # 事件账本：主相循环每轮先冲账（机制在 base.TicketEventLedgerMixin）
             await self._ledger_flush()
