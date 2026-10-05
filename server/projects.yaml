@@ -11,7 +11,14 @@
 # 其余目录用于归属判定（如工单 worktree 落在任一 dir 下即属该项目）。
 # 各插件 host 启动时加载，未知 key 一律 400，无默认值。
 projects:
-  - key: suyou
-    name: 溯游
+  # 261005 更正：种子原本只有一条已退役的 suyou（`/Users/user/Documents/suyou` 已不存在）＝**死条目**。
+  # 为什么必须修：任何**新家**（新装、隔离台、UI 采集台的临时 DSH_HOME）都会重播这份种子；
+  # 而 UI 采集台从注册表**第一条可用项目**取 cwd（`server/ui-check/capture.mjs` 的
+  # `/api/wf/projects` → global-session/open），死在死目录上 ⇒ 「新建会话失败：工作区创建失败 …
+  # ENOENT」⇒ capture exit 1 ⇒ UI 证据永远落不了泳道（KI-204，`t261005-16` 的取证面）。
+  # 种子因此改为**活的**项目目录；种子为空同样是坏的（台内造数会报「无可用项目 key」）。
+  # 受保护名单内的文件：本次为 main 侧改动（宿主令 261005 授权）。
+  - key: sandbar
+    name: sandbar
     dirs:
-      - /Users/user/Documents/suyou
+      - /Users/user/Documents/sandbar
