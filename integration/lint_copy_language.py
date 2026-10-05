@@ -41,11 +41,16 @@ Usage: python3 integration/lint_copy_language.py [--base <ref>] (cwd = repo root
 Module use: from lint_copy_language import lint_copy_language; lint_copy_language()
 appends to lint_tests.py's shared errors list via its return value.
 """
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+# t261004-42: the base-resolution chain and the added-line parser moved to the
+# shared module so the tier-marker lint (L19) reuses them instead of drifting.
+# The local `git` callable keeps its name (module consumers and the battery call
+# `git(...)`); behavior is byte-identical to the pre-extraction copy.
+from lib_lint_diff import git_run as git  # noqa: E402
+from lib_lint_diff import parse_added_lines, resolve_base  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -89,55 +94,6 @@ def _glob_match(parts, pat_parts):
     if not parts:
         return False
     return fnmatch.fnmatch(parts[0], head) and _glob_match(parts[1:], pat_parts[1:])
-
-
-def resolve_base(explicit, git):
-    """Return (base-ref, how) or (None, reason). Never guess silently."""  # type: (str|None, callable) -> tuple
-    if explicit:
-        return explicit, "--base argument"
-    env = os.environ.get("COPY_LANGUAGE_BASE", "").strip()
-    if env:
-        return env, "$COPY_LANGUAGE_BASE"
-    for ref in ("origin/main", "main"):
-        rc, out = git("merge-base", "HEAD", ref)
-        if rc == 0 and out.strip():
-            return out.strip(), "git merge-base HEAD %s" % ref
-        # ref may not exist in a shallow/odd worktree; try the next one
-    rc, _ = git("rev-parse", "--verify", "HEAD")
-    if rc == 0:
-        return "HEAD", "HEAD (uncommitted worktree diff only)"
-    return None, "no git base resolvable and no HEAD"
-
-
-def git(*args):
-    r = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
-    return r.returncode, (r.stdout or "") + (r.stderr or "")
-
-
-def parse_added_lines(diff_text):
-    """Yield (path, new_lineno, line_text) for added lines only."""
-    path = None
-    new_lineno = 0
-    for line in diff_text.splitlines():
-        if line.startswith("+++ b/"):
-            path = line[6:]
-            continue
-        if line.startswith("+++ "):
-            path = None  # /dev/null (deleted file): no added lines to judge
-            continue
-        if line.startswith("@@"):
-            m = re.search(r"\+(\d+)", line)
-            new_lineno = int(m.group(1)) - 1 if m else 0
-            continue
-        if path is None:
-            continue
-        if line.startswith("+") and not line.startswith("+++"):
-            new_lineno += 1
-            yield path, new_lineno, line[1:]
-        elif line.startswith("-") or line.startswith("\\"):
-            continue
-        else:
-            new_lineno += 1
 
 
 def _strip_comment(text: str, path: str) -> str:

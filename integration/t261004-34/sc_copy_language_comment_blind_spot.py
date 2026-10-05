@@ -36,6 +36,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 GATE_SRC = os.path.join(REPO, "integration", "lint_copy_language.py")
+# t261004-42 split the gate's diff plumbing into a shared module; the throwaway
+# transport must carry the gate's real in-repo dependency set, not a file count.
+GATE_LIB = os.path.join(REPO, "integration", "lib_lint_diff.py")
 
 FAILURES = []
 
@@ -72,6 +75,16 @@ def append(tmp, rel, text):
         f.write(text)
 
 
+def transport(tmp):
+    """Copy the gate and its in-repo dependency module into the throwaway repo."""
+    os.makedirs(os.path.join(tmp, "integration"), exist_ok=True)
+    shutil.copy2(GATE_SRC, os.path.join(tmp, "integration",
+                                        "lint_copy_language.py"))
+    if os.path.isfile(GATE_LIB):
+        shutil.copy2(GATE_LIB, os.path.join(tmp, "integration",
+                                            "lib_lint_diff.py"))
+
+
 def main():
     if not os.path.isfile(GATE_SRC):
         print("ENV_FAIL: gate script missing: integration/lint_copy_language.py")
@@ -92,8 +105,7 @@ def main():
         git(tmp, "add", "-A")
         git(tmp, "commit", "-q", "-m", "base")
         os.makedirs(os.path.join(tmp, "integration"), exist_ok=True)
-        shutil.copy2(GATE_SRC, os.path.join(tmp, "integration",
-                                            "lint_copy_language.py"))
+        transport(tmp)
 
         print("== A1 whole-line Chinese comment fires (incident face)")
         append(tmp, rel, "\n# 中文注释：whole-line comment must not dodge the gate\n")

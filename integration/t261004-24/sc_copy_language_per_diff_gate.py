@@ -48,6 +48,9 @@ import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GATE = REPO / "integration" / "lint_copy_language.py"
+# t261004-42 split the gate's diff plumbing into a shared module; the throwaway
+# transport must carry the gate's real in-repo dependency set, not a file count.
+GATE_LIB = REPO / "integration" / "lib_lint_diff.py"
 LINT = REPO / "integration" / "lint_tests.py"
 
 PASS = 0
@@ -68,6 +71,8 @@ def build_throwaway(root: pathlib.Path):
     """Throwaway repo holding a copy of the gate + a product surface with legacy CJK."""
     (root / "integration").mkdir(parents=True)
     shutil.copy2(GATE, root / "integration" / "lint_copy_language.py")
+    if GATE_LIB.is_file():
+        shutil.copy2(GATE_LIB, root / "integration" / "lib_lint_diff.py")
     prod = root / "server" / "plugins" / "demo" / "src"
     prod.mkdir(parents=True)
     (prod / "face.ts").write_text("// legacy line, untouched\n", encoding="utf-8")
@@ -149,6 +154,8 @@ def main():
         nogit = pathlib.Path(tmp) / "nogit"
         (nogit / "integration").mkdir(parents=True)
         shutil.copy2(GATE, nogit / "integration" / "lint_copy_language.py")
+        if GATE_LIB.is_file():
+            shutil.copy2(GATE_LIB, nogit / "integration" / "lib_lint_diff.py")
         r = subprocess.run(["python3", "integration/lint_copy_language.py"],
                            cwd=str(nogit), capture_output=True, text=True, timeout=120)
         out = (r.stdout or "") + (r.stderr or "")

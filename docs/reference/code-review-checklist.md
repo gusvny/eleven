@@ -6,7 +6,7 @@ tags:
   - review-checklist
   - quality
 status: active
-updated: 2026-10-04
+updated: 2026-10-05
 ---
 
 # Code Review Checklist
@@ -77,6 +77,7 @@ Quoted rule text stays in the language of its source file (see
 | C6 | Does a new external call site carry a shape assertion? | A mock shape assertion validates the call against the counterpart contract; malformed-input cases ride along | `docs/testing-guide.md` lines 205–215 (KI-046 clause) |
 | C7 | How is a red judged and classified? | Read the failure classification protocol: canonical line, three states, fail-closed, main-baseline decision table | `docs/design/failure-classification-protocol-v1.md` (whole page; the contract surface starts at line 33). Pointer; do not copy it here |
 | C8 | Does every seam have a case through its outermost real entry? | At least one case per seam runs the real entry (the real activity shell, route, or CLI) with the input production supplies, and asserts an environment-tied outcome (an absolute path under the instance root, never a relative one); injecting that input into a unit case alone does not count | `docs/testing-guide.md` line 341 (clause 10: A seam case must go through the outermost real entry) |
+| C9 | Does a new expensive case state its tier reason and its cost tier? | A scenario registered in an expensive pool (engine, browser, exclusive) that is new or changed carries the declared marker in its intent: `tier:` naming the seam or the journey and `cost:` naming the runtime class, and the case meets the six admission conditions | `docs/reference/test-tiers-and-e2e-admission.md` §When an end-to-end case is allowed item 6 and §Enforcement item 1. Pointer; do not copy it here (row numbered C9 after the main-sync merge: main took C8 for the seam-entry row first) |
 
 ### 3.4 Report quality
 
@@ -104,8 +105,13 @@ Quoted rule text stays in the language of its source file (see
   line stay human. Other partial face: `docs/scripts/build_index.py` flags missing
   frontmatter and staleness across the doc library, but it does not check the 9-item
   design-doc self-check list.
+- Partial face (t261004-42): C9's marker SHAPE is scripted by the tier-marker lint
+  (L21, `integration/lint_tests.py` + `integration/lib_tier_marker.py`): it reads
+  added or changed registry lines only, expensive pools only, and checks presence
+  and declared shape of the `tier:`/`cost:` tokens — never the truth of the
+  justification. The truth half of C9 stays human (the six admission conditions).
 - Rows that stay human only: A3, B1, B2, B3, B4, B5, B6, B7, B9, B10 (the receipt-path half;
-  its "no path inside the repo" half is L19), C1–C6, C8, D1–D3, and the
+  its "no path inside the repo" half is L19), C1–C6, C8, C9, D1–D3, and the
   part of A4 that L15 does not reach (language outside its paths, style, structure,
   terminology). In particular the design-doc self-check list (row A3) is a human
   judgement; no script ticks it. No script replaces reading the diff.

@@ -456,9 +456,16 @@ def test_apply_verdict_to_face():
 def test_prompt_contains_contract_and_budget():
     p = ins.build_inspect_prompt("inst", "20260916", "test", "/tmp/base", "abc123",
                                  max_findings=40, suite_receipt="/tmp/s.json", prev_summary="- x")
+    # t261004-42 rework: the test-face criteria block was rewritten in English
+    # (the copy-language gate L15 treats a touched prompt line as an added line,
+    # so the block now complies with the writing standard) and extended with the
+    # tier-admission A/B/C block — the tier rule genuinely belongs in the prompt
+    # (ticket deliverable C), so the pinned needle follows the new contract
+    # wording; the pin itself is not loosened. The A/B/C labels are pinned by
+    # test_t261004_42_inspect_tier_criteria.py.
     for needle in ("巡检审查任务", "只读审查员", "绝不修改", "证据", "恰好一块", "40 条",
                    "confidence", "/tmp/base", "abc123", "/tmp/s.json", "- x",
-                   "守卫是否还有效"):
+                   "Guard still valid", "Tier admission A/B/C"):
         assert needle in p, needle
     assert ins.build_inspect_prompt("i", "p", "doc", "b", "h", 10)
     assert ins.build_inspect_prompt("i", "p", "mechanism", "b", "h", 10)

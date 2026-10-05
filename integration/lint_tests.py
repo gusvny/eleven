@@ -60,6 +60,22 @@ practice:
         failure — the exact drop shape (page sends a field, two adjacent layers
         silently discard it, receipt still says saved:true) goes red here in
         milliseconds instead of in production.
+  L21 tier marker (t261004-42): every scenario registered in an expensive pool
+        (engine / browser / exclusive) whose registry entry was added or changed
+        in the diff must carry a `tier:` justification (the seam or the journey)
+        and a `cost:` class (vocabulary seconds/minutes, declared in
+        integration/lib_tier_marker.py) inside its intent text. Absent or
+        malformed = red, naming the scenario and the missing part. Shape only:
+        the check never judges the truth of the justification (the review
+        checklist row C9 and the inspection do that). Added/changed-only scope
+        mirrors the copy-language gate; the 95 existing expensive entries stay
+        untouched (the tier page: cleanup is its own ticket). Base resolution
+        reuses the shared chain (integration/lib_lint_diff.py) with
+        $TIER_MARKER_BASE; when no base is resolvable the check prints a named
+        skip line and continues — an environment property, not a rule violation,
+        never a silent pass. (Numbered L21 after the main-sync merge: main took
+        L19 runtime-state location and L20 grants-write parity first; the rule
+        is unchanged, only the label moved.)
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
@@ -1296,6 +1312,55 @@ def lint_snapshot_discipline():
         ok("L18 快照纪律：标记与清单标签成对（%d 个已申报快照测试）" % len(marked))
 
 
+def lint_tier_markers():
+    """L21 (t261004-42): the tier marker check — expensive-pool entries added or
+    changed in the diff must carry the declared tier/cost marker in their intent.
+    Core lives in integration/lib_tier_marker.py (pure, unit-battery owned);
+    this wrapper owns the diff face (base resolution + added-line mapping)."""
+    from lib_tier_marker import (EXPENSIVE_POOLS, REGISTRY_REL, check_registry,
+                                 changed_entry_names)
+    from lib_lint_diff import resolve_base
+    print("L21 tier marker: pools = %s; added/changed registry entries only "
+          "(per-diff, copy-gate construction)" % "/".join(EXPENSIVE_POOLS))
+    base_ref, how = resolve_base(None, git_diff_callable, env_var="TIER_MARKER_BASE")
+    if base_ref is None:
+        # Declared degrade path (not silent): no diff base is an environment
+        # property, not a rule violation. The skip line is visible in every run.
+        warn("L21 tier marker: skipped, no diff base resolvable — %s "
+             "(declare $TIER_MARKER_BASE to pin one)" % how)
+        return
+    rc, diff_text = git_diff_callable("diff", "--unified=0", base_ref)
+    if rc != 0:
+        warn("L21 tier marker: skipped, git diff failed — %s"
+             % diff_text.strip()[:200])
+        return
+    registry_text = (INTEG / "run_scenarios.py").read_text(encoding="utf-8")
+    changed = changed_entry_names(registry_text, diff_text, REGISTRY_REL)
+    print("L21 tier marker: base = %s (%s); changed entries: %d"
+          % (base_ref[:12], how, len(changed)))
+    sys.path.insert(0, str(INTEG))
+    import run_scenarios as rs  # noqa: E402  (same import face as L4)
+
+    def pool_of(entry):
+        opt = entry[3] if len(entry) > 3 else None
+        return opt if (opt and opt != "serial") else "main"
+
+    entries = [(e[0], e[1], pool_of(e)) for e in rs.SCENARIOS]
+    defects = check_registry(entries, changed)
+    if defects:
+        for d in defects:
+            err("L21 tier marker: %s" % d)
+    else:
+        ok("L21 tier marker: clean (%d expensive-pool entries in registry, "
+           "%d changed this diff)" % (sum(1 for _, _, p in entries
+                                          if p in EXPENSIVE_POOLS), len(changed)))
+
+
+def git_diff_callable(*args):
+    """Real git callable for L21 (cwd = repo root); fake-able in the battery."""
+    r = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
 # ---- L19 runtime-state location (host order 261004) -------------------------
 
 #: Directories never walked for L19: VCS metadata, lane worktrees (each is a
@@ -1454,6 +1519,8 @@ def main():
     lint_snapshot_discipline()
     lint_runtime_state_location()
     lint_grants_field_parity()
+    # L21 tier marker (t261004-42): the end-to-end admission rule, shape-only face
+    lint_tier_markers()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

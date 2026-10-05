@@ -1014,6 +1014,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261004_42_inspect_tier_criteria.py": {
+   "anchor": "contract",
+   "note": "t261004-42: the tier-admission A/B/C criteria live in the single declared test-face list and reach the inspect prompt",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261004_44_deliver_refusal.py": {
    "anchor": "behaviour",
    "note": "t261004-44 KI-197 unit face: a fingerprint missing the delivery class yields an immediate named refusal (class + registered set + failed check) with no workflow started; a listed class proceeds even on a stale file (review C3); a missing fingerprint degrades to the bounded wait; the bounded wait and the duplicate-started receipt read (review C1) time out into named refusals with the zombie handle cancelled; the audit row is fail-open over its own append failing (review C2).",

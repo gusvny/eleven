@@ -48,6 +48,11 @@ instances:
   - id: integration-tests
     enabled: true
     project_key: sandbar
+    # t261004-42: this instance carries the tier-admission inspection (the
+    # end-to-end admission rule, docs/reference/test-tiers-and-e2e-admission.md).
+    # Its criteria text lives with the other declared per-face criteria —
+    # server/engine/inspection_inspect.py PROFILE_TEXTS['test'], items A/B/C —
+    # so a reader sees one list, not two. No scheduling face changed here.
     # 260913-02 宿主令「每日调度接真」：每周一 09:00 → 每天 07:30（结果当天上班即读，
     # 与 docs-sync 的周一 10:00 不撞）。改本行即改 cadence，再跑
     #   inspection_trigger.py schedule-up --instance integration-tests --note <谁/为何/频率>

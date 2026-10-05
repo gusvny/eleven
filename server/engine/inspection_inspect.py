@@ -915,11 +915,28 @@ def build_inspect_prompt(instance_id: str, period: str, face: str, base_dir: str
 #: 分面附加清单（宿主裁定②：通用骨架 + 每 face 一段附加清单）
 PROFILE_TEXTS: Dict[str, str] = {
     "test": """\
-- 守卫是否还有效：integration/ 场景守卫断言的对象（函数/选择器/字面锚）在仓内是否仍真实
-  存在且语义未变（退役清单被当断言失效、夹具路径被当仓内资产是历史假报重灾区——引用前
-  先确认对象真的在生产侧）；
-- 场景是否冗余/互相覆盖（同 intent 重复看守）；
-- 场景三态纪律（PASS/FAIL/ENV_FAIL）是否被绕过（SKIP 残留、假绿路径）。""",
+- Guard still valid: does the guarded object of each integration/ scenario
+  assertion (function / selector / literal anchor) still really exist in the
+  repo with unchanged semantics (a retired list treated as a live assertion and
+  a fixture path treated as a repo asset are the historical false-positive
+  hotspots — confirm the object exists on the production side before citing it);
+- Scenario redundancy / mutual coverage (same intent guarded twice);
+- Scenario three-state discipline (PASS/FAIL/ENV_FAIL) bypassed (SKIP residue,
+  fake-green paths);
+- Tier admission A/B/C (t261004-42, source rule
+  docs/reference/test-tiers-and-e2e-admission.md — report each item by item; an
+  item that cannot be answered must SAY SO and name the missing input, never
+  stay silent):
+  A. Demotion candidates: new or changed cases (diff face) that are offline,
+     deterministic, and cross no component seam — each names the file and why a
+     cheaper tier (L0/L1/L2) can carry it. Report only; never demote or rewrite
+     a case here (a cleanup is its own ticket).
+  B. Trend: one suite round's wall time (from this period's suite receipt file,
+     when one exists) and the count of expensive-pool cases (integration SCENARIOS
+     registry, pools engine/browser/exclusive). Compare with the page's budget:
+     one round over 10 minutes, or a growing expensive count, must be stated.
+  C. Repeats: new cases whose intent a lower tier (L0/L1/L2) already covers —
+     each names the case and the lower-tier coverage it duplicates.""",
     "doc": """\
 - 文档漂移：docs/ 定稿库与代码现实是否脱节（接口/路径/流程改名后文档没跟）；
 - docs/README.md 索引与实际文件是否一致（frontmatter/index.json 漂移）；
