@@ -64,6 +64,7 @@ Quoted rule text stays in the language of its source file (see
 | B8 | Do terms match the word table? | No banned jargon (see the banned column of the table); word choice follows the table | `docs/terminology.md` lines 87–95 (禁用对照) and line 122 (the L7 mechanical face). Pointer; the table stays the machine-read source |
 | B9 | Does the evidence come from the reader's side? | For every write or delivery face (ledger, receipt, file, cross-process delivery) the evidence is read back through the reader's real path; a writer's `ok` or receipt is not evidence, and the ticket names the face and the command that shows it | `server/roles/integration.yml` line 95: 「读者侧验收：凡写入面/投递面（账本、回执、文件、跨进程投递），验收证据必须从」 |
 | B10 | Are paths across a boundary absolute, and are ignored areas probed? | Every path in a cross-process or cross-directory write face and receipt is absolute and starts at the instance root; anything `.gitignore` hides has its own probe — `git status` not seeing it is not proof it is absent | `server/roles/integration.yml` line 99: 「边界上不许相对路径：跨进程/跨目录的写面与回执里的路径必须绝对、且以实例根」; machine face: L19 `integration/lint_tests.py` |
+| B11 | Is a protected-path change either authorized for this ticket or landed main-side? | The list is read from `path_gates.PROTECTED_PATHS`, never copied. An in-lane change is lawful only with a live authorization on that ticket whose scope covers exactly the named files, whose `expires` is still in the future, and whose `reason` names the ruling — the alternative is the main-side route. An owner ticket retiring its own baseline takes the authorization route with `integration/retired-scenarios.md` synced and the retirement list on the ticket face. Evidence: the `path_gate_authz_used=<who>@<issued>:<files>` key in the settle receipt | `server/engine/authz_gates.py` (the exemption) and `server/engine/path_gates.py` (the list and its refusal text); host ruling 261005 item F, relayed through `req-1791181276263-0006` |
 
 ### 3.3 Tests judgement
 
@@ -111,7 +112,9 @@ Quoted rule text stays in the language of its source file (see
   and declared shape of the `tier:`/`cost:` tokens — never the truth of the
   justification. The truth half of C9 stays human (the six admission conditions).
 - Rows that stay human only: A3, B1, B2, B3, B4, B5, B6, B7, B9, B10 (the receipt-path half;
-  its "no path inside the repo" half is L19), C1–C6, C8, C9, D1–D3, and the
+  its "no path inside the repo" half is L19), B11 (the gate refuses the write mechanically,
+  but only a reader can judge whether the authorization that unblocked it was lawfully
+  scoped), C1–C6, C8, C9, D1–D3, and the
   part of A4 that L15 does not reach (language outside its paths, style, structure,
   terminology). In particular the design-doc self-check list (row A3) is a human
   judgement; no script ticks it. No script replaces reading the diff.
@@ -133,6 +136,8 @@ Quoted rule text stays in the language of its source file (see
 11. C8: every seam has a case through its outermost real entry.
 12. B8/A4: terms and language pass the word table and the writing standard.
 13. D1: every claim in the report has evidence; unrun checks are declared.
+14. B11: every protected-path change carries a live per-ticket authorization (scope,
+    expiry and reason checked) or was landed main-side.
 
 ## Related documents
 

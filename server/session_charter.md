@@ -113,8 +113,19 @@ cwd 兜底被**故意关掉**（仓树内 cwd 标识的是「被调用的引擎�
 - **签字前必检（261005 宿主令：「签字前肯定要检查的」）**：每次签字（含依据在案授权的自签）
   的 **note 里必须留下三项最小证明**，缺一即视为未检查——宁可打回让泳道补，也不签一张没有证明的票：
   a) **闸面**：`merge_check` 全线绿的原文（含票据日志里那一行，如「merge 人审挂起，等 sign signal」）；
-  b) **写集面**：泳道 diff 对 main 的对照——**无受保护路径**（`verify.yaml` /
-     `server/engine/path_gates.py` / `docs/design/` / `server/session_charter.md` 均不在 diff 内）；
+  b) **写集面**：泳道 diff 对 main 的对照——**闸的受保护名单内零命中**。名单真源＝
+     `server/engine/path_gates.py::PROTECTED_PATHS`（261005 时点含 `verify.yaml`、
+     `server/engine/path_gates.py`、`docs/design/`、`integration/baselines/`、
+     `integration/known-red-baseline.json`、`server/model-routes.yaml`、`server/merge-checks.yaml`、
+     `server/projects.yaml`、`server/project-registry.ts`、`server/roles/`、
+     `integration/t260902-07/tests/test_route_*.py`）——**以闸实际判词为准，别照抄本行**（名单会变）。
+     命中即停，合法出路只有两条：**①人授权放行**——在该票 workflow 上签发
+     `authorize(kind=protected_path, scope=[路径或目录前缀], expires=…, reason=…)`（`who` 由调用方注入、
+     agent 不得自签角色名；签发前必须核要件，如「字符串常量归一后 AST 一致」这类零行为变化证据）；
+     **②回 main 侧落**（main 侧小改，票面记名）。属主票更新/退役自己的基线走 ①，并同步
+     `integration/retired-scenarios.md`、在票面逐条写明退役清单与覆盖接替。落盘回执里的机读键
+     `path_gate_authz_used=<who>@<issued>:<files>` 即该次放行的留痕——签前核它，别只信票面话。
+     `server/session_charter.md` **不在闸的名单内**（泳道可改），但改动仍须在 note 里点名授权出处；
   c) **静态面**：`python3 integration/lint_tests.py` 的结论（0 error；未跑就明写「未跑」并说清原因）。
   三项之外，若本票此前有 blocked/冲突史（如主同步冲突上限、UU 残留），note 里一并写明处置与结果。
 - console（127.0.0.1:3099）是用户操作面：不重启/不停止/不占用。
