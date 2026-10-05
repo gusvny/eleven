@@ -152,6 +152,7 @@ const srv = createServer((req, res) => {
     send(200, { ok: true, actions: [{ at: Date.now() - 60e3, action: 'Sign', ticket: 't-1', result: 'merged by executor', permission: 'sign' }],
       unmapped_rows: 0, malformed_rows: 0 }); return
   }
+  if (u.pathname === '/sandbar-executor-panel/api/bridge/status') { send(200, { ok: true, mounted: true, counters: { mirrored: 0 }, last_events: [] }); return }
   res.writeHead(404); res.end('not found')
 })
 await new Promise(r => srv.listen(0, '127.0.0.1', r))

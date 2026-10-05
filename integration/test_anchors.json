@@ -1014,6 +1014,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261004_44_deliver_refusal.py": {
+   "anchor": "behaviour",
+   "note": "t261004-44 KI-197 unit face: a fingerprint missing the delivery class yields an immediate named refusal (class + registered set + failed check) with no workflow started; a listed class proceeds even on a stale file (review C3); a missing fingerprint degrades to the bounded wait; the bounded wait and the duplicate-started receipt read (review C1) time out into named refusals with the zombie handle cancelled; the audit row is fail-open over its own append failing (review C2).",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261004_27_executor_delivery.py": {
    "anchor": "behaviour",
    "note": "t261004-27: delivery face refusal matrix + identity survival are the file's asserted behaviour",
@@ -3483,6 +3488,21 @@
   "integration/worker-restart/sc_worker_single_poller.py": {
    "anchor": "behaviour",
    "note": "",
+   "sync_path": ""
+  },
+  "integration/t261004-44/sc_question_bridge_live_path.mjs": {
+   "anchor": "behaviour",
+   "note": "KI-196 live path: a real cordis app + real plugin apply + real agent-scoped emit lands two bridge-written question rows (shared group_id, raised_by session) under the instance projects root, the row ids round-trip answers back to the asking session via the real route surface, and the bridge state face reports mounted/counter/events.",
+   "sync_path": ""
+  },
+  "integration/t261004-44/sc_deliver_bounded_refusal.py": {
+   "anchor": "behaviour",
+   "note": "KI-197: deliver refuses immediately (named class + registered set) when the worker fingerprint lacks the class without starting a workflow; a wedged engine is a bounded named refusal with the zombie handle cancelled; the already-started fallback receipt is bounded too (review C1); the refusal survives its own audit-append failing (review C2).",
+   "sync_path": ""
+  },
+  "integration/t261004-44/sc_watchdog_silent_faces.mjs": {
+   "anchor": "behaviour",
+   "note": "ticket C: the watchdog raises a redline naming session+face for a pending ask with no mirrored row past the deadline and for a deliver_refused ledger row; a mirrored-in-time ask stays clear; a malformed ledger row crashes nothing and is named.",
    "sync_path": ""
   },
   "integration/t261004-43/sc_activity_ledger_root.py": {

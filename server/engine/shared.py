@@ -6441,6 +6441,11 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     # caller_project are each named refusals) — an enforcement module, so it must
     # be visible on the code-stamp fingerprint (tripwire criterion (a)).
     ("executor_delivery", "server/engine/executor_delivery.py"),
+    # t261004-44: the worker registration fingerprint face (worker_registry) decides
+    # the deliver pre-flight verdict (class absent = named refusal) — and the whole
+    # point of the face is that a worker whose registry predates the code is the
+    # delivery-hang class, so its freshness must be visible on the stamp.
+    ("worker_registry", "server/engine/worker_registry.py"),
     ("dsh_pin", "server/engine/dsh_pin.py"),
     ("failure_protocol", "server/engine/failure_protocol.py"),
     ("inspection_flow", "server/engine/inspection_flow.py"),

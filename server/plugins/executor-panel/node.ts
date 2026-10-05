@@ -21,7 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 
 import { createApi, allPanelProjects, PANEL_API_ROUTES } from './src/host/api.ts'
 import { PANEL_HTML, PANEL_ROUTE } from './src/host/panel-page.ts'
-import { createQuestionBridge, makeRegistryProjectResolver } from './src/host/question-bridge.ts'
+import { createQuestionBridge, makeRegistryProjectResolver, createBridgeStatus } from './src/host/question-bridge.ts'
 import { fsLedgerIo } from './src/host/requests.ts'
 import { readFileSync } from 'node:fs'
 
@@ -65,8 +65,12 @@ function originOf(req: IncomingMessage): string {
 }
 
 export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): void {
+  // 桥状态汇（t261004-44，KI-196 出路②）：挂载位/计数/事件环单例；/api/bridge/status
+  // 的读源。桥不触发时它如实报「mounted 但 counters 停在 0」——静默从此有面可查。
+  const bridgeStatus = createBridgeStatus()
   const api = createApi(process.env, {
     workbenchBase: config.workbenchBase ?? process.env.SANDBAR_WORKBENCH_BASE ?? undefined,
+    bridgeStatus: () => bridgeStatus.snapshot(),
   })
 
   // 问题桥（t261001-23，KI-181）：把会话级 ask_user_question 镜像进面板请求账——
@@ -80,14 +84,20 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
     // 反查 project.yaml 也读同一根——SANDBAR_PROJECTS_DIR 的既有分叉是历史欠账，不在此票扩散）。
     resolveProject: makeRegistryProjectResolver(process.env, (env) => allPanelProjects(env), (p) => readFileSync(p, 'utf8')),
     onEvent: (ev) => ctx.logger.info('[question-bridge] %s %s', ev.kind, ev.detail),
+    status: bridgeStatus,
   })
   if (typeof ctx.on === 'function') {
     ctx.effect(() => {
       const dispose = ctx.on('user-questions/request', bridge as never)
       return () => { try { dispose() } catch { /* 宿主已卸载=已收口 */ } }
     }, 'sandbar-executor-panel: question bridge（ask_user_question → 请求账）')
+    // 挂载成功才置位（t261004-44）：状态面 mounted 是真证据，不是默认真。
+    bridgeStatus.setMounted(true)
     ctx.logger.info('sandbar-executor-panel: question bridge 已挂载（user-questions/request → requests.jsonl）')
   } else {
+    // 挂载失败显式置 false（t261004-44）：状态面 mounted=false 是「未挂载」的点名，
+    // 不是缺省值——warn 日志之外，人经 /api/bridge/status 也读得到。
+    bridgeStatus.setMounted(false)
     ctx.logger.warn('sandbar-executor-panel: ctx.on 不可用——question bridge 未挂载（ask_user_question 将无处交付，KI-181 形态）')
   }
 

@@ -218,6 +218,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div class="cols">
       <div>
         <div class="sect" id="waitHead">Needs your answer · 0</div>
+        <div id="bridgeLine" class="meta" style="margin:-4px 0 6px 0"></div>
         <div id="waitList"></div>
         <div class="empty" id="waitEmpty" style="display:none">Nothing waits on you.</div>
         <div class="doneWrap" data-open="false" id="doneWrap" style="display:none">
@@ -455,6 +456,28 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       state.requests = normalizeRequests(j);
       renderWaitColumn();
     }).catch(function(){ state.requests = null; renderWaitColumn(); });
+    loadBridgeStatus();
+  }
+  // t261004-44 (KI-196): the question-bridge status line -- mounted flag / mirror
+  // counters / latest event. A bridge that does not fire must not be silent: this line
+  // is the human-readable "is the bridge alive" face; a read failure is an explicit
+  // unknown, never a fake healthy state.
+  function loadBridgeStatus(){
+    var el = document.getElementById('bridgeLine');
+    if(!el) return;
+    fetch('/sandbar-executor-panel/api/bridge/status').then(function(r){return r.json();}).then(function(j){
+      if(!j || j.ok!==true){ el.textContent = 'Question bridge: status unreadable.'; return; }
+      var c = j.counters || {};
+      var mirrored = c.mirrored || 0, refused = (c['mirror-refused']||0) + (c['mirror-failed']||0);
+      var last = (j.last_events && j.last_events[0]) || null;
+      var txt = 'Question bridge: ' + (j.mounted ? 'mounted' : 'NOT MOUNTED') +
+        ' — mirrored ' + mirrored + ', refused/failed ' + refused;
+      if(last){ txt += '; last event ' + last.kind + ' (' + fmtWaiting(Math.max(0, Date.now()-last.at)) + ' ago)'; }
+      if(!j.mounted || mirrored===0){ txt += ' — if a session is waiting on a question, the bridge is not delivering (KI-196).'; }
+      el.textContent = txt;
+    }).catch(function(){
+      el.textContent = 'Question bridge: status face unreachable (named unknown — the face may not be wired).';
+    });
   }
   function traceLine(r){
     var t = 'Request id: ' + r.id;

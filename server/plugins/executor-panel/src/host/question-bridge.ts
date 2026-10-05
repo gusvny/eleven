@@ -53,6 +53,51 @@ export interface BridgeEvent {
   detail: string
 }
 
+// ── State face (t261004-44, KI-196 way out (2)): a bridge that does not fire must be readable, never silent ──
+
+/** Bridge status snapshot: mounted flag / monotonic per-kind counters / recent
+ *  event ring (newest first, capped). */
+export interface BridgeStatusSnapshot {
+  mounted: boolean
+  counters: Record<string, number>
+  last_events: Array<{ at: number; kind: string; detail: string }>
+  /** Snapshot generation time (ms; readers derive the age from it). */
+  at: number
+}
+
+/** Status sink (node.ts creates one; createQuestionBridge writes it;
+ *  /api/bridge/status reads it). */
+export interface BridgeStatusSink {
+  setMounted(mounted: boolean): void
+  record(ev: BridgeEvent): void
+  snapshot(): BridgeStatusSnapshot
+}
+
+export const BRIDGE_EVENT_RING_CAP = 50
+
+/** Create a status sink (pure in-memory, zero io; UTs assert counters/ring/mounted directly). */
+export function createBridgeStatus(now: () => number = Date.now): BridgeStatusSink {
+  let mounted = false
+  const counters: Record<string, number> = {}
+  const ring: BridgeEvent[] = []
+  return {
+    setMounted(m: boolean) { mounted = m },
+    record(ev: BridgeEvent) {
+      counters[ev.kind] = (counters[ev.kind] ?? 0) + 1
+      ring.unshift({ at: ev.at, kind: ev.kind, detail: ev.detail })
+      if (ring.length > BRIDGE_EVENT_RING_CAP) ring.length = BRIDGE_EVENT_RING_CAP
+    },
+    snapshot(): BridgeStatusSnapshot {
+      return {
+        mounted,
+        counters: { ...counters },
+        last_events: ring.map((e) => ({ ...e })),
+        at: now(),
+      }
+    },
+  }
+}
+
 export interface BridgeDeps {
   io?: LedgerIo
   env?: NodeJS.ProcessEnv
@@ -65,6 +110,10 @@ export interface BridgeDeps {
   deadlineMs?: number
   /** 事件留痕（node.ts 接 ctx.logger；测试收集观测）。 */
   onEvent?: (ev: BridgeEvent) => void
+  /** Status sink (t261004-44; node.ts injects the read source of /api/bridge/status.
+   *  Absent = no state face; events still flow through onEvent -- the face's absence
+   *  degrades explicitly and never fakes mounted. */
+  status?: BridgeStatusSink
 }
 
 // ── 请求校验与镜像（t261004-17：一问一行）────────────────────────────────────
@@ -287,7 +336,15 @@ export function createQuestionBridge(deps: BridgeDeps = {}): (request: AskReques
   const now = deps.now ?? Date.now
   const pollMs = deps.pollMs ?? 2_000
   const deadlineMs = deps.deadlineMs ?? 24 * 3600_000
-  const onEvent = deps.onEvent ?? (() => {})
+  const onEventBase = deps.onEvent ?? (() => {})
+  const status = deps.status ?? null
+  // Status-face writes (t261004-44): every event lands in the counters and the ring --
+  // when the bridge never fires the counters stay at 0 and the ring stays empty, and
+  // the state face reports exactly that ("never moved"), never fakes health.
+  const onEvent: (ev: BridgeEvent) => void = (ev) => {
+    status?.record(ev)
+    onEventBase(ev)
+  }
   const resolveProject = deps.resolveProject ?? null
 
   return async function questionBridge(request: AskRequestLike, next: NextFn): Promise<AskAnswer> {

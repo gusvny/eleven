@@ -93,6 +93,7 @@ from shared import write_worker_meta
 from workflows import ALL_WORKFLOWS
 from workflows_v2 import (ALL_WORKFLOWS_V2, PROJECT_TEMPLATE_PASSTHROUGH_MODULES,
                           PROJECT_TEMPLATE_STAGE_IDS)
+import worker_registry
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
@@ -608,6 +609,20 @@ async def run_worker(args: argparse.Namespace) -> None:
             **_extra,
             **_worker_extra_kwargs(),  # t260916-29：显式宽限（缺省 1800s，env 可调）
         ))
+    # Registration fingerprint face (t261004-44, KI-197 way out (2)): which workflow
+    # classes THIS worker knows, written to a file deliver reads pre-flight — class
+    # absent = named refusal, never an unbounded wait. Best-effort: a write failure
+    # logs loudly and never blocks startup (deliver degrades to the bounded wait).
+    try:
+        reg_doc = worker_registry.write_fingerprint(
+            worker_registry.fingerprint_path(),
+            [getattr(c, "__name__", repr(c)) for c in (ALL_WORKFLOWS + ALL_WORKFLOWS_V2)],
+            pid=os.getpid(), now_ms=int(time.time() * 1000))
+        logging.info("worker registration fingerprint written: %s (registered=%d, pid=%d)",
+                     worker_registry.fingerprint_path(), len(reg_doc["registered"]), os.getpid())
+    except Exception as e:  # noqa: BLE001 — the fingerprint is an enabler, not a gate: a write failure never blocks startup
+        logging.warning("worker registration fingerprint write failed (deliver degrades to the bounded wait): %s: %s",
+                        type(e).__name__, e)
     logging.info("worker polling queues: %s", ", ".join(configured_task_queues()))
 
     # Graceful stop: SIGTERM/SIGINT → stop event → _graceful_shutdown（宽限期内

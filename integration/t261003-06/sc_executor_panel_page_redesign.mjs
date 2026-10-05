@@ -99,6 +99,7 @@ async function main() {
     // t261004-03 桩形修正：真实路由是 /sandbar-watchdog/api/status（不是
     // /api/watchdog/status）；且页面按 { ok, result } 信封解包（poll()），裸对象=不可达假象。
     if (u.pathname.endsWith('/api/status')) return json({ ok: true, result: { declared: true, enabled: true, heartbeat: { alive: true, age_seconds: 12 }, ledger: { path: '/x', unreadable: false, counts: { lines: 3, duplicates: 0, bad: 0, gaps: 0 } }, liveness: { executor: { alive: true } } } })
+    if (u.pathname.endsWith('/api/bridge/status')) return json({ ok: true, mounted: true, counters: { mirrored: 0 }, last_events: [] })
     res.writeHead(404); res.end('{}')
   })
   await new Promise(r => stub.listen(0, '127.0.0.1', r))

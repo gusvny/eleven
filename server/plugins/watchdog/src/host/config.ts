@@ -41,6 +41,10 @@ export interface WatchdogConfig {
    *  enabled=false = the whole filing face stops (no session text read, no row
    *  filed, no prose_ask_filed alert). */
   prose_backstop: { enabled: boolean; idle_minutes: number }
+  /** t261004-44 (KI-196 judgement): the ask-mirror watch deadline (seconds) -- a
+   *  session sitting on ask_user_question with no question row past this deadline
+   *  raises the ask_unmirrored redline (message names the session and the ask face). */
+  ask_mirror_deadline_s: number
   alerts: {
     enabled: boolean
     /** 面板消费位：本票不发声，只暴露「该响」的意图（dsh 无发声能力，已实证）。 */
@@ -63,12 +67,14 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
   reconcile_seconds: 60,
   waiting_minutes: 5,
   prose_backstop: { enabled: true, idle_minutes: 10 },
+  ask_mirror_deadline_s: 120,
   alerts: {
     enabled: true,
     sound: true,
     desktop: true,
     night: { start: '23:00', end: '07:30', policy: 'redline-only' },
-    redline: ['reconcile_mismatch', 'ledger_unreadable', 'engine_down', 'self_lock', 'stall', 'executor_missing'],
+    redline: ['reconcile_mismatch', 'ledger_unreadable', 'engine_down', 'self_lock', 'stall', 'executor_missing',
+      'ask_unmirrored', 'deliver_refused'],
     keep_days: 14,
   },
 }
@@ -144,6 +150,11 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       problems.push('reconcile_seconds must be a number >= 5 (seconds). A beat under 5 seconds only spins.')
     } else { cfg.reconcile_seconds = doc.reconcile_seconds; keys.reconcile_seconds = `${file}#reconcile_seconds` }
   }
+  if ('ask_mirror_deadline_s' in doc) {
+    if (typeof doc.ask_mirror_deadline_s !== 'number' || !Number.isFinite(doc.ask_mirror_deadline_s) || doc.ask_mirror_deadline_s <= 0) {
+      problems.push('ask_mirror_deadline_s must be a positive number (seconds)')
+    } else { cfg.ask_mirror_deadline_s = doc.ask_mirror_deadline_s; keys.ask_mirror_deadline_s = `${file}#ask_mirror_deadline_s` }
+  }
   if ('waiting_minutes' in doc) {
     if (typeof doc.waiting_minutes !== 'number' || !Number.isFinite(doc.waiting_minutes) || doc.waiting_minutes <= 0) {
       problems.push('waiting_minutes must be a positive number (minutes)')
@@ -210,7 +221,7 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       }
     }
   }
-  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'alerts'].includes(k))
+  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'ask_mirror_deadline_s', 'alerts'].includes(k))
   if (unknown.length > 0) problems.push(`Unknown keys rejected (fail-closed, KI-149 family): ${unknown.join(', ')}`)
 
   if (problems.length > 0) {

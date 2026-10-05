@@ -246,6 +246,104 @@ KIND_AUTHZ_SIGNAL_FAILED = "authz_signal_failed"            # signal 自身投�
 KIND_CROSS_PROJECT_REFUSED = "cross_project_refused"        # t260915-12：跨项目写操作闸拒收
 KIND_EXECUTOR_GRANT_REFUSED = "executor_grant_refused"      # t260930-14：执行器授权闸拒收（声明缺席/畸形/未授予/元权限反锁）
 KIND_AUTHZ_LANDING_UNCONFIRMED = "authz_landing_unconfirmed"  # 预算内无落账无拒收
+KIND_DELIVER_REFUSED = "deliver_refused"                    # t261004-44: named deliver refusal (class not registered / bounded wait timed out)
+
+# ---- deliver bounded wait + worker registry fingerprint (t261004-44, KI-197) ----
+# Root cause: a stale worker (does not know ExecutorDeliveryWorkflow) retries
+# NotFoundError activations forever while the caller hangs on handle.result() with no
+# deadline. Two defenses:
+#   (1) worker registry fingerprint (worker_registry): class absent = named refusal
+#       BEFORE any workflow starts;
+#   (2) bounded wait: start+result (including the already-started receipt-read branch,
+#       review C1) all inside wait_for; on timeout cancel the remote workflow (else
+#       Temporal retries the same-bucket zombie forever) + named refusal + audit row
+#       (fail-open, review C2: the refusal is never withheld because its audit failed).
+DELIVER_TIMEOUT_ENV = "SANDBAR_DELIVER_TIMEOUT_S"
+DELIVER_TIMEOUT_DEFAULT_S = 60.0
+DELIVER_TIMEOUT_FLOOR_S = 5.0
+DELIVER_CANCEL_TIMEOUT_S = 5.0
+DELIVER_WORKFLOW_CLASS = "ExecutorDeliveryWorkflow"
+
+
+def deliver_timeout_sec(env: Optional[Dict[str, str]] = None) -> float:
+    """Bounded-wait ceiling for deliver, in seconds. Env SANDBAR_DELIVER_TIMEOUT_S
+    overrides; floor 5s (anything lower would kill normal deliveries). Default 60s
+    matches the existing 60s caller cap. A malformed value (non-numeric / non-positive)
+    falls back conservatively to the floor — never unbounded."""
+    env = env if env is not None else os.environ
+    raw = env.get(DELIVER_TIMEOUT_ENV)
+    if not raw:
+        return DELIVER_TIMEOUT_DEFAULT_S
+    try:
+        v = float(raw)
+    except ValueError:
+        return DELIVER_TIMEOUT_FLOOR_S
+    if not (v > 0) or v != v:  # NaN/negative -> floor (malformed input fails closed to bounded)
+        return DELIVER_TIMEOUT_FLOOR_S
+    return max(v, DELIVER_TIMEOUT_FLOOR_S)
+
+
+def _deliver_registration_refusal() -> Optional[str]:
+    """Read the worker registration fingerprint; class absent -> return the named
+    refusal text (None = proceed). Absent/malformed fingerprint = explicit degradation
+    to the bounded wait (review C3: the fingerprint enables the fast refusal, it is not
+    a health certificate)."""
+    import worker_registry
+    doc, err = worker_registry.read_fingerprint(worker_registry.fingerprint_path())
+    if doc is None:
+        return None  # absent/unreadable/malformed: do not block, degrade to the bounded wait
+    chk = worker_registry.delivery_registration_check(doc)
+    if chk["ok"]:
+        return None
+    return ("deliver: workflow class %s is not registered on the running worker "
+            "(worker pid %s started_at %s; registered: %s) — failed check: "
+            "worker-registration-fingerprint; the delivery face is dead until the "
+            "worker restarts on current code; nothing was delivered"
+            % (chk["workflow_class"], chk.get("pid"), chk.get("started_at_ms"),
+               ", ".join(chk["registered"]) or "(empty)"))
+
+
+def _record_deliver_refusal(project: str, who: str, face: str, check: str,
+                            reason: str) -> Optional[str]:
+    """File the refusal into the audit ledger (fail-open, review C2): a
+    kind=deliver_refused row lands in <projects_root>/<key>/executor-grants-audit.jsonl
+    for the watchdog to raise on. An audit-write failure never withholds the caller's
+    refusal — the failure is returned and merged into the refusal text."""
+    try:
+        row = {"at": int(time.time() * 1000), "kind": "deliver_refused",
+               "project": project, "face": face, "who": who,
+               "workflow_class": DELIVER_WORKFLOW_CLASS, "check": check,
+               "reason": str(reason)[:500]}
+        executor_grants.append_audit(project, row)
+        return None
+    except Exception as e:  # noqa: BLE001 — audit is a best-effort face (append_audit also swallows OSError)
+        return "audit row not filed: %s: %s" % (type(e).__name__, e)
+
+
+async def _deliver_bounded(client: Any, wf_id: str, payload: Dict[str, Any],
+                           timeout_s: float) -> Any:
+    """One bounded delivery: start_workflow + result entirely inside wait_for (KI-197:
+    no step may be unbounded — the already-started receipt-read branch named by review
+    C1 is covered by the caller with the same shape). Timeout raises
+    asyncio.TimeoutError; the caller turns it into a named refusal."""
+    async def _run() -> Any:
+        handle = await client.start_workflow(
+            DELIVER_WORKFLOW_CLASS, payload, id=wf_id, task_queue=TASK_QUEUE)
+        return await handle.result()
+    return await asyncio.wait_for(_run(), timeout=timeout_s)
+
+
+async def _cancel_deliver_workflow(client: Any, wf_id: str) -> Optional[str]:
+    """Cancel the remote workflow after a timeout (best-effort, review C2 spirit: a
+    failed cancel is named, it never withholds the refusal). Not cancelling = Temporal
+    retries the same-bucket zombie forever; the next caller in the bucket inherits a
+    dead face."""
+    try:
+        await asyncio.wait_for(client.get_workflow_handle(wf_id).cancel(),
+                               timeout=DELIVER_CANCEL_TIMEOUT_S)
+        return None
+    except Exception as e:  # noqa: BLE001 — the remote may already be terminal/unreachable: the refusal still goes out, the failure is named
+        return "cancel failed: %s: %s" % (type(e).__name__, e)
 # t261005-03 (no-poller degrade): a RUNNING ticket's snapshot query timed out while
 # its dedicated queue had ZERO live pollers (the dedicated worker stopped polling or is
 # absent — the 261005 incident shape: a draining worker holding the pidfile). An
@@ -3646,19 +3744,63 @@ async def cmd_deliver(args: Dict[str, Any]) -> Dict[str, Any]:
                                            body, now_ms)
     wf_id = executor_delivery.workflow_id_for(identity["project"], idem)
     payload = executor_delivery.delivery_payload(face, identity["project"], identity, body)
+    # Pre-flight registration check (t261004-44 (1)): class absent = immediate named
+    # refusal, no workflow started, no wait — "this face was dead the moment you
+    # called it" finally has a name.
+    reg_refusal = _deliver_registration_refusal()
+    if reg_refusal is not None:
+        audit_note = _record_deliver_refusal(identity["project"], identity["session"],
+                                             face, "worker-registration-fingerprint",
+                                             reg_refusal)
+        if audit_note:
+            reg_refusal += " (%s)" % audit_note
+        return _err(reg_refusal, kind=KIND_DELIVER_REFUSED)
     try:
         client = await _connect()
     except TransientConnectError as e:
         return _err("engine-unreachable: %s" % e, kind=KIND_TRANSIENT)
+    # Bounded wait (t261004-44 (2)): start+result and the already-started receipt read
+    # (review C1) are all inside the same wait_for shape — no step may be unbounded.
+    # On timeout: cancel the remote zombie + named refusal.
+    timeout_s = deliver_timeout_sec()
     try:
-        handle = await client.start_workflow(
-            "ExecutorDeliveryWorkflow", payload, id=wf_id, task_queue=TASK_QUEUE)
-        receipt = await handle.result()
+        receipt = await _deliver_bounded(client, wf_id, payload, timeout_s)
+    except asyncio.TimeoutError:
+        cancel_note = await _cancel_deliver_workflow(client, wf_id)
+        timeout_refusal = (
+            "deliver: no receipt within %ss for workflow class %s — failed check: "
+            "delivery-deadline (either the running worker does not have this workflow "
+            "class registered — see the worker registration fingerprint — or the engine "
+            "is wedged); the workflow was cancelled so it cannot retry forever; "
+            "nothing was delivered%s" % (
+                int(timeout_s), DELIVER_WORKFLOW_CLASS,
+                ("; %s" % cancel_note) if cancel_note else ""))
+        audit_note = _record_deliver_refusal(identity["project"], identity["session"],
+                                             face, "delivery-deadline", timeout_refusal)
+        if audit_note:
+            timeout_refusal += " (%s)" % audit_note
+        return _err(timeout_refusal, kind=KIND_DELIVER_REFUSED)
     except Exception as e:  # noqa: BLE001 — duplicate id (bucket retry) → first receipt
         text = str(e)
         if "already started" in text or "already exists" in text or "ExecutionAlreadyStarted" in text:
             try:
-                receipt = await client.get_workflow_handle(wf_id).result()
+                # Review C1: this receipt-read branch used to be a second bare result() — it sits inside the same bounded wait now.
+                receipt = await asyncio.wait_for(
+                    client.get_workflow_handle(wf_id).result(), timeout=timeout_s)
+            except asyncio.TimeoutError:
+                cancel_note = await _cancel_deliver_workflow(client, wf_id)
+                t_refusal = (
+                    "deliver: first receipt (duplicate-started bucket) did not land "
+                    "within %ss for workflow class %s — failed check: "
+                    "delivery-deadline-first-receipt; nothing was delivered%s" % (
+                        int(timeout_s), DELIVER_WORKFLOW_CLASS,
+                        ("; %s" % cancel_note) if cancel_note else ""))
+                audit_note = _record_deliver_refusal(
+                    identity["project"], identity["session"], face,
+                    "delivery-deadline-first-receipt", t_refusal)
+                if audit_note:
+                    t_refusal += " (%s)" % audit_note
+                return _err(t_refusal, kind=KIND_DELIVER_REFUSED)
             except Exception as e2:  # noqa: BLE001
                 return _err("deliver: first receipt unavailable: %s: %s"
                             % (type(e2).__name__, e2), kind=KIND_TRANSIENT)

@@ -19,6 +19,7 @@ import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, dsh
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
 import { compareStates, ledgerCoverage, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
+import { judgeAskMirror, collectDeliverRefusals, type PendingAskLike } from './ask-loud.ts'
 import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from './self-lock.ts'
 import { detectWaitingFace, type WaitingFace } from './waiting-face.ts'
 import { decideProseBackstop, journalLine, replayJournal } from './prose-backstop.ts'
@@ -247,6 +248,9 @@ export class Watchdog {
   private ensureAdoptLogged = false
   private lastEnsureFailAt = Number.NEGATIVE_INFINITY
   private ensureState: WatchdogStatus['executor_session'] = null
+  /** t261004-44: first sighting per watched pending ask (in-memory = a lower bound
+   *  of the ask age; cleared once the mirror row lands). */
+  private askMirrorFirstSeen = new Map<string, number>()
   phase: CorePhase = 'idle'
 
   constructor(project: string, deps: WatchdogDeps = {}) {
@@ -661,6 +665,54 @@ export class Watchdog {
       // stay visible here. Snapshot missing = explicit unknown.
       const waitingRunning = this.waitingRunningLookup !== null ? this.waitingRunningLookup(sid) : null
       this.waitingOnHost = detectWaitingFace({ pending: pend.pending, sessionId: sid, running: waitingRunning, nowMs })
+
+      // t261004-44 (KI-196 judgement): ask-mirror watch -- a session sitting on
+      // ask_user_question with no question row for it past ask_mirror_deadline_s
+      // raises the ask_unmirrored redline (a bridge that does not fire has a voice).
+      // First-sighting is tracked in memory (a lower bound of the age: reporting late
+      // beats never); the watch clears as soon as the row lands.
+      const askPending = (pend.pending ?? []).filter(p => p !== null && typeof p === 'object' && (p as PendingInteraction).kind === 'question')
+      for (const p of askPending) {
+        const j = judgeAskMirror({
+          pending: p as PendingAskLike,
+          ledgerRows: this.ledgerRows,
+          firstSeenMs: this.askMirrorFirstSeen.get((p as PendingAskLike).raisedBy as string),
+          deadlineMs: (typeof this.cfg.config.ask_mirror_deadline_s === 'number' && this.cfg.config.ask_mirror_deadline_s > 0
+            ? this.cfg.config.ask_mirror_deadline_s : 120) * 1000,
+          nowMs,
+        })
+        if (j.action === 'raise') {
+          await this.raise({
+            rule: 'ask_unmirrored', target: j.sessionId, level: 'redline',
+            title: `session ${j.sessionId} waits on ask_user_question with no ledger row (ask face)`,
+            detail: j.detail,
+          })
+          this.askMirrorFirstSeen.set(j.sessionId, j.sinceMs) // do not move the baseline up again within the dedupe cooldown
+        } else if (j.action === 'watch') {
+          if (!this.askMirrorFirstSeen.has(j.sessionId)) this.askMirrorFirstSeen.set(j.sessionId, j.sinceMs)
+        } else if (j.action === 'forget') {
+          this.askMirrorFirstSeen.delete(j.sessionId)
+        }
+      }
+
+      // t261004-44 (KI-197 judgement): a deliver_refused row in the event ledger
+      // raises the redline with the refusal text intact in the detail -- "this face is
+      // dead" must reach the human. Malformed rows are counted into lastError (named
+      // skip, never silent).
+      {
+        const { refusals, malformed } = collectDeliverRefusals(this.ledgerRows)
+        for (const r of refusals) {
+          await this.raise({
+            rule: 'deliver_refused', target: r.sessionId, level: 'redline',
+            title: `deliver face refused for session ${r.sessionId} (deliver face)`,
+            detail: r.detail,
+          })
+        }
+        if (malformed > 0) {
+          this.lastError = `deliver_refused rows: ${malformed} row(s) without a session attribution skipped (named, not silent)`
+        }
+      }
+
 
       // prose backstop (t261004-08): files a prose ask as a request row (decision in
       // the pure core prose-backstop.ts; row write / alerting / journal orchestrated

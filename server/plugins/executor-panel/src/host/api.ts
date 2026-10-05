@@ -37,6 +37,7 @@ import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResul
 import { grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, GRANT_OPS, toGrantOp,
   spawnEngineGrantsWrite, type EngineGrantsWriteFace, type EngineGrantsWritePayload } from './executor-grants.ts'
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
+import type { BridgeStatusSnapshot } from './question-bridge.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
 import { WAKE_PUSH_DETAIL_CAP } from './list-contracts.ts'
@@ -104,6 +105,10 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   { path: '/sandbar-executor-panel/api/grants', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/actions', methods: ['GET'] },
   { path: '/sandbar-executor-panel/api/projects', methods: ['GET'] },
+  // t261004-44 (KI-196 way out (2)): the question-bridge state face -- mounted flag /
+  // per-kind counters / recent event ring. GET-only (read face); the read source is
+  // deps.bridgeStatus (node.ts injects the createBridgeStatus sink).
+  { path: '/sandbar-executor-panel/api/bridge/status', methods: ['GET'] },
 ]
 
 export interface ApiDeps {
@@ -125,6 +130,10 @@ export interface ApiDeps {
   authFace?: AuthFace
   /** Authority-declaration write face (default spawnEngineGrantsWrite via the engine CLI; test stub, KI-193). */
   engineGrantsWrite?: EngineGrantsWriteFace
+  /** Bridge status read source (t261004-44; node.ts injects createBridgeStatus().snapshot.
+   *  Not injected = an explicit not-wired shape (mounted:false + a naming note), never a
+   *  fake healthy snapshot. */
+  bridgeStatus?: () => BridgeStatusSnapshot
 }
 
 /** Wake-call result (ok:false always carries a human-readable reason — the receipt
@@ -523,6 +532,31 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         return { project: k, declared: r.declared, enabled: r.enabled, config_error: r.config_error }
       })
       return { status: 200, json: { ok: true, projects, note: 'declared=false = nothing enrolled yet — still selectable for inspection' } }
+    }
+    // ---- bridge status (t261004-44, KI-196 way out (2)): a bridge that does not fire must be readable ----
+    if (path === '/sandbar-executor-panel/api/bridge/status') {
+      if (method !== 'GET') return bad(405, 'read-only face: GET only')
+      const read = deps.bridgeStatus
+      if (!read) {
+        // Read source not wired (headless load / createApi used directly): an explicit
+        // unknown shape -- mounted:false says "this face is not wired", not "the bridge
+        // is healthy". Named, never silent.
+        return { status: 200, json: { ok: true, mounted: false, counters: {},
+          last_events: [], at: now(),
+          note: 'bridge status sink not wired into this API instance — no bridge health claim, check the host plugin mount log' } }
+      }
+      let snap: BridgeStatusSnapshot
+      try {
+        snap = read()
+      } catch (e) {
+        return bad(500, `bridge status snapshot failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      if (!snap || typeof snap !== 'object' || typeof snap.mounted !== 'boolean'
+          || typeof snap.counters !== 'object' || snap.counters === null
+          || !Array.isArray(snap.last_events)) {
+        return bad(500, 'bridge status snapshot shape is wrong (need {mounted:boolean, counters:object, last_events:[]}) — face refuses to fake a shape')
+      }
+      return { status: 200, json: { ok: true, ...snap } }
     }
     return bad(404, `未知面板路由：${path}`)
   }
