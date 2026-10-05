@@ -80,7 +80,10 @@ def lane_commit(wt, g, relpath, content):
 
 def ui_items(checks):
     """从 merge_check 回执里挑出 UI 截图证据项。"""
-    return [c for c in checks if c.get("item", "").startswith("UI 截图证据")]
+    # t261006-01 merge sync: select by the stable check id, not the title — the
+    # KI-205 gate helper now renders the title with the resolved path in English,
+    # while the declaration-side faces keep the original Chinese wording.
+    return [c for c in checks if c.get("id") == "ui_evidence"]
 
 
 def declare_ui_evidence(wt, g, dirs=("server/plugins/workbench/lib/",),

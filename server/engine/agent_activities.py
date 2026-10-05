@@ -107,7 +107,6 @@ from shared import (
     TEMPLATE_CLASS_NAMES,
     TEST_STUB_ENV_KNOBS,
     WORKER_ROUTING_ENV_KNOBS,
-    UI_EVIDENCE_DIR,
     ui_evidence_dir,
     evidence_base,
     lane_dot_path,
@@ -5055,36 +5054,15 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     "next_action": "排查泳道 git diff/基线后发 retry_qc 重验"})
             elif ui_paths or diff_fault:
                 # ① Declaration present + a hit (or a diff fault while present): the
-                # current red/green judgement
+                # current red/green judgement. The item (judgement + refusal text) is
+                # built by _ui_evidence_gate_check — text and judgement share ONE
+                # sticky-resolved directory (KI-205: the hard-coded UI_EVIDENCE_DIR
+                # constant pointed legacy lanes at the wrong directory).
                 judge = "按 diff 判定（%s...%s，口径=%d 声明目录）%s：%s" % (
                     (base_36 or "?")[:7], sc["branch"], len(decl_dirs), base_note,
                     ("命中 %d 个 UI 路径：%s" % (len(ui_paths), "、".join(ui_paths[:8]))) if ui_paths
                     else ("diff 故障 fail-closed：%s" % (diff_err or "基线缺失")))
-                shots_dir = ui_evidence_dir(lane_root)  # sticky resolution (ticket t260907-04)
-                pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
-                ui_gate_red = not pngs
-                checks.append({
-                    "item": "UI 截图证据（%s）" % UI_EVIDENCE_DIR,
-                    "green": not ui_gate_red,
-                    "detail": ("%s | %d screenshots in place: %s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
-                              if pngs else
-                              ("%s | UI ticket lacks screenshot evidence: the gate reads only "
-                               "TOP-LEVEL non-recursive *.png under <worktree>/%s — shots in "
-                               "subdirectories (before/, after/, ...) count as missing "
-                               "(host ruling 261005-B; seen on t261005-04/05). Run "
-                               "server/ui-check/capture.mjs --out <worktree>/%s "
-                               "(worker-run, read-only console pages; output lands flat)"
-                               % (judge, UI_EVIDENCE_DIR, UI_EVIDENCE_DIR)),
-                    "id": "ui_evidence",
-                    **({} if not ui_gate_red else {
-                        "reason_code": "ui_evidence_missing",
-                        # 命中的 UI 路径清单已在手（diff 判定产物），逐字带上
-                        "files": [str(x) for x in ui_paths[:20]],
-                        "next_action": "produce TOP-LEVEL screenshot evidence in the lane "
-                                       "(server/ui-check/capture.mjs --out "
-                                       "<worktree>/%s; output lands flat, never in "
-                                       "subdirectories), then send retry_qc"
-                                       % UI_EVIDENCE_DIR})})
+                checks.append(_ui_evidence_gate_check(judge, lane_root, ui_paths))
             # ② Declaration present + a miss + healthy diff: no item emitted (noise
             # reduction; the current stance is unchanged)
     except Exception as e:
@@ -5167,6 +5145,43 @@ def _scope_dirs(dirs: List[str], sc: Dict[str, Any]) -> List[str]:
     """Declaration directories (lane-root-relative) → a tree-root-relative subset
     (the single point that aligns baselines for the multi-repo UI hit test)."""
     return rebase_write_set(dirs, str(sc.get("repo_rel") or "")) if sc.get("repo_rel") else list(dirs or [])
+
+
+def _ui_evidence_gate_check(judge: str, lane_root: Path, ui_paths: List[str]) -> Dict[str, Any]:
+    """The merge_check UI-screenshot item (KI-205, t261006-01). ONE read point: the
+    judgement globs TOP-LEVEL non-recursive *.png under ui_evidence_dir(lane_root)
+    (sticky resolution, ticket t260907-04) and the refusal text derives its path from
+    the SAME resolved directory — never from the UI_EVIDENCE_DIR constant, so a lane
+    whose sticky resolution points at the legacy name cannot have text and judgement
+    point at different directories. Red = no top-level png (host ruling 261005-B:
+    shots in subdirectories count as missing)."""
+    shots_dir = ui_evidence_dir(lane_root)
+    pngs = sorted(shots_dir.glob("*.png")) if shots_dir.is_dir() else []
+    ui_gate_red = not pngs
+    # Copy wording = main's post-t261004-36 English refusal copy; the path source
+    # is this helper's own sticky resolution (KI-205: never the UI_EVIDENCE_DIR
+    # constant). The item title joins main's translated exception face.
+    return {
+        "item": "UI screenshot evidence (%s)" % shots_dir,
+        "green": not ui_gate_red,
+        "detail": ("%s | %d screenshots in place: %s" % (judge, len(pngs), "、".join(p.name for p in pngs[:5])))
+                  if pngs else
+                  ("%s | UI ticket lacks screenshot evidence: the gate reads only "
+                   "TOP-LEVEL non-recursive *.png under %s — shots in "
+                   "subdirectories (before/, after/, ...) count as missing "
+                   "(host ruling 261005-B; seen on t261005-04/05). Run "
+                   "server/ui-check/capture.mjs --out %s "
+                   "(worker-run, read-only console pages; output lands flat)"
+                   % (judge, shots_dir, shots_dir)),
+        "id": "ui_evidence",
+        **({} if not ui_gate_red else {
+            "reason_code": "ui_evidence_missing",
+            # Hit UI-path list is already at hand (diff-judgement product), carried verbatim.
+            "files": [str(x) for x in ui_paths[:20]],
+            "next_action": "produce TOP-LEVEL screenshot evidence in the lane "
+                           "(server/ui-check/capture.mjs --out %s; output lands flat, "
+                           "never in subdirectories), then send retry_qc"
+                           % shots_dir})}
 
 
 @activity.defn
@@ -7082,11 +7097,14 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
                 if not run_fail:
                     pngs = sorted(p.name for p in shots_dir.glob("*.png")) if shots_dir.is_dir() else []
                     if not pngs:
+                        # KI-205: the path in this red text is the SAME sticky-resolved
+                        # directory the check above globs — not the UI_EVIDENCE_DIR
+                        # constant (a legacy lane would read the text and look elsewhere).
                         run_fail = ("%s reported success but no TOP-LEVEL png under %s "
                                     "(evidence contract = non-recursive *.png at TOP "
                                     "LEVEL; shots in before/, after/, ... count as "
                                     "missing, host ruling 261005-B): %s"
-                                    % (label, UI_EVIDENCE_DIR, out[-300:]))
+                                    % (label, shots_dir, out[-300:]))
             if not run_fail:
                 activity.logger.info("[%s] ui_evidence（%s）：%s", args.ticket_id, label, "、".join(pngs))
                 # Transitional mirror for the plugin face (retirement debt #5): the
@@ -9094,7 +9112,10 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
     integration walks the new feature from the user's point of view and writes the
     acceptance report (for the human review gate to consult). The walkthrough evidence
     is produced up front by the worker — first the capture-lane isolated bench shoots
-    for real (a lane build; screenshots land in .sandbar/screenshots/acceptance/), the
+    for real (a lane build; screenshots land FLAT at the top level of the lane's
+    sticky-resolved screenshot directory — ui_evidence_dir(), i.e. .sandbar/screenshots
+    on new lanes, the legacy name on old lanes; never a subdirectory — KI-205, ticket
+    t261006-01: the merge_check gate reads that same directory, top level only), the
     output is injected into the prompt, and the agent judges the screenshots / DOM
     assertions to write the report (the StageResult contract: status=ok + report = the
     acceptance report / status=failed + report = code problems found by the
@@ -9111,8 +9132,12 @@ async def _acceptance_walkthrough_body(args: AgentStageArgs) -> StageResult:
     cwd = _ws_cwd(args.workspace, args.ticket_id)
     # Up front: the capture-lane isolated bench shoots for real (best-effort — a
     # failure injects an explanation and the agent judges as if there were no
-    # screenshots)
-    cap_out = lane_dot_path(cwd, "screenshots", "acceptance", create=True)
+    # screenshots). Output lands FLAT in ui_evidence_dir(cwd) — the same
+    # sticky-resolved top-level directory the merge_check gate globs (KI-205,
+    # t261006-01: this used to write into a screenshots/acceptance/ subdirectory the
+    # gate never reads, so a successful capture still showed a red merge_check).
+    cap_out = ui_evidence_dir(cwd)
+    cap_out.mkdir(parents=True, exist_ok=True)
     cap_note = ""
     # ── 引擎单所有者台（t260915-18）：走查镜头的起/拆所有权同样归引擎——
     # 本站点契约仍是 best-effort（失败注入说明文字，agent 当无截图判读），

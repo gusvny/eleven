@@ -292,7 +292,16 @@ async function waitReadyStage(port, timeoutMs, project, tickMs = 500) {
   throw new Error(reachable
     ? `docker 舞台 ${timeoutMs}ms 内已可达但 docker logs 里取不到 dsh web token 行`
       + `（${project}-dsh；会话门需 /?token= 兑换 cookie，拿不到 capture 只会停在 inert 相位）`
-    : `docker 舞台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`);
+      + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
+      + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000；token 行可能晚于端口可达——`
+      + `设为如 120000 再试）；②确认日志权限：当前用户能跑 docker logs ${project}-dsh 且输出里`
+      + `确有 token 行（手动验证命令：docker logs ${project}-dsh 2>&1 | grep -o 'token=[A-Za-z0-9._~-]*'）；`
+      + `③若多个舞台同时在起，串行化起台（token 行可能被并起日志冲掉/滞后）后重跑。不回落裸 URL。`
+    : `docker 舞台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`
+      + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
+      + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000，可设如 120000）；`
+      + `②确认舞台容器在跑（docker ps | grep ${project}-dsh）与 docker logs ${project}-dsh 可读；`
+      + `③多个舞台并起时串行化起台后重跑。不回落裸 URL。`);
 }
 
 async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
@@ -316,8 +325,15 @@ async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
   } catch { /* 日志读不到 */ }
   throw new Error(reachable
     ? `dsh 控制台 ${timeoutMs}ms 内**已可达但取不到带 token 首页地址**（127.0.0.1:${port}；`
-      + `会话门需 /?token= 兑换 cookie，拿不到就不该按匿名 401 页继续截图）。console.log 尾部：\n${tail || "（无日志）"}`
-    : `dsh 控制台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）。console.log 尾部：\n${tail || "（无日志）"}`);
+      + `会话门需 /?token= 兑换 cookie，拿不到就不该按匿名 401 页继续截图）`
+      + `——ENV_FAIL 可行动出路（KI-205 / t261006-01）：①提高等待阈值后重跑同一命令`
+      + `（本台读 env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000，可设如 120000）；`
+      + `②查看 console.log 尾部（下方附），确认 dsh web 行是否打出 token；`
+      + `③确认当前用户对该 console.log 有读权限。不回落裸 URL。console.log 尾部：\n${tail || "（无日志）"}`
+    : `dsh 控制台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`
+      + `——ENV_FAIL 可行动出路：①提高等待阈值后重跑同一命令`
+      + `（env SANDBAR_CAPTURE_LANE_BOOT_MS，默认 45000）；②检查端口 127.0.0.1:${port}`
+      + `是否被占用/防火墙拦截。console.log 尾部：\n${tail || "（无日志）"}`);
 }
 
 export async function main() {

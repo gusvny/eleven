@@ -132,7 +132,12 @@ else:
     from agent_activities import MergeCheckArgs  # noqa: E402
 
     def ui_items(checks):
-        return [c for c in checks if str(c.get("item", "")).startswith("UI 截图证据")]
+        # anchor on the gate's stable contract id, not on item copy wording
+        # (the title text was re-worded by the 261006 copy sweep; the id is the
+        # public face of the ui_evidence check item)
+        return [c for c in checks
+                if c.get("id") == "ui_evidence"
+                or str(c.get("item", "")).startswith("UI")]
 
     def run_merge(lane_files, branch="lane"):
         tmp, mb = merge_fixture_repo(lane_files)

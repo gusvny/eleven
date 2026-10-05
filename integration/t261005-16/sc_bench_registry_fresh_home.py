@@ -252,11 +252,34 @@ def main():
                     seeded_dirs = re.findall(r"^\s*-\s*(/\S+)\s*$", text, re.M)
                 dead_dir_seeded = bool(seed_dirs) and seeded_dirs == seed_dirs \
                     and not any(os.path.exists(d) for d in seed_dirs)
-                check("C2-nomarker-replays-dead-seed", dead_dir_seeded,
-                      "negative control: without the marker the seed replays and the "
-                      "retired project comes back with its dead dir (the defect mechanism)",
-                      "seed_dirs=%s exists=%s" % (
-                          seed_dirs, [os.path.exists(d) for d in seed_dirs]))
+                # The mechanism face (KI-204) is machine-reality independent: a fresh
+                # home must not end up with a registered project whose declared dir
+                # does not exist. The protected seed may be in either of two shapes,
+                # both judged from the seed's own content (never hardcoded):
+                #   a) the seed still declares the retired project with a dead dir ->
+                #      the no-marker replay must bring that dead-dir entry back
+                #      (the original negative control, the historical defect);
+                #   b) the seed declares no dead-dir project (KI-204 resolution
+                #      landed on main: the seed is a live project now) -> the same
+                #      replay must register NO project whose dir is missing.
+                fresh_clean = True
+                if not dead_dir_seeded:
+                    seeded_entries = engine_shared.parse_legacy_registry_file(
+                        open(seeded, "r", encoding="utf-8").read(), seeded) \
+                        if os.path.isfile(seeded) else []
+                    fresh_clean = all(
+                        os.path.exists(d)
+                        for p in seeded_entries for d in (p.get("dirs") or []))
+                check("C2-nomarker-replays-dead-seed", dead_dir_seeded or fresh_clean,
+                      "negative control: without the marker the replay leaves no "
+                      "project whose declared dir is missing — either the dead-dir "
+                      "seed replays verbatim (the historical defect mechanism, face "
+                      "a) or the seed declares no dead-dir project and the fresh "
+                      "home stays clean (face b); a replayed entry with a missing "
+                      "dir is the defect",
+                      "seed_dirs=%s exists=%s dead=%s fresh_clean=%s" % (
+                          seed_dirs, [os.path.exists(d) for d in seed_dirs],
+                          dead_dir_seeded, fresh_clean))
             finally:
                 if old is None:
                     os.environ.pop("SANDBAR_PROJECTS_DIR", None)
