@@ -15,14 +15,15 @@
 import { appendFile, mkdir, readFile, writeFile, stat, readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, dshHome, type ResolvedConfig } from './config.ts'
+import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, dshHome, FACTORY_DEFAULTS, type ResolvedConfig } from './config.ts'
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
 import { compareStates, ledgerCoverage, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
 import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
 import { judgeAskMirror, collectDeliverRefusals, type PendingAskLike } from './ask-loud.ts'
 import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from './self-lock.ts'
 import { detectWaitingFace, type WaitingFace } from './waiting-face.ts'
-import { decideProseBackstop, journalLine, replayJournal } from './prose-backstop.ts'
+import { decideProseBackstop, journalLine, replayJournal, findMarkerSentence } from './prose-backstop.ts'
+import { decideSelfHeal, buildSelfHealBrief, selfHealParkKey, type SelfHealAsk } from './self-heal.ts'
 import { applyDedupe, judgeAlert, makeKey, replayDedupe, type AlertSpec, type DedupeState } from './alert-rules.ts'
 import { alertRecord, freshWakeMemory, wakeExecutor, requestAnswerRow, alertClearedRow, type WakeIo, type WakeMemory, type WakeOutcome, type WakeReceipt } from './exits.ts'
 
@@ -173,6 +174,16 @@ export interface WatchdogStatus {
   /** t261003-15 additive：最近一拍的唤醒裁决（醒没醒 / 为什么 / 考虑几行）。
    *  null = 尚未有拍走到唤醒步（守望者未 start 或刚启动）；运行中的拍不留空。 */
   last_wake_verdict: { at: number; woke: boolean; reason: string; considered: number; presumed_self: number } | null
+  /** t261005-02 additive: the self-heal (bounded un-park) face. `state` = the latest
+   *  tick's verdict bucket; `last_cancel` = the most recent cancel receipt (persists
+   *  across ticks so a human sees that it happened, not only that the session resumed);
+   *  `config` names the declared knobs (receipt-naming requirement 4). */
+  self_heal: {
+    state: 'off' | 'idle' | 'fired' | 'failed' | 'unsupported' | 'unknown'
+    reason: string | null
+    last_cancel: Record<string, unknown> | null
+    config: { enabled: boolean; park_minutes: number }
+  }
   /** t261004-29 additive: push-path wake receipt ring (last 20). Every
    *  attempted:false carries its reason — "was a wake attempted and why not" stays
    *  answerable from the status face, not only inside the HTTP response. */
@@ -227,6 +238,12 @@ export class Watchdog {
   private lastWakeVerdict: WatchdogStatus['last_wake_verdict'] = null
   /** 自醒排除记忆（t260929-04）：随实例存活；dispose 即随进程终态。 */
   private wakeMem: WakeMemory = freshWakeMemory()
+  /** t261005-02 self-heal state: per-park attempt counter (memory; a restart re-arms
+   *  one attempt — guards still have to hold again) + the latest verdict/receipt. */
+  private selfHealAttempts = new Map<string, number>()
+  private selfHealFace: WatchdogStatus['self_heal'] = {
+    state: 'unknown', reason: 'not yet evaluated (watchdog not started / first tick pending) — explicitly unknown', last_cancel: null, config: { enabled: false, park_minutes: 0 },
+  }
   /** t261004-29 push-path wake receipt ring (one entry per requestWake / clear tick, keep 20). */
   private wakeReceipts: WakeReceipt[] = []
   /** t261004-29 alert-clear detection: dedupe keys whose alert rule was touched by
@@ -719,6 +736,11 @@ export class Watchdog {
       // here; every unknown shape raises prose_backstop_unknown, never silence).
       await this.runProseBackstop(sid, sstat.mtimeMs, nowMs)
 
+      // self-heal (t261005-02): the bounded un-park step. Judgement in the pure core
+      // self-heal.ts; cancel + briefing delivery + alert + status receipt here. Runs
+      // every tick after the waiting face so guard (a) reads this tick's asks.
+      await this.runSelfHeal(sid, pend, nowMs)
+
       // 出口 (a) wake：值得醒才醒；我们自己的未消化简报不重发；自喂循环排除（WakeMemory）。
       // t261004-29: beyond new ledger rows, an alert key active last tick but not
       // this tick = cleared — also a wake-worthy event. Its synthetic row joins the
@@ -843,6 +865,128 @@ export class Watchdog {
     this.phase = 'stopped'
   }
 
+  /**
+   * Self-heal (t261005-02): the bounded un-park step. Every tick path leaves an
+   * explicit verdict on the face (state='unknown' only before the first tick — the
+   * last_wake_verdict discipline). `last_cancel` persists across ticks: a human sees
+   * that the cancel happened, not only that the session resumed.
+   */
+  private async runSelfHeal(sid: string, pend: { available: boolean; pending: import('./self-lock.ts').PendingInteraction[] | null; reason?: string }, nowMs: number): Promise<void> {
+    // t261005-02 ruling (integration contract): a config shape WITHOUT the self_heal
+    // key (old declarations) gets the factory face (enabled, factory park threshold) —
+    // the recovery path is the point of the fix and applies to existing deployments.
+    const cfg = this.cfg.config.self_heal ?? { ...FACTORY_DEFAULTS.self_heal }
+    const cfgFace = { enabled: cfg.enabled, park_minutes: cfg.park_minutes }
+    const prevCancel = this.selfHealFace.last_cancel
+    const setFace = (state: WatchdogStatus['self_heal']['state'], reason: string, lastCancel: Record<string, unknown> | null = prevCancel) => {
+      this.selfHealFace = { state, reason, last_cancel: lastCancel, config: cfgFace }
+    }
+    if (!this.wakeIo || typeof this.wakeIo.cancelTurn !== 'function') {
+      setFace('unsupported', 'cancelTurn face not injected (headless, or host without sessionController.cancel) — explicitly unsupported, never fakes a cancel')
+      if (cfg.enabled) {
+        await this.raise({
+          rule: 'self_heal_unsupported', target: this.project, level: 'warn',
+          title: `self-heal cancel face unavailable (project ${this.project})`,
+          detail: 'wakeIo.cancelTurn not injected — a parked session would not be un-wedged; named on every tick the face stays off',
+        })
+      }
+      return
+    }
+    if (!cfg.enabled) {
+      setFace('off', 'self_heal.enabled=false — the face is explicitly off (observation only, never a cancel)')
+      return
+    }
+    // Guard (a) inputs: unanswered asks attributed to this session, read straight
+    // from the pending provider (not through the waiting face — that face's tri-state
+    // observation must not gate the recovery judgement; attribution alone is what the
+    // ticket requires) + the read-only default bit. A pending prose question marker
+    // (recent round text carrying a waiting marker, no ledger row) also satisfies (a).
+    const asks: SelfHealAsk[] = (pend.pending ?? [])
+      .filter(p => p.raisedBy === sid)
+      .map(p => ({
+        requestId: p.target,
+        raisedAt: typeof p.raisedAt === 'number' && Number.isFinite(p.raisedAt) ? p.raisedAt : null,
+        hasDefault: typeof p.hasDefault === 'boolean' ? p.hasDefault : null,
+      }))
+    let marker: { requestId: string | null; sentence: string } | null = null
+    if (asks.length === 0 && this.recentText !== null) {
+      try {
+        const r = await this.recentText(sid)
+        if (this.aborted) return
+        if (r.ok) {
+          const sentence = findMarkerSentence(r.text)
+          if (sentence !== null) marker = { requestId: this.proseBackstop.last_request_id, sentence }
+        }
+      } catch { marker = null } // unreadable text = no marker via this path, never a crash
+    }
+    // Guard (c): our latest briefing still queued. Queried even with no requestId yet
+    // (never briefed): the io face falls back to the queue depth, so an undrained
+    // queue still evidences the wedge. null = mirror unreadable = hold.
+    let ourBriefPending: boolean | null = null
+    if (typeof this.wakeIo.ourBriefPending === 'function') {
+      ourBriefPending = await this.wakeIo.ourBriefPending(sid, this.wakeMem.lastRequestId)
+      if (this.aborted) return
+    }
+    // Guard (b): the park's silence clock. Primary source = how long the earliest
+    // unanswered ask has sat without an answer (the parked turn's silence IS the
+    // ask's age); fall back to the shared progress baseline when the ask carries no
+    // readable time. No ask time and no baseline = unreadable = hold.
+    let silenceMs: number | null
+    const askTimes = asks.map(a => a.raisedAt).filter((t): t is number => t !== null)
+    if (askTimes.length > 0) silenceMs = nowMs - Math.min(...askTimes)
+    else if (this.lastProgressAt !== null) silenceMs = nowMs - this.lastProgressAt
+    else silenceMs = null
+    const running = this.liveness?.session_running ?? null
+    const verdict = decideSelfHeal({
+      sessionId: sid, asks, questionMarker: marker, silenceMs, ourBriefPending,
+      cfg: { enabled: cfg.enabled, parkMinutes: cfg.park_minutes },
+      attempts: this.selfHealAttempts, nowMs,
+    })
+    if (verdict.action === 'hold') {
+      // state is sticky: once a cancel event happened (fired/failed/unsupported) the
+      // face keeps that bucket — a human sees that it happened on every later tick;
+      // `reason` always carries the latest judgement.
+      const sticky = this.selfHealFace.state === 'fired' || this.selfHealFace.state === 'failed' || this.selfHealFace.state === 'unsupported'
+      setFace(sticky ? this.selfHealFace.state : 'idle', verdict.reason)
+      return
+    }
+    const receipt = { ...verdict.receipt, session_running: running }
+    const parkKey = selfHealParkKey(sid, receipt.ask_id)
+    // Cancel first (bounded on the io side), then deliver the retained briefing.
+    const cancelled = await this.wakeIo.cancelTurn!(sid)
+    const cancelAccepted = cancelled.accepted === true
+    const defaultNote = receipt.ask_has_default === true
+      ? 'The parked ask declares an acceptable default; answering by that default is fine for an absent host.'
+      : receipt.ask_has_default === false
+        ? 'The parked ask declares NO default — an ask without an acceptable default cannot be answered by an absent host; that is the discipline gap this event reports.'
+        : 'The ask row does not expose a default bit (read-only observation unavailable).'
+    const brief = buildSelfHealBrief(this.project, receipt, defaultNote)
+    const delivered = await this.wakeIo.prompt(sid, brief, 'queue')
+    const full: Record<string, unknown> = {
+      ...receipt,
+      cancel_accepted: cancelAccepted,
+      cancel_error: cancelled.error ?? null,
+      brief_accepted: delivered.accepted === true,
+      brief_error: delivered.error ?? null,
+    }
+    this.selfHealAttempts.set(parkKey, receipt.attempt)
+    const state: WatchdogStatus['self_heal']['state'] = cancelled.accepted === null
+      ? 'unsupported'
+      : cancelAccepted ? 'fired' : 'failed'
+    setFace(state, verdict.reason, full)
+    await this.raise({
+      rule: 'self_heal_cancel', target: receipt.ask_id, level: 'warn',
+      title: `self-heal ${state}: parked turn ${cancelAccepted ? 'cancelled' : 'NOT cancelled'} (${sid})`,
+      detail: `ask ${receipt.ask_id} (${receipt.ask_source}, has_default=${String(receipt.ask_has_default)}); silence ${receipt.silence_minutes}min >= park threshold ${receipt.threshold_minutes}min; attempt ${receipt.attempt}; cancel=${cancelAccepted}${cancelled.error ? ` (${cancelled.error})` : ''}; briefing delivered=${delivered.accepted === true}${delivered.error ? ` (${delivered.error})` : ''}`,
+    })
+    if (delivered.accepted) {
+      if (delivered.requestId) this.wakeMem.lastRequestId = delivered.requestId
+      // The delivered brief counts as progress (same as the wake exit) — the silence
+      // clock restarts here, and the one-attempt memory holds the park closed.
+      this.lastProgressAt = nowMs
+    }
+  }
+
   /** 状态面（下一票面板消费的唯一形状；见 integration/t260928-28/panel-contract.md）。 */
   status(): WatchdogStatus {
     const nowMs = this.now()
@@ -881,6 +1025,7 @@ export class Watchdog {
       executor_session: this.ensureState,
       wakes: this.wakes.slice(-20),
       last_wake_verdict: this.lastWakeVerdict,
+      self_heal: this.selfHealFace,
       wake_receipts: this.wakeReceipts.slice(-20),
       alerts: this.alerts.slice(-50),
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },

@@ -29,6 +29,12 @@ export interface PendingInteraction {
    * escalation threshold never fires early off a missing timestamp; late beats wrong).
    */
   raisedAt?: number
+  /**
+   * t261005-02: does the ask row declare an acceptable default_action (read-only
+   * observation for the self-heal receipt)? null = the row does not expose the bit.
+   * Optional: older providers/stubs omit it and the face reads null, never a guess.
+   */
+  hasDefault?: boolean | null
 }
 
 /**

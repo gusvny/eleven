@@ -65,8 +65,15 @@ let n = 0
   assert(bad8.config_error !== null, 'cfg non-string redline rejected')
   // t261004-12：long_turn_minutes 旋钮（默认 / 透传 / 畸形 / 白名单）。
   assert(FACTORY_DEFAULTS.long_turn_minutes === 45, 'cfg long_turn factory default 45 (= 3x stall 15)')
-  const okLt = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 90 }), 'oklt')
-  assert(okLt.config_error === null && okLt.config.long_turn_minutes === 90, 'cfg long_turn_minutes passes through')
+  // t261005-02 cross-knob guard: a declared long_turn above the park threshold must
+  // carry an explicit self_heal.park_minutes, otherwise the config is rejected
+  // (fail-closed: a cancel threshold at/below the long-turn threshold could fire on
+  // a healthy long turn). The old bare { long_turn_minutes: 90 } case is now red by
+  // design — covered below as ltNoPark.
+  const okLt = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 90, self_heal: { park_minutes: 120 } }), 'oklt')
+  assert(okLt.config_error === null && okLt.config.long_turn_minutes === 90, 'cfg long_turn_minutes passes through (with an explicit park above it)')
+  const ltNoPark = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 90 }), 'ltnopark')
+  assert(ltNoPark.config_error !== null && ltNoPark.config_error.includes('self_heal.park_minutes'), 'cfg long_turn above factory park without an explicit park rejected (cross-knob guard)')
   assert(okLt.provenance.keys['long_turn_minutes']?.endsWith('#long_turn_minutes'), 'cfg long_turn provenance per-key')
   const bad9 = parseWatchdogConfig(JSON.stringify({ long_turn_minutes: 0 }), 'f9')
   assert(bad9.config_error !== null && bad9.config_error.includes('long_turn_minutes'), 'cfg long_turn_minutes<=0 rejected')

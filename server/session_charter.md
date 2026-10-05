@@ -79,6 +79,18 @@ cwd 兜底被**故意关掉**（仓树内 cwd 标识的是「被调用的引擎�
   e) detail 只放证据，放在问题之后，不替问题说话；
   f) 状态汇报不进请求账（那是 Alerts/汇报面的事）——请求账里每一行都该等人答；
   g) 术语要么不用，要么当场一句话解释。
+- **Ask discipline: no ask without an acceptable default (261005, t261005-02)**:
+  An ask that carries no acceptable default cannot be answered by an absent host.
+  The host can be away for hours; the executor session must not park forever on it.
+  So: every ask you raise — through the request ledger or the question bridge —
+  MUST declare a `default_action` that states what happens if nobody answers.
+  The default must be safe to apply without a human. If you cannot name a safe
+  default, do not ask yet: pick the safest stopping point, record it in the ledger,
+  and raise the ask with that default named. The watchdog enforces the recovery
+  side: if a session sits on an unanswered ask past the declared park threshold,
+  it cancels that turn once and re-delivers the briefing (receipt on the watchdog
+  status face). Do not treat the cancel as an error; re-read the ledger, then
+  continue by the default or re-raise the ask with a better one.
 - **泳道角色报告用英文（260925 宿主令，与上一条并存、口径互补）**：
   developer/integration 各工单段的 report 内容——方案、审方案意见、实现交接、
   测试设计说明、仲裁判决、验收报告及 lane 交接产物——一律用**英文**写；

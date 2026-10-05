@@ -3644,6 +3644,21 @@
    "anchor": "behaviour",
    "note": "t261005-03 clause C: probe counts visible, dry-run default, --apply refuses non-orphans, named refusal on bad root",
    "sync_path": ""
+  },
+  "integration/t261005-02/sc_watchdog_self_heal_fires_once.py": {
+   "anchor": "behaviour",
+   "note": "t261005-02 self-heal component contract (status face + cancel act)",
+   "sync_path": ""
+  },
+  "integration/t261005-02/sc_watchdog_self_heal_holds.py": {
+   "anchor": "behaviour",
+   "note": "t261005-02 self-heal component contract (status face + cancel act)",
+   "sync_path": ""
+  },
+  "integration/t261005-02/sc_watchdog_self_heal_config_and_failure.py": {
+   "anchor": "behaviour",
+   "note": "t261005-02 self-heal component contract (status face + cancel act)",
+   "sync_path": ""
   }
  }
 }

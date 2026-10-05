@@ -78,6 +78,19 @@ export interface WakeIo {
   ourPendingItemId?(sessionId: string, requestId: string): Promise<string | null>
   /** 镜像/通路状态串（status 面 additive 键 queue_mirror；缺省 null）。 */
   transportState?(): string | null
+  /**
+   * t261005-02 self-heal: cancel one live turn, retaining pending inbox work (host
+   * SessionCancelRequest). accepted=true = cancellation admitted; accepted=null = the
+   * face is absent/unbounded-timeout (explicitly unsupported — the self-heal step
+   * holds, never retries); accepted=false = the host named a refusal (error carried).
+   * Failure-mode checklist carried over from the wake path: host absent → explicit
+   * unsupported (no silent degrade); bounded wait → Promise.race timeout (the host
+   * cancel is synchronous, no AbortSignal parameter — no signal is claimed);
+   * error → named receipt; no retry loop (one attempt per park is enforced by the
+   * decision core, not here). Cancel-specific: accepted:false = named refusal; an
+   * already-finished turn is a host-side no-op refusal and surfaces as accepted=false.
+   */
+  cancelTurn?(sessionId: string): Promise<{ accepted: boolean | null; error?: string }>
   /** 全终态：镜像消费循环等后台面的收口钩子（node.ts dispose 链调用）。 */
   dispose?(): void | Promise<void>
 }

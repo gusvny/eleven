@@ -30,6 +30,9 @@ export interface WaitingAsk {
   kind: string
   /** Raised-at from the ledger row (explicit null when absent). */
   raisedAt: number | null
+  /** t261005-02: does the row declare an acceptable default_action (read-only
+   *  observation for the self-heal receipt)? null = the bit is not exposed. */
+  hasDefault: boolean | null
 }
 
 export interface WaitingFace {
@@ -69,6 +72,7 @@ export function detectWaitingFace(input: WaitingFaceInput): WaitingFace {
       requestId: p.target,
       kind: p.kind,
       raisedAt: typeof p.raisedAt === 'number' && Number.isFinite(p.raisedAt) ? p.raisedAt : null,
+      hasDefault: typeof p.hasDefault === 'boolean' ? p.hasDefault : null,
     }))
   // Unattributed rows (raised_by empty): never matched, but named explicitly — the
   // attribution gap stays visible, not silent.

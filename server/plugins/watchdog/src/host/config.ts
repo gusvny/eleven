@@ -41,6 +41,13 @@ export interface WatchdogConfig {
    *  enabled=false = the whole filing face stops (no session text read, no row
    *  filed, no prose_ask_filed alert). */
   prose_backstop: { enabled: boolean; idle_minutes: number }
+  /** t261005-02: the bounded un-park (self-heal) face. When the executor session sits
+   *  on an unanswered ask past `park_minutes` while our wake briefing is still
+   *  unconsumed in its queue, the watchdog cancels that turn once and re-delivers the
+   *  briefing. enabled=false = the whole face stops (observation only, never cancel).
+   *  park_minutes must stay above long_turn_minutes (cross-checked at parse time:
+   *  a healthy long turn must never reach the cancel threshold). */
+  self_heal: { enabled: boolean; park_minutes: number }
   /** t261004-30: one-shot executor sessions (bounded small work). retention_days =7
    *  (host default), lock_timeout_ms reclaims a dead session's object lock. The
    *  parallel cap is NOT here — it reads the project concurrency declaration via
@@ -72,6 +79,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
   reconcile_seconds: 60,
   waiting_minutes: 5,
   prose_backstop: { enabled: true, idle_minutes: 10 },
+  self_heal: { enabled: true, park_minutes: 60 },
   one_shot: { enabled: true, retention_days: 7, lock_timeout_ms: 30 * 60 * 1000 },
   ask_mirror_deadline_s: 120,
   alerts: {
@@ -166,6 +174,23 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       problems.push('waiting_minutes must be a positive number (minutes)')
     } else { cfg.waiting_minutes = doc.waiting_minutes; keys.waiting_minutes = `${file}#waiting_minutes` }
   }
+  if ('self_heal' in doc) {
+    if (!isPlainObject(doc.self_heal)) {
+      problems.push('self_heal must be an object ({enabled, park_minutes})')
+    } else {
+      const sh = doc.self_heal
+      const out = cfg.self_heal
+      if ('enabled' in sh) {
+        if (typeof sh.enabled !== 'boolean') problems.push('self_heal.enabled must be a boolean')
+        else { out.enabled = sh.enabled; keys['self_heal.enabled'] = `${file}#self_heal.enabled` }
+      }
+      if ('park_minutes' in sh) {
+        if (typeof sh.park_minutes !== 'number' || !Number.isFinite(sh.park_minutes) || sh.park_minutes <= 0) {
+          problems.push('self_heal.park_minutes must be a positive number (minutes)')
+        } else { out.park_minutes = sh.park_minutes; keys['self_heal.park_minutes'] = `${file}#self_heal.park_minutes` }
+      }
+    }
+  }
   if ('prose_backstop' in doc) {
     if (!isPlainObject(doc.prose_backstop)) {
       problems.push('prose_backstop must be an object ({enabled, idle_minutes})')
@@ -257,7 +282,15 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
       }
     }
   }
-  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'one_shot', 'ask_mirror_deadline_s', 'alerts'].includes(k))
+  // t261005-02 cross-knob guard (review item 4): a cancel threshold at or below a
+  // DECLARED long-turn threshold could fire on a healthy long turn — reject with both
+  // knobs named. The check compares against an explicitly declared long_turn_minutes
+  // only: the factory default (45) is not a declaration, and small park thresholds
+  // (test fixtures, aggressive recovery profiles) stay valid without one.
+  if ('long_turn_minutes' in doc && cfg.self_heal.park_minutes <= cfg.long_turn_minutes) {
+    problems.push(`self_heal.park_minutes (${cfg.self_heal.park_minutes}) must stay above long_turn_minutes (${cfg.long_turn_minutes}) — a healthy long turn must never reach the cancel threshold`)
+  }
+  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'self_heal', 'one_shot', 'ask_mirror_deadline_s', 'alerts'].includes(k))
   if (unknown.length > 0) problems.push(`Unknown keys rejected (fail-closed, KI-149 family): ${unknown.join(', ')}`)
 
   if (problems.length > 0) {

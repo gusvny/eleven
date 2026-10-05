@@ -38,6 +38,7 @@ function parseIso(s, fallback) {
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makePendingProvider, makeProseBackstopIo } from './node.ts'
+import { parseWatchdogConfig } from './src/host/config.ts'
 import { readRequests, fsLedgerIo } from '../executor-panel/src/host/requests.ts'
 
 const waitingSeam = { v2: false, unreadable: false, panelDir: null, stat: { missing: true, running: false, updatedAtMs: null }, text: { mode: 'absent', text: '' } }
@@ -210,11 +211,29 @@ const stub = {
   queues: new Map(), // sessionId -> [SessionQueuedItem 形状]（权威队列真值）
   subscribers: new Set(), // 活跃 control 流订阅者（单进程内多路广播）
   idSeq: 1,
+  // t261005-02 v3 缝：cancel 出口桩（契约=integration/t261005-02/lib_selfheal_harness.py 头注：
+  // cancel_log / cancel_fail_next）。这是测试缝，不是产品行为。
+  cancelLog: [], // 每次 cancel 调用 {at, sessionId, accepted}
+  cancelFail: null, // 下一次 cancel 注入失败（宿主点名拒绝形态=抛错；用后即清）
 }
 function stubBroadcast(frame) {
   for (const sub of stub.subscribers) sub.push(frame)
 }
 const stubController = {
+  // t261005-02：宿主 cancel（同步语义，SessionCancelValue）。注入失败=抛错
+  // （生产 cancelTurn 把宿主点名的拒绝归 accepted:false + 错误透传）。
+  async cancel(req) {
+    const rec = { at: clock.now(), sessionId: req.sessionId, accepted: true }
+    if (stub.cancelFail !== null) {
+      const err = stub.cancelFail
+      stub.cancelFail = null
+      rec.accepted = false
+      stub.cancelLog.push(rec)
+      throw new Error(err)
+    }
+    stub.cancelLog.push(rec)
+    return { accepted: true }
+  },
   async prompt(req /* , signal */) {
     const pr = stub.promptResult
     if (pr === 'throw') throw new Error('session stub prompt injected failure')
@@ -275,6 +294,14 @@ function wakeIoFactory() {
 }
 function configLoaderFor(project, cfg) {
   const file = `/cfg/${project}/watchdog.json`
+  // t261005-02 v3 缝：声明里带 self_heal 的配置走**真 parseWatchdogConfig**——
+  // 畸形值/跨旋钮护栏的 config_error、逐键溯源全部来自产品代码（契约=requirement 4：
+  // fail-closed 与回执点名是产品行为，夹具不抄）。旧形状（无 self_heal 键）逐字节走
+  // 旧路径，v1/v2 场景语义不变。
+  if (cfg.self_heal !== undefined) {
+    const parsed = parseWatchdogConfig(JSON.stringify(cfg), file)
+    return () => parsed
+  }
   const keys = {}
   for (const k of ['enabled', 'executor_session', 'stall_minutes', 'reconcile_seconds']) {
     keys[k] = cfg[k] !== undefined ? `${file}#${k}` : 'factory-default'
@@ -318,6 +345,9 @@ async function ensureInstance(project, cfgOverride = null) {
     if (cfgKey(entry.cfgOverride) !== cfgKey(cfgOverride)) { entry.w.dispose(); instances.delete(project); entry = null }
   }
   if (!entry) {
+    // 缝路径先武装（t261005-02）：journal/panel 数据根一律落到夹具 /tmp 目录——
+    // 常开的 proseBackstopIo 若读真实 HOME（沙箱/权限差异）会挂起，路径全隔离即根除。
+    seamPanelDir()
     const cfg = cfgOverride || {}
     const w = new Watchdog(project, {
       configLoader: configLoaderFor(project, cfg),
@@ -325,16 +355,22 @@ async function ensureInstance(project, cfgOverride = null) {
       boardReader: boardReader(),
       engineProbe: engineProbe(),
       wakeIo: wakeIoFactory(),
-      pendingProvider: waitingSeam.v2 ? seamPendingProvider(project) : pendingProvider(),
+      // t261005-02 缝修正：v2/v3 缝命令（requests_seed / session_text_set 等）在
+      // start **之后**才到——注入面一律调用时晚绑定（按 waitingSeam.v2 现查），
+      // 否则晚到的 seed 对已建实例不可见（fires-once 冒烟实证：asks 恒空）。
+      pendingProvider: (() => {
+        const seam = seamPendingProvider(project)
+        const plain = pendingProvider()
+        return async () => (waitingSeam.v2 ? seam() : plain())
+      })(),
       sessionStat: sessionStat(),
-      waitingRunningLookup: waitingSeam.v2
-        ? () => (waitingSeam.stat.missing ? null : waitingSeam.stat.running)
-        : undefined,
-      recentText: waitingSeam.v2
-        ? async () => waitingSeam.text.mode === 'ok'
+      waitingRunningLookup: () => (waitingSeam.v2 ? (waitingSeam.stat.missing ? null : waitingSeam.stat.running) : undefined),
+      recentText: async () => {
+        if (!waitingSeam.v2) return { ok: false, reason: 'fixture text source absent (v2 seam not armed)' }
+        return waitingSeam.text.mode === 'ok'
           ? { ok: true, text: waitingSeam.text.text }
           : { ok: false, reason: waitingSeam.text.mode === 'malformed' ? 'fixture injected malformed transcript' : 'fixture text source absent' }
-        : undefined,
+      },
       proseBackstopIo: waitingSeam.v2 ? makeProseBackstopIo(project) : undefined,
       now: clock.now,
       dataDir: '/memdata',
@@ -478,8 +514,12 @@ async function handle(cmd) {
         return JSON.stringify({
           type: 'request', id: String(r.id), kind: r.kind || 'question',
           question: r.question || '', detail: r.detail || '',
-          default_action: '', expires_at: null, raised_by: r.raised_by || '',
-          project: key, status: r.status || 'waiting',
+          default_action: r.default_action !== undefined ? String(r.default_action) : '',
+          expires_at: null, raised_by: r.raised_by || r.by || '',
+          project: key,
+          // 账本状态词表只有 waiting|answered（面板账纪律）——夹具行一律归一，
+          // 场景里的 "pending" 等口语写法不进真账。
+          status: r.status === 'answered' ? 'answered' : 'waiting',
           at: r.at === 0 || r.at === undefined ? clock.now() : r.at,
         })
       })
@@ -509,6 +549,50 @@ async function handle(cmd) {
     else if (cmd.absent) waitingSeam.text = { mode: 'absent', text: '' }
     else waitingSeam.text = { mode: 'ok', text: String(cmd.text ?? '') }
     return { ok: true }
+  }
+  // ---- t261005-02 v3 seam（契约=integration/t261005-02/lib_selfheal_harness.py 头注）----
+  // brief_pending_set / cancel_log / cancel_fail_next / alerts_tail。测试缝，不是产品行为。
+  if (op === 'brief_pending_set') {
+    // 三态拨到权威队列桩上（真镜像随之可判定）：
+    //   true  = 队列里放一项未消化输入（我们的简报未消化 / 兜底深度 > 0）；
+    //   false = 清空队列（已消化）；
+    //   "null" = 镜像不可读形态（宿主服务缺席 → 生产 ourBriefPending = no-signal null）。
+    const sid = cmd.sessionId
+    if (cmd.pending === 'null') {
+      stub.present = false
+      return { ok: true, mirror: 'unreadable (host absent)' }
+    }
+    stub.present = true
+    if (cmd.pending === false) {
+      stub.queues.set(sid, [])
+      stubBroadcast({ type: 'queue', sessionId: sid, items: [] })
+      return { ok: true, mirror: 'consumed' }
+    }
+    const items = stub.queues.get(sid) ?? []
+    const id = 'q-seam-' + stub.idSeq++
+    items.push({ id, placement: 'queued', rpcId: 'seam-' + id, message: { id, content: [] } })
+    stub.queues.set(sid, items)
+    stubBroadcast({ type: 'queue', sessionId: sid, items: [...items] })
+    return { ok: true, mirror: 'pending' }
+  }
+  if (op === 'cancel_log') {
+    return { ok: true, cancels: stub.cancelLog.slice() }
+  }
+  if (op === 'cancel_fail_next') {
+    if (cmd.mode === 'absent') {
+      // 宿主服务缺席形态：生产 cancelTurn 回 accepted:null（显式 unsupported）。
+      stub.present = false
+      return { ok: true, mode: 'absent' }
+    }
+    stub.cancelFail = String(cmd.error ?? 'stub: cancel refused by host')
+    return { ok: true, armed: true }
+  }
+  if (op === 'alerts_tail') {
+    const project = cmd.project || currentProject
+    const raw = core.store.get(`/memdata/${project}.alerts.jsonl`) || ''
+    const rows = raw.split('\n').filter(l => l !== '').map(l => { try { return JSON.parse(l) } catch { return { kind: 'malformed' } } })
+      .map(r => ({ ...r, kind: r.kind !== undefined ? r.kind : r.rule })) // kind 别名：判据键（缝层，不改产品行形状）
+    return { ok: true, rows: rows.slice(-(cmd.n || 50)) }
   }
   if (op === 'session_digest') {
     // 已消化=权威队列清空（广播空 queue 帧；镜像认领随之翻 false）

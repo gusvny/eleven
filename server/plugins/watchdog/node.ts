@@ -217,8 +217,52 @@ export function makeWakeIo(ctx: Context): WakeIo {
       if (hostGone()) return null
       return ensureMirror().depthOf(sessionId)
     },
+    // t261005-02 self-heal: cancel one live turn (retains pending inbox work, so the
+    // queued wake briefing survives and the session starts a fresh turn). The host
+    // cancel is synchronous (SessionCancelValue, no AbortSignal parameter — types.d.ts
+    // L326-333), so the bound is a Promise.race timeout, not a signal; the loser
+    // timer is always cleared (terminal-state discipline). accepted=null = face
+    // absent or unbounded wait (explicit unsupported — the self-heal step holds and
+    // never retries); accepted=false = the host named a refusal, error carried.
+    async cancelTurn(sessionId): Promise<{ accepted: boolean | null; error?: string }> {
+      const c = getController() as (ControllerLike & { cancel?: (request: { sessionId: string }) => unknown }) | undefined
+      if (!c || typeof c.cancel !== 'function') {
+        return { accepted: null, error: '宿主 sessionController.cancel 不可达（headless 或服务未注入）——self-heal cancel 显式不可用' }
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const res = await Promise.race([
+          Promise.resolve(c.cancel({ sessionId })).then((v) => ({ ok: true as const, v })),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('__cancel_bound_timeout__')), 10_000)
+            ;(timer as unknown as { unref?: () => void }).unref?.()
+          }),
+        ])
+        if (res.ok && typeof res.v === 'object' && res.v !== null && (res.v as { accepted?: unknown }).accepted === true) {
+          return { accepted: true }
+        }
+        return { accepted: false, error: `宿主 cancel 回执非 accepted：${JSON.stringify(res.ok ? res.v : null).slice(0, 200)}` }
+      } catch (e) {
+        const msg = String(e instanceof Error ? e.message : e)
+        // The 10s bound fired = the answer is unknowable (accepted:null, explicit
+        // unsupported — never guessed); any other throw is a host-named refusal
+        // (accepted:false, error carried into the receipt).
+        if (msg === '__cancel_bound_timeout__') {
+          return { accepted: null, error: 'cancel call exceeded the 10s bound — outcome unknowable, explicit unsupported' }
+        }
+        return { accepted: false, error: `cancel 被宿主点名拒绝：${msg.slice(0, 200)}` }
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+    },
     async ourBriefPending(sessionId, requestId): Promise<boolean | null> {
       if (hostGone()) return null
+      if (requestId === null) {
+        // No brief of ours was ever minted (requestId null): fall back to the queue
+        // depth — an undrained queue still evidences the wedge (self-heal guard c).
+        const d = await ensureMirror().depthOf(sessionId)
+        return d === null ? null : d > 0
+      }
       return ensureMirror().ourBriefPending(sessionId, requestId)
     },
     async ourPendingItemId(sessionId, requestId): Promise<string | null> {
@@ -461,6 +505,11 @@ export function makePendingProvider(projectKey: string, runningLookup?: (session
         // 发起方会话 running 位：真源是同拍的 list 快照；发起方未知/未读到 = false
         // （证据面靠 raisedBy 归属说话，running 只是辅助位，缺席不冒充）。
         sessionRunning: r.raised_by ? runningLookup?.(r.raised_by) === true : false,
+        // t261005-02：问行是否声明了可接受的 default（只读观测，进 self-heal 回执）；
+        // 空串 = 行未声明 default（hasDefault=false），字段缺席 = 位不可见（null）。
+        hasDefault: typeof (r as { default_action?: unknown }).default_action === 'string'
+          ? ((r as { default_action: string }).default_action.trim() !== '')
+          : null,
       })),
     }
   }
