@@ -41,6 +41,7 @@ import { pickProjectTabs } from '../shared/sessions.ts'
 import type { OpenedEntry, TitleRowLike } from '../shared/sessions.ts'
 // 项目色（票② R7）：确定性色板 + hex→rgba 展开（hover 淡底，避免 color-mix 赌注）。
 import { projectColor } from '../shared/project-color.ts'
+import { projectBadgeSvg } from '../shared/project-identity.ts'
 import { hexToRgba } from './chat-project-band.ts'
 import { DERIVE_TOKENS_CSS } from './theme';
 
@@ -82,6 +83,8 @@ export interface ProjectSessionRowProps {
 const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
   padding:4px 8px 4px 20px; border-bottom:1px solid rgba(255,255,255,0.04); }
+/* UI-4 (t261005-05): 11px identity badge on the session row (inline svg, flex-aligned). */
+.wb-psess-badge { display:inline-flex; align-items:center; flex:none; line-height:0; }
 /* 项目色（票② R7 拍板 5）：色源=--wb-psess-color（根节点 inline 注入，
  * 值=projectColor(projectKey) 确定性色板）；淡底由 JS 用同色 16% 透明展开。 */
 .wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
@@ -214,6 +217,16 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
   return (
     <div className="wb-psess" data-wb-psess-row="" style={colorVars}>
       <style>{PSESS_STYLES}</style>
+      {/* UI-4 (t261005-05): 11px project identity badge on the session row (design
+          note §2.5 size rule); same key, same badge — the same single-source identity
+          as the sidebar project row and the panel. */}
+      <span
+        className="wb-psess-badge"
+        data-wb-psess-badge=""
+        title={projectKey}
+        aria-label={`${projectName} identity badge`}
+        dangerouslySetInnerHTML={{ __html: projectBadgeSvg(projectKey, 11) }}
+      />
       <button
         type="button"
         className={tabs.length === 0 ? 'wb-psess-new wb-psess-new-labeled' : 'wb-psess-new'}

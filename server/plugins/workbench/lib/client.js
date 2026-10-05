@@ -3727,50 +3727,101 @@ function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKe
 	};
 }
 //#endregion
-//#region src/shared/project-color.ts
+//#region src/shared/project-identity.ts
 /**
-* sandbar-workbench · 项目 key → tag 色 纯函数（t260903-07 工单②：全局 chat 消息
-* 项目 tag 按项目着色，为多项目同屏区分做准备）。
+* project-identity.ts — single-source pure module for the project identity badge
+* (console-ui epic item UI-4, t261005-05). One project = one badge
+* (12 colours x 6 uncommon outlines x 3 structures) + one project colour, and the
+* left column and the panel render the SAME identity for that project.
 *
-* 借鉴模式取舍（格式对齐 session-ledger-store.ts 头注）：
-* - ✅ 确定性哈希取色（FNV-1a 32bit → 调色板下标）：同 key 恒同色，无配置面也稳定。
-* - ❌ 不带运行时随机/持久化记忆：纯函数无状态，刷新/重启不漂移（验收 R3-a）。
-* - ❌ 不读 projects.yaml 配置：色映射零配置面；未来注册表声明色升级 =
-*   在本模块加「yaml 可选 color 字段优先于哈希值」一层，函数签名不变（见下）。
-* - ✅ 畸形输入兜底（外部输入纪律）：空/非字符串/超长 key → 中性灰，不 throw。
+* Declared truth (this module implements declared values, invents nothing):
+* - palette / outlines / structures = the settled spec (§2.4) in the 261004 chat
+*   identity design note under notes/discussions/ (filename carries CJK by design);
+* - geometry is ported verbatim from mock `261004-concurrency-limit-mock.html` v11
+*   (`glyphPath` / `shapeSVG`, including the ring's centre-scaled hole and half's
+*   right-side clip).
 *
-* 撞色风险（已声明，验收 R3-c 不作通过/失败断言）：10 色板下两项目撞色概率
-* 约 1/10（生日悖论在项目数个位数时更高些）。升级路径一：扩色板；升级路径二
-* （优先）：projects.yaml 增加可选 `color` 字段，registry 声明色覆盖哈希值。
+* Two declared deviations from the mock (borrowed-implementation tradeoffs, auditable):
+* (a) the mock builds mask/clip ids with `Math.random()` — this module derives a
+*     deterministic id from identity+size (SSR/snapshot safe; equal ids always carry
+*     byte-equal content, so duplicate references in one document have no visual drift);
+* (b) the mock hardcodes per-project `PROJ_SHAPE`/`PROJ_COLOR` maps — this module
+*     replaces them with the deterministic rule "two hash streams pick the preferred
+*     triple + dedupe over the known project set" (ticket requirement: an undeclared
+*     project still gets a stable, distinct identity, unchanged across restarts).
+*     The `projects.yaml` `color`/`shape` override is an approved upgrade path whose
+*     parser lives in server/project-registry.ts (outside this ticket's write set) —
+*     recorded as debt for a follow-up ticket, not implemented here.
+*
+* Tradeoffs vs project-color.ts:
+* - the hash REUSES fnv1a (FNV-1a + murmur3 finalizer; plain FNV lacked low-bit
+*   avalanche and collided the first real pair suyou/sandbar — see that module's old
+*   header; this module does not regress to a plain FNV stream);
+* - the palette upgrades to the declared 12 colours (PROJECT_PALETTE_12);
+*   project-color.ts re-exports from here — single-source rule: the palette is
+*   declared exactly once, in this file.
+*
+* Malformed-input fallback follows the existing discipline: a non-key gets the grey
+* pentagon-solid identity, never a throw.
 */
-/** 调色板：10 色。定稿口径（实现期修订，偏离方案 v2「RGB 欧氏 ≥120」并在此声明）：
-*  「两两可辨」按**色相间隔**锁死——10 个色相均匀分布（每 36° 一档，s=0.72/l=0.66 生成），
-*  任意两色 hue 环距 ≥36°（smoke/project-color.mjs 断言 ≥20° 留余量）。理由：tag 色的
-*  「可辨」是感知问题，同亮度饱和色的色相才是主判据；RGB 欧氏距离会把感知上差异明显
-*  的两色（如绿 vs 青）误判为近色，10 色板在 RGB≥120 约束下无解（程序化搜索实证，
-*  只剩荧光/暗色极端解，暗底可读性崩坏）。
-*  亮度带锁定 0.66（GitHub 暗色系 UI 同档），保证暗底可读。 */
-const PROJECT_PALETTE = [
+/**
+* This module is self-contained (zero module imports): project-color.ts re-exports
+* this module's palette/hash/fallback colour, and the panel page embeds these same
+* functions via String(fn) — one source, no drift, no import cycle.
+*/
+/** Palette: 12 colours (verbatim from mock v11 `PALETTE12`; hues about 30 degrees
+*  apart, s about 0.72 / l about 0.66). Declared values win: their measured minimum
+*  pairwise hue-ring gap is 19.2 degrees, so the old 10-colour palette's >=20 degree
+*  criterion is re-anchored (see smoke/project-color.mjs) rather than bending the
+*  declared values to keep a derived number. */
+const PROJECT_PALETTE_12 = [
 	"#e76a6a",
-	"#e7b56a",
-	"#cee76a",
-	"#83e76a",
+	"#e7936a",
+	"#e7c36a",
+	"#c6e76a",
+	"#8ae76a",
 	"#6ae79c",
-	"#6ae7e7",
-	"#6a9ce7",
-	"#836ae7",
-	"#ce6ae7",
-	"#e76ab5"
+	"#6ae7d4",
+	"#6aabe7",
+	"#7f6ae7",
+	"#b56ae7",
+	"#e76ad0",
+	"#e76a92"
 ];
-/** 畸形输入/无法归项目的兜底色（中性灰，低饱和一眼「未定色」）。 */
+/** Fallback colour for malformed input / unattributable projects (neutral grey;
+*  true source moved here, project-color.ts re-exports it). */
 const FALLBACK_COLOR = "#9ca3af";
-/** key 长度上限（超过按畸形处理；projects.yaml 的 key 都是短标识符）。 */
+/** Outline set (uncommon shapes; deliberately avoids dots/squares/triangles that
+*  read as controls — design note §2.4). */
+const IDENTITY_OUTLINES = [
+	"pentagon",
+	"hexagon",
+	"octagon",
+	"shield",
+	"sparkle",
+	"tag"
+];
+/** Structure set: solid / ring (centre-scaled hole) / half (55% base + right half at 100%). */
+const IDENTITY_STRUCTURES = [
+	"solid",
+	"ring",
+	"half"
+];
+/** Fallback identity for malformed keys (neutral grey + plainest shape = "unset"). */
+const FALLBACK_IDENTITY = {
+	color: FALLBACK_COLOR,
+	outline: "pentagon",
+	structure: "solid"
+};
+/** Salt for the second hash stream (independent of the first; changing it reshuffles
+*  every identity — think before changing). */
+const STREAM2_SALT = "\0wb-identity";
+/** Key length cap (longer is treated as malformed; project keys are short ids). */
 const KEY_MAX_LEN = 64;
-/** FNV-1a 32bit 哈希 + murmur3 终混：
-*  纯 FNV 对短 key 的低 4 位雪崩不足，真实注册表首对项目（suyou/sandbar）即同槽
-*  撞色（两 key FNV 后均 %10===2，实锤见走查报告）——用户点名的第一对就撞，
-*  「撞色风险」从概率声明变现实缺陷。加 murmur3 finalizer 改善低位雪崩；
-*  smoke/project-color.mjs 落「真实注册表键两两不同槽」回归断言看住。 */
+/** FNV-1a 32bit hash + murmur3 finalizer (moved here from project-color.ts in
+*  t261005-05: plain FNV lacked low-bit avalanche and the first real registry pair
+*  suyou/sandbar landed in one slot — the finalizer separates them). Known vectors
+*  are locked by smoke/project-color.mjs; do not hand-tune. */
 function fnv1a(input) {
 	let h = 2166136261;
 	for (let i = 0; i < input.length; i++) {
@@ -3784,17 +3835,150 @@ function fnv1a(input) {
 	h ^= h >>> 16;
 	return h >>> 0;
 }
-/** project key 合法面（宽松白名单：非空、≤64、无控制字符——UI 展示面用它渲染文本）。 */
+/** Project key validity face (loose whitelist: non-empty, <=64, no control chars —
+*  the UI renders this text, so it stays display-safe). */
 function isProjectKeyLike(key) {
 	return typeof key === "string" && key.length > 0 && key.length <= KEY_MAX_LEN && !/[\u0000-\u001f\u007f]/.test(key);
 }
+/** Preferred triple for one key, no dedupe (set dedupe lives in projectIdentity).
+*  Exported only as the panel page's String(fn) embed seam, not a standalone API. */
+function baseIdentity(key) {
+	const h1 = fnv1a(key);
+	const h2 = fnv1a(key + STREAM2_SALT);
+	return {
+		color: PROJECT_PALETTE_12[h1 % PROJECT_PALETTE_12.length],
+		outline: IDENTITY_OUTLINES[h2 % IDENTITY_OUTLINES.length],
+		structure: IDENTITY_STRUCTURES[(h1 >>> 9) % IDENTITY_STRUCTURES.length]
+	};
+}
+/** Dedupe key of a triple (a collision needs all three channels equal).
+*  Export reason same as baseIdentity (embed seam). */
+function identityId(id) {
+	return `${id.color}|${id.outline}|${id.structure}`;
+}
+/**
+* Project key -> identity. Same key, same value, always (pure function; the
+* "unchanged across restarts" acceptance object).
+*
+* @param key project key (malformed -> FALLBACK_IDENTITY, never throws).
+* @param knownKeys known project set (optional). When passed, dedupe runs in sorted
+*        order, first come first served: a later colliding project walks the ring
+*        (colour+1, outline+1, structure+1) to the first free slot — the deterministic
+*        implementation of design-note §2.4 "preferred pair + dedupe over the known
+*        project set". The two consumers (sidebar registry / panel project root) each
+*        pass their own set; the extreme divergence that different sets could cause is
+*        watched by the collision assertions in tests/project-identity.mjs.
+*/
+function projectIdentity(key, knownKeys) {
+	if (!isProjectKeyLike(key)) return FALLBACK_IDENTITY;
+	const k = key;
+	const base = baseIdentity(k);
+	if (!Array.isArray(knownKeys) || knownKeys.length === 0) return base;
+	const valid = Array.from(new Set(knownKeys)).filter(isProjectKeyLike).sort();
+	if (!valid.includes(k)) return base;
+	const taken = /* @__PURE__ */ new Set();
+	let result = base;
+	for (const v of valid) {
+		const cand = baseIdentity(v);
+		result = taken.has(identityId(cand)) ? walkOffset(cand, taken) : cand;
+		taken.add(identityId(result));
+		if (v === k) break;
+	}
+	return result;
+}
+/** Ring walk from a triple to the first slot not in `taken` (colour+1, outline+1,
+*  structure+1 per step; the 216 space cannot fill for a <=41-char key set).
+*  Export reason same as baseIdentity (panel page embed seam). */
+function walkOffset(base, taken) {
+	const ci = PROJECT_PALETTE_12.indexOf(base.color);
+	const oi = IDENTITY_OUTLINES.indexOf(base.outline);
+	const si = IDENTITY_STRUCTURES.indexOf(base.structure);
+	for (let n = 1; n < PROJECT_PALETTE_12.length * IDENTITY_OUTLINES.length; n++) {
+		const cand = {
+			color: PROJECT_PALETTE_12[(ci + n) % PROJECT_PALETTE_12.length],
+			outline: IDENTITY_OUTLINES[(oi + n) % IDENTITY_OUTLINES.length],
+			structure: IDENTITY_STRUCTURES[(si + n) % IDENTITY_STRUCTURES.length]
+		};
+		if (!taken.has(identityId(cand))) return cand;
+	}
+	return base;
+}
+/**
+* SVG path for an outline (mock `glyphPath` ported verbatim; size = viewBox edge).
+* An unknown outline name falls back to pentagon (malformed-enum fallback, no throw).
+*/
+function identityOutlinePath(name, size) {
+	const S = size;
+	const c = S / 2;
+	const R = S * .47;
+	const R2 = S * .3;
+	const polyPath = (n, rot) => {
+		const pts = [];
+		for (let k = 0; k < n; k++) {
+			const a = rot + k * 2 * Math.PI / n;
+			pts.push(`${(c + R * Math.cos(a)).toFixed(2)},${(c + R * Math.sin(a)).toFixed(2)}`);
+		}
+		return `M${pts.join(" L")} Z`;
+	};
+	if (name === "hexagon") return polyPath(6, -Math.PI / 2 + Math.PI / 6);
+	if (name === "octagon") return polyPath(8, -Math.PI / 2 + Math.PI / 8);
+	if (name === "shield") {
+		const t = S * .08, b = S * .94;
+		return `M${S * .14} ${t} H${S * .86} V${S * .52} Q${S * .86} ${b} ${c} ${b} Q${S * .14} ${b} ${S * .14} ${S * .52} Z`;
+	}
+	if (name === "sparkle") {
+		const p = [];
+		for (let k = 0; k < 8; k++) {
+			const r = k % 2 === 0 ? R : R2;
+			const a = -Math.PI / 2 + k * Math.PI / 4;
+			p.push(`${(c + r * Math.cos(a)).toFixed(2)},${(c + r * Math.sin(a)).toFixed(2)}`);
+		}
+		return `M${p.join(" L")} Z`;
+	}
+	if (name === "tag") return `M${S * .12} ${S * .12} H${S * .66} L${S * .88} ${S * .34} V${S * .88} H${S * .12} Z`;
+	return polyPath(5, -Math.PI / 2 + Math.PI / 5);
+}
+/**
+* Badge SVG text (mock `shapeSVG` port). ring = centre-scaled 0.46 hole (mask);
+* half = same colour at 55% base + right half at 100% (clipPath). Design note §2.4:
+* thin-pointed shapes like sparkle degrade to solid below 12px (no hole that size
+* cannot hold).
+*
+* Deterministic id (deviation (a) in the header): derived from identity+size by
+* default. Two badges with the same identity and size in one document share an id —
+* their content is byte-equal, so either definition renders identically.
+*/
+function identityBadgeSvg(identity, size, uid) {
+	const structure = identity.structure === "ring" && size < 12 && identity.outline === "sparkle" ? "solid" : identity.structure;
+	const d = identityOutlinePath(identity.outline, size);
+	const id = uid ?? `wbid${fnv1a(`${identity.color}|${identity.outline}|${structure}|${size}`).toString(36)}`;
+	const wrap = (inner) => `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex:0 0 auto;display:block" aria-hidden="true">${inner}</svg>`;
+	if (structure === "ring") {
+		const c = size / 2;
+		return wrap(`<mask id="${id}"><rect x="0" y="0" width="${size}" height="${size}" fill="#fff"/><g transform="translate(${c},${c}) scale(0.46) translate(${-c},${-c})"><path d="${d}" fill="#000"/></g></mask><path d="${d}" fill="${identity.color}" mask="url(#${id})"/>`);
+	}
+	if (structure === "half") {
+		const c = size / 2;
+		return wrap(`<defs><clipPath id="${id}"><path d="${d}"/></clipPath></defs><path d="${d}" fill="${identity.color}" fill-opacity="0.55"/><rect x="${c}" y="0" width="${c}" height="${size}" fill="${identity.color}" clip-path="url(#${id})"/>`);
+	}
+	return wrap(`<path d="${d}" fill="${identity.color}"/>`);
+}
+/**
+* Convenience entry: key -> badge SVG (malformed key -> fallback badge). Consumer
+* size rules (design note §2.4): sidebar project row 14, session row 11, panel chip 13.
+*/
+function projectBadgeSvg(key, size, knownKeys) {
+	return identityBadgeSvg(projectIdentity(key, knownKeys), size);
+}
+//#endregion
+//#region src/shared/project-color.ts
 /**
 * 项目 key → 调色板色。同 key 任意次调用恒同值（纯函数，R3-a 验收对象）。
 * 畸形 key → FALLBACK_COLOR，不 throw。
 */
 function projectColor(key) {
 	if (!isProjectKeyLike(key)) return FALLBACK_COLOR;
-	return PROJECT_PALETTE[fnv1a(key) % PROJECT_PALETTE.length];
+	return PROJECT_PALETTE_12[fnv1a(key) % PROJECT_PALETTE_12.length];
 }
 /**
 * 生成 tag 样式 CSS 规则文本（注入 head 的自有 style 用；机制=属性锚 +
@@ -4155,6 +4339,8 @@ const DERIVE_TOKENS_CSS = `:root{
 const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
   padding:4px 8px 4px 20px; border-bottom:1px solid rgba(255,255,255,0.04); }
+/* UI-4 (t261005-05): 11px identity badge on the session row (inline svg, flex-aligned). */
+.wb-psess-badge { display:inline-flex; align-items:center; flex:none; line-height:0; }
 /* 项目色（票② R7 拍板 5）：色源=--wb-psess-color（根节点 inline 注入，
  * 值=projectColor(projectKey) 确定性色板）；淡底由 JS 用同色 16% 透明展开。 */
 .wb-psess-new { box-sizing:border-box; width:24px; height:24px; flex:none;
@@ -4282,6 +4468,13 @@ function ProjectSessionRow(props) {
 		},
 		children: [
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: PSESS_STYLES }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-psess-badge",
+				"data-wb-psess-badge": "",
+				title: projectKey,
+				"aria-label": `${projectName} identity badge`,
+				dangerouslySetInnerHTML: { __html: projectBadgeSvg(projectKey, 11) }
+			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				type: "button",
 				className: tabs.length === 0 ? "wb-psess-new wb-psess-new-labeled" : "wb-psess-new",
@@ -48451,15 +48644,15 @@ function WorkbenchSidebar(props) {
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "wb-group-dot",
 									"data-wb-psess-dot": "",
+									"data-wb-identity-badge": "",
 									style: {
-										display: "inline-block",
-										width: 8,
-										height: 8,
-										borderRadius: 4,
+										display: "inline-flex",
 										flex: "none",
-										background: projectColor(g.project.key)
+										lineHeight: 0
 									},
-									title: g.project.key
+									title: g.project.key,
+									"aria-label": `${g.project.name} identity badge`,
+									dangerouslySetInnerHTML: { __html: projectBadgeSvg(g.project.key, 14, groups.map((x) => x.project.key)) }
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "wb-group-entry",

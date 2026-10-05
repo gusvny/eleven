@@ -76,8 +76,12 @@ import { startChatProjectTagEffect } from './chat-project-tag.ts'
 import { startChatProjectBandEffect, setChatProjectBand } from './chat-project-band.ts'
 // 上下文折叠件（t260905-04）：带 CHARTER_MARKER 的注入消息收成可展开小条。
 import { startContextFoldEffect } from './context-fold.ts'
-// 项目色（票② R7）：确定性色板，同 key 恒同色。
-import { projectColor } from '../shared/project-color.ts'
+// Project colour (ticket 2 R7): deterministic palette, same key always same colour.
+// Since UI-4 (t261005-05): the group-head colour dot is retired for the identity
+// badge; projectColor stays only a chat-project-band concern, unused in this file.
+// UI-4 (t261005-05): project identity badge single source (colour x outline x
+// structure, same identity as the panel).
+import { projectBadgeSvg } from '../shared/project-identity.ts'
 // 项目组头图标族（票③验收 11b）：五枚 SVG 线性图标（规格单源见模块头注）。
 import { ProjectIcon } from './project-icons.tsx'
 import type { ProjectIconName } from './project-icons.tsx'
@@ -824,8 +828,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
               <div className="wb-group-head" style={{ cursor: 'pointer' }}>
                 <span className="wb-group-caret" title={collapsed[g.project.key] ? 'Expand' : 'Collapse'}
                   onClick={(e) => { e.stopPropagation(); setCollapsed(c => ({ ...c, [g.project.key]: !c[g.project.key] })) }}>{collapsed[g.project.key] ? '▸' : '▾'}</span>
-                {/* 项目色点（票② R7 拍板 5）：8px 常驻项目色标识，色=projectColor 确定性色板 */}
-                <span className="wb-group-dot" data-wb-psess-dot="" style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, flex: 'none', background: projectColor(g.project.key) }} title={g.project.key} />
+                {/* UI-4 (t261005-05): 14px project identity badge (design note §2.5
+                    size rule), replacing the old 8px colour dot; colour x outline x
+                    structure from the single-source project-identity module, dedupe
+                    set = this registry's keys (the sidebar-side input of the same
+                    rule the panel runs). */}
+                <span className="wb-group-dot" data-wb-psess-dot="" data-wb-identity-badge=""
+                  style={{ display: 'inline-flex', flex: 'none', lineHeight: 0 }}
+                  title={g.project.key}
+                  aria-label={`${g.project.name} identity badge`}
+                  dangerouslySetInnerHTML={{ __html: projectBadgeSvg(g.project.key, 14, groups.map(x => x.project.key)) }} />
                 {/* gen1 可达性修（acceptance 打回）：入口=名字+计数+弹性空档整段
                     （.wb-group-entry，flex:1 吃掉行内非图标区）——普通窗口宽度下项目名
                     不再被图标簇挤成 0 宽、行中部点击必落入入口段而非图标；图标簇命中区

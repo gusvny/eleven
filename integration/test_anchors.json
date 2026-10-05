@@ -3575,6 +3575,16 @@
    "note": "t261004-28 carrier delivery contract: the three ported engine unit tests stay code-identical to their author sources (comments/docstrings/non-ASCII literals aside, test names+count kept), the source-order lock keeps a byte-identical evidence copy under integration/t261004-28/evidence/, all are registered, and the three files run under pytest (C1-C6 faces of the carrier itself)",
    "sync_path": ""
   },
+  "integration/t261005-05/sc_ui4_identity_space_contract.mjs": {
+   "anchor": "behaviour",
+   "note": "declared identity space: palette/outline/structure exactness, determinism, malformed-key fallback, distinctness over registry+undeclared sets",
+   "sync_path": ""
+  },
+  "integration/t261005-05/sc_ui4_identity_cross_surface.mjs": {
+   "anchor": "contract",
+   "note": "UI-4 headline promise: same identity on sidebar face and panel face, single source, fallback, key text kept beside badge",
+   "sync_path": ""
+  },
   "integration/t261004-31/sc_t26100431_declared_session_gate.py": {
    "anchor": "behaviour",
    "note": "declared-executor-session seam behavior: real gate funnel, isolated registry, no value lock on the production declaration",

@@ -67,7 +67,13 @@ for (const dir of [HOST_DIR, SHARED_DIR]) {
     const t = stripComments(readFileSync(join(dir, f), 'utf8'))
     for (const m of t.split('\n').entries()) {
       const [i, line] = m
-      if (WRITE_LITERAL.test(line)) writeHits.push(`${f}:${i + 1}`)
+      // t261005-05 arbitrate: the verb literal alone is too blunt a write-face
+      // proxy — the declared identity vocabulary in src/shared legitimately
+      // quotes the noun 'tag' (design note §2.4 outline name, not a git call).
+      // The contract this check guards is "no git WRITE invocation": a verb
+      // literal only counts as a hit when the same line names git (the shell
+      // out shape every real caller here uses). Non-git lines are not writes.
+      if (WRITE_LITERAL.test(line) && /\bgit\b/.test(line)) writeHits.push(`${f}:${i + 1}`)
       // worktree 双义：读（worktree list）允许，写（add/remove/prune）拒绝
       if (/['"`]worktree['"`]/.test(line) && !/worktree['"]\s*,\s*['"`]list/.test(line) && /['"`](add|remove|prune)['"]/.test(line)) writeHits.push(`${f}:${i + 1} (worktree 写形态)`)
     }

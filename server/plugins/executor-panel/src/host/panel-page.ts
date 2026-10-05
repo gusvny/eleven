@@ -28,6 +28,18 @@ import {
 } from './page-logic.ts'
 import { LIST_CONTRACTS } from './list-contracts.ts'
 import { renderMarkdown } from './markdown.ts'
+// t261005-05 (UI-4): project identity badge single source, imported across plugins
+// from workbench shared (both plugins load as raw TS via node native type-stripping;
+// the relative path stays inside the repo). The function sources are embedded into
+// the page via String(), same pattern as page-logic — the UT and the page always run
+// one implementation. If the loader rejects the cross-plugin path, the declared
+// fallback is a local copy plus a drift-guard test (plan alternative 2; never a
+// silent copy).
+import {
+  PROJECT_PALETTE_12, IDENTITY_OUTLINES, IDENTITY_STRUCTURES, FALLBACK_IDENTITY,
+  projectIdentity, identityOutlinePath, identityBadgeSvg,
+  baseIdentity, identityId, walkOffset, fnv1a, isProjectKeyLike,
+} from '../../../workbench/src/shared/project-identity.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
@@ -37,7 +49,21 @@ const EMBEDDED = [
   String(localDateTime), String(newestFirst), String(wakeRowSentence), String(themeParamOf),
   // t261004-16：markdown 渲染器同样单实现嵌入（UT 与页面同一份函数源码）。
   String(renderMarkdown),
+  // t261005-05 (UI-4): badge runtime (closure = the IDENTITY_DATA JSON constant
+  // below + cross references inside this group; editing project-identity.ts follows
+  // automatically — there is no second implementation).
+  String(fnv1a), String(isProjectKeyLike), String(baseIdentity), String(identityId),
+  String(walkOffset),
+  String(projectIdentity), String(identityOutlinePath), String(identityBadgeSvg),
 ].join('\n')
+
+/** Constant closure for the badge runtime (the page-side projectIdentity reads these tables; embedded as JSON). */
+const IDENTITY_DATA = JSON.stringify({
+  PROJECT_PALETTE_12,
+  IDENTITY_OUTLINES,
+  IDENTITY_STRUCTURES,
+  FALLBACK_IDENTITY,
+})
 
 export const PANEL_ROUTE = '/sandbar-executor-panel'
 export const PANEL_PAGE_HTML = `<!doctype html>
@@ -187,7 +213,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><h1>Executor</h1><span class="chip" id="projChip"></span></div>
+  <div class="top"><h1>Executor</h1><span class="chip" id="projChip"><span id="projBadge"></span><span id="projKey"></span></span></div>
 
   <input class="tab" type="radio" name="tb" id="t-overview" checked>
   <input class="tab" type="radio" name="tb" id="t-grants">
@@ -302,6 +328,26 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // 渲染代码只经 capOf/emptyCopyOf 引用上限与空态文案——上限数字不再内联在渲染路径里
   //（机械检查 check_list_caps.mjs 扫渲染源码里的截断形状整数常量）。
   var LIST_CONTRACTS = ${JSON.stringify(LIST_CONTRACTS)};
+  // t261005-05 (UI-4): badge runtime constant closure (the page-side projectIdentity reads these tables).
+  var IDENTITY_RUNTIME = ${IDENTITY_DATA};
+  var PROJECT_PALETTE_12 = IDENTITY_RUNTIME.PROJECT_PALETTE_12;
+  var IDENTITY_OUTLINES = IDENTITY_RUNTIME.IDENTITY_OUTLINES;
+  var IDENTITY_STRUCTURES = IDENTITY_RUNTIME.IDENTITY_STRUCTURES;
+  var FALLBACK_IDENTITY = IDENTITY_RUNTIME.FALLBACK_IDENTITY;
+  // Badge render (13px, the design-note §2.5 panel-chip size). Malformed/missing
+  // project = no badge (no silent stand-in; an empty slot IS the "unset identity"
+  // fact). Render errors are swallowed so the page never breaks. Self-contained DOM
+  // access (getElementById, NOT the IIFE-local el()): this function lives in the
+  // outer script scope, so the closure helper is invisible here — reaching for it
+  // threw at call time and aborted the rest of setProject (found by
+  // browser-page-contract: the settings knobs vanished because loadSettings never ran).
+  function renderProjBadge(key){
+    var slot = document.getElementById('projBadge');
+    if(!slot) return;
+    slot.innerHTML = '';
+    if(!key) return;
+    try{ slot.innerHTML = identityBadgeSvg(projectIdentity(key), 13); }catch(e){}
+  }
   function capOf(id){
     var c = LIST_CONTRACTS[id];
     if(!c || typeof c.cap !== 'number') throw new Error('numeric list cap not declared: '+id);
@@ -1064,7 +1110,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   try{ var themeParam = themeParamOf(new URLSearchParams(location.search).get('theme')); if(themeParam) document.documentElement.dataset.theme = themeParam; }catch(e){}
   function setProject(p){
     state.project = p || '';
-    el('projChip').textContent = state.project;
+    el('projKey').textContent = state.project;
+    renderProjBadge(state.project);
     el('noProject').style.display = state.project ? 'none' : '';
     el('footNote').textContent = state.project ? ('Project: ' + state.project + '. The lists refresh every ' + (POLL_MS/1000) + ' seconds.') : '';
     saveMsg=''; grantsSaveMsg=''; el('grantSession').value='';

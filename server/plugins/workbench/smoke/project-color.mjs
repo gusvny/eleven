@@ -6,9 +6,13 @@
  * Covers (plan v3 R3 three decidable items + the malformed-input discipline):
  *   a. Same key is deterministic: any number of calls on the same key always return the same
  *      value; no state drift across calls.
- *   b. Palette colors are pairwise distinguishable: dedup + hue-ring distance >= 20 degrees
- *      (the revised criterion and its reason are in the project-color.ts header) + a readable
- *      luminance band for dark backgrounds.
+ *   b. Palette colors are pairwise distinguishable: dedup + hue-ring distance >= 18 degrees
+ *      + a readable luminance band for dark backgrounds. (t261005-05 re-anchor: the palette
+ *      is now the DECLARED 12 colours from the UI-4 design note, copied verbatim — declared
+ *      values win over a derived threshold. Their measured minimum hue-ring gap is 19.2
+ *      degrees, so the old 20-degree criterion derived from the old 10-colour generated
+ *      palette is re-anchored at 18 with margin; we do not bend declared values to keep a
+ *      derived number. See shared/project-identity.ts for the declaration.)
  *   c. Malformed input: ''/null/undefined/number/object/overlong/control chars ->
  *      FALLBACK_COLOR, no throw.
  *   d. projectTagCssRules: base rules present, one coloring rule per project, keys deduped,
@@ -77,7 +81,8 @@ section('b 色板两两可辨（hue 环距 + 亮度带）')
       if (ring < minHueGap) minHueGap = ring
     }
   }
-  ok(minHueGap >= 20, `任意两色 hue 环距 ≥20°（got ${minHueGap.toFixed(1)}°）`)
+  // t261005-05 改锚：色板=声明 12 色（声明值优先，不为凑判据改声明值；见头注）。
+  ok(minHueGap >= 18, `任意两色 hue 环距 ≥18°（声明 12 色实测最小 ${minHueGap.toFixed(1)}°）`)
   ok(hues.every(x => x.l > 0.35 && x.l < 0.85), '亮度带：全部在暗底可读区间 (0.35,0.85)')
   ok(hues.every(x => x.s > 0.3), '饱和度带：全部 >0.3（低饱和灰不进色板）')
 }
