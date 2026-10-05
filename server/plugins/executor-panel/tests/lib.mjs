@@ -73,20 +73,10 @@ export const authPass = () => ({ ok: true, why: '' })
  * pytest 各自专测。
  */
 export function engineWriteStub(env, nowMs = () => Date.now()) {
+  // t261004-41 返工：逐字透传 payload（只换写核，不重建载荷）——逐字段重建会把
+  // 新字段丢在缝里（与 harness.mjs 同一故障形状，本票 L3 红的根因即此）。
   return async (p) => {
     const { saveGrantsDecl } = await import('../src/host/executor-grants.ts')
-    return saveGrantsDecl(
-      p.key,
-      {
-        grants: p.grants,
-        ...(p.night_tier !== undefined ? { night_tier: p.night_tier } : {}),
-        ...(p.executor_sessions !== undefined ? { executor_sessions: p.executor_sessions } : {}),
-      },
-      p.by,
-      env,
-      nowMs(),
-      '',
-      p.source,
-    )
+    return saveGrantsDecl(p.key, p, p.by, env, nowMs(), '', p.source)
   }
 }

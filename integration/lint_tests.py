@@ -52,6 +52,14 @@ practice:
         ok:true — the writer declared success, the reader (instance projects
         root) saw nothing. .gitignore hides such a path from git status, so the
         tree needs its own probe: a hidden path is not an absent path.
+  L20 grants-write field parity (t261004-41): the keys the panel page sends, the
+        keys the panel handler forwards, and the keys the engine write entry reads
+        must be parity-locked across the whole writable declaration field set
+        (grants / night_tier / executor_sessions / open_ticket_epics /
+        open_ticket_cap). Static source-text anchors, fail-closed on extraction
+        failure — the exact drop shape (page sends a field, two adjacent layers
+        silently discard it, receipt still says saved:true) goes red here in
+        milliseconds instead of in production.
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
@@ -1329,6 +1337,96 @@ def lint_runtime_state_location():
             % hits[:6])
     else:
         ok("L19 运行时状态位置：仓内无错位账本（写面须落实例根，不落 cwd）")
+# ---- L20 grants-write field parity (t261004-41) --------------------------------
+
+# The writable declaration field set (host-only keys included). The guard pins the
+# WHOLE set, so the next field added by a parallel ticket cannot repeat the drop.
+GRANTS_WRITE_FIELDS = ("grants", "night_tier", "executor_sessions",
+                       "open_ticket_epics", "open_ticket_cap")
+
+
+def _source_span(text, start_re, end_re, name):
+    """Fail-closed anchored span: no match = None (the caller turns that into an error)."""
+    m = re.search(start_re, text)
+    if not m:
+        return None
+    rest = text[m.end():]
+    m2 = re.search(end_re, rest)
+    if not m2:
+        return None
+    _ = name
+    return rest[:m2.start()]
+
+
+def lint_grants_field_parity():
+    """L20（t261004-41）：grants 写面字段齐位静态守卫——静态毫秒级，纯源文本。
+
+    事故形状：panel-page 发出 open_ticket_epics，panel handler 组 doc 时丢、
+    engineGrantsWrite 组 payload 时丢、client.py 入口不读——三层各少两个字段，
+    回执仍 saved:true，授权面编辑静默蒸发。本守卫锚定三个源点（span 提取失败
+    =红，fail-closed），判三件事：
+      ① 页面发出的键 ∈ 可写字段全集（未知键=红，防手滑发错键名）；
+      ② 页面发出的每个键在 handler doc、engine payload、client 入口读取三层
+         全部在场（发出→搬运→读取逐层贯通）；
+      ③ 可写字段全集的每个键都在 handler doc、payload、client 读取三层锚点内
+         出现（全集钉死：并行票新增/回退任一字段，缺任一层即红）。
+    """
+    page_p = REPO / "server/plugins/executor-panel/src/host/panel-page.ts"
+    api_p = REPO / "server/plugins/executor-panel/src/host/api.ts"
+    cli_p = REPO / "server/engine/client.py"
+    try:
+        page = page_p.read_text(encoding="utf-8")
+        api = api_p.read_text(encoding="utf-8")
+        cli = cli_p.read_text(encoding="utf-8")
+    except OSError as e:
+        err("L20 源文件不可读（fail-closed）：%s" % e)
+        return
+
+    page_span = _source_span(page, r"function saveGrants\(\)", r"function masterSwitch", "page")
+    payload_span = _source_span(api, r"async function engineGrantsWrite\(",
+                                r"return \(deps\.engineGrantsWrite", "payload")
+    handler_span = _source_span(api, r"const prev = prevDecl\(key\)",
+                                r"await engineGrantsWrite\(key, doc", "handler")
+    cli_span = _source_span(cli, r"async def cmd_executor_grants_write\(",
+                            r"caller_channel = str\(os\.environ", "client")
+    spans = [("page saveGrants", page_span, page_p), ("handler doc", handler_span, api_p),
+             ("engine payload", payload_span, api_p), ("client entry", cli_span, cli_p)]
+    bad = [n for n, s, _ in spans if s is None]
+    if bad:
+        err("L20 锚点提取失败（fail-closed——守卫锚定面漂移，先修锚点）：%s" % ", ".join(bad))
+        return
+
+    # ① page keys ⊆ writable set
+    page_keys = set(re.findall(r"body\.(\w+)\s*=", page_span))
+    m = re.search(r"var body = \{([^}]*)\}", page_span)
+    if m:
+        page_keys |= set(re.findall(r"(\w+)\s*:", m.group(1)))
+    unknown = sorted(page_keys - set(GRANTS_WRITE_FIELDS))
+    if unknown:
+        err("L20 页面发出未知键（不在可写字段全集）：%s" % unknown)
+    if not page_keys:
+        err("L20 页面键提取为空（fail-closed）")
+
+    # ② every page-sent key survives all three layers
+    for k in sorted(page_keys):
+        if not re.search(r"\b%s\b" % re.escape(k), handler_span):
+            err("L20 页面发出键 '%s' 在 panel handler doc 锚点内缺席（丢弃形状）" % k)
+        if not re.search(r"\b%s\b" % re.escape(k), payload_span):
+            err("L20 页面发出键 '%s' 在 engineGrantsWrite payload 锚点内缺席（丢弃形状）" % k)
+        if ('args.get("%s")' % k) not in cli_span:
+            err("L20 页面发出键 '%s' 未被 client.py 入口 args.get 读取（丢弃形状）" % k)
+
+    # ③ the whole writable set is pinned on all three layers
+    for k in GRANTS_WRITE_FIELDS:
+        if not re.search(r"\b%s\b" % re.escape(k), handler_span):
+            err("L20 可写字段 '%s' 在 panel handler doc 锚点内缺席（全集钉死）" % k)
+        if not re.search(r"\b%s\b" % re.escape(k), payload_span):
+            err("L20 可写字段 '%s' 在 engineGrantsWrite payload 锚点内缺席（全集钉死）" % k)
+        if ('args.get("%s")' % k) not in cli_span:
+            err("L20 可写字段 '%s' 未被 client.py 入口 args.get 读取（全集钉死）" % k)
+    if not [e for e in errors if e.startswith("L20")]:
+        ok("L20 grants 写面字段齐位：页面键 %s 三层贯通，全集 %s 在 handler/payload/client 三锚点钉死"
+           % (sorted(page_keys), list(GRANTS_WRITE_FIELDS)))
 
 
 def main():
@@ -1355,6 +1453,7 @@ def main():
     lint_home_paths()
     lint_snapshot_discipline()
     lint_runtime_state_location()
+    lint_grants_field_parity()
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

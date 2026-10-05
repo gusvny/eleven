@@ -3232,6 +3232,16 @@ async def cmd_executor_grants_write(args: Dict[str, Any]) -> Dict[str, Any]:
     night_tier = args.get("night_tier") if isinstance(args.get("night_tier"), dict) else None
     sessions_in = args.get("executor_sessions")
     executor_sessions = sessions_in if isinstance(sessions_in, list) else None
+    # t261004-41: the open-ticket keys must travel with the rest of the writable set.
+    # Absent (or malformed) = None = save_declaration inherits the on-disk value; an
+    # explicit [] is a real clear-all and must arrive as [] — dropping the key here is
+    # what silently discarded the panel's epic selection while the receipt said
+    # saved:true (t261004-41 root cause).
+    epics_in = args.get("open_ticket_epics")
+    open_ticket_epics = epics_in if isinstance(epics_in, list) else None
+    cap_in = args.get("open_ticket_cap")
+    # bool is an int subclass in Python — a JSON true/false must not become a cap.
+    open_ticket_cap = cap_in if isinstance(cap_in, int) and not isinstance(cap_in, bool) else None
     try:
         now_ms = int(args.get("now_ms")) if args.get("now_ms") is not None else int(time.time() * 1000)
     except (TypeError, ValueError):
@@ -3257,6 +3267,7 @@ async def cmd_executor_grants_write(args: Dict[str, Any]) -> Dict[str, Any]:
     res = executor_grants.save_declaration(
         key, grants, by, now_ms,
         night_tier=night_tier, executor_sessions=executor_sessions,
+        open_ticket_epics=open_ticket_epics, open_ticket_cap=open_ticket_cap,
         caller_channel=caller_channel, lane_surface=lane_surface, source=source)
     if not res.get("saved") and res.get("reason"):
         # save_declaration already audits the META_OP lock internally; the other

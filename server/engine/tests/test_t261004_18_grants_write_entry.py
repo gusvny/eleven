@@ -117,3 +117,4 @@ def test_unknown_op_key_passes_through_validation_refusal(projects_root):
 def test_missing_key_structured_refusal(projects_root):
     res = _call(key="", by="host", grants={})
     assert res["saved"] is False and "key" in res["reason"]
+

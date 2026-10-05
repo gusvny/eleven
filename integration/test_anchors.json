@@ -959,6 +959,21 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261004_18_grants_write_entry.py": {
+   "anchor": "contract",
+   "note": "t261004-28 carrier: port of the t261004-18 entry-contract test (host write saves+audits source, executor-channel/meta-op refusals, malformed args structured refusal); docstrings/comments translated per host L15 ruling, engine-coupled refusal literals kept as marked data; engine entry cmd_executor_grants_write landed via t261004-18 squash",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_41_grants_open_ticket_entry.py": {
+   "anchor": "contract",
+   "note": "t261004-41: the executor-grants-write entry reads and forwards open_ticket_epics/open_ticket_cap (round-trip, absent=inherit on disk, explicit [] clear-all, malformed values degrade to inherit); split out of the t261004-18 carrier file in implement gen4 — the carrier is pinned verbatim by t261004-28 and must not grow",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261004_19_open_ticket_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261004-28 carrier: port of the t261004-19 open-ticket gate judgement-core matrix (declaration face, authority surface, five refusals one allow, per-epic cap, audit rows); docstrings/comments translated per host L15 ruling; asserted refusal substrings re-anchored to the landed engine texts (the t261004-19 squash anglicized the open-ticket refusal messages; adaptation named in the carrier guard's ADAPTED_LITERALS table); engine face landed via t261004-19 squash",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261004_23_executor_requests.py": {
    "anchor": "contract",
    "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
@@ -1007,16 +1022,6 @@
   "server/engine/tests/test_t261004_34_recovery_idempotent.py": {
    "anchor": "behaviour",
    "note": "t261004-34: recovery idempotence truth tables (developer L1, landed with implement)",
-   "sync_path": ""
-  },
-  "server/engine/tests/test_t261004_18_grants_write_entry.py": {
-   "anchor": "contract",
-   "note": "t261004-28 carrier: port of the t261004-18 entry-contract test (host write saves+audits source, executor-channel/meta-op refusals, malformed args structured refusal); docstrings/comments translated per host L15 ruling, engine-coupled refusal literals kept as marked data; engine entry cmd_executor_grants_write landed via t261004-18 squash",
-   "sync_path": ""
-  },
-  "server/engine/tests/test_t261004_19_open_ticket_gate.py": {
-   "anchor": "behaviour",
-   "note": "t261004-28 carrier: port of the t261004-19 open-ticket gate judgement-core matrix (declaration face, authority surface, five refusals one allow, per-epic cap, audit rows); docstrings/comments translated per host L15 ruling; asserted refusal substrings re-anchored to the landed engine texts (the t261004-19 squash anglicized the open-ticket refusal messages; adaptation named in the carrier guard's ADAPTED_LITERALS table); engine face landed via t261004-19 squash",
    "sync_path": ""
   },
   "server/engine/tests/test_t261004_19_source_order_lock.py": {
@@ -3356,6 +3361,16 @@
    "note": "real browser journey",
    "sync_path": ""
   },
+  "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
+   "anchor": "behaviour",
+   "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
+   "sync_path": ""
+  },
+  "integration/t261004-18/sc_ki193_writer_identity_and_audit_source.mjs": {
+   "anchor": "behaviour",
+   "note": "KI-193: with a valid console-shaped credential, a forged body by records the server-derived writer host with a visible by_claimed/writer_mismatch, a grants master write records updated_by=host, the authority-write audit names its source face, and the grants readout stays consistent after the engine-routed write.",
+   "sync_path": ""
+  },
   "integration/t261004-19/sc_open_ticket_epic_gate_verdicts.py": {
    "anchor": "behaviour",
    "note": "drives the public gate funnel client._executor_grant_gate with the open-ticket context: named verdicts, per-epic cap, no-self-widening, audit rows",
@@ -3431,6 +3446,11 @@
    "note": "the agent-facing conflict-resolution text carries the red line + parse-level self-check and stays same-source with FORBIDDEN_ENTRIES",
    "sync_path": ""
   },
+  "integration/t261004-41/sc_grants_open_ticket_roundtrip.mjs": {
+   "anchor": "behaviour",
+   "note": "t261004-41 (host report 261004): a saved grants declaration round-trips every field the Grants page edits — full-field save (grants/night_tier/executor_sessions/open_ticket_epics/open_ticket_cap) reads back verbatim through GET, a partial edit inherits the open_ticket_* keys, an explicit [] clears the list, a master toggle leaves epics/cap untouched, and malformed input is refused with an explicit failure and no partial write.",
+   "sync_path": ""
+  },
   "integration/tests/test_fixture_reclaim.mjs": {
    "anchor": "behaviour",
    "note": "",
@@ -3459,16 +3479,6 @@
   "integration/t261004-43/sc_activity_ledger_root.py": {
    "anchor": "contract",
    "note": "t261004-43: the delivery ACTIVITY forwards the executing-process env so rows land in the instance projects root and the receipt exposes mis-location (absolute result.file)",
-   "sync_path": ""
-  },
-  "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
-   "anchor": "behaviour",
-   "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
-   "sync_path": ""
-  },
-  "integration/t261004-18/sc_ki193_writer_identity_and_audit_source.mjs": {
-   "anchor": "behaviour",
-   "note": "KI-193: with a valid console-shaped credential, a forged body by records the server-derived writer host with a visible by_claimed/writer_mismatch, a grants master write records updated_by=host, the authority-write audit names its source face, and the grants readout stays consistent after the engine-routed write.",
    "sync_path": ""
   },
   "integration/t261004-26/sc_hostile_identity_fixture_chain.py": {

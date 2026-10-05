@@ -83,4 +83,79 @@ function fakeExec(stdout, err) {
   }
 }
 
+// ---- t261004-41: component contract — every writable field round-trips the panel handler ----
+{
+  const { createApi } = await import('../src/host/api.ts')
+  const { declarationPath } = await import('../src/host/executor-grants.ts')
+  const { freshDir, cleanup, fakeClock, authPass } = await import('./lib.mjs')
+  const { readFileSync } = await import('node:fs')
+  const wd = freshDir(), pan = freshDir()
+  const env = { HOME: '/nonexistent-home', SANDBAR_WATCHDOG_DIR: wd, SANDBAR_PANEL_DIR: pan, SANDBAR_PROJECTS_DIR: wd }
+  const clock = fakeClock()
+  const Q = (s) => new URLSearchParams(s)
+  const PATH = '/sandbar-executor-panel/api/grants'
+  const onDisk = () => JSON.parse(readFileSync(declarationPath('alpha', env), 'utf8'))
+  // Capturing engine stub: records the payload the handler forwards, then writes it
+  // through the real TS write core (same validation / atomic write as the engine side).
+  const captured = []
+  const api = createApi(env, {
+    now: () => clock.now(),
+    declaredEnabled: () => ({ declared: true, enabled: true }),
+    authFace: authPass,
+    engineGrantsWrite: async (p) => {
+      captured.push(p)
+      const { saveGrantsDecl } = await import('../src/host/executor-grants.ts')
+      return saveGrantsDecl(p.key, p, p.by, env, clock.now(), '', p.source)
+    },
+  })
+  try {
+    // full-field save: every key the writable set declares travels and lands on disk
+    const full = { grants: { sign: true }, night_tier: { enabled: true, until: clock.now() + 60_000 }, executor_sessions: ['sess-1'],
+                   open_ticket_epics: ['epic-a', 'epic-b'], open_ticket_cap: 5, by: 'host' }
+    const r = await api.handle('POST', PATH, Q('project=alpha'), JSON.stringify(full), '')
+    assert(r.status === 200 && r.json.saved === true, `full-field save succeeds (${++n})`)
+    const p = captured[captured.length - 1]
+    assert(p.grants.sign === true, `payload carries grants (${++n})`)
+    assert(p.executor_sessions[0] === 'sess-1', `payload carries executor_sessions (${++n})`)
+    assert(JSON.stringify(p.open_ticket_epics) === '["epic-a","epic-b"]', `payload carries open_ticket_epics verbatim (${++n})`)
+    assert(p.open_ticket_cap === 5, `payload carries open_ticket_cap verbatim (${++n})`)
+    const d1 = onDisk()
+    assert(JSON.stringify(d1.open_ticket_epics) === '["epic-a","epic-b"]' && d1.open_ticket_cap === 5, `declaration round-trips epics + cap (${++n})`)
+
+    // inherited-when-absent: a partial edit must not wipe the epics or reset the cap
+    const r2 = await api.handle('POST', PATH, Q('project=alpha'), JSON.stringify({ grants: { rerun: true }, by: 'host' }), '')
+    assert(r2.json.saved === true, `partial save succeeds (${++n})`)
+    const p2 = captured[captured.length - 1]
+    assert(JSON.stringify(p2.open_ticket_epics) === '["epic-a","epic-b"]' && p2.open_ticket_cap === 5,
+      `absent keys are inherited from the on-disk declaration, never wiped (${++n})`)
+    const d2 = onDisk()
+    assert(d2.open_ticket_epics.length === 2 && d2.open_ticket_cap === 5, `on-disk epics + cap survive a partial edit (${++n})`)
+
+    // master toggle (both directions) must leave the epic list and cap untouched
+    await api.handle('POST', PATH, Q('project=alpha'), JSON.stringify({ op: 'master', enabled: false, by: 'host' }), '')
+    const d3 = onDisk()
+    assert(d3.open_ticket_epics.length === 2 && d3.open_ticket_cap === 5, `master off keeps epics + cap (${++n})`)
+    await api.handle('POST', PATH, Q('project=alpha'), JSON.stringify({ op: 'master', enabled: true, by: 'host' }), '')
+    const d4 = onDisk()
+    assert(d4.open_ticket_epics.length === 2 && d4.open_ticket_cap === 5, `master on keeps epics + cap (${++n})`)
+
+    // explicit clear-all: the page always sends the key, so [] must land as []
+    const r5 = await api.handle('POST', PATH, Q('project=alpha'), JSON.stringify({ grants: { sign: true }, open_ticket_epics: [], by: 'host' }), '')
+    assert(r5.json.saved === true && onDisk().open_ticket_epics.length === 0, `explicit [] is a real clear-all (${++n})`)
+
+    // malformed body: explicit refusal, no partial write, cap/epics keep prior values
+    await api.handle('POST', PATH, Q('project=alpha'), JSON.stringify({ grants: { sign: true }, open_ticket_epics: ['epic-a'], open_ticket_cap: 5, by: 'host' }), '')
+    const r6 = await api.handle('POST', PATH, Q('project=alpha'),
+      JSON.stringify({ grants: { sign: true }, open_ticket_epics: 'all', by: 'host' }), '')
+    assert(r6.status === 200 && r6.json.saved === false, `malformed epics value refused (${++n})`)
+    const r7 = await api.handle('POST', PATH, Q('project=alpha'),
+      JSON.stringify({ grants: { sign: true }, open_ticket_cap: true, by: 'host' }), '')
+    assert(r7.json.saved === false, `boolean cap refused (${++n})`)
+    const d7 = onDisk()
+    assert(d7.open_ticket_epics.length === 1 && d7.open_ticket_cap === 5, `refusals leave the declaration untouched (${++n})`)
+  } finally {
+    cleanup([wd, pan])
+  }
+}
+
 done(n)

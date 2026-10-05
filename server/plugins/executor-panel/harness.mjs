@@ -85,13 +85,13 @@ export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchB
     workbenchBase: (workbenchStub || sameOriginWorkbench) ? undefined : (workbenchBase || undefined),
     // t261004-18（KI-193）：测试缝不真 spawn 引擎 CLI（python 解释器/venv 不属 UT 面），
     // 授权写落回真 TS 写核（同校验/原子写/审计）；引擎侧判定由 pytest 专测。
+    // t261004-41 返工：替身**逐字透传 payload**（只换写核，不重建载荷）——此前
+    // 逐字段重建只搬三个键，把本票修的丢弃形状在缝里又复刻了一遍（L3 场景
+    // t261004-41-grants-open-ticket-roundtrip 红的根因）。透传=新字段自动随行，
+    // 这类缝不再滞后于生产契约。
     engineGrantsWrite: async (p) => {
       const { saveGrantsDecl } = await import('./src/host/executor-grants.ts')
-      return saveGrantsDecl(p.key, {
-        grants: p.grants,
-        ...(p.night_tier !== undefined ? { night_tier: p.night_tier } : {}),
-        ...(p.executor_sessions !== undefined ? { executor_sessions: p.executor_sessions } : {}),
-      }, p.by, env, Date.now(), '', p.source)
+      return saveGrantsDecl(p.key, p, p.by, env, Date.now(), '', p.source)
     },
   })
 

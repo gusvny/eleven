@@ -535,14 +535,19 @@ def save_declaration(key: str, grants: Dict[str, Any], by: str, now_ms: int,
     # t261004-19: the epic authorization list travels with the save (same semantics
     # as executor_sessions: given -> move it, absent -> inherit the on-disk value);
     # an explicit cap overrides (the validation layer defaults to 3).
+    # t261004-41: the cap follows the same rule — without this else-branch an absent
+    # cap silently reset to the default 3 on every partial edit, the same drop shape
+    # as the panel↔engine seam this ticket fixes.
+    _prev_raw = _read_json(declaration_path(key))[0] if os.path.exists(declaration_path(key)) else None
     if open_ticket_epics is not None:
         doc["open_ticket_epics"] = open_ticket_epics
     else:
-        _prev_epics, _ = _read_json(declaration_path(key)) if os.path.exists(declaration_path(key)) else (None, None)
-        if isinstance(_prev_epics, dict) and "open_ticket_epics" in _prev_epics:
-            doc["open_ticket_epics"] = _prev_epics["open_ticket_epics"]
+        if isinstance(_prev_raw, dict) and "open_ticket_epics" in _prev_raw:
+            doc["open_ticket_epics"] = _prev_raw["open_ticket_epics"]
     if open_ticket_cap is not None:
         doc["open_ticket_cap"] = open_ticket_cap
+    elif isinstance(_prev_raw, dict) and "open_ticket_cap" in _prev_raw:
+        doc["open_ticket_cap"] = _prev_raw["open_ticket_cap"]
     normalized, verr = validate_declaration(doc)
     if verr:
         return {"saved": False, "reason": verr, "file": declaration_path(key)}

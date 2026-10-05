@@ -184,6 +184,10 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       grants: (doc.grants ?? {}) as Record<string, unknown>,
       ...(doc.night_tier !== undefined ? { night_tier: doc.night_tier } : {}),
       ...(doc.executor_sessions !== undefined ? { executor_sessions: doc.executor_sessions } : {}),
+      // t261004-41: the open-ticket keys ride along — an explicit [] must survive as a
+      // clear-all, an absent key stays absent (the engine then inherits the on-disk value).
+      ...(doc.open_ticket_epics !== undefined ? { open_ticket_epics: doc.open_ticket_epics } : {}),
+      ...(doc.open_ticket_cap !== undefined ? { open_ticket_cap: doc.open_ticket_cap } : {}),
       source: auditSource(byClaimed),
     }
     return (deps.engineGrantsWrite ?? spawnEngineGrantsWrite)(payload)
@@ -387,6 +391,13 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         // executor-grants-write（META_OP 判定+审计单一真源），不再直写声明文件；
         // 写者固定 'host'，body.by 只作错配记录。
         const prev = prevDecl(key)
+        // t261004-41: the open-ticket keys inherit from the on-disk declaration on every
+        // write face (save / master on/off) — a partial edit or a master toggle must
+        // never silently wipe the epic list or reset the cap (same rule as executor_sessions).
+        const prevEpics = prev.ok && Array.isArray(prev.declaration?.open_ticket_epics)
+          ? prev.declaration.open_ticket_epics : []
+        const prevCap = prev.ok && typeof prev.declaration?.open_ticket_cap === 'number'
+          ? prev.declaration.open_ticket_cap : undefined
         let doc: Record<string, unknown>
         if (b.op === 'master') {
           doc = b.enabled === false
@@ -394,20 +405,32 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
                 grants: {},
                 ...(prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
                 ...(prev.ok && prev.declaration?.night_tier ? { night_tier: { ...prev.declaration.night_tier, enabled: false } } : {}),
+                open_ticket_epics: prevEpics,
+                ...(prevCap !== undefined ? { open_ticket_cap: prevCap } : {}),
               }
             : {
                 grants: Object.fromEntries(GRANT_OPS.map((op) => [op, true])),
                 ...(prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
+                open_ticket_epics: prevEpics,
+                ...(prevCap !== undefined ? { open_ticket_cap: prevCap } : {}),
               }
         } else {
           // 部分编辑不丢字段：body 没给 executor_sessions = 从盘上现声明继承
           //（与旧 saveGrantsDecl 同语义，t261003-06 缺陷一）。
+          // t261004-41: open_ticket_epics / open_ticket_cap follow the same rule —
+          // given → move it (an explicit [] is a real clear-all), absent → inherit.
           doc = {
             grants: (b.grants ?? {}) as Record<string, unknown>,
             ...(b.night_tier !== undefined ? { night_tier: b.night_tier } : {}),
             ...(b.executor_sessions !== undefined
               ? { executor_sessions: b.executor_sessions }
               : prev.ok && prev.declaration?.executor_sessions ? { executor_sessions: prev.declaration.executor_sessions } : {}),
+            ...(b.open_ticket_epics !== undefined
+              ? { open_ticket_epics: b.open_ticket_epics }
+              : { open_ticket_epics: prevEpics }),
+            ...(b.open_ticket_cap !== undefined
+              ? { open_ticket_cap: b.open_ticket_cap }
+              : prevCap !== undefined ? { open_ticket_cap: prevCap } : {}),
           }
         }
         const res = await engineGrantsWrite(key, doc, b.by)

@@ -455,6 +455,10 @@ export interface EngineGrantsWritePayload {
   grants: Record<string, unknown>
   night_tier?: unknown
   executor_sessions?: unknown
+  /** t261004-41: the two open-ticket keys travel with the writable set. An explicit [] is a
+   *  real clear-all; omitting the key = the engine inherits the on-disk value (never wipe). */
+  open_ticket_epics?: unknown
+  open_ticket_cap?: unknown
   /** Source face (lands verbatim in the engine audit row: surface/transport/guarded/by_claimed...). */
   source?: Record<string, unknown>
 }
