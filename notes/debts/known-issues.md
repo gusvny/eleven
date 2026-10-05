@@ -3423,3 +3423,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **下一步探针**：跑一次 `ticket.py op=concurrency --reconcile`，比对回执里的 `probe_errors`/`dropped` 与同刻在跑票集合；
 > 若 `dropped` 含在跑票即实锤（该探针自身会清账，须在可接受的时窗内做）。
 > **回归用例（待补）**：L1 单测——探活抛超时/异常时 holder 保留且具名；只有 NotFound 才摘除并写审计行。
+
+## KI-200 舞台清扫器把**在跑的集成台**判成残台：锚进程随 per-turn 代理更替而死、hold 续心跳 ⇒ `sweep` 会拆掉正在用的台（261005 实测）
+
+> **现象**：261005 15:0x（当时 4 张票在跑集成）执行只读判定 `python3 integration/stage_docker.py sweep --dry-run`：
+> `sandbar-test-integ`（两容器，34 分钟前为 `t261005-10` 的 run_integration_tests 起；holder_pid 90177 活着、
+> owner_root=`.../.lane/t261005-10`、心跳 1.7s）被判 **condemned**，理由原文
+> 「crit_iv：锚 90123 已亡（令牌不匹配=pid 重用嫌疑）而 hold 仍续心跳——主人已亡的续跳台（t260915-18）」。
+> 若不是 dry-run，它会拆掉这张**正在使用**的台，在跑的套件当场失据。
+> **机制**：判死口径把「锚进程存活」当唯一证据，而本架构的锚是 **per-turn 代理进程**（每轮换 pid）——
+> 长段（run_integration_tests 动辄几十分钟）里锚必死、hold 必活，于是「锚死+hold 活」这个**在册僵尸形态**
+> 与「正常在跑形态」在判据面重合，误判方向是**拆在跑资源**。
+> **对照面**：同批两条 `stage-console-*` 租约（同样锚死 hold 活）走「阀2：主人在 git worktree list 且目录在且心跳新鲜」
+> 被保留——同一形态两套判据，说明该家族口径已考虑到，`sandbar-test-integ` 这一族没有。
+> **危害**：清扫属运维常规动作（巡检/清场/回收），在跑票期间执行即生产事故（票面「worker 被外部终止」+ 段重跑）。
+> **出路**：①锚判据补主人面：owner_root 在 `git worktree list` 且心跳新鲜时不得仅凭锚死判拆（与阀2 拉齐）；
+> ②或清扫前要求显式声明「当前无在跑段」，无声明 fail-closed 拒扫；③回执里把「condemned 且 holder 心跳新鲜」单列成「疑似在跑」面。
+> **本次处置（261005）**：登记；**只跑 dry-run，未真拆**。真拆的是另一条确证残台 `stage-console-f919ebd3`
+> （5.3 天前为已终态票 t260929-22 起、无主人无心跳，`stage_docker down` 已拆净，residue 为空）。
