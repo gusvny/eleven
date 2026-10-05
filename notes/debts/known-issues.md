@@ -3518,3 +3518,13 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 不随手改：CLAUDE.md 规则 5）。
 > **次要面（同族排查）**：`server/ui-check/dbg-chat.mjs:31` 与 `capture-lane.mjs:353` 均 `resolveCredentialsSource("suyou")`——
 > 同一处历史绑定，修的时候一并判。
+
+> **261005 20:5x/00:4x 追加（第四层，实测）**：把种子从死项目 `suyou` 换成活项目 `sandbar`（commit `e0433a6`）之后复跑探针：
+> `node server/ui-check/capture-lane.mjs --lane . --out /tmp/probe-shots-261005-onto` → 出 **9 张图**但 **capture 仍 exit 1**，
+> 新报错在浏览器 console：`新建会话失败：工作区创建失败：/Users/user/Documents/sandbar … workspace-invalid-path: cannot create a workspace at
+> "/Users/user/Documents/sandbar": ENOENT: no such file or directory, realpath '/Users/user/Documents/sandbar'`。
+> **机制**：采集台的控制台**跑在容器里**（探针容器里仓挂载在 `/repo`，实测 env `SANDBAR_TEST_PROFILE_SRC=/repo/server/profile`），
+> 而种子写的是**宿主绝对路径** ⇒ 容器内 realpath 必失败。**同一份种子要同时服务宿主与容器两个路径空间**，
+> 所以这一层不是"换掉死条目"能修的：归 `t261005-16`（候选出路：采集台不再用种子项目的 dir 建会话 /
+> 迁移按世界改写 dirs / 种子留空且台内自建工作区）。
+> **复现命令**：`node server/ui-check/capture-lane.mjs --lane . --out /tmp/<dir>`（约 3–4 分钟；自起自拆 docker 舞台）。
