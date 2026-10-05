@@ -5948,34 +5948,59 @@ def check_paths_under_project(proj, ws, worktree):
 # worker.py keeps only thin wiring.
 WORKER_META_VERSION = 1
 
+# ---- Owner-slot state (t261005-03: drain must hand over) ----
+# The single-poller guard and the ensure side must decide on the worker's SLOT state,
+# not on pid liveness alone: a stopping worker stays ALIVE for its graceful drain (up to
+# SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC) while polling NOTHING. Read as a live owner, its
+# pid blocks the replacement and leaves a RUNNING ticket with zero pollers (261005:
+# 15-minute window, two lanes). Backward compatible: a meta without the key reads as
+# serving (an old worker keeps today's behavior — the guard stays conservative).
+WORKER_META_STATE_SERVING = "serving"
+WORKER_META_STATE_DRAINING = "draining"
+WORKER_META_STATES = (WORKER_META_STATE_SERVING, WORKER_META_STATE_DRAINING)
 
-def worker_meta_payload(repo_root=None, pid=None, dsh_face=None) -> Dict[str, Any]:
-    """The meta JSON contents: {version, pid, repo_root, ts} (ts = epoch seconds; the
-    field names are the ticket-scenario contract). repo_root goes through realpath (both
-    sides of the comparison use the same normalization, so symlink differences cannot
-    produce a fake foreign repo).
 
-    dsh_face（t260916-24 版本面）：调用方传入时增列 'dsh' 键（dsh_pin.dsh_face_payload
-    的产物，记录本 worker 用的 dsh 版本与来源）；None = 不写该键（既有形状逐字节不变，
-    读侧 read_worker_meta_state 只按需取键，增列向后兼容）。"""
+def worker_meta_payload(repo_root=None, pid=None, dsh_face=None,
+                        state: str = WORKER_META_STATE_SERVING) -> Dict[str, Any]:
+    """The meta JSON contents: {version, pid, repo_root, ts, state} (ts = epoch seconds;
+    the field names are the ticket-scenario contract). repo_root goes through realpath
+    (both sides of the comparison use the same normalization, so symlink differences
+    cannot produce a fake foreign repo).
+
+    state (t261005-03): 'serving' (default — this worker is polling and owns its
+    queue slot) or 'draining' (the worker is stopping: polling has stopped, the
+    guard/ensure side must not treat it as a live owner, a replacement may take the
+    slot at once). The shutdown entry writes draining BEFORE the pollers stop, so the
+    zero-poller window on a RUNNING ticket stays bounded.
+
+    dsh_face (t260916-24 version face): when the caller passes it, the 'dsh' key is
+    added (the product of dsh_pin.dsh_face_payload, recording the dsh version/source
+    this worker uses); None = the key is not written (the existing shape is unchanged
+    byte for byte; the read side read_worker_meta_state takes keys on demand, additive
+    and backward compatible)."""
+    if state not in WORKER_META_STATES:
+        raise ValueError("worker meta state must be serving/draining, got %r" % (state,))
     root = os.path.realpath(str(repo_root if repo_root is not None else REPO_ROOT))
     payload = {
         'version': WORKER_META_VERSION,
         'pid': int(pid if pid is not None else os.getpid()),
         'repo_root': root,
         'ts': int(_time.time()),
+        'state': state,
     }
     if dsh_face is not None:
         payload['dsh'] = dsh_face
     return payload
 
 
-def write_worker_meta(path, repo_root=None, pid=None, dsh_face=None) -> Optional[Dict[str, Any]]:
+def write_worker_meta(path, repo_root=None, pid=None, dsh_face=None,
+                      state: str = WORKER_META_STATE_SERVING) -> Optional[Dict[str, Any]]:
     """Best-effort meta write (the ownership fingerprint is an observability enhancement;
     a write failure never blocks the worker from starting — the ensure side handles the
     missing state as unknown and cannot misjudge a foreign repo because of it). Returns
-    the payload."""
-    payload = worker_meta_payload(repo_root=repo_root, pid=pid, dsh_face=dsh_face)
+    the payload. state=serving|draining (t261005-03; see worker_meta_payload)."""
+    payload = worker_meta_payload(repo_root=repo_root, pid=pid, dsh_face=dsh_face,
+                                  state=state)
     try:
         p = pathlib.Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -6007,6 +6032,13 @@ def read_worker_meta_state(path) -> Tuple[Optional[Dict[str, Any]], str, str]:
             or not data.get('repo_root') or not isinstance(data.get('pid'), int) \
             or isinstance(data.get('pid'), bool):
         return None, 'malformed', '形状不符（需 version/pid:int/repo_root:str）'
+    # t261005-03: the slot state key is read on demand — a meta written before the key
+    # existed (old worker) reads as 'serving', which keeps every consumer's behavior
+    # unchanged; an unknown value is surfaced as-is (consumers treat anything that is
+    # not exactly 'draining' as serving — fail conservative, never open the slot on a
+    # typo).
+    if not data.get('state'):
+        data['state'] = WORKER_META_STATE_SERVING
     return data, 'ok', ''
 
 

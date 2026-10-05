@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 202,
-   "scenarios": 494
+   "engine_tests": 206,
+   "scenarios": 503
   },
   "vocab": [
    "behaviour",
@@ -1033,6 +1033,15 @@
    "anchor": "behaviour",
    "note": "t261004-31: declared-executor-session seam — new identity tier fires only for a session named in the project declaration; exempt/absent/unnamed stay undeclared",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261005_03_drain_handover.py": {
+   "anchor": "behaviour"
+  },
+  "server/engine/tests/test_t261005_03_lane_reclaim.py": {
+   "anchor": "behaviour"
+  },
+  "server/engine/tests/test_t261005_03_named_read_degrade.py": {
+   "anchor": "contract"
   }
  },
  "scenarios": {
@@ -3544,6 +3553,21 @@
   "integration/t261004-31/sc_t26100431_declared_session_gate.py": {
    "anchor": "behaviour",
    "note": "declared-executor-session seam behavior: real gate funnel, isolated registry, no value lock on the production declaration",
+   "sync_path": ""
+  },
+  "integration/t261005-03/sc_t26100503_drain_handover.py": {
+   "anchor": "contract",
+   "note": "t261005-03 clause A: guard admits draining owner, refuses serving/mismatch/malformed; takeover named",
+   "sync_path": ""
+  },
+  "integration/t261005-03/sc_t26100503_named_read_degrade.py": {
+   "anchor": "contract",
+   "note": "t261005-03 clause B: snapshot read degrades bounded and named (no_poller/query_timeout/cannot-prove/malformed queue)",
+   "sync_path": ""
+  },
+  "integration/t261005-03/sc_t26100503_orphan_probe_reclaim.py": {
+   "anchor": "behaviour",
+   "note": "t261005-03 clause C: probe counts visible, dry-run default, --apply refuses non-orphans, named refusal on bad root",
    "sync_path": ""
   }
  }

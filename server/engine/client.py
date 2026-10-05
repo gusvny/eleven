@@ -246,6 +246,15 @@ KIND_AUTHZ_SIGNAL_FAILED = "authz_signal_failed"            # signal 自身投�
 KIND_CROSS_PROJECT_REFUSED = "cross_project_refused"        # t260915-12：跨项目写操作闸拒收
 KIND_EXECUTOR_GRANT_REFUSED = "executor_grant_refused"      # t260930-14：执行器授权闸拒收（声明缺席/畸形/未授予/元权限反锁）
 KIND_AUTHZ_LANDING_UNCONFIRMED = "authz_landing_unconfirmed"  # 预算内无落账无拒收
+# t261005-03 (no-poller degrade): a RUNNING ticket's snapshot query timed out while
+# its dedicated queue had ZERO live pollers (the dedicated worker stopped polling or is
+# absent — the 261005 incident shape: a draining worker holding the pidfile). An
+# EXTENSION kind of the KI-025 taxonomy (new kinds add, never overwrite): it lands in
+# the retryable/degraded family — never not_found (the ticket exists), never internal
+# (the cause is located); the face carries ticket/queue/live_pollers for the workbench
+# and the ops gate to render by name. Write-face refusals (the cross-project gate
+# pre-read) use the same kind and face — an ops refusal is no longer a bare TimeoutError.
+KIND_NO_POLLER = "no_poller"
 
 # ---- authorize 落账确认轮询参数（t260913-01）----
 # 投递后有界轮询（指数退避 0.5→8s，6 轮 ≈ 20s 上限）：intake 在 worker 激活边界即跑，
@@ -435,7 +444,12 @@ async def cmd_query(args: Dict[str, Any]) -> Dict[str, Any]:
     client = await _connect()
     handle = client.get_workflow_handle(wf_id)
     desc = await handle.describe()
-    snap = await handle.query("snapshot")
+    # t261005-03: bounded, named — a detail read on a queue with zero live pollers
+    # answers kind=no_poller in bounded time (ticket/queue/live_pollers face) instead
+    # of hanging out the timeout and surfacing a bare TimeoutError.
+    snap, rerr = await _snapshot_read_named(handle, wf_id, client)
+    if rerr is not None:
+        return rerr
     return _ok(
         {
             "workflow_id": wf_id,
@@ -706,19 +720,27 @@ def _gate_refusal(verdict: Dict[str, Any], identity: Dict[str, Any],
 
 
 async def _write_gate(handle: Any, tid: str, args: Dict[str, Any],
-                      op_label: str = "") -> Dict[str, Any]:
+                      op_label: str = "", client: Any = None) -> Dict[str, Any]:
     """ticket 写 op 闸前置（唯一入口）：读目标票 project（快照 meta）→ 判定矩阵。
 
     返回 {"err": 回执|None, "verdict", "keys", "snap", "stamp", "note", "notice"}——
     err 非 None=调用方直接返回（瞬时读取失败=KIND_TRANSIENT 不判越权（KI-025）、
     不存在=KIND_NOT_FOUND、身份形状非法/畸形旗/跨项目无旗=KIND_CROSS_PROJECT_REFUSED）。
+    (t261005-03: when the caller passes its client, the pre-read goes through the named
+    classifier — a zero-live-poller read timeout answers kind=no_poller with the
+    ticket/queue/live_pollers face, so an ops refusal is no longer a bare TimeoutError.)
     snap 一并带回（authorize 复用作落账 diff 基线，免二次查询）。"""
     try:
         identity = _caller_identity(args)
     except caller_gate.CallerIdentityError as e:
         return {"err": _err(str(e), KIND_CROSS_PROJECT_REFUSED)}
     try:
-        snap = await _query_snapshot_with_retry(handle)
+        if client is not None:
+            snap, rerr = await _snapshot_read_named(handle, tid, client)
+            if rerr is not None:
+                return {"err": rerr}
+        else:
+            snap = await _query_snapshot_with_retry(handle)
     except Exception as e:
         if _is_not_found_exc(e):
             return {"err": _err("工单不存在：%s（Temporal 无此 workflow）" % tid, KIND_NOT_FOUND)}
@@ -892,7 +914,7 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
                             % (exec_status or "未知")})
     # 跨项目闸：与既有写 op 同一判定矩阵（_write_gate 三态，拒收单一出口）；快照瞬时
     # 不可得=transient 拒收不终结（fail-closed，C2① 同口径——绝不无闸放行 terminate）。
-    gate = await _write_gate(handle, tid, args, op_label="ticket-cancel")
+    gate = await _write_gate(handle, tid, args, op_label="ticket-cancel", client=client)
     if gate["err"] is not None:
         return gate["err"]
     # 先留痕：cancel_notice 事件先落事件历史（载荷含 who+reason 原文与盖章值）。
@@ -974,7 +996,7 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
                     "exec_status": exec_status or "未知", "reason": reason, "who": who,
                     "note": "已终态（%s），未执行任何动作（幂等回执，重试安全）"
                             % (exec_status or "未知")})
-    gate = await _write_gate(handle, tid, args, op_label="close_out")
+    gate = await _write_gate(handle, tid, args, op_label="close_out", client=client)
     if gate["err"] is not None:
         return gate["err"]
     try:
@@ -1025,7 +1047,11 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
 
     if op == "query":
         desc = await handle.describe()
-        snap = await handle.query("snapshot")
+        # t261005-03: bounded, named read (no_poller face when the queue has no live
+        # poller) — same classifier as ticket-query/detail.
+        snap, rerr = await _snapshot_read_named(handle, tid, client)
+        if rerr is not None:
+            return rerr
         running = desc.status is not None and desc.status.name == "RUNNING"
         return _ok({
             "ticket_id": tid,
@@ -1041,7 +1067,7 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
     # workflow 侧消费盖章值做第二道校验+记名）。读 op（query）不设闸。
     gate = None
     if op in _GATED_TICKET_OPS:
-        gate = await _write_gate(handle, tid, args, op_label=op)
+        gate = await _write_gate(handle, tid, args, op_label=op, client=client)
         if gate["err"] is not None:
             return gate["err"]
 
@@ -1217,7 +1243,9 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         # （t260915-12「调用方身份只盖章不许自认」同源纪律）。账本未声明/停用不阻
         # 断重建（rebuild 走 skip_enabled_gate 的补洞路径：账本是时间线的派生投影，
         # 停用只是停增量，不否定补历史）。
-        snap = await handle.query("snapshot")
+        snap, rerr = await _snapshot_read_named(handle, tid, client)
+        if rerr is not None:
+            return rerr
         if not isinstance(snap, dict) or not snap:
             return _err("ledger_rebuild 拒收：票面快照不可得（票不存在或非 v2 工作流）",
                         KIND_NOT_FOUND)
@@ -1938,6 +1966,183 @@ async def _describe_with_retry(handle: Any, attempts: int = DESCRIBE_RETRY_ATTEM
     raise last
 
 
+# ---- No-poller named degrade (t261005-03, clause B) ----
+# A snapshot query executes ON a poller of the ticket's dedicated queue. With zero live
+# pollers (draining/dead worker while the ticket is RUNNING — the 261005 incident) the
+# query can only wait out its timeout. The read face therefore names the cause instead
+# of surfacing a bare TimeoutError: which ticket, which queue, how many live pollers —
+# as a face payload under the KIND_NO_POLLER extension of the KI-025 taxonomy.
+
+def _poller_identity_pid(identity: Any) -> int:
+    """Extract the pid from a poller identity ("<pid>@<host>"); unparsable -> 0."""
+    try:
+        head = str(identity or "").split("@", 1)[0].strip()
+        pid = int(head)
+        return pid if pid > 0 else 0
+    except (ValueError, AttributeError):
+        return 0
+
+
+async def queue_live_pollers(client: Any, queue: str,
+                             timeout: float = 4.0,
+                             alive_fn: Any = None) -> Dict[str, Any]:
+    """One queue's live-poller face (bounded; Temporal unreachable = named, never a
+    silent zero). Classification mirrors the engine_ops live/stale-history rule: the
+    server keeps a just-exited worker in its poller history, so every listed poller is
+    verified against a live process via shared.pid_alive before it counts.
+
+    Injectables: alive_fn (tests stub the liveness), timeout. Any failure inside the
+    probe -> {"available": False, "note": ...} — "cannot prove" is a value here, so a
+    caller never upgrades an unproven face into a no_poller claim."""
+    face: Dict[str, Any] = {"ticket": "", "queue": queue, "available": False,
+                            "live_pollers": None, "stale_history": None,
+                            "unverifiable": None, "note": ""}
+    if not queue or not isinstance(queue, str) or queue.strip() != queue \
+            or any(c in queue for c in "\n\r\t"):
+        face["note"] = ("malformed queue name (empty / whitespace / control characters) "
+                        "- the poller face cannot be proven")
+        return face
+    if alive_fn is None:
+        alive_fn = shared.pid_alive
+    try:
+        from temporalio.api.taskqueue.v1 import TaskQueue
+        from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
+    except Exception as e:  # noqa: BLE001 — SDK absent = named cannot-prove, never a fake zero
+        face["note"] = ("temporalio unavailable (%s) - the poller face cannot be proven"
+                        % type(e).__name__)
+        return face
+    try:
+        ns = getattr(client, "namespace", "") or "default"
+        resp = await asyncio.wait_for(
+            client.workflow_service.describe_task_queue(
+                DescribeTaskQueueRequest(
+                    namespace=ns, task_queue=TaskQueue(name=queue),
+                    report_pollers=True)),
+            timeout=timeout)
+    except Exception as e:  # noqa: BLE001 — probe failure itself = named cannot-prove
+        face["note"] = ("describe_task_queue failed (%s: %s) - the poller face cannot "
+                        "be proven" % (type(e).__name__, str(e)[:120]))
+        return face
+    live = stale = unver = 0
+    for p in (getattr(resp, "pollers", None) or []):
+        pid = _poller_identity_pid(getattr(p, "identity", ""))
+        try:
+            is_live = bool(pid) and bool(alive_fn(pid))
+        except Exception:  # noqa: BLE001 — a liveness-check failure counts as unverifiable, never as live
+            is_live = False
+            unver += 1
+            continue
+        if is_live:
+            live += 1
+        elif pid:
+            stale += 1  # history entry whose process is gone
+        else:
+            unver += 1
+    face.update({"available": True, "live_pollers": live,
+                 "stale_history": stale, "unverifiable": unver,
+                 "note": "each identity pid liveness-checked (history residue listed separately)"})
+    return face
+
+
+def _face_live_count(poller_face: Any) -> "tuple[bool, Any]":
+    """(available, live_count) from a duck-typed poller face. Internal faces are the
+    dicts built by queue_live_pollers; scenario faces expose report_pollers() ->
+    {"live": n} or None (None = unreachable = cannot prove)."""
+    if poller_face is None:
+        return False, None
+    rp: Any = poller_face
+    try:
+        if hasattr(poller_face, "report_pollers"):
+            rp = poller_face.report_pollers()
+    except Exception:  # noqa: BLE001 — a throwing face is an unprovable face
+        return False, None
+    if rp is None:
+        return False, None
+    if isinstance(rp, dict):
+        if rp.get("available") is False:
+            return False, None
+        if "live" in rp:
+            return True, int(rp.get("live") or 0)
+        return True, int(rp.get("live_pollers") or 0)
+    return False, None
+
+
+def _classify_snapshot_failure(exc: BaseException, tid: str, queue: str,
+                               poller_face: Any = None) -> Dict[str, Any]:
+    """One failed snapshot read -> a named _err receipt (the classification single
+    point; nothing below the read faces surfaces a bare TimeoutError). Zero live
+    pollers (proven) -> kind=no_poller with the structured face; live pollers present
+    -> transient/query_timeout wording; an unprovable face stays transient and names
+    the cannot-prove value. Never not_found, never internal-by-default."""
+    available, live = _face_live_count(poller_face)
+    structured = poller_face if (available and isinstance(poller_face, dict)) else None
+    if available and live == 0:
+        return _err(
+            "no_poller: snapshot unavailable for ticket %s - queue %s has 0 live "
+            "pollers (the dedicated worker stopped polling or is absent); no action "
+            "taken; the console ensure replaces the worker, retry after that" % (tid, queue),
+            KIND_NO_POLLER, face=structured)
+    if available:
+        return _err(
+            "query_timeout: the snapshot query timed out for ticket %s on queue %s "
+            "(%s live pollers) - momentary jitter? refresh" % (tid, queue, live),
+            KIND_TRANSIENT, face=structured)
+    note = str((poller_face or {}).get("note") if isinstance(poller_face, dict) else "") \
+        or "%s: %s" % (type(exc).__name__, exc)
+    return _err(
+        "cannot prove the poller count for ticket %s on queue %s (%s) - treating the "
+        "read as transient; refresh" % (tid, queue, note), KIND_TRANSIENT)
+
+
+async def named_snapshot_read(handle: Any, tid: str, queue: str,
+                              timeout: float = QUERY_TIMEOUT_S,
+                              client: Any = None, poller_face: Any = None,
+                              alive_fn: Any = None) -> "tuple[Any, Any]":
+    """ONE bounded, named snapshot read (the public read-face contract).
+
+    Returns (snap, None) on success, (None, _err receipt) on failure. The query is
+    bounded by `timeout` — never an unbounded hang. On failure the cause is named
+    through the poller face (injected via poller_face, or probed via client when given):
+    live==0 -> kind=no_poller naming ticket/queue/count; live pollers -> query_timeout,
+    still named; unprovable face -> a named cannot-prove, never a fake zero. NotFound
+    propagates to the caller's existing not-found handling. No retry here — the KI-003
+    retry budget belongs to the internal wrapper (_snapshot_read_named), this function
+    is the deterministic single-shot contract the scenarios pin."""
+    try:
+        return await asyncio.wait_for(handle.query("snapshot"), timeout=timeout), None
+    except Exception as e:  # noqa: BLE001 — classification single point below the read faces
+        if _is_not_found_exc(e):
+            raise
+        if poller_face is None and client is not None:
+            poller_face = await queue_live_pollers(client, queue, alive_fn=alive_fn)
+            if isinstance(poller_face, dict):
+                poller_face["ticket"] = tid
+        return None, _classify_snapshot_failure(e, tid, queue, poller_face)
+
+
+async def _snapshot_read_named(handle: Any, tid: str, client: Any,
+                               timeout: float = QUERY_TIMEOUT_S,
+                               alive_fn: Any = None) -> "tuple[Any, Any]":
+    """The internal read face with the KI-003/KI-008 retry budget in place: a failing
+    RUNNING query is usually momentary jitter in the stage-transition window, so the
+    retry loop runs first and only the exhausted budget reaches the classifier."""
+    queue = ticket_task_queue(tid)
+    try:
+        return await _query_snapshot_with_retry(handle, timeout=timeout), None
+    except Exception as e:  # noqa: BLE001 — classification single point below the read faces
+        if _is_not_found_exc(e):
+            raise
+        face = await queue_live_pollers(client, queue, alive_fn=alive_fn)
+        face["ticket"] = tid
+        if _face_live_count(face) == (True, 0):
+            # The proven zero-poller cause degrades in place (the t261005-03 contract).
+            return None, _classify_snapshot_failure(e, tid, queue, face)
+        # Any other failure re-raises so each caller keeps its OWN legacy transient
+        # wording (e.g. ticket-query's "refresh and retry" contract) — the classifier
+        # is only the no-poller extension, it never rewrites the existing copy.
+        raise
+
+
 # ---- 终态失败票两面可见（t260919-02）：判别/原因提取/失败面 ----
 # 终态「活/成」白名单（UI deriveTicketState 的 EXEC_STATUS_ALIVE 同一词表的双侧
 # 镜像；改这里必须同步改 UI 侧并跑两侧 UT）。口径=补集：显式在跑（RUNNING）与
@@ -2258,12 +2463,14 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
             return _err("workflow 结果读取失败（瞬时），请刷新重试：%s: %s"
                         % (type(e).__name__, e), KIND_TRANSIENT)
     elif exec_status == "RUNNING":
+        # t261005-03: the read goes through _snapshot_read_named — a timeout with a
+        # PROVEN zero live pollers on the ticket's dedicated queue is kind=no_poller
+        # with a ticket/queue/live_pollers face, never a bare TimeoutError; every
+        # other failure keeps the legacy transient wording below.
         try:
-            # KI-003/KI-008: a failing RUNNING query is usually momentary jitter in the
-            # stage-transition window (a mutation burst choking the event loop; the
-            # workflow side already has a yield point), so retry with exponential backoff
-            # before reporting.
-            snap = await _query_snapshot_with_retry(handle)
+            snap, rerr = await _snapshot_read_named(handle, tid, client)
+            if rerr is not None:
+                return rerr
         except Exception as e:
             return _err("snapshot 查询失败（已重试 %d 次，瞬时抖动？请刷新重试）：%s: %s"
                         % (QUERY_RETRY_ATTEMPTS - 1, type(e).__name__, e), KIND_TRANSIENT)
@@ -2659,7 +2866,19 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 # row-assembly branch uses it to build a "query timed out, refresh and
                 # retry" row, and stage_state stays running (a ticket that really is
                 # running must not be shown as waiting).
-                return {"_query_degraded": True}
+                # t261005-03: best-effort named cause — when the ticket's queue has zero
+                # live pollers the degraded row names it (no extra query cost beyond the
+                # one bounded probe; probe failure keeps the plain degraded row).
+                degrade: Dict[str, Any] = {"_query_degraded": True}
+                try:
+                    pface = await _queue_poller_face(client, ticket_task_queue(tid),
+                                                     timeout=2.0)
+                    if pface.get("available") and pface.get("live_pollers") == 0:
+                        pface["ticket"] = tid
+                        degrade["_no_poller_face"] = pface
+                except Exception:  # noqa: BLE001 — the naming is an enhancement; it never crashes the list
+                    pass
+                return degrade
 
         if exec_status == "COMPLETED" and close_ts \
                 and time.time() - close_ts < CLOSED_HYDRATE_WINDOW_S:
@@ -2761,6 +2980,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             # row. id/project/epic come straight from the SA and are unaffected;
             # stage_state/status keep the running-state reading (not the anonymous row's
             # awaiting/empty, so a genuinely running ticket is not misread as waiting).
+            # t261005-03: when the probe proved zero live pollers, the title names the
+            # cause (which queue, 0 pollers) instead of a generic "timeout, refresh".
+            npf = meta.get("_no_poller_face") or {}
             rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
                          "role": None,
                          "status": "dispatched",
@@ -2774,6 +2996,15 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "close_health": _close_health_of(exec_status)[0],
                          "close_health_reason": _close_health_of(exec_status)[1],
                          "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
+            if npf:
+                # t261005-03: the probe PROVED zero live pollers — the degraded row
+                # names the cause (which queue, 0 pollers) instead of a generic
+                # "timeout, refresh" (UI copy in English per the 261004 host order).
+                rows[-1]["title"] = (
+                    "ticket query timed out: queue %s has 0 live pollers (dedicated "
+                    "worker stopped polling or absent); wait for the ensure "
+                    "replacement before refreshing"
+                    % (npf.get("queue") or ticket_task_queue(tid)))
         elif meta:
             meta.setdefault("project", sa_project)
             # epic takes the EpicCode SA as truth (SA first) with meta as fallback (the
@@ -3437,6 +3668,66 @@ async def cmd_deliver(args: Dict[str, Any]) -> Dict[str, Any]:
     return _ok(receipt)
 
 
+# ---- Orphan lane-worker probe / guarded reclaim (t261005-03, clause C) ----
+# Thin client.py faces over server/engine/lane_reclaim.py (the probe single point).
+# Read-only by default; killing belongs to humans — lane-reclaim is DRY-RUN unless
+# apply=true, and only rows passing the full guard set are signalled (SIGTERM only).
+
+async def cmd_lane_orphans(args: Dict[str, Any]) -> Dict[str, Any]:
+    """The orphan count face: ppid=1 processes whose cwd is under the lane root.
+    This is the reading face the acceptance clause names: the count must be 0 after a
+    ticket terminal, a worker replacement, and a console restart."""
+    import lane_reclaim
+    root = str(args.get("lane_root") or "")
+    if not root or not os.path.isdir(root):
+        return _err("lane-orphans: lane root does not exist: %s" % root, KIND_INTERNAL)
+    try:
+        rows = lane_reclaim.scan_orphans(root)
+    except Exception as e:  # noqa: BLE001 — a scan failure is named, never a silent zero
+        return _err("lane-orphans: scan failed (%s: %s)" % (type(e).__name__, e),
+                    KIND_INTERNAL)
+    classified = lane_reclaim.classify_orphans(rows, root)
+    # Count face (arbitration gen2): PROVABLE orphans only — cwd proven under the
+    # lane root. Probe-failed rows stay in the receipt, NAMED, under unprovable, but
+    # outside the count, so the acceptance zero reading is deliverable on a real host.
+    orphans = [r for r in classified if lane_reclaim.is_provable_orphan(r)]
+    unprovable = [r for r in classified
+                  if r.get("error") and not r.get("cwd_under_lane")]
+    return _ok({"lane_root": root, "count": len(orphans), "condemned":
+                sum(1 for r in classified if r.get("verdict") == "condemn"),
+                "orphans": [{k: r.get(k) for k in
+                             ("pid", "ppid", "user", "lstart", "cwd", "error",
+                              "command", "verdict", "reason")} for r in orphans],
+                "unprovable": [{k: r.get(k) for k in
+                                ("pid", "ppid", "user", "command", "error",
+                                 "verdict", "reason")} for r in unprovable],
+                "unprovable_count": len(unprovable)})
+
+
+async def cmd_lane_reclaim(args: Dict[str, Any]) -> Dict[str, Any]:
+    """The guarded reclaim face. Default DRY-RUN; apply=true SIGTERMs only the rows
+    that pass every guard (ppid=1, cwd under the lane root, worker.py cmdline, own
+    user, not named by a live pidfile/meta). Every examined pid — including the spared
+    ones, with the reason — is in the receipt."""
+    import lane_reclaim
+    root = str(args.get("lane_root") or "")
+    apply_flag = bool(args.get("apply"))
+    if not root or not os.path.isdir(root):
+        return _err("lane-reclaim: lane root does not exist: %s" % root, KIND_INTERNAL)
+    try:
+        rows = lane_reclaim.scan_lane_processes(root)
+    except Exception as e:  # noqa: BLE001
+        return _err("lane-reclaim: scan failed (%s: %s)" % (type(e).__name__, e),
+                    KIND_INTERNAL)
+    classified = lane_reclaim.classify_orphans(rows, root)
+    actions = lane_reclaim.reclaim(classified, apply=apply_flag)
+    return _ok({"lane_root": root, "mode": "apply" if apply_flag else "dry-run",
+                "examined": [{k: r.get(k) for k in
+                              ("pid", "ppid", "cwd", "command", "verdict", "reason")}
+                             for r in classified],
+                "actions": actions})
+
+
 COMMANDS = {
     "start": cmd_start,
     "query": cmd_query,
@@ -3456,10 +3747,12 @@ COMMANDS = {
     "template-faces": cmd_template_faces,
     "executor-grants-write": cmd_executor_grants_write,
     "deliver": cmd_deliver,
+    "lane-orphans": cmd_lane_orphans,
+    "lane-reclaim": cmd_lane_reclaim,
 }
 
 USAGE = (
-    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces|executor-grants-write|deliver> [argsJSON]\n"
+    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces|executor-grants-write|deliver|lane-orphans|lane-reclaim> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -3479,6 +3772,11 @@ USAGE = (
     "  /畸形拒收落 refused，snapshot 的 paused/paused_phase 二态可观测），\n"
     "  update=状态维护，query 只读。\n"
     "ticket-start 创建 v2 工单（模板 id→workflow 类）；ticket-list/ticket-query=工单台数据源。\n"
+    "lane-orphans/lane-reclaim (t261005-03): orphan lane-worker probe / guarded reclaim.\n"
+    "  args accept a bare lane-root path (or JSON {lane_root, apply}); lane-reclaim is\n"
+    "  dry-run unless apply=true — killing belongs to humans, only the condemned rows\n"
+    "  (ppid=1, cwd under the lane root, worker.py cmdline, own user, not in a live\n"
+    "  pidfile/meta) are SIGTERMed; the receipt names every examined pid.\n"
     "ticket-cancel 记名单票终结（t260922-10，ticket.py op=cancel 的引擎侧）：\n"
     "  {ticket_id, who 必填, reason 必填}；先 cancel_notice 信号留痕（who+reason 入事件\n"
     "  历史，跨项目/未声明身份经闸落 cross_project_uses）后 terminate（reason 同串）；\n"
@@ -3556,7 +3854,19 @@ def main() -> None:
         return
 
     args: Dict[str, Any] = {}
-    if len(sys.argv) > 2:
+    if sub in ("lane-orphans", "lane-reclaim") and len(sys.argv) > 2:
+        # t261005-03: these two accept a BARE lane-root path (operator convenience:
+        # `client.py lane-orphans /path/to/repo/.lane`) plus optional trailing flags
+        # (lane-reclaim --apply). JSON-object args stay legal for the programmatic face.
+        raw = sys.argv[2]
+        try:
+            parsed = json.loads(raw)
+            args = parsed if isinstance(parsed, dict) else {"lane_root": str(raw)}
+        except json.JSONDecodeError:
+            args = {"lane_root": raw}
+        if sub == "lane-reclaim" and any(a == "--apply" for a in sys.argv[3:]):
+            args["apply"] = True
+    elif len(sys.argv) > 2:
         try:
             parsed = json.loads(sys.argv[2])
             if not isinstance(parsed, dict):
@@ -3579,6 +3889,13 @@ def main() -> None:
     if sub == "deliver" and isinstance(result, dict) and not result.get("ok"):
         sys.stdout.flush()
         os._exit(2)
+    # lane-orphans/lane-reclaim (t261005-03): a refused run is a machine-consumable
+    # named receipt AND a non-zero exit — receipt counters must not read a refused
+    # probe as green (same exit-code discipline as deliver above).
+    if sub in ("lane-orphans", "lane-reclaim") and isinstance(result, dict) \
+            and not result.get("ok"):
+        sys.stdout.flush()
+        os._exit(1)
     # 告警类**只读**命令的退出码语义（同 inspection_trigger.deadman）：alarmed 非空=exit 1，
     # 供 ops/巡检自动化踩；stdout 仍是单行 JSON（既有契约不变）。
     if isinstance(result, dict) and isinstance(result.get("result"), dict) \

@@ -261,6 +261,9 @@ export interface WorkerMeta {
   pid?: number
   repo_root?: string
   ts?: number
+  /** t261005-03：槽位状态。'draining' = 该 worker 已停止 polling、正在收尾——不是活
+   * owner，ensure 可立即放替补接管。缺省/未知值=serving（保守：不开槽）。 */
+  state?: string
 }
 
 /** 读 meta 结果：state 四态与 python 侧 shared.read_worker_meta_state 对齐。 */
@@ -318,7 +321,7 @@ export function judgeTicketWorkerMeta(
 /** ensureTicketWorkersOnce 单轮决策（对外契约形态，可断言的行为记录面）。 */
 export interface TicketWorkerDecision {
   tid: string
-  action: 'spawned' | 'held-same' | 'held-foreign' | 'held-unknown'
+  action: 'spawned' | 'held-same' | 'held-foreign' | 'held-unknown' | 'replaced-draining'
   /** action=held-foreign 时必带：异仓根/pid/tid（告警记录的最小闭环）。 */
   warn?: { repoRoot: string; pid: number; tid: string }
   /** action=held-unknown 时必带：meta 路径/失败原因（兼容跳过不哑巴，review C3）。 */
@@ -346,6 +349,25 @@ export async function ensureTicketWorkersOnce(
     const existing = readPid(pf)
     if (existing !== null && isPidAlive(existing)) {               // 别的 console/手动 worker 在册
       const read = readWorkerMetaDetailed(mf)
+      // t261005-03：draining 让槽——meta state='draining' 且 pid 与 pidfile 精确一致
+      // ⇒ 在册进程已停止 polling（正在收尾在飞 activity），不是活 owner。清掉它的
+      // pidfile/meta 再抢注替补，RUNNING 票的零 poller 窗口有界到一个 ensure tick
+      // （旧实现：活 pid 挡住替补，最长拖满 30 分钟 graceful drain——261005 实报）。
+      // 精确匹配才开槽：meta 缺失/畸形/异值一律按保守旧路径走（unknown/foreign）。
+      if (read.meta && read.meta.state === 'draining'
+        && read.meta.pid === existing) {
+        try { unlinkSync(pf) } catch { /* 已不在 */ }
+        try { unlinkSync(mf) } catch { /* 已不在 */ }
+        if (deps.spawn) {
+          deps.spawn(r.id, r.queue)
+          decisions.push({ tid: r.id, action: 'replaced-draining',
+            reason: `draining worker pid=${existing} 已让槽（meta state=draining），替补已拉起` })
+        } else {
+          decisions.push({ tid: r.id, action: 'replaced-draining',
+            reason: `draining worker pid=${existing} 已让槽，但未提供 spawn 出口（仅清场不拉起）` })
+        }
+        continue
+      }
       const verdict = judgeTicketWorkerMeta(read.meta, deps.repoRoot)
       if (verdict === 'foreign') {
         decisions.push({
@@ -431,6 +453,11 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
         'tid=%s pid=%d 其引擎仓=%s 本仓=%s meta=%s —— 处置：人工清点该 worker 归属' +
         '（sandbar doctor --live 扫异仓引擎进程），确认后手动停它或迁移注册',
         d.tid, d.warn.pid, d.warn.repoRoot, deps.repoRoot, mf)
+    } else if (d.action === 'replaced-draining') {
+      // t261005-03：draining 让槽换手——点名为可观测事件（票/旧 pid/替补动作）。
+      deps.log.info(
+        'sandbar-temporal-tools supervisor: 工单 worker %s draining 让槽已换手：%s',
+        d.tid, d.reason ?? '')
     } else if (d.action === 'held-unknown') {
       // meta 缺失/畸形/读失败三态都在 reason 里（review C3：兼容跳过不许哑巴）。
       // 行为不劣于现状（老版 worker 无 meta 照样跳过），但留痕可查。
@@ -773,6 +800,26 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
   // 工单 worker ensure（A 案）：独立节奏（15s），server 在线才干活。
   const ticketTimer = setInterval(() => { void ensureTicketWorkers(ticketEnsureDeps) }, ticketEnsureMs)
   void ensureTicketWorkers(ticketEnsureDeps)
+
+  // t261005-03 条款C 的 console-restart 探针：启动即数一次 ppid=1 且 cwd 在 .lane/ 下
+  // 的孤儿进程（lane_reclaim.py --json，只读——回收走人审的 --apply，工具绝不自动杀）。
+  // 读不到/超时 → warn 具名，绝不静默当 0。验收读零口径见 lane_reclaim.py 头注。
+  void (async () => {
+    try {
+      const { stdout } = await execFileP(
+        python, [join(poc, 'lane_reclaim.py'), '--json'],
+        { cwd: poc, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 })
+      const r = JSON.parse(stdout)
+      if ((r?.count ?? 0) > 0) {
+        log.warn('sandbar-temporal-tools supervisor: [t261005-03] console 重启后仍有 %d 个孤儿泳道进程（ppid=1，cwd 在 .lane/ 下）——处置：python3 server/engine/lane_reclaim.py（dry-run 查看，确认后 --apply）', r.count)
+      } else {
+        log.info('sandbar-temporal-tools supervisor: lane-orphan 探针：孤儿泳道进程 0 个（t261005-03 验收口径达成）')
+      }
+    } catch (err: any) {
+      log.warn('sandbar-temporal-tools supervisor: lane-orphan 探针失败（%s）——孤儿计数本轮不可证，绝不静默当 0',
+        err?.message ?? err)
+    }
+  })()
 
   log.info('sandbar-temporal-tools supervisor: 已启动（port=%d，keepalive=%dms，ticketEnsure=%dms，serverLog=%s）',
     port, keepaliveMs, ticketEnsureMs, serverLog)

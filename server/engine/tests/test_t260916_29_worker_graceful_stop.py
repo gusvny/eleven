@@ -112,7 +112,10 @@ def test_worker_wiring_tripwire():
     停机；停机面必点名在飞（要求①）。源面断言，防止后人改回裸 Worker(...)。"""
     src_run = inspect.getsource(worker.run_worker)
     assert "_worker_extra_kwargs()" in src_run
-    assert "_graceful_shutdown(workers, run_tasks, watch_task)" in src_run
+    # t261005-03: the shutdown call carries meta_path — the drain entry writes
+    # meta state=draining (slot hand-over) before the pollers stop; see
+    # worker.mark_meta_draining / guard_single_worker takeover admission.
+    assert "_graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path)" in src_run
     src_stop = inspect.getsource(worker._graceful_shutdown)
     assert "_log_shutdown_disposition" in src_stop
     assert "shutdown()" in src_stop

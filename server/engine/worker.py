@@ -214,10 +214,52 @@ def _log_shutdown_outcome() -> None:
                      e.get("ticket"), e.get("stage"), e.get("gen"), e.get("outcome"))
 
 
-async def _graceful_shutdown(workers, run_tasks, watch_task) -> None:
-    """停机收尾（run_worker 的尾部原样抽出）：点名在飞 → 各 Worker.shutdown()
-    （SDK 按 graceful_shutdown_timeout 等在飞 activity）→ 收 runner/watch 任务 →
-    打终态清单。selfcheck_worker_graceful_stop 走同一函数，测的是真停机路径。"""
+def mark_meta_draining(meta_path: "str | None") -> bool:
+    """Rewrite this worker's ownership meta with state='draining' (t261005-03).
+
+    Called at the graceful-shutdown entry, BEFORE the pollers stop: from that instant
+    the single-poller guard (guard_single_worker) and the console's ensure side must
+    treat this pid as a released slot, not a live owner — otherwise a RUNNING ticket
+    sits with zero pollers for up to the whole graceful drain (261005: 15 minutes,
+    two lanes).
+
+    Ownership-guarded: only writes when the meta names OUR pid — after a takeover the
+    pidfile/meta may already belong to the replacement, and clobbering it would erase
+    the new owner's fingerprint. Best-effort: a write failure returns False and the
+    caller logs; the read face (clause B) names the no-poller cause for the residual
+    window this leaves (named known boundary, never silently absorbed)."""
+    if not meta_path:
+        return False
+    try:
+        import shared as _shared
+        meta, _state, _detail = _shared.read_worker_meta_state(meta_path)
+        if int((meta or {}).get("pid") or 0) != os.getpid():
+            logging.info("drain handover: meta (%s) already has a new owner "
+                         "(pid=%s != this process %d) — not rewritten",
+                         meta_path, (meta or {}).get("pid"), os.getpid())
+            return False
+        _shared.write_worker_meta(
+            meta_path, repo_root=str((meta or {}).get("repo_root") or REPO_ROOT),
+            pid=os.getpid(), state=_shared.WORKER_META_STATE_DRAINING)
+        logging.info("drain handover: meta state=draining written (pid=%d meta=%s) — "
+                     "guard/ensure may admit the replacement at once",
+                     os.getpid(), meta_path)
+        return True
+    except Exception as e:  # noqa: BLE001 — the hand-over marker never blocks shutdown
+        logging.warning("drain handover: writing draining to meta (%s) failed (%s: %s) "
+                        "— the residual window is caught by the named read degrade "
+                        "(kind=no_poller)", meta_path, type(e).__name__, e)
+        return False
+
+
+async def _graceful_shutdown(workers, run_tasks, watch_task,
+                             meta_path: "str | None" = None) -> None:
+    """Shutdown epilogue (extracted verbatim from run_worker's tail): hand over the
+    slot (meta state=draining, t261005-03) → name the in-flight activities →
+    Worker.shutdown() per worker (the SDK waits graceful_shutdown_timeout for the
+    in-flight activities) → reap the runner/watch tasks → log the outcome ledger.
+    selfcheck_worker_graceful_stop drives the same real shutdown path."""
+    mark_meta_draining(meta_path)
     _log_shutdown_disposition()
     await asyncio.gather(*(w.shutdown() for w in workers))
     if watch_task is not None:
@@ -373,6 +415,18 @@ def guard_single_worker(pidfile: str, replace: bool = False) -> "str | None":
         return None
     pid = int(st["pid"])
     meta = _meta_of(pidfile)
+    # t261005-03: the slot state decides, not pid liveness. A draining worker is alive
+    # but polls NOTHING — treating its pid as a live owner left RUNNING tickets with
+    # zero pollers for up to the whole graceful drain (261005). Only an exact match
+    # (meta state='draining' AND meta.pid == pidfile pid) opens the slot; anything
+    # else (meta missing/malformed/foreign/serving) keeps today's conservative refusal.
+    if str(meta.get("state") or "") == "draining" \
+            and int(meta.get("pid") or 0) == pid:
+        log.warning("pidfile worker (pid=%d, pidfile=%s) is draining (polling stopped, "
+                    "in-flight activities being finished) — the slot is released, this "
+                    "process takes over the queue slot; the old process finishes its own "
+                    "exit (t261005-03)", pid, pidfile)
+        return None
     started = ""
     if meta.get("ts"):
         try:
@@ -600,7 +654,7 @@ async def run_worker(args: argparse.Namespace) -> None:
                      ",".join(configured_task_queues()), TARGET_HOST)
     run_tasks = [asyncio.create_task(w.run()) for w in workers]
     await stop.wait()
-    await _graceful_shutdown(workers, run_tasks, watch_task)
+    await _graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path)
 
 
 def main() -> None:
@@ -645,9 +699,17 @@ def main() -> None:
         # dropped by the ensure side anyway ("pid dead"), but removing it
         # actively is cleaner. Best-effort — a removal failure must not mask
         # the exit code.
+        # t261005-03: ownership-guarded — after a takeover the meta may already
+        # belong to the replacement worker; only unlink when it still names OUR pid
+        # (unconditional unlink used to erase the new owner's fingerprint).
         if meta_path:
             try:
-                pathlib.Path(meta_path).unlink()
+                import shared as _shared
+                meta, _st, _dt = _shared.read_worker_meta_state(meta_path)
+                if int((meta or {}).get("pid") or 0) == os.getpid():
+                    pathlib.Path(meta_path).unlink()
+            except ValueError:
+                pass
             except OSError:
                 pass
 
