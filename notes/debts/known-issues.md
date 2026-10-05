@@ -3560,3 +3560,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **归**：`t261006-01`（它 spec 第 3 条本来就是"ENV_FAIL 要给具名可行动出路"）——修法二选一并说清：
 > ①采集台改认这一代的认证面（trusted-host 栅 / 直接裸 URL 是否已足，需证据），或 ②把 dsh 版本与提取假设**钉在一起**
 > （升级即红，别让它静默漂）。**回归**：起一次真实容器，断言采集台**退出码 0**且顶层有图；token 提取失败时文案必须点名"哪一代 dsh 的哪个面变了"。
+
+## KI-206 **被拒收的 rework 会留下空相位**：票随即卡「内部相位解析出未知值 ''」，只能靠规范段名 rework 复位（261006 02:3x 实证）
+
+> **现象**：`t261005-09`/`-10` 在我发出 `rework(to_stage=ui_evidence)` **被引擎拒收**（「ui_evidence 非主链步，不接受 rework」）之后，
+> 两票的 `merge_check` 再 `retry_qc` 时都以同一条 blocked 告停：
+> 「内部相位解析出未知值 ''（合法相位=acceptance、arb_acc_parallel、arbitrate、create_plan、implement、integ_join、
+> integration_review、merge、merge_check、parallel_impl_design、review_plan、run_integration_tests）——已停为人审…」。
+> **机制（待定论，现象确定）**：拒收路径没有清掉/没有写回相位值，留下**空串**，此后任何驱动都先撞相位校验。
+> 引擎自带的出路文案是对的（「请用 rework(to_stage=<规范段名>) 复位，或 retry_qc 重驱」）——但 `retry_qc` 在这条形态下
+> **驱不动**（相位仍空），实测只有**规范段名 rework**（我用 `implement`）能复位。
+> **危害**：一次**被拒收**的 rework 就能把票钉死在一层"内部错"上，且这个错会盖住真实红（本例：真正的红只是 UI 证据）。
+> 对执行器尤其危险——它会照拒绝文案换个目标重试，然后掉进相位卡死。
+> **出路**：①拒收路径**不写相位**（或写回原值）——拒收不该产生状态副作用；②`retry_qc` 在相位非法时给出「用规范段名 rework」的
+> **可执行**出路（现在是文案里顺带提一句，实测驱不动）；③相位空值在票面**点名是哪次动作造成的**（可归因）。
+> **回归**：L1——构造一次被拒收的 rework（目标非主链步），断言相位字段**未被污染**且后续 `retry_qc` 正常驱动。
