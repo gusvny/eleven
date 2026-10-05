@@ -3546,3 +3546,17 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 二选一，不许两边各说各话）；②拒绝文案与判定**同源**：文案里的路径由 `ui_evidence_dir()` 现算，不再用常量硬编码；
 > ③`ENV_FAIL` 的 token 读取失败给可行动出路（等待阈值/日志权限/容器启动串行化），并按 `env_fail` 具名通道记账，不搅进产品红。
 > **回归**：L3 场景——泳道里造「图在子目录」「图在旧名目录」两形态，断言闸的判词与文案**指向同一处**且给出可执行出路。
+
+> **261006 01:1x 追加（**第六层**，实测，解释"为什么怎么都过不了"）**：采集台当前**根本起不来**，死在认证面：
+> `capture-lane.mjs` 从 `docker logs <project>-dsh` 里按正则 `[?&]token=([A-Za-z0-9_-]{20,})` 抓 token
+> （`:267-271`，注释说先例是 `stage_console.sh:640` 与 `stage_docker` 的 plugins token 提取），
+> ENV_FAIL 文案原文：「docker 舞台 45000ms 内已可达但 docker logs 里取不到 dsh web token 行（会话门需 /?token= 兑换 cookie…）
+> ——不静默回落裸 URL 假跑（docker 缺席/容器日志不可读属环境面）」⇒ **exit 2，一张图也不出**。
+> 但同一容器实际打印的启动行是：`dsh web: http://127.0.0.1:3199 (LAN: http://10.213.164.2:3199)`——**根本没有 `?token=`**。
+> 且本机 dsh（`~/.sandbar/dsh-015/bin/dsh --profile web --help`）**没有任何 token 选项**，只有
+> `--host/--no-open/--port/--trusted-host`（浏览器信任栅）；也就是说**这一代 dsh 的认证面已经不是"URL 带 token 兑 cookie"**。
+> **结论**：token 提取假设随 dsh 升级**漂移**，三家消费者（capture-lane / capture.mjs 的调用方 / stage_console.sh）
+> 共用这个陈旧假设 ⇒ UI 证据链在本机**结构性死掉**，与前面四层（回执/种子/容器路径/落点）叠加。
+> **归**：`t261006-01`（它 spec 第 3 条本来就是"ENV_FAIL 要给具名可行动出路"）——修法二选一并说清：
+> ①采集台改认这一代的认证面（trusted-host 栅 / 直接裸 URL 是否已足，需证据），或 ②把 dsh 版本与提取假设**钉在一起**
+> （升级即红，别让它静默漂）。**回归**：起一次真实容器，断言采集台**退出码 0**且顶层有图；token 提取失败时文案必须点名"哪一代 dsh 的哪个面变了"。
