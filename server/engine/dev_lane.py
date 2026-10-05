@@ -425,6 +425,28 @@ MAIN_SYNC_PATCH_ID = "dev-lane-main-sync-v1"
 # 在飞老历史回放时本点求值为未 patched ⇒ 逐字旧行为（KI-061 回放纪律）；两条车道共用
 # 同一 id（patched 判定按 workflow 实例各自 memoize，互不影响）。
 MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID = "t261002-10-merge-check-resync"
+
+#: Patch guard CONCURRENCY_GATE_PATCH_ID (t261005-14; fixes the replay break
+#: CL-1 / t261004-32 introduced). 775bdb1 wired the whole concurrency command
+#: family (gate=concurrency_acquire, release, renew) into both lanes without a
+#: patched() guard, so every ticket started before CL-1 (history's first
+#: command is prepare_workspace, no release/renew present) diverges on replay
+#: under new-code workers: TMPRL1100, workflow task fails forever (live case:
+#: t261005-02/-06 and t261004-36 frozen; the console restart only exposed the
+#: defect, it did not cause it). Marker semantics: "this run was STARTED with
+#: CL-1 present". A pre-CL-1 history carries no marker, so patched()=False and
+#: every family command site is skipped verbatim - those runs were never
+#: gated, so skipping IS the exact historical replay, not a bypass. A new
+#: instance evaluates patched()=True, records the marker, and stays fully
+#: gated (first verdict is memoized per instance and survives wake crossings,
+#: same discipline as KI-061). The release/renew guards sit inside the two
+#: emitting helpers (physically held in this file, shared by both lanes - see
+#: _concurrency_release/_concurrency_renew): one early return covers every
+#: caller (stage-boundary pause accounting, blocked renew, merge human-gate
+#: renew, terminal release), so a future call site cannot escape the sweep.
+#: One shared id for both lanes: patched markers are judged against each
+#: workflow instance's own history, so there is no cross-lane collision face.
+CONCURRENCY_GATE_PATCH_ID = "dev-lane-concurrency-gate-v1"
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -1178,6 +1200,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         """Atomic holder-record refresh (stage end / human-gate transition).
         Local no-op without a project key — the gate already refused such a
         ticket at start, so there is nothing to renew."""
+        # t261005-14: same replay guard as _concurrency_release - covers the
+        # blocked renew, the merge human-gate renew and the gate's stage-end
+        # renew with one early return (shared by both lanes).
+        if not workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+            return
         proj = self._conc_project()
         if not proj:
             return
@@ -1193,6 +1220,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
     async def _concurrency_release(self, cause: str) -> None:
         """Real release (paused / terminated) + queue-head promotion. Local
         no-op without a project key (nothing was ever acquired)."""
+        # t261005-14: pre-CL-1 replay never emitted this command - skip it
+        # entirely (one guard here covers every caller: stage-boundary pause
+        # accounting, terminal release; both lanes share this helper).
+        if not workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+            return
         proj = self._conc_project()
         if not proj:
             return
@@ -2599,7 +2631,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # t261004-32: concurrency gate - judge the slot before the first stage
         # (prepare_workspace included). No slot = wait in the queue
         # (stage_state=queued), never start-then-pause; an absent/malformed
-        await self._concurrency_gate()
+        # t261005-14: patched guard - a pre-CL-1 history carries no marker, so
+        # its replay must not schedule concurrency_acquire at all (TMPRL1100).
+        if workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+            await self._concurrency_gate()
 
         # 1) prepare_workspace (code, no agent; failure → blocked waiting for retry/rework)
         # 宿主令 260930（light-lane，直修无票）：原内联块抽为共用 helper（循环在 helper 内，命令序列逐字不变）
@@ -2681,7 +2716,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             await self._pause_gate()
             # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal
             # (reason reset to running), not holding (first run / after a pause) =
-            await self._concurrency_gate()
+            # t261005-14: patched guard (same id, same reasoning as run entry).
+            if workflow.patched(CONCURRENCY_GATE_PATCH_ID):
+                await self._concurrency_gate()
             # t260928-13：主相循环每轮先冲账（同步 signal 里的迁移由本边界冲走）
             await self._ledger_flush()
             if self._rework is not None:

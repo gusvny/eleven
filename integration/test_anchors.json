@@ -774,6 +774,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261005_14_gate_replay_compat.py": {
+   "anchor": "behaviour",
+   "note": "t261005-14: CL-1 concurrency family replay safety - pre-CL-1 replay (patched=False) emits zero family commands and reaches prepare_workspace first; new runs stay gated; releasing/renewing helpers guarded; static lock pins both lane patch ids",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t260925_21_report_language.py": {
    "anchor": "behaviour",
    "note": "",
@@ -1088,6 +1093,11 @@
   "integration/t261004-32/sc_t26100432_slot_ledger.py": {
    "anchor": "behaviour",
    "note": "slot ledger semantics: judge-before-start, four release points, human-hold, pause, lower, order, reconcile (rules 1-5,8; KI-188 family)",
+   "sync_path": ""
+  },
+  "integration/t261005-14/sc_t261005_14_gate_replay_compat.py": {
+   "anchor": "contract",
+   "note": "CL-1 concurrency command family replay-safety contract: pre-CL-1 replay emits zero family commands, new runs stay gated, guard completeness on every gate call site (both lanes)",
    "sync_path": ""
   },
   "integration/baselines/sc_auto_rework_trace.mjs": {

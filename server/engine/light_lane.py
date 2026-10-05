@@ -157,6 +157,18 @@ LIGHT_LANE_TEMPLATE_ID = "light-lane"
 #: 要救的那一轮）。机制本体=dev-lane 的 `_main_sync_before_gate`（唯一实现，不另造）。
 LIGHT_MAIN_SYNC_PATCH_ID = "light-lane-main-sync-v1"
 
+#: Patch guard LIGHT_CONCURRENCY_GATE_PATCH_ID (t261005-14; same root cause
+#: and same fix as dev-lane). CL-1 (775bdb1) wired the concurrency gate into
+#: this lane's run entry / stage loop without a patched() guard - replaying an
+#: in-flight pre-CL-1 history schedules concurrency_acquire (absent from
+#: history) and dies with TMPRL1100. This lane-scoped id covers the two gate
+#: call sites; the release/renew emitting helpers physically live in
+#: dev_lane.py and are covered by that file's CONCURRENCY_GATE_PATCH_ID early
+#: returns (pre-CL-1 history has no marker, so the family is skipped verbatim
+#: = exact replay; new runs record the marker and stay gated). Full semantics:
+#: see the CONCURRENCY_GATE_PATCH_ID comment block in dev_lane.py.
+LIGHT_CONCURRENCY_GATE_PATCH_ID = "light-lane-concurrency-gate-v1"
+
 #: 空收窄面回落门（宿主 260930 实报：真票 t260930-14 第 4 轮「点名面全被在册豁免 ⇒ 跑 0 条
 #: ⇒ 判红」）。**必须走新门**，理由与上一条同源但更硬：本修法给 `_light_gate_plan` 里**新增
 #: 一次活动调用**（读挂账册的名册活动）。在飞老实例（t260930-14：历史里已有 4 个闸轮、没有
@@ -1252,7 +1264,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
         # t261004-32: concurrency gate - same face as dev-lane (helpers in the
         # parent): judge the slot before the first stage, queue when not granted;
         # a declaration refusal fails the ticket here by name (rule 9).
-        await self._concurrency_gate()
+        # t261005-14: patched guard - a pre-CL-1 history carries no marker, so
+        # its replay must not schedule concurrency_acquire at all (TMPRL1100).
+        if workflow.patched(LIGHT_CONCURRENCY_GATE_PATCH_ID):
+            await self._concurrency_gate()
 
         # 1) 工作空间准备（dev-lane 同 helper：同活动/同失败转 blocked/同 rework 语义）
         await self._prepare_workspace_step()
@@ -1277,7 +1292,9 @@ class LightLaneWorkflow(DevLaneWorkflow):
             await self._pause_gate()
             # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal,
             # not holding = queued acquire.
-            await self._concurrency_gate()
+            # t261005-14: patched guard (same id, same reasoning as run entry).
+            if workflow.patched(LIGHT_CONCURRENCY_GATE_PATCH_ID):
+                await self._concurrency_gate()
             # 事件账本：主相循环每轮先冲账（机制在 base.TicketEventLedgerMixin）
             await self._ledger_flush()
             if self._rework is not None:
