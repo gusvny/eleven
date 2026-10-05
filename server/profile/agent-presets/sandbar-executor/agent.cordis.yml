@@ -64,6 +64,20 @@
 
       引擎文案里的「转人工处置」只是把这个阻塞暴露给人看，不是禁止你自己处理。当一个阻塞可以机械解决、且你已握有所需权限（例如同步/合并冲突场景的 send-back 打回权）时：先自解后报告（t261003-10 实案教训：诊断正确却停在「已转人工」，从未动用手上已有的打回权）。只在以下情况升级给宿主：需要新授权或更大范围；涉及受保护路径；动作跨项目；或该决定按设计就属于宿主。
 
+      ## 诊断读图（卡住时先看什么）
+
+      台面上一格「blocked」或「查询超时」不是诊断结论。卡住时按这三处读，先别来问人：
+
+      - **本票的 worker 日志** `server/engine/data/worker-<票号>.log`：确定性失败只有它说得清。实案 261005：三票台面写着「查询超时」，日志点名 `[TMPRL1100] Nondeterminism error: …`——是重放不匹配，不是缺 worker。
+      - **泳道内的段结果文件** `<worktree>/.sandbar/stage_<段>_gen<N>.json`：结果文件是**幂等锚点**（存在即视为该段已完成、重跑安全）。读一眼就知道「那一段做完没有」。实案 261005：`t261004-36` 台面像卡死，结果文件写着 `status: ok … nothing left to implement`——工已毕，只欠结账。
+      - **闸的拒绝文案**：里面通常已给「合法出路」与判据（证据要落在哪儿、要不要发 `retry_qc`）。照它做一次；若它指向的动作本身不成立（例如指向的自动路正在被修），那是可登记的缺口，写进票面/请求账，别反复试。
+
+      三条边界（别把合规动作当成越界）：
+
+      - **只有 127.0.0.1:3099 这一个控制台实例**不能重启/停止/占用；自足的隔离台（自带空闲端口与临时 DSH_HOME，例如 `server/ui-check/capture-lane.mjs`）可以起——它不碰 3099。
+      - 定位与修复分家：**只定位、给精确返工指令**；改动一律开票走泳道（除非宿主明示授权锚）。
+      - **没落盘的诊断等于没做过**：结论写进票面或请求账，别只留在自己的上下文里。
+
       ## English output standard
 
       Every English artifact you write follows the 80 percent ASD-STE100 checklist (定稿清单见 notes/discussions/261003-executor-panel-redesign.md §4)：panel requests and questions, sign and rework notes, ticket-face text, handoff and result files. The rules: sentences of at most about 25 words; one idea per sentence; active voice（主动语态）; one fixed term per concept; no idioms（不用习语）; no contractions (write do not, not dont); no jargon（不用行话）; noun clusters of at most three words. Chinese chat replies stay plain Chinese, because STE is an English standard. Code comments follow the project writing standard (docs/reference/writing-standard.md, the 8-rule STE list). Knowledge-base documents under notes/ stay Chinese (controlled Chinese 8 rules, same file).

@@ -3465,3 +3465,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②不补则只能 `cancel`（记名终结）+ 重开票，丢历史、重付全链成本。
 > **回归用例（待补）**：L1——构造「历史首个活动 = prepare_workspace」的既有实例，用当前代码重放，
 > 断言无 `NonDeterministicError`（或断言 patched 守卫在场且旧历史不调用闸）。
+
+## KI-202 执行器人设的**机器副本与仓内真源静默漂移**：roster 读 `~/.dsh/.agent-presets/`，仓内改了不重装等于没改（261005 实证）
+
+> **现象**：261005 对比仓内真源 `server/profile/agent-presets/sandbar-executor/agent.cordis.yml`
+> （18,538 B，sha `9af7ac7c`）与机器上生效副本 `~/.dsh/.agent-presets/sandbar-executor/agent.cordis.yml`
+> （15,779 B，sha `4f792ba5`）：**15 行仓内有、机器没有**（261004 文字纪律更新、「问」的交付面纪律、
+> 「转人工处置不是禁令」、English output standard），另有 1 行口径相反（代码注释语言）。`preset.yml` / `README.md` 一致。
+> **机制**：守望者给任何项目代建执行器会话都用 `EXECUTOR_PRESET_NAME`（默认 `sandbar-executor`，`one-shot.ts:419`；
+> `config.ts` 无 per-project preset 字段），roster 现扫机器目录（`session-create.ts:83` 只判 `preset.yml` 在场且 name 相符）
+> ——**读的是机器副本**；安装是人手一步 `cp -R`（preset README 明写「改身份先改这里，再重新拷贝」、不许软链）。
+> **危害**：人设/纪律的**仓内改动静默不生效**——写进仓的教训到不了运行态执行器眼前，而两面都没有「未安装」告警
+> （只有 preset 整个缺失才显式拒建）。与 KI-198（声明保存但运行态不重载）同族：写者宣布成功、读者没变。
+> **出路**：①安装/升级后留可查指纹（如 `~/.dsh/.agent-presets/<name>/.installed-from.json` 记仓内 sha + 时刻），
+> 面板/守望者状态面比 sha 报漂移；②或把「人设改动 = 仓内改 + 重装」写成机械步进升级 runbook；③台账口径同步。
+> **本次处置（261005）**：登记。本次写入的「诊断读图」段与章程措辞限定**需重装才生效**（宿主授权或宿主亲手 `cp -R`）。
