@@ -64,7 +64,11 @@ const KNOWN_RESIDUE = new Set([
 // `readFileSync(utf8)` 照样把二进制读进来：库里逐字存着历史绝对路径 ⇒ 判成「新病灶」假红，
 // 顺带每轮白读 400MB（260928 实测红：`新病灶 1 文件：server/engine/data/temporal.db`）。
 // 扫描面意图不变=**源码/文档域**零旧仓字面量。
-const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv', 'out', 'data'])
+// .dsh（261005 补，与 data/ 同口径）：dsh 运行时会话域——.dsh/storages/session_projcache/ 是
+// 控制台会话工程缓存（进程物，gitignored 零跟踪），历史会话记录里带旧仓绝对路径属事实数据
+// 而非代码（t261005-16 泳道实红：泳道自身的会话缓存里记着 suyou 路径被误判「新病灶」）。
+// 扫描面意图不变=源码/文档域零旧仓字面量。
+const SKIP_DIRS = new Set(['node_modules', '.git', '.suyou', '.lane', '.sandbar', 'docs', 'notes', '.venv', 'out', 'data', '.dsh'])
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {

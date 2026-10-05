@@ -11,7 +11,7 @@
  *   A. helper 行为冒烟（fixture tmp root + env 桩）：per-key 优先 / legacy 回落 /
  *      null / 穿越 key / env 空串 / 目录冒充；
  *   B. 接线守卫：capture-lane.mjs 与 dbg-chat.mjs 都经 creds-source.mjs 取源且
- *      per-key 首选 suyou、legacy 回落有提示日志；
+ *      per-key 首选具名项目 key（capture-lane=t261005-16 起绑台内 capture-bench；dbg-chat=固定 suyou）、legacy 回落有提示日志；
  *   C. import 健全：两脚本 + helper 可被 node 解析（--check 等价的 ESM 语法校验走
  *      node:module strip？此处用动态 import helper 实跑代替；脚本本体 import 用
  *      源级断言）。
@@ -117,13 +117,19 @@ ok(mod.PROJECT_KEY_RE instanceof RegExp && !mod.PROJECT_KEY_RE.test('Suyou') && 
    'A11 PROJECT_KEY_RE 导出且口径正确')
 
 // ---- B. 接线守卫 ----
+// B2 契约更新（t261005-16）：capture-lane 的 per-key 首查改绑台内项目
+// BENCH_PROJECT_KEY（capture-bench，经常量引用非裸串）——不再绑定历史 suyou 项目；
+// dbg-chat.mjs 的固定服务对象不变仍为 suyou。两台都保留 perkeyIsHit 迁移提示。
 const lane = readFileSync(join(repo, 'server', 'ui-check', 'capture-lane.mjs'), 'utf8')
 const dbg = readFileSync(join(repo, 'server', 'ui-check', 'dbg-chat.mjs'), 'utf8')
-for (const [name, src] of [['capture-lane.mjs', lane], ['dbg-chat.mjs', dbg]]) {
+for (const [name, src, keySrc] of [
+  ['capture-lane.mjs', lane, 'resolveCredentialsSource(BENCH_PROJECT_KEY)'],
+  ['dbg-chat.mjs', dbg, 'resolveCredentialsSource("suyou")'],
+]) {
   ok(src.includes("from './creds-source.mjs'") || src.includes('from "./creds-source.mjs"'),
      'B1 ' + name + ' 经 creds-source.mjs 取源（未绕开真源逻辑）')
-  ok(src.includes('resolveCredentialsSource("suyou")'),
-     'B2 ' + name + ' per-key 首选写死 suyou 项目（UI 检查台固定服务对象）')
+  ok(src.includes(keySrc),
+     'B2 ' + name + ' per-key 首选绑定具名项目 key（capture-lane=台内 capture-bench / dbg-chat=固定 suyou）')
   ok(src.includes('perkeyIsHit('),
      'B3 ' + name + ' legacy 回落带迁移提示判定（perkeyIsHit）')
 }

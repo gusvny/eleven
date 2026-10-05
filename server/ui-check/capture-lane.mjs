@@ -184,6 +184,63 @@ export async function buildTempProfile(tmpHome, laneWorkbenchDir) {
   return profDir;
 }
 
+// 台内注册表的项目 key（t261005-16，KI-204 ③）：隔离台不再绑定历史 suyou 项目，
+// 自建一个工作区必然存在的台内项目（key 过 PROJECT_KEY_RE 白名单）。
+export const BENCH_PROJECT_KEY = "capture-bench";
+
+/**
+ * 组台内注册表（t261005-16，KI-204 ③）：临时 DSH_HOME 是一个新家，注册表装载器
+ * （TS project-registry.ts / Python engine/shared.py 两侧同构）在根无 `.migrated`
+ * 标记时会从仓内历史种子 server/projects.yaml 重播迁移——把已退役的 suyou 项目
+ * （dirs 指向本机已不存在的路径）种回注册表 ⇒ 新建会话按 dirs[0] 建工作区 → ENOENT。
+ * 修法：给临时控制台预置一个**自带 `.migrated` 标记**的 per-key 注册表根（装载器
+ * 见标记即跳过迁移，两侧判据一致），内含台内项目 capture-bench，其工作区目录
+ * 预先 mkdir 必然存在——台在任何机器上都不再依赖机器现实的注册表。
+ * 格式按 docs/design/sandbar-project-onboarding-contract-v1.md ①a schema v1，
+ * 与装载器 serializeProjectYaml（project-registry.ts）逐字节同形：顶层
+ * `schema: v1` + `project:` 列表——顶层平铺 key:/name:/dirs: 会被两侧解析器
+ * 隔离进 quarantined（t261005-16 第一轮仲裁实测抓出，勿回退）。
+ * key 必须等于所在目录名。
+ * 返回注册表根绝对路径（调用方把它设进控制台 env 的 SANDBAR_PROJECTS_DIR）。
+ * 舞台通路口径（t261005-16 仲裁第三轮）：opts.workspaceDir（宿主侧真实 mkdir 的
+ * 工作区目录）与 opts.declaredWorkspacePath（写进 project.yaml 的路径）可分离——
+ * docker 舞台把注册表 bind mount 进容器后，容器只能看见挂载树内的路径，写宿主
+ * 临时绝对路径（/var/folders/...）＝把 KI-204 的死目录病灶换个路径重演（仲裁第
+ * 三轮实锤：容器内 workspace-invalid-path）。缺省两者同值＝boot-local 行为不变。
+ */
+export async function buildBenchRegistry(tmpHome, opts = {}) {
+  const root = path.join(tmpHome, "bench-registry", "projects");
+  const projDir = path.join(root, BENCH_PROJECT_KEY);
+  const wsDir = opts.workspaceDir || path.join(tmpHome, "bench-workspace");
+  const declaredWs = opts.declaredWorkspacePath || wsDir;
+  await mkdir(projDir, { recursive: true });
+  await mkdir(wsDir, { recursive: true });
+  const projectYaml = [
+    "schema: v1",
+    "project:",
+    `  - key: ${BENCH_PROJECT_KEY}`,
+    "    name: Capture Bench",
+    "    dirs:",
+    `      - ${declaredWs}`,
+    "",
+  ].join("\n");
+  // `wx` 独占写（t261005-16 畸形输入纪律）：落点位已有同名文件（崩溃残留/人工改动）
+  // → fail-loud 具名拒因，绝不静默覆盖。
+  const fsp = await import("node:fs/promises");
+  try {
+    await fsp.writeFile(path.join(projDir, "project.yaml"), projectYaml,
+      { encoding: "utf8", flag: "wx" });
+  } catch (e) {
+    throw new Error(`台内注册表构建失败：${path.join(projDir, "project.yaml")} 落点位被占（${e.code || e.message}）——拒绝静默覆盖，人工处置后重试`);
+  }
+  // `.migrated` 标记：装载器的跳过判据只认它（两侧同构）；内容照迁移器自己的
+  // 格式落一行来源，便于隔离台现场人工判读。
+  await fsp.writeFile(
+    path.join(root, ".migrated"),
+    "source: capture-lane bench registry (t261005-16)\n", "utf8");
+  return root;
+}
+
 /**
  * 等台就绪，并返回**带 token 的首页地址**（260928 修，KI-156）。
  *
@@ -200,6 +257,42 @@ function authUrlFromLog(logPath) {
     const m = log.match(/https?:\/\/[^\s"'<>]*[?&]token=[A-Za-z0-9._~-]+/g);
     return m ? m[m.length - 1] : "";
   } catch { return ""; }
+}
+
+/** 舞台通路的带 token 入口（t261005-16 仲裁第四轮）：boot-local 从本地 console.log
+ * 取 token（authUrlFromLog），docker 舞台的 dsh 跑在容器里，日志经 `docker logs
+ * <project>-dsh` 同源提取（先例 stage_docker._plugins_token_from_logs / PLUGINS_TOKEN_RE
+ * 同款正则）。取不到返回空串（调用方 fail-loud，不静默回落裸 URL——会话门下裸 URL
+ * 让 app 停在 inert 相位，chat 态必死，t261005-16 验收实锤）。 */
+function tokenFromDockerLogs(project) {
+  try {
+    const p = spawnSync("docker", ["logs", "--tail", "200", `${project}-dsh`],
+      { encoding: "utf8", timeout: 15000 });
+    const m = ((p.stdout ?? "") + (p.stderr ?? "")).match(/[?&]token=([A-Za-z0-9_-]{20,})/);
+    return m ? m[1] : "";
+  } catch { return ""; }
+}
+
+/** 舞台模式等台就绪：HTTP 可达 + docker logs 里出现 token 行，拼带 token 首页地址。
+ * 超时=ENV_FAIL 语义的 Error（调用方点名词退出，不静默降级裸 URL）。 */
+async function waitReadyStage(port, timeoutMs, project, tickMs = 500) {
+  const t0 = Date.now();
+  let reachable = false;
+  while (Date.now() - t0 < timeoutMs) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/`);
+      if (res.ok || res.status === 401 || res.status === 303) reachable = true;
+      if (reachable) {
+        const token = tokenFromDockerLogs(project);
+        if (token) return `http://127.0.0.1:${port}/?token=${token}`;
+      }
+    } catch { /* 未就绪，继续轮询 */ }
+    await new Promise(r => setTimeout(r, tickMs));
+  }
+  throw new Error(reachable
+    ? `docker 舞台 ${timeoutMs}ms 内已可达但 docker logs 里取不到 dsh web token 行`
+      + `（${project}-dsh；会话门需 /?token= 兑换 cookie，拿不到 capture 只会停在 inert 相位）`
+    : `docker 舞台 ${timeoutMs}ms 内未就绪（127.0.0.1:${port}）`);
 }
 
 async function waitReady(port, timeoutMs, logPath, tickMs = 500) {
@@ -261,6 +354,8 @@ export async function main() {
   // --stage-json=消费外部舞台（生命周期归调用方，本脚本绝不拆）；--boot-local=显式降级。
   let port = null;
   let ownStageProject = null;   // 本脚本自起的台才负责拆
+  let stageProject = null;      // 消费的舞台名（外部或自起），docker logs 提 token 用
+  let stageBenchHome = null;    // docker 舞台的台内注册表宿主目录（t261005-16，本脚本自起的台负责清）
   const fetchAlive = async (p) => {
     try { const r = await fetch(`http://127.0.0.1:${p}/`, { signal: AbortSignal.timeout(3000) }); return r.status < 500; }
     catch { return false; }
@@ -282,6 +377,7 @@ export async function main() {
       console.error(`[capture-lane] ENV_FAIL: 外部舞台已死（console 127.0.0.1:${port} 不可达）——不回落自搭台、不拆外部台（生命周期归调用方）`);
       process.exit(2);
     }
+    stageProject = st.project;
     console.log(`[capture-lane] 使用外部舞台 ${st.project}：127.0.0.1:${port}（拆台归调用方）`);
   } else if (!args.bootLocal) {
     const stageCli = path.join(REPO_ROOT, "integration", "stage_docker.py");
@@ -291,9 +387,27 @@ export async function main() {
     }
     const project = `capture-lane-${process.pid}`;
     const timeoutSec = Number(process.env.SANDBAR_CAPTURE_STAGE_TIMEOUT_SEC || 600);
+    // 台内注册表注入（t261005-16，KI-204 验收打回面）：docker 容器若沿用 compose
+    // 缺省 SANDBAR_PROJECTS_DIR=/nonexistent，装载器会从挂载的仓内历史种子重播
+    // 已退役 suyou 项目（死宿主路径）→ 会话/工作区创建照旧 ENOENT——本票病灶在
+    // 生产通路（merge_check 走的正是 docker 舞台）原样复现。修法与 boot-local
+    // 通路同源：宿主侧 buildBenchRegistry 造注册表，经 stage_docker 的
+    // --fixtures-dir（挂 /fixtures）+ SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects
+    // （compose 透传为容器内 SANDBAR_PROJECTS_DIR）注入容器，装载器见 .migrated
+    // 即跳过种子（先例 integration/lib_stage_console.mjs 同一通道）。
+    stageBenchHome = await mkdtemp(path.join(tmpdir(), "capture-lane-stage-bench-"));
+    // 工作区落挂载树内（t261005-16 仲裁第三轮）：容器只认 /fixtures 下的路径，
+    // 宿主临时绝对路径＝死目录病灶换路径重演（实锤：容器内 workspace-invalid-path）。
+    await buildBenchRegistry(stageBenchHome, {
+      workspaceDir: path.join(stageBenchHome, "bench-registry", "workspace"),
+      declaredWorkspacePath: "/fixtures/workspace",
+    });
+    const benchFixturesDir = path.join(stageBenchHome, "bench-registry");
     const up = spawnSync("python3", [stageCli, "up", "--project", project,
-      "--services", "full", "--timeout", String(timeoutSec)],
-      { encoding: "utf8", timeout: timeoutSec * 1000 + 15000 });
+      "--services", "full", "--timeout", String(timeoutSec),
+      "--fixtures-dir", benchFixturesDir],
+      { encoding: "utf8", timeout: timeoutSec * 1000 + 15000,
+        env: { ...process.env, SANDBAR_TEST_PROJECTS_DIR: "/fixtures/projects" } });
     if (up.status !== 0) {
       const named = String(up.stderr ?? "").split("\n").filter((l) => l.startsWith("STAGE_")).at(-1);
       console.error(`[capture-lane] ENV_FAIL: docker 测试台起台失败——${named ?? `rc=${up.status} ${String(up.stderr ?? "").slice(0, 200)}`}`);
@@ -302,6 +416,7 @@ export async function main() {
     const st = JSON.parse(String(up.stdout).trim().split("\n").at(-1));
     port = st.ports.console;
     ownStageProject = st.project;
+    stageProject = st.project;
     console.log(`[capture-lane] docker 舞台就绪 ${st.project}：127.0.0.1:${port}（本脚本负责拆台）`);
   } else {
     console.log("[capture-lane] 降级说明：--boot-local 显式走自搭进程台（docker 缺席宿主的人工通路；闸内一律走 docker 舞台）");
@@ -330,6 +445,9 @@ export async function main() {
     if (logFd !== null) { try { closeSync(logFd); } catch { /* 已关 */ } }
     // rmSync（同步）：exit 钩子路径事件循环可能已停，异步 rm 会留 /tmp 残留（t260829-07 review 实测）
     if (tmpHome) { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } }
+    // docker 舞台的台内注册表宿主目录（t261005-16）：bind mount 真源，随拆台同清
+    //（容器已停，宿主目录删除无窗口面；docker 分支单独造，boot-local 分支为 null）。
+    if (stageBenchHome) { try { rmSync(stageBenchHome, { recursive: true, force: true }); } catch { /* 留警告 */ } }
   };
   process.on("exit", teardown);
   for (const sig of ["SIGINT", "SIGTERM"]) {
@@ -346,18 +464,25 @@ export async function main() {
     // 凭据源按项回退（t260901-03）：运行环境常把 DSH_HOME 指到 worktree 内半空
     // 目录（有/无凭据皆有可能），凭据在 [DSH_HOME, $HOME/.dsh] 中取首个含
     // .credentials.yaml 的候选。preset 源仍按 t260901-02 钉死 $HOME（见下），不随此回退。
-    // 凭据源（sandbar M1-2）：per-key 项目目录 ~/.sandbar/projects/suyou/credentials.yaml
-    // 优先（UI 检查台固定服务 suyou 项目），未命中走既有 [DSH_HOME, $HOME/.dsh] legacy
-    // 回退链（t260901-03）——统一经 creds-source.mjs（agent_activities.py 同构真源）。
-    // preset 源仍按 t260901-02 钉死 $HOME（见下），不随此回退。
-    const credSrc = resolveCredentialsSource("suyou");
-    if (credSrc && !perkeyIsHit("suyou", credSrc)) {
-      console.error(`[capture-lane] 提示：项目凭据未迁 ~/.sandbar/projects/suyou/credentials.yaml，仍用 legacy ${credSrc}（契约①b 弃用窗口）`);
+    // 凭据源（sandbar M1-2 + t261005-16 改绑）：per-key 首查改用台内项目 key
+    // （capture-bench，见 buildBenchRegistry）——不再绑定历史 suyou 项目。capture-bench
+    // 恒无 per-key 凭据 ⇒ 恒走 legacy 回落链 [DSH_HOME, $HOME/.dsh]，而 DSH_HOME=临时
+    // 台且下方已把真 .credentials.yaml 拷入 ⇒ 行为与改绑前一致（截图本不需要模型凭据，
+    // 缺了不致命）。**已接受的行为变化**（t261005-16 review 条件 2）：在 ~/.sandbar/
+    // projects/suyou/credentials.yaml 在场的机器上，台不再命中该 per-key 凭据，一律
+    // 回落 DSH_HOME 拷贝件——落点等价，无净效果。
+    const credSrc = resolveCredentialsSource(BENCH_PROJECT_KEY);
+    if (credSrc && !perkeyIsHit(BENCH_PROJECT_KEY, credSrc)) {
+      console.error(`[capture-lane] 提示：台内项目 ${BENCH_PROJECT_KEY} 无 per-key 凭据，走 legacy 回落 ${credSrc}（契约①b 弃用窗口）`);
     }
     for (const f of [".credentials.yaml"]) {
       if (credSrc) await copyFileP(credSrc, path.join(tmpHome, f)).catch(() => {});
     }
     await buildTempProfile(tmpHome, laneWb);
+    // 台内注册表（t261005-16，KI-204 ③）：预置自带 .migrated 标记的注册表根，
+    // 阻断装载器从仓内历史种子重播已退役 suyou 项目（新家 ENOENT 病根），
+    // 控制台 env 的 SANDBAR_PROJECTS_DIR 指过去（见下方 spawn env 块）。
+    const benchRegistryRoot = await buildBenchRegistry(tmpHome);
     // preset 物化（t260901-02）：源=仓库外实体，**不随 env DSH_HOME**（空 DSH_HOME
     // 干净环境模拟时 env 只当隔离台目标；凭据源同因，见上方拷凭据注释）。
     // env SANDBAR_CAPTURE_PRESET_SOURCE 仅作单测/基线桩覆盖。
@@ -383,6 +508,11 @@ export async function main() {
         env: {
           ...process.env,
           DSH_HOME: tmpHome,
+          // 台内注册表（t261005-16）：两侧装载器（TS project-registry.ts / Py
+          // engine/shared.py registry_root）env 优先级最高（空串/相对路径视为未设，
+          // 这里是绝对路径）——控制台从此只看到台内项目 capture-bench（工作区必然
+          // 存在），不再重播仓内历史种子。只作用于本临时控制台的 env 块，不外泄。
+          SANDBAR_PROJECTS_DIR: benchRegistryRoot,
           // 控制台插件 wf API 指向的外部 Temporal（只读展示）；截图台不依赖它在线
           SANDBAR_TARGET_HOST: process.env.SANDBAR_CAPTURE_TARGET_HOST
             || process.env.SANDBAR_TARGET_HOST || "127.0.0.1:17233",
@@ -401,8 +531,18 @@ export async function main() {
     console.log(`[capture-lane] 隔离台就绪：127.0.0.1:${port}（DSH_HOME=${tmpHome}；`
       + `带 token 入口=${navUrl ? "已取到" : "缺"}）`);
     } else {
-      console.log(`[capture-lane] docker 台模式：preset 物化/凭据拷贝不适用（DSH_HOME 在容器卷内）；` +
-        `chat 种子如需用户 preset 请用 --boot-local 人工通路`);
+      // 舞台通路（外部 stage-json 或自起 docker）：同样要带 token 首页地址——
+      // 会话门（KI-156，dsh 0.1.5）下裸 URL 让 app 停在 inert 相位，chat 态必死
+      //（t261005-16 验收实锤：boot-local 绿/舞台红唯一差异就是 tokened entry）。
+      // token 从容器日志同源提取（先例 stage_docker），取不到=ENV_FAIL 点名退出，
+      // 不静默回落裸 URL 假跑。
+      try {
+        navUrl = await waitReadyStage(port, bootTimeoutMs, stageProject);
+      } catch (e) {
+        console.error(`[capture-lane] ENV_FAIL: ${e.message}——不静默回落裸 URL 假跑（docker 缺席/容器日志不可读属环境面）`);
+        process.exit(2);
+      }
+      console.log(`[capture-lane] 舞台就绪：127.0.0.1:${port}（带 token 入口已取到，project=${stageProject}）`);
     }
     await mkdir(args.out, { recursive: true });
     // 状态注入 opt-in（t260901-24）：env SANDBAR_CAPTURE_FIXTURES=1（bench 级开关，
@@ -470,11 +610,11 @@ async function selftest() {
     await utimes(path.join(wb, "lib", "client.js"), fresh, fresh);
     const r3 = laneBuildRejectReason(wb);
     if (r3) throw new Error(`新鲜 build 不应拒跑：${r3}`);
-    console.log("[capture-lane] selftest 1/6 绿：build 前置三态（缺失/陈旧拒跑、新鲜放行）");
+    console.log("[capture-lane] selftest 1/7 绿：build 前置三态（缺失/陈旧拒跑、新鲜放行）");
     // 2. 挑端口
     const p = await pickFreePort();
     if (!(p > 0 && p < 65536)) throw new Error(`端口异常：${p}`);
-    console.log(`[capture-lane] selftest 2/6 绿：空闲端口挑选（${p}）`);
+    console.log(`[capture-lane] selftest 2/7 绿：空闲端口挑选（${p}）`);
     // 3. 临时 profile 组装（真跑一次，检查 sandbar-workbench 软链指到假泳道）
     const fakeLaneWb = path.join(tmp, "fakelane", "workbench");
     await mkdir(path.join(fakeLaneWb, "lib"), { recursive: true });
@@ -483,7 +623,7 @@ async function selftest() {
     const real = realpathSync(path.join(profDir, "node_modules", "sandbar-workbench"));
     const want = realpathSync(fakeLaneWb);
     if (real !== want) throw new Error(`sandbar-workbench 软链未指向泳道：${real}（期望 ${want}）`);
-    console.log("[capture-lane] selftest 3/6 绿：临时 profile 组装（workbench 软链指向泳道）");
+    console.log("[capture-lane] selftest 3/7 绿：临时 profile 组装（workbench 软链指向泳道）");
     // 4. preset 物化三态（t260901-02）：真源实体落地 / 畸形源拒跑 / 缺失源拒跑。
     //    全部用临时桩目录，不依赖真源在（CI/新机器可跑）；env 覆盖路径不在此测
     //    （materializePresets 直接收参，main() 的 SANDBAR_CAPTURE_PRESET_SOURCE 由基线测）。
@@ -505,7 +645,7 @@ async function selftest() {
       const p = path.join(matDst, f);
       if (!existsSync(p) || statSync(p).isSymbolicLink()) throw new Error(`物化后 ${f} 应为实体文件`);
     }
-    console.log("[capture-lane] selftest 4/6 绿：preset 物化三态（缺失/畸形拒跑、完整源实体落地）");
+    console.log("[capture-lane] selftest 4/7 绿：preset 物化三态（缺失/畸形拒跑、完整源实体落地）");
     // 5/6（t260901-24）：状态注入 loadFixtures 三态——真 fixture 包放行；缺目录/坏 JSON/
     // 缺 _fixture 标记/软链桩各自人话拒因。真包路径=本目录 fixtures/（与脚本同树，
     // 泳道 worktree 也带同一份）；畸形桩全用临时目录，不污染真包。
@@ -540,7 +680,7 @@ async function selftest() {
     rFx = null;
     try { cap.loadFixtures(linkProbe); } catch (e) { rFx = e.message; }
     if (!rFx || !/软链/.test(rFx)) throw new Error("软链 fixture 应拒跑");
-    console.log("[capture-lane] selftest 5/6 绿：状态注入 loadFixtures 三态（真包放行；缺目录/坏 JSON/缺标记/软链各自人话拒因）");
+    console.log("[capture-lane] selftest 5/7 绿：状态注入 loadFixtures 三态（真包放行；缺目录/坏 JSON/缺标记/软链各自人话拒因）");
     // 6/6（t260901-24）：routeDecision 只拦 GET（R3）+ query 不参与匹配（C3）+
     // contentType 恒 application/json（R4）。
     const realFx2 = await cap.loadFixtures(path.join(HERE, "fixtures"));
@@ -555,7 +695,50 @@ async function selftest() {
     }
     const proj = cap.routeDecision("GET", "http://x/sandbar-workbench/api/wf/projects", realFx2);
     if (!proj.passthrough) throw new Error("projects 端点应放行走真数据");
-    console.log("[capture-lane] selftest 6/6 绿：routeDecision（GET 命中/查询串不影响/POST 恒放行/contentType 硬条款）");
+    console.log("[capture-lane] selftest 6/7 绿：routeDecision（GET 命中/查询串不影响/POST 恒放行/contentType 硬条款）");
+    // 7/7（t261005-16，KI-204 ③）：台内注册表——正常构造落齐三件（.migrated 标记 /
+    // project.yaml schema v1 / 工作区目录），畸形输入（project.yaml 落点位已有同名
+    // 目录）fail-loud 具名拒因，不静默吞。
+    const benchTmp = path.join(tmp, "bench-home");
+    await mkdir(benchTmp, { recursive: true });
+    const benchRoot = await buildBenchRegistry(benchTmp);
+    if (!statSync(path.join(benchRoot, ".migrated")).isFile()) {
+      throw new Error("台内注册表缺 .migrated 标记（装载器会重播历史种子）");
+    }
+    const benchYaml = readFileSync(path.join(benchRoot, BENCH_PROJECT_KEY, "project.yaml"), "utf8");
+    // 契约①a schema v1：顶层 `schema:` + `project:` 列表（顶层平铺 key:/name:/dirs:
+    // 会被两侧解析器隔离——t261005-16 第一轮仲裁实锤，此处钉死形状防回退）。
+    for (const line of ["schema: v1", "project:", `  - key: ${BENCH_PROJECT_KEY}`,
+                        "    name: Capture Bench", "    dirs:"]) {
+      if (!benchYaml.includes(line)) throw new Error(`台内 project.yaml 缺字段行：${line}（got: ${JSON.stringify(benchYaml)}）`);
+    }
+    const benchWs = benchYaml.match(/^    dirs:\n\s+-\s+(.+)$/m)?.[1];
+    if (!benchWs || !statSync(benchWs).isDirectory()) {
+      throw new Error(`台内工作区目录不存在：${benchWs}（建会话必 ENOENT）`);
+    }
+    const benchClash = path.join(benchTmp, "clash-home");
+    await mkdir(path.join(benchClash, "bench-registry", "projects", BENCH_PROJECT_KEY, "project.yaml"),
+      { recursive: true });
+    let rBench = null;
+    try { await buildBenchRegistry(benchClash); } catch (e) { rBench = e.message; }
+    if (!rBench) throw new Error("project.yaml 落点位是目录时应 fail-loud，不得静默");
+    // 舞台两路分离（t261005-16 仲裁第三轮）：workspaceDir（宿主 mkdir）与
+    // declaredWorkspacePath（写进 yaml、容器视角）分离——声明路径必须是挂载树内
+    // 容器可创建路径，宿主临时绝对路径＝死目录病灶重演。
+    const benchStage = path.join(tmp, "bench-stage-home");
+    const stageRoot = await buildBenchRegistry(benchStage, {
+      workspaceDir: path.join(benchStage, "bench-registry", "workspace"),
+      declaredWorkspacePath: "/fixtures/workspace",
+    });
+    const stageYaml = readFileSync(path.join(stageRoot, BENCH_PROJECT_KEY, "project.yaml"), "utf8");
+    const stageWs = stageYaml.match(/^    dirs:\n\s+-\s+(.+)$/m)?.[1];
+    if (stageWs !== "/fixtures/workspace") {
+      throw new Error(`舞台通路应声明容器内路径 /fixtures/workspace（got: ${stageWs}）——宿主路径在容器内必死`);
+    }
+    if (!statSync(path.join(benchStage, "bench-registry", "workspace")).isDirectory()) {
+      throw new Error("舞台通路宿主工作区目录未真实创建");
+    }
+    console.log(`[capture-lane] selftest 7/7 绿：台内注册表（.migrated 标记 + ${BENCH_PROJECT_KEY} schema v1 + 工作区在场；落点位被占 fail-loud；舞台两路分离 declare=/fixtures/workspace）`);
     console.log("[capture-lane] selftest 全绿（未 boot 控制台/浏览器）");
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});

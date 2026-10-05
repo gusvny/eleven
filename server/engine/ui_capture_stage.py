@@ -165,6 +165,62 @@ def stage_dead_marker(stderr_text: str) -> bool:
     return _DEAD_MARKER in str(stderr_text or "")
 
 
+# Host-side temp dirs holding the bench registry (project -> dir, t261005-16):
+# created by up_stage, reclaimed by down_stage; after a successful up the
+# container bind mount still reads the dir, so it must live until teardown.
+_BENCH_TMP_DIRS: Dict[str, str] = {}
+
+# Same value as capture-lane.mjs BENCH_PROJECT_KEY (the shape true source is the
+# JS side; the two comment blocks point at each other).
+_BENCH_PROJECT_KEY = "capture-bench"
+
+
+def _write_bench_registry(fixtures_dir: str) -> str:
+    """Write the bench registry (a Python mirror; the shape true source is
+    capture-lane.mjs buildBenchRegistry — schema v1 top-level `project:` LIST
+    form; never fall back to a flat top-level key:/name:/dirs: block, both
+    parsers quarantine that shape, t261005-16 arbitrate round 1). Returns the
+    registry root (the projects/ dir under the --fixtures-dir mount point,
+    i.e. /fixtures/projects inside the container).
+
+    The workspace is created INSIDE the mounted tree and declared as its
+    container path (/fixtures/workspace, t261005-16 arbitrate round 3): the
+    container can only see/create paths under the mount — declaring the host
+    temp absolute path re-creates the KI-204 dead-dir defect one path away."""
+    root = os.path.join(fixtures_dir, "projects")
+    proj = os.path.join(root, _BENCH_PROJECT_KEY)
+    ws = os.path.join(fixtures_dir, "workspace")
+    declared_ws = "/fixtures/workspace"
+    os.makedirs(proj, exist_ok=True)
+    os.makedirs(ws, exist_ok=True)
+    pyaml = os.path.join(proj, "project.yaml")
+    pyaml_text = ("schema: v1\n"
+                  "project:\n"
+                  "  - key: %s\n"
+                  "    name: Capture Bench\n"
+                  "    dirs:\n"
+                  "      - %s\n" % (_BENCH_PROJECT_KEY, declared_ws))
+    fd = os.open(pyaml, os.O_CREAT | os.O_EXCL | os.O_WRONLY)  # occupied target = fail-loud
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(pyaml_text)
+    with open(os.path.join(root, ".migrated"), "x", encoding="utf-8") as fh:
+        fh.write("source: ui_capture_stage bench registry (t261005-16)\n")
+    return root
+
+
+def _cleanup_bench_dir(project: str) -> None:
+    """Reclaim the host bench-registry dir (best-effort: a teardown path must
+    never raise in front of the stage teardown itself)."""
+    import shutil
+    d = _BENCH_TMP_DIRS.pop(str(project), None)
+    if d:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+        except Exception as e:  # noqa: BLE001 — best-effort, named, never blocking
+            log.warning("[_cleanup_bench_dir] bench registry dir reclaim failed for stage %s "
+                        "(left for system tmp cleanup): %s", project, e)
+
+
 # runner 注入面：callable(cmd: List[str], cap_s: float, env_extra: Dict) ->
 #   (returncode: int, stdout: str, stderr: str)。同步实现——活动侧经
 # asyncio.to_thread 调用（子进程阻塞不进事件循环）。
@@ -197,10 +253,35 @@ def up_stage(project: str, *, repo_root: Optional[str] = None,
     cap = float(up_cap) if up_cap is not None else up_cap_s()
     cli = stage_cli_path(repo_root)
     extra = dict(env_extra or {})
-    rc, out, err = run([ "python3", cli, "up", "--project", str(project).strip(),
+    key = str(project).strip()
+    # Bench registry injection (t261005-16, KI-204 acceptance-rework face): with
+    # the compose default SANDBAR_PROJECTS_DIR=/nonexistent, the loader replays
+    # the in-repo legacy seed (the retired project with its dead host path) and
+    # session/workspace creation keeps failing with ENOENT — on the production
+    # pathway, since merge_check boots exactly this stage. Same fix shape as the
+    # capture-lane boot-local/docker pathways (shape true source =
+    # buildBenchRegistry; this is the Python mirror): build a registry carrying
+    # the .migrated marker on the host, inject it via --fixtures-dir (mounted at
+    # /fixtures) + SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects (compose passes
+    # it into the container as SANDBAR_PROJECTS_DIR); the loader sees the marker
+    # and skips the seed. The host temp dir is registered in _BENCH_TMP_DIRS and
+    # reclaimed idempotently by down_stage.
+    try:
+        bench_dir = tempfile.mkdtemp(prefix="sandbar-bench-registry-")
+    except OSError as e:
+        raise UiStageEnvError("failed to create the host bench-registry dir (%s) — "
+                              "never silently fall back to a registry-less stage" % e)
+    bench_fixtures = _write_bench_registry(bench_dir)
+    _BENCH_TMP_DIRS[key] = bench_dir
+    rc, out, err = run([ "python3", cli, "up", "--project", key,
                          "--services", str(services or "full"),
-                         "--timeout", str(int(cap)) ],
-                       cap, extra)
+                         "--timeout", str(int(cap)),
+                         "--fixtures-dir", bench_fixtures ],
+                       cap, {**extra, "SANDBAR_TEST_PROJECTS_DIR": "/fixtures/projects"})
+    if rc != 0:
+        # A failed up means no stage is mounted; reclaim the host registry dir
+        # right here (the success path hands it to down_stage).
+        _cleanup_bench_dir(key)
     if rc == _ENV_FAIL_RC:
         named = [ln for ln in err.splitlines() if ln.startswith("STAGE_")]
         raise UiStageEnvError("起台 ENV_FAIL（rc=2）：%s"
@@ -236,6 +317,9 @@ def down_stage(project: str, *, repo_root: Optional[str] = None,
         log.error("[down_stage] 拆台超上限 %ss：%s", cap, e)
         return {"ok": False, "detail": "拆台超上限 %ss：%s" % (cap, e)}
     if rc == 0:
+        # Stage down: the container bind mount no longer reads; reclaim the host
+        # registry dir here (t261005-16).
+        _cleanup_bench_dir(str(project))
         log.info("[down_stage] 台 %s 已拆", project)
         return {"ok": True, "detail": (out.strip().splitlines() or [""])[-1][:200]}
     named = [ln for ln in err.splitlines() if ln.startswith("STAGE_")]

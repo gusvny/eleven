@@ -30,7 +30,9 @@
 //                                  畸形值不会让板面视图静默失效（本清单 env 名错设无告警
 //                                  的同族坑，见上一条教训）。
 //
-// 视图清单（t260829-07 六视图 + 立项单列表；尽力视图失败置非零退出码但不阻断其余）：
+// 视图清单（t260829-07 六视图 + 立项单列表；尽力视图失败置非零退出码但不阻断其余；
+// t261005-16 起另设「具名跳过」：数据缺席类（如新家零立项）跳过不截图、不记失败、
+// 不计退出码，但必须具名可读——尽力失败（渲染/断言故障）与合法空数据两种口径分开）：
 //   console-default.png      hero 落地页（必成视图，失败即整体非零退出）
 //   console-board.png        工单入口（侧栏「工单列表」视图图标）——快门前过板面就绪
 //                            断言（t260910-05）：筛选条在场且（行卡≥1 或 空态在场），
@@ -783,8 +785,15 @@ async function openView(page, title, waitSelector, waitMs = 3000) {
   return `[title="${title}"]`;
 }
 
+/** 具名跳过（t261005-16，仲裁 gen1 修向 (a)）：数据缺席是隔离台/新家的**合法状态**
+ * （新家零票零立项，fixture 注入又是 opt-in、生产 ui_evidence 通路恒无 fixture），
+ * 不是渲染故障——视图据此走「具名跳过」：不截图、不记失败、不计入退出码，但必须
+ * 具名可读（证据闸口径：缺证据要具名，不许静默）。渲染/断言类失败仍走 failures→exit 1。 */
+export class SkipView extends Error {}
+
 /** 新建工单弹层打开态（只开不提交——只读红线降级口径）。需先切到立项单视图且
  * 至少有一个立项可进详情；链路任一步不可达即报错（尽力视图，不阻断其余）。
+ * 立项单列表为空 = 新家合法状态 → SkipView 具名跳过（t261005-16）。
  *
  * 按钮文案真源=epics.tsx:459（宿主令 260925 英文化后＝「＋ New Ticket」，旧文案
  * 「＋ 新建工单」随 t260926 批退役；同批 integration/t260907-08 的同类锚已改）。 */
@@ -794,7 +803,7 @@ async function openNewTicketModal(page) {
   try {
     await chip.waitFor({ state: "visible", timeout: 5000 });
   } catch {
-    throw new Error("立项单列表为空（.wb-ep-code 无行），无法走「详情→＋ New Ticket」链路");
+    throw new SkipView("立项单列表为空（.wb-ep-code 无行）——新家/隔离台零票零立项的合法状态，数据缺席具名跳过（非渲染故障）");
   }
   await forceClick(chip);
   const btn = page.locator(".wb-ep-btn-green", { hasText: "New Ticket" }).first();
@@ -1017,7 +1026,13 @@ async function main() {
     }
     const probe = path.join(args.out, ".selftest-probe");
     await writeFile(probe, "ok");
-    console.log(`[capture] selftest 绿：依赖在位，url=${url}，out=${args.out} 可写，视图数=${VIEWS.length + 3}，板面就绪断言接线身份锁绿（t260910-05）`);
+    // 具名跳过机制形状锁（t261005-16）：SkipView 是 Error 子类（视图循环按
+    // instanceof 分流：跳过不进 failures、不计退出码），导出面在位供场景/审读用。
+    if (!(SkipView.prototype instanceof Error)) {
+      console.error("[capture] selftest 红：SkipView 不是 Error 子类（具名跳过分流失据，t261005-16）");
+      process.exit(3);
+    }
+    console.log(`[capture] selftest 绿：依赖在位，url=${url}，out=${args.out} 可写，视图数=${VIEWS.length + 3}，板面就绪断言接线身份锁绿（t260910-05），具名跳过机制形状绿（t261005-16）`);
     process.exit(0);
   }
 
@@ -1061,6 +1076,7 @@ async function main() {
 
   const shots = [];
   const failures = [];
+  const skipped = [];
   try {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await ctx.newPage();
@@ -1119,6 +1135,13 @@ async function main() {
           await gotoConsole(page, url, timeoutMs).catch(() => {});
         }
       } catch (e) {
+        // 具名跳过（t261005-16）：SkipView=数据缺席的合法台面状态——不截图、
+        // 不记失败、不计退出码，但必须具名可读（缺证据要具名，不许静默）。
+        if (e instanceof SkipView) {
+          skipped.push(`${v.title}：${e.message}`);
+          console.log(`[capture]   视图跳过（具名，数据缺席，非失败）：${v.title}——${e.message}`);
+          continue;
+        }
         // R6 口径（t260901-24）：fixture 视图失败走既有 best-effort 通路（整 run 退出码 1），
         // 但失败行带 FIXTURE-MODE 前缀——审读人据此读作「注入/fixture 数据问题，修 fixture
         // 重拍」，而非「渲染故障」；worker 侧软失败不拦主链语义不变。
@@ -1196,6 +1219,10 @@ async function main() {
   if (failures.length > 0) {
     console.error(`[capture] ${failures.length} 个尽力视图失败：\n  - ${failures.join("\n  - ")}`);
     process.exitCode = 1;
+  }
+  if (skipped.length > 0) {
+    // 具名跳过汇总（t261005-16）：数据缺席不进退出码，但证据缺口要可读可审计。
+    console.log(`[capture] ${skipped.length} 个视图具名跳过（数据缺席，非失败，不计退出码）：\n  - ${skipped.join("\n  - ")}`);
   }
   // 注入态证据自证（t260901-24 R2）：PNG 无法自标——落 manifest（URL→fixture 映射）
   // 供审读人对照哪些端点被注入。写失败只告警不遮蔽截图结果。
