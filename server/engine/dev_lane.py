@@ -171,6 +171,9 @@ with workflow.unsafe.imports_passed_through():
         env_note_for,
         # t260922-18：主同步冲突路由与证据定形（纯函数面，UT 直测）
         main_sync_conflict_route,
+        # t261006-07: the settle-first decision face for a blocked route (pure
+        # function, UT-tested)
+        main_sync_blocked_settle_plan,
         main_sync_note,
         normalize_files_changed,
         normalize_handover_runs,
@@ -278,6 +281,12 @@ INTEG_STALL_PATCH_ID = "t260929-integ-stall-guard"
 # 「永久死锁」降级为「干净重试一次」（上限 MAX_CONFLICT_ROUNDS 仍然封顶）。
 # 同形布尔门：老在途票 history 无此标记 → patched()=False → 旧路径逐字不变。
 MAIN_SYNC_RECOVERY_PATCH_ID = "t260929-main-sync-abort-on-failed-resolve"
+#: t261006-07: settle-first on a blocked route (the auto-escape). Patch-gated
+#: because it ADDS an activity execution on the blocked path — an in-flight
+#: workflow whose history already recorded the bare _blocked at that branch must
+#: replay the old shape verbatim (the counter resets and the text changes are
+#: replay-safe state/wording; only the new activity call needs the gate).
+MAIN_SYNC_SETTLE_FIRST_PATCH_ID = "t261006-07-main-sync-settle-first"
 # 260930（宿主令·nusuyou 需求说明第六条·KI-099 实案）：**未知相位绝不 raise**。
 # 病根两段：① `_auto_rework` 的两条拒绝返回可能是**空串**（`str(meta["stage"] or fallback)`
 # 而 meta['stage'] 为空、fallback 又非法）——旧路径（`_apply_rework`，patched 未激活的
@@ -2438,8 +2447,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         return ui_ctx
 
     # ---------- main flow (direct activity orchestration) ----------
-    async def _main_sync_before_gate(self, conflict_rounds: int,
-                                     prev_conflict_files: List[str],
+    async def _main_sync_before_gate(self,
                                      texts: Optional[Dict[str, str]] = None,
                                      step_id: str = "run_integration_tests",
                                      ) -> Dict[str, Any]:
@@ -2473,7 +2481,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         返回（调用方据此推进主循环，语义与旧内联块逐字一致）：
           `stop` ""=继续跑闸；"blocked"/"rework"=已处置（调用方 `continue`）；
           `phase` 非空=落点相位（`_auto_rework` 给）；`sync_s`=同步活动墙钟秒（计时面）；
-          `conflict_rounds`/`prev_conflict_files`=跨轮反例守卫状态（回填局部量）。
+          the counters live on the instance now (t261006-07): cross-round guard
+          state read/written in place; the receipt no longer returns them.
 
         `texts`=票面/提示文案覆写档（缺省=全车道中文历史原文逐字；轻道传英文以守
         「票面英文」纪律——**机制字面量与命令序列不动**，只换人读的那几句）。
@@ -2544,26 +2553,90 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 break
             if prep.conflict_files:
                 # 走既有消解回路：guard（cap/同批）→ agent 解标记 → settle 代提交
-                conflict_rounds += 1
+                self._conflict_rounds += 1
                 # files_sig 带仓标识：不同仓的同名文件不构成「同批反复冲突」
                 files_sig = sorted("%s:%s" % (_tag, f) for f in prep.conflict_files)
                 _route = main_sync_conflict_route(
-                    conflict_rounds, files_sig, prev_conflict_files,
+                    self._conflict_rounds, files_sig, self._prev_conflict_files,
                     MAX_CONFLICT_ROUNDS)
                 if _route.startswith("blocked:"):
+                    # t261006-07 (R1): the route only reads the index UU shape and
+                    # the agent sandbox cannot write the real .git, so a
+                    # resolved-but-unstaged file face still reads as conflicting —
+                    # run one settle first on a blocked route (its add-before-judge
+                    # IS the file-face judgement): ok = progress, the lane escapes
+                    # on its own (the hand-run worker-activity rescue becomes an
+                    # engine path); failure = hand over with the original route
+                    # text. prep left the scene, so MERGE_HEAD is present.
+                    # Patch-gated (replay safety: the gate adds an activity call to
+                    # a path old histories recorded as a bare _blocked).
+                    if (workflow.patched(MAIN_SYNC_SETTLE_FIRST_PATCH_ID)
+                            and main_sync_blocked_settle_plan(
+                                _route, True) == "settle_first"):
+                        _braw = await workflow.execute_activity(
+                            settle_conflict_resolution,
+                            ConflictSettleArgs(ticket_id=self.ticket_id,
+                                               worktree=_st_wt,
+                                               branch=_st["branch"],
+                                               base_ref="main",
+                                               round_no=self._conflict_rounds),
+                            start_to_close_timeout=SHORT, retry_policy=RETRY)
+                        _bres = _braw if isinstance(_braw, ConflictSettleResult) \
+                            else ConflictSettleResult(
+                                ok=bool(_braw.get("ok")),
+                                commit=str(_braw.get("commit") or ""),
+                                remaining_files=[str(x) for x in
+                                                 (_braw.get("remaining_files") or [])],
+                                error=str(_braw.get("error") or ""))
+                        if _bres.ok:
+                            _esc_round = self._conflict_rounds
+                            # Observability (review note 3): an auto-escape must
+                            # carry its own distinct one-line note — timeline and
+                            # arbitration readers must be able to tell "blocked
+                            # route overtaken by a settle" from a normal resolution
+                            # round (tonight's manual rescue was invisible precisely
+                            # because nothing recorded it).
+                            self._log(
+                                "main-sync blocked route overtaken by a successful "
+                                "settle (auto-escape, round %d): %s; merge commit %s"
+                                % (_esc_round, _route.split(":", 1)[1][:200],
+                                   _bres.commit))
+                            self.meta["main_sync"] = {
+                                "mode": "merged", "main_sha": prep.target_sha,
+                                "lane_head": _bres.commit, "scope": _tag,
+                                "detail": "；".join(_sync_outcomes),
+                                "note": "blocked route overtaken by a successful settle "
+                                        "(auto-escape, t261006-07)"}
+                            # Progress = reset (R2): a settle-success round does not
+                            # count toward the cap
+                            self._conflict_rounds = 0
+                            self._prev_conflict_files = []
+                            _sync_phase = self._auto_rework(
+                                "implement",
+                                text("back_to_implement",
+                                     "main-sync conflict resolution completed (round %d), "
+                                     "back to implement to adapt to main changes")
+                                % _esc_round,
+                                who="workflow", fallback=step_id)
+                            _sync_stop = "rework"
+                            break
+                        _route += (" settle re-check: %s" % (
+                            ("conflict-marker residue remains in: %s"
+                             % "、".join(_bres.remaining_files[:10]))
+                            if _bres.remaining_files else (_bres.error or "unknown")))
                     await self._blocked(step_id,
                                         _route.split(":", 1)[1])
                     _sync_stop = "blocked"
                     break
-                prev_conflict_files = files_sig
+                self._prev_conflict_files = files_sig
                 self._log("main sync detected merge conflict (%s, round %d/%d), "
                           "entering the existing resolution loop: %s"
-                          % (_tag, conflict_rounds, MAX_CONFLICT_ROUNDS,
+                          % (_tag, self._conflict_rounds, MAX_CONFLICT_ROUNDS,
                              "、".join(prep.conflict_files)[:200]))
                 self._handoff(step_id,
                               text("resolve_round",
                                    "main-sync conflict resolution round %d (%s): %s")
-                              % (conflict_rounds, _tag,
+                              % (self._conflict_rounds, _tag,
                                  "、".join(prep.conflict_files)[:200]))
                 # 变量名 msolve_ctx（非 solve_ctx）：selfcheck E-1 用
                 # 「_run_agent_step("implement", solve_ctx)」首次出现锚定
@@ -2593,7 +2666,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "git diff --check (leftover conflict markers / whitespace), "
                     "node --check <file> (JS syntax) — never by running the suite. "
                     "Write the result file when done.")
-                    % (conflict_rounds, MAX_CONFLICT_ROUNDS, _tag,
+                    % (self._conflict_rounds, MAX_CONFLICT_ROUNDS, _tag,
                        "\n".join("- %s" % f for f in prep.conflict_files),
                        (prep.merge_output or "(no output)")[:1200],
                        _forbidden_entries_names))
@@ -2605,9 +2678,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         gen=self._gen("implement"))
                     if workflow.patched(MAIN_SYNC_RECOVERY_PATCH_ID):
                         # 260929：先把 merge 复位再转人工（不给下一轮留 UU 死锁）
-                        _why += await self._main_sync_abort(_st_wt, conflict_rounds, T)
-                        prev_conflict_files = []
-                        conflict_rounds = 0
+                        _why += await self._main_sync_abort(_st_wt, self._conflict_rounds, T)
+                        self._prev_conflict_files = []
+                        self._conflict_rounds = 0
                     await self._blocked("implement", _why)
                     _sync_stop = "blocked"
                     break
@@ -2617,11 +2690,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     _why = self._conflict_failed_note(
                         cres,
                         text("agent_failed_fmt", "main-sync conflict resolution round %d: %s"),
-                        conflict_rounds)
+                        self._conflict_rounds)
                     if workflow.patched(MAIN_SYNC_RECOVERY_PATCH_ID):
-                        _why += await self._main_sync_abort(_st_wt, conflict_rounds, T)
-                        prev_conflict_files = []
-                        conflict_rounds = 0
+                        _why += await self._main_sync_abort(_st_wt, self._conflict_rounds, T)
+                        self._prev_conflict_files = []
+                        self._conflict_rounds = 0
                     await self._blocked("implement", _why)
                     _sync_stop = "blocked"
                     break
@@ -2631,7 +2704,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                        worktree=_st_wt,
                                        branch=_st["branch"],
                                        base_ref="main",
-                                       round_no=conflict_rounds),
+                                       round_no=self._conflict_rounds),
                     start_to_close_timeout=SHORT, retry_policy=RETRY)
                 sres = sraw if isinstance(sraw, ConflictSettleResult) \
                     else ConflictSettleResult(
@@ -2649,19 +2722,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         text("settle_unconverged",
                              "main-sync conflict resolution round %d did not converge "
                              "(worker-side commit verification failed), handing over "
-                             "to a human: %s. The worktree is now in a merging state — "
-                             "after resolving conflicts by hand send rework back to "
-                             "implement to continue, or run git merge --abort inside "
-                             "the lane to reset, then send retry_qc for re-verification. "
-                             "The executor's own way out: send this "
-                             "rework(to_stage=implement) directly using the send-back "
-                             "power you already hold, no need to wait for a human"
-                             ) % (conflict_rounds, _why))
+                             "to a human: %s. The worktree is in a merging state. "
+                             "Executable ways out (never run git commands inside the "
+                             "lane from an agent session - the sandbox cannot write "
+                             ".git): (a) send rework(to_stage=implement) - this human "
+                             "signal resets the round counter and a fresh resolution "
+                             "round runs (the worker settles the merge commit); "
+                             "(b) as the operator, reset the half-merged lane with "
+                             "`python3 server/tools/engine_ops.py sync <ticket-id> "
+                             "--abort` (engine venv, operator side), then send retry_qc"
+                             ) % (self._conflict_rounds, _why))
                     _sync_stop = "blocked"
                     break
+                _ok_round = self._conflict_rounds
                 self._log("main-sync conflict resolution round %d committed %s "
                           "(%d files), back to implement to adapt to main changes"
-                          % (conflict_rounds, sres.commit, len(prep.conflict_files)))
+                          % (_ok_round, sres.commit, len(prep.conflict_files)))
+                # Progress = reset (R2/t261006-07): one successful settle is real
+                # progress; the cap counts non-progressing rounds only, and the
+                # same-batch guard still stops a genuinely spinning lane.
+                self._conflict_rounds = 0
+                self._prev_conflict_files = []
                 self.meta["main_sync"] = {
                     "mode": "merged", "main_sha": prep.target_sha,
                     "lane_head": sres.commit, "scope": _tag,
@@ -2674,7 +2755,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     text("back_to_implement",
                          "main-sync conflict resolution completed (round %d), back "
                          "to implement to adapt to main changes")
-                    % conflict_rounds,
+                    % _ok_round,
                     who="workflow", fallback=step_id)
                 _sync_stop = "rework"
                 break
@@ -2685,8 +2766,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             self._log(text("synced_log", "main sync (%s): %s") % (
                 _tag, main_sync_note(self.meta["main_sync"]) or "回执缺证据键（点名）"))
 
-        return {"stop": _sync_stop, "conflict_rounds": conflict_rounds,
-                "prev_conflict_files": prev_conflict_files, "phase": _sync_phase,
+        # t261006-07: the counters are instance state now
+        # (self._conflict_rounds/_prev_conflict_files) so the rework/retry_qc
+        # signal handlers can reset them directly — the receipt no longer carries
+        # these two keys.
+        return {"stop": _sync_stop, "phase": _sync_phase,
                 "sync_s": _sync_s}
 
     @workflow.run
@@ -2768,8 +2852,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         design_ctx = ""                           # context injected into design_integration_tests
         arb_ctx = ""                              # test results produced by run_integration_tests, injected
         ui_ctx = ""  # t260828-09: UI screenshot evidence (produced at the join, consumed by acceptance)
-        conflict_rounds = 0                       # t260826-01: conflict auto-resolution rounds (cap MAX_CONFLICT_ROUNDS)
-        prev_conflict_files: List[str] = []       # last round's conflict files (sorted set comparison)
+        self._conflict_rounds = 0                       # t260826-01: conflict auto-resolution rounds (cap MAX_CONFLICT_ROUNDS)
+        self._prev_conflict_files: List[str] = []       # last round's conflict files (sorted set comparison)
         prev_ctx = ""
         ui_ctx = ""   # t260828-09: UI screenshot evidence list (produced at the join, consumed by the walkthrough)
 
@@ -3316,10 +3400,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # 放宽）、跑闸之前（同轮直线衔接、必重跑）。原内联块逐字搬进 helper——命令
                 # 序列/入参/等待点不变，dev-lane 行为零变化。
                 if workflow.patched(MAIN_SYNC_PATCH_ID):
-                    _ms = await self._main_sync_before_gate(conflict_rounds,
-                                                            prev_conflict_files)
-                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
-                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
+                    _ms = await self._main_sync_before_gate()
                     gate_sync_s += float(_ms.get("sync_s") or 0.0)
                     if _ms.get("phase"):
                         phase = str(_ms["phase"])
@@ -4413,10 +4494,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # blocked（step_id 点名 merge_check），绝不静默跳过同步继续检查。
                 # **判据零改动**：只改被检查的树，merge_check 四项判定一字不放宽。
                 if workflow.patched(MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID):
-                    _ms = await self._main_sync_before_gate(
-                        conflict_rounds, prev_conflict_files, step_id="merge_check")
-                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
-                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
+                    _ms = await self._main_sync_before_gate(step_id="merge_check")
                     if _ms.get("phase"):
                         phase = str(_ms["phase"])
                     if _ms.get("stop"):
@@ -4452,8 +4530,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "exit_code": 0, "checks": mc.checks,
                     "conflict": mc.conflict, "conflict_files": mc.conflict_files})
                 if mc.green:
-                    conflict_rounds = 0
-                    prev_conflict_files = []
+                    self._conflict_rounds = 0
+                    self._prev_conflict_files = []
                     self._finish("merge_check", by="merge_check",
                                  evidence="；".join(c.get("item", "") for c in mc.checks))
                     self._handoff("merge_check", "合并检查四项全绿")
@@ -4481,33 +4559,37 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     continue
                 # ---- conflict-class reds: round counting + loop protection (the blocked
                 #      wording anchors are grep-stable) ----
-                conflict_rounds += 1
+                self._conflict_rounds += 1
                 files_sig = sorted(mc.conflict_files)
                 files_txt = "、".join(files_sig)[:200]
-                if conflict_rounds > MAX_CONFLICT_ROUNDS:
+                if self._conflict_rounds > MAX_CONFLICT_ROUNDS:
                     # t260915-01 ②（A4）：conflict 类转人工的红——首红项（rehearsal）
                     # /conflict_files 结构化，紧邻 _blocked（C6 口径：消解常态路径不写）
                     self._pin_merge_red_detail(
                         mc.checks, mc.conflict_files,
                         disposition="this round = conflict-class red, resolution did not "
                                     "converge in %d rounds (cap %d) → hand over to a human"
-                                    % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS))
+                                    % (self._conflict_rounds - 1, MAX_CONFLICT_ROUNDS))
                     await self._blocked(
                         "merge_check",
                         "conflict resolution did not converge in %d rounds "
                         "(cap %d), handing over to a human: conflicting files %s."
-                        " The executor's own way out (no need to wait for a human): "
-                        "send rework(to_stage=implement); after implement adapts to "
-                        "main it automatically returns to merge_check for "
-                        "re-verification"
-                        % (conflict_rounds - 1, MAX_CONFLICT_ROUNDS, files_txt))
+                        " Executable ways out (never run git commands inside the lane"
+                        " from an agent session - the sandbox cannot write .git):"
+                        " send rework(to_stage=implement) - this human signal resets"
+                        " the round counter and a fresh resolution round runs (the"
+                        " worker settles the merge commit); or, as the operator,"
+                        " reset the half-merged lane with `python3"
+                        " server/tools/engine_ops.py sync <ticket-id> --abort`"
+                        " (engine venv, operator side), then send retry_qc"
+                        % (self._conflict_rounds - 1, MAX_CONFLICT_ROUNDS, files_txt))
                     continue
-                if prev_conflict_files and files_sig == prev_conflict_files:
+                if self._prev_conflict_files and files_sig == self._prev_conflict_files:
                     self._pin_merge_red_detail(
                         mc.checks, mc.conflict_files,
                         disposition="this round = the same file set conflicts 2 rounds in "
                                     "a row (round %d) → hand over to a human"
-                                    % conflict_rounds)
+                                    % self._conflict_rounds)
                     await self._blocked(
                         "merge_check",
                         "the same batch of files keeps conflicting (same set for 2 "
@@ -4516,13 +4598,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         "send rework(to_stage=implement); after implement adapts to "
                         "main it automatically returns to merge_check for "
                         "re-verification"
-                        % (conflict_rounds, files_txt))
+                        % (self._conflict_rounds, files_txt))
                     continue
-                prev_conflict_files = files_sig
+                self._prev_conflict_files = files_sig
                 self._log("merge_check 检出 merge 预演冲突（第 %d/%d 轮），自动打回 implement 消解：%s"
-                          % (conflict_rounds, MAX_CONFLICT_ROUNDS, files_txt))
+                          % (self._conflict_rounds, MAX_CONFLICT_ROUNDS, files_txt))
                 self._handoff("merge_check", "冲突自动消解第 %d 轮：%s"
-                              % (conflict_rounds, files_txt))
+                              % (self._conflict_rounds, files_txt))
                 # (1) the worker runs merge to leave the conflict scene in place (an agent
                 #     sandbox cannot write a real .git)
                 praw = await workflow.execute_activity(
@@ -4540,7 +4622,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     error=str(praw.get("error") or ""))
                 if not prep.ok:
                     await self._blocked("merge_check", "冲突消解准备失败（第 %d 轮）：%s"
-                                        % (conflict_rounds, prep.error or "未知"))
+                                        % (self._conflict_rounds, prep.error or "unknown"))
                     continue
                 if prep.already_clean:
                     self._log("冲突消解 prep：merge 零冲突（竞态兜底），直接回 merge_check 重验")
@@ -4555,7 +4637,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "任务：逐个文件解掉冲突标记，保持两边语义（通常是两边都保留的纯文本贴近，"
                     "t260825-03 同款）；只动冲突文件，不做无关改动；**不要 git commit**"
                     "（你交付结果文件后 worker 会代落盘合并提交）。解完写结果文件交付。"
-                    % (conflict_rounds, MAX_CONFLICT_ROUNDS,
+                    % (self._conflict_rounds, MAX_CONFLICT_ROUNDS,
                        "\n".join("- %s" % f for f in prep.conflict_files),
                        (prep.merge_output or mc.merge_tree_excerpt or "（无输出）")[:1200]))
                 try:
@@ -4571,7 +4653,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     # t260922-18：构造抽 _conflict_failed_note 单点（源码锁字面量/
                     # 调用计数恒 2/5；本站文案逐字不回归）
                     await self._blocked("implement", self._conflict_failed_note(
-                        res, "冲突消解第 %d 轮：%s", conflict_rounds))
+                        res, "conflict resolution round %d: %s", self._conflict_rounds))
                     continue
                 # (3) the worker commits the merge on the agent's behalf (verifying no
                 #     unresolved files remain; the worktree is necessarily dirty during
@@ -4583,7 +4665,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                        worktree=str(self.meta.get("worktree") or ""),
                                        branch=str(self.meta.get("branch") or ""),
                                        base_ref="main",
-                                       round_no=conflict_rounds),
+                                       round_no=self._conflict_rounds),
                     start_to_close_timeout=SHORT, retry_policy=RETRY)
                 sres = sraw if isinstance(sraw, ConflictSettleResult) else ConflictSettleResult(
                     ok=bool(sraw.get("ok")), commit=str(sraw.get("commit") or ""),
@@ -4601,20 +4683,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         "merge_check",
                         "conflict resolution round %d did not converge (worker-side "
                         "commit verification failed), handing over to a human: %s."
-                        " The worktree is now in a merging state — after resolving "
-                        "conflicts by hand send rework back to implement to continue, "
-                        "or run git merge --abort inside the lane to reset, then send "
-                        "retry_qc for re-verification."
-                        " The executor's own way out: send this "
-                        "rework(to_stage=implement) directly using the send-back "
-                        "power you already hold, no need to wait for a human"
-                        % (conflict_rounds, why))
+                        " The worktree is in a merging state. Executable ways out"
+                        " (never run git commands inside the lane from an agent"
+                        " session - the sandbox cannot write .git): (a) send"
+                        " rework(to_stage=implement) - this human signal resets the"
+                        " round counter and a fresh resolution round runs (the worker"
+                        " settles the merge commit); (b) as the operator, reset the"
+                        " half-merged lane with `python3 server/tools/engine_ops.py"
+                        " sync <ticket-id> --abort` (engine venv, operator side),"
+                        " then send retry_qc"
+                        % (self._conflict_rounds, why))
                     continue
                 self._log("conflict resolution round %d committed %s (%d files), "
                           "back to merge_check for re-verification"
-                          % (conflict_rounds, sres.commit, len(prep.conflict_files)))
+                          % (self._conflict_rounds, sres.commit, len(prep.conflict_files)))
                 self._handoff("implement", "conflict resolution round %d committed %s"
-                              % (conflict_rounds, sres.commit))
+                              % (self._conflict_rounds, sres.commit))
+                # Progress = reset (R2/t261006-07): one successful settle is real
+                # progress; the cap counts non-progressing rounds only, and the
+                # same-batch guard still stops a genuinely spinning lane.
+                self._conflict_rounds = 0
+                self._prev_conflict_files = []
                 # (4) the resolution goes straight back to merge_check for re-verification
                 #     (the mechanical gate re-checks the worktree and the dry run)
                 phase = "merge_check"
@@ -4954,13 +5043,25 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                         "rework", str(req.who or ""), "rework"):
             return
         self._rework = req
-        self._log("rework 请求：%s → %s（%s）"
-                  % (req.note, req.target_stage or "缺省目标", req.who))
+        # t261006-07 (R3): a human signal restores the lane to a state where one
+        # more resolve round is allowed — reset the conflict-round counter and the
+        # same-batch guard state. Placed AFTER the cross-project gate passes (a
+        # rejected rework must never silently mutate the guard counters — review
+        # note 2).
+        self._conflict_rounds = 0
+        self._prev_conflict_files = []
+        self._log("rework request: %s -> %s (%s); conflict-round counter reset"
+                  % (req.note, req.target_stage or "(default target)", req.who))
 
     @workflow.signal
     def retry_qc(self, who: str) -> None:
         """Request a re-run of the current step after a blocked."""
         self._retry_token += 1
+        # t261006-07 (R3): same as rework — the retry_qc human signal also resets
+        # the conflict-round counter, giving an over-cap lane the right to one more
+        # resolve round (the third way out of the deadlock).
+        self._conflict_rounds = 0
+        self._prev_conflict_files = []
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",

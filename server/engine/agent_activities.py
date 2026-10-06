@@ -3179,8 +3179,11 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     merge in progress", and any conflict markers the agent failed to clean get
     committed into the branch as if they were content. The only settlement path for a
     mid-merge workspace is settle_conflict_resolution (which also checks for leftover
-    markers); this function skips outright. A normal implement round has no
-    MERGE_HEAD, so its behavior is unchanged.
+    markers); with marker residue present this function still skips outright
+    (t261006-07: with a fully clean file face it instead settles through the shared
+    core `_settle_merge_core` — same gates, same add-before-judge — so a human rework
+    can close a half-merged lane whose agent-side resolution was final). A normal
+    implement round has no MERGE_HEAD, so its behavior is unchanged.
 
     路径闸（t260911-03，仅 path_gate=True 的票生效；False=老票 patch 门保护，行为与
     旧版逐字节一致）：脏清单非空时先过两道闸——阶段路径闸（段 × 允许面，judge_stage_paths）
@@ -3205,7 +3208,36 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         return ""
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], cwd)
     if p.returncode == 0:
-        note = "合并进行中（MERGE_HEAD 在场），代落盘跳过——合并提交由 settle_conflict_resolution 收口"
+        # t261006-07 (mechanism 3 close-out): mid-merge no longer skips
+        # unconditionally. Split two ways by the settle file-face criterion (the
+        # HEAD x MERGE_HEAD merge-file residue scan, existing gitlink gates
+        # included):
+        #   - residue remains -> keep the old guardrail: no add, no commit (marker
+        #     residue is never committed as content); the merge commit still
+        #     belongs to settle_conflict_resolution; return the explanatory note;
+        #   - zero residue (a fully resolved face left UU only because the sandbox
+        #     cannot write .git) -> settle through the shared sync core
+        #     _settle_merge_core — a human rework(to_stage=implement) can now
+        #     really close a half-merged lane (live tickets t261005-06/-10: the
+        #     file faces were long final, yet the UU criterion locked them out).
+        _mh = _settle_merge_core(cwd, ticket_id, 0)
+        if _mh.ok:
+            note = ("merge in progress (MERGE_HEAD present) but the file face has "
+                    "zero residue: join settles the merge commit %s (same core as "
+                    "settle_conflict_resolution, t261006-07)" % (_mh.commit or "?"))
+            activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
+            return note
+        if _mh.remaining_files:
+            note = ("merge in progress (MERGE_HEAD present) with conflict-marker "
+                    "residue in %s — settle skipped (residue is never committed as "
+                    "content); the merge commit is settle_conflict_resolution's to "
+                    "close" % ", ".join(_mh.remaining_files[:5]))
+            activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
+            return note
+        note = ("merge in progress (MERGE_HEAD present) but the file-face judgement "
+                "could not land (%s) — settle skipped; the merge commit is "
+                "settle_conflict_resolution's to close"
+                % (_mh.error or "unknown")[:160])
         activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
         return note
     notes: List[str] = []
@@ -5612,7 +5644,23 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
         return ConflictSettleResult(ok=True, commit="", error="", remaining_files=[])
     # No MERGE_HEAD = no merge in progress (the agent mistook ordinary workspace
     # changes for conflicts, or prep's merge left nothing behind) — report honestly,
-    # never fake a merge commit
+    # never fake a merge commit. The whole non-abort path lives in the sync core
+    # _settle_merge_core (t261006-07: the join-side mid-merge guard shares the same
+    # single implementation — no second add/commit sequence may appear).
+    return _settle_merge_core(wt, args.ticket_id, args.round_no)
+
+
+def _settle_merge_core(wt: Path, ticket_id: str, round_no: int) -> ConflictSettleResult:
+    """Sync core of settle_conflict_resolution (t261006-07 single-implementation
+    discipline): MERGE_HEAD presence check -> the merge-file list -> nested-repo
+    gate (a) -> add -A (stage on the agent's behalf) -> coordination-dir reset ->
+    nested-repo gate (b) -> conflict-marker residue scan -> the merge commit.
+
+    Shared by settle_conflict_resolution (the worker resolution loop's close-out)
+    and _settle_worktree_lane's mid-merge branch (the join close-out, t261006-07:
+    no longer an unconditional skip on a clean face) — the two sites must never
+    carry a second copy of the add/commit sequence. Sync function; callers do
+    their own logging."""
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
     if p.returncode != 0:
         return ConflictSettleResult(ok=False,
@@ -5670,20 +5718,16 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
                 remaining.append(f)
                 break
     if remaining:
-        activity.logger.warning("[%s] 冲突消解 settle：%d 个文件仍有冲突标记残留：%s",
-                                args.ticket_id, len(remaining), "、".join(remaining[:10]))
         return ConflictSettleResult(ok=False, remaining_files=sorted(remaining))
     msg = ("%s 冲突消解（第 %d 轮）：worker 代落盘合并提交\n\n"
            "agent 解冲突标记、worker 代 commit（沙箱写不了真 .git）"
-           % (args.ticket_id, args.round_no))
+           % (ticket_id, round_no))
     p = _git(["commit", "--no-edit", "-m", msg], wt)
     if p.returncode != 0:
         return ConflictSettleResult(ok=False, error="git commit 失败: %s"
                                     % (p.stderr or p.stdout or "")[-300:])
     head = _git(["rev-parse", "--short", "HEAD"], wt)
     commit = head.stdout.strip() if head.returncode == 0 else ""
-    activity.logger.info("[%s] 冲突消解 settle：合并提交落盘 %s（第 %d 轮）",
-                         args.ticket_id, commit, args.round_no)
     return ConflictSettleResult(ok=True, commit=commit)
 
 

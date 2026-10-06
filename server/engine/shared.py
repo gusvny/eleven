@@ -1853,10 +1853,18 @@ def main_sync_conflict_route(rounds: int, files: List[str], prev_files: List[str
 
     与 merge_check 既有冲突回路同一组防呆语义（cap 轮上限 + 同批文件集合连续两轮相同
     →转人工），cap 由调用方传 MAX_CONFLICT_ROUNDS（真源留在 dev_lane，这里不复制常量）。
-    files/prev_files 由调用方带仓标识（多仓下不同仓的同名文件不构成「同批反复」，
-    review 建议④）。blocked 文案含 grep 稳定锚点：「主同步冲突消解 N 轮未收敛」
-    「同批文件反复冲突」。畸形入参（rounds 非正整数、files 非列表）不抛，按保守方向
-    照常走防呆判（该 blocked 就 blocked，绝不因畸形放行）。"""
+    files/prev_files are repo-tagged by the caller (the same file name in two
+    repos is not a "same batch" repeat, review note (4)). The blocked texts carry
+    the grep-stable anchors (the over-cap sentence / the same-batch sentence).
+    t261006-07 (R4/R5): blocked texts name only EXECUTABLE exits — (a) rework
+    (to_stage=implement) (a human signal resets the round counter; the worker
+    settles the next resolution round's merge commit); (b) the named operator
+    entry `server/tools/engine_ops.py sync <ticket-id> --abort` (engine venv,
+    operator side; the agent sandbox cannot write .git, so no text may assign an
+    in-lane git command to an agent).
+    Malformed inputs (rounds not a positive int, files not a list) never raise:
+    they take the conservative direction (blocked when blocked is due, never a
+    silent pass). """
     try:
         rounds_i = int(rounds)
         cap_i = int(cap)
@@ -1865,15 +1873,51 @@ def main_sync_conflict_route(rounds: int, files: List[str], prev_files: List[str
     files_sig = sorted(str(f) for f in (files if isinstance(files, (list, tuple)) else []))
     prev_sig = sorted(str(f) for f in (prev_files if isinstance(prev_files, (list, tuple)) else []))
     files_txt = ", ".join(files_sig)[:200]
+    # t261006-07: the two executable exits (rework resets the counter /
+    # engine_ops sync --abort operator reset), assembled at this single point —
+    # both blocked texts share it, no second copy.
+    _exits = (" Executable ways out: (a) send rework(to_stage=implement) - this human "
+              "signal resets the round counter and a fresh resolution round runs (the "
+              "worker settles the merge commit); (b) as the operator, reset the "
+              "half-merged lane with `python3 server/tools/engine_ops.py sync "
+              "<ticket-id> --abort` (engine venv, operator side - never inside the "
+              "agent sandbox; the sandbox cannot write .git), then send retry_qc.")
     if rounds_i > cap_i:
         return ("blocked:main-sync conflict resolution did not converge in %d rounds "
-                "(cap %d); needs human handling: conflicting files %s"
-                % (rounds_i - 1, cap_i, files_txt))
+                "(cap %d); needs human handling: conflicting files %s.%s"
+                % (rounds_i - 1, cap_i, files_txt, _exits))
     if prev_sig and files_sig == prev_sig:
         return ("blocked:main-sync keeps conflicting on the same batch of files (same set "
-                "for 2 consecutive rounds, round %d); needs human handling: %s"
-                % (rounds_i, files_txt))
+                "for 2 consecutive rounds, round %d); needs human handling: %s.%s"
+                % (rounds_i, files_txt, _exits))
     return "resolve"
+
+
+def main_sync_blocked_settle_plan(route: Any, merge_in_progress: Any) -> str:
+    """t261006-07 (R1): the "settle first" decision face consumed by the dev_lane
+    main-sync sub-loop after the route says blocked and before a real handover
+    (pure function).
+
+    Background: the route only reads the index UU shape (prep.conflict_files),
+    while the agent sandbox cannot write the real .git — a resolved-but-unstaged
+    file face still reads as conflicting. settle_conflict_resolution's
+    add-before-judge IS the file-face judgement. So when the route blocks and
+    MERGE_HEAD is present, run one settle first: ok = progress (the face was
+    already resolved; the lane escapes on its own); failure = hand over.
+
+    Decision rule (review note 1: malformed inputs in one single item, stated
+    once):
+      - route not a str / empty / not starting with "blocked:" -> "block" (an
+        unparsable reason never triggers a settle on the lane's behalf);
+      - merge_in_progress not a bool or False -> "block" (no merge in progress =
+        nothing to close out);
+      - otherwise (blocked:* and MERGE_HEAD present) -> "settle_first".
+    """
+    if not isinstance(route, str) or not route.startswith("blocked:"):
+        return "block"
+    if not isinstance(merge_in_progress, bool) or not merge_in_progress:
+        return "block"
+    return "settle_first"
 
 
 def main_sync_note(receipt: Any) -> str:

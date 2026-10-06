@@ -309,8 +309,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
             "Main sync conflict resolution round %d did not converge (the worker's settle "
             "check failed): %s. The workspace is mid-merge. The executor can settle this: "
             "send rework(to_stage=implement). The implement stage resolves the conflict "
-            "markers, then the gate re-runs. A human has to run git merge --abort in the "
-            "lane if a reset is needed; send retry_qc after that reset"),
+            "markers, then the gate re-runs. An operator reset goes through "
+            "`python3 server/tools/engine_ops.py sync <ticket-id> --abort` (engine "
+            "venv, operator side - never inside the lane from an agent session); "
+            "send retry_qc after that reset"),
         "back_to_implement": ("Main sync conflict resolved (round %d) — back to implement to "
                               "adapt to the main changes"),
         "synced_log": "main sync (%s): %s",
@@ -1284,8 +1286,12 @@ class LightLaneWorkflow(DevLaneWorkflow):
         prev_red_names: List[str] = []    # 最近一轮红名（下一轮快反馈面来源）
         gate_rounds = 0                   # 本 attempt 内机器闸轮次（每跑一趟 +1）
         # 闸前主同步的跨轮反例守卫状态（与 dev-lane 同名同义；机制在共享 helper 里）
-        conflict_rounds = 0               # 冲突消解轮次（上限 MAX_CONFLICT_ROUNDS）
-        prev_conflict_files: List[str] = []   # 上一轮冲突文件签名（同批反复冲突守卫）
+        # t261006-07: the counters are instance state (same names as dev_lane) so
+        # the rework/retry_qc signal handlers (inherited from DevLaneWorkflow) can
+        # reset them directly — an over-cap lane becomes resumable by a human
+        # signal.
+        self._conflict_rounds = 0               # conflict-resolution rounds (cap MAX_CONFLICT_ROUNDS)
+        self._prev_conflict_files: List[str] = []   # last round's conflict-file signature (same-batch guard)
 
         while phase != "done":
             # 段间暂停门（t260908-01 通用骨架，本类只接线）：当前段（含在飞活动）
@@ -1387,10 +1393,7 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 # 任何理由（红仍红、拦仍拦）。
                 if workflow.patched(LIGHT_MAIN_SYNC_PATCH_ID):
                     _ms = await self._main_sync_before_gate(
-                        conflict_rounds, prev_conflict_files,
                         texts=self.LIGHT_MAIN_SYNC_TEXTS)
-                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
-                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
                     if _ms.get("phase"):
                         phase = str(_ms["phase"])
                     if _ms.get("stop"):
@@ -1527,10 +1530,7 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 # （step_id 点名 merge_check），绝不静默跳过同步继续检查。判据零改动。
                 if workflow.patched(MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID):
                     _ms = await self._main_sync_before_gate(
-                        conflict_rounds, prev_conflict_files,
                         texts=self.LIGHT_MAIN_SYNC_TEXTS, step_id="merge_check")
-                    conflict_rounds = int(_ms.get("conflict_rounds") or 0)
-                    prev_conflict_files = list(_ms.get("prev_conflict_files") or [])
                     if _ms.get("phase"):
                         phase = str(_ms["phase"])
                     if _ms.get("stop"):

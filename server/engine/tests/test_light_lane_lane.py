@@ -1067,11 +1067,15 @@ def test_light_lane_syncs_main_before_the_gate_via_the_shared_helper():
     assert "texts=self.LIGHT_MAIN_SYNC_TEXTS" in block, "轻道票面英文档没接上"
     assert light_lane.LIGHT_MAIN_SYNC_PATCH_ID == "light-lane-main-sync-v1"
     assert "async def _main_sync_before_gate" in DEV_SRC, "共享机制不在（dev-lane 那份）"
-    # 机制由 helper 给：轻道侧只做「回填计数/落点相位/stop 处置」
-    for frag in ('conflict_rounds = int(_ms.get("conflict_rounds") or 0)',
-                 'prev_conflict_files = list(_ms.get("prev_conflict_files") or [])',
-                 'if _ms.get("stop"):'):
-        assert frag in block, frag
+    # t261006-07: the counters are instance state (the helper reads/writes
+    # self._conflict_rounds/_prev_conflict_files directly; rework/retry_qc reset
+    # them); the light side only handles landing phase/stop, and run() initializes
+    # the same-named instance slots.
+    assert 'if _ms.get("stop"):' in block
+    for frag in ("self._conflict_rounds = 0",
+                 "self._prev_conflict_files: List[str] = []"):
+        assert frag in LIGHT_SRC, ("light run() must initialize the dev_lane-named "
+                                   "instance counter: %s" % frag)
 
 
 def test_light_lane_narrowed_face_empty_is_patch_gated_and_vocab_sourced():
@@ -1154,7 +1158,7 @@ def test_dev_lane_sync_command_sequence_is_verbatim_after_extraction():
     for lit in ("prepare_conflict_resolution,", "ConflictPrepArgs(ticket_id=self.ticket_id,",
                 'base_ref="main"', "start_to_close_timeout=SHORT, retry_policy=RETRY",
                 "settle_conflict_resolution,", "ConflictSettleArgs(ticket_id=self.ticket_id,",
-                "round_no=conflict_rounds)", "MAX_CONFLICT_ROUNDS",
+                "round_no=self._conflict_rounds)", "MAX_CONFLICT_ROUNDS",
                 "main_sync_conflict_route(",
                 # t261002-10：blocked 点名改走 step_id 参数（缺省仍=闸相位原值，
                 # merge_check 入口传 "merge_check"——字面量被参数化，锚随语义更新）

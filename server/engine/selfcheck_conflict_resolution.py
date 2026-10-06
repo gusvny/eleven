@@ -74,6 +74,7 @@ from shared import (  # noqa: E402
     ConflictPrepArgs,
     ConflictSettleArgs,
     MergeCheckArgs,
+    main_sync_conflict_route,
 )
 
 from selfcheck_common import Selfcheck  # noqa: E402  t261001-04：ok() 收敛到唯一定义，输出格式逐字不变
@@ -180,10 +181,17 @@ def _mc_decision(state, mc):
         return "blocked-nonconflict", "merge_check 红灯"
     state["rounds"] += 1
     sig = sorted(mc["conflict_files"])
-    if state["rounds"] > MAX_CONFLICT_ROUNDS:
-        return "blocked-overlimit", "冲突消解 %d 轮未收敛" % (state["rounds"] - 1)
-    if state["prev_files"] and sig == state["prev_files"]:
-        return "blocked-samebatch", "同批文件反复冲突"
+    # t261006-07: blocked details no longer hand-copy the wording — they come from
+    # the shared.main_sync_conflict_route truth source (the D-4 anchor sentence now
+    # tests the actually-emitted text; the old self-invented Chinese detail made
+    # the D-4 anchor vacuous).
+    if state["rounds"] > MAX_CONFLICT_ROUNDS or (
+            state["prev_files"] and sig == state["prev_files"]):
+        _r = main_sync_conflict_route(state["rounds"], sig, state["prev_files"],
+                                      MAX_CONFLICT_ROUNDS)
+        _kind = ("-overlimit" if state["rounds"] > MAX_CONFLICT_ROUNDS
+                 else "-samebatch")
+        return "blocked" + _kind, _r.split(":", 1)[1] if ":" in _r else _r
     state["prev_files"] = sig
     return "resolve", "第 %d 轮" % state["rounds"]
 
@@ -272,8 +280,12 @@ async def _f_checks(env, tmp: Path) -> None:
                                                      face="heal")
     finally:
         agent_activities.REPO_ROOT = orig_root
-    ok("合并进行中" in note and "settle_conflict_resolution" in note,
-       "F-1 护栏生效：返回说明而不代落盘（%s）" % note[:60])
+    # t261006-07: the guardrail note now has two English wordings (residue =
+    # skip; zero residue = the join settles). Every scene in this group carries
+    # residue, so the skip wording is expected; the behavior assertions
+    # (F-2/F-3) are unchanged verbatim.
+    ok("merge in progress" in note and "settle_conflict_resolution" in note,
+       "F-1 guardrail holds: explanatory note, no settle on a residue face (%s)" % note[:60])
     ok(_git(wt, "rev-parse", "--verify", "MERGE_HEAD").returncode == 0,
        "F-2 MERGE_HEAD 未被消耗（仍在场）")
     ok(_git(wt, "rev-parse", "HEAD").stdout.strip() == head_before,
@@ -297,10 +309,11 @@ async def _f_checks(env, tmp: Path) -> None:
                                                      face="heal")
     finally:
         agent_activities.REPO_ROOT = orig_root
-    ok("合并进行中" in note
+    ok("merge in progress" in note
        and _git(wt, "rev-parse", "--verify", "MERGE_HEAD").returncode == 0
        and _git(wt, "rev-parse", "HEAD").stdout.strip() == head_before,
-       "F-5 串测：自动代落盘被护栏跳过（无 commit、MERGE_HEAD 在场）")
+       "F-5 chain: the auto-settle is guardrail-skipped on a residue face "
+       "(no commit, MERGE_HEAD present)")
     (wt / "f.txt").write_text("line1\nline2\nLANE-ADD\nMAIN-ADD\nline3\n", "utf-8")
     s = await env.run(settle_conflict_resolution,
                       ConflictSettleArgs(ticket_id="t-self", worktree=str(wt),
@@ -416,8 +429,8 @@ def main() -> int:
     ok(a == "resolve" and st["rounds"] == 1, "D-1 仅预演冲突红 → resolve（第 1 轮，不 blocked）")
     # D-2 same file batch recurs (same set, different order, M6) -> early blocked
     a, d = _mc_decision(st, {"green": False, "conflict": True, "conflict_files": ["f.txt"]})
-    ok(a == "blocked-samebatch" and "同批文件反复冲突" in d,
-       "D-2 同批文件第 2 轮集合相同 → blocked「同批文件反复冲突」")
+    ok(a == "blocked-samebatch" and "same batch" in d,
+       "D-2 same batch twice -> blocked (route truth-source 'same batch' anchor)")
     # D-3 different files keep resolving until over 3 rounds -> blocked with the round count in the text
     st = {"rounds": 0, "prev_files": []}
     seq = []

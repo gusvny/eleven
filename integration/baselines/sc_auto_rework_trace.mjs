@@ -338,8 +338,8 @@ ok(i_fail >= 0 and i_fin > i_fail and
 # 冲突消解回 implement 再加第 9 个内部点 → 10（9 内部 + 1 壳委托）。
 # 核过「不双落」不变量未破：
 # 真正的 rework 时间线生产者仍恰 1 处（上一条断言），新点在其自己的拒收校验之后。
-ok(len(re.findall(r'self\._auto_rework\(', src)) == 10,
-   '_auto_rework 调用点=10（1 壳委托 + 9 内部自动打回点；第 9 内部点=t260922-18 主同步冲突消解回 implement）')
+ok(len(re.findall(r'self\._auto_rework\(', src)) == 11,
+   '_auto_rework 调用点=11（1 壳委托 + 10 内部自动打回点；第 10 内部点=t261006-07 主同步 blocked 被成功 settle 反超的自动逃生回 implement）')
 
 print('PYDONE pass=%d fail=%d' % (p_pass, p_fail))
 sys.exit(0 if p_fail == 0 else 1)

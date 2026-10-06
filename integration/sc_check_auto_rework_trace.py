@@ -145,7 +145,10 @@ total_calls = len(re.findall(r"phase = self\._auto_rework\(", src))
 # 260923 两票合并入 main（宿主令）后过渡窗 (8, 9) 收敛为定值 9（8=旧、9=现，不留
 # 双口径）。同批：integration/baselines/sc_auto_rework_trace.mjs 的「调用点」
 # 随同一次变更改为 10（9 内部 + 1 壳委托）——两守卫数的是同次变更的两个面。
-ok(total_calls == 9, "自动打回点 9 处（t260922-18 主同步消解回 implement 落地后定值）（实测 %d）" % total_calls)
+# t261006-07（integration 岗位仲裁 gen0，261006）：主同步 blocked 路由被成功 settle
+# 反超的「自动逃生」回 implement（R1 settle-before-block）成为第 10 个内部合法打回点
+# → 9→10。同批：baselines mjs「调用点」10→11（10 内部 + 1 壳委托）。
+ok(total_calls == 10, "自动打回点 10 处（t261006-07 主同步 blocked 被 settle 反超的自动逃生点落地后定值）（实测 %d）" % total_calls)
 # The merge point no longer stuffs self._rework (one rework must not land two timeline records)
 merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,
