@@ -949,3 +949,43 @@ t260907-04 把 SANDBAR_* env、suyou-poc 队列、.suyou/ 协调目录改成 san
 
 另有目录粘滞回落（resolve_dot_dir 规则 2，老泳道 `.suyou/` 整生命周期旧名）不占上表：  # naming-compat
 退役条件 = 旧名泳道存量清零，随规则 2 分支一并删除。
+
+## 18. Delivery rule for changes to the lane activity sequence (t261006-19, KI-212)
+
+**A change to the lane activity sequence must answer, before it is pushed to in-flight tickets,
+what happens to the runs that started before it.** A workflow-code change that adds, removes,
+reorders, or re-conditions an activity (or any state mutation that feeds such a decision —
+e.g. a counter reset that flips the main-sync conflict route) is a replay-surface change: a run
+whose history was recorded under the old code replays on the new code at the next worker
+restart, and any divergence between the replayed command sequence and the recorded history is a
+deterministic `[TMPRL1100] Nondeterminism error` — the workflow task fails forever, the snapshot
+query dies with it, and the ticket freezes while still holding its concurrency slot.
+
+Wrap every such change in a replay guard before merge, and state the guard in the change's
+report. The established family discipline (implementations in `dev_lane.py`):
+`workflow.patched(<new id>)` marker arm plus a frozen time-anchor arm
+(`info().start_time` >= the landing instant of the offending commit — `start_time` is part of
+the history, so one verdict per history forever); a pre-fix history fails both arms and skips
+the new commands verbatim, which IS its exact historical replay. The time-anchor arm is
+mandatory whenever the guarded change already shipped unguarded: runs started after the commit
+but before the guard carry the new commands in history with no marker. Note the write-set
+caveat: `workflow.patched` must never be called inside a `@query` face (SDK read-only
+assertion); signal handlers and run-path sites are legal.
+
+Three-strike ledger behind this rule: KI-201 (t260908 fix, unreplayable), the CL-1 incident
+(t261005-14/-15: the concurrency gate family froze pre-CL-1 runs; guards
+`CONCURRENCY_GATE_PATCH_ID` + `CL1_GATE_LANDED_AT`), and KI-212 (t261006-07: the unguarded
+conflict-counter resets flipped the main-sync route on replay and froze t261005-10 /
+t261006-13; guards `COUNTER_RESET_PATCH_ID` + `E9DAA05_LANDED_AT`).
+
+Pre-restart confirmation: `server/engine/.venv/bin/python server/engine/replay_check.py
+--workflow <ticket-id>` (read-only replay of the live history against local code; it addresses
+workflows by **workflow id, i.e. the ticket id** — a run_id like `01a10a77-…` answers "workflow
+not found"). After a guard lands, restart the affected ticket workers and confirm the tickets
+read and advance with no history loss.
+
+Canonical home note: the knowledge-base mirror of this rule belongs in
+`docs/ops/engine-worker-and-lane-operations.md` (§2 area). That file is outside this ticket's
+write set and the commit sweep cannot land it (observed twice, t261006-19 implement gen0/gen1);
+the mirror copy moves with the next docs-enabled ticket — booked as a debt for the integration
+role. This section is the landed engine face of record.

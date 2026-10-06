@@ -29,6 +29,7 @@ Run: server/engine/.venv/bin/python -B -m pytest \\
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -211,9 +212,18 @@ def _ut_shell(rounds: int = 5, prev=("a:x",)):
     return wl
 
 
-def test_rework_signal_resets_conflict_counter_over_cap():
+def _stub_new_run(monkeypatch):
+    """t261006-19: the counter resets now sit behind COUNTER_RESET_PATCH_ID.
+    These R3 positives describe a run STARTED with the fix present, so the
+    stub marks patched()=True (a new run keeps the R2/R3 semantics; the
+    pre-fix replay face is locked in test_t261006_19_counter_reset_replay.py)."""
+    monkeypatch.setattr(dev_lane, "workflow", SimpleNamespace(patched=lambda pid: True))
+
+
+def test_rework_signal_resets_conflict_counter_over_cap(monkeypatch):
     """R3 positive: the lane sits over the cap (5>3); after the human rework the
     next round must be allowed to resolve instead of blocking again."""
+    _stub_new_run(monkeypatch)
     wl = _ut_shell(rounds=5)
     wl.rework(shared.ReworkRequest(who="host", target_stage="implement", note="human"))
     assert wl._conflict_rounds == 0 and wl._prev_conflict_files == []
@@ -223,7 +233,8 @@ def test_rework_signal_resets_conflict_counter_over_cap():
         "the round after the reset must allow resolve (not hit the cap block again)"
 
 
-def test_retry_qc_signal_resets_conflict_counter_over_cap():
+def test_retry_qc_signal_resets_conflict_counter_over_cap(monkeypatch):
+    _stub_new_run(monkeypatch)
     wl = _ut_shell(rounds=12, prev=["a:x"])
     wl.retry_qc("host")
     assert wl._conflict_rounds == 0 and wl._prev_conflict_files == []

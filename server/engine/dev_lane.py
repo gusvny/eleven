@@ -503,6 +503,71 @@ def _concurrency_gate_active(wf, patch_id: str) -> bool:
         start = start.replace(tzinfo=timezone.utc)
     return start >= CL1_GATE_LANDED_AT
 
+
+#: Patch guard COUNTER_RESET_PATCH_ID (t261006-19; fixes the replay break
+#: KI-212 that the unguarded counter resets of t261006-07 / e9daa05
+#: introduced). e9daa05 added NEW conflict-counter mutations without a
+#: patched() guard: the R3 resets in the ``rework`` / ``retry_qc`` signal
+#: handlers and the R2 resets after a successful settle. A run started
+#: before e9daa05 keeps its over-cap counter on replay (history: route
+#: blocked -> _blocked -> concurrency_renew); a post-e9daa05 worker fires
+#: the signal handler, zeroes the counter, the main-sync conflict route
+#: flips to resolve, and the code schedules ``implement`` where history
+#: says ``concurrency_renew`` -> deterministic TMPRL1100, workflow task
+#: fails forever (live freeze: t261005-10 / t261006-13, snapshots dead).
+#: Marker semantics: "this run was STARTED with the e9daa05 resets
+#: present". A pre-e9daa05 history fails the marker arm -> the resets are
+#: skipped -> skip == the exact historical replay (the pre-fix counters
+#: survive into the route decision). A new instance records the marker
+#: and keeps the R2/R3 semantics.
+#: Replay anchor E9DAA05_LANDED_AT: the squash instant of e9daa05,
+#: 2026-10-06 15:25:58 +0800 (= 07:25:58 UTC, verified via
+#: ``git log -1 --date=iso-strict e9daa05``). Arm 2 (window (b)) is
+#: MANDATORY here, not an optional residual: every run started after this
+#: instant but before this guard lands carries the resets in its history
+#: yet no marker (e9daa05 shipped unguarded), so the marker arm alone
+#: would skip the resets and diverge on the next code swap. The accepted
+#: residual is the deploy lag inside the window (a run started after the
+#: commit instant but before a worker actually loaded e9daa05 carries no
+#: resets yet is classified as reset-carrying); for THIS family the
+#: classification direction is safe (e9daa05 was unguarded, so window
+#: histories carry the resets), same argument as the CL1 anchor, and is
+#: recorded here per the CL1_GATE_LANDED_AT discipline. Family ledger:
+#: KI-201, t261005-14/-15, KI-212 - a change to the lane activity
+#: sequence must answer, before it is pushed to in-flight tickets, what
+#: happens to the runs that started before it.
+COUNTER_RESET_PATCH_ID = "t261006-07-counter-reset-v1"
+E9DAA05_LANDED_AT = datetime(2026, 10, 6, 7, 25, 58, tzinfo=timezone.utc)
+
+
+def _counter_reset_active(wf) -> bool:
+    """Replay-safe verdict for the t261006-07 counter-reset family
+    (t261006-19). Same two-arm shape and fault modes as
+    ``_concurrency_gate_active``: arm 1 marker (patched discipline), arm 2
+    history start_time at/after the frozen anchor. Evaluated live at each
+    use point - no cached verdict survives a wake crossing (KI-061 face);
+    the composite verdict is stable across wake crossings because both
+    inputs are constant per history (the SDK memoizes only the arm-1
+    ``patched()`` verdict). Defensive on shape: a degenerate ``info()``
+    (missing / None / non-datetime start_time, or a raising ``info()``)
+    falls back to the marker verdict and never raises; a naive
+    ``start_time`` is coerced to UTC before comparison. Not a ``@query``
+    face: the four gated sites are two ``@workflow.signal`` handlers and
+    two run-path sites, so calling ``workflow.patched`` here is legal
+    (dev_lane.py query constraint applies to queries only).
+    """
+    if wf.patched(COUNTER_RESET_PATCH_ID):
+        return True
+    try:
+        start = getattr(wf.info(), "start_time", None)
+    except Exception:
+        return False
+    if not isinstance(start, datetime):
+        return False
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start >= E9DAA05_LANDED_AT
+
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
 # Temporal kills the activity first and the subprocess's own timeout recovery never runs.
@@ -2741,8 +2806,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # Progress = reset (R2/t261006-07): one successful settle is real
                 # progress; the cap counts non-progressing rounds only, and the
                 # same-batch guard still stops a genuinely spinning lane.
-                self._conflict_rounds = 0
-                self._prev_conflict_files = []
+                # t261006-19: gated - a pre-e9daa05 history never reset here;
+                # skipping IS the exact historical replay (KI-212).
+                if _counter_reset_active(workflow):
+                    self._conflict_rounds = 0
+                    self._prev_conflict_files = []
                 self.meta["main_sync"] = {
                     "mode": "merged", "main_sha": prep.target_sha,
                     "lane_head": sres.commit, "scope": _tag,
@@ -4702,8 +4770,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # Progress = reset (R2/t261006-07): one successful settle is real
                 # progress; the cap counts non-progressing rounds only, and the
                 # same-batch guard still stops a genuinely spinning lane.
-                self._conflict_rounds = 0
-                self._prev_conflict_files = []
+                # t261006-19: gated - a pre-e9daa05 history never reset here;
+                # skipping IS the exact historical replay (KI-212).
+                if _counter_reset_active(workflow):
+                    self._conflict_rounds = 0
+                    self._prev_conflict_files = []
                 # (4) the resolution goes straight back to merge_check for re-verification
                 #     (the mechanical gate re-checks the worktree and the dry run)
                 phase = "merge_check"
@@ -5048,8 +5119,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # same-batch guard state. Placed AFTER the cross-project gate passes (a
         # rejected rework must never silently mutate the guard counters — review
         # note 2).
-        self._conflict_rounds = 0
-        self._prev_conflict_files = []
+        # t261006-19: gated - a pre-e9daa05 history's rework signal never reset
+        # the counters; skipping keeps the route decision identical on replay
+        # (the KI-212 freeze face: history renew vs code implement).
+        if _counter_reset_active(workflow):
+            self._conflict_rounds = 0
+            self._prev_conflict_files = []
         self._log("rework request: %s -> %s (%s); conflict-round counter reset"
                   % (req.note, req.target_stage or "(default target)", req.who))
 
@@ -5060,8 +5135,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # t261006-07 (R3): same as rework — the retry_qc human signal also resets
         # the conflict-round counter, giving an over-cap lane the right to one more
         # resolve round (the third way out of the deadlock).
-        self._conflict_rounds = 0
-        self._prev_conflict_files = []
+        # t261006-19: gated - same replay discipline as the rework handler (KI-212).
+        if _counter_reset_active(workflow):
+            self._conflict_rounds = 0
+            self._prev_conflict_files = []
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
