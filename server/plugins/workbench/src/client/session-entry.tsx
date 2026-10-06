@@ -76,6 +76,10 @@ import {
   subscribeLedger,
   getLedgerSnapshot,
   persistLedger,
+  // UI-5: register into the per-project session ledger file (sessions.json
+  // is the source of truth; a failure throws and the caller digests it as an
+  // inline notice - a registration failure is never silent).
+  pushSessionEntry,
 } from './session-ledger-store.ts'
 // 「最近关闭」列表共享 store：模块级单例（t260904-01 D1 修复）。↺ 恢复菜单已
 // 随 R8 顶部行退役（无 UI 消费面）；closed 数据保留，仅作 nextProjectSeq 防撞
@@ -472,6 +476,15 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
             seq: entry.seq,
             lastOpenedAt: Date.now(),
           }))
+          // UI-5: the blank-rebind path registers into the project file the
+          // same way (new id replaces the old in the local cache; the server
+          // merge is id-union, so the old id's stale file entry is kept - a
+          // declared non-goal, not cleaned here).
+          try {
+            await pushSessionEntry({ id: staged, project: entry.project, cwd: entry.cwd, title: entry.title, lastOpenedAt: Date.now() })
+          } catch (err) {
+            console.error('[workbench] rebinding the session into the project ledger file failed (the local entry still works):', err)
+          }
         }
         return
       }
@@ -544,6 +557,17 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
         lastOpenedAt: Date.now(),
         seq,
       }))
+      // UI-5 (t261005-06): register into the per-project session ledger file
+      // (sessions.json is the source of truth). Failure = inline notice +
+      // console trace; the local ledger entry is not rolled back (the cache
+      // and the file diverge briefly and converge on the next fetchProjectLedger
+      // - declared behavior); session creation is unaffected.
+      try {
+        await pushSessionEntry({ id: staged, project: pk, cwd: pd ?? '', lastOpenedAt: Date.now() })
+      } catch (err) {
+        console.error('[workbench] registering the session into the project ledger file failed (the session was created; the local entry works):', err)
+        notify('Session could not be registered into the project ledger file (see the console); the session was created normally', pk)
+      }
       // 会话开局 charter 注入（t260904-07）：登记完成后，仅当 staged 是 blank
       // 新会话时恰一次注入（守卫与失败路径全在 injectSessionCharter 内就地
       // 消化：blank 判定 + prompt 前 TOCTOU 复核 + 不冒泡外层 catch 不回滚

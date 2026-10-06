@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 216,
-      "scenarios": 532
+      "scenarios": 534
     },
     "vocab": [
       "behaviour",
@@ -3748,6 +3748,16 @@
     "integration/t261005-09/sc_session_handle_contract.mjs": {
       "anchor": "contract",
       "note": "UI-1 session handle public contract: first-4-hex derivation, collision ladder to the tail form, malformed-input no-throw, purity, executor constant single source, client single-source import",
+      "sync_path": ""
+    },
+    "integration/t261005-06/sc_sessions_project_file_journey.mjs": {
+      "anchor": "contract",
+      "note": "UI-5 data face: sessions.json round-trip, hostile-file tolerance, refusal atomicity, id-union merge, executor grants merge, short codes, one-shot migration (contract anchors on session-ledger-file.ts / session-handles.ts)",
+      "sync_path": ""
+    },
+    "integration/t261005-06/sc_chat_band_and_two_entrances.mjs": {
+      "anchor": "behaviour",
+      "note": "UI-5 UI face: identity band channel switch, handle labels, both §2.6 entrances, executor row, zero-residue lifecycle",
       "sync_path": ""
     }
   }

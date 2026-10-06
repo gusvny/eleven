@@ -33,18 +33,25 @@
  * data-wb-psess-confirm-ok / -confirm-cancel（确认/取消）、
  * data-wb-psess-notice（行内失败提示）。零 CSS 类名匹配纪律（自有 .wb-psess-*
  * 前缀，与出厂类名零交叉）。
+ *
+ * UI-5 (t261005-06): the tab's main label is the session-handle short code
+ * (seq stays history-only); the executor session (fixed handle executor)
+ * enters this row's data through the session-ledger-file grants-merge door
+ * (derived display; the grants file stays the single source of who runs).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pickProjectTabs } from '../shared/sessions.ts'
 import type { OpenedEntry, TitleRowLike } from '../shared/sessions.ts'
-// UI-1 (t261005-09): session handles — short codes replace the numeric seq as the
-// visible reference (design source: 261004 chat-identity-and-session-handles note,
-// section 2.3, Chinese-named file in notes/discussions/). The seq
-// stays in tooltips/history only. The fixed `executor` handle is NOT applied here:
-// no console face marks a session as the executor session yet (that face is
-// `<projects_root>/<key>/sessions.json`, epic item UI-5) — we do not guess locally.
+// Session handles, composed union of both landed intents:
+//   - UI-1 (t261005-09, main): the display fallback derives the short code from
+//     the session id (sessionHandle; beyond-6 tail fallback; seq stays in
+//     tooltips/history only) — used when no ledger handle exists yet;
+//   - UI-5 (t261005-06, this lane): an assigned handle from the per-project
+//     sessions.json face wins over the derivation (the fixed `executor` handle
+//     arrives exactly through that face — the grants-merge door — so a session
+//     is never guessed to be the executor locally).
 import { sessionHandle } from '../shared/session-handle.ts'
 // 项目色（票② R7）：确定性色板 + hex→rgba 展开（hover 淡底，避免 color-mix 赌注）。
 import { projectColor } from '../shared/project-color.ts'
@@ -122,6 +129,9 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   /* gen8：同上，回归 45% 锁定派生（同 t260904-05 契约）。 */
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
+/* Session-row project badge (UI-5, color channel only; shapes belong to UI-4): an 8px square in the project color, inline in the tab. */
+.wb-psess-dot { width:8px; height:8px; flex:none; border-radius:2px;
+  background:var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
   font-size:9px; line-height:1; border:none; border-radius:3px; background:none;
@@ -161,20 +171,25 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
     () => pickProjectTabs(ledger, { project: projectKey, current, byId }),
     [ledger, projectKey, current, byId],
   )
-
-  // UI-1 (t261005-09): handle per tab, deduped within this project — derived in
-  // registration order (tabs are seq-ascending), each tab excluding the codes
-  // already assigned to earlier tabs. Deterministic for a given ledger state.
-  const handles = useMemo(() => {
-    const map = new Map<string, string>()
-    const assigned: string[] = []
+  // Handle map, composed (UI-5 truth over UI-1 derivation): per tab, an
+  // assigned handle from the ledger (sessions.json face; the fixed `executor`
+  // included) wins; otherwise the display code is main's PLAIN derivation
+  // `sessionHandle(t.id, [])` — empty taken set, exactly UI-1's landed
+  // contract (the t261005-09 journey pins the rendered text to
+  // `sessionHandle(id, [])` verbatim, so the derivation must not see a taken
+  // set and must not extend codes). Only an entry that actually carries a
+  // face-assigned handle renders something other than the plain derivation.
+  const handleOf = useMemo(() => {
+    const m = new Map<string, string>()
     for (const t of tabs) {
-      const h = sessionHandle(t.id, assigned)
-      map.set(t.id, h)
-      assigned.push(h)
+      const e = ledger.find(x => x && typeof x.id === 'string' && x.project === projectKey && x.id === t.id)
+      const h = e && typeof e.handle === 'string' && e.handle !== ''
+        ? e.handle
+        : sessionHandle(t.id, [])
+      m.set(t.id, h)
     }
-    return map
-  }, [tabs])
+    return m
+  }, [ledger, projectKey, tabs])
 
   /* ── 确认弹层（R5）：confirmId=等确认的 tab；弹层 position:fixed（见文件头注）── */
   const [confirmId, setConfirmId] = useState<string | null>(null)
@@ -267,7 +282,7 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
           data-active={t.active}
           role="button"
           tabIndex={0}
-          title={`${projectName} session ${t.seq} (${handles.get(t.id) ?? ''}): ${t.title}\n${t.id}`}
+          title={`${projectName} session #${handleOf.get(t.id) || t.seq} (seq ${t.seq}): ${t.title}\n${t.id}`}
           onClick={() => { setConfirmId(null); onOpen(t.id) }}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -277,13 +292,17 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
             }
           }}
         >
-          <span className="wb-psess-num">{handles.get(t.id) ?? ''}</span>
+          <span className="wb-psess-num" data-wb-psess-handle="">{handleOf.get(t.id) || t.seq}</span>
+          {/* Project badge color block (design 2.5, the session-row badge's
+              minimal face: color channel only; the shape channel belongs to
+              the UI-4 project-identity ticket). */}
+          <span aria-hidden className="wb-psess-dot" data-wb-psess-dot="" />
           <button
             type="button"
             className="wb-psess-close"
             data-wb-psess-close=""
             title="Close this session entry (needs confirmation; session content is not deleted)"
-            aria-label={`Close session entry ${handles.get(t.id) ?? t.seq}`}
+            aria-label={`Close session entry ${handleOf.get(t.id) || t.seq}`}
             onClick={e => { e.stopPropagation(); setConfirmId(t.id) }}
           >×</button>
         </div>
@@ -296,7 +315,7 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
           aria-label="Confirm closing the session entry"
           ref={popRef}
         >
-          <div className="wb-psess-confirm-t">Close session {confirmTab ? handles.get(confirmTab.id) : ''}?</div>
+          <div className="wb-psess-confirm-t">Close session #{handleOf.get(confirmTab.id) || confirmTab.seq}?</div>
           <div className="wb-psess-confirm-d" title={confirmTab.title}>{confirmTab.title}</div>
           <div className="wb-psess-confirm-m">Only the entry is closed; the session content is not deleted.</div>
           <div className="wb-psess-confirm-btns">

@@ -319,7 +319,9 @@ section('S8 项目色贯通（票② R7 拍板 5：+ 钮/激活 tab/组头色点
   ok(row.includes("--wb-psess-color") && row.includes('projectColor(projectKey)'), '+ 钮/激活 tab 项目色：CSS 变量 + projectColor 注入在场')
   ok(row.includes('--wb-psess-hover') && /hexToRgba\(color, 0\.16\)/.test(row), 'hover/淡底 = 项目色 16% 透明展开')
   ok(!row.includes('124,58,237'), '旧紫色 rgba(124,58,237,*) 已替换')
-  ok(sidebar.includes('data-wb-psess-dot') && sidebar.includes('projectColor(g.project.key)'), '组头名前项目色点在场（data-wb-psess-dot）')
+  // Since UI-4 (t261005-05) the group-head dot is the identity badge (colour x
+  // outline x structure from project-identity.ts); the psess-dot anchor stays.
+  ok(sidebar.includes('data-wb-psess-dot') && sidebar.includes('projectBadgeSvg('), '组头名前项目徽标在场（data-wb-psess-dot 锚 + projectBadgeSvg 单源）')
   const lib = readFileSync(libClient, 'utf8')
   ok(lib.includes('--wb-psess-color') && lib.includes('data-wb-psess-dot'), 'lib 产物项目色与色点同步')
 }
@@ -363,6 +365,30 @@ section('S7 D1 修复接线：closed 状态迁模块级共享 store（跨实例�
     'handleNew 续号兜底纳入 closed 号域（BO-1）')
   const lib = readFileSync(libClient, 'utf8')
   ok(lib.includes('persistClosed'), 'lib 产物共享 store 同批在场')
+}
+
+section('S11 UI-5（t261005-06）：句柄标签 + 执行器投影门 + 项目文件登记链')
+{
+  const row = readFileSync(join(here, '..', 'src', 'client', 'project-session-row.tsx'), 'utf8')
+  // Tab main label = the handle short code (data-wb-psess-handle); seq stays only as fallback
+  // Post main-sync union (t261005-09 landed on main): the label is the composed
+  // handle — an assigned sessions.json handle wins (executor included), else the
+  // UI-1 sessionHandle derivation. Both sources must stay in the row.
+  ok(row.includes('data-wb-psess-handle') && row.includes('sessionHandle') && row.includes('e.handle'),
+    'tab 主标签=组合句柄（data-wb-psess-handle；sessions.json 句柄胜，UI-1 sessionHandle 派生兜底）在场')
+  const entry = readFileSync(srcEntry, 'utf8')
+  ok(entry.includes('pushSessionEntry'), 'session-entry：新建/换绑后登记进项目文件（pushSessionEntry）在场')
+  ok(entry.includes('the session was created normally'), '登记失败=行内明示「会话已建」（不静默不谎报）')
+  const store = readFileSync(join(here, '..', 'src', 'client', 'session-ledger-store.ts'), 'utf8')
+  ok(store.includes("/sandbar-workbench/api/wf/sessions"), 'store：host API 路径同源锚（SESSIONS_API_PATH）在场')
+  ok(store.includes('fetchProjectLedger') && store.includes('file-wins'), 'store：file-wins 拉取面在场（localStorage 降级缓存）')
+  const sidebar = readFileSync(join(here, '..', 'src', 'client', 'sidebar.tsx'), 'utf8')
+  ok(sidebar.includes('fetchProjectLedger('), 'sidebar：项目切换/挂载时拉项目文件（R5 新鲜度契约接线）在场')
+  ok(sidebar.includes('setChatProjectBandInfo') && sidebar.includes('displayHandle'),
+    'sidebar：身份带归属+句柄一并下发（setChatProjectBandInfo）在场')
+  const host = readFileSync(join(here, '..', 'src', 'host', 'session-ledger-file.ts'), 'utf8')
+  ok(host.includes('executor-grants.json') && host.includes('executor_sessions'),
+    '执行器可见性=grants 合并门（派生显示，不动工作区索引）在场')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

@@ -24,11 +24,14 @@
 import {
   PROJBAND_ATTR,
   PROJBAND_BASE_CSS,
+  PROJBAND_BAND_CSS,
+  PROJBAND_HANDLE_ATTR,
   applyProjectBand,
   hexToRgba,
   startChatProjectBand,
   startChatProjectBandEffect,
 } from '../src/client/chat-project-band.ts'
+import { projectColor } from '../src/shared/project-color.ts'
 
 let passed = 0
 let failed = 0
@@ -79,7 +82,7 @@ section('A applyProjectBand：设/摘/幂等/畸形/多锚')
   const root = docOf(a)
   ok(applyProjectBand(root, 'suyou') === 1, '设属性：1 节点写动')
   ok(a.getAttribute(PROJBAND_ATTR) === 'suyou', '属性值=project key')
-  ok(a.style._props['--wb-projband-color'] === '#83e76a', 'CSS 变量=projectColor（suyou 恒同色）')
+  ok(a.style._props['--wb-projband-color'] === projectColor('suyou'), 'CSS 变量=projectColor（suyou 恒同色；t261005-05 起 12 色声明板，锚函数不锚具体值）')
   ok(applyProjectBand(root, 'suyou') === 0, '幂等：同值跳过零写动')
   ok(applyProjectBand(root, null) === 1 && a.getAttribute(PROJBAND_ATTR) === null, 'null=摘除（不在册不渲染）')
   ok(applyProjectBand(root, null) === 0, '幂等：无属性时摘除零写动')
@@ -100,6 +103,18 @@ section('A applyProjectBand：设/摘/幂等/畸形/多锚')
   const dirty = { getAttribute: 'not-a-fn' }
   const root4 = docOf(dirty, el('div', { 'data-conversation-scroll': '' }))
   ok(applyProjectBand(root4, 'suyou') === 1, '脏节点（方法缺失）跳过不崩，健康节点照常')
+  // UI-5: handle channel — set / update / idempotent / removed with the key / quote-safe
+  const d1 = el('div', { 'data-conversation-scroll': '' })
+  const root5 = docOf(d1)
+  applyProjectBand(root5, 'sandbar', '09ca')
+  ok(d1.getAttribute(PROJBAND_HANDLE_ATTR) === '09ca', '句柄属性=短码')
+  ok(applyProjectBand(root5, 'sandbar', '09ca') === 0, '句柄幂等：同值零写动')
+  applyProjectBand(root5, 'sandbar', 'e')
+  ok(d1.getAttribute(PROJBAND_HANDLE_ATTR) === 'e', '句柄更新（如 executor 固定名）')
+  applyProjectBand(root5, 'sandbar', 'bad"quote')
+  ok(d1.getAttribute(PROJBAND_HANDLE_ATTR) === null, '句柄含引号=拒设（attr() 注入面免疫）')
+  applyProjectBand(root5, null, '09ca')
+  ok(d1.getAttribute(PROJBAND_ATTR) === null && d1.getAttribute(PROJBAND_HANDLE_ATTR) === null, 'null key=属性与句柄同摘')
 }
 
 section('B hexToRgba')
@@ -124,7 +139,7 @@ section('C start/stop 生命周期（document 桩）')
   try {
     const h = startChatProjectBand({ doc })
     ok(styleNode !== null && styleNode.getAttribute('data-wb-chat-projband-style') === '', 'head 注入自有 style')
-    ok(styleNode.textContent === PROJBAND_BASE_CSS && styleNode.textContent.includes('border-top: 3px solid'), 'style 内容=基础规则（border-top 3px 项目色 + sticky 角标）')
+    ok(styleNode.textContent === (PROJBAND_BASE_CSS + '\n' + PROJBAND_BAND_CSS) && styleNode.textContent.includes('border-top: 3px solid'), 'style 内容=基础规则+身份带规则（border-top 3px 项目色 + sticky 角标 + overlay 带面）')
     h.set('suyou')
     ok(sc.getAttribute(PROJBAND_ATTR) === 'suyou', 'set(key)→属性落锚')
     h.set('chat-20260831-120000-abcd')
@@ -162,6 +177,104 @@ section('D 防重建重设逻辑（scan 重入面）')
   root.body.children = [n2]
   ok(applyProjectBand(root, 'suyou') === 1 && n2.getAttribute(PROJBAND_ATTR) === 'suyou', '重建节点经 scan 重设属性')
   ok(n1.getAttribute(PROJBAND_ATTR) === 'suyou' && !root.body.children.includes(n1), '旧节点引用随重建离场（不残留判定）')
+}
+
+section('E 身份带 overlay（UI-5：§2.1 带面 + Sessions 菜单 + 全终态回收）')
+{
+  const sc = el('div', { 'data-conversation-scroll': '' })
+  const doc = docOf(sc)
+  doc.head.appendChild = () => {}
+  const created = []
+  // Richer element stub: appendChild/querySelector/querySelectorAll/addEventListener/remove
+  function rich(tag) {
+    const node = el(tag)
+    node.children = []
+    node._bySel = {}
+    node.appendChild = (c) => { node.children.push(c); return c }
+    node.querySelector = (sel) => node.children.find(c => sel === '[data-wb-band-menu]' && c.attributes['data-wb-band-menu'] !== undefined)
+      ?? node.children.find(c => sel === '[data-wb-band-sessions]' && c.attributes['data-wb-band-sessions'] !== undefined) ?? null
+    node._listeners = {}
+    node.addEventListener = (k, fn) => { (node._listeners[k] ??= []).push(fn) }
+    node.getBoundingClientRect = () => ({ top: 40, left: 900, width: 420 })
+    node.style.setProperty('top', ''); node.style.setProperty('left', ''); node.style.setProperty('width', '')
+    created.push(node)
+    return node
+  }
+  doc.createElement = (tag) => rich(String(tag))
+  doc.body.appendChild = (c) => {
+    doc.body.children.push(c)
+    doc.body._band = c
+    // 桩的 remove=真离场（父容器 children 剔除），stop 摘除面才有断言意义
+    c.remove = () => { doc.body.children = doc.body.children.filter(x => x !== c); c.removed = true }
+    return c
+  }
+  doc.body._band = null
+  const items = [
+    { id: 'session-09ca0247-1', handle: '09ca', title: 'one', active: true },
+    { id: 'session-beef0000-2', handle: 'executor', title: 'executor', active: false },
+  ]
+  let opened = 0
+  const saved = globalThis.MutationObserver
+  globalThis.MutationObserver = class { constructor() {} observe() {} disconnect() {} }
+  try {
+    const h = startChatProjectBand({
+      doc,
+      getSessions: () => items,
+      onOpenSession: () => {},
+      onNewSession: () => { opened++ },
+    })
+    const band = doc.body._band
+    ok(band !== null, '带面 overlay 挂 body')
+    ok(band.getAttribute('data-hidden') !== null, '锚归属未设=隐藏（不越界）')
+    ok(band.children.some(c => c.className === 'wb-projband-sessions'), 'Sessions 钮在场（有 getSessions 数据源）')
+    h.setInfo({ project: 'sandbar', handle: '09ca' })
+    ok(band.getAttribute('data-hidden') === null, '设归属=可见')
+    ok(band.style._props['--wb-projband-color'] === projectColor('sandbar'), '带面 CSS 变量=projectColor(sandbar)')
+    ok(PROJBAND_BAND_CSS.includes('14%') && PROJBAND_BASE_CSS.match(/--wb-projband-color/g).length >= 3, '三通道（带面/带底/柱洗）全挂 --wb-projband-color 一个变量（§2.1 验收）')
+    ok(band.getAttribute('data-wb-chat-band') === 'sandbar', '带面属性=project key')
+    ok(sc.getAttribute(PROJBAND_HANDLE_ATTR) === '09ca', '句柄属性同帧落锚')
+    // menu render: Sessions click -> menu children filled, + New session present
+    const sessBtn = band.children.find(c => c.className === 'wb-projband-sessions')
+    sessBtn._listeners.click[0]({ stopPropagation() {} })
+    ok(band.getAttribute('data-menu-open') !== null, '点 Sessions=菜单开')
+    const menu = band.querySelector('[data-wb-band-menu]')
+    ok(menu.children.length === items.length + 1, '菜单=会话条目 + New session（执行器条目在场）')
+    ok(menu.children.some(c => c.className.includes('wb-projband-new')), '+ New session 项在场（§2.6 入口 2）')
+    const newBtn = menu.children.find(c => c.className.includes('wb-projband-new'))
+    newBtn._listeners.click[0]({ stopPropagation() {} })
+    ok(opened === 1 && band.getAttribute('data-menu-open') === null, '点 + New session=动作下发 + 菜单收起')
+    h.setInfo({ project: 'suyou', handle: 'e' })
+    ok(band.getAttribute('data-menu-open') === null, '换项目=菜单收起（不错项目数据）')
+    h.set(null)
+    ok(band.getAttribute('data-hidden') !== null, '摘归属=带面隐藏')
+    h.stop()
+    ok(band.removed === true, 'stop：overlay 摘除')
+    ok(doc.body.children.filter(c => c.attributes['data-wb-chat-band'] !== undefined).length === 0, 'stop：body 无带面残留')
+    ok(sc.getAttribute(PROJBAND_HANDLE_ATTR) === null, 'stop：句柄属性摘除')
+    h.stop()
+  } finally {
+    globalThis.MutationObserver = saved
+  }
+  // No getSessions -> no Sessions button (declared degradation, no dead button)
+  const doc2 = docOf(el('div', { 'data-conversation-scroll': '' }))
+  doc2.head.appendChild = () => {}
+  doc2.createElement = (tag) => rich(String(tag))
+  doc2.body.appendChild = (c) => {
+    doc2.body.children.push(c)
+    doc2.body._band = c
+    c.remove = () => { doc2.body.children = doc2.body.children.filter(x => x !== c); c.removed = true }
+    return c
+  }
+  doc2.body._band = null
+  const saved2 = globalThis.MutationObserver
+  globalThis.MutationObserver = class { constructor() {} observe() {} disconnect() {} }
+  try {
+    const h2 = startChatProjectBand({ doc: doc2 })
+    ok(doc2.body._band !== null && !doc2.body._band.children.some(c => c.className === 'wb-projband-sessions'), '无数据源=Sessions 钮不渲染（声明降级）')
+    h2.stop()
+  } finally {
+    globalThis.MutationObserver = saved2
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

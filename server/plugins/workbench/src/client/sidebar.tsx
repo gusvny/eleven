@@ -57,8 +57,9 @@ import { FACTORY_NEW_LABELS, useSessionEntry } from './session-entry.tsx'
 // 实例注入（账册=模块级共享 store）。
 import { ProjectSessionRow } from './project-session-row.tsx'
 // 存量编号迁移（第 3 面① 拍板 1）：账册缺 seq 条目按项目内登记序补号（幂等）。
-import { backfillProjectSeqs } from '../shared/sessions.ts'
-import { getLedgerSnapshot, persistLedger } from './session-ledger-store.ts'
+import { backfillProjectSeqs, labelOf } from '../shared/sessions.ts'
+import { displayHandle } from '../shared/session-handles.ts'
+import { fetchProjectLedger, getLedgerSnapshot, persistLedger } from './session-ledger-store.ts'
 // 插件陈旧全局提醒（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：useStaleBanner
 // 单例挂本组件；横幅渲染在 .wb-sb-right 共享容器，文案常量同源消费（banner-text.ts，
 // 场景断言锚 KI-051 纪律）。
@@ -73,7 +74,7 @@ import { publishProjectEntry, publishProjects } from './project-tag-index.ts'
 import { startChatProjectTagEffect } from './chat-project-tag.ts'
 // chat 项目色带装饰器（票② R7）：锚=平台自声明 [data-conversation-scroll]，
 // 挂/卸随本组件生命周期；归属推导见下方 effect（current→账册 project）。
-import { startChatProjectBandEffect, setChatProjectBand } from './chat-project-band.ts'
+import { startChatProjectBandEffect, setChatProjectBandInfo } from './chat-project-band.ts'
 // 上下文折叠件（t260905-04）：带 CHARTER_MARKER 的注入消息收成可展开小条。
 import { startContextFoldEffect } from './context-fold.ts'
 // Project colour (ticket 2 R7): deterministic palette, same key always same colour.
@@ -565,13 +566,43 @@ export function WorkbenchSidebar(props: SidebarProps) {
     if (backfilled !== snapshot) persistLedger(backfilled)
   }, [wide, projectSessions.ledger])
 
-  // chat 项目色带（票② R7）：挂 head 自有 style + body 子树 Observer。
-  // F1 防呆接线：effect 返回 startChatProjectBandEffect 的清理函数本身
-  // （直接返回 handle 会被 useEffect 静默忽略→卸载零回收，t260903-07 F1 实案）。
+  // Chat identity band (UI-5, t261005-06, design 2.1): head style + body
+  // subtree Observer + a body-level band overlay (key + handle + the Sessions
+  // menu, which is the second new-session entrance of design 2.6). F1 guard:
+  // the effect returns startChatProjectBandEffect's cleanup itself (returning
+  // the handle directly is silently ignored by useEffect -> zero cleanup on
+  // unload). All actions go through the existing projectSessions chain
+  // (handleNew with an explicit target; the handleOpen unified chain) - the
+  // menu does not invent a second create/switch semantic.
   useEffect(() => {
     if (!wide) return
-    return startChatProjectBandEffect({})
-  }, [wide])
+    return startChatProjectBandEffect({
+      getSessions: () => {
+        const pk = projectSessions.listState?.current
+          ? projectSessions.ledger.find(e => e.id === projectSessions.listState?.current)?.project
+          : undefined
+        const current = projectSessions.listState?.current
+        const byId = (projectSessions.listState?.byId ?? {}) as Record<string, { displayTitle?: string } | undefined>
+        return projectSessions.ledger
+          .filter(e => (pk ? e.project === pk : false))
+          .map(e => ({
+            id: e.id,
+            handle: displayHandle({ session_id: e.id, handle: e.handle }) || String(e.seq ?? ''),
+            title: labelOf(byId[e.id], e.id),
+            active: e.id === current,
+          }))
+      },
+      onNewSession: () => {
+        const pk = projectSessions.listState?.current
+          ? projectSessions.ledger.find(e => e.id === projectSessions.listState?.current)?.project
+          : (viewProject || (projects.length === 1 ? projects[0].key : ''))
+        const dir = projects.find(p => p.key === pk)?.primary ?? ''
+        if (!pk) return
+        void projectSessions.handleNew({ key: pk, dir })
+      },
+      onOpenSession: (id) => { void projectSessions.handleOpen(id) },
+    })
+  }, [wide]) // actions ride the module-level shared store; the effect only mounts/unmounts with `wide`
 
   // 上下文折叠件（t260905-04）：把带 CHARTER_MARKER 的注入消息收成可展开小条。
   // 与色带同为「chat 滚动体装饰器」，接线同位对齐（同 hook 体内相邻 effect，
@@ -581,15 +612,29 @@ export function WorkbenchSidebar(props: SidebarProps) {
     return startContextFoldEffect()
   }, [wide])
 
-  // 色带归属推导（票② R7）：current → 账册 project（纯查表，不在装饰器内
-  // 推导）。不在册（工单会话/磁盘存量/blank hero/current 为空）→ 传 null=
-  // 摘除属性不渲染——声明行为，不造隐形缺省。
+  // Band ownership derivation (UI-5 upgrade of the ticket-2 R7 project-only
+  // face): current -> the ledger project plus the handle go out together.
+  // Not in the ledger (ticket sessions / on-disk sessions / blank hero /
+  // empty current) -> null = remove, render nothing - declared behavior, no
+  // invisible default.
   useEffect(() => {
     if (!wide) return
     const cur = projectSessions.listState?.current
     const entry = cur ? projectSessions.ledger.find(e => e.id === cur) : undefined
-    setChatProjectBand(entry?.project ?? null)
+    setChatProjectBandInfo({
+      project: entry?.project ?? null,
+      handle: entry ? displayHandle({ session_id: entry.id, handle: entry.handle }) : undefined,
+    })
   }, [wide, projectSessions.listState?.current, projectSessions.ledger])
+
+  // Project-file ledger fetch (UI-5 R5 freshness contract): on mount and on
+  // project switch the cache is refreshed from sessions.json (file-wins);
+  // failures stay silent (cache fallback, declared inside fetchProjectLedger).
+  const bandProjectKey = viewProject || (projects.length === 1 ? projects[0].key : '')
+  useEffect(() => {
+    if (!wide || bandProjectKey === '') return
+    void fetchProjectLedger(bandProjectKey)
+  }, [wide, bandProjectKey])
 
   // 度量入口首选注入 shell Settings 行（t260902-05① 验收打回修订：footer.action
   // 槽落点=侧栏包 footer，与 shell Settings 不同排）。锚找不到软退化回 footer.action

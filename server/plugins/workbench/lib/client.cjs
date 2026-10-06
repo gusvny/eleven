@@ -3160,6 +3160,83 @@ function persistLedger(entries) {
 		console.error("[workbench] 会话账册订阅者通知失败（该订阅者本轮跳过，不影响其它订阅者）：", err);
 	}
 }
+/** Session-ledger host API path (verbatim-equal to the path registered in node.ts; KI-042 drift guard). */
+const SESSIONS_API_PATH = "/sandbar-workbench/api/wf/sessions";
+/** File entry -> ledger entry field mapping (session_id -> id and friends; the single snake->camel point). */
+function fileEntryToOpened(e) {
+	return {
+		id: e.session_id,
+		project: "",
+		cwd: typeof e.cwd === "string" ? e.cwd : "",
+		lastOpenedAt: typeof e.last_opened_at === "number" && Number.isFinite(e.last_opened_at) ? e.last_opened_at : 0,
+		...typeof e.title === "string" ? { title: e.title } : {},
+		...typeof e.handle === "string" && e.handle !== "" ? { handle: e.handle } : {}
+	};
+}
+/**
+* Fetch the project session ledger file and refresh the cache from it:
+* GET SESSIONS_API_PATH?project=<key> -> 2xx with a NON-EMPTY entries array ->
+* this project's cached entries are replaced wholesale by the file entries
+* (file-wins) + persist (into the localStorage cache + broadcast). Anything
+* else returns null silently and the cache is untouched (cache fallback, no
+* crash) — INCLUDING a 2xx reply that yields an EMPTY entry list: an empty
+* reply means the file face is absent/unreachable behind the endpoint (the
+* route does not exist yet, a stub answered, or the file is genuinely empty),
+* and the fallback contract is display-what-you-have, never display-nothing —
+* seeded cache entries must survive a missing file face (regression lock:
+* t261005-09's journey seeds only the localStorage cache; the round-8 red
+* was the file-empty win wiping them). Executor projection entries
+* (handle='executor') enter the cache through the same path - the project row
+* and the identity band share one data source.
+*/
+async function fetchProjectLedger(project) {
+	if (typeof project !== "string" || project === "") return null;
+	try {
+		const res = await fetch(`${SESSIONS_API_PATH}?project=${encodeURIComponent(project)}`);
+		if (!res.ok) return null;
+		const body = await res.json();
+		if (!Array.isArray(body?.entries)) return null;
+		const fileEntries = body.entries.filter((e) => e && typeof e.session_id === "string" && e.session_id !== "").map(fileEntryToOpened).map((e) => ({
+			...e,
+			project
+		}));
+		if (fileEntries.length === 0) return null;
+		const others = getLedgerSnapshot().filter((e) => e.project !== project);
+		persistLedger([...fileEntries, ...others]);
+		return fileEntries;
+	} catch {
+		return null;
+	}
+}
+/**
+* Register one session into the project file (POST): resolves to the server-
+* assigned handle on success (the short code the identity band and the project
+* row display); throws on any failure (the caller shows an inline notice - a
+* registration failure is never silent, plan step 3 acceptance). A failure does
+* not roll back the local ledger entry (the cache and the file diverge briefly
+* and converge on the next fetch - declared behavior).
+*/
+async function pushSessionEntry(entry) {
+	const res = await fetch(SESSIONS_API_PATH + (entry.project ? `?project=${encodeURIComponent(entry.project)}` : ""), {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			session_id: entry.id,
+			cwd: entry.cwd,
+			...entry.title !== void 0 ? { title: entry.title } : {},
+			...entry.lastOpenedAt !== void 0 ? { lastOpenedAt: entry.lastOpenedAt } : {},
+			opened_at: entry.lastOpenedAt,
+			last_opened_at: entry.lastOpenedAt
+		})
+	});
+	const text = await res.text();
+	let body = {};
+	try {
+		body = JSON.parse(text);
+	} catch {}
+	if (!res.ok || body?.ok !== true) throw new Error(`session ledger register failed (HTTP ${res.status}): ${typeof body?.error === "string" ? body.error : text.slice(0, 120)}`);
+	return typeof body.handle === "string" ? body.handle : "";
+}
 //#endregion
 //#region src/client/closed-ledger-store.ts
 /**
@@ -3610,14 +3687,27 @@ function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKe
 				})();
 				startWorkspaceSession(ws.workspaceId);
 				const staged = await waitForStaged(sessions, prev, 1e4);
-				if (staged && staged !== id) persist(touchEntry(removeEntry(ledger, id), {
-					id: staged,
-					project: entry.project,
-					cwd: entry.cwd,
-					title: entry.title,
-					seq: entry.seq,
-					lastOpenedAt: Date.now()
-				}));
+				if (staged && staged !== id) {
+					persist(touchEntry(removeEntry(ledger, id), {
+						id: staged,
+						project: entry.project,
+						cwd: entry.cwd,
+						title: entry.title,
+						seq: entry.seq,
+						lastOpenedAt: Date.now()
+					}));
+					try {
+						await pushSessionEntry({
+							id: staged,
+							project: entry.project,
+							cwd: entry.cwd,
+							title: entry.title,
+							lastOpenedAt: Date.now()
+						});
+					} catch (err) {
+						console.error("[workbench] rebinding the session into the project ledger file failed (the local entry still works):", err);
+					}
+				}
 				return;
 			}
 		}
@@ -3683,6 +3773,17 @@ function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKe
 				lastOpenedAt: Date.now(),
 				seq
 			}));
+			try {
+				await pushSessionEntry({
+					id: staged,
+					project: pk,
+					cwd: pd ?? "",
+					lastOpenedAt: Date.now()
+				});
+			} catch (err) {
+				console.error("[workbench] registering the session into the project ledger file failed (the session was created; the local entry works):", err);
+				notify("Session could not be registered into the project ledger file (see the console); the session was created normally", pk);
+			}
 			await injectSessionCharter(sessions, staged, pk, notify);
 		} catch (err) {
 			console.error("[workbench] 新建会话请求异常：", err);
@@ -4087,15 +4188,26 @@ function projectTagCssRules(keys) {
 *    跳过——React 重渲染/Observer 回调反复触发不抖。
 * 8. ✅ MutationObserver 防重建：body 子树 childList（同 tag/metrics-entry
 *    先例），React 重建滚动体后重设属性；attributes 不盯（自有属性无人动）。
-* 9. ✅ 全终态回收：stop() 幂等四项=断 Observer + 摘 head style + 摘全部已设
-*    自有属性（只摘自己设过的）+ 降级路径 warn 留痕。**无** window/document
-*    级监听、**无**定时器/轮询——band 数据源是账册 store（sidebar 推导后显式
-*    调 set），不需要 tag 的 fetch 索引兜底自取（差异声明）。
-* 10. ❌ body 级 overlay 贴 rect：不带（同 tag 理由——属性锚成本与脆性远低于
-*     逐帧 rect 跟随）。
+* 9. Full-terminal-state cleanup: stop() is idempotent = disconnect the
+*    Observer + remove the head style + remove every self-set attribute (only
+*    our own) + remove the band overlay element and the window-level
+*    scroll/resize listeners + warn on degraded paths.
+* 10. Body-level overlay pinned to the anchor rect: carried since UI-5
+*     (t261005-06 identity band) - the standing band of design 2.1 (14% band
+*     face + 3px bottom border + project key + handle + Sessions menu) needs
+*     an interactive element; a pure ::after cannot hold one. The overlay
+*     hangs off body (no child inserted into the React-managed subtree, so
+*     the zero-childList-intrusion discipline holds), position:fixed over the
+*     anchor rect, updated on capture scroll + resize (listeners fully
+*     cleaned up). Degradation: zero anchors = the overlay hides
+*     (display:none); it never disappears silently nor escapes the column.
 */
 /** 自有属性名（值=project key）。 */
 const PROJBAND_ATTR = "data-wb-chat-projband";
+/** Session-handle attribute (UI-5: the band's second text channel; value = short code or executor). */
+const PROJBAND_HANDLE_ATTR = "data-wb-chat-projband-handle";
+/** Identity-band overlay attribute (body-level element marker; value = project key). */
+const PROJBAND_BAND_ATTR = "data-wb-chat-band";
 /** 自有 style 元素选择器（head 内，React 树之外）。 */
 const STYLE_SELECTOR$1 = "style[data-wb-chat-projband-style]";
 /** 平台 chat 滚动体锚（出处见文件头注；平台自声明属性，非 css-module 类名）。 */
@@ -4104,24 +4216,67 @@ const SCROLL_SELECTOR$1 = "[data-conversation-scroll]";
 function hexToRgba(hex, alpha) {
 	return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${alpha})`;
 }
-/** 色带基础样式（注入 head 的自有 style；attr()-only，key 不进选择器）。 */
+/** Band base styles (self-owned style injected into head; attr()-only, the
+*  key never enters a selector). UI-5 upgrade: the three design-2.1 channels
+*  all hang off the one --wb-projband-color variable - the 3px top border
+*  (the old band face), the 5% column wash (background color-mix) and the
+*  corner tag color (::after), so one project switch moves all three in the
+*  same frame (integration scenario A4 contract: hits >= 3). */
 const PROJBAND_BASE_CSS = `
-[${PROJBAND_ATTR}] { border-top: 3px solid var(--wb-projband-color, transparent); position: relative; }
+[${PROJBAND_ATTR}] { border-top: 3px solid var(--wb-projband-color, transparent); position: relative;
+  background: color-mix(in srgb, var(--wb-projband-color, transparent) 5%, transparent); }
 [${PROJBAND_ATTR}]::after {
-  content: attr(${PROJBAND_ATTR});
+  content: attr(${PROJBAND_HANDLE_ATTR}) " \\00b7 " attr(${PROJBAND_ATTR});
   position: sticky; top: 0; float: right; margin-right: 8px; height: 0;
   display: block; font-size: 10px; line-height: 1.4; white-space: nowrap;
   font-family: var(--ds-font-family-code, monospace);
   color: var(--wb-projband-color, transparent);
   pointer-events: none; opacity: 0.9;
 }
+[${PROJBAND_ATTR}]:not([${PROJBAND_HANDLE_ATTR}])::after { content: attr(${PROJBAND_ATTR}); }
+`;
+/**
+* Identity-band overlay styles (design 2.1: a 32px band face at 14% project
+* color + a 3px solid bottom border + a 9px color chip + the project key +
+* the handle + a Sessions control; fixed over the anchor rect, zero anchors =
+* hidden).
+*/
+const PROJBAND_BAND_CSS = `
+[${PROJBAND_BAND_ATTR}] { position: fixed; z-index: 90; height: 32px;
+  display: flex; align-items: center; gap: 6px; padding: 0 10px;
+  background: color-mix(in srgb, var(--wb-projband-color, transparent) 14%, var(--dsw-alias-bg-primary, #fff));
+  border-bottom: 3px solid var(--wb-projband-color, transparent);
+  font-size: 12px; font-weight: 600; pointer-events: auto; }
+[${PROJBAND_BAND_ATTR}][data-hidden] { display: none; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-chip { width: 9px; height: 9px; flex: none;
+  background: var(--wb-projband-color, transparent); }
+[${PROJBAND_BAND_ATTR}] .wb-projband-key { font-weight: 600; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-handle { font-family: var(--ds-font-family-code, monospace);
+  font-size: 11px; font-weight: 400; opacity: 0.75; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-sessions { font: inherit; font-size: 11px;
+  font-weight: 400; padding: 2px 8px; cursor: pointer; border-radius: 4px;
+  border: 1px solid var(--wb-projband-color, transparent); background: none; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-menu { position: absolute; top: 34px; right: 0;
+  min-width: 180px; max-height: 240px; overflow-y: auto; padding: 4px;
+  border-radius: 6px; background: var(--dsw-alias-bg-primary, #fff);
+  border: 1px solid var(--wb-projband-color, transparent);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35); display: none; }
+[${PROJBAND_BAND_ATTR}][data-menu-open] .wb-projband-menu { display: block; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-item { display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 3px 6px; font: inherit; font-size: 11.5px; cursor: pointer;
+  border: none; background: none; text-align: left; border-radius: 4px; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-item:hover { background: rgba(127,127,127,0.15); }
+[${PROJBAND_BAND_ATTR}] .wb-projband-item .wb-projband-handle { flex: none; }
+[${PROJBAND_BAND_ATTR}] .wb-projband-new { color: var(--wb-projband-color, inherit);
+  border-top: 1px solid rgba(127,127,127,0.25); margin-top: 2px; }
 `;
 /**
 * 设/摘色带属性（纯 DOM 逻辑，smoke 用自有桩直测；幂等）。key=null/畸形=
-* 摘除（不在册不渲染，声明行为）。返回本次实际写动的节点数（观测用）。
-* N 个锚全部齐设（多锚语义见头注第 5 项）。
+* removal (not-in-ledger renders nothing, declared behavior; the handle
+* attribute goes with it). Returns the number of nodes actually written this
+* call (for observation). All N anchors are set together (header item 5).
 */
-function applyProjectBand(root, key) {
+function applyProjectBand(root, key, handle) {
 	let touched = 0;
 	let els;
 	try {
@@ -4134,8 +4289,9 @@ function applyProjectBand(root, key) {
 		if (typeof el.setAttribute !== "function" || typeof el.getAttribute !== "function") continue;
 		const cur = el.getAttribute(PROJBAND_ATTR);
 		if (valid === null) {
-			if (cur !== null) {
+			if (cur !== null || el.getAttribute("data-wb-chat-projband-handle") !== null) {
 				el.removeAttribute(PROJBAND_ATTR);
+				el.removeAttribute(PROJBAND_HANDLE_ATTR);
 				touched++;
 			}
 			continue;
@@ -4143,6 +4299,17 @@ function applyProjectBand(root, key) {
 		if (cur !== valid) {
 			el.setAttribute(PROJBAND_ATTR, valid);
 			if (typeof el.style?.setProperty === "function") el.style.setProperty("--wb-projband-color", projectColor(valid));
+			touched++;
+		}
+		const hCur = el.getAttribute(PROJBAND_HANDLE_ATTR);
+		const hNext = typeof handle === "string" && handle !== "" && !handle.includes("\"") ? handle : null;
+		if (hNext === null) {
+			if (hCur !== null) {
+				el.removeAttribute(PROJBAND_HANDLE_ATTR);
+				touched++;
+			}
+		} else if (hCur !== hNext) {
+			el.setAttribute(PROJBAND_HANDLE_ATTR, hNext);
 			touched++;
 		}
 	}
@@ -4158,24 +4325,25 @@ function startChatProjectBandEffect(opts = {}) {
 /** 当前活跃 handle（模块级单例引用；sidebar 的归属推导 effect 走下面这个
 *  免实例透传入口，不必自己持有 handle——单插件单装饰器，多启后写后者）。 */
 let active = null;
-/**
-* 模块级入口：设/摘色带归属（sidebar 由 listState.current → 账册 project 推导
-* 后调用；key=null=不在册，摘除不渲染——声明行为）。装饰器未启动时静默 no-op
-* （窄模式/未挂载无消费面，不造隐形报错面）。
-*/
-function setChatProjectBand(key) {
-	active?.set(key);
+/** UI-5 entry: project ownership and the current session handle go out together (called by the sidebar after derivation). */
+function setChatProjectBandInfo(info) {
+	active?.setInfo(info);
 }
 /**
-* 启动装饰器：head 挂自有 style + body 子树 childList Observer。
-* 返回 handle：set(key|null) 供 sidebar 归属推导调用；stop() 卸载必调。
+* Start the decorator: a self-owned style in head (the container attribute
+* face + the identity-band overlay face) + a body-subtree childList Observer
+* + a body-level overlay element (the design-2.1 band; pinned to the anchor
+* rect, following capture scroll + resize, listeners and element fully
+* cleaned up). Returns a handle: set/setInfo for the sidebar ownership
+* derivation; stop() is mandatory on unload.
 */
 function startChatProjectBand(opts = {}) {
 	const doc = opts.doc ?? (typeof document !== "undefined" ? document : null);
 	if (!doc || doc.documentElement === null) {
-		console.warn("[workbench] chat 项目色带装饰器无 document 可挂，软退化不渲染");
+		console.warn("[workbench] chat project-band decorator has no document to attach to; soft-degrade, nothing renders");
 		return {
 			set() {},
+			setInfo() {},
 			stop() {}
 		};
 	}
@@ -4185,10 +4353,119 @@ function startChatProjectBand(opts = {}) {
 		style.setAttribute("data-wb-chat-projband-style", "");
 		doc.head.appendChild(style);
 	}
-	if (style.textContent !== PROJBAND_BASE_CSS) style.textContent = PROJBAND_BASE_CSS;
+	const fullCss = PROJBAND_BASE_CSS + "\n" + PROJBAND_BAND_CSS;
+	if (style.textContent !== fullCss) style.textContent = fullCss;
 	let current = null;
+	let currentHandle = void 0;
 	let stopped = false;
 	let warnedDisconnected = false;
+	let band = null;
+	if (typeof doc.createElement === "function" && !!doc.body && typeof doc.body.appendChild === "function") try {
+		band = doc.createElement("div");
+		band.setAttribute(PROJBAND_BAND_ATTR, "");
+		if (typeof opts.getSessions === "function") {
+			const btn = doc.createElement("button");
+			btn.className = "wb-projband-sessions";
+			btn.setAttribute("data-wb-band-sessions", "");
+			btn.setAttribute("type", "button");
+			btn.textContent = "Sessions";
+			btn.addEventListener?.("click", (ev) => {
+				ev.stopPropagation();
+				if (!band) return;
+				if (band.getAttribute("data-menu-open") !== null) {
+					band.removeAttribute("data-menu-open");
+					return;
+				}
+				renderMenu();
+				band.setAttribute("data-menu-open", "");
+			});
+			band.appendChild(btn);
+			const menu = doc.createElement("div");
+			menu.className = "wb-projband-menu";
+			menu.setAttribute("data-wb-band-menu", "");
+			band.appendChild(menu);
+		}
+		doc.body.appendChild(band);
+	} catch {
+		band = null;
+	}
+	/** Redraw the menu content (called when opening; data from getSessions/onOpenSession/onNewSession). */
+	const renderMenu = () => {
+		if (!band) return;
+		const menu = band.querySelector("[data-wb-band-menu]");
+		if (!menu) return;
+		menu.textContent = "";
+		const items = typeof opts.getSessions === "function" ? opts.getSessions() : [];
+		for (const it of Array.isArray(items) ? items : []) {
+			if (!it || typeof it.id !== "string" || it.id === "") continue;
+			if (typeof opts.onOpenSession !== "function") break;
+			const row = doc.createElement("button");
+			row.className = "wb-projband-item";
+			row.setAttribute("data-wb-band-item", it.id);
+			row.setAttribute("type", "button");
+			const h = doc.createElement("span");
+			h.className = "wb-projband-handle";
+			h.textContent = it.handle;
+			const t = doc.createElement("span");
+			t.textContent = it.title;
+			row.appendChild(h);
+			row.appendChild(t);
+			if (it.active) row.setAttribute("data-active", "");
+			row.addEventListener?.("click", (ev) => {
+				ev.stopPropagation();
+				band?.removeAttribute("data-menu-open");
+				opts.onOpenSession?.(it.id);
+			});
+			menu.appendChild(row);
+		}
+		if (typeof opts.onNewSession === "function") {
+			const nw = doc.createElement("button");
+			nw.className = "wb-projband-item wb-projband-new";
+			nw.setAttribute("data-wb-band-new", "");
+			nw.setAttribute("type", "button");
+			nw.textContent = "+ New session";
+			nw.addEventListener?.("click", (ev) => {
+				ev.stopPropagation();
+				band?.removeAttribute("data-menu-open");
+				opts.onNewSession?.();
+			});
+			menu.appendChild(nw);
+		}
+	};
+	/** The open menu collapses on an ownership switch (a cross-project menu shows the wrong project's data; collapsing is the safe side). */
+	const closeMenu = () => {
+		band?.removeAttribute("data-menu-open");
+	};
+	/** Pin the overlay to the anchor rect (zero anchors = hidden; a stub without getBoundingClientRect = best-effort top placement). */
+	const placeBand = () => {
+		if (!band) return;
+		band.setAttribute(PROJBAND_BAND_ATTR, current ?? "");
+		if (current === null) {
+			band.setAttribute("data-hidden", "");
+			return;
+		}
+		band.removeAttribute("data-hidden");
+		const st = band.style;
+		if (typeof st?.setProperty !== "function") return;
+		const color = projectColor(current);
+		st.setProperty("--wb-projband-color", color);
+		let anchor;
+		try {
+			anchor = Array.from(doc.querySelectorAll(SCROLL_SELECTOR$1))[0];
+		} catch {
+			anchor = void 0;
+		}
+		const r = anchor?.getBoundingClientRect?.();
+		if (r && typeof r.top === "number" && typeof r.left === "number" && typeof r.width === "number") {
+			st.setProperty("top", `${Math.max(0, r.top)}px`);
+			st.setProperty("left", `${r.left}px`);
+			st.setProperty("width", `${r.width}px`);
+		} else {
+			st.setProperty("top", "0px");
+			st.setProperty("left", "0px");
+			st.removeProperty("width");
+		}
+	};
 	const scan = () => {
 		if (stopped) return;
 		if (!doc.documentElement.isConnected) {
@@ -4199,16 +4476,36 @@ function startChatProjectBand(opts = {}) {
 			observer.disconnect();
 			return;
 		}
-		applyProjectBand(doc, current);
+		applyProjectBand(doc, current, currentHandle);
+		placeBand();
 	};
 	const observer = new MutationObserver(scan);
 	observer.observe(doc.body ?? doc.documentElement, {
 		childList: true,
 		subtree: true
 	});
+	const onFollow = () => {
+		if (!stopped) placeBand();
+	};
+	const win = typeof window !== "undefined" ? window : null;
+	try {
+		doc.addEventListener?.("scroll", onFollow, true);
+		win?.addEventListener?.("resize", onFollow);
+	} catch {}
+	scan();
 	const handle = {
 		set(key) {
 			current = isProjectKeyLike(key) ? key : null;
+			currentHandle = void 0;
+			closeMenu();
+			scan();
+		},
+		setInfo(info) {
+			const key = info?.project ?? null;
+			const changed = (isProjectKeyLike(key) ? key : null) !== current;
+			current = isProjectKeyLike(key) ? key : null;
+			currentHandle = typeof info?.handle === "string" && info.handle !== "" ? info.handle : void 0;
+			if (changed) closeMenu();
 			scan();
 		},
 		stop() {
@@ -4216,10 +4513,18 @@ function startChatProjectBand(opts = {}) {
 			stopped = true;
 			if (active === handle) active = null;
 			observer.disconnect();
+			try {
+				doc.removeEventListener?.("scroll", onFollow, true);
+				win?.removeEventListener?.("resize", onFollow);
+			} catch {}
 			style.remove();
+			try {
+				band?.remove();
+			} catch {}
 			try {
 				for (const el of Array.from(doc.querySelectorAll(`[${PROJBAND_ATTR}]`))) {
 					el.removeAttribute(PROJBAND_ATTR);
+					el.removeAttribute(PROJBAND_HANDLE_ATTR);
 					if (typeof el.style?.removeProperty === "function") el.style.removeProperty("--wb-projband-color");
 				}
 			} catch {}
@@ -4363,6 +4668,11 @@ const DERIVE_TOKENS_CSS = `:root{
 * data-wb-psess-confirm-ok / -confirm-cancel（确认/取消）、
 * data-wb-psess-notice（行内失败提示）。零 CSS 类名匹配纪律（自有 .wb-psess-*
 * 前缀，与出厂类名零交叉）。
+*
+* UI-5 (t261005-06): the tab's main label is the session-handle short code
+* (seq stays history-only); the executor session (fixed handle executor)
+* enters this row's data through the session-ledger-file grants-merge door
+* (derived display; the grants file stays the single source of who runs).
 */
 const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
@@ -4399,6 +4709,9 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   /* gen8：同上，回归 45% 锁定派生（同 t260904-05 契约）。 */
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
+/* Session-row project badge (UI-5, color channel only; shapes belong to UI-4): an 8px square in the project color, inline in the tab. */
+.wb-psess-dot { width:8px; height:8px; flex:none; border-radius:2px;
+  background:var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-close { position:absolute; top:-5px; right:-5px; width:12px; height:12px;
   display:flex; align-items:center; justify-content:center; padding:0; font:inherit;
   font-size:9px; line-height:1; border:none; border-radius:3px; background:none;
@@ -4440,16 +4753,19 @@ function ProjectSessionRow(props) {
 		current,
 		byId
 	]);
-	const handles = (0, react.useMemo)(() => {
-		const map = /* @__PURE__ */ new Map();
-		const assigned = [];
+	const handleOf = (0, react.useMemo)(() => {
+		const m = /* @__PURE__ */ new Map();
 		for (const t of tabs) {
-			const h = sessionHandle(t.id, assigned);
-			map.set(t.id, h);
-			assigned.push(h);
+			const e = ledger.find((x) => x && typeof x.id === "string" && x.project === projectKey && x.id === t.id);
+			const h = e && typeof e.handle === "string" && e.handle !== "" ? e.handle : sessionHandle(t.id, []);
+			m.set(t.id, h);
 		}
-		return map;
-	}, [tabs]);
+		return m;
+	}, [
+		ledger,
+		projectKey,
+		tabs
+	]);
 	const [confirmId, setConfirmId] = (0, react.useState)(null);
 	/** 正在确认的 tab 锚（ref 回调按 confirmId 条件挂到对应 tab 上）。 */
 	const tabRef = (0, react.useRef)(null);
@@ -4531,7 +4847,7 @@ function ProjectSessionRow(props) {
 				"data-active": t.active,
 				role: "button",
 				tabIndex: 0,
-				title: `${projectName} session ${t.seq} (${handles.get(t.id) ?? ""}): ${t.title}\n${t.id}`,
+				title: `${projectName} session #${handleOf.get(t.id) || t.seq} (seq ${t.seq}): ${t.title}\n${t.id}`,
 				onClick: () => {
 					setConfirmId(null);
 					onOpen(t.id);
@@ -4543,21 +4859,30 @@ function ProjectSessionRow(props) {
 						onOpen(t.id);
 					}
 				},
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: "wb-psess-num",
-					children: handles.get(t.id) ?? ""
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					type: "button",
-					className: "wb-psess-close",
-					"data-wb-psess-close": "",
-					title: "Close this session entry (needs confirmation; session content is not deleted)",
-					"aria-label": `Close session entry ${handles.get(t.id) ?? t.seq}`,
-					onClick: (e) => {
-						e.stopPropagation();
-						setConfirmId(t.id);
-					},
-					children: "×"
-				})]
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-psess-num",
+						"data-wb-psess-handle": "",
+						children: handleOf.get(t.id) || t.seq
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						"aria-hidden": true,
+						className: "wb-psess-dot",
+						"data-wb-psess-dot": ""
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-psess-close",
+						"data-wb-psess-close": "",
+						title: "Close this session entry (needs confirmation; session content is not deleted)",
+						"aria-label": `Close session entry ${handleOf.get(t.id) || t.seq}`,
+						onClick: (e) => {
+							e.stopPropagation();
+							setConfirmId(t.id);
+						},
+						children: "×"
+					})
+				]
 			}, t.id)),
 			confirmTab && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-psess-confirm",
@@ -4569,8 +4894,8 @@ function ProjectSessionRow(props) {
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-psess-confirm-t",
 						children: [
-							"Close session ",
-							confirmTab ? handles.get(confirmTab.id) : "",
+							"Close session #",
+							handleOf.get(confirmTab.id) || confirmTab.seq,
 							"?"
 						]
 					}),
@@ -4612,6 +4937,25 @@ function ProjectSessionRow(props) {
 			})
 		]
 	});
+}
+/**
+* Short code of a dsh session id: strip the `session-` prefix, take the first N
+* hex chars. Non-`session-` shapes (ticket sessions, bare uuids, malformed) take
+* the first 4 chars too — the code is a reference, not a classifier, so the shape
+* is lenient (classification lives in isGlobalSessionId at the ledger entrance).
+* Non-string / empty returns '' (the caller treats it as unassigned; no fake code).
+*/
+function shortCodeOf(sessionId, len = 4) {
+	if (typeof sessionId !== "string" || sessionId === "") return "";
+	return (sessionId.startsWith("session-") ? sessionId.slice(8) : sessionId).slice(0, Math.max(1, Math.floor(len)));
+}
+/** Display handle of an entry: the assigned one, else a temporary short code
+*  (display only, never persisted — assignment lands on the register path, the
+*  display layer never blocks on "unassigned"). */
+function displayHandle(e) {
+	if (!e || typeof e.session_id !== "string" || e.session_id === "") return "";
+	if (typeof e.handle === "string" && e.handle !== "") return e.handle;
+	return shortCodeOf(e.session_id);
 }
 //#endregion
 //#region src/client/visibility-state.ts
@@ -48467,7 +48811,34 @@ function WorkbenchSidebar(props) {
 	}, [wide, projectSessions.ledger]);
 	(0, react.useEffect)(() => {
 		if (!wide) return;
-		return startChatProjectBandEffect({});
+		return startChatProjectBandEffect({
+			getSessions: () => {
+				const pk = projectSessions.listState?.current ? projectSessions.ledger.find((e) => e.id === projectSessions.listState?.current)?.project : void 0;
+				const current = projectSessions.listState?.current;
+				const byId = projectSessions.listState?.byId ?? {};
+				return projectSessions.ledger.filter((e) => pk ? e.project === pk : false).map((e) => ({
+					id: e.id,
+					handle: displayHandle({
+						session_id: e.id,
+						handle: e.handle
+					}) || String(e.seq ?? ""),
+					title: labelOf(byId[e.id], e.id),
+					active: e.id === current
+				}));
+			},
+			onNewSession: () => {
+				const pk = projectSessions.listState?.current ? projectSessions.ledger.find((e) => e.id === projectSessions.listState?.current)?.project : viewProject || (projects.length === 1 ? projects[0].key : "");
+				const dir = projects.find((p) => p.key === pk)?.primary ?? "";
+				if (!pk) return;
+				projectSessions.handleNew({
+					key: pk,
+					dir
+				});
+			},
+			onOpenSession: (id) => {
+				projectSessions.handleOpen(id);
+			}
+		});
 	}, [wide]);
 	(0, react.useEffect)(() => {
 		if (!wide) return;
@@ -48476,12 +48847,24 @@ function WorkbenchSidebar(props) {
 	(0, react.useEffect)(() => {
 		if (!wide) return;
 		const cur = projectSessions.listState?.current;
-		setChatProjectBand((cur ? projectSessions.ledger.find((e) => e.id === cur) : void 0)?.project ?? null);
+		const entry = cur ? projectSessions.ledger.find((e) => e.id === cur) : void 0;
+		setChatProjectBandInfo({
+			project: entry?.project ?? null,
+			handle: entry ? displayHandle({
+				session_id: entry.id,
+				handle: entry.handle
+			}) : void 0
+		});
 	}, [
 		wide,
 		projectSessions.listState?.current,
 		projectSessions.ledger
 	]);
+	const bandProjectKey = viewProject || (projects.length === 1 ? projects[0].key : "");
+	(0, react.useEffect)(() => {
+		if (!wide || bandProjectKey === "") return;
+		fetchProjectLedger(bandProjectKey);
+	}, [wide, bandProjectKey]);
 	(0, react.useEffect)(() => {
 		if (!wide) return;
 		const root = rootRef.current;

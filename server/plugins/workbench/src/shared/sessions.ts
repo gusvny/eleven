@@ -55,6 +55,13 @@ export interface OpenedEntry {
    *  重开/blank 换绑随条目带回原号（稳定身份）。可选字段=存量条目迁移前的
    *  过渡态，由 backfillProjectSeqs 幂等补号；pickProjectTabs 不显示缺号条目。 */
   seq?: number
+  /** Session handle (UI-5, t261005-06): a short code or the fixed name
+   *  executor; source of truth = the per-project sessions.json file, brought
+   *  into the cache by the fetchProjectLedger file-wins merge. Optional =
+   *  the transition state of cached entries not yet fetched from the file;
+   *  the display layer falls back to a displayHandle short code (display
+   *  only, never persisted). */
+  handle?: string
 }
 
 /** 项目内会话 tab（渲染就绪，第 3 面① R2/R6）。 */

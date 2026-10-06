@@ -41,7 +41,7 @@ globalThis.localStorage = {
   clear() { backing.clear() },
 }
 
-const { LEDGER_KEY, subscribeLedger, getLedgerSnapshot, persistLedger } =
+const { LEDGER_KEY, subscribeLedger, getLedgerSnapshot, persistLedger, fetchProjectLedger } =
   await import('../src/client/session-ledger-store.ts')
 const { touchEntry, parseLedger } = await import('../src/shared/sessions.ts')
 
@@ -118,6 +118,63 @@ console.log('C. 畸形输入容错（桩复现，不放宽）')
 
 console.log('D. LEDGER_KEY 口径')
 ok(LEDGER_KEY === 'sandbar-workbench-opened-sessions-v1', 'LEDGER_KEY 值不变（账册 key 口径回归）')
+
+// E. UI-5 file faces (t261005-06): file-wins on a real file, cache-stands on an
+// absent/empty face — seeded cache entries must NEVER be wiped by a missing file
+// face (round-8 regression: an empty 2xx reply used to win and drop them).
+{
+  const realFetch = globalThis.fetch
+  const seeded = [
+    { id: 'session-e3f90001-1', project: 'sandbar', cwd: '/x', lastOpenedAt: 100 },
+    { id: 'session-e77a0002-2', project: 'sandbar', cwd: '/x', lastOpenedAt: 200 },
+  ]
+  const restore = async () => { persistLedger(seeded.map(e => ({ ...e }))) }
+  try {
+    // E1 file-wins: a real non-empty file face replaces the project's entries
+    restore()
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, entries: [
+      { session_id: 'session-beef0003-3', handle: 'beef', last_opened_at: 300 },
+    ] }) })
+    let r = await fetchProjectLedger('sandbar')
+    ok(Array.isArray(r) && r.length === 1 && r[0].id === 'session-beef0003-3' && r[0].project === 'sandbar',
+      'E1 file-wins：非空文件面整组替换本项目条目（handle 随带回）')
+    ok(getLedgerSnapshot().some(e => e.id === 'session-beef0003-3'), 'E1b 落缓存并广播')
+    // E2 empty 2xx reply = absent file face: cache stands (round-8 regression lock)
+    restore()
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, entries: [] }) })
+    r = await fetchProjectLedger('sandbar')
+    ok(r === null, 'E2 空文件面=非真源（返回 null）')
+    ok(getLedgerSnapshot().some(e => e.id === 'session-e3f90001-1') && getLedgerSnapshot().some(e => e.id === 'session-e77a0002-2'),
+      'E2b 空文件面不清洗缓存条目（display-what-you-have，round-8 回归锁）')
+    // E3 non-2xx: cache stands
+    restore()
+    globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) })
+    r = await fetchProjectLedger('sandbar')
+    ok(r === null && getLedgerSnapshot().some(e => e.id === 'session-e3f90001-1'), 'E3 非 2xx=缓存兜底')
+    // E4 malformed reply: cache stands, no throw
+    restore()
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ entries: 'not-a-list' }) })
+    r = await fetchProjectLedger('sandbar')
+    ok(r === null && getLedgerSnapshot().some(e => e.id === 'session-e77a0002-2'), 'E4 畸形回包=缓存兜底不抛')
+    // E5 fetch throws: cache stands, no throw
+    restore()
+    globalThis.fetch = async () => { throw new Error('network down') }
+    let threw = false
+    try { r = await fetchProjectLedger('sandbar') } catch { threw = true }
+    ok(!threw && r === null && getLedgerSnapshot().some(e => e.id === 'session-e3f90001-1'), 'E5 fetch 抛异常=缓存兜底不抛')
+    // E6 other projects' entries survive a file-wins replace
+    restore()
+    persistLedger([...getLedgerSnapshot(), { id: 'session-aaaa0004-4', project: 'suyou', cwd: '/y', lastOpenedAt: 1 }])
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ ok: true, entries: [
+      { session_id: 'session-beef0003-3', handle: 'beef', last_opened_at: 300 },
+    ] }) })
+    await fetchProjectLedger('sandbar')
+    ok(getLedgerSnapshot().some(e => e.id === 'session-aaaa0004-4') && !getLedgerSnapshot().some(e => e.id === 'session-e3f90001-1'),
+      'E6 file-wins 只替换本项目条目，他项目条目保留')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+}
 
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

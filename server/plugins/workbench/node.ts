@@ -177,6 +177,17 @@ import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
 // t260926-05：巡检落账报告只读端点（report_path → 可读摘要；fail-closed 200+reason 同 /file 风格）。
 import { readInspectionReportFile } from './src/host/inspection-report.ts'
+// Per-project session ledger file (sessions.json, UI-5 t261005-06): the single
+// logic point of the GET/POST routes lives in src/host/session-ledger-file.ts
+// (atomic write / merge / refusal all live there; this file is a zero-logic front).
+import {
+  SessionLedgerError,
+  readExecutorSessionIds,
+  readLedgerFile,
+  saveSessionEntry,
+  validateSessionEntry,
+} from './src/host/session-ledger-file.ts'
+import { mergeExecutorSessions } from './src/shared/session-handles.ts'
 import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
 import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
 import { aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline } from './src/host/agent-usage.ts'
@@ -1525,6 +1536,104 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     sendJson(res, 200, { ok: true, project, charter, kind: 'charter', source: raw.trim() !== '' ? 'file' : 'fallback' })
   }
 
+  /* ------------------------------ 项目会话账册（sessions.json，UI-5 t261005-06） */
+
+  /** project query whitelist check (same discipline as findProject: an unknown key / registry fault -> 400). */
+  function sessionsProjectOf(req: IncomingMessage): { project: string } | { error: [number, string] } {
+    const url = new URL(req.url ?? '/', 'http://x')
+    const project = (url.searchParams.get('project') ?? '').trim()
+    if (project === '') return { error: [400, 'missing project query: /sandbar-workbench/api/wf/sessions?project=<key>'] }
+    try {
+      if (!findProject(project)) return { error: [400, `unknown project key: '${project}' (not in the projects registry)`] }
+    } catch (err) {
+      return { error: [400, String(err instanceof Error ? err.message : err)] }
+    }
+    return { project }
+  }
+
+  /**
+   * GET /sandbar-workbench/api/wf/sessions?project=<key>: read sessions.json
+   * (a missing/bad file -> an empty ledger, never a crash) + project the
+   * executor sessions declared in executor-grants.json (handle='executor',
+   * derived display, never persisted - the grants file stays the single source
+   * of who-is-executor). The reply carries file (absolute path, the acceptance
+   * read-back anchor) and mtime (plan R5 freshness contract).
+   */
+  async function handleSessionsGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const p = sessionsProjectOf(req)
+    if ('error' in p) {
+      sendJson(res, p.error[0], { ok: false, error: p.error[1] })
+      return
+    }
+    try {
+      const read = readLedgerFile(p.project)
+      const entries = mergeLedgerFileWithExecutors(read.entries, readExecutorSessionIds(p.project))
+      sendJson(res, 200, { ok: true, project: p.project, file: read.file, mtime: read.mtime, entries })
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+    }
+  }
+
+  /**
+   * POST /sandbar-workbench/api/wf/sessions?project=<key>: register/update
+   * one session (id-union merge + atomic write). KI-193 stance (declared,
+   * never silent): a plugin write endpoint inherits the KI-193 exposure; the
+   * surface is caller-self-reported - a write carrying the executor identity
+   * is refused by declaration (403); this is declared behavior, not auth (the
+   * injection test guards it). The recorded writer is echoed as received and
+   * the reply names by_self_reported=true - never a silent "source = host"
+   * attribution.
+   */
+  async function handleSessionsPost(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const p = sessionsProjectOf(req)
+    if ('error' in p) {
+      sendJson(res, p.error[0], { ok: false, error: p.error[1] })
+      return
+    }
+    let body: unknown
+    try {
+      body = await readJsonBody(req)
+    } catch (err) {
+      sendJson(res, 400, { ok: false, error: `request body is not valid JSON: ${String(err instanceof Error ? err.message : err)}` })
+      return
+    }
+    // Shape validation (including the executor-surface declared refusal) is single-pointed in validateSessionEntry.
+    const [entry, entryErr] = validateSessionEntry((body as { entry?: unknown } | null)?.entry ?? body)
+    if (entryErr !== null) {
+      const refused = (body as { surface?: unknown } | null)?.surface === 'executor-session'
+      sendJson(res, refused ? 403 : 400, { ok: false, error: entryErr })
+      return
+    }
+    try {
+      const result = saveSessionEntry(p.project, entry)
+      sendJson(res, 200, {
+        ok: true,
+        project: p.project,
+        file: result.file,
+        handle: result.handle,
+        entries: result.entries,
+        by_self_reported: true,
+      })
+    } catch (err) {
+      if (err instanceof SessionLedgerError) {
+        sendJson(res, err.status, { ok: false, error: err.message })
+        return
+      }
+      sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+    }
+  }
+
+  async function handleSessionsRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method === 'GET') return handleSessionsGet(req, res)
+    if (req.method === 'POST') return handleSessionsPost(req, res)
+    sendJson(res, 405, { ok: false, error: 'sessions route supports GET (read) and POST (register) only' })
+  }
+
+  /** Executor projection (a route-side thin shell over the shared pure function; executors first). */
+  function mergeLedgerFileWithExecutors(entries: ReturnType<typeof readLedgerFile>['entries'], executorIds: string[]) {
+    return mergeExecutorSessions(entries, executorIds)
+  }
+
   /**
    * metrics 读侧聚合（t260901-20，只读，M1a）：GET /sandbar-workbench/api/wf/metrics。
    * 聚合唯一实现在 src/host/metrics.ts（与 metrics-cli.mjs CLI 前门同函数同缓存，
@@ -2124,6 +2233,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'exact', path: EPICS_PREFIX, handler: handleEpics }),
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
+        // Per-project session ledger (sessions.json, UI-5 t261005-06): GET read
+        // (executor projection included) + POST register (id-union merge + atomic
+        // write; KI-193 stance in the handleSessionsPost doc).
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/sessions', handler: handleSessionsRoute }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects', handler: handleProjects }),
         // 票③面D：项目生命周期三路由（detail 票计数读面 / add·remove 写面，薄壳 spawn 安装器 CLI）。
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/detail', handler: handleProjectDetail }),
