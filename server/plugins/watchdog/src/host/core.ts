@@ -18,7 +18,7 @@ import { dirname, join } from 'node:path'
 import { loadWatchdogConfig, watchdogDataDir, eventLedgerFile, projectsRoot, dshHome, FACTORY_DEFAULTS, type ResolvedConfig } from './config.ts'
 import { LedgerTailer, deriveTicketStates, type LedgerRow, type TailIo } from './ledger-tail.ts'
 import { compareStates, ledgerCoverage, degradedResult, makeMissingRowsSpec, type BoardRow, type ReconcileResult } from './reconcile.ts'
-import { judgeExecutor, type ExecutorLiveness } from './liveness.ts'
+import { judgeExecutor, type ExecutorLiveness, type UnansweredApprovalSignal } from './liveness.ts'
 import { judgeAskMirror, collectDeliverRefusals, type PendingAskLike } from './ask-loud.ts'
 import { detectSelfLock, type PendingInteraction, type SelfLockVerdict } from './self-lock.ts'
 import { detectWaitingFace, type WaitingFace } from './waiting-face.ts'
@@ -116,6 +116,20 @@ export interface WatchdogDeps {
   recentText?: (sessionId: string) => Promise<RecentTextResult>
   /** t261004-08: prose-backstop ledger face (request-ledger read/write + journal; assembled in node.ts). */
   proseBackstopIo?: ProseBackstopIo
+  /** t261006-05: unanswered-approval probe (host page/follow records via approval-face.ts;
+   *  available:false = window unreadable — the liveness face never fakes either way). */
+  approvalProvider?: (sessionId: string) => Promise<ApprovalFaceResult>
+}
+
+/** Unanswered-approval probe result (t261006-05). available:false = the history
+ *  window was unreadable (named reason) — never folded into "no approval". */
+export interface ApprovalFaceResult {
+  available: boolean
+  awaiting: boolean
+  approval_id: string | null
+  asked_at: number | null
+  evidence: string
+  reason?: string
 }
 
 /** Recent-round-text read result (ok:false = host history face absent / call failed / malformed receipt — named explicitly). */
@@ -229,6 +243,7 @@ export class Watchdog {
   private proseJournal: Array<{ key: string; requestId: string }> = []
   private waitingRunningLookup: ((sessionId: string) => boolean | null) | null
   private recentText: (() => Promise<RecentTextResult>) | null
+  private approvalProvider: ((sessionId: string) => Promise<ApprovalFaceResult>) | null
   private proseIo: ProseBackstopIo | null
   private liveness: ExecutorLiveness | null = null
   private startup: { missing_rows: number | null; replayed_rows: number | null; dedupe_keys: number } = { missing_rows: null, replayed_rows: null, dedupe_keys: 0 }
@@ -283,6 +298,7 @@ export class Watchdog {
     this.sessionEnsure = deps.sessionEnsure ?? null
     this.waitingRunningLookup = deps.waitingRunningLookup ?? null
     this.recentText = deps.recentText ?? null
+    this.approvalProvider = deps.approvalProvider ?? null
     this.proseIo = deps.proseBackstopIo ?? null
     // 260930 直修：数据根走 config.watchdogDataDir **单一真源**（与 node.ts 的执行器会话账 /
     // 状态读侧同一个表达式）。旧写法读 `deps.configDirEnv`，而该 deps 生产恒不传 ⇒ HOME 取空
@@ -621,8 +637,19 @@ export class Watchdog {
       if (this.aborted) return
       this.lastSessionStatMs = nowMs
       this.lastSessionAdvanced = sstat.advanced
+      // Unanswered-approval probe (t261006-05, KI-207 item 1): an unreadable window
+      // feeds NO signal (the old branches stand); a named ask is the priority signal
+      // — never silently folded either way.
+      let unansweredApproval: UnansweredApprovalSignal | null = null
+      if (this.approvalProvider !== null && sid !== '') {
+        const ap = await this.approvalProvider(sid)
+        if (this.aborted) return
+        if (ap.available && ap.awaiting) {
+          unansweredApproval = { approval_id: ap.approval_id, asked_at: ap.asked_at, evidence: ap.evidence }
+        }
+      }
       this.liveness = judgeExecutor(
-        { sessionKnown: sid !== '', ledgerAdvanced, sessionProgress: sstat.advanced, lastWakeAt: this.wakes.length > 0 ? this.wakes[this.wakes.length - 1].at : null, sessionRunning: sstat.running },
+        { sessionKnown: sid !== '', ledgerAdvanced, sessionProgress: sstat.advanced, lastWakeAt: this.wakes.length > 0 ? this.wakes[this.wakes.length - 1].at : null, sessionRunning: sstat.running, unansweredApproval },
         nowMs, this.cfg.config.stall_minutes, this.lastProgressAt, this.cfg.config.long_turn_minutes,
       )
       // t261001-19 缺陷 A 修复：基准点从判活结果的 last_progress_at 回灌——判活只在
@@ -633,6 +660,18 @@ export class Watchdog {
       this.lastProgressAt = this.liveness.last_progress_at
       if (this.liveness.state === 'stalled') {
         await this.raise({ rule: 'stall', target: sid, level: 'redline', title: `executor 停摆（${sid}）`, detail: this.liveness.evidence })
+      }
+      // t261006-05 (KI-207/KI-208): parked on an unanswered approval is strictly more
+      // urgent than a long turn — the session waits on a human and nobody holds the
+      // answerer right, so it parks indefinitely. Redline level, same dedupe/cooldown
+      // path; the evidence names the approval id and the asked-at time (review
+      // condition 2: status face AND alert face, not only half of it).
+      if (this.liveness.state === 'awaiting_approval') {
+        await this.raise({
+          rule: 'executor_awaiting_approval', target: sid, level: 'redline',
+          title: `executor parked on an unanswered approval (${sid})`,
+          detail: this.liveness.evidence,
+        })
       }
       // t261004-12：running=true 的长静默是独立 case（long_turn）——不是停摆，不进
       // 红线名单，但超长回合阈值该让人看一眼：warn 级、同一去重/冷却路径。

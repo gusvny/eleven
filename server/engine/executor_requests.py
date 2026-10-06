@@ -35,6 +35,21 @@ raised_by 且与解析值不符=拒收（field=raised_by）——来源必须真
 选项 ≤8 项、单项 ≤80 字符；本口按 §8 散文上限收紧为 2–4 项、单项 ≤20 字符——
 引擎会拒掉账本本身肯收的体（如 5 个选项）。这是契约收窄不是 bug；拒收文案带
 实际计数/长度。
+
+Direct-write closure (t261006-05, KI-208): resident executor sessions (the
+cwd-derived channel, or the declared-session dual-anchor seam) must NOT append
+the ledger in their own process. The ledger sits outside the session's
+workspace-write sandbox, so a denied append leaves only the escalation prompt,
+and an executor deployment has no approval answerer (261006 evidence: a session
+parked on approval/asked for four hours). Callers on those channels get a
+structured refusal (field=channel) naming the way out: client.py deliver
+(face "request") — the engine process performs the append, never the session's
+sandbox. The env channel (explicit SANDBAR_CALLER_PROJECT) stays open: env
+injection is the scripts/fixtures/ops face, not the resident-session shape
+(the host Session API cannot inject shell env into a session — caller_gate's
+machine-observable seam note). Callers whose identity cannot resolve at all are
+already refused by the existing caller gates (zero writes); this closure does
+not depend on them.
 """
 from __future__ import annotations
 
@@ -50,6 +65,20 @@ import shared
 
 # 来源标记：面板投递的行无此键，引擎投递的行恒带——读方据此分辨。
 SURFACE_ENGINE = "engine"
+
+# Direct-write closure (t261006-05, KI-208): these two channels ARE the resident
+# executor session (watchdog-created shape). An in-process append lands outside
+# the sandbox; a denial leaves only the escalation prompt, which has no answerer.
+# Closed as a structured refusal; the way out is the engine-side delivery face.
+RESIDENT_EXECUTOR_CHANNELS = ("cwd", "declared-session")
+DIRECT_WRITE_REFUSAL = (
+    "direct in-process ledger append is closed for resident executor sessions "
+    "(channel=%s): the project ledger sits outside the session workspace, a denied "
+    "append leaves only the escalation prompt, and an executor session has no "
+    "approval answerer (KI-208). Submit through the engine-side delivery face "
+    "instead: python3 server/engine/client.py deliver '<json>' (face \"request\") — "
+    "the engine process performs the append."
+)
 
 # 请求契约（§8 写侧一半；与 TS 账本地板刻意收窄的差异见模块头）。
 QUESTION_MAX = 60          # 一次请求=一个决定，问句一行 ≤60 字符
@@ -275,6 +304,13 @@ def append_request(body: Dict[str, Any], now_ms: int, seq: int = 1,
         return caller
     key = caller["project"]
     session = caller["session"]
+    # Direct-write closure (t261006-05, KI-208): resident-executor channels (cwd /
+    # declared-session) must not append in-process — refuse BEFORE any file write
+    # (zero rows) and name the delivery face. The env channel stays open (module
+    # header: env injection is the scripts/fixtures face, not a resident session);
+    # a non-empty delivered_via = the engine process performs the append.
+    if delivered_via is None and str(caller.get("channel") or "") in RESIDENT_EXECUTOR_CHANNELS:
+        return _refuse("channel", DIRECT_WRITE_REFUSAL % caller.get("channel"))
     if not shared.PROJECT_KEY_RE.match(key or ""):
         return _refuse("project", "project key shape invalid: %r" % (key or "",))
     raised = body.get("raised_by")

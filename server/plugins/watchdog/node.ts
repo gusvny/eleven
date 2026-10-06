@@ -37,7 +37,8 @@ import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 
 import { loadWatchdogConfig, isValidProjectKey, watchdogDataDir, watchdogConfigDir } from './src/host/config.ts'
-import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type PendingProvider, type SessionStatFn } from './src/host/core.ts'
+import { Watchdog, defaultIo, readHeartbeatFile, type WatchdogStatus, type PendingProvider, type SessionStatFn, type ApprovalFaceResult } from './src/host/core.ts'
+import { judgeApprovalWindow } from './src/host/approval-face.ts'
 import { filterBoardRowsToProject, type BoardRow } from './src/host/reconcile.ts'
 import type { PendingInteraction } from './src/host/self-lock.ts'
 import { QueueMirror } from './src/host/queue-mirror.ts'
@@ -544,45 +545,79 @@ export function makePendingProvider(projectKey: string, runningLookup?: (session
  * against malformed oversized payloads. Heuristic disclosure: prose-backstop.ts header.
  */
 export function makeRecentTextIo(ctx: Context): (sessionId: string) => Promise<RecentTextResult> {
+  return async (sessionId: string): Promise<RecentTextResult> => {
+    const r = await fetchRecentRecords(ctx, sessionId)
+    if (!r.ok) return r
+    const parts: string[] = []
+    collectStrings(r.records, parts, 0)
+    return { ok: true, text: parts.join('\n') }
+  }
+}
+
+/** Recent-history records fetch (t261006-05): the shared page/follow dance of
+ *  makeRecentTextIo, returning the RAW records so multiple consumers (round text,
+ *  approval face) read the same authorized window instead of each re-walking it.
+ *  ok:false = host face absent / call failed / malformed receipt — named, never silent. */
+export type RecentRecordsResult = { ok: true; records: unknown[] } | { ok: false; reason: string }
+
+export async function fetchRecentRecords(ctx: Context, sessionId: string): Promise<RecentRecordsResult> {
   type RecordLike = { type?: unknown; data?: unknown }
   type ControllerLike = {
     page?: (request: unknown, signal: AbortSignal) => Promise<{ records?: RecordLike[] }>
     follow?: (request: unknown, signal: AbortSignal) => AsyncIterable<unknown>
   }
-  const getController = (): ControllerLike | undefined =>
-    (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
-  return async (sessionId: string): Promise<RecentTextResult> => {
-    if (sessionId === '') return { ok: false, reason: 'executor session id not declared/adopted — no session to read recent round text from' }
-    const c = getController()
-    if (!c || typeof c.follow !== 'function' || typeof c.page !== 'function') {
-      return { ok: false, reason: 'host sessionController history page/follow face unreachable (headless or service not injected) — recent round text explicitly unavailable' }
+  if (sessionId === '') return { ok: false, reason: 'executor session id not declared/adopted — no session to read recent history from' }
+  const c = (ctx.get('sessionController') as unknown as ControllerLike | undefined) ?? undefined
+  if (!c || typeof c.follow !== 'function' || typeof c.page !== 'function') {
+    return { ok: false, reason: 'host sessionController history page/follow face unreachable (headless or service not injected) — recent history explicitly unavailable' }
+  }
+  const address = { kind: 'session', sessionId }
+  let throughSeq: number | null = null
+  const ac = new AbortController()
+  try {
+    const iter = c.follow({ address, maxMessages: 1 }, ac.signal)[Symbol.asyncIterator]()
+    const first = await iter.next()
+    const frame = first.value as { cursor?: unknown } | undefined
+    if (frame !== null && typeof frame === 'object' && typeof frame.cursor === 'number') throughSeq = frame.cursor
+    ac.abort() // window closed as soon as the cursor is in hand; the stream is no longer needed (residual consumer paths are torn down by return())
+    try { await iter.return?.(undefined) } catch { /* iterator already terminal = already torn down */ }
+  } catch (e) {
+    ac.abort()
+    return { ok: false, reason: `host follow window failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)} — recent history explicitly unavailable` }
+  }
+  if (throughSeq === null) {
+    return { ok: false, reason: 'follow opening frame has no cursor (host receipt shape differs from the 0.1.5 types) — recent history explicitly unavailable' }
+  }
+  try {
+    const page = await c.page({ address, throughSeq, maxMessages: 12 }, AbortSignal.timeout(10_000))
+    const records = Array.isArray(page?.records) ? page.records : null
+    if (records === null) return { ok: false, reason: 'page receipt lacks the records array (malformed host receipt) — recent history explicitly unavailable' }
+    return { ok: true, records }
+  } catch (e) {
+    return { ok: false, reason: `host page read failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)} — recent history explicitly unavailable` }
+  }
+}
+
+/**
+ * Unanswered-approval probe (t261006-05, KI-207 item 1): read the recent history
+ * window and hand the verdict to the pure core (approval-face.ts judgeApprovalWindow).
+ * available:false = the window was unreadable (named reason) — the liveness face is
+ * NOT fed either way (it never fakes "waiting" and never fakes "no approval").
+ */
+export function makeApprovalProvider(ctx: Context): (sessionId: string) => Promise<ApprovalFaceResult> {
+  return async (sessionId: string): Promise<ApprovalFaceResult> => {
+    const r = await fetchRecentRecords(ctx, sessionId)
+    if (!r.ok) {
+      return { available: false, awaiting: false, approval_id: null, asked_at: null, evidence: '', reason: r.reason }
     }
-    const address = { kind: 'session', sessionId }
-    let throughSeq: number | null = null
-    const ac = new AbortController()
-    try {
-      const iter = c.follow({ address, maxMessages: 1 }, ac.signal)[Symbol.asyncIterator]()
-      const first = await iter.next()
-      const frame = first.value as { cursor?: unknown } | undefined
-      if (frame !== null && typeof frame === 'object' && typeof frame.cursor === 'number') throughSeq = frame.cursor
-      ac.abort() // window closed as soon as the cursor is in hand; the stream is no longer needed (residual consumer paths are torn down by return())
-      try { await iter.return?.(undefined) } catch { /* iterator already terminal = already torn down */ }
-    } catch (e) {
-      ac.abort()
-      return { ok: false, reason: `host follow window failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)} — recent round text explicitly unavailable` }
-    }
-    if (throughSeq === null) {
-      return { ok: false, reason: 'follow opening frame has no cursor (host receipt shape differs from the 0.1.5 types) — recent round text explicitly unavailable' }
-    }
-    try {
-      const page = await c.page({ address, throughSeq, maxMessages: 12 }, AbortSignal.timeout(10_000))
-      const records = Array.isArray(page?.records) ? page.records : null
-      if (records === null) return { ok: false, reason: 'page receipt lacks the records array (malformed host receipt) — recent round text explicitly unavailable' }
-      const parts: string[] = []
-      collectStrings(records, parts, 0)
-      return { ok: true, text: parts.join('\n') }
-    } catch (e) {
-      return { ok: false, reason: `host page read failed: ${String(e instanceof Error ? e.message : e).slice(0, 200)} — recent round text explicitly unavailable` }
+    const w = judgeApprovalWindow(r.records)
+    return {
+      available: w.state !== 'unknown',
+      awaiting: w.state === 'awaiting',
+      approval_id: w.approval_id,
+      asked_at: w.asked_at,
+      evidence: w.evidence,
+      reason: w.state === 'unknown' ? 'recent history window contains no readable event records' : undefined,
     }
   }
 }
@@ -692,6 +727,7 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
       // t261004-08：waiting-on-host 观测面 + prose backstop 落账面（逐项目闭包）。
       waitingRunningLookup: (sid) => session.snapshot.runningOf(sid),
       recentText: makeRecentTextIo(ctx),
+      approvalProvider: makeApprovalProvider(ctx),
       proseBackstopIo: makeProseBackstopIo(key),
       now: Date.now,
     })

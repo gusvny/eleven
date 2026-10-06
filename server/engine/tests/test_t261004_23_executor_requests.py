@@ -138,8 +138,10 @@ def test_session_not_named_refused(tmp_path):
     assert out["reason"].startswith("session-not-named")
 
 
-def test_cwd_channel_executor_accepted(tmp_path):
-    # cwd 推导通道（watchdog 代建会话）：注册表条目指向的目录即执行器通道。
+def test_cwd_channel_executor_direct_write_closed(tmp_path):
+    # cwd-derived channel (watchdog-created session) = resident executor: the direct
+    # in-process append is closed (t261006-05, KI-208) — the refusal names the deliver
+    # way out and fires before any write (zero ledger rows).
     env = _env(tmp_path)
     env.pop(shared.CALLER_PROJECT_ENV)
     env[shared.CALLER_IDENTITY_SRC_ENV] = ""
@@ -149,8 +151,9 @@ def test_cwd_channel_executor_accepted(tmp_path):
     out = er.append_request(dict(VALID_BODY), 1000, env=env, cwd=str(proj_dir),
                             projects=projects, exclude_trees=(),
                             load_decl=_decl_loader([]))
-    assert out["ok"] is True
-    assert out["row"]["project"] == "proj-alpha" and out["row"]["raised_by"] == "sess-exec-1"
+    assert out["ok"] is False and out["field"] == "channel"
+    assert "client.py deliver" in out["error"] and "no approval answerer" in out["error"]
+    assert not _file(tmp_path).exists()
 
 
 def test_cwd_inside_engine_tree_not_derived(tmp_path):
@@ -172,11 +175,10 @@ def test_cwd_inside_engine_tree_not_derived(tmp_path):
     assert out["reason"].startswith("caller-undeclared")
 
 
-def test_cwd_inside_engine_tree_declared_session_resolves(tmp_path):
-    # Seam positive case (t261004-31): this ticket's root cause — this project's main
-    # directory IS the engine repo tree, so its named executor session used to be
-    # undeclared forever; with both anchors (cwd x naming) holding, identity resolves
-    # and the request can be filed.
+def test_cwd_inside_engine_tree_declared_session_direct_write_closed(tmp_path):
+    # Seam identity still resolves (t261004-31 anchors unchanged) — but the direct
+    # in-process append is now CLOSED for the declared-session resident-executor
+    # channel too (t261006-05, KI-208): structured refusal naming deliver, zero rows.
     env = _env(tmp_path)
     env.pop(shared.CALLER_PROJECT_ENV)
     env[shared.CALLER_IDENTITY_SRC_ENV] = ""
@@ -185,9 +187,34 @@ def test_cwd_inside_engine_tree_declared_session_resolves(tmp_path):
     out = er.append_request(dict(VALID_BODY), 1000, env=env, cwd=str(engine_dir),
                             projects=projects, exclude_trees=(str(engine_dir),),
                             load_decl=_decl_loader(["sess-exec-1"]))
+    assert out["ok"] is False and out["field"] == "channel"
+    assert "(channel=declared-session)" in out["error"]
+    assert "client.py deliver" in out["error"]
+    assert not _file(tmp_path).exists()
+
+
+def test_env_channel_direct_write_still_files(tmp_path):
+    # The env channel (explicit SANDBAR_CALLER_PROJECT — scripts, fixtures, ops
+    # tooling; a dsh session cannot inject shell env) is NOT gated: the sanctioned
+    # CLI filing contract is unchanged (integration t261004-23 keeps its shape).
+    env = _env(tmp_path)
+    out = er.append_request(dict(VALID_BODY), 1000, env=env,
+                            load_decl=_decl_loader(["sess-exec-1"]))
     assert out["ok"] is True
     assert out["row"]["project"] == "proj-alpha"
     assert out["row"]["raised_by"] == "sess-exec-1"
+
+
+def test_delivered_via_engine_process_bypasses_the_closure(tmp_path):
+    # delivered_via non-empty = the ENGINE process performs the append
+    # (executor_delivery) — never a direct executor-process write, so the closure
+    # does not apply (this is the sanctioned replacement path).
+    env = _env(tmp_path)
+    out = er.append_request(dict(VALID_BODY), 1000, env=env,
+                            load_decl=_decl_loader(["sess-exec-1"]),
+                            delivered_via="engine-process")
+    assert out["ok"] is True
+    assert out["row"].get("delivered_via") == "engine-process"
 
 
 def test_cwd_inside_engine_tree_session_absent_still_undeclared(tmp_path):

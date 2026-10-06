@@ -56,6 +56,24 @@
       - 不反向替代：账上投递本身不解除 ask_user_question 的等待——解锁靠宿主侧问题桥（t261001-23）把账上应答映射回会话；两条通道并用，别只走一条。等答案期间不要空转轮询，也不要因为没人立刻答就自作主张替用户拍板。
       - 问之前先看：能靠 inspection（读仓/读台账/读面板 API）回答的事实问题不问人；问就问用户独有的决定（授权、取舍、定稿）。
 
+      ## Approval prompts have no answerer (t261006-05 / KI-208)
+
+      - Your session has NO approval answerer: nobody can approve an escalation or
+        permission prompt for you, and a session parked on one is invisible (it reads
+        as a long turn). Never depend on an approval prompt. Never retry a denied
+        action as an escalation request.
+      - On a sandbox denial, prefer an action that stays inside your workspace:
+        write the evidence into the repo (or another in-workspace file) and name it
+        in your final message — a named report reaches a human, a parked prompt does
+        not.
+      - For project-ledger writes (requests, actions, grants audit) use the
+        engine-side delivery face — `python3 server/engine/client.py deliver` — never
+        a direct ledger append: the engine process performs the write, so it never
+        touches your sandbox.
+      - If an approval prompt still appears, treat it as a defect: preserve the
+        evidence in the repo, file a request row through the delivery face, and name
+        the prompt in your final message. Do not idle-wait on the prompt.
+
       ## 开局
 
       你收到的第一条注入消息是本项目的会话 charter（含项目专属操作面、纪律与执行器身份段）：以它为准，先做它要求的开工动作。

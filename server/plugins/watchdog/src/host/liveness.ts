@@ -22,7 +22,14 @@
  *    都不动它（t261001-19 缺陷 A 同形雷：宽限拍回拨时钟 ⇒ 后续分支永不可达）。
  */
 
-export type ExecutorLivenessState = 'advancing' | 'stalled' | 'no_signal' | 'missing' | 'long_turn'
+export type ExecutorLivenessState = 'advancing' | 'stalled' | 'no_signal' | 'missing' | 'long_turn' | 'awaiting_approval'
+
+/** Unanswered-approval signal (t261006-05, KI-207 item 1; verdict from approval-face.ts). */
+export interface UnansweredApprovalSignal {
+  approval_id: string | null
+  asked_at: number | null
+  evidence: string
+}
 
 export interface ExecutorLiveness {
   state: ExecutorLivenessState
@@ -46,6 +53,13 @@ export interface ProgressSignals {
   /** executor 会话本拍是否在跑（宿主 session API 的 running 位）；null = 本拍没读到
    *  （list 缺席/调用失败/会话不在列）——显式 unknown，绝不折叠成「正常」。 */
   sessionRunning: boolean | null
+  /** The unanswered approval read this tick (null/absent = no named ask in hand — an
+   *  unreadable window counts as no signal too; approval-face's unknown never fakes
+   *  "waiting" nor "none"). Non-null = a named ask, and the verdict takes priority
+   *  over every other no-progress branch (KI-207's lesson: running=true + waiting on
+   *  a human must not collapse into long_turn; another ticket's ledger rows must not
+   *  mask this session's park). */
+  unansweredApproval?: UnansweredApprovalSignal | null
 }
 
 /** 推进判定（纯函数）。墙钟只在「有信号但无推进」时兜底判 stalled。
@@ -65,6 +79,16 @@ export function judgeExecutor(
   }
   if (!signals.sessionKnown) {
     return { ...base, state: 'missing', evidence: 'No executor_session declared for this project (or the session does not exist yet). State: missing.' }
+  }
+  // A named unanswered approval outranks every progress/long-turn branch
+  // (t261006-05, KI-207 item 1): a session parked on a prompt emits no messages,
+  // the running bit stays true, and ledger rows may come from other tickets —
+  // all four legacy signals lie on this tick; only this named one tells the truth.
+  if (signals.unansweredApproval) {
+    return {
+      ...base, state: 'awaiting_approval',
+      evidence: `${signals.unansweredApproval.evidence} Source: session history approval/asked without approval/decided.`,
+    }
   }
   const progressed = signals.ledgerAdvanced || signals.sessionProgress === true ||
     (signals.lastWakeAt !== null && (lastProgressAt === null || signals.lastWakeAt > lastProgressAt))

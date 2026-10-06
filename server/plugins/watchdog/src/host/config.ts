@@ -88,7 +88,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
     desktop: true,
     night: { start: '23:00', end: '07:30', policy: 'redline-only' },
     redline: ['reconcile_mismatch', 'ledger_unreadable', 'engine_down', 'self_lock', 'stall', 'executor_missing',
-      'ask_unmirrored', 'deliver_refused'],
+      'ask_unmirrored', 'deliver_refused', 'executor_awaiting_approval'],
     keep_days: 14,
   },
 }

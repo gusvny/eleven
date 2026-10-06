@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 216,
-      "scenarios": 534
+      "engine_tests": 217,
+      "scenarios": 538
     },
     "vocab": [
       "behaviour",
@@ -1087,6 +1087,10 @@
       "anchor": "behaviour",
       "note": "t261004-36: zero temporary copy-lang-allow data markers (retirement guard)",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_05_executor_preset_approval_clause.py": {
+      "anchor": "source-text",
+      "note": "t261006-05 source-text lock: the executor preset carries the approval/escalation persona clause (no answerer / sandbox-inside preference / client.py deliver) and never names the direct ledger-append CLI"
     }
   },
   "scenarios": {
@@ -3753,6 +3757,21 @@
     "integration/t261005-09/sc_session_handle_contract.mjs": {
       "anchor": "contract",
       "note": "UI-1 session handle public contract: first-4-hex derivation, collision ladder to the tail form, malformed-input no-throw, purity, executor constant single source, client single-source import",
+      "sync_path": ""
+    },
+    "integration/t261006-05/sc_t26100605_executor_direct_write_refused.py": {
+      "anchor": "behaviour",
+      "note": "t261006-05: executor-shaped direct ledger write is a bounded named refusal pointing at the engine-side deliver face, zero ledger side effect, lane-agent exempt caller unchanged",
+      "sync_path": ""
+    },
+    "integration/t261006-05/sc_t26100605_awaiting_approval_liveness.mjs": {
+      "anchor": "contract",
+      "note": "t261006-05: an unanswered approval judges to the named awaiting_approval state (never long_turn) with the id in evidence; approvalFace asked/decided/unreadable truth table; base truth table unchanged without approval input",
+      "sync_path": ""
+    },
+    "integration/t261006-05/sc_t26100605_delivery_pointer_agreement.py": {
+      "anchor": "source-text",
+      "note": "t261006-05: engine CLI refusal face, persona clause and family scan must all name the same engine-side deliver replacement and never recommend the direct --op file append",
       "sync_path": ""
     },
     "integration/t261005-06/sc_sessions_project_file_journey.mjs": {
