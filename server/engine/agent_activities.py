@@ -2937,19 +2937,153 @@ def _reap_agent_proc(proc: subprocess.Popen, ticket_id: str = "", stage_id: str 
 
     notes: List[str] = []
     _sig_group(signal.SIGTERM)
-    notes.append("terminate（进程组）")
+    notes.append("terminate (process group)")
     try:
         proc.wait(timeout=term_timeout)
     except subprocess.TimeoutExpired:
         _sig_group(signal.SIGKILL)
-        notes.append("terminate 超时 %ss 升级 kill（进程组）" % term_timeout)
+        notes.append("terminate timed out after %ss, escalating to kill (process group)"
+                     % term_timeout)
         try:
             proc.wait(timeout=kill_timeout)
         except subprocess.TimeoutExpired:
-            notes.append("kill 后仍未退出（%ss），放弃等待" % kill_timeout)
-    note = "%s reap：%s，rc=%s" % (tag, "→".join(notes), proc.poll())
+            notes.append("still alive %ss after kill, giving up the wait" % kill_timeout)
+    note = "%s reap：%s，rc=%s" % (tag, "+".join(notes), proc.poll())
     activity.logger.info(note)
     return note
+
+
+# ---- t261006-08: the activity-side async twin of _reap_agent_proc + the owned-spawn
+# registry. Root cause it closes: every long spawn site guarded only
+# asyncio.TimeoutError, so an activity CANCELLATION (worker graceful stop / grace
+# expiry / workflow cancel) abandoned the whole session (admin→verify_lane→
+# run_scenarios→…), reparented it to init and let it run for hours after Temporal
+# had already failed the activity (261006 08:32 incident). Design reuses the proven
+# KI-009 machinery, single point, no diverging copy: session-isolated spawn
+# (start_new_session=True) → TERM the group first → bounded wait → KILL escalation
+# → bounded wait. TERM-first is deliberate: run_scenarios installs
+# lib_tmp_reclaim.install_signal_reclaim(), so a TERM lets the suite reclaim its
+# own TMPDIR fixtures on its terminal path (the R4 lever; a KILL bypasses it —
+# that residue stays with integration/tools/sweep_tmp_fixtures.py).
+
+#: Spawned process groups this worker process still owns (pid → info dict).
+#: Consumed by worker.py's shutdown roll-call (R2) and its terminal receipt (R3).
+_OWNED_SPAWNS: Dict[int, Dict[str, Any]] = {}
+
+
+def register_owned_spawn(proc: Any, tag: str = "") -> None:
+    """Register a session-isolated spawn right after it started successfully.
+
+    Only call this AFTER create_subprocess_exec returned a live proc — the
+    registry never guesses about spawns that failed to start. Duplicated
+    registration of the same pid is a no-op (idempotent, like lib_tmp_reclaim)."""
+    pid = getattr(proc, "pid", None)
+    if pid is None:
+        return
+    _OWNED_SPAWNS.setdefault(int(pid), {
+        "proc": proc, "tag": tag, "started_monotonic": time.monotonic()})
+
+
+def unregister_owned_spawn(proc: Any) -> None:
+    _OWNED_SPAWNS.pop(int(getattr(proc, "pid", 0) or 0), None)
+
+
+def owned_spawn_snapshot() -> List[Dict[str, Any]]:
+    """Copy of the owned-spawn registry for worker.py's shutdown roll-call (R2)."""
+    return [dict(v, pid=pid) for pid, v in _OWNED_SPAWNS.items()]
+
+
+async def reap_spawn_group(proc: Any, tag: str = "",
+                           term_timeout: float = AGENT_REAP_TERM_TIMEOUT_SEC,
+                           kill_timeout: float = AGENT_REAP_KILL_TIMEOUT_SEC) -> str:
+    """Async twin of _reap_agent_proc: TERM the process group → bounded wait →
+    KILL escalation → bounded wait. Idempotent on an already-exited proc ("" note).
+
+    Fault-mode disposition (carried from _reap_agent_proc unless noted):
+      - group already gone (ESRCH) / no permission (EPERM) → fall back to
+        signalling the direct child, best effort (carried);
+      - TERM ignored → KILL escalation with bounded waits (carried);
+      - proc already exited → no-op (carried);
+      - NOT carried: **group escape** — a grandchild that setsid/setpgid itself
+        leaves the killpg's reach and is invisible to the leftover receipt too.
+        Named boundary: this ticket accepts the residual; the repo-level sweeper
+        (integration/tools/sweep_tmp_fixtures.py, whitelist + age ≥ 6h) and the
+        inspection "temp dir water level" check remain the net for it.
+    Never raises for a missing group; OSError outside ESRCH/EPERM propagates
+    (same stance as the sync twin)."""
+    # asyncio.subprocess.Process has no poll() (sync-subprocess API) — returncode
+    # is the common exited-face for both the sync and the async proc objects.
+    if getattr(proc, "returncode", None) is not None:
+        return ""
+
+    def _sig_group(sig: int) -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except OSError as e:
+            if e.errno not in (errno.ESRCH, errno.EPERM):
+                raise
+            try:
+                proc.send_signal(sig)
+            except (ProcessLookupError, OSError):
+                pass
+
+    async def _wait_bounded(t: float) -> bool:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=t)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    notes: List[str] = []
+    _sig_group(signal.SIGTERM)
+    notes.append("terminate (process group)")
+    if not await _wait_bounded(term_timeout):
+        _sig_group(signal.SIGKILL)
+        notes.append("terminate timed out after %ss, escalating to kill (process group)"
+                     % term_timeout)
+        if not await _wait_bounded(kill_timeout):
+            notes.append("still alive %ss after kill, giving up the wait" % kill_timeout)
+    return "%s reap：%s，rc=%s" % (tag or "[reap]", "+".join(notes),
+                                  getattr(proc, "returncode", None))
+
+
+def wait_budget_exhausted(t0: float, timeout: float) -> bool:
+    """Did the bounded wait that started at t0 already run out its `timeout`?
+
+    Why this exists: on CPython 3.9, `asyncio.wait_for` can surface a bare
+    CancelledError INSTEAD of TimeoutError when the inner future is cancelled at
+    expiry (the conversion race in tasks.wait_for). A caller that must re-raise
+    genuine cancellations (never swallow them) but also keep its timeout receipt
+    needs a mechanical tiebreaker: the elapsed wall clock. True only when the
+    budget has actually run out — a real cancellation arriving early is never
+    mistaken for a timeout (t261006-08, first reproduced by the real-process UT)."""
+    return timeout > 0 and (time.monotonic() - t0) >= timeout
+
+
+async def reap_owned_spawns() -> Dict[str, Any]:
+    """Reclaim every spawn this worker still owns (worker.py's shutdown epilogue,
+    R2+R3). Runs AFTER Worker.shutdown() — i.e. on both the graceful-drain path
+    and the grace-expiry path, which both funnel through _graceful_shutdown.
+    Returns the machine-checkable receipt: {owned, reclaimed, leftover} where
+    leftover lists pids that resisted even KILL — non-empty must never be
+    silently absorbed (the caller logs it). Idempotent: registry empties as we
+    go, a second call returns owned=0."""
+    owned = 0
+    reclaimed = 0
+    leftover: List[int] = []
+    for pid, info in list(_OWNED_SPAWNS.items()):
+        owned += 1
+        try:
+            await reap_spawn_group(info["proc"], tag=str(info.get("tag") or "[reap]"))
+        except Exception as e:  # noqa: BLE001 — one bad group never blocks the others
+            activity.logger.warning("[shutdown-reclaim] group pid=%s reap raised %s: %s",
+                                    pid, type(e).__name__, e)
+        unregister_owned_spawn(info["proc"])
+        if getattr(info["proc"], "returncode", None) is None:
+            leftover.append(pid)
+        else:
+            reclaimed += 1
+    return {"owned": owned, "reclaimed": reclaimed, "leftover": leftover}
 
 
 def _path_exists_at_ref(repo: Path, ref: str, path: str) -> bool:
@@ -4896,7 +5030,14 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 # 被测契约 UT 被换成桩行为/测试台值造成假红（e2e 两轮实证）。
                 # 生产 worker 的正常运转不依赖子进程携带这些旋钮，剥除对生产恒等。
                 env={k: v for k, v in os.environ.items()
-                     if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS})
+                     if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS},
+                # t261006-08: session isolation (previously missing — the timeout kill
+                # could only kill the admin layer, and killpg without a fresh session
+                # would hit the worker's own group) + booking + reap-on-cancel,
+                # same discipline as _run_scenarios.
+                start_new_session=True)
+            register_owned_spawn(vp, tag="verify-lane-code")
+            _v_wait_t0 = time.monotonic()
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=900)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
@@ -4916,11 +5057,23 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         _red_lines.append(str((_it or {}).get("detail") if isinstance(_it, dict) else _it))
                 if _red_lines:
                     detail += "；%s" % "；".join(_red_lines[:6])
+            except asyncio.CancelledError:
+                # t261006-08: reap then re-raise — cancellation semantics are never
+                # swallowed (the outer `except Exception` cannot catch the
+                # BaseException-derived CancelledError; not handling it here would
+                # orphan the tree). py3.9 wait_for race: wall-clock disambiguation
+                # (run_handover_leg shape) — budget exhausted = the timeout leg.
+                await reap_spawn_group(vp, tag="verify-lane-code")
+                if not wait_budget_exhausted(_v_wait_t0, 900):
+                    raise
+                green, detail = False, "verify_lane timed out (>900s)"
             except asyncio.TimeoutError:
-                vp.kill(); await vp.wait()
-                green, detail = False, "verify_lane 超时（>900s）"
+                await reap_spawn_group(vp, tag="verify-lane-code")
+                green, detail = False, "verify_lane timed out (>900s)"
             except json.JSONDecodeError:
                 green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
+            finally:
+                unregister_owned_spawn(vp)
             checks.append({"item": "泳道内 verify_lane code 绿灯", "green": green, "detail": detail,
                            "id": "verify_lane_code",
                            **({} if green else {
@@ -7411,6 +7564,14 @@ def read_integ_progress(path: Any) -> Dict[str, Any]:
 HANDOVER_LEG_TIMEOUT_SEC = INTEG_CMD_TIMEOUT_SEC
 
 
+def _handover_timeout_receipt(name: str, cmd_s: str, p: Any, timeout_s: int) -> Dict[str, Any]:
+    """Receipt for the py3.9 wait_for race leg (expiry surfaced as CancelledError):
+    same contract as the TimeoutError leg, English wording (new line, copy gate)."""
+    return {"name": name, "cmd": cmd_s, "exit": p.returncode,
+            "output_tail": "handover leg timed out (>%ds, reaped by process group)"
+                           % timeout_s}
+
+
 async def run_handover_leg(leg: Dict[str, str], cwd: Path,
                            timeout: float = HANDOVER_LEG_TIMEOUT_SEC) -> Dict[str, Any]:
     """单条移交命令执行（t260917-08；260920 改走 shell，宿主令「A」）：worker 执行面
@@ -7442,22 +7603,29 @@ async def run_handover_leg(leg: Dict[str, str], cwd: Path,
     p = await asyncio.create_subprocess_exec(
         "/bin/sh", "-c", cmd_s, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env, start_new_session=True)
+    # t261006-08: book the spawn and reap on cancellation too — the old code only
+    # caught TimeoutError, so a cancelled activity (worker stop / grace expiry)
+    # abandoned the whole session as an orphan.
+    register_owned_spawn(p, tag="handover-leg")
+    _t0 = time.monotonic()
     try:
         out_b, _ = await asyncio.wait_for(p.communicate(), timeout=timeout)
+    except asyncio.CancelledError:
+        # py3.9 wait_for race: an expiry can surface as CancelledError. The wall
+        # clock decides — budget exhausted = the timeout leg (old receipt, no
+        # re-raise); cancelled early = a REAL cancellation: reap, re-raise.
+        await reap_spawn_group(p, tag="handover-leg")
+        if wait_budget_exhausted(_t0, timeout):
+            # race leg of the py3.9 wait_for quirk: same receipt contract, English
+            # wording (this line is new code — the L copy gate requires English)
+            return _handover_timeout_receipt(name, cmd_s, p, int(timeout))
+        raise
     except asyncio.TimeoutError:
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            try:
-                p.kill()
-            except ProcessLookupError:
-                pass
-        try:
-            await p.wait()
-        except Exception:
-            pass
+        await reap_spawn_group(p, tag="handover-leg")
         return {"name": name, "cmd": cmd_s, "exit": p.returncode,
                 "output_tail": "移交命令超时（>%ds，已按进程组 kill 排空）" % int(timeout)}
+    finally:
+        unregister_owned_spawn(p)
     tail = (out_b or b"").decode("utf-8", "replace")[-800:].strip()
     return {"name": name, "cmd": cmd_s, "exit": p.returncode, "output_tail": tail}
 
@@ -7876,18 +8044,15 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         # worker 同进程组，killpg 会杀进调用方自己（run_handover_leg 先例同款三件套）。
         start_new_session=True)
     _sub_t0 = time.monotonic()   # t260925-12：子进程链墙钟（admin→verify_lane→执行器）
-    try:
-        p_out_b, p_err_b = await asyncio.wait_for(
-            p.communicate(), timeout=_chain_to)
-    except asyncio.TimeoutError:
-        # t260924-05 KI-116：进程组回收（killpg 先例=run_handover_leg）——老裸
-        # p.kill() 只杀 admin.py 一层，verify_lane→sh→run_scenarios→node/docker
-        # 孙进程全漏，跨期孤儿累积正是泳道内锁/端口面挂死的嫌疑链一环。
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            p.kill()
-        await p.wait()
+    # t261006-08 (same shape as run_handover_leg): book the spawn and reap on
+    # cancellation too — the old code only caught TimeoutError, so a worker-stop
+    # cancellation abandoned the whole admin→verify_lane→run_scenarios chain as
+    # orphans (261006 08:32: verify_lane pid 7712 / run_scenarios pid 56735 ran
+    # reparented to init for another hour). The cancel branch reaps, then
+    # re-raises unchanged — cancellation semantics are never swallowed.
+    register_owned_spawn(p, tag="integ-chain")
+
+    def _timeout_receipt() -> IntegrationRunResult:
         # 260927 第二刀（宿主要求②）：整链被本层杀掉也要**保留已完成信息**——读跑者
         # 逐条落盘的进度件，把「已跑 N 条」与裸「未产出结果」两态分开点名。
         _partial = read_integ_progress(
@@ -7912,6 +8077,31 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
             progress=dict(_partial or {}),
             wall_s=time.monotonic() - _act_t0,
             subprocess_wall_s=time.monotonic() - _sub_t0)
+
+    _wait_t0 = time.monotonic()
+    try:
+        p_out_b, p_err_b = await asyncio.wait_for(
+            p.communicate(), timeout=_chain_to)
+    except asyncio.CancelledError:
+        # py3.9 wait_for race: an expiry can surface as a bare CancelledError —
+        # the wall clock decides: budget exhausted = timeout leg (receipt kept, no
+        # re-raise); cancelled early = a real cancellation (reap, re-raise).
+        await reap_spawn_group(p, tag="integ-chain")
+        if wait_budget_exhausted(_wait_t0, _chain_to):
+            return _timeout_receipt()
+        raise
+    except asyncio.TimeoutError:
+        # t260924-05 KI-116 (kept): group-granular reclaim — a bare p.kill() only
+        # kills the admin layer and leaks the verify_lane→sh→run_scenarios→node
+        # grandchildren (the cross-period orphan accumulation behind lane
+        # lock/port hangs). t261006-08: routed through the reap_spawn_group single
+        # point (TERM first → KILL escalation) — the TERM lets the runner's own
+        # lib_tmp_reclaim signal hook finish, reclaiming fixtures on this terminal
+        # path (the R4 lever).
+        await reap_spawn_group(p, tag="integ-chain")
+        return _timeout_receipt()
+    finally:
+        unregister_owned_spawn(p)
     p_stdout = p_out_b.decode("utf-8", "replace")
     p_stderr = p_err_b.decode("utf-8", "replace")
     try:
@@ -8361,18 +8551,28 @@ async def _reprobe_red_body(args: ReprobeRedArgs) -> ReprobeRedResult:
         # t260924-05 KI-116：与 _run_scenarios 同款——剥旋钮组装 + 会话隔离 +
         # 进程组回收（裸 p.kill() 漏孙进程）。
         env=integ_subprocess_env(), start_new_session=True)
+    # t261006-08 (same three states as run_handover_leg): book the spawn; reap on
+    # cancellation and re-raise; TERM→KILL reap on timeout keeping the receipt.
+    register_owned_spawn(p, tag="reprobe-red")
+    _wait_t0 = time.monotonic()
     try:
         p_out_b, p_err_b = await asyncio.wait_for(
             p.communicate(), timeout=INTEG_GUARD_SEC)
-    except asyncio.TimeoutError:
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            p.kill()
-        await p.wait()
+    except asyncio.CancelledError:
+        # py3.9 wait_for race: wall-clock disambiguation (run_handover_leg shape)
+        await reap_spawn_group(p, tag="reprobe-red")
+        if not wait_budget_exhausted(_wait_t0, INTEG_GUARD_SEC):
+            raise
         return ReprobeRedResult(
-            error="探针整体超时（>%ds）——进程已回收，保守计轮"
+            error="reprobe wall timed out (>%ds) — process reaped, conservative count"
                   % INTEG_GUARD_SEC)
+    except asyncio.TimeoutError:
+        await reap_spawn_group(p, tag="reprobe-red")
+        return ReprobeRedResult(
+            error="reprobe wall timed out (>%ds) — process reaped, conservative count"
+                  % INTEG_GUARD_SEC)
+    finally:
+        unregister_owned_spawn(p)
     res = parse_reprobe_summary(p_out_b.decode("utf-8", "replace"), p.returncode or 0)
     if not res.error and (p.returncode or 0) != 0:
         res.error = "探针 exit=%s（stderr 尾=%s）" % (

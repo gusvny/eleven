@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 217,
-      "scenarios": 538
+      "engine_tests": 218,
+      "scenarios": 541
     },
     "vocab": [
       "behaviour",
@@ -1086,6 +1086,11 @@
     "server/engine/tests/test_t261004_36_copy_marker_retirement.py": {
       "anchor": "behaviour",
       "note": "t261004-36: zero temporary copy-lang-allow data markers (retirement guard)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_08_shutdown_reclaim.py": {
+      "anchor": "behaviour",
+      "note": "t261006-08: pins the NEW shutdown/cancel process-group reclamation behaviour (reap_spawn_group TERM-to-KILL escalation, owned-spawn registry, cancel-vs-timeout wall-clock disambiguation under the py3.9 wait_for race, worker shutdown-reclaim receipt); no production snapshot involved",
       "sync_path": ""
     },
     "server/engine/tests/test_t261006_05_executor_preset_approval_clause.py": {
@@ -3757,6 +3762,21 @@
     "integration/t261005-09/sc_session_handle_contract.mjs": {
       "anchor": "contract",
       "note": "UI-1 session handle public contract: first-4-hex derivation, collision ladder to the tail form, malformed-input no-throw, purity, executor constant single source, client single-source import",
+      "sync_path": ""
+    },
+    "integration/t261006-08/sc_t26100608_cancel_reaps_process_group.py": {
+      "anchor": "behaviour",
+      "note": "t261006-08 R1/KI-210: real-tree reap on the cancel face — TERM-first receipt, grandchild dies with group, CancelledError re-raised, idempotent on dead pids, session-isolation source lock",
+      "sync_path": ""
+    },
+    "integration/t261006-08/sc_t26100608_shutdown_rollcall_receipt.py": {
+      "anchor": "contract",
+      "note": "t261006-08 R2+R3: roll-call enumerates owned children; machine-parseable shutdown-reclaim receipt with leftover naming; empty registry owned=0; epilogue-after-Worker.shutdown source lock",
+      "sync_path": ""
+    },
+    "integration/t261006-08/sc_t26100608_term_first_tmp_lifecycle.py": {
+      "anchor": "behaviour",
+      "note": "t261006-08 R4: TERM-first lets the child reclaim its own temp fixtures; bounded KILL escalation on a TERM-resisting child; shared-reaper source lock; sweeper non-regression",
       "sync_path": ""
     },
     "integration/t261006-05/sc_t26100605_executor_direct_write_refused.py": {

@@ -86,7 +86,8 @@ from agent_activities import ALL_AGENT_ACTIVITIES, make_stage_activity
 # logic lives in concurrency.py; this layer only enters the Temporal registry).
 from concurrency import CONCURRENCY_ACTIVITIES
 from dsh_pin import dsh_face_payload, enforce_expected
-from agent_activities import inflight_stage_snapshot, recent_stage_outcomes
+from agent_activities import (inflight_stage_snapshot, owned_spawn_snapshot,
+                              recent_stage_outcomes, reap_owned_spawns)
 from shared import (NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE,
                     configured_task_queues, pid_alive, read_pidfile_state)
 from shared import write_worker_meta
@@ -203,6 +204,19 @@ def _log_shutdown_disposition() -> None:
                      "——期内未收尾的将被取消并在票面点名「worker 被外部终止」", len(inflight), grace)
     else:
         logging.info("停机点名：无在飞 agent 活动（graceful_shutdown_timeout=%ss）", grace)
+    # t261006-08 (R2): extend the roll-call to the child process groups this worker
+    # still owns — the old roll-call had zero knowledge of this class (261006: a
+    # whole inspection suite ran orphaned for another hour, unclaimed on ps).
+    spawns = owned_spawn_snapshot()
+    if spawns:
+        for s in spawns:
+            logging.info("shutdown roll-call: owned child process group tag=%s pid=%s (running %ds)",
+                         s.get("tag") or "?", s.get("pid"),
+                         int(time.monotonic() - s.get("started_monotonic", time.monotonic())))
+        logging.info("shutdown roll-call: %d owned child process group(s) — reclaimed at the shutdown epilogue (see shutdown-reclaim receipt)",
+                     len(spawns))
+    else:
+        logging.info("shutdown roll-call: 0 owned child process groups")
 
 
 def _log_shutdown_outcome() -> None:
@@ -273,6 +287,20 @@ async def _graceful_shutdown(workers, run_tasks, watch_task,
     except asyncio.CancelledError:
         pass
     _log_shutdown_outcome()
+    # t261006-08 (R1+R3): after Worker.shutdown() returns — BOTH the graceful drain
+    # and the grace-expiry path funnel through this epilogue (once the SDK gives up
+    # at expiry, only this code still runs) — reclaim every process group this
+    # worker still owns and emit the receipt. The receipt line is the handover's
+    # mechanical check face: `shutdown-reclaim receipt:` with leftover=[] means
+    # "no process left behind for a failed/cancelled activity", no ps archaeology.
+    receipt = await reap_owned_spawns()
+    logging.info("shutdown-reclaim receipt: owned=%d reclaimed=%d leftover=%s",
+                 receipt["owned"], receipt["reclaimed"], receipt["leftover"])
+    if receipt["leftover"]:
+        logging.warning("shutdown-reclaim: pid=%s survived even KILL (see the named "
+                        "group-escape boundary on reap_spawn_group) — not silently "
+                        "absorbed, operator follow-up needed",
+                        receipt["leftover"])
     logging.info("worker 已优雅停止")
 
 
