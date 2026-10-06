@@ -610,6 +610,69 @@ async def verify_inspection_findings(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @activity.defn
+async def run_inspection_doc_mech(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Doc-face mechanical layer (M1-M7) — IO shell for the pure module
+    inspection_doc_mech (t261006-11). Computes the change surface from git
+    (diff-fed rules M3/M5/M7), wires the ticket/commit existence predicates,
+    and returns {ok, result:{findings, meta}} in the agent-finding shape.
+
+    Degradation, never fake green: git unavailable → diff-fed rules skipped with
+    a meta caveat; predicates unavailable → the M5 sub-check degrades with a
+    caveat. Business failures return ok=False; only true infrastructure errors
+    raise."""
+    from inspection_doc_mech import DocMechError, _git_changed, run_doc_mech
+    repo_root = str(args.get("base_dir") or "")
+    base_head = str(args.get("base_head") or "HEAD")
+    project_key = str(args.get("project_key") or "")
+    if not repo_root or not Path(repo_root).is_dir():
+        return {"ok": False, "error": "doc-mech input missing base_dir or dir absent (fail-closed)"}
+    no_diff = bool(args.get("no_diff"))
+    injected_added = args.get("added_lines")
+    injected_changed = args.get("changed_files")
+    if isinstance(injected_added, dict) or isinstance(injected_changed, list):
+        # injected change surface (UTs / callers that already computed the diff)
+        added = {k: {int(l): str(t) for l, t in (v or {}).items()}
+                 for k, v in (injected_added or {}).items()}
+        changed = [str(c) for c in (injected_changed or [])]
+    elif no_diff:
+        changed, added = [], {}
+    else:
+        try:
+            changed, added = await asyncio.to_thread(_git_changed, repo_root, base_head)
+        except Exception as e:      # noqa: BLE001 — degrade the diff face, keep the scan
+            changed, added = [], {}
+            activity.logger.warning("doc-mech change surface unavailable: %s", e)
+
+    # M5 existence predicates: ticket archive dir under the project key; commit via
+    # git cat-file. A missing record = the finding fires (fail closed); the project
+    # key is shape-gated before splicing into the archive path.
+    from shared import perkey_projects_root
+    import re as _re
+    perkey_root = perkey_projects_root()
+
+    def ticket_exists(tid: str) -> bool:
+        if not _re.match(r"^t\d{6}-\d{1,2}$", tid):
+            return False
+        if not _re.match(r"^[A-Za-z0-9][\w-]*$", project_key):
+            return False
+        return (perkey_root / project_key / "data" / "tickets" / tid).is_dir()
+
+    def commit_exists(sha: str) -> bool:
+        r = subprocess.run(["git", "-C", repo_root, "cat-file", "-e", sha + "^{commit}"],
+                           capture_output=True, timeout=30)
+        return r.returncode == 0
+
+    try:
+        result = await asyncio.to_thread(
+            run_doc_mech, repo_root, added, changed, ticket_exists, commit_exists, base_head)
+    except DocMechError as e:
+        return {"ok": False, "error": str(e)}
+    activity.logger.info("doc-face mechanical layer: %d finding(s), pages=%s",
+                         len(result["findings"]), result["meta"]["pages_scanned"])
+    return {"ok": True, "result": result}
+
+
+@activity.defn
 async def write_inspection_verdicts(args: Dict[str, Any]) -> Dict[str, Any]:
     """收口段把票面裁定批量落 verdicts 台账（t260916-22 要点⑥的持久面）。
 
@@ -1295,6 +1358,9 @@ ALL_ACTIVITIES = [
     # t260916-22：inspect 段 report 面机械复核（证据复核/去重压制/预算/汇总）；
     # run_inspection_scan 已退役（保留服务老票 replay，见其退役注记）。
     verify_inspection_findings,
+    # t261006-11: doc-face mechanical layer (M1-M7; a pure-read scan that runs
+    # alongside the inspect stage for face=doc periods)
+    run_inspection_doc_mech,
     # t260916-22：发现级裁定的持久面（收口一次写齐；票内 signal 只改内存）。
     write_inspection_verdicts,
     # t260928-13：事件账本写活动（append-only per-project JSONL；真源 event_ledger.py）

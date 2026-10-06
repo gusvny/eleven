@@ -192,6 +192,11 @@ def inspect_start_to_close(timeout_sec: float) -> timedelta:
 # in-flight 票（含 260917 的 awaiting-human 旧形壳）history 无此标记 → patched()=False
 # 走旧路径收口，零影响。机器化验证=replay_check.py --workflow <老票 id>（S4 自测实测）。
 REDIRECT_PATCH_ID = "t260917-02-inspection-legacy-fire-redirect"
+# Version gate (t261006-11, replay-safe): the doc-face mechanical layer (M1-M7).
+# Only periods with face=doc run the mechanical activity; old in-flight tickets
+# have no marker in their history → patched()=False → the activity command is
+# never replayed (same shape as the gates above).
+DOC_MECH_PATCH_ID = "t261006-11-inspection-doc-mech"
 # 版本门 id（260926，replay 安全）：lane/watchdog 面（**只读**扫非终态票的工作流时间线/
 # 快照——同票重跑轮次 / tests-fault 回路停留 / 在飞静默僵尸；KI-122 追加面，KI-126 同源）
 # 只在新 run 生效。老 in-flight 巡检票 history 无此标记 → patched()=False → 不注入新活动
@@ -1463,6 +1468,28 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                 ticket_id, inp, period, "inspect",
                 str((inspect_raw or {}).get("error") or "inspect stage failed"), lane)
         ins_result = (inspect_raw or {}).get("result") or {}
+        # ---- doc-face mechanical layer (t261006-11): M1-M7 run over the whole
+        # library every period, findings merged into the SAME payload before the
+        # report-stage recheck, so panel / report / adjudication / dedupe stay
+        # single-sourced (design section 3, output shape). base_ref empty (no
+        # lane) → the daily period surface = the last day's commits (HEAD~1).
+        doc_mech_meta: Optional[Dict[str, Any]] = None
+        if workflow.patched(DOC_MECH_PATCH_ID) and str(plan.get("scan_face") or "") == "doc":
+            mech_raw: Any = await workflow.execute_activity(
+                "run_inspection_doc_mech",
+                args=[{"base_dir": base_dir,
+                       "base_head": (lane or {}).get("base_ref", "") or "HEAD~1",
+                       "project_key": getattr(inp, "project_key", "")}],
+                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+            if not (mech_raw or {}).get("ok"):
+                return await self._blocked(
+                    ticket_id, inp, period, "inspect",
+                    str((mech_raw or {}).get("error") or "doc-face mechanical layer failed"),
+                    lane)
+            mech_result = (mech_raw or {}).get("result") or {}
+            doc_mech_meta = dict(mech_result.get("meta") or {})
+            merged = list(mech_result.get("findings") or []) + list(ins_result.get("findings") or [])
+            ins_result["findings"] = merged
         # ---- report 段：机械复核（证据复核/去重压制/预算/汇总——纯函数链在活动内） ----
         self._enter("report", "running",
                     "Mechanical evidence recheck (%d agent findings)" % len(ins_result.get("findings") or []))
@@ -1481,6 +1508,8 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         ins_meta = dict(ins_result.get("meta") or {})
         ins_meta.pop("output_log", None)   # agent 原始日志路径进 meta 太吵，落 agent-home 留档即可
         vmeta["inspect"] = ins_meta
+        if doc_mech_meta is not None:
+            vmeta["doc_mech"] = doc_mech_meta
         # Coverage onto the ticket face (t261006-12, L5 hard requirement): which
         # files were reviewed and which were not = **full lists** onto the
         # face/ledger doc ("not reviewed" never reads as "no problem"). Injected

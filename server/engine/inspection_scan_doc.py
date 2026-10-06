@@ -9,6 +9,17 @@ t260911-02).
 本文件保留一版只服务老在途票 replay（Temporal 重放历史里的 run_inspection_scan
 调用必须仍能匹配）——新代码禁接线本模块；S1~S4 静态发现自此不再产出，274 条旧
 发现整体作废不迁移（宿主裁定④）。deadman/suite 机械面不受影响。
+
+【Successor (t261006-11, host 261004 approved the mechanical-layer revival)】the
+doc-face mechanical layer (M1-M7) now lives in inspection_doc_mech.py (pure
+functions + the activities.run_inspection_doc_mech shell + the workflow wiring
+behind DOC_MECH_PATCH_ID). Per-item carry list is in that module's header:
+S8 → M1 (two-way widened to index/README/files three-way); S9 → M1 frontmatter
+(lexical constants carried as-is); S10 → M2/M5 (explicit-shape-only carried;
+relative resolution FIXED to the document's own directory, glob shapes never
+treated as paths — this module's repo-root resolution was the root cause of the
+140-false-positive period; do not copy it). This module stays replay-only: the
+new module is the single source of truth for the rules.
 ------------------------------------------------------------------------
 
 Red line: inspection only produces reports and ticket-opening suggestions, it never
