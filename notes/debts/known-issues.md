@@ -3693,3 +3693,34 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **列出来并回收**（现在停机点名只报"无在飞 agent 活动"，对这类子进程零掌握）；
 > ③临时目录/日志生命周期与活动终态绑定（见下条磁盘面）。
 > **回归**：L1——起一个会阻塞很久的子进程活动，触发停机/取消，断言该子进程树**被回收**（ps 里查不到）。
+
+## KI-211 唤醒面**自锁**：一份未被消化的简报卡在会话队列里 ⇒ 守望者此后拒绝**一切**唤醒，执行器再也叫不醒（261006 09:38→10:30 实证）
+
+> **现象**：宿主 10:2x 令「把 executor 激活干活」。我按合法口子连投两次
+> `POST /sandbar-watchdog/api/wake`（宿主已让我代答那条请求，`waiting_on_host` 已 clear），
+> 回执两次都是同一句：
+> `attempted:false, woke:false, reason:"queue mirror reports our brief still undigested
+> (last brief on record: watchdog-fc822a98-6239-488b-8c33-039ab760a297) — not re-delivering on top of it"`。
+> 即：救援动作**被引擎按设计拒绝**——不是我没试，是这条路被锁死了。
+>
+> **机制**：①执行器会话 09:38:00 收到一份 wake 简报（`mode=steer, accepted=true`），
+> 但 09:39:00 那一轮以 **TRANSPORT（KI-088）**结束，简报**没被消化**；
+> ②守望者的唤醒判据在决定前先读**队列镜像**（`core.ts:529`「consults the queue mirror BEFORE deciding」），
+> 镜像报"我们那份简报仍在队列里未消化" ⇒ **拒绝再投**；该判据对**所有**唤醒源生效
+> （应答请求 / 告警消解 / 票状态迁移），于是全部被同一 latch 挡住；
+> ③**自愈面也救不了**：`decideSelfHeal` 的 guard (a) 要求"有未被应答的 ask"，
+> 而宿主刚让我**代答了唯一那条请求**（`waiting: clear`）⇒ 自愈恒 `hold`
+> （原文「no unanswered ask attributed to this session … a long turn without an ask is healthy」）；
+> ④`queue_mirror: live（更新 1 次，坏帧 0）`——镜像自启动只收到一次更新，**自己也刷不掉**这条误判。
+> 三条叠加 ⇒ **锁死于"不重复投递"这条正确纪律**：设计意图对（不叠简报），缺的是"简报长期未消化"的出路。
+>
+> **危害**：执行器变成**只能靠控制台侧动作恢复**的僵尸——引擎侧所有唤醒源（含自愈）全灭，
+> 而它面前堆着 6 道无人签的门（巡检 close ×2、`-01`、`-11`、`-05` 重验后的合并门、`-10` 仲裁门）
+> ⇒ "它会自己签"整个机制停摆。观测量还骗人：`liveness.executor` 报 `advancing`，
+> 而会话文件自 **09:39 起零写入**（progress 判据与实际相反）。
+>
+> **出路（建议，实现口径归修复票）**：①「简报长期未消化 + 会话 idle」⇒ 走**复位重投**
+> （清该队列项 / cancel 该轮后重投，并记 attempt），别永久 latch；②把这条状态并进 liveness 的**具名状态**
+> （不要报 advancing）；③给宿主一个**具名复位入口**（面板一个按钮就够），别让唯一出路是"重启控制台"；
+> ④队列镜像不可读/未刷新时**不得**当作"未消化"的长期结论（no-signal 语义要有时限）。
+> **回归**：L1——构造「队列里有一份未消化简报 + 会话 idle」，断言唤醒面给出**具名可执行出路**，而不是静默拒绝。
