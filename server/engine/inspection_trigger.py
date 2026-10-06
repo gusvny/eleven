@@ -888,6 +888,66 @@ async def cmd_deadman(args: argparse.Namespace) -> Dict[str, Any]:
     return _ok(result)
 
 
+def cmd_weekly(args: argparse.Namespace) -> Dict[str, Any]:
+    """Cross-face / cross-period aggregate weekly page (epic inspection ticket 3,
+    t261006-14; read-only derived face).
+
+    Reads period ledgers + verdicts + journals (single source = existing
+    artifacts, no second ledger); the pure layer build_aggregate derives one
+    page and this shell writes EXACTLY its own report file
+    aggregate-<instance>-<anchor-period>.json (the `aggregate-` prefix never
+    enters deadman ledger accounting). Offline derivation by default (no
+    Temporal). --with-tickets asks for the online ticket-state reader (needs
+    the venv); the engine ticket face has no finding->ticket index yet, so the
+    online reader also returns None for now => ticket_states_available=false,
+    a conservative named degrade, never guessed fixed (index wiring is a
+    named follow-up of this epic)."""
+    from inspection_aggregate import aggregate_report_name, build_aggregate
+    try:
+        decl, decl_project = _resolve_decl(args.decl_path, args.instance)
+    except ValueError as e:  # noqa: BLE001 — unusable declaration = named ok=False, no guessing
+        return _err(str(e))
+    except Exception as e:  # noqa: BLE001
+        return _err("declaration unavailable: %s" % e)
+    it = decl.instance(args.instance)
+    if it is None:
+        return _err("instance %r not in declaration (registered: %s)"
+                    % (args.instance, ", ".join(i.id for i in decl.instances)))
+    ledger_dir = Path(args.ledger_dir) if args.ledger_dir else _default_ledger_dir()
+    lookup = None
+    if args.with_tickets:
+        try:
+            import temporalio  # noqa: F401 — availability probe (same discipline as the online deadman face)
+        except ImportError as e:
+            return _err("the online ticket-state reader needs temporalio (%s); "
+                        "use the default offline derivation" % e)
+
+        def lookup(finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            return None              # finding->fix-ticket index not wired: named not-available, no guessing
+    try:
+        page = build_aggregate(
+            args.instance, ledger_dir,
+            window_days=int(args.window_days), overdue_days=int(args.overdue_days),
+            cron=str(getattr(it, "cron", "") or ""), tz_name=str(getattr(it, "tz", "") or ""),
+            lookback_days=int(args.lookback_days), grace_days=int(args.grace_days),
+            ticket_lookup=lookup)
+    except Exception as e:  # noqa: BLE001
+        return _err("aggregate failed: %s: %s" % (type(e).__name__, e))
+    if not page.get("anchor_period"):
+        return _err("no readable period ledger under %s — the aggregate page has no "
+                    "anchor period; no empty-shell file is produced" % ledger_dir)
+    page["decl_project"] = decl_project
+    out_path = Path(ledger_dir) / aggregate_report_name(args.instance,
+                                                        page["anchor_period"])
+    try:
+        out_path.write_text(json.dumps(page, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as e:
+        return _err("aggregate report write failed: %s: %s" % (type(e).__name__, e))
+    page["report_path"] = str(out_path)
+    page["alarmed"] = bool(page["missed_periods"] or page["overdue"])
+    return _ok(page)
+
+
 def _default_ledger_dir() -> Path:
     """台账目录默认值（与 shared.INSPECTION_DIR 同口径：server/engine/out/inspection，
     env SANDBAR_INSPECTION_DIR 覆盖）——不 import shared，decl/deadman 子命令保持零
@@ -1151,6 +1211,17 @@ def main() -> None:
     p.add_argument("--keep-period", default="", help="水位期号；空=无水位（全清）")
     p.add_argument("--remove-period", default="", help="定向模式：只清恰好等于该期号的条目（忽略水位）")
     p.add_argument("--repo-root", default="")
+    p = sub.add_parser("weekly", help="cross-face / cross-period aggregate weekly page (read-only; writes only aggregate-<instance>-<anchor>.json; non-empty overdue/missed = exit 1)")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--ledger-dir", default=None,
+                   help="ledger dir (default out/inspection, SANDBAR_INSPECTION_DIR override)")
+    p.add_argument("--window-days", default=7)
+    p.add_argument("--overdue-days", default=7)
+    p.add_argument("--lookback-days", default=7)
+    p.add_argument("--grace-days", default=0)
+    p.add_argument("--with-tickets", action="store_true",
+                   help="attach the online ticket-state reader (needs temporalio; the finding->ticket index is not wired yet, so this still degrades named-conservative)")
+    p.add_argument("--decl-path", default=None)
     args = ap.parse_args()
     if not args.op:
         _emit(_err(USAGE))
@@ -1160,6 +1231,8 @@ def main() -> None:
             result = cmd_decl(args)
         elif args.op == "sweep-lanes":
             result = cmd_sweep_lanes(args)
+        elif args.op == "weekly":
+            result = cmd_weekly(args)
         else:
             result = asyncio.run({"trigger": cmd_trigger, "trigger-produce": cmd_trigger_produce,
                                   "sign": cmd_sign,

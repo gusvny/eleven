@@ -1097,6 +1097,11 @@
       "anchor": "source-text",
       "note": "t261006-05 source-text lock: the executor preset carries the approval/escalation persona clause (no answerer / sandbox-inside preference / client.py deliver) and never names the direct ledger-append CLI"
     },
+    "server/engine/tests/test_261006_inspection_aggregate.py": {
+      "anchor": "behaviour",
+      "note": "t261006-14: per-rule truth table for the aggregate page (window edges, verdict winner across periods and within one file, overdue boundary, degraded ticket states, damaged-input naming, determinism, write-scope of the weekly shell face)",
+      "sync_path": ""
+    },
     "server/engine/tests/test_t261006_07_conflict_deadlock.py": {
       "anchor": "behaviour",
       "note": "t261006-07: the conflict-round cap can no longer deadlock a lane — settle-first plan on a blocked route, human signal (rework/retry_qc) resets the counter (rejected rework never does), settle-success resets it, join mid-merge guard settles a clean face through the shared settle core, blocked texts name executable exits only",
@@ -3817,6 +3822,11 @@
     "integration/t261005-06/sc_chat_band_and_two_entrances.mjs": {
       "anchor": "behaviour",
       "note": "UI-5 UI face: identity band channel switch, handle labels, both §2.6 entrances, executor row, zero-residue lifecycle",
+      "sync_path": ""
+    },
+    "integration/t261006-14/sc_inspection_aggregate_report.py": {
+      "anchor": "behaviour",
+      "note": "t261006-14: the one-page aggregate derives new/fixed/overdue from existing ledgers+journals+ticket states, names missing/damaged inputs (never silently blank), writes only its own report, stays invisible to deadman accounting; pre-implement red expected, green at gate",
       "sync_path": ""
     },
     "integration/t261006-07/sc_main_sync_conflict_deadlock.py": {
