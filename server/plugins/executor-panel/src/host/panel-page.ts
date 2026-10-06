@@ -564,8 +564,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   function rowBody(r){
     var qfull = '<div class="qfull">'+renderMarkdown(r.question||'')+'</div>';
     if(r.status==='answered'){
+      // t261006-06: an answered request can be run as ONE high-privilege
+      // one-shot unit -- the approval is the gate; the watchdog re-checks it
+      // and consumes it (one execution per approval). The action text is
+      // typed by the host in the prompt box.
       return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
         + '<div class="given">You answered: '+renderMarkdown(r.answer||'')+'</div>'
+        + '<div class="oneshot"><textarea placeholder="Exact privileged action to run" data-shotactionbox="1"></textarea><button data-shotrun="1">Run as one-shot</button></div>'
         + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
     var inlineOpts = hasOptions(r) && !state.revealedIds.has(r.id);
@@ -721,6 +726,26 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         if(input.value.trim()!=='') sendAnswer(b.closest('[data-row]').dataset.row, input.value); else input.focus();
       };
     });
+    Array.prototype.forEach.call(root.querySelectorAll('button[data-shotrun]'), function(b){
+      b.onclick = function(){
+        var input = b.parentElement.querySelector('textarea');
+        var rowId = b.closest('[data-row]').dataset.row;
+        if(input.value.trim()!=='') runOneShot(rowId, input.value); else input.focus();
+      };
+    });
+  }
+  function runOneShot(id, action){
+    postJson('/sandbar-executor-panel/api/one-shot/spawn', {project: state.project, request_id: id, action: action})
+      .then(function(j){
+        var sp = j && j.spawn;
+        if(j && j.ok===true && sp && sp.spawned===true){
+          alert('One-shot unit spawned: session '+(sp.sessionId||'?'));
+        } else {
+          alert('The one-shot spawn was refused: '+((sp&&sp.reason)||(j&&j.error)||'?'));
+        }
+        loadRequests();
+      })
+      .catch(function(e){ alert('The one-shot spawn failed to send: '+((e&&e.message)||e)); });
   }
   function sendAnswer(id, answer){
     // t261004-18（KI-193）：不发送 by——写者由服务端凭据定名（'host'），调用方

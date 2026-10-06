@@ -46,7 +46,10 @@ import {
   ensureExecutorSession, sessionEventPath, readSessionEvents,
   type SessionCreateIo, type SessionProvenanceEvent,
 } from './src/host/session-create.ts'
-import { runOneShotUnit, readConcurrencyLimit, type OneShotUnit, type OneShotOutcome } from './src/host/one-shot.ts'
+import { runOneShotUnit, readConcurrencyLimit, runsPath, type OneShotUnit, type OneShotOutcome } from './src/host/one-shot.ts'
+import { spawnApprovedUnit, privilegeAuditPath, privilegeDeclPath, smuggledPrivilegeKeys } from './src/host/one-shot-privilege.ts'
+import { instanceProjectsRoot } from './src/host/config.ts'
+import { projectMainDir } from './src/host/session-create.ts'
 import { readRequests, fsLedgerIo, appendRequest } from '../executor-panel/src/host/requests.ts'
 import type { RecentTextResult, ProseBackstopIo } from './src/host/core.ts'
 
@@ -359,7 +362,15 @@ export function makeSessionEnsure(ctx: Context, project: string) {
  *  filed by the session itself (engine settle port executor_oneshot.py +
  *  request/action ledgers), so the summary honestly says "delivered" and never
  *  pretends the unit finished. Host service absent = explicit refused. */
-export function makeOneShotRunner(ctx: Context, project: string) {
+export function makeOneShotRunner(ctx: Context, project: string, opts?: {
+  /** The declared high-privilege preset (t261006-06): the ONLY elevation
+   *  channel the host create call accepts; the default stays the resident
+   *  executor preset for callers that do not opt into privilege. */
+  presetName?: string
+  /** Unit briefing appended to the turn prompt: object, exact action,
+   *  privilege scope (composed by one-shot-privilege.ts). */
+  briefing?: string
+}) {
   const createIo = makeSessionCreateIo(ctx)
   const io = {
     readText: (p: string) => readFile(p, 'utf8'),
@@ -380,6 +391,7 @@ export function makeOneShotRunner(ctx: Context, project: string) {
       unit: input.unit,
       limit: limit.ok ? limit.limit : null,
       lockTimeoutMs: oneShot.lock_timeout_ms,
+      presetName: opts?.presetName,
       io,
       sessions: {
         create: (req) => createIo.create({ cwd: req.cwd, agentPreset: req.agentPreset }),
@@ -389,7 +401,8 @@ export function makeOneShotRunner(ctx: Context, project: string) {
           if (!c || typeof c.prompt !== 'function') {
             return { ok: false, summary: 'host sessionController.prompt unreachable (headless) — one-shot turn not delivered' }
           }
-          await c.prompt({ sessionId, message: ONE_SHOT_TURN_PROMPT }, AbortSignal.timeout(10_000))
+          const prompt = opts?.briefing ? ONE_SHOT_TURN_PROMPT + ' ' + opts.briefing : ONE_SHOT_TURN_PROMPT
+          await c.prompt({ sessionId, message: prompt }, AbortSignal.timeout(10_000))
           return { ok: true, summary: 'bounded unit prompt delivered' }
         },
       },
@@ -818,11 +831,85 @@ export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
     })
   }
 
+
+  /**
+   * t261006-06 one-shot ignition: the named, approval-gated spawn entry for
+   * one high-privilege bounded unit. The human approval IS the gate: the
+   * request must exist in the panel request ledger AND be answered by a
+   * writer other than its raiser, the request must not be expired, the
+   * declared privilege grant must not have aged out, and the approval must
+   * not already be consumed (one privileged execution per human approval,
+   * checked against the append-only run journal + privilege audit, never the
+   * mutable lock). The preset and scope come ONLY from the human-authored
+   * one-shot-privilege.json declaration -- preset/scope keys in the body are
+   * refused by name (no self-elevation). The audit row is appended BEFORE
+   * the session is created; an append failure refuses the spawn (fail
+   * closed). Reuses the wake face's HTTP discipline: POST-only, non-JSON
+   * 400, bad project 400, undeclared project 404 zero-behavior, handler
+   * throw 500 with the message.
+   */
+  async function handleOneShotRun(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'one-shot run face is POST-only (write operation, explicit trace)' })
+      return
+    }
+    let raw = ''
+    req.on('data', (chunk: Buffer) => { raw += chunk.toString('utf8') })
+    req.on('error', () => sendJson(res, 400, { ok: false, error: 'request body read failed' }))
+    req.on('end', () => {
+      void (async () => {
+        let body: Record<string, unknown>
+        try { body = JSON.parse(raw) as Record<string, unknown> } catch { sendJson(res, 400, { ok: false, error: 'non-JSON body — explicitly refused' }); return }
+        const smuggled = smuggledPrivilegeKeys(body)
+        if (smuggled.length > 0) {
+          sendJson(res, 400, { ok: false, error: `body must not carry privilege keys (${smuggled.join(', ')}) — preset and scope come only from one-shot-privilege.json; no self-elevation` })
+          return
+        }
+        const key = typeof body.project === 'string' ? body.project : ''
+        if (!isValidProjectKey(key)) { sendJson(res, 400, { ok: false, error: `project shape is not valid: ${key || '(absent)'}` }); return }
+        const requestId = typeof body.request_id === 'string' ? body.request_id : ''
+        if (requestId === '') { sendJson(res, 400, { ok: false, error: 'request_id must be a non-empty string' }); return }
+        const action = typeof body.action === 'string' ? body.action.trim() : ''
+        const cfg = loadWatchdogConfig(key)
+        if (!cfg.declared) { sendJson(res, 404, { ok: false, error: `project has no watchdog declaration: ${key} — one-shot run face zero-behavior (explicit)` }); return }
+        const dataDir = watchdogDataDir(process.env)
+        const auditFile = privilegeAuditPath(dataDir, key)
+        const readOrNull = (p: string): Promise<string | null> =>
+          readFile(p, 'utf8').catch((e: unknown) => ((e as { code?: string }).code === 'ENOENT' ? null : Promise.reject(e)))
+        try {
+          const result = await spawnApprovedUnit({
+            read: readOrNull,
+            auditAppend: (row) => mkdir(dirname(auditFile), { recursive: true }).then(() => appendFile(auditFile, JSON.stringify(row) + '\n', 'utf8')),
+            runUnit: async (input) => {
+              const cwd = projectMainDir(key, process.env)
+              if (!cwd.ok) return { action: 'refused', reason: `one-shot unit has no project main dir: ${cwd.error}` }
+              const runUnit = makeOneShotRunner(ctx, key, { presetName: input.presetName, briefing: input.briefing })
+              return runUnit({ unit: input.unit, projectMainDir: cwd.cwd })
+            },
+            project: key,
+            requestId,
+            action,
+            declFile: privilegeDeclPath(watchdogConfigDir(process.env), key),
+            ledgerFile: join(instanceProjectsRoot(process.env), key, 'requests.jsonl'),
+            runsFile: runsPath(dataDir, key),
+            auditFile,
+            nowMs: Date.now(),
+          })
+          if (result.ok) sendJson(res, 200, { ok: true, spawn: result.spawn })
+          else sendJson(res, result.status, { ok: false, error: result.error })
+        } catch (err) {
+          sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+        }
+      })()
+    })
+  }
+
   const attach = (ws: { register: (o: { kind: string; path: string; handler: (req: IncomingMessage, res: ServerResponse) => Promise<void> | void }) => () => void }): void => {
     ctx.effect(() => {
       const disposers = [
         ws.register({ kind: 'exact', path: '/sandbar-watchdog/api/status', handler: handleStatus }),
         ws.register({ kind: 'exact', path: '/sandbar-watchdog/api/wake', handler: handleWake }),
+        ws.register({ kind: 'exact', path: '/sandbar-watchdog/api/one-shot/run', handler: handleOneShotRun }),
       ]
       return () => { for (const d of disposers) d() }
     }, 'sandbar-watchdog: status route')

@@ -106,6 +106,7 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   { path: '/sandbar-executor-panel/api/grants', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/actions', methods: ['GET'] },
   { path: '/sandbar-executor-panel/api/one-shot', methods: ['GET'] },
+  { path: '/sandbar-executor-panel/api/one-shot/spawn', methods: ['POST'] },
   { path: '/sandbar-executor-panel/api/projects', methods: ['GET'] },
   // t261004-44 (KI-196 way out (2)): the question-bridge state face -- mounted flag /
   // per-kind counters / recent event ring. GET-only (read face); the read source is
@@ -130,6 +131,10 @@ export interface ApiDeps {
    *  watchdog wake endpoint (default = same-origin fetch, see defaultWakeCaller;
    *  tests inject a stub). */
   wakeCaller?: (args: { project: string; requestId: string; detail: string }) => Promise<WakeCallResult>
+  /** t261006-06 spawn-caller seam: forward an approved one-shot spawn to the
+   *  watchdog route (default = same-origin fetch, see defaultSpawnCaller;
+   *  tests inject a stub). */
+  spawnCaller?: (args: { project: string; requestId: string; action: string }) => Promise<SpawnCallResult>
   /** Write credential verdict face (default defaultAuthFace; test stub injection, KI-193). */
   authFace?: AuthFace
   /** Authority-declaration write face (default spawnEngineGrantsWrite via the engine CLI; test stub, KI-193). */
@@ -144,6 +149,13 @@ export interface ApiDeps {
  *  is never silently absent). */
 export type WakeCallResult =
   | { ok: true; receipt: { attempted: boolean; woke: boolean; reason: string; mode?: string | null; accepted?: boolean | null; at?: number } }
+  | { ok: false; reason: string }
+
+/** t261006-06 spawn-call result: the watchdog spawn receipt is validated to
+ *  shape here, like the wake receipt -- never trusted blindly, never echoed
+ *  verbatim. */
+export type SpawnCallResult =
+  | { ok: true; receipt: { action: string; sessionId?: string; objectKey?: string; outcome?: string; summary?: string } }
   | { ok: false; reason: string }
 
 /**
@@ -251,6 +263,45 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       return { ok: false, reason: 'watchdog wake response is not a receipt shape — normalized to explicit failure, never trusted blindly' }
     } catch (e) {
       return { ok: false, reason: `watchdog wake call failed: ${e instanceof Error ? e.message : String(e)}` }
+    }
+  }
+
+  /**
+   * t261006-06 default spawn caller: POST to the watchdog
+   * /sandbar-watchdog/api/one-shot/run route (same same-origin discipline as
+   * the wake caller: the Host header verbatim, no credentials, no path
+   * following, no outbound rewrite). The receipt is validated to shape;
+   * non-200 / non-JSON / non-receipt bodies normalize into ok:false with the
+   * reason named. An unresolvable base is an explicit no-op.
+   */
+  async function defaultSpawnCaller(args: { project: string; requestId: string; action: string }, origin: string): Promise<SpawnCallResult> {
+    const base = resolveWorkbenchBase(deps.workbenchBase, env, origin)
+    if (base === '') return { ok: false, reason: 'watchdog spawn endpoint base not resolvable (no SANDBAR_WORKBENCH_BASE, request origin absent) — spawn not attempted' }
+    try {
+      const res = await fetch(base + '/sandbar-watchdog/api/one-shot/run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project: args.project, request_id: args.requestId, action: args.action }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const doc = await res.json().catch(() => null) as { ok?: boolean; spawn?: unknown; error?: unknown } | null
+      if (doc?.ok !== true || typeof doc.spawn !== 'object' || doc.spawn === null) {
+        const why = typeof doc?.error === 'string' ? doc.error : `watchdog spawn endpoint HTTP ${res.status}`
+        return { ok: false, reason: why }
+      }
+      const sp = doc.spawn as { action?: unknown; sessionId?: unknown; objectKey?: unknown; outcome?: unknown; summary?: unknown }
+      if (sp.action !== 'done' || typeof sp.sessionId !== 'string') {
+        return { ok: false, reason: 'watchdog spawn response is not a done-receipt — normalized to explicit failure, never trusted blindly' }
+      }
+      return { ok: true, receipt: {
+        action: String(sp.action),
+        sessionId: sp.sessionId,
+        ...(typeof sp.objectKey === 'string' ? { objectKey: sp.objectKey } : {}),
+        ...(typeof sp.outcome === 'string' ? { outcome: sp.outcome } : {}),
+        ...(typeof sp.summary === 'string' ? { summary: sp.summary } : {}),
+      } }
+    } catch (e) {
+      return { ok: false, reason: `watchdog spawn call failed: ${e instanceof Error ? e.message : String(e)}` }
     }
   }
 
@@ -529,6 +580,39 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
             : undefined,
         },
       }
+    }
+    // ---- one-shot spawn (t261006-06): forward an APPROVED request to the
+    // watchdog ignition route. The panel is a relay, not the gate: the
+    // watchdog re-checks the approval ledger itself, so a race between the
+    // panel view and the ledger can never widen the gate. This face re-checks
+    // "answered" only to fail fast with a readable error.
+    if (path === '/sandbar-executor-panel/api/one-shot/spawn') {
+      if (method !== 'POST') return bad(405, 'spawn face is POST-only (write operation, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const b = parsed.body
+      const key = String(b.project ?? '')
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const requestId = typeof b.request_id === 'string' ? b.request_id : ''
+      if (requestId === '') return bad(400, 'request_id must be a non-empty string')
+      const action = typeof b.action === 'string' ? b.action.trim() : ''
+      if (action === '') return bad(400, 'action must be a non-empty string naming the exact privileged action')
+      // Fail fast: an unanswered request never reaches the watchdog (the
+      // watchdog gate stays authoritative either way).
+      const read = readRequests(ledgerIo, env, key)
+      const row = read.rows.find((r) => r.id === requestId)
+      if (!row) return bad(404, `request ${requestId} not found in project ${key} — nothing to spawn`)
+      if (row.status !== 'answered') return bad(409, `request ${requestId} is not answered yet — the human approval IS the gate; nothing spawns`)
+      const caller = deps.spawnCaller ?? ((a: { project: string; requestId: string; action: string }) => defaultSpawnCaller(a, origin))
+      let spawn: Record<string, unknown>
+      try {
+        const r = await caller({ project: key, requestId, action })
+        if (r.ok) spawn = { attempted: true, spawned: true, ...r.receipt }
+        else spawn = { attempted: true, spawned: false, reason: r.reason }
+      } catch (e) {
+        spawn = { attempted: true, spawned: false, reason: `spawn caller threw: ${e instanceof Error ? e.message : String(e)}` }
+      }
+      return { status: 200, json: { ok: true, spawn } }
     }
     // ---- one-shot sessions (t261004-30 read-only face: settles / locks / runs / cap) ----
     if (path === '/sandbar-executor-panel/api/one-shot') {

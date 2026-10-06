@@ -1205,6 +1205,11 @@
       "note": "",
       "sync_path": ""
     },
+    "integration/executor-loop/sc_executor_oneshot_trigger.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
     "integration/executor-loop/sc_executor_authority_gate.py": {
       "anchor": "behaviour",
       "note": "",
