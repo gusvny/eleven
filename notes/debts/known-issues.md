@@ -3630,3 +3630,46 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 或走引擎侧投递」；③**观测面**（= KI-207 ①）把「存在未应答审批」并入 liveness 判据并具名上报。
 > **本次处置（261006）**：登记；执行器那条被卡住的发现已由项目会话代投（`req-1791243271373-0001`）；
 > 该会话在本轮不可救（无应答者），实际恢复路径=重开会话/重启控制台（届时新会话带上修复）。
+
+## KI-209 主同步冲突消解的**轮次上限是累计值且人门不重置** ⇒ 泳道一旦超限即永久锁死，只有**人在引擎侧直接执行 worker 的 settle activity** 才救得出来（261006 00:4x→08:1x 实证：-06 12 轮 / -10 8 轮）
+
+> **现象**：两张 UI 票（`t261005-06`/`t261005-10`）整夜到早上，每一次告停都是同一句
+> 「main-sync conflict resolution did not converge in N rounds (cap 3)」，而 **N 只增不减**：
+> -06 是 3,4,5,…,12（00:45→07:45），-10 是 3,4,…,8（04:42→08:04）；期间我共下过 3 次
+> `rework(to_stage=implement)` + 2 次 `retry_qc`，**每次都能唤醒、都能跑完一整轮，但再进主同步立刻又 blocked，N 再 +1**。
+>
+> **关键：问题不是"冲突没解干净"**。两张票的**文件面早已终态**（我逐项验过）：全泳道冲突标记 0；
+> 两个产物（`lib/client.cjs|js`）**逐字节一致**且是**从合并后 src 新构**的（sha256 与 ours/theirs 两侧都不同，`cmp`+`node --check` 通过）；
+> 锚表是并集且 `_header.labelled_counts` 与实际条数一致（scenarios 525 / engine_tests 216，引用的文件全在）。
+>
+> **机制（三条叠加，本条是"叠加后必然锁死"的实测结论）**：
+> ① `dev_lane.py` 的 `conflict_rounds` 是 `run()` **局部量**，只在 workflow 起手置 0（`dev_lane.py:2771`）；
+> `rework`/`retry_qc` 唤醒后沿同一轮循环继续，**计数不重置** ⇒ 一旦 >3 就永远 >3。
+> ② 冲突判据取自 **git 索引的 UU 态**（`prep.conflict_files`），而 **agent 沙箱写不了真 `.git`**：
+> `fatal: Unable to create /Users/user/Documents/sandbar/.git/worktrees/t261005-10/index.lock: Operation not permitted [sandbox: file access denied under workspace-write mode]`；
+> 代 `git add` 的只有 worker 侧 `settle_conflict_resolution`（它的 docstring 明写"agent 沙箱写不了真 .git，所以本 activity 先替它 add 再扫标记"）
+> ⇒ **文件面已解干净但未暂存时，索引照旧报 UU**。
+> ③ 人门授权的 `rework(to_stage=implement)` 走**普通 implement 通道**，join 显式跳过落盘
+> （workflow log：「合并进行中（MERGE_HEAD 在场），代落盘跳过——合并提交由 settle_conflict_resolution 收口」），
+> 而 settle **只在主同步路由为 `resolve` 时被调用** ⇒ **上限闸先拦下，settle 永远等不到**。
+> 三条合起来：**文件面越好，越解不出来**。
+>
+> **危害**：①泳道**永久锁死**，票停在"等人"，而人照引擎自己给的出路做（rework 回 implement / `git merge --abort` 后 retry_qc）
+> **也在死循环里**；②引擎的 human-round 文案**对 agent 不可执行**（沙箱拒写 `.git`），
+> 派单里写「`git checkout --theirs` / `git add` / `git commit`」**必然 env_fail**
+> （-10 implement gen14 `env_fail=true`，原文：「sandbox escalation to danger-full-access requires approval, but no approval channel is available」）
+> ——**这是 KI-208 在 developer 会话上的同形**：developer 会话同样没有审批应答者；
+> ③救出来之后**没有任何装置阻止下次再进同一状态**（阈值是累计的，谁先超谁死，且每一次 main 前进对 UI 票都是新冲突）。
+>
+> **本次处置（261006 08:1x）**：我在引擎侧**直接调用 worker 的 `settle_conflict_resolution`**
+> （`server/engine/.venv/bin/python` + `ConflictSettleArgs`，`round_no` 填实际轮次）把两张泳道各自的半合并收口——
+> -10 `fb2abfb`；-06 `3c2cb98`，再对 -06 补并把当前 main 并进泳道（`927c430`，已知问题清单双侧追加由 git 自动并集）——
+> 随后两张票 `retry_qc`，主同步走**快路径**（「main@64b92ec already up to date, zero action」），两票当轮恢复跑集成。
+> **这条救法是临时的、未文档化的，不该是唯一出路。**
+>
+> **出路（实现口径由 `t261006-07` 定）**：①计数改成「**无进展轮次**」（同一文件集合连续冲突才 +1），人门信号（rework/retry_qc）**必须重置**；
+> ②冲突判据在 **settle 代 add 之后**再看（或直接看文件面标记）——"索引 UU 但无标记残留"不应判成"还在冲突"；
+> ③human-round 文案与派单**禁止指使 agent 跑 git 收口**（它做不到），改指接收方真能做的动作；
+> ④把"人在引擎侧收口半合并"做成**具名入口**（否则值守只能像本次这样 import 内部 activity）。
+> **归**：新票 `t261006-07`（engine-hardening）。
+> **回归**：L1——构造「文件面已解干净但索引 UU + 计数已超限」的泳道，断言主同步**不再 blocked**；另一条断言人门信号能把计数**重置**。
