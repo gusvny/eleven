@@ -7154,7 +7154,7 @@ function cardTitle(t, wf) {
 	if (t.updated) parts.push(`Updated ${t.updated}`);
 	return parts.join("\n");
 }
-function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
+function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ordering, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
 	const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status);
 	const epicColor = epicColorOf(t.epic);
 	const dots = compact ? [] : laneDots(wf, t);
@@ -7163,6 +7163,18 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		ev.stopPropagation();
 		if (!busy) fn?.();
 	};
+	const orderable = ordering?.kind === "queued";
+	const onDragStart = (ev) => {
+		if (!orderable) return;
+		ev.dataTransfer.effectAllowed = "move";
+		ev.dataTransfer.setData("text/plain", t.id);
+		ordering?.onDragStart?.();
+	};
+	const onDrop = (ev) => {
+		ev.preventDefault();
+		ev.stopPropagation();
+		ordering?.onDrop?.();
+	};
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-card",
 		"data-ticket-id": t.id,
@@ -7170,6 +7182,13 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		"data-active": active,
 		"data-compact": compact,
 		"data-engine": t.engine,
+		"data-order-kind": ordering?.kind,
+		draggable: orderable,
+		onDragStart,
+		onDragOver: orderable ? void 0 : (ev) => {
+			if (ordering !== void 0) ev.preventDefault();
+		},
+		onDrop: ordering !== void 0 ? onDrop : void 0,
 		style: { borderLeftColor: epicColor },
 		title: cardTitle(t, wf),
 		onClick: () => onOpen(),
@@ -7178,6 +7197,59 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-card-l1",
 				children: [
+					ordering?.kind === "queued" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-order-pos",
+						"data-order-pos": ordering.pos ?? 0,
+						title: `Queue position ${ordering.pos ?? 0}`,
+						children: ordering.pos ?? ""
+					}),
+					ordering?.kind === "atwork" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-order-dot",
+						"data-order-dot": "work",
+						title: "At work"
+					}),
+					(ordering?.kind === "hold" || ordering?.kind === "paused") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-order-dot",
+						"data-order-dot": ordering.kind === "hold" ? "hold" : "paused",
+						title: ordering.kind === "hold" ? "Holding a slot at the human gate" : "Paused by you (no slot)"
+					}),
+					orderable && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-order-ctl",
+						"data-order-ctl": "",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-order-grip",
+								"data-order-grip": "",
+								title: "Drag to reorder",
+								"aria-label": `Drag to reorder ${t.id}`,
+								children: "⋮⋮"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "wb-order-arrow",
+								disabled: ordering?.busy,
+								"aria-label": `Move ${t.id} up`,
+								title: "Move up",
+								onClick: (ev) => {
+									ev.stopPropagation();
+									ordering?.onMove?.(-1);
+								},
+								children: "⌃"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "wb-order-arrow",
+								disabled: ordering?.busy,
+								"aria-label": `Move ${t.id} down`,
+								title: "Move down",
+								onClick: (ev) => {
+									ev.stopPropagation();
+									ordering?.onMove?.(1);
+								},
+								children: "⌄"
+							})
+						]
+					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-dot",
 						"data-state": state4
@@ -7263,6 +7335,15 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 							"data-visual": d,
 							"data-state": state4
 						}, i))
+					}),
+					compact && ordering?.dotsLit !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-stage-dots",
+						"data-lit": ordering.dotsLit,
+						title: `Stage dots: ${ordering.dotsLit} of 10`,
+						children: Array.from({ length: 10 }, (_, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-stage-dot",
+							"data-on": i < (ordering.dotsLit ?? 0) || void 0
+						}, i))
 					})
 				]
 			}),
@@ -7334,6 +7415,128 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 			})
 		]
 	});
+}
+//#endregion
+//#region src/client/queue-model.ts
+/**
+* Unwrap a read-face HTTP reply into the raw face. Two lawful shapes exist:
+* the host wraps (`{ok:true, result:<face>}`) and a bare read_state is accepted
+* too (the reply contract allows it). A `{ok:false,...}` refusal or anything
+* else unwraps to null — the caller renders the order-free list.
+*/
+function concFaceFromReply(reply) {
+	if (reply === null || typeof reply !== "object" || Array.isArray(reply)) return null;
+	const r = reply;
+	if (r.ok === true && r.result !== void 0 && r.result !== null) return r.result;
+	if ("ok" in r) return null;
+	return r;
+}
+/** Parse + validate the read face. Returns null on any malformed input. */
+function parseConcFace(raw) {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+	const r = raw;
+	const holderReason = {};
+	if (r.holders !== void 0) {
+		if (!Array.isArray(r.holders)) return null;
+		for (const h of r.holders) {
+			if (h === null || typeof h !== "object") return null;
+			const id = h.ticket;
+			if (typeof id !== "string" || id === "") return null;
+			holderReason[id] = String(h.reason ?? "");
+		}
+	}
+	const queue = [];
+	if (r.queue !== void 0) {
+		if (!Array.isArray(r.queue)) return null;
+		for (const e of r.queue) {
+			let id = e;
+			if (e !== null && typeof e === "object") id = e.ticket;
+			if (typeof id !== "string" || id === "") return null;
+			if (queue.includes(id)) return null;
+			queue.push(id);
+		}
+	}
+	return {
+		holderReason,
+		queue
+	};
+}
+/**
+* Classify one ticket row. `paused` is the engine row's own pause flag
+* (host-paused tickets hold no slot, so the face never lists them — the pause
+* flag is the only source). Returns undefined for rows the face says nothing
+* about (closed tickets, unknown ids): they get no order marks at all.
+*/
+function orderKindOf(id, face, paused) {
+	if (face === null) return void 0;
+	if (face.queue.includes(id)) return "queued";
+	const reason = face.holderReason[id];
+	if (reason === "running") return "atwork";
+	if (reason === "human-hold") return "hold";
+	if (paused === true) return "paused";
+}
+/**
+* New queue after moving one queued ticket one slot up (-1) or down (+1).
+* Returns null when the move is impossible (edge of the queue, id not in the
+* queue, malformed direction) — the caller then POSTs nothing.
+*/
+function moveTicket(queue, id, dir) {
+	if (dir !== -1 && dir !== 1) return null;
+	const i = queue.indexOf(id);
+	if (i < 0) return null;
+	const j = i + dir;
+	if (j < 0 || j >= queue.length) return null;
+	const next = queue.slice();
+	[next[i], next[j]] = [next[j], next[i]];
+	return next;
+}
+/**
+* New queue after dropping `dragId` onto `dropId`'s slot (the handgrip path —
+* arrows use moveTicket). Returns null unless both ids are queued.
+*/
+function reorderMoveTo(queue, dragId, dropId) {
+	const from = queue.indexOf(dragId);
+	const to = queue.indexOf(dropId);
+	if (from < 0 || to < 0 || from === to) return null;
+	const next = queue.slice();
+	next.splice(from, 1);
+	next.splice(to, 0, dragId);
+	return next;
+}
+/**
+* Guard for the POST body: the order must be a permutation of the face's
+* current queue (the engine's own reorder() refuses anything else — mirroring
+* the check client-side turns an obvious mistake into a no-op instead of a
+* round-trip refusal). Returns null when `order` is not a permutation.
+*/
+function permutationOf(queue, order) {
+	if (!Array.isArray(order)) return null;
+	const want = [];
+	for (const t of order) {
+		if (typeof t !== "string" || t === "") return null;
+		want.push(t);
+	}
+	if (want.length !== queue.length) return null;
+	const a = [...queue].sort();
+	const b = [...want].sort();
+	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return null;
+	return want;
+}
+function stageDotsLit(stageIndex, closed = false) {
+	if (closed) return 10;
+	if (!Number.isInteger(stageIndex) || stageIndex < 0) return 0;
+	return Math.min(stageIndex + 1, 10);
+}
+/** Project-row counts from the face: `X at work · Y waiting`. Raw numbers only — the sentence lives in CSS/none. */
+function faceCounts(face) {
+	if (face === null) return {
+		atWork: 0,
+		waiting: 0
+	};
+	return {
+		atWork: Object.keys(face.holderReason).length,
+		waiting: face.queue.length
+	};
 }
 //#endregion
 //#region src/client/executor-view-model.ts
@@ -48520,6 +48723,8 @@ function mountMetricsIntoSettingsRow(root) {
 *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
 *       未选项目时中列显占位（不自动选第一个项目——不造隐形缺省）。
 */
+const CONCURRENCY_URL = "/sandbar-workbench/api/wf/concurrency";
+const CONCURRENCY_REORDER_URL = "/sandbar-workbench/api/wf/concurrency/reorder";
 /** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
 *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
 const INSPECTION_WF_LIKE = { stages: INSPECTION_TOPOLOGY };
@@ -48559,7 +48764,13 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
    单变量（shell resize handle 压住内容），此处归还 180px。gen4 勘误：gen3 的
    行下悬停图标条同样改了行外命中面（t260915-09 A/B 实证），随之退役；可达性
    最终落点=图标簇行内收纳（见 .wb-view-icons gen4 注）。 */
-.wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
+.wb-sb-left { flex:0 1 380px; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
+/* CL-3 (t261006-18, design §2.2): the left column's width base becomes 380px
+   (flex-basis; "below 340px the titles are cut too hard"). min-width keeps the
+   frozen 180px contract (t260929-22 arbitration A/B proof: raising min-width
+   crushes the shell resize geometry) - normal windows get 380px, the column
+   may shrink under shell pressure instead of fighting the shell. */
+
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
 .wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); position:relative; }
@@ -48613,6 +48824,31 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-group-entry { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
 .wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; }
+/* CL-3 (t261006-18): the project row reports two numbers on the right, X at work / Y waiting (numbers only, no sentences). */
+.wb-group-conc { font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; white-space:nowrap; }
+/* Line-1 order marks: queued = leading position number; at-work = green dot; human-hold / paused = amber dot (no ordering controls). */
+.wb-order-pos { flex:none; min-width:14px; text-align:center; font-size:10px; font-weight:600;
+  color:var(--dsw-derive-accent,#0969da); background:color-mix(in srgb,var(--dsw-derive-accent,#0969da) 12%,transparent);
+  border-radius:4px; padding:0 3px; line-height:14px; }
+.wb-order-dot { flex:none; width:8px; height:8px; border-radius:50%; }
+.wb-order-dot[data-order-dot=work] { background:var(--dsw-derive-success,#1a7f37); }
+.wb-order-dot[data-order-dot=hold], .wb-order-dot[data-order-dot=paused] { background:var(--dsw-derive-warn,#b8860b); }
+/* Ordering controls: handgrip (drag anchor) + up/down arrows, rendered on data-order-kind=queued rows only. */
+.wb-order-ctl { display:inline-flex; align-items:center; gap:1px; flex:none; margin-left:2px; }
+.wb-order-grip { cursor:grab; font-size:9px; letter-spacing:-1px; color:var(--dsw-derive-muted,#57606a); user-select:none; line-height:1; }
+.wb-order-grip:active { cursor:grabbing; }
+.wb-order-arrow { border:none; background:none; cursor:pointer; font:inherit; font-size:9px; line-height:1;
+  color:var(--dsw-derive-muted,#57606a); padding:1px 2px; border-radius:3px; }
+.wb-order-arrow:hover { background:rgba(255,255,255,.08); color:var(--dsw-alias-label-primary,#1f2328); }
+.wb-order-arrow:disabled { opacity:.4; cursor:default; }
+/* Line-2 ten-cell progress dots (design §7.2 default): lit up to the current stage, zero extra row height. */
+.wb-stage-dots { display:inline-flex; align-items:center; gap:2px; flex:none; }
+.wb-stage-dot { width:5px; height:5px; border-radius:1px; background:var(--dsw-derive-border,#d0d7de); }
+.wb-stage-dot[data-on=true] { background:var(--dsw-derive-accent,#0969da); }
+/* Reorder-refusal notice (A7): one line with the engine's refusal verbatim (same token family as .wb-insp-degraded, no new palette). */
+.wb-order-notice { margin:2px 8px 6px 14px; padding:4px 8px; font-size:10px; line-height:1.5;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-all; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
@@ -48748,6 +48984,15 @@ function WorkbenchSidebar(props) {
 	const [projects, setProjects] = (0, react.useState)([]);
 	/** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
 	const [ticketsByProject, setTicketsByProject] = (0, react.useState)({});
+	const [concByProject, setConcByProject] = (0, react.useState)({});
+	/** Reorder in flight (project key -> true): controls disabled against double writes; every write ends in POST -> re-read the same face. */
+	const [reorderBusy, setReorderBusy] = (0, react.useState)({});
+	/** Named reorder refusal (project key -> verbatim error; '' = none): renders as the group's notice line (acceptance A7). */
+	const [orderNotice, setOrderNotice] = (0, react.useState)({});
+	/** Currently dragged ticket (project key -> id): the drop row computes the move-to from it; zero local order kept - one permutation, then POST. */
+	const dragTicketRef = (0, react.useRef)(null);
+	/** Workflow topology (stage-order source of the ten-cell dots; minimal Wf projection). */
+	const [wfList, setWfList] = (0, react.useState)([]);
 	const [inspectionRows, setInspectionRows] = (0, react.useState)([]);
 	const [inspectionNote, setInspectionNote] = (0, react.useState)("");
 	const inspectionRowsRef = (0, react.useRef)([]);
@@ -48954,8 +49199,21 @@ function WorkbenchSidebar(props) {
 						return [p.key, []];
 					}
 				}));
+				const concEntries = await Promise.all(list.map(async (p) => {
+					try {
+						const cr = await fetch(`${CONCURRENCY_URL}?project=${encodeURIComponent(p.key)}`).then((r) => r.json());
+						return [p.key, parseConcFace(concFaceFromReply(cr))];
+					} catch {
+						return [p.key, null];
+					}
+				}));
 				if (cancelled) return;
 				setTicketsByProject(Object.fromEntries(entries));
+				setConcByProject(Object.fromEntries(concEntries));
+			} catch {}
+			try {
+				const wr = await fetch("/sandbar-workbench/api/wf/workflows").then((r) => r.json());
+				if (!cancelled && wr?.ok === true) setWfList(wr.result ?? []);
 			} catch {}
 			try {
 				const ir = await inspPromise;
@@ -48981,6 +49239,54 @@ function WorkbenchSidebar(props) {
 			stopPoll();
 		};
 	}, [wide]);
+	const refreshConc = (0, react.useCallback)(async (projectKey) => {
+		try {
+			const cr = await fetch(`${CONCURRENCY_URL}?project=${encodeURIComponent(projectKey)}`).then((r) => r.json());
+			setConcByProject((m) => ({
+				...m,
+				[projectKey]: parseConcFace(concFaceFromReply(cr))
+			}));
+		} catch {
+			setConcByProject((m) => ({
+				...m,
+				[projectKey]: null
+			}));
+		}
+	}, []);
+	const handleReorder = (0, react.useCallback)(async (projectKey, order) => {
+		const want = permutationOf((concByProject[projectKey] ?? null)?.queue ?? [], order);
+		if (want === null) return;
+		setReorderBusy((m) => ({
+			...m,
+			[projectKey]: true
+		}));
+		let refused = "";
+		try {
+			const r = await fetch(CONCURRENCY_REORDER_URL, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					project: projectKey,
+					order: want
+				})
+			}).then((x) => x.json());
+			if (r?.ok !== true) refused = String(r?.error ?? "reorder failed (HTTP body without ok:true)");
+		} catch (err) {
+			refused = err instanceof Error ? err.message : String(err);
+		}
+		try {
+			await refreshConc(projectKey);
+		} finally {
+			setOrderNotice((m) => ({
+				...m,
+				[projectKey]: refused
+			}));
+			setReorderBusy((m) => ({
+				...m,
+				[projectKey]: false
+			}));
+		}
+	}, [concByProject, refreshConc]);
 	const handleTicketClick = (0, react.useCallback)((t, projectKey) => {
 		setSelectedId(t.id);
 		setViewProject((p) => projectKey || p || (projects.length > 0 ? projects[0].key : ""));
@@ -49149,13 +49455,32 @@ function WorkbenchSidebar(props) {
 											if (e.key === "Enter" || e.key === " ") handleViewIcon(g.project.key, "executor");
 										},
 										onClick: () => handleViewIcon(g.project.key, "executor"),
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-group-name",
-											children: g.project.name
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-group-count",
-											children: g.tickets.length || ""
-										})]
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-group-name",
+												children: g.project.name
+											}),
+											concByProject[g.project.key] !== void 0 && concByProject[g.project.key] !== null && (() => {
+												const c = faceCounts(concByProject[g.project.key] ?? null);
+												return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													className: "wb-group-conc",
+													"data-wb-conc-counts": "",
+													"data-at-work": c.atWork,
+													"data-waiting": c.waiting,
+													title: "At work · waiting (project concurrency)",
+													children: [
+														c.atWork,
+														" at work · ",
+														c.waiting,
+														" waiting"
+													]
+												});
+											})(),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-group-count",
+												children: g.tickets.length || ""
+											})
+										]
 									}),
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 										className: "wb-view-icons",
@@ -49240,42 +49565,80 @@ function WorkbenchSidebar(props) {
 										]
 									})
 								]
-							}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
-								projectKey: g.project.key,
-								projectName: g.project.name,
-								projectDir: g.project.primary,
-								ledger: projectSessions.ledger,
-								current: projectSessions.listState?.current,
-								byId: projectSessions.listState?.byId,
-								creating: projectSessions.creating,
-								notice: projectSessions.entryNotice,
-								noticeProject: projectSessions.noticeProject,
-								onNew: () => {
-									projectSessions.handleNew({
-										key: g.project.key,
-										dir: g.project.primary
-									});
-								},
-								onOpen: (id) => {
-									projectSessions.handleOpen(id);
-								},
-								onClose: projectSessions.handleClose
-							}), g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "wb-group-empty",
-								children: "No active tickets"
-							}) : g.tickets.map((t) => {
-								const insp = isInspectionRow(t);
-								return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
-									t,
-									compact: true,
-									wf: insp ? INSPECTION_WF_LIKE : void 0,
-									progress: insp ? inspectionProgressOf(t) : void 0,
-									kindBadge: insp ? { text: "Inspection" } : void 0,
-									active: selectedId === t.id,
-									updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
-									onOpen: () => handleTicketClick(t, g.project.key)
-								}, t.id);
-							})] })]
+							}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
+									projectKey: g.project.key,
+									projectName: g.project.name,
+									projectDir: g.project.primary,
+									ledger: projectSessions.ledger,
+									current: projectSessions.listState?.current,
+									byId: projectSessions.listState?.byId,
+									creating: projectSessions.creating,
+									notice: projectSessions.entryNotice,
+									noticeProject: projectSessions.noticeProject,
+									onNew: () => {
+										projectSessions.handleNew({
+											key: g.project.key,
+											dir: g.project.primary
+										});
+									},
+									onOpen: (id) => {
+										projectSessions.handleOpen(id);
+									},
+									onClose: projectSessions.handleClose
+								}),
+								g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "wb-group-empty",
+									children: "No active tickets"
+								}) : g.tickets.map((t) => {
+									const insp = isInspectionRow(t);
+									const conc = concByProject[g.project.key] ?? null;
+									const kind = insp ? void 0 : orderKindOf(t.id, conc, t.paused === true);
+									const pos = kind === "queued" && conc !== null ? conc.queue.indexOf(t.id) + 1 : void 0;
+									const wfl = wfList.find((w) => w.id === t.workflow) ?? null;
+									const stageIdx = wfl && Array.isArray(wfl.stages) ? wfl.stages.findIndex((s) => s?.id === t.stage) : -1;
+									return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+										t,
+										compact: true,
+										wf: insp ? INSPECTION_WF_LIKE : void 0,
+										progress: insp ? inspectionProgressOf(t) : void 0,
+										kindBadge: insp ? { text: "Inspection" } : void 0,
+										ordering: kind === void 0 ? void 0 : {
+											kind,
+											pos,
+											dotsLit: kind === "queued" || kind === "atwork" || kind === "hold" ? stageDotsLit(stageIdx, t.status === "closed") : void 0,
+											busy: reorderBusy[g.project.key] === true,
+											onMove: (dir) => {
+												if (conc === null) return;
+												const next = moveTicket(conc.queue, t.id, dir);
+												if (next !== null) handleReorder(g.project.key, next);
+											},
+											onDragStart: () => {
+												dragTicketRef.current = {
+													project: g.project.key,
+													id: t.id
+												};
+											},
+											onDrop: () => {
+												const drag = dragTicketRef.current;
+												dragTicketRef.current = null;
+												if (conc === null || drag === null || drag.project !== g.project.key) return;
+												const next = reorderMoveTo(conc.queue, drag.id, t.id);
+												if (next !== null) handleReorder(g.project.key, next);
+											}
+										},
+										active: selectedId === t.id,
+										updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
+										onOpen: () => handleTicketClick(t, g.project.key)
+									}, t.id);
+								}),
+								orderNotice[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "wb-order-notice",
+									"data-wb-order-notice": "",
+									role: "alert",
+									children: orderNotice[g.project.key]
+								})
+							] })]
 						}, g.project.key)),
 						!loading && inspectionSplit.unowned.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-group-head",

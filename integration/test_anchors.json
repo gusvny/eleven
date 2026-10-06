@@ -3859,6 +3859,16 @@
    "note": "t261006-11 doc-face mechanical layer: seven rule families fire planted defects, agent finding shape single-sourced, three false-positive disciplines, malformed-input degrade, id stability",
    "sync_path": ""
   },
+  "integration/t261006-18/sc_t26100618_order_to_next_start.py": {
+   "anchor": "behaviour",
+   "note": "CL-3 engine consumption journey: queue face excludes holders, reorder write face returns verbatim on the same read face, next start promotes the person-set head, refusal matrix leaves the ledger untouched",
+   "sync_path": ""
+  },
+  "integration/t261006-18/sc_t26100618_left_column_order.mjs": {
+   "anchor": "behaviour",
+   "note": "CL-3 left-column user faces: two counts, position numbers, handgrip/arrows on queued rows only, green/amber dots without controls, write-through-then-re-read, malformed-face fallback, 380px width, capture artifact",
+   "sync_path": ""
+  },
   "integration/t261006-19/sc_counter_reset_replay_guard.py": {
    "anchor": "contract",
    "note": "t261006-19 (KI-212) counter-reset family replay contract: pre-e9daa05 history keeps the over-cap counter and the blocked route across rework/retry_qc wakes (no implement where history holds concurrency_renew), window(b)/marker positives keep the reset firing, degraded info() falls back to the marker arm, source lock on the four gated sites",

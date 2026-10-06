@@ -1536,6 +1536,92 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     sendJson(res, 200, { ok: true, project, charter, kind: 'charter', source: raw.trim() !== '' ? 'file' : 'fallback' })
   }
 
+  /* ------------------------------ 项目并发顺序（CL-3, t261006-18） */
+
+  /** 并发路由前缀（读脸）与写子路由（重排）。常量与客户端 fetch 逐字同源（session-charter KI-042 先例）。 */
+  const CONCURRENCY_PATH = '/sandbar-workbench/api/wf/concurrency'
+  const CONCURRENCY_REORDER_PATH = '/sandbar-workbench/api/wf/concurrency/reorder'
+
+  /**
+   * GET  ${CONCURRENCY_PATH}?project=<key> → ticket.py {"op":"concurrency","project"}
+   *   （engine concurrency.read_state 的薄壳投影：limit/holders/queue 位次。面板只读账，
+   *   不自己算队列——规则 8）。
+   * POST ${CONCURRENCY_REORDER_PATH} {project, order:[ids]} → 同一 op 附 order 键，
+   *   引擎侧 reorder() 写人工顺序后回读同脸。host 不持有任何本地顺序状态。
+   *
+   * 写脸缺位防线（review 条件 1b）：ticket.py 的 op=concurrency 当前只认 project/reconcile
+   * （server/tools/ 在本票写集外）。若旧 CLI 忽略 order 键静默返回读脸，回执 queue 与请求
+   * order 不一致 → 具名 409 拒收（绝不静默成功假装已重排）；等 ticket.py 接上 order 后
+   * 该比对自然通过，路由零改动。
+   *
+   * 故障面（runAdminCli 链既有纪律全沿用，不另造）：CLI 结构化失败 {ok:false,error}
+   * → 具名 502 透传（声明缺席/畸形的规则 9 具名拒收原样上抛）；spawn 超时/非零退出/
+   * 空 stdout → runAdminCli 抛错 → 502；子进程回收由 execFile timeout 兜底（有界）。
+   */
+  async function handleConcurrency(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://x')
+    if (req.method === 'GET') {
+      const project = (url.searchParams.get('project') ?? '').trim()
+      if (project === '') {
+        sendJson(res, 400, { ok: false, error: 'missing project query: ' + CONCURRENCY_PATH + '?project=<key>' })
+        return
+      }
+      try {
+        const r = await callTool('ticket', { op: 'concurrency', project })
+        if (r?.ok !== true) {
+          sendJson(res, 502, { ok: false, error: String(r?.error ?? 'concurrency read face failed'), kind: r?.kind })
+          return
+        }
+        sendJson(res, 200, { ok: true, result: r.result })
+      } catch (err) {
+        sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
+      }
+      return
+    }
+    if (req.method === 'POST') {
+      if (url.pathname !== CONCURRENCY_REORDER_PATH) {
+        sendJson(res, 404, { ok: false, error: '路径不合法：' + CONCURRENCY_REORDER_PATH })
+        return
+      }
+      let body: any
+      try {
+        body = await readJsonBody(req)
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: String(err instanceof Error ? err.message : err) })
+        return
+      }
+      const project = String(body?.project ?? '').trim()
+      const order = Array.isArray(body?.order) ? body.order.map((t: unknown) => String(t)) : null
+      if (project === '' || order === null) {
+        sendJson(res, 400, { ok: false, error: 'reorder 需要 {project, order:[ticket ids]}' })
+        return
+      }
+      try {
+        const r = await callTool('ticket', { op: 'concurrency', project, order })
+        if (r?.ok !== true) {
+          sendJson(res, 502, { ok: false, error: String(r?.error ?? 'concurrency reorder failed'), kind: r?.kind })
+          return
+        }
+        const q = (r.result as any)?.queue
+        const got = Array.isArray(q) ? q.map((e: any) => String(e?.ticket ?? e)) : null
+        if (got === null || JSON.stringify(got) !== JSON.stringify(order)) {
+          sendJson(res, 409, {
+            ok: false,
+            error: 'concurrency reorder not applied: the engine entry ignored the order key '
+              + '(ticket.py write face for CL-3 not landed) — queue unchanged, refusing to fake success',
+            queue: got ?? undefined,
+          })
+          return
+        }
+        sendJson(res, 200, { ok: true, result: r.result })
+      } catch (err) {
+        sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
+      }
+      return
+    }
+    sendJson(res, 405, { ok: false, error: 'concurrency 只支持 GET（读脸）/ POST reorder（写顺序）' })
+  }
+
   /* ------------------------------ 项目会话账册（sessions.json，UI-5 t261005-06） */
 
   /** project query whitelist check (same discipline as findProject: an unknown key / registry fault -> 400). */
@@ -2242,6 +2328,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/detail', handler: handleProjectDetail }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/add', handler: handleProjectAdd }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/projects/remove', handler: handleProjectRemove }),
+        // CL-3（t261006-18）：并发读脸 GET + 重排写子路由 POST（exact 在前缀 TICKETS 之外独立挂）。
+        ws.register({ kind: 'exact', path: CONCURRENCY_PATH, handler: handleConcurrency }),
+        ws.register({ kind: 'exact', path: CONCURRENCY_REORDER_PATH, handler: handleConcurrency }),
         // t260903-07 起客户端无调用方（openTicketSessionFlow 已删），联动入口下线仅客户端面——
         // 路由按 ③ 口径保留（数据留存/回滚面），见 handleTicketSessionOpen 头注。
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/ticket-session/open', handler: handleTicketSessionOpen }),

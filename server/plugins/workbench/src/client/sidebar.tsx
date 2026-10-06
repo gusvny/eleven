@@ -99,6 +99,17 @@ import { TicketRowCard } from './ticket-row-card.tsx'
 // t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
 // 四态单点投影 tier，不另起状态词表；node 可裸 import UT 直测）。
 import { sortMergedTickets } from './ticket-list-model.ts'
+// CL-3 (t261006-18) left-column ticket order: concurrency read-face projection
+// and move pure functions (node imports them directly for black-box UT).
+// Route constants are verbatim same-source with node.ts handleConcurrency
+// (KI-042 discipline: change one, sync the other, run both UTs).
+import {
+  parseConcFace, concFaceFromReply, orderKindOf, moveTicket, reorderMoveTo, permutationOf,
+  stageDotsLit, faceCounts,
+  type ConcFace,
+} from './queue-model.ts'
+const CONCURRENCY_URL = '/sandbar-workbench/api/wf/concurrency'
+const CONCURRENCY_REORDER_URL = '/sandbar-workbench/api/wf/concurrency/reorder'
 // t260929-22 执行器入口视图（GAP A）：项目行=入口，中列 Executor/Chat 切换器；
 // 判定纯层在 executor-view-model.ts（tests/executor-entry-model.mjs 看守）。
 import { ExecutorView } from './executor-view.tsx'
@@ -131,9 +142,15 @@ import { DERIVE_TOKENS_CSS } from './theme';
  * 设计文档《sidebar-session-entry-and-hero-design.md》目标5/Nongoal 被本票推翻——
  * 同步债见 notes/debts/design-doc-sync-t260903-07.md（后续读者以债条目为准）。 */
 
+/** Minimal workflow-topology projection for the left column (CL-3 ten-cell dots; /wf/workflows rows are a superset, extra fields ignored). */
+interface WfLite {
+  id: string
+  stages?: { id?: string }[]
+}
+
 interface Ticket {
   id: string
-  /** 项目 key（注册表；host ticket-list 行带 project 字段）。 */
+  /** Project key (registry; host ticket-list rows carry the project field). */
   project?: string
   title: string
   stage: string
@@ -284,7 +301,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
    单变量（shell resize handle 压住内容），此处归还 180px。gen4 勘误：gen3 的
    行下悬停图标条同样改了行外命中面（t260915-09 A/B 实证），随之退役；可达性
    最终落点=图标簇行内收纳（见 .wb-view-icons gen4 注）。 */
-.wb-sb-left { flex:1 1 0; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
+.wb-sb-left { flex:0 1 380px; min-width:180px; display:flex; flex-direction:column; border-right:1px solid var(--dsw-alias-border-l1,#333); }
+/* CL-3 (t261006-18, design §2.2): the left column's width base becomes 380px
+   (flex-basis; "below 340px the titles are cut too hard"). min-width keeps the
+   frozen 180px contract (t260929-22 arbitration A/B proof: raising min-width
+   crushes the shell resize geometry) - normal windows get 380px, the column
+   may shrink under shell pressure instead of fighting the shell. */
+
 /* position:relative —— 工单详情抽屉（index.tsx .wb-drawer，absolute）的定位祖先，
    让抽屉铺满中列而不是全窗（260824 用户拍板：详情显在中列）。 */
 .wb-sb-right { flex:4 1 0; display:flex; flex-direction:column; overflow:hidden; min-width:200px; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); position:relative; }
@@ -338,6 +361,31 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-group-entry { flex:1 1 0; min-width:0; display:flex; align-items:center; gap:5px; cursor:pointer; }
 .wb-group-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .wb-group-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; }
+/* CL-3 (t261006-18): the project row reports two numbers on the right, X at work / Y waiting (numbers only, no sentences). */
+.wb-group-conc { font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; flex:none; white-space:nowrap; }
+/* Line-1 order marks: queued = leading position number; at-work = green dot; human-hold / paused = amber dot (no ordering controls). */
+.wb-order-pos { flex:none; min-width:14px; text-align:center; font-size:10px; font-weight:600;
+  color:var(--dsw-derive-accent,#0969da); background:color-mix(in srgb,var(--dsw-derive-accent,#0969da) 12%,transparent);
+  border-radius:4px; padding:0 3px; line-height:14px; }
+.wb-order-dot { flex:none; width:8px; height:8px; border-radius:50%; }
+.wb-order-dot[data-order-dot=work] { background:var(--dsw-derive-success,#1a7f37); }
+.wb-order-dot[data-order-dot=hold], .wb-order-dot[data-order-dot=paused] { background:var(--dsw-derive-warn,#b8860b); }
+/* Ordering controls: handgrip (drag anchor) + up/down arrows, rendered on data-order-kind=queued rows only. */
+.wb-order-ctl { display:inline-flex; align-items:center; gap:1px; flex:none; margin-left:2px; }
+.wb-order-grip { cursor:grab; font-size:9px; letter-spacing:-1px; color:var(--dsw-derive-muted,#57606a); user-select:none; line-height:1; }
+.wb-order-grip:active { cursor:grabbing; }
+.wb-order-arrow { border:none; background:none; cursor:pointer; font:inherit; font-size:9px; line-height:1;
+  color:var(--dsw-derive-muted,#57606a); padding:1px 2px; border-radius:3px; }
+.wb-order-arrow:hover { background:rgba(255,255,255,.08); color:var(--dsw-alias-label-primary,#1f2328); }
+.wb-order-arrow:disabled { opacity:.4; cursor:default; }
+/* Line-2 ten-cell progress dots (design §7.2 default): lit up to the current stage, zero extra row height. */
+.wb-stage-dots { display:inline-flex; align-items:center; gap:2px; flex:none; }
+.wb-stage-dot { width:5px; height:5px; border-radius:1px; background:var(--dsw-derive-border,#d0d7de); }
+.wb-stage-dot[data-on=true] { background:var(--dsw-derive-accent,#0969da); }
+/* Reorder-refusal notice (A7): one line with the engine's refusal verbatim (same token family as .wb-insp-degraded, no new palette). */
+.wb-order-notice { margin:2px 8px 6px 14px; padding:4px 8px; font-size:10px; line-height:1.5;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-all; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
  * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
@@ -475,6 +523,18 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
+  // CL-3 (t261006-18): project key -> concurrency read face (GET /wf/concurrency
+  // thin projection). null = face failed/malformed (rows carry zero order marks,
+  // never a locally invented order); undefined = not fetched yet.
+  const [concByProject, setConcByProject] = useState<Record<string, ConcFace | null>>({})
+  /** Reorder in flight (project key -> true): controls disabled against double writes; every write ends in POST -> re-read the same face. */
+  const [reorderBusy, setReorderBusy] = useState<Record<string, boolean>>({})
+  /** Named reorder refusal (project key -> verbatim error; '' = none): renders as the group's notice line (acceptance A7). */
+  const [orderNotice, setOrderNotice] = useState<Record<string, string>>({})
+  /** Currently dragged ticket (project key -> id): the drop row computes the move-to from it; zero local order kept - one permutation, then POST. */
+  const dragTicketRef = useRef<{ project: string; id: string } | null>(null)
+  /** Workflow topology (stage-order source of the ten-cell dots; minimal Wf projection). */
+  const [wfList, setWfList] = useState<WfLite[]>([])
   // t260915-19 巡检分支：最近一次成功的巡检行快照（端点失败=保快照+显式降级横幅，
   // 绝不静默清空——KI-008/t260910-04 R3 同纪律，与中列 reloadTickets 同款）。
   const [inspectionRows, setInspectionRows] = useState<InspectionTicket[]>([])
@@ -734,9 +794,28 @@ export function WorkbenchSidebar(props: SidebarProps) {
             return [p.key, [] as Ticket[]] as const
           }
         }))
+        // CL-3 (t261006-18): fetch the concurrency face per project in parallel
+        // (a failed/malformed fetch = null for that project, rows degrade with
+        // zero order marks - the queue is never recomputed locally; rule 8).
+        const concEntries = await Promise.all(list.map(async (p) => {
+          try {
+            const cr = await fetch(`${CONCURRENCY_URL}?project=${encodeURIComponent(p.key)}`).then(r => r.json())
+            return [p.key, parseConcFace(concFaceFromReply(cr))] as const
+          } catch {
+            return [p.key, null] as const
+          }
+        }))
         if (cancelled) return
         setTicketsByProject(Object.fromEntries(entries))
+        setConcByProject(Object.fromEntries(concEntries))
       } catch { /* 静默 */ }
+      // CL-3 ten-cell dots (design §7.2): fetch the topology once (/wf/workflows
+      // global template face, same source as the epics create dialog, zero host
+      // change); on failure keep the previous snapshot, dots degrade to hidden.
+      try {
+        const wr = await fetch('/sandbar-workbench/api/wf/workflows').then(r => r.json())
+        if (!cancelled && wr?.ok === true) setWfList((wr.result ?? []) as WfLite[])
+      } catch { /* silent: keep the previous snapshot */ }
       // 巡检分支收口（独立于项目组 try：项目组失败不影响巡检，反之亦然）。
       try {
         const ir = await inspPromise as { ok?: boolean; error?: unknown; result?: { tickets?: unknown } } | undefined
@@ -762,6 +841,49 @@ export function WorkbenchSidebar(props: SidebarProps) {
     const stopPoll = startVisibleInterval(() => { void load() }, 10_000)
     return () => { cancelled = true; stopPoll() }
   }, [wide])
+
+  // CL-3 (t261006-18): re-fetch one project's face (the "re-read the same face"
+  // half of every POST). failure/malformed = null (rows carry zero marks) -
+  // never keep the stale face and pretend the move succeeded.
+  const refreshConc = useCallback(async (projectKey: string) => {
+    try {
+      const cr = await fetch(`${CONCURRENCY_URL}?project=${encodeURIComponent(projectKey)}`).then(r => r.json())
+      setConcByProject(m => ({ ...m, [projectKey]: parseConcFace(concFaceFromReply(cr)) }))
+    } catch {
+      setConcByProject(m => ({ ...m, [projectKey]: null }))
+    }
+  }, [])
+
+  // One manual reorder: locally compute only the PERMUTATION (pure function,
+  // and it must be a permutation of the engine's current queue), then POST
+  // reorder -> re-read the same face. Zero local order state (the ticket's
+  // iron rule). A refusal (409 non-permutation / write face absent, network
+  // error) surfaces verbatim in the group's notice line (acceptance A7: a
+  // refusal must be visible, never swallowed) - then only re-read the face so
+  // the rows fall back to the engine's truth; never fake a done move.
+  const handleReorder = useCallback(async (projectKey: string, order: string[]) => {
+    const face = concByProject[projectKey] ?? null
+    const want = permutationOf(face?.queue ?? [], order)
+    if (want === null) return // not a permutation (stale/malformed face) -> no-op, wait for the poll
+    setReorderBusy(m => ({ ...m, [projectKey]: true }))
+    let refused = ''
+    try {
+      const r = await fetch(CONCURRENCY_REORDER_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ project: projectKey, order: want }),
+      }).then(x => x.json()) as { ok?: boolean; error?: unknown } | undefined
+      if (r?.ok !== true) refused = String(r?.error ?? 'reorder failed (HTTP body without ok:true)')
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err)
+    }
+    try {
+      await refreshConc(projectKey)
+    } finally {
+      setOrderNotice(m => ({ ...m, [projectKey]: refused }))
+      setReorderBusy(m => ({ ...m, [projectKey]: false }))
+    }
+  }, [concByProject, refreshConc])
 
   // 点工单（t260903-07 起）：只在中列开工单详情抽屉，右栏 chat 恒为全局会话
   // 不切换（联动下线口径见本文件头部注释）。左列行/立项单关联行/度量下钻三入口共用。
@@ -935,6 +1057,20 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'executor') }}
                   onClick={() => handleViewIcon(g.project.key, 'executor')}>
                   <span className="wb-group-name">{g.project.name}</span>
+                  {/* CL-3 (t261006-18): two numbers on the row's right, "X at work
+                      . Y waiting" (design §2.2: numbers, no sentences). Source =
+                      the concurrency face projection (faceCounts); a missing or
+                      malformed face renders nothing (degrades with zero marks). */}
+                  {concByProject[g.project.key] !== undefined && concByProject[g.project.key] !== null && (() => {
+                    const c = faceCounts(concByProject[g.project.key] ?? null)
+                    return (
+                      <span className="wb-group-conc" data-wb-conc-counts=""
+                        data-at-work={c.atWork} data-waiting={c.waiting}
+                        title="At work · waiting (project concurrency)">
+                        {c.atWork} at work · {c.waiting} waiting
+                      </span>
+                    )
+                  })()}
                   <span className="wb-group-count">{g.tickets.length || ''}</span>
                 </span>
                 {/* 视图入口 per 项目（用户拍板 260823；t260929-22 gen4 宿主裁决落地：
@@ -1003,11 +1139,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   ) : g.tickets.map(t => {
                     // UI-1 (t261005-09) boundary with concurrency-limit CL-2/CL-3:
                     // queue position numbers and drag/arrow ordering of QUEUED
-                    // tickets belong to CL. The ticket-list face supplies no queue
-                    // field today (CL-1 landed engine-side only, t261004-32), so
-                    // this list renders order-free rows and invents no order
-                    // locally. When CL-2/CL-3 add the face, the position number and
-                    // ordering controls land here and nowhere else.
+                    // tickets belong to CL — landed here (t261006-18) and nowhere
+                    // else. The order face is the ENGINE's (GET /wf/concurrency);
+                    // this list never computes order locally: every move is
+                    // POST reorder -> re-read the same face.
                     // t260915-19：组内巡检行（t260915-20 起带项目身份，ProjectKey SA
                     // 归组）走最小适配——行1 标题引擎已给「巡检 <实例> · 期 <期号>」
                     // 零适配；行2 传本地纯函数合成进展（等你签字 · 发现 高x/中y/低z，
@@ -1017,6 +1152,15 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     // 单点在 host 层）——合并排序后巡检行混入组内各位置，数据来源
                     // 须行随身可辨，不靠「恒在组尾」的旧位置线索。
                     const insp = isInspectionRow(t)
+                    // CL-3 order projection (queue-model pure functions; a missing or
+                    // malformed face = null -> every row renders with zero marks).
+                    const conc = concByProject[g.project.key] ?? null
+                    const kind = insp ? undefined : orderKindOf(t.id, conc, t.paused === true)
+                    const pos = kind === 'queued' && conc !== null ? conc.queue.indexOf(t.id) + 1 : undefined
+                    // Ten-cell dots: the stage's index inside the topology (§7.2 default dots; the bar alternative is out of this ticket's scope).
+                    const wfl = wfList.find(w => w.id === t.workflow) ?? null
+                    const stageIdx = wfl && Array.isArray(wfl.stages)
+                      ? wfl.stages.findIndex(s => s?.id === t.stage) : -1
                     return (
                       /* t260904-17 列表 v5（mock 屏⑤）：左栏工单条目=行卡迷你版（一套 UI；
                        * compact 省略站道/管理动作位）。状态短名/配色由四态枚举驱动
@@ -1025,12 +1169,39 @@ export function WorkbenchSidebar(props: SidebarProps) {
                         wf={insp ? INSPECTION_WF_LIKE : undefined}
                         progress={insp ? inspectionProgressOf(t) : undefined}
                         kindBadge={insp ? { text: INSPECTION_ROW_BADGE } : undefined}
+                        ordering={kind === undefined ? undefined : {
+                          kind,
+                          pos,
+                          dotsLit: kind === 'queued' || kind === 'atwork' || kind === 'hold'
+                            ? stageDotsLit(stageIdx, t.status === 'closed') : undefined,
+                          busy: reorderBusy[g.project.key] === true,
+                          onMove: (dir) => {
+                            if (conc === null) return
+                            const next = moveTicket(conc.queue, t.id, dir)
+                            if (next !== null) void handleReorder(g.project.key, next)
+                          },
+                          onDragStart: () => { dragTicketRef.current = { project: g.project.key, id: t.id } },
+                          onDrop: () => {
+                            const drag = dragTicketRef.current
+                            dragTicketRef.current = null
+                            if (conc === null || drag === null || drag.project !== g.project.key) return
+                            const next = reorderMoveTo(conc.queue, drag.id, t.id)
+                            if (next !== null) void handleReorder(g.project.key, next)
+                          },
+                        }}
                         active={selectedId === t.id}
                         updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
                           ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
                         onOpen={() => handleTicketClick(t, g.project.key)} />
                     )
                   })}
+                  {/* Reorder-refusal notice (t261006-18 A7): the engine write face's
+                      named refusal verbatim - visible, order untouched (the face
+                      re-read restores truth), never silently swallowed. */}
+                  {orderNotice[g.project.key] && (
+                    <div className="wb-order-notice" data-wb-order-notice=""
+                      role="alert">{orderNotice[g.project.key]}</div>
+                  )}
                 </>
               )}
             </div>

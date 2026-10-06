@@ -11,8 +11,9 @@
  * stopPropagation 防误触行卡导航。
  */
 
-import type { MouseEvent } from 'react'
+import type { DragEvent, MouseEvent } from 'react'
 import { epicChipColor } from './theme'
+import type { OrderKind } from './queue-model.ts'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
   laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, closeHealthOf, closeHealthBadgeOf,
@@ -62,6 +63,32 @@ export interface CardProgress {
 /** 管理动作位键集（与台面 availableOps 的返回键同名单）。 */
 export type CardOp = 'advance' | 'dispatch-next' | 'rework' | 'unblock' | 'close' | 'pause' | 'resume'
 
+/**
+ * CL-3 (t261006-18) ordering face for one row, projected by the parent from the
+ * ENGINE's concurrency read face (GET /sandbar-workbench/api/wf/concurrency) —
+ * this component never classifies on its own. undefined = the row takes no
+ * part in ordering: nothing is rendered, every existing consumer is unchanged.
+ *   queued: leading position number + handgrip + up/down arrows (draggable);
+ *   atwork: green dot; hold: amber dot (the human gate); paused: amber dot;
+ *   atwork/hold/paused carry NO ordering controls (design §2.2).
+ * `dotsLit` renders the ten-cell progress dots on line 2 (design §7.2 default).
+ * Every move callback ends in POST reorder -> re-read the same face; no local
+ * order is kept anywhere.
+ */
+export interface RowOrdering {
+  kind: OrderKind
+  /** 1-based engine position (queued rows only; parent reads it from the face). */
+  pos?: number
+  /** Lit cells for the ten-cell progress dots (0..10; undefined = not rendered). */
+  dotsLit?: number
+  /** A reorder write is in flight: controls disabled (never a double move). */
+  busy?: boolean
+  onMove?: (dir: -1 | 1) => void
+  onDragStart?: () => void
+  onDrop?: () => void
+}
+
+
 export interface TicketRowCardProps {
   t: CardTicket
   /** 模板拓扑（站道点数/阶段短名数据源）；缺省=不渲染站道、悬停无阶段语境。 */
@@ -77,6 +104,8 @@ export interface TicketRowCardProps {
    *  侧栏用它标「巡检」来源行；缺省=不渲染，中列板面零消费零影响）。
    *  data-kind-badge=值即文本，渲染断言/样式作用域选择器锚。 */
   kindBadge?: { text: string }
+  /** CL-3 ordering face (queue-model projection; undefined = row not ordered, zero render change). */
+  ordering?: RowOrdering
   /** 可用管理动作键集（父层 availableOps 结果原样传入）。 */
   ops?: CardOp[]
   peerViewers?: { who: string }[]
@@ -108,7 +137,7 @@ function cardTitle(t: CardTicket, wf?: WfLike | null): string {
 }
 
 export function TicketRowCard({
-  t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge,
+  t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ordering,
   ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic,
 }: TicketRowCardProps) {
   // t260919-02：exec_status 进五态推导（失败类终态行 → 'failed'「已失败」红标）。
@@ -120,6 +149,21 @@ export function TicketRowCard({
     ev.stopPropagation()
     if (!busy) fn?.()
   }
+  // CL-3 drag: only queued rows are draggable (draggable sits on the
+  // data-order-kind=queued row); onDragOver preventDefault is the HTML5 DnD
+  // drop-allowance protocol for dropping over other rows.
+  const orderable = ordering?.kind === 'queued'
+  const onDragStart = (ev: DragEvent) => {
+    if (!orderable) return
+    ev.dataTransfer.effectAllowed = 'move'
+    ev.dataTransfer.setData('text/plain', t.id)
+    ordering?.onDragStart?.()
+  }
+  const onDrop = (ev: DragEvent) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    ordering?.onDrop?.()
+  }
   // t260905-08：状态行底色不再行内写死——CSS 按 data-state 接管
   // （.wb-card[data-state=waiting/blocked]，主题令牌派生，深浅两档自适应；
   //   原 rowTone 行内浅色写死=深色主题浅字撞浅底根因，宿主 260906 实报）。
@@ -130,12 +174,47 @@ export function TicketRowCard({
       className="wb-card" data-ticket-id={t.id}
       data-state={state4} data-active={active} data-compact={compact}
       data-engine={t.engine}
+      data-order-kind={ordering?.kind}
+      draggable={orderable}
+      onDragStart={onDragStart}
+      onDragOver={orderable ? undefined : (ev) => { if (ordering !== undefined) ev.preventDefault() }}
+      onDrop={ordering !== undefined ? onDrop : undefined}
       style={{ borderLeftColor: epicColor }}
       title={cardTitle(t, wf)}
       onClick={() => onOpen()}
       role="button"
     >
       <div className="wb-card-l1">
+        {/* CL-3 order marks (t261006-18): queued = leading position number;
+            at-work = green dot; human-hold / paused = amber dot. At-work,
+            hold and paused rows render NO ordering controls - everything
+            comes from the parent's ordering projection, never judged here. */}
+        {ordering?.kind === 'queued' && (
+          <span className="wb-order-pos" data-order-pos={ordering.pos ?? 0}
+            title={`Queue position ${ordering.pos ?? 0}`}>{ordering.pos ?? ''}</span>
+        )}
+        {ordering?.kind === 'atwork' && (
+          <span className="wb-order-dot" data-order-dot="work" title="At work" />
+        )}
+        {(ordering?.kind === 'hold' || ordering?.kind === 'paused') && (
+          <span className="wb-order-dot" data-order-dot={ordering.kind === 'hold' ? 'hold' : 'paused'}
+            title={ordering.kind === 'hold' ? 'Holding a slot at the human gate' : 'Paused by you (no slot)'} />
+        )}
+        {/* CL-3 ordering controls: handgrip (drag anchor) + one-step up/down
+            arrows, queued rows only. Every click/drag ends in the parent's
+            POST reorder -> re-read the same face; zero local order state. */}
+        {orderable && (
+          <span className="wb-order-ctl" data-order-ctl="">
+            <span className="wb-order-grip" data-order-grip="" title="Drag to reorder"
+              aria-label={`Drag to reorder ${t.id}`}>⋮⋮</span>
+            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
+              aria-label={`Move ${t.id} up`} title="Move up"
+              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(-1) }}>⌃</button>
+            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
+              aria-label={`Move ${t.id} down`} title="Move down"
+              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(1) }}>⌄</button>
+          </span>
+        )}
         {/* 状态点着色走 CSS 伪元素（::before）——元素本体无圆角无底色，
             不与迷你站道圆点混数（UI 场景 T5 以几何特征数点） */}
         <span className="wb-card-dot" data-state={state4} />
@@ -202,6 +281,18 @@ export function TicketRowCard({
           <span className="wb-card-lane" title={`Stage dots (${dots.length})`}>
             {dots.map((d, i) => (
               <span key={i} className="wb-card-lane-dot" data-visual={d} data-state={state4} />
+            ))}
+          </span>
+        )}
+        {/* CL-3 ten-cell progress dots (t261006-18, design §7.2 default):
+            compact (left-column) rows light up to the current stage;
+            data-lit = lit count, the render-assertion anchor.
+            undefined = not rendered (existing rows unchanged). */}
+        {compact && ordering?.dotsLit !== undefined && (
+          <span className="wb-stage-dots" data-lit={ordering.dotsLit}
+            title={`Stage dots: ${ordering.dotsLit} of 10`}>
+            {Array.from({ length: 10 }, (_, i) => (
+              <span key={i} className="wb-stage-dot" data-on={i < (ordering.dotsLit ?? 0) || undefined} />
             ))}
           </span>
         )}
