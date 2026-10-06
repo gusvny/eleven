@@ -175,6 +175,12 @@ class InstanceSpec:
     # 防「7 子代理审 368 个场景文件」式无界扇出复发。
     inspect_max_shards: int = DEFAULT_MAX_SHARDS
     inspect_max_files_per_shard: int = DEFAULT_MAX_FILES_PER_SHARD
+    # Review-ledger rotation slice (t261006-12): review_slice=None = not set in
+    # the declaration (the activity side applies the profile default: simplify
+    # on, the other faces off); slice_min/max=0 = activity-side default 40/60.
+    review_slice: Optional[bool] = None
+    slice_min: int = 0
+    slice_max: int = 0
     # lane/watchdog 面阈值档（260926，KI-122 追加面）：声明原值（YAML 子集无类型推断，
     # 逐字 str）——解析期已过词法/范围校验；运行期由 inspection_lane_watchdog.
     # resolve_thresholds 归一并在面/回执上点名来源（declaration|default）。空=全缺省。
@@ -519,7 +525,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                       "inspect_profile", "inspect_max_shards",
                                       "inspect_max_files_per_shard",
                                       "mode", "docs_root", "watchdog",
-                                      "skip_when_unchanged"})
+                                      "skip_when_unchanged",
+                                      "review_slice", "slice_min", "slice_max"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
                             "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
@@ -527,7 +534,9 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                             "t260916-22）/inspect_max_shards/inspect_max_files_per_shard"
                             "（缩面分片硬上限两键，t260924-06）/mode/docs_root（巡检模式两键，"
                             "t260925-01）/watchdog（lane 巡检面阈值档三键，260926）/"
-                            "skip_when_unchanged（无新变更则空转，260929 宿主令）；"
+                            "skip_when_unchanged (idle when nothing changed, host order "
+                            "260929)/review_slice, slice_min, slice_max (review-ledger "
+                            "rotation slice, t261006-12); "
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -622,6 +631,35 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                 raise DeclError("%s：skip_when_unchanged 只认 true/false 字面（got %r；"
                                 "本项=「无新变更则空转」，260929 宿主令）" % (where, raw_skip))
             skip_when_unchanged = raw_skip == "true"
+        # Review-ledger rotation slice (t261006-12): review_slice accepts the
+        # true/false literals only (None = not set -> the activity side applies
+        # the profile default); min/max are positive integers (no invented upper
+        # bound, non-positive rejected; min>max is clamped with a note at the
+        # use site). Same lexical discipline as max_findings.
+        review_slice: Optional[bool] = None
+        if item.get("review_slice") is not None:
+            raw_rs = item.get("review_slice")
+            if not isinstance(raw_rs, str) or not BOOL_RE.match(raw_rs):
+                raise DeclError("%s：review_slice only accepts the true/false literals "
+                                "(got %r; review-ledger rotation slice switch, t261006-12)"
+                                % (where, raw_rs))
+            review_slice = raw_rs == "true"
+        slice_min = 0
+        if item.get("slice_min") is not None:
+            raw_smin = _req_str(where, item, "slice_min")
+            if not re.match(r"^\d+$", raw_smin) or int(raw_smin) <= 0:
+                raise DeclError("%s：slice_min %r is invalid (a positive integer; the "
+                                "lower bound of the per-period least-recently-reviewed "
+                                "slice, default 40, t261006-12)" % (where, raw_smin))
+            slice_min = int(raw_smin)
+        slice_max = 0
+        if item.get("slice_max") is not None:
+            raw_smax = _req_str(where, item, "slice_max")
+            if not re.match(r"^\d+$", raw_smax) or int(raw_smax) <= 0:
+                raise DeclError("%s：slice_max %r is invalid (a positive integer; the "
+                                "upper bound of the per-period least-recently-reviewed "
+                                "slice, default 60, t261006-12)" % (where, raw_smax))
+            slice_max = int(raw_smax)
         kind, cron, n, source, project_key = _validate_schedule(where, item.get("schedule"), enabled)
         # 实例级项目身份必填（t260915-20）：校验放字段链**最后**——既有反用例事由
         # （缺 source、未知 kind、face 除名、cron 非法…）照旧先爆，断言语义零偷换；
@@ -645,6 +683,7 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             inspect_profile=inspect_profile,
             inspect_max_shards=inspect_max_shards,
             inspect_max_files_per_shard=inspect_max_files_per_shard,
+            review_slice=review_slice, slice_min=slice_min, slice_max=slice_max,
             watchdog=watchdog))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
@@ -712,7 +751,13 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
                         "timeout_min": it.inspect_timeout_min,
                         "profile": it.inspect_profile,
                         "max_shards": it.inspect_max_shards,
-                        "max_files_per_shard": it.inspect_max_files_per_shard},
+                        "max_files_per_shard": it.inspect_max_files_per_shard,
+                        # Review-ledger rotation slice (t261006-12): review_slice
+                        # None = not set in the declaration (activity-side profile
+                        # default); min/max 0 = activity-side default 40/60.
+                        "review_slice": it.review_slice,
+                        "slice_min": it.slice_min,
+                        "slice_max": it.slice_max},
             # lane/watchdog 阈值档（260926）：additive 键，声明原值透传——运行期活动
             # 归一并在面/回执上点名来源（declaration|default）；旧消费者忽略本键零行为。
             "watchdog": dict(it.watchdog),

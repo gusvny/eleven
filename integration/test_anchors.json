@@ -2,8 +2,8 @@
     "_header": {
         "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
         "labelled_counts": {
-            "engine_tests": 219,
-            "scenarios": 542
+            "engine_tests": 220,
+            "scenarios": 544
         },
         "vocab": [
             "behaviour",
@@ -1101,6 +1101,11 @@
             "anchor": "behaviour",
             "note": "t261006-07: the conflict-round cap can no longer deadlock a lane — settle-first plan on a blocked route, human signal (rework/retry_qc) resets the counter (rejected rework never does), settle-success resets it, join mid-merge guard settles a clean face through the shared settle core, blocked texts name executable exits only",
             "sync_path": ""
+        },
+        "server/engine/tests/test_t261006_12_review_ledger.py": {
+            "anchor": "contract",
+            "note": "t261006-12 L1: review-ledger module truth tables (path derivation incl hostile project_key, JSONL load degradation, slice ordering/bounds/determinism, coverage partition, append write-back notes)",
+            "sync_path": "server/engine/inspection_review_ledger.py"
         }
     },
     "scenarios": {
@@ -3813,6 +3818,16 @@
             "anchor": "behaviour",
             "note": "t261006-07: the main-sync conflict round cap can no longer lock a fully-resolved lane out — route truth table on the real pure function, a resolved-but-unstaged real git merge face settles through the real worker activity (abort idempotent), counter resets on human signals and settle success, block texts name executable exits only, operator sync --abort entry exists and is documented",
             "sync_path": ""
+        },
+        "integration/t261006-12/sc_review_ledger_rotation.py": {
+            "anchor": "contract",
+            "note": "t261006-12 rotation contract: slice selection is least-recently-reviewed with declared ordering and tie rule, deterministic, bounded 40-60; a lost/corrupt/torn/non-UTF-8 ledger degrades to everything-unreviewed plus a named note and never raises; hostile project_key refused; coverage lists partition the inventory",
+            "sync_path": ""
+        },
+        "integration/t261006-12/sc_review_ledger_period_chain.py": {
+            "anchor": "source-text",
+            "note": "t261006-12 period-chain contract: skip_when_unchanged and the stub path never advance the ledger, one append seam serves slice and full scope, full write-back restarts rotation, report payload carries both coverage lists and the human line names NOT-reviewed",
+            "sync_path": "server/engine/agent_activities.py"
         }
     }
 }

@@ -827,10 +827,18 @@ def ki_open_entries(path: Any) -> Tuple[List[str], Dict[str, Any]]:
     return rows, meta
 
 
+# slice_rows/slice_notes (t261006-12): the review-rotation slice (the "least
+# recently reviewed" ledger slice). Default None = the old form byte-for-byte
+# (old callers / replay safety); non-empty adds one section to the scope list
+# and records meta["slice"] (slice files + selection notes; the slice does not
+# count against the change-face shard cap — that cap bounds the diff face).
 def build_change_scope_text(diff_rows: List[str], suite_rows: List[str],
                             ki_rows: List[str], notes: Dict[str, Any],
                             prev_summary: str, max_shards: int,
-                            max_files_per_shard: int) -> Tuple[str, Dict[str, Any]]:
+                            max_files_per_shard: int,
+                            slice_rows: Optional[List[str]] = None,
+                            slice_notes: Optional[Dict[str, Any]] = None
+                            ) -> Tuple[str, Dict[str, Any]]:
     """四路输入 → scope_block（prompt 的「本期审查范围」段）+ scope_meta。
 
     硬上限（U6）：变化面超 max_shards×max_files_per_shard 时截断，meta["truncated"]
@@ -866,6 +874,20 @@ def build_change_scope_text(diff_rows: List[str], suite_rows: List[str],
     lines.append("")
     lines.append("### KI 册 open 条目（复发征兆重点看）")
     lines += ["- %s" % r for r in ki_rows] if ki_rows else ["- （无条目）"]
+    slice_rows = [str(r) for r in (slice_rows or []) if str(r).strip()]
+    if slice_rows:
+        meta["slice"] = {"files": slice_rows, **{k: v for k, v in (slice_notes or {}).items()}}
+        lines.append("")
+        lines.append("### Review-rotation slice (least recently reviewed first; "
+                     "ledger = project dir reviewed.jsonl, t261006-12)")
+        lines.append("- (%d files the ledger ranks as least recently reviewed; the union "
+                     "of this slice and the change face is this period's deep-read scope)"
+                     % len(slice_rows))
+        lines += ["- %s" % r for r in slice_rows]
+        _sl = slice_notes or {}
+        for _k in ("ledger_note", "ledger_corrupt_lines", "slice_note", "slice_clamped"):
+            if _sl.get(_k):
+                lines.append("- (%s: %s)" % (_k, _sl[_k]))
     lines.append("")
     lines.append("### 上期发现与裁定（重复项机械侧自动去重，勿复述上期原样内容）")
     lines.append(prev_summary or "- （无对照）")

@@ -231,9 +231,13 @@ def test_decl_budget_keys_parse_and_plan_passthrough(tmp_path):
     # 缩面硬上限两键（t260924-06）：声明可配
     assert (it.inspect_max_shards, it.inspect_max_files_per_shard) == (2, 30)
     plan = decl._plan_from_decl(d, "budget-inst")
+    # t261006-12: the three review-ledger rotation-slice keys ride the plan
+    # additively (not set = None/0/0 = activity-side profile default: simplify
+    # on, others off; slice default 40/60).
     assert plan["inspect"] == {"max_findings": 25, "timeout_min": 45,
                                "profile": "simplify",
-                               "max_shards": 2, "max_files_per_shard": 30}
+                               "max_shards": 2, "max_files_per_shard": 30,
+                               "review_slice": None, "slice_min": 0, "slice_max": 0}
 
 
 def test_decl_budget_keys_defaults(tmp_path):

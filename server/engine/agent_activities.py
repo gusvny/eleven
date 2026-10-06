@@ -9514,6 +9514,14 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     max_findings = int(args.get("max_findings") or DEFAULT_MAX_FINDINGS)
     timeout_sec = float(args.get("timeout_sec") or 0) or float(
         DEFAULT_INSPECT_TIMEOUT_MIN * 60)
+    # Review ledger + rotation slice (t261006-12): review_slice absent/None =
+    # profile default (simplify on, the other faces off); an explicit
+    # true/false is the declaration's ruling. review_scope="full" = the
+    # on-demand full-library read (host-only trigger; writes the SAME ledger).
+    _review_flag = args.get("review_slice")
+    review_wanted = bool(_review_flag) if _review_flag is not None \
+        else (profile == "simplify")
+    review_full = str(args.get("review_scope") or "") == "full"
 
     if not instance_id or not period or not base_dir:
         return _err("inspect 输入缺 instance/period/base_dir（fail-closed，不跑空巡检）")
@@ -9621,10 +9629,53 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     scope_notes.update(smeta)
     ki_rows, kmeta = ki_open_entries(Path(base) / "notes" / "debts" / "known-issues.md")
     scope_notes.update(kmeta)
+    # ---- Review ledger + rotation slice (t261006-12; L2): the 40-60 files the
+    # ledger ranks as least recently reviewed; ordering / tie rules are declared
+    # in inspection_review_ledger.select_slice. An unreadable ledger = "start
+    # over, everything unreviewed" + note (261004 ruling: never an error, no
+    # self-heal). review_scope=full (L4, on-demand full library) = the whole
+    # inventory as the slice, written back to the same ledger. Pure functions,
+    # zero raise; default = zero behaviour change. ----
+    slice_rows: List[str] = []
+    review_notes: Dict[str, Any] = {}
+    managed_files: List[str] = []
+    reviewed_files: List[str] = []
+    coverage: Dict[str, Any] = {}
+    if review_wanted or review_full:
+        from inspection_review_ledger import (DEFAULT_SLICE_MAX, DEFAULT_SLICE_MIN,
+                                              coverage_section, enumerate_managed_files,
+                                              load_review_ledger, review_ledger_path,
+                                              select_slice)
+        ledger_p, lp_note = review_ledger_path(project, override=args.get("review_ledger_path"))
+        if lp_note:
+            review_notes["ledger_note"] = lp_note
+        managed_files = enumerate_managed_files(base)
+        ledger_map, ld_notes = load_review_ledger(ledger_p)
+        review_notes.update(ld_notes)
+        if review_full:
+            slice_rows = list(managed_files)
+            review_notes["slice_note"] = ("on-demand full-library read (review_scope=full) — "
+                                          "the whole managed inventory is this round's scope")
+        else:
+            slice_rows, sel_notes = select_slice(
+                managed_files, ledger_map,
+                slice_min=int(args.get("slice_min") or 0) or DEFAULT_SLICE_MIN,
+                slice_max=int(args.get("slice_max") or 0) or DEFAULT_SLICE_MAX)
+            review_notes.update(sel_notes)
+        if not managed_files:
+            review_notes["inventory_note"] = ("managed inventory is empty (base %s) — no "
+                                              "rotation slice this round" % base_dir)
+        # This period's agent deep-read scope = change face UNION slice (full =
+        # the whole inventory). Diff rows contribute their path part.
+        diff_paths = [r.split("\t", 1)[1] for r in diff_rows if "\t" in r]
+        reviewed_files = sorted(set(slice_rows) | set(diff_paths)) if not review_full \
+            else list(managed_files)
+        coverage = coverage_section(reviewed_files, managed_files, period)
     scope_block, scope_meta = build_change_scope_text(
         diff_rows, suite_rows, ki_rows, scope_notes, prev_summary,
         max_shards=int(args.get("inspect_max_shards") or 0) or 4,
-        max_files_per_shard=int(args.get("inspect_max_files_per_shard") or 0) or 40)
+        max_files_per_shard=int(args.get("inspect_max_files_per_shard") or 0) or 40,
+        slice_rows=slice_rows, slice_notes=review_notes)
     activity.logger.info("[inspect] 缩面范围：变化面 %d 行、套件条目 %d、KI 条目 %d",
                          len(diff_rows), len(suite_rows), len(ki_rows))
     try:
@@ -9752,7 +9803,21 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
         except InspectParseError as e:
             return _err("agent 输出解析失败：%s；输出尾：%s" % (e, text[-400:]))
         findings += with_ids(scope_collapse_findings(scope_meta))
-        return {"ok": True, "result": {"findings": findings, "meta": {
+        # ---- Ledger write-back (t261006-12, L3/L4): only a real agent run with
+        # a parseable output counts as "reviewed" — the parse-failure / timeout /
+        # non-zero-exit branches above all return first, so the ledger does not
+        # advance. The stub path (SANDBAR_INSPECT_STUB=1) returns earlier and
+        # deliberately never writes back: if fixture receipts advanced the
+        # ledger, one test round would mark production coverage as reviewed —
+        # exactly the false coverage L3 exists to prevent. A write failure is a
+        # note, never a raise (the ledger may be lost by ruling; worst case the
+        # slice repeats next period, visible on the ticket face). ----
+        write_notes: Dict[str, Any] = {}
+        if (review_wanted or review_full) and reviewed_files:
+            from inspection_review_ledger import append_reviewed
+            write_notes = append_reviewed(
+                ledger_p, reviewed_files, period)
+        meta_out = {
             "face": face, "profile": profile, "base_dir": base_dir,
             "base_head": this_base, "agent_home": str(home),
             "model_route": route_meta,
@@ -9760,7 +9825,16 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
             # 预算护栏（used_sec 超 90% 预算=票面点名先报实测再谈预算）的原始数据。
             "scope": scope_meta, "used_sec": round(time.monotonic() - t0, 1),
             "scope_effective_base": this_base, "scope_base_prev": prev_base,
-            "output_log": str(out_f)}}}
+            "output_log": str(out_f)}
+        if review_wanted or review_full:
+            # Coverage (L5) and the ledger face go into meta -> the period
+            # report doc: reviewed AND not-reviewed as full lists land in the
+            # report, so a lost ledger cannot erase past coverage ("not
+            # reviewed" never reads as "no problem").
+            meta_out["coverage"] = coverage
+            meta_out["review"] = {**review_notes, **write_notes,
+                                  "review_scope": "full" if review_full else "slice"}
+        return {"ok": True, "result": {"findings": findings, "meta": meta_out}}
     finally:
         # 全终态回收：正常/报错/超时/取消四路都走到（KI-009 组粒度；reap 绝不外抛）
         try:

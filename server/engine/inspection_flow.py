@@ -212,6 +212,15 @@ LANE_REPAIR_PATCH_ID = "inspection-lane-residue-repair-v1"
 # 逐字一致）；新 run 记录标记后照旧等。存量实证：全量巡检 history 无一处带该定时器
 # （六期逐条查过），故本门对存量零代价。
 SUITE_TEARDOWN_GRACE_PATCH_ID = "t260927-inspection-suite-teardown-grace"
+# Version-gate id (t261006-12, replay-safe): the review-ledger rotation slice
+# (new run_inspection_inspect args review_slice/slice_min/slice_max + the face
+# coverage block) takes effect on new runs only. Old in-flight inspection
+# tickets have no such mark in their history -> patched()=False -> the activity
+# args stay byte-identical to the old form and the face gains no coverage key
+# (otherwise replay turns non-deterministic -> the workflow task fails forever,
+# old tickets wedge); repo precedent = the gates above. Ledger read/write live
+# in the activity side (the workflow body stays zero-IO).
+REVIEW_LEDGER_PATCH_ID = "t261006-12-inspection-review-ledger"
 # lane/watchdog 面预算（260926）：活动内部自设扫描总预算（有界——在册非终态票可能上百张，
 # 没有 worker 应答的僵尸票每次 query 都要等到超时）；Temporal 侧 start_to_close 必须**晚于**
 # 内部预算，否则 Temporal 先杀、活动自己的「预算用尽」收口永远跑不到（SUITE/INSPECT 双闸
@@ -1423,17 +1432,30 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         base_dir = repo_root or "."
         # 套件回执/agent_home/台账目录路径由活动侧按 INSPECTION_DIR 派生（worker 进程
         # 无沙箱面；workflow 体零路径计算零模块级属性读——头注纪律）。
+        inspect_args = {"instance_id": inp.instance_id, "period": period,
+                        "ticket_id": ticket_id,
+                        "face": str(plan.get("scan_face") or "test"),
+                        "inspect_profile": inspect_profile, "base_dir": base_dir,
+                        "base_head": (lane or {}).get("base_ref", ""),
+                        "project_key": getattr(inp, "project_key", ""),
+                        "max_findings": max_findings, "timeout_sec": inspect_budget_sec,
+                        "inspect_max_shards": int((ins_cfg.get("max_shards")) or 0),
+                        "inspect_max_files_per_shard":
+                            int((ins_cfg.get("max_files_per_shard")) or 0)}
+        # Review-ledger rotation slice (t261006-12): the new args are injected on
+        # new runs only (version gate REVIEW_LEDGER; old-history replay keeps the
+        # args byte-identical). A review_slice of None = not set in the
+        # declaration -> the activity side applies the profile default (simplify
+        # on, others off); slice_min/slice_max 0 = activity-side default 40/60.
+        if self._patched and workflow.patched(REVIEW_LEDGER_PATCH_ID):
+            inspect_args.update({
+                # review_slice None = not set in the declaration -> profile default
+                "review_slice": ins_cfg.get("review_slice"),
+                "slice_min": int(ins_cfg.get("slice_min") or 0),
+                "slice_max": int(ins_cfg.get("slice_max") or 0)})
         inspect_raw: Any = await workflow.execute_activity(
             "run_inspection_inspect",
-            args=[{"instance_id": inp.instance_id, "period": period,
-                   "ticket_id": ticket_id, "face": str(plan.get("scan_face") or "test"),
-                   "inspect_profile": inspect_profile, "base_dir": base_dir,
-                   "base_head": (lane or {}).get("base_ref", ""),
-                   "project_key": getattr(inp, "project_key", ""),
-                   "max_findings": max_findings, "timeout_sec": inspect_budget_sec,
-                   "inspect_max_shards": int((ins_cfg.get("max_shards")) or 0),
-                   "inspect_max_files_per_shard":
-                       int((ins_cfg.get("max_files_per_shard")) or 0)}],
+            args=[inspect_args],
             start_to_close_timeout=inspect_start_to_close(inspect_budget_sec),
             retry_policy=RETRY_INSPECT)
         if not (inspect_raw or {}).get("ok"):
@@ -1459,6 +1481,14 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         ins_meta = dict(ins_result.get("meta") or {})
         ins_meta.pop("output_log", None)   # agent 原始日志路径进 meta 太吵，落 agent-home 留档即可
         vmeta["inspect"] = ins_meta
+        # Coverage onto the ticket face (t261006-12, L5 hard requirement): which
+        # files were reviewed and which were not = **full lists** onto the
+        # face/ledger doc ("not reviewed" never reads as "no problem"). Injected
+        # inside the gate: old-history faces gain zero new keys.
+        if self._patched and workflow.patched(REVIEW_LEDGER_PATCH_ID):
+            cov = ins_meta.get("coverage")
+            if isinstance(cov, dict) and cov:
+                self.face["coverage"] = cov
         # 预算护栏（t260924-06 必做④）：缩面后 60 分钟预算内应有余量；used_sec 超 90%
         # 预算=票面点名——先报实测数据再谈调预算，不许默认再抬。
         used_sec = float(ins_meta.get("used_sec") or 0.0)
