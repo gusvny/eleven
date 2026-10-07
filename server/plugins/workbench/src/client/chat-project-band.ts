@@ -189,6 +189,11 @@ export interface BandSessionItem {
   handle: string
   /** Title (the title -> displayTitle -> id fallback is the caller's job). */
   title: string
+  /** Raw display title for the tooltip (t261008-01, Measure 1): when `title`
+   *  is the session handle standing in for a charter-injection raw title, the
+   *  raw text stays reachable here (rendered as the row's `title` attribute).
+   *  Absent = no tooltip beyond the handle. */
+  rawTitle?: string
   active: boolean
 }
 
@@ -331,6 +336,13 @@ export function startChatProjectBand(opts: ChatProjectBandOptions = {}): ChatPro
       h.textContent = it.handle
       const t = doc.createElement('span') as HTMLElement
       t.textContent = it.title
+      // Raw title tooltip (t261008-01, Measure 1): the handle replaces the raw
+      // charter-injection text as the visible label; the raw text stays one
+      // hover away. Guarded against quoting surprises by setAttribute (no HTML
+      // assembly). Absent rawTitle = attribute not set (declared absence).
+      if (typeof it.rawTitle === 'string' && it.rawTitle !== '' && it.rawTitle !== it.title) {
+        row.setAttribute('title', it.rawTitle)
+      }
       row.appendChild(h)
       row.appendChild(t)
       if (it.active) row.setAttribute('data-active', '')

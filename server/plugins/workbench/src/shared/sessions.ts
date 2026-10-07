@@ -91,10 +91,28 @@ export function isGlobalSessionId(id: string): boolean {
   return typeof id === 'string' && id !== '' && !id.startsWith('ticket-')
 }
 
+import { isCharterRawTitle } from './charter-title.ts'
+
 /** 行标签：displayTitle 兜底 id（displayTitle 本身已兜底过 id，双保险）。 */
 export function labelOf(row: TitleRowLike | undefined, id: string): string {
   const t = row?.displayTitle
   return typeof t === 'string' && t !== '' ? t : id
+}
+
+/**
+ * Row label (t261008-01, Measure 1): a session whose displayTitle is the raw
+ * charter injection text (see shared/charter-title.ts isCharterRawTitle) must
+ * not show comment text as its label — the handle shows instead (the executor
+ * session keeps its fixed name, regular sessions show the short code; the
+ * caller derives it via displayHandle and passes it in). The raw title stays
+ * reachable in the tooltip (the rendering face owns that). A missing handle
+ * (empty/non-string) falls back to the id — never guess an executor locally.
+ * Non-charter titles keep the exact labelOf behavior: zero change.
+ */
+export function rowLabelOf(row: TitleRowLike | undefined, id: string, handle?: unknown): string {
+  const label = labelOf(row, id)
+  if (!isCharterRawTitle(label)) return label
+  return typeof handle === 'string' && handle !== '' ? handle : id
 }
 
 /**

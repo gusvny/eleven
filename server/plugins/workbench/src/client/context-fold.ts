@@ -113,11 +113,18 @@ export const FOLD_BASE_CSS = `
 `
 
 /**
- * 折叠判定（纯函数，smoke 直测）：文本 trimStart 后以 CHARTER_MARKER 开头=是。
- * 非字符串/空串/中段提及 marker → false（取舍第 6 项）。
+ * Fold predicate (pure, smoke-tested): true when one of the first 3 non-empty
+ * lines is exactly CHARTER_MARKER (t261008-01 widened: the marker moved from
+ * line 1 to line 2 — line 1 now carries the human-readable title because the
+ * platform derives the session title from the first line — and both shapes
+ * must fold; the legacy "trimStart().startsWith(marker)" shape is a subset of
+ * the new one). Non-string / empty / mid-text mention -> false (trade-off 6
+ * unchanged: only a whole-line marker within the first 3 lines counts).
  */
 export function classifyContextFold(text: unknown): boolean {
-  return typeof text === 'string' && text.trimStart().startsWith(CHARTER_MARKER)
+  if (typeof text !== 'string') return false
+  const head = text.split('\n').map(l => l.trim()).filter(l => l !== '').slice(0, 3)
+  return head.includes(CHARTER_MARKER)
 }
 
 /**

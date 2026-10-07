@@ -3,9 +3,11 @@
  *
  * 职责：把 `server/session_charter.md`（会话开局注入源，改完即生效）
  * 渲染成单项目的注入文本：
- *   - 首段通用模板（文件顶部注释到第一个 `## project:` 分段之间）占位符
- *     统一现填（{{project_key}}/{{project_name}}/{{primary_dir}}/{{engine_root}}，
- *     注释内的占位符字样一并替换——真源口径，260904 附录+方案 R4 钉死）；
+ *   - the general template (after the file-doc comment is stripped, up to the
+ *     first `## project:` section — t261008-01 stripLeadingComment) gets its
+ *     placeholders filled ({{project_key}}/{{project_name}}/{{primary_dir}}/
+ *     {{engine_root}}, including placeholder-like text inside comments — the
+ *     unified-rendering rule, 260904 appendix + plan R4);
  *   - 命中 `## project:<key>` 分段（重复取首个）把该段原文追加在通用段后，
  *     段内占位符统一渲染（如 suyou 段的 {{engine_root}}）；
  *   - 文件缺失/读失败/空/渲染结果空 → 回落 DEFAULT_CHARTER_TEMPLATE
@@ -26,12 +28,68 @@ export const SESSION_CHARTER_PATH = '/sandbar-workbench/api/session-charter'
  * 上下文注入机读标记（t260905-04）：引擎侧给注入文本打的「消息元数据 kind=charter」
  * 落地载体。平台 wire 契约 PromptContentPart 无 metadata 字段（仓内冻结镜像
  * server/plugins/workbench/tests/ki046-charter-prompt-shape.mjs WIRE_CONTRACT 实锤），
- * 故标记拼在注入文本首行（HTML 注释样式的行，模型读无害；展开态随全文可见属
- * 已定降级——折叠态随内容区整体隐藏，「新会话开头只见小条」不受影响）。渲染端
+ * so the marker sits on line 2 of the injected text (since t261008-01 line 1
+ * is the human-readable title line — the platform session title takes the
+ * first line and must not be a comment; an HTML-comment line is harmless for
+ * the model to read; the expanded view showing the full text is the agreed
+ * degradation — folded state hides the whole block, so "a new session opens
+ * with just a chip" is unaffected). Renderer
  * （src/client/context-fold.ts）认本常量为折叠触发器，同源派生防两端漂移（R7 先例）；
  * 未来任何上下文注入（项目简介、文档引用）带同一标记即走同一折叠件。
  */
 export const CHARTER_MARKER = '<!-- workbench:kind:charter -->'
+
+/**
+ * First line of the injected text (t261008-01): a short, human-readable title
+ * line naming the project. The platform derives the session's durable title
+ * from the first message's first line, so this line — not the machine marker —
+ * is the session name a person sees. composeCharterInjection places the marker
+ * on line 2 (the fold predicate reads the first 3 lines, same-source constant).
+ * Tolerance: non-string -> empty-string; empty name -> key; both empty -> the
+ * fixed label.
+ */
+export function charterTitleLine(projectName: string, projectKey: string): string {
+  const name = typeof projectName === 'string' ? projectName.trim() : ''
+  const key = typeof projectKey === 'string' ? projectKey.trim() : ''
+  const label = name !== '' ? name : key !== '' ? key : 'project'
+  return key !== '' && key !== label ? `Project session — ${label} (${key})` : `Project session — ${label}`
+}
+
+/**
+ * Drop a leading HTML comment block from the charter source (t261008-01): the
+ * file-doc comment at the top of session_charter.md is editor-facing metadata,
+ * not charter content, and must not leak into the injected text (it used to
+ * become line 2 of the platform session title). Rule: strip only when the
+ * first non-whitespace content starts with `<!--` AND a closing `-->` exists —
+ * an unterminated opener returns the text unchanged (never swallow the whole
+ * file). No leading comment -> no-op; non-string -> returned as is.
+ */
+export function stripLeadingComment(raw: string): string {
+  if (typeof raw !== 'string') return raw
+  const start = raw.search(/\S/)
+  if (start === -1 || !raw.startsWith('<!--', start)) return raw
+  const end = raw.indexOf('-->', start)
+  if (end === -1) return raw
+  let cut = end + 3
+  if (raw[cut] === '\r') cut += 1
+  if (raw[cut] === '\n') cut += 1
+  // Everything before the comment opener is whitespace by construction (start
+  // = first non-whitespace position) — drop it too, so the body is not indented.
+  return raw.slice(cut)
+}
+
+/**
+ * Compose the full injected text (t261008-01): human-readable title line +
+ * machine marker + rendered charter body. The fold predicate
+ * (classifyContextFold) scans the first 3 lines for the marker, so the legacy
+ * shape (marker on line 1) and this shape both fold. Tolerance: a non-string
+ * charter counts as empty (the caller validates first; this function itself
+ * never throws); empty name -> key, both empty -> the fixed label.
+ */
+export function composeCharterInjection(projectName: string, projectKey: string, charter: string): string {
+  const body = typeof charter === 'string' ? charter : ''
+  return `${charterTitleLine(projectName, projectKey)}\n${CHARTER_MARKER}\n${body}`
+}
 
 /** 渲染变量（全部替换为字符串；undefined/null 容错为空串）。 */
 export interface CharterVars {
@@ -109,7 +167,11 @@ export function renderSessionCharter(raw: string, vars: CharterVars): string {
  */
 export function composeSessionCharter(raw: string, projectKey: string, vars: CharterVars): string {
   const source = typeof raw === 'string' && raw.trim() !== '' ? raw : DEFAULT_CHARTER_TEMPLATE
-  const { general, sections } = splitProjectSections(source)
+  // The file-doc comment stays out of the injected text (t261008-01): the
+  // editor-facing comment at the top of session_charter.md is stripped here
+  // (only a closed leading block, see stripLeadingComment); the fallback
+  // template has no leading comment -> no-op.
+  const { general, sections } = splitProjectSections(stripLeadingComment(source))
   const key = typeof projectKey === 'string' ? projectKey.trim() : ''
   const matched = key === '' ? undefined : sections.find(s => s.key === key)
   const body = renderSessionCharter(general, vars).trimEnd()

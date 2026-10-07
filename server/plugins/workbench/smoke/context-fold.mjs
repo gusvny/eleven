@@ -192,6 +192,11 @@ section('A classifyContextFold：判定纯函数')
   ok(classifyContextFold(`正文提到 ${CHARTER_MARKER} 不算`) === false, '中段提及不误触发')
   ok(classifyContextFold('') === false && classifyContextFold(null) === false && classifyContextFold(undefined) === false, '空串/非字符串容错为 false')
   ok(classifyContextFold(CHARTER_MARKER) === true, '纯 marker 命中')
+  // t261008-01：标记挪到第 2 行（首行=人读标题行），新形照折叠；第 4 行起不算（头部 3 行界）。
+  ok(classifyContextFold(`Project session — sandbar (sandbar)\n${CHARTER_MARKER}\n正文`) === true, 'marker 第 2 行命中（新注入形）')
+  ok(classifyContextFold(`\n标题\n${CHARTER_MARKER}\n正文`) === true, 'marker 第 2 个非空行命中（含空行偏移）')
+  ok(classifyContextFold(`a\nb\nc\n${CHARTER_MARKER}\n正文`) === false, 'marker 第 4 行起不触发（中段提及同族）')
+  ok(classifyContextFold(`Project session — sandbar (sandbar)\n正文无标记`) === false, '无 marker 的普通首行不触发')
 }
 
 section('B findCharterBubble：定位纯函数')

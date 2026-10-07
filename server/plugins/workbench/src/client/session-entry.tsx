@@ -93,7 +93,7 @@ import {
 } from './closed-ledger-store.ts'
 // session-charter 端点路径常量（t260904-07）：与 node.ts 路由注册同源派生
 // （方案 R7 防 KI-042 路径漂移）；被引模块零 node 依赖，浏览器包安全（review C1）。
-import { SESSION_CHARTER_PATH, CHARTER_MARKER } from '../host/session-charter.ts'
+import { SESSION_CHARTER_PATH, composeCharterInjection } from '../host/session-charter.ts'
 // 「新建会话」启动面的双版兼容解析（260923）：0.1.1 在 ctx.workspaces 上、
 // 0.1.5 起迁到 ctx.uiWorkspace（workspaces 变纯控制器）——严禁直呼旧面。
 import { resolveStartSession } from '../shared/workspaces-compat.ts'
@@ -339,6 +339,11 @@ export async function injectSessionCharter(sessions: SessionsFace, staged: strin
     try { body = JSON.parse(text) } catch { throw new Error(`响应非 JSON：${text.slice(0, 80)}`) }
     const charter = (body as { charter?: unknown } | null | undefined)?.charter
     if (typeof charter !== 'string' || charter.trim() === '') throw new Error('charter 字段缺失或非字符串（响应体畸形）')
+    // Project name (t261008-01): the endpoint returns the registry-looked-up
+    // project name for the human-readable title line; missing/malformed field
+    // -> fall back to projectKey (the chain never breaks on it).
+    const projectName = (body as { projectName?: unknown } | null | undefined)?.projectName
+    const displayProjectName = typeof projectName === 'string' && projectName.trim() !== '' ? projectName : projectKey
     if (!isBlankSession(sessions, staged)) {
       console.info('[workbench] charter 注入跳过：会话已非 blank（用户已抢先发首条）：', staged)
       return
@@ -351,10 +356,14 @@ export async function injectSessionCharter(sessions: SessionsFace, staged: strin
     // throw 只返回 RpcResult**（ok:false，同时镜像进 snapshot.promptError）——
     // 原 R3「就地 catch 兜底」假设失败会 throw，07 票因此静默失效；此处显式
     // 检查 result.ok，失败转 throw 落入下方 catch 的就地消化路径（R3 语义不变）。
-    // 注入文本首行拼机读标记（t260905-04）：渲染端 context-fold 折叠件据此把
-    // 本条消息收成「已注入项目背景」小条（标记常量与端点同源，R7 防漂移）；
-    // 畸形 charter 已在上方守卫挡掉，标记拼装只对已验证的字符串生效。
-    const result = await session.prompt([{ type: 'text', text: `${CHARTER_MARKER}\n${charter}` }], 'queue')
+    // Injection composition (t261008-01): line 1 is the human-readable title
+    // line (the platform session title comes from the first line, so it can no
+    // longer be a comment), line 2 the machine marker — the context-fold
+    // decorator scans the first 3 lines for the marker and collapses this
+    // message into the "project background injected" chip (composeCharter-
+    // Injection shares the constant with the fold side, R7 anti-drift);
+    // malformed charter was already rejected by the guard above.
+    const result = await session.prompt([{ type: 'text', text: composeCharterInjection(displayProjectName, projectKey, charter) }], 'queue')
     if (!result?.ok) {
       const detail = result && !result.ok ? `${result.error.code} ${result.error.message}` : '空结果（未返回 RpcResult）'
       throw new Error(`charter prompt 被平台拒收：${detail}`)

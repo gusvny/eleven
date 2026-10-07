@@ -210,7 +210,7 @@ section('E 身份带 overlay（UI-5：§2.1 带面 + Sessions 菜单 + 全终态
   }
   doc.body._band = null
   const items = [
-    { id: 'session-09ca0247-1', handle: '09ca', title: 'one', active: true },
+    { id: 'session-09ca0247-1', handle: '09ca', title: '09ca', rawTitle: '<!-- workbench:kind:charter -->\n<!-- session_charter.md -->\n正文', active: true },
     { id: 'session-beef0000-2', handle: 'executor', title: 'executor', active: false },
   ]
   let opened = 0
@@ -240,6 +240,14 @@ section('E 身份带 overlay（UI-5：§2.1 带面 + Sessions 菜单 + 全终态
     const menu = band.querySelector('[data-wb-band-menu]')
     ok(menu.children.length === items.length + 1, '菜单=会话条目 + New session（执行器条目在场）')
     ok(menu.children.some(c => c.className.includes('wb-projband-new')), '+ New session 项在场（§2.6 入口 2）')
+    // t261008-01 Measure 1: charter raw title -> handle label, raw text in the row tooltip.
+    const rawRow = menu.children.find(c => c.getAttribute?.('data-wb-band-item') === items[0].id)
+    ok(rawRow !== undefined, '会话条目按 id 可寻址')
+    const rawTexts = (rawRow?.children ?? []).map(c => c.textContent).join('|')
+    ok(rawTexts.split('|').includes('09ca') && !rawTexts.includes('workbench:kind:charter'), 'charter 原文标题 → 行文本=handle（非注释文本）')
+    ok(rawRow?.getAttribute?.('title') === items[0].rawTitle, 'raw 标题在行 tooltip（title 属性）可达')
+    const execRow = menu.children.find(c => c.getAttribute?.('data-wb-band-item') === items[1].id)
+    ok(execRow?.getAttribute?.('title') === undefined || execRow?.getAttribute?.('title') === null, '无 rawTitle/同值 → 不设 tooltip（声明缺席）')
     const newBtn = menu.children.find(c => c.className.includes('wb-projband-new'))
     newBtn._listeners.click[0]({ stopPropagation() {} })
     ok(opened === 1 && band.getAttribute('data-menu-open') === null, '点 + New session=动作下发 + 菜单收起')

@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { pathToFileURL } from 'node:url'
 // 注入标记同源常量（t260905-04：A1 精确值断言与 src 内拼装串同源，不重写字面量）。
 import { CHARTER_MARKER } from '../src/host/session-charter.ts'
+import { composeCharterInjection } from '../src/host/session-charter.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const WB = join(HERE, '..')
@@ -70,6 +71,9 @@ export default {}\n`)
   // 260923：session-entry.tsx 新增「启动面双版解析」依赖（workspaces-compat），
   // 本夹具按文件清单拷贝，漏拷即 ERR_MODULE_NOT_FOUND——新增模块必须同步登记。
   cp('src/shared/workspaces-compat.ts')
+  // t261008-01：sessions.ts 新增 charter-title 依赖（isCharterRawTitle）——同款纪律，
+  // 漏拷即 ERR_MODULE_NOT_FOUND。
+  cp('src/shared/charter-title.ts')
   cp('src/host/session-charter.ts')
 
   const mod = await import(pathToFileURL(join(tmp, 'src/client/session-entry.ts')).href)
@@ -129,10 +133,11 @@ export default {}\n`)
     ok(face.__calls.length === 1, 'A1 prompt 恰一次调用')
     const c = face.__calls[0]
     ok(Array.isArray(c.content), 'A1 content 是分片数组（镜像契约 content.kind=array）——裸字符串即 07 事故复现')
-    // t260905-04：注入文本首行拼 CHARTER_MARKER（渲染端折叠件触发器，同源常量）。
-    // 精确值口径不缩水（review C4）：全串相等，非 includes。
-    ok(c.content.length === 1 && c.content[0]?.type === 'text' && c.content[0]?.text === `${CHARTER_MARKER}\nCT-文本`,
-      `A1 text 分片 {type:'text',text:CHARTER_MARKER+'\\n'+charter}（镜像契约 partTypes 含 text）`)
+    // t260905-04 注入文本带 CHARTER_MARKER；t261008-01 起经 composeCharterInjection
+    // 拼装：第 1 行=人读标题行（平台的会话标题取首行），第 2 行才是标记。
+    // 响应体无 projectName 字段 → 回落 projectKey（同值不重复括注）。
+    ok(c.content.length === 1 && c.content[0]?.type === 'text' && c.content[0]?.text === composeCharterInjection('sandbar', 'sandbar', 'CT-文本'),
+      `A1 text 分片 {type:'text',text:composeCharterInjection(...)}（首行标题 + marker 第 2 行 + charter 原文）`)
     ok(c.mode === 'queue', 'A1 mode=queue（镜像契约 modes）')
     ok(WIRE_CONTRACT.modes.includes(c.mode), 'A1 mode 落在冻结镜像契约 closed set 内')
   }
@@ -227,11 +232,12 @@ export default {}\n`)
   /* ── B 组：三方一致锚（src / lib/client.js / lib/client.cjs）── */
   section('B 三方一致锚（改 src 必须重建 bundle）')
   const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-  const NEW_SHAPE = /\.prompt\(\s*\[\s*\{\s*type:\s*["']text["']\s*,\s*text:\s*`\$\{CHARTER_MARKER\}\\n\$\{charter\}`\s*\}\s*\]\s*,\s*["']queue["']\s*\)/
+  const NEW_SHAPE = /\.prompt\(\s*\[\s*\{\s*type:\s*["']text["']\s*,\s*text:\s*composeCharterInjection\([^)]*\)\s*\}\s*\]\s*,\s*["']queue["']\s*\)/
   // 宽松锚说明（review 意见3）：bundle 侧打包器会把 `session.` 内联为
   // `sessions.sessionOf(...)` 的链尾，前缀不保证是 `session.prompt(`——锚定
-  // `.prompt([{type:'text',text:`${CHARTER_MARKER}\n${charter}`}],'queue')` 全形状
-  // （marker 前缀已把断言面钉死在注入调用上，t260905-04），禁止反向改 src 迁就锚。
+  // `.prompt([{type:'text',text:composeCharterInjection(...)}],'queue')` 全形状
+  // （composeCharterInjection 调用已把断言面钉死在注入调用上，t261008-01；
+  // 前身=marker 前缀形状，t260905-04），禁止反向改 src 迁就锚。
   const OLD_SHAPE = /\.prompt\(\s*charter\s*,\s*["']queue["']\s*\)/
   for (const rel of ['src/client/session-entry.tsx', 'lib/client.js', 'lib/client.cjs']) {
     const code = stripComments(await import('node:fs').then((fs) => fs.readFileSync(join(WB, rel), 'utf8')))

@@ -3964,6 +3964,16 @@
    "note": "Platform banner suppression: no visible fold toggle (semantic anchor = its four platform-locale aria-labels), no blank strip above the brand row, brand-row height regression guard, middle header present, document.title untouched, guard leg (anchor renamed at doc start) hides nothing and warns exactly once naming the anchor, light+dark screenshots",
    "sync_path": ""
   },
+  "integration/t261008-01/sc_t26100801_charter_injection_readable.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-01 Measure 2: injection line 1 readable (title names project), marker in the fold window, strip table, real-file render head has no comment, fold predicate covers new+legacy shapes, wire stays PromptContentPart[] (KI-046), endpoint carries projectName",
+   "sync_path": ""
+  },
+  "integration/t261008-01/sc_t26100801_session_label_handle_face.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-01 Measure 1: charter-raw-title predicate truth table, label helper falls back to the handle (executor fixed handle), band wiring consumes the guarded label with raw title in a tooltip face, handles single-sourced",
+   "sync_path": ""
+  },
   "integration/t261008-05/sc_executor_panel_height_chain.mjs": {
    "anchor": "behaviour",
    "note": "real-browser computed layout of the middle column height chain (t261008-05)",

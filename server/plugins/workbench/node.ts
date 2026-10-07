@@ -1567,10 +1567,15 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       primaryDir: projectDir,
       engineRoot: repo,
     })
-    // kind 字段（t260905-04）：端点响应声明注入物类型=charter（机制在引擎打标
-    // 的引擎半；文本首行标记由客户端 injectSessionCharter 拼装，标记常量同源
-    // 在 src/host/session-charter.ts CHARTER_MARKER）。
-    sendJson(res, 200, { ok: true, project, charter, kind: 'charter', source: raw.trim() !== '' ? 'file' : 'fallback' })
+    // kind field (t260905-04): the response declares the injection kind=charter
+    // (the engine-side half of the tagging; the text is composed client-side by
+    // injectSessionCharter via composeCharterInjection, marker constant shared
+    // from src/host/session-charter.ts CHARTER_MARKER).
+    // projectName field (t261008-01): the registry-looked-up project name; the
+    // client uses it for the human-readable title line 1 of the injection (the
+    // platform session title takes the first line). Lookup miss already
+    // degrades to name=key inside this handler.
+    sendJson(res, 200, { ok: true, project, charter, projectName, kind: 'charter', source: raw.trim() !== '' ? 'file' : 'fallback' })
   }
 
   /* ------------------------------ 项目并发顺序（CL-3, t261006-18） */

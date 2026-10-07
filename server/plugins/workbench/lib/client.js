@@ -2934,6 +2934,104 @@ function RoutesTableSection({ providers, projectKey }) {
 		]
 	});
 }
+//#endregion
+//#region src/host/session-charter.ts
+/**
+* sandbar-workbench · session-charter 渲染纯函数（t260904-07）。
+*
+* 职责：把 `server/session_charter.md`（会话开局注入源，改完即生效）
+* 渲染成单项目的注入文本：
+*   - the general template (after the file-doc comment is stripped, up to the
+*     first `## project:` section — t261008-01 stripLeadingComment) gets its
+*     placeholders filled ({{project_key}}/{{project_name}}/{{primary_dir}}/
+*     {{engine_root}}, including placeholder-like text inside comments — the
+*     unified-rendering rule, 260904 appendix + plan R4);
+*   - 命中 `## project:<key>` 分段（重复取首个）把该段原文追加在通用段后，
+*     段内占位符统一渲染（如 suyou 段的 {{engine_root}}）；
+*   - 文件缺失/读失败/空/渲染结果空 → 回落 DEFAULT_CHARTER_TEMPLATE
+*     （插件内置兜底简化版），由 node.ts 侧保证不 5xx。
+*
+* 本模块**零 node 顶层依赖**（纯字符串函数+常量，文件读取留在 node.ts——
+* node.ts 已有 readFile）：SESSION_CHARTER_PATH 同时被 node.ts 路由注册与
+* 客户端（session-entry.tsx）fetch URL 引用——同源常量派生，一处改动两端
+* 同变（t260904-07 方案 R7，KI-042「两端路径漂移恒 404」的结构性防漂移），
+* 也因此 tsdown 打进浏览器包不破（review C1 落位选型）。
+* smoke/session-charter.mjs 直测本模块 + 源文本断言两端引用。
+*/
+/** 会话开局 charter 端点路径（node.ts 注册与客户端 fetch 共用常量）。 */
+const SESSION_CHARTER_PATH = "/sandbar-workbench/api/session-charter";
+/**
+* 上下文注入机读标记（t260905-04）：引擎侧给注入文本打的「消息元数据 kind=charter」
+* 落地载体。平台 wire 契约 PromptContentPart 无 metadata 字段（仓内冻结镜像
+* server/plugins/workbench/tests/ki046-charter-prompt-shape.mjs WIRE_CONTRACT 实锤），
+* so the marker sits on line 2 of the injected text (since t261008-01 line 1
+* is the human-readable title line — the platform session title takes the
+* first line and must not be a comment; an HTML-comment line is harmless for
+* the model to read; the expanded view showing the full text is the agreed
+* degradation — folded state hides the whole block, so "a new session opens
+* with just a chip" is unaffected). Renderer
+* （src/client/context-fold.ts）认本常量为折叠触发器，同源派生防两端漂移（R7 先例）；
+* 未来任何上下文注入（项目简介、文档引用）带同一标记即走同一折叠件。
+*/
+const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
+/**
+* First line of the injected text (t261008-01): a short, human-readable title
+* line naming the project. The platform derives the session's durable title
+* from the first message's first line, so this line — not the machine marker —
+* is the session name a person sees. composeCharterInjection places the marker
+* on line 2 (the fold predicate reads the first 3 lines, same-source constant).
+* Tolerance: non-string -> empty-string; empty name -> key; both empty -> the
+* fixed label.
+*/
+function charterTitleLine(projectName, projectKey) {
+	const name = typeof projectName === "string" ? projectName.trim() : "";
+	const key = typeof projectKey === "string" ? projectKey.trim() : "";
+	const label = name !== "" ? name : key !== "" ? key : "project";
+	return key !== "" && key !== label ? `Project session — ${label} (${key})` : `Project session — ${label}`;
+}
+/**
+* Compose the full injected text (t261008-01): human-readable title line +
+* machine marker + rendered charter body. The fold predicate
+* (classifyContextFold) scans the first 3 lines for the marker, so the legacy
+* shape (marker on line 1) and this shape both fold. Tolerance: a non-string
+* charter counts as empty (the caller validates first; this function itself
+* never throws); empty name -> key, both empty -> the fixed label.
+*/
+function composeCharterInjection(projectName, projectKey, charter) {
+	const body = typeof charter === "string" ? charter : "";
+	return `${charterTitleLine(projectName, projectKey)}\n${CHARTER_MARKER}\n${body}`;
+}
+//#endregion
+//#region src/shared/charter-title.ts
+/**
+* charter-title.ts — detect session titles that are the raw charter injection
+* text (t261008-01, console session labels).
+*
+* The platform derives a session's durable title from the first message; our
+* project sessions open with the charter injection, so sessions created before
+* t261008-01 carry titles that start with the machine marker comment (and the
+* charter file's own doc comment). Those titles must not be shown as a row
+* label — the session handle shows instead (Measure 1). Sessions created after
+* t261008-01 get a human-readable first line (composeCharterInjection) and
+* never match this predicate.
+*
+* Conservative on purpose: only the injection's own comment shapes match —
+* the marker line (`CHARTER_MARKER`, same-source constant, R7 anti-drift) or an
+* HTML comment that names the charter (`workbench:kind:charter` /
+* `session_charter`). A user title that merely starts with `<!--` stays raw.
+* Pure module: one same-source import, never throws, non-string → false.
+*/
+/**
+* True when the title is (or starts with) the raw charter injection text.
+* @param title the display title under test (first message first line origin).
+*/
+function isCharterRawTitle(title) {
+	if (typeof title !== "string") return false;
+	const first = title.split("\n").map((l) => l.trim()).find((l) => l !== "");
+	if (first === void 0) return false;
+	if (first === "<!-- workbench:kind:charter -->" || first.startsWith("<!-- workbench:kind:charter -->")) return true;
+	return first.startsWith("<!--") && (first.includes("workbench:kind:charter") || first.includes("session_charter"));
+}
 /** 全局会话 id 判定：工单会话固定 `ticket-<工单id>` 前缀，不进账册。 */
 function isGlobalSessionId(id) {
 	return typeof id === "string" && id !== "" && !id.startsWith("ticket-");
@@ -2942,6 +3040,21 @@ function isGlobalSessionId(id) {
 function labelOf(row, id) {
 	const t = row?.displayTitle;
 	return typeof t === "string" && t !== "" ? t : id;
+}
+/**
+* Row label (t261008-01, Measure 1): a session whose displayTitle is the raw
+* charter injection text (see shared/charter-title.ts isCharterRawTitle) must
+* not show comment text as its label — the handle shows instead (the executor
+* session keeps its fixed name, regular sessions show the short code; the
+* caller derives it via displayHandle and passes it in). The raw title stays
+* reachable in the tooltip (the rendering face owns that). A missing handle
+* (empty/non-string) falls back to the id — never guess an executor locally.
+* Non-charter titles keep the exact labelOf behavior: zero change.
+*/
+function rowLabelOf(row, id, handle) {
+	const label = labelOf(row, id);
+	if (!isCharterRawTitle(label)) return label;
+	return typeof handle === "string" && handle !== "" ? handle : id;
 }
 /**
 * 账册反序列化（localStorage → OpenedEntry[]）：坏 JSON、非数组、脏条目
@@ -3323,40 +3436,6 @@ function persistClosed(entries) {
 	}
 }
 //#endregion
-//#region src/host/session-charter.ts
-/**
-* sandbar-workbench · session-charter 渲染纯函数（t260904-07）。
-*
-* 职责：把 `server/session_charter.md`（会话开局注入源，改完即生效）
-* 渲染成单项目的注入文本：
-*   - 首段通用模板（文件顶部注释到第一个 `## project:` 分段之间）占位符
-*     统一现填（{{project_key}}/{{project_name}}/{{primary_dir}}/{{engine_root}}，
-*     注释内的占位符字样一并替换——真源口径，260904 附录+方案 R4 钉死）；
-*   - 命中 `## project:<key>` 分段（重复取首个）把该段原文追加在通用段后，
-*     段内占位符统一渲染（如 suyou 段的 {{engine_root}}）；
-*   - 文件缺失/读失败/空/渲染结果空 → 回落 DEFAULT_CHARTER_TEMPLATE
-*     （插件内置兜底简化版），由 node.ts 侧保证不 5xx。
-*
-* 本模块**零 node 顶层依赖**（纯字符串函数+常量，文件读取留在 node.ts——
-* node.ts 已有 readFile）：SESSION_CHARTER_PATH 同时被 node.ts 路由注册与
-* 客户端（session-entry.tsx）fetch URL 引用——同源常量派生，一处改动两端
-* 同变（t260904-07 方案 R7，KI-042「两端路径漂移恒 404」的结构性防漂移），
-* 也因此 tsdown 打进浏览器包不破（review C1 落位选型）。
-* smoke/session-charter.mjs 直测本模块 + 源文本断言两端引用。
-*/
-/** 会话开局 charter 端点路径（node.ts 注册与客户端 fetch 共用常量）。 */
-const SESSION_CHARTER_PATH = "/sandbar-workbench/api/session-charter";
-/**
-* 上下文注入机读标记（t260905-04）：引擎侧给注入文本打的「消息元数据 kind=charter」
-* 落地载体。平台 wire 契约 PromptContentPart 无 metadata 字段（仓内冻结镜像
-* server/plugins/workbench/tests/ki046-charter-prompt-shape.mjs WIRE_CONTRACT 实锤），
-* 故标记拼在注入文本首行（HTML 注释样式的行，模型读无害；展开态随全文可见属
-* 已定降级——折叠态随内容区整体隐藏，「新会话开头只见小条」不受影响）。渲染端
-* （src/client/context-fold.ts）认本常量为折叠触发器，同源派生防两端漂移（R7 先例）；
-* 未来任何上下文注入（项目简介、文档引用）带同一标记即走同一折叠件。
-*/
-const CHARTER_MARKER = "<!-- workbench:kind:charter -->";
-//#endregion
 //#region src/shared/workspaces-compat.ts
 /** 不可用时的精确报错文案（点名两版各自的所在面，避免诊断被引向错误方向）。 */
 const START_SESSION_MISSING = "startSession 不可用：dsh 0.1.5 起该 API 在 uiWorkspace 上（dsh-client-ui-workspace），ctx.workspaces 现为纯控制器（dsh-api-workspace-controller，无此方法）；0.1.1 时代它在 ctx.workspaces 上。候选服务面均未提供 startSession。";
@@ -3575,6 +3654,8 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 		}
 		const charter = body?.charter;
 		if (typeof charter !== "string" || charter.trim() === "") throw new Error("charter 字段缺失或非字符串（响应体畸形）");
+		const projectName = body?.projectName;
+		const displayProjectName = typeof projectName === "string" && projectName.trim() !== "" ? projectName : projectKey;
 		if (!isBlankSession(sessions, staged)) {
 			console.info("[workbench] charter 注入跳过：会话已非 blank（用户已抢先发首条）：", staged);
 			return;
@@ -3582,7 +3663,7 @@ async function injectSessionCharter(sessions, staged, projectKey, notify) {
 		if (typeof sessions.sessionOf !== "function") throw new Error("ctx.sessions.sessionOf 未注入（运行时面缺失）");
 		const result = await sessions.sessionOf(sessions.scope(staged)).prompt([{
 			type: "text",
-			text: `${CHARTER_MARKER}\n${charter}`
+			text: composeCharterInjection(displayProjectName, projectKey, charter)
 		}], "queue");
 		if (!result?.ok) {
 			const detail = result && !result.ok ? `${result.error.code} ${result.error.message}` : "空结果（未返回 RpcResult）";
@@ -4408,6 +4489,7 @@ function startChatProjectBand(opts = {}) {
 			h.textContent = it.handle;
 			const t = doc.createElement("span");
 			t.textContent = it.title;
+			if (typeof it.rawTitle === "string" && it.rawTitle !== "" && it.rawTitle !== it.title) row.setAttribute("title", it.rawTitle);
 			row.appendChild(h);
 			row.appendChild(t);
 			if (it.active) row.setAttribute("data-active", "");
@@ -5773,11 +5855,17 @@ const FOLD_BASE_CSS = `
 [${CHIP_ATTR}] { cursor: pointer; opacity: 0.85; font-size: 12px; }
 `;
 /**
-* 折叠判定（纯函数，smoke 直测）：文本 trimStart 后以 CHARTER_MARKER 开头=是。
-* 非字符串/空串/中段提及 marker → false（取舍第 6 项）。
+* Fold predicate (pure, smoke-tested): true when one of the first 3 non-empty
+* lines is exactly CHARTER_MARKER (t261008-01 widened: the marker moved from
+* line 1 to line 2 — line 1 now carries the human-readable title because the
+* platform derives the session title from the first line — and both shapes
+* must fold; the legacy "trimStart().startsWith(marker)" shape is a subset of
+* the new one). Non-string / empty / mid-text mention -> false (trade-off 6
+* unchanged: only a whole-line marker within the first 3 lines counts).
 */
 function classifyContextFold(text) {
-	return typeof text === "string" && text.trimStart().startsWith("<!-- workbench:kind:charter -->");
+	if (typeof text !== "string") return false;
+	return text.split("\n").map((l) => l.trim()).filter((l) => l !== "").slice(0, 3).includes(CHARTER_MARKER);
 }
 /**
 * 折叠候选判定（t260905-09 扩面，纯函数）：工单台 marker 路径 ∨ 平台自启上下文
@@ -8469,15 +8557,20 @@ function WorkbenchSidebar(props) {
 				const pk = projectSessions.listState?.current ? projectSessions.ledger.find((e) => e.id === projectSessions.listState?.current)?.project : void 0;
 				const current = projectSessions.listState?.current;
 				const byId = projectSessions.listState?.byId ?? {};
-				return projectSessions.ledger.filter((e) => pk ? e.project === pk : false).map((e) => ({
-					id: e.id,
-					handle: displayHandle({
+				return projectSessions.ledger.filter((e) => pk ? e.project === pk : false).map((e) => {
+					const raw = labelOf(byId[e.id], e.id);
+					const handle = displayHandle({
 						session_id: e.id,
 						handle: e.handle
-					}) || String(e.seq ?? ""),
-					title: labelOf(byId[e.id], e.id),
-					active: e.id === current
-				}));
+					}) || String(e.seq ?? "");
+					return {
+						id: e.id,
+						handle,
+						title: rowLabelOf(byId[e.id], e.id, handle),
+						rawTitle: raw,
+						active: e.id === current
+					};
+				});
 			},
 			onNewSession: () => {
 				const pk = projectSessions.listState?.current ? projectSessions.ledger.find((e) => e.id === projectSessions.listState?.current)?.project : viewProject || (projects.length === 1 ? projects[0].key : "");

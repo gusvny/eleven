@@ -23,9 +23,13 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
   SESSION_CHARTER_PATH,
+  CHARTER_MARKER,
   splitProjectSections,
   renderSessionCharter,
   composeSessionCharter,
+  stripLeadingComment,
+  charterTitleLine,
+  composeCharterInjection,
   DEFAULT_CHARTER_TEMPLATE,
 } from '../src/host/session-charter.ts'
 
@@ -110,6 +114,13 @@ section('C composeSessionCharter 组装与回落')
   ok(!composeSessionCharter(real, undefined, VARS).includes('本项目仓已冻结'), 'key 非字符串容错 → 只回通用段')
   const dup = composeSessionCharter('g\n## project:d\n第一份独有\n## project:d\n第二份独有\n', 'd', VARS)
   ok(dup.includes('第一份独有') && !dup.includes('第二份独有'), '重复分段取首个')
+  // t261008-01：文件头注释不进注入文本（只摘首部闭合块；正文/分段原样）。
+  ok(!composeSessionCharter(real, 'sandbar', VARS).includes('session_charter.md ——'), '文件头注释被摘除，不进注入文本')
+  const withComment = composeSessionCharter('<!-- doc -->\n正文A\n## project:x\nX\n', 'x', VARS)
+  ok(withComment.startsWith('正文A') && withComment.includes('## project:x'), '前置注释摘除后正文/分段原样保留')
+  ok(composeSessionCharter('<!-- 未闭合\n正文B\n', 'x', VARS).includes('<!-- 未闭合'), '未闭合注释原样保留（不吞文件）')
+  ok(composeSessionCharter('正文C\n<!-- 尾部注释 -->\n', 'x', VARS).startsWith('正文C'), '非首部注释不动（只摘首部）')
+  ok(DEFAULT_CHARTER_TEMPLATE.includes('内置兜底版') && composeSessionCharter('', 'k', VARS).includes('内置兜底版'), '兜底模板不受摘注释影响')
 }
 
 section('D 源文本断言（接线锚 + R7 路径同源）')
@@ -120,29 +131,57 @@ section('D 源文本断言（接线锚 + R7 路径同源）')
   ok(nodeTs.includes("readFile(join(repo, 'server', 'session_charter.md'), 'utf8')"), '端点每次请求现读 charter 文件')
   ok(nodeTs.includes("composeSessionCharter(raw, project, {"), '端点渲染走纯函数模块')
   ok(nodeTs.includes(`sendJson(res, 400, { ok: false, error: 'session-charter 缺 project query`), 'project query 缺失/空串=400')
+  ok(nodeTs.includes('projectName, kind'), '端点响应带 projectName 字段（t261008-01：客户端拼人读标题行）')
   const entry = readFileSync(entryTsxPath, 'utf8')
-  ok(entry.includes("import { SESSION_CHARTER_PATH, CHARTER_MARKER } from '../host/session-charter.ts'"), '客户端同源常量导入（R7 + CHARTER_MARKER，t260905-04）')
+  ok(entry.includes("import { SESSION_CHARTER_PATH, composeCharterInjection } from '../host/session-charter.ts'"), '客户端同源常量/组装函数导入（R7 防漂移，t261008-01）')
   ok(entry.includes('`${SESSION_CHARTER_PATH}?project='), 'fetch URL 由同源常量派生')
   ok(entry.includes('byId[id]?.blank === true'), '注入守卫 1：blank 位判定')
   ok((entryCode.match(/session\.prompt\(/g) ?? []).length === 1, '恰一次：prompt 调用点（剥注释后）唯一')
-  ok(entry.includes("await session.prompt([{ type: 'text', text: `${CHARTER_MARKER}\\n${charter}` }], 'queue')"), 'prompt 分片数组载荷（marker 前缀，t260905-04）+queue 模式（KI-046：平台 wire 契约 PromptContentPart[]，裸字符串即 invalid payload）')
+  ok(entry.includes("composeCharterInjection(displayProjectName, projectKey, charter)"), '注入文本经 composeCharterInjection 拼装（首行=人读标题，t261008-01）')
+  ok(entry.includes("typeof projectName === 'string' && projectName.trim() !== '' ? projectName : projectKey"), 'projectName 畸形/缺失回落 projectKey')
   ok(nodeTs.includes("kind: 'charter'"), '端点响应 kind=charter 字段（t260905-04 引擎打标引擎半）')
   ok(entry.includes('if (!result?.ok)'), 'prompt 业务失败不 throw 只返 RpcResult——result.ok 显式检查（KI-046：07 票 R3 兜底失效根因）')
   ok((entry.match(/isBlankSession\(sessions, staged\)/g) ?? []).length === 2, '守卫 1 + TOCTOU 复核（R5）两次 blank 判定')
   ok(entry.includes('await injectSessionCharter(sessions, staged, pk, notify)'), 'handleNew 尾段接入注入（登记后恰一次）')
-  ok(entry.includes("notify('会话开局提示注入失败（详情见控制台），会话已正常创建', projectKey)"), '失败就地消化+行内提示不冒泡（R3）')
+  ok(entry.includes("notify('Session charter injection failed (see the console for details); the session was created normally', projectKey)"), '失败就地消化+行内提示不冒泡（R3；文案英文=261004 控制台 UI 文案口径，本断言随票面文案纪律更新）')
   ok(entry.includes("typeof charter !== 'string' || charter.trim() === ''"), '响应体 charter 畸形不注入（R2）')
   ok(entry.includes('响应非 JSON'), '响应非 JSON 畸形用例（R2）')
   const charter = real
   ok(charter.includes('<!-- session_charter.md'), '顶部注释在文（真源附录逐字）')
+  ok(charter.includes('stripLeadingComment') && charter.includes('composeCharterInjection'), '文件头注释写明摘除/标题行机制（t261008-01）')
   ok(charter.includes('落盘纪律：草稿攒批'), '宿主纪律①：notes 落盘攒批在文')
   ok(charter.includes('但动手前先告知用户'), '宿主纪律②：点名修复可进 lane 先告知在文')
-  ok(/## 当前在案授权\n无/.test(charter), '当前在案授权=无')
+  // 261004 起在案授权=executor-grants.json 文件面（不再是「无」字面量）——断言随真源口径更新。
+  ok(charter.includes('## 当前在案授权') && charter.includes('executor-grants.json'), '在案授权段=grants 文件面口径（261004）')
   ok(charter.includes('## project:sandbar') && charter.includes('## project:suyou'), '两个项目分段在文')
   for (const p of ['{{project_key}}', '{{project_name}}', '{{primary_dir}}', '{{engine_root}}']) {
     ok(charter.includes(p), `占位符 ${p} 在文`)
   }
   ok(DEFAULT_CHARTER_TEMPLATE.includes('{{project_key}}') && DEFAULT_CHARTER_TEMPLATE.includes('内置兜底版'), '兜底模板常量在库')
+}
+
+section('E 注入拼装（t261008-01：首行人读标题行 + 标记第 2 行）')
+{
+  const inj = composeCharterInjection('sandbar 引擎', 'sandbar', '正文一\n正文二')
+  const lines = inj.split('\n')
+  ok(lines[0] === 'Project session — sandbar 引擎 (sandbar)', '首行=人读标题行（点名项目）')
+  ok(lines[1] === CHARTER_MARKER, '第 2 行=机读标记（不再占首行）')
+  ok(inj.endsWith('正文一\n正文二'), 'charter 正文原样在后')
+  ok(!lines[0].startsWith('<!--'), '首行不再是 HTML 注释（平台标题取首行）')
+  ok(composeCharterInjection('', 'sandbar', 'x').split('\n')[0] === 'Project session — sandbar', 'name 空 → 回落 key（同值不重复括注）')
+  ok(composeCharterInjection('   ', '', 'x').split('\n')[0] === 'Project session — project', 'name/key 全空 → 固定 label')
+  ok(composeCharterInjection('n', 'n', 'x').split('\n')[0] === 'Project session — n', 'name=key 不重复括注')
+  ok(composeCharterInjection(null, undefined, 'x').split('\n')[0] === 'Project session — project', '非字符串入参容错')
+  ok(composeCharterInjection('n', 'k', 42).endsWith('\n'), 'charter 非字符串容错为空串（不抛）')
+  // stripLeadingComment 直测（矩阵：有/无/未闭合/非首部/非字符串）。
+  ok(stripLeadingComment('<!-- a -->\nB') === 'B', '闭合首部注释整块摘除')
+  ok(stripLeadingComment('  <!-- a -->\r\nB') === 'B', '缩进注释摘除（前导空白保留语义等价）')
+  ok(stripLeadingComment('B\n<!-- t -->') === 'B\n<!-- t -->', '无首部注释 → no-op')
+  ok(stripLeadingComment('<!-- 未闭合') === '<!-- 未闭合', '未闭合 → 原样返回')
+  ok(stripLeadingComment(42) === 42, '非字符串原样返回')
+  // 标题行独立直测。
+  ok(charterTitleLine('N', 'K') === 'Project session — N (K)', 'charterTitleLine 基形')
+  ok(typeof charterTitleLine(undefined, undefined) === 'string', '畸形入参不抛')
 }
 
 console.log(`\nsession-charter smoke: passed=${passed} failed=${failed}`)

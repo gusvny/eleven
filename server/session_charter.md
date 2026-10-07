@@ -1,5 +1,8 @@
 <!-- session_charter.md —— 全部项目的会话开局注入源（workbench node.ts 读取）。
-     · 首段（本注释到第一个 ## project: 分段之间）=通用模板；占位符由
+     · 本注释是给编辑者看的文件头：注入时被摘除（t261008-01
+       stripLeadingComment，只摘首部闭合注释块），不进注入文本——注入首行由
+       composeCharterInjection 生成（人读的项目标题行），第 2 行才是机读标记。
+     · 通用模板（本注释之后到第一个 ## project: 分段之间）；占位符由
        GET /sandbar-workbench/api/session-charter?project=<key> 现填：
        {{project_key}}/{{project_name}}/{{primary_dir}}/{{engine_root}}
      · 可选分段 ## project:<key>：该段追加到对应项目注入文本末尾。

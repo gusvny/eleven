@@ -22,6 +22,9 @@ import {
   serializeSessionLedgerFile,
   shortCodeOf,
 } from '../src/shared/session-handles.ts'
+import { CHARTER_MARKER } from '../src/host/session-charter.ts'
+import { isCharterRawTitle } from '../src/shared/charter-title.ts'
+import { rowLabelOf } from '../src/shared/sessions.ts'
 
 let passed = 0
 let failed = 0
@@ -126,6 +129,26 @@ section('mergeExecutorSessions：执行器投影（派生显示，不落文件�
   ok(m[0].session_id === 'session-2222' && m[0].handle === 'executor', '投影条目 handle=executor 且排最前')
   ok(m[1] === base[0], '普通条目原样保留（同引用，无复制开销）')
   ok(mergeExecutorSessions(base, 'not-array').length === 1, '非数组声明=无投影不崩')
+}
+
+section('charter 原文标题判定与行标签替身（t261008-01 Measure 1）')
+{
+  // isCharterRawTitle：只认注入自身的注释形（marker 整行/前缀、点名 charter 的注释）。
+  ok(isCharterRawTitle(`${CHARTER_MARKER}\n<!-- doc -->\n正文`) === true, '旧注入形（marker 首行）命中')
+  ok(isCharterRawTitle(`<!-- workbench:kind:charter xxx -->`) === true, 'marker 变体注释命中')
+  ok(isCharterRawTitle(`<!-- session_charter.md —— 说明 -->`) === true, 'charter 文件头注释命中')
+  ok(isCharterRawTitle('Project session — sandbar (sandbar)') === false, '新注入首行（人读标题）不命中')
+  ok(isCharterRawTitle('普通会话标题') === false, '普通标题不命中')
+  ok(isCharterRawTitle('<!-- 随手写的注释 -->') === false, '无关 HTML 注释不命中（保守判据）')
+  ok(isCharterRawTitle('') === false && isCharterRawTitle(null) === false && isCharterRawTitle(42) === false, '空/非字符串容错 false')
+  // rowLabelOf：charter 原文标题 → handle 替身；普通标题零行为变化。
+  const row = { displayTitle: `${CHARTER_MARKER}\n<!-- session_charter.md -->\n正文` }
+  ok(rowLabelOf(row, 'session-09ca0247', '09ca') === '09ca', 'charter 原文标题 → handle 替身')
+  ok(rowLabelOf(row, 'session-09ca0247', EXECUTOR_HANDLE) === 'executor', 'executor 会话 → 固定名 executor')
+  ok(rowLabelOf(row, 'session-09ca0247', '') === 'session-09ca0247', 'handle 缺位 → 兜底 id（不做本地猜测）')
+  ok(rowLabelOf(row, 'session-09ca0247', undefined) === 'session-09ca0247', 'handle 未传 → 兜底 id')
+  ok(rowLabelOf({ displayTitle: '普通标题' }, 's1', '09ca') === '普通标题', '普通标题走 labelOf 原口径')
+  ok(rowLabelOf(undefined, 'session-09ca0247', '09ca') === 'session-09ca0247', '无标题行 → id 兜底')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

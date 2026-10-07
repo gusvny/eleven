@@ -57,7 +57,7 @@ import { FACTORY_NEW_LABELS, useSessionEntry } from './session-entry.tsx'
 // 实例注入（账册=模块级共享 store）。
 import { ProjectSessionRow } from './project-session-row.tsx'
 // 存量编号迁移（第 3 面① 拍板 1）：账册缺 seq 条目按项目内登记序补号（幂等）。
-import { backfillProjectSeqs, labelOf } from '../shared/sessions.ts'
+import { backfillProjectSeqs, labelOf, rowLabelOf } from '../shared/sessions.ts'
 import { displayHandle } from '../shared/session-handles.ts'
 import { fetchProjectLedger, getLedgerSnapshot, persistLedger } from './session-ledger-store.ts'
 // 插件陈旧全局提醒（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：useStaleBanner
@@ -640,12 +640,20 @@ export function WorkbenchSidebar(props: SidebarProps) {
         const byId = (projectSessions.listState?.byId ?? {}) as Record<string, { displayTitle?: string } | undefined>
         return projectSessions.ledger
           .filter(e => (pk ? e.project === pk : false))
-          .map(e => ({
-            id: e.id,
-            handle: displayHandle({ session_id: e.id, handle: e.handle }) || String(e.seq ?? ''),
-            title: labelOf(byId[e.id], e.id),
-            active: e.id === current,
-          }))
+          .map(e => {
+            // Session labels (t261008-01, Measure 1): a charter-injection raw
+            // title shows the handle (executor keeps its fixed name); the raw
+            // text rides along in rawTitle for the row tooltip.
+            const raw = labelOf(byId[e.id], e.id)
+            const handle = displayHandle({ session_id: e.id, handle: e.handle }) || String(e.seq ?? '')
+            return {
+              id: e.id,
+              handle,
+              title: rowLabelOf(byId[e.id], e.id, handle),
+              rawTitle: raw,
+              active: e.id === current,
+            }
+          })
       },
       onNewSession: () => {
         const pk = projectSessions.listState?.current

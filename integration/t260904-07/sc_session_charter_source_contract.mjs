@@ -93,8 +93,20 @@ const hostHasMark = hostModSrc !== null
   && (hostModSrc.includes(MARK) || /CHARTER_MARKER\s*(?::\s*string)?\s*=/.test(hostModSrc));
 check('charter 机读标记在宿主侧同源定义（session-charter.ts 字面量或 CHARTER_MARKER 常量）',
   hostHasMark, `${WB}/src/host/session-charter.ts 无 ${MARK} 字面量亦无 CHARTER_MARKER 常量`);
-check('客户端经同源常量引用标记（session-entry.tsx 引 CHARTER_MARKER，不重写字面量）',
-  hostHasMark && clientSrc !== null && clientSrc.includes('CHARTER_MARKER'),
+// t261008-01 arbitrate: the client no longer concatenates the marker itself —
+// the injection is composed by the host-module function (composeCharterInjection)
+// that owns the constant. The contract (single-source marker, no client-side
+// literal rewrite) is unchanged, so per this scenario's own S3 principle
+// (contract-preserving refactor must not break this scenario) the client leg
+// accepts BOTH shapes: a direct CHARTER_MARKER reference, or composing through
+// the host module that defines the constant. The drift face is asserted
+// directly instead: the client must never carry the raw marker literal.
+const clientSameSource = clientSrc !== null
+  && (clientSrc.includes('CHARTER_MARKER')
+    || /composeCharterInjection|charterTitleLine/.test(clientSrc));
+const clientLiteralRewrite = clientSrc !== null && clientSrc.includes(MARK);
+check('客户端经同源常量引用标记（session-entry.tsx 引 CHARTER_MARKER 或经宿主模块组装，不重写字面量）',
+  hostHasMark && clientSameSource && !clientLiteralRewrite,
   '客户端重写字面量=两处漂移面（R7 同源纪律）；marker 漂移=渲染器不识别=折叠件失明');
 check('端点响应体含 kind=charter 打标字段（node.ts）',
   nodeSrc !== null && /kind:\s*'charter'/.test(nodeSrc),
