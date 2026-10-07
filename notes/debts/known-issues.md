@@ -3895,3 +3895,35 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **空家缺锚点**报"尽力视图失败"（本例 6 个：Tickets/Epics/Docs 图标与 light/dark 外观）；
 > ②因此**浅色/深色两套与守卫态可能拍不全**，人审时**必须看图判断"证据是否真的支持票面承诺"**，
 > 不能只看"有 PNG"就签；③这条只算**临时绕行**，KI-216 的台层修复仍要做（别把 `--boot-local` 变成默认）。
+
+## KI-217 票能"**零次绿的验收运行**"就走到人审门：闸的检查项里没有"本票场景"，ENV_FAIL 也不算红（261007 实证 t261007-07；integration 岗登记）
+
+> **现象**：`t261007-07`（隐藏平台顶栏）在 merge 闸 **8/8 全绿**（含 `UI screenshot evidence` 一项），
+> 但它的**验收场景 `t261007-07-platform-banner-suppressed` 从头到尾没有一次绿的运行**：
+> - `acceptance_walkthrough` 里那次是 **ENV_FAIL**（"isolated console never printed token URL"，日志尾部 `ERR_INVALID_TYPESCRIPT_SYNTAX`）；
+> - 人审时由复核会话在**能起来的台**上跑同一场景（只读幂等校验）→ **`status: fail, cause: self, reason: assert_mismatch`**：
+>   `[FAIL] S1 run-browser — uncaught: ReferenceError: foldLabels is not defined`（`SUMMARY pass=2 fail=1 env_fail=0`，`exit=1`，报告 `out/integration-report-261007-183132.json`）。
+> 即：**这条票的场景既没跑绿过、本身还是坏的**，却走到了"等人签字"这一步；若人审只看闸，就会被放行。
+>
+> **机制（三处叠加，均已实测）**：
+> ① **merge 闸的检查项里没有"本票场景"**——逐票对比检查项完全一致：
+>   `lane_commits / worktree_clean / no_gitlink / verify_lane code / bundle 新鲜度 / UI screenshot evidence / main 脏检查 / merge 预演`
+>   （`verify_lane code` 是**引擎单测**面，泳道自己的 `integration/run_scenarios.py` 场景不在其中）；
+> ② **ENV_FAIL 不是红**（这条本身对：起台失败不该判成代码缺陷），但**没有任何地方要求"场景至少绿过一次"**——
+>   于是"起台失败 ⇒ 场景没跑 ⇒ 但票照样过关"成立；
+> ③ **人审面的证据检查是文件级的**（`.sandbar/screenshots/` 顶层有 PNG 即绿），而**环境面/人工也能产出这种文件**
+>   （本例那 5 张就是复核会话用宿主态自搭台补出来的），所以"有文件"≠"承诺被验过"。
+>
+> **危害**：①**无证据的交付**可以走到人审门（本例：明暗两套现场断言、守卫腿一条都没执行）；
+> ②ENV_FAIL 变成"静默消音"——它本该触发"重跑到绿或具名豁免"，实际成了过关通道；
+> ③把核对责任全压在人审的一句话上，而人审若只读闸的红绿就会误放。
+>
+> **出路（建议，实现口径归修复票）**：①把"**本票场景至少一次绿运行（非 ENV_FAIL）**"做成验收前置（票面或闸其一），
+> ENV_FAIL 只允许"重跑到绿"或"**具名豁免**"（写明谁、为何、替谁验）；②merge 闸的检查项加一条"本票场景最后一次运行的结论与出处"
+> （读 `out/integration-report-*.json` 回执，不重跑）；③人审面把"这份证据出自哪一次运行"写清，避免把环境产物当验收证据。
+>
+> **回归**：L1——构造"场景抛异常 / ENV_FAIL"的泳道，断言闸或验收给出红或具名拒绝，而不是全绿放行；
+> L3——ENV_FAIL 之后必须"重跑到绿"或带具名豁免，才允许进人审门。
+>
+> **本条的当轮处置**：人审**未签字**，按 `rework(to_stage=implement)` 打回，打回说明里含实测命令、`ReferenceError` 的**精确行号**
+> （`sc_platform_banner_suppressed.mjs:248` 把未绑定的 `foldLabels` 当 evaluate 参数）与"必须有一到两次绿腿"的要求。
