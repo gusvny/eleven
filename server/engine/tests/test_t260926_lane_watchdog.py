@@ -469,7 +469,7 @@ def test_d1_flow_wires_lane_face_behind_the_patch_gate():
     src = _inspect.getsource(flow.InspectionPeriodicWorkflow._run_inspect_period_flow)
     assert "workflow.patched(LANE_WATCHDOG_PATCH_ID)" in src
     gate = src.index("workflow.patched(LANE_WATCHDOG_PATCH_ID)")
-    call = src.index("await self._lane_watchdog(inp, plan)")
+    call = src.index("await self._lane_watchdog(inp, plan, shared_scan)")
     assert gate < call, "活动调用必须在版本门后（老在途票 history 零新命令）"
     assert "extra_findings += lane_findings" in src
     assert "lane=lane_section" in src
@@ -544,11 +544,14 @@ def test_d3_lane_activity_failure_and_unreadable_tickets_are_named(monkeypatch):
                      "enum_note": "scan truncated at max_tickets=1"}}}
     monkeypatch.setattr(flow, "workflow", SimpleNamespace(execute_activity=_ok))
     sec3, finds3 = asyncio.run(wf._lane_watchdog(object(), {}))
-    assert sec3 is not None and len(finds3) == 3
-    assert "unreadable ticket" in finds3[0]["subject"]
-    assert "skipped" in finds3[1]["subject"]
-    assert "truncated" in finds3[2]["subject"]
-    assert all(f["scan"] == "lane" and f["suggest"] is False for f in finds3)
+    # t261006-13 B5: noise families become counted machine notes on the lane section
+    # (kind/count/reason — how many, why), ZERO added findings; "sweep did not run"
+    # above stays a high finding (a real failure is not noise).
+    assert sec3 is not None and finds3 == []
+    kinds = {n["kind"]: n for n in sec3["machine_notes"]}
+    assert kinds["unreadable"]["count"] == 1
+    assert "out-of-scope" in kinds["skipped"]["reason"] and kinds["skipped"]["count"] == 1
+    assert "truncated" in kinds["truncated"]["reason"] and kinds["truncated"]["count"] == 1
     assert ins.finding_language_violations(finds3) == []
 
 

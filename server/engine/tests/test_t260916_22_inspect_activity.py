@@ -90,7 +90,7 @@ def test_inspect_input_gates_fail_closed(tmp_path, base_dir, monkeypatch, beats)
     for mut, why in [({"instance_id": ""}, "instance"),
                      ({"period": ""}, "period"),
                      ({"base_dir": ""}, "base_dir"),
-                     ({"base_dir": str(tmp_path / "nope")}, "不存在")]:
+                     ({"base_dir": str(tmp_path / "nope")}, "does not exist")]:
         res = asyncio.run(aa.run_inspection_inspect(_args(base_dir, tmp_path, **mut)))
         assert res["ok"] is False and why in res["error"], mut
         assert beats == []                       # 闸前零心跳

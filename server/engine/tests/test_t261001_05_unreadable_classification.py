@@ -210,8 +210,11 @@ def test_c2_legacy_receipt_falls_back_to_old_single_finding():
     assert "KI-126 zombie shape" in specs[0]["evidence"] and "t9:" in specs[0]["evidence"]
 
 
-def test_c3_flow_wiring_two_class_findings(monkeypatch):
-    """工作流接线：分类 meta → 两条发现进同一清单；建议位仍为 suggest=False。"""
+def test_c3_flow_wiring_two_class_notes(monkeypatch):
+    """Flow wiring (t261006-13 B5 closure): classified meta -> two machine-note
+    families on the lane section (kind/count/reason — how many, why), ZERO added
+    findings — machine noise no longer spends the finding budget; nonzero counts stay
+    visible (fail-closed: never silently "no problem")."""
     wf = object.__new__(flow.InspectionPeriodicWorkflow)
     meta = {"unreadable": ["t1: snapshot query failed after 1 retry: TimeoutError",
                            "t3: snapshot query failed: Exception: Workflow Task in failed state"],
@@ -226,15 +229,19 @@ def test_c3_flow_wiring_two_class_findings(monkeypatch):
                                                   source="declaration"),
                 "meta": meta}}
     monkeypatch.setattr(flow, "workflow", SimpleNamespace(execute_activity=_ok))
-    _sec, finds = asyncio.run(wf._lane_watchdog(object(), {}))
-    unread = [f for f in finds if "unreadable ticket" in f["subject"]]
-    assert len(unread) == 2                                   # 两类各一条，都不静默丢弃
-    assert all(f["scan"] == "lane" and f["suggest"] is False for f in unread)
-    assert ins.finding_language_violations(finds) == []
+    sec, finds = asyncio.run(wf._lane_watchdog(object(), {}))
+    assert finds == [], "noise adds zero findings (B5: no budget spent on machinery)"
+    notes = sec["machine_notes"]
+    kinds = {n["kind"]: n for n in notes}
+    assert kinds["unreadable"]["count"] == 1 and kinds["unreadable-transient"]["count"] == 1
+    assert "needs a human" in kinds["unreadable"]["reason"], \
+        "the permanent-class note names why (needs a human) — still visible, not silent"
 
 
 def test_c4_flow_wiring_legacy_receipt(monkeypatch):
-    """老回执接线：单条旧形发现（逐字段同旧实现）。"""
+    """Legacy-receipt wiring (t261006-13 B5 closure): a receipt without classification
+    keys -> one combined machine note (count=1, no class guessed); zero added findings
+    (the old per-finding path is superseded by the note)."""
     wf = object.__new__(flow.InspectionPeriodicWorkflow)
     sec = lw.lane_section([], {"scanned": 1, "by_leg": {}}, source="declaration")
 
@@ -242,10 +249,11 @@ def test_c4_flow_wiring_legacy_receipt(monkeypatch):
         return {"ok": True, "result": {"findings": [], "section": sec, "meta":
                 {"unreadable": ["t9: snapshot query failed: TimeoutError"]}}}
     monkeypatch.setattr(flow, "workflow", SimpleNamespace(execute_activity=_ok))
-    _sec2, finds = asyncio.run(wf._lane_watchdog(object(), {}))
-    assert len(finds) == 1
-    assert finds[0]["subject"] == "Lane/watchdog sweep had 1 unreadable ticket(s)"
-    assert finds[0]["severity"] == "med" and finds[0]["suggest"] is False
+    sec2, finds = asyncio.run(wf._lane_watchdog(object(), {}))
+    assert finds == []
+    notes = sec2["machine_notes"]
+    assert len(notes) == 1 and notes[0]["kind"] == "unreadable" and notes[0]["count"] == 1
+    assert "classification" in notes[0]["reason"]
 
 
 # ---------------------------------------------------------------- D. 界限不变 -------

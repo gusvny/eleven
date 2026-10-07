@@ -203,6 +203,13 @@ DOC_MECH_PATCH_ID = "t261006-11-inspection-doc-mech"
 # 命令（否则 Temporal replay 非确定 → workflow task 永久失败、老票卡死）；repo 先例=上述
 # 四门同形。门求值点在 run 直线上（无 KI-061 式唤醒重放路径），不需 #seq 后缀。
 LANE_WATCHDOG_PATCH_ID = "inspection-lane-watchdog-v1"
+# Version gate id (t261006-13, replay-safe): the shared change-surface stage (one
+# surface computation per period -> unavailable=blocked / small surface=front-page
+# coverage block -> both faces consume the same result) + public-scan cross-face
+# dedupe + machine noise demoted to machine notes. In-flight inspection tickets whose
+# history lacks the marker get patched()=False and follow the old command sequence
+# (the replay non-determinism red line; same discipline as the gates above).
+SURFACE_PATCH_ID = "inspection-shared-surface-v1"
 # 版本门 id（260929，replay 安全）：setup 段「泳道路径被本期残留占住 → 定向清本期残留
 # （sweep remove_period=本期）→ 重试一次 prepare」只在新 run 生效。理由同上述各门：
 # 老 in-flight 票（含 260926 重开实案 t260927-02：prepare 失败即 blocked）history 里
@@ -1171,6 +1178,9 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         self._patched: bool = False      # 版本门结果（老 history 缺标记 → 走票① 旧路径）
         self._code_stamp: str = ""       # 260927：活动带回的代码身份行（票面兜底用）
         self._input: Optional[InspectionPeriodicInput] = None  # run 入口钉存（sign 闸 payload 回退链）
+        # t261006-13: this period's coverage block (the explicit front-page face; legacy runs
+# keep it empty)
+        self._coverage: Optional[Dict[str, Any]] = None
 
     def _enter(self, stage: str, state: str = "running", reason: str = "") -> None:
         self.stage = stage
@@ -1406,16 +1416,96 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                     % (teardown_note, inp.instance_id), suggest=False))
             # 漏跑核查（dead-man 面①）仍在 suite 块内、不占段位（与旧轨道同源）
             extra_findings += await self._deadman_findings(inp, plan)
+        # ---- Shared change surface (t261006-13 B1/B2/B3): one computation per
+        # period, both faces consume the same result. New commands inside the gate
+        # (SURFACE_PATCH_ID; in-flight tickets without the marker follow the old
+        # sequence). verdict=unavailable (no previous base anywhere / git diff failed)
+        # -> the WHOLE period is blocked: "no computable change surface" is a defect of
+        # the period, not "zero findings" (B3 loud fail; the old silent scope_collapse
+        # med-finding path is superseded by this blocked on this track). A small
+        # surface -> the front-page coverage block names "little to review" WITH the
+        # thresholds actually used (never silently read as "no problem found").
+        surface: Optional[Dict[str, Any]] = None
+        shared_scan: Optional[Dict[str, Any]] = None
+        if self._patched and workflow.patched(SURFACE_PATCH_ID):
+            self._enter("inspect", "running",
+                        "Computing the period change surface (one shared computation "
+                        "from the previous period's base point; both faces consume it)")
+            surface_raw: Any = await workflow.execute_activity(
+                "run_inspection_surface",
+                args=[{"instance_id": inp.instance_id, "period": period,
+                       "base_dir": repo_root or ".",
+                       "base_head": (lane or {}).get("base_ref", ""),
+                       "ledger_dir": str(getattr(inp, "ledger_dir", "") or ""),
+                       "surface_thresholds": dict(plan.get("surface_thresholds") or {}),
+                       "shared_scans": dict(plan.get("shared_scans") or {})}],
+                start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
+            if not (surface_raw or {}).get("ok"):
+                return await self._blocked(
+                    ticket_id, inp, period, "inspect",
+                    str((surface_raw or {}).get("error") or "surface stage failed"), lane)
+            surface = dict((surface_raw or {}).get("surface") or {})
+            shared_scan = (surface_raw or {}).get("shared_scan") or None
+            cov = dict(surface.get("coverage") or {})
+            cov["verdict"] = str(surface.get("verdict") or "unavailable")
+            if cov["verdict"] == "unavailable":
+                return await self._blocked(
+                    ticket_id, inp, period, "inspect",
+                    "Change surface unavailable: %s — this period did NOT review code; "
+                    "that is a defect of the period, not a finding-free result (fix the "
+                    "base-point chain and re-run)"
+                    % str(surface.get("reason") or "unknown"), lane)
+            self._coverage = cov
+            self._enter("inspect", "running",
+                        "Change surface: %d file(s) (test %d / simplify %d / other %d), "
+                        "%d new scenario(s) — verdict %s (thresholds min_surface_files=%s, "
+                        "min_new_scenarios=%s)"
+                        % (cov.get("surface_files", 0),
+                           (surface.get("faces") or {}).get("test", 0),
+                           (surface.get("faces") or {}).get("simplify", 0),
+                           (surface.get("faces") or {}).get("other", 0),
+                           cov.get("new_scenarios", 0), cov["verdict"],
+                           (cov.get("thresholds") or {}).get("min_surface_files", "?"),
+                           (cov.get("thresholds") or {}).get("min_new_scenarios", "?")))
+            if cov["verdict"] == "little-to-review":
+                self._enter("inspect", "running",
+                            "Little to review this period: the change surface is under the "
+                            "stated thresholds — this is stated on the front page, never "
+                            "read as \"no problem found\"")
         # ---- lane/watchdog 面（260926）：只读扫非终态票的工作流时间线/快照 ----
         # （KI-122 追加面：巡检各面此前只读制品与代码、没有一面读票时间线，而活锁只体现在
         # 泳道层；KI-126 僵尸票同源。绝不写状态、绝不推进票——只 list + query。）
         lane_section: Optional[Dict[str, Any]] = None
         if workflow.patched(LANE_WATCHDOG_PATCH_ID):
-            self._enter("inspect", "running",
-                        "Read-only lane/watchdog sweep (non-terminal ticket timelines: "
-                        "re-run rounds / tests-fault loop dwell / in-flight silence)")
-            lane_section, lane_findings = await self._lane_watchdog(inp, plan)
-            extra_findings += lane_findings
+            # B4 the public scan lands in ONE place (t261006-13; design sec.5
+            # discipline 2): instances other than the declared owner do not re-scan and
+            # keep one pointer machine note (counted in no summary, no suggestion
+            # tickets); with the owner doc absent (fail-open), or when this instance IS
+            # the owner, sweep as usual (noise still goes through machine notes).
+            _owner = str((shared_scan or {}).get("owner") or "")
+            if (self._patched and workflow.patched(SURFACE_PATCH_ID) and shared_scan
+                    and _owner and _owner != inp.instance_id and shared_scan.get("exists")):
+                _cnt = int(shared_scan.get("finding_count") or 0)
+                lane_section = {"shared_scan": "lane-watchdog", "owner": _owner,
+                                "scanned": 0, "finding_count": _cnt,
+                                "threshold_note": ("public scan owned by %s this period — "
+                                                   "see the owner report" % _owner),
+                                "machine_notes": [{
+                                    "kind": "deduped-to-owner", "count": _cnt,
+                                    "reason": ("lane/watchdog findings are reported by %s "
+                                               "this period; not re-scanned, not counted "
+                                               "here, no suggestion tickets" % _owner),
+                                    "detail": []}]}
+                self._enter("inspect", "running",
+                            "Lane/watchdog: public scan owned by %s this period — %d "
+                            "finding(s) there; this face keeps one pointer note only"
+                            % (_owner, _cnt))
+            else:
+                self._enter("inspect", "running",
+                            "Read-only lane/watchdog sweep (non-terminal ticket timelines: "
+                            "re-run rounds / tests-fault loop dwell / in-flight silence)")
+                lane_section, lane_findings = await self._lane_watchdog(inp, plan, shared_scan)
+                extra_findings += lane_findings
             if lane_section:
                 tmp_sec = lane_section.get("tmp_fixture") or {}
                 self._enter("inspect", "running",
@@ -1442,6 +1532,13 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                         "face": str(plan.get("scan_face") or "test"),
                         "inspect_profile": inspect_profile, "base_dir": base_dir,
                         "base_head": (lane or {}).get("base_ref", ""),
+                        # t261006-13 B1: the period change surface = one shared
+                        # computation per period, consumed by both faces; when surface
+                        # is absent (legacy path) the activity computes it locally
+                        # (no self-seeding).
+                        "surface": surface,
+                        "surface_thresholds": dict(plan.get("surface_thresholds") or {}),
+                        "shared_scans": dict(plan.get("shared_scans") or {}),
                         "project_key": getattr(inp, "project_key", ""),
                         "max_findings": max_findings, "timeout_sec": inspect_budget_sec,
                         "inspect_max_shards": int((ins_cfg.get("max_shards")) or 0),
@@ -1504,6 +1601,25 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                 ticket_id, inp, period, "report",
                 str((verify_raw or {}).get("error") or "recheck failed"), lane)
         result = (verify_raw or {}).get("result") or {}
+        # ---- B4 cross-face dedupe (t261006-13): the non-owner face marks findings
+        # ---- the owner already reported as suppressed, with reported_by recorded;
+        # ---- distinct findings that merely share a subject keep distinct ids. ----
+        if (self._patched and workflow.patched(SURFACE_PATCH_ID) and shared_scan
+                and str(shared_scan.get("owner") or "") != inp.instance_id
+                and shared_scan.get("exists")):
+            from inspection_surface import apply_cross_face_dedupe
+            owner_doc = {"findings": [{"id": i}
+                                      for i in (shared_scan.get("finding_ids") or [])]}
+            result["findings"], xf_meta = apply_cross_face_dedupe(
+                result.get("findings") or [], owner_doc,
+                str(shared_scan.get("owner")), inp.instance_id)
+            result.setdefault("meta", {}).update(xf_meta)
+            self._enter("report", "running",
+                        "Cross-face dedupe: %d finding(s) already reported by %s "
+                        "(reported_by recorded; distinct findings that merely share a "
+                        "subject are kept)"
+                        % (int(xf_meta.get("cross_face_deduped") or 0),
+                           shared_scan.get("owner")))
         vmeta = dict(result.get("meta") or {})
         ins_meta = dict(ins_result.get("meta") or {})
         ins_meta.pop("output_log", None)   # agent 原始日志路径进 meta 太吵，落 agent-home 留档即可
@@ -1537,6 +1653,11 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         if not self.face.get("code_stamp") and self._code_stamp:
             self.face["code_stamp"] = self._code_stamp
         self.face["scan_meta"] = vmeta
+        # t261006-13 B3: the front-page coverage block (verdict + the thresholds
+        # actually used — "little to review" is an explicit statement, never silently
+        # "no problem"; unavailable was already blocked above as a whole period).
+        if self._coverage is not None:
+            self.face["coverage"] = dict(self._coverage)
         if lane:
             self.face["lane"] = dict(lane)
         return await self._finalize_and_close(ticket_id, inp, period, lane)
@@ -1816,15 +1937,19 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         return findings
 
     async def _lane_watchdog(self, inp: "InspectionPeriodicInput",
-                             plan: Dict[str, Any]):
+                             plan: Dict[str, Any],
+                             shared_scan: Optional[Dict[str, Any]] = None):
         """lane/watchdog 面（260926，KI-122 追加面 / KI-126 同源）：只读扫非终态票的
         工作流时间线/快照 + **测试夹具临时目录水位**（第四判据）→ (票面 lane 段, 发现清单)。
 
-        活动失败=显式 high 发现（**这个面本身不能静默**——否则「巡检没发现」的盲区会
-        再长回来）；阈值档来自声明 plan.watchdog（缺省/畸形的回落与来源点名由纯函数面
-        resolve_thresholds / resolve_tmp_thresholds 给，随 lane 段上票面）。
-        第四判据是**宿主级**发现（不挂任何票），随活动回执的 tmp_fixture 段并进同一发现
-        清单与同一 lane 段计数（计数合并单点=merge_lane_section，段与清单不许漂移）。"""
+        Two t261006-13 changes: (1) machine noise (truncation enum_note / unreadable
+        ticket lists / out-of-scope skips) goes through MACHINE NOTES
+        (section.machine_notes, with kind/count/reason — how many, why) instead of
+        minting one finding per item (B5); "sweep did not run" stays a high finding —
+        a real failure is not noise. (2) when shared_scan (the ownership info returned
+        by the surface activity) is non-empty and the owner doc is absent (fail-open),
+        one extra machine note names it ("the owner face has no report; this face swept
+        itself") — never silently swallowed."""
         from inspection_deadman import make_finding
         try:
             raw: Any = await workflow.execute_activity(
@@ -1855,29 +1980,26 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         tmp_findings = [f for f in (tmp.get("findings") or []) if isinstance(f, dict)]
         if tmp_findings:
             findings = findings + tmp_findings
-        # 查询/枚举面的故障点名进票面（单票快照查不到=点名，绝不静默当「这票没问题」）
-        errs = [str(x) for x in (meta.get("unreadable") or [])]
-        # 读失败分类点名（t261001-05，单点文案在 lw.unreadable_finding_specs）：两类分开
-        # 计数分开文案——瞬态（超时无应答，已重试一次）=巡检期故障证据；永久（如
-        # "Workflow Task in failed state"）=需要人。fail-closed 不变：读不到的票绝不静默
-        # 当「这票没问题」。老回执（无分类键）=单条旧形文案（不猜类，重放确定性不破）。
-        errs = [str(x) for x in (meta.get("unreadable") or [])]
-        if errs:
-            from inspection_lane_watchdog import unreadable_finding_specs
-            findings = findings + [make_finding(
-                "lane", s["severity"], s["subject"], s["evidence"], suggest=False)
-                for s in unreadable_finding_specs(meta)]
-        skipped = [str(x) for x in (meta.get("errors") or [])]
-        if skipped:
-            findings = findings + [make_finding(
-                "lane", "low", "Lane/watchdog sweep skipped %d ticket(s)" % len(skipped),
-                "out-of-scope non-terminal tickets (project not in the registry / no "
-                "ProjectKey identity) — named for completeness, not a stuck-state verdict: %s"
-                % "; ".join(skipped[:10]), suggest=False)]
-        if meta.get("enum_note"):
-            findings = findings + [make_finding(
-                "lane", "low", "Lane/watchdog sweep was truncated",
-                str(meta["enum_note"]), suggest=False)]
+        # Query/enumeration failures (unreadable tickets / out-of-scope skips /
+        # truncation) = machine notes, not findings (B5, t261006-13): with
+        # kind/count/reason — how many, why. Fail-closed stands: an unreadable ticket is
+        # never silently treated as "this ticket is fine" — a nonzero count still lands
+        # on the ticket face. Old receipts without the classification keys fall back to
+        # one combined note at the converter (no class guessed, replay determinism).
+        from inspection_lane_watchdog import machine_notes_from_meta
+        notes, _noise_findings = machine_notes_from_meta(meta, meta.get("errors") or [])
+        if isinstance(section, dict) and notes:
+            section["machine_notes"] = list(notes)
+        if (shared_scan is not None and str(shared_scan.get("owner") or "")
+                and not shared_scan.get("exists")):
+            failopen = [{"kind": "owner-report-absent", "count": 0,
+                         "reason": str(shared_scan.get("note")
+                                       or "the owner face has no period report"),
+                         "detail": []}]
+            if isinstance(section, dict):
+                section.setdefault("machine_notes", []).extend(failopen)
+            else:
+                section = {"machine_notes": failopen}
         return section, findings
 
     async def _redirect_and_finish(self, ticket_id: str, inp: "InspectionPeriodicInput",

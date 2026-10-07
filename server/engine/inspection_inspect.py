@@ -218,16 +218,22 @@ def parse_agent_findings(text: str) -> List[Dict[str, Any]]:
 
 
 def mint_finding_id(finding: Dict[str, Any]) -> str:
-    """内容哈希 id（前 8 hex）：同内容跨期稳定（去重键），内容变即新 id。
+    """Content-hash finding id (8 hex): stable across periods for the same rule+object;
+    a changed object mints a new id.
 
-    规范化=subject/why 空白折叠 + evidence 按 (path,line,quote) 排序后逐项折叠——
-    agent 两期叙述空白差异不改 id，调换 evidence 顺序也不改 id（可证伪内容不变）。"""
-    parts = [_norm_quote(finding.get("subject")), _norm_quote(finding.get("why"))]
-    evs = sorted(
-        (_norm_rel_path(ev.get("path")), int(ev.get("line") or 0), _norm_quote(ev.get("quote")))
-        for ev in (finding.get("evidence") or []) if isinstance(ev, dict))
-    for path, line, quote in evs:
-        parts.append("%s\x1f%d\x1f%s" % (path, line, quote))
+    Identity contract (design 261004 section 5 discipline 1; t261006-13 review
+    condition 2): rule + object, NEVER wording. Hash input = subject (the rule+object
+    naming string, whitespace-folded) + the set of evidence (path,line) locations
+    (sorted, deduplicated). Free text (why, quote originals, wording drift) is NOT
+    hashed: a re-worded repetition across periods keeps the id, so cross-period and
+    cross-face dedupe both hold. Non-dict evidence entries (e.g. lane-face plain-text
+    evidence) carry no object location and are skipped (conservative on malformed
+    input, never raises)."""
+    parts = [_norm_quote(finding.get("subject"))]
+    locs = sorted({
+        "%s\x1f%d" % (_norm_rel_path(ev.get("path")), int(ev.get("line") or 0))
+        for ev in (finding.get("evidence") or []) if isinstance(ev, dict)})
+    parts.extend(locs)
     return hashlib.sha256("\x1e".join(parts).encode("utf-8")).hexdigest()[:8]
 
 
@@ -269,7 +275,7 @@ def scope_collapse_findings(scope_meta: Any) -> List[Dict[str, Any]]:
     # 证据=台账里那段范围 meta 本身（**不编造文件路径**：这条塌陷的证据就在台账字段里）
     ev = [{"path": "scan_meta.inspect.scope（本期台账字段）",
            "quote": str({k: m[k] for k in ("scope_files", "scope_note", "diff_error",
-                                           "base_error", "base_source_this", "diff_empty")
+                                           "base_error", "this_base_source", "diff_empty")
                          if k in m})[:300]}]
     return [{
         "scan": SCOPE_SCAN_TAG, "severity": "med",
@@ -277,10 +283,11 @@ def scope_collapse_findings(scope_meta: Any) -> List[Dict[str, Any]]:
                     "period did NOT review code (agent reviewed receipts/KI/previous ledger only)"),
         "evidence": ev,
         "suggestion": ("Give this instance a usable review base point: for an instance without a "
-                       "lane (declaration carries no suite), use \"previous period's recorded HEAD → "
-                       "this period's HEAD\" (already wired: this period seeds the current HEAD into "
-                       "the ledger, so the next period can diff); if the base point is still missing, "
-                       "fix the declaration/lane first — do not treat \"ran\" as \"reviewed\"."),
+                       "lane (declaration carries no suite), the diff needs the PREVIOUS period's "
+                       "recorded base (lane/suite base_ref or the prev report's base_head); HEAD is "
+                       "never self-seeded as a base (that erases the diff). If the base point is "
+                       "still missing, fix the declaration/lane first — do not treat "
+                       "\"ran\" as \"reviewed\"."),
         "suggest": False,
     }]
 

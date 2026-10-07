@@ -127,7 +127,8 @@ def test_u5_no_prev_base_no_full_repo_fallback(base_dir, tmp_path, monkeypatch, 
     assert res["ok"] is True
     scope = res["result"]["meta"]["scope"]
     assert scope["scope_files"] == 0
-    assert "无基点差分" in scope["scope_note"]
+    # t261006-13: the scope note converged to the English report-face wording
+    assert "no base-point diff" in scope["scope_note"]
     block_prompt_notes = [k for k in ("diff_error", "scope_note") if scope.get(k)]
     assert block_prompt_notes
 

@@ -158,7 +158,11 @@ def main() -> int:
         m = drv.meta(pay)
         blob = drv.scope_blob(pay)
         ok(drv.result_ok(pay), "⑥无基点不炸（其余三路照给）")
-        ok("无基点" in str(m.get("scope", {}).get("scope_note")), "⑥显式 note「无基点差分」")
+        # t261006-13 收敛到英文报告面措辞（"no base-point diff: …"）；锚语义不锚字面
+        # （KI-051 教训）：断言「note 点名差分未做」，不锚任何一种语言的固定串。
+        _note6 = str(m.get("scope", {}).get("scope_note"))
+        ok("无基点" in _note6 or "no base-point diff" in _note6,
+           "⑥显式 note「无基点差分」（锚语义：点名差分未做，中英措辞皆可）")
         ok(m.get("scope", {}).get("scope_files") == 0,
            "⑥变化面为空（scope_files==0，无基点≠回落整套书）")
         ok(not any(str(n) in blob for n in (328, 368, 372)), "⑥scope 零全仓普查形态")

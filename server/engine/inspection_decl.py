@@ -64,6 +64,11 @@ from inspection_inspect import (DEFAULT_INSPECT_TIMEOUT_MIN, DEFAULT_MAX_FINDING
 from inspection_lane_watchdog import (WATCHDOG_ALL_DEFAULTS, WATCHDOG_ALL_KEYS,
                                       WATCHDOG_ALL_RANGES, WATCHDOG_DEFAULTS,
                                       WATCHDOG_KEYS, WATCHDOG_RANGES)
+# t261006-13 shared-surface vocabulary: single source in inspection_surface (pure
+# module) — same no-duplicate-defaults discipline as the watchdog keys above.
+from inspection_surface import (DEFAULT_MIN_NEW_SCENARIOS, DEFAULT_MIN_SURFACE_FILES,
+                                DEFAULT_SHARED_SCAN_OWNER, SHARED_SCAN_NAMES,
+                                SURFACE_THRESHOLD_KEYS)
 
 DECL_FILE_NAME = "inspection.yaml"
 
@@ -185,6 +190,16 @@ class InstanceSpec:
     # 逐字 str）——解析期已过词法/范围校验；运行期由 inspection_lane_watchdog.
     # resolve_thresholds 归一并在面/回执上点名来源（declaration|default）。空=全缺省。
     watchdog: Dict[str, str] = field(default_factory=dict)
+    # t261006-13 shared-surface keys:
+    #   shared_scans: {scan-name → owner instance id} — the public scan (only
+    #     "lane-watchdog" is wired) lands in the OWNER face; other faces keep a
+    #     reference line (design 261004 §5 discipline 2). Unwired scan name or empty
+    #     owner id → fail-closed.
+    #   surface_thresholds: {min_surface_files, min_new_scenarios} — B3 coverage
+    #     self-check bar; positive ints; missing keys fall back to the engine defaults
+    #     in inspection_surface (the front page always prints the bar actually used).
+    shared_scans: Dict[str, str] = field(default_factory=dict)
+    surface_thresholds: Dict[str, str] = field(default_factory=dict)
     # 无新变更则空转（260929 宿主令，simplify-face）：true=起票前比对「上次运行的基点 sha
     # 与当前 main HEAD」，相同则本期不铸票不跑（仍落一行裁决记录，漏跑核查据此不误报）；
     # 读不出/形态不合=不跳（宁可多跑一次，绝不假跳）。
@@ -426,6 +441,56 @@ def _validate_watchdog(where: str, raw: Any) -> Dict[str, str]:
     return out
 
 
+def _validate_shared_scans(where: str, raw: Any) -> Dict[str, str]:
+    """shared_scans validation (t261006-13, B4 public-scan cross-face ownership): the
+    scan name must be in the wired vocabulary and the owner instance id a non-empty
+    lowercase slug (same lexicon as instance ids) — anything else fails closed with a
+    named error ("who owns it" written wrong = the whole dedupe is dead; never guess).
+    Missing section = empty (engine default owner inspection_surface.DEFAULT_SHARED_SCAN_OWNER)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise DeclError("%s：shared_scans must be a mapping {scan-name: owner-instance-id} "
+                        "(got %r; wired scan names: %s)"
+                        % (where, raw, "/".join(SHARED_SCAN_NAMES)))
+    out: Dict[str, str] = {}
+    for scan, owner in raw.items():
+        if scan not in SHARED_SCAN_NAMES:
+            raise DeclError("%s：shared_scans scan name %r is not wired (valid: %s)"
+                            % (where, scan, "/".join(SHARED_SCAN_NAMES)))
+        if not isinstance(owner, str) or not INSTANCE_ID_RE.match(owner.strip()):
+            raise DeclError("%s：shared_scans.%s owner instance id invalid %r (lowercase "
+                            "slug, same lexicon as instance ids)" % (where, scan, owner))
+        out[scan] = owner.strip()
+    return out
+
+
+def _validate_surface_thresholds(where: str, raw: Any) -> Dict[str, str]:
+    """surface_thresholds validation (t261006-13, B3 coverage self-check bar): the two
+    documented keys, non-negative integer literals (0 is legal = "any surface counts as
+    reviewable"); unknown keys / malformed values fail closed with a named error.
+    Missing section = engine defaults (inspection_surface.DEFAULT_*); the front-page
+    coverage block always prints the thresholds actually used."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise DeclError("%s：surface_thresholds must be a mapping (got %r; valid keys: %s)"
+                        % (where, raw, "/".join(SURFACE_THRESHOLD_KEYS)))
+    unknown = sorted(set(raw) - set(SURFACE_THRESHOLD_KEYS))
+    if unknown:
+        raise DeclError("%s：surface_thresholds unknown keys %s (valid: %s)"
+                        % (where, unknown, "/".join(SURFACE_THRESHOLD_KEYS)))
+    out: Dict[str, str] = {}
+    for k, v in raw.items():
+        if not isinstance(v, str) or not re.match(r"^\d+$", v):
+            raise DeclError("%s：surface_thresholds.%s %r invalid (non-negative integer "
+                            "literal; defaults min_surface_files=%d / min_new_scenarios=%d)"
+                            % (where, k, v, DEFAULT_MIN_SURFACE_FILES,
+                               DEFAULT_MIN_NEW_SCENARIOS))
+        out[k] = v
+    return out
+
+
 def _validate_schedule(where: str, sched: Any, enabled: bool) -> tuple:
     if not isinstance(sched, dict):
         raise DeclError("%s：schedule 必须是映射（got %r）" % (where, sched))
@@ -526,7 +591,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                       "inspect_max_files_per_shard",
                                       "mode", "docs_root", "watchdog",
                                       "skip_when_unchanged",
-                                      "review_slice", "slice_min", "slice_max"})
+                                      "review_slice", "slice_min", "slice_max",
+                                      "shared_scans", "surface_thresholds"})
         if unknown:
             raise DeclError("%s：未知实例字段 %s（合法：id/enabled/schedule/workflow/template/"
                             "scan_face/suite/tz/project_key（实例级项目身份，t260915-20）/"
@@ -536,7 +602,9 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                             "t260925-01）/watchdog（lane 巡检面阈值档三键，260926）/"
                             "skip_when_unchanged (idle when nothing changed, host order "
                             "260929)/review_slice, slice_min, slice_max (review-ledger "
-                            "rotation slice, t261006-12); "
+                            "rotation slice, t261006-12)/shared_scans, surface_thresholds "
+                            "(t261006-13: public-scan ownership / coverage self-check "
+                            "thresholds); "
                             "face 已于 260910 巡检校准票 t260910-11 除名——零消费者，旧声明含 face 一律拒收点名）"
                             % (where, unknown))
         inst_id = _req_str(where, item, "id")
@@ -622,6 +690,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
                                 "本项=每片文件数硬上限，缩面纪律 t260924-06）" % (where, raw_mp))
             inspect_max_files_per_shard = int(raw_mp)
         watchdog = _validate_watchdog(where, item.get("watchdog"))
+        shared_scans = _validate_shared_scans(where, item.get("shared_scans"))
+        surface_thresholds = _validate_surface_thresholds(where, item.get("surface_thresholds"))
         # 布尔口径与 enabled 逐字同规（本 YAML 子集无类型推断，标量恒为 str：只认
         # true/false 字面，其他一律 fail-closed 点名——不许 'yes'/1/True 混进来）。
         skip_when_unchanged = False
@@ -684,7 +754,8 @@ def decl_from_mapping(data: Any, source: str = "<mapping>") -> InspectionDecl:
             inspect_max_shards=inspect_max_shards,
             inspect_max_files_per_shard=inspect_max_files_per_shard,
             review_slice=review_slice, slice_min=slice_min, slice_max=slice_max,
-            watchdog=watchdog))
+            watchdog=watchdog, shared_scans=shared_scans,
+            surface_thresholds=surface_thresholds))
     return InspectionDecl(schema=SCHEMA, instances=instances, source=source)
 
 
@@ -761,6 +832,10 @@ def _plan_from_decl(decl: "InspectionDecl", instance_id: str) -> Dict[str, Any]:
             # lane/watchdog 阈值档（260926）：additive 键，声明原值透传——运行期活动
             # 归一并在面/回执上点名来源（declaration|default）；旧消费者忽略本键零行为。
             "watchdog": dict(it.watchdog),
+            # t261006-13: shared public scan ownership + B3 coverage thresholds
+            # (additive keys; declaration raw values, engine-side normalization).
+            "shared_scans": dict(it.shared_scans),
+            "surface_thresholds": dict(it.surface_thresholds),
             "kind": it.kind, "workflow": it.workflow, "template": it.template,
             # t260917-02（R2 身份回退链）：实例级项目身份随 plan 出——旧调度 payload 缺
             # project_key 时（260917 实况），spawn 活动按本键回退决议归属，起票 SA

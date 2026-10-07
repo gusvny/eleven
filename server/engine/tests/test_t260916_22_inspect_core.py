@@ -115,13 +115,21 @@ def test_mint_id_stable_across_whitespace_and_evidence_order():
 
 
 def test_mint_id_changes_with_content():
+    """t261006-13 identity contract (design sec.5 discipline 1): id = rule + object
+    (subject + the (path,line) location set), never wording — why/quote wording drift
+    keeps the id; only a changed object (subject / location) mints a new one."""
     base = ins.mint_finding_id(good_finding())
     assert ins.mint_finding_id(good_finding(subject="另一问题")) != base
-    assert ins.mint_finding_id(good_finding(why="理由不同")) != base
+    assert ins.mint_finding_id(good_finding(why="different why")) == base, \
+        "why is free wording and stays out of the identity hash (dedupe survives drift)"
     assert ins.mint_finding_id(good_finding(
         evidence=[{"path": "src/a.py", "line": 13, "quote": "assert old_fn()"}])) != base
     assert ins.mint_finding_id(good_finding(
-        evidence=[{"path": "src/a.py", "line": 12, "quote": "assert new_fn()"}])) != base
+        evidence=[{"path": "src/a.py", "line": 12, "quote": "assert new_fn()"}])) == base, \
+        "a re-worded quote at the same location is not a new finding (wording is not identity)"
+    # plain-text evidence (no path/line, e.g. the lane face) falls back to subject identity
+    assert ins.mint_finding_id({"subject": "lane-stuck:t1", "evidence": "stuck 3h"}) \
+        == ins.mint_finding_id({"subject": "lane-stuck:t1", "evidence": "stuck 3h (re-checked)"})
 
 
 def test_with_ids_tags_scan_agent():

@@ -9559,6 +9559,161 @@ def _read_file_tail(path: Path, limit: int = 400_000) -> str:
 
 
 @activity.defn
+async def run_inspection_surface(args: Dict[str, Any]) -> Dict[str, Any]:
+    """The period change surface: ONE computation per period, shared by both faces (t261006-13 B1).
+
+    Input: instance_id / period / base_dir (the reviewed repo) / base_head (suite
+    periods = lane base_ref; non-suite = empty, the activity uses the repo HEAD as the
+    diff ENDPOINT — legal, never recorded as a future prev-base; B2 self-seed deleted) / ledger_dir.
+
+    Three states (each named, never silent):
+      1. shared hit: out/inspection/surface-<period>.json present and both base shas
+         match → reuse as-is (shared=true) — the second face recomputes nothing;
+      2. shared absent / sha mismatch / unreadable → compute locally with the same
+         inspection_surface pure functions and write the file back (idempotent by shas; a
+         mismatch is named stale — a surface between other base points is never trusted);
+      3. no previous base in the chain / git diff failed → verdict=unavailable + reason
+
+         (the workflow BLOCKS the period on it — a period defect, not "zero findings", B3).
+    Extra face (B4): reads the shared-scan owner instance (shared_scans.lane-watchdog,
+    default integration-tests) SAME-period ledger doc and returns its finding id set —
+    """
+    from shared import INSPECTION_DIR
+    from inspection_surface import (
+        DEFAULT_SHARED_SCAN_OWNER, compute_surface, load_shared_surface,
+        normalize_thresholds, resolve_prev_base, resolve_this_base,
+        surface_file_name, surface_unavailable)
+    from inspection_inspect import read_prev_ledger_doc
+
+    def _err(msg: str) -> Dict[str, Any]:
+        return {"ok": False, "error": msg}
+
+    instance_id = str(args.get("instance_id") or "")
+    period = str(args.get("period") or "")
+    base_dir = str(args.get("base_dir") or "")
+    base_head_arg = str(args.get("base_head") or "")
+    thresholds = normalize_thresholds(args.get("surface_thresholds"))
+    if not instance_id or not period or not base_dir:
+        return _err("surface input missing instance/period/base_dir (fail-closed)")
+    base = Path(base_dir)
+    if not base.is_dir():
+        return _err("reviewed repo dir does not exist: %s" % base_dir)
+    ledger_dir = Path(str(args.get("ledger_dir")
+                          or os.environ.get("SANDBAR_INSPECTION_DIR")
+                          or INSPECTION_DIR))
+
+    # ---- This period's base (diff endpoint): lane base_ref wins; else repo HEAD as
+    # ---- the endpoint ONLY ----
+    this_res = resolve_this_base(base_head_arg)
+    endpoint_note = ""
+    if this_res.get("verdict") != "ok":
+        try:
+            _hp = await asyncio.to_thread(
+                subprocess.run, ["git", "-C", str(base), "rev-parse", "HEAD"],
+                timeout=30, capture_output=True, text=True, check=False)
+            if _hp.returncode == 0 and (_hp.stdout or "").strip():
+                this_res = {"base": (_hp.stdout or "").strip().splitlines()[0],
+                            "verdict": "ok"}
+                endpoint_note = ("this period's endpoint is the repo HEAD %s (endpoint "
+                                 "only — never recorded as a future prev-base)"
+                                 % this_res["base"][:7])
+            else:
+                return {"ok": True, "surface": surface_unavailable(
+                    "this period's base point unavailable (git rev-parse rc=%s): %s"
+                    % (_hp.returncode, ((_hp.stderr or _hp.stdout or "").strip()[-160:])))}
+        except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+            return {"ok": True, "surface": surface_unavailable(
+                "this period's base point unavailable (%s: %s)" % (type(e).__name__, e))}
+    this_base = str(this_res["base"])
+
+    # ---- Previous base (B2: only the previous REPORT chain, no fourth level, never self-seeded) ----
+    prev_doc, prev_note = await asyncio.to_thread(
+        read_prev_ledger_doc, ledger_dir, instance_id, period)
+    prev_res = resolve_prev_base(prev_doc)
+    prev_base = str(prev_res.get("base") or "")
+    if prev_res.get("verdict") != "ok":
+        return {"ok": True, "surface": surface_unavailable(
+            "no usable previous-period base point (%s) — the change-surface diff was "
+            "not made" % (prev_note or "the previous ledger has no recorded base"))}
+
+    # ---- B4 extra face (computed first: the reuse path must carry it too) ----
+    owner = str((args.get("shared_scans") or {}).get("lane-watchdog")
+                or DEFAULT_SHARED_SCAN_OWNER) if isinstance(args.get("shared_scans"), dict) \
+        else DEFAULT_SHARED_SCAN_OWNER
+    shared_scan: Dict[str, Any] = {"owner": owner}
+    if owner and owner != instance_id:
+        # SAME-period owner doc (not read_prev_ledger_doc — that looks BACK): the
+        # owner face of this very period is the dedupe authority for B4.
+        owner_path = ledger_dir / ("inspection-%s-%s.json" % (owner, period))
+        try:
+            owner_raw = json.loads(owner_path.read_text(encoding="utf-8")) \
+                if owner_path.is_file() else None
+        except (OSError, ValueError):
+            owner_raw = None
+        if isinstance(owner_raw, dict) and isinstance(owner_raw.get("findings"), list):
+            shared_scan["exists"] = True
+            shared_scan["finding_count"] = len(owner_raw["findings"])
+            shared_scan["finding_ids"] = [str(f.get("id")) for f in owner_raw["findings"]
+                                          if isinstance(f, dict) and f.get("id")]
+        else:
+            shared_scan["exists"] = False
+            shared_scan["note"] = ("owner period doc for %s absent/unreadable (%s) — the "
+                                   "non-owner face runs its own sweep and keeps its "
+                                   "findings (fail-open, named)"
+                                   % (owner, owner_path.name))
+
+    # ---- Shared file, three states (reuse / compute locally and write back) ----
+    shared, shared_note = await asyncio.to_thread(
+        load_shared_surface, ledger_dir, period, prev_base, this_base)
+    if shared is not None:
+        shared["shared"] = True
+        shared["note"] = "reused the period's shared surface (%s)" % shared_note
+        return {"ok": True, "surface": shared, "shared_scan": shared_scan}
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "-C", str(base), "diff", "--name-status",
+             "%s..%s" % (prev_base, this_base)],
+            timeout=60, capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            return {"ok": True, "surface": surface_unavailable(
+                "git diff failed (rc=%s): %s" % (proc.returncode, (proc.stderr or "").strip()[-200:]),
+                prev_base, this_base)}
+        surface = compute_surface(prev_base, this_base, proc.stdout or "",
+                                  thresholds=thresholds)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+        return {"ok": True, "surface": surface_unavailable(
+            "git diff not runnable (%s: %s)" % (type(e).__name__, e),
+            prev_base, this_base)}
+    surface["prev_base_source"] = str(prev_res.get("base_source") or "")
+    surface["shared"] = False
+    notes = [shared_note]
+    if endpoint_note:
+        notes.append(endpoint_note)
+    surface["note"] = "；".join(n for n in notes if n)
+    # Write the shared file back (idempotent by shas; a write failure does not block the
+    # period — both faces run the same pure functions, recomputation is equivalent)
+    try:
+        await asyncio.to_thread(_write_text_atomic,
+                                ledger_dir / surface_file_name(period),
+                                json.dumps(surface, ensure_ascii=False, indent=2))
+    except OSError as e:
+        surface["note"] += ("；shared surface file write failed (%s: %s) — each face "
+                            "recomputes the same pure functions" % (type(e).__name__, e))
+    return {"ok": True, "surface": surface, "shared_scan": shared_scan}
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Small atomic text write (tmp + rename) so a concurrently read surface file is
+    never seen half-written. OSError propagates (caller names it, never silent)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp-%s" % os.getpid())
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(str(tmp), str(path))
+
+
+@activity.defn
 async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     """巡检 inspect 段：spawn 只读 agent（role=inspection）产出强 schema 发现清单。
 
@@ -9611,7 +9766,7 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("inspect 输入缺 instance/period/base_dir（fail-closed，不跑空巡检）")
     base = Path(base_dir)
     if not base.is_dir():
-        return _err("审查基座目录不存在：%s" % base_dir)
+        return _err("reviewed repo dir does not exist: %s" % base_dir)
     # 台账目录/套件回执/agent-home 路径按 INSPECTION_DIR 派生（workflow 体零路径计算；
     # agent_home 钉 out/ 下，绝不写审查基座——真仓工作区零 .dsh 残留的落点保证）。
     from shared import INSPECTION_DIR
@@ -9648,47 +9803,61 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     from inspection_inspect import (build_change_scope_text, ki_open_entries,
                                     parse_name_status, suite_receipt_rows)
     scope_notes: Dict[str, Any] = {}
-    # 上期基点三级回落（260929 宿主口径 A）：泳道 base_ref → 套件 base_ref → 上期台账
-    # 记的 inspect.base_head。第三级是**无泳道实例**的唯一可用面（声明不带 suite 的实例
-    # 从不建泳道，`lane` 键永远缺席 —— 09-29 实案：simplify-face 因此整期拿不到变化面，
-    # 审查范围塌成「KI 册 + 上期台账」，3 分钟就跑完而**代码一行没看**，且塌陷不出发现）。
-    prev_base = ""
-    if isinstance(prev_doc, dict):
-        for _k in ("lane", "suite"):
-            _d = prev_doc.get(_k)
-            if isinstance(_d, dict) and str(_d.get("base_ref") or "").strip():
-                prev_base = str(_d["base_ref"]).strip()
-                break
-        if not prev_base:
-            _sm = prev_doc.get("scan_meta")
-            _ins = _sm.get("inspect") if isinstance(_sm, dict) else None
-            if isinstance(_ins, dict) and str(_ins.get("base_head") or "").strip():
-                prev_base = str(_ins["base_head"]).strip()
-                scope_notes["base_source"] = "prev scan_meta.inspect.base_head（上期无泳道）"
-    this_base = str(base_head or "").strip()
-    if not this_base:
-        # 本期基点自播种（同一口径）：无泳道实例取当前 HEAD 当本期基点，并**记进台账**
-        # ⇒ 下期就能用「上期记录的 HEAD」做差分。取不到=显式 note（不假造基点）。
-        try:
-            _hp = subprocess.run(["git", "-C", str(base), "rev-parse", "HEAD"],
-                                 capture_output=True, text=True, timeout=30, check=False)
-            if _hp.returncode == 0 and (_hp.stdout or "").strip():
-                this_base = (_hp.stdout or "").strip().splitlines()[0]
-                scope_notes["base_source_this"] = ("本期无泳道基点 → 取当前 HEAD %s 自播种"
-                                                   "（下期起可差分）" % this_base[:7])
-            else:
-                scope_notes["base_error"] = "本期基点取不到（git rev-parse rc=%s）：%s" % (
-                    _hp.returncode, ((_hp.stderr or _hp.stdout or "").strip()[-160:]))
-        except (OSError, subprocess.TimeoutExpired) as e:
-            scope_notes["base_error"] = "本期基点取不到（%s: %s）" % (type(e).__name__, e)
+    # ---- Change surface (t261006-13): ONE computation per period, shared ----
+    # Preferred input: args["surface"] — the period surface computed once by
+    # run_inspection_surface and consumed by every face (B1). When absent (legacy
+    # callers / in-flight replay) this activity computes the same surface locally
+    # through the same pure functions (inspection_surface) — under one hard rule
+    # (B2): the previous period's base comes from the previous REPORT's recorded
+    # chain only (lane base_ref → suite base_ref → prev scan_meta.inspect.base_head);
+    # the current HEAD may serve as THIS period's diff endpoint, but the old
+    # self-seed branch (recording HEAD as a future prev-base) is deleted — it erased
+    # the diff and turned the period into a no-op.
+    from inspection_surface import resolve_prev_base
+    surface_in = args.get("surface")
     diff_rows: List[str] = []
-    if not prev_base:
-        scope_notes["scope_note"] = ("无基点差分：%s——变化面差分未做，审查范围只含"
-                                     "回执红/漏跑/KI/上期台账" % (prev_note or "上期台账无可用基点"))
-    elif not this_base:
-        scope_notes["scope_note"] = ("本期基点不可得（base_head 空且 HEAD 取不到）——变化面差分未做，"
-                                     "审查范围只含回执红/漏跑/KI/上期台账")
+    if isinstance(surface_in, dict) and surface_in.get("verdict") != "unavailable" \
+            and isinstance(surface_in.get("rows"), list):
+        diff_rows = [str(r) for r in surface_in["rows"]]
+        this_base = str(surface_in.get("this_base") or "")
+        prev_base = str(surface_in.get("prev_base") or "")
+        scope_notes["base_source"] = str(surface_in.get("prev_base_source") or "")
+        if surface_in.get("note"):
+            scope_notes["surface_note"] = str(surface_in["note"])
     else:
+        # Defensive local computation (production blocks earlier on an unavailable
+        # surface; the same named notes keep the scope collapse finding truthful).
+        if isinstance(surface_in, dict):
+            scope_notes["scope_note"] = ("change surface unavailable: %s"
+                                         % str(surface_in.get("reason") or "unknown"))
+        prev_res = resolve_prev_base(prev_doc)
+        prev_base = str(prev_res.get("base") or "")
+        if prev_res.get("verdict") == "ok":
+            scope_notes["base_source"] = str(prev_res.get("base_source") or "")
+        else:
+            scope_notes["scope_note"] = scope_notes.get("scope_note") or (
+                "no base-point diff: %s — the change surface was not computed, the "
+                "review scope holds receipt-red / missed-run / KI / previous ledger only"
+                % (prev_note or "the previous ledger has no usable base point"))
+        this_base = str(base_head or "").strip()
+        if not this_base:
+            # HEAD as THIS period's diff endpoint only (B2): used to aim the diff,
+            # never recorded anywhere as a future previous-period base.
+            try:
+                _hp = subprocess.run(["git", "-C", str(base), "rev-parse", "HEAD"],
+                                     capture_output=True, text=True, timeout=30, check=False)
+                if _hp.returncode == 0 and (_hp.stdout or "").strip():
+                    this_base = (_hp.stdout or "").strip().splitlines()[0]
+                    scope_notes["this_base_source"] = (
+                        "this period's diff endpoint is the current HEAD %s (endpoint "
+                        "only — never recorded as a future prev-base)" % this_base[:7])
+                else:
+                    scope_notes["base_error"] = "this period's base point unavailable (git rev-parse rc=%s): %s" % (
+                        _hp.returncode, ((_hp.stderr or _hp.stdout or "").strip()[-160:]))
+            except (OSError, subprocess.TimeoutExpired) as e:
+                scope_notes["base_error"] = ("this period's base point unavailable (%s: %s)"
+                                             % (type(e).__name__, e))
+    if prev_base and this_base:
         try:
             proc_d = subprocess.run(
                 ["git", "-C", str(base), "diff", "--name-status",
@@ -10173,5 +10342,8 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     resolve_main_head, sweep_inspection_lanes, run_inspection_suite,
     # 巡检 inspect 段（t260916-22）：只读 agent 产出发现。缺注册=运行时才炸（同上纪律）。
     run_inspection_inspect,
+    # The period change surface (t261006-13 B1/B2/B3): one computation per period,
+    # a missing registration only surfaces at runtime (same discipline as above).
+    run_inspection_surface,
 ]
 

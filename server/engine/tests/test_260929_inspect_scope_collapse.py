@@ -120,18 +120,25 @@ def test_prev_recorded_head_gives_a_real_change_surface(repo, tmp_path, beats, f
         "有真变化面 ⇒ 不许出塌陷发现"
 
 
-def test_self_seeding_records_this_head_for_the_next_period(repo, tmp_path, beats, fake_dsh):
-    """无泳道且上期无记录 ⇒ 本期取当前 HEAD **自播种并记进台账**，下期即可差分。"""
+def test_no_prev_base_never_self_seeds(repo, tmp_path, beats, fake_dsh):
+    """t261006-13 B2 closure: no lane and no previous record means NEVER self-seed —
+    HEAD may serve only as this period's diff ENDPOINT and must not be recorded as a
+    future previous-period base (self-seeding erases the diff = the period reviewed
+    nothing). With no real base the scope-collapse finding still lands on the ticket
+    face (in production the workflow additionally blocks the whole period on
+    surface=unavailable; this activity face is defence in depth)."""
     res = asyncio.run(aa.run_inspection_inspect(_args(repo, tmp_path)))
     assert res["ok"] is True, res
     meta = res["result"]["meta"]
     head = _git(repo, "rev-parse", "HEAD")
-    assert meta["scope_effective_base"] == head and meta["base_head"] == head, \
-        "本期实际用的基点必须落进台账（下期就是「上期记录」）"
-    assert "自播种" in meta["scope"].get("base_source_this", "")
+    # HEAD is the endpoint (the diff is possible), and the note names "endpoint only"
+    assert meta["scope_effective_base"] == head
+    assert "never recorded as a future prev-base" in meta["scope"].get("this_base_source", "")
+    assert "\u81ea\u64ad\u79cd" not in json.dumps(meta, ensure_ascii=False), \
+        "the self-seed wording is deleted (B2): meta must not carry it"
     scope_fs = [f for f in res["result"]["findings"] if f.get("scan") == "scope"]
     assert len(scope_fs) == 1 and scope_fs[0]["severity"] == "med", \
-        "首期必然塌陷 ⇒ 必须在票面上说出来（宿主令：记票上）"
+        "no real base must be stated on the ticket face (defence-in-depth face intact)"
 
 
 def test_no_new_commits_is_not_a_collapse(repo, tmp_path, beats, fake_dsh):

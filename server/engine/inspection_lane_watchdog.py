@@ -1089,3 +1089,58 @@ def unreadable_finding_specs(meta: Any) -> List[Dict[str, str]]:
             "evidence": "%s Per-ticket raw detail: %s"
                         % (head, "; ".join(trans_lines[:UNREADABLE_LIST_CAP]))})
     return specs
+
+
+def machine_notes_from_meta(meta: Any, skipped: Any = None) -> tuple:
+    """Sweep machine noise → counted machine notes (t261006-13 B5; pure function).
+
+    Returns (notes, added_findings): `notes` is the list of machine notes — each a dict
+    {kind, count, reason, detail} saying HOW MANY and WHY — and `added_findings` is
+    always [] (the machinery's own noise is never a finding; the finding budget is no
+    longer spent on truncation / unreadable enumerations repeated every period).
+
+    Noise families (each its own note):
+      - unreadable ticket timelines, split into permanent / transient classes when the
+        receipt carries the classification keys (t261001-05); old receipts without them
+        fall back to one combined note with the plain count (no class guess);
+      - skipped out-of-scope tickets (`skipped`, the activity's `errors` meta);
+      - sweep truncation (meta["enum_note"]).
+
+    Fail-closed is preserved: a nonzero unreadable state still surfaces as a named note
+    (never a silent "no problem"). "Sweep did not run" is NOT handled here — that is a
+    real failure and stays a high finding at the caller. Malformed input → fewer notes,
+    never an exception.
+    """
+    notes: List[Dict[str, Any]] = []
+    m = meta if isinstance(meta, dict) else {}
+    unreadable = [str(x) for x in (m.get("unreadable") or []) if str(x)]
+    trans = m.get("unreadable_transient")
+    perm = m.get("unreadable_permanent")
+    if unreadable and not (isinstance(trans, list) and isinstance(perm, list)):
+        notes.append({"kind": "unreadable", "count": len(unreadable),
+                      "reason": "timeline snapshot could not be read (receipt without "
+                                "the transient/permanent classification keys)",
+                      "detail": unreadable[:UNREADABLE_LIST_CAP]})
+    else:
+        trans_lines = [str(x) for x in (trans or []) if str(x)] if isinstance(trans, list) else []
+        perm_lines = [str(x) for x in (perm or []) if str(x)] if isinstance(perm, list) else []
+        if perm_lines:
+            notes.append({"kind": "unreadable", "count": len(perm_lines),
+                          "reason": "permanent workflow condition (needs a human): %s"
+                                    % _named_ids_subject_suffix(
+                                        _unreadable_ticket_ids(perm_lines)),
+                          "detail": perm_lines[:UNREADABLE_LIST_CAP]})
+        if trans_lines:
+            notes.append({"kind": "unreadable-transient", "count": len(trans_lines),
+                          "reason": "no snapshot answer at scan time (not broken tickets)",
+                          "detail": trans_lines[:UNREADABLE_LIST_CAP]})
+    skip = [str(x) for x in (skipped or []) if str(x)]
+    if skip:
+        notes.append({"kind": "skipped", "count": len(skip),
+                      "reason": "out-of-scope non-terminal tickets (project not in the "
+                                "registry / no ProjectKey identity)",
+                      "detail": skip[:UNREADABLE_LIST_CAP]})
+    if m.get("enum_note"):
+        notes.append({"kind": "truncated", "count": 1,
+                      "reason": str(m["enum_note"]), "detail": []})
+    return notes, []
