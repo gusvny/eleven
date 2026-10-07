@@ -3927,3 +3927,29 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **本条的当轮处置**：人审**未签字**，按 `rework(to_stage=implement)` 打回，打回说明里含实测命令、`ReferenceError` 的**精确行号**
 > （`sc_platform_banner_suppressed.mjs:248` 把未绑定的 `foldLabels` 当 evaluate 参数）与"必须有至少一次绿的运行"的要求。
+
+## KI-218 记名终结（`cancel`）**不回收并发队列条目**：僵尸排在队里，容量释放时可能把已死的 workflow 提成持有人（261008 实证 t261008-06；integration 岗登记）
+
+> **现象**：261008 我做了一次**记名终结**（`op=cancel`，理由=「开工前被新决定取代」，回执 `terminated:true`）——
+> 但被终结的 `t261008-06` **仍留在并发队列里**：清账前 `queue = [05, 06, 07, 08]`（其中 06 的 workflow 已经终止）。
+> 引擎侧没有任何一次清理把它拿掉。
+>
+> **机制（代码级）**：清两侧（holders 与 queue）的函数是 `concurrency.release(ticket, cause=terminated|paused)`，
+> 但它由 **workflow 自己**在释放点调用；**被终结的 workflow 再也不会运行**，所以这一笔永远不会发生。
+> 而崩溃路径的卫生函数 `concurrency.reconcile()` **只按探活裁剪 holders**（`doc["holders"] = keep`），
+> **完全不看 queue** ——队列条目从不与 liveness 对账。
+>
+> **危害**：①**幻影持有人**——容量一释放，`release`/`reconcile` 的"递补队首"会把队首提成持有人；
+> 若队首正是那张已死的票，等于把一个额度交给一个不存在的 workflow（该泳道不会再跑，额度白占）；
+> ②**位次失真**——左栏/面板显示的排队位次（`position`）把死票算在内，人看到的"我排第 2"其实是错的；
+> ③排查困难：票面查不到终态后的日志（回执也这么说），队列里那条却看着像"有票在等"。
+>
+> **本条的当轮处置**：用引擎自己的 API 按终止语义销账——
+> `concurrency.release("sandbar", "t261008-06", "terminated")` → 回执 `released:false`（它本就没持额度）、队列变为 `[05, 07, 08]`，holder 数不变。
+>
+> **出路（建议，实现口径归修复票）**：①`reconcile` 同时按 liveness 清 `queue`（与 holders 同一探活口径）；
+> ②或让 `cancel` 路径在引擎侧**顺手销账**（终结既然由引擎执行，就该同时清 holders 与 queue）；
+> ③把队列条目的"探活结论/最后一次核对时间"带进读面，让僵尸排队**可见**而不是等人踩。
+>
+> **回归**：L1——构造"排队中被终结的票"，断言队列不再含它（或断言 `reconcile` 之后不再含）；
+> L3——容量释放时不得把已终止的票提为持有人（断言递补结果里没有死票）。
