@@ -3881,3 +3881,17 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **给值守者的一句话**：看到"UI 票缺截图证据"时，先按本条的判据区分**环境面**（容器装载失败 → 本条 + KI-215）
 > 与**代码面**（截图确有缺）——两者的处置完全不同，别按"票的代码有问题"去改泳道。
+
+### KI-216 现行出路（261007 17:3x 实测可用的绕行）
+
+> 容器台（docker）装载失败期间，**宿主态自搭台可以照常取证**：
+> ```
+> node server/ui-check/capture-lane.mjs --lane <泳道worktree> --out <泳道>/.sandbar/screenshots --boot-local
+> ```
+> 实测（t261007-07）：隔离台在宿主上起在自带空闲端口（本例 `127.0.0.1:52519`）+ 临时 `DSH_HOME`，
+> **不碰 3099**；拍出 5 张顶层 PNG（`console-default / -sessions / -providers / -refresh / -chat`），
+> 证据闸要的就是"顶层非递归 `*.png`"⇒ 闸可通过。
+> **代价与纪律**：①`--boot-local` 是**降级通路**（管线原本默认走 docker 舞台），`capture.mjs` 仍会因
+> **空家缺锚点**报"尽力视图失败"（本例 6 个：Tickets/Epics/Docs 图标与 light/dark 外观）；
+> ②因此**浅色/深色两套与守卫态可能拍不全**，人审时**必须看图判断"证据是否真的支持票面承诺"**，
+> 不能只看"有 PNG"就签；③这条只算**临时绕行**，KI-216 的台层修复仍要做（别把 `--boot-local` 变成默认）。
