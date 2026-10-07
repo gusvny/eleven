@@ -972,11 +972,16 @@ but before the guard carry the new commands in history with no marker. Note the 
 caveat: `workflow.patched` must never be called inside a `@query` face (SDK read-only
 assertion); signal handlers and run-path sites are legal.
 
-Three-strike ledger behind this rule: KI-201 (t260908 fix, unreplayable), the CL-1 incident
-(t261005-14/-15: the concurrency gate family froze pre-CL-1 runs; guards
-`CONCURRENCY_GATE_PATCH_ID` + `CL1_GATE_LANDED_AT`), and KI-212 (t261006-07: the unguarded
-conflict-counter resets flipped the main-sync route on replay and froze t261005-10 /
-t261006-13; guards `COUNTER_RESET_PATCH_ID` + `E9DAA05_LANDED_AT`).
+Three-strike ledger behind this rule: KI-201 (the CL-1 concurrency gate landed
+unguarded in t261004-32, commit 775bdb1 — every history started before it
+diverged on replay; froze t261005-02 / t261005-06 / t261004-36; the guard arms
+landed via fix tickets t261005-14/-15: `CONCURRENCY_GATE_PATCH_ID` +
+`CL1_GATE_LANDED_AT`), KI-203 (the KI-201 fix itself missed the middle window —
+tickets started after CL-1 but before the guard carried the gate in history
+with no marker; froze t261005-09 / t261005-10; closed by the t261005-15
+time-anchor arm), and KI-212 (t261006-07: the unguarded conflict-counter resets
+flipped the main-sync route on replay and froze t261005-10 / t261006-13; guards
+`COUNTER_RESET_PATCH_ID` + `E9DAA05_LANDED_AT`).
 
 Pre-restart confirmation: `server/engine/.venv/bin/python server/engine/replay_check.py
 --workflow <ticket-id>` (read-only replay of the live history against local code; it addresses
