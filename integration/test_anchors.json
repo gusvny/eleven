@@ -3,7 +3,7 @@
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
    "engine_tests": 226,
-   "scenarios": 564
+   "scenarios": 571
   },
   "vocab": [
    "behaviour",
@@ -3964,6 +3964,21 @@
    "note": "Platform banner suppression: no visible fold toggle (semantic anchor = its four platform-locale aria-labels), no blank strip above the brand row, brand-row height regression guard, middle header present, document.title untouched, guard leg (anchor renamed at doc start) hides nothing and warns exactly once naming the anchor, light+dark screenshots",
    "sync_path": ""
   },
+  "integration/t261008-07/sc_t26100807_detail_single_column.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-07 detail column: one scrolling column in mock v11 order (order via compareDocumentPosition over semantic anchors), per-state decision-card wording, ops-only action row with no dead buttons, no-data-renders-nothing, source_ticket-filtered requests read reader-side, collapsed heavy sections at the end, crumb walk-back, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-02/sc_middle_column_no_comment_text.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-02: rendered middle-column machine-status head contains no // comment text and none of the t261005-10 (UI-2) comment literal, light+dark with screenshots; S0 family guard: no bare // comment lines in JSX children position in workbench client src, bundles free of the literal and in sync",
+   "sync_path": ""
+  },
+  "integration/t261008-05/sc_executor_panel_height_chain.mjs": {
+   "anchor": "behaviour",
+   "note": "real-browser computed layout of the middle column height chain (t261008-05)",
+   "sync_path": ""
+  },
   "integration/t261008-01/sc_t26100801_charter_injection_readable.mjs": {
    "anchor": "behaviour",
    "note": "t261008-01 Measure 2: injection line 1 readable (title names project), marker in the fold window, strip table, real-file render head has no comment, fold predicate covers new+legacy shapes, wire stays PromptContentPart[] (KI-046), endpoint carries projectName",
@@ -3972,16 +3987,6 @@
   "integration/t261008-01/sc_t26100801_session_label_handle_face.mjs": {
    "anchor": "behaviour",
    "note": "t261008-01 Measure 1: charter-raw-title predicate truth table, label helper falls back to the handle (executor fixed handle), band wiring consumes the guarded label with raw title in a tooltip face, handles single-sourced",
-   "sync_path": ""
-  },
-  "integration/t261008-05/sc_executor_panel_height_chain.mjs": {
-   "anchor": "behaviour",
-   "note": "real-browser computed layout of the middle column height chain (t261008-05)",
-   "sync_path": ""
-  },
-  "integration/t261008-02/sc_middle_column_no_comment_text.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-02: rendered middle-column machine-status head contains no // comment text and none of the t261005-10 (UI-2) comment literal, light+dark with screenshots; S0 family guard: no bare // comment lines in JSX children position in workbench client src, bundles free of the literal and in sync",
    "sync_path": ""
   },
   "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {

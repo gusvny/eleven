@@ -85,8 +85,21 @@ export function epicChipMuted(): string {
 /**
  * :root 级派生令牌定义（注入各组件 CSS 常量头部；多组件各注入一份同值块，
  * 重复定义无害，保证任一组件独立挂载时令牌都在场）。
+ *
+ * t261008-07 (A8b code-fault fix, arbitrate gen1 direction): the derive
+ * declarations are emitted at BOTH `:root` and `body[data-ds-dark-theme]`.
+ * A custom property whose value contains var() substitutes those inner
+ * references at the element where the property is DECLARED — so a :root-only
+ * declaration freezes every derive token on the light alias values even after
+ * the platform shell re-declares the aliases dark at body scope (the t260905-08
+ * guard documents body-level as the shell's real flip scope; probe: alias flips
+ * to #151517 at body, --dsw-derive-canvas stays #fff at every scope). The
+ * body-level copy makes color-mix recompute against the dark aliases inside
+ * the body subtree exactly when the shell has flipped it; the :root copy keeps
+ * every out-of-body mount (portal/slot) covered, and every var() consumer keeps
+ * its light fallback (unchanged discipline).
  */
-export const DERIVE_TOKENS_CSS = `:root{
+const DERIVE_DECL = `
 /* 文字系：基色 × 平台前景混色——浅档基色微加深（对比度↑），深档自动提亮 */
 /* t260929-22 gen9 曾把 fg/muted/warn/ink-* 锁成「浅档深墨裸值」，理由是平台 label
    在浅底实测 rgb(122,122,133)≈4.24。该做法的代价在集测**暗档档位**上暴露：固定深墨落在
@@ -153,7 +166,6 @@ export const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-dark-border:#2a2f3a;
 --dsw-derive-dark-surface:#21262d;
 --dsw-derive-dark-surface-2:#30363d;
-}
 /* 老浏览器静态回退（t260915-08 仲裁修复，方向①）：warn/danger 底色令牌值为
  * color-mix(...)——不支持的浏览器（Chrome<111）上 var 替换 IACVT=底色透明，
  * 「等你=黄调行」在该类浏览器瞎掉。@supports not 分档在**令牌声明位**直接覆盖
@@ -165,4 +177,11 @@ export const DERIVE_TOKENS_CSS = `:root{
   --dsw-derive-warn-bg:#fff8c5;
   --dsw-derive-danger-bg:#ffebe9;
   }
+  body[data-ds-dark-theme]{
+  --dsw-derive-warn-bg:#fff8c5;
+  --dsw-derive-danger-bg:#ffebe9;
+  }
 }`
+
+export const DERIVE_TOKENS_CSS = `:root{${DERIVE_DECL}}
+body[data-ds-dark-theme]{${DERIVE_DECL}}`

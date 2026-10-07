@@ -60,9 +60,12 @@ ok('派生定义逐条语法：名字=值；值内每个 var( 带逗号 fallback
 });
 ok('固定暗面板恰 12 个且为裸 hex（自备深底不随平台翻转；12=核心 9＋t260907-08 面位扩展 3）', () => {
   // 名字精确点名：家族成员是登记制（theme.ts 头注），UT 同步钉名防顺手混入非成对面。
+  // t261008-07: the sheet declares the same block at :root AND body[data-ds-dark-theme]
+  // (dark-scope re-declaration so color-mix recomputes against the dark aliases) —
+  // dedupe by unique declaration; the contract is 12 DISTINCT dark tokens.
   const EXPECT = ['bg', 'fg', 'muted', 'green', 'red', 'amber', 'accent', 'warn-bg', 'warn-fg',
     'border', 'surface', 'surface-2'];
-  const dark = defs.filter(d => d.startsWith('--dsw-derive-dark-'));
+  const dark = [...new Set(defs.filter(d => d.startsWith('--dsw-derive-dark-')))];
   const names = dark.map(d => d.slice('--dsw-derive-dark-'.length).split(':')[0]).sort();
   assert.deepStrictEqual(names, [...EXPECT].sort(), dark.join(' | '));
   for (const d of dark) assert.match(d, /^--dsw-derive-dark-[a-z0-9-]+:#[0-9a-f]{6}$/);

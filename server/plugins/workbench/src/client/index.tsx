@@ -111,6 +111,15 @@ import {
 } from './ticket-overlay-model.ts'
 import type { OverlayNav } from './ticket-overlay-model.ts'
 import { SpecBlock } from './spec-block.tsx'
+// t261008-07: pure model for the single-column detail (decision-card wording,
+// receipts, stage notes, changes kv, requests filter).
+import {
+  decisionCard, receiptRows, stageNoteRows, changeRows,
+  requestsForTicket, timelineRows,
+} from './ticket-detail-column-model.ts'
+// t261008-07: concurrency face — the queued position N truth is the engine read
+// face (queue-model discipline: the UI never computes order, only projects it).
+import { concFaceFromReply, parseConcFace } from './queue-model.ts'
 import { STATE_LABEL, stageDisplayLabel, workflowLabel } from './ui-labels.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
@@ -593,6 +602,31 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-health-offline{display:flex;flex-direction:column;gap:3px;background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#eac54f);
   color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:7px 12px;font-size:12px}
 /* ── M9 变更页签（PR 式审批台；制式照 knowledge block diff，类名 wb-d-* 独立自带不依赖 knowledge CSS） ── */
+/* t261008-07 single-column detail (mock v11 ticketView): action row, decision
+   card, two-column block, collapsed folds. Theme rides the derive tokens, so
+   light and dark are both covered by the token layer (dual-theme captures). */
+.wb-detail-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.wb-decide{display:flex;flex-direction:column;gap:2px;margin:10px 0 0;padding:8px 12px;border-radius:8px;
+  border:1px solid var(--dsw-derive-accent-border,#54aeff);background:var(--dsw-derive-accent-bg,#ddf4ff);
+  font-size:12.5px;color:var(--dsw-derive-accent-deep,#0a3069)}
+.wb-decide b{font-size:13px}
+.wb-detail-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 0}
+@media (max-width:720px){.wb-detail-two{grid-template-columns:1fr}}
+.wb-detail-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.wb-panelbox{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:8px 12px;background:var(--dsw-derive-canvas,#ffffff)}
+.wb-panelbox .ttl{font-size:12px;font-weight:600;color:var(--dsw-derive-muted,#57606a);margin-bottom:5px}
+.wb-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.wb-tl li{display:flex;gap:8px;align-items:baseline}
+.wb-tl .at{flex:none;color:var(--dsw-derive-muted,#8c959f);font-variant-numeric:tabular-nums}
+.wb-kv2{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.wb-kv2-pair{display:flex;gap:10px}
+.wb-kv2-pair .k{flex:none;min-width:76px;color:var(--dsw-derive-muted,#57606a);font-weight:600}
+.wb-req-lite{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:2px 0}
+.wb-req-lite code{flex:none;color:var(--dsw-derive-accent,#0969da)}
+.wb-dfold{margin:12px 0 0;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px}
+.wb-dfold>summary{cursor:pointer;font:inherit;font-size:13px;padding:7px 12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-dfold[open]>summary{border-bottom:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-dfold>summary:hover{background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-dtabs{display:flex;gap:2px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de)}
 .wb-dtab{font:inherit;font-size:13px;padding:7px 16px;border:none;background:none;color:var(--dsw-derive-muted,#57606a);cursor:pointer;
   border-bottom:2px solid transparent}
@@ -2828,6 +2862,151 @@ function unifiedStats(text: string): { add: number; del: number } {
   return { add, del }
 }
 
+/* -- t261008-07 single-column detail faces (mock v11 ticketView parts) ------ */
+
+/** Decision card (design section 7.3): per state, what the list cannot show.
+ *  The queued position N comes from the engine concurrency read face
+ *  (GET /wf/concurrency parsed by queue-model; malformed or missing face means
+ *  no position — the card says plain 'Queued' and never invents a number).
+ *  Wording comes from the pure decisionCard model; null = no card at all.
+ *  Fetch teardown: unmount abort + dead flag, both paths covered. */
+function DetailDecisionCardFace({ detail }: { detail: TicketDetail }) {
+  const [pos, setPos] = useState<number | null>(null)
+  useEffect(() => {
+    let dead = false
+    const ctl = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(withProject(`${API}/concurrency`), { signal: ctl.signal })
+        const j = await res.json()
+        if (dead) return
+        const face = parseConcFace(concFaceFromReply(j))
+        if (!face) return
+        const i = face.queue.indexOf(detail.id)
+        if (i >= 0) setPos(i + 1)
+      } catch { /* no concurrency face -> no position (plain 'Queued'), no error frame */ }
+    })()
+    return () => { dead = true; ctl.abort() }
+  }, [detail.id])
+  const card = decisionCard(detail, pos)
+  if (!card) return null
+  return (
+    <div className="wb-decide" data-testid="decision-card">
+      <b>{card.title}</b>
+      <span>{card.body}</span>
+    </div>
+  )
+}
+
+/** Column section 7: two columns (left = Timeline + Stage notes; right =
+ *  Receipts + Changes + Requests on this ticket). A block with no data renders
+ *  nothing (section 7.3: no empty scaffolding); all absent = no section at all.
+ *  The changes/requests read faces (diff face, executor-panel request ledger)
+ *  failing means that one box does not render — never an error frame, never a
+ *  stuck spinner (read errors are named by the collapsed changeset section). */
+function DetailTwoColumns({ detail, projectKey }: { detail: TicketDetail; projectKey?: string }) {
+  const [diff, setDiff] = useState<unknown>(undefined)
+  const [reqRows, setReqRows] = useState<unknown>(undefined)
+  useEffect(() => { // diff face (same endpoint the collapsed changeset section reads)
+    let dead = false
+    void (async () => {
+      try {
+        const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/diff`)
+        if (!dead && r?.ok === true) setDiff(r.result)
+      } catch { /* no changes box */ }
+    })()
+    return () => { dead = true }
+  }, [detail.id])
+  useEffect(() => { // request-ledger read face (t261007-02 source_ticket; no project key = no read)
+    if (!projectKey) { setReqRows(undefined); return }
+    let dead = false
+    void (async () => {
+      try {
+        const res = await fetch(`/sandbar-executor-panel/api/requests?project=${encodeURIComponent(projectKey)}`)
+        const j = await res.json()
+        if (!dead && j?.ok === true) setReqRows(j.rows)
+      } catch { /* no requests box */ }
+    })()
+    return () => { dead = true }
+  }, [projectKey, detail.id])
+  const tl = timelineRows(detail.timeline)
+  const notes = stageNoteRows(detail)
+  const receipts = receiptRows(detail.gate_runs)
+  const changes = changeRows(diff, detail)
+  const reqs = requestsForTicket(reqRows, detail.id)
+  if (!tl && !notes && !receipts && !changes && !reqs) return null
+  return (
+    <div className="wb-detail-two" data-testid="detail-columns">
+      <div className="wb-detail-col">
+        {tl !== null && (
+          <div className="wb-panelbox" data-testid="detail-timeline">
+            <div className="ttl">Timeline</div>
+            <ul className="wb-tl">{tl.map((r, i) => (
+              <li key={i}><span className="at">{r.at ? fmtAt(r.at) : ''}</span><span>
+                {stageDisplayLabel(r.stage)}
+                {r.state ? ` · ${STATE_LABEL[r.state] ?? r.state}` : ''}{r.reason ? ` · ${r.reason}` : ''}
+              </span></li>
+            ))}</ul>
+          </div>
+        )}
+        {notes !== null && (
+          <div className="wb-panelbox" data-testid="detail-stage-notes">
+            <div className="ttl">Stage notes</div>
+            <ul className="wb-tl">{notes.map((r) => (
+              <li key={r.stage}><span className="at">{stageDisplayLabel(r.stage)}</span><span>{r.note}</span></li>
+            ))}</ul>
+          </div>
+        )}
+      </div>
+      <div className="wb-detail-col">
+        {receipts !== null && (
+          <div className="wb-panelbox" data-testid="detail-receipts">
+            <div className="ttl">Receipts</div>
+            <div className="wb-kv2">{receipts.map((r) => (
+              <span key={r.k + r.v} className="wb-kv2-pair"><span className="k">{r.k}</span><span>{r.v}</span></span>
+            ))}</div>
+          </div>
+        )}
+        {changes !== null && (
+          <div className="wb-panelbox" data-testid="detail-changes">
+            <div className="ttl">Changes</div>
+            <div className="wb-kv2">{changes.map((r) => (
+              <span key={r.k} className="wb-kv2-pair"><span className="k">{r.k}</span><span>{r.v}</span></span>
+            ))}</div>
+          </div>
+        )}
+        {reqs !== null && (
+          <div className="wb-panelbox" data-testid="ticket-requests">
+            <div className="ttl">Requests on this ticket</div>
+            {reqs.map((r) => (
+              <div className="wb-req-lite" key={String(r.id)}>
+                <code>#{String(r.id).slice(0, 4)}</code>
+                <span>{String(r.question)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Lazy fold shell: a closed <details> still mounts its children in the DOM, so
+ *  here children mount only once opened — keeping ChangesTab/AgentLogsTab's
+ *  original on-demand fetch semantics (borrowed-implementation discipline: the
+ *  fault modes stay unchanged). Once opened it stays mounted (review/scroll
+ *  state survives re-folding). */
+function LazyFold({ label, testid, children }: { label: string; testid: string; children: ReactNode }) {
+  const [opened, setOpened] = useState(false)
+  return (
+    <details className="wb-dfold" data-testid={testid}
+      onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) setOpened(true) }}>
+      <summary>{label}</summary>
+      {opened && children}
+    </details>
+  )
+}
+
 function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
   detail: TicketDetail
   operator: string
@@ -3493,7 +3672,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   const [fileViewer, setFileViewer] = useState<{ ticketId: string; path: string; mode: TicketTimeMode } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [health, setHealth] = useState<TemporalHealth | undefined>(undefined)
-  const [drawerTab, setDrawerTab] = useState<'detail' | 'changes' | 'agent'>('detail')
   const [scan, setScan] = useState<ScanReportResult | undefined>(undefined)
   /** 一工单一 worker（260824）：逐 worker 状态，状态条「N workers」点开列全表。 */
   const [workers, setWorkers] = useState<WorkersResult | undefined>(undefined)
@@ -3680,7 +3858,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
     // 落地，晚同步会让首次点行的响应被跳单守卫误丢。
     selectedIdRef.current = id
     setSelectedId(id)
-    setDrawerTab('detail')
     setDetailLoading(true)
     setOpMsg('')
     setTerminalFace(null)  // t260919-02：切单/重开先清失败面，绝不串票
@@ -4245,6 +4422,92 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
                 <UsageSummaryLine detail={detail} wf={selWf} usage={usage} />
               </div>
 
+              {/* t261008-07 action row (mock .acts): Sign / Send back / Retry check /
+                  Pause(/Resume) — rendered ONLY from the ops face (availableOps),
+                  never a dead button. Labels are the mock verbs but the handlers
+                  are the existing ones: advance at awaiting-human = Sign (other
+                  awaiting semantics = Continue, named explicitly so it can never
+                  masquerade as Sign — review comment 2); rework = Send back;
+                  unblock = Retry check (template-as-code-v2 branch kept as is);
+                  pause/resume promoted from More into the row (t261005-10: the
+                  capability does not retire with the view). Ops with no mock verb
+                  (dispatch-next/close/preview/Temporal link) stay in collapsed
+                  More. */}
+              <div className="wb-detail-actions" data-testid="detail-actions">
+                {ops.includes('advance') && (
+                  <button className="wb-btn wb-btn-green" disabled={opBusy}
+                    onClick={() => { doAdvance(detail.id, detail.stage_state, detail.epic) }}>
+                    {detail.stage_state === 'awaiting-human' ? 'Sign' : 'Continue'}
+                  </button>
+                )}
+                {ops.includes('rework') && (
+                  <button className="wb-btn wb-btn-danger" disabled={opBusy}
+                    onClick={() => { openRework(detail.id, detail.stage_state === 'awaiting-human') }}>
+                    Send back
+                  </button>
+                )}
+                {ops.includes('unblock') && (
+                  <button className="wb-btn wb-btn-blue" disabled={opBusy}
+                    onClick={() => {
+                      if ((detail as { engine?: string }).engine === 'template-as-code-v2') {
+                        void doOp(detail.id, 'retry-qc', { who: operator }, 'Retry requested (retry_qc)')
+                      } else {
+                        void doOp(detail.id, 'update', { stage_state: 'awaiting', note: '(board) unblock' }, 'Unblocked')
+                      }
+                    }}>
+                    Retry check
+                  </button>
+                )}
+                {ops.includes('pause') && (
+                  <button className="wb-btn" disabled={opBusy}
+                    onClick={() => void doOp(detail.id, 'pause', { who: operator }, 'Pause sent (stops after current stage finishes)')}>
+                    Pause
+                  </button>
+                )}
+                {ops.includes('resume') && (
+                  <button className="wb-btn" disabled={opBusy}
+                    onClick={() => void doOp(detail.id, 'resume', {}, 'Resume sent; dispatching continues')}>
+                    Resume
+                  </button>
+                )}
+                <details className="wb-d2-more">
+                  <summary>More</summary>
+                  <div className="wb-d2-more-body">
+                    {ops.includes('dispatch-next') && (
+                      <button className="wb-btn" disabled={opBusy}
+                        onClick={() => { void doOp(detail.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}>
+                        Dispatch next
+                      </button>
+                    )}
+                    {ops.includes('close') && (
+                      <button className="wb-btn wb-btn-green" disabled={opBusy}
+                        onClick={() => { if (window.confirm('Mark as completed (closed)?')) void doOp(detail.id, 'update', { status: 'closed', note: '(board) done' }, 'Marked closed') }}>
+                        Done
+                      </button>
+                    )}
+                    {detail.book_path && (
+                      <button className="wb-btn" disabled={opBusy || previewLoading}
+                        onClick={() => { void openPreview() }}>
+                        {previewLoading ? 'Loading…' : 'Preview content'}
+                      </button>
+                    )}
+                    <a className="wb-meta-link"
+                      href={`http://127.0.0.1:8233/namespaces/default/workflows/${encodeURIComponent(detail.id)}`}
+                      target="_blank" rel="noreferrer">Temporal execution ↗</a>
+                  </div>
+                </details>
+                {ops.length === 0 && detail.status !== 'closed' && detail.kind !== 'inspection' && (
+                  <span className="wb-d2-hint">No operation available for this state ({detail.status}×{detail.stage_state})</span>
+                )}
+              </div>
+              {opMsg !== '' && <div className="wb-sub" style={{ marginTop: 6 }}>{opMsg}</div>}
+
+              {/* t261008-07 state decision card (design section 7.3): after the
+                  action row, before the spec (host order 261008 option 2 column
+                  order supersedes section 7.5's spec-first order; recorded on the
+                  ticket). */}
+              <DetailDecisionCardFace detail={detail} />
+
               {/* 受阻原因横幅（t260904-17）：行卡「看原因」导航的详情落点——
                   阻塞原文随详情可达，不藏在折叠区。t260921-03：引擎 close_health=
                   abnormal/unreadable（已结束票）不让 ⛔受阻框架双开（原因在终态
@@ -4372,113 +4635,35 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
               <AgentLivePanel ticketId={detail.id} />
               <EvidenceImages ticketId={detail.id} />
               <D2Problems detail={detail} />
-              <div className="wb-d2-actions">
-                {ops.includes('advance') && (
-                  <button className="wb-btn wb-btn-green" disabled={opBusy}
-                    onClick={() => { doAdvance(detail.id, detail.stage_state, detail.epic) }}>
-                    {detail.stage_state === 'awaiting-human' ? '✓ Approve' : 'Advance'}
-                  </button>
-                )}
-                {ops.includes('unblock') && (
-                  <button className="wb-btn wb-btn-blue" disabled={opBusy}
-                    onClick={() => {
-                      if ((detail as { engine?: string }).engine === 'template-as-code-v2') {
-                        void doOp(detail.id, 'retry-qc', { who: operator }, 'Retry requested (retry_qc)')
-                      } else {
-                        void doOp(detail.id, 'update', { stage_state: 'awaiting', note: '(board) unblock' }, 'Unblocked')
-                      }
-                    }}>
-                    Rerun this step
-                  </button>
-                )}
-                {ops.includes('rework') && (
-                  <button className="wb-btn wb-btn-danger" disabled={opBusy}
-                    onClick={() => { openRework(detail.id, detail.stage_state === 'awaiting-human') }}>
-                    Rework
-                  </button>
-                )}
-                {detail.stage_state === 'awaiting-human' && detail.kind !== 'inspection' && (
-                  <span className="wb-d2-hint">Review the diff in the Changes tab before approving</span>
-                )}
-                {ops.length === 0 && detail.status !== 'closed' && detail.kind !== 'inspection' && (
-                  <span className="wb-d2-hint">No operation available for this state ({detail.status}×{detail.stage_state})</span>
-                )}
-                <details className="wb-d2-more">
-                  <summary>More</summary>
-                  <div className="wb-d2-more-body">
-                    {/* t261005-10 (UI-2): the pause/resume actions move from the retired
-                        board row card into the detail More section — the capability does
-                        not retire with the view (availableOps/pauseOpOf unchanged). */}
-                    {ops.includes('pause') && (
-                      <button className="wb-btn" disabled={opBusy}
-                        onClick={() => void doOp(detail.id, 'pause', { who: operator }, 'Pause sent (stops after current stage finishes)')}>
-                        Pause
-                      </button>
-                    )}
-                    {ops.includes('resume') && (
-                      <button className="wb-btn" disabled={opBusy}
-                        onClick={() => void doOp(detail.id, 'resume', {}, 'Resume sent; dispatching continues')}>
-                        Resume
-                      </button>
-                    )}
-                    {ops.includes('dispatch-next') && (
-                      <button className="wb-btn" disabled={opBusy}
-                        onClick={() => { void doOp(detail.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}>
-                        Dispatch next
-                      </button>
-                    )}
-                    {ops.includes('close') && (
-                      <button className="wb-btn wb-btn-green" disabled={opBusy}
-                        onClick={() => { if (window.confirm('Mark as completed (closed)?')) void doOp(detail.id, 'update', { status: 'closed', note: '(board) done' }, 'Marked closed') }}>
-                        Done
-                      </button>
-                    )}
-                    {detail.book_path && (
-                      <button className="wb-btn" disabled={opBusy || previewLoading}
-                        onClick={() => { void openPreview() }}>
-                        {previewLoading ? 'Loading…' : 'Preview content'}
-                      </button>
-                    )}
-                    <a className="wb-meta-link"
-                      href={`http://127.0.0.1:8233/namespaces/default/workflows/${encodeURIComponent(detail.id)}`}
-                      target="_blank" rel="noreferrer">Temporal execution ↗</a>
-                  </div>
-                </details>
-              </div>
-              {opMsg !== '' && <div className="wb-sub" style={{ marginTop: 6 }}>{opMsg}</div>}
+              {/* t261008-07 section 7: two columns (left = Timeline + Stage notes;
+                  right = Receipts + Changes + Requests on this ticket). A block
+                  with no data renders nothing (design section 7.3: no empty
+                  scaffolding). */}
+              <DetailTwoColumns detail={detail} projectKey={projectKey} />
 
-              {/* 巡检票无变更页签（无 diff 面板），进展+Agent 日志两页签足够 */}
-              <div className="wb-dtabs">
-                <button className="wb-dtab" data-on={drawerTab === 'detail'} onClick={() => setDrawerTab('detail')}>Progress</button>
-                {detail.kind !== 'inspection' && (
-                  <button className="wb-dtab" data-on={drawerTab === 'changes'} onClick={() => setDrawerTab('changes')}>
-                    Changes{detail.stage_state === 'awaiting-human' ? ' (diff required before approval)' : ''}
-                  </button>
-                )}
-                <button className="wb-dtab" data-on={drawerTab === 'agent'} onClick={() => setDrawerTab('agent')}>
-                  Agent log
-                </button>
-              </div>
-
-              {/* 合并语义（t260915-17 × t260915-08）：巡检票无变更页签（main 侧条件），
-                  非巡检票的变更文件行仍带本票时刻查看器链接（HEAD 侧 onOpenFile） */}
-              {drawerTab === 'changes' && detail.kind !== 'inspection' && (
-                <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg}
-                  onOpenFile={(p, m) => setFileViewer({ ticketId: detail.id, path: p, mode: m })} />
+              {/* t261008-07 heavy faces as collapsed sections at the end of the
+                  column (the mock single column retires the tab strip; the choice
+                  is end-of-column <details> folds, not a secondary expander row —
+                  ChangesTab/AgentLogsTab are already self-contained components, a
+                  fold keeps them byte-identical and lazily mounted, while a second
+                  expander row would need its own state machine for zero gain).
+                  LazyFold = literally "mounted only once opened", preserving the
+                  tabs' on-demand fetch / onMsg / setFileViewer semantics
+                  (review comment 4). The stage-progress cards (D2Stages,
+                  durations/rounds) move into a fold too — content kept, it just
+                  yields to the lane map + stage notes progress spine. */}
+              {detail.kind !== 'inspection' && (
+                <LazyFold label="Changeset (full diff and review)" testid="fold-changes">
+                  <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg}
+                    onOpenFile={(p, m) => setFileViewer({ ticketId: detail.id, path: p, mode: m })} />
+                </LazyFold>
               )}
-
-              {drawerTab === 'agent' && (
+              <LazyFold label="Agent log" testid="fold-agent-log">
                 <AgentLogsTab detail={detail} wf={selWf} onMsg={setOpMsg} />
-              )}
-
-              {drawerTab === 'detail' && (<>
-              {/* 详情页 v2.1：正文已上移到头部（所有页签可见）；本页签=进展阶段卡 + 深查折叠。
-                  旧 M14 五 section 内容全保留在深查区，一项不丢。 */}
-              <D2Stages detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
-              {/* t260925-18：深查区六折叠（快照要点/基本信息/入参/验收清单/流水 log/接力时间线）
-                  整体移除——只删 UI 不删数据；同字段仍可经 ticket CLI / Temporal query 观测
-                  （triage 全走 ticket CLI，票面已声明）。 */}
-              </>)}
+              </LazyFold>
+              <LazyFold label="Stage progress (per-stage cards and durations)" testid="fold-stage-progress">
+                <D2Stages detail={detail} wf={selWf} usage={usage} durs={stageDurs.durs} nowMs={stageDurs.nowMs} />
+              </LazyFold>
 
             </>
           )}

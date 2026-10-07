@@ -4632,8 +4632,21 @@ function epicChipMuted() {
 /**
 * :root 级派生令牌定义（注入各组件 CSS 常量头部；多组件各注入一份同值块，
 * 重复定义无害，保证任一组件独立挂载时令牌都在场）。
+*
+* t261008-07 (A8b code-fault fix, arbitrate gen1 direction): the derive
+* declarations are emitted at BOTH `:root` and `body[data-ds-dark-theme]`.
+* A custom property whose value contains var() substitutes those inner
+* references at the element where the property is DECLARED — so a :root-only
+* declaration freezes every derive token on the light alias values even after
+* the platform shell re-declares the aliases dark at body scope (the t260905-08
+* guard documents body-level as the shell's real flip scope; probe: alias flips
+* to #151517 at body, --dsw-derive-canvas stays #fff at every scope). The
+* body-level copy makes color-mix recompute against the dark aliases inside
+* the body subtree exactly when the shell has flipped it; the :root copy keeps
+* every out-of-body mount (portal/slot) covered, and every var() consumer keeps
+* its light fallback (unchanged discipline).
 */
-const DERIVE_TOKENS_CSS = `:root{
+const DERIVE_DECL = `
 /* 文字系：基色 × 平台前景混色——浅档基色微加深（对比度↑），深档自动提亮 */
 /* t260929-22 gen9 曾把 fg/muted/warn/ink-* 锁成「浅档深墨裸值」，理由是平台 label
    在浅底实测 rgb(122,122,133)≈4.24。该做法的代价在集测**暗档档位**上暴露：固定深墨落在
@@ -4700,7 +4713,6 @@ const DERIVE_TOKENS_CSS = `:root{
 --dsw-derive-dark-border:#2a2f3a;
 --dsw-derive-dark-surface:#21262d;
 --dsw-derive-dark-surface-2:#30363d;
-}
 /* 老浏览器静态回退（t260915-08 仲裁修复，方向①）：warn/danger 底色令牌值为
  * color-mix(...)——不支持的浏览器（Chrome<111）上 var 替换 IACVT=底色透明，
  * 「等你=黄调行」在该类浏览器瞎掉。@supports not 分档在**令牌声明位**直接覆盖
@@ -4712,7 +4724,13 @@ const DERIVE_TOKENS_CSS = `:root{
   --dsw-derive-warn-bg:#fff8c5;
   --dsw-derive-danger-bg:#ffebe9;
   }
+  body[data-ds-dark-theme]{
+  --dsw-derive-warn-bg:#fff8c5;
+  --dsw-derive-danger-bg:#ffebe9;
+  }
 }`;
+const DERIVE_TOKENS_CSS = `:root{${DERIVE_DECL}}
+body[data-ds-dark-theme]{${DERIVE_DECL}}`;
 //#endregion
 //#region src/client/project-session-row.tsx
 /**
@@ -10320,6 +10338,221 @@ function SpecBlock({ body, spec, acceptance, writeSet, redLine, specHtml }) {
 	});
 }
 //#endregion
+//#region src/client/ticket-detail-column-model.ts
+function asStr(v) {
+	return typeof v === "string" ? v : "";
+}
+/**
+* Decision card text per state (design §7.3 table, host order wording):
+* - awaiting-human → 'Waiting for you: sign the merge' + what is being signed
+*   + 'send it back instead if the diff is wrong';
+* - paused → 'Paused by you' + 'it stops after the current stage ends';
+* - queued → 'Queued, position N' (position may be unknown → plain 'Queued',
+*   never a fabricated number) + 'it starts when a slot frees';
+* - otherwise (running / awaiting / blocked) → 'At work: <stage>' +
+*   'nothing to decide yet'.
+* null: closed tickets, terminal done state, inspection tickets (the
+* inspection face is its own decision surface — no double frame) and any face
+* with neither a status nor a stage_state (malformed input renders nothing).
+*/
+function decisionCard(detail, queuePosition) {
+	if (detail === null || typeof detail !== "object") return null;
+	if (detail.kind === "inspection" || detail.engine === "inspection") return null;
+	const status = asStr(detail.status);
+	const ss = asStr(detail.stage_state);
+	if (status === "" && ss === "") return null;
+	if (status === "closed" || ss === "done") return null;
+	const stage = asStr(detail.stage_name) || asStr(detail.stage) || "the current stage";
+	if (ss === "awaiting-human") return {
+		title: "Waiting for you: sign the merge",
+		body: `Sign the ${stage} handoff and the ticket advances. Send it back instead if the diff is wrong.`
+	};
+	if (detail.paused === true) return {
+		title: "Paused by you",
+		body: "It stops after the current stage ends."
+	};
+	if (status === "queued" || ss === "queued") return {
+		title: typeof queuePosition === "number" && Number.isFinite(queuePosition) && queuePosition >= 1 ? `Queued, position ${queuePosition}` : "Queued",
+		body: "It starts when a slot frees."
+	};
+	return {
+		title: `At work: ${stage}`,
+		body: "Nothing to decide yet."
+	};
+}
+/**
+* Receipts box (sec 7.3, 'last receipt'): the LAST gate round of the same gate_runs
+* face the checks detail consumes. Rows: `<label>: <green> of <total> green`,
+* plus the suite counts and the env red count ONLY when the face carries them.
+* Absent/empty/malformed face → null (render nothing).
+*/
+function receiptRows(gateRuns) {
+	if (!Array.isArray(gateRuns)) return null;
+	let last = null;
+	for (let i = gateRuns.length - 1; i >= 0; i--) {
+		const r = gateRuns[i];
+		if (r !== null && typeof r === "object" && Array.isArray(r.checks)) {
+			last = r;
+			break;
+		}
+	}
+	if (last === null) return null;
+	const rows = [];
+	const label = asStr(last.label) || asStr(last.stage) || "check";
+	const checks = last.checks;
+	const total = checks.length;
+	const green = checks.filter((c) => c !== null && typeof c === "object" && c.green === true).length;
+	rows.push({
+		k: label,
+		v: total > 0 ? `${green} of ${total} green` : "no checks recorded"
+	});
+	const suite = last.suite;
+	if (suite !== null && typeof suite === "object" && !Array.isArray(suite)) {
+		const s = suite;
+		const ran = typeof s.ran === "number" ? s.ran : void 0;
+		const passed = typeof s.passed === "number" ? s.passed : void 0;
+		if (ran !== void 0 && passed !== void 0) {
+			const known = typeof s.known === "number" ? ` / ${s.known} known` : "";
+			rows.push({
+				k: "suite",
+				v: `${ran} ran / ${passed} passed${known}`
+			});
+		}
+	}
+	const red = typeof last.red_count === "number" && Number.isFinite(last.red_count) ? last.red_count : void 0;
+	if (red !== void 0 && red > 0) rows.push({
+		k: "env red",
+		v: String(red)
+	});
+	return rows;
+}
+/**
+* Stage notes (host order: per-stage gen and round counts from the snapshot's
+* faces). Round counts come from the snapshot `gens` face (stage → round
+* number, t260915-01); entries without it fall back to counting `running`
+* timeline entries per stage. Absent faces / no stages → null.
+*/
+function stageNoteRows(detail) {
+	if (detail === null || typeof detail !== "object") return null;
+	const d = detail;
+	const gens = d.gens !== null && typeof d.gens === "object" && !Array.isArray(d.gens) ? d.gens : null;
+	const runsByStage = /* @__PURE__ */ new Map();
+	if (Array.isArray(d.timeline)) for (const t of d.timeline) {
+		if (t === null || typeof t !== "object") continue;
+		const e = t;
+		if (e.state !== "running") continue;
+		const stage = asStr(e.stage);
+		if (!stage) continue;
+		runsByStage.set(stage, (runsByStage.get(stage) ?? 0) + 1);
+	}
+	const stages = /* @__PURE__ */ new Set([...Object.keys(gens ?? {}), ...runsByStage.keys()]);
+	if (stages.size === 0) return null;
+	const out = [];
+	for (const stage of [...stages].sort()) {
+		const gen = gens !== null && typeof gens[stage] === "number" ? gens[stage] : null;
+		const runs = runsByStage.get(stage) ?? 0;
+		if (gen !== null && gen >= 1) out.push({
+			stage,
+			note: `round ${gen}${runs > 1 ? ` · entered ${runs} times` : ""}`
+		});
+		else if (runs > 0) out.push({
+			stage,
+			note: runs === 1 ? "ran once" : `ran ${runs} times`
+		});
+	}
+	return out.length > 0 ? out : null;
+}
+/** +/− line count over one unified diff text (skips +++/--- header lines). */
+function unifiedStats$1(text) {
+	if (typeof text !== "string") return {
+		add: 0,
+		del: 0
+	};
+	let add = 0;
+	let del = 0;
+	for (const l of text.split("\n")) {
+		if (l.startsWith("+++") || l.startsWith("---")) continue;
+		if (l.startsWith("+")) add++;
+		else if (l.startsWith("-")) del++;
+	}
+	return {
+		add,
+		del
+	};
+}
+/**
+* Changes box (mock kv2): file count and the +/− line, the lane path and
+* branch. Data: the same diff face the changeset section consumes
+* (GET /tickets/:id/diff → {files:[{unified?...}], worktree?}) plus the
+* snapshot's worktree/branch keys. No diff face or an unreadable one → null
+* (the §7.3 rule: no face, no scaffolding — the collapsed changeset section is
+* the place that names read errors).
+*/
+function changeRows(diff, detail) {
+	if (diff === null || typeof diff !== "object") return null;
+	const files = diff.files;
+	if (!Array.isArray(files)) return null;
+	let add = 0;
+	let del = 0;
+	for (const f of files) {
+		if (f === null || typeof f !== "object") continue;
+		const st = unifiedStats$1(f.unified);
+		add += st.add;
+		del += st.del;
+	}
+	const rows = [{
+		k: "files",
+		v: `${files.length} · +${add} −${del}`
+	}];
+	const d = detail !== null && typeof detail === "object" ? detail : {};
+	const lane = [asStr(d.worktree), asStr(d.branch)].filter((s) => s !== "").join(" · ");
+	if (lane !== "") rows.push({
+		k: "lane",
+		v: lane
+	});
+	return rows;
+}
+/**
+* Requests on this ticket: the request-ledger head rows whose source_ticket
+* equals this ticket id (field landed with t261007-02; legacy rows without the
+* field never match). Malformed rows (non-object, missing/non-string id or
+* question) are skipped, never thrown. No rows → null (render nothing).
+*/
+function requestsForTicket(rows, ticketId) {
+	if (!Array.isArray(rows) || typeof ticketId !== "string" || ticketId === "") return null;
+	const out = [];
+	for (const r of rows) {
+		if (r === null || typeof r !== "object") continue;
+		const o = r;
+		if (o.source_ticket !== ticketId) continue;
+		if (asStr(o.id) === "" || asStr(o.question) === "") continue;
+		out.push(o);
+	}
+	return out.length > 0 ? out : null;
+}
+/**
+* Timeline rows (same activity feed the live panel reads: the snapshot's
+* timeline face). Malformed entries skipped; empty face → null.
+*/
+function timelineRows(timeline) {
+	if (!Array.isArray(timeline)) return null;
+	const out = [];
+	for (const t of timeline) {
+		if (t === null || typeof t !== "object") continue;
+		const e = t;
+		const stage = asStr(e.stage);
+		const state = asStr(e.state);
+		if (stage === "" && state === "") continue;
+		out.push({
+			at: asStr(e.at),
+			stage,
+			state,
+			reason: asStr(e.reason)
+		});
+	}
+	return out.length > 0 ? out : null;
+}
+//#endregion
 //#region src/client/terminal-face.ts
 /** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
 const TERMINAL_FACE_FALLBACKS = {
@@ -11780,6 +12013,31 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-health-offline{display:flex;flex-direction:column;gap:3px;background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#eac54f);
   color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:7px 12px;font-size:12px}
 /* ── M9 变更页签（PR 式审批台；制式照 knowledge block diff，类名 wb-d-* 独立自带不依赖 knowledge CSS） ── */
+/* t261008-07 single-column detail (mock v11 ticketView): action row, decision
+   card, two-column block, collapsed folds. Theme rides the derive tokens, so
+   light and dark are both covered by the token layer (dual-theme captures). */
+.wb-detail-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.wb-decide{display:flex;flex-direction:column;gap:2px;margin:10px 0 0;padding:8px 12px;border-radius:8px;
+  border:1px solid var(--dsw-derive-accent-border,#54aeff);background:var(--dsw-derive-accent-bg,#ddf4ff);
+  font-size:12.5px;color:var(--dsw-derive-accent-deep,#0a3069)}
+.wb-decide b{font-size:13px}
+.wb-detail-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 0}
+@media (max-width:720px){.wb-detail-two{grid-template-columns:1fr}}
+.wb-detail-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.wb-panelbox{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:8px 12px;background:var(--dsw-derive-canvas,#ffffff)}
+.wb-panelbox .ttl{font-size:12px;font-weight:600;color:var(--dsw-derive-muted,#57606a);margin-bottom:5px}
+.wb-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.wb-tl li{display:flex;gap:8px;align-items:baseline}
+.wb-tl .at{flex:none;color:var(--dsw-derive-muted,#8c959f);font-variant-numeric:tabular-nums}
+.wb-kv2{display:flex;flex-direction:column;gap:3px;font-size:12px}
+.wb-kv2-pair{display:flex;gap:10px}
+.wb-kv2-pair .k{flex:none;min-width:76px;color:var(--dsw-derive-muted,#57606a);font-weight:600}
+.wb-req-lite{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:2px 0}
+.wb-req-lite code{flex:none;color:var(--dsw-derive-accent,#0969da)}
+.wb-dfold{margin:12px 0 0;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px}
+.wb-dfold>summary{cursor:pointer;font:inherit;font-size:13px;padding:7px 12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-dfold[open]>summary{border-bottom:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-dfold>summary:hover{background:var(--dsw-derive-surface,#f6f8fa)}
 .wb-dtabs{display:flex;gap:2px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de)}
 .wb-dtab{font:inherit;font-size:13px;padding:7px 16px;border:none;background:none;color:var(--dsw-derive-muted,#57606a);cursor:pointer;
   border-bottom:2px solid transparent}
@@ -13844,6 +14102,187 @@ function unifiedStats(text) {
 		del
 	};
 }
+/** Decision card (design section 7.3): per state, what the list cannot show.
+*  The queued position N comes from the engine concurrency read face
+*  (GET /wf/concurrency parsed by queue-model; malformed or missing face means
+*  no position — the card says plain 'Queued' and never invents a number).
+*  Wording comes from the pure decisionCard model; null = no card at all.
+*  Fetch teardown: unmount abort + dead flag, both paths covered. */
+function DetailDecisionCardFace({ detail }) {
+	const [pos, setPos] = (0, react.useState)(null);
+	(0, react.useEffect)(() => {
+		let dead = false;
+		const ctl = new AbortController();
+		(async () => {
+			try {
+				const j = await (await fetch(withProject(`${API}/concurrency`), { signal: ctl.signal })).json();
+				if (dead) return;
+				const face = parseConcFace(concFaceFromReply(j));
+				if (!face) return;
+				const i = face.queue.indexOf(detail.id);
+				if (i >= 0) setPos(i + 1);
+			} catch {}
+		})();
+		return () => {
+			dead = true;
+			ctl.abort();
+		};
+	}, [detail.id]);
+	const card = decisionCard(detail, pos);
+	if (!card) return null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-decide",
+		"data-testid": "decision-card",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.title }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: card.body })]
+	});
+}
+/** Column section 7: two columns (left = Timeline + Stage notes; right =
+*  Receipts + Changes + Requests on this ticket). A block with no data renders
+*  nothing (section 7.3: no empty scaffolding); all absent = no section at all.
+*  The changes/requests read faces (diff face, executor-panel request ledger)
+*  failing means that one box does not render — never an error frame, never a
+*  stuck spinner (read errors are named by the collapsed changeset section). */
+function DetailTwoColumns({ detail, projectKey }) {
+	const [diff, setDiff] = (0, react.useState)(void 0);
+	const [reqRows, setReqRows] = (0, react.useState)(void 0);
+	(0, react.useEffect)(() => {
+		let dead = false;
+		(async () => {
+			try {
+				const r = await apiGet(`${API}/tickets/${encodeURIComponent(detail.id)}/diff`);
+				if (!dead && r?.ok === true) setDiff(r.result);
+			} catch {}
+		})();
+		return () => {
+			dead = true;
+		};
+	}, [detail.id]);
+	(0, react.useEffect)(() => {
+		if (!projectKey) {
+			setReqRows(void 0);
+			return;
+		}
+		let dead = false;
+		(async () => {
+			try {
+				const j = await (await fetch(`/sandbar-executor-panel/api/requests?project=${encodeURIComponent(projectKey)}`)).json();
+				if (!dead && j?.ok === true) setReqRows(j.rows);
+			} catch {}
+		})();
+		return () => {
+			dead = true;
+		};
+	}, [projectKey, detail.id]);
+	const tl = timelineRows(detail.timeline);
+	const notes = stageNoteRows(detail);
+	const receipts = receiptRows(detail.gate_runs);
+	const changes = changeRows(diff, detail);
+	const reqs = requestsForTicket(reqRows, detail.id);
+	if (!tl && !notes && !receipts && !changes && !reqs) return null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-detail-two",
+		"data-testid": "detail-columns",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-detail-col",
+			children: [tl !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-panelbox",
+				"data-testid": "detail-timeline",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "ttl",
+					children: "Timeline"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+					className: "wb-tl",
+					children: tl.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "at",
+						children: r.at ? fmtAt(r.at) : ""
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+						stageDisplayLabel(r.stage),
+						r.state ? ` · ${STATE_LABEL[r.state] ?? r.state}` : "",
+						r.reason ? ` · ${r.reason}` : ""
+					] })] }, i))
+				})]
+			}), notes !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-panelbox",
+				"data-testid": "detail-stage-notes",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "ttl",
+					children: "Stage notes"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
+					className: "wb-tl",
+					children: notes.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "at",
+						children: stageDisplayLabel(r.stage)
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: r.note })] }, r.stage))
+				})]
+			})]
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-detail-col",
+			children: [
+				receipts !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-panelbox",
+					"data-testid": "detail-receipts",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "ttl",
+						children: "Receipts"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-kv2",
+						children: receipts.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "wb-kv2-pair",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "k",
+								children: r.k
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: r.v })]
+						}, r.k + r.v))
+					})]
+				}),
+				changes !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-panelbox",
+					"data-testid": "detail-changes",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "ttl",
+						children: "Changes"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-kv2",
+						children: changes.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "wb-kv2-pair",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "k",
+								children: r.k
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: r.v })]
+						}, r.k))
+					})]
+				}),
+				reqs !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-panelbox",
+					"data-testid": "ticket-requests",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "ttl",
+						children: "Requests on this ticket"
+					}), reqs.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-req-lite",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("code", { children: ["#", String(r.id).slice(0, 4)] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: String(r.question) })]
+					}, String(r.id)))]
+				})
+			]
+		})]
+	});
+}
+/** Lazy fold shell: a closed <details> still mounts its children in the DOM, so
+*  here children mount only once opened — keeping ChangesTab/AgentLogsTab's
+*  original on-demand fetch semantics (borrowed-implementation discipline: the
+*  fault modes stay unchanged). Once opened it stays mounted (review/scroll
+*  state survives re-folding). */
+function LazyFold({ label, testid, children }) {
+	const [opened, setOpened] = (0, react.useState)(false);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+		className: "wb-dfold",
+		"data-testid": testid,
+		onToggle: (e) => {
+			if (e.target.open) setOpened(true);
+		},
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: label }), opened && children]
+	});
+}
 function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 	const [diff, setDiff] = (0, react.useState)(void 0);
 	const [loading, setLoading] = (0, react.useState)(true);
@@ -14679,7 +15118,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	const [fileViewer, setFileViewer] = (0, react.useState)(null);
 	const [previewLoading, setPreviewLoading] = (0, react.useState)(false);
 	const [health, setHealth] = (0, react.useState)(void 0);
-	const [drawerTab, setDrawerTab] = (0, react.useState)("detail");
 	const [scan, setScan] = (0, react.useState)(void 0);
 	/** 一工单一 worker（260824）：逐 worker 状态，状态条「N workers」点开列全表。 */
 	const [workers, setWorkers] = (0, react.useState)(void 0);
@@ -14815,7 +15253,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	async function openDetail(id) {
 		selectedIdRef.current = id;
 		setSelectedId(id);
-		setDrawerTab("detail");
 		setDetailLoading(true);
 		setOpMsg("");
 		setTerminalFace(null);
@@ -15374,6 +15811,110 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 								})
 							]
 						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-detail-actions",
+							"data-testid": "detail-actions",
+							children: [
+								ops.includes("advance") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "wb-btn wb-btn-green",
+									disabled: opBusy,
+									onClick: () => {
+										doAdvance(detail.id, detail.stage_state, detail.epic);
+									},
+									children: detail.stage_state === "awaiting-human" ? "Sign" : "Continue"
+								}),
+								ops.includes("rework") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "wb-btn wb-btn-danger",
+									disabled: opBusy,
+									onClick: () => {
+										openRework(detail.id, detail.stage_state === "awaiting-human");
+									},
+									children: "Send back"
+								}),
+								ops.includes("unblock") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "wb-btn wb-btn-blue",
+									disabled: opBusy,
+									onClick: () => {
+										if (detail.engine === "template-as-code-v2") doOp(detail.id, "retry-qc", { who: operator }, "Retry requested (retry_qc)");
+										else doOp(detail.id, "update", {
+											stage_state: "awaiting",
+											note: "(board) unblock"
+										}, "Unblocked");
+									},
+									children: "Retry check"
+								}),
+								ops.includes("pause") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "wb-btn",
+									disabled: opBusy,
+									onClick: () => void doOp(detail.id, "pause", { who: operator }, "Pause sent (stops after current stage finishes)"),
+									children: "Pause"
+								}),
+								ops.includes("resume") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "wb-btn",
+									disabled: opBusy,
+									onClick: () => void doOp(detail.id, "resume", {}, "Resume sent; dispatching continues"),
+									children: "Resume"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
+									className: "wb-d2-more",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "More" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-d2-more-body",
+										children: [
+											ops.includes("dispatch-next") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-btn",
+												disabled: opBusy,
+												onClick: () => {
+													doOp(detail.id, "dispatch-next", {}, "Dispatch prompt generated");
+												},
+												children: "Dispatch next"
+											}),
+											ops.includes("close") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-btn wb-btn-green",
+												disabled: opBusy,
+												onClick: () => {
+													if (window.confirm("Mark as completed (closed)?")) doOp(detail.id, "update", {
+														status: "closed",
+														note: "(board) done"
+													}, "Marked closed");
+												},
+												children: "Done"
+											}),
+											detail.book_path && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-btn",
+												disabled: opBusy || previewLoading,
+												onClick: () => {
+													openPreview();
+												},
+												children: previewLoading ? "Loading…" : "Preview content"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
+												className: "wb-meta-link",
+												href: `http://127.0.0.1:8233/namespaces/default/workflows/${encodeURIComponent(detail.id)}`,
+												target: "_blank",
+												rel: "noreferrer",
+												children: "Temporal execution ↗"
+											})
+										]
+									})]
+								}),
+								ops.length === 0 && detail.status !== "closed" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "wb-d2-hint",
+									children: [
+										"No operation available for this state (",
+										detail.status,
+										"×",
+										detail.stage_state,
+										")"
+									]
+								})
+							]
+						}),
+						opMsg !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "wb-sub",
+							style: { marginTop: 6 },
+							children: opMsg
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DetailDecisionCardFace, { detail }),
 						detail.blocked_reason && detail.close_health !== "abnormal" && detail.close_health !== "unreadable" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-d2-blocked",
 							children: ["⛔ Blocked: ", detail.blocked_reason]
@@ -15521,157 +16062,44 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLivePanel, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EvidenceImages, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Problems, { detail }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-d2-actions",
-							children: [
-								ops.includes("advance") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "wb-btn wb-btn-green",
-									disabled: opBusy,
-									onClick: () => {
-										doAdvance(detail.id, detail.stage_state, detail.epic);
-									},
-									children: detail.stage_state === "awaiting-human" ? "✓ Approve" : "Advance"
-								}),
-								ops.includes("unblock") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "wb-btn wb-btn-blue",
-									disabled: opBusy,
-									onClick: () => {
-										if (detail.engine === "template-as-code-v2") doOp(detail.id, "retry-qc", { who: operator }, "Retry requested (retry_qc)");
-										else doOp(detail.id, "update", {
-											stage_state: "awaiting",
-											note: "(board) unblock"
-										}, "Unblocked");
-									},
-									children: "Rerun this step"
-								}),
-								ops.includes("rework") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "wb-btn wb-btn-danger",
-									disabled: opBusy,
-									onClick: () => {
-										openRework(detail.id, detail.stage_state === "awaiting-human");
-									},
-									children: "Rework"
-								}),
-								detail.stage_state === "awaiting-human" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-d2-hint",
-									children: "Review the diff in the Changes tab before approving"
-								}),
-								ops.length === 0 && detail.status !== "closed" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "wb-d2-hint",
-									children: [
-										"No operation available for this state (",
-										detail.status,
-										"×",
-										detail.stage_state,
-										")"
-									]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", {
-									className: "wb-d2-more",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("summary", { children: "More" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-d2-more-body",
-										children: [
-											ops.includes("pause") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "wb-btn",
-												disabled: opBusy,
-												onClick: () => void doOp(detail.id, "pause", { who: operator }, "Pause sent (stops after current stage finishes)"),
-												children: "Pause"
-											}),
-											ops.includes("resume") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "wb-btn",
-												disabled: opBusy,
-												onClick: () => void doOp(detail.id, "resume", {}, "Resume sent; dispatching continues"),
-												children: "Resume"
-											}),
-											ops.includes("dispatch-next") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "wb-btn",
-												disabled: opBusy,
-												onClick: () => {
-													doOp(detail.id, "dispatch-next", {}, "Dispatch prompt generated");
-												},
-												children: "Dispatch next"
-											}),
-											ops.includes("close") && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "wb-btn wb-btn-green",
-												disabled: opBusy,
-												onClick: () => {
-													if (window.confirm("Mark as completed (closed)?")) doOp(detail.id, "update", {
-														status: "closed",
-														note: "(board) done"
-													}, "Marked closed");
-												},
-												children: "Done"
-											}),
-											detail.book_path && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "wb-btn",
-												disabled: opBusy || previewLoading,
-												onClick: () => {
-													openPreview();
-												},
-												children: previewLoading ? "Loading…" : "Preview content"
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-												className: "wb-meta-link",
-												href: `http://127.0.0.1:8233/namespaces/default/workflows/${encodeURIComponent(detail.id)}`,
-												target: "_blank",
-												rel: "noreferrer",
-												children: "Temporal execution ↗"
-											})
-										]
-									})]
-								})
-							]
-						}),
-						opMsg !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "wb-sub",
-							style: { marginTop: 6 },
-							children: opMsg
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-dtabs",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "wb-dtab",
-									"data-on": drawerTab === "detail",
-									onClick: () => setDrawerTab("detail"),
-									children: "Progress"
-								}),
-								detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-									className: "wb-dtab",
-									"data-on": drawerTab === "changes",
-									onClick: () => setDrawerTab("changes"),
-									children: ["Changes", detail.stage_state === "awaiting-human" ? " (diff required before approval)" : ""]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "wb-dtab",
-									"data-on": drawerTab === "agent",
-									onClick: () => setDrawerTab("agent"),
-									children: "Agent log"
-								})
-							]
-						}),
-						drawerTab === "changes" && detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChangesTab, {
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DetailTwoColumns, {
 							detail,
-							operator,
-							onMsg: setOpMsg,
-							onOpenFile: (p, m) => setFileViewer({
-								ticketId: detail.id,
-								path: p,
-								mode: m
+							projectKey
+						}),
+						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LazyFold, {
+							label: "Changeset (full diff and review)",
+							testid: "fold-changes",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChangesTab, {
+								detail,
+								operator,
+								onMsg: setOpMsg,
+								onOpenFile: (p, m) => setFileViewer({
+									ticketId: detail.id,
+									path: p,
+									mode: m
+								})
 							})
 						}),
-						drawerTab === "agent" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLogsTab, {
-							detail,
-							wf: selWf,
-							onMsg: setOpMsg
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(LazyFold, {
+							label: "Agent log",
+							testid: "fold-agent-log",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLogsTab, {
+								detail,
+								wf: selWf,
+								onMsg: setOpMsg
+							})
 						}),
-						drawerTab === "detail" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stages, {
-							detail,
-							wf: selWf,
-							usage,
-							durs: stageDurs.durs,
-							nowMs: stageDurs.nowMs
-						}) })
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(LazyFold, {
+							label: "Stage progress (per-stage cards and durations)",
+							testid: "fold-stage-progress",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Stages, {
+								detail,
+								wf: selWf,
+								usage,
+								durs: stageDurs.durs,
+								nowMs: stageDurs.nowMs
+							})
+						})
 					] })
 				]
 			}),

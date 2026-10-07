@@ -138,6 +138,15 @@ const detailB = {
 const details = { [FA]: detailA, [FB]: detailB };
 
 async function attachStub(page) {
+  // t261008-07 walkthrough round-2: the detail column's "Requests on this
+  // ticket" box reads the executor-panel request ledger when a project key is
+  // present (t261007-02 source_ticket face). This journey has no ledger; an
+  // unrouted call falls through to the real server → 404 → console noise T7
+  // misattributes. ok:true empty ledger = the honest "no requests" face.
+  await page.route('**/sandbar-executor-panel/api/requests**', (route) => {
+    return route.fulfill({ contentType: 'application/json',
+      body: JSON.stringify({ ok: true, groups: [], rows: [], malformed_rows: 0 }) });
+  });
   await page.route('**/sandbar-workbench/api/**', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -162,6 +171,11 @@ async function attachStub(page) {
       // client renders honestly (no fabricated payload, no silent placeholder).
       if (id && sub && req.method() === 'GET') {
         if (sub === 'evidence') return body({ ok: true, result: { files: [] } });
+        // t261008-07 walkthrough round-2: the detail column now reads the diff
+        // face (DetailTwoColumns) on open. Its absence on this journey is legal
+        // (no-data-renders-nothing); an ok:true empty face keeps that honest
+        // without the 404 console noise T7's hygiene leg would misattribute.
+        if (sub === 'diff') return body({ ok: true, result: { source: 'worktree', changed: false, filesTruncated: false, files: [] } });
         // AgentUsageResult with exists=false and no suspect markers = the honest
         // "no token accounting for this fixture ticket" face (renders the plain
         // tokens line, no warning, no fabricated numbers).
@@ -212,11 +226,24 @@ async function attachStub(page) {
       const im = /^\/sandbar-workbench\/api\/wf\/inspection\/tickets$/.exec(url.pathname);
       if (im && req.method() === 'GET') return body({ ok: true, result: { tickets: [] } });
     }
+    {
+      if (url.pathname === '/sandbar-workbench/api/wf/concurrency' && req.method() === 'GET') {
+        return body({ ok: true, result: { holders: [], queue: [] } });
+      }
+    }
     // t261005-10 (acceptance round 7): shell boot/detail faces this journey does
     // not supply. Their consumers degrade silently on ok:false (health point stays
     // grey, stale-check classifies any malformed input to {stale:false}) — a 200
     // ok:false line keeps that honest degrade WITHOUT generating 404 console noise
     // that T7's hygiene leg would misattribute to the product.
+    {
+      // t261008-07 walkthrough round-2: the overlay's embedded epic face pulls
+      // the workflow-template list (its New-ticket dropdown). This journey
+      // creates no ticket; an empty template list is the honest face, not 404
+      // noise.
+      const wf = url.pathname === '/sandbar-workbench/api/wf/workflows';
+      if (wf && req.method() === 'GET') return body({ ok: true, result: [] });
+    }
     {
       const boot = /^\/sandbar-workbench\/api\/(build-info|wf\/temporal-health|wf\/workers|wf\/scan-report|wf\/sessions)$/.exec(url.pathname);
       if (boot && req.method() === 'GET') return body({ ok: false, error: `fixture stub: ${boot[1]} not supplied on this journey` });
@@ -241,6 +268,7 @@ async function openStubbedPage(pw, { results, tag, consoleErrors }) {
     await attachStub(page);
     page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
     page.on('pageerror', e => consoleErrors.push(String(e)));
+    page.on('response', r => { if (r.status() >= 400) console.log(`[DIAG] ${r.status()} ${r.url()}`); });
     await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
     try { await dismissFirstRunModals(page); } catch (e) {
       results.record(`${tag}/first-run-modals`, 'env_fail', `first-run modal net failed: ${String(e).slice(0, 120)}`);
