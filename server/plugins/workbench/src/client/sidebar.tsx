@@ -77,6 +77,13 @@ import { startChatProjectTagEffect } from './chat-project-tag.ts'
 import { startChatProjectBandEffect, setChatProjectBandInfo } from './chat-project-band.ts'
 // 上下文折叠件（t260905-04）：带 CHARTER_MARKER 的注入消息收成可展开小条。
 import { startContextFoldEffect } from './context-fold.ts'
+// Platform banner-row hide (t261007-07, closing item of the 261004 topbar
+// note): hide the platform's left-column logoRow (brand mark + fold toggle).
+// Anchor = the fold toggle's aria-label set; root landmark = our own brand row
+// [data-wb-brand-row] (review C1: never a blind parentElement — walk up to the
+// ancestor containing the landmark and tag the whole chain; unresolved =
+// guard, hide nothing + exactly one warn). See platform-banner.ts header.
+import { startPlatformBannerHideEffect } from './platform-banner.ts'
 // Project colour (ticket 2 R7): deterministic palette, same key always same colour.
 // Since UI-4 (t261005-05): the group-head colour dot is retired for the identity
 // badge; projectColor stays only a chat-project-band concern, unused in this file.
@@ -651,6 +658,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
     if (!wide) return
     return startContextFoldEffect()
   }, [wide])
+
+  // Platform banner-row hide (t261007-07, closing item of the 261004 topbar
+  // note): hide the platform's left-column logoRow (brand mark + fold toggle).
+  // Anchor, landmark walk, and guard discipline live in platform-banner.ts.
+  // NOT gated on `wide`: the platform row is present in the narrow rail too
+  // (36px mark), and hiding it in both shapes is the declared behavior.
+  // F1 wiring same as the band/fold decorators.
+  useEffect(() => startPlatformBannerHideEffect(), [])
 
   // Band ownership derivation (UI-5 upgrade of the ticket-2 R7 project-only
   // face): current -> the ledger project plus the handle go out together.

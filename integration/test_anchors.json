@@ -3958,6 +3958,11 @@
       "anchor": "contract",
       "note": "t261006-15 P1/P2/P4/P6/P7: rendered tab journey — newest-first period row, verbatim read-only banner, explicit no-report merge face, named-vs-counted separation, not-reviewed never clean, host-only trigger copy + records below period row, Range layout rule (1px left/right lines, equal-width metric grid, full-window width)",
       "sync_path": ""
+    },
+    "integration/t261007-07/sc_platform_banner_suppressed.mjs": {
+      "anchor": "behaviour",
+      "note": "Platform banner suppression: no visible fold toggle (semantic anchor = its four platform-locale aria-labels), no blank strip above the brand row, brand-row height regression guard, middle header present, document.title untouched, guard leg (anchor renamed at doc start) hides nothing and warns exactly once naming the anchor, light+dark screenshots",
+      "sync_path": ""
     }
   }
 }
