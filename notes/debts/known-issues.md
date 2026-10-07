@@ -3914,7 +3914,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ③ **人审面的证据检查是文件级的**（`.sandbar/screenshots/` 顶层有 PNG 即绿），而**环境面/人工也能产出这种文件**
 >   （本例那 5 张就是复核会话用宿主态自搭台补出来的），所以"有文件"≠"承诺被验过"。
 >
-> **危害**：①**无证据的交付**可以走到人审门（本例：明暗两套现场断言、守卫腿一条都没执行）；
+> **危害**：①**无证据的交付**可以走到人审门（本例：明暗两套现场断言、守卫用例一条都没执行）；
 > ②ENV_FAIL 变成"静默消音"——它本该触发"重跑到绿或具名豁免"，实际成了过关通道；
 > ③把核对责任全压在人审的一句话上，而人审若只读闸的红绿就会误放。
 >
@@ -3926,4 +3926,4 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > L3——ENV_FAIL 之后必须"重跑到绿"或带具名豁免，才允许进人审门。
 >
 > **本条的当轮处置**：人审**未签字**，按 `rework(to_stage=implement)` 打回，打回说明里含实测命令、`ReferenceError` 的**精确行号**
-> （`sc_platform_banner_suppressed.mjs:248` 把未绑定的 `foldLabels` 当 evaluate 参数）与"必须有一到两次绿腿"的要求。
+> （`sc_platform_banner_suppressed.mjs:248` 把未绑定的 `foldLabels` 当 evaluate 参数）与"必须有至少一次绿的运行"的要求。
