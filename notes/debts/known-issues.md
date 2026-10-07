@@ -3800,3 +3800,31 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L1——构造"并集消解留下重复片段"的夹具，断言 settle 被拒并点名该文件；
 > L3——本轮 touch 的每个代码文件语法探针必须绿，否则不得进入 merge_check。
+
+## KI-215 UI 证据步（`prepare_ui_evidence`）**环境面失败后没有重试路径** ⇒ UI 票卡在 merge_check 证据红，唯一出路是人手跑 capture（261007 实证 t261007-07；integration 岗登记）
+
+> **现象**：`t261007-07`（隐藏平台顶栏那条横幅）是 UI 票（diff 命中 4 个 UI 路径），但 `.sandbar/screenshots/` **始终为空**，
+> 于是 merge_check 的证据闸恒红：`UI ticket lacks screenshot evidence: the gate reads only TOP-LEVEL non-recursive *.png ...`。
+> 真因是**环境面**：引擎起截图隔离台时 `stage_docker.py up` **被 180.0s 上限杀掉**（日志原文：
+> `prepare_ui_evidence: capture-lane (engine bench ui-shot-t261007-07-g0) stage boot failed (environment)，降级 capture.mjs 直连`），
+> 降级直连也没产出图。当场实测 docker 健康（2 容器在跑、0 stopped、无残骸台），属**一时资源争抢**。
+>
+> **机制（代码级）**：`dev_lane.py:~2505` 那个分支把证据活动的失败处理成"**不拦主链**"
+> （注释原文：`infra failure: noted, main chain unaffected, merge_check gate catches it`）——它把坏态推给闸，
+> 但**没有任何人在闸前重试这一步**。实测三条出路都堵：①`rework(to_stage=ui_evidence)` 被拒
+> （`ui_evidence is not a main-chain step (op-local)`，见 `REWORK_ADMISSIBLE_PHASES` 不含该相位）；
+> ②`rework(to_stage=merge_check)` 只重跑闸、**不重跑截图**（重跑后目录仍为 0 个文件）；
+> ③`retry_qc` 同理。⇒ 车道与引擎两侧都没有合法动作能补出这份证据，**只剩人手跑 capture**（引擎自己在红灯里点名
+> `server/ui-check/capture.mjs --out <lane>/.sandbar/screenshots`）。
+>
+> **危害**：①一次**环境抖动**升级成"必须有人手动介入"的卡点（本票因此卡住；当晚由项目会话按引擎点名命令跑隔离台补图）；
+> ②重跑闸只是把同一条红再报一遍，值守者容易误判为"票的代码有问题"；
+> ③与 KI-213（陈旧阻断）、KI-214（静默残骸）同族：**引擎的判定面与真实状态/可恢复动作不同源**。
+>
+> **出路（建议，实现口径归修复票）**：①`prepare_ui_evidence` 做成**可重入**：merge_check 遇到「UI 票 + 零证据 + 上次失败是环境面」时，
+> 自动重跑一次该活动（或在 `REWORK_ADMISSIBLE_PHASES`/op 面给一个具名重跑入口，如 `op=ui-evidence`）；
+> ②或把该活动失败**升级为具名阻断**并写明重跑入口（现在的"不拦主链"让坏态一路跑到闸上，闸又只能喊人）；
+> ③回执里保留「上次失败原因（环境/代码）」，供自动判定"该重试"还是"该打回泳道"。
+>
+> **回归**：L1——构造"证据活动环境失败"的泳道，断言进 merge_check 前会自动重试一次（或给出具名重跑入口），而不是直接红；
+> L3——重跑入口执行后截图落到顶层、闸转绿。
