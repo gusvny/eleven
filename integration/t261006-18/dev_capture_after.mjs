@@ -14,17 +14,19 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const PROJ = 'fixture-order'
-const Q1 = 'tq1a', Q2 = 'tq2b', Q3 = 'tq3c', RUN = 'tr4d', HOLD = 'th5e'
+const Q1 = 'tq1a', Q2 = 'tq2b', Q3 = 'tq3c', RUN = 'tr4d', HOLD = 'th5e', PAUSED = 'tp6f'
 const T0 = 1789353600
-function devRow(id, title, ts) {
+function devRow(id, title, ts, extra = {}) {
   return { id, role: 'developer', status: 'dispatched', title,
     workflow: 'dev-lane', stage: 'implement', stage_state: 'running',
     handoff_count: 0, pending_count: 0, worktree: '', updated: '—', updated_ts: ts,
-    created: ts, engine: 'template-as-code-v2', exec_status: 'RUNNING', epic: 'concurrency-limit' }
+    created: ts, engine: 'template-as-code-v2', exec_status: 'RUNNING', epic: 'concurrency-limit', ...extra }
 }
 const TICKETS = [devRow(Q1, 'first queued ticket', T0), devRow(Q2, 'second queued ticket', T0 + 1),
   devRow(Q3, 'third queued ticket', T0 + 2), devRow(RUN, 'at work ticket', T0 + 3),
-  devRow(HOLD, 'held for you ticket', T0 + 4)]
+  devRow(HOLD, 'held for you ticket', T0 + 4),
+  // t261008-08 evidence face: a between-stages paused row (amber dot, no controls).
+  devRow(PAUSED, 'paused between stages ticket', T0 + 5, { paused: true, paused_phase: 'at_gate' })]
 let queueOrder = [Q1, Q2, Q3]
 function face() {
   return { project: PROJ, limit: 2, unlimited: false,
@@ -98,8 +100,15 @@ try {
   console.log('[probe]', JSON.stringify(probe))
   const outDir = join(process.cwd(), '.sandbar', 'screenshots')
   mkdirSync(outDir, { recursive: true })
+  // t261008-08 evidence: light + dark captures of the left column carrying the
+  // three faces (queued / at-work / paused). Theme flips via the client's own
+  // data-theme attribute (same switch the panel's toggle uses).
   await page.screenshot({ path: join(outDir, 'after-left-column-order.png') })
   console.log('[capture] .sandbar/screenshots/after-left-column-order.png')
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: join(outDir, 'after-left-column-order-dark.png') })
+  console.log('[capture] .sandbar/screenshots/after-left-column-order-dark.png')
 } finally {
   await browser.close().catch(() => {})
   if (bench.teardown) await bench.teardown()

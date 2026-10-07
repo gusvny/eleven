@@ -349,10 +349,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-brand-mark { display:inline-flex; flex:none; line-height:0; }
 .wb-brand-word { font-weight:600; font-size:12px; }
 .wb-brand-count { margin-left:auto; font-size:10px; color:var(--dsw-derive-muted,#57606a); font-weight:400; }
-/* UI-1 (t261005-09): per-project block — 3px left bar in the project colour,
-   selected block gets a 6% colour wash (multi-project screens stay legible at a
-   glance; colour is not the only channel — the badge + name carry the identity). */
-.wb-project-block { border-left:3px solid var(--wb-proj-color, transparent); }
+/* UI-1 (t261005-09) as revised by t261008-08 (mock v11 alignment): the project
+   block drops its 3px project-colour left bar — the mock's .proj carries only a
+   bottom hairline; project identity stays on the badge + name. The selected
+   block keeps its 6% colour wash (colour is not the only channel). */
+.wb-project-block { border-bottom:1px solid var(--dsw-derive-border,#d0d7de); }
 .wb-project-block[data-selected=true] { background:color-mix(in srgb, var(--wb-proj-color, transparent) 6%, transparent); }
 .wb-group-head { display:flex; align-items:center; gap:5px; padding:7px 8px 5px; cursor:pointer; font-weight:600; position:sticky; top:0; background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); z-index:1; }
 .wb-group-head:hover { background:rgba(255,255,255,0.05); }
@@ -372,8 +373,10 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-order-dot { flex:none; width:8px; height:8px; border-radius:50%; }
 .wb-order-dot[data-order-dot=work] { background:var(--dsw-derive-success,#1a7f37); }
 .wb-order-dot[data-order-dot=hold], .wb-order-dot[data-order-dot=paused] { background:var(--dsw-derive-warn,#b8860b); }
-/* Ordering controls: handgrip (drag anchor) + up/down arrows, rendered on data-order-kind=queued rows only. */
-.wb-order-ctl { display:inline-flex; align-items:center; gap:1px; flex:none; margin-left:2px; }
+/* Ordering controls: handgrip (drag anchor) + up/down arrows, rendered on data-order-kind=queued rows only.
+   t261008-08 (mock v11): the controls sit at the ROW END (margin-left:auto eats
+   the slack after the title); the position number stays first, grip right after it. */
+.wb-order-ctl { display:inline-flex; align-items:center; gap:1px; flex:none; margin-left:auto; }
 .wb-order-grip { cursor:grab; font-size:9px; letter-spacing:-1px; color:var(--dsw-derive-muted,#57606a); user-select:none; line-height:1; }
 .wb-order-grip:active { cursor:grabbing; }
 .wb-order-arrow { border:none; background:none; cursor:pointer; font:inherit; font-size:9px; line-height:1;
@@ -389,14 +392,25 @@ const CSS = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-all; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
-/* t260904-17 列表 v5：工单条目=行卡迷你版（TicketRowCard compact）——暗色主题覆写：
- * 透明底、继承字色、选中紫调高亮；收口（data-state=done）淡一档 */
+/* t260904-17 list v5: ticket entries = compact TicketRowCard — dark-theme
+ * overrides: transparent base, inherited text colour, selected violet wash;
+ * closed (data-state=done) dimmed one step.
+ * t261008-08 (mock v11): left-column rows drop the inherited 4px epic bar (the
+ * mock's .tk row has none) — border-left-width:0 offsets the board baseline
+ * (index.tsx .wb-card border-left-width:4px); belt-and-braces with the
+ * component side, which no longer writes the borderLeftColor inline colour
+ * when compact. */
 .wb-sb .wb-card { background:transparent; border-color:var(--dsw-derive-border,#d0d7de);
+  border-left-width:0;
   box-shadow:none; color:var(--dsw-derive-fg,#1f2328); margin:0 6px 4px 14px; padding:5px 8px; }
 .wb-sb .wb-card:hover { background:var(--dsw-derive-surface,#f6f8fa); }
 .wb-sb .wb-card[data-active=true] { background:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 18%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); border-color:color-mix(in srgb,var(--dsw-derive-active,#7c3aed) 50%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff))); }
 .wb-sb .wb-card[data-state=done] { opacity:0.72; } /* 对齐板面 .72：0.55 时次级字混底后 <3:1（看守实测） */
 .wb-sb .wb-card-title { color:inherit; font-weight:400; }
+/* t261008-08 (mock v11): compact line 2 stage small text — 10px muted, same
+   token family as the l2 meta (stage · epic · dots per the mock's .tk .l2). */
+.wb-sb .wb-card-stage { flex:none; font-size:10px; color:var(--dsw-derive-muted,#57606a);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 /* t260929-22 gen8（对比度打回实测 rgb(122,122,133)≈4.24 元凶）：左栏 mini 行卡
    状态字曾一律 inherit（继承左栏弱化灰），改按四态消费语义令牌（gen8 起令牌为
    浅档深墨声明位，白底全部 ≥4.5）。 */

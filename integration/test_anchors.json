@@ -3983,6 +3983,11 @@
    "anchor": "behaviour",
    "note": "t261008-02: rendered middle-column machine-status head contains no // comment text and none of the t261005-10 (UI-2) comment literal, light+dark with screenshots; S0 family guard: no bare // comment lines in JSX children position in workbench client src, bundles free of the literal and in sync",
    "sync_path": ""
+  },
+  "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
+   "anchor": "behaviour",
+   "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
   }
  }
 }

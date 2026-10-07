@@ -95,10 +95,10 @@ try {
         if (typeof v === 'string' && v) cands.push(v)
       } catch { /* candidate unavailable */ }
     }
-    try {
-      const s4 = tlm.deriveTicketState(row.status, row.stage_state, row.exec_status)
-      if (s4 && tlm.STATE4_LABEL[s4]) cands.push(tlm.STATE4_LABEL[s4])
-    } catch { /* candidate unavailable */ }
+    // t261008-08：状态英文词已从左栏行退役（状态语义由彩点承载），STATE4_LABEL 不再
+    // 作为阶段标签候选——只认 ui-labels 阶段映射词；无映射阶段的行不造标签（缺席合法，
+    // 标题仍在即数据面未丢）。
+    return cands
     return cands
   }
 } catch { stageLabelOf = () => [] }
@@ -314,20 +314,21 @@ async function runBrowser(pw, browser) {
       brandOk ? `brand row h=${Math.round(brand.h)}px, buttons=0, 'Sandbar' + 'N projects' present`
         : `brand row contract violated: ${JSON.stringify(brand)}（pre-implement red expected）`)
 
-    // B1 项目身份：组头带身份徽标（svg）与项目色面（3px 左色条=项目色纯值；选中块 6% 上漆是
-    // color-mix 混合面，只要求「背景含项目色分量」，纯色相等只钉左条）。
+    // B1 项目身份：组头带身份徽标（svg）；项目身份承载=徽标+名字（票 t261008-08，
+    // mock v11 对齐）：项目块 3px 左色条已退役——左条改反断言（任何元素都不得再带
+    // 项目色左边条），选中块的 6% color-mix 上漆仍算合法色面（只记录不判）。
     const expectedColor = projectColorOf(PROJ_A)
     const ident = await page.evaluate(([proj, hex]) => {
       const sb = document.querySelector('.wb-sb') || document.body
       const head = [...sb.querySelectorAll('*')].find(el => el.children.length === 0
         && (el.textContent || '').trim() === proj)
-      if (!head) return { badge: -1, colour: false, dbg: 'head-absent' }
+      if (!head) return { badge: -1, bar: false, dbg: 'head-absent' }
       let w = head
       while (w && w !== document.body && !w.querySelector('.wb-card[data-ticket-id]')) w = w.parentElement
-      if (!w || w === document.body) return { badge: -1, colour: false, dbg: 'container-absent' }
+      if (!w || w === document.body) return { badge: -1, bar: false, dbg: 'container-absent' }
       const badge = w.querySelectorAll('svg').length
       const rgbOf = (s) => (s.match(/\d+/g) || []).slice(0, 3).map(Number)
-      let colour = false
+      let bar = false
       let dbg = 'no-colour-face'
       if (hex) {
         const rgb = hex.replace('#', '').match(/../g).map(x => parseInt(x, 16))
@@ -335,18 +336,18 @@ async function runBrowser(pw, browser) {
           const cs = getComputedStyle(el)
           const bl = rgbOf(cs.borderLeftColor)
           const bw = parseFloat(cs.borderLeftWidth) || 0
-          if (bw >= 2 && bl[0] === rgb[0] && bl[1] === rgb[1] && bl[2] === rgb[2]) { colour = true; dbg = 'border-left'; break }
+          if (bw >= 2 && bl[0] === rgb[0] && bl[1] === rgb[1] && bl[2] === rgb[2]) { bar = true; dbg = 'border-left'; break }
           const bg = rgbOf(cs.backgroundColor)
           const washish = cs.backgroundColor.includes('color-mix') || (bg[0] > 0 && Math.abs(bg[0] - rgb[0]) < 40 && Math.abs(bg[1] - rgb[1]) < 40 && Math.abs(bg[2] - rgb[2]) < 40 && bg[3] !== undefined)
-          if (bg[3] > 0 && washish) { colour = true; dbg = `wash(${cs.backgroundColor.slice(0, 60)})`; break }
+          if (bg[3] > 0 && washish) { dbg = `wash(${cs.backgroundColor.slice(0, 60)})`; break }
         }
-      } else { colour = null; dbg = 'colour-module-unavailable' }
-      return { badge, colour, dbg, block: getComputedStyle(w).borderLeftWidth + '/' + getComputedStyle(w).borderLeftColor + '/' + getComputedStyle(w).backgroundColor.slice(0, 40) }
+      } else { dbg = 'colour-module-unavailable' }
+      return { badge, bar, dbg, block: getComputedStyle(w).borderLeftWidth + '/' + getComputedStyle(w).borderLeftColor + '/' + getComputedStyle(w).backgroundColor.slice(0, 40) }
     }, [PROJ_A, expectedColor])
-    const identOk = ident.badge >= 1 && ident.colour !== false
+    const identOk = ident.badge >= 1 && ident.bar !== true
     record('B1 project-identity', identOk ? 'pass' : 'fail',
-      identOk ? `group head carries badge (svg×${ident.badge}) + project colour face (${ident.dbg})`
-        : `identity face violated: ${JSON.stringify(ident)} (expected colour ${expectedColor})（pre-implement red expected）`)
+      identOk ? `group head carries badge (svg×${ident.badge}), no project-colour left bar (${ident.dbg})`
+        : `identity face violated: ${JSON.stringify(ident)} (expected colour ${expectedColor})`)
 
     // rows-landed：两 dev 行+巡检行都落组（不候齐则内容断言读残缺 DOM=时序假红）。
     const allLanded = await waitFor(async () => {
@@ -361,7 +362,9 @@ async function runBrowser(pw, browser) {
     record('S1 rows-landed', 'pass', '2 dev 行+1 巡检行落组渲染')
 
     // B2 工单行两行式：行文本含标题（数据不译）+ 阶段英文标签（ui-labels 现算候选之一；
-    // 不锚具体取哪个映射函数=合法实现选择面）。
+    // 不锚具体取哪个映射函数=合法实现选择面）。t261008-08：状态英文词已从左栏行退役
+    // （状态语义由彩点承载），STATE4_LABEL 不再是候选；无映射阶段的行不造标签（缺席
+    // 合法），标题仍须在（数据面未丢）。
     const labelRows = await page.evaluate((ids) => ids.map((id) => {
       const card = document.querySelector(`.wb-sb .wb-card[data-ticket-id="${id}"]`)
       return { id, text: card ? (card.innerText || '').replace(/\s+/g, ' ') : null }
@@ -369,7 +372,15 @@ async function runBrowser(pw, browser) {
     const b2bad = []
     for (const r of labelRows) {
       if (!r.text) { b2bad.push(`${r.id}(card-absent)`); continue }
-      const cands = stageLabelOf(DEV_ROWS.find(d => d.id === r.id))
+      const devRow = DEV_ROWS.find(d => d.id === r.id)
+      // 候选只钉行面显示的那个字段=stage（二行阶段小字）；stage_state 是另一维度
+      // （旧实现靠状态词碰巧命中，t261008-08 拔词后必须钉真源）。
+      const cands = stageLabelOf({ ...devRow, stage_state: undefined })
+      const titleOk = !!devRow && r.text.includes(devRow.title)
+      if (cands.length === 0) {
+        if (!titleOk) b2bad.push(`${r.id}(unmapped stage but title missing)`)
+        continue
+      }
       const hit = cands.some(c => r.text.includes(c))
       if (!hit) b2bad.push(`${r.id}(no mapped label; candidates=${JSON.stringify(cands)}; text=${r.text.slice(0, 120)})`)
     }

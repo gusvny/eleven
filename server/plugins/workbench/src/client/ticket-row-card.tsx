@@ -121,10 +121,18 @@ export interface TicketRowCardProps {
   onOpenEpic?: (code: string) => void
 }
 
-/** 悬停 title：id＋阶段语境（C2 消费点：阶段短名拓扑驱动）＋阻塞原因＋执行状态原文
- *  （t260919-02：失败行在悬停里可辨 Temporal 终态词，与状态标签「已失败」互证）＋
- *  收口健康原因（t260921-03：异常收口行悬停即得事实原因，不许无因异常）。 */
-function cardTitle(t: CardTicket, wf?: WfLike | null): string {
+/** Row tooltip title: id + stage context (C2 consumer: stage-short topology) +
+ *  blocked reason + exec-status verbatim (t260919-02: a failed row is
+ *  distinguishable in the tooltip by its Temporal terminal word) + the
+ *  close-health reason (t260921-03: never an unexplained abnormal close).
+ *  t261008-08 (mock v11): the compact (left-column) row moves the progress
+ *  sentence and the updated time into the tooltip — the visible row keeps only
+ *  id/title on line 1 and stage+epic+dots on line 2; absent parts are skipped,
+ *  never rendered as `undefined`.
+ *  (Exported for unit tests only — the malformed-input truth table runs in
+ *  tests/; render assertions belong to the scenarios.) */
+export function cardTitle(t: CardTicket, wf?: WfLike | null, compact = false,
+  progress?: CardProgress, rel?: string | null): string {
   const parts = [t.id]
   const stage = (wf?.stages ?? []).find(s => s?.id === t.stage)
   const short = stageDisplayLabel(stage?.id ?? t.stage, stageShortOf(stage))
@@ -132,7 +140,9 @@ function cardTitle(t: CardTicket, wf?: WfLike | null): string {
   if (t.blocked_reason) parts.push(`Blocked: ${t.blocked_reason}`)
   if (t.exec_status) parts.push(`Exec: ${t.exec_status}`)
   if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`)
+  if (compact && progress?.text) parts.push(progress.text)
   if (t.updated) parts.push(`Updated ${t.updated}`)
+  else if (compact && rel) parts.push(`Updated ${rel}`)
   return parts.join('\n')
 }
 
@@ -145,6 +155,11 @@ export function TicketRowCard({
   const epicColor = epicColorOf(t.epic)
   const dots = compact ? [] : laneDots(wf, t)
   const rel = relativeTime(toMillis(t.updated_ts ?? updatedTsMs))
+  // t261008-08 (mock v11): the compact line-2 stage short text (same single
+  // derivation the tooltip consumes).
+  const stageLabel = stageDisplayLabel(
+    (wf?.stages ?? []).find(s => s?.id === t.stage)?.id ?? t.stage,
+    stageShortOf((wf?.stages ?? []).find(s => s?.id === t.stage)))
   const stop = (fn?: () => void) => (ev: MouseEvent) => {
     ev.stopPropagation()
     if (!busy) fn?.()
@@ -179,8 +194,8 @@ export function TicketRowCard({
       onDragStart={onDragStart}
       onDragOver={orderable ? undefined : (ev) => { if (ordering !== undefined) ev.preventDefault() }}
       onDrop={ordering !== undefined ? onDrop : undefined}
-      style={{ borderLeftColor: epicColor }}
-      title={cardTitle(t, wf)}
+      style={compact ? undefined : { borderLeftColor: epicColor }}
+      title={cardTitle(t, wf, compact, progress, rel)}
       onClick={() => onOpen()}
       role="button"
     >
@@ -200,25 +215,15 @@ export function TicketRowCard({
           <span className="wb-order-dot" data-order-dot={ordering.kind === 'hold' ? 'hold' : 'paused'}
             title={ordering.kind === 'hold' ? 'Holding a slot at the human gate' : 'Paused by you (no slot)'} />
         )}
-        {/* CL-3 ordering controls: handgrip (drag anchor) + one-step up/down
-            arrows, queued rows only. Every click/drag ends in the parent's
-            POST reorder -> re-read the same face; zero local order state. */}
-        {orderable && (
-          <span className="wb-order-ctl" data-order-ctl="">
-            <span className="wb-order-grip" data-order-grip="" title="Drag to reorder"
-              aria-label={`Drag to reorder ${t.id}`}>⋮⋮</span>
-            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
-              aria-label={`Move ${t.id} up`} title="Move up"
-              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(-1) }}>⌃</button>
-            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
-              aria-label={`Move ${t.id} down`} title="Move down"
-              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(1) }}>⌄</button>
-          </span>
-        )}
         {/* 状态点着色走 CSS 伪元素（::before）——元素本体无圆角无底色，
             不与迷你站道圆点混数（UI 场景 T5 以几何特征数点） */}
         <span className="wb-card-dot" data-state={state4} />
-        <span className="wb-card-state" data-state={state4}>{STATE4_LABEL[state4]}</span>
+        {/* t261008-08 (mock v11): the left-column line 1 keeps dot + id + title
+            only — the English state word leaves the row face (the state stays
+            on the coloured dot); the board column keeps it. */}
+        {!compact && (
+          <span className="wb-card-state" data-state={state4}>{STATE4_LABEL[state4]}</span>
+        )}
         {/* 段间暂停徽标（t260908-01）：二态文案防「已暂停却还在跑」误读——
             pending=信号已受理、当前段还在跑（待段间生效）；at_gate=已停在段间门口。 */}
         {t.paused && (
@@ -260,8 +265,27 @@ export function TicketRowCard({
           data-title-src={t.title?.trim() ? 'title' : t.title_or_first ? 'first' : 'id'}>
           {ticketDisplayTitle(t)}
         </span>
-        {/* epic 独立字段：彩 chip，点击=按 epic 筛（stopPropagation 不触发行卡导航） */}
-        {t.epic && (
+        {/* CL-3 ordering controls (t261008-08, mock v11): handgrip (drag anchor)
+            + one-step up/down arrows, queued rows only, at the ROW END (mock:
+            arrows trail the row, never the row head). Every click/drag ends in
+            the parent's POST reorder -> re-read the same face; zero local
+            order state. Position number stays first, grip right after it. */}
+        {orderable && (
+          <span className="wb-order-ctl" data-order-ctl="">
+            <span className="wb-order-grip" data-order-grip="" title="Drag to reorder"
+              aria-label={`Drag to reorder ${t.id}`}>⋮⋮</span>
+            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
+              aria-label={`Move ${t.id} up`} title="Move up"
+              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(-1) }}>⌃</button>
+            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
+              aria-label={`Move ${t.id} down`} title="Move down"
+              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(1) }}>⌄</button>
+          </span>
+        )}
+        {/* Epic chip: coloured chip, click filters by epic (stopPropagation keeps
+            row navigation out). t261008-08: on compact rows the chip drops to
+            line 2 (mock: l2 = stage · epic + dots). */}
+        {!compact && t.epic && (
           <span className="wb-card-epic"
             style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
             title={`Epic: ${t.epic}`}
@@ -271,11 +295,33 @@ export function TicketRowCard({
         )}
       </div>
       <div className="wb-card-l2">
-        {/* 一句进展：host 时间线末条人话；缺省降级只显相对时间（绝对时间字符串兜底） */}
-        <span className="wb-card-progress" data-state={progress?.state ?? ''}>
-          {progress ? progress.text : (t.updated || '')}
-        </span>
-        <span className="wb-card-time">{rel ?? (t.updated || '')}</span>
+        {/* t261008-08 (mock v11): compact line 2 = stage small text + epic chip +
+            ten-cell progress dots; the progress sentence and the updated time
+            moved into the tooltip (cardTitle), off the row face. */}
+        {compact && stageLabel !== '' && (
+          <span className="wb-card-stage" data-wb-row-stage={stageLabel}>{stageLabel}</span>
+        )}
+        {compact && t.epic && (
+          <span className="wb-card-epic"
+            style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
+            title={`Epic: ${t.epic}`}
+            onClick={(ev) => { ev.stopPropagation(); onOpenEpic?.(t.epic ?? '') }}>
+            {t.epic}
+          </span>
+        )}
+        {/* Progress sentence: the host timeline's last human-readable line; falls
+            back to the relative/absolute time when absent.
+            t261008-08: compact rows moved it into the tooltip (cardTitle) —
+            EXCEPT rows the parent hands a synthesized progress sentence
+            (t260915-19 triage face: waiting-for-signature + finding counts are
+            at-a-glance row facts, not hover facts; the mock v11 has no such
+            row, so no mock conflict). The board column keeps it. */}
+        {(!compact || progress) && (
+          <span className="wb-card-progress" data-state={progress?.state ?? ''}>
+            {progress ? progress.text : (t.updated || '')}
+          </span>
+        )}
+        {!compact && <span className="wb-card-time">{rel ?? (t.updated || '')}</span>}
         {t.role && !compact && <span className="wb-card-role">· {t.role}</span>}
         {!compact && dots.length > 0 && (
           <span className="wb-card-lane" title={`Stage dots (${dots.length})`}>
