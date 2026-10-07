@@ -175,6 +175,7 @@ import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readLatestScanReport } from './src/host/scan-report.ts'
+import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
 // t260926-05：巡检落账报告只读端点（report_path → 可读摘要；fail-closed 200+reason 同 /file 风格）。
 import { readInspectionReportFile } from './src/host/inspection-report.ts'
 // Per-project session ledger file (sessions.json, UI-5 t261005-06): the single
@@ -1451,6 +1452,42 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /**
+   * Inspection period archive read side (t261006-15, plan D1, read-only):
+   *   GET /sandbar-workbench/api/wf/inspection-archive?project=<key>[&period=YYYYMMDD&instance=<id>]
+   * Serves the period list (explicit newest-first + missing/merge semantics; computation
+   * core = src/host/inspection-archive.ts); with period+instance it serves that single
+   * report. The project root goes through anchorOf (same contract as docs/tree: unknown
+   * key 400 / isolated-or-broken entry 502, never a silent fallback to the default
+   * repo). An absent archive directory = 200 + ok:false + human reason (no inspection
+   * has run — not a server error, the same degraded style as scan-report).
+   */
+  async function handleInspectionArchive(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'inspection-archive is a read face: GET only' })
+      return
+    }
+    const url = new URL(req.url || '/', 'http://localhost')
+    const a = anchorGuard(res, anchorOf(url))
+    if (a === null) return
+    try {
+      const dir = join(a.root, 'out', 'inspection')
+      const period = url.searchParams.get('period')
+      const instance = url.searchParams.get('instance')
+      if (period !== null || instance !== null) {
+        if (period === null || instance === null) {
+          sendJson(res, 400, { ok: false, error: 'period and instance must be given together (single report fetch)' })
+          return
+        }
+        sendJson(res, 200, { ok: true, result: await readPeriodReport(dir, instance, period) })
+        return
+      }
+      sendJson(res, 200, { ok: true, result: await readInspectionArchive(dir) })
+    } catch (err) {
+      sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
+    }
+  }
+
+  /**
    * host 陈旧看守读侧（t260902-03，只读）：GET /sandbar-workbench/api/build-info。
    * 现算磁盘指纹与启动指纹比对，stale=true 即「磁盘 host 半已更新、console 进程
    * 还在跑旧码」，客户端据此渲染全局「重启 console 生效」横幅。指纹全缺（部署
@@ -2311,6 +2348,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/temporal-health', handler: handleTemporalHealth }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workers', handler: handleWorkers }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/scan-report', handler: handleScanReport }),
+        // Inspection period archive read side (t261006-15): period list + single
+        // period+instance report (read-only, project root via anchorOf).
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/inspection-archive', handler: handleInspectionArchive }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/build-info', handler: handleBuildInfo }),
         // 会话开局 charter 读侧（t260904-07）：路径同源常量（src/host/session-charter.ts
         // SESSION_CHARTER_PATH），客户端 fetch URL 与此处注册逐字同源，防 KI-042 漂移。

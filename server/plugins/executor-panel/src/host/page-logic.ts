@@ -128,8 +128,6 @@ export function splitWaiting<T extends { status?: string }>(rows: T[]): { waitin
     else waiting.push(r)
   }
   return { waiting, answered, dismissed }
-}  }
-  return { waiting, answered, dismissed }
 }
 
 /** 选项判据（有选项=按钮，没选项=自由文本框；畸形选项项当没有——渲染面拿到的恒可信）。 */

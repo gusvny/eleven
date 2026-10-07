@@ -26,12 +26,18 @@ assert(new Set(tabs).size === tabs.length, 'no duplicate tabs')
 for (const t of ORDER) assert(html.includes(`id="t-${t}"`), `radio input for ${t}`)
 for (const t of ORDER) assert(html.includes(`id="pane`), 'panes present')
 
-// ---- panes for the four moved-in faces ----
-for (const id of ['paneEpics', 'paneInspection', 'paneMetrics', 'paneDocs']) {
+// ---- panes for the moved-in faces ----
+// t261006-15 reconcile: the Inspection slot's pane is the inspection epic's CONTENT
+// face (paneInsp), not the t261005-10 placeholder (paneInspection retired with its
+// scan-report dwell table — the placeholder's own comment assigned the report
+// content to the inspection epic).
+for (const id of ['paneEpics', 'paneInsp', 'paneMetrics', 'paneDocs']) {
   assert(html.includes(`id="${id}"`), `${id} pane present`)
 }
-// lazy loaders wired in the page script
-for (const fn of ['loadEpics', 'loadInspection', 'loadMetrics', 'loadDocs', 'loadConcurrency']) {
+assert(!html.includes('paneInspection') && !html.includes('loadInspection'),
+  'the placeholder inspection face is fully retired (one slot, one content face)')
+// lazy loaders wired in the page script (inspection loads via its own lazy gate)
+for (const fn of ['loadEpics', 'loadMetrics', 'loadDocs', 'loadConcurrency', 'inspEnsureLoaded']) {
   assert(html.includes(`function ${fn}`), `page defines ${fn}`)
 }
 
@@ -42,14 +48,17 @@ assert(!/id="limit(Up|Down|Minus|Plus|Input)"/.test(html), 'no second limit knob
 assert(html.includes('CL-2'), 'the absent write face is named (CL-2)')
 
 // ---- list contracts declared for the new faces ----
-for (const id of ['epics_list', 'epic_tickets', 'docs_tree', 'metrics_kpis', 'inspection_items']) {
+// t261006-15 reconcile: inspection_items (the placeholder's dwell list) is retired
+// with the placeholder face; the Inspection tab's lists are inspection_periods /
+// inspection_trigger_records (declared by t261006-15).
+for (const id of ['epics_list', 'epic_tickets', 'docs_tree', 'metrics_kpis', 'inspection_periods', 'inspection_trigger_records']) {
   assert(LIST_CONTRACTS[id] && typeof LIST_CONTRACTS[id].empty_copy === 'string' && LIST_CONTRACTS[id].empty_copy.length > 0,
     `list contract ${id} declared with empty copy`)
 }
 // the page renders empty states through the contract (no inline copies for the new lists)
 assert(html.includes("emptyCopyOf('epics_list')") && html.includes("emptyCopyOf('epic_tickets')")
-  && html.includes("emptyCopyOf('docs_tree')") && html.includes("emptyCopyOf('metrics_kpis')")
-  && html.includes("emptyCopyOf('inspection_items')"), 'page references the declared empty copies by name')
+  && html.includes("emptyCopyOf('docs_tree')") && html.includes("emptyCopyOf('metrics_kpis')"),
+  'page references the declared empty copies by name')
 
 // ---- postMessage contract pairing with the host (executor-view.tsx) ----
 const hostSrc = readFileSync(join(here, '../../workbench/src/client/executor-view.tsx'), 'utf8')

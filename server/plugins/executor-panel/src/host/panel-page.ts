@@ -33,6 +33,10 @@ import {
 } from './page-logic.ts'
 import { LIST_CONTRACTS } from './list-contracts.ts'
 import { renderMarkdown } from './markdown.ts'
+// t261006-15: the Inspection tab's period-view model — embedded into the page via
+// String() like page-logic, so the unit test and the page run one implementation.
+// buildPeriodViewCore is closure-free (tables passed in, embedded as JSON below).
+import { buildPeriodViewCore, EMPTY_COPIES, INSTANCE_LABELS } from './inspection-view.ts'
 // t261005-05 (UI-4): project identity badge single source, imported across plugins
 // from workbench shared (both plugins load as raw TS via node native type-stripping;
 // the relative path stays inside the repo). The function sources are embedded into
@@ -65,9 +69,16 @@ const EMBEDDED = [
   String(fnv1a), String(isProjectKeyLike), String(baseIdentity), String(identityId),
   String(walkOffset),
   String(projectIdentity), String(identityOutlinePath), String(identityBadgeSvg),
+  // t261006-15: Inspection period-view core (self-contained; tables via INSP_TABLES).
+  String(buildPeriodViewCore),
   // t261006-17 (CL-2): concurrency knob + chip classifier (same single implementation).
   String(limitStep), String(concChipState),
 ].join('\n')
+
+/** t261006-15: Inspection tables (verbatim empty copies + instance labels) as JSON —
+ *  the data half of the embedded period-view core. EMPTY_COPIES (inspection-view.ts)
+ *  stays the single copy source; a unit test locks the page HTML to these strings. */
+const INSP_TABLES = JSON.stringify({ EMPTY_COPIES, INSTANCE_LABELS })
 
 /** Constant closure for the badge runtime (the page-side projectIdentity reads these tables; embedded as JSON). */
 const IDENTITY_DATA = JSON.stringify({
@@ -102,8 +113,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 input.tab{position:absolute;opacity:0;pointer-events:none}
 .seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
 .seg label:hover{color:var(--fg)}
-#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-ledger:checked~.seg label[for=t-ledger],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}
-.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-ledger:checked~.seg label[for=t-ledger],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sect.lead{margin-top:18px}
@@ -235,6 +245,50 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 .backbtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:4px 12px;font:inherit;cursor:pointer;margin-bottom:8px}
 .backbtn:hover{border-color:var(--blue);color:var(--blue)}
 .foot{margin-top:26px;color:var(--faint);font-size:11px}
+/* t261006-15 Inspection tab — layout discipline (P6): ONE text gutter (--igx) for
+   card text, block titles, description lines, table first column and metric keys;
+   containers keep their own edge; three vertical steps (--isect/--icard/--iline);
+   right edges share one line (right-aligned meta, table last column, toolbar);
+   metrics in an equal-width grid, never one squeezed row. The acceptance is the
+   RULE (Range-measured left edges within 1px / right edges on one line), not these
+   pixel values. */
+.inspCard{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:0 0 var(--icard,8px);padding:var(--iline,10px) 0}
+.inspCard .pad{padding:0 var(--igx,14px)}
+.inspSect{margin:var(--isect,20px) 0 6px;padding-left:var(--igx,14px);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)}
+.inspNote{padding-left:var(--igx,14px);color:var(--muted);font-size:11px;margin:6px 0 0}
+.inspMeta{color:var(--muted);font-size:11px;white-space:nowrap;text-align:right}
+.inspNums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 20px;padding:0 var(--igx,14px);margin-top:8px}
+.inspNums .kv{display:flex;flex-direction:column;gap:1px;font-size:11px;color:var(--muted)}
+.inspNums .kv b{color:var(--fg);font-weight:600;font-size:15px;line-height:1.2}
+.inspCard table{width:100%;border-collapse:collapse;font-size:12px}
+/* P6 (arbitrate gen4): the table box itself sits +2px right of the card text line, so
+   the FIRST column's text gets -2px to land on the shared gutter (122-line); the rule
+   is the line, not these pixels — a width change must still hold <=1px. */
+.inspCard table th:first-child,.inspCard table td:first-child{padding-left:12px}
+.inspCard th{text-align:left;color:var(--muted);font-weight:500;padding:6px var(--igx,14px);border-bottom:1px solid var(--line)}
+.inspCard td{padding:7px var(--igx,14px);border-bottom:1px solid var(--line-soft,var(--panel2));vertical-align:top}
+.inspCard tr:last-child td{border-bottom:0}
+.inspCard th.num,.inspCard td.num{text-align:right}
+.inspPeriods{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;padding:0 var(--igx,14px)}
+.inspPeriods .lbl{color:var(--muted);font-size:11px}
+.inspPeriods button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:3px 11px;font:inherit;font-size:12px;cursor:pointer;line-height:18px}
+.inspPeriods button[data-on="true"]{background:var(--accent-soft,var(--panel2));border-color:var(--blue);color:var(--fg)}
+.inspFld{display:grid;grid-template-columns:96px 1fr;gap:8px 10px;align-items:center;padding:0 var(--igx,14px)}
+.inspFld label{color:var(--muted);font-size:12px}
+.inspFld select,.inspFld input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit;width:100%;max-width:340px}
+/* P6: the reviewed-list summary must sit exactly on the text gutter — kill the
+   disclosure marker's indent on every engine (arbitrate gen1: 2.4px off the line). */
+#paneInsp summary{list-style:none;display:block}
+#paneInsp summary::-webkit-details-marker{display:none}
+#paneInsp summary::marker{content:''}
+/* P6 residual (arbitrate gen2): the reviewed block must take its gutter ONLY from
+   .inspNote's padding — the details element itself is zero-inset, so summary and
+   disclosed content start exactly where every other .pad/.inspNote line starts. */
+#paneInsp details{padding:0;margin:0}
+/* P6 residual (arbitrate gen2): toolbar button box edge vs meta text edge sat 2px
+   apart; pull the button box onto the meta's text line (mock v8 precedent: button
+   aligns by box edge, meta by text edge, SAME line). */
+#inspRunBtn{margin-right:2px}
 </style>
 </head>
 <body>
@@ -262,8 +316,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <label for="t-metrics" data-tab="metrics">Metrics</label>
     <label for="t-docs" data-tab="docs">Docs</label>
     <label for="t-grants" data-tab="grants">Grants</label>
-    <label for="t-settings" data-tab="settings">Settings</label>
-  </div>
+    <label for="t-settings" data-tab="settings">Settings</label>  </div>
 
   <div id="noProject" class="banner red" style="display:none">No project is selected. Open this panel from a project row, or add ?project=&lt;project-key&gt; to the address.</div>
 
@@ -332,14 +385,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div id="epicDetail"></div>
   </section>
 
-  <!-- t261005-10 (UI-2): Inspection tab — read-only face over the latest scan report.
-       The report content itself belongs to the inspection epic; this tab only makes
-       it reachable and ordered (epic division of labour). -->
-  <section id="paneInspection" style="display:none">
-    <div id="inspBanner"></div>
-    <div id="inspMeta" class="muted" style="font-size:11px;margin:2px 0 6px"></div>
-    <div id="inspTable"></div>
-  </section>
 
   <!-- t261005-10 (UI-2): Metrics tab — facts-only face over the project metrics API
        (KPI cards + freshness line). No second chart engine in the panel. -->
@@ -400,6 +445,48 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div class="sect lead">Last wakes</div>
     <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
     <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
+  </section>
+
+  <section id="paneInsp" style="display:none">
+    <div id="inspBanner"></div>
+    <div class="strip">
+      <span class="ro">● host action</span>
+      <span>Full-codebase review</span>
+      <span class="grow" style="flex:1"></span>
+      <button class="bar" id="inspRunBtn">Run a full review…</button>
+    </div>
+    <div class="inspNote" style="margin-top:-6px">Only you can start a full review. The executor cannot. A review is recorded when it starts.</div>
+    <div class="inspCard" id="inspDlg" data-open="false" style="display:none">
+      <div class="pad inspSect">Run a full-codebase review</div>
+      <div class="inspFld">
+        <label for="inspScope">Scope</label>
+        <select id="inspScope">
+          <option value="everything">Everything</option>
+          <option value="server/plugins only">server/plugins only</option>
+          <option value="server/engine only">server/engine only</option>
+          <option value="integration/ only">integration/ only</option>
+          <option value="docs/ + notes/ only">docs/ + notes/ only</option>
+        </select>
+        <label for="inspReason">Reason</label>
+        <input type="text" id="inspReason" placeholder="why now — recorded">
+      </div>
+      <div class="bar" style="padding:0 var(--igx,14px)">
+        <button class="primary" id="inspStartBtn">Start</button>
+        <button id="inspCancelBtn">Cancel</button>
+        <span class="meta" id="inspMsg"></span>
+      </div>
+    </div>
+    <div class="inspSect">Period</div>
+    <div class="inspPeriods"><span class="lbl">Period</span><span id="inspPeriodBtns" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>
+    <div id="inspPeriodNote" class="inspNote" style="display:none"></div>
+    <div id="inspBody"></div>
+    <div class="inspSect lead" style="margin-top:20px;padding-left:var(--igx,14px);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Reviews you started</div>
+    <div class="inspCard"><table id="inspRecords">
+      <thead><tr><th>when</th><th>who</th><th>scope</th><th>reason</th><th style="text-align:right">state · result</th></tr></thead>
+      <tbody id="inspRecordsBody"></tbody>
+    </table></div>
+    <div class="inspNote">Newest first · kept after the review ends</div>
+    <div id="inspEmpty" class="empty" style="display:none;padding-left:var(--igx,14px)">No reviews started yet.</div>
   </section>
 
   <section id="paneSet" style="display:none">
@@ -1295,49 +1382,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
 
   // ---- t261005-10 (UI-2): Inspection tab (read-only face over the latest scan report) ----
-  function loadInspection(){
-    if(!state.project){ state.inspection=null; renderInspection(); return; }
-    fetch('/sandbar-workbench/api/wf/scan-report').then(function(r){ return r.json(); }).then(function(j){
-      state.inspection=(j && j.ok===true && j.result) ? j.result : null;
-      state.inspectionError=(j && j.ok===false && j.error) ? String(j.error) : '';
-      renderInspection();
-    }).catch(function(){ state.inspection=null; state.inspectionError=''; renderInspection(); });
-  }
-  function renderInspection(){
-    var e=el('inspBanner'), meta=el('inspMeta'), tbl=el('inspTable');
-    if(!state.project){ e.innerHTML=''; meta.textContent=''; tbl.innerHTML=''; return; }
-    var r=state.inspection;
-    if(!r){ e.innerHTML=bannerHtml(state.inspectionError ? 'The inspection report could not be read. Reason: '+state.inspectionError : 'The inspection report could not be reached.', true); meta.textContent=''; tbl.innerHTML=''; return; }
-    var rep=r.report;
-    if(!rep){ e.innerHTML=bannerHtml(r.reason||'No inspection report exists yet.', false); meta.textContent=''; tbl.innerHTML=''; return; }
-    e.innerHTML='';
-    meta.textContent='Generated '+rep.generated_at+' · report file '+r.file
-      +' · total '+rep.total_tickets+' · pending '+rep.pending_decision_count
-      +' · stuck threshold '+rep.stuck_threshold_hours+'h';
-    var items=Array.isArray(rep.items)?rep.items:[];
-    if(items.length===0){ tbl.innerHTML='<div class="empty">'+esc(emptyCopyOf('inspection_items'))+'</div>'; return; }
-    var html='<table><tr><th>Ticket</th><th>Stage</th><th>Dwell</th><th>pending</th><th>Suggestion</th><th>Reasons</th></tr>';
-    for(var i=0;i<items.length;i++){
-      var it=items[i];
-      var reasons=Array.isArray(it.reasons)?it.reasons:[];
-      html+='<tr data-ticket="'+esc(it.ticket_id)+'" class="mrow">'
-        +'<td><b>'+esc(it.ticket_id)+'</b><br>'+esc(it.title||'')+'</td>'
-        +'<td>'+esc(it.stage||'')+' '+esc(it.stage_state||'')+'</td>'
-        +'<td>'+esc(it.dwell_hours)+'h</td>'
-        +'<td>'+(it.pending_count>0?esc(it.pending_count):'—')+'</td>'
-        +'<td>'+esc(it.suggestion||'')+'</td>'
-        +'<td>'+reasons.map(function(x){ return esc(x); }).join('<br>')+'</td></tr>';
-    }
-    html+='</table>'+(rep.red_line?'<div class="file">'+esc(rep.red_line)+'</div>':'');
-    tbl.innerHTML=html;
-    // Row click -> the host opens the ticket overlay (same as the Epics rows; this
-    // face does not duplicate the detail).
-    Array.prototype.forEach.call(tbl.querySelectorAll('tr[data-ticket]'), function(n){
-      n.onclick=function(){ openTicketInHost(n.dataset.ticket); };
-    });
-  }
-
-  // ---- t261005-10 (UI-2): Metrics tab (facts-only; the frozen four KPI fields) ----
   function loadMetrics(){
     if(!state.project){ state.metrics=null; renderMetrics(); return; }
     var q='window=7d&epic=all&project='+encodeURIComponent(state.project)+'&template=dev-lane&view=time';
@@ -1675,14 +1719,211 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       .then(function(r){ return r.json(); });
   }
 
+  // ---- Inspection tab (t261006-15) ----
+  var INSP = {
+    archive: null,        // the served archive payload (workbench inspection-archive route)
+    archiveReason: '',
+    records: null,
+    selected: '',         // the selected period ('' = latest reported / first render)
+    loadedFor: '',        // project the faces were loaded for (lazy-load gate, inspEnsureLoaded)
+    tables: ${INSP_TABLES}
+  };
+  // t261006-15 rework (404 fix): the Inspection faces load LAZILY — on first open of
+  // the tab, not on every setProject. The two inspection endpoints do not exist in
+  // other scenarios' page-boundary stub environments, and an eager fetch there 404s
+  // into the console, tripping the panel family's zero-pageerror guards
+  // (t261003-13 / t260929-03 / t261003-06). A tab that is never opened must never
+  // request anything.
+  function inspEnsureLoaded(){
+    if(!state.project) return;
+    if(INSP.loadedFor === state.project) return;
+    INSP.loadedFor = state.project;
+    inspLoad();
+  }
+  function inspLatestReported(){
+    // Ordering contract: the SERVER declares periods newest-first
+    // (inspection-archive.ts sortPeriodsDesc — never a payload iteration order).
+    // This scan is a belt-and-braces explicit pass over that declared sequence.
+    var ps = (INSP.archive && INSP.archive.periods) || [];
+    var latest = null, best = -1;
+    for(var i=0;i<ps.length;i++){
+      if(ps[i].any_report){
+        var n = Number(ps[i].period);
+        if(!isNaN(n) && n > best){ best = n; latest = ps[i].period; }
+      }
+    }
+    return latest;
+  }
+  function inspLoad(){
+    if(!state.project){ INSP.archive=null; INSP.records=null; inspRender(); return; }
+    var key = encodeURIComponent(state.project);
+    fetch('/sandbar-workbench/api/wf/inspection-archive?project='+key).then(function(r){return r.json();}).then(function(j){
+      INSP.archive = (j && j.result && j.result.ok === true) ? j.result : null;
+      INSP.archiveReason = (j && j.result && j.result.reason) || 'The period archive is not available.';
+      inspRenderPeriods();
+    }).catch(function(){ INSP.archive=null; INSP.archiveReason='The period archive could not be loaded.'; inspRenderPeriods(); });
+    fetch('/sandbar-executor-panel/api/inspection/trigger-records?project='+key).then(function(r){return r.json();}).then(function(j){
+      INSP.records = j || null;
+      inspRenderRecords();
+    }).catch(function(){ INSP.records = {ok:false, rows:[], reason:'The trigger records could not be loaded.'}; inspRenderRecords(); });
+  }
+  function inspRenderPeriods(){
+    var host = el('inspPeriodBtns'); host.innerHTML='';
+    var note = el('inspPeriodNote'); note.style.display='none';
+    if(!INSP.archive){
+      el('inspBody').innerHTML = '<div class="inspCard"><div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(INSP.archiveReason)+'</div></div>';
+      el('inspBanner').innerHTML='';
+      INSP.selected=''; inspRenderBody(); return;
+    }
+    // The items list already carries the merge/missing semantics (server-computed).
+    var items = INSP.archive.items || [];
+    var first = null;
+    items.forEach(function(it){
+      var b = document.createElement('button');
+      b.textContent = it.kind === 'no-report-run' ? it.label : it.period;
+      b.onclick = function(){ INSP.selected = (it.kind==='no-report-run') ? '' : it.period; inspRenderBody(items); };
+      host.appendChild(b);
+      if(first === null) first = { it: it, btn: b };
+    });
+    // Default selection: the newest reported period (first item that carries one).
+    var def = null;
+    for(var i=0;i<items.length;i++){
+      if(items[i].kind === 'period'){ def = items[i]; break; }
+      if(items[i].kind === 'no-report-run' && def === null) def = items[i];
+    }
+    var sel = INSP.selected || (def && def.kind === 'period' ? def.period : '');
+    INSP.selected = sel;
+    inspRenderBody(items);
+  }
+  function inspMarkActive(items){
+    var btns = el('inspPeriodBtns').children;
+    var items2 = items || (INSP.archive && INSP.archive.items) || [];
+    for(var i=0;i<btns.length && i<items2.length;i++){
+      var it = items2[i];
+      var on = (it.kind==='period') ? (it.period === INSP.selected) : (INSP.selected === '');
+      btns[i].setAttribute('data-on', on ? 'true' : 'false');
+    }
+  }
+  function inspRenderBody(items){
+    items = items || (INSP.archive && INSP.archive.items) || [];
+    inspMarkActive(items);
+    var banner = el('inspBanner'); var body = el('inspBody');
+    var C = INSP.tables.EMPTY_COPIES;
+    if(!INSP.archive){ body.innerHTML=''; return; }
+    // Find the selected item.
+    var item = null;
+    for(var i=0;i<items.length;i++){
+      if(items[i].kind==='no-report-run' && INSP.selected===''){ item = items[i]; break; }
+      if(items[i].kind==='period' && items[i].period===INSP.selected){ item = items[i]; break; }
+    }
+    if(!item){ body.innerHTML=''; banner.innerHTML=''; return; }
+    if(item.kind==='no-report-run'){
+      banner.innerHTML='';
+      var rows = '';
+      for(var j=0;j<item.periods.length;j++){
+        var p = item.periods[j];
+        var per = [];
+        for(var inst in p.reports){ if(p.reports[inst] && p.reports[inst].reason) per.push(inst+': '+p.reports[inst].reason); }
+        rows += '<tr><td>'+esc(p.period)+'</td><td class="num">'+esc(per.length?per.join(' · '):'no report file in the archive')+'</td></tr>';
+      }
+      body.innerHTML =
+        '<div class="inspCard"><div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(C.no_reports)+' '+esc(item.label)+'</div>'+
+        '<table><tbody>'+rows+'</tbody></table></div>';
+      return;
+    }
+    // A real period: view model (same implementation as the unit tests).
+    var latest = inspLatestReported();
+    var v = buildPeriodViewCore(
+      (INSP.archive.periods||[]).filter(function(p){ return p.period===item.period; })[0] || null,
+      latest,
+      INSP.archive.instances || [],
+      INSP.tables);
+    banner.innerHTML = v.read_only ? '<div class="banner">'+esc(v.banner)+'</div>' : '';
+    var html = '';
+    v.cards.forEach(function(c){
+      html += '<div class="inspCard"><div class="pad" style="display:flex;align-items:baseline;gap:8px;padding:0 var(--igx,14px)">'+
+        '<b>'+esc(c.label)+'</b><span class="inspMeta" style="margin-left:auto">'+esc(c.instance)+'</span></div>';
+      if(c.report_error){
+        html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(c.report_error)+'</div></div>';
+        return;
+      }
+      html += '<div class="inspNums">'+
+        '<div class="kv"><span>Findings</span><b>'+(c.counts?c.counts.total:'—')+'</b><span>'+esc(c.counts_copy)+'</span></div>'+
+        '<div class="kv"><span>Named items</span><b>'+c.named.length+'</b><span>'+esc(c.named_copy)+'</span></div>'+
+        '<div class="kv"><span>High</span><b>'+(c.counts?c.counts.high:'—')+'</b><span>severity: high</span></div>'+
+        '<div class="kv"><span>Med · low</span><b>'+(c.counts?(c.counts.med+' · '+c.counts.low):'—')+'</b><span>severity: med, low</span></div>'+
+        '</div>';
+      if(c.findings_copy) html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(c.findings_copy)+'</div>';
+      if(c.named.length){
+        html += '<table><thead><tr><th>Named findings</th></tr></thead><tbody>';
+        c.named.forEach(function(n2){ html += '<tr><td>'+esc(n2)+'</td></tr>'; });
+        html += '</tbody></table>';
+      }
+      html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)"><b>Coverage</b> · '+esc(c.coverage_copy)+'</div>';
+      if(c.not_reviewed && c.not_reviewed.length){
+        html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">Not reviewed (this is not a clean result):</div>';
+        html += '<table><tbody>';
+        c.not_reviewed.forEach(function(f){ html += '<tr><td>'+esc(f)+'</td></tr>'; });
+        html += '</tbody></table>';
+      }
+      if(c.reviewed && c.reviewed.length){
+        html += '<details style="padding:0;margin:0"><summary class="inspNote">Reviewed ('+c.reviewed.length+')</summary><div class="inspNote">'+c.reviewed.map(esc).join('<br>')+'</div></details>';
+      }
+      html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(v.range_note)+'</div>';
+      html += '</div>';
+    });
+    body.innerHTML = html;
+  }
+  function inspRenderRecords(){
+    var body = el('inspRecordsBody'); var empty = el('inspEmpty');
+    var j = INSP.records;
+    var rows = (j && j.rows) || [];
+    body.innerHTML = rows.map(function(r){
+      var st = r.spawn && r.spawn.ok === true
+        ? '<span style="color:var(--green)">started</span>'
+        : '<span style="color:var(--red)">failed</span>';
+      var res = r.spawn ? (r.spawn.ok === true ? (r.spawn.ticket_id || 'workflow started') : (r.spawn.error || 'failed')) : '—';
+      // state+result live in ONE right-aligned last column: the table's right text
+      // edge must sit on the shared right line (P6; arbitrate gen1 L1-right fix).
+      return '<tr><td>'+esc(new Date(r.at).toLocaleString())+'</td><td>'+esc(r.by)+
+        '</td><td>'+esc(r.scope)+'</td><td>'+esc(r.reason)+'</td><td style="text-align:right">'+st+' · '+esc(res)+'</td></tr>';
+    }).join('');
+    empty.style.display = rows.length ? 'none' : '';
+    el('inspRecords').style.display = rows.length ? '' : 'none';
+  }
+  el('inspRunBtn').onclick = function(){
+    el('inspDlg').style.display=''; el('inspDlg').setAttribute('data-open','true');
+    el('inspMsg').textContent='';
+  };
+  el('inspCancelBtn').onclick = function(){
+    el('inspDlg').style.display='none'; el('inspDlg').setAttribute('data-open','false');
+  };
+  el('inspStartBtn').onclick = function(){
+    var reason = el('inspReason').value;
+    if(!reason || !reason.trim()){ el('inspMsg').textContent='A reason is required — it is recorded with the trigger.'; return; }
+    el('inspMsg').textContent='Starting…';
+    postJson('/sandbar-executor-panel/api/inspection/trigger', {
+      project: state.project, instance: 'integration-tests', scope: el('inspScope').value, reason: reason
+    }).then(function(j){
+      if(j && j.ok === true){
+        el('inspMsg').textContent='The review was started and recorded.';
+        el('inspReason').value='';
+        inspLoad();
+      } else {
+        el('inspMsg').textContent='The review did not start: '+((j && (j.error||'')) || 'refused')+' (the attempt stays recorded).';
+      }
+    }).catch(function(e){
+      el('inspMsg').textContent='The review did not start: '+((e&&e.message)||e);
+    });
+  };
+
   // ---- tab switching ----
   // t261005-10 (UI-2): the nine-tab fixed order (mock v11); the four read-only
   // faces load on first activation (lazy — they are reference faces, not live
   // state, so they stay out of the 5s poll).
   var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],['t-ledger','paneLedger'],['t-alerts','paneAlert'],
-    ['t-inspection','paneInspection'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
-  var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': loadInspection, 't-metrics': loadMetrics, 't-docs': loadDocs };
-  function showTab(id){
+    ['t-inspection','paneInsp'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
+  var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': inspEnsureLoaded, 't-metrics': loadMetrics, 't-docs': loadDocs };  function showTab(id){
     for(var i=0;i<PANES.length;i++){
       el(PANES[i][1]).style.display = (PANES[i][0]===id) ? '' : 'none';
     }
@@ -1690,7 +1931,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(loader && state.project) loader();
   }
   Array.prototype.forEach.call(document.querySelectorAll('input.tab'), function(r){
-    r.onchange = function(){ if(r.checked) showTab(r.id); };
+    r.onchange = function(){
+      if(r.checked){
+        showTab(r.id);
+        // t261006-15: first open of the Inspection tab loads its faces (lazy — the
+        // two inspection endpoints are not served by every page-boundary stub env).
+        if(r.id === 't-inspection') inspEnsureLoaded();
+      }
+    };
   });
   function currentTabId(){
     var on=document.querySelector('input.tab:checked');
@@ -1768,11 +2016,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     state.inspection=null; state.inspectionError=''; state.metrics=null; state.metricsError='';
     state.docs=null; state.docSel='';
     try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
-    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); renderConcurrency(); renderLimitRow(); renderEpics(); renderInspection(); renderMetrics(); renderDocs(); return; }
-    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants();
+    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); renderConcurrency(); renderLimitRow(); renderEpics(); renderMetrics(); renderDocs(); return; }
+    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants(); loadConcurrency();
     var loader = TAB_LOADER[currentTabId()];
     if(loader) loader();
     loadConcurrency();
+    // t261006-15: the Inspection faces stay lazy (see inspEnsureLoaded) — TAB_LOADER
+    // only fires them when the user actually sits on the tab, so page environments
+    // without the inspection endpoints never see a request from here.
   }
   setInterval(function(){ if(state.project){ poll(); loadRequests(); loadActions(); loadConcurrency(); } }, POLL_MS);
   window.__panelSelect = setProject; // testability seam (browser scenario drives project selection)

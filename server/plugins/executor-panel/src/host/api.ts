@@ -40,6 +40,11 @@ import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResul
 import { grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, GRANT_OPS, toGrantOp,
   spawnEngineGrantsWrite, type EngineGrantsWriteFace, type EngineGrantsWritePayload } from './executor-grants.ts'
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
+import {
+  appendTriggerRecord, readTriggerRecords, validateTriggerInput,
+  makeDefaultSpawnTrigger, fsTriggerIo,
+  type TriggerIo, type SpawnTriggerFace,
+} from './inspection-triggers.ts'
 import { readConcurrency, spawnConcurrencyLimitWrite, CONCURRENCY_LIMIT_MIN, CONCURRENCY_LIMIT_MAX,
   CONCURRENCY_UNLIMITED, readLastLimitAudit, concurrencyDeclarationPath,
   type ConcurrencyRead, type ConcurrencyWriteFace } from './concurrency.ts'
@@ -119,6 +124,12 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   { path: '/sandbar-executor-panel/api/one-shot', methods: ['GET'] },
   { path: '/sandbar-executor-panel/api/one-shot/spawn', methods: ['POST'] },
   { path: '/sandbar-executor-panel/api/projects', methods: ['GET'] },
+  // t261006-15: on-demand inspection. The trigger POST is a WRITE (attributed,
+  // project's own account) and sits behind the KI-193 gate like every other write
+  // method (the gate is method-based above, not per-branch). The records GET is a
+  // read face over the same ledger (already-attributed facts only).
+  { path: '/sandbar-executor-panel/api/inspection/trigger-records', methods: ['GET'] },
+  { path: '/sandbar-executor-panel/api/inspection/trigger', methods: ['POST'] },
   // t261004-44 (KI-196 way out (2)): the question-bridge state face -- mounted flag /
   // per-kind counters / recent event ring. GET-only (read face); the read source is
   // deps.bridgeStatus (node.ts injects the createBridgeStatus sink).
@@ -158,6 +169,12 @@ export interface ApiDeps {
    *  Not injected = an explicit not-wired shape (mounted:false + a naming note), never a
    *  fake healthy snapshot. */
   bridgeStatus?: () => BridgeStatusSnapshot
+  /** t261006-15 trigger-record ledger io (default fs; tests inject an in-memory stub). */
+  triggerIo?: TriggerIo
+  /** t261006-15 trigger spawn face (default: spawn inspection_trigger.py via
+   *  makeDefaultSpawnTrigger, full lifecycle reaping; tests inject a stub — never a real
+   *  workflow start from a unit test). */
+  spawnTrigger?: SpawnTriggerFace
   /** Concurrency read face (default readConcurrency via the engine CLI; test stub injection, t261006-17). */
   engineConcurrencyRead?: (key: string, env: NodeJS.ProcessEnv) => Promise<ConcurrencyRead>
   /** Concurrency limit write face (default spawnConcurrencyLimitWrite via the engine CLI; test stub, t261006-17). */
@@ -447,6 +464,7 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       }
       return { status: 200, json: { ok: true, dismissed: res.dismissRow,
         ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+    }
     // ---- t261007-02: host state change (dismissed only; see setThreadState) ----
     if (path === '/sandbar-executor-panel/api/requests/state') {
       if (method !== 'POST') return bad(405, 'state face is POST-only (a write, recorded on the trail)')
@@ -725,6 +743,59 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       }
       return { status: 200, json: { ok: true, ...snap } }
     }
+    // ---- inspection trigger records (t261006-15, P4) ----
+    if (path === '/sandbar-executor-panel/api/inspection/trigger-records') {
+      if (method !== 'GET') return bad(405, 'read-only face: GET only')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const read = readTriggerRecords(deps.triggerIo ?? fsTriggerIo, env, key)
+      if (!read.ok) {
+        // An empty state is not an error state (200 + ok:false + human reason, same
+        // degraded style as the requests read side).
+        return { status: 200, json: { ok: false, source: read.source, reason: read.reason, rows: [] } }
+      }
+      return { status: 200, json: { ok: true, source: read.source, rows: read.rows,
+        malformed_rows: read.malformed_rows, hidden_rows: read.hidden_rows,
+        note: 'newest first by at; the full history stays in the project trigger record file' } }
+    }
+    // ---- inspection trigger (t261006-15, P3) — write, KI-193 gated above ----
+    if (path === '/sandbar-executor-panel/api/inspection/trigger') {
+      if (method !== 'POST') return bad(405, 'trigger face is POST-only (write operation, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const v = validateTriggerInput(parsed.body)
+      if (!v.ok) return bad(400, v.error)
+      // KI-193: the writer is named by the credential, fixed 'host'; a caller-reported
+      // by lands only in by_claimed (writer_mismatch visible).
+      const spawnFace: SpawnTriggerFace = deps.spawnTrigger ?? makeDefaultSpawnTrigger(env)
+      let spawnRes: Awaited<ReturnType<SpawnTriggerFace>>
+      try {
+        spawnRes = await spawnFace(v.value)
+      } catch (err) {
+        spawnRes = { ok: false, error: `trigger spawn face threw: ${err instanceof Error ? err.message : String(err)}` }
+      }
+      const record = {
+        at: now(),
+        by: 'host' as const,
+        ...(v.by_claimed !== undefined ? { by_claimed: v.by_claimed, writer_mismatch: true } : {}),
+        project: v.value.project,
+        instance: v.value.instance,
+        scope: v.value.scope,
+        reason: v.value.reason,
+        spawn: spawnRes.ok
+          ? { ok: true, ...(spawnRes.ticket_id ? { ticket_id: spawnRes.ticket_id } : {}) }
+          : { ok: false, error: spawnRes.error },
+      }
+      const written = appendTriggerRecord(deps.triggerIo ?? fsTriggerIo, env, v.value.project, record)
+      if (!written.ok) return bad(500, written.error)
+      // A failed trigger is an explicit 502 carrying the already-written attribution
+      // row — the attempt keeps its name, success or failure, never silent.
+      if (!spawnRes.ok) {
+        return { status: 502, json: { ok: false, error: spawnRes.error, record, written: written.file } }
+      }
+      return { status: 200, json: { ok: true, record, written: written.file } }
+    }
+    // ---- concurrency declaration (t261005-10, UI-2): the Overview limit row's face ----
     // ---- concurrency (t261006-17, CL-2): read the engine ledger / save the limit ----
     if (path === '/sandbar-executor-panel/api/concurrency') {
       const key = query.get('project') ?? ''

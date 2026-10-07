@@ -509,6 +509,7 @@ function isLinkRow(v: unknown): v is LinkRow {
   const r = v as Record<string, unknown>
   return r.type === 'link' && typeof r.to === 'string' && typeof r.at === 'number'
     && (r.kind === 'supersedes' || r.kind === 'duplicates' || r.kind === 'follows_up' || r.kind === 'blocks')
+}
 
 /** Strict dismiss-row guard (t261007-01): anything shape-off falls to the
  *  malformed counter — a dismiss row is never guessed into existence. */

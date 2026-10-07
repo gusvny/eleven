@@ -120,6 +120,24 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     cap: 'all',
     empty_copy: 'Not applicable: the settings form is fixed-shape.',
   },
+  // t261006-15: Inspection tab lists.
+  inspection_periods: {
+    id: 'inspection_periods',
+    title: 'Inspection — Period',
+    source: 'GET /sandbar-workbench/api/wf/inspection-archive?project=<key>, result.items (the period archive <project-repo>/out/inspection, whitelist inspection-<instance>-<YYYYMMDD>.json)',
+    order: 'Newest first: an explicit descending numeric sort of the YYYYMMDD period key in inspection-archive.ts sortPeriodsDesc — never a data source iteration order (the mock shipped the numeric-key ascending-enumeration bug this rule bans). Merged no-report runs keep the declared sequence adjacency; no date arithmetic anywhere.',
+    cap: 'all',
+    empty_copy: 'No inspection report in the archive yet.',
+  },
+  inspection_trigger_records: {
+    id: 'inspection_trigger_records',
+    title: 'Inspection — Reviews you started',
+    source: 'GET /sandbar-executor-panel/api/inspection/trigger-records?project=<key> (the project trigger record <projects_root>/<key>/inspection/trigger-records.jsonl; read model in inspection-triggers.ts)',
+    order: 'Newest first by at, sorted in inspection-triggers.ts before the page receives rows. Missing or malformed at sorts last. Equal at keeps file order (stable).',
+    cap: 50,
+    cap_reason: 'The tab shows the recent trigger history, not the record: the full attributed history stays in the project trigger-records.jsonl and the response carries hidden_rows plus the source path, so capping here hides a summary, not data.',
+    empty_copy: 'No reviews started yet.',
+  },
   // ---- t261005-10 (UI-2): the four faces that move into panel tabs ----
   epics_list: {
     id: 'epics_list',
@@ -152,14 +170,6 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     order: 'Fixed KPI order: tickets, closed, avg delivery, tokens total.',
     cap: 'all',
     empty_copy: 'No metrics yet for this window.',
-  },
-  inspection_items: {
-    id: 'inspection_items',
-    title: 'Inspection — report items',
-    source: 'GET /sandbar-workbench/api/wf/scan-report, report.items',
-    order: 'Payload order as the report generator wrote it (dwell severity order, not chronological).',
-    cap: 'all',
-    empty_copy: 'No pending tickets this round.',
   },
 }
 

@@ -47,10 +47,14 @@ const head = (id, extra = {}) => ({ type: 'request', id, at: 1000, project: 'alp
   assert(stOf('req-3') === 'resolved', 'state row resolved')
   assert(stOf('req-4') === 'dismissed', 'state row dismissed')
   assert(stOf('req-5') === 'superseded', 'state row superseded')
-  // waiting 只收 open（工单第 10 条）：折叠区收其余四态，等待列永不回流。
+  // waiting 只收 open（工单第 10 条）：折叠区收其余态，等待列永不回流。
+  // t261006-15 lane reconcile: the Overview renders THREE collapsed groups
+  // (Answered / Dismissed / resolved+superseded fold into Answered) — design note
+  // §9 "dismissed keeps its own bucket" — so answered=3, dismissed=1 here.
   const sp = splitWaiting(read.rows)
   assert(sp.waiting.length === 1 && sp.waiting[0].id === 'req-1', 'waiting list = open items only')
-  assert(sp.answered.length === 4, 'closed states collapse out of the waiting list')
+  assert(sp.answered.length === 3, 'answered/resolved/superseded collapse out of the waiting list')
+  assert(sp.dismissed.length === 1 && sp.dismissed[0].id === 'req-4', 'dismissed keeps its own bucket (design note §9)')
 }
 
 // ---------- answer 行仍判 answered（存量行零迁移）+ answered state 行同落 ----------
