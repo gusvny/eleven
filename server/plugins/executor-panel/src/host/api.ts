@@ -37,6 +37,9 @@ import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResul
 import { grantsReadoutState, isOpGranted, provenanceKeys, readDeclaration, GRANT_OPS, toGrantOp,
   spawnEngineGrantsWrite, type EngineGrantsWriteFace, type EngineGrantsWritePayload } from './executor-grants.ts'
 import { readRecentActions, fsActionsIo, type ActionsIo } from './recent-actions.ts'
+import { readConcurrency, spawnConcurrencyLimitWrite, CONCURRENCY_LIMIT_MIN, CONCURRENCY_LIMIT_MAX,
+  CONCURRENCY_UNLIMITED, readLastLimitAudit, concurrencyDeclarationPath,
+  type ConcurrencyRead, type ConcurrencyWriteFace } from './concurrency.ts'
 import { readOneShotFace, fsOneShotIo, type OneShotIo } from './one-shot-view.ts'
 import type { BridgeStatusSnapshot } from './question-bridge.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
@@ -114,12 +117,10 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   // per-kind counters / recent event ring. GET-only (read face); the read source is
   // deps.bridgeStatus (node.ts injects the createBridgeStatus sink).
   { path: '/sandbar-executor-panel/api/bridge/status', methods: ['GET'] },
-  // t261005-10 (UI-2): the Overview limit row's read face. CL-1 engine half only:
-  // declaration file <projects_root>/<key>/concurrency-limit.json, schema
-  // {"version":1,"limit":1..10|"unlimited"} (server/engine/concurrency.py is the
-  // single truth). The write face belongs to CL-2 — GET-only by design (one knob,
-  // and the knob is not this ticket's).
-  { path: '/sandbar-executor-panel/api/concurrency', methods: ['GET'] },
+  // t261006-17 (CL-2): concurrency read face + limit write face. GET reads the engine
+  // ledger (ticket.py op=concurrency) and never recomputes it; POST saves the
+  // declaration through the engine entry (client.py concurrency-limit-write, CL-2b).
+  { path: '/sandbar-executor-panel/api/concurrency', methods: ['GET', 'POST'] },
 ]
 
 export interface ApiDeps {
@@ -151,6 +152,10 @@ export interface ApiDeps {
    *  Not injected = an explicit not-wired shape (mounted:false + a naming note), never a
    *  fake healthy snapshot. */
   bridgeStatus?: () => BridgeStatusSnapshot
+  /** Concurrency read face (default readConcurrency via the engine CLI; test stub injection, t261006-17). */
+  engineConcurrencyRead?: (key: string, env: NodeJS.ProcessEnv) => Promise<ConcurrencyRead>
+  /** Concurrency limit write face (default spawnConcurrencyLimitWrite via the engine CLI; test stub, t261006-17). */
+  engineConcurrencyWrite?: ConcurrencyWriteFace
 }
 
 /** Wake-call result (ok:false always carries a human-readable reason — the receipt
@@ -698,40 +703,73 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       }
       return { status: 200, json: { ok: true, ...snap } }
     }
-    // ---- concurrency declaration (t261005-10, UI-2): the Overview limit row's face ----
+    // ---- concurrency (t261006-17, CL-2): read the engine ledger / save the limit ----
     if (path === '/sandbar-executor-panel/api/concurrency') {
-      if (method !== 'GET') return bad(405, 'read-only face: GET only')
       const key = query.get('project') ?? ''
       if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
-      const root = env.SANDBAR_PANEL_DIR || instanceProjectsRoot(env)
-      const declPath = join(root, key, 'concurrency-limit.json')
-      let raw: string
-      try {
-        raw = readFileSync(declPath, 'utf8')
-      } catch (e) {
-        const code = (e as { code?: unknown })?.code
-        if (code === 'ENOENT') {
-          // No declaration = a fact, not an error: the engine default applies, the
-          // row says so, and the absent write face is named (CL-2 boundary).
-          return { status: 200, json: { ok: true, project: key, declared: false, limit: null,
-            unlimited: false, path: declPath,
-            note: 'No concurrency limit declared. The engine default applies. The write control lands with CL-2.' } }
+      if (method === 'GET') {
+        const read = await (deps.engineConcurrencyRead ?? readConcurrency)(key, env)
+        if (!read.ok) {
+          // The engine's named refusal travels verbatim (declaration absent/malformed,
+          // malformed ledger, engine unreachable): the consumer renders an explicit
+          // degraded card, never an "empty list" fake. declared:false + limit:null ride
+          // along so the t261005-10 read-only row keeps its fact shape; an ABSENT
+          // declaration is reported as a fact (ok:true) with the engine's refusal text
+          // carried in `reason` — the engine gate itself still refuses to run without
+          // one (rule 9), so nothing here guesses a number.
+          const absent = /declaration absent/i.test(read.reason)
+          const face: Record<string, unknown> = absent
+            ? { ok: true, project: key, declared: false, limit: null, unlimited: false,
+                path: concurrencyDeclarationPath(key, env), reason: read.reason,
+                note: 'No concurrency limit declaration. The engine gate refuses to run a lane without one (CL-2 boundary: the write control saves through the engine entry).' }
+            : { ok: false, project: key, reason: read.reason, declared: false, limit: null,
+                path: concurrencyDeclarationPath(key, env) }
+          return { status: 200, json: face }
         }
-        return { status: 200, json: { ok: true, project: key, declared: false, limit: null,
-          unlimited: false, path: declPath,
-          reason: `declaration unreadable: ${e instanceof Error ? e.message : String(e)}` } }
+        const audit = readLastLimitAudit(key, env)
+        return {
+          status: 200,
+          json: {
+            ok: true, project: key,
+            declared: true, path: read.decl,
+            limit: read.limit, unlimited: read.unlimited,
+            at_work: read.holders.length, waiting: read.queue.length,
+            holders: read.holders, queue: read.queue, decl: read.decl,
+            audit: audit.ok ? { ok: true, by: audit.row.by, ts: audit.row.ts, from: audit.row.from, to: audit.row.to, file: audit.file }
+              : { ok: false, reason: audit.reason, file: audit.file },
+            note: 'numbers come from the engine ledger — the panel never recomputes positions or waited seconds',
+          },
+        }
       }
-      try {
-        const limit = parseConcurrencyDoc(raw)
-        return { status: 200, json: { ok: true, project: key, declared: true, limit,
-          unlimited: limit === null, path: declPath } }
-      } catch (e) {
-        // Present but malformed: declared stays false (the engine refuses this
-        // declaration too — validator messages carry the reason verbatim).
-        return { status: 200, json: { ok: true, project: key, declared: false, limit: null,
-          unlimited: false, path: declPath,
-          reason: e instanceof Error ? e.message : String(e) } }
+      if (method !== 'POST') return bad(405, 'GET/POST only (POST = save the limit through the engine entry)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const b = parsed.body as Record<string, unknown>
+      const limit = b.limit
+      if (limit !== CONCURRENCY_UNLIMITED
+        && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < CONCURRENCY_LIMIT_MIN || limit > CONCURRENCY_LIMIT_MAX)) {
+        return bad(422, `limit must be an integer ${CONCURRENCY_LIMIT_MIN}..${CONCURRENCY_LIMIT_MAX} or the string "${CONCURRENCY_UNLIMITED}" (got ${JSON.stringify(limit ?? null)})`)
       }
+      const byClaimed = typeof b.by === 'string' ? b.by : undefined
+      // KI-193: the writer is fixed 'host' (the only identity the credential proves);
+      // a body `by` is recorded as a mismatch, never authority.
+      const payload = { project: key, limit: limit as number | 'unlimited', by: 'host', source: auditSource(byClaimed) }
+      const res = await (deps.engineConcurrencyWrite ?? spawnConcurrencyLimitWrite)(payload)
+      const mismatch = byClaimed !== undefined && byClaimed !== null && byClaimed !== 'host'
+      if (!res.saved) {
+        // A refusal is the editor working (same semantics as settings/grants): 200 +
+        // saved:false + the named reason; while CL-2b has not landed the engine
+        // answers "unknown subcommand" -> the pinned engine-entry-absent refusal.
+        // The claimed identity stays visible on the failure branch too (never
+        // swallowed by the save outcome).
+        return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason,
+          ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+      }
+      return { status: 200, json: { ok: true, saved: true, project: key, limit: res.limit, audit_row: res.audit_row, decl: res.decl,
+        ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+    // t261005-10 (UI-2) note: its GET-only declaration read face on this route is
+    // SUPERSEDED by this CL-2 face (engine-ledger numbers + save); the response is a
+    // superset (limit/unlimited/decl), so the read-only row keeps working off `decl`.
     }
     return bad(404, `未知面板路由：${path}`)
   }

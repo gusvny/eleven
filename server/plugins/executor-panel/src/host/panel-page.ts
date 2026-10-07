@@ -45,6 +45,11 @@ import {
   projectIdentity, identityOutlinePath, identityBadgeSvg,
   baseIdentity, identityId, walkOffset, fnv1a, isProjectKeyLike,
 } from '../../../workbench/src/shared/project-identity.ts'
+// t261006-17 (CL-2): the limit knob step and the three-state chip classifier are
+// embedded the same way — the UT and the page always run one implementation. The
+// CONC_LIMITS constant table is embedded as JSON next to them (the embedded function
+// sources read it from page scope).
+import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 const EMBEDDED = [
@@ -60,6 +65,8 @@ const EMBEDDED = [
   String(fnv1a), String(isProjectKeyLike), String(baseIdentity), String(identityId),
   String(walkOffset),
   String(projectIdentity), String(identityOutlinePath), String(identityBadgeSvg),
+  // t261006-17 (CL-2): concurrency knob + chip classifier (same single implementation).
+  String(limitStep), String(concChipState),
 ].join('\n')
 
 /** Constant closure for the badge runtime (the page-side projectIdentity reads these tables; embedded as JSON). */
@@ -109,6 +116,13 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
 .dot.amber{background:var(--amber)}.dot.grey{background:var(--dot-grey)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
+/* t261006-17 (CL-2): the Running tickets block — knob buttons, limit value, three-state chip. */
+.concBtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;width:28px;height:24px;font:inherit;cursor:pointer;line-height:1;padding:0}
+.concBtn:hover{border-color:var(--blue)}
+.concVal{display:inline-block;min-width:80px;text-align:center;font-weight:600}
+.pill.conc-room{background:var(--pill-open-bg);color:var(--pill-open-fg)}
+.pill.conc-at{background:var(--pill-sign-bg);color:var(--pill-sign-fg)}
+.pill.conc-over{background:var(--warn-soft);color:var(--amber)}
 .meta{color:var(--muted);font-size:11px;white-space:nowrap}
 .chev{color:var(--muted);font-size:10px;flex:0 0 auto;transition:transform .15s}
 .row[data-open="true"] .chev{transform:rotate(90deg)}
@@ -263,6 +277,20 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
     </div>
     <div id="ovBanners"></div>
+    <div class="grp" id="concBlock">
+      <div class="line"><div class="lab" style="flex:0 0 auto">Running tickets <span id="concChip" class="pill conc-room" style="display:none"></span></div>
+        <span class="meta" id="concAudit" style="margin-left:auto"></span></div>
+      <div class="line" id="concKnobRow">
+        <div class="lab" style="flex:0 0 auto">Limit</div>
+        <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
+        <span class="concVal" id="concLimit">–</span>
+        <button class="concBtn" id="concPlus" title="One more ticket at the same time">+</button>
+        <span class="meta" id="concCounts"></span>
+        <button id="concSave" style="margin-left:auto">Save</button>
+        <span class="meta" id="concMsg"></span>
+      </div>
+      <div id="concList"></div>
+    </div>
     <!-- t261005-10 (UI-2): the ONE concurrency-limit row (CL-1 read face; the write
          face belongs to CL-2 and is named as absent when it is). Facts only. -->
     <div id="limitRow" class="meta" style="margin:-6px 0 10px 0"></div>
@@ -398,6 +426,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   var LIST_CONTRACTS = ${JSON.stringify(LIST_CONTRACTS)};
   // t261005-05 (UI-4): badge runtime constant closure (the page-side projectIdentity reads these tables).
   var IDENTITY_RUNTIME = ${IDENTITY_DATA};
+  // t261006-17 (CL-2): the limit-range table the embedded limitStep/concChipState read.
+  var CONC_LIMITS = ${JSON.stringify(CONC_LIMITS)};
   var PROJECT_PALETTE_12 = IDENTITY_RUNTIME.PROJECT_PALETTE_12;
   var IDENTITY_OUTLINES = IDENTITY_RUNTIME.IDENTITY_OUTLINES;
   var IDENTITY_STRUCTURES = IDENTITY_RUNTIME.IDENTITY_STRUCTURES;
@@ -432,6 +462,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     concurrency:null, epics:null, epicsReason:'', epicTickets:{}, epicOpen:'',
     inspection:null, inspectionError:'', metrics:null, metricsError:'',
     docs:null, docsScope:'docs', docSel:'' };
+  // t261006-17 (CL-2): the concurrency face + the knob draft (null = follow the saved limit).
+  state.conc = null;
+  state.concDraft = null;
   var saveMsg = '';
   var grantsSaveMsg = '';
   // t261003-14：UI 态搬到 JS state（键=请求 id），轮询重建 DOM 不再抹掉宿主视图。
@@ -932,6 +965,93 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('actList').innerHTML = html;
   }
 
+  // ---- concurrency (t261006-17, CL-2): limit knob + running list ----
+  // The read face only reads the engine ledger (passed through the API); the panel
+  // never recomputes. Refusal text renders verbatim — never a faked empty list.
+  function concChipLabel(kind){
+    return { room:'room to start one', at:'at the limit', over:'over the limit' }[kind] || kind;
+  }
+  function loadConcurrency(){
+    // ONE fetch feeds BOTH faces (t261006-17 block + t261005-10 limit row): the CL-2
+    // api response is the superset, and state.concurrency is derived from it — the
+    // two renderers never disagree about the numbers.
+    if(!state.project){ state.conc=null; state.concurrency=null; renderConcurrency(); renderLimitRow(); return; }
+    fetch('/sandbar-executor-panel/api/concurrency?project='+encodeURIComponent(state.project)).then(function(r){ return r.json(); }).then(function(j){
+      state.conc = j; state.concDraft = null;
+      state.concurrency = { ok:true, declared:j.declared !== false,
+        limit:j.limit, unlimited:j.unlimited === true, path:j.decl || j.path,
+        refusal:j.declared === false, reason:j.reason };
+      renderConcurrency(); renderLimitRow();
+    }).catch(function(){ state.conc = {ok:false, reason:'The concurrency endpoint could not be reached.'}; state.concurrency={ok:false}; renderConcurrency(); renderLimitRow(); });
+  }
+  function concDraftValue(){
+    if(state.concDraft !== null) return state.concDraft;
+    var c = state.conc;
+    if(!c || c.ok !== true) return null;
+    return c.unlimited === true ? CONC_LIMITS.unlimited : c.limit;
+  }
+  function renderConcurrency(){
+    var c = state.conc;
+    var chip = el('concChip'), knobRow = el('concKnobRow'), list = el('concList');
+    if(!state.project){
+      chip.style.display='none'; knobRow.style.display='none';
+      el('concAudit').textContent=''; el('concCounts').textContent=''; el('concLimit').textContent='–';
+      list.innerHTML=''; return;
+    }
+    if(!c || c.ok !== true){
+      chip.style.display='none'; knobRow.style.display='none';
+      el('concAudit').textContent=''; el('concCounts').textContent='';
+      list.innerHTML = '<div class="act" style="border:0"><span class="say muted">' + esc(c && c.reason ? c.reason : 'The concurrency state is not known yet.') + '</span></div>';
+      return;
+    }
+    if(c.declared === false){
+      // Absent/malformed declaration: the engine refuses to run without a usable
+      // declaration — show the named refusal, never a guessed default number.
+      chip.style.display='none'; knobRow.style.display='none'; el('concCounts').textContent='';
+      list.innerHTML = '<div class="act" style="border:0"><span class="say muted">' + esc(c.reason || c.note || 'No concurrency limit is declared.') + '</span></div>';
+      return;
+    }
+    knobRow.style.display='';
+    var kind = concChipState(c.limit, c.unlimited === true, c.at_work);
+    // The over state carries its amber marking in a class name (conc-amber) so a
+    // capture face can read it from the attribute instead of guessing colors.
+    chip.style.display=''; chip.className='pill conc-'+kind+(kind==='over'?' conc-amber':''); chip.textContent=concChipLabel(kind);
+    var a = c.audit;
+    el('concAudit').textContent = (a && a.ok === true) ? ('set by ' + a.by + ' ' + localDateTime(a.ts)) : 'never changed';
+    el('concCounts').textContent = c.at_work + ' at work · ' + c.waiting + ' waiting';
+    var v = concDraftValue();
+    el('concLimit').textContent = v === CONC_LIMITS.unlimited ? 'Unlimited' : String(v);
+    var html = '';
+    for(var i=0;i<c.holders.length;i++){
+      var h = c.holders[i];
+      var hold = h.reason === 'human-hold';
+      // A ticket waiting for a signature keeps its slot (amber solid dot); a running
+      // ticket is blue. No rule explanation inline (host ruling: the wording belongs
+      // in the document). The queue is NOT listed here (CL-3 face).
+      html += '<div class="act"><span class="dot'+(hold?' amber':' blue')+'" title="'+(hold?'Holds a slot while it waits for your signature':'Holds a slot')+'"></span>'
+        + '<span class="tk">'+esc(h.ticket)+'</span>'
+        + '<span class="say muted">'+(hold?'awaiting your signature':'at work')+'</span></div>';
+    }
+    if(c.holders.length === 0){
+      html = '<div class="act" style="border:0"><span class="say muted">No ticket holds a slot.</span></div>';
+    }
+    list.innerHTML = html;
+  }
+  el('concMinus').onclick = function(){ var v=concDraftValue(); if(v===null) return; state.concDraft=limitStep(v,-1); renderConcurrency(); };
+  el('concPlus').onclick  = function(){ var v=concDraftValue(); if(v===null) return; state.concDraft=limitStep(v,1); renderConcurrency(); };
+  el('concSave').onclick = function(){
+    if(!state.project) return;
+    var v = concDraftValue();
+    if(v === null){ el('concMsg').textContent='The current limit is not known yet.'; return; }
+    postJson('/sandbar-executor-panel/api/concurrency?project='+encodeURIComponent(state.project), { limit: v })
+      .then(function(j){
+        if(j.saved !== true){ el('concMsg').innerHTML = '<span class="bad">REJECTED: '+esc(j.reason || j.error || '?')+'</span>'; }
+        else { el('concMsg').textContent='The limit is saved.'; state.concDraft = null; }
+        loadConcurrency();
+      })
+      .catch(function(e){ el('concMsg').innerHTML = saveFailHtml(e); });
+  };
+
   // ---- Alerts / Ledger (STE copy) ----
   function renderAlertsLedger(){
     var st = state.status;
@@ -977,19 +1097,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('ledgerEvents').innerHTML = ev;
   }
 
-  // ---- t261005-10 (UI-2): Overview limit row (the ONE concurrency row; CL-1 read face) ----
-  function loadConcurrency(){
-    if(!state.project){ state.concurrency=null; renderLimitRow(); return; }
-    fetch('/sandbar-executor-panel/api/concurrency?project='+encodeURIComponent(state.project))
-      .then(function(r){ return r.json(); })
-      .then(function(j){ state.concurrency=j; renderLimitRow(); })
-      .catch(function(){ state.concurrency={ok:false}; renderLimitRow(); });
-  }
+  // ---- t261005-10 (UI-2): Overview limit row (render only; the loader is CL-2's
+  // loadConcurrency above — one fetch feeds both faces, no duplicate loader). ----
   function renderLimitRow(){
     var c = state.concurrency;
     var e = el('limitRow');
     if(!state.project || !c){ e.textContent=''; return; }
     if(c.ok!==true){ e.textContent='Running limit: unknown — the concurrency face could not be reached.'; return; }
+    if(c.refusal===true){ e.textContent='The concurrency face refused: '+c.reason; return; }
     if(c.declared===true){
       e.textContent='Running limit: '+(c.unlimited?'unlimited':c.limit)+' — declared in '+c.path+'.';
     } else if(c.reason){
@@ -1605,6 +1720,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     w.dataset.open = w.dataset.open==='true' ? 'false' : 'true';
   };
   var urlProj = ''; try{ urlProj = new URLSearchParams(location.search).get('project') || ''; }catch(e){}
+  // t261006-17: #project=<key> is the query-less fallback deep link (the console
+  // "point a project row" path); query string wins when both are present.
+  if(!urlProj){ try{ var h = (location.hash||'').match(/#project=([^&]+)/); if(h) urlProj = decodeURIComponent(h[1]); }catch(e){} }
   // t261003-09 缺陷 2：workbench 深链恒带 theme=light|dark；缺席/畸形 → 不设
   // data-theme，落 prefers-color-scheme（themeParamOf 纯函数，单测与页面同一份实现）。
   try{ var themeParam = themeParamOf(new URLSearchParams(location.search).get('theme')); if(themeParam) document.documentElement.dataset.theme = themeParam; }catch(e){}
@@ -1621,16 +1739,17 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     state.inspection=null; state.inspectionError=''; state.metrics=null; state.metricsError='';
     state.docs=null; state.docSel='';
     try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
-    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); renderLimitRow(); renderEpics(); renderInspection(); renderMetrics(); renderDocs(); return; }
-    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants(); loadConcurrency();
+    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); renderConcurrency(); renderLimitRow(); renderEpics(); renderInspection(); renderMetrics(); renderDocs(); return; }
+    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants();
     var loader = TAB_LOADER[currentTabId()];
     if(loader) loader();
+    loadConcurrency();
   }
-  setInterval(function(){ if(state.project){ poll(); loadRequests(); loadActions(); } }, POLL_MS);
+  setInterval(function(){ if(state.project){ poll(); loadRequests(); loadActions(); loadConcurrency(); } }, POLL_MS);
   window.__panelSelect = setProject; // testability seam (browser scenario drives project selection)
   // t261003-14（review #1）：手动触发一轮轮询（poll+loadRequests+loadActions），浏览器
   // 测试注入周期用它，不等真实 5s 墙钟。
-  window.__panelTick = function(){ if(state.project){ poll(); loadRequests(); loadActions(); } };
+  window.__panelTick = function(){ if(state.project){ poll(); loadRequests(); loadActions(); loadConcurrency(); } };
   setProject(urlProj);
 })();
 </script>

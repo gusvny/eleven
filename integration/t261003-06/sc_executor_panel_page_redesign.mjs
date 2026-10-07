@@ -100,17 +100,18 @@ async function main() {
     // /api/watchdog/status）；且页面按 { ok, result } 信封解包（poll()），裸对象=不可达假象。
     if (u.pathname.endsWith('/api/status')) return json({ ok: true, result: { declared: true, enabled: true, heartbeat: { alive: true, age_seconds: 12 }, ledger: { path: '/x', unreadable: false, counts: { lines: 3, duplicates: 0, bad: 0, gaps: 0 } }, liveness: { executor: { alive: true } } } })
     if (u.pathname.endsWith('/api/bridge/status')) return json({ ok: true, mounted: true, counters: { mirrored: 0 }, last_events: [] })
-    // t261005-10 UI-2 follow-up: the panel overview now fetches the concurrency
-    // read face and lazily fetches the read-only tab faces; an unstubbed fetch
-    // 404s and fails the hygiene leg on stub noise, not product. Honest empty /
-    // undeclared shapes only (no fabricated facts).
-    if (u.pathname.endsWith('/api/concurrency')) return json({ ok: true, project: 'stub', declared: false, limit: null, unlimited: false, path: '(stub: no declaration)' })
+    // t261006-17 (CL-2) + t261005-10 (UI-2) merged stubs: the page fetches the
+    // concurrency read face on load (and lazily fetches the read-only tab faces);
+    // an unstubbed fetch 404s and fails the hygiene leg on stub noise, not
+    // product. The concurrency face keeps the CL-2 quiet shape (empty holders /
+    // never-changed audit) so the zero-pageerror and render assertions judge
+    // THEIR faces, not the new block.
+    if (u.pathname.endsWith('/api/concurrency')) return json({ ok: true, project: 'alpha', limit: 3, unlimited: false, at_work: 0, waiting: 0, holders: [], queue: [], audit: { ok: false } })
     if (u.pathname.endsWith('/api/epics')) return json({ ok: true, result: { epics: [] } })
     if (u.pathname.endsWith('/api/wf/docs/tree')) return json({ ok: true, result: { tree: [] } })
     if (u.pathname.endsWith('/api/wf/docs/doc')) return json({ ok: true, result: { path: '(stub)', markdown: '' } })
     if (u.pathname.endsWith('/api/wf/metrics')) return json({ ok: true, result: {} })
     if (u.pathname.endsWith('/api/wf/scan-report')) return json({ ok: true, result: { findings: [], pending: 0 } })
-
     res.writeHead(404); res.end('{}')
   })
   await new Promise(r => stub.listen(0, '127.0.0.1', r))
