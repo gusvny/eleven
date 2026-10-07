@@ -159,5 +159,26 @@
     "project_pattern": "t26090502-*",
     "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
     "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族）；261001 加入本清单，切片实测本条目 PASS。"
+  },
+  {
+    "entry": "t261005-13-receipt-port-contract",
+    "pool": "ro",
+    "project_pattern": "sc-t26100513-*",
+    "reason": "被测对象=receipt-port 契约本体：场景自驱 stage_docker CLI、自有临时工程名（sc_t26100513_receipt_port_contract.py 头注与 :91 直呼实证）——批台复用会换掉被测对象本身，与清单既有三条 engine 池 stage-docker 契约条目同族。注册池=ro，按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免。",
+    "evidence": "integration/t261005-13/sc_t26100513_receipt_port_contract.py:8,91 自驱 stage_docker.py CLI；261005 登记（t261005-10 arbitrate gen8 首入，gen9 复核；本条为 implement gen7 确定性重加——worker squash 曾两次丢弃该条目，KI 候选 F7）"
+  },
+  {
+    "entry": "t261006-03-engine-path-mount-contract",
+    "pool": "ro",
+    "project_pattern": "sc-t26100603-*",
+    "reason": "被测对象=engine-path mount 契约本体（t261006-03）：场景自驱 stage_docker CLI / 自有临时工程名，批台复用会换掉被测对象——与清单既有 stage-docker 契约条目同族。注册池=ro，按清点判据在此显式登记豁免。",
+    "evidence": "integration/t261006-03/sc_engine_path_mount_contract.py 直呼 stage_docker CLI（grep 实证）；t261005-10 arbitrate gen17 首入；F7 丢失史：23ca6a0 merge 解析取 main 侧版本第三次丢弃，implement gen20 确定性重加。"
+  },
+  {
+    "entry": "t261006-03-engine-path-capture-journey",
+    "pool": "browser",
+    "project_pattern": "sc-t26100603-*",
+    "reason": "被测对象=engine 自有采集链全旅程（run_capture_stage services=flat -> capture-lane --stage-json，t261006-03）：自带工程名起拆台，批台不在位/复用都会换掉被测链。注册池=browser，同族豁免。",
+    "evidence": "integration/t261006-03/sc_engine_path_capture_journey.py 自驱采集链（场景头注与 run 体）；F7 丢失史同上，gen20 重加。"
   }
 ]

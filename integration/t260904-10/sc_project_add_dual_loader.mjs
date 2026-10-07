@@ -3,13 +3,13 @@
 // intent（用户可感知行为）：宿主用 `sandbar project add` 接入一个项目后，该条目立即被
 // 两侧装载器一致消费——Python（shared.load_projects_registry，工单锚定闸的数据源）
 // 与 TS（project-registry.ts loadRegistry，workbench API 消费方）装载出同一条目
-// （key/name/dirs 全等）、零隔离；既有条目（tracked 迁移种子产出的 suyou）字节不动
+// （key/name/dirs 全等）、零隔离；既有条目（tracked 迁移种子产出，261005 起种子=sandbar，KI-204 种子更正）字节不动
 // （决策7 现状不动账）；写入零 tmp 残留；体检报告三词汇（verify.yaml/credentials/paths）
 // 在文且不阻塞。
 //
 // high-level steps：
 //   1. 全新隔离根（SANDBAR_PROJECTS_DIR=临时目录，无 .migrated）→ Python 侧首次装载：
-//      触发 tracked 种子（server/projects.yaml）自动播种，断言 suyou 在案+标记落盘；
+//      触发 tracked 种子（server/projects.yaml）自动播种，断言种子条目（sandbar）在案+标记落盘；
 //   2. 快照注册表根（既有条目字节+目录清单）；
 //   3. 真跑 `project add <key> <name> <root_dir> --json`（裸 fixture 根）→ exit 0、
 //      --json 可解析、含该 key；
@@ -40,13 +40,13 @@ const root = tmpRoot('fix10-dual-');
 const first = pyRegistry(root);
 const seededKeys = first.projects.map((p) => p.key);
 c.check('首装载零隔离', first.quarantined.length === 0, JSON.stringify(first.quarantined));
-c.check('种子自动播种产出 suyou 条目（tracked 种子契约）', seededKeys.includes('suyou'),
+c.check('种子自动播种产出 sandbar 条目（tracked 种子契约；261005 种子更正 KI-204）', seededKeys.includes('sandbar'),
   `实际 key 集=${JSON.stringify(seededKeys)}`);
 c.check('.migrated 标记由首装载落盘', existsSync(path.join(root, '.migrated')));
 
 // ---- 2. 快照既有现场（决策7 断言基线） ----
 const seededSnapshot = snapshotRoot(root);
-const suyouBytes = readFileSync(path.join(root, 'suyou', 'project.yaml'), 'utf8');
+const seededBytes = readFileSync(path.join(root, 'sandbar', 'project.yaml'), 'utf8');
 
 // ---- 3. add --json 成功路径（裸 fixture 项目根；位置参数面=实现期冻结的 CLI 契约） ----
 const dirA = tmpRoot('fix10-proj-a-');
@@ -77,7 +77,7 @@ c.check('条目 dirs=单根模型恰一条且为输入根',
   entryA && entryA.dirs.length === 1 && entryA.dirs[0] === dirA,
   JSON.stringify(entryA));
 c.check('种子条目字节不动（决策7）',
-  readFileSync(path.join(root, 'suyou', 'project.yaml'), 'utf8') === suyouBytes);
+  readFileSync(path.join(root, 'sandbar', 'project.yaml'), 'utf8') === seededBytes);
 const afterSnapshot = snapshotRoot(root);
 c.check('注册表根无 .tmp. 泄漏', assertNoTmpLeak(afterSnapshot));
 c.check('既有条目集合不变（新增恰两条 fixture）',
@@ -92,7 +92,7 @@ c.check('TS 侧装载出全部新条目',
   ['zfix10a', 'zfix10b'].every((k) => tsKeys.includes(k)),
   `TS 实际=${JSON.stringify(tsKeys)}`);
 c.check('TS 侧零隔离', (reg.quarantined || []).length === 0, JSON.stringify(reg.quarantined || []));
-c.check('TS 侧含种子条目 suyou', tsKeys.includes('suyou'));
+c.check('TS 侧含种子条目 sandbar', tsKeys.includes('sandbar'));
 for (const k of ['zfix10a', 'zfix10b']) {
   const py = after.projects.find((p) => p.key === k);
   const t = reg.projects.find((p) => p.key === k);

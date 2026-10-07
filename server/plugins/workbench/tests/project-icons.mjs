@@ -30,11 +30,16 @@ const sidebar = read('server/plugins/workbench/src/client/sidebar.tsx')
 const index = read('server/plugins/workbench/src/client/index.tsx')
 const epics = read('server/plugins/workbench/src/client/epics.tsx')
 
-section('A 图标模块：五枚 specs + 规格单源')
-for (const name of ['board', 'docs', 'routes', 'epics', 'settings']) {
+// t261005-10 (UI-2)：图标族随视图归并退役——board/docs/epics 三枚退（Epics/Docs
+// 住面板 tab，工单详情走左列行浮层），图标族只留 More views 里的两枚。
+section('A 图标模块：两枚 specs + 规格单源')
+for (const name of ['routes', 'settings']) {
   ok(icons.includes(`${name}: { title:`), `spec ${name} 在案`)
 }
-for (const title of ['Tickets', 'Docs', 'Model Routes', 'Epics', 'Project Settings']) {
+for (const gone of ['board', 'docs', 'epics']) {
+  ok(!new RegExp(`${gone}: \\{ title:`).test(icons), `retired spec ${gone} 已退`)
+}
+for (const title of ['Model Routes', 'Project Settings']) {
   ok(icons.includes(`'${title}'`), `title/aria「${title}」齐备`)
 }
 ok(icons.includes("PROJECT_ICON_VIEWBOX = '0 0 20 20'"), 'viewBox 20×20 单源')
@@ -44,19 +49,18 @@ ok(icons.includes('width="18"') && icons.includes('height="18"'), '显形 18px')
 ok(icons.includes('aria-label={spec.ariaLabel}'), 'aria-label 恒同 title')
 ok(icons.includes('滑杆') && icons.includes('带箭头分流'), '修订11 两枚重绘语义在案（设置=滑杆/路由=分流）')
 
-section('B sidebar 渲染点：五枚换装 + 语义保留')
-ok(sidebar.includes("<ProjectIcon name=\"board\" />"), '工单列表换装')
-ok(sidebar.includes("<ProjectIcon name=\"docs\" />"), '文档换装（t260905-06 旧提法退役）')
-ok(sidebar.includes("<ProjectIcon name=\"routes\" />"), '模型路由换装')
-ok(sidebar.includes("<ProjectIcon name=\"epics\" />"), '立项单换装')
+section('B sidebar 渲染点：More views 两枚 + 语义保留')
+ok(!sidebar.includes("<ProjectIcon name=\"board\" />"), 'board 图标退役（UI-2）')
+ok(!sidebar.includes("<ProjectIcon name=\"docs\" />"), 'docs 图标退役（UI-2）')
+ok(!sidebar.includes("<ProjectIcon name=\"epics\" />"), 'epics 图标退役（UI-2）')
+ok(sidebar.includes("<ProjectIcon name=\"routes\" />"), '模型路由换装（More views 保留）')
 ok(sidebar.includes("<ProjectIcon name=\"settings\" />"), '第五枚设置入口')
 ok(sidebar.includes('data-wb-project-settings-entry=""'), '设置入口语义锚')
-ok((sidebar.match(/onClick=\{\(\) => handleViewIcon\(g\.project\.key, '(board|docs|routes|epics)'\)\}/g) ?? []).length === 4,
-  '四视图 onClick 语义零回归（onKeyDown 键位行不混入计数）')
+ok((sidebar.match(/onClick=\{\(\) => handleViewIcon\(g\.project\.key, '(routes)'\)\}/g) ?? []).length === 1,
+  '视图 onClick 只剩 routes（onKeyDown 键位行不混入计数）')
 ok(!sidebar.includes('knowledge'), 't260905-06：knowledge 提法清零（图标键）')
-ok((sidebar.match(/className=\{`wb-view-icon \$\{rightView === '(board|routes|epics)' && viewProject === g\.project\.key \? 'active' : ''\}`\}/g) ?? []).length === 3,
-  'per-project 三视图 active 态零回归')
-ok(sidebar.includes("rightView === 'docs' ? 'active' : ''"), '文档视图 active=全仓单例（不判 viewProject，t260905-06 C1）')
+ok((sidebar.match(/className=\{`wb-view-icon \$\{rightView === 'routes' && viewProject === g\.project\.key \? 'active' : ''\}`\}/g) ?? []).length === 1,
+  'per-project 视图 active 态只剩 routes')
 ok(sidebar.includes("width:26px; height:26px") && sidebar.includes('border-radius:6px'), '命中区 26×26 radius 6')
 
 section('C emoji 清零（三文件）+ 白名单豁免')

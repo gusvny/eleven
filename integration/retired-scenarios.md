@@ -115,3 +115,87 @@ t260904-06-spec-card-dom（含 XSS 保真）、t260926-05-inspection-report-ui-d
 t260905-05-modal-dialog-semantics、t260913-02-integ-run-singleflight（与
 t261002-03 并发标定合并处置）——按 261002 直修批同款「终态/结构锚＋两级点击」
 修判法；修后仍 >20% 红再议退。
+
+
+## 261005 退役批（t261005-10 UI-2 中栏 tab 归并的产品性退役；登记=integration 岗位复核项）
+
+产品事实：宿主拍板（epic console-ui item UI-2，mock 261004-concurrency-limit-mock v11）把中栏 tab 归并为
+面板内九页签（Overview / Epics / Ledger / Alerts / Inspection / Metrics / Docs / Grants / Settings），
+**状态看板删除**、Epics/Docs 迁入 tab、Metrics 自侧栏迁入、旧 Metrics 入口三连同退。下列场景的被测主体
+随该产品决定整体消失，退役=把产品决定落账（非红账处理）。回归责任移交：面板 tab 的新在场/降级契约由
+本票新场景 t261005-10-ui2-panel-tab-order-contract / -board-metrics-entrance-retired / -epics-docs-metrics-tabs-journey 承接。
+
+### metrics-donut-dom
+- 守什么：宿主 echarts 度量面板三 donut 真渲染 + cache-first 角标（黑盒 DOM 基线）。
+- 为什么退：宿主度量面板（metrics.tsx 三级入口 + echarts 渲染层）随「Metrics 迁入面板 tab」整体退役；
+  面板 tab 是事实面 KPI 卡（mock v11 无仪表盘），无 canvas 可守。
+- 移交：数据聚合 L1（host/metrics.ts、metrics-model、metrics-charts 的 tests/*）原样保留；面板 tab 事实面
+  由 t261005-10 journey U4（fixture 数值可见）承接。
+- 认赔：真浏览器下 echarts 交付/时间/令牌环形图无人守——若宿主要回迁仪表盘，按本留痕复活。
+
+### t260905-06-doc-entry-present
+- 守什么：左列「文档」图标在场/键盘可达/active 高亮。
+- 为什么退：Docs 迁入面板 Docs tab，宿主图标退役（More views 只剩 Model Routes + Project Settings）。
+- 移交：面板 Docs tab 在场 + 渲染由 t261005-10 journey U3 承接。
+- 认赔：无（入口面由 journey 的 data-tab="docs" 契约守）。
+
+### t260905-06-doc-read-through
+- 守什么：宿主文档视图目录→篇→正文链路、穿路径拒收、窄栏单栏流。
+- 为什么退：被测视图整体退役。数据面契约（tree/doc 白名单/穿路径 fail-closed）不随视图退役。
+- 移交：API 契约由 t260910-10-docs-project-anchor 承接（未退役）；面板 Docs tab 的 tree+正文渲染由
+  t261005-10 journey U3 承接（同一 renderMarkdown 渲染器）。
+- 认赔：窄栏单栏流在面板 Docs tab 内无人守（后续如需，开面板 Docs tab 版面票）。
+
+### t260910-10-docs-ui-mock-v1
+- 守什么：宿主文档视图 mock v1 版面旅程（chips/大纲/搜索/折叠/空态）。
+- 为什么退：视图退役（同上）。
+- 移交：API 锚解析/回落/注入面由 t260910-10-docs-project-anchor 承接（未退役）。
+- 认赔：文档阅读 UI 的细粒度旅程（大纲跳转/搜索过滤）在面板 Docs tab 无人守——面板 tab 是精简只读面，
+  如宿主要全量旅程，开票补。
+
+### t260915-10-docs-follow-project
+- 守什么：DocsSection 跟随壳层项目（初值/手动优先/重挂载/空态指引）。
+- 为什么退：跟随语义被 ?project= 深链取代（面板 tab 由宿主按项目深链打开，无第二项目语境源）。
+- 移交：面板侧项目语境 = executor-panel 深链（executor-view.tsx executorPanelUrl），由 t260929-22 族先例锚守。
+- 认赔：无独立场景守「面板 Docs tab 的 project 参数透传」（t261005-10 journey 的 stub 按 URL 断言可扩展）。
+
+### t260915-09-epics-client-project-wire
+- 守什么：宿主立项单视图的 client/host wire（?project= 穿参）。
+- 为什么退：宿主 Epics 视图退役；面板 Epics tab 的 wire 由 /epics?project= + /epics/<code>/tickets?project= 承接。
+- 移交：面板 epic 面（列表/票行/下钻）由 t261005-10 journey U1/U2 承接。
+- 认赔：epics 端点 per-project 锚（KI-057）在面板消费面无独立旅程（API 面仍有 L1/L2）。
+
+### t260915-08-board-ui
+- 守什么：状态看板巡检行卡的 UI 渲染层（S0 bundle 锚 + S1 真点）。
+- 为什么退：状态看板整体删除（UI-2 票面第一句）；巡检行在左栏的行卡与详情浮层巡检面不随看板退役。
+- 移交：巡检数据面由 t260915-08-board-rows / sign-journey 承接（未退役）；面板 Inspection tab 在场由
+  t261005-10 journey 承接。
+- 认赔：巡检行「等你黄底/去签字钮」的行卡级 DOM 断言无人守（左栏行卡仍有黄调 CSS 与徽标，无专场景）。
+
+
+## 261005 退役批二（t261005-10 arbitrate round-2 Family C 收口；登记=integration 岗位复核项）
+
+### t260904-17-ticket-list-rowcard-ui
+- 守什么：中列状态看板整页契约——四态 chips 计数、行卡动作位（Sign →/View Reason）、收口折叠、分页。
+- 为什么退：状态看板整页随 UI-2 删除（票面第一句）；这些判据全是板面页 DOM，无处可迁。
+- 移交：左栏行卡 `data-ticket-id` 可测性锚由 t260915-19 / t260916-15 sidebar 场景继续守；
+  行卡组件共享（TicketRowCard 同一实现，compact 只是省略站道与动作位）。
+- 认赔：板面级「状态分布一眼可见」无人守——这是 UI-2 的既定产品取舍（左栏=有序队列，面板 tab=状态面）。
+
+### t260905-07-ticket-detail-panel
+- 守什么：板面全尺寸行卡的行标题契约（data-wb-row-title / data-title-src=first）+ enrich=progress
+  数据通道 + 行点击开详情抽屉。
+- 为什么退：板面删除后，夹具票（t260903-10 等 9 月初收口票）已出左栏驻留窗（sandbarHours 窗），
+  左栏重定位在真实台面上不可达——不是改锚能解，是被测可达面消失。
+- 移交：`data-wb-row-title` 属性仍由共享组件 TicketRowCard 渲染（左栏 compact 卡同样带锚），
+  组件级断言留待后续票以组件测试接管；enrich=progress 数据通道由 host 契约测试守；
+  行点击→详情浮层由 t261005-04-ticket-detail-overlay 承接（已重定位绿）。
+- 认赔：行标题契约暂无专场景（组件级补测为后续项，登记为欠账而非静默丢失）。
+
+### t260907-08-wb-contrast-quadrant
+- 守什么：四视图（board/docs/epics/metrics 浮层）遍历的中列文字对比度四象限走查。
+- 为什么退：被遍历的宿主视图整体退役（board 删除、Docs/Epics 迁面板 tab、度量浮层三连同退）——
+  走查对象不复存在，子用例全数落 na 不是「绿」是「无对象」。
+- 移交：对比度哨兵语义由主题令牌（DERIVE_TOKENS_CSS）与 t260905-08 contrast-guard 的存活面承接；
+  面板九页签的对比度走查属面板 tab 世界，若宿主要求，按面板 tab 版面开新走查票。
+- 认赔：面板 tab 面的文字对比度暂无遍历场景（面板页用既有主题词表，零硬编码色——t261004-10 教训口径）。

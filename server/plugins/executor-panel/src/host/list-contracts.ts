@@ -120,6 +120,47 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     cap: 'all',
     empty_copy: 'Not applicable: the settings form is fixed-shape.',
   },
+  // ---- t261005-10 (UI-2): the four faces that move into panel tabs ----
+  epics_list: {
+    id: 'epics_list',
+    title: 'Epics — list',
+    source: 'GET /sandbar-workbench/api/epics?project=<key>, result.epics (notes/epics/<code>.md registry)',
+    order: 'Payload order as the epics endpoint returns it (file name order, not chronological).',
+    cap: 'all',
+    empty_copy: 'This project has no epic yet (notes/epics/ is empty or absent).',
+  },
+  epic_tickets: {
+    id: 'epic_tickets',
+    title: 'Epics — tickets in one epic',
+    source: 'GET /sandbar-workbench/api/wf/tickets?project=<key> grouped client-side by the row epic field',
+    order: 'Newest first by updated_ts (missing or malformed sorts last; equal keeps payload order, stable).',
+    cap: 'all',
+    empty_copy: 'No open ticket in this epic.',
+  },
+  docs_tree: {
+    id: 'docs_tree',
+    title: 'Docs — file tree',
+    source: 'GET /sandbar-workbench/api/wf/docs/tree?scope=docs|notes&project=<key>, groups[].files',
+    order: 'Payload order: groups by directory name, files alphabetical inside a group (server-side buildDocTree).',
+    cap: 'all',
+    empty_copy: 'The library is empty for this scope.',
+  },
+  metrics_kpis: {
+    id: 'metrics_kpis',
+    title: 'Metrics — KPI cards',
+    source: 'GET /sandbar-workbench/api/wf/metrics?window=7d&epic=all&project=<key>&template=dev-lane&view=time, kpis (frozen four fields)',
+    order: 'Fixed KPI order: tickets, closed, avg delivery, tokens total.',
+    cap: 'all',
+    empty_copy: 'No metrics yet for this window.',
+  },
+  inspection_items: {
+    id: 'inspection_items',
+    title: 'Inspection — report items',
+    source: 'GET /sandbar-workbench/api/wf/scan-report, report.items',
+    order: 'Payload order as the report generator wrote it (dwell severity order, not chronological).',
+    cap: 'all',
+    empty_copy: 'No pending tickets this round.',
+  },
 }
 
 /** 取某列表声明的数字上限；'all' 或未知 id 都算编程错误（上限必须显式命名使用）。 */

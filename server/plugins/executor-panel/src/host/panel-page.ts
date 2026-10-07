@@ -9,7 +9,12 @@
  *
  * 版面（设计 note §2 / mock 261003）：顶部只有 Executor + 项目标签——项目选择器
  * （下拉/手填/Load）与轮询状态行**不存在**；项目来自 ?project= 深链（workbench
- * 项目行进面板即该项目）。页签 Overview / Grants / Alerts / Ledger / Settings。
+ * project row). Tabs (t261005-10 UI-2 consolidated order, mock v11):
+ * Overview / Epics / Ledger / Alerts / Inspection / Metrics / Docs / Grants / Settings——
+ * Epics/Docs/Metrics/Inspection are read-only faces (source = same-origin workbench
+ * GET endpoints; unreachable = a named degraded face, never a blank pane). The
+ * Overview carries ONE concurrency-limit row (the CL-1 read face; the write face
+ * belongs to CL-2 — this ticket adds no second knob).
  * Overview 两栏并列（左=等你回，右=最近动作），窄于 760px 叠放（.cols media query）。
  *
  * 语义（设计 note §3）：Overview 的 Disable executor 与 Grants 总开关是**同一份状态**
@@ -90,7 +95,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 input.tab{position:absolute;opacity:0;pointer-events:none}
 .seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
 .seg label:hover{color:var(--fg)}
-#t-overview:checked~.seg label[for=t-overview],#t-grants:checked~.seg label[for=t-grants],#t-alerts:checked~.seg label[for=t-alerts],#t-ledger:checked~.seg label[for=t-ledger],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}
+#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-ledger:checked~.seg label[for=t-ledger],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}
 .badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
@@ -208,6 +213,13 @@ table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel)
 th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 th{color:var(--muted);font-weight:600;font-size:11px}
 .good{color:var(--green)} .bad{color:var(--red)} .muted{color:var(--muted)}
+/* t261005-10 (UI-2): clickable rows of the Epics/Docs read-only faces — the .line
+   row shape with the .head hover feedback. */
+.mrow{cursor:pointer}
+.mrow:hover{background:var(--hover)}
+.docfile{font-family:ui-monospace,monospace;font-size:12px}
+.backbtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:4px 12px;font:inherit;cursor:pointer;margin-bottom:8px}
+.backbtn:hover{border-color:var(--blue);color:var(--blue)}
 .foot{margin-top:26px;color:var(--faint);font-size:11px}
 </style>
 </head>
@@ -216,17 +228,27 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   <div class="top"><h1>Executor</h1><span class="chip" id="projChip"><span id="projBadge"></span><span id="projKey"></span></span></div>
 
   <input class="tab" type="radio" name="tb" id="t-overview" checked>
-  <input class="tab" type="radio" name="tb" id="t-grants">
-  <input class="tab" type="radio" name="tb" id="t-alerts">
+  <input class="tab" type="radio" name="tb" id="t-epics">
   <input class="tab" type="radio" name="tb" id="t-ledger">
+  <input class="tab" type="radio" name="tb" id="t-alerts">
+  <input class="tab" type="radio" name="tb" id="t-inspection">
+  <input class="tab" type="radio" name="tb" id="t-metrics">
+  <input class="tab" type="radio" name="tb" id="t-docs">
+  <input class="tab" type="radio" name="tb" id="t-grants">
   <input class="tab" type="radio" name="tb" id="t-settings">
 
   <div class="seg">
-    <label for="t-overview">Overview <span id="reqBadge" class="badge zero">0</span></label>
-    <label for="t-grants">Grants</label>
-    <label for="t-alerts">Alerts</label>
-    <label for="t-ledger">Ledger</label>
-    <label for="t-settings">Settings</label>
+    <!-- t261005-10 (UI-2): data-tab anchors in the fixed declared order (the
+         tab-order contract scenario asserts this exact sequence). -->
+    <label for="t-overview" data-tab="overview">Overview <span id="reqBadge" class="badge zero">0</span></label>
+    <label for="t-epics" data-tab="epics">Epics</label>
+    <label for="t-ledger" data-tab="ledger">Ledger</label>
+    <label for="t-alerts" data-tab="alerts">Alerts</label>
+    <label for="t-inspection" data-tab="inspection">Inspection</label>
+    <label for="t-metrics" data-tab="metrics">Metrics</label>
+    <label for="t-docs" data-tab="docs">Docs</label>
+    <label for="t-grants" data-tab="grants">Grants</label>
+    <label for="t-settings" data-tab="settings">Settings</label>
   </div>
 
   <div id="noProject" class="banner red" style="display:none">No project is selected. Open this panel from a project row, or add ?project=&lt;project-key&gt; to the address.</div>
@@ -241,6 +263,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
     </div>
     <div id="ovBanners"></div>
+    <!-- t261005-10 (UI-2): the ONE concurrency-limit row (CL-1 read face; the write
+         face belongs to CL-2 and is named as absent when it is). Facts only. -->
+    <div id="limitRow" class="meta" style="margin:-6px 0 10px 0"></div>
     <div class="cols">
       <div>
         <div class="sect" id="waitHead">Needs your answer · 0</div>
@@ -268,6 +293,41 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         <div class="row" style="padding:2px 4px" id="actList"></div>
       </div>
     </div>
+  </section>
+
+  <!-- t261005-10 (UI-2): Epics tab — read-only face over the workbench epics API.
+       Epic rows drill in-tab (single layer, ← Back); a ticket row asks the host
+       console (postMessage) to open the ticket-detail overlay (UI-3 machinery). -->
+  <section id="paneEpics" style="display:none">
+    <div id="epicsBanner"></div>
+    <div id="epicsList"></div>
+    <div id="epicDetail"></div>
+  </section>
+
+  <!-- t261005-10 (UI-2): Inspection tab — read-only face over the latest scan report.
+       The report content itself belongs to the inspection epic; this tab only makes
+       it reachable and ordered (epic division of labour). -->
+  <section id="paneInspection" style="display:none">
+    <div id="inspBanner"></div>
+    <div id="inspMeta" class="muted" style="font-size:11px;margin:2px 0 6px"></div>
+    <div id="inspTable"></div>
+  </section>
+
+  <!-- t261005-10 (UI-2): Metrics tab — facts-only face over the project metrics API
+       (KPI cards + freshness line). No second chart engine in the panel. -->
+  <section id="paneMetrics" style="display:none">
+    <div id="metricsBanner"></div>
+    <div class="grid" id="metricsGrid"></div>
+    <div class="file" id="metricsMeta"></div>
+  </section>
+
+  <!-- t261005-10 (UI-2): Docs tab — read-only tree + markdown reader over the
+       workbench docs API (same renderer as the rest of the page). -->
+  <section id="paneDocs" style="display:none">
+    <div id="docsBanner"></div>
+    <div class="bar" style="margin-top:0" id="docsScopeBar"></div>
+    <div id="docsTree"></div>
+    <div id="docsReader"></div>
   </section>
 
   <section id="paneGrants" style="display:none">
@@ -367,7 +427,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
 
 (function(){
-  var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'' };
+  var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'',
+    // t261005-10 (UI-2): the four read-only tab faces + the Overview limit row.
+    concurrency:null, epics:null, epicsReason:'', epicTickets:{}, epicOpen:'',
+    inspection:null, inspectionError:'', metrics:null, metricsError:'',
+    docs:null, docsScope:'docs', docSel:'' };
   var saveMsg = '';
   var grantsSaveMsg = '';
   // t261003-14：UI 态搬到 JS state（键=请求 id），轮询重建 DOM 不再抹掉宿主视图。
@@ -913,6 +977,320 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('ledgerEvents').innerHTML = ev;
   }
 
+  // ---- t261005-10 (UI-2): Overview limit row (the ONE concurrency row; CL-1 read face) ----
+  function loadConcurrency(){
+    if(!state.project){ state.concurrency=null; renderLimitRow(); return; }
+    fetch('/sandbar-executor-panel/api/concurrency?project='+encodeURIComponent(state.project))
+      .then(function(r){ return r.json(); })
+      .then(function(j){ state.concurrency=j; renderLimitRow(); })
+      .catch(function(){ state.concurrency={ok:false}; renderLimitRow(); });
+  }
+  function renderLimitRow(){
+    var c = state.concurrency;
+    var e = el('limitRow');
+    if(!state.project || !c){ e.textContent=''; return; }
+    if(c.ok!==true){ e.textContent='Running limit: unknown — the concurrency face could not be reached.'; return; }
+    if(c.declared===true){
+      e.textContent='Running limit: '+(c.unlimited?'unlimited':c.limit)+' — declared in '+c.path+'.';
+    } else if(c.reason){
+      e.textContent='No usable concurrency limit: '+c.reason+' The engine default applies. The write control lands with CL-2.';
+    } else {
+      e.textContent='No concurrency limit declared — the engine default applies. The write control lands with CL-2.';
+    }
+  }
+
+  // ---- t261005-10 (UI-2): Epics tab (read-only face) ----
+  // Layout = flat: one group per epic (head = code / title / status / ticket count
+  // and waiting-for-you count; the head drills to the SOURCE detail with a Back
+  // walk-back), and the epic's ticket rows directly inside (a row click asks the
+  // host console to open the existing ticket overlay — design §7.8 entrance 1).
+  // Ticket source = the per-epic /epics/<code>/tickets endpoint (the endpoint does
+  // the epic filtering; the page never guesses membership).
+  function epicCodeOf(e){ return (e && (e.code || e.id)) ? String(e.code || e.id) : ''; }
+  function loadEpics(){
+    if(!state.project){ state.epics=null; state.epicTickets={}; renderEpics(); return; }
+    fetch('/sandbar-workbench/api/epics?project='+encodeURIComponent(state.project))
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        state.epics=(j && j.ok===true && j.result && Array.isArray(j.result.epics)) ? j.result.epics : null;
+        state.epicsReason=(j && j.ok===false && j.error) ? String(j.error) : '';
+        state.epicTickets={};
+        renderEpics();
+        if(!state.epics) return;
+        // One fetch per epic (small N = the notes/epics/ entry count); one failed
+        // fetch degrades its own group row by name and never takes the face down.
+        state.epics.forEach(function(e){
+          var code=epicCodeOf(e);
+          if(!code) return;
+          fetch('/sandbar-workbench/api/epics/'+encodeURIComponent(code)
+            +'/tickets?project='+encodeURIComponent(state.project))
+            .then(function(r){ return r.json(); })
+            .then(function(tj){
+              var res=tj && tj.ok===true ? tj.result : null;
+              state.epicTickets[code]={ rows:(res && Array.isArray(res.tickets))?res.tickets:[],
+                degraded:!(res && Array.isArray(res.tickets)),
+                reason:(res && res.reason)?String(res.reason):((tj && tj.error)?String(tj.error):'') };
+              renderEpics();
+            })
+            .catch(function(){
+              state.epicTickets[code]={ rows:[], degraded:true, reason:'the ticket source could not be reached' };
+              renderEpics();
+            });
+        });
+      })
+      .catch(function(){ state.epics=null; state.epicTickets={}; renderEpics(); });
+  }
+  // epic_tickets contract order: newest first by updated_ts; missing/malformed
+  // sorts last; equal values keep the payload order (stable).
+  function byUpdatedDesc(a,b){
+    var ta=typeof a.updated_ts==='number'?a.updated_ts:-1, tb=typeof b.updated_ts==='number'?b.updated_ts:-1;
+    return tb-ta;
+  }
+  function epicTicketRows(code){
+    var f=state.epicTickets[code];
+    if(!f || !f.rows) return [];
+    var rows=f.rows.slice(); // LIST-CAP-OK: copy for sort, not a list cap
+    rows.sort(byUpdatedDesc);
+    return rows;
+  }
+  function renderEpics(){
+    var list=el('epicsList'), det=el('epicDetail');
+    if(!state.project){ list.innerHTML=''; det.innerHTML=''; el('epicsBanner').innerHTML=''; return; }
+    if(!state.epics){
+      el('epicsBanner').innerHTML=bannerHtml(state.epicsReason
+        ? 'The epic list could not be read. Reason: '+state.epicsReason
+        : 'The epic list could not be reached (the workbench plugin may not be loaded).', true);
+      list.innerHTML=''; det.innerHTML=''; return;
+    }
+    el('epicsBanner').innerHTML='';
+    if(state.epicOpen){ renderEpicDetail(); list.innerHTML=''; return; }
+    det.innerHTML='';
+    if(state.epics.length===0){ list.innerHTML='<div class="empty">'+esc(emptyCopyOf('epics_list'))+'</div>'; return; }
+    var html='';
+    for(var i=0;i<state.epics.length;i++){
+      var e=state.epics[i], code=epicCodeOf(e);
+      if(!code) continue;
+      var f=state.epicTickets[code];
+      var rows=epicTicketRows(code);
+      var waiting=rows.filter(function(t){ return t.stage_state==='awaiting-human'; }).length;
+      html+='<div class="sect lead">'+esc(code)+(e.title?' <span class="muted" style="text-transform:none;letter-spacing:0">'+esc(e.title)+'</span>':'')
+        +'<button class="linkbtn" data-epic-head="'+esc(code)+'">Source</button></div>'
+        +'<div class="grp">';
+      if(!f){
+        html+='<div class="line"><span class="say muted">Loading tickets…</span></div>';
+      } else if(f.degraded){
+        html+='<div class="line"><span class="say muted">The ticket source could not be read. Reason: '+esc(f.reason||'?')+'</span></div>';
+      } else if(rows.length===0){
+        html+='<div class="line"><span class="say muted">'+esc(emptyCopyOf('epic_tickets'))+'</span></div>';
+      } else {
+        for(var k=0;k<rows.length;k++){
+          var t=rows[k];
+          html+='<div class="line mrow" data-ticket="'+esc(t.id)+'" data-epic="'+esc(code)+'" role="button" tabindex="0">'
+            +'<div class="lab"><b>'+esc(t.id)+'</b> '+esc(t.title||'')
+            +'<small>'+esc(t.stage||'')+' · '+esc(t.stage_state||'')+(t.status?' · '+esc(t.status):'')+'</small></div>'
+            +'<span class="meta">Open in the console</span></div>';
+        }
+      }
+      html+='<div class="line" style="border-bottom:0"><span class="meta">'+rows.length+' ticket(s)'
+        +(waiting>0?' · '+waiting+' waiting for you':'')+'</span></div></div>';
+    }
+    list.innerHTML=html;
+    Array.prototype.forEach.call(list.querySelectorAll('[data-epic-head]'), function(n){
+      n.onclick=function(){ state.epicOpen=n.dataset.epicHead; renderEpics(); };
+    });
+    Array.prototype.forEach.call(list.querySelectorAll('[data-ticket]'), function(n){
+      var open=function(){ openTicketInHost(n.dataset.ticket, n.dataset.epic); };
+      n.onclick=open;
+      n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); open(); } };
+    });
+  }
+  function renderEpicDetail(){
+    var code=state.epicOpen, det=el('epicDetail');
+    var meta=null;
+    for(var i=0;i<state.epics.length;i++){ if(epicCodeOf(state.epics[i])===code) meta=state.epics[i]; }
+    var rows=epicTicketRows(code);
+    var html='<button class="backbtn" id="epicBackBtn">&#8592; Back to epics</button>'
+      +'<div class="sect">'+esc(code)+' <span class="muted">epic</span></div>'
+      +'<div class="grp"><div class="line"><div class="lab">Source <small>notes/epics/'+esc(code)+'.md'
+      +((meta&&(meta.status||meta.note))?' · '+esc(meta.status||'')+(meta.note?' · '+esc(meta.note):''):'')+'</small></div>'
+      +'<span class="meta">'+rows.length+' ticket(s)</span></div></div>';
+    if(rows.length===0){
+      html+='<div class="empty">'+esc(emptyCopyOf('epic_tickets'))+'</div>';
+    } else {
+      html+='<div class="grp">';
+      for(var k=0;k<rows.length;k++){
+        var t=rows[k];
+        html+='<div class="line mrow" data-ticket="'+esc(t.id)+'" data-epic="'+esc(code)+'" role="button" tabindex="0">'
+          +'<div class="lab"><b>'+esc(t.id)+'</b> '+esc(t.title||'')
+          +'<small>'+esc(t.stage||'')+' · '+esc(t.stage_state||'')+'</small></div>'
+          +'<span class="meta">Open in the console</span></div>';
+      }
+      html+='</div>';
+    }
+    det.innerHTML=html;
+    el('epicBackBtn').onclick=function(){ state.epicOpen=''; renderEpics(); };
+    bindTicketRows(det);
+  }
+  function bindTicketRows(root){
+    Array.prototype.forEach.call(root.querySelectorAll('[data-ticket]'), function(n){
+      var open=function(){ openTicketInHost(n.dataset.ticket, n.dataset.epic); };
+      n.onclick=open;
+      n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); open(); } };
+    });
+  }
+  // Ticket row -> the host console opens the existing ticket overlay (UI-3; the
+  // overlay machinery lives in the host since t261005-04). Standalone (no parent
+  // page) = a no-op — the overlay is not this page's to build. The tab also flips
+  // to that epic's SOURCE detail: design §7.8's epic detail and the overlay
+  // coexist without stacking (the overlay is the host's face).
+  function openTicketInHost(id, epicCode){
+    if(!id) return;
+    if(epicCode){ state.epicOpen=String(epicCode); renderEpics(); }
+    if(window.parent===window) return;
+    window.parent.postMessage({ type:'sandbar-executor-panel:open-ticket', ticketId:String(id) }, window.location.origin);
+  }
+
+  // ---- t261005-10 (UI-2): Inspection tab (read-only face over the latest scan report) ----
+  function loadInspection(){
+    if(!state.project){ state.inspection=null; renderInspection(); return; }
+    fetch('/sandbar-workbench/api/wf/scan-report').then(function(r){ return r.json(); }).then(function(j){
+      state.inspection=(j && j.ok===true && j.result) ? j.result : null;
+      state.inspectionError=(j && j.ok===false && j.error) ? String(j.error) : '';
+      renderInspection();
+    }).catch(function(){ state.inspection=null; state.inspectionError=''; renderInspection(); });
+  }
+  function renderInspection(){
+    var e=el('inspBanner'), meta=el('inspMeta'), tbl=el('inspTable');
+    if(!state.project){ e.innerHTML=''; meta.textContent=''; tbl.innerHTML=''; return; }
+    var r=state.inspection;
+    if(!r){ e.innerHTML=bannerHtml(state.inspectionError ? 'The inspection report could not be read. Reason: '+state.inspectionError : 'The inspection report could not be reached.', true); meta.textContent=''; tbl.innerHTML=''; return; }
+    var rep=r.report;
+    if(!rep){ e.innerHTML=bannerHtml(r.reason||'No inspection report exists yet.', false); meta.textContent=''; tbl.innerHTML=''; return; }
+    e.innerHTML='';
+    meta.textContent='Generated '+rep.generated_at+' · report file '+r.file
+      +' · total '+rep.total_tickets+' · pending '+rep.pending_decision_count
+      +' · stuck threshold '+rep.stuck_threshold_hours+'h';
+    var items=Array.isArray(rep.items)?rep.items:[];
+    if(items.length===0){ tbl.innerHTML='<div class="empty">'+esc(emptyCopyOf('inspection_items'))+'</div>'; return; }
+    var html='<table><tr><th>Ticket</th><th>Stage</th><th>Dwell</th><th>pending</th><th>Suggestion</th><th>Reasons</th></tr>';
+    for(var i=0;i<items.length;i++){
+      var it=items[i];
+      var reasons=Array.isArray(it.reasons)?it.reasons:[];
+      html+='<tr data-ticket="'+esc(it.ticket_id)+'" class="mrow">'
+        +'<td><b>'+esc(it.ticket_id)+'</b><br>'+esc(it.title||'')+'</td>'
+        +'<td>'+esc(it.stage||'')+' '+esc(it.stage_state||'')+'</td>'
+        +'<td>'+esc(it.dwell_hours)+'h</td>'
+        +'<td>'+(it.pending_count>0?esc(it.pending_count):'—')+'</td>'
+        +'<td>'+esc(it.suggestion||'')+'</td>'
+        +'<td>'+reasons.map(function(x){ return esc(x); }).join('<br>')+'</td></tr>';
+    }
+    html+='</table>'+(rep.red_line?'<div class="file">'+esc(rep.red_line)+'</div>':'');
+    tbl.innerHTML=html;
+    // Row click -> the host opens the ticket overlay (same as the Epics rows; this
+    // face does not duplicate the detail).
+    Array.prototype.forEach.call(tbl.querySelectorAll('tr[data-ticket]'), function(n){
+      n.onclick=function(){ openTicketInHost(n.dataset.ticket); };
+    });
+  }
+
+  // ---- t261005-10 (UI-2): Metrics tab (facts-only; the frozen four KPI fields) ----
+  function loadMetrics(){
+    if(!state.project){ state.metrics=null; renderMetrics(); return; }
+    var q='window=7d&epic=all&project='+encodeURIComponent(state.project)+'&template=dev-lane&view=time';
+    fetch('/sandbar-workbench/api/wf/metrics?'+q).then(function(r){ return r.json(); }).then(function(j){
+      state.metrics=(j && j.kpis) ? j : null;
+      state.metricsError=(j && j.error) ? String(j.error) : '';
+      renderMetrics();
+    }).catch(function(){ state.metrics=null; state.metricsError=''; renderMetrics(); });
+  }
+  function renderMetrics(){
+    var e=el('metricsBanner'), grid=el('metricsGrid'), meta=el('metricsMeta');
+    if(!state.project){ e.innerHTML=''; grid.innerHTML=''; meta.textContent=''; return; }
+    var m=state.metrics;
+    if(!m){ e.innerHTML=bannerHtml(state.metricsError ? 'Metrics could not be read. Reason: '+state.metricsError : 'Metrics could not be reached (the workbench plugin may not be loaded).', true); grid.innerHTML=''; meta.textContent=''; return; }
+    e.innerHTML='';
+    var k=m.kpis;
+    if(!k || typeof k!=='object'){
+      grid.innerHTML='<div class="empty">'+esc(emptyCopyOf('metrics_kpis'))+'</div>';
+      meta.textContent='';
+      return;
+    }
+    grid.innerHTML=
+      '<div class="cell"><b>'+esc(k.tickets!=null?k.tickets:'—')+'</b><span>tickets (7d)</span></div>'
+      +'<div class="cell"><b>'+esc(k.closed!=null?k.closed:'—')+'</b><span>closed (7d)</span></div>'
+      +'<div class="cell"><b>'+esc(k.avg_delivery_min!=null?k.avg_delivery_min:'—')+'</b><span>avg delivery (min)</span></div>'
+      +'<div class="cell"><b>'+esc(k.tokens_total!=null?k.tokens_total:'—')+'</b><span>tokens total</span></div>';
+    meta.textContent='Window 7d · generated '+(m.generated_at||'')+' · cache '+(m.cache&&m.cache.status?m.cache.status:'unknown');
+  }
+
+  // ---- t261005-10 (UI-2): Docs tab (read-only tree + markdown reader) ----
+  function loadDocs(){
+    if(!state.project){ state.docs=null; renderDocs(); return; }
+    var scope=state.docsScope;
+    var url='/sandbar-workbench/api/wf/docs/tree?scope='+scope+'&project='+encodeURIComponent(state.project);
+    fetch(url).then(function(r){ return r.json(); }).then(function(j){
+      state.docs=j; renderDocs();
+    }).catch(function(){ state.docs=null; renderDocs(); });
+  }
+  function renderDocs(){
+    var e=el('docsBanner'), bar=el('docsScopeBar'), tree=el('docsTree'), reader=el('docsReader');
+    if(!state.project){ e.innerHTML=''; bar.innerHTML=''; tree.innerHTML=''; reader.innerHTML=''; return; }
+    bar.innerHTML=['docs','notes'].map(function(s){
+      return '<button class="backbtn" data-scope="'+s+'"'+(s===state.docsScope?' style="border-color:var(--blue);color:var(--blue)"':'')+'>'+s+'/</button>';
+    }).join('');
+    Array.prototype.forEach.call(bar.querySelectorAll('[data-scope]'), function(b){
+      b.onclick=function(){ if(state.docsScope!==b.dataset.scope){ state.docsScope=b.dataset.scope; state.docs=null; state.docSel=''; loadDocs(); } };
+    });
+    var d=state.docs;
+    if(!d){ e.innerHTML=bannerHtml('The doc tree could not be reached (the workbench plugin may not be loaded).', true); tree.innerHTML=''; reader.innerHTML=''; return; }
+    e.innerHTML='';
+    if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; reader.innerHTML=''; return; }
+    var groups=Array.isArray(d.groups)?d.groups:[];
+    var html='';
+    for(var i=0;i<groups.length;i++){
+      var g=groups[i];
+      var files=Array.isArray(g.files)?g.files:[];
+      if(files.length===0) continue;
+      html+='<div class="sect lead">'+esc(g.label||g.dir||'')+'</div><div class="grp">';
+      for(var k2=0;k2<files.length;k2++){
+        var f=files[k2];
+        html+='<div class="line mrow" data-doc="'+esc(f.rel)+'"><div class="lab docfile">'+esc(f.rel)+'</div>'
+          +'<span class="meta">'+esc(f.title||'')+'</span></div>';
+      }
+      html+='</div>';
+    }
+    if(Array.isArray(d.skipped)&&d.skipped.length>0){
+      html+='<div class="file">'+esc(d.skipped.length)+' file(s) skipped (outside the readable whitelist).</div>';
+    }
+    tree.innerHTML=html||('<div class="empty">'+esc(emptyCopyOf('docs_tree'))+'</div>');
+    Array.prototype.forEach.call(tree.querySelectorAll('[data-doc]'), function(n){
+      n.onclick=function(){ openDoc(n.dataset.doc); };
+    });
+    if(state.docSel) renderDocBody();
+    else reader.innerHTML='';
+  }
+  function openDoc(rel){
+    state.docSel=rel; renderDocBody();
+  }
+  function renderDocBody(){
+    var reader=el('docsReader');
+    var rel=state.docSel;
+    if(!rel){ reader.innerHTML=''; return; }
+    reader.innerHTML='<div class="muted" style="font-size:11px">Loading '+esc(rel)+' …</div>';
+    var url='/sandbar-workbench/api/wf/docs/doc?scope='+state.docsScope+'&project='+encodeURIComponent(state.project)
+      +'&path='+encodeURIComponent(rel);
+    fetch(url).then(function(r){ return r.json(); }).then(function(j){
+      var body=j && (j.body!==undefined ? j.body : (j.result && j.result.body));
+      if(typeof body!=='string'){
+        reader.innerHTML='<div class="banner red">The document could not be read'+(j&&j.error?': '+esc(String(j.error)):'')+'</div>';
+        return;
+      }
+      reader.innerHTML='<div class="sect">'+esc(rel)+'</div><div class="detail" style="max-height:none">'+renderMarkdown(body)+'</div>';
+    }).catch(function(err){
+      reader.innerHTML='<div class="banner red">The document could not be loaded: '+esc(String(err&&err.message||err))+'</div>';
+    });
+  }
+
   // ---- Grants tab ----
   function loadGrants(){
     if(!state.project){ state.grants=null; renderGrants(); return; }
@@ -1154,15 +1532,26 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
 
   // ---- tab switching ----
-  var PANES = [['t-overview','paneOv'],['t-grants','paneGrants'],['t-alerts','paneAlert'],['t-ledger','paneLedger'],['t-settings','paneSet']];
+  // t261005-10 (UI-2): the nine-tab fixed order (mock v11); the four read-only
+  // faces load on first activation (lazy — they are reference faces, not live
+  // state, so they stay out of the 5s poll).
+  var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],['t-ledger','paneLedger'],['t-alerts','paneAlert'],
+    ['t-inspection','paneInspection'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
+  var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': loadInspection, 't-metrics': loadMetrics, 't-docs': loadDocs };
   function showTab(id){
     for(var i=0;i<PANES.length;i++){
       el(PANES[i][1]).style.display = (PANES[i][0]===id) ? '' : 'none';
     }
+    var loader = TAB_LOADER[id];
+    if(loader && state.project) loader();
   }
   Array.prototype.forEach.call(document.querySelectorAll('input.tab'), function(r){
     r.onchange = function(){ if(r.checked) showTab(r.id); };
   });
+  function currentTabId(){
+    var on=document.querySelector('input.tab:checked');
+    return on ? on.id : 't-overview';
+  }
 
   // ---- boot ----
   el('giveAllBtn').onclick = function(){ setAllSwitches(true); syncMaster(); };
@@ -1179,8 +1568,32 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   window.addEventListener('message', function(ev){
     if(ev.origin !== window.location.origin) return;
     var d = ev.data;
-    if(!d || d.type !== 'sandbar-executor-panel:open-session-result') return;
-    el('sessionMsg').textContent = d.ok === true ? 'The session is open in the console.' : 'The console could not open the session.';
+    if(!d || typeof d !== 'object') return;
+    if(d.type === 'sandbar-executor-panel:open-session-result'){
+      el('sessionMsg').textContent = d.ok === true ? 'The session is open in the console.' : 'The console could not open the session.';
+      return;
+    }
+    // t261005-10 (UI-2): host -> panel wayfinding messages (the machine-level
+    // Inspection number jumps to the tab; an epic badge jumps to the epic detail).
+    // Only these two types, only from the parent window; unknown types or unknown
+    // senders are ignored (review C3: the accepted surface does not grow).
+    if(window.parent === window) return;
+    if(d.type === 'sandbar-executor-panel:show-tab' && typeof d.tab === 'string'){
+      var id = 't-' + d.tab;
+      if(TAB_LOADER[id] || id === 't-overview'){
+        var input = el(id);
+        if(input){ input.checked = true; showTab(id); }
+      }
+      return;
+    }
+    if(d.type === 'sandbar-executor-panel:show-epic' && typeof d.code === 'string' && d.code){
+      state.epicOpen = String(d.code);
+      var ep = el('t-epics');
+      if(ep){ ep.checked = true; }
+      loadEpics();
+      showTab('t-epics');
+      return;
+    }
   });
   el('doneHeadBtn').onclick = function(){
     var w = el('doneWrap');
@@ -1202,9 +1615,16 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('noProject').style.display = state.project ? 'none' : '';
     el('footNote').textContent = state.project ? ('Project: ' + state.project + '. The lists refresh every ' + (POLL_MS/1000) + ' seconds.') : '';
     saveMsg=''; grantsSaveMsg=''; el('grantSession').value='';
+    // t261005-10 (UI-2): reference-face state resets on a project switch (no
+    // cross-project bleed).
+    state.concurrency=null; state.epics=null; state.epicsReason=''; state.epicTickets={}; state.epicOpen='';
+    state.inspection=null; state.inspectionError=''; state.metrics=null; state.metricsError='';
+    state.docs=null; state.docSel='';
     try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
-    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); return; }
-    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants();
+    if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); renderLimitRow(); renderEpics(); renderInspection(); renderMetrics(); renderDocs(); return; }
+    poll(); loadRequests(); loadActions(); loadSettings(); loadGrants(); loadConcurrency();
+    var loader = TAB_LOADER[currentTabId()];
+    if(loader) loader();
   }
   setInterval(function(){ if(state.project){ poll(); loadRequests(); loadActions(); } }, POLL_MS);
   window.__panelSelect = setProject; // testability seam (browser scenario drives project selection)

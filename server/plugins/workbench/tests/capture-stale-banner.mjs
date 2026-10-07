@@ -225,30 +225,27 @@ async function main() {
     await page.screenshot({ path: join(OUT, 'stale-banner-1-visible.png') })
     console.log('[capture-stale-banner] 横幅可见态已拍')
 
-    // 6) 切视图验证常驻：点「Epics」图标（视图入口 title 真源=插件 PROJECT_ICON_SPECS；
-    //    宿主令 260925 英文化后旧中文 title 退役）。
-    //    三态纪律（260929 修）：旧实现 `const epicsBtn = await page.$('[title="立项单"]');
-    //    if (epicsBtn) {...}` 在锚点改名后**静默跳过**——脚本照样 exit 0，等于把这条
-    //    「横幅跨视图常驻」断言悄悄删掉（假绿；同族教训：锚点错了它反而报过）。
-    //    现在：元素不在场=明确红（本步前提已由上方 [data-wb-psess-row] 在场证明插件已挂载，
-    //    故缺席只能是视图入口改名/未渲染=真缺陷），横幅消失也从 WARN 升为红。
+    // 6) 切视图验证常驻：t261005-10 (UI-2) 起 Epics/Docs/Tickets 视图图标退役——
+    //    中列唯一存活切换=项目名行进入执行器面板（[data-wb-executor-entry]，UI-1 起
+    //    项目名即执行器入口）。三态纪律不变：入口缺席=明确红（上方 [data-wb-psess-row]
+    //    在场已证插件挂载，缺席只能是入口改名/未渲染=真缺陷），横幅消失=红。
     const viewTitles = await page.$$eval('.wb-view-icon',
       els => [...new Set(els.map(e => e.getAttribute('title')).filter(Boolean))])
-    const epicsBtn = await page.$('.wb-view-icon[title="Epics"]')
-    if (!epicsBtn) {
-      console.error(`[capture-stale-banner] FAIL：侧栏无 Epics 视图图标（DOM 实有 title=${viewTitles.join(',') || '无 .wb-view-icon'}）`
-        + '——视图入口改名或未渲染；本步断言不可跳过（三态纪律：缺席不当通过）')
+    const execEntry = await page.$('[data-wb-executor-entry]')
+    if (!execEntry) {
+      console.error(`[capture-stale-banner] FAIL：侧栏无执行器入口（DOM 实有 view icon title=${viewTitles.join(',') || '无 .wb-view-icon'}）`
+        + '——入口改名或未渲染；本步断言不可跳过（三态纪律：缺席不当通过）')
       teardown(); process.exit(1)
     }
-    await epicsBtn.click()
-    await new Promise(r => setTimeout(r, 800))
+    await execEntry.click()
+    await new Promise(r => setTimeout(r, 1500))
     const still = await page.$('.wb-stale-banner')
     if (!still) {
-      console.error('[capture-stale-banner] FAIL：Epics 视图下 stale 横幅消失（应跨视图常驻）——本步原为 WARN 不判红，属漏判')
+      console.error('[capture-stale-banner] FAIL：executor 面板视图下 stale 横幅消失（应跨视图常驻）')
       teardown(); process.exit(1)
     }
-    await page.screenshot({ path: join(OUT, 'stale-banner-2-epics-view.png') })
-    console.log('[capture-stale-banner] Epics 视图横幅常驻已拍（锚 [title="Epics"]）')
+    await page.screenshot({ path: join(OUT, 'stale-banner-2-executor-view.png') })
+    console.log('[capture-stale-banner] executor 面板视图横幅常驻已拍（锚 [data-wb-executor-entry]）')
     const bannerCount = await page.$$eval('.wb-stale-banner', els => els.length)
     console.log(`[capture-stale-banner] 终态横幅数=${bannerCount}`)
     teardown()

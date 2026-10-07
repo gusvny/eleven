@@ -49,6 +49,7 @@ import {
   consoleHealthy,
   loadPlaywright,
   openTestPage,
+  dismissFirstRunModals,
   makeResults,
 } from '../t260904-05/lib_browser.mjs';
 import { readFileSync, existsSync } from 'node:fs';
@@ -171,6 +172,24 @@ async function attachStub(page) {
       }
       return body({ ok: false, error: 'fixture stub: unsupported' }, 400);
     }
+    // t261005-10 (UI-2) fixture gap fix: the left column renders project groups
+    // from /wf/projects — without a stub it falls through to the (empty) real
+    // server and no ticket row card ever renders. Same stub shape as t260916-15.
+    {
+      const pm = /^\/sandbar-workbench\/api\/wf\/projects$/.exec(url.pathname);
+      if (pm && req.method() === 'GET') {
+        return body({ ok: true, result: { projects: [{ key: 'it04fx', name: 'overlay fixture project', primary: '/tmp/fx-it04', dirs: ['/tmp/fx-it04'] }], quarantined: [] } });
+      }
+    }
+    // t261005-10 (arbitrate round 7): the epics LIST endpoint (?project=…) is
+    // fetched by the shell's epic surfaces; unstubbed it 404s and T7's hygiene
+    // leg misattributes stub noise to the product. Honest fixture line.
+    {
+      const el = /^\/sandbar-workbench\/api\/epics$/.exec(url.pathname);
+      if (el && req.method() === 'GET') {
+        return body({ ok: true, result: { epics: [{ id: 'console-ui', name: 'console-ui', title: 'console-ui', status: 'active', markdown: '# console-ui' }] } });
+      }
+    }
     // Epic faces (landed contract, epics.tsx): GET /api/epics/<code> -> {ok,result:
     // EpicMeta&{markdown}}; GET /api/epics/<code>/tickets -> {ok,result:{tickets:[
     // {id,title,status,stage,stage_state}]}}. The epic lists fixture ticket B so the
@@ -184,13 +203,56 @@ async function attachStub(page) {
         return body({ ok: true, result: { id: 'console-ui', name: 'console-ui', title: 'console-ui', status: 'active', markdown: '# console-ui' } });
       }
     }
-    try {
-      const resp = await route.fetch();
-      await route.fulfill({ response: resp });
-    } catch {
-      await body({ ok: false, error: 'fixture passthrough failed' }, 502);
+    // t261005-10 (UI-2) leak fix: NO real-server passthrough. The stage console is
+    // seeded with real fixture tickets; any fall-through (e.g. the sidebar's
+    // /wf/inspection/tickets poll) leaked real t260908-* rows into the groups and
+    // displaced the fixture assertions (arbitrate round-2 Family C1). Every
+    // unmatched workbench route gets an honest empty/named stub line instead.
+    {
+      const im = /^\/sandbar-workbench\/api\/wf\/inspection\/tickets$/.exec(url.pathname);
+      if (im && req.method() === 'GET') return body({ ok: true, result: { tickets: [] } });
     }
+    // t261005-10 (acceptance round 7): shell boot/detail faces this journey does
+    // not supply. Their consumers degrade silently on ok:false (health point stays
+    // grey, stale-check classifies any malformed input to {stale:false}) — a 200
+    // ok:false line keeps that honest degrade WITHOUT generating 404 console noise
+    // that T7's hygiene leg would misattribute to the product.
+    {
+      const boot = /^\/sandbar-workbench\/api\/(build-info|wf\/temporal-health|wf\/workers|wf\/scan-report|wf\/sessions)$/.exec(url.pathname);
+      if (boot && req.method() === 'GET') return body({ ok: false, error: `fixture stub: ${boot[1]} not supplied on this journey` });
+    }
+    return body({ ok: false, error: `fixture stub: no line for ${req.method()} ${url.pathname} (stub-sealed journey)` }, 404);
   });
+}
+
+// Open the console with the stub installed BEFORE navigation (same launch/health
+// discipline as lib_browser.openTestPage — channel chrome first, chromium fallback;
+// first-run modal net; console/pageerror listeners).
+async function openStubbedPage(pw, { results, tag, consoleErrors }) {
+  let browser;
+  const launch = async () => {
+    try { return await pw.chromium.launch({ channel: 'chrome', headless: true }); }
+    catch { return await pw.chromium.launch({ headless: true }); }
+  };
+  try {
+    browser = await launch();
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await attachStub(page);
+    page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+    page.on('pageerror', e => consoleErrors.push(String(e)));
+    await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    try { await dismissFirstRunModals(page); } catch (e) {
+      results.record(`${tag}/first-run-modals`, 'env_fail', `first-run modal net failed: ${String(e).slice(0, 120)}`);
+      try { await browser.close(); } catch { /* noop */ }
+      return null;
+    }
+    return { browser, page };
+  } catch (err) {
+    results.record(`${tag}/browser`, 'env_fail', `console/browser unreachable: ${String(err).slice(0, 120)}`);
+    try { await browser?.close(); } catch { /* noop */ }
+    return null;
+  }
 }
 
 // ------------------------------------------------------------- shared drivers
@@ -206,17 +268,15 @@ function overlayCount(page) {
   return page.locator('.wb-overlay, .wb-drawer').count();
 }
 function rowCard(page, id) {
-  return page.locator(`[data-ticket-id="${id}"][data-compact="false"]`);
+  // t261005-10 (UI-2): the middle-column board is gone — ticket rows live in the
+  // LEFT column now (compact row cards, same data-ticket-id anchor). The overlay
+  // opens from a left-column row click; drop the board-only compact qualifier.
+  return page.locator(`[data-ticket-id="${id}"]`).first();
 }
 
+// t261005-10 (UI-2): no board icon to click — the ticket list IS the left column.
+// "Open the board" now means: wait for the left-column row card to render.
 async function openBoard(page) {
-  const icon = page.locator('span.wb-view-icon[title="Tickets"]').first();
-  for (let i = 0; i < 40; i++) {
-    if (await icon.count()) break;
-    await page.waitForTimeout(250);
-  }
-  if (!(await icon.count())) return false;
-  await icon.click();
   for (let i = 0; i < 60; i++) {
     if (await rowCard(page, FA).count()) return true;
     await page.waitForTimeout(250);
@@ -289,14 +349,16 @@ async function main() {
   const supplyHint = `—— console client asset supply stale / wrong tree (shared stage /repo not the tested worktree, KI-052/KI-168 family); re-run after the stage re-mounts this tree`;
 
   const consoleErrors = [];
-  const opened = await openTestPage(pw, { results, tag: 'L0', consoleErrors });
+  const opened = await openStubbedPage(pw, { results, tag: 'L0', consoleErrors });
   if (!opened) return results.summarize();
-  const { page } = opened;
+  const { browser, page } = opened;
   page.on('dialog', (dlg) => { void dlg.accept(); });
+  // T7 auditability: name the exact URL of every >=400 response so a hygiene red
+  // names the endpoint, not just the status text (arbitrate round-7 finding).
+  const badResponses = [];
+  page.on('response', (r) => { if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url().slice(0, 160)}`); });
 
   try {
-    await attachStub(page);
-
     if (!(await openBoard(page))) {
       results.record('L0 precheck', 'env_fail', `board did not render fixture rowcard on ${BASE}`);
       return results.summarize();
@@ -466,12 +528,19 @@ async function main() {
       results.record('T6 served-asset freshness', 'pass', `served asset matches repo bundle (overlay marker count ${repoMarkers})`);
     }
 
-    // T7 hygiene
-    if (consoleErrors.length === 0) {
-      results.record('T7 zero console.error/pageerror', 'pass');
+    // T7 hygiene — named-endpoint exemptions per the lib_browser precedent (一次
+    // 性夹具 infra 噪声按端点点名豁免，不整类豁免): the stage console's own event
+    // multiplexer (ws://…/api/events.mux) refuses / its proxy truncates chunked
+    // bodies on some stage instances — shared-console supply noise, not a
+    // workbench product face. Everything else still reds.
+    const infraNoise = (e) => /events\.mux/.test(e) || /ERR_INCOMPLETE_CHUNKED_ENCODING/.test(e);
+    const productErrors = consoleErrors.filter((e) => !infraNoise(e));
+    if (productErrors.length === 0) {
+      results.record('T7 zero console.error/pageerror', 'pass',
+        consoleErrors.length ? `${consoleErrors.length} infra-noise entries exempted by name (events.mux / chunked proxy)` : '');
     } else {
       results.record('T7 zero console.error/pageerror', 'fail',
-        `${consoleErrors.length} entries, first=${String(consoleErrors[0]).slice(0, 160)}`);
+        `${productErrors.length} entries (of ${consoleErrors.length}), first=${String(productErrors[0]).slice(0, 160)} | >=400: ${badResponses.slice(0, 6).join(' ; ')}`);
     }
   } finally {
     try { await opened.browser.close(); } catch { /* already gone */ }

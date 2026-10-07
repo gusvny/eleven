@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 221,
-   "scenarios": 546
+   "engine_tests": 223,
+   "scenarios": 541
   },
   "vocab": [
    "behaviour",
@@ -1214,11 +1214,6 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/baselines/sc_metrics_donut_dom.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
   "integration/baselines/sc_notes_write_gate.py": {
    "anchor": "behaviour",
    "note": "",
@@ -1754,11 +1749,6 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t260904-17/sc_ticket_list_rowcard_ui.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
   "integration/t260904-18/sc_t260904_18_ki049_write_set_contract.py": {
    "anchor": "behaviour",
    "note": "",
@@ -1834,22 +1824,7 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t260905-06/sc_doc_entry_present.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/t260905-06/sc_doc_read_through.mjs": {
-   "anchor": "contract",
-   "note": "docs library read-through (terminology/testing-guide)",
-   "sync_path": ""
-  },
   "integration/t260905-06/sc_docs_wording_retired.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/t260905-07/sc_ticket_detail_panel.mjs": {
    "anchor": "behaviour",
    "note": "",
    "sync_path": ""
@@ -1989,11 +1964,6 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t260907-08/sc_wb_contrast_quadrant.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
   "integration/t260907-10/sc_engine_layout.py": {
    "anchor": "contract",
    "note": "file-level layout contract",
@@ -2077,11 +2047,6 @@
   "integration/t260910-10/sc_docs_project_anchor.mjs": {
    "anchor": "contract",
    "note": "docs project anchor through the doc API",
-   "sync_path": ""
-  },
-  "integration/t260910-10/sc_docs_ui_mock_v1.mjs": {
-   "anchor": "behaviour",
-   "note": "",
    "sync_path": ""
   },
   "integration/t260910-11/sc_inspection_decl_v2_rename.py": {
@@ -2444,22 +2409,7 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t260915-08/sc_inspection_board_ui.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
   "integration/t260915-08/sc_inspection_sign_journey.py": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/t260915-09/sc_epics_client_project_wire.mjs": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/t260915-10/sc_docs_follow_project.mjs": {
    "anchor": "behaviour",
    "note": "",
    "sync_path": ""
@@ -3887,6 +3837,21 @@
   "integration/t261006-19/sc_counter_reset_replay_guard.py": {
    "anchor": "contract",
    "note": "t261006-19 (KI-212) counter-reset family replay contract: pre-e9daa05 history keeps the over-cap counter and the blocked route across rework/retry_qc wakes (no implement where history holds concurrency_renew), window(b)/marker positives keep the reset firing, degraded info() falls back to the marker arm, source lock on the four gated sites",
+   "sync_path": ""
+  },
+  "integration/t261005-10/sc_ui2_panel_tab_order_contract.mjs": {
+   "anchor": "contract",
+   "note": "UI-2: one 9-tab strip in fixed order, no board tab; single concurrency-limit row face = facts + provenance, never a guessed number (CL-2 boundary)",
+   "sync_path": ""
+  },
+  "integration/t261005-10/sc_ui2_board_metrics_entrance_retired.mjs": {
+   "anchor": "source-text",
+   "note": "UI-2: whole-tree absence guard — board view retired, wb-metrics-toggle family zero sites, bundle freshness (KI-052 family)",
+   "sync_path": ""
+  },
+  "integration/t261005-10/sc_ui2_epics_docs_metrics_tabs_journey.mjs": {
+   "anchor": "behaviour",
+   "note": "UI-2 browser journey: epics/docs/metrics tab faces render fixture facts, row click opens existing overlay, 500/malformed degrade to named faces, no board icon at runtime",
    "sync_path": ""
   }
  }

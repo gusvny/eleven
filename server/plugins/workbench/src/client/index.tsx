@@ -101,7 +101,6 @@ import { asText, suiteSectionView, faceRows, reportDigest, findingView } from '.
 import type { DigestLine } from './inspection-report-model.ts'
 import { ProvidersSection } from '../../../providers/src/client/index.tsx'
 import { WorkbenchSidebar } from './sidebar.tsx'
-import { MetricsFooterButton, markFooterSlot } from './metrics-entry.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
 // UI-3 (t261005-04): ticket detail as a middle-column overlay — single-layer
@@ -115,7 +114,8 @@ import { SpecBlock } from './spec-block.tsx'
 import { STATE_LABEL, stageDisplayLabel, workflowLabel } from './ui-labels.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
-import { DocsSection } from './docs.tsx'
+// t261005-10 (UI-2): the host Docs view moved into the panel Docs tab (docs.tsx keeps
+// its model layer for the reader tests; the view is no longer injected).
 // t260904-17 工单列表 v5（mock 屏⑤⑥）：平铺行卡（一套 UI，中列+侧栏共用）+ 纯函数模型层。
 import { TicketRowCard, type CardOp } from './ticket-row-card.tsx'
 import {
@@ -3442,37 +3442,24 @@ function ScanReportSection({ scan, onOpen }: {
 /** 工单列表分页大小（260824 用户拍板⑥）。 */
 const PAGE_SIZE = 20
 
-function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEpic }: {
+function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   focusId?: string
   /** 侧栏「又点了一次工单」信号（t260825-05）：同 id 重开（× 关抽屉后再点同一行）也触发。 */
   focusNonce?: number
   /** 侧栏「点工单列表图标回列表」信号（t260825-05）：变化时关详情抽屉回列表页。 */
   listNonce?: number
   projectKey?: string
-  /** 所属立项徽标点击（t260826-02）：由侧栏注入，中列切立项单视图并定位代号。 */
-  onOpenEpic?: (code: string) => void
 }) {
   const [tickets, setTickets] = useState<TicketRow[] | undefined>(undefined)
   const [workflows, setWorkflows] = useState<Wf[]>([])
   const [operator] = useState(operatorOf)
   const [error, setError] = useState('')
-  // t260904-17 列表 v5（mock 屏⑤⑥）：筛选 chips=过滤非分组——四态/epic/搜索词。
-  const [filterState4, setFilterState4] = useState<TicketState4 | ''>('')
-  const [filterEpic, setFilterEpic] = useState('')
-  const [q, setQ] = useState('')
   // t260921-03：异常收口独立筛选（与五态 chips AND）——「已结束但缺应有产物/面
   // 不可读」单独可筛出（要求⑤）；''=不过滤。
-  const [filterHealth, setFilterHealth] = useState<'abnormal' | ''>('')
-  /** 收口折叠（mock ⑥）：缺省折叠成「✓ 收口 · N」计数行。 */
-  const [showDone, setShowDone] = useState(false)
-  /** 进展行 enrichment（host /tickets/progress 只读）：仅当前可见页逐票拉取（R5 负载预算）。 */
-  const [progressMap, setProgressMap] = useState<Record<string, { state: string; text: string }>>({})
   // t260915-08 巡检板面：最近一次成功的巡检行快照（拉取失败=保留上次成功快照，
   // 与主列表「保持上次成功快照」同口径）+ 显式降级 note（非空时台面顶部提示）。
   const inspectionRowsRef = useRef<TicketRow[]>([])
   const [inspectionNote, setInspectionNote] = useState('')
-  // 无标题票首句映射（t260905-07）：enrichment 通道 title_or_first 的行级缓存。
-  const [titleFirstMap, setTitleFirstMap] = useState<Record<string, string>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // UI-3 (t261005-04) overlay navigation: a non-null epic entry = the overlay
   // content becomes the epic detail (same layer; the ticket detail does not
@@ -3511,10 +3498,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   /** 一工单一 worker（260824）：逐 worker 状态，状态条「N workers」点开列全表。 */
   const [workers, setWorkers] = useState<WorkersResult | undefined>(undefined)
   const [workersOpen, setWorkersOpen] = useState(false)
-  /** 中列页：tickets=工单列表；scan=巡检报告独立页（260824 用户拍板③）。 */
-  const [page, setPage] = useState<'tickets' | 'scan'>('tickets')
-  /** 工单列表分页（260824 用户拍板⑥）：筛选/排序变化时重置回第 1 页。 */
-  const [pageNo, setPageNo] = useState(1)
   /** token 消耗聚合（t260828-07）：详情抽屉打开时拉一次，头部合计与阶段行内数字共用。 */
   const usage = useAgentUsage(detail?.id ?? '', detail !== undefined)
 
@@ -3650,7 +3633,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   useEffect(() => {
     if (listNonceRef.current === listNonce) return
     listNonceRef.current = listNonce
-    setPage('tickets')
     selectedIdRef.current = null
     setSelectedId(null)
     setOverlayNav(EMPTY_OVERLAY)
@@ -4040,89 +4022,21 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return startVisibleInterval(() => { void reloadScan() }, 30000)
   }, [])
 
-  // t260904-17 列表 v5：过滤/计数/分组全部走纯函数模型层（与行卡同源，单点口径）。
-  const filtered = useMemo(() => filterRows(tickets ?? [], {
-    state: filterState4 || undefined, epic: filterEpic || undefined, q,
-    health: filterHealth || undefined,
-  }), [tickets, filterState4, filterEpic, q, filterHealth])
-  const stateCounts = useMemo(() => countByState(tickets ?? []), [tickets])
-  const epicList = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const t of tickets ?? []) { const e = t.epic || ''; if (e) m.set(e, (m.get(e) ?? 0) + 1) }
-    return [...m.entries()].map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count)
-  }, [tickets])
-
-  // 排序缺省=最近活动（t260904-17，mock ⑥ 通用口径；旧缺省=created 倒序，切键在此声明）。
-  const [sortKey, setSortKey] = useState<'created' | 'updated'>('updated')
-  const [sortAsc, setSortAsc] = useState(false)
-  const sorted = useMemo(() => [...filtered].sort((a, b) => {
-    const va = (sortKey === 'created' ? a.created : a.updated_ts) ?? 0
-    const vb = (sortKey === 'created' ? b.created : b.updated_ts) ?? 0
-    return sortAsc ? va - vb : vb - va
-  }), [filtered, sortKey, sortAsc])
-
-  // 收口折叠（mock ⑥）：收口票折成计数行，展开才铺卡；分页只算未收口票。
-  // t260919-02：exec_status 进五态推导（失败类终态≠done，不进收口折叠吃掉）。
-  // t260921-03 拆桶：异常收口（abnormal/unreadable）**不折叠**、恒展开渲染在正常
-  // 收口折叠行之前（不沉底、不被并入「看起来正常」的收口组——要求③）；正常收口
-  // 折叠行计数=doneOk 数（done 桶归属不变，stateCounts 仍含异常收口行）。
-  const openList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state, t.exec_status) !== 'done'), [sorted])
-  const doneList = useMemo(() => sorted.filter(t => deriveTicketState(t.status, t.stage_state, t.exec_status) === 'done'), [sorted])
-  const [doneAbn, doneOk] = useMemo(() => {
-    const abn: TicketRow[] = []
-    const okRows: TicketRow[] = []
-    for (const t of doneList) (isAbnormalCloseOf(t) ? abn : okRows).push(t)
-    return [abn, okRows] as const
-  }, [doneList])
-  const abnormalCloseCount = useMemo(() => (tickets ?? []).filter(isAbnormalCloseOf).length, [tickets])
-
-  // 分页（260824 用户拍板⑥）：筛选/排序一变回第 1 页。
-  const pageCount = Math.max(1, Math.ceil(openList.length / PAGE_SIZE))
-  const paged = useMemo(() => openList.slice((pageNo - 1) * PAGE_SIZE, pageNo * PAGE_SIZE), [openList, pageNo])
-  useEffect(() => { setPageNo(1) }, [filterState4, filterEpic, q, sortKey, sortAsc, filterHealth])
-
-  // 进展行 enrichment（t260904-17）：只拉当前可见页的非收口票（R5 负载预算=可见页×
-  // 单票一次/轮询周期）；host 契约=?enrich=progress（主列表零 show，show 只在此阶段）。
-  // 失败/缺数据=该票行卡降级只显相对时间，不重试不打错条。
-  useEffect(() => {
-    const ids = paged.filter(t => deriveTicketState(t.status, t.stage_state, t.exec_status) !== 'done').map(t => t.id)
-    if (ids.length === 0) return
-    let alive = true
-    apiGet(`${API}/tickets?project=${encodeURIComponent(projectKey ?? '')}`
-      + `&enrich=progress&ids=${encodeURIComponent(ids.join(','))}`)
-      .then((data) => {
-        if (!alive || data?.ok !== true) return
-        const rows = (data.result?.tickets ?? []) as { id: string; progress?: { stage: string; state: string; at?: unknown }; title_or_first?: string }[]
-        const next: Record<string, { state: string; text: string }> = {}
-        const firsts: Record<string, string> = {}
-        for (const r of rows) {
-          // 无标题票首句（t260905-07）：enrichment 顺带下发，行卡展示选择函数消费
-          if (r?.title_or_first) firsts[r.id] = r.title_or_first
-          if (!r?.progress) continue
-          const line = progressLineOf([r.progress])
-          if (line) next[r.id] = line
-        }
-        setTitleFirstMap(firsts)
-        setProgressMap(next)
-      })
-      .catch(() => { /* 静默降级 */ })
-    return () => { alive = false }
-  }, [tickets, pageNo, projectKey])
-
-  // 短序号（时序可见）：按 created 升序编号 #01、#02…，显示在 id 列（悬停 title 显示完整 id）。
-  // t260927-05：目录未命中回落——wfById 查不到（目录面故障/未刷新）时，用详情快照
-  // 自带 topology 合成最小 Wf，泳道图仍按「票面拓扑优先」渲染（绝不猜拓扑：详情无
-  // topology=undefined，回落现行线性步骤条）。目录命中（正常路径，含目录面合并落地
-  // 后的已声明外置模板）零变化。
+  // t261005-10 rework (integration round 6): the board-page surgery dropped these two
+  // definitions but the overlay still consumes them (lane map, stepper, stages,
+  // agent logs, workflow label) — the first row click crashed the overlay host with
+  // `ReferenceError: selWf is not defined` and the error boundary unmounted the
+  // whole middle column. Restored from main@9a861d5 (L4117-4137).
   const selWf = useMemo(() => {
     if (!detail) return undefined
     const hit = wfById[detail.workflow_id]
     if (hit) return hit
-    // 260928：**畸形输入必须走同一个净化器**。此前这里只判 `topo?.nodes?.length`——
-    // 字符串也有 length，于是 `nodes: 'garbage'`（票面/接缝畸形，真场景 L7b 的夹具形态）
-    // 会一路走到 `topo.nodes.map(...)` 抛 TypeError：整个详情面**崩成不可渲染**，而不是
-    // 按设计回落线性步骤条。改用 lane-map-model 的 parseTopology（它逐字段校验 id/label/
-    // kind、去重、拒绝非数组），与泳道图模型同一个净化单源，绝不猜拓扑。
+    // 260928 hardening: malformed topology must go through the same sanitizer.
+    // A bare `topo?.nodes?.length` check passes for strings (`'garbage'.length`),
+    // so `nodes: 'garbage'` reached `topo.nodes.map(...)` and threw a TypeError,
+    // crashing the whole detail face instead of falling back to the linear stepper.
+    // parseTopology (lane-map-model) validates id/label/kind per field, dedupes and
+    // rejects non-arrays — the same sanitizing single source as the lane-map model.
     const parsed = parseTopology(detail.topology)
     if (!parsed || !parsed.nodes.length) return undefined
     return {
@@ -4133,12 +4047,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       topology: parsed,
     } as Wf
   }, [detail, wfById])
-  /** 节点耗时（t260901-12）：泳道图步骤条与阶段卡共用，一次推导两处传参。 */
+  /** Node durations (t260901-12): shared by the lane stepper and the stage cards. */
   const stageDurs = useStageDurations(detail, selWf)
-  // t260915-05：真泳道图模型（mock ③④）。拓扑双层取用：详情快照 topology（门内
-  // additive 键=该票渲染时点的拓扑，旧票不追新）优先，缺省回落模板级导出
-  // （selWf.topology，workflow.py list additive 键；KI-027 关单可见的兜底面）；
-  // 两层都缺=null → 泳道图回落现行线性步骤条（零回归降级锚，绝不猜拓扑）。
   const laneModel = useMemo(
     () => buildLaneMap(detail?.topology ?? selWf?.topology ?? null, detail),
     [detail, selWf],
@@ -4170,7 +4080,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
     return (
       <div className="wb-root">
         <div style={{ padding: 32, color: 'var(--dsw-alias-label-secondary, #888)', fontSize: 13 }}>
-          Pick a project row on the left and click its ticket-list icon to open that project board.
+          Pick a project row on the left (or click a ticket row) — the middle column opens the executor panel.
         </div>
       </div>
     )
@@ -4179,7 +4089,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
   return (
     <div className="wb-root">
       <div className="wb-head">
-        <span className="wb-title">Ticket Board</span>
+        {/* t261005-10 (UI-2): the status board is gone — the head keeps only the
+            machine-level status buttons (Temporal UI / workers / Inspection). */}
         <span className="wb-head-spacer" />
         <span className="wb-health">
           <a className="wb-health-link" href="http://127.0.0.1:8233" target="_blank" rel="noreferrer"
@@ -4199,12 +4110,15 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
             onClick={() => { if (!workersOpen) void reloadWorkers(); setWorkersOpen(!workersOpen) }}>
             {workers ? `${workers.count_alive} workers` : '— workers'}
           </button>
-          <button className="wb-status-btn" data-open={page === 'scan'}
+          // t261005-10 (UI-2): the number stays machine-level; the table lives in the
+          // panel's Inspection tab — the button asks the executor panel to show it
+          // (ExecutorView forwards over postMessage; no second table face here).
+          <button className="wb-status-btn" data-wb-inspection-jump=""
             data-online={scan?.report ? scan.report.pending_decision_count === 0 : undefined}
             title={scan?.report
-              ? `Inspection report · ${scan.report.pending_decision_count} pending · click for full table`
+              ? `Inspection report · ${scan.report.pending_decision_count} pending · open the panel Inspection tab`
               : (scan?.reason ?? 'Loading inspection report…')}
-            onClick={() => setPage(page === 'scan' ? 'tickets' : 'scan')}>
+            onClick={() => window.dispatchEvent(new CustomEvent('wb-panel-goto', { detail: { tab: 'inspection' } }))}>
             Inspection{scan?.report ? ` ${scan.report.pending_decision_count}` : ''}
           </button>
         </span>
@@ -4254,149 +4168,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
       )}
 
       {error !== '' && <div className="wb-err">{error}{'\n'}(Board API not mounted? headless profile has no webServer.)</div>}
-
-      {page === 'tickets' && (<>
-      <div className="wb-filters">
-        {/* 状态 chips=过滤非分组（t260904-17，mock J；t260919-02 增「已失败」）：
-            五态+计数；「等你」chip 恒显，>0 强调；「已失败」红系可辨 */}
-        {(['waiting', 'blocked', 'active', 'failed', 'done'] as TicketState4[]).map(s => (
-          <button key={s} className="wb-chip-btn" data-state={s} data-on={filterState4 === s}
-            onClick={() => setFilterState4(filterState4 === s ? '' : s)}>
-            {STATE4_LABEL[s]} {stateCounts[s]}
-          </button>
-        ))}
-        {/* 异常收口 chip（t260921-03）：独立筛选（与五态 chips AND）——「已结束但
-            异常收口（无报告/快照未读到）」的票单独可筛出（要求⑤）。异常收口行仍在
-            「收口」桶计数里（桶归属不变）。data-health=渲染断言锚。 */}
-        <button className="wb-chip-btn wb-chip-health" data-health="abnormal" data-on={filterHealth === 'abnormal'}
-          title="Only tickets closed abnormally (no report / unreadable close face)"
-          onClick={() => setFilterHealth(filterHealth === 'abnormal' ? '' : 'abnormal')}>
-          Abnormal close {abnormalCloseCount}
-        </button>
-        <button className="wb-chip-btn" data-on={filterState4 === '' && filterHealth === ''}
-          onClick={() => { setFilterState4(''); setFilterHealth('') }}>All {tickets?.length ?? 0}</button>
-        {epicList.length > 0 && <span className="wb-sub">epic:</span>}
-        {epicList.map(e => (
-          <button key={e.code} className="wb-chip-btn wb-chip-epic" data-on={filterEpic === e.code}
-            style={{ borderColor: epicColorOf(e.code), ...({ '--epic-c': epicColorOf(e.code) } as React.CSSProperties), color: epicChipColor() }}
-            title={`Filter by epic ${e.code}`}
-            onClick={() => setFilterEpic(filterEpic === e.code ? '' : e.code)}>
-            {e.code} ·{e.count}
-          </button>
-        ))}
-        <input className="wb-search" type="search" placeholder="Search id / title…" value={q}
-          onChange={e => setQ(e.target.value)} />
-        <select className="wb-select" value={sortKey} onChange={e => setSortKey(e.target.value as 'created' | 'updated')}>
-          <option value="updated">Last activity ↓</option>
-          <option value="created">Created ↓</option>
-        </select>
-        <button className="wb-btn" onClick={() => { void pollOnce() }}>Refresh</button>
-        {/* KI-003③（t260903-06）：轮询失败不弹窗——静默重试期间保留上次成功快照，
-            角标提示「数据可能滞后」；连续 3 次失败才升错误条（见上方 wb-err）。 */}
-        {pollHealth.failStreak > 0 && !pollHealth.degraded && (
-          <span
-            className="wb-sub"
-            title={pollLastError || 'Last refresh failed; showing last good snapshot, auto-retrying'}
-          >
-            ⟳ Data may be stale (auto-retrying)
-          </span>
-        )}
-        <span className="wb-sub">{openList.length + doneList.length}/{tickets?.length ?? 0} tickets</span>
-      </div>
-
-      {/* t260915-08 巡检板面降级提示：拉取失败/声明降级=显式横幅（不静默清空） */}
-      {inspectionNote !== '' && (
-        <div className="wb-insp-note-banner" data-testid="inspection-degraded">{inspectionNote}</div>
-      )}
-
-      {/* 平铺行卡列表（t260904-17，mock ⑥）：状态配色不分组、epic 彩条、迷你站道、衍生动作位 */}
-      {paged.map(t => {
-        const ops = availableOps(t, wfById[t.workflow]) as CardOp[]
-        // t260915-08：巡检行——拓扑走宿主声明面、进展行本地纯函数合成（enrich 通道
-        // 只覆盖项目票）；点行开详情，「去签字/看原因」都落进展页签（巡检面住那里）。
-        const insp = isInspectionRow(t)
-        return (
-          <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }}
-            wf={insp ? INSPECTION_WF : wfById[t.workflow]}
-            progress={insp ? inspectionProgressOf(t) : progressMap[t.id]}
-            active={t.id === selectedId} busy={opBusy} ops={ops}
-            peerViewers={peerViewersByTicket.get(t.id)}
-            onOpen={(anchor) => {
-              // 衍生动作位=纯导航（R3）：去签字→详情「变更」页签（审批必看 diff 区，本票落点）；
-              // 看原因→详情「进展」页签（问题区/阻塞原因）。零写操作。
-              // 巡检行（t260915-08）：无变更页签，review/blocked 一律落「进展」（巡检面）。
-              if (anchor === 'review' && !insp) setDrawerTab('changes')
-              if (anchor === 'blocked' || anchor === undefined || insp) setDrawerTab('detail')
-              openTicketOverlay(t.id)
-            }}
-            onAdvance={() => { doAdvance(t.id, t.stage_state, t.epic) }}
-            onDispatch={() => { void doOp(t.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}
-            onRework={() => { openRework(t.id, t.stage_state === 'awaiting-human') }}
-            onPause={() => { void doOp(t.id, 'pause', { who: operator }, 'Pause sent (stops after current stage finishes)') }}
-            onResume={() => { void doOp(t.id, 'resume', { who: operator }, 'Resume sent; dispatching continues') }}
-            onUnblock={() => {
-              if (t.engine === 'template-as-code-v2') {
-                void doOp(t.id, 'retry-qc', { who: operator }, 'Retry requested (retry_qc)')
-              } else {
-                void doOp(t.id, 'update', { stage_state: 'awaiting', note: '(board) unblock' }, 'Unblocked')
-              }
-            }}
-            onClose={() => { if (window.confirm('Mark as completed (closed)?')) void doOp(t.id, 'update', { status: 'closed', note: '(board) done' }, 'Marked closed') }}
-            onOpenEpic={onOpenEpic} />
-        )
-      })}
-      {paged.length === 0 && openList.length === 0 && (
-        <div className="wb-empty">No tickets match the filter.</div>
-      )}
-
-      {/* 异常收口段（t260921-03）：不折叠恒展开，排在正常收口折叠行之前——不沉底、
-          不被并入「看起来正常」的收口组（要求③）；行卡自带「已结束·异常（无报告）/
-          已结束·待核」徽标与悬停原因。 */}
-      {doneAbn.map(t => (
-        <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]} compact={false}
-          active={t.id === selectedId} busy={opBusy} ops={[]}
-          onOpen={() => openTicketOverlay(t.id) }
-          onOpenEpic={onOpenEpic} />
-      ))}
-
-      {/* 收口折叠计数行（mock ⑥）：数据覆盖面以 /wf/tickets 返回集为准（KI-031 注记：
-          terminate/直并收口票不在列表数据宇宙，计数偏小非折叠逻辑丢票）。
-          t260921-03：计数=doneOk（异常收口行已上移恒展开，不再折叠） */}
-      {doneOk.length > 0 && (
-        showDone ? (
-          <>
-            <button className="wb-done-row" onClick={() => setShowDone(false)}>▾ Closed · {doneOk.length} (click to collapse)</button>
-            {doneOk.map(t => (
-              <TicketRowCard key={t.id} t={{ ...t, title_or_first: t.title_or_first ?? titleFirstMap[t.id] }} wf={wfById[t.workflow]} compact={false}
-                active={t.id === selectedId} busy={opBusy} ops={[]}
-                onOpen={() => openTicketOverlay(t.id) }
-                onOpenEpic={onOpenEpic} />
-            ))}
-          </>
-        ) : (
-          <button className="wb-done-row" onClick={() => setShowDone(true)}>✓ Closed · {doneOk.length} (click to expand)</button>
-        )
-      )}
-
-      {pageCount > 1 && (
-        <div className="wb-pager">
-          <button className="wb-btn" disabled={pageNo <= 1}
-            onClick={() => setPageNo(p => Math.max(1, p - 1))}>Prev page</button>
-          <span className="wb-sub">Page {pageNo}/{pageCount} · {openList.length} open</span>
-          <button className="wb-btn" disabled={pageNo >= pageCount}
-            onClick={() => setPageNo(p => Math.min(pageCount, p + 1))}>Next page</button>
-        </div>
-      )}
-      </>)}
-
-      {page === 'scan' && (
-        <>
-          <div className="wb-scan-backbar">
-            <button className="wb-btn" onClick={() => setPage('tickets')}>← Back to ticket list</button>
-          </div>
-          <ScanReportSection scan={scan} onOpen={(id) => { setPage('tickets'); openTicketOverlay(id) }} />
-        </>
-      )}
 
       {(selectedId !== null || overlayNav.current !== null) && (
         <div className="wb-drawer wb-overlay" data-testid="ticket-overlay">
@@ -4635,6 +4406,21 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey, onOpenEp
                 <details className="wb-d2-more">
                   <summary>More</summary>
                   <div className="wb-d2-more-body">
+                    {/* t261005-10 (UI-2): the pause/resume actions move from the retired
+                        board row card into the detail More section — the capability does
+                        not retire with the view (availableOps/pauseOpOf unchanged). */}
+                    {ops.includes('pause') && (
+                      <button className="wb-btn" disabled={opBusy}
+                        onClick={() => void doOp(detail.id, 'pause', { who: operator }, 'Pause sent (stops after current stage finishes)')}>
+                        Pause
+                      </button>
+                    )}
+                    {ops.includes('resume') && (
+                      <button className="wb-btn" disabled={opBusy}
+                        onClick={() => void doOp(detail.id, 'resume', {}, 'Resume sent; dispatching continues')}>
+                        Resume
+                      </button>
+                    )}
                     {ops.includes('dispatch-next') && (
                       <button className="wb-btn" disabled={opBusy}
                         onClick={() => { void doOp(detail.id, 'dispatch-next', {}, 'Dispatch prompt generated') }}>
@@ -4835,21 +4621,12 @@ export function apply(ctx: ClientContext): void {
     sessions={ctx.sessions}
     workspaces={ctx.workspaces as any}
     getService={getService}
-    views={{ board: WorkbenchSection, docs: DocsSection, routes: ProvidersSection, epics: EpicSection }}
+    // t261005-10 (UI-2): one middle column — the executor panel with the consolidated
+    // tab strip; WorkbenchSection survives as the overlay/machine-head host (no board).
+    views={{ overlay: WorkbenchSection, routes: ProvidersSection }}
     {...props} /></SlotErrorBoundary>))
 
-  // 度量入口进出厂 footer.action 槽（t260902-05①）：与 dsh settings 齿轮同排。
-  // inject 回调体 try/catch（README 槽纪律：槽未声明时 throw 在 register() 内
-  // 延迟执行，外层 catch 接不到）；失败 markFooterSlot(false) → 侧栏 .wb-sb-foot
-  // 兜底钮照常渲染（软退化不静默，console.warn 留痕）。
-  ctx.slots.inject('sidebar.footer.action', () => {
-    try {
-      const dispose = ctx.slots.register({ name: 'sidebar.footer.action', priority: -10 }, MetricsFooterButton)
-      markFooterSlot(true)
-      return dispose
-    } catch (err) {
-      markFooterSlot(false)
-      console.warn('[workbench] sidebar.footer.action 槽注册失败，度量入口软退化回工单台下栏：', err)
-    }
-  })
+  // t261005-10 (UI-2): the metrics footer.action slot registration retires with
+  // the three-level entrance — Metrics lives in the panel Metrics tab and the slot
+  // goes back to the platform (an unregistered slot occupies nothing).
 }

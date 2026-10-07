@@ -247,9 +247,23 @@ async function waitFor(cond, ms) {
 async function dismissOverlays(p) {
   for (let i = 0; i < 5; i++) {
     const dialog = p.locator('[role="dialog"]').first()
-    if (!(await dialog.count())) return
+    if (!(await dialog.count())) break
     const btn = dialog.locator('button:enabled').first()
     if (await btn.count()) await btn.click({ timeout: 3000 }).catch(() => {})
+    else await p.keyboard.press('Escape').catch(() => {})
+    await p.waitForTimeout(600)
+  }
+  // arbitrate round-3 finding: the dsh shell's modal mask (CSS-module
+  // _mask_*/_root_*, e.g. the first-run onboarding overlay that ships with the
+  // post-sync shell) intercepts pointer events over the sidebar but carries
+  // role="presentation", so the [role=dialog] pass above never sees it. Dismiss
+  // it the way a user would: its close button, else Escape — repeated until the
+  // sidebar is clickable again.
+  for (let i = 0; i < 5; i++) {
+    const mask = p.locator('[class*="_mask_"]').first()
+    if (!(await mask.count()) || !(await mask.isVisible().catch(() => false))) return
+    const close = p.locator('[class*="_dialog_"] [class*="_close_"], [class*="_root_"] button:enabled').first()
+    if (await close.count()) await close.click({ timeout: 2000 }).catch(() => {})
     else await p.keyboard.press('Escape').catch(() => {})
     await p.waitForTimeout(600)
   }
@@ -277,10 +291,11 @@ async function runBrowser(pw, browser) {
     const pageErrors = []
     const page = await ctx.newPage()
     page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)))
-    await bench.goto(page, { waitUntil: 'networkidle' })
-    await page.waitForTimeout(3000)
-    await dismissOverlays(page)
-
+    // t261005-10 (UI-2) re-home: install the route stub BEFORE navigation — the
+    // first /wf/projects /wf/tickets /wf/inspection/tickets fetches happen at first
+    // paint; a post-goto install let the REAL seeded stage render its groups and the
+    // fixture rows never displaced them (arbitrate round-2 Family C5 root cause,
+    // same shape as the t261005-04 leak).
     // 数据只在 API 边界打桩；inspection 载荷可变（降级子用例换 ok:false）。
     let insPayload = { ok: true, result: { tickets: INS_ROWS, count: INS_ROWS.length } }
     const DEGRADE = { ok: false, error: 'ticket-list(inspection) 失败: fixture 降级注入 0x519' }
@@ -318,6 +333,10 @@ async function runBrowser(pw, browser) {
       }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'fixture stub: unknown ticket or sub-route' }) })
     })
+    await bench.goto(page, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(3000)
+    await dismissOverlays(page)
+
 
     // precheck：自带 /wf/projects 桩 → 项目组必须真渲染（不依赖台面真实注册表）。
     const groupHeadA = page.locator(`.wb-sb .wb-group-dot[title="${PROJ_A}"]`).first()

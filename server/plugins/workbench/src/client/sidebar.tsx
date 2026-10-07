@@ -128,8 +128,8 @@ import {
 // ⚙ settings 弹层（收 sandbar 驻留输入）保留在中列底部——工单台自有设置，
 // 与出厂 settings 语义不同（t260902-05 方案 v2 R6-① 决策）。下钻：关面板后走
 // handleTicketClick 开详情抽屉。
-import { MetricsPanel } from './metrics.tsx'
-import { METRICS_STATE_EVENT, METRICS_TOGGLE_EVENT, footerSlotOk, mountMetricsIntoSettingsRow, shellActiveNow, subscribeShellActive } from './metrics-entry.tsx'
+// t261005-10 (UI-2): the sidebar metrics entrance (all three levels) and its
+// CustomEvent bus are retired wholesale — Metrics lives in the panel's Metrics tab.
 import { DERIVE_TOKENS_CSS } from './theme';
 
 /* ---------------------------------------------------------------- 类型 */
@@ -198,19 +198,13 @@ interface Project {
 
 /** 中列视图，由 index.tsx 注入（避免 sidebar→index 循环 import；t260826-02 起三视图 + 立项单第四视图）。 */
 interface MiddleViews {
-  /** 工单台（WorkbenchSection），focusId=要在详情抽屉里打开的工单；
-   *  focusNonce=「又点了一次工单」信号（同 id 重开也触发——setState 同值跳渲染，
-   *  只靠 focusId 传达不到）；listNonce=「点工单列表图标回列表」信号（通知关详情抽屉）。
-   *  onOpenEpic=工单徽标点击（t260826-02）：中列切立项单视图并定位代号。 */
-  board: ComponentType<{ focusId?: string; focusNonce?: number; listNonce?: number; projectKey?: string; onOpenEpic?: (code: string) => void }>
-  /** 文档视图（t260905-06 立；t260915-10 接壳层）：初值/跟随=壳层当前项目，页内选择器
-   *  可手动切且手动优先；''=无项目上下文→缺省引擎仓回落（既有语义不删）。 */
-  docs: ComponentType<{ projectKey?: string }>
-  /** 模型/路由（ProvidersSection）。 */
+  /** Ticket-detail overlay + machine-level status head host (the middle column's
+   *  only host surface since t261005-10; the board view is deleted — the overlay
+   *  machinery stays, opened by left-column rows and panel-tab rows). */
+  overlay: ComponentType<{ focusId?: string; focusNonce?: number; listNonce?: number; projectKey?: string }>
+  /** Model routes (ProvidersSection) — kept as the More-views escape hatch (its
+   *  merge into the panel Settings belongs to a later ticket). */
   routes: ComponentType<{ projectKey?: string }>
-  /** 立项单（EpicSection，t260826-02）：epicCode/epicNonce=定位信号（同 code 重进靠 nonce，
-   *  同 focusNonce 先例）；onOpenTicket=点关联工单行跳工单详情（复用 handleTicketClick 链路）。 */
-  epics: ComponentType<{ epicCode?: string; epicNonce?: number; projectKey?: string; onOpenTicket?: (ticketId: string) => void }>
 }
 
 interface SidebarProps {
@@ -250,7 +244,8 @@ interface SidebarProps {
   views: MiddleViews
 }
 
-type RightView = 'board' | 'docs' | 'routes' | 'epics' | 'executor'
+// t261005-10 (UI-2): executor panel = the middle column; routes stays as the More-views escape hatch.
+type RightView = 'executor' | 'routes'
 
 /** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
  *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
@@ -456,8 +451,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-project-add-row:hover { background:rgba(255,255,255,0.06); color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-project-add-plus { width:22px; height:22px; border:1px dashed var(--dsw-alias-border-l1,#555); border-radius:6px;
   display:flex; align-items:center; justify-content:center; font-size:14px; flex:none; }
-/* 中列：视图容器（四视图自带全套样式，无切换条——视图由左列图标直切） */
-.wb-right-content { flex:1; overflow-y:auto; }
+/* Middle column container. Since t261005-10 (UI-2) the content is the machine-level
+   status head (carried by the overlay host) plus the executor panel (fills the rest)
+   — a vertical flex stack; the overlay covers both when open. */
+.wb-right-content { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.wb-right-content > .wb-root { flex:none; }
+.wb-right-content > .wb-executor-view { flex:1; min-height:0; }
+.wb-right-content > .wb-placeholder { flex:none; }
 .wb-placeholder { padding:32px; color:var(--dsw-derive-muted,#57606a); font-size:13px; line-height:1.8; }
 
 /* 顶部会话入口行样式已随票② R8 退役（t260904-05，顶部行样式族全清）。 */
@@ -543,7 +543,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
   // 兜底组折叠态：独立布尔——collapsed 的键是项目注册表 key，不与它混用（防撞名）。
   const [inspCollapsed, setInspCollapsed] = useState(false)
   const [selectedId, setSelectedId] = useState<string>('')
-  const [rightView, setRightView] = useState<RightView>('board')
+  const [rightView, setRightView] = useState<RightView>('executor')
   /** 当前中列视图所属项目（左列图标点击行）；空=未选（中列显占位）。 */
   const [viewProject, setViewProject] = useState('')
   /** 「又点了一次工单」信号：随 focusId 传给 WorkbenchSection，
@@ -568,30 +568,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
   >(null)
   /** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
   const [quarantined, setQuarantined] = useState<{ key: string; dir: string; error: string }[]>([])
-  /** 立项单视图定位（t260826-02）：epicCode=当前立项代号；epicNonce=「又点了一次同一立项」
-   *  信号（同 focusNonce 先例——同 code 重进也要触发 EpicSection 重拉）。 */
-  const [epicCode, setEpicCode] = useState('')
-  const [epicNonce, setEpicNonce] = useState(0)
-  // metrics M2a（t260902-01）：度量面板开/关 + ⚙ settings 弹层；「度量」钮 ref
-  // 供面板关闭时焦点归还（焦点管理最小实现）。
-  const [metricsOpen, setMetricsOpen] = useState(false)
+  // The ⚙ settings popover (the sandbar dwell input) stays; the three-level metrics
+  // entrance and its event bus retired wholesale with t261005-10 (UI-2) — Metrics
+  // lives in the panel Metrics tab.
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const metricsBtnRef = useRef<HTMLButtonElement | null>(null)
-  // 兜底钮显隐（响应式）：footerSlotOk() 是注册回调的滞后快照（首次渲染时常为
-  // false，探针实锤兜底钮与覆盖层并存）——以 shell 覆盖层激活态订阅兜底，
-  // 覆盖层激活即隐兜底钮（双入口消除），注册失败且覆盖层不可用才显示。
-  const [shellActive, setShellActive] = useState(shellActiveNow)
-  useEffect(() => subscribeShellActive(setShellActive), [])
-  // 入口联动（t260902-05①）：footer.action 槽钮（另一棵 React 子树）经事件总线
-  // 开/关面板；面板开合状态回播给钮做高亮。cleanup 双向都摘。
-  useEffect(() => {
-    const onToggle = () => { setSettingsOpen(false); setMetricsOpen(o => !o) }
-    document.addEventListener(METRICS_TOGGLE_EVENT, onToggle)
-    return () => { document.removeEventListener(METRICS_TOGGLE_EVENT, onToggle) }
-  }, [])
-  useEffect(() => {
-    document.dispatchEvent(new CustomEvent(METRICS_STATE_EVENT, { detail: { open: metricsOpen } }))
-  }, [metricsOpen])
   const [sandbar, setSandbar] = useState(sandbarHours)
   const rootRef = useRef<HTMLDivElement>(null)
   // 插件陈旧看守（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：classifyHandshake
@@ -687,25 +667,17 @@ export function WorkbenchSidebar(props: SidebarProps) {
     })
   }, [wide, projectSessions.listState?.current, projectSessions.ledger])
 
-  // Project-file ledger fetch (UI-5 R5 freshness contract): on mount and on
-  // project switch the cache is refreshed from sessions.json (file-wins);
-  // failures stay silent (cache fallback, declared inside fetchProjectLedger).
+  // Project-file ledger fetch (UI-5 R5 freshness contract, merged from main): on
+  // mount and on project switch the cache is refreshed from sessions.json
+  // (file-wins); failures stay silent (cache fallback, declared inside
+  // fetchProjectLedger). The metrics shell-row mount effect that used to live in
+  // this slot is retired by t261005-10 (UI-2): the module it mounted was deleted
+  // and Metrics lives in the panel's Metrics tab.
   const bandProjectKey = viewProject || (projects.length === 1 ? projects[0].key : '')
   useEffect(() => {
     if (!wide || bandProjectKey === '') return
     void fetchProjectLedger(bandProjectKey)
   }, [wide, bandProjectKey])
-
-  // 度量入口首选注入 shell Settings 行（t260902-05① 验收打回修订：footer.action
-  // 槽落点=侧栏包 footer，与 shell Settings 不同排）。锚找不到软退化回 footer.action
-  // 槽（metrics-entry 内广播 METRICS_SHELL_EVENT 控制槽钮显隐）；卸载/折叠全回收。
-  useEffect(() => {
-    if (!wide) return
-    const root = rootRef.current
-    if (!root) return
-    return mountMetricsIntoSettingsRow(root)
-  }, [wide])
-
   // 撑宽侧栏：两处关卡都要过——
   // ① frame 是 grid 三轨（inline grid-template-columns），把第一轨改为 75%（左15%+中60%，右栏 chat 由 1fr 得 25%）；
   // ② SidebarRoot 自身带 inline width（layout store 供值、上限 420px），轨再宽它也只占 store 宽度——改为 100% 撑满轨道。
@@ -894,7 +866,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
     // 需要非空 projectKey 才能开详情抽屉；零注册项目时选中态在、中列保持占位
     // （既有边界交回，本票不做 index.tsx 结构手术）。项目组行传非空 key=原行为。
     setViewProject(p => projectKey || p || (projects.length > 0 ? projects[0].key : ''))
-    setRightView('board')
+    // t261005-10 (UI-2): the board view is gone — the overlay opens on top of the
+    // executor panel (the overlay carries the content replacement; the panel iframe
+    // never unmounts).
+    setRightView('executor')
     setFocusNonce(n => n + 1)
   }, [projects])
 
@@ -912,15 +887,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
   // 立项单（t260827-01）：点图标=回立项清单（空代号=列表模式），bump epicNonce
   //    保证「看过详情再点图标」与「同项目重复点图标」都能触发 EpicSection 重拉回列表
   //    （epicCode/rightView/viewProject 多半已是同值，setState 跳渲染——同 listNonce 先例）。
+  // A view icon on a project row switches the middle column (stopPropagation keeps
+  // the group fold closed). t261005-10 (UI-2): the Tickets/Epics/Docs icons retired
+  // with their views — More views keeps Model Routes and Project Settings (the
+  // latter is a modal, not a view).
   const handleViewIcon = useCallback((projectKey: string, view: RightView) => {
-    if (view === 'board') {
-      setSelectedId('')
-      setListNonce(n => n + 1)
-    }
-    if (view === 'epics') {
-      setEpicCode('')
-      setEpicNonce(n => n + 1)
-    }
     setViewProject(projectKey)
     setRightView(view)
   }, [])
@@ -964,28 +935,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
     }))
   }, [projects, ticketsByProject, inspectionSplit])
 
-  const Board = views.board
-  const Docs = views.docs
+  // t261005-10 (UI-2): Ws = the overlay + machine-status-head host (no board view).
+  const Ws = views.overlay
   const Routes = views.routes
-  const Epics = views.epics
-
-  // 进立项单详情视图（工单徽标点击，t260826-02）：中列切 epics 并定位代号。
-  // （t260827-01 起左列不再有立项列表区，清单入口=项目行立项单图标，走 handleViewIcon。）
-  // viewProject 兜底注册表首项——立项单列表/详情本身不需要 project，但详情页「新建工单」
-  // 与点关联工单行需要（?project= 必传）；立项单是跨项目语义单元（EpicCode SA 不带项目维度）。
-  const openEpic = useCallback((code: string) => {
-    setEpicCode(code)
-    setEpicNonce(n => n + 1)
-    setRightView('epics')
-    setViewProject(p => p || (projects.length > 0 ? projects[0].key : ''))
-  }, [projects])
 
   // 轨条态
   if (!wide) {
     return (
       <div ref={rootRef} className="wb-sb rail">
         <style>{CSS}</style>
-        <div className="wb-sb-icon" onClick={expandSidebar} title="Ticket Board">⊞</div>
+        <div className="wb-sb-icon" onClick={expandSidebar} title="Console">⊞</div>
       </div>
     )
   }
@@ -1079,22 +1038,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     三枚收进「More views」行内展开位（展开也在流内，零外溢命中面）；
                     active 高亮只判 rightView（跨组同亮，t260915-10 口径不变）。 */}
                 <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
-                  <span
-                    className={`wb-view-icon ${rightView === 'board' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="Tickets" aria-label="Tickets"
-                    onClick={() => handleViewIcon(g.project.key, 'board')}><ProjectIcon name="board" /></span>
-                  <span
-                    className={`wb-view-icon ${rightView === 'epics' && viewProject === g.project.key ? 'active' : ''}`}
-                    title="Epics" aria-label="Epics"
-                    onClick={() => handleViewIcon(g.project.key, 'epics')}><ProjectIcon name="epics" /></span>
-                  {/* 键盘可达（t260905-06 验收①）：span 非原生可聚焦——role+tabIndex+Enter 键位补齐。 */}
+                  {/* t261005-10 (UI-2): the Tickets/Epics/Docs icons retired — ticket
+                      details open from a left-column row (the overlay); Epics/Docs/
+                      Metrics live in panel tabs; More views keeps Model Routes and
+                      Project Settings (modal). */}
                   {moreViews[g.project.key] && (<>
-                    <span
-                      className={`wb-view-icon ${rightView === 'docs' ? 'active' : ''}`}
-                      role="button" tabIndex={0}
-                      title="Docs" aria-label="Docs"
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleViewIcon(g.project.key, 'docs') }}
-                      onClick={() => handleViewIcon(g.project.key, 'docs')}><ProjectIcon name="docs" /></span>
                     <span
                       className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
                       title="Model Routes" aria-label="Model Routes"
@@ -1267,56 +1215,33 @@ export function WorkbenchSidebar(props: SidebarProps) {
         <div className="wb-right-content">
           {!viewProject && (
             <div className="wb-placeholder">
-              Open a view from a project row on the left:
-              <br />Tickets · Docs · Model Routes · Epics · Project Settings
-              <br />or click a project name row to open its Executor panel
-              <br />(routed by the row's project; Epics is a cross-project list — clicking its icon shows the list in the middle column)
+              Open a project from the left (click a project name row to open its Executor panel,
+              <br />or click a ticket row to open its detail overlay).
             </div>
           )}
-          {/* 执行器视图（t261003-09 修订）：项目行入口点进来；iframe 嵌同源面板页。
-              顶部 Executor/Chat 行随本票退役——「打开声明的 executor 会话」改为面板
-              Overview 小按钮经 postMessage 请求本组件 handler（openExecutorSessionById）；
-              主题名随深链传入面板。 */}
+          {/* t261005-10 (UI-2): the middle column is the executor panel (home of the
+              consolidated tab strip) plus the overlay host (Ws) — the machine-level
+              head sits above the panel; the ticket overlay covers both. */}
           {viewProject && rightView === 'executor' && (
-            <ExecutorView
-              projectKey={viewProject}
-              openExecutorSession={openExecutorSessionById} />
+            <>
+              <Ws focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} />
+              <ExecutorView
+                projectKey={viewProject}
+                openExecutorSession={openExecutorSessionById}
+                openTicketOverlay={(id) => handleTicketClick({ id } as Ticket, viewProject)} />
+            </>
           )}
-          {viewProject && rightView === 'board' && <Board focusId={selectedId || undefined} focusNonce={focusNonce} listNonce={listNonce} projectKey={viewProject} onOpenEpic={openEpic} />}
-          {/* 文档视图（t260905-06 立；t260915-10 接壳层 projectKey）：与 per-project 视图
-              同通路穿参，但不要求已选项目（''=缺省引擎仓回落）——渲染行不带 viewProject
-              守卫（Board 渲染守卫不带，取舍清单见 t260915-10 方案 §1.6）。 */}
-          {rightView === 'docs' && <Docs projectKey={viewProject} />}
           {viewProject && rightView === 'routes' && <Routes projectKey={viewProject} />}
-          {/* 立项单视图（t260826-02 中列第四视图；t260827-01 起空代号=立项清单，由项目行
-              立项单图标进入，详情由清单行/工单徽标定位）：点关联工单行 → 复用 handleTicketClick
-              链路（中列工单详情抽屉 + 右栏会话）；handleTicketClick 只用 t.id，最小形状安全。 */}
-          {viewProject && rightView === 'epics' && (
-            <Epics epicCode={epicCode} epicNonce={epicNonce} projectKey={viewProject}
-              onOpenTicket={(id) => { void handleTicketClick({ id } as Ticket, viewProject) }} />
-          )}
-          {/* 度量面板（t260902-05② 中 pane 化）：挂在 .wb-sb-right（position:relative）
-              内的覆盖层，inset:0 随中列自适应——不再全幅。打开才挂载，关闭即释放
-              全部图表实例。 */}
-          {metricsOpen && (
-            <MetricsPanel
-              openerRef={metricsBtnRef}
-              onClose={() => { setMetricsOpen(false) }}
-              onPickTicket={(id) => { void handleTicketClick({ id } as Ticket, viewProject) }} />
-          )}
         </div>
         {/* 下栏（t260902-05 修订）：度量入口已迁出厂 footer.action 槽（与 dsh settings
             同排）；此处仅剩 ⚙ settings 弹层（工单台自有 sandbar 驻留设置 + M2c 预留位）。
             槽注册失败（软退化）时兜底「📊 度量」钮回此排，功能不丢。 */}
         <div className="wb-sb-foot">
-          {!footerSlotOk() && !shellActive && (
-            <button ref={metricsBtnRef} className="wb-sb-foot-btn" data-on={metricsOpen}
-              title="Metrics (stage durations / delivery / tokens / system health)"
-              onClick={() => { setSettingsOpen(false); setMetricsOpen(o => !o) }}>📊 Metrics</button>
-          )}
+          {/* t261005-10 (UI-2): the 📊 Metrics fallback button retired (Metrics lives
+              in the panel tab). */}
           <span className="wb-sb-foot-sp" />
           <button className="wb-sb-foot-btn" data-on={settingsOpen} title="Settings"
-            onClick={() => { setMetricsOpen(false); setSettingsOpen(o => !o) }}>⚙</button>
+            onClick={() => setSettingsOpen(o => !o)}>⚙</button>
         </div>
         {settingsOpen && (
           <div className="wb-sb-setpop" role="dialog" aria-label="Settings">

@@ -133,6 +133,8 @@ console.log('\n== E ticketShowErrorReply：410 分级零回归 + face 只加键�
 /* ---- F. 源级锚（防接线被静默拆除/复发） ---- */
 console.log('\n== F 源级锚 ==')
 const idxSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/index.tsx'), 'utf8')
+const modelSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-list-model.ts'), 'utf8')
+const sbSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/sidebar.tsx'), 'utf8')
 const tfSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/terminal-face.ts'), 'utf8')
 const nodeSrc = readFileSync(join(repo, 'server/plugins/workbench/node.ts'), 'utf8')
 
@@ -156,10 +158,12 @@ ok(idxSrc.includes('{!detailLoading && overlayNav.current?.kind !== \'epic\' && 
 ok(idxSrc.includes('setTerminalFace(terminalFaceView('), 'openDetail 捕获 face 装配视图')
 ok(idxSrc.includes("e.face = data?.face"), '错误对象挂 face（apiGet 410 返回 body 通路）')
 ok((idxSrc.match(/setTerminalFace\(null\)/g) || []).length >= 2, '切单/重开/关抽屉清态（≥2 处，不串票）')
-ok(idxSrc.includes("'waiting', 'blocked', 'active', 'failed', 'done'"), 'chips 数组含 failed（五态过滤接线）')
-ok(idxSrc.includes(".wb-chip-btn[data-state=failed]") && idxSrc.includes('.wb-root .wb-card[data-state=failed]')
-  && idxSrc.includes('.wb-card-dot[data-state=failed]') && idxSrc.includes('.wb-card-state[data-state=failed]'),
-  'failed 红系 CSS（chip/行底/点/状态字）在源')
+// t261005-10 (UI-2)：板面 chips/行卡随 board 视图退役——五态枚举（含 failed）的
+// 消费面收拢到 ticket-list-model（STATE4_LABEL）与左栏行卡（sidebar 的
+// .wb-sb .wb-card-state data-state 覆写）。源锁随消费面搬家。
+ok(modelSrc.includes("'failed'"), '五态枚举含 failed（模型层 TicketState4）')
+ok(sbSrc.includes("[data-state=failed]") && idxSrc.includes(".wb-root .wb-card[data-state=failed]"),
+  'failed 红系 CSS 消费点在源（左栏行卡/板面遗留覆写）')
 ok(idxSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status)'), 'deriveTicketState 调用点传 exec_status')
 ok(idxSrc.includes("if (deriveTicketState(t.status, t.stage_state, t.exec_status) === 'failed') return []"),
   'availableOps：失败行零管理操作（终态票零推进入口，行卡面）')

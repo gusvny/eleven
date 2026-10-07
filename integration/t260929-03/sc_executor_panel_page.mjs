@@ -153,6 +153,16 @@ const srv = createServer((req, res) => {
       unmapped_rows: 0, malformed_rows: 0 }); return
   }
   if (u.pathname === '/sandbar-executor-panel/api/bridge/status') { send(200, { ok: true, mounted: true, counters: { mirrored: 0 }, last_events: [] }); return }
+  // t261005-10 UI-2 follow-up: honest stubs for the panel's new read faces
+  // (concurrency + lazily-fetched read-only tabs) — an unstubbed fetch 404s and
+  // fails the hygiene leg on stub noise, not product.
+  if (u.pathname.endsWith('/api/concurrency')) return send(200, { ok: true, project: 'stub', declared: false, limit: null, unlimited: false, path: '(stub: no declaration)' })
+  if (u.pathname.endsWith('/api/epics')) return send(200, { ok: true, result: { epics: [] } })
+  if (u.pathname.endsWith('/api/wf/docs/tree')) return send(200, { ok: true, result: { tree: [] } })
+  if (u.pathname.endsWith('/api/wf/docs/doc')) return send(200, { ok: true, result: { path: '(stub)', markdown: '' } })
+  if (u.pathname.endsWith('/api/wf/metrics')) return send(200, { ok: true, result: {} })
+  if (u.pathname.endsWith('/api/wf/scan-report')) return send(200, { ok: true, result: { findings: [], pending: 0 } })
+
   res.writeHead(404); res.end('not found')
 })
 await new Promise(r => srv.listen(0, '127.0.0.1', r))

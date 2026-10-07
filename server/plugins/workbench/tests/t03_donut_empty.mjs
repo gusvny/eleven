@@ -68,19 +68,8 @@ const D = (stub) => {
   ok('完全无数据 slices 空（绝不抛）', Array.isArray(d3.slices) && d3.slices.length === 0)
 }
 
-// ---- C. bundle 空态文案门（S4 后绿灯）
-{
-  console.log('C. bundle 门：人话空态文案（implement 前故意 FAIL）')
-  let bundle = ''
-  try { bundle = readFileSync(new URL('./../lib/client.js', import.meta.url), 'utf8') } catch {}
-  if (bundle === '') {
-    console.log('  SKIP bundle 门 — lib/client.js 不存在')
-  } else {
-    // 空态文案以实现落地为准（方案 R5 初稿「窗口内无 stage 时长数据」，实现定稿
-    // 「窗口内无可绘图数据」——20260902 review 同步，覆盖 donut 全零白块场景）
-    const n = (bundle.match(/窗口内无可绘图数据/g) ?? []).length
-    ok('bundle 含人话空态文案「窗口内无可绘图数据」', n >= 1, `count=${n}`)
-  }
-}
+// ---- C. bundle 门随 echarts 度量面板退役（t261005-10 UI-2：Metrics 住面板 tab，
+// 事实面 KPI 卡；donut 渲染层 metrics-model/metrics-charts 的 L1 断言在 A/B 段，
+// bundle 不再携带宿主 donut 空态文案——此门无对象，退役不留假绿）。
 const passAll = summary('t03_donut_empty')
 process.exit(passAll ? 0 : 1)

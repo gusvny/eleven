@@ -23,7 +23,7 @@
  * executor-grants-write (single truth for META_OP judgment + audit).
  */
 
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -114,6 +114,12 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   // per-kind counters / recent event ring. GET-only (read face); the read source is
   // deps.bridgeStatus (node.ts injects the createBridgeStatus sink).
   { path: '/sandbar-executor-panel/api/bridge/status', methods: ['GET'] },
+  // t261005-10 (UI-2): the Overview limit row's read face. CL-1 engine half only:
+  // declaration file <projects_root>/<key>/concurrency-limit.json, schema
+  // {"version":1,"limit":1..10|"unlimited"} (server/engine/concurrency.py is the
+  // single truth). The write face belongs to CL-2 — GET-only by design (one knob,
+  // and the knob is not this ticket's).
+  { path: '/sandbar-executor-panel/api/concurrency', methods: ['GET'] },
 ]
 
 export interface ApiDeps {
@@ -692,10 +698,74 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       }
       return { status: 200, json: { ok: true, ...snap } }
     }
+    // ---- concurrency declaration (t261005-10, UI-2): the Overview limit row's face ----
+    if (path === '/sandbar-executor-panel/api/concurrency') {
+      if (method !== 'GET') return bad(405, 'read-only face: GET only')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const root = env.SANDBAR_PANEL_DIR || instanceProjectsRoot(env)
+      const declPath = join(root, key, 'concurrency-limit.json')
+      let raw: string
+      try {
+        raw = readFileSync(declPath, 'utf8')
+      } catch (e) {
+        const code = (e as { code?: unknown })?.code
+        if (code === 'ENOENT') {
+          // No declaration = a fact, not an error: the engine default applies, the
+          // row says so, and the absent write face is named (CL-2 boundary).
+          return { status: 200, json: { ok: true, project: key, declared: false, limit: null,
+            unlimited: false, path: declPath,
+            note: 'No concurrency limit declared. The engine default applies. The write control lands with CL-2.' } }
+        }
+        return { status: 200, json: { ok: true, project: key, declared: false, limit: null,
+          unlimited: false, path: declPath,
+          reason: `declaration unreadable: ${e instanceof Error ? e.message : String(e)}` } }
+      }
+      try {
+        const limit = parseConcurrencyDoc(raw)
+        return { status: 200, json: { ok: true, project: key, declared: true, limit,
+          unlimited: limit === null, path: declPath } }
+      } catch (e) {
+        // Present but malformed: declared stays false (the engine refuses this
+        // declaration too — validator messages carry the reason verbatim).
+        return { status: 200, json: { ok: true, project: key, declared: false, limit: null,
+          unlimited: false, path: declPath,
+          reason: e instanceof Error ? e.message : String(e) } }
+      }
+    }
     return bad(404, `未知面板路由：${path}`)
   }
 
   return { handle }
+}
+
+/**
+ * concurrency-limit.json parse (t261005-10 pure function, UT-covered; mirrors the
+ * server/engine/concurrency.py validate_limit rules — schema {"version":1,"limit":1..10|"unlimited"}):
+ *   - "unlimited" -> null (the engine's None synonym);
+ *   - int 1..10 -> number; non-integer / out-of-range / missing key / non-object -> throw
+ *     (the message goes verbatim into the page's named degraded face).
+ * A throw is a refusal: no guessing, no silent default — the caller shows the reason.
+ */
+export function parseConcurrencyDoc(raw: string): number | null {
+  let doc: unknown
+  try {
+    doc = JSON.parse(raw)
+  } catch (e) {
+    throw new Error(`concurrency-limit.json is not valid JSON: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) {
+    throw new Error('concurrency-limit.json must be a JSON object {"version":1,"limit":1..10|"unlimited"}')
+  }
+  const o = doc as Record<string, unknown>
+  if (o.version !== 1) throw new Error(`concurrency-limit.json version must be 1 (got ${JSON.stringify(o.version ?? null)})`)
+  const v = o.limit
+  if (v === 'unlimited') return null
+  if (typeof v !== 'number' || !Number.isInteger(v)) {
+    throw new Error(`concurrency-limit.json limit must be an int 1..10 or "unlimited" (got ${JSON.stringify(v ?? null)})`)
+  }
+  if (v < 1 || v > 10) throw new Error(`concurrency-limit.json limit ${v} is out of range (1..10)`)
+  return v
 }
 
 /** panel 自有项目集（有 requests.jsonl 或 watchdog 声明的项目；「按项目分组」的主列数据源）。 */

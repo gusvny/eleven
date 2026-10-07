@@ -60,8 +60,9 @@ ok('行卡源码锁：暂停徽标 data 锚点 + pause/resume 操作位 + busy �
 ok('index.tsx 源码锁：availableOps 走 pauseOpOf 纯函数层 + 行卡装配 onPause/onResume', () => {
   const idx = readFileSync(join(repo, 'server/plugins/workbench/src/client/index.tsx'), 'utf8')
   assert.ok(idx.includes('v2ops.push(pauseOpOf(t.paused))'), 'availableOps 消费 pauseOpOf')
-  assert.ok(idx.includes("doOp(t.id, 'pause',") && idx.includes("doOp(t.id, 'resume',"),
-    '行卡装配 onPause/onResume 走 doOp 既有写通路')
+  // t261005-10 (UI-2)：操作位随行卡迁入详情 More 区——装配点改锁详情面。
+  assert.ok(idx.includes("doOp(detail.id, 'pause',") && idx.includes("doOp(detail.id, 'resume',"),
+    '详情 More 区装配 pause/resume 走 doOp 既有写通路')
 })
 
 ok('node.ts 源码锁：OPS 白名单含 pause/resume + 走 runPocCli 信号通道（不造旁路）', () => {

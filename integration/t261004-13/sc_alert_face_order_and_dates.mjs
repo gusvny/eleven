@@ -71,6 +71,17 @@ function stubServer(alerts, wakes) {
     if (u.pathname.endsWith('/api/settings')) return json({ config: { enabled: true }, provenance: {} })
     if (u.pathname.endsWith('/api/grants')) return json({ granted_count: 0, total: 6, executor_sessions: [], session_state: 'none' })
     if (u.pathname.endsWith('/api/recent-actions')) return json({ rows: [] })
+    // t261005-10 UI-2 follow-up: the panel overview now fetches the concurrency
+    // read face and lazily fetches the read-only tab faces; an unstubbed fetch
+    // 404s and fails the hygiene leg on stub noise, not product. Honest empty /
+    // undeclared shapes only (no fabricated facts).
+    if (u.pathname.endsWith('/api/concurrency')) return json({ ok: true, project: 'stub', declared: false, limit: null, unlimited: false, path: '(stub: no declaration)' })
+    if (u.pathname.endsWith('/api/epics')) return json({ ok: true, result: { epics: [] } })
+    if (u.pathname.endsWith('/api/wf/docs/tree')) return json({ ok: true, result: { tree: [] } })
+    if (u.pathname.endsWith('/api/wf/docs/doc')) return json({ ok: true, result: { path: '(stub)', markdown: '' } })
+    if (u.pathname.endsWith('/api/wf/metrics')) return json({ ok: true, result: {} })
+    if (u.pathname.endsWith('/api/wf/scan-report')) return json({ ok: true, result: { findings: [], pending: 0 } })
+
     res.writeHead(404); res.end('{}')
   })
 }

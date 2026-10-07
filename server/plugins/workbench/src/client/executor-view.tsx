@@ -35,14 +35,30 @@ import { consoleThemeName, executorPanelUrl } from './executor-view-model.ts'
 export const OPEN_SESSION_MSG_TYPE = 'sandbar-executor-panel:open-session'
 /** 宿主 → 面板的结果回执（面板只渲染一行 STE 文案，不做轮询/重试/状态条）。 */
 export const OPEN_SESSION_RESULT_MSG_TYPE = 'sandbar-executor-panel:open-session-result'
+/** t261005-10 (UI-2): a panel Epics/Inspection ticket row asks the host to open the
+ *  existing ticket-detail overlay (the t261005-04 machinery; the panel builds no
+ *  second detail face). */
+export const OPEN_TICKET_MSG_TYPE = 'sandbar-executor-panel:open-ticket'
+/** t261005-10 (UI-2): host -> panel wayfinding messages (the machine-level
+ *  Inspection number jumps to the panel tab; a ticket-detail epic badge jumps to
+ *  the panel Epics tab). The panel accepts only these two, from the parent only. */
+export const SHOW_TAB_MSG_TYPE = 'sandbar-executor-panel:show-tab'
+export const SHOW_EPIC_MSG_TYPE = 'sandbar-executor-panel:show-epic'
+/** In-window event: a WorkbenchSection machine-level button reaches this component,
+ *  which forwards it into the iframe over postMessage. */
+export const PANEL_GOTO_EVENT = 'wb-panel-goto'
 
 export interface ExecutorViewProps {
   projectKey: string
   /** 打开面板声明的 executor 会话（侧栏实现：sessions.open；返回是否无异常）。 */
   openExecutorSession: (sessionId: string) => boolean
+  /** t261005-10 (UI-2): a panel ticket row requests the ticket-detail overlay (the
+   *  sidebar handleTicketClick chain). Absent = a no-op — the overlay is not this
+   *  surface's to build; no error is raised. */
+  openTicketOverlay?: (ticketId: string) => void
 }
 
-export function ExecutorView({ projectKey, openExecutorSession }: ExecutorViewProps) {
+export function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }: ExecutorViewProps) {
   const [panelState, setPanelState] = useState<{ ok: boolean; detail: string }>({ ok: false, detail: 'checking…' })
   const frameRef = useRef<HTMLIFrameElement | null>(null)
 
@@ -70,14 +86,45 @@ export function ExecutorView({ projectKey, openExecutorSession }: ExecutorViewPr
       if (e.origin !== window.location.origin) return
       const frame = frameRef.current
       if (!frame || e.source !== frame.contentWindow) return
-      const d = e.data as { type?: unknown; sessionId?: unknown } | null
-      if (!d || d.type !== OPEN_SESSION_MSG_TYPE) return
-      const ok = typeof d.sessionId === 'string' && d.sessionId !== '' && openExecutorSession(d.sessionId)
-      frame.contentWindow?.postMessage({ type: OPEN_SESSION_RESULT_MSG_TYPE, ok }, window.location.origin)
+      const d = e.data as { type?: unknown; sessionId?: unknown; ticketId?: unknown } | null
+      if (!d || typeof d !== 'object') return
+      // t261005-10 (UI-2): the same listener also takes open-ticket — a ticket row
+      // opens the existing overlay. Unknown types or unknown senders are ignored
+      // (the accepted surface does not grow, review C3); a missing
+      // openTicketOverlay callback is a no-op.
+      if (d.type === OPEN_SESSION_MSG_TYPE) {
+        const ok = typeof d.sessionId === 'string' && d.sessionId !== '' && openExecutorSession(d.sessionId)
+        frame.contentWindow?.postMessage({ type: OPEN_SESSION_RESULT_MSG_TYPE, ok }, window.location.origin)
+        return
+      }
+      if (d.type === OPEN_TICKET_MSG_TYPE) {
+        if (typeof d.ticketId === 'string' && d.ticketId !== '' && openTicketOverlay) openTicketOverlay(d.ticketId)
+        return
+      }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [openExecutorSession])
+  }, [openExecutorSession, openTicketOverlay])
+
+  // t261005-10 (UI-2): the machine-level head button (the Inspection number)
+  // forwards to the panel tab in the same window. Only PANEL_GOTO_EVENT is taken;
+  // tab/epic must be non-empty strings to forward; the listener is removed on
+  // unmount (all-terminal cleanup).
+  useEffect(() => {
+    const onGoto = (ev: Event) => {
+      const frame = frameRef.current
+      if (!frame || !frame.contentWindow) return
+      const detail = (ev as CustomEvent).detail as { tab?: unknown; epic?: unknown } | null
+      if (!detail || typeof detail !== 'object') return
+      if (typeof detail.tab === 'string' && detail.tab !== '') {
+        frame.contentWindow.postMessage({ type: SHOW_TAB_MSG_TYPE, tab: detail.tab }, window.location.origin)
+      } else if (typeof detail.epic === 'string' && detail.epic !== '') {
+        frame.contentWindow.postMessage({ type: SHOW_EPIC_MSG_TYPE, epic: detail.epic }, window.location.origin)
+      }
+    }
+    window.addEventListener(PANEL_GOTO_EVENT, onGoto)
+    return () => window.removeEventListener(PANEL_GOTO_EVENT, onGoto)
+  }, [])
 
   const theme = consoleThemeName()
 

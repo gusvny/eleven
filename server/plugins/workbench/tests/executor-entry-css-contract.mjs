@@ -67,13 +67,17 @@ assert(/\.wb-group-entry \{ flex:1 1 0; min-width:0;/.test(src), `C1 entry-zone 
     `C5b no out-of-row overlay left (${++n})`)
   const minW = Number(src.match(/\.wb-sb-left \{ flex:1 1 0; min-width:(\d+)px/)[1])
   assert(minW === 180, `C5c left column min-width stays 180px (got ${minW}) (${++n})`)
-  // 常驻钉住：board 与 epics 图标在「More views」展开位之前、无条件渲染
+  // t261005-10 (UI-2)：Tickets/Epics/Docs 图标随视图归并退役——簇内常驻为零枚，
+  // More views 展开位只剩 Model Routes + Project Settings。
   const iconsStart = src.indexOf('<span className="wb-view-icons"')
   const more = src.indexOf('data-wb-more-views=""', iconsStart)
   assert(iconsStart > 0 && more > 0, `C5d cluster and expander present (${++n})`)
   const pinned = src.slice(iconsStart, more)
-  assert(pinned.includes('aria-label="Tickets"') && pinned.includes('aria-label="Epics"'),
-    `C5e Tickets and Epics icons pinned unconditionally (${++n})`)
+  assert(!pinned.includes('aria-label="Tickets"') && !pinned.includes('aria-label="Epics"')
+    && !pinned.includes('aria-label="Docs"'),
+    `C5e board/epics/docs icons retired from the cluster (${++n})`)
+  assert(src.includes('aria-label="Model Routes"') && src.includes('data-wb-project-settings-entry=""'),
+    `C5e2 More views keeps Model Routes + Project Settings (${++n})`)
   assert(/aria-label=\{moreViews\[g\.project\.key\][^\n]*'More views'/.test(src),
     `C5f More views expander with keyboard support (${++n})`)
 }
