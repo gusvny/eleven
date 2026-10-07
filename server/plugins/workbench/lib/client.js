@@ -15041,7 +15041,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 								},
 								children: workers ? `${workers.count_alive} workers` : "— workers"
 							}),
-							"// t261005-10 (UI-2): the number stays machine-level; the table lives in the // panel's Inspection tab — the button asks the executor panel to show it // (ExecutorView forwards over postMessage; no second table face here).",
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 								className: "wb-status-btn",
 								"data-wb-inspection-jump": "",

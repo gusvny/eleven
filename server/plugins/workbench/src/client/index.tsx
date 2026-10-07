@@ -4110,9 +4110,9 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
             onClick={() => { if (!workersOpen) void reloadWorkers(); setWorkersOpen(!workersOpen) }}>
             {workers ? `${workers.count_alive} workers` : '— workers'}
           </button>
-          // t261005-10 (UI-2): the number stays machine-level; the table lives in the
-          // panel's Inspection tab — the button asks the executor panel to show it
-          // (ExecutorView forwards over postMessage; no second table face here).
+          {/* t261005-10 (UI-2): the number stays machine-level; the table lives in the
+              panel's Inspection tab — the button asks the executor panel to show it
+              (ExecutorView forwards over postMessage; no second table face here). */}
           <button className="wb-status-btn" data-wb-inspection-jump=""
             data-online={scan?.report ? scan.report.pending_decision_count === 0 : undefined}
             title={scan?.report
