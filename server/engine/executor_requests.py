@@ -10,6 +10,12 @@
 
 宿主侧的应答/授权/dismiss 仍只在面板（控制台会话凭据门后）；本模块不提供任何应答面。
 
+Thread face (t261007-02): request_thread.py lands reply / state / link rows on
+the same ledger (five states, four link kinds, the two ownership fields, three
+register-derived source classes). This gate's head-row contract is unchanged
+(the new fields subject/epic/... land through the thread face's op=file);
+legacy head rows are valid history and readers tolerate them.
+
 CLI（与其他引擎条目同形：一个 JSON argv）：
     python3 server/engine/executor_requests.py '<json>'
   输入体：{op:"file", project:<key>, kind, question, detail?, options?,

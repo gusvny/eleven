@@ -27,10 +27,13 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
-  appendRequest, answerRequest, dismissRequest, readRequests, parseJsonBody, requestUrgency,
+  appendRequest, answerRequest, dismissRequest, readRequests, parseJsonBody, requestUrgency, setThreadState,
   fsLedgerIo, type LedgerIo,
 } from './requests.ts'
 import { loadWatchdogConfig } from './settings.ts'
+
+/** Legacy prefix of malformedProjectMessage (existing copy; kept as a constant so new lines stay English-only). */
+const LEGACY_PROJECT_BAD = 'project ' + String.fromCharCode(24418,29366)
 import { instanceProjectsRoot } from '../../../watchdog/src/host/config.ts'
 import { readSettings, saveWatchdogDecl, revokeAll, sleepToggle } from './settings.ts'
 import { deriveGrants, extractTemplateFacts, grantsUnavailable, type GrantsResult } from './grants.ts'
@@ -107,6 +110,9 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   { path: '/sandbar-executor-panel/api/requests/answer', methods: ['POST'] },
   // t261007-01: the dismiss write (host-only, same credential gate as answer).
   { path: '/sandbar-executor-panel/api/requests/dismiss', methods: ['POST'] },
+  // t261007-02: the host state-change face behind the thread states (dismissed
+  // here; resolved belongs to the doer via the engine entry request_thread.py).
+  { path: '/sandbar-executor-panel/api/requests/state', methods: ['POST'] },
   { path: '/sandbar-executor-panel/api/settings', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/grants', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/actions', methods: ['GET'] },
@@ -378,9 +384,13 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       const res = answerRequest(ledgerIo, env, String(b.project ?? ''), b.id, b.answer, 'host', now(),
         mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : undefined)
       if (!res.ok) {
-        const status = res.error.startsWith('project 形状') || res.error.startsWith('id 必须') || res.error.startsWith('answer 必须')
+        // t261007-02: the answer refusals moved to English copy (writing standard);
+        // match the same three classes. LEGACY_PROJECT_BAD is the existing
+        // malformedProjectMessage prefix constant (legacy copy, not reworded here).
+        const status = res.error.startsWith(LEGACY_PROJECT_BAD) || res.error.startsWith('id must')
+          || res.error.startsWith('answer must')
           ? 400
-          : res.error.startsWith('无此请求') ? 404 : 409
+          : res.error.startsWith('no such request') ? 404 : 409
         return bad(status, res.error)
       }
       // t261004-29: the wake is pushed only after the answer has landed (the answer
@@ -437,6 +447,18 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       }
       return { status: 200, json: { ok: true, dismissed: res.dismissRow,
         ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+    // ---- t261007-02: host state change (dismissed only; see setThreadState) ----
+    if (path === '/sandbar-executor-panel/api/requests/state') {
+      if (method !== 'POST') return bad(405, 'state face is POST-only (a write, recorded on the trail)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const b = parsed.body
+      const res = setThreadState(ledgerIo, env, String(b.project ?? ''), b.id, b.state, 'host', now())
+      if (!res.ok) {
+        // the refusal carries its own status hint (no message-text matching)
+        return bad(res.status ?? 409, res.error)
+      }
+      return { status: 200, json: { ok: true, state: res.stateRow } }
     }
     // ---- settings ----
     if (path === '/sandbar-executor-panel/api/settings') {

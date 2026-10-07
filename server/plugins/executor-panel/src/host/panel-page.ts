@@ -633,7 +633,29 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   function traceLine(r){
     var t = 'Request id: ' + r.id;
     if(r.raised_by) t = 'Raised by session ' + r.raised_by + '. ' + t;
-    t += '. Default action: ' + (r.default_action ? r.default_action : 'none') + '.';
+    // t261007-02: the two ownership fields (source ticket = fact, owning epic =
+    // judgement, 'none' carries its reason) and the judged source class.
+    if(r.source_ticket) t += ' Source ticket: ' + r.source_ticket + '.';
+    if(r.epic) t += ' Owning epic: ' + r.epic
+      + (r.epic === 'none' && r.epic_reason ? ' (' + r.epic_reason + ')' : '') + '.';
+    if(r.source_class) t += ' Source: ' + r.source_class + '.';
+    t += ' State: ' + (r.state || 'open') + '.';
+    t += ' Default action: ' + (r.default_action ? r.default_action : 'none') + '.';
+    // Thread face: replies (the delegated trio by/via/anchor as separate named parts)
+    // and links (a duplicates link without 'from' = a re-file that was linked, never
+    // a dangling id).
+    var replies = r.replies || [];
+    for(var i=0;i<replies.length;i++){
+      var rp = replies[i];
+      t += ' Reply by ' + rp.by + (rp.via ? ' (decided by ' + rp.via + ')' : '')
+        + (rp.anchor ? ' — anchor: "' + rp.anchor + '"' : '') + ': ' + rp.text;
+    }
+    var links = r.links || [];
+    for(var j=0;j<links.length;j++){
+      var l = links[j];
+      t += ' Link ' + l.kind + (l.from ? ' from ' + l.from : ' (re-file linked, no new item opened)')
+        + ' to ' + l.to + '.';
+    }
     return t;
   }
   function rowHead(r, cls, groupTag){
@@ -642,6 +664,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(groupTag) meta += ' · <span class="gtag">'+esc(groupTag)+'</span>';
     if(u.expired) meta += ' · expired. It still waits.';
     if(r.status==='answered') meta = esc(r.kind);
+    // t261007-02: closed states show their name on the collapsed head, and the two
+    // ownership fields travel on every head (empty on legacy rows = not shown).
+    if(r.status==='resolved'||r.status==='dismissed'||r.status==='superseded'){
+      meta = esc(r.kind) + ' · ' + esc(r.state||r.status);
+    }
+    if(r.epic) meta += ' · ' + esc(r.epic);
+    if(r.source_ticket) meta += ' · ' + esc(r.source_ticket);
     // t261007-01: a dismissed card names what happened, in one line.
     if(r.status==='dismissed') meta = esc(r.kind) + ' · dismissed';
     return '<div class="head" data-id="'+esc(r.id)+'"><span class="dot '+cls+'"></span>'

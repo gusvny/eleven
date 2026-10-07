@@ -40,7 +40,7 @@ assert(r.status === 400, 'answer: missing id/answer → 400')
 r = await api.handle('POST', '/sandbar-executor-panel/api/requests/answer', Q(), JSON.stringify({ project: 'alpha', id: rid, answer: 'ok' }))
 assert(r.status === 200, 'answer: first answer ok')
 r = await api.handle('POST', '/sandbar-executor-panel/api/requests/answer', Q(), JSON.stringify({ project: 'alpha', id: rid, answer: 'again' }))
-assert(r.status === 409 && r.json.error.includes('拒绝二次应答'), 'answer: second answer → 409 explicit rejection')
+assert(r.status === 409 && r.json.error.includes('second close refused'), 'answer: second answer → 409 explicit rejection')
 r = await api.handle('POST', '/sandbar-executor-panel/api/requests/answer', Q(), JSON.stringify({ project: 'alpha', id: 'req-ghost', answer: 'x' }))
 assert(r.status === 404, 'answer: unknown id → 404')
 

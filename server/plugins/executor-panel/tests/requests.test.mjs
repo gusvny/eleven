@@ -37,7 +37,11 @@ assert(a1.ok === true, 'answer valid request ok')
 const raw = io.files[f('alpha')]
 const linesAfterAnswer = raw.split('\n').filter(Boolean)
 const lastLine = JSON.parse(linesAfterAnswer[linesAfterAnswer.length - 1])
-assert(lastLine.type === 'answer' && lastLine.answer_for === r1.row.id, 'answer appended as its own row (request row untouched)')
+// t261007-02：应答成功后同落一条 answered state 行（写路径必须落 state 行）；
+// answer 行仍是自己一行，原请求行不改写。
+const answerLine = JSON.parse(linesAfterAnswer[linesAfterAnswer.length - 2])
+assert(answerLine.type === 'answer' && answerLine.answer_for === r1.row.id, 'answer appended as its own row (request row untouched)')
+assert(lastLine.type === 'state' && lastLine.state === 'answered' && lastLine.state_for === r1.row.id, 'answered state row appended after the answer row')
 assert(linesAfterAnswer.filter(l => JSON.parse(l).type === 'request' && l.includes(r1.row.id)).length === 1, 'original request row still present exactly once')
 const read1 = readRequests(io, env, 'alpha')
 const answeredRow = read1.rows.find(x => x.id === r1.row.id)
@@ -46,7 +50,7 @@ assert(raw.includes('"question"') && answeredRow.question.includes('merge'), 'or
 
 // 二次应答=显式拒绝（绝不静默二次关闭）。
 const a2 = answerRequest(io, env, 'alpha', r1.row.id, 'again', 'host', clock.now())
-assert(a2.ok === false && a2.error.includes('拒绝二次应答'), 'second answer explicitly rejected')
+assert(a2.ok === false && a2.error.includes('second close refused'), 'second answer explicitly rejected')
 
 // 无此 id=显式拒绝。
 assert(answerRequest(io, env, 'alpha', 'req-nope', 'x', 'host', 1).ok === false, 'answer unknown id explicitly rejected')

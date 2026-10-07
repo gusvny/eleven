@@ -110,17 +110,25 @@ export function groupByProject<T extends { project: string }>(rows: T[]): Array<
 
 /** Overview left-column split (t261007-01: three buckets — waiting on top,
  *  answered and dismissed in collapsed groups below; newest first within each).
- *  Anything shape-off is treated as waiting, never silently dropped. */
+ *  t261007-02: the five-state model narrows the waiting bucket to open —
+ *  resolved/superseded collapse away with answered (they are decisions or
+ *  machine closures, never waiting), dismissed keeps its own bucket, and a
+ *  row with a shape-off status stays waiting (an over-wait beats silencing a
+ *  possibly-open item). The closed-state list is inlined in the body (this
+ *  function is embedded into the page via String() and must be self-contained). */
 export function splitWaiting<T extends { status?: string }>(rows: T[]): { waiting: T[]; answered: T[]; dismissed: T[] } {
   const waiting: T[] = []
   const answered: T[] = []
   const dismissed: T[] = []
+  const closed = ['answered', 'resolved', 'dismissed', 'superseded']
   for (const r of rows || []) {
     if (!r) continue
-    if (r.status === 'answered') answered.push(r)
-    else if (r.status === 'dismissed') dismissed.push(r)
+    if (r.status === 'dismissed') dismissed.push(r)
+    else if (closed.includes(String(r.status))) answered.push(r)
     else waiting.push(r)
   }
+  return { waiting, answered, dismissed }
+}  }
   return { waiting, answered, dismissed }
 }
 

@@ -48,6 +48,14 @@ export interface RequestRow {
    *  面板据此把多问渲染成一张多问卡；单问行/历史行可缺省。给了就必须是非空短字符串
    *  （≤120 字符，同 raised_by 口径）——畸形在 append 时 fail-closed 拒收。 */
   group_id?: string
+  /** t261007-02 thread face: the owning fields and the judged source. All optional =
+   *  legacy rows (pre-thread) stay valid history; the view renders them empty and the
+   *  host's classification call on those rows is still pending (out of scope here). */
+  subject?: string
+  epic?: string
+  epic_reason?: string
+  source_class?: 'executor-session' | 'project-session' | 'lane-agent'
+  source_ticket?: string
 }
 
 /** 应答行（按 id 关联；追加不改写）。 */
@@ -64,29 +72,69 @@ export interface AnswerRow {
   writer_mismatch?: boolean
 }
 
-/**
- * Dismiss row (t261007-01, host ruling 261004, design note
- * 261003-executor-panel-redesign §9). A dismiss means "I saw it, I do not rule
- * on it". It is never approval. The default action still applies, and the
- * executor still runs it. The row stays separate from an answer: an answer
- * carries a decision, a dismiss carries none.
- */
-export interface DismissRow {
-  type: 'dismiss'
-  dismiss_for: string
+/** t261007-02 reply row (append-only; the thread's prose face). Delegated answers
+ *  carry the three-field split: by (who decided) / via (who filed it) / anchor (the
+ *  host's words) — shown as separate columns. Writers are gated by identity, not by
+ *  the head's state (design note; review round 1 comment 3). */
+export interface ReplyRow {
+  type: 'reply'
+  id: string
+  reply_for: string
   at: number
+  text: string
   by: string
-  /** Same writer-mismatch visibility as the answer row (KI-193). */
-  by_claimed?: string
-  writer_mismatch?: boolean
+  intent: 'answer' | 'fact' | 'ask'
+  source_class?: string
+  via?: string
+  anchor?: string
 }
 
-export type LedgerLine = RequestRow | AnswerRow | DismissRow
+/** t261007-02 state row: every state change is its own row, never a rewrite. */
+export interface StateRow {
+  type: 'state'
+  id: string
+  state_for: string
+  state: 'answered' | 'resolved' | 'dismissed' | 'superseded'
+  at: number
+  by: string
+  /** resolved only: a ticket id or a commit id — no evidence means no resolved. */
+  evidence?: string
+  note?: string
+}
 
-/** Read view: request row merged with answers and dismisses (three statuses),
- *  malformed-row count kept visible, never silent. */
+/** t261007-02 link row (supersedes / duplicates / follows_up / blocks). A duplicate
+ *  re-file opens NO head: the row omits `from` (the denied filing never became a row)
+ *  and carries the triple snapshot (dup_subject / dup_epic / dup_source_ticket) — the
+ *  panel renders it as a one-way link to `to` and never resolves a dangling id. */
+export interface LinkRow {
+  type: 'link'
+  id: string
+  kind: 'supersedes' | 'duplicates' | 'follows_up' | 'blocks'
+  from?: string
+  to: string
+  at: number
+  by: string
+  dup_subject?: string
+  dup_epic?: string
+  dup_source_ticket?: string
+}
+
+export type LedgerLine = RequestRow | AnswerRow | ReplyRow | StateRow | LinkRow | DismissRow
+
+/** The five thread states. `open` is the only waiting state — the waiting list keeps
+ *  its meaning (ticket item 10); expiry never moves a row between states (item 8). */
+export type ThreadState = 'open' | 'answered' | 'resolved' | 'dismissed' | 'superseded'
+
+/** Read view: request rows merged with answer/reply/state/link rows (malformed
+ *  rows counted, never silently dropped).
+ *  status (the legacy consumer face): waiting = open in the five-state model,
+ *  the other four states keep their value -- the waiting list takes open only
+ *  (page-logic splitWaiting narrows in step); state is the five-state truth. */
 export interface RequestView extends RequestRow {
-  status: 'waiting' | 'answered' | 'dismissed'
+  status: 'waiting' | 'answered' | 'resolved' | 'dismissed' | 'superseded'
+  state: ThreadState
+  replies: ReplyRow[]
+  links: LinkRow[]
   answer?: string
   answered_at?: number
   answered_by?: string
@@ -228,28 +276,92 @@ export function appendRequest(
 }
 
 /**
- * 应答一条请求（显式拒绝面，review 意见 #2 的 API 级防线）：
- * 无此 id / 已应答 → 显式报错，绝不静默二次关闭、绝不自动应答。
+ * Answer a request (the explicit refusal face, review comment #2's API-level
+ * defense): unknown id / no longer open -> named error, never a silent second
+ * close, never an auto-answer.
+ * t261007-02: a successful answer also lands an answered state row (the
+ * invariant: the write path never skips the state row; the answer row lands
+ * first, the state row second -- a crash between them still yields answered
+ * status from the answer row's merge).
  */
 export function answerRequest(
   io: LedgerIo, env: NodeJS.ProcessEnv, key: string, id: unknown, answer: unknown, by: string, nowMs: number,
   writerMeta?: { by_claimed?: string; writer_mismatch?: boolean },
-): { ok: true; answerRow: AnswerRow } | { ok: false; error: string } {
+): { ok: true; answerRow: AnswerRow; stateRow?: StateRow } | { ok: false; error: string } {
   if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
     return { ok: false, error: malformedProjectMessage(key) }
   }
-  if (typeof id !== 'string' || id === '') return { ok: false, error: 'id 必须是非空字符串' }
-  if (typeof answer !== 'string' || answer.trim() === '') return { ok: false, error: 'answer 必须是非空字符串' }
+  if (typeof id !== 'string' || id === '') return { ok: false, error: 'id must be a non-empty string' }
+  if (typeof answer !== 'string' || answer.trim() === '') return { ok: false, error: 'answer must be a non-empty string' }
   const read = readRequests(io, env, key)
   const target = read.rows.find(r => r.id === id)
-  if (!target) return { ok: false, error: `无此请求 id：${id}（该项目的账里没有这一条）` }
-  if (target.status === 'answered') {
-    return { ok: false, error: `请求 ${id} 已于 ${new Date(target.answered_at ?? 0).toISOString()} 由 ${target.answered_by ?? '?'} 应答——拒绝二次应答（留痕不可改写）` }
+  if (!target) return { ok: false, error: `no such request id: ${id} (nothing to answer in this project's ledger)` }
+  // t261007-01 §9 (merged from main): answer-after-dismiss wins — the host may
+  // change their mind; a dismiss is not a decision. Only a real decision
+  // (answered) or a doer terminal state (resolved/superseded) refuses.
+  if (target.state === 'answered' || target.state === 'resolved' || target.state === 'superseded') {
+    return { ok: false, error: `request ${id} is already ${target.state} — second close refused (the trail is never rewritten)` }
   }
   const answerRow: AnswerRow = { type: 'answer', answer_for: id, at: nowMs, answer, by, ...writerMeta }
-  io.appendFileSync(requestsLedgerFile(key, env), JSON.stringify(answerRow) + '\n')
-  return { ok: true, answerRow }
+  const file = requestsLedgerFile(key, env)
+  io.appendFileSync(file, JSON.stringify(answerRow) + '\n')
+  const stateRow: StateRow = { type: 'state', id: `st-${nowMs}-a`, state_for: id,
+    state: 'answered', at: nowMs, by }
+  io.appendFileSync(file, JSON.stringify(stateRow) + '\n')
+  return { ok: true, answerRow, stateRow }
 }
+
+/** t261007-02 host state change (panel face): dismissed only. The fixed setters:
+ *  answered is the answer route's word; resolved belongs to the doer with evidence
+ *  (engine entry request_thread.py op=state); superseded is set by the machine when
+ *  a newer item links this one. Terminal states accept no further state rows.
+ *  A refusal carries an HTTP status hint so the route layer never re-matches
+ *  message text. */
+export function setThreadState(
+  io: LedgerIo, env: NodeJS.ProcessEnv, key: string, id: unknown, state: unknown, by: string, nowMs: number,
+): { ok: true; stateRow: StateRow } | { ok: false; error: string; status?: number } {
+  if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
+    return { ok: false, error: malformedProjectMessage(key), status: 400 }
+  }
+  if (typeof id !== 'string' || id === '') return { ok: false, error: 'id must be a non-empty string', status: 400 }
+  if (state !== 'dismissed') {
+    return { ok: false, status: 400, error: 'state must be dismissed (the panel sets only the host side: answered goes through the answer face, resolved is the doer\'s with evidence, superseded is the machine\'s with a link; got ' + String(state) + ')' }
+  }
+  const read = readRequests(io, env, key)
+  const target = read.rows.find(r => r.id === id)
+  if (!target) return { ok: false, status: 404, error: `no such request id: ${id} (nothing to dismiss in this project's ledger)` }
+  if (target.state === 'resolved' || target.state === 'dismissed' || target.state === 'superseded') {
+    return { ok: false, status: 409, error: `request ${id} is already ${target.state} (terminal) — a state row is never rewritten, second close refused` }
+  }
+  const stateRow: StateRow = { type: 'state', id: `st-${nowMs}-d`, state_for: id,
+    state: 'dismissed', at: nowMs, by }
+  io.appendFileSync(requestsLedgerFile(key, env), JSON.stringify(stateRow) + '\n')
+  return { ok: true, stateRow }
+}
+
+/** Read view: request rows merged with answer/reply/state/link rows (malformed
+ *  rows counted, never silently dropped).
+ *  status (the legacy consumer face): waiting = open in the five-state model,
+ *  the other four states keep their value -- the waiting list takes open only
+ *  (page-logic splitWaiting narrows in step); state is the five-state truth. */
+export interface RequestView extends RequestRow {
+  status: 'waiting' | 'answered' | 'resolved' | 'dismissed' | 'superseded'
+  state: ThreadState
+  replies: ReplyRow[]
+  links: LinkRow[]
+  answer?: string
+  answered_at?: number
+  answered_by?: string
+}
+
+export interface RequestsRead {
+  file: string
+  rows: RequestView[]
+  malformed_rows: number
+}
+
+
+/** Read the ledger and merge answers/replies/states/links into the view (malformed rows counted, never silently dropped -- the ledger discipline shared with the watchdog). */
 
 /**
  * Dismiss a request (t261007-01, host ruling 261004, design note §9): "I saw it,
@@ -294,15 +406,25 @@ export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string):
   const lines = raw.split('\n').filter(l => l.trim() !== '')
   const requests = new Map<string, RequestView>()
   const answers: AnswerRow[] = []
+  const replies: ReplyRow[] = []
+  const states: StateRow[] = []
+  const links: LinkRow[] = []
   const dismisses: DismissRow[] = []
   for (const line of lines) {
     let doc: unknown
     try { doc = JSON.parse(line) } catch { out.malformed_rows += 1; continue }
     if (isRequestRow(doc)) {
       // 历史行（t260929-08 前落账）没有 raised_by：读出统一归一化为 ''（未归属哨兵），不畸形。
-      requests.set(doc.id, { ...doc, raised_by: typeof doc.raised_by === 'string' ? doc.raised_by : '', status: 'waiting' })
+      requests.set(doc.id, { ...doc, raised_by: typeof doc.raised_by === 'string' ? doc.raised_by : '',
+        status: 'waiting', state: 'open', replies: [], links: [] })
     } else if (isAnswerRow(doc)) {
       answers.push(doc)
+    } else if (isReplyRow(doc)) {
+      replies.push(doc)
+    } else if (isStateRow(doc)) {
+      states.push(doc)
+    } else if (isLinkRow(doc)) {
+      links.push(doc)
     } else if (isDismissRow(doc)) {
       dismisses.push(doc)
     } else {
@@ -315,12 +437,39 @@ export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string):
   for (const d of dismisses) {
     const t = requests.get(d.dismiss_for)
     if (!t) { out.malformed_rows += 1; continue } // ghost dismiss (points at no request row) = malformed trace, never silent
-    t.status = 'dismissed'; t.dismissed_at = d.at; t.dismissed_by = d.by
+    t.status = 'dismissed'; t.state = 'dismissed'; t.dismissed_at = d.at; t.dismissed_by = d.by
   }
   for (const a of answers) {
     const t = requests.get(a.answer_for)
     if (!t) { out.malformed_rows += 1; continue } // 指向不存在请求的应答行=畸形留痕，不静默
-    t.status = 'answered'; t.answer = a.answer; t.answered_at = a.at; t.answered_by = a.by
+    if (t.state === 'open' || t.state === 'dismissed') { t.state = 'answered' } // answer-after-dismiss wins (§9)
+    t.status = t.state as RequestView['status']
+    t.answer = a.answer; t.answered_at = a.at; t.answered_by = a.by
+  }
+  for (const r of replies) {
+    const t = requests.get(r.reply_for)
+    if (!t) { out.malformed_rows += 1; continue }
+    t.replies.push(r)
+  }
+  // State rows take effect in landing order (the later one wins); torn-op
+  // tolerance: a supersedes link without its derived state row -> the reader
+  // recomputes superseded (torn-op repair only, never a write-path license).
+  for (const s of states) {
+    const t = requests.get(s.state_for)
+    if (!t) { out.malformed_rows += 1; continue }
+    t.state = s.state as ThreadState
+    t.status = t.state as RequestView['status']
+    if (s.state === 'answered' && !t.answer) { t.answer = ''; t.answered_by = s.by }
+  }
+  for (const l of links) {
+    const t = requests.get(l.to)
+    if (t) {
+      t.links.push(l)
+      if (l.kind === 'supersedes' && t.state !== 'superseded') {
+        t.state = 'superseded'; t.status = 'superseded' // torn-op tolerance (see above)
+      }
+    }
+    if (l.from && !requests.has(l.from)) out.malformed_rows += 1 // a dangling from is recorded as malformed
   }
   out.rows = [...requests.values()].sort((a, b) => b.at - a.at) // 新的在前；旧的永不丢
   return out
@@ -340,6 +489,26 @@ function isAnswerRow(v: unknown): v is AnswerRow {
   return r.type === 'answer' && typeof r.answer_for === 'string' && typeof r.at === 'number'
     && typeof r.answer === 'string'
 }
+
+function isReplyRow(v: unknown): v is ReplyRow {
+  if (typeof v !== 'object' || v === null) return false
+  const r = v as Record<string, unknown>
+  return r.type === 'reply' && typeof r.reply_for === 'string' && typeof r.at === 'number'
+    && typeof r.text === 'string' && typeof r.by === 'string'
+}
+
+function isStateRow(v: unknown): v is StateRow {
+  if (typeof v !== 'object' || v === null) return false
+  const r = v as Record<string, unknown>
+  return r.type === 'state' && typeof r.state_for === 'string' && typeof r.at === 'number'
+    && (r.state === 'answered' || r.state === 'resolved' || r.state === 'dismissed' || r.state === 'superseded')
+}
+
+function isLinkRow(v: unknown): v is LinkRow {
+  if (typeof v !== 'object' || v === null) return false
+  const r = v as Record<string, unknown>
+  return r.type === 'link' && typeof r.to === 'string' && typeof r.at === 'number'
+    && (r.kind === 'supersedes' || r.kind === 'duplicates' || r.kind === 'follows_up' || r.kind === 'blocks')
 
 /** Strict dismiss-row guard (t261007-01): anything shape-off falls to the
  *  malformed counter — a dismiss row is never guessed into existence. */
