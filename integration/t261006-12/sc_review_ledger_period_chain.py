@@ -74,16 +74,76 @@ def section(t):
 APPEND = getattr(rl, "append_reviewed", None)
 ok(callable(APPEND), "module exposes the single append seam (append_reviewed)")
 
+def branch_body(src: str, anchor: str) -> str:
+    """Return the source text of the if-block whose header line matches `anchor`.
+
+    t261008-04: the previous byte-window regex (`literal.{0,600}?`) was vacuous —
+    the lazy quantifier captured only the 19-char literal, so the forbidden-word
+    scan below read nothing. This extractor is line-based: from the anchor line to
+    the last line indented deeper than it (blank lines skipped; block ends at the
+    first non-blank line with indent <= the anchor indent, or at EOF). Empty
+    string = anchor not found (caller turns that into a RED).
+    """
+    lines = src.splitlines()
+    start = next((i for i, ln in enumerate(lines)
+                  if re.search(anchor, ln)), None)
+    if start is None:
+        return ""
+    base_indent = len(lines[start]) - len(lines[start].lstrip())
+    out = [lines[start]]
+    for ln in lines[start + 1:]:
+        if not ln.strip():
+            continue
+        if len(ln) - len(ln.lstrip()) <= base_indent:
+            break
+        out.append(ln)
+    return "\n".join(out)
+
+
+# The anchor must pin the branch, not a comment: today exactly one line in
+# activities.py matches (the `if bool(plan.get("skip_when_unchanged")):` header
+# at spawn_inspection_period); a future duplicate turns red here instead of
+# silently testing the wrong branch.
+SKIP_ANCHOR = r'if\s+bool\(plan\.get\("skip_when_unchanged"\)\)'
+FORBIDDEN = ("review_ledger", "reviewed", "append_review", "select_slice")
+
+
+def forbidden_in(txt: str):
+    """The one forbidden-word scan the guard (and the negative control) share."""
+    return [w for w in FORBIDDEN if w in txt]
+
+
 # ---------- P1 skip period ----------
 section("P1 skip_when_unchanged never touches the ledger")
-skip_m = re.search(r"skip_when_unchanged.{0,600}?", ACTIV_SRC, re.S)
-ok(skip_m is not None, "skip_when_unchanged branch located in activities.py")
-skip_txt = skip_m.group(0) if skip_m else ""
-for forbidden in ("review_ledger", "reviewed", "append_review", "select_slice"):
-    ok(forbidden not in skip_txt,
-       "skip branch carries no %s reference" % forbidden)
+ok(len(re.findall(SKIP_ANCHOR, ACTIV_SRC)) == 1,
+   "skip_when_unchanged branch anchor is unique in activities.py")
+skip_txt = branch_body(ACTIV_SRC, SKIP_ANCHOR)
+ok(skip_txt != "", "skip_when_unchanged branch body located in activities.py")
+ok(len(skip_txt) > 100,
+   "capture covers the real branch body, not just the literal (%d chars)" % len(skip_txt))
+ok("Client.connect" not in skip_txt,
+   "capture does not swallow the code after the branch (no over-capture)")
+for w in forbidden_in(skip_txt):
+    ok(False, "skip branch carries no %s reference" % w)
+if not forbidden_in(skip_txt):
+    for w in FORBIDDEN:
+        ok(True, "skip branch carries no %s reference" % w)
 ok('"skipped"' in ACTIV_SRC and "no-new-changes" in ACTIV_SRC,
    "skip verdict row stays the declared no-new-changes shape")
+
+# Negative control (t261008-04): plant a forbidden word inside the captured
+# branch body and require the shared scan to go red — the guard must not be
+# able to regress to vacuous silently. The plant is inserted on a line indented
+# deeper than the anchor if-line, strictly inside the extracted line range.
+m = re.search(SKIP_ANCHOR, ACTIV_SRC)
+plant = ("        poisoned = append_review"
+         "  # negative-control plant (never executed)")
+poisoned_src = ACTIV_SRC[:m.end()] + "\n" + plant + ACTIV_SRC[m.end():]
+poisoned_txt = branch_body(poisoned_src, SKIP_ANCHOR)
+ok(plant in poisoned_txt,
+   "negative control: planted line lands inside the captured branch body")
+ok(bool(forbidden_in(poisoned_txt)),
+   "negative control: planted forbidden word makes the scan go red")
 
 # ---------- P2/P3/P4 stub exclusion + one seam + full scope ----------
 section("P2 stub path / P3 one seam / P4 full scope")
