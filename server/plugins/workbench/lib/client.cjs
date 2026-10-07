@@ -8339,7 +8339,15 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
    status head (carried by the overlay host) plus the executor panel (fills the rest)
    — a vertical flex stack; the overlay covers both when open. */
 .wb-right-content { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-.wb-right-content > .wb-root { flex:none; }
+/* t261008-05: the overlay host must not size itself out of the middle column.
+ * The legacy global .wb-root rule (index.tsx) carries height:100% AND
+ * min-height:100%; for a flex:none item both resolve against the column's
+ * definite height, so the host takes the whole column and leaves the executor
+ * panel (flex:1 1 0%; min-height:0) at zero height. height:auto + min-height:0
+ * makes the host shrink to its own content. The legacy global rule is
+ * intentionally NOT rewritten — views that still use .wb-root as their
+ * full-height root keep it. */
+.wb-right-content > .wb-root { flex:none; height:auto; min-height:0; }
 .wb-right-content > .wb-executor-view { flex:1; min-height:0; }
 .wb-right-content > .wb-placeholder { flex:none; }
 .wb-placeholder { padding:32px; color:var(--dsw-derive-muted,#57606a); font-size:13px; line-height:1.8; }
