@@ -64,14 +64,34 @@ export interface AnswerRow {
   writer_mismatch?: boolean
 }
 
-export type LedgerLine = RequestRow | AnswerRow
+/**
+ * Dismiss row (t261007-01, host ruling 261004, design note
+ * 261003-executor-panel-redesign §9). A dismiss means "I saw it, I do not rule
+ * on it". It is never approval. The default action still applies, and the
+ * executor still runs it. The row stays separate from an answer: an answer
+ * carries a decision, a dismiss carries none.
+ */
+export interface DismissRow {
+  type: 'dismiss'
+  dismiss_for: string
+  at: number
+  by: string
+  /** Same writer-mismatch visibility as the answer row (KI-193). */
+  by_claimed?: string
+  writer_mismatch?: boolean
+}
 
-/** 读出视图：请求行 + 应答合流（waiting/answered），畸形行计数显式在案。 */
+export type LedgerLine = RequestRow | AnswerRow | DismissRow
+
+/** Read view: request row merged with answers and dismisses (three statuses),
+ *  malformed-row count kept visible, never silent. */
 export interface RequestView extends RequestRow {
-  status: 'waiting' | 'answered'
+  status: 'waiting' | 'answered' | 'dismissed'
   answer?: string
   answered_at?: number
   answered_by?: string
+  dismissed_at?: number
+  dismissed_by?: string
 }
 
 export interface RequestsRead {
@@ -179,6 +199,17 @@ export function appendRequest(
     if (options.length === 0) return { ok: false, error: 'options 空数组=无意义（不给 = 自由文本请求，不要传空表）' }
     if (options.length > 8) return { ok: false, error: `options 至多 8 项（收到 ${options.length}）` }
   }
+  // Scope-6 re-file guard (t261007-01): after a dismiss, the executor must not
+  // re-file the same request verbatim. Mechanical rule here = a byte-identical
+  // question on a dismissed, still-unanswered request is refused. The full rule
+  // (a re-raise must name the prior dismiss and the new evidence in the question
+  // line) is prose, not machine-checkable at this layer — "names the new
+  // evidence" cannot be validated mechanically; a different question text passes.
+  const prior = readRequests(io, env, key)
+  const dup = prior.rows.find(r => r.status === 'dismissed' && r.question === body.question)
+  if (dup) {
+    return { ok: false, error: `request ${dup.id} was dismissed by the host — do not re-file the same ask verbatim; a re-raise with new evidence must name the prior dismiss and the new evidence in the question line` }
+  }
   const row: RequestRow = {
     type: 'request', id: makeRequestId(nowMs), at: nowMs, project: key,
     kind: body.kind,
@@ -220,7 +251,40 @@ export function answerRequest(
   return { ok: true, answerRow }
 }
 
-/** 读账并合流应答（畸形行计数显式在案，绝不静默丢弃——账本纪律同守望者）。 */
+/**
+ * Dismiss a request (t261007-01, host ruling 261004, design note §9): "I saw it,
+ * I do not rule on it". Never approval — the default action still applies and
+ * the executor still runs it. Explicit refusal faces, mirroring answerRequest:
+ * no silent double-close, and a dismissed request stays dismissed. Dismissing an
+ * already-answered request is refused too (developer decision, fault-mode item 4
+ * of plan_t261007-01: a decision exists; a dismiss adds nothing — the design
+ * note §9 rules only answer-after-dismiss, not dismiss-after-answer).
+ */
+export function dismissRequest(
+  io: LedgerIo, env: NodeJS.ProcessEnv, key: string, id: unknown, by: string, nowMs: number,
+  writerMeta?: { by_claimed?: string; writer_mismatch?: boolean },
+): { ok: true; dismissRow: DismissRow } | { ok: false; error: string } {
+  if (typeof key !== 'string' || !PROJECT_KEY_RE.test(key)) {
+    return { ok: false, error: malformedProjectMessage(key) }
+  }
+  if (typeof id !== 'string' || id === '') return { ok: false, error: 'id must be a non-empty string' }
+  const read = readRequests(io, env, key)
+  const target = read.rows.find(r => r.id === id)
+  if (!target) return { ok: false, error: `no such request id: ${id} (this project ledger has no such row)` }
+  if (target.status === 'dismissed') {
+    return { ok: false, error: `request ${id} was already dismissed at ${new Date(target.dismissed_at ?? 0).toISOString()} — second dismiss refused (the trace is never rewritten)` }
+  }
+  if (target.status === 'answered') {
+    return { ok: false, error: `request ${id} was answered (by ${target.answered_by ?? '?'}) — dismiss refused: a decision is on record, a dismiss adds nothing` }
+  }
+  const dismissRow: DismissRow = { type: 'dismiss', dismiss_for: id, at: nowMs, by, ...writerMeta }
+  io.appendFileSync(requestsLedgerFile(key, env), JSON.stringify(dismissRow) + '\n')
+  return { ok: true, dismissRow }
+}
+
+/** Read the ledger and merge answers and dismisses into the view (malformed
+ *  rows counted, never silently dropped — the same ledger discipline as the
+ *  watchdog). */
 export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string): RequestsRead {
   const file = requestsLedgerFile(key, env)
   const out: RequestsRead = { file, rows: [], malformed_rows: 0 }
@@ -230,6 +294,7 @@ export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string):
   const lines = raw.split('\n').filter(l => l.trim() !== '')
   const requests = new Map<string, RequestView>()
   const answers: AnswerRow[] = []
+  const dismisses: DismissRow[] = []
   for (const line of lines) {
     let doc: unknown
     try { doc = JSON.parse(line) } catch { out.malformed_rows += 1; continue }
@@ -238,9 +303,19 @@ export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string):
       requests.set(doc.id, { ...doc, raised_by: typeof doc.raised_by === 'string' ? doc.raised_by : '', status: 'waiting' })
     } else if (isAnswerRow(doc)) {
       answers.push(doc)
+    } else if (isDismissRow(doc)) {
+      dismisses.push(doc)
     } else {
       out.malformed_rows += 1
     }
+  }
+  // t261007-01 merge order: dismisses first, then answers — answer-after-dismiss
+  // wins (design note §9: the host may change their mind); both rows stay in the
+  // ledger trace. Dismiss-after-answer cannot occur (dismissRequest refuses it).
+  for (const d of dismisses) {
+    const t = requests.get(d.dismiss_for)
+    if (!t) { out.malformed_rows += 1; continue } // ghost dismiss (points at no request row) = malformed trace, never silent
+    t.status = 'dismissed'; t.dismissed_at = d.at; t.dismissed_by = d.by
   }
   for (const a of answers) {
     const t = requests.get(a.answer_for)
@@ -264,6 +339,15 @@ function isAnswerRow(v: unknown): v is AnswerRow {
   const r = v as Record<string, unknown>
   return r.type === 'answer' && typeof r.answer_for === 'string' && typeof r.at === 'number'
     && typeof r.answer === 'string'
+}
+
+/** Strict dismiss-row guard (t261007-01): anything shape-off falls to the
+ *  malformed counter — a dismiss row is never guessed into existence. */
+function isDismissRow(v: unknown): v is DismissRow {
+  if (typeof v !== 'object' || v === null) return false
+  const r = v as Record<string, unknown>
+  return r.type === 'dismiss' && typeof r.dismiss_for === 'string' && typeof r.at === 'number'
+    && typeof r.by === 'string'
 }
 
 /** 等待时长与过期（纯函数，界面渲染用；到期只是标记，永不自动关闭）。 */

@@ -108,15 +108,20 @@ export function groupByProject<T extends { project: string }>(rows: T[]): Array<
 
 // ---------- t261003-06：改版页面纯逻辑面（与上面同纪律：零 DOM、经 String(fn) 嵌页） ----------
 
-/** 等待/已答切分（Overview 左栏：waiting 在上、answered 收进折叠区；组内新的在前）。 */
-export function splitWaiting<T extends { status?: string }>(rows: T[]): { waiting: T[]; answered: T[] } {
+/** Overview left-column split (t261007-01: three buckets — waiting on top,
+ *  answered and dismissed in collapsed groups below; newest first within each).
+ *  Anything shape-off is treated as waiting, never silently dropped. */
+export function splitWaiting<T extends { status?: string }>(rows: T[]): { waiting: T[]; answered: T[]; dismissed: T[] } {
   const waiting: T[] = []
   const answered: T[] = []
+  const dismissed: T[] = []
   for (const r of rows || []) {
-    if (r && r.status === 'answered') answered.push(r)
-    else if (r) waiting.push(r)
+    if (!r) continue
+    if (r.status === 'answered') answered.push(r)
+    else if (r.status === 'dismissed') dismissed.push(r)
+    else waiting.push(r)
   }
-  return { waiting, answered }
+  return { waiting, answered, dismissed }
 }
 
 /** 选项判据（有选项=按钮，没选项=自由文本框；畸形选项项当没有——渲染面拿到的恒可信）。 */

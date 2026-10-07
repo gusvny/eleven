@@ -40,6 +40,15 @@ assert(PANEL_PAGE_HTML.includes('Needs your answer'), 'left column heading (STE:
 assert(PANEL_PAGE_HTML.includes('Recent actions'), 'right column = recent actions')
 assert(PANEL_PAGE_HTML.includes('id="reqBadge"'), 'waiting-count badge on Overview')
 
+// ---- t261007-01: the Dismiss action and the third group ----
+assert(PANEL_PAGE_HTML.includes('id="dismissedWrap"') && PANEL_PAGE_HTML.includes('id="dismissedList"') && PANEL_PAGE_HTML.includes('id="dismissedHead"'), 'Dismissed group markup present next to Answered')
+assert(PANEL_PAGE_HTML.includes("'Dismissed · ' + dismissed.length"), 'Dismissed group header carries the count')
+assert(PANEL_PAGE_HTML.includes("el('dismissedWrap').style.display = dismissed.length===0 ? 'none' : ''"), 'Dismissed group hidden while empty (same rule as Answered)')
+assert(PANEL_PAGE_HTML.includes('data-dismiss="1"') && PANEL_PAGE_HTML.includes('button[data-dismiss]'), 'Dismiss button rendered on waiting cards and bound')
+assert(PANEL_PAGE_HTML.includes("api/requests/dismiss'"), 'dismiss click POSTs the dismiss endpoint')
+assert(PANEL_PAGE_HTML.includes('Dismissed by you. Your default action applies.'), 'dismissed card copy (ticket wording, verbatim)')
+assert(PANEL_PAGE_HTML.includes("if(r.status==='dismissed') meta = esc(r.kind) + ' · dismissed'"), 'dismissed row head names the state')
+
 // ---- 交互：可展开、选项按钮 vs 自由文本、Answered 折叠、trace 行 ----
 assert(PANEL_PAGE_HTML.includes('data-open="false"') && PANEL_PAGE_HTML.includes("dataset.open==='true' ? 'false' : 'true'"), 'rows expand and collapse in place')
 assert(PANEL_PAGE_HTML.includes('max-height:440px;overflow:auto'), 'detail height-capped and scrollable')

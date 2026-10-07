@@ -27,7 +27,7 @@ import { readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import {
-  appendRequest, answerRequest, readRequests, parseJsonBody, requestUrgency,
+  appendRequest, answerRequest, dismissRequest, readRequests, parseJsonBody, requestUrgency,
   fsLedgerIo, type LedgerIo,
 } from './requests.ts'
 import { loadWatchdogConfig } from './settings.ts'
@@ -102,6 +102,8 @@ function auditSource(byClaimed: unknown): Record<string, unknown> {
 export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }> = [
   { path: '/sandbar-executor-panel/api/requests', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/requests/answer', methods: ['POST'] },
+  // t261007-01: the dismiss write (host-only, same credential gate as answer).
+  { path: '/sandbar-executor-panel/api/requests/dismiss', methods: ['POST'] },
   { path: '/sandbar-executor-panel/api/settings', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/grants', methods: ['GET', 'POST'] },
   { path: '/sandbar-executor-panel/api/actions', methods: ['GET'] },
@@ -392,6 +394,37 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         wake = { attempted: false, woke: false, reason: `wake caller threw: ${e instanceof Error ? e.message : String(e)}` }
       }
       return { status: 200, json: { ok: true, answered: res.answerRow, wake,
+        ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+    }
+    // t261007-01: the dismiss write rides the SAME credential gate as the answer
+    // write (the gate at dispatch above covers it — no second door), and the
+    // writer is the fixed 'host' exactly like the answer path. No wake is pushed:
+    // a dismiss carries no decision, so the executor has nothing new to wake for
+    // (the default action it already runs is unchanged).
+    if (path === '/sandbar-executor-panel/api/requests/dismiss') {
+      if (method !== 'POST') return bad(405, 'dismiss face is POST-only (write operation, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const b = parsed.body
+      // KI-193, same as answer: the writer is never caller-asserted. A body `by`
+      // that differs from 'host' is kept only as by_claimed + writer_mismatch.
+      const byClaimed = typeof b.by === 'string' ? b.by : undefined
+      const mismatch = byClaimed !== undefined && byClaimed !== 'host'
+      const projectKey = String(b.project ?? '')
+      if (!PROJECT_KEY_RE.test(projectKey)) return bad(400, malformedProjectMessage(b.project))
+      const res = dismissRequest(ledgerIo, env, projectKey, b.id, 'host', now(),
+        mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : undefined)
+      if (!res.ok) {
+        // Stable error-message prefixes, same design as the answer path
+        // (fault-mode item 7): shape refusals = 400, unknown id = 404, the
+        // rest = 409. The project-key shape is checked here so no CJK copy of
+        // the shared malformed-key message is duplicated in the prefix test.
+        const status = res.error.startsWith('id must')
+          ? 400
+          : res.error.startsWith('no such request') ? 404 : 409
+        return bad(status, res.error)
+      }
+      return { status: 200, json: { ok: true, dismissed: res.dismissRow,
         ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
     }
     // ---- settings ----

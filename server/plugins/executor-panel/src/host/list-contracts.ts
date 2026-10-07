@@ -51,6 +51,17 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     cap: 'all',
     empty_copy: 'No answered rows. The section stays hidden while this list is empty.',
   },
+  // t261007-01: the third group — a dismissed row carries no decision ("I saw
+  // it, I do not rule on it"); the default action still applies and the
+  // executor still runs it.
+  overview_dismissed: {
+    id: 'overview_dismissed',
+    title: 'Overview — Dismissed',
+    source: 'GET /sandbar-executor-panel/api/requests, rows with status "dismissed" (requests ledger, dismiss rows)',
+    order: 'Newest first by at (epoch ms; ISO strings parsed). Missing or malformed at sorts last. Equal at keeps ledger order (stable).',
+    cap: 'all',
+    empty_copy: 'No dismissed rows. The section stays hidden while this list is empty.',
+  },
   overview_recent_actions: {
     id: 'overview_recent_actions',
     title: 'Overview — Recent actions',

@@ -76,7 +76,10 @@ try {
   const dflt = rotateRow.locator('.dflt')
   assert(await dflt.isVisible(), 'the default action is visible without expanding')
   assert((await dflt.textContent()).includes('If you do not answer: hold the rotation.'), 'the card states what happens when the host does not answer')
-  assert((await rotateRow.locator('.opts').count()) === 0, 'a no-options card shows no buttons')
+  // t261007-01: the Dismiss button is the one intended button on a no-options
+  // card — no answer buttons, the answer box fallback, and Dismiss.
+  assert((await rotateRow.locator('button[data-answer]').count()) === 0, 'a no-options card shows no answer buttons')
+  assert((await rotateRow.locator('button[data-dismiss="1"]').count()) === 1, 'a no-options card still offers the Dismiss action')
   assert((await rotateRow.locator('textarea[data-answerbox]').count()) === 1, 'a no-options card falls back to the answer box')
 
   // ④ 收起态等待时长在头上一行可见（fmtWaiting 的输出在场，点开才看详情不再是必经路）。
@@ -97,6 +100,13 @@ try {
     await page.waitForFunction(() => document.getElementById('reqBadge') && document.getElementById('reqBadge').textContent === '4', { polling: 200 })
     const longLoc = page.locator('[data-row]', { hasText: 'Keep the interim lock' }).first()
     await longLoc.locator('.head').click()
+    // The render loop can rebuild the list between attach and click; wait until
+    // the expand actually took (data-open projects from state.openIds).
+    await longLoc.waitFor({ state: 'visible', timeout: 5000 })
+    await page.waitForFunction((row) => {
+      const el = document.querySelector('[data-row="' + row + '"]')
+      return el && el.dataset.open === 'true'
+    }, longRow.row.id, { polling: 200, timeout: 5000 }).catch(async () => { await longLoc.locator('.head').click() })
     geoShot = await longLoc.locator('.detail').evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight, card: el.closest('[data-row]').getBoundingClientRect().height }))
     writeFileSync(join(shotsDir, 't261004-17-card-metrics.json'), JSON.stringify({
       detail_1600: geoShot,
@@ -133,10 +143,43 @@ try {
   if (!geoShot) {
     const longRowLoc = page.locator('[data-row]', { hasText: 'Keep the interim lock' }).first()
     await longRowLoc.locator('.head').click()
+    await page.waitForFunction((row) => {
+      const el = document.querySelector('[data-row="' + row + '"]')
+      return el && el.dataset.open === 'true'
+    }, longRow.row.id, { polling: 200, timeout: 5000 }).catch(async () => { await longRowLoc.locator('.head').click() })
     geoShot = await longRowLoc.locator('.detail').evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight, card: el.closest('[data-row]').getBoundingClientRect().height }))
   }
   assert(geoShot.scroll > 100, 'the 1600-char detail has real content height')
   n += 1
+
+  // ⑨ t261007-01: the Dismiss action — one click moves the card out of
+  // Needs your answer into the collapsed Dismissed group, with the card copy;
+  // the ledger read-back carries the session-derived writer 'host'.
+  const holdRow = page.locator('[data-row]', { hasText: 'Keep the interim lock' }).first()
+  const dismissBtn = holdRow.locator('button[data-dismiss="1"]')
+  await dismissBtn.waitFor({ timeout: 5000 })
+  await dismissBtn.click()
+  await page.waitForFunction(() => {
+    const h = document.getElementById('dismissedHead')
+    return h && h.textContent === 'Dismissed · 1'
+  }, { polling: 200 })
+  assert((await page.textContent('#waitList')).includes('Open the red-clear ticket?'), 'the remaining question still waits after the dismiss')
+  assert(!(await page.textContent('#waitList')).includes('Keep the interim lock'), 'the dismissed card left Needs your answer')
+  const disTxt = await page.textContent('#dismissedList')
+  assert(disTxt.includes('Keep the interim lock'), 'the dismissed card shows in the Dismissed group')
+  assert(disTxt.includes('Dismissed by you. Your default action applies.'), 'the dismissed card carries the copy')
+  const readAfter = await fetch(H.base + '/sandbar-executor-panel/api/requests?project=' + KEY).then((r) => r.json())
+  const held = readAfter.rows.find((r) => r.question === 'Keep the interim lock?')
+  assert(held.status === 'dismissed' && held.dismissed_by === 'host', 'ledger read-back: the dismiss row carries the console-session identity')
+  // UI evidence (ticket acceptance): one capture with the dismissed card in its
+  // group, next to Answered. Written only when SANDBAR_CARD_SHOTS is set.
+  if (shotsDir) {
+    await page.goto(H.base + '/sandbar-executor-panel?project=' + KEY + '&theme=light')
+    await page.waitForFunction(() => document.getElementById('dismissedHead') && document.getElementById('dismissedHead').textContent === 'Dismissed · 1', { polling: 200 })
+    await page.screenshot({ path: join(shotsDir, 't261007-01-dismissed-card-light.png'), fullPage: false })
+    assert(true, 'dismiss UI capture written to ' + shotsDir)
+  }
+  n += 6
 
   await page.close()
 } finally {

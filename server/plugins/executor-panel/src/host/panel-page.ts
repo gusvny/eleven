@@ -253,6 +253,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
           </div>
           <div class="doneList" id="doneList"></div>
         </div>
+        <!-- t261007-01: the Dismissed group (collapsed, next to Answered). A
+             dismissed card carries no decision — the copy says so. -->
+        <div class="doneWrap" data-open="false" id="dismissedWrap" style="display:none">
+          <div class="doneHead" id="dismissedHeadBtn">
+            <span class="chev2">&#9662;</span><span class="sect" style="margin:0" id="dismissedHead">Dismissed · 0</span>
+          </div>
+          <div class="doneList" id="dismissedList"></div>
+        </div>
       </div>
       <div>
         <div class="sect">Recent actions</div>
@@ -537,6 +545,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(groupTag) meta += ' · <span class="gtag">'+esc(groupTag)+'</span>';
     if(u.expired) meta += ' · expired. It still waits.';
     if(r.status==='answered') meta = esc(r.kind);
+    // t261007-01: a dismissed card names what happened, in one line.
+    if(r.status==='dismissed') meta = esc(r.kind) + ' · dismissed';
     return '<div class="head" data-id="'+esc(r.id)+'"><span class="dot '+cls+'"></span>'
       + '<span class="txt">'+esc(r.question)+'</span>'
       + '<span class="meta">'+meta+'</span><span class="chev">&#9656;</span></div>';
@@ -547,6 +557,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // 对按钮无意义）——与 main 侧正文同一只渲染器。
   function inlineBlock(r){
     if(r.status!=='waiting') return '';
+    // t261007-01: the Dismiss action — "I saw it, I do not rule on it". One
+    // click moves the card out of Needs your answer; the default action still
+    // applies and the executor still runs it. It rides the same inline block
+    // as the options so the collapsed row never clips it.
+    var dismissBtn = '<button class="other" data-dismiss="1">Dismiss</button>';
     var html = '';
     if(hasOptions(r) && !state.revealedIds.has(r.id)){
       html += '<div class="opts inline">';
@@ -554,7 +569,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       for(var i=0;i<opts.length;i++){
         html += '<button data-answer="'+esc(opts[i])+'"'+(i===0?' class="primary"':'')+'>'+renderMarkdown(opts[i],{inline:true})+'</button>';
       }
-      html += '<button class="other" data-reveal="1">Type an answer</button></div>';
+      html += '<button class="other" data-reveal="1">Type an answer</button>' + dismissBtn + '</div>';
+    } else {
+      html += '<div class="opts inline">' + dismissBtn + '</div>';
     }
     if(r.default_action) html += '<div class="dflt">If you do not answer: '+esc(r.default_action)+'.</div>';
     return html;
@@ -563,6 +580,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // 只能落成字面文本）；展开行把完整问题按格式渲染在正文顶部（行头收起态保持单行省略）。
   function rowBody(r){
     var qfull = '<div class="qfull">'+renderMarkdown(r.question||'')+'</div>';
+    // t261007-01: the dismissed card copy — no decision was made; the default
+    // action still applies and the executor still runs it.
+    if(r.status==='dismissed'){
+      return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
+        + '<div class="given">Dismissed by you. Your default action applies.</div>'
+        + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
+    }
     if(r.status==='answered'){
       // t261006-06: an answered request can be run as ONE high-privilege
       // one-shot unit -- the approval is the gate; the watchdog re-checks it
@@ -597,12 +621,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   function renderWaitColumn(){
     var st = state.requests;
-    var waitHtml = '', doneHtml = '';
-    var waiting = [], answered = [];
+    var waitHtml = '', doneHtml = '', dismissedHtml = '';
+    var waiting = [], answered = [], dismissed = [];
     if(st && st.ok===true){
       // t261004-14：两个列表都最新在前（at 降序，at 畸形排最后）——契约见 LIST_CONTRACTS。
+      // t261007-01: third group, dismissed, same newest-first order (a dismiss
+      // = seen but not ruled; the card lands in the collapsed group).
       var sp = splitWaiting(st.rows);
-      waiting = newestFirst(sp.waiting); answered = newestFirst(sp.answered);
+      waiting = newestFirst(sp.waiting); answered = newestFirst(sp.answered); dismissed = newestFirst(sp.dismissed);
     }
     else if(!st){ waitHtml = '<div class="act" style="border:0"><span class="say muted">The request ledger could not be reached. This is not an empty inbox.</span></div>'; }
     // t261003-14：展开态来自 state.openIds（键=id），轮询重建不折叠宿主展开的行。
@@ -627,6 +653,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var groupTagOf = function(r){ return groupTag[r.id] || ''; };
     for(var i=0;i<waiting.length;i++) waitHtml += '<div class="row wait" data-open="'+openOf(waiting[i].id)+'" data-row="'+esc(waiting[i].id)+'">'+rowHead(waiting[i],'amber',groupTagOf(waiting[i]))+inlineBlock(waiting[i])+rowBody(waiting[i])+'</div>';
     for(var j=0;j<answered.length;j++) doneHtml += '<div class="row done" data-open="'+openOf(answered[j].id)+'" data-row="'+esc(answered[j].id)+'">'+rowHead(answered[j],'grey',groupTagOf(answered[j]))+inlineBlock(answered[j])+rowBody(answered[j])+'</div>';
+    // t261007-01: dismissed cards render into their own collapsed group.
+    for(var k=0;k<dismissed.length;k++) dismissedHtml += '<div class="row done" data-open="'+openOf(dismissed[k].id)+'" data-row="'+esc(dismissed[k].id)+'">'+rowHead(dismissed[k],'grey',groupTagOf(dismissed[k]))+inlineBlock(dismissed[k])+rowBody(dismissed[k])+'</div>';
     // 重建前快照焦点（输入框光标）与各详情块滚动位置，重建后原样放回。
     // 滚动位置直接从 DOM 读——scroll 事件是异步派的，程序化滚动在重建前可能还没派到，
     // 只靠监听器记会有竞态（t261003-14 截图证据里真实踩到过）。
@@ -642,16 +670,21 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
     el('waitList').innerHTML = waitHtml;
     el('doneList').innerHTML = doneHtml;
+    el('dismissedList').innerHTML = dismissedHtml;
     el('waitHead').textContent = 'Needs your answer · ' + waiting.length;
     el('waitEmpty').textContent = emptyCopyOf('overview_waits');
     el('waitEmpty').style.display = (waiting.length===0 && st && st.ok===true) ? '' : 'none';
     el('doneHead2').textContent = 'Answered · ' + answered.length;
     el('doneWrap').style.display = answered.length===0 ? 'none' : '';
+    // t261007-01: third group header/count; hidden while empty, like Answered.
+    el('dismissedHead').textContent = 'Dismissed · ' + dismissed.length;
+    el('dismissedWrap').style.display = dismissed.length===0 ? 'none' : '';
     var badge = el('reqBadge');
     badge.textContent = String(waiting.length);
     badge.className = 'badge' + (waiting.length===0 ? ' zero' : '');
     bindRows(el('waitList'));
     bindRows(el('doneList'));
+    bindRows(el('dismissedList'));
     restoreRowState(focusSnap, scrollSnap);
   }
   // t261003-14：重建后按 id 放回滚动位置、草稿文本与焦点光标。
@@ -702,6 +735,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
     Array.prototype.forEach.call(root.querySelectorAll('button[data-answer]'), function(b){
       b.onclick = function(){ sendAnswer(b.closest('[data-row]').dataset.row, b.dataset.answer); };
+    });
+    // t261007-01: the Dismiss click — one click, no decision, out of the
+    // waiting list into the Dismissed group.
+    Array.prototype.forEach.call(root.querySelectorAll('button[data-dismiss]'), function(b){
+      b.onclick = function(){ sendDismiss(b.closest('[data-row]').dataset.row); };
     });
     Array.prototype.forEach.call(root.querySelectorAll('button[data-reveal]'), function(b){
       b.onclick = function(){
@@ -761,6 +799,17 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         loadRequests();
       })
       .catch(function(e){ alert('The answer failed to send: '+((e&&e.message)||e)); });
+  }
+  // t261007-01: the dismiss POST — the writer is server-derived from the console
+  // session ('host'), so nothing about the writer is sent from the page (same
+  // discipline as sendAnswer, KI-193).
+  function sendDismiss(id){
+    postJson('/sandbar-executor-panel/api/requests/dismiss', {project: state.project, id: id})
+      .then(function(j){
+        if(j.ok!==true){ alert('The dismiss was rejected: '+(j.error||'?')); }
+        loadRequests();
+      })
+      .catch(function(e){ alert('The dismiss failed to send: '+((e&&e.message)||e)); });
   }
   // ---- recent actions (right column) ----
   function loadActions(){
@@ -1135,6 +1184,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   });
   el('doneHeadBtn').onclick = function(){
     var w = el('doneWrap');
+    w.dataset.open = w.dataset.open==='true' ? 'false' : 'true';
+  };
+  // t261007-01: the Dismissed group folds open and closed like the Answered one.
+  el('dismissedHeadBtn').onclick = function(){
+    var w = el('dismissedWrap');
     w.dataset.open = w.dataset.open==='true' ? 'false' : 'true';
   };
   var urlProj = ''; try{ urlProj = new URLSearchParams(location.search).get('project') || ''; }catch(e){}

@@ -1124,6 +1124,21 @@
   }
  },
  "scenarios": {
+ "integration/t261007-01/sc_dismiss_unauth_refusal.mjs": {
+  "anchor": "behaviour",
+  "note": "t261007-01: the dismiss write with no console credential answers 401/403 (honest body, forged by, and malformed body all hit the identity gate) and leaves the request ledger byte-identical; the read face stays open.",
+  "sync_path": ""
+ },
+ "integration/t261007-01/sc_dismiss_status_and_reopen_guard.mjs": {
+  "anchor": "behaviour",
+  "note": "t261007-01: a dismissed request reads back as the third status dismissed and no longer counts as waiting; a verbatim re-file is refused naming the prior dismiss, a re-raise with new evidence passes, an answer after the dismiss wins (design note §9 change-of-mind), both rows stay in the trace, and dismissing an answered request is refused 409.",
+  "sync_path": ""
+ },
+ "integration/t261007-01/sc_dismiss_writer_identity.mjs": {
+  "anchor": "behaviour",
+  "note": "t261007-01: the dismiss row read back from the ledger file records the server-derived writer host with the ticket shape {dismiss_for, at, by}; a forged body by stays visible as by_claimed/writer_mismatch and is never recorded as the writer.",
+  "sync_path": ""
+ },
   "integration/t261005-12/sc_gate_recording_engine_route.py": {
    "anchor": "contract",
    "note": "t261005-12 routing contract: caller writes no ledger row, engine-side delivery dispatch lands the row, fail-open named failure, exempt zero-row, last-failure marker face",
