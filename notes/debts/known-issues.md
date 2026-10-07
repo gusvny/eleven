@@ -3864,3 +3864,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L3——在容器化隔离台里起一次控制台并断言 `plugin tree` 装载成功（现会红）；L1——`capture-lane` 的起台失败必须区分
 > **环境面**（容器崩溃/未就绪）与**代码面**（截图缺失），并各自给具名出路。
+
+### KI-216 补充实测（261007 17:2x，把修复方向钉死）
+
+> **结论：主树没坏，坏的是容器台那棵树的装载上下文。** 同一份文件在两种 node 下都能正常装载：
+> - `npx -y node@22.23.2 --experimental-strip-types -e "import('./server/plugins/executor-panel/src/host/requests.ts')"` → **OK**（与崩掉的容器同版本）；
+> - 宿主 node 26.5 同命令 → **OK**；
+> - 四个插件包 `package.json` 均声明 `"type": "module"`；`server/profile/node_modules/sandbar-*` 全是**仓内相对软链**（`../../plugins/<name>`）。
+> 因此"`requests.ts` 被判成 CJS"**不是我们代码的问题**，而是容器里那棵树（`/repo-nm`，由 `stage_docker.py:1432-1435` 定义：
+> `/repo`＝被测泳道树、`/repo-nm`＝装了 `profile/node_modules` 的树，缺省回落主树）**在容器内的路径/模块解析**与宿主不同。
+>
+> **对修复方向的含义**：①**不要**去改 `executor-panel/src/host/requests.ts`（它是无辜的，改了也修不好）；
+> ②要修的是**台层**：`/repo-nm` 那棵树要么整树 bind（保留 `package.json` 与相对软链的解析链），
+> 要么在容器内显式给 `.ts` 装载指定模块类型（或在同一位置落地 `package.json` 的 `type`），
+> 要么把容器 node 与宿主对齐；③交付物应包含一条 L3：**容器台内起一次控制台并断言 `plugin tree` 装载成功**（现必红）。
+>
+> **给值守者的一句话**：看到"UI 票缺截图证据"时，先按本条的判据区分**环境面**（容器装载失败 → 本条 + KI-215）
+> 与**代码面**（截图确有缺）——两者的处置完全不同，别按"票的代码有问题"去改泳道。
