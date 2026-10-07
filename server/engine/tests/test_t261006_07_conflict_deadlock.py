@@ -188,7 +188,12 @@ def test_join_and_activity_share_one_core():
     # old inline body has moved out)
     act = src.split("async def settle_conflict_resolution(", 1)[1]
     act = act.split("def _settle_merge_core(", 1)[0]
-    assert "return _settle_merge_core(wt, args.ticket_id, args.round_no)" in act
+    # t261007-06 (KI-213): the call now passes base_ref (the MERGE_HEAD-absent
+    # branch reads the disk truth through _measure_merged_face) — the lock's
+    # intent is unchanged: one route, and the add sequence still lives only in
+    # the core (asserted by the two lines below, kept verbatim).
+    assert "return _settle_merge_core(wt, args.ticket_id, args.round_no," in act
+    assert "base_ref=args.base_ref or \"main\"" in act
     assert '"add", "-A"' not in act, "the activity body must not keep a second add sequence"
     core = src.split("def _settle_merge_core(", 1)[1].split("\n\ndef ", 1)[0]
     assert core.count('"add", "-A"') == 1, "the add sequence lives only in the shared core"

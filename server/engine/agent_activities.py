@@ -5642,15 +5642,99 @@ async def settle_conflict_resolution(args: ConflictSettleArgs) -> ConflictSettle
                                               "reset (merge state not cleared) — "
                                               "needs manual handling")
         return ConflictSettleResult(ok=True, commit="", error="", remaining_files=[])
-    # No MERGE_HEAD = no merge in progress (the agent mistook ordinary workspace
-    # changes for conflicts, or prep's merge left nothing behind) — report honestly,
-    # never fake a merge commit. The whole non-abort path lives in the sync core
-    # _settle_merge_core (t261006-07: the join-side mid-merge guard shares the same
-    # single implementation — no second add/commit sequence may appear).
-    return _settle_merge_core(wt, args.ticket_id, args.round_no)
+    # No MERGE_HEAD = no merge in progress **right now** — but that fact alone
+    # decided nothing before KI-213 (t261007-06): the join-settle path lands the
+    # same merge commit through this very core (consuming MERGE_HEAD), so a
+    # branch-side settle can run right after a fully landed merge and read the
+    # bare "no merge in progress" failure. Read the disk truth instead of
+    # asserting a state: if HEAD already carries the base ref, the index has no
+    # unmerged entries and the file face is clean and parsable, report
+    # ok=True + already_settled=True (the workflow's success path takes over, no
+    # block, straight back to merge_check). Anything short of that fails closed
+    # with the **measured** facts appended — never a state assertion.
+    # The whole non-abort path lives in the sync core _settle_merge_core
+    # (t261006-07: the join-side mid-merge guard shares the same single
+    # implementation — no second add/commit sequence may appear).
+    # KI-213 malformed-input gate: a nonexistent worktree fails closed with a
+    # named receipt instead of a FileNotFoundError past the activity seam (a
+    # missing directory is a triage-able input error, not an infrastructure
+    # retry).
+    if not wt.is_dir():
+        return ConflictSettleResult(
+            ok=False,
+            error="settle: worktree %s does not exist — fail-closed, nothing "
+                  "read or written" % wt)
+    return _settle_merge_core(wt, args.ticket_id, args.round_no,
+                              base_ref=args.base_ref or "main")
 
 
-def _settle_merge_core(wt: Path, ticket_id: str, round_no: int) -> ConflictSettleResult:
+def _measure_merged_face(wt: Path, base_ref: str) -> ConflictSettleResult:
+    """KI-213 (t261007-06): read-only disk-truth probe for the MERGE_HEAD-absent
+    settle. Read-only by construction (no add/commit lives here — the single
+    add/commit sequence stays in _settle_merge_core):
+
+      - `merge-base --is-ancestor <base> HEAD`: does HEAD already carry the base?
+      - `ls-files -u`: zero unmerged index entries?
+      - `status --porcelain -z` over SETTLE_PATHSPEC: clean face?
+      - conflict-marker scan over `diff --name-only <base>..HEAD` (two-dot, the
+        whole changed face): clean and parsable?
+
+    All four good -> ok=True, commit=<short HEAD>, already_settled=True. Any
+    shortcoming -> ok=False with the old grep-stable "no merge in progress"
+    prefix plus the measured facts (never a "merging state" assertion — the
+    facts are read from git at call time). Malformed inputs (missing worktree,
+    unknown base ref) fail closed with a named error, never an exception."""
+    try:
+        if not (wt / ".git").exists() and not wt.is_dir():
+            return ConflictSettleResult(
+                ok=False,
+                error="no merge in progress (MERGE_HEAD does not exist); "
+                      "measured: worktree %s does not exist" % wt)
+        anc = _git(["merge-base", "--is-ancestor", base_ref, "HEAD"], wt)
+        ancestor = anc.returncode == 0
+        unmerged = _git(["ls-files", "-u"], wt)
+        n_unmerged = len([ln for ln in unmerged.stdout.splitlines() if ln.strip()])
+        st = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, wt)
+        dirty = len([x for x in st.stdout.split("\0") if x.strip()]) \
+            if st.returncode == 0 else -1
+        changed = _git(["diff", "--name-only", "%s..HEAD" % base_ref], wt)
+        residue: List[str] = []
+        if changed.returncode == 0:
+            for f in [ln.strip() for ln in changed.stdout.splitlines() if ln.strip()]:
+                fp = wt / f
+                if not fp.is_file():
+                    continue
+                try:
+                    text = fp.read_text("utf-8", errors="replace")
+                except Exception:
+                    continue
+                for ln in text.splitlines():
+                    if ln.startswith("<<<<<<<") or ln.startswith(">>>>>>>") \
+                            or ln == "=======":
+                        residue.append(f)
+                        break
+        facts = ("measured: %s is%s an ancestor of HEAD; unmerged entries: %d; "
+                 "dirty files: %d; marker residue: %s"
+                 % (base_ref, "" if ancestor else " NOT", n_unmerged, dirty,
+                    (", ".join(residue[:5]) or "none")))
+        if ancestor and n_unmerged == 0 and dirty == 0 and not residue:
+            head = _git(["rev-parse", "--short", "HEAD"], wt)
+            return ConflictSettleResult(
+                ok=True, commit=head.stdout.strip() if head.returncode == 0 else "",
+                already_settled=True)
+        return ConflictSettleResult(
+            ok=False,
+            error="no merge in progress (MERGE_HEAD does not exist); cannot "
+                  "record a merge commit; %s" % facts)
+    except Exception as e:  # probe failure = fail closed, never raise past the activity seam
+        return ConflictSettleResult(
+            ok=False,
+            error="no merge in progress (MERGE_HEAD does not exist); cannot "
+                  "record a merge commit; measured state unavailable: %s" % str(e)[:160])
+
+
+def _settle_merge_core(wt: Path, ticket_id: str, round_no: int,
+                       base_ref: str = "main") -> ConflictSettleResult:
     """Sync core of settle_conflict_resolution (t261006-07 single-implementation
     discipline): MERGE_HEAD presence check -> the merge-file list -> nested-repo
     gate (a) -> add -A (stage on the agent's behalf) -> coordination-dir reset ->
@@ -5660,13 +5744,13 @@ def _settle_merge_core(wt: Path, ticket_id: str, round_no: int) -> ConflictSettl
     and _settle_worktree_lane's mid-merge branch (the join close-out, t261006-07:
     no longer an unconditional skip on a clean face) — the two sites must never
     carry a second copy of the add/commit sequence. Sync function; callers do
-    their own logging."""
+    their own logging. KI-213 (t261007-06): the MERGE_HEAD-absent branch reads
+    the disk truth through _measure_merged_face (read-only) instead of asserting
+    a state — a settled merge reports ok + already_settled, a genuinely unsettled
+    one fails closed with the measured facts."""
     p = _git(["rev-parse", "--verify", "MERGE_HEAD"], wt)
     if p.returncode != 0:
-        return ConflictSettleResult(ok=False,
-                                    error="no merge in progress (MERGE_HEAD does "
-                                          "not exist); cannot record a merge "
-                                          "commit")
+        return _measure_merged_face(wt, base_ref)
     # The files this merge touches (taken before add; the diff HEAD MERGE_HEAD stance
     # is unchanged afterwards)
     p = _git(["diff", "--name-only", "HEAD", "MERGE_HEAD"], wt)

@@ -4762,6 +4762,12 @@ class ConflictSettleResult:
 
     ok: bool = False
     commit: str = ""                          # the short hash of the landed merge commit
+    # KI-213 (t261007-06): the merge commit was already on disk when this settle
+    # ran (the join-settle path landed it through the same core, consuming
+    # MERGE_HEAD). The workflow treats this exactly like a fresh commit — same
+    # success path, no block — with its own log line naming the pre-landing.
+    # Additive field: old serialized payloads deserialize to False; replay-safe.
+    already_settled: bool = False
     remaining_files: List[str] = field(default_factory=list)  # files still carrying unresolved conflicts (non-empty = the agent didn't finish)
     error: str = ""
 

@@ -2779,16 +2779,28 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                          (sraw.get("remaining_files") or [])],
                         error=str(sraw.get("error") or ""))
                 if not sres.ok:
-                    _why = ("unresolved conflict files remain: %s"
+                    _why = ("unresolved conflict files remain (the merge is still "
+                            "open): %s"
                             % "、".join(sres.remaining_files[:10])
                             ) if sres.remaining_files else (sres.error or "未知")
+                    # KI-213 (t261007-06): no unconditional "merging state" claim —
+                    # the settle error carries the measured disk facts instead.
+                    # When those facts show the merge commit already on disk (main
+                    # IS an ancestor of HEAD), name the light exit first: the two
+                    # heavy exits below are wrong for a settled merge (rework costs
+                    # a whole round, --abort destroys a correct commit).
+                    _light = ("the measured state shows main is an ancestor of HEAD "
+                              "(the merge commit is already on disk, already "
+                              "settled): a single retry_qc resumes - no rework, no "
+                              "abort. "
+                              ) if ("is an ancestor of HEAD" in _why) else ""
                     await self._blocked(
                         step_id,
                         text("settle_unconverged",
                              "main-sync conflict resolution round %d did not converge "
                              "(worker-side commit verification failed), handing over "
-                             "to a human: %s. The worktree is in a merging state. "
-                             "Executable ways out (never run git commands inside the "
+                             "to a human: %s. %sExecutable ways out (never run git "
+                             "commands inside the "
                              "lane from an agent session - the sandbox cannot write "
                              ".git): (a) send rework(to_stage=implement) - this human "
                              "signal resets the round counter and a fresh resolution "
@@ -2796,13 +2808,15 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                              "(b) as the operator, reset the half-merged lane with "
                              "`python3 server/tools/engine_ops.py sync <ticket-id> "
                              "--abort` (engine venv, operator side), then send retry_qc"
-                             ) % (self._conflict_rounds, _why))
+                             ) % (self._conflict_rounds, _why, _light))
                     _sync_stop = "blocked"
                     break
                 _ok_round = self._conflict_rounds
                 self._log("main-sync conflict resolution round %d committed %s "
-                          "(%d files), back to implement to adapt to main changes"
-                          % (_ok_round, sres.commit, len(prep.conflict_files)))
+                          "(%d files)%s, back to implement to adapt to main changes"
+                          % (_ok_round, sres.commit, len(prep.conflict_files),
+                             " (already on disk: join-settle landed it, KI-213)"
+                             if sres.already_settled else ""))
                 # Progress = reset (R2/t261006-07): one successful settle is real
                 # progress; the cap counts non-progressing rounds only, and the
                 # same-batch guard still stops a genuinely spinning lane.
@@ -4740,18 +4754,27 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     remaining_files=[str(x) for x in (sraw.get("remaining_files") or [])],
                     error=str(sraw.get("error") or ""))
                 if not sres.ok:
-                    why = ("unresolved conflict files remain: %s"
+                    why = ("unresolved conflict files remain (the merge is still "
+                           "open): %s"
                            % "、".join(sres.remaining_files[:10])
                            ) if sres.remaining_files else (sres.error or "未知")
-                    # The worktree is in a "merge in progress" state here (MERGE_HEAD
-                    # present) — a retry_qc would make merge_check block again on a
-                    # "dirty worktree" red (a diagnostic mismatch), so the message gives
-                    # handling instructions directly
+                    # KI-213 (t261007-06): the old text asserted "The worktree is
+                    # in a merging state" without reading git — in every measured
+                    # hit the merge commit was already on disk (join-settle had
+                    # landed it, MERGE_HEAD consumed). No state assertion anymore:
+                    # the settle error quotes the measured facts; when those show
+                    # main IS an ancestor of HEAD, name the light exit first (the
+                    # two heavy exits below are wrong for a settled merge).
+                    _light = ("the measured state shows main is an ancestor of HEAD "
+                              "(the merge commit is already on disk, already "
+                              "settled): a single retry_qc resumes - no rework, no "
+                              "abort. "
+                              ) if ("is an ancestor of HEAD" in why) else ""
                     await self._blocked(
                         "merge_check",
                         "conflict resolution round %d did not converge (worker-side "
                         "commit verification failed), handing over to a human: %s."
-                        " The worktree is in a merging state. Executable ways out"
+                        " %sExecutable ways out"
                         " (never run git commands inside the lane from an agent"
                         " session - the sandbox cannot write .git): (a) send"
                         " rework(to_stage=implement) - this human signal resets the"
@@ -4760,11 +4783,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         " half-merged lane with `python3 server/tools/engine_ops.py"
                         " sync <ticket-id> --abort` (engine venv, operator side),"
                         " then send retry_qc"
-                        % (self._conflict_rounds, why))
+                        % (self._conflict_rounds, why, _light))
                     continue
-                self._log("conflict resolution round %d committed %s (%d files), "
+                self._log("conflict resolution round %d committed %s (%d files)%s, "
                           "back to merge_check for re-verification"
-                          % (self._conflict_rounds, sres.commit, len(prep.conflict_files)))
+                          % (self._conflict_rounds, sres.commit,
+                             len(prep.conflict_files),
+                             " (already on disk: join-settle landed it, KI-213)"
+                             if sres.already_settled else ""))
                 self._handoff("implement", "conflict resolution round %d committed %s"
                               % (self._conflict_rounds, sres.commit))
                 # Progress = reset (R2/t261006-07): one successful settle is real
