@@ -3828,3 +3828,39 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L1——构造"证据活动环境失败"的泳道，断言进 merge_check 前会自动重试一次（或给出具名重跑入口），而不是直接红；
 > L3——重跑入口执行后截图落到顶层、闸转绿。
+
+## KI-216 容器化隔离台的**插件树装载失败**：`executor-panel/src/host/requests.ts` 被当 CommonJS ⇒ 控制台容器起不来 ⇒ 一切 UI 截图证据拿不到（261007 实证 t261007-07；integration 岗登记）
+
+> **现象**：`t261007-07` 卡在 merge_check 的"UI 票缺截图证据"红上。引擎自己的截图步先失败
+> （`prepare_ui_evidence: capture-lane (engine bench ui-shot-t261007-07-g0) stage boot failed (environment)`，
+> `stage_docker.py up` 被 180s 上限杀掉）；项目会话按引擎点名的补救命令手跑隔离台也失败
+> （`[capture-lane] ENV_FAIL: docker 测试台起台失败——STAGE_ENV: console 597s 内未就绪（http://127.0.0.1:21020/）`）。
+> 查该台的容器：`capture-lane-51194-dsh` **Exited (1)**（`capture-lane-51194-temporal` Up）——控制台容器**崩溃**，
+> 日志根因原文：
+> `dsh: plugin tree failed to load: failed to apply loader entry include` →
+> `failed to import loader entry sandbar-watchdog (sandbar-watchdog): 'import', and 'export' cannot be used outside of module code` →
+> `file:///repo-nm/server/plugins/executor-panel/src/host/requests.ts:523  SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]:
+> 'import', and 'export' cannot be used outside of module code`（node v22.23.2）。
+> **对照面**：**宿主控制台（127.0.0.1:3099）不受影响**——探针 `GET /sandbar-executor-panel/api/requests?project=sandbar`
+> 与 `GET /sandbar-workbench/api/wf/projects` 均 **200**；本地（node 26.5）对同一文件 `node --experimental-strip-types --check` 无错。
+> 即：**同一棵树，宿主态能装、容器态装不上**。
+>
+> **机制（确定的与待证的）**：确定的是"node 把该 `.ts` 判成了 CJS"（`'import'/'export' cannot be used outside of module code`
+> 只在 CJS 上下文出现），而该文件所在包 `server/plugins/executor-panel/package.json` 写着 `"type": "module"`。
+> 待证的两条：①**容器内路径解析**——容器里出现的路径是 `/repo-nm/...`，而本仓 profile 的插件是**软链**挂载
+> （`profile/node_modules/sandbar-watchdog → ../../plugins/watchdog`），若软链在容器内解析到裸机绝对路径/挂载外的 realpath，
+> node 找不到最近的 `package.json` ⇒ 退回 CJS；②容器 node 22.23 与宿主 node 26 在 `.ts` 模块类型判定上的差异放大。
+> 触发面：`server/plugins/watchdog/node.ts:54` 直接以相对路径 import `../executor-panel/src/host/requests.ts`，
+> 所以 executor-panel 的该文件一坏，**整个插件树**（含 watchman）装载失败、容器控制台起不来。
+>
+> **危害**：①**UI 票的验收通道整体断掉**——任何 UI 票都拿不到截图证据，只能卡在证据红等人（本票即为实例）；
+> ②引擎对"证据步失败"没有重试路径（见 KI-215），两者叠加 ⇒ **坏态不可自愈**；
+> ③症状指向"票的代码有问题"，实际是**环境/装载面**，排查方向极易跑偏（本票排查链：起台超时 → 截图缺失 → 容器崩溃 → 模块类型）。
+>
+> **出路（建议，实现口径归修复票）**：①让容器态的插件解析**不依赖裸机绝对路径**（挂载/copy 而非软链，
+> 或在 profile 内显式声明模块类型）；②或在容器内固定 node 版本与宿主一致（消除 `.ts` 判定差异）；
+> ③给 UI 证据闸一条**具名降级出路**（例如：证据步环境失败时，把"环境面不可拍"记为具名状态并放行到人审，由人决定是否接受非视觉证据），
+> 免得"环境坏一次 ⇒ UI 票全停"。
+>
+> **回归**：L3——在容器化隔离台里起一次控制台并断言 `plugin tree` 装载成功（现会红）；L1——`capture-lane` 的起台失败必须区分
+> **环境面**（容器崩溃/未就绪）与**代码面**（截图缺失），并各自给具名出路。
