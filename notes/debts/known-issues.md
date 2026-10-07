@@ -3748,3 +3748,31 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **归**：待宿主人审后开票（本岗不擅自开票）；候选=并入 `t261006-07` 的后续修复面。
 > **回归**：L1——构造"补丁前起的 run + 补丁后的码"，断言重放不报非确定性（或断言守卫使旧 run 走旧路）；
 > 并给一条**交付纪律**：换码类修复在推给在飞票之前，必须先验回溯安全性。
+
+## KI-213 合并提交**已经落地**却仍停在"陈旧阻断"上等人：阻断文案断言的合并状态当时已不存在（261007 实证 4 票命中；integration 岗登记）
+
+> **现象**：261007 00:5x–11:0x，接连四张票被同一句阻断文案钉住——
+> `main-sync conflict resolution round N did not converge (worker-side commit verification failed), handing over to a human: no merge in progress (MERGE_HEAD does not exist); cannot record a merge commit. The worktree is in a merging state.`
+> 命中票：`t261007-01`、`t261006-17`（两次）、`t261006-18`、`t261007-02`。
+>
+> **实测反证（每票都当场核过盘）**：这些票的泳道**早已落下合并提交**（-01 `0e6138d`、-17 `d62bfed`、-02 `1c1c538`），
+> `MERGE_HEAD` **不存在**、未合并索引 **0 条**、工作区**干净**、`integration/test_anchors.json` **零冲突标记且可解析**——
+> 也就是文案里那句 "The worktree is in a merging state" 与事实相反。**只发一条 `retry_qc` 即恢复正常推进**，
+> 既不需要 `rework`（那会让泳道白跑一轮实现），也不需要 operator 侧 `engine_ops.py sync --abort`（那会把已落地的正确合并拆掉重来）。
+>
+> **机制（代码级）**：`dev_lane.py:4752` 这条 `_blocked(...)` 分支在 settle 活动返回 `ok=False` 时，**无条件**写出"还在合并中"的
+> **断言式**文案；而 settle 的 worker 侧提交校验与"汇合统一落盘（join-settle）"之间存在**时间窗**：校验跑在提交落地之前
+> ⇒ 报 "no merge in progress"，紧接着 join-settle 把合并提交落盘（同一票日志里紧邻那行
+> `汇合统一落盘：merge in progress (MERGE_HEAD present) but the file face has zero residue: join settles the merge commit …`）。
+> 落盘之后**没有任何人重读 git 真值**，阻断状态就留在票面上，直到有人逐票归因后发 `retry_qc`。
+>
+> **危害**：①每命中一次就白停一次（等人/等巡检）——今晚 4 票合计停掉数小时，是"票跑很久"的主要来源之一；
+> ②文案把人引向**两条更重的出路**，而真实处置只是一条 `retry_qc`；③与 KI-209（主同步计数累计不清零）症状相邻但**根因不同**：
+> 这条是"阻断判定与 git 事实不同源"。
+>
+> **出路（建议，实现口径归修复票）**：①写阻断前**重读 git 真值**（HEAD 是否已含 main / 是否仍有未合并索引 / 冲突文件面是否已零残留），
+> 按**实测**状态写文案；②join-settle 落盘成功后，撤销同一轮的陈旧阻断或直接续走 merge_check（不必等人）；
+> ③文案按实测状态给出路：状态已好时明写"已落盘，发 retry_qc 即可"。
+>
+> **回归**：L1——构造"settle 校验失败 + join-settle 随后落盘"的序列，断言票面**不再出现**"无 MERGE_HEAD 却断言 merging state"的文案
+> （或出现具名"已落盘，重跑即可"）；L3——泳道盘面已干净（零标记、可解析、提交在场）时，阻断判定必须与盘面一致。
