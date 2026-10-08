@@ -916,19 +916,19 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         const read = await (deps.engineConcurrencyRead ?? readConcurrency)(key, env)
         if (!read.ok) {
           // The engine's named refusal travels verbatim (declaration absent/malformed,
-          // malformed ledger, engine unreachable): the consumer renders an explicit
-          // degraded card, never an "empty list" fake. declared:false + limit:null ride
-          // along so the t261005-10 read-only row keeps its fact shape; an ABSENT
-          // declaration is reported as a fact (ok:true) with the engine's refusal text
-          // carried in `reason` — the engine gate itself still refuses to run without
-          // one (rule 9), so nothing here guesses a number.
-          const absent = /declaration absent/i.test(read.reason)
-          const face: Record<string, unknown> = absent
-            ? { ok: true, project: key, declared: false, limit: null, unlimited: false,
-                path: concurrencyDeclarationPath(key, env), reason: read.reason,
-                note: 'No concurrency limit declaration. The engine gate refuses to run a lane without one (CL-2 boundary: the write control saves through the engine entry).' }
-            : { ok: false, project: key, reason: read.reason, declared: false, limit: null,
-                path: concurrencyDeclarationPath(key, env) }
+          // malformed ledger, engine unreachable): ONE ok:false refusal envelope for
+          // every !read.ok case (t261008-48 settled contract). The read-only limit row
+          // keeps its facts — declared:false, the declaration path and the engine text
+          // ride along, and the page derives its copy from those fields, so nothing
+          // here guesses a number or fakes an empty list (rule 9, KI-193). The absent
+          // declaration is NOT an ok:true fact row: ok:true + limit:null would collide
+          // with the unlimited face, and the engine itself refuses (rc!=0) when the
+          // declaration is absent — the face agrees with the engine.
+          const face: Record<string, unknown> = {
+            ok: false, project: key, reason: read.reason, declared: false, limit: null,
+            path: concurrencyDeclarationPath(key, env),
+            note: 'The engine gate refuses to run a lane without a usable concurrency declaration (CL-2 boundary: the write control saves through the engine entry).',
+          }
           return { status: 200, json: face }
         }
         const audit = readLastLimitAudit(key, env)

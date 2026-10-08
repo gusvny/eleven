@@ -3871,7 +3871,7 @@
     },
     "integration/t261006-17/sc_concurrency_face_ledger_route.mjs": {
       "anchor": "contract",
-      "note": "CL-2 read face: engine ledger numbers reach the panel route unchanged; malformed ledger and absent declaration are named refusals with absolute paths, never empty lists; project switch is per-key",
+      "note": "CL-2 read face: engine ledger numbers reach the panel route unchanged; malformed ledger and absent declaration are the SAME named ok:false refusal envelope (t261008-48 contract) with absolute paths, engine text verbatim, declared:false carried, never a fabricated number, unlimited face or empty lists; project switch is per-key between restored lawful fixtures",
       "sync_path": ""
     },
     "integration/t261006-17/sc_concurrency_overview_ui.mjs": {
@@ -3881,7 +3881,7 @@
     },
     "integration/t261006-17/sc_concurrency_save_gate.mjs": {
       "anchor": "contract",
-      "note": "CL-2 save face: credential gate 401 before disk touch, body by-claim refused, CL-2b-absent named refusal with declaration bytes unchanged, save lands in the audit file read reader-side and the GET face reflects it (KI-193/KI-198)",
+      "note": "CL-2 save face: S0 read-path pin (the GET face resolves the seeded PROJECTS-ROOT declaration before any POST, t261008-48), credential gate 401 before disk touch, body by-claim refused, CL-2b-absent named refusal with declaration bytes unchanged, save lands in the audit file read reader-side and the GET face reflects it (KI-193/KI-198)",
       "sync_path": ""
     },
     "integration/t261006-18/sc_t26100618_left_column_order.mjs": {

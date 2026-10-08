@@ -15,8 +15,15 @@
 //  F2 malformed ledger: state file replaced by invalid JSON — the route
 //     carries the engine's named refusal VERBATIM (quoting the absolute state
 //     path); holders/queue absent, NEVER empty arrays.
-//  F3 missing declaration: concurrency-limit.json removed — named
-//     absent-declaration refusal quoting the absolute declaration path.
+//  F3 missing declaration: concurrency-limit.json removed — NAMED REFUSAL
+//     (t261008-48 settled contract): the ok:false envelope carrying
+//     declared:false + limit:null + the engine's verbatim refusal text + the
+//     absolute declaration path. NOT a fact face (ok:true): that collided
+//     with the unlimited face (ok:true + limit:null) and read "no limit"
+//     where the machine cannot know (KI-193). A malformed ledger (F2) keeps
+//     the SAME ok:false envelope; the two refusals differ only in the text.
+//     Negative: an absent declaration never surfaces as limit=0, a number,
+//     unlimited:true, or empty holders/queue arrays.
 //  F4 project switch: a second project key with different numbers — the same
 //     route switches limit + numbers with the key (one face, per-key state).
 //
@@ -153,10 +160,25 @@ function engineRefusalEcho(engine, reason) {
   const { body } = await getFace('alpha')
   const reason = String((body && body.reason) || '')
   C.case('F3.route-refuses-absent-decl', body && body.ok === false,
-    'absent declaration = named refusal: ' + JSON.stringify(body).slice(0, 200))
+    'absent declaration = named refusal (t261008-48 contract): ' + JSON.stringify(body).slice(0, 200))
+  C.case('F3.declared-false-fact-carried', body && body.declared === false,
+    'the refusal envelope still carries the declared:false fact: ' + JSON.stringify(body && body.declared))
+  C.case('F3.no-fake-limit', body && body.limit === null,
+    'an absent declaration is limit:null — never 0, never a number, never "unlimited" (KI-193): '
+      + JSON.stringify(body && body.limit))
+  C.case('F3.not-unlimited-face', body && body.unlimited !== true,
+    'absent must not read as the unlimited face (ok:true+limit:null collision banned): '
+      + JSON.stringify(body && body.unlimited))
+  C.case('F3.no-empty-lists', body && body.holders === undefined && body.queue === undefined,
+    'holders/queue must be ABSENT on refusal (empty array would read as "nobody working")')
   C.case('F3.refusal-quotes-decl-path', reason.includes(join(root, 'alpha', 'concurrency-limit.json')),
     'refusal must quote the absolute declaration path: ' + reason.slice(0, 200))
+  C.case('F3.refusal-carries-engine-text', reason.length > 0 && engineRefusalEcho(engine, reason),
+    'the face must carry the engine refusal text, not reword it')
   C.case('F3.engine-agrees-refusal', engine.rc !== 0, 'engine itself must refuse (fixture sanity)')
+  // restore the declaration so F4 compares two fully-seeded projects (same
+  // discipline as the F2 block: each case leaves a lawful fixture behind)
+  writeFileSync(join(root, 'alpha', 'concurrency-limit.json'), JSON.stringify({ version: 1, limit: 2 }))
 }
 
 // ---------- F4 project switch ----------

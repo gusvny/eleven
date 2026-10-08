@@ -8,6 +8,10 @@
 // identity fixed to host — a claimed identity in the body is never authority.
 //
 // Sub-cases:
+//  S0 read-face path pin (t261008-48): the GET face serves the seeded
+//     projects-root declaration (declared:true, limit 2, exact path) before any
+//     POST — pins the path contract in BOTH siblings so a resolver drift cannot
+//     leave one green and one red.
 //  S1 no credential on POST → 401, before any parse or disk touch (KI-193).
 //  S2 credential + a body by:'someone-else' → named writer-mismatch refusal
 //     (by_claimed surfaced), nothing written.
@@ -87,6 +91,22 @@ async function post(payload, withCookie = true) {
 
 // The face refusal carries the engine text either as `reason` or `error`.
 const refusalOf = (body) => String((body && (body.reason ?? body.error)) || JSON.stringify(body || {}))
+
+// ---------- S0 read-face path pin (t261008-48) ----------
+// The sibling ledger-route scenario owns the read face's deep assertions; this
+// case only pins the PATH CONTRACT so the two siblings can never diverge again:
+// the read face must resolve the seeded declaration at the PROJECTS ROOT
+// (<root>/<key>/, the same home the engine CLI reads) — a resolver that drifts
+// to the panel directory turns this green scenario red too.
+{
+  const r = await fetch(H.base + '/sandbar-executor-panel/api/concurrency?project=' + encodeURIComponent(KEY))
+  const b = await r.json().catch(() => null)
+  C.case('S0.read-face-serves-seeded-root', r.status === 200 && b && b.ok === true && b.limit === 2,
+    'the read face resolves the PROJECTS-ROOT declaration (never the panel dir): ' + JSON.stringify(b).slice(0, 200))
+  C.case('S0.declared-at-projects-root', b && b.declared === true &&
+    String(b.path || b.decl || '') === DECL,
+    'declared:true with the exact seeded declaration path ' + DECL + ', got ' + JSON.stringify(b && (b.path || b.decl)))
+}
 
 // ---------- S1 credential gate ----------
 {

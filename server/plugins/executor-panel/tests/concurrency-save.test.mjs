@@ -115,14 +115,17 @@ const Q = (s = '') => new URLSearchParams(s)
   const api3 = apiWith({ engineConcurrencyRead: async () => okFace })
   const r3 = await api3.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=BAD_KEY'), '')
   assert(r3.status === 400, 'bad project key -> 400')
-  // t261005-10 union: an ABSENT declaration is a fact face (declared:false) with the
-  // engine's refusal text carried in `reason` — ok:true, never a guessed number.
+  // t261008-48 settled contract: an ABSENT declaration is a NAMED REFUSAL
+  // (ok:false) with the engine's text verbatim + the declaration path — never an
+  // ok:true fact row (ok:true + limit:null would collide with the unlimited face,
+  // and the engine itself refuses). No holders/queue keys, no fabricated number.
   const apiAbsent = apiWith({ engineConcurrencyRead: async () => ({ ok: false, reason: 'ValueError: Concurrency-limit declaration absent: /p/ghost/concurrency-limit.json - fail-closed refusal' }) })
   const ra = await apiAbsent.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=ghost'), '')
-  assert(ra.status === 200 && ra.json.ok === true && ra.json.declared === false && ra.json.limit === null
+  assert(ra.status === 200 && ra.json.ok === false && ra.json.declared === false && ra.json.limit === null
     && String(ra.json.path).length > 0 && String(ra.json.note).includes('CL-2')
-    && String(ra.json.reason).includes('absent'),
-    'absent declaration -> fact face (declared:false + engine refusal verbatim + CL-2 note)')
+    && String(ra.json.reason).includes('absent') && String(ra.json.reason).includes('/p/ghost/concurrency-limit.json')
+    && ra.json.holders === undefined && ra.json.queue === undefined && ra.json.unlimited === undefined,
+    'absent declaration -> named refusal (ok:false + declared:false + engine text + path, no fake numbers/lists)')
   n++
 
   const post = async (api, body, withAuth = true) => api.handle('POST', '/sandbar-executor-panel/api/concurrency',

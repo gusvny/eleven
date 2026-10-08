@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import {
   readConcurrency, parseConcurrencyRead, limitStep, concChipState,
   concurrencyReadArgv, engineTicketPath,
+  concurrencyProjectsRoot, concurrencyDeclarationPath,
 } from '../src/host/concurrency.ts'
 
 let n = 0
@@ -111,6 +112,36 @@ async function readWith(stdout, err) {
   assert(concChipState(null, true, 9) === 'room', 'unlimited is always room')
   assert(concChipState(null, false, 1) === 'room', 'null limit with unlimited flag false still room (defensive)')
   n += 5
+}
+
+// ---- 路径契约真值表（t261008-48 L1：projects root 是唯一权威账本根） ----
+{
+  const PR = '/iso/projects', WD = '/iso/watchdog', PN = '/iso/panel'
+  const table = [
+    // [label, env, expected root] — the documented truth table in the header.
+    ['PROJECTS_DIR wins over both others', { SANDBAR_PROJECTS_DIR: PR, SANDBAR_WATCHDOG_DIR: WD, SANDBAR_PANEL_DIR: PN }, PR],
+    ['PROJECTS_DIR wins over PANEL_DIR alone', { SANDBAR_PROJECTS_DIR: PR, SANDBAR_PANEL_DIR: PN }, PR],
+    ['only WATCHDOG_DIR set -> WATCHDOG_DIR', { SANDBAR_WATCHDOG_DIR: WD }, WD],
+    ['only PANEL_DIR set -> PANEL_DIR', { SANDBAR_PANEL_DIR: PN }, PN],
+    ['neither set -> instance projects root (declared fallback, never empty)', {}, concurrencyProjectsRoot({})],
+  ]
+  for (const [label, env, expected] of table) {
+    assert(concurrencyProjectsRoot(env) === expected, `root table: ${label}`)
+    assert(concurrencyDeclarationPath('alpha', env) === expected.replace(/\/+$/, '') + '/alpha/concurrency-limit.json',
+      `declaration path follows the root: ${label}`)
+    n += 2
+  }
+  // Trailing slashes are stripped, never doubled.
+  assert(concurrencyProjectsRoot({ SANDBAR_PROJECTS_DIR: PR + '/' }) === PR, 'trailing slash stripped')
+  // The engine child env is pinned to the resolved root (one resolver, both faces).
+  {
+    let seenEnv = null
+    const capture = (cmd, args, opts, cb) => { seenEnv = opts.env; setTimeout(() => cb(null, JSON.stringify({ ok: true, result: GOOD_FACE })), 1) }
+    await readConcurrency('alpha', { SANDBAR_PANEL_DIR: PN }, { execFileFn: capture })
+    assert(seenEnv && seenEnv.SANDBAR_PROJECTS_DIR === PN,
+      'engine child pinned to the resolved root when only PANEL_DIR is set (no machine-default home read)')
+    n++
+  }
 }
 
 done(n)

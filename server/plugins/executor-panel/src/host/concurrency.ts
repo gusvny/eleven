@@ -23,6 +23,36 @@
  * engine absent or temporalio unvendored / maxBuffer overflow — all carried (see
  * the implementation notes below). Row 8 adjusted: a saved:true receipt must also
  * carry the audit_row shape, else it is refused.
+ *
+ * Path contract (t261008-48, settled): the PROJECTS ROOT is the authoritative
+ * home of every per-project concurrency file — declaration
+ * (<root>/<key>/concurrency-limit.json), state (.../concurrency-state.json) and
+ * audit (.../concurrency-limit-audit.jsonl). The engine CLI reads/writes ONLY
+ * there (server/engine/shared.py perkey_projects_root: SANDBAR_PROJECTS_DIR, else
+ * ~/.sandbar/projects), so the panel must resolve the same root or it reads a
+ * ledger the engine never wrote (the KI-198 shape inside one handler).
+ * SANDBAR_PANEL_DIR / SANDBAR_WATCHDOG_DIR are isolation seams, never ledger
+ * homes. Resolution is ONE exported resolver (concurrencyProjectsRoot below) with
+ * the precedence the grants family already declares (executor-grants.ts):
+ * PROJECTS_DIR > WATCHDOG_DIR > PANEL_DIR > instance projects root; the engine
+ * child is pinned to the resolved root via SANDBAR_PROJECTS_DIR so an isolated
+ * bench that sets only WATCHDOG/PANEL still stays off the machine-default home.
+ *
+ * Env truth table (L1-pinned in tests/concurrency-face.test.mjs):
+ *   PROJECTS_DIR set (with or without the others) -> PROJECTS_DIR
+ *   only WATCHDOG_DIR set                         -> WATCHDOG_DIR
+ *   only PANEL_DIR set                            -> PANEL_DIR
+ *   none set                                      -> instanceProjectsRoot(env)
+ *
+ * Refusal-shape contract (t261008-48, settled): an ABSENT declaration is a named
+ * refusal — {ok:false, declared:false, limit:null, path, reason:<engine text
+ * quoting the absolute declaration path>}. It is NOT an ok:true fact row:
+ * ok:true + limit:null collides with the unlimited face, and the engine itself
+ * refuses (rc!=0) when the declaration is absent — the face agrees with the
+ * engine. A MALFORMED ledger keeps the same ok:false envelope; the two cases
+ * differ only in the engine's reason text. The read-only limit row keeps its
+ * facts: declared:false + path + reason ride the refusal envelope (the page
+ * derives its row from those fields, never from a fabricated number — KI-193).
  */
 
 import { execFile as execFileCb } from 'node:child_process'
@@ -112,21 +142,26 @@ export type ConcurrencyWriteFace = (
   opts?: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv },
 ) => Promise<ConcurrencySaveOutcome>
 
-function isRootOf(env: NodeJS.ProcessEnv): string | undefined {
-  // Same injection priority as executor-grants.ts declarationPath: SANDBAR_PROJECTS_DIR
-  // > SANDBAR_WATCHDOG_DIR > the instance projects root (non-default instances and
-  // lane benches can isolate through env).
-  if (env.SANDBAR_PROJECTS_DIR) return String(env.SANDBAR_PROJECTS_DIR).replace(/\/+$/, '')
-  if (env.SANDBAR_WATCHDOG_DIR) return String(env.SANDBAR_WATCHDOG_DIR).replace(/\/+$/, '')
-  return instanceProjectsRoot(env)
+/** ONE resolver for the per-project concurrency file home (t261008-48 path
+ *  contract, see the header): the projects root is authoritative — the engine CLI
+ *  reads/writes only there. Precedence matches the grants family
+ *  (executor-grants.ts declarationPath): PROJECTS_DIR > WATCHDOG_DIR > PANEL_DIR >
+ *  instance projects root. Trailing slashes are stripped so path concatenation
+ *  stays single-slash. */
+export function concurrencyProjectsRoot(env: NodeJS.ProcessEnv): string {
+  const root = env.SANDBAR_PROJECTS_DIR || env.SANDBAR_WATCHDOG_DIR
+    || env.SANDBAR_PANEL_DIR || instanceProjectsRoot(env)
+  return String(root).replace(/\/+$/, '')
 }
 
-/** This project's concurrency declaration path (same root family as the grants
- *  declaration; PANEL_DIR before WATCHDOG_DIR so a panel-scoped test env aligns). */
+function isRootOf(env: NodeJS.ProcessEnv): string {
+  return concurrencyProjectsRoot(env)
+}
+
+/** This project's concurrency declaration path (the settled contract: the
+ *  projects root, same home the engine CLI reads — never the panel directory). */
 export function concurrencyDeclarationPath(key: string, env: NodeJS.ProcessEnv = process.env): string {
-  const root = env.SANDBAR_PROJECTS_DIR || env.SANDBAR_PANEL_DIR
-    || env.SANDBAR_WATCHDOG_DIR || instanceProjectsRoot(env)
-  return String(root).replace(/\/+$/, '') + '/' + String(key) + '/concurrency-limit.json'
+  return concurrencyProjectsRoot(env) + '/' + String(key) + '/concurrency-limit.json'
 }
 
 /** The read-face command (argv array; same execFile shape as the grants spawn). */
@@ -224,13 +259,13 @@ export function readConcurrency(
       if (!settled) { settled = true; resolve(r) }
     }
     try {
-      // The engine child must read the SAME root the panel family resolves (env
-      // alignment): otherwise an isolated bench env (PANEL/WATCHDOG_DIR set,
-      // PROJECTS_DIR unset) silently reads the machine default home root.
+      // The engine child must read the SAME root the panel resolves (the settled
+      // t261008-48 path contract, one resolver): otherwise an isolated bench env
+      // (PANEL/WATCHDOG_DIR set, PROJECTS_DIR unset) silently reads the machine
+      // default home root.
       const childEnv: NodeJS.ProcessEnv = {
         ...env,
-        SANDBAR_PROJECTS_DIR: String(env.SANDBAR_PROJECTS_DIR || env.SANDBAR_PANEL_DIR
-          || env.SANDBAR_WATCHDOG_DIR || instanceProjectsRoot(env)),
+        SANDBAR_PROJECTS_DIR: concurrencyProjectsRoot(env),
       }
       run(enginePython(env), concurrencyReadArgv(key),
         { timeout: opts.timeoutMs ?? 15_000, maxBuffer: 1_000_000, env: childEnv },

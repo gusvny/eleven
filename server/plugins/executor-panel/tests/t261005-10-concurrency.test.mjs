@@ -5,16 +5,25 @@
  * 畸形全抛）。外部输入消费 → 畸形输入用例必带（桩/固定文件，不靠真外部源）。
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { assert, done, freshDir, isolatedEnv } from './lib.mjs'
 import { createApi, parseConcurrencyDoc } from '../src/host/api.ts'
+import { concurrencyDeclarationPath } from '../src/host/concurrency.ts'
 
 const wd = freshDir(), pan = freshDir()
 const env = isolatedEnv(wd, pan)
 const api = createApi(env, {})
 let n = 0
 const Q = (s = '') => new URLSearchParams(s)
-const proj = (key) => { mkdirSync(join(pan, key), { recursive: true }); return join(pan, key) }
+// Seed through the DECLARED path resolver (t261008-48 contract): the fixture must
+// land where the read face resolves (the projects root — WATCHDOG_DIR here, the
+// grants-family precedence), never at a hand-picked directory. Seeding anywhere
+// else would pin the old PANEL-first ordering that this ticket settled away.
+const proj = (key) => {
+  const file = concurrencyDeclarationPath(key, env)
+  mkdirSync(dirname(file), { recursive: true })
+  return file
+}
 
 // ---- parseConcurrencyDoc（纯函数）----
 assert(parseConcurrencyDoc('{"version":1,"limit":"unlimited"}') === null, 'unlimited → null (engine None 同义)')
@@ -48,29 +57,29 @@ assert(r.status === 401 || r.status === 405, 'PUT refused')
 
 // ---- API: not declared (no dir) ----
 r = await api.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=ghost'))
-assert(r.status === 200 && r.json.ok === true && r.json.declared === false && r.json.limit === null
+assert(r.status === 200 && r.json.ok === false && r.json.declared === false && r.json.limit === null
   && typeof r.json.path === 'string' && r.json.path.length > 0,
-  'not declared: explicit face with provenance path, no guessed number')
+  'not declared: named refusal with provenance path, no guessed number')
 assert(String(r.json.note).includes('CL-2'), 'absent write face is named (CL-2 boundary)')
 
 // ---- API: declared ----
-const dir = proj('alpha')
-writeFileSync(join(dir, 'concurrency-limit.json'), '{"version":1,"limit":3}')
+const declFile = proj('alpha')
+writeFileSync(declFile, '{"version":1,"limit":3}')
 r = await api.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=alpha'))
 assert(r.status === 200 && r.json.declared === true && r.json.limit === 3 && r.json.unlimited === false
   && String(r.json.path).endsWith('concurrency-limit.json'),
   'declared: value + declaration path together (provenance)')
-writeFileSync(join(dir, 'concurrency-limit.json'), '{"version":1,"limit":"unlimited"}')
+writeFileSync(declFile, '{"version":1,"limit":"unlimited"}')
 r = await api.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=alpha'))
 assert(r.json.declared === true && r.json.limit === null && r.json.unlimited === true,
   'declared unlimited: declared=true, limit=null (fact, not absence)')
 
 // ---- API: malformed / out-of-range fail closed ----
-writeFileSync(join(dir, 'concurrency-limit.json'), '{"version":1,"limit":')
+writeFileSync(declFile, '{"version":1,"limit":')
 r = await api.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=alpha'))
 assert(r.json.declared === false && r.json.limit === null && String(r.json.reason).includes('JSON'),
   'malformed: fails closed with the reason verbatim')
-writeFileSync(join(dir, 'concurrency-limit.json'), '{"version":1,"limit":42}')
+writeFileSync(declFile, '{"version":1,"limit":42}')
 r = await api.handle('GET', '/sandbar-executor-panel/api/concurrency', Q('project=alpha'))
 assert(r.json.declared === false && r.json.limit === null && String(r.json.reason).includes('range'),
   'out-of-range: fails closed')
