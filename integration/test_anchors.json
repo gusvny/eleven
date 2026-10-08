@@ -1136,6 +1136,21 @@
    "anchor": "behaviour",
    "note": "",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261008_25_status_surface_map.py": {
+   "anchor": "behaviour",
+   "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261008_25_archive_terminal.py": {
+   "anchor": "behaviour",
+   "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261008_25_board_status_filter.py": {
+   "anchor": "behaviour",
+   "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -3992,6 +4007,16 @@
   "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
    "anchor": "behaviour",
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
+  },
+  "integration/t261008-25/sc_t261008_25_failed_ticket_disposition.py": {
+   "anchor": "behaviour",
+   "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
+   "sync_path": ""
+  },
+  "integration/t261008-25/sc_t261008_25_status_surface_map.py": {
+   "anchor": "behaviour",
+   "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
    "sync_path": ""
   },
   "integration/t261008-19/sc_t26100819_panel_tab_mock_anchors.mjs": {

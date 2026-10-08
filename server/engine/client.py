@@ -775,6 +775,33 @@ async def _executor_grant_gate(identity: Dict[str, Any], op: str, key: str,
 _TICKET_TERMINAL_STATUSES = frozenset((
     "COMPLETED", "FAILED", "CANCELED", "TERMINATED", "CONTINUED_AS_NEW", "TIMED_OUT"))
 
+#: Exhaustive status-to-surface map (KI-223): every ExecutionStatus Temporal can report
+#: names the faces that collect it, so a future terminal class cannot silently land
+#: outside every collection pass again. Face ids:
+#:   "board"            — cmd_ticket_list (unfiltered, always present)
+#:   "running"          — cmd_running_tickets (in-flight face)
+#:   "cancel_audit"     — cmd_cancel_audit (terminate audit face)
+#:   "archive_cleanup"  — _closed_ticket_entries (feeds ticket-prune / archive-legacy)
+#:   "terminal_archive" — cmd_ticket_archive_terminal (the named, reason-required exit
+#:                        for terminal-but-not-completed tickets)
+#: CONTINUED_AS_NEW is deliberately board-only and declared as such: it is not terminal
+#: (KI-025 — never report live as terminal), so no terminal-class exit may take it.
+_STATUS_SURFACE_MAP = {
+    "COMPLETED": ("board", "archive_cleanup"),
+    "RUNNING": ("board", "running"),
+    "CONTINUED_AS_NEW": ("board",),
+    "TERMINATED": ("board", "cancel_audit", "terminal_archive"),
+    "FAILED": ("board", "terminal_archive"),
+    "CANCELED": ("board", "terminal_archive"),
+    "TIMED_OUT": ("board", "terminal_archive"),
+}
+
+#: The named archive exit's eligibility set, derived from the map (one truth — no
+#: second status list to drift). Single-ticket command (KI-223 reject rule: no batch,
+#: no automatic sweep of historical tickets).
+_ARCHIVE_TERMINAL_ELIGIBLE = frozenset(
+    s for s, faces in _STATUS_SURFACE_MAP.items() if "terminal_archive" in faces)
+
 
 async def _executor_open_epic_count(project: str, epic: str) -> "Tuple[int, Optional[str]]":
     """Per-epic count of tickets started by the executor and not yet terminal (the
@@ -1146,6 +1173,197 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
                                                "%r 即人工收口的可辨标记"
                                                % CLOSE_OUT_PREFIX)}),
                          gate, "ticket-close-out")
+
+
+def _project_from_describe(desc: Any) -> str:
+    """ProjectKey search attribute off a describe result (best-effort: unreadable/absent
+    = empty string, never guessed — the KI-223 archive exit targets a workflow that is
+    already terminal, so the snapshot-query face _write_gate normally reads the project
+    from is not reliably available; the visibility search attribute is the authority
+    here, same source _closed_ticket_entries uses for its rows)."""
+    try:
+        v = desc.typed_search_attributes.get(SearchAttributeKey.for_keyword(PROJECT_SA_NAME))
+        if v:
+            return str(v)
+    except Exception:  # noqa: BLE001 — fall through to the untyped face
+        pass
+    try:
+        sa = getattr(desc, "search_attributes", None) or {}
+        v = sa.get(PROJECT_SA_NAME)
+        if v:
+            return str(v[0] if isinstance(v, (list, tuple)) and v else v)
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+async def cmd_ticket_archive_terminal(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Named archive exit for terminal-but-not-completed tickets (KI-223): the
+    FAILED/CANCELED/TIMED_OUT/TERMINATED class that no collection face used to reach.
+    Single-ticket command by design (reject rule: no batch, no automatic sweep of
+    historical tickets — one call, one reason, one named operator).
+
+    Discipline (same family as ticket-cancel / ticket-close-out, minus the workflow
+    writes — the ticket is already terminal, there is nothing to signal or terminate;
+    this is a pure named ledger write into the ticket's data face). Order:
+
+      arg validation -> describe -> terminal guard -> idempotency guard ->
+      cross-project/executor gate -> write archive.json
+
+    - reason mandatory, non-empty, string-typed: a non-string is never str()-coerced
+      (["x"] would coerce to "['x']" and pass — the archive reason is the named audit
+      anchor; a malformed type is a structured refusal with zero side effects, the
+      same discipline as cancel). The reason must state why this failure is being
+      retired, so the exit cannot become a way to wipe a failure clean.
+    - terminal guard (fail-closed, single exit): non-terminal (including
+      CONTINUED_AS_NEW, KI-025) is refused — which also closes the KI-218 family by
+      construction: a ticket still holding a queue entry is live, and the terminal
+      guard refuses it at describe. COMPLETED is pointed back to the normal path
+      (ticket-archive-legacy / ticket-prune); this exit is never a side door for
+      completed tickets.
+    - cross-project gate: NOT _write_gate — it reads the target project through a
+      snapshot query, and a terminal workflow's query face is not reliably available
+      (snapshot unavailable = transient refusal, which would wall this exit shut and
+      reproduce KI-223). This command writes nothing to the workflow (no signal, no
+      terminate); the target project comes from describe's ProjectKey search attribute
+      (the same source _closed_ticket_entries uses), and the judgment matrix is the
+      same caller_gate sequence (identity -> override -> judge -> executor grant),
+      with the same refusal shape.
+    - idempotency: a readable archive.json means skip, never overwrite (a real archive
+      is never rewritten, same as archive-legacy); malformed/error = fail-closed
+      failure.
+    - record shape = the existing schema v1 with `legacy:false`, `terminal_status`
+      carrying the execution status verbatim (the failure class is named honestly,
+      never rewritten into a success) and `archived_by` carrying who. Stays queryable
+      after archiving: pre-prune the board row is visible with its archive on disk;
+      post-prune, ticket-prune --execute deletes the Temporal workflow itself (the
+      deleter goes through DeleteWorkflowExecution) and the on-disk archive.json
+      (reason/terminal_status/archived_by) is unaffected — a two-phase disposition
+      whose ledger never evaporates.
+    - refusal = zero side effects: every refusal happens before the disk write (a
+      refused call is still recorded to admin.log by the _emit face)."""
+    tid = str(args.get("ticket_id") or args.get("id") or "")
+    who = str(args.get("who") or "").strip()
+    raw_reason = args.get("reason")
+    if raw_reason is not None and not isinstance(raw_reason, str):
+        return _err("ticket-archive-terminal requires a string reason (received %s) — "
+                    "the archive reason is the named audit anchor and is never "
+                    "str()-coerced; a malformed type = structured refusal"
+                    % type(raw_reason).__name__)
+    reason = str(raw_reason or "").strip()
+    if not tid:
+        return _err("ticket-archive-terminal requires ticket_id")
+    if not who:
+        return _err("ticket-archive-terminal requires who (the operator identity is "
+                    "required and must be non-empty — a named archive exit never stays "
+                    "op-local)")
+    if not reason:
+        return _err("ticket-archive-terminal requires reason (state why this "
+                    "terminal-but-not-completed ticket is being archived — the reason "
+                    "is the durable audit anchor in the on-disk manifest; empty = "
+                    "structured refusal)")
+    if len(reason) > CROSS_PROJECT_NOTE_LIMIT:
+        return _err("ticket-archive-terminal reason exceeds limit (%d > %d chars) — "
+                    "shorten it and retry" % (len(reason), CROSS_PROJECT_NOTE_LIMIT))
+    client = await _connect()
+    handle = client.get_workflow_handle(tid)
+    try:
+        desc = await handle.describe()
+    except Exception as e:
+        if _is_not_found_exc(e):
+            return _err("ticket does not exist: %s (no such workflow in Temporal)"
+                        % tid, KIND_NOT_FOUND)
+        return _err("target read failed (%s: %s) — nothing executed, retry later"
+                    % (type(e).__name__, e), KIND_TRANSIENT)
+    exec_status = desc.status.name if desc.status is not None else ""
+    # terminal guard: single exit, fail-closed.
+    if exec_status not in _TICKET_TERMINAL_STATUSES:
+        return _err("ticket not terminal (exec_status=%s) — the terminal archive exit "
+                    "never takes a live ticket (KI-025: never report live as terminal); "
+                    "refused with zero side effects" % (exec_status or "unknown"))
+    if exec_status == "CONTINUED_AS_NEW":
+        return _err("exec_status=CONTINUED_AS_NEW is not terminal (KI-025: the "
+                    "watcher-generation handover is unclosed) — refused with zero "
+                    "side effects")
+    if exec_status == "COMPLETED":
+        return _err("exec_status=COMPLETED does not belong to this exit — use the "
+                    "normal archive path (ticket-archive-legacy / ticket-prune); "
+                    "refused with zero side effects")
+    project = _project_from_describe(desc)
+    # idempotency guard (a read, before the write gate — no side effects): a readable
+    # archive means skip, never overwrite.
+    m = _read_archive_manifest(tid, project)
+    if m["state"] == "ok":
+        return _ok({"ticket_id": tid, "archived": False, "skipped": True,
+                    "exec_status": exec_status, "path": m["detail"],
+                    "note": "a readable archive already exists — a real archive is "
+                            "never overwritten (idempotent receipt, safe to retry)"})
+    if m["state"] != "missing":
+        return _err("archive manifest unreadable (%s) — fail-closed, nothing written "
+                    "(handle manually, same contract as ticket-archive-legacy): %s"
+                    % (m["state"], m["detail"]))
+    # cross-project/executor gate (same judgment matrix; the target project comes from
+    # the search attribute, not a snapshot — see the docstring).
+    try:
+        identity = _caller_identity(args)
+    except caller_gate.CallerIdentityError as e:
+        return _err(str(e), KIND_CROSS_PROJECT_REFUSED)
+    override, oerr = caller_gate.validate_override(args)
+    if oerr:
+        return _err(oerr, KIND_CROSS_PROJECT_REFUSED)
+    verdict = caller_gate.judge_caller(identity, project, override)
+    if verdict["decision"] == "refuse":
+        return _gate_refusal(verdict, identity,
+                             context=" (target ticket %s, project %s)"
+                                     % (tid, project or "(no project face)"))
+    egate = await _executor_grant_gate(identity, "ticket-archive-terminal", project,
+                                       ticket=tid)
+    if egate["err"] is not None:
+        return egate["err"]
+    keys = caller_gate.identity_receipt(identity, verdict)
+    keys.update(egate["keys"])
+    reg = _registered_hint(str(verdict.get("stamp") or ""))
+    if reg is not None:
+        keys["caller_project_registered"] = reg
+    gate = {"err": None, "verdict": verdict, "keys": keys,
+            "stamp": str(verdict.get("stamp") or ""),
+            "note": str((override or {}).get("reason") or ""),
+            "notice": str(verdict.get("notice") or "")}
+    # record the archive: the existing schema v1 shape, with the failure class named
+    # verbatim (KI-223 acceptance: never rewritten into a success).
+    import datetime as _dt
+    try:
+        dpath = ticket_data_dir(project, tid)
+        dpath.mkdir(parents=True, exist_ok=True)
+        manifest = {"schema": "v1", "ticket_id": tid, "legacy": False,
+                    "terminal_status": exec_status,
+                    "archived_at": _dt.datetime.now(
+                        _dt.timezone.utc).isoformat(timespec="seconds"),
+                    "meta": {}, "files": [], "absent": ["worktree"],
+                    "reason": reason, "archived_by": who, "excluded_rules": []}
+        (dpath / "archive.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as ex:
+        return _err("archive manifest write failed (%s: %s) — nothing recorded, "
+                    "retry safe" % (type(ex).__name__, str(ex)[:300]))
+    return _gate_receipt(_ok({"ticket_id": tid, "archived": True,
+                              "exec_status": exec_status,
+                              "terminal_status": exec_status,
+                              "project": project or None,
+                              "reason": reason, "who": who,
+                              "path": str(dpath),
+                              "receipt_note": ("two-phase disposition, stated "
+                                               "honestly: pre-prune the board row "
+                                               "stays visible with its terminal "
+                                               "class and this archive on disk; "
+                                               "post-prune (ticket-prune --execute) "
+                                               "the Temporal workflow itself is "
+                                               "deleted and the row leaves the "
+                                               "board by design, while this "
+                                               "manifest (reason/terminal_status/"
+                                               "archived_by) survives on disk as "
+                                               "the durable audit record")}),
+                         gate, "ticket-archive-terminal")
 
 
 async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -2784,6 +3002,23 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     if id_prefix and not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$", id_prefix):
         return _err("id_prefix 形状不合法（字母/数字开头，[A-Za-z0-9._-]，≤61 字符）：%r"
                     % id_prefix)
+    # KI-223: board status filter — display layer only. The filter is checked against
+    # the exhaustive _STATUS_SURFACE_MAP key set (unknown token = structured refusal,
+    # never a silent empty board) and applied client-side after the query and run-merge
+    # (see the row loop below), so query semantics and the merge precedence rule are
+    # untouched; a filtered empty result is named in the receipt, never silent.
+    raw_status = str(args.get("status") or "").strip()
+    status_filter: List[str] = []
+    if raw_status:
+        for tok in raw_status.split(","):
+            tok = tok.strip().upper()
+            if not tok:
+                continue
+            if tok not in _STATUS_SURFACE_MAP:
+                return _err("status filter token %r is not an ExecutionStatus the "
+                            "engine can report (whitelist: %s)"
+                            % (tok, ", ".join(sorted(_STATUS_SURFACE_MAP))))
+            status_filter.append(tok)
     client = await _connect()
 
     async def _scan(query: str, prefix_filter: str = "") -> "Tuple[Dict[str, Any], List[str]]":
@@ -2891,6 +3126,10 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 q.startswith(TICKET_QUEUE_PREFIX)):
             continue
         exec_status = wf.status.name if wf.status is not None else ""
+        # KI-223 display-layer status filter (after query + run-merge; zero engine
+        # semantics change): a filtered-out row is dropped before snapshot enrichment.
+        if status_filter and exec_status not in status_filter:
+            continue
         if exec_status == "TERMINATED":
             continue  # torn-down/aborted tickets stay off the board (history remains queryable in Temporal)
         # ProjectKey / EpicCode read straight from the SA: even when the snapshot is
@@ -3196,6 +3435,10 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
     if id_prefix:
         # 铸号扫描面回执（t260916-02）：scan_mode 可辨（starts_with / type_only_fallback）
         result["id_prefix_scan"] = {"prefix": id_prefix, "scan_mode": inspection_scan_mode}
+    if status_filter:
+        # KI-223: an empty result under a filter is never silent — the receipt names
+        # the applied filter and how many rows survived it.
+        result["status_filter"] = {"applied": status_filter, "matched": len(rows)}
     return _ok(result)
 
 
@@ -3227,12 +3470,16 @@ def _read_archive_manifest(ticket_id: str, project_key: str) -> Dict[str, Any]:
 
 
 async def _closed_ticket_entries(args: Dict[str, Any]) -> "List[Dict[str, Any]]":
-    """List COMPLETED (closed) ticket entries: {id, sa_project, close_ts} (TERMINATED is
-    not collected — same reading as ticket-list: torn-down/aborted executions stay off
-    the board and out of the archive-cleanup surface)."""
+    """List COMPLETED (closed) ticket entries: {id, sa_project, close_ts} (KI-223
+    docstring drift fixed: this face collects COMPLETED only — face=archive_cleanup per
+    _STATUS_SURFACE_MAP, which is the exhaustive status-to-surface declaration;
+    FAILED/TERMINATED/CANCELED/TIMED_OUT are collected by cmd_ticket_archive_terminal,
+    TERMINATED additionally by cmd_cancel_audit, CONTINUED_AS_NEW by no collection face
+    by design)."""
     client = await _connect()
     type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
                               for c in TEMPLATE_CLASSES.values())
+    # face=archive_cleanup per _STATUS_SURFACE_MAP
     async for wf in client.list_workflows('(%s) AND ExecutionStatus="Completed"' % type_filter):
         q = str(getattr(wf, "task_queue", "") or "")
         if q not in (TASK_QUEUE,) and not (
@@ -3419,6 +3666,7 @@ async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     type_filter = " OR ".join('WorkflowType="%s"' % c.__name__
                               for c in TEMPLATE_CLASSES.values())
     running: List[Dict[str, str]] = []
+    # face=running per _STATUS_SURFACE_MAP
     async for wf in client.list_workflows('(%s) AND ExecutionStatus="Running"' % type_filter):
         q = str(getattr(wf, "task_queue", "") or "")
         if q not in (TASK_QUEUE,) and not (
@@ -3470,6 +3718,7 @@ async def cmd_cancel_audit(args: Dict[str, Any]) -> Dict[str, Any]:
                               for c in TEMPLATE_CLASSES.values())
     since = (datetime.now(timezone.utc)
              - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # face=cancel_audit per _STATUS_SURFACE_MAP
     query = '(%s) AND ExecutionStatus="Terminated" AND CloseTime > "%s"' % (type_filter, since)
 
     def _signal_reason(attrs: Any) -> str:
@@ -4035,6 +4284,7 @@ COMMANDS = {
     "ticket-query": cmd_ticket_query,
     "ticket-prune": cmd_ticket_prune,
     "ticket-archive-legacy": cmd_ticket_archive_legacy,
+    "ticket-archive-terminal": cmd_ticket_archive_terminal,
     "running-tickets": cmd_running_tickets,
     "cancel-audit": cmd_cancel_audit,
     "template-faces": cmd_template_faces,
@@ -4045,7 +4295,7 @@ COMMANDS = {
 }
 
 USAGE = (
-    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|cancel-audit|template-faces|executor-grants-write|deliver|lane-orphans|lane-reclaim> [argsJSON]\n"
+    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|ticket-archive-terminal|cancel-audit|template-faces|executor-grants-write|deliver|lane-orphans|lane-reclaim> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -4082,6 +4332,15 @@ USAGE = (
     "  rejections/builtin/projects_scanned/declared_projects/projects_root——\n"
     "  ticket.py create 模板闸的单一权威源，类面拒收与空转在此点名而非静默。\n"
     "ticket-archive-legacy 存量诚实过账：closed 且无档票写 legacy manifest（不伪造不补产）。\n"
+    "ticket-archive-terminal: the named archive exit for terminal-but-not-completed\n"
+    "  tickets (KI-223). {ticket_id, who required, reason required non-empty string};\n"
+    "  one ticket, one reason per call (no batch, no automatic sweep). The terminal\n"
+    "  guard admits only FAILED/CANCELED/TIMED_OUT/TERMINATED (COMPLETED is pointed\n"
+    "  back to the normal path; CONTINUED_AS_NEW is refused as not-terminal, KI-025).\n"
+    "  Manifest = schema v1 with terminal_status (failure class verbatim) and\n"
+    "  archived_by; the archive stays queryable (pre-prune the board row is visible\n"
+    "  with its archive; post-prune the workflow is deleted while the on-disk\n"
+    "  manifest survives — a two-phase disposition whose ledger never evaporates).\n"
     "running-tickets=轻量 RUNNING 工单清单（console keepalive ensure 专用，无 snapshot 查询）。\n"
     '例：python client.py ticket-start \'{"ticket_id":"t260822-01","template_id":"dev-lane","title":"…"}\''
 )
