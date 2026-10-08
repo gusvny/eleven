@@ -804,6 +804,11 @@
    "note": "real decl watchdog key values (five-key literal); marker added t261004-20",
    "sync_path": "server/engine/tests/test_t260926_lane_watchdog.py"
   },
+  "server/engine/tests/test_t261008_30_lane_watchdog_human_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261008-30: rerun-rounds leg exempt on human-gate tickets (shared not-in-flight rule), exemption named in suppressed, human_gate wait datum, span never labelled per-round",
+   "sync_path": "server/engine/tests/test_t261008_30_lane_watchdog_human_gate.py"
+  },
   "server/engine/tests/test_t260926_tmp_fixture_water.py": {
    "anchor": "production-snapshot",
    "note": "real decl watchdog water-key values; marker added t261004-20",
@@ -4017,6 +4022,11 @@
   "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
    "anchor": "behaviour",
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
+  },
+  "integration/t261008-30/sc_t26100830_lane_rerun_human_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261008-30: incident fingerprint replay through the public lane_legs/lane_findings judgement face; W9 source-text drift guard is auxiliary",
    "sync_path": ""
   },
   "integration/t261008-26/sc_lane_vocabulary_gate.py": {

@@ -10,7 +10,17 @@
 
   ① `rerun-rounds`      同票重跑轮次 > N（N=`rerun_rounds`，缺省 3）→ med；> 2N → high。
                         点名票号 + 轮次 + 每轮墙钟（由相邻「进入本步」记录的 at 差分；末轮
-                        「在飞」）。
+                        "in flight"). Per-round durations and the total span are
+                        reported as two separately labelled fields (261008 host report:
+                        never dress the span up as a per-round value - a reader must be
+                        able to tell slow from thrashing). NOT applied to the not-in-flight
+                        ticket states (261008, same rule as leg 3): a ticket parked at a
+                        human gate (paused / blocked / stage_state=awaiting*) outside the
+                        run_integration_tests stage gets no finding from this leg - it is
+                        waiting for a signature, not stuck. The case is named in
+                        meta.suppressed and the waiting age goes to the low-key
+                        meta.human_gate datum. Inside the suite stage the leg still fires
+                        (a blanket exemption must not swallow real thrashing).
   ② `tests-fault-loop`  停在 tests-fault 回路超时：最近一次仲裁判决 = tests-fault 而下判决
                         之后停留 > `fault_loop_min`（缺省 90 分钟）→ high。点名票号 + 判决
                         + 停留时长（判决已下却不收敛）。
@@ -83,6 +93,8 @@ LEG_DATA_UNREADABLE = "data-unreadable"
 #: ③族（inflight-silent）**不适用**的票态（260926 复核缺陷⑤）：这三态都不是「在飞」——
 #: paused=KI-122 止血动作本身；blocked=等人审签字；stage_state 含 awaiting=等**人门**
 #: （base.py 设计内可挂数小时/数日）。命中这三态时本族不出条，逐条进 meta.suppressed。
+#: (Since 261008 the rule lives in `_not_in_flight_reasons` as a single writer:
+#: the rerun-rounds leg applies it too.)
 INFLIGHT_INAPPLICABLE_STATUS = "blocked"
 
 #: 已知测试夹具前缀白名单（**同一份清单**也用于 integration/tools/sweep_tmp_fixtures.py；
@@ -470,13 +482,39 @@ def _wall_text(entries: Sequence[float], now_ts: float,
     return text, tail
 
 
+def _not_in_flight_reasons(facts: Dict[str, Any]) -> List[str]:
+    """Single-writer not-in-flight rule (raised from leg 3 in 261008; all legs share it):
+    paused=True (the KI-122 stop-the-bleeding action), status=blocked (waiting on a human
+    decision), stage_state containing awaiting (waiting on a human gate, a designed state
+    that can hold for hours or days). Returns the named reasons; an empty list means in
+    flight. Against a fault finding these states mean waiting, not stuck: reporting them
+    is contrary to fact (the precise-error discipline), and every inspection period with
+    a ticket waiting for a signature would read as not-green."""
+    reasons: List[str] = []
+    if facts.get("paused") is True:
+        reasons.append("paused=True (stop-the-bleeding action, KI-122)")
+    status = str(facts.get("status") or "")
+    if status == INFLIGHT_INAPPLICABLE_STATUS:
+        reasons.append("status=%s (waiting on a human decision)" % status)
+    stage_state = str(facts.get("stage_state") or "")
+    if "awaiting" in stage_state.lower():
+        reasons.append("stage_state=%s (waiting on a human gate)" % stage_state)
+    return reasons
+
+
 def lane_legs(facts: Dict[str, Any], now_ts: float,
               thresholds: Dict[str, Any],
-              suppressed: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """逐票三族判定（纯函数）→ 命中族列表（每条=一份英文文案 + severity + leg token）。
+              suppressed: Optional[List[str]] = None,
+              human_gate: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Per-ticket three-leg judgement (pure) -> hit list (English copy + severity + leg).
 
-    `suppressed`（可选出参）：③族因「不在飞」的票态而不适用时，把具名原因逐条追加进去
-    （调用方进 meta/section 的 suppressed 面——降级可见，但不假报 in flight）。"""
+    `suppressed` (optional out): a leg ruled out by a not-in-flight ticket state appends
+    its named reason here (caller surfaces it in meta/section - visible, never faked).
+    Each line starts with the leg token ("rerun-rounds NOT reported" / "inflight-silent
+    NOT reported") so the two families stay machine-separable in one shared list.
+    `human_gate` (optional out): the low-key waiting fact for a ticket excused from the
+    rerun leg by a human-gate state (ticket/stage/reasons/waiting age) - not a finding:
+    no severity, no by_leg slot, no say in green/red (a queue is not a fault)."""
     legs: List[Dict[str, Any]] = []
     if not isinstance(facts, dict):
         return legs
@@ -494,23 +532,55 @@ def lane_legs(facts: Dict[str, Any], now_ts: float,
                                                  str(facts.get("status") or "?"))
 
     # ① 同票重跑轮次 > N
+    not_in_flight = _not_in_flight_reasons(facts)   # single writer: legs 1 and 3
     if n_rounds > rerun_n:
-        wall, _ = _wall_text(entries, now_ts,
-                             in_flight=(stage == "run_integration_tests"))
-        # severity 阶梯（机械、可判）：>N → med；≥2N → high（今天实案 6 轮 × ~1h 即 high）
-        sev = "high" if n_rounds >= 2 * rerun_n else "med"
-        legs.append({
-            "leg": LEG_RERUN, "severity": sev,
-            "subject": "%s re-ran the integration suite %d times (threshold %d)"
-                       % (tid, n_rounds, rerun_n),
-            "why": "the same ticket re-entered run_integration_tests %d times (> watchdog "
-                   "threshold %d): the loop is not converging, or external handling keeps "
-                   "re-driving it (KI-122 family). Action: read the ticket timeline, then "
-                   "either accept the arbitration verdict, rework, or pause the ticket — "
-                   "the workflow does not stop by itself." % (n_rounds, rerun_n),
-            "evidence": ("suite re-runs=%d > threshold %d | per-round wall: %s | %s"
-                         % (n_rounds, rerun_n, wall or "unavailable", where)),
-        })
+        # 261008: human-gate exemption (the SAME rule as leg 3, single writer
+        # `_not_in_flight_reasons`). Blanket guard: a ticket currently inside
+        # run_integration_tests is still judged - the rounds measure that stage, and
+        # real thrashing there must not be swallowed by a waiting-shaped state word.
+        if not_in_flight and stage != "run_integration_tests":
+            if suppressed is not None:
+                suppressed.append(
+                    "%s: rerun-rounds NOT reported — the ticket is not in flight (%s); "
+                    "suite re-runs=%d" % (tid, ", ".join(not_in_flight), n_rounds))
+            if human_gate is not None:
+                last = float(facts.get("last_activity_at") or 0.0)
+                human_gate.append({
+                    "ticket_id": tid, "stage": stage, "stage_state": stage_state,
+                    "reasons": list(not_in_flight),
+                    "waiting": _mins(now_ts - last) if last else "",
+                    "age_unknown": not last,
+                })
+        else:
+            wall, _ = _wall_text(entries, now_ts,
+                                 in_flight=(stage == "run_integration_tests"))
+            # Per-round vs span stay separate (261008): the span is computed and
+            # labelled on its own, never under the per-round label.
+            if not entries:
+                span = "unavailable (no suite entries)"
+            elif len(entries) == 1:
+                span = "%s (single round: span equals the last round)" % _mins(
+                    max(0.0, (now_ts or entries[-1]) - entries[0]))
+            elif stage == "run_integration_tests":
+                span = "%s over %d rounds (tail round still in flight)" % (
+                    _mins(max(0.0, now_ts - entries[0])), n_rounds)
+            else:
+                span = "%s over %d rounds" % (_mins(entries[-1] - entries[0]), n_rounds)
+            # severity ladder (mechanical): >N -> med; >=2N -> high (today's case: 6 rounds x ~1h = high)
+            sev = "high" if n_rounds >= 2 * rerun_n else "med"
+            legs.append({
+                "leg": LEG_RERUN, "severity": sev,
+                "subject": "%s re-ran the integration suite %d times (threshold %d)"
+                           % (tid, n_rounds, rerun_n),
+                "why": "the same ticket re-entered run_integration_tests %d times (> watchdog "
+                       "threshold %d): the loop is not converging, or external handling keeps "
+                       "re-driving it (KI-122 family). Action: read the ticket timeline, then "
+                       "either accept the arbitration verdict, rework, or pause the ticket — "
+                       "the workflow does not stop by itself." % (n_rounds, rerun_n),
+                "evidence": ("suite re-runs=%d > threshold %d | per-round wall: %s | total "
+                             "span: %s | %s"
+                             % (n_rounds, rerun_n, wall or "unavailable", span, where)),
+            })
 
     # ② 停在 tests-fault 回路超时（判决已下却不收敛）
     verdict = str(facts.get("verdict") or "")
@@ -534,17 +604,14 @@ def lane_legs(facts: Dict[str, Any], now_ts: float,
                                 len(entries) or 0, n_rounds, where)),
             })
 
-    # ③ 在飞超阈值无进展（僵尸票，KI-126 同源）——**只对真在飞的票**：paused / blocked /
-    #    awaiting* 三态是设计内的非在飞态（等待人处置/人门），报「while in flight」既与事实
-    #    相反（报错精确纪律），又会把每期含等人签字票的巡检打成「非全绿」；改逐条降级点名。
+    # 3. in-flight silent over threshold (zombie ticket, KI-126 family) - only for a
+    #    ticket that is genuinely in flight: paused / blocked / awaiting* are designed
+    #    non-in-flight states (waiting on a human). Reporting "while in flight" against
+    #    them is contrary to fact (precise-error discipline) and would paint every period
+    #    holding a signature-waiting ticket not-green; demote to named suppression.
+    #    (Single writer for the rule = `_not_in_flight_reasons`, shared with leg 1
+    #    since 261008.)
     last = float(facts.get("last_activity_at") or 0.0)
-    not_in_flight = []
-    if facts.get("paused") is True:
-        not_in_flight.append("paused=True (stop-the-bleeding action, KI-122)")
-    if str(facts.get("status") or "") == INFLIGHT_INAPPLICABLE_STATUS:
-        not_in_flight.append("status=%s (waiting on a human decision)" % INFLIGHT_INAPPLICABLE_STATUS)
-    if "awaiting" in stage_state.lower():
-        not_in_flight.append("stage_state=%s (waiting on a human gate)" % stage_state)
     if last and now_ts > last:
         silent = now_ts - last
         if silent > silent_min * 60 and not not_in_flight:
@@ -616,6 +683,7 @@ def lane_findings(tickets: Any, *, now_ts: float,
     by_leg = {k: 0 for k in LANE_LEGS}
     skipped: List[str] = []
     suppressed: List[str] = []
+    human_gate: List[Dict[str, Any]] = []
     scanned = 0
     for f in (tickets if isinstance(tickets, list) else []):
         if not isinstance(f, dict):
@@ -625,7 +693,7 @@ def lane_findings(tickets: Any, *, now_ts: float,
             skipped.append("ticket facts without ticket_id (skipped)")
             continue
         scanned += 1
-        legs = lane_legs(f, float(now_ts or 0.0), thr, suppressed)
+        legs = lane_legs(f, float(now_ts or 0.0), thr, suppressed, human_gate)
         if not legs:
             continue
         for leg in legs:
@@ -657,6 +725,11 @@ def lane_findings(tickets: Any, *, now_ts: float,
                             if isinstance(tickets_meta, dict) else scanned,
             "with_findings": len(out), "by_leg": by_leg, "skipped": skipped,
             "suppressed": suppressed,
+            # Low-key waiting facts (261008): named exemption reasons + waiting age
+            # for human-gate tickets. Not findings: no finding_count / by_leg /
+            # max_severity contribution - a queue is not a fault, it must not drag
+            # green/red.
+            "human_gate": human_gate,
             "thresholds": dict(thr)}
     return out, meta
 
@@ -695,6 +768,10 @@ def lane_section(findings: Any, meta: Any, *, source: str = "",
         # 降级可见面（260926 复核缺陷⑤）：③族因「不在飞」票态而不适用时逐条点名——
         # 不出假发现，但也不允许「什么都没说」（静默的零与真的零必须可区分）。
         "suppressed": list(m.get("suppressed") or []),
+        # Human-gate waiting facts (261008, low-key, not faults): keep object-shaped
+        # entries only, drop malformed ones.
+        "human_gate": [x for x in (m.get("human_gate") or [])
+                       if isinstance(x, dict)] if isinstance(m.get("human_gate"), list) else [],
     }
 
 
