@@ -1137,6 +1137,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261008_26_lane_vocabulary.py": {
+   "anchor": "behaviour",
+   "note": "t261008-26 KI-226 developer L1: derive_lane_workspace vocabulary table + lane_workspace_gate_error table incl. zero-disturbance shapes; anchor registered by the integration stage to satisfy L16 coverage",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261008_22_void_surface.py": {
    "anchor": "contract",
    "note": "t261008-22: the named void surface's contract (population gate / idempotence / zero-write refusals / journal+ledger agreement) on fixture ledger dirs",
@@ -4012,6 +4017,11 @@
   "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
    "anchor": "behaviour",
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
+  },
+  "integration/t261008-26/sc_lane_vocabulary_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261008-26 KI-226: both lane-vocabulary gate faces plus zero-disturbance negative assertions; drives the real shared.py module (no production snapshot, no value lock beyond the declared vocabulary itself)",
    "sync_path": ""
   },
   "integration/t261008-22/sc_t26100822_void_named_surface.py": {

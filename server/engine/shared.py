@@ -2632,6 +2632,15 @@ def workspace_of(meta: Dict[str, Any], template_lane: str = "") -> Optional[Dict
 # creation validation) — better blocked awaiting a human than silently degraded to the
 # main tree / a temp directory.
 LANE_WORKTREE = "worktree"
+# KI-226 (t261008-26): the lane vocabulary — the only lane values the engine
+# accepts. An unknown lane name used to degrade silently to the main tree (no
+# worktree, no branch, no base_ref; the ticket ran stage after stage producing
+# nothing and never going blocked). Defined once here; the creation chain
+# (derive_lane_workspace) and the workflow-side gate (lane_workspace_gate_error)
+# both check against this tuple, fail-closed. An empty lane stays legitimate
+# (a no-lane workflow such as content-studio).
+LANE_MAIN = "main"
+LANES = (LANE_MAIN, LANE_WORKTREE)
 
 
 def default_lane_paths(ticket_id: str) -> Tuple[str, str]:
@@ -3012,8 +3021,22 @@ def derive_lane_workspace(
       4. A non-worktree lane + template_workspace_dir → default
          {type:dir, WS_DIR_BASE/<ticket id>}; otherwise workspace stays None (the
          main-tree lane edits directly, no separate space).
+      5. The resolved lane must be in LANES (main|worktree); anything else →
+         ValueError naming the value (t261008-26 / KI-226). An empty lane passes
+         only when the template lane is empty too (a no-lane workflow).
     """
     lane = str(lane or "") or str(template_lane or "")
+    # KI-226 (t261008-26): fail closed on any resolved lane outside LANES — before
+    # this check an unknown value fell through to the non-worktree branch with an
+    # empty workspace/worktree/branch (the silent degradation). The check is
+    # unconditional on the RESOLVED value, so an explicit lane cannot drag in a
+    # matching off-vocabulary template lane. An empty lane keeps passing: a
+    # no-lane workflow is legitimate and must not be disturbed.
+    if lane and lane not in LANES:
+        raise ValueError(
+            "unknown lane %r — accepted values: %s (an unrecognised lane used to "
+            "degrade silently to the main tree: no worktree, no branch, no base_ref; "
+            "t261008-26 / KI-226)" % (lane, "|".join(LANES)))
     ws = None
     if workspace is not None:
         if not isinstance(workspace, dict) or workspace.get("type") not in WORKSPACE_TYPES \
@@ -3071,6 +3094,14 @@ def derive_lane_workspace(
             ws = {"type": LANE_WORKTREE, "path": worktree}
         if not branch:
             branch = "lane/" + ws["path"].rstrip("/").rsplit("/", 1)[-1]
+        # KI-226 outcome 5 (t261008-26): an ok receipt next to lane=worktree with an
+        # empty worktree must be unrepresentable. Defensive tail check — the branches
+        # above all fill worktree, so reaching this with an empty value means a
+        # derivation bug; refuse instead of reporting success.
+        if not worktree:
+            raise ValueError(
+                "lane=worktree derived an empty worktree — refusing to report a "
+                "created ticket without a landing place (t261008-26 / KI-226)")
     elif ws is None and template_workspace_dir:
         # 260927 ⑤a(i)：缺省基准落项目内（<项目根>/.ticket-ws/<票号>）——老实现用
         # /tmp/sandbar-ws，随后被同链的 check_paths_under_project 判「不在项目注册目录」
@@ -3093,7 +3124,21 @@ def lane_workspace_gate_error(meta: Dict[str, Any]) -> str:
     new entry points" bypassing the creation validation — better blocked awaiting a
     human than silently degraded to the main tree / a temp directory.
     """
-    if str(meta.get("lane") or "") != LANE_WORKTREE:
+    lane = str(meta.get("lane") or "")
+    # KI-226 (t261008-26): the gate now knows the lane vocabulary, not just the
+    # literal "worktree". Empty = a no-lane workflow, legitimate, unchanged. A
+    # non-empty lane outside LANES is the dangerous shape (it used to slip past
+    # every check below and degrade silently) — refuse it here so hand-written
+    # payloads, old payloads and future entry points that bypass creation are
+    # caught too. lane=main keeps returning "" (main-tree and dir-workspace
+    # tickets are legitimate non-worktree tickets; zero disturbance).
+    if not lane:
+        return ""
+    if lane not in LANES:
+        return ("unknown lane %r — accepted values: %s; the creation chain skipped "
+                "derivation or the payload was hand-written; refusing to run "
+                "(t261008-26 / KI-226)" % (lane, "|".join(LANES)))
+    if lane == LANE_MAIN:
         return ""
     ws = meta.get("workspace")
     if not (isinstance(ws, dict) and ws.get("type") == LANE_WORKTREE and ws.get("path")):

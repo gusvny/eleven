@@ -1859,6 +1859,12 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         "project": project, "epic": epic,
         "stage": first.id, "stage_state": "running", "role": first.role,
         "status": "dispatched", "engine": ENGINE_V2,
+        # KI-226 (t261008-26): the receipt carries the resulting lane shape instead
+        # of hiding it. A caller can rely on lane/worktree/branch naming the derived
+        # truth; lane=worktree always comes with a non-empty worktree because derive
+        # refuses the empty shape, so ok:false is the only way to see it.
+        "lane": lane, "worktree": worktree, "branch": branch,
+        "base_ref": str(args.get("base_ref") or ""),
     }), gate, "ticket-start")
 
 

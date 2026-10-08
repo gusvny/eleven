@@ -57,10 +57,12 @@ def test_workspace_malformed_rejected(bad_ws):
 
 
 def test_dir_lane_default_workspace():
-    lane, ws, _, _ = derive_lane_workspace("t9", "dev", workspace=None, template_workspace_dir=True)
-    assert lane == "dev" and ws == {"type": "dir", "path": WS_DIR_BASE + "/t9"}
+    # t261008-26: the resolved lane must be in LANES — the old fixture label "dev"
+    # (an off-vocabulary placeholder for "non-worktree lane") now uses "main".
+    lane, ws, _, _ = derive_lane_workspace("t9", "main", workspace=None, template_workspace_dir=True)
+    assert lane == "main" and ws == {"type": "dir", "path": WS_DIR_BASE + "/t9"}
 
 
 def test_dir_lane_without_flag_keeps_none():
-    _, ws, _, _ = derive_lane_workspace("t9", "dev")
+    _, ws, _, _ = derive_lane_workspace("t9", "main")
     assert ws is None

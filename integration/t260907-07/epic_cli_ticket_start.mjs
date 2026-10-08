@@ -33,7 +33,8 @@ client._connect = _connect
 r = asyncio.run(client.cmd_ticket_start({
     'template_id': 'dev-lane', 'ticket_id': 't260907-07-t1',
     'project': ${JSON.stringify(project)}, 'epic': ${JSON.stringify(epic)},
-    'lane': 'dir', 'title': 'x', 'write_set': ['notes/x.md'],
+    // t261008-26 (KI-226): lane vocabulary is main|worktree; the old 'dir' value rode the removed silent-degradation path.
+    'lane': 'main', 'title': 'x', 'write_set': ['notes/x.md'],
 }))
 inp = captured.get('input')
 print(json.dumps({'ok': r.get('ok'), 'error': r.get('error', ''),

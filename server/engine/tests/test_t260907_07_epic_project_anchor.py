@@ -211,7 +211,10 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
         return asyncio.run(client.cmd_ticket_start({
             "template_id": "dev-lane", "ticket_id": "t260907-07-t1",
             "project": project, "epic": epic,
-            "lane": "dir", "title": "x",
+            # t261008-26 (KI-226): the lane vocabulary is main|worktree — the old
+            # fixture value 'dir' rode the silent-degradation path this ticket
+            # removed; the deliberate non-worktree face here is lane=main.
+            "lane": "main", "title": "x",
             "write_set": ["notes/x.md"],
             # t260925-08 翻严后 ticket-start 过跨项目闸：本类测 epic 锚定语义（非闸），
             # 调用方身份按生产注入链形态声明为同项目（declared 同项目=pass）。

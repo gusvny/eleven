@@ -227,8 +227,10 @@ def test_derive_legacy_shapes_ignore_repo_write_set(multirepo):
         workspace={"type": "worktree", "path": "/tmp/x"},
         repo_write_set=["repo_a/x.py"])
     assert ws["path"] == "/tmp/x" and "repo_worktrees" not in ws
+    # t261008-26: the resolved lane must be in LANES — the old fixture label "dir"
+    # (an off-vocabulary placeholder) now uses "main".
     lane, ws, worktree, branch = shared.derive_lane_workspace(
-        "t26090706ut", "dir", repo_write_set=["repo_a/x.py"], project_root=str(root),
+        "t26090706ut", "main", repo_write_set=["repo_a/x.py"], project_root=str(root),
         template_workspace_dir=True)
     assert ws["type"] == "dir" and "repo_worktrees" not in ws
 
