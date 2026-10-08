@@ -58,6 +58,8 @@ related:
 9. A red is attributed with **bounded** cost: the same revision is re-run once before any search, the per-lane scenario results are used as a free first filter, and only then is the range searched.
 10. A red never silently holds the fleet: it has a named owner and a named escalation point, and ranges already attributed are not searched twice.
 11. `main` keeps a human signature — now **one per batch** instead of one per ticket.
+12. The new flow is built **alongside** the current one, not on top of it: while the new one is being built and validated the current flow keeps working unchanged, the new flow exists as a **new lane version** that a ticket opts into, and only after it has proven itself are tickets moved over and the old version retired — gradually, not in one step.
+13. Nothing introduced for the new flow applies **retroactively** to tickets running the old flow: a new precondition, a new proof or a new gate check ships inside the new version and is chosen by the tickets that use it, never injected into every ticket's gate.
 
 **Stakeholders and what they care about most:**
 
@@ -84,6 +86,9 @@ related:
 - **Not freezing the fast set.** A membership that never changes either misses new breakage surfaces or keeps paying for members that no longer earn their time; the review is periodic by design, and "keep" is a verdict that must also be argued.
 - **Not rolling this out to other projects in this cycle.** Sandbar first; the flow is per project and the others follow deliberately.
 - **Not changing what "blocked" means for a ticket.** The blocking reasons stay the engine's; this document only changes what a lane must prove and where.
+- **Not modifying the current lane in place.** The current flow is the fleet's working line; changing it under running tickets is what produces the incidents this document exists to avoid. The new flow arrives as a new version beside it.
+- **Not switching the fleet over at once.** Tickets move to the new version deliberately, and the old version keeps serving the tickets that are already on it.
+- **Not retiring the old version before the new one has proven itself** on real landings — "stable" is something the record has to show, not something we declare.
 
 ## Proposal
 
@@ -110,6 +115,17 @@ A ticket's own scenarios answer "did I build what I said?"; they say nothing abo
 - **Culprit handling:** the responsible landing is **reverted** where possible — so the proven prefix can go to `main` and the buffer returns to a good state — and the original ticket is sent back to work; fixing forward on a lane based on the buffer is the fallback when a revert is not possible under the existing protections.
 - **Main:** batches are taken from the certified prefix, and a person signs the batch. What a person is approving is now "this group of landings, each of which was already covered by a certified buffer revision".
 
+### Coexistence and rollout
+
+The new flow is a **new lane version that runs beside the current one**. That is not caution for its own sake: the fleet is working on the current version right now, and the incidents this document reacts to were caused by mechanisms landing *into* that working line — a precondition that started judging tickets which had never been able to satisfy it, and a suite whose output reached the delivered checkout. A second version makes the boundary explicit: everything the new flow needs (its own proof rules, its own gate, its own landing line and its own record) belongs to the tickets that opted in.
+
+- **What is shared and must stay compatible:** the declared scenario inventory (one inventory, two uses), the classification of a red as product fault / environment / flake, the protected-path and write-set protections, and the delivered line's human signature. Sharing these is what keeps the two versions comparable — a ticket moved to the new flow must not need a second definition of any of them.
+- **What is separate:** the new version's landing line and its certification record, its per-lane proof (own scenarios plus the fast global set within a budget), and the checks that enforce them. The old version's gate keeps judging its tickets exactly as it does today, including the checks that were added to it while it was already running.
+- **How a ticket chooses:** per ticket, at the moment it is opened, by naming the version; there is no global switch and no silent migration. A ticket already running on the old version is never moved by a change to the new one.
+- **What "stable enough to move over" means (evidence, not a feeling):** a run of real landings on the new flow whose certification record shows the whole path working — landings made, revisions certified, at least one red attributed and bounded (including the flake-first rerun doing its job), and no class of incident that the old flow did not have. The numbers are set when the implementation is planned; what matters here is that the promotion decision is read off the record.
+- **Retirement of the old version** follows the same rule in reverse: tickets stop being opened on it, the tickets already on it finish, and it is removed only when nothing is running on it — the old flow is not switched off under anybody's feet.
+- **The lesson that shaped this section:** a mechanism that changes the meaning of an existing gate must first run where it cannot judge tickets that predate it. Today's evidence is four tickets blocked by a precondition none of them could satisfy, holding every concurrency slot while others queued.
+
 ### Key tradeoffs, stated plainly
 
 - **A shared proof has a wider blast radius than a per-ticket one.** What keeps it bounded here is the prefix rule (the last certified revision always lands) plus the fact that only landings *after* that revision wait for attribution. A shared proof is also why the rerun-once rule must come before any search: bisecting on a flake would cost hours.
@@ -119,7 +135,7 @@ A ticket's own scenarios answer "did I build what I said?"; they say nothing abo
 
 ### How this ties back
 
-This proposal addresses the **Problem** by taking the heavy proof off the per-lane attempt and putting it on a line whose revisions are certified once, and by replacing a proof that other people's merges destroy with one recorded against revisions; it satisfies the **Requirement** by keeping per-lane proof of the ticket's own change (goal 2), adding the curated fast global set with its time budget and its maintained membership (3–5), running the heavy suite at most once per tick (6), making landability mechanical (7) with the last certified revision always landable (8), bounding attribution cost (9) and escalation (10), and keeping the human signature on `main` (11); and it avoids the **Nongoal** items by not touching the human gate's existence, not letting lanes skip their own scenarios, not running the suite per landing, not rebuilding the suite, and staying inside one project.
+This proposal addresses the **Problem** by taking the heavy proof off the per-lane attempt and putting it on a line whose revisions are certified once, and by replacing a proof that other people's merges destroy with one recorded against revisions; it satisfies the **Requirement** by keeping per-lane proof of the ticket's own change (goal 2), adding the curated fast global set with its time budget and its maintained membership (3–5), running the heavy suite at most once per tick (6), making landability mechanical (7) with the last certified revision always landable (8), bounding attribution cost (9) and escalation (10), and keeping the human signature on `main` (11); it answers goals 12–13 by arriving as a new lane version that a ticket chooses, with the current flow's gate and its running tickets untouched; and it avoids the **Nongoal** items by not touching the human gate's existence, not letting lanes skip their own scenarios, not running the suite per landing, not rebuilding the suite, not modifying the current lane in place, not switching the fleet at once, not retiring the old version before the record shows the new one is stable, and staying inside one project.
 
 ## Related documents
 
