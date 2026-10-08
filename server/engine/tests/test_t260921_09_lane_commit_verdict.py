@@ -201,9 +201,29 @@ def _scope_stub(checks, lane_commits=0, with_key=True):
 
 
 def _mk_multi_lane(tmp_path, repos=("r1", "r2")):
-    """真泳道清单夹具：_lane_scopes 读盘产出多 scope（桩不碰 repo，仓目录无需存在）。"""
+    """Real manifest lane fixture: _lane_scopes reads it into multi scopes. Since
+    t261008-24 each member dir must be a real git repo (merge_check's green-run
+    precondition rev-parses the branch on scopes[0]'s repo - the stubs stay
+    judgment-free but the repos themselves must exist); branches = manifest-named
+    lane/tkt-<r>."""
     lane = tmp_path / "proj" / ".lane" / "tkt"
     lane.mkdir(parents=True)
+    import subprocess
+    for r in repos:
+        rp = _init_repo(tmp_path / "proj" / r, branch="main")
+        # fuse B materialization face: the declared subdir must be committed so the
+        # lane worktree carries a materialized tree
+        (rp / "src").mkdir()
+        (rp / "src" / "keep.txt").write_text("k\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(rp), "add", "-A"], check=True,
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(rp), "commit", "-qm", "materialize"],
+                       check=True, capture_output=True)
+        # register lane/<repo> as a REAL worktree of the repo (same source as the
+        # is_worktree_of predicate)
+        subprocess.run(["git", "-C", str(rp), "worktree", "add", "-b",
+                        "lane/tkt-%s" % r, str(lane / r)], check=True,
+                       capture_output=True)
     mf = shared.multi_manifest_path(lane)
     mf.parent.mkdir(parents=True, exist_ok=True)
     mf.write_text(json.dumps([{"repo": r, "name": r, "branch": "lane/tkt-%s" % r}
@@ -211,11 +231,34 @@ def _mk_multi_lane(tmp_path, repos=("r1", "r2")):
     return lane
 
 
-def _run_mc(lane, monkeypatch, stub, no_file_changes=False, write_set=("r1/", "r2/")):
+def T_git_add_commit(rp):
+    import subprocess
+    subprocess.run(["git", "-C", str(rp), "add", "-A"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(rp), "commit", "-qm", "materialize"],
+                   check=True, capture_output=True)
+
+
+def _head(lane, repo="r1"):
+    """Real HEAD of the manifest's first repo branch (the green-run face sha anchor,
+    the same identity merge_check resolves as scopes[0])."""
+    proj = Path(lane).parent.parent
+    return _git("rev-parse", "--verify", "lane/tkt-%s" % repo, cwd=proj / repo)
+
+
+def _run_mc(lane, monkeypatch, stub, no_file_changes=False,
+            write_set=("r1/src/", "r2/lib/"), green_run=False):
+    """green_run=True: inject the real-sha green-run face (the t261008-24
+    precondition item is red fail-closed without a face / on a sha mismatch, so
+    green-expecting cases must inject it or they drown in an intent-irrelevant
+    red)."""
     monkeypatch.setattr(aa, "_merge_check_one_scope", stub)
+    kwargs = {}
+    if green_run:
+        kwargs["last_green_run"] = {"sha": _head(lane), "ran": 1}
     return asyncio.run(aa.merge_check(MergeCheckArgs(
         ticket_id="tkt", worktree=str(lane), branch="lane/tkt", base_ref="basesha",
-        write_set=list(write_set), no_file_changes=no_file_changes)))
+        write_set=list(write_set), no_file_changes=no_file_changes, **kwargs)))
 
 
 def test_granularity_lock_multi_dirs_single_repo_one_scope(tmp_path):
@@ -234,7 +277,7 @@ def test_granularity_lock_multidir_write_set_with_commit_not_red(tmp_path, monke
     lane = _mk_multi_lane(tmp_path)
     res = _run_mc(lane, monkeypatch,
                   _scope_stub([_green_item(1), _rehearsal_item()], lane_commits=1),
-                  write_set=("r1/a/", "r1/b/", "r2/c/"))
+                  write_set=("r1/a/", "r1/b/", "r2/c/"), green_run=True)
     assert res.green is True
     assert not [c for c in res.checks if c.get("id") == "all_repos_zero_commits"]
 
@@ -250,7 +293,7 @@ def test_merge_check_multirepo_one_repo_zero_changes_passes(tmp_path, monkeypatc
         return {"checks": [_green_item(3), _rehearsal_item()], "rehearsal_green": True,
                 "conflict_files": [], "merge_tree_excerpt": "", "lane_commits": 3}
 
-    res = _run_mc(lane, monkeypatch, stub)
+    res = _run_mc(lane, monkeypatch, stub, green_run=True)
     assert res.green is True
     amber = [c for c in res.checks if c.get("reason_code") == "no_changes_no_diff"]
     assert amber and "r1" in amber[0]["item"]  # multi 前缀点名仓名
@@ -290,7 +333,10 @@ def test_merge_check_all_repos_zero_commit_global_red(tmp_path, monkeypatch):
     assert gate[0]["reason_code"] == "all_repos_zero_commits"
     assert "allow_empty_write_set" in gate[0]["next_action"]
     assert res.checks[-1]["id"] == "merge_rehearsal"
-    assert res.checks[-2]["id"] == "all_repos_zero_commits"
+    # t261008-24: the green-run precondition item sits before the rehearsal
+    # (KI-047 slot-contract extension face)
+    assert res.checks[-2]["id"] == "scenario_green_run"
+    assert res.checks[-3]["id"] == "all_repos_zero_commits"
 
 
 def test_merge_check_no_file_changes_exempt_global_gate(tmp_path, monkeypatch):
@@ -298,7 +344,7 @@ def test_merge_check_no_file_changes_exempt_global_gate(tmp_path, monkeypatch):
     lane = _mk_multi_lane(tmp_path)
     res = _run_mc(lane, monkeypatch,
                   _scope_stub([_amber_item(), _rehearsal_item()], lane_commits=0),
-                  no_file_changes=True)
+                  no_file_changes=True, green_run=True)
     assert res.green is True
     assert not [c for c in res.checks if c.get("id") == "all_repos_zero_commits"]
 
@@ -342,11 +388,14 @@ def test_merge_check_single_repo_no_file_changes_green(tmp_path, monkeypatch):
     # 行为变化点名面（方案自报、review 复核认可）：no_file_changes 单仓票由红转
     # amber+豁免=绿——对齐 review gate 既有豁免
     wt = tmp_path / "solo" / ".lane" / "tkt"
+    _init_repo(tmp_path / "solo", branch="lane/tkt")  # real repo: face sha resolvable
     monkeypatch.setattr(aa, "_merge_check_one_scope",
                         _scope_stub([_amber_item(), _rehearsal_item()], lane_commits=0))
     res = asyncio.run(aa.merge_check(MergeCheckArgs(
         ticket_id="tkt", worktree=str(wt), branch="lane/tkt", base_ref="basesha",
-        write_set=[], no_file_changes=True)))
+        write_set=[], no_file_changes=True,
+        last_green_run={"sha": _git("rev-parse", "--verify", "lane/tkt",
+                                    cwd=tmp_path / "solo"), "ran": 1})))
     assert res.green is True
     assert not [c for c in res.checks if c.get("id") == "all_repos_zero_commits"]
 
@@ -356,7 +405,7 @@ def test_merge_check_stub_without_count_key_skips_gate(tmp_path, monkeypatch):
     lane = _mk_multi_lane(tmp_path)
     res = _run_mc(lane, monkeypatch,
                   _scope_stub([_amber_item(), _rehearsal_item()], lane_commits=0,
-                              with_key=False))
+                              with_key=False), green_run=True)
     assert res.green is True
     assert not [c for c in res.checks if c.get("id") == "all_repos_zero_commits"]
 

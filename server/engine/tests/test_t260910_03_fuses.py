@@ -252,9 +252,15 @@ def test_merge_check_fuse_only_red_is_not_conflict_class(multirepo, monkeypatch)
 def test_merge_check_all_green_stays_green(multirepo, monkeypatch):
     lane = _make_multirepo_lane(multirepo)
     monkeypatch.setattr(aa, "_merge_check_one_scope", _stub_scope_core)
+    # t261008-24: the green-run precondition item is always on (red zero_run
+    # without a face, never green-by-default) - this fixture tests the fuse-B face,
+    # so inject the real-sha face (manifest first-repo branch, scopes[0] identity)
+    face = {"sha": _git("rev-parse", "--verify", "lane/t26091003ut-repo_a",
+                        cwd=multirepo / "repo_a"), "ran": 1}
     res = asyncio.run(aa.merge_check(MergeCheckArgs(
         ticket_id="t26091003ut", worktree=str(lane), branch="lane/t26091003ut",
-        write_set=["repo_a/src/a.py", "repo_b/lib/b.py"])))
+        write_set=["repo_a/src/a.py", "repo_b/lib/b.py"],
+        last_green_run=face)))
     assert res.green and not res.conflict
     # 全绿也出绿色物化项（可见闸记录，不静默），且在 rehearsal 之前
     fuse = [c for c in res.checks if "保险丝B" in c["item"]]
@@ -265,6 +271,8 @@ def test_merge_check_all_green_stays_green(multirepo, monkeypatch):
 def test_merge_check_empty_write_set_no_fuse_item(multirepo, monkeypatch):
     lane = multirepo / ".lane" / "t26091003ut"
     monkeypatch.setattr(aa, "_merge_check_one_scope", _stub_scope_core)
+    # t261008-24: the green-run precondition item is scoped to tickets with a
+    # write set; the empty-write-set legacy shape keeps its verdict unchanged.
     res = asyncio.run(aa.merge_check(MergeCheckArgs(
         ticket_id="t26091003ut", worktree=str(lane), branch="lane/t26091003ut",
         write_set=[])))

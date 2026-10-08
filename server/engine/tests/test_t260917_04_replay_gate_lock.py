@@ -326,6 +326,22 @@ def scan_unpatched_branches(files: dict) -> dict:
 # 包装」是有意的：其体内含 await self._blocked（命令面）＝混合方法，白名单登记并写明
 # 自守机制（unique-per-entry patch id，KI-061）。
 BRANCH_REGISTRY = {
+    # KI-220 (t261008-24) zero-run supply STOP, three sites (main receipt point +
+    # two t260923-D closing-run branches): the gate self-guards inside
+    # _ki220_supply_zero_run_stop (first line: workflow.patched(
+    # KI220_ZERO_RUN_PATCH_ID) - same shape as KI-061: old history without the
+    # marker => patched()=False => the branch is unreachable, replay adds zero new
+    # commands); the blocked face itself goes through the existing _blocked.
+    "dev_lane.py#run#await self._ki220_supply_zero_run_stop(ir)#0":
+        "KI-220: the zero-run supply receipt refuses at the route decision (named "
+        "STOP); gated inside the helper by workflow.patched(KI220_ZERO_RUN_PATCH_ID) "
+        "- unreachable on old-history replay.",
+    "dev_lane.py#run#await self._ki220_supply_zero_run_stop(closing)#0":
+        "KI-220: same-shaped closing-full-run branch (parallel fork), same self-"
+        "guard; the supply-red closing blocks BEFORE the pass is voided back into "
+        "an arbitrate re-judgement spin.",
+    "dev_lane.py#run#await self._ki220_supply_zero_run_stop(closing)#1":
+        "KI-220: same-shaped closing-full-run branch (serial side), same self-guard.",
     # 260929 集成判停两处（串行 / 并行汇合侧）：外层已处
     # workflow.patched(INTEG_STALL_PATCH_ID) 门内（AST 祖先链核实，自证钉在
     # test_260929_integ_stall_guard.py::test_stall_branches_are_inside_their_patch_gate

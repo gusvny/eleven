@@ -1003,6 +1003,175 @@ def tests_supply_assembly_error(error: Any) -> bool:
     return all(m in error for m in LEGACY_SUPPLY_ASSEMBLY_MARKS)
 
 
+# ---------------- KI-220 (t261008-24): the zero-run supply shape is a named blocker ----------------
+#
+# Root cause (KI-220): a gate round whose receipt is `ran==0 / failed==0 / blockers==[]`
+# with a supply-assembly error carries NO red face, so downstream consumers (arbitrate,
+# merge_check) read it as green — a ticket merged with its acceptance scenario never
+# executed on that commit. `_tests_supply_assembly_fail` already identifies the shape but
+# only affects round accounting. These pure functions turn the shape into a named blocker
+# (consumed by dev_lane as a mechanical stop before the arbitrate verdict) and pin the
+# merge-gate precondition "at least one green run of the ticket's scenario on this tree"
+# (KI-217 exit (1); ONE mechanism covering both the zero-run and the ran-but-never-green
+# forms).
+#
+# False-refusal guard: the distinction is by NAMED CAUSE (the supply-assembly signature),
+# never by counts alone — a legitimately zero-run round (empty registry face, probe-only
+# round) has an empty error and must stay blocker-free.
+
+#: The synthetic blocker name. `__` prefix = the existing synthetic-entry convention
+#: (`__gate_blockers__` / `__pool_exclude__`): display/decision faces can name it while
+#: `_tests_red_names` keeps it out of targeted-reprobe surfaces.
+SUPPLY_ZERO_RUN_BLOCKER_NAME = "__supply_zero_run__"
+
+#: merge_check check-item id for the green-run precondition (KI-217 exit (1)).
+GREEN_RUN_CHECK_ID = "scenario_green_run"
+
+
+def gate_zero_run_supply_blocker(receipt: Any) -> Optional[Dict[str, Any]]:
+    """Classify a gate receipt as the zero-run supply shape (pure, KI-220; UT-driven).
+
+    Fires (returns a named blocker dict) iff ALL of:
+      - `ran == 0 and failed == 0 and env_fail == 0` (ints; TypeError/ValueError => None),
+      - `blockers` PRESENT and an empty list (absent / non-list => None = fail closed to
+        the previous behaviour: conservative round counting, no blocker),
+      - `error` hits `tests_supply_assembly_error` (the single-writer signature matcher —
+        all three SUPPLY_STATE_SIGS variants qualify; legacy Chinese marks inherit via
+        the same matcher).
+
+    Malformed receipts (non-int counts, blockers missing, dict-shaped receipts) => None.
+    Receipts with a real scenario red or a legitimately-zero-run empty error => None.
+    Reads dataclass or dict receipt shapes (same defensive read as gate_round_signature).
+    """
+    if receipt is None:
+        return None
+
+    def _g(name, default=None):
+        if isinstance(receipt, dict):
+            return receipt.get(name, default)
+        return getattr(receipt, name, default)
+
+    try:
+        ran = int(_g("ran", 0) or 0)
+        failed = int(_g("failed", 0) or 0)
+        env_fail = int(_g("env_fail", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if ran != 0 or failed != 0 or env_fail != 0:
+        return None
+    blockers = _g("blockers", None)
+    if not isinstance(blockers, list) or blockers:
+        return None
+    if not tests_supply_assembly_error(_g("error", "")):
+        return None
+    return {"name": SUPPLY_ZERO_RUN_BLOCKER_NAME,
+            "reason_code": "supply_zero_run",
+            "text": ("gate round ran ZERO scenarios (ran=0, no product red, empty "
+                     "blockers) and the error carries the supply-assembly signature "
+                     "(SUPPLY_SIDE_RED): the ticket's acceptance scenario never "
+                     "executed on this tree. %s"
+                     % str(_g("error", "") or "")[:300])}
+
+
+def supply_stop_route(receipt: Any) -> str:
+    """The mechanical route override for the zero-run supply shape (pure, KI-220).
+
+    Returns a `blocked:` route text (naming the supply face AND both human exits:
+    fix the supply / retry_qc) when `gate_zero_run_supply_blocker` fires; `""`
+    otherwise — the caller then keeps its existing route untouched. The
+    SUPPLY_SIDE_RED face is quoted, never silenced (ticket red line).
+    """
+    blocker = gate_zero_run_supply_blocker(receipt)
+    if not blocker:
+        return ""
+    return ("blocked:supply-side red (zero run): %s — exits: fix the supply (docker / "
+            "supply assembly), then retry_qc to re-run this ticket's scenario"
+            % blocker["text"])
+
+
+def green_run_face(ran: Any, failed: Any, error: Any, blockers: Any,
+                   targeted_only: bool) -> Optional[Dict[str, Any]]:
+    """Should this gate round update the ticket's `last_green_run` face (pure, KI-220)?
+
+    Returns `{"ran": <int ran>}` for a FULL gate round that is genuinely green
+    (`error == ""`, `ran > 0`, `failed == 0`, `blockers` empty, not a targeted-only
+    run — release only counts full closes, t260923 D rule). Returns the LEGAL
+    zero-scenarios face `{"ran": 0, "no_scenarios": True}` for a full green round
+    that legitimately ran nothing (empty registry — the classifier's None case with
+    an empty error): a named legal face, NOT a fake green. Returns None for anything
+    else (red rounds, supply-red rounds, targeted runs, malformed fields). The caller
+    adds `sha`/`at` after resolving the lane HEAD.
+    """
+    try:
+        ran_i = int(ran or 0)
+        failed_i = int(failed or 0)
+    except (TypeError, ValueError):
+        return None
+    if targeted_only or not isinstance(error, str) or error:
+        return None
+    if not isinstance(blockers, list) or blockers or failed_i != 0:
+        return None
+    if ran_i > 0:
+        return {"ran": ran_i}
+    if ran_i == 0:
+        return {"ran": 0, "no_scenarios": True}
+    return None
+
+
+def green_run_check_item(last_green_run: Any, head_sha: Any) -> Dict[str, Any]:
+    """merge_check's green-run precondition item (pure, KI-217 exit (1); UT-driven).
+
+    `last_green_run` is the ticket's recorded face `{"sha", "ran"[, "no_scenarios"]}`
+    (defaulted EMPTY = old replays / never recorded). `head_sha` is the lane branch
+    HEAD resolved by merge_check at judgement time ("" / None = query failure).
+
+    Green iff the face is well-formed AND `sha == head_sha` AND (`ran > 0` OR the
+    named legal `no_scenarios` face). Red named otherwise:
+      - missing/empty face            => reason_code=zero_run (KI-220's own face),
+      - sha mismatch                  => reason_code=stale (tree changed after the
+                                         last green gate round — including the
+                                         caller-side main re-merge, t261002-10; one
+                                         more gate round is the intended cost),
+      - malformed face / HEAD unknown => fail-closed red (never green-by-default).
+    """
+    item = {"item": "acceptance scenario green run on this tree",
+            "id": GREEN_RUN_CHECK_ID, "reason_code": "zero_run"}
+
+    def _red(detail):
+        return dict(item, green=False, detail=detail)
+
+    sha = str(head_sha or "").strip()
+    if not sha:
+        return _red("lane HEAD sha unavailable (query failed) — fail closed")
+    if not isinstance(last_green_run, dict) or not last_green_run:
+        return _red("no green run recorded for this ticket's scenarios on this tree "
+                    "(zero-run — KI-220): the gate never completed a green round here")
+    f_sha = str(last_green_run.get("sha", "") or "").strip()
+    try:
+        f_ran = int(last_green_run.get("ran", 0) or 0)
+    except (TypeError, ValueError):
+        return _red("malformed green-run face (ran unreadable) — fail closed")
+    no_sc = last_green_run.get("no_scenarios") is True
+    if not f_sha:
+        return _red("malformed green-run face (sha missing) — fail closed")
+    if f_sha != sha:
+        item["reason_code"] = "stale"
+        return _red("green run is stale: recorded on %s, but the tree being merged is "
+                    "%s (a main re-merge or a later round moved the lane HEAD) — one "
+                    "more green gate round is required" % (f_sha[:12], sha[:12]))
+    if f_ran > 0 or no_sc:
+        if no_sc and f_ran == 0:
+            return dict(item, green=True, reason_code="no_scenarios",
+                        detail="green full gate round on this tree (%s) legitimately "
+                               "ran zero scenarios (empty registry) — named legal face, "
+                               "not a fake green" % sha[:12])
+        return dict(item, green=True, reason_code="ok",
+                    detail="green full gate round ran %d scenario(s) on this tree (%s)"
+                           % (f_ran, sha[:12]))
+    return _red("green-run face carries ran=0 without the named no-scenarios mark "
+                "— fail closed")
+
+
 def tests_supply_assembly_note(error: Any) -> str:
     """装配级供给失败的票面留痕文案（单写者，t260920-01 票①要求①「留痕含
     「不计入」+ 点名供给面，不得静默」）：dev_lane._tests_round_account 与 UT
@@ -4157,6 +4326,13 @@ class MergeCheckArgs:
     # commit 全局闸——与 review_gate_verdict 的豁免口径同源。defaulted False=老事件
     # 回放不破（同 path_gate t260911-03 先例）。
     no_file_changes: bool = False
+    # KI-220 (t261008-24) / KI-217 exit (1): the ticket's recorded green-run face
+    # {"sha", "ran"[, "no_scenarios"]} — updated by dev_lane/light_lane after every
+    # full GREEN gate round; merge_check's new "acceptance scenario green run on this
+    # tree" item consumes it (verdict in shared.green_run_check_item). Defaulted EMPTY
+    # so RUNNING instances replaying historical events do not break — an empty face
+    # reads as RED zero-run (never green-by-default; fail-closed by design).
+    last_green_run: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----

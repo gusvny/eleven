@@ -56,7 +56,9 @@ def main():
             "t26092109r1",
             {"repo_a": {"commit": ("src/a.py", "work\n")}, "repo_b": {}},
             write_set=["repo_a/src/a.py", "repo_b/lib/b.py"])
-        res_a = pa.merge_check(aa, "t26092109r1", lane_a)
+        # t261008-24：绿跑面注入（本场景 intent=amber/物化/位次契约面；无面=
+        # 新前置项恒红 zero_run，与本票 intent 无关的红会污染整票推进断言）
+        res_a = pa.merge_check(aa, "t26092109r1", lane_a, green_run=True)
 
         L.check("① 真链整票推进不红（green=True）且非冲突类",
                 res_a.green is True and res_a.conflict is False,

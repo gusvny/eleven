@@ -19,6 +19,7 @@ fail-closed 拒收面。白名单门的工具语义另有专测（verify_lane �
 实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；
 temporalio 缺失=ENV_FAIL 点名（全链行为子用例），无 stdlib 替代子用例（本场全靠真链路）。
 """
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -60,13 +61,34 @@ def prepare_and_settle(ticket):
     return root, repos, container, counts
 
 
+def green_run_face(container):
+    """t261008-24/KI-217 出口①绿跑面：清单首仓分支真 HEAD（与 merge_check 的
+    _gr_sha 同款解析）、ran=1。无面=新检查项恒红 zero_run（永不默认绿），
+    G1 的「整体绿」会被无关红污染。解析失败=空 sha（活动侧 fail-closed）。"""
+    import subprocess
+    mf = shared.multi_manifest_path(container)  # 协调目录解析三规则单点
+    sha = ""
+    try:
+        e0 = json.loads(mf.read_text("utf-8"))[0]
+        repo = (container.parent.parent / str(e0.get("repo") or "")).resolve()
+        br = str(e0.get("branch") or "")
+        p = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", br],
+                           capture_output=True, text=True)
+        if p.returncode == 0:
+            sha = (p.stdout or "").strip()
+    except Exception:
+        sha = ""
+    return {"sha": sha, "ran": 1}
+
+
 def run_merge_check(container, write_set, ticket):
     import asyncio
     import agent_activities  # noqa: E402
     return asyncio.run(agent_activities.merge_check(
         call_with_supported_fields(
             shared.MergeCheckArgs, ticket_id=ticket, worktree=str(container),
-            branch="", base_ref="", write_set=list(write_set))))
+            branch="", base_ref="", write_set=list(write_set),
+            last_green_run=green_run_face(container))))
 
 
 def run_merge(container, ticket):
@@ -102,7 +124,7 @@ if root is not None:
         checks = getattr(res, "checks", [])
         any_red = any(c.get("green") is False for c in checks)
         check("G1 合法分仓改动过白名单门=绿（重基不假红）",
-              len(checks) > 0 and not any_red, "checks=%s" % (details_of(res)[:400],))
+              len(checks) > 0 and not any_red, "checks=%s" % (details_of(res)[:1500],))
 
         # 注入写集外文件并提交（越界改动，KI-009 自愈不得放行）
         ta = container / "repo_a"
@@ -114,7 +136,7 @@ if root is not None:
         red2 = any(c.get("green") is False for c in checks2)
         det2 = details_of(res2)
         check("G2 树内写集外注入→整体红且点名（重基不放空）",
-              red2 and "evil.py" in det2, "checks=%s" % (det2[:400],))
+              red2 and "evil.py" in det2, "checks=%s" % (det2[:1500],))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

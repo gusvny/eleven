@@ -1208,7 +1208,13 @@ class LightLaneWorkflow(DevLaneWorkflow):
                            path_gate=bool(self.meta.get("path_gate")),
                            path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
                            authorizations=self._protected_authz_records(),
-                           no_file_changes=bool(self.meta.get("no_file_changes"))),
+                           no_file_changes=bool(self.meta.get("no_file_changes")),
+                           # KI-220 (t261008-24): the ticket's green-run face
+                           # (recorded after full green gate rounds); defaulted empty
+                           # => the new merge_check item reads red zero-run
+                           # (never green-by-default).
+                           last_green_run=dict(
+                               self.meta.get("last_green_run") or {})),
             start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
         mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
             green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
@@ -1405,6 +1411,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 if not ir.error:
                     self._handover_debt_clear()
                 prev_red_names = self._tests_red_names(ir)
+                # KI-220 (t261008-24): the zero-run supply shape refuses here (named
+                # blocked face; the round itself stays an exempt, not-counted round);
+                # a full GREEN round records the ticket's last_green_run face. Both
+                # helpers are inherited from the dev-lane parent and patch-gated
+                # (replay-safe no-ops on old in-flight history).
+                if await self._ki220_supply_zero_run_stop(ir):
+                    continue
+                await self._ki220_record_green_run(ir, bool(run_only))
                 _face_note = self._light_face_note(ir, run_only)
                 self.results["run_integration_tests"] = self._light_gate_receipt(ir, gen0)
                 # 261001 补：**机器闸每轮也进 gate_runs**（与 merge_check 那一处同形，键族与

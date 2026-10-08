@@ -1142,6 +1142,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261008_24_zero_run_supply.py": {
+   "anchor": "behaviour",
+   "note": "KI-220 t261008-24: zero-run supply blocker classifier + green-run merge precondition truth tables",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261008_26_lane_vocabulary.py": {
    "anchor": "behaviour",
    "note": "t261008-26 KI-226 developer L1: derive_lane_workspace vocabulary table + lane_workspace_gate_error table incl. zero-disturbance shapes; anchor registered by the integration stage to satisfy L16 coverage",
@@ -4022,6 +4027,16 @@
   "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
    "anchor": "behaviour",
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
+  },
+  "integration/t261008-24/sc_supply_zero_run_blocker.py": {
+   "anchor": "behaviour",
+   "note": "KI-220 t261008-24: real verify_lane zero-run supply receipt refuses (named blocked route), round stays exempt, false-refusal guard",
+   "sync_path": ""
+  },
+  "integration/t261008-24/tests/sc_zero_run_gate_stop.py": {
+   "anchor": "behaviour",
+   "note": "KI-220 t261008-24: real-worker journey - supply-red STOP (no arbitrate round) -> recovery -> retry_qc -> green ran>0 -> merge gate consumes the green-run face",
    "sync_path": ""
   },
   "integration/t261008-30/sc_t26100830_lane_rerun_human_gate.py": {

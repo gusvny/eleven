@@ -59,8 +59,11 @@ def main():
                 and amber_a.get("reason_code") == "no_changes_no_diff")
 
         # ---- 形态 B：同形态 + no_file_changes 声明 → 豁免推进（行为变化点名） ----
+        # t261008-24：绿跑面注入（本场景 intent=豁免/防伪面；无面=新前置项恒红
+        # zero_run，与本票 intent 无关的红会污染豁免推进断言）
         res_b = pa.merge_check(aa, "t26092109s1", lane_a, base_ref=base_a,
-                               branch="lane/t26092109s1-single", no_file_changes=True)
+                               branch="lane/t26092109s1-single", no_file_changes=True,
+                               green_run=True)
         amber_b = next((c for c in res_b.checks if c.get("id") == "lane_commits"), None)
         L.check("③ no_file_changes 豁免：单仓 0+0 声明票推进不红（旧判据此形态红）",
                 res_b.green is True and res_b.conflict is False
@@ -75,7 +78,7 @@ def main():
         lane_c = pa.build_single_lane("t26092109s1c", {"commit": ("f.txt", "work\n")},
                                       write_set=["f.txt"])
         res_c = pa.merge_check(aa, "t26092109s1c", lane_c, base_ref=base_a,
-                               branch="lane/t26092109s1c-single")
+                               branch="lane/t26092109s1c-single", green_run=True)
         item_c = next((c for c in res_c.checks if c.get("id") == "lane_commits"), None)
         L.check("⑤ 单仓有 commit → 整票照旧绿", res_c.green is True and res_c.conflict is False)
         L.check("⑤ 旧绿项契约零回归：只带 id/detail，不带 reason_code（新形状不外溢）",
@@ -86,7 +89,7 @@ def main():
         L.check("⑤ 有 commit 票不受豁免开关影响（no_file_changes=True 仍绿）",
                 pa.merge_check(aa, "t26092109s1c", lane_c, base_ref=base_a,
                                branch="lane/t26092109s1c-single",
-                               no_file_changes=True).green is True)
+                               no_file_changes=True, green_run=True).green is True)
 
         # ---- 形态 D：base_ref 坏引用 → 查询失败 fail-closed，全局闸不误判 ----
         pd = FX.TempProject(single=True)

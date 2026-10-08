@@ -167,17 +167,55 @@ class TempProject:
         return lane
 
     def merge_check(self, aa, tid, lane, *, no_file_changes=False, base_ref="",
-                    branch="", write_set=None):
-        """直调真 merge_check activity（红不抛，回执=对外契约）。"""
+                    branch="", write_set=None, green_run=False):
+        """直调真 merge_check activity（红不抛，回执=对外契约）。
+
+        green_run=True：注入本票绿跑面 last_green_run={"sha","ran":1}——t261008-24
+        起 merge_check 恒带「验收场景本树至少一次绿跑」前置项（无面=红 zero_run，
+        永不默认绿）；专测其它检查项的场景若不注面，会被该前置项**与本票 intent
+        无关的红**污染。sha=泳道分支真 HEAD（rev-parse 于仓根，与 merge_check 的
+        scopes[0] 同一身份），不是凭空绿。"""
         async def _run():
-            return await aa.merge_check(aa.MergeCheckArgs(
+            kwargs = dict(
                 ticket_id=tid, worktree=str(lane), branch=branch,
-                base_ref=base_ref, write_set=list(self.write_set if write_set is None else write_set),
-                no_file_changes=bool(no_file_changes)))
+                base_ref=base_ref,
+                write_set=list(self.write_set if write_set is None else write_set),
+                no_file_changes=bool(no_file_changes))
+            if green_run:
+                kwargs["last_green_run"] = _green_run_face(aa, lane, branch)
+            return await aa.merge_check(aa.MergeCheckArgs(**kwargs))
         return asyncio.run(_run())
 
     def cleanup(self):
         shutil.rmtree(self.base, ignore_errors=True)
+
+
+def _green_run_face(aa, lane, branch=""):
+    """绿跑面 sha 的身份单点（t261008-24 rework gen7）：多仓清单 = **清单首仓分支**
+    在该成员仓里 rev-parse（与 merge_check 的 scopes[0] 同一身份——容器根本体
+    HEAD 是另一棵树，gen4 的容器根解析因此被仲裁判错并回红）；无清单（单仓回落
+    形态）= lane 泳道分支。任何解析失败 → 空 sha（merge_check 侧 fail-closed 红，
+    绝不造假绿），本探针在任何畸形夹具上都不抛。"""
+    try:
+        ref = branch
+        repo_dir = None
+        if not ref:
+            mf = Path(lane) / aa.MULTI_MANIFEST_REL
+            entries = json.loads(mf.read_text(encoding="utf-8"))
+            if isinstance(entries, list) and entries and isinstance(entries[0], dict):
+                ref = str(entries[0].get("branch") or "")
+                repo_dir = Path(lane).parent.parent / str(entries[0].get("repo") or "")
+        if not ref:
+            ref = "HEAD"
+        cmd_repo = repo_dir if (repo_dir and repo_dir.is_dir()) else Path(lane)
+        p = subprocess.run(["git", "-C", str(cmd_repo), "rev-parse", "--verify", ref],
+                           capture_output=True, text=True, timeout=30)
+        lines = (p.stdout or "").strip().splitlines()
+        if p.returncode == 0 and lines and lines[0]:
+            return {"sha": lines[0], "ran": 1}
+    except Exception:  # noqa: BLE001 — 解析不出=空 sha=fail-closed，绝不抛、绝不假绿
+        pass
+    return {"sha": "", "ran": 1}
 
 
 class Legs:

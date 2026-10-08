@@ -80,6 +80,8 @@ with workflow.unsafe.imports_passed_through():
         acceptance_walkthrough,
         archive_ticket,
         changed_files,
+        LaneHeadShaArgs,
+        LaneHeadShaResult,
         merge,
         merge_check,
         prepare_conflict_resolution,
@@ -115,6 +117,9 @@ with workflow.unsafe.imports_passed_through():
         tests_round_step,
         tests_supply_assembly_error,
         tests_supply_assembly_note,
+        green_run_face,
+        supply_stop_route,
+        gate_zero_run_supply_blocker,
         TICKET_STATUSES,
         AUTH_ARBITRATION_VERDICT,
         AUTH_PROTECTED_PATH,
@@ -434,6 +439,14 @@ MAIN_SYNC_PATCH_ID = "dev-lane-main-sync-v1"
 # 在飞老历史回放时本点求值为未 patched ⇒ 逐字旧行为（KI-061 回放纪律）；两条车道共用
 # 同一 id（patched 判定按 workflow 实例各自 memoize，互不影响）。
 MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID = "t261002-10-merge-check-resync"
+# KI-220 (t261008-24): the zero-run supply shape becomes a named STOP (mechanical,
+# before the arbitrate verdict is consumed) and every full GREEN gate round records
+# the ticket's `last_green_run` face (consumed by merge_check's new precondition
+# item). The recording path calls a NEW activity (lane_head_sha) => NEW history
+# events, so both paths are gated behind this patch id: in-flight instances
+# replaying old history evaluate it un-patched => byte-identical old behaviour
+# (KI-061 replay discipline).
+KI220_ZERO_RUN_PATCH_ID = "t261008-24-zero-run-supply-stop-v1"
 
 #: Patch guard CONCURRENCY_GATE_PATCH_ID (t261005-14; fixes the replay break
 #: CL-1 / t261004-32 introduced). 775bdb1 wired the whole concurrency command
@@ -1489,6 +1502,86 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         if getattr(cur_integ, "blockers", None):
             return False
         return tests_supply_assembly_error(getattr(cur_integ, "error", "") or "")
+
+    # ---------- KI-220 (t261008-24): zero-run supply STOP + green-run face ----------
+    async def _ki220_supply_zero_run_stop(self, receipt) -> bool:
+        """Mechanical stop for the zero-run supply shape (KI-220): the receipt
+        `ran==0 / failed==0 / env_fail==0 / blockers==[] / supply-signature error`
+        must refuse the flow instead of being read as no-red (the t261008-07
+        incident: the last gate round before the merge was exactly this shape and
+        the ticket merged with its scenario never executed).
+
+        The round-exemption semantics stay intact: this stop does NOT re-classify
+        the round as a fault — `_tests_round_account` has already recorded it as an
+        exempt (not-counted) round via `_tests_supply_assembly_fail`; the stop only
+        replaces the ROUTE with a named blocked face (supply face quoted verbatim +
+        both exits: fix the supply, then retry_qc) so the round can never reach
+        arbitrate as `verdict=pass -> acceptance`.
+
+        Gated behind KI220_ZERO_RUN_PATCH_ID (replay safety: in-flight instances
+        replaying old history take the byte-identical old path). Returns True when
+        the ticket was blocked (the caller must `continue` its loop).
+        """
+        if not workflow.patched(KI220_ZERO_RUN_PATCH_ID):
+            return False
+        route = supply_stop_route(receipt)
+        if not route:
+            return False
+        why = route.split(":", 1)[1]
+        blocker = gate_zero_run_supply_blocker(receipt) or {}
+        self.meta["blocked_detail"] = {
+            "reason_code": str(blocker.get("reason_code") or "supply_zero_run"),
+            "item": str(blocker.get("name") or "__supply_zero_run__"),
+            "detail": why}
+        await self._blocked("run_integration_tests", why)
+        return True
+
+    async def _ki220_record_green_run(self, receipt, targeted_only: bool) -> None:
+        """Record the ticket's `last_green_run` face after a full GREEN gate round
+        (KI-220 / KI-217 exit (1), ONE mechanism). Face shape:
+        `{"sha", "ran", "at"[, "no_scenarios"]}` — sha = lane branch HEAD at the
+        round (the exact tree the green round ran on); the legal zero-scenarios
+        green round records `{"ran": 0, "no_scenarios": True}` (named legal face,
+        never a fake green). Face selection single-writer = shared.green_run_face;
+        the sha resolution failure leaves the face untouched (fail-closed: the
+        merge gate then reads zero-run red, never mints a green).
+
+        Gated behind KI220_ZERO_RUN_PATCH_ID (the lane_head_sha activity call adds
+        history events; old in-flight replays must not execute it).
+        """
+        if not workflow.patched(KI220_ZERO_RUN_PATCH_ID):
+            return
+        face = green_run_face(
+            getattr(receipt, "ran", 0), getattr(receipt, "failed", 0),
+            getattr(receipt, "error", ""), getattr(receipt, "blockers", None),
+            bool(targeted_only))
+        if face is None:
+            return
+        try:
+            raw = await workflow.execute_activity(
+                "lane_head_sha",
+                args=[LaneHeadShaArgs(ticket_id=self.ticket_id,
+                              worktree=str(self.meta.get("worktree") or ""),
+                              branch=str(self.meta.get("branch") or ""))],
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+            res = raw if isinstance(raw, LaneHeadShaResult) else LaneHeadShaResult(
+                ok=bool(raw.get("ok")), sha=str(raw.get("sha") or ""),
+                error=str(raw.get("error") or ""))
+        except Exception as e:  # noqa: BLE001 — face stays absent => merge gate red (fail-closed)
+            self._log("green-run face not recorded (lane_head_sha failed): "
+                      "%s: %s" % (type(e).__name__, e))
+            return
+        if not getattr(res, "ok", False) or not getattr(res, "sha", ""):
+            self._log("green-run face not recorded: %s"
+                      % (getattr(res, "error", "") or "unknown lane_head_sha failure"))
+            return
+        face["sha"] = str(res.sha)
+        face["at"] = self._now_epoch()
+        self.meta["last_green_run"] = face
+        self._log("green-run face recorded (ran=%d%s, sha=%s)"
+                  % (int(face.get("ran", 0)),
+                     ", no_scenarios" if face.get("no_scenarios") else "",
+                     str(face["sha"])[:12]))
 
     def _tests_env_red_names(self, cur_integ):
         """B2（宿主 260929 令）环境红**具名**名单读面——唯一认的通道=闸回执的
@@ -3708,6 +3801,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # t260923 D：跑面簿记（少跑必须可见+定点面来源）——每跑后刷新。
                 last_run_only = list(run_only)
                 prev_red_names = self._tests_red_names(ir)
+                # KI-220 (t261008-24): the zero-run supply shape refuses here, before
+                # the arbitrate verdict can read its empty blockers face as green; a
+                # full GREEN round records the ticket's last_green_run face. Both are
+                # patch-gated (replay-safe no-ops on old in-flight history).
+                if await self._ki220_supply_zero_run_stop(ir):
+                    continue
+                await self._ki220_record_green_run(ir, bool(run_only))
                 # t260917-09：_arb_json 补机械环境面三键（env_fail/闸拦/归属置信）——
                 # 仲裁 agent 首次直接看到 t260910-13 归属判定，不再只从 details 尾巴猜；
                 # 只读既有字段，与 t260917-08（环境信号一等化）零耦合。
@@ -3841,6 +3941,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         cur_integ = closing
                         last_run_only = []
                         prev_red_names = self._tests_red_names(closing)
+                        # KI-220: a closing full run with the zero-run supply shape
+                        # refuses (blocked named) instead of voiding the pass into an
+                        # arbitrate re-judgement spin; a green closing records the face.
+                        if await self._ki220_supply_zero_run_stop(closing):
+                            continue
+                        await self._ki220_record_green_run(closing, False)
                         _new_red = list(getattr(closing, "blockers", None) or [])
                         if _new_red or getattr(closing, "error", ""):
                             self._log("收口全量跑有新增红（%s）——pass 判决作废，回仲裁重裁"
@@ -4264,6 +4370,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     cur_integ = closing
                     last_run_only = []
                     prev_red_names = self._tests_red_names(closing)
+                    # KI-220: serial branch — same refuse/record faces as above.
+                    if await self._ki220_supply_zero_run_stop(closing):
+                        continue
+                    await self._ki220_record_green_run(closing, False)
                     _new_red = list(getattr(closing, "blockers", None) or [])
                     if _new_red or getattr(closing, "error", ""):
                         self._log("收口全量跑有新增红（%s）——pass 判决作废，仲裁边真重跑"
@@ -4594,7 +4704,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                    # t260921-09：建票「本票无文件改动」声明（meta 链
                                    # client.py ticket-start → meta.no_file_changes）
                                    # 透传给 merge_check 的整票零 commit 全局闸豁免
-                                   no_file_changes=bool(self.meta.get("no_file_changes"))),
+                                   no_file_changes=bool(self.meta.get("no_file_changes")),
+                                   # KI-220 (t261008-24): the ticket's green-run face
+                                   # (recorded after full green gate rounds); defaulted
+                                   # empty on old replays => the new item reads red
+                                   # zero-run (never green-by-default).
+                                   last_green_run=dict(
+                                       self.meta.get("last_green_run") or {})),
                     start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
                 mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
                     green=bool(raw.get("green")), checks=list(raw.get("checks") or []),

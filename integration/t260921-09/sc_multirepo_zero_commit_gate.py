@@ -167,6 +167,30 @@ def main():
 
         lane = tmp / "proj" / ".lane" / "tkt"
         lane.mkdir(parents=True, exist_ok=True)
+        # t261008-24：清单首仓分支必须真可解析（merge_check 的 _gr_sha 在 scopes[0]
+        # 的 repo 上 rev-parse）——真 git 仓落 r1/r2，绿跑面才有真 sha 可锚。
+        proj = tmp / "proj"
+        face_sha = ""
+        for rn, br in (("r1", "lane/tkt-r1"), ("r2", "lane/tkt-r2")):
+            rp = proj / rn
+            rp.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "-C", str(rp), "init", "-q", "-b", "main"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(rp), "config", "user.name", "fx"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(rp), "config", "user.email", "fx@e.c"],
+                           check=True, capture_output=True)
+            (rp / "f.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(rp), "add", "-A"], check=True,
+                           capture_output=True)
+            subprocess.run(["git", "-C", str(rp), "commit", "-qm", "base"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(rp), "branch", br], check=True,
+                           capture_output=True)
+        _p = subprocess.run(["git", "-C", str(proj / "r1"), "rev-parse",
+                             "--verify", "lane/tkt-r1"],
+                            capture_output=True, text=True)
+        face_sha = (_p.stdout or "").strip()
         mf = shared.multi_manifest_path(lane)
         mf.parent.mkdir(parents=True, exist_ok=True)
         mf.write_text(json.dumps([{"repo": "r1", "name": "r1", "branch": "lane/tkt-r1"},
@@ -177,15 +201,20 @@ def main():
 
         from shared import MergeCheckArgs  # noqa: E402  （load_engine 已插 sys.path）
 
-        def run_mc(stub, no_file_changes=False):
+        def run_mc(stub, no_file_changes=False, green_run=True):
             # write_set 置空（no_file_changes 票的真形态）：聚合桩面专测全局闸与豁免，
             # 保险丝B 的物化判定归 test_t260910_03_fuses 白盒分工，不在本场景重复
             aa._merge_check_one_scope = stub
             try:
-                return asyncio.run(aa.merge_check(MergeCheckArgs(
+                kwargs = dict(
                     ticket_id="tkt", worktree=str(lane), branch="lane/tkt",
                     base_ref="basesha", write_set=[],
-                    no_file_changes=no_file_changes)))
+                    no_file_changes=no_file_changes)
+                # t261008-24/KI-217 出口①：绿跑面（首仓分支真 HEAD、ran=1）——
+                # 无面=新检查项恒红 zero_run（永不默认绿），本票 intent 被无关红污染。
+                if green_run:
+                    kwargs["last_green_run"] = {"sha": face_sha, "ran": 1}
+                return asyncio.run(aa.merge_check(MergeCheckArgs(**kwargs)))
             finally:
                 aa._merge_check_one_scope = orig
 
@@ -196,9 +225,18 @@ def main():
               and "r1" in gates[0]["detail"] and "r2" in gates[0]["detail"]
               and "allow_empty_write_set" in gates[0]["next_action"],
               json.dumps(res3.checks, ensure_ascii=False)[:400])
-        check("③-位次契约 rehearsal 保持最后",
-              res3.checks[-1]["id"] == "merge_rehearsal"
-              and res3.checks[-2]["id"] == "all_repos_zero_commits")
+        # t261008-24：绿跑前置项（若有）插在 rehearsal 之前（KI-047 位次契约延申面）。
+        # gen10 起该项只对带写集的票签发（空写集票不签发=收窄到有验收面形态）——本子用例
+        # write_set=[] 走聚合桩，两种合法槽序都要钉：有项= rehearsal < scenario_green_run
+        # < all_repos；无项= rehearsal < all_repos。方向只收紧（rehearsal 恒最后）。
+        _gr = [c for c in res3.checks if c.get("id") == "scenario_green_run"]
+        _slot_ok = (
+            res3.checks[-1]["id"] == "merge_rehearsal"
+            and ((_gr and res3.checks[-2]["id"] == "scenario_green_run"
+                  and res3.checks[-3]["id"] == "all_repos_zero_commits")
+                 or (not _gr and res3.checks[-2]["id"] == "all_repos_zero_commits")))
+        check("③-位次契约 rehearsal 保持最后（绿跑项在场=其槽紧邻 rehearsal 前；"
+              "被写集闸收窄不签发=全局闸紧邻）", _slot_ok)
         res4 = run_mc(stub_zero, no_file_changes=True)
         check("③-豁免 no_file_changes 放行（与 review gate 同口径）",
               res4.green is True

@@ -58,6 +58,7 @@ import subprocess
 import shutil
 import tempfile
 import time
+from dataclasses import dataclass
 
 # 260927 code_stamp：本模块被 worker 载入的时刻（shared.worker_code_stamp 读它判 stale——
 # 「盘上 mtime 晚于本时刻」= 进程跑的是改动前的旧码，磁盘修复对这个进程无效）
@@ -5369,6 +5370,48 @@ def _ui_evidence_gate_check(judge: str, lane_root: Path, ui_paths: List[str]) ->
                            % shots_dir})}
 
 
+# ---- KI-220 (t261008-24): lane HEAD sha for the green-run face --------------------
+
+@dataclass
+class LaneHeadShaArgs:
+    """Inputs of the lane_head_sha activity: resolve the lane branch's full HEAD sha
+    so the workflow can anchor `meta["last_green_run"]` on the exact tree the green
+    gate round ran on (KI-217 exit (1) / KI-220). Same worktree/branch pair the
+    MergeCheckArgs call sites pass, so both faces anchor on one identity."""
+
+    ticket_id: str
+    worktree: str = ""
+    branch: str = ""
+
+
+@dataclass
+class LaneHeadShaResult:
+    ok: bool = False
+    sha: str = ""          # full sha of the lane branch HEAD ("" on failure)
+    error: str = ""
+
+
+@activity.defn
+async def lane_head_sha(args: LaneHeadShaArgs) -> LaneHeadShaResult:
+    """Resolve the lane branch HEAD sha (read-only, KI-220). Failures do not raise:
+    `ok=False` + named error — the caller simply skips recording the green-run face
+    for that round (the merge gate then stays red zero-run, fail-closed; a missing
+    face never mints a green)."""
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    ref = args.branch or "HEAD"
+    p = _git(["rev-parse", "--verify", ref], wt)
+    if p.returncode != 0:
+        return LaneHeadShaResult(
+            ok=False, error="git rev-parse %s failed in %s: %s"
+                            % (ref, wt, (p.stderr or p.stdout or "")[-200:]))
+    lines = (p.stdout or "").strip().splitlines()
+    if not lines or not lines[0]:
+        return LaneHeadShaResult(ok=False, error="empty rev-parse output")
+    return LaneHeadShaResult(ok=True, sha=lines[0])
+
+
 @activity.defn
 async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     """Programmatic checks before the merge (260824 dev-lane, no agent — every
@@ -5474,6 +5517,41 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                        "next_action": "整票零 commit：确无文件改动应 allow_empty_write_set "
                                       "声明建票（no_file_changes）；否则排查实现段 settle "
                                       "代落盘后发 retry_qc"})
+    # KI-220 (t261008-24) / KI-217 exit (1): the merge gate's own green-run
+    # precondition — at least one GREEN gate round of the ticket's scenarios on THIS
+    # tree, made visible and required here (ONE mechanism for both the zero-run form
+    # KI-220 and the ran-but-never-green form KI-217). The face is recorded by the
+    # lanes after each full green gate round and compared against the lane branch
+    # HEAD resolved at judgement time; verdict single-writer =
+    # shared.green_run_check_item. Inserted before the rehearsal item (the
+    # checks[-1] slot stays the merge rehearsal — conflict-classification contract,
+    # same slot discipline as the t260921-09 global gate above). Multi-repo tickets:
+    # the primary (first) scope anchors the face — the lanes record against the same
+    # worktree/branch pair they pass here. HEAD query failure => "" => red
+    # fail-closed (never green-by-default). SYNTHETIC-LANE guard (rework gen7,
+    # test_t260921_09_lane_commit_verdict.py): the probe must FAIL CLOSED, never
+    # raise — stub fixtures build scopes whose repo path does not exist, and
+    # subprocess would raise FileNotFoundError through _git; an unresolvable lane
+    # root / branch answers with the empty sha and the existing verdict stands.
+    _gr_sha = ""
+    # Scope guard (rework gen10): a ticket with an EMPTY write set is the legacy
+    # in-flight / nothing-to-verify shape — it has no acceptance scenario to have
+    # run, so demanding a green-run face there would be an intent-irrelevant
+    # permanent red. The precondition is emitted only for tickets that carry a
+    # write set (the KI-220 incident shape); empty-write-set tickets keep the
+    # pre-existing verdict unchanged.
+    if scopes and args.write_set:
+        try:
+            _gr_p = _git(["rev-parse", "--verify", str(scopes[0]["branch"])],
+                         scopes[0]["repo"])
+            if _gr_p.returncode == 0:
+                _gr_lines = (_gr_p.stdout or "").strip().splitlines()
+                if _gr_lines and _gr_lines[0]:
+                    _gr_sha = _gr_lines[0]
+        except Exception:  # noqa: BLE001 — unresolvable tree => empty sha => red fail-closed
+            _gr_sha = ""
+        checks.insert(max(len(checks) - 1, 0),
+                      shared.green_run_check_item(args.last_green_run, _gr_sha))
     green = all(c["green"] for c in checks)
     # Ticket t260826-01 automatic conflict resolution loop: red lights split into two
     # classes —
