@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 226,
-   "scenarios": 574
+   "engine_tests": 229,
+   "scenarios": 577
   },
   "vocab": [
    "behaviour",
@@ -4009,6 +4009,26 @@
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
    "sync_path": ""
   },
+  "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
+   "sync_path": ""
+  },
+  "integration/t261008-21/sc_t26100821_sidebar_popover_retired.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-21: popover retired, dwell pinned at 24h, stale localStorage not steering the knobless window, inspection rows bypass the client window",
+   "sync_path": ""
+  },
+  "integration/t261008-19/sc_t26100819_panel_tab_mock_anchors.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-19: panel Metrics Charts face + Docs entry rows vs the 261004 mocks, semantic-text anchors, negative tab-strip/Inspection assertions, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
+   "anchor": "behaviour",
+   "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",
+   "sync_path": ""
+  },
   "integration/t261008-25/sc_t261008_25_failed_ticket_disposition.py": {
    "anchor": "behaviour",
    "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
@@ -4017,21 +4037,6 @@
   "integration/t261008-25/sc_t261008_25_status_surface_map.py": {
    "anchor": "behaviour",
    "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
-   "sync_path": ""
-  },
-  "integration/t261008-19/sc_t26100819_panel_tab_mock_anchors.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-19: panel Metrics Charts face + Docs entry rows vs the 261004 mocks, semantic-text anchors, negative tab-strip/Inspection assertions, light+dark captures",
-   "sync_path": ""
-  },
-  "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
-   "sync_path": ""
-  },
-  "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
-   "anchor": "behaviour",
-   "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",
    "sync_path": ""
   }
  }

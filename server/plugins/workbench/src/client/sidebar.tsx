@@ -106,6 +106,10 @@ import { TicketRowCard } from './ticket-row-card.tsx'
 // t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
 // 四态单点投影 tier，不另起状态词表；node 可裸 import UT 直测）。
 import { sortMergedTickets } from './ticket-list-model.ts'
+// t261008-21 (host order 261008 option A): the closed dev-lane dwell window is
+// pinned at 24 h; the window rule lives in sandbar-dwell (pure layer, UT-covered)
+// and this is its only consumer (two-window split below — inspection rows exempt).
+import { inSandbar } from './sandbar-dwell.ts'
 // CL-3 (t261006-18) left-column ticket order: concurrency read-face projection
 // and move pure functions (node imports them directly for black-box UT).
 // Route constants are verbatim same-source with node.ts handleConcurrency
@@ -267,27 +271,6 @@ const INSPECTION_WF_LIKE = { stages: INSPECTION_TOPOLOGY }
 /** 未完成 = 生命周期未收口（dispatched/settled/rework）。项目组里只列这些。 */
 const isOpen = (t: Ticket): boolean => t.status !== 'closed' && t.status !== 'verified'
 
-/* ---- sandbar（沙洲）：已完成工单在左栏的驻留时长（小时），默认 24。
- *  配置项落在 localStorage（工单台「设置」区的输入框写它），侧栏每次轮询渲染时现读。 */
-const SANDBAR_KEY = 'sandbar-workbench-sandbar-v1'
-const SANDBAR_DEFAULT_H = 24
-export function sandbarHours(): number {
-  const v = Number(localStorage.getItem(SANDBAR_KEY))
-  return Number.isFinite(v) && v >= 0 && localStorage.getItem(SANDBAR_KEY) !== null ? v : SANDBAR_DEFAULT_H
-}
-export function setSandbarHours(h: number): void {
-  localStorage.setItem(SANDBAR_KEY, String(h))
-}
-
-/** sandbar 驻留判定：已收口且 close_ts 还在驻留窗口内（close_ts 缺失时用 created 兜底）。 */
-const inSandbar = (t: Ticket, nowS: number): boolean => {
-  if (isOpen(t)) return true
-  const h = sandbarHours()
-  if (h <= 0) return false
-  const ts = t.close_ts || t.created || 0
-  return ts > 0 && nowS - ts < h * 3600
-}
-
 /* ---------------------------------------------------------------- 样式 */
 
 const CSS = `${DERIVE_TOKENS_CSS}
@@ -322,18 +305,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-stale-banner .wb-stale-dismiss { flex:none; border:1px solid var(--dsw-derive-warn,#b8860b); background:transparent;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); border-radius:6px; padding:2px 10px; font:inherit; font-size:12px; cursor:pointer; }
 .wb-stale-banner .wb-stale-dismiss:hover { background:rgba(255,255,255,0.12); }
-/* metrics M2a（t260902-01）下栏：中列底部固定高度条（UI 规划 §2——左「📊 度量」、
-   右 ⚙ settings；高度恒定，内容收进 ⚙ 弹层）。 */
+/* Bottom strip under the middle column (fixed height, from metrics M2a).
+   t261008-21: the metrics entrance and the gear Settings popover are both
+   retired; only the spacer span remains, holding the original height (no reflow). */
 .wb-sb-foot{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-top:1px solid var(--dsw-alias-border-l1,#333);flex:none;font-size:12px}
-.wb-sb-foot-btn{display:inline-flex;align-items:center;gap:5px;border:none;background:none;color:var(--dsw-alias-label-primary,#1f2328);cursor:pointer;font:inherit;padding:4px 8px;border-radius:6px}
-.wb-sb-foot-btn:hover{background:rgba(255,255,255,.08)}
-.wb-sb-foot-btn[data-on=true]{color:var(--dsw-derive-accent,#0969da)}
 .wb-sb-foot-sp{flex:1}
-.wb-sb-setpop{position:absolute;right:8px;bottom:40px;z-index:96;background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));border:1px solid var(--dsw-alias-border-l1,#333);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.wb-sb-setpop .row{display:flex;align-items:center;gap:6px;font-size:12px}
-.wb-sb-setpop input[type=number]{width:64px;font:inherit;font-size:12px;background:transparent;color:inherit;border:1px solid var(--dsw-alias-border-l1,#333);border-radius:4px;padding:2px 6px}
-.wb-sb-setpop .t{font-size:12px;font-weight:600}
-.wb-sb-setpop .m2c{font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
 /* 项目组 */
 .wb-ticket-list { flex:1; overflow-y:auto; }
 /* UI-1 (t261005-09): brand first row — replaces the old "Projects" header slot.
@@ -597,11 +573,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
   >(null)
   /** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
   const [quarantined, setQuarantined] = useState<{ key: string; dir: string; error: string }[]>([])
-  // The ⚙ settings popover (the sandbar dwell input) stays; the three-level metrics
-  // entrance and its event bus retired wholesale with t261005-10 (UI-2) — Metrics
-  // lives in the panel Metrics tab.
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [sandbar, setSandbar] = useState(sandbarHours)
+  // t261008-21: the sidebar Settings popover (gear + dwell input) is retired
+  // with host order 261008 option A; its state went with the markup.
   const rootRef = useRef<HTMLDivElement>(null)
   // 插件陈旧看守（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：classifyHandshake
   // 三元组判定 → restart（服务端旧）/reload（浏览器旧，跨重启存活页面）两支横幅。
@@ -1278,34 +1251,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
           )}
           {viewProject && rightView === 'routes' && <Routes projectKey={viewProject} />}
         </div>
-        {/* 下栏（t260902-05 修订）：度量入口已迁出厂 footer.action 槽（与 dsh settings
-            同排）；此处仅剩 ⚙ settings 弹层（工单台自有 sandbar 驻留设置 + M2c 预留位）。
-            槽注册失败（软退化）时兜底「📊 度量」钮回此排，功能不丢。 */}
+        {/* Bottom strip: since t261008-21 the gear Settings popover (with the
+            dwell input and the M2c placeholder) is retired — host order 261008
+            option A pins the dwell window at 24 h (rule lives in sandbar-dwell).
+            Only the spacer span remains, holding the original height. */}
         <div className="wb-sb-foot">
-          {/* t261005-10 (UI-2): the 📊 Metrics fallback button retired (Metrics lives
-              in the panel tab). */}
           <span className="wb-sb-foot-sp" />
-          <button className="wb-sb-foot-btn" data-on={settingsOpen} title="Settings"
-            onClick={() => setSettingsOpen(o => !o)}>⚙</button>
         </div>
-        {settingsOpen && (
-          <div className="wb-sb-setpop" role="dialog" aria-label="Settings">
-            <div className="t">Settings</div>
-            {/* sandbar 驻留输入（原 board 筛选行内联输入迁来；localStorage key 与
-                sandbarHours/setSandbarHours 语义不变，侧栏轮询每次现读）。 */}
-            <label className="row" title="How long closed tickets stay in the sidebar groups (hours; 0 = hide immediately)">
-              Sandbar dwell
-              <input type="number" min={0} step={1} value={sandbar}
-                onChange={e => {
-                  const h = Math.max(0, Number(e.target.value) || 0)
-                  setSandbar(h)
-                  setSandbarHours(h)
-                }} />
-              hours
-            </label>
-            <div className="m2c">Quiet in-progress threshold (minutes): ships with the M2c system-health tab.</div>
-          </div>
-        )}
         {/* 项目生命周期四弹层（票③面D）：设置（只读+danger 区）→ 摘除四步流 →
             接入（预检 dry-run+就地错误）→ 隔离详情。写路径=host 薄壳 spawn 安装器
             CLI（单源）；成功回调重拉注册表（左栏即时出现新项目组/即时消失被摘组）。 */}

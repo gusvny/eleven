@@ -7722,6 +7722,59 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 	});
 }
 //#endregion
+//#region src/client/sandbar-dwell.ts
+/**
+* sandbar-dwell —— closed dev-lane ticket dwell window for the sidebar groups
+* (pure logic layer, zero react/platform deps so node can black-box import it,
+* same layering precedent as ticket-list-model.ts).
+*
+* Host order 261008 option A: the sidebar Settings popover (gear + "Sandbar
+* dwell" input) is retired, so the dwell window is PINNED at 24 hours. The
+* window behaviour itself stays real: a closed dev-lane ticket leaves the left
+* column 24 h after it closes (close_ts, falling back to created). Inspection
+* rows never go through this window — their closed-row window is the engine's
+* own R8 window (two-window split, see sidebar.tsx group assembly).
+*
+* Stored-value policy (chosen over clamp): the legacy localStorage key is
+* IGNORED and removed, not clamped. With the knob gone, any surviving stored
+* value (e.g. a previously typed 999) silently steering a user-visible window
+* is exactly the failure this retirement must rule out; clamping would keep
+* hidden state alive for values above the pin.
+*
+* NOTE: sandbarHours() is now the pin point of this whole rule — the one-shot
+* legacy-key removal inside it is deliberate and idempotent, not dead weight.
+* Do not "simplify" the delete away: that resurrects hidden stored state with
+* no knob to clear it.
+*/
+/** Legacy localStorage key written by the retired dwell-hours input. */
+const SANDBAR_KEY = "sandbar-workbench-sandbar-v1";
+/**
+* Single reader of the dwell window: always the pinned 24 h. As a one-shot
+* side effect it deletes the legacy stored key so a stale custom value can
+* never steer the window while the knob is gone (idempotent, guarded for
+* non-browser environments).
+*/
+function sandbarHours() {
+	if (typeof localStorage !== "undefined") try {
+		localStorage.removeItem(SANDBAR_KEY);
+	} catch {}
+	return 24;
+}
+/** Open = lifecycle not closed out; project groups always list these. */
+const isDwellOpen = (t) => t.status !== "closed" && t.status !== "verified";
+/**
+* Dwell predicate: closed rows stay while close_ts (fallback created) is
+* inside the pinned window. Boundary is strict `<` — a row at exactly 24 h
+* has left.
+*/
+const inSandbar = (t, nowS) => {
+	if (isDwellOpen(t)) return true;
+	const h = sandbarHours();
+	if (h <= 0) return false;
+	const ts = t.close_ts || t.created || 0;
+	return ts > 0 && nowS - ts < h * 3600;
+};
+//#endregion
 //#region src/client/queue-model.ts
 /**
 * Unwrap a read-face HTTP reply into the raw face. Two lawful shapes exist:
@@ -8259,23 +8312,6 @@ const INSPECTION_WF_LIKE = { stages: INSPECTION_TOPOLOGY };
 */
 /** 未完成 = 生命周期未收口（dispatched/settled/rework）。项目组里只列这些。 */
 const isOpen = (t) => t.status !== "closed" && t.status !== "verified";
-const SANDBAR_KEY = "sandbar-workbench-sandbar-v1";
-const SANDBAR_DEFAULT_H = 24;
-function sandbarHours() {
-	const v = Number(localStorage.getItem(SANDBAR_KEY));
-	return Number.isFinite(v) && v >= 0 && localStorage.getItem(SANDBAR_KEY) !== null ? v : SANDBAR_DEFAULT_H;
-}
-function setSandbarHours(h) {
-	localStorage.setItem(SANDBAR_KEY, String(h));
-}
-/** sandbar 驻留判定：已收口且 close_ts 还在驻留窗口内（close_ts 缺失时用 created 兜底）。 */
-const inSandbar = (t, nowS) => {
-	if (isOpen(t)) return true;
-	const h = sandbarHours();
-	if (h <= 0) return false;
-	const ts = t.close_ts || t.created || 0;
-	return ts > 0 && nowS - ts < h * 3600;
-};
 const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-sb { display:flex; flex-direction:column; height:100%; /* t260905-08：底改自适应 alias（平台 fill 层级高于 :root 注入无法跟随看守档位，可读性收敛到 alias 对）；装饰性 fill 见 --dsw-specific-sidebar-fill 保留在 group-head */ background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); color:var(--dsw-derive-fg,#1f2328); font-size:12px; }
 /* 轨条态：仅图标 */
@@ -8308,18 +8344,11 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-stale-banner .wb-stale-dismiss { flex:none; border:1px solid var(--dsw-derive-warn,#b8860b); background:transparent;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); border-radius:6px; padding:2px 10px; font:inherit; font-size:12px; cursor:pointer; }
 .wb-stale-banner .wb-stale-dismiss:hover { background:rgba(255,255,255,0.12); }
-/* metrics M2a（t260902-01）下栏：中列底部固定高度条（UI 规划 §2——左「📊 度量」、
-   右 ⚙ settings；高度恒定，内容收进 ⚙ 弹层）。 */
+/* Bottom strip under the middle column (fixed height, from metrics M2a).
+   t261008-21: the metrics entrance and the gear Settings popover are both
+   retired; only the spacer span remains, holding the original height (no reflow). */
 .wb-sb-foot{display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-top:1px solid var(--dsw-alias-border-l1,#333);flex:none;font-size:12px}
-.wb-sb-foot-btn{display:inline-flex;align-items:center;gap:5px;border:none;background:none;color:var(--dsw-alias-label-primary,#1f2328);cursor:pointer;font:inherit;padding:4px 8px;border-radius:6px}
-.wb-sb-foot-btn:hover{background:rgba(255,255,255,.08)}
-.wb-sb-foot-btn[data-on=true]{color:var(--dsw-derive-accent,#0969da)}
 .wb-sb-foot-sp{flex:1}
-.wb-sb-setpop{position:absolute;right:8px;bottom:40px;z-index:96;background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));border:1px solid var(--dsw-alias-border-l1,#333);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.wb-sb-setpop .row{display:flex;align-items:center;gap:6px;font-size:12px}
-.wb-sb-setpop input[type=number]{width:64px;font:inherit;font-size:12px;background:transparent;color:inherit;border:1px solid var(--dsw-alias-border-l1,#333);border-radius:4px;padding:2px 6px}
-.wb-sb-setpop .t{font-size:12px;font-weight:600}
-.wb-sb-setpop .m2c{font-size:11px;color:var(--dsw-derive-muted,#8c959f)}
 /* 项目组 */
 .wb-ticket-list { flex:1; overflow-y:auto; }
 /* UI-1 (t261005-09): brand first row — replaces the old "Projects" header slot.
@@ -8565,8 +8594,6 @@ function WorkbenchSidebar(props) {
 	const [modal, setModal] = (0, react.useState)(null);
 	/** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
 	const [quarantined, setQuarantined] = (0, react.useState)([]);
-	const [settingsOpen, setSettingsOpen] = (0, react.useState)(false);
-	const [sandbar, setSandbar] = (0, react.useState)(sandbarHours);
 	const rootRef = (0, react.useRef)(null);
 	const staleBanner = useStaleBanner();
 	const [staleDismissed, setStaleDismissed] = (0, react.useState)(false);
@@ -9227,49 +9254,9 @@ function WorkbenchSidebar(props) {
 							viewProject && rightView === "routes" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Routes, { projectKey: viewProject })
 						]
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-sb-foot",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-sb-foot-sp" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "wb-sb-foot-btn",
-							"data-on": settingsOpen,
-							title: "Settings",
-							onClick: () => setSettingsOpen((o) => !o),
-							children: "⚙"
-						})]
-					}),
-					settingsOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-sb-setpop",
-						role: "dialog",
-						"aria-label": "Settings",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "t",
-								children: "Settings"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-								className: "row",
-								title: "How long closed tickets stay in the sidebar groups (hours; 0 = hide immediately)",
-								children: [
-									"Sandbar dwell",
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-										type: "number",
-										min: 0,
-										step: 1,
-										value: sandbar,
-										onChange: (e) => {
-											const h = Math.max(0, Number(e.target.value) || 0);
-											setSandbar(h);
-											setSandbarHours(h);
-										}
-									}),
-									"hours"
-								]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "m2c",
-								children: "Quiet in-progress threshold (minutes): ships with the M2c system-health tab."
-							})
-						]
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-sb-foot-sp" })
 					}),
 					modal?.kind === "settings" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSettingsModal, {
 						project: modal.project,
