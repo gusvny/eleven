@@ -81,6 +81,13 @@ export async function startHarness({ port = 0, panelDir, watchdogDir, workbenchB
     SANDBAR_WATCHDOG_DIR: watchdogDir,
     SANDBAR_WORKBENCH_BASE: (workbenchStub || sameOriginWorkbench) ? '' : workbenchBase,
   }
+  // t261008-37 (arbitrate defect 2, production parity): production mounts the API on
+  // process.env, so an outer SANDBAR_PROJECTS_DIR reaches BOTH the read and the write
+  // face. The slim env dropped it, splitting the faces across roots (writer root,
+  // reader root/_panel) — the KI-198 shape inside one handler. Pass it through when
+  // the outer process set one (isolated benches / scenarios); PROJECTS_DIR wins over
+  // PANEL_DIR in the face resolvers, so this restores the production precedence.
+  if (process.env.SANDBAR_PROJECTS_DIR) env.SANDBAR_PROJECTS_DIR = process.env.SANDBAR_PROJECTS_DIR
   const api = createApi(env, {
     workbenchBase: (workbenchStub || sameOriginWorkbench) ? undefined : (workbenchBase || undefined),
     // t261004-18（KI-193）：测试缝不真 spawn 引擎 CLI（python 解释器/venv 不属 UT 面），

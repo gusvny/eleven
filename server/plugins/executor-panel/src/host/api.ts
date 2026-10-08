@@ -956,22 +956,28 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         return bad(422, `limit must be an integer ${CONCURRENCY_LIMIT_MIN}..${CONCURRENCY_LIMIT_MAX} or the string "${CONCURRENCY_UNLIMITED}" (got ${JSON.stringify(limit ?? null)})`)
       }
       const byClaimed = typeof b.by === 'string' ? b.by : undefined
-      // KI-193: the writer is fixed 'host' (the only identity the credential proves);
-      // a body `by` is recorded as a mismatch, never authority.
-      const payload = { project: key, limit: limit as number | 'unlimited', by: 'host', source: auditSource(byClaimed) }
-      const res = await (deps.engineConcurrencyWrite ?? spawnConcurrencyLimitWrite)(payload)
       const mismatch = byClaimed !== undefined && byClaimed !== null && byClaimed !== 'host'
+      // KI-193 (arbitrate t261008-37 defect 1): the writer is fixed 'host' (the only
+      // identity the credential proves); a body `by` naming another writer is judged
+      // BEFORE the spawn — the write is refused by name and never reaches the engine
+      // (a save with after-the-fact mismatch metadata is not a refusal).
+      if (mismatch) {
+        const why = `writer_mismatch: body by '${byClaimed}' is not the credential-proven writer 'host' - nothing written (KI-193: a claimed identity is never authority)`
+        return { status: 200, json: { ok: false, saved: false, error: why, reason: why,
+          by_claimed: byClaimed, writer_mismatch: true } }
+      }
+      const payload = { project: key, limit: limit as number | 'unlimited', by: 'host', source: auditSource(byClaimed) }
+      // Same env for read and write faces (arbitrate t261008-37 defect 2): a write
+      // spawned against process.env while the read face resolves the handler env is
+      // the KI-198 shape inside one handler (writer says saved, reader sees nothing).
+      const res = await (deps.engineConcurrencyWrite ?? spawnConcurrencyLimitWrite)(payload, { env })
       if (!res.saved) {
         // A refusal is the editor working (same semantics as settings/grants): 200 +
         // saved:false + the named reason; while CL-2b has not landed the engine
         // answers "unknown subcommand" -> the pinned engine-entry-absent refusal.
-        // The claimed identity stays visible on the failure branch too (never
-        // swallowed by the save outcome).
-        return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason,
-          ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+        return { status: 200, json: { ok: false, saved: false, error: res.reason, reason: res.reason } }
       }
-      return { status: 200, json: { ok: true, saved: true, project: key, limit: res.limit, audit_row: res.audit_row, decl: res.decl,
-        ...(mismatch ? { by_claimed: byClaimed, writer_mismatch: true } : {}) } }
+      return { status: 200, json: { ok: true, saved: true, project: key, limit: res.limit, audit_row: res.audit_row, decl: res.decl } }
     // t261005-10 (UI-2) note: its GET-only declaration read face on this route is
     // SUPERSEDED by this CL-2 face (engine-ledger numbers + save); the response is a
     // superset (limit/unlimited/decl), so the read-only row keeps working off `decl`.

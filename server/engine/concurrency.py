@@ -196,6 +196,125 @@ def record_limit_change(project_key: str, by: str, old: Any, new: Any) -> Dict[s
     return row
 
 
+# ---------- the CL-2b write face (panel knob -> engine entry) ----------
+
+def _declared_limit(value: Any) -> Any:
+    """Validate a write-payload limit and return the value as DECLARED (int,
+    or the string "unlimited"). One validation copy: everything routes through
+    validate_limit (bool / 0 / out-of-range / "3" / 5.5 / null refuse by name
+    there); this wrapper only maps the unlimited word so the declaration file
+    stores exactly what load_limit reads back ("unlimited"), never a null."""
+    if isinstance(value, str) and value.strip() == UNLIMITED:
+        return UNLIMITED
+    return validate_limit(value, "payload limit")
+
+
+def set_limit(payload: Any) -> Dict[str, Any]:
+    """Write one project's concurrency-limit declaration (CL-2b: the engine
+    entry the panel spawns, `client.py concurrency-limit-write '<payload>'`).
+
+    Contract (pinned by the panel parser parseConcurrencySaveReceipt and the
+    landed scenario t261006-17-concurrency-save-gate — do not reshape):
+      receipt = {"saved": True, "project": k, "limit": <declared>,
+                 "audit_row": <the row appended to the audit file>, "decl": <path>}
+      refusal = {"saved": False, "reason": <named>}
+    Zero side effect on refusal: every judgment happens BEFORE any byte lands;
+    if the audit append fails after the declaration was replaced, the previous
+    declaration bytes are restored (rollback) and the receipt refuses by name.
+
+    Fail-closed, named refusals: payload not an object / malformed project /
+    non-integer, out-of-range or missing limit / missing or empty `by` /
+    non-object `source`. Unknown extra keys (e.g. the scenario probe's
+    caller_project) are ignored. The audit actor IS the payload `by` — the
+    engine never invents one (KI-193: the panel fixes by to the credential-
+    proven 'host' before spawning). First Save on a project with no
+    declaration yet is legal (design: the default lives where the host writes
+    it, i.e. this entry); `from` is null on that path.
+
+    Enforcement semantics need NO new code here: lowering the limit never
+    touches holders (a holder keeps its slot until a real release point —
+    existing acquire/release rule); raising the limit lets the queue drain
+    through the existing release/reconcile promotion and the 60 s re-poll
+    backstop, both of which re-read load_limit per event.
+    """
+    try:
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "Concurrency-limit write refused: payload must be a JSON "
+                "object {project, limit, by, source?} (got %s) - nothing "
+                "written" % type(payload).__name__)
+        k = _check_key(payload.get("project"))
+        by = payload.get("by")
+        if isinstance(by, bool) or not isinstance(by, str) or not by.strip():
+            raise ValueError(
+                "Concurrency-limit write refused: by must be a non-empty "
+                "string naming the actor (the audit row's `by` is the payload "
+                "value, never engine-invented) - nothing written")
+        who = by.strip()
+        if "limit" not in payload:
+            raise ValueError(
+                "Concurrency-limit write refused: the limit key is missing "
+                "(a missing key is not unlimited) - nothing written")
+        declared = _declared_limit(payload.get("limit"))
+        source = payload.get("source")
+        if source is not None and not isinstance(source, dict):
+            raise ValueError(
+                "Concurrency-limit write refused: source must be a JSON "
+                "object when present (got %s) - nothing written"
+                % type(source).__name__)
+        path = declaration_path(k)
+        try:
+            old = load_limit(k)
+        except ValueError:
+            old = None   # first Save: no declaration exists yet
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                prev_bytes = f.read()
+        except FileNotFoundError:
+            prev_bytes = None
+        # Atomic declaration write (first Save creates the key dir).
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"version": DECL_VERSION, "limit": declared}, f,
+                      ensure_ascii=False)
+        os.replace(tmp, path)
+        try:
+            row = record_limit_change(k, who, old, declared)
+        except BaseException:
+            # The audit row is part of the contract: a save without it is
+            # exactly the KI-198 family ("writer says saved, reader sees no
+            # change"), so roll the declaration back and refuse by name.
+            try:
+                if prev_bytes is None:
+                    os.remove(path)
+                else:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(prev_bytes)
+            except OSError as rb_err:
+                raise ValueError(
+                    "Concurrency-limit write FAILED AFTER the declaration was "
+                    "replaced: the audit append refused and the rollback of "
+                    "%s also failed (%s: %s) - the file is now out of "
+                    "contract, inspect by hand"
+                    % (path, type(rb_err).__name__, rb_err))
+            raise
+        return {"saved": True, "project": k, "limit": declared,
+                "audit_row": {"ts": row["ts"], "by": row["by"],
+                              "from": row["from"], "to": row["to"]},
+                "decl": path}
+    except ValueError as e:
+        return {"saved": False, "reason": str(e)}
+    except OSError as e:
+        # A declaration/audit filesystem failure after the judgment phase: the
+        # rollback above has restored (or named its own failure), so this is a
+        # named refusal, never a partial save reported as success.
+        return {"saved": False,
+                "reason": "Concurrency-limit write failed on the filesystem "
+                          "(%s: %s) - declaration rolled back, nothing "
+                          "changed" % (type(e).__name__, e)}
+
+
 # ---------- slot ledger (lock-guarded, single state file) ----------
 
 @dataclass

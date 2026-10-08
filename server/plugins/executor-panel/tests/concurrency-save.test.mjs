@@ -144,19 +144,31 @@ const Q = (s = '') => new URLSearchParams(s)
 
   // 成功 + 错配身份可见（成功与失败两个分支都要携带）。
   const savedRow = { ts: 9, by: 'host', from: 2, to: 5 }
-  const apiOk = apiWith({ authFace: authPass, engineConcurrencyWrite: async (p) => ({
-    saved: true, project: 'alpha', limit: p.limit === 'unlimited' ? null : p.limit, audit_row: { ...savedRow, to: p.limit }, decl: '/d.json' }) })
+  // t261008-37 rework (KI-193): a body by naming another writer is refused BEFORE the
+  // spawn — the write face must never be called (a save with mismatch metadata was
+  // the arbitrated defect: a report after the fact, not a refusal).
+  let mismatchSpawnCalls = 0
+  const apiOk = apiWith({ authFace: authPass, engineConcurrencyWrite: async (p) => {
+    mismatchSpawnCalls++
+    return { saved: true, project: 'alpha', limit: p.limit === 'unlimited' ? null : p.limit,
+      audit_row: { ...savedRow, to: p.limit === 'unlimited' ? 'unlimited' : p.limit }, decl: '/d.json' }
+  } })
   const r8 = await post(apiOk, { limit: 5, by: 'someone-else' })
-  assert(r8.status === 200 && r8.json.saved === true && r8.json.audit_row.to === 5
-    && r8.json.writer_mismatch === true && r8.json.by_claimed === 'someone-else',
-    'success carries the audit row + the surfaced identity claim')
+  assert(r8.status === 200 && r8.json.ok === false && r8.json.saved === false
+    && r8.json.writer_mismatch === true && r8.json.by_claimed === 'someone-else'
+    && /writer_mismatch/.test(r8.json.reason),
+    'a mismatched body by is refused by name, nothing written')
+  assert(mismatchSpawnCalls === 0, 'the write face is NEVER spawned on a mismatch')
+  const r9 = await post(apiOk, { limit: 5, by: 'host' })
+  assert(r9.status === 200 && r9.json.saved === true && r9.json.audit_row.to === 5,
+    'the credential-proven writer saves and carries the audit row')
   const apiFail = apiWith({ authFace: authPass, engineConcurrencyWrite: async () => ({ saved: false, reason: 'engine write failed' }) })
-  const r9 = await post(apiFail, { limit: 5, by: 'someone-else' })
-  assert(r9.status === 200 && r9.json.ok === false && r9.json.writer_mismatch === true,
-    'the failure branch keeps the identity claim visible (never swallowed)')
+  const r9f = await post(apiFail, { limit: 5, by: 'host' })
+  assert(r9f.status === 200 && r9f.json.ok === false && r9f.json.reason === 'engine write failed',
+    'the engine-failure branch keeps the named reason')
   const r10 = await post(apiOk, { limit: 'unlimited' })
   assert(r10.status === 200 && r10.json.saved === true && r10.json.limit === null, 'unlimited save accepted')
-  n += 3
+  n += 5
 }
 
 done(n)

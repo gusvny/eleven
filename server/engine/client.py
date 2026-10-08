@@ -4341,7 +4341,7 @@ COMMANDS = {
 }
 
 USAGE = (
-    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|ticket-archive-terminal|cancel-audit|template-faces|executor-grants-write|deliver|lane-orphans|lane-reclaim> [argsJSON]\n"
+    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|ticket-archive-terminal|cancel-audit|template-faces|executor-grants-write|concurrency-limit-write|deliver|lane-orphans|lane-reclaim> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"
@@ -4440,10 +4440,63 @@ def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
           .encode("utf-8", "backslashreplace").decode("utf-8"))
 
 
+def _concurrency_limit_write_entry(raw: Optional[str]) -> None:
+    """concurrency-limit-write (CL-2b, t261008-37): the engine-side write entry
+    the executor panel spawns (`client.py concurrency-limit-write '<json>'`).
+
+    Deliberately NOT on the generic COMMANDS/_emit path: the panel's receipt
+    parser (parseConcurrencySaveReceipt) reads a top-level boolean `saved`, so
+    the {ok, result} envelope would read as 'unexpected shape'. This shell is
+    parse + delegate + print + exit only — every validation and the audit live
+    in engine concurrency.set_limit (one implementation, no second copy).
+
+    admin.log discipline (KI-067 review comment): the generic path's _emit
+    logs every attempt; this entry cannot use _emit, so it logs through the
+    same audit.audit_call helper directly — attempt AND refusal both land a
+    row (the trail is never silently dropped), before stdout is written.
+
+    Exit contract: 0 = receipt saved:true; 1 = structured saved:false refusal.
+    """
+    import concurrency as engine_concurrency
+    payload: Any = None
+    receipt: Dict[str, Any]
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as e:
+            # Transport-layer parse refusal (same shape as the generic path's
+            # argsJSON refusal); limit/by validation stays single-copy in
+            # engine concurrency.set_limit.
+            receipt = {"saved": False,
+                       "reason": "concurrency-limit-write: args JSON is not "
+                                 "valid JSON (%s) - refused, nothing written" % e}
+        else:
+            receipt = engine_concurrency.set_limit(payload)
+    else:
+        receipt = engine_concurrency.set_limit(None)
+    try:
+        audit.audit_call("concurrency-limit-write",
+                         {"ok": bool(receipt.get("saved")), **receipt})
+    except Exception:
+        pass   # audit never swallows the receipt (same rule as _emit)
+    print(json.dumps(receipt, ensure_ascii=False)
+          .encode("utf-8", "backslashreplace").decode("utf-8"))
+    sys.stdout.flush()
+    sys.exit(0 if receipt.get("saved") is True else 1)
+
+
 def main() -> None:
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         _emit(sub or "help", {}, {"ok": False, "error": USAGE})
+        return
+
+    if sub == "concurrency-limit-write":
+        # CL-2b: raw-receipt entry (see _concurrency_limit_write_entry); must
+        # sit BEFORE the COMMANDS lookup so an unknown subcommand still falls
+        # through to the existing unknown-subcommand (CJK) refusal — the
+        # panel's engine-entry-absent detection matches that wording.
+        _concurrency_limit_write_entry(sys.argv[2] if len(sys.argv) > 2 else "")
         return
 
     fn = COMMANDS.get(sub)
