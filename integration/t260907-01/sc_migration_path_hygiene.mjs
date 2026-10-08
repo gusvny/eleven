@@ -42,6 +42,12 @@ const REPO = resolve(join(fileURLToPath(import.meta.url), '..', '..', '..'))
 // 串接构造：本文件自身不得含旧仓字面量（自引用免疫）
 const NEEDLE = '/Users/user/Documents/' + 'suyou'
 
+// admin.log 的轮转归档名（真源=server/engine/audit.py：归档名 admin.log.YYYYMMDD=文件「关闭日」，
+// 同日过大顺切再带 -HHMMSS）。t261008 实报：过滤器只跳 *.log，归档后缀不是 .log ⇒
+// server/admin.log.20261005 / .20261006 被判「新病灶」，每轮门都红一条（假红）。
+// 归档与活跃日志同域：都是追加式运行审计流水，逐字存着历史工单原文（旧仓绝对路径属事实记录）。
+const LOG_ROTATION_ARCHIVE = /(^|\/)admin\.log\.\d{8}(-\d{6})?$/
+
 // 另开票处置的已知残留（t260907-01 review 定案：写集外，登记在案才豁免）
 const KNOWN_RESIDUE = new Set([
   'server/README.md',
@@ -81,7 +87,8 @@ function* walk(dir) {
       // *.log=追加式运行审计流水（gitignored，如 server/admin.log 499MB）：闸口回执
       // 逐字引用历史工单原文（含旧仓绝对路径属事实记录），与 .suyou/.sandbar 运行时
       // 记录同口径排除；顺带省掉每次全量读大日志的扫描成本（t260907-01 收口补）
-      if (name.endsWith('.log')) continue
+      // t261008：轮转归档 admin.log.<YYYYMMDD>[-<HHMMSS>] 同域同口径一并排除（见上常量）
+      if (name.endsWith('.log') || LOG_ROTATION_ARCHIVE.test('/' + name)) continue
       yield p
     }
   }

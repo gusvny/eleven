@@ -76,9 +76,12 @@ EXEMPT_FILES = {
     "server/engine/tests/test_engine_venv_fallback.py",
     # 项目仓内 server/dsh/reviews=**活约定**（workbench node.ts:852
     # join(anchor.root,'server','dsh') 的审批落点，t260907-11 KI-057 锚定）；项目仓
-    # 布局与引擎仓布局是两个域，v6 摊平只动了引擎仓——这三文件引用的是活指针，
+    # 布局与引擎仓布局是两个域，v6 摊平只动了引擎仓——这四文件引用的是活指针，
     # 豁免登记（真退役该项目侧约定时须连豁免一起动）
     "server/plugins/workbench/smoke/ki057-anchors.mjs",
+    # t261008 实报：同一活约定的第五个消费点（smoke/changes.mjs:230-231 读写
+    # echo server/dsh/reviews/<工单id>.json），理由与上面三条逐字相同
+    "server/plugins/workbench/smoke/changes.mjs",
     "integration/t260907-11/sc_wb_anchor_cross_project_faces.mjs",
     "integration/run_scenarios.py",  # 上条活约定的 intent 描述面（:629 引 server/dsh/reviews）
 }
@@ -86,6 +89,11 @@ EXEMPT_FILES = {
 EXEMPT_PREFIXES = (
     "notes/",               # 历史票快照/账本/讨论纪要
     "integration/t260907-10/",  # 本场景族自身＋fixture 面（token 即被测对象）
+    # t261008 实报：t261006-15（巡检页/期次归档那两张，已收口）的场景文件里存着迁移前的
+    # 旧路径字面（server/dsh/temporal-poc/base/workflow.ts 等）。它们属本模块已声明的
+    # 「历史票快照」类目、且不在活指针面上 ⇒ 按既有类目**具名归类**（不是放宽判据：
+    # 活指针面仍照旧扫，前缀只覆盖这一张已收口票的资产）。
+    "integration/t261006-15/",
 )
 
 
