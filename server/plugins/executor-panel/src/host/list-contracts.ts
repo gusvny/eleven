@@ -142,6 +142,18 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     cap_reason: 'The tab shows the recent trigger history, not the record: the full attributed history stays in the project trigger-records.jsonl and the response carries hidden_rows plus the source path, so capping here hides a summary, not data.',
     empty_copy: 'No reviews started yet.',
   },
+  // t261008-22: the human exit face for a mechanically-rejected (blocked) inspection
+  // ticket — rerun / void attempts, attributed. Same read model family as
+  // inspection_trigger_records (read model in inspection-disposition.ts).
+  inspection_disposition_records: {
+    id: 'inspection_disposition_records',
+    title: 'Inspection — Exits you recorded (rerun / void)',
+    source: 'GET /sandbar-executor-panel/api/inspection/disposition-records?project=<key> (the project disposition record <projects_root>/<key>/inspection/disposition-records.jsonl; read model in inspection-disposition.ts)',
+    order: 'Newest first by at, sorted in inspection-disposition.ts before the page receives rows. Missing or malformed at sorts last. Equal at keeps file order (stable).',
+    cap: 50,
+    cap_reason: 'The block shows the recent disposition history, not the record: the full attributed history stays in the project disposition-records.jsonl and the response carries hidden_rows plus the source path, so capping here hides a summary, not data.',
+    empty_copy: 'No exits recorded yet.',
+  },
   // ---- t261005-10 (UI-2): the four faces that move into panel tabs ----
   epics_list: {
     id: 'epics_list',

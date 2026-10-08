@@ -109,6 +109,7 @@ import {
   neighborTicketId, openTicket,
 } from './ticket-overlay-model.ts'
 import type { OverlayNav } from './ticket-overlay-model.ts'
+import { InspectionExitBlock, inspectionExitVisible } from './inspection-exit.tsx'
 import { SpecBlock } from './spec-block.tsx'
 // t261008-07: pure model for the single-column detail (decision-card wording,
 // receipts, stage notes, changes kv, requests filter).
@@ -370,6 +371,13 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-drawer-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:10px}
 .wb-d2-blocked{margin:8px 0;padding:6px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-radius:6px;
   background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);font-size:12.5px}
+/* t261008-22 inspection human-exit block (re-run / void): same red family as the
+   blocked face but its own box — the exit is an ACTION face, not a blocked-fact
+   face; the voided state reuses the block for a read-only fact row. */
+.wb-insp-exit{margin:8px 0;padding:8px 12px;border:1px dashed var(--dsw-derive-danger,#cf222e);border-radius:6px;background:var(--dsw-derive-canvas,#fff)}
+.wb-insp-exit-ttl{font-size:12px;font-weight:600;color:var(--dsw-derive-danger,#cf222e)}
+.wb-insp-exit-reason{width:100%;margin-top:6px;padding:6px 8px;font-size:12px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-radius:6px;box-sizing:border-box;resize:vertical}
+.wb-insp-exit-actions{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
 /* KI-048（t260911-05）人话状态卡：红调=blocked / 黄调=其它态带受阻面；主题令牌派生。 */
 .wb-status-card{margin:8px 0;padding:10px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-left:4px solid var(--dsw-derive-danger,#cf222e);border-radius:8px;background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-status-card[data-sev=amber]{border-color:var(--dsw-derive-warn,#bf8700);border-left-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
@@ -1017,6 +1025,10 @@ interface TicketRow {
   kind?: string
   instance_id?: string
   period?: string
+  /** t261008-22: voided (passed through by ticket-query; truth = the first signature
+   *  in inspection-void.jsonl). Truthy = the detail renders the "Voided by ..." fact
+   *  row (findings never swallowed); the row also re-classifies out of blocked. */
+  voided?: { at?: unknown; who?: unknown; reason?: unknown }
   findings?: { high?: number; med?: number; low?: number; total?: number }
   heartbeat?: boolean
   report_path?: string
@@ -2434,11 +2446,11 @@ function availableOps(t: { status: string; stage_state: string; stage: string | 
   // t260919-02：失败类终态行零管理操作——终态票不再推进，行卡不得给打回/暂停/
   // 恢复等会打错信号的入口（票面边界「不给终态票任何推进入口」；判定走五态推导
   // 单点，exec_status 与 status/stage_state 失败词面双保险）。
-  if (deriveTicketState(t.status, t.stage_state, t.exec_status) === 'failed') return []
+  if (deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided) === 'failed') return []
   // t260921-03：已结束票零管理操作（终态对账同理）——合法 closed/巡检行本就无 ops
   // （零变化），本早退堵住「词面 blocked/running × exec COMPLETED」陈旧行拿到
   // rework/pause 的终态推进入口（判定同走五态推导单点）。
-  if (deriveTicketState(t.status, t.stage_state, t.exec_status) === 'done') return []
+  if (deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided) === 'done') return []
   // M11 v2（模版即代码）：自动推进——无 dispatch-next/逐项 accept；人门=签字（advance 钮），
   // blocked=retry_qc 重跑（unblock 钮），任何进行态可 rework 打回；closed 无操作。
   if (t.engine === 'template-as-code-v2') {
@@ -4207,6 +4219,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
                   收口卡里以事实措辞呈现）。 */}
               {detail.blocked_reason && detail.close_health !== 'abnormal' && detail.close_health !== 'unreadable' && (
                 <div className="wb-d2-blocked">⛔ Blocked: {detail.blocked_reason}</div>
+              )}
+              {/* t261008-22: the human exit for a mechanically-rejected inspection
+                  ticket (re-run / void, both named) — the exit lives on the blocked
+                  ticket's own detail face (host order 260908: a blocked row must not
+                  be stuck-only with no exit). A voided ticket renders the recorded
+                  disposition instead (findings never swallowed). */}
+              {detail.kind === 'inspection' && inspectionExitVisible(detail) && (
+                <InspectionExitBlock detail={detail} projectKey={projectKey} />
               )}
               {/* KI-048（t260911-05）人话状态卡（mock 260904 A 块口径，四件：人话
                   主文案／挡事文件点名／下一步安排／原始日志折叠）。视图模型由

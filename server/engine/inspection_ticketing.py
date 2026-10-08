@@ -41,6 +41,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -224,6 +225,219 @@ def reopen_journal_rows(ledger_dir: Any) -> List[Dict[str, Any]]:
         if isinstance(row, dict):
             rows.append(row)
     return rows
+
+
+# ---- t261008-22: the named void face for terminal blocked inspection tickets ------
+#: Void audit journal (t261008-22, host order 261008 "a mechanically-rejected
+#: inspection ticket needs a human exit"). Naming/suffix rationale is verbatim the
+#: same as REOPEN_JOURNAL_NAME: append-only JSONL, suffix deliberately .jsonl (the
+#: deadman ledger scan only takes `.json` — writing "this period was voided" must
+#: never read as "this period ran"; not in the period set, not in deadman/ledger
+#: accounting). Consumers: client.py ticket-list (rows gain the `voided` key),
+#: inspection_trigger.py void CLI (idempotence), void_period_ticket below.
+VOID_JOURNAL_NAME = "inspection-void.jsonl"
+
+#: Input bounds for the void face (t261008-22; who matches
+#: shared.AUTHZ_WHO_MAX_LEN / MAX_WHO_LEN; reason matches the panel's
+#: REASON_MAX_CHARS scale — over-bound is refused structurally at this layer,
+#: zero side effects).
+VOID_WHO_MAX_LEN = 64
+VOID_REASON_MAX_LEN = 2000
+
+
+def append_void_journal(ledger_dir: Any, instance_id: str, period: str,
+                        ticket_id: str, who: str, reason: str,
+                        now_fn=time.time) -> None:
+    """Append one void audit row (append-only JSONL; same discipline as
+    append_reopen_journal: write-only, never reads back — an existing file stays
+    appendable even when malformed; OSError propagates to the caller for an explicit
+    error — a missing audit trail is never silent).
+    Row shape: {at, instance, period, ticket_id, who, reason}."""
+    p = Path(str(ledger_dir)) / VOID_JOURNAL_NAME
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"at": float(now_fn()), "instance": str(instance_id),
+               "period": str(period), "ticket_id": str(ticket_id or ""),
+               "who": str(who or ""), "reason": str(reason or "")}
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def read_void_journal(ledger_dir: Any, *, with_malformed: bool = False):
+    """Read the void audit journal. Default return: the rows list (consumer
+    contract: client.py row augmentation, the void CLI idempotence check, the
+    scenario scaffold); `with_malformed=True` returns (rows, malformed_count).
+    Missing file = ([], 0); bad lines are skipped per line but COUNTED (visible,
+    never silently dropped — same read-tolerance family as spawn_journal_rows, the
+    difference is only the reported count: a void row is a human-disposition
+    voucher; swallowing one row = swallowing one human signature)."""
+    try:
+        text = (Path(str(ledger_dir)) / VOID_JOURNAL_NAME).read_text("utf-8")
+    except (FileNotFoundError, OSError):
+        return ([], 0) if with_malformed else []
+    rows: List[Dict[str, Any]] = []
+    malformed = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            malformed += 1
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+        else:
+            malformed += 1
+    return (rows, malformed) if with_malformed else rows
+
+
+def voided_ticket_row(rows: List[Dict[str, Any]], ticket_id: str) -> Optional[Dict[str, Any]]:
+    """Void-row lookup (pure): ticket already voided -> the EARLIEST row (the first
+    signature wins — the truth source for the idempotence refusal, quoted when a
+    repeat void is refused); not voided -> None. An empty ticket_id never matches
+    (malformed-row defense: a row without a ticket_id is nobody's voucher)."""
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        return None
+    for row in rows:
+        if str(row.get("ticket_id") or "").strip() == tid:
+            return row
+    return None
+
+
+def _void_period_lexical_error(period: str) -> Optional[str]:
+    """Period lexics for the void face (local copy): same lexer as
+    inspection_trigger._valid_period (YYYYMMDD or YYYYMMDD-<bucket>, bucket a
+    positive integer; must be a real calendar day) — no import of the CLI module
+    (an engine module never depends back on the ops shell); lexics parity is
+    pinned by a unit test over the same sample set on both sides."""
+    from inspection_flow import PERIOD_RE  # noqa: PLC0415 — lexer single point (lazy import, open_period_ticket precedent)
+    if not PERIOD_RE.match(period or ""):
+        return "period invalid: %r (need YYYYMMDD or YYYYMMDD-<bucket>)" % (period,)
+    try:
+        datetime.strptime(period.split("-")[0], "%Y%m%d")
+    except ValueError:
+        return "period is not a real calendar day: %r" % (period,)
+    return None
+
+
+def void_period_ticket(ledger_dir: Any, *, instance_id: str, period: str,
+                       ticket_id: str, who: str, reason: str,
+                       now_fn=time.time) -> Dict[str, Any]:
+    """Named void of a terminal blocked inspection ticket (t261008-22; the engine
+    side of the 261008 host order's human exit — plan v2 review decision: a blocked
+    ticket is a terminal COMPLETED workflow and ticket-cancel is a documented no-op
+    on it (client._TICKET_CANCEL_ALIVE holds only RUNNING/CONTINUED_AS_NEW); the
+    historical face is immutable, so the honest void = an audit row + a `voided`
+    field in the period ledger doc. Face agreement is reached by consumers
+    (ticket-list rows / panel cards) reading these two records).
+
+    Receipt: ok=True -> {voided:{at,who,reason,ticket_id}, journal:<path>,
+    ledger:<path>}; ok=False -> a single-line readable error naming the reason;
+    EVERY refusal path is zero-write (journal and ledger doc byte-identical —
+    pinned by before/after snapshot equality in tests).
+
+    Refusal order (fail-closed, each named):
+      (1) shape: instance/period/ticket_id/who/reason all non-empty; period
+          lexics; who <= 64 chars and not an agent role name (only humans sign);
+          reason <= 2000 chars.
+      (3) idempotence: the ticket already has a void row -> refused, quoting the
+          first disposition (who/reason/at verbatim — the first human disposition
+          stands, never a silent second signature; checked before the population
+          gate, so a repeat refusal is independent of the current ledger state).
+      (2) population: period_ledger_face(doc, ticket_id) must be exactly "blocked"
+          (doc readable + matching ticket id + non-empty blocked_reason). Live /
+          not-yet-closed (doc absent) -> named "wait for it to close; a live
+          period takes no void"; ticket-id mismatch -> named; empty
+          blocked_reason (served evidence) -> named "void only applies to blocked
+          tickets — served findings can never be voided away". The
+          write_ledger=False redirected shell (the one blocked shape with no
+          ledger doc, see period_ledger_face) falls under the same doc-absent
+          refusal — its only human exit is a named re-run, and the refusal copy
+          says so.
+    On success: one append_void_journal row + an incremental `voided` write to the
+    ledger doc (read-modify-whole-write, tmp->rename atomic swap; a crash leaves
+    the old or the new doc, never a torn one)."""
+    iid = str(instance_id or "").strip()
+    per = str(period or "").strip()
+    tid = str(ticket_id or "").strip()
+    w = str(who or "").strip()
+    r = str(reason or "").strip()
+
+    def _err(msg: str) -> Dict[str, Any]:
+        return {"ok": False, "error": "%s (instance %s period %s ticket %s)" % (msg, iid, per, tid)}
+
+    # (1) shape — all before the first write, zero side effects
+    if not iid:
+        return _err("void is missing instance_id")
+    if not per:
+        return _err("void is missing period")
+    verr = _void_period_lexical_error(per)
+    if verr:
+        return _err(verr)
+    if not tid:
+        return _err("void is missing ticket_id")
+    if not w:
+        return _err("void is missing who (a human signature is mandatory — a signature-less void is never accepted)")
+    if len(w) > VOID_WHO_MAX_LEN:
+        return _err("who is too long (> %d chars)" % VOID_WHO_MAX_LEN)
+    from inspection_flow import AGENT_ROLE_NAMES  # noqa: PLC0415 — role-name set single point (lazy import)
+    if w.lower() in AGENT_ROLE_NAMES:
+        return _err("who is an agent role name (%s) — only a human can sign a void" % w)
+    if not r:
+        return _err("void is missing reason (the reason is mandatory — a reason-less void is never accepted)")
+    if len(r) > VOID_REASON_MAX_LEN:
+        return _err("reason is too long (> %d chars)" % VOID_REASON_MAX_LEN)
+
+    ledger = Path(str(ledger_dir))
+    # (3) idempotence — before any write, and before the population gate
+    rows, _malformed = read_void_journal(ledger, with_malformed=True)
+    prev = voided_ticket_row(rows, tid)
+    if prev is not None:
+        return _err("ticket already voided (%s at %s: %s) — the first human disposition stands; no repeat signature"
+                    % (prev.get("who"), _void_fmt_ts(prev.get("at")),
+                       str(prev.get("reason") or "")))
+    # (2) population gate (the blocked-completed iron proof; every other shape is
+    # refused by name, never guessed)
+    doc = read_period_ledger_doc(ledger, iid, per)
+    if doc is None:
+        return _err("period ledger doc unreadable (not closed = a live period takes no void — wait for it to close; "
+                    "a write_ledger=False redirected shell has no doc: its human exit is a named re-run)")
+    if str(doc.get("ticket_id") or "").strip() != tid:
+        return _err("ticket_id does not match the period ledger doc (doc records %s) — void only applies to a blocked "
+                    "ticket whose doc is present and whose id matches" % (str(doc.get("ticket_id") or "") or "nothing"))
+    if period_ledger_face(doc, tid) != "blocked":
+        return _err("no blocked evidence in the ledger doc (empty blocked_reason = a served period) — void only applies "
+                    "to blocked tickets; the findings of a served period can never be voided away")
+    # write: the audit row + the ledger doc increment (atomic swap)
+    at = float(now_fn())
+    append_void_journal(ledger, iid, per, tid, w, r, now_fn=now_fn)
+    out = dict(doc)
+    out["voided"] = {"at": at, "who": w, "reason": r, "ticket_id": tid}
+    path = ledger / ledger_file_name(iid, per)
+    tmp = path.with_suffix(".json.void-tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        tmp.replace(path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return {"ok": True,
+            "voided": {"at": at, "who": w, "reason": r, "ticket_id": tid},
+            "journal": str(ledger / VOID_JOURNAL_NAME), "ledger": str(path)}
+
+
+def _void_fmt_ts(v: Any) -> str:
+    """epoch -> readable time (for the void idempotence refusal copy; non-number =
+    as-written, never guessed)."""
+    try:
+        return time.strftime("%m-%d %H:%M", time.localtime(float(v)))
+    except (TypeError, ValueError):
+        return str(v or "unknown")
 
 
 # ---- KI-192（t261003-03）：supersede 链采信 + blocked-completed 重分类 -------------

@@ -1137,6 +1137,11 @@
    "note": "",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261008_22_void_surface.py": {
+   "anchor": "contract",
+   "note": "t261008-22: the named void surface's contract (population gate / idempotence / zero-write refusals / journal+ledger agreement) on fixture ledger dirs",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261008_25_status_surface_map.py": {
    "anchor": "behaviour",
    "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
@@ -4007,6 +4012,26 @@
   "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
    "anchor": "behaviour",
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_void_named_surface.py": {
+   "anchor": "contract",
+   "note": "void surface named-disposition contract on the engine's own ledger/journal evidence files",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_void_then_rerun_period.py": {
+   "anchor": "behaviour",
+   "note": "void-then-rerun composition and in-flight ordering on open_period_ticket with the stub-client seam",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_disposition_entry_face.mjs": {
+   "anchor": "behaviour",
+   "note": "panel disposition face: both action labels, verbatim refusals, voided copy keeps the rejection",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_voided_row_ranking.mjs": {
+   "anchor": "behaviour",
+   "note": "voided row derives non-blocked state and leaves the blocked tier in the production sort",
    "sync_path": ""
   },
   "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {

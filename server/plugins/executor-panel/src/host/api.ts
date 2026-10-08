@@ -45,6 +45,11 @@ import {
   makeDefaultSpawnTrigger, fsTriggerIo,
   type TriggerIo, type SpawnTriggerFace,
 } from './inspection-triggers.ts'
+import {
+  validateRerunInput, validateVoidInput, appendDispositionRecord,
+  readDispositionRecords, makeDefaultSpawnRerun, makeDefaultSpawnVoid, fsDispositionIo,
+  type DispositionIo, type SpawnRerunFace, type SpawnVoidFace,
+} from './inspection-disposition.ts'
 import { readConcurrency, spawnConcurrencyLimitWrite, CONCURRENCY_LIMIT_MIN, CONCURRENCY_LIMIT_MAX,
   CONCURRENCY_UNLIMITED, readLastLimitAudit, concurrencyDeclarationPath,
   type ConcurrencyRead, type ConcurrencyWriteFace } from './concurrency.ts'
@@ -130,6 +135,14 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   // read face over the same ledger (already-attributed facts only).
   { path: '/sandbar-executor-panel/api/inspection/trigger-records', methods: ['GET'] },
   { path: '/sandbar-executor-panel/api/inspection/trigger', methods: ['POST'] },
+  // t261008-22: the human exit face for a mechanically-rejected (blocked) inspection
+  // ticket — rerun / void, both WRITE (attributed, project's own account), both behind
+  // the KI-193 gate like every other write method. The records GET is a read face over
+  // the same disposition ledger. Reason-less attempts are refused by name in the
+  // validators BEFORE any spawn or ledger write (zero side effects, L1).
+  { path: '/sandbar-executor-panel/api/inspection/disposition-records', methods: ['GET'] },
+  { path: '/sandbar-executor-panel/api/inspection/period/rerun', methods: ['POST'] },
+  { path: '/sandbar-executor-panel/api/inspection/period/void', methods: ['POST'] },
   // t261004-44 (KI-196 way out (2)): the question-bridge state face -- mounted flag /
   // per-kind counters / recent event ring. GET-only (read face); the read source is
   // deps.bridgeStatus (node.ts injects the createBridgeStatus sink).
@@ -175,6 +188,14 @@ export interface ApiDeps {
    *  makeDefaultSpawnTrigger, full lifecycle reaping; tests inject a stub — never a real
    *  workflow start from a unit test). */
   spawnTrigger?: SpawnTriggerFace
+  /** t261008-22 disposition ledger io (default fs; tests inject an in-memory stub). */
+  dispositionIo?: DispositionIo
+  /** t261008-22 rerun spawn face (default: inspection_trigger.py trigger --reopen-reason
+   *  via makeDefaultSpawnRerun; tests inject a stub — never a real workflow from a unit). */
+  spawnRerun?: SpawnRerunFace
+  /** t261008-22 void spawn face (default: inspection_trigger.py void via
+   *  makeDefaultSpawnVoid; tests inject a stub — zero-write refusals live engine-side). */
+  spawnVoid?: SpawnVoidFace
   /** Concurrency read face (default readConcurrency via the engine CLI; test stub injection, t261006-17). */
   engineConcurrencyRead?: (key: string, env: NodeJS.ProcessEnv) => Promise<ConcurrencyRead>
   /** Concurrency limit write face (default spawnConcurrencyLimitWrite via the engine CLI; test stub, t261006-17). */
@@ -790,6 +811,97 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
       if (!written.ok) return bad(500, written.error)
       // A failed trigger is an explicit 502 carrying the already-written attribution
       // row — the attempt keeps its name, success or failure, never silent.
+      if (!spawnRes.ok) {
+        return { status: 502, json: { ok: false, error: spawnRes.error, record, written: written.file } }
+      }
+      return { status: 200, json: { ok: true, record, written: written.file } }
+    }
+    // ---- inspection disposition records (t261008-22) — read face over the ledger ----
+    if (path === '/sandbar-executor-panel/api/inspection/disposition-records') {
+      if (method !== 'GET') return bad(405, 'read-only face: GET only')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const read = readDispositionRecords(deps.dispositionIo ?? fsDispositionIo, env, key)
+      if (!read.ok) {
+        // An empty state is not an error state (200 + ok:false + human reason — the
+        // trigger-records read face's degraded style).
+        return { status: 200, json: { ok: false, source: read.source, reason: read.reason, rows: [] } }
+      }
+      return { status: 200, json: { ok: true, source: read.source, rows: read.rows,
+        malformed_rows: read.malformed_rows, hidden_rows: read.hidden_rows,
+        note: 'newest first by at; the full history stays in the project disposition record file' } }
+    }
+    // ---- inspection period rerun (t261008-22) — write, KI-193 gated above ----
+    if (path === '/sandbar-executor-panel/api/inspection/period/rerun') {
+      if (method !== 'POST') return bad(405, 'rerun face is POST-only (write operation, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const v = validateRerunInput(parsed.body)
+      if (!v.ok) return bad(400, v.error)
+      const spawnFace: SpawnRerunFace = deps.spawnRerun ?? makeDefaultSpawnRerun(env)
+      let spawnRes: Awaited<ReturnType<SpawnRerunFace>>
+      try {
+        spawnRes = await spawnFace(v.value)
+      } catch (err) {
+        spawnRes = { ok: false, error: `rerun spawn face threw: ${err instanceof Error ? err.message : String(err)}` }
+      }
+      const record = {
+        at: now(),
+        by: 'host' as const,
+        ...(v.by_claimed !== undefined ? { by_claimed: v.by_claimed, writer_mismatch: true } : {}),
+        action: 'rerun' as const,
+        project: v.value.project,
+        instance: v.value.instance,
+        period: v.value.period,
+        reason: v.value.reason,
+        spawn: spawnRes.ok
+          ? { ok: true, ...(typeof (spawnRes.doc as Record<string, unknown> | undefined)?.ticket_id === 'string'
+              ? { ticket_id: (spawnRes.doc as Record<string, unknown>).ticket_id as string } : {}) }
+          : { ok: false, error: spawnRes.error },
+      }
+      const written = appendDispositionRecord(deps.dispositionIo ?? fsDispositionIo, env, v.value.project, record)
+      if (!written.ok) return bad(500, written.error)
+      // A failed rerun is an explicit 502 carrying the already-written attribution row
+      // AND the engine's error VERBATIM (in-flight refusal included — the ordering
+      // message is a ticket-face datum, never reworded or swallowed).
+      if (!spawnRes.ok) {
+        return { status: 502, json: { ok: false, error: spawnRes.error, record, written: written.file } }
+      }
+      return { status: 200, json: { ok: true, record, written: written.file } }
+    }
+    // ---- inspection period void (t261008-22) — write, KI-193 gated above ----
+    if (path === '/sandbar-executor-panel/api/inspection/period/void') {
+      if (method !== 'POST') return bad(405, 'void face is POST-only (write operation, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const v = validateVoidInput(parsed.body)
+      if (!v.ok) return bad(400, v.error)
+      const spawnFace: SpawnVoidFace = deps.spawnVoid ?? makeDefaultSpawnVoid(env)
+      let spawnRes: Awaited<ReturnType<SpawnVoidFace>>
+      try {
+        spawnRes = await spawnFace(v.value)
+      } catch (err) {
+        spawnRes = { ok: false, error: `void spawn face threw: ${err instanceof Error ? err.message : String(err)}` }
+      }
+      const record = {
+        at: now(),
+        by: 'host' as const,
+        ...(v.by_claimed !== undefined ? { by_claimed: v.by_claimed, writer_mismatch: true } : {}),
+        action: 'void' as const,
+        project: v.value.project,
+        instance: v.value.instance,
+        period: v.value.period,
+        ticket_id: v.value.ticket_id,
+        reason: v.value.reason,
+        spawn: spawnRes.ok
+          ? { ok: true, ticket_id: v.value.ticket_id, voided: true }
+          : { ok: false, error: spawnRes.error },
+      }
+      const written = appendDispositionRecord(deps.dispositionIo ?? fsDispositionIo, env, v.value.project, record)
+      if (!written.ok) return bad(500, written.error)
+      // A refused void (population / idempotence / unreadable ledger) is an explicit
+      // 502 with the engine's refusal VERBATIM plus the attribution row — a void never
+      // looks like it succeeded when the engine refused it.
       if (!spawnRes.ok) {
         return { status: 502, json: { ok: false, error: spawnRes.error, record, written: written.file } }
       }

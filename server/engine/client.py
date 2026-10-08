@@ -2950,6 +2950,18 @@ def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any],
     meta["exec_status"] = exec_status or None
     meta["close_health"] = _chealth
     meta["close_health_reason"] = _cheason
+    # t261008-22: the detail row carries the same void facts (same source and truth
+    # as the ticket-list row augmentation: inspection-void.jsonl, first signature
+    # wins; read failure = key absent = the detail renders no void face, never
+    # fabricated).
+    try:
+        from inspection_ticketing import read_void_journal, voided_ticket_row  # noqa: PLC0415
+        _vrow = voided_ticket_row(read_void_journal(shared.INSPECTION_DIR), ticket_id)
+        if _vrow is not None:
+            meta["voided"] = {"at": _vrow.get("at"), "who": _vrow.get("who"),
+                              "reason": _vrow.get("reason")}
+    except Exception:
+        pass  # read failure = key absent (honest degradation; ticket-list names the same failure via voided_note)
     meta["close_time_txt"] = close_time_txt
     # t260916-05：模板拓扑导出透传（快照门内 additive 键；workbench detail.topology
     # → 泳道图唯一图源通道——巡检 detail 无 workflow_id，模板级兜底通道不存在）。
@@ -3428,6 +3440,34 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             ip = (str(r.get("instance_id") or ""), str(r.get("period") or ""))
             if ip[0] and ip in closed_by_ip and closed_by_ip[ip] != str(r.get("id") or ""):
                 r["same_period_closed"] = closed_by_ip[ip]
+        # t261008-22: void-face row augmentation — one pass over rows (covers every
+        # row assembly site in this branch: full snapshot / closed-window degraded /
+        # RUNNING query degraded / terminal-failed rows). A voided ticket's row
+        # carries `voided:{at,who,reason}` (the UI re-classifies the row out of the
+        # blocked tier from this key and renders who/why; status/stage_state keep the
+        # snapshot words verbatim — the "reconciliation never rewrites the historical
+        # face" discipline; the re-classification happens on the UI consumer side
+        # only). Read failure = rows unchanged + a named note in inspection_filter
+        # (never fabricated, never silently zeroed).
+        _voided_note = ""
+        try:
+            from inspection_ticketing import read_void_journal  # noqa: PLC0415
+            _voided_by_tid: Dict[str, Dict[str, Any]] = {}
+            for _vr in read_void_journal(shared.INSPECTION_DIR):
+                _vtid = str(_vr.get("ticket_id") or "").strip()
+                if _vtid and _vtid not in _voided_by_tid:   # first signature wins (the idempotence truth)
+                    _voided_by_tid[_vtid] = _vr
+            for r in rows:
+                _v = _voided_by_tid.get(str(r.get("id") or "").strip())
+                if _v is not None:
+                    r["voided"] = {"at": _v.get("at"), "who": _v.get("who"),
+                                   "reason": _v.get("reason")}
+        except Exception as e:  # noqa: BLE001 — void journal read failure degrades (rows untouched, observable)
+            _voided_note = "void journal read failed (rows not augmented): %s: %s" % (type(e).__name__, e)
+        if _voided_note:
+            if not isinstance(inspection_info, dict):
+                inspection_info = {"kind": "inspection", "enabled_instances": []}
+            inspection_info["voided_note"] = _voided_note
     rows.sort(key=lambda r: -(r.get("created") or 0))
     result: Dict[str, Any] = {"count": len(rows), "tickets": rows}
     if inspection_info is not None:

@@ -57,7 +57,10 @@ WINDOW_DAYS_DEFAULT = 7
 OVERDUE_DAYS_DEFAULT = 7
 
 #: journal torn-tail / bad-line count keys (visible-gap face)
-JOURNAL_NAMES = ("inspection-spawn.jsonl", "inspection-reopen.jsonl")
+#: t261008-22: the void journal joins the registry — a torn void row is a swallowed
+#: human signature, so it must stay visible in the aggregate's malformed-count face.
+JOURNAL_NAMES = ("inspection-spawn.jsonl", "inspection-reopen.jsonl",
+                 "inspection-void.jsonl")
 
 #: the ordering statement carried verbatim in the report body (explicit
 #: declaration; never any data source's iteration order)

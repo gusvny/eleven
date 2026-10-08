@@ -958,6 +958,31 @@ def _default_ledger_dir() -> Path:
     return Path(__file__).resolve().parent / "out" / "inspection"
 
 
+def cmd_void(args: argparse.Namespace) -> Dict[str, Any]:
+    """Named void of a terminal blocked inspection ticket (t261008-22, host order
+    261008's human exit).
+
+    Pure ledger I/O (zero Temporal dependency, same shape as verdict --offline):
+    fail-closed argument checks (period lexics, who non-empty and not an agent
+    role name, reason non-empty — all inherited from the trigger face's existing
+    discipline), then straight into inspection_ticketing.void_period_ticket (the
+    single point: population gate / idempotence / audit row + ledger-doc increment
+    all live in that layer; this shell only pre-checks shapes and assembles the
+    receipt — B3 borrowed discipline: the engine's validation is the single truth,
+    this layer does not copy the rules). Whether the instance is in a declaration is
+    covered indirectly by the population gate in void_period_ticket (no doc = named
+    refusal) — no declaration lookup here: a void targets a ticket that is KNOWN to
+    exist, unlike trigger's "check the declaration before any action" scenario; an
+    instance with no voidable ticket needs no declaration pass.
+    """
+    from inspection_ticketing import void_period_ticket
+    period = str(args.period or "").strip()
+    return void_period_ticket(
+        _default_ledger_dir(), instance_id=args.instance, period=period,
+        ticket_id=str(args.ticket_id or "").strip(),
+        who=str(args.who or ""), reason=str(args.reason or ""))
+
+
 
 def cmd_sweep_lanes(args: argparse.Namespace) -> Dict[str, Any]:
     """人工清场入口（t260913-02）：删本实例命名空间里**早于水位**的巡检 worktree/分支
@@ -1140,7 +1165,10 @@ def main() -> None:
     sub = ap.add_subparsers(dest="op")
     p = sub.add_parser("decl", help="离线声明视图")
     p.add_argument("--decl-path", default=None)
-    p = sub.add_parser("trigger", help="手动触发一期（每期一票：同票号去重；--reopen-reason 可具名重跑已服务/失败/blocked-completed 期——这是唯一的人工处置入口，cancel 对终态票是空操作回执）")
+    p = sub.add_parser("trigger", help="manually trigger one period (one ticket per period: same-id dedup; --reopen-reason "
+                                       "re-opens a served/failed/timed-out/blocked-completed slot with a named reason; a live "
+                                       "period refuses. The labeling exit for a terminal blocked ticket is the void subcommand "
+                                       "— cancel is a no-op receipt on terminal tickets)")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
     p.add_argument("--repo-root", default="")
@@ -1151,6 +1179,17 @@ def main() -> None:
                         "在飞期仍拒。260926 宿主令 + KI-192）")
     p.add_argument("--fixture-mark", default="",
                    help="夹具标记（KI-191：测试夹具跑真流程必带——去重认标记不认假票）")
+    p = sub.add_parser("void", help="named void of a terminal blocked ticket (who+reason "
+                                    "mandatory; only a blocked-completed ticket with its "
+                                    "ledger doc present qualifies; a live period takes no "
+                                    "void — wait for it to close or use a named cancel; a "
+                                    "served period refuses void — findings must not be "
+                                    "erased. t261008-22 human exit)")
+    p.add_argument("--instance", required=True)
+    p.add_argument("--period", required=True)
+    p.add_argument("--ticket-id", required=True, help="ticket being voided (must match the period ledger doc)")
+    p.add_argument("--who", required=True, help="disposer (agent role names refused)")
+    p.add_argument("--reason", required=True, help="void reason (mandatory non-empty; lands in the audit row and the ledger face)")
     p = sub.add_parser("trigger-produce", help="手动触发产出型巡检一期（per-ticket 队列，t260925-01）")
     p.add_argument("--instance", required=True)
     p.add_argument("--period", default=None)
@@ -1231,6 +1270,8 @@ def main() -> None:
             result = cmd_decl(args)
         elif args.op == "sweep-lanes":
             result = cmd_sweep_lanes(args)
+        elif args.op == "void":
+            result = cmd_void(args)   # pure ledger I/O, zero Temporal (sync branch like decl/sweep-lanes)
         elif args.op == "weekly":
             result = cmd_weekly(args)
         else:

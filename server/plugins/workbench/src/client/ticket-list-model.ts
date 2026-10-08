@@ -61,12 +61,20 @@ const EXEC_STATUS_ALIVE = new Set(['RUNNING', 'CONTINUED_AS_NEW'])
  *     语义上已完成，沿用台面 ticketState 既有口径）；未知/未来 stage_state →
  *     active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
  */
-export function deriveTicketState(status?: unknown, stageState?: unknown, execStatus?: unknown): TicketState4 {
+export function deriveTicketState(status?: unknown, stageState?: unknown, execStatus?: unknown,
+                                  voided?: unknown): TicketState4 {
   if (typeof execStatus === 'string' && execStatus !== '') {
     if (EXEC_STATUS_DONE_OK.has(execStatus)) return 'done'
     if (!EXEC_STATUS_ALIVE.has(execStatus)) return 'failed'
   }
   if (status === 'failed' || stageState === 'failed') return 'failed'
+  // t261008-22: a voided inspection row re-classifies out of the blocked tier (done
+  // family) — a void means the human disposition is DONE, not "stuck, waiting for
+  // you" (void only applies to blocked tickets; the engine face is
+  // inspection-void.jsonl and the row key `voided` is augmented by client.py
+  // ticket-list). failed still outranks voided (the two sets do not intersect;
+  // defensive order, never guessed).
+  if (voided) return 'done'
   const st = typeof status === 'string' ? status : undefined
   const ss = typeof stageState === 'string' ? stageState : undefined
   if (st === 'closed') return 'done'
@@ -108,6 +116,8 @@ export interface CloseHealthRowLike {
   report_path?: unknown
   /** 受阻事实（实案 t260920-02 形：面快照 blocked——受阻面=没跑成实质工作）。 */
   blocked_reason?: unknown
+  /** t261008-22: voided (engine row key; truth = inspection-void.jsonl; truthy = the human disposition is done). */
+  voided?: unknown
   /** 引擎下发的收口健康度（t260921-03 起随行）；缺省=本地兜底推导。 */
   close_health?: unknown
 }
@@ -166,6 +176,10 @@ export function closeHealthOf(row: CloseHealthRowLike | null | undefined): Close
  * 巡检缺报告产生（引擎判定同源），未来新产物域接入时随词表一起扩。
  */
 export function closeHealthBadgeOf(row: CloseHealthRowLike | null | undefined): string {
+  // t261008-22: a voided row's badge carries the disposition fact (who/why live in
+  // the row tooltip and the detail; the badge only says "voided + the findings were
+  // still rejected" — a void never reads as success, and the rejection stays said).
+  if (row !== null && typeof row === 'object' && row.voided) return 'Voided · findings were rejected'
   const h = closeHealthOf(row)
   if (h === 'abnormal') return 'Closed·Abnormal (no report)'
   if (h === 'unreadable') return 'Closed·Unverified'
@@ -198,6 +212,8 @@ export interface TicketSortRowLike {
   stage_state?: unknown
   /** Temporal 执行状态（t260919-02：失败类终态行置顶可 attention 的数据源）。 */
   exec_status?: unknown
+  /** t261008-22: voided (the re-classify-out-of-blocked data source). */
+  voided?: unknown
   /** 收口健康度判定面（t260921-03：done 档拆异常/正常两层的数据源，全可缺）。 */
   engine?: unknown
   kind?: unknown
@@ -221,7 +237,7 @@ export interface TicketSortRowLike {
  */
 export function ticketMergeTierOf(status?: unknown, stageState?: unknown, execStatus?: unknown,
                                   row?: CloseHealthRowLike | null): 0 | 1 | 2 | 3 {
-  const s4 = deriveTicketState(status, stageState, execStatus)
+  const s4 = deriveTicketState(status, stageState, execStatus, row?.voided)
   switch (s4) {
     case 'waiting':
     case 'blocked':
@@ -453,7 +469,7 @@ export interface FilterInput {
 export function filterRows<T extends FilterableRow>(rows: T[], f: FilterInput): T[] {
   const q = (f.q ?? '').trim().toLowerCase()
   return rows.filter(r => {
-    if (f.state && deriveTicketState(r.status, r.stage_state, r.exec_status) !== f.state) return false
+    if (f.state && deriveTicketState(r.status, r.stage_state, r.exec_status, r.voided) !== f.state) return false
     if (f.health === 'abnormal') {
       const h = closeHealthOf(r)
       if (h !== 'abnormal' && h !== 'unreadable') return false
@@ -470,7 +486,7 @@ export function filterRows<T extends FilterableRow>(rows: T[], f: FilterInput): 
 /** 五态 chips 计数（含 done——收口折叠计数行的数字来源；'' 全部计数由调用方取 rows.length）。 */
 export function countByState(rows: FilterableRow[]): Record<TicketState4, number> {
   const out: Record<TicketState4, number> = { active: 0, done: 0, waiting: 0, blocked: 0, failed: 0 }
-  for (const r of rows) out[deriveTicketState(r.status, r.stage_state, r.exec_status)] += 1
+  for (const r of rows) out[deriveTicketState(r.status, r.stage_state, r.exec_status, r.voided)] += 1
   return out
 }
 

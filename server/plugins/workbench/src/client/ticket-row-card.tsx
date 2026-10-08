@@ -36,6 +36,8 @@ export interface CardTicket {
   updated_ts?: number
   created?: number
   blocked_reason?: string
+  /** t261008-22: voided (engine row key; truthy = the row re-classifies to done + the card shows "Voided by ..."). */
+  voided?: { at?: unknown; who?: unknown; reason?: unknown } | unknown
   /** 段间暂停二态（t260908-01，host 行形状透传）：paused=已受理；
    *  paused_phase=pending（待段间生效）/ at_gate（已停在段间门口）。 */
   paused?: boolean
@@ -138,6 +140,17 @@ export function cardTitle(t: CardTicket, wf?: WfLike | null, compact = false,
   const short = stageDisplayLabel(stage?.id ?? t.stage, stageShortOf(stage))
   if (short !== '') parts.push(`Stage: ${short}`)
   if (t.blocked_reason) parts.push(`Blocked: ${t.blocked_reason}`)
+  // t261008-22: the void fact goes into the tooltip (who/why — the disposition
+  // voucher travels with the row; malformed voided shape = say "voided" only, never
+  // invent a who).
+  if (t.voided && typeof t.voided === 'object') {
+    const v = t.voided as { who?: unknown; reason?: unknown }
+    const who = typeof v.who === 'string' && v.who.trim() !== '' ? v.who : 'unknown'
+    const why = typeof v.reason === 'string' && v.reason.trim() !== '' ? `: ${v.reason}` : ''
+    parts.push(`Voided by ${who}${why} (findings were rejected, not erased)`)
+  } else if (t.voided) {
+    parts.push('Voided (findings were rejected, not erased)')
+  }
   if (t.exec_status) parts.push(`Exec: ${t.exec_status}`)
   if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`)
   if (compact && progress?.text) parts.push(progress.text)
@@ -151,7 +164,7 @@ export function TicketRowCard({
   ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic,
 }: TicketRowCardProps) {
   // t260919-02：exec_status 进五态推导（失败类终态行 → 'failed'「已失败」红标）。
-  const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status)
+  const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided)
   const epicColor = epicColorOf(t.epic)
   const dots = compact ? [] : laneDots(wf, t)
   const rel = relativeTime(toMillis(t.updated_ts ?? updatedTsMs))

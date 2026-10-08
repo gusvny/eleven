@@ -7137,12 +7137,13 @@ const EXEC_STATUS_ALIVE = /* @__PURE__ */ new Set(["RUNNING", "CONTINUED_AS_NEW"
 *     语义上已完成，沿用台面 ticketState 既有口径）；未知/未来 stage_state →
 *     active（宁显活跃勿假警报——不作受阻/等你误报，UT 真值表钉此缺省行）。
 */
-function deriveTicketState(status, stageState, execStatus) {
+function deriveTicketState(status, stageState, execStatus, voided) {
 	if (typeof execStatus === "string" && execStatus !== "") {
 		if (EXEC_STATUS_DONE_OK.has(execStatus)) return "done";
 		if (!EXEC_STATUS_ALIVE.has(execStatus)) return "failed";
 	}
 	if (status === "failed" || stageState === "failed") return "failed";
+	if (voided) return "done";
 	const st = typeof status === "string" ? status : void 0;
 	const ss = typeof stageState === "string" ? stageState : void 0;
 	if (st === "closed") return "done";
@@ -7211,6 +7212,7 @@ function closeHealthOf(row) {
 * 巡检缺报告产生（引擎判定同源），未来新产物域接入时随词表一起扩。
 */
 function closeHealthBadgeOf(row) {
+	if (row !== null && typeof row === "object" && row.voided) return "Voided · findings were rejected";
 	const h = closeHealthOf(row);
 	if (h === "abnormal") return "Closed·Abnormal (no report)";
 	if (h === "unreadable") return "Closed·Unverified";
@@ -7243,7 +7245,7 @@ function pausedBadgeText(phase) {
 * 老调用点/无行面语境不下异常结论）。
 */
 function ticketMergeTierOf(status, stageState, execStatus, row) {
-	switch (deriveTicketState(status, stageState, execStatus)) {
+	switch (deriveTicketState(status, stageState, execStatus, row?.voided)) {
 		case "waiting":
 		case "blocked":
 		case "failed": return 0;
@@ -7432,6 +7434,12 @@ function cardTitle(t, wf, compact = false, progress, rel) {
 	const short = stageDisplayLabel(stage?.id ?? t.stage, stageShortOf(stage));
 	if (short !== "") parts.push(`Stage: ${short}`);
 	if (t.blocked_reason) parts.push(`Blocked: ${t.blocked_reason}`);
+	if (t.voided && typeof t.voided === "object") {
+		const v = t.voided;
+		const who = typeof v.who === "string" && v.who.trim() !== "" ? v.who : "unknown";
+		const why = typeof v.reason === "string" && v.reason.trim() !== "" ? `: ${v.reason}` : "";
+		parts.push(`Voided by ${who}${why} (findings were rejected, not erased)`);
+	} else if (t.voided) parts.push("Voided (findings were rejected, not erased)");
 	if (t.exec_status) parts.push(`Exec: ${t.exec_status}`);
 	if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`);
 	if (compact && progress?.text) parts.push(progress.text);
@@ -7440,7 +7448,7 @@ function cardTitle(t, wf, compact = false, progress, rel) {
 	return parts.join("\n");
 }
 function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ordering, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
-	const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status);
+	const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided);
 	const epicColor = epicColorOf(t.epic);
 	const dots = compact ? [] : laneDots(wf, t);
 	const rel = relativeTime(toMillis(t.updated_ts ?? updatedTsMs));
@@ -10223,6 +10231,198 @@ function cleanId(v) {
 	return typeof v === "string" && v.trim() !== "" ? v : null;
 }
 //#endregion
+//#region src/client/inspection-exit-model.ts
+/**
+* inspection-exit-model — pure model for the inspection ticket exit block
+* (t261008-22). Zero react / zero io — node-importable unit-tested truth tables
+* (ticket-list-model.ts layering precedent); the .tsx component only consumes.
+*/
+/** Exit block visibility: inspection rows only, and only when there is something to
+*  say — a blocked face (actions) or a voided face (the recorded disposition). */
+function inspectionExitVisible(detail) {
+	if (detail === null || typeof detail !== "object") return false;
+	if (detail.kind !== "inspection") return false;
+	return Boolean(detail.voided) || detail.status === "blocked";
+}
+/** Shape + require-a-reason pre-check (the same named refusals the server repeats).
+*  Returns the validated payload or a named error; never throws. */
+function buildExitPayload(action, detail, projectKey, reason) {
+	const instance = typeof detail.instance_id === "string" ? detail.instance_id.trim() : "";
+	const period = typeof detail.period === "string" ? detail.period.trim() : "";
+	if (instance === "") return {
+		ok: false,
+		error: "This ticket carries no instance identity — the exit cannot address a period (resolve the identity first)."
+	};
+	if (period === "") return {
+		ok: false,
+		error: "This ticket carries no period — the exit cannot address a period (resolve the period first)."
+	};
+	const r = reason.trim();
+	if (r === "") return {
+		ok: false,
+		error: `A reason is required for ${action === "rerun" ? "a re-run" : "a void"} — it is the human signature. Write why, then retry.`
+	};
+	const payload = {
+		project: projectKey ?? "",
+		instance,
+		period,
+		reason: r
+	};
+	if (action === "void") {
+		payload.ticket_id = typeof detail.id === "string" ? detail.id : "";
+		if (payload.ticket_id === "") return {
+			ok: false,
+			error: "This ticket carries no id — a void cannot be addressed."
+		};
+	}
+	return {
+		ok: true,
+		payload
+	};
+}
+//#endregion
+//#region src/client/inspection-exit.tsx
+/**
+* inspection-exit — the human exit block for a mechanically-rejected (blocked)
+* inspection ticket, on the ticket detail face (t261008-22, host order 261008;
+* plan v2 Step 4, entry face = the workbench ticket detail, where the blocked row
+* the host complained about actually sits).
+*
+* Two named actions, both requiring a reason (a reason-less attempt is refused BY
+* NAME client-side before any fetch — zero side effects; the server refuses again):
+*   - "Re-run this period"  -> POST /sandbar-executor-panel/api/inspection/period/rerun
+*     (drives inspection_trigger.py trigger --reopen-reason; the engine's refusals —
+*     the in-flight refusal ("a live inspection for this period already exists ...
+*     named cancel first, then re-run") included — surface
+*     VERBATIM, never reworded or swallowed).
+*   - "Void with a reason"  -> POST /sandbar-executor-panel/api/inspection/period/void
+*     (drives inspection_trigger.py void — the engine's named void for terminal
+*     blocked-completed tickets; void never reads as success: the block says the
+*     rejected findings stay on the ticket).
+*
+* Population copy (review C6): a blocked-completed ticket's valid exit is re-run
+* alone; void is optional labeling (who/why), never a prerequisite — the copy never
+* tells the host to "void first" here. A voided ticket renders the recorded
+* disposition instead of the actions (who/reason verbatim; findings untouched).
+*
+* Same-origin cross-plugin fetch precedent: the requests band already reads
+* /sandbar-executor-panel/api/requests from this client (index.tsx).
+*/
+/** The block itself (client component; self-contained state). */
+function InspectionExitBlock({ detail, projectKey }) {
+	const [reason, setReason] = (0, react.useState)("");
+	const [busy, setBusy] = (0, react.useState)(null);
+	const [msg, setMsg] = (0, react.useState)("");
+	const [msgKind, setMsgKind] = (0, react.useState)("info");
+	if (detail.voided) {
+		const v = detail.voided;
+		const who = typeof v.who === "string" && v.who.trim() !== "" ? v.who : "unknown";
+		const why = typeof v.reason === "string" && v.reason.trim() !== "" ? v.reason : "(reason not recorded)";
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-insp-exit",
+			"data-testid": "inspection-exit-voided",
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-insp-exit-ttl",
+					children: "Voided"
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-sub",
+					children: [
+						"Voided by ",
+						who,
+						": ",
+						why
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-sub",
+					children: "This ticket stays on record as rejected — the findings above were not erased by the void."
+				})
+			]
+		});
+	}
+	const run = async (action) => {
+		const check = buildExitPayload(action, detail, projectKey, reason);
+		if (!check.ok) {
+			setMsgKind("error");
+			setMsg(check.error);
+			return;
+		}
+		setBusy(action);
+		setMsg("");
+		try {
+			const res = await fetch(`/sandbar-executor-panel/api/inspection/period/${action}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(check.payload)
+			});
+			const doc = await res.json().catch(() => null);
+			const err = doc && typeof doc.error === "string" ? doc.error : `HTTP ${res.status}`;
+			if (res.ok && doc && doc.ok === true) {
+				setMsgKind("ok");
+				setMsg(action === "rerun" ? "Re-run accepted — a NEW ticket for the same period was opened (the audit link old → new is in the reopen journal); this blocked row will leave the top tier." : "Void recorded — who and why are in the engine ledger; this row is no longer ranked as blocked.");
+			} else {
+				setMsgKind("error");
+				setMsg(`Refused: ${err}`);
+			}
+		} catch (e) {
+			setMsgKind("error");
+			setMsg(`Exit call failed: ${e instanceof Error ? e.message : String(e)}`);
+		} finally {
+			setBusy(null);
+		}
+	};
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-insp-exit",
+		"data-testid": "inspection-exit",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-insp-exit-ttl",
+				children: "Human exit for this rejected ticket"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-sub",
+				children: "Re-run opens a NEW ticket for the same period (this blocked row stops being ranked as blocked). Void labels this rejected ticket with who and why — it does not un-reject the findings. Both need a reason."
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+				className: "wb-insp-exit-reason",
+				"data-testid": "inspection-exit-reason",
+				placeholder: "Reason (required — who is signing: host; why now)",
+				value: reason,
+				onChange: (e) => setReason(e.target.value),
+				rows: 2
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-insp-exit-actions",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					className: "wb-btn",
+					"data-testid": "inspection-exit-rerun",
+					disabled: busy !== null,
+					onClick: () => {
+						run("rerun");
+					},
+					children: busy === "rerun" ? "Re-running…" : "Re-run this period"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					className: "wb-btn",
+					"data-testid": "inspection-exit-void",
+					disabled: busy !== null,
+					onClick: () => {
+						run("void");
+					},
+					children: busy === "void" ? "Voiding…" : "Void with a reason"
+				})]
+			}),
+			msg !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: msgKind === "error" ? "wb-sub" : "wb-sub",
+				"data-testid": "inspection-exit-msg",
+				"data-kind": msgKind,
+				children: msg
+			})
+		]
+	});
+}
+//#endregion
 //#region src/client/spec-block.tsx
 function strList(v) {
 	if (!Array.isArray(v)) return [];
@@ -11742,6 +11942,13 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-drawer-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:10px}
 .wb-d2-blocked{margin:8px 0;padding:6px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-radius:6px;
   background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);font-size:12.5px}
+/* t261008-22 inspection human-exit block (re-run / void): same red family as the
+   blocked face but its own box — the exit is an ACTION face, not a blocked-fact
+   face; the voided state reuses the block for a read-only fact row. */
+.wb-insp-exit{margin:8px 0;padding:8px 12px;border:1px dashed var(--dsw-derive-danger,#cf222e);border-radius:6px;background:var(--dsw-derive-canvas,#fff)}
+.wb-insp-exit-ttl{font-size:12px;font-weight:600;color:var(--dsw-derive-danger,#cf222e)}
+.wb-insp-exit-reason{width:100%;margin-top:6px;padding:6px 8px;font-size:12px;border:1px solid var(--dsw-derive-surface-2,#e8ebef);border-radius:6px;box-sizing:border-box;resize:vertical}
+.wb-insp-exit-actions{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
 /* KI-048（t260911-05）人话状态卡：红调=blocked / 黄调=其它态带受阻面；主题令牌派生。 */
 .wb-status-card{margin:8px 0;padding:10px 12px;border:1px solid var(--dsw-derive-danger,#cf222e);border-left:4px solid var(--dsw-derive-danger,#cf222e);border-radius:8px;background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-status-card[data-sev=amber]{border-color:var(--dsw-derive-warn,#bf8700);border-left-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
@@ -13749,8 +13956,8 @@ function availableOps(t, wf) {
 	const s = t.status;
 	const ss = t.stage_state;
 	if (t.engine === "inspection") return [];
-	if (deriveTicketState(t.status, t.stage_state, t.exec_status) === "failed") return [];
-	if (deriveTicketState(t.status, t.stage_state, t.exec_status) === "done") return [];
+	if (deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided) === "failed") return [];
+	if (deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided) === "done") return [];
 	if (t.engine === "template-as-code-v2") {
 		if (s === "closed") return [];
 		const v2ops = [];
@@ -15677,6 +15884,10 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 						detail.blocked_reason && detail.close_health !== "abnormal" && detail.close_health !== "unreadable" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-d2-blocked",
 							children: ["⛔ Blocked: ", detail.blocked_reason]
+						}),
+						detail.kind === "inspection" && inspectionExitVisible(detail) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(InspectionExitBlock, {
+							detail,
+							projectKey
 						}),
 						(() => {
 							const card = buildStatusCard(detail);

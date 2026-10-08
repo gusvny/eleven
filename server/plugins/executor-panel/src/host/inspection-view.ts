@@ -265,3 +265,90 @@ export function buildPeriodView(
 ): PeriodView {
   return buildPeriodViewCore(periodEntry, latestReported, instances, { EMPTY_COPIES, INSTANCE_LABELS })
 }
+
+/* --------------------------------------------------------------- t261008-22 ----
+ * inspection-exit disposition view — the pure render model for the human exit
+ * block on a blocked inspection card (host order 261008). Zero DOM / zero io /
+ * zero react (same layering as buildPeriodView above; embedded verbatim into the
+ * static page or consumed by a client component). Input = an engine row (UNTRUSTED:
+ * missing/drifted fields degrade — no throw, no fabrication) + the last exit
+ * attempt's result if one was made (the engine's refusal surfaces VERBATIM —
+ * the in-flight refusal is a ticket-face datum, never reworded or swallowed).
+ * Copy is verbatim the ticket's contract wording: both action labels, a
+ * reason-mandatory copy, and — for a voided card — the recorded who/reason plus
+ * the statement that the rejected findings stay on record (a void never reads as
+ * a success and never hides what the inspection found). */
+
+/** Action labels (single point — the page and the tests reference, never rewrite). */
+export const DISPOSITION_ACTIONS = {
+  rerun: 'Re-run this period',
+  void: 'Void with a reason',
+} as const
+
+export const DISPOSITION_COPIES = {
+  reason_mandatory: 'Both need a reason — it is the human signature; a reason-less attempt is refused by name.',
+  rejection_kept: 'Voiding does not erase the findings: they were rejected and stay on record.',
+  rerun_effect: 'Re-run opens a NEW ticket for the same period; this blocked row stops being ranked as blocked.',
+  void_effect: 'Void labels this rejected ticket with who and why — it does not un-reject the findings.',
+} as const
+
+export interface DispositionCardLike {
+  instance_id?: unknown
+  period?: unknown
+  ticket_id?: unknown
+  id?: unknown
+  status?: unknown
+  kind?: unknown
+  voided?: unknown
+}
+
+export interface DispositionView {
+  visible: boolean
+  blocked: boolean
+  actions: { rerun: string; void: string }
+  reason_copy: string
+  rejection_copy: string
+  rerun_effect: string
+  void_effect: string
+  /** Engine refusal verbatim (ok:false error, or a bare refusal string) — '' when none. */
+  error: string
+  /** Recorded void (verbatim who/reason) — null when not voided. */
+  voided: { who: string; reason: string; at: string } | null
+}
+
+function dispStr(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
+export function buildDispositionView(
+  card: DispositionCardLike | null | undefined,
+  lastResult?: unknown,
+): DispositionView {
+  const c = (card !== null && typeof card === 'object') ? card as Record<string, unknown> : {}
+  const voidedRaw = (c.voided !== null && typeof c.voided === 'object') ? c.voided as Record<string, unknown> : null
+  const status = dispStr(c.status)
+  const visible = dispStr(c.kind) === 'inspection'
+    && dispStr(c.instance_id) !== '' && dispStr(c.period) !== ''
+    && (Boolean(voidedRaw) || status === 'blocked')
+  // The engine's refusal verbatim: {ok:false,error} shape, or a bare refusal string.
+  let error = ''
+  if (typeof lastResult === 'string') {
+    error = lastResult
+  } else if (lastResult !== null && typeof lastResult === 'object' && !Array.isArray(lastResult)) {
+    const lr = lastResult as Record<string, unknown>
+    if (lr.ok === false && typeof lr.error === 'string') error = lr.error
+  }
+  return {
+    visible,
+    blocked: status === 'blocked',
+    actions: { rerun: DISPOSITION_ACTIONS.rerun, void: DISPOSITION_ACTIONS.void },
+    reason_copy: DISPOSITION_COPIES.reason_mandatory,
+    rejection_copy: DISPOSITION_COPIES.rejection_kept,
+    rerun_effect: DISPOSITION_COPIES.rerun_effect,
+    void_effect: DISPOSITION_COPIES.void_effect,
+    error,
+    voided: voidedRaw
+      ? { who: dispStr(voidedRaw.who) || 'unknown', reason: dispStr(voidedRaw.reason), at: dispStr(voidedRaw.at) }
+      : null,
+  }
+}

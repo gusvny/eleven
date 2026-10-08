@@ -164,8 +164,8 @@ ok((idxSrc.match(/setTerminalFace\(null\)/g) || []).length >= 2, '切单/重开/
 ok(modelSrc.includes("'failed'"), '五态枚举含 failed（模型层 TicketState4）')
 ok(sbSrc.includes("[data-state=failed]") && idxSrc.includes(".wb-root .wb-card[data-state=failed]"),
   'failed 红系 CSS 消费点在源（左栏行卡/板面遗留覆写）')
-ok(idxSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status)'), 'deriveTicketState 调用点传 exec_status')
-ok(idxSrc.includes("if (deriveTicketState(t.status, t.stage_state, t.exec_status) === 'failed') return []"),
+ok(idxSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided)'), 'deriveTicketState 调用点传 exec_status 与 voided（t261008-22：void 行改判数据源随行）')
+ok(idxSrc.includes("if (deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided) === 'failed') return []"),
   'availableOps：失败行零管理操作（终态票零推进入口，行卡面）')
 
 ok(tfSrc.includes('不抛、不编造'), 'terminal-face.ts 纪律声明在源（畸形输入全降级的口径锚）')
@@ -181,7 +181,7 @@ ok(nodeSrc.includes("['ticket-query', JSON.stringify({ ticket_id: id })]"), '直
 ok(!/console\.log/.test(nodeSrc.slice(nodeSrc.indexOf('function fetchTerminalFace'), nodeSrc.indexOf('function fetchTerminalFace') + 800)), '直读桥零调试残留')
 
 const rowCardSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-row-card.tsx'), 'utf8')
-ok(rowCardSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status)'), '行卡五态推导传 exec_status')
+ok(rowCardSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided)'), '行卡五态推导传 exec_status 与 voided（t261008-22）')
 ok(rowCardSrc.includes('exec_status?: string'), '行卡类型补 exec_status')
 ok(rowCardSrc.includes('Exec: '), '行卡悬停 title 带执行状态原文（t260925-18 英文）')
 
