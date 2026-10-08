@@ -105,11 +105,15 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
   },
   ledger_last_wakes: {
     id: 'ledger_last_wakes',
-    title: 'Ledger — Last wakes',
+    title: 'Overview — Recent actions (view source event) — Wakes',
     source: 'GET /sandbar-watchdog/api/status, result.wakes',
-    order: 'Newest first by at, sorted in the page (the payload may arrive append-ordered — this ordering rule is the fix for the t261004-14 incident). Missing or malformed at sorts last. Equal at keeps payload order (stable).',
-    cap: 3,
-    cap_reason: 'The block is a compact "last" view beside the ledger counters, not the record: the full wake history is in the watchdog ledger file, so capping here hides a summary, not data. (Incident t261004-14: this cap existed as an unnamed three-row loop bound and took the first three rows of an append-ordered array — the declaration and the newest-first sort are the fix.)',
+    order: 'Newest first by at, sorted in the page (the payload may arrive append-ordered — this ordering rule is the fix for the t261004-14 incident). Missing or malformed at sorts last. Equal at keeps payload order (stable). The watchdog status itself keeps only the last 20 wakes; the dialog renders every row that payload returns and names the 20-row window in its copy instead of truncating further.',
+    // t261008-20 (host order): the wakes face moved from a capped compact block on
+    // the retired Ledger tab to the Overview source-event dialog, and the host asked
+    // for more than three rows. The dialog renders every row the status API returns;
+    // the real ceiling is the payload's own window (watchdog core.ts keeps the last
+    // 20 wakes — named in `order` and in the dialog copy, not silently applied).
+    cap: 'all',
     empty_copy: 'No wakes yet. The watchdog adds a row here when it wakes an executor.',
   },
   settings_knobs: {

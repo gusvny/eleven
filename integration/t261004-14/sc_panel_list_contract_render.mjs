@@ -65,11 +65,14 @@ async function loadPlaywright() {
 function declaredWakeCap() {
   if (!existsSync(CONTRACT_PATH)) return null
   const src = readFileSync(CONTRACT_PATH, 'utf8')
-  // Accept any entry whose id/cap line pair mentions wakes; look for a numeric cap
-  // in the wakes entry block. Deliberately loose in shape, strict in semantics:
-  // a wakes entry must carry an explicit number.
-  const m = src.match(/wakes[\s\S]{0,400}?cap['"]?\s*[:=]\s*(\d+)/i)
-  return m ? Number(m[1]) : undefined // null = no module; undefined = module without a numeric wakes cap
+  // Accept any entry whose id/cap line pair mentions wakes; look for the declared
+  // cap in the wakes entry block — either a number or the literal 'all'
+  // (t261008-20: the wakes face is the record view, so the declaration is 'all').
+  // Deliberately loose in shape, strict in semantics: a wakes entry must carry an
+  // explicit declaration, and a bare pseudo-numeric cap (99) never satisfies this.
+  const m = src.match(/wakes[\s\S]{0,400}?cap['"]?\s*[:=]\s*(?:['"]all['"]|(\d+))/i)
+  if (!m) return undefined // module without a declared wakes cap
+  return m[1] !== undefined ? Number(m[1]) : 'all'
 }
 
 async function main() {
@@ -156,26 +159,42 @@ async function main() {
     await page.goto(`http://127.0.0.1:${lport}/?project=${PROJ}`)
     await page.waitForTimeout(600)
 
-    // Ledger tab holds wakes; Alerts tab holds alerts. Collect rendered rows.
+    // t261008-20: the wakes face lives in the Overview source-event dialog — open
+    // it from the reader's path before judging what the reader sees.
+    try { await page.click('text=Recent actions (view source event)'); await page.waitForTimeout(250) } catch { /* pre-implement: entry absent, legs below name it */ }
+
+    // The Overview dialog holds wakes; Alerts tab holds alerts. Collect rendered rows.
     const rows = await page.evaluate(() => {
       const grab = (sel) => [...document.querySelectorAll(sel)].map(e => (e.textContent || '').trim())
       return { wakes: grab('#ledgerEvents .act'), alerts: grab('#alertList .row'), acts: grab('#actList .act'), body: document.body.innerText, doc: document.documentElement.textContent }
     })
     const t = rows.body.toLowerCase()
 
-    // W1 cap: rendered wake row count equals the declared cap when payload exceeds it.
-    if (typeof cap === 'number') {
+    // W1 cap: rendered wake row count matches the declared cap applied to the
+    // payload. cap='all' (t261008-20) means every returned row — the face is the
+    // record view; a numeric cap is honored as declared, but 3 is the incident.
+    if (cap === 'all') {
+      const shown = rows.wakes.filter(x => /wake/i.test(x)).length
+      C.case('W1-wakes-shown-per-declared-cap', shown === wakes.length,
+        `declared=all payload=${wakes.length} shown=${shown} (incident showed 3 regardless)`)
+      C.case('W1b-incident-unfixed-detect', shown > 3, `shown=${shown} must exceed the incident's 3`)
+    } else if (typeof cap === 'number') {
       const shown = rows.wakes.filter(x => /wake/i.test(x)).length
       C.case('W1-wakes-shown-per-declared-cap', shown === Math.min(cap, wakes.length),
         `declared=${cap} payload=${wakes.length} shown=${shown} (incident showed 3 regardless)`)
       if (cap > 3) C.case('W1b-incident-unfixed-detect', shown > 3, `shown=${shown} must exceed the incident's 3`)
+      if (cap === 3) C.case('W1b-incident-unfixed-detect', false, 'the incident cap (3) is declared again — t261008-20 revoked it')
     } else {
       C.case('W1-wakes-shown-per-declared-cap', false, 'no declared cap to compare against')
     }
 
     // W2 wakes newest first: ticket ids in DOM order must follow at desc.
-    // Newest = t-new-6 > t-new-5 > t-new-4 > t-new-3 > t-old-1 > t-old-2.
-    const order = ['t-new-6', 't-new-5', 't-new-4', 't-new-3', 't-old-1', 't-old-2']
+    // Fixture ats (UTC): new-6=02:00 Jan5 > new-4=01:00 Jan5 > new-3=00:30 Jan5 >
+    // new-5=00:15 Jan5 > old-1=01:00 Dec30 > old-2=00:30 Dec30. (The earlier
+    // expected array 6,5,4,3… contradicted the fixture's own timestamps and only
+    // passed under the old 3-row cap by filter∩shown accident — exposed by the
+    // t261008-20 uncap, corrected here to the timestamp truth.)
+    const order = ['t-new-6', 't-new-4', 't-new-3', 't-new-5', 't-old-1', 't-old-2']
     const seq = rows.wakes.map(x => (x.match(/t-(?:new|old)-\d/) || [''])[0]).filter(Boolean)
     const wantSeq = order.filter(id => seq.includes(id))
     C.case('W2-wakes-newest-first', wantSeq.length >= 2 && JSON.stringify(seq) === JSON.stringify(wantSeq), `dom order=${seq.join(',')} expected=${wantSeq.join(',')}`)

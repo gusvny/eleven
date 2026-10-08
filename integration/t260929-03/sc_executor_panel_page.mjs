@@ -12,7 +12,9 @@
 //   A1 alerts tab：level 与 night-muted 标记可见；不发明 answered/auto-action 位。
 //   Q1 requests 主从视图：按项目分组、详情含问题/默认动作/等待时间；show more
 //      追加旧行**不丢最新尾行**；答复只经显式动作且未答行原样保留。
-//   L1 ledger tab：健康度以比例呈现（含 % 或 of），unreadable=显式降级横幅。
+//   L1 ledger 面（t261008-20：源事件对话框，Ledger 页签退役）：健康度以比例呈现
+//      （含 % 或 of），unreadable=显式降级横幅。
+//   T2 Ledger 页签退役：tab strip 不再有 Ledger（面在对话框里，页签不得残留）。
 //   P1 provenance：≥2 旋钮各显示其来源（file#path 与 factory-default 两种形态）。
 //   X1 全旅程零 pageerror/console.error。
 //
@@ -189,18 +191,23 @@ const bodyText = (page) => page.evaluate(() => document.body.innerText)
   const { ctx, page } = await freshPage()
   await page.goto(URL_); await page.waitForTimeout(400)
   const t = await bodyText(page)
-  // t261003-06 改版定稿：五 tab = Overview/Grants/Alerts/Ledger/Settings；Requests 页签
-  // 退役并入 Overview（本场景的 tab 清单随之更新——旧清单钉的是已退役布局）。
-  const tabs = ['Overview', 'Grants', 'Alerts', 'Ledger', 'Settings']
+  // t261008-20 改版定稿：四 tab = Overview/Grants/Alerts/Settings；Requests 页签
+  // 退役并入 Overview、Ledger 页签退役折进 Overview 源事件对话框
+  // （本场景的 tab 清单随之更新——旧清单钉的是已退役布局）。
+  const tabs = ['Overview', 'Grants', 'Alerts', 'Settings']
   const missing = tabs.filter(x => !t.includes(x))
   const requestsTabRetired = !/(^|\n)\s*Requests\s*(\n|$)/.test(t)
+  const ledgerTabRetired = !/(^|\n)\s*Ledger\s*(\n|$)/.test(t)
   const navEl = await page.evaluate(() => {
     const nav = document.querySelector('nav') || document.body
     return nav.innerText
   })
   const cjk = /[\u4e00-\u9fff]/.test(navEl)
-  C.case('T1-five-tabs-english-chrome', missing.length === 0 && !cjk && requestsTabRetired,
+  C.case('T1-tabs-english-chrome', missing.length === 0 && !cjk && requestsTabRetired,
     missing.length ? 'missing tabs: ' + missing.join(',') : (!requestsTabRetired ? 'standalone Requests tab still present (retired by t261003-06)' : (cjk ? 'CJK in chrome nav' : 'ok')))
+  // t261008-20 (host order 261008)：Ledger 页签退役——不许隐藏残留。
+  C.case('T2-ledger-tab-retired', ledgerTabRetired,
+    ledgerTabRetired ? 'ok' : 'a Ledger tab still renders on the tab strip (retired by t261008-20)')
   await ctx.close()
 }
 
@@ -302,14 +309,22 @@ statusBody = { ok: true, result: statusFixture() }
     `detail=${detailOk} tail_kept=${tailKept}`)
   // 答复仅显式动作：无 answer POST 发生在纯浏览时
   C.case('Q2-no-auto-answer-on-render', answerPosts.length === 0, `answer_posts=${answerPosts.length}`)
-  // Ledger：比例呈现 + unreadable 横幅
-  await page.click('text=Ledger').catch(() => {})
+  // Ledger 面（t261008-20：源事件对话框；入口在 Overview，Ledger 页签已退役）：
+  // 比例呈现 + unreadable 横幅——读 #ledgerDlg 容器自身文本（隐藏元素不在 body
+  // innerText 里）。
+  const dlgText = async () => page.evaluate(() => {
+    const dlg = document.querySelector('#ledgerDlg')
+    return dlg ? dlg.innerText : ''
+  })
+  await page.click('#ledgerDlgBtn').catch(() => {})
   await page.waitForTimeout(300)
-  const lt = await bodyText(page)
+  const lt = await dlgText()
   C.case('L1-ledger-proportions', /%| of /.test(lt), `proportion_face=${/%| of /.test(lt)}`)
   statusBody = { ok: true, result: statusFixture({ ledger: statusFixture().ledger, }) }
   statusBody.result.ledger = { ...statusBody.result.ledger, unreadable: 'EACCES: /ledg/alpha.jsonl' }
   await page.reload(); await page.waitForTimeout(400)
+  // L2 的 unreadable 降级横幅是页面级横幅（横幅条在对话框外，属全页降级提示），
+  // 从 body 读；对话框面只承载 L1 的健康度网格。
   const lt2 = await bodyText(page)
   C.case('L2-ledger-unreadable-banner', /unreadable|EACCES/i.test(lt2), 'ok')
   // Settings：≥2 旋钮溯源两种形态

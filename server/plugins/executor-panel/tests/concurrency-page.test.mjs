@@ -1,8 +1,9 @@
 /**
- * concurrency-page.test.mjs —— t261006-17 (CL-2) 页面形状 UT（纯 node，无浏览器）：
- *  - Overview 的 Running tickets 区块形状：区块头（chip + 审计短语位）、唯一旋钮行
- *    （Limit [−] N [+] · 计数 · [Save]）、running list 容器；
- *  - 宿主裁定锁面：**无队列列出、无解释文案**（队列票号 / FIFO / 规则句不出现）；
+ * concurrency-page.test.mjs —— t261006-17 (CL-2) 页面形状 UT（纯 node，无浏览器）；
+ * t261008-20 更新：区块更名 Concurrent limit，running list 容器与审计短语位退场。
+ *  - Overview 的 Concurrent limit 区块形状：区块头（chip）、唯一旋钮行
+ *    （Limit [−] N [+] · 计数 · [Save]）；
+ *  - 宿主裁定锁面：**无队列列出、无解释文案、无 running 票列表**（左列已有 running 面）；
  *  - #project= 深链回退在案（切项目 = 换上限与数字）；
  *  - EMBEDDED 单实现锁：limitStep / concChipState 源码与 CONC_LIMITS 表嵌入页面，
  *    与 UT 所测函数同源（漂移在此红）。
@@ -15,20 +16,28 @@ let n = 0
 const H = PANEL_PAGE_HTML
 
 // ---- 区块形状 ----
-for (const id of ['concBlock', 'concChip', 'concAudit', 'concKnobRow', 'concMinus', 'concLimit',
-  'concPlus', 'concCounts', 'concSave', 'concMsg', 'concList']) {
+for (const id of ['concBlock', 'concChip', 'concKnobRow', 'concMinus', 'concLimit',
+  'concPlus', 'concCounts', 'concSave', 'concMsg']) {
   assert(H.includes('id="' + id + '"'), 'Overview block element present: ' + id)
   n++
 }
-assert(H.includes('Running tickets'), 'block header: Running tickets')
+// t261008-20 negative face: the removed containers/stamp cannot come back unnoticed.
+assert(!H.includes('id="concList"'), 'no running-ticket list container (removed by t261008-20)')
+assert(!H.includes('id="concAudit"'), 'no audit-stamp span (removed by t261008-20)')
+assert(!H.includes("'set by '"), "no 'set by ' audit phrase producer anywhere")
+{
+  // Check the old title on the rendered block itself (page comments may narrate the rename).
+  const b0 = H.indexOf('id="concBlock"')
+  const b1 = H.indexOf('</div>\n    </div>', b0)
+  const block = H.slice(Math.max(0, b0 - 200), b1 > b0 ? b1 + 16 : b0 + 400)
+  assert(!block.includes('Running tickets'), 'old block title gone from the rendered block')
+  assert(block.includes('Concurrent limit'), 'block header: Concurrent limit (t261008-20)')
+}
 assert(H.includes('>Limit<'), 'the one knob row is labeled Limit')
 assert(H.includes("id=\"concSave\""), 'one Save control in the block')
 assert(H.includes('concChipLabel') && H.includes("'room to start one'") && H.includes("'at the limit'") && H.includes("'over the limit'"),
   'the three chip states are named on the page (design §2.1)')
 assert(H.includes('conc-amber'), 'the over-the-limit amber marking lands in a class name (attribute-readable)')
-assert(H.includes("'never changed'"), 'an unchanged limit says so explicitly (never an empty phrase)')
-assert(H.includes('awaiting your signature'), 'the human-hold row names why it holds (amber-dot row)')
-assert(H.includes('class="dot'), 'holder rows render a dot marker')
 n += 6
 
 // ---- host-ruling lock face: no queue listing, no explanation copy (checked on the

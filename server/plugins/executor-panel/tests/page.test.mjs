@@ -1,6 +1,6 @@
 /**
  * page.test.mjs —— 改版静态页形状 UT（t261003-06，视觉基准 mock 261003 / 设计 note §2-§4）：
- *  - 五 tab（Overview/Grants/Alerts/Ledger/Settings）；Requests 页签取消（并入 Overview）；
+ *  - tab strip（t261008-20：无 Ledger；Overview/Grants/Alerts/Settings 等）；Requests 页签取消（并入 Overview）；
  *  - 项目选择器（下拉/手填/Load）与轮询状态行**不存在**；?project= 深链缝仍在；
  *  - Overview 两栏并列（760px 断点叠放）、条目可展开、选项按钮/自由文本分叉、
  *    Answered 折叠区、总开关与 Grants 总开关同一状态；
@@ -13,7 +13,7 @@ import { PANEL_PAGE_HTML, PANEL_ROUTE } from '../src/host/panel-page.ts'
 let n = 0
 
 // ---- 五 tab + Requests 页签取消 ----
-for (const tab of ['Overview', 'Grants', 'Alerts', 'Ledger', 'Settings']) {
+for (const tab of ['Overview', 'Grants', 'Alerts', 'Settings']) {
   assert(PANEL_PAGE_HTML.includes('>' + tab + ' <') || PANEL_PAGE_HTML.includes('>' + tab + '<'), 'tab label present: ' + tab)
 }
 assert(!PANEL_PAGE_HTML.includes('>Requests<'), 'Requests tab removed (merged into Overview)')
@@ -142,8 +142,9 @@ assert(PANEL_ROUTE === '/sandbar-executor-panel', 'panel route constant')
   assert(calls >= 3, 'alerts/ledger refresh on poll success and failure paths, found ' + calls)
 }
 
-// ---- t261003-13：Ledger 页诚实化（改名 + 去 'sent' 假数据 + 本地时间带标签） ----
-assert(PANEL_PAGE_HTML.includes('>Last wakes<'), 'ledger block renamed to what it shows (Last wakes)')
+// ---- t261003-13 / t261008-20：Ledger 面诚实化 + 迁入 Overview source-event 对话框 ----
+// （t261008-20：Ledger 页签退场，>Last wakes< 面随迁对话框并改题为 Wakes + 计数。）
+assert(PANEL_PAGE_HTML.includes('Wakes <span class="meta" id="ledgerWakeCount">'), 'wakes block titled Wakes with a count span (t261008-20)')
 assert(!PANEL_PAGE_HTML.includes('Last events'), 'no "Last events" title left (title must match rows)')
 assert(!PANEL_PAGE_HTML.includes('The watchdog appends here when a ticket changes.'), 'old empty copy gone')
 assert(PANEL_PAGE_HTML.includes('No wakes yet. The watchdog adds a row here when it wakes an executor.'), 'empty copy matches what the block really shows')
@@ -152,10 +153,15 @@ assert(PANEL_PAGE_HTML.includes('wakeRowSentence(w2)'), 'wake rows render mode+a
 assert(!PANEL_PAGE_HTML.includes("||'sent'"), "no 'sent' literal fallback anywhere in the page")
 assert(PANEL_PAGE_HTML.includes('function localDateTime'), 'dated local-time formatter is the shared embedded implementation')
 assert(!PANEL_PAGE_HTML.includes('hhmmLocal'), 'no stale hhmmLocal name left anywhere in the page')
-assert(PANEL_PAGE_HTML.includes('esc(localDateTime(x.at))') && PANEL_PAGE_HTML.includes('esc(localDateTime(a2.at))') && PANEL_PAGE_HTML.includes('esc(localDateTime(w2.at))'), 'Overview, Alerts and wake rows all render local time')
+// t261003-13 rework: the wake row computes `when` once (guarded, dash on malformed
+// input) and renders esc(when) — the local-time formatter is still the only clock.
+assert(PANEL_PAGE_HTML.includes('esc(localDateTime(x.at))') && PANEL_PAGE_HTML.includes('esc(localDateTime(a2.at))')
+  && PANEL_PAGE_HTML.includes("var when = bad ? '—' : localDateTime(w2.at)") && PANEL_PAGE_HTML.includes("esc(when)"),
+  'Overview, Alerts and wake rows all render local time (wake row via the guarded when)')
 {
-  const caps = (PANEL_PAGE_HTML.match(/>Times are local\.</g) || []).length
-  assert(caps === 3, 'Times are local. caption on Overview, Alerts and Ledger tabs, found ' + caps)
+  const caps = (PANEL_PAGE_HTML.match(/>Times are local\./g) || []).length
+  // t261008-20: Overview column, the source-event dialog, Alerts tab (Ledger tab gone).
+  assert(caps === 3, 'Times are local. caption on Overview, the dialog and Alerts, found ' + caps)
 }
 
 n += 60

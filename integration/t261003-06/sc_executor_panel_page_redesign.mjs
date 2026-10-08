@@ -145,9 +145,12 @@ async function main() {
     const text = await page.evaluate(() => document.body.innerText)
     const t = text.toLowerCase()
 
-    // T1 五页签
-    const tabs = ['overview', 'grants', 'alerts', 'ledger', 'settings'].filter(x => t.includes(x))
-    C.case('T1-five-tabs', tabs.length === 5, `found=${tabs.join(',')}`)
+    // T1 五页签（t261008-20 起 Ledger 页签退场——tab 集为 4；ledger 面改为 Overview
+    // source-event 对话框，从入口文字断言其可达，不再作为页签存在）
+    const tabs = ['overview', 'grants', 'alerts', 'settings'].filter(x => t.includes(x))
+    C.case('T1-five-tabs', tabs.length === 4, `found=${tabs.join(',')}`)
+    C.case('T1b-ledger-face-entry', !/data-tab="ledger"/.test(html) && t.includes('recent actions (view source event)'),
+      'the ledger face is reachable from the Overview entry, never a Ledger tab')
     const hasRequestsTab = await page.evaluate(() => {
       const els = [...document.querySelectorAll('label,input[name],.tab,[data-tab]')]
       return els.some(e => /^\s*requests\s*$/i.test(e.textContent || ''))

@@ -2,24 +2,30 @@
 // block a person actually sees.
 //
 // intent: the executor-panel Overview shows ONE row (Limit [−] N [+] · X at
-// work · Y waiting [Save]) with a three-state chip, the audit phrase at the
-// right of the block header, a holders-only running list where a human-hold
-// ticket keeps its slot and marks an amber solid dot — and NO queue listing
-// and NO explanation copy on this face (host ruling: the wording belongs in
-// the document). Switching project switches limit + numbers with it.
+// work · Y waiting [Save]) with a three-state chip — and NO queue listing,
+// NO explanation copy, NO running-ticket rows and NO audit stamp on this
+// face. t261008-20 (host order 261008): the block is renamed 'Concurrent
+// limit'; it must NOT list the running tickets (the console's left column
+// already shows them — the holders face lives there, not here) and the
+// 'set by <who> <when>' stamp is gone (the writer's audit record stays in
+// the engine audit file, only this display goes). Switching project
+// switches limit + numbers with it.
 //
 // Sub-cases (fixture face served at the page boundary, three chip states):
 //  U1 room to start one  (limit 5, 2 at work, 1 waiting) — chip says so.
 //  U2 at the limit       (limit 2, 2 at work, 1 waiting) — chip says so.
 //  U3 over the limit     (limit 1, 2 at work, 2 waiting) — chip says so AND
 //     carries the amber marking.
-//  U4 amber solid dot on the human-hold holder row (its slot is kept: the row
-//     is present in the running list).
+//  U4 t261008-20 (host order): the running-ticket list is removed — the face
+//     renders NO ticket rows at all, holder or otherwise (no 't-hold-1', no
+//     't-run-' markup anywhere on the page); the block carries the counts in
+//     words instead ('2 at work · 1 waiting').
 //  U5 one knob only: exactly one Save control in the block; the queue tickets
 //     of the fixture NEVER render (no queue listing); no explanation copy
 //     about queue semantics on the face.
-//  U6 audit phrase at the right of the block header (who/when, or an explicit
-//     never-changed phrase — never an empty string).
+//  U6 t261008-20 (host order): NO audit stamp — no 'set by '/'changed by'
+//     text even when the audit record travels with the face (the display
+//     goes; the engine audit file is out of scope).
 //  U7 project switch: same page, beta fixture (different limit) — limit and
 //     numbers switch together.
 //  U8 UI capture: the Overview block is screenshotted in each of the three
@@ -151,11 +157,11 @@ for (const [chip, st] of Object.entries(STATES)) {
   FACES.alpha.waiting = st.waiting
   await openProject('alpha')
   const body = (await page.locator('body').innerText()).toLowerCase()
-  const blockAt = body.indexOf('running tickets')
+  const blockAt = body.indexOf('concurrent limit')
   const block = blockAt >= 0 ? body.slice(blockAt, blockAt + 1200) : body
 
   C.case('U' + (idx + 1) + '.block-present[' + chip + ']', blockAt >= 0,
-    'the RUNNING TICKETS block must render on Overview')
+    'the CONCURRENT LIMIT block must render on Overview')
   C.case('U' + (idx + 1) + '.chip-text[' + chip + ']', body.includes(chip),
     'chip must say "' + chip + '", page had: ' + body.slice(0, 160).replace(/\n/g, ' '))
   C.case('U' + (idx + 1) + '.knob-row[' + chip + ']',
@@ -186,33 +192,26 @@ for (const [chip, st] of Object.entries(STATES)) {
       'the over-the-limit chip carries the amber marking, got: ' + String(amber))
   }
   if (chip === 'room to start one') {
-    const htmlNow = await page.content()
-    C.case('U4.hold-row-kept', htmlNow.includes('t-hold-1'),
-      'a human-hold ticket still holds its slot — its row renders')
-    const dot = await page.evaluate(() => {
-      const row = [...document.querySelectorAll('*')].find(n =>
-        n.children.length === 0 && (n.textContent || '').trim() === 't-hold-1')
-      if (!row) return null
-      let el = row.parentElement
-      for (let i = 0; i < 4 && el; i++) {
-        const hit = [...el.querySelectorAll('[class],[style]')].find(n =>
-          /dot|bullet|badge|marker|indicator/i.test(n.getAttribute('class') || '') &&
-          /amber|warn|#(b45309|f59e0b|d97706|a16207)|rgb/i.test((n.getAttribute('class') || '') + ' ' + (n.getAttribute('style') || '')))
-        if (hit) return (hit.getAttribute('class') || '') + ' ' + (hit.getAttribute('style') || '')
-        el = el.parentElement
-      }
-      return null
-    })
-    C.case('U4.amber-dot-on-hold-row', !!dot,
-      'the human-hold row marks an amber solid dot, found: ' + String(dot))
-    C.case('U5.no-queue-listing', !(await page.content()).includes('t-wait-1'),
+    // t261008-20 (host order): the running-ticket list is gone from this
+    // block — the fixture's holder and queue tickets must not leak onto the
+    // page in any shape (row, markup, or id text).
+    const htmlNow = (await page.content()).toLowerCase()
+    C.case('U4.no-holder-rows', !htmlNow.includes('t-hold-1') && !htmlNow.includes('t-run-'),
+      'no running-ticket rows render on this face (the left column owns that)')
+    C.case('U4.counts-in-words', block.includes(st.atWork + ' at work') && block.includes(st.waiting + ' waiting'),
+      'the block states the numbers in words: "' + st.atWork + ' at work · ' + st.waiting + ' waiting"; got: ' +
+        block.slice(0, 160).replace(/\n/g, ' '))
+    C.case('U5.no-queue-listing', !htmlNow.includes('t-wait-1'),
       'host ruling: no queue listing on this face — waiting tickets never render')
     C.case('U5.no-explanation-copy', !/queue (is|orders|reorders|semantics)|first in|fifo/i.test(block),
       'no explanation copy about queue semantics on the face')
     C.case('U5.one-save', (block.match(/save/g) || []).length === 1,
       'one knob, one Save: ' + (block.match(/save/g) || []).length)
-    C.case('U6.audit-phrase', /set by|changed by|never changed|by you/i.test(block),
-      'the audit phrase sits in the block header area: ' + block.slice(0, 160).replace(/\n/g, ' '))
+    // t261008-20 (host order): the audit stamp display goes — no 'set by'
+    // phrase anywhere in the block even though the face carries an ok audit
+    // record shape; the engine audit file keeps the record (out of scope).
+    C.case('U6.no-audit-stamp', !/set by|changed by|never changed/.test(block),
+      'no audit stamp on the face: ' + block.slice(0, 160).replace(/\n/g, ' '))
   }
   await page.screenshot({ path: join(SHOTS, 'overview-chip-' + String(idx + 1) + '-' + chip.replace(/ /g, '-') + '.png'), fullPage: true })
   idx += 1
@@ -223,12 +222,12 @@ for (const [chip, st] of Object.entries(STATES)) {
   FACES.alpha.limit = 5
   await openProject('beta')
   const body = (await page.locator('body').innerText()).toLowerCase()
-  const blockAt = body.indexOf('running tickets')
+  const blockAt = body.indexOf('concurrent limit')
   const block = blockAt >= 0 ? body.slice(blockAt, blockAt + 800) : ''
   C.case('U7.limit-switches', block.includes('7'),
     'switching project switches the limit with it (beta=7)')
   C.case('U7.numbers-switch', block.includes('at work') && !block.includes('t-run-1'),
-    'the running list belongs to beta now')
+    'the counts line belongs to beta now, and still no ticket rows')
 }
 
 await browser.close()

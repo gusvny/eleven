@@ -113,7 +113,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 input.tab{position:absolute;opacity:0;pointer-events:none}
 .seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
 .seg label:hover{color:var(--fg)}
-#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-ledger:checked~.seg label[for=t-ledger],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sect.lead{margin-top:18px}
@@ -126,7 +126,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
 .dot.amber{background:var(--amber)}.dot.grey{background:var(--dot-grey)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
-/* t261006-17 (CL-2): the Running tickets block — knob buttons, limit value, three-state chip. */
+/* t261006-17 (CL-2), renamed t261008-20: the Concurrent limit block — knob buttons, limit value, three-state chip. */
 .concBtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;width:28px;height:24px;font:inherit;cursor:pointer;line-height:1;padding:0}
 .concBtn:hover{border-color:var(--blue)}
 .concVal{display:inline-block;min-width:80px;text-align:center;font-weight:600}
@@ -297,7 +297,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 
   <input class="tab" type="radio" name="tb" id="t-overview" checked>
   <input class="tab" type="radio" name="tb" id="t-epics">
-  <input class="tab" type="radio" name="tb" id="t-ledger">
   <input class="tab" type="radio" name="tb" id="t-alerts">
   <input class="tab" type="radio" name="tb" id="t-inspection">
   <input class="tab" type="radio" name="tb" id="t-metrics">
@@ -310,7 +309,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
          tab-order contract scenario asserts this exact sequence). -->
     <label for="t-overview" data-tab="overview">Overview <span id="reqBadge" class="badge zero">0</span></label>
     <label for="t-epics" data-tab="epics">Epics</label>
-    <label for="t-ledger" data-tab="ledger">Ledger</label>
     <label for="t-alerts" data-tab="alerts">Alerts</label>
     <label for="t-inspection" data-tab="inspection">Inspection</label>
     <label for="t-metrics" data-tab="metrics">Metrics</label>
@@ -330,9 +328,15 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
     </div>
     <div id="ovBanners"></div>
+    <!-- t261008-20 (host order): renamed to Concurrent limit (was the running-tickets
+         block). The block no longer
+         lists the tickets holding slots (the console's left column already shows what
+         is running) and no longer shows the audit stamp ("set by <who> <when>" — the
+         engine audit record stays in the engine ledger; only this display went).
+         The limit knob, the limit value, the counts line (words, not rows) and the
+         three-state chip stay. -->
     <div class="grp" id="concBlock">
-      <div class="line"><div class="lab" style="flex:0 0 auto">Running tickets <span id="concChip" class="pill conc-room" style="display:none"></span></div>
-        <span class="meta" id="concAudit" style="margin-left:auto"></span></div>
+      <div class="line"><div class="lab" style="flex:0 0 auto">Concurrent limit <span id="concChip" class="pill conc-room" style="display:none"></span></div></div>
       <div class="line" id="concKnobRow">
         <div class="lab" style="flex:0 0 auto">Limit</div>
         <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
@@ -342,7 +346,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         <button id="concSave" style="margin-left:auto">Save</button>
         <span class="meta" id="concMsg"></span>
       </div>
-      <div id="concList"></div>
     </div>
     <!-- t261005-10 (UI-2): the ONE concurrency-limit row (CL-1 read face; the write
          face belongs to CL-2 and is named as absent when it is). Facts only. -->
@@ -372,6 +375,33 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         <div class="sect">Recent actions</div>
         <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
         <div class="row" style="padding:2px 4px" id="actList"></div>
+        <!-- t261008-20 (host order): the Ledger tab left the strip; its whole face
+             (health grid, ledger file, wakes) lives in this dialog. The entry uses
+             the host's wording. Keyboard: a real button opens it; focus moves to the
+             Close control and returns to the opener; Esc closes. -->
+        <div class="sect lead" style="margin-top:8px">
+          <button class="linkbtn" id="ledgerDlgBtn">Recent actions (view source event)</button>
+        </div>
+      </div>
+    </div>
+    <!-- t261008-20: the source-event dialog (former Ledger tab face). Same overlay
+         pattern as inspDlg (data-open + display toggle, pure DOM — no timers, no
+         spawned work). Fixed + centered so it reads as a dialog from anywhere on the
+         long Overview. Not carried from that pattern: Esc close and focus move /
+         restore (added here because the host order demands keyboard reachability).
+         No close-on-outside-click, by decision. -->
+    <div class="inspCard" id="ledgerDlg" data-open="false" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(640px,92vw);max-height:80vh;overflow:auto;z-index:50;box-shadow:0 12px 40px rgba(0,0,0,.25)" role="dialog" aria-label="Source event record">
+      <div class="pad inspSect" style="display:flex;align-items:center">
+        <span style="flex:1">Source event record</span>
+        <button class="bar" id="ledgerDlgClose">Close</button>
+      </div>
+      <div class="pad">
+        <div class="sect">Health</div>
+        <div class="grid" id="ledgerGrid"></div>
+        <div class="file" id="ledgerFile"></div>
+        <div class="sect lead">Wakes <span class="meta" id="ledgerWakeCount"></span></div>
+        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes.</div>
+        <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
       </div>
     </div>
   </section>
@@ -438,14 +468,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div id="alertList"></div>
   </section>
 
-  <section id="paneLedger" style="display:none">
-    <div class="sect">Health</div>
-    <div class="grid" id="ledgerGrid"></div>
-    <div class="file" id="ledgerFile"></div>
-    <div class="sect lead">Last wakes</div>
-    <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
-    <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
-  </section>
+  <!-- t261008-20 (host order): paneLedger is gone — the Ledger tab left the strip
+       and its face moved into the Overview source-event dialog (#ledgerDlg). -->
 
   <section id="paneInsp" style="display:none">
     <div id="inspBanner"></div>
@@ -508,7 +532,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 <script>
 ` + EMBEDDED + `
   // t261004-14：列表契约一处声明（list-contracts.ts 编译期校验，此处 JSON 嵌页）。
-  // 渲染代码只经 capOf/emptyCopyOf 引用上限与空态文案——上限数字不再内联在渲染路径里
+  // Render paths reach the empty copy through emptyCopyOf only (since t261008-20
+  // capOf retired with the last numeric cap — every list is cap:'all'); cap numbers
+  // stay out of the render paths.
   //（机械检查 check_list_caps.mjs 扫渲染源码里的截断形状整数常量）。
   var LIST_CONTRACTS = ${JSON.stringify(LIST_CONTRACTS)};
   // t261005-05 (UI-4): badge runtime constant closure (the page-side projectIdentity reads these tables).
@@ -533,15 +559,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(!key) return;
     try{ slot.innerHTML = identityBadgeSvg(projectIdentity(key), 13); }catch(e){}
   }
-  function capOf(id){
-    var c = LIST_CONTRACTS[id];
-    if(!c || typeof c.cap !== 'number') throw new Error('numeric list cap not declared: '+id);
-    return c.cap;
-  }
   function emptyCopyOf(id){
     var c = LIST_CONTRACTS[id];
     return (c && c.empty_copy) || '';
   }
+  // t261008-20: capOf removed with the last numeric cap — every list the page renders
+  // now declares cap:'all' (LIST_CONTRACTS is the truth; no render path truncates).
 
 (function(){
   var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'',
@@ -1108,23 +1131,25 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   function renderConcurrency(){
     var c = state.conc;
-    var chip = el('concChip'), knobRow = el('concKnobRow'), list = el('concList');
+    var chip = el('concChip'), knobRow = el('concKnobRow');
+    // t261008-20 (host order): the block lists no tickets (the console's left column
+    // already shows what is running) and shows no audit stamp. The refusal / error
+    // copy that used to land in the removed #concList now lands in #concCounts.
     if(!state.project){
       chip.style.display='none'; knobRow.style.display='none';
-      el('concAudit').textContent=''; el('concCounts').textContent=''; el('concLimit').textContent='–';
-      list.innerHTML=''; return;
+      el('concCounts').textContent=''; el('concLimit').textContent='–';
+      return;
     }
     if(!c || c.ok !== true){
       chip.style.display='none'; knobRow.style.display='none';
-      el('concAudit').textContent=''; el('concCounts').textContent='';
-      list.innerHTML = '<div class="act" style="border:0"><span class="say muted">' + esc(c && c.reason ? c.reason : 'The concurrency state is not known yet.') + '</span></div>';
+      el('concCounts').textContent = c && c.reason ? c.reason : 'The concurrency state is not known yet.';
       return;
     }
     if(c.declared === false){
       // Absent/malformed declaration: the engine refuses to run without a usable
       // declaration — show the named refusal, never a guessed default number.
-      chip.style.display='none'; knobRow.style.display='none'; el('concCounts').textContent='';
-      list.innerHTML = '<div class="act" style="border:0"><span class="say muted">' + esc(c.reason || c.note || 'No concurrency limit is declared.') + '</span></div>';
+      chip.style.display='none'; knobRow.style.display='none';
+      el('concCounts').textContent = c.reason || c.note || 'No concurrency limit is declared.';
       return;
     }
     knobRow.style.display='';
@@ -1132,26 +1157,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     // The over state carries its amber marking in a class name (conc-amber) so a
     // capture face can read it from the attribute instead of guessing colors.
     chip.style.display=''; chip.className='pill conc-'+kind+(kind==='over'?' conc-amber':''); chip.textContent=concChipLabel(kind);
-    var a = c.audit;
-    el('concAudit').textContent = (a && a.ok === true) ? ('set by ' + a.by + ' ' + localDateTime(a.ts)) : 'never changed';
     el('concCounts').textContent = c.at_work + ' at work · ' + c.waiting + ' waiting';
     var v = concDraftValue();
     el('concLimit').textContent = v === CONC_LIMITS.unlimited ? 'Unlimited' : String(v);
-    var html = '';
-    for(var i=0;i<c.holders.length;i++){
-      var h = c.holders[i];
-      var hold = h.reason === 'human-hold';
-      // A ticket waiting for a signature keeps its slot (amber solid dot); a running
-      // ticket is blue. No rule explanation inline (host ruling: the wording belongs
-      // in the document). The queue is NOT listed here (CL-3 face).
-      html += '<div class="act"><span class="dot'+(hold?' amber':' blue')+'" title="'+(hold?'Holds a slot while it waits for your signature':'Holds a slot')+'"></span>'
-        + '<span class="tk">'+esc(h.ticket)+'</span>'
-        + '<span class="say muted">'+(hold?'awaiting your signature':'at work')+'</span></div>';
-    }
-    if(c.holders.length === 0){
-      html = '<div class="act" style="border:0"><span class="say muted">No ticket holds a slot.</span></div>';
-    }
-    list.innerHTML = html;
   }
   el('concMinus').onclick = function(){ var v=concDraftValue(); if(v===null) return; state.concDraft=limitStep(v,-1); renderConcurrency(); };
   el('concPlus').onclick  = function(){ var v=concDraftValue(); if(v===null) return; state.concDraft=limitStep(v,1); renderConcurrency(); };
@@ -1175,6 +1183,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       el('alertBanner').innerHTML = bannerHtml(pickDegraded({reachable: state.reachable===true}).label, true);
       el('alertList').innerHTML=''; el('alertHead').textContent='Recent · 0';
       el('ledgerGrid').innerHTML=''; el('ledgerFile').textContent=''; el('ledgerEvents').innerHTML='';
+      el('ledgerWakeCount').textContent='';
       return;
     }
     // t261004-14：alerts 最新在前（payload 可能是追加序）；cap='all'，契约见 LIST_CONTRACTS。
@@ -1199,19 +1208,52 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       + '<div class="cell"><b>'+esc(lg.gaps_seen!=null?lg.gaps_seen:'—')+'</b><span>gaps</span></div>';
     el('ledgerFile').textContent = lg.path || 'The ledger path is not known.';
     var ev = '';
-    // t261004-14 事故修复：last wakes 先排最新在前，再取**声明过的**上限
-    // （LIST_CONTRACTS.ledger_last_wakes.cap=3，事故原状是内联的取前三行循环上界
-    // 取追加序前三行）。上限以名字引用——机械检查扫渲染路径里的截断形状整数常量。
+    // t261008-20 (host order): the wakes face moved from the Ledger tab into the
+    // Overview source-event dialog and no longer takes the first three rows — render
+    // every row the status API returned (cap='all', see LIST_CONTRACTS). The real
+    // ceiling is the watchdog status payload's own 20-row window; the dialog copy
+    // names that number instead of truncating silently. The newest-first sort is
+    // still the t261004-14 fix. Missing st / missing st.wakes / empty wakes all fall
+    // through to the declared empty copy — no fabricated rows.
     var wakes = newestFirst(st.wakes||[]);
-    var wcap = capOf('ledger_last_wakes');
-    for(var k=0;k<Math.min(wakes.length,wcap);k++){
+    el('ledgerWakeCount').textContent = '· ' + wakes.length;
+    for(var k=0;k<wakes.length;k++){
       var w2 = wakes[k];
-      ev += '<div class="act"><span class="t">'+esc(localDateTime(w2.at))+'</span><span class="pill open">WAKE</span>'
-        + '<span class="tk">'+esc(w2.ticket||w2.id||'')+'</span><span class="say">'+esc(wakeRowSentence(w2))+'</span></div>';
+      // t261003-13 rework (re-exposed by the t261008-20 uncap): the renderer never
+      // dereferences the row unchecked — a non-object row (null / string / number)
+      // renders the honest face (dash time, unknown sentence) instead of aborting
+      // the whole ledger face. wakeRowSentence and localDateTime are already
+      // null-safe pure helpers; the guard here only keeps the field reads safe.
+      var bad = !w2 || typeof w2 !== 'object' || Array.isArray(w2);
+      var when = bad ? '—' : localDateTime(w2.at);
+      var tk = bad ? '' : (w2.ticket||w2.id||'');
+      ev += '<div class="act"><span class="t">'+esc(when)+'</span><span class="pill open">WAKE</span>'
+        + '<span class="tk">'+esc(tk)+'</span><span class="say">'+esc(wakeRowSentence(w2))+'</span></div>';
     }
     if(!ev) ev = '<div class="act" style="border:0"><span class="say muted">'+esc(emptyCopyOf('ledger_last_wakes'))+'</span></div>';
     el('ledgerEvents').innerHTML = ev;
   }
+
+  // ---- t261008-20: source-event dialog (former Ledger tab face). Same overlay
+  // pattern as inspDlg (data-open + display toggle). Added here, not inherited:
+  // Esc close (one element-keyed document listener — inspDlg keeps its button-only
+  // close) and focus move to the Close control on open / restore to the opener on
+  // close. Pure DOM toggles on both paths — nothing to reclaim on any path.
+  var ledgerOpener = null;
+  function setLedgerDlg(open){
+    var dlg = el('ledgerDlg');
+    dlg.style.display = open ? '' : 'none';
+    dlg.setAttribute('data-open', open ? 'true' : 'false');
+    if(open){ ledgerOpener = document.activeElement; el('ledgerDlgClose').focus(); }
+    else if(ledgerOpener && ledgerOpener.focus){ ledgerOpener.focus(); ledgerOpener = null; }
+  }
+  el('ledgerDlgBtn').onclick = function(){ setLedgerDlg(true); };
+  el('ledgerDlgClose').onclick = function(){ setLedgerDlg(false); };
+  document.addEventListener('keydown', function(e){
+    if((e.key === 'Escape' || e.key === 'Esc') && el('ledgerDlg').getAttribute('data-open') === 'true'){
+      setLedgerDlg(false);
+    }
+  });
 
   // ---- t261005-10 (UI-2): Overview limit row (render only; the loader is CL-2's
   // loadConcurrency above — one fetch feeds both faces, no duplicate loader). ----
@@ -1921,7 +1963,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // t261005-10 (UI-2): the nine-tab fixed order (mock v11); the four read-only
   // faces load on first activation (lazy — they are reference faces, not live
   // state, so they stay out of the 5s poll).
-  var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],['t-ledger','paneLedger'],['t-alerts','paneAlert'],
+  var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],['t-alerts','paneAlert'],
     ['t-inspection','paneInsp'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
   var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': inspEnsureLoaded, 't-metrics': loadMetrics, 't-docs': loadDocs };  function showTab(id){
     for(var i=0;i<PANES.length;i++){

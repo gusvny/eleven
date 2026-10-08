@@ -165,8 +165,9 @@ async function main() {
     // A5 时区口径标签仍在
     C.case('A5-times-are-local-label', /Times are local\./.test(listText), 'label missing')
 
-    // A4 Ledger 页签 wakes 同一日期化形
-    await gotoTab(page, 'Ledger')
+    // A4 wakes 行同一日期化形（t261008-20 起 wakes 面在 Overview source-event 对话框，
+    // Ledger 页签已退场——从读者路径点开对话框再断言）
+    try { await page.click('text=Recent actions (view source event)'); await page.waitForTimeout(250) } catch { /* pre-implement: entry absent, A4 names it */ }
     const ledgerText = await page.evaluate(() => document.body.innerText)
     C.case('A4-wakes-dated-format', ledgerText.includes(wantNew), `wakes want "${wantNew}"`)
 

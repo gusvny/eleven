@@ -3993,6 +3993,11 @@
    "anchor": "behaviour",
    "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
    "sync_path": ""
+  },
+  "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
+   "sync_path": ""
   }
  }
 }

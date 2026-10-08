@@ -6,16 +6,18 @@
  *
  * User-perceivable contract under test (ticket scope): the middle column carries
  * ONE consolidated tab strip inside the executor panel, in the fixed order the
- * design note fixes: Overview / Epics / Ledger / Alerts / Inspection / Metrics /
- * Docs / Grants / Settings. The status board is NOT a tab and must not re-enter
- * the strip. The Overview carries exactly ONE concurrency-limit row: value +
+ * design note fixes: Overview / Epics / Alerts / Inspection / Metrics /
+ * Docs / Grants / Settings (Ledger left the strip with t261008-20, host order
+ * 261008 — its face lives in the Overview dialog now). The status board is NOT a
+ * tab and must not re-enter the strip. The Overview carries exactly ONE
+ * concurrency-limit row: value +
  * declaration path as the engine face reports them; when no limit is declared the
  * row says so explicitly and names the absent write face (CL-2 boundary) — it
  * never shows a guessed number and never renders a second knob.
  *
  * Legs:
- *   T1 the panel page face serves exactly 9 tabs in the fixed order, no board
- *      tab, no duplicates.
+ *   T1 the panel page face serves exactly 8 tabs in the fixed order, no board
+ *      tab, no Ledger tab (t261008-20), no duplicates.
  *   T2 the asserted face is the production page constant (harness parity —
  *      what we assert is what a user gets).
  *   T3 undeclared limit: the concurrency face reports no number and an explicit
@@ -55,7 +57,7 @@ function summarize() {
   console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=${ef} na=0`)
 }
 
-const ORDER = ['overview', 'epics', 'ledger', 'alerts', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+const ORDER = ['overview', 'epics', 'alerts', 'inspection', 'metrics', 'docs', 'grants', 'settings']
 
 // ------------------------------------------------------------- production face
 const HARNESS = REPO + '/server/plugins/executor-panel/harness.mjs'
@@ -84,7 +86,7 @@ if (harness) {
       check('T1 tab strip present', 'fail',
         `tab order/shape drifted: got [${tabs.join(',')}] want [${ORDER.join(',')}] (duplicates: ${tabs.length !== uniq.length})`)
     } else {
-      check('T1 tab strip present', 'pass', `9 tabs, fixed order, no duplicates: ${tabs.join(',')}`)
+      check('T1 tab strip present', 'pass', `8 tabs, fixed order, no duplicates: ${tabs.join(',')}`)
     }
     check('T1b no status-board tab', tabs.includes('board') ? 'fail' : 'pass',
       tabs.includes('board') ? 'board tab re-entered the consolidated strip' : '')

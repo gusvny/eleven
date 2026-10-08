@@ -23,6 +23,8 @@
 // intent 分工：五页签/布局/请求交互/全面板 STE 抽查归 t261003-06-executor-panel-page-redesign；
 // recent-actions 数据面归 t261003-06-executor-panel-recent-actions；本条只锁本票三缺陷
 // （标题诚实 / 唤醒行内容 / 时间标签）——三者在既有清单均无 intent 级覆盖。
+// t261008-20（host order 261008）：Ledger 页签退役，账本面折进 Overview 源事件对话框；
+// 本场景的诚实性 intent 不变，到达面改为 #ledgerDlgBtn → #ledgerDlg（见 openLedgerFace）。
 import { createServer } from 'node:http'
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -107,9 +109,21 @@ async function closePanel({ browser, local }) {
   local.close()
 }
 async function gotoTab(page, name) {
-  // 页签可点：按文本点 tab（Ledger / Alerts）；点不到按失败处理由调用方断言暴露。
+  // 页签可点：按文本点 tab（Alerts 等）；点不到按失败处理由调用方断言暴露。
   try { await page.click(`text=/^\\s*${name}\\s*$/i`) } catch { try { await page.click(`text=/${name}/i`) } catch { /* noop */ } }
   await page.waitForTimeout(250)
+}
+async function openLedgerFace(page) {
+  // t261008-20 (host order 261008)：Ledger 页签退役，账本面折进 Overview 的
+  // 源事件对话框（#ledgerDlgBtn → #ledgerDlg）。本场景的诚实性 intent 不变，
+  // 只是到达面从「点页签」换成「点入口开对话框」，读 #ledgerDlg 容器自身的
+  // 文本（隐藏元素 innerText 为空，不能取 body）。
+  await page.click('#ledgerDlgBtn')
+  await page.waitForTimeout(150)
+  return page.evaluate(() => {
+    const dlg = document.querySelector('#ledgerDlg')
+    return dlg ? dlg.innerText : ''
+  })
 }
 
 async function launchBrowser(pw) {
@@ -152,13 +166,15 @@ async function main() {
   }
   try {
     const { page, errors } = session
-    // Ledger 页签
-    await gotoTab(page, 'ledger')
-    const ledgerText = await page.evaluate(() => document.body.innerText)
+    // Ledger 面（t261008-20：源事件对话框；入口在 Overview 右栏）
+    const ledgerText = await openLedgerFace(page)
     const lt = ledgerText.toLowerCase()
 
-    // H1 标题诚实：唤醒区块标题=Last wakes；旧标题/旧空态退场
-    C.case('H1-heading-says-wakes', lt.includes('last wakes'), `heading "Last wakes" in ledger tab=${lt.includes('last wakes')}`)
+    // H1 标题诚实：唤醒区块标题承诺唤醒（'Wakes'）；旧标题「Last events」与旧空态
+    // 文案「appends here when a ticket changes」退场（标题许诺账本事件而展示唤醒
+    // = 本票根缺陷）。t261003-13 定稿标题「Last wakes」随 t261008-20 对话框改版
+    // 收敛为「Wakes · N」——锚语义（标题只承诺唤醒）不锚旧字面，KI-051 纪律。
+    C.case('H1-heading-says-wakes', /\bwakes\b/.test(lt) && !lt.includes('last events'), `heading promises wakes (dialog face)=${/\bwakes\b/.test(lt)}`)
     C.case('H1b-old-title-and-copy-gone', !lt.includes('last events') && !ledgerText.includes('appends here when a ticket changes'),
       `old title present=${lt.includes('last events')} old empty copy present=${ledgerText.includes('appends here when a ticket changes')}`)
 
@@ -220,8 +236,7 @@ async function main() {
   }
   try {
     const { page, errors } = session2
-    await gotoTab(page, 'ledger')
-    const ledgerText = await page.evaluate(() => document.body.innerText)
+    const ledgerText = await openLedgerFace(page)
     // H4 畸形行不产生句状词；显式 unknown / — 顶位；'sent' 仍不得出现
     C.case('H4-malformed-no-bare-word', !/\bsent\b/i.test(ledgerText), `literal "sent" under malformed wakes=${/\bsent\b/i.test(ledgerText)}`)
     C.case('H4b-missing-fields-explicit', /unknown/i.test(ledgerText), `explicit "unknown" present=${/unknown/i.test(ledgerText)}`)
@@ -239,8 +254,7 @@ async function main() {
   }
   try {
     const { page, errors } = session3
-    await gotoTab(page, 'ledger')
-    const ledgerText = await page.evaluate(() => document.body.innerText)
+    const ledgerText = await openLedgerFace(page)
     C.case('H2-empty-state-honest', /no wakes yet/i.test(ledgerText) && !/no recent events/i.test(ledgerText),
       `wakes empty copy=${/no wakes yet/i.test(ledgerText)} old copy=${/no recent events/i.test(ledgerText)}`)
     C.case('X1b-zero-pageerror-empty', errors.length === 0, `errors=${errors.slice(0, 3).join(' | ').slice(0, 200)}`)

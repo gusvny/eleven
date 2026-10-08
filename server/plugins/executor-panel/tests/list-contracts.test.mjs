@@ -39,8 +39,11 @@ for (const id of ids) {
   assert(JSON.parse(JSON.stringify(c)).cap === c.cap, id + ': contract survives JSON round-trip')
 }
 
-// ---- 事故回归：ledger_last_wakes 的 3 行上限与最新在前必须写在契约里 ----
-assert(declaredCap('ledger_last_wakes') === 3, 'last wakes cap declared as 3 (the incident cap)')
+// ---- t261004-14 事故回归 + t261008-20 修订单更新：wakes 契约仍唯一、仍最新在前，
+// 但 cap 随宿主令改为 'all'（对话框渲染 status API 返回的全部行；20 行窗口由
+// watchdog status 自己持有并在对话框文案点名，不再是渲染侧数字 cap）。
+assert(LIST_CONTRACTS.ledger_last_wakes.cap === 'all', 'last wakes cap is "all" (t261008-20: the dialog renders everything the API returns)')
+assert(LIST_CONTRACTS.ledger_last_wakes.order.includes('last 20'), 'the contract names the watchdog 20-row window (no silent prefix)')
 assert(/append-order|Newest first/i.test(LIST_CONTRACTS.ledger_last_wakes.order),
   'last wakes order states newest first over an append-ordered source')
 assert(declaredCap('overview_recent_actions') === 50, 'recent actions cap declared as 50 (t261004-11 window, declared per t261004-14)')
@@ -74,9 +77,10 @@ for (const [name, bad] of Object.entries({
 assert(contractComplete(LIST_CONTRACTS.ledger_last_wakes), 'the real incident contract passes the same shape gate')
 
 // ---- 嵌入面：页面带契约数据与守门函数，上限不再内联在渲染路径 ----
+// （t261008-20：capOf 随最后一个数字 cap 退役——页面只剩 emptyCopyOf。）
 assert(PANEL_PAGE_HTML.includes('var LIST_CONTRACTS ='), 'page embeds the contract table')
-assert(PANEL_PAGE_HTML.includes('function capOf(') && PANEL_PAGE_HTML.includes('function emptyCopyOf('),
-  'page embeds cap/empty-copy accessors')
+assert(!PANEL_PAGE_HTML.includes('function capOf(') && PANEL_PAGE_HTML.includes('function emptyCopyOf('),
+  'page embeds the empty-copy accessor (capOf retired with the last numeric cap)')
 assert(PANEL_PAGE_HTML.includes(JSON.stringify(LIST_CONTRACTS.ledger_last_wakes).slice(0, 40)),
   'embedded table is the same declaration the tests read')
 assert(!/Math\.min\([^;\n]*?\d/.test(PANEL_PAGE_HTML.split('var LIST_CONTRACTS')[1] || ''), // 渲染段不再有截断常量
