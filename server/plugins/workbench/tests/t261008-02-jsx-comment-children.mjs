@@ -54,19 +54,20 @@ for (const [path, mustBeAbsent] of [[LIB_JS, true], [LIB_CJS, true]]) {
   ok(!text.includes(LITERAL), `${relative(REPO, path)} does not ship the children-position comment text`)
 }
 
-/* ---- 2. src: the literal survives only inside a JSX comment block ---- */
-section('src keeps the note as a real JSX comment ({/* ... */})')
+/* ---- 2. src: the head site itself is retired (t261008-18) ---- */
+// The whole machine-status head went away (host order 261008; the mock's head is
+// the one the executor panel renders inside its iframe), so the offending note is
+// gone from src entirely and the strip's class/event names must not come back.
+section('src: the machine-status head site stays retired (t261008-18)')
+const STRIP_MARKS = ['wb-health', 'wb-status-btn', 'wb-workers-panel', 'wb-panel-goto', 'wb-head-spacer']
 let src = null
 try { src = readFileSync(SRC, 'utf8') } catch { src = null }
 ok(src !== null, 'src/client/index.tsx readable')
 if (src !== null) {
-  ok(src.includes(LITERAL), 'src still carries the explanatory note (not deleted outright)')
-  // Strip every {/* ... */} block (non-greedy, no nesting in this codebase), then
-  // the literal must be gone: i.e. it existed only inside a JSX comment.
-  const stripped = src.replace(/\{\/\*[\s\S]*?\*\//g, '')
-  ok(!stripped.includes(LITERAL), 'the note lives ONLY inside a {/* ... */} block')
-  ok(/\{\/\* t261005-10 \(UI-2\): the number stays machine-level/.test(src),
-    'the note is a JSX comment at the machine-status head site')
+  ok(!src.includes(LITERAL), 'the offending children-position note is gone from src')
+  for (const mark of STRIP_MARKS) {
+    ok(!src.includes(mark), `strip machinery \`${mark}\` does not reappear in src`)
+  }
 }
 
 /* ---- 3. family sweep guard: no children-position `//` comment lines ---- */

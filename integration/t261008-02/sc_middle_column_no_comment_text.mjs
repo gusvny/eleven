@@ -248,9 +248,10 @@ function routeStubs(route) {
   return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'fixture stub: unknown route' }) })
 }
 
-// In-page read of the machine-status head and its column. Grey-box binding kept
-// shallow: the head is the rendered element holding the machine-status buttons
-// (the same element the t261007-07 entry calls `.wb-right-content .wb-head`);
+// In-page read of the middle column's first-screen face and its column.
+// t261008-18: the machine-status head is retired — the face this entry waits for
+// is the executor view (`[data-wb-executor-view]`, the middle column's own head
+// since the strip went away);
 // the assertions fall on READER-visible text of the middle column as a whole
 // (a superset of the head — if the literal leaks anywhere the user can see, it
 // is a defect), never on internal names or execution order.
@@ -262,7 +263,7 @@ async function headFaces(page) {
       const cs = getComputedStyle(el)
       return cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity || '1') > 0.05
     }
-    const head = document.querySelector('.wb-right-content .wb-head')
+    const head = document.querySelector('[data-wb-executor-view]')
     const headVisible = !!head && visible(head)
     const column = document.querySelector('.wb-right-content')
     const colText = column ? column.textContent : ''
@@ -274,7 +275,7 @@ async function headFaces(page) {
       hasSlashSlash: colText.includes('//'),   // the defect face: a // comment rendering as text
       hasLiteral: colText.includes('t261005-10 (UI-2)'),
       diag: {
-        headCount: document.querySelectorAll('.wb-head').length,
+        headCount: document.querySelectorAll('[data-wb-executor-view]').length,
         headSnippet: headText ? headText.slice(0, 80) : null,
         colHasSlash: colText.includes('//'),
       },
@@ -293,7 +294,8 @@ async function settleLeftColumn(page) {
 }
 
 // The user journey from the host report: click into the project (the executor
-// entry on the project row), wait until the machine-status head shows. Bound to
+// entry on the project row), wait until the middle column's own face shows
+// (t261008-18: the executor view replaced the machine-status head). Bound to
 // the entry contract (data-wb-executor-entry), not to coordinates or internals.
 async function openMachineHead(page) {
   return waitFor(async () => {
@@ -323,19 +325,19 @@ async function runLeg(browser, colorScheme, shotName) {
     }
     const opened = await openMachineHead(page)
     if (!opened) {
-      record(`S1 ${shotName} precheck`, 'env_fail', 'machine-status head did not appear after clicking the project entry — journey unreachable in this stage build')
+      record(`S1 ${shotName} precheck`, 'env_fail', 'the middle-column face (executor view) did not appear after clicking the project entry — journey unreachable in this stage build')
       return
     }
-    record(`S1 ${shotName} precheck`, 'pass', `machine-status head rendered (${colorScheme || 'light (default)'})`)
+    record(`S1 ${shotName} precheck`, 'pass', `middle-column face rendered (${colorScheme || 'light (default)'})`)
 
     const f = await headFaces(page)
 
-    // H1 the ticket's reader-visible face: the middle column (the head included)
-    // contains no '//' rendered text (a children-position comment is the only
-    // way one lands as text here).
+    // H1 the ticket's reader-visible face: the middle column (the executor view
+    // included) contains no '//' rendered text (a children-position comment is
+    // the only way one lands as text here).
     const h1ok = f.headVisible && !f.hasSlashSlash
     record(`H1 head-has-no-comment-text (${shotName})`, h1ok ? 'pass' : 'fail',
-      h1ok ? 'machine-status head / middle column contains no "//" '
+      h1ok ? 'middle column / executor view contains no "//" '
         : `"//" still renders in the middle column (head visible=${f.headVisible}, diag=${JSON.stringify(f.diag)})（pre-implement red expected）`)
 
     // H2 the exact comment literal never reaches the DOM (regression lock on

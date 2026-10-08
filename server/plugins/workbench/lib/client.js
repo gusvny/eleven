@@ -7913,14 +7913,6 @@ function executorPanelUrl(projectKey, theme = "light") {
 }
 /** 宿主 → 面板的结果回执（面板只渲染一行 STE 文案，不做轮询/重试/状态条）。 */
 const OPEN_SESSION_RESULT_MSG_TYPE = "sandbar-executor-panel:open-session-result";
-/** t261005-10 (UI-2): host -> panel wayfinding messages (the machine-level
-*  Inspection number jumps to the panel tab; a ticket-detail epic badge jumps to
-*  the panel Epics tab). The panel accepts only these two, from the parent only. */
-const SHOW_TAB_MSG_TYPE = "sandbar-executor-panel:show-tab";
-const SHOW_EPIC_MSG_TYPE = "sandbar-executor-panel:show-epic";
-/** In-window event: a WorkbenchSection machine-level button reaches this component,
-*  which forwards it into the iframe over postMessage. */
-const PANEL_GOTO_EVENT = "wb-panel-goto";
 function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 	const [panelState, setPanelState] = (0, react.useState)({
 		ok: false,
@@ -7974,24 +7966,6 @@ function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 		window.addEventListener("message", onMessage);
 		return () => window.removeEventListener("message", onMessage);
 	}, [openExecutorSession, openTicketOverlay]);
-	(0, react.useEffect)(() => {
-		const onGoto = (ev) => {
-			const frame = frameRef.current;
-			if (!frame || !frame.contentWindow) return;
-			const detail = ev.detail;
-			if (!detail || typeof detail !== "object") return;
-			if (typeof detail.tab === "string" && detail.tab !== "") frame.contentWindow.postMessage({
-				type: SHOW_TAB_MSG_TYPE,
-				tab: detail.tab
-			}, window.location.origin);
-			else if (typeof detail.epic === "string" && detail.epic !== "") frame.contentWindow.postMessage({
-				type: SHOW_EPIC_MSG_TYPE,
-				epic: detail.epic
-			}, window.location.origin);
-		};
-		window.addEventListener(PANEL_GOTO_EVENT, onGoto);
-		return () => window.removeEventListener(PANEL_GOTO_EVENT, onGoto);
-	}, []);
 	const theme = consoleThemeName();
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-executor-view",
@@ -11534,10 +11508,9 @@ function setViewProject(project) {
 * 内容变→旧意见标「已过期」）。签字联动：approve 摘要随 sign 进历史，
 * reject 意见即返工指令一键复制/一键填入打回理由。
 *
-* M6 巡检报告区（t260821-m6-scan-expand）：台面表格下方加「巡检报告」区——
-* 读 /sandbar-workbench/api/wf/scan-report（最新 out/scan/<日期>.json）渲染
-* 待决工单检查表（停留/验收勾选率/脚本门灯/pending/建议三档色 chip），点行
-* 开详情抽屉；无报告走 reason 人话降级。红线显性化：报告 red_line 常驻区底。
+* M6 inspection-report section (t260821-m6-scan-expand): retired by t261008-18 —
+* the /wf/scan-report route and the section went with the strip's Inspection
+* button. A future Inspection-content ticket starts from git history.
 *
 * M12 agent 日志（t260822-m12）：详情抽屉加「Agent 日志」页签——读
 * /sandbar-workbench/api/wf/tickets/<id>/agent-logs 列泳道 .suyou/ 的
@@ -11585,7 +11558,6 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-fg,#1f2328);min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
   display:flex;flex-direction:column;gap:16px;height:100%;overflow-y:auto;font-size:13px;line-height:1.55}
-.wb-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de);padding-bottom:12px;position:relative}
 .wb-title{font-size:20px;font-weight:600;color:var(--dsw-derive-ink-strong,#24292f)}/* t260929-22 gen9：4.05→深墨 */
 .wb-sub{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
 .wb-err{background:var(--dsw-derive-danger-bg,#ffebe9);border:1px solid var(--dsw-derive-danger-border,#ff9b9b);color:var(--dsw-derive-danger,#cf222e);border-radius:6px;
@@ -11616,8 +11588,8 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-chip-btn[data-state=failed][data-on=false]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
 /* t260921-03「异常收口」chip：黄系（注意但非受阻——异常收口=已结束，不动 danger 族）。
  * hex-clean 纪律同上：warn 令牌既有声明位，零新增裸 hex。 */
-.wb-chip-health{border-color:var(--dsw-derive-warn-border,#d4a72c)}
-.wb-chip-health[data-on=false]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
+/* t261008-18 sweep: .wb-chip-health removed — no JSX face has used it since the
+close-health chip left the board card; dead at HEAD too (pre-existing). */
 /* t260921-03 收口健康徽标（行1 状态字后，中列与左栏共用行卡全局类）：琥珀描边深字
  * =可扫读的「已结束但有问题」，不用受阻红（已结束≠受阻等你处置）。
  * data-close-health=健康度值锚（渲染断言/样式作用域选择器）。 */
@@ -11977,41 +11949,8 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-preview-ch{border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef);padding:8px 2px 12px}
 .wb-preview-ch-title{font-size:15px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);margin-bottom:6px}
 .wb-preview-para{font-size:13px;line-height:1.9;color:var(--dsw-derive-fg,#1f2328);margin:0 0 8px;white-space:pre-wrap}
-/* Temporal server/worker 状态点（台面头部，t260821-06）：绿=在线 红=离线，悬停见详情 */
-.wb-head-spacer{flex:1}
-.wb-health{display:inline-flex;align-items:center;gap:10px;flex:none}
-.wb-health-link{display:inline-flex;align-items:center;gap:10px;text-decoration:none;border:1px solid var(--dsw-derive-border,#d0d7de);
-  border-radius:6px;padding:3px 8px;background:var(--dsw-derive-canvas,#ffffff)}
-.wb-health-link:hover{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-surface,#f6f8fa)}
-/* 状态条按钮（workers 数 / 巡检出入口，260824 用户拍板②③）：药丸样式，点开态高亮。 */
-.wb-status-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--dsw-derive-muted,#57606a);cursor:pointer;
-  background:var(--dsw-derive-canvas,#ffffff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:999px;padding:3px 10px;font-family:inherit;white-space:nowrap}
-.wb-status-btn:hover{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-status-btn[data-open=true]{border-color:var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
-.wb-status-btn[data-online=true]{color:var(--dsw-derive-success,#1a7f37);border-color:var(--dsw-derive-success-border,#7dd9a0);background:var(--dsw-derive-success-bg,#dafbe1)}
-.wb-status-btn[data-online=false]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger-border,#ff9b9b);background:var(--dsw-derive-danger-bg,#ffebe9)}
-/* workers 下拉面板：定位祖先=.wb-head（position:relative），右对齐贴状态条。 */
-.wb-workers-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:30;background:var(--dsw-derive-canvas,#ffffff);
-  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:10px 12px;min-width:560px}
-.wb-workers-head{font-size:12px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);margin-bottom:6px}
-.wb-workers-table{border-collapse:collapse;font-size:12px;width:100%}
-.wb-workers-table th,.wb-workers-table td{text-align:left;padding:3px 12px 3px 0;border-bottom:1px solid var(--dsw-derive-border,#eaeef2);
-  white-space:nowrap;color:var(--dsw-derive-fg,#1f2328);font-weight:400}
-.wb-workers-table th{color:var(--dsw-derive-muted,#57606a);font-weight:600}
-.wb-workers-table tr[data-offline=true] td{color:var(--dsw-derive-muted,#8c959f)}
 /* 分页条（260824 用户拍板⑥）。 */
 .wb-pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;padding:8px 0}
-/* 巡检独立页（260824 用户拍板③）：返回条 + 复用 ScanReportSection 整页铺。 */
-.wb-scan-backbar{display:flex;padding-bottom:8px}
-.wb-health-item{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--dsw-derive-muted,#57606a);
-  background:var(--dsw-derive-canvas,#ffffff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:999px;padding:3px 10px;cursor:help;white-space:nowrap}
-.wb-health-dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--dsw-derive-muted,#8c959f)}
-.wb-health-item[data-online=true]{color:var(--dsw-derive-success,#1a7f37);border-color:var(--dsw-derive-success-border,#7dd9a0);background:var(--dsw-derive-success-bg,#dafbe1)}
-.wb-health-item[data-online=true] .wb-health-dot{background:var(--dsw-derive-success-solid,#2da44e)}
-.wb-health-item[data-online=false]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger-border,#ff9b9b);background:var(--dsw-derive-danger-bg,#ffebe9)}
-.wb-health-item[data-online=false] .wb-health-dot{background:var(--dsw-derive-danger-solid,#d1242f)}
-.wb-health-offline{display:flex;flex-direction:column;gap:3px;background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#eac54f);
-  color:var(--dsw-derive-warn-deep,#7d4e00);border-radius:6px;padding:7px 12px;font-size:12px}
 /* ── M9 变更页签（PR 式审批台；制式照 knowledge block diff，类名 wb-d-* 独立自带不依赖 knowledge CSS） ── */
 /* t261008-07 single-column detail (mock v11 ticketView): action row, decision
    card, two-column block, collapsed folds. Theme rides the derive tokens, so
@@ -12137,27 +12076,6 @@ const CSS = `${DERIVE_TOKENS_CSS}
   line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto}
 .wb-d-trunc{font-size:11px;color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#eac54f);border-radius:6px;
   padding:3px 10px;margin:4px 12px}
-/* ── M6 巡检报告区（类名 wb-scan-* / wb-sug 独立） ── */
-.wb-scan-meta{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-derive-muted,#57606a);align-items:center}
-.wb-scan-chips{display:flex;gap:8px;flex-wrap:wrap}
-.wb-sug{font-size:12px;border-radius:6px;padding:1px 8px;font-weight:600;white-space:nowrap}
-.wb-sug[data-sug="Signable"]{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329)}
-.wb-sug[data-sug="Needs info"]{background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-sug[data-sug="Maybe stuck"]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e)}
-.wb-scan-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--dsw-derive-surface-2,#e8ebef);
-  border-radius:8px;font-size:12px;overflow:hidden}
-.wb-scan-table th{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);font-weight:600;text-align:left;padding:6px 10px;
-  border-bottom:1px solid var(--dsw-derive-surface-2,#e8ebef);white-space:nowrap}
-.wb-scan-table td{padding:6px 10px;border-bottom:1px solid var(--dsw-derive-border,#f0f2f5);vertical-align:top}
-.wb-scan-table tbody tr{cursor:pointer}
-.wb-scan-table tbody tr:hover{background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-scan-table tbody tr:last-child td{border-bottom:none}
-.wb-scan-id{color:var(--dsw-derive-accent,#0969da);font-weight:600;white-space:nowrap}
-.wb-scan-title{color:var(--dsw-derive-muted,#57606a);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  max-width:260px}
-.wb-scan-reasons{margin:0;padding-left:16px;color:var(--dsw-derive-muted,#57606a);font-size:11px}
-.wb-scan-redline{font-size:11px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#eac54f);
-  border-radius:6px;padding:4px 10px}
 /* ── M12 agent 日志（wb-al-*：详情抽屉「Agent」页签） ── */
 .wb-al-meta{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:var(--dsw-derive-muted,#57606a);align-items:center}
 .wb-al-file{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-canvas,#ffffff);overflow:hidden}
@@ -15117,11 +15035,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	const [preview, setPreview] = (0, react.useState)(void 0);
 	const [fileViewer, setFileViewer] = (0, react.useState)(null);
 	const [previewLoading, setPreviewLoading] = (0, react.useState)(false);
-	const [health, setHealth] = (0, react.useState)(void 0);
-	const [scan, setScan] = (0, react.useState)(void 0);
-	/** 一工单一 worker（260824）：逐 worker 状态，状态条「N workers」点开列全表。 */
-	const [workers, setWorkers] = (0, react.useState)(void 0);
-	const [workersOpen, setWorkersOpen] = (0, react.useState)(false);
 	/** token 消耗聚合（t260828-07）：详情抽屉打开时拉一次，头部合计与阶段行内数字共用。 */
 	const usage = useAgentUsage(detail?.id ?? "", detail !== void 0);
 	/** 本页签 presence 句柄：挂载即建、卸载 stop（effect 清理收口，见下）。 */
@@ -15189,21 +15102,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 		const out = worstOutcome(listOut, detailOut);
 		applyPollOutcome(out, out === "ok" ? "" : "snapshot query transient failure (stage switch window?)");
 	}
-	/** Temporal server/worker 状态点：读 temporal-health（真实探测，静默失败灰显）。 */
-	async function reloadHealth() {
-		try {
-			const data = await apiGet(`${API}/temporal-health`);
-			if (data?.ok === true) setHealth(data.result);
-		} catch {}
-	}
-	/** 一工单一 worker（260824）：/wf/workers 逐 pidfile 探测；接口未挂载（dsh 未重启）时保持 undefined 灰显。 */
-	async function reloadWorkers() {
-		try {
-			const data = await apiGet(`${API}/workers`);
-			if (data?.ok === true) setWorkers(data.result);
-		} catch {}
-	}
-	/** 巡检报告（M6）：读最新 out/scan/<日期>.json；无报告=reason 降级显示，不算错误。 */
 	(0, react.useEffect)(() => {
 		setViewProject(projectKey ?? "");
 		setTickets(void 0);
@@ -15244,12 +15142,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 		selectedIdRef.current = selectedId;
 		presenceRef.current?.setViewingTicket(selectedId);
 	}, [selectedId]);
-	async function reloadScan() {
-		try {
-			const data = await apiGet(`${API}/scan-report`);
-			if (data?.ok === true) setScan(data.result);
-		} catch {}
-	}
 	async function openDetail(id) {
 		selectedIdRef.current = id;
 		setSelectedId(id);
@@ -15529,20 +15421,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	(0, react.useEffect)(() => {
 		pollOnce();
 	}, []);
-	(0, react.useEffect)(() => {
-		reloadHealth();
-		reloadWorkers();
-		return startVisibleInterval(() => {
-			reloadHealth();
-			reloadWorkers();
-		}, 5e3);
-	}, []);
-	(0, react.useEffect)(() => {
-		reloadScan();
-		return startVisibleInterval(() => {
-			reloadScan();
-		}, 3e4);
-	}, []);
 	const selWf = (0, react.useMemo)(() => {
 		if (!detail) return void 0;
 		const hit = wfById[detail.workflow_id];
@@ -15588,112 +15466,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-root",
 		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-head",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-head-spacer" }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "wb-health",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-								className: "wb-health-link",
-								href: "http://127.0.0.1:8233",
-								target: "_blank",
-								rel: "noreferrer",
-								title: "Open the Temporal console (http://127.0.0.1:8233)",
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "wb-health-item",
-									"data-online": health?.server.online ?? false,
-									title: health ? `server · ${health.server.detail}${health.server.online ? "" : `\nrestart: ${health.restart_hint.server}`}` : "probing temporal server status…",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "wb-health-dot",
-										"data-online": health?.server.online ?? false
-									}), "Temporal UI ↗"]
-								})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "wb-status-btn",
-								"data-open": workersOpen,
-								"data-online": workers === void 0 ? void 0 : workers.count_alive > 0,
-								title: workers ? `workers ${workers.count_alive}/${workers.count} online · click for per-worker status` : "workers API not mounted (takes effect after dsh restart)",
-								onClick: () => {
-									if (!workersOpen) reloadWorkers();
-									setWorkersOpen(!workersOpen);
-								},
-								children: workers ? `${workers.count_alive} workers` : "— workers"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-								className: "wb-status-btn",
-								"data-wb-inspection-jump": "",
-								"data-online": scan?.report ? scan.report.pending_decision_count === 0 : void 0,
-								title: scan?.report ? `Inspection report · ${scan.report.pending_decision_count} pending · open the panel Inspection tab` : scan?.reason ?? "Loading inspection report…",
-								onClick: () => window.dispatchEvent(new CustomEvent("wb-panel-goto", { detail: { tab: "inspection" } })),
-								children: ["Inspection", scan?.report ? ` ${scan.report.pending_decision_count}` : ""]
-							})
-						]
-					}),
-					workersOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-workers-panel",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "wb-workers-head",
-								children: ["workers", workers ? ` · ${workers.count_alive}/${workers.count} online` : ""]
-							}),
-							workers === void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "wb-empty",
-								children: "API not mounted (takes effect after dsh restart)."
-							}),
-							workers !== void 0 && workers.workers.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "wb-empty",
-								children: "No worker pidfiles."
-							}),
-							workers !== void 0 && workers.workers.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-								className: "wb-workers-table",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "Queue" }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "Ticket" }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "pid" }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "Status" }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "Log time" })
-								] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: workers.workers.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
-									"data-offline": !w.online,
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-											className: "wb-id",
-											children: w.queue
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.ticket ?? "(shared pool)" }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.pid ?? "—" }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-health-dot",
-											"data-online": w.online
-										}), w.online ? " online" : " offline"] }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: w.log_mtime ? (/* @__PURE__ */ new Date(w.log_mtime * 1e3)).toLocaleString() : "—" })
-									]
-								}, w.queue)) })]
-							})
-						]
-					})
-				]
-			}),
-			health !== void 0 && !health.server.online && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-health-offline",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-					"Temporal server offline (",
-					health.server.detail,
-					") → ",
-					health.restart_hint.server
-				] })
-			}),
-			workers !== void 0 && workers.count > 0 && workers.count_alive === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-health-offline",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-					"All workers offline (",
-					workers.count,
-					" pidfiles, none alive) → ",
-					health?.restart_hint.worker ?? "restart worker"
-				] })
-			}),
 			error !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-err",
 				children: [

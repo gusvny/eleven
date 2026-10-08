@@ -1,9 +1,10 @@
-// sc_executor_panel_height_chain.mjs — t261008-05 中列几何链：机器状态头 + 全高执行器面板
-// 共存于中列（灰盒 L3，真浏览器 + 隔离台 + API 桩，红线零接触 3099）。
+// sc_executor_panel_height_chain.mjs — t261008-05 中列几何链：全高执行器面板 + 中列前驱块
+// 共存（灰盒 L3，真浏览器 + 隔离台 + API 桩，红线零接触 3099；t261008-18 起前驱块不再
+// 是机器状态头——该行已退役，几何契约本身不变）。
 //
 // Intent（用户可感知行为；真源=工单 t261008-05 宿主实测与验收口径）：
 //   点左栏项目名打开执行器面板后，用户必须**同时**看到：
-//   - 顶部的 overlay + 机器状态头（宿主 .wb-root，flex:none 的兄弟块）；
+//   - 其上的 overlay 前驱块（宿主 .wb-root，flex:none 的兄弟块；曾经是机器状态头）；
 //   - 其下占满中列剩余高度的执行器面板（.wb-executor-view + 内部 iframe）。
 //   t261005-10 回归（宿主 261008 实测）：宿主仍带遗留 min-height:100%/height:100%，
 //   吃满整列 → 面板视图高度 0 → iframe 落回 150px 替换元素默认值并外溢——用户看到
@@ -171,7 +172,7 @@ async function measureChain(page) {
     const frame = q('[data-wb-executor-frame]') || q('.wb-executor-frame')
     const rect = (el) => el ? el.getBoundingClientRect() : null
     const colR = rect(col), viewR = rect(view), frameR = rect(frame)
-    // 宿主 = 中列里面板视图的直接前驱块（overlay + 机器状态头所在），按兄弟关系定位。
+    // 宿主 = 中列里面板视图的直接前驱块（overlay 所在；t261008-18 前曾是机器状态头），按兄弟关系定位。
     let hostR = null
     if (view && view.parentElement) {
       const sibs = [...view.parentElement.children].filter(c => c !== view)
@@ -188,7 +189,7 @@ function chainProblems(m) {
   const probs = []
   // G1 核心判据：面板视图必须拿到实质高度（0 高 = 本票缺陷复现）。
   if (m.view.h <= MIN_PANEL_H) probs.push(`executor view height ${m.view.h}px <= ${MIN_PANEL_H} (panel squeezed — the ticket defect)`)
-  // G2 面板视图不吃满整列：机器状态头必须仍在画面里（host 与 view 同列共存）。
+  // G2 面板视图不吃满整列：前驱块（overlay 等）与 view 同列共存。
   if (m.host && m.host.h >= m.col.h) probs.push(`overlay host takes the whole column (${m.host.h}px of ${m.col.h}px)`)
   // G3 iframe 填满视图（150px 替换元素默认值 = 缺陷面）。
   if (m.frame.h < m.view.h * 0.9) probs.push(`iframe ${m.frame.h}px does not fill its view ${m.view.h}px (replaced-element default leak)`)

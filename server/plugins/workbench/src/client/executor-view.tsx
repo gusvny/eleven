@@ -39,14 +39,14 @@ export const OPEN_SESSION_RESULT_MSG_TYPE = 'sandbar-executor-panel:open-session
  *  existing ticket-detail overlay (the t261005-04 machinery; the panel builds no
  *  second detail face). */
 export const OPEN_TICKET_MSG_TYPE = 'sandbar-executor-panel:open-ticket'
-/** t261005-10 (UI-2): host -> panel wayfinding messages (the machine-level
- *  Inspection number jumps to the panel tab; a ticket-detail epic badge jumps to
- *  the panel Epics tab). The panel accepts only these two, from the parent only. */
+/** Panel wayfinding message contract (t261005-10, kept as the panel page's own
+ * protocol surface). Since t261008-18 no parent-side sender ships in this client;
+ * the panel accepts only these two, from the parent only. */
 export const SHOW_TAB_MSG_TYPE = 'sandbar-executor-panel:show-tab'
 export const SHOW_EPIC_MSG_TYPE = 'sandbar-executor-panel:show-epic'
-/** In-window event: a WorkbenchSection machine-level button reaches this component,
- *  which forwards it into the iframe over postMessage. */
-export const PANEL_GOTO_EVENT = 'wb-panel-goto'
+/* t261008-18: PANEL_GOTO_EVENT ('wb-panel-goto') went with the machine-level head
+ * button that dispatched it — the panel is reached by opening it, not by in-window
+ * wayfinding from a strip that no longer exists. */
 
 export interface ExecutorViewProps {
   projectKey: string
@@ -106,25 +106,9 @@ export function ExecutorView({ projectKey, openExecutorSession, openTicketOverla
     return () => window.removeEventListener('message', onMessage)
   }, [openExecutorSession, openTicketOverlay])
 
-  // t261005-10 (UI-2): the machine-level head button (the Inspection number)
-  // forwards to the panel tab in the same window. Only PANEL_GOTO_EVENT is taken;
-  // tab/epic must be non-empty strings to forward; the listener is removed on
-  // unmount (all-terminal cleanup).
-  useEffect(() => {
-    const onGoto = (ev: Event) => {
-      const frame = frameRef.current
-      if (!frame || !frame.contentWindow) return
-      const detail = (ev as CustomEvent).detail as { tab?: unknown; epic?: unknown } | null
-      if (!detail || typeof detail !== 'object') return
-      if (typeof detail.tab === 'string' && detail.tab !== '') {
-        frame.contentWindow.postMessage({ type: SHOW_TAB_MSG_TYPE, tab: detail.tab }, window.location.origin)
-      } else if (typeof detail.epic === 'string' && detail.epic !== '') {
-        frame.contentWindow.postMessage({ type: SHOW_EPIC_MSG_TYPE, epic: detail.epic }, window.location.origin)
-      }
-    }
-    window.addEventListener(PANEL_GOTO_EVENT, onGoto)
-    return () => window.removeEventListener(PANEL_GOTO_EVENT, onGoto)
-  }, [])
+  // t261008-18: the PANEL_GOTO_EVENT forward effect went with the strip button
+  // that dispatched it. The panel-side wayfinding message contract (SHOW_TAB/_EPIC)
+  // stays declared for the panel page itself; no parent-side sender remains.
 
   const theme = consoleThemeName()
 

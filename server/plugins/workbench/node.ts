@@ -53,16 +53,6 @@
  *   GET  /sandbar-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
- *   GET  /sandbar-workbench/api/wf/temporal-health → Temporal 健康（只读，t260821-06）：真实探测
- *                                                 127.0.0.1:7233 端口是否监听（=server 在线）+ worker
- *                                                 pidfile pid 是否存活（=worker 在线），不写死结果
- *   GET  /sandbar-workbench/api/wf/workers        → worker 清单（260824 每工单专属 worker）：
- *                                                 扫 data/worker*.pid 逐个探测存活（共享 sandbar +
- *                                                 专属 sandbar-ticket-<id>），状态条「N workers」数据源
- *   GET  /sandbar-workbench/api/wf/scan-report    → 巡检报告（只读，M6 t260821-m6-scan-expand）：
- *                                                 读 engine/out/scan/ 文件名序最新的
- *                                                 <YYYY-MM-DD>.json（DispatcherScanWorkflow 落盘）；
- *                                                 无报告走 reason 人话降级，不抛错
  *   POST /sandbar-workbench/api/global-session/open {project}
  *                                               → 新建全局会话（session-entry t260825-02，侧栏「会话」区
  *                                                 新建按钮）：仿工单会话开/找，但 id 不带 ticket- 前缀、
@@ -137,9 +127,8 @@
 
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFile, readFile, readdir, stat } from 'node:fs/promises'
+import { appendFile, readFile, readdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import net from 'node:net'
 import { dirname, join, resolve, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -174,7 +163,6 @@ import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
 import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
-import { readLatestScanReport } from './src/host/scan-report.ts'
 import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
 // t260926-05：巡检落账报告只读端点（report_path → 可读摘要；fail-closed 200+reason 同 /file 风格）。
 import { readInspectionReportFile } from './src/host/inspection-report.ts'
@@ -348,49 +336,9 @@ export async function listEvidenceFiles(
   return [...seen].sort()
 }
 
-/** Temporal 状态探测（t260821-06）：真实探测，不写死结果。 */
-const TEMPORAL_HOST = '127.0.0.1'
-const TEMPORAL_PORT = 7233
-const PORT_PROBE_TIMEOUT_MS = 800
-
-/** TCP 探测端口：有监听者即「server 在线」。 */
-function probePort(host: string, port: number, timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = net.connect({ host, port })
-    let settled = false
-    const done = (ok: boolean) => {
-      if (settled) return
-      settled = true
-      sock.destroy()
-      resolve(ok)
-    }
-    sock.setTimeout(timeoutMs)
-    sock.once('connect', () => done(true))
-    sock.once('error', () => done(false))
-    sock.once('timeout', () => done(false))
-  })
-}
-
-/** 进程存活探测（kill -0）。ESRCH=没了；EPERM=还在只是没权限。 */
-function isPidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (err: any) {
-    return err?.code === 'EPERM'
-  }
-}
-
-/** 读 pidfile（worker.py --daemon 自写），拿不到/脏值返回 null。 */
-async function readPid(pidfile: string): Promise<number | null> {
-  try {
-    const n = Number.parseInt((await readFile(pidfile, 'utf8')).trim(), 10)
-    return Number.isInteger(n) && n > 0 ? n : null
-  } catch {
-    return null
-  }
-}
+/* t261008-18: the Temporal port probe / pid-alive / pidfile helpers went with the
+   /wf/temporal-health and /wf/workers routes (the machine-status strip was their
+   only consumer). */
 
 /** 读 POST JSON body（64KB 封顶），非法 JSON 抛错。 */
 async function readJsonBody(req: IncomingMessage): Promise<any> {
@@ -852,81 +800,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     } catch (err) {
       sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }
-  }
-
-  /** Temporal 健康（只读）：server=7233 端口监听，worker=pidfile pid 存活，真实探测。
-   *  worker pidfile 缺省 <repo>/server/engine/data/worker.pid（worker.py --daemon 自写，
-   *  与 sandbar-temporal-tools supervisor 的 pidfile 同一真相源）。 */
-  async function handleTemporalHealth(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const workerPidfile = join(repo, 'server', 'engine', 'data', 'worker.pid')
-    const serverOnline = await probePort(TEMPORAL_HOST, TEMPORAL_PORT, PORT_PROBE_TIMEOUT_MS)
-    const pid = await readPid(workerPidfile)
-    const workerOnline = pid !== null && isPidAlive(pid)
-    sendJson(res, 200, {
-      ok: true,
-      result: {
-        ts: Math.floor(Date.now() / 1000),
-        server: {
-          online: serverOnline,
-          host: TEMPORAL_HOST,
-          port: TEMPORAL_PORT,
-          detail: serverOnline
-            ? `${TEMPORAL_HOST}:${TEMPORAL_PORT} 端口监听中`
-            : `${TEMPORAL_HOST}:${TEMPORAL_PORT} 未监听（server 离线）`,
-        },
-        worker: {
-          online: workerOnline,
-          pid,
-          pidfile: workerPidfile,
-          detail: workerOnline
-            ? `pid ${pid} 存活（${workerPidfile}）`
-            : (pid !== null
-              ? `pid ${pid} 已退出（pidfile ${workerPidfile}）`
-              : `无 pidfile（${workerPidfile}）`),
-        },
-        restart_hint: {
-          server: 'cd server/engine && ./run_server.sh（或重启控制台，supervisor 会自动拉起）',
-          worker: 'cd server/engine && .venv/bin/python worker.py --daemon（或重启控制台，supervisor 会自动拉起）',
-        },
-      },
-    })
-  }
-
-  /** Worker 清单（260824 每工单专属 worker）：扫 data/worker*.pid 逐个探测存活。
-   *  worker.pid=共享队列 suyou-poc；worker-<工单id>.pid=专属队列 suyou-ticket-<id>。
-   *  工单台状态条「N workers」点开即是本接口的清单。 */
-  async function handleWorkers(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const dataDir = join(repo, 'server', 'engine', 'data')
-    const workers: unknown[] = []
-    try {
-      const files = await readdir(dataDir)
-      for (const f of files.sort()) {
-        const m = /^worker(?:-(.+))?\.pid$/.exec(f)
-        if (!m) continue
-        const tid = m[1] ?? ''
-        const pid = await readPid(join(dataDir, f))
-        const online = pid !== null && isPidAlive(pid)
-        let logMtime: number | null = null
-        try {
-          logMtime = Math.floor((await stat(join(dataDir, `worker${tid ? `-${tid}` : ''}.log`))).mtimeMs / 1000)
-        } catch { /* 无日志文件（前台 worker 直打 stdout） */ }
-        workers.push({
-          ticket: tid || null,
-          queue: tid ? `suyou-ticket-${tid}` : 'suyou-poc',
-          pid,
-          online,
-          log_mtime: logMtime,
-        })
-      }
-    } catch { /* data 目录不存在 → 空清单 */ }
-    sendJson(res, 200, {
-      ok: true,
-      result: {
-        count: workers.length,
-        count_alive: (workers as { online: boolean }[]).filter(w => w.online).length,
-        workers,
-      },
-    })
   }
 
   /* ------------------------------------------------ M9 PR 式审批台：diff + review */
@@ -1439,16 +1312,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       return
     }
     sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/wf/tickets/<id>[/op | /evidence/<file>]' })
-  }
-
-  /** 巡检报告（M6，只读）：最新一份 out/scan/<YYYY-MM-DD>.json；无报告走 reason 降级。 */
-  async function handleScanReport(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    try {
-      const scanDir = join(repo, 'server', 'engine', 'out', 'scan')
-      sendJson(res, 200, { ok: true, result: await readLatestScanReport(scanDir) })
-    } catch (err) {
-      sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
-    }
   }
 
   /**
@@ -2350,9 +2213,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         // 「文档」视图两路由（t260905-06；KI-070 起按 ?project= 项目根解析）：目录树 + 按篇正文。
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/tree', handler: handleDocsTree }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/doc', handler: handleDocsDoc }),
-        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/temporal-health', handler: handleTemporalHealth }),
-        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workers', handler: handleWorkers }),
-        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/scan-report', handler: handleScanReport }),
         // Inspection period archive read side (t261006-15): period list + single
         // period+instance report (read-only, project root via anchorOf).
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/inspection-archive', handler: handleInspectionArchive }),

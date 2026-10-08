@@ -9,7 +9,9 @@
  * 文档打出死链接。
  *
  * 断言面（锚定路由契约与产物自洽，不绑 handler 内部实现）：
- *  T1 新前缀真 handler 应答：GET /sandbar-workbench/api/wf/temporal-health → 200
+ *  T1 新前缀真 handler 应答：GET /sandbar-workbench/api/build-info → 200
+ *  （t261008-18：/wf/temporal-health 已随机器状态条退役，探针改用同样零 spawn 的
+ *    build-info 读守卫；「路由改名后真 handler 应答」的 intent 不变）
  *     （该 handler 恒 200 人话信封、零引擎 spawn——探测 Temporal 端口只读，生产
  *     Temporal 只读红线允许面；7233 离线也 200+detail，不锚业务数字）；
  *  T2 旧前缀同路径 → 404（无兼容层：非 301/308/410/200）；
@@ -112,13 +114,15 @@ const statusOf = async (p) => {
 }
 
 try {
-  console.log('== 1. 新前缀真 handler 应答（temporal-health：零 spawn、恒 200 人话信封）')
-  const s1 = await statusOf('/sandbar-workbench/api/wf/temporal-health')
-  check(s1 === 200, 'GET /sandbar-workbench/api/wf/temporal-health → 200（实得 %s）', s1)
+  console.log('== 1. 新前缀真 handler 应答（build-info：零 spawn、恒 200；t261008-18 起 temporal-health 已退役不再作探针）')
+  const s1 = await statusOf('/sandbar-workbench/api/build-info')
+  check(s1 === 200, 'GET /sandbar-workbench/api/build-info → 200（实得 %s）', s1)
 
-  console.log('== 2. 旧前缀死透（直接换不留旧：404，非 3xx/410/200）')
-  const s2 = await statusOf('/suyou-workbench/api/wf/temporal-health')
-  check(s2 === 404, '旧前缀 temporal-health → 404（实得 %s）', s2)
+  console.log('== 2. 旧前缀死透 + 退役路由不复活（404，非 3xx/410/200）')
+  const s2 = await statusOf('/suyou-workbench/api/build-info')
+  check(s2 === 404, '旧前缀 build-info → 404（实得 %s）', s2)
+  const s2r = await statusOf('/sandbar-workbench/api/wf/temporal-health')
+  check(s2r === 404, '已退役 /wf/temporal-health → 404（实得 %s）', s2r)
   const s3 = await statusOf('/suyou-workbench/api/wf/tickets')
   check(s3 === 404, '旧前缀 tickets → 404（实得 %s；此子用例不 fetch 新 tickets——spawn 面归隔离台）', s3)
 
