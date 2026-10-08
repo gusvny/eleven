@@ -63,6 +63,13 @@ let n = 0
   assert(bad7.config_error !== null, 'cfg empty executor_session rejected')
   const bad8 = parseWatchdogConfig(JSON.stringify({ alerts: { redline: [1, 2] } }), 'f8')
   assert(bad8.config_error !== null, 'cfg non-string redline rejected')
+  // t261008-39: blocked_rerise_minutes knob (factory / passthrough / malformed).
+  assert(FACTORY_DEFAULTS.blocked_rerise_minutes === 30, 'cfg blocked_rerise factory default 30 (= 2x stall 15)')
+  const okBr = parseWatchdogConfig(JSON.stringify({ blocked_rerise_minutes: 45 }), 'okbr')
+  assert(okBr.config_error === null && okBr.config.blocked_rerise_minutes === 45, 'cfg blocked_rerise_minutes passes through')
+  assert(okBr.provenance.keys['blocked_rerise_minutes']?.endsWith('#blocked_rerise_minutes'), 'cfg blocked_rerise provenance per-key')
+  const badBr = parseWatchdogConfig(JSON.stringify({ blocked_rerise_minutes: 0 }), 'fbr')
+  assert(badBr.config_error !== null && badBr.config_error.includes('blocked_rerise_minutes'), 'cfg blocked_rerise_minutes<=0 rejected')
   // t261004-12：long_turn_minutes 旋钮（默认 / 透传 / 畸形 / 白名单）。
   assert(FACTORY_DEFAULTS.long_turn_minutes === 45, 'cfg long_turn factory default 45 (= 3x stall 15)')
   // t261005-02 cross-knob guard: a declared long_turn above the park threshold must

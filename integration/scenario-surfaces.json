@@ -6,63 +6,93 @@
   "surfaces": [
     {
       "id": "workbench-ui",
-      "paths": ["server/plugins/workbench/"],
-      "artifacts": ["server/plugins/workbench/lib/"],
+      "paths": [
+        "server/plugins/workbench/"
+      ],
+      "artifacts": [
+        "server/plugins/workbench/lib/"
+      ],
       "console": true,
       "names": []
     },
     {
       "id": "executor-panel",
-      "paths": ["server/plugins/executor-panel/"],
+      "paths": [
+        "server/plugins/executor-panel/"
+      ],
       "artifacts": [],
       "console": true,
       "names": []
     },
     {
       "id": "admin-ui",
-      "paths": ["server/plugins/ui/"],
-      "artifacts": ["server/plugins/ui/lib/"],
+      "paths": [
+        "server/plugins/ui/"
+      ],
+      "artifacts": [
+        "server/plugins/ui/lib/"
+      ],
       "console": true,
       "names": []
     },
     {
       "id": "knowledge-plugin",
-      "paths": ["server/plugins/knowledge/"],
-      "artifacts": ["server/plugins/knowledge/lib/"],
+      "paths": [
+        "server/plugins/knowledge/"
+      ],
+      "artifacts": [
+        "server/plugins/knowledge/lib/"
+      ],
       "console": true,
       "names": []
     },
     {
       "id": "providers-plugin",
-      "paths": ["server/plugins/providers/"],
-      "artifacts": ["server/plugins/providers/lib/"],
+      "paths": [
+        "server/plugins/providers/"
+      ],
+      "artifacts": [
+        "server/plugins/providers/lib/"
+      ],
       "console": true,
       "names": []
     },
     {
       "id": "watchdog",
-      "paths": ["server/plugins/watchdog/"],
+      "paths": [
+        "server/plugins/watchdog/"
+      ],
       "artifacts": [],
       "console": false,
-      "names": []
+      "names": [
+        "t261008-39-board-sweep-brief-contract",
+        "t261008-39-stuck-block-rerise-persistence",
+        "t261008-39-sweep-disposition-contract"
+      ]
     },
     {
       "id": "temporal-tools",
-      "paths": ["server/plugins/temporal-tools/"],
+      "paths": [
+        "server/plugins/temporal-tools/"
+      ],
       "artifacts": [],
       "console": false,
       "names": []
     },
     {
       "id": "docs-kb",
-      "paths": ["docs/"],
+      "paths": [
+        "docs/"
+      ],
       "artifacts": [],
       "console": false,
       "names": []
     },
     {
       "id": "notes-kb",
-      "paths": ["notes/"],
+      "paths": [
+        "notes/"
+      ],
       "artifacts": [],
       "console": false,
       "names": []

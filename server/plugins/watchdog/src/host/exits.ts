@@ -14,6 +14,7 @@
 
 import type { LedgerRow } from './ledger-tail.ts'
 import type { AlertSpec } from './alert-rules.ts'
+import { isReriseRow, sweepInstruction } from './board-sweep.ts'
 
 /** 值得唤醒的行：状态迁移类（带 stage/stage_state 的行）。纯 kind 行（如 engine 维护）不醒。
  *
@@ -52,14 +53,28 @@ export function wakeMode(level: 'info' | 'warn' | 'redline'): 'queue' | 'steer' 
   return level === 'redline' ? 'steer' : 'queue'
 }
 
-/** 简报构造（人说人话：增量 + 请求指针，说清「为什么叫你」）。 */
-export function buildBrief(project: string, rows: LedgerRow[], selfLockTarget: string | null): string {
-  const lines = [`【watchdog 唤醒 · ${project}】事件账有新内容，请读简报推进：`]
+/** Brief builder (human-readable: the delta + the request pointer, saying why the
+ *  executor was woken).
+ *  t261008-39 (host order 261008): the brief UNCONDITIONALLY carries the standing
+ *  board-sweep instruction (with or without new transitions) — the executor sweeps
+ *  the whole board on wake and returns a bounded disposition per decision-state
+ *  ticket; reriseRows (long-stuck re-raise synthetic rows) get their own named
+ *  section. reriseRows affect the text only; the dedupe bookkeeping is owned by
+ *  splitLoopRows' per-row force. */
+export function buildBrief(project: string, rows: LedgerRow[], selfLockTarget: string | null, reriseRows: LedgerRow[] = [], reriseThresholdMinutes: number | null = null): string {
+  const lines: string[] = []
+  lines.push(sweepInstruction(reriseThresholdMinutes ?? 30))
+  lines.push(`[watchdog wake · ${project}] The event ledger has new content — read the brief and move the work forward:`)
   for (const r of rows.slice(0, 20)) {
-    lines.push(`- ${r.ticket} ${r.stage ?? ''}→${r.stage_state ?? ''}${r.reason ? `（${r.reason}）` : ''}`)
+    lines.push(`- ${r.ticket} ${r.stage ?? ''}→${r.stage_state ?? ''}${r.reason ? ` (${r.reason})` : ''}`)
   }
-  if (rows.length > 20) lines.push(`…另有 ${rows.length - 20} 行，读账本增量`)
-  if (selfLockTarget) lines.push(`注意：你有一个自己发起、尚未被答复的挂起项（${selfLockTarget}）——它在等你，先处理或落成请求。`)
+  if (rows.length > 20) lines.push(`…and ${rows.length - 20} more rows — read the ledger delta`)
+  for (const r of reriseRows.slice(0, 20)) {
+    const real = typeof r.raw?.real_ticket === 'string' ? r.raw.real_ticket : r.ticket
+    lines.push(`- [re-raise] ${real}: ${r.reason}`)
+  }
+  if (reriseRows.length > 20) lines.push(`…and ${reriseRows.length - 20} more re-raises`)
+  if (selfLockTarget) lines.push(`Note: you have a self-initiated, unanswered pending item (${selfLockTarget}) — it waits on you; handle it or file it as a request.`)
   return lines.join('\n')
 }
 
@@ -159,7 +174,11 @@ export function splitLoopRows(rows: LedgerRow[], mem: WakeMemory, bypass = false
   const presumed: LedgerRow[] = []
   for (const row of rows) {
     const key = stageKeyOf(row)
-    const force = bypass || isDecisionRow(row)
+    // t261008-39: a re-raise synthetic row forces its own row through (the explicit
+    // raw.rerise marker only, see isReriseRow) — the batch-level bypass is NOT
+    // widened by its presence: normal already-briefed rows in the same batch keep
+    // their guards ①② suppression.
+    const force = bypass || isDecisionRow(row) || isReriseRow(row)
     const fresh = mem.fresh.get(row.ticket) ?? new Set<string>()
     if (!force && mem.briefed.get(row.ticket)?.has(key)) continue // ① idem：简报讲过的迁移不讲第二遍
     if (!force && fresh.has(key)) continue // 同一观察窗内的重复行（重投/同批重复）不重复计数
@@ -214,10 +233,15 @@ export async function wakeExecutor(
   selfLockTarget: string | null,
   level: 'info' | 'warn' | 'redline' = 'info',
   mem: WakeMemory = freshWakeMemory(),
+  reriseRows: LedgerRow[] = [],
+  reriseThresholdMinutes: number | null = null,
 ): Promise<WakeOutcome> {
   const worthies = rows.filter(worthWaking)
   // t261003-15：决策态行（或红线拍）旁路 ①②；规则③不旁路（见 DECISION_STAGE_STATES 注）。
-  const bypass = level === 'redline' || worthies.some(isDecisionRow)
+  // t261008-39 (review R2): re-raise synthetic rows do NOT take part in the
+  // batch-level bypass computation (they carry their own per-row force) — otherwise
+  // one synthetic row in the batch would dismantle guards ①② for all normal rows.
+  const bypass = level === 'redline' || worthies.some(r => isDecisionRow(r) && !isReriseRow(r))
   const { wakeable, presumed } = splitLoopRows(worthies, mem, bypass)
   const considered = worthies.length
   const presumedMeta = { presumedSelf: mem.presumedSelfRows, presumedSelfDetail: mem.presumedSelfDetail, considered }
@@ -246,12 +270,19 @@ export async function wakeExecutor(
     if (depth === null) noSignal = true
   }
   const mode = wakeMode(level)
-  const brief = buildBrief(project, wakeable, selfLockTarget)
+  // t261008-39: re-raise synthetic rows travel the same delivery channel (no second
+  // channel) but pass splitLoopRows via their per-row force (never swallowed by ①②);
+  // after an accepted prompt only NORMAL rows are recorded into briefed — the
+  // synthetic keys are unique per episode by construction, and recording them would
+  // grow mem.briefed without bound.
+  const normalWakeable = wakeable.filter(r => !isReriseRow(r))
+  const reriseWakeable = wakeable.filter(isReriseRow)
+  const brief = buildBrief(project, normalWakeable, selfLockTarget, reriseWakeable, reriseThresholdMinutes)
   try {
     const r = await io.prompt(sessionId, brief, mode)
     if (r.accepted) {
       // 简报投出 = 这些 stage_key 都进了简报：fresh 并入 briefed，开始新一轮观察窗。
-      for (const row of wakeable) {
+      for (const row of normalWakeable) {
         const set = mem.briefed.get(row.ticket) ?? new Set<string>()
         set.add(stageKeyOf(row))
         mem.briefed.set(row.ticket, set)

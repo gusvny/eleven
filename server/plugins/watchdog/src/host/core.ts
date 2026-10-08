@@ -26,6 +26,7 @@ import { decideProseBackstop, journalLine, replayJournal, findMarkerSentence } f
 import { decideSelfHeal, buildSelfHealBrief, selfHealParkKey, type SelfHealAsk } from './self-heal.ts'
 import { applyDedupe, judgeAlert, makeKey, replayDedupe, type AlertSpec, type DedupeState } from './alert-rules.ts'
 import { alertRecord, freshWakeMemory, wakeExecutor, requestAnswerRow, alertClearedRow, type WakeIo, type WakeMemory, type WakeOutcome, type WakeReceipt } from './exits.ts'
+import { collectStuckRerises, freshSweepMemory, type SweepMemory } from './board-sweep.ts'
 
 export interface BoardReader {
   (): Promise<{ ok: boolean; rows: BoardRow[]; error?: string }>
@@ -202,6 +203,19 @@ export interface WatchdogStatus {
    *  attempted:false carries its reason — "was a wake attempted and why not" stays
    *  answerable from the status face, not only inside the HTTP response. */
   wake_receipts: WakeReceipt[]
+  /** t261008-39 additive: the standing board-sweep face. Every currently-stuck
+   *  decision-state ticket (blocked/refused only; awaiting-human is a queue, never
+   *  listed as a fault), the re-raise threshold (never silent — a silent threshold
+   *  is the original defect), this tick's rerise count, and whether a due rerise
+   *  was suppressed by the undigested-brief gate ③ (with its named reason) — a
+   *  stuck ticket stays visible here even while a brief sits undigested. */
+  sweep_rerise: {
+    threshold_minutes: number | null
+    stuck: Array<{ ticket: string; since: number; minutes: number; episode: number; action: 'none' | 'after_action' }>
+    rerised: number
+    suppressed: boolean
+    reason: string
+  }
   alerts: Array<Record<string, unknown>>
   notify: { beep: boolean; unseen_redline: number }
   last_error: string | null
@@ -253,6 +267,13 @@ export class Watchdog {
   private lastWakeVerdict: WatchdogStatus['last_wake_verdict'] = null
   /** 自醒排除记忆（t260929-04）：随实例存活；dispose 即随进程终态。 */
   private wakeMem: WakeMemory = freshWakeMemory()
+  /** t261008-39 sweep memory: the re-raise throttle + episode per ticket (in-memory;
+   *  lost on restart — first-sighting semantics: a restart only delays a re-raise,
+   *  never fabricates stuck age). */
+  private sweepMem: SweepMemory = freshSweepMemory()
+  /** t261008-39 sweep status face: this tick's stuck decision-state tickets, the
+   *  threshold, and whether a due re-raise fired or was suppressed. */
+  private sweepRerise: WatchdogStatus['sweep_rerise'] = { threshold_minutes: null, stuck: [], rerised: 0, suppressed: false, reason: 'not yet evaluated (watchdog not started / first tick pending)' }
   /** t261005-02 self-heal state: per-park attempt counter (memory; a restart re-arms
    *  one attempt — guards still have to hold again) + the latest verdict/receipt. */
   private selfHealAttempts = new Map<string, number>()
@@ -787,25 +808,50 @@ export class Watchdog {
       // takeAlertClears also rotates "this tick -> last tick"; lastCondActive is
       // empty on the first tick, so a restart never emits a phantom clear.
       const clearRows = this.takeAlertClears()
-      const wakeRows = [...newRows, ...clearRows]
+      // t261008-39 board sweep: derive this tick's long-stuck blocked/refused re-raise
+      // candidates from the rolling ledger (threshold = config.blocked_rerise_minutes;
+      // awaiting-human never enters). Synthetic rows are wake inputs only — nothing is
+      // ever written to any ledger; the threshold is echoed to the status face and the
+      // brief (a silent threshold is the original defect).
+      const reriseThresholdMin = typeof this.cfg.config.blocked_rerise_minutes === 'number' && this.cfg.config.blocked_rerise_minutes > 0
+        ? this.cfg.config.blocked_rerise_minutes : 30
+      const sweep = collectStuckRerises(this.ledgerRows, this.sweepMem, nowMs, reriseThresholdMin, this.project)
+      const wakeRows = [...newRows, ...clearRows, ...sweep.reriseRows]
+      // The status face lands "who is stuck" first — the stuck tickets stay visible
+      // even on a tick that does not wake (no delivery face / suppressed / failed).
+      this.sweepRerise = { threshold_minutes: reriseThresholdMin, stuck: sweep.stuck, rerised: 0, suppressed: false, reason: sweep.reriseRows.length > 0 ? 'rerise rows due this tick' : 'no ticket past the re-raise threshold' }
       // t261003-15：本拍唤醒裁决（无论醒不醒）都落 lastWakeVerdict——状态面可答
       // 「为什么没醒」，不再需要翻 executor 会话日志。每条路径（含无新行/无投递面/
       // 无会话 id 的跳过拍）都给显式 reason，运行中的拍绝不留空裁决。
       if (!this.wakeIo) {
         this.lastWakeVerdict = { at: nowMs, woke: false, reason: '本实例未注入投递面（wakeIo=null）——显式不作为', considered: 0, presumed_self: 0 }
+        if (sweep.reriseRows.length > 0) {
+          this.sweepRerise.suppressed = true
+          this.sweepRerise.reason = 'wakeIo not injected — the re-raise rows have no delivery face (explicit no-op)'
+        }
       } else if (wakeRows.length === 0) {
         this.lastWakeVerdict = { at: nowMs, woke: false, reason: '本拍无新账本行', considered: 0, presumed_self: this.wakeMem.presumedSelfRows }
       } else {
         const level = this.selfLock.state === 'waiting_on_itself' || this.liveness.state === 'stalled' ? 'redline' : 'info'
-        const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, wakeRows, this.selfLock.target, level, this.wakeMem)
+        const r: WakeOutcome = await wakeExecutor(this.wakeIo, this.project, sid, wakeRows, this.selfLock.target, level, this.wakeMem, sweep.reriseRows, reriseThresholdMin)
         if (this.aborted) return
         this.lastWakeVerdict = { at: nowMs, woke: r.woke, reason: r.reason, considered: r.considered ?? 0, presumed_self: r.presumedSelf ?? this.wakeMem.presumedSelfRows }
         if (r.woke) {
+          if (sweep.reriseRows.length > 0) this.sweepRerise.rerised = sweep.reriseRows.length
           this.wakes.push({ at: nowMs, ticket: wakeRows[wakeRows.length - 1].ticket, dedupe_key: makeKey('wake', sid), mode: r.mode, accepted: r.accepted })
           if (this.wakes.length > 100) this.wakes.splice(0, this.wakes.length - 100)
           this.lastProgressAt = nowMs
-        } else if (r.accepted === false) {
-          await this.raise({ rule: 'wake_failed', target: sid, level: 'warn', title: `唤醒投递失败（${sid}）`, detail: r.reason })
+        } else {
+          // No wake: with re-raise rows due, the status face must say which gate
+          // suppressed it (review note 2) — a stuck ticket never vanishes from the
+          // status face just because a previous brief sits undigested.
+          if (sweep.reriseRows.length > 0) {
+            this.sweepRerise.suppressed = true
+            this.sweepRerise.reason = `rerise due but the wake was suppressed: ${r.reason}`
+          }
+          if (r.accepted === false) {
+            await this.raise({ rule: 'wake_failed', target: sid, level: 'warn', title: `wake delivery failed (${sid})`, detail: r.reason })
+          }
         }
       }
     } finally {
@@ -1066,6 +1112,7 @@ export class Watchdog {
       last_wake_verdict: this.lastWakeVerdict,
       self_heal: this.selfHealFace,
       wake_receipts: this.wakeReceipts.slice(-20),
+      sweep_rerise: this.sweepRerise,
       alerts: this.alerts.slice(-50),
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },
       last_error: this.lastError,

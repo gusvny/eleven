@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 234,
-      "scenarios": 593
+      "scenarios": 596
     },
     "vocab": [
       "behaviour",
@@ -4142,6 +4142,21 @@
     "integration/t261008-36/sc_t26100836_single_routes_path.py": {
       "anchor": "source-text",
       "note": "t261008-36 negative face: no model-routes reference in executor-panel source, exactly one ProvidersSection mount site, data-wb-more-views grep-zero, providers client keeps the routes save face",
+      "sync_path": ""
+    },
+    "integration/t261008-39/sc_board_sweep_brief_contract.mjs": {
+      "anchor": "contract",
+      "note": "t261008-39 board sweep / rerise",
+      "sync_path": ""
+    },
+    "integration/t261008-39/sc_sweep_disposition_contract.mjs": {
+      "anchor": "contract",
+      "note": "t261008-39 board sweep / rerise",
+      "sync_path": ""
+    },
+    "integration/t261008-39/sc_stuck_block_rerise_persistence.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-39 board sweep / rerise",
       "sync_path": ""
     }
   }

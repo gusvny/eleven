@@ -28,6 +28,16 @@ export interface WatchdogConfig {
    *  都报），又有界（真挂死但 running 位仍 true 的循环不会永远无声）。running=false
    *  的停摆判定仍用 stall_minutes，两条阈值互不借用。 */
   long_turn_minutes: number
+  /** t261008-39 (host order 261008): the re-raise threshold (minutes) for a ticket
+   *  stuck in blocked/refused — past it, with no recorded action, later wake briefs
+   *  name the ticket again (still blocked, previously surfaced) instead of relying
+   *  on the once-only briefing; a recorded action while still stuck moves the fire
+   *  point to 2x the threshold (never punishes an attempt, but long non-progress
+   *  still reaches the table). Default 30 = 2x stall_minutes, below
+   *  long_turn_minutes (45), and below the live case's harm window (t261008-22 sat
+   *  unnoticed for 59 minutes). awaiting-human is a queue, not a fault — it never
+   *  enters the re-raise. */
+  blocked_rerise_minutes: number
   reconcile_seconds: number
   /** t261004-08: self-lock escalation threshold (minutes) — an unanswered request
    *  raised by the executor session itself escalates to `waiting_on_itself` (redline)
@@ -76,6 +86,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
   executor_session: '',
   stall_minutes: 15,
   long_turn_minutes: 45,
+  blocked_rerise_minutes: 30,
   reconcile_seconds: 60,
   waiting_minutes: 5,
   prose_backstop: { enabled: true, idle_minutes: 10 },
@@ -158,6 +169,11 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
     if (typeof doc.long_turn_minutes !== 'number' || !Number.isFinite(doc.long_turn_minutes) || doc.long_turn_minutes <= 0) {
       problems.push('long_turn_minutes must be a positive number (minutes)')
     } else { cfg.long_turn_minutes = doc.long_turn_minutes; keys.long_turn_minutes = `${file}#long_turn_minutes` }
+  }
+  if ('blocked_rerise_minutes' in doc) {
+    if (typeof doc.blocked_rerise_minutes !== 'number' || !Number.isFinite(doc.blocked_rerise_minutes) || doc.blocked_rerise_minutes <= 0) {
+      problems.push('blocked_rerise_minutes must be a positive number (minutes)')
+    } else { cfg.blocked_rerise_minutes = doc.blocked_rerise_minutes; keys.blocked_rerise_minutes = `${file}#blocked_rerise_minutes` }
   }
   if ('reconcile_seconds' in doc) {
     if (typeof doc.reconcile_seconds !== 'number' || !Number.isFinite(doc.reconcile_seconds) || doc.reconcile_seconds < 5) {
@@ -290,7 +306,7 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
   if ('long_turn_minutes' in doc && cfg.self_heal.park_minutes <= cfg.long_turn_minutes) {
     problems.push(`self_heal.park_minutes (${cfg.self_heal.park_minutes}) must stay above long_turn_minutes (${cfg.long_turn_minutes}) — a healthy long turn must never reach the cancel threshold`)
   }
-  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'self_heal', 'one_shot', 'ask_mirror_deadline_s', 'alerts'].includes(k))
+  const unknown = Object.keys(doc).filter(k => !['enabled', 'executor_session', 'stall_minutes', 'long_turn_minutes', 'blocked_rerise_minutes', 'reconcile_seconds', 'waiting_minutes', 'prose_backstop', 'self_heal', 'one_shot', 'ask_mirror_deadline_s', 'alerts'].includes(k))
   if (unknown.length > 0) problems.push(`Unknown keys rejected (fail-closed, KI-149 family): ${unknown.join(', ')}`)
 
   if (problems.length > 0) {
