@@ -222,3 +222,35 @@ export function themeParamOf(v: unknown): 'light' | 'dark' | null {
   if (s === 'dark') return 'dark'
   return null
 }
+
+/**
+ * t261008-19 (mock reconciliation): page count over a docs-tree response (pure
+ * function, embedded into the page via String(fn)). The input is the workbench
+ * /api/wf/docs/tree JSON (untrusted external input): any malformed shape is null —
+ * the page renders null as '— pages' and never invents a number (ticket reject rule:
+ * no fabricated page counts).
+ */
+export function countDocsTree(j: unknown): number | null {
+  if (typeof j !== 'object' || j === null) return null
+  const groups = (j as Record<string, unknown>).groups
+  if (!Array.isArray(groups)) return null
+  let n = 0
+  for (const g of groups) {
+    const files = g !== null && typeof g === 'object' ? (g as Record<string, unknown>).files : null
+    if (Array.isArray(files)) n += files.length
+  }
+  return n
+}
+
+/**
+ * t261008-19: the Docs tab's two entry rows (layout authority = the 261004 mock
+ * docsTabHtml; the mock's 25/60 are illustrative numbers — real counts come from
+ * countDocsTree, unknown shows '— pages'). scope/label are fixed page constants;
+ * a null count renders as an explicit dash, never a placeholder fake number.
+ */
+export function docEntryRow(scope: string, label: string, count: number | null): string {
+  return '<div class="cell" data-docentry="' + scope + '" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+    + '<b>' + scope + '/</b><span>' + label + '</span>'
+    + '<span class="meta">' + (count === null ? '— pages' : count + ' pages') + '</span>'
+    + '<button class="backbtn" data-docopen="' + scope + '">Open</button></div>'
+}

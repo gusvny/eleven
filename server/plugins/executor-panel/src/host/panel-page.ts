@@ -30,6 +30,8 @@
 import {
   beepDecision, pickDegraded, fmtProportion, fmtWaiting, fmtAge, groupByProject,
   splitWaiting, hasOptions, chipLabel, masterOn, localDateTime, newestFirst, wakeRowSentence, themeParamOf,
+  // t261008-19: docs tree page count + the mock's two entry rows (single implementation).
+  countDocsTree, docEntryRow,
 } from './page-logic.ts'
 import { LIST_CONTRACTS } from './list-contracts.ts'
 import { renderMarkdown } from './markdown.ts'
@@ -73,6 +75,8 @@ const EMBEDDED = [
   String(buildPeriodViewCore),
   // t261006-17 (CL-2): concurrency knob + chip classifier (same single implementation).
   String(limitStep), String(concChipState),
+  // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
+  String(countDocsTree), String(docEntryRow),
 ].join('\n')
 
 /** t261006-15: Inspection tables (verbatim empty copies + instance labels) as JSON —
@@ -418,16 +422,34 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 
   <!-- t261005-10 (UI-2): Metrics tab — facts-only face over the project metrics API
        (KPI cards + freshness line). No second chart engine in the panel. -->
+  <!-- t261008-19: Metrics tab — the t261005-10 KPI face stays; below it the 261004
+       mock's Charts box (metricsTabHtml) as semantic text anchors only. No chart
+       engine is added (t261005-10 ruling stands); the conflict with
+       docs/design/metrics-panel-ui-plan.md (ECharts, four views) is REPORTED to the
+       adjudication surface, not resolved here. The three label strings are
+       byte-identical to the mock. The value-side copy states the real data state:
+       there is no chart data drawn in this build (named degraded face, not silence). -->
   <section id="paneMetrics" style="display:none">
     <div id="metricsBanner"></div>
     <div class="grid" id="metricsGrid"></div>
     <div class="file" id="metricsMeta"></div>
+    <div class="sect lead">Charts</div>
+    <div class="cell" id="metricsCharts" style="display:block">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">lanes per day</span><span class="meta">(chart from the project metrics API)</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">stage duration</span><span class="meta">(chart — no chart data drawn in this build)</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">gate reds</span><span class="meta">(chart — no chart data drawn in this build)</span></div>
+    </div>
   </section>
 
   <!-- t261005-10 (UI-2): Docs tab — read-only tree + markdown reader over the
        workbench docs API (same renderer as the rest of the page). -->
   <section id="paneDocs" style="display:none">
     <div id="docsBanner"></div>
+    <!-- t261008-19: the 261004 mock's two entry rows (docsTabHtml) — docs/ the
+         library, notes/ the ledger, real page counts (countDocsTree; unknown shows
+         '— pages', never a fabricated number) and an Open action. The mock is silent
+         on the Open target; the in-tab reader/scope switch is chosen, no new endpoint. -->
+    <div class="bar" id="docsEntries" style="margin-top:0"></div>
     <div class="bar" style="margin-top:0" id="docsScopeBar"></div>
     <div id="docsTree"></div>
     <div id="docsReader"></div>
@@ -1459,12 +1481,32 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var scope=state.docsScope;
     var url='/sandbar-workbench/api/wf/docs/tree?scope='+scope+'&project='+encodeURIComponent(state.project);
     fetch(url).then(function(r){ return r.json(); }).then(function(j){
-      state.docs=j; renderDocs();
+      state.docs=j;
+      // t261008-19: remember the real page count per scope (malformed → null, shown
+      // as '— pages'; never a fabricated count).
+      state.docsCounts=state.docsCounts||{};
+      state.docsCounts[scope]=countDocsTree(j);
+      renderDocs();
     }).catch(function(){ state.docs=null; renderDocs(); });
+  }
+  function renderDocEntries(){
+    var entries=el('docsEntries');
+    var counts=state.docsCounts||{};
+    entries.innerHTML=
+      docEntryRow('docs','the library',counts.docs===undefined?null:counts.docs)
+      +docEntryRow('notes','the ledger',counts.notes===undefined?null:counts.notes);
+    Array.prototype.forEach.call(entries.querySelectorAll('[data-docopen]'), function(b){
+      b.onclick=function(){
+        // The mock is silent on the Open target; the chosen target is the existing
+        // in-tab face (switch scope, reload the tree, keep the reader) — no new endpoint.
+        if(state.docsScope!==b.dataset.docopen){ state.docsScope=b.dataset.docopen; state.docs=null; state.docSel=''; loadDocs(); }
+      };
+    });
   }
   function renderDocs(){
     var e=el('docsBanner'), bar=el('docsScopeBar'), tree=el('docsTree'), reader=el('docsReader');
-    if(!state.project){ e.innerHTML=''; bar.innerHTML=''; tree.innerHTML=''; reader.innerHTML=''; return; }
+    if(!state.project){ e.innerHTML=''; bar.innerHTML=''; el('docsEntries').innerHTML=''; tree.innerHTML=''; reader.innerHTML=''; return; }
+    renderDocEntries();
     bar.innerHTML=['docs','notes'].map(function(s){
       return '<button class="backbtn" data-scope="'+s+'"'+(s===state.docsScope?' style="border-color:var(--blue);color:var(--blue)"':'')+'>'+s+'/</button>';
     }).join('');
