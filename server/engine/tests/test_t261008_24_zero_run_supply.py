@@ -221,13 +221,18 @@ def test_light_lane_wires_stop_record_and_args():
     assert "last_green_run=dict(" in src
 
 
-def test_merge_check_consumes_the_item_and_keeps_rehearsal_last():
+def test_current_gate_no_longer_injects_the_item_and_rehearsal_stays_last():
+    """261009 宿主直修令：现行门不再注入 green-run 前置（本票的接线面随之退役）。
+
+    判据函数 shared.green_run_check_item 仍在（新版 lane 与将来重新接线用），
+    所以本用例只钉两件：①现行门里**没有**该注入；②rehearsal 仍占 checks[-1]。
+    函数本身的真值表仍由本文件其余用例覆盖。
+    """
     src = _src("agent_activities.py")
-    assert "shared.green_run_check_item(args.last_green_run, _gr_sha)" in src
-    insert_at = src.index("shared.green_run_check_item(args.last_green_run")
-    rehearsal_at = src.index("green = all(c[\"green\"] for c in checks)", insert_at)
-    assert insert_at < rehearsal_at
-    assert "insert(max(len(checks) - 1, 0)" in src          # rehearsal keeps checks[-1]
+    assert "shared.green_run_check_item(args.last_green_run" not in src
+    assert "261009 宿主直修令" in src          # 摘除留痕（provenance）
+    rehearsal_at = src.index("green = all(c[\"green\"] for c in checks)")
+    assert rehearsal_at > 0                    # rehearsal 计算仍在且是判定入口
 
 
 # ---------------- ⑥ round budget untouched ----------------
@@ -401,9 +406,15 @@ def test_merge_check_empty_write_set_suppresses_the_item(tmp_path, monkeypatch):
     assert res.green is True
 
 
-def test_merge_check_write_set_carries_the_item_even_without_a_face(tmp_path, monkeypatch):
-    """The KI-220 incident shape (a real write set, no face) keeps the item ON and
-    red zero_run — the guard must never silently narrow past the incident."""
+def test_current_gate_no_longer_carries_the_item_after_host_order(tmp_path, monkeypatch):
+    """261009 宿主直修令后的新事实：现行门**不再携带** green-run 前置项。
+
+    原用例钉的是"KI-220 事件形状（有写集、无 face）必须带该项且判 zero_run 红"——
+    那正是宿主在 261009 下令摘除的行为（它绑 sha 相等 ⇒ 别人合一张票就作废本票的绿 ⇒
+    四张票永久挡住、占满额度）。因此本用例改为钉**新的现行形状**，并显式声明这不是
+    "放宽断言蒙绿"：判据函数仍在 shared.py（其真值表由本文件其余用例覆盖），
+    而"不许零跑过关"这条意图的落点改为**新版 lane**（见 docs/design/develop-buffer-v1.md）。
+    """
     import agent_activities as aa
     from shared import MergeCheckArgs
     lane = _mk_solo_repo(tmp_path)
@@ -418,6 +429,7 @@ def test_merge_check_write_set_carries_the_item_even_without_a_face(tmp_path, mo
         ticket_id="t", worktree=str(lane), branch="lane/tkt",
         base_ref="basesha", write_set=["f.txt"])))
     items = [c for c in res.checks if c.get("id") == shared.GREEN_RUN_CHECK_ID]
-    assert len(items) == 1 and items[0]["green"] is False
-    assert items[0]["reason_code"] == "zero_run"
-    assert res.green is False
+    assert items == []                      # 现行门不再注入该项（261009 宿主直修令）
+    assert shared.GREEN_RUN_CHECK_ID not in [c.get("id") for c in res.checks]
+    # 判定仍由其它检查驱动（本夹具全绿 ⇒ 不再因该项被判红）
+    assert res.green is True

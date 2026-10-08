@@ -333,10 +333,13 @@ def test_merge_check_all_repos_zero_commit_global_red(tmp_path, monkeypatch):
     assert gate[0]["reason_code"] == "all_repos_zero_commits"
     assert "allow_empty_write_set" in gate[0]["next_action"]
     assert res.checks[-1]["id"] == "merge_rehearsal"
-    # t261008-24: the green-run precondition item sits before the rehearsal
-    # (KI-047 slot-contract extension face)
-    assert res.checks[-2]["id"] == "scenario_green_run"
-    assert res.checks[-3]["id"] == "all_repos_zero_commits"
+    # t261008-24 的 green-run 前置项曾坐在 rehearsal 之前（KI-047 槽位契约扩展面）；
+    # **261009 宿主直修令已把它从现行门摘除**（理由见 agent_activities.py 该处注释与
+    # docs/design/develop-buffer-v1.md：判据绑 sha 相等，别人合票即作废本票的绿，
+    # 四张票被永久挡住）⇒ 现行门的 rehearsal 之前一项回到 all_repos_zero_commits。
+    # 本断言随之回到摘除前的形状；判据函数本身的 UT 仍在
+    # test_t261008_24_zero_run_supply.py（只测函数，不再钉接线）。
+    assert res.checks[-2]["id"] == "all_repos_zero_commits"
 
 
 def test_merge_check_no_file_changes_exempt_global_gate(tmp_path, monkeypatch):
