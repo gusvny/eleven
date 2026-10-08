@@ -3,7 +3,7 @@
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
    "engine_tests": 229,
-   "scenarios": 577
+   "scenarios": 581
   },
   "vocab": [
    "behaviour",
@@ -4062,6 +4062,26 @@
   "integration/t261008-25/sc_t261008_25_status_surface_map.py": {
    "anchor": "behaviour",
    "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_lane_map_v5.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-23 lane map v5: duration-proportional segment widths, unstarted nominal width, two parallel forks as two bands in one dashed window with the parallel mark, generic renderer, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_timeline_reason_collapse.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-23 timeline option b: every entry kept, long reason collapsed behind a keyboard-reachable expand control that reveals the full text, malformed entries never yield undefined",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_changes_english_dedup.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-23 changes face: one compact Changes panel plus one full-diff fold (no second Changeset summary), English empty state naming which precondition is missing, never a fabricated diff",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_agent_log_dir.mjs": {
+   "anchor": "contract",
+   "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal",
    "sync_path": ""
   }
  }

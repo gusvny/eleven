@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from '../src/host/agent-logs.ts'
+import { listAgentLogs, resolveAgentBaseDir, resolveAgentBaseDirs, _sessionKbFast } from '../src/host/agent-logs.ts'
 import { apply } from '../node.ts'
 
 const execFileP = promisify(execFile)
@@ -39,18 +39,22 @@ try {
   section('A resolveAgentBaseDir 定目录')
   {
     const repo = join(tmp, 'repo')
+    // t261008-23: the read face catches up with the engine write name; the
+    // primary candidate is .sandbar and .suyou stays as the compat fallback.
     const r1 = resolveAgentBaseDir(repo, 't-x', { worktree: '.worktrees/wt' })
-    ok(r1.base === join(repo, '.worktrees/wt', '.suyou') && r1.reason === undefined, '泳道 worktree → <repo>/<worktree>/.suyou')
+    ok(r1.base === join(repo, '.worktrees/wt', '.sandbar') && r1.reason === undefined, 'lane worktree -> <repo>/<worktree>/.sandbar (primary candidate)')
+    const r1d = resolveAgentBaseDirs(repo, 't-x', { worktree: '.worktrees/wt' })
+    ok(r1d.dirs.length === 2 && r1d.dirs[1] === join(repo, '.worktrees/wt', '.suyou'), 'candidates carry the .suyou compat fallback in probe order')
     const r2 = resolveAgentBaseDir(repo, 't-x', { worktree: '..' })
-    ok(r2.base === '' && (r2.reason ?? '').includes('越界'), 'worktree 越界 → 拒绝（防穿）')
+    ok(r2.base === '' && (r2.reason ?? '').includes('refused'), 'out-of-root worktree -> refused (escape guard)')
     const r3 = resolveAgentBaseDir(repo, 't-x', { worktree: '', workspace: { type: 'dir', path: '/tmp/sandbar-ws/t-x' } })
-    ok(r3.base === '/tmp/sandbar-ws/t-x/.suyou', 'workspace.dir /tmp/sandbar-ws/ 隔离目录')
+    ok(r3.base === '/tmp/sandbar-ws/t-x/.sandbar', 'workspace.dir /tmp/sandbar-ws/ isolated dir -> .sandbar')
     const r4 = resolveAgentBaseDir(repo, 't-x', { workspace: { type: 'dir', path: '/etc/passwd' } })
-    ok(r4.base === join('/tmp/sandbar-ws', 't-x', '.suyou') && r4.reason !== undefined,
-      '非 /tmp/sandbar-ws 的 dir → 兜底隔离目录 + reason')
+    ok(r4.base === join('/tmp/sandbar-ws', 't-x', '.sandbar') && r4.reason !== undefined,
+      'non-/tmp/sandbar-ws dir -> fallback isolated dir + reason')
     const r5 = resolveAgentBaseDir(repo, 't-x', null)
-    ok(r5.base === join('/tmp/sandbar-ws', 't-x', '.suyou') && (r5.reason ?? '').includes('主树道'),
-      '无泳道/无 workspace → 主树道兜底 /tmp/sandbar-ws/<id>/.suyou')
+    ok(r5.base === join('/tmp/sandbar-ws', 't-x', '.sandbar') && (r5.reason ?? '').includes('main-tree'),
+      'no lane / no workspace -> main-tree fallback /tmp/sandbar-ws/<id>/.sandbar')
   }
 
   /* ------------------------------------------------------------ B. listAgentLogs */
@@ -58,7 +62,7 @@ try {
   {
     const suyou = join(tmp, 'ws', 't-b', '.suyou')
     const missing = await listAgentLogs(join(tmp, 'ws', 't-missing', '.suyou'))
-    ok(missing.exists === false && (missing.reason ?? '').includes('不存在'), '目录不存在 → exists=false + reason')
+    ok(missing.exists === false && (missing.reason ?? '').includes('directory does not exist'), 'missing dir -> exists=false + English reason naming the probe (t261008-23)')
 
     await mkdir(suyou, { recursive: true })
     const empty = await listAgentLogs(suyou)

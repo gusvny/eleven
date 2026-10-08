@@ -177,7 +177,7 @@ import {
   validateSessionEntry,
 } from './src/host/session-ledger-file.ts'
 import { mergeExecutorSessions } from './src/shared/session-handles.ts'
-import { listAgentLogs, resolveAgentBaseDir, _sessionKbFast } from './src/host/agent-logs.ts'
+import { listAgentLogs, resolveAgentBaseDirs, _sessionKbFast } from './src/host/agent-logs.ts'
 import { readAgentLiveTail, resolveSessionFile } from './src/host/agent-live.ts'
 import { aggregateTicketUsage, resolveAllSessionFiles, stageWindowsFromTimeline } from './src/host/agent-usage.ts'
 import { buildMetricsResponse, defaultDeps } from './src/host/metrics.ts'
@@ -1810,8 +1810,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         return
       }
       const t = s.result ?? {}
-      const { base, reason } = resolveAgentBaseDir(repo, id, t, projectRootsFor(t.project))
-      const result = await listAgentLogs(base)
+      const { dirs, reason } = resolveAgentBaseDirs(repo, id, t, projectRootsFor(t.project))
+      const result = await listAgentLogs(dirs) // t261008-23：候选序探测，result.base=实际探测目录
       if (reason !== undefined && result.reason === undefined) result.reason = reason
       sendJson(res, 200, { ok: true, result })
     } catch (err) {

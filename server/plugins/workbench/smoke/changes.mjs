@@ -180,7 +180,7 @@ try {
   {
     const r = await computeTicketDiff(repo, { id: 't-smoke-5' })
     ok(r.source === 'none' && r.changed === false, '无 worktree/base/write_set → none')
-    ok((r.emptyReason ?? '').includes('无变更记录'), 'emptyReason 显「无变更记录」')
+    ok((r.emptyReason ?? '').includes('no change record'), 'emptyReason names the missing preconditions in English (t261008-23)')
   }
 
   /* ------------------------------------------------------------ B. review endpoint */
@@ -227,8 +227,8 @@ try {
       ],
     })
     ok(r.status === 200 && r.body.ok === true && typeof r.body.run_id === 'string' && r.body.run_id !== '', 'POST review 200 + run-id')
-    const saved = JSON.parse(await readFile(join(repo, 'server/reviews/t-smoke-1.json'), 'utf8'))
-    ok(saved.rounds.length === 1 && saved.rounds[0].conclude === 'changes-requested', '落盘 server/reviews/<工单id>.json')
+    const saved = JSON.parse(await readFile(join(repo, 'server/dsh/reviews/t-smoke-1.json'), 'utf8')) // KI-057 anchor: <root>/server/dsh/reviews/
+    ok(saved.rounds.length === 1 && saved.rounds[0].conclude === 'changes-requested', '落盘 server/dsh/reviews/<工单id>.json（KI-057 锚）')
     ok(saved.rounds[0].blocks.length === 2 && saved.rounds[0].blocks[0].comment === '这里要改', '块意见逐字段落盘')
     ok(saved.rounds[0].reviewer === 'op-test', 'reviewer 落盘')
     // GET reads it back

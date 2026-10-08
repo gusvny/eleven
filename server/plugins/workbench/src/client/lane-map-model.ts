@@ -32,7 +32,7 @@
  */
 import { deriveStageStates } from './lane-states.ts'
 import type { D2Visual, LaneDetailLike, LaneBlockedHistory } from './lane-states.ts'
-import { HANDOFF_KEY_ALIAS } from './lane-durations.ts'
+import { HANDOFF_KEY_ALIAS, deriveStageDurations, stageTotalMs } from './lane-durations.ts'
 
 /* ── 拓扑契约（引擎 template_topology.py topology-v1） ── */
 
@@ -73,6 +73,18 @@ export const LANE_KIND_ICON: Record<LaneNodeKind, string> = {
 
 /* ── 视图模型 ── */
 
+/** Lane map v5 (t261008-23, mock 261004 612-690): where the time-share width
+ *  weight comes from. measured=closed round windows, real wall clock;
+ *  running=open round window ticking with nowMs; nominal=not started (the mock
+ *  gives unstarted stages a nominal width). Single duration source =
+ *  lane-durations (deriveStageDurations + stageTotalMs, the same truth the
+ *  stepper / duration badges consume). */
+export type LaneDurSource = 'measured' | 'running' | 'nominal'
+
+/** Nominal weight (ms) for an unstarted stage: the mock's NOMINAL constant,
+ *  so the first stage cannot swallow the row. */
+export const LANE_NOMINAL_MS = 10 * 60_000
+
 /** 一个轮格（同段第 n 次进入）。 */
 export interface LaneRound {
   /** 展示轮次（1 起）。引擎 gen 直接用；老票回退=进入序号。 */
@@ -99,6 +111,11 @@ export interface LaneNodeView {
   /** 受阻史与当前性判定（t260916-04）：resolved=true 且 vis='done' → 渲染层出
    *  「曾受阻」角标+hover 经过；无受阻史的段缺省（键不存在）。 */
   blockedHistory?: LaneBlockedHistory
+  /** v5 time-share weight (ms, always present; unstarted = LANE_NOMINAL_MS;
+ *  source named by durSource). */
+  weightMs: number
+  /** Weight source (the renderer only maps weight to width, no policy here). */
+  durSource: LaneDurSource
 }
 
 export interface LaneGroupView {
@@ -107,6 +124,9 @@ export interface LaneGroupView {
   /** 任一成员 running=并行进行中（虚线框高亮）。 */
   active: boolean
   allDone: boolean
+  /** v5 parallel window weight (ms) = max of member weights (mock: window time
+ *  = max of the par pair's own durations). */
+  windowMs: number
 }
 
 export interface LaneMapModel {
@@ -130,6 +150,9 @@ interface DetailLike {
   results?: unknown
   checks?: unknown
   handoffs?: unknown
+  /** Closed-ticket settle fallback (epoch seconds; same source as lane-durations
+ *  closedTs, same shape useStageDurations already feeds). */
+  updated?: unknown
   gens?: unknown
   parallel_stages?: unknown
   meta?: { parallel_stages?: unknown; parallel_phase?: unknown } | null
@@ -393,8 +416,17 @@ export function buildChecksDetail(detail: unknown): GateRunView[] {
 /**
  * 构建泳道图视图模型。返回 null = 拓扑不可用，调用方回落现行线性步骤条
  * （零回归降级锚：老 host / 未声明拓扑的模板 / 畸形契约面）。
+ *
+ * opts.nowMs: determinism anchor for the v5 weights (open running windows
+ * tick against it). Defaults to Date.now(); tests inject a fixed value so the
+ * proportionality assertion is checked against the very weights the model
+ * used (review comment 5).
  */
-export function buildLaneMap(topologyRaw: unknown, detailRaw: unknown): LaneMapModel | null {
+export function buildLaneMap(
+  topologyRaw: unknown,
+  detailRaw: unknown,
+  opts?: { nowMs?: number },
+): LaneMapModel | null {
   const topology = parseTopology(topologyRaw)
   if (!topology) return null
   const detail: DetailLike = (detailRaw !== null && typeof detailRaw === 'object')
@@ -422,14 +454,43 @@ export function buildLaneMap(topologyRaw: unknown, detailRaw: unknown): LaneMapM
   const derived = deriveStageStates(laneDetail, order, { groups: topology.groups.map(g => g.members) })
 
   const nodes: Record<string, LaneNodeView> = {}
+  // v5 time-share weights (t261008-23): single source = lane-durations. Fault
+ // modes inherited from the borrowed implementation (review comment 3):
+ // missing handoffs / alias keys / open window without now are already covered
+ // by its settle chain; this layer only adds malformed timeline -> nominal
+ // weight without throwing. No second duration policy.
+  const nowMs = opts?.nowMs ?? Date.now()
+  const durs = deriveStageDurations(
+    detail.timeline as Parameters<typeof deriveStageDurations>[0],
+    order,
+    Array.isArray(detail.handoffs) ? (detail.handoffs as Parameters<typeof deriveStageDurations>[2]) : null,
+    {
+      nowMs,
+      closedTs: detail.status === 'closed' && typeof detail.updated === 'number' && Number.isFinite(detail.updated)
+        ? detail.updated
+        : null,
+    },
+  )
   for (const n of topology.nodes) {
     const rounds = deriveRounds(n.id, detail)
     const bh = derived.blockedHistory[n.id]
+    const d = durs[n.id]
+    let weightMs = LANE_NOMINAL_MS
+    let durSource: LaneDurSource = 'nominal'
+    if (d !== undefined) {
+      const total = stageTotalMs(d, nowMs)
+      if (total !== null) {
+        weightMs = total
+        durSource = d.rounds.some(r => r.toMs === null) ? 'running' : 'measured'
+      }
+    }
     nodes[n.id] = {
       node: n,
       vis: derived.states[n.id] ?? 'todo',
       rounds,
       badge: rounds.length > 1 ? `×${rounds.length}` : '',
+      weightMs,
+      durSource,
       ...(bh ? { blockedHistory: bh } : {}),
     }
   }
@@ -444,6 +505,7 @@ export function buildLaneMap(topologyRaw: unknown, detailRaw: unknown): LaneMapM
       members,
       active: members.some(m => m.vis === 'running'),
       allDone: members.every(m => m.vis === 'done'),
+      windowMs: Math.max(...members.map(m => m.weightMs)),
     }
   }
   const groupOf: Record<string, string> = {}

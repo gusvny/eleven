@@ -115,7 +115,8 @@ import { SpecBlock } from './spec-block.tsx'
 // receipts, stage notes, changes kv, requests filter).
 import {
   decisionCard, receiptRows, stageNoteRows, changeRows,
-  requestsForTicket, timelineRows,
+  requestsForTicket, timelineRows, collapseReason,
+  type TimelineRow,
 } from './ticket-detail-column-model.ts'
 // t261008-07: concurrency face — the queued position N truth is the engine read
 // face (queue-model discipline: the UI never computes order, only projects it).
@@ -407,11 +408,16 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-status-card .sc-signwhat-ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-accent-deep,#0550ae)}
 .wb-status-card .sc-signwhat ul{margin:4px 0 0;padding-left:18px}
 .wb-status-card .sc-signwhat li{font-size:11.5px;line-height:1.7;word-break:break-all}
-/* t260915-05：真泳道图（拓扑驱动）——节点/并行虚线框/人门虚线圈/轮次带/×N 徽章 */
+/* t260915-05: real lane map (topology-driven) - nodes / parallel dashed window /
+ * human gate dashed ring / round strips / xN badge.
+ * t261008-23 v5: segment width follows the weight share (inline width%, the
+ * renderer computes pct); the fixed min-width retired (72px constant width
+ * conflicts with v5 width-proportional-to-duration); the readable minimum is
+ * kept by the renderer's MIN_PCT floor instead. */
 .wb-lanemap{margin:10px 0 4px;padding:14px 10px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:flex;align-items:stretch;gap:2px;min-height:96px}
-.wb-lm-item{display:flex;align-items:center}
+.wb-lm-item{display:flex;align-items:center;min-width:0}
 .wb-lm-item:not(:first-child)::before{content:'→';color:var(--dsw-derive-border,#d0d7de);margin:0 6px;font-size:14px}
-.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:72px}
+.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:0;overflow:hidden}
 .wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
 .wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
 .wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
@@ -435,11 +441,14 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-lm-round[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-lm-round[data-state=awaiting-human]{color:var(--dsw-derive-warn-deep,#7d4e00);border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
 .wb-lm-round[data-state=rework]{color:var(--dsw-derive-warn-deep,#953800);border-style:dashed;border-color:var(--dsw-derive-warn,#d4a72c)}
-/* 并行组：虚线框 + 纵排多道（mock 屏① B：并行双道虚线框，图面单向流） */
-.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px}
+/* Parallel group: dashed window + same-window bands (v5: the main band spans
+ * the window; a partner band takes its own weight share, set inline). */
+.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px;flex:1}
 .wb-lm-parallel[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
 .wb-lm-plabel{position:absolute;top:-8px;left:10px;background:var(--dsw-derive-canvas,#fff);padding:0 6px;font-size:9.5px;color:var(--dsw-derive-muted,#57606a)}
-.wb-lm-branches{display:flex;flex-direction:column;gap:2px}
+.wb-lm-par-mark{font-style:normal;color:var(--dsw-derive-muted,#57606a);margin-left:4px}
+.wb-lm-branches{display:flex;flex-direction:column;gap:2px;width:100%}
+.wb-lm-band{display:flex;align-items:center;min-width:0}
 .wb-lm-node-inlane{flex-direction:row;min-width:0;padding:2px 6px}
 .wb-lm-node-inlane .wb-lm-dot{width:20px;height:20px;font-size:10px;flex:none}
 .wb-lm-node-inlane .wb-lm-name{white-space:normal;text-align:left}
@@ -591,6 +600,8 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .wb-tl li{display:flex;gap:8px;align-items:baseline}
 .wb-tl .at{flex:none;color:var(--dsw-derive-muted,#8c959f);font-variant-numeric:tabular-nums}
+/* t261008-23 option b: long-reason expand button (native button = keyboard reachable) */
+.wb-tl-more{flex:none;font:inherit;font-size:11px;color:var(--dsw-derive-accent,#0969da);background:none;border:none;padding:0 4px;cursor:pointer;text-decoration:underline}
 .wb-kv2{display:flex;flex-direction:column;gap:3px;font-size:12px}
 .wb-kv2-pair{display:flex;gap:10px}
 .wb-kv2-pair .k{flex:none;min-width:76px;color:var(--dsw-derive-muted,#57606a);font-weight:600}
@@ -2795,16 +2806,50 @@ function DetailDecisionCardFace({ detail }: { detail: TicketDetail }) {
   )
 }
 
+/** One timeline row with option-b reason collapse (t261008-23): every entry
+ *  stays; a long reason renders as the short form plus a native button that
+ *  expands to the full text (keyboard reachable; the full text is kept in
+ *  state, never dropped). */
+function TimelineReasonRow({ row }: { row: TimelineRow }) {
+  const c = collapseReason(row.reason)
+  const [expanded, setExpanded] = useState(false)
+  const head = (
+    <>
+      {stageDisplayLabel(row.stage)}
+      {row.state ? ` · ${STATE_LABEL[row.state] ?? row.state}` : ''}
+    </>
+  )
+  return (
+    <li>
+      <span className="at">{row.at ? fmtAt(row.at) : ''}</span>
+      <span data-testid="timeline-row" data-collapsed={c.collapsed && !expanded ? 'true' : undefined}>
+        {head}
+        {row.reason ? (expanded || !c.collapsed ? ` · ${row.reason}` : ` · ${c.short}`) : ''}
+        {c.collapsed && (
+          <button
+            type="button"
+            className="wb-tl-more"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(e => !e)}
+          >
+            {expanded ? 'less' : 'more'}
+          </button>
+        )}
+      </span>
+    </li>
+  )
+}
+
 /** Column section 7: two columns (left = Timeline + Stage notes; right =
  *  Receipts + Changes + Requests on this ticket). A block with no data renders
  *  nothing (section 7.3: no empty scaffolding); all absent = no section at all.
  *  The changes/requests read faces (diff face, executor-panel request ledger)
  *  failing means that one box does not render — never an error frame, never a
- *  stuck spinner (read errors are named by the collapsed changeset section). */
+ *  stuck spinner (read errors are named by the collapsed changes section). */
 function DetailTwoColumns({ detail, projectKey }: { detail: TicketDetail; projectKey?: string }) {
   const [diff, setDiff] = useState<unknown>(undefined)
   const [reqRows, setReqRows] = useState<unknown>(undefined)
-  useEffect(() => { // diff face (same endpoint the collapsed changeset section reads)
+  useEffect(() => { // diff face (same endpoint the collapsed changes section reads)
     let dead = false
     void (async () => {
       try {
@@ -2838,12 +2883,7 @@ function DetailTwoColumns({ detail, projectKey }: { detail: TicketDetail; projec
         {tl !== null && (
           <div className="wb-panelbox" data-testid="detail-timeline">
             <div className="ttl">Timeline</div>
-            <ul className="wb-tl">{tl.map((r, i) => (
-              <li key={i}><span className="at">{r.at ? fmtAt(r.at) : ''}</span><span>
-                {stageDisplayLabel(r.stage)}
-                {r.state ? ` · ${STATE_LABEL[r.state] ?? r.state}` : ''}{r.reason ? ` · ${r.reason}` : ''}
-              </span></li>
-            ))}</ul>
+            <ul className="wb-tl">{tl.map((r, i) => <TimelineReasonRow key={i} row={r} />)}</ul>
           </div>
         )}
         {notes !== null && (
@@ -3028,8 +3068,8 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
     }
   }
 
-  if (loading) return <div className="wb-empty">Computing changeset (git diff)…</div>
-  if (loadErr !== '') return <div className="wb-err">Changeset load failed: {loadErr}</div>
+  if (loading) return <div className="wb-empty">Computing changes (git diff)…</div>
+  if (loadErr !== '') return <div className="wb-err">Changes load failed: {loadErr}</div>
   if (diff === undefined) return null
 
   const latestRound = reviewFile !== undefined && reviewFile.rounds.length > 0
@@ -3122,7 +3162,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
   return (
     <>
       <div className="wb-section">
-        <div className="wb-section-title">Changeset ({sourceLabel})</div>
+        <div className="wb-section-title">Full diff ({sourceLabel})</div>
         <div className="wb-d-sum">
           <span>{diff.source === 'merged' ? 'merge' : 'base'}: <code>{diff.base === '' ? '(none)' : diff.base.slice(0, 12)}</code></span>
           {diff.worktree !== undefined && <span>Worktree: {shortSlug(diff.worktree)}</span>}
@@ -4366,7 +4406,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
                   durations/rounds) move into a fold too — content kept, it just
                   yields to the lane map + stage notes progress spine. */}
               {detail.kind !== 'inspection' && (
-                <LazyFold label="Changeset (full diff and review)" testid="fold-changes">
+                <LazyFold label="Changes (full diff and review)" testid="fold-changes">
                   <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg}
                     onOpenFile={(p, m) => setFileViewer({ ticketId: detail.id, path: p, mode: m })} />
                 </LazyFold>

@@ -101,6 +101,9 @@ function makeMergeRepo(name, keepBranch) {
 
 const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branch: 'lane/t260915-17' }
 
+/* Stale-copy note (t261008-23): the reason regexes below assert the English
+ * copy of ticket-time-model.ts (host order 260925 English console copy); the
+ * older Chinese regexes broke when the copy went English without this file. */
 /* ── A：merge 收口仓（分支删除） ── */
 {
   const { root, baseRef, mergeCommit } = makeMergeRepo('merge-del', false)
@@ -126,22 +129,22 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
 
   // 反用例：路径不在该版本
   const r4 = await readTicketTimeFile(root, MERGE_META, 'settle', 'src/nope.ts')
-  ok(r4.ok === false && r4.content === undefined && /不在该版本/.test(r4.reason ?? ''),
+  ok(r4.ok === false && r4.content === undefined && /not in that version/.test(r4.reason ?? ''), // copy went English (host order 260925)
     'A4: settle 路径不在该版本 → 人话且无内容（不回落）')
   const r4b = await readTicketTimeFile(root, { ...MERGE_META, baseRef }, 'base', 'src/feat.ts')
-  ok(r4b.ok === false && /不在该版本/.test(r4b.reason ?? ''),
+  ok(r4b.ok === false && /not in that version/.test(r4b.reason ?? ''),
     'A4b: base 问收口期新增文件 → 路径不在基点版')
 
   // C5②：二进制拒渲染
   const r5 = await readTicketTimeFile(root, MERGE_META, 'settle', 'bin/asset.bin')
-  ok(r5.ok === false && r5.content === undefined && /二进制/.test(r5.reason ?? ''),
+  ok(r5.ok === false && r5.content === undefined && /Binary file/.test(r5.reason ?? ''),
     'A5: 二进制文件 → 人话拒渲染（不冒充文本）')
 
   // current：工作树当前版（唯一读工作树的口径）
   const r6 = await readTicketTimeFile(root, MERGE_META, 'current', 'docs/ref.md')
   ok(r6.ok === true && r6.content === WORKTREE_REF, 'A6: current=工作树当前版（C5①）')
   const r6b = await readTicketTimeFile(root, MERGE_META, 'current', 'gone/x.txt')
-  ok(r6b.ok === false && /当前工作树不存在/.test(r6b.reason ?? ''), 'A6b: current 缺文件 → 人话')
+  ok(r6b.ok === false && /current working tree/.test(r6b.reason ?? ''), 'A6b: current 缺文件 → 人话')
 
   // 畸形路径（fail-closed，不抛）
   for (const [p, label] of [['../etc/passwd', '相对穿路径'], ['/abs/x', '绝对路径'], ['a\\b', '反斜杠'], ['', '空串'], [null, 'null'], ['a b.md', '含空格']]) {
@@ -163,15 +166,15 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
 
   // N1：主树道专门文案
   const r10 = await readTicketTimeFile(root, { ...MERGE_META, lane: 'main', branch: '' }, 'settle', 'docs/ref.md')
-  ok(r10.ok === false && /主树道/.test(r10.reason ?? ''), 'A10: 主树道 → 专门人话（不误导「泳道已拆」）')
+  ok(r10.ok === false && /main-lane/.test(r10.reason ?? ''), 'A10: 主树道 → 专门人话（不误导「泳道已拆」）')
   const r10b = await readTicketTimeFile(root, { id: 'x', status: 'closed' }, 'settle', 'docs/ref.md')
-  ok(r10b.ok === false && /主树道/.test(r10b.reason ?? ''), 'A10b: lane/branch 缺省老票 → 同主树道面')
+  ok(r10b.ok === false && /main-lane/.test(r10b.reason ?? ''), 'A10b: lane/branch 缺省老票 → 同主树道面')
 
   // base 无效/缺登记
   const r11 = await readTicketTimeFile(root, { ...MERGE_META, baseRef: 'deadbeefdead' }, 'base', 'docs/ref.md')
-  ok(r11.ok === false && /ref 无效/.test(r11.reason ?? ''), 'A11: base_ref 无效 → 人话')
+  ok(r11.ok === false && /Invalid base ref/.test(r11.reason ?? ''), 'A11: base_ref 无效 → 人话')
   const r11b = await readTicketTimeFile(root, { ...MERGE_META }, 'base', 'docs/ref.md')
-  ok(r11b.ok === false && /未登记开票基点/.test(r11b.reason ?? ''), 'A11b: base_ref 缺省 → 人话')
+  ok(r11b.ok === false && /no recorded base ref/.test(r11b.reason ?? ''), 'A11b: base_ref 缺省 → 人话')
 
   // lane 分支 token 畸形（注入面）：branch 以 - 开头不得进 argv
   const r12 = await readTicketTimeFile(root, { ...MERGE_META, branch: '--exec=evil' }, 'settle', 'docs/ref.md')
@@ -229,7 +232,7 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
   console.log('# C 撞库仓（main 只有 t260915-170 收口提交）')
 
   const r = await readTicketTimeFile(root, { ...MERGE_META }, 'settle', 'docs/ref.md')
-  ok(r.ok === false && r.content === undefined && /找不到本票（t260915-17）/.test(r.reason ?? ''),
+  ok(r.ok === false && r.content === undefined && /torn down.*\(t260915-17\)/.test(r.reason ?? ''),
     'C1: 短 id 不命中长 id 票收口提交（读到别人的票=撒谎级，拒）')
 }
 
@@ -247,7 +250,7 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
 
   for (const status of ['dispatched', 'rework']) {
     const r = await readTicketTimeFile(root, { ...MERGE_META, status }, 'settle', 'docs/ref.md')
-    ok(r.ok === false && r.content === undefined && /还在飞/.test(r.reason ?? ''),
+    ok(r.ok === false && r.content === undefined && /in flight/.test(r.reason ?? ''),
       `D1: 在飞 status=${status} + 分支在场 → 人话拒绝（C1：分支存在性不可反证已收口）`)
   }
   // 对照：同仓 status 改 closed → leg① 命中（证明 D1 拒的是在飞语义而非分支缺席）
@@ -270,7 +273,7 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
   console.log('# E 泳道拆无收口仓')
 
   const r = await readTicketTimeFile(root, MERGE_META, 'settle', 'docs/ref.md')
-  ok(r.ok === false && r.content === undefined && /泳道已拆除/.test(r.reason ?? ''),
+  ok(r.ok === false && r.content === undefined && /torn down/.test(r.reason ?? ''),
     'E1: 拆且无收口提交 → lane-gone 人话（不回落工作树 main 版本）')
 }
 
@@ -319,7 +322,7 @@ const MERGE_META = { id: 't260915-17', status: 'closed', lane: 'worktree', branc
   const r3 = await readTicketTimeFile(root, meta, 'settle', 'docs/ref.md')
   ok(r3.ok === true && r3.content === SETTLE_REF, 'F3: 根仓条目 branch（lane/<id>-root）归属收口')
   const r4 = await readTicketTimeFile(root, meta, 'base', 'member-repo/m.md')
-  ok(r4.ok === false && /成员仓路径未登记开票基点/.test(r4.reason ?? '') && r4.content === undefined,
+  ok(r4.ok === false && /member-repo path/.test(r4.reason ?? '') && r4.content === undefined,
     'F4: 成员仓 base → member-repo-no-base（C4③ 诚实降级，不修成回落）')
   const r5 = await readTicketTimeFile(root, { ...meta, baseRef: g(root, 'rev-parse', 'HEAD~1').trim() }, 'base', 'docs/ref.md')
   ok(r5.ok === true && r5.content === BASE_REF, 'F5: 根仓路径 base=根仓票面 base_ref（C4① 不做归属）')

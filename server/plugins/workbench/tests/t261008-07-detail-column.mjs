@@ -117,13 +117,20 @@ ok('stage notes: absent faces → null', () => {
 });
 
 // ---- changeRows ------------------------------------------------------------
+// t261008-23: the compact panel now carries one row per file (path → +add −del;
+// status prefixed when carried) after the totals row; pathless entries stay
+// totals-only.
 const DIFF = { files: [{ unified: '+a\n+b\n-c\n' }, { unified: 'ctx\n+++\n---\n+d\n' }, { path: 'x' }] };
-ok('changes: file count and plus/minus line, lane row when carried', () => {
+ok('changes: totals + per-file rows + lane row when carried', () => {
   assert.deepEqual(changeRows(DIFF, { worktree: '/lane/t1', branch: 'lane/t1' }), [
     { k: 'files', v: '3 · +3 −1' },
+    { k: 'x', v: '+0 −0' },
     { k: 'lane', v: '/lane/t1 · lane/t1' },
   ]);
-  assert.deepEqual(changeRows(DIFF, {}), [{ k: 'files', v: '3 · +3 −1' }]);
+  assert.deepEqual(changeRows(DIFF, {}), [
+    { k: 'files', v: '3 · +3 −1' },
+    { k: 'x', v: '+0 −0' },
+  ]);
 });
 
 ok('changes: no/unreadable diff face → null', () => {

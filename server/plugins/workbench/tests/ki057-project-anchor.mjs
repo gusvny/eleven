@@ -124,15 +124,15 @@ section('D computeTicketDiff 按项目根判界（闸一行未改，基准随锚
   // KI-057 实报修复点：fpv 泳道在 fpv 仓根内——引擎仓锚下判「越出仓库根」，项目锚下放行。
   // 票面 worktree 是绝对路径（引擎仓外的 fpv 泳道）——resolve 到引擎锚外 → 闸拒（实报形态）。
   const rEngineAnchor = await computeTicketDiff(engineRepo, { id: 't-fpv-1', worktree: join(fpvRepo, '.worktrees/wt'), base_ref: base })
-  ok(rEngineAnchor.source === 'none' && (rEngineAnchor.emptyReason ?? '').includes('越出仓库根'), '引擎仓锚（旧行为）：fpv 泳道被闸拒——复现实报')
+  ok(rEngineAnchor.source === 'none' && (rEngineAnchor.emptyReason ?? '').includes('outside the repository root'), '引擎仓锚（旧行为）：fpv 泳道被闸拒——复现实报')
   const rFpv = await computeTicketDiff(fpvRepo, { id: 't-fpv-1', worktree: '.worktrees/wt', base_ref: base })
   ok(rFpv.source === 'worktree' && rFpv.changed === true, '项目根锚：fpv 泳道 diff 放行（实报修复）')
   ok(rFpv.files.some(f => f.path === 'docs/a.md'), '变更集含改文件')
   // 闸语义不弱化三态：../ 穿越仍拒
   const rDotDot = await computeTicketDiff(fpvRepo, { id: 't-x1', worktree: '../outside', base_ref: base })
-  ok(rDotDot.source === 'none' && (rDotDot.emptyReason ?? '').includes('越出仓库根'), '../ 穿越仍拒（闸未弱化）')
+  ok(rDotDot.source === 'none' && (rDotDot.emptyReason ?? '').includes('outside the repository root'), '../ 穿越仍拒（闸未弱化）')
   const rAbs = await computeTicketDiff(fpvRepo, { id: 't-x2', worktree: engineRepo, base_ref: base })
-  ok(rAbs.source === 'none' && (rAbs.emptyReason ?? '').includes('越出仓库根'), '根外绝对路径仍拒（闸未弱化）')
+  ok(rAbs.source === 'none' && (rAbs.emptyReason ?? '').includes('outside the repository root'), '根外绝对路径仍拒（闸未弱化）')
 }
 
 section('E listEvidenceFiles 项目根＋env 闸')

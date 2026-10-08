@@ -283,12 +283,12 @@ function reconJson(oldText: string, newText: string): { recon: ReconEntry[]; tru
   try {
     before = JSON.parse(oldText)
   } catch (err) {
-    return { recon: [], truncated: false, parseError: `旧值不是合法 JSON：${String(err instanceof Error ? err.message : err)}` }
+    return { recon: [], truncated: false, parseError: `old value is not valid JSON: ${String(err instanceof Error ? err.message : err)}` }
   }
   try {
     after = JSON.parse(newText)
   } catch (err) {
-    return { recon: [], truncated: false, parseError: `新值不是合法 JSON：${String(err instanceof Error ? err.message : err)}` }
+    return { recon: [], truncated: false, parseError: `new value is not valid JSON: ${String(err instanceof Error ? err.message : err)}` }
   }
   const out: ReconEntry[] = []
   const state = { truncated: false }
@@ -315,7 +315,7 @@ async function buildFileEntry(
   let oldNote: string | undefined
   if (status !== 'added') {
     const raw = await gitShow(gitCwd, base, oldPath ?? path)
-    if (raw === null) oldNote = '（base 侧内容读取失败，按空基线降级显示）'
+    if (raw === null) oldNote = '(base-side content unreadable; shown against an empty baseline)'
     else oldText = raw
   }
   let newText = ''
@@ -323,7 +323,7 @@ async function buildFileEntry(
   if (status !== 'removed') {
     if (newRef !== undefined) {
       const raw = await gitShow(gitCwd, newRef, path)
-      if (raw === null) newNote = '（<C> 侧内容读取失败，diff 已降级）'
+      if (raw === null) newNote = '(changed-side content unreadable; diff degraded)'
       else newText = raw
     } else {
       try {
@@ -343,12 +343,12 @@ async function buildFileEntry(
   if (oldText.length > MAX_TEXT_CHARS) {
     oldText = oldText.slice(0, MAX_TEXT_CHARS)
     entry.unifiedTruncated = true
-    notes.add('（内容超过 256KB，已截断显示）')
+    notes.add('(content over 256KB, shown truncated)')
   }
   if (newText.length > MAX_TEXT_CHARS) {
     newText = newText.slice(0, MAX_TEXT_CHARS)
     entry.unifiedTruncated = true
-    notes.add('（内容超过 256KB，已截断显示）')
+    notes.add('(content over 256KB, shown truncated)')
   }
   if (notes.size > 0) entry.note = [...notes].join('')
   if (kind === 'doc') {
@@ -361,7 +361,7 @@ async function buildFileEntry(
     entry.reconTruncated = r.truncated
     if (r.parseError !== undefined) {
       // 有一侧不是合法 JSON：退化成 unified 视图，不让对账静默空。
-      let text = `（JSON 解析失败，退化行级视图：${r.parseError}）\n` + synthUnified(oldText, newText)
+      let text = `(JSON parse failed, degraded to line-level view: ${r.parseError})\n` + synthUnified(oldText, newText)
       if (text.length > MAX_UNIFIED_CHARS) {
         text = text.slice(0, MAX_UNIFIED_CHARS)
         entry.unifiedTruncated = true
@@ -378,12 +378,12 @@ async function buildFileEntry(
     let text = capped.map(l => '+' + l).join('\n')
     if (lines.length > MAX_NEW_FILE_LINES) {
       entry.unifiedTruncated = true
-      notes.add('（新增文件超过 300 行，已截断显示）')
+      notes.add('(added file over 300 lines, shown truncated)')
     }
     if (text.length > MAX_SYNTH_CHARS) {
       text = text.slice(0, MAX_SYNTH_CHARS)
       entry.unifiedTruncated = true
-      notes.add('（内容超过 48KB，已截断显示）')
+      notes.add('(content over 48KB, shown truncated)')
     }
     if (notes.size > 0) entry.note = [...notes].join('')
     entry.unified = text
@@ -398,10 +398,10 @@ async function buildFileEntry(
       let stat: string
       try {
         stat = await git(gitCwd, ['diff', '--stat', base, ...(newRef !== undefined ? [newRef] : []), '--', path])
-        text = `（diff 输出超限，已降级为 --stat 摘要）\n${stat}`
+        text = `(diff output over the cap, degraded to --stat summary)\n${stat}`
       } catch (err2) {
         const msg = String(err2 instanceof Error ? err2.message : err2).slice(0, 120)
-        text = `（diff 与 --stat 均失败，内容读取失败：${msg}）`
+        text = `(both diff and --stat failed, content unreadable: ${msg})`
       }
       entry.unifiedTruncated = true
       if (text.length > MAX_UNIFIED_CHARS) text = text.slice(0, MAX_UNIFIED_CHARS)
@@ -461,7 +461,7 @@ async function mergedTicketDiff(repo: string, ticket: TicketForDiff): Promise<Ti
     }
   } catch { /* git 失败落 none */ }
   if (commit === '' || !(await validBase(repo, commit))) {
-    return none(`泳道 worktree 已拆除，且 main 上找不到 lane/${id} 的 merge commit 或 squash 收口提交（未合并？）：${worktree}`)
+    return none(`lane worktree removed and no merge commit or squash settle commit for lane/${id} found on main (merged?): ${worktree}`)
   }
   const base = parents === 2 ? `${commit}^1` : `${commit}~1`
   const paths = writeSetPaths(ticket.write_set)
@@ -478,7 +478,7 @@ async function mergedTicketDiff(repo: string, ticket: TicketForDiff): Promise<Ti
     id, base: commit, hasBase: true, source: 'merged',
     worktree: worktree !== '' ? worktree : undefined,
     changed: files.length > 0,
-    emptyReason: files.length === 0 ? '收口提交在 write_set 范围内无文件差异（write_set 与实合入不符？）' : undefined,
+    emptyReason: files.length === 0 ? 'no file diff inside the write_set scope of the settle commit (write_set does not match what actually merged?)' : undefined,
     files, filesTruncated: ns.length > MAX_FILES,
   }
 }
@@ -570,7 +570,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
   if (worktree !== '') {
     const wtAbs = resolve(repo, worktree)
     if (wtAbs !== repo && !wtAbs.startsWith(repo + sep)) {
-      return { id, base: base0, hasBase: false, source: 'none', changed: false, files: [], filesTruncated: false, emptyReason: `worktree 越出仓库根：${worktree}` }
+      return { id, base: base0, hasBase: false, source: 'none', changed: false, files: [], filesTruncated: false, emptyReason: `worktree is outside the repository root: ${worktree}` }
     }
     try {
       const st = await stat(wtAbs)
@@ -593,7 +593,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
           const st = await stat(treeAbs)
           if (!st.isDirectory()) throw new Error('not dir')
         } catch {
-          summary.emptyReason = `成员仓树未物化（泳道内不存在 ${e.repo || '（根仓树）'}）`
+          summary.emptyReason = `member repo tree not materialized (${e.repo || 'root repo'} missing inside the lane)`
           ok = false
         }
         if (ok) {
@@ -601,7 +601,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
           if (base === '') base = await defaultBase(treeAbs)
           summary.base = base
           if (base === '' || !(await validBase(treeAbs, base))) {
-            summary.emptyReason = `base ref 无效或定不了基线：${e.base_ref || '（条目未带 base_ref，merge-base 也失败）'}`
+            summary.emptyReason = `base ref invalid or no baseline resolvable: ${e.base_ref || 'this entry has no base_ref and merge-base also failed'}`
           } else {
             const r = await diffOneTree(treeAbs, base)
             summary.files = r.files
@@ -613,7 +613,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
               totalExcluded += r.excludedCount
               for (const p of r.excludedPaths) totalExcludedPaths.add((e.repo === '' ? '' : e.repo + '/') + p)
             }
-            if (r.files.length === 0) summary.emptyReason = `仓 ${e.name} 相对 base ${base.slice(0, 12)} 无变更`
+            if (r.files.length === 0) summary.emptyReason = `repo ${e.name} has no change relative to base ${base.slice(0, 12)}`
           }
         }
         repos.push(summary)
@@ -627,7 +627,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
       return {
         id, base: base0, hasBase: base0 !== '' || repos.every(r => r.base !== ''), source: 'worktree', worktree,
         changed: files.length > 0,
-        emptyReason: files.length === 0 ? '多仓泳道各仓均无变更（或基线不可定，见逐仓 emptyReason）' : undefined,
+        emptyReason: files.length === 0 ? 'no repo in the multi-repo lane has changes (or no baseline resolvable — see each repo emptyReason)' : undefined,
         files,
         filesTruncated: repos.some(r => r.filesTruncated),
         excludedEngineFiles: totalExcluded > 0 ? totalExcluded : undefined,
@@ -639,13 +639,13 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
     let base = base0
     if (base === '') base = await defaultBase(wtAbs)
     if (base === '' || !(await validBase(wtAbs, base))) {
-      return { id, base, hasBase: false, source: 'worktree', worktree, changed: false, files: [], filesTruncated: false, emptyReason: `base ref 无效或定不了基线：${base0 || '（工单未登记 base_ref，merge-base 也失败）'}` }
+      return { id, base, hasBase: false, source: 'worktree', worktree, changed: false, files: [], filesTruncated: false, emptyReason: `base ref invalid or no baseline resolvable: ${base0 || 'ticket has no registered base_ref and merge-base also failed'}` }
     }
     const r = await diffOneTree(wtAbs, base)
     return {
       id, base, hasBase: true, source: 'worktree', worktree,
       changed: r.files.length > 0,
-      emptyReason: r.files.length === 0 ? `泳道相对 base ${base.slice(0, 12)} 无变更` : undefined,
+      emptyReason: r.files.length === 0 ? `lane has no change relative to base ${base.slice(0, 12)}` : undefined,
       files: r.files, filesTruncated: r.filesTruncated,
       excludedEngineFiles: r.excludedCount > 0 ? r.excludedCount : undefined,
       excludedPaths: r.excludedPaths.length > 0 ? r.excludedPaths : undefined,
@@ -657,11 +657,15 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
   if (base0 === '' || paths.length === 0) {
     return {
       id, base: base0, hasBase: base0 !== '', source: 'none', changed: false, files: [], filesTruncated: false,
-      emptyReason: '无变更记录（工单无泳道 worktree，且缺 base_ref 或 write_set 可对账）',
+      emptyReason: `no change record: ticket has no lane worktree and ${
+        base0 === ''
+          ? (paths.length === 0 ? 'both base_ref and write_set are missing' : 'base_ref is missing')
+          : 'write_set is missing or empty'
+      }`,
     }
   }
   if (!(await validBase(repo, base0))) {
-    return { id, base: base0, hasBase: false, source: 'main', changed: false, files: [], filesTruncated: false, emptyReason: `base ref 无效：${base0}` }
+    return { id, base: base0, hasBase: false, source: 'main', changed: false, files: [], filesTruncated: false, emptyReason: `base ref invalid: ${base0}` }
   }
   const ns = parseNameStatus(await git(repo, ['diff', '--name-status', '-M', `${base0}..HEAD`, '--', ...paths]))
     .filter(c => !isProcessArtifact(c.path)) // 2b：主树道同样不展示引擎过程物
@@ -675,7 +679,7 @@ export async function computeTicketDiff(repo: string, ticket: TicketForDiff): Pr
   return {
     id, base: base0, hasBase: true, source: 'main',
     changed: files.length > 0,
-    emptyReason: files.length === 0 ? '无变更记录（write_set 范围内相对 base 无 git 变更）' : undefined,
+    emptyReason: files.length === 0 ? `no change record: no git change inside the write_set scope relative to base ${base0.slice(0, 12)}` : undefined,
     files, filesTruncated: ns.length > MAX_FILES,
   }
 }

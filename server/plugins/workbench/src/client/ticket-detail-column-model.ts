@@ -184,11 +184,14 @@ function unifiedStats(text: unknown): { add: number; del: number } {
 
 /**
  * Changes box (mock kv2): file count and the +/− line, the lane path and
- * branch. Data: the same diff face the changeset section consumes
- * (GET /tickets/:id/diff → {files:[{unified?...}], worktree?}) plus the
- * snapshot's worktree/branch keys. No diff face or an unreadable one → null
- * (the §7.3 rule: no face, no scaffolding — the collapsed changeset section is
- * the place that names read errors).
+ * branch, plus one compact row per file (path → status · +add −del; t261008-23
+ * direction: the compact panel keeps file rows/status/size, the full diff body
+ * and review actions live only in the collapsible fold at the end of the
+ * column — the two do not overlap). Data: the same diff face the changes
+ * section consumes (GET /tickets/:id/diff → {files:[{unified?...}]}
+ * worktree?}) plus the snapshot's worktree/branch keys. No diff face or an
+ * unreadable one → null (the §7.3 rule: no face, no scaffolding — the
+ * collapsed changes section is the place that names read errors).
  */
 export function changeRows(diff: unknown, detail: unknown): KvRow[] | null {
   if (diff === null || typeof diff !== 'object') return null
@@ -196,17 +199,42 @@ export function changeRows(diff: unknown, detail: unknown): KvRow[] | null {
   if (!Array.isArray(files)) return null
   let add = 0
   let del = 0
+  const perFile: KvRow[] = []
   for (const f of files) {
     if (f === null || typeof f !== 'object') continue
-    const st = unifiedStats((f as Record<string, unknown>).unified)
+    const o = f as Record<string, unknown>
+    const path = asStr(o.path)
+    const st = unifiedStats(o.unified)
     add += st.add
     del += st.del
+    if (path === '') continue
+    const status = asStr(o.status)
+    perFile.push({ k: path, v: `${status !== '' ? status + ' · ' : ''}+${st.add} −${st.del}` })
   }
   const rows: KvRow[] = [{ k: 'files', v: `${files.length} · +${add} −${del}` }]
+  rows.push(...perFile.slice(0, CHANGE_FILE_ROWS_CAP))
+  if (perFile.length > CHANGE_FILE_ROWS_CAP) {
+    rows.push({ k: '…', v: `${perFile.length - CHANGE_FILE_ROWS_CAP} more files (full list in the changes fold)` })
+  }
   const d = (detail !== null && typeof detail === 'object' ? detail : {}) as Record<string, unknown>
   const lane = [asStr(d.worktree), asStr(d.branch)].filter(s => s !== '').join(' · ')
   if (lane !== '') rows.push({ k: 'lane', v: lane })
   return rows
+}
+
+/** Compact Changes panel: per-file rows cap (totals row always present; the
+ *  full per-file diff stays in the collapsible fold). */
+const CHANGE_FILE_ROWS_CAP = 8
+
+/** Long timeline reason collapse (t261008-23 option b): every entry stays;
+ *  a reason longer than the threshold renders as a short form with an
+ *  expand-on-click control. Pure helper so the model half is unit-testable. */
+export const TIMELINE_REASON_MAX = 120
+
+export function collapseReason(reason: string): { short: string; full: string; collapsed: boolean } {
+  const one = reason.replace(/\s+/g, ' ').trim()
+  if (one.length <= TIMELINE_REASON_MAX) return { short: one, full: reason, collapsed: false }
+  return { short: one.slice(0, TIMELINE_REASON_MAX) + '…', full: reason, collapsed: true }
 }
 
 /**

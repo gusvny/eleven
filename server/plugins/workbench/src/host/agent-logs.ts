@@ -55,8 +55,14 @@ export interface AgentLogFile {
 }
 
 export interface AgentLogsResult {
-  /** 实际探测的 .suyou 目录绝对路径。 */
+  /** Absolute path of the dot-directory actually probed (first existing
+ *  candidate; when none exists, the first candidate). */
   base: string
+  /** t261008-23: every candidate in probe order (.sandbar new name first,
+ *  .suyou kept as the naming-compat fallback). */
+  candidates?: string[]
+  /** Degradation note: fell back to the compat name / all candidates named. */
+  probedNote?: string
   /** 目录是否存在（不存在 → files=[] + reason）。 */
   exists: boolean
   files: AgentLogFile[]
@@ -88,12 +94,12 @@ function isWithin(root: string, target: string): boolean {
  *  - workspace.type=dir 且 path 是 /tmp/sandbar-ws/ 前缀（agent 隔离目录，M4；与 engine shared.py WS_DIR_BASE 同源）→ path/.suyou；
  *  - 全无 → /tmp/sandbar-ws/<id>/.suyou 兜底（主树道 v2 工单的默认隔离目录），附 reason 说明。
  */
-export function resolveAgentBaseDir(
+export function resolveAgentBaseDirs(
   repo: string,
   ticketId: string,
   ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null } | null,
   extraRoots: readonly string[] = [],
-): { base: string; reason?: string } {
+): { dirs: string[]; reason?: string } {
   // 跨项目（t260903-11 实雷）：extraRoots=票所属项目的注册目录（路由层喂），
   // 守卫语义不变——只读注册领土，防穿越硬项保留；缺省空=旧行为（仅本仓）。
   const roots = [repo, ...extraRoots]
@@ -101,35 +107,79 @@ export function resolveAgentBaseDir(
     const a = resolve(r)
     return p === a || p.startsWith(a + sep)
   })
+  // t261008-23: the read face catches up with the engine's write name
+ // (shared.py DOT_DIR_NEW='.sandbar'; '.suyou' stays only as a naming-compat
+ // read). Both candidates are returned newest-first; consumers probe in order
+ // and report the directory actually probed.
+  const dirsOf = (wsRoot: string) => [join(wsRoot, '.sandbar'), join(wsRoot, '.suyou')]
   const ws = ticket?.workspace
   if (typeof ticket?.worktree === 'string' && ticket.worktree !== '') {
     const abs = resolve(repo, ticket.worktree)
     if (!withinAny(abs)) {
-      return { base: '', reason: `工单 worktree 越界（拒绝读取）: ${ticket.worktree}` }
+      return { dirs: [], reason: `ticket worktree outside the registered roots (refused to read): ${ticket.worktree}` }
     }
-    return { base: join(abs, '.suyou') }
+    return { dirs: dirsOf(abs) }
   }
   if (ws !== null && ws !== undefined && typeof ws?.path === 'string' && ws.path !== '') {
     if (ws.type === 'worktree' && withinAny(resolve(repo, ws.path))) {
-      return { base: join(resolve(repo, ws.path), '.suyou') }
+      return { dirs: dirsOf(resolve(repo, ws.path)) }
     }
     if (ws.type === 'dir' && ws.path.startsWith('/tmp/sandbar-ws/')) {
-      return { base: join(ws.path, '.suyou') }
+      return { dirs: dirsOf(ws.path) }
     }
   }
   // 主树道工单（无泳道/无显式 workspace）：agent 默认隔离目录（shared.py WS_DIR_BASE）。
   return {
-    base: join('/tmp/sandbar-ws', ticketId, '.suyou'),
-    reason: '主树道工单无泳道——agent 日志在 /tmp/sandbar-ws/<工单id>/.suyou（若存在）',
+    dirs: dirsOf(join('/tmp/sandbar-ws', ticketId)),
+    reason: 'main-tree ticket has no lane - agent logs live in /tmp/sandbar-ws/<ticket-id>/.sandbar (older tickets fall back to .suyou when present)',
   }
 }
 
-/** 列 .suyou 目录里的 agent 日志/段结果（只读，纯函数）。 */
-export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
-  const result: AgentLogsResult = { base, exists: false, files: [], truncated: false, sessionKb: 0, agentAlive: false, lastActivity: '' }
-  if (base === '') return result
+/** Compat wrapper: returns the first candidate (the new .sandbar name).
+ *  dirname is unchanged (both are the workspace root), so agent-usage /
+ *  agent-live, which locate the workspace root via dirname(base), are not
+ *  affected by the primary-name switch. */
+export function resolveAgentBaseDir(
+  repo: string,
+  ticketId: string,
+  ticket: { worktree?: string; workspace?: { type?: string; path?: string } | null } | null,
+  extraRoots: readonly string[] = [],
+): { base: string; reason?: string } {
+  const r = resolveAgentBaseDirs(repo, ticketId, ticket, extraRoots)
+  return { base: r.dirs[0] ?? '', reason: r.reason }
+}
+
+/**
+ * List the agent logs / stage results in a workspace dot-directory (read-only,
+ * pure). t261008-23: base accepts a directory array (the resolveAgentBaseDirs
+ * candidate order: .sandbar new name first, .suyou old name as fallback) -
+ * each candidate is probed and the first existing one is read; when none
+ * exists the face answers exists=false with a reason naming every candidate.
+ * result.base is the directory actually probed (or the first candidate),
+ * candidates carries the full probe order, probedNote the degradation note.
+ */
+export async function listAgentLogs(base: string | readonly string[]): Promise<AgentLogsResult> {
+  const candidates = Array.isArray(base) ? [...base] : [base]
+  let probed = candidates[0] ?? ''
+  if (probed !== '') {
+    for (const dir of candidates) {
+      try {
+        const s = await stat(dir)
+        if (s.isDirectory()) { probed = dir; break }
+      } catch { /* missing -> try the next candidate */ }
+      probed = dir
+    }
+  }
+  const result: AgentLogsResult = {
+    base: probed, candidates, exists: false, files: [], truncated: false,
+    sessionKb: 0, agentAlive: false, lastActivity: '',
+    ...(candidates.length > 1
+      ? { probedNote: candidates[0] !== probed ? `primary directory missing; read the compat directory instead (${probed})` : `probed in order: ${candidates.join(', ')}` }
+      : {}),
+  }
+  if (probed === '') return result
   // session 进度探测（agent 读上下文阶段的可观测信号）
-  const sessDir = join(dirname(base), '.dsh', 'sessions')
+  const sessDir = join(dirname(probed), '.dsh', 'sessions')
   try {
     const sessInfo = await _readSessionKb(sessDir)
     result.sessionKb = sessInfo.kb
@@ -139,10 +189,10 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
   } catch { /* .dsh 不存在=agent 尚未启动，静默 */ }
   let names: string[]
   try {
-    names = await readdir(base)
+    names = await readdir(probed)
   } catch (err: any) {
     if (err?.code === 'ENOENT') {
-      result.reason = `目录不存在: ${base}（agent 尚未跑过，或工作空间未落 .suyou）`
+      result.reason = `directory does not exist: ${candidates.join(', ')} (the agent has not run yet, or the workspace has no .sandbar/.suyou)`
       return result
     }
     result.reason = `目录读取失败: ${String(err?.message ?? err)}`
@@ -164,7 +214,7 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
     let size = 0
     let mtime = 0
     try {
-      const s = await stat(join(base, name))
+      const s = await stat(join(probed, name))
       size = s.size
       mtime = Math.floor(s.mtimeMs / 1000)
     } catch { /* 读不到的跳过 */ }
@@ -183,7 +233,7 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
   // 逐文件带内容（log 取尾部 / result 解析 JSON；单文件独立失败不拖垮整体）。
   const withContent: AgentLogFile[] = []
   for (const f of files) {
-    const p = join(base, f.name)
+    const p = join(probed, f.name)
     try {
       const text = await readFile(p, 'utf8')
       if (f.kind === 'log') {
@@ -208,7 +258,7 @@ export async function listAgentLogs(base: string): Promise<AgentLogsResult> {
   }
   result.files = withContent
   if (result.files.length === 0) {
-    result.reason = result.reason ?? `目录为空或无 agent 日志/段结果文件: ${base}`
+    result.reason = result.reason ?? `directory is empty or holds no agent log / stage result file: ${probed}`
   }
   return result
 }

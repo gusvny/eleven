@@ -18,8 +18,21 @@
  */
 import { stageDisplayLabel } from './ui-labels.ts'
 import { LANE_KIND_ICON } from './lane-map-model.ts'
-import type { LaneMapModel, LaneNodeView, GateRunView } from './lane-map-model.ts'
+import type { LaneMapModel, LaneNodeView, GateRunView, LaneGroupView } from './lane-map-model.ts'
 import type { LaneBlockedHistory } from './lane-states.ts'
+
+/* v5 time-share geometry (t261008-23, mock 261004 612-690):
+ *   band width = MIN_PCT + flex x (weight / totalWeight) - the fixed floor
+ *   keeps narrow stages readable; flex is shared by weight; an unstarted stage
+ *   carries the nominal weight from the model (LANE_NOMINAL_MS) so the first
+ *   stage cannot swallow the row.
+ *   Parallel window: the main band spans the window; a partner band takes
+ *   window x min(1, partner/window) (the mock's own clamp - a partner longer
+ *   than the head never overflows); the window is a dashed box + the parallel
+ *   mark.
+ * The renderer only maps weight to width; all policy lives in LaneMapModel
+ * (the generic-renderer promise is unchanged). */
+const LM_MIN_PCT = 6
 
 const LM_ICON: Record<string, string> = {
   done: '✓', running: '▶', blocked: '✗', 'awaiting-human': '✋', todo: '○', rework: '↺',
@@ -102,39 +115,83 @@ function LaneMapNode({ nv, inGroup }: { nv: LaneNodeView; inGroup: boolean }) {
   )
 }
 
-/** 并行组：虚线框 + 纵排双道（几道都行，mock ④「任意形状」）。 */
+/** Parallel group: dashed window + parallel mark + same-window bands (v5: the
+ *  main band spans the window, every further band takes its own weight share
+ *  clamped to the window - any lane count works). */
 function LaneMapGroup({ model, groupId }: { model: LaneMapModel; groupId: string }) {
   const g = model.groups[groupId]
   if (!g) return null
   return (
-    <span className="wb-lm-parallel" data-group={g.def.id} data-active={g.active ? 'true' : 'false'} data-done={g.allDone ? 'true' : 'false'}>
-      <span className="wb-lm-plabel">Parallel · {g.members.length} lanes</span>
+    <span
+      className="wb-lm-parallel"
+      data-group={g.def.id}
+      data-active={g.active ? 'true' : 'false'}
+      data-done={g.allDone ? 'true' : 'false'}
+      data-window-ms={g.windowMs}
+    >
+      <span className="wb-lm-plabel">
+        Parallel · {g.members.length} lanes <i className="wb-lm-par-mark" aria-label="parallel">∥</i>
+      </span>
       <span className="wb-lm-branches">
-        {g.members.map(m => <LaneMapNode key={m.node.id} nv={m} inGroup />)}
+        {g.members.map((m, i) => (
+          <span
+            key={m.node.id}
+            className="wb-lm-band"
+            data-band={i === 0 ? 'main' : 'partner'}
+            style={i === 0 ? undefined : { width: `${lmBandPct(m.weightMs, g.windowMs)}%` }}
+          >
+            <LaneMapNode nv={m} inGroup />
+          </span>
+        ))}
       </span>
     </span>
   )
+}
+
+/** Partner band width (%): min(1, partner/window) x 100 (the mock line ~677 clamp). */
+function lmBandPct(partnerMs: number, windowMs: number): number {
+  if (!(windowMs > 0)) return 100
+  return Math.min(1, partnerMs / windowMs) * 100
+}
+
+/** v5 time-share main lane: band width = MIN_PCT + flex x (weight/totalWeight)
+ *  (the mock's own formula). */
+function lmWidths(model: LaneMapModel): Array<{ id: string; weightMs: number; pct: number }> {
+  const weights = model.items.map(it => ({
+    id: it.id,
+    weightMs: it.kind === 'group' ? (model.groups[it.id]?.windowMs ?? 0) : (model.nodes[it.id]?.weightMs ?? 0),
+  }))
+  const total = weights.reduce((a, r) => a + r.weightMs, 0)
+  const flex = 100 - LM_MIN_PCT * weights.length
+  return weights.map(w => ({
+    ...w,
+    pct: LM_MIN_PCT + (total > 0 ? flex * (w.weightMs / total) : flex / Math.max(1, weights.length)),
+  }))
 }
 
 /**
  * 真泳道图。model=null 时调用方不渲染本组件（回落现行线性步骤条）。
  */
 export function LaneMap({ model }: { model: LaneMapModel }) {
+  const widths = lmWidths(model)
+  const pctOf = new Map(widths.map(w => [w.id, w]))
   return (
     <div className="wb-lanemap" data-template={model.topology.template}>
-      {model.items.map(item => (
-        item.kind === 'group'
-          ? (
-            <span key={item.id} className="wb-lm-item">
-              <LaneMapGroup model={model} groupId={item.id} />
-            </span>
-          )
-          : (
-            <span key={item.id} className="wb-lm-item">
-              <LaneMapNode nv={model.nodes[item.id]} inGroup={false} />
-            </span>
-          )
-      ))}
+      {model.items.map(item => {
+        const w = pctOf.get(item.id)
+        return (
+          <span
+            key={item.id}
+            className="wb-lm-item"
+            data-weight-ms={w?.weightMs}
+            style={w ? { width: `${w.pct.toFixed(2)}%` } : undefined}
+          >
+            {item.kind === 'group'
+              ? <LaneMapGroup model={model} groupId={item.id} />
+              : <LaneMapNode nv={model.nodes[item.id]} inGroup={false} />}
+          </span>
+        )
+      })}
     </div>
   )
 }

@@ -154,7 +154,7 @@ try {
     ok(f && f.unifiedTruncated === true, 'big-bad.json unifiedTruncated=true')
     ok(f && f.unified.length <= MAX_UNIFIED + 300,
       `big-bad.json unified ≤ 48KB+文案（实际 ${f?.unified?.length}）`)
-    ok(f && f.unified.includes('JSON 解析失败'), 'big-bad.json 退化文案含「JSON 解析失败」')
+    ok(f && f.unified.includes('not valid JSON'), 'big-bad.json 退化文案含 not-valid-JSON（英文 t261008-23）')
   }
 
   console.log('case E：~20MB per-file diff > 16MB 兜底 → --stat 一级降级')
@@ -162,8 +162,8 @@ try {
     const f = rA.files.find(x => x.path === 'giant-mod.txt')
     ok(f !== undefined, 'name-status 含 giant-mod.txt')
     ok(f && f.unifiedTruncated === true, 'giant-mod.txt unifiedTruncated=true')
-    ok(f && typeof f.unified === 'string' && f.unified.includes('已降级为 --stat 摘要'),
-      'giant-mod.txt 带一级降级文案「已降级为 --stat 摘要」')
+    ok(f && typeof f.unified === 'string' && f.unified.includes('degraded to --stat summary'),
+      'giant-mod.txt 带一级降级文案 degraded to --stat summary（英文 t261008-23）')
     ok(f && f.unified.includes('giant-mod.txt'),
       'giant-mod.txt --stat 摘要含文件名')
     ok(f && f.unified.length <= MAX_UNIFIED + 300,

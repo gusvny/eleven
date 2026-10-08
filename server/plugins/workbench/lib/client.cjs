@@ -795,6 +795,9 @@ const LANE_KIND_ICON = {
 	gate: "✓",
 	human: "👤"
 };
+/** Nominal weight (ms) for an unstarted stage: the mock's NOMINAL constant,
+*  so the first stage cannot swallow the row. */
+const LANE_NOMINAL_MS = 10 * 6e4;
 function asString(v) {
 	return typeof v === "string" ? v : "";
 }
@@ -1014,8 +1017,13 @@ function buildChecksDetail(detail) {
 /**
 * 构建泳道图视图模型。返回 null = 拓扑不可用，调用方回落现行线性步骤条
 * （零回归降级锚：老 host / 未声明拓扑的模板 / 畸形契约面）。
+*
+* opts.nowMs: determinism anchor for the v5 weights (open running windows
+* tick against it). Defaults to Date.now(); tests inject a fixed value so the
+* proportionality assertion is checked against the very weights the model
+* used (review comment 5).
 */
-function buildLaneMap(topologyRaw, detailRaw) {
+function buildLaneMap(topologyRaw, detailRaw, opts) {
 	const topology = parseTopology(topologyRaw);
 	if (!topology) return null;
 	const detail = detailRaw !== null && typeof detailRaw === "object" ? detailRaw : {};
@@ -1031,14 +1039,31 @@ function buildLaneMap(topologyRaw, detailRaw) {
 		meta: detail.meta
 	}, order, { groups: topology.groups.map((g) => g.members) });
 	const nodes = {};
+	const nowMs = opts?.nowMs ?? Date.now();
+	const durs = deriveStageDurations(detail.timeline, order, Array.isArray(detail.handoffs) ? detail.handoffs : null, {
+		nowMs,
+		closedTs: detail.status === "closed" && typeof detail.updated === "number" && Number.isFinite(detail.updated) ? detail.updated : null
+	});
 	for (const n of topology.nodes) {
 		const rounds = deriveRounds(n.id, detail);
 		const bh = derived.blockedHistory[n.id];
+		const d = durs[n.id];
+		let weightMs = LANE_NOMINAL_MS;
+		let durSource = "nominal";
+		if (d !== void 0) {
+			const total = stageTotalMs(d, nowMs);
+			if (total !== null) {
+				weightMs = total;
+				durSource = d.rounds.some((r) => r.toMs === null) ? "running" : "measured";
+			}
+		}
 		nodes[n.id] = {
 			node: n,
 			vis: derived.states[n.id] ?? "todo",
 			rounds,
 			badge: rounds.length > 1 ? `×${rounds.length}` : "",
+			weightMs,
+			durSource,
 			...bh ? { blockedHistory: bh } : {}
 		};
 	}
@@ -1050,7 +1075,8 @@ function buildLaneMap(topologyRaw, detailRaw) {
 			def: g,
 			members,
 			active: members.some((m) => m.vis === "running"),
-			allDone: members.every((m) => m.vis === "done")
+			allDone: members.every((m) => m.vis === "done"),
+			windowMs: Math.max(...members.map((m) => m.weightMs))
 		};
 	}
 	const groupOf = {};
@@ -1174,6 +1200,7 @@ function stageDisplayLabel(stageId, engineName) {
 *     历史已解除受阻=完成色+「曾受阻」角标（.wb-lm-ever，黄点），节点/角标
 *     hover 出经过（何时受阻、何因、如何解除；数据=blockedHistory）。
 */
+const LM_MIN_PCT = 6;
 const LM_ICON = {
 	done: "✓",
 	running: "▶",
@@ -1261,7 +1288,9 @@ function LaneMapNode({ nv, inGroup }) {
 		]
 	});
 }
-/** 并行组：虚线框 + 纵排双道（几道都行，mock ④「任意形状」）。 */
+/** Parallel group: dashed window + parallel mark + same-window bands (v5: the
+*  main band spans the window, every further band takes its own weight share
+*  clamped to the window - any lane count works). */
 function LaneMapGroup({ model, groupId }) {
 	const g = model.groups[groupId];
 	if (!g) return null;
@@ -1270,42 +1299,76 @@ function LaneMapGroup({ model, groupId }) {
 		"data-group": g.def.id,
 		"data-active": g.active ? "true" : "false",
 		"data-done": g.allDone ? "true" : "false",
+		"data-window-ms": g.windowMs,
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 			className: "wb-lm-plabel",
 			children: [
 				"Parallel · ",
 				g.members.length,
-				" lanes"
+				" lanes ",
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+					className: "wb-lm-par-mark",
+					"aria-label": "parallel",
+					children: "∥"
+				})
 			]
 		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 			className: "wb-lm-branches",
-			children: g.members.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
-				nv: m,
-				inGroup: true
+			children: g.members.map((m, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-lm-band",
+				"data-band": i === 0 ? "main" : "partner",
+				style: i === 0 ? void 0 : { width: `${lmBandPct(m.weightMs, g.windowMs)}%` },
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
+					nv: m,
+					inGroup: true
+				})
 			}, m.node.id))
 		})]
 	});
+}
+/** Partner band width (%): min(1, partner/window) x 100 (the mock line ~677 clamp). */
+function lmBandPct(partnerMs, windowMs) {
+	if (!(windowMs > 0)) return 100;
+	return Math.min(1, partnerMs / windowMs) * 100;
+}
+/** v5 time-share main lane: band width = MIN_PCT + flex x (weight/totalWeight)
+*  (the mock's own formula). */
+function lmWidths(model) {
+	const weights = model.items.map((it) => ({
+		id: it.id,
+		weightMs: it.kind === "group" ? model.groups[it.id]?.windowMs ?? 0 : model.nodes[it.id]?.weightMs ?? 0
+	}));
+	const total = weights.reduce((a, r) => a + r.weightMs, 0);
+	const flex = 100 - LM_MIN_PCT * weights.length;
+	return weights.map((w) => ({
+		...w,
+		pct: LM_MIN_PCT + (total > 0 ? flex * (w.weightMs / total) : flex / Math.max(1, weights.length))
+	}));
 }
 /**
 * 真泳道图。model=null 时调用方不渲染本组件（回落现行线性步骤条）。
 */
 function LaneMap({ model }) {
+	const widths = lmWidths(model);
+	const pctOf = new Map(widths.map((w) => [w.id, w]));
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-lanemap",
 		"data-template": model.topology.template,
-		children: model.items.map((item) => item.kind === "group" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			className: "wb-lm-item",
-			children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapGroup, {
-				model,
-				groupId: item.id
-			})
-		}, item.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			className: "wb-lm-item",
-			children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
-				nv: model.nodes[item.id],
-				inGroup: false
-			})
-		}, item.id))
+		children: model.items.map((item) => {
+			const w = pctOf.get(item.id);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-lm-item",
+				"data-weight-ms": w?.weightMs,
+				style: w ? { width: `${w.pct.toFixed(2)}%` } : void 0,
+				children: item.kind === "group" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapGroup, {
+					model,
+					groupId: item.id
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
+					nv: model.nodes[item.id],
+					inGroup: false
+				})
+			}, item.id);
+		})
 	});
 }
 /**
@@ -10643,11 +10706,14 @@ function unifiedStats$1(text) {
 }
 /**
 * Changes box (mock kv2): file count and the +/− line, the lane path and
-* branch. Data: the same diff face the changeset section consumes
-* (GET /tickets/:id/diff → {files:[{unified?...}], worktree?}) plus the
-* snapshot's worktree/branch keys. No diff face or an unreadable one → null
-* (the §7.3 rule: no face, no scaffolding — the collapsed changeset section is
-* the place that names read errors).
+* branch, plus one compact row per file (path → status · +add −del; t261008-23
+* direction: the compact panel keeps file rows/status/size, the full diff body
+* and review actions live only in the collapsible fold at the end of the
+* column — the two do not overlap). Data: the same diff face the changes
+* section consumes (GET /tickets/:id/diff → {files:[{unified?...}]}
+* worktree?}) plus the snapshot's worktree/branch keys. No diff face or an
+* unreadable one → null (the §7.3 rule: no face, no scaffolding — the
+* collapsed changes section is the place that names read errors).
 */
 function changeRows(diff, detail) {
 	if (diff === null || typeof diff !== "object") return null;
@@ -10655,16 +10721,30 @@ function changeRows(diff, detail) {
 	if (!Array.isArray(files)) return null;
 	let add = 0;
 	let del = 0;
+	const perFile = [];
 	for (const f of files) {
 		if (f === null || typeof f !== "object") continue;
-		const st = unifiedStats$1(f.unified);
+		const o = f;
+		const path = asStr(o.path);
+		const st = unifiedStats$1(o.unified);
 		add += st.add;
 		del += st.del;
+		if (path === "") continue;
+		const status = asStr(o.status);
+		perFile.push({
+			k: path,
+			v: `${status !== "" ? status + " · " : ""}+${st.add} −${st.del}`
+		});
 	}
 	const rows = [{
 		k: "files",
 		v: `${files.length} · +${add} −${del}`
 	}];
+	rows.push(...perFile.slice(0, CHANGE_FILE_ROWS_CAP));
+	if (perFile.length > CHANGE_FILE_ROWS_CAP) rows.push({
+		k: "…",
+		v: `${perFile.length - CHANGE_FILE_ROWS_CAP} more files (full list in the changes fold)`
+	});
 	const d = detail !== null && typeof detail === "object" ? detail : {};
 	const lane = [asStr(d.worktree), asStr(d.branch)].filter((s) => s !== "").join(" · ");
 	if (lane !== "") rows.push({
@@ -10672,6 +10752,22 @@ function changeRows(diff, detail) {
 		v: lane
 	});
 	return rows;
+}
+/** Compact Changes panel: per-file rows cap (totals row always present; the
+*  full per-file diff stays in the collapsible fold). */
+const CHANGE_FILE_ROWS_CAP = 8;
+function collapseReason(reason) {
+	const one = reason.replace(/\s+/g, " ").trim();
+	if (one.length <= 120) return {
+		short: one,
+		full: reason,
+		collapsed: false
+	};
+	return {
+		short: one.slice(0, 120) + "…",
+		full: reason,
+		collapsed: true
+	};
 }
 /**
 * Requests on this ticket: the request-ledger head rows whose source_ticket
@@ -11978,11 +12074,16 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-status-card .sc-signwhat-ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-accent-deep,#0550ae)}
 .wb-status-card .sc-signwhat ul{margin:4px 0 0;padding-left:18px}
 .wb-status-card .sc-signwhat li{font-size:11.5px;line-height:1.7;word-break:break-all}
-/* t260915-05：真泳道图（拓扑驱动）——节点/并行虚线框/人门虚线圈/轮次带/×N 徽章 */
+/* t260915-05: real lane map (topology-driven) - nodes / parallel dashed window /
+ * human gate dashed ring / round strips / xN badge.
+ * t261008-23 v5: segment width follows the weight share (inline width%, the
+ * renderer computes pct); the fixed min-width retired (72px constant width
+ * conflicts with v5 width-proportional-to-duration); the readable minimum is
+ * kept by the renderer's MIN_PCT floor instead. */
 .wb-lanemap{margin:10px 0 4px;padding:14px 10px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:flex;align-items:stretch;gap:2px;min-height:96px}
-.wb-lm-item{display:flex;align-items:center}
+.wb-lm-item{display:flex;align-items:center;min-width:0}
 .wb-lm-item:not(:first-child)::before{content:'→';color:var(--dsw-derive-border,#d0d7de);margin:0 6px;font-size:14px}
-.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:72px}
+.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:0;overflow:hidden}
 .wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
 .wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
 .wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
@@ -12006,11 +12107,14 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-lm-round[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
 .wb-lm-round[data-state=awaiting-human]{color:var(--dsw-derive-warn-deep,#7d4e00);border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
 .wb-lm-round[data-state=rework]{color:var(--dsw-derive-warn-deep,#953800);border-style:dashed;border-color:var(--dsw-derive-warn,#d4a72c)}
-/* 并行组：虚线框 + 纵排多道（mock 屏① B：并行双道虚线框，图面单向流） */
-.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px}
+/* Parallel group: dashed window + same-window bands (v5: the main band spans
+ * the window; a partner band takes its own weight share, set inline). */
+.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px;flex:1}
 .wb-lm-parallel[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
 .wb-lm-plabel{position:absolute;top:-8px;left:10px;background:var(--dsw-derive-canvas,#fff);padding:0 6px;font-size:9.5px;color:var(--dsw-derive-muted,#57606a)}
-.wb-lm-branches{display:flex;flex-direction:column;gap:2px}
+.wb-lm-par-mark{font-style:normal;color:var(--dsw-derive-muted,#57606a);margin-left:4px}
+.wb-lm-branches{display:flex;flex-direction:column;gap:2px;width:100%}
+.wb-lm-band{display:flex;align-items:center;min-width:0}
 .wb-lm-node-inlane{flex-direction:row;min-width:0;padding:2px 6px}
 .wb-lm-node-inlane .wb-lm-dot{width:20px;height:20px;font-size:10px;flex:none}
 .wb-lm-node-inlane .wb-lm-name{white-space:normal;text-align:left}
@@ -12162,6 +12266,8 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12px}
 .wb-tl li{display:flex;gap:8px;align-items:baseline}
 .wb-tl .at{flex:none;color:var(--dsw-derive-muted,#8c959f);font-variant-numeric:tabular-nums}
+/* t261008-23 option b: long-reason expand button (native button = keyboard reachable) */
+.wb-tl-more{flex:none;font:inherit;font-size:11px;color:var(--dsw-derive-accent,#0969da);background:none;border:none;padding:0 4px;cursor:pointer;text-decoration:underline}
 .wb-kv2{display:flex;flex-direction:column;gap:3px;font-size:12px}
 .wb-kv2-pair{display:flex;gap:10px}
 .wb-kv2-pair .k{flex:none;min-width:76px;color:var(--dsw-derive-muted,#57606a);font-weight:600}
@@ -14248,12 +14354,39 @@ function DetailDecisionCardFace({ detail }) {
 		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: card.title }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: card.body })]
 	});
 }
+/** One timeline row with option-b reason collapse (t261008-23): every entry
+*  stays; a long reason renders as the short form plus a native button that
+*  expands to the full text (keyboard reachable; the full text is kept in
+*  state, never dropped). */
+function TimelineReasonRow({ row }) {
+	const c = collapseReason(row.reason);
+	const [expanded, setExpanded] = (0, react.useState)(false);
+	const head = /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [stageDisplayLabel(row.stage), row.state ? ` · ${STATE_LABEL[row.state] ?? row.state}` : ""] });
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "at",
+		children: row.at ? fmtAt(row.at) : ""
+	}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		"data-testid": "timeline-row",
+		"data-collapsed": c.collapsed && !expanded ? "true" : void 0,
+		children: [
+			head,
+			row.reason ? expanded || !c.collapsed ? ` · ${row.reason}` : ` · ${c.short}` : "",
+			c.collapsed && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-tl-more",
+				"aria-expanded": expanded,
+				onClick: () => setExpanded((e) => !e),
+				children: expanded ? "less" : "more"
+			})
+		]
+	})] });
+}
 /** Column section 7: two columns (left = Timeline + Stage notes; right =
 *  Receipts + Changes + Requests on this ticket). A block with no data renders
 *  nothing (section 7.3: no empty scaffolding); all absent = no section at all.
 *  The changes/requests read faces (diff face, executor-panel request ledger)
 *  failing means that one box does not render — never an error frame, never a
-*  stuck spinner (read errors are named by the collapsed changeset section). */
+*  stuck spinner (read errors are named by the collapsed changes section). */
 function DetailTwoColumns({ detail, projectKey }) {
 	const [diff, setDiff] = (0, react.useState)(void 0);
 	const [reqRows, setReqRows] = (0, react.useState)(void 0);
@@ -14304,14 +14437,7 @@ function DetailTwoColumns({ detail, projectKey }) {
 					children: "Timeline"
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
 					className: "wb-tl",
-					children: tl.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("li", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "at",
-						children: r.at ? fmtAt(r.at) : ""
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-						stageDisplayLabel(r.stage),
-						r.state ? ` · ${STATE_LABEL[r.state] ?? r.state}` : "",
-						r.reason ? ` · ${r.reason}` : ""
-					] })] }, i))
+					children: tl.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TimelineReasonRow, { row: r }, i))
 				})]
 			}), notes !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-panelbox",
@@ -14530,11 +14656,11 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 	}
 	if (loading) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 		className: "wb-empty",
-		children: "Computing changeset (git diff)…"
+		children: "Computing changes (git diff)…"
 	});
 	if (loadErr !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-err",
-		children: ["Changeset load failed: ", loadErr]
+		children: ["Changes load failed: ", loadErr]
 	});
 	if (diff === void 0) return null;
 	const latestRound = reviewFile !== void 0 && reviewFile.rounds.length > 0 ? reviewFile.rounds[reviewFile.rounds.length - 1] : void 0;
@@ -14695,7 +14821,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-section-title",
 					children: [
-						"Changeset (",
+						"Full diff (",
 						sourceLabel,
 						")"
 					]
@@ -16037,7 +16163,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 							projectKey
 						}),
 						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LazyFold, {
-							label: "Changeset (full diff and review)",
+							label: "Changes (full diff and review)",
 							testid: "fold-changes",
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChangesTab, {
 								detail,

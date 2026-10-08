@@ -129,8 +129,8 @@ section('B 逐仓三态点名：树未物化 / base 无效（不整体降级）'
       ],
     })
     ok(r.repos !== undefined && r.repos.length === 3, '三仓条目全在')
-    ok((r.repos?.[1].emptyReason ?? '').includes('未物化'), '未物化仓 emptyReason 点名')
-    ok((r.repos?.[2].emptyReason ?? '').includes('base ref 无效'), 'base 无效仓 emptyReason 点名（M1 三态）')
+    ok((r.repos?.[1].emptyReason ?? '').includes('not materialized'), '未物化仓 emptyReason 点名（英文，t261008-23）')
+    ok((r.repos?.[2].emptyReason ?? '').includes('base ref invalid'), 'base 无效仓 emptyReason 点名（M1 三态，英文 t261008-23）')
     ok(r.repos?.[0].files.some(f => f.path === 'a.txt') === true, '健康仓不受坏仓拖累（不整体降级）')
   } finally { rmSync(fx.rootDir, { recursive: true, force: true }) }
 }
