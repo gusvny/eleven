@@ -29,3 +29,9 @@ server/ledger/
 # 挂载进 cordis.patch.yml 却没落链，且仓里没有第二处会建链（installer/start-console 均无）。
 !server/profile/node_modules/
 !server/profile-headless/node_modules/
+
+# 场景跑出来的证据截图（t261008 门被挡的根因）：这类 PNG 是每轮套件运行时重新生成的产物，
+# 跟踪它们会让"跑一次测试"就等于"改了 main 的工作区"，而 merge 闸的 main_untouched 检查
+# 只看到"未提交改动"，于是挡住别的票的合并门（261008 三张票被连坐）。
+# 证据仍然落同样的路径（供人查看/走查取证），只是不再进版本库。
+integration/*/shots/*.png
