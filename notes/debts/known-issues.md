@@ -4124,3 +4124,34 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②`audit_write_failed` 的文案升级为**具名归因**（是权限面、是写集面、还是真故障），别只给一个裸键名。
 >
 > **回归**：L1——断言回执文案能区分"写集面受限"与"真写失败"；L3——决定性操作（终结类）在 admin.log 写失败时，事件历史一侧必须留有同串理由（现状已满足，锁住别退化）。
+
+## KI-226 **未知 lane 值被静默降级成"主树道"**：开票回执 `ok:true`，但票**没有泳道、没有分支、没有 base_ref**，于是 agent 无处落盘、变更面恒零、整票空转（261008 实证：integration 岗自造 8 张废票；integration 岗登记）
+
+> **现象（本轮我自己踩的）**：我按 /tmp 载荷模板开票时多写了一个 `"lane":"land"` 字段（本意只是随手填的占位）。八张票**全部创建成功**（`ok:true` + 票号 + `status:dispatched`），但：
+> - `worktree` 空、`branch` 空、`base_ref` 空、`workspace` 为 `None`；
+> - 盘上**没有 `.lane/<票号>` 目录、没有 `lane/<票号>` 分支、`git status` 全程干净**；
+> - 对照宿主 executor 开的票（`t261008-04/-05/-07/-08`）：`lane=worktree`、`worktree=.lane/<票号>`、有 `base_ref`。
+>
+> **后果（票在跑，但什么都不会产出来）**：票一路走到 `implement → run_integration_tests → arbitrate`，而 agent 的落盘被沙箱拒（写主仓 `Operation not permitted`），只能在隔离目录留下**代落盘清单**并报 `env_fail:true`；票**既不 blocked、也没有产出**，人审门若只看门红绿会一路放行。宿主正是从「`t261008-12` 都到 arbitrate 了，changes 还是 0」这一句问出来的。
+>
+> **机制（读码定位）**：`server/engine/shared.py:3016` 的
+> `lane = str(lane or "") or str(template_lane or "")` —— **显式 lane 非空就一律采信，零词表校验**；
+> 而 `server/tools/ticket.py:653` 只校验**模板声明**的 lane（`须 main/worktree`），**不校验调用方显式传的 lane**。
+> 于是任何未知字符串（本例 `"land"`）都会**静默变成"非泳道 → 主树道"**（该函数 docstring 第 4 条明确写着"非 worktree 道 + 模板非 dir → workspace 保持 None（主树道直接改主仓，无独立空间）"）。
+> 这与同函数自己的承诺直接冲突：它开篇写"illegal → ValueError（创建时拒收，把'跑 1.5 小时后才暴露'的错误提前到创建瞬间）"，而同一个函数里 `workspace` 形状不对**是会 raise 的**——**唯一漏掉词表校验的就是 lane 本身**。
+>
+> **危害**：①**开票回执撒谎**——`ok:true` 让人以为票正常，实际它连落盘路径都没有（回执里 `worktree` 虽是空串，但没人会去比对，我这次就没比）；
+> ②**整票空转且不 blocked**：agent 只能反复报 `env_fail`，票跑到仲裁还在跑，占用并发额度与 LLM 配额，产出为零；
+> ③**变更面连带失真**：`changes` 面因此恒回 `source:none`＋空态——本条的现场症状就是宿主看到"changes 都是 0"；
+> ④无告警：`admin.log` 里开票行是 `ok:true`，没有一条记录说"这张票没有泳道"。
+>
+> **出路（建议，实现口径归修复票）**：
+> ①`derive_lane_workspace` 对 **lane 走词表 fail-closed**（`main|worktree`，空=回模板声明；**其余一律 ValueError 点名收到的值**），与它已有的 workspace 形状校验同族；
+> ②开票回执把"**本票的落盘形态**"（lane / worktree / base_ref 三件）显式带上并做**一致性自检**（lane=worktree 而 worktree 空 ⇒ 回执不合格），让"没泳道的票"在创建瞬间就看得见；
+> ③票面加一条**创建后哨兵**（与 KI-220 同族）：`lane=worktree` 的票在进入 `implement` 前，若泳道目录不存在 ⇒ 具名 blocked，别让它继续空跑。
+>
+> **回归**：L1——`derive_lane_workspace` 对未知 lane 值逐例 ValueError（含 `"land"`/`"wt"`/大小写畸形/含空格），空串仍回落模板声明；
+> L3——用未知 lane 开票 ⇒ **创建即拒收**（回执 `ok:false` 且点名值），绝不落一张无泳道的票。
+>
+> **本条的当轮处置**：八张废票全部记名 `cancel`（理由写明"未知 lane 被静默降级"）→ 用引擎自己的 `concurrency.reconcile` + `release(terminated)` 把并发账清回 `holders:[] queue:[]`（其中一次 reconcile 还把一张已死票从队列提成持有人，逐票 release 才清干净）；**改用不带 lane 字段的载荷重建**为 `t261008-18 … -25`，八张**全部带泳道**（一次性烟测证明：不带 lane 字段的 dev-lane 票正确派生 `lane=worktree`）。
+> 另有两条纪律已记在我这边：**开票后必须核对回执里的 worktree**；`op=create` 回 `ok:true` **不等于**票可用。
