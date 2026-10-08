@@ -5533,25 +5533,23 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     # raise — stub fixtures build scopes whose repo path does not exist, and
     # subprocess would raise FileNotFoundError through _git; an unresolvable lane
     # root / branch answers with the empty sha and the existing verdict stands.
-    _gr_sha = ""
     # Scope guard (rework gen10): a ticket with an EMPTY write set is the legacy
     # in-flight / nothing-to-verify shape — it has no acceptance scenario to have
     # run, so demanding a green-run face there would be an intent-irrelevant
     # permanent red. The precondition is emitted only for tickets that carry a
     # write set (the KI-220 incident shape); empty-write-set tickets keep the
     # pre-existing verdict unchanged.
-    if scopes and args.write_set:
-        try:
-            _gr_p = _git(["rev-parse", "--verify", str(scopes[0]["branch"])],
-                         scopes[0]["repo"])
-            if _gr_p.returncode == 0:
-                _gr_lines = (_gr_p.stdout or "").strip().splitlines()
-                if _gr_lines and _gr_lines[0]:
-                    _gr_sha = _gr_lines[0]
-        except Exception:  # noqa: BLE001 — unresolvable tree => empty sha => red fail-closed
-            _gr_sha = ""
-        checks.insert(max(len(checks) - 1, 0),
-                      shared.green_run_check_item(args.last_green_run, _gr_sha))
+    # ---- 261009 宿主直修令：本条前置**从现行门摘除**（不开票、main 直修，同 260925 先例）----
+    # 为什么摘：KI-217/220 的这道前置（"本票的场景在这棵树上必须有过一次绿轮"）要求
+    # sha 与当前 lane HEAD 相等，而 merge_check 每次都会把 main 重并进泳道 ⇒ 别人合一张票
+    # 就把本票的绿作废；结果是四张从未拿到过绿的票（-33/-43/-45/-46）被永久挡住、占满
+    # 5 个并发额度、7 张票排队，宿主实报"现在没法动了"。
+    # 处置口径（宿主 261009 定）：**意图不撤回，但落点改到新版 lane**（设计案见
+    # docs/design/develop-buffer-v1.md：新版 devlane 用自己的证明规则与检查；"
+    # 改现有门含义的机制必须先跑在它判不到旧票的地方"已写进该文档作为教训）。
+    # 判据函数 shared.green_run_check_item 保留在 shared.py，供新版 lane 与将来的
+    # 重新接线使用；**现行门不再注入这一项**（原采算 HEAD 的代码一并撤除）。
+    # 重新把它接回现行门 ⇒ 需要与本次同级的决定（宿主），不是随手加一行。
     green = all(c["green"] for c in checks)
     # Ticket t260826-01 automatic conflict resolution loop: red lights split into two
     # classes —
