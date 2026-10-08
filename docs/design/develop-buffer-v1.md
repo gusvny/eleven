@@ -49,12 +49,15 @@ related:
 
 1. A lane can land without paying a full suite round, and a lane's landing does not have to survive a window in which nobody else lands.
 2. Each lane still proves **its own** change: the ticket's own scenarios run per lane, and a failure there is attributed to that ticket without any whole-suite round.
-3. The full suite runs against a **buffer line between lanes and main**, at most once per schedule tick (event-driven trigger, scheduled backstop), not once per lane attempt.
-4. "May this land in main?" is answerable **mechanically**, from recorded facts, without asking a human to remember anything: a revision is certified by a passing full run, and a ticket is landable when its landing is contained in a certified revision.
-5. The **greatest certified revision is always landable**, even while the buffer is red — a red must never take the already-proven part hostage.
-6. A red is attributed with **bounded** cost: the same revision is re-run once before any search, the per-lane scenario results are used as a free first filter, and only then is the range searched.
-7. A red never silently holds the fleet: it has a named owner and a named escalation point, and ranges already attributed are not searched twice.
-8. `main` keeps a human signature — now **one per batch** instead of one per ticket.
+3. Besides its own scenarios, every lane runs a **fast global set** defined by the integration role: a small, curated selection whose job is to catch, at the lane, the breakage that a ticket's own scenarios do not look at — so that fewer defects reach the buffer and have to be solved there. The lane's whole proof (own scenarios plus the fast set) must stay inside a declared time budget.
+4. The fast set's membership is **maintained, not fixed**: the integration patrol reviews it periodically and adds or removes members on recorded evidence about both sides of the trade — how much time a member costs and how much breakage it actually catches. A member earns its place by catching cross-cutting breakage early; it loses its place when it is too slow for the budget, flaky, or already covered by another member.
+5. The fast set is derived from the **same declared inventory** that feeds the full suite — one inventory with two uses, never a second hand-kept list that can drift away from it. A member that is meant to catch breakage the full suite does not cover says so explicitly.
+6. The full suite runs against a **buffer line between lanes and main**, at most once per schedule tick (event-driven trigger, scheduled backstop), not once per lane attempt.
+7. "May this land in main?" is answerable **mechanically**, from recorded facts, without asking a human to remember anything: a revision is certified by a passing full run, and a ticket is landable when its landing is contained in a certified revision.
+8. The **greatest certified revision is always landable**, even while the buffer is red — a red must never take the already-proven part hostage.
+9. A red is attributed with **bounded** cost: the same revision is re-run once before any search, the per-lane scenario results are used as a free first filter, and only then is the range searched.
+10. A red never silently holds the fleet: it has a named owner and a named escalation point, and ranges already attributed are not searched twice.
+11. `main` keeps a human signature — now **one per batch** instead of one per ticket.
 
 **Stakeholders and what they care about most:**
 
@@ -77,6 +80,8 @@ related:
 - **Not letting lanes skip their own scenarios.** The split is "the lane proves its change, the buffer proves the combination" — not "nobody proves anything until later".
 - **Not running the full suite after every landing.** Explicitly chosen: scheduled certifications, with the previous certified revision as the anchor that is always landable.
 - **Not making the suite faster.** Its cost is addressed here by *when* it runs; making it cheaper is a separate concern.
+- **Not letting the fast set grow into a second full suite.** It is a tripwire with a time budget, not a proof; when it starts costing like the full suite it has stopped doing its job.
+- **Not freezing the fast set.** A membership that never changes either misses new breakage surfaces or keeps paying for members that no longer earn their time; the review is periodic by design, and "keep" is a verdict that must also be argued.
 - **Not rolling this out to other projects in this cycle.** Sandbar first; the flow is per project and the others follow deliberately.
 - **Not changing what "blocked" means for a ticket.** The blocking reasons stay the engine's; this document only changes what a lane must prove and where.
 
@@ -87,6 +92,17 @@ related:
 Insert a **buffer line** (`develop`) between the lanes and `main`, and move the expensive proof onto it.
 
 - **Landing:** lanes land into `develop`, one ticket per landing, serially managed by the engine. A lane does **not** have to be rebuilt on the newest buffer before landing — serialized landing keeps the buffer's history linear, which is what makes "before/after" meaningful. A lane still runs its own scenarios first; that run is what attributes a per-ticket failure for free.
+
+### The lane's fast global set
+
+A ticket's own scenarios answer "did I build what I said?"; they say nothing about the surfaces it walked over. The **fast global set** is integration's answer to that gap, and its whole reason to exist is *earliness*: catching a cross-cutting break at the lane is far cheaper than catching it on the buffer, where it costs an attribution round and holds other people's landings.
+
+- **What it is:** a small, curated selection drawn from the same inventory as the full suite, chosen for coverage-per-second rather than depth. It is a tripwire: cheap, deterministic and honest about what it does not cover. It is not proof, and it is never a substitute for the full suite.
+- **Budget:** the lane's proof — its own scenarios plus the fast set — carries a declared time budget. The budget is the constraint that keeps the set honest: a candidate that does not fit is either trimmed or left to the full suite.
+- **Failure semantics:** a red in the fast set blocks the lane and is attributed to that ticket, and it is classified the same way any other red is (product fault, environment, or flake) — a flaky tripwire would burn exactly the throughput it exists to protect, so flakiness is a removal reason, not something to live with.
+- **Stewardship:** the integration patrol reviews membership periodically and records a verdict per member — add, remove, or keep — each argued on evidence about both sides of the trade: how much lane time it costs and what breakage it has actually caught (including what it missed, when a defect reached the buffer it should have caught). "Keep" is a verdict too: the default is not to keep paying silently.
+- **Candidates for membership** come from breakage that a lane failure would have caught earlier, from new cross-cutting surfaces, and from members whose cost drops. **Candidates for removal** are those that are too slow for the budget, flaky, or now covered by another member or by a general guard.
+- **One inventory, two uses:** the fast set is marked inside the same declared inventory that feeds the full suite, so membership can never drift into a second, hand-kept list; a member meant to catch breakage outside the full suite's reach says so in its declaration.
 - **Certification:** a full suite round runs **on the buffer**, in a workspace of its own (never the delivered checkout), on a schedule: triggered when the buffer changes (debounced) with a timed run as backstop. A passing round **certifies** the revision it ran on.
 - **The record:** certification is not a status flag but a **fact ledger**: for each certification, which revision was certified and which range of landings it covers, what ran and how it went (scenarios run, failures, environment reds), under which booked-red inventory it was judged, when, by what driver (scheduled / triggered / re-run) and by whom. Alongside it, a **counterpart record for attributed reds**: which range was searched, which landing was found responsible, how that was established, and what happened to it. The ledger is append-only and machine-written; corrections are new rows, never edits.
 - **Landability:** a ticket may land in `main` when its landing is contained in a certified revision. The **greatest certified revision is always landable**, regardless of what the buffer looks like now; this is what keeps a red from holding the already-proven part hostage.
@@ -103,7 +119,7 @@ Insert a **buffer line** (`develop`) between the lanes and `main`, and move the 
 
 ### How this ties back
 
-This proposal addresses the **Problem** by taking the heavy proof off the per-lane attempt and putting it on a line whose revisions are certified once, and by replacing a proof that other people's merges destroy with one recorded against revisions; it satisfies the **Requirement** by keeping per-lane proof of the ticket's own change (goal 2), running the heavy suite at most once per tick (3), making landability mechanical (4) with the last certified revision always landable (5), bounding attribution cost (6) and escalation (7), and keeping the human signature on `main` (8); and it avoids the **Nongoal** items by not touching the human gate's existence, not letting lanes skip their own scenarios, not running the suite per landing, not rebuilding the suite, and staying inside one project.
+This proposal addresses the **Problem** by taking the heavy proof off the per-lane attempt and putting it on a line whose revisions are certified once, and by replacing a proof that other people's merges destroy with one recorded against revisions; it satisfies the **Requirement** by keeping per-lane proof of the ticket's own change (goal 2), adding the curated fast global set with its time budget and its maintained membership (3–5), running the heavy suite at most once per tick (6), making landability mechanical (7) with the last certified revision always landable (8), bounding attribution cost (9) and escalation (10), and keeping the human signature on `main` (11); and it avoids the **Nongoal** items by not touching the human gate's existence, not letting lanes skip their own scenarios, not running the suite per landing, not rebuilding the suite, and staying inside one project.
 
 ## Related documents
 
