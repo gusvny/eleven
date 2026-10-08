@@ -4471,16 +4471,17 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     conc_pools = {}
     for x in os.environ.get(
             "SANDBAR_CONC_POOLS",
-            # t261008（宿主 261008 实报 + 实测归因）：browser-free 从 3 降到 1。
-            # 为什么：捕获/浏览器族（起真台+真浏览器+端口，单条 93–313s）虽然自身池内串行
-            # （browser 池不在本清单 ⇒ 宽度 1），但**池与池并行**——它和 browser-free:3、
-            # main:3、ro:3 同时跑，机器上同时有好几个真台抢资源。实测后果：
-            # t261004-26-hostile-identity-fixture-chain 与 t261006-03-engine-path-capture-journey
-            # **单独跑全绿（16/16、14/14），全量套件里却红**（14/2、9/1），属负载假红；
-            # 与引擎池既有教训同族（本文件 72-77 行：宽度 2 起台即 flake）。
-            # 代价：browser-free 累计仅 444s 且跨池并行，关键路径由 browser 池 313s 决定
-            # ⇒ 墙钟基本不变。改回 3 只需把这一处还原。
-            "main:3,ro:3,browser-free:1").split(","):
+            # t261008 试验与回退（宿主 261008 授权「解掉 3 条环境假红」）：曾把 browser-free 从 3
+            # 降到 1，意图减少捕获族（起真台+真浏览器+端口）跨池争用造成的负载假红。
+            # **闸口径对照实测：不合格，已回退——**
+            #   改前 445 条 / 墙钟 730s / 失败 7；改后 513 条 / 墙钟 1093s（+50%）/ 失败 19。
+            #   两条目标里只有 t261004-26 回绿；t261006-03 仍红（313s→175s）、t261005-16 仍红；
+            #   同轮新出现一批失败/ENV_FAIL（t260907-01-smoke-lane-green、t260912-01-pw-path-
+            #   resolution、capture-chat-e2e、t260916-25 三条台面场景、多条 31s 台面族），
+            #   无法归因于本改动还是环境抖动。
+            # 结论：池宽不是那 3 条假红的充分原因，而代价（墙钟 +50%）远超收益 ⇒ 保持 3。
+            # 将来再试须先固定环境基线（干净机器、无并发票），否则对照不可信。
+            "main:3,ro:3,browser-free:3").split(","):
         name, _, w = x.strip().partition(":")
         if not name:
             continue
