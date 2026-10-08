@@ -4,10 +4,11 @@
  * 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/文档/模型
  * 三个视图从 conversation.view 环摘除，改由侧栏接管组件的中栏承载：
  * 本插件注册 sidebar.workspaces（priority=-10 抢占 shell 默认浏览器），
- * WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=四视图
- * （WorkbenchSection 本文件 / DocsSection 本插件 ./docs.tsx（t260905-06 起，
- * 顶替 knowledge 插件视图——旧提法退役，界面层不再出现） /
- * ProvidersSection 从 providers 插件 import）。t260903-07 起：点工单只开中列
+ * WorkbenchSidebar: left column = project groups + in-progress tickets + plugin
+ * entry; middle column = the executor panel (since t261008-36, Model routes and
+ * Project settings open from the panel's Settings tab — executor-view.tsx owns
+ * ProvidersSection, the view registry no longer carries it). Since t260903-07,
+ * clicking a ticket opens only the middle-column detail drawer.
  * 详情抽屉，右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存——
  * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
  * 数据来自 /sandbar-workbench/api/wf/* 而非会话事件。
@@ -98,7 +99,9 @@ import { LaneMap, ChecksDetail } from './lane-map.tsx'
 // t260926-05：巡检报告面纯函数层（asText/套件证据段/泛化 face 行/报告摘要/发现项防御视图）。
 import { asText, suiteSectionView, faceRows, reportDigest, findingView } from './inspection-report-model.ts'
 import type { DigestLine } from './inspection-report-model.ts'
-import { ProvidersSection } from '../../../providers/src/client/index.tsx'
+// t261008-36: the ProvidersSection import retired here — Model routes opens from
+// the executor panel's Settings tab; executor-view.tsx is now the component's one
+// importer (one face, one home).
 import { WorkbenchSidebar } from './sidebar.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
@@ -4561,7 +4564,9 @@ export function apply(ctx: ClientContext): void {
     getService={getService}
     // t261005-10 (UI-2): one middle column — the executor panel with the consolidated
     // tab strip; WorkbenchSection survives as the overlay/machine-head host (no board).
-    views={{ overlay: WorkbenchSection, routes: ProvidersSection }}
+    // t261008-36: views.routes retired — Model routes and Project settings open from
+    // the panel's Settings tab (the mock's two rows; the 'later ticket' is this one).
+    views={{ overlay: WorkbenchSection }}
     {...props} /></SlotErrorBoundary>))
 
   // t261005-10 (UI-2): the metrics footer.action slot registration retires with

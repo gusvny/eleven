@@ -49,19 +49,19 @@ ok(icons.includes('width="18"') && icons.includes('height="18"'), '显形 18px')
 ok(icons.includes('aria-label={spec.ariaLabel}'), 'aria-label 恒同 title')
 ok(icons.includes('滑杆') && icons.includes('带箭头分流'), '修订11 两枚重绘语义在案（设置=滑杆/路由=分流）')
 
-section('B sidebar 渲染点：More views 两枚 + 语义保留')
+section('B sidebar 渲染点：t261008-36 起 More views 整体退役（两面归面板 Settings）')
 ok(!sidebar.includes("<ProjectIcon name=\"board\" />"), 'board 图标退役（UI-2）')
 ok(!sidebar.includes("<ProjectIcon name=\"docs\" />"), 'docs 图标退役（UI-2）')
 ok(!sidebar.includes("<ProjectIcon name=\"epics\" />"), 'epics 图标退役（UI-2）')
-ok(sidebar.includes("<ProjectIcon name=\"routes\" />"), '模型路由换装（More views 保留）')
-ok(sidebar.includes("<ProjectIcon name=\"settings\" />"), '第五枚设置入口')
-ok(sidebar.includes('data-wb-project-settings-entry=""'), '设置入口语义锚')
-ok((sidebar.match(/onClick=\{\(\) => handleViewIcon\(g\.project\.key, '(routes)'\)\}/g) ?? []).length === 1,
-  '视图 onClick 只剩 routes（onKeyDown 键位行不混入计数）')
+ok(!sidebar.includes("<ProjectIcon name=\"routes\" />"), 'routes 图标退役（t261008-36：改从面板 Settings 开）')
+ok(!sidebar.includes("<ProjectIcon name=\"settings\" />"), 'settings 图标退役（t261008-36：改从面板 Settings 开）')
+ok(!sidebar.includes('data-wb-project-settings-entry=""'), '设置入口语义锚退役（t261008-36）')
+ok(!sidebar.includes('data-wb-more-views'), 'More views 展开钮退役（t261008-36）')
+ok((sidebar.match(/onClick=\{\(\) => handleViewIcon\(g\.project\.key, '(\w+)'\)\}/g) ?? []).every(x => x.includes("'executor'")),
+  '视图 onClick 只剩 executor（键位行不混入计数）')
 ok(!sidebar.includes('knowledge'), 't260905-06：knowledge 提法清零（图标键）')
-ok((sidebar.match(/className=\{`wb-view-icon \$\{rightView === 'routes' && viewProject === g\.project\.key \? 'active' : ''\}`\}/g) ?? []).length === 1,
-  'per-project 视图 active 态只剩 routes')
-ok(sidebar.includes("width:26px; height:26px") && sidebar.includes('border-radius:6px'), '命中区 26×26 radius 6')
+ok(!sidebar.includes("rightView === 'routes'"), 'per-project 视图 active 态只剩 executor（routes 判式退役）')
+ok(sidebar.includes("width:26px; height:26px") && sidebar.includes('border-radius:6px'), '命中区 26×26 radius 6（几何契约不动）')
 
 section('C emoji 清零（三文件）+ 白名单豁免')
 for (const [name, src] of [['sidebar', sidebar], ['index', index], ['epics', epics]]) {

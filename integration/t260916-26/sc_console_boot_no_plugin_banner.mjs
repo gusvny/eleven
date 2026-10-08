@@ -118,37 +118,38 @@ try {
       '壳层未渲染（T2 红），absence 判定不可信')
   }
 
-  // T4 「模型路由」视图烟测（点夹具甲组「模型路由」图标，作用域锚复制自 t260915-10
-  // docsIconOf 同款——全局 aria-label 序数会被组内 svg 错位，必须按组头收窄）：
-  // 渲染出显式状态（正常头「模 型」或 API 未挂载显式错误框）即算可用，空白才算红
+  // T4 「模型路由」面烟测（t261008-36 起入口迁移：More-views 图标退役，Model
+  // routes 从执行器面板 Settings tab 开，宿主面 overlay 挂既有 ProvidersSection——
+  // 点项目行开面板 → Settings tab → data-wb-panel-face="routes"）：渲染出显式状态
+  // （正常头「模 型」或 API 未挂载显式错误框）即算可用，空白才算红。
   try {
-
-// t260929-22 宿主裁 1（260929）：Docs/模型路由/项目设置收进组内「More views」展开位
-// （260823 常驻可见放宽为展开显现）——取用前先展开全部组的展开位（data-on 缺席=未展开）。
-async function expandMoreViews(page) {
-  const btns = page.locator('[data-wb-more-views]:not([data-on])')
-  const n = await btns.count().catch(() => 0)
-  for (let i = 0; i < n; i++) await btns.nth(i).click({ timeout: 4000 }).catch(() => {})
-  await page.waitForTimeout(300)
-}
-  await expandMoreViews(page)
-    const routesIcon = page.locator('.wb-group-head', { hasText: '夹具甲' })
-      // 入口钉 aria-label（无障碍名=入口用户可感知契约本身；宿主令 260925 控制台 UI 文案
-      // 一律英文后取值 "Model Routes"，迁移前旧值为「模型路由」）。
-      .locator('span[aria-label="Model Routes"]')
-    // 点击预算 20s（t260916-26 implement gen3 加固）：图标在 workbench 板面数据
-    // 加载后才渲染，闸内并发 herd（concurrency=4）下 8s 预算两度超时（单跑同树
-    // 两跑全绿=负载抖动非语义红，registry load-flake 家族同型）。预算不是断言
-    // 语义：本子用例锚的仍是「点击后 ProvidersSection 显式状态在 DOM」，正向控制
-    // T2 的等待预算（15s）本就按负载口径给，此处对齐。
-    await routesIcon.click({ timeout: 20000 })
+    const entry = page.locator('[data-wb-executor-entry]').first()
+    await entry.click({ timeout: 20000, force: true })
+    // 等面板 iframe 真挂载（t260929-22 同款判据），失败时把现场带进点名。
+    let iframeSrc = ''
+    const mounted = await (async () => {
+      const t0 = Date.now()
+      while (Date.now() - t0 < 15000) {
+        iframeSrc = await page.evaluate(() => {
+          const f = [...document.querySelectorAll('iframe')].find((f) => /sandbar-executor-panel/.test(f.src || ''))
+          return f ? f.src : ''
+        }).catch(() => '')
+        if (iframeSrc) return true
+        await page.waitForTimeout(300)
+      }
+      return false
+    })()
+    if (!mounted) throw new Error(`executor panel iframe did not mount (src='${iframeSrc}')`)
+    const frame = page.frameLocator('iframe[src*="sandbar-executor-panel"]')
+    await frame.locator('[data-tab="settings"]').click({ timeout: 20000 })
+    await frame.locator('[data-wb-panel-face="routes"]').click({ timeout: 20000 })
     await page.waitForTimeout(1500)
     const txt = await page.locator('body').innerText()
     const okShape = txt.includes('模 型') || txt.includes('模型管理 API 未挂载')
-    record('T4 「模型路由」视图渲染出显式状态（正常头或显式错误框，非空白）', okShape,
+    record('T4 「模型路由」面渲染出显式状态（面板 Settings 开，正常头或显式错误框，非空白）', okShape,
       okShape ? 'ProvidersSection 显式状态在 DOM' : '点击后未见「模 型」头亦未见显式错误框')
   } catch (e) {
-    record('T4 「模型路由」视图渲染出显式状态（正常头或显式错误框，非空白）', 'fail',
+    record('T4 「模型路由」面渲染出显式状态（面板 Settings 开，正常头或显式错误框，非空白）', 'fail',
       `导航/点击失败：${String(e).slice(0, 160)}`)
   }
 } catch (e) {

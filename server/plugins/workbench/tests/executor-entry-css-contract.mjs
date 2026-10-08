@@ -38,13 +38,14 @@ assert(/\.wb-group-entry \{ flex:1 1 0; min-width:0;/.test(src), `C1 entry-zone 
   assert(Number(m[1]) === 26 && Number(m[2]) === 26, `C2 icon hit area is the frozen 26x26 (got ${m[1]}x${m[2]}) (${++n})`)
 }
 
-// C3 入口段包住名字+计数、先于图标簇（空档属于入口）
+// C3 入口段包住名字+计数（空档属于入口）。t261008-36：wb-view-icons 簇整体退役，
+// 入口段成为行头的最后一个元素——契约从「先于图标簇」改为「行头内、无图标簇残留」。
 {
   const head = src.indexOf('<span className="wb-group-entry" data-wb-executor-entry=""')
   assert(head > 0, `C3 entry span present (${++n})`)
-  const icons = src.indexOf('<span className="wb-view-icons"', head)
-  assert(icons > 0, `C3 icons cluster after entry (${++n})`)
-  const block = src.slice(head, icons)
+  const headEnd = src.indexOf('</span>\n              </div>', head)
+  assert(headEnd > 0, `C3 group head closes after the entry (${++n})`)
+  const block = src.slice(head, headEnd)
   assert(block.includes('wb-group-name') && block.includes('wb-group-count'),
     `C3 entry wraps name and count (${++n})`)
 }
@@ -65,21 +66,21 @@ assert(/\.wb-group-entry \{ flex:1 1 0; min-width:0;/.test(src), `C1 entry-zone 
   assert(m, `C5 icon cluster is plain in-flow (no absolute/hover layer) (${++n})`)
   assert(!/wb-view-icons[^\n]*position:absolute/.test(src) && !/top:100%/.test(src),
     `C5b no out-of-row overlay left (${++n})`)
-  const minW = Number(src.match(/\.wb-sb-left \{ flex:1 1 0; min-width:(\d+)px/)[1])
+  // t261008-36 顺手修：正则与现行 .wb-sb-left 规则对齐（flex:0 1 380px; min-width:180px）——
+  // 旧形态 flex:1 1 0 在 t260929-22 前后已漂移，此断言在基线上一直空转红。
+  const minW = Number(src.match(/\.wb-sb-left \{ flex:0 1 380px; min-width:(\d+)px/)[1])
   assert(minW === 180, `C5c left column min-width stays 180px (got ${minW}) (${++n})`)
-  // t261005-10 (UI-2)：Tickets/Epics/Docs 图标随视图归并退役——簇内常驻为零枚，
-  // More views 展开位只剩 Model Routes + Project Settings。
-  const iconsStart = src.indexOf('<span className="wb-view-icons"')
-  const more = src.indexOf('data-wb-more-views=""', iconsStart)
-  assert(iconsStart > 0 && more > 0, `C5d cluster and expander present (${++n})`)
-  const pinned = src.slice(iconsStart, more)
-  assert(!pinned.includes('aria-label="Tickets"') && !pinned.includes('aria-label="Epics"')
-    && !pinned.includes('aria-label="Docs"'),
-    `C5e board/epics/docs icons retired from the cluster (${++n})`)
-  assert(src.includes('aria-label="Model Routes"') && src.includes('data-wb-project-settings-entry=""'),
-    `C5e2 More views keeps Model Routes + Project Settings (${++n})`)
-  assert(/aria-label=\{moreViews\[g\.project\.key\][^\n]*'More views'/.test(src),
-    `C5f More views expander with keyboard support (${++n})`)
+  // t261005-10 (UI-2)：Tickets/Epics/Docs 图标随视图归并退役。
+  // t261008-36：More views 展开位与最后两枚（Model Routes / Project Settings）一并
+  // 整体退役——两面改从执行器面板 Settings 开（一面一家，不留第二道门）；
+  // 图标簇/展开钮/锚点在渲染源内 grep-zero（样式残留不算门，仅渲染面算）。
+  assert(!src.includes('<span className="wb-view-icons"'), `C5d icon cluster retired (${++n})`)
+  assert(!src.includes('data-wb-more-views=""'), `C5d2 More-views toggle anchor retired (${++n})`)
+  assert(!src.includes("'More views'") && !src.includes("'Fewer views'"),
+    `C5d3 More/Fewer views copy retired (${++n})`)
+  assert(!src.includes('aria-label="Model Routes"') && !src.includes('data-wb-project-settings-entry=""'),
+    `C5e2 Model Routes / Project Settings icons retired from the row (${++n})`)
+  assert(!src.includes('moreViews'), `C5f moreViews state retired (${++n})`)
 }
 
 console.log(`done ${n}`)

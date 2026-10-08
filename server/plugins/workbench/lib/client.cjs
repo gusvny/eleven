@@ -1748,1256 +1748,6 @@ function findingView(f, i) {
 	};
 }
 //#endregion
-//#region ../providers/src/host/routes-edit.ts
-/** 视图 → 编辑草稿（null 条目 → 空串，UI 显示为「继承 default」）。 */
-function draftFromView(view) {
-	const dft = view.default ?? {
-		provider: "",
-		model: ""
-	};
-	const roles = {};
-	for (const role of view.roles) {
-		const e = role.entry ?? {
-			provider: "",
-			model: ""
-		};
-		const tasks = {};
-		for (const t of role.tasks) {
-			const te = t.entry ?? {
-				provider: "",
-				model: ""
-			};
-			tasks[t.kind] = {
-				provider: te.provider ?? "",
-				model: te.model ?? ""
-			};
-		}
-		roles[role.role] = {
-			provider: e.provider ?? "",
-			model: e.model ?? "",
-			tasks
-		};
-	}
-	return {
-		default: {
-			provider: dft.provider ?? "",
-			model: dft.model ?? ""
-		},
-		roles
-	};
-}
-/** 草稿 → 保存载荷：所有字段显式携带（含 ''=清空键），宿主 diff 后只改有变化的行。 */
-function draftToPayload(d) {
-	const payload = {
-		default: {
-			provider: d.default.provider,
-			model: d.default.model
-		},
-		roles: {}
-	};
-	for (const [rid, r] of Object.entries(d.roles)) {
-		const role = {
-			provider: r.provider,
-			model: r.model
-		};
-		const tasks = {};
-		for (const [kind, t] of Object.entries(r.tasks)) tasks[kind] = {
-			provider: t.provider,
-			model: t.model
-		};
-		role.tasks = tasks;
-		payload.roles[rid] = role;
-	}
-	return payload;
-}
-//#endregion
-//#region ../providers/src/client/index.tsx
-/**
-* sandbar-providers —— LLM provider 管理与优先级 · 浏览器半。
-*
-* 槽位契约沿革：本插件曾向会话视图环注册「模型」页签 + `conversationViews.register`
-* （t260821-11 ①，260823 前）；260823 起「模型」UI 移到工单台侧栏中栏、由
-* sandbar-workbench 直接 import 本插件的 ProvidersSection 渲染，apply 改为
-* 空操作——插件对 conversationViews/uiConversation 零消费、零注册。
-*
-* 功能（t260821-08 B 版 + t260821-11 ②③ + M13 路由表）：
-*   ① 列出 provider（deepseek-official/kimi-coding/zai/scnet…）+ 上下移/拖拽排序；
-*   ② 每个 provider 计费档说明可编辑；
-*   ③ 「设为当前」一键写 agent-default-model（provider+model，可带 reasoningEffort）；
-*   ④ 「添加 provider」表单（baseURL/协议/模型 id 列表/key 环境变量 + **key 直填**）：
-*      key 直填走宿主半 credentials seam 写 $DSH_HOME/.credentials.yaml，settings.yaml
-*      仍只落 apiKeyEnv 引用，写 settings 仍走 assertServiceable dry-run 校验；
-*   ⑤ scnet 预置一键填表并**预填 14 个模型 id**（glm/minimax/kimi/qwen/deepseek 系）；
-*   ⑥ 「路由表」分区（M13，t260822-m13-model-routes-edit）：展示 model-routes.yaml
-*      真源路由表（default/五角色/分工 tasks）+ provider 下拉/模型下拉编辑（换 provider
-*      即刷新该家已注册模型清单，260828）+
-*      保存（POST /sandbar-admin/api/routes/save，宿主在 sandbar-admin-ui 插件，写前备份
-*      /tmp；保存即生效——运行时查表，下一个工单 agent spawn 用新表）。
-* 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /sandbar-providers/api/*；
-* 路由表读写走 sandbar-admin-ui 的 /sandbar-admin/api/routes（同源，M13① 保留的 API）。
-*
-* 【inject 收窄史（t260916-26）】曾声明 `inject = ['slots','conversationViews']`；
-* dsh 0.1.5 起 conversationViews 服务随 dsh-client-runtime 整包移除，声明即
-* 永久 pending（UI 报 Failed to load plugins）。现改从 ./inject-contract 导入
-* CLIENT_INJECT（=['slots']，双版本稳定白名单），同一 bundle 在 0.1.1/0.1.5
-* 都能激活；本插件无页签注册行为（apply 空操作），收窄零行为差异。
-*/
-const CSS$3 = `
-.syp-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  background:#f6f8fa;color:#1f2328;min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
-  display:flex;flex-direction:column;gap:16px;font-size:13px;line-height:1.55}
-.syp-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid #d0d7de;padding-bottom:12px}
-.syp-title{font-size:20px;font-weight:600;color:#1f2328}
-.syp-sub{font-size:12px;color:#57606a}
-.syp-banner{display:flex;align-items:center;gap:10px;border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:10px 14px;flex-wrap:wrap}
-.syp-banner-k{color:#57606a}
-.syp-banner-v{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.syp-err{background:#ffebe9;border:1px solid #ff9b9b;color:#cf222e;border-radius:6px;padding:8px 12px;font-size:12px;white-space:pre-wrap}
-.syp-ok{background:#dafbe1;border:1px solid #7dd9a0;color:#116329;border-radius:6px;padding:8px 12px;font-size:12px}
-.syp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.syp-btn{font:inherit;font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid #d0d7de;background:#fff;color:#1f2328;transition:background .12s}
-.syp-btn:hover{background:#f6f8fa}
-.syp-btn:disabled{opacity:.45;cursor:default}
-.syp-btn-primary{border-color:#0969da;background:#0969da;color:#fff;font-weight:600}
-.syp-btn-primary:hover{background:#0857b6}
-.syp-btn-danger{border-color:#ff9b9b;color:#cf222e;background:#ffebe9}
-.syp-btn-green{border-color:#7dd9a0;color:#1a7f37;background:#dafbe1}
-.syp-icon-btn{font:inherit;font-size:13px;padding:2px 8px;border-radius:6px;cursor:pointer;border:1px solid #d0d7de;background:#fff;color:#57606a}
-.syp-icon-btn:hover{background:#f6f8fa}
-.syp-icon-btn:disabled{opacity:.35;cursor:default}
-.syp-list{display:flex;flex-direction:column;gap:8px}
-.syp-row{display:flex;align-items:flex-start;gap:10px;border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:10px 12px;transition:box-shadow .12s}
-.syp-row[data-current=true]{border-color:#0969da;box-shadow:inset 3px 0 0 #0969da;background:#f0f6ff}
-.syp-row[data-drag=true]{opacity:.5;border-style:dashed}
-.syp-row-grip{cursor:grab;color:#8c959f;user-select:none;font-size:16px;line-height:1;padding:4px 2px}
-.syp-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
-.syp-row-line1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.syp-row-name{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.syp-badge{font-size:11px;border-radius:6px;padding:1px 8px;font-weight:500}
-.syp-badge[data-kind=external]{background:#fff8c5;color:#7d4e00}
-.syp-badge[data-kind=pi-ai]{background:#dafbe1;color:#116329}
-.syp-badge[data-kind=preset]{background:#ddf4ff;color:#0550ae}
-.syp-badge[data-cur=true]{background:#0969da;color:#fff}
-.syp-row-line2{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;color:#57606a}
-.syp-kv{display:inline-flex;gap:4px}
-.syp-kv b{color:#8c959f;font-weight:500}
-.syp-row-line3{display:flex;align-items:center;gap:8px}
-.syp-note-label{font-size:11px;color:#8c959f;white-space:nowrap}
-.syp-note-input{font:inherit;font-size:12px;flex:1;border:1px solid #d0d7de;border-radius:6px;padding:4px 8px;color:#1f2328;background:#fff}
-.syp-note-input:focus{outline:none;border-color:#0969da}
-.syp-row-ops{display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:none}
-.syp-row-ops .syp-btn{white-space:nowrap}
-.syp-form{border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
-.syp-form-title{font-size:14px;font-weight:600;color:#1f2328}
-.syp-field{display:flex;flex-direction:column;gap:4px}
-.syp-field label{font-size:12px;color:#57606a}
-.syp-field input,.syp-field select,.syp-field textarea{font:inherit;font-size:12px;border:1px solid #d0d7de;border-radius:6px;padding:6px 10px;color:#1f2328;background:#fff}
-.syp-field input:focus,.syp-field select:focus,.syp-field textarea:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.12)}
-.syp-field textarea{min-height:72px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.syp-hint{font-size:11px;color:#8c959f}
-.syp-modal{position:fixed;inset:0;background:rgba(31,35,40,.5);z-index:99;display:flex;align-items:center;justify-content:center;padding:24px}
-.syp-modal-box{background:#fff;border:1px solid #d0d7de;border-radius:10px;box-shadow:0 8px 32px rgba(31,35,40,.2);max-width:520px;width:100%;display:flex;flex-direction:column;gap:10px;padding:18px 20px}
-.syp-modal-title{font-size:15px;font-weight:600;color:#1f2328}
-.syp-empty{font-size:12px;color:#57606a;padding:12px 0}
-/* ── M13 路由表（syp-route-*）── */
-.syp-route-card{border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:14px 16px;
-  display:flex;flex-direction:column;gap:10px}
-.syp-route-title{font-size:14px;font-weight:600;color:#1f2328;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.syp-route-note{font-size:11px;color:#57606a;line-height:1.7}
-.syp-route-redline{font-size:11px;color:#7d4e00;background:#fff8c5;border:1px solid #d4a72c;
-  border-radius:6px;padding:6px 10px;line-height:1.7}
-.syp-route-gen{font-size:12px;color:#116329;background:#dafbe1;border:1px solid #7dd9a0;
-  border-radius:6px;padding:8px 12px;line-height:1.7;white-space:pre-wrap}
-.syp-route-tbl{border:1px solid #eaeef2;border-radius:6px;overflow:hidden}
-.syp-route-row{display:grid;grid-template-columns:170px minmax(140px,1fr) minmax(140px,1fr) auto;
-  gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #eaeef2}
-.syp-route-row:last-child{border-bottom:none}
-.syp-route-row[data-head=true]{background:#f6f8fa;font-size:11px;color:#8c959f;padding-top:5px;padding-bottom:5px}
-.syp-route-row[data-task=true]{padding-left:26px;background:#fbfcfe}
-.syp-route-label{font-size:12px;font-weight:600;color:#1f2328;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
-.syp-route-kind{font-size:11px;font-weight:400;color:#8c959f}
-.syp-route-cell{display:flex;flex-direction:column;gap:2px;min-width:0}
-.syp-route-cell select,.syp-route-cell input{font:inherit;font-size:12px;border:1px solid #d0d7de;
-  border-radius:6px;padding:4px 8px;color:#1f2328;background:#fff;width:100%;box-sizing:border-box}
-.syp-route-cell select:focus,.syp-route-cell input:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.12)}
-.syp-route-cell-hint{font-size:10px;color:#8c959f}
-.syp-route-cell-warn{font-size:10px;color:#b45309;display:block}
-.syp-route-eff{font-size:11px;color:#57606a;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
-.syp-route-via{font-size:10px;color:#8c959f;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.syp-route-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.syp-route-warn{font-size:11px;color:#9a6700;background:#fff8c5;border-radius:6px;padding:6px 10px;
-  margin:0;white-space:pre-wrap;line-height:1.6}
-`;
-const CSS_TAG_ID$1 = "sandbar-providers/ProvidersSection.css";
-if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID$1) + "]") === null) {
-	const tag = document.createElement("style");
-	tag.dataset.plugin = "sandbar-providers";
-	tag.dataset.pluginCss = CSS_TAG_ID$1;
-	tag.textContent = CSS$3;
-	document.head.appendChild(tag);
-}
-const API$1 = "/sandbar-providers/api";
-/** 多项目化（260823）：路由表两条 URL（/sandbar-admin/api/routes*，按项目主目录解析
-*  model-routes.yaml）统一拼 ?project=；provider 管理（/sandbar-providers/api/*）是
-*  dsh 全局设施，不分流。
-*  260826 修：project 从模块级持有量改为纯函数入参——旧写法靠 ProvidersSection 的
-*  effect 落值，但 React 挂载时子组件 effect 先于父组件执行，RoutesTableSection
-*  首次 load 永远拿到空 project → 宿主 400「缺 project 参数」。prop 渲染期即有值，
-*  不依赖 effect 顺序。 */
-function routesUrl(path, projectKey) {
-	if (!projectKey) return path;
-	return path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(projectKey);
-}
-async function apiGet$1(path) {
-	return (await fetch(path)).json();
-}
-async function apiPost$1(path, body) {
-	return (await fetch(path, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body ?? {})
-	})).json();
-}
-const KIND_LABEL$1 = {
-	"pi-ai": "llm-pi-ai 路由",
-	external: "官方 deepseek 适配器",
-	preset: "预置（未添加）"
-};
-/** 「手填…」select 选项哨兵值：与真实模型 id 冲突面极小（模型 id 不会长这样）。 */
-const HAND_OPT = "__hand__";
-/**
-* 模型 id 单元。provider 有已注册清单 → 渲染真 <select>（整单随 provider 刷新）；
-* 清单为空或选了「手填…」→ 自由输入 + datalist 兜底（catalog 滞后的新模型仍可手输）。
-*
-* 为什么不用 datalist 当主下拉：datalist 的候选会被输入框现值过滤（框里留着上一家的
-* 模型 id 时，下拉看起来永远是空的/旧的），WebKit 还常不随重渲染刷新候选——260828
-* 反馈「选了 provider 模型列表不刷新」的根因。真 select 没有这两毛病。
-* 调用方用 key={provider id} 挂载：换 provider 即重挂，手填态自动退回下拉。
-*/
-function ModelIdCell({ pid, models, value, onChange, listId }) {
-	const [hand, setHand] = (0, react.useState)(false);
-	if (hand || models.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-		/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-			value,
-			list: models.length > 0 ? listId : void 0,
-			placeholder: "模型 id（手填）",
-			onChange: (e) => onChange(e.target.value)
-		}),
-		models.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("datalist", {
-			id: listId,
-			children: models.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", { value: m }, m))
-		}),
-		models.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-			type: "button",
-			className: "syp-btn",
-			onClick: () => setHand(false),
-			children: [
-				"回 ",
-				pid,
-				" 清单下拉"
-			]
-		})
-	] });
-	const known = models.includes(value);
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-		value: known ? value : HAND_OPT,
-		onChange: (e) => {
-			if (e.target.value === HAND_OPT) {
-				setHand(true);
-				return;
-			}
-			onChange(e.target.value);
-		},
-		children: [
-			!known && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-				value,
-				children: value === "" ? "（未设）" : `${value}（未注册）`
-			}),
-			models.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-				value: m,
-				children: m
-			}, m)),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-				value: HAND_OPT,
-				children: "（手填…）"
-			})
-		]
-	});
-}
-function ProvidersSection({ projectKey }) {
-	const [data, setData] = (0, react.useState)(void 0);
-	const [error, setError] = (0, react.useState)("");
-	const [busy, setBusy] = (0, react.useState)(false);
-	const [msg, setMsg] = (0, react.useState)("");
-	const [showForm, setShowForm] = (0, react.useState)(false);
-	const [dragId, setDragId] = (0, react.useState)(null);
-	const [noteDraft, setNoteDraft] = (0, react.useState)({});
-	const [fId, setFId] = (0, react.useState)("");
-	const [fDisplay, setFDisplay] = (0, react.useState)("");
-	const [fApi, setFApi] = (0, react.useState)("openai-completions");
-	const [fBase, setFBase] = (0, react.useState)("");
-	const [fKeyEnv, setFKeyEnv] = (0, react.useState)("");
-	const [fApiKey, setFApiKey] = (0, react.useState)("");
-	const [fModels, setFModels] = (0, react.useState)("");
-	const [fNote, setFNote] = (0, react.useState)("");
-	const [curId, setCurId] = (0, react.useState)(null);
-	const [curModel, setCurModel] = (0, react.useState)("");
-	const [curRe, setCurRe] = (0, react.useState)("");
-	async function reload() {
-		try {
-			const d = await apiGet$1(`${API$1}/state`);
-			if (d?.ok !== true) throw new Error(d?.error ?? "加载失败");
-			setData(d.result);
-			setError("");
-		} catch (err) {
-			setError(String(err instanceof Error ? err.message : err));
-		}
-	}
-	(0, react.useEffect)(() => {
-		reload();
-	}, []);
-	async function post(path, body, okMsg) {
-		setBusy(true);
-		setMsg("");
-		try {
-			const r = await apiPost$1(path, body);
-			if (r?.ok !== true) {
-				setMsg(`失败：${r?.error ?? "未知错误"}`);
-				return false;
-			}
-			setMsg(okMsg);
-			await reload();
-			return true;
-		} catch (err) {
-			setMsg(`请求失败：${String(err instanceof Error ? err.message : err)}`);
-			return false;
-		} finally {
-			setBusy(false);
-		}
-	}
-	function fillScnet() {
-		const p = data?.scnetPreset;
-		if (!p) return;
-		setFId(p.id);
-		setFDisplay(p.displayName);
-		setFApi(p.api);
-		setFBase(p.baseURL);
-		setFKeyEnv(p.apiKeyEnv);
-		setFApiKey("");
-		setFModels(Array.isArray(p.models) ? p.models.join("\n") : "");
-		setFNote("");
-	}
-	async function submitAdd() {
-		const models = fModels.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-		if (await post(`${API$1}/add-provider`, {
-			id: fId,
-			displayName: fDisplay,
-			api: fApi,
-			baseURL: fBase,
-			apiKeyEnv: fKeyEnv,
-			apiKey: fApiKey,
-			models,
-			note: fNote
-		}, `已添加 provider「${fId.trim()}」到 llm-pi-ai.providers${fApiKey.trim() !== "" ? `，key 已存入 ${fKeyEnv.trim()}` : ""}`)) {
-			setShowForm(false);
-			setFId("");
-			setFDisplay("");
-			setFApi("openai-completions");
-			setFBase("");
-			setFKeyEnv("");
-			setFApiKey("");
-			setFModels("");
-			setFNote("");
-		}
-	}
-	function openSetCurrent(p) {
-		setCurId(p.id);
-		setCurModel(p.isCurrent ? p.currentModel : p.models[0] ?? "");
-		setCurRe(p.isCurrent ? data?.current.reasoningEffort ?? "" : "");
-	}
-	async function submitSetCurrent() {
-		if (!curId) return;
-		if (await post(`${API$1}/set-current`, {
-			provider: curId,
-			model: curModel,
-			reasoningEffort: curRe
-		}, `已把 agent-default-model 切到 ${curId} / ${curModel.trim()}`)) setCurId(null);
-	}
-	async function saveNote(p) {
-		const note = noteDraft[p.id] ?? p.note;
-		await post(`${API$1}/update-note`, {
-			id: p.id,
-			note
-		}, `已保存「${p.id}」计费说明`);
-	}
-	async function reorder(order) {
-		setBusy(true);
-		setMsg("");
-		try {
-			const r = await apiPost$1(`${API$1}/reorder`, { order });
-			if (r?.ok !== true) {
-				setMsg(`失败：${r?.error ?? "未知错误"}`);
-				return;
-			}
-			setMsg("优先级已保存");
-			await reload();
-		} catch (err) {
-			setMsg(`请求失败：${String(err instanceof Error ? err.message : err)}`);
-		} finally {
-			setBusy(false);
-		}
-	}
-	function move(id, delta) {
-		const list = data?.providers.map((p) => p.id) ?? [];
-		const i = list.indexOf(id);
-		const j = i + delta;
-		if (i < 0 || j < 0 || j >= list.length) return;
-		const next = [...list];
-		const tmp = next[i];
-		next[i] = next[j];
-		next[j] = tmp;
-		reorder(next);
-	}
-	function onDrop(id) {
-		const list = data?.providers.map((p) => p.id) ?? [];
-		const from = dragId;
-		const to = id;
-		setDragId(null);
-		if (!from || from === to) return;
-		const next = list.filter((x) => x !== from);
-		const idx = next.indexOf(to);
-		next.splice(idx, 0, from);
-		reorder(next);
-	}
-	const rows = data?.providers ?? [];
-	const modelListForCurrent = (0, react.useMemo)(() => curId ? rows.find((p) => p.id === curId)?.models ?? [] : [], [curId, rows]);
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "syp-root",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-head",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: "syp-title",
-					children: "模 型"
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-					className: "syp-sub",
-					children: ["LLM provider 管理与优先级（手动排序 + 一键切换）· 写 ", data?.settingsPath ?? "settings.yaml"]
-				})]
-			}),
-			data && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-banner",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "syp-banner-k",
-						children: "当前 agent-default-model："
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "syp-banner-v",
-						children: [
-							data.current.provider,
-							" / ",
-							data.current.model
-						]
-					}),
-					data.current.reasoningEffort && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "syp-badge",
-						"data-cur": true,
-						children: data.current.reasoningEffort
-					})
-				]
-			}),
-			error !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-err",
-				children: [
-					error,
-					"\n",
-					"（模型管理 API 未挂载？headless profile 无 webServer。）"
-				]
-			}),
-			msg !== "" && (msg.startsWith("失败") || msg.startsWith("请求失败") ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "syp-err",
-				children: msg
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "syp-ok",
-				children: msg
-			})),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-actions",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					className: "syp-btn",
-					disabled: busy,
-					onClick: () => {
-						reload();
-					},
-					children: "刷 新"
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-					className: "syp-btn syp-btn-primary",
-					onClick: () => setShowForm((v) => !v),
-					children: showForm ? "收起添加表单" : "+ 添加 provider"
-				})]
-			}),
-			showForm && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-form",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "syp-form-title",
-						children: "添加 provider（写 settings.yaml 的 llm-pi-ai.providers；坏 provider 会被 dry-run 拒绝，绝不落盘）"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-actions",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "syp-btn",
-							onClick: fillScnet,
-							title: data?.scnetPreset?.description,
-							children: "scnet 预置一键填表"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "syp-hint",
-							children: data?.scnetPreset?.description ?? ""
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "provider id（route key，如 scnet / my-gateway）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							value: fId,
-							onChange: (e) => setFId(e.target.value),
-							placeholder: "scnet"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "显示名（可选）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							value: fDisplay,
-							onChange: (e) => setFDisplay(e.target.value),
-							placeholder: "SCNet"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "协议 api" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
-							value: fApi,
-							onChange: (e) => setFApi(e.target.value),
-							children: (data?.protocols ?? [
-								"openai-completions",
-								"openai-responses",
-								"anthropic-messages"
-							]).map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-								value: p,
-								children: p
-							}, p))
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "baseURL" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							value: fBase,
-							onChange: (e) => setFBase(e.target.value),
-							placeholder: "https://api.scnet.cn/api/llm/v1"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "key 环境变量 apiKeyEnv（key 直填时即存入该名下）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							value: fKeyEnv,
-							onChange: (e) => setFKeyEnv(e.target.value),
-							placeholder: "SCNET_API_KEY"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "API key 直填（可选；留空则只登记 apiKeyEnv，不写任何 key）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							type: "password",
-							value: fApiKey,
-							onChange: (e) => setFApiKey(e.target.value),
-							autoComplete: "off",
-							placeholder: "sk-…（存入 $DSH_HOME/.credentials.yaml，0600）"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "模型 id 列表（每行一个；scnet 预置会预填 14 个模型 id，可增删）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-							value: fModels,
-							onChange: (e) => setFModels(e.target.value),
-							placeholder: "GLM-5.2\nGLM-5\n…"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-field",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "计费档说明（可选）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							value: fNote,
-							onChange: (e) => setFNote(e.target.value),
-							placeholder: "如：¥0.001/1K tokens"
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "syp-actions",
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							className: "syp-btn syp-btn-green",
-							disabled: busy,
-							onClick: () => {
-								submitAdd();
-							},
-							children: "添 加"
-						})
-					})
-				]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-list",
-				children: [rows.map((p, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "syp-row",
-					"data-current": p.isCurrent,
-					"data-drag": dragId === p.id,
-					draggable: !busy,
-					onDragStart: () => setDragId(p.id),
-					onDragOver: (e) => e.preventDefault(),
-					onDrop: (e) => {
-						e.preventDefault();
-						onDrop(p.id);
-					},
-					onDragEnd: () => setDragId(null),
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "syp-row-grip",
-							title: "拖拽排序",
-							children: "⠿"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "syp-row-main",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "syp-row-line1",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "syp-row-name",
-											children: p.id
-										}),
-										p.displayName && p.displayName !== p.id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "syp-sub",
-											children: p.displayName
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "syp-badge",
-											"data-kind": p.kind,
-											children: KIND_LABEL$1[p.kind] ?? p.kind
-										}),
-										p.isCurrent && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "syp-badge",
-											"data-cur": true,
-											children: "当前"
-										})
-									]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "syp-row-line2",
-									children: [
-										p.api && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "syp-kv",
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "协议" }), p.api]
-										}),
-										p.baseURL && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "syp-kv",
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "baseURL" }), p.baseURL]
-										}),
-										p.apiKeyEnv && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "syp-kv",
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "key" }),
-												p.apiKeyEnv,
-												p.keySet === true ? "（已存）" : p.keySet === false ? "（未存）" : ""
-											]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "syp-kv",
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "模型" }), p.models.length > 0 ? `${p.models.length} 个` : "—"]
-										}),
-										p.description && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "syp-kv",
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "备注" }), p.description]
-										})
-									]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "syp-row-line3",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "syp-note-label",
-											children: "计费说明"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-											className: "syp-note-input",
-											value: noteDraft[p.id] ?? p.note,
-											placeholder: "（可编辑，如计费档位/价格）",
-											onChange: (e) => setNoteDraft((v) => ({
-												...v,
-												[p.id]: e.target.value
-											}))
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											className: "syp-btn",
-											disabled: busy,
-											onClick: () => {
-												saveNote(p);
-											},
-											children: "保存说明"
-										})
-									]
-								})
-							]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "syp-row-ops",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "syp-actions",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										className: "syp-icon-btn",
-										disabled: busy || i === 0,
-										title: "上移",
-										onClick: () => move(p.id, -1),
-										children: "↑"
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										className: "syp-icon-btn",
-										disabled: busy || i === rows.length - 1,
-										title: "下移",
-										onClick: () => move(p.id, 1),
-										children: "↓"
-									})]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "syp-btn syp-btn-primary",
-									disabled: busy,
-									onClick: () => openSetCurrent(p),
-									children: "设为当前"
-								}),
-								p.kind === "preset" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "syp-btn syp-btn-green",
-									disabled: busy,
-									onClick: () => {
-										fillScnet();
-										setShowForm(true);
-									},
-									children: "添加"
-								}),
-								p.kind === "pi-ai" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									className: "syp-btn syp-btn-danger",
-									disabled: busy,
-									onClick: () => {
-										if (window.confirm(`删除 provider「${p.id}」（从 llm-pi-ai.providers 移除）？`)) post(`${API$1}/delete-provider`, { id: p.id }, `已删除「${p.id}」`);
-									},
-									children: "删除"
-								})
-							]
-						})
-					]
-				}, p.id)), rows.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "syp-empty",
-					children: "没有 provider（加载中或 API 未挂载）。"
-				})]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RoutesTableSection, {
-				providers: rows,
-				projectKey
-			}),
-			curId !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "syp-modal",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "syp-modal-box",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "syp-modal-title",
-							children: ["设为当前 — ", curId]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "syp-field",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
-								"模型 id（",
-								modelListForCurrent.length > 0 ? `${modelListForCurrent.length} 个已注册模型下拉可选，新模型选「手填…」` : "手填模型 id",
-								"）"
-							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
-								pid: curId,
-								models: modelListForCurrent,
-								value: curModel,
-								onChange: setCurModel,
-								listId: "syp-model-list"
-							}, curId)]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "syp-field",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "reasoningEffort（可选，留空则省略；仅当目标适配器支持时有效）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-								value: curRe,
-								onChange: (e) => setCurRe(e.target.value),
-								placeholder: "low / medium / high"
-							})]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "syp-actions",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "syp-btn syp-btn-primary",
-								disabled: busy || !curModel.trim(),
-								onClick: () => {
-									submitSetCurrent();
-								},
-								children: "确认切换"
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								className: "syp-btn",
-								disabled: busy,
-								onClick: () => setCurId(null),
-								children: "取 消"
-							})]
-						})
-					]
-				})
-			})
-		]
-	});
-}
-/** 「路由表」分区：展示当前路由表（只读真源）+ 编辑 provider/model + 保存
-*  （保存即生效——运行时查表，下一个工单 agent spawn 用新表）。providers 列表
-*  （含模型 id）来自本插件 /state，供下拉用。 */
-function RoutesTableSection({ providers, projectKey }) {
-	const [view, setView] = (0, react.useState)(void 0);
-	const [draft, setDraft] = (0, react.useState)(void 0);
-	const [error, setError] = (0, react.useState)("");
-	const [busy, setBusy] = (0, react.useState)(false);
-	const [msg, setMsg] = (0, react.useState)("");
-	const [saved, setSaved] = (0, react.useState)(false);
-	async function load() {
-		setError("");
-		try {
-			const data = await apiGet$1(routesUrl("/sandbar-admin/api/routes", projectKey ?? ""));
-			if (data?.ok !== true) throw new Error(data?.error ?? "模型路由读取失败");
-			const v = data.result;
-			setView(v);
-			setDraft(draftFromView(v));
-			setSaved(false);
-		} catch (err) {
-			setError(String(err instanceof Error ? err.message : err));
-		}
-	}
-	(0, react.useEffect)(() => {
-		setView(void 0);
-		setDraft(void 0);
-		setError("");
-		if (projectKey) load();
-	}, [projectKey]);
-	function setRoleField(rid, field, value) {
-		setDraft((d) => d === void 0 ? d : {
-			...d,
-			roles: {
-				...d.roles,
-				[rid]: {
-					...d.roles[rid],
-					[field]: value
-				}
-			}
-		});
-	}
-	function setTaskField(rid, kind, field, value) {
-		setDraft((d) => d === void 0 ? d : {
-			...d,
-			roles: {
-				...d.roles,
-				[rid]: {
-					...d.roles[rid],
-					tasks: {
-						...d.roles[rid].tasks,
-						[kind]: {
-							...d.roles[rid].tasks[kind],
-							[field]: value
-						}
-					}
-				}
-			}
-		});
-	}
-	async function save() {
-		if (draft === void 0) return;
-		if (!window.confirm("保存将改写项目声明 paths.model_routes 指向的路由表（真源；未声明时落仓内 server/model-routes.yaml，写前备份 /tmp）。\n保存即生效：路由表是运行时查表，下一个工单 agent spawn 时就按新表走，无需任何生成/重启步骤。\n确认保存路由表？")) return;
-		setBusy(true);
-		setMsg("");
-		setSaved(false);
-		try {
-			const r = await apiPost$1(routesUrl("/sandbar-admin/api/routes/save", projectKey ?? ""), { table: draftToPayload(draft) });
-			if (r?.ok !== true) {
-				setMsg(`保存失败：${r?.error ?? "未知错误"}`);
-				return;
-			}
-			const res = r.result ?? {};
-			setMsg(res.changed?.length > 0 ? `已保存 ${res.changed.length} 处变更（${res.changed.join("、")}）到 ${res.routes_file}` : "路由表无变更（未写文件）");
-			setSaved(true);
-			await load();
-		} catch (err) {
-			setMsg(`请求失败：${String(err instanceof Error ? err.message : err)}`);
-		} finally {
-			setBusy(false);
-		}
-	}
-	if (!projectKey) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "syp-route-card",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "syp-route-title",
-			children: "路 由 表"
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "syp-sub",
-			children: "从左侧项目行点 🔀 图标打开该项目的模型路由。"
-		})]
-	});
-	if (error !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "syp-route-card",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "syp-route-title",
-			children: "路 由 表"
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "syp-err",
-			children: [
-				error,
-				"\n",
-				"（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=声明指向的路由表（或仓内兜底表）问题。）"
-			]
-		})]
-	});
-	if (view === void 0 || draft === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "syp-route-card",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "syp-route-title",
-			children: "路 由 表"
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "syp-empty",
-			children: "加载路由表…"
-		})]
-	});
-	const modelsOf = (pid) => providers.find((p) => p.id === pid)?.models ?? [];
-	/** 换 provider 时对齐 model：切到「继承/不设」清空；原 model 不在新家清单 → 取新家
-	*  首个已注册模型（都没有则清空）。避免留下「A 家 provider + B 家 model」的错配，也
-	*  让模型下拉随 provider 切换即见新家清单。 */
-	function snapModel(curModel, newPid) {
-		if (newPid === "") return "";
-		const ms = modelsOf(newPid);
-		if (ms.includes(curModel)) return curModel;
-		return ms[0] ?? "";
-	}
-	/** 未注册提示：值非空、该家有已知清单、值不在清单 → 提示（不硬拦——catalog 滞后的
-	*  新模型仍需手输入口，但把「模型 ref 不许发明」红线摆到眼前，260826 zai/k3 教训）。 */
-	const UnregHint = ({ pid, model }) => {
-		const ms = modelsOf(pid);
-		if (model === "" || ms.length === 0 || ms.includes(model)) return null;
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-			className: "syp-route-cell-warn",
-			children: [
-				"⚠ 不在 ",
-				pid,
-				" 已注册清单（",
-				ms.length,
-				" 个），保存前确认已实测"
-			]
-		});
-	};
-	const effOf = (eff) => eff !== null ? `${eff.provider}/${eff.model}` : "未设（继承 profile 默认）";
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "syp-route-card",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-route-title",
-				children: ["路 由 表", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-					className: "syp-hint",
-					children: [
-						"真源 ",
-						view.routes_file,
-						" · 工单 agent 用哪个模型（运行时查表，下次 spawn 生效）"
-					]
-				})]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-route-redline",
-				children: [
-					"改表红线：保存直接改写声明指向的路由表（未声明时落仓内兜底表；写前备份 /tmp）；模型 ref 不许发明——只用下方 provider 下拉里实证存在的 provider 及其模型 id。保存后",
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "下一个工单 agent 启动即生效" }),
-					"，无需任何生成/重启步骤。"
-				]
-			}),
-			view.warnings.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-				className: "syp-route-warn",
-				children: view.warnings.join("\n")
-			}),
-			saved && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-route-gen",
-				children: [
-					"✅ 路由表已写入 ",
-					view.routes_file,
-					"。下一个工单 agent 启动即按新表路由（运行时查表，无需任何生成/重启步骤）。"
-				]
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-route-tbl",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-route-row",
-						"data-head": true,
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "条目" }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "provider" }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "model" }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "当前查表结果" })
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-route-row",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-label",
-								children: ["default ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "syp-route-kind",
-									children: "兜底"
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "syp-route-cell",
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-									value: draft.default.provider,
-									onChange: (e) => setDraft((d) => {
-										if (d === void 0) return d;
-										const provider = e.target.value;
-										return {
-											...d,
-											default: {
-												provider,
-												model: snapModel(d.default.model, provider)
-											}
-										};
-									}),
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-										value: "",
-										children: "（不设 → 全部不烘焙）"
-									}), providers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-										value: p.id,
-										children: p.id
-									}, p.id))]
-								})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-cell",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
-									pid: draft.default.provider || "（未设 provider）",
-									models: modelsOf(draft.default.provider),
-									value: draft.default.model,
-									onChange: (v) => setDraft((d) => d === void 0 ? d : {
-										...d,
-										default: {
-											...d.default,
-											model: v
-										}
-									}),
-									listId: "syp-ml-default"
-								}, draft.default.provider), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnregHint, {
-									pid: draft.default.provider,
-									model: draft.default.model
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-cell",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "syp-route-eff",
-									children: effOf(view.default)
-								}), view.default !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "syp-route-via",
-									children: ["via ", view.default.via]
-								})]
-							})
-						]
-					}),
-					view.roles.map((role) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-route-row",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-label",
-								children: [
-									role.display,
-									" ",
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "syp-route-kind",
-										children: role.role
-									})
-								]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "syp-route-cell",
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-									value: draft.roles[role.role].provider,
-									onChange: (e) => setDraft((d) => {
-										if (d === void 0) return d;
-										const provider = e.target.value;
-										const r = d.roles[role.role];
-										return {
-											...d,
-											roles: {
-												...d.roles,
-												[role.role]: {
-													...r,
-													provider,
-													model: snapModel(r.model, provider)
-												}
-											}
-										};
-									}),
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-										value: "",
-										children: "（继承 default）"
-									}), providers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-										value: p.id,
-										children: p.id
-									}, p.id))]
-								})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-cell",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
-										pid: draft.roles[role.role].provider || "（未设 provider）",
-										models: modelsOf(draft.roles[role.role].provider),
-										value: draft.roles[role.role].model,
-										onChange: (v) => setRoleField(role.role, "model", v),
-										listId: `syp-ml-${role.role}`
-									}, draft.roles[role.role].provider),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnregHint, {
-										pid: draft.roles[role.role].provider,
-										model: draft.roles[role.role].model
-									}),
-									modelsOf(draft.roles[role.role].provider).length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "syp-route-cell-hint",
-										children: [
-											"已注册 ",
-											modelsOf(draft.roles[role.role].provider).length,
-											" 个模型，下拉直选"
-										]
-									})
-								]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-cell",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "syp-route-eff",
-									children: effOf(role.effective)
-								}), role.effective !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "syp-route-via",
-									children: ["via ", role.effective.via]
-								})]
-							})
-						]
-					}), role.tasks.map((task) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "syp-route-row",
-						"data-task": true,
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-label",
-								children: [
-									task.display,
-									"分工 ",
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "syp-route-kind",
-										children: task.kind
-									})
-								]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "syp-route-cell",
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
-									value: draft.roles[role.role].tasks[task.kind].provider,
-									onChange: (e) => setDraft((d) => {
-										if (d === void 0) return d;
-										const provider = e.target.value;
-										const t = d.roles[role.role].tasks[task.kind];
-										const tasks = {
-											...d.roles[role.role].tasks,
-											[task.kind]: {
-												...t,
-												provider,
-												model: snapModel(t.model, provider)
-											}
-										};
-										const r = d.roles[role.role];
-										return {
-											...d,
-											roles: {
-												...d.roles,
-												[role.role]: {
-													...r,
-													tasks
-												}
-											}
-										};
-									}),
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-										value: "",
-										children: "（继承 default）"
-									}), providers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
-										value: p.id,
-										children: p.id
-									}, p.id))]
-								})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-cell",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
-									pid: draft.roles[role.role].tasks[task.kind].provider || "（未设 provider）",
-									models: modelsOf(draft.roles[role.role].tasks[task.kind].provider),
-									value: draft.roles[role.role].tasks[task.kind].model,
-									onChange: (v) => setTaskField(role.role, task.kind, "model", v),
-									listId: `syp-ml-${role.role}-${task.kind}`
-								}, `${draft.roles[role.role].provider}-${task.kind}`), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnregHint, {
-									pid: draft.roles[role.role].tasks[task.kind].provider,
-									model: draft.roles[role.role].tasks[task.kind].model
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "syp-route-cell",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "syp-route-eff",
-									children: effOf(task.effective)
-								}), task.effective !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "syp-route-via",
-									children: ["via ", task.effective.via]
-								})]
-							})
-						]
-					}, task.kind))] }, role.role))
-				]
-			}),
-			msg !== "" && (msg.startsWith("保存失败") || msg.startsWith("请求失败") ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "syp-err",
-				children: msg
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "syp-ok",
-				children: msg
-			})),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "syp-route-actions",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "syp-btn syp-btn-primary",
-						disabled: busy,
-						onClick: () => {
-							save();
-						},
-						children: busy ? "保存中…" : "保存路由表"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						className: "syp-btn",
-						disabled: busy,
-						onClick: () => {
-							load();
-						},
-						children: "放弃修改（重新加载）"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "syp-hint",
-						children: "查表规则：(role, task_kind) → tasks.<kind> → roles.<role> → default；条目留空即向上落兜底。"
-					})
-				]
-			})
-		]
-	});
-}
-//#endregion
 //#region src/host/session-charter.ts
 /**
 * sandbar-workbench · session-charter 渲染纯函数（t260904-07）。
@@ -6437,67 +5187,6 @@ function startPlatformBannerHide(opts = {}) {
 	} };
 }
 //#endregion
-//#region src/client/project-icons.tsx
-/** 图标语义元数据：title 与 aria-label 恒同值（可辨识纪律，验收 11b）。 */
-const PROJECT_ICON_SPECS = {
-	routes: {
-		title: "Model Routes",
-		ariaLabel: "Model Routes"
-	},
-	settings: {
-		title: "Project Settings",
-		ariaLabel: "Project Settings"
-	}
-};
-/** 统一规格常量（单源；显形尺寸由消费方 CSS 定，几何常量在此）。 */
-const PROJECT_ICON_VIEWBOX = "0 0 20 20";
-const PROJECT_ICON_STROKE_WIDTH = 1.6;
-function iconPaths(name) {
-	switch (name) {
-		case "routes": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-			cx: "4.2",
-			cy: "10",
-			r: "1.8"
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M5.8 8.6l5.9-5.9M9.4 2.7h2.3v2.3M5.8 11.4l5.9 5.9M9.4 17.3h2.3v-2.3" })] });
-		case "settings": return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 5.6h8.2M15.4 5.6H17M3 10h1.9M9.1 10h7.9M3 14.4h9.4" }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-				cx: "13.3",
-				cy: "5.6",
-				r: "1.9"
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-				cx: "7",
-				cy: "10",
-				r: "1.9"
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-				cx: "14.5",
-				cy: "14.4",
-				r: "1.9"
-			})
-		] });
-	}
-}
-/** 图标组件：纯 svg（currentColor），容器态样式归消费方。 */
-function ProjectIcon(props) {
-	const spec = PROJECT_ICON_SPECS[props.name];
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
-		className: props.className,
-		viewBox: PROJECT_ICON_VIEWBOX,
-		width: "18",
-		height: "18",
-		fill: "none",
-		stroke: "currentColor",
-		strokeWidth: PROJECT_ICON_STROKE_WIDTH,
-		strokeLinecap: "round",
-		strokeLinejoin: "round",
-		role: "img",
-		"aria-label": spec.ariaLabel,
-		children: iconPaths(props.name)
-	});
-}
-//#endregion
 //#region src/client/project-modals.tsx
 /**
 * project-modals.tsx —— 项目生命周期四弹层（project-lifecycle 票③面D，验收 11-13）。
@@ -8035,6 +6724,1278 @@ function executorPanelUrl(projectKey, theme = "light") {
 	const t = theme === "dark" ? "dark" : "light";
 	return projectKey === "" ? "/sandbar-executor-panel/?theme=" + t : "/sandbar-executor-panel/?project=" + encodeURIComponent(projectKey) + "&theme=" + t;
 }
+//#endregion
+//#region src/client/face-overlay-model.ts
+/** open-face payload whitelist (same surface as the OPEN_FACE_MSG_TYPE branch in
+*  executor-view.tsx). */
+const PANEL_FACES = ["routes", "project-settings"];
+/**
+* Judge one open-face message payload: valid -> return the face; every other shape
+* -> null (the caller ignores it). expectedProjectKey is the projectKey prop this
+* view (the host) holds — byte-for-byte equality is required. The type field is
+* checked here too: this function is the first gate on external input and does not
+* trust the caller to have filtered the type.
+*/
+function panelFaceFromMessage(data, expectedProjectKey) {
+	if (!data || typeof data !== "object") return null;
+	const d = data;
+	if (d.type !== "sandbar-executor-panel:open-face") return null;
+	if (typeof d.face !== "string") return null;
+	if (!PANEL_FACES.includes(d.face)) return null;
+	if (typeof d.projectKey !== "string") return null;
+	if (d.projectKey !== expectedProjectKey) return null;
+	return d.face;
+}
+//#endregion
+//#region ../providers/src/host/routes-edit.ts
+/** 视图 → 编辑草稿（null 条目 → 空串，UI 显示为「继承 default」）。 */
+function draftFromView(view) {
+	const dft = view.default ?? {
+		provider: "",
+		model: ""
+	};
+	const roles = {};
+	for (const role of view.roles) {
+		const e = role.entry ?? {
+			provider: "",
+			model: ""
+		};
+		const tasks = {};
+		for (const t of role.tasks) {
+			const te = t.entry ?? {
+				provider: "",
+				model: ""
+			};
+			tasks[t.kind] = {
+				provider: te.provider ?? "",
+				model: te.model ?? ""
+			};
+		}
+		roles[role.role] = {
+			provider: e.provider ?? "",
+			model: e.model ?? "",
+			tasks
+		};
+	}
+	return {
+		default: {
+			provider: dft.provider ?? "",
+			model: dft.model ?? ""
+		},
+		roles
+	};
+}
+/** 草稿 → 保存载荷：所有字段显式携带（含 ''=清空键），宿主 diff 后只改有变化的行。 */
+function draftToPayload(d) {
+	const payload = {
+		default: {
+			provider: d.default.provider,
+			model: d.default.model
+		},
+		roles: {}
+	};
+	for (const [rid, r] of Object.entries(d.roles)) {
+		const role = {
+			provider: r.provider,
+			model: r.model
+		};
+		const tasks = {};
+		for (const [kind, t] of Object.entries(r.tasks)) tasks[kind] = {
+			provider: t.provider,
+			model: t.model
+		};
+		role.tasks = tasks;
+		payload.roles[rid] = role;
+	}
+	return payload;
+}
+//#endregion
+//#region ../providers/src/client/index.tsx
+/**
+* sandbar-providers —— LLM provider 管理与优先级 · 浏览器半。
+*
+* 槽位契约沿革：本插件曾向会话视图环注册「模型」页签 + `conversationViews.register`
+* （t260821-11 ①，260823 前）；260823 起「模型」UI 移到工单台侧栏中栏、由
+* sandbar-workbench 直接 import 本插件的 ProvidersSection 渲染，apply 改为
+* 空操作——插件对 conversationViews/uiConversation 零消费、零注册。
+*
+* 功能（t260821-08 B 版 + t260821-11 ②③ + M13 路由表）：
+*   ① 列出 provider（deepseek-official/kimi-coding/zai/scnet…）+ 上下移/拖拽排序；
+*   ② 每个 provider 计费档说明可编辑；
+*   ③ 「设为当前」一键写 agent-default-model（provider+model，可带 reasoningEffort）；
+*   ④ 「添加 provider」表单（baseURL/协议/模型 id 列表/key 环境变量 + **key 直填**）：
+*      key 直填走宿主半 credentials seam 写 $DSH_HOME/.credentials.yaml，settings.yaml
+*      仍只落 apiKeyEnv 引用，写 settings 仍走 assertServiceable dry-run 校验；
+*   ⑤ scnet 预置一键填表并**预填 14 个模型 id**（glm/minimax/kimi/qwen/deepseek 系）；
+*   ⑥ 「路由表」分区（M13，t260822-m13-model-routes-edit）：展示 model-routes.yaml
+*      真源路由表（default/五角色/分工 tasks）+ provider 下拉/模型下拉编辑（换 provider
+*      即刷新该家已注册模型清单，260828）+
+*      保存（POST /sandbar-admin/api/routes/save，宿主在 sandbar-admin-ui 插件，写前备份
+*      /tmp；保存即生效——运行时查表，下一个工单 agent spawn 用新表）。
+* 所有写操作走宿主半（../node.ts）挂在 dsh webServer 上的 /sandbar-providers/api/*；
+* 路由表读写走 sandbar-admin-ui 的 /sandbar-admin/api/routes（同源，M13① 保留的 API）。
+*
+* 【inject 收窄史（t260916-26）】曾声明 `inject = ['slots','conversationViews']`；
+* dsh 0.1.5 起 conversationViews 服务随 dsh-client-runtime 整包移除，声明即
+* 永久 pending（UI 报 Failed to load plugins）。现改从 ./inject-contract 导入
+* CLIENT_INJECT（=['slots']，双版本稳定白名单），同一 bundle 在 0.1.1/0.1.5
+* 都能激活；本插件无页签注册行为（apply 空操作），收窄零行为差异。
+*/
+const CSS$3 = `
+.syp-root{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  background:#f6f8fa;color:#1f2328;min-height:100%;box-sizing:border-box;padding:20px 24px 32px;
+  display:flex;flex-direction:column;gap:16px;font-size:13px;line-height:1.55}
+.syp-head{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid #d0d7de;padding-bottom:12px}
+.syp-title{font-size:20px;font-weight:600;color:#1f2328}
+.syp-sub{font-size:12px;color:#57606a}
+.syp-banner{display:flex;align-items:center;gap:10px;border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:10px 14px;flex-wrap:wrap}
+.syp-banner-k{color:#57606a}
+.syp-banner-v{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.syp-err{background:#ffebe9;border:1px solid #ff9b9b;color:#cf222e;border-radius:6px;padding:8px 12px;font-size:12px;white-space:pre-wrap}
+.syp-ok{background:#dafbe1;border:1px solid #7dd9a0;color:#116329;border-radius:6px;padding:8px 12px;font-size:12px}
+.syp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.syp-btn{font:inherit;font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer;border:1px solid #d0d7de;background:#fff;color:#1f2328;transition:background .12s}
+.syp-btn:hover{background:#f6f8fa}
+.syp-btn:disabled{opacity:.45;cursor:default}
+.syp-btn-primary{border-color:#0969da;background:#0969da;color:#fff;font-weight:600}
+.syp-btn-primary:hover{background:#0857b6}
+.syp-btn-danger{border-color:#ff9b9b;color:#cf222e;background:#ffebe9}
+.syp-btn-green{border-color:#7dd9a0;color:#1a7f37;background:#dafbe1}
+.syp-icon-btn{font:inherit;font-size:13px;padding:2px 8px;border-radius:6px;cursor:pointer;border:1px solid #d0d7de;background:#fff;color:#57606a}
+.syp-icon-btn:hover{background:#f6f8fa}
+.syp-icon-btn:disabled{opacity:.35;cursor:default}
+.syp-list{display:flex;flex-direction:column;gap:8px}
+.syp-row{display:flex;align-items:flex-start;gap:10px;border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:10px 12px;transition:box-shadow .12s}
+.syp-row[data-current=true]{border-color:#0969da;box-shadow:inset 3px 0 0 #0969da;background:#f0f6ff}
+.syp-row[data-drag=true]{opacity:.5;border-style:dashed}
+.syp-row-grip{cursor:grab;color:#8c959f;user-select:none;font-size:16px;line-height:1;padding:4px 2px}
+.syp-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.syp-row-line1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.syp-row-name{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.syp-badge{font-size:11px;border-radius:6px;padding:1px 8px;font-weight:500}
+.syp-badge[data-kind=external]{background:#fff8c5;color:#7d4e00}
+.syp-badge[data-kind=pi-ai]{background:#dafbe1;color:#116329}
+.syp-badge[data-kind=preset]{background:#ddf4ff;color:#0550ae}
+.syp-badge[data-cur=true]{background:#0969da;color:#fff}
+.syp-row-line2{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;color:#57606a}
+.syp-kv{display:inline-flex;gap:4px}
+.syp-kv b{color:#8c959f;font-weight:500}
+.syp-row-line3{display:flex;align-items:center;gap:8px}
+.syp-note-label{font-size:11px;color:#8c959f;white-space:nowrap}
+.syp-note-input{font:inherit;font-size:12px;flex:1;border:1px solid #d0d7de;border-radius:6px;padding:4px 8px;color:#1f2328;background:#fff}
+.syp-note-input:focus{outline:none;border-color:#0969da}
+.syp-row-ops{display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:none}
+.syp-row-ops .syp-btn{white-space:nowrap}
+.syp-form{border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.syp-form-title{font-size:14px;font-weight:600;color:#1f2328}
+.syp-field{display:flex;flex-direction:column;gap:4px}
+.syp-field label{font-size:12px;color:#57606a}
+.syp-field input,.syp-field select,.syp-field textarea{font:inherit;font-size:12px;border:1px solid #d0d7de;border-radius:6px;padding:6px 10px;color:#1f2328;background:#fff}
+.syp-field input:focus,.syp-field select:focus,.syp-field textarea:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.12)}
+.syp-field textarea{min-height:72px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.syp-hint{font-size:11px;color:#8c959f}
+.syp-modal{position:fixed;inset:0;background:rgba(31,35,40,.5);z-index:99;display:flex;align-items:center;justify-content:center;padding:24px}
+.syp-modal-box{background:#fff;border:1px solid #d0d7de;border-radius:10px;box-shadow:0 8px 32px rgba(31,35,40,.2);max-width:520px;width:100%;display:flex;flex-direction:column;gap:10px;padding:18px 20px}
+.syp-modal-title{font-size:15px;font-weight:600;color:#1f2328}
+.syp-empty{font-size:12px;color:#57606a;padding:12px 0}
+/* ── M13 路由表（syp-route-*）── */
+.syp-route-card{border:1px solid #d0d7de;border-radius:8px;background:#fff;padding:14px 16px;
+  display:flex;flex-direction:column;gap:10px}
+.syp-route-title{font-size:14px;font-weight:600;color:#1f2328;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.syp-route-note{font-size:11px;color:#57606a;line-height:1.7}
+.syp-route-redline{font-size:11px;color:#7d4e00;background:#fff8c5;border:1px solid #d4a72c;
+  border-radius:6px;padding:6px 10px;line-height:1.7}
+.syp-route-gen{font-size:12px;color:#116329;background:#dafbe1;border:1px solid #7dd9a0;
+  border-radius:6px;padding:8px 12px;line-height:1.7;white-space:pre-wrap}
+.syp-route-tbl{border:1px solid #eaeef2;border-radius:6px;overflow:hidden}
+.syp-route-row{display:grid;grid-template-columns:170px minmax(140px,1fr) minmax(140px,1fr) auto;
+  gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid #eaeef2}
+.syp-route-row:last-child{border-bottom:none}
+.syp-route-row[data-head=true]{background:#f6f8fa;font-size:11px;color:#8c959f;padding-top:5px;padding-bottom:5px}
+.syp-route-row[data-task=true]{padding-left:26px;background:#fbfcfe}
+.syp-route-label{font-size:12px;font-weight:600;color:#1f2328;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.syp-route-kind{font-size:11px;font-weight:400;color:#8c959f}
+.syp-route-cell{display:flex;flex-direction:column;gap:2px;min-width:0}
+.syp-route-cell select,.syp-route-cell input{font:inherit;font-size:12px;border:1px solid #d0d7de;
+  border-radius:6px;padding:4px 8px;color:#1f2328;background:#fff;width:100%;box-sizing:border-box}
+.syp-route-cell select:focus,.syp-route-cell input:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.12)}
+.syp-route-cell-hint{font-size:10px;color:#8c959f}
+.syp-route-cell-warn{font-size:10px;color:#b45309;display:block}
+.syp-route-eff{font-size:11px;color:#57606a;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}
+.syp-route-via{font-size:10px;color:#8c959f;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.syp-route-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.syp-route-warn{font-size:11px;color:#9a6700;background:#fff8c5;border-radius:6px;padding:6px 10px;
+  margin:0;white-space:pre-wrap;line-height:1.6}
+`;
+const CSS_TAG_ID$1 = "sandbar-providers/ProvidersSection.css";
+if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID$1) + "]") === null) {
+	const tag = document.createElement("style");
+	tag.dataset.plugin = "sandbar-providers";
+	tag.dataset.pluginCss = CSS_TAG_ID$1;
+	tag.textContent = CSS$3;
+	document.head.appendChild(tag);
+}
+const API$1 = "/sandbar-providers/api";
+/** 多项目化（260823）：路由表两条 URL（/sandbar-admin/api/routes*，按项目主目录解析
+*  model-routes.yaml）统一拼 ?project=；provider 管理（/sandbar-providers/api/*）是
+*  dsh 全局设施，不分流。
+*  260826 修：project 从模块级持有量改为纯函数入参——旧写法靠 ProvidersSection 的
+*  effect 落值，但 React 挂载时子组件 effect 先于父组件执行，RoutesTableSection
+*  首次 load 永远拿到空 project → 宿主 400「缺 project 参数」。prop 渲染期即有值，
+*  不依赖 effect 顺序。 */
+function routesUrl(path, projectKey) {
+	if (!projectKey) return path;
+	return path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(projectKey);
+}
+async function apiGet$1(path) {
+	return (await fetch(path)).json();
+}
+async function apiPost$1(path, body) {
+	return (await fetch(path, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body ?? {})
+	})).json();
+}
+const KIND_LABEL$1 = {
+	"pi-ai": "llm-pi-ai 路由",
+	external: "官方 deepseek 适配器",
+	preset: "预置（未添加）"
+};
+/** 「手填…」select 选项哨兵值：与真实模型 id 冲突面极小（模型 id 不会长这样）。 */
+const HAND_OPT = "__hand__";
+/**
+* 模型 id 单元。provider 有已注册清单 → 渲染真 <select>（整单随 provider 刷新）；
+* 清单为空或选了「手填…」→ 自由输入 + datalist 兜底（catalog 滞后的新模型仍可手输）。
+*
+* 为什么不用 datalist 当主下拉：datalist 的候选会被输入框现值过滤（框里留着上一家的
+* 模型 id 时，下拉看起来永远是空的/旧的），WebKit 还常不随重渲染刷新候选——260828
+* 反馈「选了 provider 模型列表不刷新」的根因。真 select 没有这两毛病。
+* 调用方用 key={provider id} 挂载：换 provider 即重挂，手填态自动退回下拉。
+*/
+function ModelIdCell({ pid, models, value, onChange, listId }) {
+	const [hand, setHand] = (0, react.useState)(false);
+	if (hand || models.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+		/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+			value,
+			list: models.length > 0 ? listId : void 0,
+			placeholder: "模型 id（手填）",
+			onChange: (e) => onChange(e.target.value)
+		}),
+		models.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("datalist", {
+			id: listId,
+			children: models.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", { value: m }, m))
+		}),
+		models.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+			type: "button",
+			className: "syp-btn",
+			onClick: () => setHand(false),
+			children: [
+				"回 ",
+				pid,
+				" 清单下拉"
+			]
+		})
+	] });
+	const known = models.includes(value);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+		value: known ? value : HAND_OPT,
+		onChange: (e) => {
+			if (e.target.value === HAND_OPT) {
+				setHand(true);
+				return;
+			}
+			onChange(e.target.value);
+		},
+		children: [
+			!known && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+				value,
+				children: value === "" ? "（未设）" : `${value}（未注册）`
+			}),
+			models.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+				value: m,
+				children: m
+			}, m)),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+				value: HAND_OPT,
+				children: "（手填…）"
+			})
+		]
+	});
+}
+function ProvidersSection({ projectKey }) {
+	const [data, setData] = (0, react.useState)(void 0);
+	const [error, setError] = (0, react.useState)("");
+	const [busy, setBusy] = (0, react.useState)(false);
+	const [msg, setMsg] = (0, react.useState)("");
+	const [showForm, setShowForm] = (0, react.useState)(false);
+	const [dragId, setDragId] = (0, react.useState)(null);
+	const [noteDraft, setNoteDraft] = (0, react.useState)({});
+	const [fId, setFId] = (0, react.useState)("");
+	const [fDisplay, setFDisplay] = (0, react.useState)("");
+	const [fApi, setFApi] = (0, react.useState)("openai-completions");
+	const [fBase, setFBase] = (0, react.useState)("");
+	const [fKeyEnv, setFKeyEnv] = (0, react.useState)("");
+	const [fApiKey, setFApiKey] = (0, react.useState)("");
+	const [fModels, setFModels] = (0, react.useState)("");
+	const [fNote, setFNote] = (0, react.useState)("");
+	const [curId, setCurId] = (0, react.useState)(null);
+	const [curModel, setCurModel] = (0, react.useState)("");
+	const [curRe, setCurRe] = (0, react.useState)("");
+	async function reload() {
+		try {
+			const d = await apiGet$1(`${API$1}/state`);
+			if (d?.ok !== true) throw new Error(d?.error ?? "加载失败");
+			setData(d.result);
+			setError("");
+		} catch (err) {
+			setError(String(err instanceof Error ? err.message : err));
+		}
+	}
+	(0, react.useEffect)(() => {
+		reload();
+	}, []);
+	async function post(path, body, okMsg) {
+		setBusy(true);
+		setMsg("");
+		try {
+			const r = await apiPost$1(path, body);
+			if (r?.ok !== true) {
+				setMsg(`失败：${r?.error ?? "未知错误"}`);
+				return false;
+			}
+			setMsg(okMsg);
+			await reload();
+			return true;
+		} catch (err) {
+			setMsg(`请求失败：${String(err instanceof Error ? err.message : err)}`);
+			return false;
+		} finally {
+			setBusy(false);
+		}
+	}
+	function fillScnet() {
+		const p = data?.scnetPreset;
+		if (!p) return;
+		setFId(p.id);
+		setFDisplay(p.displayName);
+		setFApi(p.api);
+		setFBase(p.baseURL);
+		setFKeyEnv(p.apiKeyEnv);
+		setFApiKey("");
+		setFModels(Array.isArray(p.models) ? p.models.join("\n") : "");
+		setFNote("");
+	}
+	async function submitAdd() {
+		const models = fModels.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+		if (await post(`${API$1}/add-provider`, {
+			id: fId,
+			displayName: fDisplay,
+			api: fApi,
+			baseURL: fBase,
+			apiKeyEnv: fKeyEnv,
+			apiKey: fApiKey,
+			models,
+			note: fNote
+		}, `已添加 provider「${fId.trim()}」到 llm-pi-ai.providers${fApiKey.trim() !== "" ? `，key 已存入 ${fKeyEnv.trim()}` : ""}`)) {
+			setShowForm(false);
+			setFId("");
+			setFDisplay("");
+			setFApi("openai-completions");
+			setFBase("");
+			setFKeyEnv("");
+			setFApiKey("");
+			setFModels("");
+			setFNote("");
+		}
+	}
+	function openSetCurrent(p) {
+		setCurId(p.id);
+		setCurModel(p.isCurrent ? p.currentModel : p.models[0] ?? "");
+		setCurRe(p.isCurrent ? data?.current.reasoningEffort ?? "" : "");
+	}
+	async function submitSetCurrent() {
+		if (!curId) return;
+		if (await post(`${API$1}/set-current`, {
+			provider: curId,
+			model: curModel,
+			reasoningEffort: curRe
+		}, `已把 agent-default-model 切到 ${curId} / ${curModel.trim()}`)) setCurId(null);
+	}
+	async function saveNote(p) {
+		const note = noteDraft[p.id] ?? p.note;
+		await post(`${API$1}/update-note`, {
+			id: p.id,
+			note
+		}, `已保存「${p.id}」计费说明`);
+	}
+	async function reorder(order) {
+		setBusy(true);
+		setMsg("");
+		try {
+			const r = await apiPost$1(`${API$1}/reorder`, { order });
+			if (r?.ok !== true) {
+				setMsg(`失败：${r?.error ?? "未知错误"}`);
+				return;
+			}
+			setMsg("优先级已保存");
+			await reload();
+		} catch (err) {
+			setMsg(`请求失败：${String(err instanceof Error ? err.message : err)}`);
+		} finally {
+			setBusy(false);
+		}
+	}
+	function move(id, delta) {
+		const list = data?.providers.map((p) => p.id) ?? [];
+		const i = list.indexOf(id);
+		const j = i + delta;
+		if (i < 0 || j < 0 || j >= list.length) return;
+		const next = [...list];
+		const tmp = next[i];
+		next[i] = next[j];
+		next[j] = tmp;
+		reorder(next);
+	}
+	function onDrop(id) {
+		const list = data?.providers.map((p) => p.id) ?? [];
+		const from = dragId;
+		const to = id;
+		setDragId(null);
+		if (!from || from === to) return;
+		const next = list.filter((x) => x !== from);
+		const idx = next.indexOf(to);
+		next.splice(idx, 0, from);
+		reorder(next);
+	}
+	const rows = data?.providers ?? [];
+	const modelListForCurrent = (0, react.useMemo)(() => curId ? rows.find((p) => p.id === curId)?.models ?? [] : [], [curId, rows]);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "syp-root",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-head",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "syp-title",
+					children: "模 型"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					className: "syp-sub",
+					children: ["LLM provider 管理与优先级（手动排序 + 一键切换）· 写 ", data?.settingsPath ?? "settings.yaml"]
+				})]
+			}),
+			data && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-banner",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "syp-banner-k",
+						children: "当前 agent-default-model："
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "syp-banner-v",
+						children: [
+							data.current.provider,
+							" / ",
+							data.current.model
+						]
+					}),
+					data.current.reasoningEffort && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "syp-badge",
+						"data-cur": true,
+						children: data.current.reasoningEffort
+					})
+				]
+			}),
+			error !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-err",
+				children: [
+					error,
+					"\n",
+					"（模型管理 API 未挂载？headless profile 无 webServer。）"
+				]
+			}),
+			msg !== "" && (msg.startsWith("失败") || msg.startsWith("请求失败") ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "syp-err",
+				children: msg
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "syp-ok",
+				children: msg
+			})),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-actions",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					className: "syp-btn",
+					disabled: busy,
+					onClick: () => {
+						reload();
+					},
+					children: "刷 新"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					className: "syp-btn syp-btn-primary",
+					onClick: () => setShowForm((v) => !v),
+					children: showForm ? "收起添加表单" : "+ 添加 provider"
+				})]
+			}),
+			showForm && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-form",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "syp-form-title",
+						children: "添加 provider（写 settings.yaml 的 llm-pi-ai.providers；坏 provider 会被 dry-run 拒绝，绝不落盘）"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-actions",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "syp-btn",
+							onClick: fillScnet,
+							title: data?.scnetPreset?.description,
+							children: "scnet 预置一键填表"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "syp-hint",
+							children: data?.scnetPreset?.description ?? ""
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "provider id（route key，如 scnet / my-gateway）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							value: fId,
+							onChange: (e) => setFId(e.target.value),
+							placeholder: "scnet"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "显示名（可选）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							value: fDisplay,
+							onChange: (e) => setFDisplay(e.target.value),
+							placeholder: "SCNet"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "协议 api" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+							value: fApi,
+							onChange: (e) => setFApi(e.target.value),
+							children: (data?.protocols ?? [
+								"openai-completions",
+								"openai-responses",
+								"anthropic-messages"
+							]).map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+								value: p,
+								children: p
+							}, p))
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "baseURL" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							value: fBase,
+							onChange: (e) => setFBase(e.target.value),
+							placeholder: "https://api.scnet.cn/api/llm/v1"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "key 环境变量 apiKeyEnv（key 直填时即存入该名下）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							value: fKeyEnv,
+							onChange: (e) => setFKeyEnv(e.target.value),
+							placeholder: "SCNET_API_KEY"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "API key 直填（可选；留空则只登记 apiKeyEnv，不写任何 key）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							type: "password",
+							value: fApiKey,
+							onChange: (e) => setFApiKey(e.target.value),
+							autoComplete: "off",
+							placeholder: "sk-…（存入 $DSH_HOME/.credentials.yaml，0600）"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "模型 id 列表（每行一个；scnet 预置会预填 14 个模型 id，可增删）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+							value: fModels,
+							onChange: (e) => setFModels(e.target.value),
+							placeholder: "GLM-5.2\nGLM-5\n…"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-field",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "计费档说明（可选）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							value: fNote,
+							onChange: (e) => setFNote(e.target.value),
+							placeholder: "如：¥0.001/1K tokens"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "syp-actions",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							className: "syp-btn syp-btn-green",
+							disabled: busy,
+							onClick: () => {
+								submitAdd();
+							},
+							children: "添 加"
+						})
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-list",
+				children: [rows.map((p, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "syp-row",
+					"data-current": p.isCurrent,
+					"data-drag": dragId === p.id,
+					draggable: !busy,
+					onDragStart: () => setDragId(p.id),
+					onDragOver: (e) => e.preventDefault(),
+					onDrop: (e) => {
+						e.preventDefault();
+						onDrop(p.id);
+					},
+					onDragEnd: () => setDragId(null),
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "syp-row-grip",
+							title: "拖拽排序",
+							children: "⠿"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "syp-row-main",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "syp-row-line1",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "syp-row-name",
+											children: p.id
+										}),
+										p.displayName && p.displayName !== p.id && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "syp-sub",
+											children: p.displayName
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "syp-badge",
+											"data-kind": p.kind,
+											children: KIND_LABEL$1[p.kind] ?? p.kind
+										}),
+										p.isCurrent && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "syp-badge",
+											"data-cur": true,
+											children: "当前"
+										})
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "syp-row-line2",
+									children: [
+										p.api && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "syp-kv",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "协议" }), p.api]
+										}),
+										p.baseURL && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "syp-kv",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "baseURL" }), p.baseURL]
+										}),
+										p.apiKeyEnv && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "syp-kv",
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "key" }),
+												p.apiKeyEnv,
+												p.keySet === true ? "（已存）" : p.keySet === false ? "（未存）" : ""
+											]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "syp-kv",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "模型" }), p.models.length > 0 ? `${p.models.length} 个` : "—"]
+										}),
+										p.description && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "syp-kv",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: "备注" }), p.description]
+										})
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "syp-row-line3",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "syp-note-label",
+											children: "计费说明"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+											className: "syp-note-input",
+											value: noteDraft[p.id] ?? p.note,
+											placeholder: "（可编辑，如计费档位/价格）",
+											onChange: (e) => setNoteDraft((v) => ({
+												...v,
+												[p.id]: e.target.value
+											}))
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: "syp-btn",
+											disabled: busy,
+											onClick: () => {
+												saveNote(p);
+											},
+											children: "保存说明"
+										})
+									]
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "syp-row-ops",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "syp-actions",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "syp-icon-btn",
+										disabled: busy || i === 0,
+										title: "上移",
+										onClick: () => move(p.id, -1),
+										children: "↑"
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "syp-icon-btn",
+										disabled: busy || i === rows.length - 1,
+										title: "下移",
+										onClick: () => move(p.id, 1),
+										children: "↓"
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "syp-btn syp-btn-primary",
+									disabled: busy,
+									onClick: () => openSetCurrent(p),
+									children: "设为当前"
+								}),
+								p.kind === "preset" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "syp-btn syp-btn-green",
+									disabled: busy,
+									onClick: () => {
+										fillScnet();
+										setShowForm(true);
+									},
+									children: "添加"
+								}),
+								p.kind === "pi-ai" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									className: "syp-btn syp-btn-danger",
+									disabled: busy,
+									onClick: () => {
+										if (window.confirm(`删除 provider「${p.id}」（从 llm-pi-ai.providers 移除）？`)) post(`${API$1}/delete-provider`, { id: p.id }, `已删除「${p.id}」`);
+									},
+									children: "删除"
+								})
+							]
+						})
+					]
+				}, p.id)), rows.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "syp-empty",
+					children: "没有 provider（加载中或 API 未挂载）。"
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RoutesTableSection, {
+				providers: rows,
+				projectKey
+			}),
+			curId !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "syp-modal",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "syp-modal-box",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "syp-modal-title",
+							children: ["设为当前 — ", curId]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "syp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [
+								"模型 id（",
+								modelListForCurrent.length > 0 ? `${modelListForCurrent.length} 个已注册模型下拉可选，新模型选「手填…」` : "手填模型 id",
+								"）"
+							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
+								pid: curId,
+								models: modelListForCurrent,
+								value: curModel,
+								onChange: setCurModel,
+								listId: "syp-model-list"
+							}, curId)]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "syp-field",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("label", { children: "reasoningEffort（可选，留空则省略；仅当目标适配器支持时有效）" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								value: curRe,
+								onChange: (e) => setCurRe(e.target.value),
+								placeholder: "low / medium / high"
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "syp-actions",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "syp-btn syp-btn-primary",
+								disabled: busy || !curModel.trim(),
+								onClick: () => {
+									submitSetCurrent();
+								},
+								children: "确认切换"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								className: "syp-btn",
+								disabled: busy,
+								onClick: () => setCurId(null),
+								children: "取 消"
+							})]
+						})
+					]
+				})
+			})
+		]
+	});
+}
+/** 「路由表」分区：展示当前路由表（只读真源）+ 编辑 provider/model + 保存
+*  （保存即生效——运行时查表，下一个工单 agent spawn 用新表）。providers 列表
+*  （含模型 id）来自本插件 /state，供下拉用。 */
+function RoutesTableSection({ providers, projectKey }) {
+	const [view, setView] = (0, react.useState)(void 0);
+	const [draft, setDraft] = (0, react.useState)(void 0);
+	const [error, setError] = (0, react.useState)("");
+	const [busy, setBusy] = (0, react.useState)(false);
+	const [msg, setMsg] = (0, react.useState)("");
+	const [saved, setSaved] = (0, react.useState)(false);
+	async function load() {
+		setError("");
+		try {
+			const data = await apiGet$1(routesUrl("/sandbar-admin/api/routes", projectKey ?? ""));
+			if (data?.ok !== true) throw new Error(data?.error ?? "模型路由读取失败");
+			const v = data.result;
+			setView(v);
+			setDraft(draftFromView(v));
+			setSaved(false);
+		} catch (err) {
+			setError(String(err instanceof Error ? err.message : err));
+		}
+	}
+	(0, react.useEffect)(() => {
+		setView(void 0);
+		setDraft(void 0);
+		setError("");
+		if (projectKey) load();
+	}, [projectKey]);
+	function setRoleField(rid, field, value) {
+		setDraft((d) => d === void 0 ? d : {
+			...d,
+			roles: {
+				...d.roles,
+				[rid]: {
+					...d.roles[rid],
+					[field]: value
+				}
+			}
+		});
+	}
+	function setTaskField(rid, kind, field, value) {
+		setDraft((d) => d === void 0 ? d : {
+			...d,
+			roles: {
+				...d.roles,
+				[rid]: {
+					...d.roles[rid],
+					tasks: {
+						...d.roles[rid].tasks,
+						[kind]: {
+							...d.roles[rid].tasks[kind],
+							[field]: value
+						}
+					}
+				}
+			}
+		});
+	}
+	async function save() {
+		if (draft === void 0) return;
+		if (!window.confirm("保存将改写项目声明 paths.model_routes 指向的路由表（真源；未声明时落仓内 server/model-routes.yaml，写前备份 /tmp）。\n保存即生效：路由表是运行时查表，下一个工单 agent spawn 时就按新表走，无需任何生成/重启步骤。\n确认保存路由表？")) return;
+		setBusy(true);
+		setMsg("");
+		setSaved(false);
+		try {
+			const r = await apiPost$1(routesUrl("/sandbar-admin/api/routes/save", projectKey ?? ""), { table: draftToPayload(draft) });
+			if (r?.ok !== true) {
+				setMsg(`保存失败：${r?.error ?? "未知错误"}`);
+				return;
+			}
+			const res = r.result ?? {};
+			setMsg(res.changed?.length > 0 ? `已保存 ${res.changed.length} 处变更（${res.changed.join("、")}）到 ${res.routes_file}` : "路由表无变更（未写文件）");
+			setSaved(true);
+			await load();
+		} catch (err) {
+			setMsg(`请求失败：${String(err instanceof Error ? err.message : err)}`);
+		} finally {
+			setBusy(false);
+		}
+	}
+	if (!projectKey) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "syp-route-card",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "syp-route-title",
+			children: "路 由 表"
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "syp-sub",
+			children: "从左侧项目行点 🔀 图标打开该项目的模型路由。"
+		})]
+	});
+	if (error !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "syp-route-card",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "syp-route-title",
+			children: "路 由 表"
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "syp-err",
+			children: [
+				error,
+				"\n",
+				"（/sandbar-admin/api/routes 返回错误——按上面文案排查：缺参/未知项目=调用问题；表缺失/解析失败=声明指向的路由表（或仓内兜底表）问题。）"
+			]
+		})]
+	});
+	if (view === void 0 || draft === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "syp-route-card",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "syp-route-title",
+			children: "路 由 表"
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "syp-empty",
+			children: "加载路由表…"
+		})]
+	});
+	const modelsOf = (pid) => providers.find((p) => p.id === pid)?.models ?? [];
+	/** 换 provider 时对齐 model：切到「继承/不设」清空；原 model 不在新家清单 → 取新家
+	*  首个已注册模型（都没有则清空）。避免留下「A 家 provider + B 家 model」的错配，也
+	*  让模型下拉随 provider 切换即见新家清单。 */
+	function snapModel(curModel, newPid) {
+		if (newPid === "") return "";
+		const ms = modelsOf(newPid);
+		if (ms.includes(curModel)) return curModel;
+		return ms[0] ?? "";
+	}
+	/** 未注册提示：值非空、该家有已知清单、值不在清单 → 提示（不硬拦——catalog 滞后的
+	*  新模型仍需手输入口，但把「模型 ref 不许发明」红线摆到眼前，260826 zai/k3 教训）。 */
+	const UnregHint = ({ pid, model }) => {
+		const ms = modelsOf(pid);
+		if (model === "" || ms.length === 0 || ms.includes(model)) return null;
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+			className: "syp-route-cell-warn",
+			children: [
+				"⚠ 不在 ",
+				pid,
+				" 已注册清单（",
+				ms.length,
+				" 个），保存前确认已实测"
+			]
+		});
+	};
+	const effOf = (eff) => eff !== null ? `${eff.provider}/${eff.model}` : "未设（继承 profile 默认）";
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "syp-route-card",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-route-title",
+				children: ["路 由 表", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					className: "syp-hint",
+					children: [
+						"真源 ",
+						view.routes_file,
+						" · 工单 agent 用哪个模型（运行时查表，下次 spawn 生效）"
+					]
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-route-redline",
+				children: [
+					"改表红线：保存直接改写声明指向的路由表（未声明时落仓内兜底表；写前备份 /tmp）；模型 ref 不许发明——只用下方 provider 下拉里实证存在的 provider 及其模型 id。保存后",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: "下一个工单 agent 启动即生效" }),
+					"，无需任何生成/重启步骤。"
+				]
+			}),
+			view.warnings.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
+				className: "syp-route-warn",
+				children: view.warnings.join("\n")
+			}),
+			saved && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-route-gen",
+				children: [
+					"✅ 路由表已写入 ",
+					view.routes_file,
+					"。下一个工单 agent 启动即按新表路由（运行时查表，无需任何生成/重启步骤）。"
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-route-tbl",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-route-row",
+						"data-head": true,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "条目" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "provider" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "model" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "当前查表结果" })
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-route-row",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-label",
+								children: ["default ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "syp-route-kind",
+									children: "兜底"
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "syp-route-cell",
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+									value: draft.default.provider,
+									onChange: (e) => setDraft((d) => {
+										if (d === void 0) return d;
+										const provider = e.target.value;
+										return {
+											...d,
+											default: {
+												provider,
+												model: snapModel(d.default.model, provider)
+											}
+										};
+									}),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "",
+										children: "（不设 → 全部不烘焙）"
+									}), providers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: p.id,
+										children: p.id
+									}, p.id))]
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-cell",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
+									pid: draft.default.provider || "（未设 provider）",
+									models: modelsOf(draft.default.provider),
+									value: draft.default.model,
+									onChange: (v) => setDraft((d) => d === void 0 ? d : {
+										...d,
+										default: {
+											...d.default,
+											model: v
+										}
+									}),
+									listId: "syp-ml-default"
+								}, draft.default.provider), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnregHint, {
+									pid: draft.default.provider,
+									model: draft.default.model
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-cell",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "syp-route-eff",
+									children: effOf(view.default)
+								}), view.default !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "syp-route-via",
+									children: ["via ", view.default.via]
+								})]
+							})
+						]
+					}),
+					view.roles.map((role) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-route-row",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-label",
+								children: [
+									role.display,
+									" ",
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "syp-route-kind",
+										children: role.role
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "syp-route-cell",
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+									value: draft.roles[role.role].provider,
+									onChange: (e) => setDraft((d) => {
+										if (d === void 0) return d;
+										const provider = e.target.value;
+										const r = d.roles[role.role];
+										return {
+											...d,
+											roles: {
+												...d.roles,
+												[role.role]: {
+													...r,
+													provider,
+													model: snapModel(r.model, provider)
+												}
+											}
+										};
+									}),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "",
+										children: "（继承 default）"
+									}), providers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: p.id,
+										children: p.id
+									}, p.id))]
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-cell",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
+										pid: draft.roles[role.role].provider || "（未设 provider）",
+										models: modelsOf(draft.roles[role.role].provider),
+										value: draft.roles[role.role].model,
+										onChange: (v) => setRoleField(role.role, "model", v),
+										listId: `syp-ml-${role.role}`
+									}, draft.roles[role.role].provider),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnregHint, {
+										pid: draft.roles[role.role].provider,
+										model: draft.roles[role.role].model
+									}),
+									modelsOf(draft.roles[role.role].provider).length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "syp-route-cell-hint",
+										children: [
+											"已注册 ",
+											modelsOf(draft.roles[role.role].provider).length,
+											" 个模型，下拉直选"
+										]
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-cell",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "syp-route-eff",
+									children: effOf(role.effective)
+								}), role.effective !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "syp-route-via",
+									children: ["via ", role.effective.via]
+								})]
+							})
+						]
+					}), role.tasks.map((task) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "syp-route-row",
+						"data-task": true,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-label",
+								children: [
+									task.display,
+									"分工 ",
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "syp-route-kind",
+										children: task.kind
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "syp-route-cell",
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+									value: draft.roles[role.role].tasks[task.kind].provider,
+									onChange: (e) => setDraft((d) => {
+										if (d === void 0) return d;
+										const provider = e.target.value;
+										const t = d.roles[role.role].tasks[task.kind];
+										const tasks = {
+											...d.roles[role.role].tasks,
+											[task.kind]: {
+												...t,
+												provider,
+												model: snapModel(t.model, provider)
+											}
+										};
+										const r = d.roles[role.role];
+										return {
+											...d,
+											roles: {
+												...d.roles,
+												[role.role]: {
+													...r,
+													tasks
+												}
+											}
+										};
+									}),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "",
+										children: "（继承 default）"
+									}), providers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: p.id,
+										children: p.id
+									}, p.id))]
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-cell",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ModelIdCell, {
+									pid: draft.roles[role.role].tasks[task.kind].provider || "（未设 provider）",
+									models: modelsOf(draft.roles[role.role].tasks[task.kind].provider),
+									value: draft.roles[role.role].tasks[task.kind].model,
+									onChange: (v) => setTaskField(role.role, task.kind, "model", v),
+									listId: `syp-ml-${role.role}-${task.kind}`
+								}, `${draft.roles[role.role].provider}-${task.kind}`), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(UnregHint, {
+									pid: draft.roles[role.role].tasks[task.kind].provider,
+									model: draft.roles[role.role].tasks[task.kind].model
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "syp-route-cell",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "syp-route-eff",
+									children: effOf(task.effective)
+								}), task.effective !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "syp-route-via",
+									children: ["via ", task.effective.via]
+								})]
+							})
+						]
+					}, task.kind))] }, role.role))
+				]
+			}),
+			msg !== "" && (msg.startsWith("保存失败") || msg.startsWith("请求失败") ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "syp-err",
+				children: msg
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "syp-ok",
+				children: msg
+			})),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "syp-route-actions",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "syp-btn syp-btn-primary",
+						disabled: busy,
+						onClick: () => {
+							save();
+						},
+						children: busy ? "保存中…" : "保存路由表"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "syp-btn",
+						disabled: busy,
+						onClick: () => {
+							load();
+						},
+						children: "放弃修改（重新加载）"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "syp-hint",
+						children: "查表规则：(role, task_kind) → tasks.<kind> → roles.<role> → default；条目留空即向上落兜底。"
+					})
+				]
+			})
+		]
+	});
+}
 /** 宿主 → 面板的结果回执（面板只渲染一行 STE 文案，不做轮询/重试/状态条）。 */
 const OPEN_SESSION_RESULT_MSG_TYPE = "sandbar-executor-panel:open-session-result";
 function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
@@ -8043,6 +8004,10 @@ function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 		detail: "checking…"
 	});
 	const frameRef = (0, react.useRef)(null);
+	const [face, setFace] = (0, react.useState)(null);
+	const [settingsStep, setSettingsStep] = (0, react.useState)("settings");
+	const [projectEntry, setProjectEntry] = (0, react.useState)(null);
+	const [entryError, setEntryError] = (0, react.useState)("");
 	(0, react.useEffect)(() => {
 		const ac = new AbortController();
 		setPanelState({
@@ -8068,6 +8033,33 @@ function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 		return () => ac.abort();
 	}, [projectKey]);
 	(0, react.useEffect)(() => {
+		setFace(null);
+		setSettingsStep("settings");
+		setProjectEntry(null);
+		setEntryError("");
+	}, [projectKey]);
+	(0, react.useEffect)(() => {
+		if (face !== "project-settings") return;
+		const ac = new AbortController();
+		setProjectEntry(null);
+		setEntryError("");
+		fetch("/sandbar-workbench/api/wf/projects", { signal: ac.signal }).then((r) => r.json()).then((pr) => {
+			if (ac.signal.aborted) return;
+			const entry = (pr?.result?.projects ?? []).find((p) => p && p.key === projectKey) ?? null;
+			if (entry) setProjectEntry(entry);
+			else setEntryError(`Project ${projectKey} is not in the registry — the settings face cannot open.`);
+		}).catch((e) => {
+			if (ac.signal.aborted) return;
+			setEntryError(`The project registry could not be reached: ${e instanceof Error ? e.message : String(e)}`);
+		});
+		return () => ac.abort();
+	}, [face, projectKey]);
+	const openTicketWins = (ticketId) => {
+		setFace(null);
+		setSettingsStep("settings");
+		if (openTicketOverlay) openTicketOverlay(ticketId);
+	};
+	(0, react.useEffect)(() => {
 		const onMessage = (e) => {
 			if (e.origin !== window.location.origin) return;
 			const frame = frameRef.current;
@@ -8083,37 +8075,132 @@ function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 				return;
 			}
 			if (d.type === "sandbar-executor-panel:open-ticket") {
-				if (typeof d.ticketId === "string" && d.ticketId !== "" && openTicketOverlay) openTicketOverlay(d.ticketId);
+				if (typeof d.ticketId === "string" && d.ticketId !== "" && openTicketOverlay) openTicketWins(d.ticketId);
+				return;
+			}
+			if (d.type === "sandbar-executor-panel:open-face") {
+				const f = panelFaceFromMessage(d, projectKey);
+				if (f) {
+					setSettingsStep("settings");
+					setFace(f);
+				}
 				return;
 			}
 		};
 		window.addEventListener("message", onMessage);
 		return () => window.removeEventListener("message", onMessage);
-	}, [openExecutorSession, openTicketOverlay]);
+	}, [
+		openExecutorSession,
+		openTicketOverlay,
+		openTicketWins,
+		projectKey
+	]);
 	const theme = consoleThemeName();
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-executor-view",
 		"data-wb-executor-view": "",
 		"data-project": projectKey,
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: EXECUTOR_CSS }), panelState.ok ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
-			ref: frameRef,
-			"data-wb-executor-frame": "",
-			className: "wb-executor-frame",
-			title: `Executor panel — ${projectKey}`,
-			src: executorPanelUrl(projectKey, theme)
-		}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-executor-note",
-			role: "alert",
-			"data-wb-executor-note": "",
-			children: ["Executor panel unavailable for this project. ", panelState.detail]
-		})]
+		"data-face": face ?? "",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: EXECUTOR_CSS }),
+			panelState.ok ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+				ref: frameRef,
+				"data-wb-executor-frame": "",
+				className: "wb-executor-frame",
+				title: `Executor panel — ${projectKey}`,
+				src: executorPanelUrl(projectKey, theme)
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-executor-note",
+				role: "alert",
+				"data-wb-executor-note": "",
+				children: ["Executor panel unavailable for this project. ", panelState.detail]
+			}),
+			face === "routes" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-face-overlay",
+				"data-wb-face-overlay": "",
+				"data-face": "routes",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-face-head",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-face-back",
+						"data-wb-face-back": "",
+						onClick: () => {
+							setFace(null);
+							setSettingsStep("settings");
+						},
+						children: "Back to Settings"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-face-title",
+						children: "Model routes"
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-face-body",
+					"data-wb-face-body": "routes",
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProvidersSection, { projectKey })
+				})]
+			}),
+			face === "project-settings" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-face-overlay",
+				"data-wb-face-overlay": "",
+				"data-face": "project-settings",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-face-head",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-face-back",
+						"data-wb-face-back": "",
+						onClick: () => {
+							setFace(null);
+							setSettingsStep("settings");
+						},
+						children: "Back to Settings"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-face-title",
+						children: "Project settings"
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-face-body",
+					"data-wb-face-body": "project-settings",
+					children: projectEntry ? settingsStep === "settings" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSettingsModal, {
+						project: projectEntry,
+						onClose: () => {
+							setFace(null);
+							setSettingsStep("settings");
+						},
+						onRemove: () => setSettingsStep("remove")
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectRemoveModal, {
+						project: projectEntry,
+						onClose: () => setSettingsStep("settings"),
+						onRemoved: () => {
+							setFace(null);
+							setSettingsStep("settings");
+						}
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-executor-note",
+						role: "alert",
+						"data-wb-face-entry-error": "",
+						children: entryError || "Loading the project registry entry…"
+					})
+				})]
+			})
+		]
 	});
 }
 const EXECUTOR_CSS = `
-.wb-executor-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.wb-executor-view { display: flex; flex-direction: column; min-height: 0; height: 100%; position: relative; }
 .wb-executor-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .wb-executor-note { margin: 16px; padding: 12px 14px; border: 1px solid var(--dsw-derive-border, #444); border-radius: 8px;
   color: var(--dsw-derive-fg, #ccc); font-size: 13px; line-height: 1.5; max-width: 640px; }
+.wb-face-overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; min-height: 0;
+  background: var(--dsw-alias-bg-base, #fff); }
+.wb-face-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-derive-border, #e8ebef); }
+.wb-face-back { border: 1px solid var(--dsw-derive-border, #d0d7de); background: transparent; border-radius: 6px;
+  padding: 3px 10px; font-size: 12px; cursor: pointer; color: inherit; }
+.wb-face-title { font-size: 13px; font-weight: 600; color: inherit; }
+.wb-face-body { flex: 1; min-height: 0; overflow: auto; }
+.wb-face-body > .wb-pmod-overlay { position: static; background: transparent; padding: 12px; }
 `;
 //#endregion
 //#region src/host/inspection-face.ts
@@ -8366,8 +8453,11 @@ function inspectionDegradedNote(err) {
 *       （20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）；巡检行带
 *       类别徽标（INSPECTION_ROW_BADGE chip）一眼可辨数据来源。
 * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
-*       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
-*       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
+*       (since t261008-36 Model routes and Project settings open from the executor
+*       panel's Settings tab; the view registry carries only the WorkbenchSection
+*       overlay host, and executor-view.tsx owns ProvidersSection — index.tsx no
+*       longer injects it). EpicSection (this plugin, t260826-02: empty code =
+*       charter list, a code = detail face).
 *       260823 起它们不再占 chat 顶部页签。t260903-07 起：点工单只在中列开详情抽屉，
 *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
 *       未选项目时中列显占位（不自动选第一个项目——不造隐形缺省）。
@@ -8528,7 +8618,11 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
    截住 .wb-psess 会话行的点击，此形态整体退役）：行内常驻=工单+立项单两枚场景钉住的
    图标 + 一枚「More views」展开钮；其余三枚（文档/模型路由/项目设置）收进展开位，
    展开也在流内（行自身盒内，零绝对定位、零外溢命中面）；展开时入口段名字瞬态让位，
-   锚点行为不变。全部几何均 gen1 前同族：行高、列宽、命中区 26×26 冻结契约不动。 */
+   (expansion stays in flow; anchor behavior unchanged; the geometry contract of
+   gen1 times holds: row height, rail width, 26x26 hit area). t261008-36: the More-views toggle and both remaining icons retired wholesale —
+   Model routes and Project settings open from the executor panel's Settings tab
+   (one face, one home; no second door). The .wb-view-icons/.wb-view-icon styles
+   below stay as a neutral geometry contract with no consumer today. */
 .wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
@@ -8547,7 +8641,8 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
    3.43——透明度压不出 AA（0.55 时即便纯黑也只 4.75，实际墨色达不到）。本元素改走
    muted 墨色（极性自适应）：静息仍是弱化观感，两档都 ≥4.5，几何零改动。
    其余 view icon 不用文字字符（SVG），不受本规则影响。 */
-.wb-view-icon[data-wb-more-views] { opacity:1; color:var(--dsw-derive-muted,#57606a); }
+/* t261008-36: the More-views rest-state rule retired with the toggle —
+   no consumer remains (the affordance is gone from the project row). */
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
 .wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
   color:var(--dsw-derive-danger-border,#ff8183); background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
@@ -8660,7 +8755,6 @@ function WorkbenchSidebar(props) {
 	*  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
 	const [listNonce, setListNonce] = (0, react.useState)(0);
 	const [collapsed, setCollapsed] = (0, react.useState)({});
-	const [moreViews, setMoreViews] = (0, react.useState)({});
 	const [loading, setLoading] = (0, react.useState)(true);
 	const [modal, setModal] = (0, react.useState)(null);
 	/** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
@@ -8950,7 +9044,6 @@ function WorkbenchSidebar(props) {
 		inspectionSplit
 	]);
 	const Ws = views.overlay;
-	const Routes = views.routes;
 	if (!wide) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		ref: rootRef,
 		className: "wb-sb rail",
@@ -9094,56 +9187,6 @@ function WorkbenchSidebar(props) {
 												children: g.tickets.length || ""
 											})
 										]
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "wb-view-icons",
-										onClick: (e) => e.stopPropagation(),
-										children: [moreViews[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: `wb-view-icon ${rightView === "routes" && viewProject === g.project.key ? "active" : ""}`,
-											title: "Model Routes",
-											"aria-label": "Model Routes",
-											onClick: () => handleViewIcon(g.project.key, "routes"),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "routes" })
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-view-icon",
-											"data-wb-project-settings-entry": "",
-											title: "Project Settings",
-											"aria-label": "Project Settings",
-											onClick: () => {
-												setModal({
-													kind: "settings",
-													project: g.project
-												});
-											},
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectIcon, { name: "settings" })
-										})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-view-icon",
-											role: "button",
-											tabIndex: 0,
-											"data-wb-more-views": "",
-											"data-on": Boolean(moreViews[g.project.key]) || void 0,
-											title: moreViews[g.project.key] ? "Fewer views" : "More views",
-											"aria-label": moreViews[g.project.key] ? "Fewer views" : "More views",
-											onKeyDown: (e) => {
-												if (e.key === "Enter" || e.key === " ") setMoreViews((m) => ({
-													...m,
-													[g.project.key]: !m[g.project.key]
-												}));
-											},
-											onClick: () => setMoreViews((m) => ({
-												...m,
-												[g.project.key]: !m[g.project.key]
-											})),
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												"aria-hidden": "true",
-												style: {
-													fontSize: 13,
-													lineHeight: 1,
-													fontWeight: 700
-												},
-												children: "⋯"
-											})
-										})]
 									})
 								]
 							}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
@@ -9303,46 +9346,27 @@ function WorkbenchSidebar(props) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-right-content",
-						children: [
-							!viewProject && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "wb-placeholder",
-								children: [
-									"Open a project from the left (click a project name row to open its Executor panel,",
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
-									"or click a ticket row to open its detail overlay)."
-								]
-							}),
-							viewProject && rightView === "executor" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Ws, {
-								focusId: selectedId || void 0,
-								focusNonce,
-								listNonce,
-								projectKey: viewProject
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExecutorView, {
-								projectKey: viewProject,
-								openExecutorSession: openExecutorSessionById,
-								openTicketOverlay: (id) => handleTicketClick({ id }, viewProject)
-							})] }),
-							viewProject && rightView === "routes" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Routes, { projectKey: viewProject })
-						]
+						children: [!viewProject && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-placeholder",
+							children: [
+								"Open a project from the left (click a project name row to open its Executor panel,",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+								"or click a ticket row to open its detail overlay)."
+							]
+						}), viewProject && rightView === "executor" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Ws, {
+							focusId: selectedId || void 0,
+							focusNonce,
+							listNonce,
+							projectKey: viewProject
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExecutorView, {
+							projectKey: viewProject,
+							openExecutorSession: openExecutorSessionById,
+							openTicketOverlay: (id) => handleTicketClick({ id }, viewProject)
+						})] })]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-sb-foot",
 						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-sb-foot-sp" })
-					}),
-					modal?.kind === "settings" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSettingsModal, {
-						project: modal.project,
-						onClose: () => setModal(null),
-						onRemove: () => setModal({
-							kind: "remove",
-							project: modal.project
-						})
-					}),
-					modal?.kind === "remove" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectRemoveModal, {
-						project: modal.project,
-						onClose: () => setModal(null),
-						onRemoved: () => {
-							setModal(null);
-						}
 					}),
 					modal?.kind === "add" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectAddModal, {
 						onClose: () => setModal(null),
@@ -11762,10 +11786,11 @@ function setViewProject(project) {
 * 260823 改版（用户拍板）：chat 顶部页签只留 chat/trajectory——工单台/文档/模型
 * 三个视图从 conversation.view 环摘除，改由侧栏接管组件的中栏承载：
 * 本插件注册 sidebar.workspaces（priority=-10 抢占 shell 默认浏览器），
-* WorkbenchSidebar 左列=项目分组+进行中工单+插件入口，中列=四视图
-* （WorkbenchSection 本文件 / DocsSection 本插件 ./docs.tsx（t260905-06 起，
-* 顶替 knowledge 插件视图——旧提法退役，界面层不再出现） /
-* ProvidersSection 从 providers 插件 import）。t260903-07 起：点工单只开中列
+* WorkbenchSidebar: left column = project groups + in-progress tickets + plugin
+* entry; middle column = the executor panel (since t261008-36, Model routes and
+* Project settings open from the panel's Settings tab — executor-view.tsx owns
+* ProvidersSection, the view registry no longer carries it). Since t260903-07,
+* clicking a ticket opens only the middle-column detail drawer.
 * 详情抽屉，右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存——
 * 见 sidebar.tsx 头注与 notes/debts/design-doc-sync-t260903-07.md）。
 * 数据来自 /sandbar-workbench/api/wf/* 而非会话事件。
@@ -16452,10 +16477,7 @@ function apply(ctx) {
 		sessions: ctx.sessions,
 		workspaces: ctx.workspaces,
 		getService,
-		views: {
-			overlay: WorkbenchSection,
-			routes: ProvidersSection
-		},
+		views: { overlay: WorkbenchSection },
 		...props
 	}) })));
 }

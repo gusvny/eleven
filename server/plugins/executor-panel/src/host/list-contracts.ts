@@ -124,6 +124,21 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     cap: 'all',
     empty_copy: 'Not applicable: the settings form is fixed-shape.',
   },
+  // t261008-36: the Settings tab's two face entries (Model routes / Project
+  // settings). Fixed-shape like settings_knobs — the rows are hard-coded markup in
+  // panel-page.ts; each button posts one open-face message to the parent console,
+  // which mounts the existing faces (ProvidersSection / ProjectSettingsModal).
+  // NOTE (docs drift, declared): the mirror table in
+  // docs/reference/panel-list-conventions.md is one row behind this module after
+  // t261008-36 (docs/ is outside that ticket's write set); this module is the truth.
+  settings_faces: {
+    id: 'settings_faces',
+    title: 'Settings — face entries (Model routes / Project settings)',
+    source: 'The fixed #faceEntries markup block in panel-page.ts (two buttons, data-wb-panel-face="routes" | "project-settings")',
+    order: 'Fixed markup order: Model routes first, Project settings second (the 261004 mock row order).',
+    cap: 'all',
+    empty_copy: 'Not applicable: the entry list is fixed-shape.',
+  },
   // t261006-15: Inspection tab lists.
   inspection_periods: {
     id: 'inspection_periods',

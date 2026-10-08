@@ -38,8 +38,11 @@
  *       （20 之前老票、隔离 key）落「巡检」兜底组（显式不静默丢失）；巡检行带
  *       类别徽标（INSPECTION_ROW_BADGE chip）一眼可辨数据来源。
  * 中列：四视图由 index.tsx 注入（views prop）——工单台 WorkbenchSection（本插件）、
- *       文档 DocsSection（本插件，t260905-06）、模型 ProvidersSection（providers 插件）、
- *       立项单 EpicSection（本插件，t260826-02；空代号=立项清单，带代号=详情）。
+ *       (since t261008-36 Model routes and Project settings open from the executor
+ *       panel's Settings tab; the view registry carries only the WorkbenchSection
+ *       overlay host, and executor-view.tsx owns ProvidersSection — index.tsx no
+ *       longer injects it). EpicSection (this plugin, t260826-02: empty code =
+ *       charter list, a code = detail face).
  *       260823 起它们不再占 chat 顶部页签。t260903-07 起：点工单只在中列开详情抽屉，
  *       右栏 chat 恒为单全局会话不再切换（每工单会话联动下线，数据留存）。
  *       未选项目时中列显占位（不自动选第一个项目——不造隐形缺省）。
@@ -100,7 +103,7 @@ import { hexToRgba } from './chat-project-band.ts'
 import { ProjectIcon } from './project-icons.tsx'
 import type { ProjectIconName } from './project-icons.tsx'
 // 项目生命周期四弹层（票③面D：设置/接入/摘除/隔离详情，验收 11-13）。
-import { ProjectAddModal, ProjectRemoveModal, ProjectSettingsModal, QuarantineModal } from './project-modals.tsx'
+import { ProjectAddModal, QuarantineModal } from './project-modals.tsx'
 // t260904-17 列表 v5：左栏工单条目=行卡迷你版（一套 UI 裁定，与中列同一组件/模型层）。
 import { TicketRowCard } from './ticket-row-card.tsx'
 // t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
@@ -213,9 +216,6 @@ interface MiddleViews {
    *  only host surface since t261005-10; the board view is deleted — the overlay
    *  machinery stays, opened by left-column rows and panel-tab rows). */
   overlay: ComponentType<{ focusId?: string; focusNonce?: number; listNonce?: number; projectKey?: string }>
-  /** Model routes (ProvidersSection) — kept as the More-views escape hatch (its
-   *  merge into the panel Settings belongs to a later ticket). */
-  routes: ComponentType<{ projectKey?: string }>
 }
 
 interface SidebarProps {
@@ -255,8 +255,10 @@ interface SidebarProps {
   views: MiddleViews
 }
 
-// t261005-10 (UI-2): executor panel = the middle column; routes stays as the More-views escape hatch.
-type RightView = 'executor' | 'routes'
+// t261005-10 (UI-2): executor panel = the middle column. t261008-36: the 'routes'
+// view retired — Model routes and Project settings open from the panel's Settings
+// tab (executor-view.tsx face overlay); the More-views escape hatch is gone.
+type RightView = 'executor'
 
 /** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
  *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
@@ -418,7 +420,11 @@ const CSS = `${DERIVE_TOKENS_CSS}
    截住 .wb-psess 会话行的点击，此形态整体退役）：行内常驻=工单+立项单两枚场景钉住的
    图标 + 一枚「More views」展开钮；其余三枚（文档/模型路由/项目设置）收进展开位，
    展开也在流内（行自身盒内，零绝对定位、零外溢命中面）；展开时入口段名字瞬态让位，
-   锚点行为不变。全部几何均 gen1 前同族：行高、列宽、命中区 26×26 冻结契约不动。 */
+   (expansion stays in flow; anchor behavior unchanged; the geometry contract of
+   gen1 times holds: row height, rail width, 26x26 hit area). t261008-36: the More-views toggle and both remaining icons retired wholesale —
+   Model routes and Project settings open from the executor panel's Settings tab
+   (one face, one home; no second door). The .wb-view-icons/.wb-view-icon styles
+   below stay as a neutral geometry contract with no consumer today. */
 .wb-view-icons { display:flex; gap:2px; }
 /* 图标族统一（票③ 11b）：命中区 26×26 radius 6，显形 18px（svg 由 ProjectIcon 定）；
    三态 idle/hover/active 沿用本侧栏既有色板（深色语境；mock 规格卡三态色为浅色
@@ -437,7 +443,8 @@ const CSS = `${DERIVE_TOKENS_CSS}
    3.43——透明度压不出 AA（0.55 时即便纯黑也只 4.75，实际墨色达不到）。本元素改走
    muted 墨色（极性自适应）：静息仍是弱化观感，两档都 ≥4.5，几何零改动。
    其余 view icon 不用文字字符（SVG），不受本规则影响。 */
-.wb-view-icon[data-wb-more-views] { opacity:1; color:var(--dsw-derive-muted,#57606a); }
+/* t261008-36: the More-views rest-state rule retired with the toggle —
+   no consumer remains (the affordance is gone from the project row). */
 /* 隔离行（票③验收 11）：红色一行，常驻可辨。 */
 .wb-quar-row { display:flex; align-items:center; gap:8px; padding:7px 10px; font-size:12px;
   color:var(--dsw-derive-danger-border,#ff8183); background:rgba(255,235,233,.08); cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); }
@@ -558,15 +565,12 @@ export function WorkbenchSidebar(props: SidebarProps) {
    *  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
   const [listNonce, setListNonce] = useState(0)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
-  /* t260929-22 gen4：每项目的「More views」展开位（文档/模型路由/项目设置三枚的
-     行内收纳；展开也在流内，零外溢命中面）。 */
-  const [moreViews, setMoreViews] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(true)
-  // 项目生命周期弹层（票③面D，验收 11-13）：kind 区分四弹层；settings→remove 由
-  // 设置弹层 danger 区切换（同弹层面，非叠层）。
+  // Project-lifecycle modals (ticket 3 face D): two kinds. t261008-36: the
+  // settings->remove chain retired here — its only entrance was the More-views
+  // icon, and both faces now open from the executor panel's Settings tab
+  // (executor-view.tsx hosts the same components; one face, one home).
   const [modal, setModal] = useState<
-    | { kind: 'settings'; project: Project }
-    | { kind: 'remove'; project: Project }
     | { kind: 'add' }
     | { kind: 'quarantine'; entry: { key: string; dir: string; error: string } }
     | null
@@ -907,8 +911,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
   //    （epicCode/rightView/viewProject 多半已是同值，setState 跳渲染——同 listNonce 先例）。
   // A view icon on a project row switches the middle column (stopPropagation keeps
   // the group fold closed). t261005-10 (UI-2): the Tickets/Epics/Docs icons retired
-  // with their views — More views keeps Model Routes and Project Settings (the
-  // latter is a modal, not a view).
+  // with their views. t261008-36: the More-views affordance retired too — Model
+  // routes and Project settings open from the panel's Settings tab, so only the
+  // 'executor' view remains on RightView.
+
   const handleViewIcon = useCallback((projectKey: string, view: RightView) => {
     setViewProject(projectKey)
     setRightView(view)
@@ -954,8 +960,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
   }, [projects, ticketsByProject, inspectionSplit])
 
   // t261005-10 (UI-2): Ws = the overlay + machine-status-head host (no board view).
+  // t261008-36: views.routes is gone — Model routes opens from the panel Settings.
   const Ws = views.overlay
-  const Routes = views.routes
 
   // 轨条态
   if (!wide) {
@@ -1050,34 +1056,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   })()}
                   <span className="wb-group-count">{g.tickets.length || ''}</span>
                 </span>
-                {/* 视图入口 per 项目（用户拍板 260823；t260929-22 gen4 宿主裁决落地：
-                    260823 的「五枚常驻」放宽——行内常驻=工单+立项单（两枚场景钉住：
-                    t260904-17 点工单、t260915-09 点立项单），文档/模型路由/项目设置
-                    三枚收进「More views」行内展开位（展开也在流内，零外溢命中面）；
-                    active 高亮只判 rightView（跨组同亮，t260915-10 口径不变）。 */}
-                <span className="wb-view-icons" onClick={e => e.stopPropagation()}>
-                  {/* t261005-10 (UI-2): the Tickets/Epics/Docs icons retired — ticket
-                      details open from a left-column row (the overlay); Epics/Docs/
-                      Metrics live in panel tabs; More views keeps Model Routes and
-                      Project Settings (modal). */}
-                  {moreViews[g.project.key] && (<>
-                    <span
-                      className={`wb-view-icon ${rightView === 'routes' && viewProject === g.project.key ? 'active' : ''}`}
-                      title="Model Routes" aria-label="Model Routes"
-                      onClick={() => handleViewIcon(g.project.key, 'routes')}><ProjectIcon name="routes" /></span>
-                    <span className="wb-view-icon" data-wb-project-settings-entry=""
-                      title="Project Settings" aria-label="Project Settings"
-                      onClick={() => { setModal({ kind: 'settings', project: g.project }) }}><ProjectIcon name="settings" /></span>
-                  </>)}
-                  <span
-                    className="wb-view-icon"
-                    role="button" tabIndex={0}
-                    data-wb-more-views="" data-on={Boolean(moreViews[g.project.key]) || undefined}
-                    title={moreViews[g.project.key] ? 'Fewer views' : 'More views'}
-                    aria-label={moreViews[g.project.key] ? 'Fewer views' : 'More views'}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setMoreViews(m => ({ ...m, [g.project.key]: !m[g.project.key] })) }}
-                    onClick={() => setMoreViews(m => ({ ...m, [g.project.key]: !m[g.project.key] }))}><span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1, fontWeight: 700 }}>⋯</span></span>
-                </span>
+                {/* View entries per project (user decision 260823; gen4 host ruling
+                    t260929-22: row-resident icons = tickets + charter only, pinned by
+                    their scenarios t260904-17 / t260915-09).
+                    t261008-36: the whole More-views affordance retired — Model routes
+                    and Project settings open from the executor panel's Settings tab
+                    (one face, one home; no second door), and no third face remained
+                    inside the expansion. */}
               </div>
               {!collapsed[g.project.key] && (
                 <>
@@ -1249,7 +1234,6 @@ export function WorkbenchSidebar(props: SidebarProps) {
                 openTicketOverlay={(id) => handleTicketClick({ id } as Ticket, viewProject)} />
             </>
           )}
-          {viewProject && rightView === 'routes' && <Routes projectKey={viewProject} />}
         </div>
         {/* Bottom strip: since t261008-21 the gear Settings popover (with the
             dwell input and the M2c placeholder) is retired — host order 261008
@@ -1258,21 +1242,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
         <div className="wb-sb-foot">
           <span className="wb-sb-foot-sp" />
         </div>
-        {/* 项目生命周期四弹层（票③面D）：设置（只读+danger 区）→ 摘除四步流 →
-            接入（预检 dry-run+就地错误）→ 隔离详情。写路径=host 薄壳 spawn 安装器
-            CLI（单源）；成功回调重拉注册表（左栏即时出现新项目组/即时消失被摘组）。 */}
-        {modal?.kind === 'settings' && (
-          <ProjectSettingsModal
-            project={modal.project}
-            onClose={() => setModal(null)}
-            onRemove={() => setModal({ kind: 'remove', project: modal.project })} />
-        )}
-        {modal?.kind === 'remove' && (
-          <ProjectRemoveModal
-            project={modal.project}
-            onClose={() => setModal(null)}
-            onRemoved={() => { setModal(null) }} />
-        )}
+        {/* Project-lifecycle modals (ticket 3 face D): add (dry-run precheck with
+            in-place errors) -> quarantine detail. t261008-36: the settings->remove
+            chain moved to the executor panel's Settings tab (executor-view.tsx mounts
+            the same components); the sidebar keeps add + quarantine. Write path =
+            the host thin shell spawning the installer CLI (single source); the
+            success callback re-pulls the registry (new project groups appear /
+            removed groups vanish in the left column). */}
         {modal?.kind === 'add' && (
           <ProjectAddModal
             onClose={() => setModal(null)}

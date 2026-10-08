@@ -30,6 +30,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { consoleThemeName, executorPanelUrl } from './executor-view-model.ts'
+import { panelFaceFromMessage, OPEN_FACE_MSG_TYPE, type PanelFace } from './face-overlay-model.ts'
+// t261008-36: the two existing faces the panel's Settings tab now drives. They are
+// mounted exactly as the retired More-views entry mounted them — one importer, one
+// face; the panel gains no second read or write path for model routes.
+import { ProvidersSection } from '../../../providers/src/client/index.tsx'
+import { ProjectRemoveModal, ProjectSettingsModal } from './project-modals.tsx'
+import type { ProjectEntryLike } from './project-modals-types.ts'
 
 /** 面板 → 宿主的代开请求（type 常量双向成对；改一处必须改另一处，单测锚定）。 */
 export const OPEN_SESSION_MSG_TYPE = 'sandbar-executor-panel:open-session'
@@ -47,6 +54,15 @@ export const SHOW_EPIC_MSG_TYPE = 'sandbar-executor-panel:show-epic'
 /* t261008-18: PANEL_GOTO_EVENT ('wb-panel-goto') went with the machine-level head
  * button that dispatched it — the panel is reached by opening it, not by in-window
  * wayfinding from a strip that no longer exists. */
+/** t261008-36: the panel Settings tab asks the host to open one of the two existing
+ *  faces (Model routes / Project settings). Paired with OPEN_FACE_MSG_TYPE in
+ *  panel-page.ts (declared once in face-overlay-model.ts, re-exported here to keep
+ *  the existing constant surface). The payload carries the panel's own project key;
+ *  the host accepts the message only when it equals this view's projectKey (identity
+ *  comes from the panel's own context, never from the console's view registry). No
+ *  result receipt: the face renders in this same document, so success is visible
+ *  without an ack. */
+export { OPEN_FACE_MSG_TYPE }
 
 export interface ExecutorViewProps {
   projectKey: string
@@ -61,6 +77,20 @@ export interface ExecutorViewProps {
 export function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }: ExecutorViewProps) {
   const [panelState, setPanelState] = useState<{ ok: boolean; detail: string }>({ ok: false, detail: 'checking…' })
   const frameRef = useRef<HTMLIFrameElement | null>(null)
+  // t261008-36: the face the panel Settings tab asked for. One face at a time,
+  // rendered as a full-pane overlay covering the iframe (single layer: content
+  // replacement, no second window, no navigation away). `null` = Settings face only.
+  const [face, setFace] = useState<PanelFace | null>(null)
+  // The project-settings chain mirrors the sidebar's modal state machine: the
+  // settings modal's danger button steps into the remove flow; the remove flow's
+  // close returns to settings (exactly the sidebar behavior). Back to Settings —
+  // the overlay's own affordance — unmounts the whole face.
+  const [settingsStep, setSettingsStep] = useState<'settings' | 'remove'>('settings')
+  // Registry entry for the settings modal (key/name/primary). Fetched from the same
+  // projects API the sidebar uses when the face opens; failure or a missing entry =
+  // a named degraded face, never a blank pane.
+  const [projectEntry, setProjectEntry] = useState<ProjectEntryLike | null>(null)
+  const [entryError, setEntryError] = useState('')
 
   // 面板页可达性（每项目一次；换项目/卸载即中止——全终态）。
   useEffect(() => {
@@ -77,6 +107,52 @@ export function ExecutorView({ projectKey, openExecutorSession, openTicketOverla
       })
     return () => ac.abort()
   }, [projectKey])
+
+  // t261008-36: a face never survives a project switch (no cross-project bleed;
+  // the panel-side projectKey equality check also rejects stale frames). This is
+  // the deliberate fix for the modal-state-survives-switch fault mode the sidebar
+  // chain carries.
+  useEffect(() => {
+    setFace(null)
+    setSettingsStep('settings')
+    setProjectEntry(null)
+    setEntryError('')
+  }, [projectKey])
+
+  // t261008-36: the settings face needs the registry entry (key/name/primary) for
+  // its modal. One fetch per face-open, aborted on close/switch/unmount — same
+  // all-terminal discipline as the reachability fetch above. Source = the same
+  // projects API the sidebar reads; no second registry representation is kept.
+  useEffect(() => {
+    if (face !== 'project-settings') return
+    const ac = new AbortController()
+    setProjectEntry(null)
+    setEntryError('')
+    fetch('/sandbar-workbench/api/wf/projects', { signal: ac.signal })
+      .then((r) => r.json())
+      .then((pr) => {
+        if (ac.signal.aborted) return
+        const list: ProjectEntryLike[] = pr?.result?.projects ?? []
+        const entry = list.find((p) => p && p.key === projectKey) ?? null
+        if (entry) setProjectEntry(entry)
+        else setEntryError(`Project ${projectKey} is not in the registry — the settings face cannot open.`)
+      })
+      .catch((e) => {
+        if (ac.signal.aborted) return
+        setEntryError(`The project registry could not be reached: ${e instanceof Error ? e.message : String(e)}`)
+      })
+    return () => ac.abort()
+  }, [face, projectKey])
+
+  // R4 precedence: the ticket-detail overlay wins. Opening a ticket (left-column
+  // row, or a panel-tab row's open-ticket message) clears the face; it does not
+  // auto-restore — a face silently reappearing would be a second layer resurrecting
+  // itself. Reopening it is one click in the panel Settings tab.
+  const openTicketWins = (ticketId: string) => {
+    setFace(null)
+    setSettingsStep('settings')
+    if (openTicketOverlay) openTicketOverlay(ticketId)
+  }
 
   // 宿主侧代开 handler：面板按钮 postMessage 过来，这里校验（同源 origin + 请求
   // 恰来自本视图的 iframe + sessionId 是非空字符串）后走既有 sessions.open 通路，
@@ -98,13 +174,26 @@ export function ExecutorView({ projectKey, openExecutorSession, openTicketOverla
         return
       }
       if (d.type === OPEN_TICKET_MSG_TYPE) {
-        if (typeof d.ticketId === 'string' && d.ticketId !== '' && openTicketOverlay) openTicketOverlay(d.ticketId)
+        if (typeof d.ticketId === 'string' && d.ticketId !== '' && openTicketOverlay) openTicketWins(d.ticketId)
+        return
+      }
+      // t261008-36: open-face. Idempotent by replacement — opening the already-open
+      // face sets the same value and mounts nothing new (it never stacks, never
+      // toggles). Payload checks (face whitelist + projectKey equality) live in
+      // panelFaceFromMessage (face-overlay-model.ts, unit-tested with malformed
+      // shapes); a rejected message is ignored — the accepted surface does not grow.
+      if (d.type === OPEN_FACE_MSG_TYPE) {
+        const f = panelFaceFromMessage(d, projectKey)
+        if (f) {
+          setSettingsStep('settings')
+          setFace(f)
+        }
         return
       }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [openExecutorSession, openTicketOverlay])
+  }, [openExecutorSession, openTicketOverlay, openTicketWins, projectKey])
 
   // t261008-18: the PANEL_GOTO_EVENT forward effect went with the strip button
   // that dispatched it. The panel-side wayfinding message contract (SHOW_TAB/_EPIC)
@@ -113,7 +202,7 @@ export function ExecutorView({ projectKey, openExecutorSession, openTicketOverla
   const theme = consoleThemeName()
 
   return (
-    <div className="wb-executor-view" data-wb-executor-view="" data-project={projectKey}>
+    <div className="wb-executor-view" data-wb-executor-view="" data-project={projectKey} data-face={face ?? ''}>
       <style>{EXECUTOR_CSS}</style>
       {panelState.ok ? (
         <iframe
@@ -127,13 +216,67 @@ export function ExecutorView({ projectKey, openExecutorSession, openTicketOverla
           Executor panel unavailable for this project. {panelState.detail}
         </div>
       )}
+      {/* t261008-36: the face overlay. Covers the iframe in this same column — the
+          single layer the ticket demands (content replacement, no second window, no
+          navigation away). The iframe never unmounts (t261005-10 contract); Back to
+          Settings unmounts the face, and React unmount is the all-terminal cleanup
+          for the face's own fetches. */}
+      {face === 'routes' && (
+        <div className="wb-face-overlay" data-wb-face-overlay="" data-face="routes">
+          <div className="wb-face-head">
+            <button type="button" className="wb-face-back" data-wb-face-back=""
+              onClick={() => { setFace(null); setSettingsStep('settings') }}>Back to Settings</button>
+            <span className="wb-face-title">Model routes</span>
+          </div>
+          <div className="wb-face-body" data-wb-face-body="routes">
+            <ProvidersSection projectKey={projectKey} />
+          </div>
+        </div>
+      )}
+      {face === 'project-settings' && (
+        <div className="wb-face-overlay" data-wb-face-overlay="" data-face="project-settings">
+          <div className="wb-face-head">
+            <button type="button" className="wb-face-back" data-wb-face-back=""
+              onClick={() => { setFace(null); setSettingsStep('settings') }}>Back to Settings</button>
+            <span className="wb-face-title">Project settings</span>
+          </div>
+          <div className="wb-face-body" data-wb-face-body="project-settings">
+            {projectEntry ? (
+              settingsStep === 'settings' ? (
+                <ProjectSettingsModal
+                  project={projectEntry}
+                  onClose={() => { setFace(null); setSettingsStep('settings') }}
+                  onRemove={() => setSettingsStep('remove')} />
+              ) : (
+                <ProjectRemoveModal
+                  project={projectEntry}
+                  onClose={() => setSettingsStep('settings')}
+                  onRemoved={() => { setFace(null); setSettingsStep('settings') }} />
+              )
+            ) : (
+              <div className="wb-executor-note" role="alert" data-wb-face-entry-error="">
+                {entryError || 'Loading the project registry entry…'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 const EXECUTOR_CSS = `
-.wb-executor-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.wb-executor-view { display: flex; flex-direction: column; min-height: 0; height: 100%; position: relative; }
 .wb-executor-frame { flex: 1; width: 100%; border: 0; background: transparent; }
 .wb-executor-note { margin: 16px; padding: 12px 14px; border: 1px solid var(--dsw-derive-border, #444); border-radius: 8px;
   color: var(--dsw-derive-fg, #ccc); font-size: 13px; line-height: 1.5; max-width: 640px; }
+.wb-face-overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; min-height: 0;
+  background: var(--dsw-alias-bg-base, #fff); }
+.wb-face-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--dsw-derive-border, #e8ebef); }
+.wb-face-back { border: 1px solid var(--dsw-derive-border, #d0d7de); background: transparent; border-radius: 6px;
+  padding: 3px 10px; font-size: 12px; cursor: pointer; color: inherit; }
+.wb-face-title { font-size: 13px; font-weight: 600; color: inherit; }
+.wb-face-body { flex: 1; min-height: 0; overflow: auto; }
+.wb-face-body > .wb-pmod-overlay { position: static; background: transparent; padding: 12px; }
 `

@@ -4074,6 +4074,16 @@
    "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
    "sync_path": ""
   },
+  "integration/t261008-36/sc_t26100836_settings_faces_merge.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-36: panel Settings tab lists Model routes + Project settings, each opens its face in one host-side overlay with the iframe kept (single layer), Back restores, pmod danger anchors unchanged, More-views affordance retired wholesale, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-36/sc_t26100836_single_routes_path.py": {
+   "anchor": "source-text",
+   "note": "t261008-36 negative face: no model-routes reference in executor-panel source, exactly one ProvidersSection mount site, data-wb-more-views grep-zero, providers client keeps the routes save face",
+   "sync_path": ""
+  },
   "integration/t261008-35/sc_orphan_check_local_to_leg.py": {
    "anchor": "behaviour",
    "note": "pins the ticket contract: the shutdown-reclaim orphan check is local to the leg (no machine-wide process enumeration) and keeps teeth",

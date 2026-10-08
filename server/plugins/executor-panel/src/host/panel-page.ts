@@ -537,6 +537,22 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 
   <section id="paneSet" style="display:none">
     <div id="setBanners"></div>
+    <!-- t261008-36: the two face entries the 261004 mock puts in this tab ("Model
+         routes - moved into the panel - Settings tab" / "Project settings - moved
+         into the panel - Settings tab"). The buttons do not render the faces here —
+         they post one message to the parent console over the existing same-origin
+         postMessage seam, and the console mounts the EXISTING faces (ProvidersSection
+         / ProjectSettingsModal). The panel gains no second read or write path for
+         model routes: no YAML access, no validation copy, no cached routes table.
+         Fixed-shape list — declared in LIST_CONTRACTS (settings_faces). -->
+    <div class="grp" id="faceEntries">
+      <div class="line"><div class="lab">Model routes</div>
+        <span class="meta">Providers, keys, and the routing table</span>
+        <button class="openBtn" id="faceRoutesBtn" data-wb-panel-face="routes" style="margin-left:auto">Open</button></div>
+      <div class="line"><div class="lab">Project settings</div>
+        <span class="meta">Registry entry, ticket counts, and the danger zone</span>
+        <button class="openBtn" id="faceSettingsBtn" data-wb-panel-face="project-settings" style="margin-left:auto">Open</button></div>
+    </div>
     <div class="sect lead">Watchdog</div>
     <div class="grp" id="setKnobs"></div>
     <div class="bar">
@@ -2041,6 +2057,30 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('sessionMsg').textContent = 'Opening the session in the console.';
     window.parent.postMessage({ type: 'sandbar-executor-panel:open-session', sessionId: state.session }, window.location.origin);
   };
+  // t261008-36: the Settings tab's two face entries. One postMessage each to the
+  // parent console (paired constant on the host side: OPEN_FACE_MSG_TYPE in
+  // executor-view.tsx). The payload carries this panel's own project key (state.project,
+  // from the ?project= deep link) so the host can verify the request matches the
+  // project it embedded — the identity comes from the panel's own context, never
+  // from the console's view registry. Without a parent (panel opened standalone)
+  // the buttons are disabled with a title naming where the panel must be opened
+  // from — an explicit degraded face, never a dead silent button. Repeated clicks
+  // are safe: the host treats open-face as idempotent-by-replacement.
+  var OPEN_FACE_MSG_TYPE = 'sandbar-executor-panel:open-face';
+  function bindFaceEntry(btn, face){
+    if(!btn) return;
+    if(window.parent === window){
+      btn.disabled = true;
+      btn.title = 'Open this panel from the console to use this button.';
+      return;
+    }
+    btn.onclick = function(){
+      if(window.parent === window) return;
+      window.parent.postMessage({ type: OPEN_FACE_MSG_TYPE, face: face, projectKey: state.project }, window.location.origin);
+    };
+  }
+  bindFaceEntry(document.getElementById('faceRoutesBtn'), 'routes');
+  bindFaceEntry(document.getElementById('faceSettingsBtn'), 'project-settings');
   window.addEventListener('message', function(ev){
     if(ev.origin !== window.location.origin) return;
     var d = ev.data;
