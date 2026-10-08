@@ -58,6 +58,8 @@ related:
 9. A red is attributed with **bounded** cost: the same revision is re-run once before any search, the per-lane scenario results are used as a free first filter, and only then is the range searched.
 10. A red never silently holds the fleet: it has a named owner and a named escalation point, and ranges already attributed are not searched twice.
 11. `main` keeps a human signature — now **one per batch** instead of one per ticket.
+14. A ticket's life ends at the buffer, not at `main`: the new flow lands it into the buffer automatically, then the ticket **waits for the certification that covers its landing** and ends when that certification arrives. The human review moves from the per-ticket merge gate to the batch that leaves the buffer — so the ticket's record must still show all three stages of its outcome (the revision it landed at, the certification that covered it, and whether it reached `main` or was later reverted there).
+15. Waiting for a certification **does not hold a slot**: a ticket that is only waiting for the next scheduled run must not consume the capacity that other tickets need.
 12. The new flow is built **alongside** the current one, not on top of it: while the new one is being built and validated the current flow keeps working unchanged, the new flow exists as a **new lane version** that a ticket opts into, and only after it has proven itself are tickets moved over and the old version retired — gradually, not in one step.
 13. Nothing introduced for the new flow applies **retroactively** to tickets running the old flow: a new precondition, a new proof or a new gate check ships inside the new version and is chosen by the tickets that use it, never injected into every ticket's gate.
 
@@ -79,6 +81,7 @@ related:
 ## Nongoal
 
 - **Not removing the human gate on main.** The gate becomes per-batch; it does not disappear.
+- **Not keeping a per-ticket human merge gate in the new flow.** A person reviews the batch that leaves the buffer (the certified prefix), not each ticket; the ticket ends when its landing is certified. The old flow keeps its per-ticket gate for as long as it serves tickets.
 - **Not letting lanes skip their own scenarios.** The split is "the lane proves its change, the buffer proves the combination" — not "nobody proves anything until later".
 - **Not running the full suite after every landing.** Explicitly chosen: scheduled certifications, with the previous certified revision as the anchor that is always landable.
 - **Not making the suite faster.** Its cost is addressed here by *when* it runs; making it cheaper is a separate concern.
@@ -114,6 +117,24 @@ A ticket's own scenarios answer "did I build what I said?"; they say nothing abo
 - **Red handling:** a red first gets the **same revision re-run once** — the cheapest discriminator between a flake and a fault, and the reason a flaky suite cannot send the search chasing a ghost. Then the per-lane scenario results are consulted (a red there names the culprit for free). Only then is the range searched, and the result is written down so the same range is never searched twice.
 - **Culprit handling:** the responsible landing is **reverted** where possible — so the proven prefix can go to `main` and the buffer returns to a good state — and the original ticket is sent back to work; fixing forward on a lane based on the buffer is the fallback when a revert is not possible under the existing protections.
 - **Main:** batches are taken from the certified prefix, and a person signs the batch. What a person is approving is now "this group of landings, each of which was already covered by a certified buffer revision".
+
+### Ticket completion, and where a person looks
+
+In the new flow the ticket does **not** wait for `main`. Its life cycle ends at the buffer:
+
+1. the lane finishes its own proof (its scenarios plus the fast global set) and the engine **lands it into the buffer automatically**, one landing at a time;
+2. the ticket then **waits for a certification that covers its landing** — the next scheduled round, or a run already in flight;
+3. that certification arrives green ⇒ **the ticket ends**. No per-ticket merge gate, no waiting for `main`.
+
+What this buys is one fewer stop per ticket and a person who looks at a **batch** instead of at a queue of individual merges. What it costs has to be paid explicitly:
+
+- **"Ended" no longer means "delivered".** A closed ticket may sit on the buffer until the next batch is taken to `main`, and may in principle be reverted there. So the ticket's own record carries the three stages — where it landed, which certification covered it, and whether it reached `main` or was later reverted — and the buffer's record names the tickets each certification covers. The two records must be readable against each other, because "closed" alone would otherwise be a claim nobody can check.
+- **A red certification that names my landing is not the end of my ticket.** The ticket returns to work (or a fix lane is opened on the buffer); only a ticket whose landing is not implicated keeps waiting. This is the failure semantics of the new waiting step, and it must be distinguishable in the ticket's face from "still waiting".
+- **Waiting is not working.** A ticket waiting for the next run holds no capacity; if waiting held a slot, one tick would pin the whole fleet — which is the very stall this design removes.
+- **The batch view is now the human's whole surface.** The person signing the batch must be able to open each member (its diff, its own scenario results, the certification's evidence) before signing; a batch that can only be approved as a black box would move the human further from the work, not closer.
+- **An automatic landing that conflicts bounces back to the lane** rather than blocking: the lane re-merges the buffer and lands again. An automatic step must never introduce a new place for tickets to pile up.
+
+**The lesson that shaped this section:** the previous flow's stops per ticket were the human gate AND the full suite. Removing the second without moving the first would just relocate the bottleneck; the two moves have to happen together, and the ticket's record has to stay honest about the difference between "landed", "certified" and "delivered".
 
 ### Coexistence and rollout
 
