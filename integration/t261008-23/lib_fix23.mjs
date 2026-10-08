@@ -16,7 +16,7 @@ export const T0 = 1789353600000 // ms
 // （与 implement 同窗并行）、ui_evidence 30s、run_integration_tests 900s、
 // arbitrate 480s、acceptance_walkthrough 90s（与 arbitrate 同窗并行）、merge_check 60s、merge 人等。
 export function fixtureTimeline({ start = T0, longReason = true } = {}) {
-  const LONG = 'handoff from implement: implemented the lane map v5 renderer with duration-proportional segment widths, folded the Changeset panel into Changes, moved the agent-log resolver onto the .sandbar directory with a .suyou compat fallback, and left the timeline rows in place because the host chose option b (collapse the reason, keep every entry) — this sentence is deliberately long so the collapse face has a real wall of prose to shorten'
+  const LONG = 'handoff from implement: implemented the lane map v5 renderer with duration-proportional segment widths, folded the Changeset panel into Changes, moved the agent-log resolver onto the .sandbar directory with a .suyou compat fallback, and left the timeline rows in place because the host chose option b (collapse the reason, keep every entry) — this sentence is deliberately long so the collapse face has a real wall of prose to shorten'  // naming-compat
   // lane-durations contract (t260901-12): `at` is an ISO string (non-ISO is
   // skipped -> nominal weight) and windows OPEN on `state:'running'` marks
   // (the engine has no done mark). Durations then vary via the settle chain

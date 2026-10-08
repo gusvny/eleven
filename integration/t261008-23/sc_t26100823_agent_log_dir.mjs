@@ -4,8 +4,8 @@
 // intent（灰盒 L2，browser-free 池，隔离台 + 真 HTTP API 面，零浏览器零 docker，
 // 红线零接触 3099）：agent-log 块对「盘上有日志」的夹具返回非空文件清单——
 // A 新目录优先：日志只在 <ws>/.sandbar → 清单非空、回执 base=实际探测的 .sandbar
-//   绝对路径（回执点名探测目录）；B 旧名兼容：日志只在 <ws>/.suyou → 仍可读、
-//   base=.suyou；C 两处皆无 → 诚实 exists=false 非空清单不伪造；D 负面断言
+//   绝对路径（回执点名探测目录）；B 旧名兼容：日志只在 <ws>/.suyou → 仍可读、  // naming-compat
+//   base=.suyou；C 两处皆无 → 诚实 exists=false 非空清单不伪造；D 负面断言  // naming-compat
 // （票面要求）：合并票 worktree 已删、隔离工作区仍在 → 仍经幸存路径解析出日志。
 // 读者侧验收纪律：证据全部从 API 读面（读者那一侧）取，不取写者回执。
 // 引擎 DOT_DIR 常量不在本票写集——本条只锁读面行为。
@@ -108,15 +108,15 @@ async function main() {
       JSON.stringify({ exists: a.body && a.body.exists, files: a.body && a.body.files && a.body.files.length, base: a.body && a.body.base }))
   }
 
-  // B 旧名兼容：日志只在 .suyou（改名前的存量票不丢）。
+  // B 旧名兼容：日志只在 .suyou（改名前的存量票不丢）。  // naming-compat
   const dirB = mkwsDir('b')
-  seedLogs(dirB, '.suyou')
+  seedLogs(dirB, '.suyou')  // naming-compat
   pushTicket(dirB)
   const b2 = await listLogs()
   if (!b2.env) {
-    rec('B logs under .suyou stay readable via the compat fallback, base reports .suyou',
+    rec('B logs under .suyou stay readable via the compat fallback, base reports .suyou',  // naming-compat
       b2.body && b2.body.exists === true && b2.body.files && b2.body.files.length >= LOGS.length
-        && typeof b2.body.base === 'string' && b2.body.base.endsWith('.suyou'),
+        && typeof b2.body.base === 'string' && b2.body.base.endsWith('.suyou'),  // naming-compat
       JSON.stringify({ exists: b2.body && b2.body.exists, base: b2.body && b2.body.base }))
   }
 

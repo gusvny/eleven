@@ -4126,7 +4126,7 @@
     },
     "integration/t261008-23/sc_t26100823_agent_log_dir.mjs": {
       "anchor": "contract",
-      "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal",
+      "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal (naming-compat: quotes the scenario's leg-B fixture)",
       "sync_path": ""
     },
     "integration/t261008-37/sc_concurrency_write_entry.mjs": {
