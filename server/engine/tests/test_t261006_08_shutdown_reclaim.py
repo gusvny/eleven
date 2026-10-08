@@ -16,14 +16,20 @@ UT scope (zero network / zero Temporal / zero real suites, conftest discipline):
     call owned=0), one raising group does not block the others;
   - worker._graceful_shutdown: runs AFTER the SDK drain on BOTH the graceful path
     and the grace-expiry path (same epilogue), logs the per-child roll-call lines
-    and the machine-checkable `shutdown-reclaim receipt:` line (R2/R3 faces).
+    and the machine-checkable `shutdown-reclaim receipt:` line (R2/R3 faces);
+  - t261008-35: the real-leg orphan checks are LOCAL to the leg's own process
+    group (os.killpg on the leg's own pgid) — no machine-wide process listing.
 """
 import asyncio
+import contextlib
 import errno
 import inspect
 import os
 import pathlib
+import signal
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -306,44 +312,126 @@ def _group_alive(pgid: int) -> bool:
         return False
 
 
-def test_real_leg_timeout_reaps_group_and_keeps_receipt():
+# ---- t261008-35: the orphan check must judge only THIS leg's own processes ----
+# The old form ran `ps -eo command | grep -c '[s]leep 30'`: a MACHINE-WIDE
+# listing that any parallel lane's `sleep 30` red-lights, and that restricted
+# runners refuse outright (`ps: Operation not permitted`). The local vocabulary
+# was already here — the leg spawns with start_new_session=True (its pid IS the
+# pgid, agent_activities.run_handover_leg), books itself in the owned-spawn
+# ledger, and the probe is os.killpg(pgid, 0). No global enumeration anywhere.
+
+def _capture_leg_pgid(monkeypatch) -> dict:
+    """Record the pgid of the leg's OWN spawn via the ledger registration."""
+    captured: dict = {}
+    real = agent_activities.register_owned_spawn
+
+    def _spy(proc, tag="", **kw):
+        real(proc, tag=tag, **kw)
+        if tag == "handover-leg":
+            captured["pgid"] = os.getpgid(proc.pid)  # own child: local call
+
+    monkeypatch.setattr(agent_activities, "register_owned_spawn", _spy)
+    return captured
+
+
+def _leg_group_gone(pgid: int, deadline: float = 5.0) -> bool:
+    """LOCAL orphan probe: the leg's own process group no longer exists.
+
+    Polls os.killpg(pgid, 0) only — never a machine-wide listing. A probe that
+    cannot be performed is a NAMED failure, never a silent green."""
+    end = time.monotonic() + deadline
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError as e:
+            raise AssertionError(
+                "orphan probe not permitted: os.killpg(%d, 0): %s" % (pgid, e))
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.05)
+
+
+@contextlib.contextmanager
+def _foreign_sleep_decoy():
+    """A FOREIGN `sleep 30` alive in its OWN group across the check — exactly
+    the condition that red-lit the machine-wide ps form (t261008-35 L3 lock)."""
+    decoy = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        start_new_session=True)
+    try:
+        if decoy.poll() is not None:
+            raise AssertionError(
+                "foreign decoy failed to start (rc=%s)" % decoy.returncode)
+        yield decoy
+    finally:
+        try:
+            os.killpg(decoy.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # decoy already exited early — still reap it below
+        decoy.wait()
+
+
+def test_real_leg_timeout_reaps_group_and_keeps_receipt(monkeypatch):
     import tempfile
-    out = asyncio.run(run_handover_leg(
-        {"name": "slow-leg", "cmd": "/bin/sleep 30"},
-        cwd=pathlib.Path(tempfile.gettempdir()), timeout=0.5))
-    # either leg of the py3.9 wait_for race: same contract, two wordings
-    cjk_to = "\u8d85\u65f6"      # the legacy CJK receipt wording, escaped for the copy gate
-    cjk_grp = "\u8fdb\u7a0b\u7ec4"
-    assert ("timed out" in out["output_tail"]) or (cjk_to in out["output_tail"])
-    assert ("process group" in out["output_tail"]) or (cjk_grp in out["output_tail"])
-    assert owned_spawn_snapshot() == []            # the book is clean after the leg
-    import subprocess as _sp
-    r = _sp.run(["/usr/bin/env", "bash", "-c",
-                 "ps -eo command | grep -c '[s]leep 30'"], capture_output=True)
-    assert int((r.stdout or b"0").split()[-1] or b"0") == 0  # nothing orphaned
+    leg = _capture_leg_pgid(monkeypatch)
+    with _foreign_sleep_decoy() as decoy:
+        out = asyncio.run(run_handover_leg(
+            {"name": "slow-leg", "cmd": "/bin/sleep 30"},
+            cwd=pathlib.Path(tempfile.gettempdir()), timeout=0.5))
+        # either leg of the py3.9 wait_for race: same contract, two wordings
+        cjk_to = "\u8d85\u65f6"      # the legacy CJK receipt wording, escaped for the copy gate
+        cjk_grp = "\u8fdb\u7a0b\u7ec4"
+        assert ("timed out" in out["output_tail"]) or (cjk_to in out["output_tail"])
+        assert ("process group" in out["output_tail"]) or (cjk_grp in out["output_tail"])
+        assert owned_spawn_snapshot() == []            # the book is clean after the leg
+        # nothing orphaned — LOCAL probe on the leg's own process group only
+        # (t261008-35): the decoy's foreign `sleep 30` is alive at this moment
+        # and must not influence the verdict.
+        assert decoy.poll() is None  # the foreign sleep 30 WAS alive at check time
+        assert _leg_group_gone(leg["pgid"])
 
 
-def test_real_leg_early_cancel_reraises_and_reaps():
+def test_real_leg_early_cancel_reraises_and_reaps(monkeypatch):
     import tempfile
 
     async def _go():
-        task = asyncio.ensure_future(run_handover_leg(
-            {"name": "slow-leg", "cmd": "/bin/sleep 30"},
-            cwd=pathlib.Path(tempfile.gettempdir()), timeout=60))
-        await asyncio.sleep(0.5)   # let the shell + sleep actually start
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        await asyncio.sleep(0.1)
-        assert owned_spawn_snapshot() == []
-        # no orphan: no process of ours still runs a sleep 30 spawned by the leg
-        import subprocess as _sp
-        r = _sp.run(["/usr/bin/env", "bash", "-c",
-                     "ps -eo pgid,command | grep -c '[s]leep 30'"],
-                    capture_output=True)
-        assert int((r.stdout or b"0").split()[-1] or b"0") == 0
+        leg = _capture_leg_pgid(monkeypatch)
+        with _foreign_sleep_decoy() as decoy:
+            task = asyncio.ensure_future(run_handover_leg(
+                {"name": "slow-leg", "cmd": "/bin/sleep 30"},
+                cwd=pathlib.Path(tempfile.gettempdir()), timeout=60))
+            await asyncio.sleep(0.5)   # let the shell + sleep actually start
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await asyncio.sleep(0.1)
+            assert owned_spawn_snapshot() == []
+            # no orphan: LOCAL probe — the leg's own process group is gone while
+            # the decoy's foreign `sleep 30` is still alive (t261008-35)
+            assert decoy.poll() is None  # the foreign sleep 30 WAS alive at check time
+            assert _leg_group_gone(leg["pgid"])
 
     asyncio.run(asyncio.wait_for(_go(), timeout=20))
+
+
+def test_local_orphan_probe_catches_live_group():
+    # teeth proof (t261008-35): a genuinely live group must make the local
+    # probe go RED — a check that cannot fail is worse than the flake it
+    # replaced. Kept unreaped first, asserted red, then reaped and un-flipped.
+    orphan = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        start_new_session=True)  # pid == pgid (own group, like the leg)
+    try:
+        assert _leg_group_gone(orphan.pid, deadline=0.2) is False  # RED
+    finally:
+        try:
+            os.killpg(orphan.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        orphan.wait()
+    assert _leg_group_gone(orphan.pid) is True  # un-flips after the reap
 
 
 # ---- worker._graceful_shutdown: roll-call + receipt on the real epilogue ----
