@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Executor panel — Overview with Alerts and Events folded in (mock, 261009)</title>
+<style>
+:root{--bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;--faint:#6e7781;
+--blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--soft-blue:#ddf4ff;--soft-red:#ffebe9;--soft-amber:#fff8c5;--soft-green:#dafbe1}
+html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--muted:#8ea0b8;--faint:#5b6880;
+--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--soft-blue:#1d3550;--soft-red:#3a1d1d;--soft-amber:#2a2313;--soft-green:#16301f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:12.5px/1.5 ui-sans-serif,system-ui,sans-serif}
+.mockbar{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--panel);color:var(--faint);font-size:11.5px}
+.mockbar .g{flex:1}
+.mockbar button{border:0;background:transparent;color:var(--faint);cursor:pointer;font:inherit;padding:2px 6px;border-radius:5px}
+.mockbar button:hover{background:var(--hover);color:var(--fg)}
+.tabs{display:flex;gap:2px;padding:5px 10px 0;border-bottom:1px solid var(--line);background:var(--panel);overflow-x:auto}
+.tab{padding:5px 11px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;color:var(--muted);white-space:nowrap}
+.tab.on{background:var(--bg);border-color:var(--line);color:var(--fg);font-weight:600;position:relative;top:1px}
+.badge{min-width:17px;height:17px;border-radius:9px;background:var(--blue);color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.wrap{max-width:900px;margin:12px auto 36px;padding:0 14px;display:flex;flex-direction:column;gap:10px}
+.strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ro{color:var(--green);font-size:11.5px}
+.chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:2px 9px;font-size:11.5px}
+.pill{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:1px 7px;font-size:11px}
+.pill.sign{border-color:var(--green);background:var(--soft-green);color:var(--green)}
+.pill.retry{border-color:var(--amber);background:var(--soft-amber);color:var(--amber)}
+.pill.wake{border-color:var(--blue);background:var(--soft-blue);color:var(--blue)}
+.pill.refused{border-color:var(--red);background:var(--soft-red);color:var(--red)}
+button.btn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:8px;padding:4px 10px;font:inherit;cursor:pointer}
+button.btn:hover{border-color:var(--blue)}
+button.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
+button.btn.power{border-color:var(--green);color:var(--green);background:var(--soft-green)}
+button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline dotted;padding:0}
+.grp{border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:9px 12px}
+.grp .line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lab{color:var(--muted)}
+.knob{border:1px solid var(--line);background:var(--panel2);border-radius:6px;width:24px;height:22px;font:inherit;cursor:pointer}
+.val{font-weight:650;min-width:14px;text-align:center}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.card .hd{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line-soft)}
+.card .hd .sect{font-weight:600}
+.card .hd .n{color:var(--muted)}
+.card .bd{padding:6px 12px 10px}
+.sect{font-size:11.5px;letter-spacing:.3px;text-transform:uppercase;color:var(--muted);font-weight:600;cursor:help}
+.row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--line-soft)}
+.row:last-child{border-bottom:0}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;margin-top:5px}
+.dot.red{background:var(--red)}.dot.amber{background:var(--amber)}.dot.blue{background:var(--blue)}.dot.green{background:var(--green)}
+.t{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--muted);flex:none;width:88px}
+.txt{flex:1}
+.meta{color:var(--faint);font-size:11px}
+.tk{font-family:ui-monospace,Menlo,monospace;font-size:11px}
+.link{color:var(--blue);cursor:pointer;text-decoration:underline dotted}
+.fold{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11.5px;padding:6px 0;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:8px 0}
+.cell{border:1px solid var(--line);border-radius:8px;padding:6px 9px}
+.cell b{display:block;font-size:15px}
+.cell span{color:var(--muted);font-size:11px}
+.path{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint);word-break:break-all}
+.banner{display:flex;align-items:center;gap:8px;border:1px solid var(--amber);background:var(--soft-amber);border-radius:8px;padding:6px 10px;font-size:11.5px;color:var(--amber)}
+.empty{color:var(--faint);padding:8px 0}
+.ask{border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px}
+.ask .q{font-weight:600}
+</style>
+</head>
+<body>
+<div class="mockbar">
+  <span>mock controls:</span>
+  <button id="st">state: normal</button><button id="th">theme: light</button>
+  <span class="g"></span><span>Overview after the Alerts and Events tabs leave the strip</span>
+</div>
+
+<div class="tabs">
+  <span class="tab on">Overview <span class="badge">2</span></span>
+  <span class="tab">Epics</span><span class="tab">Inspection</span><span class="tab">Metrics</span>
+  <span class="tab">Docs</span><span class="tab">Grants</span><span class="tab">Settings</span>
+</div>
+
+<div class="wrap">
+
+  <div class="strip">
+    <span class="ro">● read-only</span>
+    <span id="stateTxt">Idle · 2 requests wait on you.</span>
+    <span class="chip" title="the grants this session holds, out of the declared set">Permissions: 5 of 6</span>
+    <span class="chip" title="the executor session writing the actions below">Session: session-7685c51a</span>
+    <button class="btn" id="openBtn">Open session</button>
+    <button class="btn power" style="margin-left:auto">Enable executor</button>
+  </div>
+
+  <div class="grp">
+    <div class="line">
+      <span class="lab">Concurrent limit</span><span class="chip" title="how the fleet stands against the limit">room to start one</span>
+    </div>
+    <div class="line" style="margin-top:6px">
+      <span class="lab">Limit</span>
+      <button class="knob" title="One fewer ticket at the same time">&minus;</button>
+      <span class="val">4</span>
+      <button class="knob" title="One more ticket at the same time">+</button>
+      <span class="meta" title="held slots against the limit, and what is queued behind it">5 held · 0 queued</span>
+      <button class="btn" style="margin-left:auto">Save</button>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="card">
+      <div class="hd"><span class="sect" title="questions the engine put to you: nothing advances until one is answered">Needs your answer</span><span class="n">2</span></div>
+      <div class="bd">
+        <div class="ask">
+          <div class="q">Raise the write set of <span class="link tk">t261009-22</span> to <span class="tk">integration/</span>?</div>
+          <div class="meta">asked 21:12 by the executor · the plan needs one file outside the ticket's write set</div>
+          <div style="margin-top:6px;display:flex;gap:6px"><button class="btn p">Approve</button><button class="btn">Deny</button></div>
+        </div>
+        <div class="ask">
+          <div class="q">Authorise one protected-path write for <span class="link tk">t261008-47</span>?</div>
+          <div class="meta">asked 20:41 by the executor · <span class="tk">integration/baselines/lane-stages-chain.mjs</span></div>
+          <div style="margin-top:6px;display:flex;gap:6px"><button class="btn p">Approve</button><button class="btn">Deny</button></div>
+        </div>
+        <div class="fold" title="requests already answered by a person">Answered · 7</div>
+        <div class="fold" title="requests a person took off this list without answering">Dismissed · 3</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><span class="sect" title="what the watchdog shouted about, newest first; a redline alert is never silenced">Alerts</span><span class="n">3</span></div>
+      <div class="bd">
+        <div class="banner" title="the night policy silenced the amber rows; redline alerts still play a sound">Rows marked night-muted were silenced by the night policy.</div>
+        <div class="row"><span class="dot red"></span><span class="txt">Queue <span class="tk">sandbar-ticket-t261008-47</span> has 0 live pollers</span><span class="meta">20:07 · redline</span></div>
+        <div class="row"><span class="dot amber"></span><span class="txt">Worker <span class="tk">pid 1898</span> is older than the tree it runs</span><span class="meta">20:12 · night-muted</span></div>
+        <div class="row"><span class="dot amber"></span><span class="txt">Run <span class="tk">run-01M4GE0C2QV0F10V1STXN1K6E1</span> ended with 4 failures</span><span class="meta">21:40 · night-muted</span></div>
+      </div>
+
+      <div class="hd" style="border-top:1px solid var(--line-soft)"><span class="sect" title="what the executor did, newest first; every row is one entry in the action ledger">Recent actions</span><span class="n">5</span></div>
+      <div class="bd">
+        <div class="row"><span class="t">21:04</span><span class="pill sign">sign</span><span class="tk link">t261009-18</span><span class="txt">approved at gate merge</span></div>
+        <div class="row"><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk link">t261009-15</span><span class="txt">re-ran the machine check</span></div>
+        <div class="row"><span class="t">20:51</span><span class="dot red"></span><span class="pill refused">refused</span><span class="tk link">t261008-47</span><span class="txt">restart refused: who longer than 64</span></div>
+        <div class="row"><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk link">t261009-17</span><span class="txt">approved at gate merge</span></div>
+        <div class="row"><span class="t">20:41</span><span class="pill">request</span><span class="tk link">t261008-47</span><span class="txt">asked you for a protected-path write</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd">
+      <span class="sect" title="the watchdog's own ledger: the rows it read, the wakes it acted on, and the health of both">Events</span>
+      <span class="n">20</span>
+      <span class="meta" style="margin-left:auto" title="the status payload itself carries a 20-row window; nothing is truncated here">newest first · 20-row window</span>
+    </div>
+    <div class="bd">
+      <div class="grid">
+        <div class="cell"><b>12,480</b><span>rows</span></div>
+        <div class="cell"><b>0.3%</b><span>duplicates</span></div>
+        <div class="cell"><b>0</b><span>bad rows</span></div>
+        <div class="cell"><b>0</b><span>gaps</span></div>
+      </div>
+      <div class="path">~/.sandbar/projects/sandbar/ledger/events.jsonl</div>
+      <div style="margin-top:6px">
+        <div class="row"><span class="t">22:02</span><span class="pill wake">WAKE</span><span class="tk link">t261008-47</span><span class="txt">workflow task retried and completed</span></div>
+        <div class="row"><span class="t">21:58</span><span class="pill wake">WAKE</span><span class="tk link">t261008-47</span><span class="txt">worker handover picked the workflow task up</span></div>
+        <div class="row"><span class="t">21:48</span><span class="pill wake">WAKE</span><span class="tk link">t261009-20</span><span class="txt">squash landed on main</span></div>
+        <div class="row"><span class="t">21:40</span><span class="pill wake">WAKE</span><span class="tk">run-01M4GE0C2QV0F10V1STXN1K6E1</span><span class="txt">round finished: 478 pass · 4 fail · 16 env</span></div>
+        <div class="row"><span class="t">21:18</span><span class="pill wake">WAKE</span><span class="tk link">t261009-20</span><span class="txt">round started</span></div>
+      </div>
+      <div class="fold" title="the remaining 15 rows of the window">Show all 20</div>
+      <div class="meta" style="margin-top:4px" title="the former Ledger tab's per-row drill-down, now reached from a row instead of from a lone link at the bottom">Each row opens its own record: health, the wake sentence, and the ledger bytes behind it.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function $(i){return document.getElementById(i)}
+var frozen=false;
+$('th').textContent='theme: '+(document.documentElement.dataset.theme==='dark'?'dark':'light');
+$('th').onclick=function(){var h=document.documentElement;var d=h.dataset.theme==='dark';h.dataset.theme=d?'light':'dark';$('th').textContent='theme: '+(d?'light':'dark')};
+$('st').onclick=function(){frozen=!frozen;$('st').textContent='state: '+(frozen?'empty':'normal');
+  $('stateTxt').textContent=frozen?'The executor is idle. Nothing waits on you.':'Idle · 2 requests wait on you.'};
+</script>
+</body>
+</html>
