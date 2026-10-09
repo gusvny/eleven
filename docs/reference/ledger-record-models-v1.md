@@ -52,7 +52,7 @@ Applied to every record in this document:
 
 | Record | Role | Id |
 |---|---|---|
-| ticket | cited everywhere, human-facing | `t261009-10` — the project's existing shape, kept; it is minted by one authority (see the collision below) |
+| ticket | cited everywhere, human-facing, **and baked into paths and branches** | **pending** — the host keeps `t261009-10` for now and has not ruled out a ULID; the consequences of changing it are listed below |
 | landing / certification / run / promotion / freeze episode / relation | **cited by other records** | **family prefix + time id, one shape for all of them**: `ldg-01J9Z6QK3M…`, `cert-01J9Z6R2…`, `run-…`, `prom-…`, `frz-…`, `rel-…` |
 | finding | cited, and its identity **is** its content | **content id**, widened to 16 hex: `3d4b305e1f7a9c02` |
 | fault mode | **cited verbatim in prose, in many places** | **a ULID** — `01J9Z6QK3M7X2P4T8V0N5R` (the host's decision, 261009: coordination-free ids win over short ones). Existing entries keep the numbers they already have; nothing is renumbered (see the note below) |
@@ -91,6 +91,32 @@ Two consequences worth stating plainly. **The two minting rules stay two**, and 
 So the rule is not "centralise unless you cannot": it is **use the authority that already exists for the object if there is one, and where there is none, use an id that needs no authority**. A central mint is a cost only when it is *added* — and the interesting case in this project was never the ticket number, which was free, but the fault ledger, where it would have been new.
 
 **And neither choice is free of risk; they are different risks.** A coordination-free id pushes its trust into the clock and the random source: a wrong clock costs ordering (not uniqueness), a poor random source costs collisions. A counter pushes its trust into shared state: whoever mints must see everything it counts. Pick the risk you can observe and test — for the fault ledger that is the random source; for tickets it was shared state, and it failed once, which is why the check that refuses a duplicate id exists.
+
+**The full list: what can be a ULID, and what cannot.** Five tests decide it, and none of them is about importance: must the id be **recomputable** (then it is derived from content)? is it a **dedupe or join key** (then it is derived from the key's meaning)? is it an **idempotency key** (then it must be deterministic)? is it a **name or a path component** (then it is natural)? and **does anything cite it at all** (if not, it needs no id)?
+
+| Key | Verdict | Why |
+|---|---|---|
+| landing, certification, run, promotion, freeze episode, relation | **ULID** (with a family prefix) | cited by other records, nothing about them is derived or natural |
+| fault mode | **ULID** — decided | the ledger is a file anyone can append to; a mint would be an added authority |
+| **finding** | **cannot** | its identity must be **recomputed from content**, or a later sighting of the same problem becomes a different thing |
+| **ticket** | **pending (host, 261009)** | see the consequences below |
+| inspection period | **cannot — natural composite** | the period *is* instance + period; the dedupe rule ("one ticket per instance and period") depends on that being the key, and the period appears in a report path |
+| scenario name | **cannot — derived** | it is the ticket id plus a slug, it is a file-and-ledger key, and run results, booked-red rows and coverage join on it across time |
+| alert key | **cannot — derived** | its whole purpose is that repeats of the same rule and target **dedupe**; a random id would make every repeat a new alert |
+| idempotency key (executor actions) | **cannot — deterministic** | the same request must produce the same key, which is the opposite of unique-by-randomness |
+| project key, repository name, lane name, inspection instance id, pool name | **cannot — names** | declared by people, used in paths, environment and store directories |
+| observation, state change, reviewed path, run case row, booked-red row, event, capacity and authorisation audit rows | **no id at all** | each is read by a query and cited by nobody; the tuple is the key |
+| repository relation | **not a record** | keyed by the base repository's name |
+| request id (`req-<ms>-<seq>`), executor session id (`session-<uuid>`) | **already coordination-free in another shape** | existing shapes that do the same job less uniformly; migrating them is cosmetic and low value |
+| `seq` | **not an id** | a counter, or the thing a monotonic id replaces |
+
+**If the ticket id becomes a ULID, these are the consequences to weigh** — none of them is fatal, and all of them are paid outside the ledger:
+
+- **Every derived name changes with it**: `.lane/<id>` directories, `lane/<id>` branches, and **scenario names**, which would leave the repository holding two generations of scenarios (the old names stay, because renaming them means editing the ledger rows, the booked-red list and the coverage history that join on them).
+- **The date prefix's uses have to be replaced**: "which day" and "how many that day" are read off it today, and the faces group and sort by it; both become queries.
+- **Two shapes coexist for the tickets that already exist**, exactly as with the fault ledger — and here the mixture shows up in directory listings and branch lists, not only in prose.
+- **The collision fix is needed either way**, and it is independent of the shape: the minter must look at **all** tickets, retired ones included.
+- **What it buys**: minting that needs no authority. Worth having if tickets are ever created on several machines — though the same could be had by handing out number blocks, with no name changing anywhere.
 
 **Where a ULID is the wrong choice — three classes, and none of them is about uniqueness.**
 
