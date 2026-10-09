@@ -4650,3 +4650,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **受害者**：`t261008-47` 卡死（快照不可读、任何写操作都进不去，`reconcile` 只能把它判"不可判"并释放槽位）。
 > **救法（不是重启、也不是补 worker）**：给这条新分支补 `workflow.patched(<新 id>)`——**老历史取 marker 失败 ⇒ 跳过新分支 ⇒ 恰好等于历史重放** ⇒ `-47` 应当自己活过来（与 `COUNTER_RESET_PATCH_ID` 的语义完全同款）。
 > **教训（写给未来的我自己）**：**票面写"行为修法"时必须同时写"这条改动是否落在工作流已走过位置、需不需要 patch 守卫"**——本岗这次判据里漏了这一句，代价是一张票卡死 + 一轮排障。
+
+## KI-01M4GF5R8NHQNATH7WD7SKF94X **换手 worker 会作废"正在跑"的 workflow task，把重试押后一整个 499s；同时超长历史票的重放成本与 continue-as-new 建议无人处置**(261009 实测;integration 岗登记)
+
+> **现象（261009 `t261008-47` 实测，事件级）**：
+> - 21:48:43 `t261009-20` 落地（补上 `workflow.patched("dev-lane-settle-rerun-v1")` 守卫，修 `7993697a` 的重放砖）。21:51:44 本岗用 `engine_ops.py restart --scope lane:t261008-47` 把该票的 worker 换手（老 pid 1898 = 20:06 的旧码 `stale`，新 pid 33614 `stale=[]`、poller 活）。
+> - **换手之后票面仍报 `Workflow Task in failed state`**，读 `describe` 才看见真因：**在换手前 21:49:47，老 worker 已经把 WFT 取走（attempt 21，`state=STARTED`）**；TERM 之后它成了**孤儿任务**，要等 `start_to_close_timeout`（本票为 **499s**）超时才会重新派发 ⇒ **修复到位也要多等 ~8 分 20 秒**才可能看到效果。
+> - 同票第二个隐患：历史 **8,084,901 字节 / 47,029 事件**，服务端在该 WFT 的 `workflow_task_started` 上打了 **`suggest_continue_as_new: true`**；全史 8,513 次 WFT scheduled / 8,509 completed / 2 timed out / 1 failed。**每轮重放都要走完 4.7 万事件**。
+>
+> **机理**：Temporal 的 WFT 是**独占**的——一旦被某 worker 取走并 STARTED，server 在超时前不会再派给别人；TERM 掉承载它的进程不会立刻释放该任务，只是让它走完超时。超长历史把每次重放的墙钟放大到分钟量级，使"换手—重放—失败/成功"的反馈环路变得很慢，也让"修了却看不到效果"极易被误读成"修复无效"。
+>
+> **危害**：①**误判**：值守看到"落地了但票还不动"，很容易得出"修复没用"的结论，进而重复换手（每次都再押后一个超时）；②**运维黑洞**：历史接近/超过服务端阈值时，continue-as-new 建议若无人接，票会一直背着 8MB 历史跑，重放成本随事件数线性上涨；③**并发面**：孤儿 WFT 期间 `reconcile` 读不到快照，会把该票的槽位判为"不可判/僵尸"。
+>
+> **出路**：①**换手挑窗口**（纪律，本岗已写进值守报告）：TERM 前先 `describe` 看 `pending_workflow_task.state/started_time`——`STARTED` 且刚起 ⇒ **等它超时或跑完再换手**，或接受"多等一个 start_to_close_timeout"并写进账；②**引擎面**：工作流应在 `suggest_continue_as_new` 为真时**主动 continue-as-new**（并把"历史事件数/字节数"作为可观测项暴露到票面），这是实现口径，归新票；③**观测面**：把"WFT attempt 号 + started_time + history 字节数"接进巡检输出，使"重试被超时押后"与"重放真的又失败"可区分。
+>
+> **回归**：L3——造"长历史 + 在跑 WFT"的形态，断言(а)换手后系统能区分"等待超时重试"与"重放失败"（具名）；(b)`suggest_continue_as_new` 为真时工作流自行 continue-as-new 且历史体量回落；(c)巡检输出包含 attempt/started_time/history_bytes 三列。
