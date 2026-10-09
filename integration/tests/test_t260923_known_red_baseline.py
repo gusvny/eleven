@@ -83,6 +83,38 @@ def test_ratchet_shrink_only():
         % (len(d["entries"]), d["meta"]["max_entries"])
 
 
+def test_booked_sha_resolves_to_a_real_commit():
+    """261009 追加（本岗自伤的机械护栏）：booked_sha 必须是**真能解出来的对象**，
+    不能只有形状对。
+
+    事故（261009 16:1x）：新挂一行时 booked_sha 手写补齐成一个"看着像"的 40 位串，
+    形状检查放行；于是数据驱动的引擎测试（test_t260926_ki122_adoption::
+    test_b3_receipt_carries_evidence_stamps_and_base_point，取**最新戳行**当探针、
+    拿它的 booked_sha 当 base_ref 去解基点）解析不出 ⇒ 全仓 verify_lane code 面转红
+    ⇒ 每条泳道的 merge_check 被堵。教训：**写进项目数据的 sha 只能来自 git rev-parse**。
+
+    判据：逐行 git cat-file -e <sha>^{commit}；git 或仓缺席 = 具名失败（fail-closed，
+    不静默跳过——"验不了"不等于"验过了"）。
+    """
+    import subprocess
+    d = _load()
+    sha_re = re.compile(r"^[0-9a-f]{7,64}$")
+    bad = []
+    for e in d["entries"]:
+        s = str(e.get("booked_sha") or "")
+        if not sha_re.match(s):
+            bad.append((e.get("name"), s, "shape"))
+            continue
+        r = subprocess.run(["git", "cat-file", "-e", s + "^{commit}"],
+                           capture_output=True, cwd=str(BOOK.parent.parent))
+        if r.returncode != 0:
+            bad.append((e.get("name"), s, "unresolvable"))
+    assert not bad, (
+        "booked_sha 必须是本仓真能解出来的提交（形状对不等于对象在）：%s——"
+        "手写/补齐 sha 会让取最新戳行的数据驱动测试解析失败、全仓闸转红"
+        % (bad[:6],))
+
+
 def test_fixed_must_leave_the_book():
     """修掉即删行的负棒：今天两笔「修掉」定性不得回册（回册=账面与事实不符）。"""
     d = _load()
