@@ -203,6 +203,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 :root{--proj:#9ca3af}
 .top{position:relative}
 .top::before{content:'';position:absolute;left:0;right:0;top:-11px;height:3px;background:var(--proj)}
+.tk{white-space:nowrap}
+.evhealth{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 0}
+.evhealth .file{font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;max-width:46ch;white-space:nowrap}
 .concRow{display:flex;align-items:center;gap:10px;height:34px}
 .concBox{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:0 9px;height:28px;width:max-content}
 .concBox .concBtn{width:24px;height:22px}
@@ -312,18 +315,22 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         <div class="act"><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk">t261009-15</span><span class="say">retry_qc</span></div>
         <div class="act"><span class="dot red" title="Refused"></span><span class="t">20:51</span><span class="pill sign">sign</span><span class="tk">t261008-47</span><span class="say">refused: who &gt; 64</span></div>
         <div class="act"><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk">t261009-17</span><span class="say">sign · merge</span></div>
-        <div class="sect" style="margin-top:12px" id="eventsHead">Events · 20</div>
-        <div class="sect">Health</div>
-        <div class="grid" id="ledgerGrid"></div><div class="cell"><b>12,480</b><span>rows</span></div><div class="cell"><b>0.3%</b><span>duplicates</span></div><div class="cell"><b>0</b><span>bad rows</span></div><div class="cell"><b>0</b><span>gaps</span></div>
-        <div class="file" id="ledgerFile"></div>~/.sandbar/projects/sandbar/ledger/events.jsonl
-        <div class="sect lead">Wakes <span class="meta" id="ledgerWakeCount">· 20</span></div>
-        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes.</div>
-        <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
-        <div class="act"><span class="t">22:02</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">task retried</span></div>
-        <div class="act"><span class="t">21:58</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">handover picked it up</span></div>
-        <div class="act"><span class="t">21:48</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">landed on main</span></div>
+        <div class="sect" style="margin-top:14px" id="eventsHead" title="what the watchdog read and acted on, newest first">Events · 20</div>
+        <div class="evhealth">
+          <span class="meta" title="the watchdog's own ledger: rows read, duplicates skipped, bad rows, gaps">12,480 rows · 0.3% duplicates · 0 bad rows · 0 gaps</span>
+          <span class="meta file" id="ledgerFile">~/.sandbar/projects/sandbar/ledger/events.jsonl</span>
+    </div>
+        <div class="row" style="padding:2px 4px" id="ledgerEvents">
+              <div class="act"><span class="t">22:02</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">task retried</span></div>
+              <div class="act"><span class="t">21:58</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">handover picked up</span></div>
+              <div class="act"><span class="t">21:48</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">landed on main</span></div>
+              <div class="act"><span class="t">21:40</span><span class="pill open">WAKE</span><span class="tk">run-01M4GE0…</span><span class="say">round finished</span></div>
+              <div class="act"><span class="t">21:18</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">round started</span></div>
+    </div>
+        <div class="muted" style="margin:4px 0 0;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes. <button class="linkbtn">Show all 20</button></div>
       </div>
     </div>
+
 </section>
 
   <!-- t261005-10 (UI-2): Epics tab — read-only face over the workbench epics API.
