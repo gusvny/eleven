@@ -131,4 +131,5 @@ This proposal addresses the **Problem** by giving causality between tickets a du
 
 - [Develop Buffer v1 (lane → develop → main)](develop-buffer-v1.md) — the first consumer: a red is remedied by a new ticket, and the freeze exemption has to name what the fix repairs.
 - [Failure Classification Protocol v1 and Mechanical Attribution](failure-classification-protocol-v1.md) — how a red is classified and attributed; attribution is what creates the causal relation.
+- [Project Fact Ledgers v1 (where the project's own facts live)](project-fact-ledgers-v1.md) — the family this ledger belongs to, and the rules it shares with the others.
 - [Design Document Writing Guide](design-doc-writing-guide.md) — the admission standard this document follows.
