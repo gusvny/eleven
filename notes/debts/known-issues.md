@@ -4613,3 +4613,28 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **下一步(本岗自办,integration 资产)**:①先把"它这次到底撞了哪条 blocked 文案"取到手(场景加 `T09_KEEP_TMP`-同款保留开关或打印完整快照);②对照"超限口径"是否随 KI-122 streak-hold 补丁(`KI122_STREAK_HOLD_PATCH_ID`)变了——若变,**重钉它的驱动/期望**;③若短期钉不动,**在册**并给出 owner/retire_when(不许让它以"未在册"的形态继续污染判据)。
 >
 > **回归**:L3——造"tests-fault 连续打回至上限"的票,断言出现**超限 blocked 且文案含超限口径**,并断言该态在并行分叉期的 stage 表征与本场景判据一致。
+
+## KI-01M4G97W99WVN2B2VS2BYT6C9X **换码/重启后,在飞工作流的工作流任务进入 failed 状态 ⇒ 票永久卡住(查询与信号都进不去)**(261009 实证;integration 岗登记)
+
+> **现象(重启后 20:30 实测)**:宿主重启 worker(新码)后,`concurrency reconcile` 把两张在飞票的槽位**判为僵尸并释放**(`dropped=['t261008-47','t261009-18']`),
+> 两条 `probe_errors` 原文:
+> - `t261009-18`:`no_poller: queue sandbar-ticket-t261009-18 has 0 live pollers(the dedicated worker stopped polling or is absent)`
+> - `t261008-47`:`ValueError: Temporal 拒绝: RPCError: Unable to query workflow due to Workflow Task in failed state.`
+> 两张票的**泳道仍在写**(说明当前那轮活动还在旧进程里跑),但**队列没有活轮询者**,且其中一张的工作流任务已被 Temporal 标成 **failed**。
+>
+> **机理(与既有 nondeterminism 族同源)**:引擎工作流是**重放式**的——换码后由新 worker 接手旧历史时,
+> 若新码在历史已走过的位置**调度了不同的命令**(典型:CL-1 曾在 `DevLaneWorkflow.run` 顶部**无条件**插入 `concurrency_acquire` 而无 `workflow.patched` 守卫,
+> 见 261005 那次 `[TMPRL1100] Nondeterminism error`),则该工作流任务**每次都失败**,票**既查不了也推不动**(`no_poller` / `failed state` 是同一根的两张脸)。
+> 本次重启把**所有在飞票**都置于这个风险下:凡历史创建时刻早于某次引擎落地,而那次落地**没有 patch 守卫**,它就可能重放不通过。
+>
+> **危害**:①**票静默变砖**:查询面报 `no_poller`/`transient`,看着像"worker 没起",实际是**工作流任务失败**;值守容易在"补 worker"上打转(本岗今晚就先去查 poller 了);
+> ②**槽位被误判释放**:reconcile 读不到快照 ⇒ 把活票当僵尸释放,并发账目与事实不符,别的票可能乘隙进来;
+> ③**重启本身是触发器**:越积越多的引擎落地 × 在飞票 = 每次重启都在赌"哪些票的历史能被新码重放"。
+>
+> **出路(实现口径归修复票/运维口径归宿主)**:
+> ①**纪律**:凡改动工作流"已走过位置会看到"的命令(尤其插入新活动调用),**必须带 `workflow.patched(...)` 守卫**——本仓已有先例(CL-1 缺守卫那次);
+> ②**运维**:重启 worker 前先看**在飞票的历史起点 vs 待生效的引擎落地**,或**分队列分批重启**(空队列的先重启),避免"新码撞旧历史";
+> ③**判据**:巡检/守望应把 `Workflow Task in failed state` 与 `no_poller` **升级为具名发现**(现在只是查询期错误文本),并**区分**"没 poller(可补 worker)"与"任务失败(补 worker 也白搭)";
+> ④**reconcile 面**:读不到快照时**不得**直接当僵尸释放槽位(应标"不可判"并留痕),否则并发账目会撒谎。
+>
+> **回归**:L3——造"历史在旧码下创建、worker 换新码"的形态,断言(а)工作流任务失败被**具名发现**;(b)reconcile 对不可判票**不释放槽位**;(c)带 patch 守卫的同类改动**不**触发失败(正例)。
