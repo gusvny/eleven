@@ -47,6 +47,8 @@ related:
 | Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
 | **Record what cannot be derived; derive what can** | the state a landing sat on and the range a certification continued from are **not** stored — both are derived from the certification ledger's order | Proposed; `base` and `covered_from` were dropped for this reason (261009) |
+| **A record's own `at` is when that fact happened** | the freeze's opening record carries `at`; there is no `opened_at`, and no `closed_at` — the closing is a record of its own with its own `at` | Proposed; `opened_at` / `closed_at` were dropped for this reason (261009) |
+| **An entity carries only what was true when it came into being; everything after is another record keyed to it** | a freeze opens with its cause and its candidate set; an attribution change, a closure and a reopening are three further records | Proposed; the freeze episode and the inspection period were written as entities with mutable fields and are corrected below |
 | **A summary lives with the data it summarises** | a run's counts, environment, width and duration are fields of the **run** record; a certification cites the run instead of restating it | The test for a summary: would a reader be forced to open the raw body to make a decision they make daily? and can it be checked against the body? If yes it is kept — **at the level of the data, not one level up**. Anything that fails both tests is duplication (`base`, dropped) |
 | A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 | **A landing is one act over every repository it names: all or nothing** | see the multi-repository example under *landing* | Proposed — see below for why a partial landing is not an option |
@@ -131,34 +133,64 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 - **No verdict on the certification.** A certification whose run came back red is still a certification — that is how a freeze gets opened — and the verdict is read from the run. Carrying a second verdict here would be a second answer to one question.
 - **One run can back more than one certification.** A green row is reusable when the commit, the fingerprint and the width all match, so an unchanged candidate can be re-certified without re-running, and a re-certification cites the same run rather than restating it. That is why runs are records in their own right rather than fields of a certification.
 
-### freeze episode — "why is nothing landing on this line, and who is fixing it?"
+### freeze episode (entity) — "why is nothing landing on this line, and who is fixing it?"
+
+What is true when the freeze opens:
 
 ```json
 {
   "id": "frz-261009-03",
   "line": "default",
-  "opened_at": 1791508600000,
-  "opened_by": "cert-261009-14",
+  "cause": "cert-261009-14",
   "culprit_candidates": ["t261008-45", "t261008-46"],
-  "attribution": "boundary, culprit not isolated",
-  "state": "open",
-  "closed_at": null,
-  "closed_by": null,
-  "reopened_reason": null
+  "seq": 41078,
+  "at": 1791508600000
 }
 ```
 
 | Field | Example value | Why it is there |
 |---|---|---|
-| `id` | `frz-261009-03` | A thing with a lifetime, not an event: "why is nothing landing" must be answerable while it is open |
+| `id` | `frz-261009-03` | A thing with a lifetime: "why is nothing landing" must be answerable while it is open |
 | `line` | `default` | A freeze is per line — one line's red does not stop another's landings |
-| `opened_at` | `1791508600000` | When the line stopped; with `closed_at`, **how long it was stopped** |
-| `opened_by` | `cert-261009-14` | The certification that caused it: the freeze **points at its cause** instead of saying "something is red" |
+| `cause` | `cert-261009-14` | The certification that stopped the line: the freeze **points at its cause** instead of saying "something is red" |
 | `culprit_candidates` | `["t261008-45", "t261008-46"]` | The landings inside the covered range — **deliberately a set**, narrowed later |
-| `attribution` | `isolated: t261008-45` / `boundary, culprit not isolated` | The design requires that the second sentence be sayable |
-| `state` | `open` / `closed` | Current state, held as its own record rather than by editing the episode |
-| `closed_at` / `closed_by` | `1791515000000` / `t261009-04` | When and by what remedy the line reopened |
-| `reopened_reason` | `null` / `the remedy did not hold` | If the same content red comes back |
+| `seq` / `at` | `41078` / `1791508600000` | Its place in the ledger's order, and **the moment it opened**. That is what `at` means on every record; a field called `opened_at` would be the same instant under a different name |
+
+Everything that happens to it afterwards is **another record keyed to it**, because a fact is never edited:
+
+```json
+{
+  "freeze": "frz-261009-03",
+  "change": "attribution",
+  "value": "isolated: t261008-45",
+  "by": "integration",
+  "reason": "the per-line results pointed at one landing",
+  "seq": 41081,
+  "at": 1791509900000
+}
+```
+
+```json
+{
+  "freeze": "frz-261009-03",
+  "change": "closed",
+  "by": "t261009-04",
+  "reason": "the remedy landed and certified",
+  "seq": 41102,
+  "at": 1791515000000
+}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `freeze` | `frz-261009-03` | Which episode this is a change to |
+| `change` | `attribution` / `closed` / `reopened` | The kind of change. Three, and no more are needed |
+| `value` | `isolated: t261008-45` / `boundary, culprit not isolated` | For an attribution change: **the design requires that the second sentence be sayable** |
+| `by` | `integration` / `t261009-04` | For a closure: the remedy that reopened the line. For a reopening: whoever decided |
+| `reason` | `the remedy landed and certified` | Mandatory, as on every record |
+| `seq` / `at` | `41102` / `1791515000000` | Order, and when the change happened |
+
+**So there is no `state`, no `closed_at`, no `closed_by` and no `reopened_reason` on the episode** — writing the closure into the opening record would be editing a fact, and a field called `closed_at` sitting next to an `at` that means "opened" is the same instant under a second name. State, age and attribution are all **derived**: the state and the attribution are the latest change of that kind, and "how long was the line stopped" is the closing record's `at` minus the opening record's `at`. A freeze that never closes has no closing record, which is exactly what "still stopped" should look like.
 
 ### batch — "what did a person approve, and what did main become?"
 
@@ -628,23 +660,31 @@ Current state, read as a whole under a lock. Reasons seen: `running`, `human-hol
 
 Levels seen: `redline`.
 
-### inspection period (entity) — "what did this period do, and was its outcome served, voided or re-run?"
+### inspection period (entity) — "what did this period do, and what became of it?"
 
 ```json
 {
+  "id": "insp-docs-sync-20261007",
   "instance": "docs-sync",
   "period": "20261007",
   "ticket": "t261009-05",
-  "state": "voided",
-  "disposition": {
-    "who": "integration",
-    "reason": "blocked by a red line",
-    "at": 1791520000000
-  }
+  "seq": 41055,
+  "at": 1791400000000
 }
 ```
 
-States: `blocked` / `completed` / `voided`.
+```json
+{
+  "period": "insp-docs-sync-20261007",
+  "change": "voided",
+  "by": "integration",
+  "reason": "the line was frozen for the whole period",
+  "seq": 41120,
+  "at": 1791520000000
+}
+```
+
+Same shape as the freeze episode, for the same reason: the period comes into being when its ticket is opened, and `blocked` / `completed` / `voided` are changes to it, not fields that get rewritten. The `change` values in use today are `blocked`, `completed`, `voided` and `re-run`, and a disposition carries `who` and `reason` exactly as above.
 
 ## E. Ticket truth
 
