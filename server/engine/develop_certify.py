@@ -35,6 +35,19 @@ What this module owns:
   opens nothing (goal 24: the freeze rule keys on content red, never on an
   unavailable proof).
 
+- The **waiting faces** (t261009-21, design goals 8/14/15/16):
+  ``freeze_state``, ``ticket_wait_state``, ``may_land`` and ``needs_slot``
+  are PROJECTIONS of the same records, never stored state. A waiting ticket
+  is dated (``waiting_since``), names the certification it waits for, and
+  never reads as ``red_implicated`` — the design doc's three look-alikes
+  ("waiting", "red and implicated", "reverted") are distinct by
+  construction. ``needs_slot`` answers the scheduler's one question:
+  waiting holds no capacity (goal 15 — if waiting held a slot, one tick
+  would pin the whole fleet). ``may_land`` judges the freeze exemption as a
+  caller-declared structural fact (goal 17), never a self-set flag. Like
+  ``should_certify``, these deliver decisions; the scheduler call sites
+  belong to a later ticket.
+
 Dependency seams (the dispatch's "write against concepts" rule): T1.1's
 line/landing records and T0.1's run record are consumed as plain record
 dicts passed in by the caller — this module never guesses their wiring; the
@@ -603,6 +616,158 @@ def should_freeze(attribution_value):
     """A freeze opens only when the red implicates content. ``could not
     run`` is not a red — it grows the range instead (goal 24)."""
     return bool(attribution_value)
+
+
+# ---- the waiting faces (t261009-21: goals 8 / 14 / 15 / 16) ----------------
+# Projections of the delivery ledger, same discipline as derive_range: the
+# records' order is authoritative, nothing here writes a field onto any row
+# (the culprit range AND the wait are derived, never stored).
+
+WAIT_WAITING = "waiting"
+WAIT_CERTIFIED = "certified"
+WAIT_RED_IMPLICATED = "red_implicated"
+WAIT_REVERTED = "reverted"  # reserved: needs the relation records (later
+# ticket); unreachable today and stated as such, never faked.
+
+FREEZE_EXEMPT_KIND = "fix"
+"""The one ticket kind that may land on a frozen line. Being exempt is a
+property of HOW THE WORK WAS OPENED (the fix workflow, goal 17) — the caller
+declares it from the relation record, this face only judges it; no landing
+can acquire it by writing a field about itself."""
+
+LANDABLE_KINDS = (FREEZE_EXEMPT_KIND, "chore")
+"""The lane version's declared ticket kinds that ever land. A kind outside
+the declaration is refused by name on a frozen line — a typo of the exempt
+kind must not read as "the freeze says no" and silently deadlock the real
+fix; the vocabulary grows by declaration, not by use."""
+
+
+def freeze_state(rows, line):
+    """Read a line's freeze from the records alone: the latest episode is
+    the live one; its state is replayed from its change records by seq
+    (open at creation, ``closed`` closes, ``reopened`` opens again). The
+    culprit is the episode's latest ``attribution`` value — including the
+    honest boundary sentence, passed through verbatim. No freeze field is
+    ever written onto a landing or a certification by this face."""
+    episodes = _of_kind(rows, KIND_FREEZE, line)
+    if not episodes:
+        return {"frozen": False, "episode": None, "cause": None,
+                "culprit": None, "closed_at": None}
+    ep = episodes[-1]
+    frozen, closed_at = True, None
+    culprit = None
+    for ch in _of_kind(rows, KIND_FREEZE_CHANGE, line):
+        if ch.get("freeze") != ep["id"]:
+            continue
+        if ch.get("change") == CHANGE_CLOSED:
+            frozen, closed_at = False, ch["at"]
+        elif ch.get("change") == CHANGE_REOPENED:
+            frozen, closed_at = True, None
+        elif ch.get("change") == CHANGE_ATTRIBUTION:
+            culprit = ch.get("value")
+    return {"frozen": frozen, "episode": ep["id"], "cause": ep["cause"],
+            "culprit": culprit, "closed_at": closed_at}
+
+
+def may_land(rows, line, ticket_kind):
+    """May this kind of ticket land into ``line`` now? An unfrozen line
+    takes every declared kind. A frozen line takes only the structurally
+    exempt fix kind (goal 16/17) — judged from the records, never from a
+    ticket's own claim. An undeclared kind is refused by name, never
+    guessed into an exemption NOR into a silent no (a misspelled fix kind
+    on a frozen line would deadlock the fix without a trace)."""
+    if not isinstance(ticket_kind, str) or not ticket_kind.strip():
+        raise CertifyError("ticket_kind_missing")
+    if ticket_kind not in LANDABLE_KINDS:
+        raise CertifyError("ticket_kind_undeclared:%r" % (ticket_kind,))
+    return (not freeze_state(rows, line)["frozen"]) \
+        or ticket_kind == FREEZE_EXEMPT_KIND
+
+
+def ticket_wait_state(rows, line, landing, is_green, now_ms,
+                      wait_bound_ms=None):
+    """The waiting ticket's face, derived from the records (goal 14/16).
+
+    Returns a dict: ``state`` (waiting / certified / red_implicated /
+    reverted-reserved), ``waiting_since`` (the landing's own ``at`` — the
+    record order decides, not a clock race), ``waiting_for`` (the id of the
+    certification this landing is queued behind — the line's latest one; None
+    while none exists yet), ``covered_by`` (the green certification id that
+    ended the wait, if any), and ``overdue`` (True only once the wait has
+    outlived the declared ``wait_bound_ms`` — surfaced, not silently
+    tolerated; the patrol consumes it once the surfaces exist).
+
+    ``waiting`` and ``red_implicated`` never look the same: implicated means
+    the landing sits in the derived range of a RED certification on this
+    line; waiting means the covering certification simply has not arrived.
+
+    ``is_green`` is the same injected run reader ``landable`` takes. Here the
+    loud contract is stricter: once the line has ANY certification, a caller
+    that cannot read runs must say so with a callable that answers honestly
+    — ``None`` reads as a plausible default (every cert green) and is refused
+    by name. A caller with no certification on the line may pass None: there
+    is nothing to misread yet.
+    """
+    if not isinstance(landing, dict) or landing.get("kind") != KIND_LANDING:
+        raise CertifyError("landing_not_landing")
+    if landing.get("line") != line:
+        raise CertifyError("landing_not_on_line")
+    if not isinstance(now_ms, int) or isinstance(now_ms, bool):
+        raise CertifyError("now_ms_not_ms")
+    if wait_bound_ms is not None and (not isinstance(wait_bound_ms, int)
+                                      or isinstance(wait_bound_ms, bool)
+                                      or wait_bound_ms <= 0):
+        raise CertifyError("wait_bound_not_positive_ms")
+    certs = _of_kind(rows, KIND_CERT, line)
+    if certs and not callable(is_green):
+        raise CertifyError("is_green_not_injected")
+
+    def _green(cert):
+        return bool(is_green(cert["run"])) if callable(is_green) else True
+
+    base = {"waiting_since": landing["at"], "waiting_for": None,
+            "covered_by": None, "overdue": False}
+    # red_implicated: in the derived range of a red certification (goal 16's
+    # "red and implicated" — distinct from plain waiting by construction).
+    for cert in certs:
+        if _green(cert):
+            continue
+        if any(l["id"] == landing["id"]
+               for l in _red_range(rows, line, cert)):
+            return dict(base, state=WAIT_RED_IMPLICATED,
+                        waiting_for=cert["id"])
+    if landable(rows, line, landing, is_green=is_green):
+        covered = [c for c in certs
+                   if _green(c)
+                   and {r["repo"]: r["revision"] for r in c["repos"]}
+                   == {r["repo"]: r["revision"] for r in landing["repos"]}]
+        return dict(base, state=WAIT_CERTIFIED,
+                    covered_by=covered[-1]["id"])
+    last = certs[-1] if certs else None
+    state = dict(base, state=WAIT_WAITING,
+                 waiting_for=last["id"] if last else None)
+    if wait_bound_ms is not None and now_ms - landing["at"] >= wait_bound_ms:
+        state["overdue"] = True
+    return state
+
+
+def needs_slot(state):
+    """Does this ticket face hold a concurrency slot? No face of a landed
+    ticket does (goals 14/15): waiting holds none — that is the stall this
+    design removes; ``red_implicated`` also keeps *waiting* for the
+    certification that finally covers it; ``certified`` and ``reverted``
+    are ends — the ticket's life is over, there is nothing left to
+    schedule. The whitelist is the seam: a state the scheduler does not
+    know is refused by name, never defaulted into (or out of) capacity. A
+    future working state would have to be added here on purpose."""
+    if not isinstance(state, dict):
+        raise CertifyError("wait_state_not_face")
+    s = state.get("state")
+    if s == WAIT_WAITING or s == WAIT_RED_IMPLICATED:
+        return False
+    if s == WAIT_CERTIFIED or s == WAIT_REVERTED:
+        return False
+    raise CertifyError("wait_state_unknown:%r" % (s,))
 
 
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------

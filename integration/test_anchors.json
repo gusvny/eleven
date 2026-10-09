@@ -4353,6 +4353,11 @@
    "anchor": "behaviour",
    "note": "t261009-19 bounded red journey: the ladder answers rerun before any search, a unique per-lane hit isolates for free, a one-landing range isolates by arithmetic, an unfiltered multi-landing range reaches search and its range_key recorded as a searched change refuses the same range by name (goal 10), the boundary sentence is recordable as an attribution change; freeze episode carries only id/line/cause (state/culprit/closure are keyed change rows, should_freeze false for no attribution); a missing or zero-run header raises CouldNotRun and lands a range-growth row with no freeze row (goal 24); garbage red_cert/lane_reds shapes raise CertifyError by name",
    "sync_path": ""
+  },
+  "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
+   "anchor": "behaviour",
+   "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
+   "sync_path": ""
   }
  }
 }
