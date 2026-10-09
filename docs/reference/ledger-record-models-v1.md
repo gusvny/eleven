@@ -692,6 +692,26 @@ Closing it is a fact of its own, and it is decided by evidence rather than by a 
 
 **Today**: produced by the inspection agent; the id is minted from the content and stable across periods, and the evidence is verified mechanically. Where the entity is *stored* is **not settled** (see open questions).
 
+#### How a finding's id is minted, exactly
+
+The engine mints it, never the agent — the agent cannot influence its identity beyond what it writes in the subject and where it says the evidence is. The recipe (read from the implementation, not from a description of it):
+
+```
+parts = [ fold_whitespace(subject) ]                     # the rule + object naming string
+      + sorted, deduplicated { normalise(path) + "\x1f" + line }   # one per evidence entry
+id    = sha256(join(parts, "\x1e")).hexdigest()[:8]      # 8 hex characters
+```
+
+**What is in the identity, and what is deliberately out.** In: the **subject** and the **set of evidence locations** `(path, line)`. Out: the `why`, the quotes as written, the `suggestion`, and the `severity` — so a finding that is re-worded or re-graded next period **keeps its id**, which is what makes deduplication across periods and across faces hold. The path is normalised (backslashes to slashes, `./` dropped, trimmed) and the subject has its whitespace folded, so cosmetic differences do not mint a new identity.
+
+**Three consequences that are real and worth watching:**
+
+- **The subject carries the identity, and the subject is written by a language model.** If next period's agent names the same problem differently, the id changes and the problem looks new — deduplication is exactly as stable as the model's naming habits. Everything else was left out of the hash on purpose, so there is nothing to fall back on.
+- **A finding with no machine-readable evidence collapses to its subject.** Non-dict evidence entries (some faces report prose) carry no location, so they are skipped, and two different problems with the same subject would share an id. The choice was deliberate — never raise on malformed input — but it means the identity's strength varies by face.
+- **The id is truncated to eight hex characters — 32 bits.** Collisions are improbable today and merge two different findings into one when they happen, silently. **Widening the truncation to sixteen characters costs nothing and removes the question**; the id is compared and printed, never typed, so length is free here.
+
+The same rule the delivery side arrived at shows up here from the other end: **identity is minted from meaning, not from a moment** — which is why a finding may never be given a ULID.
+
 ### finding observation (fact) — "is it still there, and for how long has it been?"
 
 **What it is for, in one line: the period records the findings it produced, and the observation is the link that says *this finding was seen again, in this period***. Without it, every period starts from zero as far as the record is concerned: the ids are minted from content, so the *same* finding does keep its id across periods, but **nothing states that it was seen again** — a reader would have to open several period tickets and compare id lists by hand.
