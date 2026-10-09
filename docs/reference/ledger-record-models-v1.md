@@ -50,7 +50,7 @@ related:
 | A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 | **A landing is one act over every repository it names: all or nothing** | see the multi-repository example under *landing* | Proposed — see below for why a partial landing is not an option |
 
-**The older time shapes (kept for reading, not for writing):** `at` as integer milliseconds (executor actions, requests, alerts, grants audit); `ts` as float seconds (capacity limit audit); `at` as float seconds (inspection reviewed-paths); `ts` as an ISO string with offset (run results).
+**The older time shapes (kept for reading, not for writing):** `wall_s` as a duration in seconds (run results, and the certification examples before the rename above); `at` as integer milliseconds (executor actions, requests, alerts, grants audit); `ts` as float seconds (capacity limit audit); `at` as float seconds (inspection reviewed-paths); `ts` as an ISO string with offset (run results).
 
 ## A. Delivery records (proposed — the buffer flow)
 
@@ -110,7 +110,7 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
   "ran": {
     "suite": "full",
     "scenarios": 445,
-    "wall_s": 2132
+    "duration_s": 2132
   },
   "env_fp": "0febeeb6da6b25dc...",
   "env_reds": ["t260916-25"],
@@ -132,14 +132,18 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 | `tickets` | `["t261008-45", "t261008-46"]` | Which tickets' landings are inside the covered range: what lets a batch say whom it delivers |
 | `ran.suite` | `full` / `fast-set` | Which proof was run |
 | `ran.scenarios` | `445` | How much was run — evidence for arguing the fast set's membership |
-| `ran.wall_s` | `2132` | What the proof cost |
-| `env_fp` | `0febeeb6da6b25dc...` | Environment fingerprint: two runs in different environments are not comparable |
+| `ran.duration_s` | `2132` | What the proof cost, **in seconds** (≈ 35 minutes here). Named for what it is rather than after the clock it was read from — `wall_s` said "wall-clock seconds" and nobody should have to know that. The existing run-result rows still carry `wall_s`; see the older shapes below |
+| `env_fp` | `0febeeb6da6b25dc...` | **What makes two runs comparable at all** — a hash of the toolchain versions and the test-protocol libraries, so a result can be reused or trusted only when this matches. Read the honest caveat below: it covers less than the name suggests |
 | `env_reds` | `["t260916-25"]` | Failures that were environmental — **never counted as content reds** ("could not run" is not "red") |
 | `booked_red` | `known-red-baseline@2026-10-04` | Which expected-red list this judgement used: what tells a new red from a known one |
 | `verdict` | `green` / `red` | The outcome |
 | `driver` | `integration/run_scenarios.py` | What produced it |
 | `at` | `1791508600000` | Milliseconds since the epoch |
 | `evidence` | `ledger/scenario-results.jsonl#run-261009-14` | A reference to the raw rows, not the rows themselves |
+
+**What `env_fp` actually covers, and what its name oversells.** It is a hash over three things: the Python version, the Node version (or `absent`), and the content of four test-protocol files under the integration tree. Both the gate side and the executor side compute it with the same key set and the same algorithm on purpose, and the key set deliberately excludes ticket-specific and temporary-path values, so that two runs do not differ merely because a different ticket ran.
+
+What that buys: a previous row may be **reused or trusted as evidence** for the current run only when the commit, this fingerprint **and** the concurrency width and pool all match — which is why `conc_width` and `pool` sit beside it in the run results rather than inside it. What it does **not** cover: the container images, the browser build, the OS, the machine. So "same fingerprint" means "same toolchain and same test protocol", not "same world" — and a red that a different browser build caused will still share a fingerprint with a green run. Either the key set grows (image digest, browser version) or the name should say what it hashes; today the name promises more than it checks.
 
 ### freeze episode — "why is nothing landing on this line, and who is fixing it?"
 
