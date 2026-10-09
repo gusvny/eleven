@@ -17,7 +17,7 @@ related:
     note: the relation records and their rules
   - mode: dependency
     target: ../design/develop-buffer-v1.md
-    note: the delivery records (landing, certification, promotion, freeze, revert)
+    note: the delivery records (landing, certification with its run, promotion, freeze episode) — and why a withdrawal is work rather than a record
 ---
 
 # Ledger Record Models v1 (what the ledgers store, and how)
@@ -237,48 +237,26 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 | `note` | `two engine-hardening landings` | The human's own words about what this promotion is |
 | `at` | `1791512000000` | Milliseconds since the epoch |
 
-### revert — "this content was withdrawn; where does it still live?"
+### withdrawal is work, not a record (priority lowered by the host, 261009)
 
-**The story it exists for.** A ticket's landing, `A`, was promoted to `main`. Later `A` turns out to be bad. The fast way to protect the delivered line is to **withdraw** it — commit the undo on `main` — and then fix it properly with a new ticket. But the withdrawal only undoes `A` **where the undo was made**. Any other line that already merged `A` — say the `ui` line merged `default` before the withdrawal — still carries it, and nothing tells anyone: git records what happened to *that branch*, not that a change is now unwelcome everywhere.
+The original design had a **revert** record: which landing was withdrawn, where the withdrawal was made, and which lines still carried it. The host's call is simpler and better, and it removes a record type:
 
-Whether `A` comes back on a later promotion is genuinely subtle and depends on mechanics a person should not have to reason about: if the line holds **the same commit** that was withdrawn and the undo sits in the merge base, a merge usually keeps it withdrawn; if the line holds the same *content* as a different commit (a squash or a cherry-pick), or if a later landing touches those same lines, the change can come back, and git will not say so. **The record exists so that this stops being a bet on merge behaviour**: it names the withdrawn landing, names the lines still carrying it, and gives each line an obligation it must discharge — visible on its face rather than remembered.
+**If something must be withdrawn, open a ticket whose change is the undo.** It is a ticket like any other — its content lands, is certified and is promoted — and it is a **remedy ticket**, which is the same shape the buffer design already gives to a red that implicates a landing. What the revert record was carrying turns out to be derivable or already covered:
 
-```json
-{
-  "id": "rev-261009-01",
-  "landing": "ldg-261009-0007",
-  "on": "main",
-  "at": 1791515000000,
-  "by": "host",
-  "reason": "the lazy-path rewrite renamed a public constant",
-  "implicated_lines": ["default", "ui"]
-}
-```
+| What the record carried | Where it lives instead |
+|---|---|
+| Which piece of content was withdrawn | A **relation**: this ticket exists to withdraw that landing (the same relation vocabulary, with the outcome recorded as "withdrawn" rather than "fixed forward") |
+| Where the withdrawal was made (`main` or a line) | Where the withdrawal's own landing happened — the ordinary landing record says it |
+| Which lines still carry it | Derived: the lines whose history contains that landing |
+| Whether a line has actually let go | **Not a stored state at all — a check.** A promotion must not re-introduce a patch that was withdrawn, and that is answered by comparing content at promotion time (patch identity), not by a per-line flag that someone has to remember to update |
+| "Closed" versus "delivered" for the affected ticket | The projection: `reverted_at` is derived from the withdrawal's relation plus the promotion that carried it |
 
-The withdrawal is itself content: it lands like anything else and is judged like anything else, so a withdrawal is never a silent edit. And fixing the defect properly stays a **new ticket** — the withdrawal only buys the delivered line time.
+Two things must survive this simplification, or the guard is lost:
 
-Each of those lines then discharges the obligation **in its own record** — git will not do it for them:
+1. **The withdrawal is recorded as a relation**, not just as a diff. A revert commit's message is not a fact the flow can read; the relation is what the promotion check consults, and it is recorded by whoever decided to withdraw (a judgement, with a name and a reason, like any attribution).
+2. **The promotion check must actually use it**: refuse — or at minimum name — a candidate that re-introduces the patch of a withdrawn landing. Without that check, the simplification is real and the guard is gone.
 
-```json
-{
-  "revert": "rev-261009-01",
-  "line": "ui",
-  "change": "applied",
-  "by": "integration",
-  "reason": "the line no longer carries the withdrawn landing",
-  "at": 1791519000000
-}
-```
-
-| Field | Example value | Why it is there |
-|---|---|---|
-| `id` | `rev-261009-01` | The withdrawal is a fact about a landing |
-| `landing` | `ldg-261009-0007` | The obligation attaches to **a specific piece of content**, not to a file or a ticket |
-| `on` | `main` / `default` | Withdrawing from `main` protects the delivered line and leaves every line that carries the content with an obligation; withdrawing on a line undoes it there and matters to `main` only if it was promoted. The two are different acts, and the record says which one happened |
-| `at` / `by` | `1791515000000` / `host` | When, and who decided |
-| `reason` | `the lazy-path rewrite renamed a public constant` | Why the content had to go |
-| `implicated_lines` | `["default", "ui"]` | **The point of the record**: every line that still carries the withdrawn landing is named. Not because git is guaranteed to re-introduce it, but because whether it does depends on merge mechanics nobody should have to bet on — and because the lines, not the withdrawal, are what somebody must act on |
-| *(the discharge)* | a record per line, `change: applied` | Whether a line has actually let go of the content is a change keyed to the revert, not a field on it — the same rule as everywhere else, and the states in use are `applied`, `pending` and `line retired` |
+What this costs: nothing in correctness, and one thing in presentation — a reader who wants "which lines still carry the withdrawn change" asks for a computation instead of reading a field. That is the same trade the rest of this document already makes.
 
 ### ticket outcome — "where did this ticket end up?"
 
@@ -314,7 +292,7 @@ Waiting for a certification:
 | `landed_at` | `9f3c2a1b` / `null` | The content it put on the line, if it has landed |
 | `certified_by` | `cert-261009-14` / `null` | The certification covering its landing — this, not delivery, is where the ticket's life ends |
 | `delivered_in` | `prom-261009-02` / `null` | The promotion that carried it; `null` is normal and is **not** a defect |
-| `reverted_at` | `null` / `1791515000000` | Set when the content it landed was withdrawn |
+| `reverted_at` | `null` / `1791515000000` | Derived from the withdrawal ticket's relation plus the promotion that carried its content — a withdrawal is work, not a record |
 | `waiting_since` | `1791510000000` / `null` | **What tells "waiting" apart from "stuck"**: a waiting ticket has a start time and a certification it is waiting for |
 
 **It is not a record in the fact ledger.** It has no `id`, no `seq` and no `at` of its own, because it has no moment of its own — it is a function of the landings, certifications, promotions and reverts. Where a projection is *kept*, it is kept as a **derived view**, and three rules come with that:
