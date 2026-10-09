@@ -44,6 +44,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 import { findProject, primaryDir, type ProjectEntry } from '../../project-registry.ts'
 import { diffBlocks } from './src/shared/blocks.ts'
 import {
@@ -99,7 +100,9 @@ async function readJsonBody(req: IncomingMessage): Promise<any> {
 }
 
 export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
-  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
+  // t261008-33: shared anchor chain (config.repo -> SANDBAR_REPO -> DEFAULT_REPO) + escape
+  // guard (SANDBAR_ANCHOR_MISMATCH before any write) — see repo-anchor.mjs.
+  const repo = resolveRepo(config?.repo, DEFAULT_REPO)
   const python = config?.python ?? 'python3'
   const timeoutMs = config?.timeoutMs ?? 30_000
 

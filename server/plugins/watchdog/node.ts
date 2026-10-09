@@ -26,6 +26,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile, readdir } from 'node:fs/promises'
@@ -699,8 +700,20 @@ export function makeEngineProbe(port: number = ENGINE_PORT): () => Promise<{ onl
 }
 
 export function apply(ctx: Context, options: WatchdogPluginConfig = {}): void {
-  const repo = options.repo ?? process.env.SANDBAR_REPO ?? defaultRepo()
-  if (process.env.SANDBAR_REPO === undefined) process.env.SANDBAR_REPO = repo // Watchdog.ledgerDir 缺省推导用
+  // t261008-33: shared anchor chain + escape guard (repo-anchor.mjs) — this plugin
+  // resolves and guards its OWN tree's anchor here, per-process.
+  // Rework (t261008-33 gen13, arbitration round 6): the former set-when-absent
+  // `process.env.SANDBAR_REPO = repo` is REMOVED. The stage container mounts TWO
+  // plugin trees (/repo tested worktree + /repo-nm node_modules tree) and the cordis
+  // loader initialises entries in PARALLEL — whichever tree applied first wrote ITS
+  // root into the process env, and the other tree's consumers were then refused by
+  // the guard at apply: the console died at boot (SUPPLY_ASSEMBLY_FAILED ×3). A
+  // process-global env write carrying a tree identity is cross-tree poison under
+  // multi-tree loading. Nothing needs it: Watchdog.ledgerDir's default derivation
+  // (SANDBAR_EVENT_LEDGER_DIR / projectsRoot → instanceSandbarRoot) has not read
+  // SANDBAR_REPO since t261001-12, and every consumer in this process now keeps
+  // its own tree's anchor (per-process anchor discipline, this ticket's own rule).
+  const repo = resolveRepo(options.repo, defaultRepo())
 
   const watch = new Map<string, Watchdog>()
   const wakeIo = makeWakeIo(ctx)

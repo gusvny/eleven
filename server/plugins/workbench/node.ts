@@ -133,6 +133,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 import type { Context } from '@deepseek-ai/cordis'
 import { runAdminCli } from '../../sandbar-tools.ts'
 import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../../project-registry.ts'
@@ -362,7 +363,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   // repo 语义（KI-057 改判后）：默认仓/回落值——boot 指纹、docs 视图、项目注册表、
   // runProjectCli、runPocCli 等引擎语义面仍锚它；项目工单路由逐请求经 anchorOf 解析
   // 项目主目录，不再直接消费本值。
-  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
+  // t261008-33: shared anchor chain (config.repo -> SANDBAR_REPO -> DEFAULT_REPO) + escape
+  // guard (SANDBAR_ANCHOR_MISMATCH before any write) — see repo-anchor.mjs.
+  const repo = resolveRepo(config?.repo, DEFAULT_REPO)
   const logger: { warn?: (...a: unknown[]) => void } | undefined = (ctx as any)?.logger
   // host 陈旧看守（t260902-03）：boot 指纹只在首次 apply 固化（见模块级注释的不变量）。
   void resolveBootFingerprint(repo)

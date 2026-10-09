@@ -622,10 +622,20 @@ def test_i1_new_knobs_in_test_stub_family():
 
 
 def test_i2_strip_face_single_discipline_source_lock():
-    # verify_lane 子进程 env 与移交命令子进程 env 同一句剥除判据（两处，不多不少）
+    # verify_lane's child env and the handover-command child env share one strip
+    # criterion. t261008-33 upgrade: the literal criterion now lives in exactly
+    # one place (integ_subprocess_env - this ticket's "single point, no second
+    # drift-prone list" rule); verify_lane and the handover command go through
+    # lane_subprocess_env (same strip face + anchor injection). The lock moves
+    # from "two identical literals" to "single source + both lane spawn faces
+    # via the lane single point" - same semantics, one strip criterion.
     src = _src("agent_activities.py")
     assert src.count("if k not in TEST_STUB_ENV_KNOBS and "
-                     "k not in WORKER_ROUTING_ENV_KNOBS") == 2
+                     "k not in WORKER_ROUTING_ENV_KNOBS") == 1
+    assert src.count("def lane_subprocess_env(") == 1
+    assert src.count('lane_subprocess_env(sc["tree"])') == 1      # verify_lane face
+    # handover face + surface-plan query face (t261008-33: both lane-rooted at cwd)
+    assert src.count("env = lane_subprocess_env(cwd)") == 2
 
 
 def test_i3_leg_timeout_is_capacity_not_verdict_relaxation():

@@ -994,3 +994,39 @@ Canonical home note: the knowledge-base mirror of this rule belongs in
 write set and the commit sweep cannot land it (observed twice, t261006-19 implement gen0/gen1);
 the mirror copy moves with the next docs-enabled ticket — booked as a debt for the integration
 role. This section is the landed engine face of record.
+
+## Repo anchor discipline (t261008-33)
+
+`SANDBAR_REPO` is per-process anchor state and is never inherited across an engine
+spawn boundary. Every engine env built for a LANE ticket goes through
+`agent_activities.lane_subprocess_env(lane_root, extra)` — the single composition
+point: it reuses the `integ_subprocess_env` strip face (which strips
+`shared.ANCHOR_ENV_KNOBS = ("SANDBAR_REPO",)` as its own family, beside
+TEST_STUB/WORKER_ROUTING, never folded into them) and then pins the anchor to the
+lane root. Wired faces: verify_lane spawn, gate-round scenario runs, handover
+commands, the agent spawn path (worktree cwd → lane root, otherwise stripped), ui
+evidence capture, the surface-plan query and the reprobe probe. The variable's
+documented escape-hatch purpose (server/README.md) is unchanged; the resolution
+order `config.repo -> SANDBAR_REPO -> location-derived` is unchanged.
+
+The escape guard (scope narrowed in the gen6 rework): a process whose own tree is
+a git LINKED worktree (`.git` is a gitfile) is lane work; if its ENV-SOURCED
+anchor (`SANDBAR_REPO` inherited across the spawn boundary — the 261008 incident
+class) resolves outside its own tree it fails LOUDLY with
+`SANDBAR_ANCHOR_MISMATCH` BEFORE any write, naming both roots and where each came
+from. A deliberate `config.repo` anchor (the documented primary seam: external
+callers and test fixtures such as the t260907-11 workbench-anchor family) passes
+like the escape hatch does — it is explicit in code, not inherited state. No plugin-family
+code may write a tree identity into `process.env.SANDBAR_REPO` (rework gen13:
+the watchdog set-when-absent write was removed — under the stage container's
+parallel dual-tree plugin loading it wrote one tree's root into the process env
+and the other tree's consumers were refused at apply, crashing the console at
+boot); source lock: `test_no_process_global_anchor_env_writer`. Verdict single point: `shared.anchor_guard_error`
+(Python) mirrored by `server/plugins/repo-anchor.mjs` (TS/ESM consumers); parity
+pinned by `tests/test_t261008_33_anchor_discipline.py`. A standalone checkout
+(`.git` is a directory) keeps honouring an explicit anchor — external callers and
+unusual layouts are unaffected. Deferral (review R1, verbatim): guard coverage of
+`server/sandbar-tools.ts` is knowingly INCOMPLETE in this ticket — that consumer
+relies on the corrected engine env alone until the follow-up ticket lands its
+two-line migration; the integration gate must not sign this ticket as "family
+fully guarded".

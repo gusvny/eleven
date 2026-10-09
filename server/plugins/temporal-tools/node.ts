@@ -28,6 +28,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync,
 import net from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -469,7 +470,9 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
 }
 
 export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) | void {
-  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
+  // t261008-33: shared anchor chain (config.repo -> SANDBAR_REPO -> DEFAULT_REPO) + escape
+  // guard (SANDBAR_ANCHOR_MISMATCH before any write) — see repo-anchor.mjs.
+  const repo = resolveRepo(config?.repo, DEFAULT_REPO)
   const python = config?.python ?? join(pocDir(repo), '.venv', 'bin', 'python')
   const timeoutMs = config?.timeoutMs ?? 120_000
   const clientPy = join(pocDir(repo), 'client.py')

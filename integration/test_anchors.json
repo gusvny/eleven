@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 234,
-      "scenarios": 596
+      "engine_tests": 235,
+      "scenarios": 599
     },
     "vocab": [
       "behaviour",
@@ -1176,6 +1176,11 @@
       "anchor": "behaviour",
       "note": "t261008-37 CL-2b: engine concurrency-limit write entry (set_limit truth table, zero-side-effect on refusal, rollback, spawn contract)",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_33_anchor_discipline.py": {
+      "anchor": "contract",
+      "note": "t261008-33: engine env single point (ANCHOR_ENV_KNOBS strip + lane_subprocess_env) and the anchor guard verdict; decision-table parity with server/plugins/repo-anchor.mjs",
+      "sync_path": "server/plugins/repo-anchor.mjs"
     }
   },
   "scenarios": {
@@ -4126,7 +4131,7 @@
     },
     "integration/t261008-23/sc_t26100823_agent_log_dir.mjs": {
       "anchor": "contract",
-      "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal (naming-compat: quotes the scenario's leg-B fixture)",
+      "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal",
       "sync_path": ""
     },
     "integration/t261008-37/sc_concurrency_write_entry.mjs": {
@@ -4158,6 +4163,21 @@
       "anchor": "behaviour",
       "note": "t261008-39 board sweep / rerise",
       "sync_path": ""
+    },
+    "integration/t261008-33/sc_t26100833_lane_env_anchor_boundary.mjs": {
+      "anchor": "contract",
+      "note": "t261008-33: every engine-built env for lane work carries the lane root as the repo anchor (single-point seam)",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "integration/t261008-33/sc_t26100833_anchor_guard_named_failure.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-33: SANDBAR_ANCHOR_MISMATCH named failure before any write across lane/standalone tree shapes; external-caller escape hatch regression",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "integration/t261008-33/sc_t26100833_main_checkout_witness.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-33: incident-class witness - lane evidence write leaves the main checkout clean (delta-based), main root derived from the lane gitfile",
+      "sync_path": "server/plugins/repo-anchor.mjs"
     }
   }
 }

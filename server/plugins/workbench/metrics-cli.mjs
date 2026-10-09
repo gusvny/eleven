@@ -20,6 +20,7 @@
  */
 
 import { buildMetricsResponse, defaultDeps } from './src/host/metrics.ts'
+import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 
 const arg = process.argv[2]
 if (arg === undefined || arg === '-h' || arg === '--help') {
@@ -39,7 +40,9 @@ if (params === null || typeof params !== 'object' || Array.isArray(params)) {
 }
 
 // 本文件固定落在 <repo>/server/plugins/workbench/ 下，上三级即仓库根（无机器绝对路径写死）
-const repo = process.env.SANDBAR_REPO ?? new URL('../../..', import.meta.url).pathname.replace(/\/+$/, '')
+// t261008-33: shared anchor chain + escape guard (repo-anchor.mjs); location-derived
+// default unchanged (this file sits at <repo>/server/plugins/workbench/, three up = repo root).
+const repo = resolveRepo(undefined, new URL('../../..', import.meta.url).pathname.replace(/\/+$/, ''))
 const deps = defaultDeps(repo)
 
 try {

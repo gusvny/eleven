@@ -4151,6 +4151,75 @@ TEST_STUB_ENV_KNOBS = ("SANDBAR_AGENT_STUB", "SANDBAR_AGENT_STUB_FILES",
 WORKER_ROUTING_ENV_KNOBS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES",
                             "SANDBAR_WATCH_WORKFLOW", "SANDBAR_WATCH_INTERVAL_SEC")
 
+# Anchor-discipline knob family (t261008-33): SANDBAR_REPO is the repo-anchor
+# escape hatch (server/README.md: the location derivation works normally, the
+# variable exists for unusual layouts). It is PER-PROCESS state and must never
+# be inherited across an engine spawn boundary - subprocesses ordered by the
+# engine for a lane ticket get the lane root injected by lane_subprocess_env
+# (or the variable stripped, falling through to the location-derived branch).
+# A hand-exported main-checkout value leaking from the console/shell env would
+# anchor lane code at the main checkout (261008: the main tree was dirtied by
+# browser-pool scenario evidence written through the wrong anchor). The family
+# is its own tuple, not folded into TEST_STUB_ENV_KNOBS: different semantics
+# (anchor = process identity, stub = test behaviour); one member today, every
+# future member reviewed individually.
+ANCHOR_ENV_KNOBS = ("SANDBAR_REPO",)
+
+
+# Is own_root a git linked worktree (the physical shape of a lane worktree):
+# `.git` is a gitfile (a plain file) = linked worktree; `.git` is a directory =
+# a standalone checkout (the main checkout, an external deployed copy). The
+# test reads own_root itself (the caller module's own location), NEVER the
+# anchor being validated - a wrong anchor must not pick the `.git` the guard
+# inspects (t261008-33 review R3). Missing own_root / no `.git`: treated as a
+# non-worktree (the guard passes; the escape-hatch semantics are preserved).
+def is_linked_worktree(own_root) -> bool:
+    marker = pathlib.Path(own_root) / ".git"
+    try:
+        return marker.is_file()
+    except OSError:
+        return False
+
+
+# Anchor guard (t261008-33, plan gen1): pure single-point implementation of the
+# "anchor vs own tree" verdict; server/plugins/repo-anchor.mjs mirrors it and a
+# decision-table parity test pins the two to identical verdicts. Rules:
+#   - own tree not a linked worktree -> None (pass: external callers and
+#     main-checkout processes keep honouring config.repo / SANDBAR_REPO exactly
+#     as documented; the escape hatch is untouched);
+#   - no explicit anchor (anchor_src empty or 'location-derived') -> None (the
+#     location-derived branch is the normal state, always equal to the own tree);
+#   - linked worktree + explicit anchor whose realpath differs from the own
+#     root's realpath -> a named error string stating both roots and both
+#     sources, to be raised BEFORE any write (never downgraded to a warning).
+# Both sides are realpath-normalized (macOS /var vs /private/var, symlinked
+# checkouts) so the legitimate config.repo == lane-root pass case cannot
+# false-fail.
+def anchor_guard_error(anchor: str, anchor_src: str, own_root) -> Optional[str]:
+    # Scope (rework t261008-33 gen6): ENV-sourced anchors only. The incident
+    # class is an anchor inherited across a process boundary; `config.repo` is
+    # an explicit in-code choice by the process owner (the documented primary
+    # seam) — a deliberate foreign config.repo anchor is the external-caller /
+    # fixture face outcome 3 orders preserved, so it passes like the escape
+    # hatch does. Location-derived is the normal state and always passes.
+    if not anchor or anchor_src in (None, '', 'location-derived', 'config.repo'):
+        return None
+    if not is_linked_worktree(own_root):
+        return None
+    try:
+        a = pathlib.Path(anchor).resolve(strict=False)
+        o = pathlib.Path(own_root).resolve(strict=False)
+    except (OSError, ValueError, RuntimeError) as e:
+        return ("SANDBAR_ANCHOR_MISMATCH: anchor %r (src=%s) unresolvable against "
+                "own root %r: %s" % (anchor, anchor_src, str(own_root), e))
+    if a == o:
+        return None
+    return ("SANDBAR_ANCHOR_MISMATCH: anchor %r (src=%s) points outside this "
+            "process's own tree %r (src=this module's own file location; lane "
+            "worktree); refusing to write into another checkout. Set the anchor "
+            "to the lane root or unset it."
+            % (anchor, anchor_src, str(own_root)))
+
 
 @dataclass
 class PauseRequest:

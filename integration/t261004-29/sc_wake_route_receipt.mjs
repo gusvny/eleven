@@ -45,6 +45,15 @@ const WAKE_PATH = '/sandbar-watchdog/api/wake'
 const REAL_DSH_HOME = process.env.DSH_HOME
 process.env.DSH_HOME = join(HOME, 'dsh-home')
 
+// t261008-33 arbitration (20261008): make THIS scenario hermetic to the repo
+// anchor chain. This scenario tests the wake route's input contract, not anchor
+// discipline; a host-shell SANDBAR_REPO leaking in (this machine hand-exports
+// the main checkout) made the t261008-33 escape guard correctly refuse the
+// plugin apply here. Unset it so the plugin takes the location-derived branch
+// (the normal state); the anchor contract itself is owned by
+// integration/t261008-33/sc_t26100833_anchor_guard_named_failure.mjs.
+delete process.env.SANDBAR_REPO
+
 /** A Watchdog stub stand-in seam: apply() resolves per-project watchdogs through
  *  declaredProjects(); with an empty DSH_HOME no real project starts, so apply is
  *  cheap and side-effect free. The wake route's project validation must consult

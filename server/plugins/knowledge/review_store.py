@@ -53,6 +53,40 @@ DOCS = REPO / 'docs'
 REVIEWS = DOCS / 'reviews'
 ADMIN_LOG = REPO / 'server' / 'admin.log'
 
+
+# 锚守卫（t261008-33）：与 engine/shared.anchor_guard_error、server/plugins/
+# repo-anchor.mjs 同一裁决的本地镜像（本文件是独立 CLI，不 import 引擎，故就地
+# 复刻；三方一致性由 test_t261008_33_anchor_discipline 的决策表对拍钉住）。
+# own tree 取本文件自身位置推导根（HERE.parents[2]），绝不取待校验的锚——错锚
+# 不得替守卫选错 .git。规则：自身树是 git linked worktree（.git 是 gitfile）且
+# 显式锚 realpath 落在自身树之外 → 命名错误（写入前拒绝，不静默降级为告警）；
+# 无显式锚（位置推导=常态）或锚等于自身树或自身树非 worktree（外部部署拷贝的
+# 逃逸口语义）→ 放行。
+def _is_linked_worktree(root):
+    try:
+        return (Path(root) / '.git').is_file()
+    except OSError:
+        return False
+
+
+def anchor_guard_error():
+    anchor = os.environ.get('SANDBAR_REPO') or ''
+    if not anchor:
+        return None
+    own = HERE.parents[2]
+    if not _is_linked_worktree(own):
+        return None
+    try:
+        if Path(anchor).resolve(strict=False) == Path(own).resolve(strict=False):
+            return None
+    except (OSError, ValueError) as e:
+        return ('SANDBAR_ANCHOR_MISMATCH: anchor %r (src=env SANDBAR_REPO) '
+                'unresolvable against own root %r: %s' % (anchor, str(own), e))
+    return ('SANDBAR_ANCHOR_MISMATCH: anchor %r (src=env SANDBAR_REPO) points '
+            'outside this process\'s own tree %r (lane worktree); refusing to '
+            'write into another checkout. Set the anchor to the lane root or '
+            'unset it.' % (anchor, str(own)))
+
 # 与 node.ts DOC_PATH_RE 同源白名单（防穿路径）：四分类目录下的一层 .md。
 DOC_PATH_RE = re.compile(r'^(design|content|ops|reference)/[^/]+\.md$')
 CONCLUDES = ('approved', 'changes-requested', 'in-progress')
@@ -129,6 +163,11 @@ def op_save(a):
     run_id = uuid.uuid4().hex[:12]
     p = a.get('path') if isinstance(a.get('path'), str) else ''
     try:
+        # t261008-33：锚守卫在任何写入（reviews 落盘 / admin.log 追加）之前执行——
+        # 锚与自身树相悖时命名拒绝，不写进另一个检出。
+        _guard = anchor_guard_error()
+        if _guard:
+            raise ReviewError(_guard)
         if not DOC_PATH_RE.match(p):
             raise ReviewError('path 不合法（只允许 design|content|ops|reference/<文件>.md）: %r' % p)
         base = a.get('base') if isinstance(a.get('base'), str) and a.get('base') else 'HEAD'

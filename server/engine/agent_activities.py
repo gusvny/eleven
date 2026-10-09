@@ -107,6 +107,7 @@ from shared import (
     StageResult,
     TEMPLATE_CLASS_NAMES,
     TEST_STUB_ENV_KNOBS,
+    ANCHOR_ENV_KNOBS,
     WORKER_ROUTING_ENV_KNOBS,
     ui_evidence_dir,
     evidence_base,
@@ -3493,6 +3494,15 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     local_dsh = Path(agent_home) if agent_home is not None else cwd / ".dsh"
     local_dsh.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
+    # t261008-33 anchor discipline: SANDBAR_REPO is per-process state, never
+    # inherited across the engine spawn boundary. An agent whose cwd is a lane
+    # worktree gets the lane root; any other agent gets the variable stripped so
+    # consumers fall through to the location-derived branch (documented normal
+    # state). The hand-exported escape hatch in the parent env must not leak in.
+    if shared.is_linked_worktree(cwd):
+        env["SANDBAR_REPO"] = str(cwd)
+    else:
+        env.pop("SANDBAR_REPO", None)
     env["DSH_HOME"] = str(local_dsh)
     # t260925-08（KI-119）：调用方身份注入——泳道 agent 在容器/宿主内发起的 ticket/op
     # 写操作由此获得机制注入的 caller 身份（client 闸 identity_src=env）。形状白名单：
@@ -5062,8 +5072,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 # 桩脑工单的 worker env 会把它们漏进 verify_lane 的 pytest 子进程，
                 # 被测契约 UT 被换成桩行为/测试台值造成假红（e2e 两轮实证）。
                 # 生产 worker 的正常运转不依赖子进程携带这些旋钮，剥除对生产恒等。
-                env={k: v for k, v in os.environ.items()
-                     if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS},
+                # t261008-33: compose via the lane_subprocess_env single point -
+                # same strip families plus the anchor knob pinned to the lane root
+                # (verify_lane's repo anchor is always the lane; a hand-exported
+                # main-checkout value no longer leaks in).
+                env=lane_subprocess_env(sc["tree"]),
                 # t261006-08: session isolation (previously missing — the timeout kill
                 # could only kill the admin layer, and killpg without a fresh session
                 # would hit the worker's own group) + booking + reap-on-cancel,
@@ -7403,6 +7416,14 @@ async def prepare_ui_evidence(args: UiEvidenceArgs) -> UiEvidenceResult:
     if not script.is_file():
         return UiEvidenceResult(ok=False, detail="capture.mjs 不存在（主树）：%s" % script)
     env = dict(os.environ)
+    # t261008-33 anchor discipline: capture children are lane work when wt is a
+    # lane worktree — pin the anchor to the lane root; otherwise strip the
+    # inherited value (location-derived branch applies). Never leak the parent's
+    # hand-exported main-checkout value into the capture process.
+    if shared.is_linked_worktree(wt):
+        env["SANDBAR_REPO"] = str(wt)
+    else:
+        env.pop("SANDBAR_REPO", None)
     env.setdefault("SANDBAR_CONSOLE_URL", "http://127.0.0.1:3099")
     detail_tail = ""
     detail_parts: List[str] = []   # ticket t260831-02: accumulate per candidate instead of overwriting each other
@@ -7800,10 +7821,13 @@ async def run_handover_leg(leg: Dict[str, str], cwd: Path,
     if not cmd_s.strip():
         return {"name": name, "cmd": cmd_s, "exit": None,
                 "output_tail": "移交命令为空（不执行）"}
-    # t260924-05 KI-116：剥除判据复用 integ_subprocess_env 单点（同元组同宽、零
-    # extra=逐字旧行为）——剥除字面判据全文件恰两处由 test_t260917_08 的 i2 单源锁
-    # 看管（扩锁不拆锁：本处从自持判据改为复用，语义零变化）。
-    env = integ_subprocess_env()
+    # t260924-05 KI-116: strip criteria reuse the integ_subprocess_env single
+    # point (same tuples, same width, zero extra = byte-identical old behaviour);
+    # the single-source lock in test_t260917_08 keeps the literal count honest.
+    # t261008-33: compose via lane_subprocess_env - same strip face plus the
+    # anchor pinned to cwd (the lane root, per the docstring contract), so a
+    # handover command's repo anchor is always the lane.
+    env = lane_subprocess_env(cwd)
     p = await asyncio.create_subprocess_exec(
         "/bin/sh", "-c", cmd_s, cwd=str(cwd), stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env, start_new_session=True)
@@ -7982,20 +8006,46 @@ def _handover_conc() -> int:
 
 
 def integ_subprocess_env(extra: Dict[str, str] = None) -> Dict[str, str]:
-    """集测/巡检子进程 env 组装单点（t260924-05 KI-116）：黑名单剥除
-    TEST_STUB_ENV_KNOBS + WORKER_ROUTING_ENV_KNOBS 两个封闭元组（裁定单源=shared.py，
-    与 run_handover_leg 同款、同宽），再并入 extra 显式注入面（SANDBAR_INTEG_LEDGER_
-    SOURCE / SANDBAR_STAGE_SWEEP_ORPHANS* / SANDBAR_SCENARIO_ONLY 等都在 extra，
-    剥除绝不吞它们；SANDBAR_INTEG_BATCH_TIMEOUT_SEC 不在剥除集、运维覆盖须达子进程）。
-    背景：worker 常驻进程被 ticket_worker 注入 SANDBAR_TASK_QUEUE(S)/
-    SANDBAR_WATCH_WORKFLOW，老代码原样继承进子进程链——run_scenarios.py:1850 的
-    runner 层双键剥除（t260910-08）是同一先例，本函数把它上提到下单层；两层剥除面
-    **不同宽**（runner 只剥两键、不剥 QUEUES/WATCH_INTERVAL_SEC），系既成事实勿混同，
-    本票不扩 runner 半径（防双层过滤面漂移出新撒谎注释）。"""
+    """Single env-composition point for integ/patrol subprocesses (t260924-05
+    KI-116): blacklist-strip the closed tuples TEST_STUB_ENV_KNOBS +
+    WORKER_ROUTING_ENV_KNOBS + ANCHOR_ENV_KNOBS (single source of truth =
+    shared.py, same width as run_handover_leg), then merge the extra explicit
+    injection face (SANDBAR_INTEG_LEDGER_SOURCE / SANDBAR_STAGE_SWEEP_ORPHANS* /
+    SANDBAR_SCENARIO_ONLY all live in extra and are never swallowed by the
+    strip; SANDBAR_INTEG_BATCH_TIMEOUT_SEC is not in the strip set so ops
+    overrides reach the child). Background: resident workers get
+    SANDBAR_TASK_QUEUE(S)/SANDBAR_WATCH_WORKFLOW injected by ticket_worker and
+    the old code passed them down unchanged - the runner-level double-key strip
+    at run_scenarios.py:1850 (t260910-08) is the earlier precedent; this
+    function lifted it to the dispatch layer. The two strip faces are NOT the
+    same width (the runner strips two keys only); do not conflate them; this
+    ticket does not widen the runner face.
+    ANCHOR_ENV_KNOBS (t261008-33): SANDBAR_REPO is per-process anchor state and
+    is never inherited across the engine spawn boundary - a hand-exported
+    main-checkout value leaking from the parent env would anchor lane code at
+    the main checkout (261008: the main tree was dirtied this way). Lane
+    children get their anchor from lane_subprocess_env; this function only
+    strips (non-lane children fall through to the location-derived branch,
+    the documented normal state)."""
     env = {k: v for k, v in os.environ.items()
-           if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS}
+           if k not in TEST_STUB_ENV_KNOBS and k not in WORKER_ROUTING_ENV_KNOBS
+           and k not in ANCHOR_ENV_KNOBS}
     for k, v in (extra or {}).items():
         env[str(k)] = str(v)
+    return env
+
+
+def lane_subprocess_env(lane_root, extra: Dict[str, str] = None) -> Dict[str, str]:
+    """Single env-composition point for LANE subprocesses (t261008-33): on top
+    of the integ_subprocess_env strip face, pin SANDBAR_REPO to the lane root,
+    so a lane child (scenario runs, handover commands, verify_lane, agent
+    spawn, ui evidence) anchors at the lane root whether the parent env carried
+    the main-checkout value, a foreign value, or nothing. The caller must pass
+    the real lane/worktree root (cwd or sc['tree']); this function never
+    derives it (derivation belongs to the consumer side: repo-anchor.mjs /
+    review_store.py - the engine injects, the consumer verifies)."""
+    env = integ_subprocess_env(extra)
+    env["SANDBAR_REPO"] = str(lane_root)
     return env
 
 
@@ -8198,8 +8248,12 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     _extra_env.update(_cal_env)
     if _cal_reason:
         _warnings.append(_cal_reason)
-    # t260924-05 KI-116：组装面统一走 integ_subprocess_env（剥两个封闭元组后并
-    # 显式注入面），worker 自身路由旋钮不再漏进子进程链。
+    # t260924-05 KI-116: compose via integ_subprocess_env (strip the closed
+    # tuples then merge the explicit injection face) so worker routing knobs no
+    # longer leak into the child chain.
+    # t261008-33: upgraded to lane_subprocess_env - same strip face plus the
+    # anchor pinned to the lane root wt; gate-round scenario children anchor at
+    # the lane (the root-cause face of the 261008 main-tree dirtying).
     # 260927：巡检套件段三笔预算经 env 下发给执行器与闸（缺省 0/None=不下发，每票集测段
     # 与老载荷逐字节零改动）：
     #   ① 跑者**自我收口点**（SANDBAR_INTEG_RUN_BUDGET_SEC）= min(跑者总预算, 执行器超时−余量)
@@ -8217,7 +8271,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     if supply_timeout_sec and supply_timeout_sec > 0 and \
             not os.environ.get("SANDBAR_SUPPLY_TIMEOUT_SEC"):
         _extra_env["SANDBAR_SUPPLY_TIMEOUT_SEC"] = "%.0f" % float(supply_timeout_sec)
-    _sub_env = integ_subprocess_env(_extra_env)
+    _sub_env = lane_subprocess_env(wt, _extra_env)
     # t260924-05 KI-116：integ 道整体超时经载荷显式下单（=内层批次值，≤守卫），
     # verify_lane 不再独立读 env；老载荷缺键回落同值缺省（replay/老回放零漂移）。
     # 260927 第二刀：巡检段（执行器超时>0）下**执行器专属墙**（缺省 6000s）——旧版这条
@@ -8581,8 +8635,11 @@ async def surface_plan(args: shared.SurfacePlanArgs) -> shared.SurfacePlanResult
                   "按全量跑（fail-closed，零 spawn）")
     cmd = [sys.executable, "integration/run_scenarios.py", "--print-surface-plan",
            ",".join(files)]
-    env = dict(os.environ)
-    # 查询面是只读的：把会改变执行器行为的旋钮剥掉，避免「查询顺带按点名/排除池缩表」
+    env = lane_subprocess_env(cwd)
+    # The query face is read-only: strip the knobs that change executor behaviour
+    # so the query does not silently narrow the table by name/excluded pools
+    # (t261008-33: the anchor knob is already pinned to cwd by
+    # lane_subprocess_env, so the query process anchors at the lane).
     for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS",
               "SANDBAR_KNOWN_RED_EXCLUDE"):
         env.pop(k, None)
@@ -8752,9 +8809,11 @@ async def _reprobe_red_body(args: ReprobeRedArgs) -> ReprobeRedResult:
         "python3", str(runner), "--reprobe", ",".join(names),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        # t260924-05 KI-116：与 _run_scenarios 同款——剥旋钮组装 + 会话隔离 +
-        # 进程组回收（裸 p.kill() 漏孙进程）。
-        env=integ_subprocess_env(), start_new_session=True)
+        # t260924-05 KI-116: same discipline as _run_scenarios - knob-stripped
+        # env composition + session isolation + process-group reap.
+        # t261008-33: lane_subprocess_env - same strip face plus the anchor
+        # pinned to the lane root wt.
+        env=lane_subprocess_env(wt), start_new_session=True)
     # t261006-08 (same three states as run_handover_leg): book the spawn; reap on
     # cancellation and re-raise; TERM→KILL reap on timeout keeping the receipt.
     register_owned_spawn(p, tag="reprobe-red")

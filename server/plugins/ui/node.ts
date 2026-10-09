@@ -49,6 +49,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 import { runAdminCli } from '../../sandbar-tools.ts'
 import { findProject, primaryDir } from '../../project-registry.ts'
 import { buildRoutesView, saveRoutesTable } from './src/host/routes.ts'
@@ -91,7 +92,9 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 }
 
 export function apply(ctx: Context, config?: SuyouAdminUiConfig): void {
-  const repo = config?.repo ?? process.env.SANDBAR_REPO ?? DEFAULT_REPO
+  // t261008-33: shared anchor chain (config.repo -> SANDBAR_REPO -> DEFAULT_REPO) + escape
+  // guard (SANDBAR_ANCHOR_MISMATCH before any write) — see repo-anchor.mjs.
+  const repo = resolveRepo(config?.repo, DEFAULT_REPO)
   const cli = { repo, python: config?.python, timeoutMs: config?.timeoutMs }
   const needsApproval = new Set(config?.needsApproval ?? ['params_set'])
   const auditLog = join(repo, 'server', 'admin.log')
