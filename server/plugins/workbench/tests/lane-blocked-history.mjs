@@ -54,15 +54,15 @@ section('T1 复现子用例（t260916-02 实证形态：同刻 done+blocked，�
     results: { create_plan: okRes(1), review_plan: okRes(1) },
     gens: { create_plan: 1, review_plan: 1, implement: 1, run_integration_tests: 1 },
     timeline: [
-      tle('create_plan', 'running', '进入本步（第 1 次）', 1),
+      tle('create_plan', 'running', 'Entered step (attempt 1)', 1),
       tle('create_plan', 'done', 'developer-agent：方案定稿', 1),
-      tle('review_plan', 'running', '进入本步（第 1 次）', 1),
+      tle('review_plan', 'running', 'Entered step (attempt 1)', 1),
       tle('review_plan', 'done', 'integration-agent：过', 1),
-      tle('implement', 'running', '进入本步（第 1 次）', 1, P),
+      tle('implement', 'running', 'Entered step (attempt 1)', 1, P),
       tle('implement', 'done', 'developer-agent：活干完', 1, P),
       tle('design_integration_tests', 'done', 'integration-agent：兄弟早已完成', 1, P),
       tle('implement', 'blocked', '受保护路径闸拒绝落盘：docs/design/契约v1.md', 1, P),
-      tle('run_integration_tests', 'running', '进入本步（第 1 次）', 1), // 推进证据（后段任意条目型）
+      tle('run_integration_tests', 'running', 'Entered step (attempt 1)', 1), // 推进证据（后段任意条目型）
     ],
   }
   const r = deriveStageStates(d, ORDER, { groups: [['implement', 'design_integration_tests']] })
@@ -87,9 +87,9 @@ section('T1b 同段重跑解除（rerun）')
     timeline: [
       tle('create_plan', 'done', '', 1),
       tle('review_plan', 'done', '', 1),
-      tle('implement', 'running', '进入本步（第 1 次）', 1),
+      tle('implement', 'running', 'Entered step (attempt 1)', 1),
       tle('implement', 'blocked', 'verify_red：泳道内 verify_lane code 红', 1),
-      tle('implement', 'running', '进入本步（第 2 次）', 2),   // retry_qc 重进
+      tle('implement', 'running', 'Entered step (attempt 2)', 2),   // retry_qc 重进
       tle('implement', 'done', 'developer-agent：重跑完成', 2),
     ],
   }
@@ -123,7 +123,7 @@ section('T3 疑难子用例')
     timeline: [
       tle('create_plan', 'done', '', 1),
       tle('review_plan', 'done', '', 1),
-      tle('implement', 'running', '进入本步（第 1 次）', 1, P),
+      tle('implement', 'running', 'Entered step (attempt 1)', 1, P),
       tle('implement', 'blocked', 'agent 报失败：容器故障', 1, P),
       tle('design_integration_tests', 'done', 'integration-agent：兄弟先干完', 1, P), // 同相位兄弟
     ],
@@ -137,7 +137,7 @@ section('T3 疑难子用例')
   const d3b = {
     status: 'dispatched', stage: 'create_plan', stage_state: 'blocked',
     timeline: [
-      tle('create_plan', 'running', '进入本步（第 1 次）', 1),
+      tle('create_plan', 'running', 'Entered step (attempt 1)', 1),
       tle('create_plan', 'blocked', '受保护路径闸拒绝落盘', 1),
       tle('create_plan', 'authorized', '人审放行（受保护路径）', 1), // t260912-03 授权通道留痕
     ],
@@ -146,7 +146,7 @@ section('T3 疑难子用例')
   const d3b2 = {
     status: 'dispatched', stage: 'review_plan', stage_state: 'blocked',
     timeline: [
-      tle('review_plan', 'running', '进入本步（第 1 次）', 1),
+      tle('review_plan', 'running', 'Entered step (attempt 1)', 1),
       tle('review_plan', 'blocked', '审读红灯', 1),
       tle('review_plan', 'retry-requested', '已请求重验', 1),
     ],
@@ -156,10 +156,10 @@ section('T3 疑难子用例')
   const d3b3 = {
     status: 'dispatched', stage: 'review_plan', stage_state: 'running',
     timeline: [
-      tle('review_plan', 'running', '进入本步（第 1 次）', 1),
+      tle('review_plan', 'running', 'Entered step (attempt 1)', 1),
       tle('review_plan', 'blocked', '审读红灯', 1),
       tle('review_plan', 'retry-requested', '已请求重跑（第 1 次）', 1),
-      tle('review_plan', 'running', '进入本步（第 2 次）', 2),
+      tle('review_plan', 'running', 'Entered step (attempt 2)', 2),
     ],
   }
   ok(deriveStageStates(d3b3, ORDER).states.review_plan === 'running', 'T3b.3 真重跑进段后显 ▶（受阻期已离开）')
@@ -168,9 +168,9 @@ section('T3 疑难子用例')
     status: 'dispatched', stage: 'run_integration_tests', stage_state: 'running',
     results: { create_plan: okRes(0) },
     timeline: [
-      tle('create_plan', 'running', '进入本步'),
+      tle('create_plan', 'running', 'Entered step'),
       tle('create_plan', 'blocked', '越界探针'),
-      tle('run_integration_tests', 'running', '进入本步'), // 无相位标注的后段条目
+      tle('run_integration_tests', 'running', 'Entered step'), // 无相位标注的后段条目
     ],
   }
   const r3cLegacy = deriveStageStates(d3c, ORDER) // 降级面：无法判兄弟 → 保守红
@@ -185,7 +185,7 @@ section('T4 关闭票子用例（closed → 全 done + 历史受阻 resolvedBy=c
     status: 'closed', stage: 'merge', stage_state: 'done',
     results: { create_plan: okRes(2), merge: okRes(1) },
     timeline: [
-      tle('create_plan', 'running', '进入本步（第 1 次）', 1),
+      tle('create_plan', 'running', 'Entered step (attempt 1)', 1),
       tle('create_plan', 'blocked', '越界', 1),
       tle('create_plan', 'done', '重跑完成', 2),
       tle('merge', 'done', 'user：签字', 1),

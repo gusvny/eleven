@@ -469,8 +469,11 @@ def facts_from_snapshot(ticket_id: str, project: str, snapshot: Any,
     if not facts["created_at"]:
         notes.append("meta.created absent/unparseable (ticket age unknown)")
 
-    # ---- 重跑轮次与每轮墙钟：真源=时间线「进入本步」记录（stage+state=running），
-    # ---- 交叉核对 gens[stage]（快照的代数计数；两者不一致取大者并在 note 点名）。
+    # ---- Re-run rounds and per-round wall time: source = the timeline stage-entry
+    # ---- marker records (structured fields stage + state=running + gen; the human
+    # ---- reason text is copy, never a match key — t261008-47); cross-check
+    # ---- gens[stage] (the snapshot's gen counter; on mismatch take the larger and
+    # ---- name it in a note).
     timeline = snapshot.get("timeline") if isinstance(snapshot.get("timeline"), list) else []
     if not isinstance(snapshot.get("timeline"), list):
         notes.append("timeline absent/not a list (re-run rounds unknown)")
@@ -550,9 +553,11 @@ def _mins(sec: float) -> str:
 
 def _wall_text(entries: Sequence[float], now_ts: float,
                in_flight: bool = True) -> Tuple[str, float]:
-    """每轮墙钟（相邻「进入本步」记录的 at 差分；末轮=至今，仅在**当前仍在跑套件**时
-    标 in flight，否则标 last round to date）。返回 (可读文本, 末轮时长秒)。
-    畸形/空 → 空文本（有则给，无则不给）。"""
+    """Per-round wall time (at differences between adjacent stage-entry running
+    markers, matched on structured fields, not the reason text — t261008-47; last
+    round = until now, only flagged in flight while the suite is genuinely running,
+    otherwise flagged as last round to date). Returns (readable text, last-round
+    seconds). Malformed/empty → empty text (give when present, none when absent)."""
     if not entries:
         return "", 0.0
     parts: List[str] = []

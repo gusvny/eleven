@@ -167,8 +167,8 @@ def test_helper_step_id_defaults_to_the_gate_phase_value():
 
 def test_docs_agree_at_both_machine_stages():
     """验收③：两个车道的 merge_check 段文案 + ticket.py retry_qc 帮助都写明重并 main。"""
-    assert "重并 main" in DL_SRC[DL_SRC.index('id="merge_check"'):
-                                  DL_SRC.index('id="merge"')]
+    assert "re-merges main" in DL_SRC[DL_SRC.index('id="merge_check"'):
+                                      DL_SRC.index('id="merge"')]  # copy anglicized in t261008-47
     ll_desc_i = LL_SRC.index('id="merge_check"')
     assert "re-merges main" in LL_SRC[ll_desc_i:LL_SRC.index('id="merge"', ll_desc_i)]
     tq_i = TK_SRC.index("retry_qc {id, by(who)}")

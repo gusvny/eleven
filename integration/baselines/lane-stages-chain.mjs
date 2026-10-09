@@ -64,10 +64,10 @@ for (const [from, to] of [['implement', 'design_integration_tests'],
 }
 
 /* ------------------------------------------------------------ 3. desc/parts */
-section('desc 并行注明 + parts 非空（文本级）')
+section('design_integration_tests desc notes parallelism + parts non-empty (text level)')
 {
   const blk = region.match(/Stage\(id="design_integration_tests"[\s\S]*?(?=Stage\(id=|\n    \))/)
-  ok(blk && /并行/.test(blk[0]), 'design_integration_tests desc 注明并行')
+  ok(blk && /runs in parallel with/.test(blk[0]), 'design_integration_tests desc notes parallelism')
   const noParts = [...region.matchAll(/Stage\(id="([^"]+)"[\s\S]*?parts=\(\)/g)].map(m => m[1])
   ok(noParts.length === 0, `无空 parts 步（${noParts.join(',') || '无'}）`)
 }

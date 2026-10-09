@@ -112,9 +112,9 @@ section('F1 merge 签字期：✋ 且非活跃（review v3 规则 2+7）')
 {
   const d = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests',
     'run_integration_tests', 'arbitrate', 'acceptance_walkthrough', 'merge_check'])
-  d.checks.merge = [{ item: '人审签字', done: false, by: '' }, { item: 'merge 落账', done: false, by: '' }]  // 签字期 checks 未翻
-  d.timeline.push(tle('merge', 'running', '进入本步'))
-  d.timeline.push(tle('merge', AH, '等人签字'))
+  d.checks.merge = [{ item: 'Human sign-off', done: false, by: '' }, { item: 'Merge booked', done: false, by: '' }]  // 签字期 checks 未翻
+  d.timeline.push(tle('merge', 'running', 'Entered step'))
+  d.timeline.push(tle('merge', AH, 'waiting for sign-off'))
   d.stage = 'merge'; d.stage_state = AH
   const st = run(d)
   expectAll(st, {
@@ -130,10 +130,10 @@ section('F2 merge 执行期：恰 merge 单活跃')
 {
   const d = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests',
     'run_integration_tests', 'arbitrate', 'acceptance_walkthrough', 'merge_check'])
-  d.checks.merge = [{ item: '人审签字', done: true, by: 'x' }, { item: 'merge 落账', done: false, by: '' }]
-  d.timeline.push(tle('merge', 'running', '进入本步'))
-  d.timeline.push(tle('merge', AH, '等人签字'))
-  d.timeline.push(tle('merge', 'running', '人审通过，执行 merge'))
+  d.checks.merge = [{ item: 'Human sign-off', done: true, by: 'x' }, { item: 'Merge booked', done: false, by: '' }]
+  d.timeline.push(tle('merge', 'running', 'Entered step'))
+  d.timeline.push(tle('merge', AH, 'waiting for sign-off'))
+  d.timeline.push(tle('merge', 'running', 'human sign-off (x), executing merge'))
   d.stage = 'merge'; d.stage_state = RUN
   const st = run(d)
   ok(st.merge === RUN, 'merge=▶ running')
@@ -145,7 +145,7 @@ section('F3 merge_check 首尝试即 blocked：✗ 非活跃（review v3 规则 
 {
   const d = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests',
     'run_integration_tests', 'arbitrate', 'acceptance_walkthrough'])
-  d.timeline.push(tle('merge_check', 'running', '进入本步'))
+  d.timeline.push(tle('merge_check', 'running', 'Entered step'))
   d.timeline.push(tle('merge_check', BLK, '红灯：预演冲突'))
   d.stage = 'merge_check'; d.stage_state = BLK
   const st = run(d)
@@ -158,8 +158,8 @@ section('F3 merge_check 首尝试即 blocked：✗ 非活跃（review v3 规则 
 section('F4 并行分叉期：implement ∥ design_integration_tests 双高亮（本票核心场景）')
 {
   const d = baseDetail(['create_plan', 'review_plan'])
-  d.timeline.push(tle('implement', 'running', '进入本步'))
-  d.timeline.push(tle('design_integration_tests', 'running', '进入本步'))
+  d.timeline.push(tle('implement', 'running', 'Entered step'))
+  d.timeline.push(tle('design_integration_tests', 'running', 'Entered step'))
   d.stage = 'design_integration_tests'; d.stage_state = RUN
   const st = run(d)
   ok(st.implement === RUN && st.design_integration_tests === RUN, '两并行步同显 running')
@@ -174,9 +174,9 @@ section('F5 implement 完成(gen0)后打回重进 gen1：高亮重跑、不误�
 {
   const d = baseDetail(['create_plan', 'review_plan'])
   d.results.implement = okRes(0)                       // 上一轮已完成
-  d.timeline.push(tle('implement', 'running', '进入本步（第 1 次）'))
-  d.timeline.push(tle('implement', 'running', '进入本步（第 2 次）'))  // 打回重进
-  d.timeline.push(tle('design_integration_tests', 'running', '进入本步'))
+  d.timeline.push(tle('implement', 'running', 'Entered step (attempt 1)'))
+  d.timeline.push(tle('implement', 'running', 'Entered step (attempt 2)'))  // 打回重进
+  d.timeline.push(tle('design_integration_tests', 'running', 'Entered step'))
   d.stage = 'implement'; d.stage_state = RUN
   const st = run(d)
   ok(st.implement === RUN, 'implement=running（count 2 > attempts 1）')
@@ -188,14 +188,14 @@ section('F6 ui_evidence：UI 票 ok=done；软失败 C1 双可')
 {
   const ok6 = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests'])
   ok6.results.ui_evidence = okRes(0)
-  ok6.timeline.push(tle('run_integration_tests', 'running', '进入本步'))
+  ok6.timeline.push(tle('run_integration_tests', 'running', 'Entered step'))
   ok6.stage = 'run_integration_tests'; ok6.stage_state = RUN
   const stOk = run(ok6)
   ok(stOk.ui_evidence === DONE, 'UI 票 ui_evidence ok → done')
 
   const fl6 = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests'])
   fl6.results.ui_evidence = { status: 'failed', gen: 0 }   // 软失败：计次不计数
-  fl6.timeline.push(tle('run_integration_tests', 'running', '进入本步'))
+  fl6.timeline.push(tle('run_integration_tests', 'running', 'Entered step'))
   fl6.stage = 'run_integration_tests'; fl6.stage_state = RUN
   const stFl = run(fl6)
   ok(stFl.ui_evidence === DONE || stFl.ui_evidence === TODO,
@@ -318,7 +318,7 @@ section('P2 真源位置：snapshot 形态 meta.parallel_stages 同样生效')
 section('P3 先完成边收口窗：显式终态不被列表重亮（引擎汇合前的真实形态）')
 {
   const d = baseDetail(['create_plan', 'review_plan', 'implement'])
-  d.timeline.push(tle('design_integration_tests', 'running', '进入本步'))
+  d.timeline.push(tle('design_integration_tests', 'running', 'Entered step'))
   d.stage = 'design_integration_tests'; d.stage_state = RUN
   d.parallel_stages = ['implement', 'design_integration_tests']
   const st = run(d)
@@ -350,8 +350,8 @@ section('P4 畸形列表：非字符串/模板外 id/重复清洗；全非法/�
 section('P5 空数组=无并行：与无字段同口径（引擎删键后的汇合期形态）')
 {
   const d = baseDetail(['create_plan', 'review_plan'])
-  d.timeline.push(tle('implement', 'running', '进入本步'))
-  d.timeline.push(tle('design_integration_tests', 'running', '进入本步'))
+  d.timeline.push(tle('implement', 'running', 'Entered step'))
+  d.timeline.push(tle('design_integration_tests', 'running', 'Entered step'))
   d.stage = 'design_integration_tests'; d.stage_state = RUN
   d.parallel_stages = []
   const st = run(d)
@@ -364,9 +364,9 @@ section('P6 等待期摘失败边（review C4 写死口径的 UI 面）：失败
 {
   const d = baseDetail(['create_plan', 'review_plan', 'implement', 'design_integration_tests',
     'ui_evidence', 'run_integration_tests'])
-  d.timeline.push(tle('arbitrate', 'running', '进入本步'))
+  d.timeline.push(tle('arbitrate', 'running', 'Entered step'))
   d.timeline.push(tle('arbitrate', BLK, 'agent 活动故障'))
-  d.timeline.push(tle('acceptance_walkthrough', 'running', '进入本步'))
+  d.timeline.push(tle('acceptance_walkthrough', 'running', 'Entered step'))
   d.stage = 'arbitrate'; d.stage_state = BLK
   d.parallel_stages = ['acceptance_walkthrough']
   const st = run(d)

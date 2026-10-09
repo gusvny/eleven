@@ -132,14 +132,14 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
   const closed = {
     status: 'closed', stage: 'merge', stage_state: 'awaiting-human',
     gens: { merge: 1 },
-    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: '等人签字', gen: 1 }],
+    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: 'waiting for sign-off', gen: 1 }],
   }
   const m = buildLaneMap(DEV_LANE_TOPOLOGY, closed)
   ok(m.closed === true, 'B: closed 旗标')
   ok(Object.values(m.nodes).every(n => n.vis === 'done'), 'B: closed 终态全 done（轮次带仍在）')
   const m2 = buildLaneMap(DEV_LANE_TOPOLOGY, {
     status: 'running', stage: 'merge', stage_state: 'awaiting-human',
-    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: '等人签字' }],
+    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: 'waiting for sign-off' }],
   })
   ok(m2.humanGateActive === 'merge', 'B: 人门到站 humanGateActive=merge')
 }
@@ -241,7 +241,7 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
       { at: '2026-09-30T08:09:09+00:00', stage: 'workspace', state: 'ready',
         reason: 'prepare_workspace: worktree/created+deps:server/engine/.venv', gen: 0 },
       { at: '2026-09-30T08:09:09+00:00', stage: 'implement', state: 'running',
-        reason: '进入本步（第 1 次）', gen: 1 },
+        reason: 'Entered step (attempt 1)', gen: 1 },
       { at: '2026-09-30T08:26:25+00:00', stage: 'implement', state: 'done',
         reason: '交接报告落盘', gen: 1 },
     ],
@@ -272,9 +272,9 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
     status: 'running', stage: 'implement', stage_state: 'running',
     timeline: [
       { at: 'T0', stage: 'implement', state: 'awaiting', reason: 'adopt light-lane（步=[...]）', gen: 0 },
-      { at: 'T1', stage: 'implement', state: 'running', reason: '进入本步（第 1 次）', gen: 1 },
+      { at: 'T1', stage: 'implement', state: 'running', reason: 'Entered step (attempt 1)', gen: 1 },
       { at: 'T2', stage: 'implement', state: 'rework', reason: '验收打回：证据缺', gen: 1 },
-      { at: 'T3', stage: 'implement', state: 'running', reason: '进入本步（第 2 次）', gen: 2 },
+      { at: 'T3', stage: 'implement', state: 'running', reason: 'Entered step (attempt 2)', gen: 2 },
       { at: 'T4', stage: 'implement', state: 'done', reason: '第 2 次完成', gen: 2 },
     ],
   }

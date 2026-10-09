@@ -60,7 +60,7 @@ def payload(elp, **over):
     p = {
         "project": "demo", "scope": "project", "ticket": "t-1",
         "workflow": "DevLaneWorkflow", "template": "dev-lane",
-        "stage": "implement", "state": "running", "reason": "进入本步",
+        "stage": "implement", "state": "running", "reason": "Entered step",
         "gen": 1, "seq": 1, "run_id": "run-A",
     }
     p.update(over)
@@ -329,7 +329,7 @@ def main():
                 getattr(elp, "rebuild_ticket_lines")
             RUN = "run-R"
             timeline = [
-                {"stage": "implement", "state": "running", "reason": "进入本步",
+                {"stage": "implement", "state": "running", "reason": "Entered step",
                  "gen": 1, "at": "2026-09-28T10:00:00+08:00",
                  "ledger_seq": 1, "ledger_run": RUN},
                 {"stage": "implement", "state": "done", "reason": "完成",

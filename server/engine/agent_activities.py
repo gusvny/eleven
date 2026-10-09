@@ -3444,8 +3444,9 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                 # fail-closed，绝不吞成 note
                 raise RuntimeError("settle: 暂存区检查失败（diff --cached --quiet rc=%d）: %s"
                                    % (st.returncode, (st.stderr or "")[-200:]))
-            msg = ("%s %s：worker 代落盘（gen%d，%d 项改动）\n\n"
-                   "headless agent 沙箱写不了主库 .git，commit 由 worker 确定性兜底"
+            msg = ("%s %s: worker-settled (gen%d, %d files changed)\n\n"
+                   "a headless agent sandbox cannot write the main repo .git; the "
+                   "worker settles the commit deterministically"
                    % (ticket_id, stage_id, gen, len(dirty)))
             p = _git(["commit", "-m", msg], cwd)
             if p.returncode != 0:
@@ -6151,8 +6152,9 @@ def _settle_merge_core(wt: Path, ticket_id: str, round_no: int,
                 break
     if remaining:
         return ConflictSettleResult(ok=False, remaining_files=sorted(remaining))
-    msg = ("%s 冲突消解（第 %d 轮）：worker 代落盘合并提交\n\n"
-           "agent 解冲突标记、worker 代 commit（沙箱写不了真 .git）"
+    msg = ("%s conflict resolution (round %d): worker-settled merge commit\n\n"
+           "the agent resolved the conflict markers, the worker settles the commit "
+           "(an agent sandbox cannot write a real .git)"
            % (ticket_id, round_no))
     p = _git(["commit", "--no-edit", "-m", msg], wt)
     if p.returncode != 0:
@@ -6734,8 +6736,9 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
     else:
         # The message must contain lane/<id>: the ticket console's changes.ts greps
         # for it in both shapes, so it is the shared locator
-        msg = ("%s squash 收口（一单一提交，KI-006）\n\n"
-               "来源 %s；审计真源在 Temporal；泳道内小步历史不进 main"
+        msg = ("%s squash close-out (one commit per ticket, KI-006)\n\n"
+               "from %s; the audit source of truth is Temporal; the lane's "
+               "small-step history does not enter main"
                % (ticket_id, branch))
         c = _git(["commit", "-m", msg], repo, timeout=60)
         if c.returncode != 0:

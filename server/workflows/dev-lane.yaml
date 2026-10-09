@@ -9,107 +9,107 @@ stages:
   - id: create_plan
     role: developer
     name: "做方案"
-    desc: "读需求出实现方案：改动文件清单、步骤、验收口径；不动代码"
+    desc: "Read the request and produce the implementation plan: changed-file list, steps, acceptance criteria; no code changes"
     next: review_plan
     parts:
       - agent
     acceptance:
-      - "方案落结果文件（改动清单+步骤+验收口径）"
+      - "Plan written to the result file (changed-file list + steps + acceptance criteria)"
   - id: review_plan
     role: integration
     name: "审方案"
-    desc: "审读方案写 review comments：通过 ok / 打回 failed+修改意见"
+    desc: "Review the plan and write review comments: pass=ok / reject=failed+comments"
     next: implement
     parts:
       - agent
     acceptance:
-      - "review comments 落结果文件"
-      - "通过/打回结论明确"
+      - "Review comments written to the result file"
+      - "Explicit pass/reject verdict"
   - id: implement
     role: developer
     name: "实现"
-    desc: "按方案开发：写集白名单内；commit 由 worker 代落盘（agent 沙箱写不了真 .git）；与 design_integration_tests 并行分叉，两边齐活后汇合统一落盘"
+    desc: "Develop per the plan: stay inside the write set; commits are settled on behalf by the worker (an agent sandbox cannot write a real .git); forks in parallel with design_integration_tests, both edges land in one joint settle"
     next: design_integration_tests
     parts:
       - agent
       - script
     acceptance:
-      - "写集白名单内"
-      - "改动落写集文件（worker 代落盘 commit）"
-      - "相关 smoke/自测全绿"
+      - "Changes stay inside the write set"
+      - "Changes land in write-set files (worker-settled commit)"
+      - "Related smoke/self-tests all green"
   - id: design_integration_tests
     role: integration
     name: "设计集成测试"
-    desc: "按方案评估测试需求：从用户场景出发设计/迭代集成测试集（仓库 integration/ 目录，并登记进场景清单），覆盖并发与边界故障面；与 implement 并行，测试集不向 developer 引导"
+    desc: "Assess test needs from the plan: design/iterate the integration test set (repo integration/ directory, registered in the scenario list), covering concurrency and boundary failure surfaces; runs in parallel with implement, the test set is not shown to the developer"
     next: ui_evidence
     parts:
       - agent
     acceptance:
-      - "测试集落 integration/ 目录（并登记进场景清单）"
-      - "场景覆盖与故障面清单落结果文件"
+      - "Test set lands in the integration/ directory (and is registered in the scenario list)"
+      - "Scenario coverage and failure-surface list written to the result file"
   - id: ui_evidence
     role: developer
     name: "UI截图证据"
-    desc: "UI 票实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截控制台各视图落 .sandbar/screenshots/（软失败不拦主链，闸兜底）"
+    desc: "For UI tickets, after the implementation lands the worker runs ui-check/capture-lane.mjs on the isolated console, capturing each view into .sandbar/screenshots/ (soft failure does not block the main chain; the gate is the backstop)"
     next: run_integration_tests
     parts:
       - script
     acceptance:
-      - "UI 票 .sandbar/screenshots/ 有截图（merge_check 证据闸机械查）"
+      - "UI tickets have screenshots under .sandbar/screenshots/ (checked mechanically by the merge_check evidence gate)"
   - id: run_integration_tests
     role: integration
     name: "跑集成测试"
-    desc: "程序化（无 agent）：前置检查泳道落盘（0 commit = 实现未落盘 → blocked）；跑闸前主同步 main 一次（t260922-18：worker 代并，已追平幂等；冲突走既有消解回路回 implement；不可达响亮 blocked 转人工）；然后跑项目声明场景执行器 integration/run_scenarios.py（cwd=泳道），结果 JSON 交仲裁判定"
+    desc: "Programmatic (no agent): precheck the lane landing (0 commits = implementation not landed → blocked); re-merge main once before the gate (t260922-18: worker-settled, idempotent when up to date; conflicts take the existing resolution loop back to implement; unreachable = loud blocked to a human); then run the project-declared scenario executor integration/run_scenarios.py (cwd=lane), the result JSON goes to arbitration"
     next: arbitrate
     parts:
       - script
     # 纯脚本门段（agent=False：无 agent 活动，只跑门）
     acceptance:
-      - "场景执行器跑完全部场景并产出结果"
+      - "The scenario executor ran all scenarios and produced a result"
   - id: arbitrate
     role: integration
     name: "仲裁"
-    desc: "读机械测试结果三态判定：pass 通过 / tests-fault 测试集问题（自行迭代后重跑，上限 5 轮）/ code-fault 代码问题（集成测试报告打回 implement，上限 5 轮）"
+    desc: "Read the mechanical test results and give a three-state verdict: pass / tests-fault (test-set problem, iterate and re-run, cap 5 rounds) / code-fault (code problem, integration test report sends work back to implement, cap 5 rounds)"
     next: acceptance_walkthrough
     parts:
       - agent
       - script
     acceptance:
-      - "三态 verdict 明确（pass/tests-fault/code-fault）"
-      - "code-fault 附集成测试报告"
+      - "Explicit three-state verdict (pass/tests-fault/code-fault)"
+      - "code-fault carries an integration test report"
   - id: acceptance_walkthrough
     role: integration
     name: "验收走查"
-    desc: "测试通过后 integration 以用户视角走查新功能、写验收报告（供人审门查阅）；走查实证由 worker 前置产出（capture-lane 隔离台实拍 + DOM 断言）；走查发现代码问题 → 打回 implement（上限 2 轮）；收口两问（沉淀一问+反向同步闸）随走查顺路带出——不答不阻塞（doc-lifecycle 票②，文案=shared.STAGE_ACCEPTANCE_EXTRA，登记=agent_activities.apply_doc_gate）"
+    desc: "After tests pass, integration walks the new feature from the user's perspective and writes the acceptance report (for the human review gate); walkthrough evidence is pre-produced by the worker (capture-lane isolated-console shots + DOM assertions); a code problem found → send back to implement (cap 2 rounds); the two close-out questions (retention question + reverse-sync gate) ride along with the walkthrough — unanswered does not block (doc-lifecycle ticket ②, wording=shared.STAGE_ACCEPTANCE_EXTRA, registration=agent_activities.apply_doc_gate)"
     next: merge_check
     parts:
       - agent
       - script
     acceptance:
-      - "验收报告落结果文件（逐场景结论）"
-      - "沉淀一问有预填建议或显式无可沉淀（未答留痕不阻塞）"
-      - "矛盾核对结论落回执（有矛盾则债条目已登记 pending-doc-sync）"
+      - "Acceptance report written to the result file (per-scenario conclusions)"
+      - "Retention question has a prefilled suggestion or an explicit nothing-to-retain (unanswered is recorded, not blocking)"
+      - "Contradiction-check conclusion written to the receipt (with a contradiction, the debt entry is registered as pending-doc-sync)"
   - id: merge_check
     role: integration
     name: "合并检查"
-    desc: "程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；相位入口先重并 main（t261002-10：retry_qc 重跑本段前把 main 修复带进泳道，已追平=零动作；重并冲突走既有消解回路，不可达响亮 blocked）；仅预演冲突红 → 自动打回 implement 消解（上限 3 轮），其它红灯 blocked 等人"
+    desc: "Programmatic checks (no agent): the lane has commits, the worktree is clean, in-lane verify_lane is green, merge-tree has no conflict; phase entry re-merges main first (t261002-10: retry_qc re-runs bring the main fixes into the lane before the check, up to date = zero action; re-merge conflicts take the existing resolution loop, unreachable = loud blocked); only a dry-run conflict red → automatic send-back to implement for resolution (cap 3 rounds), any other red stays blocked for a human"
     next: merge
     parts:
       - script
     # 纯脚本门段（agent=False：无 agent 活动，只跑门）
     acceptance:
-      - "泳道分支有 commit"
-      - "工作区干净（无未提交改动）"
-      - "泳道内 verify_lane code 绿灯"
-      - "merge 预演无冲突（**仅**预演冲突这一类红自动打回 implement 消解，上限 3 轮；脏工作区/verify_lane 红等其它红 blocked 等人）"
+      - "Lane branch has commits"
+      - "Worktree is clean (no uncommitted changes)"
+      - "In-lane verify_lane code is green"
+      - "merge dry-run has no conflict (ONLY a dry-run-conflict red auto-sends work back to implement for resolution, cap 3 rounds; other reds such as a dirty worktree or a verify_lane red stay blocked for a human)"
   - id: merge
     role: integration
     name: "合并（人审）"
-    desc: "人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验"
+    desc: "After human sign-off, execute the merge: merge main + lane cleanup (tear down the worktree, delete the branch); a merge failure (e.g. another lane advanced main during the sign-off window) auto-sends work back to merge_check for re-verification"
     exit: human
     parts:
       - human
       - script
     acceptance:
-      - "人审签字"
-      - "merge 落账 + 泳道清理"
+      - "Human sign-off recorded"
+      - "Merge booked + lane cleaned up"

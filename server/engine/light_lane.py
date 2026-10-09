@@ -345,8 +345,9 @@ class LightLaneWorkflow(DevLaneWorkflow):
     # 同一 diff 源（非 UI 票零活动零痕迹，见 `_light_record_ui_evidence` 的落痕口径）。
     STAGES = (
         Stage(id="implement", name="实现", role="developer", next="ui_evidence",
-              desc="按方案开发：写集白名单内；agent 沙箱写不了真 .git，commit 由 worker "
-                   "代落盘；单测随实现交付",
+              desc="Develop per the plan: stay inside the write set; an agent sandbox "
+                   "cannot write a real .git, commits are settled on behalf by the "
+                   "worker; unit tests ship with the implementation",
               parts=("agent", "script"),
               acceptance=("Changes stay inside the write set",
                           "Changes are committed to the lane branch (the worker settles "
@@ -356,9 +357,11 @@ class LightLaneWorkflow(DevLaneWorkflow):
         # dev_lane._ui_evidence_step（同一 helper、同一判据）；本类只做「段有没有跑」的记账。
         Stage(id="ui_evidence", name="UI截图证据", role="developer",
               next="run_integration_tests",
-              desc="条件段（仅 UI 票）：实现落盘/结算后 worker 代跑 ui-check 隔离台截图，落 "
-                   ".sandbar/screenshots/（脚本段、无 agent 无 LLM；软失败不拦主链，merge_check "
-                   "的 UI 证据闸兜底）",
+              desc="Conditional stage (UI tickets only): after the implementation "
+                   "lands/settles the worker runs ui-check isolated-console screenshots "
+                   "into .sandbar/screenshots/ (script stage, no agent, no LLM; soft "
+                   "failure does not block the main chain, the merge_check UI-evidence "
+                   "gate is the backstop)",
               parts=("script",),
               acceptance=("UI tickets carry screenshots under .sandbar/screenshots/ "
                           "(the merge_check UI-evidence gate checks it mechanically)",)),
@@ -367,11 +370,15 @@ class LightLaneWorkflow(DevLaneWorkflow):
         # 之外的一步**（段表里没有它），却决定「被验证树=被合并树」；见模块头注与相位注释。
         Stage(id="run_integration_tests", name="跑集成测试", role="integration",
               next="merge_check", agent=False,
-              desc="程序化（无 agent）：泳道 0-commit 前置检查 → 闸前主同步（把 main 并进泳道一次，"
-                   "被验证树=被合并树）→ 改动清单 → 面计划收窄快反馈面 "
-                   "→ 跑项目声明的集成命令（与 dev-lane 同一条命令、同一个执行器）；不绿即 blocked "
-                   "（票面=给人看的摘要：计数 + 本票的账最多 5 名 + 出路 ≤3；完整违规集在 "
-                   "blocked_detail/回执里）；不自动重跑、不调仲裁；定点轮放行只认收口全量跑",
+              desc="Programmatic (no agent): lane 0-commit precheck → pre-gate main "
+                   "sync (merge main into the lane once; the verified tree = the merged "
+                   "tree) → changed-file list → face-plan-narrowed fast-feedback set → "
+                   "run the project-declared integration command (the same command and "
+                   "executor as dev-lane); not green = blocked "
+                   "(ticket face = a human-readable digest: counts + at most 5 named "
+                   "violations for this ticket + up to 3 ways out; the full violation "
+                   "set is in blocked_detail/the receipt); no automatic re-run, no "
+                   "arbitration; a targeted round only passes on a closing full run",
               parts=("script",),
               gate=LIGHT_LANE_GATES[(LIGHT_LANE_TEMPLATE_ID, "run_integration_tests")],
               acceptance=("The project-declared integration command ran and produced a receipt",
@@ -379,19 +386,22 @@ class LightLaneWorkflow(DevLaneWorkflow):
                           "name, the counts, and the receipt pointer")),
         Stage(id="merge_check", name="合并检查", role="integration", next="merge",
               agent=False,
-              desc="程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、"
-                   "merge-tree 无冲突；phase entry re-merges main before the check "
+              desc="Programmatic checks (no agent): the lane has commits, the worktree "
+                   "is clean, in-lane verify_lane is green, merge-tree has no conflict; "
+                   "phase entry re-merges main before the check "
                    "(t261002-10: a retry_qc brings a main-side fix into the lane within "
-                   "one retry; up to date = zero action; re-merge conflict goes to the "
-                   "existing resolution loop, unreachable = loud blocked)；"
-                   "任一项红 → blocked 等人（轻道不做自动冲突消解轮）",
+                   "one retry; up to date = zero action; a re-merge conflict goes to the "
+                   "existing resolution loop, unreachable = loud blocked); "
+                   "any red → blocked for a human (the light lane runs no automatic "
+                   "conflict-resolution rounds)",
               parts=("script",),
               acceptance=("Lane branch has commits", "Worktree is clean",
                           "The in-lane verify_lane check is green",
                           "merge dry-run has no conflict")),
         Stage(id="merge", name="合并（人审）", role="integration", next="", exit="human",
-              desc="人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；"
-                   "归档失败 fail-closed 保留泳道",
+              desc="After human sign-off, execute the merge: merge main + lane cleanup "
+                   "(tear down the worktree, delete the branch); archive failure is "
+                   "fail-closed and keeps the lane",
               parts=("human", "script"),
               acceptance=("Human sign-off recorded",
                           "Merge booked and the lane is torn down after a successful archive")),

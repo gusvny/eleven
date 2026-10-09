@@ -250,8 +250,8 @@ def test_env_red_face_note_shape():
     """票面注记形状：前 5 个 + 省略号 + 总数；空名单/畸形=空串（不加这段）。"""
     wf = _lane()
     note = wf._env_red_face_note(ENV_RED_11)
-    assert note.startswith("｜环境红（不拦·具名）：")
-    assert note.endswith("（共 11）") and "…" in note
+    assert note.startswith(" | env-red (not blocking, named): ")  # copy anglicized in t261008-47
+    assert note.endswith(" (total 11)") and "..." in note  # copy anglicized in t261008-47
     for n in ENV_RED_11[:5]:
         assert n in note
     assert ENV_RED_11[5] not in note
@@ -295,8 +295,8 @@ def test_wiring_pins():
     """结构锁：两分支的 `if not counted:` 归宿判据接线在场，且环境面注记串在场。"""
     src = (POC / "dev_lane.py").read_text(encoding="utf-8")
     assert src.count("if not counted and self._acceptance_without_rerun(cur_integ):") == 2
-    assert "环境面/已知红面，不重跑" in src
-    assert "｜环境红（不拦·具名）：" in src
+    assert "env/known-red surface, not re-run" in src  # copy anglicized in t261008-47
+    assert " | env-red (not blocking, named): " in src
     # 具名通道读面/产品红减法/票面注记三件套的单写者接线
     assert "_tests_env_red_names(" in src
     assert "_tests_product_red_names(" in src

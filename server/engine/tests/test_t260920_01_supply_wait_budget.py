@@ -231,7 +231,7 @@ def test_a_dev_lane_note_sites_intact():
     """两处「本轮不计入 tests-fault 轮次」handoff 站点仍在（串行+平行）——
     留痕上台面的结构用例（t260917-04 守卫锚的同族轻量自证）。"""
     src = (REPO / "server" / "engine" / "dev_lane.py").read_text("utf-8")
-    assert src.count("本轮不计入 tests-fault 轮次") == 2
+    assert src.count("not counted as a tests-fault round") == 2  # copy anglicized in t261008-47
 
 
 # ---------- B. 等待超预算用例（验收②）+ 点名（验收③） ----------

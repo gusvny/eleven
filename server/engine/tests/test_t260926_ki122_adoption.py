@@ -695,7 +695,7 @@ def test_c6_adoption_note_lands_on_ticket_face():
     assert SRC.count("adoption_note") >= 8, SRC.count("adoption_note")
     assert SRC.count('self._log("tests-fault 判决未采纳：%s" % adoption_note)') == 2
     assert SRC.count('(" " + adoption_note) if adoption_note else ""') == 6
-    assert SRC.count("环境面/已知红面，不重跑") == 2      # B2 新增两处（串行/平行同构）
+    assert SRC.count("env/known-red surface, not re-run") == 2      # B2, both branches (copy anglicized in t261008-47)
 
 
 # ---------------- D. ③外部处置不击穿上限 ----------------

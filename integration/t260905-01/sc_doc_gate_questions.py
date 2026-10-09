@@ -72,8 +72,8 @@ check("A6 acceptance 返回路径调用位在场（触发器被拆=红）",
 check("A7 债册常量在位（pending-doc-sync.jsonl 路径可查可审计）",
       "pending-doc-sync.jsonl" in (SHARED_SRC + AA_SRC))
 check("A8 dev_lane STAGES 两问验收项追加（走查块含沉淀/矛盾核对项）",
-      "沉淀" in stage_block(DL_SRC, "acceptance_walkthrough")
-      and "矛盾" in stage_block(DL_SRC, "acceptance_walkthrough"))
+      "Retention question" in stage_block(DL_SRC, "acceptance_walkthrough")
+      and "Contradiction-check conclusion" in stage_block(DL_SRC, "acceptance_walkthrough"))
 
 # ---------- 行为半（temporalio 面；缺失=ENV_FAIL） ----------
 aa = None

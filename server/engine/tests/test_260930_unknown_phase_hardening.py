@@ -138,8 +138,8 @@ def test_loop_tail_blocks_instead_of_raising_behind_the_gate():
         "门开后（blocked 之前）不许再有 raise 语句（注释里提「raise」不算）"
     assert "await self._blocked(" in after_gate, \
         "门开后必须走 blocked（可查/可唤醒），而不是打断工作流实例"
-    assert "不再让工作流任务失败" in after_gate and "retry_qc" in after_gate, \
-        "blocked 文案必须点名「不再让工作流任务失败」并给出出路"
+    assert "no longer fails" in after_gate and "retry_qc" in after_gate, \
+        "the blocked copy must name \"the workflow task no longer fails\" and give a way out (copy anglicized in t261008-47)"
     assert "phase = REWORK_PHASE_FALLBACK" in after_gate, "相位夹到人门再回主循环"
     assert "continue" in after_gate
 

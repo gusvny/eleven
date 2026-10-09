@@ -73,7 +73,7 @@ const statesOf = (r) => r.states
  */
 function conflictLoopDetail({ noDone = false, closed = false } = {}) {
   const results = {}, checks = {}, timeline = []
-  const enter = (s, i) => timeline.push(tle(s, RUN, `进入本步（第 ${i} 次）`))
+  const enter = (s, i) => timeline.push(tle(s, RUN, `Entered step（第 ${i} 次）`))
   const finish = (s, by) => {
     if (s === 'merge_check' || s === 'merge') checks[s] = doneChecks('泳道有 commit', '工作区干净', 'verify_lane code 绿', 'merge-tree 无冲突')
     else results[s] = okRes(results[s] ? results[s].gen : 0)
@@ -94,7 +94,7 @@ function conflictLoopDetail({ noDone = false, closed = false } = {}) {
   // merge_check 三进段（冲突×2 + 全绿×1）：只落 checks，无 results
   for (let i = 1; i <= 3; i++) { enter('merge_check', i); if (i === 3) finish('merge_check', 'merge_check') }
   // merge 签字
-  timeline.push(tle('merge', 'awaiting-human', '等人签字：sign(gate=merge)'))
+  timeline.push(tle('merge', 'awaiting-human', 'waiting for sign-off：sign(gate=merge)'))
   enter('merge', 1)
   finish('merge', 'user')
   return {
@@ -144,7 +144,7 @@ section('T4 重跑语义：done 条目后 rework 重进 → 回 running 入活�
 {
   const d = conflictLoopDetail()
   // acceptance 打回 implement 重做：_enter 追加 running 在 done 之后
-  d.timeline.push(tle('implement', RUN, '进入本步（第 2 次）'))
+  d.timeline.push(tle('implement', RUN, 'Entered step (attempt 2)'))
   d.stage = 'implement'
   const s = statesOf(derive(d, ORDER))
   const r = derive(d, ORDER)

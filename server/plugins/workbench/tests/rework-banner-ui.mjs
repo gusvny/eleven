@@ -55,9 +55,9 @@ if (m) {
 // fixture：_mark 真实产出的记录形状（at/stage/state/reason 四键）
 const autoRecord = { at: '2026-09-01T10:06:54', stage: 'implement', state: 'rework', reason: '验收走查打回（第 2 轮）（workflow）' }
 const mixedTimeline = [
-  { at: '2026-09-01T09:00:00', stage: 'create_plan', state: 'running', reason: '进入本步（第 1 次）' },
+  { at: '2026-09-01T09:00:00', stage: 'create_plan', state: 'running', reason: 'Entered step (attempt 1)' },
   autoRecord,
-  { at: '2026-09-01T10:07:00', stage: 'implement', state: 'running', reason: '进入本步（第 2 次）' },
+  { at: '2026-09-01T10:07:00', stage: 'implement', state: 'running', reason: 'Entered step (attempt 2)' },
 ]
 if (filterFn) {
   ok(filterFn.length === 1, '过滤函数单参数（t）')

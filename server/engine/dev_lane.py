@@ -884,7 +884,7 @@ _LEGACY_STEPS: Dict[str, Stage] = {
     "integration_review": Stage(
         id="integration_review", name="集成审读", role="integration",
         next="merge_check", parts=("agent",),
-        desc="（已退役——仅存量 workflow 重放可达；新链把关=集成测试+仲裁+验收走查）"),
+        desc="(retired — reachable only by replaying existing workflows; the new chain is gated by integration tests + arbitration + acceptance walkthrough)"),
 }
 
 
@@ -953,82 +953,63 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
     # polling etc.) is not counted.
     STAGES = (
         Stage(id="create_plan", name="做方案", role="developer", next="review_plan",
-              desc="读需求出实现方案：改动文件清单、步骤、验收口径；不动代码",
+              desc="Read the request and produce the implementation plan: changed-file list, steps, acceptance criteria; no code changes",
               parts=("agent",),
-              acceptance=("方案落结果文件（改动清单+步骤+验收口径）",)),
+              acceptance=("Plan written to the result file (changed-file list + steps + acceptance criteria)",)),
         Stage(id="review_plan", name="审方案", role="integration", next="implement",
-              desc="审读方案写 review comments：通过 ok / 打回 failed+修改意见",
+              desc="Review the plan and write review comments: pass=ok / reject=failed+comments",
               parts=("agent",),
-              acceptance=("review comments 落结果文件", "通过/打回结论明确")),
+              acceptance=("Review comments written to the result file", "Explicit pass/reject verdict")),
         # implement and design_integration_tests really run in parallel (asyncio.gather,
         # see run()'s parallel_impl_design branch; the display chain lines them up
         # adjacently as a linear approximation, the join point commits for both).
         # t260915-05：真拓扑的导出面=template_topology（节点+边+并行组+人门，含本处
         # 与 arb_acc_parallel 两分叉）——泳道图消费导出面，不再吃线性近似（KI-019）。
         Stage(id="implement", name="实现", role="developer", next="design_integration_tests",
-              desc="按方案开发：写集白名单内；commit 由 worker 代落盘（agent 沙箱写不了真 .git）；"
-                   "与 design_integration_tests 并行分叉，两边齐活后汇合统一落盘",
+              desc="Develop per the plan: stay inside the write set; commits are settled on behalf by the worker (an agent sandbox cannot write a real .git); forks in parallel with design_integration_tests, both edges land in one joint settle",
               parts=("agent", "script"),
-              acceptance=("写集白名单内", "改动落写集文件（worker 代落盘 commit）", "相关 smoke/自测全绿")),
+              acceptance=("Changes stay inside the write set", "Changes land in write-set files (worker-settled commit)", "Related smoke/self-tests all green")),
         # ---- ticket t260831-02: parallel implement ∥ test design → mechanical tests
         #      → arbitration loop → acceptance walkthrough ----
         Stage(id="design_integration_tests", name="设计集成测试", role="integration", next="ui_evidence",
-              desc="按方案评估测试需求：从用户场景出发设计/迭代集成测试集（仓库 integration/ 目录，"
-                   "并登记进场景清单），覆盖并发与边界故障面；与 implement 并行，测试集不向 developer 引导",
+              desc="Assess test needs from the plan: design/iterate the integration test set (repo integration/ directory, registered in the scenario list), covering concurrency and boundary failure surfaces; runs in parallel with implement, the test set is not shown to the developer",
               parts=("agent",),
-              acceptance=("测试集落 integration/ 目录（并登记进场景清单）", "场景覆盖与故障面清单落结果文件")),
+              acceptance=("Test set lands in the integration/ directory (and is registered in the scenario list)", "Scenario coverage and failure-surface list written to the result file")),
         # t260828-09: display metadata only (UI tickets only, run inline in run()
         # between the join commit and the mechanical tests; non-UI tickets skip this
         # step; missing screenshots are caught by the merge_check evidence gate).
         Stage(id="ui_evidence", name="UI截图证据", role="developer", next="run_integration_tests",
-              desc="UI 票实现落盘后 worker 代跑 ui-check/capture-lane.mjs 隔离台，截控制台"
-                   "各视图落 .sandbar/screenshots/（软失败不拦主链，闸兜底）",
+              desc="For UI tickets, after the implementation lands the worker runs ui-check/capture-lane.mjs on the isolated console, capturing each view into .sandbar/screenshots/ (soft failure does not block the main chain; the gate is the backstop)",
               parts=("script",),
-              acceptance=("UI 票 .sandbar/screenshots/ 有截图（merge_check 证据闸机械查）",)),
+              acceptance=("UI tickets have screenshots under .sandbar/screenshots/ (checked mechanically by the merge_check evidence gate)",)),
         Stage(id="run_integration_tests", name="跑集成测试", role="integration", next="arbitrate", agent=False,
-              desc="程序化（无 agent）：前置检查泳道落盘（0 commit = 实现未落盘 → blocked）；"
-                   "跑闸前主同步 main 一次（t260922-18：worker 代并，已追平幂等；冲突走既有消解"
-                   "回路回 implement；不可达响亮 blocked 转人工）；然后跑项目声明场景执行器 "
-                   "integration/run_scenarios.py（cwd=泳道），结果 JSON 交仲裁判定",
+              desc="Programmatic (no agent): precheck the lane landing (0 commits = implementation not landed → blocked); re-merge main once before the gate (t260922-18: worker-settled, idempotent when up to date; conflicts take the existing resolution loop back to implement; unreachable = loud blocked to a human); then run the project-declared scenario executor integration/run_scenarios.py (cwd=lane), the result JSON goes to arbitration",
               parts=("script",),
-              acceptance=("场景执行器跑完全部场景并产出结果",)),
+              acceptance=("The scenario executor ran all scenarios and produced a result",)),
         Stage(id="arbitrate", name="仲裁", role="integration", next="acceptance_walkthrough",
-              desc="读机械测试结果三态判定：pass 通过 / tests-fault 测试集问题（自行迭代后重跑，"
-                   "上限 %d 轮）/ code-fault 代码问题（集成测试报告打回 implement，上限 %d 轮）"
+              desc="Read the mechanical test results and give a three-state verdict: pass / tests-fault (test-set problem, iterate and re-run, cap %d rounds) / code-fault (code problem, integration test report sends work back to implement, cap %d rounds)"
                    % (MAX_TESTS_FAULT_ROUNDS, MAX_CODE_FAULT_ROUNDS),
               parts=("agent", "script"),
-              acceptance=("三态 verdict 明确（pass/tests-fault/code-fault）", "code-fault 附集成测试报告")),
+              acceptance=("Explicit three-state verdict (pass/tests-fault/code-fault)", "code-fault carries an integration test report")),
         Stage(id="acceptance_walkthrough", name="验收走查", role="integration", next="merge_check",
-              desc="测试通过后 integration 以用户视角走查新功能、写验收报告（供人审门查阅）；"
-                   "走查实证由 worker 前置产出（capture-lane 隔离台实拍 + DOM 断言）；"
-                   "走查发现代码问题 → 打回 implement（上限 %d 轮）；"
-                   "收口两问（沉淀一问+反向同步闸）随走查顺路带出——不答不阻塞（doc-lifecycle 票②，"
-                   "文案=shared.STAGE_ACCEPTANCE_EXTRA，登记=agent_activities.apply_doc_gate）"
+              desc="After tests pass, integration walks the new feature from the user's perspective and writes the acceptance report (for the human review gate); walkthrough evidence is pre-produced by the worker (capture-lane isolated-console shots + DOM assertions); a code problem found → send back to implement (cap %d rounds); the two close-out questions (retention question + reverse-sync gate) ride along with the walkthrough — unanswered does not block (doc-lifecycle ticket ②, wording=shared.STAGE_ACCEPTANCE_EXTRA, registration=agent_activities.apply_doc_gate)"
                    % MAX_ACCEPTANCE_ROUNDS,
               parts=("agent", "script"),
-              acceptance=("验收报告落结果文件（逐场景结论）",
-                          "沉淀一问有预填建议或显式无可沉淀（未答留痕不阻塞）",
-                          "矛盾核对结论落回执（有矛盾则债条目已登记 pending-doc-sync）")),
+              acceptance=("Acceptance report written to the result file (per-scenario conclusions)", "Retention question has a prefilled suggestion or an explicit nothing-to-retain (unanswered is recorded, not blocking)", "Contradiction-check conclusion written to the receipt (with a contradiction, the debt entry is registered as pending-doc-sync)")),
         Stage(id="merge_check", name="合并检查", role="integration", next="merge", agent=False,
-              desc="程序化检查（无 agent）：泳道有 commit、工作区干净、泳道内 verify_lane 绿、merge-tree 无冲突；"
-                   "相位入口先重并 main（t261002-10：retry_qc 重跑本段前把 main 修复带进泳道，"
-                   "已追平=零动作；重并冲突走既有消解回路，不可达响亮 blocked）；"
-                   "仅预演冲突红 → 自动打回 implement 消解（上限 %d 轮），其它红灯 blocked 等人" % MAX_CONFLICT_ROUNDS,
+              desc="Programmatic checks (no agent): the lane has commits, the worktree is clean, in-lane verify_lane is green, merge-tree has no conflict; phase entry re-merges main first (t261002-10: retry_qc re-runs bring the main fixes into the lane before the check, up to date = zero action; re-merge conflicts take the existing resolution loop, unreachable = loud blocked); only a dry-run conflict red → automatic send-back to implement for resolution (cap %d rounds), any other red stays blocked for a human" % MAX_CONFLICT_ROUNDS,
               parts=("script",),
-              acceptance=("泳道分支有 commit", "工作区干净（无未提交改动）",
-                          "泳道内 verify_lane code 绿灯",
+              acceptance=("Lane branch has commits", "Worktree is clean (no uncommitted changes)", "In-lane verify_lane code is green",
                           # 260927（宿主实报「段的说明写会自动消解，实测冲突重驱两次仍红」）：
                           # 自动消解只对**预演冲突这一类红**生效（mc.conflict），其它红（脏工作区/
                           # verify_lane 红/差值闸…）一律 blocked 等人——原文案把两类混写成一句，
                           # 让人以为「任何冲突都会自动消解」。文案按类分开点名。
-                          "merge 预演无冲突（**仅**预演冲突这一类红自动打回 implement 消解，"
-                          "上限 %d 轮；脏工作区/verify_lane 红等其它红 blocked 等人）"
+                          "merge dry-run has no conflict (ONLY a dry-run-conflict red auto-sends work back to implement for resolution, cap %d rounds; other reds such as a dirty worktree or a verify_lane red stay blocked for a human)"
                           % MAX_CONFLICT_ROUNDS)),
         Stage(id="merge", name="合并（人审）", role="integration", next="", exit="human",
-              desc="人审签字后执行 merge：合 main + 泳道清理（拆 worktree、删分支）；"
-                   "合并失败（如签字期间他道先进 main 冲突）自动打回 merge_check 重验",
+              desc="After human sign-off, execute the merge: merge main + lane cleanup (tear down the worktree, delete the branch); a merge failure (e.g. another lane advanced main during the sign-off window) auto-sends work back to merge_check for re-verification",
               parts=("human", "script"),
-              acceptance=("人审签字", "merge 落账 + 泳道清理")),
+              acceptance=("Human sign-off recorded", "Merge booked + lane cleaned up")),
         # t260910-14 退役注记：旧「预跑下一单」Stage 整链退役（宿主 260910 拍板）。
         # 老票 results 里残留的该段键由展示/推进面按未知键自然忽略（STAGES 不再含
         # 该 id，不构成推进阻塞）。
@@ -1264,7 +1245,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # t260929-19：畸形/重复增项显式降级——log 类台账点名（非 _mark 段状态，
             # 避免污染下游 snapshot/lane 读的段状态机）。
             self._log("acceptance_extra 丢弃畸形/重复项：%s" % ", ".join(_dropped))
-        self._mark(first.id, "awaiting", "adopt %s（步=%s）"
+        self._mark(first.id, "awaiting", "adopt %s (steps=%s)"
                    % (self.TEMPLATE_ID, [s.id for s in self.STAGES]))
 
     # ---------- step entry (the meta/ledger trio) ----------
@@ -1289,7 +1270,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # 仲裁格式纠正轮失败后下轮成功等）。与 _blocked wake 清（清点①）双保险。
             self.meta["blocked_detail"] = None
         self._touch()
-        self._mark(step_id, "running", "进入本步（第 %d 次）" % self._gen(step_id))
+        self._mark(step_id, "running", "Entered step (attempt %d)" % self._gen(step_id))
         # KI-227 (t261008-29): the stage now survives the terminal state (memo;
         # failure-isolated + patch-gated, see _persist_stage_memo).
         self._persist_stage_memo(step_id, "enter gen=%d" % self._gen(step_id))
@@ -1306,7 +1287,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         #     workbench falls back to its current inRun heuristics (no retroactive fix);
         # (3) re-run semantics — when a rework re-enters, running is appended after
         #     done, so the newest state correctly reads as running again.
-        self._mark(step_id, "done", by + (("：" + evidence) if evidence else ""))
+        self._mark(step_id, "done", by + ((": " + evidence) if evidence else ""))
         self._touch()
 
     def _handoff(self, step_id: str, summary: str,
@@ -1725,9 +1706,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         got = [str(x).strip() for x in names if str(x or "").strip()]
         if not got:
             return ""
-        shown = "、".join(got[:limit])
-        return "｜环境红（不拦·具名）：%s%s（共 %d）" % (
-            shown, "…" if len(got) > limit else "", len(got))
+        shown = ", ".join(got[:limit])
+        return " | env-red (not blocking, named): %s%s (total %d)" % (
+            shown, "..." if len(got) > limit else "", len(got))
 
     def _integ_round_stall(self, cur_integ) -> Dict[str, Any]:
         """本轮闸**测量面**与上一轮判过的逐字相同 ⇒ 判停（260929 宿主令直修）。
@@ -2492,8 +2473,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self.meta["stage_state"] = "awaiting"
         self.meta["last_rework_note"] = note
         self._touch()
-        self._log("rework: %s（回 %s）——%s" % (note, target, who))
-        self._mark(target, "rework", "%s（%s）" % (note, who))
+        self._log("rework: %s (back to %s) - %s" % (note, target, who))
+        self._mark(target, "rework", "%s (%s)" % (note, who))
         # KI-227 (t261008-29): rework also moves the stage — persist it (memo,
         # failure-isolated; see _persist_stage_memo).
         self._persist_stage_memo(target, "rework")
@@ -2552,11 +2533,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             self.meta["role"] = self._step(target).role
             self.meta["status"] = "rework"
             self.meta["stage_state"] = "awaiting"
-            self.meta["last_rework_note"] = "%s——%s（%s）" % (orig, req.note, req.who)
+            self.meta["last_rework_note"] = "%s - %s (%s)" % (orig, req.note, req.who)
             self._touch()
             self._log("rework: %s——%s（%s）→ 落点 %s（%s 边重跑，另一边结果保留）"
                       % (orig, req.note, req.who, landing, edge))
-            self._mark(landing, "rework", "%s——%s（%s）" % (orig, req.note, req.who))
+            self._mark(landing, "rework", "%s - %s (%s)" % (orig, req.note, req.who))
             # KI-227 (t261008-29): rework landing site — persist (memo, isolated).
             self._persist_stage_memo(landing, "rework landing")
             return landing, edge, ""
@@ -2820,8 +2801,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                          "skip the sync, otherwise the verified tree ≠ the merged "
                          "tree): "
                          "%s%s")
-                    % (prep.error or "未知",
-                       ("｜各仓同步结果：%s" % "、".join(_sync_outcomes))
+                    % (prep.error or "unknown",
+                       (" | per-repo sync results: %s" % ", ".join(_sync_outcomes))
                        if len(_sync_targets) > 1 else ""))
                 _sync_stop = "blocked"
                 break
@@ -2906,12 +2887,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self._log("main sync detected merge conflict (%s, round %d/%d), "
                           "entering the existing resolution loop: %s"
                           % (_tag, self._conflict_rounds, MAX_CONFLICT_ROUNDS,
-                             "、".join(prep.conflict_files)[:200]))
+                             ", ".join(prep.conflict_files)[:200]))
                 self._handoff(step_id,
                               text("resolve_round",
                                    "main-sync conflict resolution round %d (%s): %s")
                               % (self._conflict_rounds, _tag,
-                                 "、".join(prep.conflict_files)[:200]))
+                                 ", ".join(prep.conflict_files)[:200]))
                 # 变量名 msolve_ctx（非 solve_ctx）：selfcheck E-1 用
                 # 「_run_agent_step("implement", solve_ctx)」首次出现锚定
                 # merge_check 分支的 prep→implement→settle 串行——主同步
@@ -3241,7 +3222,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     continue
                 self._finish("create_plan", by="developer-agent",
                              evidence=res.evidence or res.summary)
-                self._handoff("create_plan", res.summary or "方案完成",
+                self._handoff("create_plan", res.summary or "Plan done",
                               artifacts=res.deliverables, report=res.report)
                 phase = "review_plan"
                 continue
@@ -3271,7 +3252,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     self._finish("review_plan", by="integration-agent",
                                  evidence=res.evidence or res.summary)
                     self._handoff("review_plan",
-                                  ("方案审读附条件放行：" if is_cond else "方案审读通过：")
+                                  ("Plan review conditional pass: " if is_cond else "Plan review passed: ")
                                   + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
                     if is_cond:
@@ -3309,7 +3290,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 prev_ctx = ("【方案审读打回（第 %d 轮）】review comments：\n%s\n%s"
                             % (plan_rounds, res.report or res.summary or "",
                                res.evidence or "")).strip()
-                self._handoff("review_plan", "方案打回：" + (res.summary or ""),
+                self._handoff("review_plan", "Plan rejected: " + (res.summary or ""),
                               report=res.report)
                 if plan_rounds > MAX_REVIEW_ROUNDS:
                     await self._blocked("review_plan",
@@ -3337,7 +3318,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     continue
                 self._finish("implement", by="developer-agent",
                              evidence=res.evidence or res.summary)
-                self._handoff("implement", res.summary or "实现完成",
+                self._handoff("implement", res.summary or "Implementation done",
                               artifacts=res.deliverables, report=res.report)
                 if not workflow.patched(INTEG_LOOP_PATCH_ID):
                     # ---- old chain tail (reachable only by replaying existing
@@ -3373,7 +3354,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     phase = "integration_review"
                     continue
                 impl_done = True
-                self._handoff("implement", res.summary or "实现完成",
+                self._handoff("implement", res.summary or "Implementation done",
                               artifacts=res.deliverables, report=res.report)
                 phase = "integ_join"
                 continue
@@ -3458,7 +3439,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         continue
                     self._finish("integration_review", by="integration-agent",
                                  evidence=res.evidence or res.summary)
-                    self._handoff("integration_review", "集成审读通过：" + (res.summary or ""),
+                    self._handoff("integration_review", "Integration review passed: " + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
                     phase = "merge_check"
                     continue
@@ -3466,7 +3447,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 prev_ctx = ("【集成审读打回（第 %d 轮）】review comments：\n%s\n%s"
                             % (impl_rounds, res.report or res.summary or "",
                                res.evidence or "")).strip()
-                self._handoff("integration_review", "集成审读打回：" + (res.summary or ""),
+                self._handoff("integration_review", "Integration review rejected: " + (res.summary or ""),
                               report=res.report)
                 if impl_rounds > MAX_REVIEW_ROUNDS:
                     await self._blocked("integration_review",
@@ -3474,7 +3455,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                         "over limit (cap %d)"
                                         % (impl_rounds, MAX_REVIEW_ROUNDS))
                     continue
-                note = "集成审读打回（第 %d 轮）" % impl_rounds
+                note = "integration review back (round %d)" % impl_rounds
                 self._log("integration_review 打回 → implement（第 %d 轮）：%s"
                           % (impl_rounds, (res.summary or "")[:120]))
                 phase = self._auto_rework("implement", note, who="workflow",
@@ -3494,7 +3475,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 impl_done = True
                 self._finish("implement", by="developer-agent",
                              evidence=res.evidence or res.summary)
-                self._handoff("implement", res.summary or "实现完成",
+                self._handoff("implement", res.summary or "Implementation done",
                               artifacts=r.deliverables if False else res.deliverables,
                               report=res.report)
                 phase = "integ_join"
@@ -3579,7 +3560,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                 settle=False) for n in pend],
                             return_exceptions=True)
                     except Exception as e:  # gather itself should not raise (return_exceptions); defensive
-                        await self._blocked("parallel_impl_design", "并行分叉异常：%s" % e)
+                        await self._blocked("parallel_impl_design", "parallel fork exception: %s" % e)
                         continue
                     failed = False
                     for name, r in zip(pend, rs):
@@ -3613,14 +3594,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             impl_done = True
                             self._finish("implement", by="developer-agent",
                                          evidence=r.evidence or r.summary)
-                            self._handoff("implement", r.summary or "实现完成",
+                            self._handoff("implement", r.summary or "Implementation done",
                                           artifacts=r.deliverables, report=r.report)
                         else:
                             design_done = True
                             self._finish("design_integration_tests", by="integration-agent",
                                          evidence=r.evidence or r.summary)
                             self._handoff("design_integration_tests",
-                                          r.summary or "集成测试集就绪",
+                                          r.summary or "Integration test set ready",
                                           artifacts=r.deliverables, report=r.report)
                 if not (impl_done and design_done):
                     continue
@@ -3707,8 +3688,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         if g.lane_commits == 0:
                             await self._blocked(
                                 "run_integration_tests",
-                                "实现未落盘（泳道 0 commit）——实现步产物缺失，"
-                                "发 rework 回 implement 或排查实现步")
+                                "implementation not landed (lane has 0 commits) — implement-stage artifacts missing; send a rework back to implement or investigate the implement stage")
                             continue
                     except Exception as e:
                         self._log("落盘前置检查故障（不拦主链）：%s: %s" % (type(e).__name__, e))
@@ -3881,8 +3861,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # 旧口径命中面（forced_by）只作迁移期留痕，不再出现在票面注记里。
                 _pe_note = ""
                 if ir.excluded_pools:
-                    _pe_note = "｜本轮跳过池=%s（少 %d 条）" % (
-                        "、".join(ir.excluded_pools), ir.excluded_count)
+                    _pe_note = " | skipped pools this round=%s (%d fewer entries)" % (
+                        ", ".join(ir.excluded_pools), ir.excluded_count)
                 # t260917-08（review N3）：失败命令点名进票面——前 3 个失败命令名+剩余计数，
                 # 「｜」注记风格与既有面一致；单列计数不进 status 判定（闸口径零改动）
                 _hv_note = ""
@@ -3891,11 +3871,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                  for d in ir.details
                                  if str(d.get("name") or "").startswith("handover:")
                                  and d.get("exit") != 0]
-                    _hv_note = "｜移交命令 %d 跑 / %d 过 / %d 败" % (
+                    _hv_note = " | handover commands %d ran / %d passed / %d failed" % (
                         ir.handover_ran, ir.handover_passed, ir.handover_failed)
                     if _red_legs:
-                        _hv_note += "（失败命令：%s%s）" % (
-                            "、".join(_red_legs[:3]), "等" if len(_red_legs) > 3 else "")
+                        _hv_note += " (failed commands: %s%s)" % (
+                            ", ".join(_red_legs[:3]), " etc" if len(_red_legs) > 3 else "")
                 # t260922-18：主同步证据进票面（机械证据三处之一；与闸补 baseline_ref
                 # 同轮互证——开跑时 main@sha 一致）。回执畸形/缺键=空文案，票面不铸假证据
                 #（同步被 blocked 打断时根本到不了这里）。
@@ -3918,7 +3898,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "status": "failed" if (ir.error or ir.failed) else "ok",
                     "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s%s"
                                % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                  ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
+                                  (" | " + ir.error) if ir.error else "", _pe_note, _hv_note,
                                   _env_note_face, _ms_sum,
                                   ("｜" + _wf_line) if _wf_line else ""),
                     "report": "", "deliverables": [], "files_changed": [],
@@ -3927,13 +3907,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     "code_stamp": _wf_stamp,
                     "gen": 0}
                 self._finish("run_integration_tests", by="run_integration_tests",
-                             evidence="；".join("%s:%s" % (d.get("name"),
-                                                    "过" if d.get("exit") == 0 else "败")
+                             evidence="; ".join("%s:%s" % (d.get("name"),
+                                                    "pass" if d.get("exit") == 0 else "fail")
                                                 for d in ir.details))
                 self._handoff("run_integration_tests",
-                              "集成测试 %d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s"
+                              "integration tests: %d ran / %d passed / %d failed / %d env-red%s%s%s%s%s"
                               % (ir.ran, ir.passed, ir.failed, ir.env_fail,
-                                 ("｜" + ir.error) if ir.error else "", _pe_note, _hv_note,
+                                 (" | " + ir.error) if ir.error else "", _pe_note, _hv_note,
                                  _env_note_face, _ms_sum))
                 # t260901-19: budget 6000→4000 with tail-keeping ([-4000:]) — details sit
                 # at the end of the JSON, so a head slice would squeeze out the failure
@@ -4109,7 +4089,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         self._log("tests_rounds 计数复位（仲裁 pass，连续语义）")
                     self._finish("arbitrate", by="integration-agent",
                                  evidence=res.evidence or res.summary)
-                    self._handoff("arbitrate", "仲裁通过：" + (res.summary or ""),
+                    self._handoff("arbitrate", "Arbitration passed: " + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
                     phase = "acceptance"
                     continue
@@ -4263,7 +4243,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                          evidence=res.evidence or res.summary)
                             self._handoff(
                                 "arbitrate",
-                                "环境面/已知红面，不重跑（%s）：%s%s%s"
+                                "env/known-red surface, not re-run (%s): %s%s%s"
                                 % (note, (res.summary or "")[:80],
                                    self._env_red_face_note(
                                        getattr(cur_integ, "env_red", None)),
@@ -4278,7 +4258,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             # 假封防护（要求③）：该轮不计入——留痕点名原因，直接重跑
                             # 集成测试（上限不吃这一轮，但套件仍要重新收敛）。
                             self._handoff("arbitrate",
-                                          "本轮不计入 tests-fault 轮次（%s）：%s%s"
+                                          "not counted as a tests-fault round (%s): %s%s"
                                           % (note, (res.summary or "")[:120],
                                              (" " + adoption_note) if adoption_note else ""),
                                           report=res.report)
@@ -4312,11 +4292,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 prev_ctx = ("【集成测试报告（第 %d 轮）】verdict=code-fault\n%s\n%s"
                             % (code_rounds, res.report or res.summary or "",
                                res.evidence or "")).strip()
-                self._handoff("arbitrate", "code-fault 打回 implement（第 %d 轮）" % code_rounds,
+                self._handoff("arbitrate", "code-fault back to implement (round %d)" % code_rounds,
                               report=res.report)
                 self._log("code-fault 打回 → implement（第 %d 轮）" % code_rounds)
                 impl_done = False
-                phase = self._auto_rework("implement", "code-fault 打回 implement（第 %d 轮）"
+                phase = self._auto_rework("implement", "code-fault back to implement (round %d)"
                                           % code_rounds, who="workflow",
                                           fallback="arbitrate")
                 continue
@@ -4350,7 +4330,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                 settle=False) for n in pend],
                             return_exceptions=True)
                     except Exception as e:  # gather itself should not raise (return_exceptions); defensive
-                        await self._blocked("arb_acc_parallel", "并行分叉异常：%s" % e)
+                        await self._blocked("arb_acc_parallel", "parallel fork exception: %s" % e)
                         continue
                     failed = False
                     for name, r in zip(pend, rs):
@@ -4569,7 +4549,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     if acc_res is not None and acc_res.status == "ok":
                         self._finish("acceptance_walkthrough", by="integration-agent",
                                      evidence=acc_res.evidence or acc_res.summary)
-                        self._handoff("acceptance", "验收报告：" + (acc_res.summary or ""),
+                        self._handoff("acceptance", "Acceptance report: " + (acc_res.summary or ""),
                                       artifacts=acc_res.deliverables, report=acc_res.report)
                         phase = "merge_check"
                         # KI-003: yield once at the tail of the judgment+consume mutation
@@ -4590,7 +4570,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         acc_rounds += 1
                         prev_ctx = ("【验收走查打回（第 %d 轮）】走查发现代码问题：\n%s"
                                     % (acc_rounds, acc_res.report or acc_res.summary or "")).strip()
-                        self._handoff("acceptance", "验收打回 implement（第 %d 轮）" % acc_rounds,
+                        self._handoff("acceptance", "Acceptance walkthrough back to implement (round %d)" % acc_rounds,
                                       report=acc_res.report)
                         if acc_rounds > MAX_ACCEPTANCE_ROUNDS:
                             await self._blocked("acceptance",
@@ -4601,7 +4581,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         self._log("acceptance 打回 → implement（第 %d 轮）" % acc_rounds)
                         impl_done = False
                         phase = self._auto_rework("implement",
-                                                  "验收走查打回（第 %d 轮）" % acc_rounds,
+                                                  "Acceptance walkthrough back (round %d)" % acc_rounds,
                                                   who="workflow", fallback="arbitrate")
                         continue
                     # Walkthrough edge missing (left behind by an abnormal re-run): fall
@@ -4717,7 +4697,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                          evidence=arb_res.evidence or arb_res.summary)
                             self._handoff(
                                 "arbitrate",
-                                "环境面/已知红面，不重跑（%s）：%s%s%s"
+                                "env/known-red surface, not re-run (%s): %s%s%s"
                                 % (note, (arb_res.summary or "")[:80],
                                    self._env_red_face_note(
                                        getattr(cur_integ, "env_red", None)),
@@ -4730,7 +4710,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                             continue
                         if not counted:
                             self._handoff("arbitrate",
-                                          "本轮不计入 tests-fault 轮次（%s）：%s%s"
+                                          "not counted as a tests-fault round (%s): %s%s"
                                           % (note, (arb_res.summary or "")[:120],
                                              (" " + adoption_note) if adoption_note else ""),
                                           report=arb_res.report)
@@ -4764,11 +4744,11 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 prev_ctx = ("【集成测试报告（第 %d 轮）】verdict=code-fault\n%s\n%s"
                             % (code_rounds, arb_res.report or arb_res.summary or "",
                                arb_res.evidence or "")).strip()
-                self._handoff("arbitrate", "code-fault 打回 implement（第 %d 轮）" % code_rounds,
+                self._handoff("arbitrate", "code-fault back to implement (round %d)" % code_rounds,
                               report=arb_res.report)
                 self._log("code-fault 打回 → implement（第 %d 轮）" % code_rounds)
                 impl_done = False
-                phase = self._auto_rework("implement", "code-fault 打回 implement（第 %d 轮）"
+                phase = self._auto_rework("implement", "code-fault back to implement (round %d)"
                                           % code_rounds, who="workflow",
                                           fallback="arbitrate")
                 continue
@@ -4787,7 +4767,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 if res.status == "ok":
                     self._finish("acceptance_walkthrough", by="integration-agent",
                                  evidence=res.evidence or res.summary)
-                    self._handoff("acceptance", "验收报告：" + (res.summary or ""),
+                    self._handoff("acceptance", "Acceptance report: " + (res.summary or ""),
                                   artifacts=res.deliverables, report=res.report)
                     phase = "merge_check"
                     continue
@@ -4800,7 +4780,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 acc_rounds += 1
                 prev_ctx = ("【验收走查打回（第 %d 轮）】走查发现代码问题：\n%s"
                             % (acc_rounds, res.report or res.summary or "")).strip()
-                self._handoff("acceptance", "验收打回 implement（第 %d 轮）" % acc_rounds,
+                self._handoff("acceptance", "Acceptance walkthrough back to implement (round %d)" % acc_rounds,
                               report=res.report)
                 if acc_rounds > MAX_ACCEPTANCE_ROUNDS:
                     await self._blocked("acceptance",
@@ -4813,7 +4793,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 # t260901-04: an automatic send-back after a failed acceptance must land
                 # a state='rework' timeline record — the workbench rework banner consumes
                 # only state=rework, so without it the user never sees why.
-                phase = self._auto_rework("implement", "验收走查打回（第 %d 轮）" % acc_rounds,
+                phase = self._auto_rework("implement", "Acceptance walkthrough back (round %d)" % acc_rounds,
                                           who="workflow", fallback="acceptance")
                 continue
 
@@ -4874,8 +4854,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     self._conflict_rounds = 0
                     self._prev_conflict_files = []
                     self._finish("merge_check", by="merge_check",
-                                 evidence="；".join(c.get("item", "") for c in mc.checks))
-                    self._handoff("merge_check", "合并检查四项全绿")
+                                 evidence="; ".join(c.get("item", "") for c in mc.checks))
+                    self._handoff("merge_check", "merge_check: all four checks green")
                     phase = "merge"
                     continue
                 # t261009-15 (2): consume the quiet verdict for known load-sensitive
@@ -4897,10 +4877,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     _q_log = list(self.meta.get("load_sensitive_quiet_green_log") or [])
                     _q_log.extend(_q_rows)
                     self.meta["load_sensitive_quiet_green_log"] = _q_log
-                    _q_names = "、".join(sorted({str(r["name"]) for r in _q_rows}))
+                    _q_names = ", ".join(sorted({str(r["name"]) for r in _q_rows}))
                     self._finish(
                         "merge_check", by="merge_check",
-                        evidence="；".join(c.get("item", "") for c in mc.checks)
+                        evidence="; ".join(c.get("item", "") for c in mc.checks)
                         + " | quiet-green (load-sensitive): " + _q_names)
                     self._handoff(
                         "merge_check",
@@ -4927,7 +4907,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         mc.checks,
                         disposition="this round = non-conflict red → blocked, waiting "
                                     "for a human; per-item handling in reds")
-                    await self._blocked("merge_check", "merge_check 红灯：%s" % (red or mc.error))
+                    await self._blocked("merge_check", "merge_check red: %s" % (red or mc.error))
                     continue
                 # ---- conflict-class reds: round counting + loop protection (the blocked
                 #      wording anchors are grep-stable) ----
@@ -4975,7 +4955,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self._prev_conflict_files = files_sig
                 self._log("merge_check 检出 merge 预演冲突（第 %d/%d 轮），自动打回 implement 消解：%s"
                           % (self._conflict_rounds, MAX_CONFLICT_ROUNDS, files_txt))
-                self._handoff("merge_check", "冲突自动消解第 %d 轮：%s"
+                self._handoff("merge_check", "conflict auto-resolution round %d: %s"
                               % (self._conflict_rounds, files_txt))
                 # (1) the worker runs merge to leave the conflict scene in place (an agent
                 #     sandbox cannot write a real .git)
@@ -4993,7 +4973,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     already_clean=bool(praw.get("already_clean")),
                     error=str(praw.get("error") or ""))
                 if not prep.ok:
-                    await self._blocked("merge_check", "冲突消解准备失败（第 %d 轮）：%s"
+                    await self._blocked("merge_check", "conflict-resolution prep failed (round %d): %s"
                                         % (self._conflict_rounds, prep.error or "unknown"))
                     continue
                 if prep.already_clean:
@@ -5151,7 +5131,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     continue
                 # Approved signature → real merge
                 self.meta["stage_state"] = "running"
-                self._mark("merge", "running", "人审通过（%s），执行 merge" % sig.who)
+                self._mark("merge", "running", "human sign-off (%s), executing merge" % sig.who)
                 # t260910-14: the pre-run-next-ticket step retired — merge proceeds straight to
                 # the merge activity after the signature.
                 # t260902-02 M1-3 three-step close: merge only books (defer_teardown);
@@ -5196,17 +5176,16 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     self.meta["blocked_detail"] = {
                         "reason_code": mr.reason or "merge_fault",
                         "files": list(mr.files)[:20],
-                        "next_action": ("在 main 提交或暂存（git stash）这些改动，"
-                                        "或票面说明后发 retry_qc 重验；引擎不自动 stash/提交")
+                        "next_action": ("commit or stash these changes on main, or explain on the ticket and send retry_qc for re-verification; the engine never auto-stashes or auto-commits")
                                        if mr.action == "dirty" else
                                        "merge execution fault (non-conflict), handle "
                                        "with a human, then send retry_qc for "
                                        "re-verification",
                     }
                     self._touch()
-                    note = ("merge 未收口（%s/%s）： %s"
+                    note = ("merge not closed out (%s/%s): %s"
                             % (mr.action, mr.reason or "merge_fault",
-                               (mr.error or "未知")[:400]))
+                               (mr.error or "unknown")[:400]))
                     self._log(note)
                     await self._blocked("merge", note)
                     continue
@@ -5222,8 +5201,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     # and land two timeline entries for one send-back, t260901-04).
                     # (Post-KI-048 this branch is conflict-only: dirty/failed split
                     # off above, per the failure-classification protocol.)
-                    note = "merge 失败（%s）自动打回重验：%s" \
-                           % (mr.action, (mr.error or "未知")[:300])
+                    note = "merge failed (%s), auto send-back for re-verification: %s" \
+                           % (mr.action, (mr.error or "unknown")[:300])
                     self._log(note)
                     phase = self._auto_rework("merge_check", note, who="workflow",
                                               fallback="merge")
@@ -5244,14 +5223,14 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     except Exception as e:
                         await self._blocked(
                             "merge",
-                            "工单数据归档失败（fail-closed，泳道保留不拆）：%s: %s%s"
+                            "ticket data archive failed (fail-closed, lane kept, not torn down): %s: %s%s"
                             % (type(e).__name__, str(e)[:400],
                                shared.exception_chain_note(e)))
                         continue
                     if not isinstance(ares, ArchiveResult) or not ares.ok:
                         await self._blocked(
                             "merge",
-                            "工单数据归档回执异常（fail-closed，泳道保留不拆）：%s"
+                            "ticket data archive receipt abnormal (fail-closed, lane kept, not torn down): %s"
                             % ((getattr(ares, "error", "") or repr(ares))[:400]))
                         continue
                     self._log("工单数据出仓归档完成：%s"
@@ -5292,9 +5271,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         self._log("lane teardown warning (residue recoverable, ticket body archived): %s"
                                   % tr.error)
                 self._finish("merge", by=sig.who,
-                             evidence="merge 落账 %s（人审 %s：%s）"
+                             evidence="merge booked %s (human sign-off %s: %s)"
                                       % (mr.merge_commit, sig.who, sig.note))
-                self._handoff("merge", "合并完成 %s" % mr.merge_commit)
+                self._handoff("merge", "Merge completed %s" % mr.merge_commit)
                 phase = "done"
                 continue
 
@@ -5308,9 +5287,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             # 不会空转）。
             await self._blocked(
                 REWORK_PHASE_FALLBACK,
-                "内部相位解析出未知值 %r（合法相位=%s）——已停为人审（不再让工作流任务失败）；"
-                "请用 rework(to_stage=<规范段名>) 复位，或 retry_qc 重驱"
-                % (phase, "、".join(sorted(PHASE_MAIN_CHAIN - {"done"}))))
+                "unknown internal phase value %r (legal phases=%s) — stopped for a "
+                "human (the workflow task no longer fails); use "
+                "rework(to_stage=<stage>) to reset, or retry_qc to re-drive"
+                % (phase, ", ".join(sorted(PHASE_MAIN_CHAIN - {"done"}))))
             phase = REWORK_PHASE_FALLBACK
             continue
 
@@ -5323,7 +5303,7 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         # cancel, the workflow dies) has no code-execution chance - those zombie
         await self._concurrency_release(CAUSE_TERMINATED)
         self._log("merge 落账，工单收口（closed）")
-        self._mark("merge", "closed", "workflow 完成")
+        self._mark("merge", "closed", "workflow complete")
         # t260928-13：收口前最后冲账——正常完单零 pending（行为验收口径）
         await self._ledger_flush()
         return self._snapshot()

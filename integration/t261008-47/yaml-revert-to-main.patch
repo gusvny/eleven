@@ -1,0 +1,4 @@
+# RETIRED (t261008-47, per t261009-39 yaml-verdict.md on main): the host-ordered yaml revert
+# this patch carried is overruled - the English server/workflows/*.yaml is the sanctioned
+# generator output and lands with the engine code (one-commit invariant). See
+# integration/t261009-39/yaml-verdict.md. Do not apply. (Gen36 artifact, tombstoned gen39.)

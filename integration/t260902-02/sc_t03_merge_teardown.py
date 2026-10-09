@@ -186,7 +186,8 @@ def main():
        or ("archive_ticket" in act_src and "teardown_lane" in act_src
            and "ALL_AGENT_ACTIVITIES" in act_src),
        "archive_ticket/teardown_lane 注册进 ALL_AGENT_ACTIVITIES")
-    ok("await self._blocked(" in src and "归档失败（fail-closed，泳道保留不拆）" in src,
+    ok("await self._blocked(" in src
+       and "ticket data archive failed (fail-closed, lane kept, not torn down)" in src,
        "归档失败转 blocked、泳道保留（fail-closed 接线）")
 
     print("SUMMARY pass=%d fail=%d env_fail=%d na=0" % (PASS, FAIL, ENV_FAIL))

@@ -147,14 +147,14 @@ section('C. 翻译层表驱动 + 蓝卡「签什么」')
   const blue = buildStatusCard({
     stage_state: 'awaiting-human',
     human_context: { merge: { context_text: '变更：a.py\n\n验收：见走查报告' } },
-    stage_acceptance: ['人审签字', 'merge 落账'],
+    stage_acceptance: ['Human sign-off', 'Merge booked'],
     gate_runs: [{ stage: 'merge_check', green: true, red_count: 0 }],
-    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: '等人签字' }],
+    timeline: [{ at: 'T1', stage: 'merge', state: 'awaiting-human', reason: 'waiting for sign-off' }],
   })
   ok(blue !== null && blue.severity === 'blue', 'awaiting-human → 蓝卡')
   ok(blue.headline === REASON_LEXICON['awaiting-human'].headline, '蓝卡主文案=词条表 awaiting-human 条目')
   ok(blue.signWhat.some(s => s.includes('变更：a.py')), '签什么收人门上下文（空行跳过）')
-  ok(blue.signWhat.some(s => s.startsWith('Acceptance criterion: 人审签字')), '签什么收验收口径')
+  ok(blue.signWhat.some(s => s.startsWith('Acceptance criterion: Human sign-off')), '签什么收验收口径')
   ok(blue.signWhat.some(s => s.includes('merge_check') && s.includes('All prior gates green')), '签什么收门结论')
   ok(blue.signWhat.length <= STATUS_CARD_SIGN_WHAT_CAP, `签什么封顶 ${STATUS_CARD_SIGN_WHAT_CAP}`)
   ok(blue.files.length === 0, '蓝卡无文件点名（无受阻面）')
