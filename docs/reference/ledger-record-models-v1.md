@@ -44,6 +44,28 @@ related:
 | **Recognising the same thing across time** — a fault mode, a finding | **from the content** (a hash of what it is about), so a re-sighting computes the *same* id and deduplication is possible at all | fault modes (`KI-228`), findings (`3d4b305e`) |
 | **Naming a moment** — a landing, a certification, a run, a promotion, a sighting | **time prefix + randomness**, e.g. the ULID shape `01J9Z6QK3M7X2P4T8V0N5R` (48-bit millisecond timestamp, then random), optionally after a short family prefix: `ldg-01J9Z6QK3M…` | the delivery, run and relation families |
 
+**Not every record gets an id, and that is the first thing to fix about this model.** The ids above were invented one record at a time and it shows: seven families with a time-ish id, one content id, one human-sequential number, one composite key — and several records with no id at all. The rule that replaces the ad-hoc set:
+
+> **A record gets an id when something else must cite it. A record whose only access is a query keeps its tuple as the key. Minting an id nobody cites is the same fault as a field nobody reads.**
+
+Applied to every record in this document:
+
+| Record | Role | Id |
+|---|---|---|
+| ticket | cited everywhere, human-facing | `t261009-10` — the project's existing shape, kept; it is minted by one authority (see the collision below) |
+| landing / certification / run / promotion / freeze episode / relation | **cited by other records** | **family prefix + time id, one shape for all of them**: `ldg-01J9Z6QK3M…`, `cert-01J9Z6R2…`, `run-…`, `prom-…`, `frz-…`, `rel-…` |
+| finding | cited, and its identity **is** its content | **content id**, widened to 16 hex: `3d4b305e1f7a9c02` |
+| fault mode | cited in prose everywhere, human-facing | `KI-227` — sequential, minted by the registrar as one more than the highest in the whole ledger, never reused even if an entry is retired |
+| inspection period | cited | `insp-<instance>-<period>` — composite, because a period *is* an instance plus a period |
+| observation | **never cited; read by query** | **no id** — the key is `(finding, period)` |
+| state change (a freeze closing, a period being voided) | never cited | **no id** — the key is `(parent, change)` |
+| reviewed path | never cited | **no id** — the key is `(path, period)` |
+| run case row | never cited | **no id** — the key is `(run, scenario)` |
+| booked-red row | never cited | **no id** — the key is `(case)` |
+| repository relation | not a record at all | keyed by the base repository's name |
+
+Two consequences worth stating plainly. **The two minting rules stay two**, and that is not inconsistency: a thing whose identity is its content must be recognisable when it is seen again, and a thing that happened once needs a time; forcing one rule on both would break one of them. **And the fault-mode number is the one id a human types**, so it keeps its short sequential shape — with the rule that it is never reused, because the reused ticket number is exactly the incident this rule exists to prevent.
+
 **For the second kind, yes: a time-prefixed id works, and randomness is the part that makes it never repeat.** The prefix gives the time (readable to the millisecond, and sortable) and the random tail removes every need for coordination — no central counter, no "what has already been issued" question, no collision between two machines that mint at the same instant. UUIDv7 is the same idea standardised; ULID is the same idea in a shorter, sortable text form.
 
 **The trap this must not fall into is the one this project already fell into.** A date plus a per-day counter looks friendlier and reads better (`t261009-10`), and it *is* fine — **provided a single authority mints it while seeing the whole id space of that day**. Ours did not: the next ticket number was derived from the tickets that happened to be *alive*, and a cancelled ticket stops being counted, so a number was handed out twice. **Time in an id is never the mechanism for uniqueness; uniqueness comes from randomness (second kind) or from content (first kind), and a counter works only when its issuer sees everything it counts.**
