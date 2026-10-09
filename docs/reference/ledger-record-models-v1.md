@@ -47,6 +47,7 @@ related:
 | Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
 | **Record what cannot be derived; derive what can** | the state a landing sat on and the range a certification continued from are **not** stored — both are derived from the certification ledger's order | Proposed; `base` and `covered_from` were dropped for this reason (261009) |
+| **A summary that is read far more often than its source is kept, if it can be checked against it** | the certification carries counts, the fingerprint and the duration although every run row carries the same environment facts | The test: would a reader be forced to open the raw body to make a decision they make daily? And can the summary be verified against the body? A restatement that fails both tests is duplication (`base`, dropped); a digest that passes both is a summary |
 | A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 | **A landing is one act over every repository it names: all or nothing** | see the multi-repository example under *landing* | Proposed — see below for why a partial landing is not an option |
 
@@ -144,6 +145,19 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 **What `env_fp` actually covers, and what its name oversells.** It is a hash over three things: the Python version, the Node version (or `absent`), and the content of four test-protocol files under the integration tree. Both the gate side and the executor side compute it with the same key set and the same algorithm on purpose, and the key set deliberately excludes ticket-specific and temporary-path values, so that two runs do not differ merely because a different ticket ran.
 
 What that buys: a previous row may be **reused or trusted as evidence** for the current run only when the commit, this fingerprint **and** the concurrency width and pool all match — which is why `conc_width` and `pool` sit beside it in the run results rather than inside it. What it does **not** cover: the container images, the browser build, the OS, the machine. So "same fingerprint" means "same toolchain and same test protocol", not "same world" — and a red that a different browser build caused will still share a fingerprint with a green run. Either the key set grows (image digest, browser version) or the name should say what it hashes; today the name promises more than it checks.
+
+**What the evidence already contains, and why the summary still stays.** The run-result rows behind `evidence` carry, per case: the commit, the environment fingerprint, the concurrency width, the pool, the verdict, the duration and the source. So the counts, the environment facts and per-case outcomes are all *in* the evidence — and the certification keeps its own copy of three of them anyway, deliberately:
+
+- **`verdict`** is derivable from the rows, and is kept because it is the answer the whole flow reads.
+- **`env_fp`, `conc_width`, `pool`** are on every row and are kept because they are the comparability key: a reader deciding whether an older green may be reused needs them without opening a 88 MB file.
+- **`duration_s` is not in the rows at all** — they carry one duration per case, not the run's own. The run's total is what the budget and the throughput argument are about.
+
+**What nothing but the certification can say**, and what would be lost if the fields were dropped: the candidate as a **set** (the rows carry one `commit` each, so a multi-repository candidate is not even representable in the evidence today), which **expected-red list was in force** (`booked_red` appears nowhere in the rows), and which **suite** produced the proof. Those are the judgement's inputs; without them a green is unreadable later — "green against what, judged by which list?"
+
+**Two defects this question exposed, both mine:**
+
+1. **The evidence rows have no run identity.** `"evidence": "ledger/scenario-results.jsonl#run-261009-14"` points at nothing: the rows are grouped implicitly by timestamp, commit, fingerprint and width. Either the rows carry a run identifier, or `evidence` cannot be a pointer. The cheap fix is for each row to carry the certification identifier — one field that turns the reference into a real one.
+2. **The rows carry a single `commit` per row**, so the multi-repository shape this document is careful about is invisible in the evidence. The certification's set is authoritative today; if landings keep spanning repositories, the run rows need a repository too.
 
 ### freeze episode — "why is nothing landing on this line, and who is fixing it?"
 
@@ -629,4 +643,5 @@ The truth about a ticket — its stage, its signature, its verdict, a send-back 
 3. **Shape versions.** The event ledger has one (`event-ledger-v1`); the rest do not. Roll the same convention out, and state what a reader does with an unknown version (fail loudly, not guess).
 4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime.
 5. **What may never be recorded.** "References, not payloads" needs forbidden examples (credentials, tokens, private host paths, raw model input containing them) so a record can be refused rather than argued about.
-6. **What ends a ticket that has no content?** A report-only or verification-only ticket changes no files, so it has nothing to land and nothing to certify by landing. The `landed_at: null` row is representable; the rule for how such a ticket finishes is not written yet, and it is the one gap that this section exposed.
+6. **The run-result rows need a run identity** (and a repository, once a landing can span repositories), or `evidence` is a phrase rather than a pointer. See the certification notes above.
+7. **What ends a ticket that has no content?** A report-only or verification-only ticket changes no files, so it has nothing to land and nothing to certify by landing. The `landed_at: null` row is representable; the rule for how such a ticket finishes is not written yet, and it is the one gap that this section exposed.
