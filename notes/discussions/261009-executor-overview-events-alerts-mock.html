@@ -32,11 +32,18 @@ button.btn:hover{border-color:var(--blue)}
 button.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
 button.btn.power{border-color:var(--green);color:var(--green);background:var(--soft-green)}
 button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline dotted;padding:0}
-.limitrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 2px}
+.limitbar{display:inline-flex;align-items:center;gap:10px;align-self:flex-start;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:4px 10px}
+.stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--bg)}
+.stepper .st{border:0;background:transparent;color:var(--fg);width:22px;height:22px;cursor:pointer;font:inherit;line-height:1;padding:0}
+.stepper .st:hover{background:var(--hover)}
+.stepper .val{display:flex;align-items:center;justify-content:center;min-width:26px;border-left:1px solid var(--line);border-right:1px solid var(--line);font-weight:650;font-variant-numeric:tabular-nums}
+.chip.good{border-color:var(--green);background:var(--soft-green);color:var(--green)}
+.sep{width:1px;height:16px;background:var(--line-soft)}
+.btn.sm{padding:2px 9px;font-size:11.5px}
+.limitbar b{font-weight:650}
 .lab{color:var(--muted)}
-.knob{border:1px solid var(--line);background:var(--panel2);border-radius:6px;width:24px;height:22px;font:inherit;cursor:pointer}
 .val{font-weight:650;min-width:14px;text-align:center}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
 .card{border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .card .hd{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line-soft)}
 .card .hd .sect{font-weight:600}
@@ -87,14 +94,17 @@ button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cu
     <button class="btn power" style="margin-left:auto">Enable executor</button>
   </div>
 
-  <div class="limitrow">
-    <span class="lab" title="the most tickets that may run at the same time; the engine ledger is the truth, this writes it">Concurrent limit</span>
-    <button class="knob" title="One fewer ticket at the same time">&minus;</button>
-    <span class="val">4</span>
-    <button class="knob" title="One more ticket at the same time">+</button>
-    <span class="chip" title="how the fleet stands against the limit">room to start one</span>
-    <span class="meta" title="held slots against the limit, and what is queued behind it">5 held · 0 queued</span>
-    <button class="btn" id="concSave" style="display:none" title="shown only after the value changes">Save</button>
+  <div class="limitbar">
+    <span class="lab" title="the most tickets that may run at the same time; the engine ledger is the truth, this control writes it">Concurrent limit</span>
+    <span class="stepper">
+      <button class="st" title="One fewer ticket at the same time">&minus;</button>
+      <span class="val">4</span>
+      <button class="st" title="One more ticket at the same time">+</button>
+    </span>
+    <span class="chip good" title="how the fleet stands against the limit">room to start one</span>
+    <span class="sep"></span>
+    <span class="meta" title="slots held right now, and what is queued behind them"><b>5</b> held · <b>0</b> queued</span>
+    <button class="btn sm p" id="concSave" style="display:none" title="shown only after the value changes">Save</button>
   </div>
 
   <div class="cols">
@@ -169,7 +179,7 @@ var frozen=false;
 $('th').textContent='theme: '+(document.documentElement.dataset.theme==='dark'?'dark':'light');
 $('th').onclick=function(){var h=document.documentElement;var d=h.dataset.theme==='dark';h.dataset.theme=d?'light':'dark';$('th').textContent='theme: '+(d?'light':'dark')};
 $('concSave').style.display='none';
-document.querySelectorAll('.knob').forEach(function(b){b.onclick=function(){$('concSave').style.display='inline-block'}});
+document.querySelectorAll('.stepper .st').forEach(function(b){b.onclick=function(){$('concSave').style.display='inline-block'}});
 $('st').onclick=function(){frozen=!frozen;$('st').textContent='state: '+(frozen?'empty':'normal');
   $('stateTxt').textContent=frozen?'The executor is idle. Nothing waits on you.':'Idle · 2 requests wait on you.'};
 </script>
