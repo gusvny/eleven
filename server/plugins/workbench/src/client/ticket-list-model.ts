@@ -292,6 +292,79 @@ export function sortMergedTickets<T extends TicketSortRowLike>(rows: readonly T[
   return keyed.map(k => k.row)
 }
 
+/* ------------------------------------------------------------- dismissal face (t261009-43) */
+
+/**
+ * The engine's dismissal row key shape (t261009-31, client.py `_dismissed_face_of`):
+ * `dismissed:{at,who,reason}` on ticket-list/detail rows, truthy = the LAST
+ * journal row for the ticket is a dismiss. On a journal READ FAILURE the key is
+ * ABSENT and a named `dismissed_note` string travels in the payload instead —
+ * never a silent "not dismissed". This layer is the client's single reader of
+ * both keys; the client never invents the key and never flips it locally.
+ */
+
+/** The dismissal voucher as the engine carries it (all keys untrusted input). */
+export interface DismissedFace {
+  at?: unknown
+  who?: unknown
+  reason?: unknown
+}
+
+/** Minimal row shape the dismissal reader needs (row = untrusted engine payload). */
+export interface DismissalRowLike {
+  dismissed?: unknown
+  dismissed_note?: unknown
+}
+
+/**
+ * The row's dismissal voucher, or null when the row is NOT dismissed.
+ * Only a truthy PLAIN OBJECT counts: a primitive (`true`, `"yes"`, `5`), an
+ * array, null and a missing key all read as not dismissed. Rationale: the
+ * engine's contract is a fixed {at,who,reason} shape, and the cost of the two
+ * failure directions is asymmetric — treating a malformed key as dismissed
+ * silently HIDES a live row, while treating it as not dismissed keeps the row
+ * on the board (visible, never lost). The client never invents this key.
+ */
+export function dismissedFaceOf(row: DismissalRowLike | null | undefined): DismissedFace | null {
+  if (row === null || typeof row !== 'object') return null
+  const d = row.dismissed
+  if (d === null || typeof d !== 'object' || Array.isArray(d)) return null
+  return d as DismissedFace
+}
+
+/** Truthy shorthand: does this row leave the left column? (see dismissedFaceOf) */
+export function isDismissedRow(row: DismissalRowLike | null | undefined): boolean {
+  return dismissedFaceOf(row) !== null
+}
+
+/**
+ * The engine's named note for the read-failure path (journal unreadable → the
+ * `dismissed` key is absent and `dismissed_note` carries the reason verbatim).
+ * Returns '' for absent/malformed/non-string values. A row with a note is
+ * NEVER dismissed: the caller must keep the row visible and surface the note.
+ */
+export function dismissedNoteOf(row: DismissalRowLike | null | undefined): string {
+  if (row === null || typeof row !== 'object') return ''
+  const n = row.dismissed_note
+  return typeof n === 'string' && n.trim() !== '' ? n : ''
+}
+
+/**
+ * Split a merged row list into (kept, dismissed) preserving the input order in
+ * BOTH halves — the left column filters with this so the remaining rows of a
+ * project keep their order after a dismissal, and the fold lists the dismissed
+ * rows in the same order they held on the board. Pure: no input mutation.
+ */
+export function splitDismissedRows<T extends DismissalRowLike>(rows: readonly T[]): {
+  kept: T[]
+  dismissed: T[]
+} {
+  const kept: T[] = []
+  const dismissed: T[] = []
+  for (const r of rows) (isDismissedRow(r) ? dismissed : kept).push(r)
+  return { kept, dismissed }
+}
+
 /* ------------------------------------------------------------- epic 哈希色 */
 
 /**

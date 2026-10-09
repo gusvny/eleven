@@ -17,6 +17,7 @@ import type { OrderKind } from './queue-model.ts'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
   laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, closeHealthOf, closeHealthBadgeOf,
+  dismissedFaceOf, dismissedNoteOf,
   type WfLike,
 } from './ticket-list-model.ts'
 import { stageDisplayLabel } from './ui-labels.ts'
@@ -54,6 +55,15 @@ export interface CardTicket {
   close_health?: string
   /** 收口健康度事实原因（引擎下发；悬停 title 透传，绝不编造）。 */
   close_health_reason?: string
+  /** t261009-43: the engine's dismissal voucher (dismissed:{at,who,reason};
+   *  truthy plain object = dismissed). Read, never invented, never flipped
+   *  locally — see dismissedFaceOf in ticket-list-model.ts. A dismissed row is
+   *  NOT done: the five-state derivation does not see this key. */
+  dismissed?: unknown
+  /** t261009-43: the engine's named note when the dismiss journal could not be
+   *  read (the dismissed key is absent then). Non-empty = keep the row visible
+   *  and surface the note; never read as "dismissed". */
+  dismissed_note?: unknown
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -121,6 +131,14 @@ export interface TicketRowCardProps {
   onPause?: () => void
   onResume?: () => void
   onOpenEpic?: (code: string) => void
+  /** t261009-43: the person's dismiss action. The parent passes it ONLY for a
+   *  failure-class row the person is looking at (one row, never bulk) and the
+   *  component double-guards on the failed state; the label is "Dismiss" —
+   *  never a close/done word. undefined = not offered, zero render change. */
+  onDismiss?: () => void
+  /** t261009-43: undo path from the dismissed fold. Rendered only on a
+   *  dismissed row; undefined = not offered. */
+  onRestore?: () => void
 }
 
 /** Row tooltip title: id + stage context (C2 consumer: stage-short topology) +
@@ -153,6 +171,22 @@ export function cardTitle(t: CardTicket, wf?: WfLike | null, compact = false,
   }
   if (t.exec_status) parts.push(`Exec: ${t.exec_status}`)
   if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`)
+  // t261009-43: the dismissal voucher travels with the row tooltip (who/why —
+  // a dismissed row is a human disposition, not a done ticket); a malformed
+  // voucher says "Dismissed" only, never an invented who.
+  if (t.dismissed && typeof t.dismissed === 'object' && !Array.isArray(t.dismissed)) {
+    const d = t.dismissed as { who?: unknown; reason?: unknown }
+    const who = typeof d.who === 'string' && d.who.trim() !== '' ? d.who : 'unknown'
+    const why = typeof d.reason === 'string' && d.reason.trim() !== '' ? `: ${d.reason}` : ''
+    parts.push(`Dismissed by ${who}${why} (off the board, not done — restorable)`)
+  } else if (t.dismissed) {
+    parts.push('Dismissed (off the board, not done — restorable)')
+  }
+  // t261009-43: the engine's named note (journal read failed) surfaces verbatim
+  // in the tooltip AND as a visible row chip below — a row with a note stays.
+  if (typeof t.dismissed_note === 'string' && t.dismissed_note.trim() !== '') {
+    parts.push(`Dismiss note: ${t.dismissed_note}`)
+  }
   if (compact && progress?.text) parts.push(progress.text)
   if (t.updated) parts.push(`Updated ${t.updated}`)
   else if (compact && rel) parts.push(`Updated ${rel}`)
@@ -162,8 +196,13 @@ export function cardTitle(t: CardTicket, wf?: WfLike | null, compact = false,
 export function TicketRowCard({
   t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ordering,
   ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic,
+  onDismiss, onRestore,
 }: TicketRowCardProps) {
   // t260919-02：exec_status 进五态推导（失败类终态行 → 'failed'「已失败」红标）。
+  // t261009-43: the dismissed key is deliberately NOT an input — a dismissed
+  // row keeps its true state class (a dismissed failure stays failed, never
+  // re-reads as done); leaving the board is the parent filter's job.
+  const dismissedVoucher = dismissedFaceOf(t) !== null
   const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided)
   const epicColor = epicColorOf(t.epic)
   const dots = compact ? [] : laneDots(wf, t)
@@ -202,6 +241,7 @@ export function TicketRowCard({
       className="wb-card" data-ticket-id={t.id}
       data-state={state4} data-active={active} data-compact={compact}
       data-engine={t.engine}
+      data-dismissed={dismissedVoucher ? '1' : undefined}
       data-order-kind={ordering?.kind}
       draggable={orderable}
       onDragStart={onDragStart}
@@ -268,6 +308,14 @@ export function TicketRowCard({
             </span>
           )
         })()}
+        {/* t261009-43: the engine's journal-read-failure note, surfaced ON the
+            row (not only the tooltip) — a row with a note stays on the board
+            and must say why its dismissal face is unreadable. Full text in the
+            title; the chip is the visible anchor (data-dismiss-note). */}
+        {dismissedNoteOf(t) !== '' && (
+          <span className="wb-card-dismiss-note" data-dismiss-note="1"
+            title={dismissedNoteOf(t)}>Dismiss note</span>
+        )}
         <span className="wb-card-id">{t.id}</span>
         {(peerViewers?.length ?? 0) > 0 && (
           <span title={`Viewed from another tab: ${(peerViewers ?? []).map(v => v.who).join(', ')}`}>👀</span>
@@ -390,6 +438,20 @@ export function TicketRowCard({
         )}
         {!compact && ops.includes('close') && (
           <button className="wb-card-btn wb-card-btn-green" disabled={busy} onClick={stop(onClose)}>Done</button>
+        )}
+        {/* t261009-43: the person's dismiss action — one failed row the person
+            is looking at, never bulk, never worded close/done. The parent opens
+            the reason prompt (the engine refuses an empty reason; the face asks
+            first). Restore is the fold's undo path, dismissed rows only. */}
+        {state4 === 'failed' && !dismissedVoucher && onDismiss && (
+          <button className="wb-card-btn wb-card-btn-dismiss" data-dismiss-ctl={t.id} disabled={busy}
+            title="Dismiss: take this failed ticket off the board (reversible; a reason is asked and recorded)"
+            onClick={stop(onDismiss)}>Dismiss</button>
+        )}
+        {dismissedVoucher && onRestore && (
+          <button className="wb-card-btn wb-card-btn-green" data-restore-ctl={t.id} disabled={busy}
+            title="Restore: put this dismissed ticket back on the board"
+            onClick={stop(onRestore)}>Restore</button>
         )}
       </div>
     </div>

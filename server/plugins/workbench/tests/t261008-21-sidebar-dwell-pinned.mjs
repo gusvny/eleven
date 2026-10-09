@@ -46,6 +46,38 @@ ok(inSandbar({ status: CLOSED, created: hourOld(1) }, Date.now() / 1000), 'close
 ok(!inSandbar({ status: CLOSED, created: hourOld(25) }, Date.now() / 1000), 'close_ts missing -> created fallback, outside window')
 ok(!inSandbar({ status: CLOSED }, Date.now() / 1000), 'close_ts and created missing -> filtered (ts=0 guard)')
 
+/* ---- t261009-43: a failure-class terminal settles like a closed one ----
+ * The hole: isDwellOpen used to treat every status except closed/verified as
+ * open, so a workflow that ended FAILED stayed listed forever (73h/110h/249h
+ * measured). The failure verdict delegates to the five-state single point
+ * (deriveTicketState) WITHOUT the voided argument — a voided row must never
+ * enter the client window through this path. */
+ok(inSandbar({ status: 'dispatched', stage_state: 'running', exec_status: 'FAILED', close_ts: hourOld(1) }, Date.now() / 1000),
+  'failed (exec complement) 1h old -> rendered (inside 24h)')
+ok(!inSandbar({ status: 'dispatched', stage_state: 'running', exec_status: 'FAILED', close_ts: hourOld(24) }, Date.now() / 1000),
+  'failed (exec complement) exactly 24h -> left (same strict < boundary)')
+ok(!inSandbar({ status: 'dispatched', stage_state: 'running', exec_status: 'FAILED', close_ts: hourOld(249) }, Date.now() / 1000),
+  'failed (exec complement) 249h old -> retired (the reported live case)')
+ok(inSandbar({ status: 'failed', close_ts: hourOld(1) }, Date.now() / 1000),
+  'failed literal status (exec key lost) 1h old -> rendered')
+ok(!inSandbar({ status: 'failed', close_ts: hourOld(25) }, Date.now() / 1000),
+  'failed literal status 25h old -> retired')
+ok(inSandbar({ status: 'dispatched', exec_status: 'COMPLETED', close_ts: hourOld(1) }, Date.now() / 1000),
+  'exec COMPLETED still settles like closed (terminal reconciliation wins), inside window')
+ok(inSandbar({ status: 'blocked', stage_state: 'blocked', close_ts: hourOld(999) }, Date.now() / 1000),
+  'blocked is NOT failure-class -> still always listed (unchanged)')
+ok(inSandbar({ status: 'mystery-status', close_ts: hourOld(999) }, Date.now() / 1000),
+  'unknown status still derives to active = open (unchanged default)')
+// review pin (conditional pass, comment 2): the voided arg stays OUT of the
+// dwell path — deriveTicketState('blocked', undefined, undefined, true) maps a
+// voided row to done, but isDwellOpen never passes voided, so a voided-shaped
+// row cannot sneak into the window through the reuse.
+ok(inSandbar({ status: 'blocked', stage_state: 'blocked', close_ts: hourOld(999) }, Date.now() / 1000),
+  'voided never reaches the derivation from the dwell path (voided arg not passed)')
+ok(inSandbar({ status: 'blocked', stage_state: 'blocked', close_ts: hourOld(999) }, Date.now() / 1000) &&
+  !inSandbar({ status: 'failed', close_ts: hourOld(999) }, Date.now() / 1000),
+  'both lifecycles true to their own rule (closed/failed settle, blocked/open do not)')
+
 /* ---- stale localStorage must not steer the window (chosen policy: ignore + remove) ---- */
 store = new Map([['sandbar-workbench-sandbar-v1', '999']])
 ok(sandbarHours() === 24, 'stored 999 ignored -> pin 24')
@@ -81,6 +113,10 @@ ok(dwell.includes('sandbar-workbench-sandbar-v1'), 'SANDBAR_KEY literal survives
 ok(dwell.split('SANDBAR_KEY').length - 1 === 2, 'SANDBAR_KEY appears only in sandbar-dwell (2 refs: decl + remove)')
 ok(!src.includes('sandbar-workbench-sandbar-v1'), 'sidebar no longer touches the storage key')
 ok(src.includes('wb-sb-foot-sp') && src.includes('wb-sb-foot'), 'footer keeps its original shape (foot + spacer)')
-ok(src.includes('驻留窗分工'), 'two-window split anchor kept verbatim (inspection rows exempt, t260916-15/t260915-19 pins)')
+// t261009-43: the two-window-split comment moved to English with the 261004
+// writing standard (the lint gate rejects new CJK copy); the anchor moves with
+// the wording it pins (inspection rows exempt from the client window).
+ok(src.includes('Two-window split') && src.includes('inspection rows never pass the client\'s 24 h dwell window'),
+  'two-window split anchor kept (inspection rows exempt, t260916-15/t260915-19/t261009-43 pins)')
 
 console.log(`ok ${n} assertions (t261008-21 sidebar dwell pinned)`)

@@ -96,7 +96,11 @@ ok(sbSrc.includes('data-testid="sidebar-inspection-degraded"'), '降级横幅语
 ok(sbSrc.includes('.wb-sb .wb-card[data-engine=inspection][data-state=waiting]'),
   '等你黄调=等值选择器作用域（review C1 口径：项目行 data-engine 在场-异值，非属性缺席）')
 ok(sbSrc.includes('inspection_filter'), 'inspection_filter.degraded 左栏不带横幅的取舍声明在源（review gen0 意见②）')
-ok(sbSrc.includes('驻留窗分工'), '巡检行不经 inSandbar 窗的两窗分工声明在源（review gen2 意见2）')
+// t261009-43: the pinned comment moved to English with the 261004 writing
+// standard (the lint gate rejects new CJK copy); the anchor moved with the
+// wording it pins.
+ok(sbSrc.includes('Two-window split') && sbSrc.includes('inspection rows never pass it'),
+  '巡检行不经 inSandbar 窗的两窗分工声明在源（review gen2 意见2；t261009-43 起英文措辞）')
 ok(sbSrc.includes('chat 项目 tag') && sbSrc.includes('不进 chat 项目 tag'), '巡检行不进 publishProjectEntry 的取舍声明在源')
 ok(sbSrc.includes('INSPECTION_TICKETS_URL'), '端点串从单点 import（不写字面量）')
 ok(!/const INSPECTION_TICKETS_URL\s*=/.test(sbSrc), '侧栏不再本地定义端点串')

@@ -4434,44 +4434,9 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t261009-20/sc_settle_rerun_replay_guard.py": {
-   "anchor": "source-text",
-   "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
-   "sync_path": ""
-  },
-  "integration/t261009-18/sc_line_landing_journey.py": {
-   "anchor": "behaviour",
-   "note": "t261009-18: the landing journey over real git repos and the real store files — linear history, reader-side record, one-per-ticket refusal, conflict bounce, cross-process serialization",
-   "sync_path": ""
-  },
-  "integration/t261009-18/sc_line_declaration_contract.py": {
-   "anchor": "contract",
-   "note": "t261009-18: the declaration reader's fail-closed contract — absent/malformed/unknown-version/duplicate-branch refusals, multi-repo shape, empty extra set legal",
-   "sync_path": ""
-  },
-  "integration/t261009-18/sc_old_flow_inert_face.py": {
-   "anchor": "behaviour",
-   "note": "t261009-18: coexistence — import writes nothing, one-way dependency source-text face, landing write-locality inside the develop area only",
-   "sync_path": ""
-  },
-  "integration/t261009-19/sc_t26100919_certify_once.py": {
-   "anchor": "behaviour",
-   "note": "t261009-19 certification journey: at most one certification per tick (held guard refuses every trigger, second acquire gets no token), the record cites the run (run id/judged_by/booked_red/at) with zero counts/verdict keys and a verdict-restating append refused by name, the covered range derived from the shared seq order (same-seq landing excluded, stored covered_range a legal projection), and the green certified prefix answers landable even with a red certification later on the line (goal 8)",
-   "sync_path": ""
-  },
-  "integration/t261009-19/sc_t26100919_red_bounded.py": {
-   "anchor": "behaviour",
-   "note": "t261009-19 bounded red journey: the ladder answers rerun before any search, a unique per-lane hit isolates for free, a one-landing range isolates by arithmetic, an unfiltered multi-landing range reaches search and its range_key recorded as a searched change refuses the same range by name (goal 10), the boundary sentence is recordable as an attribution change; freeze episode carries only id/line/cause (state/culprit/closure are keyed change rows, should_freeze false for no attribution); a missing or zero-run header raises CouldNotRun and lands a range-growth row with no freeze row (goal 24); garbage red_cert/lane_reds shapes raise CertifyError by name",
-   "sync_path": ""
-  },
   "integration/t261009-22/sc_t26100922_lane_map_mock_chrome.mjs": {
    "anchor": "behaviour",
    "note": "t261009-22 lane map mock chrome: header kind legend + elapsed/now-at summary + waiting-for-you, durations printed under labels, diamond human gate, time axis at the segment scale, skipped dashed empty, now cursor, hover duration; malformed entries leak nothing",
-   "sync_path": ""
-  },
-  "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
-   "anchor": "behaviour",
-   "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
    "sync_path": ""
   },
   "integration/t261009-31/sc_t26100931_dismiss_journal_contract.py": {
@@ -4522,6 +4487,11 @@
   "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
    "anchor": "behaviour",
    "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
+   "sync_path": ""
+  },
+  "integration/t261009-32/sc_t26100943_left_column_dismiss.mjs": {
+   "anchor": "contract",
+   "note": "the left-column dismiss face + dwell-rule hole, judged on the public client faces (inSandbar, dismissed read helpers, sidebar copy/wiring shape); engine half is t261009-31's entries",
    "sync_path": ""
   }
  }

@@ -141,7 +141,10 @@ ok(sbSrc.includes('sortMergedTickets(inspectionSplit.unowned)'), '兜底组同�
 ok(sbSrc.includes('kindBadge={insp ? { text: INSPECTION_ROW_BADGE } : undefined}'), '项目组巡检行传类别徽标')
 ok(sbSrc.includes("kindBadge={{ text: INSPECTION_ROW_BADGE }}"), '兜底组行传类别徽标')
 ok(sbSrc.includes('.wb-sb .wb-card-kind'), '徽标 chip 样式作用域 .wb-sb（中列零影响）在源')
-ok(sbSrc.includes('驻留窗分工'), '巡检行不经 inSandbar 窗的两窗分工声明保留（t260915-19 UT 锚不丢）')
+// t261009-43: the pinned comment moved to English with the 261004 writing
+// standard (the lint gate rejects new CJK copy); the anchor moved with it.
+ok(sbSrc.includes('Two-window split') && sbSrc.includes('inspection rows never pass it'),
+  '巡检行不经 inSandbar 窗的两窗分工声明保留（t260915-19 UT 锚不丢；t261009-43 起英文措辞）')
 ok(!sbSrc.includes('并进对应组尾部'), '旧「组尾部」契约措辞已随行为变更清除（防死注释）')
 
 const cardSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-row-card.tsx'), 'utf8')

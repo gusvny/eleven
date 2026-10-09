@@ -108,7 +108,9 @@ import { ProjectAddModal, QuarantineModal } from './project-modals.tsx'
 import { TicketRowCard } from './ticket-row-card.tsx'
 // t260916-15 左栏合并排序：纯函数住 ticket-list-model 模型层（复用 deriveTicketState
 // 四态单点投影 tier，不另起状态词表；node 可裸 import UT 直测）。
-import { sortMergedTickets } from './ticket-list-model.ts'
+// t261009-43: the dismissal face readers (dismissed voucher, named note, the
+// order-preserving kept/dismissed split) live in the same pure layer.
+import { sortMergedTickets, isDismissedRow, splitDismissedRows } from './ticket-list-model.ts'
 // t261008-21 (host order 261008 option A): the closed dev-lane dwell window is
 // pinned at 24 h; the window rule lives in sandbar-dwell (pure layer, UT-covered)
 // and this is its only consumer (two-window split below — inspection rows exempt).
@@ -124,6 +126,29 @@ import {
 } from './queue-model.ts'
 const CONCURRENCY_URL = '/sandbar-workbench/api/wf/concurrency'
 const CONCURRENCY_REORDER_URL = '/sandbar-workbench/api/wf/concurrency/reorder'
+// t261009-43: the person's dismissal write face (engine ops dismiss/restore,
+// t261009-31 CLI behind it; who/reason both required non-empty). KI-042
+// discipline: verbatim same-source with node.ts's op route path — NOTE the
+// route whitelist entry lives in node.ts, OUTSIDE this ticket's write set
+// (named debt on the ticket; the client contract is fixed and stub-tested).
+const DISMISS_URL = (id: string): string =>
+  `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/dismiss`
+const RESTORE_URL = (id: string): string =>
+  `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/restore`
+// t261009-43: the person identity for dismiss/restore. Mirrors index.tsx
+// operatorOf (SAME localStorage key = one person identity per browser); a
+// local copy because importing index.tsx from the sidebar is a forbidden
+// circular import (sidebar is index's child).
+const OPERATOR_KEY = 'sandbar-workbench-operator-v1'
+function sidebarOperator(): string {
+  try {
+    const old = localStorage.getItem(OPERATOR_KEY)
+    if (old) return old
+    const id = 'op-' + Math.random().toString(36).slice(2, 8)
+    localStorage.setItem(OPERATOR_KEY, id)
+    return id
+  } catch { return 'op-local' }
+}
 // t260929-22 执行器入口视图（GAP A）：项目行=入口，中列 Executor/Chat 切换器；
 // 判定纯层在 executor-view-model.ts（tests/executor-entry-model.mjs 看守）。
 import { ExecutorView } from './executor-view.tsx'
@@ -182,6 +207,16 @@ interface Ticket {
   /** 更新时间（unix 秒；引擎行恒带，t260916-15 组内合并排序的时间源）。 */
   updated_ts?: number
   blocked_reason?: string
+  /** t260919-02: Temporal exec status (the five-state derivation's third input;
+   *  the left column's dwell failure-class settlement reads it too). */
+  exec_status?: string
+  /** t261009-43: the engine's dismissal voucher (t261009-31 row augmentation;
+   *  truthy plain object = the LAST journal row is a dismiss). Read via
+   *  isDismissedRow, never invented, never flipped locally. */
+  dismissed?: unknown
+  /** t261009-43: the engine's named note when the dismiss journal read failed
+   *  (the dismissed key is absent then); the row stays and the note surfaces. */
+  dismissed_note?: unknown
   pending?: { gate: string; reason: string }[]
   session_kb?: number
   agent_alive?: boolean
@@ -413,6 +448,33 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-insp-degraded { padding:6px 10px; font-size:11px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
+/* t261009-43: the dismissed fold — a count row per project ("N dismissed",
+   never a done-family word), caret + count + hint, rows expand in place. */
+.wb-dismissed-fold { margin:2px 6px 6px 14px; }
+.wb-dismissed-head { display:flex; align-items:center; gap:5px; padding:3px 6px; cursor:pointer;
+  border-radius:5px; color:var(--dsw-derive-muted,#57606a); font-size:11px; user-select:none; }
+.wb-dismissed-head:hover { background:rgba(255,255,255,0.05); }
+.wb-dismissed-label { font-weight:600; }
+.wb-dismissed-hint { font-weight:400; font-size:10px; color:var(--dsw-derive-muted,#57606a); }
+/* t261009-43: the dismiss affordance is deliberately low-key (a quiet action,
+   never a close/done button): transparent, muted ink, border only. */
+.wb-sb .wb-card-btn-dismiss { background:transparent; color:var(--dsw-derive-muted,#57606a);
+  border:1px solid var(--dsw-derive-border,#d0d7de); }
+.wb-sb .wb-card-btn-dismiss:hover { color:var(--dsw-alias-label-primary,#1f2328); }
+/* t261009-43: the journal-read-failure note chip (amber family, same tokens as
+   .wb-card-kind — an explicit "the dismissal face is unreadable", never silent). */
+.wb-sb .wb-card-dismiss-note { display:inline-flex; align-items:center; flex:none; padding:0 5px;
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px;
+  color:var(--dsw-derive-warn,#b8860b); font-size:10px; line-height:15px; }
+/* t261009-43: the reason prompt (bottom of the left column, one at a time). */
+.wb-dismiss-prompt { flex:none; margin:6px; padding:8px; border:1px solid var(--dsw-alias-border-l1,#333);
+  border-radius:8px; display:flex; flex-direction:column; gap:6px;
+  background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); }
+.wb-dismiss-prompt-title { font-size:11px; font-weight:600; }
+.wb-dismiss-reason { font:inherit; font-size:11px; min-height:44px; resize:vertical;
+  border:1px solid var(--dsw-alias-border-l1,#555); border-radius:5px; padding:4px 6px;
+  background:transparent; color:inherit; }
+.wb-dismiss-prompt-actions { display:flex; gap:6px; }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档）。
    t260929-22 gen4（宿主 260929 裁决落地：260927 设计胜、260823 放宽由 developer 落地、
@@ -565,6 +627,28 @@ export function WorkbenchSidebar(props: SidebarProps) {
    *  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
   const [listNonce, setListNonce] = useState(0)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  // t261009-43: the per-project dismissed fold (separate key family from
+  // `collapsed` — the collapsed key is the project registry key, and mixing
+  // fold families on one record would let a dismissal open/close the whole
+  // group; same discipline as the inspCollapsed comment above).
+  const [dismissedOpen, setDismissedOpen] = useState<Record<string, boolean>>({})
+  const [unownedDismissedOpen, setUnownedDismissedOpen] = useState(false)
+  // t261009-43: the reason prompt (one row, one action at a time — a person's
+  // action, never bulk). The engine refuses an empty reason, so the face asks
+  // first and disables Confirm until the reason is non-blank.
+  const [dismissPrompt, setDismissPrompt] = useState<
+    { projectKey: string; ticketId: string; action: 'dismiss' | 'restore' } | null
+  >(null)
+  const [dismissReason, setDismissReason] = useState('')
+  /** Write in flight (ticket id -> true): controls disabled against double writes. */
+  const [dismissBusy, setDismissBusy] = useState<Record<string, boolean>>({})
+  /** Named refusal (ticket id -> verbatim error; '' = none) rendered in the prompt panel. */
+  const [dismissNotice, setDismissNotice] = useState<Record<string, string>>({})
+  /** t261009-43: bump to force the data load effect to re-run right after a
+   *  successful dismiss/restore (the row leaves / returns on the ENGINE's
+   *  payload, never a local flip; the 10 s poll would catch it eventually —
+   *  the spec says "immediately"). */
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [loading, setLoading] = useState(true)
   // Project-lifecycle modals (ticket 3 face D): two kinds. t261008-36: the
   // settings->remove chain retired here — its only entrance was the More-views
@@ -834,7 +918,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
     // t260901-15：不可见页签暂停轮询（隐藏零请求、回可见立即补刷）。
     const stopPoll = startVisibleInterval(() => { void load() }, 10_000)
     return () => { cancelled = true; stopPoll() }
-  }, [wide])
+    // t261009-43: reloadNonce re-runs the whole load after a successful
+    // dismiss/restore POST (re-read the same face, never a local flip).
+  }, [wide, reloadNonce])
 
   // CL-3 (t261006-18): re-fetch one project's face (the "re-read the same face"
   // half of every POST). failure/malformed = null (rows carry zero marks) -
@@ -886,6 +972,40 @@ export function WorkbenchSidebar(props: SidebarProps) {
       setReorderBusy(m => ({ ...m, [projectKey]: false }))
     }
   }, [concByProject, refreshConc])
+
+  // t261009-43: one person's dismiss/restore. POST the op (who + reason both
+  // required non-empty — the engine refuses an empty reason, so the face asks
+  // first), surface a refusal verbatim, and on success re-read the face (the
+  // row leaves / returns because the ENGINE payload says so — the client never
+  // invents or locally flips the dismissed key). The outcome lands when the
+  // reloadNonce effect re-pulls ticket-list (immediate, not waiting for the
+  // 10 s poll).
+  const submitDismissal = useCallback(async (projectKey: string, ticketId: string,
+    action: 'dismiss' | 'restore', reason: string) => {
+    if (reason.trim() === '') {
+      setDismissNotice(m => ({ ...m, [ticketId]: 'a reason is required (recorded with the disposition)' }))
+      return
+    }
+    setDismissBusy(m => ({ ...m, [ticketId]: true }))
+    let refused = ''
+    try {
+      const r = await fetch(action === 'dismiss' ? DISMISS_URL(ticketId) : RESTORE_URL(ticketId), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ who: sidebarOperator(), reason }),
+      }).then(x => x.json()) as { ok?: boolean; error?: unknown } | undefined
+      if (r?.ok !== true) refused = String(r?.error ?? `${action} failed (HTTP body without ok:true)`)
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err)
+    }
+    setDismissNotice(m => ({ ...m, [ticketId]: refused }))
+    setDismissBusy(m => ({ ...m, [ticketId]: false }))
+    if (refused === '') {
+      setDismissPrompt(null)
+      setDismissReason('')
+      setReloadNonce(n => n + 1)
+    }
+  }, [])
 
   // 点工单（t260903-07 起）：只在中列开工单详情抽屉，右栏 chat 恒为全局会话
   // 不切换（联动下线口径见本文件头部注释）。左列行/立项单关联行/度量下钻三入口共用。
@@ -951,20 +1071,37 @@ export function WorkbenchSidebar(props: SidebarProps) {
   )
   const groups = useMemo(() => {
     const nowS = Date.now() / 1000
-    return projects.map(p => ({
-      project: p,
-      // t260916-15 合并排序：dev 行与巡检行拼接后按统一口径排（在等你/受阻→在跑→
-      // 已完成，级内 updated_ts 倒序）——巡检行不因数据来源沉底（宿主 260916 实报）。
-      // 排序纯函数 sortMergedTickets 住 ticket-list-model 层，UT/场景双看守。
-      tickets: sortMergedTickets([
-        ...(ticketsByProject[p.key] ?? []).filter(t => inSandbar(t, nowS)),
-        // 驻留窗分工（review gen2 意见2 钉一句话）：客户端 sandbarHours 窗只管上面
-        // dev-lane 行（inSandbar）；巡检行不经此窗——闭合行窗由引擎 R8 窗承担
-        // （超窗/close_ts 缺失不上板，t260915-08 board-rows 场景看守）。
-        // 此非「漏过滤」，勿当缺陷误修。
-        ...(inspectionSplit.byProject[p.key] ?? []),
-      ]),
-    }))
+    return projects.map(p => {
+      const dev = ticketsByProject[p.key] ?? []
+      const insp = inspectionSplit.byProject[p.key] ?? []
+      // t261009-43: a DISMISSED row leaves the left column — on BOTH sources
+      // (the dev-lane list and the inspection board face merge here, and a
+      // dismissal that worked on only one would look broken). The dismissed
+      // key is read from the engine payload (isDismissedRow; the client never
+      // invents it), and a row carrying only `dismissed_note` (journal read
+      // failure) is NOT dismissed: it stays visible with the note surfaced.
+      // Remaining rows keep their order: the filters preserve input order and
+      // sortMergedTickets is stable, so a dismissal never re-shuffles the
+      // project's other rows.
+      // Two-window split (pinned by review gen2 comment 2, t260916-15/t260915-19):
+      // the client's sandbarHours window governs ONLY the dev-lane rows
+      // (inSandbar); inspection rows never pass it — their closed-row window is
+      // the engine's R8 window (over-window / close_ts-missing rows never reach
+      // the board, t260915-08 board-rows scenario). This is NOT a missed filter;
+      // do not "fix" it. t261009-43 asymmetry, stated rather than left
+      // implicit: inspection rows never pass the client's 24 h dwell window
+      // (their window is the engine's), so for an inspection row the human
+      // dismissal IS the retirement mechanism on this face.
+      const dismissed = sortMergedTickets([...dev, ...insp].filter(isDismissedRow))
+      return {
+        project: p,
+        tickets: sortMergedTickets([
+          ...dev.filter(t => !isDismissedRow(t) && inSandbar(t, nowS)),
+          ...insp.filter(t => !isDismissedRow(t)),
+        ]),
+        dismissed,
+      }
+    })
   }, [projects, ticketsByProject, inspectionSplit])
 
   // t261005-10 (UI-2): Ws = the overlay + machine-status-head host (no board view).
@@ -1151,7 +1288,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
                         active={selectedId === t.id}
                         updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
                           ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
-                        onOpen={() => handleTicketClick(t, g.project.key)} />
+                        onOpen={() => handleTicketClick(t, g.project.key)}
+                        onDismiss={() => setDismissPrompt({ projectKey: g.project.key, ticketId: t.id, action: 'dismiss' })} />
                     )
                   })}
                   {/* Reorder-refusal notice (t261006-18 A7): the engine write face's
@@ -1161,34 +1299,98 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     <div className="wb-order-notice" data-wb-order-notice=""
                       role="alert">{orderNotice[g.project.key]}</div>
                   )}
+                  {/* t261009-43: the dismissed fold for this project. Label says
+                      "dismissed", never done — a dismissed row is off the board,
+                      NOT a completed ticket. Expanded, each row offers Restore
+                      (the undo path; no database edit). */}
+                  {g.dismissed.length > 0 && (
+                    <div className="wb-dismissed-fold" data-wb-dismissed-fold={g.project.key}
+                      data-dismissed-count={g.dismissed.length}>
+                      <div className="wb-dismissed-head" role="button" tabIndex={0}
+                        aria-expanded={dismissedOpen[g.project.key] === true}
+                        aria-label={`${g.dismissed.length} dismissed in ${g.project.name}`}
+                        data-wb-dismissed-toggle=""
+                        onClick={(e) => { e.stopPropagation(); setDismissedOpen(m => ({ ...m, [g.project.key]: !m[g.project.key] })) }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setDismissedOpen(m => ({ ...m, [g.project.key]: !m[g.project.key] })) } }}>
+                        <span className="wb-group-caret">{dismissedOpen[g.project.key] ? '▾' : '▸'}</span>
+                        <span className="wb-dismissed-label">{g.dismissed.length} dismissed</span>
+                        <span className="wb-dismissed-hint">off the board, not done</span>
+                      </div>
+                      {dismissedOpen[g.project.key] && g.dismissed.map(t => (
+                        <TicketRowCard key={t.id} t={t} compact
+                          wf={isInspectionRow(t) ? INSPECTION_WF_LIKE : undefined}
+                          progress={isInspectionRow(t) ? inspectionProgressOf(t) : undefined}
+                          kindBadge={isInspectionRow(t) ? { text: INSPECTION_ROW_BADGE } : undefined}
+                          active={selectedId === t.id}
+                          onOpen={() => handleTicketClick(t, g.project.key)}
+                          onRestore={() => setDismissPrompt({ projectKey: g.project.key, ticketId: t.id, action: 'restore' })} />
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
             </div>
           ))}
-          {/* 巡检兜底组（t260915-19）：project 为空（20 之前老票）或不在注册表
-              （隔离 key/摘除项目）的巡检票显式落此组——不静默丢失（工单④）。
-              无此类行=整组不渲染（不占位不报错，组头计数同款）；行渲染与项目组
-              巡检行同款适配（含 t260916-15 类别徽标），组内行序同口径合并排序；
-              点击走 handleTicketClick（projectKey 空→兜底首项目，见其注释）。 */}
-          {!loading && inspectionSplit.unowned.length > 0 && (
+          {/* Unowned inspection group (t260915-19): inspection tickets whose
+              project is empty (pre-20 legacy tickets) or not in the registry
+              (quarantined key / removed project) land here EXPLICITLY — never
+              silently dropped. No such rows = the whole group is not rendered;
+              rows render with the same adaptation as project-group inspection
+              rows (incl. the t260916-15 kind badge), merged-sorted the same
+              way; clicks go through handleTicketClick (empty projectKey ->
+              first-project fallback, see its comment).
+              t261009-43: dismissed rows leave this group too (second-source
+              symmetry); their fold lives under the same group head. */}
+          {!loading && inspectionSplit.unowned.length > 0 && (() => {
+            const { kept: unownedKept, dismissed: unownedDismissed } =
+              splitDismissedRows(sortMergedTickets(inspectionSplit.unowned))
+            return (
             <div>
               <div className="wb-group-head" data-testid="sidebar-inspection-head"
                 onClick={() => setInspCollapsed(c => !c)}>
                 <span className="wb-group-caret">{inspCollapsed ? '▸' : '▾'}</span>
                 <span className="wb-group-name">{INSPECTION_ROW_BADGE}</span>
-                <span className="wb-group-count">{inspectionSplit.unowned.length}</span>
+                <span className="wb-group-count">{unownedKept.length}</span>
               </div>
-              {!inspCollapsed && sortMergedTickets(inspectionSplit.unowned).map(t => (
+              {!inspCollapsed && unownedKept.map(t => (
                 <TicketRowCard key={t.id} t={t} compact
                   wf={INSPECTION_WF_LIKE} progress={inspectionProgressOf(t)}
                   kindBadge={{ text: INSPECTION_ROW_BADGE }}
                   active={selectedId === t.id}
                   updatedTsMs={(isOpen(t) ? t.created : (t.close_ts || t.created)) !== undefined
                     ? (isOpen(t) ? t.created : (t.close_ts || t.created))! * 1000 : undefined}
-                  onOpen={() => handleTicketClick(t, '')} />
+                  onOpen={() => handleTicketClick(t, '')}
+                  onDismiss={() => setDismissPrompt({ projectKey: '', ticketId: t.id, action: 'dismiss' })} />
               ))}
+              {/* t261009-43: the unowned group's own dismissed fold (separate
+                  boolean from the project-keyed record — no registry key exists
+                  here to key it by). */}
+              {!inspCollapsed && unownedDismissed.length > 0 && (
+                <div className="wb-dismissed-fold" data-wb-dismissed-fold="unowned"
+                  data-dismissed-count={unownedDismissed.length}>
+                  <div className="wb-dismissed-head" role="button" tabIndex={0}
+                    aria-expanded={unownedDismissedOpen}
+                    aria-label={`${unownedDismissed.length} dismissed inspection rows`}
+                    data-wb-dismissed-toggle=""
+                    onClick={(e) => { e.stopPropagation(); setUnownedDismissedOpen(v => !v) }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setUnownedDismissedOpen(v => !v) } }}>
+                    <span className="wb-group-caret">{unownedDismissedOpen ? '▾' : '▸'}</span>
+                    <span className="wb-dismissed-label">{unownedDismissed.length} dismissed</span>
+                    <span className="wb-dismissed-hint">off the board, not done</span>
+                  </div>
+                  {unownedDismissedOpen && unownedDismissed.map(t => (
+                    <TicketRowCard key={t.id} t={t} compact
+                      wf={INSPECTION_WF_LIKE} progress={inspectionProgressOf(t)}
+                      kindBadge={{ text: INSPECTION_ROW_BADGE }}
+                      active={selectedId === t.id}
+                      onOpen={() => handleTicketClick(t, '')}
+                      onRestore={() => setDismissPrompt({ projectKey: '', ticketId: t.id, action: 'restore' })} />
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+            )
+          })()}
           {/* 隔离行（票③验收 11）：装载器隔离的 key 红色一行，点击看原因与修复指路；
               隔离期间无组头无项目设置入口（无装载条目可设置）。 */}
           {quarantined.map(q => (
@@ -1205,6 +1407,42 @@ export function WorkbenchSidebar(props: SidebarProps) {
             onClick={() => setModal({ kind: 'add' })}>
             <span className="wb-project-add-plus">＋</span>Add project
           </div>
+          {/* t261009-43: the reason prompt — one row, one action at a time. The
+              engine refuses an empty reason, so Confirm stays disabled until
+              the reason is non-blank; a refusal surfaces verbatim (never
+              swallowed); a success closes the prompt and re-reads the face. */}
+          {dismissPrompt !== null && (() => {
+            const p = dismissPrompt
+            const notice = dismissNotice[p.ticketId] ?? ''
+            return (
+              <div className="wb-dismiss-prompt" data-wb-dismiss-prompt="" role="dialog"
+                aria-label={`${p.action} ${p.ticketId}`}>
+                <div className="wb-dismiss-prompt-title">
+                  {p.action === 'dismiss'
+                    ? `Dismiss ${p.ticketId} — off the board, not done (restorable)`
+                    : `Restore ${p.ticketId} — back on the board`}
+                </div>
+                <textarea className="wb-dismiss-reason" data-wb-dismiss-reason=""
+                  value={dismissReason}
+                  placeholder="Reason (required, recorded)"
+                  onChange={(e) => setDismissReason(e.target.value)} />
+                {notice !== '' && (
+                  <div className="wb-order-notice" data-wb-dismiss-notice="" role="alert">{notice}</div>
+                )}
+                <div className="wb-dismiss-prompt-actions">
+                  <button type="button" className="wb-card-btn wb-card-btn-dismiss" data-dismiss-confirm=""
+                    disabled={dismissBusy[p.ticketId] === true || dismissReason.trim() === ''}
+                    onClick={() => { void submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason) }}>
+                    {p.action === 'dismiss' ? 'Dismiss' : 'Restore'}
+                  </button>
+                  <button type="button" className="wb-card-btn" data-dismiss-cancel=""
+                    onClick={() => { setDismissPrompt(null); setDismissReason(''); setDismissNotice(m => ({ ...m, [p.ticketId]: '' })) }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
         </div>
       </div>
       {/* 中列：四视图（现成的工单台/文档/模型/立项单 UI，从 chat 页签迁来；左列图标直切，无 tab 条）。

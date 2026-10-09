@@ -6214,6 +6214,51 @@ function sortMergedTickets(rows) {
 	return keyed.map((k) => k.row);
 }
 /**
+* The row's dismissal voucher, or null when the row is NOT dismissed.
+* Only a truthy PLAIN OBJECT counts: a primitive (`true`, `"yes"`, `5`), an
+* array, null and a missing key all read as not dismissed. Rationale: the
+* engine's contract is a fixed {at,who,reason} shape, and the cost of the two
+* failure directions is asymmetric — treating a malformed key as dismissed
+* silently HIDES a live row, while treating it as not dismissed keeps the row
+* on the board (visible, never lost). The client never invents this key.
+*/
+function dismissedFaceOf(row) {
+	if (row === null || typeof row !== "object") return null;
+	const d = row.dismissed;
+	if (d === null || typeof d !== "object" || Array.isArray(d)) return null;
+	return d;
+}
+/** Truthy shorthand: does this row leave the left column? (see dismissedFaceOf) */
+function isDismissedRow(row) {
+	return dismissedFaceOf(row) !== null;
+}
+/**
+* The engine's named note for the read-failure path (journal unreadable → the
+* `dismissed` key is absent and `dismissed_note` carries the reason verbatim).
+* Returns '' for absent/malformed/non-string values. A row with a note is
+* NEVER dismissed: the caller must keep the row visible and surface the note.
+*/
+function dismissedNoteOf(row) {
+	if (row === null || typeof row !== "object") return "";
+	const n = row.dismissed_note;
+	return typeof n === "string" && n.trim() !== "" ? n : "";
+}
+/**
+* Split a merged row list into (kept, dismissed) preserving the input order in
+* BOTH halves — the left column filters with this so the remaining rows of a
+* project keep their order after a dismissal, and the fold lists the dismissed
+* rows in the same order they held on the board. Pure: no input mutation.
+*/
+function splitDismissedRows(rows) {
+	const kept = [];
+	const dismissed = [];
+	for (const r of rows) (isDismissedRow(r) ? dismissed : kept).push(r);
+	return {
+		kept,
+		dismissed
+	};
+}
+/**
 * epic 色板：10 色。与项目色板（shared/project-color.ts PROJECT_PALETTE）色相同构
 * 但独立声明——两板语义不同（项目 tag vs epic 彩条/chip），互指防漂移不共用实例。
 * 撞色口径同 project-color：碰撞无害（chip 有名可辨），不作通过/失败断言。
@@ -6355,12 +6400,20 @@ function cardTitle(t, wf, compact = false, progress, rel) {
 	} else if (t.voided) parts.push("Voided (findings were rejected, not erased)");
 	if (t.exec_status) parts.push(`Exec: ${t.exec_status}`);
 	if (t.close_health_reason) parts.push(`Close: ${t.close_health_reason}`);
+	if (t.dismissed && typeof t.dismissed === "object" && !Array.isArray(t.dismissed)) {
+		const d = t.dismissed;
+		const who = typeof d.who === "string" && d.who.trim() !== "" ? d.who : "unknown";
+		const why = typeof d.reason === "string" && d.reason.trim() !== "" ? `: ${d.reason}` : "";
+		parts.push(`Dismissed by ${who}${why} (off the board, not done — restorable)`);
+	} else if (t.dismissed) parts.push("Dismissed (off the board, not done — restorable)");
+	if (typeof t.dismissed_note === "string" && t.dismissed_note.trim() !== "") parts.push(`Dismiss note: ${t.dismissed_note}`);
 	if (compact && progress?.text) parts.push(progress.text);
 	if (t.updated) parts.push(`Updated ${t.updated}`);
 	else if (compact && rel) parts.push(`Updated ${rel}`);
 	return parts.join("\n");
 }
-function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ordering, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic }) {
+function TicketRowCard({ t, wf, progress, compact = false, active = false, busy = false, updatedTsMs, kindBadge, ordering, ops = [], peerViewers = [], onOpen, onAdvance, onDispatch, onRework, onUnblock, onClose, onPause, onResume, onOpenEpic, onDismiss, onRestore }) {
+	const dismissedVoucher = dismissedFaceOf(t) !== null;
 	const state4 = deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided);
 	const epicColor = epicColorOf(t.epic);
 	const dots = compact ? [] : laneDots(wf, t);
@@ -6389,6 +6442,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		"data-active": active,
 		"data-compact": compact,
 		"data-engine": t.engine,
+		"data-dismissed": dismissedVoucher ? "1" : void 0,
 		"data-order-kind": ordering?.kind,
 		draggable: orderable,
 		onDragStart,
@@ -6451,6 +6505,12 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 							children: badge
 						});
 					})(),
+					dismissedNoteOf(t) !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-card-dismiss-note",
+						"data-dismiss-note": "1",
+						title: dismissedNoteOf(t),
+						children: "Dismiss note"
+					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-id",
 						children: t.id
@@ -6636,6 +6696,22 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						disabled: busy,
 						onClick: stop(onClose),
 						children: "Done"
+					}),
+					state4 === "failed" && !dismissedVoucher && onDismiss && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-card-btn wb-card-btn-dismiss",
+						"data-dismiss-ctl": t.id,
+						disabled: busy,
+						title: "Dismiss: take this failed ticket off the board (reversible; a reason is asked and recorded)",
+						onClick: stop(onDismiss),
+						children: "Dismiss"
+					}),
+					dismissedVoucher && onRestore && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-card-btn wb-card-btn-green",
+						"data-restore-ctl": t.id,
+						disabled: busy,
+						title: "Restore: put this dismissed ticket back on the board",
+						onClick: stop(onRestore),
+						children: "Restore"
 					})
 				]
 			})
@@ -6652,9 +6728,12 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 * Host order 261008 option A: the sidebar Settings popover (gear + "Sandbar
 * dwell" input) is retired, so the dwell window is PINNED at 24 hours. The
 * window behaviour itself stays real: a closed dev-lane ticket leaves the left
-* column 24 h after it closes (close_ts, falling back to created). Inspection
-* rows never go through this window — their closed-row window is the engine's
-* own R8 window (two-window split, see sidebar.tsx group assembly).
+* column 24 h after it closes (close_ts, falling back to created). t261009-43:
+* a failure-class terminal status settles like a closed one and then obeys the
+* same pinned window, so a dead failed row retires too. Inspection rows never
+* go through this window — their closed-row window is the engine's
+* own R8 window (two-window split, see sidebar.tsx group assembly); for them
+* the human dismissal (t261009-43) is the retirement mechanism.
 *
 * Stored-value policy (chosen over clamp): the legacy localStorage key is
 * IGNORED and removed, not clamped. With the knob gone, any surviving stored
@@ -6681,12 +6760,28 @@ function sandbarHours() {
 	} catch {}
 	return 24;
 }
-/** Open = lifecycle not closed out; project groups always list these. */
-const isDwellOpen = (t) => t.status !== "closed" && t.status !== "verified";
+/**
+* Open = lifecycle not closed out; project groups always list these.
+* t261009-43 (the dwell-rule hole): a FAILURE-CLASS TERMINAL status settles
+* like a closed one — before this change every status except closed/verified
+* counted as open, so a workflow that ended FAILED stayed listed forever no
+* matter how old it was (73 h / 110 h / 249 h measured on the live board).
+* The failure verdict is NOT re-derived here: it delegates to the five-state
+* single point (deriveTicketState in ticket-list-model.ts) and deliberately
+* passes NO voided argument — a voided row must never enter the client window
+* through this path (inspection rows bypass inSandbar entirely, and passing
+* `voided` would silently change that for a dev-lane row shape). Unknown
+* statuses still derive to active = open, unchanged.
+*/
+const isDwellOpen = (t) => {
+	if (t.status === "closed" || t.status === "verified") return false;
+	return deriveTicketState(t.status, t.stage_state, t.exec_status) !== "failed";
+};
 /**
 * Dwell predicate: closed rows stay while close_ts (fallback created) is
 * inside the pinned window. Boundary is strict `<` — a row at exactly 24 h
-* has left.
+* has left. Since t261009-43 a failed row obeys the same window from the same
+* timestamps: the failure settles the ticket, the pinned 24 h retires it.
 */
 const inSandbar = (t, nowS) => {
 	if (isDwellOpen(t)) return true;
@@ -8625,6 +8720,20 @@ function inspectionDegradedNote(err) {
 */
 const CONCURRENCY_URL = "/sandbar-workbench/api/wf/concurrency";
 const CONCURRENCY_REORDER_URL = "/sandbar-workbench/api/wf/concurrency/reorder";
+const DISMISS_URL = (id) => `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/dismiss`;
+const RESTORE_URL = (id) => `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/restore`;
+const OPERATOR_KEY$1 = "sandbar-workbench-operator-v1";
+function sidebarOperator() {
+	try {
+		const old = localStorage.getItem(OPERATOR_KEY$1);
+		if (old) return old;
+		const id = "op-" + Math.random().toString(36).slice(2, 8);
+		localStorage.setItem(OPERATOR_KEY$1, id);
+		return id;
+	} catch {
+		return "op-local";
+	}
+}
 /** 巡检行卡的 wf 形状（t260915-19）：compact 无站道点，仅喂悬停阶段短名；
 *  拓扑=宿主声明面单点（host/inspection-face.ts），不 import index.tsx 防循环。 */
 const INSPECTION_WF_LIKE = { stages: INSPECTION_TOPOLOGY };
@@ -8772,6 +8881,33 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-insp-degraded { padding:6px 10px; font-size:11px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border-bottom:1px solid var(--dsw-derive-warn,#b8860b); }
+/* t261009-43: the dismissed fold — a count row per project ("N dismissed",
+   never a done-family word), caret + count + hint, rows expand in place. */
+.wb-dismissed-fold { margin:2px 6px 6px 14px; }
+.wb-dismissed-head { display:flex; align-items:center; gap:5px; padding:3px 6px; cursor:pointer;
+  border-radius:5px; color:var(--dsw-derive-muted,#57606a); font-size:11px; user-select:none; }
+.wb-dismissed-head:hover { background:rgba(255,255,255,0.05); }
+.wb-dismissed-label { font-weight:600; }
+.wb-dismissed-hint { font-weight:400; font-size:10px; color:var(--dsw-derive-muted,#57606a); }
+/* t261009-43: the dismiss affordance is deliberately low-key (a quiet action,
+   never a close/done button): transparent, muted ink, border only. */
+.wb-sb .wb-card-btn-dismiss { background:transparent; color:var(--dsw-derive-muted,#57606a);
+  border:1px solid var(--dsw-derive-border,#d0d7de); }
+.wb-sb .wb-card-btn-dismiss:hover { color:var(--dsw-alias-label-primary,#1f2328); }
+/* t261009-43: the journal-read-failure note chip (amber family, same tokens as
+   .wb-card-kind — an explicit "the dismissal face is unreadable", never silent). */
+.wb-sb .wb-card-dismiss-note { display:inline-flex; align-items:center; flex:none; padding:0 5px;
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px;
+  color:var(--dsw-derive-warn,#b8860b); font-size:10px; line-height:15px; }
+/* t261009-43: the reason prompt (bottom of the left column, one at a time). */
+.wb-dismiss-prompt { flex:none; margin:6px; padding:8px; border:1px solid var(--dsw-alias-border-l1,#333);
+  border-radius:8px; display:flex; flex-direction:column; gap:6px;
+  background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)); }
+.wb-dismiss-prompt-title { font-size:11px; font-weight:600; }
+.wb-dismiss-reason { font:inherit; font-size:11px; min-height:44px; resize:vertical;
+  border:1px solid var(--dsw-alias-border-l1,#555); border-radius:5px; padding:4px 6px;
+  background:transparent; color:inherit; }
+.wb-dismiss-prompt-actions { display:flex; gap:6px; }
 /* 视图入口图标：右对齐放在每个项目组头行内（用户拍板 260823：per-project，不占独立行；
    t260827-01 起四个：工单/文档/模型/立项单；t260905-06 旧提法退役换文档）。
    t260929-22 gen4（宿主 260929 裁决落地：260927 设计胜、260823 放宽由 developer 落地、
@@ -8916,6 +9052,19 @@ function WorkbenchSidebar(props) {
 	*  详情抽屉（WorkbenchSection 内部 state）收不到通知——靠这个单调递增计数传达。 */
 	const [listNonce, setListNonce] = (0, react.useState)(0);
 	const [collapsed, setCollapsed] = (0, react.useState)({});
+	const [dismissedOpen, setDismissedOpen] = (0, react.useState)({});
+	const [unownedDismissedOpen, setUnownedDismissedOpen] = (0, react.useState)(false);
+	const [dismissPrompt, setDismissPrompt] = (0, react.useState)(null);
+	const [dismissReason, setDismissReason] = (0, react.useState)("");
+	/** Write in flight (ticket id -> true): controls disabled against double writes. */
+	const [dismissBusy, setDismissBusy] = (0, react.useState)({});
+	/** Named refusal (ticket id -> verbatim error; '' = none) rendered in the prompt panel. */
+	const [dismissNotice, setDismissNotice] = (0, react.useState)({});
+	/** t261009-43: bump to force the data load effect to re-run right after a
+	*  successful dismiss/restore (the row leaves / returns on the ENGINE's
+	*  payload, never a local flip; the 10 s poll would catch it eventually —
+	*  the spec says "immediately"). */
+	const [reloadNonce, setReloadNonce] = (0, react.useState)(0);
 	const [loading, setLoading] = (0, react.useState)(true);
 	const [modal, setModal] = (0, react.useState)(null);
 	/** 隔离条目（GET /wf/projects 的 quarantined 面，票③验收 11）：红色行渲染源。 */
@@ -9122,7 +9271,7 @@ function WorkbenchSidebar(props) {
 			cancelled = true;
 			stopPoll();
 		};
-	}, [wide]);
+	}, [wide, reloadNonce]);
 	const refreshConc = (0, react.useCallback)(async (projectKey) => {
 		try {
 			const cr = await fetch(`${CONCURRENCY_URL}?project=${encodeURIComponent(projectKey)}`).then((r) => r.json());
@@ -9177,6 +9326,46 @@ function WorkbenchSidebar(props) {
 			}));
 		}
 	}, [concByProject, refreshConc]);
+	const submitDismissal = (0, react.useCallback)(async (projectKey, ticketId, action, reason) => {
+		if (reason.trim() === "") {
+			setDismissNotice((m) => ({
+				...m,
+				[ticketId]: "a reason is required (recorded with the disposition)"
+			}));
+			return;
+		}
+		setDismissBusy((m) => ({
+			...m,
+			[ticketId]: true
+		}));
+		let refused = "";
+		try {
+			const r = await fetch(action === "dismiss" ? DISMISS_URL(ticketId) : RESTORE_URL(ticketId), {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					who: sidebarOperator(),
+					reason
+				})
+			}).then((x) => x.json());
+			if (r?.ok !== true) refused = String(r?.error ?? `${action} failed (HTTP body without ok:true)`);
+		} catch (err) {
+			refused = err instanceof Error ? err.message : String(err);
+		}
+		setDismissNotice((m) => ({
+			...m,
+			[ticketId]: refused
+		}));
+		setDismissBusy((m) => ({
+			...m,
+			[ticketId]: false
+		}));
+		if (refused === "") {
+			setDismissPrompt(null);
+			setDismissReason("");
+			setReloadNonce((n) => n + 1);
+		}
+	}, []);
 	const handleTicketClick = (0, react.useCallback)((t, projectKey) => {
 		setSelectedId(t.id);
 		setViewProject((p) => projectKey || p || (projects.length > 0 ? projects[0].key : ""));
@@ -9201,10 +9390,16 @@ function WorkbenchSidebar(props) {
 	const inspectionSplit = (0, react.useMemo)(() => inspectionSplitByProject(inspectionRows, projects.map((p) => p.key)), [inspectionRows, projects]);
 	const groups = (0, react.useMemo)(() => {
 		const nowS = Date.now() / 1e3;
-		return projects.map((p) => ({
-			project: p,
-			tickets: sortMergedTickets([...(ticketsByProject[p.key] ?? []).filter((t) => inSandbar(t, nowS)), ...inspectionSplit.byProject[p.key] ?? []])
-		}));
+		return projects.map((p) => {
+			const dev = ticketsByProject[p.key] ?? [];
+			const insp = inspectionSplit.byProject[p.key] ?? [];
+			const dismissed = sortMergedTickets([...dev, ...insp].filter(isDismissedRow));
+			return {
+				project: p,
+				tickets: sortMergedTickets([...dev.filter((t) => !isDismissedRow(t) && inSandbar(t, nowS)), ...insp.filter((t) => !isDismissedRow(t))]),
+				dismissed
+			};
+		});
 	}, [
 		projects,
 		ticketsByProject,
@@ -9420,7 +9615,12 @@ function WorkbenchSidebar(props) {
 										},
 										active: selectedId === t.id,
 										updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
-										onOpen: () => handleTicketClick(t, g.project.key)
+										onOpen: () => handleTicketClick(t, g.project.key),
+										onDismiss: () => setDismissPrompt({
+											projectKey: g.project.key,
+											ticketId: t.id,
+											action: "dismiss"
+										})
 									}, t.id);
 								}),
 								orderNotice[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -9428,37 +9628,154 @@ function WorkbenchSidebar(props) {
 									"data-wb-order-notice": "",
 									role: "alert",
 									children: orderNotice[g.project.key]
+								}),
+								g.dismissed.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-dismissed-fold",
+									"data-wb-dismissed-fold": g.project.key,
+									"data-dismissed-count": g.dismissed.length,
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-dismissed-head",
+										role: "button",
+										tabIndex: 0,
+										"aria-expanded": dismissedOpen[g.project.key] === true,
+										"aria-label": `${g.dismissed.length} dismissed in ${g.project.name}`,
+										"data-wb-dismissed-toggle": "",
+										onClick: (e) => {
+											e.stopPropagation();
+											setDismissedOpen((m) => ({
+												...m,
+												[g.project.key]: !m[g.project.key]
+											}));
+										},
+										onKeyDown: (e) => {
+											if (e.key === "Enter" || e.key === " ") {
+												e.stopPropagation();
+												setDismissedOpen((m) => ({
+													...m,
+													[g.project.key]: !m[g.project.key]
+												}));
+											}
+										},
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-group-caret",
+												children: dismissedOpen[g.project.key] ? "▾" : "▸"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "wb-dismissed-label",
+												children: [g.dismissed.length, " dismissed"]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-dismissed-hint",
+												children: "off the board, not done"
+											})
+										]
+									}), dismissedOpen[g.project.key] && g.dismissed.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+										t,
+										compact: true,
+										wf: isInspectionRow(t) ? INSPECTION_WF_LIKE : void 0,
+										progress: isInspectionRow(t) ? inspectionProgressOf(t) : void 0,
+										kindBadge: isInspectionRow(t) ? { text: "Inspection" } : void 0,
+										active: selectedId === t.id,
+										onOpen: () => handleTicketClick(t, g.project.key),
+										onRestore: () => setDismissPrompt({
+											projectKey: g.project.key,
+											ticketId: t.id,
+											action: "restore"
+										})
+									}, t.id))]
 								})
 							] })]
 						}, g.project.key)),
-						!loading && inspectionSplit.unowned.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-group-head",
-							"data-testid": "sidebar-inspection-head",
-							onClick: () => setInspCollapsed((c) => !c),
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-caret",
-									children: inspCollapsed ? "▸" : "▾"
+						!loading && inspectionSplit.unowned.length > 0 && (() => {
+							const { kept: unownedKept, dismissed: unownedDismissed } = splitDismissedRows(sortMergedTickets(inspectionSplit.unowned));
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-group-head",
+									"data-testid": "sidebar-inspection-head",
+									onClick: () => setInspCollapsed((c) => !c),
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-group-caret",
+											children: inspCollapsed ? "▸" : "▾"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-group-name",
+											children: "Inspection"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-group-count",
+											children: unownedKept.length
+										})
+									]
 								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-name",
-									children: "Inspection"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-group-count",
-									children: inspectionSplit.unowned.length
+								!inspCollapsed && unownedKept.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+									t,
+									compact: true,
+									wf: INSPECTION_WF_LIKE,
+									progress: inspectionProgressOf(t),
+									kindBadge: { text: "Inspection" },
+									active: selectedId === t.id,
+									updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
+									onOpen: () => handleTicketClick(t, ""),
+									onDismiss: () => setDismissPrompt({
+										projectKey: "",
+										ticketId: t.id,
+										action: "dismiss"
+									})
+								}, t.id)),
+								!inspCollapsed && unownedDismissed.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-dismissed-fold",
+									"data-wb-dismissed-fold": "unowned",
+									"data-dismissed-count": unownedDismissed.length,
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-dismissed-head",
+										role: "button",
+										tabIndex: 0,
+										"aria-expanded": unownedDismissedOpen,
+										"aria-label": `${unownedDismissed.length} dismissed inspection rows`,
+										"data-wb-dismissed-toggle": "",
+										onClick: (e) => {
+											e.stopPropagation();
+											setUnownedDismissedOpen((v) => !v);
+										},
+										onKeyDown: (e) => {
+											if (e.key === "Enter" || e.key === " ") {
+												e.stopPropagation();
+												setUnownedDismissedOpen((v) => !v);
+											}
+										},
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-group-caret",
+												children: unownedDismissedOpen ? "▾" : "▸"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "wb-dismissed-label",
+												children: [unownedDismissed.length, " dismissed"]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-dismissed-hint",
+												children: "off the board, not done"
+											})
+										]
+									}), unownedDismissedOpen && unownedDismissed.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
+										t,
+										compact: true,
+										wf: INSPECTION_WF_LIKE,
+										progress: inspectionProgressOf(t),
+										kindBadge: { text: "Inspection" },
+										active: selectedId === t.id,
+										onOpen: () => handleTicketClick(t, ""),
+										onRestore: () => setDismissPrompt({
+											projectKey: "",
+											ticketId: t.id,
+											action: "restore"
+										})
+									}, t.id))]
 								})
-							]
-						}), !inspCollapsed && sortMergedTickets(inspectionSplit.unowned).map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TicketRowCard, {
-							t,
-							compact: true,
-							wf: INSPECTION_WF_LIKE,
-							progress: inspectionProgressOf(t),
-							kindBadge: { text: "Inspection" },
-							active: selectedId === t.id,
-							updatedTsMs: (isOpen(t) ? t.created : t.close_ts || t.created) !== void 0 ? (isOpen(t) ? t.created : t.close_ts || t.created) * 1e3 : void 0,
-							onOpen: () => handleTicketClick(t, "")
-						}, t.id))] }),
+							] });
+						})(),
 						quarantined.map((q) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-quar-row",
 							"data-wb-quarantine-row": "",
@@ -9484,7 +9801,62 @@ function WorkbenchSidebar(props) {
 								className: "wb-project-add-plus",
 								children: "＋"
 							}), "Add project"]
-						})
+						}),
+						dismissPrompt !== null && (() => {
+							const p = dismissPrompt;
+							const notice = dismissNotice[p.ticketId] ?? "";
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-dismiss-prompt",
+								"data-wb-dismiss-prompt": "",
+								role: "dialog",
+								"aria-label": `${p.action} ${p.ticketId}`,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-dismiss-prompt-title",
+										children: p.action === "dismiss" ? `Dismiss ${p.ticketId} — off the board, not done (restorable)` : `Restore ${p.ticketId} — back on the board`
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+										className: "wb-dismiss-reason",
+										"data-wb-dismiss-reason": "",
+										value: dismissReason,
+										placeholder: "Reason (required, recorded)",
+										onChange: (e) => setDismissReason(e.target.value)
+									}),
+									notice !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-order-notice",
+										"data-wb-dismiss-notice": "",
+										role: "alert",
+										children: notice
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-dismiss-prompt-actions",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											type: "button",
+											className: "wb-card-btn wb-card-btn-dismiss",
+											"data-dismiss-confirm": "",
+											disabled: dismissBusy[p.ticketId] === true || dismissReason.trim() === "",
+											onClick: () => {
+												submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason);
+											},
+											children: p.action === "dismiss" ? "Dismiss" : "Restore"
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											type: "button",
+											className: "wb-card-btn",
+											"data-dismiss-cancel": "",
+											onClick: () => {
+												setDismissPrompt(null);
+												setDismissReason("");
+												setDismissNotice((m) => ({
+													...m,
+													[p.ticketId]: ""
+												}));
+											},
+											children: "Cancel"
+										})]
+									})
+								]
+							});
+						})()
 					]
 				})]
 			}),
