@@ -163,6 +163,33 @@ if os.path.isfile(WRAPPER) and os.path.isfile(SCENARIO):
     except OSError as exc:
         ok(False, "wrapper readable (%s)" % exc)
 
+# ---------- R. roster integrity: every booked_sha must resolve (261009 incident) ----------
+# 事故（261009 16:1x，本岗自伤）：新挂一行时 booked_sha 手写补齐成一个"看着像"的 40 位串，
+# 红册卫生测试只查形状 ⇒ 放行；引擎侧数据驱动测试取"最新戳"行当探针、拿它的 sha 解基点
+# ⇒ 解不出 ⇒ 全仓 verify_lane code 面转红 ⇒ 各泳道 merge_check 被堵。
+# 本段把该护栏搬进**已在册的场景**（不新增场景、不动锚点表）：红册每一行的 booked_sha
+# 必须真能解出来；git/仓缺席=具名失败（fail-closed，不静默跳过）。
+section("R roster integrity — booked_sha must resolve to a real commit")
+try:
+    import subprocess as _sp
+    with open(ROSTER, "r", encoding="utf-8") as f:
+        _book = json.load(f)
+    _bad = []
+    for _e in (_book.get("entries") or []):
+        _s = str((_e or {}).get("booked_sha") or "")
+        if not _s:
+            _bad.append((str((_e or {}).get("name")), _s, "missing"))
+            continue
+        _r = _sp.run(["git", "cat-file", "-e", _s + "^{commit}"],
+                     capture_output=True, cwd=str(REPO))
+        if _r.returncode != 0:
+            _bad.append((str((_e or {}).get("name")), _s, "unresolvable"))
+    ok(not _bad,
+       "every roster row's booked_sha resolves in this tree (%d rows, bad=%s)"
+       % (len(_book.get("entries") or []), _bad[:3]))
+except (OSError, ValueError) as exc:
+    ok(False, "roster readable for the integrity leg (%s)" % exc)
+
 # ---------- summary ----------
 total = PASS + FAIL + NA
 print("\nSUMMARY pass=%d fail=%d env_fail=0 na=%d" % (PASS, FAIL, NA))
