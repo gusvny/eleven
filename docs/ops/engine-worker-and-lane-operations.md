@@ -337,3 +337,39 @@ owns it.**
 the added entries without losing the old ones, and that the previously red check goes green at the
 next merge check.
 
+
+## 11. Answering the executor's request ledger as the steward on duty
+
+The executor files blockers into `~/.sandbar/projects/<key>/requests.jsonl`; the ticket face and the
+panel render them as a thread. Two row kinds matter here, and they are **not** interchangeable:
+
+- **`reply` (the sanctioned path).** Write it through the engine's own entry point rather than by
+  editing the file:
+
+  ```bash
+  PY=server/engine/.venv/bin/python
+  "$PY" server/engine/request_thread.py '{"op":"reply","id":"<req-…>","intent":"fact",
+    "via":"<who filed it on the decider's behalf>","caller_project":"<key>","text":"…"}'
+  ```
+
+  Row shape: `{type:"reply", id:"rpl-…", reply_for:"<req-…>", at, text, by, intent, via?}`. Two
+  gates the operator meets, both by design:
+  - `caller-undeclared` — pass `caller_project` (or set `SANDBAR_CALLER_PROJECT`); a session with no
+    declared project identity is refused rather than guessed.
+  - **a project session may ask and add facts, never answer.** `intent` is one of
+    `answer` / `fact` / `ask`; a project session is limited to `fact` and `ask`. The decider's word
+    arrives as an `answer` (the host answers in the panel, not through this CLI). So a steward
+    relaying a *host* decision must either have the host's own words, or post a `fact` reply that
+    records the escalation and the disposition, and put the *ticket-side* decision where the ticket
+    can see it: a `ruling` on the ticket (`ticket.py op=ruling`, non-empty `note`).
+- **`answer` (legacy, still judged).** Rows of `{type:"answer", answer_for, answer, by, at}` were
+  appended directly in earlier duty cycles; the thread reader still counts them (an answer row
+  moves the head to `answered`), so history stays coherent. Treat it as history, not as the shape
+  to reach for: the sanctioned route is the `reply` above plus a `ruling` on the ticket.
+
+**Rules that hold whichever row you write.** One row per fact, append-only, never rewrite the file.
+State the disposition, name what the requester must **not** do (retry, rework, or find a way around
+a gate), and say who owns the decision. When the request asks for something only the host can give
+(a protected path, a widened write set, a design call), the steward's job is: **escalate in the same
+breath, record the escalation id on the ticket, and tell the lane to hold** — a lane parked on a
+named human decision is cheap; a lane invited to work around one is not.
