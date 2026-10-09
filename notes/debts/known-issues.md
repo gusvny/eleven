@@ -4441,3 +4441,26 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **本岗即时改法（已在做）**：①**台账提交一次 tick 只提交一次**，且**先提交、后复活受害票**（顺序反了＝新同步又要撞一次）；
 > ②被这条竞态挂住的票**不发第 N 次 `retry_qc`，一律走票面出路 (a) `rework(to_stage=implement)`**；
 > ③把这条的**机器修法挂进 `t261009-15`**（同一张门禁票、同一文件），不另开撞写集的票。
+
+## 261009 收口批次之一：`KI-01M4FEPBXC34V3KD5W7CMDZEPR` 追加收口证据（宿主 261009 决定作废 `t261009-04`）
+
+> 与该条同源的 `t261009-04`（《绿跑前置要键在本票自己的 run 上》）**已按宿主 261009 决定作废（cancel）**——理由不是"跑不动"，
+> 而是**它要修的机制已整条移除**（`265300e6` + 资产同步 `e810facc`），**再按"重新键化"继续＝在已删的机制上盖房子**。
+> 作废时实测：停在段间暂停（00:43 起）、不占并发槽、泳道零写入、`run_integration_tests` 段早已出过结果；**它自己没留下任何场景载体**（`integration/t261009-04/` 不存在）。
+> 于是**本机制的载体清单以本条的全局排查为准**：真需处置的仍是**两张**（`t261008-24` 的 L2 `sc_supply_zero_run_blocker`、L3 `sc_zero_run_gate_stop`），
+> 其余命中点只是"容忍式调用点"（不是幻影红）⇒ **改法已拟、等台子空**（**必须在台子上跑过再提交**，本岗不改未跑过的断言）。
+>
+
+## KI-01M4FNQCJG9NH5W2KC1PAG9YW1 **重试信号必须与被挂住的闸匹配**：四闸四按键（261009 一夜三例；integration 岗登记）
+
+> `retry_qc` 与 `rework` 都不是万能的"复活键"，**对不同的闸只有一种是对的**，发错就是**零效果空转**（时间线还会留下"attempt N"的假象）：
+> ① **段间暂停**（`between-segment pause in effect` / `paused-waiting`）⇒ **只有 `resume` 有效**；`retry_qc` 清得掉 `blocked`、清不掉暂停（`t261008-43`：23:51 被吞、02:49 清了 blocked 却没派段，一个 `resume` 3 秒复活）；
+> ② **签字闸**（`awaiting-human` / `waiting for signature: sign(gate=merge)`）⇒ **只有 `sign` 有效**；`retry_qc` 无效（`t261009-13`：14:19:04 发了 retry_qc attempt 1，票仍是 `awaiting-human`）；
+> ③ **main-sync 未收敛**（`main is NOT an ancestor of HEAD`、`MERGE_HEAD` 不存在、树干净）⇒ **只有 `rework(to_stage=implement)` 有效**（`t261008-45`、`t261008-43` 各一次即复活）；
+> ④ **blocked 且红项仍在**（判据没变）⇒ `retry_qc` 才有效（判据变了才对——同批文件第 N 次复判会点名，见 `_gate_refusal_repeat_suffix`）。
+> **危害**：错信号=**零效果但记账**（票面 `attempt N` 与"其实一步没动"并存），值守会误判为"已处理"；
+> 本岗今晚就在 `t261008-43` 上先犯过一次（按"陈旧拦住"发 `retry_qc`，白等一小时）。
+> **出路**：①**闸侧自检**——收到 `retry_qc` 时若当前闸是"暂停/签字/同步未收敛"，**回执必须具名说"该发 resume/sign/rework"**，不要静默接受；
+> ②票面 `blocked_reason` 若为空，**禁止**在时间线里写 `retry-requested`（先把"为什么停"写清楚）；
+> ③值守手册收一张**"四闸四按键"对照表**（本条目即为该表）。
+> **回归**：L3——四闸各造一例，逐例断言"错按键零效果且回执具名点名正确按键"（不是静默吞掉）。
