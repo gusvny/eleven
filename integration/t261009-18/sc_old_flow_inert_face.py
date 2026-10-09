@@ -98,6 +98,10 @@ def main():
 
         # --- A: import writes nothing ---
         os.environ["SANDBAR_PROJECTS_DIR"] = root
+        # t261009-28: the landing record now lives in the delivery ledger --
+        # route it into the same temp root so the scenario never touches the
+        # real ~/.sandbar store.
+        os.environ["SANDBAR_DELIVERY_LEDGER_DIR"] = os.path.join(root, "ledger")
         sys.path.insert(0, engine)
         try:
             import shared  # noqa: F401  (pre-existing import face = the baseline)
@@ -145,11 +149,25 @@ def main():
             check("C-landing-ran", False, str(e)[:150])
         before_c = before  # store face at import time
         after_c = snapshot(root)
+        # t261009-28: the landing act has a SECOND by-design write face — the
+        # project's delivery ledger (routed into root/ledger above, so the
+        # allowlist is self-chosen and cannot hide an external writer). The
+        # locality contract keeps its teeth: changes outside the develop area
+        # must be exactly that ledger face (rows file + its .lock); anything
+        # else is still a locality breach.
         outside = {k for k, v in after_c.items()
                    if not k.replace(os.sep, "/").startswith(key + "/data/develop/")
+                   and not k.replace(os.sep, "/").startswith("ledger/")
                    and before_c.get(k) != v}
         check("C-landing-touches-only-develop-area", not outside,
-              "changed outside develop/: %r" % sorted(outside)[:5])
+              "changed outside develop/ + delivery ledger/: %r" % sorted(outside)[:5])
+        ledger_face = {k for k, v in after_c.items()
+                       if k.replace(os.sep, "/").startswith("ledger/")
+                       and before_c.get(k) != v}
+        ledger_expected = {"ledger/.lock", "ledger/%s.jsonl" % key}
+        check("C-delivery-ledger-face-bounded", ledger_face <= ledger_expected,
+              "unexpected ledger-face writes: %r"
+              % sorted(ledger_face - ledger_expected)[:5])
         check("C-no-own-sandbar-dir",
               not os.path.exists(os.path.join(dev_dir, ".sandbar")),
               "the line worktree must not carry its own coordination dir")

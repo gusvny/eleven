@@ -24,8 +24,17 @@ import pytest
 POC = Path(__file__).resolve().parents[2] / "server" / "engine"
 sys.path.insert(0, str(POC))
 
+import develop_certify as dc  # noqa: E402
 import develop_line as dl  # noqa: E402
 import shared  # noqa: E402
+
+
+def _land_rows(project="proj"):
+    """The landing rows of the ONE home (t261009-28): the delivery ledger,
+    kind-filtered. Replaces the retired load_landings read face."""
+    rows, bad = dc.read_rows(dc.ledger_path(project))
+    assert not bad, bad
+    return dc._of_kind(rows, dc.KIND_LANDING)
 
 
 # ------------------------------------------------------------------ fixtures
@@ -59,6 +68,7 @@ def _lane_commit(repo: Path, fname: str, text: str, msg: str, branch="lane") -> 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
     monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path / "projects"))
+    monkeypatch.setenv("SANDBAR_DELIVERY_LEDGER_DIR", str(tmp_path / "ledger"))
     return tmp_path
 
 
@@ -144,18 +154,22 @@ def test_ulid_shape_and_injectability():
         dl.mint_ulid(rand=b"short")
 
 
-def test_record_strict_read(store):
+def test_legacy_landing_ledger_refused_by_name(store):
+    """t261009-28: the line landing ledger is retired. A pre-existing
+    landings.jsonl is refused BY NAME at landing entry — its rows are never
+    read as data (the old strict-read contract now belongs to the delivery
+    ledger, covered by the certify tests and the torn-ledger face below)."""
     d = shared.develop_dir("proj")
     d.mkdir(parents=True, exist_ok=True)
     (d / "landings.jsonl").write_text(
-        json.dumps({"id": "ldg-1", "version": 1}) + "\n" + "{torn\n", encoding="utf-8")
-    with pytest.raises(dl.LandingError):
-        dl.load_landings("proj")
-    (d / "landings.jsonl").write_text(json.dumps({"id": "ldg-1", "version": 2}) + "\n",
-                                      encoding="utf-8")
-    with pytest.raises(dl.LandingError):
-        dl.load_landings("proj")
-    assert dl.load_landings("nope-nope") == []  # absent file = empty, not an error
+        json.dumps({"id": "ldg-1", "version": 1}) + "\n", encoding="utf-8")
+    _declare(store)
+    r = _init_repo(store / "repo")
+    _lane_commit(r, "feat.txt", "one\n", "lane work")
+    line = dl.load_line("proj", "buffer")
+    with pytest.raises(dl.LandingLegacyLedgerError) as ei:
+        dl.land_ticket(line, "proj", {"r": r}, "t-legacy", "engine")
+    assert "landings.jsonl" in str(ei.value) and "delivery ledger" in str(ei.value)
 
 
 # --------------------------------------------------------------------- landing
@@ -173,12 +187,16 @@ def test_landing_happy_path(store, line_and_repos):
     res = dl.land_ticket(line, "proj", {"r": repo}, "t1", "engine")
     assert res.ok and res.record is not None
     rec = res.record
+    clean, why = dc.validate_row(rec)
+    assert clean is not None, why
     assert rec["id"].startswith("ldg-") and len(rec["id"]) == 4 + 26  # "ldg-" is a 4-char prefix
-    assert rec["ticket"] == "t1" and rec["line_id"] == "buffer"
-    assert rec["by"] == "engine" and isinstance(rec["at"], int)
-    assert set(rec["revisions"]) == {"r"} and set(rec["base"]) == {"r"}
-    # the recorded revision IS the line branch HEAD (post-amend sha)
-    assert rec["revisions"]["r"] == _git("rev-parse", "develop", cwd=repo).stdout.strip()
+    assert rec["ticket"] == "t1" and rec["line"] == "buffer"
+    assert rec["actor"] == "engine" and isinstance(rec["at"], int)
+    assert rec["kind"] == "landing" and isinstance(rec["seq"], int)
+    assert rec["repos"] == [{"repo": "r",
+                             "revision": _git("rev-parse", "develop", cwd=repo).stdout.strip()}]
+    # `base` is retired (t261009-28): what the landing sat on is derived
+    assert "base" not in rec and "revisions" not in rec
     # exactly one merge commit; its message is the landing message, not the
     # settle core's conflict-resolution message
     log = _git("log", "--merges", "--format=%s", "develop", cwd=repo).stdout.strip().splitlines()
@@ -224,7 +242,7 @@ def test_landing_serialized_under_race(store, line_and_repos):
         t.join()
     assert not errs, errs
     assert len(results) == 2
-    rows = dl.load_landings("proj")
+    rows = _land_rows()
     assert len(rows) == 2
     ats = [r["at"] for r in rows]
     assert ats == sorted(ats)  # strictly ordered appends
@@ -248,11 +266,11 @@ def test_landing_conflict_bounces_with_no_record(store, line_and_repos):
     (wt / "conflict.txt").write_text("line side\n", encoding="utf-8")
     _git("add", "-A", cwd=wt)
     _git("commit", "-m", "line side", cwd=wt)
-    n_records = len(dl.load_landings("proj"))
+    n_records = len(_land_rows())
     with pytest.raises(dl.LandingError) as ei:
         dl.land_ticket(line, "proj", {"r": repo}, "t2", "engine")
     assert "conflict" in str(ei.value)
-    assert len(dl.load_landings("proj")) == n_records  # no record for a bounced landing
+    assert len(_land_rows()) == n_records  # no record for a bounced landing
     # the worktree is left merge-clean (terminal-state discipline)
     wt = shared.develop_dir("proj") / "wt" / "r"
     assert not _git("rev-parse", "--verify", "MERGE_HEAD", cwd=wt, check=False).returncode == 1 or True
@@ -263,10 +281,10 @@ def test_one_landing_per_ticket(store, line_and_repos):
     line, repo = line_and_repos
     _lane_commit(repo, "feat.txt", "one\n", "lane work")
     dl.land_ticket(line, "proj", {"r": repo}, "t1", "engine")
-    n = len(dl.load_landings("proj"))
+    n = len(_land_rows())
     with pytest.raises(dl.LandingDuplicateError):
         dl.land_ticket(line, "proj", {"r": repo}, "t1", "engine")
-    assert len(dl.load_landings("proj")) == n
+    assert len(_land_rows()) == n
 
 
 def test_nothing_to_land_is_a_named_refusal(store, line_and_repos):
@@ -276,12 +294,12 @@ def test_nothing_to_land_is_a_named_refusal(store, line_and_repos):
     line, repo = line_and_repos
     _lane_commit(repo, "feat.txt", "one\n", "lane work")
     dl.land_ticket(line, "proj", {"r": repo}, "t1", "engine")  # tip now on the line
-    n = len(dl.load_landings("proj"))
+    n = len(_land_rows())
     _git("checkout", "-B", "lane-again", "develop", cwd=repo)  # HEAD == line tip
     with pytest.raises(dl.LandingDuplicateError) as ei:
         dl.land_ticket(line, "proj", {"r": repo}, "t1", "engine")
     assert "already landed" in str(ei.value)  # the entry guard refuses before any merge
-    assert len(dl.load_landings("proj")) == n
+    assert len(_land_rows()) == n
 
 
 def test_unrecorded_tip_on_line_is_recovered_without_amend(store, line_and_repos):
@@ -298,9 +316,9 @@ def test_unrecorded_tip_on_line_is_recovered_without_amend(store, line_and_repos
     head_before = _git("rev-parse", "develop", cwd=repo).stdout.strip()
     res = dl.land_ticket(line, "proj", {"r": repo}, "t9", "engine")
     assert res.ok and res.record is not None
-    rows = dl.load_landings("proj")
+    rows = _land_rows()
     assert len(rows) == 1 and rows[0]["ticket"] == "t9"
-    assert rows[0]["revisions"]["r"] == head_before  # the pre-existing commit, unrewritten
+    assert rows[0]["repos"] == [{"repo": "r", "revision": head_before}]  # unrewritten
     assert "pre-landed by a crashed process" in _git("log", "-1", "--format=%s",
                                                      "develop", cwd=repo).stdout
     assert any("recovered" in f for f in res.faces.values())
@@ -314,7 +332,7 @@ def test_partial_failure_faces_and_no_record(store):
     with pytest.raises(dl.LandingError) as ei:
         dl.land_ticket(line, "proj", {"r": r, "s": store / "not-a-repo"}, "t3", "engine")
     # malformed repo input fails closed before any merge; no record
-    assert dl.load_landings("proj") == []
+    assert _land_rows() == []
     assert "not a git checkout" in str(ei.value)
     # repo not declared on the line is refused up front
     with pytest.raises(dl.LandingError):
@@ -333,7 +351,7 @@ def test_malformed_inputs_fail_closed(store, line_and_repos, ticket, by):
     line, repo = line_and_repos
     with pytest.raises(dl.LandingError):
         dl.land_ticket(line, "proj", {"r": repo}, ticket, by)
-    assert dl.load_landings("proj") == []
+    assert _land_rows() == []
 
 
 def test_dirty_line_worktree_refused(store, line_and_repos):
@@ -346,7 +364,7 @@ def test_dirty_line_worktree_refused(store, line_and_repos):
     with pytest.raises(dl.LandingError) as ei:
         dl.land_ticket(line, "proj", {"r": repo}, "t7", "engine")
     assert "not clean" in str(ei.value)
-    assert dl.load_landings("proj") == []
+    assert _land_rows() == []
 
 
 def test_unwritable_store_dir_fails_closed(store, line_and_repos):
@@ -354,10 +372,12 @@ def test_unwritable_store_dir_fails_closed(store, line_and_repos):
     _lane_commit(repo, "feat.txt", "one\n", "lane work")
     d = shared.develop_dir("proj")
     d.mkdir(parents=True, exist_ok=True)
-    (d / "landings.jsonl").write_text("{torn\n", encoding="utf-8")  # strict read fails on append's dup scan
+    ledger = dc.ledger_path("proj")  # t261009-28: the ONE home is the delivery ledger
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("{torn\n", encoding="utf-8")  # malformed ledger refuses the append
     with pytest.raises(dl.LandingError) as ei:
         dl.land_ticket(line, "proj", {"r": repo}, "t8", "engine")
-    assert "ledger" in str(ei.value) or "append" in str(ei.value) or "malformed" in str(ei.value)
+    assert "delivery ledger" in str(ei.value)
 
 
 # ---------------------------------------------------------------- coexistence

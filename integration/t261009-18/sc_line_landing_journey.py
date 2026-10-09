@@ -7,16 +7,19 @@ engine lands the ticket's content onto its DECLARED line -- one landing per
 ticket, a LINEAR line history, and ONE append-only landing record a reader
 can open in the project store. Grey-box L3: real `git` subprocesses on real
 fixture repos, the public surface named by the reviewed plan
-(`develop_line.load_lines` / `develop_line.land_ticket` / the store files
-under the per-key develop dir), never internals.
+(`develop_line.load_lines` / `develop_line.land_ticket` / the delivery
+ledger via `develop_certify.read_rows` + `ledger_path` -- the landing
+record's ONE home since t261009-28; the retired `landings.jsonl` is gone),
+never internals.
 
 Faces:
-  A  happy path: two tickets land in turn; the record FILE on disk (read
+  A  happy path: two tickets land in turn; the DELIVERY LEDGER on disk (read
      back by the reader, not from the return value) carries one row per
-     landing with ticket / line id / revision set / integer-ms `at` /
-     performer and a time-ordered `ldg-` ULID id; the line branch history
-     is linear -- each landing's merge commit parent is the previous head;
-     the recorded revision equals the branch head the reader sees.
+     landing with ticket / line / revision set / integer-ms `at` / actor /
+     a writer-assigned `seq` and a time-ordered `ldg-` ULID id; the line
+     branch history is linear -- each landing's merge commit parent is the
+     previous head; the recorded revision equals the branch head the reader
+     sees.
   B  one landing per ticket: a second landing for a ticket already on the
      line is refused loudly -- no third row, head unchanged.
   C  conflict bounce-back: a lane branch touching the same file bounces
@@ -98,6 +101,7 @@ def main():
         return 1
     sys.path.insert(0, ENGINE)
     try:
+        import develop_certify
         import develop_line  # noqa: F401
         import shared
     except ImportError as e:
@@ -108,6 +112,7 @@ def main():
     root = tempfile.mkdtemp(prefix="t26100918-journey-")
     try:
         os.environ["SANDBAR_PROJECTS_DIR"] = root
+        os.environ["SANDBAR_DELIVERY_LEDGER_DIR"] = os.path.join(root, "ledger")
         key = "t26100918"
         line_branch = "develop-main"
         repo = make_repo(root, "repo1")
@@ -122,6 +127,13 @@ def main():
             json.dump(decl, f)
         line = develop_line.load_line(key, "line-1")
         head = lambda: git("rev-parse", line_branch, cwd=repo).stdout.strip()
+
+        def land_rows():
+            """The landing rows of their ONE home: the delivery ledger,
+            kind-filtered, in the writer's seq order."""
+            rows, bad = develop_certify.read_rows(develop_certify.ledger_path(key))
+            check("reader-clean-ledger", not bad, str(bad)[:120])
+            return develop_certify._of_kind(rows, develop_certify.KIND_LANDING)
 
         # --- A: two landings, linear history, reader-side record ---
         shas = []
@@ -138,21 +150,24 @@ def main():
               bool(getattr(r, "ok", True) or not getattr(r, "error", "")),
               str(getattr(r, "error", "")))
         shas.append(head())
-        rows = [json.loads(ln) for ln in
-                open(os.path.join(dev_dir, "landings.jsonl")) if ln.strip()]
+        rows = land_rows()
         check("A-record-two-rows", len(rows) == 2, "rows=%d" % len(rows))
         if rows:
             r0 = rows[0]
+            repos0 = {x.get("repo"): x.get("revision")
+                      for x in r0.get("repos", []) if isinstance(x, dict)}
             check("A-record-fields",
-                  r0.get("ticket") == "t-j1" and r0.get("line_id") == "line-1"
-                  and "repo1" in r0.get("revisions", {}) and isinstance(r0.get("at"), int)
-                  and r0.get("by") == "integration-test",
+                  r0.get("ticket") == "t-j1" and r0.get("line") == "line-1"
+                  and "repo1" in repos0 and isinstance(r0.get("at"), int)
+                  and r0.get("actor") == "integration-test"
+                  and isinstance(r0.get("seq"), int),
                   json.dumps(r0)[:200])
             rid = str(r0.get("id", ""))
             check("A-record-ulid-shape", rid.startswith("ldg-") and len(rid) > 20, rid)
             check("A-record-rev-is-reader-head",
-                  rows[-1].get("revisions", {}).get("repo1") == shas[-1],
-                  "%s vs %s" % (rows[-1].get("revisions", {}).get("repo1"), shas[-1]))
+                  {x.get("repo"): x.get("revision")
+                   for x in rows[-1].get("repos", [])}.get("repo1") == shas[-1],
+                  "%s vs %s" % (rows[-1].get("repos"), shas[-1]))
         log = git("log", "--format=%P|%s", line_branch, cwd=repo).stdout.strip().splitlines()
         merges = [ln for ln in log if ln.split("|")[0].count(" ") == 1]
         check("A-linear-two-merge-commits", len(merges) == 2, str(log))
@@ -176,7 +191,7 @@ def main():
             refused = False
         except Exception as e:
             refused = True
-        rows_b = sum(1 for ln in open(os.path.join(dev_dir, "landings.jsonl")) if ln.strip())
+        rows_b = len(land_rows())
         check("B-refused-no-second-row", refused and rows_b == 2 and head() == before,
               "refused=%s rows=%d" % (refused, rows_b))
 
@@ -188,7 +203,7 @@ def main():
             bounced = False
         except Exception:
             bounced = True
-        rows_c = sum(1 for ln in open(os.path.join(dev_dir, "landings.jsonl")) if ln.strip())
+        rows_c = len(land_rows())
         check("C-conflict-no-record-head-unchanged",
               rows_c == 2 and head() == before, "rows=%d" % rows_c)
         if os.path.isdir(wt):
@@ -218,8 +233,7 @@ def main():
             for tid, br, rp in (("t-r1", "lane-a2", repo),
                                 ("t-r2", "lane-b2", clone2))]
         outs = [p.communicate()[0] for p in procs]
-        rows_d = [json.loads(ln) for ln in
-                  open(os.path.join(dev_dir, "landings.jsonl")) if ln.strip()]
+        rows_d = land_rows()
         race_rows = [r for r in rows_d if r.get("ticket") in ("t-r1", "t-r2")]
         ok_races = sum(1 for o in outs if '"ok": true' in o or "RACE_OK" in o)
         named_refusals = sum(1 for o in outs if "lock" in o.lower() or "RACE_REFUSED" in o)
@@ -232,9 +246,10 @@ def main():
         # landed the same revision the race face below would count the
         # recovered-duplicate path, not a race
         check("D-race-distinct-revisions",
-              len({r.get("revisions", {}).get("repo1") for r in race_rows})
+              len({next((x.get("revision") for x in r.get("repos", [])
+                         if x.get("repo") == "repo1"), None) for r in race_rows})
               == len(race_rows),
-              str([r.get("revisions") for r in race_rows]))
+              str([r.get("repos") for r in race_rows]))
         if race_rows:
             # Linear history has ONE physical realisation: the project store
             # owns a single line worktree per declared repository (created
@@ -257,7 +272,9 @@ def main():
         # pin the lane repo at a revision ALREADY on the line (a successful
         # racer's landing revision) so the E landing is deterministically a
         # recovered duplicate, never a fresh merge
-        git("checkout", "-q", race_rows[0]["revisions"]["repo1"], cwd=repo)
+        git("checkout", "-q",
+            next(x["revision"] for x in race_rows[0]["repos"] if x["repo"] == "repo1"),
+            cwd=repo)
         r = develop_line.land_ticket(line, key, {"repo1": Path(repo)},
                                      "t-e1", "integration-test")
         check("E-recovered-ok-named",
@@ -266,8 +283,7 @@ def main():
               "ok=%s faces=%s" % (getattr(r, "ok", None), getattr(r, "faces", None)))
         check("E-recovered-no-new-commit", head() == tip,
               "%s -> %s" % (tip[:10], head()[:10]))
-        rows_e = sum(1 for ln in open(os.path.join(dev_dir, "landings.jsonl"))
-                     if ln.strip())
+        rows_e = len(land_rows())
         check("E-recovered-record-appended", rows_e == 2 + ok_races + 1,
               "rows=%d" % rows_e)
         print("JOURNEY done: %d pass / %d fail" % (passed, failed))

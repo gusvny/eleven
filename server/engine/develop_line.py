@@ -9,9 +9,16 @@ What lives here:
   - The LANDING (goal 7): after a lane's own proof passes, the engine merges the
     lane's HEAD into the line's branch, one landing per ticket, serialized by a
     store lock so the line's history stays linear.
-  - The LANDING RECORD (ledger-record-models-v1): one append-only JSONL row per
-    landing — ULID-family id, integer-millisecond ``at``, the repository revision
-    set, who performed it.
+  - The LANDING RECORD (t261009-28, ledger-record-models-v1): the landing act
+    appends ONE row — the delivery ledger's `kind: "landing"` row — through the
+    delivery ledger's own writer (`develop_certify.append_rows`), so the row
+    gets its `seq` inside the shared ordering space every delivery face reads.
+    The former second home (`landings.jsonl` + `load_landings`) is RETIRED: its
+    only question (what content did this ticket put on the line) is exactly the
+    delivery ledger's landing row, and two shapes for one fact is what this
+    ticket removes. A pre-existing `landings.jsonl` is refused BY NAME at
+    landing entry (`LandingLegacyLedgerError`) — never read as "no landings",
+    never silently migrated; conversion is a dedicated later ticket.
 
 Coexistence (rule 13): nothing on the running flow imports this module yet. The
 new behaviour becomes reachable only through the new lane version (a follow-up
@@ -36,6 +43,13 @@ import shared
 # The single add/commit implementation (t261006-07 discipline) — imported, never
 # re-implemented. _git is the same bounded-timeout subprocess family.
 from agent_activities import _git, _settle_merge_core  # noqa: E402
+# The delivery ledger's own faces (t261009-28): validation, the single writer
+# that assigns `seq` under flock, the reader, and the kind constants. No import
+# cycle: develop_certify imports neither this module nor agent_activities.
+from develop_certify import (  # noqa: E402
+    KIND_CERT, KIND_LANDING, _of_kind, append_rows, ledger_path, mint_id,
+    read_rows,
+)
 
 # Record shape version (ledger-record-models rule 24: every record carries the
 # version of its own shape; an unknown version is a loud failure, never a guess).
@@ -68,6 +82,13 @@ class LandingError(Exception):
 class LandingDuplicateError(LandingError):
     """This ticket already has a landing record on this line — one landing per
     ticket (goal 7); the second attempt is refused loudly, no merge attempted."""
+
+
+class LandingLegacyLedgerError(LandingError):
+    """A retired ``landings.jsonl`` exists in the develop dir (t261009-28).
+    The landing act refuses by name: the legacy rows are NOT migrated here and
+    are never read as "no landings" — conversion to the delivery ledger is a
+    dedicated later ticket."""
 
 
 # ---------------------------------------------------------------- declaration
@@ -233,50 +254,32 @@ def ulid_time_ms(ulid: str) -> int:
 
 
 # ------------------------------------------------------------- landing record
+# (t261009-28: the landing record's ONE home is the delivery ledger. The
+# former line landing ledger faces — load_landings / _record_path /
+# _append_record — are retired with it; develop_certify owns the reader and
+# the writer.)
 
 
-def _record_path(project_key: str) -> Path:
+def _legacy_record_path(project_key: str) -> Path:
+    """The RETIRED line landing ledger's path. Used only to refuse it by name;
+    never read as data."""
     return shared.develop_dir(project_key) / "landings.jsonl"
 
 
-def load_landings(project_key: str) -> List[Dict[str, Any]]:
-    """Read the landing ledger. Append-only file, strict read: a malformed row or
-    an unknown record version raises LandingError — the ledger is never read as
-    "empty" through a parse failure (fact-ledger goal 8)."""
-    path = _record_path(project_key)
-    if not path.is_file():
-        return []
-    rows: List[Dict[str, Any]] = []
-    for i, ln in enumerate(path.read_text(encoding="utf-8").splitlines()):
-        if not ln.strip():
-            continue
-        try:
-            row = json.loads(ln)
-        except ValueError as e:
-            raise LandingError("landing ledger row %d malformed (%s): %s" % (i + 1, e, path))
-        if not isinstance(row, dict) or row.get("version") != RECORD_VERSION:
-            raise LandingError("landing ledger row %d unknown record version: %s" % (i + 1, path))
-        rows.append(row)
-    return rows
-
-
-def _append_record(project_key: str, row: Dict[str, Any]) -> None:
-    """Append one record row. Called under the landing lock. The duplicate-id
-    check runs on append: a ULID makes it almost never fire — which is exactly
-    why the check stays (ledger-record-models)."""
-    path = _record_path(project_key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing_ids = {r.get("id") for r in load_landings(project_key)}
-    if row["id"] in existing_ids:
-        raise LandingError("duplicate landing id %r — refusing to append" % row["id"])
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+def _landing_rows(project_key: str) -> List[Dict[str, Any]]:
+    """The line's landing rows, read from the delivery ledger (kind filter,
+    seq order from the shared space). An absent ledger is an empty one —
+    nothing has landed yet; a malformed row is the writer's named refusal,
+    raised on the next append, never silently skipped here."""
+    rows, _bad = read_rows(ledger_path(project_key))
+    return _of_kind(rows, KIND_LANDING)
 
 
 def has_landing(project_key: str, ticket_id: str, line_id: str) -> bool:
-    """One landing per ticket (goal 7): is there already a record?"""
-    return any(r.get("ticket") == ticket_id and r.get("line_id") == line_id
-               for r in load_landings(project_key))
+    """One landing per ticket (goal 7): is there already a landing row for
+    this (ticket, line) in the delivery ledger?"""
+    return any(r.get("ticket") == ticket_id and r.get("line") == line_id
+               for r in _landing_rows(project_key))
 
 
 # -------------------------------------------------------------------- landing
@@ -383,6 +386,15 @@ def land_ticket(line: DevelopLine, project_key: str,
     if has_landing(project_key, ticket_id, line.line_id):
         raise LandingDuplicateError(
             "ticket %r already landed on line %r — one landing per ticket" % (ticket_id, line.line_id))
+    # No backward magic (t261009-28): a retired line landing ledger is refused
+    # by name at entry — its rows are neither read nor migrated here.
+    legacy = _legacy_record_path(project_key)
+    if legacy.is_file():
+        raise LandingLegacyLedgerError(
+            "retired landing ledger %s exists — the landing record's one home is "
+            "the delivery ledger (develop_certify.append_rows); migrate its rows "
+            "with the dedicated conversion ticket, never by landing over it"
+            % legacy)
 
     lock_path = shared.develop_dir(project_key) / "landings.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -413,10 +425,46 @@ def land_ticket(line: DevelopLine, project_key: str,
         lock_f.close()  # releases the flock on every path
 
 
+def _check_ancestor(wt_dir: Path, name: str, certified: Optional[str],
+                    landed: str) -> None:
+    """The design's per-repository ancestor check (ledger-record-models-v1,
+    landing entry): the certified revision must be an ancestor of the revision
+    that landed. Performed here, at act time, from the delivery ledger's own
+    records — the state a landing sits on is DERIVED, so no ``base`` is stored.
+    Before the line's first certification there is no derived predecessor (the
+    declaration carries no starting revisions); the fail-closed merge-base
+    assertion already run is the interim check for that case (``certified``
+    is None). Fail-closed on an unreadable certified sha too: a ledger naming
+    a revision the worktree cannot see refuses the landing by name."""
+    if not certified:
+        return
+    known = _rev(wt_dir, certified)
+    if not known:
+        raise LandingError(
+            "ancestor check failed in %r: the certified revision %s is not "
+            "resolvable in the line worktree — refusing to land over content "
+            "the ledger certifies but this line does not carry" % (name, certified[:12]))
+    anc = _git(["merge-base", "--is-ancestor", certified, landed], wt_dir)
+    if anc.returncode != 0:
+        raise LandingError(
+            "ancestor check failed in %r: certified revision %s is NOT an "
+            "ancestor of the landed revision %s — the landing would skip or "
+            "revert certified content" % (name, certified[:12], landed[:12]))
+
+
 def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path],
                  ticket_id: str, performed_by: str, result: LandingResult) -> LandingResult:
     wt_root = shared.develop_dir(project_key) / "wt"
-    base_map: Dict[str, str] = {}
+    # The state each repository sits on, DERIVED once before the act: the
+    # line's latest certification's revision per repository (None where the
+    # line has never certified that repo). Never stored on the landing.
+    certs = _of_kind(read_rows(ledger_path(project_key))[0], KIND_CERT, line.line_id)
+    cert_rev: Dict[str, str] = {}
+    if certs:
+        for r in certs[-1].get("repos", []):
+            if isinstance(r, dict) and isinstance(r.get("repo"), str) \
+                    and isinstance(r.get("revision"), str):
+                cert_rev[r["repo"]] = r["revision"]
     rev_map: Dict[str, str] = {}
     for repo_meta in line.repositories:
         name = repo_meta.name
@@ -427,7 +475,6 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
             if not lane_sha:
                 raise LandingError("lane repository %r has no HEAD" % name)
             branch, start_sha = _ensure_line_worktree(lane_repo, repo_meta, wt_dir, result)
-            base_map[name] = start_sha
             dirty = _git(["status", "--porcelain"], wt_dir)
             if dirty.returncode != 0 or (dirty.stdout or "").strip():
                 raise LandingError(
@@ -439,7 +486,17 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
             if mb.returncode != 0 or not (mb.stdout or "").strip():
                 raise LandingError("merge-base %s %s failed in line worktree %r: %s"
                                    % (branch, lane_sha[:12], name, (mb.stderr or "")[-200:]))
-            base_map[name] = mb.stdout.strip()
+            # The design's ancestor gate, BEFORE any commit: the certified
+            # revision must be an ancestor of the line tip the landing builds
+            # on (a landing only adds content on top, so the pre-merge tip is
+            # the exact face to judge — refusing here moves no head and writes
+            # no record). Before the line's first certification this is the
+            # declared interim: no derived predecessor exists and the
+            # fail-closed merge-base above stands in.
+            line_tip = _rev(wt_dir, "HEAD")
+            if not line_tip:
+                raise LandingError("line worktree %r has no HEAD before merge" % name)
+            _check_ancestor(wt_dir, name, cert_rev.get(name), line_tip)
             # Named "already contained" path. Two distinct faces:
             #  - a record already exists → the ticket landed before: refuse as a
             #    duplicate (nothing to land);
@@ -459,7 +516,6 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
                 head_sha = _rev(wt_dir, "HEAD")
                 if not head_sha:
                     raise LandingError("recovery face: HEAD unreadable in %r" % name)
-                base_map[name] = mb.stdout.strip()
                 rev_map[name] = head_sha
                 result.faces[name] = ("recovered: lane tip already on the line "
                                       "(no new commit, no amend)")
@@ -513,25 +569,41 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
                 result.faces.setdefault(r2.name, "untouched")
             raise
     at_ms = int(time.time() * 1000)
+    # The landing record's ONE home: the delivery ledger, written through its
+    # own writer so `seq` is assigned inside the shared critical section (the
+    # ordering space derive_range / ticket_wait_state / the promotion faces
+    # read). Shape per validate_row's landing branch: kind / ldg- id / ticket /
+    # line / repos / actor; `base` is NOT carried — what the landing sat on is
+    # derived (see _check_ancestor), and a second stored answer to what the
+    # certification already answers is the drift this ticket removes.
+    repos_rows = [{"repo": name, "revision": sha} for name, sha in rev_map.items()]
     record = {
-        "id": "ldg-" + mint_ulid(now_ms=at_ms),
+        "kind": KIND_LANDING,
+        "id": mint_id("ldg", at_ms=at_ms),
         "ticket": ticket_id,
-        "line_id": line.line_id,
-        "revisions": dict(rev_map),
-        "base": dict(base_map),
+        "line": line.line_id,
+        "repos": repos_rows,
         "at": at_ms,
-        "by": performed_by,
+        "actor": performed_by,
         "version": RECORD_VERSION,
     }
     if result.seeded_branches:
         record["seeded_branches"] = list(result.seeded_branches)
     try:
-        _append_record(project_key, record)
-    except (OSError, LandingError) as e:
+        written = append_rows([record], ledger_path(project_key))
+    except Exception as e:  # named wrap: CertifyError / OSError -> LandingError
         for r2 in line.repositories:
             result.faces.setdefault(r2.name, "untouched")
-        raise LandingError("landing record append failed — landing NOT recorded: %s" % e)
+        raise LandingError("delivery ledger append failed — landing NOT recorded: %s" % e)
+    if written.get("written") != 1:
+        # Rejected-but-not-raised (validate_row refusal, duplicate id): the
+        # merges are already committed, but NO record exists — the named error
+        # keeps that face loud, and the KI-213 recovery face covers the retry.
+        for r2 in line.repositories:
+            result.faces.setdefault(r2.name, "untouched")
+        raise LandingError("delivery ledger rejected the landing row — landing NOT "
+                           "recorded: %r" % (written.get("rejected"),))
     result.ok = True
-    result.record = record
+    result.record = record  # carries the `seq` the writer assigned in place
     result.revisions = dict(rev_map)
     return result
