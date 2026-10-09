@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 237,
-   "scenarios": 608
+   "engine_tests": 250,
+   "scenarios": 645
   },
   "vocab": [
    "behaviour",
@@ -1237,6 +1237,11 @@
    "note": "t261009-27 L1: ticket_outcome field truth tables (withdrawn_at/superseded/ending/product_kind/ended_by/ended_at/compare_outcomes)",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261009_38_bundle_out_face.py": {
+   "anchor": "contract",
+   "note": "bundle_out_face predicate truth tables + gate fallback wiring (developer L1, this ticket)",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261009_39_yaml_follows_code.py": {
    "anchor": "contract",
    "note": "the generated workflows/*.yaml must byte-match the generator's output (gen_workflows_doc.py); pins the yaml-follows-code invariant settled by t261009-39",
@@ -1247,9 +1252,9 @@
    "note": "t261008-47: engine UI copy English — parser re-keyed on structured timeline fields (old/new format), narrow CJK guard over emission points",
    "sync_path": ""
   },
-  "server/engine/tests/test_t261009_38_bundle_out_face.py": {
-   "anchor": "contract",
-   "note": "bundle_out_face predicate truth tables + gate fallback wiring (developer L1, this ticket)",
+  "server/engine/tests/test_t261009_29_promotion_single_space.py": {
+   "anchor": "behaviour",
+   "note": "t261009-29 L1: one ledger/one seq space — the shared writer admits promotion+relation kinds and stamps the shared seq; legacy promotion.jsonl migration (at-then-file order, named refusals incl. in-file duplicates, rename, idempotent no-op) and the unmigrated-legacy refusal on every consumer-reachable face; ticket_outcome/one-list projection with the single as_of cursor",
    "sync_path": ""
   }
  },
@@ -4439,14 +4444,19 @@
    "note": "t261009-31: the read face — list/detail rows carry dismissed:{at,who,reason}, read failure degrades to named dismissed_note, no DONE-family reclassification, CLI ops human-only and signal-free",
    "sync_path": ""
   },
+  "integration/t261009-38/sc_t26100938_gate_admits_bundle_out.py": {
+   "anchor": "behaviour",
+   "note": "drives real settle_lane on a git lane fixture (gate face of the bundle-out rule)",
+   "sync_path": ""
+  },
+  "integration/t261009-38/sc_t26100938_mergecheck_pair_agreement.py": {
+   "anchor": "contract",
+   "note": "merge-check whitelist face of the bundle-out rule: widen helper + verify_lane run() over the shared declaration (admit by name / refuse both directions)",
+   "sync_path": ""
+  },
   "integration/t261009-39/sc_t261009_39_yaml_follows_code.py": {
    "anchor": "contract",
    "note": "t261009-39: generated workflow yaml is pure generator output (KI-154)",
-   "sync_path": ""
-  },
-  "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
-   "anchor": "behaviour",
-   "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
    "sync_path": ""
   },
   "integration/t261008-47/sc_ticket_face_english.py": {
@@ -4459,14 +4469,19 @@
    "note": "rerun round/wall derivation identical over old- and new-format timelines; named degradation; history rows still drive the leg",
    "sync_path": ""
   },
-  "integration/t261009-38/sc_t26100938_gate_admits_bundle_out.py": {
+  "integration/t261009-29/sc_promotion_one_seq_space.py": {
    "anchor": "behaviour",
-   "note": "drives real settle_lane on a git lane fixture (gate face of the bundle-out rule)",
+   "note": "t261009-29: the promotion and withdrawal relations live in the SAME delivery.jsonl and seq space as landings and certifications - the shared append face stamps one strictly increasing sequence across kinds, the promotion row keeps every field and gains seq, ticket_outcome consumes ONE rows list with a single delivery cursor, and the withdrawal guard stays armed inside the one file",
    "sync_path": ""
   },
-  "integration/t261009-38/sc_t26100938_mergecheck_pair_agreement.py": {
-   "anchor": "contract",
-   "note": "merge-check whitelist face of the bundle-out rule: widen helper + verify_lane run() over the shared declaration (admit by name / refuse both directions)",
+  "integration/t261009-29/sc_legacy_promotion_ledger_migration.py": {
+   "anchor": "behaviour",
+   "note": "t261009-29: the legacy promotion.jsonl is migrated into delivery.jsonl in at-then-file order (rename out of the way, idempotent second run) or refused BY NAME on the read/append faces while unmigrated - never silently read as no promotions; malformed and duplicate legacy input aborts by name appending nothing",
+   "sync_path": ""
+  },
+  "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
+   "anchor": "behaviour",
+   "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
    "sync_path": ""
   }
  }

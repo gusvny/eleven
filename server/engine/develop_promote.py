@@ -42,20 +42,27 @@ What this module owns:
   ticket's landing, the guard compares patch ids; an exact withdrawal
   matches exactly, a partial one must say so in the relation's reason.
 
-Ledger decision (review condition 1, verified empirically at implement):
-the shared delivery ledger's ``append_rows`` refuses any kind outside its
-set (``kind_unknown:'promotion'`` — reproduced in a temp dir before this
-module was written), and develop_certify.py belongs to another in-flight
-ticket. So the promotion and relation rows live in a SIBLING file,
-``promotion.jsonl``, in the same directory, with the same borrowed store
-pattern (flock whole-append, one write + fsync, shared-style seq assignment,
-duplicate-id refusal, malformed-line loudness, no rewrite of existing
-bytes). The shared seq space with the delivery ledger returns the day the
-kind set admits ``promotion``; until then the two files are each append-only
-and mergeable by seq then. RISK named for the record: while two files
-exist, ordering claims are checked WITHIN a file only, never across files
-by seq (review condition 2) — ``ticket_outcome`` takes both sources
-separately and never compares seqs across them.
+Ledger decision (t261009-29 — the split this module was born with is removed):
+the delivery ledger's kind set now admits ``promotion`` and the §B relation
+kinds (``withdraws`` / ``repairs`` / ``supersedes``), so landings,
+certifications, promotions and relations share ONE file
+(``delivery.jsonl``), ONE writer (``develop_certify.append_rows``) and ONE
+seq space. That is what makes "the landings after the previous
+certification" computable across the whole family, and the projection's
+derived facts all come from that one space — there is no cross-file
+comparison left, because there is no second file. The relations joined the
+same space with the promotion (recorded decision, ticket item 4): the
+withdrawal guard and ``reverted_at`` already join relations to promotions
+and landings, so a separate relation file would have re-created the
+cross-file comparison one level down.
+
+Legacy ``promotion.jsonl`` (the sibling file this module used before
+t261009-29) is either MIGRATED — ``migrate_legacy_promotion_ledger``
+appends its rows into the delivery ledger in ``at``-then-file order, so the
+shared writer assigns seqs in that order, then renames the file — or
+REFUSED BY NAME: any read or append face that finds an unmigrated legacy
+file holding rows raises ``legacy_promotion_file_not_migrated`` instead of
+silently reading "no promotions".
 
 Borrowed-implementation dispositions (the pattern is
 develop_certify.py's store face, which itself carries
@@ -63,14 +70,13 @@ integration/scenario_ledger.py's; the git subprocess family is
 agent_activities._git, borrowed exactly like develop_line does):
 
 - flock whole-append serialisation under ``<dir>/.lock``, single write +
-  fsync: **carried**. The lock file is the ledger directory's own
-  ``.lock`` — shared with the delivery ledger when both live in one
-  directory, which is what makes the two files' seq assignments mutually
-  exclusive even while their spaces are separate.
+  fsync: **carried** — and now trivially shared, because the promotion
+  family writes through ``develop_certify.append_rows`` itself.
 - duplicate-id refusal on append: **carried**.
 - malformed/partial lines on read: **carried via develop_certify.read_rows**
   (bad lines collected, capped, append refuses a ledger that has any).
-- append never rewrites ledger bytes: **carried**.
+- append never rewrites ledger bytes: **carried** (migration RENAMES the
+  legacy file, it never rewrites it).
 - loud maintenance failures: **carried** — a wrong-shaped field is a named
   refusal, never a guess.
 - ULID mint: **reused from develop_certify.mint_id** (same shape, same
@@ -80,27 +86,19 @@ agent_activities._git, borrowed exactly like develop_line does):
   a missing binary each become a named error (``patch_id_unavailable``),
   never a silent empty result (review condition 4).
 
-Coexistence (rule 13): nothing on the running flow imports this module yet;
-today's tickets are byte-for-byte unaffected.
+Coexistence: nothing on the running flow imports this module yet, so no
+production ``promotion.jsonl`` exists today — the migration face is built
+and tested against fixture files, and the refusal is the guard for any
+straggler that turns up later.
 
-Ordering-space limit (t261009-27, stated for the follow-up ticket that puts
-the promotion into the delivery ledger's ordering space — not silently fixed
-here, not silently depended on):
-
-- SAME-FILE comparisons: landing→certification ("cert seq > landing seq")
-  inside the delivery ledger; promotion selection (delivered_in, the newest
-  promotion) and every relation reading (withdrawn_at, reverted_at,
-  superseded_by/at) inside ``promotion.jsonl`` only.
-- CROSS-FILE, by ID only: ``delivered_in`` names a promotion id while
-  ``landed_at`` / ``certified_by`` come from the delivery ledger. No seq is
-  ever compared across the two files.
-- What the follow-up ticket must preserve when the two files share one
-  ordering space: within-file seq monotonicity, the cert-after-landing
-  rule, and that no comparison silently starts spanning files.
-
+Ordering space (t261009-29, closing the limit t261009-27 stated): ONE file,
+ONE seq space. The landing→certification rule ("cert seq > landing seq"),
+promotion selection (``delivered_in``), and every relation reading
+(``withdrawn_at``, ``reverted_at``, ``superseded_by/at``) all read the same
+list; within-file seq monotonicity is the shared writer's own, and no
+comparison spans files because there is one file.
 """
 
-import json
 import os
 import subprocess
 import time
@@ -111,22 +109,28 @@ import develop_certify as dc  # noqa: E402
 
 RECORD_VERSION = 1
 
-#: Promotion/relation ledger file — sibling of the delivery ledger.
+#: The LEGACY promotion/relation ledger file — the sibling file this module
+#: used before t261009-29 joined the ordering space. It exists now only as
+#: the migration input and the named refusal; the live ledger is the
+#: delivery ledger (``develop_certify.MAIN_NAME``).
 PROMOTION_NAME = "promotion.jsonl"
 
-KIND_PROMOTION = "promotion"
+#: Aliases of the shared kind set — the delivery ledger's writer owns the
+#: names now; this module re-exports them so existing importers keep
+#: working.
+KIND_PROMOTION = dc.KIND_PROMOTION
 #: Relation rows follow the record-models §B shape literally: the ``kind``
 #: FIELD carries the relation kind and the ``rel-`` id prefix carries the
 #: family — so family detection is by id prefix, not by this field.
-REL_KIND_WITHDRAWS = "withdraws"
-REL_KIND_REPAIRS = "repairs"
+REL_KIND_WITHDRAWS = dc.REL_KIND_WITHDRAWS
+REL_KIND_REPAIRS = dc.REL_KIND_REPAIRS
 #: A newer ticket took this one's place. Derived ending face only (goal 14):
 #: the outcome view reads ``supersedes`` relations; nothing else consumes
 #: them yet. Registered together with the validator (review condition):
-#: a kind declared here but rejected by ``_validate_relation`` would be an
-#: ending derived from rows the writer refuses to store.
-REL_KIND_SUPERSEDES = "supersedes"
-RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS, REL_KIND_SUPERSEDES)
+#: a kind declared here but rejected by the validator would be an ending
+#: derived from rows the writer refuses to store.
+REL_KIND_SUPERSEDES = dc.REL_KIND_SUPERSEDES
+RELATION_KINDS = dc.RELATION_KINDS
 
 #: Product kinds of the outcome view (goal 14): which fact ends a ticket.
 #: These are the VIEW's names, not the tickets' raw ``kind`` strings.
@@ -179,9 +183,9 @@ class WithdrawnTargetUnknown(PromoteError):
 # ---- paths ------------------------------------------------------------------
 
 def promotion_path(project, ledger_dir=None):
-    """Resolve the promotion ledger path. Same resolution rules as
-    develop_certify.ledger_path (explicit dir / env / project store), with
-    this module's file name."""
+    """Resolve the LEGACY promotion ledger path (the sibling file). Kept for
+    the migration face and for tests of that face; the live ledger resolves
+    through ``develop_certify.ledger_path``."""
     d = ledger_dir or os.environ.get(dc.LEDGER_DIR_ENV, "").strip() or None
     if d:
         return Path(d) / PROMOTION_NAME
@@ -200,127 +204,122 @@ def _valid_str(value):
 
 
 def validate_row(row):
-    """Validate one candidate promotion-ledger row. Returns
-    (clean_row_or_None, why). Unknown family / missing field / wrong shape
-    is refused by name, never guessed around."""
-    if not isinstance(row, dict):
-        return _bad("row_not_object")
-    rid = row.get("id")
-    if not isinstance(rid, str):
-        return _bad("id_not_string")
-    if rid.startswith("prom-"):
-        return _validate_promotion(row)
-    if rid.startswith("rel-"):
-        return _validate_relation(row)
-    return _bad("family_unknown:%s" % rid[:24])
+    """Validate one candidate row through the SHARED validator: the delivery
+    ledger's kind set admits the promotion and relation kinds since
+    t261009-29, so there is exactly one validator and one refusal table —
+    this module keeps none of its own. Unknown kind / missing field / wrong
+    shape is refused by name, never guessed around."""
+    return dc.validate_row(row)
 
 
-def _validate_promotion(row):
-    if row.get("kind") != KIND_PROMOTION:
-        return _bad("promotion_kind_missing")
-    cert = row.get("certification")
-    if not (isinstance(cert, str) and cert.startswith("cert-")):
-        # Spec (b): the refusal is by name. A promotion that cannot NAME a
-        # certification is never built with a default or an inferred one.
-        return _bad("promotion_without_named_certification")
-    if not _valid_str(row.get("line")):
-        return _bad("promotion_missing_line")
-    if not dc._valid_repos(row.get("repos")):
-        return _bad("promotion_repos_invalid")
-    tickets = row.get("tickets")
-    if not isinstance(tickets, list) or not tickets \
-            or not all(_valid_str(t) for t in tickets):
-        return _bad("promotion_tickets_invalid")
-    for f in ("main_before", "main_after"):
-        if not dc._valid_repos(row.get(f)):
-            return _bad("promotion_%s_invalid" % f)
-    # Spec (a): three separate fields. ``on_behalf_of`` and ``authority``
-    # stand together — delegation recorded without the order (or the order
-    # without the delegate) is a half fact, refused by name.
-    behalf, authority = row.get("on_behalf_of"), row.get("authority")
-    if (behalf is None) != (authority is None):
-        return _bad("delegation_incomplete")
-    if behalf is not None and not _valid_str(behalf):
-        return _bad("delegation_on_behalf_of_invalid")
-    if authority is not None and not _valid_str(authority):
-        return _bad("delegation_authority_invalid")
-    if not _valid_str(row.get("signer")):
-        return _bad("promotion_missing_signer")
-    if "note" in row and row["note"] is not None \
-            and not isinstance(row["note"], str):
-        return _bad("promotion_note_not_string")
-    if not dc._valid_at(row.get("at")):
-        return _bad("at_not_ms")
-    return row, ""
+# ---- store face (the delivery ledger IS the promotion ledger now) -----------
+
+def legacy_promotion_path(delivery_path):
+    """The legacy sibling file next to a delivery ledger path (the file this
+    module wrote before t261009-29 joined the ordering space)."""
+    return Path(delivery_path).parent / PROMOTION_NAME
 
 
-def _validate_relation(row):
-    if row.get("kind") not in RELATION_KINDS:
-        return _bad("relation_kind_unknown")
-    for f in ("from", "to"):
-        if not _valid_str(row.get(f)):
-            return _bad("relation_missing_%s" % f)
-    if not _valid_str(row.get("recorded_by")):
-        return _bad("relation_missing_recorded_by")
-    if not _valid_str(row.get("reason")):
-        return _bad("relation_missing_reason")
-    if not dc._valid_at(row.get("at")):
-        return _bad("at_not_ms")
-    return row, ""
+def _unmigrated_legacy_rows(delivery_path):
+    """Rows still sitting in the legacy file, [] when there is none (or when
+    the target IS the legacy file — the migration face reads it directly)."""
+    legacy = legacy_promotion_path(delivery_path)
+    if Path(delivery_path).resolve() == legacy.resolve():
+        return []
+    rows, _bad = dc.read_rows(legacy)
+    return rows
 
 
-# ---- store face (same pattern as develop_certify, sibling file) -------------
+def _refuse_unmigrated_legacy(delivery_path):
+    """The guard every consumer-reachable face sits behind: a legacy
+    ``promotion.jsonl`` holding rows is a MIGRATION DEBT, never a silence —
+    reading it as "no promotions" is exactly the failure the ticket forbids
+    by name."""
+    rows = _unmigrated_legacy_rows(delivery_path)
+    if rows:
+        raise PromoteError("legacy_promotion_file_not_migrated:%s:%d"
+                           % (PROMOTION_NAME, len(rows)))
+
 
 def read_promotion_rows(path):
-    """Read the promotion ledger via the shared reader (malformed lines are
-    collected and reported, never silently skipped)."""
+    """Read the shared ledger via the loud shared reader (malformed lines
+    collected and reported, never silently skipped). An unmigrated legacy
+    ``promotion.jsonl`` next to the ledger refuses by name first."""
+    _refuse_unmigrated_legacy(path)
     return dc.read_rows(path)
 
 
 def append_rows(rows, path):
-    """Validate + append a batch under the directory's lock, one write +
+    """Validate + append through the SHARED writer — one flock, one write +
     fsync, monotonic seq assigned in the critical section, duplicate ids
-    refused. All-rejected means zero bytes land. Append never rewrites
-    existing bytes."""
-    fd = None
-    path = Path(path)
+    refused, all-rejected means zero bytes land, existing bytes never
+    rewritten. ``path`` is the delivery ledger: landings, certifications,
+    promotions and relations take their seqs from the one space. An
+    unmigrated legacy ``promotion.jsonl`` refuses by name first — new-space
+    writes must not start while the old space still holds rows."""
+    _refuse_unmigrated_legacy(path)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd = dc._acquire_lock(path)
-        existing, bad = read_promotion_rows(path)
-        if bad:
-            raise PromoteError("ledger_has_malformed_lines:%d" % len(bad))
-        seen = {r.get("id") for r in existing if isinstance(r, dict)}
-        max_seq = 0
-        for r in existing:
-            if isinstance(r, dict) and isinstance(r.get("seq"), int):
-                max_seq = max(max_seq, r["seq"])
-        clean, rejected = [], []
-        for i, row in enumerate(rows):
-            c, why = validate_row(row)
-            if c is None:
-                rejected.append({"index": i, "reason": why})
-                continue
-            if c["id"] in seen:
-                rejected.append({"index": i, "reason": "duplicate_id:%s" % c["id"]})
-                continue
-            seen.add(c["id"])
-            clean.append(c)
-        if not clean:
-            return {"written": 0, "rejected": rejected, "seqs": []}
-        seqs, lines = [], []
-        for c in clean:
-            max_seq += 1
-            c["seq"] = max_seq
-            seqs.append(max_seq)
-            lines.append(json.dumps(c, ensure_ascii=False, separators=(",", ":")))
-        with open(str(path), "a", encoding="utf-8") as fh:
-            fh.write("\n".join(lines) + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        return {"written": len(clean), "rejected": rejected, "seqs": seqs}
-    finally:
-        dc._release_lock(fd)
+        return dc.append_rows(rows, path)
+    except dc.CertifyError as exc:
+        # the shared writer's loud store errors keep this module's own
+        # contract: the caller of THIS face catches PromoteError, the name
+        # travels verbatim
+        raise PromoteError(str(exc))
+
+
+def migrate_legacy_promotion_ledger(delivery_path, legacy_path=None):
+    """Fold the legacy sibling file into the delivery ledger's ordering
+    space. The seq assignment order is the ticket's stated order: ``at``
+    first, file position breaking ties (a stable sort — equal ``at`` keeps
+    the order the rows were read in). Every refusal is by name:
+
+    - ``legacy_has_malformed_lines`` — a torn line is a fact, not noise;
+    - ``legacy_row_invalid:<id>:<why>`` — a row the shared validator refuses;
+    - ``legacy_row_duplicate:<id>`` — twice inside the legacy file itself;
+    - ``id_already_in_delivery_ledger:<id>`` — already folded (a previous
+      migration that died before the rename, or double-booked work).
+
+    On success the legacy file is RENAMED (never rewritten) to
+    ``promotion.jsonl.migrated`` — append-only discipline kept, and a second
+    run is a clean no-op (nothing to read)."""
+    delivery_path = Path(delivery_path)
+    legacy = Path(legacy_path) if legacy_path is not None \
+        else legacy_promotion_path(delivery_path)
+    if legacy.resolve() == delivery_path.resolve():
+        raise PromoteError("legacy_file_is_delivery_ledger")
+    if not legacy.exists():
+        return {"migrated": 0, "renamed": False, "seqs": []}
+    rows, bad = dc.read_rows(legacy)
+    if bad:
+        raise PromoteError("legacy_has_malformed_lines:%d" % len(bad))
+    indexed = sorted(enumerate(rows),
+                     key=lambda p: (p[1].get("at")
+                                    if dc._valid_at(p[1].get("at")) else 0,
+                                    p[0]))
+    ordered, in_legacy = [], set()
+    for _i, row in indexed:
+        clean, why = dc.validate_row(row)
+        if clean is None:
+            raise PromoteError("legacy_row_invalid:%s:%s"
+                               % (row.get("id"), why))
+        if clean.get("id") in in_legacy:
+            raise PromoteError("legacy_row_duplicate:%s" % clean["id"])
+        in_legacy.add(clean["id"])
+        ordered.append(clean)
+    existing, dbad = dc.read_rows(delivery_path)
+    if dbad:
+        raise PromoteError("ledger_has_malformed_lines:%d" % len(dbad))
+    in_ledger = {r.get("id") for r in existing if isinstance(r, dict)}
+    for row in ordered:
+        if row.get("id") in in_ledger:
+            raise PromoteError("id_already_in_delivery_ledger:%s"
+                               % row["id"])
+    res = dc.append_rows(ordered, delivery_path)
+    if res["rejected"] or res["written"] != len(ordered):
+        raise PromoteError("migration_append_refused:%s" % res["rejected"])
+    os.replace(str(legacy), str(legacy) + ".migrated")
+    return {"migrated": len(ordered), "renamed": True,
+            "seqs": res["seqs"]}
 
 
 # ---- the promotion ----------------------------------------------------------
@@ -473,22 +472,23 @@ def patch_id(revision, repo_path, timeout=60):
     return first
 
 
-def withdrawn_patch_ids(promotion_rows, delivery_rows, patch_id_fn, repo):
+def withdrawn_patch_ids(rows, patch_id_fn, repo):
     """The guard set: patch id -> the relation id that forbids it. Built from
     every ``withdraws`` relation, resolved through the withdrawn ticket's
-    landing. Unknown target and unavailable patch id both refuse loudly —
+    landing — both from the ONE ledger list (t261009-29: one ordering
+    space). Unknown target and unavailable patch id both refuse loudly —
     the guard NEVER silently shrinks. ``repo`` is the repository NAME as the
     records spell it; ``patch_id_fn(revision, repo_name)`` is the injected
     adapter that resolves that name to a checkout (the engine never guesses
     the wiring — the same seam rule as develop_certify's ``is_green``)."""
-    landings = [r for r in delivery_rows
+    landings = [r for r in rows
                 if isinstance(r, dict) and r.get("kind") == dc.KIND_LANDING
                 and isinstance(r.get("seq"), int)]
     latest = {}
     for l in sorted(landings, key=lambda r: r["seq"]):
         latest[l["ticket"]] = l
     guard = {}
-    for row in sorted(promotion_rows, key=lambda r: r.get("seq") or 0):
+    for row in sorted(rows, key=lambda r: r.get("seq") or 0):
         if row.get("kind") != REL_KIND_WITHDRAWS:
             continue
         rel_id = row["id"]
@@ -503,17 +503,17 @@ def withdrawn_patch_ids(promotion_rows, delivery_rows, patch_id_fn, repo):
     return guard
 
 
-def check_withdrawn(candidate_ticket, delivery_rows, promotion_rows,
-                    patch_id_fn, repo):
+def check_withdrawn(candidate_ticket, rows, patch_id_fn, repo):
     """Refuse — by name — a promotion candidate whose content re-introduces
     a withdrawn patch (spec (e)). Raises PromotionRefused
     (``withdrawn_patch_present:<rel-id>``), WithdrawnTargetUnknown or
-    PatchIdUnavailable; returns the (possibly empty) guard set when clean."""
-    landing = _ticket_landing(delivery_rows, candidate_ticket)
+    PatchIdUnavailable; returns the (possibly empty) guard set when clean.
+    ``rows`` is the ONE ledger list (landings, certifications, promotions,
+    relations together)."""
+    landing = _ticket_landing(rows, candidate_ticket)
     if landing is None:
         raise PromotionRefused("tickets_not_covered:%s" % candidate_ticket)
-    guard = withdrawn_patch_ids(promotion_rows, delivery_rows,
-                                patch_id_fn, repo)
+    guard = withdrawn_patch_ids(rows, patch_id_fn, repo)
     lrev = _repos_map(landing["repos"])
     rev = lrev.get(repo)
     if rev is not None:
@@ -526,15 +526,18 @@ def check_withdrawn(candidate_ticket, delivery_rows, promotion_rows,
 
 # ---- the outcome projection (derived only; three stages stay distinct) ------
 
-def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
-                   ticket_record=None):
+def ticket_outcome(rows, ticket, is_green=None, ticket_record=None):
     """The ticket's outcome as a derived view (record-models projection
     rules): three INDEPENDENT fields — ``landed_at`` (the revision set the
     ticket put on the line), ``certified_by`` (a green certification whose
-    delivery-ledger seq is after the landing's — same file, so the order is
-    the shared space's own), ``delivered_in`` (a promotion row carrying the
-    ticket — the promotion file's own order; seq is NEVER compared across
-    the two files) — plus the ending faces:
+    seq is after the landing's), ``delivered_in`` (a promotion row carrying
+    the ticket) — plus the ending faces:
+
+    Ordering space (t261009-29): ``rows`` is the ONE ledger list — landings,
+    certifications, promotions and relations together. NO comparison crosses
+    files, because there is one file: the cert-after-landing rule, the
+    promotion selection and every relation reading all read the same seq
+    space the shared writer assigns.
 
     - ``reverted_at``: a ``withdraws`` relation against this ticket whose
       own landing was later delivered (today's face, unchanged);
@@ -583,16 +586,10 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
     rebuildable (``compare_outcomes`` is the drift check), and no other
     record may cite it — the view has no ``id``, no ``seq`` and no ``at``
     of its own.
-
-    Ordering-space limit (kept honest, not silently fixed): the
-    landing→certification comparison uses the delivery ledger's seq only;
-    every promotion/relation selection uses the promotion file's own order
-    only. The one cross-file fact is ``delivered_in``, and it is carried as
-    an ID, never compared by seq against delivery-ledger rows.
     """
     if not _valid_str(ticket):
         raise PromoteError("ticket_not_named")
-    landings = [r for r in delivery_rows
+    landings = [r for r in rows
                 if isinstance(r, dict) and r.get("kind") == dc.KIND_LANDING
                 and r.get("ticket") == ticket and isinstance(r.get("seq"), int)]
     landings.sort(key=lambda r: r["seq"])
@@ -601,7 +598,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
     certified_by = None
     certified_at = None
     if landing is not None:
-        certs = [r for r in delivery_rows
+        certs = [r for r in rows
                  if isinstance(r, dict) and r.get("kind") == dc.KIND_CERT
                  and isinstance(r.get("seq"), int) and r["seq"] > landing["seq"]]
         certs.sort(key=lambda r: r["seq"])
@@ -615,7 +612,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
                 certified_at = c.get("at")
                 break
 
-    proms = [r for r in promotion_rows
+    proms = [r for r in rows
              if isinstance(r, dict) and r.get("kind") == KIND_PROMOTION
              and isinstance(r.get("seq"), int) and ticket in r.get("tickets", [])]
     proms.sort(key=lambda r: r["seq"])
@@ -624,16 +621,16 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
     reverted_at = None
     withdrawn_at = None
     if delivered_in is not None:
-        for rel in promotion_rows:
+        for rel in rows:
             if not isinstance(rel, dict) or rel.get("kind") != REL_KIND_WITHDRAWS:
                 continue
             if rel.get("to") != ticket:
                 continue
-            wlanding = _ticket_landing(delivery_rows, rel.get("from"))
+            wlanding = _ticket_landing(rows, rel.get("from"))
             if wlanding is None:
                 raise WithdrawnTargetUnknown(
                     "withdrawn_target_unknown:%s" % rel.get("id"))
-            wproms = [r for r in promotion_rows
+            wproms = [r for r in rows
                       if isinstance(r, dict) and r.get("kind") == KIND_PROMOTION
                       and rel.get("from") in r.get("tickets", [])
                       and isinstance(r.get("seq"), int)]
@@ -642,7 +639,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
     # The ticket's OWN withdrawal face: the relation is the recorded
     # judgement, so it fires regardless of whether the withdrawing ticket
     # itself has a landing (that landing matters only to ``reverted_at``).
-    for rel in promotion_rows:
+    for rel in rows:
         if not isinstance(rel, dict) or rel.get("kind") != REL_KIND_WITHDRAWS:
             continue
         if rel.get("to") != ticket or not dc._valid_at(rel.get("at")):
@@ -653,7 +650,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
 
     superseded_by = None
     superseded_at = None
-    for rel in promotion_rows:
+    for rel in rows:
         if not isinstance(rel, dict) or rel.get("kind") != REL_KIND_SUPERSEDES:
             continue
         if rel.get("to") != ticket or not _valid_str(rel.get("from")):
@@ -717,9 +714,9 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
     else:
         ending = "open"
 
-    d_seq = max([r.get("seq") for r in delivery_rows
-                 if isinstance(r, dict) and isinstance(r.get("seq"), int)] or [0])
-    p_seq = max([r.get("seq") for r in promotion_rows
+    # The single cursor of the one ordering space (t261009-29): there is no
+    # second file, so ``as_of`` carries the delivery ledger's max seq alone.
+    d_seq = max([r.get("seq") for r in rows
                  if isinstance(r, dict) and isinstance(r.get("seq"), int)] or [0])
     return {
         "landed_at": list(landing["repos"]) if landing else None,
@@ -734,7 +731,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
         "ended_at": ended_at,
         "ending": ending,
         "waiting_since": waiting_since,
-        "as_of": {"delivery": d_seq, "promotion": p_seq},
+        "as_of": {"delivery": d_seq},
     }
 
 

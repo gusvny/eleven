@@ -99,6 +99,16 @@ KIND_CERT = "certification"
 KIND_FREEZE = "freeze"
 KIND_FREEZE_CHANGE = "freeze_change"
 KIND_RANGE_GROWTH = "range_growth"
+# The promotion family joined the delivery ledger's ordering space
+# (t261009-29): one file, one writer, one seq space. The relation rows
+# (record-models §B) joined with it — ``reverted_at`` and the withdrawal
+# guard already join relations to promotions and landings, so a second
+# file would re-create the cross-file comparison one level down.
+KIND_PROMOTION = "promotion"
+REL_KIND_WITHDRAWS = "withdraws"
+REL_KIND_REPAIRS = "repairs"
+REL_KIND_SUPERSEDES = "supersedes"
+RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS, REL_KIND_SUPERSEDES)
 
 CHANGE_ATTRIBUTION = "attribution"
 CHANGE_CLOSED = "closed"
@@ -279,6 +289,61 @@ def validate_row(row):
             return _bad("growth_missing_line")
         if not isinstance(row.get("reason"), str) or not row["reason"].strip():
             return _bad("growth_missing_reason")
+    elif kind == KIND_PROMOTION:
+        # t261009-29: the promotion lives in THIS ledger's ordering space.
+        # Refusal names carried over verbatim from the sibling-file era
+        # (develop_promote's validators), so existing callers read the same
+        # reasons; the shared writer assigns the ``seq``.
+        if not (isinstance(rid, str) and rid.startswith("prom-")):
+            return _bad("promotion_id_not_prom")
+        cert = row.get("certification")
+        if not (isinstance(cert, str) and cert.startswith("cert-")):
+            # Spec (b): the refusal is by name. A promotion that cannot NAME
+            # a certification is never built with a default or an inferred
+            # one.
+            return _bad("promotion_without_named_certification")
+        if not isinstance(row.get("line"), str) or not row["line"].strip():
+            return _bad("promotion_missing_line")
+        if not _valid_repos(row.get("repos")):
+            return _bad("promotion_repos_invalid")
+        tickets = row.get("tickets")
+        if not isinstance(tickets, list) or not tickets \
+                or not all(isinstance(t, str) and t.strip() for t in tickets):
+            return _bad("promotion_tickets_invalid")
+        for f in ("main_before", "main_after"):
+            if not _valid_repos(row.get(f)):
+                return _bad("promotion_%s_invalid" % f)
+        # Spec (a): three separate fields. ``on_behalf_of`` and ``authority``
+        # stand together — delegation recorded without the order (or the
+        # order without the delegate) is a half fact, refused by name.
+        behalf, authority = row.get("on_behalf_of"), row.get("authority")
+        if (behalf is None) != (authority is None):
+            return _bad("delegation_incomplete")
+        if behalf is not None and not (isinstance(behalf, str)
+                                       and behalf.strip()):
+            return _bad("delegation_on_behalf_of_invalid")
+        if authority is not None and not (isinstance(authority, str)
+                                          and authority.strip()):
+            return _bad("delegation_authority_invalid")
+        if not isinstance(row.get("signer"), str) or not row["signer"].strip():
+            return _bad("promotion_missing_signer")
+        if "note" in row and row["note"] is not None \
+                and not isinstance(row["note"], str):
+            return _bad("promotion_note_not_string")
+    elif kind in RELATION_KINDS:
+        # Record-models §B shape: the ``kind`` FIELD carries the relation
+        # kind, the ``rel-`` id prefix carries the family — family detection
+        # is by id prefix, not by this field.
+        if not (isinstance(rid, str) and rid.startswith("rel-")):
+            return _bad("relation_id_not_rel")
+        for f in ("from", "to"):
+            if not isinstance(row.get(f), str) or not row[f].strip():
+                return _bad("relation_missing_%s" % f)
+        if not isinstance(row.get("recorded_by"), str) \
+                or not row["recorded_by"].strip():
+            return _bad("relation_missing_recorded_by")
+        if not isinstance(row.get("reason"), str) or not row["reason"].strip():
+            return _bad("relation_missing_reason")
     else:
         return _bad("kind_unknown:%r" % (kind,))
     if not _valid_at(row.get("at")):

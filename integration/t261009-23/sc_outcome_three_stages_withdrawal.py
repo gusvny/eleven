@@ -181,7 +181,7 @@ try:
     drows, _bad = dc.read_rows(dpath)
     ppath = os.path.join(d, "promotions.jsonl")
     prows0, _bp = dc.read_rows(ppath)
-    out = dp.ticket_outcome(drows, prows0, "t-a")
+    out = dp.ticket_outcome(drows + prows0, "t-a")
     ok(bool(out.get("landed_at")) and bool(out.get("certified_by"))
        and not out.get("delivered_in"),
        "A1 a ticket that ended at certification shows landed + certified but "
@@ -196,7 +196,7 @@ try:
     cert = [r for r in drows if r.get("kind") == dc.KIND_CERT][0]
     promote(ppath, cert, rev, ["t-a"], 1791510002000, drows=drows)
     prows1, _bq = dc.read_rows(ppath)
-    out2 = dp.ticket_outcome(drows, prows1, "t-a")
+    out2 = dp.ticket_outcome(drows + prows1, "t-a")
     ok(str(out2.get("delivered_in", "")).startswith("prom-")
        and out2.get("landed_at") == out.get("landed_at")
        and out2.get("certified_by") == out.get("certified_by"),
@@ -274,7 +274,7 @@ try:
 
     refused_, why = False, ""
     try:
-        dp.check_withdrawn("t-again", drows, prows, pid_fn, REPO_NAME)
+        dp.check_withdrawn("t-again", drows + prows, pid_fn, REPO_NAME)
     except dp.PromoteError as exc:
         refused_, why = True, str(exc)
     ok(refused_ and "withdrawn_patch_present" in why,
@@ -284,7 +284,7 @@ try:
        "C3 the refusal cites the relation it rests on, never a bare no")
     allowed = True
     try:
-        dp.check_withdrawn("t-ok", drows, prows, pid_fn, REPO_NAME)
+        dp.check_withdrawn("t-ok", drows + prows, pid_fn, REPO_NAME)
     except dp.PromoteError:
         allowed = False
     ok(allowed, "C4 an unrelated landing is allowed (the guard is not a "
@@ -303,7 +303,7 @@ dp.append_rows([rel], ppath)
 prows, _bd = dc.read_rows(ppath)
 loud = False
 try:
-    dp.withdrawn_patch_ids(prows, [], lambda r, n: "x",
+    dp.withdrawn_patch_ids(prows, lambda r, n: "x",
                            REPO_NAME)
 except dp.PromoteError as exc:
     loud = "withdrawn_target_unknown" in str(exc)
@@ -331,7 +331,7 @@ try:
 
     named = False
     try:
-        dp.check_withdrawn("t-e", drows, prows, broken_pid, REPO_NAME)
+        dp.check_withdrawn("t-e", drows + prows, broken_pid, REPO_NAME)
     except dp.PatchIdUnavailable as exc:
         named = bool(str(exc).strip())
     ok(named, "E1 when the patch identity cannot be computed the check "

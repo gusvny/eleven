@@ -54,11 +54,11 @@ The user-perceivable contract this entry owns:
      for a landed-not-yet-certified change ticket, as_of stays with both
      cursors, and the view still has no id, no seq and no at of its own.
 
-  E  THE ORDERING-SPACE LIMIT, OBSERVED NOT HIDDEN (spec 5). delivered_in
-     names a promotion-file id while landed_at / certified_by derive from the
-     delivery ledger — the cross-file face the follow-up ticket must preserve;
-     a promotion whose seq is lower than the delivery cursor still counts as
-     the delivery (seq is never compared across the two files).
+  E  THE ORDERING SPACE, UPDATED BY t261009-29. The promotion joined the
+     delivery ledger's ONE seq space: there are no longer two files, so no
+     comparison can cross them; a promotion whose seq is lower than the
+     delivery cursor still counts as the delivery (delivered_in is derived
+     by membership and the shared seq, from one list).
 
 Intent split (no intent-level duplication): the three-stage distinctness
 truth table and the withdrawal-guard propagation are owned by
@@ -145,9 +145,11 @@ def relation(kind, src, dst, rid, at, reason="sc relation"):
 
 
 def view(drows, prows, ticket, ticket_record=None):
+    # t261009-29: ONE ordering space — the projection takes the merged list
+    rows = list(drows) + list(prows)
     if ticket_record is None:
-        return dp.ticket_outcome(drows, prows, ticket)
-    return dp.ticket_outcome(drows, prows, ticket, ticket_record=ticket_record)
+        return dp.ticket_outcome(rows, ticket)
+    return dp.ticket_outcome(rows, ticket, ticket_record=ticket_record)
 
 
 # ---- A. endings that are not deliveries ------------------------------------
@@ -273,7 +275,7 @@ ok(cmp.get("agrees") is True and not (cmp.get("differs_in") or []),
    "C2 two identical views agree with no differing fields")
 
 stale_only = dict(same)
-stale_only["as_of"] = {"delivery": 99, "promotion": 0}
+stale_only["as_of"] = {"delivery": 99}
 cmp = dp.compare_outcomes(stale_only, same)
 ok(cmp.get("agrees") is True,
    "C2 an as_of-only cursor drift is reported, not counted as disagreement "
@@ -297,24 +299,24 @@ for label, vv in (("D1 endings face", view(drows_a, prows_a, T)),
     ok(not ({"id", "seq", "at"} & set(vv)),
        "%s: no id, no seq, no at of its own" % label)
     ok(isinstance(vv.get("as_of"), dict)
-       and set(vv["as_of"]) == {"delivery", "promotion"},
-       "%s: the as_of cursor carries both files" % label)
+       and set(vv["as_of"]) == {"delivery"},
+       "%s: the as_of cursor is the ONE ordering space's own"
+       % label)
     ok(all(f in vv for f in ("landed_at", "certified_by", "delivered_in",
                              "reverted_at", "waiting_since")),
        "%s: the four independent fields stay four (no status enum)" % label)
 
-# ---- E. the ordering-space limit, observed ----------------------------------
+# ---- E. the ordering space after t261009-29 ---------------------------------
 
-section("E. cross-file delivery identity, seq never compared across files")
+section("E. one ordering space: no comparison can span files any more")
 
 drows_e = [landing(T, 1, 1000), cert(2, 2000)]
 prows_e = [promotion(1, "prom-261009-01", [T], 500)]
 v = view(drows_e, prows_e, T)
 ok(v.get("delivered_in") == "prom-261009-01",
    "E1 a promotion whose seq is below the delivery cursor still counts: "
-   "delivered_in names the promotion-file id while landed_at/certified_by "
-   "come from the delivery ledger — seq is never compared across the two "
-   "files (the limit the follow-up ticket must preserve)")
+   "delivered_in is derived from the ONE ledger list (t261009-29) — there "
+   "is no second file left, so no comparison can span files")
 
 # ---- summary ------------------------------------------------------------------
 

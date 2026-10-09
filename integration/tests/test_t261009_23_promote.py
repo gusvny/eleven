@@ -95,6 +95,11 @@ class TempCase(unittest.TestCase):
         rows, _ = dc.read_rows(self.delivery)
         return rows
 
+    def rows(self):
+        rows, bad = dc.read_rows(self.delivery)
+        self.assertEqual(bad, [])
+        return rows
+
 
 class TestPromotionRecord(TempCase):
     """Spec (a) + (b) + (d): one signature, named and traceable; no content
@@ -114,12 +119,14 @@ class TestPromotionRecord(TempCase):
         self.assertEqual(row["main_before"], [{"repo": "r", "revision": "old"}])
         self.assertEqual(row["main_after"], [{"repo": "r", "revision": "rev1"}])
         self.assertTrue(row["id"].startswith("prom-"))
-        res = dp.append_rows([row], self.promo)
+        res = dp.append_rows([row], self.delivery)
         self.assertEqual(res["written"], 1)
         # durable, in an append-only ledger — never in main
-        back, bad = dp.read_promotion_rows(self.promo)
+        back, bad = dp.read_promotion_rows(self.delivery)
         self.assertEqual(bad, [])
-        self.assertEqual(back[0]["id"], row["id"])
+        self.assertEqual(back[-1]["id"], row["id"])
+        # the shared writer stamped the promotion into the ONE seq space
+        self.assertEqual(back[-1]["seq"], 5)
 
     def test_no_signature_without_delegation_fields(self):
         rows = self.seeded()
@@ -135,8 +142,9 @@ class TestPromotionRecord(TempCase):
                          "promotion_without_named_certification")
         self.assertEqual(try_build(rows, **PROM(cert_id="ldg-x001")),
                          "promotion_without_named_certification")
-        # never defaulted: nothing was appended
-        self.assertFalse(self.promo.exists())
+        # never defaulted: nothing was appended — the seeded rows are all
+        # that is in the ledger
+        self.assertEqual(len(self.rows()), 4)
 
     def test_certification_must_exist_and_be_green(self):
         rows = self.seeded()
@@ -176,37 +184,41 @@ class TestPromotionRecord(TempCase):
 
 
 class TestStoreFace(TempCase):
-    """The promotion ledger: same store pattern, sibling file."""
+    """The delivery ledger IS the promotion ledger now (t261009-29): one
+    writer, one seq space."""
 
     def test_append_assigns_monotonic_seq_and_refuses_duplicates(self):
         rows = self.seeded()
         rel = dp.record_relation("withdraws", "t2", "t1", "integration", "undo")
-        r1 = dp.append_rows([rel], self.promo)
-        self.assertEqual(r1["seqs"], [1])
-        r2 = dp.append_rows([rel], self.promo)
+        r1 = dp.append_rows([rel], self.delivery)
+        # the promotion's seq continues the DELIVERY ledger's space
+        self.assertEqual(r1["seqs"], [5])
+        r2 = dp.append_rows([rel], self.delivery)
         self.assertEqual(r2["written"], 0)
         self.assertTrue(r2["rejected"][0]["reason"].startswith("duplicate_id:"))
 
-    def test_unknown_family_refused_by_name(self):
+    def test_unknown_kind_refused_by_name(self):
         row = {"id": "zzz-1", "at": 1}
-        res = dp.append_rows([row], self.promo)
-        self.assertEqual(res["rejected"][0]["reason"], "family_unknown:zzz-1")
+        res = dp.append_rows([row], self.delivery)
+        self.assertEqual(res["rejected"][0]["reason"], "kind_unknown:None")
 
     def test_malformed_ledger_blocks_append_loudly(self):
-        self.promo.parent.mkdir(parents=True, exist_ok=True)
-        self.promo.write_text("{not json}\n", encoding="utf-8")
+        self.delivery.parent.mkdir(parents=True, exist_ok=True)
+        self.delivery.write_text("{not json}\n", encoding="utf-8")
         rel = dp.record_relation("withdraws", "t2", "t1", "integration", "undo")
         with self.assertRaises(dp.PromoteError):
-            dp.append_rows([rel], self.promo)
+            dp.append_rows([rel], self.delivery)
 
     def test_validate_row_truth_table(self):
         good = dp.record_relation("withdraws", "t2", "t1", "integration", "undo")
         self.assertEqual(dp.validate_row(good), (good, ""))
         cases = [
             (None, "row_not_object"),
-            ({}, "id_not_string"),
-            (dict(good, kind="reverts"), "relation_kind_unknown"),  # no revert type
-            (dict(good, kind="revenge"), "relation_kind_unknown"),
+            # t261009-29: one shared validator — the refusal names are the
+            # delivery ledger's kind table now, not the old family dispatch.
+            ({}, "kind_unknown:None"),
+            (dict(good, kind="reverts"), "kind_unknown:'reverts'"),  # no revert type
+            (dict(good, kind="revenge"), "kind_unknown:'revenge'"),
             (dict(good, to=""), "relation_missing_to"),
             (dict(good, recorded_by=""), "relation_missing_recorded_by"),
             (dict(good, reason=""), "relation_missing_reason"),
@@ -221,7 +233,7 @@ class TestStoreFace(TempCase):
         # as an unknown relation kind or an unknown family.
         self.assertNotIn("revert", (dp.RELATION_KINDS))
         self.assertEqual(dp.validate_row({"id": "rev-1", "kind": "revert"}),
-                         (None, "family_unknown:rev-1"))
+                         (None, "kind_unknown:'revert'"))
 
 
 class TestWithdrawalGuard(TempCase):
@@ -258,40 +270,40 @@ class TestWithdrawalGuard(TempCase):
         delivery, _ = dc.read_rows(self.delivery)
         dp.append_rows([dp.record_relation(
             "withdraws", "t2", "t1", "integration", "undo t1", at_ms=1)],
-            self.promo)
-        promo, _ = dp.read_promotion_rows(self.promo)
-        return delivery, promo
+            self.delivery)
+        rows, _ = dc.read_rows(self.delivery)
+        return rows
 
     def test_reintroducing_withdrawn_patch_is_refused_by_name(self):
         repo, revs = self._git_repo()
         by_name = {"repo": str(repo)}.get
         fn = lambda rev, name: dp.patch_id(rev, by_name(name))  # noqa: E731
-        delivery, promo = self._seed(revs, repo)
+        rows = self._seed(revs, repo)
         try:
-            dp.check_withdrawn("t1", delivery, promo, fn, "repo")
+            dp.check_withdrawn("t1", rows, fn, "repo")
             self.fail("re-introduction was allowed")
         except dp.PromotionRefused as exc:
             self.assertTrue(exc.args[0].startswith("withdrawn_patch_present:rel-"))
         # the withdrawal's own landing and an unrelated one are clean
-        self.assertIsNotNone(dp.check_withdrawn("t2", delivery, promo, fn, "repo"))
-        self.assertIsNotNone(dp.check_withdrawn("t3", delivery, promo, fn, "repo"))
+        self.assertIsNotNone(dp.check_withdrawn("t2", rows, fn, "repo"))
+        self.assertIsNotNone(dp.check_withdrawn("t3", rows, fn, "repo"))
 
     def test_guard_failure_is_named_never_empty(self):
         repo, revs = self._git_repo()
-        delivery, promo = self._seed(revs, repo)
+        rows = self._seed(revs, repo)
         def boom(rev, name):
             raise dp.PatchIdUnavailable("patch_id_difftree_failed:%s" % rev)
         with self.assertRaises(dp.PatchIdUnavailable):
-            dp.check_withdrawn("t1", delivery, promo, boom, "repo")
+            dp.check_withdrawn("t1", rows, boom, "repo")
 
     def test_unknown_withdrawn_target_is_loud(self):
         rows = self.seeded()
         dp.append_rows([dp.record_relation(
             "withdraws", "t2", "t-ghost", "integration", "undo", at_ms=1)],
-            self.promo)
-        promo, _ = dp.read_promotion_rows(self.promo)
+            self.delivery)
+        rows, _ = dc.read_rows(self.delivery)
         with self.assertRaises(dp.WithdrawnTargetUnknown):
-            dp.withdrawn_patch_ids(promo, rows, lambda rev, name: "p", "r")
+            dp.withdrawn_patch_ids(rows, lambda rev, name: "p", "r")
 
     def test_patch_id_failure_modes_are_named(self):
         repo, revs = self._git_repo()
@@ -320,11 +332,11 @@ class TestTicketOutcome(TempCase):
         rows = self.seeded()
         # t2's landing IS covered by cert-x002 (rev2); a ticket waiting is
         # one whose landing no green certification's revision covers
-        out = dp.ticket_outcome(rows, [], "t2")
+        out = dp.ticket_outcome(rows, "t2")
         self.assertEqual(out["certified_by"], "cert-x002")
         self.append_delivery([LANDING(7, "t4", revision="rev4", seq=5)])
         rows2, _ = dc.read_rows(self.delivery)
-        out = dp.ticket_outcome(rows2, [], "t4")
+        out = dp.ticket_outcome(rows2, "t4")
         self.assertEqual(out["landed_at"], [{"repo": "r", "revision": "rev4"}])
         self.assertIsNone(out["certified_by"])
         self.assertIsNone(out["delivered_in"])
@@ -332,7 +344,7 @@ class TestTicketOutcome(TempCase):
 
     def test_certified_but_not_delivered(self):
         rows = self.seeded()
-        out = dp.ticket_outcome(rows, [], "t1")
+        out = dp.ticket_outcome(rows, "t1")
         self.assertEqual(out["landed_at"], [{"repo": "r", "revision": "rev1"}])
         self.assertEqual(out["certified_by"], "cert-x001")
         self.assertIsNone(out["delivered_in"])  # closed != delivered
@@ -343,14 +355,14 @@ class TestTicketOutcome(TempCase):
         row = dp.build_promotion(delivery_rows=rows, **PROM(
             cert_id="cert-x002", main_after=[{"repo": "r", "revision": "rev2"}],
             tickets=["t2"]))
-        dp.append_rows([row], self.promo)
-        promo, _ = dp.read_promotion_rows(self.promo)
-        out = dp.ticket_outcome(rows, promo, "t2")
+        dp.append_rows([row], self.delivery)
+        rows, _ = dc.read_rows(self.delivery)
+        out = dp.ticket_outcome(rows, "t2")
         self.assertEqual(out["certified_by"], "cert-x002")
         self.assertEqual(out["delivered_in"], row["id"])
-        # landing in one file, delivery in the other: the cross-file case
-        # the review condition asked for — no seq is compared across files
-        self.assertEqual(out["as_of"], {"delivery": 4, "promotion": 1})
+        # t261009-29: one file, one seq — the delivery's own seq is readable
+        # off the single cursor (the promotion landed after seq 4)
+        self.assertEqual(out["as_of"], {"delivery": 5})
 
     def test_reverted_at_comes_from_the_withdrawal_relation(self):
         rows = self.seeded()
@@ -358,7 +370,7 @@ class TestTicketOutcome(TempCase):
         row = dp.build_promotion(delivery_rows=rows, **PROM(
             cert_id="cert-x002", main_after=[{"repo": "r", "revision": "rev2"}],
             tickets=["t2"]))
-        dp.append_rows([row], self.promo)
+        dp.append_rows([row], self.delivery)
         self.append_delivery([LANDING(9, "t3", revision="rev3", seq=9),
                               CERT(3, run="run-c", revision="rev3", seq=10)])
         rows2, _ = dc.read_rows(self.delivery)
@@ -367,28 +379,28 @@ class TestTicketOutcome(TempCase):
             tickets=["t3"], at_ms=1791514000000))
         dp.append_rows([dp.record_relation(
             "withdraws", "t3", "t2", "integration", "undo t2", at_ms=5)],
-            self.promo)
-        dp.append_rows([prom3], self.promo)
-        promo, _ = dp.read_promotion_rows(self.promo)
-        out = dp.ticket_outcome(rows2, promo, "t2")
+            self.delivery)
+        dp.append_rows([prom3], self.delivery)
+        rows2, _ = dc.read_rows(self.delivery)
+        out = dp.ticket_outcome(rows2, "t2")
         self.assertEqual(out["delivered_in"], row["id"])
         self.assertEqual(out["reverted_at"], 1791514000000)
         # the withdrawal ticket itself: delivered, not reverted
-        out3 = dp.ticket_outcome(rows2, promo, "t3")
+        out3 = dp.ticket_outcome(rows2, "t3")
         self.assertIsNotNone(out3["delivered_in"])
         self.assertIsNone(out3["reverted_at"])
 
     def test_projection_is_derived_only_and_carries_the_cursor(self):
         rows = self.seeded()
-        out = dp.ticket_outcome(rows, [], "t1")
+        out = dp.ticket_outcome(rows, "t1")
         self.assertNotIn("id", out)
         self.assertNotIn("seq", out)
         self.assertNotIn("at", out)
-        self.assertEqual(out["as_of"], {"delivery": 4, "promotion": 0})
+        self.assertEqual(out["as_of"], {"delivery": 4})
 
     def test_never_landed_ticket(self):
         rows = self.seeded()
-        out = dp.ticket_outcome(rows, [], "t-ghost")
+        out = dp.ticket_outcome(rows, "t-ghost")
         self.assertIsNone(out["landed_at"])
         self.assertIsNone(out["certified_by"])
         self.assertIsNone(out["delivered_in"])
@@ -396,11 +408,11 @@ class TestTicketOutcome(TempCase):
 
     def test_unnamed_ticket_is_refused(self):
         with self.assertRaises(dp.PromoteError):
-            dp.ticket_outcome([], [], "")
+            dp.ticket_outcome([], "")
 
     def test_red_certification_does_not_certify(self):
         rows = self.seeded()
-        out = dp.ticket_outcome(rows, [], "t1", is_green=lambda run: run != "run-a")
+        out = dp.ticket_outcome(rows, "t1", is_green=lambda run: run != "run-a")
         # cert-x001 ran run-a (red by this verdict) — the next green one
         # covers a different revision, so t1 stays waiting
         self.assertIsNone(out["certified_by"])
