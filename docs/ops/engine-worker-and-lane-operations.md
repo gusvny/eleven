@@ -292,3 +292,48 @@ from one of its endpoints proves it started before that fix.
 * The console's port (3099) is the user's operation surface and is never touched.
 * Nothing here changes gate criteria, reason codes or attribution rules; the tool reports what the
   engine already decided.
+
+## 10. When a ticket must change a derived or generated path outside its write set
+
+This is the operational recipe for a shape that stopped three tickets in one night (261009/261010,
+`t261009-22`, `t261009-35`, `t261008-47`), and it is worth recognising early because no amount of
+re-driving the lane can converge.
+
+**The shape.** The merge gate demands a file the write set forbids. Two instances:
+a **build output** (`server/plugins/workbench/lib/` must be rebuilt in the same batch as a change
+under `server/plugins/workbench/src/client/` — the `bundle_pairs` rule in
+`server/merge-checks.yaml`), and a **generated file** (`server/workflows/*.yaml`, output of
+`server/engine/gen_workflows_doc.py`, whose change must land in the same commit as the code it was
+generated from). In both cases the settle's path gate is right to refuse the derived path — the
+ticket's frozen write set does not name it — and the two verdicts are each correct and mutually
+unsatisfiable. A `rework` repeats the same work; a `retry_qc` re-measures the same red.
+
+**What does not help.** Rebuilding the output in the lane. The lane can build it and the settle
+will still refuse it, so it never enters a commit (`git log -1 -- <out>` keeps naming an older
+commit). Do not read the loop as "the settle drops worktree work": measure it with
+`git diff --name-only main...HEAD`, which shows the source change and no output change.
+
+**The route that works — widen the write set through the plan, or hand the path to a ticket that
+owns it.**
+1. **Widen through the plan (the documented mechanism).** The write set is refreshed as a **union**
+   after `review_plan` passes, and the added entries come from the `create_plan` receipt's
+   `files_changed` (`dev_lane.py::_refresh_write_set_after_plan` → `shared.refresh_write_set`,
+   behind `REFRESH_WRITE_SET_PATCH_ID`). So `rework` the ticket to `create_plan` and require the
+   new plan to list the derived path **by name** in `files_changed` — an empty or forgetful receipt
+   silently no-ops the refresh (the KI-049 shape, which cost three tickets hours), while a listed
+   path widens the surface without shrinking the existing entries. Verified end to end on
+   261010: the receipt listed both yaml paths and the ticket's `write_set` gained exactly those two
+   entries, keeping the original ones.
+2. **Hand the path over.** When the derived file is not this ticket's business, a ticket whose own
+   write set contains it can act — for generated files, regenerate rather than patch, and keep the
+   "generated artefact lands with the source it came from" invariant.
+3. **Human routes.** A protected path is a human decision (the `authorize` operation,
+   `kind=protected_path`, with `scope` and an `expires` in epoch seconds), and the main-tree route
+   stays available for a change that should not go through a lane at all. Note the boundary: the
+   authorization face covers **protected paths only** — it does not unlock an ordinary write-set
+   violation.
+
+**What to check afterwards.** That the receipt names the path, that the ticket's `write_set` shows
+the added entries without losing the old ones, and that the previously red check goes green at the
+next merge check.
+
