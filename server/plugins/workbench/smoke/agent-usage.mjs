@@ -240,7 +240,8 @@ try {
   ok(rAll.paths.every(p => p.includes('t-c-')), '只取本工单会话（别工单不混入）')
 
   const rEsc = await resolveAllSessionFiles(repo, 't-c', { worktree: '..' })
-  ok(rEsc.refused === true && (rEsc.reason ?? '').includes('越界'), 'worktree=.. → refused（防穿）')
+  // t261009-10: production resolveAgentBaseDir (agent-logs.ts) refuses in English now.
+  ok(rEsc.refused === true && (rEsc.reason ?? '').includes('refused to read'), 'worktree=.. → refused（防穿）')
 
   const rNone = await resolveAllSessionFiles(repo, 't-absent', { worktree: '.worktrees/wt' })
   ok(rNone.paths.length === 0 && (rNone.reason ?? '').includes('无本工单会话'), '无会话 → reason 降级')

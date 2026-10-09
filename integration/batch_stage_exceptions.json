@@ -180,5 +180,12 @@
     "project_pattern": "sc-t26100603-*",
     "reason": "被测对象=engine 自有采集链全旅程（run_capture_stage services=flat -> capture-lane --stage-json，t261006-03）：自带工程名起拆台，批台不在位/复用都会换掉被测链。注册池=browser，同族豁免。",
     "evidence": "integration/t261006-03/sc_engine_path_capture_journey.py 自驱采集链（场景头注与 run 体）；F7 丢失史同上，gen20 重加。"
+  },
+  {
+    "entry": "t261008-46-supply-working-peer-ceiling",
+    "pool": "ro",
+    "project_pattern": "t26100846-*",
+    "reason": "被测对象=供给争用等待的两层上界契约本体（t261008-46）：场景自驱 stage_docker CLI、自有临时工程名 t26100846-ceiling（:86-88 直呼实证）+tmp 隔离锁根——批台复用会换掉被测的锁根/工程名，与清单既有 ro 池 stage-docker 契约条目同族。注册池=ro，按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免。",
+    "evidence": "integration/t261008-46/sc_supply_working_peer_ceiling.py:7,86-88 自驱 stage_docker.py ensure、PROJECT='t26100846-ceiling'（grep 实证）；t261009-10 arbitrate gen0-gen4 连续五轮确认 settle 确定性丢弃本条目，implement gen2 确定性重加（KI 候选：settle 枚举丢 integration/ 写集面文件）。"
   }
 ]

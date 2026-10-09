@@ -85,7 +85,8 @@ try {
     ok(!r3.path.includes('other-ticket'), '别工单的会话不混入')
 
     const r4 = await resolveSessionFile(repo, 't-b', { worktree: '..' })
-    ok(r4.refused === true && (r4.reason ?? '').includes('越界'), 'worktree=.. 越界 → refused（防穿）')
+    // t261009-10: production resolveAgentBaseDir (agent-logs.ts) refuses in English now.
+    ok(r4.refused === true && (r4.reason ?? '').includes('refused to read'), 'worktree=.. 越界 → refused（防穿）')
 
     const r5 = await resolveSessionFile(repo, 't-nope', { worktree: '.worktrees/wt' })
     ok(r5.path === undefined && r5.refused === undefined && (r5.reason ?? '').includes('无本工单会话'),

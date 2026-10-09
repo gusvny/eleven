@@ -260,7 +260,8 @@ process.exit(failed === 0 ? 0 : 1)
   const rOk = resolveAgentBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' }, ['/otherproj'])
   ok(rOk.base === '/otherproj/.lane/t-x11/.suyou' && rOk.reason === undefined, 'extraRoots 命中 → 放行（跨项目票）')
   const rNo = resolveAgentBaseDir(repo, 't-x11', { worktree: '/otherproj/.lane/t-x11' })
-  ok(rNo.base === '' && (rNo.reason ?? '').includes('越界'), 'extraRoots 缺省 → 仍拒（旧行为）')
+  // t261009-10: production resolveAgentBaseDirs refuses in English now (both lines below).
+  ok(rNo.base === '' && (rNo.reason ?? '').includes('refused to read'), 'extraRoots 缺省 → 仍拒（旧行为）')
   const rEvil = resolveAgentBaseDir(repo, 't-x11', { worktree: '/etc' }, ['/otherproj'])
-  ok(rEvil.base === '' && (rEvil.reason ?? '').includes('越界'), 'extraRoots 外路径 → 仍拒（防穿越硬项）')
+  ok(rEvil.base === '' && (rEvil.reason ?? '').includes('refused to read'), 'extraRoots 外路径 → 仍拒（防穿越硬项）')
 }
