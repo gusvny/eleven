@@ -505,9 +505,14 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
 
 **Today**: a machine-read file in the repository.
 
-## D. Inspection findings (what a review observed)
+## D. Inspection records (what a review reported, and where it looked)
 
-**One of these three exists today; its own home is the open question.**
+**Yes — a `finding` is exactly what an inspection period's agent reports.** The inspect stage spawns a read-only inspection agent that must return one fenced block of findings; each carries a subject, a severity, evidence as `path / line / quote`, a why, a suggestion and a confidence. The id is **minted mechanically from the content** (so the same finding keeps its id across periods), the evidence is **verified mechanically** (the file exists, the line is in range, the quote matches — otherwise the entry is downgraded and named, never silently dropped), and only findings that are verified, confident and at least medium severity may spawn fix tickets. A finding is therefore the inspection subsystem's own unit of "here is a problem", and it is deliberately hard to fake.
+
+Two clarifications that keep this section honest:
+
+- **The section holds more than findings.** Also here: the **observation** (a finding *seen again*, against a named revision — proposed; today only the finding itself exists) and the **reviewed path** (which files a period actually examined — today, and that is a coverage ledger, not a finding).
+- **The machinery exists; the output is nearly empty.** Only the **test face** has a schedule today. The `docs-sync` and `simplify-face` instances are declared and enabled in the project's declaration but have never run, so those faces have produced no findings at all. And a *change-producing* face (doc, simplify) does not report findings as its product — it produces **a change**, which is a ticket that lands like any other work. "Inspection output" is therefore three different things: findings, changes, and coverage.
 
 ### finding (entity) — "what is wrong here?"
 
