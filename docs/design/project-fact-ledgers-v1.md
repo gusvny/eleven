@@ -65,6 +65,7 @@ related:
 14. **Losing the machine is survivable.** Every fact that cannot be rebuilt is kept so that it can be recovered on a different machine, from a different location.
 15. **What can be rebuilt is named as rebuildable**, so that backup effort goes to what cannot be — and so that a loss is a loss of work rather than a loss of memory.
 16. **Moving to a new machine is a written, checkable procedure** that has been exercised at least once, rather than knowledge held by one person. It covers what must be installed, which locations must be moved, where the engine's own history lives, and how to check that the move succeeded.
+17. **Sharing is not synchronising.** For the families that several people write while they are being read, the transport may not require a single shared working copy: a shared repository merges changes in batches, answers a read with whatever was last fetched, and cannot enforce that a record is never rewritten. Whatever carries those families must either serialise writes or be conflict-free by construction.
 
 ### Stakeholders
 
@@ -93,6 +94,8 @@ related:
 - **Not migrating all families at once**, and not migrating a family with no identified consumer.
 - **Not solving growth by hand-editing a log**, and not letting a store grow unbounded with no declared policy.
 - **Not changing write authority as part of the move**, and not letting the move become an occasion to loosen it.
+- **Not using version control as the transport for multi-writer fact streams.** It is the right home for what must match a revision and for what is reviewed as a change; for facts written by several people while they are read, it answers with a batch, not with the present.
+- **Not treating a synchronised copy as a shared ledger.** Two writers on two machines appending to one file is not a weaker version of sharing; it is a design that loses the property that made local appending safe.
 - **Not a disaster-recovery programme, not high availability, and not a second machine this cycle.** The requirement is that the loss is survivable and the move is written down, not that the system keeps running through it.
 - **Not backing up what can be rebuilt.** Copying the large derived family would cost more than it protects and would hide which layer actually matters.
 
@@ -158,6 +161,24 @@ Three things follow, and the first is independent of everything else in this doc
 3. **The engine's own history is included in the procedure**, whichever way its storage is moved. It is the truth about every ticket, and today its location is not written down anywhere.
 
 A note on in-flight work: worktrees live in the operating system's temporary area, which does not survive a machine change and may not survive a restart. Committed work is safe as long as the repository is, because worktrees share its object store; uncommitted work is not, and that is the part a move cannot rescue.
+
+### Why a shared repository is not the transport for a shared ledger
+
+The repository looks like an obvious answer to "several people, several machines", because it already carries the fault ledger and every ledger in it is a file. It is the wrong answer for the family that has to be read **current**, for three structural reasons rather than a matter of taste:
+
+- **A batch is not the present.** A reader gets whatever was last fetched. That is the same staleness this design exists to remove, only with a network round trip in front of it. A lane consulting live fault knowledge must not have to remember to fetch first, and a fetch is a deliberate act.
+- **Two writers on one log is a conflict, not two facts.** Two clones appending to the same file touch the same region, so the merge is a decision somebody has to make. Tooling can be configured for a union merge, and then it works — with the ordering chosen by the tools rather than the ledger, which is exactly the clock-like assumption goal 6 forbids.
+- **Nothing enforces "never rewritten".** The append-only property that makes the local store safe is a *convention* in a repository; a history rewrite or a force push can remove records, and the party that would notice is the party that did it.
+
+That is not an argument against version control. It is the same family rule as everywhere else in this document, applied to transport: **content whose meaning is tied to a revision belongs in the repository, and content that must be present tense does not.**
+
+Three shapes are therefore possible, and only the third is the target:
+
+1. **Repository as the transport (interim, tolerable).** Legitimate while there is one writer, and even with several if the records are independent and identified so that merging is a union rather than a decision — the fault ledger's shape happens to allow this. Its ceiling is the fetch: nobody gets ten-minutes-ago for free, and current state (who holds what, what the fleet is doing) can never be carried this way.
+2. **One writer per file, several readers (still local).** What the store does today, extended to more readers. It scales to one machine and no further.
+3. **The target: one writing authority.** The truth behind a service that owns writes, or storage with real transactions, read through the same versioned pull interface as before. This is what "several people on several machines" actually requires, and it is why phase 1 was shaped as a read path rather than a file — the change is plumbing, not a rewrite of every reader.
+
+The ordering consequence is worth stating plainly: **making the read path exist before making the store shared** is what keeps the second step from being a migration of consumers. It is also why the interim shape is acceptable: as long as readers never open a file, moving from a repository-backed read to a service-backed read is invisible to them.
 
 ### The order of work, and why
 
@@ -251,6 +272,8 @@ Quarantine directories, rescue runbooks, screenshot piles, overnight autopilot l
 4. **What the store lacks is what version control gave for free.** Seventeen hand-made dated copies of one request log is what a backup story looks like when there is no backup story; an 88 MB single log with only rename-rotation is what a growth policy looks like when there is none; and "as of which version did my work read this?" has no answer in either home.
 5. **The largest exposure is not in this design at all.** The repository has no remote, the engine's history is machine-local, the store has no off-device copy, and the knowledge of how to move it all is held by one person. Every fact family in this inventory shares one fate until that changes, and it is worth fixing before any family moves.
 
+
+6. **"Share the repository" is not a sharing design.** It answers a batch, not the present, and it cannot enforce the property that makes appending safe. The families that must be read current need either a single writing authority or records that merge as a union — and the read path has to exist first, whichever of the two arrives.
 
 ## Related documents
 
