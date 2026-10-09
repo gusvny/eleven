@@ -20,6 +20,8 @@
  *    about coverage data existing anywhere today.
  */
 
+import { COVERAGE_COPIES } from './inspection-coverage.ts'
+
 /** Instance display names (known instances mapped; unknown falls back to its own id —
  *  never invented, never hidden). */
 export const INSTANCE_LABELS: Record<string, string> = {
@@ -69,6 +71,10 @@ export interface FaceCard {
   /** Item-level coverage lists (either absent = null -> coverage_copy says so). */
   reviewed: string[] | null
   not_reviewed: string[] | null
+  /** t261009-49 period-x-face coverage line (COVERAGE_COPIES wording via RUN_COPIES):
+   *  produced / blocked-shell copy for a readable report; '' when the slot failed —
+   *  the failed slot's gap is carried by the coverage block, never doubled here. */
+  coverage_run_copy: string
 }
 
 export interface PeriodView {
@@ -151,6 +157,9 @@ function extractCoverage(report: unknown): {
 export interface InspTables {
   EMPTY_COPIES: typeof EMPTY_COPIES
   INSTANCE_LABELS: Record<string, string>
+  /** t261009-49: the two run-state copies (produced / blocked shell) the card's
+   *  coverage_run_copy line may use; sourced from inspection-coverage.COVERAGE_COPIES. */
+  RUN_COPIES: { produced: string; blocked: string }
 }
 
 /** Table-parameterised core (page embeds this + the JSON tables; the wrapper below
@@ -238,11 +247,17 @@ export function buildPeriodViewCore(
         findings_copy: C.no_findings,
         coverage_copy: 'No coverage without a report.',
         reviewed: null, not_reviewed: null,
+        coverage_run_copy: '',
       }
     }
     const counts = extractCounts(slot.report)
     const named = extractNamed(slot.report)
     const cov = extractCoverage(slot.report)
+    // t261009-49: a blocked shell (readable ledger, non-empty blocked_reason, zero
+    // served findings) must never read as produced — the run copy names it.
+    const rep = (slot.report !== null && typeof slot.report === 'object') ? slot.report as Record<string, unknown> : {}
+    const blockedReason = typeof rep.blocked_reason === 'string' ? rep.blocked_reason.trim() : ''
+    const runCopy = blockedReason ? T.RUN_COPIES.blocked : T.RUN_COPIES.produced
     return {
       instance: inst, label, report_error: '',
       counts,
@@ -253,6 +268,7 @@ export function buildPeriodViewCore(
       coverage_copy: cov.copy,
       reviewed: cov.reviewed,
       not_reviewed: cov.not_reviewed,
+      coverage_run_copy: runCopy,
     }
   })
   return { read_only: readOnly, banner: readOnly ? C.read_only : '', cards, range_note: rangeNote }
@@ -263,7 +279,10 @@ export function buildPeriodView(
   latestReported: string | null,
   instances: string[],
 ): PeriodView {
-  return buildPeriodViewCore(periodEntry, latestReported, instances, { EMPTY_COPIES, INSTANCE_LABELS })
+  return buildPeriodViewCore(periodEntry, latestReported, instances, {
+    EMPTY_COPIES, INSTANCE_LABELS,
+    RUN_COPIES: { produced: COVERAGE_COPIES.produced, blocked: COVERAGE_COPIES.blocked },
+  })
 }
 
 /* --------------------------------------------------------------- t261008-22 ----

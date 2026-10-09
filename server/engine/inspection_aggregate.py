@@ -107,6 +107,163 @@ def aggregate_report_name(instance_id: str, anchor_period: str) -> str:
 
 
 # ========================================================================================
+# period-x-face coverage (t261009-49, KI-01M4GGFXPAHDGSQ9767VMB5NGM)
+# ========================================================================================
+#
+# A SECOND fact, never merged with the dead-man verdict: dead-man answers "was the
+# period's ticket created?" and counts a blocked/failed ticket as ran — right for the
+# missing-run question. This face answers one level down, "did the face PRODUCE a
+# result this period", and reports one row per (declared instance, period) with
+# exactly one state:
+#
+#   produced   — the ledger is readable and served (blocked_reason empty/absent; an
+#                all-green served ledger is a produced result).
+#   blocked    — the BLOCKED-SHELL shape: readable ledger + non-empty blocked_reason
+#                + zero served findings (t261002-12; judgement single-sources
+#                inspection_ticketing.period_ledger_face — no second truth). This is
+#                "ran but produced nothing" and must never read produced.
+#   failed     — attempts exist (injected reader) but no served ledger was produced.
+#   not_run    — zero attempts recorded for the period. Different fact, different
+#                copy from failed.
+#   unreadable — the ledger file exists but cannot be parsed (or is not a dict).
+#                Named as unreadable; no default turns it into fine or missing.
+#
+# One-way accounting (ticket spec item 4): no new ledger kind, no second source of
+# "did this face run" — the projection reads the existing period ledgers and, via an
+# INJECTED reader (same discipline as build_aggregate's ticket_lookup), the attempt
+# rows. The projection is droppable, rebuildable, and cited by nothing. Attempt
+# terminal states are never re-derived here (the five-state single point owns them).
+
+COVERAGE_STATES = ("produced", "blocked", "failed", "not_run", "unreadable")
+
+#: Per-row attempt evidence cap (anti-flooding; the overflow is counted, not hidden).
+COVERAGE_ATTEMPT_CAP = 5
+
+COVERAGE_NOTE = (
+    "one row per (declared instance, period); exactly one of %s. A blocked shell "
+    "(readable ledger + non-empty blocked_reason) is 'blocked', never 'produced'. "
+    "last_ok_period = the newest strictly-earlier period this face produced a result, "
+    "or the literal 'never'. Attempt states are carried verbatim from the injected "
+    "reader; a state the reader does not know stays verbatim — terminal states are "
+    "never re-derived here." % ", ".join(COVERAGE_STATES))
+
+
+def _read_one_ledger(ledger_dir: Any, instance_id: str, period: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """One period ledger -> (doc|None, "ok"|"unreadable"|"absent"). Absent is distinct
+    from unreadable: absent feeds the attempt question, unreadable is named as such
+    (never fine, never missing)."""
+    path = Path(str(ledger_dir)) / ("inspection-%s-%s.json" % (instance_id, period))
+    try:
+        raw = path.read_text("utf-8")
+    except FileNotFoundError:
+        return None, "absent"
+    except OSError:
+        return None, "unreadable"
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return None, "unreadable"
+    if not isinstance(doc, dict):
+        return None, "unreadable"
+    # Same served-shape bar as read_period_ledgers: a served ledger always carries a
+    # findings list; a doc without one is malformed on this face too (unless it is a
+    # blocked shell, whose served evidence is the blocked_reason itself).
+    if not isinstance(doc.get("findings"), list) and not str(doc.get("blocked_reason") or "").strip():
+        return None, "unreadable"
+    return doc, "ok"
+
+
+def _sanitize_attempts(raw: Any) -> Tuple[List[Dict[str, str]], int]:
+    """Attempt rows -> sanitised evidence + malformed count. Non-list input counts as
+    one malformed row; non-dict entries are counted, never fabricated into evidence."""
+    if not isinstance(raw, list):
+        return [], 1
+    out: List[Dict[str, str]] = []
+    bad = 0
+    for e in raw:
+        if isinstance(e, dict):
+            # `terminal_state` is the journal-row vocabulary; `state` the reader
+            # shorthand — either is accepted, both stay verbatim (never re-derived).
+            out.append({"ticket_id": str(e.get("ticket_id") or "").strip(),
+                        "state": str(e.get("state") or e.get("terminal_state") or "").strip(),
+                        "blocked_reason": str(e.get("blocked_reason") or "").strip()})
+        else:
+            bad += 1
+    return out, bad
+
+
+def face_coverage(instance_id: str, face_id: str, ledger_dir: Any, periods: Any,
+                  attempts: Optional[Callable[[str], Any]] = None) -> Dict[str, Any]:
+    """The pure coverage projection (see the section comment above for the contract).
+
+    attempts(period) -> list of {ticket_id, state, blocked_reason} | anything:
+    the INJECTED attempt reader. None means "no reader on this surface": rows stay
+    derivable, `attempts_available=false` says so, and an absent-ledger row reads
+    not_run with the explicit caveat — the surface could not check attempts, so
+    "no attempt" is that surface's limit, not a verified fact. A raising reader
+    degrades named per period (never crash, never silent green)."""
+    from inspection_ticketing import period_ledger_face
+
+    inst = str(instance_id or "")
+    rows: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    malformed_total = 0
+    period_list = sorted({str(p) for p in (periods or []) if str(p)}, key=_sort_key)
+    last_ok: Optional[str] = None
+    for period in period_list:
+        prev_ok = last_ok
+        doc, status = _read_one_ledger(ledger_dir, inst, period)
+        evidence: List[Dict[str, str]] = []
+        if status == "ok":
+            if period_ledger_face(doc, str((doc or {}).get("ticket_id") or "")) == "blocked":
+                result = "blocked"
+                evidence = [{"ticket_id": str((doc or {}).get("ticket_id") or ""),
+                             "state": "blocked",
+                             "blocked_reason": str((doc or {}).get("blocked_reason") or "").strip()}]
+            else:
+                result = "produced"
+                last_ok = period
+        elif status == "unreadable":
+            result = "unreadable"
+        else:  # absent ledger -> the attempt question
+            attempt_rows: Any = []
+            if attempts is not None:
+                try:
+                    attempt_rows = attempts(period)
+                except Exception as e:  # noqa: BLE001 — a raising reader degrades named, not corrupt
+                    errors.append("attempts reader failed for %s: %s: %s"
+                                  % (period, type(e).__name__, e))
+                    attempt_rows = []
+            evidence, malformed = _sanitize_attempts(attempt_rows)
+            malformed_total += malformed
+            result = "failed" if evidence else "not_run"
+        rows.append({
+            "period": period,
+            "face": str(face_id) if face_id else None,
+            # `result` and `state` are the same five-state value under both names:
+            # `state` is the vocabulary word, `result` the report-field name.
+            "result": result,
+            "state": result,
+            "last_ok_period": prev_ok if prev_ok else "never",
+            "attempts": evidence[:COVERAGE_ATTEMPT_CAP],
+            "attempts_truncated": max(0, len(evidence) - COVERAGE_ATTEMPT_CAP),
+            "attempts_unavailable": result == "not_run" and attempts is None,
+        })
+    return {
+        "kind": "inspection-coverage",
+        "instance_id": inst,
+        "face": str(face_id) if face_id else None,
+        "attempts_available": attempts is not None,
+        "attempts_reader_errors": sorted(errors),
+        "malformed_attempt_rows": malformed_total,
+        "states": list(COVERAGE_STATES),
+        "rows": rows,
+        "produced_nothing": [r for r in rows if r["result"] != "produced"],
+        "note": COVERAGE_NOTE,
+    }
+
+
+# ========================================================================================
 # read-only collection (every face degrades explicitly; one bad file never kills the page)
 # ========================================================================================
 
@@ -207,12 +364,17 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
                     cron: str = "", tz_name: str = "",
                     lookback_days: int = 7, grace_days: int = 0,
                     ticket_lookup: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
+                    declared_face: str = "",
+                    attempts: Optional[Callable[[str], Any]] = None,
                     ) -> Dict[str, Any]:
     """Assemble the one page (read-only derivation; the write privilege is the
     shell's). ticket_lookup(finding) -> {"ticket_id","state","closed"} | None:
     the injected ticket-state reader. No reader injected =>
     ticket_states_available=false; every finding without a record stays
-    conservatively open."""
+    conservatively open. declared_face / attempts feed the period-x-face coverage
+    projection (face_coverage, t261009-49): declared_face is the instance's declared
+    scan_face — an empty value keeps the rows but carries face=None (the declared
+    face is named as not supplied on this call, never invented)."""
     from inspection_deadman import missed_periods
     from inspection_inspect import SEVERITY_RANK
     from inspection_ticketing import spawn_skip_periods
@@ -331,6 +493,27 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
     for period, err in sorted(verdicts["errors"].items()):
         not_available["%s (verdicts)" % period] = err
 
+    # ---- period-x-face coverage projection (t261009-49; droppable, cited by nothing):
+    #      window periods PLUS any unreadable-ledger period inside the window (an
+    #      unreadable ledger is a named row, never a silent absence). The window's
+    #      upper bound extends to the newest named ledger period even when it is
+    #      unreadable — otherwise the very period that produced nothing would fall
+    #      outside the window. Fallback: the anchor alone when the window collapsed. ----
+    coverage_periods = set(in_window) or ({anchor} if anchor else set())
+    cov_upper = anchor_date
+    for p in ledgers["not_available"]:
+        pd = _period_date(p) if _PERIOD_RE.match(str(p)) else None
+        if pd is None:
+            continue
+        if cov_upper is None or pd > cov_upper:
+            cov_upper = pd
+    if anchor_date and window_start_date and cov_upper:
+        for p in ledgers["not_available"]:
+            pd = _period_date(p) if _PERIOD_RE.match(str(p)) else None
+            if pd and window_start_date < pd <= cov_upper:
+                coverage_periods.add(p)
+    coverage = face_coverage(inst, declared_face, ledger_dir, sorted(coverage_periods), attempts)
+
     return {
         "kind": "inspection-aggregate",
         "instance_id": inst,
@@ -353,5 +536,6 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
         "fixed": fixed,
         "still_open": open_items,
         "overdue": overdue,
+        "coverage": coverage,
         "ordering": ORDERING_NOTE,
     }

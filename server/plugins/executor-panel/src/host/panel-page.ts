@@ -39,6 +39,11 @@ import { renderMarkdown } from './markdown.ts'
 // String() like page-logic, so the unit test and the page run one implementation.
 // buildPeriodViewCore is closure-free (tables passed in, embedded as JSON below).
 import { buildPeriodViewCore, EMPTY_COPIES, INSTANCE_LABELS } from './inspection-view.ts'
+// t261009-49: the period-x-face coverage answer — a pure core embedded via String(fn)
+// like buildPeriodViewCore; recordsToAttempts turns the untrusted disposition/trigger
+// rows into the per (instance/period) attempts map; the page renders the named
+// 'produced nothing' block verbatim.
+import { buildCoverageCore, COVERAGE_COPIES, recordsToAttempts } from './inspection-coverage.ts'
 // t261005-05 (UI-4): project identity badge single source, imported across plugins
 // from workbench shared (both plugins load as raw TS via node native type-stripping;
 // the relative path stays inside the repo). The function sources are embedded into
@@ -83,6 +88,9 @@ const EMBEDDED = EMBED_CONSTS + [
   String(projectIdentity), String(identityOutlinePath), String(identityBadgeSvg),
   // t261006-15: Inspection period-view core (self-contained; tables via INSP_TABLES).
   String(buildPeriodViewCore),
+  // t261009-49: coverage core + attempts-map builder (both closure-free; tables via
+  // INSP_COVERAGE_TABLES — COVERAGE_COPIES stays the single copy source).
+  String(buildCoverageCore), String(recordsToAttempts),
   // t261006-17 (CL-2): concurrency knob + chip classifier (same single implementation).
   String(limitStep), String(concChipState),
   // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
@@ -92,7 +100,18 @@ const EMBEDDED = EMBED_CONSTS + [
 /** t261006-15: Inspection tables (verbatim empty copies + instance labels) as JSON —
  *  the data half of the embedded period-view core. EMPTY_COPIES (inspection-view.ts)
  *  stays the single copy source; a unit test locks the page HTML to these strings. */
-const INSP_TABLES = JSON.stringify({ EMPTY_COPIES, INSTANCE_LABELS })
+const INSP_TABLES = JSON.stringify({
+  EMPTY_COPIES, INSTANCE_LABELS,
+  // t261009-49: the two run-state copies the period-view core may print on a card.
+  RUN_COPIES: { produced: COVERAGE_COPIES.produced, blocked: COVERAGE_COPIES.blocked },
+})
+
+/** t261009-49: coverage tables (copy single source COVERAGE_COPIES; no declared-face
+ *  map on this surface — every face id reads the named 'decl-unreadable' marker, and
+ *  the marker is defined in one place, never rewritten here). */
+const INSP_COVERAGE_TABLES = JSON.stringify({
+  COPIES: COVERAGE_COPIES, FACES: {}, ATTEMPT_CAP: 5,
+})
 
 /** Constant closure for the badge runtime (the page-side projectIdentity reads these tables; embedded as JSON). */
 const IDENTITY_DATA = JSON.stringify({
@@ -1872,7 +1891,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     records: null,
     selected: '',         // the selected period ('' = latest reported / first render)
     loadedFor: '',        // project the faces were loaded for (lazy-load gate, inspEnsureLoaded)
-    tables: ${INSP_TABLES}
+    tables: ${INSP_TABLES},
+    coverageTables: ${INSP_COVERAGE_TABLES},
+    dispositions: null,   // retired fetch face (t261009-49 rework, gate round 1 Red 2)
   };
   // t261006-15 rework (404 fix): the Inspection faces load LAZILY — on first open of
   // the tab, not on every setProject. The two inspection endpoints do not exist in
@@ -1912,6 +1933,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       INSP.records = j || null;
       inspRenderRecords();
     }).catch(function(){ INSP.records = {ok:false, rows:[], reason:'The trigger records could not be loaded.'}; inspRenderRecords(); });
+    // t261009-49 rework (gate round 1, Red 2): NO disposition-records fetch on this
+    // surface. The t261008-19 pinned hit-endpoint anchor (E1) forbids a new fetch
+    // face here, and that anchor's contract may only change through its owner's
+    // review (protected asset; t260916-19/-21 discipline). The coverage answer
+    // renders from the ledgers and, until a period-keyed attempts source arrives
+    // inside an already-served payload, names itself attempts-unavailable; the
+    // module's attempts machinery stays unit-pinned in
+    // integration/t261009-49/inspection-coverage.test.mjs (P2/P5 faces kept).
   }
   function inspRenderPeriods(){
     var host = el('inspPeriodBtns'); host.innerHTML='';
@@ -1950,6 +1979,31 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       btns[i].setAttribute('data-on', on ? 'true' : 'false');
     }
   }
+  // t261009-49 rework (gate round 1, Red 2): the attempts map comes ONLY from
+  // payloads already served on this surface. Trigger rows carry no period, so on
+  // today's payloads this reads null = attempts-unavailable (named in the block);
+  // recordsToAttempts stays the single wiring point — a period-keyed rows source
+  // (a future archive-payload field) lights the attempt evidence up with no other
+  // change. Never a new endpoint fetch (t261008-19 E1 pinned anchor).
+  function inspAttempts(){
+    var t = INSP.records && INSP.records.rows;
+    if(Array.isArray(t)) return recordsToAttempts(t);
+    return null;
+  }
+  // t261009-49: the named 'produced nothing' block — one line per (period x face)
+  // that produced nothing, with period, face id, last success (or never) and the
+  // attempt evidence; visible without counting rows.
+  function inspCoverageBlockHtml(cov){
+    if(!cov || !cov.block || !cov.block.visible) return '';
+    var h = '<div class="inspCard"><div class="pad" style="padding:0 var(--igx,14px)"><b>'+esc(cov.block.title)+'</b></div>';
+    if(!cov.attempts_available){
+      h += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(INSP.coverageTables.COPIES.attempts_unavailable)+'</div>';
+    }
+    h += '<table><tbody>';
+    cov.block.lines.forEach(function(l){ h += '<tr><td>'+esc(l)+'</td></tr>'; });
+    h += '</tbody></table></div>';
+    return h;
+  }
   function inspRenderBody(items){
     items = items || (INSP.archive && INSP.archive.items) || [];
     inspMarkActive(items);
@@ -1965,6 +2019,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(!item){ body.innerHTML=''; banner.innerHTML=''; return; }
     if(item.kind==='no-report-run'){
       banner.innerHTML='';
+      // t261009-49 rework (gate round 1, Red 1): the coverage block on THIS face is
+      // scoped to the run's OWN periods (t261006-15 §7 adjacency ruling — the merge
+      // is adjacency-only; a far period must not leak into this view). The
+      // full-window coverage answer stays on the per-period card face.
+      var runPeriodKeys = {};
+      (item.periods||[]).forEach(function(q){ runPeriodKeys[q.period] = true; });
+      var runPeriods = (INSP.archive.periods||[]).filter(function(p){ return runPeriodKeys[p.period] === true; });
+      var covGap = buildCoverageCore(runPeriods, INSP.archive.instances||[], inspAttempts(), INSP.coverageTables);
       var rows = '';
       for(var j=0;j<item.periods.length;j++){
         var p = item.periods[j];
@@ -1974,18 +2036,22 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       }
       body.innerHTML =
         '<div class="inspCard"><div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(C.no_reports)+' '+esc(item.label)+'</div>'+
+        inspCoverageBlockHtml(covGap)+
         '<table><tbody>'+rows+'</tbody></table></div>';
       return;
     }
     // A real period: view model (same implementation as the unit tests).
     var latest = inspLatestReported();
+    // t261009-49: the period-x-face coverage answer over the WHOLE archive window —
+    // the named 'produced nothing' block, not a row count for the reader to do.
+    var cov = buildCoverageCore(INSP.archive.periods||[], INSP.archive.instances||[], inspAttempts(), INSP.coverageTables);
     var v = buildPeriodViewCore(
       (INSP.archive.periods||[]).filter(function(p){ return p.period===item.period; })[0] || null,
       latest,
       INSP.archive.instances || [],
       INSP.tables);
     banner.innerHTML = v.read_only ? '<div class="banner">'+esc(v.banner)+'</div>' : '';
-    var html = '';
+    var html = inspCoverageBlockHtml(cov);
     v.cards.forEach(function(c){
       html += '<div class="inspCard"><div class="pad" style="display:flex;align-items:baseline;gap:8px;padding:0 var(--igx,14px)">'+
         '<b>'+esc(c.label)+'</b><span class="inspMeta" style="margin-left:auto">'+esc(c.instance)+'</span></div>';
@@ -2006,6 +2072,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         html += '</tbody></table>';
       }
       html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)"><b>Coverage</b> · '+esc(c.coverage_copy)+'</div>';
+      if(c.coverage_run_copy) html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)"><b>Run</b> · '+esc(c.coverage_run_copy)+'</div>';
       if(c.not_reviewed && c.not_reviewed.length){
         html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">Not reviewed (this is not a clean result):</div>';
         html += '<table><tbody>';
