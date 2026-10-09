@@ -4684,3 +4684,17 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①**驻留规则补一条终态**（失败类终态按闭口行同款 24 小时窗退休）——归 UI 票 `t261009-32`；②**dismiss 面**（引擎侧 `t261009-31`：账本 + 行透出 + CLI；UI 侧 `t261009-32`：控件 + 立刻离板 + 折叠可撤销），且**必须覆盖巡检这一路**（左栏是两路合并，只做 dev-lane 那路会出现"按了没用"）；③**覆盖缺口要有面**：按"期次 × 路"输出"成功/失败/缺失"，缺失即具名——归后续巡检覆盖面票（本岗已备票载）。
 >
 > **回归**：L3——(а)一张 `failed` 票（dev-lane 与巡检各一）在无 dismiss 时按 24 小时窗退休，dismiss 后**立刻**离板且可 restore；(b)造"某期次某路只有 failed"的形态，断言覆盖面**具名**报出该缺口，而不是读成"无发现"；(c)"读不到 dismissal 账本"时行**留在板上**并具名告警，绝不静默当"没人 dismiss 过"。
+
+## KI-01M4GN7MXKKXV1327KCVS8SZQW **纪律扫描器把"读"当"跑"：baselines 路径交给 sed/grep/cat 也会被判"developer 段禁跑集成"**(261009 实证;integration 岗登记)
+
+> **现象（261009 `t261008-47` 实案）**：该票被 `blocked`，理由是「【红线】developer 段禁跑集成（宿主令 260921）」，
+> 而命令摘录里能看到的只是「跑本票 UT + `integration/lint_tests.py`」（两者都在允许清单上），**真正的命中项是一条只读命令**——
+> 该票自己的验收证据就写着 `sed -n 70p integration/baselines/lane-stages-chain.mjs`。
+> 机理（读代码）：`server/engine/integration_discipline.py` 的 `_match_entry_token` **只看 token 不看程序**——
+> 只要路径里含 `baselines` 段且 basename 以 `.py/.mjs/.sh` 结尾就算命中入口，**哪怕它的接收者是 `sed`/`grep`/`cat` 这类只读程序**。
+>
+> **危害**：①**合法读被拦**（本仓规则明写"读集成代码/文档做诊断合法，不算违规"）：票被停在一段只读命令上，需人工发 `rework` 才继续，浪费一轮；②**系统性**：`integration/baselines/` 正是场景钉锚的**标尺**，凡设计或证据需要引用它的票都会踩（今晚 `-47`、`-22`、以及我在 `-24` 授权里引用的同一个文件）；③**诱因偏移**：写票人会为规避扫描器而**不引用标尺**，那才是真正的伤害。
+>
+> **处置**：已开修票 **`t261009-36`**——把判据从「token」改成「(程序, token)」：只有**能执行该文件的程序**（python/python3 脚本、node/nodejs 脚本、bash/sh/zsh/dash、裸路径、`-m` 模块）才算命中；接收者是只读程序（sed/grep/rg/cat/head/tail/less/wc/awk/cut/sort/uniq/diff/ls/stat/file）时不算；**管道 / xargs / heredoc 下游的真执行仍要抓**，包装器（env/timeout/sudo）跳过之后再判程序。
+>
+> **回归**：L1/L3——两个方向都要钉：①只读读 baselines 不算命中（含包装器包着读）；②真执行（脚本直跑 / `-m` / 管道下游 / xargs / heredoc 喂 shell）仍命中；③既有 `-m` 静态工具与 `node --check` 豁免不回归。
