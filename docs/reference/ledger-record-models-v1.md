@@ -238,6 +238,10 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 
 ### revert — "this content was withdrawn; where does it still live?"
 
+**The story it exists for.** A ticket's landing, `A`, was promoted to `main`. Later `A` turns out to be bad. The fast way to protect the delivered line is to **withdraw** it — commit the undo on `main` — and then fix it properly with a new ticket. But the withdrawal only undoes `A` **where the undo was made**. Any other line that already merged `A` — say the `ui` line merged `default` before the withdrawal — still carries it, and nothing tells anyone: git records what happened to *that branch*, not that a change is now unwelcome everywhere.
+
+Whether `A` comes back on a later promotion is genuinely subtle and depends on mechanics a person should not have to reason about: if the line holds **the same commit** that was withdrawn and the undo sits in the merge base, a merge usually keeps it withdrawn; if the line holds the same *content* as a different commit (a squash or a cherry-pick), or if a later landing touches those same lines, the change can come back, and git will not say so. **The record exists so that this stops being a bet on merge behaviour**: it names the withdrawn landing, names the lines still carrying it, and gives each line an obligation it must discharge — visible on its face rather than remembered.
+
 ```json
 {
   "id": "rev-261009-01",
@@ -249,6 +253,8 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
   "implicated_lines": ["default", "ui"]
 }
 ```
+
+The withdrawal is itself content: it lands like anything else and is judged like anything else, so a withdrawal is never a silent edit. And fixing the defect properly stays a **new ticket** — the withdrawal only buys the delivered line time.
 
 Each of those lines then discharges the obligation **in its own record** — git will not do it for them:
 
@@ -267,10 +273,10 @@ Each of those lines then discharges the obligation **in its own record** — git
 |---|---|---|
 | `id` | `rev-261009-01` | The withdrawal is a fact about a landing |
 | `landing` | `ldg-261009-0007` | The obligation attaches to **a specific piece of content**, not to a file or a ticket |
-| `on` | `main` / `default` | Withdrawing from main and from a line are different acts with different propagation |
+| `on` | `main` / `default` | Withdrawing from `main` protects the delivered line and leaves every line that carries the content with an obligation; withdrawing on a line undoes it there and matters to `main` only if it was promoted. The two are different acts, and the record says which one happened |
 | `at` / `by` | `1791515000000` / `host` | When, and who decided |
 | `reason` | `the lazy-path rewrite renamed a public constant` | Why the content had to go |
-| `implicated_lines` | `["default", "ui"]` | **The point of the record**: every line that still carries the withdrawn landing is named, because a merge keeps it silently and the next promotion would reintroduce it |
+| `implicated_lines` | `["default", "ui"]` | **The point of the record**: every line that still carries the withdrawn landing is named. Not because git is guaranteed to re-introduce it, but because whether it does depends on merge mechanics nobody should have to bet on — and because the lines, not the withdrawal, are what somebody must act on |
 | *(the discharge)* | a record per line, `change: applied` | Whether a line has actually let go of the content is a change keyed to the revert, not a field on it — the same rule as everywhere else, and the states in use are `applied`, `pending` and `line retired` |
 
 ### ticket outcome — "where did this ticket end up?"
