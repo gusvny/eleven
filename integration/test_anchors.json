@@ -4349,6 +4349,16 @@
    "note": "t261009-19 bounded red journey: the ladder answers rerun before any search, a unique per-lane hit isolates for free, a one-landing range isolates by arithmetic, an unfiltered multi-landing range reaches search and its range_key recorded as a searched change refuses the same range by name (goal 10), the boundary sentence is recordable as an attribution change; freeze episode carries only id/line/cause (state/culprit/closure are keyed change rows, should_freeze false for no attribution); a missing or zero-run header raises CouldNotRun and lands a range-growth row with no freeze row (goal 24); garbage red_cert/lane_reds shapes raise CertifyError by name",
    "sync_path": ""
   },
+  "integration/t261009-20/sc_settle_rerun_replay_guard.py": {
+   "anchor": "source-text",
+   "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
+   "sync_path": ""
+  },
+  "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
+   "anchor": "behaviour",
+   "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
+   "sync_path": ""
+  },
   "integration/t261009-23/sc_outcome_three_stages_withdrawal.py": {
    "anchor": "behaviour",
    "note": "t261009-23: promotion human surface / outcome three stages + withdrawal guard (grey-box L3, public develop_promote face)",
@@ -4357,6 +4367,26 @@
   "integration/t261009-23/sc_promotion_proof_signature.py": {
    "anchor": "behaviour",
    "note": "t261009-23: promotion human surface / outcome three stages + withdrawal guard (grey-box L3, public develop_promote face)",
+   "sync_path": ""
+  },
+  "integration/t261009-27/sc_t26100927_outcome_endings_kind_compare.py": {
+   "anchor": "behaviour",
+   "note": "t261009-27: endings that are not deliveries (withdrawn/superseded coexisting with the three stages), the product's kind deciding the ending fact with unknown named, and rebuild-and-compare naming the moved field - through the public develop_promote outcome/compare faces",
+   "sync_path": ""
+  },
+  "integration/t261009-28/sc_t26100928_legacy_and_ancestor_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261009-28: legacy landings.jsonl refused by name with zero writes anywhere, control landing accepted, and the certified-revision ancestor gate refuses a stale lane tip recording nothing",
+   "sync_path": ""
+  },
+  "integration/t261009-28/sc_t26100928_one_home_landing_record.py": {
+   "anchor": "behaviour",
+   "note": "t261009-28: the landing act records once in the delivery ledger through its own writer (writer-assigned seq, no second shape) and the landing is computable in the shared ordering space (derive_range / should_certify / has_landing)",
+   "sync_path": ""
+  },
+  "integration/t261009-36/sc_discipline_read_not_run.py": {
+   "anchor": "behaviour",
+   "note": "",
    "sync_path": ""
   },
   "integration/tests/test_fixture_reclaim.mjs": {

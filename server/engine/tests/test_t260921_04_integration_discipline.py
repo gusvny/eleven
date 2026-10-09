@@ -393,6 +393,145 @@ class TestReceiptApply:
         assert res.integration_scan_note == ""
 
 
+# ---------- t261009-36: a READ must not red-line a stage (live t261008-47) ----------
+
+class TestT26100936ReadNotRun:
+    """Live false positive (t261008-47): a read-only inspector given a baselines
+    path as an argument was judged as running the suite.
+
+    Root cause is not _match_entry_token alone (read-only verbs were already
+    passed by the EXEC_VERBS gate): the `bash -lc "<string>"` combined short
+    flag fell into the generic flag skip and the whole embedded string was
+    matched as a bare token. These fixtures pin both directions: reads stay
+    green, runs stay red (the red line only tightens)."""
+
+    BASE_MJS = "integration/baselines/lane-stages-chain.mjs"
+
+    def test_readonly_inspectors_with_baselines_arg_no_hit(self):
+        """Reads stay green: sed/grep/cat/head/tail/wc/diff on baselines paths."""
+        for cmd in [
+            "sed -n 70p %s" % self.BASE_MJS,
+            "sed -n '70p' %s" % self.BASE_MJS,
+            "grep -n verify_lane %s" % self.BASE_MJS,
+            "cat %s" % self.BASE_MJS,
+            "head -20 integration/baselines/x.py",
+            "tail -5 %s" % self.BASE_MJS,
+            "wc -l integration/baselines/x.mjs",
+            "diff integration/baselines/a.py integration/baselines/b.py",
+        ]:
+            assert idisc.scan_bash_command(cmd) == [], "false hit on read: %s" % cmd
+
+    def test_wrapped_reader_no_hit(self):
+        """Reads stay green under transparent wrappers: after wrapper skipping
+        the resolved program is the inspector, so its args are read data."""
+        for cmd in [
+            "timeout 5 sed -n 70p %s" % self.BASE_MJS,
+            "env -i sed -n 70p %s" % self.BASE_MJS,
+            "sudo cat integration/baselines/x.py",
+            "nohup grep -n verify_lane %s &" % self.BASE_MJS,
+        ]:
+            assert idisc.scan_bash_command(cmd) == [], "false hit on wrapped read: %s" % cmd
+
+    def test_nested_shell_combined_flag_reader_no_hit(self):
+        """The live incident shape: bash -lc "<read>" - the combined-flag -c
+        recursion judges the string by the same rules, so it is green."""
+        assert idisc.scan_bash_command(
+            'bash -lc "sed -n 70p %s"' % self.BASE_MJS) == []
+        assert idisc.scan_bash_command(
+            'sh -ic "grep verify_lane integration/baselines/x.py"') == []
+
+    def test_reader_pipeline_no_hit(self):
+        """Reads stay green: a pipeline whose downstream is also a reader."""
+        assert idisc.scan_bash_command(
+            "sed -n 1p %s | grep verify_lane | wc -l" % self.BASE_MJS) == []
+        # git is not an exec verb (passed by the EXEC_VERBS gate; not a
+        # READONLY_INSPECTORS member - the gate decides, the set is a tripwire)
+        assert idisc.scan_bash_command(
+            "git grep verify_lane integration/baselines") == []
+
+    def test_heredoc_body_readonly_group_no_hit(self):
+        """Review comment 1: a heredoc body mentioning baselines in a
+        non-executing group is not judged (group-level shelling-out detection
+        is untouched by the whitespace defense belt)."""
+        assert idisc.scan_bash_command(
+            "cat <<EOF\nintegration/baselines/x.py mentioned\nEOF") == []
+
+    def test_nested_shell_combined_flag_executor_hit(self):
+        """Runs stay red: an execution inside the same -lc form - before the
+        fix this was a silent miss (the fall-through cuts both ways)."""
+        hits = idisc.scan_bash_command(
+            'bash -lc "python3 integration/run_scenarios.py"')
+        assert hits and hits[0]["entry"] == "run_scenarios.py"
+        hits = idisc.scan_bash_command(
+            'bash -lc "python3 -m integration.run_scenarios"')
+        assert hits and hits[0]["entry"] == "run_scenarios.py"
+        hits = idisc.scan_bash_command(
+            'bash -lc "node %s"' % self.BASE_MJS)
+        assert hits and hits[0]["entry"] == "baselines"
+
+    def test_executor_forms_still_hit(self):
+        """Runs stay red: the execution forms named by spec item 4 - the
+        narrowing must not loosen any of them."""
+        for cmd, entry in [
+            ("python3 integration/baselines/x.py", "baselines"),
+            ("node integration/baselines/x.mjs", "baselines"),
+            ("bash integration/with_stage.sh", "with_stage.sh"),
+            ("python3 integration/run_scenarios.py", "run_scenarios.py"),
+            ("python3 -m integration.run_scenarios", "run_scenarios.py"),
+            ('bash -c "python3 integration/baselines/x.py"', "baselines"),
+            ("python3 integration/light-lane/sc_t04_prune_archive_legacy.py",
+             "sc_*"),
+            ("python3 server/tools/admin.py verify_lane", "verify_lane"),
+        ]:
+            hits = idisc.scan_bash_command(cmd)
+            assert hits, "should be red: %s" % cmd
+            assert hits[0]["entry"] == entry, (cmd, hits)
+
+    def test_pipeline_downstream_executor_hit(self):
+        """Runs stay red: a read pipeline whose downstream is an executor
+        (spec item 4: the narrowing must not open a new leak)."""
+        hits = idisc.scan_bash_command(
+            "sed -n 1p list.txt | xargs python3 integration/baselines/x.py")
+        assert hits and hits[0]["entry"] == "baselines"
+        hits = idisc.scan_bash_command(
+            "cat list | xargs -0 -n1 node integration/baselines/x.mjs")
+        assert hits and hits[0]["entry"] == "baselines"
+        hits = idisc.scan_bash_command(
+            "cat list | xargs -I{} python3 integration/baselines/x.py")
+        assert hits and hits[0]["entry"] == "baselines"
+
+    def test_heredoc_fed_to_bash_hit(self):
+        """Runs stay red: a heredoc group whose program word is a shell
+        interpreter keeps judging its body line by line."""
+        hits = idisc.scan_bash_command(
+            'bash <<EOF\npython3 integration/baselines/x.py\nEOF')
+        assert hits and hits[0]["entry"] == "baselines"
+
+    def test_whitespace_token_never_entry(self):
+        """Review comment 1: a token containing whitespace is never an entry
+        (normal shlex never yields one; the malformed .split() fallback is the
+        path this pure defense belt guards). Pinned so it does not drift."""
+        assert idisc._match_entry_token("") is None
+        assert idisc._match_entry_token("python3 integration/baselines/x.py") \
+            is None
+        assert idisc._match_entry_token(
+            "integration/baselines/x.py") == "baselines"   # normal path intact
+
+    def test_xargs_bare_still_no_hit(self):
+        """Bare xargs (default echo) keeps the old no-hit verdict."""
+        assert idisc.scan_bash_command(
+            "ls integration | xargs -I{} python3 {}") == []
+
+    def test_malformed_inputs_no_crash(self):
+        """Malformed inputs (house rule): unbalanced quote in -lc, empty -lc
+        string, xargs with no executor - no raise."""
+        assert isinstance(idisc.scan_bash_command('bash -lc "sed -n 70p'),
+                          list)  # fallback tokenization must not raise
+        assert idisc.scan_bash_command('bash -lc ""') == []
+        assert idisc.scan_bash_command("cat list | xargs") == []
+        assert idisc.scan_bash_command("xargs -0") == []
+
+
 # ---------- 口径同步（反用例④：文案=执法，两侧同批） ----------
 
 class TestPromptSync:

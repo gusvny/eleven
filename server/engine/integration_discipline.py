@@ -41,7 +41,29 @@
   pytest 默认只收集 test_ 前缀文件，目录形实参 basename 不命中入口表
   （integration/tests 是集成库自身单测面）；pytest 仅在实参 basename 命中入口表时判
   （收集即 import 执行场景模块=真跑）；
-- `xargs` 二段式不追——已知局限；
+- `xargs` indirect shapes (substitution into a shell string, `xargs sh -c` bodies)
+  are not traced — known limitation;
+- `xargs <executor> …` (t261009-36): after skipping xargs's own flags (`-0`/`-n1`/
+  `-I{}`…), the remaining tokens are re-scanned as their own token stream —
+  `… | xargs python3 integration/baselines/x.py` stays a hit; bare `xargs`
+  (default echo) has no program word left, so no hit (same as the old verdict);
+- combined short flags on a nested shell (t261009-36): `bash -lc "<string>"` and
+  kin recurse through the same path as a bare `-c` — previously `-lc` fell into
+  the generic flag skip and the whole embedded string was matched as a bare
+  token: a read (`bash -lc "sed -n 70p integration/baselines/x.mjs"`) was
+  red-lined (live incident t261008-47) while an execution form
+  (`bash -lc "python3 -m integration.run_scenarios"`) slipped through; after
+  recursion both settle the same way: the string is judged by the same rules,
+  reads stay legal, runs stay red;
+- read-only inspectors (t261009-36, READONLY_INSPECTORS): arguments of
+  sed/grep/cat/head/tail/wc/awk/diff… are data being read, never a hit. The
+  authoritative gate is EXEC_VERBS (no inspector is an exec verb anyway); this
+  set is a tripwire — if an inspector is ever wrongly added to EXEC_VERBS, the
+  short-circuit here prevents a silent pass;
+- `_match_entry_token` never matches a token containing whitespace (t261009-36,
+  pure defense belt): normal shlex tokenization never yields one; only the
+  malformed-input `.split()` fallback can — an embedded command string is never
+  an executable path, so a forgotten recursion cannot fake a whole-string hit;
 - heredoc 正文=数据（t260922-14）：body 不再无条件逐行判——同逻辑行组内任一段的
   程序词（剥括号后）属于解释/执行动词（bash/sh/zsh/dash/source/./eval/xargs，含
   `cat <<EOF | bash` 这类**管道下游消费方**、`xargs python3 <<EOF` 实参执行形）时，
@@ -100,6 +122,17 @@ STATIC_TOOL_MODULES = frozenset({
 NODE_STATIC_CHECK_FLAGS = frozenset({"--check"})
 # node 静态自检 flag 仅对 node/nodejs 本身生效（bun/deno 同形语义未核实，不豁免）。
 NODE_STATIC_CHECK_VERBS = frozenset({"node", "nodejs"})
+# Read-only inspectors (t261009-36): their arguments are data being read, never
+# a hit. The authoritative gate is EXEC_VERBS (no member of this set is an exec
+# verb, so the normal path already passes them); this set is a tripwire — if an
+# inspector is ever wrongly added to EXEC_VERBS, _scan_tokens short-circuits
+# here instead of silently passing. Extending this set requires UT + docstring
+# in the same change (declaration = enforcement).
+READONLY_INSPECTORS = frozenset({
+    "sed", "grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "less",
+    "more", "wc", "awk", "cut", "sort", "uniq", "diff", "cmp", "md5",
+    "md5sum", "shasum", "sha256sum", "ls", "stat", "file",
+})
 # 透明包装 token（跳过）：其后直至程序 token 之前的 flag/数字/VAR=… 一并跳过。
 WRAPPER_TOKENS = frozenset({
     "sudo", "nohup", "env", "timeout", "time", "nice", "stdbuf", "exec",
@@ -123,7 +156,16 @@ def _basename(token):
 
 
 def _match_entry_token(token):
-    """实参 token → 命中入口的判据键；None=未命中。basename 锚定（防目录形误伤）。"""
+    """Argument token → entry key; None = no hit. Basename-anchored (guards
+    against directory-form arguments).
+
+    A token containing whitespace is never matched (t261009-36, pure defense
+    belt): normal shlex tokenization never yields one; only the malformed-input
+    `.split()` fallback can — an embedded command string is never an executable
+    path, so a forgotten `-c` recursion cannot fake a whole-string hit (live
+    incident t261008-47)."""
+    if not token.strip() or any(ch.isspace() for ch in token):
+        return None
     base = _basename(token)
     if base == "run_scenarios.py":
         return "run_scenarios.py"
@@ -342,6 +384,14 @@ def _split_segments(command):
     return segments
 
 
+def _is_shell_c_flag(arg):
+    """Combined short flag carrying -c (t261009-36): `-lc`/`-ci` shapes — a
+    single `-`, letters only, contains `c`. Long `--` options and flags with
+    non-letters (`-o pipefail` and kin) keep the generic skip."""
+    return (arg.startswith("-") and not arg.startswith("--")
+            and len(arg) > 1 and "c" in arg[1:] and arg[1:].isalpha())
+
+
 def _scan_tokens(tokens, segment, command, depth):
     """单段 token 流 → 命中清单（纯函数）。"""
     if not tokens:
@@ -354,6 +404,21 @@ def _scan_tokens(tokens, segment, command, depth):
     direct = _match_entry_token(prog)
     if direct:
         return [_hit(command, direct, segment)]
+    # Read-only inspector tripwire (t261009-36): arguments are data being read,
+    # never a hit. The authoritative gate is the EXEC_VERBS check below (no
+    # inspector is an exec verb); this short-circuit guards a future EXEC_VERBS
+    # over-extension.
+    if prog.lower() in READONLY_INSPECTORS:
+        return []
+    # xargs execution form (t261009-36): skip xargs's own flags, then re-scan
+    # the remaining tokens as their own stream —
+    # `… | xargs python3 integration/baselines/x.py` stays a hit. Bare xargs
+    # (default echo) leaves no program word → the recursion returns [].
+    if prog.lower() == "xargs":
+        k = i + 1
+        while k < len(tokens) and tokens[k].startswith("-"):
+            k += 1
+        return _scan_tokens(tokens[k:], segment, command, depth)
     if prog.lower() not in EXEC_VERBS:
         # 只读动词（grep/cat/sed/ls/…）与未知动词不执法——参数提及不算违规（验收③）。
         return []
@@ -363,8 +428,13 @@ def _scan_tokens(tokens, segment, command, depth):
     while k < n:
         arg = tokens[k]
         # shell -c 递归（K1）：下一实参即嵌套命令串（shlex 已去引号）；
+        # Combined short flag form (`bash -lc "<string>"`, t261009-36) recurses
+        # the same way — previously the embedded string fell into the generic
+        # flag skip and was matched as a bare token (reads red-lined, -m
+        # execution forms missed).
         # python -c 内联不解析（docstring 边界清单），走 startswith("-") 跳过。
-        if arg == "-c" and prog.lower() in SHELL_VERBS and k + 1 < n:
+        if ((arg == "-c" or _is_shell_c_flag(arg))
+                and prog.lower() in SHELL_VERBS and k + 1 < n):
             hits.extend(scan_bash_command(tokens[k + 1], depth + 1))
             k += 2
             continue
