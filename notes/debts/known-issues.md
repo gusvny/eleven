@@ -703,6 +703,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 处置方向：①判据层面＝t260910-13（失败形态分类+机械基线对照）落地后，此类红不再堵票；
   ②测试层面＝这些检查需加时序容忍/重试或去掉对墙钟与并发的依赖（归巡检校准 t260910-11 或后续小票）；
   ③运维层面＝过夜/高峰期限制同时跑套件数（并发争抢是共同诱因）。
+- **补记二（261009 16:0x，第二类实例）**：同一晚又抓到**另一条**负载敏感检查——
+  `server/engine/tests/test_260930_unknown_phase_hardening.py::test_auto_rework_never_hands_back_an_empty_phase`：
+  `t261008-29` 在 `merge_check` 被它判红（`verify_lane code red=1`；当时 5–6 个套件并发，整套 431s 跑完 4260 passed / 1 failed），
+  而**同刻静面单跑 = `1 passed in 0.22s`（同一棵 main）**。
+  ⇒ 形态与①完全相同（宽面红/静面绿），只是**换了检查**；**红册里没有它的在册行，静面判决机制因此不覆盖它**（按设计：机制只认 `verdict=isolated` 的在册名）。
+  处置（本岗当场）：静面取证 ⇒ `retry_qc` 复活。**暂不入册**——一次红+一次静绿不足以立"长期负载面"之判；**复发 2 次以上或再次同形堵门 ⇒ 按 `t261009-15` 的挂账口径入册**（verdict=isolated + home + owner + retire_when）。
 - **补记（261009 13:43，integration 岗）——①号实例"换了载体"仍在堵票，而这次它堵在每张票的默认合并路径上**：
   `integration/t260901-25/t03_reap_process_group.py` 已被「manifest 退役分流」**薄包装成引擎单测**
   `server/engine/tests/test_t260901_25_t03_reap_process_group.py`（13 行：`subprocess.run` 跑原脚本、断言 `rc==0`），
