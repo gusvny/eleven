@@ -117,11 +117,12 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
       <div class="who" style="margin-top:4px" id="lbCap">Left of the boundary is certified and landable now; right of it is landed but not covered yet. One round moves the boundary right; one signature promotes the certified part to main.</div>
       <div class="trig">
         <span class="sw" id="swAuto"><span class="track" id="swTrack"><span class="knob"></span></span>auto-run</span>
-        <span class="k" style="font-size:12px" id="trigTxt">next round starts by itself once landings are waiting and the bench is free</span>
+        <span class="k" style="font-size:12px" id="trigTxt">a round ends, the next one starts right away</span>
         <span class="grow"></span>
         <button class="btn quiet" id="btnRun">run now anyway</button>
       </div>
       <div class="who" id="trigWhy">Rounds need nobody: a round only measures. What needs a person is the promotion — that is the signature above.</div>
+      <div class="who" id="trigHow">Chained: round N ends → round N+1 begins at once while anything is still waiting; no interval, no button, no signature. Only when nothing is waiting does the loop sit idle — the next landing starts a round immediately.</div>
     </div>
   </div>
 
@@ -185,10 +186,11 @@ var GREEN={big:'GREEN',dot:'g',frozen:false,certN:12,waitN:3,
  rounds:[['run-01M4G2T7Q9K3…','21:40','auto · 3 waiting','478 / 498 ran · 4 fail · 16 env','green','main@46d6e8bf + 3 lanes'],
          ['run-01M4G1P0X…','20:50','auto · 2 waiting','476 / 496 ran · 4 fail · 16 env','green','main@b3deb245 + 2 lanes'],
          ['run-01M4FZK9Q…','17:40','manual','474 / 494 ran · 4 fail · 16 env','green','main@a0325c14 + 2 lanes']],
- bench:'bench free · a round would start now',
- trigger:'next round starts by itself once landings are waiting and the bench is free',
+ bench:'round ends ~22:24 → next starts at once',
+ trigger:'a round ends, the next one starts right away (anything still waiting is covered by it)',
+ how:'Chained: round N ends → round N+1 begins at once while anything is still waiting; no interval, no button, no signature. Only when nothing is waiting does the loop sit idle — the next landing starts a round immediately.',
  why:'Rounds need nobody: a round only measures. What needs a person is the promotion — that is the signature above.',
- rWho:'started automatically (3 landings were waiting) · ~44 min on the serial bench',
+ rWho:'started automatically (previous round ended, 3 were waiting) · ~44 min on the serial bench',
  banner:''};
 var FROZEN={big:'FROZEN BY RED',dot:'r',frozen:true,certN:12,waitN:3,
  wait:[['t261009-20','guard the route change','22:0x'],['t261009-21','a waiting ticket holds nothing','—'],['t261009-22','lane map as the mock draws it','—']],
@@ -196,10 +198,11 @@ var FROZEN={big:'FROZEN BY RED',dot:'r',frozen:true,certN:12,waitN:3,
  rounds:[['run-01M4G2T7Q9K3…','21:40','auto · 3 waiting','478 / 498 ran · 4 fail · 16 env','red · 2 blockers','main@46d6e8bf + 3 lanes'],
          ['run-01M4G1P0X…','20:50','auto · 2 waiting','476 / 496 ran · 4 fail · 16 env','green','main@b3deb245 + 2 lanes'],
          ['run-01M4FZK9Q…','17:40','manual','474 / 494 ran · 4 fail · 16 env','green','main@a0325c14 + 2 lanes']],
- bench:'bench free · retrying the red round now',
- trigger:'auto-run keeps going: the red round is retried at the next free slot, no button, no signature',
+ bench:'round ends ~22:24 → red round retried at once',
+ trigger:'a round ends, the next one starts right away — the red round is retried at once',
+ how:'Chained and automatic: the moment the red round ends, the next round starts. No button, no interval, no signature. New landings wait for a round that comes back green; the certified part stays landable either way.',
  why:'A person is not asked to restart anything: retrying a red round is automatic. New landings wait until a round comes back green; the certified part stays landable.',
- rWho:'started automatically (3 landings were waiting) · red · retry queued on the free slot',
+ rWho:'started automatically (previous round ended, 3 were waiting) · red · next round starts at once',
  banner:'<b>Landing is frozen by a red round.</b> New landings on this line stop; the <b>certified part (12) stays landable</b>. Retry is automatic. Blockers: <span class="mono">t260922-12-gate-ledger-debt-not-blocked</span>, <span class="mono">t261009-15-quiet-baseline-identity</span>.'};
 var auto=true;
 function $(i){return document.getElementById(i)}
@@ -222,6 +225,7 @@ function draw(k){
   $('cBench').textContent=s.bench;
   $('trigTxt').textContent=auto?s.trigger:'auto-run is off — a round starts only when someone presses run now';
   $('trigWhy').textContent=auto?s.why:'Nothing starts by itself while auto-run is off; the line just gets staler.';
+  $('trigHow').textContent=auto?s.how:'Nothing starts by itself while auto-run is off; the line just gets staler.';
   $('swTrack').className='track'+(auto?'':' off');
   $('rWho').textContent=s.rWho;
   var w=''; s.wait.forEach(function(r){w+='<tr><td class="mono">'+r[0]+'</td><td>'+r[1]+'</td><td class="mono">'+r[2]+'</td></tr>'});
