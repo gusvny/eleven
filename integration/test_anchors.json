@@ -4329,6 +4329,21 @@
    "note": "KI-01M4FKAWY0EP59PY0V0QZWWGV5 regression: moved main must not stop a lane for a human; judged through the public settle receipt",
    "sync_path": ""
   },
+  "integration/t261009-18/sc_line_landing_journey.py": {
+   "anchor": "behaviour",
+   "note": "t261009-18: the landing journey over real git repos and the real store files — linear history, reader-side record, one-per-ticket refusal, conflict bounce, cross-process serialization",
+   "sync_path": ""
+  },
+  "integration/t261009-18/sc_line_declaration_contract.py": {
+   "anchor": "contract",
+   "note": "t261009-18: the declaration reader's fail-closed contract — absent/malformed/unknown-version/duplicate-branch refusals, multi-repo shape, empty extra set legal",
+   "sync_path": ""
+  },
+  "integration/t261009-18/sc_old_flow_inert_face.py": {
+   "anchor": "behaviour",
+   "note": "t261009-18: coexistence — import writes nothing, one-way dependency source-text face, landing write-locality inside the develop area only",
+   "sync_path": ""
+  },
   "integration/t261009-19/sc_t26100919_certify_once.py": {
    "anchor": "behaviour",
    "note": "t261009-19 certification journey: at most one certification per tick (held guard refuses every trigger, second acquire gets no token), the record cites the run (run id/judged_by/booked_red/at) with zero counts/verdict keys and a verdict-restating append refused by name, the covered range derived from the shared seq order (same-seq landing excluded, stored covered_range a legal projection), and the green certified prefix answers landable even with a red certification later on the line (goal 8)",

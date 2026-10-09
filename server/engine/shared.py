@@ -5566,6 +5566,18 @@ def perkey_projects_root() -> pathlib.Path:
     return pathlib.Path(root)
 
 
+def develop_dir(project_key: str) -> pathlib.Path:
+    """The declared develop-line home of one project (t261009-18, buffer slice 1):
+    `<perkey_projects_root>/<key>/data/develop/`. Holds the line declaration
+    (`lines.json`), the append-only landing ledger (`landings.jsonl`), the landing
+    lock and the engine-owned line worktrees. Same project-key traversal guard as
+    `ticket_data_dir`; raises instead of returning a guessed path."""
+    key = str(project_key or "").strip()
+    if not PROJECT_KEY_RE.match(key):
+        raise ValueError("malformed project_key: %r (whitelist %s)" % (key, PROJECT_KEY_RE.pattern))
+    return perkey_projects_root() / key / "data" / "develop"
+
+
 def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
     """A finished ticket's archive directory (M1-3):
     <SANDBAR_PROJECTS_DIR|~/.sandbar/projects>/<key>/data/tickets/<id>/.
