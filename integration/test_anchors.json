@@ -1216,6 +1216,11 @@
    "anchor": "behaviour",
    "note": "moved-main settle convergence + rerun predicate (t261009-17)",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261009_20_settle_rerun_guard.py": {
+   "anchor": "source-text",
+   "note": "t261009-20: both settle_shape_needs_rerun routing sites must stay behind workflow.patched(SETTLE_RERUN_PATCH_ID) + the guarded decision expression",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -4327,6 +4332,11 @@
   "integration/t261009-17/sc_t26100917_moved_main_not_human.py": {
    "anchor": "behaviour",
    "note": "KI-01M4FKAWY0EP59PY0V0QZWWGV5 regression: moved main must not stop a lane for a human; judged through the public settle receipt",
+   "sync_path": ""
+  },
+  "integration/t261009-20/sc_settle_rerun_replay_guard.py": {
+   "anchor": "source-text",
+   "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
    "sync_path": ""
   },
   "integration/t261009-18/sc_line_landing_journey.py": {

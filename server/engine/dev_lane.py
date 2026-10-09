@@ -307,6 +307,18 @@ MAIN_SYNC_RECOVERY_PATCH_ID = "t260929-main-sync-abort-on-failed-resolve"
 #: replay the old shape verbatim (the counter resets and the text changes are
 #: replay-safe state/wording; only the new activity call needs the gate).
 MAIN_SYNC_SETTLE_FIRST_PATCH_ID = "t261006-07-main-sync-settle-first"
+#: t261009-20: re-guard of 7993697a (t261009-17). The settle-rerun early branch
+#: (`settle_shape_needs_rerun`) changes WHICH command the workflow schedules at a
+#: position an in-flight history may already have passed (rework / merge_check
+#: instead of _blocked) — it shipped without a patch gate and froze t261008-47
+#: with TMPRL1100 on replay (the e9daa05 / COUNTER_RESET_PATCH_ID family).
+#: Same-shaped boolean gate: a history created before the marker exists gets
+#: patched()=False → the OLD blocked path verbatim → skip == exact historical
+#: replay → the wedged ticket revives and stops for a human as before. Post-marker
+#: histories take the new rerun path. The routing decision itself is unchanged,
+#: only made history-aware; both call sites (main-sync settle and conflict
+#: resolution) shipped atomically in one commit, so one id covers both.
+SETTLE_RERUN_PATCH_ID = "dev-lane-settle-rerun-v1"
 # 260930（宿主令·nusuyou 需求说明第六条·KI-099 实案）：**未知相位绝不 raise**。
 # 病根两段：① `_auto_rework` 的两条拒绝返回可能是**空串**（`str(meta["stage"] or fallback)`
 # 而 meta['stage'] 为空、fallback 又非法）——旧路径（`_apply_rework`，patched 未激活的
@@ -2976,7 +2988,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                                          (sraw.get("remaining_files") or [])],
                         error=str(sraw.get("error") or ""))
                 if not sres.ok and settle_shape_needs_rerun(sres.error) \
-                        and self._conflict_rounds < MAX_CONFLICT_ROUNDS:
+                        and self._conflict_rounds < MAX_CONFLICT_ROUNDS \
+                        and workflow.patched(SETTLE_RERUN_PATCH_ID):
                     # t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): the measured
                     # shape names nothing a human can act on (merge commit on
                     # disk, tree clean, no unmerged entries, no residue) —
@@ -5031,7 +5044,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     remaining_files=[str(x) for x in (sraw.get("remaining_files") or [])],
                     error=str(sraw.get("error") or ""))
                 if not sres.ok and settle_shape_needs_rerun(sres.error) \
-                        and self._conflict_rounds < MAX_CONFLICT_ROUNDS:
+                        and self._conflict_rounds < MAX_CONFLICT_ROUNDS \
+                        and workflow.patched(SETTLE_RERUN_PATCH_ID):
                     # t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): the measured
                     # shape names nothing a human can act on — re-run (back to
                     # merge_check; the next round either converges against the
