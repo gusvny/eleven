@@ -49,7 +49,7 @@ try {
     const r = await call(EPICS_PREFIX, `${EPICS_PREFIX}?project=nope`)
     j.ok(r.status === 400, `未知 key → 400（实得 ${r.status}）`)
     j.ok(typeof r.body?.error === 'string' && r.body.error.includes('nope'), 'error 点名未知项目键')
-    j.ok(!(r.body?.error ?? '').includes('越出'), 'error 不伪装成穿越语义')
+    j.ok(!(r.body?.error ?? '').includes('outside the repository root'), 'error 不伪装成穿越语义')
   }
 
   // ── 子用例D 隔离条目：显式 502 透传注册表文案（不回落默认仓=不违隔离语义） ──

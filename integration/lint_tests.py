@@ -1521,6 +1521,12 @@ def main():
     lint_grants_field_parity()
     # L21 tier marker (t261004-42): the end-to-end admission rule, shape-only face
     lint_tier_markers()
+    # L22 stale pin (t261009-02): a scenario pin of a CJK literal that survives
+    # nowhere it could come from = the wording moved without its anchor. Cheap
+    # static face of "a wording change carries its pinning anchors in the same
+    # change"; stated limits live in integration/lib_stale_pin.py's docstring.
+    from lib_stale_pin import lint_stale_pins as _l22
+    _l22(REPO, errors)
     n_e, n_w = len(errors), len(warns)
     print("LINT done: %d error / %d warn" % (n_e, n_w))
     return 1 if n_e else 0

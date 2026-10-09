@@ -95,10 +95,10 @@ try {
     j.ok(dFpv.changed === true && dFpv.files.some((f) => f.path === 'src-changed.ts'),
       'fpv 项目根内泳道 diff 可见（宿主实报的变更 tab 空＝本断言的反面）')
     const dCross = await computeTicketDiff(fx.repoA, { id: 't-fpv-1', worktree: absWt, base_ref: base })
-    j.ok(dCross.changed === false && (dCross.emptyReason ?? '').includes('越出'),
+    j.ok(dCross.changed === false && (dCross.emptyReason ?? '').includes('outside the repository root'),
       '同一 worktree 换 sandbar 锚判界 → 仍拒（闸不弱化，只是基准随项目走）')
     const dEsc = await computeTicketDiff(fx.repoB, { id: 't-fpv-1', worktree: join(fx.repoB, '..', 'escape'), base_ref: base })
-    j.ok(dEsc.changed === false && (dEsc.emptyReason ?? '').includes('越出'),
+    j.ok(dEsc.changed === false && (dEsc.emptyReason ?? '').includes('outside the repository root'),
       'fpv 根外路径（../ 语义同级目录）仍拒')
   }
 } finally {

@@ -183,7 +183,7 @@ try {
     const rws = [...rwsT1, { repo: 'ghost', name: 'ghost', branch: 'lane/ghost', base_ref: t1.baseM }]
     const r = await computeTicketDiff(t1.proj, { id: 't1', worktree: t1.lane, base_ref: t1.baseR, repo_worktrees: rws })
     const g = r.repos.find((x) => x.repo === 'ghost')
-    ok(!!g && (g.emptyReason ?? '').includes('ghost') && (g.emptyReason ?? '').includes('未物化'),
+    ok(!!g && (g.emptyReason ?? '').includes('ghost') && (g.emptyReason ?? '').includes('not materialized'),
       `E1 缺席成员仓 emptyReason 点名仓（实得 ${g?.emptyReason}）`)
     ok((r.repos.find((x) => x.repo === 'member')?.files.length ?? 0) > 0, 'E2 他仓不受牵连照常出清单')
     ok(r.files.some((f) => f.path === 'member/m-feature.py'), 'E3 顶层清单不受缺席仓影响')
