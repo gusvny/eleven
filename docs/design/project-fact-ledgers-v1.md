@@ -130,12 +130,13 @@ Three homes follow:
 
 Facts are appended as records in the store and read through **one pull interface that answers as of a version**. That interface is the thing that makes the later move cheap: a reader never opens a file, so what is behind the interface can change without changing readers.
 
-Alongside it, four rules that exist because leaving version control has a price:
+Alongside it, five rules that exist because leaving version control has a price:
 
 - **The writer and the reason are recorded on every record.** Version control used to answer "who did this and why" for free; once facts leave it, the record must carry them. The reason is mandatory for the same reason it is mandatory for relations: a record whose reason cannot be written is a record that should not exist.
 - **Identifiers are minted, never reused, never positional.** This project has already seen a ticket identifier handed out twice because the next number was derived from what happened to be alive; a reused fault-mode number would silently rewrite what every report that cited it meant.
 - **Ordering comes from the ledger, not the clock.** The clock assumption is exactly the one that breaks when goal 11 arrives.
 - **A generated read-only projection stays in the repository.** It serves the reader who wants to see a change in review or reconstruct history offline, and it means a lost store is a recoverable incident. It is generated, so nobody hand-edits it and it cannot conflict.
+- **An entity and an observation of it are two records.** Something a ledger keeps may be an entity that persists while the facts about it are observations — seen in this period, against that revision, by this check. Without the split, "how long has this been open" cannot be answered and identity has to be re-derived from content every time. See [Ticket Relations v1](ticket-relations-v1.md).
 
 Availability is treated as part of the contract, because consulting the fault ledger is part of a ticket's normal inputs: a ledger that cannot be read is reported as unreadable and the work stops, rather than proceeding on "nothing known" — the same discipline as a gate that refuses to call missing data green.
 
