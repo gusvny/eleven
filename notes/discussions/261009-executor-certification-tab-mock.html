@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Executor panel — Certification tab (mock v5, 261009)</title>
+<style>
+:root{--bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;--faint:#6e7781;
+--blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--accent-soft:#dbe9ff;--green-soft:#dafbe1;--red-soft:#ffebe9;--warn-soft:#fff8c5}
+html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--muted:#8ea0b8;--faint:#5b6880;
+--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--accent-soft:#1d3550;--green-soft:#16301f;--red-soft:#3a1d1d;--warn-soft:#2a2313}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,system-ui,sans-serif}
+.bar{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+.bar .w{font-weight:600;font-size:12.5px}.bar .g{flex:1}
+.ico{border:0;background:transparent;color:var(--muted);cursor:pointer;font:inherit;padding:3px 6px;border-radius:5px}
+.ico:hover{background:var(--hover);color:var(--fg)}
+.tabs{display:flex;gap:2px;padding:6px 10px 0;border-bottom:1px solid var(--line);background:var(--panel)}
+.tab{padding:6px 12px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;color:var(--muted);font-size:12.5px}
+.tab.on{background:var(--bg);border-color:var(--line);color:var(--fg);font-weight:600;position:relative;top:1px}
+.wrap{max-width:880px;margin:14px auto 40px;padding:0 14px;display:flex;flex-direction:column;gap:12px}
+.pick{display:flex;align-items:center;gap:8px}
+.pick label{color:var(--muted);font-size:12.5px}
+select,input[type=text]{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:5px 8px;font:inherit;font-size:12.5px}
+select{min-width:210px}
+input[type=text]{width:170px}
+.sumb{margin-left:auto;color:var(--muted);font-size:12px}
+.card{border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.card .hd{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.card h3{margin:0;padding:8px 14px;border-top:1px solid var(--line-soft);font-size:11.5px;letter-spacing:.35px;text-transform:uppercase;color:var(--muted)}
+.card .pad{padding:10px 14px 14px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.dot.g{background:var(--green)}.dot.r{background:var(--red)}
+.state{font-weight:650;font-size:16px}
+.chip{display:inline-flex;align-items:center;border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--fg)}
+.chip.green{border-color:var(--green);background:var(--green-soft);color:var(--green)}
+.chip.red{border-color:var(--red);background:var(--red-soft);color:var(--red)}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
+.grow{flex:1}
+.k{color:var(--muted)}
+button.btn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:8px;padding:5px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+button.btn:hover{border-color:var(--blue)}
+button.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
+button.btn[disabled]{opacity:.45;cursor:not-allowed}
+.link{color:var(--blue);cursor:pointer;text-decoration:underline dotted;font-size:12px}
+.who{color:var(--faint);font-size:11.5px}
+.banner{border:1px solid var(--red);background:var(--red-soft);border-radius:10px;padding:9px 12px;font-size:12.5px}
+.banner b{color:var(--red)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line-soft)}
+th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.3px;font-weight:600}
+tr:last-child td{border-bottom:0}
+.st{font-weight:600}
+.st.g{color:var(--green)}.st.r{color:var(--red)}.st.w{color:var(--amber)}
+/* ---- the line: one bar, one boundary, nothing else ---- */
+.lb{display:flex;align-items:stretch;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.lb .s{display:flex;align-items:center;gap:6px;padding:0 10px;font-size:12.5px;white-space:nowrap;overflow:hidden}
+.lb .cert{background:var(--green-soft);color:var(--green);border-right:3px solid var(--green)}
+.lb .cert.frozen{border-right-color:var(--red)}
+.lb .wait{background:var(--warn-soft);color:var(--amber)}
+.lb .wait.frozen{background:var(--red-soft);color:var(--red)}
+.lb .n{margin-left:auto;font-weight:650}
+.lbt{display:flex;align-items:center;gap:10px;margin-top:6px;color:var(--faint);font-size:11.5px}
+.dialog{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:20px}
+.dialog.on{display:flex}
+.dlg{background:var(--bg);border:1px solid var(--line);border-radius:12px;max-width:520px;width:100%}
+.dlg h4{margin:0;padding:11px 14px;border-bottom:1px solid var(--line-soft);font-size:13.5px}
+.dlg .in{padding:12px 14px;font-size:12.5px;display:flex;flex-direction:column;gap:8px}
+.dlg .f{display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--line-soft)}
+pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="bar"><span class="w">sandbar</span><span class="g"></span>
+  <button class="ico" id="st">state: green</button><button class="ico" id="th">◑ theme</button></div>
+
+<div class="tabs"><span class="tab">Overview</span><span class="tab">Inspection</span><span class="tab">Metrics</span>
+  <span class="tab">Docs</span><span class="tab on">Certification</span><span class="tab">Settings</span></div>
+
+<div class="wrap">
+
+  <div class="pick">
+    <label for="lineSel">Line</label>
+    <select id="lineSel"><option selected>sandbar / develop-buffer</option></select>
+    <input type="text" id="lineFilter" placeholder="type to filter lines…">
+    <span class="sumb" id="sumb">12 certified · 3 waiting · 2 not promoted</span>
+  </div>
+
+  <div class="banner" id="banner" style="display:none"></div>
+
+  <div class="card">
+    <div class="hd">
+      <span class="dot g" id="dot"></span>
+      <span class="state" id="big">GREEN</span>
+      <span class="chip" id="cWhen">last round 21:40 · green</span>
+      <span class="grow"></span>
+      <button class="btn" id="btnRerun" style="display:none">Re-run the red round</button>
+      <button class="btn p" id="btnRun">Run a round now</button>
+    </div>
+    <h3>Line</h3>
+    <div class="pad">
+      <div class="lb">
+        <div class="s cert" id="segCert" style="flex:12"><span>certified · landable now</span><span class="n" id="segCertN">12</span></div>
+        <div class="s wait" id="segWait" style="flex:3"><span>waiting · next round</span><span class="n" id="segWaitN">3</span></div>
+      </div>
+      <div class="lbt">
+        <span id="lbBnd">certified at 21:40 (green)</span>
+        <span class="grow"></span>
+        <span id="lbProm">promote 2 → main · 1 signature</span>
+      </div>
+      <div class="who" style="margin-top:4px" id="lbCap">Left of the boundary is certified and landable now; right of it is landed but not covered yet. One round moves the boundary right; one signature promotes the certified part to main.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Last round</h3>
+    <div class="pad">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span><span class="mono" id="rWhen">21:40</span> · <span class="st g" id="rVerdict">green</span> · <span class="mono" id="rCounts">478 pass / 498 ran · 4 fail · 16 env</span> · <span class="mono" id="rDur">44m 12s</span></span>
+        <span class="grow"></span>
+        <span class="mono k" id="rRev">main@46d6e8bf + 3 lanes</span>
+        <span class="link" id="rRec">record ↗</span>
+      </div>
+      <div class="who" style="margin-top:5px" id="rWho">Run a round now: host, or the executor on its <span class="mono">rerun</span> grant · ~44 min on the serial bench · disabled while a round is running</div>
+      <div class="who" id="rBlock" style="margin-top:3px"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="card">
+      <h3>Waiting for a round <span class="k" id="wCount">3</span></h3>
+      <div class="pad"><table><thead><tr><th>Ticket</th><th>Title</th><th>Landed</th></tr></thead><tbody id="wRows"></tbody></table>
+        <div class="who" style="margin-top:6px">Waiting holds nothing: no round budget, no lock on the prefix.</div></div>
+    </div>
+    <div class="card">
+      <h3>Certified, not promoted <span class="k" id="pCount">2</span></h3>
+      <div class="pad"><table><thead><tr><th>Ticket</th><th>Certified by</th></tr></thead><tbody id="pRows"></tbody></table>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <span class="who">one signature covers the batch</span><span class="grow"></span>
+          <button class="btn p" id="btnSign">Sign &amp; promote</button>
+        </div>
+        <div class="who" style="margin-top:4px">who: host (or the executor on its <span class="mono">sign</span> grant)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Recent rounds</h3>
+    <div class="pad"><table><thead><tr><th>Round</th><th>Started</th><th>Counts</th><th>Verdict</th><th>Revision set</th><th></th></tr></thead><tbody id="runRows"></tbody></table></div>
+  </div>
+</div>
+
+<div class="dialog" id="dRun"><div class="dlg">
+  <h4>Run a round now?</h4>
+  <div class="in"><div>One round on the serial bench, on the current revision set. ~44 min.</div>
+    <pre id="runBody"></pre>
+    <div class="who">A red round freezes new landings on this line; the certified part stays landable.</div></div>
+  <div class="f"><button class="btn" data-c>Cancel</button><button class="btn p" data-c>Run</button></div>
+</div></div>
+
+<div class="dialog" id="dSign"><div class="dlg">
+  <h4>Promote the certified batch</h4>
+  <div class="in"><pre id="signBody"></pre>
+  <div class="who">The signature note records the round it rests on and the revisions promoted.</div></div>
+  <div class="f"><button class="btn" data-c>Cancel</button><button class="btn p" data-c>Sign &amp; promote</button></div>
+</div></div>
+
+<script>
+var GREEN={big:'GREEN',dot:'g',frozen:false,certN:12,waitN:3,
+ wait:[['t261009-20','guard the route change','22:0x'],['t261009-21','a waiting ticket holds nothing','—'],['t261009-22','lane map as the mock draws it','—']],
+ prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
+ rounds:[['run-01M4G2T7Q9K3…','21:40','478 / 498 ran · 4 fail · 16 env','green','main@46d6e8bf + 3 lanes'],
+         ['run-01M4G1P0X…','20:50','476 / 496 ran · 4 fail · 16 env','green','main@b3deb245 + 2 lanes'],
+         ['run-01M4FZK9Q…','17:40','474 / 494 ran · 4 fail · 16 env','green','main@a0325c14 + 2 lanes']],
+ banner:''};
+var FROZEN={big:'FROZEN BY RED',dot:'r',frozen:true,certN:12,waitN:3,
+ wait:[['t261009-20','guard the route change','22:0x'],['t261009-21','a waiting ticket holds nothing','—'],['t261009-22','lane map as the mock draws it','—']],
+ prom:[],
+ rounds:[['run-01M4G2T7Q9K3…','21:40','478 / 498 ran · 4 fail · 16 env','red · 2 blockers','main@46d6e8bf + 3 lanes'],
+         ['run-01M4G1P0X…','20:50','476 / 496 ran · 4 fail · 16 env','green','main@b3deb245 + 2 lanes'],
+         ['run-01M4FZK9Q…','17:40','474 / 494 ran · 4 fail · 16 env','green','main@a0325c14 + 2 lanes']],
+ banner:'<b>Landing is frozen by a red round.</b> New landings on this line stop; the <b>certified part (12) stays landable</b>. Blockers: <span class="mono">t260922-12-gate-ledger-debt-not-blocked</span>, <span class="mono">t261009-15-quiet-baseline-identity</span>.'};
+function $(i){return document.getElementById(i)}
+function draw(k){
+  var s=k==='green'?GREEN:FROZEN;
+  $('big').textContent=s.big; $('dot').className='dot '+s.dot;
+  $('banner').style.display=s.frozen?'block':'none'; $('banner').innerHTML=s.banner;
+  $('btnRerun').style.display=s.frozen?'inline-block':'none'; $('btnSign').disabled=s.frozen;
+  $('segCert').style.flex=s.certN; $('segCertN').textContent=s.certN;
+  $('segWait').style.flex=s.waitN; $('segWaitN').textContent=s.waitN;
+  $('segCert').className='s cert'+(s.frozen?' frozen':''); $('segWait').className='s wait'+(s.frozen?' frozen':'');
+  $('lbBnd').textContent='certified at '+s.rounds[0][1]+' ('+(s.frozen?'this round is red':'green')+')';
+  $('lbProm').textContent=s.prom.length?('promote '+s.prom.length+' → main · 1 signature'):'nothing to promote while the line is red';
+  $('lbCap').textContent=s.frozen
+    ? 'Left of the boundary is certified and still landable now; right of it is landed and waits for a green round to move the boundary.'
+    : 'Left of the boundary is certified and landable now; right of it is landed but not covered yet. One round moves the boundary right; one signature promotes the certified part to main.';
+  $('sumb').textContent=s.certN+' certified · '+s.waitN+' waiting · '+s.prom.length+' not promoted';
+  $('cWhen').textContent='last round '+s.rounds[0][1]+' · '+(s.frozen?'red':'green');
+  var w=''; s.wait.forEach(function(r){w+='<tr><td class="mono">'+r[0]+'</td><td>'+r[1]+'</td><td class="mono">'+r[2]+'</td></tr>'});
+  $('wRows').innerHTML=w; $('wCount').textContent=s.wait.length;
+  var p=''; s.prom.forEach(function(r){p+='<tr><td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td></tr>'});
+  $('pRows').innerHTML=p||'<tr><td colspan="2" class="k">a red round promotes nothing</td></tr>'; $('pCount').textContent=s.prom.length;
+  var rr=''; s.rounds.forEach(function(r){var cls=r[3].indexOf('red')>=0?'r':'g';
+    rr+='<tr><td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td><td class="mono">'+r[2]+'</td><td class="st '+cls+'">'+r[3]+'</td><td class="mono k">'+r[4]+'</td><td><span class="link">record</span></td></tr>'});
+  $('runRows').innerHTML=rr;
+  $('rVerdict').textContent=s.rounds[0][3]; $('rVerdict').className='st '+(s.frozen?'r':'g');
+  $('rWhen').textContent=s.rounds[0][1]; $('rCounts').textContent=s.rounds[0][2]; $('rRev').textContent=s.rounds[0][4];
+  $('rBlock').textContent=s.frozen?'blockers: t260922-12-gate-ledger-debt-not-blocked, t261009-15-quiet-baseline-identity':'';
+  $('runBody').textContent='line: '+$('lineSel').value+'\nrevision set: '+s.rounds[0][4]+'\ncovered by this round: '+s.wait.length+' waiting tickets\nbench: 1 serial slot · budget 44 min';
+  $('signBody').textContent=s.prom.length?s.prom.map(function(r){return r[0]+'   certified by '+r[1]}).join('\n'):'(nothing to promote while the line is red)';
+  $('st').textContent='state: '+(s.frozen?'frozen':'green');
+}
+$('st').onclick=function(){draw($('st').textContent.indexOf('green')>=0?'frozen':'green')};
+$('th').onclick=function(){var h=document.documentElement;h.dataset.theme=(h.dataset.theme==='dark'?'light':'dark')};
+$('btnRun').onclick=function(){$('dRun').classList.add('on')};
+$('btnSign').onclick=function(){$('dSign').classList.add('on')};
+$('btnRerun').onclick=function(){$('dRun').classList.add('on')};
+Array.prototype.forEach.call(document.querySelectorAll('[data-c]'),function(b){b.onclick=function(e){e.target.closest('.dialog').classList.remove('on')}});
+draw('green');
+</script>
+</body>
+</html>
