@@ -4687,6 +4687,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L3——(а)一张 `failed` 票（dev-lane 与巡检各一）在无 dismiss 时按 24 小时窗退休，dismiss 后**立刻**离板且可 restore；(b)造"某期次某路只有 failed"的形态，断言覆盖面**具名**报出该缺口，而不是读成"无发现"；(c)"读不到 dismissal 账本"时行**留在板上**并具名告警，绝不静默当"没人 dismiss 过"。
 
+> **复发（261010 07:17，升级形态；integration 岗登记）**：同一个碎片 `server/engine/tests/test_zz_t26100420_planted_anchor_case.py`（54 字节、内容一行 `BAD = "/home/user/Documents/sandbar/inspection.yaml"`）这次**不是留在 main 树干上，而是被提交进了泳道的 git 历史**：
+> - 出处：`t261009-47` 的 **arbitrate gen0 提交 `00886185`**（前一条 `07517577` implement 提交里就已经带上，`git log --diff-filter=A` 两处都点名）⇒ **未跟踪碎片被 `git add -A` 顺手收进批**；
+> - 后果：该票 `merge_check` 判 `泳道内 verify_lane code 绿灯` 红（`blocked_reason` 原文 `LINT done: 2 error / 1 warn`），而两条错的出处**正是这一个文件**——**L16**（新文件未申报 anchor）与 **L17**（测试内绝对家目录路径，回执把违规行逐字贴出）；
+> - **家族扫描（本岗做，不只修点名处）**：逐条扫 7 条在飞泳道找 `test_zz_*`/`*planted*`，**只有 `-47` 命中（2 处，另一处在它的 `out/` 下），其余 6 条为 0** ⇒ 本次是单例，不是疫情；
+> - **当轮处置**：已向 `-47` 发 `rework → implement`，note 里点名「**删除注入夹具**」、要求扫同类残留、复跑 `integration/lint_tests.py` 回到 `0 error / 1 warn`（当前 main 基线）并把尾部行贴进结果文件；并按在册 `KI-01M4H53WAP7FFS2CN3YP7XENPQ` 要求它在结果里点名该 rework 项（我会核两处：有没有点名 + 文件是否真消失）。
+>
+> **⇒ 为什么必须升级为修复票（原条目的出路还停在"建议"）**：这次复发证明了**"靠 finally 撤"这条防线在真实工程流里会被两道工序击穿**——① 场景被中断（`finally` 挡不住信号）；② 碎片被**提交**（`git add -A` 不认识它，settle 也不认识它）。原条目三条例出路（信号面清理／开场清白检查／lint 措辞可区分）**一条都还没落地**，且**当时没有开修复票**。本次已开票（见票面 `t261009-52`）。
+
 ## KI-01M4GN7MXKKXV1327KCVS8SZQW **纪律扫描器把"读"当"跑"：baselines 路径交给 sed/grep/cat 也会被判"developer 段禁跑集成"**(261009 实证;integration 岗登记)
 
 > **现象（261009 `t261008-47` 实案）**：该票被 `blocked`，理由是「【红线】developer 段禁跑集成（宿主令 260921）」，
