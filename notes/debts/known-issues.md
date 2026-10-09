@@ -4721,3 +4721,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 机理：票面的快照查询要由**该队列的 worker** 应答，而换手窗口里该队列**活 poller=0**（旧进程排空中、supervisor 未补位）⇒ 查询无人应答 ⇒ `op=show/list` 落到降级面（`stage=None`）。
 > **判据（三看，可与"工作流任务失败"区分）**：① `describe().status` 是否 `RUNNING`；② 历史尾部是否为 **`activity_task_scheduled` 在等**（不是 `workflow_task_failed`）；③ 该队列活 poller 数（换手窗口=0，真砖=可能有 poller 但每次 WFT 都失败）。
 > **纪律**：换手窗口期的票面降级**不得当砖处置**（别去补 worker、别去查重放）；且**不要批量换手**——在跑轮次的票逐条换、看完整周期再换下一条。
+
+## KI-01M4H53WAP7FFS2CN3YP7XENPQ **`rework` 带来的指令会被"顺路的 main-sync 消解轮"吃掉：那一轮报"本轮无 rework 项"，被指令的活儿从未发生**(261010 实测两次;integration 岗登记)
+
+> **现象（261010 04:xx，两例）**：为让两张票在**新码**下重建客户端产物，本岗发 `rework(to_stage=implement)` 并在 note 里写明"跑 `bash server/plugins/workbench/build-client.sh`、让 `lib/` 两个产物进批"。
+> 结果两张票的下一轮 `implement` 结果摘要分别是 *"Round 7 entry with **NO named rework item** … verified the lane absorbed the main-sync conflict round cleanly"* 与 *"**Nothing needed changing** … settle confirmation"* ——
+> **它们做的是"顺手把 main-sync 冲突消解掉"的那一轮，我给的活儿一条没做**；随后票直接进机跑段/闸，于是**同一个红（bundle 新鲜度）复现**。读盘复核：两票泳道 `lib/` 差集为 0、`git status` 干净、隔离目录里也只有 `create_plan` 条目 ⇒ **确实从未构建**（对比 `-22`：它那轮的 note 没被冲突轮吃掉，于是真跑了构建、产物被路径闸放行、那红转绿）。
+>
+> **机理**：lane 的 `implement` 轮有两种来源——**"结算/消解轮"**（main 动了、有冲突要收口；本轮以"把 main 并进来并落盘"为任务）与**"返工轮"**（带 rework 项）。当**两者同时存在**时，**消解轮先生效**，并把它那一轮记为"无 rework 项"⇒ 人给的指令在不报错的情况下消失。票面看起来一切正常（`status=ok`），所以**不差一点证据就发现不了**。
+>
+> **危害**：①**指令静默失效**——发出方以为说了、接收方以为没收到，票在同一个红上来回；②**归因误导**——复现的红看上去"和上次一模一样"，容易去查产品而不去查"那条指令有没有被执行"；③**多票同形**（凡 `integration/` 写集宽的票遇上 `test_anchors.json` 冲突就会踩）。
+>
+> **出路（本岗已按此处置，且写成纪律）**：**把"清障"与"派活"分成两轮**——先发一轮 `rework` 让它**专门**消解冲突（note 里明说"本轮不要做别的"），**确认树干净、main 已并进来之后**，**再发**一轮 `rework` 带上真正的活儿；发完要**在两处取证**：(а) 下一轮结果摘要里**是否点名了该 rework 项**；(b) 该轮的**产物是否真的出现**（本次=`lib/` 是否进差集 / 日志里有没有构建入口的调用）。**只有 (a)(b) 都成立才算"指令送达"。**
+> **工具面改进（归引擎票，可选）**：消解轮应把"本轮因冲突消解而**未执行** rework 项 X"**显式写进票面**（而不是只写"无 rework 项"），让"指令被吞"可被一眼看见；或把 rework 项**排队**到消解轮之后的第一个真轮次。
+>
+> **回归**：L3——造"同一轮既有 main-sync 冲突又有 rework 项"的形态，断言(а)票面**具名**报出"该 rework 项被本轮推迟/未执行"；(b) 该 rework 项在**冲突消解后的下一轮**被执行（正例）；(c) 两轮都完成后，被指令的产物**确实出现**在差集里。
