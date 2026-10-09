@@ -366,14 +366,13 @@ proof_rule: touching base runs the dependents' scenarios too
 {
   "id": "KI-227",
   "title": "an uncommitted change on main blocks other tickets' merges",
-  "state": "open",
   "blocking": false,
   "pattern": "merge_check dirty-tree guard",
   "trigger": "anyone leaves an uncommitted change in the main working tree"
 }
 ```
 
-**Today** these are prose entries in one file, edited in place; this is what the entity would look like. States: `open` / `booked red` / `fixed` / `obsolete`.
+**Today** these are prose entries in one file, edited in place; this is what the entity would look like. It carries no state: `open` / `booked red` / `fixed` / `obsolete` live in its **dispositions** (below), which is why the entity can stay unedited while its status moves.
 
 ### fault-mode disposition (fact) — "do we accept this, or must it be fixed?"
 
@@ -429,8 +428,18 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
   ],
   "why": "the UI copy contract is English",
   "suggestion": "use the stage id",
-  "confidence": "high",
-  "state": "open"
+  "confidence": "high"
+}
+```
+
+Closing it is a fact of its own, and it is decided by evidence rather than by a ticket's state:
+
+```json
+{
+  "finding": "fi-9c1e42a0",
+  "change": "closed",
+  "evidence": "the quoted text is gone from main as of 7c1d90ab",
+  "at": 1791530000000
 }
 ```
 
