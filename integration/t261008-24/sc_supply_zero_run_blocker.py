@@ -18,16 +18,11 @@ err 带供给装配签名（docker daemon 不可达），消费面 blockers=[] �
   D. 假拒绝护栏（按签名命名，不按计数）：
      - 合法零执行轮（空在册/probe-only：err 为空）→ 拦阻不命中，路由照旧 acceptance；
      - 非签名启动级文案（执行器整体超时，t260920-01 C 形态）→ 不命中，照旧保守计轮；
-  E. 合并闸绿跑前置（KI-217 出口①，同一机制）：merge_check 新增检查项
-     「验收场景在本树至少一次绿跑」真值表——
-       缺面 ⇒ 红点名 zero-run(KI-220)；sha 不配 ⇒ 红点名 stale（树变了）；
-       畸形面 ⇒ 红 fail-closed；合法零在册（no_scenarios）+sha 配 ⇒ 绿且点名理由；
-       ran>0 绿跑 + sha 配 ⇒ 绿；老回放字段缺省 ⇒ 红（永不默认绿）。
-
-与既有资产 intent 分工（防重复声明）：
-  · t260920-01-supply-assembly-seam 锁「真出口文案 × 签名 × 计轮账本」旧三环
-    （其 A1f/A2c 在本场景 C 段仍须绿，语义未动）——本条新增锁**第四环：零执行
-    形态在路由决策点成为命名拦阻**与**合并闸绿跑前置项**，彼场景不锁此二面；
+  E. **合并闸"绿跑前置"已被整条移除**（宿主令 260921 整条撤除；main 提交 265300e6 +
+     资产同步 e810facc）：merge_check 对"缺面 / sha 不配 / 畸形 / 合法零在册 / ran>0"五种
+     形态**都不再发射**该项 ⇒ 本段改钉"移除后的新真相"（五形态逐条断言条目缺席），
+     并**把这次移除给出的东西具名记下来**（E9 记录位：不带供给签名的合法零执行面已不再
+     被合并闸拦；覆盖收缩是有意决定、登记于 KI-220，不是事故、不静默）。
   · t260904-12 sc_supply_gate_ethred 锁 verify_lane supply 机制本体，不重复；
   · t260917-09 sc_tests_false_escalation_guard 锁场景级环境红/抖动豁免，不重复；
   · developer L1（test_t261008_24_zero_run_supply.py）锁纯函数真值表（构造串直驱）
@@ -300,38 +295,33 @@ def merge_check_item(agent_activities, shared, last_green_run, write_set=("src/a
 
 _, agent_activities = ENG[0], ENG[2]
 
-# E1 缺面（老回放字段缺省）⇒ 红点名 zero-run(KI-220)——永不默认绿
-item, why = merge_check_item(agent_activities, shared, {})
-ok(item is not None and item.get("green") is False,
-   "E1 缺绿跑面 ⇒ merge_check 新项红（got: %s)" % (why or json.dumps(item, ensure_ascii=False)[:120]))
-ok(item is not None and ("zero-run" in json.dumps(item, ensure_ascii=False)
-                         and "KI-220" in json.dumps(item, ensure_ascii=False)),
-   "E1b 红文本点名 zero-run(KI-220)")
+# ---- E 五形态真值表（移除后的新真相）：前置项整体撤除 ⇒ 逐形态断言"不发射" ----
+# 旧表（每种形态断言 merge_check 发射「验收场景在本树至少一次绿跑」项）随 265300e6 失效；
+# 这里逐形态改钉缺席，并把"移除给出的东西"记在 E9——覆盖收缩是决定，必须可见。
+FACE_SHAPES = [
+    ("E1 缺面（老回放字段缺省）", {}),
+    ("E2 sha 不配（树变了）", {"sha": "deadbeef" * 5, "ran": 2, "at": 1}),
+    ("E3 畸形面（fail-closed 面已撤，形态照样不发射）", {"sha": 12, "ran": "many"}),
+    ("E4 合法零在册（no_scenarios）", {"sha": "SELF", "ran": 0, "no_scenarios": True, "at": 1}),
+    ("E5 真·绿跑面（ran>0）", {"sha": "SELF", "ran": 3, "at": 1}),
+]
+for _label, _face in FACE_SHAPES:
+    _item, _why = merge_check_item(agent_activities, shared, _face)
+    ok(_item is None and _why and "item not found" in _why,
+       "%s ⇒ 前置项不发射（移除后的新真相；got: %s）"
+       % (_label, _why if _item is None else json.dumps(_item, ensure_ascii=False)[:120]))
 
-# E2 sha 不配（树变了）⇒ 红点名 stale
-item, why = merge_check_item(agent_activities, shared,
-                             {"sha": "deadbeef" * 5, "ran": 2, "at": 1})
-ok(item is not None and item.get("green") is False
-   and "stale" in json.dumps(item, ensure_ascii=False),
-   "E2 sha 不配 ⇒ 红点名 stale（got: %s)" % (why or json.dumps(item, ensure_ascii=False)[:120]))
-
-# E3 畸形面 ⇒ 红 fail-closed
-item, why = merge_check_item(agent_activities, shared,
-                             {"sha": 12, "ran": "many"})
-ok(item is not None and item.get("green") is False,
-   "E3 畸形面 ⇒ 红 fail-closed（got: %s)" % (why or json.dumps(item, ensure_ascii=False)[:120]))
-
-# E4 合法零在册（no_scenarios）+ sha 配 ⇒ 绿且理由在场（不造假绿）
-item, why = merge_check_item(agent_activities, shared,
-                             {"sha": "SELF", "ran": 0, "no_scenarios": True, "at": 1})
-ok(item is not None and item.get("green") is True,
-   "E4 合法零在册面 + sha 配 ⇒ 绿（got: %s)" % (why or json.dumps(item, ensure_ascii=False)[:120]))
-
-# E5 真·绿跑面（ran>0, sha 配）⇒ 绿
-item, why = merge_check_item(agent_activities, shared,
-                             {"sha": "SELF", "ran": 3, "at": 1})
-ok(item is not None and item.get("green") is True,
-   "E5 ran>0 绿跑面 + sha 配 ⇒ 绿（got: %s)" % (why or json.dumps(item, ensure_ascii=False)[:120]))
+# E9 记录位（不是新守卫，是"把移除给出的东西具名"）：不带供给签名的合法零执行面
+# ⇒ 命名拦阻**不**发射（也就是合并闸不再拦它）。这正是 265300e6 的有意移除：
+# 零执行供给红仍被拦（A 段），但"合法零执行"这一形态已放开；登记 KI-220。
+_legal_zero = {"exit_code": 0, "ran": 0, "failed": 0, "blockers": [], "error": ""}
+_cls = getattr(shared, "gate_zero_run_supply_blocker", None)
+_rte = getattr(shared, "supply_stop_route", None)
+_lz_blocker = _cls(_legal_zero) if _cls else "MISSING:shared.gate_zero_run_supply_blocker"
+_lz_route = _rte(_legal_zero) if _rte else "MISSING:shared.supply_stop_route"
+ok(_lz_blocker is None and not str(_lz_route).startswith("blocked"),
+   "E9 合法零执行面（无供给签名）已不再被拦——移除给出的东西具名在册（KI-220 / 265300e6）；got: %s / %s"
+   % (json.dumps(_lz_blocker, ensure_ascii=False)[:60] if _lz_blocker else "None", _lz_route))
 
 # E7 空写集收窄面（gen10 范围守卫，验收 round6 调和解 a 的具名钉）：空写集票=
 # 在途旧票/无物可验形态 ⇒ 前置项整体不发射（条目缺席），既有判定逐字保持——
