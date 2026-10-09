@@ -192,7 +192,7 @@ What that choice owes in return: **one registrar**, minting **one more than the 
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
 | **Record what cannot be derived; derive what can** | the state a landing sat on and the range a certification continued from are **not** stored — both are derived from the certification ledger's order | Proposed; `base` and `covered_from` were dropped for this reason (261009) |
 | **`seq` is the store's own order, not a table counter** | `"seq": 41077` — assigned when the record is written, by the one writer the store has, monotonic across record types, never reused, and **gaps are allowed and mean nothing** (a number, not a count). Never read from a clock | Proposed. Two things it buys: "the landings after the previous certification" becomes computable, and "read as of seq N" becomes the version cursor the ledger design asks for. Its total order is for **reading and range computation, not causality**: two lines' landings are concurrent whatever their numbers say, and that is what relations are for |
-| **The delivery records share one ordering space** | | the landings and the certifications are ordered by one `seq`, so "the landings after the previous certification" is computable | Proposed, and load-bearing: the freeze's culprit range (filtered to that line), the certified prefix and the uncertified range are all derived from it. Separate counters per record type — an auto-increment per file or per table — would bring back every field that was just dropped |
+| **The delivery records share one ordering space** | the landings and the certifications are ordered by one `seq`, so "the landings after the previous certification" is computable | Proposed, and load-bearing: the freeze's culprit range (filtered to that line), the certified prefix and the uncertified range are all derived from it. Separate counters per record type — an auto-increment per file or per table — would bring back every field that was just dropped |
 | **A record's own `at` is when that fact happened** | the freeze's opening record carries `at`; there is no `opened_at`, and no `closed_at` — the closing is a record of its own with its own `at` | Proposed; `opened_at` / `closed_at` were dropped for this reason (261009) |
 | **An entity carries only what was true when it came into being; everything after is another record keyed to it** | a freeze opens with its cause and its candidate set; an attribution change, a closure and a reopening are three further records | Proposed; the freeze episode and the inspection period were written as entities with mutable fields and are corrected below |
 | **A projection is not a record** | the ticket's outcome is a view over landings, certifications, promotions and reverts — it has no `id`, `seq` or `at` of its own | Proposed. If kept, it is a derived view carrying the cursor it was computed up to, droppable and rebuildable; the rebuild-and-compare is the drift check, and no fact may cite it |
@@ -202,13 +202,62 @@ What that choice owes in return: **one registrar**, minting **one more than the 
 
 **The older time shapes (kept for reading, not for writing):** `wall_s` as a duration in seconds (run results, and the certification examples before the rename above); `at` as integer milliseconds (executor actions, requests, alerts, grants audit); `ts` as float seconds (capacity limit audit); `at` as float seconds (inspection reviewed-paths); `ts` as an ISO string with offset (run results).
 
-## A. Delivery records (proposed — the buffer flow)
+## A. Delivery records (the buffer flow — built and proposed)
 
-**Status of this section:** the records are proposed, except the run's case rows, which exist today. Each entry says which.
+**Status of this section:** the shapes below were read from the modules that hold them, not from memory. **Built today** (a module writes and reads the shape, and a scenario exercises it): the line declaration, the landing, the certification, the freeze episode with its change rows, range growth, and the run with its case rows. **Still proposed**: the promotion and the ticket outcome, whose module is in flight while this is written. Each entry says which, and names the module for the built ones.
 
 **One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a promotion advances several of them and records all of them. Where such a state is derived rather than recorded, it is derived **per repository** too.
 
+### line declaration — "what is this line, what does it cover, who owns it, and what may land on it?"
+
+**Status: today.** The declaration is read by `server/engine/develop_line.py` and exercised by the line declaration contract and the line landing journey scenarios. It is the one record in this document that is **not** a ledger row, and the reason is in the entry's last paragraph.
+
+The declaration is a **file a person writes**, not a record the engine appends. One entry per line:
+
+```json
+{
+  "version": 1,
+  "line_id": "develop-buffer",
+  "scope": "epic develop-buffer",
+  "owner": "integration",
+  "repositories": [
+    { "name": "sandbar", "branch": "develop-buffer" }
+  ],
+  "extra_scenarios": []
+}
+```
+
+| Field | Means | Notes |
+|---|---|---|
+| `version` | the version of the declaration shape | an unknown version is an error, never a guess at a newer shape |
+| `line_id` | the line's identifier: what every other record cites as its `line` | unique among the lines of one project; a duplicate is an error |
+| `scope` | what the line covers — the answer to "what is this line for" | a declared fact, so a component line and an epic line differ in what they declare rather than in how they work |
+| `owner` | who carries the line's obligation | a **group or role**, never a person or a session: a line outlives whoever wrote its declaration |
+| `repositories` | the repositories the line runs on, each named with the **branch that realises it** | one branch realises **at most one** line; a branch named by two lines is an error, because the same content cannot be two lines' business |
+| `extra_scenarios` | the proof this line adds to the shared inventory | declared here, legitimately empty, and never hard-coded in the engine |
+
+**The errors it raises, by name.** A declaration file that cannot be read, a version the engine does not know, an entry that is not an object, a missing or malformed `line_id`, an empty or malformed repository list, a repository without a name or a branch, an `extra_scenarios` entry that is not a name — each is a **named error**. **An unreadable or missing declaration must never read as "nothing is declared"**: a project with no line and a project whose declaration failed to load are different facts, and only the first one is a normal state.
+
+**What a line is not, and why each "not" is written down.** Not a **branch name** — a branch is one way of realising a line, and naming lines after branches is what closes the door on a line whose repositories are separate. Not a **topology** — what a line covers and who owns it are declared facts, so adding a line is a declaration rather than a protocol change. Not a **piece of work** — work is an epic; a line is the integration container the work lands on. Not a **lane** — a lane is one ticket's working copy, and it outlives neither the ticket nor the landing.
+
+**Why this one is not a ledger row.** A ledger row is a fact that happened at a moment and that other records cite. A declaration is neither: it has no moment of its own (it has a version), and other records cite the line's **identifier**, not the declaration. So it has no minted `id`, no `seq`, and no `at` — the three things every record below this entry carries.
+
+**What the line's records derive.** Nothing in this table is a stored field; each row is computed from the records below it, and a cached copy must carry the cursor it was computed up to, be droppable, and be rebuildable.
+
+| Derived fact | Computed from | The rule |
+|---|---|---|
+| **landed** | the landing records of the line | a ticket is landed once its landing is recorded — one act over every repository the landing names |
+| **certified** | the certification records, ordered | a landing is certified when it is contained in the revision set of the line's latest **green** certification |
+| **delivered** | the promotion records | a landing is delivered when a promotion names it and `main` became the certified revision |
+| **waiting** | landings against certifications | landed and not covered by any certification yet: it holds no capacity and no lock, and it is **dated** (`waiting_since` from the landing's own `at`, because the record order decides, not a clock) and names the certification it waits for |
+| **the certified prefix** | the latest green certification's revision set | what may be delivered while nothing else changes; a red round freezes **new** landings and never takes this prefix away |
+| **a freeze's culprit range** | landings and certifications in one ordering space, filtered to the line | the landings **after the line's previous certification** — derived per line, never a field written onto a landing, and never widened to another line's landings that happen to land in between |
+
+A ticket's own outcome — landed, certified, delivered, waiting, with the implicated and reverted faces beside them — is the projection over this table; it has its own entry below.
+
 ### landing — "what content did this ticket put on this line, and on top of what?"
+
+**Status: today — in two shapes, in two files, and this is an open contradiction (see the end of this entry).** The landing code (`server/engine/develop_line.py`) writes the shape below; the faces that read landings (`server/engine/develop_certify.py`, and the promotion module) read the delivery ledger's `kind: "landing"` rows instead.
 
 Single repository:
 
@@ -247,7 +296,28 @@ Several repositories — still **one** landing, one act:
 
 Deriving it costs nothing and buys a check. Per repository, **the certified revision must be an ancestor of the revision that landed**: that one check catches a landing that skipped over certified content, a lane whose base is behind, and a landing that would revert content the line has already certified — reported per repository, because in a multi-repository project those failures are per repository. A repository the line has never certified is covered by the declared starting revisions, so the range never has an undefined beginning, and a repository the landing does not name simply takes no part in it.
 
+**What the landing code writes today.** Read from `server/engine/develop_line.py` (record version 1, appended to the line landing ledger `landings.jsonl` in the project's develop store):
+
+```json
+{
+  "id": "ldg-01M4GE0C2QV0F10V1STXN1K6E1",
+  "ticket": "t261008-45",
+  "line_id": "develop-buffer",
+  "revisions": { "sandbar": "9f3c2a1b" },
+  "base": { "sandbar": "3a91be07" },
+  "at": 1791507005123,
+  "by": "engine",
+  "version": 1
+}
+```
+
+Differences from the shape above, all of them open rather than settled: the line is `line_id` here and `line` there; the revision set is a map under `revisions` here and a list of `{repo, revision}` there; **there is no `seq`**, so "the landings after the previous certification" cannot yet be computed from this file; `by` replaces `actor`; `version` is present, which the conventions above ask for; and **`base` is stored**, which the conventions table says was dropped. `seeded_branches` appears when the landing had to create the line's branch.
+
+**Two landing shapes and two homes, and what each choice would cost.** The landing code appends to `landings.jsonl`; the certification, waiting and promotion faces read the delivery ledger and select rows by `kind: "landing"`. Nothing bridges the two today. Either the landing code writes the delivery ledger's shape into the delivery ledger (and the line landing ledger retires), or the delivery ledger reads the line landing ledger (and its own landing kind retires). Until one of them happens, **a landing recorded by the landing code is invisible to every face that reports whether content may be delivered** — the one question the flow exists to answer.
+
 ### certification — "may this content be delivered, and what was actually proved?"
+
+**Status: today.** Written and read by `server/engine/develop_certify.py` in the delivery ledger, in this shape, with two additions the module found necessary and declares: `judged_by` (what judged it) and `covered_range` (a projection of the records' order, recomputable and never authoritative). The `run` it cites exists today as well.
 
 ```json
 {
@@ -283,7 +353,7 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 
 ### run (fact) — "what actually executed, and what came of it?"
 
-**Status: the header is proposed; the case rows exist today** (without a run identity, which is the one field this document asks them to gain).
+**Status: the case rows and their run identity exist today; the header's summary fields are the part still proposed.** A run identity was added to the case rows (`run-<ULID>`, minted as a 48-bit millisecond prefix plus 80 random bits), which is what lets a certification cite a run instead of restating its counts. The header row itself — one row per run with the suite, source, width and duration — is not written yet.
 
 The run's own record, written once at the end of a run:
 
@@ -346,6 +416,8 @@ The run's own record, written once at the end of a run:
 
 ### freeze episode (entity) — "why is nothing landing on this line, and who is fixing it?"
 
+**Status: today.** Written and read by `server/engine/develop_certify.py`. Two additions the module declares rather than smuggles: the open row carries `kind: "freeze"`, and the change rows carry a fourth `change` value, `searched` — the range that was searched, so that "never search the same range twice" is checkable from records. This entry's other three kinds carry no place for it.
+
 What is true when the freeze opens:
 
 ```json
@@ -407,6 +479,8 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 **So there is no `state`, no `closed_at`, no `closed_by` and no `reopened_reason` on the episode** — writing the closure into the opening record would be editing a fact, and a field called `closed_at` sitting next to an `at` that means "opened" is the same instant under a second name. State, age and attribution are all **derived**: the state and the attribution are the latest change of that kind, and "how long was the line stopped" is the closing record's `at` minus the opening record's `at`. A freeze that never closes has no closing record, which is exactly what "still stopped" should look like.
 
 ### promotion — "what did a person approve, and what did main become?"
+
+**Status: proposed — the module that writes it is in flight while this is written**, and its shape is read from that module rather than from this document. Two things it adds to the shape below, both of them the point of the record: `signer`, `on_behalf_of` and `authority` are three separate fields, because a delegated signature and the order it rests on must stay distinguishable from the person who typed it; and a promotion that cannot name the certification it rests on is refused **by name**, never defaulted.
 
 ```json
 {
@@ -473,6 +547,8 @@ Two things must survive this simplification, or the guard is lost:
 What this costs: nothing in correctness, and one thing in presentation — a reader who wants "which lines still carry the withdrawn change" asks for a computation instead of reading a field. That is the same trade the rest of this document already makes.
 
 ### ticket outcome — "where did this ticket end up?"
+
+**Status: proposed.** It is a projection, so it has no `id`, no `seq` and no `at` of its own, and no fact may cite it; the derivation table under *line declaration* is the list of what it is computed from.
 
 Delivered:
 
@@ -968,9 +1044,11 @@ The truth about a ticket — its stage, its signature, its verdict, a send-back 
 
 ## Still open
 
-**One question only** — the rest of this list has been decided and is waiting to be built (below).
+**Three questions** — the rest of this list has been decided and is waiting to be built (below).
 
 1. **Does the ticket id become a ULID?** Kept as `t261009-10` for now; the consequences of changing it are listed in the identity section.
+2. **One landing record, in one home, in one shape.** The landing code writes `landings.jsonl`; the certification, waiting and promotion faces read the delivery ledger's `kind: "landing"` rows. The two shapes differ in the field names, in the revision-set form, in the presence of `seq`, and in whether `base` is stored. This is a single decision — which home survives — and until it is made, the records the landing code writes are invisible to the faces that answer "may this content be delivered". Evidence and both readings are in the *landing* entry above.
+3. **Is the landing's `base` stored or derived?** The conventions table says it was dropped, because the certified revision answers the same question and two answers eventually disagree. The landing code stores it: it records, per repository, the revision the line worktree started from and the fail-closed merge-base it computed before merging. Either the field goes (and the check reads the certification order), or the conventions table changes and says why a landing needs its own answer to what it sat on. One of the two must be withdrawn, and the withdrawal must say which check is then lost.
 
 ## Agreed, waiting to be built
 
