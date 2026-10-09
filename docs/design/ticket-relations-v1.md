@@ -52,17 +52,17 @@ related:
 7. Remedy work that names nothing it repairs is **incomplete** and does not get the permission in goal 6.
 8. The structures that already exist — epic membership and rework lineage — are readable in the same place as the new relations. One place to look, not three.
 9. An ordering kind (phase 2) may not be introduced until it can refuse to create a cycle, and it must not change the meaning of any gate for tickets that predate it.
-10. The ticket's own face, and the batch record that takes a certified prefix further, both show the relations of the tickets they contain.
+10. The ticket's own face, and the promotion record that takes a certified prefix further, both show the relations of the tickets they contain.
 11. No relation kind may change the meaning of an existing gate for tickets that predate it.
 12. **A second kind is load-bearing in phase 1: work that exists because a finding produced it** (inspection's loop). Its consumers are different from the first kind's — not a permission, but the closing of a finding, the deduplication of a finding across periods, and the evidence that decides whether a face earns its keep.
 13. **An entity and its observations are different records.** A finding persists; each period records an observation of it, naming the revision it was seen against. Without that split, "how long has this been reported" and "was this seen again" cannot be answered, and dedup has to lean on content alone.
 14. **Whether a finding is closed is decided by evidence, not by a ticket's state.** The quoted content no longer existing in main is a checkable condition; "a ticket was opened" is not.
-15. **Relations are project-level facts, not line-level ones.** The work that answers a finding may land on a different line and travel in a different batch, so the ledger lives in one place and is read across lines.
+15. **Relations are project-level facts, not line-level ones.** The work that answers a finding may land on a different line and travel in a different promotion, so the ledger lives in one place and is read across lines.
 
 
 ### Stakeholders
 
-- **The host / the person signing a batch** — cares that "why does this ticket exist" and "is the chain closed" are answerable in one look, without reading a story.
+- **The host / the person signing a promotion** — cares that "why does this ticket exist" and "is the chain closed" are answerable in one look, without reading a story.
 - **Whoever attributes a red** — cares that the attribution, once made, is a durable fact and not a sentence that the next reader may or may not find.
 - **Lanes and workers** — care that nothing here lets them award themselves a permission.
 - **Future maintainers** — care that the vocabulary stays small and each word means something the system actually does.
@@ -122,12 +122,12 @@ Phase 2, named now and deliberately not built now:
 - **Append-only means corrections are recorded, not erased.** A relation that turns out to be wrong is superseded by another record saying so. This means a reader must read the current state of a relation rather than its first record — and that the history of a wrong attribution stays visible, which is the point.
 - **Who may record what.** The lineage the engine observes itself is recorded by the engine. The causal relation is recorded by whoever attributes the red — a person or the patrol — because attribution is a judgement. What no ticket may record is a relation that grants itself a permission.
 - **Outcome, not a second kind.** Whether a repair *fixed* the implicated landing or *withdrew* it is recorded where the repair closes, not as a separate relation kind: it is the same relation with a different ending, and two kinds with near-identical consumers would drift apart.
-- **What this looks like when read.** A ticket's relations are visible in both directions: the benefited ticket shows what repaired or withdrew it, the remedy shows what it repairs, and the batch record names both the tickets it covers and the repairs it contains. A chain of repairs stays visible as a chain, because a repair that did not turn the buffer green produces the next repair, and a freeze that quietly becomes permanent is worse than the red it was hiding.
+- **What this looks like when read.** A ticket's relations are visible in both directions: the benefited ticket shows what repaired or withdrew it, the remedy shows what it repairs, and the promotion record names both the tickets it covers and the repairs it contains. A chain of repairs stays visible as a chain, because a repair that did not turn the buffer green produces the next repair, and a freeze that quietly becomes permanent is worse than the red it was hiding.
 - **Phase 2's ordering, when it comes.** Its consumer is readiness on the new lane only; it refuses to create a cycle, and refusing is loud rather than silent — a cycle that is quietly broken somewhere else would move the mistake away from where it was made.
 
 - **Where a relation is derivable, it is derived, and where it is not, a person records it.** On a main whose history is linear, one landing per ticket, the content a finding quotes can often be traced to the landing that introduced it — so the causal relation is derived mechanically rather than judged. Attribution by a person is for the cases where the trace fails, and it carries the recorder's name and reason like any other record.
 - **A finding is an entity; its observations are facts.** The entity persists across periods with an identity minted from its content; each observation says which period saw it and which revision it was seen against. Closing the entity is a separate fact, and it is decided by evidence (the quoted content is gone from `main`) rather than by the state of any ticket.
-- **The chain is read across lines.** A finding may describe content on one line while the work answering it lands on another and travels in a different batch, so these relations cannot live with a line: they are project-level facts, read the same way as the certification record.
+- **The chain is read across lines.** A finding may describe content on one line while the work answering it lands on another and travels in a different promotion, so these relations cannot live with a line: they are project-level facts, read the same way as the certification record.
 
 ### Key tradeoffs, stated plainly
 

@@ -17,7 +17,7 @@ related:
     note: the relation records and their rules
   - mode: dependency
     target: ../design/develop-buffer-v1.md
-    note: the delivery records (landing, certification, batch, freeze, revert)
+    note: the delivery records (landing, certification, promotion, freeze, revert)
 ---
 
 # Ledger Record Models v1 (what the ledgers store, and how)
@@ -33,6 +33,7 @@ related:
 | **main** | the delivered target | we no longer say "the delivered line" — that phrasing collided with *line* and caused exactly the confusion this table exists to stop |
 | **epic** | a piece of work | we avoid the phrase "a line of work" entirely |
 | **buffer** | the role a line plays, and the design's own name for it (develop-buffer) | not a separate object |
+| **promotion** | the act of moving a certified range of content to `main`, approved by a person (or a delegate) | **not** `batch` — in this project a batch already means a run of the test bench, and the word names the grouping rather than the two things that matter (a person approved it, `main` moved); **not** `delivery` — the engine already has an executor delivery workflow, and one word for two things is how `line` got into trouble; **not** `release`, which would claim versioning this design does not have; **not** `advance`, a retired operation name |
 
 ## Conventions that apply to every record
 
@@ -59,7 +60,7 @@ related:
 
 ## A. Delivery records (proposed — the buffer flow)
 
-**One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a batch advances several of them and records all of them. Where such a state is derived rather than recorded, it is derived **per repository** too.
+**One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a promotion advances several of them and records all of them. Where such a state is derived rather than recorded, it is derived **per repository** too.
 
 ### landing — "what content did this ticket put on this line, and on top of what?"
 
@@ -119,7 +120,7 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 
 | Field | Example value | Why it is there |
 |---|---|---|
-| `id` | `cert-261009-15` | The judgement, cited by batches and freezes |
+| `id` | `cert-261009-15` | The judgement, cited by promotions and freezes |
 | `line` | `default` | Which line this judgement is about |
 | `repos[].revision` | `9f3c2a1b` | The exact content the judgement covers |
 | `run` | `run-261009-14` | **Which run answered it.** A certification does not restate what a run measured — see below |
@@ -196,11 +197,11 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 
 **So there is no `state`, no `closed_at`, no `closed_by` and no `reopened_reason` on the episode** — writing the closure into the opening record would be editing a fact, and a field called `closed_at` sitting next to an `at` that means "opened" is the same instant under a second name. State, age and attribution are all **derived**: the state and the attribution are the latest change of that kind, and "how long was the line stopped" is the closing record's `at` minus the opening record's `at`. A freeze that never closes has no closing record, which is exactly what "still stopped" should look like.
 
-### batch — "what did a person approve, and what did main become?"
+### promotion — "what did a person approve, and what did main become?"
 
 ```json
 {
-  "id": "batch-261009-02",
+  "id": "prom-261009-02",
   "certification": "cert-261009-14",
   "line": "default",
   "repos": [
@@ -223,16 +224,16 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 
 | Field | Example value | Why it is there |
 |---|---|---|
-| `id` | `batch-261009-02` | Cited by a ticket's outcome and by any later withdrawal |
-| `certification` | `cert-261009-14` | **Which proof justifies this delivery** — a batch can never name content without one |
+| `id` | `prom-261009-02` | Cited by a ticket's outcome and by any later withdrawal |
+| `certification` | `cert-261009-14` | **Which proof justifies this delivery** — a promotion can never name content without one |
 | `line` | `default` | Which line it takes content from |
 | `repos[].revision` | `7c1d90ab` | What actually moved |
 | `tickets` | `["t261008-45", "t261008-46"]` | Whom it delivers — the only source for "delivered" |
-| `main_before` / `main_after` | `[{"repo":"sandbar","revision":"de46ce42"}]` / `[… "7c1d90ab"]` | Makes the batch a fact about a range; rollbacks and withdrawals can name it |
+| `main_before` / `main_after` | `[{"repo":"sandbar","revision":"de46ce42"}]` / `[… "7c1d90ab"]` | Makes the promotion a fact about a range; rollbacks and withdrawals can name it |
 | `signer` | `integration` | Who actually signed |
 | `on_behalf_of` | `host` / `null` | Delegation: the record names both sides |
 | `authority` | `宿主令 261009「...」` | The order being executed — the third field of the `by`/`who` split |
-| `note` | `two engine-hardening landings` | The human's own words about what this batch is |
+| `note` | `two engine-hardening landings` | The human's own words about what this promotion is |
 | `at` | `1791512000000` | Milliseconds since the epoch |
 
 ### revert — "this content was withdrawn; where does it still live?"
@@ -269,7 +270,7 @@ Each of those lines then discharges the obligation **in its own record** — git
 | `on` | `main` / `default` | Withdrawing from main and from a line are different acts with different propagation |
 | `at` / `by` | `1791515000000` / `host` | When, and who decided |
 | `reason` | `the lazy-path rewrite renamed a public constant` | Why the content had to go |
-| `implicated_lines` | `["default", "ui"]` | **The point of the record**: every line that still carries the withdrawn landing is named, because a merge keeps it silently and the next batch would reintroduce it |
+| `implicated_lines` | `["default", "ui"]` | **The point of the record**: every line that still carries the withdrawn landing is named, because a merge keeps it silently and the next promotion would reintroduce it |
 | *(the discharge)* | a record per line, `change: applied` | Whether a line has actually let go of the content is a change keyed to the revert, not a field on it — the same rule as everywhere else, and the states in use are `applied`, `pending` and `line retired` |
 
 ### ticket outcome — "where did this ticket end up?"
@@ -281,7 +282,7 @@ Delivered:
   "ticket": "t261008-45",
   "landed_at": "9f3c2a1b",
   "certified_by": "cert-261009-14",
-  "delivered_in": "batch-261009-02",
+  "delivered_in": "prom-261009-02",
   "reverted_at": null,
   "waiting_since": null
 }
@@ -305,7 +306,7 @@ Waiting for a certification:
 | `ticket` | `t261008-45` | One row per ticket |
 | `landed_at` | `9f3c2a1b` / `null` | The content it put on the line, if it has landed |
 | `certified_by` | `cert-261009-14` / `null` | The certification covering its landing — this, not delivery, is where the ticket's life ends |
-| `delivered_in` | `batch-261009-02` / `null` | The batch that carried it; `null` is normal and is **not** a defect |
+| `delivered_in` | `prom-261009-02` / `null` | The promotion that carried it; `null` is normal and is **not** a defect |
 | `reverted_at` | `null` / `1791515000000` | Set when the content it landed was withdrawn |
 | `waiting_since` | `1791510000000` / `null` | **What tells "waiting" apart from "stuck"**: a waiting ticket has a start time and a certification it is waiting for |
 
