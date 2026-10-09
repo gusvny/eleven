@@ -58,12 +58,17 @@ related:
 9. A red is attributed with **bounded** cost: the same revision is re-run once before any search, the per-lane scenario results are used as a free first filter, and only then is the range searched.
 10. A red never silently holds the fleet: it has a named owner and a named escalation point, and ranges already attributed are not searched twice.
 11. `main` keeps a human signature — now **one per batch** instead of one per ticket.
-14. A ticket's life ends at the buffer, not at `main`: the new flow lands it into the buffer automatically, then the ticket **waits for the certification that covers its landing** and ends when that certification arrives. The human review moves from the per-ticket merge gate to the batch that leaves the buffer — so the ticket's record must still show all three stages of its outcome (the revision it landed at, the certification that covered it, and whether it reached `main` or was later reverted there).
-15. Waiting for a certification **does not hold a slot**: a ticket that is only waiting for the next scheduled run must not consume the capacity that other tickets need.
 12. The new flow is built **alongside** the current one, not on top of it: while the new one is being built and validated the current flow keeps working unchanged, the new flow exists as a **new lane version** that a ticket opts into, and only after it has proven itself are tickets moved over and the old version retired — gradually, not in one step.
 13. Nothing introduced for the new flow applies **retroactively** to tickets running the old flow: a new precondition, a new proof or a new gate check ships inside the new version and is chosen by the tickets that use it, never injected into every ticket's gate.
+14. A ticket's life ends at the buffer, not at `main`: the new flow lands it into the buffer automatically, then the ticket **waits for the certification that covers its landing** and ends when that certification arrives. The human review moves from the per-ticket merge gate to the batch that leaves the buffer — so the ticket's record must still show all three stages of its outcome (the revision it landed at, the certification that covered it, and whether it reached `main` or was later reverted there).
+15. Waiting for a certification **does not hold a slot**: a ticket that is only waiting for the next scheduled run must not consume the capacity that other tickets need.
 16. A red certification **suspends landings into the buffer** until the buffer is green again: while the buffer is red, tickets that are still in flight finish their own proof but do not land. The remedy for a red that implicates a landing is a **new fix ticket opened against the buffer** — never a return of the implicated ticket to work — and the fix ticket is the one kind of work that may still land while the buffer is red.
 17. The exemption in 16 is **structural, not self-declared**: the fix ticket runs through its own workflow, so "may land while frozen" is a property of how the work was opened, not a flag any ticket can set on itself.
+18. **A landing is a set of repository revisions, not a branch.** In the single-line, single-repository phase the set has one member, but every record that names a landing, a certification or a batch can name a set — and can say **which members must move together**, because a change that is only safe as a pair has to land as one act, or it leaves a window in which the delivered state is broken.
+19. **A line is a declaration, not a topology.** What a line covers (a line of work, a component, one or more repositories), who owns it, and when it is expected to end are declared facts. Adding a component line or a repository line is a declaration rather than a change to the protocol, and a long-lived line is a different obligation rather than a different mechanism.
+20. **Boundary ownership follows the shared artifact.** When two sides each changed something and broke together, the owner is whoever owns the thing both sides changed — the shared component, or the repository. When the sides share nothing, the owner is whoever formed the batch.
+21. **A line's continuing existence is decided by evidence**, and the evidence is the one already collected: how often its landings are blocked, and how much conflict appears when its content is combined. A line that costs more than it isolates is split or ended, which is possible only because a line is a declaration.
+22. **The first phase arrives so that the later shapes are declarations plus at most one new mechanism** — a landing that spans repositories and must move as one act — never a rewrite of the certification and landing records.
 
 **Stakeholders and what they care about most:**
 
@@ -84,6 +89,8 @@ related:
 
 - **Not removing the human gate on main.** The gate becomes per-batch; it does not disappear.
 - **Not letting any ticket declare itself exempt from a freeze.** Only the fix workflow is exempt from stopped landings, and that is decided by how the work was opened.
+- **Not building several lines this cycle.** A line per component, a line per repository and coordinated landings across repositories are out of scope; what this cycle owes them is that they arrive as declarations rather than as a rewrite.
+- **Not defining a line by its branch.** A line is a declared scope with an owner; a branch is one way of implementing that scope, not its identity.
 - **Not keeping a per-ticket human merge gate in the new flow.** A person reviews the batch that leaves the buffer (the certified prefix), not each ticket; the ticket ends when its landing is certified. The old flow keeps its per-ticket gate for as long as it serves tickets.
 - **Not letting lanes skip their own scenarios.** The split is "the lane proves its change, the buffer proves the combination" — not "nobody proves anything until later".
 - **Not running the full suite after every landing.** Explicitly chosen: scheduled certifications, with the previous certified revision as the anchor that is always landable.
@@ -154,6 +161,34 @@ The rest follows from those two:
 - **If the fix does not turn the buffer green, the freeze stays** and the next fix ticket names the fix landing as its candidate culprit; the chain of fix tickets must stay visible, because a freeze that quietly becomes the permanent state is worse than the red it was hiding.
 - **The freeze is visible to people, not just to the machine.** Whoever signs the next batch has to be able to see that the buffer was frozen, for what, and by which fix ticket it reopened.
 - **What a fix repairs is a recorded fact, not a sentence in its description.** The relation between remedy work and the landing it repairs is what grants the exemption and what lets the benefited ticket record how it ended; see [Ticket Relations v1](ticket-relations-v1.md).
+
+### What comes after one line, and what the first phase must not foreclose
+
+One line is the first phase. The shapes that follow differ in **what a line is scoped to**, not in how a line works:
+
+- a line per line of work (an epic) — the shape a single developer reaches for first;
+- the same, for an epic that lives a long time: the mechanism is identical, and what differs is the **duration of the obligation** it creates;
+- a line per **component inside one project**, owned by the group that maintains that component;
+- and lines over **several repositories**, where the groups maintaining those repositories may be different groups again, and where the repositories can be managed separately.
+
+Two properties make those arrivals cheap later, and both have to be in place from the first phase because neither can be retrofitted:
+
+1. **A landing is a set of repository revisions, not a branch.** In the single-line phase the set has one member, but the records must be able to name a set — including which members have to move together. This is not speculative: the engine's lane vocabulary already admits projects whose repositories are separate, so a ledger that assumed one repository would be the part that has to be rewritten. And a change spanning two repositories that is only safe as a pair has to land as one act, or the delivered state has a window in which it is broken.
+2. **A line is a declaration, not a topology.** What it covers, who owns it, and when it is expected to end are declared facts. Then adding a component line or a repository line is a declaration rather than a protocol change, and a line declared long-lived is a *different obligation* rather than a different mechanism.
+
+Three consequences worth writing down now, because the single-line phase must not make them impossible:
+
+- **Certification generalizes upward, not sideways.** What gets certified is the **candidate set of revisions that would be delivered together**. One line is the special case where the candidate is that line's head; several lines, or several repositories, is the general case — and the rule is unchanged: landability means being contained in a certified candidate.
+- **Boundary ownership follows the shared artifact.** When two sides each changed something and broke together, the owner is whoever owns the thing both sides changed — the shared component, or the repository. When the sides share nothing, there is no artifact to own the boundary and the owner is whoever formed the batch. Without this rule, boundary problems belong to everyone and therefore to nobody.
+- **A line's existence is decided by evidence, not by habit.** A long-lived line pays a continuing obligation: it must keep taking in the certified state, and a withdrawn landing must be removed from it explicitly. Whether that is worth paying is a question about the line, and the evidence already exists — how often its landings are blocked, and how much conflict appears when its content is combined. A line that costs more than it isolates should be split or ended, which is possible only because a line is a declaration.
+
+**What "too simple" would look like**, stated so that a reviewer can catch it:
+
+- a record that says "the revision of the buffer", in the singular, with nowhere to put a second repository;
+- a batch that assumes one repository, or that cannot express "these two must land together";
+- a line identified by a branch name rather than by a declared scope and owner;
+- an owner attached to a person or a session rather than to a scope;
+- boundary problems with no owner, or with the batch's preparer as the only owner even when a shared component exists.
 
 ### Coexistence and rollout
 
