@@ -585,6 +585,28 @@ The questions it answers, none of which have an answer today:
 
 Two fields that were in the earlier draft are **gone**, for reasons this document applies everywhere: **the revision the period read is a property of the period**, not of each sighting (the revision is pinned when the period opens, so every finding in it shares it), and **`quote_fp` had no consumer** — the id already encodes the content, and nothing reads a separate quote fingerprint.
 
+### The grain is the fact, not the run
+
+A period that reports sixty-two findings and examines two hundred and twenty-seven paths writes **many records, not one blob**:
+
+| What happened | Records written |
+|---|---|
+| A finding seen for the first time | one **finding** record (the entity) |
+| A finding seen again | one **observation** record |
+| Each path the review examined | one **reviewed path** record |
+| The period itself | one **period** record: its identity and the revision it pinned |
+
+So a period with forty new findings out of sixty-two seen produces forty entity records, sixty-two observations, and the paths — and **no record anywhere holds a list**.
+
+**Why not one record per run.** The obvious alternative is what exists today: a single blob holding the period's findings list (that is the ticket's `findings` field, and what the report file contains). It is worse on every count that matters here:
+
+- **A list cannot be read as a stream.** "How long has this been open", "how often has it been seen", "was it re-verified against the newer state" are queries over sightings, and a list inside a per-period record turns each of them into a scan-and-parse across files.
+- **It makes the run the unit when the problem is the unit.** Findings persist across periods and are fixed independently of the run that noticed them; a per-run blob re-creates the same problem anew in every period and never lets it grow old.
+- **The record becomes arbitrarily large.** Sixty-two findings with evidence is a big object to append atomically, and one of them being malformed costs the whole period.
+- **It duplicates the entity across periods**, one copy per period, each of which can be verified differently — which is exactly the drift the entity/observation split exists to prevent.
+
+**The counts are not stored.** How many findings a period produced is a count over that period's observations, so it is a projection like any other — the period's record carries its identity and pinned revision, and the number on the face is computed. **The precedent is already in the store**: `reviewed.jsonl` writes one row per path per period rather than one row per period, and every other family in this document writes one row per fact.
+
 ### Where a period's output lives — and what the report file becomes
 
 Today a period writes **two** things outside the flow: the findings as a list **on the period ticket** (`t261009-09` carries 62 of them), and a **report file** per period per instance under the engine's `out/`, which nothing tracks. Asked whether the report stays a JSON file or becomes part of a stream, the answer follows from the rules this document already applies:
