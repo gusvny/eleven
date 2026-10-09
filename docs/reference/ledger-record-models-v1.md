@@ -79,6 +79,19 @@ Two consequences worth stating plainly. **The two minting rules stay two**, and 
 2. **The authority hands out blocks.** A writer leases a range (say 227–276) and increments inside it without asking again. Coordination drops to once per block, and — the useful part — it is **merge-safe**: two clones' appends can be merged because their numbers cannot overlap. What is lost is that the number stops being a count: it becomes an upper bound, and "how many are there" is a query.
 3. **Each writer has its own scope inside the id** (`KI-A-12`, `KI-B-7`): no coordination at all, still short and still sayable out loud, at the cost of the global sequence — nothing can read how many exist off the highest number.
 
+**When is a central mint justified at all?** The test is not how important the id is — it is **whether the thing itself is already created in one place**:
+
+| Object | Is its creation centralised anyway? | So the id is |
+|---|---|---|
+| a ticket | **yes** — a ticket exists only because the engine made it | **minted in that same step, at no extra cost.** There is no authority to add and none to remove; the number rides on the object's creation. This is also where its collision bug belongs: the minter has every ticket, alive or not, so it must look at all of them |
+| a fact in the store (landing, run, certification, promotion, relation) | **yes** — appends and current state already need one writer, for reasons that have nothing to do with ids | **minted in that same step.** The single writing authority is not built for the id; the id uses it |
+| a fault mode | **no** — the ledger is a file anyone who finds a fault can append to, and that is its virtue | **coordination-free: a ULID.** Here a mint would be an *added* authority, a step and a bottleneck for a low-frequency but locally-decidable act |
+| a finding | **no**, and it needs no mint at all | **derived from content**, so that a sighting in a later period computes the same id |
+
+So the rule is not "centralise unless you cannot": it is **use the authority that already exists for the object if there is one, and where there is none, use an id that needs no authority**. A central mint is a cost only when it is *added* — and the interesting case in this project was never the ticket number, which was free, but the fault ledger, where it would have been new.
+
+**And neither choice is free of risk; they are different risks.** A coordination-free id pushes its trust into the clock and the random source: a wrong clock costs ordering (not uniqueness), a poor random source costs collisions. A counter pushes its trust into shared state: whoever mints must see everything it counts. Pick the risk you can observe and test — for the fault ledger that is the random source; for tickets it was shared state, and it failed once, which is why the check that refuses a duplicate id exists.
+
 **Where a ULID is the wrong choice — three classes, and none of them is about uniqueness.**
 
 1. **Identity that has to be *derived from the content*.** A finding's id is recomputed from what it is about, because that is the only way the *same* problem, seen again in a later period, is recognised as the same one — which is what deduplication and "how long has this been open" rest on. A ULID is minted once at first sighting and cannot be recomputed at the second, so the two sightings would simply be two different things. **Findings cannot use ULIDs**, and neither can anything else whose identity is its content. (The sighting itself could carry a ULID, but it needs no id at all.)
