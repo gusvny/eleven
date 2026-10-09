@@ -160,6 +160,136 @@ _OUT_CONFIG = "sanctioned way out: complete the configuration and rerun, or take
 TICKET_TEST_FACE_NOTE = "lawful deliverable outside the write set (ticket-test-face rule)"
 
 
+# ---------------- Bundle-out-face rule (t261009-38: a declared build chain's output is a lawful deliverable) ----------------
+#
+# Deadlock on record (three instances): a ticket's frozen write set names a build
+# chain's SOURCE prefix only, the lane rebuilds the derived output, and the gates
+# then eat it from both sides — the settle stage path gate refuses the out-prefix
+# write (not in the write set) while merge_check's bundle_freshness red demands
+# exactly that rebuild (t261009-22, t261009-35: the rebuilt lib/ never entered a
+# commit). Repair stance follows the ticket-test-face precedent (t261004-25):
+# the declaration is the single source (server/merge-checks.yaml bundle_pairs —
+# the same list merge_check item 3.5 reads), and when the paired src prefix is
+# inside the ticket's own write set, a write under the out prefix is a LAWFUL
+# DELIVERABLE, admitted as a NAMED pass (note names rule + file + paired src),
+# never silently. The paired src NOT covered by the write set → the out write
+# stays refused (nothing widens by accident). Declaration missing / malformed /
+# without usable pairs → the gate admits nothing extra (fail-closed, never
+# fail-open). Everything here is pure and zero-IO like the rest of the module:
+# callers read the declaration file and pass the pairs in.
+
+BUNDLE_OUT_FACE_NOTE = ("lawful build-chain deliverable outside the write set "
+                        "(bundle-out-face rule, declared in server/merge-checks.yaml)")
+
+
+def parse_bundle_pairs(text: str) -> List[Tuple[str, str]]:
+    """Minimal parser for the bundle_pairs section of merge-checks.yaml — the
+    pure, single implementation of the declaration format (t261009-38 review C1:
+    it lives here, stdlib-only and zero-IO, so the verify_lane tool subprocess
+    can import it directly the way it imports is_ticket_test_face; agent_activities
+    and any other face import this same symbol — no second copy).
+
+    Accepts only the fixed shape: top-level `bundle_pairs:` followed by indented
+    `- src: <prefix>` / `out: <prefix>` entries with bare-token values; comments
+    and blank lines are skipped; any other indented line inside the section
+    raises ValueError (callers fail closed on the raise). Returns a list of
+    (src, out) prefix tuples with both members non-empty (an entry missing its
+    out is dropped, never guessed). Non-string input → [] (fail-closed)."""
+    if not isinstance(text, str):
+        return []
+    pairs: List[Dict[str, str]] = []
+    in_section = False
+    cur: Optional[Dict[str, str]] = None
+    for raw in text.splitlines():
+        ln = raw.replace("\t", "  ").rstrip()
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        if not ln.startswith(" "):
+            in_section = (s == "bundle_pairs:")
+            cur = None
+            continue
+        if not in_section:
+            continue
+        if s.startswith("- src:"):
+            cur = {"src": s[len("- src:"):].strip(), "out": ""}
+            pairs.append(cur)
+        elif s.startswith("out:") and cur is not None:
+            cur["out"] = s[len("out:"):].strip()
+        else:
+            raise ValueError("merge-checks.yaml has an unparseable line: %s" % s)
+    return [(p["src"], p["out"]) for p in pairs if p["src"] and p["out"]]
+
+
+def bundle_out_face(path: Any, write_set: Any, bundle_pairs: Any) -> Optional[str]:
+    """Is path a lawful bundle-out-face deliverable (t261009-38)?
+
+    Returns the paired src prefix (for the named pass note) when ALL hold:
+      1. path is a safe normalized path (malformed spellings cannot bypass the
+         judge — same _norm_path/_is_safe_path stance as the test face);
+      2. bundle_pairs is a list/tuple and some declared pair's out prefix covers
+         path; pair members that are not plain safe prefix strings are skipped,
+         never guessed;
+      3. that pair's src prefix is covered by the ticket's write set
+         (src == entry or src under entry + '/'), judged with the same
+         _within/_entries stance as the write-set match itself.
+    Anything else returns None = the write stays refused. Fail-closed by
+    construction: a missing/malformed/empty declaration, a malformed path, or an
+    empty/missing write set all return None — the gate admits nothing extra."""
+    if not isinstance(path, str) or not path.strip():
+        return None
+    norm = _norm_path(path.strip())
+    if not _is_safe_path(norm):
+        return None
+    if not isinstance(bundle_pairs, (list, tuple)):
+        return None
+    ws_ok, ws = _entries(write_set)
+    if not ws_ok:
+        return None
+    for pair in bundle_pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        raw_src, raw_out = pair[0], pair[1]
+        if not isinstance(raw_src, str) or not isinstance(raw_out, str):
+            continue
+        src = _norm_path(raw_src.strip().rstrip("/")) if raw_src.strip() else ""
+        out = _norm_path(raw_out.strip().rstrip("/")) if raw_out.strip() else ""
+        if not src or not out or not _is_safe_path(src) or not _is_safe_path(out):
+            continue
+        if not _within(norm, (out,)):
+            continue
+        if _within(src, ws):
+            return src
+    return None
+
+
+def bundle_out_prefixes(write_set: Any, bundle_pairs: Any) -> List[str]:
+    """Declared out prefixes whose paired src prefix is covered by the ticket's
+    write set (t261009-38) — the widen list a merge gate may add to the
+    whitelist it hands the lane tool, so the rebuilt output can enter the
+    commit. Pure; same fail-closed stance as bundle_out_face: a missing/
+    malformed/empty declaration or a missing/empty write set yields [] (nothing
+    widens). Normalized (trailing slash stripped, dedup) with first-seen order
+    kept, so the named note lists the members deterministically."""
+    ws_ok, ws = _entries(write_set)
+    if not ws_ok or not isinstance(bundle_pairs, (list, tuple)):
+        return []
+    outs: List[str] = []
+    for pair in bundle_pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        raw_src, raw_out = pair[0], pair[1]
+        if not isinstance(raw_src, str) or not isinstance(raw_out, str):
+            continue
+        src = _norm_path(raw_src.strip().rstrip("/")) if raw_src.strip() else ""
+        out = _norm_path(raw_out.strip().rstrip("/")) if raw_out.strip() else ""
+        if not src or not out or not _is_safe_path(src) or not _is_safe_path(out):
+            continue
+        if _within(src, ws) and out not in outs:
+            outs.append(out)
+    return outs
+
+
 def ticket_slug(ticket_id: Any) -> str:
     """Ticket slug (t261004-19 -> t261004_19): strip, then replace '-' with '_'.
     Malformed input (empty / path separators) returns "" = predicate always False
@@ -336,7 +466,8 @@ def _resolve_stage_rule(stage_id: str, template_rules: Any) -> Optional[Dict[str
 def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None,
                       ticket_id: str = "", ui_dirs: Any = None,
                       template_rules: Any = None,
-                      notes_out: Optional[List[str]] = None
+                      notes_out: Optional[List[str]] = None,
+                      bundle_pairs: Any = None
                       ) -> Tuple[bool, List[str], str]:
     """段 × 允许面判定。返回 (allowed, violations, reason_code)；allowed=True 时
     violations 为空、reason_code 为 ""。
@@ -351,6 +482,14 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
       出路=补配写集（沿用既有 helper 空写集 fail-closed 立场，显式化）。
     - 结果文件（.sandbar/.suyou）对所有段放行（不进 commit，与 SETTLE_PATHSPEC 排除  # naming-compat
       现实一致）。
+    - bundle_pairs (t261009-38, optional): the declaration pairs ((src, out)
+      prefixes) the caller loaded from this repo's server/merge-checks.yaml.
+      Default None = the judged face stays byte-identical to history; only the
+      write_set/join/self_heal kinds gain a fallback: a file that misses the
+      write set tries the ticket-test-face fallback, then the bundle-out-face
+      fallback (paired src inside the write set -> the out-prefix write is
+      admitted and NAMED; declaration missing/malformed/empty -> the fallback
+      judges None and nothing widens).
     """
     clean = _clean_files(files)
     rule = _resolve_stage_rule(stage_id, template_rules)
@@ -376,19 +515,31 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
             if notes_out is not None:
                 notes_out.append("%s: %s" % (TICKET_TEST_FACE_NOTE, f))
             return True
+
+        def _bundle_out_ok() -> bool:
+            # t261009-38: after the test-face fallback misses, a declared build
+            # chain's out prefix is a lawful deliverable when its paired src is
+            # inside the write set — the pass is NAMED (rule + file + paired src),
+            # never silent; a missing/malformed declaration admits nothing.
+            src = bundle_out_face(f, write_set, bundle_pairs)
+            if src is None:
+                return False
+            if notes_out is not None:
+                notes_out.append("%s: %s (src %s)" % (BUNDLE_OUT_FACE_NOTE, f, src))
+            return True
         if kind == "result_files":
             return "unauthorized_path"
         if kind == "write_set":
             if ws_ok and _within(f, ws):
                 return ""
-            return "" if _test_face_ok() else \
+            return "" if (_test_face_ok() or _bundle_out_ok()) else \
                 ("write_set_missing" if not ws_ok else "unauthorized_path")
         if kind == "join":
             if _within(f, ("integration",)):
                 return ""
             if ws_ok and _within(f, ws):
                 return ""
-            return "" if _test_face_ok() else \
+            return "" if (_test_face_ok() or _bundle_out_ok()) else \
                 ("write_set_missing" if not ws_ok else "unauthorized_path")
         if kind == "prefixes":
             return "" if _within(f, rule.get("prefixes") or ()) else "unauthorized_path"
@@ -406,7 +557,7 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
                 return ""
             if receipt and _within(f, (receipt,)):
                 return ""
-            return "" if _test_face_ok() else \
+            return "" if (_test_face_ok() or _bundle_out_ok()) else \
                 ("write_set_missing" if not ws_ok else "unauthorized_path")
         return "unknown_stage"  # 规则表内未知 kind：规则表自身配错，同样 fail-closed
 

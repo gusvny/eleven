@@ -3317,9 +3317,17 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             # remediation, never silent). Dedup, order kept — the remediation loop
             # re-judges each round and would emit the same note again.
             carve_notes: List[str] = []
+            # t261009-38: load the build-chain declaration (same file + parser as
+            # merge_check 3.5) and hand it to the gate — absent = lawful opt-out
+            # (no warning), malformed = one named warning and [] (fail-closed).
+            pairs, pairs_diag = _read_bundle_pairs_for_gate(cwd)
+            if pairs_diag:
+                activity.logger.warning("[%s/%s] %s-settle：%s",
+                                        ticket_id, stage_id, face, pairs_diag)
             allowed, violations, reason = path_gates.judge_stage_paths(
                 stage_id, judged, write_set=write_set, ticket_id=ticket_id,
-                template_rules=path_gate_rules, notes_out=carve_notes)
+                template_rules=path_gate_rules, notes_out=carve_notes,
+                bundle_pairs=pairs)
             remediation.extend(n for n in carve_notes if n not in remediation)
             # 闸②：受保护路径（真源与期望值，「存在才拦」，锚=泳道分叉点 base_ref）
             # t260912-03：定性仍走 judge_protected_paths 单点（判定严格先于任何 git add），
@@ -4735,34 +4743,65 @@ MERGE_CHECKS_CFG = "server/merge-checks.yaml"
 
 
 def _parse_bundle_pairs(text: str) -> List[tuple]:
-    """Minimal parser for merge-checks.yaml (same trade-off as model-routes: accept
-    only the fixed shape, raise on a broken file).
+    """Thin delegate to path_gates.parse_bundle_pairs — the pure, single
+    implementation of the declaration format lives there (t261009-38 review C1:
+    stdlib-only, zero-IO, importable by the verify_lane tool subprocess without
+    dragging in this activity module). Kept as a local name because merge_check
+    item 3.5 and the settle gate loader both call it. Fail-closed semantics are
+    unchanged: a broken file raises, the callers fail closed on the raise."""
+    return path_gates.parse_bundle_pairs(text)
 
-    Only the paired 「- src: <prefix>」 + 「out: <prefix>」 entries under bundle_pairs:
-    are recognized, with bare-token values.
-    """
-    pairs: List[Dict[str, str]] = []
-    in_section = False
-    cur: Optional[Dict[str, str]] = None
-    for raw in text.splitlines():
-        ln = raw.replace("\t", "  ").rstrip()
-        s = ln.strip()
-        if not s or s.startswith("#"):
-            continue
-        if not ln.startswith(" "):
-            in_section = (s == "bundle_pairs:")
-            cur = None
-            continue
-        if not in_section:
-            continue
-        if s.startswith("- src:"):
-            cur = {"src": s[len("- src:"):].strip(), "out": ""}
-            pairs.append(cur)
-        elif s.startswith("out:") and cur is not None:
-            cur["out"] = s[len("out:"):].strip()
-        else:
-            raise ValueError("merge-checks.yaml has an unparseable line: %s" % s)
-    return [(p["src"], p["out"]) for p in pairs if p["src"] and p["out"]]
+
+def _read_bundle_pairs_for_gate(cwd: Any) -> Tuple[List[tuple], str]:
+    """t261009-38: load the bundle_pairs declaration for the settle stage path
+    gate — the SAME file (MERGE_CHECKS_CFG) and the SAME parser as merge_check
+    item 3.5, so a chain cannot be declared for the merge gate and unknown to
+    the settle.
+
+    Returns (pairs, diag):
+      - file absent = a lawful opt-out (the merge-check face treats absence the
+        same way: no declared chains, no extra checks) → ([], "") with NO
+        warning (a non-declaring project's lanes must not get recurring noise);
+      - read/parse failure → ([], "<named reason>"): the gate receives [] and
+        admits nothing extra (fail-closed, never fail-open), and the CALLER
+        logs the named warning once per settle. cwd may be str or Path."""
+    if cwd is None:
+        return ([], "no lane root to read %s from (named, fail-closed)" % MERGE_CHECKS_CFG)
+    cfg = Path(cwd) / MERGE_CHECKS_CFG
+    try:
+        if not cfg.is_file():
+            return ([], "")
+        return (path_gates.parse_bundle_pairs(cfg.read_text("utf-8")), "")
+    except Exception as e:
+        return ([], "bundle-out-face declaration unreadable/malformed (%s): %s"
+                % (MERGE_CHECKS_CFG, e))
+
+
+def _bundle_widened_write_set(lane_root: Any, ticket_write_set: Any) -> Tuple[List[str], str]:
+    """t261009-38: the merge gate's effective whitelist = the ticket write set
+    plus the declared build-chain out prefixes whose paired src the write set
+    covers — the SAME declaration (server/merge-checks.yaml bundle_pairs) the
+    settle gate and merge_check item 3.5 read, so both faces agree on one
+    source. This is the merge-check face of the bundle-out-face rule: without
+    it, a lane that rebuilds a declared output (its src changed) passes the
+    settle gate and then deadlocks one step later at the out-of-set whitelist
+    red (measured: t261009-22/-35).
+
+    Returns (effective_write_set, note): note is "" when nothing widened
+    (declaration absent / malformed / no usable pair / no src covered — the
+    malformed case keeps the named diag so the operator sees why nothing
+    widened; fail-closed, never fail-open). The whitelist judgement itself
+    stays with the lane tool — this only fixes which set it is judged against,
+    and the note NAMES the rule and the admitted prefixes (never silent)."""
+    base = list(ticket_write_set or [])
+    pairs, diag = _read_bundle_pairs_for_gate(lane_root)
+    extra = path_gates.bundle_out_prefixes(base, pairs)
+    if not extra:
+        return base, ("" if not diag else "%s (no widening, fail-closed)" % diag)
+    return (base + extra,
+            "%s: whitelist widened with declared build-chain output prefixes %s "
+            "(paired src inside the ticket write set)"
+            % (path_gates.BUNDLE_OUT_FACE_NOTE, ", ".join(extra)))
 
 
 def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any]:
@@ -5265,11 +5304,18 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             lane_admin = sc["tree"] / "server" / "admin.py"
             admin_bin = str(lane_admin if lane_admin.is_file() else
                              Path(__file__).resolve().parents[1] / "admin.py")  # cross-project without an engine layout: fall back to the main-tree copy
+            # t261009-38: the whitelist is judged against the ticket write set
+            # WIDENED with the declared build-chain out prefixes whose paired src
+            # the write set covers (same declaration as the settle gate and item
+            # 3.5; absent/malformed declaration widens nothing, fail-closed).
+            # The note names the rule and the admitted prefixes so a green
+            # whitelist that admitted a rebuilt output is never silent.
+            eff_ws, bundle_note = _bundle_widened_write_set(sc["tree"], sc.get("write_set"))
             vp = await asyncio.create_subprocess_exec(  # async (ticket t260903-09: a blocking subprocess would freeze the event loop)
                 "python3", admin_bin, "call", "verify_lane",
                 json.dumps({"lane": "code", "path": str(sc["tree"]),
                             "base": wl_base, "require_base": True,
-                            "write_set": list(sc["write_set"]),
+                            "write_set": list(eff_ws),
                             # t261004-25: pass the ticket id down — verify_lane's
                             # write-set whitelist then admits ticket-test-face files
                             # via is_ticket_test_face (named green note).
@@ -5335,6 +5381,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 unregister_owned_spawn(vp)
             checks.append({"item": "泳道内 verify_lane code 绿灯", "green": green, "detail": detail,
                            "id": "verify_lane_code",
+                           # t261009-38: a whitelist green that admitted a declared
+                           # rebuilt output carries the named rule note on the
+                           # receipt (never silent); nothing widened = no key.
+                           **({"note": bundle_note} if bundle_note and green else {}),
                            **({} if green else {
                                "reason_code": "verify_red",
                                # 文件级归因在 verify_lane 回执 detail 文本里（保持文本，
