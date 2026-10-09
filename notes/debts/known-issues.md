@@ -4179,3 +4179,27 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L1——脏检查在"未提交改动与本票写集不相交"时的判定与声明一致，"不可由本票修复"写进红文案；
 > L3——制造一处 main 侧未提交改动，跑到 merge_check，断言票面**点名来源**、且票**不被推回上一段**。
+
+## KI-228 **僵尸 holder 与"无人轮询的队列"**：票的专用 worker 停了，槽位与台账仍显示"在跑"（261009 实证：两张终态票各占一个槽，reconcile 探活点名 `no_poller`；integration 岗登记）
+
+> **机制（读盘实证）**：`~/.sandbar/projects/sandbar/concurrency-state.json` 的 holders 里有两张票 `t261008-49` / `t261009-08`，各持一个 `reason: running` 的槽位；
+> 但 `op=show` 对两者都报 **`工单查询失败（terminal）`** —— **票已终态，槽位还活着**。
+> `op=concurrency reconcile=true` 逐票探活后具名清账，`probe_errors` 原文：
+> `no_poller: snapshot unavailable for ticket t261008-49 - queue sandbar-ticket-t261008-49 has 0 live pollers (the dedicated worker stopped polling or ...)`。
+> 清账后 holders 由 5 降为 3（限额 10）。同类现象另有一例：`t261008-43` 收到 `retry_qc` 后 **40 秒状态不变**（仍 `merge_check/blocked`），且它**不持有槽位**。
+> 同期 watchdog 也在报 `ledger_missing_rows`（在飞票没有台账行）——三个面互相印证同一个事实：**票在账上是"在跑"，在机器上没有人在干**。
+>
+> **危害**：
+> ①**额度被死票占着**——限额 10、在持 5，其中 2 个是鬼，**真实并发比账面小**，而调度只看账面；
+> ②**票静默停摆**——没有 worker 轮询它的专用队列，信号（如 `retry_qc`）即使投递也无人消费，票既不前进也不报错；
+> ③**三个面互相矛盾**（槽位说 running、show 说 terminal/blocked、watchdog 说台账缺行），**读的人没法判断该信哪个**。
+>
+> **触发条件**：票的专用 worker 因故停止轮询（被杀/崩溃/重启未拉起）而工作流仍在——**而没有任何东西把票从"在跑"降级**。
+>
+> **出路（建议，实现口径归修复票）**：
+> ①**在飞票的 worker 存活性要成为一等事实**（与 holder 同面被巡检看）：探活失败 ⇒ **具名降级**，不许继续显示 `running`；
+> ②**reconcile 的探活要周期性自动跑**（今天是人想起来才跑一次），其 `no_poller` 结论必须进告警面；
+> ③**blocked 必须有原因**：今天存在 `blocked_reason` 为空的 blocked 票（`t261008-43`），读的人无从判断——空原因即缺陷，不是"没事"。
+>
+> **回归**：L1——终态票不得持有槽位（清账判定：`dropped` 具名、holders 递减）；
+> L3——杀掉一张在飞票的专用 worker，断言它在限定时间内被**具名降级或清账**（而不是继续 `running`），且降级理由里点名 `no_poller` 与队列名。
