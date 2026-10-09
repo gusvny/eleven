@@ -251,6 +251,12 @@ The original design had a **revert** record: which landing was withdrawn, where 
 | Whether a line has actually let go | **Not a stored state at all — a check.** A promotion must not re-introduce a patch that was withdrawn, and that is answered by comparing content at promotion time (patch identity), not by a per-line flag that someone has to remember to update |
 | "Closed" versus "delivered" for the affected ticket | The projection: `reverted_at` is derived from the withdrawal's relation plus the promotion that carried it |
 
+**Why the relation is kept, and why it is not another derivable field.** The tempting argument — "the withdrawal is visible in the content, so derive it" — was tested against the cases: an exact `revert` undoes the diff, but a **partial** withdrawal undoes part of it, a change can be the *inverse-looking* diff of an earlier one for an unrelated reason, a revert of a revert withdraws the withdrawal, and once the earlier landing has been edited by later work "its patch" is not a well-defined object. Content tells you *what the diff is*; it cannot tell you *that this work exists to withdraw that landing*. That is a judgement, so it is recorded the way judgements are recorded — with a recorder, a reason and the landing it names.
+
+**It needs no new kind.** The relation is the existing one for "this work exists because of that ticket", whose **outcome is recorded where the work closes** — `withdrawn` rather than `fixed forward`. A separate kind for withdrawals would be a second way to say the same thing, which is what the outcome field exists to prevent.
+
+**And it has its consumers**, which is the ledger's own admission test: the promotion guard (the set of patches that must not come back) and the affected ticket's projection (`reverted_at`). One scope limit is recorded honestly: the relation names a **landing**, while the guard compares **patches**; for an exact withdrawal those are the same thing, and for a partial one the reason must say so rather than the design pretending to a finer granularity than it has.
+
 Two things must survive this simplification, or the guard is lost:
 
 1. **The withdrawal is recorded as a relation**, not just as a diff. A revert commit's message is not a fact the flow can read; the relation is what the promotion check consults, and it is recorded by whoever decided to withdraw (a judgement, with a name and a reason, like any attribution).
