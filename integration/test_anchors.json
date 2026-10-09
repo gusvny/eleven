@@ -1222,6 +1222,11 @@
    "note": "t261009-20: both settle_shape_needs_rerun routing sites must stay behind workflow.patched(SETTLE_RERUN_PATCH_ID) + the guarded decision expression",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261009_31_ticket_dismiss.py": {
+   "anchor": "contract",
+   "note": "t261009-31: dismissal journal contract — named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, payload key shape dismissed:{at,who,reason}, no-inspection-import pin, append-OSError propagation",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261009_28_landing_delivery_ledger.py": {
    "anchor": "behaviour",
    "note": "t261009-28 L1 (developer): the landing act appends one validate_row-clean delivery row through append_rows with a writer seq, legacy landings.jsonl refused by name (LandingLegacyLedgerError), no stored base, act-time ancestor check from the ledger-derived certification, torn-ledger/rejected-row/duplicate named failures with zero records, git all-or-nothing unchanged",
@@ -4387,6 +4392,16 @@
   "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
    "anchor": "behaviour",
    "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
+   "sync_path": ""
+  },
+  "integration/t261009-31/sc_t26100931_dismiss_journal_contract.py": {
+   "anchor": "contract",
+   "note": "t261009-31: the dismissal journal/operation contract through the public ops — one-row append, named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, append-failure propagation",
+   "sync_path": ""
+  },
+  "integration/t261009-31/sc_t26100931_dismiss_reader_face.py": {
+   "anchor": "contract",
+   "note": "t261009-31: the read face — list/detail rows carry dismissed:{at,who,reason}, read failure degrades to named dismissed_note, no DONE-family reclassification, CLI ops human-only and signal-free",
    "sync_path": ""
   },
   "integration/t261009-28/sc_t26100928_one_home_landing_record.py": {

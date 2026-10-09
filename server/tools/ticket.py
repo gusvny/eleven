@@ -140,7 +140,10 @@ TOOL = {
                     'project 必传）/update（结算/验收/收口/返工）'
                     '/list（结构化，可按 project/epic 过滤）/show/rework（打回）'
                     '/pause·resume（段间暂停·恢复，t260914-04）'
-                    '/cancel（记名单票终结：残渣票清场，who/reason 必填，判据=模块头清场 runbook）。'
+                    '/cancel（记名单票终结：残渣票清场，who/reason 必填，判据=模块头清场 runbook）'
+                    '/dismiss·restore（t261009-31 人工处置失败票：who/reason 必填记名，'
+                    '把失败行摘出板面/撤回摘除——只记 audit journal，非 workflow 信号，'
+                    '不改状态机；人工动作，agent 角色名拒收）。'
                     'accept/advance/dispatch-next 在 v2 引擎已取消（自动推进+事后看产物）。'
                     'status 状态机 dispatched→settled→verified→closed/rework，'
                     'stage_state=running/awaiting/awaiting-human/blocked 为进度维度，两者正交。'),
@@ -151,11 +154,12 @@ TOOL = {
                                               'advance', 'dispatch-next', 'rework',
                                               'sign', 'retry_qc', 'pause', 'resume',
                                               'authorize', 'ruling', 'cancel',
-                                              'close_out', 'concurrency']},
+                                              'close_out', 'concurrency',
+                                              'dismiss', 'restore']},
             'caller_project': {'type': 'string', 'description': '调用方项目身份（t260915-12 跨项目闸）：显式声明优先于 env/cwd 推导；写操作身份与目标票项目不符=拒收（cross_project_refused），确需跨项目带 cross_project 旗。引擎仓树内 cwd 不推导（防间接调用凭空造身份）'},
             'cross_project': {'type': 'object', 'properties': {'by': {'type': 'string', 'description': '谁在越权（记名）'}, 'reason': {'type': 'string', 'description': '为什么跨项目（理由必填入账）'}}, 'required': ['by', 'reason'], 'description': '越权豁免旗（记名留痕可查）：declared 身份跨项目写操作的显式放行钥匙；缺理由=拒收'},
             'cross_project_reason': {'type': 'string', 'description': '越权旗扁平形（理由必填；by 缺省取 by|who）——与 cross_project.reason 互斥'},
-            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc/pause/resume/cancel 必填；create 可指定否则自动生成）'},
+            'id': {'type': 'string', 'description': '工单 id（update/show/accept/advance/dispatch-next/rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 必填；create 可指定否则自动生成）'},
             'project': {'type': 'string', 'description': '项目 key（机器级注册表 ~/.sandbar/projects/<key>/project.yaml；create 必传、无默认值；list 可选过滤，不传=全部项目）'},
             'epic': {'type': 'string', 'description': '立项代号（epic-linkage 机制，可选）：notes/epics/<代号>.md 必须存在否则 create 拒收；合法则 workflow 打 EpicCode search attribute，可按 EpicCode 查询捞出。list 可按 epic 过滤（先强校验，不存在的代号明确报错而非空表）'},
             'workflow': {'type': 'string', 'description': '工作流模板 id（create 必填，见 workflow list）'},
@@ -175,14 +179,14 @@ TOOL = {
             'status': {'type': 'string', 'enum': ['dispatched', 'settled', 'verified', 'closed', 'rework']},
             'stage_state': {'type': 'string', 'enum': ['running', 'awaiting', 'awaiting-human', 'blocked']},
             'note': {'type': 'string', 'description': '备注（结算摘要/验收结论/返工原因；pause/resume 为可选理由，上限由 workflow intake 把关）'},
-            'reason': {'type': 'string', 'description': 'cancel=清场理由 / close_out=收口依据（两者皆必填非空）：终结后 admin.log 与 workflow 事件历史按此串精确对账；建议 ≤300 字符（保跨项目记名条目 cross_project_uses 全文入账；残渣票判据=模块头清场 runbook）。close_out 的理由=凭什么认定工作已完成（事后审计唯一锚点）'},
+            'reason': {'type': 'string', 'description': 'cancel=清场理由 / close_out=收口依据 / dismiss·restore=处置理由（t261009-31，必填非空，绝不默认）：终结后 admin.log 与 workflow 事件历史按此串精确对账；建议 ≤300 字符（保跨项目记名条目 cross_project_uses 全文入账；残渣票判据=模块头清场 runbook）。close_out 的理由=凭什么认定工作已完成（事后审计唯一锚点）'},
             'pending_add': {'type': 'string', 'description': '追加一条挂起项（遗留问题，不硬改交回）'},
             'to_stage': {'type': 'string', 'description': 'rework 打回目标 stage（缺省回上一段）'},
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
             'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/sandbar-ws/<id> 隔离目录（老 base 粘滞））'},
-            'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume/cancel 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume/cancel 必填非空——正规入口不落 op-local）'},
-            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume/cancel 收）'},
+            'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume/cancel/dismiss/restore 必填非空——正规入口不落 op-local；dismiss/restore 拒收 agent 角色名）'},
+            'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 收）'},
             'gate': {'type': 'string', 'description': 'sign：审批门标识（可选，缺省空串透传）'},
             'decision': {'type': 'string', 'enum': ['approve', 'reject'], 'description': 'sign：审批决定（缺省 approve=放行推进；reject=打回）'},
         },
@@ -1587,6 +1591,59 @@ def _hatch_debts(a):
             'debts': debts}
 
 
+def _dismiss_restore(a, action):
+    """t261009-31 人工处置失败票：dismiss（摘出板面）/ restore（撤回摘除）。
+
+    契约：人工动作——who/by 必填非空且非 agent 角色名、reason 必填非空（绝不默认），
+    这些在 CLI 层先具名拒收一遍（引擎层同规则复核）；工单存在性走 engine ticket-list
+    全量做存在闸（查不到全量=拒收，绝不静默跳过闸）；只记 audit journal（append-only），
+    绝不发 workflow 信号、不改状态机、不写票 meta——workflow 自己的历史仍是票怎么结束的
+    真源。拒绝路径零写入（引擎层 dir-digest 用例钉死）。"""
+    tid = str(a.get('id') or '').strip()
+    if not tid:
+        raise ValueError('%s 需要 id（工单 id 必填）' % action)
+    who = str(a.get('by') or a.get('who') or '').strip()
+    if not who:
+        raise ValueError('%s 需要 who/by（人工签名必填——无签名的人工处置绝不收）' % action)
+    reason = str(a.get('reason') or '').strip()
+    if not reason:
+        raise ValueError('%s 需要 reason（处置理由必填非空，绝不默认）' % action)
+    mod = _ticket_dismiss_mod()
+    known = _known_ticket_ids()
+    if known is None:
+        raise ValueError('%s 拒收：无法核验工单存在（ticket-list 全量不可得）——'
+                         '存在闸宁拒不猜' % action)
+    fn = mod.dismiss_ticket if action == 'dismiss' else mod.restore_ticket
+    res = fn(mod.journal_dir(), ticket_id=tid, who=who, reason=reason,
+             known_ticket_ids=known)
+    if not res.get('ok'):
+        raise ValueError(res.get('error') or '%s refused' % action)
+    return res
+
+
+def _ticket_dismiss_mod():
+    """engine ticket_dismiss 模块单点（lazy import，与 _poc 同目录族）。"""
+    import importlib
+    import sys as _sys
+    engine_dir = str(TEMP_POC)
+    if engine_dir not in _sys.path:
+        _sys.path.insert(0, engine_dir)
+    return importlib.import_module('ticket_dismiss')
+
+
+def _known_ticket_ids():
+    """存在闸人口：engine ticket-list 全量 id 集（None=列表不可得，调用方拒收）。
+    只读，不缓存（每次处置现查，防陈旧名单放行幽灵票）。"""
+    try:
+        out = _poc('ticket-list', {})
+    except Exception:
+        return None
+    if not out.get('ok'):
+        return None
+    rows = (out.get('result') or {}).get('tickets') or []
+    return {str(r.get('id') or '').strip() for r in rows} - {''}
+
+
 def run(args):
     op = args.get('op')
     if op == 'create':
@@ -1627,6 +1684,10 @@ def run(args):
         return _repair_hatch(args)
     if op == 'hatch_debts':
         return _hatch_debts(args)
+    if op == 'dismiss':
+        return _dismiss_restore(args, 'dismiss')
+    if op == 'restore':
+        return _dismiss_restore(args, 'restore')
     raise ValueError('未知 op: %r' % (op,))
 
 
@@ -1640,7 +1701,7 @@ def run(args):
 
 _TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，含 op>\'\n'
                      'op: create/update/list/show/rework/sign/authorize/retry_qc'
-                     '/pause/resume/cancel/repair_hatch/hatch_debts'
+                     '/pause/resume/cancel/dismiss/restore/repair_hatch/hatch_debts'
                      '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
                      '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
 

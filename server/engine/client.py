@@ -2728,6 +2728,33 @@ async def _terminal_face_stage_from_memo(desc: Any) -> Dict[str, Any]:
             "last_stage_note": note, "last_stage_history": hist_out}
 
 
+# ---- t261009-31: ticket-dismissal read face (augmentation helpers) -----------
+#: Read failure note prefix shared by every dismissal degradation site (a read
+#: failure = the `dismissed` key is absent AND a named note travels in the
+#: payload — never a silent "not dismissed", same contract as the void path).
+
+def _dismissed_read_last() -> Dict[str, Dict[str, Any]]:
+    """LAST-row-wins map {ticket_id: row} from the dismissal journal (raises on
+    read failure — the caller degrades with a named note). Rows without a
+    ticket_id are nobody's voucher and never enter the map."""
+    from ticket_dismiss import journal_dir, read_dismiss_journal  # noqa: PLC0415
+    last: Dict[str, Dict[str, Any]] = {}
+    for _r in read_dismiss_journal(journal_dir()):
+        _tid = str(_r.get("ticket_id") or "").strip()
+        if _tid:
+            last[_tid] = _r          # keep walking: the LAST row wins
+    return last
+
+
+def _dismissed_face_of(last: Dict[str, Dict[str, Any]], ticket_id: Any) -> Optional[Dict[str, Any]]:
+    """Consumer face for one ticket from the last-row map: `{at, who, reason}`
+    when the standing action is dismiss; None when not dismissed (payload key
+    shape is fixed at dismissed:{at,who,reason}; the action stays internal —
+    ticket_dismiss.dismissed_face is the single point)."""
+    from ticket_dismiss import dismissed_face  # noqa: PLC0415
+    return dismissed_face(last.get(str(ticket_id or "").strip()))
+
+
 async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
                                  exec_status: str) -> Dict[str, Any]:
     """终态票可渲染失败面（ticket-query kind=terminal 回执的 face 键，t260919-02）。
@@ -2793,7 +2820,7 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         inst, per = _legacy_inspection_instance_period_of(tid)
     sig_face = await _terminal_face_last_signal(handle)
     stage_face = await _terminal_face_stage_from_memo(desc)
-    return {
+    face = {
         "exec_status": exec_status or "未知",
         "ticket_id": tid,
         "project": project,
@@ -2830,6 +2857,19 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         # 绝不编造。
         **sig_face,
     }
+    # t261009-31: the terminal failure face carries the same dismissal facts
+    # (dismissed:{at,who,reason}; read failure = key absent + dismissed_note —
+    # never a silent "not dismissed"). A dismissed row is NOT a done ticket:
+    # this face keeps exec_status and every failure field verbatim.
+    try:
+        _dlast = _dismissed_read_last()
+        _dface = _dismissed_face_of(_dlast, tid)
+        if _dface is not None:
+            face["dismissed"] = _dface
+    except Exception as e:  # noqa: BLE001 — journal read failure degrades, observable
+        face["dismissed_note"] = ("dismiss journal read failed (face not augmented): "
+                                  "%s: %s" % (type(e).__name__, e))
+    return face
 
 
 def _classify_infra_error(e: BaseException) -> Dict[str, Any]:
@@ -2940,13 +2980,25 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
             "ticket": _inspection_query_meta(tid, snap, exec_status, _close_txt),
             "pulse": _pulse_from_desc(desc) if exec_status == "RUNNING" else None,
         })
+    # t261009-31: the detail face carries the same dismissal facts as the list
+    # rows (dismissed:{at,who,reason}; read failure = key absent + dismissed_note
+    # in the payload — never a silent "not dismissed").
+    _detail_meta = dict((snap or {}).get("meta") or {})
+    try:
+        _dlast = _dismissed_read_last()
+        _dface = _dismissed_face_of(_dlast, tid)
+        if _dface is not None:
+            _detail_meta["dismissed"] = _dface
+    except Exception as e:  # noqa: BLE001 — journal read failure degrades, observable
+        _detail_meta["dismissed_note"] = ("dismiss journal read failed (detail not "
+                                          "augmented): %s: %s" % (type(e).__name__, e))
     return _ok({
         "ticket_id": tid,
         "run_id": handle.result_run_id or handle.run_id,
         "exec_status": exec_status or None,
         "engine": (snap or {}).get("engine") or "",
         "snapshot": snap,
-        "ticket": (snap or {}).get("meta") or {},
+        "ticket": _detail_meta,
         # Running pulse (t260825-03): while RUNNING, pull the pending activity heartbeat
         # out of describe ({stage,gen,polls,session_kb} + heartbeat time); non-RUNNING or
         # no heartbeat → degraded to None.
@@ -3024,6 +3076,17 @@ def _inspection_query_meta(ticket_id: str, snap: Dict[str, Any],
                               "reason": _vrow.get("reason")}
     except Exception:
         pass  # read failure = key absent (honest degradation; ticket-list names the same failure via voided_note)
+    # t261009-31: the inspection detail face carries the same dismissal facts
+    # (same contract as the dev-lane detail above — a dismissal is per ticket,
+    # machine-wide, engine-agnostic).
+    try:
+        _dlast = _dismissed_read_last()
+        _dface = _dismissed_face_of(_dlast, ticket_id)
+        if _dface is not None:
+            meta["dismissed"] = _dface
+    except Exception as _de:  # noqa: BLE001 — journal read failure degrades, observable
+        meta["dismissed_note"] = ("dismiss journal read failed (detail not augmented): "
+                                  "%s: %s" % (type(_de).__name__, _de))
     meta["close_time_txt"] = close_time_txt
     # t260916-05：模板拓扑导出透传（快照门内 additive 键；workbench detail.topology
     # → 泳道图唯一图源通道——巡检 detail 无 workflow_id，模板级兜底通道不存在）。
@@ -3530,8 +3593,27 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             if not isinstance(inspection_info, dict):
                 inspection_info = {"kind": "inspection", "enabled_instances": []}
             inspection_info["voided_note"] = _voided_note
+    # t261009-31: dismissal row augmentation — one pass over ALL rows (every
+    # assembly site: full snapshot / degraded / terminal-failed / minimal).
+    # A dismissed ticket's row carries `dismissed:{at,who,reason}` (the UI
+    # re-classifies the row out of the board from this key; status/stage_state
+    # keep the engine words verbatim — a dismissal is NOT a done ticket). The
+    # LAST journal row for the ticket decides (dismiss | restore: a restore
+    # removes the key). Read failure = rows unchanged + result-level
+    # `dismissed_note` (never fabricated, never silently zeroed).
+    _dismissed_note = ""
+    try:
+        _dlast = _dismissed_read_last()
+        for _r in rows:
+            _dface = _dismissed_face_of(_dlast, _r.get("id"))
+            if _dface is not None:
+                _r["dismissed"] = _dface
+    except Exception as e:  # noqa: BLE001 — journal read failure degrades (rows untouched, observable)
+        _dismissed_note = "dismiss journal read failed (rows not augmented): %s: %s" % (type(e).__name__, e)
     rows.sort(key=lambda r: -(r.get("created") or 0))
     result: Dict[str, Any] = {"count": len(rows), "tickets": rows}
+    if _dismissed_note:
+        result["dismissed_note"] = _dismissed_note
     if inspection_info is not None:
         result["inspection_filter"] = inspection_info
     if id_prefix:
