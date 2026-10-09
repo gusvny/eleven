@@ -47,7 +47,7 @@ related:
 | Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
 | **Record what cannot be derived; derive what can** | the state a landing sat on and the range a certification continued from are **not** stored — both are derived from the certification ledger's order | Proposed; `base` and `covered_from` were dropped for this reason (261009) |
-| **A summary that is read far more often than its source is kept, if it can be checked against it** | the certification carries counts, the fingerprint and the duration although every run row carries the same environment facts | The test: would a reader be forced to open the raw body to make a decision they make daily? And can the summary be verified against the body? A restatement that fails both tests is duplication (`base`, dropped); a digest that passes both is a summary |
+| **A summary lives with the data it summarises** | a run's counts, environment, width and duration are fields of the **run** record; a certification cites the run instead of restating it | The test for a summary: would a reader be forced to open the raw body to make a decision they make daily? and can it be checked against the body? If yes it is kept — **at the level of the data, not one level up**. Anything that fails both tests is duplication (`base`, dropped) |
 | A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 | **A landing is one act over every repository it names: all or nothing** | see the multi-repository example under *landing* | Proposed — see below for why a partial landing is not an option |
 
@@ -100,64 +100,36 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 
 ```json
 {
-  "id": "cert-261009-14",
-  "candidate": "cand-261009-14",
+  "id": "cert-261009-15",
+  "candidate": "cand-261009-15",
   "line": "default",
   "repos": [
     { "repo": "sandbar", "revision": "9f3c2a1b" }
   ],
-  "seq": 41076,
-  "tickets": ["t261008-45", "t261008-46"],
-  "ran": {
-    "suite": "full",
-    "scenarios": 445,
-    "duration_s": 2132
-  },
-  "env_fp": "0febeeb6da6b25dc...",
-  "env_reds": ["t260916-25"],
+  "run": "run-261009-14",
   "booked_red": "known-red-baseline@2026-10-04",
-  "verdict": "green",
-  "driver": "integration/run_scenarios.py",
-  "at": 1791508600000,
-  "evidence": "ledger/scenario-results.jsonl#run-261009-14"
+  "judged_by": "integration/run_scenarios.py",
+  "seq": 41076,
+  "at": 1791508600000
 }
 ```
 
 | Field | Example value | Why it is there |
 |---|---|---|
-| `id` | `cert-261009-14` | This run, cited by batches and freezes |
-| `candidate` | `cand-261009-14` | **What is proved is the set of revisions that would be delivered together**, not a branch: the line's head today, a merge of heads once there are several lines |
-| `line` | `default` | Which line's candidate this is |
-| `repos[].revision` | `9f3c2a1b` | The exact content under proof |
-| `seq` | `41076` | Order, for the same reason as on a landing. The certified prefix is then just the certifications on this line, in order — **derived, not restated** — which is what makes "the greatest certified revision is always landable" true |
-| `tickets` | `["t261008-45", "t261008-46"]` | Which tickets' landings are inside the covered range: what lets a batch say whom it delivers |
-| `ran.suite` | `full` / `fast-set` | Which proof was run |
-| `ran.scenarios` | `445` | How much was run — evidence for arguing the fast set's membership |
-| `ran.duration_s` | `2132` | What the proof cost, **in seconds** (≈ 35 minutes here). Named for what it is rather than after the clock it was read from — `wall_s` said "wall-clock seconds" and nobody should have to know that. The existing run-result rows still carry `wall_s`; see the older shapes below |
-| `env_fp` | `0febeeb6da6b25dc...` | **What makes two runs comparable at all** — a hash of the toolchain versions and the test-protocol libraries, so a result can be reused or trusted only when this matches. Read the honest caveat below: it covers less than the name suggests |
-| `env_reds` | `["t260916-25"]` | Failures that were environmental — **never counted as content reds** ("could not run" is not "red") |
-| `booked_red` | `known-red-baseline@2026-10-04` | Which expected-red list this judgement used: what tells a new red from a known one |
-| `verdict` | `green` / `red` | The outcome |
-| `driver` | `integration/run_scenarios.py` | What produced it |
+| `id` | `cert-261009-15` | The judgement, cited by batches and freezes |
+| `candidate` | `cand-261009-15` | **What is judged is the set of revisions that would be delivered together**, not a branch: the line's head today, a merge of heads once there are several lines |
+| `line` | `default` | Which line this judgement is about |
+| `repos[].revision` | `9f3c2a1b` | The exact content the judgement covers |
+| `run` | `run-261009-14` | **Which run answered it.** A certification does not restate what a run measured — see below |
+| `booked_red` | `known-red-baseline@2026-10-04` | Which expected-red list was in force when this was judged. It appears in no run, and without it a later reader cannot tell a new red from a known one |
+| `judged_by` | `integration/run_scenarios.py` | What performed the judgement |
+| `seq` | `41076` | Order, for the same reason as on a landing: the certified prefix is the certifications on this line, in order — **derived, not restated** |
 | `at` | `1791508600000` | Milliseconds since the epoch |
-| `evidence` | `ledger/scenario-results.jsonl#run-261009-14` | A reference to the raw rows, not the rows themselves |
 
-**What `env_fp` actually covers, and what its name oversells.** It is a hash over three things: the Python version, the Node version (or `absent`), and the content of four test-protocol files under the integration tree. Both the gate side and the executor side compute it with the same key set and the same algorithm on purpose, and the key set deliberately excludes ticket-specific and temporary-path values, so that two runs do not differ merely because a different ticket ran.
+**A run says what happened; a certification says what was judged — and a run has its own record.** Everything measural belongs to the run: what ran, how many cases, how many failed, in which environment, at which width, for how long, and the verdict that follows mechanically from those rows. The certification binds that run to a **candidate** and to the **expected-red list in force**, which is the part no run can know. Two consequences worth stating:
 
-What that buys: a previous row may be **reused or trusted as evidence** for the current run only when the commit, this fingerprint **and** the concurrency width and pool all match — which is why `conc_width` and `pool` sit beside it in the run results rather than inside it. What it does **not** cover: the container images, the browser build, the OS, the machine. So "same fingerprint" means "same toolchain and same test protocol", not "same world" — and a red that a different browser build caused will still share a fingerprint with a green run. Either the key set grows (image digest, browser version) or the name should say what it hashes; today the name promises more than it checks.
-
-**What the evidence already contains, and why the summary still stays.** The run-result rows behind `evidence` carry, per case: the commit, the environment fingerprint, the concurrency width, the pool, the verdict, the duration and the source. So the counts, the environment facts and per-case outcomes are all *in* the evidence — and the certification keeps its own copy of three of them anyway, deliberately:
-
-- **`verdict`** is derivable from the rows, and is kept because it is the answer the whole flow reads.
-- **`env_fp`, `conc_width`, `pool`** are on every row and are kept because they are the comparability key: a reader deciding whether an older green may be reused needs them without opening a 88 MB file.
-- **`duration_s` is not in the rows at all** — they carry one duration per case, not the run's own. The run's total is what the budget and the throughput argument are about.
-
-**What nothing but the certification can say**, and what would be lost if the fields were dropped: the candidate as a **set** (the rows carry one `commit` each, so a multi-repository candidate is not even representable in the evidence today), which **expected-red list was in force** (`booked_red` appears nowhere in the rows), and which **suite** produced the proof. Those are the judgement's inputs; without them a green is unreadable later — "green against what, judged by which list?"
-
-**Two defects this question exposed, both mine:**
-
-1. **The evidence rows have no run identity.** `"evidence": "ledger/scenario-results.jsonl#run-261009-14"` points at nothing: the rows are grouped implicitly by timestamp, commit, fingerprint and width. Either the rows carry a run identifier, or `evidence` cannot be a pointer. The cheap fix is for each row to carry the certification identifier — one field that turns the reference into a real one.
-2. **The rows carry a single `commit` per row**, so the multi-repository shape this document is careful about is invisible in the evidence. The certification's set is authoritative today; if landings keep spanning repositories, the run rows need a repository too.
+- **No verdict on the certification.** A certification whose run came back red is still a certification — that is how a freeze gets opened — and the verdict is read from the run. Carrying a second verdict here would be a second answer to one question.
+- **One run can back more than one certification.** A green row is reusable when the commit, the fingerprint and the width all match, so an unchanged candidate can be re-certified without re-running, and a re-certification cites the same run rather than restating it. That is why runs are records in their own right rather than fields of a certification.
 
 ### freeze episode — "why is nothing landing on this line, and who is fixing it?"
 
@@ -447,10 +419,52 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
 
 Proposed; today only the finding itself exists. Verification values: `verified` / `downgraded` / `unlocatable`.
 
-### run result (fact) — "how did this case behave on this revision, in this environment?"
+### run (fact) — "what actually executed, and what came of it?"
+
+The run's own record, written once at the end of a run:
 
 ```json
 {
+  "id": "run-261009-14",
+  "line": "default",
+  "repos": [
+    { "repo": "sandbar", "revision": "9f3c2a1b" }
+  ],
+  "suite": "full",
+  "source": "scheduled",
+  "env_fp": "0febeeb6da6b25dc...",
+  "conc_width": 3,
+  "pool": "main:3,ro:3,browser-free:3",
+  "started_at": 1791506200000,
+  "duration_s": 2132,
+  "cases": {
+    "ran": 445,
+    "passed": 443,
+    "failed": 2,
+    "env_failed": 0
+  },
+  "verdict": "red"
+}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `run-261009-14` | The identity the case rows and the certifications point at — without it, "this run" is not something a record can name |
+| `repos` | `[{"repo": "sandbar", "revision": "9f3c2a1b"}]` | What was under test; a set, because a candidate may span repositories |
+| `suite` | `full` / `fast-set` | Which proof this was: the certification's heavy one, or the set a lane runs |
+| `source` | `scheduled` / `lane` / `change-triggered` | Why the run happened |
+| `env_fp` / `conc_width` / `pool` | `0febeeb6...` / `3` / `main:3,ro:3,browser-free:3` | The comparability key: a green row may be reused **only** when the revision, this fingerprint and the width all match |
+| `started_at` / `duration_s` | `1791506200000` / `2132` | What it cost and when — the numbers the budget and the throughput argument are made of |
+| `cases.ran` / `passed` / `failed` / `env_failed` | `445` / `443` / `2` / `0` | **The pair that makes a run a proof.** `ran: 0` is never a proof, however green it looks — that was a live incident, and this counter is where that rule can be enforced |
+| `verdict` | `red` | The mechanical roll-up of those counts |
+
+**Its absence means the run did not finish.** The header is written when the run ends; rows without a header are an interrupted run, which is a state to see rather than a summary to invent. This is also the home of the two fixes the certification needed: the run identity, and (once landings span repositories) the repository.
+
+#### run case rows (today's shape, with one addition)
+
+```json
+{
+  "run": "run-261009-14",
   "ts": "2026-09-22T15:33:10+08:00",
   "commit": "da942b8f...",
   "env_fp": "0febeeb6...",
@@ -464,7 +478,7 @@ Proposed; today only the finding itself exists. Verification values: `verified` 
 }
 ```
 
-**Today**, verbatim. It already carries the revision and the environment fingerprint — certification should reuse this shape rather than invent another.
+**Today** these rows exist as shown, verbatim, except for `run`: the rows carry no run identity yet, which is why a certification could not point at a run and had to restate the counts. Adding `run` to each row is the one change this document asks of them.
 
 ### reviewed path (fact) — "has anyone looked at this file lately?"
 
@@ -643,5 +657,5 @@ The truth about a ticket — its stage, its signature, its verdict, a send-back 
 3. **Shape versions.** The event ledger has one (`event-ledger-v1`); the rest do not. Roll the same convention out, and state what a reader does with an unknown version (fail loudly, not guess).
 4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime.
 5. **What may never be recorded.** "References, not payloads" needs forbidden examples (credentials, tokens, private host paths, raw model input containing them) so a record can be refused rather than argued about.
-6. **The run-result rows need a run identity** (and a repository, once a landing can span repositories), or `evidence` is a phrase rather than a pointer. See the certification notes above.
+6. **The case rows need `run` added** (and a repository, once a landing can span repositories). Until they carry it, no certification can point at a run, and the header record is not enough on its own — the rows are what a reader checks the counts against.
 7. **What ends a ticket that has no content?** A report-only or verification-only ticket changes no files, so it has nothing to land and nothing to certify by landing. The `landed_at: null` row is representable; the rule for how such a ticket finishes is not written yet, and it is the one gap that this section exposed.
