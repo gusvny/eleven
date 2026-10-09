@@ -24,7 +24,10 @@ activity `identity` 才查出「服务它的是另一个 worker（pid 63268）�
                               `prepare_conflict_resolution`，绝不手写 git merge）
   restart --scope central|lane:<tid> [--replace]
                               走 worker.py 的启动守卫（活进程拒启 / --replace 才优雅回收），
-                              换手后**自证恰好一个活 poller**
+                              换手后**自证恰好一个活 poller**；
+                              t261009-48：换手前先出 pre-flight 面（STARTED workflow task /
+                              在飞活动 / stale 指纹 / 历史大小），在飞即具名拒绝（缺省），
+                              决策落 data/worker-handovers.jsonl（--force 是显式逃生口）
 
 输出约定：stdout **单行 JSON**（同 client.py/verify_lane.py 家族）`{"ok":…,"result"|"error":…}`；
 退出码：0=正常、1=告警（drift 检出漂移 / poller 数≠1）、2=环境面不可得（Temporal 连不上、
@@ -740,6 +743,310 @@ def cmd_sync(args) -> dict:
                         "（restart --scope lane:%s）" % tid})
 
 
+# ---------------------------------------------------------------- restart pre-flight (t261009-48: look before you kill)
+# Field provenance (named, not fabricated):
+#   ticket          = the --scope lane:<ticket> argument itself (never parsed out of payloads)
+#   stage/stage_state = the workflow's `snapshot` query (the same face the ticket reads);
+#                       when the query fails the refusal says `stage=unavailable` with the reason
+#   gen             = snapshot["gens"][stage]; absent there = `gen=unavailable` (named)
+#   attempt/elapsed = DescribeWorkflowExecutionResponse (pending activity: attempt + last_started_time)
+#   worker stale    = the existing stamp_for face (unchanged)
+HANDOVER_RECORD_NAME = "worker-handovers.jsonl"
+INFLIGHT_POLICY_DEFAULT_WAIT_S = 300.0
+#: history-event count from which the tool names the continue-as-new hint (report only).
+LONG_HISTORY_EVENT_COUNT = 5000
+
+
+def _ts_epoch(t) -> float:
+    """Best-effort epoch seconds from a proto Timestamp / float / None; 0.0 = unknown."""
+    try:
+        if t is None:
+            return 0.0
+        if hasattr(t, "ToDatetime"):
+            return t.ToDatetime().timestamp()
+        return float(t)
+    except Exception:  # noqa: BLE001 — a malformed timestamp degrades to "unknown", never a fake value
+        return 0.0
+
+
+def _pending_activity_rows(pending, now=None) -> list:
+    """DescribeWorkflowExecutionResponse.pending_activities → plain rows."""
+    now = time.time() if now is None else now
+    rows = []
+    for p in pending or []:
+        started = _ts_epoch(getattr(p, "last_started_time", None))
+        rows.append({
+            "activity_type": str(getattr(getattr(p, "activity_type", None), "name", "") or ""),
+            "state": str(getattr(getattr(p, "state", None), "name", "") or "").lower(),
+            "attempt": int(getattr(p, "attempt", 0) or 0),
+            "last_worker_identity": str(getattr(p, "last_worker_identity", "") or ""),
+            "last_started_at": (datetime.datetime.fromtimestamp(started).isoformat(timespec="seconds")
+                                 if started else ""),
+            "running_s": int(max(0.0, now - started)) if started else None,
+        })
+    return rows
+
+
+def _workflow_task_face(raw, now=None) -> dict:
+    """The pending workflow task face — the 499 s orphan condition (KI-01M4GF5R8NHQNATH7WD7SKF94X).
+
+    proto3 message field: an unset field returns a default instance, so use HasField
+    (same discipline as `_has_field` in the `who` parser above)."""
+    now = time.time() if now is None else now
+    try:
+        present = bool(raw.HasField("pending_workflow_task"))
+    except Exception:  # noqa: BLE001 — fake/malformed objects without the field
+        present = getattr(raw, "pending_workflow_task", None) is not None
+    if not present:
+        return {"present": False, "state": "", "attempt": 0, "started_at": "", "running_s": None}
+    p = getattr(raw, "pending_workflow_task")
+    started = _ts_epoch(getattr(p, "started_time", None))
+    return {"present": True,
+            "state": str(getattr(getattr(p, "state", None), "name", "") or "").lower(),
+            "attempt": int(getattr(p, "attempt", 0) or 0),
+            "started_at": (datetime.datetime.fromtimestamp(started).isoformat(timespec="seconds")
+                           if started else ""),
+            "running_s": int(max(0.0, now - started)) if started else None}
+
+
+def _stage_face(host: str, ns: str, tid: str) -> dict:
+    """The ticket's stage/gen face from the workflow's own `snapshot` query.
+
+    Provenance per plan review: stage/stage_state come from the snapshot top level, gen
+    from snapshot["gens"][stage]. Unobtainable = named unavailable, never fabricated."""
+    try:
+        from temporalio.client import Client
+
+        async def _go():
+            c = await Client.connect(host, namespace=ns)
+            h = c.get_workflow_handle(tid)
+            return await h.query("snapshot")
+
+        snap = asyncio.run(_go()) or {}
+    except Exception as e:  # noqa: BLE001
+        return {"available": False, "stage": None, "stage_state": None, "gen": None,
+                "note": "unavailable: snapshot query failed (%s: %s)"
+                        % (type(e).__name__, str(e)[:120])}
+    if not isinstance(snap, dict):
+        return {"available": False, "stage": None, "stage_state": None, "gen": None,
+                "note": "unavailable: snapshot query returned %s" % type(snap).__name__}
+    stage = str(snap.get("stage") or "")
+    gens = snap.get("gens") if isinstance(snap.get("gens"), dict) else {}
+    gen = gens.get(stage) if stage else None
+    return {"available": True,
+            "stage": stage or None, "stage_state": snap.get("stage_state") or None,
+            "gen": (int(gen) if isinstance(gen, (int, float)) else None),
+            "note": "" if (stage and gen is not None) else
+                    ("named unavailable: snapshot has no gen for stage %r" % stage if stage
+                     else "named unavailable: snapshot has no stage")}
+
+
+def _worker_face(pf) -> dict:
+    """Target worker's pidfile + stale-stamp face (the existing faces, reused)."""
+    st = read_pidfile(pf) if pf is not None and pathlib.Path(pf).exists() else \
+        {"state": "no-pidfile", "pid": None, "started_at": "", "detail": "pidfile not found"}
+    pid = st.get("pid")
+    tree = tree_of_pid(pid) if st.get("state") == "live" else \
+        {"tree": "", "available": False, "note": "unavailable: process not running"}
+    return {"pid": pid, "state": st.get("state"), "started_at": st.get("started_at", ""),
+            "tree": repo_root_from_tree(tree.get("tree", "")),
+            "stamp": stamp_for(pid, repo_root_from_tree(tree.get("tree", "")),
+                               st.get("started_at", ""))}
+
+
+def _ticket_preflight(host: str, ns: str, tid: str, pf=None, now=None) -> dict:
+    """One describe + one snapshot query → the operator's pre-flight face.
+
+    Unavailable (Temporal down, ticket absent, temporalio missing) is a **named face**
+    (`available: False` + note), not an exception — the report must print even then."""
+    now = time.time() if now is None else now
+    face = {"ticket": tid, "available": False, "workflow_status": "",
+            "pending_workflow_task": {"present": False, "state": "", "attempt": 0,
+                                      "started_at": "", "running_s": None},
+            "pending_activities": [], "stage_face": None,
+            "history": {"event_count": None, "size_bytes": None}, "note": ""}
+    try:
+        from temporalio.client import Client
+
+        async def _go():
+            c = await Client.connect(host, namespace=ns)
+            h = c.get_workflow_handle(tid)
+            return await h.describe()
+
+        desc = asyncio.run(_go())
+    except Exception as e:  # noqa: BLE001
+        face["note"] = ("unavailable: describe failed (%s: %s) — the in-flight face cannot be "
+                        "read for this scope" % (type(e).__name__, str(e)[:160]))
+        face["stage_face"] = _stage_face(host, ns, tid)
+        face["worker"] = _worker_face(pf)
+        return face
+    raw = getattr(desc, "raw_description", None) or desc
+    face["available"] = True
+    try:
+        info = getattr(raw, "workflow_execution_info", None)
+        face["workflow_status"] = str(getattr(getattr(info, "status", None), "name", "") or "")
+    except Exception:  # noqa: BLE001 — malformed status degrades to empty string
+        pass
+    face["pending_workflow_task"] = _workflow_task_face(raw, now=now)
+    face["pending_activities"] = _pending_activity_rows(
+        getattr(raw, "pending_activities", None), now=now)
+    face["history"] = {"event_count": int(getattr(raw, "history_length", 0) or 0) or None,
+                       "size_bytes": int(getattr(raw, "history_size_bytes", 0) or 0) or None}
+    face["stage_face"] = _stage_face(host, ns, tid)
+    face["worker"] = _worker_face(pf)
+    return face
+
+
+def handover_blockers(preflight: dict) -> list:
+    """Pre-flight face → the list of things a TERM would destroy (pure, testable)."""
+    blockers = []
+    wt = preflight.get("pending_workflow_task") or {}
+    if wt.get("present"):
+        blockers.append({
+            "kind": "started_workflow_task", "state": wt.get("state") or "unknown",
+            "attempt": wt.get("attempt"), "running_s": wt.get("running_s"),
+            "risk": ("TERM orphans this workflow task; nothing resumes it until its "
+                     "start-to-close timeout expires (499 s observed, KI-01M4GF5R8NHQNATH7WD7SKF94X)")})
+    for r in preflight.get("pending_activities") or []:
+        blockers.append({
+            "kind": "in_flight_activity", "activity": r.get("activity_type") or "unknown",
+            "attempt": r.get("attempt"), "running_s": r.get("running_s"),
+            "last_worker_identity": r.get("last_worker_identity") or "",
+            "risk": ("TERM lets it drain for the grace period (SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC, "
+                     "default 1800); if it cannot finish, the round is cancelled and the ticket "
+                     "records the worker termination (KI-01M4H1DN2Z10J973DD6PBMPB4W)")})
+    return blockers
+
+
+def refusal_message(tid: str, blockers: list, stage_face: dict) -> str:
+    """A refusal names ticket, stage, generation, and elapsed time — spec item 2."""
+    stage = (stage_face or {}).get("stage")
+    gen = (stage_face or {}).get("gen")
+    stage_s = ("stage=%s" % stage if stage else
+               "stage=unavailable(%s)" % ((stage_face or {}).get("note") or "unknown"))
+    gen_s = "gen=%s" % gen if gen is not None else "gen=unavailable"
+    parts = []
+    for b in blockers:
+        if b.get("kind") == "started_workflow_task":
+            parts.append("STARTED workflow task (state=%s attempt=%s running=%ss)"
+                         % (b.get("state"), b.get("attempt"), b.get("running_s")))
+        else:
+            parts.append("in-flight agent activity %s (attempt=%s running=%ss)"
+                         % (b.get("activity"), b.get("attempt"), b.get("running_s")))
+    return ("refusing handover of %s: %s — %s, %s. Those in-flight items would be destroyed "
+            "by a TERM. Re-run with --force to proceed anyway (recorded as forced), or "
+            "--inflight-policy wait --inflight-wait <sec> to wait for a round boundary"
+            % (tid, "; ".join(parts), stage_s, gen_s))
+
+
+def decide_handover(blockers: list, force: bool, policy: str) -> str:
+    """Pure disposition decision: clear | forced | wait | refused.
+
+    Precedence (plan review item 2): --force wins over --inflight-policy wait; a nonsense
+    policy value is rejected by the CLI layer before this runs."""
+    if not blockers:
+        return "clear"
+    if force:
+        return "forced"
+    if policy == "wait":
+        return "wait"
+    return "refused"
+
+
+def wait_for_round_boundary(fetch, wait_s: float, poll_s: float = 5.0, sleep=time.sleep) -> dict:
+    """Bounded poll of the pre-flight face until the workflow reaches a round boundary.
+
+    `fetch` is injectable (tests pass a stub; production passes a _ticket_preflight
+    closure). Returns {"cleared": bool, "waited_s": ..., "last_blockers": [...]}."""
+    t0 = time.time()
+    blockers: list = []
+    while True:
+        blockers = handover_blockers(fetch())
+        if not blockers:
+            return {"cleared": True, "waited_s": round(time.time() - t0, 1), "last_blockers": []}
+        if time.time() - t0 >= wait_s:
+            return {"cleared": False, "waited_s": round(time.time() - t0, 1),
+                    "last_blockers": blockers}
+        sleep(poll_s)
+
+
+def handover_record_path() -> pathlib.Path:
+    """Absolute record path (plan review item 4a: always echoed absolute)."""
+    return (DATA / HANDOVER_RECORD_NAME).resolve()
+
+
+def append_handover_record(record: dict) -> dict:
+    """Append one JSON line, single O_APPEND write (review item 4b: no interleaved half-lines).
+
+    Tolerates pre-existing garbage in the file (append-only; never rewrites). A write
+    failure is named and returned, never raised into the handover itself."""
+    path = handover_record_path()
+    line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        try:
+            os.write(fd, line.encode("utf-8", "backslashreplace"))
+        finally:
+            os.close(fd)
+        return {"path": str(path), "written": True, "note": ""}
+    except OSError as e:
+        return {"path": str(path), "written": False,
+                "note": "record write failed (%s: %s) — the handover itself is unaffected"
+                        % (type(e).__name__, e)}
+
+
+def build_handover_record(*, scope: str, tid: str, reason: str, policy: str,
+                          preflight: dict, blockers: list, disposition: str,
+                          outcome: str, error: str = "") -> dict:
+    """The decision record (spec item 3): who asked, why, what was in flight, disposition.
+
+    aborted_a_round is true only when a handover actually went ahead (disposition=forced)
+    on top of an in-flight item — a wait-timeout ends in refusal, so no kill, no abort
+    (plan review item 3)."""
+    stage_face = preflight.get("stage_face") or {}
+    return {
+        "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+        "scope": scope,
+        "ticket": tid or None,
+        "requested_by": _requested_by(),
+        "reason": reason,
+        "inflight_policy": policy,
+        "inflight_at_decision": {"blockers": blockers, "stage": stage_face.get("stage"),
+                                 "stage_state": stage_face.get("stage_state"),
+                                 "gen": stage_face.get("gen"),
+                                 "history": preflight.get("history")},
+        "disposition": disposition,
+        "aborted_a_round": bool(disposition == "forced" and blockers),
+        "outcome": outcome,
+        "error": error,
+    }
+
+
+def _requested_by() -> str:
+    import getpass
+    try:
+        user = getpass.getuser()
+    except Exception:  # noqa: BLE001 — no passwd entry / odd environment
+        user = "unknown"
+    return ("%s via engine_ops.py %s" % (user, " ".join(sys.argv[1:])))[:400]
+
+
+def _continue_as_new_hint(preflight: dict) -> str:
+    """Report-only hint (spec item 5): never an automatic action."""
+    hist = preflight.get("history") or {}
+    n = hist.get("event_count")
+    if not n or n < LONG_HISTORY_EVENT_COUNT:
+        return ""
+    return ("long history: %s events (%s bytes) — a handover plus a replay of this history "
+            "is the expensive case; continue-as-new is the lever, and this tool only "
+            "reports it (it never rewrites a workflow)"
+            % (n, hist.get("size_bytes")))
+
+
+#: indirection point for tests (monkeypatched to stub the Temporal faces)
+_PREFLIGHT_FETCH = _ticket_preflight
+
+
 # ---------------------------------------------------------------- subcommand: restart
 def _wait_dead(pid, timeout=90.0) -> bool:
     t0 = time.time()
@@ -951,6 +1258,14 @@ def _kill_and_wait_for_respawn(host, ns, pf, queues, wait_s: float,
 def cmd_restart(args) -> dict:
     """**kill-only 换手**：TERM 现有 worker，等 supervisor 自动拉起并自证恰好一颗活 poller。
 
+    t261009-48: before any signal is sent, the pre-flight face is built and printed —
+    whether a STARTED workflow task or an agent activity is in flight (ticket/stage/gen/
+    attempt/elapsed), the worker's stale stamp, and the history size. When the pre-flight
+    shows work a TERM would destroy, the handover is refused by name by default; the
+    operator chooses `--inflight-policy wait --inflight-wait <sec>` (bounded round-boundary
+    wait) or `--force` (explicit escape hatch, recorded as forced). Every decision appends
+    one line to `data/worker-handovers.jsonl` (who/why/in-flight/disposition/aborted-round).
+
     绝不自己起 worker（宿主 260930 纠正；理由见 `_kill_and_wait_for_respawn` 文档串与
     docs/ops/engine-worker-and-lane-operations.md 的实况案例）。`--replace` 现在只是
     「TERM 后等拉起」这件事的显式别名（旧语义「先停旧再起新的」已删除）。"""
@@ -959,8 +1274,18 @@ def cmd_restart(args) -> dict:
     scope = str(args.scope or "")
     wait_s = float(getattr(args, "wait", 60) or 60)
     old_drain_s = float(getattr(args, "old_drain", OLD_DRAIN_WAIT_S) or OLD_DRAIN_WAIT_S)
+    policy = str(getattr(args, "inflight_policy", "") or "refuse")
+    if policy not in ("refuse", "wait"):
+        return {"ok": False, "exit": ENV_EXIT,
+                "error": "restart --inflight-policy only accepts refuse | wait (got %r)"
+                         % policy}
+    force = bool(getattr(args, "force", False))
+    reason = str(getattr(args, "reason", "") or "")
+    wait_inflight_s = float(getattr(args, "inflight_wait", INFLIGHT_POLICY_DEFAULT_WAIT_S)
+                            or INFLIGHT_POLICY_DEFAULT_WAIT_S)
     if scope == "central":
         pf, queues = DATA / "worker.pid", shared.configured_task_queues()
+        tid = ""
     elif scope.startswith("lane:"):
         tid = scope.split(":", 1)[1].strip()
         if not tid:
@@ -970,12 +1295,90 @@ def cmd_restart(args) -> dict:
     else:
         return {"ok": False, "exit": ENV_EXIT,
                 "error": "restart --scope 只接受 central 或 lane:<ticket>（实得 %r）" % scope}
+
+    # ---------------- pre-flight: look before you kill (spec item 1) ----------------
+    if tid:
+        preflight = _PREFLIGHT_FETCH(host, ns, tid, pf=pf)
+    else:
+        # central scope serves many tickets; no single workflow face exists. The worker
+        # stamp/poller faces still print; the in-flight face is named unavailable, and
+        # the limitation is carried into the handover record (never silently passed off
+        # as "clear").
+        preflight = {"ticket": None, "available": False, "workflow_status": "",
+                     "pending_workflow_task": {"present": False, "state": "", "attempt": 0,
+                                               "started_at": "", "running_s": None},
+                     "pending_activities": [],
+                     "stage_face": {"available": False, "stage": None, "stage_state": None,
+                                    "gen": None,
+                                    "note": "unavailable: central scope has no single "
+                                            "ticket workflow"},
+                     "history": {"event_count": None, "size_bytes": None},
+                     "worker": _worker_face(pf),
+                     "note": "central scope: in-flight face unavailable (one worker serves "
+                             "many tickets); the pre-flight covers the stale stamp only"}
+    blockers = handover_blockers(preflight)
+    decision = decide_handover(blockers, force, policy)
+
+    # ---------------- wait for a round boundary (named bounded wait) ----------------
+    wait_note = ""
+    if decision == "wait":
+        fetch = lambda: _PREFLIGHT_FETCH(host, ns, tid, pf=pf)  # noqa: E731
+        res_w = wait_for_round_boundary(fetch, wait_inflight_s)
+        if res_w["cleared"]:
+            decision, blockers = "waited", []
+            wait_note = "waited %.0fs for a round boundary, then proceeded" % res_w["waited_s"]
+        else:
+            decision = "refused"
+            wait_note = ("still in flight after %.0fs of waiting (round boundary never "
+                         "reached)" % res_w["waited_s"])
+            blockers = res_w["last_blockers"] or blockers
+
+    # ---------------- refusal path: report printed, record written, nothing signalled ---
+    if decision == "refused":
+        record = build_handover_record(scope=scope, tid=tid, reason=reason, policy=policy,
+                                       preflight=preflight, blockers=blockers,
+                                       disposition="refused", outcome="refused",
+                                       error=wait_note or
+                                             (blockers[0].get("risk") if blockers else ""))
+        rec_face = append_handover_record(record)
+        msg = refusal_message(tid, blockers, preflight.get("stage_face"))
+        if wait_note:
+            msg = "%s — %s" % (msg, wait_note)
+        return {"ok": False, "exit": ALERT_EXIT, "error": msg,
+                "result": {"scope": scope, "disposition": "refused", "forced": False,
+                           "preflight": preflight, "blockers": blockers,
+                           "record": rec_face, "record_path": str(rec_face["path"]),
+                           "aborted_a_round": False}}
+
+    # ---------------- proceeding dispositions: clear / forced / waited ----------------
     res = _kill_and_wait_for_respawn(host, ns, pf, queues, wait_s, old_drain_s)
     res["scope"] = scope
+    res["preflight"] = preflight
+    res["blockers"] = blockers
+    res["disposition"] = decision
+    res["forced"] = decision == "forced"
+    res["aborted_a_round"] = bool(decision == "forced" and blockers)
+    res["wait_note"] = wait_note
+    outcome = "handover_ok" if not res.get("error") else "handover_failed"
+    record = build_handover_record(scope=scope, tid=tid, reason=reason, policy=policy,
+                                   preflight=preflight, blockers=blockers,
+                                   disposition=decision, outcome=outcome,
+                                   error=str(res.get("error") or ""))
+    rec_face = append_handover_record(record)
+    res["record"] = rec_face
+    res["record_path"] = str(rec_face["path"])
+    hint_extra = _continue_as_new_hint(preflight)
     res["hint"] = ("换手后请用 `who <ticket>` 确认后续闸轮落**新 pid**；"
                    "启动 worker 的唯一自动面=控制台 temporal-tools supervisor"
                    "（本工具只 kill、不自己起：agent 会话起的 worker 会继承沙箱，"
                    "工作区外写 fail-closed ⇒ 票归档 EPERM，t260930-09 实案）")
+    if decision == "forced":
+        res["hint"] += ("；--force 在案：换手记录已具名 forced 与在飞项"
+                        + ("（aborted_a_round=true）" if res["aborted_a_round"] else ""))
+    if hint_extra:
+        res["hint"] += "；" + hint_extra
+    if preflight.get("note"):
+        res["preflight_note"] = preflight["note"]
     if res.get("error"):
         return {"ok": False, "exit": ALERT_EXIT, "error": res["error"], "result": res}
     return _ok(res)
@@ -1023,6 +1426,22 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--old-drain", type=float, default=OLD_DRAIN_WAIT_S,
                    help="等**旧 worker 排空**（优雅停等在飞活动）的上界秒数（缺省 90）。"
                         "排空期间 supervisor 已起新 pid 属合法中间态，不判失败")
+    r.add_argument("--inflight-policy", choices=["refuse", "wait"], default="refuse",
+                   help="t261009-48: what to do when the pre-flight shows a STARTED workflow "
+                        "task or an in-flight agent activity. refuse (default, safe) = do not "
+                        "signal, name what is in flight; wait = bounded wait for a round "
+                        "boundary, then proceed. --force overrides either (documented "
+                        "precedence: --force wins)")
+    r.add_argument("--inflight-wait", type=float, default=INFLIGHT_POLICY_DEFAULT_WAIT_S,
+                   help="bounded seconds for --inflight-policy wait (default 300); timeout "
+                        "ends in a named refusal, never a kill")
+    r.add_argument("--force", action="store_true",
+                   help="explicit escape hatch: proceed even with work in flight; recorded "
+                        "as disposition=forced in the handover record (and as "
+                        "aborted_a_round=true when an item was in flight at the TERM)")
+    r.add_argument("--reason", default="",
+                   help="why this handover is asked for (recorded verbatim in the handover "
+                        "record)")
     return p
 
 
