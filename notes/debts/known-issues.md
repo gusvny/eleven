@@ -723,6 +723,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
   ②**红分类先对照静面基线**：同一检查在静面单跑绿 ⇒ 记"负载敏感"并按瞬态处置（不堵票、留痕、计数）；
   ③**时序敏感的整树回收类检查不该进 `verify_lane code` 这种"每票必跑"的套件**（要么回集成池按池纪律跑，
   要么在套件里显式标注并串行/重试）——这项改法是**资产归属问题**，需 integration 与 developer 各出一半。
+- **归因核对（同刻逐处读 diff，防"想当然"）**：`t261009-11` 的 diff 只动 **verify_lane 的账本/run 头面**
+  （`server/tools/verify_lane.py` +145/-8：`SANDBAR_INTEG_LEDGER_OWNER` 注入、run id 与 header 落账），
+  **未动 code 道怎么跑**（diff 里没有一条 pytest/超时/测试选择相关的改动）⇒ **红与它的改动无因果**；
+  同一票早一轮的真红（`test_t260930_02_surface_plan_query.py`）是**它自己复现出来的自伤**，两回事——
+  **不要把这一轮的红读成"自伤复发"**（这是本次最容易被误读的地方）。
 
 ## KI-073 可复现构建未闭合：同源码重建仍出压缩器风格抖动（260910-15 反例，260911 夜实证）
 - 现象：t260911-02 泳道内重建前端产物 lib/client.js|cjs，与分叉点版本差 4 行（每文件 4 行），
