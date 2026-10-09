@@ -87,9 +87,9 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 <div class="wrap">
 
   <div class="pick">
-    <span class="lb">Line</span>
+    <span class="lb" title="a development line is a declared thing: an identifier, a scope, an owner and the repositories it runs on. Everything landed on it gets certified by a round and delivered by a promotion.">Development line</span>
     <input type="text" id="lineBox" list="lineList" value="develop-buffer" placeholder="type to filter lines…"
-           title="line_id, from the line declaration (scope / owner / repositories live in the same record). One control: type to filter or pick from the list.">
+           title="the line_id of a declared line (lines.json). One control: type to filter or pick from the list.">
     <datalist id="lineList"><option value="develop-buffer"></option></datalist>
   </div>
 
@@ -105,7 +105,6 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
       <span class="grow"></span>
       <button class="btn p" id="btnPromote" title="a promotion is signed: the record carries signer, on_behalf_of and the authority it rests on">Promote <span id="btnPromoteN">2</span></button>
     </div>
-    <h3 title="what the bar counts: a ticket is landed, then certified by a green round, then delivered by a promotion; waiting = landed, not covered by any round yet">Line</h3>
     <div class="pad">
       <div class="lb" id="lbBar" title="the bar is what is still on the line: certified (covered, waiting for a signature) and waiting (not covered yet). The fixed-width bar at the left is the delivered part — a running total, so it never grows into the picture.">
         <div class="s cap" id="capDelivered" title="delivered"></div>
@@ -184,7 +183,8 @@ function $(i){return document.getElementById(i)}
 function draw(k){
   var s=k==='green'?GREEN:FROZEN;
   $('big').textContent=s.big; $('dot').className='dot '+s.dot;
-  $('banner').style.display=s.frozen?'flex':'none'; $('bnTxt').textContent=s.banner; $('bnNames').textContent=s.names;
+  $('banner').style.display=s.frozen?'flex':'none'; $('bnTxt').textContent=s.banner;
+  $('bnNames').innerHTML=(s.names||'').split(' · ').filter(Boolean).map(function(x){return '<span class="link mono" title="open the scenario record">'+x+'</span>'}).join(' · ');
   var n=s.certN;
   $('btnPromote').disabled=!n; $('btnPromoteN').textContent=n;
   $('btnPromote2').disabled=!n; $('btnPromoteN2').textContent=n;
@@ -197,9 +197,9 @@ function draw(k){
   $('cWhen').textContent='as of '+s.rounds[0][1];
   $('roundState').textContent=auto?s.roundState:'idle';
   $('swTrack').className='track'+(auto?'':' off');
-  var w=''; s.wait.forEach(function(r){w+='<tr><td class="mono">'+r[0]+'</td><td class="mono k">'+r[1]+'</td></tr>'});
+  var w=''; s.wait.forEach(function(r){w+='<tr><td><span class="link mono" title="open the ticket">'+r[0]+'</span></td><td class="mono k">'+r[1]+'</td></tr>'});
   $('wRows').innerHTML=w; $('wCount').textContent=s.wait.length;
-  var p=''; s.certified.forEach(function(r){p+='<tr><td class="mono">'+r[0]+'</td><td class="mono k">'+r[1]+'</td></tr>'});
+  var p=''; s.certified.forEach(function(r){p+='<tr><td><span class="link mono" title="open the ticket">'+r[0]+'</span></td><td><span class="link mono" title="open the round\'s record">'+r[1]+'</span></td></tr>'});
   $('pRows').innerHTML=p||'<tr><td colspan="2" class="k">—</td></tr>'; $('pCount').textContent=n;
   var rr=''; s.rounds.forEach(function(r){var cls=r[4].indexOf('red')>=0?'r':'g';
     rr+='<tr><td><span class="link mono" title="open the record of this round">'+r[0]+'</span></td><td class="mono">'+r[1]+'</td><td title="'+(r[2]==='↻'?'started by itself, chained onto the round before it':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td class="mono k">'+r[5]+'</td></tr>'});
