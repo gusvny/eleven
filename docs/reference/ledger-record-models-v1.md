@@ -35,6 +35,23 @@ related:
 | **buffer** | the role a line plays, and the design's own name for it (develop-buffer) | not a separate object |
 | **promotion** | the act of moving a certified range of content to `main`, approved by a person (or a delegate) | **not** `batch` — in this project a batch already means a run of the test bench, and the word names the grouping rather than the two things that matter (a person approved it, `main` moved); **not** `delivery` — the engine already has an executor delivery workflow, and one word for two things is how `line` got into trouble; **not** `release`, which would claim versioning this design does not have; **not** `advance`, a retired operation name |
 
+## Identity: what an id has to do, and how to get time into it without collisions
+
+**The question** — "can an id carry the time and still never repeat" — has a clean answer, but only once the id's job is split in two, because this ledger holds two kinds of thing:
+
+| The id is for | How it is minted | Where it is used |
+|---|---|---|
+| **Recognising the same thing across time** — a fault mode, a finding | **from the content** (a hash of what it is about), so a re-sighting computes the *same* id and deduplication is possible at all | fault modes (`KI-228`), findings (`3d4b305e`) |
+| **Naming a moment** — a landing, a certification, a run, a promotion, a sighting | **time prefix + randomness**, e.g. the ULID shape `01J9Z6QK3M7X2P4T8V0N5R` (48-bit millisecond timestamp, then random), optionally after a short family prefix: `ldg-01J9Z6QK3M…` | the delivery, run and relation families |
+
+**For the second kind, yes: a time-prefixed id works, and randomness is the part that makes it never repeat.** The prefix gives the time (readable to the millisecond, and sortable) and the random tail removes every need for coordination — no central counter, no "what has already been issued" question, no collision between two machines that mint at the same instant. UUIDv7 is the same idea standardised; ULID is the same idea in a shorter, sortable text form.
+
+**The trap this must not fall into is the one this project already fell into.** A date plus a per-day counter looks friendlier and reads better (`t261009-10`), and it *is* fine — **provided a single authority mints it while seeing the whole id space of that day**. Ours did not: the next ticket number was derived from the tickets that happened to be *alive*, and a cancelled ticket stops being counted, so a number was handed out twice. **Time in an id is never the mechanism for uniqueness; uniqueness comes from randomness (second kind) or from content (first kind), and a counter works only when its issuer sees everything it counts.**
+
+**A related defect worth fixing while we are here: the content-minted ids are too short.** A finding id is eight hex characters — 32 bits. Collisions are unlikely at today's counts and inevitable at scale: at roughly 65,000 findings a 32-bit space has even odds of a collision, and a collision here does not look like an error, it silently merges two different findings into one id. Sixteen hex characters cost six characters and remove the question.
+
+**And the time in an id is a convenience, not the record's time.** Every record already carries `at` (milliseconds) and the ledger carries `seq`; the prefix is for humans who read ids all day and for sorting, and nobody should read it as "the moment this happened" more precisely than the record's own fields.
+
 ## Conventions that apply to every record
 
 | Rule | Example | Status |
@@ -43,7 +60,7 @@ related:
 | A record carries the version of its own shape | `"v": "event-ledger-v1"` | **Half in place**: only the event ledger has it |
 | Facts are appended; a correction is another fact | a correction record names `"supersedes": "rel-261009-0004"` | Today by convention; stated in the ledger design |
 | An entity and an observation of it are two records | entity `finding fi-9c1e`, observation `{"finding": "fi-9c1e", "period": "20261007"}` | Proposed; the fault ledger violates it today |
-| Identity is minted, never derived, never reused | `"id": "cert-261009-14"` | Today for inspection findings; to be the rule everywhere |
+| Identity is minted, never derived, never reused — see the identity section below | `"id": "cert-261009-14"` | Today for inspection findings; to be the rule everywhere |
 | One direction is stored; the reverse is derived | store `repair: t261009-04 → t261008-45`; read the reverse from it | Proposed |
 | Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
