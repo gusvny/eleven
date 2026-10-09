@@ -46,6 +46,7 @@ related:
 | One direction is stored; the reverse is derived | store `repair: t261009-04 → t261008-45`; read the reverse from it | Proposed |
 | Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
+| **Record what cannot be derived; derive what can** | the state a landing sat on and the range a certification continued from are **not** stored — both are derived from the certification ledger's order | Proposed; `base` and `covered_from` were dropped for this reason (261009) |
 | A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 | **A landing is one act over every repository it names: all or nothing** | see the multi-repository example under *landing* | Proposed — see below for why a partial landing is not an option |
 
@@ -53,7 +54,7 @@ related:
 
 ## A. Delivery records (proposed — the buffer flow)
 
-**One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a batch advances several of them and records all of them.
+**One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a batch advances several of them and records all of them. Where such a state is derived rather than recorded, it is derived **per repository** too.
 
 ### landing — "what content did this ticket put on this line, and on top of what?"
 
@@ -67,7 +68,7 @@ Single repository:
   "repos": [
     { "repo": "sandbar", "revision": "9f3c2a1b" }
   ],
-  "base": "4d2e0f9a",
+  "seq": 41077,
   "at": 1791507005123,
   "actor": "engine"
 }
@@ -84,40 +85,15 @@ Several repositories — still **one** landing, one act:
     { "repo": "sandbar", "revision": "7d21c0a4" },
     { "repo": "dsh", "revision": "41b0e771" }
   ],
-  "base": [
-    { "repo": "sandbar", "revision": "9f3c2a1b" },
-    { "repo": "dsh", "revision": "0a77e1c3" }
-  ],
+  "seq": 41098,
   "at": 1791510000000,
   "actor": "engine"
 }
 ```
 
-`base` is a **set keyed to the repositories the landing names** — one entry per repository, in the same order as `repos`, so a reader compares entry by entry. It is not a new source of truth: it is the previous certification's `repos` set, snapshotted at the moment of landing. And it is a **checkable claim**: per repository, `base` must be an ancestor of the landing's revision. That single check is what catches a landing that skipped over certified content, or a lane whose base is behind (or, worse, that would revert content the line already certified) — and it reports **per repository**, because in a multi-repository project those failures are per repository too.
+**Where the state a landing sits on is found — it is not stored here.** A landing says only what content it put on the line; *what it sat on* is **derived**: for each repository, the most recent certification on that line, and before the line's first certification, the revisions the line was declared from. Storing that set on the landing would be a second answer to a question the certification record already answers, and the two would eventually disagree.
 
-Three cases to define, or the field will be read wrongly:
-
-- **A repository the line has never certified.** Its `base` entry is the revision the line was created from in that repository (recorded when the line was declared), so the field is never absent and the check still applies. The uncovered range for that repository then starts at the line's creation, which may be a lot — that is a fact worth seeing rather than hiding.
-- **Repositories the landing does not name do not appear in `base`,** and their certified revisions are read from the certification record instead. `base` must not be read as "the whole state of the line"; it is the state of the repositories this landing touched.
-- **A lane behind the certified state** fails the ancestry check in exactly the repository where it is behind — which is the signal to merge the certified state in before landing, not to land on a stale base.
-
-| Field | Example value | Why it is there |
-|---|---|---|
-| `id` | `ldg-261009-0007` | Minted, never reused: the anchor every other delivery record points at |
-| `ticket` | `t261008-45` | Whose content this is |
-| `line` | `default` / `ui` / `epic-console-ui` | Which line it landed on — freezes and certification are per line |
-| `repos[].repo` | `sandbar`, `dsh` | A landing may span repositories; one entry in the single-repository case |
-| `repos[].revision` | `9f3c2a1b` | The commit that went onto that repository's line |
-| `base` | `[{"repo":"sandbar","revision":"4d2e0f9a"}]` | The previously certified **state**, as a set keyed to `repos`: **the anchor that makes the uncertified range computable** instead of remembered, and a checkable claim (per repository, it must be an ancestor of the revision that landed) |
-| `at` | `1791507005123` | Milliseconds since the epoch |
-| `actor` | `engine` / `integration` / `host` | Who performed the landing — provenance, not authority |
-
-**All or nothing, and there is no flag for it.** A ticket lands as a whole or it has not landed, and this is not a preference: the line's history stays linear with one landing per ticket so that "before" and "after" are well defined. If a landing could put one repository's revision in place and not another's, then three things stop being answerable at once — what range a certification covers, which content a batch delivered, and what a ticket's `landed_at` points at. Mechanically a multi-repository landing can still *fail halfway* (one repository merges, the other conflicts); that is a state to repair, not a landing to record: **a landing that did not complete on every repository it names has not landed**, the line is brought back to a consistent state, and the record says the attempt failed.
-
-Two questions that look like this one and are not:
-
-- **"Whose coupling is it?"** When a change in one repository is only correct together with a change in another, that is a **proof** question, not a landing question: the repository relation declaration in section B says which dependents must be proved when the base changes.
-- **"Could this work have been split?"** If a ticket's changes are genuinely independent of each other, the answer is **two tickets**, not a landing in two pieces — attribution is sharper and the blast radius smaller.
+Deriving it costs nothing and buys a check. Per repository, **the certified revision must be an ancestor of the revision that landed**: that one check catches a landing that skipped over certified content, a lane whose base is behind, and a landing that would revert content the line has already certified — reported per repository, because in a multi-repository project those failures are per repository. A repository the line has never certified is covered by the declared starting revisions, so the range never has an undefined beginning, and a repository the landing does not name simply takes no part in it.
 
 ### certification — "may this content be delivered, and what was actually proved?"
 
@@ -129,9 +105,7 @@ Two questions that look like this one and are not:
   "repos": [
     { "repo": "sandbar", "revision": "9f3c2a1b" }
   ],
-  "covered_from": [
-    { "repo": "sandbar", "revision": "4d2e0f9a" }
-  ],
+  "seq": 41076,
   "tickets": ["t261008-45", "t261008-46"],
   "ran": {
     "suite": "full",
@@ -154,7 +128,7 @@ Two questions that look like this one and are not:
 | `candidate` | `cand-261009-14` | **What is proved is the set of revisions that would be delivered together**, not a branch: the line's head today, a merge of heads once there are several lines |
 | `line` | `default` | Which line's candidate this is |
 | `repos[].revision` | `9f3c2a1b` | The exact content under proof |
-| `covered_from` | `[{"repo":"sandbar","revision":"4d2e0f9a"}]` | The revision this certification continues from — **what makes the certified prefix reconstructible**, and therefore what makes "the greatest certified revision is always landable" true |
+| `seq` | `41076` | Order, for the same reason as on a landing. The certified prefix is then just the certifications on this line, in order — **derived, not restated** — which is what makes "the greatest certified revision is always landable" true |
 | `tickets` | `["t261008-45", "t261008-46"]` | Which tickets' landings are inside the covered range: what lets a batch say whom it delivers |
 | `ran.suite` | `full` / `fast-set` | Which proof was run |
 | `ran.scenarios` | `445` | How much was run — evidence for arguing the fast set's membership |
