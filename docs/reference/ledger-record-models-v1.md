@@ -55,7 +55,7 @@ Applied to every record in this document:
 | ticket | cited everywhere, human-facing, **and baked into paths and branches** | **pending** — the host keeps `t261009-10` for now and has not ruled out a ULID; the consequences of changing it are listed below |
 | landing / certification / run / promotion / freeze episode / relation | **cited by other records** | **family prefix + time id, one shape for all of them**: `ldg-01J9Z6QK3M…`, `cert-01J9Z6R2…`, `run-…`, `prom-…`, `frz-…`, `rel-…` |
 | finding | cited, and its identity **is** its content | **content id**, widened to 16 hex: `3d4b305e1f7a9c02` |
-| fault mode | **cited verbatim in prose, in many places** | **a ULID** — `01J9Z6QK3M7X2P4T8V0N5R` (the host's decision, 261009: coordination-free ids win over short ones). Existing entries keep the numbers they already have; nothing is renumbered (see the note below) |
+| fault mode | **cited verbatim in prose, in many places** | **`KI-` followed by a ULID** — `KI-01J9Z6QK3M7X2P4T8V0N5R` (the host's decision, 261009, and the prefix is kept on purpose: the family is then readable in every citation, and old and new entries share one visible shape). Existing entries keep their numbers; nothing is renumbered |
 | inspection period | cited | `insp-<instance>-<period>` — composite, because a period *is* an instance plus a period |
 | observation | **never cited; read by query** | **no id** — the key is `(finding, period)` |
 | state change (a freeze closing, a period being voided) | never cited | **no id** — the key is `(parent, change)` |
@@ -70,7 +70,7 @@ Two consequences worth stating plainly. **The two minting rules stay two**, and 
 
 - **What is lost is narrower than it first looks.** A ULID **keeps the order and the time** — the first 48 bits are a millisecond timestamp, so lexicographic order *is* time order and the moment can be decoded exactly, which is strictly more than a sequence number ever gave ("roughly when" by position). What it loses is the **count** (how many entries exist is now a query, not something readable off the highest number) and **being sayable in conversation**. Those two are the price, and the second one is simply paid.
 - **The price is measured**: fault-mode numbers are cited **4,058 times across 790 tracked files**. Those citations are of the *existing* numbers and keep working, because:
-- **Nothing is renumbered.** The ledger holds two shapes from here on: entries registered before this decision keep their `KI-<n>` id (it is their identity, and it stays cited), and entries registered after it carry a ULID. Rewriting 4,058 citations across 790 files would be a history rewrite with no benefit that a reader can see, and the rule from the delivery side applies here too — **old records are not rewritten**.
+- **Nothing is renumbered.** The ledger holds two shapes from here on — `KI-<n>` and `KI-<ULID>` — sharing the same visible prefix: entries registered before this decision keep their `KI-<n>` id (it is their identity, and it stays cited), and entries registered after it carry a ULID. Rewriting 4,058 citations across 790 files would be a history rewrite with no benefit that a reader can see, and the rule from the delivery side applies here too — **old records are not rewritten**.
 - **A duplicate id is still refused loudly**, on append and after any merge. A ULID makes that check almost never fire; "almost never" is exactly why the check stays.
 
 **When more than one writer mints, a sequence needs one of three things — and the failure is worse than a race.** Two writers reading the same maximum and appending the same number is the obvious one. The one that actually bites here is quieter: **the fault ledger is a file in a repository**, so two people can each append an entry in their own clone, push, and the merge leaves **two entries with the same number in one file** — with every citation of that number now ambiguous, and nothing raising a hand. So the choice is not "sequence or no sequence", it is which of these three to pay for:
@@ -92,15 +92,22 @@ So the rule is not "centralise unless you cannot": it is **use the authority tha
 
 **And neither choice is free of risk; they are different risks.** A coordination-free id pushes its trust into the clock and the random source: a wrong clock costs ordering (not uniqueness), a poor random source costs collisions. A counter pushes its trust into shared state: whoever mints must see everything it counts. Pick the risk you can observe and test — for the fault ledger that is the random source; for tickets it was shared state, and it failed once, which is why the check that refuses a duplicate id exists.
 
+**What an inspection period looks like today, read from the store.** A period ticket carries `instance_id`, `period` and `kind` (`t261009-09`: `docs-sync`, `20261009`, `inspection`), and the report artifact is named from the same pair (`inspection-docs-sync-20261009.json`). The coverage ledger — `~/.sandbar/projects/<key>/inspection/reviewed.jsonl` — records only `{path, period, ts}`, with no instance field, and its own contract says multiple rows for one path mean the last one wins.
+
+Two consequences worth knowing before reusing this key:
+
+- **The pair is a dedupe key, not an identity that never repeats.** A blocked period is voided and re-run as a **new ticket for the same instance and period**, so `(instance, period)` can appear on more than one ticket over time; what distinguishes the served one is the disposition state, not the key.
+- **The coverage ledger is per project, not per face.** One face's review marks files as reviewed for every other face in the same project, and the rotation rule ("never-reviewed first, then oldest timestamp") then hands those files to nobody. Whether that is intended — project-wide coverage, or per-face coverage — is a question this document leaves open rather than silently answering, because the answer changes what a face is measuring.
+
 **The full list: what can be a ULID, and what cannot.** Five tests decide it, and none of them is about importance: must the id be **recomputable** (then it is derived from content)? is it a **dedupe or join key** (then it is derived from the key's meaning)? is it an **idempotency key** (then it must be deterministic)? is it a **name or a path component** (then it is natural)? and **does anything cite it at all** (if not, it needs no id)?
 
 | Key | Verdict | Why |
 |---|---|---|
 | landing, certification, run, promotion, freeze episode, relation | **ULID** (with a family prefix) | cited by other records, nothing about them is derived or natural |
-| fault mode | **ULID** — decided | the ledger is a file anyone can append to; a mint would be an added authority |
+| fault mode | **`KI-` + ULID** — decided | the ledger is a file anyone can append to; a mint would be an added authority. The prefix stays so that a citation says which family it belongs to |
 | **finding** | **cannot** | its identity must be **recomputed from content**, or a later sighting of the same problem becomes a different thing |
 | **ticket** | **pending (host, 261009)** | see the consequences below |
-| inspection period | **cannot — natural composite** | the period *is* instance + period; the dedupe rule ("one ticket per instance and period") depends on that being the key, and the period appears in a report path |
+| inspection period | **cannot — natural composite** | the period *is* instance + period, which is what the dedupe rule ("one ticket per instance and period") keys on; see the note below for what the shape is today and where it repeats |
 | scenario name | **cannot — derived** | it is the ticket id plus a slug, it is a file-and-ledger key, and run results, booked-red rows and coverage join on it across time |
 | alert key | **cannot — derived** | its whole purpose is that repeats of the same rule and target **dedupe**; a random id would make every repeat a new alert |
 | idempotency key (executor actions) | **cannot — deterministic** | the same request must produce the same key, which is the opposite of unique-by-randomness |
@@ -946,5 +953,6 @@ The truth about a ticket — its stage, its signature, its verdict, a send-back 
 3. **Shape versions.** The event ledger has one (`event-ledger-v1`); the rest do not. Roll the same convention out, and state what a reader does with an unknown version (fail loudly, not guess).
 4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime.
 5. **What may never be recorded.** "References, not payloads" needs forbidden examples (credentials, tokens, private host paths, raw model input containing them) so a record can be refused rather than argued about.
-6. **The case rows need `run` added** (and a repository, once a landing can span repositories). Until they carry it, no certification can point at a run, and the header record is not enough on its own — the rows are what a reader checks the counts against.
+6. **Is inspection coverage project-wide or per face?** The coverage ledger keys on `{path, period}` with no instance, so one face's review covers files for every other face, and the rotation can hand a whole area to nobody. Both readings are defensible; the choice decides what "this face reviewed it" means.
+7. **The case rows need `run` added** (and a repository, once a landing can span repositories). Until they carry it, no certification can point at a run, and the header record is not enough on its own — the rows are what a reader checks the counts against.
 7. **What ends a ticket that has no content?** A report-only or verification-only ticket changes no files, so it has nothing to land and nothing to certify by landing. The `landed_at: null` row is representable; the rule for how such a ticket finishes is not written yet, and it is the one gap that this section exposed.
