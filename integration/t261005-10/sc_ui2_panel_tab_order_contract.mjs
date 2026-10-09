@@ -16,7 +16,7 @@
  * never shows a guessed number and never renders a second knob.
  *
  * Legs:
- *   T1 the panel page face serves exactly 8 tabs in the fixed order, no board
+ *   T1 the panel page face serves exactly 7 tabs in the fixed order (t261009-37: no Ledger, no Alerts), no board
  *      tab, no Ledger tab (t261008-20), no duplicates.
  *   T2 the asserted face is the production page constant (harness parity —
  *      what we assert is what a user gets).
@@ -57,7 +57,11 @@ function summarize() {
   console.log(`SUMMARY pass=${pass} fail=${fail} env_fail=${ef} na=0`)
 }
 
-const ORDER = ['overview', 'epics', 'alerts', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+// t261009-37 (host order 261009-(1)): the Alerts tab left the strip (its face moved
+// into the Overview Alerts block) — DELIBERATE口径 change, declared in the ticket
+// report; the Ledger tab left earlier (t261008-20). Source of truth = the page's
+// own tab-order unit contract (tests/t261005-10-page-contract.test.mjs).
+const ORDER = ['overview', 'epics', 'inspection', 'metrics', 'docs', 'grants', 'settings']
 
 // ------------------------------------------------------------- production face
 const HARNESS = REPO + '/server/plugins/executor-panel/harness.mjs'
@@ -86,7 +90,7 @@ if (harness) {
       check('T1 tab strip present', 'fail',
         `tab order/shape drifted: got [${tabs.join(',')}] want [${ORDER.join(',')}] (duplicates: ${tabs.length !== uniq.length})`)
     } else {
-      check('T1 tab strip present', 'pass', `8 tabs, fixed order, no duplicates: ${tabs.join(',')}`)
+      check('T1 tab strip present', 'pass', `7 tabs, fixed order, no duplicates: ${tabs.join(',')}`)
     }
     check('T1b no status-board tab', tabs.includes('board') ? 'fail' : 'pass',
       tabs.includes('board') ? 'board tab re-entered the consolidated strip' : '')

@@ -16,8 +16,11 @@
 //      width does not move when a row opens (t261003-09 no-layout-shift contract).
 //   T4 The detail box can hold a long request: computed max-height >= 420px and
 //      font size >= 13px (ticket numbers: 170px -> at least 420px, 12px -> 13px).
-//   T5 The page never scrolls as a whole: after expanding, document scrollHeight
-//      does not exceed the viewport height (per-column scroll stays).
+//   T5 (t261009-37 arbitration, declared口径 change) the mock moved the page from
+//      column-internal scroll to PAGE scroll, so vertical growth after an unfold
+//      is the declared design; the surviving anti-crush invariant is that the
+//      detail body stays internally capped + scrollable (T4b) and the unfold adds
+//      NO horizontal overflow (docW <= innerWidth, before AND after).
 //   T6 At a 1100px viewport there is no horizontal scrollbar and the gutters stay
 //      within the 5% cap.
 //   T7 The two-column to one-column collapse stays container-based: below the
@@ -185,9 +188,9 @@ async function main() {
     C.case('T3-expand-grows-only-own-column',
       drift <= 2 && after.colW[0] >= before.colW[0] - 2,
       `cols before=${before.colW.join('x')} after=${after.colW.join('x')} other-column-drift=${drift}px`)
-    C.case('T5-expansion-adds-no-whole-page-scroll',
-      after.docH <= before.docH + 2,
-      `docH before=${before.docH} after=${after.docH} winH=${after.winH} (per-column scroll contract stays; the pre-existing ~60px page slop is reported separately)`)
+    C.case('T5-expansion-adds-no-horizontal-scroll',
+      after.docW <= after.inner && before.docW <= before.inner,
+      `docW before=${before.docW} after=${after.docW} inner=${after.inner} (vertical growth is the declared page-scroll design; horizontal overflow stays forbidden)`)
 
     const dm = await page.evaluate(DETAIL_METRICS)
     if (!dm) C.case('T4-detail-cap-and-font', false, 'no .detail box found in an expanded row')

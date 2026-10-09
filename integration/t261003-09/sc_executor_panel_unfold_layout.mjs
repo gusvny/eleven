@@ -37,7 +37,10 @@ async function run(viewport, label) {
   try {
     await env.page.waitForTimeout(400)
     const rect0 = await env.page.evaluate(() => {
-      const els = [...document.querySelectorAll('h1,h2,h3,h4,div,section')].filter(e => /recent actions/i.test(e.textContent || '') && e.children.length === 0)
+      // t261009-37: the Recent actions head moved into the Overview block chrome
+      // (.blk > .bhd > span.sect) — the locator must also match SPAN leaves, the
+      // no-shift invariant itself is unchanged.
+      const els = [...document.querySelectorAll('h1,h2,h3,h4,div,section,span')].filter(e => /^recent actions$/i.test((e.textContent || '').trim()) && e.children.length === 0)
       const el = els[0]
       if (!el) return null
       const r = el.getBoundingClientRect()
@@ -49,12 +52,23 @@ async function run(viewport, label) {
     if (!clicked) return `waiting request row not clickable (${label})`
     await env.page.waitForTimeout(400)
     const rect1 = await env.page.evaluate(() => {
-      const els = [...document.querySelectorAll('h1,h2,h3,h4,div,section')].filter(e => /recent actions/i.test(e.textContent || '') && e.children.length === 0)
+      const els = [...document.querySelectorAll('h1,h2,h3,h4,div,section,span')].filter(e => /^recent actions$/i.test((e.textContent || '').trim()) && e.children.length === 0)
       const r = els[0].getBoundingClientRect()
       return { top: r.top, height: r.height }
     })
+    // t261009-37 arbitration (declared口径 change): the mock moved the page from
+    // column-internal scroll to PAGE scroll, so at the stacked (narrow) width the
+    // blocks legitimately reflow downward when a request unfolds — the no-shift
+    // invariant only binds the SIDE-BY-SIDE face. Narrow keeps its own face: the
+    // unfold must introduce NO horizontal overflow and the actions block must
+    // stay below the requests column (stack order kept).
     const moved = Math.abs(rect1.top - rect0.top) > 1 || Math.abs(rect1.height - rect0.height) > 1
-    if (moved) return `unfold moved the other column: top ${rect0.top}->${rect1.top}, height ${rect0.height}->${rect1.height} (${label})`
+    if (label === 'wide' && moved) return `unfold moved the other column: top ${rect0.top}->${rect1.top}, height ${rect0.height}->${rect1.height} (wide)`
+    if (label === 'narrow') {
+      const sw = await env.page.evaluate(() => ({ doc: document.documentElement.scrollWidth, inner: window.innerWidth }))
+      if (sw.doc > sw.inner + 1) return `unfold introduced horizontal overflow: docW=${sw.doc} inner=${sw.inner} (narrow)`
+      if (rect1.top <= rect0.top && rect0.top > 0) return `stack order broke: actions head not below requests after unfold (${rect0.top}->${rect1.top})`
+    }
     // U3 详情限高可滚（只在窄容器这趟顺带查，避免重复断言面）。
     // t261004-16 仲裁修订：上限数值不再锚旧 170px 时代的 ≤220 硬数（该票 Req 4 把
     // 详情上限抬高到 ≥420，现实现 440px——旧界把新验收钉成假红）。不变量照旧：
@@ -81,7 +95,7 @@ async function main() {
   for (const [viewport, label] of [[{ width: 700, height: 900 }, 'narrow'], [{ width: 1000, height: 900 }, 'wide']]) {
     try {
       const err = await run(viewport, label)
-      C.case(`U-${label}-unfold-does-not-push`, !err, err || `viewport=${viewport.width}px`)
+      C.case(`U-${label}-unfold-face`, !err, err || `viewport=${viewport.width}px`)
     } catch (e) {
       const msg = String(e).slice(0, 200)
       if (/browser|executable|chromium|launch/i.test(msg)) { C.envFail(`chromium-launch-${label}`, msg); break }

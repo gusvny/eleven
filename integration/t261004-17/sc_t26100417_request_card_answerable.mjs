@@ -158,8 +158,11 @@ async function main() {
     // B5 既有行为不回归
     const answeredHead = await page.textContent('#doneHead2').catch(() => '')
     C.case('B5a-answered-section-intact', /answered\s*·\s*\d/i.test(answeredHead || ''), `head="${(answeredHead || '').trim()}"`)
+    // t261009-37 host order (3), declared口径 change: the Open session control is
+    // retired from the strip — B5b flips from presence to RETIREMENT (the session
+    // chip stays the state display). Never a silent loosening.
     const openSession = await page.$$eval('button, a', es => es.some(e => /open session/i.test(e.textContent || '') || e.hasAttribute('data-open-session')))
-    C.case('B5b-open-session-control-intact', openSession, 'open session 控件在场')
+    C.case('B5b-open-session-control-retired', !openSession, 'no Open session control may remain')
     const cssText = await page.evaluate(() => {
       const el = document.querySelector('style')
       return el ? el.textContent : [...document.styleSheets].map(s => { try { return [...s.cssRules].map(r => r.cssText).join('\n') } catch { return '' } }).join('\n')

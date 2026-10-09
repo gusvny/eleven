@@ -41,6 +41,11 @@ function hardcodedHexOutsideThemeBlocks(source) {
   const offenders = []
   style[1].split('\n').forEach((l, i) => {
     if (/--bg:#/.test(l)) return
+    // t261009-37 arbitration: a declared token DEFINITION (`--name:#hex`) IS the
+    // theme system, not a hardcoded component colour — only bare hex outside a
+    // variable definition offends. The identity grey default (`--proj:#9ca3af`,
+    // the mock's declared no-project fallback) is exactly that shape.
+    if (/--[\w-]+\s*:\s*#[0-9a-fA-F]{3,8}\b/.test(l)) return
     const m = l.replace(/&#\w+;/g, '').match(/#[0-9a-fA-F]{3,8}\b/g)
     if (m) offenders.push(`style line ${i + 1}: ${m.join(',')}`)
   })

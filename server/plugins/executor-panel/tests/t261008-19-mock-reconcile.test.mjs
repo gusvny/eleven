@@ -58,9 +58,10 @@ assert(countDocsTree({ groups: [null, { files: 'nope' }, { files: [{ rel: 'a.md'
 
 // ---- T4 negative assertions: this ticket is not a licence to redraw the panel ----
 // Tab strip follows the currently declared strip (source of truth = the t261005-10
-// page-contract test's ORDER; t261008-20 retired the Ledger tab). This ticket's guard
-// is only that THIS ticket changed nothing about the strip.
-const ORDER = ['overview', 'epics', 'alerts', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+// page-contract test's ORDER; t261008-20 retired the Ledger tab; t261009-37 retired
+// the Alerts tab — host order 261009-(1), face moved into the Overview). This
+// ticket's guard is only that THIS ticket changed nothing about the strip.
+const ORDER = ['overview', 'epics', 'inspection', 'metrics', 'docs', 'grants', 'settings']
 const tabs = [...html.matchAll(/data-tab="([a-z_-]+)"/g)].map(m => m[1])
 assert(JSON.stringify(tabs) === JSON.stringify(ORDER), 'the tab strip order is unchanged')
 const paneInsp = html.slice(html.indexOf('id="paneInsp"'), html.indexOf('id="paneSet"'))

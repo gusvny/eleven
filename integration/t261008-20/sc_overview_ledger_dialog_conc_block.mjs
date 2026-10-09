@@ -1,47 +1,41 @@
-// sc_overview_ledger_dialog_conc_block.mjs — t261008-20 Overview restructure
-// (host order 261008): the Ledger tab folds into an Overview dialog beside
-// 'Recent actions', wakes render uncapped (>3), 'Running tickets' becomes
-// 'Concurrent limit' with no ticket list, the audit stamp goes. Grey-box L3,
-// real browser + page-boundary API stubs, zero docker/Temporal, never touches
-// 3099. Shared stage pattern reused from t261004-13 (fixture/stub/openPanel are
-// shared setup, not duplicated cases).
+// sc_overview_ledger_dialog_conc_block.mjs — t261008-20 Overview restructure,
+// UPDATED by t261009-37 (host orders 261009 (1)(2)(3)). DELIBERATE口径 CHANGE,
+// declared: the source-event DIALOG pattern this scenario pinned (entry text
+// exists; ledger content hidden before the click and visible after; focus/Esc
+// keyboard round-trip) was REPLACED by host order 261009-(2) — the Ledger face
+// now lives INLINE in the Overview Events block, and the Alerts tab is gone with
+// its face inline too (261009-(1)); the Open session button is gone (261009-(3)).
+// This is a pattern replacement ordered by the host, NOT a silent loosening: the
+// D5 keyboard case is RETIRED because its object (the dialog) no longer exists,
+// and every other case survives scoped to the inline block. No case was deleted
+// to make the suite pass — D2 was rewritten to the new face and D5 retired, and
+// new cases pin the replacement (no alerts tab; alerts rows visible inline).
 //
-// Intent (user-perceivable, ticket verbatim + accepted plan rev2):
-//   D1 the tab strip carries no Ledger entry — the ledger tab is gone, not hidden.
-//   D2 the Overview entry 'Recent actions (view source event)' exists and opens
-//      the ledger dialog (content not visible before the click, visible after).
-//   D3 the dialog shows MORE THAN THREE wakes — all 6 fixture rows render (the
-//      old 3-row cap must not silently survive), newest first.
-//   D4 the dialog states the count and names the real ceiling: 'Wakes · 6' and
-//      the watchdog 20-row window copy (the limit is named, not silently applied).
-//   D5 keyboard: focus moves into the dialog on open; Esc closes it; the close
-//      control closes it; focus returns to the entry (reachable AND dismissible).
-//   D6 empty wakes: the dialog shows the declared empty copy and no fabricated
-//      rows (the ticket: 'says so when the list is empty').
-//   D7 missing wakes key: the dialog renders no rows and the page does not throw
-//      (external-input missing/late/malformed discipline).
-//   D8 malformed `at` in a wake sorts last and renders no NaN (t261004-14 rule
-//      must survive the uncap — the incident regression, dialog edition).
-//   D9 the block is titled 'Concurrent limit', keeps the counts line in words
-//      ('2 at work · 1 waiting'), and renders NO ticket rows (holder tickets are
-//      absent from the face); the chip stays.
-//   D10 no audit stamp anywhere: no 'set by ' text even when the audit record is
-//      present and ok (the writer's audit file is out of scope; the display goes).
-//   D11 negative regression: no 'data-tab="ledger"', no concList/concAudit
-//      element, no holder-row markup — the removed faces cannot come back
-//      unnoticed.
-//   K1 light AND dark captures (KI-055) of the Overview with the dialog open.
-//   X1 zero pageerror / console error across the whole journey.
-//
-// Intent split: the wakes order/cap CONTRACT declaration belongs to
-// t261004-14/sc_panel_list_contract_render (updated in the same change); the
-// tab-strip ORDER contract belongs to t261005-10/sc_ui2_panel_tab_order_contract
-// (ORDER updated in the same change); the dated-format parity belongs to
-// t261004-13 A4 (updated in the same change). This entry owns the NEW user
-// journey: dialog reachability, the >3 wake face, the renamed conc block, the
-// stamp's absence. Pre-implement red is the expected TDD signal; arbitrate and
-// merge must be green. playwright/chromium missing = ENV_FAIL exit 2 (KI-036
-// family); page module missing = FAIL named (TDD red).
+// Still owned here (user-perceivable):
+//   D1  the tab strip carries no Ledger entry — and (new) no Alerts entry.
+//   D2' the events block is VISIBLE on the Overview WITHOUT any entry click;
+//       the lone entry link and the dialog do not exist.
+//   D2n (new) no Alerts tab; the Alerts block renders the alert rows inline
+//       (header count + rows) with the night-muted face in the block.
+//   D3  the events block shows MORE THAN THREE wakes — all 6 fixture rows render
+//       (the old 3-row cap must not silently survive), newest first.
+//   D4  the block states the count and names the real ceiling: the wake count in
+//       the block header and the watchdog 20-row window copy.
+//   D5  RETIRED with its pattern (the dialog). See the declared-change note above.
+//   D6  empty wakes: the block shows the declared empty copy and no fabricated rows.
+//   D7  missing wakes key: no rows, page does not throw.
+//   D8  malformed `at` in a wake sorts last and renders no NaN (t261004-14 rule).
+//   D9  the block is titled 'Concurrent limit' (case-insensitive: .sect uppercases
+//       the rendered text), counts in words, NO ticket rows; the chip stays.
+//   D10 no audit stamp anywhere ('set by ').
+//   D11 negative regression: no data-tab="ledger", no data-tab="alerts", no
+//       concList/concAudit, no openSessionBtn, no ledgerDlg — the removed faces
+//       cannot come back unnoticed.
+//   K1  light AND dark captures (KI-055) of the Overview.
+//   X1  zero pageerror / console error across the whole journey.
+// Grey-box L3, real browser + page-boundary API stubs, zero docker/Temporal,
+// never touches 3099. playwright/chromium missing = ENV_FAIL exit 2 (KI-036
+// family); page module missing = FAIL named.
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -54,9 +48,6 @@ const C = makeCase()
 const PROJ = 'alpha'
 const OUT = fileURLToPath(new URL('./out/', import.meta.url))
 
-// Two cross-day timestamps + three more, all in the past; expectation values are
-// computed on the same machine/TZ by the shared t261004-13 helper pattern — here
-// we only assert ORDER and count, not the rendered time text (owned by A4).
 const T = (d, h, m) => Date.UTC(2026, 9, d, h, m, 0)
 const WAKES = [
   { at: T(3, 11, 50), ticket: 't-wake-newest', dedupe_key: 'w1', mode: 'queue', accepted: true },
@@ -71,21 +62,24 @@ const HOLDERS = [
   { ticket: 't-holder-beta', reason: 'human-hold' },
 ]
 const CONC = { ok: true, project: PROJ, limit: 3, unlimited: false, at_work: 2, waiting: 1, holders: HOLDERS, queue: [], audit: { ok: true, by: 'host', ts: T(1, 10, 0) } }
+const ALERTS = [
+  { at: T(3, 12, 7), title: 'Queue t-wake-newest has 0 live pollers', level: 'redline' },
+  { at: T(3, 12, 12), title: 'Worker pid 1898 is older than the tree it runs', level: 'warn', night_muted: true },
+]
 
 function stubServer(wakes, { omitWakes = false } = {}) {
   return createServer((req, res) => {
     const u = new URL(req.url, 'http://x')
     const json = (b) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)) }
     if (u.pathname.endsWith('/watchdog/api/status') || u.pathname.endsWith('/status')) {
-      const result = { declared: true, enabled: true, heartbeat: { alive: true }, ledger: { path: '/x/ledger.jsonl', unreadable: false, counts: { lines: 3, duplicates: 0, bad: 0, gaps: 0 } }, liveness: { executor: { alive: true } }, alerts: [] }
+      const result = { declared: true, enabled: true, heartbeat: { alive: true }, ledger: { path: '/x/ledger.jsonl', unreadable: false, rows_seen: 12480, dupes_skipped: 3, malformed_rows: 0, gaps_seen: 0 }, liveness: { executor: { alive: true } }, alerts: ALERTS }
       if (!omitWakes) result.wakes = wakes
       return json({ ok: true, result })
     }
     if (u.pathname.endsWith('/api/requests')) return json({ rows: [] })
-    if (u.pathname.endsWith('/api/actions')) return json({ ok: true, rows: [], degraded: false })
+    if (u.pathname.endsWith('/api/actions')) return json({ ok: true, actions: [], degraded: false })
     if (u.pathname.endsWith('/api/settings')) return json({ config: { enabled: true }, provenance: {} })
     if (u.pathname.endsWith('/api/grants')) return json({ granted_count: 0, total: 6, executor_sessions: [], session_state: 'none' })
-    if (u.pathname.endsWith('/api/recent-actions')) return json({ rows: [] })
     if (u.pathname.endsWith('/api/concurrency')) return json(CONC)
     if (u.pathname.endsWith('/api/epics')) return json({ ok: true, result: { epics: [] } })
     if (u.pathname.endsWith('/api/wf/docs/tree')) return json({ ok: true, result: { tree: [] } })
@@ -140,11 +134,6 @@ async function closePanel({ browser, local }) {
   if (browser) { try { await browser.close() } catch { /* noop */ } }
   local.close()
 }
-const ENTRY = 'Recent actions (view source event)'
-async function openDialog(page) {
-  await page.click(`text=${ENTRY}`)
-  await page.waitForTimeout(250)
-}
 
 async function main() {
   if (!existsSync(PANEL_PAGE_PATH)) {
@@ -153,7 +142,7 @@ async function main() {
   }
   const pageMod = await import(pathToFileURL(PANEL_PAGE_PATH).href).catch(() => null)
   if (!pageMod || typeof pageMod.PANEL_PAGE_HTML !== 'string') {
-    C.case('PANEL_PAGE_HTML-export', false, 'panel-page.ts has no PANEL_PAGE_HTML export (seam contract; TDD-phase red expected)')
+    C.case('PANEL_PAGE_HTML-export', false, 'panel-page.ts has no PANEL_PAGE_HTML export (seam contract)')
     return C.exit()
   }
   const pw = await loadPlaywright()
@@ -162,6 +151,9 @@ async function main() {
 
   // ---- D11 negative half runs on the STATIC page constant (source-presence guard)
   C.case('D11-no-ledger-tab-marker', !/data-tab="ledger"/.test(html), 'tab strip must carry no Ledger entry')
+  C.case('D11-no-alerts-tab-marker', !/data-tab="alerts"/.test(html) && !/id="t-alerts"/.test(html) && !/id="paneAlert"/.test(html), 'no Alerts tab: radio, label and pane are gone (t261009-37)')
+  C.case('D11-no-dialog-or-entry', !/id="ledgerDlg"/.test(html) && !/id="ledgerDlgBtn"/.test(html), 'the source-event entry link and dialog are gone (t261009-37)')
+  C.case('D11-no-open-session', !/id="openSessionBtn"/.test(html) && !html.includes("'sandbar-executor-panel:open-session'"), 'the Open session button and its postMessage are gone (t261009-37)')
   C.case('D11-no-concList-concAudit', !/id="concList"/.test(html) && !/id="concAudit"/.test(html), 'removed list container and audit span must be gone')
   C.case('D11-no-holder-row-markup', !/Holds a slot/.test(html) && !/dot blue/.test(html), 'old running-ticket row markup must not survive anywhere')
 
@@ -178,12 +170,23 @@ async function main() {
   try {
     const bodyText = await page.evaluate(() => document.body.innerText)
 
-    // ---- D1 no Ledger tab on the served page
+    // ---- D1 no Ledger tab, and (t261009-37) no Alerts tab on the served page
     const tabNames = await page.evaluate(() => Array.from(document.querySelectorAll('[data-tab]')).map(e => e.getAttribute('data-tab')))
     C.case('D1-no-ledger-tab', !tabNames.includes('ledger'), `tabs: [${tabNames.join(',')}]`)
+    C.case('D1-no-alerts-tab', !tabNames.includes('alerts'), `tabs: [${tabNames.join(',')}]`)
+
+    // ---- D2' the events block is inline: visible WITHOUT any entry click
+    C.case('D2-events-block-inline-visible', await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return !!e && e.offsetParent !== null }), 'the events block must be visible on the Overview without any entry click')
+    C.case('D2-no-entry-link', await page.evaluate(() => document.getElementById('ledgerDlgBtn') === null), 'the lone source-event entry link is gone')
+
+    // ---- D2n (new) the Alerts face is inline in its block: header count + rows
+    C.case('D2n-alerts-block-inline', await page.evaluate(() => { const e = document.getElementById('alertList'); return !!e && e.offsetParent !== null }), 'the alerts rows render inline on the Overview (no tab, no click)')
+    C.case('D2n-alerts-count', (await page.textContent('#alertHead')) === String(ALERTS.length), 'the Alerts header carries the real count')
+    C.case('D2n-alerts-row-visible', bodyText.includes('Worker pid 1898 is older than the tree it runs'), 'an alert row title is visible on the page')
+    C.case('D2n-night-muted-face', /night-muted/i.test(bodyText), 'the night-muted face is present in the block')
 
     // ---- D9 renamed block, counts in words, no ticket rows
-    C.case('D9-title-concurrent-limit', /Concurrent limit/.test(bodyText) && !/Running tickets/.test(bodyText), 'block title must read "Concurrent limit"')
+    C.case('D9-title-concurrent-limit', /concurrent limit/i.test(bodyText) && !/Running tickets/i.test(bodyText), 'block title must read "Concurrent limit"')
     C.case('D9-counts-in-words', /2 at work · 1 waiting/.test(bodyText), 'counts line must state holders/queue in words')
     C.case('D9-no-holder-rows', !bodyText.includes('t-holder-alpha') && !bodyText.includes('t-holder-beta'), 'running-ticket rows must not render')
     C.case('D9-chip-present', await page.evaluate(() => { const e = document.getElementById('concChip'); return !!e && e.style.display !== 'none' && e.textContent.length > 0 }), 'three-state chip stays')
@@ -191,60 +194,29 @@ async function main() {
     // ---- D10 no audit stamp even with a present+ok audit record
     C.case('D10-no-audit-stamp', !bodyText.includes('set by '), 'audit record was ok:true in the stub — no "set by" display may render')
 
-    // ---- D2 entry exists and opens the dialog; content hidden before
-    C.case('D2-entry-present', bodyText.includes(ENTRY), `entry text "${ENTRY}" must exist on the Overview`)
-    const beforeOpen = await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return !!e && e.offsetParent === null })
-    await openDialog(page)
-    const afterOpen = await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return !!e && e.offsetParent !== null })
-    C.case('D2-entry-opens-dialog', beforeOpen && afterOpen, `ledger content hidden before=${beforeOpen} visible after=${afterOpen}`)
-
-    // ---- D3 >3 wakes, all rows, newest first
+    // ---- D3 >3 wakes, all rows, newest first (scoped to the inline block)
     const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ledgerEvents .act')).map(e => e.textContent))
     C.case('D3-more-than-three-wakes', rows.length === WAKES.length && rows.length > 3, `rendered ${rows.length} rows, fixture has ${WAKES.length}`)
     const tickets = await page.evaluate(() => Array.from(document.querySelectorAll('#ledgerEvents .tk')).map(e => e.textContent))
     C.case('D3-newest-first', tickets[0] === 't-wake-newest', `first row ticket=${tickets[0]}`)
 
     // ---- D4 count stated + real ceiling named
-    const dlgText = await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return e ? (e.closest('[data-open]') || document.body).innerText : '' })
-    C.case('D4-count-stated', new RegExp('wakes\\s*·\\s*' + WAKES.length, 'i').test(dlgText), 'dialog must state the wake count (case-insensitive: the heading is uppercased by CSS)')
-    C.case('D4-ceiling-named', /last 20 wakes/i.test(dlgText), 'dialog must name the watchdog 20-row window')
+    const blkText = await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return e ? e.closest('.blk').innerText : '' })
+    C.case('D4-count-stated', (await page.textContent('#wakeCount')) === String(WAKES.length), 'the Events header states the wake count')
+    C.case('D4-ceiling-named', /last 20 wakes/i.test(blkText), 'the block must name the watchdog 20-row window')
+    C.case('D4-ledger-path-in-header', (await page.textContent('#ledgerFile')) === '/x/ledger.jsonl', 'the Events header carries the ledger path')
 
     // ---- D8 malformed at: sorts last, no NaN
     C.case('D8-malformed-at-last', tickets[tickets.length - 1] === 't-wake-bad-at', `last row ticket=${tickets[tickets.length - 1]}`)
-    C.case('D8-malformed-no-nan', !/NaN|invalid date/i.test(dlgText), 'malformed at must never render NaN')
+    C.case('D8-malformed-no-nan', !/NaN|invalid date/i.test(blkText), 'malformed at must never render NaN')
 
-    // ---- D5 keyboard: focus in, Esc closes, close control closes, focus restores
-    const focusIn = await page.evaluate(() => {
-      const a = document.activeElement
-      const d = document.getElementById('ledgerEvents')
-      if (!a || a.tagName !== 'BUTTON' || !d) return false
-      const dlg = d.closest('[data-open]')
-      return !!dlg && dlg.contains(a)
-    })
-    C.case('D5-focus-moves-into-dialog', focusIn, `activeElement=${await page.evaluate(() => document.activeElement && document.activeElement.tagName)}`)
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(200)
-    const afterEsc = await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return !!e && e.offsetParent === null })
-    C.case('D5-esc-closes', afterEsc, 'Esc must close the dialog')
-    const focusBack = await page.evaluate((t) => { const a = document.activeElement; return !!a && (a.textContent || '').includes(t) }, ENTRY)
-    C.case('D5-focus-restores-to-entry', focusBack, 'focus must return to the entry button')
-    await openDialog(page)
-    const closedByBtn = await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button')).filter(b => /^close$/i.test((b.textContent || '').trim()) && b.offsetParent !== null)
-      if (btns.length === 0) return false
-      btns[0].click()
-      return true
-    })
-    await page.waitForTimeout(200)
-    const hiddenAgain = await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return !!e && e.offsetParent === null })
-    C.case('D5-close-control', closedByBtn && hiddenAgain, `a visible Close control exists=${closedByBtn} and closes the dialog=${hiddenAgain}`)
-    await openDialog(page)
+    // ---- D5 RETIRED with its pattern (the dialog) — declared口径 change, see header.
 
     // ---- K1 captures, light and dark (KI-055)
     try {
       mkdirSync(OUT, { recursive: true })
-      await page.screenshot({ path: join(OUT, 'overview-dialog-light.png'), fullPage: false })
-      C.case('K1-light-capture', existsSync(join(OUT, 'overview-dialog-light.png')), 'integration/t261008-20/out/overview-dialog-light.png')
+      await page.screenshot({ path: join(OUT, 'overview-blocks-light.png'), fullPage: false })
+      C.case('K1-light-capture', existsSync(join(OUT, 'overview-blocks-light.png')), 'integration/t261008-20/out/overview-blocks-light.png')
     } catch (e) { C.case('K1-light-capture', false, String(e).slice(0, 160)) }
     await closePanel(session); session = null
     let dark
@@ -252,10 +224,9 @@ async function main() {
       C.case('K1-dark-capture', false, String(e).slice(0, 160)); stub.close(); return C.exit()
     }
     try {
-      await openDialog(dark.page)
       mkdirSync(OUT, { recursive: true })
-      await dark.page.screenshot({ path: join(OUT, 'overview-dialog-dark.png'), fullPage: false })
-      C.case('K1-dark-capture', existsSync(join(OUT, 'overview-dialog-dark.png')), 'integration/t261008-20/out/overview-dialog-dark.png')
+      await dark.page.screenshot({ path: join(OUT, 'overview-blocks-dark.png'), fullPage: false })
+      C.case('K1-dark-capture', existsSync(join(OUT, 'overview-blocks-dark.png')), 'integration/t261008-20/out/overview-blocks-dark.png')
       C.case('X1-dark-no-pageerror', dark.errors.length === 0, dark.errors.slice(0, 3).join(' | '))
     } finally { await closePanel(dark) }
     C.case('X1-no-pageerror', errors.length === 0, errors.slice(0, 3).join(' | '))
@@ -269,7 +240,6 @@ async function main() {
       stubEmpty.close(); C.case('D6-empty-wakes', false, String(e).slice(0, 160)); return C.exit()
     }
     try {
-      await openDialog(s2.page)
       const emptyRows = await s2.page.evaluate(() => Array.from(document.querySelectorAll('#ledgerEvents .act')).length)
       const emptyText = await s2.page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return e ? e.innerText : '' })
       C.case('D6-empty-wakes', emptyRows <= 1 && /no wakes/i.test(emptyText), `rows=${emptyRows} text="${emptyText.slice(0, 80)}"`)
@@ -284,10 +254,9 @@ async function main() {
       stubNoWakes.close(); C.case('D7-missing-wakes-key', false, String(e).slice(0, 160)); return C.exit()
     }
     try {
-      await openDialog(s3.page)
       const noRows = await s3.page.evaluate(() => Array.from(document.querySelectorAll('#ledgerEvents .act')).length)
-      const dlg3 = await s3.page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return e ? (e.closest('[data-open]') || document.body).innerText : '' })
-      C.case('D7-missing-wakes-key', !/NaN|undefined/.test(dlg3) && noRows <= 1, `rows=${noRows}, dialog must not throw or fabricate (scoped to the dialog; the separate limit-row "declared in undefined." finding is reported, not asserted here)`)
+      const blk3 = await s3.page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return e ? e.closest('.blk').innerText : '' })
+      C.case('D7-missing-wakes-key', !/NaN|undefined/.test(blk3) && noRows <= 1, `rows=${noRows}, the block must not throw or fabricate`)
       C.case('D7-missing-no-pageerror', s3.errors.length === 0, s3.errors.slice(0, 3).join(' | '))
     } finally { await closePanel(s3); stubNoWakes.close() }
   } finally {

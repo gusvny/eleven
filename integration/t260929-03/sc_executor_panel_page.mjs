@@ -191,10 +191,10 @@ const bodyText = (page) => page.evaluate(() => document.body.innerText)
   const { ctx, page } = await freshPage()
   await page.goto(URL_); await page.waitForTimeout(400)
   const t = await bodyText(page)
-  // t261008-20 改版定稿：四 tab = Overview/Grants/Alerts/Settings；Requests 页签
-  // 退役并入 Overview、Ledger 页签退役折进 Overview 源事件对话框
-  // （本场景的 tab 清单随之更新——旧清单钉的是已退役布局）。
-  const tabs = ['Overview', 'Grants', 'Alerts', 'Settings']
+  // t261008-20 改版定稿 + t261009-37 host order (2)（declared口径 change）：三 tab
+  // = Overview/Grants/Settings；Requests/Ledger/Alerts 页签均退役——Alerts 面改为
+  // Overview 内联块（tab 清单随退役布局更新，不静默松绑）。
+  const tabs = ['Overview', 'Grants', 'Settings']
   const missing = tabs.filter(x => !t.includes(x))
   const requestsTabRetired = !/(^|\n)\s*Requests\s*(\n|$)/.test(t)
   const ledgerTabRetired = !/(^|\n)\s*Ledger\s*(\n|$)/.test(t)
@@ -309,15 +309,15 @@ statusBody = { ok: true, result: statusFixture() }
     `detail=${detailOk} tail_kept=${tailKept}`)
   // 答复仅显式动作：无 answer POST 发生在纯浏览时
   C.case('Q2-no-auto-answer-on-render', answerPosts.length === 0, `answer_posts=${answerPosts.length}`)
-  // Ledger 面（t261008-20：源事件对话框；入口在 Overview，Ledger 页签已退役）：
-  // 比例呈现 + unreadable 横幅——读 #ledgerDlg 容器自身文本（隐藏元素不在 body
-  // innerText 里）。
+  // Ledger 面（t261009-37 host order (2), declared口径 change: the source-event
+  // dialog and its entry are retired — the ledger face is now the INLINE Events
+  // block in the Overview right column, visible without any click）：
+  // 比例呈现读块内健康度行自身文本。
   const dlgText = async () => page.evaluate(() => {
-    const dlg = document.querySelector('#ledgerDlg')
-    return dlg ? dlg.innerText : ''
+    const ev = document.querySelector('#ledgerEvents')
+    const blk = ev && ev.closest('.blk')
+    return blk ? blk.innerText : ''
   })
-  await page.click('#ledgerDlgBtn').catch(() => {})
-  await page.waitForTimeout(300)
   const lt = await dlgText()
   C.case('L1-ledger-proportions', /%| of /.test(lt), `proportion_face=${/%| of /.test(lt)}`)
   statusBody = { ok: true, result: statusFixture({ ledger: statusFixture().ledger, }) }

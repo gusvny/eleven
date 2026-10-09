@@ -16,24 +16,26 @@ const html = PANEL_PAGE_HTML
 let n = 0
 
 // ---- T1 tab strip: fixed order, no board, no duplicates ----
-// t261008-20 (host order): the Ledger tab left the strip (8 tabs); its face moved
-// into the Overview source-event dialog.
-const ORDER = ['overview', 'epics', 'alerts', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+// t261008-20 (host order): the Ledger tab left the strip; t261009-37 (host order
+// 261009-(1)): the Alerts tab left too — both faces live in the Overview blocks.
+const ORDER = ['overview', 'epics', 'inspection', 'metrics', 'docs', 'grants', 'settings']
 const tabs = [...html.matchAll(/data-tab="([a-z_-]+)"/g)].map(m => m[1])
-assert(JSON.stringify(tabs) === JSON.stringify(ORDER), `tab strip is the 8 fixed-order tabs (got [${tabs.join(',')}])`)
+assert(JSON.stringify(tabs) === JSON.stringify(ORDER), `tab strip is the 7 fixed-order tabs (got [${tabs.join(',')}])`)
 assert(!tabs.includes('board'), 'no status-board tab in the strip')
 assert(!tabs.includes('ledger'), 'no Ledger tab in the strip (t261008-20)')
+assert(!tabs.includes('alerts'), 'no Alerts tab in the strip (t261009-37)')
 assert(new Set(tabs).size === tabs.length, 'no duplicate tabs')
 
-// t261008-20: the source-event dialog (former Ledger face) sits on the Overview.
-assert(html.includes('id="ledgerDlgBtn"') && html.includes('Recent actions (view source event)'),
-  'the Overview carries the source-event entry with the host wording')
-assert(html.includes('id="ledgerDlg"') && html.includes('id="ledgerGrid"') && html.includes('id="ledgerFile"') && html.includes('id="ledgerEvents"'),
-  'the dialog carries the whole former Ledger face (grid, file, wakes)')
-assert(html.includes('id="ledgerDlgClose"') && html.includes("'Escape'"),
-  'the dialog closes by control and by Esc')
-assert(!html.includes('id="paneLedger"') && !html.includes('data-tab="ledger"'),
-  'no hidden Ledger pane or tab anchor left (negative regression)')
+// t261009-37: the source-event dialog is retired; the former Ledger face is the
+// inline Events block on the Overview (visible without any entry click).
+assert(!html.includes('id="ledgerDlgBtn"') && !html.includes('Recent actions (view source event)'),
+  'the lone source-event entry is gone (t261009-37)')
+assert(!html.includes('id="ledgerDlg"') && !html.includes('id="ledgerDlgClose"'),
+  'the dialog overlay and its close control are gone (t261009-37)')
+assert(html.includes('id="ledgerHealth"') && html.includes('id="ledgerFile"') && html.includes('id="ledgerEvents"') && html.includes('id="wakeCount"'),
+  'the Events block carries the whole former Ledger face (health line, file, wakes, count)')
+assert(!html.includes('id="paneLedger"') && !html.includes('data-tab="ledger"') && !html.includes('id="paneAlert"'),
+  'no hidden Ledger/Alerts pane or tab anchor left (negative regression)')
 
 // radio inputs back every label (click targets exist for each tab)
 for (const t of ORDER) assert(html.includes(`id="t-${t}"`), `radio input for ${t}`)

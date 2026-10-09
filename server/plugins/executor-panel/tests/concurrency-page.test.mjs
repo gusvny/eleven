@@ -16,7 +16,7 @@ let n = 0
 const H = PANEL_PAGE_HTML
 
 // ---- 区块形状 ----
-for (const id of ['concBlock', 'concChip', 'concKnobRow', 'concMinus', 'concLimit',
+for (const id of ['concBlock', 'concChip', 'concBox', 'concMinus', 'concLimit',
   'concPlus', 'concCounts', 'concSave', 'concMsg']) {
   assert(H.includes('id="' + id + '"'), 'Overview block element present: ' + id)
   n++
@@ -27,9 +27,11 @@ assert(!H.includes('id="concAudit"'), 'no audit-stamp span (removed by t261008-2
 assert(!H.includes("'set by '"), "no 'set by ' audit phrase producer anywhere")
 {
   // Check the old title on the rendered block itself (page comments may narrate the rename).
+  // t261009-37: the block now lives inside the right-column stack; slice to the next block.
   const b0 = H.indexOf('id="concBlock"')
-  const b1 = H.indexOf('</div>\n    </div>', b0)
-  const block = H.slice(Math.max(0, b0 - 200), b1 > b0 ? b1 + 16 : b0 + 400)
+  const b1 = H.indexOf('id="alertBanner"', b0)
+  assert(b0 > 0 && b1 > b0, 'the block slice is locatable')
+  const block = H.slice(Math.max(0, b0 - 200), b1 > b0 ? b1 : b0 + 400)
   assert(!block.includes('Running tickets'), 'old block title gone from the rendered block')
   assert(block.includes('Concurrent limit'), 'block header: Concurrent limit (t261008-20)')
 }
@@ -44,7 +46,7 @@ n += 6
 // block markup slice; the page's other tabs may legitimately use these words) ----
 {
   const b0 = H.indexOf('id="concBlock"')
-  const b1 = H.indexOf('class="cols"', b0)
+  const b1 = H.indexOf('id="alertBanner"', b0)
   assert(b0 >= 0 && b1 > b0, 'the block slice is locatable')
   const block = H.slice(b0, b1)
   assert(!/fifo|first in|queue (is|orders|reorders|semantics)|reorder/i.test(block),

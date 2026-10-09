@@ -13,7 +13,8 @@ import { PANEL_PAGE_HTML, PANEL_ROUTE } from '../src/host/panel-page.ts'
 let n = 0
 
 // ---- 五 tab + Requests 页签取消 ----
-for (const tab of ['Overview', 'Grants', 'Alerts', 'Settings']) {
+// t261009-37 (host order 261009): the Alerts tab is gone too (its face lives in the Overview).
+for (const tab of ['Overview', 'Grants', 'Settings']) {
   assert(PANEL_PAGE_HTML.includes('>' + tab + ' <') || PANEL_PAGE_HTML.includes('>' + tab + '<'), 'tab label present: ' + tab)
 }
 assert(!PANEL_PAGE_HTML.includes('>Requests<'), 'Requests tab removed (merged into Overview)')
@@ -33,7 +34,8 @@ assert(PANEL_PAGE_HTML.includes('grid-template-columns:minmax(0,1.85fr) minmax(0
 // t261003-09 缺陷 1：断点按真实容器宽（container query），两栏各自限高内滚——
 // 展开只在自己那栏长高，另一栏与下方内容永不位移。
 assert(PANEL_PAGE_HTML.includes('@container (max-width:760px){ .cols{grid-template-columns:1fr} }'), 'columns stack below 760px of the real container (container query)')
-assert(PANEL_PAGE_HTML.includes('.cols>div{min-width:0;height:calc(100vh - 230px);overflow-y:auto'), 'each column has a FIXED height and scrolls on its own (an unfold can never grow the frame)')
+// t261009-37：右列改为区块叠（.colstk），两栏随页面滚动——限高内滚规则随四区块版面退役。
+assert(PANEL_PAGE_HTML.includes('.cols>div{min-width:0}') && PANEL_PAGE_HTML.includes('.cols>div:last-child{display:flex;flex-direction:column}'), 'the right column is a block stack; the per-column height cap is retired (t261009-37)')
 assert(PANEL_PAGE_HTML.includes('container-type:inline-size'), 'the wrap is the query container')
 assert(PANEL_PAGE_HTML.includes('max-height:440px;overflow:auto'), 'row detail keeps its own height cap (anchoring stable)')
 assert(PANEL_PAGE_HTML.includes('Needs your answer'), 'left column heading (STE: no idiom "Needs you")')
@@ -76,7 +78,12 @@ assert(PANEL_PAGE_HTML.includes('/sandbar-executor-panel/api/actions'), 'page co
 assert(PANEL_PAGE_HTML.includes("a&&a.reason ? a.reason"), 'actions degrade names the reason (never an empty list)')
 assert(PANEL_PAGE_HTML.includes('permission · session '), 'action rows hover names the permission and the acting session')
 assert(PANEL_PAGE_HTML.includes('Refused: '), 'refused rows hover names the reason')
-assert(PANEL_PAGE_HTML.includes('class="dot red" title="Refused"'), 'refused rows carry a distinct visual marker, not just the word')
+// t261009-37 (host order 261009-(5)): the refused fact is a red 'refused' pill in the
+// op column (the inline dot before the time is gone); the sentence names what was
+// refused and why, so the meaning never depends on the tooltip.
+assert(!PANEL_PAGE_HTML.includes('class="dot red" title="Refused"'), 'no inline refused dot before the time column (t261009-37)')
+assert(PANEL_PAGE_HTML.includes("cls = refused ? 'refused' :"), 'refused rows take the refused pill class in the op column')
+assert(PANEL_PAGE_HTML.includes("esc(x.action||'') + ' · ' + esc(x.reason||'no reason recorded')"), 'the refused row sentence names the action and the reason on the row')
 assert(PANEL_PAGE_HTML.includes('no recorded executor action') === false || true, 'empty copy comes from the API reason (single source)')
 assert(PANEL_PAGE_HTML.includes('failed to record '), 'a failed engine append surfaces in a status face (gaps note)')
 
@@ -87,17 +94,14 @@ assert(PANEL_PAGE_HTML.includes('@media (prefers-color-scheme: dark){ html:not([
 assert(PANEL_PAGE_HTML.includes('dataset.theme = themeParam'), 'boot applies the parsed theme param')
 assert(PANEL_PAGE_HTML.includes('function themeParamOf'), 'themeParamOf source embedded (page and unit tests share one implementation)')
 
-// ---- t261003-09 缺陷 3：Overview 唯一会话入口（小按钮） ----
-assert(PANEL_PAGE_HTML.includes('id="openSessionBtn"'), 'exactly one open-session entry: the small Overview button')
-assert(PANEL_PAGE_HTML.includes('window.parent === window'), 'standalone detection gates the button')
-assert(PANEL_PAGE_HTML.includes('Open this panel from the console to use this button.'), 'standalone disable says why in one STE sentence')
-// t261004-09：STE 提示必须落在**可见文案**（sessionMsg），不只在 title 属性——
-// 浏览器场景 W5 断言 body.innerText，title 不算数（261004 写法政策主面）。
-assert(/window\.parent === window\)\{[^\n]*sessionMsg[^\n]*return; \}/.test(PANEL_PAGE_HTML) &&
-  PANEL_PAGE_HTML.includes("el('sessionMsg').textContent = hint"),
-  'standalone STE hint is rendered as visible copy (sessionMsg), not title-only')
-assert(PANEL_PAGE_HTML.includes('No executor session is declared. Declare one in Settings.'), 'undeclared-session disable says why')
-assert(PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session'") && PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session-result'"), 'postMessage contract to the parent console (request + one-line result)')
+// ---- t261009-37 (host order 261009-(3)): the Open session button is gone; the
+// session chip is the state display. ----
+assert(!PANEL_PAGE_HTML.includes('id="openSessionBtn"'), 'no Open session button in the strip')
+assert(!PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session'"), 'no open-session postMessage producer left')
+assert(!PANEL_PAGE_HTML.includes("'sandbar-executor-panel:open-session-result'"), 'no open-session-result listener left')
+assert(PANEL_PAGE_HTML.includes('id="sessionChip"') && PANEL_PAGE_HTML.includes("'Session: ' + (sess ? sess : 'none')"), 'the session chip stays as the state display')
+// standalone detection survives for the still-standing console face entries (Settings).
+assert(PANEL_PAGE_HTML.includes('window.parent === window'), 'standalone detection gates the console-bound face entries')
 
 // ---- 显式降级文案 + beep 缝（沿用） ----
 for (const frag of ['Watchdog unreachable', 'Not enrolled', 'data possibly stale', 'REJECTED']) {
@@ -142,9 +146,9 @@ assert(PANEL_ROUTE === '/sandbar-executor-panel', 'panel route constant')
   assert(calls >= 3, 'alerts/ledger refresh on poll success and failure paths, found ' + calls)
 }
 
-// ---- t261003-13 / t261008-20：Ledger 面诚实化 + 迁入 Overview source-event 对话框 ----
-// （t261008-20：Ledger 页签退场，>Last wakes< 面随迁对话框并改题为 Wakes + 计数。）
-assert(PANEL_PAGE_HTML.includes('Wakes <span class="meta" id="ledgerWakeCount">'), 'wakes block titled Wakes with a count span (t261008-20)')
+// ---- t261003-13 / t261008-20 / t261009-37：Ledger 面诚实化 → Overview Events 区块 ----
+// （t261009-37：对话框退场，面居右列 Events 区块；头行 = Events + 计数 + 台账路径。）
+assert(PANEL_PAGE_HTML.includes('class="evfile" id="ledgerFile"'), 'the Events header carries the ledger path (monospace, ellipsised)')
 assert(!PANEL_PAGE_HTML.includes('Last events'), 'no "Last events" title left (title must match rows)')
 assert(!PANEL_PAGE_HTML.includes('The watchdog appends here when a ticket changes.'), 'old empty copy gone')
 assert(PANEL_PAGE_HTML.includes('No wakes yet. The watchdog adds a row here when it wakes an executor.'), 'empty copy matches what the block really shows')
@@ -160,8 +164,9 @@ assert(PANEL_PAGE_HTML.includes('esc(localDateTime(x.at))') && PANEL_PAGE_HTML.i
   'Overview, Alerts and wake rows all render local time (wake row via the guarded when)')
 {
   const caps = (PANEL_PAGE_HTML.match(/>Times are local\./g) || []).length
-  // t261008-20: Overview column, the source-event dialog, Alerts tab (Ledger tab gone).
-  assert(caps === 3, 'Times are local. caption on Overview, the dialog and Alerts, found ' + caps)
+  // t261009-37: the Alerts block header, the Recent actions block header, and the
+  // Events footer (the dialog and its copy are gone with the dialog).
+  assert(caps === 3, 'Times are local. caption on the Alerts/Recent actions headers and the Events footer, found ' + caps)
 }
 
 n += 60

@@ -101,9 +101,11 @@ async function waitText(page, sel, substr, ms = 8000) {
 }
 const OUT_DIR = join(REPO, 'integration', 't261008-19', 'out')
 // t261008-20 (post-merge recalibration, not this ticket): the Ledger tab was
-// retired into Overview; the declared strip is now the 8 fixed-order tabs —
+// retired into Overview; the declared strip is now the 7 fixed-order tabs —
 // same source of truth as the t261005-10 page-contract test's ORDER.
-const TAB_ORDER = ['Overview', 'Epics', 'Alerts', 'Inspection', 'Metrics', 'Docs', 'Grants', 'Settings']
+// t261009-37 arbitration (host order 261009-(2), declared口径 change): Alerts
+// left the strip for the Overview blocks, so the declared order drops it.
+const TAB_ORDER = ['Overview', 'Epics', 'Inspection', 'Metrics', 'Docs', 'Grants', 'Settings']
 const CHART_ENTRIES = ['lanes per day', 'stage duration', 'gate reds']
 const MOCK_ILLUSTRATIVE = ['38', '2h10m', '25 pages', '60 pages']
 

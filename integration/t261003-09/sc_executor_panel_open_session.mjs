@@ -1,21 +1,18 @@
-// sc_executor_panel_open_session.mjs — t261003-09 缺陷③：顶部行退场，Overview 内
-// 恰一个小「打开会话」按钮（灰盒 L3，真浏览器 + 同源父页 + API 桩，零 docker，
+// sc_executor_panel_open_session.mjs — t261003-09 缺陷③原锁「恰一个打开会话按钮」；
+// t261009-37 host order 261009-(3) 把该面整体退役（deliberate口径 change，非静默
+// 松绑）——本场景改锁退役契约（灰盒 L3，真浏览器 + 同源父页 + API 桩，零 docker，
 // 红线零接触 3099）。
 //
-// Intent（用户可感知行为；工单派发规格 Defect 3）：
-//   W1 Overview 会话条旁恰一个打开会话按钮（无第二个入口、无页签行形状）。
-//   W2 已声明会话 → 按钮可用；点击 → 同源父页（console 的替身）收到
-//      {type:'...open-session', sessionId:'exec-1'} 消息（打开动作留在 workbench 侧）。
-//   W3 父页回执 ok → 按钮旁出现非空回执文案（成功/失败都显式，无静默路）。
-//   W4 未声明会话 → 按钮禁用。
-//   W5 独立打开（无父页，window.parent===window）→ 按钮禁用 + 一句 STE 说明
-//      （提及从 console 打开；零缩略形式）。
-//   W6 父页回执畸形（非预期形状）→ 面板不崩、零 pageerror（外部输入三态之畸形态）。
+// Intent（用户可感知行为；host order (3)）：
+//   W1' 任何形态（嵌入/未声明/独立）都没有 Open session 按钮——退役是全形态的。
+//   W2' 页面源里没有 open-session postMessage 发送面（引号字面量零命中；注释不算面）。
+//   W4' 会话 chip 仍在场——状态展示不随按钮退役（「chip 即状态显示」）。
+//   W5' 独立打开（无父页）没有 STE 提示句——提示路径随按钮一起退场，页面照常渲染。
 //   W7 全旅程零 pageerror。
 //
 // intent 分工：workbench 侧 Executor/Chat 行退场与监听器落在真 console 的面归
-// t260929-22-executor-entry-console（本票已改写其 E2/E3）；本场景只锁面板页内按钮
-// 与同源消息契约（父页=console 同源替身）。会话读出源（session chip 同源）由桩注入。
+// t260929-22-executor-entry-console；本场景只锁面板页内退役面与会话 chip 在场。
+// 会话读出源（session chip 同源）由桩注入。
 import { PANEL_PAGE_PATH, makeCase, loadPw, REPO } from './lib_panel_stub.mjs'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -87,33 +84,11 @@ async function main() {
     env.page.on('pageerror', e => errors.push(String(e)))
     const frame = env.frame
     await frame.waitForTimeout(400)
-    const w1 = await frame.evaluate(() => {
-      const btns = [...document.querySelectorAll('button')].filter(b => /open session/i.test(b.textContent || ''))
-      return { count: btns.length, disabled: btns[0] ? btns[0].disabled : null }
-    })
-    if (w1.count !== 1) C.case('W1-exactly-one-open-session-button', false, `count=${w1.count}`)
-    else {
-      C.case('W1-exactly-one-open-session-button', true, 'count=1')
-      // W2 点击 → 父页收到消息
-      await frame.click('button:has-text("Open session")', { timeout: 5000 }).catch(() => {})
-      await env.page.waitForTimeout(500)
-      const got = await env.page.evaluate(() => window.__got)
-      C.case('W2-click-posts-open-session-to-parent', !!got && typeof got.sessionId === 'string' && /open-session/.test(got.type || ''), JSON.stringify(got).slice(0, 160))
-      // W3 父页回执 → 按钮旁非空回执文案
-      const w3 = await frame.evaluate(() => {
-        const btn = [...document.querySelectorAll('button')].find(b => /open session/i.test(b.textContent || ''))
-        if (!btn) return ''
-        const holder = btn.closest('div,section,span,p')?.parentElement || btn.parentElement
-        return (holder?.innerText || '').replace(/open session/i, '').trim()
-      })
-      C.case('W3-parent-result-surfaced', w3.length > 0, `ack="${w3.slice(0, 120)}"`)
-    }
-    // W6 畸形回执不崩（重新装载父页、换回执模式）
-    await env.page.evaluate(() => { window.__replyMode = 'garbage' })
-    await frame.click('button:has-text("Open session")', { timeout: 5000 }).catch(() => {})
-    await env.page.waitForTimeout(400)
-    const alive = await frame.evaluate(() => document.querySelectorAll('button').length > 0)
-    C.case('W6-garbage-reply-no-crash', alive, 'panel still interactive after malformed parent reply')
+    // W1' 嵌入形态：无任何 Open session 按钮（退役是全形态的）。
+    const w1 = await frame.evaluate(() => [...document.querySelectorAll('button')].filter(b => /open session/i.test(b.textContent || '')).length)
+    C.case('W1-open-session-entry-retired', w1 === 0, `count=${w1}`)
+    // W4' 会话 chip 仍是状态显示。
+    C.case('W4-session-chip-stays', await frame.evaluate(() => !!document.getElementById('sessionChip')), 'the session chip remains the state display')
   } catch (e) {
     const msg = String(e).slice(0, 200)
     if (/browser|executable|chromium|launch/i.test(msg)) { C.envFail('chromium-launch', msg); s1.close(); return C.exit() }
@@ -122,17 +97,21 @@ async function main() {
   if (env) { await env.browser.close().catch(() => {}) }
   s1.close()
 
+  // W2' 页面源里没有 open-session 消息发送面（引号字面量级；注释不算面）。
+  C.case('W2-no-open-session-postMessage-in-source', !/['"]open-session['"]/.test(html),
+    'no quoted open-session literal in the served page source (the retired sender cannot come back unnoticed)')
+
   // ---- 嵌入形态（未声明会话）
   const s2 = await serveDual(html, UNDECLARED, PARENT_LISTENER)
   try {
     const e2 = await openParent(pw, `http://127.0.0.1:${s2.port}`, '/parent')
-    const w4 = await e2.frame.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')].find(b => /open session/i.test(b.textContent || ''))
-      return btn ? btn.disabled : null
-    })
-    C.case('W4-no-session-disabled', w4 === true, `disabled=${w4}`)
+    const w4 = await e2.frame.evaluate(() => ({
+      btns: [...document.querySelectorAll('button')].filter(b => /open session/i.test(b.textContent || '')).length,
+      chip: !!document.getElementById('sessionChip'),
+    }))
+    C.case('W4-undeclared-no-button-chip-stays', w4.btns === 0 && w4.chip, JSON.stringify(w4))
     await e2.browser.close().catch(() => {})
-  } catch (e) { C.case('W4-no-session-disabled', false, String(e).slice(0, 160)) }
+  } catch (e) { C.case('W4-undeclared-no-button-chip-stays', false, String(e).slice(0, 160)) }
   s2.close()
 
   // ---- 独立形态（无父页；直接开面板页）
@@ -140,13 +119,14 @@ async function main() {
   try {
     const e3 = await openParent(pw, `http://127.0.0.1:${s3.port}`, '/panel?project=alpha&theme=light')
     const w5 = await e3.page.evaluate(() => {
-      const btn = [...document.querySelectorAll('button')].find(b => /open session/i.test(b.textContent || ''))
+      const btns = [...document.querySelectorAll('button')].filter(b => /open session/i.test(b.textContent || '')).length
       const txt = document.body.innerText
-      return { disabled: btn ? btn.disabled : null, hint: /open this panel from the console/i.test(txt), contraction: /\b(don't|won't|can't|it's)\b/i.test(txt) }
+      return { btns, hint: /open this panel from the console/i.test(txt), chip: !!document.getElementById('sessionChip') }
     })
-    C.case('W5-standalone-disabled-with-STE-hint', w5.disabled === true && w5.hint && !w5.contraction, JSON.stringify(w5))
+    // W5' 独立形态：按钮与 STE 提示路径一起退役；页面照常渲染，chip 在场。
+    C.case('W5-standalone-retired-no-hint', w5.btns === 0 && !w5.hint && w5.chip, JSON.stringify(w5))
     await e3.browser.close().catch(() => {})
-  } catch (e) { C.case('W5-standalone-disabled-with-STE-hint', false, String(e).slice(0, 160)) }
+  } catch (e) { C.case('W5-standalone-retired-no-hint', false, String(e).slice(0, 160)) }
   s3.close()
 
   C.case('W7-zero-pageerror', errors.length === 0, `errors=${errors.slice(0, 3).join(' | ').slice(0, 200)}`)

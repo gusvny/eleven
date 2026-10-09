@@ -9,8 +9,8 @@
  *
  * 版面（设计 note §2 / mock 261003）：顶部只有 Executor + 项目标签——项目选择器
  * （下拉/手填/Load）与轮询状态行**不存在**；项目来自 ?project= 深链（workbench
- * project row). Tabs (t261005-10 UI-2 consolidated order, mock v11):
- * Overview / Epics / Ledger / Alerts / Inspection / Metrics / Docs / Grants / Settings——
+ * project row). Tabs (t261005-10 UI-2 consolidated order; t261009-37 removed Ledger+Alerts):
+ * Overview / Epics / Inspection / Metrics / Docs / Grants / Settings——
  * Epics/Docs/Metrics/Inspection are read-only faces (source = same-origin workbench
  * GET endpoints; unreachable = a named degraded face, never a blank pane). The
  * Overview carries ONE concurrency-limit row (the CL-1 read face; the write face
@@ -58,7 +58,17 @@ import {
 import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
-const EMBEDDED = [
+// t261009-37 (defect found by the colour-bar work): the two module-private
+// constants the embedded identity functions close over. project-identity.ts does
+// not export them, so the embedded isProjectKeyLike/baseIdentity sources used to
+// hit a ReferenceError at call time — the badge silently never rendered (the
+// render is wrapped in try/catch). The values are pinned from OUTSIDE by a
+// behavior unit test against the real module (tests/t261009-37-overview-blocks):
+// if the module ever changes them, that test goes red here.
+const EMBED_CONSTS =
+  'var STREAM2_SALT = ' + JSON.stringify('\u0000wb-identity') + ';\n' +
+  'var KEY_MAX_LEN = 64;\n'
+const EMBEDDED = EMBED_CONSTS + [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
   String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
@@ -117,7 +127,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 input.tab{position:absolute;opacity:0;pointer-events:none}
 .seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
 .seg label:hover{color:var(--fg)}
-#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sect.lead{margin-top:18px}
@@ -191,7 +201,11 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 /* t261003-09 缺陷 1：断点按真实容器宽（container query——面板是 iframe/独立窗口，
    视口宽≠内容盒宽），且两栏各自限高内滚——展开任何一条请求只在**自己那栏**长高，
    另一栏与下方内容永不位移；行内 detail 的 170px 限高不变（滚动锚定稳定）。 */
-.cols>div{min-width:0;height:calc(100vh - 230px);overflow-y:auto;overscroll-behavior:contain}
+/* t261009-37 (host order 261009): the columns scroll with the page again — the
+   right column is a stack of bordered blocks, so the per-column height cap and
+   inner scroll are gone (the mock is the yardstick). The 760px collapse stays. */
+.cols>div{min-width:0}
+.cols>div:last-child{display:flex;flex-direction:column}
 @container (max-width:760px){ .cols{grid-template-columns:1fr} }
 .act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid var(--line-soft)}
 .act:last-child{border-bottom:0}
@@ -293,6 +307,40 @@ th{color:var(--muted);font-weight:600;font-size:11px}
    apart; pull the button box onto the meta's text line (mock v8 precedent: button
    aligns by box edge, meta by text edge, SAME line). */
 #inspRunBtn{margin-right:2px}
+
+/* ---- t261009-37 mock deltas (261009 host orders; yardstick notes/discussions/261009-executor-panel-overview-mock.html) ---- */
+/* Project identity colour bar. --proj default is the grey stand-in for "no project
+   resolved yet": renderProjBadge sets the real colour from projectIdentity(key); a
+   failed/absent status fetch leaves the grey default — the bar states that no
+   identity is known, it never guesses one. */
+:root{--proj:#9ca3af}
+.top{position:relative}
+.top::before{content:'';position:absolute;left:0;right:0;top:-11px;height:3px;background:var(--proj)}
+.tk{white-space:nowrap}
+.evhealth{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:2px 0 0}
+.evhealth .file{font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;max-width:46ch;white-space:nowrap}
+.concRow{display:flex;align-items:center;gap:10px;height:34px}
+.blk .bbd .concBox{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:0 9px;height:28px;width:max-content}
+.concBox .concBtn{width:24px;height:22px}
+.concBox .concVal{min-width:22px}
+#ledgerFile{overflow-wrap:anywhere}
+/* the right-column blocks: one border each, header row carrying the name and the count */
+.blk{border:1px solid var(--line);border-radius:10px;background:var(--bg);margin:0 0 12px 0}
+.colstk .blk:last-child{margin-bottom:0}
+.blk .bhd{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line-soft)}
+.blk .bhd .n{color:var(--muted)}
+.blk .bhd .grow{flex:1}
+.blk .bhd .muted{font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.blk .bbd{padding:6px 12px 10px}
+.blk .bbd .row{padding:4px 0}
+.blk .bbd .act{border-bottom:1px solid var(--line-soft)}
+.blk .bbd .act:last-child{border-bottom:0}
+.pill.refused{border-color:var(--red);background:var(--danger-soft,var(--soft-red));color:var(--red)}
+/* the action row into columns: the mark of a refused action is a pill in the op column, so nothing sits outside the aligned grid */
+.blk .bbd .act .pill{flex:0 0 66px;text-align:center;justify-content:center}
+.blk .bbd .act .t{flex:0 0 96px;white-space:nowrap}
+.blk .bbd .act .tk{flex:0 0 88px;overflow:hidden;text-overflow:ellipsis}
+.evfile{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;max-width:22ch;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -301,7 +349,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 
   <input class="tab" type="radio" name="tb" id="t-overview" checked>
   <input class="tab" type="radio" name="tb" id="t-epics">
-  <input class="tab" type="radio" name="tb" id="t-alerts">
   <input class="tab" type="radio" name="tb" id="t-inspection">
   <input class="tab" type="radio" name="tb" id="t-metrics">
   <input class="tab" type="radio" name="tb" id="t-docs">
@@ -313,7 +360,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
          tab-order contract scenario asserts this exact sequence). -->
     <label for="t-overview" data-tab="overview">Overview <span id="reqBadge" class="badge zero">0</span></label>
     <label for="t-epics" data-tab="epics">Epics</label>
-    <label for="t-alerts" data-tab="alerts">Alerts</label>
     <label for="t-inspection" data-tab="inspection">Inspection</label>
     <label for="t-metrics" data-tab="metrics">Metrics</label>
     <label for="t-docs" data-tab="docs">Docs</label>
@@ -328,36 +374,27 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       <span id="stateTxt">The executor state is not known yet.</span>
       <span id="grantChip" class="chip">Permissions: 0 of 6</span>
       <span id="sessionChip" class="chip">Session: none</span>
-      <button class="openBtn" id="openSessionBtn" disabled>Open session</button><span class="meta" id="sessionMsg"></span>
+      <span class="meta" id="sessionMsg"></span>
       <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
     </div>
     <div id="ovBanners"></div>
-    <!-- t261008-20 (host order): renamed to Concurrent limit (was the running-tickets
-         block). The block no longer
-         lists the tickets holding slots (the console's left column already shows what
-         is running) and no longer shows the audit stamp ("set by <who> <when>" — the
-         engine audit record stays in the engine ledger; only this display went).
-         The limit knob, the limit value, the counts line (words, not rows) and the
-         three-state chip stay. -->
-    <div class="grp" id="concBlock">
-      <div class="line"><div class="lab" style="flex:0 0 auto">Concurrent limit <span id="concChip" class="pill conc-room" style="display:none"></span></div></div>
-      <div class="line" id="concKnobRow">
-        <div class="lab" style="flex:0 0 auto">Limit</div>
-        <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
-        <span class="concVal" id="concLimit">–</span>
-        <button class="concBtn" id="concPlus" title="One more ticket at the same time">+</button>
-        <span class="meta" id="concCounts"></span>
-        <button id="concSave" style="margin-left:auto">Save</button>
-        <span class="meta" id="concMsg"></span>
-      </div>
-    </div>
-    <!-- t261005-10 (UI-2): the ONE concurrency-limit row (CL-1 read face; the write
-         face belongs to CL-2 and is named as absent when it is). Facts only. -->
-    <div id="limitRow" class="meta" style="margin:-6px 0 10px 0"></div>
+    <!-- t261009-37 (host order 261009): the Overview right column is FOUR bordered
+         blocks — Concurrent limit / Alerts / Recent actions / Events — in the same
+         .blk chrome with the same gap (the mock is the yardstick). The limit block
+         carries its counts in the header row; its knob, three-state chip, write
+         path and refusal copy stay. The Alerts tab and the source-event dialog are
+         gone: both faces live here (t261008-20 put the Ledger face in a dialog;
+         host order 261009-(2) replaces that pattern with this inline block). -->
     <div class="cols">
       <div>
         <div class="sect" id="waitHead">Needs your answer · 0</div>
-        <div id="bridgeLine" class="meta" style="margin:-4px 0 6px 0"></div>
+        <!-- t261009-37 rework (arbitrate round 1): the old .cols>div carried
+             overflow:auto and CLIPPED child overflow; with the block-stack layout the
+             page scrolls instead, so this meta line's min-content width used to
+             propagate to the document and reintroduced a 10px horizontal overflow at
+             narrow viewports (t261004-16 T7). The line is bounded again: one line,
+             ellipsised, never widening the page. -->
+        <div id="bridgeLine" class="meta" style="margin:-4px 0 6px 0;min-width:0;overflow:hidden;text-overflow:ellipsis"></div>
         <div id="waitList"></div>
         <div class="empty" id="waitEmpty" style="display:none">Nothing waits on you.</div>
         <div class="doneWrap" data-open="false" id="doneWrap" style="display:none">
@@ -375,37 +412,46 @@ th{color:var(--muted);font-weight:600;font-size:11px}
           <div class="doneList" id="dismissedList"></div>
         </div>
       </div>
-      <div>
-        <div class="sect">Recent actions</div>
-        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
-        <div class="row" style="padding:2px 4px" id="actList"></div>
-        <!-- t261008-20 (host order): the Ledger tab left the strip; its whole face
-             (health grid, ledger file, wakes) lives in this dialog. The entry uses
-             the host's wording. Keyboard: a real button opens it; focus moves to the
-             Close control and returns to the opener; Esc closes. -->
-        <div class="sect lead" style="margin-top:8px">
-          <button class="linkbtn" id="ledgerDlgBtn">Recent actions (view source event)</button>
+      <div class="colstk">
+        <div class="blk" id="concBlock">
+          <div class="bhd"><span class="sect">Concurrent limit</span><span id="concChip" class="pill conc-room" style="display:none"></span><span class="grow"></span><span class="muted" id="concCounts"></span></div>
+          <div class="bbd">
+            <span class="concBox" id="concBox">
+              <span class="lab" style="flex:0 0 auto">Limit</span>
+              <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
+              <span class="concVal" id="concLimit">–</span>
+              <button class="concBtn" id="concPlus" title="One more ticket at the same time">+</button>
+              <button id="concSave">Save</button>
+            </span>
+            <span class="meta" id="concMsg"></span>
+            <!-- t261009-37: the CL-1 read sentence (declaration path / refusal copy)
+                 moved from the standalone #limitRow strip line into the block body —
+                 same element id, same producer (renderLimitRow), one face. -->
+            <div id="limitRow" class="meta" style="margin:6px 0 0;width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis"></div>
+          </div>
         </div>
-      </div>
-    </div>
-    <!-- t261008-20: the source-event dialog (former Ledger tab face). Same overlay
-         pattern as inspDlg (data-open + display toggle, pure DOM — no timers, no
-         spawned work). Fixed + centered so it reads as a dialog from anywhere on the
-         long Overview. Not carried from that pattern: Esc close and focus move /
-         restore (added here because the host order demands keyboard reachability).
-         No close-on-outside-click, by decision. -->
-    <div class="inspCard" id="ledgerDlg" data-open="false" style="display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(640px,92vw);max-height:80vh;overflow:auto;z-index:50;box-shadow:0 12px 40px rgba(0,0,0,.25)" role="dialog" aria-label="Source event record">
-      <div class="pad inspSect" style="display:flex;align-items:center">
-        <span style="flex:1">Source event record</span>
-        <button class="bar" id="ledgerDlgClose">Close</button>
-      </div>
-      <div class="pad">
-        <div class="sect">Health</div>
-        <div class="grid" id="ledgerGrid"></div>
-        <div class="file" id="ledgerFile"></div>
-        <div class="sect lead">Wakes <span class="meta" id="ledgerWakeCount"></span></div>
-        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes.</div>
-        <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
+
+        <div class="blk">
+          <div class="bhd"><span class="sect">Alerts</span><span class="n" id="alertHead">0</span><span class="grow"></span><span class="muted">Times are local.</span></div>
+          <div class="bbd">
+            <div id="alertBanner"></div>
+            <div id="alertList"></div>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="bhd"><span class="sect">Recent actions</span><span class="n" id="actCount">0</span><span class="grow"></span><span class="muted">Times are local.</span></div>
+          <div class="bbd"><div id="actList"></div></div>
+        </div>
+
+        <div class="blk">
+          <div class="bhd"><span class="sect" id="eventsHead" title="what the watchdog read and acted on, newest first">Events</span><span class="n" id="wakeCount">0</span><span class="grow"></span><span class="evfile" id="ledgerFile"></span></div>
+          <div class="bbd">
+            <div class="evhealth"><span class="meta" id="ledgerHealth" title="the watchdog's own ledger: rows read, duplicates skipped, bad rows, gaps"></span></div>
+            <div id="ledgerEvents"></div>
+            <div class="muted" style="margin:4px 0 0;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes. <!-- t261009-37 review #1: a display of the full-list fact (every row renders, cap 'all' since t261008-20), deliberately NOT a control — no click handler is wired, and a unit test pins that. --><button class="linkbtn" id="wakesShowAll">Show all</button></div>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -483,15 +529,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div id="openEpics"></div>
   </section>
 
-  <section id="paneAlert" style="display:none">
-    <div id="alertBanner"></div>
-    <div class="sect" id="alertHead">Recent · 0</div>
-    <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
-    <div id="alertList"></div>
-  </section>
+  <!-- t261009-37 (host order 261009-(1)): paneAlert is gone — the Alerts tab left
+       the strip and its face moved into the Overview right column as the Alerts
+       block (#alertBanner / #alertList / #alertHead unchanged). -->
 
-  <!-- t261008-20 (host order): paneLedger is gone — the Ledger tab left the strip
-       and its face moved into the Overview source-event dialog (#ledgerDlg). -->
+  <!-- t261008-20 (host order): paneLedger is gone — the Ledger tab left the strip; -->
+  <!-- t261009-37 (host order 261009-(2)): the source-event dialog is gone too — the
+       face lives inline in the Overview Events block (#ledgerFile / #ledgerHealth /
+       #ledgerEvents). -->
 
   <section id="paneInsp" style="display:none">
     <div id="inspBanner"></div>
@@ -594,6 +639,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var slot = document.getElementById('projBadge');
     if(!slot) return;
     slot.innerHTML = '';
+    // t261009-37 (host order 261009-(6)): the page carries the project colour as a
+    // 3px bar across the top — derived from the SAME projectIdentity() the badge
+    // uses (no second hash, no hand-picked value). Identity colour goes on identity
+    // surfaces only (this bar, the badge); never on buttons, status chips, alert
+    // rows or pills — the semantic colours carry meaning there. If the fetch for
+    // this project failed or no project is set, the grey :root default stays: the
+    // bar states "no identity known", it never guesses.
+    try{ document.documentElement.style.setProperty('--proj', projectIdentity(key).color); }catch(e){}
     if(!key) return;
     try{ slot.innerHTML = identityBadgeSvg(projectIdentity(key), 13); }catch(e){}
   }
@@ -725,7 +778,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       || (g && g.executor_sessions && g.executor_sessions.length ? g.executor_sessions[0] : '');
     state.session = sess;
     el('sessionChip').textContent = 'Session: ' + (sess ? sess : 'none');
-    updateOpenBtn(sess);
     var stTxt = st && st.heartbeat ? (st.heartbeat.alive ? 'The watchdog is alive. Last beat: '+fmtAge(st.heartbeat.age_seconds) : 'The watchdog is not alive.') : 'The watchdog state is not known.';
     el('stateTxt').textContent = stTxt + (on ? '' : ' The executor can only read and ask. The watchdog keeps running.');
     renderWaitColumn();
@@ -884,15 +936,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       + controls
       + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
   }
-  // t261003-09 缺陷 3：Overview 里唯一的会话入口。standalone（无父页）= 显式禁用
-  // 并一句话说明原因；无声明会话同样禁用点名去处。按钮只发一条 postMessage，
-  // 结果只落一行文案——不造轮询/重试/状态条（t261003-06 已删的形态不还魂）。
-  function updateOpenBtn(sess){
-    var btn = el('openSessionBtn');
-    if(window.parent === window){ btn.disabled = true; var hint = 'Open this panel from the console to use this button.'; btn.title = hint; el('sessionMsg').textContent = hint; return; }
-    if(!sess){ btn.disabled = true; btn.title = 'No executor session is declared. Declare one in Settings.'; return; }
-    btn.disabled = false; btn.title = 'Open session ' + sess + ' in the console.';
-  }
+  // t261009-37 (host order 261009-(3)): updateOpenBtn and the Open session button
+  // are gone — the session chip is the state display; no session entry postMessage
+  // is sent from this page anymore.
   function renderWaitColumn(){
     var st = state.requests;
     var waitHtml = '', doneHtml = '', dismissedHtml = '';
@@ -1094,20 +1140,27 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   function renderActions(){
     var a = state.actions, html = '';
-    if(!state.project){ html = ''; }
+    if(!state.project){ html = ''; el('actCount').textContent = '0'; }
     else if(!a || a.ok!==true){
       // 显式降级：点名原因（新源缺席=「记录启动以来无动作」+文件路径），绝不冒充空列表。
+      el('actCount').textContent = '0';
       html = '<div class="act" style="border:0"><span class="say muted">' + esc(a&&a.reason ? a.reason : 'The action record is not known.') + '</span></div>';
     } else if(a.actions.length===0){
       // t261004-21：空态文案取自契约（emptyCopyOf），不再内联重复——契约改词即页面
       // 改词，渲染面守卫（b5 的 innerText 断言）才看得见契约文案。
+      el('actCount').textContent = '0';
       html = '<div class="act" style="border:0"><span class="say muted">' + esc(emptyCopyOf('overview_recent_actions')) + ' Full history: ' + esc(a.source) + '.</span></div>';
     } else {
+      el('actCount').textContent = String(a.actions.length);
       for(var i=0;i<a.actions.length;i++){
         var x = a.actions[i];
         var refused = x.result==='refused';
-        var cls = {Sign:'sign','Send back':'sendback',Rerun:'retry','Open ticket':'open',Pause:'pause',Resume:'pause','Pause or resume':'pause',Cancel:'cancel'}[x.action]||'pause';
-        // hover 文案带权限+执行会话（t261004-11）；refused 行=红点标记（不靠文字辨认）。
+        // t261009-37 (host order 261009-(5)): the refused fact moved from an inline
+        // red dot before the time into a red 'refused' pill in the op column, and
+        // the sentence names what was refused and why — the row's meaning never
+        // depends on a tooltip (the title stays as a duplicate, not as the carrier).
+        var cls = refused ? 'refused' : ({Sign:'sign','Send back':'sendback',Rerun:'retry','Open ticket':'open',Pause:'pause',Resume:'pause','Pause or resume':'pause',Cancel:'cancel'}[x.action]||'pause');
+        // hover copy carries permission + session (t261004-11).
         // 文案前缀写在属性字面量里（title="Allowed by the … / title="Refused: …），
         // 页面源码即可断言 hover 形状（场景 B3 的锁定面）。
         // 时间口径走 localDateTime（t261004-14：行时间带日期，旧的时分格式已退役）。
@@ -1117,13 +1170,16 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         var titleAttr = refused
           ? '"Refused: '+attr(x.reason||'no reason recorded')+' · session '+sess+'."'
           : '"Allowed by the '+perm+' permission · session '+sess+'."';
-        html += '<div class="act">' + (refused ? '<span class="dot red" title="Refused"></span>' : '')
+        var say = refused
+          ? esc(x.action||'') + ' · ' + esc(x.reason||'no reason recorded')
+          : esc(x.result||'done');
+        html += '<div class="act">'
           + '<span class="t">'+esc(localDateTime(x.at))+'</span>'
-          + '<span class="pill '+cls+'" title='+titleAttr+'>'+esc(x.action)+'</span>'
+          + '<span class="pill '+cls+'" title='+titleAttr+'>'+esc(refused?'refused':x.action)+'</span>'
           + '<span class="tk">'+esc(x.ticket)+'</span>'
           // t261004-19：open-ticket 行带 epic（行数据缺席/旧行=不渲染标签，不吞行）。
           + (x.epic ? '<span class="say muted">· epic '+esc(x.epic)+'</span>' : '')
-          + '<span class="say">'+esc(x.result||'done')+'</span></div>';
+          + '<span class="say">'+say+'</span></div>';
       }
       if(a.older_rows>0 && a.note){ html += '<div class="act" style="border:0"><span class="say muted">'+esc(a.note)+'</span></div>'; }
     }
@@ -1169,28 +1225,29 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   function renderConcurrency(){
     var c = state.conc;
-    var chip = el('concChip'), knobRow = el('concKnobRow');
+    var chip = el('concChip'), box = el('concBox');
     // t261008-20 (host order): the block lists no tickets (the console's left column
     // already shows what is running) and shows no audit stamp. The refusal / error
-    // copy that used to land in the removed #concList now lands in #concCounts.
+    // copy that used to land in the removed #concList now lands in #concCounts
+    // (t261009-37: the counts + refusal copy moved into the block header row).
     if(!state.project){
-      chip.style.display='none'; knobRow.style.display='none';
+      chip.style.display='none'; box.style.display='none';
       el('concCounts').textContent=''; el('concLimit').textContent='–';
       return;
     }
     if(!c || c.ok !== true){
-      chip.style.display='none'; knobRow.style.display='none';
+      chip.style.display='none'; box.style.display='none';
       el('concCounts').textContent = c && c.reason ? c.reason : 'The concurrency state is not known yet.';
       return;
     }
     if(c.declared === false){
       // Absent/malformed declaration: the engine refuses to run without a usable
       // declaration — show the named refusal, never a guessed default number.
-      chip.style.display='none'; knobRow.style.display='none';
+      chip.style.display='none'; box.style.display='none';
       el('concCounts').textContent = c.reason || c.note || 'No concurrency limit is declared.';
       return;
     }
-    knobRow.style.display='';
+    box.style.display='';
     var kind = concChipState(c.limit, c.unlimited === true, c.at_work);
     // The over state carries its amber marking in a class name (conc-amber) so a
     // capture face can read it from the attribute instead of guessing colors.
@@ -1219,14 +1276,16 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var st = state.status;
     if(!st){
       el('alertBanner').innerHTML = bannerHtml(pickDegraded({reachable: state.reachable===true}).label, true);
-      el('alertList').innerHTML=''; el('alertHead').textContent='Recent · 0';
-      el('ledgerGrid').innerHTML=''; el('ledgerFile').textContent=''; el('ledgerEvents').innerHTML='';
-      el('ledgerWakeCount').textContent='';
+      el('alertList').innerHTML=''; el('alertHead').textContent='0';
+      el('ledgerHealth').textContent=''; el('ledgerFile').textContent=''; el('ledgerEvents').innerHTML='';
+      el('wakeCount').textContent='0';
       return;
     }
     // t261004-14：alerts 最新在前（payload 可能是追加序）；cap='all'，契约见 LIST_CONTRACTS。
     var rows = newestFirst(st.alerts||[]);
-    el('alertHead').textContent = 'Recent · ' + rows.length;
+    // t261009-37: the face lives in the Overview Alerts block — the header carries
+    // the bare count (#alertHead), the body is unchanged (rows + night-muted banner).
+    el('alertHead').textContent = String(rows.length);
     var html = '';
     for(var i=0;i<rows.length;i++){
       var a2 = rows[i];
@@ -1239,12 +1298,16 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('alertList').innerHTML = html;
     el('alertBanner').innerHTML = rows.some(function(x){return x.night_muted;}) ? bannerHtml('Rows marked night-muted were silenced by the night policy. Redline alerts still play a sound.') : '';
     var lg = st.ledger||{};
-    el('ledgerGrid').innerHTML =
-      '<div class="cell"><b>'+esc(lg.rows_seen!=null?lg.rows_seen:'—')+'</b><span>rows</span></div>'
-      + '<div class="cell"><b>'+esc(fmtProportion(lg.dupes_skipped, lg.rows_seen))+'</b><span>duplicates</span></div>'
-      + '<div class="cell"><b>'+esc(lg.malformed_rows!=null?lg.malformed_rows:'—')+'</b><span>bad rows</span></div>'
-      + '<div class="cell"><b>'+esc(lg.gaps_seen!=null?lg.gaps_seen:'—')+'</b><span>gaps</span></div>';
+    // t261009-37: the health facts are ONE line (rows / duplicates / bad rows /
+    // gaps) in the Events block body; the ledger path lives in the block header
+    // (monospace, ellipsised) and its full value travels on the title attribute.
+    el('ledgerHealth').innerHTML =
+      esc(lg.rows_seen!=null?lg.rows_seen:'—') + ' rows · '
+      + esc(fmtProportion(lg.dupes_skipped, lg.rows_seen)) + ' duplicates · '
+      + esc(lg.malformed_rows!=null?lg.malformed_rows:'—') + ' bad rows · '
+      + esc(lg.gaps_seen!=null?lg.gaps_seen:'—') + ' gaps';
     el('ledgerFile').textContent = lg.path || 'The ledger path is not known.';
+    el('ledgerFile').title = lg.path || '';
     var ev = '';
     // t261008-20 (host order): the wakes face moved from the Ledger tab into the
     // Overview source-event dialog and no longer takes the first three rows — render
@@ -1254,7 +1317,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     // still the t261004-14 fix. Missing st / missing st.wakes / empty wakes all fall
     // through to the declared empty copy — no fabricated rows.
     var wakes = newestFirst(st.wakes||[]);
-    el('ledgerWakeCount').textContent = '· ' + wakes.length;
+    el('wakeCount').textContent = String(wakes.length);
     for(var k=0;k<wakes.length;k++){
       var w2 = wakes[k];
       // t261003-13 rework (re-exposed by the t261008-20 uncap): the renderer never
@@ -1272,26 +1335,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('ledgerEvents').innerHTML = ev;
   }
 
-  // ---- t261008-20: source-event dialog (former Ledger tab face). Same overlay
-  // pattern as inspDlg (data-open + display toggle). Added here, not inherited:
-  // Esc close (one element-keyed document listener — inspDlg keeps its button-only
-  // close) and focus move to the Close control on open / restore to the opener on
-  // close. Pure DOM toggles on both paths — nothing to reclaim on any path.
-  var ledgerOpener = null;
-  function setLedgerDlg(open){
-    var dlg = el('ledgerDlg');
-    dlg.style.display = open ? '' : 'none';
-    dlg.setAttribute('data-open', open ? 'true' : 'false');
-    if(open){ ledgerOpener = document.activeElement; el('ledgerDlgClose').focus(); }
-    else if(ledgerOpener && ledgerOpener.focus){ ledgerOpener.focus(); ledgerOpener = null; }
-  }
-  el('ledgerDlgBtn').onclick = function(){ setLedgerDlg(true); };
-  el('ledgerDlgClose').onclick = function(){ setLedgerDlg(false); };
-  document.addEventListener('keydown', function(e){
-    if((e.key === 'Escape' || e.key === 'Esc') && el('ledgerDlg').getAttribute('data-open') === 'true'){
-      setLedgerDlg(false);
-    }
-  });
+  // t261009-37 (host order 261009-(2)): the source-event dialog is retired with its
+  // pattern — the entry button, the overlay, the Esc/focus machinery and the
+  // keydown listener are all gone. The face lives inline in the Events block.
 
   // ---- t261005-10 (UI-2): Overview limit row (render only; the loader is CL-2's
   // loadConcurrency above — one fetch feeds both faces, no duplicate loader). ----
@@ -2021,7 +2067,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // t261005-10 (UI-2): the nine-tab fixed order (mock v11); the four read-only
   // faces load on first activation (lazy — they are reference faces, not live
   // state, so they stay out of the 5s poll).
-  var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],['t-alerts','paneAlert'],
+  var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],
     ['t-inspection','paneInsp'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
   var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': inspEnsureLoaded, 't-metrics': loadMetrics, 't-docs': loadDocs };  function showTab(id){
     for(var i=0;i<PANES.length;i++){
@@ -2052,11 +2098,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   el('powerBtn').onclick = function(){
     masterSwitch(el('powerBtn').dataset.on !== 'true');
   };
-  el('openSessionBtn').onclick = function(){
-    if(window.parent === window || !state.session) return;
-    el('sessionMsg').textContent = 'Opening the session in the console.';
-    window.parent.postMessage({ type: 'sandbar-executor-panel:open-session', sessionId: state.session }, window.location.origin);
-  };
+  // t261009-37 (host order 261009-(3)): the open-session click handler and its
+  // postMessage are gone with the button.
   // t261008-36: the Settings tab's two face entries. One postMessage each to the
   // parent console (paired constant on the host side: OPEN_FACE_MSG_TYPE in
   // executor-view.tsx). The payload carries this panel's own project key (state.project,
@@ -2085,10 +2128,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(ev.origin !== window.location.origin) return;
     var d = ev.data;
     if(!d || typeof d !== 'object') return;
-    if(d.type === 'sandbar-executor-panel:open-session-result'){
-      el('sessionMsg').textContent = d.ok === true ? 'The session is open in the console.' : 'The console could not open the session.';
-      return;
-    }
+    // t261009-37: the 'open-session-result' branch is gone with the button that
+    // sent the request.
     // t261005-10 (UI-2): host -> panel wayfinding messages (the machine-level
     // Inspection number jumps to the tab; an epic badge jumps to the epic detail).
     // Only these two types, only from the parent window; unknown types or unknown

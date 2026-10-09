@@ -208,8 +208,8 @@ async function main() {
       const page = await fetch(base + PANEL_ROUTE).then(r => r.text()).catch(() => '')
       const refusedShown = rows && api.body?.actions?.some(a => String(a.result || '').toLowerCase() === 'refused')
       leg('b2-refused-row-visually-distinct' + fixtureNote,
-        rows && refusedShown ? /class="dot red"|refused-marker|refused-row/i.test(page) : false,
-        rows ? 'refused-present=' + refusedShown + ' marker-in-render-source=' + /class="dot red"/i.test(page) : fixtureNote)
+        rows && refusedShown ? /refused\s*\?\s*'refused'|pill\.refused/i.test(page) : false,
+        rows ? 'refused-present=' + refusedShown + ' refused-pill-in-render-source=' + /refused\s*\?\s*'refused'|pill\.refused/i.test(page) : fixtureNote)
       const payloadCarries = rows && (api.body?.actions || []).every(a =>
         Object.prototype.hasOwnProperty.call(a, 'permission') && Object.prototype.hasOwnProperty.call(a, 'session'))
       leg('b3-hover-carries-permission-and-session' + fixtureNote,

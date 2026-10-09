@@ -145,12 +145,14 @@ async function main() {
     const text = await page.evaluate(() => document.body.innerText)
     const t = text.toLowerCase()
 
-    // T1 五页签（t261008-20 起 Ledger 页签退场——tab 集为 4；ledger 面改为 Overview
-    // source-event 对话框，从入口文字断言其可达，不再作为页签存在）
-    const tabs = ['overview', 'grants', 'alerts', 'settings'].filter(x => t.includes(x))
-    C.case('T1-five-tabs', tabs.length === 4, `found=${tabs.join(',')}`)
-    C.case('T1b-ledger-face-entry', !/data-tab="ledger"/.test(html) && t.includes('recent actions (view source event)'),
-      'the ledger face is reachable from the Overview entry, never a Ledger tab')
+    // T1 页签（t261008-20 起 Ledger 页签退场；t261009-37 host order (2) 起 Alerts
+    // 页签同样退场——tab 集为 3 页签 + Overview 常开；ledger 面改为 Overview 内联
+    // Events 块，不再有任何对话框或入口，deliberate口径 change）
+    const tabs = ['overview', 'grants', 'settings'].filter(x => t.includes(x))
+    C.case('T1-five-tabs', tabs.length === 3, `found=${tabs.join(',')}`)
+    C.case('T1b-ledger-face-entry', !/data-tab="ledger"/.test(html) && !/ledgerDlg/.test(html)
+        && await page.evaluate(() => { const e = document.getElementById('ledgerEvents'); return !!e && e.offsetParent !== null }),
+      'the ledger face renders INLINE in the Overview (no Ledger tab, no dialog, visible without any entry click)')
     const hasRequestsTab = await page.evaluate(() => {
       const els = [...document.querySelectorAll('label,input[name],.tab,[data-tab]')]
       return els.some(e => /^\s*requests\s*$/i.test(e.textContent || ''))

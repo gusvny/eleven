@@ -105,14 +105,15 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
   },
   ledger_last_wakes: {
     id: 'ledger_last_wakes',
-    title: 'Overview — Recent actions (view source event) — Wakes',
+    title: 'Overview — Events block — Wakes',
     source: 'GET /sandbar-watchdog/api/status, result.wakes',
-    order: 'Newest first by at, sorted in the page (the payload may arrive append-ordered — this ordering rule is the fix for the t261004-14 incident). Missing or malformed at sorts last. Equal at keeps payload order (stable). The watchdog status itself keeps only the last 20 wakes; the dialog renders every row that payload returns and names the 20-row window in its copy instead of truncating further.',
+    order: 'Newest first by at, sorted in the page (the payload may arrive append-ordered — this ordering rule is the fix for the t261004-14 incident). Missing or malformed at sorts last. Equal at keeps payload order (stable). The watchdog status itself keeps only the last 20 wakes; the Events block renders every row that payload returns and names the 20-row window in its copy instead of truncating further.',
     // t261008-20 (host order): the wakes face moved from a capped compact block on
-    // the retired Ledger tab to the Overview source-event dialog, and the host asked
-    // for more than three rows. The dialog renders every row the status API returns;
-    // the real ceiling is the payload's own window (watchdog core.ts keeps the last
-    // 20 wakes — named in `order` and in the dialog copy, not silently applied).
+    // the retired Ledger tab to the Overview, and the host asked for more than three
+    // rows. t261009-37 (host order 261009-(2)): the source-event dialog is retired —
+    // the face is the inline Events block, which renders every row the status API
+    // returns; the real ceiling is the payload's own window (watchdog core.ts keeps
+    // the last 20 wakes — named in `order` and in the block copy, not silently applied).
     cap: 'all',
     empty_copy: 'No wakes yet. The watchdog adds a row here when it wakes an executor.',
   },
