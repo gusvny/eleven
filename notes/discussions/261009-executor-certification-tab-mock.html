@@ -131,22 +131,6 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
     </div>
   </div>
 
-  <div class="card">
-    <h3>Last round</h3>
-    <div class="pad">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span class="mono" id="rWhen">21:40</span>
-        <span class="st g" id="rVerdict">green</span>
-        <span class="mono" id="rCounts">478 / 498 · 4 fail · 16 env</span>
-        <span class="mono k" id="rDur">44m 12s</span>
-        <span class="mono k" title="the revision set the round ran on">covered 12</span>
-        <span class="grow"></span>
-        <span class="mono k" id="rRev">main@46d6e8bf +3</span>
-        <span class="link" id="rRec">record ↗</span>
-      </div>
-    </div>
-  </div>
-
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     <div class="card">
       <h3 title="a waiting ticket holds no slot and no lock — it needs nobody">Waiting <span class="k" id="wCount">3</span></h3>
@@ -164,8 +148,8 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
   </div>
 
   <div class="card">
-    <h3>Rounds</h3>
-    <div class="pad"><table><thead><tr><th>Round</th><th>Started</th><th title="↻ started by itself · ✋ started by hand"></th><th>Result</th><th>Verdict</th><th></th></tr></thead><tbody id="runRows"></tbody></table></div>
+    <h3 title="the last few rounds; the round id opens its record">Rounds</h3>
+    <div class="pad"><table><thead><tr><th>Round</th><th>Started</th><th title="↻ started by itself · ✋ started by hand"></th><th>Result</th><th>Verdict</th><th title="the revision set the round ran on">Revision set</th></tr></thead><tbody id="runRows"></tbody></table></div>
   </div>
 </div>
 
@@ -186,16 +170,16 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 var GREEN={big:'GREEN',dot:'g',frozen:false,delivN:10,certN:2,waitN:3,certAt:'21:40',
  wait:[['t261009-20','22:0x'],['t261009-21','—'],['t261009-22','—']],
  prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
- rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','green'],
-         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green'],
-         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green']],
+ rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','green','main@46d6e8bf +3'],
+         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green','main@b3deb245 +2'],
+         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green','main@a0325c14 +2']],
  bench:'↻ 22:24', nextAt:'next ~22:24', banner:'', names:''};
 var FROZEN={big:'FROZEN',dot:'r',frozen:true,delivN:10,certN:2,waitN:3,certAt:'20:50',
  wait:[['t261009-20','22:0x'],['t261009-21','—'],['t261009-22','—']],
  prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
- rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','red · 2'],
-         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green'],
-         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green']],
+ rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','red · 2','main@46d6e8bf +3'],
+         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green','main@b3deb245 +2'],
+         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green','main@a0325c14 +2']],
  bench:'↻ retry now', nextAt:'retry now',
  banner:'Frozen by a red round — new landings stop; the certified part can still be promoted.',
  names:'t260922-12-gate-ledger-debt-not-blocked · t261009-15-quiet-baseline-identity'};
@@ -225,10 +209,8 @@ function draw(k){
   var p=''; (s.frozen?s.prom:s.prom).forEach(function(r){p+='<tr><td class="mono">'+r[0]+'</td><td class="mono k">'+r[1]+'</td></tr>'});
   $('pRows').innerHTML=p||'<tr><td colspan="2" class="k">—</td></tr>'; $('pCount').textContent=n;
   var rr=''; s.rounds.forEach(function(r){var cls=r[4].indexOf('red')>=0?'r':'g';
-    rr+='<tr><td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td><td title="'+(r[2]==='↻'?'started by itself':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td><span class="link">record</span></td></tr>'});
+    rr+='<tr><td><span class="link mono" title="open the record">'+r[0]+'</span></td><td class="mono">'+r[1]+'</td><td title="'+(r[2]==='↻'?'started by itself':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td class="mono k">'+r[5]+'</td></tr>'});
   $('runRows').innerHTML=rr;
-  $('rVerdict').textContent=s.rounds[0][4]; $('rVerdict').className='st '+(s.frozen?'r':'g');
-  $('rWhen').textContent=s.rounds[0][1]; $('rCounts').textContent=s.rounds[0][3];
   $('runBody').textContent='line: '+$('lineBox').value+'\nrevision set: main@46d6e8bf +3\ncovers: '+s.waitN+' waiting\nbench: 1 serial slot · ~44 min';
   $('signBody').textContent=s.prom.map(function(r){return r[0]+'   '+r[1]}).join('\n');
   $('signWho').textContent=s.frozen
