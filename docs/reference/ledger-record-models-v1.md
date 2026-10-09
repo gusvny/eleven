@@ -52,6 +52,7 @@ related:
 | **The delivery records share one ordering space** | | the landings and the certifications are ordered by one `seq`, so "the landings after the previous certification" is computable | Proposed, and load-bearing: the freeze's culprit range (filtered to that line), the certified prefix and the uncertified range are all derived from it. Separate counters per record type — an auto-increment per file or per table — would bring back every field that was just dropped |
 | **A record's own `at` is when that fact happened** | the freeze's opening record carries `at`; there is no `opened_at`, and no `closed_at` — the closing is a record of its own with its own `at` | Proposed; `opened_at` / `closed_at` were dropped for this reason (261009) |
 | **An entity carries only what was true when it came into being; everything after is another record keyed to it** | a freeze opens with its cause and its candidate set; an attribution change, a closure and a reopening are three further records | Proposed; the freeze episode and the inspection period were written as entities with mutable fields and are corrected below |
+| **A projection is not a record** | the ticket's outcome is a view over landings, certifications, promotions and reverts — it has no `id`, `seq` or `at` of its own | Proposed. If kept, it is a derived view carrying the cursor it was computed up to, droppable and rebuildable; the rebuild-and-compare is the drift check, and no fact may cite it |
 | **A summary lives with the data it summarises** | a run's counts, environment, width and duration are fields of the **run** record; a certification cites the run instead of restating it | The test for a summary: would a reader be forced to open the raw body to make a decision they make daily? and can it be checked against the body? If yes it is kept — **at the level of the data, not one level up**. Anything that fails both tests is duplication (`base`, dropped) |
 | A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 | **A landing is one act over every repository it names: all or nothing** | see the multi-repository example under *landing* | Proposed — see below for why a partial landing is not an option |
@@ -316,7 +317,11 @@ Waiting for a certification:
 | `reverted_at` | `null` / `1791515000000` | Set when the content it landed was withdrawn |
 | `waiting_since` | `1791510000000` / `null` | **What tells "waiting" apart from "stuck"**: a waiting ticket has a start time and a certification it is waiting for |
 
-A projection, not a source: it is recomputed from the facts above, and if it disagrees with them, the projection is what is wrong.
+**It is not a record in the fact ledger.** It has no `id`, no `seq` and no `at` of its own, because it has no moment of its own — it is a function of the landings, certifications, promotions and reverts. Where a projection is *kept*, it is kept as a **derived view**, and three rules come with that:
+
+- **Derived only.** Nothing writes to it except the derivation, and no other record may cite it: a promotion is cited for "delivered", never "the outcome says delivered". A cached answer that other records lean on has become a second source.
+- **It carries the cursor it was computed up to.** A view is stored "as of seq N", so a reader can tell whether it is behind rather than discovering a stale answer. That is the same cursor the ledger design asks for on the read path.
+- **It is droppable and rebuildable, and the rebuild is also the check.** Deleting it must cost nothing but a recomputation; rebuilding it and comparing against the facts is exactly the patrol job that catches drift. Whether it exists at all is a performance decision, not a modelling one — and today the project already keeps projections of this kind (the per-ticket mirror of the engine's own history, and the generated document index).
 
 ## B. Relation records (proposed)
 
