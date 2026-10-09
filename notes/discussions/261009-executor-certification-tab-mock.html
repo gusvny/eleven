@@ -18,7 +18,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,s
 .tab{padding:6px 11px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;color:var(--muted);font-size:12.5px;white-space:nowrap}
 .tab.on{background:var(--bg);border-color:var(--line);color:var(--fg);font-weight:600;position:relative;top:1px}
 .wrap{max-width:840px;margin:14px auto 40px;padding:0 14px;display:flex;flex-direction:column;gap:12px}
-.pick{display:flex;align-items:center;gap:10px}
+.pick{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line-soft)}
 .pick .lb{color:var(--muted);font-size:12.5px}
 input[type=text]{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:5px 9px;font:inherit;font-size:12.5px;width:230px}
 input[type=text]:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px var(--accent-soft)}
@@ -87,24 +87,22 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 
 <div class="wrap">
 
-  <div class="pick">
-    <span class="lb" title="a development line is a declared thing: an identifier, a scope, an owner and the repositories it runs on. Everything landed on it gets certified by a round and delivered by a promotion.">Development line</span>
-    <input type="text" id="lineBox" list="lineList" value="develop-buffer" placeholder="type to filter lines…"
-           title="the line_id of a declared line (lines.json). One control: type to filter or pick from the list.">
-    <datalist id="lineList"><option value="develop-buffer"></option></datalist>
-  </div>
-
   <div class="banner" id="banner" style="display:none">
     <span class="dot r"></span><span id="bnTxt"></span><span class="grow"></span><span class="mono k" id="bnNames"></span>
   </div>
 
   <div class="card">
+    <div class="pick">
+      <span class="lb" title="a development line is a declared thing: an identifier, a scope, an owner and the repositories it runs on. Everything landed on it gets certified by a round and delivered by a promotion.">Development line</span>
+      <input type="text" id="lineBox" list="lineList" value="develop-buffer" placeholder="type to filter lines…"
+             title="the line_id of a declared line (lines.json). One control: type to filter or pick from the list.">
+      <datalist id="lineList"><option value="develop-buffer"></option></datalist>
+    </div>
     <div class="hd">
       <span class="dot g" id="dot"></span>
       <span class="state" id="big">GREEN</span>
       <span class="chip" id="cWhen" title="the last round and its verdict — the state above is as of this round">as of 21:40</span>
       <span class="grow"></span>
-      <button class="btn p" id="btnPromote" title="a promotion is signed: the record carries signer, on_behalf_of and the authority it rests on">Promote <span id="btnPromoteN">2</span></button>
     </div>
     <div class="pad">
       <div class="lb" id="lbBar" title="the bar is what is still on the line: certified (covered, waiting for a signature) and waiting (not covered yet). The fixed-width bar at the left is the delivered part — a running total, so it never grows into the picture.">
@@ -193,7 +191,6 @@ function draw(k){
   $('banner').style.display=s.frozen?'flex':'none'; $('bnTxt').textContent=s.banner;
   $('bnNames').innerHTML=(s.names||'').split(' · ').filter(Boolean).map(function(x){return '<span class="link mono" title="open the scenario record">'+x+'</span>'}).join(' · ');
   var n=s.certN;
-  $('btnPromote').disabled=!n; $('btnPromoteN').textContent=n;
   $('btnPromote2').disabled=!n; $('btnPromoteN2').textContent=n;
   $('segCert').style.flex=s.certN; $('segCertN').textContent=s.certN;
   $('segWait').style.flex=s.waitN; $('segWaitN').textContent=s.waitN;
@@ -222,7 +219,6 @@ $('st').onclick=function(){draw($('st').textContent.indexOf('green')>=0?'frozen'
 $('th').onclick=function(){var h=document.documentElement;h.dataset.theme=(h.dataset.theme==='dark'?'light':'dark')};
 $('swAuto').onclick=function(){auto=!auto;draw($('st').textContent.indexOf('green')>=0?'green':'frozen')};
 $('btnRun').onclick=function(){$('dRun').classList.add('on')};
-$('btnPromote').onclick=function(){$('dPromote').classList.add('on')};
 $('btnPromote2').onclick=function(){$('dPromote').classList.add('on')};
 Array.prototype.forEach.call(document.querySelectorAll('[data-c]'),function(b){b.onclick=function(e){e.target.closest('.dialog').classList.remove('on')}});
 draw('green');
