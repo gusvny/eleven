@@ -8978,7 +8978,13 @@ function WorkbenchSidebar(props) {
 	}, []);
 	const handleReorder = (0, react.useCallback)(async (projectKey, order) => {
 		const want = permutationOf((concByProject[projectKey] ?? null)?.queue ?? [], order);
-		if (want === null) return;
+		if (want === null) {
+			setOrderNotice((m) => ({
+				...m,
+				[projectKey]: "concurrency reorder not applied: the queue face is unavailable or stale — no move made"
+			}));
+			return;
+		}
 		setReorderBusy((m) => ({
 			...m,
 			[projectKey]: true

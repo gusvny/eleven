@@ -858,7 +858,15 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const handleReorder = useCallback(async (projectKey: string, order: string[]) => {
     const face = concByProject[projectKey] ?? null
     const want = permutationOf(face?.queue ?? [], order)
-    if (want === null) return // not a permutation (stale/malformed face) -> no-op, wait for the poll
+    if (want === null) {
+      // t261009-03: a refused move must be VISIBLE (ticket outcome 3). The
+      // face is null or stale — refusing the move is right, but refusing
+      // silently is exactly the "drag looks inert" the host reported. Set
+      // the same notice line the 409 path uses; the poll restores truth.
+      setOrderNotice(m => ({ ...m, [projectKey]:
+        'concurrency reorder not applied: the queue face is unavailable or stale — no move made' }))
+      return
+    }
     setReorderBusy(m => ({ ...m, [projectKey]: true }))
     let refused = ''
     try {

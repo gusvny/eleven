@@ -1178,11 +1178,25 @@ def _concurrency(args):
       队列位次与已等时长。面板只读账，不自己算队列（规则8）。
     - reconcile=true：逐个 holder 用只读 query 探活（workflow 已消亡=僵尸），
       具名清账并递补队首。声明缺席/畸形在这里具名拒收（规则9），绝不静默 unlimited。
+    - order=[ticket ids]（CL-3 写脸，t261009-03）：路由到 engine concurrency.reorder
+      ——唯一实现在引擎（置换校验/锁内写/具名拒收都在那里，本壳零二次校验），
+      写后回读 read_state 同脸返回（面板拿新序比对，绝不本地算队列）。reconcile 与
+      order 同给时 order 胜（显式写请求）。空 order 对非空队列=非置换，引擎具名拒收。
+
+    身份闸（KI-193 在册欠账，诚实声明）：本 op 及其写路径只经 runAdminCli 直 spawn
+    边界可达（console 宿主持 console 凭据拉起本 CLI），与 reconcile 清账写、CL-2b
+    set_limit 同闸——不另设第二道闸。已知欠账：插件路由本身无 token 闸（KI-193
+    未收），本边界是宿主进程spawn闸而非完整身份面。
     """
     project = str(args.get('project') or '').strip()
     if not project:
         raise ValueError('op=concurrency 需要 project（项目 key，声明按项目逐份判读）')
     conc = _concurrency_mod()
+    if args.get('order') is not None:
+        # CL-3 写脸：引擎 reorder 是唯一实现（置换校验/锁内写/具名拒收），本壳
+        # 只路由；写后回读 read_state，面板拿到与读脸同形的新序（比对即过）。
+        conc.reorder(project, args.get('order'))
+        return conc.read_state(project)
     if not args.get('reconcile'):
         return conc.read_state(project)
     state = conc.read_state(project)

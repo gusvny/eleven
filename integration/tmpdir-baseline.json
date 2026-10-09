@@ -68,7 +68,8 @@
   "server/installer/tests/test_zombies.py": 3,
   "server/plugins/knowledge/smoke/review_store.mjs": 1,
   "server/plugins/workbench/smoke/ki057-anchors.mjs": 2,
-  "server/plugins/workbench/tests/t260905_06_docs_api.mjs": 1
+  "server/plugins/workbench/tests/t260905_06_docs_api.mjs": 1,
+  "integration/t261009-03/sc_t26100903_reorder_write_face.mjs": 1
  },
  "generated_by": "python3 integration/lint_tests.py --write-tmpdir-baseline",
  "rule": "L8: a file calling mkdtemp* must reclaim in the same file; grandfathered here (value = mkdtemp call sites); only NEW debt warns"

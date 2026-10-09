@@ -1457,10 +1457,11 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * POST ${CONCURRENCY_REORDER_PATH} {project, order:[ids]} → 同一 op 附 order 键，
    *   引擎侧 reorder() 写人工顺序后回读同脸。host 不持有任何本地顺序状态。
    *
-   * 写脸缺位防线（review 条件 1b）：ticket.py 的 op=concurrency 当前只认 project/reconcile
-   * （server/tools/ 在本票写集外）。若旧 CLI 忽略 order 键静默返回读脸，回执 queue 与请求
-   * order 不一致 → 具名 409 拒收（绝不静默成功假装已重排）；等 ticket.py 接上 order 后
-   * 该比对自然通过，路由零改动。
+   * 写脸已接（t261009-03）：ticket.py 的 op=concurrency 认 order 键（引擎
+   * concurrency.reorder 唯一实现：置换校验/锁内写/具名拒收），POST 的新序经
+   * read_state 同脸回读，比对自然通过。比对不一致分支保留为异常防线（引擎说
+   * ok 却回执序与请求序不同）——具名 409 拒收、文案中性不臆断成因，绝不静默
+   * 成功假装已重排；引擎自己的置换拒收走 ok:false → 502 透传原文。
    *
    * 故障面（runAdminCli 链既有纪律全沿用，不另造）：CLI 结构化失败 {ok:false,error}
    * → 具名 502 透传（声明缺席/畸形的规则 9 具名拒收原样上抛）；spawn 超时/非零退出/
@@ -1515,8 +1516,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         if (got === null || JSON.stringify(got) !== JSON.stringify(order)) {
           sendJson(res, 409, {
             ok: false,
-            error: 'concurrency reorder not applied: the engine entry ignored the order key '
-              + '(ticket.py write face for CL-3 not landed) — queue unchanged, refusing to fake success',
+            // Neutral named text (review t261009-03 conditional 1): this branch
+            // only fires when the engine said ok:true but the returned queue
+            // differs from the requested order — an anomaly whose cause is not
+            // known here, so the text must not assert one. Never fake success.
+            error: 'concurrency reorder not applied: the engine\'s returned queue '
+              + 'differs from the requested order — refusing to fake success',
             queue: got ?? undefined,
           })
           return

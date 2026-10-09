@@ -164,7 +164,9 @@ def main():
     import re
     m = re.search(r"create_subprocess_exec\([^\n]*\n\s*\"python3\", admin_bin", src)
     if m:
-        block = src[m.start():m.start() + 1600]
+        # window = the whole call, not a fixed 1600 chars: t261008-33's comment
+        # block pushed the marker past 1600 (product correct, pin brittle).
+        block = src[m.start():m.start() + 4000]
         ok("start_new_session=True" in block,
            "C5 merge-check verify_lane-code spawn is session-isolated")
     else:
