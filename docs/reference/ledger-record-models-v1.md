@@ -22,69 +22,250 @@ related:
 
 # Ledger Record Models v1 (what the ledgers store, and how)
 
-**What this is.** The design documents state *why* a fact lives where it lives. This document states **what a record is, what question it answers, and how it is shaped**, so it can be reviewed before it is built and so two implementations cannot drift. Everything marked **today** exists on disk now (the shapes below were read from the store, not remembered); everything marked **proposed** is designed and not yet built.
+**What this is.** The design documents state *why* a fact lives where it lives. This document states **what a record is, what question it answers, how it is shaped, and what the values look like**, so it can be reviewed before it is built and so two implementations cannot drift. Every record carries an **example**; every field carries an **example value**. Entries marked **today** exist on disk now (their shapes were read from the store, not remembered); **proposed** means designed and not yet built.
+
+## Naming (the words this document uses, and the collisions it avoids)
+
+| Word | Means | Deliberately not |
+|---|---|---|
+| **lane** | the per-ticket working copy — where a ticket's own work happens | never the integration container |
+| **line** | the integration container between the lanes and `main`: a **declared scope with an owner**, serialized landings, one shared proof | **not** a branch name (a branch is one way of implementing a line), and **not** a piece of work |
+| **main** | the delivered target | we no longer say "the delivered line" — that phrasing collided with *line* and caused exactly the confusion this table exists to stop |
+| **epic** | a piece of work | we avoid the phrase "a line of work" entirely |
+| **buffer** | the role a line plays, and the design's own name for it (develop-buffer) | not a separate object |
 
 ## Conventions that apply to every record
 
-| Rule | Why | Status |
+| Rule | Example | Status |
 |---|---|---|
-| **Time is `at`: an integer count of milliseconds since the epoch** | One convention for every family; four existed when this was written | **Decided by the host (261009).** New records use it. Older records keep the form they were written in and are read as they are — the older forms are listed below, and nothing is rewritten |
-| A record carries the version of its own shape | A reader must be able to read older shapes instead of demanding a migration | **Half in place**: the event ledger already has `v:"event-ledger-v1"`; the others do not |
-| Facts are appended; a correction is another fact | Rewriting a fact destroys the history that makes attribution auditable | Today, by convention; stated in the ledger design |
-| An entity and an observation of it are two records | "How long has this been open" and "was it seen again" are different questions | Proposed as a rule; the fault ledger violates it today (one prose entry per fault mode) |
-| Identity is minted, never derived, never reused | A reused id silently rewrites what every report that cited it meant | Today for inspection findings (minted from content); to be the rule everywhere |
-| One direction is stored; the reverse is derived | Two rows for one fact drift apart | Proposed |
-| Order comes from the ledger, not from a clock | Several machines do not agree on time | Proposed; today everything orders by timestamp |
-| Records carry references, not payloads | A shared store must not accumulate credentials, tokens or private paths | Proposed; today some free-text fields carry whatever the writer wrote |
-| Which machine produced a record is provenance, never authority | A pin or a machine must not grant a right | Proposed |
+| **Time is `at`: an integer count of milliseconds since the epoch** | `"at": 1791507005123` | **Decided by the host (261009).** New records use it; older records keep the form they were written in and are read as they are |
+| A record carries the version of its own shape | `"v": "event-ledger-v1"` | **Half in place**: only the event ledger has it |
+| Facts are appended; a correction is another fact | a correction record names `"supersedes": "rel-261009-0004"` | Today by convention; stated in the ledger design |
+| An entity and an observation of it are two records | entity `finding fi-9c1e`, observation `{"finding":"fi-9c1e","period":"20261007","revision":"de46ce42"}` | Proposed; the fault ledger violates it today |
+| Identity is minted, never derived, never reused | `"id": "cert-261009-14"` | Today for inspection findings; to be the rule everywhere |
+| One direction is stored; the reverse is derived | store `repair: t261009-04 → t261008-45`; read the reverse from it | Proposed |
+| Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
+| Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
+| A machine is provenance, never authority | `"machine": "mac-mini-2"` decides nothing | Proposed |
 
-**The time shapes found on disk (kept for reading, not for writing):** `at` as integer milliseconds (executor actions, requests, alerts, grants audit); `ts` as float seconds (capacity limit audit); `at` as float seconds (inspection reviewed-paths); `ts` as an ISO string with offset (run results).
+**The older time shapes (kept for reading, not for writing):** `at` as integer milliseconds (executor actions, requests, alerts, grants audit); `ts` as float seconds (capacity limit audit); `at` as float seconds (inspection reviewed-paths); `ts` as an ISO string with offset (run results).
 
 ## A. Delivery records (proposed — the buffer flow)
 
-| Record | What it is for — the question it answers | Kind | Fields | Written by | Read by |
-|---|---|---|---|---|---|
-| **landing** | "What content did this ticket put on this line, and on top of what?" It is the anchor every other delivery record points at: a certification says which range it covered, and a ticket's outcome says which landing carried it | fact | ticket, line, repositories `[{repo, revision}]`, move-together flag, base (the previously certified revision), at, actor | the engine, when a ticket lands | certification driver, faces |
-| **certification** | "May this content be delivered, and what was actually proved?" It is the only thing that grants landability, and the only record that makes two revisions comparable — so it is also what tells a red apart from a known one | fact | certification id, candidate id, repositories `[{repo, revision}]`, covered-from revision, tickets covered, what ran (suite / fast set, scenario set, wall time), environment fingerprint, environment reds, booked-red inventory version, verdict, driver, at, evidence reference | the certification driver | landability check, faces, patrol |
-| **freeze episode** | "Why is nothing landing on this line, and who is fixing it?" Its purpose is to make a stop **visible and bounded**: an open episode names the culprit set and the remedy ticket, so a freeze cannot quietly become the permanent state | entity | freeze id, line, opened at, opened by (certification id), culprit candidates, state (open / closed), closed at, closed by (remedy ticket), reopening reason | engine, on a red that implicates a landing | waiting tickets, patrol, faces |
-| **batch** | "What did a person approve, and what did the delivered line become?" It is the only place a human signature attaches, and the only place a ticket's delivery can be confirmed | fact | batch id, certification id, repositories `[{repo, revision}]`, tickets covered, main before, main after, signer, **signed on behalf of**, note, at | the person (or delegate) who signs | delivery provenance, faces |
-| **revert** | "This content was withdrawn — where does it still live?" Its purpose is the **propagation obligation**: every line that still carries the withdrawn landing is named, because a branch merge keeps it silently and the next batch would reintroduce it | fact | revert id, the landing withdrawn, on (line or delivered line), at, by, reason, propagated-to `[{line, state}]` | engine / person, per the withdrawal rules | lines that still carry it, provenance |
-| **ticket outcome** | "Where did this ticket end up?" — the three stages (landed, certified, delivered) in one projection, so a closed ticket is never mistaken for a delivered one, and a waiting ticket is distinguishable from a stuck one | projection | ticket, landed at (revision set or none), certified by, delivered in (batch id) or reverted at, waiting since | derived | faces, the ticket's own record |
+### landing — "what content did this ticket put on this line, and on top of what?"
+
+```json
+{"id": "ldg-261009-0007", "ticket": "t261008-45", "line": "default",
+ "repos": [{"repo": "sandbar", "revision": "9f3c2a1b"}], "atomic": false,
+ "base": "4d2e0f9a", "at": 1791507005123, "actor": "engine"}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `ldg-261009-0007` | Minted, never reused: the anchor every other delivery record points at |
+| `ticket` | `t261008-45` | Whose content this is |
+| `line` | `default` / `ui` / `epic-console-ui` | Which line it landed on — freezes and certification are per line |
+| `repos[].repo` | `sandbar` | A landing may span repositories; one entry in the single-repository case |
+| `repos[].revision` | `9f3c2a1b` | The commit that went onto that repository's line |
+| `atomic` | `false` (or `true`) | `true` when the landing's revisions **must be delivered as one act** — a change that is only correct as a pair; `false` when each may travel on its own. Known limit, recorded deliberately: it says nothing about *which* two of three are coupled |
+| `base` | `4d2e0f9a` | The previously certified revision: **the anchor that makes the uncertified range computable** instead of remembered |
+| `at` | `1791507005123` | Milliseconds since the epoch |
+| `actor` | `engine` / `integration` / `host` | Who performed the landing — provenance, not authority |
+
+### certification — "may this content be delivered, and what was actually proved?"
+
+```json
+{"id": "cert-261009-14", "candidate": "cand-261009-14", "line": "default",
+ "repos": [{"repo": "sandbar", "revision": "9f3c2a1b"}],
+ "covered_from": "4d2e0f9a", "tickets": ["t261008-45", "t261008-46"],
+ "ran": {"suite": "full", "scenarios": 445, "wall_s": 2132},
+ "env_fp": "0febeeb6da6b25dc…", "env_reds": ["t260916-25"],
+ "booked_red": "known-red-baseline@2026-10-04", "verdict": "green",
+ "driver": "integration/run_scenarios.py", "at": 1791508600000,
+ "evidence": "ledger/scenario-results.jsonl#run-261009-14"}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `cert-261009-14` | This run, cited by batches and freezes |
+| `candidate` | `cand-261009-14` | **What is proved is the set of revisions that would be delivered together**, not a branch: the line's head today, a merge of heads once there are several lines |
+| `line` | `default` | Which line's candidate this is |
+| `repos[].revision` | `9f3c2a1b` | The exact content under proof |
+| `covered_from` | `4d2e0f9a` | The revision this certification continues from — **what makes the certified prefix reconstructible**, and therefore what makes "the greatest certified revision is always landable" true |
+| `tickets` | `["t261008-45","t261008-46"]` | Which tickets' landings are inside the covered range: what lets a batch say whom it delivers |
+| `ran.suite` | `full` / `fast-set` | Which proof was run |
+| `ran.scenarios` | `445` | How much was run — evidence for arguing the fast set's membership |
+| `ran.wall_s` | `2132` | What the proof cost |
+| `env_fp` | `0febeeb6da6b25dc…` | Environment fingerprint: two runs in different environments are not comparable |
+| `env_reds` | `["t260916-25"]` | Failures that were environmental — **never counted as content reds** ("could not run" is not "red") |
+| `booked_red` | `known-red-baseline@2026-10-04` | Which expected-red list this judgement used: what tells a new red from a known one |
+| `verdict` | `green` / `red` | The outcome |
+| `driver` | `integration/run_scenarios.py` | What produced it |
+| `at` | `1791508600000` | Milliseconds since the epoch |
+| `evidence` | `ledger/scenario-results.jsonl#run-261009-14` | A reference to the raw rows, not the rows themselves |
+
+### freeze episode — "why is nothing landing on this line, and who is fixing it?"
+
+```json
+{"id": "frz-261009-03", "line": "default", "opened_at": 1791508600000,
+ "opened_by": "cert-261009-14", "culprit_candidates": ["t261008-45", "t261008-46"],
+ "attribution": "boundary, culprit not isolated",
+ "state": "open", "closed_at": null, "closed_by": null, "reopened_reason": null}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `frz-261009-03` | A thing with a lifetime, not an event: "why is nothing landing" must be answerable while it is open |
+| `line` | `default` | A freeze is per line — one line's red does not stop another's landings |
+| `opened_at` | `1791508600000` | When the line stopped; with `closed_at`, **how long it was stopped** |
+| `opened_by` | `cert-261009-14` | The certification that caused it: the freeze **points at its cause** instead of saying "something is red" |
+| `culprit_candidates` | `["t261008-45","t261008-46"]` | The landings inside the covered range — **deliberately a set**, narrowed later |
+| `attribution` | `isolated: t261008-45` / `boundary, culprit not isolated` | The design requires that the second sentence be sayable |
+| `state` | `open` / `closed` | Current state, held as its own record rather than by editing the episode |
+| `closed_at` / `closed_by` | `1791515000000` / `t261009-04` | When and by what remedy the line reopened |
+| `reopened_reason` | `null` / `the remedy did not hold` | If the same content red comes back |
+
+### batch — "what did a person approve, and what did main become?"
+
+```json
+{"id": "batch-261009-02", "certification": "cert-261009-14", "line": "default",
+ "repos": [{"repo": "sandbar", "revision": "7c1d90ab"}],
+ "tickets": ["t261008-45", "t261008-46"],
+ "main_before": "de46ce42", "main_after": "7c1d90ab",
+ "signer": "integration", "on_behalf_of": "host",
+ "authority": "宿主令 261009「resume 2 个 ticket，按优先级」",
+ "note": "two engine-hardening landings", "at": 1791512000000}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `batch-261009-02` | Cited by a ticket's outcome and by any later withdrawal |
+| `certification` | `cert-261009-14` | **Which proof justifies this delivery** — a batch can never name content without one |
+| `line` | `default` | Which line it takes content from |
+| `repos[].revision` | `7c1d90ab` | What actually moved |
+| `tickets` | `["t261008-45","t261008-46"]` | Whom it delivers — the only source for "delivered" |
+| `main_before` / `main_after` | `de46ce42` / `7c1d90ab` | Makes the batch a fact about a range; rollbacks and withdrawals can name it |
+| `signer` | `integration` | Who actually signed |
+| `on_behalf_of` | `host` / `null` | Delegation: the record names both sides |
+| `authority` | `宿主令 261009「…」` | The order being executed — the third field of the `by`/`who` split |
+| `note` | `two engine-hardening landings` | The human's own words about what this batch is |
+| `at` | `1791512000000` | Milliseconds since the epoch |
+
+### revert — "this content was withdrawn; where does it still live?"
+
+```json
+{"id": "rev-261009-01", "landing": "ldg-261009-0007", "on": "main",
+ "at": 1791515000000, "by": "host",
+ "reason": "the lazy-path rewrite renamed a public constant",
+ "propagated_to": [{"line": "default", "state": "pending"},
+                   {"line": "ui", "state": "applied"}]}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `rev-261009-01` | The withdrawal is a fact about a landing |
+| `landing` | `ldg-261009-0007` | The obligation attaches to **a specific piece of content**, not to a file or a ticket |
+| `on` | `main` / `default` | Withdrawing from main and from a line are different acts with different propagation |
+| `at` / `by` | `1791515000000` / `host` | When, and who decided |
+| `reason` | `the lazy-path rewrite renamed a public constant` | Why the content had to go |
+| `propagated_to[].line` | `default`, `ui` | **The point of the record**: every line that still carries the withdrawn landing is named, because a merge keeps it silently and the next batch would reintroduce it |
+| `propagated_to[].state` | `pending` / `applied` / `line retired` | The obligation's state on that line — visible instead of remembered |
+
+### ticket outcome — "where did this ticket end up?"
+
+```json
+{"ticket": "t261008-45", "landed_at": "9f3c2a1b", "certified_by": "cert-261009-14",
+ "delivered_in": "batch-261009-02", "reverted_at": null, "waiting_since": null}
+```
+
+```json
+{"ticket": "t261008-50", "landed_at": "3b9ca940", "certified_by": null,
+ "delivered_in": null, "reverted_at": null, "waiting_since": 1791510000000}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `ticket` | `t261008-45` | One row per ticket |
+| `landed_at` | `9f3c2a1b` / `null` | The content it put on the line, if it has landed |
+| `certified_by` | `cert-261009-14` / `null` | The certification covering its landing — this, not delivery, is where the ticket's life ends |
+| `delivered_in` | `batch-261009-02` / `null` | The batch that carried it; `null` is normal and is **not** a defect |
+| `reverted_at` | `null` / `1791515000000` | Set when the content it landed was withdrawn |
+| `waiting_since` | `1791510000000` / `null` | **What tells "waiting" apart from "stuck"**: a waiting ticket has a start time and a certification it is waiting for |
+
+A projection, not a source: it is recomputed from the facts above, and if it disagrees with them, the projection is what is wrong.
 
 ## B. Relation records (proposed)
 
-| Record | What it is for — the question it answers | Kind | Fields |
-|---|---|---|---|
-| **relation** | "Why does this work exist?" and "who owns this boundary?" Its purpose is that the answer outlives the conversation in which it was decided | fact | relation id, subject A, subject B, kind (`repairs` \| `originates from a finding`), recorded by, reason, evidence, at, shape version |
-| **relation correction** | "That attribution was wrong." Its purpose is that a wrong attribution can be superseded without erasing the fact that it was made | fact | the relation it supersedes, the replacement, recorded by, reason, at |
-| **repository relation** | "What else must be proved when this repository changes?" Its purpose is that a landing spanning repositories has a **defined** proof set rather than an improvised one | **declaration, not a ledger** — the subjects are repositories, not tickets, and it changes rarely | base repository, dependent repositories, the proof rule |
+### relation — "why does this work exist?" / "who owns this boundary?"
+
+```json
+{"id": "rel-261009-0004", "from": "t261009-04", "to": "t261008-45",
+ "kind": "repairs", "recorded_by": "integration",
+ "reason": "the same lazy path constant", "evidence": "cert-261009-13",
+ "at": 1791505000000, "v": "relation-v1"}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `rel-261009-0004` | Minted; a correction cites it |
+| `from` / `to` | `t261009-04` / `t261008-45` | One direction stored; the reverse is derived |
+| `kind` | `repairs` / `originates from a finding` | Only kinds with a live consumer |
+| `recorded_by` | `integration` / `engine` | **Who may record what** is part of the design: a ticket may not record a relation that grants itself a permission |
+| `reason` | `the same lazy path constant` | Mandatory — a relation whose reason cannot be written should not exist |
+| `evidence` | `cert-261009-13` | What the record rests on |
+| `at` / `v` | `1791505000000` / `relation-v1` | When, and the shape's version |
+
+### relation correction
+
+```json
+{"id": "rel-261009-0011", "supersedes": "rel-261009-0004", "from": "t261009-04",
+ "to": "t261008-43", "kind": "repairs", "recorded_by": "integration",
+ "reason": "the first attribution named the wrong landing", "at": 1791509000000}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `supersedes` | `rel-261009-0004` | A wrong attribution is superseded, never erased |
+
+### repository relation — a declaration, not a ledger
+
+```yaml
+base: sandbar
+dependents: [dsh]
+proof_rule: touching base runs the dependents' scenarios too
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `base` / `dependents` | `sandbar` / `[dsh]` | The subjects are repositories, not tickets; it changes rarely, so it is declared with the project layout |
+| `proof_rule` | `touching base runs the dependents' scenarios too` | What a landing spanning repositories must prove — a **defined** set instead of an improvised one |
 
 ## C. Knowledge records
 
-| Record | What it is for — the question it answers | Kind | Fields | Status |
-|---|---|---|---|---|
-| **fault mode** | "Have we seen this before?" The catalogue entry: the pattern, what triggers it, what kind of change steps on it | entity | id, title, pattern, trigger, what kind of change steps on it, blocking or not, state | **Today**: one prose entry per mode in a single file, edited in place |
-| **fault-mode disposition** | "Do we accept this, or must it be fixed?" The decision about a fault mode, recorded as a fact so that "we decided to live with it" is distinguishable from "we just hit it again" | fact | fault mode, from state, to state (open → booked red → fixed → obsolete), who, why, which fix, at | Proposed; today it is prose |
-| **case ↔ fault mode link** | "Is this fault mode actually locked by a case?" The join whose absence turns the ledger into a search | fact | case id, fault mode id, marked by, at | **Missing today**: it exists only as prose citations |
-| **booked-red inventory** | "Is this red new?" The expected-red list the gate compares against | state | per case: expected-red or not, the reason, who booked it | **Today**: a machine-read file in the repository |
-| **finding** | "What is wrong here?" — with evidence a machine can check, so that a finding is a fact rather than an opinion | entity | id minted from content, subject, severity, evidence `[{path, line, quote}]`, why, suggestion, confidence, state | **Today**: produced by the inspection agent, id minted mechanically, evidence verified mechanically; where the entity is *stored* is not settled (see open questions) |
-| **finding observation** | "Is it still there, and for how long has it been?" — the sighting, against a named revision | fact | finding id, period, revision seen against, verification result (verified / downgraded / unlocatable), quote fingerprint, at | Proposed; today only the finding itself exists |
-| **run result** | "How did this case behave on this revision, in this environment?" The evidence behind every green and red | fact | at, commit, environment fingerprint, concurrency width, pool, scenario, verdict, wall seconds, source, ticket | **Today**: one row per case per run. It already carries the revision and the environment fingerprint — certification should reuse this shape rather than invent another |
-| **reviewed path** | "Has anyone looked at this file lately?" What an inspection period actually examined | fact | path, period, at | **Today** |
+| Record | Example | Notes on the values |
+|---|---|---|
+| **fault mode** (entity) | `{"id":"KI-227","title":"an uncommitted change on main blocks other tickets' merges","state":"open","blocking":false,"pattern":"merge_check dirty-tree guard","trigger":"anyone leaves an uncommitted change in the main working tree"}` | **Today** these are prose entries in one file, edited in place; this is what the entity would look like |
+| **fault-mode disposition** (fact) | `{"fault_mode":"KI-220","from":"open","to":"fixed","who":"integration","why":"removed the injected precondition","fix":"t261008-24","at":1791520000000}` | States: `open` → `booked red` → `fixed` → `obsolete` |
+| **case ↔ fault mode link** (fact) | `{"case":"t261008-26-lane-vocabulary-fail-closed","fault_mode":"KI-226","marked_by":"integration","at":1791520000000}` | **Missing today**: exists only as prose citations |
+| **booked-red inventory** (state) | `{"case":"t261004-26","expected_red":true,"reason":"load flake in the full suite","booked_by":"integration"}` | **Today**: a machine-read file in the repository |
+| **finding** (entity) | `{"id":"fi-9c1e42a0","subject":"stage-entry titles fall back to Chinese","severity":"med","evidence":[{"path":"server/plugin/x.ts","line":412,"quote":"阶段开始"}],"why":"the UI copy contract is English","suggestion":"use the stage id","confidence":"high","state":"open"}` | **Today**: produced by the inspection agent; the id is minted from content and stable across periods; the evidence is verified mechanically. Where the entity is stored is **not settled** (see open questions) |
+| **finding observation** (fact) | `{"finding":"fi-9c1e42a0","period":"20261007","revision":"de46ce42","verification":"verified","quote_fp":"a1b2c3","at":1791520000000}` | Proposed; verification values are `verified` / `downgraded` / `unlocatable` |
+| **run result** (fact) | `{"ts":"2026-09-22T15:33:10+08:00","commit":"da942b8f…","env_fp":"0febeeb6…","conc_width":1,"pool":"ro","scenario":"t260903-10-installer-console-line","verdict":"pass","wall_s":0.043,"source":"baseline","ticket":""}` | **Today**, verbatim. It already carries the revision and the environment fingerprint — certification should reuse this shape |
+| **reviewed path** (fact) | `{"path":".gitignore","period":"20261007","ts":1791338554.34}` | **Today**, verbatim: what a period actually looked at (not a finding) |
 
 ## D. Fleet and operations records (today)
 
-| Record | What it is for — the question it answers | Kind | Fields |
-|---|---|---|---|
-| **event** | "What did the engine or the watchdog see?" The running account behind the faces and behind diagnosis | fact | `v`, project, scope, ticket, workflow, template, stage, state, reason, at |
-| **executor action** | "What did the executor do, and on whose authority?" | fact | at, channel, decision, grant, grant source, idempotency key, op, session, ticket |
-| **request** | "What was asked of the host, and what was answered?" The executor's channel to the person | fact | type, id, at, project, kind, question, detail |
-| **capacity limit change** | "Who changed how many tickets may run at once, and why?" The audit behind a current value | fact | at, project, by, from, to |
-| **authorisation change** | "Who was given what, and by whose order?" | fact | at, action, project, who, from, to, night tier |
-| **capacity state** | "Who holds a slot right now, and who is waiting?" — read as a whole, under a lock | state | version, holders `[{ticket, since, reason}]`, queue |
-| **authorisation state** | "What may the executor session do right now?" | state | executor sessions, grants, open-ticket cap, epics |
-| **alert** | "What did the watchdog shout about, and at what level?" | fact | at, key, rule, target, level, title, detail |
-| **inspection period** | "What did this period do, and was its outcome served, voided or re-run?" | entity | instance, period, ticket id, state (blocked / completed / voided), disposition (who, reason, at) |
+| Record | Example | Notes |
+|---|---|---|
+| **event** | `{"v":"event-ledger-v1","project":"sandbar","scope":"project","ticket":"t260928-20","workflow":"DevLaneWorkflow","template":"dev-lane","stage":"create_plan","state":"awaiting","reason":"adopt dev-lane …"}` | The only family that versions its shape |
+| **executor action** | `{"at":1791188111775,"channel":"arg","decision":"allowed","grant":"sign","grant_source":"grants.sign @ …/executor-grants.json","idem":"a93cc061b4fcb867","op":"sign","session":"session-7685c51a-…","ticket":"t261005-14"}` | Carries an idempotency key |
+| **request** | `{"type":"request","id":"req-1790950261961-0001","at":1790950261961,"project":"sandbar","kind":"question","question":"给 sandbar 执行器开哪些授权？","detail":"…"}` | `detail` is free text — exactly what "references, not payloads" should constrain |
+| **capacity limit change** | `{"ts":1791503148.53,"project":"sandbar","by":"host","from":8,"to":10}` | `by` is free text mixing identity, delegation and the order — see open question 2 |
+| **authorisation change** | `{"at":1791007438979,"action":"grant-change","project":"sandbar","who":"宿主（经 sandbar 项目会话代写）","from":{},"to":{"sign":true,"send-back":true,"rerun":true,"open-ticket":true,"pause-resume":true,"cleanup":true},"night_tier":null}` | Same problem as `by` |
+| **capacity state** | `{"version":1,"holders":[{"ticket":"t261008-29","since":1791495146.2,"reason":"human-hold"}],"queue":[]}` | Current state, read as a whole under a lock; reasons seen: `running`, `human-hold` |
+| **authorisation state** | `{"executor_sessions":["session-7685c51a-…"],"grants":{"cleanup":true,"sign":true},"open_ticket_cap":3,"open_ticket_epics":["concurrency-limit"]}` | Current state |
+| **alert** | `{"at":1790841884993,"key":"reconcile_mismatch:sandbar","rule":"reconcile_mismatch","target":"sandbar","level":"redline","title":"对账不一致 99 票","detail":"…"}` | Levels seen: `redline` |
+| **inspection period** (entity) | `{"instance":"docs-sync","period":"20261007","ticket":"t261009-05","state":"voided","disposition":{"who":"integration","reason":"blocked by a red line","at":1791520000000}}` | States: `blocked` / `completed` / `voided` |
 
 ## E. Ticket truth
 
@@ -93,7 +274,8 @@ The truth about a ticket — its stage, its signature, its verdict, a send-back 
 ## Open questions for this review
 
 1. **Where do findings live?** The inspected ledger records *paths reviewed*, not findings; the finding entity and its observations have no settled home, and the entity/observation split depends on one.
-2. **`by` / `who` must split.** With delegation allowed, a field carrying "host（经…代写；宿主令…）" as prose cannot be checked by a machine. Proposed: `actor`, `on behalf of`, `authority reference` — all three required when the writer is not the authority.
-3. **Shape versions.** The event ledger has one; the rest do not. Roll the same convention out, and state what a reader must do with an unknown version (fail loudly, not guess).
-4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime, or the store grows without a rule.
-5. **What may never be recorded.** The rule "references, not payloads" needs forbidden examples (credentials, tokens, private host paths, raw model input containing them) so that a record can be refused rather than argued about.
+2. **`by` / `who` must split.** Examples of the prose that cannot be machine-checked are in the fleet table above (`capacity limit change.by`, `authorisation change.who`). Proposed: `actor`, `on behalf of`, `authority reference` — all three required when the writer is not the authority.
+3. **Shape versions.** The event ledger has one (`event-ledger-v1`); the rest do not. Roll the same convention out, and state what a reader does with an unknown version (fail loudly, not guess).
+4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime.
+5. **What may never be recorded.** "References, not payloads" needs forbidden examples (credentials, tokens, private host paths, raw model input containing them) so a record can be refused rather than argued about.
+6. **`atomic` is coarse.** One flag on the whole landing cannot say *which* two of three repositories are coupled. Recorded as a known limit; a finer shape arrives only if a real case demands it.

@@ -249,7 +249,7 @@ Every record of facts this project keeps, grouped by the reader criterion of goa
 | Fault mode ↔ case ↔ result | The join: which case locks which fault mode, and how that case last ran | Nobody can read it as a set; it exists only as prose citations and scenario descriptions | Nowhere | **Missing.** Its absence is why the fault ledger reads as prose and why "which of these does my change touch" is a search |
 | Work queue | Tickets waiting to be opened, mostly blocked on write-set collisions | Read and written by the integration role | In the repository, prose, edited in place | **Moves.** It is consulted while planning, so it must be current |
 | Queued ticket payloads | 21 per-ticket files last touched in September; no flow names them | Nobody | In the repository | **Decide explicitly: retire or move.** A registration table nobody maintains is a dead table |
-| Epic declarations | One file per epic (15): the rationale for a line of work | Read by whoever opens work under it; written by host / integration | In the repository, prose | **Split.** The membership facts belong to the store as relations; the rationale stays a document |
+| Epic declarations | One file per epic (15): the rationale for a piece of work | Read by whoever opens work under it; written by host / integration | In the repository, prose | **Split.** The membership facts belong to the store as relations; the rationale stays a document |
 
 ### B. Baselines that must match the code under test
 
