@@ -53,7 +53,7 @@ related:
 2. A fault-mode ledger is read **as of a version**: the reader can state which revision of the ledger its change was designed against, and can pull a newer one deliberately rather than by accident.
 3. Every record names its writer and the reason it exists. Nothing depends on identity being inferable from the machine it was written on.
 4. Facts are append-only; corrections are new facts. Current state is read as a whole and read consistently.
-5. Identifiers are minted and never reused, and are never derived from a position inside a file or from an accident of what happened to be alive.
+5. Identifiers are minted and never reused, and are never derived from a position inside a file or from an accident of what happened to be alive. A fault mode's identifier is a ULID (host decision 261009): a sequence number is a coordination problem as soon as two people can register, and the coordination-free id is worth more here than a short one. Entries registered before that decision keep the numbers they already have and are not renumbered.
 6. Ordering comes from the ledger itself, not from a clock.
 7. Every record carries the project it belongs to, and can be interpreted without a machine-local path.
 8. **Availability is explicit**: a required ledger that cannot be read is a loud failure, never read as "nothing known".
