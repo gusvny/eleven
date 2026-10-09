@@ -551,22 +551,43 @@ Closing it is a fact of its own, and it is decided by evidence rather than by a 
 
 ### finding observation (fact) — "is it still there, and for how long has it been?"
 
+**What it is for, in one line: the period records the findings it produced, and the observation is the link that says *this finding was seen again, in this period***. Without it, every period starts from zero as far as the record is concerned: the ids are minted from content, so the *same* finding does keep its id across periods, but **nothing states that it was seen again** — a reader would have to open several period tickets and compare id lists by hand.
+
+The questions it answers, none of which have an answer today:
+
+- **How long has this been open?** First sighting to closure — the age of a finding, which is what decides whether it is being lived with or being ignored.
+- **Is it persisting, or was it a one-off?** Seen in five of the last five periods is a different thing from seen once.
+- **Was it actually fixed?** The finding disappearing next period is not proof: the quote may simply have drifted out of match, and this time the verification says so.
+- **Did two faces report the same thing?** The same content found by two scans is one problem, not two.
+
+**A sighting's verification can differ from the last one, and that is the fact worth recording**: the file changes underneath a quote, so the same finding can verify in one period and fail to locate in the next. The proposed shape keeps only what cannot be derived — the pairing, the verification outcome, and the moment.
+
 **Status: proposed** — today only the finding itself exists, so "seen again, against this revision" cannot be recorded.
 
 ```json
+```json
 {
-  "finding": "fi-9c1e42a0",
+  "finding": "3d4b305e",
   "period": "20261007",
-  "revision": "de46ce42",
-  "verification": "verified",
-  "quote_fp": "a1b2c3",
+  "verification": "downgraded",
+  "verification_note": "the quoted line is no longer in the file at that path",
   "at": 1791520000000
 }
 ```
 
-Proposed; today only the finding itself exists. Verification values: `verified` / `downgraded` / `unlocatable`.
+| Field | Example value | Why it is there |
+|---|---|---|
+| `finding` | `3d4b305e` | The entity this sighting belongs to — the real id shape, minted from content (as the period ticket's own findings are) |
+| `period` | `20261007` | Which period saw it |
+| `verification` | `verified` / `downgraded` / `unlocatable` | **The one thing that changes from sighting to sighting**, and therefore the reason a sighting is a record rather than a field on the finding |
+| `verification_note` | `the quoted line is no longer in the file at that path` | A downgrade must say which check failed, never just that it failed |
+| `at` | `1791520000000` | Milliseconds since the epoch |
+
+Two fields that were in the earlier draft are **gone**, for reasons this document applies everywhere: **the revision the period read is a property of the period**, not of each sighting (the revision is pinned when the period opens, so every finding in it shares it), and **`quote_fp` had no consumer** — the id already encodes the content, and nothing reads a separate quote fingerprint.
 
 ### reviewed path (fact) — "has anyone looked at this file lately?"
+
+**This is the input side of a period, where a finding is the output side.** One row per path per period: which files the review actually examined. Its purpose is coverage — a face that quietly narrows what it reads still reports the same number of findings, and only this ledger shows that it stopped looking at a whole area.
 
 **Status: today** — one row per path per period, verbatim below.
 
