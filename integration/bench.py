@@ -260,4 +260,17 @@ def write_registry(dirpath, key, project_dir):
         "schema: v1\nproject:\n  - key: %s\n    name: %s\n    dirs:\n      - %s\n"
         % (key, key, project_dir),
         encoding="utf-8")
+    # 261009（integration 岗修共享夹具）：并发上限声明也必须落位——CL-1 起
+    # （t261004-32，concurrency.py:load_limit）**缺声明即 fail-closed 拒服务**，
+    # 而夹具此前只写 project.yaml ⇒ 凡经真工作流起票的夹具场景，票会在
+    # concurrency_acquire 处直接收口 FAILED（实证：t261008-24 的 L3 场景
+    # `sc_zero_run_gate_stop` 相一就早退，worker 日志原文 "Concurrency-limit
+    # declaration absent: …/reg/<key>/concurrency-limit.json does not exist"）。
+    # 声明形状与真项目同款（{"version": 1, "limit": N}）；夹具给一个小上限，
+    # 够跑链路即可，不冒充真环境的 10。
+    import json as _json
+    import os as _os
+    _limit = int(_os.environ.get("SANDBAR_FIXTURE_CONC_LIMIT", "4"))
+    (key_dir / "concurrency-limit.json").write_text(
+        _json.dumps({"version": 1, "limit": _limit}) + "\n", encoding="utf-8")
     return str(d)

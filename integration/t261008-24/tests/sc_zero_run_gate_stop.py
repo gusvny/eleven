@@ -184,9 +184,12 @@ def main():
         # ---- 相二：docker 恢复模拟（marker 落地）→ retry_qc → 真跑 ran=1 绿 → merge 前置 ----
         with open(marker, "w", encoding="utf-8") as f:
             f.write("recovered\n")
+        # 261009：retry_qc 的 workflow 契约**只收裸 who**——带 note 会被显式拒收
+        # （client.py:1527 原文「retry_qc 不收 note（workflow 契约只收 who）」；
+        # 想带话要走 op=update 的 pending_add 或 ruling）。本场景此前带 note，
+        # 于是相二第一步就被拒、后面三项全塌（实测 rc=0 ok=False）。
         rc, out = run_poc_client(py, "ticket", {
-            "op": "retry_qc", "ticket_id": TID, "who": WHO,
-            "note": "t261008-24 e2e: supply recovered, rerun the gate"}, env)
+            "op": "retry_qc", "ticket_id": TID, "who": WHO}, env)
         doc = parse_out_json(out)
         check(rc == 0 and doc.get("ok") is True,
               "相二 op=retry_qc 受理（rc=%s ok=%s out尾=%s）"

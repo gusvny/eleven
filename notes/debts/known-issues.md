@@ -4521,6 +4521,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L2——造一个**不 ignore `out/`** 的夹具仓，跑两轮闸，断言：(a) 台账**仍增长**（不因自产快照停写），或 (b) 若确要按脏树停写，则**台账里有一行具名的"本轮未记账（原因）"**，且闸**点名**该状态而不是照旧判绿。
 
+> **加记（261009 17:1x，第二、三例：共享夹具与产品声明漂移）**——同一族的两处，都在 `t261008-24` 的 L3 场景
+> `tests/sc_zero_run_gate_stop.py` 上暴露，而它此前**被当成"断言了已移除的合并闸绿跑前置"红了一整周**（那个解释只对它的离线兄弟成立）：
+> ①**共享夹具缺"并发上限声明"**：`integration/bench.py:write_registry` 只写 `project.yaml`，而 CL-1 起（`concurrency.py:load_limit`）
+> **缺 `<projects>/<key>/concurrency-limit.json` 即 fail-closed 拒服务** ⇒ 凡经**真工作流**起票的夹具场景，票在 `concurrency_acquire` 处**直接收口 FAILED**、专属 worker 自退，
+> 场景在"相一"就早退（worker 日志原文：`Concurrency-limit declaration absent: …/reg/<key>/concurrency-limit.json does not exist - fail-closed refusal`）。
+> 该夹具被 **12+ 个场景**引用 ⇒ 这是**家族面**的漂移（修一处、受益一片）。
+> ②**测试载荷不符合契约**：相二用 `retry_qc` 唤票时带了 `note`，而契约**只收裸 who**（`client.py:1527` 显式拒收）⇒ 相二第一步就被拒、后续三处断言全塌（实测 `rc=0 ok=False`）。
+> **修复**（integration 资产，两处都是"夹具/载荷对齐真契约"）：`bench.write_registry` 补写同款声明（`{"version":1,"limit":4}`，可用
+> `SANDBAR_FIXTURE_CONC_LIMIT` 覆盖）；场景的 `retry_qc` 去掉 `note`（并在代码里写明契约出处）。**实跑验证**：该 L3 场景
+> **pass=13 fail=0（exit=0）**（改前 `pass=9 fail=4`、再之前相一早退）。
+> **教训**：**"某个场景为什么红"的解释会过期**——产品声明/契约一变，旧解释就成了错误归因；**改钉之前必须先拿到它当下真在哪一步红**（本次靠 `T09_KEEP_TMP=1` 保住夹具目录、读 worker 日志才看清）。
+
 ## KI-01M4FW2YGG85Q00F71QTD5Q57T **写进项目数据的 sha 必须来自 `git rev-parse`**：手写补齐的 `booked_sha` 让全仓闸转红（261009 本岗自伤实证）
 
 > **事故链（我在 10 分钟内自查发现并修好，但代价是全仓闸红了半轮）**：
