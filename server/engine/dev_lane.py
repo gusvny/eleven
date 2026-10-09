@@ -395,6 +395,25 @@ KI122_ADOPTION_PATCH_ID = "dev-lane-ki122-adoption-v1"
 KI122_LIVE_BASELINE_SOURCE = (
     "none: the receipt carried no live-baseline evidence (gate baseline answers / ledger "
     "rows absent) — time evidence only")
+
+
+def quiet_baseline_covered(checks: Any) -> bool:
+    """t261009-15: the quiet-verdicts-all-green coverage predicate (single writer
+    = pure function, shared by the workflow routing and the unit tests).
+
+    True only when reds exist AND every red carries non-empty quiet_verdicts AND
+    every verdict is green with no cap/error degradation — any uncovered red,
+    quiet red, or degraded verdict -> False (fail-closed to today's blocked path,
+    byte-identical). Green receipts never reach this predicate (the caller sits
+    after the mc.green branch)."""
+    reds = [c for c in (checks or []) if isinstance(c, dict) and not c.get("green")]
+    if not reds:
+        return False
+    return all(
+        bool(c.get("quiet_verdicts"))
+        and all(v.get("green") and not v.get("error")
+                for v in (c.get("quiet_verdicts") or []))
+        for c in reds)
 # KI-122②：tests 连续计数的**段入口复位**必须停用——旧口径对「任何非 tests-fault 迭代来源
 # 的重进」都复位（新实现轮/验收打回/**人工 rework**/retry_qc/blocked 脱困重进），于是两道上限
 # （MAX_TESTS_FAULT_ROUNDS=5 / MAX_TESTS_EXEMPT_ROUNDS=5）可被外部处置反复击穿、永不触顶
@@ -4733,6 +4752,37 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     self._finish("merge_check", by="merge_check",
                                  evidence="；".join(c.get("item", "") for c in mc.checks))
                     self._handoff("merge_check", "合并检查四项全绿")
+                    phase = "merge"
+                    continue
+                # t261009-15 (2): consume the quiet verdict for known load-sensitive
+                # checks (same shape semantics as the arbitrate face's live_baseline_*).
+                # Proceed ONLY when EVERY red carries an all-green quiet verdict (no
+                # cap/error degradation): record by name in the meta ledger (visible,
+                # counted, never silent) -> finish merge_check with name-named evidence
+                # -> merge. Any uncovered red, unavailable roster, or quiet red falls
+                # through to today's path below, byte-identical (fail-closed).
+                _q_reds = [c for c in mc.checks if not c.get("green")]
+                _q_covered = quiet_baseline_covered(mc.checks)
+                if _q_covered:
+                    _q_rows = [
+                        {"name": v.get("name"), "roster_entry": v.get("roster_entry"),
+                         "at": (v.get("load_context") or {}).get("at", ""),
+                         "load_context": v.get("load_context"),
+                         "detail": v.get("detail")}
+                        for c in _q_reds for v in (c.get("quiet_verdicts") or [])]
+                    _q_log = list(self.meta.get("load_sensitive_quiet_green_log") or [])
+                    _q_log.extend(_q_rows)
+                    self.meta["load_sensitive_quiet_green_log"] = _q_log
+                    _q_names = "、".join(sorted({str(r["name"]) for r in _q_rows}))
+                    self._finish(
+                        "merge_check", by="merge_check",
+                        evidence="；".join(c.get("item", "") for c in mc.checks)
+                        + " | quiet-green (load-sensitive): " + _q_names)
+                    self._handoff(
+                        "merge_check",
+                        "merge_check red carried by known load-sensitive check(s) "
+                        "(%s); quiet rerun green — recorded by name and proceeding "
+                        "to merge" % _q_names)
                     phase = "merge"
                     continue
                 # 260927 ⑥：逐条带出该红的**处置**（宿主实报：旧文案只有首红的处置，

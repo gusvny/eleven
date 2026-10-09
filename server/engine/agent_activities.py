@@ -4880,6 +4880,213 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
                 shared.LANE_COMMITS_QUERY_FAILED)
 
 
+# ---- t261009-15: quiet-baseline verdict for known load-sensitive checks ----
+#: Roster entries with verdict "isolated" = the load/environment-face class
+#: (vocabulary source of truth: shared.KNOWN_RED_VERDICTS and the meta.policy of
+#: integration/known-red-baseline.json). At the merge_check face, a red whose name
+#: is known load-sensitive first gets one quiet rerun verdict before disposition —
+#: the same shape semantics as the arbitrate face's live_baseline_red/green/source;
+#: no second mechanism is built.
+LOAD_SENSITIVE_VERDICT = "isolated"
+#: Cap on quiet reruns per merge_check round (plan rev 2 §7-T6); names beyond the
+#: cap keep today's path (blocked), with the cap named in the verdict.
+MAX_QUIET_RERUNS_PER_ROUND = 3
+#: Per-name quiet rerun timeout (seconds).
+QUIET_RERUN_TIMEOUT_S = 300
+#: Red item-name extraction: pytest lines inside the verify_lane receipt's
+#: items[].detail (the tool truncates details at 200 chars; the nodeid sits at
+#: line start, so it survives). A detail with no parseable line yields NO name —
+#: never guessed; no name = no exemption = today's blocked path.
+_RED_NAME_RE = re.compile(r"^(?:FAILED|ERROR) (\S+)", re.MULTILINE)
+
+
+def canonical_check_name(raw: Any) -> str:
+    """Carrier-independent identity (t261009-15 part 3): a scenario path and the
+    engine unit-test nodeid of the same script normalize to the same key.
+
+    integration/t260901-25/t03_reap_process_group.py
+        -> t260901_25_t03_reap_process_group
+    server/engine/tests/test_t260901_25_t03_reap_process_group.py::test_...
+        -> t260901_25_t03_reap_process_group (same key)
+    Malformed input -> a degraded key (non-empty, never raises) — a degraded key
+    never collides with a roster row (fail-closed direction), and matching is
+    EXACT equality only (no prefix/substring matching, so near-collision names
+    cannot get a false exemption)."""
+    s = str(raw or "").strip().lower()
+    if not s:
+        return "_"
+    s = s.split("::", 1)[0]
+    if s.endswith(".py"):
+        s = s[:-3]
+    base = s.rsplit("/", 1)[-1]
+    if base.startswith("test_"):
+        base = base[len("test_"):]
+    if s.startswith("integration/"):
+        parts = [p for p in s.split("/") if p]
+        if len(parts) >= 3:
+            base = parts[1] + "_" + parts[-1]
+    return re.sub(r"[-/.]+", "_", base) or "_"
+
+
+def _red_item_names_from_receipt(res: Any) -> List[str]:
+    """verify_lane receipt -> failing item names (structured identity, ticket
+    requirement 1). Malformed receipts (res not a dict / checks not a list /
+    item not a dict) are skipped safely; unparseable = empty list."""
+    names: List[str] = []
+    if not isinstance(res, dict):
+        return names
+    for chk in (res.get("checks") or []):
+        if not isinstance(chk, dict) or chk.get("level") != "red":
+            continue
+        for it in (chk.get("items") or []):
+            text = it.get("detail") if isinstance(it, dict) else it
+            for m in _RED_NAME_RE.finditer(str(text or "")):
+                n = m.group(1)
+                if n not in names:
+                    names.append(n)
+    return names
+
+
+def _load_sensitive_roster(tree: Path):
+    """Read the repo-root known-red roster (ticket-snapshot semantics, same way
+    merge-checks.yaml is read) and keep the isolated entries.
+
+    Returns ({canonical key: {name, verdict, booked_sha}}, error). Missing file =
+    a legal empty set (error='' — the mechanism stays inert by "nothing booked",
+    a deliberate non-exemption); present-but-malformed file = non-empty error
+    (fail-closed, no exemption, and the red item's detail names the reason — a
+    silently inert mechanism must stay distinguishable from a deliberate one,
+    review C3). Only name/verdict/booked_sha are consumed; hygiene fields like
+    owner/retire_when belong to the roster's own gate and are not re-checked."""
+    path = tree / shared.KNOWN_RED_BASELINE_REL
+    out: Dict[str, Dict[str, str]] = {}
+    try:
+        if not path.is_file():
+            return out, ""
+        data = json.loads(path.read_text("utf-8"))
+    except Exception as e:  # noqa: BLE001 — unreadable roster = fail-closed, reason goes on the ticket face
+        return out, "roster unreadable: %s: %s" % (type(e).__name__, e)
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return out, "roster malformed: entries is not a list"
+    for ent in entries:
+        if not isinstance(ent, dict):
+            return out, "roster malformed: entry is not an object"
+        if str(ent.get("verdict") or "") != LOAD_SENSITIVE_VERDICT:
+            continue
+        name = str(ent.get("name") or "").strip()
+        if not name:
+            continue
+        out[canonical_check_name(name)] = {
+            "name": name, "verdict": LOAD_SENSITIVE_VERDICT,
+            "booked_sha": str(ent.get("booked_sha") or "")}
+    return out, ""
+
+
+def _quiet_load_context() -> Dict[str, Any]:
+    """Load context at decision time (review R1: one of the four acceptance
+    evidence items). inflight/owned_spawns are THIS worker process's observable
+    faces — cross-worker load is not visible in-process, and scope_note says so
+    explicitly instead of overclaiming."""
+    try:
+        inflight = len(inflight_stage_snapshot())
+    except Exception:  # noqa: BLE001 — bookkeeping must never break the verdict face
+        inflight = -1
+    try:
+        spawns = len(owned_spawn_snapshot())
+    except Exception:  # noqa: BLE001
+        spawns = -1
+    return {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+            "inflight_activities": inflight, "owned_spawns": spawns,
+            "scope_note": "this worker process view only"}
+
+
+async def _quiet_rerun_green(name: str, tree: Path):
+    """Run one quiet rerun for a single red item name; returns (green, detail).
+    Carrier-independent command choice: nodeid / engine test path -> pytest;
+    integration scenario path -> run the script directly. Full terminal-state
+    reaping: normal / error / timeout / cancel every path reaps; the py3.9
+    wait_for race is disambiguated by wall clock, same as the verify_lane block.
+    Any non-zero rc (incl. pytest 4/5) = quiet red = fail-closed to today's
+    blocked path."""
+    raw = str(name or "")
+    if "::" in raw or raw.startswith("server/engine/tests/"):
+        cmd = ["python3", "-m", "pytest", "-q", raw]
+    else:
+        cmd = ["python3", raw]
+    try:
+        p = await asyncio.create_subprocess_exec(
+            *cmd, cwd=str(tree), stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE, start_new_session=True)
+    except Exception as e:  # noqa: BLE001 — spawn failure = no quiet verdict = red
+        return False, "quiet rerun spawn failed: %s: %s" % (type(e).__name__, e)
+    register_owned_spawn(p, tag="merge-check-quiet")
+    _q_t0 = time.monotonic()
+    try:
+        out_b, _err_b = await asyncio.wait_for(
+            p.communicate(), timeout=QUIET_RERUN_TIMEOUT_S)
+    except asyncio.CancelledError:
+        await reap_spawn_group(p, tag="merge-check-quiet")
+        if not wait_budget_exhausted(_q_t0, QUIET_RERUN_TIMEOUT_S):
+            raise
+        return False, "quiet rerun timed out (>%ds)" % QUIET_RERUN_TIMEOUT_S
+    except asyncio.TimeoutError:
+        await reap_spawn_group(p, tag="merge-check-quiet")
+        return False, "quiet rerun timed out (>%ds)" % QUIET_RERUN_TIMEOUT_S
+    except Exception as e:  # noqa: BLE001
+        await reap_spawn_group(p, tag="merge-check-quiet")
+        return False, "quiet rerun error: %s: %s" % (type(e).__name__, e)
+    finally:
+        unregister_owned_spawn(p)
+    tail = (out_b or b"")[-300:].decode("utf-8", "replace").strip().replace("\n", " ")
+    return p.returncode == 0, "exit=%s %s" % (p.returncode, tail[:200])
+
+
+async def _apply_quiet_verdicts(ticket_id: str, checks: List[Dict[str, Any]],
+                                tree: Path) -> None:
+    """Quiet verdicts at the merge_check face (t261009-15 part 2; mutates checks
+    in place and NEVER flips green).
+
+    Eligible = verify_lane_code red item + non-empty red_items + every name's
+    canonical key EXACTLY equal to a roster isolated entry. A verdict only adds
+    the quiet_verdicts evidence field; the pass/skip decision lives on the
+    workflow side (dev_lane) — this activity stays pure evidence. When the
+    roster cannot be read, the red item's detail names the reason (C3); other
+    red items are left untouched."""
+    if not any(c.get("id") == "verify_lane_code" and not c.get("green")
+               and c.get("red_items") for c in checks):
+        return
+    roster, roster_err = _load_sensitive_roster(tree)
+    budget = MAX_QUIET_RERUNS_PER_ROUND
+    for c in checks:
+        if c.get("id") != "verify_lane_code" or c.get("green"):
+            continue
+        names = [str(x.get("name") or "") for x in (c.get("red_items") or [])
+                 if isinstance(x, dict) and str(x.get("name") or "")]
+        if not names:
+            continue
+        if roster_err:  # C3: eligible-by-shape but roster unavailable — name it, never silently inert
+            c["detail"] = "%s | roster unavailable: %s" % (c.get("detail") or "",
+                                                           roster_err)
+        matched = [(n, roster[canonical_check_name(n)]) for n in names
+                   if canonical_check_name(n) in roster]
+        if not matched:
+            continue
+        verdicts: List[Dict[str, Any]] = []
+        for n, ent in matched:
+            if budget <= 0:
+                verdicts.append({"name": n, "green": False,
+                                 "error": "quiet-rerun cap reached (%d/round)"
+                                          % MAX_QUIET_RERUNS_PER_ROUND})
+                continue
+            budget -= 1
+            ok, detail = await _quiet_rerun_green(n, tree)
+            verdicts.append({"name": n, "green": ok, "detail": detail,
+                             "roster_entry": ent,
+                             "load_context": _quiet_load_context()})
+        c["quiet_verdicts"] = verdicts
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -5084,6 +5291,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 start_new_session=True)
             register_owned_spawn(vp, tag="verify-lane-code")
             _v_wait_t0 = time.monotonic()
+            _red_names: List[str] = []  # t261009-15 (1): exception paths default to no names (no exemption)
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=900)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
@@ -5103,6 +5311,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         _red_lines.append(str((_it or {}).get("detail") if isinstance(_it, dict) else _it))
                 if _red_lines:
                     detail += "；%s" % "；".join(_red_lines[:6])
+                # t261009-15 (1): failing item names carried out in a structured
+                # field (machine-readable identity) — existing text keys stay
+                # byte-identical, pure addition; unparseable = no field (never invented).
+                _red_names = _red_item_names_from_receipt(res)
             except asyncio.CancelledError:
                 # t261006-08: reap then re-raise — cancellation semantics are never
                 # swallowed (the outer `except Exception` cannot catch the
@@ -5127,6 +5339,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                # 文件级归因在 verify_lane 回执 detail 文本里（保持文本，
                                # 不二次解析）；此处不现造 files
                                "next_action": "按 detail 里的红灯项修复后发 retry_qc 重验"})})
+            # t261009-15 (1): structured failing item names, appended after the item
+            # keeps the original construction byte-identical (pure addition, existing
+            # text keys untouched; no names parsed = no field, never invented).
+            if not green and _red_names:
+                checks[-1]["red_items"] = [{"name": n} for n in _red_names]
     except Exception as e:
         checks.append({"item": "泳道内 verify_lane code 绿灯", "green": False,
                        "detail": "verify_lane error: %s" % e,
@@ -5332,6 +5549,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     except Exception as e:
         checks.append({"item": MERGE_REHEARSAL_ITEM, "green": False, "detail": "merge-tree error: %s" % e,
                        "id": "merge_rehearsal", "reason_code": "merge_conflict"})
+    # t261009-15 (2): quiet verdicts — a red from a known load-sensitive check gets
+    # one quiet rerun before the workflow disposes it (evidence fields only; green is
+    # never flipped here; the pass decision lives on the workflow side).
+    await _apply_quiet_verdicts(str(args.ticket_id or ""), checks, sc["tree"])
     return {"checks": checks, "rehearsal_green": rehearsal_green,
             "conflict_files": conflict_files,
             "merge_tree_excerpt": merge_tree_excerpt,
