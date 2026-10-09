@@ -149,7 +149,7 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 
   <div class="card">
     <h3 title="the last few rounds; the round id opens its record">Rounds</h3>
-    <div class="pad"><table><thead><tr><th>Round</th><th>Started</th><th title="↻ started by itself · ✋ started by hand"></th><th>Result</th><th>Verdict</th><th title="the revision set the round ran on">Revision set</th></tr></thead><tbody id="runRows"></tbody></table></div>
+    <div class="pad"><table><thead><tr><th>Round</th><th>Started</th><th title="↻ started by itself · ✋ started by hand"></th><th>Result</th><th>Verdict</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">Measured</th></tr></thead><tbody id="runRows"></tbody></table></div>
   </div>
 </div>
 
@@ -170,16 +170,16 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 var GREEN={big:'GREEN',dot:'g',frozen:false,delivN:10,certN:2,waitN:3,certAt:'21:40',
  wait:[['t261009-20','22:0x'],['t261009-21','—'],['t261009-22','—']],
  prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
- rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','green','main@46d6e8bf +3'],
-         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green','main@b3deb245 +2'],
-         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green','main@a0325c14 +2']],
+ rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','green','line 396b221a'],
+         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green','line 2337e52b'],
+         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green','line c65561ff']],
  bench:'↻ 22:24', nextAt:'next ~22:24', banner:'', names:''};
 var FROZEN={big:'FROZEN',dot:'r',frozen:true,delivN:10,certN:2,waitN:3,certAt:'20:50',
  wait:[['t261009-20','22:0x'],['t261009-21','—'],['t261009-22','—']],
  prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
- rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','red · 2','main@46d6e8bf +3'],
-         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green','main@b3deb245 +2'],
-         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green','main@a0325c14 +2']],
+ rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','red · 2','line 396b221a'],
+         ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green','line 2337e52b'],
+         ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green','line c65561ff']],
  bench:'↻ retry now', nextAt:'retry now',
  banner:'Frozen by a red round — new landings stop; the certified part can still be promoted.',
  names:'t260922-12-gate-ledger-debt-not-blocked · t261009-15-quiet-baseline-identity'};
@@ -211,7 +211,7 @@ function draw(k){
   var rr=''; s.rounds.forEach(function(r){var cls=r[4].indexOf('red')>=0?'r':'g';
     rr+='<tr><td><span class="link mono" title="open the record">'+r[0]+'</span></td><td class="mono">'+r[1]+'</td><td title="'+(r[2]==='↻'?'started by itself':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td class="mono k">'+r[5]+'</td></tr>'});
   $('runRows').innerHTML=rr;
-  $('runBody').textContent='line: '+$('lineBox').value+'\nrevision set: main@46d6e8bf +3\ncovers: '+s.waitN+' waiting\nbench: 1 serial slot · ~44 min';
+  $('runBody').textContent='line: '+$('lineBox').value+'\nmeasured: line 396b221a\ncovers: '+s.waitN+' waiting\nbench: 1 serial slot · ~44 min';
   $('signBody').textContent=s.prom.map(function(r){return r[0]+'   '+r[1]}).join('\n');
   $('signWho').textContent=s.frozen
     ? 'the red round stops new landings, not this: the certified part stays promotable · the note records the round it rests on'
