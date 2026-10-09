@@ -118,10 +118,10 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
         <div class="s wait" id="segWait" style="flex:3"><span>waiting</span><span class="n" id="segWaitN">3</span></div>
       </div>
       <div class="lbt">
-        <span class="mono" id="lbMain" title="the thin bar at the left of the track: landings already in main">main 10</span>
+        <span class="mono" id="lbMain" title="state: landings that are already in main — the thin bar at the left of the track">in main 10</span>
         <span id="lbBnd" title="the certification point: everything to its left is covered by this green round">certified 21:40</span>
         <span class="grow"></span>
-        <span id="lbProm" title="the certified part is what one signature promotes">→ main 2</span>
+        <span id="lbProm" title="action: one signature promotes the certified part — the same number as the certified segment">promote 2</span>
       </div>
       <div class="flow">
         <span class="sw" id="swAuto" title="rounds run by themselves, one after another — a round only measures"><span class="track" id="swTrack"><span class="knob"></span></span>↻ auto</span>
@@ -215,8 +215,8 @@ function draw(k){
   $('segCert').className='s cert edge'+(s.frozen?'':'');
   $('segCert').style.borderRightColor=s.frozen?'var(--red)':'var(--green)';
   $('lbBnd').textContent='certified '+s.rounds[0][1];
-  $('lbMain').textContent='main '+s.delivN;
-  $('lbProm').textContent=n?('→ main '+n):'no promotion';
+  $('lbMain').textContent='in main '+s.delivN;
+  $('lbProm').textContent=n?('promote '+n):'nothing to promote';
   $('sumbD').textContent=s.delivN; $('sumbC').textContent=n; $('sumbW').textContent=s.waitN;
   $('cWhen').textContent=s.rounds[0][1];
   $('cBench').textContent=s.bench;
