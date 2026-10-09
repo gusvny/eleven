@@ -703,6 +703,26 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 - 处置方向：①判据层面＝t260910-13（失败形态分类+机械基线对照）落地后，此类红不再堵票；
   ②测试层面＝这些检查需加时序容忍/重试或去掉对墙钟与并发的依赖（归巡检校准 t260910-11 或后续小票）；
   ③运维层面＝过夜/高峰期限制同时跑套件数（并发争抢是共同诱因）。
+- **补记（261009 13:43，integration 岗）——①号实例"换了载体"仍在堵票，而这次它堵在每张票的默认合并路径上**：
+  `integration/t260901-25/t03_reap_process_group.py` 已被「manifest 退役分流」**薄包装成引擎单测**
+  `server/engine/tests/test_t260901_25_t03_reap_process_group.py`（13 行：`subprocess.run` 跑原脚本、断言 `rc==0`），
+  于是它进了**每张票 `merge_check` 都要跑的 `verify_lane code` 套件**——不再是"巡检面的一条场景"。
+  实证（同一次 tick 内）：`t261009-11` 在 `merge_check` 被判红卡门——
+  `FAILED server/engine/tests/test_t260901_25_t03_reap_process_group.py::test_t260901_25_t03_reap_process_group`，
+  `disposition=this round = non-conflict red → blocked, waiting for a human`（当时并发面 5 个套件同跑）；
+  **同一刻本岗在主的静面单跑同一测试：`1 passed in 1.29s`**（exit 0）。该票写集在 integration 的 run 记录面，
+  **与该文件无关**——即"红"与"票"无关，纯负载瞬态。
+- **机制缺口（本次新增认知）**：`verify_lane code` 红**没有** flaky/基线容错——`agent_activities.py:5123-5129`
+  红面只给 `reason_code=verify_red` + "修复后发 retry_qc"，`merge_check` 对非冲突红一律 `class=human` → blocked 等人；
+  处置①所指的分类器**面没盖到这一层**（它在仲裁/回执面，用 `live_baseline_*` 与 `known-red-baseline.json`）。
+  更糟的是**载体换了名字**：巡检面的豁免表按"集成场景短前缀"记（如 `t25-t03-`，
+  `inspection_lane_watchdog.py:157`），**换成引擎单测的路径就认不出**——同一个 flaky 的两副面孔，只豁免了一副。
+- **危害**：这是**每张票都会走**的合并路径 ⇒ 并发越高越常红，而"提高并发"正是 develop-buffer 线要的；
+  被卡的票同时**白占一个并发槽**（`human-hold`），并在盘面上显示为"卡了 6 小时"，把诊断引向"票坏了"。
+- **出路**：①**载体无关的具名豁免**（认定以"被跑的那个脚本"为准，不认它被包成脚本还是单测）；
+  ②**红分类先对照静面基线**：同一检查在静面单跑绿 ⇒ 记"负载敏感"并按瞬态处置（不堵票、留痕、计数）；
+  ③**时序敏感的整树回收类检查不该进 `verify_lane code` 这种"每票必跑"的套件**（要么回集成池按池纪律跑，
+  要么在套件里显式标注并串行/重试）——这项改法是**资产归属问题**，需 integration 与 developer 各出一半。
 
 ## KI-073 可复现构建未闭合：同源码重建仍出压缩器风格抖动（260910-15 反例，260911 夜实证）
 - 现象：t260911-02 泳道内重建前端产物 lib/client.js|cjs，与分叉点版本差 4 行（每文件 4 行），
@@ -4341,3 +4361,37 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 本岗已把①②写成要求挂进 **`t261009-11`（T0.1 run 记录）** 的 `pending_add`；本条登记的是**现象与危害**（票是修法，册是账）。
 >
 > **回归**：L1——给定同一批的输入，计数函数在"两遍"与"一遍"两种输入下给出**与遍数一致**的答案；L3——造一批只有一遍的行，断言自检**点名"遍数与场景数不匹配"**，而不是把它算成少了一半的用例。
+
+## KI-01M4FK1B3NA05CY5HQJNVCGKTA **`retry_qc` 落在"段间暂停"里 ⇒ 票停在 `blocked` 且 `blocked_reason` 为空、无人伺服**（261009 实证；integration 岗登记）
+
+> **实证（同一张票 `t261008-43`，两条时间线并排读出来）**：
+> ①10-08 23:50 因"主工作区有未提交改动"（挡事文件 `docs/design/develop-buffer-v1.md`）**正常** blocked；
+> 23:51 有人（executor session-7685c51a）发 `retry_qc`（attempt 6）→ **同一秒**时间线写
+> `between-segment pause in effect; waiting for resume signal`（当时宿主令 261009 正暂停所有占槽票）——
+> **`retry_qc` 清得掉 blocked，清不掉段间暂停：重试被暂停闸吞了。**
+> ②10-09 02:49 第二次 `retry_qc`（attempt 7，本岗按"陈旧拦住"处置）→ 日志写
+> `merge_check blocked 解除（retry_qc 唤醒）→ 主循环重驱` + `Pause accounting: slot released (1 waiting)`，
+> **却没有任何"进入本步"条目** ⇒ 主循环并未真跑起来；此后 11 小时票面 `stage_state=blocked`、
+> `blocked_reason` **为空串**、`blocked_detail=null`、merge_check 四项 check 全 `done=False`、
+> **不在并发 holders 里**（= 无人伺服）。③本刻处置（有效）：发 `resume`（`by=integration-agent`）→
+> 时间线立刻三段接续：`resume 放行，继续派段` → `进入本步（第 6 次）merge_check/running` → `implement/running`。
+> **5.8 小时的"冷票"，一个 `resume` 就活了。**
+>
+> **危害**：
+> ①**盘面撒谎**：`blocked` + 空 reason 与"真卡住"在票面上无法区分，排查只能去读时间线——
+> 本岗今天就先按"陈旧拦住"误判处置了一轮（发 `retry_qc`，零效果，白等一小时）；
+> ②**重试计数误导**：时间线上的 `attempt 7` 暗示"已试 7 次"，实际只跑了 5 次；
+> ③**槽位账不平**：票既不占槽也不在跑，四路交叉排查只剩"泳道 200 分钟无写入"这一路能发现，
+> 而日志里 `Pause accounting: slot released` 让账面看起来正常。
+>
+> **出路（实现口径归修复票）**：
+> ①**段间暂停生效时 `retry_qc` 不得静默吞掉**——要么等价于 resume（时间线注明），
+> 要么明确回执"被暂停挡着，需 resume"（fail-closed，别写成 `retry-requested`）；
+> ②**暂停要有票面可见字段**（`paused: true` 或把 `paused-waiting` 映射到 `stage_state`），
+> 别让 `blocked` 同时承担"有红卡住"与"被暂停挂起"两种含义；
+> ③**`blocked` 且红项内容为空 = 非法终态**：工作流自检应在 N 分钟内具名报警
+> （"票 X 停在 blocked 但没有任何红项"——与 `KI-228` 补记里的"无人伺服/僵尸 holder"同族，
+> 都是"没人管"的票在盘面上看起来正常）。
+>
+> **回归**：L3——起一张票到段间暂停、在暂停里发 `retry_qc`，断言（a）票不会停在"blocked 无理由"；
+> （b）盘面能看出"暂停中"；（c）重试计数不虚增（`attempt` 与实际派段次数一致）。
