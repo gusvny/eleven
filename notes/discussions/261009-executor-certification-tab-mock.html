@@ -47,6 +47,7 @@ table{width:100%;border-collapse:collapse;font-size:12.5px}
 th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line-soft)}
 th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.3px;font-weight:600;cursor:help}
 tr:last-child td{border-bottom:0}
+.ttl{color:var(--fg)}
 .st{font-weight:600}
 .st.g{color:var(--green)}.st.r{color:var(--red)}.st.w{color:var(--amber)}
 .sw{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none}
@@ -125,14 +126,14 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
     </div>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div style="display:flex;flex-direction:column;gap:12px">
     <div class="card">
       <h3 title="landed, no round covers it yet — a waiting ticket holds no slot and no lock">Waiting <span class="k" id="wCount">3</span></h3>
-      <div class="pad"><table><thead><tr><th>Ticket</th><th title="the landing record's own moment">Landed</th></tr></thead><tbody id="wRows"></tbody></table></div>
+      <div class="pad"><table><thead><tr><th>Ticket</th><th>Epic</th><th title="the landing record's own moment">Landed</th></tr></thead><tbody id="wRows"></tbody></table></div>
     </div>
     <div class="card">
       <h3 title="covered by a green round, not delivered yet — this is what one signature promotes">Certified <span class="k" id="pCount">2</span></h3>
-      <div class="pad"><table><thead><tr><th>Ticket</th><th title="the certification that covers it: certified_by">Certified by</th></tr></thead><tbody id="pRows"></tbody></table>
+      <div class="pad"><table><thead><tr><th>Ticket</th><th>Epic</th><th title="the certification that covers it: certified_by">Certified by</th></tr></thead><tbody id="pRows"></tbody></table>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
           <span class="grow"></span>
           <button class="btn p" id="btnPromote2">Promote <span id="btnPromoteN2">2</span></button>
@@ -164,15 +165,21 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 
 <script>
 var GREEN={big:'GREEN',dot:'g',frozen:false,delivered:10,certN:2,waitN:3,certAt:'21:40',roundState:'idle',
- wait:[['t261009-20','21:42'],['t261009-21','21:46'],['t261009-22','21:52']],
- certified:[['t261009-18','run-01M4GE0C2QV0F10V1STXN1K6E1'],['t261009-19','run-01M4GE0C2QV0F10V1STXN1K6E1']],
+ wait:[['t261009-20',"Guard t261009-17's route change so pre-change histories replay",'engine-hardening','21:42'],
+       ['t261009-21','A ticket that is only waiting holds nothing','develop-buffer','21:46'],
+       ['t261009-22','Draw the lane map the way the 261004 mock draws it','console-ui','21:52']],
+ certified:[['t261009-18','Land a proven lane onto a declared line','develop-buffer','run-01M4GE0C2QV0F10V1STXN1K6E1'],
+            ['t261009-19','Certify a line on a schedule','develop-buffer','run-01M4GE0C2QV0F10V1STXN1K6E1']],
  rounds:[['run-01M4GE0C2QV0F10V1STXN1K6E1','21:40','↻','478 pass · 4 fail · 16 env','green','line 396b221a'],
          ['run-01M4GDQ7B1XK9K2M4P8T0ZR5V3','20:50','↻','476 pass · 4 fail · 16 env','green','line 2337e52b'],
          ['run-01M4FZK9QP0W3N7J5H2C8L4Y6D','17:40','✋','474 pass · 4 fail · 16 env','green','line c65561ff']],
  banner:'', names:''};
 var FROZEN={big:'FROZEN',dot:'r',frozen:true,delivered:10,certN:2,waitN:3,certAt:'20:50',roundState:'running',
- wait:[['t261009-20','21:42'],['t261009-21','21:46'],['t261009-22','21:52']],
- certified:[['t261009-18','run-01M4GDQ7B1XK9K2M4P8T0ZR5V3'],['t261009-19','run-01M4GDQ7B1XK9K2M4P8T0ZR5V3']],
+ wait:[['t261009-20',"Guard t261009-17's route change so pre-change histories replay",'engine-hardening','21:42'],
+       ['t261009-21','A ticket that is only waiting holds nothing','develop-buffer','21:46'],
+       ['t261009-22','Draw the lane map the way the 261004 mock draws it','console-ui','21:52']],
+ certified:[['t261009-18','Land a proven lane onto a declared line','develop-buffer','run-01M4GDQ7B1XK9K2M4P8T0ZR5V3'],
+            ['t261009-19','Certify a line on a schedule','develop-buffer','run-01M4GDQ7B1XK9K2M4P8T0ZR5V3']],
  rounds:[['run-01M4GE0C2QV0F10V1STXN1K6E1','21:40','↻','478 pass · 4 fail · 16 env','red · 2 blockers','line 396b221a'],
          ['run-01M4GDQ7B1XK9K2M4P8T0ZR5V3','20:50','↻','476 pass · 4 fail · 16 env','green','line 2337e52b'],
          ['run-01M4FZK9QP0W3N7J5H2C8L4Y6D','17:40','✋','474 pass · 4 fail · 16 env','green','line c65561ff']],
@@ -197,15 +204,15 @@ function draw(k){
   $('cWhen').textContent='as of '+s.rounds[0][1];
   $('roundState').textContent=auto?s.roundState:'idle';
   $('swTrack').className='track'+(auto?'':' off');
-  var w=''; s.wait.forEach(function(r){w+='<tr><td><span class="link mono" title="open the ticket">'+r[0]+'</span></td><td class="mono k">'+r[1]+'</td></tr>'});
+  var w=''; s.wait.forEach(function(r){w+='<tr><td><span class="link mono" title="open the ticket">'+r[0]+'</span> <span class="ttl">'+r[1]+'</span></td><td class="mono k">'+r[2]+'</td><td class="mono k">'+r[3]+'</td></tr>'});
   $('wRows').innerHTML=w; $('wCount').textContent=s.wait.length;
-  var p=''; s.certified.forEach(function(r){p+='<tr><td><span class="link mono" title="open the ticket">'+r[0]+'</span></td><td><span class="link mono" title="open the round\'s record">'+r[1]+'</span></td></tr>'});
+  var p=''; s.certified.forEach(function(r){p+='<tr><td><span class="link mono" title="open the ticket">'+r[0]+'</span> <span class="ttl">'+r[1]+'</span></td><td class="mono k">'+r[2]+'</td><td><span class="link mono" title="open the round\'s record">'+r[3]+'</span></td></tr>'});
   $('pRows').innerHTML=p||'<tr><td colspan="2" class="k">—</td></tr>'; $('pCount').textContent=n;
   var rr=''; s.rounds.forEach(function(r){var cls=r[4].indexOf('red')>=0?'r':'g';
     rr+='<tr><td><span class="link mono" title="open the record of this round">'+r[0]+'</span></td><td class="mono">'+r[1]+'</td><td title="'+(r[2]==='↻'?'started by itself, chained onto the round before it':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td class="mono k">'+r[5]+'</td></tr>'});
   $('runRows').innerHTML=rr;
   $('runBody').textContent='line: '+$('lineBox').value+'\nmeasured: '+s.rounds[0][5]+'\ncovers: '+s.waitN+' waiting\none round at a time';
-  $('promBody').textContent=s.certified.map(function(r){return r[0]+'   certified by '+r[1]}).join('\n');
+  $('promBody').textContent=s.certified.map(function(r){return r[0]+'   '+r[1]+'   certified by '+r[3]}).join('\n');
   $('promWho').textContent=s.frozen
     ? 'the red round stops new landings, not this: the certified part stays promotable · signer, on_behalf_of and authority go in the record'
     : 'the record keeps signer, on_behalf_of and the authority the signature rests on';
