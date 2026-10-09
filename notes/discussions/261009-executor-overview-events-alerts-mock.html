@@ -14,9 +14,17 @@ body{margin:0;background:var(--bg);color:var(--fg);font:12.5px/1.5 ui-sans-serif
 .mockbar .g{flex:1}
 .mockbar button{border:0;background:transparent;color:var(--faint);cursor:pointer;font:inherit;padding:2px 6px;border-radius:5px}
 .mockbar button:hover{background:var(--hover);color:var(--fg)}
+.panelhead{position:relative;display:flex;align-items:center;gap:10px;padding:9px 14px 8px;background:var(--bg);border-bottom:1px solid var(--line)}
+.panelhead::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:var(--proj,#9ca3af)}
+.panelhead .h1{font-size:15px;font-weight:650}
+.panelhead .g{flex:1}
+.mockctl{color:var(--faint);font-size:11px}
+.mockctl select{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:7px;padding:2px 6px;font:inherit;font-size:11px}
+.projchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);color:var(--fg);background:color-mix(in srgb,var(--proj,#9ca3af) 16%,transparent);border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:650}
+.projchip svg{display:block}
 .tabs{display:flex;gap:2px;padding:5px 10px 0;border-bottom:1px solid var(--line);background:var(--panel);overflow-x:auto}
 .tab{padding:5px 11px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;color:var(--muted);white-space:nowrap}
-.tab.on{background:var(--bg);border-color:var(--line);color:var(--fg);font-weight:600;position:relative;top:1px}
+.tab.on{background:var(--bg);border-color:var(--line);color:var(--fg);font-weight:600;position:relative;top:1px;box-shadow:inset 0 -2px 0 var(--proj,#9ca3af)}
 .badge{min-width:17px;height:17px;border-radius:9px;background:var(--blue);color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .wrap{max-width:900px;margin:12px auto 36px;padding:0 14px;display:flex;flex-direction:column;gap:10px}
 .strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -76,6 +84,15 @@ button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cu
   <span>mock controls:</span>
   <button id="st">state: normal</button><button id="th">theme: light</button>
   <span class="g"></span><span>Overview after the Alerts and Events tabs leave the strip</span>
+</div>
+
+<div class="panelhead">
+  <span class="h1">Executor</span>
+  <span class="projchip" id="projChip" title="the project this panel belongs to: its key, its colour and its badge shape, all derived from the key (panel chip badge = 13 px, per the identity design note)">
+    <span id="projBadge"></span><span id="projKey">sandbar</span>
+  </span>
+  <span class="g"></span>
+  <span class="mockctl">project <select id="projSel"><option>sandbar</option><option>dengzhufpv</option><option>nusuyou</option></select></span>
 </div>
 
 <div class="tabs">
@@ -159,7 +176,7 @@ button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cu
         <div class="cell"><b>0</b><span>bad rows</span></div>
         <div class="cell"><b>0</b><span>gaps</span></div>
       </div>
-      <div class="path">~/.sandbar/projects/sandbar/ledger/events.jsonl</div>
+      <div class="path" id="ledgerPath">~/.sandbar/projects/sandbar/ledger/events.jsonl</div>
       <div style="margin-top:6px">
         <div class="row"><span class="t">22:02</span><span class="pill wake">WAKE</span><span class="tk link">t261008-47</span><span class="txt">workflow task retried and completed</span></div>
         <div class="row"><span class="t">21:58</span><span class="pill wake">WAKE</span><span class="tk link">t261008-47</span><span class="txt">worker handover picked the workflow task up</span></div>
@@ -174,10 +191,50 @@ button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cu
 </div>
 
 <script>
+
+/* ---- project identity runtime: ported verbatim from server/plugins/workbench/src/shared/project-identity.ts
+   (the panel page embeds the same functions as its seam; this copy keeps the mock honest, it is not a re-invention) ---- */
+var PALETTE12=['#e76a6a','#e7936a','#e7c36a','#c6e76a','#8ae76a','#6ae79c','#6ae7d4','#6aabe7','#7f6ae7','#b56ae7','#e76ad0','#e76a92'];
+var FALLBACK_COLOR='#9ca3af';
+var OUTLINES=['pentagon','hexagon','octagon','shield','sparkle','tag'];
+var STRUCTURES=['solid','ring','half'];
+var STREAM2_SALT='\u0000wb-identity';
+function fnv1a(str){var h=0x811c9dc5;for(var i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,0x01000193);}
+  h^=h>>>16;h=Math.imul(h,0x85ebca6b);h^=h>>>13;h=Math.imul(h,0xc2b2ae35);h^=h>>>16;return h>>>0;}
+function baseIdentity(key){var h1=fnv1a(key),h2=fnv1a(key+STREAM2_SALT);
+  return {color:PALETTE12[h1%PALETTE12.length],outline:OUTLINES[h2%OUTLINES.length],structure:STRUCTURES[(h1>>>9)%STRUCTURES.length]};}
+function projectIdentity(key){return (typeof key==='string'&&key.length>0&&key.length<=64&&!/[\u0000-\u001f\u007f]/.test(key))?baseIdentity(key):{color:FALLBACK_COLOR,outline:'pentagon',structure:'solid'};}
+function outlinePath(name,size){var S=size,c=S/2,R=S*0.47,R2=S*0.3;
+  function poly(n,rot){var pts=[];for(var k=0;k<n;k++){var a=rot+k*2*Math.PI/n;pts.push((c+R*Math.cos(a)).toFixed(2)+','+(c+R*Math.sin(a)).toFixed(2));}return 'M'+pts.join(' L')+' Z';}
+  if(name==='hexagon')return poly(6,-Math.PI/2+Math.PI/6);
+  if(name==='octagon')return poly(8,-Math.PI/2+Math.PI/8);
+  if(name==='shield'){var t=S*0.08,b=S*0.94;return 'M'+(S*0.14)+' '+t+' H'+(S*0.86)+' V'+(S*0.52)+' Q'+(S*0.86)+' '+b+' '+c+' '+b+' Q'+(S*0.14)+' '+b+' '+(S*0.14)+' '+(S*0.52)+' Z';}
+  if(name==='sparkle'){var p=[];for(var k2=0;k2<8;k2++){var r=k2%2===0?R:R2,a2=-Math.PI/2+k2*Math.PI/4;p.push((c+r*Math.cos(a2)).toFixed(2)+','+(c+r*Math.sin(a2)).toFixed(2));}return 'M'+p.join(' L')+' Z';}
+  if(name==='tag')return 'M'+(S*0.12)+' '+(S*0.12)+' H'+(S*0.66)+' L'+(S*0.88)+' '+(S*0.34)+' V'+(S*0.88)+' H'+(S*0.12)+' Z';
+  return poly(5,-Math.PI/2+Math.PI/5);
+}
+function badgeSvg(id,size){var st=(id.structure==='ring'&&size<12&&id.outline==='sparkle')?'solid':id.structure;
+  var d=outlinePath(id.outline,size),uid='wbid'+fnv1a(id.color+'|'+id.outline+'|'+st+'|'+size).toString(36);
+  function wrap(inner){return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" role="img" aria-label="'+id.outline+' '+st+'">'+inner+'</svg>';}
+  if(st==='ring'){var c=size/2;return wrap('<mask id="'+uid+'"><rect width="'+size+'" height="'+size+'" fill="#fff"/><circle cx="'+c+'" cy="'+c+'" r="'+(size*0.46/2).toFixed(2)+'" fill="#000"/></mask><path d="'+d+'" fill="'+id.color+'" mask="url(#'+uid+')"/>');}
+  if(st==='half'){var ch=size/2;return wrap('<clipPath id="'+uid+'"><rect x="'+ch+'" y="0" width="'+ch+'" height="'+size+'"/></clipPath><path d="'+d+'" fill="'+id.color+'" fill-opacity="0.55"/><rect x="'+ch+'" y="0" width="'+ch+'" height="'+size+'" fill="'+id.color+'" clip-path="url(#'+uid+')"/>');}
+  return wrap('<path d="'+d+'" fill="'+id.color+'"/>');
+}
+function applyProject(key){
+  var id=projectIdentity(key);
+  document.documentElement.style.setProperty('--proj',id.color);
+  document.getElementById('projBadge').innerHTML=badgeSvg(id,13);
+  document.getElementById('projKey').textContent=key;
+  var lp=document.getElementById('ledgerPath'); if(lp) lp.textContent='~/.sandbar/projects/'+key+'/ledger/events.jsonl';
+  document.getElementById('projChip').title='project '+key+' · colour '+id.color+' · '+id.outline+' '+id.structure;
+}
+
 function $(i){return document.getElementById(i)}
 var frozen=false;
 $('th').textContent='theme: '+(document.documentElement.dataset.theme==='dark'?'dark':'light');
 $('th').onclick=function(){var h=document.documentElement;var d=h.dataset.theme==='dark';h.dataset.theme=d?'light':'dark';$('th').textContent='theme: '+(d?'light':'dark')};
+$('projSel').onchange=function(){applyProject($('projSel').value)};
+applyProject('sandbar');
 $('concSave').style.display='none';
 document.querySelectorAll('.stepper .st').forEach(function(b){b.onclick=function(){$('concSave').style.display='inline-block'}});
 $('st').onclick=function(){frozen=!frozen;$('st').textContent='state: '+(frozen?'empty':'normal');
