@@ -1236,6 +1236,11 @@
    "anchor": "behaviour",
    "note": "t261009-27 L1: ticket_outcome field truth tables (withdrawn_at/superseded/ending/product_kind/ended_by/ended_at/compare_outcomes)",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261009_39_yaml_follows_code.py": {
+   "anchor": "contract",
+   "note": "the generated workflows/*.yaml must byte-match the generator's output (gen_workflows_doc.py); pins the yaml-follows-code invariant settled by t261009-39",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -4414,16 +4419,6 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t261009-20/sc_settle_rerun_replay_guard.py": {
-   "anchor": "source-text",
-   "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
-   "sync_path": ""
-  },
-  "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
-   "anchor": "behaviour",
-   "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
-   "sync_path": ""
-  },
   "integration/t261009-31/sc_t26100931_dismiss_journal_contract.py": {
    "anchor": "contract",
    "note": "t261009-31: the dismissal journal/operation contract through the public ops — one-row append, named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, append-failure propagation",
@@ -4434,19 +4429,9 @@
    "note": "t261009-31: the read face — list/detail rows carry dismissed:{at,who,reason}, read failure degrades to named dismissed_note, no DONE-family reclassification, CLI ops human-only and signal-free",
    "sync_path": ""
   },
-  "integration/t261009-28/sc_t26100928_one_home_landing_record.py": {
-   "anchor": "behaviour",
-   "note": "t261009-28: the landing act records once in the delivery ledger through its own writer (writer-assigned seq, no second shape) and the landing is computable in the shared ordering space (derive_range / should_certify / has_landing)",
-   "sync_path": ""
-  },
-  "integration/t261009-28/sc_t26100928_legacy_and_ancestor_gate.py": {
-   "anchor": "behaviour",
-   "note": "t261009-28: legacy landings.jsonl refused by name with zero writes anywhere, control landing accepted, and the certified-revision ancestor gate refuses a stale lane tip recording nothing",
-   "sync_path": ""
-  },
-  "integration/t261009-27/sc_t26100927_outcome_endings_kind_compare.py": {
-   "anchor": "behaviour",
-   "note": "t261009-27: endings that are not deliveries (withdrawn/superseded coexisting with the three stages), the product's kind deciding the ending fact with unknown named, and rebuild-and-compare naming the moved field - through the public develop_promote outcome/compare faces",
+  "integration/t261009-39/sc_t261009_39_yaml_follows_code.py": {
+   "anchor": "contract",
+   "note": "t261009-39: generated workflow yaml is pure generator output (KI-154)",
    "sync_path": ""
   }
  }
