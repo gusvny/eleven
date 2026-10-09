@@ -4178,6 +4178,11 @@
       "anchor": "behaviour",
       "note": "t261008-33: incident-class witness - lane evidence write leaves the main checkout clean (delta-based), main root derived from the lane gitfile",
       "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "integration/t261008-50/sc_clean_tree_run_output.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
     }
   }
 }

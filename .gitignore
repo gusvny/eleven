@@ -30,14 +30,24 @@ server/ledger/
 !server/profile/node_modules/
 !server/profile-headless/node_modules/
 
-# 场景跑出来的证据截图（t261008 门被挡的根因）：这类 PNG 是每轮套件运行时重新生成的产物，
-# 跟踪它们会让"跑一次测试"就等于"改了 main 的工作区"，而 merge 闸的 main_untouched 检查
-# 只看到"未提交改动"，于是挡住别的票的合并门（261008 三张票被连坐）。
-# 证据仍然落同样的路径（供人查看/走查取证），只是不再进版本库。
-integration/*/shots/*.png
-
-# 场景跑出来的证据截图（第二次复发：t261008-36 的 evidence/ 目录，t261008 门被挡 4 张票）
-# 与上面 shots/ 同一条道理：PNG 是每轮套件重新生成的产物，跟踪它 = 跑一次测试改一次 main 工作区，
-# merge 闸的 main_untouched 随即挡住无关票的合并门。根因（该不该有“跑出来的证据进版本库”）
-# 归 t261008-50；此处只摘 PNG，故意提交的文本证据（README.md / *.py.txt）不动。
-integration/*/evidence/*.png
+# Scenario run output (shots/, out/, evidence/ — t261008 gate blockage root cause,
+# second recurrence was integration/t261008-36/evidence/*.png): these files are
+# regenerated on every suite run; tracking them makes "run the tests" dirty main's
+# worktree, and the merge gate's main-untouched check then blocks every other lane's
+# merge (the 261008 three-ticket pile-up). Evidence still lands at the same paths for
+# human walkthrough — it just never enters version control. Deliberately committed
+# text evidence (README.md / *.py.txt in carrier dirs) stays tracked: see the
+# negations below.
+# evidence/ uses FILE-level rules (not a directory rule): git prunes an ignored
+# directory without descending, so in-directory negations are inert; with the
+# file-level form the negations fire and the two carrier directories stay
+# un-ignored. Those carriers are NOT run output — they are hand-preserved
+# quarantined deliverables (see their README), so they must remain trackable.
+# (t261008-50: this block supersedes the main-side hotfix rules
+# integration/*/shots/*.png and integration/*/evidence/*.png — directory-level
+# coverage, so non-png strays count too.)
+integration/*/shots/
+integration/*/out/
+integration/*/evidence/*
+!integration/t261004-25/evidence/*
+!integration/t261004-28/evidence/*
