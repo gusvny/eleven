@@ -41,6 +41,8 @@ related:
 - The fault-mode ledger is 222 entries in one prose file inside the repository. A lane reads the copy it branched with, so an entry registered ten minutes ago is invisible to work already in flight — for a ledger whose entire purpose is to be read *before* designing a change's proof.
 - The same question — "which known failures does my change touch?" — is answered by searching prose, while the family's real value is the join between a fault mode, the case that locks it, and how that case last ran. The join exists only in prose.
 - Several machine-read baselines also live inside the repository, and their requirement is the **opposite** of the fault ledger's: they judge a run, so they must be the version that matches the code under test. Treating them as one family with the fault ledger would break one of the two.
+- **The machine itself is a single point of failure, and that has nothing to do with this design.** The repository has no remote, so the code, the documents, the ledgers and the entire commit history exist on one disk. The workflow engine's history — the truth about every ticket that was ever worked — is served from a loopback address on the same machine, so it is outside version control too. The store sits in a home directory with no backup, and in-flight worktrees live in the operating system's temporary area. Losing the machine is not a slower version of moving to a new one: today there is no second copy of anything, and the knowledge of how to move it all lives in one person's head.
+
 - The store outside the repository already holds each project's event log, action log, capacity state, authorisations, requests and run outcomes, in the same shape across seven projects. What is missing is not a home; it is **the rule saying which family goes where** — and the answer to what happens when the machine stops being one machine.
 
 ## Requirement
@@ -60,6 +62,9 @@ related:
 11. **Later goal — real sharing.** The same read path serves several people on several machines. This is what "multi-user" means as a target, and it is not achieved by pointing several machines at one file. What it needs is a **single writing authority** (a service that owns writes) or storage with real transactions. Phase 1 does not build it, and must not foreclose it.
 12. **Phase-1 readiness for goal 11**: reads go through one pull interface that answers as of a version, and no record depends on a machine, a path or a clock — so that moving the truth behind a service changes the plumbing and not a single reader.
 13. The rules that govern these facts today — who may write the fault ledger, what must accompany a repair — survive the move unchanged. This design changes where facts live, not who may write them.
+14. **Losing the machine is survivable.** Every fact that cannot be rebuilt is kept so that it can be recovered on a different machine, from a different location.
+15. **What can be rebuilt is named as rebuildable**, so that backup effort goes to what cannot be — and so that a loss is a loss of work rather than a loss of memory.
+16. **Moving to a new machine is a written, checkable procedure** that has been exercised at least once, rather than knowledge held by one person. It covers what must be installed, which locations must be moved, where the engine's own history lives, and how to check that the move succeeded.
 
 ### Stakeholders
 
@@ -88,6 +93,8 @@ related:
 - **Not migrating all families at once**, and not migrating a family with no identified consumer.
 - **Not solving growth by hand-editing a log**, and not letting a store grow unbounded with no declared policy.
 - **Not changing write authority as part of the move**, and not letting the move become an occasion to loosen it.
+- **Not a disaster-recovery programme, not high availability, and not a second machine this cycle.** The requirement is that the loss is survivable and the move is written down, not that the system keeps running through it.
+- **Not backing up what can be rebuilt.** Copying the large derived family would cost more than it protects and would hide which layer actually matters.
 
 ## Proposal
 
@@ -127,6 +134,30 @@ Real sharing is a change of writing authority, not a change of file location:
 - The truth moves **behind a single writing authority** — a service that owns writes, or storage with real transactions. Writers no longer append to a shared file.
 - What makes concurrent appends safe on one machine — the guarantee that a single small append is not interleaved with another — **does not hold over a network filesystem**, and file synchronisation produces conflicts rather than records. Sharing one log file between machines is therefore not a weaker version of the target; it is a different and broken design, and it would produce exactly the kind of quiet divergence this project has already spent effort cleaning up.
 - Because phase 1 reads through one interface, as of a version, with records that name no machine, path or clock, this arrival is a plumbing change. That is the entire reason phase 1 is shaped this way rather than simply "moving a file".
+
+### Losing the machine, and moving to another one
+
+Two different events, and only one of them is currently possible without loss:
+
+- **Moving while the old machine still runs** is a copy. It is easy in principle and hard in practice for one reason: it depends on knowing *everything* that has to be copied — the repository, the store, the session data, and the engine's own history — and where the last of those actually lives. That is knowledge, and knowledge that lives in one person's head fails exactly when it is needed. So it becomes a written procedure, exercised once, and the exercise is what proves the procedure rather than the intent.
+- **Losing the machine** is survivable only if a copy exists somewhere else. A second copy on the same disk, or on a synchronised folder that follows the machine, is not a copy in this sense: it shares the failure. **Off-device is the requirement**, and "we have a backup" only counts once a restore has been performed from it.
+
+The effort should not be spread evenly, because the families differ enormously in two respects:
+
+| Layer | Examples | Size today | If it is lost |
+|---|---|---|---|
+| **Cannot be rebuilt** | Fault-mode ledger, the relation and certification records to come, the request channel, the alert stream, the action stream, the event stream, inspection findings, authorisation and capacity audits, and the engine's own ticket history | A few megabytes for the file-based ones, plus the engine's history | Amnesia. No amount of re-running the system brings these back |
+| **Can be rebuilt or regenerated** | Per-ticket snapshots, settlements, metrics, run results, runtime workspaces, screenshots and evidence | Roughly 1.3 GB and 14,000 directories | Painful, and remediable — the system can produce them again |
+
+The conclusion is the useful part: **the layer that must survive is small enough to carry**, while the layer that is large is the layer that can be produced again. A backup story that treats the store as one undifferentiated 1.3 GB blob would be both expensive and wrong.
+
+Three things follow, and the first is independent of everything else in this document:
+
+1. **The repository needs a copy somewhere else.** Today it has no remote, so the code, the documents and the whole history share the fate of one disk. This is the largest single exposure in the project, it is cheap to fix, and it is not a design question.
+2. **The irrecoverable layer gets an export** that lands off-device, and the export is checked by restoring from it — into a scratch location, not over the original.
+3. **The engine's own history is included in the procedure**, whichever way its storage is moved. It is the truth about every ticket, and today its location is not written down anywhere.
+
+A note on in-flight work: worktrees live in the operating system's temporary area, which does not survive a machine change and may not survive a restart. Committed work is safe as long as the repository is, because worktrees share its object store; uncommitted work is not, and that is the part a move cannot rescue.
 
 ### The order of work, and why
 
@@ -186,6 +217,7 @@ This family is already in the project's store, outside the repository, in the sa
 | Inspection findings | Review outcomes per period | Read by the inspection faces | Project store, append-only | **Stays** |
 | Ticket snapshots, settlements, metrics | Per-ticket roll-ups and the numbers behind the panels | Read by the faces | Project store, **1.2 GB** across 273 / 261 / 215 entries | **Stays.** Growth policy applies |
 | Runtime declarations | Watchdog state, sessions, project declaration, model routes | Read by the running system | Project store, current state | **Stays** |
+| Watchdog streams | Per-project alert stream (574 KB for this project), executor session stream, heartbeat, and a prose backstop | Read by the watchdog faces and by diagnosis | Outside the project store, append-only | **Stays.** Missed in the first pass of this inventory and added here: it is a separate family in a separate directory |
 | Runtime workspaces | Stage directories and reclaimable scratch areas — **14,217 entries** | Nobody reads them; the system creates them | Outside the project store | **Not a ledger.** Residue with a lifetime question, not a home |
 
 ### D. Facts about tickets
@@ -196,6 +228,8 @@ This family is already in the project's store, outside the repository, in the sa
 | Relations between tickets | Which ticket exists because of which | — | Designed, not built ([Ticket Relations v1](ticket-relations-v1.md)) | Belongs to the store |
 | Landing and certification record | Which revision of the buffer was certified, by what, and with which faults booked | — | Designed, not built ([Develop Buffer v1](develop-buffer-v1.md)) | Belongs to the store |
 | Acceptance and integration reports | What a walkthrough concluded, with its evidence | Read by the host and by whoever picks the work up later | In the repository and in per-ticket directories (267 ticket directories, 68 evidence directories, 1,164 report files) | **Reports are products, not a ledger** — but there is no register of which reports exist or what each concluded, so finding them is a path convention |
+
+A note on the truth's own storage: the engine's history is served from a loopback address on this machine, which means the record of every signature, verdict and send-back is subject to the same loss as the files above, and, like them, it is outside version control.
 
 ### E. Documents
 
@@ -215,6 +249,8 @@ Quarantine directories, rescue runbooks, screenshot piles, overnight autopilot l
 2. **The template already exists.** The operational family is in the store, in one shape, for every project. What is missing is not a store but a **convention set**: identity, writers and reasons, append-only facts versus current state, versioned reads, availability and backup.
 3. **The really missing ledger is the join.** Fault mode, the case that locks it, and how that case last ran are three facts that today have no shared home, which is why reading the fault ledger is a search rather than a query.
 4. **What the store lacks is what version control gave for free.** Seventeen hand-made dated copies of one request log is what a backup story looks like when there is no backup story; an 88 MB single log with only rename-rotation is what a growth policy looks like when there is none; and "as of which version did my work read this?" has no answer in either home.
+5. **The largest exposure is not in this design at all.** The repository has no remote, the engine's history is machine-local, the store has no off-device copy, and the knowledge of how to move it all is held by one person. Every fact family in this inventory shares one fate until that changes, and it is worth fixing before any family moves.
+
 
 ## Related documents
 
