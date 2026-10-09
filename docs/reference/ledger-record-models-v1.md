@@ -61,6 +61,8 @@ related:
 
 ## A. Delivery records (proposed — the buffer flow)
 
+**Status of this section:** the records are proposed, except the run's case rows, which exist today. Each entry says which.
+
 **One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a promotion advances several of them and records all of them. Where such a state is derived rather than recorded, it is derived **per repository** too.
 
 ### landing — "what content did this ticket put on this line, and on top of what?"
@@ -135,6 +137,69 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 
 - **No verdict on the certification.** A certification whose run came back red is still a certification — that is how a freeze gets opened — and the verdict is read from the run. Carrying a second verdict here would be a second answer to one question.
 - **One run can back more than one certification.** A green row is reusable when the commit, the fingerprint and the width all match, so an unchanged candidate can be re-certified without re-running, and a re-certification cites the same run rather than restating it. That is why runs are records in their own right rather than fields of a certification.
+
+### run (fact) — "what actually executed, and what came of it?"
+
+**Status: the header is proposed; the case rows exist today** (without a run identity, which is the one field this document asks them to gain).
+
+The run's own record, written once at the end of a run:
+
+```json
+{
+  "id": "run-261009-14",
+  "line": "default",
+  "repos": [
+    { "repo": "sandbar", "revision": "9f3c2a1b" }
+  ],
+  "suite": "full",
+  "source": "scheduled",
+  "env_fp": "0febeeb6da6b25dc...",
+  "conc_width": 3,
+  "pool": "main:3,ro:3,browser-free:3",
+  "started_at": 1791506200000,
+  "duration_s": 2132,
+  "cases": {
+    "ran": 445,
+    "passed": 443,
+    "failed": 2,
+    "env_failed": 0
+  },
+  "verdict": "red"
+}
+```
+
+| Field | Example value | Why it is there |
+|---|---|---|
+| `id` | `run-261009-14` | The identity the case rows and the certifications point at — without it, "this run" is not something a record can name |
+| `repos` | `[{"repo": "sandbar", "revision": "9f3c2a1b"}]` | What was under test; a set, because a candidate may span repositories |
+| `suite` | `full` / `fast-set` | Which proof this was: the certification's heavy one, or the set a lane runs |
+| `source` | `scheduled` / `lane` / `change-triggered` | Why the run happened |
+| `env_fp` / `conc_width` / `pool` | `0febeeb6...` / `3` / `main:3,ro:3,browser-free:3` | The comparability key: a green row may be reused **only** when the revision, this fingerprint and the width all match |
+| `started_at` / `duration_s` | `1791506200000` / `2132` | What it cost and when — the numbers the budget and the throughput argument are made of |
+| `cases.ran` / `passed` / `failed` / `env_failed` | `445` / `443` / `2` / `0` | **The pair that makes a run a proof.** `ran: 0` is never a proof, however green it looks — that was a live incident, and this counter is where that rule can be enforced |
+| `verdict` | `red` | The mechanical roll-up of those counts |
+
+**Its absence means the run did not finish.** The header is written when the run ends; rows without a header are an interrupted run, which is a state to see rather than a summary to invent. This is also the home of the two fixes the certification needed: the run identity, and (once landings span repositories) the repository.
+
+#### run case rows (today's shape, with one addition)
+
+```json
+{
+  "run": "run-261009-14",
+  "ts": "2026-09-22T15:33:10+08:00",
+  "commit": "da942b8f...",
+  "env_fp": "0febeeb6...",
+  "conc_width": 1,
+  "pool": "ro",
+  "scenario": "t260903-10-installer-console-line",
+  "verdict": "pass",
+  "wall_s": 0.043,
+  "source": "baseline",
+  "ticket": ""
+}
+```
+
+**Today** these rows exist as shown, verbatim, except for `run`: the rows carry no run identity yet, which is why a certification could not point at a run and had to restate the counts. Adding `run` to each row is the one change this document asks of them.
 
 ### freeze episode (entity) — "why is nothing landing on this line, and who is fixing it?"
 
@@ -309,6 +374,8 @@ Waiting for a certification:
 
 ## B. Relation records (proposed)
 
+**Status of this section:** none of it exists. Today the repository layout is *derived* from the directories; the declared relations and the proof rule they carry do not exist, and neither do the relation records or their corrections.
+
 ### relation — "why does this work exist?" / "who owns this boundary?"
 
 ```json
@@ -368,9 +435,15 @@ proof_rule: touching base runs the dependents' scenarios too
 | `base` / `dependents` | `sandbar` / `[dsh]` | The subjects are repositories, not tickets; it changes rarely, so it is declared with the project layout |
 | `proof_rule` | `touching base runs the dependents' scenarios too` | The **proof set** for a landing that spans repositories — a defined set instead of an improvised one |
 
-## C. Knowledge records
+## C. Fault knowledge (what is known broken)
+
+**Two of these four exist today, in prose or in a file; two do not exist at all.** Each entry says which.
+
+
 
 ### fault mode (entity) — "have we seen this before?"
+
+**Status: today** — 228 entries in one prose file, edited in place. The record below is what the entity would look like once the prose is split into an entity and its dispositions.
 
 ```json
 {
@@ -385,6 +458,8 @@ proof_rule: touching base runs the dependents' scenarios too
 **Today** these are prose entries in one file, edited in place; this is what the entity would look like. It carries no state: `open` / `booked red` / `fixed` / `obsolete` live in its **dispositions** (below), which is why the entity can stay unedited while its status moves.
 
 ### fault-mode disposition (fact) — "do we accept this, or must it be fixed?"
+
+**Status: today as prose** — the ledger's own convention already says a fault mode moves `open → fixed（注明修复工单）`, but nothing records that transition as a record; the record below does not exist yet.
 
 ```json
 {
@@ -402,6 +477,8 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
 
 ### case ↔ fault mode link (fact) — "is this fault mode actually locked by a case?"
 
+**Status: missing today** — the join exists only as prose citations inside scenario descriptions and the fault ledger's text.
+
 ```json
 {
   "case": "t261008-26-lane-vocabulary-fail-closed",
@@ -415,6 +492,8 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
 
 ### booked-red inventory (state) — "is this red new?"
 
+**Status: today** — a machine-read file in the repository, one row per case.
+
 ```json
 {
   "case": "t261004-26",
@@ -426,7 +505,13 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
 
 **Today**: a machine-read file in the repository.
 
+## D. Inspection findings (what a review observed)
+
+**One of these three exists today; its own home is the open question.**
+
 ### finding (entity) — "what is wrong here?"
+
+**Status: today** — the inspection agent produces these (id minted from content, evidence verified mechanically); where the entity is *stored* is not settled.
 
 ```json
 {
@@ -457,6 +542,8 @@ Closing it is a fact of its own, and it is decided by evidence rather than by a 
 
 ### finding observation (fact) — "is it still there, and for how long has it been?"
 
+**Status: proposed** — today only the finding itself exists, so "seen again, against this revision" cannot be recorded.
+
 ```json
 {
   "finding": "fi-9c1e42a0",
@@ -470,68 +557,9 @@ Closing it is a fact of its own, and it is decided by evidence rather than by a 
 
 Proposed; today only the finding itself exists. Verification values: `verified` / `downgraded` / `unlocatable`.
 
-### run (fact) — "what actually executed, and what came of it?"
-
-The run's own record, written once at the end of a run:
-
-```json
-{
-  "id": "run-261009-14",
-  "line": "default",
-  "repos": [
-    { "repo": "sandbar", "revision": "9f3c2a1b" }
-  ],
-  "suite": "full",
-  "source": "scheduled",
-  "env_fp": "0febeeb6da6b25dc...",
-  "conc_width": 3,
-  "pool": "main:3,ro:3,browser-free:3",
-  "started_at": 1791506200000,
-  "duration_s": 2132,
-  "cases": {
-    "ran": 445,
-    "passed": 443,
-    "failed": 2,
-    "env_failed": 0
-  },
-  "verdict": "red"
-}
-```
-
-| Field | Example value | Why it is there |
-|---|---|---|
-| `id` | `run-261009-14` | The identity the case rows and the certifications point at — without it, "this run" is not something a record can name |
-| `repos` | `[{"repo": "sandbar", "revision": "9f3c2a1b"}]` | What was under test; a set, because a candidate may span repositories |
-| `suite` | `full` / `fast-set` | Which proof this was: the certification's heavy one, or the set a lane runs |
-| `source` | `scheduled` / `lane` / `change-triggered` | Why the run happened |
-| `env_fp` / `conc_width` / `pool` | `0febeeb6...` / `3` / `main:3,ro:3,browser-free:3` | The comparability key: a green row may be reused **only** when the revision, this fingerprint and the width all match |
-| `started_at` / `duration_s` | `1791506200000` / `2132` | What it cost and when — the numbers the budget and the throughput argument are made of |
-| `cases.ran` / `passed` / `failed` / `env_failed` | `445` / `443` / `2` / `0` | **The pair that makes a run a proof.** `ran: 0` is never a proof, however green it looks — that was a live incident, and this counter is where that rule can be enforced |
-| `verdict` | `red` | The mechanical roll-up of those counts |
-
-**Its absence means the run did not finish.** The header is written when the run ends; rows without a header are an interrupted run, which is a state to see rather than a summary to invent. This is also the home of the two fixes the certification needed: the run identity, and (once landings span repositories) the repository.
-
-#### run case rows (today's shape, with one addition)
-
-```json
-{
-  "run": "run-261009-14",
-  "ts": "2026-09-22T15:33:10+08:00",
-  "commit": "da942b8f...",
-  "env_fp": "0febeeb6...",
-  "conc_width": 1,
-  "pool": "ro",
-  "scenario": "t260903-10-installer-console-line",
-  "verdict": "pass",
-  "wall_s": 0.043,
-  "source": "baseline",
-  "ticket": ""
-}
-```
-
-**Today** these rows exist as shown, verbatim, except for `run`: the rows carry no run identity yet, which is why a certification could not point at a run and had to restate the counts. Adding `run` to each row is the one change this document asks of them.
-
 ### reviewed path (fact) — "has anyone looked at this file lately?"
+
+**Status: today** — one row per path per period, verbatim below.
 
 ```json
 {
@@ -543,7 +571,7 @@ The run's own record, written once at the end of a run:
 
 **Today**, verbatim: what an inspection period actually examined (not a finding).
 
-## D. Fleet and operations records (today)
+## E. Fleet and operations records (today)
 
 ### event — "what did the engine or the watchdog see?"
 
@@ -705,7 +733,7 @@ Levels seen: `redline`.
 
 Same shape as the freeze episode, for the same reason: the period comes into being when its ticket is opened, and `blocked` / `completed` / `voided` are changes to it, not fields that get rewritten. The `change` values in use today are `blocked`, `completed`, `voided` and `re-run`, and a disposition carries `who` and `reason` exactly as above.
 
-## E. Ticket truth
+## F. Ticket truth
 
 The truth about a ticket — its stage, its signature, its verdict, a send-back — lives in the workflow engine's own history and is **not** duplicated here. Everything in this document that mentions a ticket is either a projection of that truth or a fact about something else that names a ticket.
 
