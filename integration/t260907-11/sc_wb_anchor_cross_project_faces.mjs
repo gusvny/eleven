@@ -94,6 +94,10 @@ try {
     const dFpv = await computeTicketDiff(fx.repoB, { id: 't-fpv-1', worktree: absWt, base_ref: base })
     j.ok(dFpv.changed === true && dFpv.files.some((f) => f.path === 'src-changed.ts'),
       'fpv 项目根内泳道 diff 可见（宿主实报的变更 tab 空＝本断言的反面）')
+    // t261009-01 pin update (NOT a relaxation): production emits the English
+    // emptyReason 'worktree is outside the repository root: ...'; the old pins
+    // ('越出') predate the English-waves migration and drifted stale. The
+    // rejection semantics (changed=false + outside-root reason) stay asserted.
     const dCross = await computeTicketDiff(fx.repoA, { id: 't-fpv-1', worktree: absWt, base_ref: base })
     j.ok(dCross.changed === false && (dCross.emptyReason ?? '').includes('outside the repository root'),
       '同一 worktree 换 sandbar 锚判界 → 仍拒（闸不弱化，只是基准随项目走）')

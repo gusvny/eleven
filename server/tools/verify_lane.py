@@ -952,6 +952,93 @@ def _parse_integ_run(stdout, returncode):
     return ran, passed, failed, env_failed, scen, None
 
 
+# ---------------- t261009-01 pre-existing-main discriminator ----------------
+# A ledger-ambiguous red is probed on the CLEAN baseline tree (main at the lane
+# base) through the existing fail-closed targeted entry (SANDBAR_SCENARIO_ONLY,
+# in-register check keeps running) instead of burning a full-suite baseline.
+# Bounds: at most MAIN_SIDE_PROBE_CAP names probed per round; names beyond the
+# cap get NO probe answer and stay blockers, named in the receipt (never
+# silently dropped). Fail-closed: probe off / clone failure / timeout /
+# no-answer all leave the red a lane blocker — only a red that REPRODUCES on the
+# clean base becomes a named pre-existing main-side red (failure_protocol
+# decide(): baseline_red existing debt => record, not blocker).
+MAIN_SIDE_PROBE_CAP = 8
+MAINSIDE_PROBE_ENV = 'SANDBAR_GATE_MAINSIDE_PROBE'   # '0' = historical behavior
+
+
+def _mainside_probe_enabled(environ=None):
+    """Kill-switch reader (pure): env '0/off/false/no' disables the probe and
+    restores the historical targeted/full-baseline shape. Malformed values are
+    NOT convenience-accepted — anything else means enabled."""
+    import os as _os
+    src = _os.environ if environ is None else environ
+    return str(src.get(MAINSIDE_PROBE_ENV, '1')).strip().lower() \
+        not in ('0', 'off', 'false', 'no')
+
+
+def _main_side_probe_plan(ledger_ambiguous, red_names, probe_on,
+                          cap=MAIN_SIDE_PROBE_CAP):
+    """Pure decision face: which ambiguous red names get the clean-clone probe.
+
+    Returns (targeted, capped_out, probe_applied):
+      - probe_on and ambiguous non-empty -> the first `cap` ambiguous names are
+        probed; the rest are capped_out (stay blockers, receipt-named);
+      - probe_on and NO ambiguous name -> nothing probed (the ledger already
+        answered every red; the caller skips the baseline entirely);
+      - probe OFF -> the historical shape byte for byte: partial ambiguity is
+        targeted in full, all-ambiguous falls back to the full baseline run.
+    Malformed inputs (non-list container / non-str items) fabricate no probe
+    answer: a non-list ambiguous container reads as no names at all."""
+    if not isinstance(ledger_ambiguous, (list, tuple)):
+        amb = []
+    else:
+        amb = [str(n).strip() for n in ledger_ambiguous
+               if isinstance(n, str) and n.strip()]
+    seen, names = set(), []
+    for n in amb:
+        if n not in seen:
+            seen.add(n)
+            names.append(n)
+    reds = {str(n).strip() for n in (red_names or [])
+            if isinstance(n, str) and n.strip()}
+    if not probe_on:
+        targeted = list(names) if names and len(names) < len(reds) else []
+        return targeted, [], False
+    if not names:
+        return [], [], False
+    try:
+        safe_cap = max(int(cap), 0)
+    except (TypeError, ValueError):
+        safe_cap = 0        # malformed cap = probe nothing, cap everything (conservative)
+    return names[:safe_cap], names[safe_cap:], True
+
+
+def _main_side_face(red_names, baseline_answers, targeted, capped_out,
+                    probe_wall_s, probe_applied):
+    """Pure receipt face builder: names each ambiguous red as pre-existing
+    main-side (reproduced on the clean base) or still-this-lane's blocker.
+    No answer (not probed / baseline not-checked / capped out) is NEVER read as
+    pre-existing — the fail-closed direction keeps it a blocker."""
+    ans = baseline_answers if isinstance(baseline_answers, dict) else {}
+    reds = sorted({str(n).strip() for n in (red_names or [])
+                   if isinstance(n, str) and n.strip()})
+    pre = sorted(n for n in reds if ans.get(n) == 'red')
+    undecided = sorted(n for n in (list(targeted or []) + list(capped_out or []))
+                       if ans.get(n) != 'red')
+    return {
+        'enabled': bool(probe_applied),
+        'probed': sorted(str(n) for n in (targeted or [])),
+        'probed_count': len(targeted or []),
+        'probe_wall_s': probe_wall_s,
+        'capped_out_stay_blockers': sorted(str(n) for n in (capped_out or [])),
+        'pre_existing_main': pre,
+        'still_lane_blockers': undecided,
+        'verdict': ('pre-existing main-side reds are records, not lane blockers '
+                    '(failure_protocol decide: baseline_red existing debt); a red '
+                    'the clean clone does not reproduce still blocks'),
+    }
+
+
 def _integ(args):
     """集成道（薄壳化，宿主令 t260902）：执行项目声明的 integration.cmd 并解析输出契约
     （PASS/FAIL 行 + 末行 SCENARIOS ran=N pass=N fail=N）。执行与解析全天下唯此一份——
@@ -1317,12 +1404,19 @@ def _integ(args):
     # 歧义面里，照旧回退实跑——「查不到」永不等于「当绿」。
     baseline_skipped_by_ledger = False
     baseline_targeted = []
+    # t261009-01: bounded pre-existing-main probe plan (pure face above).
+    mainside_probe_on = _mainside_probe_enabled()
+    baseline_targeted, mainside_probe_capped, mainside_probe_applied = \
+        _main_side_probe_plan(ledger_ambiguous, red_names, mainside_probe_on)
     if need_baseline and ledger_mod is not None and red_names:
         if not ledger_ambiguous:
             need_baseline = False
             baseline_skipped_by_ledger = True
-        elif len(ledger_ambiguous) < len(red_names):
-            baseline_targeted = list(ledger_ambiguous)
+        elif not mainside_probe_applied and len(ledger_ambiguous) == len(red_names):
+            # probe off (or nothing targeted by the historical shape): the
+            # all-ambiguous round falls back to the FULL baseline run, exactly
+            # as before this ticket.
+            baseline_targeted = []
     # 261001：基线那一步的 env 是**重建**的（`cmd_env` + 本 extra）⇒ 执行器加在 env 里的
     # 嵌套深度（INTEG_RUN_DEPTH）必须**显式透传**，否则内层每次都从 0 起算、深度护栏永远
     # 到不了帽（实测：自递归 12 层、护栏零命中）。这是「层级嵌套跑同一个面」的判据面。
@@ -1469,6 +1563,28 @@ def _integ(args):
     _out['runner_used_sec'] = runner_used
     if _warnings:                       # 1② 混版本接缝显式 WARN（进回执，不静默）
         _out['warnings'] = list(_warnings)
+    # t261009-01: pre-existing-main discriminator face (additive observation; the
+    # block/record semantics stay single-sourced in failure_protocol.decide —
+    # this face only NAMES the classification the decision table produced).
+    if red_names and ledger_ambiguous:
+        _out['main_side_reds'] = _main_side_face(
+            red_names, _out['baseline']['answers'], baseline_targeted,
+            mainside_probe_capped, baseline_wall_s, mainside_probe_applied)
+        # t261009-01 (arbitrate round 2): the face rides the gate's stdout JSON
+        # envelope, but the round artifacts the desk actually reads (the runner
+        # report out/integration-report-*.json) never carried it — the reader
+        # could not see the classification the decision table produced. Persist
+        # a latest-round snapshot next to the runner reports. Best-effort: a
+        # write failure is named on stderr and never flips any verdict.
+        try:
+            _msdir = root / 'out'
+            _msdir.mkdir(parents=True, exist_ok=True)
+            (_msdir / 'main-side-reds.json').write_text(
+                json.dumps(_out['main_side_reds'], ensure_ascii=False,
+                           indent=2) + '\n', encoding='utf-8')
+        except OSError as _mse:
+            _note('MAIN_SIDE_SNAPSHOT write failed (%s: %s) — the face lives on '
+                  'the gate JSON envelope only' % (type(_mse).__name__, _mse))
     if _run_budget_env:
         try:
             _out['run_budget_sec'] = int(float(_run_budget_env))

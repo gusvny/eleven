@@ -183,6 +183,12 @@ try {
     const rws = [...rwsT1, { repo: 'ghost', name: 'ghost', branch: 'lane/ghost', base_ref: t1.baseM }]
     const r = await computeTicketDiff(t1.proj, { id: 't1', worktree: t1.lane, base_ref: t1.baseR, repo_worktrees: rws })
     const g = r.repos.find((x) => x.repo === 'ghost')
+    // t261009-01 pin update (NOT a relaxation): production emits the English
+    // emptyReason 'member repo tree not materialized (...)'; the old pin
+    // ('未物化') predates the English-waves migration and drifted stale. The
+    // naming face (reason names the ghost repo + the not-materialized cause)
+    // stays asserted. (Main landed the same pin update comment-less via its own
+    // sync; the comment is kept as the provenance record.)
     ok(!!g && (g.emptyReason ?? '').includes('ghost') && (g.emptyReason ?? '').includes('not materialized'),
       `E1 缺席成员仓 emptyReason 点名仓（实得 ${g?.emptyReason}）`)
     ok((r.repos.find((x) => x.repo === 'member')?.files.length ?? 0) > 0, 'E2 他仓不受牵连照常出清单')

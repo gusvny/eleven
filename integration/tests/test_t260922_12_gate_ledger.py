@@ -212,7 +212,15 @@ class _FakeLedger:
         return {"written": len(rows), "rejected": []}
 
 
-def _row(verdict="fail", scenario="s1", ts="2026-09-21T08:00:00+00:00", **over):
+def _row(verdict="fail", scenario="s1", ts=None, **over):
+    # t261009-01 incidental fix: the default ts was a fixed 2026-09-21 stamp;
+    # the ≤7-day trust bound (failure_protocol.ledger_trust rule 3) expired it
+    # on 2026-09-28+ and the whole consult face started failing as a time bomb.
+    # Default to NOW (fresh row) so the fixture tests trust ordering, not the
+    # calendar; fixed stamps remain available for expiry tests via ts=...
+    if ts is None:
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
     r = {"ts": ts, "commit": "ef" * 20, "env_fp": FP, "conc_width": 4,
          "pool": "main", "scenario": scenario, "verdict": verdict,
          "wall_s": 1.0, "source": "inspection", "ticket": ""}
@@ -222,15 +230,16 @@ def _row(verdict="fail", scenario="s1", ts="2026-09-21T08:00:00+00:00", **over):
 
 def test_consult_trusted_latest_wins(repo, monkeypatch):
     monkeypatch.setattr(vl, "_is_ancestor", lambda *a, **k: True)
-    # ts 必须落在真实时钟的 7 天采信窗内：固定 2026-09 日期随日历老化出窗，
-    # 用例红在日历而非被测代码（时间炸弹修复，t261009-11 顺手）
-    import time as _t
-    import datetime as _dt
-    def _iso(days_ago):
-        return _dt.datetime.fromtimestamp(
-            _t.time() - days_ago * 86400, _dt.timezone.utc).isoformat()
-    rows = [_row(verdict="fail", ts=_iso(2.0)),
-            _row(verdict="pass", ts=_iso(0.5))]
+    # Both lanes fixed the same calendar time bomb (t261009-01 incidental fix
+    # via the _row default ts=None -> NOW; main's t261009-11 via explicit
+    # days-ago args). Kept explicit stamps so the fail/pass ORDERING is
+    # deterministic regardless of clock resolution; both sit inside the
+    # 7-day trust window, so the case tests ordering, not the calendar.
+    from datetime import datetime, timedelta, timezone
+    _now = datetime.now(timezone.utc)
+    _iso = lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    rows = [_row(verdict="fail", ts=_iso(_now - timedelta(days=1))),
+            _row(verdict="pass", ts=_iso(_now))]
     answers, red, green, amb = vl._ledger_consult(
         fp_mod, _FakeLedger(rows), ["s1"], FP, 4, SHA, repo)
     assert answers["s1"]["verdict"] == "pass", "同键多行取最新可信"

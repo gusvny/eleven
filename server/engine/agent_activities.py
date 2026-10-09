@@ -8733,6 +8733,14 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                   if int(_kr_skipped or 0) else "")),
         "injection": "SANDBAR_KNOWN_RED_EXCLUDE=1 (engine in-lane round)",
     }
+    # t261009-01: pre-existing-main discriminator face (additive; absent or
+    # unmapped = the old receipt byte-for-byte). Carried, never re-judged: the block/record semantics
+    # stay single-sourced in the gate's decision table (failure_protocol.decide —
+    # baseline_red existing debt is already a record, not a blocker); this face
+    # only puts the classification + probe cost/scope on the ticket face.
+    _msr = res.get("main_side_reds")
+    if isinstance(_msr, dict) and _msr:
+        out.main_side_reds = dict(_msr)
     if _pe.get("applied"):
         _tail = "本轮跳过池=%s（少 %d 条）" % (
             "、".join(str(x) for x in (_pe.get("declared") or out.excluded_pools)),
