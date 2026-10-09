@@ -1211,6 +1211,11 @@
    "anchor": "contract",
    "note": "t261009-01: pre-existing-main discriminator pure faces (probe plan cap/fail-closed, receipt face naming, kill-switch, decision-table composition record-not-blocker)",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261009_17_moved_main_settle.py": {
+   "anchor": "behaviour",
+   "note": "moved-main settle convergence + rerun predicate (t261009-17)",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -4307,6 +4312,11 @@
   "integration/t261009-01/sc_t261009_01_gate_preexisting_red_face.py": {
    "anchor": "contract",
    "note": "binds to the classifier public entry + classification enum (the new gate contract from ticket t261009-01 deliverable 2)",
+   "sync_path": ""
+  },
+  "integration/t261009-17/sc_t26100917_moved_main_not_human.py": {
+   "anchor": "behaviour",
+   "note": "KI-01M4FKAWY0EP59PY0V0QZWWGV5 regression: moved main must not stop a lane for a human; judged through the public settle receipt",
    "sync_path": ""
   }
  }

@@ -6002,12 +6002,38 @@ def _measure_merged_face(wt: Path, base_ref: str) -> ConflictSettleResult:
                       "measured: worktree %s does not exist" % wt)
         anc = _git(["merge-base", "--is-ancestor", base_ref, "HEAD"], wt)
         ancestor = anc.returncode == 0
+        # t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): judge against the revision
+        # this lane actually merged, not the live ref. When the live base ref is
+        # NOT an ancestor of HEAD but HEAD is a merge commit, read its second
+        # parent — main's tip at merge time. If that merged base is an ancestor
+        # of both HEAD and the live base ref (it belongs to main history), the
+        # only unmet measurement is "live main advanced past it": the merge
+        # commit is on disk and nothing needs resolving. Judge against the
+        # merged base and scan the residue face against it too (scanning the
+        # live ref would sweep integration-session files into the residue check
+        # and re-create the same false stop this removes). Read from disk, no
+        # seam change: correct for both entry paths (worker settle and
+        # join-settle) and replay-safe (a replay re-reads the same commit).
+        judge_ref = base_ref
+        merged_note = ""
+        if not ancestor:
+            parents = _git(["rev-list", "--parents", "-n", "1", "HEAD"], wt)
+            plist = parents.stdout.split()[1:] if parents.returncode == 0 else []
+            if len(plist) >= 2:
+                merged_base = plist[1]
+                m_head = _git(["merge-base", "--is-ancestor", merged_base, "HEAD"], wt)
+                m_base = _git(["merge-base", "--is-ancestor", merged_base, base_ref], wt)
+                if m_head.returncode == 0 and m_base.returncode == 0:
+                    judge_ref = merged_base
+                    merged_note = ("the lane merged %s (the merge commit's second "
+                                   "parent); live %s has advanced past it"
+                                   % (merged_base[:12], base_ref))
         unmerged = _git(["ls-files", "-u"], wt)
         n_unmerged = len([ln for ln in unmerged.stdout.splitlines() if ln.strip()])
         st = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, wt)
         dirty = len([x for x in st.stdout.split("\0") if x.strip()]) \
             if st.returncode == 0 else -1
-        changed = _git(["diff", "--name-only", "%s..HEAD" % base_ref], wt)
+        changed = _git(["diff", "--name-only", "%s..HEAD" % judge_ref], wt)
         residue: List[str] = []
         if changed.returncode == 0:
             for f in [ln.strip() for ln in changed.stdout.splitlines() if ln.strip()]:
@@ -6023,10 +6049,22 @@ def _measure_merged_face(wt: Path, base_ref: str) -> ConflictSettleResult:
                             or ln == "=======":
                         residue.append(f)
                         break
-        facts = ("measured: %s is%s an ancestor of HEAD; unmerged entries: %d; "
-                 "dirty files: %d; marker residue: %s"
-                 % (base_ref, "" if ancestor else " NOT", n_unmerged, dirty,
-                    (", ".join(residue[:5]) or "none")))
+        if merged_note:
+            facts = ("measured: live %s is NOT an ancestor of HEAD, %s; unmerged "
+                     "entries: %d; dirty files: %d; marker residue (scanned "
+                     "%s..HEAD): %s"
+                     % (base_ref, merged_note, n_unmerged, dirty,
+                        judge_ref[:12], (", ".join(residue[:5]) or "none")))
+        else:
+            facts = ("measured: %s is%s an ancestor of HEAD; unmerged entries: %d; "
+                     "dirty files: %d; marker residue: %s"
+                     % (base_ref, "" if ancestor else " NOT", n_unmerged, dirty,
+                        (", ".join(residue[:5]) or "none")))
+        if judge_ref != base_ref and n_unmerged == 0 and dirty == 0 and not residue:
+            head = _git(["rev-parse", "--short", "HEAD"], wt)
+            return ConflictSettleResult(
+                ok=True, commit=head.stdout.strip() if head.returncode == 0 else "",
+                already_settled=True)
         if ancestor and n_unmerged == 0 and dirty == 0 and not residue:
             head = _git(["rev-parse", "--short", "HEAD"], wt)
             return ConflictSettleResult(

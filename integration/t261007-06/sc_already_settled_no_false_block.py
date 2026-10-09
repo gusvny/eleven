@@ -237,7 +237,17 @@ ok(getattr(r_b1, "ok", False),
 ok(bool(getattr(r_b1, "already_settled", False)),
    "B1 (RED until fix): clean-lane verdict names already_settled")
 
-# B2 main NOT an ancestor of HEAD -> fail-closed with measured facts
+# B2 HEAD that genuinely differs from main with NO merge commit on disk ->
+# fail-closed with measured facts.
+# t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): the OLD B2 pinned "main advanced
+# past the merged base + clean face -> fail-closed". That exact shape is the
+# measured incident this ticket declares a FALSE stop — the convergence judge
+# now reads the merge commit's second parent (the main the lane actually
+# merged), so a moved live main converges (regression owned by
+# integration/t261009-17/sc_t26100917_moved_main_not_human.py, not duplicated
+# here). The fail-closed intent this subcase guards ("never a fabricated ok")
+# is re-anchored on the shape that still carries human information: the merge
+# commit is genuinely absent (reset away) and HEAD still differs from main.
 repo_b2 = make_conflicted_lane(TMP_ROOT / "b2")
 resolve_worktree(repo_b2)
 join_settle(repo_b2)
@@ -245,9 +255,13 @@ git_in(repo_b2, "checkout", "-q", "main")
 (repo_b2 / "f.txt").write_text("line=main-ahead\nshared=1\n")
 git_in(repo_b2, "commit", "-qam", "main moves on after the merge")
 git_in(repo_b2, "checkout", "-q", "lane")
+# remove the merge commit itself: HEAD is the plain lane commit, main is ahead,
+# nothing on disk records what main the lane merged -> fail-closed
+git_in(repo_b2, "reset", "-q", "--hard", "HEAD^")
 r_b2 = core_with_base_ref(repo_b2, "main")
 ok(not getattr(r_b2, "ok", True),
-   "B2: main ahead of HEAD -> fail-closed (never a fabricated ok)")
+   "B2: merge commit absent + HEAD differs from main -> fail-closed "
+   "(never a fabricated ok)")
 ok("no merge in progress" in receipt_text(r_b2),
    "B2: grep-stable anchor prefix kept for the incident family")
 ok(FALSE_STATE_TEXT not in receipt_text(r_b2),

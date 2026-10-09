@@ -148,7 +148,12 @@ total_calls = len(re.findall(r"phase = self\._auto_rework\(", src))
 # t261006-07（integration 岗位仲裁 gen0，261006）：主同步 blocked 路由被成功 settle
 # 反超的「自动逃生」回 implement（R1 settle-before-block）成为第 10 个内部合法打回点
 # → 9→10。同批：baselines mjs「调用点」10→11（10 内部 + 1 壳委托）。
-ok(total_calls == 10, "自动打回点 10 处（t261006-07 主同步 blocked 被 settle 反超的自动逃生点落地后定值）（实测 %d）" % total_calls)
+# t261009-17: baseline 10 -> 11 — the main-sync no-human-info shape (merge commit
+# already on disk, MERGE_HEAD absent, clean face, live main merely advanced) now
+# escapes via _auto_rework back to implement instead of stopping for a human
+# (KI-01M4FKAWY0EP59PY0V0QZWWGV5); the new call sites live in the two dev_lane
+# settle-failure branches (main-sync and merge_check families).
+ok(total_calls == 11, "自动打回点 11 处（t261009-17 基线 10 + 主同步 no-human-info 形状自动重跑点 1）（实测 %d）" % total_calls)
 # The merge point no longer stuffs self._rework (one rework must not land two timeline records)
 merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,

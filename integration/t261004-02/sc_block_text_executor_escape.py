@@ -97,10 +97,19 @@ for kw in ("engine_ops.py sync", "retry_qc"):
 m_exec = re.search(EXEC_CLAUSE, DEV)
 ok(m_exec is not None,
    "settle 文案带执行器出路子句（新老两种落定措辞均认，非仅归人）")
+# The anchor is on the RUNTIME copy, not on source line-wrapping: Python source
+# may split the phrase across adjacent string literals ("...to a "\n"human..."),
+# which is byte-identical at runtime. Count both the contiguous phrase and the
+# literal-join form (t261009-17: the did-not-converge copy was rewrapped and the
+# raw source count silently dropped 3 -> 2 with the phrase unchanged at runtime).
 _n_human = 0
-for _m in re.finditer(r"handing over to a human", DEV):
+_raw_hits = sorted({m.start()
+                    for m in re.finditer(r"handing over to a human", DEV)}
+                   | {m.start()
+                      for m in re.finditer(r"handing over to a\s*(?:\"\s*\n\s*\")?\s*human", DEV)})
+for _start in _raw_hits:
     _n_human += 1
-    _tail = DEV[_m.start():_m.start() + 900]
+    _tail = DEV[_start:_start + 900]
     _has_exec = re.search(EXEC_CLAUSE, _tail) is not None
     _has_op = ("engine_ops.py sync" in _tail and "retry_qc" in _tail)
     ok(_has_exec or _has_op,

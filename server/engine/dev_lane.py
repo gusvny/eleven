@@ -412,6 +412,31 @@ KI122_LIVE_BASELINE_SOURCE = (
     "rows absent) — time evidence only")
 
 
+def settle_shape_needs_rerun(error: str) -> bool:
+    """t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): True iff a settle failure
+    carries no human-actionable fact — the measured shape "MERGE_HEAD absent +
+    unmerged entries 0 + dirty files 0 + no marker residue" means the merge
+    commit is on disk, the tree is clean and nothing needs resolving; such a
+    shape must re-run (a fresh resolution round / re-verification), never stop
+    the ticket and ask for a human. Only a shape naming something a human can
+    act on (unmerged entries, named conflict markers, a missing worktree, a
+    genuinely unresolved merge) may stop — every such shape fails at least one
+    token below, so it degrades to today's blocked path. Anchored on the
+    stable measured-facts tokens, not on sentences: if the settle copy drifts,
+    this predicate stops matching and the failure silently degrades to the
+    blocked path (fail-safe direction: block, never spin). Malformed counts
+    ("dirty files: -1" = the status probe failed) also fail the token and
+    block."""
+    if not error:
+        return False
+    return all(_t in error for _t in (
+        "no merge in progress (MERGE_HEAD does not exist)",
+        "unmerged entries: 0",
+        "dirty files: 0",
+        "marker residue: none",
+    ))
+
+
 def quiet_baseline_covered(checks: Any) -> bool:
     """t261009-15: the quiet-verdicts-all-green coverage predicate (single writer
     = pure function, shared by the workflow routing and the unit tests).
@@ -2950,6 +2975,30 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         remaining_files=[str(x) for x in
                                          (sraw.get("remaining_files") or [])],
                         error=str(sraw.get("error") or ""))
+                if not sres.ok and settle_shape_needs_rerun(sres.error) \
+                        and self._conflict_rounds < MAX_CONFLICT_ROUNDS:
+                    # t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): the measured
+                    # shape names nothing a human can act on (merge commit on
+                    # disk, tree clean, no unmerged entries, no residue) —
+                    # re-run instead of stopping the ticket. Back to implement
+                    # like the success path; the round counter is NOT reset
+                    # here, so a genuinely spinning lane still hits the cap and
+                    # stops with the precise copy below.
+                    self._log(
+                        "main-sync settle round %d hit the no-human-info shape "
+                        "(tree clean, no unmerged entries, no marker residue) — "
+                        "re-running instead of stopping for a human (t261009-17)"
+                        % self._conflict_rounds)
+                    _sync_phase = self._auto_rework(
+                        "implement",
+                        text("back_to_implement",
+                             "main-sync settle re-run (round %d): the measured "
+                             "shape carries no human action, back to implement "
+                             "to re-verify against the moved main")
+                        % self._conflict_rounds,
+                        who="workflow", fallback=step_id)
+                    _sync_stop = "rework"
+                    break
                 if not sres.ok:
                     _why = ("unresolved conflict files remain (the merge is still "
                             "open): %s"
@@ -2970,7 +3019,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                         step_id,
                         text("settle_unconverged",
                              "main-sync conflict resolution round %d did not converge "
-                             "(worker-side commit verification failed), handing over "
+                             "(settle measured an unresolved state — the failed "
+                             "measurement and the true state are quoted below), "
+                             "handing over "
                              "to a human: %s. %sExecutable ways out (never run git "
                              "commands inside the "
                              "lane from an agent session - the sandbox cannot write "
@@ -4979,6 +5030,21 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                     ok=bool(sraw.get("ok")), commit=str(sraw.get("commit") or ""),
                     remaining_files=[str(x) for x in (sraw.get("remaining_files") or [])],
                     error=str(sraw.get("error") or ""))
+                if not sres.ok and settle_shape_needs_rerun(sres.error) \
+                        and self._conflict_rounds < MAX_CONFLICT_ROUNDS:
+                    # t261009-17 (KI-01M4FKAWY0EP59PY0V0QZWWGV5): the measured
+                    # shape names nothing a human can act on — re-run (back to
+                    # merge_check; the next round either converges against the
+                    # merged base or opens a fresh resolution round). The round
+                    # counter is NOT reset here, so a genuinely spinning lane
+                    # still hits the cap and stops with the precise copy below.
+                    self._log(
+                        "conflict resolution settle round %d hit the no-human-info "
+                        "shape (tree clean, no unmerged entries, no marker residue) "
+                        "— re-running instead of stopping for a human (t261009-17)"
+                        % self._conflict_rounds)
+                    phase = "merge_check"
+                    continue
                 if not sres.ok:
                     why = ("unresolved conflict files remain (the merge is still "
                            "open): %s"
@@ -4998,8 +5064,10 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                               ) if ("is an ancestor of HEAD" in why) else ""
                     await self._blocked(
                         "merge_check",
-                        "conflict resolution round %d did not converge (worker-side "
-                        "commit verification failed), handing over to a human: %s."
+                        "conflict resolution round %d did not converge (settle "
+                        "measured an unresolved state — the failed measurement "
+                        "and the true state are quoted below), handing over to a "
+                        "human: %s."
                         " %sExecutable ways out"
                         " (never run git commands inside the lane from an agent"
                         " session - the sandbox cannot write .git): (a) send"
