@@ -217,8 +217,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 /* the three right-column blocks: one border each, header row carrying the name and the count */
 .blk{border:1px solid var(--line);border-radius:10px;background:var(--bg);margin:0 0 12px 0}
 .colstk .blk:last-child{margin-bottom:0}
-.act .gut{flex:0 0 12px;display:inline-flex;align-items:center}
-.act .gut .dot{margin-top:0}
 .blk .bhd{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line-soft)}
 .blk .bhd .n{color:var(--muted)}
 .blk .bhd .grow{flex:1}
@@ -227,6 +225,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 .blk .bbd .row{padding:4px 0}
 .blk .bbd .act{border-bottom:1px solid var(--line-soft)}
 .blk .bbd .act:last-child{border-bottom:0}
+.pill.refused{border-color:var(--red);background:var(--danger-soft,var(--soft-red));color:var(--red)}
+/* the action row into columns: the mark of a refused action is a pill in the op column, so nothing sits outside the aligned grid */
+.blk .bbd .act .pill{flex:0 0 66px;text-align:center;justify-content:center}
+.blk .bbd .act .t{flex:0 0 40px}
+.blk .bbd .act .tk{flex:0 0 88px;overflow:hidden;text-overflow:ellipsis}
 .evfile{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;max-width:22ch;white-space:nowrap}
 .banner.amber{border:1px solid var(--amber);background:var(--warn-soft);color:var(--amber);border-radius:8px;padding:5px 9px;font-size:11.5px;margin-bottom:6px}
 </style>
@@ -335,10 +338,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
           <div class="bhd"><span class="sect">Recent actions</span><span class="n">4</span><span class="grow"></span><span class="muted">Times are local.</span></div>
           <div class="bbd">
             <div id="actList">
-              <div class="act"><span class="gut"></span><span class="t">21:04</span><span class="pill sign">sign</span><span class="tk">t261009-18</span><span class="say">sign · merge</span></div>
-              <div class="act"><span class="gut"></span><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk">t261009-15</span><span class="say">retry_qc</span></div>
-              <div class="act"><span class="gut"><span class="dot red" title="Refused: the engine refused this action"></span></span><span class="t">20:51</span><span class="pill sign">sign</span><span class="tk">t261008-47</span><span class="say">refused: who &gt; 64</span></div>
-              <div class="act"><span class="gut"></span><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk">t261009-17</span><span class="say">sign · merge</span></div>
+              <div class="act"><span class="t">21:04</span><span class="pill sign">sign</span><span class="tk">t261009-18</span><span class="say">sign · merge</span></div>
+              <div class="act"><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk">t261009-15</span><span class="say">retry_qc</span></div>
+              <div class="act"><span class="t">20:51</span><span class="pill refused" title="the engine refused this action">refused</span><span class="tk">t261008-47</span><span class="say">sign · who &gt; 64</span></div>
+              <div class="act"><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk">t261009-17</span><span class="say">sign · merge</span></div>
             </div>
           </div>
         </div>
@@ -348,11 +351,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
           <div class="bbd">
             <div class="evhealth"><span class="meta" title="the watchdog's own ledger: rows read, duplicates skipped, bad rows, gaps">12,480 rows · 0.3% duplicates · 0 bad rows · 0 gaps</span></div>
             <div id="ledgerEvents">
-              <div class="act"><span class="gut"></span><span class="t">22:02</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">task retried</span></div>
-              <div class="act"><span class="gut"></span><span class="t">21:58</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">handover picked up</span></div>
-              <div class="act"><span class="gut"></span><span class="t">21:48</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">landed on main</span></div>
-              <div class="act"><span class="gut"></span><span class="t">21:40</span><span class="pill open">WAKE</span><span class="tk">run-01M4GE0…</span><span class="say">round finished</span></div>
-              <div class="act"><span class="gut"></span><span class="t">21:18</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">round started</span></div>
+              <div class="act"><span class="t">22:02</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">task retried</span></div>
+              <div class="act"><span class="t">21:58</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">handover picked up</span></div>
+              <div class="act"><span class="t">21:48</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">landed on main</span></div>
+              <div class="act"><span class="t">21:40</span><span class="pill open">WAKE</span><span class="tk">run-01M4GE0…</span><span class="say">round finished</span></div>
+              <div class="act"><span class="t">21:18</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">round started</span></div>
             </div>
             <div class="muted" style="margin:4px 0 0;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes. <button class="linkbtn">Show all 20</button></div>
           </div>
