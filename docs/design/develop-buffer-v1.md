@@ -153,6 +153,7 @@ The rest follows from those two:
 - **The fix lands as the only landing on the buffer**, and that fact is recorded as such: when landings have been stopped, the culprit set for the next red is not "whatever landed since the last green" but a set that has to be read off the record.
 - **If the fix does not turn the buffer green, the freeze stays** and the next fix ticket names the fix landing as its candidate culprit; the chain of fix tickets must stay visible, because a freeze that quietly becomes the permanent state is worse than the red it was hiding.
 - **The freeze is visible to people, not just to the machine.** Whoever signs the next batch has to be able to see that the buffer was frozen, for what, and by which fix ticket it reopened.
+- **What a fix repairs is a recorded fact, not a sentence in its description.** The relation between remedy work and the landing it repairs is what grants the exemption and what lets the benefited ticket record how it ended; see [Ticket Relations v1](ticket-relations-v1.md).
 
 ### Coexistence and rollout
 
@@ -180,4 +181,5 @@ This proposal addresses the **Problem** by taking the heavy proof off the per-la
 
 - [Design Document Writing Guide](design-doc-writing-guide.md) — the admission standard this document follows.
 - [Failure Classification Protocol v1 and Mechanical Attribution](failure-classification-protocol-v1.md) — how a red is classified as product / environment / flake; the bisection protocol here depends on it.
+- [Ticket Relations v1 (what one ticket is to another)](ticket-relations-v1.md) — the relation ledger; the freeze exemption and the benefited ticket's outcome both rest on a recorded repair relation.
 - [Knowledge Base Design](knowledge-base-design.md) — where this document sits in the document-first workflow.
