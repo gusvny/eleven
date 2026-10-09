@@ -4638,3 +4638,15 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ④**reconcile 面**:读不到快照时**不得**直接当僵尸释放槽位(应标"不可判"并留痕),否则并发账目会撒谎。
 >
 > **回归**:L3——造"历史在旧码下创建、worker 换新码"的形态,断言(а)工作流任务失败被**具名发现**;(b)reconcile 对不可判票**不释放槽位**;(c)带 patch 守卫的同类改动**不**触发失败(正例)。
+
+> **加记（261009 21:0x，本岗自办的账：肇事落地已定位到 `t261009-17`，是我开的票）**：
+> 宿主 20:02 重启控制台把新码带进在飞泳道后，`t261008-47` 于 **20:07:09** 报出确定性的重放失败：
+> `[TMPRL1100] Nondeterminism error: Activity type of scheduled event 'concurrency_renew' does not match …`
+> 逐处核对后定位：**`t261009-17`（按我写的票面实施）在 `server/engine/dev_lane.py` 的主同步消解里新增了一条"零人工信息形态 ⇒ 改走 `merge_check` 重跑"的分支**
+> （`7993697a` 的两处 hunk：`if not sres.ok and settle_shape_needs_rerun(...) and self._conflict_rounds < MAX_CONFLICT_ROUNDS: … phase="merge_check"; continue`），
+> **这处改动会让"历史已走过该位置"的票在新码下调度出与历史不同的命令 ⇒ 确定性的 TMPRL1100 ⇒ 工作流任务永远失败**。
+> **它没有 `workflow.patched(...)` 守卫**（对该提交的 dev_lane diff 逐行 grep `patched|PATCH_ID`：零命中）——而本仓**早就有这条纪律与先例**
+> （同文件注释里写着 e9daa05 无守卫导致 KI-212「live freeze」，以及 `COUNTER_RESET_PATCH_ID` 的修法）。
+> **受害者**：`t261008-47` 卡死（快照不可读、任何写操作都进不去，`reconcile` 只能把它判"不可判"并释放槽位）。
+> **救法（不是重启、也不是补 worker）**：给这条新分支补 `workflow.patched(<新 id>)`——**老历史取 marker 失败 ⇒ 跳过新分支 ⇒ 恰好等于历史重放** ⇒ `-47` 应当自己活过来（与 `COUNTER_RESET_PATCH_ID` 的语义完全同款）。
+> **教训（写给未来的我自己）**：**票面写"行为修法"时必须同时写"这条改动是否落在工作流已走过位置、需不需要 patch 守卫"**——本岗这次判据里漏了这一句，代价是一张票卡死 + 一轮排障。
