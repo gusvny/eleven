@@ -4596,3 +4596,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ④运维口径:宿主令 260921 可以补一句**窄例外**(仅限"重算机器生成物并提交",且只允许 integration 侧角色跑)以免与消解流程相冲。
 >
 > **回归**:L3——造一张"主同步冲突落在机器生成物上"的票,断言消解**能走通**(集成侧执行/转交后完成),且**不因红线被反复打回**。
+
+## KI-01M4G5WPF7NZKB09EBADMGP694 **未在册的长期红第三条:`t260912-03-authz-overlimit-accept` 到不了它要的"仲裁超限"态**(261009 实测;integration 岗登记)
+
+> **实测(账本 + 直跑)**:该场景 4 条账本行里 **3 次 `fail`**(10-02 / 10-03 / 10-09 巡检各一次;另 1 次 `env_fail`),**不在 `integration/known-red-baseline.json`**(即每轮真跑真红),属本岗今晚已登记的"未在册长期红"同族。
+> 本 tick 直跑复核:`ticket-start` 受理、worker 起得来、票**确实推进**(新报错位置已不是环境面),但它**没到达自己等的那个态**——
+> `fail.bail("未在 600s 内到达仲裁超限 blocked(现 stage=acceptance_walkthrough state=blocked))"`。
+> 它的判据是 `stage ∈ OVER_LIMIT_STAGES(已含 acceptance_walkthrough) ∧ stage_state == blocked ∧ 快照文本含 "exceed the cap"`;
+> **前两项都满足**,所以差的是**文本里那半句 `exceed the cap`** ⇒ **它这次是被"另一条规则"挡住的**(acceptance 侧自己的 blocked 文案),而不是它要考的那条"tests-fault 打回超限"。
+>
+> **性质(暂定,需独立诊断)**:与今晚另两张同族但不同面——**它们是夹具/载荷与契约漂移**;这张看起来是**"驱动桩的那套轮次序列不再把票推到目标态"**(或引擎侧超限口径变了)。
+> **佐证**:同一 helper 族的 `lib_ki061.drive_to_overlimit_blocked` 头注早已写明"并行分叉期 stage 会报 acceptance_walkthrough(260908 首跑实证)"⇒ stage 面不是问题,**文本面才是**。
+>
+> **危害**:①未在册 ⇒ **每轮真跑真红**,污染判据(与 `KI-01M4FE0T3FG7Y0G9R97NS4T7QJ` 同族);②它在 **engine 池**(真 docker 台),其红**可能被别的票的仲裁认成外来 blocker**而白卡别人(今晚 `t260922-12` 就是这么卡了 `t261009-16` 两轮)。
+>
+> **下一步(本岗自办,integration 资产)**:①先把"它这次到底撞了哪条 blocked 文案"取到手(场景加 `T09_KEEP_TMP`-同款保留开关或打印完整快照);②对照"超限口径"是否随 KI-122 streak-hold 补丁(`KI122_STREAK_HOLD_PATCH_ID`)变了——若变,**重钉它的驱动/期望**;③若短期钉不动,**在册**并给出 owner/retire_when(不许让它以"未在册"的形态继续污染判据)。
+>
+> **回归**:L3——造"tests-fault 连续打回至上限"的票,断言出现**超限 blocked 且文案含超限口径**,并断言该态在并行分叉期的 stage 表征与本场景判据一致。
