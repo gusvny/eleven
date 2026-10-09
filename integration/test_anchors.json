@@ -1256,6 +1256,11 @@
    "anchor": "behaviour",
    "note": "t261009-29 L1: one ledger/one seq space — the shared writer admits promotion+relation kinds and stamps the shared seq; legacy promotion.jsonl migration (at-then-file order, named refusals incl. in-file duplicates, rename, idempotent no-op) and the unmigrated-legacy refusal on every consumer-reachable face; ticket_outcome/one-list projection with the single as_of cursor",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261009_30_line_round.py": {
+   "anchor": "behaviour",
+   "note": "t261009-30 L1: run_line_round truth tables on injected seams - decide/guard/run/record per tick, guard joined and released on every terminal path, chain retries an open range within CHAIN_LIMIT with the named exceed face, backstop/change trigger wiring, candidate_set head-per-repo, could-not-run grows the range, malformed ledger/garbage runner named refusals, refuse_delivered_checkout incl. symlink",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -4487,6 +4492,26 @@
   "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
    "anchor": "behaviour",
    "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
+   "sync_path": ""
+  },
+  "integration/t261009-30/sc_t26100930_round_green_and_growth.py": {
+   "anchor": "behaviour",
+   "note": "t261009-30 line round contract",
+   "sync_path": ""
+  },
+  "integration/t261009-30/sc_t26100930_round_red_freeze_exempt.py": {
+   "anchor": "behaviour",
+   "note": "t261009-30 line round contract",
+   "sync_path": ""
+  },
+  "integration/t261009-30/sc_t26100930_round_slot_chain_checkout.py": {
+   "anchor": "behaviour",
+   "note": "t261009-30 line round contract",
+   "sync_path": ""
+  },
+  "integration/t261009-30/sc_t26100930_line_round.py": {
+   "anchor": "behaviour",
+   "note": "t261009-30 line round: green round certifies the head and closes the range over a real temp ledger (certification cites the run, restates nothing, waiting ticket answers certified/landable); guard-held joins with zero runs and zero writes; red opens the freeze keyed to the red cert with the rerun-first ladder and the structural fix exemption; could-not-run writes range_growth never a freeze; corrupt ledger/guard refuse loud with the guard released; the delivered checkout (incl. symlink alias) is refused before any runner runs",
    "sync_path": ""
   },
   "integration/t261009-32/sc_t26100943_left_column_dismiss.mjs": {

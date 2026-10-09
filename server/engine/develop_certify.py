@@ -835,6 +835,175 @@ def needs_slot(state):
     raise CertifyError("wait_state_unknown:%r" % (s,))
 
 
+# ---- the line round (T2.3, t261009-30) --------------------------------------
+#
+# One round = decide (should_certify) -> guard -> run the suite on the line's
+# head -> record the run's certification (and the freeze / range growth that
+# follows a red / an unavailable proof). The suite itself and the run store
+# stay behind INJECTED seams (``runner`` / the read/append callables): the
+# engine never imports the integration support layer, and the subprocess form
+# of the runner (its own checkout of the candidate revisions) is the wiring
+# ticket's face — this module only refuses a runner pointed at the delivered
+# checkout (``refuse_delivered_checkout``).
+
+CHAIN_LIMIT = 4
+"""Max chained rounds ONE ``run_line_round`` invocation may run (host order
+261009: when a round ends the next starts at once while anything is still
+waiting — without a bound a fast landing stream would loop forever inside one
+tick). The bound is declared, its exceed-face is named, and rows are left
+untouched by the exceed itself; the next trigger re-enters normally."""
+
+STATE_CERTIFIED = "certified"
+STATE_RED = "red"
+STATE_GREW = "grew"
+END_IDLE = "idle"
+END_JOINED = "joined"
+END_CHAIN_LIMIT = "chain_limit_exceeded"
+
+
+def guard_held(path):
+    """Is a certification in flight? Reads the guard file's state; a corrupt
+    guard is a loud failure, never read as 'free' (same discipline as
+    guard_acquire). An absent guard file is simply not held."""
+    gp = Path(path).parent / GUARD_NAME
+    try:
+        with open(str(gp), encoding="utf-8") as fh:
+            state = json.load(fh)
+    except FileNotFoundError:
+        return False
+    except (ValueError, OSError) as e:
+        raise CertifyError("guard_unreadable:%s" % e)
+    if not isinstance(state, dict):
+        raise CertifyError("guard_unreadable:guard_not_object")
+    return bool(state.get("held"))
+
+
+def candidate_set(covered_landings):
+    """The revision set a round certifies: per repository, the HEAD revision
+    across the range's landings (the landings are in seq order, so the last
+    one naming a repo wins). A set of repository revisions, not a branch
+    (goal 18)."""
+    head = {}
+    for landing in covered_landings:
+        for r in landing.get("repos", []):
+            head[r["repo"]] = r["revision"]
+    return [{"repo": k, "revision": v} for k, v in head.items()]
+
+
+def refuse_delivered_checkout(tree, main_checkout):
+    """Upfront constraint: the whole-suite run lives where its own output
+    cannot touch the delivered checkout. The runner seam carries this in its
+    subprocess form; this helper is the named refusal a wiring call site runs
+    BEFORE pointing a runner at a tree. The same path (realpath-resolved, so
+    a symlink alias does not slip through) is refused by name."""
+    a = os.path.realpath(str(tree))
+    b = os.path.realpath(str(main_checkout))
+    if a == b:
+        raise CertifyError("tree_is_delivered_checkout:%s" % a)
+
+
+def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
+                   judged_by, booked_red, backstop_ms=None, now_ms=None,
+                   chain_limit=CHAIN_LIMIT, lane_reds=None):
+    """Run the line's certification round(s): at most one per tick, chained
+    while anything is still waiting, bounded by ``chain_limit``.
+
+    Injected seams (the engine never imports the integration support layer):
+    ``read_rows() -> (rows, bad)`` over the delivery ledger, ``append_rows(
+    batch)`` through the shared flock writer, and ``runner(candidate_repos)
+    -> run header`` — the full suite executed against the candidate revision
+    set in a tree of its own (never the delivered checkout; see
+    refuse_delivered_checkout). A runner that cannot produce a proof raises
+    CouldNotRun or returns a shape build_certification refuses: the round
+    records range growth and opens nothing (goal 24).
+
+    Returns {"rounds": [...], "end": {"state", "reason"}}. ``end`` is one of:
+    idle (nothing to certify — the loop waits for the next landing), joined
+    (a round was asked for while one ran: this tick joins the next one
+    instead of starting a second serial slot), chain_limit_exceeded (named,
+    rows untouched by the exceed itself), or the loop exhausted its chain
+    budget. Chaining re-checks the SAME records order: after a round that
+    recorded a certification the derived range is closed, so the loop idles
+    and the next trigger re-enters; after a round that could not run the
+    range is still open, so the loop retries within the bound (that is the
+    chain host order 261009 asks for — bounded, never unbounded). The guard
+    is released on EVERY path (success, runner error, refusal, cancellation)
+    — a guard left held would pin the tick."""
+    if not isinstance(chain_limit, int) or isinstance(chain_limit, bool) \
+            or chain_limit < 1:
+        raise CertifyError("chain_limit_invalid:%r" % (chain_limit,))
+    rounds = []
+    while True:
+        rows, bad = read_rows()
+        if bad:
+            raise CertifyError("ledger_has_malformed_lines:%d" % len(bad))
+        go, why = should_certify(trigger, rows, line, guard_held(guard_path),
+                                 now_ms=now_ms, backstop_ms=backstop_ms)
+        if not go:
+            state = END_JOINED if why == "guard_held" else END_IDLE
+            return {"rounds": rounds, "end": {"state": state, "reason": why}}
+        if len(rounds) >= chain_limit:
+            return {"rounds": rounds,
+                    "end": {"state": END_CHAIN_LIMIT,
+                            "reason": "chain_limit:%d" % chain_limit}}
+        guard = guard_acquire(guard_path, judged_by)
+        if guard is None:  # raced between the read and the acquire: join
+            return {"rounds": rounds,
+                    "end": {"state": END_JOINED, "reason": "guard_held"}}
+        try:
+            rng = derive_range(rows, line)
+            if not rng["covered_landings"]:
+                return {"rounds": rounds,
+                        "end": {"state": END_IDLE, "reason": "range_empty"}}
+            candidate = candidate_set(rng["covered_landings"])
+            try:
+                header = runner(candidate)
+                cert = build_certification(candidate, header, booked_red,
+                                           judged_by, at_ms=now_ms, line=line)
+                verdict = run_verdict(header["cases"])
+                batch = [cert]
+                if verdict == "red":
+                    batch += open_freeze_rows(cert, at_ms=now_ms)
+                res = append_rows(batch)
+                if res["written"] != len(batch):
+                    raise CertifyError("round_append_rejected:%r"
+                                       % (res["rejected"],))
+                entry = {"state": STATE_CERTIFIED if verdict == "green"
+                         else STATE_RED,
+                         "cert": cert["id"], "run": cert["run"],
+                         "verdict": verdict, "candidate": candidate}
+                if verdict == "red":
+                    # Re-read: the ladder is judged from the records' order
+                    # (seq), which only exists after the append.
+                    rows2, bad2 = read_rows()
+                    if bad2:
+                        raise CertifyError(
+                            "ledger_has_malformed_lines:%d" % len(bad2))
+                    red_cert = _of_kind(rows2, KIND_CERT, line)[-1]
+                    frz = _of_kind(rows2, KIND_FREEZE, line)[-1]
+                    entry["freeze"] = frz["id"]
+                    try:
+                        action, target = next_red_action(rows2, line, red_cert,
+                                                         lane_reds)
+                    except AlreadySearchedError:
+                        action, target = "already_searched", None
+                    entry["next"] = action
+                    if action == "isolated":
+                        append_rows([freeze_change_row(
+                            frz["id"], CHANGE_ATTRIBUTION, judged_by,
+                            "red ladder isolated the culprit",
+                            value=target["id"], at_ms=now_ms, line=line)])
+                        entry["attribution"] = target["id"]
+                rounds.append(entry)
+            except CouldNotRun as e:
+                append_rows([could_not_run_row(line, str(e), at_ms=now_ms)])
+                rounds.append({"state": STATE_GREW, "reason": str(e)})
+        finally:
+            guard_release(guard_path)
+        trigger = "change"  # a chained round re-evaluates as a change tick
+    # unreachable: every branch above returns
+
+
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------
 
 def range_key(landing_ids):
