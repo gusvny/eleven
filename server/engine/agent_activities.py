@@ -4771,7 +4771,11 @@ def _read_bundle_pairs_for_gate(cwd: Any) -> Tuple[List[tuple], str]:
     try:
         if not cfg.is_file():
             return ([], "")
-        return (path_gates.parse_bundle_pairs(cfg.read_text("utf-8")), "")
+        # t261009-42 rework: strip the declared optional key lines before the
+        # strict parse so the gate face composes with the entry extension (the
+        # merge-check 3.5 face does the same; see _strip_bundle_optional_keys).
+        return (path_gates.parse_bundle_pairs(
+            _strip_bundle_optional_keys(cfg.read_text("utf-8"))), "")
     except Exception as e:
         return ([], "bundle-out-face declaration unreadable/malformed (%s): %s"
                 % (MERGE_CHECKS_CFG, e))
@@ -4802,6 +4806,158 @@ def _bundle_widened_write_set(lane_root: Any, ticket_write_set: Any) -> Tuple[Li
             "%s: whitelist widened with declared build-chain output prefixes %s "
             "(paired src inside the ticket write set)"
             % (path_gates.BUNDLE_OUT_FACE_NOTE, ", ".join(extra)))
+
+
+def _strip_bundle_optional_keys(text: str) -> str:
+    """t261009-42 rework: drop the two DECLARED optional per-pair key lines
+    (`entry:` / `budget_s:`, indented inside a pair block) before the strict
+    path_gates.parse_bundle_pairs runs. This is the composition seam between the
+    strict pair parser (load-bearing for the t261009-38 faces) and the tolerant
+    supplementary reader (_read_bundle_entry_keys): without it, a declaration
+    carrying the optional keys raised ValueError before the reader was ever
+    consulted, turning the extension into a universal red on every src-touching
+    lane (integration round 1 code-fault). Fail-closed faces kept: ONLY those two
+    key names are stripped — any other unknown line still reaches the strict
+    parser and still raises; the stripped lines' VALUES are re-judged by
+    _read_bundle_entry_keys on the original text, so a malformed value still
+    degrades to the named legacy verdict."""
+    out = []
+    for raw in text.splitlines():
+        s = raw.lstrip(" ")
+        if raw[:1] == " " and (s.startswith("entry:") or s.startswith("budget_s:")):
+            continue
+        out.append(raw)
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+def _read_bundle_entry_keys(text: str, npairs: int) -> Tuple[List[Optional[Tuple[str, Optional[int]]]], str]:
+    """t261009-42: supplementary reader for the OPTIONAL per-pair `entry:` /
+    `budget_s:` keys in server/merge-checks.yaml. The pair list itself stays with
+    path_gates.parse_bundle_pairs (its 2-tuple shape is load-bearing for the
+    settle path gate, t261009-38); this reader only aligns the optional keys with
+    the pairs BY ORDER (each `- src:` line starts a new pair; a following
+    indented `entry:` / `budget_s:` line decorates that pair).
+
+    Returns (entries, diag): entries[i] = None (no keys declared for pair i) or
+    (entry_path, budget_or_None). A malformed or misaligned key block (an
+    `entry:` before any pair, a duplicate, a count mismatch against the parser's
+    pairs) yields a named diag and the caller falls back to the legacy
+    diff-based verdict for every pair — fail-closed, never fail-open, never a
+    crash of the whole 3.5 block. Stdlib-only, no yaml dependency (the file's
+    shape is line-oriented by the declaration contract in its header)."""
+    entries: List[Optional[Tuple[str, Optional[int]]]] = [None] * max(npairs, 0)
+    idx = -1  # pair currently being decorated; -1 = before the first `- src:`
+    seen: set = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("- src:"):
+            idx += 1
+            if idx >= npairs:
+                return ([], "bundle_pairs optional-key reader saw more `- src:` lines than the %d parsed pairs" % npairs)
+            continue
+        key = None
+        if line.startswith("entry:"):
+            key = "entry"
+        elif line.startswith("budget_s:"):
+            key = "budget_s"
+        if key is None:
+            continue
+        if idx < 0:
+            return ([], "bundle_pairs optional key %r appears before any `- src:` line" % key)
+        if (idx, key) in seen:
+            return ([], "bundle_pairs duplicate %s: for pair #%d" % (key, idx))
+        seen.add((idx, key))
+        value = line.split(":", 1)[1].strip()
+        prev = entries[idx] or (None, None)
+        if key == "entry":
+            if not value:
+                return ([], "bundle_pairs pair #%d declares an empty entry:" % idx)
+            entries[idx] = (value, prev[1])
+        else:
+            if not re.fullmatch(r"\d+", value):
+                return ([], "bundle_pairs pair #%d has a non-integer budget_s: %r" % (idx, value))
+            if prev[0] is None:
+                return ([], "bundle_pairs pair #%d declares budget_s: without entry:" % idx)
+            entries[idx] = (prev[0], int(value))
+    if idx + 1 != npairs:
+        return ([], "bundle_pairs optional-key reader saw %d `- src:` lines, parser saw %d pairs" % (idx + 1, npairs))
+    return (entries, "")
+
+
+def _bundle_freshness_rebuild(repo: Path, out_prefix: str, entry: str,
+                              budget_s: int) -> Tuple[str, str, List[str]]:
+    """t261009-42: decide freshness by REBUILDING the declared chain in a temp
+    copy of the lane and byte-comparing the produced out-prefix files with the
+    committed ones (the t261009-39 method for generated files). The entry is the
+    project's declared build script — never an engine-invented command.
+
+    Returns (state, detail, diff_files):
+      - ("rebuilt-and-identical", detail, []) → the committed bundle IS what
+        this lane's src produces; "it did not change" is a fact, not an offence.
+      - ("rebuilt-and-different", detail, [named files]) → the bundle is stale
+        (or a committed out file is missing/torn — the malformed-input face).
+      - ("could-not-establish", detail, []) → the build chain could not run to a
+        comparable end (entry file missing, non-zero exit, budget exceeded).
+        The CALLER degrades to today's verdict and the detail NAMES the failed
+        step; it never says "assumed fresh".
+
+    Bounds & reaping: one run per red-candidate; the whole repo is copied into a
+    TemporaryDirectory with a generic ignore list (no engine-hardcoded project
+    knowledge); subprocess.run carries a hard timeout; the TemporaryDirectory
+    context reaps the copy on every terminal path (normal, non-zero, timeout,
+    cancel/unwind) — subprocess.run kills the child before raising
+    TimeoutExpired."""
+    entry_path = repo / entry
+    if not entry_path.is_file():
+        return ("could-not-establish",
+                "freshness could not be established: declared build entry not found: %s" % entry,
+                [])
+    t0 = time.monotonic()
+    try:
+        with tempfile.TemporaryDirectory(prefix="bundle-freshness-") as td:
+            tmp_repo = Path(td) / "repo"
+            # symlinks=True: symlinks are copied as links, never dereferenced — a
+            # broken link in the tree (observed: .dsh/profiles/*) must not fail the
+            # copy and degrade the verdict for an environmental reason.
+            shutil.copytree(str(repo), str(tmp_repo), symlinks=True,
+                            ignore=shutil.ignore_patterns(
+                                ".git", "node_modules", ".venv", "__pycache__"))
+            copy_s = time.monotonic() - t0
+            out_dir = tmp_repo / out_prefix
+            committed: Dict[str, bytes] = {}
+            if out_dir.is_dir():
+                for f in sorted(out_dir.rglob("*")):
+                    if f.is_file():
+                        committed[str(f.relative_to(out_dir))] = f.read_bytes()
+            try:
+                p = subprocess.run(["bash", str(tmp_repo / entry)],
+                                   cwd=str(tmp_repo), capture_output=True, text=True,
+                                   timeout=budget_s)
+            except subprocess.TimeoutExpired:
+                return ("could-not-establish",
+                        "freshness could not be established: build entry exceeded its %ds budget (copy %.1fs)"
+                        % (budget_s, copy_s), [])
+            if p.returncode != 0:
+                return ("could-not-establish",
+                        "freshness could not be established: build entry exited %d (copy %.1fs)"
+                        % (p.returncode, copy_s), [])
+            produced: Dict[str, bytes] = {}
+            if out_dir.is_dir():
+                for f in sorted(out_dir.rglob("*")):
+                    if f.is_file():
+                        produced[str(f.relative_to(out_dir))] = f.read_bytes()
+            diff = sorted(k for k in set(committed) | set(produced)
+                          if committed.get(k) != produced.get(k))
+            if diff:
+                return ("rebuilt-and-different",
+                        "rebuilt via declared entry in a temp copy: committed bundle differs from what this lane's src produces (stale): %s"
+                        % ", ".join(diff), diff)
+            return ("rebuilt-and-identical",
+                    "rebuilt via declared entry in a temp copy (%.1fs incl. repo copy): committed bundle is byte-identical to what this lane's src produces"
+                    % (time.monotonic() - t0), [])
+    except OSError as e:
+        return ("could-not-establish",
+                "freshness could not be established: temp copy or build could not run: %s" % e, [])
 
 
 def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any]:
@@ -5412,8 +5568,18 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     try:
         cfg = sc["tree"] / MERGE_CHECKS_CFG
         if cfg.is_file():
-            pairs = _parse_bundle_pairs(cfg.read_text("utf-8"))
+            cfg_text = cfg.read_text("utf-8")
+            # t261009-42 rework: composition seam — the strict pair parser must not
+            # see the declared optional key lines (it raises on any other indented
+            # line); strip them here, strict-parse the pairs, and let the tolerant
+            # reader judge the keys (incl. malformed values) on the ORIGINAL text.
+            pairs = _parse_bundle_pairs(_strip_bundle_optional_keys(cfg_text))
             if pairs:
+                # t261009-42: optional per-pair entry:/budget_s: keys, read by the
+                # supplementary order-aligned reader (path_gates.parse_bundle_pairs
+                # keeps its 2-tuple shape). A named misalignment degrades EVERY pair
+                # to the legacy verdict below — fail-closed, named, never silent green.
+                entry_keys, entry_diag = _read_bundle_entry_keys(cfg_text, len(pairs))
                 # Same whitelist stance as item 3: the three-dot main...branch only
                 # sees what the lane brought in, so src changed by someone else on the
                 # main side does not falsely trip the bundle freshness red (ticket
@@ -5421,19 +5587,53 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 p = _git(["diff", "--name-only", "main...%s" % sc["branch"]],
                          sc["repo"])  # same-family anchor fix: the 3.5 bundle freshness diff anchors the lane repo
                 changed = p.stdout.split() if p.returncode == 0 else []
-                for src, out in pairs:
+                for i, (src, out) in enumerate(pairs):
                     if not any(f.startswith(src) for f in changed):
                         continue  # this lane never touched that build chain: no item emitted (noise reduction)
+                    key = entry_keys[i] if not entry_diag and i < len(entry_keys) else None
+                    if key is not None:
+                        # t261009-42 freshness verdict: is the committed out prefix the
+                        # output of this lane's src? Rebuild via the DECLARED entry in a
+                        # temp copy and byte-compare. "out did not change in the diff" is
+                        # a fact, not an offence (a type-only change or a new unreferenced
+                        # file can never move the bundle). The other half keeps its teeth:
+                        # a lane that changes src and does NOT rebuild reds because the
+                        # committed output no longer matches what the source produces, and
+                        # a hand-edited out prefix fails the same compare.
+                        state, detail, diff_files = _bundle_freshness_rebuild(
+                            sc["tree"], out, key[0], key[1] if key[1] else 600)
+                        green = state == "rebuilt-and-identical"
+                        # copy-lang-allow:bundle-freshness-item — surviving copy: the check item label
+                        # and next_action are the registered identity cited by tickets/lean logs (t260827-02 shape), not new copy.
+                        checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),  # copy-lang-allow:bundle-freshness-item
+                                       "green": green,
+                                       "detail": detail,
+                                       "id": "bundle_freshness",
+                                       **({} if green else {
+                                           "reason_code": "bundle_stale",
+                                           "files": [str(src), str(out)],
+                                           "next_action": "泳道内重建产物（tsdown）后发 retry_qc 重验"})})  # copy-lang-allow:bundle-freshness-item
+                        continue
+                    # No usable declared entry (none declared, or a named reader
+                    # misalignment): today's diff-based verdict, fail-closed — declaring
+                    # a pair must never let a stale bundle through via a missing runner.
+                    if entry_diag:
+                        detail = ("declared chain entry unreadable (%s); verdict from the diff heuristic: "
+                                  "freshness could not be established mechanically" % entry_diag)
+                    else:
+                        detail = ("no build entry declared for this pair; verdict from the diff heuristic: "
+                                  "freshness could not be established mechanically")
                     rebuilt = any(f.startswith(out) for f in changed)
-                    checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),
+                    # copy-lang-allow:bundle-freshness-item — same surviving copy as above (legacy verdict face).
+                    checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),  # copy-lang-allow:bundle-freshness-item
                                    "green": rebuilt,
-                                   "detail": "src changed and build output rebuilt in the same batch" if rebuilt else
-                                             "src changed but build output not rebuilt in the same batch (tsdown rebuild in-lane, settle persists it on behalf)",
+                                   "detail": detail if not rebuilt else
+                                             "no build entry declared; out rebuilt in the same batch (diff heuristic)",
                                    "id": "bundle_freshness",
                                    **({} if rebuilt else {
                                        "reason_code": "bundle_stale",
                                        "files": [str(src), str(out)],
-                                       "next_action": "泳道内重建产物（tsdown）后发 retry_qc 重验"})})
+                                       "next_action": "泳道内重建产物（tsdown）后发 retry_qc 重验"})})  # copy-lang-allow:bundle-freshness-item
     except Exception as e:
         checks.append({"item": "bundle 新鲜度（%s）" % MERGE_CHECKS_CFG, "green": False,
                        "detail": "extended check error: %s" % e,

@@ -1247,6 +1247,11 @@
    "note": "the generated workflows/*.yaml must byte-match the generator's output (gen_workflows_doc.py); pins the yaml-follows-code invariant settled by t261009-39",
    "sync_path": ""
   },
+  "server/engine/tests/test_t261009_42_bundle_freshness.py": {
+   "anchor": "contract",
+   "note": "t261009-42: bundle freshness verdict truth tables — entry-key reader order alignment/fail-closed, rebuild three states (identical green / different stale red / could-not-establish named degraded), never 'assumed fresh', temp-copy reaping",
+   "sync_path": ""
+  },
   "server/engine/tests/test_t261008_47_english_ticket_face.py": {
    "anchor": "contract",
    "note": "t261008-47: engine UI copy English — parser re-keyed on structured timeline fields (old/new format), narrow CJK guard over emission points",
@@ -4459,6 +4464,11 @@
    "note": "drives real settle_lane on a git lane fixture (gate face of the bundle-out rule)",
    "sync_path": ""
   },
+  "integration/t261009-42/sc_bundle_freshness_verdict.py": {
+   "anchor": "behaviour",
+   "note": "t261009-42: real merge_check over a git lane fixture with a stub declared entry — three-state freshness verdict (identical=green / different=red stale / could-not-establish=red degraded named), legacy no-entry verdict kept both ways, malformed key fail-closed, src-untouched no item, temp-copy reaping",
+   "sync_path": ""
+  },
   "integration/t261009-38/sc_t26100938_mergecheck_pair_agreement.py": {
    "anchor": "contract",
    "note": "merge-check whitelist face of the bundle-out rule: widen helper + verify_lane run() over the shared declaration (admit by name / refuse both directions)",
@@ -4467,6 +4477,11 @@
   "integration/t261009-39/sc_t261009_39_yaml_follows_code.py": {
    "anchor": "contract",
    "note": "t261009-39: generated workflow yaml is pure generator output (KI-154)",
+   "sync_path": ""
+  },
+  "integration/t261009-42/sc_bundle_freshness_verdict.py": {
+   "anchor": "contract",
+   "note": "t261009-42: merge-check item 3.5 three-state freshness verdict at the gate level (rebuild declared entry + byte-compare; legacy verdict kept when no entry declared)",
    "sync_path": ""
   },
   "integration/t261008-47/sc_ticket_face_english.py": {
