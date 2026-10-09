@@ -189,6 +189,7 @@ Three consequences worth writing down now, because the single-line phase must no
 - a line identified by a branch name rather than by a declared scope and owner;
 - an owner attached to a person or a session rather than to a scope;
 - boundary problems with no owner, or with the batch's preparer as the only owner even when a shared component exists.
+- a stage that can only run on the machine that created the worktree, or a line whose state cannot be reconstructed from the repository and the recorded facts (see [Project Fact Ledgers v1](project-fact-ledgers-v1.md): a machine is a resource, not a home).
 
 ### Coexistence and rollout
 

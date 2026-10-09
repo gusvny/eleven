@@ -67,6 +67,11 @@ related:
 16. **Moving to a new machine is a written, checkable procedure** that has been exercised at least once, rather than knowledge held by one person. It covers what must be installed, which locations must be moved, where the engine's own history lives, and how to check that the move succeeded.
 17. **Sharing is not synchronising.** For the families that several people write while they are being read, the transport may not require a single shared working copy: a shared repository merges changes in batches, answers a read with whatever was last fetched, and cannot enforce that a record is never rewritten. Whatever carries those families must either serialise writes or be conflict-free by construction.
 
+18. **A machine is a resource, not a home.** A person may work from more than one machine, and a machine may be added, replaced or lost without any ticket, session or record becoming unreachable or unreadable. Which machine produced a record is **provenance**; it is never authority and never identity.
+19. **Capacity belongs to the resource; totals are a reading.** A limit is a property of the machine that owns the resources, and the fleet's total is something a reader adds up, not something one machine enforces on behalf of the others.
+20. **Work must be runnable on a machine that has never seen the ticket** — with nothing but the store, the repository and the ticket's own recorded facts. Anything machine-local is a cache that can be rebuilt. Where a stage genuinely cannot be re-created elsewhere, the exception is a **declared affinity** with a reason, not an accident of where the work happened to start.
+21. **The environment is part of the record.** A result from one machine is comparable with a result from another only if the environment is a declared fact, so the environment a run used is recorded with the run rather than inferred from where it happened.
+
 ### Stakeholders
 
 - **The host** — cares that "why does this exist" and "what is known to be broken" are answerable in one look, and that losing a ledger is an incident rather than an amnesia.
@@ -98,6 +103,8 @@ related:
 - **Not treating a synchronised copy as a shared ledger.** Two writers on two machines appending to one file is not a weaker version of sharing; it is a design that loses the property that made local appending safe.
 - **Not a disaster-recovery programme, not high availability, and not a second machine this cycle.** The requirement is that the loss is survivable and the move is written down, not that the system keeps running through it.
 - **Not backing up what can be rebuilt.** Copying the large derived family would cost more than it protects and would hide which layer actually matters.
+- **Not building a scheduler this cycle.** Which machine runs which piece of work is the workflow engine's dispatch today; what this cycle owes is that no piece of work is *correct* only on one machine.
+- **Not running a multi-machine fleet this cycle.** The phase-1 obligation is that nothing in the records assumes a single machine, not that several machines are in use.
 
 ## Proposal
 
@@ -137,6 +144,23 @@ Real sharing is a change of writing authority, not a change of file location:
 - The truth moves **behind a single writing authority** — a service that owns writes, or storage with real transactions. Writers no longer append to a shared file.
 - What makes concurrent appends safe on one machine — the guarantee that a single small append is not interleaved with another — **does not hold over a network filesystem**, and file synchronisation produces conflicts rather than records. Sharing one log file between machines is therefore not a weaker version of the target; it is a different and broken design, and it would produce exactly the kind of quiet divergence this project has already spent effort cleaning up.
 - Because phase 1 reads through one interface, as of a version, with records that name no machine, path or clock, this arrival is a plumbing change. That is the entire reason phase 1 is shaped this way rather than simply "moving a file".
+
+### Machines are resources, not homes
+
+Today a person works from one machine, and a lot of the system quietly relies on that: the operator's console, the worker fleet, the worktrees, the agent's conversation, the capacity ledger and the caches are all properties of the machine. That coupling is not written down anywhere, and it is the kind that survives right up until someone has two machines — at which point it turns into questions no record can answer: which console is the real one, which machine's capacity counts, and whose conversation continues a ticket.
+
+The test that decides everything is one question: **can this stage run on a machine that has never seen the ticket?** Given the store, the repository and the ticket's recorded facts, four couplings fail that test today:
+
+- **The worktree.** It lives in an operating-system temporary area on the machine that created it, so the work exists only where it started. A branch that is not pushed is machine-bound by definition; a pushed commit is the durable unit of work, and the working tree above it is a cache.
+- **The conversation.** The agent's session is machine-local, so a ticket that moves to another machine restarts without its context. Because every stage must already be re-runnable, this is a cost rather than a correctness problem — but it is a real quality cost, and it is the reason the *recorded* facts (the ticket, its stage notes, the reasons for a send-back) have to be sufficient to reconstruct the work without the conversation.
+- **The environment.** Images, browsers and virtual environments are built on the machine that has them. A result is comparable with another result only if the environment is declared with it.
+- **The fleet's shape.** Which machine runs which piece of work is not decided anywhere today: it is whatever machine's worker happens to take the work. That is only safe if the work is machine-independent — which is exactly what is being required here.
+
+**Capacity is the one thing that stays machine-scoped, and it is not a contradiction.** A limit protects the resources of the machine that holds them, so a limit per machine is correct. What matters is that the total across the fleet is a **reading**, not an enforced number: whoever is looking adds up the fleet, and the person decides. What may never be per machine is anything that is **authority** (who may sign, who may land, what may be withdrawn) or **truth** (a ticket's state, the ledgers). Provenance — "this ran on that machine, in this environment" — is worth recording for diagnosis and comparability, and must never be what grants a right.
+
+**Affinity is the honest fallback, and it must be declared.** Some work genuinely cannot be re-created elsewhere: a browser capture that depends on a specific local profile, a build too heavy to repeat. That work is *pinned*, and pinning is a declared property of that work with a stated reason. The trap to avoid is a ticket that is pinned **by accident** — one that looks movable and is not, so the fleet's shape becomes a hidden fact about the work.
+
+The consequence for this document's own subject is small and worth stating: a record's machine is provenance, and no record's meaning may depend on it. Goals 3, 7 and 12 already said this about *records*; goal 20 extends the same rule to *work*. And the operator's surface follows: a console stops being "the machine I use" and becomes a surface that can be opened anywhere against the same truth — the same shape as the read path, one truth and many surfaces.
 
 ### Losing the machine, and moving to another one
 
@@ -195,7 +219,7 @@ The ordering consequence is worth stating plainly: **making the read path exist 
 
 ### How this ties back
 
-This proposal addresses the **Problem** by replacing an accidental arrangement with a rule (goal 1's criterion) and by giving the fault knowledge a home where being current is possible; it satisfies the **Requirement** by versioned reads (2), recorded writers and reasons (3), the fact/state split (4), minted identifiers (5), ledger ordering (6), project-tagged and path-free records (7), loud availability (8), declared backup (9) and growth policy (10), and by declaring real sharing as the target (11) with the phase-1 properties that keep it reachable (12) while leaving write authority untouched (13); and it avoids the **Nongoal** items by not duplicating the engine's truth, not moving documents, not sweeping the run-judging baselines along, not building the service this cycle, not admitting families with no consumer, not crossing projects, not migrating everything at once, not editing growth by hand, and not loosening authority in the name of a move.
+This proposal addresses the **Problem** by replacing an accidental arrangement with a rule (goal 1's criterion) and by giving the fault knowledge a home where being current is possible; it satisfies the **Requirement** by versioned reads (2), recorded writers and reasons (3), the fact/state split (4), minted identifiers (5), ledger ordering (6), project-tagged and path-free records (7), loud availability (8), declared backup (9) and growth policy (10), and by declaring real sharing as the target (11) with the phase-1 properties that keep it reachable (12) while leaving write authority untouched (13); and it avoids the **Nongoal** items by not duplicating the engine's truth, not moving documents, not sweeping the run-judging baselines along, not building the service this cycle, not admitting families with no consumer, not crossing projects, not migrating everything at once, not editing growth by hand, not loosening authority in the name of a move, and keeping a machine a resource rather than a home so that a person with two machines — or with none — is a question about resources and never about where the truth lives (18–21).
 
 ## Appendix: the inventory
 
