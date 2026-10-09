@@ -62,6 +62,8 @@ related:
 15. Waiting for a certification **does not hold a slot**: a ticket that is only waiting for the next scheduled run must not consume the capacity that other tickets need.
 12. The new flow is built **alongside** the current one, not on top of it: while the new one is being built and validated the current flow keeps working unchanged, the new flow exists as a **new lane version** that a ticket opts into, and only after it has proven itself are tickets moved over and the old version retired — gradually, not in one step.
 13. Nothing introduced for the new flow applies **retroactively** to tickets running the old flow: a new precondition, a new proof or a new gate check ships inside the new version and is chosen by the tickets that use it, never injected into every ticket's gate.
+16. A red certification **suspends landings into the buffer** until the buffer is green again: while the buffer is red, tickets that are still in flight finish their own proof but do not land. The remedy for a red that implicates a landing is a **new fix ticket opened against the buffer** — never a return of the implicated ticket to work — and the fix ticket is the one kind of work that may still land while the buffer is red.
+17. The exemption in 16 is **structural, not self-declared**: the fix ticket runs through its own workflow, so "may land while frozen" is a property of how the work was opened, not a flag any ticket can set on itself.
 
 **Stakeholders and what they care about most:**
 
@@ -81,6 +83,7 @@ related:
 ## Nongoal
 
 - **Not removing the human gate on main.** The gate becomes per-batch; it does not disappear.
+- **Not letting any ticket declare itself exempt from a freeze.** Only the fix workflow is exempt from stopped landings, and that is decided by how the work was opened.
 - **Not keeping a per-ticket human merge gate in the new flow.** A person reviews the batch that leaves the buffer (the certified prefix), not each ticket; the ticket ends when its landing is certified. The old flow keeps its per-ticket gate for as long as it serves tickets.
 - **Not letting lanes skip their own scenarios.** The split is "the lane proves its change, the buffer proves the combination" — not "nobody proves anything until later".
 - **Not running the full suite after every landing.** Explicitly chosen: scheduled certifications, with the previous certified revision as the anchor that is always landable.
@@ -129,12 +132,27 @@ In the new flow the ticket does **not** wait for `main`. Its life cycle ends at 
 What this buys is one fewer stop per ticket and a person who looks at a **batch** instead of at a queue of individual merges. What it costs has to be paid explicitly:
 
 - **"Ended" no longer means "delivered".** A closed ticket may sit on the buffer until the next batch is taken to `main`, and may in principle be reverted there. So the ticket's own record carries the three stages — where it landed, which certification covered it, and whether it reached `main` or was later reverted — and the buffer's record names the tickets each certification covers. The two records must be readable against each other, because "closed" alone would otherwise be a claim nobody can check.
-- **A red certification that names my landing is not the end of my ticket.** The ticket returns to work (or a fix lane is opened on the buffer); only a ticket whose landing is not implicated keeps waiting. This is the failure semantics of the new waiting step, and it must be distinguishable in the ticket's face from "still waiting".
+- **A red certification that names my landing is not the end of my ticket, and it is not a return to work either.** The landing is already on the buffer; sending the ticket back would put it on a base that no longer exists. The remedy is a **new fix ticket opened against the buffer**, and the implicated ticket keeps waiting for the certification that finally covers it — or ends as reverted if the fix reverts it. The ticket's face must distinguish "waiting", "red and implicated", and "reverted", because those three look identical from the outside and mean very different things.
 - **Waiting is not working.** A ticket waiting for the next run holds no capacity; if waiting held a slot, one tick would pin the whole fleet — which is the very stall this design removes.
 - **The batch view is now the human's whole surface.** The person signing the batch must be able to open each member (its diff, its own scenario results, the certification's evidence) before signing; a batch that can only be approved as a black box would move the human further from the work, not closer.
 - **An automatic landing that conflicts bounces back to the lane** rather than blocking: the lane re-merges the buffer and lands again. An automatic step must never introduce a new place for tickets to pile up.
 
 **The lesson that shaped this section:** the previous flow's stops per ticket were the human gate AND the full suite. Removing the second without moving the first would just relocate the bottleneck; the two moves have to happen together, and the ticket's record has to stay honest about the difference between "landed", "certified" and "delivered".
+
+### When the buffer is red
+
+A red certification is not one ticket's problem to fix, and it is not free to ignore. Two rules:
+
+**Landings stop.** While the buffer is red, tickets that are still in flight keep running their own proof but do not land into it. The reason is attribution, not caution: the buffer's red is only actionable while the number of candidate culprits is small. If work keeps landing on top of a broken revision, the red stops naming anything, every later ticket inherits it, and the bisect that was supposed to find the culprit now has to guess among an unbounded set. Stopping landings is what keeps a red a fact about one landing.
+
+**The fix ticket may still land.** A freeze that also blocks the fix would be a deadlock, so the fix is the one kind of work exempt from it. That exemption must be **structural**: the fix ticket is opened through its own workflow, so being allowed to land on a red buffer is a property of how the work was opened, not a box any ticket can tick about itself. A self-declared exemption would be a hole in the freeze, and holes in gates get used by accident long before they get used on purpose.
+
+The rest follows from those two:
+
+- **A ticket waiting for landings to reopen is waiting, not working** — it holds no capacity, exactly like a ticket waiting for the next certification.
+- **The fix lands as the only landing on the buffer**, and that fact is recorded as such: when landings have been stopped, the culprit set for the next red is not "whatever landed since the last green" but a set that has to be read off the record.
+- **If the fix does not turn the buffer green, the freeze stays** and the next fix ticket names the fix landing as its candidate culprit; the chain of fix tickets must stay visible, because a freeze that quietly becomes the permanent state is worse than the red it was hiding.
+- **The freeze is visible to people, not just to the machine.** Whoever signs the next batch has to be able to see that the buffer was frozen, for what, and by which fix ticket it reopened.
 
 ### Coexistence and rollout
 
