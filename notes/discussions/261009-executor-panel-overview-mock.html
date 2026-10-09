@@ -212,6 +212,19 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 .concBox .concVal{min-width:22px}
 #ledgerFile{overflow-wrap:anywhere}
 .cols>div{min-width:0}
+
+/* the three right-column blocks: one border each, header row carrying the name and the count */
+.blk{border:1px solid var(--line);border-radius:10px;background:var(--bg);margin-bottom:12px}
+.blk .bhd{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line-soft)}
+.blk .bhd .n{color:var(--muted)}
+.blk .bhd .grow{flex:1}
+.blk .bhd .muted{font-size:11px}
+.blk .bbd{padding:6px 12px 10px}
+.blk .bbd .row{padding:4px 0}
+.blk .bbd .act{border-bottom:1px solid var(--line-soft)}
+.blk .bbd .act:last-child{border-bottom:0}
+.evfile{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;max-width:22ch;white-space:nowrap}
+.banner.amber{border:1px solid var(--amber);background:var(--warn-soft);color:var(--amber);border-radius:8px;padding:5px 9px;font-size:11.5px;margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -289,45 +302,55 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       </div>
       <div>
         <div class="concRow" id="concBlock">
-        <span class="concBox">
-          <span class="lab" style="flex:0 0 auto">Limit <span id="concChip" class="pill conc-room">room</span></span>
-          <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
-          <span class="concVal" id="concLimit">4</span>
-          <button class="concBtn" id="concPlus" title="One more ticket at the same time">+</button>
-          <button id="concSave" style="display:none">Save</button>
-        </span>
-        <span class="meta" id="concCounts">5 held · 0 queued</span>
-        <span class="meta" id="concMsg"></span>
-      </div>
-        <div class="sect" id="alertsHead">Alerts · 3</div>
-        <div id="alertBanner"></div>
-        <div id="alertBanner"></div>
-    <div class="sect" id="alertHead">Recent · 0</div>
-    <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
-    <div id="alertList"></div>
-        <div class="row"><div class="head" style="cursor:default"><span class="dot red"></span><span class="txt">Queue t261008-47 has 0 live pollers</span><span class="meta">20:07</span></div></div>
-        <div class="row"><div class="head" style="cursor:default"><span class="dot amber"></span><span class="txt">Worker pid 1898 is older than the tree it runs</span><span class="meta">20:12 · night-muted</span></div></div>
-        <div class="row"><div class="head" style="cursor:default"><span class="dot amber"></span><span class="txt">Run run-01M4GE0… ended with 4 failures</span><span class="meta">21:40 · night-muted</span></div></div>
-        <div class="sect" style="margin-top:12px">Recent actions</div>
-        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
-        <div class="row" style="padding:2px 4px" id="actList"></div>
-        <div class="act"><span class="t">21:04</span><span class="pill sign">sign</span><span class="tk">t261009-18</span><span class="say">sign · merge</span></div>
-        <div class="act"><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk">t261009-15</span><span class="say">retry_qc</span></div>
-        <div class="act"><span class="dot red" title="Refused"></span><span class="t">20:51</span><span class="pill sign">sign</span><span class="tk">t261008-47</span><span class="say">refused: who &gt; 64</span></div>
-        <div class="act"><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk">t261009-17</span><span class="say">sign · merge</span></div>
-        <div class="sect" style="margin-top:14px" id="eventsHead" title="what the watchdog read and acted on, newest first">Events · 20</div>
-        <div class="evhealth">
-          <span class="meta" title="the watchdog's own ledger: rows read, duplicates skipped, bad rows, gaps">12,480 rows · 0.3% duplicates · 0 bad rows · 0 gaps</span>
-          <span class="meta file" id="ledgerFile">~/.sandbar/projects/sandbar/ledger/events.jsonl</span>
-    </div>
-        <div class="row" style="padding:2px 4px" id="ledgerEvents">
+          <span class="concBox">
+            <span class="lab" style="flex:0 0 auto">Limit <span id="concChip" class="pill conc-room">room</span></span>
+            <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
+            <span class="concVal" id="concLimit">4</span>
+            <button class="concBtn" id="concPlus" title="One more ticket at the same time">+</button>
+            <button id="concSave" style="display:none">Save</button>
+          </span>
+          <span class="meta" id="concCounts">5 held · 0 queued</span>
+          <span class="meta" id="concMsg"></span>
+        </div>
+
+        <div class="blk">
+          <div class="bhd"><span class="sect">Alerts</span><span class="n">3</span><span class="grow"></span><span class="muted">Times are local.</span></div>
+          <div class="bbd">
+            <div id="alertBanner" class="banner amber" title="the night policy silenced the amber rows; redline alerts still play a sound">Rows marked night-muted were silenced by the night policy.</div>
+            <div id="alertList">
+              <div class="row"><div class="head" style="cursor:default"><span class="dot red"></span><span class="txt">Queue t261008-47 has 0 live pollers</span><span class="meta">20:07</span></div></div>
+              <div class="row"><div class="head" style="cursor:default"><span class="dot amber"></span><span class="txt">Worker pid 1898 is older than the tree it runs</span><span class="meta">20:12 · night-muted</span></div></div>
+              <div class="row"><div class="head" style="cursor:default"><span class="dot amber"></span><span class="txt">Run run-01M4GE0… ended with 4 failures</span><span class="meta">21:40 · night-muted</span></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="bhd"><span class="sect">Recent actions</span><span class="n">4</span><span class="grow"></span><span class="muted">Times are local.</span></div>
+          <div class="bbd">
+            <div id="actList">
+              <div class="act"><span class="t">21:04</span><span class="pill sign">sign</span><span class="tk">t261009-18</span><span class="say">sign · merge</span></div>
+              <div class="act"><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk">t261009-15</span><span class="say">retry_qc</span></div>
+              <div class="act"><span class="dot red" title="Refused"></span><span class="t">20:51</span><span class="pill sign">sign</span><span class="tk">t261008-47</span><span class="say">refused: who &gt; 64</span></div>
+              <div class="act"><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk">t261009-17</span><span class="say">sign · merge</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="bhd"><span class="sect" id="eventsHead" title="what the watchdog read and acted on, newest first">Events</span><span class="n">20</span><span class="grow"></span><span class="evfile" id="ledgerFile">~/.sandbar/projects/sandbar/ledger/events.jsonl</span></div>
+          <div class="bbd">
+            <div class="evhealth"><span class="meta" title="the watchdog's own ledger: rows read, duplicates skipped, bad rows, gaps">12,480 rows · 0.3% duplicates · 0 bad rows · 0 gaps</span></div>
+            <div id="ledgerEvents">
               <div class="act"><span class="t">22:02</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">task retried</span></div>
               <div class="act"><span class="t">21:58</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">handover picked up</span></div>
               <div class="act"><span class="t">21:48</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">landed on main</span></div>
               <div class="act"><span class="t">21:40</span><span class="pill open">WAKE</span><span class="tk">run-01M4GE0…</span><span class="say">round finished</span></div>
               <div class="act"><span class="t">21:18</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">round started</span></div>
-    </div>
-        <div class="muted" style="margin:4px 0 0;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes. <button class="linkbtn">Show all 20</button></div>
+            </div>
+            <div class="muted" style="margin:4px 0 0;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes. <button class="linkbtn">Show all 20</button></div>
+          </div>
+        </div>
       </div>
     </div>
 
