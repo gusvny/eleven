@@ -50,6 +50,14 @@ related:
 
 **A related defect worth fixing while we are here: the content-minted ids are too short.** A finding id is eight hex characters — 32 bits. Collisions are unlikely at today's counts and inevitable at scale: at roughly 65,000 findings a 32-bit space has even odds of a collision, and a collision here does not look like an error, it silently merges two different findings into one id. Sixteen hex characters cost six characters and remove the question.
 
+**So can a good id replace `seq`? Yes — if it is a *monotonic* time id, and if three conditions hold.** The ordering and the read cursor were the only two jobs `seq` had, and a time-prefixed id does both: it sorts, and "everything after `<id>`" is a cursor. Two conditions are what turn that from a hope into a property:
+
+1. **Monotonic within the issuer, not merely time-prefixed.** Two records written in the same millisecond must not order arbitrarily, so the id's tail increments rather than being purely random when the millisecond repeats — the monotonic ULID/ULID-with-counter shape. This is the "order comes from the ledger, not from a clock" requirement, kept as a requirement, with the mechanism moved into the id.
+2. **Clock-skew protection at the issuer.** The minting reads a wall clock, so a backwards correction must not mint an id below the last one; the issuer keeps a floor of the last timestamp it issued. And in the later shape where several writers exist, monotonicity across writers is a property of the **single writing authority** — exactly the authority `seq` would have needed anyway, which is why this change costs nothing structurally.
+3. **No content-minted ids in an ordered stream.** A finding's id is derived from its content and carries no time at all, by design, so it can never be ordered. That is not a problem — nothing needs to order entities; "the oldest open finding" is a question about its *observations*, which do carry time ids.
+
+**What is kept either way is the requirement, not the field.** If the ids are monotonic and sortable, `seq` is redundant and disappears from the records; the derivations that use it are restated as id comparisons ("landings whose id is below this certification's id"), which are just as mechanical. If any of the three conditions cannot be guaranteed, `seq` stays and remains the authority — an explicit counter is easier to reason about than an id whose ordering depends on the minting code behaving.
+
 **And the time in an id is a convenience, not the record's time.** Every record already carries `at` (milliseconds) and the ledger carries `seq`; the prefix is for humans who read ids all day and for sorting, and nobody should read it as "the moment this happened" more precisely than the record's own fields.
 
 ## Conventions that apply to every record
