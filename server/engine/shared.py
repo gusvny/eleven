@@ -155,6 +155,14 @@ def configured_task_queues() -> List[str]:
 # Isolation semantics: a worker running ticket A's old code can never steal ticket B's
 # tasks (the lesson of the 260824 version-poisoning incident).
 TICKET_QUEUE_PREFIX = "sandbar-ticket-"
+# KI-227 (t261008-29): the Temporal memo keys the engine writes at every stage
+# entry so a ticket that dies at its first stage still names that stage after the
+# workflow is terminal. Single source lives HERE (stdlib-only, light-import safe):
+# client.py's terminal face reads them and client.py must stay free of the heavy
+# dev_lane import (dev_lane pulls temporalio.workflow at module level, which breaks
+# the offline stub-scenario family — the t02-t260902-02-arbitrate lesson).
+STAGE_MEMO_KEY = "sandbar_stage"
+STAGE_MEMO_HISTORY_KEY = "sandbar_stage_history"
 def ticket_task_queue(ticket_id: str) -> str:
     """The ticket-specific task queue name (identical on the workflow-start side and
     the dedicated-worker side)."""

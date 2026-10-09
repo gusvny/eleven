@@ -55,6 +55,10 @@ with workflow.unsafe.imports_passed_through():
     # 渲染器只认节点+边+kind——KI-019 线性近似泳道图的真拓扑承载）。
     import template_topology
     import shared   # t260925-12：gate_phase_timings 纯函数（零 IO，沙箱安全）
+    # KI-227 (t261008-29): the memo key names, single-sourced in shared so that
+    # client.py's terminal face can read them without importing this heavy module
+    # (the t02-t260902-02 arbitrate return).
+    from shared import STAGE_MEMO_HISTORY_KEY, STAGE_MEMO_KEY
     # t261004-32 (CL-1 engine half): project-level concurrency cap. The semantic
     # source of truth (fail-closed declaration loading, lock-guarded ledger)
     # lives in concurrency.py - this file only wires it: judge the slot before a
@@ -257,6 +261,17 @@ WRITE_SET_FAULT_PATCH_ID = "dev-lane-write-set-fault"
 # = replay safe); the review_gate patched branch judges UI tickets from it.
 # Same-shaped boolean gate (see the first PATCH_ID note).
 UI_EVIDENCE_DECL_PATCH_ID = "dev-lane-ui-evidence-decl"
+# KI-227 (t261008-29): persist the current stage (and its transitions) into the
+# Temporal memo at every stage entry, so a ticket that dies at its first stage
+# still names that stage after the workflow is terminal (the snapshot query is
+# gone, the memo survives). Memo is METADATA, never control flow — nothing reads
+# it back into ticket behaviour. New command behind a boolean patch gate: an
+# in-flight workflow replaying on a new worker must not emit a command the old
+# history lacks (same rule as every *_PATCH_ID above).
+STAGE_MEMO_PATCH_ID = "dev-lane-stage-memo-ki227"
+#: Hard cap on the memo transition list: memo rides on every workflow task and is
+#: NOT size-free; the console needs "which stage failed last", not full history.
+STAGE_MEMO_HISTORY_CAP = 50
 # t260829-07: after integration_review reports ok, verify_review_gate re-checks it
 # mechanically (0 lane commits / missing UI screenshots → forced send-back; git/path
 # errors → skip). Same-shaped boolean gate (see the first PATCH_ID note).
@@ -1014,6 +1029,43 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
     def _now_iso(self) -> str:
         return workflow.now().isoformat(timespec="seconds")
 
+    # ---------- KI-227 (t261008-29): stage survives the terminal state (memo) ----------
+    def _persist_stage_memo(self, stage: str, note: str = "") -> None:
+        """Write the current stage (+ capped transition list) into the Temporal memo.
+
+        Why: a ticket that dies at its FIRST stage loses its snapshot (a terminal
+        workflow serves no query), and its face could only say "last known stage
+        unavailable" — the engine created that hole by never writing the stage
+        into the memo. Now every stage entry upserts it; the console reads the
+        memo even after the workflow is terminal.
+
+        Discipline (ticket red line: this must NOT change ticket behaviour):
+        - memo is METADATA, never control flow — nothing reads it back;
+        - FAILURE-ISOLATED (review condition 1): a raised upsert (SDK/server
+          capability mismatch, transient fault) is caught, logged, swallowed —
+          the stage transition proceeds exactly as before;
+        - replay-safe: the whole call sits behind STAGE_MEMO_PATCH_ID, so
+          in-flight instances replaying on a new worker emit no new command the
+          old history lacks.
+        """
+        if not workflow.patched(STAGE_MEMO_PATCH_ID):
+            return
+        try:
+            hist = list(getattr(self, "_stage_memo_history", []) or [])
+            hist.append({"ts": self._now_epoch(), "stage": str(stage), "note": str(note or "")})
+            # Cap kept deliberately: memo rides on every task; the console needs
+            # "which stage failed last", not unbounded history.
+            hist = hist[-STAGE_MEMO_HISTORY_CAP:]
+            self._stage_memo_history = hist
+            workflow.upsert_memo({STAGE_MEMO_KEY: str(stage),
+                                  STAGE_MEMO_HISTORY_KEY: hist})
+        except Exception as e:  # noqa: BLE001 — best-effort metadata, never a stage-transition gate
+            workflow.logger.warning(
+                "[%s] stage memo upsert degraded (%s: %s) — stage %s NOT persisted to "
+                "the memo; ticket behaviour unchanged, terminal face falls back to "
+                "the honest-unavailable note", self.ticket_id, type(e).__name__, e, stage)
+
+
     def _log(self, note: str, status: Optional[str] = None) -> None:
         self.meta.setdefault("log", []).append(
             {"ts": self._now_epoch(), "status": status or self.meta.get("status", ""), "note": note})
@@ -1201,6 +1253,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             self.meta["blocked_detail"] = None
         self._touch()
         self._mark(step_id, "running", "进入本步（第 %d 次）" % self._gen(step_id))
+        # KI-227 (t261008-29): the stage now survives the terminal state (memo;
+        # failure-isolated + patch-gated, see _persist_stage_memo).
+        self._persist_stage_memo(step_id, "enter gen=%d" % self._gen(step_id))
 
     def _finish(self, step_id: str, by: str, evidence: str) -> None:
         for c in self.meta.setdefault("checks", {}).setdefault(step_id, []):
@@ -2402,6 +2457,9 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
         self._touch()
         self._log("rework: %s（回 %s）——%s" % (note, target, who))
         self._mark(target, "rework", "%s（%s）" % (note, who))
+        # KI-227 (t261008-29): rework also moves the stage — persist it (memo,
+        # failure-isolated; see _persist_stage_memo).
+        self._persist_stage_memo(target, "rework")
         return target
 
     def _apply_rework(self, fallback: str) -> str:
@@ -2462,6 +2520,8 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             self._log("rework: %s——%s（%s）→ 落点 %s（%s 边重跑，另一边结果保留）"
                       % (orig, req.note, req.who, landing, edge))
             self._mark(landing, "rework", "%s——%s（%s）" % (orig, req.note, req.who))
+            # KI-227 (t261008-29): rework landing site — persist (memo, isolated).
+            self._persist_stage_memo(landing, "rework landing")
             return landing, edge, ""
         if target == "done" or target not in PHASE_MAIN_CHAIN:
             why = ("终态不可为打回目标" if target == "done"

@@ -650,13 +650,31 @@ async def run_worker(args: argparse.Namespace) -> None:
     # classes THIS worker knows, written to a file deliver reads pre-flight — class
     # absent = named refusal, never an unbounded wait. Best-effort: a write failure
     # logs loudly and never blocks startup (deliver degrades to the bounded wait).
+    # KI-227 (t261008-29): the file now also records the ACTIVITY registry this
+    # process actually registered (the exact thing that went stale on 261008) and
+    # the code identity it loaded (HEAD sha + dirty flag) — staleness becomes a
+    # file read, not a stack trace.
     try:
+        _acts = sorted({activity_registered_name(a)
+                        for a in compose_worker_activities(PROJECT_TEMPLATE_STAGE_IDS)})
+        _identity = worker_registry.code_identity(str(POC_DIR))
+        if _identity.get("error"):
+            logging.warning("worker code identity probe degraded (%s) — "
+                            "code_fingerprint written empty (honest unknown, never a made-up sha)",
+                            _identity["error"])
         reg_doc = worker_registry.write_fingerprint(
             worker_registry.fingerprint_path(),
             [getattr(c, "__name__", repr(c)) for c in (ALL_WORKFLOWS + ALL_WORKFLOWS_V2)],
-            pid=os.getpid(), now_ms=int(time.time() * 1000))
-        logging.info("worker registration fingerprint written: %s (registered=%d, pid=%d)",
-                     worker_registry.fingerprint_path(), len(reg_doc["registered"]), os.getpid())
+            pid=os.getpid(), now_ms=int(time.time() * 1000),
+            code_fingerprint=str(_identity.get("sha") or ""),
+            activity_names=_acts,
+            code_dirty=bool(_identity.get("dirty")))
+        logging.info("worker registration fingerprint written: %s (registered=%d, pid=%d, "
+                     "activities=%d, code=%s%s)",
+                     worker_registry.fingerprint_path(), len(reg_doc["registered"]), os.getpid(),
+                     len(reg_doc["activities"]),
+                     reg_doc["code_fingerprint"][:12] or "(unknown)",
+                     " dirty" if reg_doc["code_dirty"] else "")
     except Exception as e:  # noqa: BLE001 — the fingerprint is an enabler, not a gate: a write failure never blocks startup
         logging.warning("worker registration fingerprint write failed (deliver degrades to the bounded wait): %s: %s",
                         type(e).__name__, e)

@@ -53,6 +53,12 @@
  *   GET  /sandbar-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
+ *   GET  /sandbar-workbench/api/wf/worker-staleness → worker 陈旧度对比（只读，t261008-29 KI-227）：
+ *                                                 运行中 worker 指纹 vs 当前 HEAD + 当前活动注册集；
+ *                                                 stale=警告（observe-only，绝不阻断/重启 worker）
+ *                                                 （t261008-18 已撤 temporal-health/workers/
+ *                                                 scan-report 三路由：main 侧删除语义保留，
+ *                                                 本路由不依赖其探针助手，自带 execFile 直探）
  *   POST /sandbar-workbench/api/global-session/open {project}
  *                                               → 新建全局会话（session-entry t260825-02，侧栏「会话」区
  *                                                 新建按钮）：仿工单会话开/找，但 id 不带 ticket- 前缀、
@@ -806,6 +812,41 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /* ------------------------------------------------ M9 PR 式审批台：diff + review */
+
+  /** KI-227（t261008-29）worker 陈旧度对比面（只读 observe-only）：比对运行中
+   *  worker 的指纹文件与当前 HEAD + 当前活动注册集，stale=警告，绝不阻断、绝不
+   *  重启/停止 worker、绝不写泳道。引擎侧单源=worker_staleness.py（--tree 全量
+   *  组装同源路径），本路由只 spawn（绝对路径锚 repo——review 条件②：路径跨进程
+   *  边界必须绝对，console cwd 不保真）+ 15s 进程内缓存（--tree 全引擎导入秒级，
+   *  防止控制台轮询反复打 git）。 */
+  const STALENESS_CACHE_MS = 15_000
+  let stalenessCache: { at: number; payload: any } | null = null
+  async function handleWorkerStaleness(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (stalenessCache && Date.now() - stalenessCache.at < STALENESS_CACHE_MS) {
+      sendJson(res, 200, stalenessCache.payload)
+      return
+    }
+    const poc = join(repo, 'server', 'engine')
+    const venvPy = join(poc, '.venv', 'bin', 'python')
+    const python = existsSync(venvPy) ? venvPy : 'python3'
+    try {
+      const { stdout } = await execFileP(python, [join(poc, 'worker_staleness.py'), '--tree'], {
+        // cwd 锚引擎目录（worker_staleness.py 自锚 _ENGINE_DIR，双保险）；有界回收
+        // 由 execFile timeout 兜底（同 runPocCli 纪律）。
+        cwd: poc,
+        timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
+      })
+      const parsed = JSON.parse(stdout)
+      const payload = { ok: true, result: parsed }
+      stalenessCache = { at: Date.now(), payload }
+      sendJson(res, 200, payload)
+    } catch (err) {
+      // 失败=named 502（不缓存，下一轮重试）；可见面自身故障绝不能被误读成 worker 绿。
+      sendJson(res, 502, { ok: false, error: `worker-staleness face failed: ${String(err instanceof Error ? err.message : err)}` })
+    }
+  }
+
 
   /**
    * 变更集（只读）：worktree/base_ref/write_set 读工单 JSON 字段，计算在 src/host/changes.ts。
@@ -2221,6 +2262,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         // 「文档」视图两路由（t260905-06；KI-070 起按 ?project= 项目根解析）：目录树 + 按篇正文。
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/tree', handler: handleDocsTree }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/docs/doc', handler: handleDocsDoc }),
+        // KI-227（t261008-29）：worker 陈旧度对比面（只读，observe-only）。
+        // （t261008-18 已撤 temporal-health/workers/scan-report 三路由——main 侧删除
+        // 语义保留，本路由不依赖其探针助手。）
+        ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/worker-staleness', handler: handleWorkerStaleness }),
         // Inspection period archive read side (t261006-15): period list + single
         // period+instance report (read-only, project root via anchorOf).
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/inspection-archive', handler: handleInspectionArchive }),

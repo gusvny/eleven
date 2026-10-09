@@ -59,6 +59,14 @@ class _Stub:
     def _touch(self):
         pass
 
+    def _persist_stage_memo(self, stage, note=""):
+        # KI-227 (t261008-29): the rework path now persists the stage into the
+        # Temporal memo. This white-box stub models the accounting surface only —
+        # record the call so the surface under test stays exercisable without a
+        # workflow runtime (one-line recorder, per the arbitrate's preferred fix).
+        self.stage_memo_calls = getattr(self, "stage_memo_calls", [])
+        self.stage_memo_calls.append((stage, note))
+
 
 # ---------------- ①相位兜底 ----------------
 

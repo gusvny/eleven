@@ -41,6 +41,15 @@ def run_dryrun() -> dict:
 
     acts = worker.compose_worker_activities(worker.PROJECT_TEMPLATE_STAGE_IDS)
 
+    # KI-227 (t261008-29): the summary carries the activity-set fingerprint and the
+    # code identity, same vocabulary as the running worker's fingerprint file
+    # (single source: worker_registry.activity_fingerprint / code_identity) so the
+    # before/after of a restart is machine-comparable. Probe failures degrade named
+    # (empty fingerprint + reason) and never block the dry-run's own assertions.
+    import worker_registry as _wr
+    _act_names = sorted({worker.activity_registered_name(a) for a in acts})
+    _identity = _wr.code_identity(str(_ENGINE_DIR))
+
     # ② 工作流定义名唯一（同口径防线：撞名模板类同样会让注册期崩）
     seen_wf = {}
     for cls in list(worker.ALL_WORKFLOWS) + list(worker.ALL_WORKFLOWS_V2):
@@ -74,6 +83,11 @@ def run_dryrun() -> dict:
     return {
         "ok": True,
         "activities": len(acts),
+        "activity_names": _act_names,
+        "activity_fingerprint": _wr.activity_fingerprint(_act_names),
+        "code_fingerprint": str(_identity.get("sha") or ""),
+        "code_dirty": bool(_identity.get("dirty")),
+        "code_identity_error": str(_identity.get("error") or ""),
         "workflows": len(seen_wf),
         "external_templates": ext,
         "task_queues": "unchecked (dry-run does not touch the network)",

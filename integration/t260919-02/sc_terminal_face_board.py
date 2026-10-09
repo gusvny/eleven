@@ -484,7 +484,16 @@ def main() -> int:
                     if re.search(r"\d{4}-\d{2}-\d{2}|\d{2}-\d{2} \d{2}:\d{2}", ft):
                         has_time, why = True, "date-like 值"
                 ok(has_time, "失败面含终态时刻面（close/start 时间；%s）" % why)
-                ok("快照" in ft and ("不可得" in ft or "无快照" in ft or "不可查" in ft),
+                # t261008-29: the explanation may be carried by snapshot_note (English
+                # "no snapshot ...") OR the last_stage note (Chinese 快照/不可查) — the
+                # contract is "the face explains WHY there is no snapshot", not one
+                # historical note's Chinese wording (KI-025 honesty, language-neutral).
+                _snap_explained = (
+                    ("快照" in ft or "snapshot" in ft.lower())
+                    and ("不可得" in ft or "无快照" in ft or "不可查" in ft
+                         or "no longer runs" in ft or "not a transient" in ft)
+                )
+                ok(_snap_explained,
                    "失败面含「无快照及为何无」显式说明（绝不空面；ft 摘=%r）" % ft[:120])
         print("== C2 组：FAILED dev-lane 票详情失败面 ==")
         tid_d = "t-dev-failed"
@@ -502,7 +511,8 @@ def main() -> int:
                 ft = face_text(face)
                 ok("FAILED" in ft and "dev boom" in ft,
                    "失败面含执行状态+原因串（FAILED / dev boom）")
-                ok("快照" in ft, "失败面含无快照说明（ft 摘=%r）" % ft[:100])
+                ok("快照" in ft or "snapshot" in ft.lower(),
+                   "失败面含无快照说明（ft 摘=%r）" % ft[:100])
 
         # ---- D 组：反用例——原因不可得（验收②反用例+红线「绝不编造」）----
         print("== D 组：终态但原因不可得 → 显式「原因不可得」并保留执行状态 ==")

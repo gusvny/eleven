@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 240,
-   "scenarios": 614
+   "engine_tests": 241,
+   "scenarios": 616
   },
   "vocab": [
    "behaviour",
@@ -1200,6 +1200,11 @@
   "server/engine/tests/test_t261009_15_quiet_baseline.py": {
    "anchor": "behaviour",
    "note": "t261009-15: quiet-baseline verdict for known load-sensitive checks at merge_check (carrier-independent identity normalizer, structured red item names, roster exact matching, quiet rerun full-terminal-state reaping, coverage predicate)",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261008_29_ki227_stale_worker_visibility.py": {
+   "anchor": "behaviour",
+   "note": "t261008-29 KI-227 unit face: the v2 worker fingerprint carries a non-empty code identity and the activity registry (fingerprint moves when an activity is added; v1 docs still read); the comparison face reports a strict-subset worker stale naming the missing activities, dead pid offline, and empty/absent identity unknown (never fresh), and is observe-only (no writes/kills surface); the memo path persists the stage failure-isolated behind the KI-227 patch gate, and the terminal face decodes the memo stage or keeps the honest-unavailable note.",
    "sync_path": ""
   },
   "server/engine/tests/test_t261009_01_checkout_shape_discriminator.py": {
@@ -4282,6 +4287,16 @@
   "integration/t261009-15/sc_t26100915_quiet_baseline_identity.py": {
    "anchor": "contract",
    "note": "t261009-15: carrier-independent identity seam — engine canonical_check_name vs booked roster row vs the two real carriers (KI-072)",
+   "sync_path": ""
+  },
+  "integration/t261008-29/sc_stale_worker_visibility.py": {
+   "anchor": "behaviour",
+   "note": "KI-227 stale-worker visibility: fingerprint v2 carries code fingerprint + activity set, activity fingerprint moves on activity add, strict-subset worker is stale_activities by the comparison face, degraded inputs named, observe-only negative",
+   "sync_path": ""
+  },
+  "integration/t261008-29/sc_terminal_stage_memo_face.py": {
+   "anchor": "behaviour",
+   "note": "KI-227 terminal-stage memo face: memo sandbar_stage reaches the terminal failure face as last_stage with memo provenance, pre-fix tickets keep the honest-unavailable note, malformed memo degrades named, the read writes nothing",
    "sync_path": ""
   },
   "integration/t261009-01/sc_t261009_01_clean_checkout_shared_faces.py": {

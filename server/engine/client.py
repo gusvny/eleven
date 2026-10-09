@@ -87,9 +87,17 @@ from shared import (
     validate_background_refs,
     validate_epic_code,
     validate_write_set_args,
+    # KI-227 (t261008-29): memo key names, single-sourced in shared (stdlib-only)
+    # so this module needs no heavy dev_lane import.
+    STAGE_MEMO_HISTORY_KEY,
+    STAGE_MEMO_KEY,
 )
 from workflows import DispatcherScanWorkflow
 from workflows_v2 import TEMPLATE_CLASSES
+# KI-227 (t261008-29): the memo key names the engine writes at every stage entry.
+# SINGLE SOURCE = shared (stdlib-only) — client.py must stay free of the heavy
+# dev_lane import (dev_lane pulls temporalio.workflow at module level, which breaks
+# the offline stub-scenario family; the t02-t260902-02 arbitrate return).
 
 # KI-067（t260910-06）：无差别自审计 + entry_hint 单一真源（stdlib-only，同目录）。
 # main() 每个出口（含 -h/无参/未知子命令/argsJSON 非法/连接失败兜底）都经
@@ -2679,6 +2687,47 @@ async def _terminal_face_last_signal(handle: Any) -> Dict[str, Any]:
                                     % (type(e).__name__, str(e)[:120])}
 
 
+async def _terminal_face_stage_from_memo(desc: Any) -> Dict[str, Any]:
+    """Terminal ticket "last known stage" (KI-227, t261008-29): read the
+    sandbar_stage / sandbar_stage_history the engine persists into the Temporal
+    memo at every stage entry (key single source = dev_lane's STAGE_MEMO_KEY /
+    STAGE_MEMO_HISTORY_KEY).
+
+    Discipline: the memo is metadata, never control flow — this face only reads,
+    it never changes any advance semantics. Named degradation: a missing memo key
+    (a pre-fix ticket), a describe stub without memo(), or a decode failure all
+    answer available=false with the honest-unavailable note (never a guess).
+    """
+    unavailable = {"last_stage": None, "last_stage_available": False,
+                   "last_stage_note": ("last known stage unavailable: this ticket "
+                                       "left no stage in the memo (a pre-KI-227 "
+                                       "ticket, or the memo read failed) — omitted "
+                                       "rather than guessed"),
+                   "last_stage_history": None}
+    try:
+        memo = await desc.memo()
+    except AttributeError:
+        return unavailable          # stub / older SDK without the memo face
+    except Exception as e:  # noqa: BLE001 — a read-only evidence face never raises out
+        unavailable["last_stage_note"] = ("last known stage unavailable: memo read "
+                                          "failed %s: %s — omitted rather than guessed"
+                                          % (type(e).__name__, str(e)[:120]))
+        return unavailable
+    if not isinstance(memo, dict):
+        return unavailable          # Memo() undecodable or shape drift
+    stage = memo.get(STAGE_MEMO_KEY)
+    if stage is None or not str(stage):
+        return unavailable
+    hist = memo.get(STAGE_MEMO_HISTORY_KEY)
+    hist_out = hist if isinstance(hist, list) else None
+    note = ("source: Temporal memo (the engine persists it at every stage entry; "
+            "readable after the workflow is terminal)")
+    if hist_out is None:
+        note += " (no history key = written by an older engine build, current stage only)"
+    return {"last_stage": str(stage), "last_stage_available": True,
+            "last_stage_note": note, "last_stage_history": hist_out}
+
+
 async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
                                  exec_status: str) -> Dict[str, Any]:
     """终态票可渲染失败面（ticket-query kind=terminal 回执的 face 键，t260919-02）。
@@ -2743,6 +2792,7 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
     if not inst:
         inst, per = _legacy_inspection_instance_period_of(tid)
     sig_face = await _terminal_face_last_signal(handle)
+    stage_face = await _terminal_face_stage_from_memo(desc)
     return {
         "exec_status": exec_status or "未知",
         "ticket_id": tid,
@@ -2762,9 +2812,15 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
                           "worker serves the snapshot query (a deterministic "
                           "conclusion of the terminal state, not a transient "
                           "fault; refreshing will not help)"),
-        "last_stage": None,
-        "last_stage_note": ("最后已知阶段不可得：引擎未在阶段迁移时把阶段写入 Temporal "
-                            "memo，终态后快照亦不可查询——宁缺不猜"),
+        # KI-227 (t261008-29): last_stage now comes from the Temporal memo — the
+        # engine persists it at every stage entry, and the memo survives the
+        # terminal state where the snapshot query is gone. Pre-fix tickets carry
+        # no memo stage and keep the honest-unavailable note verbatim (additive
+        # keys only; the console renders lastStage when non-empty).
+        "last_stage": stage_face.get("last_stage"),
+        "last_stage_available": bool(stage_face.get("last_stage_available")),
+        "last_stage_note": stage_face.get("last_stage_note"),
+        "last_stage_history": stage_face.get("last_stage_history"),
         "start_ts": start_ts,
         "close_ts": close_ts,
         "start_time_txt": _terminal_face_ts_txt(start_ts),

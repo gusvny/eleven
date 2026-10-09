@@ -37,8 +37,14 @@ class FingerprintFaceTests(unittest.TestCase):
 
     def test_write_then_read_roundtrip(self) -> None:
         doc = worker_registry.write_fingerprint(
-            self.path, ["A", "ExecutorDeliveryWorkflow"], pid=4242, now_ms=1_000)
-        self.assertEqual(doc["version"], 1)
+            self.path, ["A", "ExecutorDeliveryWorkflow"], pid=4242, now_ms=1_000,
+            code_fingerprint="sha-ki227", activity_names=["act_a"])
+        # t261008-29 (KI-227): fingerprint bumped to v2 — the doc now also carries
+        # the code identity and the activity registry.
+        self.assertEqual(doc["version"], worker_registry.FINGERPRINT_VERSION)
+        self.assertEqual(doc["code_fingerprint"], "sha-ki227")
+        self.assertEqual(doc["activities"], ["act_a"])
+        self.assertTrue(doc["activity_fingerprint"])
         self.assertEqual(doc["registered"], ["A", "ExecutorDeliveryWorkflow"])
         got, err = worker_registry.read_fingerprint(self.path)
         self.assertIsNone(err)
