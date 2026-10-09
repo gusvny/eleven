@@ -4665,3 +4665,22 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①**换手挑窗口**（纪律，本岗已写进值守报告）：TERM 前先 `describe` 看 `pending_workflow_task.state/started_time`——`STARTED` 且刚起 ⇒ **等它超时或跑完再换手**，或接受"多等一个 start_to_close_timeout"并写进账；②**引擎面**：工作流应在 `suggest_continue_as_new` 为真时**主动 continue-as-new**（并把"历史事件数/字节数"作为可观测项暴露到票面），这是实现口径，归新票；③**观测面**：把"WFT attempt 号 + started_time + history 字节数"接进巡检输出，使"重试被超时押后"与"重放真的又失败"可区分。
 >
 > **回归**：L3——造"长历史 + 在跑 WFT"的形态，断言(а)换手后系统能区分"等待超时重试"与"重放失败"（具名）；(b)`suggest_continue_as_new` 为真时工作流自行 continue-as-new 且历史体量回落；(c)巡检输出包含 attempt/started_time/history_bytes 三列。
+
+## KI-01M4GGFXPAHDGSQ9767VMB5NGM **failed 的巡检票永久挂在左栏，且"某期次某路只有 failed"这个覆盖缺口无人出面**(261009 实证;integration 岗登记)
+
+> **现象（261009 实测，`ticket-list {kind:"inspection"}`）**：sandbar 有 **4 张 `failed` + 1 张 `blocked`** 巡检票久挂左栏——
+> `t261008-17`（simplify-face · period 20261008）、`t261008-09`（integration-tests · period 20261008）、
+> `t260919-01`（integration-tests · 20260919）、`t260918-01`（integration-tests · 20260918）、`t261002-12`（integration-tests · 20261002，blocked）。
+> **它们为什么永不退休**：左栏的行规则 `isDwellOpen(t) = status !== 'closed' && status !== 'verified'`（`server/plugins/workbench/src/client/sandbar-dwell.ts`）——**凡不是 closed/verified 都算"开着"**，pinned 24 小时驻留窗**只对 closed 行生效**；`failed` 不是 closed ⇒ 永久上板。**巡检行还额外**不经客户端这道窗（其窗由引擎侧承担），于是两条路都留不住它们。
+>
+> **机理**：驻留规则写于"开 / 收口"两种生命周期成为常识的年代，**没有把"失败"算作终态**；而工作流以 `FAILED` 结束在今天已是常态（今晚这两张的直接死因就是陈旧 worker：`Activity function run_inspection_surface … is not registered on this worker`，3 次尝试后 FAILED；见 KI-227 / `t261008-29` 的陈旧度观测面）。
+>
+> **更值钱的那半（本次顺带查出）**：**按"期次 × 路"统计完成情况，缺口是静默的**——
+> `20261008` 的 **integration-tests 只有 failed，没有任何成功行**（simplify-face 有成功重跑，docs-sync 正常）；
+> `20260918` / `20260919` 的 integration-tests 同样只有 failed 且从未补跑。**没有任何面会说"这一期这一路没有产出"**：人只能自己把 22 行摊开数。
+>
+> **危害**：①**残骸污染判读**——failure 类的巡检票和"真的需要处置的失败"混在同一栏里，久了没人看（本岗今晚就先答错了一次）；②**覆盖缺口静默**——"这一期没跑出来的那条路"被读成"没什么可报"；③**同一根会咬别的来源**：任何"以失败告终"的行（巡检、外项目票）都会永久占位。
+>
+> **出路**：①**驻留规则补一条终态**（失败类终态按闭口行同款 24 小时窗退休）——归 UI 票 `t261009-32`；②**dismiss 面**（引擎侧 `t261009-31`：账本 + 行透出 + CLI；UI 侧 `t261009-32`：控件 + 立刻离板 + 折叠可撤销），且**必须覆盖巡检这一路**（左栏是两路合并，只做 dev-lane 那路会出现"按了没用"）；③**覆盖缺口要有面**：按"期次 × 路"输出"成功/失败/缺失"，缺失即具名——归后续巡检覆盖面票（本岗已备票载）。
+>
+> **回归**：L3——(а)一张 `failed` 票（dev-lane 与巡检各一）在无 dismiss 时按 24 小时窗退休，dismiss 后**立刻**离板且可 restore；(b)造"某期次某路只有 failed"的形态，断言覆盖面**具名**报出该缺口，而不是读成"无发现"；(c)"读不到 dismissal 账本"时行**留在板上**并具名告警，绝不静默当"没人 dismiss 过"。
