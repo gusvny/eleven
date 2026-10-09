@@ -4493,3 +4493,24 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①CLI 在发信号前**就把值域校验做掉**（`who ≤ 64`、`expires` 必须是 **epoch 秒**、`scope` 对 arbitration_verdict 必须恰为票号）——
 > 现在这些只由 workflow 端拦，回执却不带理由，最容易被读成"发了没用"；②信号回执**必须回带拒收理由**（或至少 `refused` 增量）。
 > **回归**：L1——越界 `who` / ISO 字符串 `expires` / 错 scope 各造一例，断言 CLI **当场拒收并点名**，而不是回 `delivered:true` 让人去翻票面。
+
+## KI-01M4FTEZWF0ZNXN5J5N8Z24D8Z **门的自产快照落在"只在被 ignore 时才无害"的路径上 ⇒ 脏树守卫静默停写台账行（append-only 破）**（261009 实证；integration 岗登记）
+
+> **现象链（四步，全部实测）**：①`t261009-01` 落地（`95a8848b`）给闸加了 latest-round 快照：
+> `root/out/main-side-reds.json`（"best-effort：写失败只上 stderr，绝不翻判决"）；
+> ②那份快照是**未跟踪文件** ⇒ `git status --porcelain` 出现 `?? out/` ⇒ 工作树判脏；
+> ③`verify_lane` 里**既有**的行写守卫（`_worktree_dirty` ⇒ `skip_whys: lane worktree is dirty — a missing row beats a dirty row`）**静默停写本轮的台账行**（`written: 0`，只有 `write_skipped` 里一行字）；
+> ④于是主账**本轮不再增长**，`t260922-12-gate-ledger-debt-not-blocked` 的 R2「主账 append-only：旧字节前缀保持且增长」判红——而它是那一轮**闸的唯一 blocker**，把 `t261009-16`（T0.3）等票按 code-fault 反复打回。
+>
+> **为什么真仓没炸、夹具炸了（关键分辨）**：真仓 `.gitignore:1` 就是 `out/`，`git status` **尊重 ignore** ⇒ 真泳道不脏；而场景夹具仓（`lib_ledger_fixture.make_fixture`）**不带 .gitignore** ⇒ 同一份快照在夹具里成了未跟踪文件。
+> **归因过程（留痕，防"想当然"）**：先怀疑 `t261009-11`（run 记录 + 单写者纪律）→ **两个 worktree 二分**：`6768ccdc`（-11 之前）**绿 21/0**、`27804a94`（-11 之后/-01 之前）**绿 21/0**、当前 main **红 20/1** ⇒ **真凶是 `t261009-01`**（`git log -S"_msdir = root / 'out'"` 单点归因）。
+>
+> **危害（两条，第二条是普适的）**：
+> ①**夹具失真会伪装成产品红**：一条与产品无关的"未跟踪文件"能把一条**已交付的不变式**（台账 append-only）判红，并顺着闸门把无辜票打回（本轮实害：T0.3 被 code-fault 打回 2 轮）；
+> ②**更普适的风险**：门把自产快照写进"**只有在被 ignore 时才无害**"的路径（`<root>/out/`），**多项目/新项目/自有 .gitignore 的项目**只要没那条规则，就会踩同一颗雷——而失败形态是**静默少写账行**（"缺行胜过脏行"），不是响亮报错。**门自己的产物不该有"靠别人的 ignore 才不脏"的性质。**
+>
+> **出路（实现口径归修复票）**：①门侧：自产快照写到**人不受树脏影响的落点**（项目账/证据目录，或写前显式判 ignore 并在不 ignore 时点名——"要么不落树，要么落了就让人看见"）；
+> ②闸侧：`write_skipped` 这种**静默停写**必须升级为**台账自己的一行可查记录**（缺了哪一轮、为什么），否则"账不再增长"与"没有新红"在下游长得一模一样；
+> ③夹具侧（本岗已做）：夹具仓必须**同构于真仓的 ignore 语义**（本批给 `sc_gate_ledger_debt_not_blocked` 的夹具补了 `tracked_extra={".gitignore": "out/\n"}`，并注明理由）——**夹具失真就是判据失真**。
+>
+> **回归**：L2——造一个**不 ignore `out/`** 的夹具仓，跑两轮闸，断言：(a) 台账**仍增长**（不因自产快照停写），或 (b) 若确要按脏树停写，则**台账里有一行具名的"本轮未记账（原因）"**，且闸**点名**该状态而不是照旧判绿。

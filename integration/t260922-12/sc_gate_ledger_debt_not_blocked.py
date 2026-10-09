@@ -44,7 +44,13 @@ def main():
         print("ENV_FAIL: git 缺失，基线归属子用例不可验（exit 2）")
         return 2
     td = tempfile.mkdtemp(prefix="t26092212-debt-")
-    repo = make_fixture(make_stub(["case-a", "case-b"], "case-a"))
+    # 夹具必须**同构于真泳道**：真仓 .gitignore:1 就是 `out/`（闸的 latest-round 快照
+    # out/main-side-reds.json，t261009-01 起落在这里），而 `_worktree_dirty` 读 git status
+    # 是**尊重 ignore** 的——夹具仓缺这条规则时，那份快照就成了未跟踪文件，会撞上
+    # 「lane worktree is dirty ⇒ 不写行」的既有守卫，于是第二轮零行写入、主账不再增长。
+    # 那是夹具失真（真泳道不会脏），不是产品红：补一条与真仓同款的 ignore 规则。
+    repo = make_fixture(make_stub(["case-a", "case-b"], "case-a"),
+                        tracked_extra={".gitignore": "out/\n"})
     ledger_dir = Path(td) / "ledger"
     ledger_dir.mkdir()
     log = Path(td) / "fixture-log.jsonl"
