@@ -186,11 +186,33 @@ TMP_WATCHDOG_RANGES = {"tmp_fixture_max_dirs": (1, 10_000_000),
 TMP_WATCHDOG_DEFAULTS = {"tmp_fixture_max_dirs": DEFAULT_TMP_FIXTURE_MAX_DIRS,
                          "tmp_fixture_max_age_h": DEFAULT_TMP_FIXTURE_MAX_AGE_H}
 
-#: 声明档的**合法键全集**（票级三键 + 水位两键）与合并字典：声明解析件（inspection_decl）
-#: 用前者判「未知字段」，水位面用后者取值——两处都从这里取，绝不各造一份。
-WATCHDOG_ALL_KEYS = WATCHDOG_KEYS + TMP_WATCHDOG_KEYS
-WATCHDOG_ALL_RANGES = dict(WATCHDOG_RANGES, **TMP_WATCHDOG_RANGES)
-WATCHDOG_ALL_DEFAULTS = dict(WATCHDOG_DEFAULTS, **TMP_WATCHDOG_DEFAULTS)
+#: Suite-duration threshold pair (t261008-43, host order 261008): the fifth threshold
+#: group — a slow inspection suite must report itself (slow-round finding + per-scenario
+#: outliers + a bigger/slower trend against the previous round).
+#: Measured basis (stated in the ticket result): a gate round of 35.5 minutes
+#: (wall 2132s, 445 scenarios) must NOT fire; the 20261008 inspection suite
+#: (runner_used_sec=5916.4s = 98.6 min, 530 scenarios) MUST fire — the round default
+#: sits at 90 min, between the two (below the "fires every round" red line); the
+#: per-scenario outlier default is 240s: the slowest scenario measured today is
+#: t261006-03 at 313s (browser pool, a known flapper at 252-258s across three runs),
+#: then 110/99/97/93s — the 240s line names a handful, not the norm. Declaration and
+#: env override ride the same `watchdog:` block (single source, no second knob).
+DEFAULT_SUITE_SLOW_ROUND_MIN = 90
+DEFAULT_SUITE_SLOW_SCENARIO_SEC = 240
+SUITE_DURATION_KEYS = ("suite_slow_round_min", "suite_slow_scenario_sec")
+SUITE_DURATION_RANGES = {"suite_slow_round_min": (1, 10080),
+                         "suite_slow_scenario_sec": (10, 86400)}
+SUITE_DURATION_DEFAULTS = {"suite_slow_round_min": DEFAULT_SUITE_SLOW_ROUND_MIN,
+                           "suite_slow_scenario_sec": DEFAULT_SUITE_SLOW_SCENARIO_SEC}
+
+#: The declaration's legal-key universe (ticket trio + water-level pair + suite-duration
+#: pair) and the merged dicts: the declaration parser (inspection_decl) uses the former
+#: to reject unknown fields, the water-level/duration faces read values from the latter
+#: — both take from here, never two copies.
+WATCHDOG_ALL_KEYS = WATCHDOG_KEYS + TMP_WATCHDOG_KEYS + SUITE_DURATION_KEYS
+WATCHDOG_ALL_RANGES = dict(WATCHDOG_RANGES, **TMP_WATCHDOG_RANGES, **SUITE_DURATION_RANGES)
+WATCHDOG_ALL_DEFAULTS = dict(WATCHDOG_DEFAULTS, **TMP_WATCHDOG_DEFAULTS,
+                             **SUITE_DURATION_DEFAULTS)
 
 THRESHOLD_SOURCE_DECL = "declaration"
 THRESHOLD_SOURCE_DEFAULT = "default"
@@ -201,6 +223,10 @@ THRESHOLD_SOURCE_ENV = "env"
 #: 环境变量名（真源；活动壳读取后**传入**纯函数，本模块自己不读环境）
 TMP_ENV_MAX_DIRS = "SANDBAR_TMP_FIXTURE_MAX_DIRS"
 TMP_ENV_MAX_AGE_H = "SANDBAR_TMP_FIXTURE_MAX_AGE_H"
+#: Suite-duration env override names (t261008-43; same discipline — the activity shell
+#: reads them and passes the values in; this module never reads the environment)
+SUITE_ENV_SLOW_ROUND_MIN = "SANDBAR_SUITE_SLOW_ROUND_MIN"
+SUITE_ENV_SLOW_SCENARIO_SEC = "SANDBAR_SUITE_SLOW_SCENARIO_SEC"
 
 #: 发现清单里的证据文本上限（防票面洪泛；超长截断并点名）
 EVIDENCE_CAP = 1200
@@ -317,6 +343,69 @@ def resolve_tmp_thresholds(raw: Any = None, env: Any = None):
               else THRESHOLD_SOURCE_DEFAULT)
     note = "threshold source=%s (%s)" % (
         source, ", ".join("%s=%d/%s" % (k, int(thr[k]), origin[k]) for k in TMP_WATCHDOG_KEYS))
+    if problems:
+        note += " | fallbacks: " + "; ".join(problems)
+    return thr, source, note, problems
+
+
+def resolve_suite_duration_thresholds(raw: Any = None, env: Any = None):
+    """Suite-duration thresholds (t261008-43) -> (thresholds, source, note, problems).
+
+    Shaped line-for-line on resolve_tmp_thresholds (same fallback order: per-key
+    declaration > env override > module default; the same declaration|env|default
+    source vocabulary; the same one-line English note + problems list). The two keys:
+    suite_slow_round_min (whole-round runner-wall threshold, minutes) and
+    suite_slow_scenario_sec (per-scenario wall outlier threshold, seconds).
+
+    Fault-mode list carried over from the borrowed implementation (one UT case each):
+    declaration not a mapping -> named in problems, all keys fall back; per-key
+    absent / non-integer (non-digit str, bool, float) / out of range -> that key
+    falls back and is named; env value absent / malformed / out of range -> falls
+    back and is named; unknown keys -> named in problems (the whole block is not
+    rejected — the declaration-side lexical gate is fail-closed instead); the
+    per-key origin is always recorded (the note is one line, origin is the
+    structural face). Pure, zero IO: reads no files and never the process env —
+    the caller (activity shell) reads env and passes the values in.
+    """
+    thr = dict(SUITE_DURATION_DEFAULTS)
+    problems: List[str] = []
+    origin: Dict[str, str] = {k: THRESHOLD_SOURCE_DEFAULT for k in SUITE_DURATION_KEYS}
+    decl = raw if isinstance(raw, dict) else {}
+    if raw is not None and not isinstance(raw, dict):
+        problems.append("watchdog declaration is not a mapping (%s)" % type(raw).__name__)
+    env_map = env if isinstance(env, dict) else {}
+    for k in SUITE_DURATION_KEYS:
+        lo, hi = SUITE_DURATION_RANGES[k]
+        if k in decl:
+            v = decl.get(k)
+            ok = (isinstance(v, str) and _INT_RE.match(v) and lo <= int(v) <= hi) \
+                or (isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi)
+            if ok:
+                thr[k] = int(v)
+                origin[k] = THRESHOLD_SOURCE_DECL
+                continue
+            problems.append("declared %s=%r rejected (integer %d~%d) -> fallback"
+                            % (k, v, lo, hi))
+        env_name = (SUITE_ENV_SLOW_ROUND_MIN if k == "suite_slow_round_min"
+                    else SUITE_ENV_SLOW_SCENARIO_SEC)
+        ev = env_map.get(env_name)
+        if ev not in (None, ""):
+            ok = (isinstance(ev, str) and _INT_RE.match(ev) and lo <= int(ev) <= hi) \
+                or (isinstance(ev, int) and not isinstance(ev, bool) and lo <= ev <= hi)
+            if ok:
+                thr[k] = int(ev)
+                origin[k] = THRESHOLD_SOURCE_ENV
+                continue
+            problems.append("env %s=%r rejected (integer %d~%d) -> fallback"
+                            % (env_name, ev, lo, hi))
+        if k not in decl:
+            problems.append("%s absent -> module default %d" % (k, SUITE_DURATION_DEFAULTS[k]))
+    origins = set(origin.values())
+    source = (THRESHOLD_SOURCE_DECL if origins == {THRESHOLD_SOURCE_DECL}
+              else THRESHOLD_SOURCE_ENV if THRESHOLD_SOURCE_ENV in origins
+              else THRESHOLD_SOURCE_DEFAULT)
+    note = "threshold source=%s (%s)" % (
+        source, ", ".join("%s=%d/%s" % (k, int(thr[k]), origin[k]) for k in SUITE_DURATION_KEYS))
     if problems:
         note += " | fallbacks: " + "; ".join(problems)
     return thr, source, note, problems

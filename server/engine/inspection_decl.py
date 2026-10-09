@@ -413,7 +413,8 @@ def _validate_watchdog(where: str, raw: Any) -> Dict[str, str]:
     缺省段=空档（全缺省值）；非映射/未知键/非正整数或越界 → DeclError 点名（与 inspect 预算键
     同款 fail-closed 纪律）。范围与缺省**同源**自 inspection_lane_watchdog（票级三键 +
     水位两键的合并字典 WATCHDOG_ALL_RANGES/DEFAULTS）——本函数只做词法闸，值语义单点在
-    运行期 resolve_thresholds / resolve_tmp_thresholds。"""
+    runtime resolve_thresholds / resolve_tmp_thresholds /
+    resolve_suite_duration_thresholds (the t261008-43 suite-duration pair)."""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -427,7 +428,9 @@ def _validate_watchdog(where: str, raw: Any) -> Dict[str, str]:
             "fault_loop_min": "tests-fault 回路停留阈值（分钟）",
             "inflight_silent_min": "在飞静默阈值（分钟）",
             "tmp_fixture_max_dirs": "测试夹具临时目录数水位（第四判据；目录数上界）",
-            "tmp_fixture_max_age_h": "测试夹具最老目录年龄水位（第四判据；小时）"}
+            "tmp_fixture_max_age_h": "fixture tmp water-level: oldest dir age (4th criterion, hours)",
+            "suite_slow_round_min": "suite whole-round duration threshold (minutes; t261008-43 slow-round finding)",
+            "suite_slow_scenario_sec": "suite per-scenario duration outlier threshold (seconds; t261008-43)"}
     out: Dict[str, str] = {}
     for k in WATCHDOG_ALL_KEYS:
         if k not in raw:

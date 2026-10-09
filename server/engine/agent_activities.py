@@ -8454,9 +8454,28 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                 setattr(out, _k, float(res[_k]))
             except (TypeError, ValueError):
                 setattr(out, _k, None)
-    out.details = [{"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
-                    "output_tail": s.get("output_tail") or ""}
-                   for s in (res.get("scenarios") or [])]
+    # t261008-43 per-scenario duration passthrough (additive): the gate receipt's `cases`
+    # norm rows carry dur_s/suite(pool) and the old face dropped them here — merge them
+    # back into `details` by scenario name (missing key / unmatched name / malformed
+    # dur_s -> key absent; old receipts and old history replay byte-identical). The
+    # duration leg consumes exactly these two keys; no re-judging, no count changes.
+    _dur_by_name: Dict[str, Dict[str, Any]] = {}
+    for _c in (res.get("cases") or []):
+        if isinstance(_c, dict) and str(_c.get("name") or ""):
+            _dur_by_name[str(_c["name"])] = _c
+    out.details = []
+    for s in (res.get("scenarios") or []):
+        _row = {"name": s.get("name", ""), "cmd": "", "exit": int(s.get("exit") or 0),
+                "output_tail": s.get("output_tail") or ""}
+        _c = _dur_by_name.get(str(_row["name"]))
+        if _c is not None:
+            try:
+                _row["dur_s"] = round(float(_c.get("dur_s")), 1)
+            except (TypeError, ValueError):
+                pass                  # malformed -> key absent: the duration leg names it, never guesses 0
+            if str(_c.get("suite") or ""):
+                _row["pool"] = str(_c["suite"])
+        out.details.append(_row)
     # ---- t260913-03 池排除回执面：applied（跳过面点名）与旧口径命中面留痕两态
     # 都进 details——红线「少跑必须点名」；宿主管 260914 起例外分支已撤除，
     # former_force_assets 只作迁移期可见性（说明这些资产在旧口径下会触发全跑）----
@@ -9133,6 +9152,53 @@ async def run_inspection_suite(args: Dict[str, Any]) -> Dict[str, Any]:
         }
     except Exception as e:  # noqa: BLE001——身份面故障绝不拦回执
         receipt["budget_plan"] = {"error": "%s: %s" % (type(e).__name__, e)}
+    # ---- t261008-43 suite duration leg groundwork (IO stays in the activity shell; the
+    # judgement face stays a pure function): ----
+    # 1) threshold resolution (per-key declaration > env override > module default,
+    #    source named): the declaration raw values arrive via workflow args (the
+    #    `watchdog` block; old history replay lacks the key -> None -> full fallback)
+    #    and env is read HERE and passed in — the pure face never reads the process env.
+    # 2) previous-round comparison face (prev_round): this instance's latest earlier
+    #    suite receipt; unreadable = `unreadable` with the reason — never impersonated
+    #    by another instance/period, never guessed.
+    try:
+        import os as _os_dur
+        from inspection_lane_watchdog import resolve_suite_duration_thresholds
+        _thr, _src, _note, _problems = resolve_suite_duration_thresholds(
+            args.get("watchdog"),
+            {"SANDBAR_SUITE_SLOW_ROUND_MIN": _os_dur.environ.get("SANDBAR_SUITE_SLOW_ROUND_MIN"),
+             "SANDBAR_SUITE_SLOW_SCENARIO_SEC": _os_dur.environ.get("SANDBAR_SUITE_SLOW_SCENARIO_SEC")})
+        receipt["duration_threshold_note"] = _note
+        receipt["duration_thresholds"] = dict(_thr)
+    except Exception as e:  # noqa: BLE001 — groundwork failure never blocks the receipt (duration leg falls back to defaults / a named unreadable)
+        receipt["duration_threshold_note"] = ("duration threshold resolution failed: "
+                                              "%s: %s" % (type(e).__name__, e))
+        activity.logger.warning("[%s] duration threshold resolution failed: %s", ticket_id, e)
+    try:
+        from inspection_deadman import previous_suite_receipt_path, read_suite_receipt
+        from shared import INSPECTION_DIR as _ledger_dir
+        _prev_path = previous_suite_receipt_path(_ledger_dir, instance_id, period)
+        if not _prev_path:
+            receipt["prev_round"] = {"unreadable": "no earlier suite receipt for this "
+                                                   "instance in the ledger dir"}
+        else:
+            _pr = read_suite_receipt(_prev_path)
+            if not _pr.get("ok"):
+                receipt["prev_round"] = {"unreadable": "previous suite receipt unreadable: "
+                                                       + str(_pr.get("error") or "")}
+            else:
+                _pd = _pr["receipt"]
+                _p_trunc = bool(_pd.get("interrupted")) or bool(
+                    isinstance(_pd.get("budget"), dict) and _pd["budget"].get("exhausted"))
+                receipt["prev_round"] = {
+                    "period": str(Path(_prev_path).name).replace("-suite.json", ""),
+                    "ran": _pd.get("ran"), "passed": _pd.get("passed"),
+                    "runner_used_sec": _pd.get("runner_used_sec"),
+                    "wall_seconds": _pd.get("wall_seconds"),
+                    "truncated": _p_trunc}
+    except Exception as e:  # noqa: BLE001 — comparison-face failure = a named unreadable, never guessed, never blocking
+        receipt["prev_round"] = {"unreadable": "previous-round lookup failed: %s: %s"
+                                               % (type(e).__name__, e)}
     # ---- 迟到孤儿闸（必做③）：写盘前确认「泳道与本活动仍在位」 ----
     late_reason = _late_suite_receipt_reason(wt, time.monotonic() - started,
                                              run_budget, suite_to)

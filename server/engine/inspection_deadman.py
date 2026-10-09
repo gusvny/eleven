@@ -24,7 +24,7 @@ from datetime import datetime, time, timedelta
 # 260927 code_stamp（同 agent_activities）：本模块的 worker 载入时刻
 import datetime as _dt_code
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 PERIOD_DAY_RE = re.compile(r"^\d{8}$")
 # 台账文件名解析（t260913-02 验收 P1 连带修正）：`inspection-<实例>-<期号>.json` 的
@@ -248,7 +248,327 @@ def _tail(text: Any, n: int = 400) -> str:
     return s[-n:]
 
 
-def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
+# ========================================================================================
+# Suite-duration leg (t261008-43): slow-round finding + per-scenario outliers + a bigger/slower trend vs the previous round
+# ========================================================================================
+
+#: Defaults for the suite-duration keys (single source =
+#: inspection_lane_watchdog.SUITE_DURATION_DEFAULTS — fetched via lazy import; this
+#: module never copies the numbers, keeping one source of truth).
+def _suite_duration_defaults() -> Dict[str, int]:
+    from inspection_lane_watchdog import SUITE_DURATION_DEFAULTS
+    return dict(SUITE_DURATION_DEFAULTS)
+
+
+def _num_or_none(v: Any) -> Optional[float]:
+    """Lenient numeric parse: int/float (bool excluded) -> float; anything else
+    (None/str/NaN/inf) -> None. Receipt fields are facts written by the executor/gate —
+    malformed always becomes None for the caller to name, never a guessed 0."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        f = float(v)
+        if f != f or f in (float("inf"), float("-inf")):
+            return None
+        return f
+    return None
+
+
+def duration_readings(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    """Suite receipt -> duration readings (pure): {runner_sec, ran, unreadable, runner_src}.
+
+    - runner_sec takes runner_used_sec (the runner wall clock the gate receipt carries;
+      missing/malformed falls back to wall_seconds — both missing/malformed =
+      unreadable, never a guessed 0 posing as "instant");
+    - ran feeds the trend's per-scenario average; malformed (non-numeric/negative) =
+      ran=None (the trend reports raw counts only, no average);
+    - unreadable = an English list of per-item reasons; non-empty makes the caller
+      emit the named "duration unreadable" note — never a silent green."""
+    out: Dict[str, Any] = {"runner_sec": None, "ran": None, "unreadable": [],
+                           "runner_src": "", "ran_unreadable": ""}
+    if not isinstance(receipt, dict):
+        out["unreadable"].append("receipt is not a mapping (%s)" % type(receipt).__name__)
+        return out
+    runner = _num_or_none(receipt.get("runner_used_sec"))
+    src = "runner_used_sec"
+    if runner is None or runner < 0:
+        runner = _num_or_none(receipt.get("wall_seconds"))
+        src = "wall_seconds"
+    if runner is None or runner < 0:
+        out["unreadable"].append(
+            "no readable duration: runner_used_sec=%r wall_seconds=%r"
+            % (receipt.get("runner_used_sec"), receipt.get("wall_seconds")))
+    else:
+        out["runner_sec"] = runner
+        out["runner_src"] = src
+    ran = _num_or_none(receipt.get("ran"))
+    if ran is None or ran < 0:
+        msg = "ran is not a non-negative number (%r)" % (receipt.get("ran"),)
+        out["unreadable"].append(msg)
+        out["ran_unreadable"] = msg
+    else:
+        out["ran"] = int(ran)
+    return out
+
+
+def scenario_outliers(receipt: Dict[str, Any], threshold_sec: float,
+                      cap: int = SUITE_RED_DETAIL_CAP) -> Dict[str, Any]:
+    """Per-scenario outlier face (pure): details entries whose dur_s crosses the
+    threshold, sorted descending, capped at `cap`.
+
+    Data source = the per-scenario dur_s the gate receipt carries (the t261008-43
+    engine-side additive passthrough; an old receipt without it = carried=False and
+    the caller names "no per-scenario durations" instead of a silent "no outliers").
+    Over-cap entries aggregate into a count (never silently truncated); the per-
+    scenario detail lives in the receipt JSON. Malformed dur_s (non-numeric) is
+    never guessed or counted — it lands in the `bad` count. `__`-prefixed summary
+    rows (__pool_exclude__ etc.) are not scenarios and never enter the list."""
+    out: Dict[str, Any] = {"carried": False, "hits": [], "over_cap": 0, "bad": 0}
+    if not isinstance(receipt, dict):
+        return out
+    details = receipt.get("details") if isinstance(receipt.get("details"), list) else []
+    hits: List[Dict[str, Any]] = []
+    for d in details:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("name") or "")
+        if not name or name.startswith("__"):
+            continue
+        dur = _num_or_none(d.get("dur_s"))
+        if dur is None:
+            if d.get("dur_s") is not None:
+                out["bad"] += 1           # key present but malformed: named, not counted
+            continue
+        out["carried"] = True
+        if dur > threshold_sec:
+            hits.append({"name": name, "dur_s": dur,
+                         "pool": str(d.get("pool") or "main")})
+    hits.sort(key=lambda h: -h["dur_s"])
+    out["hits"] = hits[:cap]
+    out["over_cap"] = max(0, len(hits) - cap)
+    return out
+
+
+def duration_findings(receipt: Dict[str, Any], thresholds: Any,
+                      threshold_note: str = "") -> List[Dict[str, Any]]:
+    """Suite-duration leg -> findings (pure; wired at the tail of suite_findings).
+
+    Classification discipline (host order 261008, pinned by UTs):
+      - a slow round is a cost/attention signal, NOT a product red: severity=med,
+        suggest=False — never into suggested_fix_tickets, never a tests-fault (that
+        is the lane-watchdog face; this leg does not touch it);
+      - the only escalation is the hang shape (runner_used_sec >= run_budget_sec):
+        severity=high but still suggest=False — a hang is an ops-disposal signal,
+        a fix ticket is the wrong tool (the finding text says so explicitly so it
+        does not read as a missing label);
+      - error / ran==0 / reds / env_fail are judged independently: a round that both
+        ran long and failed keeps BOTH sets of findings — no merging, no suppression;
+      - the trend compares against the previous round (prev_round, the raw dict the
+        activity shell read and passed in) on three numbers: ran, runner/wall
+        seconds, and the per-scenario average (runner_sec/ran); avg up >25% =>
+        slower; ran up >10% => bigger (a suite that merely grew in scenario count
+        with a flat average is reported bigger, NOT slower — the 261008 host order
+        verbatim); both shapes can coexist and are both reported. A previous round
+        that is unreadable or was truncated => say so, never use missing data as a
+        baseline; ran==0 makes the average incomputable => report raw counts and
+        name "average not computable", no slower/bigger classification.
+    """
+    thr = dict(_suite_duration_defaults())
+    if isinstance(thresholds, dict):
+        for k in thr:
+            v = _num_or_none(thresholds.get(k))
+            if v is not None and v > 0:
+                thr[k] = v
+    note = str(threshold_note or "threshold source=default")
+    findings: List[Dict[str, Any]] = []
+    rd = duration_readings(receipt)
+    receipt_path = (receipt.get("report_path") if isinstance(receipt, dict) else None) \
+        or "(no receipt written)"
+    truncated = False
+    if isinstance(receipt, dict):
+        truncated = bool(receipt.get("interrupted")) \
+            or bool(isinstance(receipt.get("budget"), dict) and receipt["budget"].get("exhausted"))
+    if [r for r in rd["unreadable"] if r != rd["ran_unreadable"]]:
+        findings.append(make_finding(
+            SUITE_SCAN, "med", "Suite duration unreadable",
+            "%s — the duration leg cannot judge this round (never a silent pass); "
+            "check the receipt by hand | receipt file %s"
+            % ("; ".join(rd["unreadable"]), receipt_path),
+            suggest=False))
+        return findings
+    if rd["ran_unreadable"]:
+        # malformed ran != unreadable duration: slow-round/outliers still judge (no average), but the malformation itself is named, never swallowed
+        findings.append(make_finding(
+            SUITE_SCAN, "med", "Suite receipt ran field malformed",
+            "%s — trend average and outlier counts carry the raw duration only "
+            "(never guessed) | receipt file %s" % (rd["ran_unreadable"], receipt_path),
+            suggest=False))
+    runner_sec = float(rd["runner_sec"])
+    ran = rd["ran"]
+    runner_min = runner_sec / 60.0
+    # ---- slow-round judgement ----
+    if runner_min >= thr["suite_slow_round_min"]:
+        budget = _num_or_none(receipt.get("run_budget_sec")) if isinstance(receipt, dict) else None
+        hang = budget is not None and budget > 0 and runner_sec >= budget
+        findings.append(make_finding(
+            SUITE_SCAN, "high" if hang else "med",
+            "Suite round slow: %.1f min (threshold %d min)%s"
+            % (runner_min, thr["suite_slow_round_min"],
+               " — hang-shaped (at/over run_budget; still suggest=false, an ops signal "
+               "not a fix ticket)" if hang else ""),
+            "round took %.1f min (%s=%.1fs, ran=%s scenarios) >= threshold %d min "
+            "| %s | NOT a product red and NOT a tests-fault: running long is a cost/attention "
+            "signal — open no fix ticket, triage the cost by hand%s | receipt file %s"
+            % (runner_min, rd.get("runner_src") or "runner_used_sec", runner_sec,
+               ran if ran is not None else "?", thr["suite_slow_round_min"], note,
+               "; NOTE this round was truncated (interrupted/budget-exhausted) — the "
+               "duration is a truncated-round duration, not a full-suite time"
+               if truncated else "",
+               receipt_path),
+            suggest=False))
+    # ---- per-scenario outliers ----
+    so = scenario_outliers(receipt, thr["suite_slow_scenario_sec"])
+    if so["bad"]:
+        findings.append(make_finding(
+            SUITE_SCAN, "med", "Suite per-scenario durations malformed: %d" % so["bad"],
+            "%d detail entries carry a non-numeric dur_s — excluded from the outlier face, "
+            "never guessed | receipt file %s" % (so["bad"], receipt_path),
+            suggest=False))
+    if so["hits"] or so["over_cap"]:
+        listed = ", ".join("%s (%s, %.1fs)" % (h["name"], h["pool"], h["dur_s"])
+                           for h in so["hits"])
+        more = ("; and %d more over the threshold (drill-down: sort the receipt's details "
+                "by dur_s)" % so["over_cap"]) if so["over_cap"] else ""
+        findings.append(make_finding(
+            SUITE_SCAN, "med",
+            "Suite slow scenarios: %d over %ds%s"
+            % (len(so["hits"]) + so["over_cap"], thr["suite_slow_scenario_sec"],
+               " (%d listed)" % len(so["hits"]) if so["over_cap"] else ""),
+            "per-scenario outliers (threshold %ds, %s): %s%s | NOT a product red: slow "
+            "scenarios are cost signals (often the known-expensive pools); triage by hand "
+            "| receipt file %s"
+            % (thr["suite_slow_scenario_sec"], note, listed, more, receipt_path),
+            suggest=False))
+    elif not so["carried"] and isinstance(receipt.get("details"), list) \
+            and any(isinstance(d, dict) and str(d.get("name") or "")
+                    and not str(d.get("name")).startswith("__")
+                    for d in receipt["details"]):
+        findings.append(make_finding(
+            SUITE_SCAN, "med", "Suite receipt carries no per-scenario durations",
+            "the detail entries have no dur_s (old gate form) — the outlier face cannot "
+            "name slow scenarios this round; per-scenario timing needs the cases passthrough "
+            "| receipt file %s" % receipt_path,
+            suggest=False))
+    # ---- trend (vs the previous round; unreadable is stated, never guessed) ----
+    prev = receipt.get("prev_round") if isinstance(receipt, dict) else None
+    trend_lines: List[str] = []
+    slower = bigger = False
+    if not isinstance(prev, dict):
+        trend_lines.append("no previous round readable for this instance — trend not "
+                           "computed (stated, not guessed)")
+    else:
+        preason = str(prev.get("unreadable") or "")
+        ptruncated = bool(prev.get("truncated"))
+        p_ran = _num_or_none(prev.get("ran"))
+        p_runner = _num_or_none(prev.get("runner_used_sec"))
+        if p_runner is None or p_runner < 0:
+            p_runner = _num_or_none(prev.get("wall_seconds"))
+        if preason or p_runner is None or p_ran is None:
+            trend_lines.append("previous round not readable (%s) — trend not computed"
+                               % (preason or "missing/invalid ran or duration"))
+        elif ptruncated:
+            trend_lines.append(
+                "previous round (%s) was truncated (interrupted/budget-exhausted) — its "
+                "per-scenario average is a truncated-round average, trend not computed off "
+                "it (a killed round would fake a speed-up)" % (prev.get("period") or "?"))
+        else:
+            p_ran = int(p_ran)
+            avg_now = (runner_sec / ran) if (ran is not None and ran > 0) else None
+            avg_prev = p_runner / p_ran if p_ran > 0 else None
+            trend_lines.append(
+                "previous round %s: ran=%d runner=%.1fs (avg %.1fs/scenario)"
+                % (prev.get("period") or "?", p_ran, p_runner,
+                   avg_prev if avg_prev is not None else -1.0))
+            if ran is None:
+                trend_lines.append("this round's ran is unreadable — avg not computable")
+            elif avg_now is None or avg_prev is None:
+                trend_lines.append(
+                    "per-scenario average not computable (ran=0 on the %s side) — raw "
+                    "counts only, no slower/bigger classification"
+                    % ("this" if avg_now is None else "previous"))
+            else:
+                if avg_now > avg_prev * 1.25:
+                    slower = True
+                    trend_lines.append(
+                        "SLOWER: per-scenario average %.1fs vs %.1fs (+%.0f%%)"
+                        % (avg_now, avg_prev, (avg_now / avg_prev - 1) * 100))
+                if ran > p_ran * 1.1:
+                    bigger = True
+                    trend_lines.append(
+                        "BIGGER: %d scenarios vs %d (+%d) — count growth, per-scenario "
+                        "average %s" % (ran, p_ran, ran - p_ran,
+                                        "up too" if slower else "flat"))
+                if not slower and not bigger:
+                    trend_lines.append("steady: scenario count and per-scenario average "
+                                       "within tolerance vs the previous round")
+    if slower or bigger:
+        findings.append(make_finding(
+            SUITE_SCAN, "med",
+            "Suite trend vs previous round: %s" % (("slower" if slower else "")
+                                                   + (" bigger" if bigger else "")).strip(),
+            "this round: ran=%s runner=%.1fs | %s | NOT a product red and NOT a "
+            "tests-fault — a suite that grew in scenario count is 'bigger', not 'slower' "
+            "| receipt file %s"
+            % (ran if ran is not None else "?", runner_sec,
+               "; ".join(trend_lines), receipt_path),
+            suggest=False))
+    return findings
+
+
+#: Period parsing for suite-receipt filenames (LEDGER_NAME_RE does not cover the
+#: -suite suffix — ledger entries and suite receipts are two name shapes; this row
+#: exists only for the function below and keeps its lexicon verbatim identical).
+_SUITE_LEDGER_NAME_RE = re.compile(
+    r"^inspection-(?P<inst>[a-z0-9][a-z0-9-]*?)-(?P<period>\d{8}(?:-[1-9]\d*)?)"
+    r"-suite\.json$")
+
+
+def previous_suite_receipt_path(ledger_dir: Any, instance_id: str, period: str) -> Optional[str]:
+    """Ledger dir -> this instance's LATEST suite receipt strictly earlier than
+    `period` (a pure listing function: no writes, no content reads).
+
+    IO (actually reading file contents) lives in the activity shell; this function
+    only lists and filters by filename lexicon — late orphans (-suite-late(-N)) and
+    other instances never become candidates; returns None when nothing qualifies
+    (the caller states "no previous round", never impersonated by another
+    instance/period)."""
+    inst = str(instance_id or "")
+    if not inst:
+        return None
+    d = Path(str(ledger_dir))
+    if not d.is_dir():
+        return None
+    try:
+        names = sorted(p.name for p in d.iterdir())
+    except OSError:
+        return None
+    best: Optional[Tuple[str, str]] = None   # (period, name)
+    for name in names:
+        if not name.endswith(SUITE_RECEIPT_SUFFIX) or "-suite-late" in name:
+            continue
+        m = _SUITE_LEDGER_NAME_RE.match(name)
+        if m is None or m.group("inst") != inst:
+            continue
+        p = m.group("period")
+        if str(period) and p >= str(period):
+            continue                          # only strictly earlier periods qualify
+        if best is None or p > best[0]:
+            best = (p, name)
+    return str(d / best[1]) if best else None
+
+
+def suite_findings(receipt: Dict[str, Any], thresholds: Any = None,
+                   threshold_note: str = "") -> List[Dict[str, Any]]:
     """套件回执（run_inspection_suite 的 result 形状）→ 发现清单。
 
     机械映射（红=high；环境红=med；「没跑成」=high）：
@@ -332,7 +652,7 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings.append(make_finding(
             SUITE_SCAN, "high", "Suite red: %s" % name,
             "exit=%s | output tail: %s" % (ex, _tail(d.get("output_tail"))),
-            suggestion="Human review decides: open a dev-lane fix ticket (source_inspection=<this inspection ticket>)")),
+            suggestion="Human review decides: open a dev-lane fix ticket (source_inspection=<this inspection ticket>)"))
     if len(reds) > SUITE_RED_DETAIL_CAP:
         more = reds[SUITE_RED_DETAIL_CAP:]
         findings.append(make_finding(
@@ -340,7 +660,7 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
             "per-scenario detail is in the suite receipt: %s | not listed: %s"
             % (receipt.get("report_path") or "(no receipt written)",
                "、".join(str(d.get("name") or "（无名）") for d, _ in more[:20])),
-            suggestion="Human review decides: triage item by item from the receipt file")),
+            suggestion="Human review decides: triage item by item from the receipt file"))
     if env_fail > 0:
         findings.append(make_finding(
             SUITE_SCAN, "med", "Suite environment red: %d" % env_fail,
@@ -378,6 +698,12 @@ def suite_findings(receipt: Dict[str, Any]) -> List[Dict[str, Any]]:
             % (_tail(receipt.get("late_error"), 300),
                receipt.get("report_path") or "(no receipt written)"),
             suggest=False))
+    # t261008-43 suite-duration leg: thresholds=None (old callers / old replay) skips
+    # the whole leg, byte-identical zero regression; when passed, duration findings
+    # are APPENDED after the existing ones — never suppressing or merging
+    # error/ran==0/reds/env_fail.
+    if thresholds is not None:
+        findings.extend(duration_findings(receipt, thresholds, threshold_note))
     return findings
 
 
@@ -430,6 +756,14 @@ def suite_section(receipt: Dict[str, Any], wall_seconds: Any = None) -> Dict[str
     for k in ("supply_used_sec", "runner_used_sec", "run_budget_sec", "supply_timeout_sec"):
         if receipt.get(k) is not None:
             out[k] = receipt[k]
+    # t261008-43 duration-leg passthrough (additive; absent keys add nothing, old
+    # receipts drift nothing): the threshold source line (the ticket face reads at a
+    # glance who set the bar) and the raw previous-round comparison face (the
+    # human-readable trend evidence).
+    if receipt.get("duration_threshold_note"):
+        out["duration_threshold_note"] = str(receipt["duration_threshold_note"])
+    if isinstance(receipt.get("prev_round"), dict) and receipt["prev_round"]:
+        out["prev_round"] = dict(receipt["prev_round"])
     return out
 
 

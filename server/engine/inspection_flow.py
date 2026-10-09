@@ -170,6 +170,14 @@ DEADMAN_LOOKBACK_DAYS = 7
 # 老票卡死）。repo 先例=base.py 的 PAUSE_PATCH_ID / BREATHE_PATCH_ID；机器化验证=
 # replay_check.py --workflow <老票 id>（本票实测四张在途老票全绿）。
 SUITE_PATCH_ID = "t260913-02-inspection-suite-stage"
+# Patch gate id (t261008-43, replay-safe): the suite activity (run_inspection_suite)
+# gains a `watchdog` args key (the suite-duration leg's raw declaration values) in new
+# runs only — in-flight tickets' histories hold activity commands without the key, so
+# generating the new args unconditionally would break replay determinism (permanent
+# workflow task failure). The judgement face needs no gate: suite_findings wires the
+# duration leg only when the receipt itself carries duration_thresholds — old
+# receipts/replays drift nothing byte-for-byte.
+SUITE_DURATION_PATCH_ID = "t261008-43-suite-duration-leg"
 # 版本门 id（t260915-20，replay 安全）：无主票守卫 + sign 闸项目面收紧只在新 run 生效。
 # 老 in-flight 票 history 无此标记 → patched()=False → 走旧路径（恒放行），零影响；
 # 新票双空判据见 run 内守卫（README 迁移步：旧调度 payload 撞守卫=可见 blocked）。
@@ -1380,7 +1388,7 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                         "Running the full integration suite in the inspection lane (lane base %s)"
                       % (lane or {}).get("base_ref", ""))
             suite_section, suite_findings, teardown_note = await self._run_suite(
-                ticket_id, inp, period, lane or {})
+                ticket_id, inp, period, lane or {}, plan)
             extra_findings += suite_findings
             if suite_section.get("suite_timeout"):
                 # 套件段硬超时（活动被判死）：本段必须自己点名——拆泳道前先等一小段，
@@ -1818,7 +1826,7 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
 
     async def _run_suite(
         self, ticket_id: str, inp: "InspectionPeriodicInput", period: str,
-        lane: Dict[str, str],
+        lane: Dict[str, str], plan: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], str]:
         """跑全集 + 拆泳道。返回 (票面套件段, 套件发现, 拆除说明)。
 
@@ -1841,7 +1849,14 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                        "instance_id": inp.instance_id, "period": period,
                        "run_budget_sec": float(SUITE_RUN_BUDGET_SEC),
                        "supply_timeout_sec": float(INTEG_SUPPLY_TO_SEC),
-                       "suite_timeout_sec": float(SUITE_TO.total_seconds())}],
+                       "suite_timeout_sec": float(SUITE_TO.total_seconds()),
+                       # t261008-43: pass the raw `watchdog` declaration block through (duration threshold
+                       # resolution happens in the activity shell, declaration > env >
+                       # default). PATCH-GATED: the args key is generated in new runs
+                       # only (old-history replay always gets None; the activity falls
+                       # back per key, keeping the command byte-identical).
+                       "watchdog": (dict((plan or {}).get("watchdog") or {})
+                                    if workflow.patched(SUITE_DURATION_PATCH_ID) else None)}],
                 start_to_close_timeout=SUITE_TO, retry_policy=RETRY_SUITE)
             if (raw or {}).get("ok"):
                 receipt = dict((raw or {}).get("result") or {})
@@ -1850,7 +1865,14 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                            "details": [], "ran": 0, "passed": 0, "failed": 0, "env_fail": 0}
         except Exception as e:  # noqa: BLE001——活动故障=可见数据（high 发现），不是期票崩塌
             receipt = suite_failure_receipt(e, SUITE_TO.total_seconds())
-        findings = suite_findings(receipt)
+        # t261008-43: wire the duration leg (thresholds=None keeps suite_findings in its old
+        # shape) — the activity shell brings the thresholds and the source line back
+        # inside the receipt; a receipt without the keys (failure/old-replay shapes)
+        # skips the leg entirely — thresholds are never invented in the workflow.
+        _dur_thr = receipt.get("duration_thresholds") \
+            if isinstance(receipt.get("duration_thresholds"), dict) else None
+        findings = suite_findings(receipt, _dur_thr,
+                                  str(receipt.get("duration_threshold_note") or ""))
         teardown_note = await self._teardown(ticket_id, lane, report_residue=True)
         return suite_section(receipt), findings, teardown_note
 
@@ -2416,7 +2438,7 @@ async def _run_legacy_period_flow(wf: "InspectionPeriodicWorkflow",
                   "Running the full integration suite in the inspection lane (lane base %s)"
                       % (lane or {}).get("base_ref", ""))
         suite_section, suite_findings, teardown_note = await wf._run_suite(
-            ticket_id, inp, period, lane or {})
+            ticket_id, inp, period, lane or {}, plan)
         extra_findings += suite_findings
         wf._enter("suite", "running", "Lane teardown: %s" % teardown_note)
         if teardown_note.startswith(TEARDOWN_RESIDUE):

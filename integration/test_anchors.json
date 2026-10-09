@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 236,
-      "scenarios": 604
+      "engine_tests": 237,
+      "scenarios": 608
     },
     "vocab": [
       "behaviour",
@@ -1185,6 +1185,11 @@
     "server/engine/tests/test_t261009_03_concurrency_reorder_cli.py": {
       "anchor": "behaviour",
       "note": "t261009-03 CL-3: ticket.py order face routes to the engine reorder - refusal-by-name with byte-identical state, valid permutation reads back through read_state, empty/non-permutation/unqueued-id refused, holder accounting untouched, no-order-key output byte-identical to the pre-change read face, reconcile path unchanged, reconcile+order -> order wins (review conditional 4a)",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "server/engine/tests/test_t261008_43_suite_duration.py": {
+      "anchor": "behaviour",
+      "note": "t261008-43 suite-duration leg: pure judgement face + resolver fault modes + wiring source assertions",
       "sync_path": ""
     }
   },
@@ -4222,6 +4227,11 @@
     "integration/t261009-12/sc_lint_verdict_stable_or_named.py": {
       "anchor": "behaviour",
       "note": "",
+      "sync_path": ""
+    },
+    "integration/t261008-43/sc_inspection_suite_duration_leg.py": {
+      "anchor": "behaviour",
+      "note": "t261008-43: grey-box L3 rod — the suite-duration leg contract (threshold surface, slow-round finding with source line, outliers capped+counted, bigger-vs-slower trend, coexistence/classification) exercised through the public judgement functions over in-memory fixture receipts",
       "sync_path": ""
     }
   }
