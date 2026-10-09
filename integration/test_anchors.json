@@ -4264,6 +4264,16 @@
    "note": "t261008-43: grey-box L3 rod — the suite-duration leg contract (threshold surface, slow-round finding with source line, outliers capped+counted, bigger-vs-slower trend, coexistence/classification) exercised through the public judgement functions over in-memory fixture receipts",
    "sync_path": ""
   },
+  "integration/t261009-16/sc_fast_set_declaration.py": {
+   "anchor": "behaviour",
+   "note": "pins the CLI declaration face (membership/budget/cost), not internal names",
+   "sync_path": ""
+  },
+  "integration/t261009-16/sc_fast_set_gate.py": {
+   "anchor": "behaviour",
+   "note": "pins fail-closed refusal faces over fixture injections",
+   "sync_path": ""
+  },
   "integration/t261009-15/sc_t26100915_quiet_baseline_identity.py": {
    "anchor": "contract",
    "note": "t261009-15: carrier-independent identity seam — engine canonical_check_name vs booked roster row vs the two real carriers (KI-072)",

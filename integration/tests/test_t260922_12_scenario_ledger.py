@@ -244,22 +244,45 @@ def test_rollup_moves_aged_rows_dedupes_and_is_idempotent(ledger_home):
     assert out2["rolled_up"] == 0, "重跑幂等"
 
 
-def test_append_opportunistic_rollup_respects_marker(ledger_home):
-    """标记新鲜（<24h）→ append 不触发 rollup；标记过期 → append 触发（老行卷出）。"""
+def test_append_is_append_only_even_with_stale_rollup_mark(ledger_home):
+    """t261009-16 段新契约（t260922-12 R2 的单元面）：append **绝不改写主账**——
+    即使 .last-rollup 标记早已过期，append 后旧字节前缀仍逐字节保持、只有新行追加。
+    机会性 rollup 已从 append 路径摘除（验证轮中间整文件重写=R2 实红）；保留窗
+    维护只走显式 _maybe_rollup / CLI rollup 面。"""
     mark = ledger_home / sl.ROLLUP_MARK
     mark.write_text("1\n", encoding="utf-8")
     os.utime(str(mark), (NOW - 3600, NOW - 3600))  # 新鲜：1h 前
     sl.append_records([mk_row(verdict="fail", ts=iso(NOW - 100 * 86400))], now=NOW)
+    b1 = (ledger_home / sl.MAIN_NAME).read_bytes()
     rows, _ = sl.read_rows()
     assert len(rows) == 1, "标记新鲜：老行暂留主账"
+    # 过期标记（25h 前）→ 旧行为会在这里触发 rollup 整文件重写；新契约：append-only。
+    os.utime(str(mark), (NOW - 25 * 3600, NOW - 25 * 3600))
+    sl.append_records([mk_row(scenario="s3", ts=iso(NOW - 86400))], now=NOW)
+    b2 = (ledger_home / sl.MAIN_NAME).read_bytes()
+    assert b2.startswith(b1) and b2 != b1, \
+        "append-only：过期标记下 append 也不改写旧字节前缀"
+    rows, _ = sl.read_rows()
+    assert len(rows) == 2, "两行都在主账（老行未被卷出）"
+
+
+def test_explicit_maybe_rollup_respects_marker_and_rolls_up(ledger_home):
+    """显式维护面语义不变（原 append 机会性行为迁移到此）：标记新鲜 → 不触发；
+    标记过期 → 触发（老行卷出到月卷，窗口内行保留）。"""
+    mark = ledger_home / sl.ROLLUP_MARK
+    mark.write_text("1\n", encoding="utf-8")
+    os.utime(str(mark), (NOW - 3600, NOW - 3600))  # 新鲜：1h 前
     # s2/s3 是「应留」的窗口内行：ts 必须显式落在 NOW 的 90 天窗内（mk_row 默认
     # ts=2026-09-21，距 NOW≈116 天=超窗——原数据让 rollup 把它们当老行卷光，
     # rows==[] 与断言「3→2」自相矛盾；测试数据缺陷修复，断言语义不变）。
+    sl.append_records([mk_row(verdict="fail", ts=iso(NOW - 100 * 86400))], now=NOW)
     sl.append_records([mk_row(scenario="s2", ts=iso(NOW - 86400))], now=NOW)
+    sl._maybe_rollup(ledger_home / sl.MAIN_NAME, now=NOW)
     rows, _ = sl.read_rows()
-    assert len(rows) == 2, "标记仍新鲜：不触发 rollup"
+    assert len(rows) == 2, "标记新鲜：显式触发也不 rollup"
     os.utime(str(mark), (NOW - 25 * 3600, NOW - 25 * 3600))  # 过期 → 触发
     sl.append_records([mk_row(scenario="s3", ts=iso(NOW - 86400))], now=NOW)
+    sl._maybe_rollup(ledger_home / sl.MAIN_NAME, now=NOW)
     rows, _ = sl.read_rows()
     assert len(rows) == 2, "触发后老行已卷出（3→2）"
 

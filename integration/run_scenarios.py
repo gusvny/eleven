@@ -133,11 +133,11 @@ SCENARIOS = [
     # ---- t261009-10: workbench refusal copy anchor contract + anchor-rot tripwire ----
     ("t261009-10-refusal-copy-anchor-contract",
      "The workbench agent faces' out-of-root refusal keeps its contract and its copy anchor cannot rot silently again (ticket t261009-10, split from t261009-01, grey-box L2, real production module imported directly, offline seconds, zero docker/Temporal/browser, never touches 3099; tier: component contract over the shared resolveAgentBaseDir refusal face plus a test-face source tripwire; cost: seconds): C contract — worktree \"..\" escape, default-extraRoots miss and absolute-out-of-every-root all refuse with base='' + refused/named reason carrying the shared stable anchor 'refused to read' (the same substring the smoke faces pin — never the whole sentence, KI-051 discipline), with the negative regression that an in-root worktree still resolves to <wt>/.suyou untouched; M malformed input — null ticket and empty worktree return a shaped result, never throw; R anchor-rot tripwire (the ticket's own fault mode: production copy migrated Chinese「越界」-> English while the smoke kept pinning the dead anchor, red 50/1, invisible to the engine gate because smoke is agent-run only and verify.yaml has no smoke reference — KI-047 observation) — the production source must still carry the pinned anchor and the three smoke faces must pin zero `includes('越界')` assertions, each stale hit named with its line number. Intent split: developer L1 owns the per-face smoke assertions themselves (workbench smoke/); this entry owns the shared refusal contract at the gate level and the cross-face rot tripwire, so copy migrations can never again strand the smoke red outside the gate. Pre-fix tree: R red is the expected TDD signal; green required at the integration gate / merge. node missing / production TS unimportable = ENV_FAIL exit 2",
-     "node integration/t261009-10/sc_refusal_copy_anchor_contract.mjs", "ro"),
+     "node integration/t261009-10/sc_refusal_copy_anchor_contract.mjs", "ro", "fast"),
     # ---- t261008-43: the inspection notices a slow integration suite (duration leg) ----
     ("t261008-43-inspection-suite-duration-leg",
      "The inspection suite face reports a slow round by itself (ticket t261008-43, host order 261008, regression rod for KI-060 suite-health-unattended; grey-box L3, offline seconds, zero docker/Temporal/browser, never touches 3099): A the two suite-duration thresholds ride the SAME watchdog declaration key union (no second threshold surface), env override names are declared once, and the resolver's per-key fallback is declaration > env > default with the source word named, malformed declared values falling back named instead of throwing; B a long runner_used_sec produces a duration finding naming the measured value, the threshold, its source word and the receipt path, a short round produces none, an env-overridden threshold says source=env, and the hang shape (over run_budget_sec) escalates severity to high while staying suggest=false; C missing or malformed duration fields produce a named duration-unreadable note, never a silent pass; D per-scenario outliers are named WITH their pool — two slow scenarios under the cap are both named, fast ones are not, and over the cap the list is capped AND the remainder counted (no silent truncation); E the trend face: this vs previous round — scenario count up with a flat per-scenario average reports bigger and NOT slower, a rising average reports slower, an unreadable previous round is said explicitly (no fabricated numbers), and a ran==0 previous round never divides by zero; F coexistence and classification: a receipt that is error + reds + env_fail AND slow yields ALL existing findings plus the duration findings (nothing suppressed, nothing collapsed), and every duration finding is suggest=false, med severity (high only in the hang shape), never proposing a fix ticket or rework round. Judgement is exercised through the module's public functions over in-memory fixture receipts; the duration entry point is discovered by contract name so a keeping refactor stays green. Pre-implement red is the expected TDD signal; must be green at arbitrate/merge.",
-     "python3 integration/t261008-43/sc_inspection_suite_duration_leg.py", "ro"),
+     "python3 integration/t261008-43/sc_inspection_suite_duration_leg.py", "ro", "fast"),
     # ---- t261008-24: gate zero-run supply receipt must be a named blocker, not a green pass (KI-220) ----
     ("t261008-24-supply-zero-run-blocker",
      "零执行闸回执×命名拦阻×计轮豁免×合并闸绿跑前置接缝（t261008-24 要求①②③/验收 L3(a)，灰盒 L2.5 离线，admin.py 真入口+真 verify_lane+真 dev_lane/agent_activities 模块）：KI-220 实案（t261008-07 最后一轮 ran=0/blockers=[]/供给签名 err 被当绿，merge 落 main 而本票场景一次未跑）的接缝面——供给装配失败两态（exit 7 失败/timeout 超时）真跑闸产出的零执行回执（ran=0∧failed=0∧blockers 空∧err 命中 shared.tests_supply_assembly_error）⇒ gate_zero_run_supply_blocker 命名拦阻（reason_code=supply_zero_run，按签名命名非按计数）+ supply_stop_route 返回 blocked: 路由（不再当 no-red 流向 arbitrate），封据文本点名供给面（SUPPLY_SIDE_RED 原样在场+need 名）与出路 retry_qc；计轮豁免语义保持（同回执 _tests_round_account 仍 counted=False，无假封不耗轮）；假拒绝护栏（宁窄勿宽）=合法零执行轮（err 空）与非签名启动级文案（执行器整体超时，t260920-01 C 形态）均不命中、后者照旧保守计轮；对照组 PASS 桩=闸绿且绿回执不命中。合并闸绿跑前置（KI-217 出口①同一机制）：真 git 夹具仓离线直驱真 merge_check 新检查项真值表——缺面（老回放缺省）⇒红点名 zero-run(KI-220) 永不默认绿；sha 不配⇒红点名 stale；畸形面⇒红 fail-closed；合法零在册（no_scenarios）+sha 配⇒绿且理由在场；ran>0 绿跑+sha 配⇒绿。分工：t260920-01-supply-assembly-seam 锁旧三环（出口×签名×计轮），本条新增锁第四环（路由决策点命名拦阻）与合并闸前置项真值表，彼场景 A1f/A2c 语义未动不重复；t261008-24-zero-run-gate-stop 锁真 worker 全旅程（STOP→恢复→retry_qc→merge），developer L1 锁纯函数真值表（构造串直驱）。现状注记：新函数未落地前 A/D 段红属预期（TDD 信号），arbitrate/merge 期必须绿。纯离线秒级零 docker",
@@ -148,7 +148,7 @@ SCENARIOS = [
     # ---- t261008-26: one lane vocabulary, fail-closed on both faces (KI-226) ----
     ("t261008-26-lane-vocabulary-gate",
      "An unrecognised lane name is refused on BOTH faces with the value named, and every legitimate non-worktree ticket is untouched (ticket t261008-26 / KI-226, incident 261008: eight tickets created with lane=\"land\" returned ok:true with no worktree, no branch, no base_ref — silently degraded to the main tree, ran stage after stage producing nothing and never going blocked, grey-box L2/L3, real engine module, offline seconds, zero docker/Temporal/browser, never touches 3099; tier: component contract over the two public guard faces, the ticket's entire user-visible surface is these two refusals plus their absence on legal shapes): A creation side — derive_lane_workspace raises ValueError naming the value verbatim for each of 'land','wt','dev','Worktree' (case), ' worktree' (whitespace), 'main-tree', including the smuggled shape explicit lane == template lane (the check must be unconditional on the RESOLVED lane); an EMPTY explicit lane keeps falling back to the template lane for both a worktree template (full shape derived) and a main template (no worktree rendered). B workflow side — lane_workspace_gate_error returns a named error for every unrecognised meta.lane (hand-written payloads, old payloads, future entry points). C ZERO DISTURBANCE as negative assertions — '' for: no-lane workflow (content-studio), explicitly empty lane, main lane, main+dir workspace, full worktree shape, multi-repo worktree shape; and the existing shape checks still fire (worktree lane with missing workspace / empty worktree / disagreeing path / empty branch). D single source — LANES is exactly ('main','worktree') and both faces judge it. Malformed input (case/whitespace variants) judged unknown, never convenience-accepted. Pre-fix tree red (TDD signal); green at the integration gate/merge. Engine module unavailable = ENV_FAIL exit 2",
-     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261008-26/sc_lane_vocabulary_gate.py", "ro"),
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261008-26/sc_lane_vocabulary_gate.py", "ro", "fast"),
     # ---- t261008-22: a mechanically-rejected (blocked) inspection ticket gets a human exit ----
     ("t261008-22-void-named-surface",
      "Voiding a terminal blocked inspection ticket is a NAMED disposition recorded in the engine's own ledgers (ticket t261008-22 host order 261008, KI-192 family, grey-box L2/L3 on the module+ledger files, offline seconds, zero docker/Temporal/browser, never touches 3099): A1 a fixture period whose ledger doc carries the blocked face voids with who+reason — exactly one void-journal row (instance/period/ticket_id/who/reason/at) and the ledger doc gains a voided field carrying the SAME who/reason verbatim (face × record agreement, acceptance 4); A2 reason-less / who-less / agent-named voids are refused BY NAME with the ledger directory byte-identical afterwards (zero side effects asserted by byte-compare, L1 evidence); A3 population refusals — served (unproven) face, unreadable doc, wrong ticket_id — each refused by name, zero writes (void only applies to blocked tickets; served findings can never be voided away); A4 idempotence — a second void names the FIRST disposition (who/reason/at) and writes nothing; A5 a torn pre-existing journal row is counted, never fatal, never blocks a fresh void of another ticket (external-input discipline); A6 the blocked_reason/findings survive the void verbatim (voiding never reads as success). Intent split: composition with re-run belongs to t261008-22-void-then-rerun-period; panel/row faces to the mjs entries; this entry owns the void surface's engine-side contract. Pre-implement = FAIL naming the missing surface (TDD red expected); green at arbitrate/merge. Engine tree unimportable = ENV_FAIL exit 2",
@@ -920,7 +920,7 @@ SCENARIOS = [
      "node integration/baselines/sc_sandbar_contract_v1.mjs", "ro"),
     ("sandbar-dsh-compat",
      "(doc-guard, t260903-08): 契约 v1.7 ⑧节 dsh 兼容区间/四条升版必查项/版本自报口径在场，交接单取舍清单覆盖 R1 关键词+V1 真孤儿优先级+3099 六词禁词表——⑧节是安装器 upgrade/doctor 探针的机器消费面，缺失=消费方展示假区间/升版复扫漏项",
-     "node integration/baselines/sc_sandbar_dsh_compat.mjs", "ro"),
+     "node integration/baselines/sc_sandbar_dsh_compat.mjs", "ro", "fast"),
     ("ui-evidence-failure-retention",
      "显式钉死候选环境：单直连候选（假 capture.mjs 秒退 3）+ 死端口 + 临时归档目录。",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=../../server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/baselines/sc_ui_evidence_failure_retention.py", "browser-free"),  # free: no console — dead-port negative test
@@ -954,16 +954,16 @@ SCENARIOS = [
      "python3 integration/sc_check_concurrency_reorder_face.py"),
     ("metrics-contract-doc-structure",
      "t260901-11 M0 集成测试：契约文档存在性与结构（黑盒文档基线） // 验收对象：docs/design/metrics-api-contract-v1.md // - 存在、fro",
-     "node integration/baselines/sc_metrics_contract_doc_structure.mjs", "ro"),
+     "node integration/baselines/sc_metrics_contract_doc_structure.mjs", "ro", "fast"),
     ("metrics-contract-schema-sync",
      "t260901-11 M0 集成测试：两文档 schema/枚举冻结同步（防各说各话） // 验收对象： // 1. 契约文档缓存 schema 行与 UI 规划 §6 sch",
-     "node integration/baselines/sc_metrics_contract_schema_sync.mjs", "ro"),
+     "node integration/baselines/sc_metrics_contract_schema_sync.mjs", "ro", "fast"),
     ("metrics-contract-api-freeze",
      "t260901-11 M0 集成测试：/metrics API 契约冻结面（请求/响应/错误/双前门） // 验收对象：契约文档中冻结的请求参数、响应字段、错误与降级行为、字节",
-     "node integration/baselines/sc_metrics_contract_api_freeze.mjs", "ro"),
+     "node integration/baselines/sc_metrics_contract_api_freeze.mjs", "ro", "fast"),
     ("metrics-contract-criteria-faultmodes",
      "t260901-11 M0 集成测试：口径钉死与故障面（review 三轮收敛成果的回归守卫） // 验收对象： // 1. 三维口径（时间/交付/token）各有真源与已知近",
-     "node integration/baselines/sc_metrics_contract_criteria_faultmodes.mjs", "ro"),
+     "node integration/baselines/sc_metrics_contract_criteria_faultmodes.mjs", "ro", "fast"),
     ("t19-cache-probe",
      "!/usr/bin/env python3 '''t260901-19 T4: cache_probe tool (plan v3 item 1, read-only inve",
      "python3 integration/t260901-19/sc_t04_cache_probe.py"),
@@ -1059,13 +1059,13 @@ SCENARIOS = [
      "python3 integration/t260902-11/sc_t03_log_faultsurface.py"),
     ("t260903-02-fork-contract",
      "泳道提速②并行分叉契约：分叉边名必须是 STAGES id（防未知步骤卡死，t260901-04 同款）；单点 settle 先于 verdict 判定（tests-fault 测试集改动先落账再重跑）；非 pass 作废走查有留痕",
-     "python3 integration/t260903-02/sc_fork_contract.py", "ro"),
+     "python3 integration/t260903-02/sc_fork_contract.py", "ro", "fast"),
     ("t260903-02-conditional-contract",
      "泳道提速③附条件放行契约：FLOW_BRIEF 三态词表与解析正则同源且带负向断言；附条件意见直通 implement 前缀在场且拼接 report；plan_rounds 计数点恰 1 处（只 reject）；打回环与超限 blocked 文案保留；纯函数真接线",
-     "python3 integration/t260903-02/sc_conditional_contract.py", "ro"),
+     "python3 integration/t260903-02/sc_conditional_contract.py", "ro", "fast"),
     ("t260903-02-lock-update-integrity",
      "两把已登记精确锁随 arb_acc_parallel 新键同步且不弱化：py EXPECT 恰 13 键含新键、total_calls==7；mjs len==13、findall==8、旧字面退场、键集合动态比对保留",
-     "python3 integration/t260903-02/sc_lock_update_integrity.py", "ro"),
+     "python3 integration/t260903-02/sc_lock_update_integrity.py", "ro", "fast"),
     ("contract-v11-onboarding",
      "下一个项目接入全旅程：照契约 ②a~②e 写最小 verify.yaml（列表命令制 checks 含 cwd/timeout、integration.cmd 三行协议桩），admin.py call 真入口双道绿且返回形状逐键符合 ②b-(b)；越界写红并点名；场景失败 exit 透传（t260903-01）",
      "node integration/t260903-01/sc_contract_v11_onboarding.mjs"),
@@ -1077,7 +1077,7 @@ SCENARIOS = [
      "node integration/t260903-01/sc_contract_v11_checks_exec.mjs", "ro"),
     ("contract-v11-regression-rods",
      "本票勘误回归棒（KI-020① 同族「真源文件自身漂移」）：verify_lane.py 幻影/退役措辞零残留、契约文档 F1（integration 道无关闭态+零场景绿惯用法）与 F2（汇总行参考性）语义明文、verify.yaml 头注指向 ②a~②e；实现落地前红=预期（t260903-01）",
-     "node integration/t260903-01/sc_contract_v11_regression_rods.mjs", "ro"),
+     "node integration/t260903-01/sc_contract_v11_regression_rods.mjs", "ro", "fast"),
     ("t260903-03-paths-spawn-seam",
      "路径契约化端到端（跨组件：注册条目×路径解析×spawn 组装×patch 产物，观测=cmd --patch 链与 patch 文件内容）：声明命中用声明值（roles patch 指声明目录、模型来自声明表，声明优先于现行约定）；未声明多态（无 paths 节/条目不存在/key 空/key 非法含穿越形状）角色 patch 走现行约定（roles 语义不变）而模型面无表=不打 model patch+引擎面点名 state=decl_missing（t260914-05 兜底分支退役，禁静默回落仓内表）；锚点在内容缺走软语义不红（t260903-03 ①d 用户旅程）",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260903-03/sc_paths_spawn_seam.py"),
@@ -1086,7 +1086,7 @@ SCENARIOS = [
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" integration/t260903-03/sc_paths_failclosed_red.py", "ro"),
     ("t260903-03-paths-contract-doc-guard",
      "契约 ①d/v1.6 落地防漂移（对外合同冻结）：①d 两键声明、条目文件畸形 fail-closed 不回落、装载器放开前生效前提过渡句、锚点/内容软语义、声明表内容损坏容错边界、空白值 strip 口径（t260903-03）",
-     "python3 integration/t260903-03/sc_paths_contract_doc_guard.py", "ro"),
+     "python3 integration/t260903-03/sc_paths_contract_doc_guard.py", "ro", "fast"),
     ("t260903-04-parallel-stages-meta",
      "并行期快照 meta.parallel_stages 生命周期契约（KI-024①引擎半）：两分叉段写入与汇合清空在案、单 stage 字段保留向后兼容；纯函数行为=词表内写入/词表外与非字符串清洗/去重/空列表删键/幂等（t260903-04）",
      "python3 integration/t260903-04/sc_t01_parallel_stages_meta.py", "ro"),
@@ -1123,7 +1123,7 @@ SCENARIOS = [
     # ---- t260904-07 project-session opening injection, session-charter (charter file + GET endpoint + injected exactly once for blank) ----
     ("t260904-07-charter-source-contract",
      "charter 交付契约冻结（t260904-07，ro 静态面）：【260926 宿主令「删 S1，不开票」】原 S1「charter ↔ notes/discussions/260904-project-session-charter.md 附录 fenced 模板逐字同步」已删——它把运行时文本锚死到 notes 讨论档，而 notes/ 不在任何泳道写集内（有意设计）→ 涉及 charter 的票对该断言结构性不可满足（实测卡死 t260925-21 九轮仲裁、t260907-05 一次、回写当刻主仓出镜像红），且与本场景 S2「授权栏内容会合法变更故不锚内容」自相矛盾；真源同步改由人的流程承接（charter 改动落票 + 人审签字时主审核对）。现余面：交付物在位（charter 文件存在）；结构要素在文（四占位符/两纪律语义锚：notes 落盘攒批+点名修复先告知/当前在案授权节在/sandbar、suyou 两分段）；端点注册路径与客户端请求路径两侧各自可解析到同一路径字面量（直字面量或同源常量两实现形态都过——KI-042 同族「路径漂移→恒 404 静默吞」的对症看守）；内置回落模板在位含占位符（缺文件回落不 5xx 的前提）。与随票 smoke intent 级不同层：smoke 锚实现守卫源锚（L1/L2），本条锚交付物在位、结构要素与跨端接线一致性。t260905-04 随迁 S5 打标同源锚：charter 机读标记在宿主侧同源定义+客户端经常量引用+端点响应 kind 字段——marker 漂移=折叠件失明静默退化回整段刷屏（KI-042 同族看守）。实现段落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "node integration/t260904-07/sc_session_charter_source_contract.mjs", "ro"),
+     "node integration/t260904-07/sc_session_charter_source_contract.mjs", "ro", "fast"),
     ("t260904-07-charter-endpoint-live",
      "charter 端点活体契约（t260904-07，ro fetch 级，隔离台 3199 拒 3099）：GET session-charter?project=<key> 部署后可感知契约——命中项目 200+{ok,charter}+key 实值化+零 {{ 残留（统一渲染）+命中分段头在文；未命中项目仍 200 只回通用段+无该 key 分段+{{project_name}} 弱化=key；缺/空串 project=400 形状错误 JSON 不崩不 5xx；404 时源锚复核精确归因（源码已接线未部署=fail，pre-merge=干净 skip 部署后自动生效）。t260905-04 仲裁修正命中子用例前提：命中 key 取「注册表∩session_charter.md 有专属分段」的 key（sandbar 优先），注册表在案≠有分段（泳道台 seedws 无分段假红实证），无交集时分段子用例=na 点名台数据前提非产品红。与随票 smoke intent 级不同层：smoke 直测渲染纯函数（内存面），本条锚 HTTP 可达面（真宿主真文件真路由）；「文件缺失回落」「改文件即生效」需对受控文件写操作不在活体子用例，回落归 smoke 纯函数直测、现读现渲染列人工走查",
      "node integration/t260904-07/sc_session_charter_endpoint_live.mjs", "ro"),
@@ -1144,7 +1144,7 @@ SCENARIOS = [
      "python3 integration/t260904-13/sc_ki044_merge_gate_ui_item.py", "ro"),
     ("t260904-13-lane-patchgate-wiring",
      "dev_lane UI 判定源接线与部署兼容结构（t260904-13 KI-044 编排面，灰盒 L3）：主链判定换新 activity 必须套 workflow.patched 兼容门（新实例走 diff 判定、挂起中存量实例重放走旧布尔分支=命令序列与旧历史严格一致，部署不破存量工单）；patch id 值钉死 dev-lane-ui-diff-v1（历史标记键改名=存量重放断裂）；新命令恰 1 处（旧链尾——仅存量重放可达——冻结不引入新命令）；patch 门先于新命令（门控形状）；新路径入参取 meta 泳道三件套 worktree/branch/base_ref。与判定源/闸两场景 intent 不同面；与 developer selfcheck（锁字面随实现重写）不同深度——本条锁不可随重构漂移的部署承诺。temporalio 泳道不可用→源码契约结构锁（t05 同族）。实现已随本票落地全绿；实现回退或契约破面则红，arbitrate/merge 期必须绿",
-     "python3 integration/t260904-13/sc_ki044_lane_patchgate_wiring.py", "ro"),
+     "python3 integration/t260904-13/sc_ki044_lane_patchgate_wiring.py", "ro", "fast"),
     # ---- t260904-10 project lifecycle ticket 1: sandbar project add/list (registry wiring face) ----
     ("t260904-10-project-add-dual-loader",
      "add 产出条目的双侧装载一致性（t260904-10，ro 隔离根）：真跑 `sandbar project add` 后 Python shared.load_projects_registry 与 TS project-registry.ts.loadRegistry 从同一隔离根（SANDBAR_PROJECTS_DIR 临时目录）装载出同一条目（key/name/dirs 全等）、零隔离；首装载×seed 自动播种真路径（tracked 种子 suyou 在案+.migrated 落盘）且 add 后种子条目字节不动（决策7 不动账）；体检报告三词汇（verify.yaml/credentials/paths）在文且 credentials 先布置/裸目录两态输出可辨——排他性锚 project.yaml 文件而非条目目录（契约①b：目录与 per-key credentials 可先于 add 布置，O_EXCL 架在目录 mkdir 上=此子用例红契约对）；写入零 .tmp. 残留；--json 机器可判。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
@@ -1567,7 +1567,7 @@ SCENARIOS = [
      "node integration/t260910-15/sc_build_reproducible.mjs"),
     ("t260910-15-toolchain-pinned",
      "打包工具链锁定完备负锁（t260910-15 验收①前置=t260908-01 化妆噪音故障的复发条件移除守卫，灰盒 L2 纯读秒级）：仓内不存在任何会拉到非 0.22.2 tsdown 的活声明口径——package.json devDependencies 精确版本无 ^/~；package-lock.json 根 specifier 与 node_modules/tsdown resolved 双点、pnpm-lock.yaml importers 段 specifier/version 双点均 0.22.2（双锁矛盾即 260910 实锤病灶：pnpm 路径曾锁漂移版）；口径载体文件集（package.json/两把 lockfile/tsdown.config.ts/build-client.sh/README）零漂移版本词面负锁（活口径只长在承诺载体上；验收记录等叙述面合法不扫——词面全仓扫会误咬历史叙述并自咬本场景，试跑实录）；start-console.sh 的 npx@0.22.2 为写集外合法固定面，主版本锚不进载体集合）；组件公开构建入口 scripts.build 指向仓内构建脚本非裸 tsdown。判定器先红绿自证（0.22.14 合成锁样必咬≥4 处、0.22.2 锁样必绿=防恒真）；锁定载体文件缺失/不可解析=FAIL 点名（承诺载体被拆是产品红非环境缺）。与 developer L1 负锁断言 intent 不同层；与 t260903-12-merge-checks-pairs（护栏配置对齐面）不同面。锚文件终态不锚行号与内部结构。实现段落地前红属预期（TDD 信号：当前仓双锁矛盾在案），arbitrate/merge 期必须绿",
-     "node integration/t260910-15/sc_toolchain_pinned.mjs", "ro"),
+     "node integration/t260910-15/sc_toolchain_pinned.mjs", "ro", "fast"),
 
     # ---- t260911-06: KI-073 收口——产物 provenance 闸侧归因点名（票型触发） ----
     ("t260911-06-artifact-provenance",
@@ -2136,7 +2136,7 @@ SCENARIOS = [
      "python3 integration/t260920-03/sc_terminology_l7_gate.py", "ro"),
     ("t260920-03-terminology-baseline-floor",
      "术语基线帽单调看守（t260920-03 要求②「值只许降；上调=红」的机械化，灰盒 L1 离线秒级，纯标准库零子进程）：L7（兄弟条目 terminology-l7-gate 所守）只判用量不新增，对「改基线本身」全盲——抬帽/扩 allowlist/加新键都能把新增用量合法化而 L7 恒绿。本条把 S4 落地后的基线冻结为 floor 快照（integration/t260920-03/terminology-baseline-floor.json，程序化生成、只降恒绿无需随批更新）：逐键现值≤floor、键集只许收缩、allowlist（-1）面冻结为术语表本体与基线自身、汇总 total_before_allowlist 只许降，违例逐条点名（帽被抬/免红令面扩/基线扩面/汇总上调）——封死「加用量同时抬帽给自己发免红令」（t260911-03 改共享守卫期望值同族事故的术语域形态）。比较器合成数据红绿电池自证（抬帽红/下调绿/缩键绿/扩 allowlist 红/扩键红/汇总上调红/畸形红）防检测器失明；出路可达面=L7 红行指向的 docs/terminology.md「禁用对照」真源在册且真列被禁字（chr 构词断言，红行出路不得 404）。与 terminology-l7-gate 不同面（彼守用量维、本条守帽维），合壁才完整不互替；被看守文件缺损/畸形=产品红点名（仓内受控资产面，非环境缺席，无 ENV_FAIL 子用例）",
-     "python3 integration/t260920-03/sc_terminology_baseline_floor.py", "ro"),
+     "python3 integration/t260920-03/sc_terminology_baseline_floor.py", "ro", "fast"),
     ("t260921-03-close-health-board",
      "已结束工单的收口健康度引擎行/详情契约（t260921-03 验收①②③之数据面，灰盒 L2 离线，stub temporalio+过滤串忠实桩，共享夹具 _stub_temporalio 镜 t260919-02 桩法）：实案复现（t260920-02/t260921-01 形=面快照 blocked×工作流 COMPLETED×无报告）行带 close_health=abnormal+exec_status=COMPLETED+非空事实原因，词面事实原样保留（blocked_reason/findings=0 不回填不清洗——票面边界）；六格矩阵（COMPLETED/FAILED/TERMINATED×有/无产物）：COMPLETED×有产物=ok、×无产物=abnormal、FAILED 两格=failed（dev-lane 与巡检同口径）、TERMINATED 两格=不产生行且零 snapshot/result 查询（僵尸纪律半边原样+资源白烧=0）；反用例=正常收口（有报告）恒 ok 且 reason 空（对账不反向撒谎）、abnormal 必带原因（无因异常禁止）、failed 不混入 abnormal；详情 meta 补终态对账数据源（exec_status/close_health/close_health_reason/终态时刻——现状 meta 无 exec_status=详情表达缺口根）；畸形三态=face 缺失/非串 report_path/findings 非列表全降级不抛不编造、face 缺失的 COMPLETED 不判 ok（产物不可证≠产物在）、收口快照读不到=unreadable 显式存疑绝不冒充 ok、真在飞的查询超时降级行保持 ''+running 词面（KI-008 口径原样）；回归=dev-lane 四形状（meta/极简/失败/降级）既有键值零回归+close_health 键只加不改+四形状键集 parity、R8 闭合窗与白名单不上板口径原样、失败行标题诚实零回归；KI-018① 新增字段纪律=close_health_reason 等新增面不含「刷新重试/查询超时/瞬时」瞬态占位语（既有降级行 title 的占位语是 KI-018 在册面，不属本票不随手修）。分工：t260915-08-board-rows 深钉巡检行形状/R8 窗/白名单（彼时无健康度概念）、t260919-02-terminal-face-board 深钉失败行形状与失败面 face 载荷、t260916-02/t260917-02 守旧形三代/不可辨在跑，本条只钉健康度键存在性/词表语义/详情数据源+零扰动 spot，与彼零重叠；UI 词表与呈现半边归 t260921-03-close-health-ui-model。纯离线无 ENV_FAIL 子用例。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260921-03/sc_close_health_board.py", "ro"),
@@ -2614,7 +2614,7 @@ SCENARIOS = [
     # ---- t261004-02: 机械冲突 blocked 文案点名执行器出路 × 执行器 preset 升级教义/STE 产出标准 ----
     ("t261004-02-block-text-executor-escape",
      "机械冲突 blocked 文案点名执行器自己的出路（t261004-02 Part A，灰盒 L2，离线秒级零 docker 零 Temporal，t261003-10 实案回归棒：执行器被唤醒、诊断正确、却因文案只说「转人工处置」而让步）：A dev_lane merge_check 干跑态两文案（超限/同批）human 锚「转人工处置」逐字保留且同句点名 rework 打回 implement 出路、不把 git 操作指派给执行器（干跑态泳道 .git 是 gitfile 执行器跑不了 git）；B 合并进行中态 settle 两文案（merge_check/主同步缺省）：执行器可自解子句（rework(to_stage=implement)）与人工半句（git merge --abort 复位后 retry_qc）同段在场、各自归位；C light_lane settle_unconverged：rework(to_stage=implement) 与 retry_qc 点名、human 的 abort 复位半句保留、开场「a human has to take it」整块归人矛盾形态拆除；D 真人工分支零污染——unreachable/reset_exception/reset_failed 仍如实指人且不伪造执行器出路；E 负控=实发的那条同批文案必带出路；selfcheck 文案锚（冲突消解 N 轮未收敛/同批文件反复冲突）零漂移。intent 分工：冲突回路机制/重入编排归 t261002-10 与 selfcheck（L1/编排面），本条只锁「文案在 block 时刻告诉执行器怎么自救」的用户可感知文本契约。实现未落地红属预期（TDD 信号），arbitrate/merge 期必须绿",
-     "python3 integration/t261004-02/sc_block_text_executor_escape.py", "ro", "serial"),
+     "python3 integration/t261004-02/sc_block_text_executor_escape.py", "ro", "serial", "fast"),
     ("t261004-02-executor-preset-doctrine",
      "执行器 preset 升级教义×STE 产出标准×安装缝如实报态（t261004-02 Part B，灰盒 L2，离线秒级零 docker）：A 教义面——agent.cordis.yml 点名「转人工处置」措辞（与引擎文案同词可检索）、先自解后报告语义在案、四类升级条件（新授权/更大范围、保护路径、跨项目、宿主拍板）≥3/4 点名；B 产出标准面——ASD-STE100 标准点名、绑定 261003-executor-panel-redesign.md §4 定稿清单（文档真实存在）、清单要点（词长/语态/行话任一）携带、中文分工在案（聊天平实中文/文档现代中文不随 STE）；C 安装缝——install_executor_preset.py --check 退出码在声明词汇表（0=已装/3=未装）且输出具名 live copy 路径、本泳道不代装（宿主步骤留证）。intent 分工：面板 UI/唤醒投递归 t261003-14/-15 族，本条只锁常驻人设的教义与产出标准文本契约。实现未落地红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t261004-02/sc_executor_preset_doctrine.py", "ro", "serial"),
@@ -2725,7 +2725,413 @@ SCENARIOS = [
     ("t261009-12-lint-verdict-stable-or-named",
      "The lint verdict must be reproducible for identical inputs or name its condition (t261009-12 Defect B, measured today: two runs seconds apart printed `LINT done: 0 error / 1 warn` then `20 error` while the fleet was busy — the judged input set is a function of live git state, and on any git read failure the target builder silently degrades to a full rglob; grey-box L3, real lint_tests.py subprocess on the real tree, offline seconds, zero docker, never touches 3099). A two consecutive runs on the untouched tree print byte-identical final `LINT done:` lines; B fault injection — a PATH shim git failing exactly `ls-files` (all other git calls pass through) — the run must NAME the degraded input condition in its own output and the verdict line itself carries the condition (a bare counts line under degraded inputs is the defect face); C under the same injected condition two runs still agree byte-for-byte (naming the condition must not reintroduce drift); D zero residue — shim lives in a temp dir removed in finally, the real tree is never written. Intent split: the pure helpers' unit matrix (base pinning, condition-line formatting, degradation flag) belongs to developer L1; this entry pins the tool's user-visible output contract end to end. python/git or lint_tests.py missing = ENV_FAIL exit 2. Pre-implement red on B is the expected TDD signal; arbitrate/merge must be green",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-12/sc_lint_verdict_stable_or_named.py", "ro"),
+    # ---- t261009-16: the lane's fast global set — declaration face + fail-closed gate faces ----
+    ("t261009-16-fast-set-declaration",
+     "The lane can see its fast global set without running it (t261009-16, design docs/design/develop-buffer-v1.md §'The lane's fast global set', grey-box L3, real run_scenarios.py CLI subprocess on the real tree, offline seconds, zero docker/browser, never touches 3099; user need: members + a declared time budget + measured evidence of what it costs): A --print-fast-set exits 0 with a NON-EMPTY member list whose every name exists in the SAME declared inventory that feeds the full suite (read in a fresh process — never a second hand-kept list); B every member carries a fast-catch: clause naming the breakage it catches early and no member-shaped line lacks one; C a declared budget in minutes is present and the note names the serial/serial-pole accounting honesty; D with an EMPTY scenario ledger (SANDBAR_SCENARIO_LEDGER_DIR at a fresh temp dir) the face still exits 0 and NAMES the no-measured-cost condition per member — it never fabricates a 0s cost for rows it does not have; E membership rules hold on the real tree — no member intersects integration/known-red-baseline.json and no member comes from the browser pool (the round's serial 19.6-minute pole). Intent split: the fail-closed refusal faces belong to t261009-16-fast-set-gate; marker/budget pure-function truth tables belong to developer L1. Pre-implement red expected (TDD signal); arbitrate/merge must be green. run_scenarios.py missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-16/sc_fast_set_declaration.py", "ro"),
+    ("t261009-16-fast-set-gate",
+     "The fast set's gate faces fail closed by name (t261009-16, membership rule 'a chronically-red case must NOT be a member' + KI-01M4FE0T3FG7Y0G9R97NS4T7QJ (an untrustworthy booked-red surface cannot back a tripwire judgement), grey-box L3, real run_scenarios.py CLI subprocess + the public fast_set_entries() helper over fixture registries, offline seconds, zero docker/browser, never touches 3099): A --fast-set and --print-fast-set together refuse with a named argument error before anything runs (never a silent pick); B with SANDBAR_KNOWN_RED_ROSTER pointed at a fixture roster holding a REAL fast member's name, the declaration face refuses non-zero and names the member AND the roster check (a booked-red tripwire protects nobody); C a malformed-JSON roster and an absent roster path each refuse with their condition named — an unreadable roster is never read as an empty roster (the empty-roster-silently-admits-everything defect face); D marker integrity over the one inventory — fast_set_entries() on the real registry returns names all present exactly once, and over fixture registries it fails closed named on a duplicate member name, a fast marker without a pool, and an unknown trailing element; E the face carries the declared budget against measured cost as evidence wording (suggest/stewardship), never an auto-trim of the set. Intent split: the happy declaration face belongs to t261009-16-fast-set-declaration; marker-parsing truth tables and roster-reader unit contract belong to developer L1. Pre-implement red expected (TDD signal); arbitrate/merge must be green. run_scenarios.py missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-16/sc_fast_set_gate.py", "ro"),
 ]
+
+# ---- t261009-16: the lane's fast global set (the declaration) ----------------
+# Design: docs/design/develop-buffer-v1.md §"The lane's fast global set".
+# Membership is marked ON the registry entries themselves (a trailing "fast"
+# token in the optional tail after cmd) — the SAME inventory that feeds the
+# full suite, never a second hand-kept list: renaming a case moves its marker
+# with it, and a marker cannot exist without the entry it marks.
+# Stewardship: membership changes go through evidence-led add/remove/keep
+# verdicts by the integration patrol. Writing a new guard scenario does NOT
+# earn it membership by convenience — this declaration's own two t261009-16
+# scenarios are deliberately NOT members (review condition, t261009-16).
+FAST_SET_MARKER = "fast"
+#: The only legal trailing tokens after cmd. Anything else is a named
+#: declaration error (marker integrity, fail-closed).
+FAST_SET_LEGIT_TAIL = ("serial", FAST_SET_MARKER)
+#: Environment switch for the runnable entry (the lane runs exactly the set).
+FAST_SET_ENV = "SANDBAR_SCENARIO_FAST_SET"
+#: The declared time budget, in minutes of WALL CLOCK, for running exactly the
+#: fast set. Accounting honesty (ticket requirement): members carrying the
+#: "serial" flag SUM; parallel members are accounted per pool by that pool's
+#: slowest member (the pole) — the arithmetic lives in fast_set_wall_estimate()
+#: and is pinned by the L1 battery. The pole arithmetic assumes the
+#: SANDBAR_CONC_POOLS default width 3 for the ro pool; a width change
+#: invalidates the budget and is a named stewardship event, never a silent one.
+FAST_SET_BUDGET_MIN = 2
+FAST_SET_BUDGET_NOTE = (
+    "fast-set budget: %d minutes wall clock. Accounting: serial members sum, "
+    "parallel pools count by their slowest member (pole) at the declared "
+    "concurrency width (SANDBAR_CONC_POOLS default ro:3). Measured basis "
+    "(261009, scenario-ledger means): 18 ro members, ~1.3s summed case time — "
+    "the budget is headroom for process startup and machine variance, not a "
+    "target. Breach is a named stewardship signal, never an auto-trim."
+) % FAST_SET_BUDGET_MIN
+#: What each member is FOR (the design rule: "each member must say what
+#: breakage it is meant to catch early — a member that catches nothing has
+#: stopped doing its job"). Keyed by registry name and validated in BOTH
+#: directions by validate_fast_set(): a key without a fast-marked entry, or a
+#: fast-marked entry without a key, is a named declaration error. The dict
+#: therefore cannot drift into a second membership list — membership itself
+#: lives only on the registry markers.
+FAST_SET_CATCH = {
+    "sandbar-dsh-compat":
+        "a dsh plugin seam contract regression (the installer upgrade/doctor "
+        "compat-interval probe face) reaching lanes unnoticed",
+    "metrics-contract-doc-structure":
+        "the metrics API contract document losing a required section",
+    "metrics-contract-schema-sync":
+        "the metrics schema drifting from its contract document",
+    "metrics-contract-api-freeze":
+        "a frozen metrics API face changing without a contract revision",
+    "metrics-contract-criteria-faultmodes":
+        "the metrics criteria/fault-mode vocabulary losing a declared entry",
+    "contract-v11-regression-rods":
+        "a cross-project write-gate contract regression (v1.1 rod set)",
+    "t260903-02-fork-contract":
+        "the cross-project judge's fork policy face regressing",
+    "t260903-02-conditional-contract":
+        "the cross-project judge's conditional policy face regressing",
+    "t260903-02-lock-update-integrity":
+        "the cross-project judge's lock-update integrity face regressing",
+    "t260903-03-paths-contract-doc-guard":
+        "the engine paths contract document drifting from the code it pins",
+    "t260904-07-charter-source-contract":
+        "the session charter source-of-truth face regressing",
+    "t260904-13-lane-patchgate-wiring":
+        "the lane patchgate wiring (KI-044 family) silently unwiring",
+    "t260910-15-toolchain-pinned":
+        "the pinned toolchain (node/python versions) drifting unpinned",
+    "t260920-03-terminology-baseline-floor":
+        "the banned-jargon lint losing its terminology baseline floor",
+    "t261008-26-lane-vocabulary-gate":
+        "an unrecognised lane name being convenience-accepted again (KI-226)",
+    "t261009-10-refusal-copy-anchor-contract":
+        "the shared out-of-root refusal contract losing its copy anchor "
+        "(the anchor-rot tripwire)",
+    "t261004-02-block-text-executor-escape":
+        "a blocked-ticket copy losing the executor's named way out",
+    "t261008-43-inspection-suite-duration-leg":
+        "the integration round going slow or hanging without the inspection "
+        "suite face noticing (KI-060 family tripwire)",
+}
+
+
+def parse_fast_markers(entry):
+    """Pure: (is_fast, errors) for one registry entry's optional tail.
+
+    Failure modes covered (the borrowed-implementation trade-off list,
+    t261009-16 review condition 1):
+    - positional ambiguity: the tail token at index 3 is ALSO the pool slot —
+      a bare ("fast",) there would be consumed as a pool name, so a fast
+      marker at index 3 is a named error ("declare the pool first"); the same
+      ambiguity for "serial" is the pre-existing, accepted shape.
+    - duplicate marker: more than one "fast" (or more than one "serial") in
+      the tail is a named error, never a silent first-wins.
+    - unknown trailing element: any token outside FAST_SET_LEGIT_TAIL is a
+      named error (typo-proof, future-proof — new markers must be declared
+      here first).
+    - pool omitted entirely: ("name", intent, cmd) with no tail is legal and
+      simply not a fast member (main-pool serial semantics unchanged).
+    """
+    errors = []
+    tail = list(entry[3:])
+    if not tail:
+        return False, errors
+    # The first tail slot is the POOL slot unless it is a bare marker (the
+    # accepted pool-less serial shape). A "fast" token in that slot would be
+    # consumed as a pool name by pool_of() — that is the positional ambiguity
+    # and it is a named error, never silently accepted.
+    rest = tail[1:] if tail[0] not in ("serial", FAST_SET_MARKER) else tail
+    if tail[0] == FAST_SET_MARKER:
+        errors.append("fast marker sits in the pool slot — declare the pool "
+                      "first (\"fast\" at index 3 would be read as a pool "
+                      "name)")
+    if rest.count(FAST_SET_MARKER) > 1:
+        errors.append("duplicate %s marker" % FAST_SET_MARKER)
+    if rest.count("serial") > 1:
+        errors.append("duplicate serial marker")
+    unknown = [t for t in rest if t not in FAST_SET_LEGIT_TAIL]
+    if unknown:
+        errors.append("unknown trailing element(s) %s (legal: %s)"
+                      % (unknown, ",".join(FAST_SET_LEGIT_TAIL)))
+    return FAST_SET_MARKER in tail, errors
+
+
+def validate_fast_set(registry=None):
+    """Pure-ish: every named declaration error over the whole registry.
+
+    Empty list = the declaration is coherent: markers well-formed, every fast
+    member has a fast-catch declaration, every fast-catch key resolves to a
+    fast member (both directions — no drift), the budget is a positive whole
+    number of minutes, and no member sits in a pool the budget arithmetic
+    cannot describe honestly (exclusive runs alone before all pools; browser
+    is the serial long-pole pool the set must never import).
+    """
+    reg = SCENARIOS if registry is None else registry
+    errors = []
+    names = [e[0] for e in reg]
+    for n in set(n for n in names if names.count(n) > 1):
+        errors.append("[%s] duplicate registry name" % n)
+    members = []
+    for e in reg:
+        is_fast, errs = parse_fast_markers(e)
+        for m in errs:
+            errors.append("[%s] %s" % (e[0], m))
+        if not is_fast:
+            continue
+        members.append(e)
+        if e[0] not in FAST_SET_CATCH:
+            errors.append("[%s] fast member has no fast-catch declaration — "
+                          "a member that catches nothing has stopped doing "
+                          "its job" % e[0])
+        pool = pool_of(e)
+        if pool in ("exclusive", "browser"):
+            errors.append("[%s] fast member in pool %s — the budget "
+                          "arithmetic cannot describe it honestly (serial "
+                          "long pole / pre-pool exclusive)" % (e[0], pool))
+    catch_keys = set(FAST_SET_CATCH)
+    member_names = set(e[0] for e in members)
+    # The both-direction drift check only judges the REAL declaration; a
+    # fixture registry (injected tests) is judged per-entry only — the global
+    # catch dict obviously does not describe a mini registry.
+    if registry is None:
+        for k in sorted(catch_keys - member_names):
+            errors.append("[%s] fast-catch declaration without a fast-marked "
+                          "registry entry (orphan — membership lives on the "
+                          "registry markers only)" % k)
+    if not isinstance(FAST_SET_BUDGET_MIN, int) or FAST_SET_BUDGET_MIN <= 0:
+        errors.append("FAST_SET_BUDGET_MIN must be a positive whole number "
+                      "of minutes, got %r" % (FAST_SET_BUDGET_MIN,))
+    return errors
+
+
+def fast_set_entries(registry=None):
+    """The member list, derived by filtering the one inventory.
+
+    Fail-closed helper (the gate entry drives it over fixture registries): a
+    malformed marker (fast in the pool slot, duplicate marker, unknown
+    trailing element) or a duplicate name among the fast members raises a
+    named ValueError — a malformed marker can never silently shrink or grow
+    the set. Callers that need the error LIST use validate_fast_set().
+    """
+    reg = SCENARIOS if registry is None else registry
+    members = [e for e in reg if parse_fast_markers(e)[0]]
+    # The specific duplicate-member-name face first (the gate entry pins it);
+    # then the per-member marker problems. Budget/roster problems belong to
+    # the preflight, not this helper's raise face.
+    member_names = [e[0] for e in members]
+    dups = sorted(set(n for n in member_names if member_names.count(n) > 1))
+    if dups:
+        raise ValueError("fast-set declaration malformed: duplicate member "
+                         "name(s) %s" % dups)
+    relevant = [p for p in validate_fast_set(reg)
+                if "marker" in p or "pool slot" in p
+                or "trailing element" in p
+                or "duplicate registry name" in p]
+    if relevant:
+        raise ValueError("fast-set declaration malformed: %s" % relevant)
+    return members
+
+
+def read_known_red_roster_strict(root):
+    """Strict roster read for the fast-set face: a roster that is not
+    perfectly interpretable is a NAMED ERROR, never an empty roster.
+
+    The lenient reader (`read_known_red_roster`) serves the per-round skip
+    path, where an odd entry degrades to "run it" — the conservative side
+    THERE. This face certifies a no-booked-red property, so the same oddity
+    must REFUSE instead: an entry that is not a dict, or carries no usable
+    string name, or carries a verdict outside KNOWN_RED_BOOKED_VERDICTS (the
+    arbitrated repro: a booked-red member named WITHOUT a verdict field)
+    makes the whole roster untrustworthy — an empty-roster read would
+    silently admit every booked-red member (KI-01M4FE0T3FG7Y0G9R97NS4T7QJ).
+    """
+    path = (os.environ.get("SANDBAR_KNOWN_RED_ROSTER")
+            or os.path.join(root, "integration", "known-red-baseline.json"))
+    if not os.path.isfile(path):
+        return [], "挂账册不在场：%s" % path
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception as e:  # noqa: BLE001
+        return [], "挂账册读取/解析失败（%s: %s）：%s" % (type(e).__name__, e, path)
+    if not isinstance(payload, dict) or not isinstance(payload.get("entries"), list):
+        return [], "挂账册形状不合法（缺 entries 列表）：%s" % path
+    verdicts = set(KNOWN_RED_BOOKED_VERDICTS)
+    bad = []
+    for e in payload["entries"]:
+        if not isinstance(e, dict):
+            bad.append("non-object entry")
+            continue
+        name, verdict = e.get("name"), e.get("verdict")
+        if not isinstance(name, str) or not name.strip():
+            bad.append("entry without a usable name")
+            continue
+        if not isinstance(verdict, str) or verdict.strip() not in verdicts:
+            bad.append("entry %s without a verdict in %s" %
+                       (name.strip() if isinstance(name, str) else "?",
+                        ",".join(sorted(verdicts))))
+    if bad:
+        return [], ("挂账册条目不可信（%d 处：%s）：%s — fail-closed，绝不按空册读"
+                    % (len(bad), "; ".join(bad[:3]), path))
+    return sorted(set(e["name"].strip() for e in payload["entries"])), ""
+
+
+def fast_set_preflight(roster_reader=None, registry=None):
+    """(members, errors): declaration errors + the chronically-red rule.
+
+    A member on the known-red roster is a named error — a booked-red case can
+    never back a tripwire (KI-01M4FE0T3FG7Y0G9R97NS4T7QJ). The roster is
+    consumed external input: an unreadable / malformed / untrustworthy /
+    absent roster is a named error and the set refuses — it is NEVER read as
+    an empty roster (an empty roster would silently admit every booked-red
+    member). The default reader is the STRICT one
+    (read_known_red_roster_strict): the lenient reader's per-entry degrade
+    to "run it" is right for the per-round skip path but wrong here, where
+    the roster read certifies a no-booked-red property.
+    """
+    errors = validate_fast_set(registry)
+    # Non-raising member derivation: malformed markers surface as the named
+    # errors above (the raising face belongs to fast_set_entries()).
+    members = [e for e in (SCENARIOS if registry is None else registry)
+               if parse_fast_markers(e)[0]]
+    reader = (roster_reader if roster_reader is not None
+              else read_known_red_roster_strict)
+    red_names, err = reader(_REPO_ROOT)
+    if err:
+        errors.append("known-red roster unreadable (%s) — refusing: a "
+                      "booked-red member could not be detected" % err)
+    else:
+        red_set = set(red_names)
+        for e in members:
+            if e[0] in red_set:
+                errors.append("[%s] member is on the known-red roster — a "
+                              "booked-red case can never be a tripwire"
+                              % e[0])
+    return members, errors
+
+
+def fast_set_costs(rows, names):
+    """Pure: (costs, bad_rows) — mean wall_s per member name from ledger rows.
+
+    A member with no row (or no usable row) maps to None: the caller must say
+    "no measured cost", never fabricate a 0. Malformed rows are counted and
+    named, never fatal and never silently dropped.
+    """
+    by = {}
+    bad = 0
+    for r in rows:
+        if not isinstance(r, dict) or not isinstance(r.get("scenario"), str):
+            bad += 1
+            continue
+        w = r.get("wall_s")
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or w < 0:
+            bad += 1
+            continue
+        by.setdefault(r["scenario"], []).append(float(w))
+    costs = {}
+    for n in names:
+        v = by.get(n)
+        costs[n] = round(sum(v) / len(v), 2) if v else None
+    return costs, bad
+
+
+def fast_set_wall_estimate(entries, costs, width=3):
+    """Pure, honest wall-clock arithmetic for the declared budget.
+
+    Per pool: serial members sum; concurrent members contribute
+    max(pole, sum/width). Pools run in parallel, so the estimate is the MAX
+    over pools. `width` is the declared concurrency assumption (SANDBAR_
+    CONC_POOLS default ro:3) — the budget note names it, and a width change
+    invalidates the budget as a named stewardship event. Unmeasured members
+    count as 0 here but are reported per pool (`unmeasured`) so the estimate
+    can never look more certain than it is.
+    """
+    pools = {}
+    for e in entries:
+        tail = list(e[3:])
+        serial = "serial" in tail
+        pools.setdefault(pool_of(e), []).append((e, serial))
+    out = {}
+    est = 0.0
+    for pool, items in sorted(pools.items()):
+        serial_sum = sum(costs.get(e[0]) or 0.0 for e, s in items if s)
+        conc = [costs.get(e[0]) for e, s in items if not s]
+        conc_vals = [c for c in conc if c is not None]
+        pole = max(conc_vals) if conc_vals else 0.0
+        conc_sum = sum(conc_vals)
+        est_pool = serial_sum + max(pole, conc_sum / max(1, int(width)))
+        out[pool] = {"serial_sum_s": round(serial_sum, 2),
+                     "pole_s": round(pole, 2),
+                     "conc_sum_s": round(conc_sum, 2),
+                     "unmeasured": sum(1 for c in conc if c is None),
+                     "est_s": round(est_pool, 2)}
+        est = max(est, est_pool)
+    return {"est_s": round(est, 2), "width": int(width), "pools": out}
+
+
+def fast_set_mode_enabled(flag=None, env=None):
+    """--fast-set resolution: explicit flag > env switch > off."""
+    if flag is not None:
+        return bool(flag)
+    raw = str((os.environ if env is None else env).get(FAST_SET_ENV, ""))
+    return raw.strip().lower() in ("1", "on", "true", "yes")
+
+
+def print_fast_set_declaration() -> int:
+    """--print-fast-set: the read-only declaration face (never runs a case).
+
+    Prints members (name, pool, serial flag, measured cost, fast-catch
+    clause), the declared budget note, and the honest wall estimate against
+    measured ledger means. A member with no ledger row says "no measured
+    cost" — never a fabricated 0. Declaration/gate errors refuse non-zero
+    with a named reason (REFUSED [ prefix — a refusal is a gate error, not a
+    scenario red, t261001-10 output-shape contract).
+    """
+    members, errors = fast_set_preflight()
+    if errors:
+        for m in errors:
+            print("REFUSED [__fast_set__] %s" % m, flush=True)
+        print("FAST_SET_DECLARATION refused (%d named errors) — nothing ran"
+              % len(errors), flush=True)
+        return 2
+    try:
+        import scenario_ledger as _sl
+        rows, bad = _sl.read_rows()
+        ledger_note = ""
+    except Exception as _ex:   # noqa: BLE001 — unreadable ledger = unmeasured, not fatal
+        rows, bad, ledger_note = None, 0, "ledger unreadable (%s: %s)" % (
+            type(_ex).__name__, _ex)
+    names = [e[0] for e in members]
+    if rows is None:
+        costs = {n: None for n in names}
+    else:
+        costs, bad = fast_set_costs(rows, names)
+    est = fast_set_wall_estimate(members, costs, width=3)
+    print("FAST_SET_DECLARATION members=%d budget_min=%d" %
+          (len(members), FAST_SET_BUDGET_MIN), flush=True)
+    print("FAST_SET_BUDGET %s" % FAST_SET_BUDGET_NOTE, flush=True)
+    for e in members:
+        c = costs.get(e[0])
+        meas = ("%.2fs" % c) if c is not None else \
+            "no measured cost (no usable ledger row)"
+        print("  member %s pool=%s serial=%s measured=%s fast-catch: %s" %
+              (e[0], pool_of(e), "yes" if "serial" in e[3:] else "no",
+               meas, FAST_SET_CATCH[e[0]]), flush=True)
+    print("FAST_SET_ESTIMATE %s" % json.dumps(est, ensure_ascii=False),
+          flush=True)
+    unmeasured = [n for n in names if costs.get(n) is None]
+    if unmeasured:
+        print("FAST_SET_UNMEASURED %d member(s) with no measured cost "
+              "(empty or missing ledger%s): %s" %
+              (len(unmeasured),
+               ("; " + ledger_note) if ledger_note else "",
+               ",".join(unmeasured)), flush=True)
+    if bad:
+        print("FAST_SET_LEDGER_WARN %d malformed ledger row(s) ignored — "
+              "named, never silently dropped" % bad, flush=True)
+    return 0
+
 
 CMD_TIMEOUT = 900
 _SPAWN_FAIL = -8   # spawn 面（OSError 等）：非超时非断言，综合为 not-checked×external
@@ -4448,7 +4854,35 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
     os._exit(2)
 
 
-def main(exclude_pools=None, only_scenarios=None) -> int:
+def _ensure_report_dir_ignored(report_dir):
+    """Declare the report landing dir as process-artifact space (t261009-16).
+
+    The runner's own report (`out/integration-report-*.json`) landed INSIDE the
+    judged worktree as an untracked file, so from the SECOND verification round
+    on the tree was permanently dirty and the gate's ledger dirty-guard
+    (verify_lane: "a missing row beats a dirty row") silently skipped every
+    round's ledger rows — the main ledger stopped growing (t260922-12 R2
+    append-only red, arbitrated gen2). The honest fix keeps the write where
+    every reader expects it (light_lane's report_path face, the t260930-01
+    glob) and declares `out/` ignored process-artifact space via
+    `out/.gitignore` = "*": untracked artifacts stop showing in `git status`,
+    so the dirty-guard judges what it exists to judge — the SOURCES — and the
+    ledger grows every executed round. The ignore file ignores itself too
+    (`*` matches it), so the dir is invisible to git status as a whole.
+    Best-effort: an unwritable location degrades to the old behavior (the
+    report still lands; the observation face is never verdict-bearing).
+    """
+    gi = report_dir / ".gitignore"
+    if gi.exists():
+        return True
+    try:
+        gi.write_text("*\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     # 261001 递归护栏**也要在进程内入口**（`verify_lane._integ` 是 `import run_scenarios as rs`
     # 后直调 `rs.main()` 的——那条路不过 `_cli`）：护栏只在「内层标记 + 收窄面都在场」时拦，
     # 正常注入式电池（无标记）与合法嵌套（lib_env 清理后两键都被剥）都不受影响。
@@ -4551,6 +4985,35 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
     only_names = parse_only_scenarios(
         os.environ.get("SANDBAR_SCENARIO_ONLY")
         if only_scenarios is None else only_scenarios)
+    # ---- t261009-16 fast global set: the lane's runnable entry ----
+    # Runs EXACTLY the marked members through the same named-round machinery
+    # (fail-closed preflight: malformed declaration, booked-red member, or an
+    # unreadable known-red roster each refuse before anything runs — a
+    # refusal is a gate error, `REFUSED [` prefix, t261001-10 output shape).
+    fast_mode = fast_set_mode_enabled(fast_set)
+    if fast_mode and only_names:
+        print("REFUSED [__fast_set__] --fast-set and --only are mutually "
+              "exclusive (one round, one declared face) — nothing ran",
+              flush=True)
+        print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+        print("FAST_SET_SUMMARY %s" % json.dumps(
+            {"ran": 0, "error": "fast-set + only mutually exclusive"},
+            ensure_ascii=False), flush=True)
+        return 2
+    if fast_mode:
+        members, errors = fast_set_preflight()
+        if errors:
+            for m in errors:
+                print("REFUSED [__fast_set__] %s" % m, flush=True)
+            print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)",
+                  flush=True)
+            print("FAST_SET_SUMMARY %s" % json.dumps(
+                {"ran": 0, "errors": errors}, ensure_ascii=False), flush=True)
+            return 2
+        only_names = [e[0] for e in members]
+        print("FAST_SET 起跑 fast global set：%d 条（声明预算 %d 分钟）"
+              % (len(only_names), FAST_SET_BUDGET_MIN), flush=True)
+        print("FAST_SET_BUDGET %s" % FAST_SET_BUDGET_NOTE, flush=True)
     registry = SCENARIOS
     if only_names:
         by_name = {e[0]: e for e in SCENARIOS}
@@ -4685,9 +5148,10 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         if opt == "exclusive":
             exclusives.append(e)
             continue
-        fifth = e[4] if len(e) > 4 else None
-        pool = opt if (opt and opt != "serial") else "main"
-        serial = opt == "serial" or fifth == "serial"
+        # t261009-16：尾部标记改为整尾扫描——"fast" 与 "serial" 一样是可选尾标记，
+        # 位置无关（第 5/6 元都可）；旧的 3/4 元二元读法对既有形状逐字节同义。
+        pool = opt if (opt and opt not in ("serial", "fast")) else "main"
+        serial = "serial" in e[3:]
         pools.setdefault(pool, []).append((e, serial))
 
     # "name" -> SANDBAR_POOL_CONC lanes; "name:N" -> N lanes; absent -> 1.
@@ -4979,6 +5443,11 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
             _summary["excluded_count"] = len(excluded_entries)
         if only_names:
             _summary["only_scenarios"] = list(only_names)
+        # t261009-16 additive fast-set keys (consumers without them untouched):
+        if fast_mode:
+            _summary["fast_set"] = True
+            _summary["fast_budget_min"] = FAST_SET_BUDGET_MIN
+            _summary["fast_names"] = list(only_names)
         # t260925-12：timings 分相块（验收④执行器半边，additive 键——既有键集/
         # 三态语义逐键不变，t260925-12-executor-timings-receipt 锁定）。前奏在
         # wall 内（wall=t0 起含清扫/卫生/预起），场景跑面=wall−前奏；和 ≤ wall*1.05
@@ -5033,6 +5502,7 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         rp = _pl.Path("out") / ("integration-report-%s.json"
                                 % _dt.datetime.now().strftime("%y%m%d-%H%M%S"))
         rp.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_report_dir_ignored(rp.parent)
         _report = {"ran": ran, "pass": passed, "fail": failed, "env_fail": env_failed,
                    "wall_s": round(wall, 1), "prelude_s": round(_prelude_s, 1),
                    "generated": _dt.datetime.now().isoformat(),
@@ -5340,6 +5810,15 @@ def _cli(argv):
     if "--print-surface-plan" in argv:
         i = argv.index("--print-surface-plan")
         return print_surface_plan(argv[i + 1] if i + 1 < len(argv) else "")
+    # --print-fast-set（t261009-16）：fast global set 声明面——与 --print-pool-assets
+    # 同类的只读查询面，**不起场景、不占锁**，故在锁之前分流。
+    if "--print-fast-set" in argv:
+        if "--fast-set" in argv:
+            print("REFUSED [__fast_set__] --fast-set and --print-fast-set "
+                  "together is a caller bug (run vs read-only declaration) — "
+                  "nothing ran", flush=True)
+            return 2
+        return print_fast_set_declaration()
     if not _runner_cap_guard():
         print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
         return 2
@@ -5366,8 +5845,10 @@ def _cli(argv):
     if "--exclude-pools" in argv:
         i = argv.index("--exclude-pools")
         return main(exclude_pools=argv[i + 1] if i + 1 < len(argv) else "",
-                    only_scenarios=only_raw)
-    return main(only_scenarios=only_raw)
+                    only_scenarios=only_raw,
+                    fast_set=True if "--fast-set" in argv else None)
+    return main(only_scenarios=only_raw,
+                fast_set=True if "--fast-set" in argv else None)
 
 
 if __name__ == "__main__":

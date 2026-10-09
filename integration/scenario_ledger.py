@@ -28,7 +28,8 @@ line 字段暂缺=具名欠账——树里尚无 line 身份可填）。
 不可信（畸形行）时逐行点名不静默，闸侧回退实跑（fail-closed，无「查不到当绿」）。
 
 保留：>90 天的行按月卷出（scenario-results-<YYYYMM>.jsonl，同键保最新），主账
-原子重写（tmp+os.replace）；append 路径按 .last-rollup 标记机会性触发（>24h 一次）；
+原子重写（tmp+os.replace）；保留窗由显式 _maybe_rollup / CLI rollup 触发（>24h 一次）——
+append 路径绝不改写主账（append-only，t260922-12 R2；t261009-16 段修复）；
 并发：主账 append 与 rollup 全程 flock（<dir>/.lock）序列化，append 批内一次持锁。
 
 CLI（cwd 任意）：
@@ -203,7 +204,16 @@ def _dumps(row):
 def append_records(rows, path=None, now=None):
     """校验+成批追加（单次 write + fsync，flock 序列化——多泳道闸并发写安全）。
     返回 {"written": n, "rejected": [{"index","reason"}...]}。全部被拒 → 零落盘
-    （不建文件）；至少一条合法才动主账。写完按 .last-rollup 标记机会性触发保留。"""
+    （不建文件）；至少一条合法才动主账。
+
+    主账 append-only（t260922-12 R2 铁律；t261009-16 段修复外来回归）：**append
+    绝不改写主账字节**——机会性保留（rollup 的 tmp+os.replace 原子重写）已从
+    append 路径摘除。旧行为（append 收尾触发 _maybe_rollup）会在验证轮中间把主账
+    整文件重写，打破「旧字节前缀保持且新增行」的契约
+    （t260922-12-gate-ledger-debt-not-blocked R2 实红），也让并发读主账的复用面
+    在读完之前被换掉文件。保留窗维护改为**显式面**：`_maybe_rollup(target,
+    now=…)`（人工/运维）或 CLI `rollup` 子命令——语义不变，只是不再藏在记账路径
+    里。"""
     target = Path(path) if path else ledger_path()
     clean, rejected = [], []
     for i, r in enumerate(rows or []):
@@ -232,7 +242,9 @@ def append_records(rows, path=None, now=None):
         receipt["written"] = len(clean)
     finally:
         _release_lock(lock)
-    _maybe_rollup(target, now=now)
+    # t261009-16 段：不再在 append 收尾机会性触发 rollup——append-only 契约
+    # （t260922-12 R2：旧字节前缀保持且新增行）优先于维护便利；保留窗维护走
+    # 显式 _maybe_rollup / CLI rollup 面。
     return receipt
 
 
@@ -348,7 +360,8 @@ def rollup(now=None, keep_days=DEFAULT_KEEP_DAYS, path=None):
 
 
 def _maybe_rollup(target, now=None):
-    """机会性触发（>24h 一次，append 收尾调用）：维护面失败响亮留痕不抬手
+    """显式维护面（>24h 一次；t261009-16 段起**不再**由 append 自动调用——
+    append-only 契约优先，见 append_records docstring）：维护面失败响亮留痕不抬手
     ——最坏=主账变肥，窗口由下次触发或人工 rollup 补，不影响主账正确性。"""
     mark = target.parent / ROLLUP_MARK
     now = float(now) if now is not None else time.time()
