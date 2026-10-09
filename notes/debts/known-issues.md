@@ -4484,3 +4484,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 于是这类"目标文件在保护名单上"的票，**修法与放行口径都应当按该条走**，而不是硬怼泳道（本岗已把这一点作为建议报给宿主）。
 >
 > **回归**：L3——造一张"修复文件 + 事前合并"的票，断言修复**被 commit 进泳道**（不是消失在 `git add` 扑空里）；再断言"工作区被重置导致未落盘"时，**回执具名点名原因并保留 diff**。
+> **加记（261009 15:0x）——同族第二形态：信号"发出去"了但被工作流拒收，理由只在票面 `refused` 里**。
+> 实证：本岗对 `t261009-14` 发 `authorize(kind=arbitration_verdict, scope=[票号])`，CLI 回执 `{"ok":true,…,"delivered":true}`，
+> **但票的 `authz_active` 仍为空、闸没解**——真因在票面 `refused` 列表里：**`who too long (76 > 64)`**。
+> 把 `who` 缩到 38 字重发，回执里多出 `"landing": "landed"`，`authz_active` 立变 1。
+> ⇒ **判据补一条**：凡"授权/签字/裁决"类信号，**回执 `delivered` 只说明"信号已入队"，不等于"已生效"**；
+> 生效证明要看**票面 `authz_active` / `signatures`**，失败原因要看 **`refused`**。
+> **出路**：①CLI 在发信号前**就把值域校验做掉**（`who ≤ 64`、`expires` 必须是 **epoch 秒**、`scope` 对 arbitration_verdict 必须恰为票号）——
+> 现在这些只由 workflow 端拦，回执却不带理由，最容易被读成"发了没用"；②信号回执**必须回带拒收理由**（或至少 `refused` 增量）。
+> **回归**：L1——越界 `who` / ISO 字符串 `expires` / 错 scope 各造一例，断言 CLI **当场拒收并点名**，而不是回 `delivered:true` 让人去翻票面。
