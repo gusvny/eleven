@@ -47,6 +47,7 @@ related:
 | Order comes from the ledger, not from a clock | `"seq": 41077` | Proposed; today everything orders by timestamp |
 | Records carry references, not payloads | `"evidence": "ledger/scenario-results.jsonl#run-261009-14"`, never the raw log or a token | Proposed |
 | **Record what cannot be derived; derive what can** | the state a landing sat on and the range a certification continued from are **not** stored — both are derived from the certification ledger's order | Proposed; `base` and `covered_from` were dropped for this reason (261009) |
+| **The delivery records share one ordering space** | the landings and the certifications are ordered by one `seq`, so "the landings after the previous certification" is computable | Proposed, and load-bearing: the freeze's culprit range, the certified prefix and the uncertified range are all derived from it. Separate counters per record type would bring back every field that was just dropped |
 | **A record's own `at` is when that fact happened** | the freeze's opening record carries `at`; there is no `opened_at`, and no `closed_at` — the closing is a record of its own with its own `at` | Proposed; `opened_at` / `closed_at` were dropped for this reason (261009) |
 | **An entity carries only what was true when it came into being; everything after is another record keyed to it** | a freeze opens with its cause and its candidate set; an attribution change, a closure and a reopening are three further records | Proposed; the freeze episode and the inspection period were written as entities with mutable fields and are corrected below |
 | **A summary lives with the data it summarises** | a run's counts, environment, width and duration are fields of the **run** record; a certification cites the run instead of restating it | The test for a summary: would a reader be forced to open the raw body to make a decision they make daily? and can it be checked against the body? If yes it is kept — **at the level of the data, not one level up**. Anything that fails both tests is duplication (`base`, dropped) |
@@ -103,7 +104,6 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 ```json
 {
   "id": "cert-261009-15",
-  "candidate": "cand-261009-15",
   "line": "default",
   "repos": [
     { "repo": "sandbar", "revision": "9f3c2a1b" }
@@ -119,10 +119,10 @@ Deriving it costs nothing and buys a check. Per repository, **the certified revi
 | Field | Example value | Why it is there |
 |---|---|---|
 | `id` | `cert-261009-15` | The judgement, cited by batches and freezes |
-| `candidate` | `cand-261009-15` | **What is judged is the set of revisions that would be delivered together**, not a branch: the line's head today, a merge of heads once there are several lines |
 | `line` | `default` | Which line this judgement is about |
 | `repos[].revision` | `9f3c2a1b` | The exact content the judgement covers |
 | `run` | `run-261009-14` | **Which run answered it.** A certification does not restate what a run measured — see below |
+| `repos` (above) | — | **The candidate is this set, and nothing else.** It needs no separate record or id: the set of repository revisions *is* the identity, and identifying it by its own content means it cannot drift from what was judged. The rerun-once rule then reads correctly as "a second run on the same set", which is why a run and a certification are separate records |
 | `booked_red` | `known-red-baseline@2026-10-04` | Which expected-red list was in force when this was judged. It appears in no run, and without it a later reader cannot tell a new red from a known one |
 | `judged_by` | `integration/run_scenarios.py` | What performed the judgement |
 | `seq` | `41076` | Order, for the same reason as on a landing: the certified prefix is the certifications on this line, in order — **derived, not restated** |
@@ -142,7 +142,6 @@ What is true when the freeze opens:
   "id": "frz-261009-03",
   "line": "default",
   "cause": "cert-261009-14",
-  "culprit_candidates": ["t261008-45", "t261008-46"],
   "seq": 41078,
   "at": 1791508600000
 }
@@ -153,8 +152,12 @@ What is true when the freeze opens:
 | `id` | `frz-261009-03` | A thing with a lifetime: "why is nothing landing" must be answerable while it is open |
 | `line` | `default` | A freeze is per line — one line's red does not stop another's landings |
 | `cause` | `cert-261009-14` | The certification that stopped the line: the freeze **points at its cause** instead of saying "something is red" |
-| `culprit_candidates` | `["t261008-45", "t261008-46"]` | The landings inside the covered range — **deliberately a set**, narrowed later |
 | `seq` / `at` | `41078` / `1791508600000` | Its place in the ledger's order, and **the moment it opened**. That is what `at` means on every record; a field called `opened_at` would be the same instant under a different name |
+
+**The culprit set is not a field either.** What could have caused this red is exactly *the landings in the covered range*, and the range is derived from `cause`: the landings that landed after the previous certification on this line. Two things follow, and both matter:
+
+- **It is a set of landings, not of tickets.** A ticket is what a person talks to; a landing is what can be reverted, and a ticket may own several landings (a rework produces another one). Blaming the ticket when one landing is the culprit would name more content than the evidence supports. The ticket view is a lookup from the landing, and a person wanting "which tickets are implicated" reads it from there.
+- **It is derived, so writing it here would be a second answer** — the same reason `base` was dropped. When the range narrows, that is the `attribution` change record below, and its value names a **landing**.
 
 Everything that happens to it afterwards is **another record keyed to it**, because a fact is never edited:
 
@@ -162,7 +165,7 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 {
   "freeze": "frz-261009-03",
   "change": "attribution",
-  "value": "isolated: t261008-45",
+  "value": "isolated: ldg-261009-0007",
   "by": "integration",
   "reason": "the per-line results pointed at one landing",
   "seq": 41081,
@@ -185,7 +188,7 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 |---|---|---|
 | `freeze` | `frz-261009-03` | Which episode this is a change to |
 | `change` | `attribution` / `closed` / `reopened` | The kind of change. Three, and no more are needed |
-| `value` | `isolated: t261008-45` / `boundary, culprit not isolated` | For an attribution change: **the design requires that the second sentence be sayable** |
+| `value` | `isolated: ldg-261009-0007` / `boundary, culprit not isolated` | For an attribution change: a **landing**, not a ticket — and **the design requires that the second sentence be sayable** |
 | `by` | `integration` / `t261009-04` | For a closure: the remedy that reopened the line. For a reopening: whoever decided |
 | `reason` | `the remedy landed and certified` | Mandatory, as on every record |
 | `seq` / `at` | `41102` / `1791515000000` | Order, and when the change happened |
