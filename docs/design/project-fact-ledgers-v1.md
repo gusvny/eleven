@@ -168,7 +168,11 @@ The test that decides everything is one question: **can this stage run on a mach
 - **What pinning must never touch: authority and truth.** A ticket pinned to machine A is still signable and reviewable from a console on machine B, its state stays in the shared history, and its ledgers live in the store. The pin is provenance and placement; it never grants or withholds a right.
 - **Some work is pinned by nature, and that is declared too.** A browser capture that depends on a specific local profile, a build too heavy to repeat: such a stage is genuinely unmovable, and saying so up front is what keeps a move from failing halfway. The trap is a ticket pinned **by accident** — one that looks movable and is not.
 
+**And the same applies to a person.** With one operator on one machine, a name the caller supplies is harmless; with several people it is the difference between an audit and a formality. Identity is therefore **authority** — who may sign, land or withdraw is a property the system recognises — and never a value a caller fills in about itself. That is the fifth shape this store has to be ready for, and it is the one that cannot be fixed later by a migration: records written under a forgeable identity cannot be re-authenticated after the fact.
+
 The consequence for this document's own subject is small and worth stating: a record's machine is provenance, and no record's meaning may depend on it. Goals 3, 7 and 12 already said this about *records*; goal 20 extends the same rule to *work*. And the operator's surface follows: a console stops being "the machine I use" and becomes a surface that can be opened anywhere against the same truth — the same shape as the read path, one truth and many surfaces.
+
+**One question, asked where review already happens**: does this change touch a door that a later shape needs — a record's ability to name a set, a fact's ability to leave its machine, an identity that must not be forgeable — and does that door still open? The answer is written on the ticket. A door closed without a recorded reason is sent back, and closing one on purpose with the reason written down is allowed.
 
 ### Losing the machine, and moving to another one
 
@@ -309,7 +313,6 @@ Quarantine directories, rescue runbooks, screenshot piles, overnight autopilot l
 
 ## Related documents
 
-- [Later Shapes v1 (and the doors today's work must leave open)](later-shapes-v1.md) — the machine, writer and people shapes this store expects later, and what would block them.
 - [Ticket Relations v1 (what one ticket is to another)](ticket-relations-v1.md) — the first relation ledger in this family, with the same recording rules.
 - [Develop Buffer v1 (lane → develop → main)](develop-buffer-v1.md) — the certification and landing ledgers are members of this family.
 - [Knowledge Base Design](knowledge-base-design.md) — the split between documents and facts.

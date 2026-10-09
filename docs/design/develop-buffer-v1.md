@@ -182,7 +182,7 @@ Three consequences worth writing down now, because the single-line phase must no
 - **Boundary ownership follows the shared artifact.** When two sides each changed something and broke together, the owner is whoever owns the thing both sides changed — the shared component, or the repository. When the sides share nothing, there is no artifact to own the boundary and the owner is whoever formed the batch. Without this rule, boundary problems belong to everyone and therefore to nobody.
 - **A line's existence is decided by evidence, not by habit.** A long-lived line pays a continuing obligation: it must keep taking in the certified state, and a withdrawn landing must be removed from it explicitly. Whether that is worth paying is a question about the line, and the evidence already exists — how often its landings are blocked, and how much conflict appears when its content is combined. A line that costs more than it isolates should be split or ended, which is possible only because a line is a declaration.
 
-**What "too simple" would look like**, stated so that a reviewer can catch it:
+**Doors this flow must leave open**, stated so that a reviewer can catch one being closed:
 
 - a record that says "the revision of the buffer", in the singular, with nowhere to put a second repository;
 - a batch that assumes one repository, or that cannot express "these two must land together";
@@ -190,6 +190,8 @@ Three consequences worth writing down now, because the single-line phase must no
 - an owner attached to a person or a session rather than to a scope;
 - boundary problems with no owner, or with the batch's preparer as the only owner even when a shared component exists.
 - a stage that can only run on the machine that created the worktree, or a line whose state cannot be reconstructed from the repository and the recorded facts (see [Project Fact Ledgers v1](project-fact-ledgers-v1.md): a machine is a resource, not a home).
+
+**One question, asked where review already happens**: does this change touch one of these doors, and does the door still open? The answer is written on the ticket, so the next reader sees why the shape is the way it is. A door closed without a recorded reason is sent back; closing one **on purpose**, with the reason written down, is allowed — a list that forbids all simplification is a list everybody ignores.
 
 ### Coexistence and rollout
 
@@ -218,6 +220,5 @@ This proposal addresses the **Problem** by taking the heavy proof off the per-la
 - [Design Document Writing Guide](design-doc-writing-guide.md) — the admission standard this document follows.
 - [Failure Classification Protocol v1 and Mechanical Attribution](failure-classification-protocol-v1.md) — how a red is classified as product / environment / flake; the bisection protocol here depends on it.
 - [Ticket Relations v1 (what one ticket is to another)](ticket-relations-v1.md) — the relation ledger; the freeze exemption and the benefited ticket's outcome both rest on a recorded repair relation.
-- [Later Shapes v1 (and the doors today's work must leave open)](later-shapes-v1.md) — the later line and repository shapes, and the tells that show a door has been closed.
 - [Project Fact Ledgers v1 (where the project's own facts live)](project-fact-ledgers-v1.md) — where the certification and landing ledgers live, and how they are shared.
 - [Knowledge Base Design](knowledge-base-design.md) — where this document sits in the document-first workflow.
