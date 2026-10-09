@@ -45,11 +45,79 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 ENV_PREFIX = "SANDBAR_"
 
 # ---- Paths ----
-POC_DIR = pathlib.Path(__file__).resolve().parent
-REPO_ROOT = POC_DIR.parents[1]          # server/engine -> repo root
-ADMIN_PY = REPO_ROOT / "server" / "admin.py"
-WORKFLOWS_DIR = pathlib.Path(os.environ.get("SANDBAR_WORKFLOWS_DIR") or (REPO_ROOT / "server" / "workflows"))
-OUT_DIR = POC_DIR / "out"
+# Lazy path constants (t261008-45): the temporalio workflow sandbox re-imports
+# workflow-defining modules at worker start and REJECTS `pathlib.Path.resolve` (and
+# friends) at import time — `executor_delivery` does a bare top-level `import shared`,
+# so any eager resolve here killed ExecutorDeliveryWorkflow registration and left the
+# engine pool red. The constants below are resolved lazily through the module's SINGLE
+# PEP 562 `__getattr__` (bottom of this file) — importing this module performs no
+# filesystem access at all. Observable change (deliberate): SANDBAR_* path env vars
+# set AFTER importing shared but BEFORE first use of the constant now win (they used
+# to be read at import time).
+# Discipline (t260930 lock, tests/test_t260927_01_suite_timeout_attribution.py): this
+# module must define exactly ONE function named `__getattr__` — the single dispatch
+# point for every lazy module attribute (path constants AND the code_stamp process
+# names). Never define `__getattr__` again, not even as a class method; add a resolver
+# to _LAZY_PATH_RESOLVERS instead. In-module code never reads these names bare
+# (module-level `__getattr__` is not consulted for in-module globals): it calls the
+# _-prefixed resolver helpers below.
+def _poc_dir() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent
+
+
+def _repo_root() -> pathlib.Path:
+    return _poc_dir().parents[1]        # server/engine -> repo root
+
+
+def _admin_py() -> pathlib.Path:
+    return _repo_root() / "server" / "admin.py"
+
+
+def _workflows_dir() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("SANDBAR_WORKFLOWS_DIR")
+                        or (_repo_root() / "server" / "workflows"))
+
+
+def _out_dir() -> pathlib.Path:
+    return _poc_dir() / "out"
+
+
+def _epics_dir() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR")
+                        or (_repo_root() / "notes" / "epics"))
+
+
+def _scan_dir() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("SANDBAR_SCAN_DIR") or (_out_dir() / "scan"))
+
+
+def _inspection_dir() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("SANDBAR_INSPECTION_DIR")
+                        or (_out_dir() / "inspection"))
+
+
+def _projects_yaml() -> pathlib.Path:
+    # public-surface discipline: shared.PROJECTS_YAML stays a settable module
+    # attribute (tests monkeypatch it, e.g. test_t260904_02_registry_anchor) — an
+    # explicit attribute wins over the lazy default; after monkeypatch teardown
+    # the attribute is gone and the default is re-resolved (and re-cached).
+    overridden = globals().get("PROJECTS_YAML")
+    if overridden is not None:
+        return overridden
+    return _repo_root() / 'server' / 'projects.yaml'
+
+
+_LAZY_PATH_RESOLVERS = {
+    "POC_DIR": _poc_dir,
+    "REPO_ROOT": _repo_root,
+    "ADMIN_PY": _admin_py,
+    "WORKFLOWS_DIR": _workflows_dir,
+    "OUT_DIR": _out_dir,
+    "EPICS_DIR": _epics_dir,
+    "SCAN_DIR": _scan_dir,
+    "INSPECTION_DIR": _inspection_dir,
+    "PROJECTS_YAML": _projects_yaml,
+}
 
 # ---- Temporal endpoints ----
 # Overridable by environment variables (the test environment runs its own Temporal in
@@ -136,7 +204,6 @@ EPIC_SA_NAME = "EpicCode"
 #      resolve_epics_dir's live env read).
 # the retired pre-run-next-ticket preparation (agent_activities) has moved to
 # resolve_epics_dir and no longer consumes this constant.
-EPICS_DIR = pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR") or (REPO_ROOT / "notes" / "epics"))
 # Code-shape whitelist: reuses the PROJECT_KEY_RE character set and also blocks
 # ../../ path traversal.
 EPIC_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
@@ -185,7 +252,7 @@ def resolve_epics_dir(project_key):
         return pathlib.Path(env_dir)
     key = str(project_key or "").strip()
     if not key:
-        return EPICS_DIR
+        return _epics_dir()
     return resolve_project_root(key) / "notes" / "epics"
 
 
@@ -209,7 +276,7 @@ def validate_epic_code(code: str, epics_dir=None) -> str:
     if not EPIC_CODE_RE.match(code):
         raise ValueError(
             "illegal epic code shape: %r (required %s, lowercase letters/digits/hyphens)" % (code, EPIC_CODE_RE.pattern))
-    base = pathlib.Path(epics_dir) if epics_dir is not None else EPICS_DIR
+    base = pathlib.Path(epics_dir) if epics_dir is not None else _epics_dir()
     path = base / (code + ".md")
     if not path.is_file():
         existing = sorted(p.stem for p in base.glob("*.md")) if base.is_dir() else []
@@ -2439,12 +2506,10 @@ TICKET_STAGE_STATES = ("running", "awaiting", "awaiting-human", "blocked")
 
 # Where reports are written (env override for self-test temp dirs; default the POC's
 # out/scan — a run artifact, gitignored, not committed).
-SCAN_DIR = pathlib.Path(os.environ.get("SANDBAR_SCAN_DIR") or (OUT_DIR / "scan"))
 # The inspection ticket ledger directory (ticket t260905-03; env override for self-test
 # temp dirs; default out/inspection, a run artifact, not committed). The new variable
 # name takes the sandbar prefix per the 260904 host order (pre-existing SANDBAR_* are a
 # historical debt handled only by a dedicated migration ticket; nothing new may use one).
-INSPECTION_DIR = pathlib.Path(os.environ.get("SANDBAR_INSPECTION_DIR") or (OUT_DIR / "inspection"))
 # The 「suspected stuck」 dwell-time threshold (hours). env-tunable; read by the
 # activity, never enters the workflow body.
 SCAN_STUCK_HOURS = float(os.environ.get("SANDBAR_SCAN_STUCK_HOURS") or 48)
@@ -4454,7 +4519,7 @@ def evidence_base(repo_root=None) -> pathlib.Path:
     env = os.environ.get("SANDBAR_EVIDENCE_DIR")
     if env:
         return pathlib.Path(env)
-    return lane_dot_path(repo_root or REPO_ROOT, "evidence")
+    return lane_dot_path(repo_root or _repo_root(), "evidence")
 
 
 def match_ui_paths(paths: Any, prefixes: Any = None) -> List[str]:
@@ -5182,7 +5247,7 @@ def result_file_for(ticket_id: str, stage_id: str, gen: int,
     base = (ws or {}).get("path") or ws_dir_path(ticket_id)
     p = pathlib.Path(base)
     if not p.is_absolute():
-        p = REPO_ROOT / p
+        p = _repo_root() / p
     return str(lane_dot_path(p, "stage_%s_gen%d.json" % (stage_id, gen)))
 
 
@@ -5195,7 +5260,7 @@ def agent_log_for(ticket_id: str, stage_id: str,
     base = (ws or {}).get("path") or ws_dir_path(ticket_id)
     p = pathlib.Path(base)
     if not p.is_absolute():
-        p = REPO_ROOT / p
+        p = _repo_root() / p
     return str(lane_dot_path(p, "agent_%s_gen%d.log" % (stage_id, gen)))
 
 
@@ -5930,7 +5995,6 @@ import time as _time                                # noqa: E402
 # fail-closed, other projects unaffected); the directory name must pass the
 # PROJECT_KEY_RE whitelist, an entry's key must equal its directory name exactly, and the
 # migration test only recognizes the .migrated marker.
-PROJECTS_YAML = REPO_ROOT / 'server' / 'projects.yaml'
 
 
 def registry_root():
@@ -6225,7 +6289,7 @@ def _resume_registry_migration(root, expected, on_disk_keys):
     try:
         fd = os.open(str(root / '.migrated'), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         with os.fdopen(fd, 'w') as fh:
-            fh.write('source: %s\nmigrated_at: %s\n' % (PROJECTS_YAML, _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime())))
+            fh.write('source: %s\nmigrated_at: %s\n' % (_projects_yaml(), _time.strftime('%Y-%m-%dT%H:%M:%SZ', _time.gmtime())))
     except FileExistsError:
         pass  # concurrent: another process already wrote the marker with equivalent contents, ignore
 
@@ -6247,22 +6311,22 @@ def ensure_registry_migrated(root):
     projects, quarantined = scan_registry(root)
     on_disk = len(projects) + len(quarantined)
     if on_disk == 0:
-        if not PROJECTS_YAML.is_file():
+        if not _projects_yaml().is_file():
             raise ValueError('the registry root directory does not exist: %s, and there is no migration source %s (fail-closed; never silently treated as an empty registry)'
-                             % (root, PROJECTS_YAML))
-        migrate_registry(root, PROJECTS_YAML)
+                             % (root, _projects_yaml()))
+        migrate_registry(root, _projects_yaml())
         return
-    if not PROJECTS_YAML.is_file():
+    if not _projects_yaml().is_file():
         return  # a purely manual registry: no seed, so there is nothing to judge or migrate from — accept the state
     try:
         expected = _expected_registry_entries(
-            parse_legacy_registry_file(PROJECTS_YAML.read_text('utf-8'), str(PROJECTS_YAML)), str(PROJECTS_YAML))
+            parse_legacy_registry_file(_projects_yaml().read_text('utf-8'), str(_projects_yaml())), str(_projects_yaml()))
     except ValueError as e:
         raise ValueError('registry state cannot be judged: %s has %d project entries but no '
                          '.migrated marker, and the migration source %s is unparseable (%s). '
                          'Disposition: fix or remove the migration source, then retry. A '
                          'silent skip is refused.'
-                         % (root, on_disk, PROJECTS_YAML, e))
+                         % (root, on_disk, _projects_yaml(), e))
     seed_keys = set(expected.keys())
     on_disk_keys = set([p['key'] for p in projects] + [pathlib.Path(q['dir']).name for q in quarantined])
     if not (on_disk_keys & seed_keys):
@@ -6280,7 +6344,7 @@ def ensure_registry_migrated(root):
                      'leftovers stacked with manual edits). Disposition: after confirming, '
                      'write the marker, wipe the directory and re-migrate, or remove/fix '
                      'the migration source. A silent skip is refused.'
-                     % (root, on_disk, PROJECTS_YAML))
+                     % (root, on_disk, _projects_yaml()))
 
 
 def load_projects_registry():
@@ -6292,10 +6356,10 @@ def load_projects_registry():
         return parse_legacy_registry_file(pathlib.Path(legacy).read_text('utf-8'), legacy), []
     root = registry_root()
     if not root.is_dir():
-        if not PROJECTS_YAML.is_file():
+        if not _projects_yaml().is_file():
             raise ValueError('the registry root directory does not exist: %s, and there is no migration source %s (fail-closed; never silently treated as an empty registry)'
-                             % (root, PROJECTS_YAML))
-        migrate_registry(root, PROJECTS_YAML)
+                             % (root, _projects_yaml()))
+        migrate_registry(root, _projects_yaml())
     else:
         ensure_registry_migrated(root)
     return scan_registry(root)
@@ -6395,7 +6459,7 @@ def worker_meta_payload(repo_root=None, pid=None, dsh_face=None,
     and backward compatible)."""
     if state not in WORKER_META_STATES:
         raise ValueError("worker meta state must be serving/draining, got %r" % (state,))
-    root = os.path.realpath(str(repo_root if repo_root is not None else REPO_ROOT))
+    root = os.path.realpath(str(repo_root if repo_root is not None else _repo_root()))
     payload = {
         'version': WORKER_META_VERSION,
         'pid': int(pid if pid is not None else os.getpid()),
@@ -6656,7 +6720,7 @@ def _load_project_templates_mod():
     if existing is not None:
         return existing
     import importlib.util as _ilu
-    path = POC_DIR / "project_templates.py"
+    path = _poc_dir() / "project_templates.py"
     spec = _ilu.spec_from_file_location("_poc_project_templates", path)
     mod = _ilu.module_from_spec(spec)
     _sys.modules["_poc_project_templates"] = mod
@@ -6689,7 +6753,7 @@ def project_template_scan(import_classes: bool, root=None):
         return pt.scan(perkey_root=lambda: pathlib.Path(root) if root else perkey_projects_root(),
                        project_keys=lambda: keys,
                        resolve_decl=lambda k: project_paths(k),
-                       engine_dir=POC_DIR,
+                       engine_dir=_poc_dir(),
                        builtin_names=_bn,
                        builtin_displays=_bd,
                        part_kinds=PART_KINDS,
@@ -6817,12 +6881,25 @@ def worker_pid() -> int:
     return _PROCESS_PID
 
 
+# t261008-45: the lazy path constants (POC_DIR / REPO_ROOT / ... see
+# _LAZY_PATH_RESOLVERS) are dispatched from this single entry point too — the
+# workflow sandbox rejects import-time `pathlib.Path.resolve`, so the constants
+# must resolve lazily. Same-ticket finding: a __getattr__ defined as a class
+# method is ALSO counted by the t260930 AST lock (it walks every FunctionDef
+# named __getattr__), so no second __getattr__ of ANY shape may exist; register
+# a resolver in _LAZY_PATH_RESOLVERS instead. Resolved values are cached back
+# into globals() so later attribute accesses skip this function.
 def __getattr__(name):
     """PEP 562 惰性模块属性——**全模块只有这一个** `__getattr__`，两个名字都处理。
 
     教训（260930 实案）：同一模块里写两个 `__getattr__`，后者**遮蔽**前者 →
     `shared.WORKER_STARTED_AT` 直接 AttributeError（票面 code_stamp 变 None）。
     本函数是唯一入口；新增惰性名在此加分支，不得另起一个 `def __getattr__`。"""
+    resolver = _LAZY_PATH_RESOLVERS.get(name)
+    if resolver is not None:
+        value = resolver()
+        globals()[name] = value
+        return value
     if name == "WORKER_STARTED_AT":
         return worker_started_at()
     if name == "WORKER_PID":

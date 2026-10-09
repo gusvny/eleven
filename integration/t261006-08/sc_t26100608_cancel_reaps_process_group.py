@@ -164,8 +164,11 @@ def main():
     import re
     m = re.search(r"create_subprocess_exec\([^\n]*\n\s*\"python3\", admin_bin", src)
     if m:
-        # window = the whole call, not a fixed 1600 chars: t261008-33's comment
-        # block pushed the marker past 1600 (product correct, pin brittle).
+        # window = the whole call, not a fixed N chars: successive comment passes
+        # (t261008-33, then the 261009 plain-English engine pass) kept pushing the
+        # marker deeper into the block (product correct, pin brittle) — the
+        # assertion itself is unchanged, the window just spans the whole
+        # documented spawn block.
         block = src[m.start():m.start() + 4000]
         ok("start_new_session=True" in block,
            "C5 merge-check verify_lane-code spawn is session-isolated")
