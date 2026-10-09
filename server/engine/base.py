@@ -115,6 +115,111 @@ TICKET_UPDATE_RECEIPT_PATCH_ID = "ticket-update-receipt-v1"
 # 旧历史重放分支不经 _update_echo——旧文案逐字复刻，保证重放逐字节兼容）。
 UPDATE_ECHO_LIMIT = 200
 
+# ---------------------------------------------------------------------------
+# KI-212 (t261009-47): rework hold — a host instruction is delivered or refused
+# by name, never absorbed by a mechanical round. Patch-gated exactly like
+# dev-lane-settle-rerun-v1 (t261009-20): the fault mode is in-flight-history
+# replay divergence at a mid-history enable position (a branch that changes
+# which code path the workflow takes must sit behind workflow.patched, or an
+# old history replays a different shape than it originally ran).
+REWORK_HOLD_PATCH_ID = "ki212-rework-hold-v1"
+
+
+def rework_landing_decision(phase, target, stage_state, agent_phases):
+    """KI-212 pure decision face: ("hold"|"consume", reason) for a rework landing.
+
+    Invariant (review R3, gen2): a round that is parked on a rework-aware wait is
+    a round that can act on the signal — the main-loop top is the honoring point.
+    Hold ONLY a non-agent phase in the running state: a running mechanical round
+    builds no stage prompt, so a note it swallowed could never be rendered.
+
+    Malformed inputs (non-string phase/state, non-set agent_phases) fail closed
+    to consume with today's fallback semantics; this function never raises.
+    `target` is part of the signature for call-site symmetry and logging only —
+    target validity/refusal is decided by the caller's arrival-time checks (C3),
+    a doomed signal never reaches this helper.
+    """
+    ph = str(phase or "")
+    tgt = str(target or "")
+    st = str(stage_state or "")
+    try:
+        agents = frozenset(agent_phases or ())
+    except TypeError:
+        # malformed agent set → fail closed to consume (deliver the instruction)
+        return ("consume", "malformed agent_phases (%r): fail closed to consume"
+                % (agent_phases,))
+    if st != "running":
+        return ("consume", "parked state %r: the rework-aware wait can act on the "
+                           "signal at the loop top" % (st or "?"))
+    if ph in agents:
+        return ("consume", "phase %r builds a stage prompt (agent-capable round)" % ph)
+    return ("hold", "phase %r is a running mechanical round (no stage prompt to "
+                    "carry the note; target %r waits)" % (ph, tgt or "<default>"))
+
+
+class ReworkHoldMixin:
+    """KI-212 shared bookkeeping for the hold/refuse/coalesce discipline.
+
+    Mixed into TicketWorkflowBase and DevLaneWorkflow (light_lane inherits the
+    latter). Host-facing records are written in English per the ticket-face rule.
+    """
+
+    def _note_rework_held(self, target: str, why: str) -> None:
+        """Mark a held rework on the ticket face (idempotent per target+note, so
+        the mechanical round's log is not spammed on every loop top)."""
+        req = getattr(self, "_rework", None)
+        note = str(getattr(req, "note", "") or "")
+        held = self.meta.get("rework_held") or {}
+        if held.get("target") == str(target or "") and held.get("note") == note:
+            return
+        self.meta["rework_held"] = {
+            "target": str(target or ""), "note": note,
+            "who": str(getattr(req, "who", "") or ""), "why": str(why or ""),
+            "at": self._now_iso()}
+        self._log("rework held until %s: %s" % (target, why))
+        self._touch()
+
+    def _queue_rework(self, req, source: str) -> None:
+        """Internal send-backs (human-gate reject, conflict auto-rework) must
+        never clobber a held external rework: the external request keeps its
+        identity and the internal note is appended, both attributions kept."""
+        held = getattr(self, "_rework", None)
+        if held is None or not workflow.patched(REWORK_HOLD_PATCH_ID):
+            self._rework = req
+            return
+        self._rework = ReworkRequest(
+            who=str(getattr(held, "who", "") or ""),
+            target_stage=str(getattr(held, "target_stage", "") or ""),
+            note="%s (%s) | internal %s send-back: %s (%s)" % (
+                str(getattr(held, "note", "") or ""),
+                str(getattr(held, "who", "") or ""),
+                source, str(getattr(req, "note", "") or ""),
+                str(getattr(req, "who", "") or "")),
+            caller_project=str(getattr(req, "caller_project", "") or ""),
+            cross_project_note=str(getattr(req, "cross_project_note", "") or ""))
+        self._log("rework coalesced: held external send-back kept, internal %s "
+                  "note appended" % source)
+
+    def _refuse_held_rework_at_close(self) -> None:
+        """Terminal guard (review R1): a signal still held at the real loop exit
+        is refused by name on the ticket — never silently dropped at close-out."""
+        req = getattr(self, "_rework", None)
+        if req is None:
+            return
+        tgt = str(getattr(req, "target_stage", "") or "")
+        want = "rework(%s)" % (tgt if tgt else "default target = <landing>")
+        why = ("lane reached terminal (done) before this rework could be honoured; "
+               "refused by name - not absorbed")
+        self.refused.append({"who": str(getattr(req, "who", "") or ""),
+                             "want": want, "why": why})
+        self.meta["rework_refused_at_close"] = {
+            "who": str(getattr(req, "who", "") or ""),
+            "target": tgt if tgt else "<default>",
+            "note": str(getattr(req, "note", "") or ""), "why": why}
+        self._rework = None
+        self._log("rework refused at close: %s — %s" % (want, why))
+        self._touch()
+
 
 def _update_echo(v) -> str:
     """update 拒绝留痕的不受信回显截断单点（t260922-09）。
@@ -597,7 +702,7 @@ class TicketEventLedgerMixin:
                     pass
 
 
-class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
+class TicketWorkflowBase(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin):
     """Shared mechanisms for the six template subclasses. A subclass only declares:
       STAGES: Tuple[Stage, ...]   — the stage chain (source of truth = code)
       PATCH_ID: str               — this template's own patched id
@@ -926,9 +1031,13 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             return "next"
         # reject = send-back: default target is revision_to / the previous stage
         target = st.revision_to or (self.STAGES[idx - 1].id if idx > 0 else "")
-        self._rework = ReworkRequest(
-            who=sig.who, target_stage=target,
-            note="human sent back %s: %s (signer %s)" % (st.id, sig.note, sig.who))
+        # KI-212: internal send-back goes through the coalescing queue — it must
+        # never clobber a held external rework.
+        self._queue_rework(
+            ReworkRequest(
+                who=sig.who, target_stage=target,
+                note="human sent back %s: %s (signer %s)" % (st.id, sig.note, sig.who)),
+            "human-gate reject")
         return "rework"
 
     # ---------- Bookkeeping: checks/handoff ----------
@@ -955,7 +1064,23 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
     # ---------- rework ----------
     def _apply_rework(self, cur_idx: int) -> int:
         """Compute the rework landing stage. Returns the target stage index
-        (illegal target → refuse with a record, stay on the current stage)."""
+        (illegal target → refuse with a record, stay on the current stage).
+
+        KI-212 hold guard: while a non-agent/non-human stage is actively running,
+        a rework whose resolved landing is that same mechanical stage is HELD
+        (the signal is not consumed — a mechanical round builds no stage prompt,
+        so the note could never render). Parked states (blocked / awaiting-human)
+        consume as today. Unpatched histories take the old path verbatim."""
+        if self._rework is not None and workflow.patched(REWORK_HOLD_PATCH_ID) \
+                and str(self.meta.get("stage_state") or "") == "running":
+            cur_probe = self.STAGES[cur_idx]
+            probe = str(self._rework.target_stage or "") or cur_probe.revision_to \
+                or (self.STAGES[cur_idx - 1].id if cur_idx > 0 else "")
+            pidx = self._stage_idx(probe) if probe else -1
+            if pidx >= 0 and self.STAGES[pidx].kind not in ("agent", "human"):
+                _, why = rework_landing_decision("", probe, "running", ())
+                self._note_rework_held(probe, why)
+                return cur_idx
         req = self._rework
         self._rework = None
         cur = self.STAGES[cur_idx]
@@ -1129,6 +1254,10 @@ class TicketWorkflowBase(TicketPauseMixin, TicketCrossProjectMixin):
             idx += 1
 
         # All stages done: auto-settle (v2 has no manual driving; human gates excepted)
+        # KI-212 terminal guard: a signal still held at the real loop exit is
+        # refused by name — never silently dropped with the closed ticket.
+        if workflow.patched(REWORK_HOLD_PATCH_ID):
+            self._refuse_held_rework_at_close()
         last = self.STAGES[-1]
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"

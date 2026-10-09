@@ -43,11 +43,14 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from base import (
+        REWORK_HOLD_PATCH_ID,
         TICKET_UPDATE_RECEIPT_PATCH_ID,
+        ReworkHoldMixin,
         TicketCrossProjectMixin,
         TicketEventLedgerMixin,
         TicketPauseMixin,
         _update_echo,
+        rework_landing_decision,
     )
     import authz_gates
     import path_gates  # t260915-01 ②：闸拒绝结构化明细的构造/校形（纯函数零 IO）
@@ -673,6 +676,17 @@ PHASE_MAIN_CHAIN = frozenset({
     "create_plan", "review_plan", "parallel_impl_design", "implement",
     "integ_join", "integration_review", "run_integration_tests", "arbitrate",
     "arb_acc_parallel", "acceptance", "merge_check", "merge", "done"})
+
+#: KI-212 (t261009-47): phases that build a stage prompt — an agent round that can
+#: carry the rework note in its own prompt (review R2: the consume condition is
+#: "agent-capable OR parked"; a mechanical-named target is held like any other).
+#: The complement within PHASE_MAIN_CHAIN is the mechanical/orchestration set
+#: (run_integration_tests / merge_check / merge, the parallel forks and joins,
+#: done).
+AGENT_CAPABLE_PHASES = frozenset(PHASE_MAIN_CHAIN - {
+    "run_integration_tests", "merge_check", "merge",
+    "parallel_impl_design", "integ_join", "integration_review",
+    "arb_acc_parallel", "done"})
 # phase main-chain step → role mapping (used by _auto_rework to record meta['role']).
 # Deliberately not via _step(target): the three values in the vocabulary that are not
 # STAGES ids would make _step raise "unknown step" and wedge the workflow (t260901-04).
@@ -913,7 +927,7 @@ def _prompt_next_no(prompt: str) -> int:
 
 
 @workflow.defn
-class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
+class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin,
                       TicketEventLedgerMixin):
     """The single workflow for developer-family tickets (dev-lane). Direct activity
     orchestration, no stage machine.
@@ -3175,38 +3189,74 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             await self._ledger_flush()
             if self._rework is not None:
                 fb = "implement" if phase == "parallel_impl_design" else phase
-                # KI-024: a rework leaving a parallel period (target is a serial section)
-                # must clear parallel_stages — otherwise the stale list pins edges that
-                # already left on UI ▶ forever (one of two clearing paths, the other is
-                # at the join point; the waiting-period contract is spelled out in the
-                # failure-edge comments of each parallel branch).
-                if phase in ("parallel_impl_design", "arb_acc_parallel"):
-                    set_parallel_stages(self.meta, [])
-                if getattr(self, "_rework_escape_on", False):
-                    # t260916-19 ①（门内新路径）：别名直达目标段 / 显式拒收——拒绝
-                    # 信号已被消费（不残留），blocked 点名后等 retry_qc 或新 rework，
-                    # 绝不静默回落 fb 原地复判（t260916-11 死结观感根因）。
-                    phase, edge, refusal_note = self._consume_rework(fb)
-                    if refusal_note:
-                        await self._blocked(fb, refusal_note)
-                        continue
-                    if edge == "design":
-                        design_done = False  # 只重跑设计边（实现边结果保留在内存）
-                else:
-                    phase = self._apply_rework(fb)
-                # KI-003: yield once after the rework bookkeeping burst (_auto_rework's
-                # _log/_mark/_touch) so a queued snapshot query sees the post-rework state.
-                await self._breathe()
-                prev_ctx = str(self.meta.get("last_rework_note") or "")
-                if workflow.patched(TESTS_STREAK_PATCH_ID):
-                    # t260917-09：rework=非迭代来源边（方案 §2.4.3「rework 后重进复位」
-                    # ——人审打回/验收打回都经此分支）。只翻 streak 标记：计数转移与
-                    # 留痕仍归 run_integration_tests 段入口单点（下一拍 tests_streak
-                    # 已 False → 那里复位并 _log「计数复位」）。
-                    tests_streak = False
-                if phase == "implement":
-                    impl_done = False  # re-implement: the join point will commit for both again
-                continue
+                # KI-212 (t261009-47): a rework must not be consumed by a round
+                # that cannot act on it. A non-agent phase in the running state
+                # builds no stage prompt, so the note it swallowed could never be
+                # rendered — HOLD the signal instead (never consumed here), leave
+                # it pending across the mechanical round(s), and let the first
+                # agent-capable round or parked-state wake consume it at this loop
+                # top with the note in its own prompt. Arrival-time refusals are
+                # NOT held (C3): an invalid target falls through to the consume
+                # paths below and is refused by name exactly as before. Fall-through
+                # discipline (C4): the loop top is an inter-iteration boundary — the
+                # just-finished round already recorded its result and set the next
+                # phase, so dispatching here is exactly what the no-signal path
+                # would do next; no mechanical round runs twice.
+                _held = False
+                if workflow.patched(REWORK_HOLD_PATCH_ID):
+                    _tgt = str(getattr(self._rework, "target_stage", "") or "")
+                    _eff = _tgt or fb
+                    if _eff in PHASE_MAIN_CHAIN and _eff != "done":
+                        _d, _why = rework_landing_decision(
+                            phase, _tgt, str(self.meta.get("stage_state") or ""),
+                            AGENT_CAPABLE_PHASES)
+                        if _d == "hold":
+                            self._note_rework_held(_eff, _why)
+                            _held = True
+                if not _held:
+                    # KI-024: a rework leaving a parallel period (target is a serial
+                    # section) must clear parallel_stages — otherwise the stale list
+                    # pins edges that already left on UI ▶ forever (one of two
+                    # clearing paths, the other is at the join point). Consuming
+                    # only (KI-212): a held signal changes nothing about the running
+                    # parallel section's own bookkeeping.
+                    if phase in ("parallel_impl_design", "arb_acc_parallel"):
+                        set_parallel_stages(self.meta, [])
+                    if getattr(self, "_rework_escape_on", False):
+                        # t260916-19 (1) (new in-gate path): alias direct-to-target /
+                        # explicit refusal — a refused signal is consumed (nothing
+                        # left pending), blocked names the reason and waits for
+                        # retry_qc or a new rework; never silently fall back to fb
+                        # and re-judge in place (t260916-11 deadlock's observed root).
+                        phase, edge, refusal_note = self._consume_rework(fb)
+                        if refusal_note:
+                            await self._blocked(fb, refusal_note)
+                            continue
+                        if edge == "design":
+                            design_done = False  # re-run the design edge only (the implement edge's result stays in memory)
+                    else:
+                        phase = self._apply_rework(fb)
+                    # KI-003: yield once after the rework bookkeeping burst (_auto_rework's
+                    # _log/_mark/_touch) so a queued snapshot query sees the post-rework state.
+                    await self._breathe()
+                    prev_ctx = str(self.meta.get("last_rework_note") or "")
+                    if workflow.patched(TESTS_STREAK_PATCH_ID):
+                        # t260917-09: a rework is a non-iteration source edge (plan
+                        # §2.4.3 "reset on re-entry after a send-back" — both the
+                        # human-review send-back and the acceptance send-back come
+                        # through here). Only flip the streak flag: the counter
+                        # transition and its record stay owned by the single
+                        # run_integration_tests entry point (the next beat has
+                        # tests_streak False → it resets there and _logs "counter reset").
+                        tests_streak = False
+                    if phase == "implement":
+                        impl_done = False  # re-implement: the join point will commit for both again
+                    continue
+                # held (KI-212): the signal stays pending; fall through to normal
+                # phase dispatch (no continue — dispatching the current phase here
+                # is exactly what the no-signal path would do next; a continue
+                # would re-enter the hold branch without ever running the round
+                # and spin forever).
 
             # 2) create_plan ⇄ review_plan
             if phase == "create_plan":
@@ -5125,9 +5175,13 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
                 self.signatures["merge"] = {"who": sig.who, "decision": sig.decision,
                                             "note": sig.note, "at": self._now_iso()}
                 if sig.decision != "approve":
-                    self._rework = ReworkRequest(
-                        who=sig.who, target_stage="implement",
-                        note="human send-back at merge: %s (signed by %s)" % (sig.note, sig.who))
+                    # KI-212: internal send-back goes through the coalescing queue —
+                    # it must never clobber a held external rework.
+                    self._queue_rework(
+                        ReworkRequest(
+                            who=sig.who, target_stage="implement",
+                            note="human send-back at merge: %s (signed by %s)" % (sig.note, sig.who)),
+                        "human-gate reject at merge")
                     continue
                 # Approved signature → real merge
                 self.meta["stage_state"] = "running"
@@ -5295,6 +5349,12 @@ class DevLaneWorkflow(TicketPauseMixin, TicketCrossProjectMixin,
             continue
 
         # Close out
+        # KI-212 terminal guard (review R1): a signal still held at the real loop
+        # exit is refused by name — never silently dropped with the closed ticket.
+        # The _blocked("merge", ...) close-out failure paths stay inside the loop
+        # (C6): there the parked-state consume applies, not this guard.
+        if workflow.patched(REWORK_HOLD_PATCH_ID):
+            self._refuse_held_rework_at_close()
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"
         self._touch()

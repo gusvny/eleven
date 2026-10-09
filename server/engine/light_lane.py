@@ -92,6 +92,7 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from dev_lane import (
+        AGENT_CAPABLE_PHASES,
         INTEG_RUN_TO,
         MERGE_CHECK_TO,
         MERGE_TO,
@@ -105,6 +106,8 @@ with workflow.unsafe.imports_passed_through():
         # time arm); judged against THIS module's workflow facade at the two
         # gate sites below, the shared dev-lane id at the inherited helpers.
         _concurrency_gate_active,
+        REWORK_HOLD_PATCH_ID,
+        rework_landing_decision,
     )
     import shared  # 纯函数面（exception_chain_note 等，零 IO）
     # t261004-32: rule-point constants of the concurrency slot gate (the gate
@@ -234,6 +237,11 @@ LIGHT_REWORK_TARGETS = frozenset({
     # 宿主 260930：create_plan 段已删——它**也不再是可返工目标**（打回一个不存在的段
     # 只会把票打到未知相位；拒收面会具名点名「不是轻道段」）。
     "implement", "run_integration_tests", "merge_check", "merge"})
+
+#: KI-212 (t261009-47): light-lane agent-capable phases — the only phases here that
+#: build a stage prompt. run_integration_tests / merge_check are agent=False; merge
+#: is the human gate (its rework wake consumes at the loop top, parked-state rule).
+LIGHT_AGENT_PHASES = frozenset(LIGHT_REWORK_TARGETS & AGENT_CAPABLE_PHASES)
 
 #: 轻道段级补述：在 dev-lane 的同段补述**前面**加一段轻道契约说明；正文 import 复用，
 #: 纪律条文（英文报告义务 + developer 段集成禁跑执法）因此与 dev-lane 同源、不会漂移。
@@ -1325,15 +1333,36 @@ class LightLaneWorkflow(DevLaneWorkflow):
             # 事件账本：主相循环每轮先冲账（机制在 base.TicketEventLedgerMixin）
             await self._ledger_flush()
             if self._rework is not None:
-                landing, refusal = self._consume_light_rework(phase)
-                if refusal:
-                    await self._blocked(self._safe_phase(phase, self.STAGES[0].id),
-                                        refusal)
+                # KI-212 (t261009-47): hold the landing while the current phase is a
+                # RUNNING mechanical round (agent=False — no stage prompt to carry
+                # the note); consume at any parked state or agent-capable phase.
+                # Arrival-time refusals are not held (C3): an out-of-vocabulary
+                # target falls through to _consume_light_rework and is refused by
+                # name exactly as before. Fall-through discipline (C4): the loop top
+                # is an inter-iteration boundary; dispatching here is what the
+                # no-signal path would do next (no continue — that would spin on
+                # the hold branch without ever running the round).
+                _held = False
+                if workflow.patched(REWORK_HOLD_PATCH_ID):
+                    _tgt = str(getattr(self._rework, "target_stage", "") or "")
+                    _eff = _tgt or phase
+                    if _eff in LIGHT_REWORK_TARGETS:
+                        _d, _why = rework_landing_decision(
+                            phase, _tgt, str(self.meta.get("stage_state") or ""),
+                            LIGHT_AGENT_PHASES)
+                        if _d == "hold":
+                            self._note_rework_held(_eff, _why)
+                            _held = True
+                if not _held:
+                    landing, refusal = self._consume_light_rework(phase)
+                    if refusal:
+                        await self._blocked(self._safe_phase(phase, self.STAGES[0].id),
+                                            refusal)
+                        continue
+                    phase = landing
+                    prev_ctx = str(self.meta.get("last_rework_note") or "")
+                    await self._breathe()
                     continue
-                phase = landing
-                prev_ctx = str(self.meta.get("last_rework_note") or "")
-                await self._breathe()
-                continue
 
             # 2) implement（首段；developer 落地 + 单测；worker 代落盘）
             #    轻道**没有方案段**（宿主 260930 裁定，见模块头注）——所以这里也**不调**
@@ -1621,10 +1650,12 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 self.signatures["merge"] = {"who": sig.who, "decision": sig.decision,
                                             "note": sig.note, "at": self._now_iso()}
                 if sig.decision != "approve":
-                    self._rework = ReworkRequest(
+                    # KI-212: coalescing queue — never clobber a held external rework.
+                    self._queue_rework(ReworkRequest(
                         who=sig.who, target_stage="implement",
                         note=("human rejected at the merge gate: %s (signer %s)"
-                              % (sig.note, sig.who)))
+                              % (sig.note, sig.who))),
+                        "human-gate reject at merge")
                     continue
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human signed off (%s) — merging" % sig.who)
@@ -1741,6 +1772,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
             continue
 
         # 收口（与父类同形：closed + timeline closed 条目 + 末次冲账）
+        # KI-212 terminal guard (review R1): a signal still held at the real loop
+        # exit is refused by name — never silently dropped with the closed ticket.
+        if workflow.patched(REWORK_HOLD_PATCH_ID):
+            self._refuse_held_rework_at_close()
         self.meta["status"] = "closed"
         self.meta["stage_state"] = "awaiting"
         self._touch()
