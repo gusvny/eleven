@@ -53,6 +53,8 @@ related:
 
 ## A. Delivery records (proposed — the buffer flow)
 
+**One rule covers every field that names a state.** In a multi-repository project a "revision" is really a set of per-repository revisions, so `repos`, `base`, `covered_from`, `main_before` and `main_after` are all **sets**, one entry per repository, and in the single-repository case each has exactly one member. Anything that names a state and is not a set would have to be rewritten the day a second repository appears. The same applies to `main`: in a multi-repository project "main" is per repository, so a batch advances several of them and records all of them.
+
 ### landing — "what content did this ticket put on this line, and on top of what?"
 
 Single repository:
@@ -82,11 +84,22 @@ Several repositories — still **one** landing, one act:
     { "repo": "sandbar", "revision": "7d21c0a4" },
     { "repo": "dsh", "revision": "41b0e771" }
   ],
-  "base": "9f3c2a1b",
+  "base": [
+    { "repo": "sandbar", "revision": "9f3c2a1b" },
+    { "repo": "dsh", "revision": "0a77e1c3" }
+  ],
   "at": 1791510000000,
   "actor": "engine"
 }
 ```
+
+`base` is a **set keyed to the repositories the landing names** — one entry per repository, in the same order as `repos`, so a reader compares entry by entry. It is not a new source of truth: it is the previous certification's `repos` set, snapshotted at the moment of landing. And it is a **checkable claim**: per repository, `base` must be an ancestor of the landing's revision. That single check is what catches a landing that skipped over certified content, or a lane whose base is behind (or, worse, that would revert content the line already certified) — and it reports **per repository**, because in a multi-repository project those failures are per repository too.
+
+Three cases to define, or the field will be read wrongly:
+
+- **A repository the line has never certified.** Its `base` entry is the revision the line was created from in that repository (recorded when the line was declared), so the field is never absent and the check still applies. The uncovered range for that repository then starts at the line's creation, which may be a lot — that is a fact worth seeing rather than hiding.
+- **Repositories the landing does not name do not appear in `base`,** and their certified revisions are read from the certification record instead. `base` must not be read as "the whole state of the line"; it is the state of the repositories this landing touched.
+- **A lane behind the certified state** fails the ancestry check in exactly the repository where it is behind — which is the signal to merge the certified state in before landing, not to land on a stale base.
 
 | Field | Example value | Why it is there |
 |---|---|---|
@@ -95,7 +108,7 @@ Several repositories — still **one** landing, one act:
 | `line` | `default` / `ui` / `epic-console-ui` | Which line it landed on — freezes and certification are per line |
 | `repos[].repo` | `sandbar`, `dsh` | A landing may span repositories; one entry in the single-repository case |
 | `repos[].revision` | `9f3c2a1b` | The commit that went onto that repository's line |
-| `base` | `4d2e0f9a` | The previously certified revision: **the anchor that makes the uncertified range computable** instead of remembered |
+| `base` | `[{"repo":"sandbar","revision":"4d2e0f9a"}]` | The previously certified **state**, as a set keyed to `repos`: **the anchor that makes the uncertified range computable** instead of remembered, and a checkable claim (per repository, it must be an ancestor of the revision that landed) |
 | `at` | `1791507005123` | Milliseconds since the epoch |
 | `actor` | `engine` / `integration` / `host` | Who performed the landing — provenance, not authority |
 
@@ -116,7 +129,9 @@ Two questions that look like this one and are not:
   "repos": [
     { "repo": "sandbar", "revision": "9f3c2a1b" }
   ],
-  "covered_from": "4d2e0f9a",
+  "covered_from": [
+    { "repo": "sandbar", "revision": "4d2e0f9a" }
+  ],
   "tickets": ["t261008-45", "t261008-46"],
   "ran": {
     "suite": "full",
@@ -139,7 +154,7 @@ Two questions that look like this one and are not:
 | `candidate` | `cand-261009-14` | **What is proved is the set of revisions that would be delivered together**, not a branch: the line's head today, a merge of heads once there are several lines |
 | `line` | `default` | Which line's candidate this is |
 | `repos[].revision` | `9f3c2a1b` | The exact content under proof |
-| `covered_from` | `4d2e0f9a` | The revision this certification continues from — **what makes the certified prefix reconstructible**, and therefore what makes "the greatest certified revision is always landable" true |
+| `covered_from` | `[{"repo":"sandbar","revision":"4d2e0f9a"}]` | The revision this certification continues from — **what makes the certified prefix reconstructible**, and therefore what makes "the greatest certified revision is always landable" true |
 | `tickets` | `["t261008-45", "t261008-46"]` | Which tickets' landings are inside the covered range: what lets a batch say whom it delivers |
 | `ran.suite` | `full` / `fast-set` | Which proof was run |
 | `ran.scenarios` | `445` | How much was run — evidence for arguing the fast set's membership |
@@ -192,8 +207,12 @@ Two questions that look like this one and are not:
     { "repo": "sandbar", "revision": "7c1d90ab" }
   ],
   "tickets": ["t261008-45", "t261008-46"],
-  "main_before": "de46ce42",
-  "main_after": "7c1d90ab",
+  "main_before": [
+    { "repo": "sandbar", "revision": "de46ce42" }
+  ],
+  "main_after": [
+    { "repo": "sandbar", "revision": "7c1d90ab" }
+  ],
   "signer": "integration",
   "on_behalf_of": "host",
   "authority": "宿主令 261009「resume 2 个 ticket，按优先级」",
@@ -209,7 +228,7 @@ Two questions that look like this one and are not:
 | `line` | `default` | Which line it takes content from |
 | `repos[].revision` | `7c1d90ab` | What actually moved |
 | `tickets` | `["t261008-45", "t261008-46"]` | Whom it delivers — the only source for "delivered" |
-| `main_before` / `main_after` | `de46ce42` / `7c1d90ab` | Makes the batch a fact about a range; rollbacks and withdrawals can name it |
+| `main_before` / `main_after` | `[{"repo":"sandbar","revision":"de46ce42"}]` / `[… "7c1d90ab"]` | Makes the batch a fact about a range; rollbacks and withdrawals can name it |
 | `signer` | `integration` | Who actually signed |
 | `on_behalf_of` | `host` / `null` | Delegation: the record names both sides |
 | `authority` | `宿主令 261009「...」` | The order being executed — the third field of the `by`/`who` split |
