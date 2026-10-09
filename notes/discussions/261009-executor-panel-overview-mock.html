@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Executor</title>
+<style>
+/* t261003-09 缺陷 2：双调色板，随 ?theme= 切（workbench 深链恒带）；缺席/畸形 →
+   不设 data-theme，落 prefers-color-scheme 显式降级（standalone 场景），浅色兜底。
+   词表对齐控制台 --dsw-alias/--dsw-derive 家族（light=GitHub 浅档、dark=原深档）。 */
+html[data-theme="light"],html:not([data-theme]){--bg:#ffffff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--fg-soft:#424a53;--muted:#57606a;--faint:#6e7781;--blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--badge-fg:#ffffff;--accent-soft:#dbe9ff;--accent-line:#7aa7e8;--dot-grey:#99a3ad;--sw-off:#d7dde3;--knob:#57606a;--warn-soft:#fff8c5;--danger-soft:#ffebe9;--pill-sign-bg:#ddf4ff;--pill-sign-fg:#0550ae;--pill-open-bg:#dafbe1;--pill-open-fg:#116329;--pill-retry-bg:#fff8c5;--pill-retry-fg:#7d4e00;--pill-send-bg:#fff1d6;--pill-send-fg:#9a5b00;--pill-cancel-bg:#ffebe9;--pill-cancel-fg:#cf222e;--pill-pause-bg:#e7ebef;--pill-pause-fg:#57606a}
+html[data-theme="dark"]{--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--fg-soft:#c3cfdf;--muted:#8ea0b8;--faint:#5b6880;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--badge-fg:#0e1420;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot-grey:#46536a;--sw-off:#39465c;--knob:#8ea0b8;--warn-soft:#2a2313;--danger-soft:#2a1414;--pill-sign-bg:#183153;--pill-sign-fg:#79b8ff;--pill-open-bg:#16351f;--pill-open-fg:#7ad48a;--pill-retry-bg:#3a2d13;--pill-retry-fg:#ffb454;--pill-send-bg:#3a2a13;--pill-send-fg:#ffc07a;--pill-cancel-bg:#3a1a1a;--pill-cancel-fg:#ff8b8b;--pill-pause-bg:#262f3d;--pill-pause-fg:#9fb0c8}
+@media (prefers-color-scheme: dark){ html:not([data-theme]){--bg:#141a24;--panel:#1b2330;--panel2:#222c3c;--line:#2e394d;--line-soft:#232c3a;--fg:#dbe4f0;--fg-soft:#c3cfdf;--muted:#8ea0b8;--faint:#5b6880;--blue:#4da3ff;--red:#ff6b6b;--amber:#ffb454;--green:#7ad48a;--hover:#1f2937;--badge-fg:#0e1420;--accent-soft:#1d3550;--accent-line:#2f5b8a;--dot-grey:#46536a;--sw-off:#39465c;--knob:#8ea0b8;--warn-soft:#2a2313;--danger-soft:#2a1414;--pill-sign-bg:#183153;--pill-sign-fg:#79b8ff;--pill-open-bg:#16351f;--pill-open-fg:#7ad48a;--pill-retry-bg:#3a2d13;--pill-retry-fg:#ffb454;--pill-send-bg:#3a2a13;--pill-send-fg:#ffc07a;--pill-cancel-bg:#3a1a1a;--pill-cancel-fg:#ff8b8b;--pill-pause-bg:#262f3d;--pill-pause-fg:#9fb0c8} }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,system-ui,sans-serif}
+/* t261004-16 Req1：页面用满窗宽（1600 视口两侧留白各 ≤5%），超宽屏 1440 封顶，
+   左右 padding 随窗宽缩放（16–28px）。container-type 保留（两栏断点按容器宽）。 */
+.wrap{max-width:min(1440px,100%);margin:0 auto;padding:18px clamp(16px,2vw,28px) 48px;container-type:inline-size}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.top h1{font-size:14px;font-weight:600;margin:0}
+.chip{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:2px 9px;font-size:11px}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;width:max-content;margin-bottom:16px;flex-wrap:wrap}
+input.tab{position:absolute;opacity:0;pointer-events:none}
+.seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
+.seg label:hover{color:var(--fg)}
+#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-alerts:checked~.seg label[for=t-alerts],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+.badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
+.sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.sect.lead{margin-top:18px}
+.row{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.row.wait{border-left:3px solid var(--amber)}
+.row.done{border-left:3px solid var(--line);background:transparent}
+.head{display:flex;align-items:baseline;gap:8px;padding:10px 12px;cursor:pointer;user-select:none}
+.head:hover{background:var(--hover)}
+.row.done .head .txt{color:var(--muted)}
+.txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
+.dot.amber{background:var(--amber)}.dot.grey{background:var(--dot-grey)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
+/* t261006-17 (CL-2), renamed t261008-20: the Concurrent limit block — knob buttons, limit value, three-state chip. */
+.concBtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;width:28px;height:24px;font:inherit;cursor:pointer;line-height:1;padding:0}
+.concBtn:hover{border-color:var(--blue)}
+.concVal{display:inline-block;min-width:80px;text-align:center;font-weight:600}
+.pill.conc-room{background:var(--pill-open-bg);color:var(--pill-open-fg)}
+.pill.conc-at{background:var(--pill-sign-bg);color:var(--pill-sign-fg)}
+.pill.conc-over{background:var(--warn-soft);color:var(--amber)}
+.meta{color:var(--muted);font-size:11px;white-space:nowrap}
+.chev{color:var(--muted);font-size:10px;flex:0 0 auto;transition:transform .15s}
+.row[data-open="true"] .chev{transform:rotate(90deg)}
+.body{display:none;padding:0 12px 11px 12px;border-top:1px solid var(--line-soft)}
+.row[data-open="true"] .body{display:block}
+/* t261004-16 Req4：详情限高 170→440px（票面要求 ≥420），字号 12→13px；内部滚动保留。
+   正文行长封顶 90ch——限的是内容，不是页面。markdown 元素全部只用既有主题词表
+   （t261004-10 教训：零硬编码色）。 */
+.detail{margin-top:9px;max-height:440px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;color:var(--fg-soft);font-size:13px}
+.detail>*{max-width:90ch}
+.detail h1,.detail h2,.detail h3,.detail h4,.qfull h1,.qfull h2,.qfull h3,.qfull h4{margin:8px 0 4px;font-weight:600;line-height:1.3}
+.detail h1,.qfull h1{font-size:15px}.detail h2,.qfull h2{font-size:14px}.detail h3,.qfull h3,.detail h4,.qfull h4{font-size:13px}
+.detail p,.qfull p{margin:4px 0;white-space:pre-wrap}
+.detail ul,.detail ol,.qfull ul,.qfull ol{margin:4px 0;padding-left:22px}
+.detail li,.qfull li{margin:2px 0;white-space:pre-wrap}
+.detail code,.qfull code{font-family:ui-monospace,monospace;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.detail pre{margin:6px 0;padding:8px 10px;background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:auto}
+.detail pre code{background:transparent;border:0;padding:0;white-space:pre}
+.detail blockquote,.qfull blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--muted)}
+.detail a,.qfull a{color:var(--blue)}
+.md-clipped{color:var(--muted);font-size:11px}
+/* t261004-16 Req3：展开行的完整问题放正文顶部，按格式渲染（行头收起态仍是单行省略）。 */
+.qfull{margin-top:9px;font-size:13px;color:var(--fg)}
+.qfull p:first-child{margin-top:0}
+.opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+/* t261004-17：选项块可挂在收起行内（不展开也能一键答），默认动作行随卡在收起态可见。 */
+.opts.inline{margin-top:0;padding:9px 12px 11px 12px;border-top:1px solid var(--line-soft)}
+.dflt{color:var(--muted);font-size:11px;margin-top:8px}
+.gtag{color:var(--muted)}
+.opts button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 14px;font:inherit;cursor:pointer}
+.opts button:hover{border-color:var(--blue);color:var(--blue)}
+.opts button.primary{background:var(--accent-soft);border-color:var(--accent-line)}
+.other{border:0;background:transparent;color:var(--faint);font:inherit;cursor:pointer;padding:6px 4px;text-decoration:underline dotted}
+.answer{display:flex;gap:8px;margin-top:10px}
+/* t261004-17：应答框从单行 input 换成多行 textarea（宿主要能贴多行答复）。 */
+.answer input,.answer textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:6px 9px;font:inherit;resize:vertical;min-height:44px}
+.answer input:focus,.answer textarea:focus{outline:0;border-color:var(--blue)}
+.answer button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
+.given{color:var(--green);font-size:12px;padding:0 12px 10px 12px}
+.trace{color:var(--faint);font-size:11px;margin-top:9px}
+.strip{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);margin-bottom:14px;flex-wrap:wrap}
+.strip .live{color:var(--green)}
+.strip .ro{color:var(--amber)}
+.power{border:1px solid var(--line);border-radius:7px;padding:5px 12px;font:inherit;cursor:pointer;background:var(--panel2);color:var(--fg)}
+.power[data-on="true"]:hover{border-color:var(--red);color:var(--red)}
+.power[data-on="false"]:hover{border-color:var(--green);color:var(--green)}
+.openBtn{border:1px solid var(--line);border-radius:7px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer;background:var(--panel2);color:var(--fg)}
+.openBtn:disabled{opacity:.45;cursor:not-allowed}
+/* t261004-16 Req2：请求/应答栏拿宽侧（1.85fr），Recent actions 拿窄侧（1fr）。
+   容器断点、两栏各自限高内滚（展开只长自己那栏）两条既有规则不动。 */
+.cols{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);gap:16px;align-items:start}
+/* t261003-09 缺陷 1：断点按真实容器宽（container query——面板是 iframe/独立窗口，
+   视口宽≠内容盒宽），且两栏各自限高内滚——展开任何一条请求只在**自己那栏**长高，
+   另一栏与下方内容永不位移；行内 detail 的 170px 限高不变（滚动锚定稳定）。 */
+.cols>div{min-width:0;height:calc(100vh - 230px);overflow-y:auto;overscroll-behavior:contain}
+@container (max-width:760px){ .cols{grid-template-columns:1fr} }
+.act{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid var(--line-soft)}
+.act:last-child{border-bottom:0}
+.act .t{color:var(--muted);font-size:11px;width:74px;flex:0 0 auto}
+.pill{font-size:10px;font-weight:700;letter-spacing:.6px;border-radius:5px;padding:2px 7px;min-width:52px;text-align:center}
+.pill.sign{background:var(--pill-sign-bg);color:var(--pill-sign-fg)}
+.pill.open{background:var(--pill-open-bg);color:var(--pill-open-fg)}
+.pill.retry{background:var(--pill-retry-bg);color:var(--pill-retry-fg)}
+.pill.sendback{background:var(--pill-send-bg);color:var(--pill-send-fg)}
+.pill.cancel{background:var(--pill-cancel-bg);color:var(--pill-cancel-fg)}
+.pill.pause{background:var(--pill-pause-bg);color:var(--pill-pause-fg)}
+.act .tk{font-weight:600}
+.act .say{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.cell{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 11px}
+.cell b{display:block;font-size:15px;font-weight:600}
+.cell span{color:var(--muted);font-size:11px}
+.file{color:var(--faint);font-size:11px;margin-top:8px}
+.grp{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden}
+.line{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line-soft)}
+.line:last-child{border-bottom:0}
+.line .lab{flex:1;min-width:0}
+.line .lab small{display:block;color:var(--muted);font-size:11px}
+.line input[type=text],.line input[type=number],.line input[type=time],.line select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit;width:150px}
+.sw{width:38px;height:21px;border-radius:11px;background:var(--sw-off);border:1px solid var(--line);position:relative;cursor:pointer;flex:0 0 auto;transition:background .15s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--knob);transition:left .15s,background .15s}
+.sw[data-on="true"]{background:var(--accent-soft);border-color:var(--accent-line)}
+.sw[data-on="true"]::after{left:18px;background:var(--blue)}
+.sw.locked{opacity:.35;cursor:not-allowed}
+.linkbtn{border:0;background:transparent;color:var(--muted);font:inherit;cursor:pointer;text-decoration:underline dotted;margin-left:auto}
+.linkbtn:hover{color:var(--blue)}
+.bar{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.bar button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:7px 14px;font:inherit;cursor:pointer}
+.bar button.primary{background:var(--accent-soft);border-color:var(--accent-line)}
+.bar button:hover{border-color:var(--blue)}
+.doneWrap{margin-top:14px}
+.doneHead{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;padding:4px 0}
+.chev2{color:var(--muted);transition:transform .15s}
+.doneWrap[data-open="false"] .chev2{transform:rotate(-90deg)}
+.doneWrap[data-open="false"] .doneList{display:none}
+.empty{color:var(--muted);padding:22px 4px}
+.banner{border:1px solid var(--amber);color:var(--amber);background:var(--warn-soft);border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px}
+.banner.red{border-color:var(--red);color:var(--red);background:var(--danger-soft)}
+.knob{display:grid;grid-template-columns:200px 1fr 240px;gap:6px;padding:5px 12px;border-bottom:1px solid var(--line-soft);align-items:center;font-size:12px}
+.knob .src{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
+table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:11px}
+.good{color:var(--green)} .bad{color:var(--red)} .muted{color:var(--muted)}
+/* t261005-10 (UI-2): clickable rows of the Epics/Docs read-only faces — the .line
+   row shape with the .head hover feedback. */
+.mrow{cursor:pointer}
+.mrow:hover{background:var(--hover)}
+.docfile{font-family:ui-monospace,monospace;font-size:12px}
+.backbtn{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:4px 12px;font:inherit;cursor:pointer;margin-bottom:8px}
+.backbtn:hover{border-color:var(--blue);color:var(--blue)}
+.foot{margin-top:26px;color:var(--faint);font-size:11px}
+/* t261006-15 Inspection tab — layout discipline (P6): ONE text gutter (--igx) for
+   card text, block titles, description lines, table first column and metric keys;
+   containers keep their own edge; three vertical steps (--isect/--icard/--iline);
+   right edges share one line (right-aligned meta, table last column, toolbar);
+   metrics in an equal-width grid, never one squeezed row. The acceptance is the
+   RULE (Range-measured left edges within 1px / right edges on one line), not these
+   pixel values. */
+.inspCard{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:0 0 var(--icard,8px);padding:var(--iline,10px) 0}
+.inspCard .pad{padding:0 var(--igx,14px)}
+.inspSect{margin:var(--isect,20px) 0 6px;padding-left:var(--igx,14px);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)}
+.inspNote{padding-left:var(--igx,14px);color:var(--muted);font-size:11px;margin:6px 0 0}
+.inspMeta{color:var(--muted);font-size:11px;white-space:nowrap;text-align:right}
+.inspNums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 20px;padding:0 var(--igx,14px);margin-top:8px}
+.inspNums .kv{display:flex;flex-direction:column;gap:1px;font-size:11px;color:var(--muted)}
+.inspNums .kv b{color:var(--fg);font-weight:600;font-size:15px;line-height:1.2}
+.inspCard table{width:100%;border-collapse:collapse;font-size:12px}
+/* P6 (arbitrate gen4): the table box itself sits +2px right of the card text line, so
+   the FIRST column's text gets -2px to land on the shared gutter (122-line); the rule
+   is the line, not these pixels — a width change must still hold <=1px. */
+.inspCard table th:first-child,.inspCard table td:first-child{padding-left:12px}
+.inspCard th{text-align:left;color:var(--muted);font-weight:500;padding:6px var(--igx,14px);border-bottom:1px solid var(--line)}
+.inspCard td{padding:7px var(--igx,14px);border-bottom:1px solid var(--line-soft,var(--panel2));vertical-align:top}
+.inspCard tr:last-child td{border-bottom:0}
+.inspCard th.num,.inspCard td.num{text-align:right}
+.inspPeriods{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 8px;padding:0 var(--igx,14px)}
+.inspPeriods .lbl{color:var(--muted);font-size:11px}
+.inspPeriods button{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:999px;padding:3px 11px;font:inherit;font-size:12px;cursor:pointer;line-height:18px}
+.inspPeriods button[data-on="true"]{background:var(--accent-soft,var(--panel2));border-color:var(--blue);color:var(--fg)}
+.inspFld{display:grid;grid-template-columns:96px 1fr;gap:8px 10px;align-items:center;padding:0 var(--igx,14px)}
+.inspFld label{color:var(--muted);font-size:12px}
+.inspFld select,.inspFld input{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:5px 8px;font:inherit;width:100%;max-width:340px}
+/* P6: the reviewed-list summary must sit exactly on the text gutter — kill the
+   disclosure marker's indent on every engine (arbitrate gen1: 2.4px off the line). */
+#paneInsp summary{list-style:none;display:block}
+#paneInsp summary::-webkit-details-marker{display:none}
+#paneInsp summary::marker{content:''}
+/* P6 residual (arbitrate gen2): the reviewed block must take its gutter ONLY from
+   .inspNote's padding — the details element itself is zero-inset, so summary and
+   disclosed content start exactly where every other .pad/.inspNote line starts. */
+#paneInsp details{padding:0;margin:0}
+/* P6 residual (arbitrate gen2): toolbar button box edge vs meta text edge sat 2px
+   apart; pull the button box onto the meta's text line (mock v8 precedent: button
+   aligns by box edge, meta by text edge, SAME line). */
+#inspRunBtn{margin-right:2px}
+
+/* ---- mock deltas (261009 host orders) ---- */
+:root{--proj:#9ca3af}
+.top{position:relative}
+.top::before{content:'';position:absolute;left:0;right:0;top:-11px;height:3px;background:var(--proj)}
+.concRow{display:flex;align-items:center;gap:10px;height:34px}
+.concBox{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:0 9px;height:28px;width:max-content}
+.concBox .concBtn{width:24px;height:22px}
+.concBox .concVal{min-width:22px}
+#ledgerFile{overflow-wrap:anywhere}
+.cols>div{min-width:0}
+</style>
+</head>
+<body>
+<div style="display:flex;align-items:center;gap:10px;padding:6px 14px;background:var(--panel2);border-bottom:1px solid var(--line);color:var(--muted);font-size:11.5px">mock · static sample data · markup and CSS are the real panel's, with only the ordered changes applied</div>
+<div class="wrap">
+  <div class="top"><h1>Executor</h1><span class="chip" id="projChip"><span id="projBadge"></span><span id="projKey"></span></span></div>
+
+  <input class="tab" type="radio" name="tb" id="t-overview" checked>
+  <input class="tab" type="radio" name="tb" id="t-epics">
+  <input class="tab" type="radio" name="tb" id="t-inspection">
+  <input class="tab" type="radio" name="tb" id="t-metrics">
+  <input class="tab" type="radio" name="tb" id="t-docs">
+  <input class="tab" type="radio" name="tb" id="t-grants">
+  <input class="tab" type="radio" name="tb" id="t-settings">
+
+  <div class="seg">
+    <!-- t261005-10 (UI-2): data-tab anchors in the fixed declared order (the
+         tab-order contract scenario asserts this exact sequence). -->
+    <label for="t-overview" data-tab="overview">Overview <span id="reqBadge" class="badge">2</span></label>
+    <label for="t-epics" data-tab="epics">Epics</label>
+    <label for="t-inspection" data-tab="inspection">Inspection</label>
+    <label for="t-metrics" data-tab="metrics">Metrics</label>
+    <label for="t-docs" data-tab="docs">Docs</label>
+    <label for="t-grants" data-tab="grants">Grants</label>
+    <label for="t-settings" data-tab="settings">Settings</label>  </div>
+
+  <div id="noProject" class="banner red" style="display:none">No project is selected. Open this panel from a project row, or add ?project=&lt;project-key&gt; to the address.</div>
+
+  <section id="paneOv">
+    <div class="strip">
+      <span id="liveDot" class="ro">● read-only</span>
+      <span id="stateTxt">Idle · 2 requests wait on you.</span>
+      <span id="grantChip" class="chip">Permissions: 5 of 6</span>
+      <span id="sessionChip" class="chip">Session: session-7685c51a</span>
+      <span class="meta" id="sessionMsg"></span>
+      <button class="power" id="powerBtn" data-on="false" style="margin-left:auto">Enable executor</button>
+    </div>
+    <div id="ovBanners"></div>
+    <!-- t261008-20 (host order): renamed to Concurrent limit (was the running-tickets
+         block). The block no longer
+         lists the tickets holding slots (the console's left column already shows what
+         is running) and no longer shows the audit stamp ("set by <who> <when>" — the
+         engine audit record stays in the engine ledger; only this display went).
+         The limit knob, the limit value, the counts line (words, not rows) and the
+         three-state chip stay. -->
+    <div class="cols">
+      <div>
+        <div class="sect" id="waitHead">Needs your answer · 2</div>
+        <div id="bridgeLine" class="meta" style="margin:-4px 0 6px 0"></div>
+        <div id="waitList"></div>
+        <div class="row wait" data-open="false" data-row="req-1791548213397-0001">
+          <div class="head" data-id="req-1791548213397-0001"><span class="dot amber"></span><span class="txt">t261008-47: fix the replay or cancel it?</span><span class="meta">blocker · 12m</span><span class="chev">&#9656;</span></div>
+          <div class="opts inline"><button data-answer="fix the code" class="primary">Fix the code</button><button class="other" data-dismiss="1">Dismiss</button></div>
+          <div class="dflt">If you do not answer: the executor keeps the workaround.</div>
+        </div>
+        <div class="row wait" data-open="false" data-row="req-1791549000000-0002">
+          <div class="head" data-id="req-1791549000000-0002"><span class="dot amber"></span><span class="txt">Raise the write set of t261009-22?</span><span class="meta">request · 4m</span><span class="chev">&#9656;</span></div>
+          <div class="opts inline"><button data-answer="approve" class="primary">Approve</button><button class="other" data-dismiss="1">Dismiss</button></div>
+        </div>
+        <div class="empty" id="waitEmpty" style="display:none">Nothing waits on you.</div>
+        <div class="doneWrap" data-open="false" id="doneWrap">
+          <div class="doneHead" id="doneHeadBtn">
+            <span class="chev2">&#9662;</span><span class="sect" style="margin:0" id="doneHead2">Answered · 7</span>
+          </div>
+          <div class="doneList" id="doneList"></div>
+        </div>
+        <!-- t261007-01: the Dismissed group (collapsed, next to Answered). A
+             dismissed card carries no decision — the copy says so. -->
+        <div class="doneWrap" data-open="false" id="dismissedWrap">
+          <div class="doneHead" id="dismissedHeadBtn">
+            <span class="chev2">&#9662;</span><span class="sect" style="margin:0" id="dismissedHead">Dismissed · 3</span>
+          </div>
+          <div class="doneList" id="dismissedList"></div>
+        </div>
+      </div>
+      <div>
+        <div class="concRow" id="concBlock">
+        <span class="concBox">
+          <span class="lab" style="flex:0 0 auto">Limit <span id="concChip" class="pill conc-room">room</span></span>
+          <button class="concBtn" id="concMinus" title="One fewer ticket at the same time">&minus;</button>
+          <span class="concVal" id="concLimit">4</span>
+          <button class="concBtn" id="concPlus" title="One more ticket at the same time">+</button>
+          <button id="concSave" style="display:none">Save</button>
+        </span>
+        <span class="meta" id="concCounts">5 held · 0 queued</span>
+        <span class="meta" id="concMsg"></span>
+      </div>
+        <div class="sect" id="alertsHead">Alerts · 3</div>
+        <div id="alertBanner"></div>
+        <div id="alertBanner"></div>
+    <div class="sect" id="alertHead">Recent · 0</div>
+    <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
+    <div id="alertList"></div>
+        <div class="row"><div class="head" style="cursor:default"><span class="dot red"></span><span class="txt">Queue t261008-47 has 0 live pollers</span><span class="meta">20:07</span></div></div>
+        <div class="row"><div class="head" style="cursor:default"><span class="dot amber"></span><span class="txt">Worker pid 1898 is older than the tree it runs</span><span class="meta">20:12 · night-muted</span></div></div>
+        <div class="row"><div class="head" style="cursor:default"><span class="dot amber"></span><span class="txt">Run run-01M4GE0… ended with 4 failures</span><span class="meta">21:40 · night-muted</span></div></div>
+        <div class="sect" style="margin-top:12px">Recent actions</div>
+        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local.</div>
+        <div class="row" style="padding:2px 4px" id="actList"></div>
+        <div class="act"><span class="t">21:04</span><span class="pill sign">sign</span><span class="tk">t261009-18</span><span class="say">sign · merge</span></div>
+        <div class="act"><span class="t">20:57</span><span class="pill retry">retry_qc</span><span class="tk">t261009-15</span><span class="say">retry_qc</span></div>
+        <div class="act"><span class="dot red" title="Refused"></span><span class="t">20:51</span><span class="pill sign">sign</span><span class="tk">t261008-47</span><span class="say">refused: who &gt; 64</span></div>
+        <div class="act"><span class="t">20:48</span><span class="pill sign">sign</span><span class="tk">t261009-17</span><span class="say">sign · merge</span></div>
+        <div class="sect" style="margin-top:12px" id="eventsHead">Events · 20</div>
+        <div class="sect">Health</div>
+        <div class="grid" id="ledgerGrid"></div><div class="cell"><b>12,480</b><span>rows</span></div><div class="cell"><b>0.3%</b><span>duplicates</span></div><div class="cell"><b>0</b><span>bad rows</span></div><div class="cell"><b>0</b><span>gaps</span></div>
+        <div class="file" id="ledgerFile"></div>~/.sandbar/projects/sandbar/ledger/events.jsonl
+        <div class="sect lead">Wakes <span class="meta" id="ledgerWakeCount">· 20</span></div>
+        <div class="muted" style="margin:2px 0 4px;font-size:11px">Times are local. The watchdog status keeps the last 20 wakes.</div>
+        <div class="row" style="padding:2px 4px" id="ledgerEvents"></div>
+        <div class="act"><span class="t">22:02</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">task retried</span></div>
+        <div class="act"><span class="t">21:58</span><span class="pill open">WAKE</span><span class="tk">t261008-47</span><span class="say">handover picked it up</span></div>
+        <div class="act"><span class="t">21:48</span><span class="pill open">WAKE</span><span class="tk">t261009-20</span><span class="say">landed on main</span></div>
+      </div>
+    </div>
+</section>
+
+  <!-- t261005-10 (UI-2): Epics tab — read-only face over the workbench epics API.
+       Epic rows drill in-tab (single layer, ← Back); a ticket row asks the host
+       console (postMessage) to open the ticket-detail overlay (UI-3 machinery). -->
+  <section id="paneEpics" style="display:none">
+    <div id="epicsBanner"></div>
+    <div id="epicsList"></div>
+    <div id="epicDetail"></div>
+  </section>
+
+
+  <!-- t261005-10 (UI-2): Metrics tab — facts-only face over the project metrics API
+       (KPI cards + freshness line). No second chart engine in the panel. -->
+  <!-- t261008-19: Metrics tab — the t261005-10 KPI face stays; below it the 261004
+       mock's Charts box (metricsTabHtml) as semantic text anchors only. No chart
+       engine is added (t261005-10 ruling stands); the conflict with
+       docs/design/metrics-panel-ui-plan.md (ECharts, four views) is REPORTED to the
+       adjudication surface, not resolved here. The three label strings are
+       byte-identical to the mock. The value-side copy states the real data state:
+       there is no chart data drawn in this build (named degraded face, not silence). -->
+  <section id="paneMetrics" style="display:none">
+    <div id="metricsBanner"></div>
+    <div class="grid" id="metricsGrid"></div>
+    <div class="file" id="metricsMeta"></div>
+    <div class="sect lead">Charts</div>
+    <div class="cell" id="metricsCharts" style="display:block">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">lanes per day</span><span class="meta">(chart from the project metrics API)</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">stage duration</span><span class="meta">(chart — no chart data drawn in this build)</span></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">gate reds</span><span class="meta">(chart — no chart data drawn in this build)</span></div>
+    </div>
+  </section>
+
+  <!-- t261005-10 (UI-2): Docs tab — read-only tree + markdown reader over the
+       workbench docs API (same renderer as the rest of the page). -->
+  <section id="paneDocs" style="display:none">
+    <div id="docsBanner"></div>
+    <!-- t261008-19: the 261004 mock's two entry rows (docsTabHtml) — docs/ the
+         library, notes/ the ledger, real page counts (countDocsTree; unknown shows
+         '— pages', never a fabricated number) and an Open action. The mock is silent
+         on the Open target; the in-tab reader/scope switch is chosen, no new endpoint. -->
+    <div class="bar" id="docsEntries" style="margin-top:0"></div>
+    <div class="bar" style="margin-top:0" id="docsScopeBar"></div>
+    <div id="docsTree"></div>
+    <div id="docsReader"></div>
+  </section>
+
+  <section id="paneGrants" style="display:none">
+    <div id="grantsBanner"></div>
+    <div class="sect">Executor
+      <button class="linkbtn" id="giveAllBtn">Give all</button>
+      <button class="linkbtn" id="giveNoneBtn" style="margin-left:0">Give none</button>
+    </div>
+    <div class="grp">
+      <div class="line"><div class="lab">Executor permissions <small>Off: the executor can only read and ask. The watchdog keeps running.</small></div>
+        <div class="sw" id="masterSw" data-on="false"></div></div>
+      <div class="line"><div class="lab">Executor session <small>The session that works as the executor.</small></div>
+        <input type="text" id="grantSession" placeholder="session id"></div>
+    </div>
+    <div class="sect lead">Permissions you can give</div>
+    <div class="grp" id="permList"></div>
+    <div class="sect lead">Your permissions only</div>
+    <div class="grp">
+      <div class="line"><div class="lab">Change permissions <small>Only you can change this list.</small></div>
+        <div class="sw locked" data-on="false"></div></div>
+    </div>
+    <div class="bar">
+      <button class="primary" id="grantsSave">Save</button>
+      <span id="grantsSaveOut" class="meta"></span>
+    </div>
+    <div id="grantsReadout" class="muted" style="margin-top:10px"></div>
+    <div id="grantsMatrix"></div>
+    <div id="openEpics"></div>
+  </section>
+
+
+
+  <!-- t261008-20 (host order): paneLedger is gone — the Ledger tab left the strip
+       and its face moved into the Overview source-event dialog (#ledgerDlg). -->
+
+  <section id="paneInsp" style="display:none">
+    <div id="inspBanner"></div>
+    <div class="strip">
+      <span class="ro">● host action</span>
+      <span>Full-codebase review</span>
+      <span class="grow" style="flex:1"></span>
+      <button class="bar" id="inspRunBtn">Run a full review…</button>
+    </div>
+    <div class="inspNote" style="margin-top:-6px">Only you can start a full review. The executor cannot. A review is recorded when it starts.</div>
+    <div class="inspCard" id="inspDlg" data-open="false" style="display:none">
+      <div class="pad inspSect">Run a full-codebase review</div>
+      <div class="inspFld">
+        <label for="inspScope">Scope</label>
+        <select id="inspScope">
+          <option value="everything">Everything</option>
+          <option value="server/plugins only">server/plugins only</option>
+          <option value="server/engine only">server/engine only</option>
+          <option value="integration/ only">integration/ only</option>
+          <option value="docs/ + notes/ only">docs/ + notes/ only</option>
+        </select>
+        <label for="inspReason">Reason</label>
+        <input type="text" id="inspReason" placeholder="why now — recorded">
+      </div>
+      <div class="bar" style="padding:0 var(--igx,14px)">
+        <button class="primary" id="inspStartBtn">Start</button>
+        <button id="inspCancelBtn">Cancel</button>
+        <span class="meta" id="inspMsg"></span>
+      </div>
+    </div>
+    <div class="inspSect">Period</div>
+    <div class="inspPeriods"><span class="lbl">Period</span><span id="inspPeriodBtns" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>
+    <div id="inspPeriodNote" class="inspNote" style="display:none"></div>
+    <div id="inspBody"></div>
+    <div class="inspSect lead" style="margin-top:20px;padding-left:var(--igx,14px);font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Reviews you started</div>
+    <div class="inspCard"><table id="inspRecords">
+      <thead><tr><th>when</th><th>who</th><th>scope</th><th>reason</th><th style="text-align:right">state · result</th></tr></thead>
+      <tbody id="inspRecordsBody"></tbody>
+    </table></div>
+    <div class="inspNote">Newest first · kept after the review ends</div>
+    <div id="inspEmpty" class="empty" style="display:none;padding-left:var(--igx,14px)">No reviews started yet.</div>
+  </section>
+
+  <section id="paneSet" style="display:none">
+    <div id="setBanners"></div>
+    <!-- t261008-36: the two face entries the 261004 mock puts in this tab ("Model
+         routes - moved into the panel - Settings tab" / "Project settings - moved
+         into the panel - Settings tab"). The buttons do not render the faces here —
+         they post one message to the parent console over the existing same-origin
+         postMessage seam, and the console mounts the EXISTING faces (ProvidersSection
+         / ProjectSettingsModal). The panel gains no second read or write path for
+         model routes: no YAML access, no validation copy, no cached routes table.
+         Fixed-shape list — declared in LIST_CONTRACTS (settings_faces). -->
+    <div class="grp" id="faceEntries">
+      <div class="line"><div class="lab">Model routes</div>
+        <span class="meta">Providers, keys, and the routing table</span>
+        <button class="openBtn" id="faceRoutesBtn" data-wb-panel-face="routes" style="margin-left:auto">Open</button></div>
+      <div class="line"><div class="lab">Project settings</div>
+        <span class="meta">Registry entry, ticket counts, and the danger zone</span>
+        <button class="openBtn" id="faceSettingsBtn" data-wb-panel-face="project-settings" style="margin-left:auto">Open</button></div>
+    </div>
+    <div class="sect lead">Watchdog</div>
+    <div class="grp" id="setKnobs"></div>
+    <div class="bar">
+      <button class="primary" id="saveBtn">Save</button>
+      <button id="sleepBtn">Sleep until morning</button>
+      <button id="wakeBtn">Revert the night policy</button>
+      <button id="revokeBtn">Disable watchdog</button>
+      <span id="saveResult" class="meta"></span>
+    </div>
+    <div class="muted" style="margin-top:8px;font-size:11px">Save writes the file only after the real loader accepts it. A rejected save does not change the file. Disable watchdog stops all watchdog behavior. It does not change the grants.</div>
+  </section>
+
+  <div class="foot" id="footNote"></div>
+</div>
+<script>
+/* mock stub. The real page's script is an engine client (fetch + poll); here only what
+   this mock is about is driven: the project identity accent and badge, and the limit
+   stepper. Every other face is static sample markup already in the page, written in
+   the same row shapes the real script emits. */
+var PALETTE12=['#e76a6a','#e7936a','#e7c36a','#c6e76a','#8ae76a','#6ae79c','#6ae7d4','#6aabe7','#7f6ae7','#b56ae7','#e76ad0','#e76a92'];
+var OUTLINES=['pentagon','hexagon','octagon','shield','sparkle','tag'],STRUCTURES=['solid','ring','half'],SALT='\u0000wb-identity';
+function fnv1a(s){var h=0x811c9dc5;for(var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193);}h^=h>>>16;h=Math.imul(h,0x85ebca6b);h^=h>>>13;h=Math.imul(h,0xc2b2ae35);h^=h>>>16;return h>>>0;}
+function baseIdentity(k){var a=fnv1a(k),b=fnv1a(k+SALT);return {color:PALETTE12[a%PALETTE12.length],outline:OUTLINES[b%OUTLINES.length],structure:STRUCTURES[(a>>>9)%STRUCTURES.length]};}
+function outlinePath(n,S){var c=S/2,R=S*0.47,R2=S*0.3;
+ function poly(m,rot){var p=[];for(var k=0;k<m;k++){var a=rot+k*2*Math.PI/m;p.push((c+R*Math.cos(a)).toFixed(2)+','+(c+R*Math.sin(a)).toFixed(2));}return 'M'+p.join(' L')+' Z';}
+ if(n==='hexagon')return poly(6,-Math.PI/2+Math.PI/6);
+ if(n==='octagon')return poly(8,-Math.PI/2+Math.PI/8);
+ if(n==='shield'){var t=S*0.08,b=S*0.94;return 'M'+(S*0.14)+' '+t+' H'+(S*0.86)+' V'+(S*0.52)+' Q'+(S*0.86)+' '+b+' '+c+' '+b+' Q'+(S*0.14)+' '+b+' '+(S*0.14)+' '+(S*0.52)+' Z';}
+ if(n==='sparkle'){var q=[];for(var k2=0;k2<8;k2++){var r=k2%2===0?R:R2,a2=-Math.PI/2+k2*Math.PI/4;q.push((c+r*Math.cos(a2)).toFixed(2)+','+(c+r*Math.sin(a2)).toFixed(2));}return 'M'+q.join(' L')+' Z';}
+ if(n==='tag')return 'M'+(S*0.12)+' '+(S*0.12)+' H'+(S*0.66)+' L'+(S*0.88)+' '+(S*0.34)+' V'+(S*0.88)+' H'+(S*0.12)+' Z';
+ return poly(5,-Math.PI/2+Math.PI/5);}
+function badge(id,size){var d=outlinePath(id.outline,size),u='wbid'+fnv1a(id.color+'|'+id.outline+'|'+id.structure+'|'+size).toString(36);
+ function w(x){return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">'+x+'</svg>';}
+ if(id.structure==='ring'){var c=size/2;return w('<mask id="'+u+'"><rect width="'+size+'" height="'+size+'" fill="#fff"/><circle cx="'+c+'" cy="'+c+'" r="'+(size*0.23).toFixed(2)+'" fill="#000"/></mask><path d="'+d+'" fill="'+id.color+'" mask="url(#'+u+')"/>');}
+ if(id.structure==='half'){var h=size/2;return w('<clipPath id="'+u+'"><rect x="'+h+'" y="0" width="'+h+'" height="'+size+'"/></clipPath><path d="'+d+'" fill="'+id.color+'" fill-opacity="0.55"/><rect x="'+h+'" y="0" width="'+h+'" height="'+size+'" fill="'+id.color+'" clip-path="url(#'+u+')"/>');}
+ return w('<path d="'+d+'" fill="'+id.color+'"/>');}
+var KEY='sandbar',id=baseIdentity(KEY);
+document.documentElement.style.setProperty('--proj',id.color);
+document.getElementById('projBadge').innerHTML=badge(id,13);
+document.getElementById('projKey').textContent=KEY;
+var limit=4;
+function paint(){document.getElementById('concLimit').textContent=String(limit);}
+document.getElementById('concMinus').onclick=function(){limit=Math.max(1,limit-1);paint();document.getElementById('concSave').style.display='';};
+document.getElementById('concPlus').onclick=function(){limit=limit+1;paint();document.getElementById('concSave').style.display='';};
+paint();
+</script>
+
+</body>
+</html>
