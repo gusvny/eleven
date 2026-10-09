@@ -966,13 +966,23 @@ Same shape as the freeze episode, for the same reason: the period comes into bei
 
 The truth about a ticket — its stage, its signature, its verdict, a send-back — lives in the workflow engine's own history and is **not** duplicated here. Everything in this document that mentions a ticket is either a projection of that truth or a fact about something else that names a ticket.
 
-## Open questions for this review
+## Still open
 
-1. **Findings' home is settled (the store, as records — see the note in section D), and what remains is the split**: today the finding and its sightings are one per-period blob on a ticket, so the entity that outlives a period still has to be separated from the sightings that record it.
-2. **`by` / `who` must split.** Examples of the prose that cannot be machine-checked are in section D (`capacity limit change.by`, `authorisation change.who`). Proposed: `actor`, `on behalf of`, `authority reference` — all three required when the writer is not the authority.
-3. **Shape versions.** The event ledger has one (`event-ledger-v1`); the rest do not. Roll the same convention out, and state what a reader does with an unknown version (fail loudly, not guess).
-4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime.
-5. **What may never be recorded.** "References, not payloads" needs forbidden examples (credentials, tokens, private host paths, raw model input containing them) so a record can be refused rather than argued about.
-6. **Is inspection coverage project-wide or per face?** The coverage ledger keys on `{path, period}` with no instance, so one face's review covers files for every other face, and the rotation can hand a whole area to nobody. Both readings are defensible; the choice decides what "this face reviewed it" means.
-7. **The case rows need `run` added** (and a repository, once a landing can span repositories). Until they carry it, no certification can point at a run, and the header record is not enough on its own — the rows are what a reader checks the counts against.
-8. **What ends a ticket that has no content?** A report-only or verification-only ticket changes no files, so it has nothing to land and nothing to certify by landing. The `landed_at: null` row is representable; the rule for how such a ticket finishes is not written yet, and it is the one gap that this section exposed.
+**One question only** — the rest of this list has been decided and is waiting to be built (below).
+
+1. **Does the ticket id become a ULID?** Kept as `t261009-10` for now; the consequences of changing it are listed in the identity section.
+
+## Agreed, waiting to be built
+
+1. **Split the finding from its sightings.** Today a period's findings are one list on the ticket, so "the same finding seen last period" is not a fact anywhere. Two record kinds: the **finding** (an entity that persists) and the **sighting** (finding, period, verification outcome, at). It is what makes "how long has this been open", "seen how often", "was it re-verified after the content moved" and "closed because the content is gone" answerable by query.
+2. **Split `by` / `who`** into `actor`, `on behalf of` and `authority reference` — all three required whenever the writer is not the authority. Today's free text cannot be machine-checked.
+3. **Roll shape versions out to every family.** The event ledger already writes `"v": "event-ledger-v1"` on every row; the others do not. A reader that meets an unknown version must **fail loudly**, never guess or silently drop what it does not recognise — an ignored field is read as an absent one.
+4. **Declare a lifetime per family.** Only the event ledger has a rotation cursor. The run results file is **88 MB and grows by one row per case per run** — a declared policy (how long at full detail, what is rolled up, what is dropped) is missing for every family.
+5. **Write the forbidden examples** for "references, not payloads": credentials, tokens, private host paths, and raw model input that contains them — so a record can be refused rather than argued about.
+6. **Coverage is per face** (decided): the coverage ledger must key on the **instance** as well as the path and period, so each face's rotation slice is its own. Today's rows carry no instance, so they are legacy: treat them as project-level and unattributed, write the instance from now on, and let each face start with its own slice (the worst case is that every face re-reads everything once, which is honest and cheap).
+7. **The case rows carry `run`** (and a repository once a landing can span repositories), so a certification can point at a run and the counts can be checked against the rows.
+8. **A ticket ends when the fact it exists to produce is recorded.** `landed_at` was never universal: the rule is the product, not the path —
+   - a **change** ticket ends through the delivery path (landed, certified, delivered);
+   - a **report** ticket (an inspection period) ends when its findings are written as records and the period's cursor is stamped — its product *is* the record;
+   - a **verification** ticket ends when its verdict is recorded.
+   The outcome projection therefore carries the product's kind, not just a landing.
