@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
-<title>Executor panel — Certification tab (mock v8, 261009)</title>
+<title>Executor panel — Certification tab (mock v9, 261009)</title>
 <style>
 :root{--bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;--faint:#6e7781;
 --blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--accent-soft:#dbe9ff;--green-soft:#dafbe1;--red-soft:#ffebe9;--warn-soft:#fff8c5}
@@ -32,8 +32,6 @@ input[type=text]:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2p
 .dot.g{background:var(--green)}.dot.r{background:var(--red)}.dot.a{background:var(--amber)}.dot.b{background:var(--blue)}
 .state{font-weight:650;font-size:15px}
 .chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:2px 9px;font-size:11.5px;color:var(--fg)}
-.chip.green{border-color:var(--green);background:var(--green-soft);color:var(--green)}
-.chip.red{border-color:var(--red);background:var(--red-soft);color:var(--red)}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
 .grow{flex:1}
 .k{color:var(--muted)}
@@ -58,11 +56,13 @@ tr:last-child td{border-bottom:0}
 .sw .track.off{background:var(--line)}
 .sw .knob{position:absolute;top:2px;left:16px;width:12px;height:12px;border-radius:50%;background:#fff;transition:.15s}
 .sw .track.off .knob{left:2px}
-/* ---- the line: one bar, one boundary ---- */
-.lb{display:flex;align-items:stretch;height:36px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+/* ---- the line: one bar, one boundary, three state bands ---- */
+.lb{display:flex;align-items:stretch;height:38px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
 .lb .s{display:flex;align-items:center;gap:6px;padding:0 10px;font-size:12.5px;white-space:nowrap;overflow:hidden}
-.lb .cert{background:var(--green-soft);color:var(--green);border-right:3px solid var(--green)}
-.lb .cert.frozen{border-right-color:var(--red)}
+.lb .deliv{background:var(--green);color:#fff}
+html[data-theme="dark"] .lb .deliv{color:#0b1a10}
+.lb .cert{background:var(--green-soft);color:var(--green)}
+.lb .cert.edge{border-right:3px solid var(--green)}
 .lb .wait{background:var(--warn-soft);color:var(--amber)}
 .lb .wait.frozen{background:var(--red-soft);color:var(--red)}
 .lb .n{margin-left:auto;font-weight:650}
@@ -92,9 +92,9 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
     <input type="text" id="lineBox" list="lineList" value="sandbar / develop-buffer" placeholder="type to filter lines…" title="one control: type to filter, or pick from the list">
     <datalist id="lineList"><option value="sandbar / develop-buffer"></option></datalist>
     <span class="tally">
-      <span title="certified and landable now"><span class="dot g"></span> <b id="sumbC">12</b></span>
-      <span title="landed, waiting for a round that covers them"><span class="dot a"></span> <b id="sumbW">3</b></span>
-      <span title="certified but not yet promoted to main"><span class="dot b"></span> <b id="sumbP">2</b></span>
+      <span title="delivered: already in main"><span class="dot g"></span> <b id="sumbD">10</b></span>
+      <span title="certified: covered by a green round, not promoted yet"><span class="dot b"></span> <b id="sumbC">2</b></span>
+      <span title="waiting: landed, not covered by any round yet"><span class="dot a"></span> <b id="sumbW">3</b></span>
     </span>
   </div>
 
@@ -106,21 +106,22 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
     <div class="hd">
       <span class="dot g" id="dot"></span>
       <span class="state" id="big">GREEN</span>
-      <span class="chip" id="cWhen">21:40</span>
+      <span class="chip" id="cWhen" title="the round behind the certified part">21:40</span>
       <span class="grow"></span>
       <span class="chip" id="cBench" title="rounds are chained: this one ends, the next starts at once">↻ 22:24</span>
-      <button class="btn p" id="btnSign2" style="display:none">Sign &amp; promote <span id="btnSign2N"></span></button>
+      <button class="btn p" id="btnSign2">Sign &amp; promote <span id="btnSign2N">2</span></button>
     </div>
     <h3>Line</h3>
     <div class="pad">
-      <div class="lb" title="left of the boundary: covered by a green round, landable now — right of it: landed, not covered yet">
-        <div class="s cert" id="segCert" style="flex:12"><span>certified</span><span class="n" id="segCertN">12</span></div>
+      <div class="lb" id="lbBar" title="the line's landings in order: what is already in main, what a green round certified, and what still waits for one">
+        <div class="s deliv" id="segDeliv" style="flex:10"><span>delivered</span><span class="n" id="segDelivN">10</span></div>
+        <div class="s cert edge" id="segCert" style="flex:2"><span>certified</span><span class="n" id="segCertN">2</span></div>
         <div class="s wait" id="segWait" style="flex:3"><span>waiting</span><span class="n" id="segWaitN">3</span></div>
       </div>
       <div class="lbt">
-        <span id="lbBnd" title="the certification point: everything left of it was covered by this green round">certified 21:40</span>
+        <span id="lbBnd" title="the certification point: everything to its left is covered by this green round">certified 21:40</span>
         <span class="grow"></span>
-        <span id="lbProm" title="one signature promotes the whole certified batch to main">→ main 2</span>
+        <span id="lbProm" title="the certified part is what one signature promotes">→ main 2</span>
       </div>
       <div class="flow">
         <span class="sw" id="swAuto" title="rounds run by themselves, one after another — a round only measures"><span class="track" id="swTrack"><span class="knob"></span></span>↻ auto</span>
@@ -139,6 +140,7 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
         <span class="st g" id="rVerdict">green</span>
         <span class="mono" id="rCounts">478 / 498 · 4 fail · 16 env</span>
         <span class="mono k" id="rDur">44m 12s</span>
+        <span class="mono k" title="the revision set the round ran on">covered 12</span>
         <span class="grow"></span>
         <span class="mono k" id="rRev">main@46d6e8bf +3</span>
         <span class="link" id="rRec">record ↗</span>
@@ -152,7 +154,7 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
       <div class="pad"><table><thead><tr><th>Ticket</th><th>Landed</th></tr></thead><tbody id="wRows"></tbody></table></div>
     </div>
     <div class="card">
-      <h3 title="certified by a green round, still sitting on the line">Not promoted <span class="k" id="pCount">2</span></h3>
+      <h3 title="covered by a green round, still sitting on the line">Certified <span class="k" id="pCount">2</span></h3>
       <div class="pad"><table><thead><tr><th>Ticket</th><th>Certified by</th></tr></thead><tbody id="pRows"></tbody></table>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
           <span class="grow"></span>
@@ -182,21 +184,21 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 </div></div>
 
 <script>
-var GREEN={big:'GREEN',dot:'g',frozen:false,certN:12,waitN:3,
+var GREEN={big:'GREEN',dot:'g',frozen:false,delivN:10,certN:2,waitN:3,
  wait:[['t261009-20','22:0x'],['t261009-21','—'],['t261009-22','—']],
  prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
  rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','green'],
          ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green'],
          ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green']],
  bench:'↻ 22:24', nextAt:'next ~22:24', banner:'', names:''};
-var FROZEN={big:'FROZEN',dot:'r',frozen:true,certN:12,waitN:3,
+var FROZEN={big:'FROZEN',dot:'r',frozen:true,delivN:10,certN:2,waitN:3,
  wait:[['t261009-20','22:0x'],['t261009-21','—'],['t261009-22','—']],
- prom:[],
+ prom:[['t261009-18','run-01M4G2T7Q9K3…'],['t261009-19','run-01M4G2T7Q9K3…']],
  rounds:[['run-01M4G2T7Q9K3…','21:40','↻','478 / 498 · 4 fail · 16 env','red · 2'],
          ['run-01M4G1P0X…','20:50','↻','476 / 496 · 4 fail · 16 env','green'],
          ['run-01M4FZK9Q…','17:40','✋','474 / 494 · 4 fail · 16 env','green']],
  bench:'↻ retry now', nextAt:'retry now',
- banner:'Frozen by a red round — the certified part stays landable.',
+ banner:'Frozen by a red round — new landings stop; the certified part can still be promoted.',
  names:'t260922-12-gate-ledger-debt-not-blocked · t261009-15-quiet-baseline-identity'};
 var auto=true;
 function $(i){return document.getElementById(i)}
@@ -204,31 +206,36 @@ function draw(k){
   var s=k==='green'?GREEN:FROZEN;
   $('big').textContent=s.big; $('dot').className='dot '+s.dot;
   $('banner').style.display=s.frozen?'flex':'none'; $('bnTxt').textContent=s.banner; $('bnNames').textContent=s.names;
-  $('btnSign2').style.display=(s.frozen||!s.prom.length)?'none':'inline-block';
-  $('btnSign2N').textContent=s.prom.length;
-  $('btnSign').disabled=s.frozen||!s.prom.length; $('btnSignN').textContent=s.prom.length;
+  var n=s.certN;
+  $('btnSign2').disabled=!n; $('btnSign2N').textContent=n;
+  $('btnSign').disabled=!n; $('btnSignN').textContent=n;
+  $('segDeliv').style.flex=s.delivN; $('segDelivN').textContent=s.delivN;
   $('segCert').style.flex=s.certN; $('segCertN').textContent=s.certN;
   $('segWait').style.flex=s.waitN; $('segWaitN').textContent=s.waitN;
-  $('segCert').className='s cert'+(s.frozen?' frozen':''); $('segWait').className='s wait'+(s.frozen?' frozen':'');
+  $('segWait').className='s wait'+(s.frozen?' frozen':'');
+  $('segCert').className='s cert edge'+(s.frozen?'':'');
+  $('segCert').style.borderRightColor=s.frozen?'var(--red)':'var(--green)';
   $('lbBnd').textContent='certified '+s.rounds[0][1];
-  $('lbProm').textContent=s.prom.length?('→ main '+s.prom.length):'no promotion';
-  $('sumbC').textContent=s.certN; $('sumbW').textContent=s.waitN; $('sumbP').textContent=s.prom.length;
+  $('lbProm').textContent=n?('→ main '+n):'no promotion';
+  $('sumbD').textContent=s.delivN; $('sumbC').textContent=n; $('sumbW').textContent=s.waitN;
   $('cWhen').textContent=s.rounds[0][1];
-  $('cBench').textContent=s.bench; $('nextAt').textContent=s.nextAt;
-  $('swTrack').className='track'+(auto?'':' off');
+  $('cBench').textContent=s.bench;
   $('nextAt').textContent=auto?s.nextAt:'off';
+  $('swTrack').className='track'+(auto?'':' off');
   var w=''; s.wait.forEach(function(r){w+='<tr><td class="mono">'+r[0]+'</td><td class="mono k">'+r[1]+'</td></tr>'});
   $('wRows').innerHTML=w; $('wCount').textContent=s.wait.length;
-  var p=''; s.prom.forEach(function(r){p+='<tr><td class="mono">'+r[0]+'</td><td class="mono k">'+r[1]+'</td></tr>'});
-  $('pRows').innerHTML=p||'<tr><td colspan="2" class="k">—</td></tr>'; $('pCount').textContent=s.prom.length;
+  var p=''; (s.frozen?s.prom:s.prom).forEach(function(r){p+='<tr><td class="mono">'+r[0]+'</td><td class="mono k">'+r[1]+'</td></tr>'});
+  $('pRows').innerHTML=p||'<tr><td colspan="2" class="k">—</td></tr>'; $('pCount').textContent=n;
   var rr=''; s.rounds.forEach(function(r){var cls=r[4].indexOf('red')>=0?'r':'g';
-    rr+='<tr><td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td><td'+' title="'+(r[2]==='↻'?'started by itself':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td><span class="link">record</span></td></tr>'});
+    rr+='<tr><td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td><td title="'+(r[2]==='↻'?'started by itself':'started by hand')+'">'+r[2]+'</td><td class="mono">'+r[3]+'</td><td class="st '+cls+'">'+r[4]+'</td><td><span class="link">record</span></td></tr>'});
   $('runRows').innerHTML=rr;
   $('rVerdict').textContent=s.rounds[0][4]; $('rVerdict').className='st '+(s.frozen?'r':'g');
   $('rWhen').textContent=s.rounds[0][1]; $('rCounts').textContent=s.rounds[0][3];
   $('runBody').textContent='line: '+$('lineBox').value+'\nrevision set: main@46d6e8bf +3\ncovers: '+s.waitN+' waiting\nbench: 1 serial slot · ~44 min';
-  $('signBody').textContent=s.prom.length?s.prom.map(function(r){return r[0]+'   '+r[1]}).join('\n'):'(nothing to promote)';
-  $('signWho').textContent=s.frozen?'frozen by a red round — nothing to promote':'who: host (or the executor on its sign grant) · the note records the round it rests on';
+  $('signBody').textContent=s.prom.map(function(r){return r[0]+'   '+r[1]}).join('\n');
+  $('signWho').textContent=s.frozen
+    ? 'the red round stops new landings, not this: the certified part stays promotable · the note records the round it rests on'
+    : 'who: host (or the executor on its sign grant) · the note records the round it rests on';
   $('st').textContent='state: '+(s.frozen?'frozen':'green');
 }
 $('st').onclick=function(){draw($('st').textContent.indexOf('green')>=0?'frozen':'green')};
