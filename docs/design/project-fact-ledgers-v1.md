@@ -145,6 +145,77 @@ Real sharing is a change of writing authority, not a change of file location:
 
 This proposal addresses the **Problem** by replacing an accidental arrangement with a rule (goal 1's criterion) and by giving the fault knowledge a home where being current is possible; it satisfies the **Requirement** by versioned reads (2), recorded writers and reasons (3), the fact/state split (4), minted identifiers (5), ledger ordering (6), project-tagged and path-free records (7), loud availability (8), declared backup (9) and growth policy (10), and by declaring real sharing as the target (11) with the phase-1 properties that keep it reachable (12) while leaving write authority untouched (13); and it avoids the **Nongoal** items by not duplicating the engine's truth, not moving documents, not sweeping the run-judging baselines along, not building the service this cycle, not admitting families with no consumer, not crossing projects, not migrating everything at once, not editing growth by hand, and not loosening authority in the name of a move.
 
+## Appendix: the inventory
+
+Every record of facts this project keeps, grouped by the reader criterion of goal 1. Counts and sizes are the state at the time of writing; they are evidence for the Problem, not a plan of record.
+
+### A. Knowledge that must be read current
+
+| Ledger | What it holds | Reader / writer | Where it lives today | What this design says |
+|---|---|---|---|---|
+| Fault-mode ledger | 222 numbered entries in one prose file, 512 KB: what is known broken, its trigger, what kind of change steps on it | Read before designing any change's proof; written by the integration role at attribution time | In the repository, prose, edited in place | **Moves — first family.** Its staleness is the cost that motivates this design |
+| Fault mode ↔ case ↔ result | The join: which case locks which fault mode, and how that case last ran | Nobody can read it as a set; it exists only as prose citations and scenario descriptions | Nowhere | **Missing.** Its absence is why the fault ledger reads as prose and why "which of these does my change touch" is a search |
+| Work queue | Tickets waiting to be opened, mostly blocked on write-set collisions | Read and written by the integration role | In the repository, prose, edited in place | **Moves.** It is consulted while planning, so it must be current |
+| Queued ticket payloads | 21 per-ticket files last touched in September; no flow names them | Nobody | In the repository | **Decide explicitly: retire or move.** A registration table nobody maintains is a dead table |
+| Epic declarations | One file per epic (15): the rationale for a line of work | Read by whoever opens work under it; written by host / integration | In the repository, prose | **Split.** The membership facts belong to the store as relations; the rationale stays a document |
+
+### B. Baselines that must match the code under test
+
+| Ledger | What it holds | Reader / writer | Where it lives today | What this design says |
+|---|---|---|---|---|
+| Booked-red baseline | Which cases are expected to be red, and why a red is not new | Read by the gate and by acceptance faces; written when a red is booked | In the repository, machine-read, 57 KB | **Stays.** It judges a run, so it must be the revision that judges that code — the opposite requirement from the fault ledger even though the two look alike |
+| Case anchors | What each case pins, so a case is judged against declared anchors rather than implementation names | Read by the suite and the gate | In the repository, machine-read, 152 KB | **Stays**, same reason |
+| Terminology baseline (and its floor) | The vocabulary documents may and may not use | Read by the documentation check | In the repository, machine-read, 25 KB | **Stays**, same reason |
+| Scenario surfaces | Which surface each case owns, so coverage is not duplicated | Read by the suite | In the repository, machine-read | **Stays**, same reason |
+| Batch/stage exceptions and temporary-directory baseline | The declared exceptions a judging step must honour | Read by the judging steps | In the repository, machine-read | **Stays**, same reason |
+| Write-set protection list | Which paths a lane may not write | Read by the gate; it is expressed in engine code rather than as a file | In code | **Not a ledger** — a policy input. Named here so that a later reader does not mistake it for a fact store |
+
+### C. Operational facts of the running system
+
+This family is already in the project's store, outside the repository, in the same shape across every project — it is this design's template.
+
+| Ledger | What it holds | Reader / writer | Where it lives today | What this design says |
+|---|---|---|---|---|
+| Event log | What the engine and the watchdog observed, as it happened | Read by the console faces and by diagnosis | Project store, append-only, 5.7 MB | **Stays**, and becomes the model the moved families follow |
+| Action log | What the executor did and on whose authority | Read by the board and by audit | Project store, append-only | **Stays** |
+| Run results | One row per case per suite run — the history behind every green and red | Read by the gate, the faces and the patrol | Project store, append-only, **88 MB**, with a rotation cursor | **Stays.** Growth is the thing to decide here, not the location |
+| Capacity limit and its audit | The number of tickets allowed at once, and every change to it | Read by the gate; written by host / executor | Project store: a current value plus an append-only audit | **Stays.** The value is current state; the audit is a fact — the two shapes are already separate, which is the pattern goal 4 asks for |
+| Capacity state | Who holds a slot, who is queued | Read and written by the gate every few seconds, under a lock | Project store, current state + lock file | **Stays.** The clearest example of why current state is not a fact log |
+| Executor authorisation | What the executor session may do, and every grant or revocation | Read by the executor path | Project store: current value plus append-only audit | **Stays** |
+| Request channel | What the executor asked the host for, and the answer | Read by the host; written by the executor | Project store, append-only, 279 KB — with **17 hand-made dated backups** beside it | **Stays.** The backups are this design's best evidence for goal 9 |
+| Inspection findings | Review outcomes per period | Read by the inspection faces | Project store, append-only | **Stays** |
+| Ticket snapshots, settlements, metrics | Per-ticket roll-ups and the numbers behind the panels | Read by the faces | Project store, **1.2 GB** across 273 / 261 / 215 entries | **Stays.** Growth policy applies |
+| Runtime declarations | Watchdog state, sessions, project declaration, model routes | Read by the running system | Project store, current state | **Stays** |
+| Runtime workspaces | Stage directories and reclaimable scratch areas — **14,217 entries** | Nobody reads them; the system creates them | Outside the project store | **Not a ledger.** Residue with a lifetime question, not a home |
+
+### D. Facts about tickets
+
+| Ledger | What it holds | Reader / writer | Where it lives today | What this design says |
+|---|---|---|---|---|
+| Ticket state, stages, signatures, verdicts, sends-back | The truth about every ticket | Read by the console and the engine; written by the workflow | The engine's own history | **Truth stays there.** The store may hold projections for faces, never a second copy |
+| Relations between tickets | Which ticket exists because of which | — | Designed, not built ([Ticket Relations v1](ticket-relations-v1.md)) | Belongs to the store |
+| Landing and certification record | Which revision of the buffer was certified, by what, and with which faults booked | — | Designed, not built ([Develop Buffer v1](develop-buffer-v1.md)) | Belongs to the store |
+| Acceptance and integration reports | What a walkthrough concluded, with its evidence | Read by the host and by whoever picks the work up later | In the repository and in per-ticket directories (267 ticket directories, 68 evidence directories, 1,164 report files) | **Reports are products, not a ledger** — but there is no register of which reports exist or what each concluded, so finding them is a path convention |
+
+### E. Documents
+
+| Ledger | What it holds | Reader / writer | Where it lives today | What this design says |
+|---|---|---|---|---|
+| Design, operations and reference documents | Reasoning that must be read as reviewed | Read by people and by agents as context; written through review | In the repository | **Stays a document.** Version control is the review mechanism |
+| Document index | Where each document is and what it is tagged | Read by the knowledge faces | In the repository, **generated** | Stays: generated from the documents, never hand-edited |
+| Terminology | The project's agreed vocabulary | Read by people and by the documentation check | In the repository, prose | Stays a document; its machine-checked form is the terminology baseline above |
+
+### F. Residue that is not a ledger
+
+Quarantine directories, rescue runbooks, screenshot piles, overnight autopilot logs and state, scratch caches, and in-repository test stages. These are workspaces and leftovers rather than facts. They need a **lifetime rule** (when is this deleted, who may delete it), not a home in a fact store — and naming them here is deliberate, because a family rule that does not say "not this" would eventually sweep them in.
+
+### What the inventory shows
+
+1. **Two families with opposite requirements currently share one home.** The fault ledger must be current; the baselines that judge a run must match the code under test. Both sit in the repository today, which means the family that needs liveness gets a snapshot and the family that needs revision-matching has no rule at all.
+2. **The template already exists.** The operational family is in the store, in one shape, for every project. What is missing is not a store but a **convention set**: identity, writers and reasons, append-only facts versus current state, versioned reads, availability and backup.
+3. **The really missing ledger is the join.** Fault mode, the case that locks it, and how that case last ran are three facts that today have no shared home, which is why reading the fault ledger is a search rather than a query.
+4. **What the store lacks is what version control gave for free.** Seventeen hand-made dated copies of one request log is what a backup story looks like when there is no backup story; an 88 MB single log with only rename-rotation is what a growth policy looks like when there is none; and "as of which version did my work read this?" has no answer in either home.
+
 ## Related documents
 
 - [Ticket Relations v1 (what one ticket is to another)](ticket-relations-v1.md) — the first relation ledger in this family, with the same recording rules.
