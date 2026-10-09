@@ -58,6 +58,13 @@ related:
 
 **What is kept either way is the requirement, not the field.** If the ids are monotonic and sortable, `seq` is redundant and disappears from the records; the derivations that use it are restated as id comparisons ("landings whose id is below this certification's id"), which are just as mechanical. If any of the three conditions cannot be guaranteed, `seq` stays and remains the authority — an explicit counter is easier to reason about than an id whose ordering depends on the minting code behaving.
 
+**"But the store is append-only, so the order is already there" — half true, and the other half is why a key exists.** Append-only gives the *reading* order for free: within a file, records come back in the order they were written. What it does not give is a key that a record can *carry*:
+
+- **A record has to cite a position.** "The landings before this certification" is a comparison between two records — the certification's key against each landing's key. A position in a file cannot be written into another record, because it stops being true the moment anything is rotated or compacted.
+- **Rotation moves records.** The store already rotates by renaming, so one logical stream becomes several files; positions are not comparable across them, and a cursor has to be something stable that a reader can hand back ("after this id" or "after this number").
+- **The counter is nearly free precisely because the store is append-only.** Appends are already serialised through one writer, so assigning the next number there costs one increment and no cleverness — which is an argument for **keeping** `seq` rather than dropping it.
+- **And append-only removes lost updates, not collisions.** A duplicated id does not lose a record; it makes two records indistinguishable — which is worse in a ledger whose only purpose is to be cited.
+
 **And the time in an id is a convenience, not the record's time.** Every record already carries `at` (milliseconds) and the ledger carries `seq`; the prefix is for humans who read ids all day and for sorting, and nobody should read it as "the moment this happened" more precisely than the record's own fields.
 
 ## Conventions that apply to every record
