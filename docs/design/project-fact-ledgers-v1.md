@@ -309,6 +309,7 @@ Quarantine directories, rescue runbooks, screenshot piles, overnight autopilot l
 
 ## Related documents
 
+- [Later Shapes v1 (and the doors today's work must leave open)](later-shapes-v1.md) — the machine, writer and people shapes this store expects later, and what would block them.
 - [Ticket Relations v1 (what one ticket is to another)](ticket-relations-v1.md) — the first relation ledger in this family, with the same recording rules.
 - [Develop Buffer v1 (lane → develop → main)](develop-buffer-v1.md) — the certification and landing ledgers are members of this family.
 - [Knowledge Base Design](knowledge-base-design.md) — the split between documents and facts.

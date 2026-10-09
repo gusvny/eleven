@@ -218,5 +218,6 @@ This proposal addresses the **Problem** by taking the heavy proof off the per-la
 - [Design Document Writing Guide](design-doc-writing-guide.md) — the admission standard this document follows.
 - [Failure Classification Protocol v1 and Mechanical Attribution](failure-classification-protocol-v1.md) — how a red is classified as product / environment / flake; the bisection protocol here depends on it.
 - [Ticket Relations v1 (what one ticket is to another)](ticket-relations-v1.md) — the relation ledger; the freeze exemption and the benefited ticket's outcome both rest on a recorded repair relation.
+- [Later Shapes v1 (and the doors today's work must leave open)](later-shapes-v1.md) — the later line and repository shapes, and the tells that show a door has been closed.
 - [Project Fact Ledgers v1 (where the project's own facts live)](project-fact-ledgers-v1.md) — where the certification and landing ledgers live, and how they are shared.
 - [Knowledge Base Design](knowledge-base-design.md) — where this document sits in the document-first workflow.
