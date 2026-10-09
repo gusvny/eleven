@@ -363,5 +363,68 @@ ok(parseTopology({ nodes: [{ id: 'a', label: '', kind: 'agent' }] }) === null, '
   ok(m.nodes['fx_step_one'].vis === 'done' && m.nodes['fx_step_two'].vis === 'running', 'D: 同组件线性链状态推导')
 }
 
+/* ── E. t261009-22 header（elapsed / now at / waiting for you / 轴时钟）、
+ *      skipped（被绕过的条件段）、durationText ── */
+{
+  const T0 = Date.UTC(2026, 8, 30, 5, 5) // 轴起点（ISO 夹具）
+  const NOW = T0 + 44 * 60_000 // implement/design 窗口开着跑 38m
+  const iso = (ms) => new Date(ms).toISOString()
+  const detail = {
+    status: 'running', stage: 'implement', stage_state: 'running',
+    meta: { parallel_stages: ['implement', 'design_integration_tests'], parallel_phase: 'parallel_impl_design' },
+    timeline: [
+      { at: iso(T0), stage: 'create_plan', state: 'running', gen: 1 },
+      { at: iso(T0 + 4 * 60_000), stage: 'review_plan', state: 'running', gen: 1 },
+      { at: iso(T0 + 6 * 60_000), stage: 'implement', state: 'running', gen: 1, phase: 'parallel_impl_design' },
+      { at: iso(T0 + 6 * 60_000), stage: 'design_integration_tests', state: 'running', gen: 1, phase: 'parallel_impl_design' },
+    ],
+  }
+  const m = buildLaneMap(DEV_LANE_TOPOLOGY, detail, { nowMs: NOW })
+  // elapsed=头部与几何同源：段权重和（create 4m + review 2m + 窗口38m + 名义10m×5）
+  ok(m.header.elapsedMs === 94 * 60_000, 'E: elapsedMs=段权重和（与宽度同一真源）')
+  ok(m.header.elapsedText === '1h 34m', 'E: elapsedText=fmtDur 词表（1h 34m）')
+  ok(m.header.nowLabel === 'Implement ∥ Design Integration Tests', 'E: now at=并行对 ∥ 连接（ui-labels 英文段名）')
+  ok(m.header.waitingForYou === false, 'E: 未到人门=无 waiting for you')
+  // 轴时钟：start=首条可解析 at；end=start+elapsed；同日分钟差=94
+  ok(/^\d{2}:\d{2}$/.test(m.header.startClock ?? ''), 'E: startClock=hh:mm 形态')
+  const minOf = (s) => Number((s ?? '').slice(0, 2)) * 60 + Number((s ?? '').slice(3, 5))
+  ok(minOf(m.header.endClock) - minOf(m.header.startClock) === 94, 'E: end-start=94m（轴与段同一比例尺）')
+  // durationText：running 段=实测 38m；nominal 段=名义 10m（如实，不装测过）
+  ok(m.nodes['implement'].durationText === '38m', 'E: running 段 durationText=38m')
+  ok(m.nodes['merge'].durationText === '10m' && m.nodes['merge'].durSource === 'nominal', 'E: 未开始段=名义 10m 且标注 nominal')
+  // skipped：被绕过的可选段（ui_evidence 后面的段已跑）→ skipped=true；必经段永不 skipped
+  const m2 = buildLaneMap(DEV_LANE_TOPOLOGY, {
+    status: 'running', stage: 'run_integration_tests', stage_state: 'running',
+    timeline: [
+      { at: iso(T0), stage: 'create_plan', state: 'running' },
+      { at: iso(T0 + 60_000), stage: 'run_integration_tests', state: 'running' },
+    ],
+  }, { nowMs: NOW })
+  ok(m2.nodes['ui_evidence'].skipped === true, 'E: 被绕过的可选段 skipped=true')
+  ok(m2.nodes['review_plan'].skipped === undefined, 'E: 必经段无 skipped 键')
+  ok(m2.nodes['ui_evidence'].durationText === '10m', 'E: skipped 段 durationText=名义值（如实缺省）')
+}
+{
+  // 畸形输入（本票 hook）：at 全坏/时间线缺席 → 轴时钟=null（只画线不造数），不抛
+  const T0 = Date.UTC(2026, 8, 30, 5, 5)
+  const iso = (ms) => new Date(ms).toISOString()
+  const m = buildLaneMap(DEV_LANE_TOPOLOGY, {
+    status: 'running', stage: 'merge', stage_state: 'awaiting-human',
+    timeline: [
+      { at: 'not-a-date', stage: 'create_plan', state: 'running' },
+      { at: '', stage: 'merge', state: 'running' },
+      { at: iso(T0), stage: 'merge', state: 'awaiting-human' },
+    ],
+  })
+  ok(m.header.startClock !== null, 'E: 坏 at 被跳过、好 at 兜住（首条可解析为准）')
+  const m2 = buildLaneMap(DEV_LANE_TOPOLOGY, { status: 'running', stage: 'merge', stage_state: 'awaiting-human' })
+  ok(m2.header.startClock === null && m2.header.endClock === null, 'E: 无时间线=null 时钟（不造数）')
+  ok(m2.header.elapsedMs === 8 * 10 * 60_000, 'E: 全名义权重和=elapsed（8 段×10m）')
+  ok(typeof m2.header.nowLabel === 'string' && m2.header.nowLabel !== '', 'E: 回落末段=now at 标签不空')
+  ok(m2.header.waitingForYou === true, 'E: 人门到站=waiting for you')
+  const m3 = buildLaneMap(DEV_LANE_TOPOLOGY, { status: 42, timeline: [null, 'x', { stage: 1 }], meta: 'junk' })
+  ok(m3 !== null && m3.header.startClock === null, 'E: 畸形 detail 不抛、时钟 null')
+}
+
 console.log(`\nLANE_MAP_MODEL_TESTS pass=${passed} fail=${failed}`)
 process.exit(failed === 0 ? 0 : 1)

@@ -32,7 +32,8 @@
  */
 import { deriveStageStates } from './lane-states.ts'
 import type { D2Visual, LaneDetailLike, LaneBlockedHistory } from './lane-states.ts'
-import { HANDOFF_KEY_ALIAS, deriveStageDurations, stageTotalMs } from './lane-durations.ts'
+import { HANDOFF_KEY_ALIAS, deriveStageDurations, stageTotalMs, fmtDur } from './lane-durations.ts'
+import { stageDisplayLabel } from './ui-labels.ts'
 
 /* ── 拓扑契约（引擎 template_topology.py topology-v1） ── */
 
@@ -116,6 +117,29 @@ export interface LaneNodeView {
   weightMs: number
   /** Weight source (the renderer only maps weight to width, no policy here). */
   durSource: LaneDurSource
+  /** t261009-22 (mock 261004 criterion 4/8): the formatted duration printed
+ *  under the label and inside the hover title. Same fmtDur vocabulary as the
+ *  stepper's duration badges - no second formatter anywhere. */
+  durationText: string
+  /** t261009-22 (criterion 3): a bypassed optional stage - still todo while a
+ *  topologically later node already ran. Renders as a dashed empty box. */
+  skipped?: boolean
+}
+
+/** t261009-22 (mock 261004 header, criteria 2/3/5/6): the map's header line -
+ *  elapsed total (the same weight sum the widths use, so header and geometry
+ *  agree), the current label (`now at …`, parallel members joined with ∥),
+ *  `waiting for you` when the arrival human gate is the current segment, and
+ *  the axis clocks (start = first parseable timeline `at`, end = start +
+ *  elapsed). Malformed/missing timestamps degrade to null clocks - the axis
+ *  renders its line without fabricated times. */
+export interface LaneMapHeader {
+  elapsedMs: number
+  elapsedText: string
+  nowLabel: string
+  waitingForYou: boolean
+  startClock: string | null
+  endClock: string | null
 }
 
 export interface LaneGroupView {
@@ -138,6 +162,13 @@ export interface LaneMapModel {
   /** 到站人门节点 id（kind=human 且 awaiting-human）；无=null。 */
   humanGateActive: string | null
   closed: boolean
+  /** t261009-22: the header row (numbers/wording truth lives here; the
+   * renderer only draws the legend and copy). */
+  header: LaneMapHeader
+  /** Current item id (detail.stage pointer first, live state then last item
+   * as fallbacks) - the renderer draws the now cursor from this, the same
+   * decision that produces nowLabel, so the two can never split. */
+  nowItem: string | null
 }
 
 /* ── 输入校形（畸形防御的最小结构） ── */
@@ -167,6 +198,27 @@ function asStringArray(v: unknown): string[] {
 }
 
 const EXPLICIT_STATES = new Set(['done', 'blocked', 'awaiting-human', 'rework'])
+
+/** t261009-22 axis clock: first parseable `at` in timeline order (ISO strings
+ *  per the lane-durations contract); malformed entries are skipped, none
+ *  parseable -> null (the axis renders without times, never a made-up clock). */
+function firstClockMs(detail: DetailLike): number | null {
+  if (!Array.isArray(detail.timeline)) return null
+  for (const e of detail.timeline) {
+    if (e === null || typeof e !== 'object') continue
+    const at = asString((e as Record<string, unknown>).at)
+    if (!at) continue
+    const ms = Date.parse(at)
+    if (Number.isFinite(ms)) return ms
+  }
+  return null
+}
+
+/** Local hh:mm (the mock's own minute-of-day rendering, epoch flavour). */
+function hhmm(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 /* ── 拓扑清洗 ── */
 
@@ -491,6 +543,12 @@ export function buildLaneMap(
       badge: rounds.length > 1 ? `×${rounds.length}` : '',
       weightMs,
       durSource,
+      durationText: fmtDur(weightMs),
+      ...((n.optional !== undefined
+        && (derived.states[n.id] ?? 'todo') === 'todo'
+        && order.slice(order.indexOf(n.id) + 1)
+          .some(id => (derived.states[id] ?? 'todo') === 'done' || (derived.states[id] ?? 'todo') === 'running'))
+        ? { skipped: true } : {}),
       ...(bh ? { blockedHistory: bh } : {}),
     }
   }
@@ -527,6 +585,44 @@ export function buildLaneMap(
   }
 
   const humanGateActive = topology.nodes.find(n => n.kind === 'human' && nodes[n.id].vis === 'awaiting-human')?.id ?? null
+
+  // t261009-22 header: elapsed = the very weight sum the widths are drawn
+  // from (header and geometry cannot disagree); the current item is the one
+  // carrying a live node (running / awaiting-human / blocked), else the last
+  // item (the mock's own fallback). Clocks: first parseable timeline `at`,
+  // end = start + elapsed; nothing parseable -> null clocks (no made-up time).
+  const itemWeight = (id: string): number => {
+    const g = groups[id]
+    return g ? g.windowMs : (nodes[id]?.weightMs ?? 0)
+  }
+  const elapsedMs = items.reduce((a, it) => a + itemWeight(it.id), 0)
+  const itemMembers = (id: string): LaneNodeView[] => {
+    const g = groups[id]
+    return g ? g.members : [nodes[id]].filter(Boolean)
+  }
+  const isLive = (m: LaneNodeView): boolean =>
+    m.vis === 'running' || m.vis === 'awaiting-human' || m.vis === 'blocked'
+  // Current item: the one carrying the engine's stage pointer first (detail.stage
+  // is the truth for "now at"); the states derivation can keep earlier stages
+  // conservatively "running" when a ticket has no explicit done marks, so the
+  // live-state scan is only the fallback; last item is the terminal fallback.
+  const ptr = asString(detail.stage)
+  const curItem = (ptr ? items.find(it => itemMembers(it.id).some(m => m.node.id === ptr)) : undefined)
+    ?? items.find(it => itemMembers(it.id).some(isLive))
+    ?? items[items.length - 1]
+  const nowLabel = curItem
+    ? itemMembers(curItem.id).map(m => stageDisplayLabel(m.node.id, m.node.label)).join(' ∥ ')
+    : ''
+  const nowItem = curItem?.id ?? null
+  const startMs = firstClockMs(detail)
+  const header: LaneMapHeader = {
+    elapsedMs,
+    elapsedText: fmtDur(elapsedMs),
+    nowLabel,
+    waitingForYou: humanGateActive !== null,
+    startClock: startMs === null ? null : hhmm(startMs),
+    endClock: startMs === null ? null : hhmm(startMs + elapsedMs),
+  }
   return {
     topology,
     items,
@@ -534,5 +630,7 @@ export function buildLaneMap(
     groups,
     humanGateActive,
     closed: detail.status === 'closed',
+    header,
+    nowItem,
   }
 }

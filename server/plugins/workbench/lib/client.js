@@ -756,6 +756,79 @@ function stageDurationTitle(d, nowMs) {
 	return parts.join(" · ");
 }
 //#endregion
+//#region src/client/ui-labels.ts
+/**
+* ui-labels —— 控制台 UI 英文文案唯一映射表（t260925-18，CLAUDE.md 规则 6 补充令）。
+*
+* 口径（宿主令 260925）：
+*  - 界面文案一律英文；数据不译（票面正文/交接报告/台账保持原语言）。
+*  - 英文标签以**引擎既有英文标识**为真源（stage id / stage_state / status /
+*    workflow 模板 id），由本表统一映射；不另造词、不逐页各译。
+*  - 未知值回落原始标识本身（永不空白、永不中文）——engine 加新段/新态时
+*    UI 显示原 id，等待本表补条目，不做静默降级。
+*
+* 纯函数层：无 DOM / 无 IO，node 直跑可测（tests/ui-labels.mjs）。
+*/
+/** 查表回落：表内无此键 → 返回原始标识（trim 后空白串也视为未知）。 */
+function labelOf$1(table, id) {
+	if (typeof id !== "string") return "";
+	const key = id.trim();
+	if (key === "") return "";
+	return table[key] ?? key;
+}
+/** 阶段 id → 英文段名（真源：dev_lane.py / inspection_flow.py Stage(id=…)）。 */
+const STAGE_TABLE = {
+	create_plan: "Create Plan",
+	review_plan: "Review Plan",
+	implement: "Implement",
+	design_integration_tests: "Design Integration Tests",
+	ui_evidence: "UI Evidence",
+	run_integration_tests: "Run Integration Tests",
+	arbitrate: "Arbitrate",
+	acceptance_walkthrough: "Acceptance Walkthrough",
+	merge_check: "Merge Check",
+	merge: "Merge (Human Review)",
+	setup: "Setup",
+	suite: "Suite",
+	inspect: "Inspect",
+	produce: "Produce",
+	selfcheck: "Self-check",
+	report: "Report",
+	close: "Close"
+};
+/** 阶段态 stage_state → 英文（真源：base.py stage_state 写入点）。 */
+const STATE_TABLE = {
+	running: "In Progress",
+	awaiting: "Awaiting Dispatch",
+	"awaiting-human": "Awaiting Approval",
+	blocked: "Blocked",
+	rework: "Rework",
+	done: "Done",
+	closed: "Done"
+};
+/** 工作流模板 id → 英文名（真源：模板注册 id；模板 name 字段是中文数据，不译不显）。 */
+const WORKFLOW_TABLE = {
+	"dev-lane": "Dev Lane",
+	"light-lane": "Light Lane",
+	"inspection-lite": "Inspection",
+	"chore-lane": "Chore Lane"
+};
+const STATE_LABEL = STATE_TABLE;
+function stageLabel(id) {
+	return labelOf$1(STAGE_TABLE, id);
+}
+function workflowLabel(id) {
+	return labelOf$1(WORKFLOW_TABLE, id);
+}
+/** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
+*  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */
+function stageDisplayLabel(stageId, engineName) {
+	const mapped = stageLabel(stageId);
+	if (mapped !== "" && mapped !== stageId) return mapped;
+	if (mapped === "" && typeof engineName === "string" && engineName.trim() !== "") return engineName;
+	return mapped;
+}
+//#endregion
 //#region src/client/lane-map-model.ts
 /**
 * lane-map-model —— 真泳道图（拓扑驱动）视图模型（t260915-05，mock ③/④）。
@@ -789,12 +862,6 @@ function stageDurationTitle(d, nowMs) {
 *   非串 id/state 的条目跳过；拓扑外 stage id 不建视图不泄漏；全程不抛。
 *   消费本模块的渲染器不得出现任何 dev-lane 专属词（fixture-two-step 对拍锚）。
 */
-/** kind 图标（渲染器唯一认识的视觉词，零业务语义）。 */
-const LANE_KIND_ICON = {
-	agent: "🤖",
-	gate: "✓",
-	human: "👤"
-};
 /** Nominal weight (ms) for an unstarted stage: the mock's NOMINAL constant,
 *  so the first stage cannot swallow the row. */
 const LANE_NOMINAL_MS = 10 * 6e4;
@@ -810,6 +877,25 @@ const EXPLICIT_STATES = /* @__PURE__ */ new Set([
 	"awaiting-human",
 	"rework"
 ]);
+/** t261009-22 axis clock: first parseable `at` in timeline order (ISO strings
+*  per the lane-durations contract); malformed entries are skipped, none
+*  parseable -> null (the axis renders without times, never a made-up clock). */
+function firstClockMs(detail) {
+	if (!Array.isArray(detail.timeline)) return null;
+	for (const e of detail.timeline) {
+		if (e === null || typeof e !== "object") continue;
+		const at = asString(e.at);
+		if (!at) continue;
+		const ms = Date.parse(at);
+		if (Number.isFinite(ms)) return ms;
+	}
+	return null;
+}
+/** Local hh:mm (the mock's own minute-of-day rendering, epoch flavour). */
+function hhmm(ms) {
+	const d = new Date(ms);
+	return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 /** 清洗原始拓扑；不可救（非对象/无合法节点）→ null=调用方回落线性步骤条。 */
 function parseTopology(raw) {
 	if (raw === null || typeof raw !== "object") return null;
@@ -1064,6 +1150,8 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 			badge: rounds.length > 1 ? `×${rounds.length}` : "",
 			weightMs,
 			durSource,
+			durationText: fmtDur$1(weightMs),
+			...n.optional !== void 0 && (derived.states[n.id] ?? "todo") === "todo" && order.slice(order.indexOf(n.id) + 1).some((id) => (derived.states[id] ?? "todo") === "done" || (derived.states[id] ?? "todo") === "running") ? { skipped: true } : {},
 			...bh ? { blockedHistory: bh } : {}
 		};
 	}
@@ -1098,87 +1186,40 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 			id: n.id
 		});
 	}
+	const humanGateActive = topology.nodes.find((n) => n.kind === "human" && nodes[n.id].vis === "awaiting-human")?.id ?? null;
+	const itemWeight = (id) => {
+		const g = groups[id];
+		return g ? g.windowMs : nodes[id]?.weightMs ?? 0;
+	};
+	const elapsedMs = items.reduce((a, it) => a + itemWeight(it.id), 0);
+	const itemMembers = (id) => {
+		const g = groups[id];
+		return g ? g.members : [nodes[id]].filter(Boolean);
+	};
+	const isLive = (m) => m.vis === "running" || m.vis === "awaiting-human" || m.vis === "blocked";
+	const ptr = asString(detail.stage);
+	const curItem = (ptr ? items.find((it) => itemMembers(it.id).some((m) => m.node.id === ptr)) : void 0) ?? items.find((it) => itemMembers(it.id).some(isLive)) ?? items[items.length - 1];
+	const nowLabel = curItem ? itemMembers(curItem.id).map((m) => stageDisplayLabel(m.node.id, m.node.label)).join(" ∥ ") : "";
+	const nowItem = curItem?.id ?? null;
+	const startMs = firstClockMs(detail);
+	const header = {
+		elapsedMs,
+		elapsedText: fmtDur$1(elapsedMs),
+		nowLabel,
+		waitingForYou: humanGateActive !== null,
+		startClock: startMs === null ? null : hhmm(startMs),
+		endClock: startMs === null ? null : hhmm(startMs + elapsedMs)
+	};
 	return {
 		topology,
 		items,
 		nodes,
 		groups,
-		humanGateActive: topology.nodes.find((n) => n.kind === "human" && nodes[n.id].vis === "awaiting-human")?.id ?? null,
-		closed: detail.status === "closed"
+		humanGateActive,
+		closed: detail.status === "closed",
+		header,
+		nowItem
 	};
-}
-//#endregion
-//#region src/client/ui-labels.ts
-/**
-* ui-labels —— 控制台 UI 英文文案唯一映射表（t260925-18，CLAUDE.md 规则 6 补充令）。
-*
-* 口径（宿主令 260925）：
-*  - 界面文案一律英文；数据不译（票面正文/交接报告/台账保持原语言）。
-*  - 英文标签以**引擎既有英文标识**为真源（stage id / stage_state / status /
-*    workflow 模板 id），由本表统一映射；不另造词、不逐页各译。
-*  - 未知值回落原始标识本身（永不空白、永不中文）——engine 加新段/新态时
-*    UI 显示原 id，等待本表补条目，不做静默降级。
-*
-* 纯函数层：无 DOM / 无 IO，node 直跑可测（tests/ui-labels.mjs）。
-*/
-/** 查表回落：表内无此键 → 返回原始标识（trim 后空白串也视为未知）。 */
-function labelOf$1(table, id) {
-	if (typeof id !== "string") return "";
-	const key = id.trim();
-	if (key === "") return "";
-	return table[key] ?? key;
-}
-/** 阶段 id → 英文段名（真源：dev_lane.py / inspection_flow.py Stage(id=…)）。 */
-const STAGE_TABLE = {
-	create_plan: "Create Plan",
-	review_plan: "Review Plan",
-	implement: "Implement",
-	design_integration_tests: "Design Integration Tests",
-	ui_evidence: "UI Evidence",
-	run_integration_tests: "Run Integration Tests",
-	arbitrate: "Arbitrate",
-	acceptance_walkthrough: "Acceptance Walkthrough",
-	merge_check: "Merge Check",
-	merge: "Merge (Human Review)",
-	setup: "Setup",
-	suite: "Suite",
-	inspect: "Inspect",
-	produce: "Produce",
-	selfcheck: "Self-check",
-	report: "Report",
-	close: "Close"
-};
-/** 阶段态 stage_state → 英文（真源：base.py stage_state 写入点）。 */
-const STATE_TABLE = {
-	running: "In Progress",
-	awaiting: "Awaiting Dispatch",
-	"awaiting-human": "Awaiting Approval",
-	blocked: "Blocked",
-	rework: "Rework",
-	done: "Done",
-	closed: "Done"
-};
-/** 工作流模板 id → 英文名（真源：模板注册 id；模板 name 字段是中文数据，不译不显）。 */
-const WORKFLOW_TABLE = {
-	"dev-lane": "Dev Lane",
-	"light-lane": "Light Lane",
-	"inspection-lite": "Inspection",
-	"chore-lane": "Chore Lane"
-};
-const STATE_LABEL = STATE_TABLE;
-function stageLabel(id) {
-	return labelOf$1(STAGE_TABLE, id);
-}
-function workflowLabel(id) {
-	return labelOf$1(WORKFLOW_TABLE, id);
-}
-/** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
-*  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */
-function stageDisplayLabel(stageId, engineName) {
-	const mapped = stageLabel(stageId);
-	if (mapped !== "" && mapped !== stageId) return mapped;
-	if (mapped === "" && typeof engineName === "string" && engineName.trim() !== "") return engineName;
-	return mapped;
 }
 //#endregion
 //#region src/client/lane-map.tsx
@@ -1191,7 +1232,11 @@ function stageDisplayLabel(stageId, engineName) {
 *
 * 图面语义（mock 屏③）：
 *   - 并行组=虚线框，成员纵排双道，任一成员 running 时框高亮（active）；
-*   - 人门（kind=human）=虚线圈 👤，到站时状态卡变蓝（蓝卡在 status-card）；
+*   - Human gate (kind=human) = a diamond at the head of the segment; when the
+*     arrival gate is human the header says "waiting for you" (t261009-22,
+*     mock 261004 criteria 2-6: kind legend + elapsed/now header, fills by
+*     state, alternating labels with a duration · ×N line, now cursor, time
+*     axis, per-segment hover with duration and rounds);
 *   - 条件段（optional）=虚节点+条件注记；
 *   - 轮次带=同段多轮逐轮一格，hover title=该轮证据/打回原因（数据=gen/phase）；
 *   - 不画返工弧：返工史归打回横幅与本组件 ×N 徽章，图面单向流
@@ -1235,45 +1280,75 @@ function roundTitle(nv, gen, state) {
 	if (r.handoffSummary) bits.push(r.handoffSummary);
 	return bits.join(" · ");
 }
-/** 单个站点（主道与并行道内共用；道内竖排由父级 flex 方向控制）。 */
-function LaneMapNode({ nv, inGroup }) {
+/** One station (shared by the main lane and the parallel bands; vertical
+*  stacking inside a band is the parent flex direction's business).
+*  t261009-22 (mock 261004 criteria 3/4/5/8):
+*    - label block = name + a "duration · xN" line (duration truth = the
+*      model's durationText/fmtDur); unstarted (nominal) stages print none
+*      (the mock prints durations only for done/now);
+*    - leader line alternates above/below (alt = label above the dot, the
+*      default below); canvas clamping is the container padding + scroll;
+*    - human gate = a diamond at the segment head (SVG path, replacing the
+*      old dashed-ring person);
+*    - hover title carries duration and rounds (criterion 8 completed). */
+function LaneMapNode({ nv, inGroup, alt }) {
 	const n = nv.node;
-	const glyph = n.kind === "human" ? LANE_KIND_ICON.human : LM_ICON[nv.vis] ?? LM_ICON.todo;
+	const glyph = n.kind === "human" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+		className: "wb-lm-diamond",
+		width: "14",
+		height: "14",
+		viewBox: "0 0 14 14",
+		role: "img",
+		"aria-label": "human gate",
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", {
+			d: "M7 1.5 l5.5 5.5 l-5.5 5.5 l-5.5 -5.5 z",
+			fill: "var(--dsw-derive-canvas,#fff)",
+			stroke: "var(--dsw-derive-warn,#bf8700)",
+			strokeWidth: "1.5"
+		})
+	}) : LM_ICON[nv.vis] ?? LM_ICON.todo;
 	const ever = nv.blockedHistory?.resolved === true && nv.blockedHistory.passes.length > 0 && nv.vis === "done";
 	const everTitle = ever && nv.blockedHistory ? everBlockedTitle(nv.blockedHistory) : "";
-	const title = `${stageDisplayLabel(n.id, n.label)} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""}${everTitle ? ` · ${everTitle}` : ""}`;
+	const title = `${stageDisplayLabel(n.id, n.label)} · ${n.role} · ${n.kind}${n.optional ? ` · ${n.optional}` : ""} · ${nv.durationText} · ${nv.rounds.length} rounds${everTitle ? ` · ${everTitle}` : ""}`;
+	const durLine = nv.durSource === "nominal" ? "" : nv.durationText;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-		className: `wb-lm-node${inGroup ? " wb-lm-node-inlane" : ""}`,
+		className: `wb-lm-node${inGroup ? " wb-lm-node-inlane" : ""}${alt ? " wb-lm-alt" : ""}`,
 		"data-id": n.id,
 		"data-kind": n.kind,
 		"data-vis": nv.vis,
+		"data-skipped": nv.skipped ? "true" : void 0,
 		"data-ever-blocked": ever ? "true" : void 0,
 		title,
 		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+				className: "wb-lm-label",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					className: "wb-lm-name",
+					children: [
+						stageDisplayLabel(n.id, n.label),
+						n.optional ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("em", {
+							className: "wb-lm-opt",
+							title: `Conditional stage: ${n.optional}`,
+							children: n.optional
+						}) : null,
+						ever && nv.blockedHistory ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+							className: "wb-lm-ever",
+							title: everBlockedTitle(nv.blockedHistory),
+							children: "was blocked"
+						}) : null
+					]
+				}), durLine ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					className: "wb-lm-dur",
+					children: [durLine, nv.badge ? ` · ${nv.badge}` : ""]
+				}) : null]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+				className: "wb-lm-leader",
+				"aria-hidden": "true"
+			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
 				className: "wb-lm-dot",
 				children: glyph
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: "wb-lm-name",
-				children: [
-					stageDisplayLabel(n.id, n.label),
-					n.optional ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("em", {
-						className: "wb-lm-opt",
-						title: `Conditional stage: ${n.optional}`,
-						children: n.optional
-					}) : null,
-					nv.badge ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", {
-						className: "wb-lm-badge",
-						title: `${nv.rounds.length} rounds at this stage (rework history in the rework banner)`,
-						children: nv.badge
-					}) : null,
-					ever && nv.blockedHistory ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
-						className: "wb-lm-ever",
-						title: everBlockedTitle(nv.blockedHistory),
-						children: "was blocked"
-					}) : null
-				]
 			}),
 			nv.rounds.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				className: "wb-lm-rounds",
@@ -1317,6 +1392,9 @@ function LaneMapGroup({ model, groupId }) {
 			children: g.members.map((m, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				className: "wb-lm-band",
 				"data-band": i === 0 ? "main" : "partner",
+				"data-kind": m.node.kind,
+				"data-vis": m.vis,
+				"data-skipped": m.skipped ? "true" : void 0,
 				style: i === 0 ? void 0 : { width: `${lmBandPct(m.weightMs, g.windowMs)}%` },
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
 					nv: m,
@@ -1347,28 +1425,111 @@ function lmWidths(model) {
 }
 /**
 * 真泳道图。model=null 时调用方不渲染本组件（回落现行线性步骤条）。
+*
+* t261009-22 (mock 261004 criteria 2/3/5/6): the header row = topology name
+* (degrades to "N stages" without one - no business words pasted here, review
+* comment 1) + the three-swatch kind legend + `elapsed ... · now at ...`
+* (plus `(waiting for you)` at the arrival human gate); the current item
+* carries the now cursor (a dashed vertical line); the footer time axis shows
+* start/end clocks at the segment scale (same width truth as the segments),
+* and renders the line only when clocks are missing - never a made-up time.
 */
 function LaneMap({ model }) {
 	const widths = lmWidths(model);
 	const pctOf = new Map(widths.map((w) => [w.id, w]));
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+	const h = model.header;
+	const groupCount = Object.keys(model.groups).length;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-lanemap",
 		"data-template": model.topology.template,
-		children: model.items.map((item) => {
-			const w = pctOf.get(item.id);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-lm-item",
-				"data-weight-ms": w?.weightMs,
-				style: w ? { width: `${w.pct.toFixed(2)}%` } : void 0,
-				children: item.kind === "group" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapGroup, {
-					model,
-					groupId: item.id
-				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
-					nv: model.nodes[item.id],
-					inGroup: false
+		"data-testid": "detail-lane-map",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-lm-head",
+				"data-testid": "lane-map-header",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: model.topology.name || `${model.items.length} stages` }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
+						model.items.length,
+						" stages",
+						groupCount > 0 ? ` · ${groupCount} parallel` : ""
+					] }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-lm-lkind",
+						"aria-label": "legend",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", { className: "wb-lm-k k-agent" }),
+							"agent",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", { className: "wb-lm-k k-gate" }),
+							"gate",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", { className: "wb-lm-k k-human" }),
+							"you"
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-lm-lsum",
+						"data-testid": "lane-map-summary",
+						children: [
+							"elapsed ",
+							h.elapsedText,
+							" · now at ",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: h.nowLabel }),
+							h.waitingForYou ? " (waiting for you)" : ""
+						]
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-lm-track",
+				children: model.items.map((item, i) => {
+					const w = pctOf.get(item.id);
+					const now = model.nowItem === item.id;
+					const kind = item.kind === "group" ? void 0 : model.nodes[item.id]?.node.kind;
+					const vis = item.kind === "group" ? void 0 : model.nodes[item.id]?.vis;
+					const skipped = item.kind === "group" ? void 0 : model.nodes[item.id]?.skipped;
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-lm-item",
+						"data-weight-ms": w?.weightMs,
+						"data-now": now ? "true" : void 0,
+						"data-kind": kind,
+						"data-vis": vis,
+						"data-skipped": skipped ? "true" : void 0,
+						"data-stage": item.kind === "node" ? item.id : void 0,
+						style: w ? { width: `${w.pct.toFixed(2)}%` } : void 0,
+						children: [item.kind === "group" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapGroup, {
+							model,
+							groupId: item.id
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LaneMapNode, {
+							nv: model.nodes[item.id],
+							inGroup: false,
+							alt: i % 2 === 1
+						}), now ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+							className: "wb-lm-cursor",
+							"aria-hidden": "true"
+						}) : null]
+					}, item.id);
 				})
-			}, item.id);
-		})
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-lm-axis",
+				"data-testid": "lane-map-axis",
+				"data-clock": h.startClock ? "true" : "false",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-lm-axis-t",
+						children: h.startClock ?? ""
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {
+						className: "wb-lm-axis-line",
+						"aria-hidden": "true"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-lm-axis-t",
+						children: h.endClock ?? ""
+					})
+				]
+			})
+		]
 	});
 }
 /**
@@ -12111,23 +12272,101 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
  * renderer computes pct); the fixed min-width retired (72px constant width
  * conflicts with v5 width-proportional-to-duration); the readable minimum is
  * kept by the renderer's MIN_PCT floor instead. */
-.wb-lanemap{margin:10px 0 4px;padding:14px 10px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:flex;align-items:stretch;gap:2px;min-height:96px}
-.wb-lm-item{display:flex;align-items:center;min-width:0}
-.wb-lm-item:not(:first-child)::before{content:'→';color:var(--dsw-derive-border,#d0d7de);margin:0 6px;font-size:14px}
-.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:0;overflow:hidden}
+/* t261009-22 (mock 261004 criteria 2/3/4/5/6): the container becomes a block
+ * with three rows - header (legend + elapsed/now summary), the pipe row (the
+ * old flex layout moved into .wb-lm-track; the inter-segment arrows are
+ * retired for the continuous-pipe look) and the footer time axis. Segment
+ * fills by kind x state (22% tint / solid + amber outline / grey / skipped
+ * dashed-empty); the now cursor rides the right edge of the current item. */
+.wb-lanemap{margin:10px 0 4px;padding:12px 12px 8px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:block}
+.wb-lm-head{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--dsw-derive-muted,#57606a);padding:0 2px 8px;flex-wrap:wrap}
+.wb-lm-head>b{font-size:12px;color:var(--dsw-derive-fg,#1f2328);white-space:nowrap}
+.wb-lm-lkind{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--dsw-derive-muted,#57606a)}
+.wb-lm-k{width:8px;height:8px;border-radius:2px;display:inline-block}
+.wb-lm-k.k-agent{background:var(--dsw-derive-success,#4ac26b);opacity:.35}
+.wb-lm-k.k-gate{background:var(--dsw-derive-accent,#0969da);opacity:.35}
+.wb-lm-k.k-human{background:var(--dsw-derive-warn,#bf8700)}
+.wb-lm-lsum{margin-left:auto;font-family:ui-monospace,monospace;font-size:10px;white-space:nowrap}
+.wb-lm-track{display:flex;align-items:stretch;gap:2px;min-height:96px}
+.wb-lm-item{position:relative;display:flex;align-items:center;min-width:0;border-radius:8px}
+/* Segment fills: done = kind colour at 22% tint; running = solid + amber
+ * outline (the mock's now box) + inverted text; todo = grey; skipped =
+ * dashed empty; blocked keeps its solid red (t260916-04 rule). */
+.wb-lm-item[data-kind=agent]{background:color-mix(in srgb,var(--dsw-derive-success,#4ac26b) 22%,transparent)}
+.wb-lm-item[data-kind=gate]{background:color-mix(in srgb,var(--dsw-derive-accent,#0969da) 22%,transparent)}
+.wb-lm-item[data-kind=human]{background:color-mix(in srgb,var(--dsw-derive-warn,#bf8700) 22%,transparent)}
+.wb-lm-item[data-vis=todo]{background:color-mix(in srgb,var(--dsw-derive-border,#d0d7de) 18%,transparent)}
+.wb-lm-item[data-vis=running]{background:var(--dsw-derive-success,#4ac26b);box-shadow:0 0 0 1.5px var(--dsw-derive-warn,#bf8700)}
+.wb-lm-item[data-vis=running][data-kind=gate]{background:var(--dsw-derive-accent,#0969da)}
+.wb-lm-item[data-vis=running][data-kind=human]{background:var(--dsw-derive-warn,#bf8700)}
+.wb-lm-item[data-vis=blocked]{background:var(--dsw-derive-danger,#cf222e)}
+.wb-lm-item[data-vis=running] .wb-lm-name,.wb-lm-item[data-vis=blocked] .wb-lm-name,
+.wb-lm-item[data-vis=running] .wb-lm-dur,.wb-lm-item[data-vis=blocked] .wb-lm-dur{color:var(--dsw-derive-canvas,#fff)}
+.wb-lm-item[data-skipped]{background:transparent;box-shadow:none;border:1.5px dashed var(--dsw-derive-border,#d0d7de)}
+.wb-lm-item[data-skipped] .wb-lm-name,.wb-lm-item[data-skipped] .wb-lm-dur{color:var(--dsw-derive-muted,#8c959f)}
+/* Bands inside a parallel window use the same fills (a band is a segment in
+ * the window; same rules as the item level). */
+.wb-lm-band{border-radius:8px}
+.wb-lm-band[data-kind=agent]{background:color-mix(in srgb,var(--dsw-derive-success,#4ac26b) 22%,transparent)}
+.wb-lm-band[data-kind=gate]{background:color-mix(in srgb,var(--dsw-derive-accent,#0969da) 22%,transparent)}
+.wb-lm-band[data-kind=human]{background:color-mix(in srgb,var(--dsw-derive-warn,#bf8700) 22%,transparent)}
+.wb-lm-band[data-vis=todo]{background:color-mix(in srgb,var(--dsw-derive-border,#d0d7de) 18%,transparent)}
+.wb-lm-band[data-vis=running]{background:var(--dsw-derive-success,#4ac26b);box-shadow:0 0 0 1.5px var(--dsw-derive-warn,#bf8700)}
+.wb-lm-band[data-vis=running][data-kind=gate]{background:var(--dsw-derive-accent,#0969da)}
+.wb-lm-band[data-vis=running][data-kind=human]{background:var(--dsw-derive-warn,#bf8700)}
+.wb-lm-band[data-vis=blocked]{background:var(--dsw-derive-danger,#cf222e)}
+.wb-lm-band[data-vis=running] .wb-lm-name,.wb-lm-band[data-vis=blocked] .wb-lm-name,
+.wb-lm-band[data-vis=running] .wb-lm-dur,.wb-lm-band[data-vis=blocked] .wb-lm-dur{color:var(--dsw-derive-canvas,#fff)}
+/* skipped on the band too (acceptance rework: the attribute and the styled
+ * surface must be the same element - the item-level row is not reachable
+ * inside a parallel window) */
+.wb-lm-band[data-skipped]{background:transparent;box-shadow:none;border:1.5px dashed var(--dsw-derive-border,#d0d7de)}
+.wb-lm-band[data-skipped] .wb-lm-name,.wb-lm-band[data-skipped] .wb-lm-dur{color:var(--dsw-derive-muted,#8c959f)}
+/* Now cursor: one dashed vertical line on the right edge of the current item
+ * (the mock's nowMark; a real element, not a pseudo - DOM probes and the
+ * accessibility tree can enumerate it). */
+.wb-lm-cursor{position:absolute;right:-1px;top:-8px;bottom:-8px;border-left:1.5px dashed var(--dsw-derive-accent,#0969da);pointer-events:none}
+.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:0;overflow:visible}
+/* Labels alternate above/below via a leader line (t261009-22 criterion 4):
+ * default puts the label below the dot (dot-leader-label-rounds), .wb-lm-alt
+ * puts it above (label-leader-dot-rounds). */
+.wb-lm-node .wb-lm-dot{order:1}
+.wb-lm-node .wb-lm-leader{order:2}
+.wb-lm-node .wb-lm-label{order:3}
+.wb-lm-node .wb-lm-rounds{order:4}
+.wb-lm-node.wb-lm-alt .wb-lm-label{order:1}
+.wb-lm-node.wb-lm-alt .wb-lm-leader{order:2}
+.wb-lm-node.wb-lm-alt .wb-lm-dot{order:3}
+.wb-lm-leader{width:1px;height:8px;background:var(--dsw-derive-border,#d0d7de);flex:none}
+/* label chip: a canvas background so alternating labels stay readable where
+ * narrow segments make neighbours overlap (acceptance cosmetic observation) */
+.wb-lm-label{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0;background:var(--dsw-derive-canvas,#fff);padding:0 3px;border-radius:4px}
+/* canvas clamp (mock criterion 4): the edge labels align inward so their text
+ * cannot spill past the map's padding box */
+.wb-lm-item:first-child .wb-lm-label{align-items:flex-start;text-align:left}
+.wb-lm-item:last-child .wb-lm-label{align-items:flex-end;text-align:right}
 .wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
 .wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
 .wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
 /* t260916-04：当前受阻=实心红（既有强调收实底，反白 glyph），与「曾受阻=完成色+角标」区分 */
 .wb-lm-node[data-vis=blocked] .wb-lm-dot{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger,#cf222e);color:var(--dsw-derive-canvas,#fff)}
 .wb-lm-node[data-vis=awaiting-human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
-/* 人门=虚线圈（mock 屏③ callout E：人门站与机械站形状区分） */
-.wb-lm-node[data-kind=human] .wb-lm-dot{border-style:dashed;border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+/* t261009-22: human gate = a diamond (SVG glyph inside the dot; the old
+ * dashed-ring styling is retired). */
+.wb-lm-node[data-kind=human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-lm-node[data-kind=human][data-vis=todo] .wb-lm-dot{background:var(--dsw-derive-canvas,#fff)}
+.wb-lm-diamond{display:block}
 /* 程序化闸=方点（kind 形状区分：agent 叙述/程序化闸/人门拍板） */
 .wb-lm-node[data-kind=gate] .wb-lm-dot{border-radius:6px}
 .wb-lm-name{font-size:11px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);line-height:1.3;text-align:center;white-space:nowrap}
+.wb-lm-dur{font-size:9.5px;color:var(--dsw-derive-muted,#57606a);font-family:ui-monospace,monospace;white-space:nowrap}
 .wb-lm-opt{font-style:normal;font-size:9.5px;color:var(--dsw-derive-muted,#8c959f);border:1px dashed var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;margin-left:3px}
-.wb-lm-badge{font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px}
+/* t261009-22: the footer time axis (start/end clocks at the segment scale;
+ * missing clocks render the line only, never a made-up time). */
+.wb-lm-axis{display:flex;align-items:center;gap:6px;margin-top:10px;padding:0 2px}
+.wb-lm-axis-line{flex:1;border-top:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-lm-axis-t{font-size:9px;color:var(--dsw-derive-muted,#8c959f);font-family:ui-monospace,monospace;white-space:nowrap}
+.wb-lm-axis[data-clock=false] .wb-lm-axis-t{display:none}
 /* t260916-04：历史已解除受阻=完成色+「曾受阻」角标（黄点；hover 出经过，lane-map.tsx） */
 .wb-lm-ever{font-style:normal;font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px;cursor:default;white-space:nowrap}
 .wb-lm-ever::before{content:'●';color:var(--dsw-derive-warn,#9a6700);margin-right:2px;font-size:8px;vertical-align:1px}
