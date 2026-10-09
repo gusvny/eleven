@@ -585,6 +585,20 @@ The questions it answers, none of which have an answer today:
 
 Two fields that were in the earlier draft are **gone**, for reasons this document applies everywhere: **the revision the period read is a property of the period**, not of each sighting (the revision is pinned when the period opens, so every finding in it shares it), and **`quote_fp` had no consumer** — the id already encodes the content, and nothing reads a separate quote fingerprint.
 
+### Where a period's output lives — and what the report file becomes
+
+Today a period writes **two** things outside the flow: the findings as a list **on the period ticket** (`t261009-09` carries 62 of them), and a **report file** per period per instance under the engine's `out/`, which nothing tracks. Asked whether the report stays a JSON file or becomes part of a stream, the answer follows from the rules this document already applies:
+
+- **The report file is the weakest home of the three.** It sits in the repository's working tree but is not tracked, so it is neither versioned nor shared nor backed up; it has no cursor, so "which state of the world does this describe" cannot be asked of it; and there is one per period per instance, so a year of them is a directory of files nobody reads. It cannot be the home of the facts.
+- **The ticket is better but still per-period.** It is durable and it is the audit surface, and it is what the engine compares against the previous period. What it cannot be is the *entity's* home: it holds one period's list, so "seen again next period" is not a fact anywhere.
+- **The store is where they belong.** Findings are operational facts: append-only, read as of a cursor, shared, backed up by the same story as the rest of the store, and queryable as a stream — which is exactly what the four questions in the observation entry need. `reviewed.jsonl` in the same store already shows the shape working for the input side.
+
+So the shape is: **records in the store are the detail; the period ticket carries the period's own face — how many findings, and the cursor it wrote — and cites rather than copies; the JSON report becomes a generated view, or is dropped.** Three notes make that honest:
+
+1. **A generated view may still exist as a file**, for a human who wants to open one period's result, but it is labelled generated and can be rebuilt from the records; it is never cited as the source, and it never has to be reconciled with anything.
+2. **Old periods are not rewritten.** Their findings stay on their tickets; new periods write records. A reader therefore meets both shapes, and the period's own face says which one it holds.
+3. **The period ticket's count-and-cursor summary is not a second copy** — it is a reference, on the same footing as the ticket-outcome projection: if it disagrees with the records, the records win.
+
 ### reviewed path (fact) — "has anyone looked at this file lately?"
 
 **This is the input side of a period, where a finding is the output side.** One row per path per period: which files the review actually examined. Its purpose is coverage — a face that quietly narrows what it reads still reports the same number of findings, and only this ledger shows that it stopped looking at a whole area.
@@ -769,7 +783,7 @@ The truth about a ticket — its stage, its signature, its verdict, a send-back 
 
 ## Open questions for this review
 
-1. **Where do findings live?** The inspected ledger records *paths reviewed*, not findings; the finding entity and its observations have no settled home, and the entity/observation split depends on one.
+1. **Findings' home is settled (the store, as records — see the note in section D), and what remains is the split**: today the finding and its sightings are one per-period blob on a ticket, so the entity that outlives a period still has to be separated from the sightings that record it.
 2. **`by` / `who` must split.** Examples of the prose that cannot be machine-checked are in section D (`capacity limit change.by`, `authorisation change.who`). Proposed: `actor`, `on behalf of`, `authority reference` — all three required when the writer is not the authority.
 3. **Shape versions.** The event ledger has one (`event-ledger-v1`); the rest do not. Roll the same convention out, and state what a reader does with an unknown version (fail loudly, not guess).
 4. **Retention per family.** Only the event ledger has a rotation cursor; run results are 88 MB and rotate by rename alone. Each family needs a declared lifetime.
