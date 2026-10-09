@@ -3184,6 +3184,11 @@
    "note": "",
    "sync_path": ""
   },
+  "integration/t260928-29/sc_executor_charter_grant_home.py": {
+   "anchor": "behaviour",
+   "note": "t261009-14: grant facts relocated with zero coverage loss (sandbar section keeps executor-grants.json; generic template drops block+file refs) and the charter-identity scenario stays live-judged (never in known-red-baseline).",
+   "sync_path": ""
+  },
   "integration/t260928-29/sc_executor_preset_repo_contract.py": {
    "anchor": "behaviour",
    "note": "",

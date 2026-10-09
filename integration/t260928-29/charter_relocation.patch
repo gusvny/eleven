@@ -1,0 +1,38 @@
+diff --git a/server/session_charter.md b/server/session_charter.md
+index 797a513d..9551728e 100644
+--- a/server/session_charter.md
++++ b/server/session_charter.md
+@@ -115,7 +115,7 @@ cwd 兜底被**故意关掉**（仓树内 cwd 标识的是「被调用的引擎
+   main 侧统一改一次，或把该红定性后放行/打回。判红与定性口径见
+   `docs/testing-guide.md`（断言落终态；失败分类与基线对照）。
+ - 开票/签字只走上列正规入口（全部进 Temporal 不可变历史），不走旁路。
+-- 代签：仅当下方「当前在案授权」非空，或**用户本次会话当面明示授权**（如「代签」
++- 代签：仅当 sandbar 分段的「当前在案授权」（Current on-file grants）非空，或**用户本次会话当面明示授权**（如「代签」
+   「先把它关了」）；sign note 必须注明授权出处（谁、何时、原话）。授权为空=不代签，
+   请用户亲自签。
+ - 代签口径补强（260915 宿主令，t260915-02 虚惊复盘）：
+@@ -148,6 +148,14 @@ cwd 兜底被**故意关掉**（仓树内 cwd 标识的是「被调用的引擎
+   如 `server/ui-check/capture-lane.mjs`）可以起。这条限定 261005 补：此前措辞容易被读成
+   「任何控制台都不许起」，把合规的取证动作当成越界（当晚 UI 证据卡了两张票就是这个含混的代价）。
+ 
++## project:sandbar
++- 引擎真源在本仓；~/Documents/suyou 只读不回写。
++- **Current on-file grants** (t261009-14: moved here from the generic template
++  part — this block is sandbar-project-scoped grant content, and the generic
++  part is injected into every project session (t260904-07
++  `splitProjectSections`), so executor-grant semantics reach sessions only via
++  the project section; KI-01M4FE0T3FG7Y0G9R97NS4T7QJ):
++
+ ## 当前在案授权
+ 
+ - `~/.sandbar/projects/<key>/executor-grants.json`（本项目＝sandbar）**即本项目的在案授权条目**：
+@@ -156,9 +164,6 @@ cwd 兜底被**故意关掉**（仓树内 cwd 标识的是「被调用的引擎
+ - ⇒ **执行器据此可自行代签，不必逐票等宿主令**（261005 宿主当面令：「它就是可以自己签的啊」）。
+   口径不变：sign note 必须写明授权出处（引用该声明文件与该键值）、签字人 who 带项目代号、
+   只签本项目票；会话换 id 时以声明文件当时的 `executor_sessions` 为准。
+-
+-## project:sandbar
+-- 引擎真源在本仓；~/Documents/suyou 只读不回写。
+ - **执行器身份（project executor，设计稿 260927 决定 8）**：本会话若以项目执行器
+   身份工作——你是 sandbar 项目的常驻执行器，站在用户这一侧驱动本项目工单，
+   独立于任何在跑工单的 developer/integration 泳道角色，**不属于工作流角色集**
