@@ -512,23 +512,27 @@ The decision about a fault mode, as a fact — so that "we decided to live with 
 Two clarifications that keep this section honest:
 
 - **The section holds more than findings.** Also here: the **observation** (a finding *seen again*, against a named revision — proposed; today only the finding itself exists) and the **reviewed path** (which files a period actually examined — today, and that is a coverage ledger, not a finding).
-- **The machinery exists; the output is nearly empty.** Only the **test face** has a schedule today. The `docs-sync` and `simplify-face` instances are declared and enabled in the project's declaration but have never run, so those faces have produced no findings at all. And a *change-producing* face (doc, simplify) does not report findings as its product — it produces **a change**, which is a ticket that lands like any other work. "Inspection output" is therefore three different things: findings, changes, and coverage.
+- **The faces are running now.** An earlier reading of this project's own design notes said the `docs-sync` and `simplify-face` instances had never run; that is no longer true. The docs-sync period for 20261009 closed today with **62 findings**, and its reviewed-path ledger recorded 227 paths for the same period. What matters for this document is the shape of the record, not the count — but the count is worth keeping honest.
+- **A change-producing face does not report findings.** The doc and simplify faces produce **a change**, which is a ticket that lands like any other work. "Inspection output" is therefore three different things: findings, changes, and coverage.
 
 ### finding (entity) — "what is wrong here?"
 
-**Status: today** — the inspection agent produces these (id minted from content, evidence verified mechanically); where the entity is *stored* is not settled.
+**Status: today, and its home is the period ticket.** An inspection period's findings are stored **on the ticket itself** — `t261009-09` ("Inspection docs-sync · period 20261009") carries `findings` as a list of 62 entries together with `instance_id`, `period` and `kind` — plus a report artifact written to `server/engine/out/inspection/<instance>-<period>.json` (a path that is not tracked). So the snapshot has a home. What has none is the **entity that outlives the period**: the ticket holds one period's list, and "the same finding seen again next period" exists only because the ids are minted from content. That is the gap the observation record below is for.
+
+The shape below is **verbatim from a real period** (period 20261009, docs-sync face, 62 findings), not a sketch — which is why it carries `scan` and `verified` and does not carry the `confidence` this document previously invented:
 
 ```json
 {
-  "id": "fi-9c1e42a0",
-  "subject": "stage-entry titles fall back to Chinese",
+  "id": "3d4b305e",
+  "scan": "doc-m1-index",
   "severity": "med",
+  "subject": "page exists but is not registered in docs/index.json",
   "evidence": [
-    { "path": "server/plugin/x.ts", "line": 412, "quote": "阶段开始" }
+    { "path": "docs/design/develop-buffer-v1.md", "line": 1, "quote": "---" }
   ],
-  "why": "the UI copy contract is English",
-  "suggestion": "use the stage id",
-  "confidence": "high"
+  "why": "The page exists under docs/ but the machine index has no entry for it; plugins and agents consume the index.",
+  "suggestion": "Register the page (python3 docs/scripts/build_index.py) or move it out of docs/.",
+  "verified": "verified"
 }
 ```
 
