@@ -48,6 +48,12 @@ PROJECT = "t26092001-cap"
 LOCK_NAME = "ensure-%s.lock" % PROJECT
 BUDGET_S = "2"          # 预算旋钮（实现后墙钟贴 2s）
 CLI_TIMEOUT_S = "8"     # --timeout 兜底（实现前防卡 600s；墙钟上与预算可辨）
+# t261008-46 两层上界：ensure 互斥窗改走工作对端上限（min(timeout,
+# max(base, ceiling))）——争用分支必须同步注入 CEILING=BUDGET_S 才能保住「墙钟贴
+# 2s」锚（缺省上限 660s 会把本用例拖到 --timeout 兜底=假红）。语义分工：本条
+# 仍锁「有界+点名+诚实红+持有者零波及」契约；「有进度骑到上限/无进度基础预算
+# 快速红」的两层契约归 t261008-46 场景与其 L1 电池（test_stage_mutex_wait.py）。
+CEILING_S = BUDGET_S
 
 pass_n = fail_n = 0
 
@@ -66,6 +72,7 @@ def run_ensure(lock_root, extra_env=None, timeout_s=60):
     env = dict(os.environ)
     env["SANDBAR_STAGE_LOCK_DIR"] = str(lock_root)
     env["SANDBAR_STAGE_WAIT_BUDGET_S"] = BUDGET_S
+    env["SANDBAR_STAGE_WORKING_PEER_CEILING_S"] = CEILING_S   # t261008-46：互斥窗 cap=max(base,ceiling)
     env.update(extra_env or {})
     t0 = time.time()
     p = subprocess.run(

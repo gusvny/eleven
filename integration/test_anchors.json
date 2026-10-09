@@ -3,7 +3,7 @@
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
    "engine_tests": 236,
-   "scenarios": 602
+   "scenarios": 604
   },
   "vocab": [
    "behaviour",
@@ -4197,6 +4197,16 @@
   "integration/t261009-03/sc_t26100903_reorder_write_face.mjs": {
    "anchor": "behaviour",
    "note": "t261009-03 CL-3 L3 journey: the panel POST {project, order} through the real route chain lands and the GET face returns the new order; refusal body text reaches the client in the shape orderNotice renders; refusal paths leave the state file byte-hash identical; holder slots/queue count unchanged",
+   "sync_path": ""
+  },
+  "integration/t261008-46/sc_supply_working_peer_ceiling.py": {
+   "anchor": "contract",
+   "note": "t261008-46: two-tier supply contention wait contract (base budget vs working-peer ceiling knob) at the stage_docker CLI process face",
+   "sync_path": ""
+  },
+  "integration/t261008-46/sc_mutex_working_peer_ceiling.py": {
+   "anchor": "contract",
+   "note": "t261008-46: working-peer ceiling on the ensure-mutex flock window (named-bound honest red)",
    "sync_path": ""
   }
  }

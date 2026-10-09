@@ -40,7 +40,18 @@ Subcommands:
   ensure --project <name> [--keep] [...same flags as up]   idempotent ensure:
                               a live lease (state=up + fresh heartbeat + holder
                               alive) is reused with zero docker queries; a
-                              booting lease is waited for, never double-booted;
+                              booting lease is waited for, never double-booted
+                              (the wait rides the WORKING-PEER ceiling,
+                              SANDBAR_STAGE_WORKING_PEER_CEILING_S default
+                              660s, while the peer's lease is being RENEWED —
+                              observed heartbeat change; a peer with no
+                              observable renewal — static lease, stale
+                              heartbeat, dead holder — bails at the base
+                              budget SANDBAR_STAGE_WAIT_BUDGET_S default
+                              120s — t261008-46: a legitimate cold boot must
+                              not be cut at 120s, that was the
+                              zero-scenario-gate symptom; verify gen3:
+                              progress = observed renewal, not freshness);
                               a dead lease (expired AND holder gone) is
                               reclaimed and rebuilt; --keep = never tear down a
                               running face (supply-stage semantics: honest red
@@ -408,6 +419,57 @@ def wait_budget_s():
     except ValueError:
         return float(DEFAULT_WAIT_BUDGET_S)
     return v if v > 0 else float(DEFAULT_WAIT_BUDGET_S)
+
+
+# Working-peer ceiling (t261008-46): contention waits that ride out a WORKING
+# peer (the same-project ensure-mutex flock and the booting flip) must not be
+# cut at the 120s base budget — the winner may legitimately be doing a full
+# cold boot inside its critical section (residue sweep, compose down/up), and
+# cutting the loser there is exactly the "gate runs zero scenarios" symptom.
+# Ceiling default = the holder's own health-wait window (DEFAULT_TIMEOUT
+# 600s) + one grace minute: a legitimate cold boot can never exceed the
+# winner's own health budget, so riding it out never needs more. The windows
+# that wait on a possibly-stalled peer (daemon probe, capacity-0 fuse lock,
+# heartbeat-recovery grace) stay capped by wait_budget_s() alone — a dead
+# daemon must still honest-red in seconds (t260920-01's core win).
+WORKING_PEER_CEILING_ENV = "SANDBAR_STAGE_WORKING_PEER_CEILING_S"
+DEFAULT_WORKING_PEER_CEILING_S = 660.0
+
+
+def working_peer_ceiling_s():
+    """Working-peer contention ceiling (seconds). Malformed (non-numeric or
+    <= 0) falls back to the default — the budget face prefers waiting a
+    bounded larger amount over crashing, same discipline as wait_budget_s()."""
+    raw = (os.environ.get(WORKING_PEER_CEILING_ENV) or "").strip()
+    try:
+        v = float(raw) if raw else DEFAULT_WORKING_PEER_CEILING_S
+    except ValueError:
+        return DEFAULT_WORKING_PEER_CEILING_S
+    return v if v > 0 else DEFAULT_WORKING_PEER_CEILING_S
+
+
+def contention_wait_cap(timeout):
+    """Cap for working-peer contention waits: the caller's own timeout, but
+    never below the working-peer ceiling even when the base budget is small
+    (the base budget still bounds every no-progress path)."""
+    return min(float(timeout), max(wait_budget_s(), working_peer_ceiling_s()))
+
+
+def booting_progressing(lease, now=None, alive=None):
+    """Progress predicate for the booting wait: state=booting AND heartbeat
+    fresh AND holder process alive. A stale heartbeat or a dead holder means
+    no progress — the wait falls back to the base budget (fast honest bail
+    instead of riding a corpse)."""
+    if not isinstance(lease, dict) or lease.get("state") != "booting":
+        return False
+    if lease_expired(lease, now=now):
+        return False
+    pid = holder_pid(lease)
+    if not pid:
+        return False
+    alive_fn = alive if alive is not None else pid_alive
+    return bool(alive_fn(pid))
+
 
 
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
@@ -3466,11 +3528,102 @@ def _reused(st):
     return st
 
 
+def _mutex_progress_sig(project, last_sig):
+    """Observed-progress probe for the mutex wait (t261008-46 rework, verify
+    round gen3): progress = a booting lease that is progressing AND whose
+    signature (heartbeat_ts, state) CHANGED since the previous poll — i.e. the
+    holder is actively renewing while it boots. A holder that merely holds the
+    lock with no lease (or a static lease) shows NO progress: the loser keeps
+    the base budget and the t260920-01 raise fires. Returns (sig, changed)."""
+    st = read_lease(project)
+    if not booting_progressing(st):
+        return None, last_sig is not None
+    sig = (st.get("heartbeat_ts"), st.get("state"))
+    changed = last_sig is not None and sig != last_sig   # 首见≠续跳（同 _wait_booting）
+    return sig, changed
+
+
+def _wait_ensure_mutex(project, fd, timeout):
+    """Acquire the same-project ensure mutex under a TWO-TIER bound
+    (t261008-46, reworked after the verify round): the ceiling extension
+    applies ONLY while the holder shows OBSERVED progress — a booting lease
+    whose heartbeat is being renewed (sig change between polls). A holder that
+    merely holds the lock without progress (no lease yet / static lease /
+    stale heartbeat) keeps the flat base budget and the t260920-01 honest red
+    (「ensure 互斥等待超时…等待预算」wording preserved verbatim as the older
+    contract's guard). Once renewal is observed, the wait may ride to the
+    working-peer ceiling (a legitimate cold boot renews its lease while it
+    runs) — cutting THAT at 120s was the "gate runs zero scenarios" symptom.
+    Exhaustion stays an honest ENV_FAIL red (kind=env, exit 2) naming WHICH
+    bound was hit. Returns once the lock is held by this process."""
+    t0 = time.time()
+    base = wait_budget_s()
+    base_deadline = t0 + min(float(timeout), base)
+    hard_deadline = t0 + contention_wait_cap(timeout)
+    last_sig = None
+    last_change = t0          # last observed signature change (progress)
+    progress_seen = False
+    last_ping = 0.0
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            now = time.time()
+            sig, changed = _mutex_progress_sig(project, last_sig)
+            if sig is not None:
+                if changed:
+                    progress_seen = True
+                    last_change = now
+                last_sig = sig   # 每轮都记：下次轮询才能识别「续跳」
+            elif progress_seen:
+                # renewal stopped: fall back to a base budget from that point
+                progress_seen = False
+                base_deadline = max(base_deadline, now + base)
+            if progress_seen:
+                allowed = min(hard_deadline, last_change + hard_deadline - t0)
+            else:
+                allowed = base_deadline
+            waited = now - t0
+            if now >= allowed:
+                if progress_seen:
+                    raise StageError(
+                        "ENV_FAIL: 供给台 %s ensure 互斥等待达争用上限（已等 %.0fs，"
+                        "工作对端上限 %.0fs，%s=%d）：同项目并发 ensure 未在上限内交付"
+                        "——不硬等，收诚实红（下轮供给自动重试）；疑似起台卡死查 "
+                        "docker 与 hold-%s.log"
+                        % (project, waited, hard_deadline - t0,
+                           WORKING_PEER_CEILING_ENV,
+                           int(working_peer_ceiling_s()), project),
+                        kind="env")
+                raise StageError(
+                    "ENV_FAIL: 供给台 %s ensure 互斥等待超时（已等 %.0fs，等待"
+                    "预算 %.0fs，%s=%d）：对端持锁无进度（未见 booting 租约续跳）"
+                    "——不硬等，按等待预算收诚实红（下轮供给自动重试）；疑似起台"
+                    "卡死查 docker 与 hold-%s.log"
+                    % (project, waited, allowed - t0,
+                       "SANDBAR_STAGE_WAIT_BUDGET_S", int(base), project),
+                    kind="env")
+            if now - last_ping >= STAGE_WAIT_PING_EVERY_S:
+                last_ping = now
+                _stage_wait_ping(" 同项目 ensure 互斥锁（另一 ensure 在起台）",
+                                 "对方未交付也未消亡", waited, allowed - t0,
+                                 extra="project=%s" % project)
+            time.sleep(1.0)
+
+
 def _wait_booting(project, lock_fd, deadline):
     """booting 等待（ticket ② state=booting → 等待其完成；review R5）：轮询
     时不持项目锁（os.replace 原子写保证无锁读安全；持锁轮询会让起台者永远拿
-    不到锁=自锁死）。预算=min(调用方剩余 timeout, 争用等待预算)（t260920-01：
-    等「别人的冷起」属争用等待）——超预算收诚实红上抛，**绝不落回冷路径并发
+    不到锁=自锁死）。两层上界（t261008-46；verify gen3 重构——进度=**观察到
+    的续跳**，非静态新鲜度）：轮询间租约签名（heartbeat_ts/state）发生变化
+    =「对方在干活」（hold 分支周期续跳），允许等到工作对端上限
+    （SANDBAR_STAGE_WORKING_PEER_CEILING_S 缺省 660s=对方健康窗+宽限）——120s
+    基础预算把合法冷起拦腰截断正是「闸零执行」病灶；签名从不变化（一次性写
+    的静态租约，含心跳停更/持有者亡）=无进度，只给基础预算（wait_budget_s
+    缺省 120s，自最近一次进度起算）快速收诚实红，绝不骑在尸体/静止租约上硬等。
+    任一上界到点收诚实红上抛，红文案点名**命中的是哪条界**（报错精确纪律；
+    基础预算红保留「booting 等待超预算」旧契约短语），且**绝不落回冷路径并发
     再起**（旧语义等满界后返回会让 do_ensure 走到冷起；预算化后那条路=双起，
     破坏「绝不并发再起」不变式）。返回时已重新持锁。"""
     try:
@@ -3478,29 +3631,58 @@ def _wait_booting(project, lock_fd, deadline):
     except OSError:
         pass
     t0 = time.time()
-    wait_deadline = min(deadline, t0 + wait_budget_s())
+    base = wait_budget_s()
+    hard_deadline = min(deadline, t0 + max(base, working_peer_ceiling_s()))
+    last_sig = None
+    last_change = t0          # 最近一次观察到的签名变化（进度）
+    progress_seen = False
     last_ping = 0.0
     try:
-        while time.time() < wait_deadline:
+        while True:
+            now = time.time()
             st = read_lease(project)
             if not isinstance(st, dict) or st.get("state") != "booting":
                 return st   # 翻 up / downing / 被回收 / 消失 → 回锁终判
-            now = time.time()
+            if booting_progressing(st):
+                sig = (st.get("heartbeat_ts"), st.get("state"))
+                if last_sig is not None and sig != last_sig:
+                    # 续跳=「已见过的签名」发生变化；首见不算进度（一次性写
+                    # 的静态租约绝不因「新鲜」而骑上限）
+                    last_change = now
+                    progress_seen = True
+                last_sig = sig
+            if progress_seen and booting_progressing(st):
+                # 观察到续跳且仍在续：骑工作对端上限（自最近一次进度起算）
+                allowed = min(hard_deadline, last_change + (hard_deadline - t0))
+            else:
+                # 无进度（从未观察到续跳，或续跳停止/心跳停更/持有者亡）：
+                # 自最近一次进度（或起点）起基础预算快速红
+                allowed = min(hard_deadline, last_change + base)
+            if now >= allowed:
+                if progress_seen and allowed == hard_deadline:
+                    raise StageError(
+                        "ENV_FAIL: 供给台 %s booting 等待达工作对端上限（已等 %.0fs，"
+                        "上限 %.0fs，%s=%d）：同项目冷起未在上限内交付——不硬等也不"
+                        "并发再起，收诚实红（下轮供给自动重试；查 docker 与 "
+                        "hold-%s.log）"
+                        % (project, now - t0, hard_deadline - t0,
+                           WORKING_PEER_CEILING_ENV, int(working_peer_ceiling_s()),
+                           project), kind="env")
+                raise StageError(
+                    "ENV_FAIL: 供给台 %s booting 等待超预算（已等 %.0fs，等待"
+                    "预算 %.0fs，%s=%d）：对端无进度（租约签名未变=心跳未续跳/"
+                    "持有者不在）——不硬等也不并发再起，收诚实红（查 docker 与 "
+                    "hold-%s.log）"
+                    % (project, now - t0, allowed - t0,
+                       "SANDBAR_STAGE_WAIT_BUDGET_S", int(base), project),
+                    kind="env")
             if now - last_ping >= STAGE_WAIT_PING_EVERY_S:
                 last_ping = now
                 _stage_wait_ping(" 同项目另一次冷起翻面（state=booting）",
                                  "对方 boot 未完成，绝不并发再起",
-                                 now - t0, wait_deadline - t0,
+                                 now - t0, allowed - t0,
                                  extra="project=%s" % project)
             time.sleep(1.0)
-        if time.time() < deadline:
-            raise StageError(
-                "ENV_FAIL: 供给台 %s booting 等待超预算（已等 %.0fs，预算 %.0fs）："
-                "同项目起台者未在等待预算内交付——不硬等也不并发再起，按等待预算收"
-                "诚实红（下轮供给自动重试；查 docker 与 hold-%s.log）"
-                % (project, time.time() - t0, wait_deadline - t0, project),
-                kind="env")
-        return read_lease(project)
     finally:
         while True:
             try:
@@ -3580,32 +3762,13 @@ def do_ensure(project, services_list, opts, timeout, keep=False):
         return _reused(st)
     lock_path = lock_root() / ("ensure-%s.lock" % project)
     fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o644)
+    # 争用等待（t261008-46，review 条件②）：锁获取=等同项目别人在临界区里起台
+    # ——持锁者由内核保证存活，且其冷起可以合法地跑满自己的健康窗，所以这一
+    # 窗走工作对端上限（contention_wait_cap），不走 120s 基础预算；下方 booting
+    # 翻面等待同族。无进度路径（心跳停更/持有者亡）的基础预算快速红语义不变。
+    _wait_ensure_mutex(project, fd, timeout)
     t0 = time.time()
-    # 争用等待预算（t260920-01，review 条件②）：只封顶「等同项目别人起台」的
-    # 这一个等待点（min(原界, 预算)），下方冷起 boot 健康窗（deadline/timeout）
-    # 原样不动——预算不缩自家干活窗口。
-    lock_budget = min(float(timeout), wait_budget_s())
-    last_ping = 0.0
     try:
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                waited = time.time() - t0
-                if waited >= lock_budget:
-                    raise StageError(
-                        "ENV_FAIL: 供给台 %s ensure 互斥等待超时（已等 %.0fs，等待"
-                        "预算 %.0fs）：同项目并发 ensure 未在等待预算内交付——不硬等，"
-                        "按等待预算收诚实红（下轮供给自动重试）；疑似起台卡死查 "
-                        "docker 与 hold-%s.log" % (project, waited, lock_budget, project),
-                        kind="env")
-                if time.time() - last_ping >= STAGE_WAIT_PING_EVERY_S:
-                    last_ping = time.time()
-                    _stage_wait_ping(" 同项目 ensure 互斥锁（另一 ensure 在起台）",
-                                     "对方未交付也未消亡", waited, lock_budget,
-                                     extra="project=%s" % project)
-                time.sleep(1.0)
         # 持锁终判：等待窗口里先到者可能已完成起台。
         deadline = t0 + timeout
         # 起台时扫一遍（t260912-02 挂点②）：僵尸台（心跳陈旧等残态）在本项目
