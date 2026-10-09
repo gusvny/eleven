@@ -2,8 +2,8 @@
  "_header": {
   "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
   "labelled_counts": {
-   "engine_tests": 241,
-   "scenarios": 616
+   "engine_tests": 237,
+   "scenarios": 608
   },
   "vocab": [
    "behaviour",
@@ -1185,6 +1185,11 @@
   "server/engine/tests/test_t261009_03_concurrency_reorder_cli.py": {
    "anchor": "behaviour",
    "note": "t261009-03 CL-3: ticket.py order face routes to the engine reorder - refusal-by-name with byte-identical state, valid permutation reads back through read_state, empty/non-permutation/unqueued-id refused, holder accounting untouched, no-order-key output byte-identical to the pre-change read face, reconcile path unchanged, reconcile+order -> order wins (review conditional 4a)",
+   "sync_path": "server/plugins/repo-anchor.mjs"
+  },
+  "server/engine/tests/test_t261008_43_suite_duration.py": {
+   "anchor": "behaviour",
+   "note": "t261008-43 suite-duration leg: pure judgement face + resolver fault modes + wiring source assertions",
    "sync_path": ""
   },
   "server/engine/tests/test_t261008_45_shared_lazy_paths.py": {
@@ -1192,24 +1197,19 @@
    "note": "lazy shared.py path constants: sandboxed import + env-override behaviour",
    "sync_path": "server/engine/shared.py"
   },
-  "server/engine/tests/test_t261008_43_suite_duration.py": {
-   "anchor": "behaviour",
-   "note": "t261008-43 suite-duration leg: pure judgement face + resolver fault modes + wiring source assertions",
-   "sync_path": ""
-  },
   "server/engine/tests/test_t261009_15_quiet_baseline.py": {
    "anchor": "behaviour",
    "note": "t261009-15: quiet-baseline verdict for known load-sensitive checks at merge_check (carrier-independent identity normalizer, structured red item names, roster exact matching, quiet rerun full-terminal-state reaping, coverage predicate)",
    "sync_path": ""
   },
-  "server/engine/tests/test_t261008_29_ki227_stale_worker_visibility.py": {
-   "anchor": "behaviour",
-   "note": "t261008-29 KI-227 unit face: the v2 worker fingerprint carries a non-empty code identity and the activity registry (fingerprint moves when an activity is added; v1 docs still read); the comparison face reports a strict-subset worker stale naming the missing activities, dead pid offline, and empty/absent identity unknown (never fresh), and is observe-only (no writes/kills surface); the memo path persists the stage failure-isolated behind the KI-227 patch gate, and the terminal face decodes the memo stage or keeps the honest-unavailable note.",
-   "sync_path": ""
-  },
   "server/engine/tests/test_t261009_01_checkout_shape_discriminator.py": {
    "anchor": "contract",
    "note": "t261009-01: pre-existing-main discriminator pure faces (probe plan cap/fail-closed, receipt face naming, kill-switch, decision-table composition record-not-blocker)",
+   "sync_path": ""
+  },
+  "server/engine/tests/test_t261008_29_ki227_stale_worker_visibility.py": {
+   "anchor": "behaviour",
+   "note": "t261008-29 KI-227 unit face: the v2 worker fingerprint carries a non-empty code identity and the activity registry (fingerprint moves when an activity is added; v1 docs still read); the comparison face reports a strict-subset worker stale naming the missing activities, dead pid offline, and empty/absent identity unknown (never fresh), and is observe-only (no writes/kills surface); the memo path persists the stage failure-isolated behind the KI-227 patch gate, and the terminal face decodes the memo stage or keeps the honest-unavailable note.",
    "sync_path": ""
   },
   "server/engine/tests/test_t261009_17_moved_main_settle.py": {
@@ -3194,11 +3194,6 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t260928-29/sc_executor_charter_grant_home.py": {
-   "anchor": "behaviour",
-   "note": "t261009-14: grant facts relocated with zero coverage loss (sandbar section keeps executor-grants.json; generic template drops block+file refs) and the charter-identity scenario stays live-judged (never in known-red-baseline).",
-   "sync_path": ""
-  },
   "integration/t260928-29/sc_executor_preset_repo_contract.py": {
    "anchor": "behaviour",
    "note": "",
@@ -3979,6 +3974,16 @@
    "note": "t261007-01: the dismiss row read back from the ledger file records the server-derived writer host with the ticket shape {dismiss_for, at, by}; a forged body by stays visible as by_claimed/writer_mismatch and is never recorded as the writer.",
    "sync_path": ""
   },
+  "integration/t261009-13/sc_t26100913_hatch_one_door.py": {
+   "anchor": "behaviour",
+   "note": "t261009-13 slice 1 a+b one-door journey: host authorisation lands one reader-side record carrying who/breakage/revisions/expiry/moment, the act reads back as an outstanding certification debt, a ticket-path origin cwd is refused by name leaving the store byte-identical (origin judged, not payload), agent role names and -agent suffix identities are refused by name",
+   "sync_path": ""
+  },
+  "integration/t261009-13/sc_t26100913_hatch_audit_debt_face.py": {
+   "anchor": "contract",
+   "note": "t261009-13 slice 1 c+d+e store contract: append-only JSONL with refused calls writing nothing, torn line = named fail-closed refusal never a silent zero-debt list, certification coverage clears exactly the covered revision while uncovered siblings stay outstanding, a forged second landing-granting family is never counted as a debt or clearance and the op catalogue declares exactly one hatch op",
+   "sync_path": ""
+  },
   "integration/t261007-02/sc_request_thread_panel_view.mjs": {
    "anchor": "contract",
    "note": "t261007-02 panel face: five states round-trip, waiting list open-only, ownership fields + none-with-reason, links (supersedes with from, duplicates re-file without from), delegated by/via/anchor trio, host state face credential gate and terminal no-rewrite, answer route lands the answered state row",
@@ -4209,6 +4214,16 @@
    "note": "t261008-46: two-tier supply contention wait contract (base budget vs working-peer ceiling knob) at the stage_docker CLI process face",
    "sync_path": ""
   },
+  "integration/t261008-43/sc_inspection_suite_duration_leg.py": {
+   "anchor": "behaviour",
+   "note": "t261008-43: grey-box L3 rod — the suite-duration leg contract (threshold surface, slow-round finding with source line, outliers capped+counted, bigger-vs-slower trend, coexistence/classification) exercised through the public judgement functions over in-memory fixture receipts",
+   "sync_path": ""
+  },
+  "integration/t261008-45/sc_executor_workflow_sandbox_validates.py": {
+   "anchor": "behaviour",
+   "note": "t261008-45: real worker start against a stage Temporal (reader-side poller evidence, no RestrictedWorkflowAccessError, SIGTERM reaped) plus the sandbox re-import family guard",
+   "sync_path": "server/engine/worker.py"
+  },
   "integration/t261008-50/sc_clean_tree_run_output.py": {
    "anchor": "behaviour",
    "note": "",
@@ -4254,6 +4269,11 @@
    "note": "",
    "sync_path": ""
   },
+  "integration/t261009-10/sc_refusal_copy_anchor_contract.mjs": {
+   "anchor": "contract",
+   "note": "resolveAgentBaseDir refusal contract on the shared stable anchor + smoke-face anchor-rot tripwire",
+   "sync_path": ""
+  },
   "integration/t261009-11/sc_run_record_store.py": {
    "anchor": "behaviour",
    "note": "",
@@ -4264,19 +4284,24 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t261009-10/sc_refusal_copy_anchor_contract.mjs": {
+  "integration/t261009-15/sc_t26100915_quiet_baseline_identity.py": {
    "anchor": "contract",
-   "note": "resolveAgentBaseDir refusal contract on the shared stable anchor + smoke-face anchor-rot tripwire",
+   "note": "t261009-15: carrier-independent identity seam — engine canonical_check_name vs booked roster row vs the two real carriers (KI-072)",
    "sync_path": ""
   },
-  "integration/t261008-45/sc_executor_workflow_sandbox_validates.py": {
+  "integration/t261009-01/sc_t261009_01_clean_checkout_shared_faces.py": {
    "anchor": "behaviour",
-   "note": "t261008-45: real worker start against a stage Temporal (reader-side poller evidence, no RestrictedWorkflowAccessError, SIGTERM reaped) plus the sandbox re-import family guard",
-   "sync_path": "server/engine/worker.py"
+   "note": "runs the real runner entries in a clean clone; pins the user-visible green-from-clean-checkout contract, not source text",
+   "sync_path": ""
   },
-  "integration/t261008-43/sc_inspection_suite_duration_leg.py": {
+  "integration/t261009-01/sc_t261009_01_gate_preexisting_red_face.py": {
+   "anchor": "contract",
+   "note": "binds to the classifier public entry + classification enum (the new gate contract from ticket t261009-01 deliverable 2)",
+   "sync_path": ""
+  },
+  "integration/t260928-29/sc_executor_charter_grant_home.py": {
    "anchor": "behaviour",
-   "note": "t261008-43: grey-box L3 rod — the suite-duration leg contract (threshold surface, slow-round finding with source line, outliers capped+counted, bigger-vs-slower trend, coexistence/classification) exercised through the public judgement functions over in-memory fixture receipts",
+   "note": "t261009-14: grant facts relocated with zero coverage loss (sandbar section keeps executor-grants.json; generic template drops block+file refs) and the charter-identity scenario stays live-judged (never in known-red-baseline).",
    "sync_path": ""
   },
   "integration/t261009-16/sc_fast_set_declaration.py": {
@@ -4289,11 +4314,6 @@
    "note": "pins fail-closed refusal faces over fixture injections",
    "sync_path": ""
   },
-  "integration/t261009-15/sc_t26100915_quiet_baseline_identity.py": {
-   "anchor": "contract",
-   "note": "t261009-15: carrier-independent identity seam — engine canonical_check_name vs booked roster row vs the two real carriers (KI-072)",
-   "sync_path": ""
-  },
   "integration/t261008-29/sc_stale_worker_visibility.py": {
    "anchor": "behaviour",
    "note": "KI-227 stale-worker visibility: fingerprint v2 carries code fingerprint + activity set, activity fingerprint moves on activity add, strict-subset worker is stale_activities by the comparison face, degraded inputs named, observe-only negative",
@@ -4302,16 +4322,6 @@
   "integration/t261008-29/sc_terminal_stage_memo_face.py": {
    "anchor": "behaviour",
    "note": "KI-227 terminal-stage memo face: memo sandbar_stage reaches the terminal failure face as last_stage with memo provenance, pre-fix tickets keep the honest-unavailable note, malformed memo degrades named, the read writes nothing",
-   "sync_path": ""
-  },
-  "integration/t261009-01/sc_t261009_01_clean_checkout_shared_faces.py": {
-   "anchor": "behaviour",
-   "note": "runs the real runner entries in a clean clone; pins the user-visible green-from-clean-checkout contract, not source text",
-   "sync_path": ""
-  },
-  "integration/t261009-01/sc_t261009_01_gate_preexisting_red_face.py": {
-   "anchor": "contract",
-   "note": "binds to the classifier public entry + classification enum (the new gate contract from ticket t261009-01 deliverable 2)",
    "sync_path": ""
   },
   "integration/t261009-17/sc_t26100917_moved_main_not_human.py": {

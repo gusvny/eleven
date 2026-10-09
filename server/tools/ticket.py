@@ -55,6 +55,16 @@ op:
       与 schema 宣告对齐——宣告不支持的 op=对模型面撒谎，KI-079 同族）。who/note
       必填非空本层 fail-fast（D1 同族）；note 上限单点=workflow intake
       HOST_RULING_NOTE_INPUT_LIMIT；跨项目闸第二道在 workflow intake。
+  repair_hatch {project, by|who, breakage={known_issue|description}, revisions,
+                expires}  → 快修口唯一 op（t261009-13 slice 1，develop-buffer 规则 26）：
+      宿主授权一次认证外落地——逐字段具名拒收 + 票路径闸（ticket.py 自身 cwd 在
+      .lane/ 下即拒，repair_hatch_refused_from_ticket_path）+ 锁内追加一条
+      hatch-authorisation-v1 记录到项目 store（<perkey>/<key>/hatch/…jsonl，
+      append-only、fail-closed 读）。slice 1 不做机械落地；expires 本层只记录
+      （须在未来），落地时刻的过期复查属 T1.2。每次使用即开一条认证债（见下）。
+  hatch_debts {project}  → 认证债只读面：outstanding 列表 + 覆盖状态；清债唯一
+      机制=同 store 内 certification-v1 记录覆盖修订全集（推导非命令，无 clear op）
+      ——认证记录由 T1.2 认证驱动写入，slice 1 只保证债可查且必在。
   accept/advance/dispatch-next  → v2 已取消（workflow 过门自动推进，验收=事后看产物；
                                   blocked 重跑=retry_qc op），保留 op 报结构化错误
 
@@ -1215,6 +1225,368 @@ def _concurrency(args):
     return out
 
 
+# ---------- repair hatch（t261009-13，slice 1：授权/记录/闸/认证债——不做机械落地） ----------
+#
+# 设计真源：docs/design/develop-buffer-v1.md 规则 26（全流程唯一快修口：宿主授权、
+# 连同所修破损一起记账、票不可达、每次使用必留认证债）+ nongoal「不做第二条紧急通道」；
+# 记录形状族 docs/reference/ledger-record-models-v1.md（certification 以修订集为身份
+# ——覆盖关系是唯一清债机制）。引擎侧（server/engine/）不在本工单写集，故 slice 1
+# 的 store 与 op 都在本文件自足实现；记录按 ledger 形状铸形，T1.2 认证驱动落地时
+# 把 store 提升到 pull interface 之后是纯接线，不改读取方。
+#
+# 借鉴实现的故障模式取舍（review_plan R1 在案，这里只留结论）：
+# - concurrency.py：整段 append 持锁（carried）、账本损坏 fail-closed 拒收（carried）、
+#   整文档写回（dropped——append-only 台账重写全文件即违约）、僵死锁清扫（不需要：
+#   flock 随 fd 存亡，无陈锁可清，写清扫器才是新故障）。
+# - authz_gates.validate_authorization：who 先 .strip().lower() 再比对角色名与
+#   '-agent' 后缀（carried，原文录入）、who 长度上限（carried，同常量）、
+#   kind 白名单（dropped：本 op 只有唯一形状，kind 字段是第二扇门的挂件）。
+# - _authorize：逐字段具名拒收 + 身份注入不落 op-local（carried）；「expires 只在
+#   签发时判一次、下游不再复查」是本票要修的故障，**不 carried**——slice 1 只记录
+#   expires（写入原值，单测钉回读一致），机械落地（T1.2 范围）必须在落地时刻拒绝
+#   对已过期授权动手；过期授权的记录留在审计台账里——过期退役的是授权，不是事实。
+
+_HATCH_FAMILY = 'hatch-authorisation-v1'      # 本 slice 唯一会写的记录族
+_HATCH_CERT_FAMILY = 'certification-v1'       # T1.2 认证记录族（清债只认它；本 slice 不写）
+_HATCH_LANDING_FAMILIES = (_HATCH_FAMILY,)    # 授予「认证外落地」的记录族全集——
+                                              # 唯一快修口的断言锚（spec (e)）
+_HATCH_MAX_REVISIONS = 32                     # 单次授权可点名的修订数上界
+_HATCH_REVISION_MAX_LEN = 64                  # 单个修订标识长度上界（短 hash/分支名足够）
+
+
+def _hatch_store_path(project_key):
+    """项目 store 内的快修口台账路径（<perkey_projects_root>/<key>/hatch/…jsonl）。
+    路径形状与 concurrency.py 的 per-key 同族；key 形状先过 PROJECT_KEY_RE 白名单，
+    畸形 key 在碰文件之前拒收（concurrency._check_key 同序）。"""
+    s = _shared()
+    k = str(project_key or '').strip()
+    if not k or not s.PROJECT_KEY_RE.match(k):
+        raise ValueError('repair_hatch 需要 project（注册表 key，白名单 %s；收到 %r）'
+                         % (s.PROJECT_KEY_RE.pattern, (k or '')[:64]))
+    return s.perkey_projects_root() / k / 'hatch' / 'hatch_records.jsonl'
+
+
+def _hatch_mint_id(now_ms, existing_ids):
+    """铸造记录 id：hatch-<毫秒>-<4hex>，与既有 id 撞号则换尾重铸（id 永不复用、
+    不按位置推导——fact ledger 身份纪律；同毫秒并发由锁内串行化兜底）。"""
+    import random as _random
+    for _ in range(8):
+        cand = 'hatch-%d-%04x' % (int(now_ms), _random.getrandbits(16))
+        if cand not in existing_ids:
+            return cand
+    raise ValueError('repair_hatch：id 铸造连续撞号 8 次（异常环境，拒绝落账）')
+
+
+def _hatch_read_records(path):
+    """fail-closed 读台账：文件缺失=空列表（尚未开张是合法态）；任何一行坏 JSON /
+    非对象 / 缺 v 或 id = 点名行号的结构化拒收——绝不把损坏读成空账（concurrency
+    同纪律：unreadable ledger is a refusal, not an empty read）。返回 (records, ids)。"""
+    p = Path(path)
+    if not p.exists():
+        return [], set()
+    records, ids = [], set()
+    with p.open('r', encoding='utf-8') as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError as e:
+                raise ValueError('repair_hatch 台账损坏：%s 第 %d 行不是合法 JSON（%s）'
+                                 '——fail-closed 拒收，绝不静默当空账' % (p, lineno, e))
+            if not isinstance(rec, dict) or not rec.get('v') or not rec.get('id'):
+                raise ValueError('repair_hatch 台账损坏：%s 第 %d 行缺 v|id 或不是对象'
+                                 '——fail-closed 拒收' % (p, lineno))
+            if rec['id'] in ids:
+                raise ValueError('repair_hatch 台账损坏：%s 第 %d 行 id 重复（%s）'
+                                 '——id 一旦铸出永不复用' % (p, lineno, rec['id']))
+            ids.add(rec['id'])
+            records.append(rec)
+    return records, ids
+
+
+def _hatch_families(records):
+    """台账里出现过的记录族集合（去重）；供唯一快修口断言与覆盖读取共用。"""
+    return set(str(r.get('v') or '') for r in records)
+
+
+def assert_single_hatch(families):
+    """「全流程只有一扇快修口」的断言（spec (e)：asserted, not promised）。
+    授予认证外落地的记录族全集=_HATCH_LANDING_FAMILIES；出现第二个此类族 =
+    结构化拒收。写路径每次落账前跑一遍；单测另用伪造族表钉它的拒收分支。"""
+    extra = set(families or ()) - set(_HATCH_LANDING_FAMILIES) - {_HATCH_CERT_FAMILY}
+    if extra:
+        raise ValueError(
+            'repair_hatch：台账出现认证外落地授权族之外的未知族 %s——第二扇紧急通道'
+            '就地拒收（全流程只允许一扇快修口，develop-buffer 规则 26）' % sorted(extra))
+
+
+def _hatch_locked(path, exclusive=True):
+    """flock 守护的台账访问：lock 文件与台账同目录同名 .lock 后缀（与 concurrency
+    的 <key>/concurrency-state.lock 不同位，无碰撞面）；flock 随 fd 存亡故无陈锁、
+    无清扫器；unlock+close 在 finally，正常/报错/拒收每条路径都收全终态。
+    exclusive=True 供写（锁跨整个 append，不产生撕裂行）；False 供读（共享锁）。"""
+    import contextlib
+    import fcntl
+    p = Path(path)
+    @contextlib.contextmanager
+    def _guard():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lock_fh = open(str(p) + '.lock', 'a+')
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+            yield lock_fh
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+            lock_fh.close()
+    return _guard()
+
+
+def _hatch_append(path, record):
+    """锁内追加一行（整行一次 write，锁保跨写者不撕裂）；追加前跑唯一口断言——
+    台账里已出现未知族时，连合法追加也一并拒收（先把第二扇门钉死再谈开门）。"""
+    records, ids = _hatch_read_records(path)
+    assert_single_hatch(_hatch_families(records))
+    record['id'] = _hatch_mint_id(record['at'], ids)
+    line = json.dumps(record, ensure_ascii=False, sort_keys=True)
+    with _hatch_locked(path, exclusive=True):
+        with open(str(path), 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+            f.flush()
+    return record['id']
+
+
+def _hatch_check_who(a):
+    """操作人校验（authz_gates.validate_authorization 同口径的薄镜像）：by|who 双读、
+    非空、≤AUTHZ_WHO_MAX_LEN；先 .strip().lower() 归一再比对 agent 角色名与 '-agent'
+    后缀（Host / HOST / host-AGENT 同拒）；入账记原文不记归一形。返回原文 who。"""
+    s = _shared()
+    who = _who(a)
+    if not who.strip():
+        raise ValueError('repair_hatch 需要 by|who（宿主授权人身份由调用方注入，不得留空）')
+    if len(who) > s.AUTHZ_WHO_MAX_LEN:
+        raise ValueError('repair_hatch 的 by|who 超限（%d > %d 字符）'
+                         % (len(who), s.AUTHZ_WHO_MAX_LEN))
+    norm = who.strip().lower()
+    if norm in s.AUTHZ_AGENT_ROLE_NAMES:
+        raise ValueError('repair_hatch 拒收：%r 是 agent 角色名——快修口只认宿主授权，'
+                         'agent 不得自授权（与既有 authorize 同一条不自我授权规则）' % who)
+    if norm.endswith('-agent'):
+        raise ValueError('repair_hatch 拒收：%r 落在 agent 显示名族（-agent 后缀）——'
+                         '快修口只认宿主授权' % who)
+    return who
+
+
+def _hatch_parse_expires(raw):
+    """expires 解析：epoch 秒（int/float/纯数字串）或 ISO8601；解析失败/过去时刻
+    具名拒收（授权必须到期作废，且不许签发生来已过期的授权）。返回 epoch 秒 int。"""
+    if raw in (None, ''):
+        raise ValueError('repair_hatch 需要 expires（epoch 秒或 ISO8601——授权必须到期作废）')
+    if isinstance(raw, bool):
+        raise ValueError('repair_hatch 的 expires 形状非法（bool）：%r' % (raw,))
+    try:
+        if isinstance(raw, (int, float)) or (isinstance(raw, str) and raw.strip().isdigit()):
+            exp = int(float(raw))
+        else:
+            import datetime
+            exp = int(datetime.datetime.fromisoformat(str(raw).strip())
+                      .replace(tzinfo=datetime.timezone.utc).timestamp())
+    except ValueError as e:
+        if 'expires' in str(e):
+            raise
+        raise ValueError('repair_hatch 的 expires 解析失败（epoch 秒或 ISO8601）：%r' % (raw,))
+    if exp <= int(time.time()):
+        raise ValueError('repair_hatch 的 expires 已是过去时刻（%d）——不许签发生来已过期的授权' % exp)
+    return exp
+
+
+def _hatch_check_breakage(a):
+    """所修破损校验：known_issue（KI- id，两形状 KI-<n>/KI-<ULID> 皆合法身份，
+    存在性对 notes/debts/known-issues.md 只读核对，未登记=具名拒收）或非空 description；
+    二者恰给其一。返回 {'known_issue':…} 或 {'description':…}（入账形状）。"""
+    br = a.get('breakage')
+    ki = desc = None
+    if isinstance(br, dict):
+        ki = str(br.get('known_issue') or '').strip() or None
+        desc = str(br.get('description') or '').strip() or None
+    elif isinstance(br, str) and br.strip():
+        # 平铺字符串缺省按 KI id 解释（以 KI- 开头），否则按描述——人话入口不设第二 op
+        raw = br.strip()
+        ki, desc = (raw, None) if raw.upper().startswith('KI-') else (None, raw)
+    if ki is None:
+        ki = str(a.get('known_issue') or '').strip() or None
+    if desc is None:
+        desc = str(a.get('breakage_description') or '').strip() or None
+    if ki and desc:
+        raise ValueError('repair_hatch 的 breakage 只收其一：known_issue 或 description（两个都给=歧义拒收）')
+    if ki:
+        if not re.match(r'^KI-[0-9A-Za-z]+$', ki):
+            raise ValueError('repair_hatch 的 known_issue 形状非法（KI-<n> 或 KI-<ULID>）：%r' % ki[:64])
+        ki_file = REPO / 'notes' / 'debts' / 'known-issues.md'
+        if not ki_file.exists() or not _ki_known_in(ki, ki_file.read_text(encoding='utf-8', errors='replace')):
+            raise ValueError('repair_hatch 拒收：known_issue %s 未在 known-issues.md 登记'
+                             '（破损必须是已记账事实，不是口头形容）' % ki)
+        return {'known_issue': ki}
+    if desc:
+        return {'description': desc}
+    raise ValueError('repair_hatch 需要 breakage（known_issue: KI-… id 或 description 非空描述'
+                     '——授权记录必须能回答修的是什么）')
+
+
+def _ki_known_in(ki, text):
+    """known-issues.md 登记表核对（纯函数，文本注入便于单测）：id 出现在表行首列
+    （| KI-… |）即视为已登记——不解析表语义，只做存在性。"""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('|') and re.match(r'^\|\s*%s\s*\|' % re.escape(ki), stripped):
+            return True
+    return False
+
+
+def _hatch_check_revisions(a):
+    """修订（集）校验：数组或逗号串，1..N 条，逐条非空白且 ≤ 长度上界；返回去重
+    有序列表（集合语义：落地的身份是修订集本身，与顺序无关）。"""
+    raw = a.get('revisions')
+    if isinstance(raw, str):
+        parts = raw.split(',')
+        if any(not p.strip() for p in parts):
+            raise ValueError('repair_hatch 的 revisions 串含空段（%r）——逗号分隔须逐段非空'
+                             % raw[:80])
+        raw = [p.strip() for p in parts]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError('repair_hatch 需要 revisions（数组或逗号分隔串：本次授权将落地的修订/修订集）')
+    out = []
+    for r in raw:
+        r = str(r).strip()
+        if not r:
+            raise ValueError('repair_hatch 的 revisions 含空白条目')
+        if len(r) > _HATCH_REVISION_MAX_LEN:
+            raise ValueError('repair_hatch 的 revisions 条目超长（%d > %d）：%s…'
+                             % (len(r), _HATCH_REVISION_MAX_LEN, r[:24]))
+        if r not in out:
+            out.append(r)
+    if len(out) > _HATCH_MAX_REVISIONS:
+        raise ValueError('repair_hatch 的 revisions 条目过多（%d > %d）'
+                         % (len(out), _HATCH_MAX_REVISIONS))
+    return out
+
+
+_HATCH_TICKET_DIR_RE = re.compile(r'^t\d{6}-\d+')
+
+
+def caller_from_ticket_path(cwd, repo_root, lane_roots):
+    """票路径闸（spec (b)，纯函数）：调用方 cwd（realpath）命中任一形状即拒——
+    ① 任一注入泳道根之下；② 本 checkout 的 .lane/ 之下；③ 路径中某段为 `.lane`
+    且其下紧邻一段是票 worktree 目录名（t<n>-<n>…），而该 worktree 不是本工具
+    自身所在的 checkout（集成闸在泳道 worktree 里跑本文件，cwd=checkout 根必须
+    放行——闸判的是「别的票的泳道」，不是「引擎自己住的地方」）＝票会话在给
+    自己开快修口，具名拒收。诚实边界：cwd 是本 slice 唯一有的出处信号——先改
+    目录再调用的调用方不被此闸捕获，更强出处证明（spawn 链随行的会话身份）属
+    引擎侧工作，不在本票写集（review R4 在案）。"""
+    c = os.path.realpath(str(cwd or ''))
+    parts = c.split(os.sep)
+    for i, seg in enumerate(parts):
+        if seg != '.lane':
+            continue
+        root = os.sep.join(parts[:i + 1])   # .lane 本体
+        if i + 1 < len(parts) and _HATCH_TICKET_DIR_RE.match(parts[i + 1]):
+            if os.path.realpath(str(repo_root or '')) != os.sep.join(parts[:i + 2]):
+                return True                 # 别的 checkout 的票泳道（含 c 即其根）→ 拒
+            continue                        # 本 checkout 自己的泳道根＝引擎家；更深路径里
+                                            # 若还有 .lane，交给后续迭代判（勿 break 漏判）
+        if c == root or c.startswith(root + os.sep):
+            return True                     # 本 checkout .lane/ 之下（含 .lane 本体）→ 拒
+    for root in list(lane_roots or []):
+        r = os.path.realpath(str(root))
+        if r and (c == r or c.startswith(r + os.sep)):
+            return True
+    return False
+
+
+def _hatch_covered_by(debt_revisions, records, project_key):
+    """覆盖判定（清债唯一机制，纯函数）：存在族=certification-v1 的记录，其修订集
+    覆盖债的修订全集（同一项目内）→ 返回该认证 id；否则 None。cert 记录形状按
+    ledger-record-models 的认证行（revisions 集合字段；T1.2 落地时同一形状入账）。"""
+    want = set(debt_revisions)
+    for rec in records:
+        if str(rec.get('v') or '') != _HATCH_CERT_FAMILY:
+            continue
+        if str(rec.get('project') or '') != project_key:
+            continue
+        have = set(str(x) for x in (rec.get('revisions') or []))
+        if want and want <= have:
+            return str(rec.get('id') or '')
+    return None
+
+
+def _hatch_debt_view(records, project_key):
+    """认证债可读面（spec d）：每条 hatch 授权=一条债，covered_by=覆盖它的认证 id
+    （None=在账未清）。outstanding 列表由此派生——清债是推导不是命令，故「只有
+    一种清法」是结构性质而非约定。"""
+    now = int(time.time())
+    out = []
+    for rec in records:
+        if str(rec.get('v') or '') != _HATCH_FAMILY:
+            continue
+        covered = _hatch_covered_by(rec.get('revisions') or [], records, project_key)
+        out.append({
+            'id': str(rec.get('id') or ''),
+            'by': str(rec.get('by') or ''),
+            'at': int(rec.get('at') or 0),
+            'breakage': rec.get('breakage') if isinstance(rec.get('breakage'), dict) else {},
+            'revisions': [str(x) for x in (rec.get('revisions') or [])],
+            'expires': int(rec.get('expires') or 0),
+            'expired': int(rec.get('expires') or 0) <= now,
+            'outstanding': covered is None,
+            'covered_by': covered,
+        })
+    return out
+
+
+def _repair_hatch(a):
+    """快修口唯一 op（spec a-e）：宿主授权一次认证外落地——逐字段具名拒收 →
+    票路径闸 → 锁内追加一条 hatch-authorisation-v1 记录（who/所修破损/修订集/
+    到期/时刻全在记录里，审计不必读对话）。slice 1 不做机械落地；expires 在本层
+    只记录（签发时须在未来），落地时刻的过期复查属 T1.2（模块头注释在案）。"""
+    project = str(a.get('project') or '').strip()
+    if not project:
+        raise ValueError('repair_hatch 需要 project（目标项目 key，无默认值）')
+    who = _hatch_check_who(a)
+    if caller_from_ticket_path(os.getcwd(), REPO, []):
+        raise ValueError('repair_hatch_refused_from_ticket_path：调用方 cwd 在票泳道路径下'
+                         '——票永不为自己开快修口（与 authorize 同一条不自我授权规则，'
+                         '由宿主会话/控制台面发起）')
+    breakage = _hatch_check_breakage(a)
+    revisions = _hatch_check_revisions(a)
+    expires = _hatch_parse_expires(a.get('expires'))
+    path = _hatch_store_path(project)
+    record = {'v': _HATCH_FAMILY, 'at': int(time.time() * 1000), 'project': project,
+              'by': who, 'breakage': breakage, 'revisions': revisions,
+              'expires': expires, 'kind': 'repair_hatch'}
+    rec_id = _hatch_append(path, record)
+    return {'hatch_id': rec_id, 'project': project, 'by': who, 'breakage': breakage,
+            'revisions': revisions, 'expires': expires,
+            'note': 'certification debt opened; the next certification must cover '
+                    'these revisions (wiring lands with the certification driver, T1.2)'}
+
+
+def _hatch_debts(a):
+    """认证债只读面（spec d：named, queryable fact；授不了任何权）：outstanding
+    列表 + 每条债的覆盖状态；T1.2 认证入账后同一张脸自动反映清账，无 clear 命令。"""
+    project = str(a.get('project') or '').strip()
+    if not project:
+        raise ValueError('hatch_debts 需要 project（目标项目 key）')
+    path = _hatch_store_path(project)
+    with _hatch_locked(path, exclusive=False):
+        records, _ids = _hatch_read_records(path)
+    assert_single_hatch(_hatch_families(records))
+    debts = _hatch_debt_view(records, project)
+    return {'project': project, 'count': len(debts),
+            'outstanding_count': len([d for d in debts if d['outstanding']]),
+            'debts': debts}
+
+
 def run(args):
     op = args.get('op')
     if op == 'create':
@@ -1251,6 +1623,10 @@ def run(args):
         return _pause_resume(args, op)
     if op == 'concurrency':
         return _concurrency(args)
+    if op == 'repair_hatch':
+        return _repair_hatch(args)
+    if op == 'hatch_debts':
+        return _hatch_debts(args)
     raise ValueError('未知 op: %r' % (op,))
 
 
@@ -1264,7 +1640,7 @@ def run(args):
 
 _TICKET_CLI_USAGE = ('用法：python3 server/tools/ticket.py \'<json 对象，含 op>\'\n'
                      'op: create/update/list/show/rework/sign/authorize/retry_qc'
-                     '/pause/resume/cancel'
+                     '/pause/resume/cancel/repair_hatch/hatch_debts'
                      '（accept/advance/dispatch-next 已取消，报结构化错误）\n'
                      '失败契约：非零退出 + {ok:false,error,kind?}，绝不空输出。')
 
