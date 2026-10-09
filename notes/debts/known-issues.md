@@ -4464,3 +4464,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > ②票面 `blocked_reason` 若为空，**禁止**在时间线里写 `retry-requested`（先把"为什么停"写清楚）；
 > ③值守手册收一张**"四闸四按键"对照表**（本条目即为该表）。
 > **回归**：L3——四闸各造一例，逐例断言"错按键零效果且回执具名点名正确按键"（不是静默吞掉）。
+
+## KI-01M4FPW5P492SDF9JVJZBZ3J1G **交接链的前提被"交接前的合并"重置：修复六轮都进不了泳道**（261009 实证，integration 岗登记）
+
+> **现象（`t261009-14`，2 小时内连打 6 轮）**：仲裁回执原文——「**the main-sync merge to HEAD `8fcd2a0a` reset the working tree BEFORE the handover chain ran,
+> so `git add` found nothing ("nothing to commit, working tree clean") and the chain correctly failed its own stat check**」。
+> 即：**每一轮修复都是"未提交的工作区状态"**，而**交接链开跑之前**先做了一次 main-sync 合并/检出 ⇒ 脏树被抹平 ⇒ 链条第一步 `git add` 扑空 ⇒ **修复从来没被 commit 进泳道** ⇒ 闸看到的一直是旧文本 ⇒ code-fault 打回 ⇒ 下一轮再来一次。六轮之后撞 `cap 5`，票转人工。
+> **票面自证**：仲裁段连续 gen1→gen8 都报同一个红（`t260928-29-executor-charter-identity`），而**它要改的文件始终是 main 的旧措辞**（`git show HEAD:server/session_charter.md` 里 L118 是修复前文案、块留在通用段）。
+>
+> **性质**：这不是"developer 不干活"，是**链条的先后顺序错**——**"要提交的东西"必须先于"会重置工作区的动作"**。
+> 危害：①**修复反复丢失且不留痕**（每轮都从零开始，看不出"其实早就做完了"）；②**烧满轮次上限后转人工**，而人到场时**看不到任何待审产物**（工作区干净、无 diff、无补丁）；
+> ③同类位置（任何"先合并/检出、后执行交接链"的阶段）都可能复发，只是这一票把轮次烧满才暴露。
+>
+> **出路（实现口径归修复票）**：
+> ①**次序修正**：交接链（apply/commit 类动作）**必须先于**任何会重置工作区的合并/检出；或把链条放到**独立工作树/临时索引**里跑；
+> ②**失败要具名**：`nothing to commit, working tree clean` 只是一句 git 输出，**须升级为"本轮修复未落盘（工作区已被 X 重置）"**，并**保留待落盘的 diff**（至少进 quarantine/结果文件）；
+> ③**同轮幂等**：同一修复在下一轮应能**从落盘产物恢复**，而不是靠上下文记忆；
+> ④**与"受保护路径不走泳道"的交界**：本例的目标文件 `server/session_charter.md` 本身是受保护路径——**章程自己写着「正路＝main 侧统一改一次，或把该红定性后放行/打回」**；
+> 于是这类"目标文件在保护名单上"的票，**修法与放行口径都应当按该条走**，而不是硬怼泳道（本岗已把这一点作为建议报给宿主）。
+>
+> **回归**：L3——造一张"修复文件 + 事前合并"的票，断言修复**被 commit 进泳道**（不是消失在 `git add` 扑空里）；再断言"工作区被重置导致未落盘"时，**回执具名点名原因并保留 diff**。
