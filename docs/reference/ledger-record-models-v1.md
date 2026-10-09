@@ -241,10 +241,20 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
   "at": 1791515000000,
   "by": "host",
   "reason": "the lazy-path rewrite renamed a public constant",
-  "propagated_to": [
-    { "line": "default", "state": "pending" },
-    { "line": "ui", "state": "applied" }
-  ]
+  "implicated_lines": ["default", "ui"]
+}
+```
+
+Each of those lines then discharges the obligation **in its own record** — git will not do it for them:
+
+```json
+{
+  "revert": "rev-261009-01",
+  "line": "ui",
+  "change": "applied",
+  "by": "integration",
+  "reason": "the line no longer carries the withdrawn landing",
+  "at": 1791519000000
 }
 ```
 
@@ -255,8 +265,8 @@ Everything that happens to it afterwards is **another record keyed to it**, beca
 | `on` | `main` / `default` | Withdrawing from main and from a line are different acts with different propagation |
 | `at` / `by` | `1791515000000` / `host` | When, and who decided |
 | `reason` | `the lazy-path rewrite renamed a public constant` | Why the content had to go |
-| `propagated_to[].line` | `default`, `ui` | **The point of the record**: every line that still carries the withdrawn landing is named, because a merge keeps it silently and the next batch would reintroduce it |
-| `propagated_to[].state` | `pending` / `applied` / `line retired` | The obligation's state on that line — visible instead of remembered |
+| `implicated_lines` | `["default", "ui"]` | **The point of the record**: every line that still carries the withdrawn landing is named, because a merge keeps it silently and the next batch would reintroduce it |
+| *(the discharge)* | a record per line, `change: applied` | Whether a line has actually let go of the content is a change keyed to the revert, not a field on it — the same rule as everywhere else, and the states in use are `applied`, `pending` and `line retired` |
 
 ### ticket outcome — "where did this ticket end up?"
 
