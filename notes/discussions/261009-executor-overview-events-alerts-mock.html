@@ -41,7 +41,8 @@ button.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
 button.btn.power{border-color:var(--green);color:var(--green);background:var(--soft-green)}
 button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline dotted;padding:0}
 .colstk{display:flex;flex-direction:column;gap:10px;min-width:0}
-.limitbar{display:inline-flex;align-items:center;gap:8px;align-self:flex-start;height:36px;box-sizing:border-box;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:0 10px;white-space:nowrap}
+.limitrow2{display:flex;align-items:center;gap:10px;height:36px}
+.limitbar{display:inline-flex;align-items:center;gap:8px;height:28px;box-sizing:border-box;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:0 9px;white-space:nowrap;width:max-content}
 .stepper{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--bg)}
 .stepper .st{border:0;background:transparent;color:var(--fg);width:22px;height:22px;cursor:pointer;font:inherit;line-height:1;padding:0}
 .stepper .st:hover{background:var(--hover)}
@@ -135,17 +136,18 @@ button.linkbtn{border:0;background:transparent;color:var(--blue);font:inherit;cu
     </div>
 
     <div class="colstk">
-    <div class="limitbar">
-      <span class="dot green" style="margin:0" title="room to start one"></span>
-      <span class="lab" title="the most tickets that may run at the same time; the engine ledger is the truth, this control writes it">Limit</span>
-      <span class="stepper">
-        <button class="st" title="One fewer ticket at the same time">&minus;</button>
-        <span class="val">4</span>
-        <button class="st" title="One more ticket at the same time">+</button>
+    <div class="limitrow2">
+      <span class="limitbar">
+        <span class="dot green" style="margin:0" title="room to start one"></span>
+        <span class="lab" title="the most tickets that may run at the same time; the engine ledger is the truth, this control writes it">Limit</span>
+        <span class="stepper">
+          <button class="st" title="One fewer ticket at the same time">&minus;</button>
+          <span class="val">4</span>
+          <button class="st" title="One more ticket at the same time">+</button>
+        </span>
+        <button class="btn sm p" id="concSave" style="display:none" title="shown only after the value changes">Save</button>
       </span>
-      <span class="sep"></span>
-      <span class="meta" title="slots held right now, and what is queued behind them"><b>5</b> held · <b>0</b> queued</span>
-      <button class="btn sm p" id="concSave" style="display:none" title="shown only after the value changes">Save</button>
+      <span class="meta" title="slots held right now against the limit, and what is queued behind them"><b>5</b> held · <b>0</b> queued</span>
     </div>
     <div class="card">
       <div class="hd"><span class="sect" title="what the watchdog shouted about, newest first; a redline alert is never silenced">Alerts</span><span class="n">3</span></div>
