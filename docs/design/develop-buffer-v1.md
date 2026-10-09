@@ -69,7 +69,11 @@ related:
 20. **Boundary ownership follows the shared artifact.** When two sides each changed something and broke together, the owner is whoever owns the thing both sides changed — the shared component, or the repository. When the sides share nothing, the owner is whoever formed the batch.
 21. **A line's continuing existence is decided by evidence**, and the evidence is the one already collected: how often its landings are blocked, and how much conflict appears when its content is combined. A line that costs more than it isolates is split or ended, which is possible only because a line is a declaration.
 22. **The first phase arrives so that the later shapes are declarations plus at most one new mechanism** — a landing that spans repositories and must move as one act — never a rewrite of the certification and landing records.
-
+23. **The old flow's landings count as certified.** A per-ticket landing that a person signed is a certification route of its own for that revision, so the delivered line only ever advances over content that has been certified one way or the other, and the ancestor rule keeps its meaning through the transition. This is what lets the two flows share the delivered line.
+24. **"Could not run" is not "red".** A certification that could not be produced leaves the lines working and landing; what grows is the range the next certification has to cover, and that range is recorded. The freeze rule keys on a red that implicates content, never on a proof that was unavailable.
+25. **A signature may be given on someone else's behalf**, and the record then names both the signer and the authority they signed under.
+26. **The flow has exactly one repair hatch**, because a mechanism that can break must be repairable without waiting for itself: it is authorised by the host, it is recorded with the breakage it repairs, it is unreachable from a ticket, and **every use creates a certification debt** that the next certification has to clear. A hatch whose debt is not cleared is surfaced rather than tolerated — an invisible exception becomes the norm.
+27. **The old flow is retired on measured delivery efficiency, and the measurement has to be trustworthy first.** Until it is, "the new flow proved itself" is an opinion.
 **Stakeholders and what they care about most:**
 
 - **Host** — throughput without losing the ability to say "a person approved this".
@@ -90,6 +94,7 @@ related:
 - **Not removing the human gate on main.** The gate becomes per-batch; it does not disappear.
 - **Not letting any ticket declare itself exempt from a freeze.** Only the fix workflow is exempt from stopped landings, and that is decided by how the work was opened.
 - **Not building several lines this cycle.** A line per component, a line per repository and coordinated landings across repositories are out of scope; what this cycle owes them is that they arrive as declarations rather than as a rewrite.
+- **Not a second emergency path.** One hatch exists; its hurry is a field on its record, not a second door with its own authority.
 - **Not defining a line by its branch.** A line is a declared scope with an owner; a branch is one way of implementing that scope, not its identity.
 - **Not keeping a per-ticket human merge gate in the new flow.** A person reviews the batch that leaves the buffer (the certified prefix), not each ticket; the ticket ends when its landing is certified. The old flow keeps its per-ticket gate for as long as it serves tickets.
 - **Not letting lanes skip their own scenarios.** The split is "the lane proves its change, the buffer proves the combination" — not "nobody proves anything until later".

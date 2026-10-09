@@ -74,6 +74,9 @@ related:
 22. **One owner at a time, and a returning machine is refused.** Ownership is a single value; a transfer names the new owner; a machine that comes back after being replaced must not resume a ticket it no longer owns. A machine that stays dead is a smaller problem than one that comes back.
 23. **The environment is part of the record.** A result from one machine is comparable with a result from another only if the environment is a declared fact, so the environment a run used is recorded with the run rather than inferred from where it happened.
 
+24. **Every record carries the version of its own shape**, and a reader reads older shapes rather than demanding a migration. An unknown version is a loud failure, never a guess.
+25. **Records carry references, not payloads.** What a ledger may never accumulate: credentials, tokens, private host paths, and raw model input that contains them. The rule needs forbidden examples, so that a record can be refused rather than argued about.
+
 ### Stakeholders
 
 - **The host** — cares that "why does this exist" and "what is known to be broken" are answerable in one look, and that losing a ledger is an incident rather than an amnesia.

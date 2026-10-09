@@ -98,6 +98,9 @@ The second rule is that **permissions come from two things at once, never from o
 
 ### The vocabulary
 
+**One kind of relation that is not a ledger entry, deliberately.** A landing may span several repositories, and a change to a base repository may require the dependents to be proved as well. That fact belongs to the project's layout and changes rarely, so it is a **declaration** (base repository, dependents, and the proof rule) rather than an appended record: the ledger's subjects are tickets, and keeping repositories out of it preserves the rule that only kinds with a live consumer enter the vocabulary. A landing that spans repositories cites the declaration.
+
+
 Small on purpose. Phase 1:
 
 - **repairs** — this ticket exists to repair a landing that another ticket made (or the defect that landing introduced). Its consumers: the freeze exemption, and the benefited ticket's outcome record.
