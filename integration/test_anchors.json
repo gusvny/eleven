@@ -1221,6 +1221,11 @@
    "anchor": "source-text",
    "note": "t261009-20: both settle_shape_needs_rerun routing sites must stay behind workflow.patched(SETTLE_RERUN_PATCH_ID) + the guarded decision expression",
    "sync_path": ""
+  },
+  "server/engine/tests/test_t261009_27_ticket_outcome_faces.py": {
+   "anchor": "behaviour",
+   "note": "t261009-27 L1: ticket_outcome field truth tables (withdrawn_at/superseded/ending/product_kind/ended_by/ended_at/compare_outcomes)",
+   "sync_path": ""
   }
  },
  "scenarios": {
@@ -4369,99 +4374,19 @@
    "note": "",
    "sync_path": ""
   },
-  "integration/t261009-10/sc_refusal_copy_anchor_contract.mjs": {
-   "anchor": "contract",
-   "note": "resolveAgentBaseDir refusal contract on the shared stable anchor + smoke-face anchor-rot tripwire",
-   "sync_path": ""
-  },
-  "integration/t261009-11/sc_run_record_store.py": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/t261009-11/sc_run_record_drivers.py": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/t261009-15/sc_t26100915_quiet_baseline_identity.py": {
-   "anchor": "contract",
-   "note": "t261009-15: carrier-independent identity seam — engine canonical_check_name vs booked roster row vs the two real carriers (KI-072)",
-   "sync_path": ""
-  },
-  "integration/t261009-01/sc_t261009_01_clean_checkout_shared_faces.py": {
-   "anchor": "behaviour",
-   "note": "runs the real runner entries in a clean clone; pins the user-visible green-from-clean-checkout contract, not source text",
-   "sync_path": ""
-  },
-  "integration/t261009-01/sc_t261009_01_gate_preexisting_red_face.py": {
-   "anchor": "contract",
-   "note": "binds to the classifier public entry + classification enum (the new gate contract from ticket t261009-01 deliverable 2)",
-   "sync_path": ""
-  },
-  "integration/t260928-29/sc_executor_charter_grant_home.py": {
-   "anchor": "behaviour",
-   "note": "t261009-14: grant facts relocated with zero coverage loss (sandbar section keeps executor-grants.json; generic template drops block+file refs) and the charter-identity scenario stays live-judged (never in known-red-baseline).",
-   "sync_path": ""
-  },
-  "integration/t261009-16/sc_fast_set_declaration.py": {
-   "anchor": "behaviour",
-   "note": "pins the CLI declaration face (membership/budget/cost), not internal names",
-   "sync_path": ""
-  },
-  "integration/t261009-16/sc_fast_set_gate.py": {
-   "anchor": "behaviour",
-   "note": "pins fail-closed refusal faces over fixture injections",
-   "sync_path": ""
-  },
-  "integration/t261008-29/sc_stale_worker_visibility.py": {
-   "anchor": "behaviour",
-   "note": "KI-227 stale-worker visibility: fingerprint v2 carries code fingerprint + activity set, activity fingerprint moves on activity add, strict-subset worker is stale_activities by the comparison face, degraded inputs named, observe-only negative",
-   "sync_path": ""
-  },
-  "integration/t261008-29/sc_terminal_stage_memo_face.py": {
-   "anchor": "behaviour",
-   "note": "KI-227 terminal-stage memo face: memo sandbar_stage reaches the terminal failure face as last_stage with memo provenance, pre-fix tickets keep the honest-unavailable note, malformed memo degrades named, the read writes nothing",
-   "sync_path": ""
-  },
-  "integration/t261009-17/sc_t26100917_moved_main_not_human.py": {
-   "anchor": "behaviour",
-   "note": "KI-01M4FKAWY0EP59PY0V0QZWWGV5 regression: moved main must not stop a lane for a human; judged through the public settle receipt",
-   "sync_path": ""
-  },
   "integration/t261009-20/sc_settle_rerun_replay_guard.py": {
    "anchor": "source-text",
    "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
    "sync_path": ""
   },
-  "integration/t261009-18/sc_line_landing_journey.py": {
-   "anchor": "behaviour",
-   "note": "t261009-18: the landing journey over real git repos and the real store files — linear history, reader-side record, one-per-ticket refusal, conflict bounce, cross-process serialization",
-   "sync_path": ""
-  },
-  "integration/t261009-18/sc_line_declaration_contract.py": {
-   "anchor": "contract",
-   "note": "t261009-18: the declaration reader's fail-closed contract — absent/malformed/unknown-version/duplicate-branch refusals, multi-repo shape, empty extra set legal",
-   "sync_path": ""
-  },
-  "integration/t261009-18/sc_old_flow_inert_face.py": {
-   "anchor": "behaviour",
-   "note": "t261009-18: coexistence — import writes nothing, one-way dependency source-text face, landing write-locality inside the develop area only",
-   "sync_path": ""
-  },
-  "integration/t261009-19/sc_t26100919_certify_once.py": {
-   "anchor": "behaviour",
-   "note": "t261009-19 certification journey: at most one certification per tick (held guard refuses every trigger, second acquire gets no token), the record cites the run (run id/judged_by/booked_red/at) with zero counts/verdict keys and a verdict-restating append refused by name, the covered range derived from the shared seq order (same-seq landing excluded, stored covered_range a legal projection), and the green certified prefix answers landable even with a red certification later on the line (goal 8)",
-   "sync_path": ""
-  },
-  "integration/t261009-19/sc_t26100919_red_bounded.py": {
-   "anchor": "behaviour",
-   "note": "t261009-19 bounded red journey: the ladder answers rerun before any search, a unique per-lane hit isolates for free, a one-landing range isolates by arithmetic, an unfiltered multi-landing range reaches search and its range_key recorded as a searched change refuses the same range by name (goal 10), the boundary sentence is recordable as an attribution change; freeze episode carries only id/line/cause (state/culprit/closure are keyed change rows, should_freeze false for no attribution); a missing or zero-run header raises CouldNotRun and lands a range-growth row with no freeze row (goal 24); garbage red_cert/lane_reds shapes raise CertifyError by name",
-   "sync_path": ""
-  },
   "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
    "anchor": "behaviour",
    "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
+   "sync_path": ""
+  },
+  "integration/t261009-27/sc_t26100927_outcome_endings_kind_compare.py": {
+   "anchor": "behaviour",
+   "note": "t261009-27: endings that are not deliveries (withdrawn/superseded coexisting with the three stages), the product's kind deciding the ending fact with unknown named, and rebuild-and-compare naming the moved field - through the public develop_promote outcome/compare faces",
    "sync_path": ""
   }
  }

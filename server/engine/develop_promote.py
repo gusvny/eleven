@@ -82,6 +82,22 @@ agent_activities._git, borrowed exactly like develop_line does):
 
 Coexistence (rule 13): nothing on the running flow imports this module yet;
 today's tickets are byte-for-byte unaffected.
+
+Ordering-space limit (t261009-27, stated for the follow-up ticket that puts
+the promotion into the delivery ledger's ordering space — not silently fixed
+here, not silently depended on):
+
+- SAME-FILE comparisons: landing→certification ("cert seq > landing seq")
+  inside the delivery ledger; promotion selection (delivered_in, the newest
+  promotion) and every relation reading (withdrawn_at, reverted_at,
+  superseded_by/at) inside ``promotion.jsonl`` only.
+- CROSS-FILE, by ID only: ``delivered_in`` names a promotion id while
+  ``landed_at`` / ``certified_by`` come from the delivery ledger. No seq is
+  ever compared across the two files.
+- What the follow-up ticket must preserve when the two files share one
+  ordering space: within-file seq monotonicity, the cert-after-landing
+  rule, and that no comparison silently starts spanning files.
+
 """
 
 import json
@@ -104,7 +120,40 @@ KIND_PROMOTION = "promotion"
 #: family — so family detection is by id prefix, not by this field.
 REL_KIND_WITHDRAWS = "withdraws"
 REL_KIND_REPAIRS = "repairs"
-RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS)
+#: A newer ticket took this one's place. Derived ending face only (goal 14):
+#: the outcome view reads ``supersedes`` relations; nothing else consumes
+#: them yet. Registered together with the validator (review condition):
+#: a kind declared here but rejected by ``_validate_relation`` would be an
+#: ending derived from rows the writer refuses to store.
+REL_KIND_SUPERSEDES = "supersedes"
+RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS, REL_KIND_SUPERSEDES)
+
+#: Product kinds of the outcome view (goal 14): which fact ends a ticket.
+#: These are the VIEW's names, not the tickets' raw ``kind`` strings.
+PRODUCT_KIND_CHANGE = "change"
+PRODUCT_KIND_REPORT = "report"
+PRODUCT_KIND_VERIFICATION = "verification"
+PRODUCT_KIND_UNKNOWN = "unknown"
+
+#: Named mapping from the kind a ticket actually carries to the product kind
+#: the projection reports. Explicit table, never prose and never a guess
+#: (review condition 1): a raw kind not in this table reads ``unknown`` by
+#: name instead of defaulting to ``change``.
+#: - landable change kinds (develop_certify ``LANDABLE_KINDS`` + the plain
+#:   ``change`` name) end through the delivery path;
+#: - an inspection period (the real ticket shape: ``kind: "inspection"``)
+#:   and a plain ``report`` are report products — the ticket's findings and
+#:   the stamped period cursor are the product;
+#: - a verification ticket's product is its verdict.
+TICKET_KIND_TO_PRODUCT = {
+    "change": PRODUCT_KIND_CHANGE,
+    "fix": PRODUCT_KIND_CHANGE,
+    "chore": PRODUCT_KIND_CHANGE,
+    "inspection": PRODUCT_KIND_REPORT,
+    "report": PRODUCT_KIND_REPORT,
+    "verification": PRODUCT_KIND_VERIFICATION,
+    "verify": PRODUCT_KIND_VERIFICATION,
+}
 
 
 class PromoteError(Exception):
@@ -477,18 +526,70 @@ def check_withdrawn(candidate_ticket, delivery_rows, promotion_rows,
 
 # ---- the outcome projection (derived only; three stages stay distinct) ------
 
-def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None):
+def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None,
+                   ticket_record=None):
     """The ticket's outcome as a derived view (record-models projection
     rules): three INDEPENDENT fields — ``landed_at`` (the revision set the
     ticket put on the line), ``certified_by`` (a green certification whose
     delivery-ledger seq is after the landing's — same file, so the order is
     the shared space's own), ``delivered_in`` (a promotion row carrying the
     ticket — the promotion file's own order; seq is NEVER compared across
-    the two files), plus ``reverted_at`` (a ``withdraws`` relation against
-    this ticket whose own landing was later delivered) and ``waiting_since``
-    (the landing moment, while no certification covers the landing yet).
+    the two files) — plus the ending faces:
+
+    - ``reverted_at``: a ``withdraws`` relation against this ticket whose
+      own landing was later delivered (today's face, unchanged);
+    - ``withdrawn_at``: a ``withdraws`` relation whose ``to`` is this
+      ticket — the ticket's own landing was withdrawn and never delivered.
+      The relation IS the recorded judgement (record-models, withdrawal is
+      work, not a record), so it sets ``withdrawn_at`` whether or not the
+      withdrawing ticket itself has a landing; the loud
+      ``WithdrawnTargetUnknown`` raise stays only on the ``reverted_at``
+      path, where the withdrawing ticket's landing is the fact being read;
+    - ``superseded_by`` / ``superseded_at``: the newest ``supersedes``
+      relation whose ``to`` is this ticket (relation ``at``, then relation
+      id, break ties). Coexistence is the point: a ticket can be delivered
+      and later superseded, so these sit beside ``delivered_in`` rather
+      than replacing it;
+    - ``ending``: which ending applies, in precedence order
+      reverted > superseded > withdrawn > ended > open. A convenience
+      summary — never a status enum; every independent field behind it
+      stays readable on its own.
+
+    The product's kind (goal 14): ``product_kind`` is read from what the
+    ticket actually carries — ``ticket_record["kind"]`` through the named
+    ``TICKET_KIND_TO_PRODUCT`` table. A kind the table does not know reads
+    ``unknown`` BY NAME, never a default to ``change``. The kind decides
+    which fact ends the ticket (record-models "agreed, waiting to be
+    built" item 8):
+
+    - ``change``: the delivery path — ``ended_by`` is ``certification``
+      (the covering certification is where the life ends) with the
+      certification's moment, or ``delivery`` when a promotion exists
+      without a readable covering certification;
+    - ``report``: the ticket's findings are recorded and its period cursor
+      is stamped (non-empty ``findings`` AND a ``period`` on the ticket
+      record) — ``ended_by: "findings"``, ``ended_at`` the ticket's own
+      moment when it carries one;
+    - ``verification``: a verdict is recorded on the ticket —
+      ``ended_by: "verdict"``;
+    - ``unknown``: no ending fact is derived; a landing without a covering
+      certification still reads ``waiting_since`` as before.
+
+    A report or verification ticket is NEVER reported waiting: its ending
+    fact is not a landing, so "waiting since the landing" is meaningless
+    for it even if a landing row exists.
+
     Carries the cursor it was computed up to (``as_of``), is droppable and
-    rebuildable, and no other record may cite it."""
+    rebuildable (``compare_outcomes`` is the drift check), and no other
+    record may cite it — the view has no ``id``, no ``seq`` and no ``at``
+    of its own.
+
+    Ordering-space limit (kept honest, not silently fixed): the
+    landing→certification comparison uses the delivery ledger's seq only;
+    every promotion/relation selection uses the promotion file's own order
+    only. The one cross-file fact is ``delivered_in``, and it is carried as
+    an ID, never compared by seq against delivery-ledger rows.
+    """
     if not _valid_str(ticket):
         raise PromoteError("ticket_not_named")
     landings = [r for r in delivery_rows
@@ -498,6 +599,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None):
     landing = landings[-1] if landings else None
 
     certified_by = None
+    certified_at = None
     if landing is not None:
         certs = [r for r in delivery_rows
                  if isinstance(r, dict) and r.get("kind") == dc.KIND_CERT
@@ -510,6 +612,8 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None):
             if all(crev.get(repo) == rev
                    for repo, rev in _repos_map(landing["repos"]).items()):
                 certified_by = c["id"]
+                certified_at = c.get("at")
+                break
 
     proms = [r for r in promotion_rows
              if isinstance(r, dict) and r.get("kind") == KIND_PROMOTION
@@ -518,6 +622,7 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None):
     delivered_in = proms[-1]["id"] if proms else None
 
     reverted_at = None
+    withdrawn_at = None
     if delivered_in is not None:
         for rel in promotion_rows:
             if not isinstance(rel, dict) or rel.get("kind") != REL_KIND_WITHDRAWS:
@@ -534,9 +639,83 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None):
                       and isinstance(r.get("seq"), int)]
             if wproms:
                 reverted_at = min(r.get("at") or 0 for r in wproms) or reverted_at
+    # The ticket's OWN withdrawal face: the relation is the recorded
+    # judgement, so it fires regardless of whether the withdrawing ticket
+    # itself has a landing (that landing matters only to ``reverted_at``).
+    for rel in promotion_rows:
+        if not isinstance(rel, dict) or rel.get("kind") != REL_KIND_WITHDRAWS:
+            continue
+        if rel.get("to") != ticket or not dc._valid_at(rel.get("at")):
+            continue
+        at = rel["at"]
+        if withdrawn_at is None or at < withdrawn_at:
+            withdrawn_at = at
 
-    waiting_since = landing["at"] if (landing is not None
-                                      and certified_by is None) else None
+    superseded_by = None
+    superseded_at = None
+    for rel in promotion_rows:
+        if not isinstance(rel, dict) or rel.get("kind") != REL_KIND_SUPERSEDES:
+            continue
+        if rel.get("to") != ticket or not _valid_str(rel.get("from")):
+            continue
+        at = rel.get("at") if dc._valid_at(rel.get("at")) else 0
+        if (superseded_at is None or at > superseded_at
+                or (at == superseded_at and _valid_str(rel.get("id"))
+                    and (superseded_by is None or rel["id"] > superseded_by))):
+            superseded_by = rel.get("from")
+            superseded_at = rel.get("at") if at else None
+
+    # The product's kind, read from what the ticket carries. A record that
+    # is not a dict, or whose kind is not a known raw string, reads
+    # ``unknown`` by name.
+    product_kind = PRODUCT_KIND_UNKNOWN
+    ended_by = None
+    ended_at = None
+    if isinstance(ticket_record, dict):
+        raw_kind = ticket_record.get("kind")
+        if isinstance(raw_kind, str):
+            product_kind = TICKET_KIND_TO_PRODUCT.get(
+                raw_kind, PRODUCT_KIND_UNKNOWN)
+    record_at = ticket_record.get("at") if (
+        isinstance(ticket_record, dict)
+        and dc._valid_at(ticket_record.get("at"))) else None
+    if product_kind == PRODUCT_KIND_REPORT:
+        findings = ticket_record.get("findings")
+        period = ticket_record.get("period")
+        if isinstance(findings, list) and findings and _valid_str(period):
+            ended_by = "findings"
+            # The ticket's own moment when it carries one; otherwise the
+            # stamped period cursor itself is the moment the record names.
+            ended_at = record_at if record_at is not None else period
+    elif product_kind == PRODUCT_KIND_VERIFICATION:
+        if _valid_str(ticket_record.get("verdict")):
+            ended_by, ended_at = "verdict", record_at
+    elif product_kind == PRODUCT_KIND_CHANGE:
+        if certified_by is not None:
+            ended_by, ended_at = "certification", certified_at
+        elif delivered_in is not None:
+            ended_by, ended_at = "delivery", None
+
+    # waiting stays the landing's own face — and only for a product whose
+    # ending fact IS a landing (change, or a kind we cannot name, where a
+    # landing genuinely awaits its certification). A report/verification
+    # ticket is never "waiting since the landing".
+    if landing is not None and certified_by is None and product_kind not in (
+            PRODUCT_KIND_REPORT, PRODUCT_KIND_VERIFICATION):
+        waiting_since = landing["at"]
+    else:
+        waiting_since = None
+
+    if reverted_at is not None:
+        ending = "reverted"
+    elif superseded_by is not None:
+        ending = "superseded"
+    elif withdrawn_at is not None:
+        ending = "withdrawn"
+    elif ended_by is not None:
+        ending = "ended"
+    else:
+        ending = "open"
 
     d_seq = max([r.get("seq") for r in delivery_rows
                  if isinstance(r, dict) and isinstance(r.get("seq"), int)] or [0])
@@ -547,6 +726,48 @@ def ticket_outcome(delivery_rows, promotion_rows, ticket, is_green=None):
         "certified_by": certified_by,
         "delivered_in": delivered_in,
         "reverted_at": reverted_at,
+        "withdrawn_at": withdrawn_at,
+        "superseded_by": superseded_by,
+        "superseded_at": superseded_at,
+        "product_kind": product_kind,
+        "ended_by": ended_by,
+        "ended_at": ended_at,
+        "ending": ending,
         "waiting_since": waiting_since,
         "as_of": {"delivery": d_seq, "promotion": p_seq},
+    }
+
+
+#: The fields ``compare_outcomes`` judges. ``as_of`` is deliberately NOT in
+#: it: two views computed at different cursors legitimately differ in the
+#: cursor alone, so the cursor is reported, never counted as drift.
+OUTCOME_COMPARE_FIELDS = (
+    "landed_at", "certified_by", "delivered_in", "reverted_at",
+    "withdrawn_at", "superseded_by", "superseded_at",
+    "product_kind", "ended_by", "ended_at", "ending", "waiting_since",
+)
+
+
+def compare_outcomes(baseline, rebuilt):
+    """The rebuild-and-compare (goal 14): given a cached projection and a
+    fresh rebuild, report whether they agree and NAME the field that
+    disagrees when they do not — that is what makes "the projection is
+    what is wrong" a checkable statement instead of a promise.
+
+    Pure function over two views; touches no ledger. ``as_of`` cursors are
+    returned beside the verdict (``baseline_as_of`` / ``rebuilt_as_of``)
+    so the caller can tell a stale baseline from real drift, but a cursor
+    difference alone is NOT a disagreement. An absent field and a ``None``
+    field read as the same answer. Malformed input is refused by name.
+    """
+    for name, view in (("baseline", baseline), ("rebuilt", rebuilt)):
+        if not isinstance(view, dict):
+            raise PromoteError("outcome_not_object:%s" % name)
+    differs_in = [f for f in OUTCOME_COMPARE_FIELDS
+                  if baseline.get(f) != rebuilt.get(f)]
+    return {
+        "agrees": not differs_in,
+        "differs_in": differs_in,
+        "baseline_as_of": baseline.get("as_of"),
+        "rebuilt_as_of": rebuilt.get("as_of"),
     }
