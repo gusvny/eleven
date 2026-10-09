@@ -150,7 +150,10 @@ def test_positive_ledger_red_means_record_not_block():
     out = aff([lane()], ledger={"s1": ans("fail")})
     v = {x["name"]: x for x in out["verdicts"]}
     assert v["s1"]["verdict"] == "record"
-    assert v["s1"]["why"] == "ledger_red(既有欠账·台账)"
+    # wording drift fix in passing (t261009-11): failure_protocol's ledger_red
+    # reason was translated to English (host order 261004); the test pinned the
+    # retired Chinese string and failed on the calendar of language, not code
+    assert v["s1"]["why"] == "ledger_red(existing debt · ledger)"
     assert out["blockers"] == [] and "s1" in out["records"]
     assert out["ledger"]["overridden"] == ["s1"]
     assert out["ledger"]["hits_red"] == ["s1"]

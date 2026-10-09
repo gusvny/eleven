@@ -2698,6 +2698,13 @@ SCENARIOS = [
     ("t261008-50-clean-tree-run-output",
      "Scenario run output never dirties the main work tree (t261008-50, ticket user request: stop tracking scenario run output (evidence/ and out/ as well as shots/) and add a clean-tree regression check; grey-box L3, real git subprocesses on the real tree, offline seconds, zero docker/browser, never touches 3099; incident 261008: tracked evidence PNGs under integration/t261008-36/evidence were regenerated every suite run, turning git status --porcelain dirty on main, so the merge gate's main-untouched check blocked every other lane): A simulated-run face — fresh files under integration/<non-carrier>/{shots,out,evidence}/ (png, non-png stray, name with a space) are each reported by git check-ignore and none appears in git status --porcelain (a run regenerating output leaves main clean); B carrier face — the two hand-preserved deliverable dirs integration/t261004-25/evidence and integration/t261004-28/evidence stay tracked in git ls-files AND are NOT reported ignored (the ! negation fires; a blanket evidence ignore would silently doom their future files); C rule-drift face — .gitignore carries the three output-dir rules and the two carrier negations verbatim, a removed rule turns red with the missing line named; net-zero side effect — all probe files are removed before exit, no git state touched. Division of intent: the developer L1 unit test pins the static untracked face (git ls-files contains no run output); this scenario pins the behaviour face (writing fresh output keeps porcelain clean, the carve-out actually fires both ways) — neither substitutes for the other. git absent / not a git work tree = ENV_FAIL exit 2. Pre-fix tree red on A is the expected TDD signal; green at arbitrate/merge",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261008-50/sc_clean_tree_run_output.py", "ro"),
+    # ---- t261009-11: every suite run gets a record of its own; the run id rides every case row ----
+    ("t261009-11-run-record-store",
+     "Run-record contract over the ledger's public faces (ticket t261009-11, design source docs/reference/ledger-record-models-v1.md section A, grey-box L2, offline seconds, zero docker/Temporal/port/console, temp ledger dir via SANDBAR_SCENARIO_LEDGER_DIR so the real ledger is never written; user need: certification cites one run and reads its counts from that record): A identity minted without coordination - run- + 26-char Crockford base32 ULID, two mints differ, same-millisecond mints order strictly increasing (monotonic tail, no clock race), later-millisecond mints sort after (lexicographic order is time order); B one header per run - run-stamped rows then one header lands in runs.jsonl, read_runs reads it back, rows_for_run returns exactly that run's rows; C counts must be derivable from the rows and checked against them - a header whose counts disagree with the recount is refused by name and BOTH files stay byte-identical (a dirty record is worse than none); D a duplicate run id is refused loudly, across batches and within one batch; E the verdict is the mechanical roll-up - ran=0 with green refused (ran: 0 is never a proof), a verdict contradicting the counts refused; F malformed headers refused by name, never guessed (non-object, missing field, bad env_fp, negative count, non-integer-ms started_at, conc_width not >=1, verdict off the vocabulary); G legacy rows without run stay readable - key query still hits, rows_for_run never silently folds them in, and a consumer that requires a run id and finds none fails loudly with a named error (never a guess); H an interrupted run is a state to see - rows carrying a run id with no header are distinguishable from a finished run (never an invented summary); I the retention rollup keeps the run field verbatim in both the month file and the kept main rows; J the CLI runs --json face reads the headers back from the same source of truth. Division of intent: developer L1 owns the white-box truth tables and ULID unit details; failure_protocol.ledger_trust and the t260922-12 family own the trust boundary (untouched here - run id and trust are orthogonal); t260930-01-ledger-reuse-round owns the four-key reuse path (a legacy row staying reusable with no run id is exactly leg G); the driver journey (runner top-driver / gate-owned suppression / gate header) belongs to t261009-11-run-record-drivers. Pre-implement red expected (TDD signal); must be green at arbitrate/merge",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-11/sc_run_record_store.py", "ro"),
+    ("t261009-11-run-record-drivers",
+     "Both drivers write the run record end to end (ticket t261009-11, grey-box L3, real run_scenarios subprocesses on a real clean git fixture tree + one real verify_lane integ round in-process, offline seconds, zero docker/Temporal/port/console, fixture technique shared with t260930-01-sc_ledger_reuse_round, ledger projected to a private temp dir - the real ledger is never written): A runner as top driver (no owner env) - every new case row carries the SAME run- prefixed id, exactly ONE header lands at the end of the round, the header's counts equal the recount of the rows carrying its id, the verdict is the mechanical roll-up of those counts, started_at is integer milliseconds and duration_s a number, and INTEG_SUMMARY gains the additive run_id key equal to the header id (the consumer face can cite the run); B gate-owned round (SANDBAR_INTEG_LEDGER_OWNER=gate) - the runner runs its cases but writes NOTHING, rows file and runs file stay byte-identical (the single-writer discipline holds per round; one run never gets two headers); C legacy coexistence - a pre-seeded run-less row survives a new round and its old key query still hits (legacy stays readable, no re-stamping over old rows); D gate face (real verify_lane _integ, baseline-free profile) - the gate writes its own header for its revision set, that header's counts equal the recount of the rows carrying its id, and the receipt carries the run face with the id a consumer can cite. Division of intent: the store/CLI contract (minting, refusals, legacy tolerance, interrupted-run visibility, rollup retention) belongs to t261009-11-run-record-store; reuse and ledger trust belong to the t260930-01 / t260922-12 families; developer L1 owns the pure-function battery. Pre-implement red expected (TDD signal); must be green at arbitrate/merge. git missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-11/sc_run_record_drivers.py", "ro"),
     # ---- t261009-12: an environment red never wears the ticket's own cause; the lint verdict is reproducible or names its condition ----
     ("t261009-12-env-refused-not-self",
      "An environment failure in a scenario tail must classify as a named env red, never as the ticket's own cause (t261009-12 Defect A, incident t261008-36: tail carried net::ERR_CONNECTION_REFUSED at http://127.0.0.1:21010/ plus a fixture transport error, process exited 1, synthesis stamped fail×self×assert_mismatch pointing every reader at the wrong file; grey-box L2.5, offline seconds, zero docker/browser). The scenario drives the production synthesis seam (_spec_from_output) with real subprocess-shaped outputs and asserts ONLY the emitted protocol line (public gate-consumed face): A the literal incident tail × exit 1 -> not-checked × external, reason a prepare-type code naming the connection-refused family, evidence keeps the observed tail, line parses and enforce_semantics consumes it with ZERO violations (a backed env red is a legal line); B a genuine assertion tail × exit 1 keeps fail×self×assert_mismatch byte-identically (no vocabulary overreach onto real product reds); C malformed faces (None/empty/pattern-free garbage tail × exit 1) fail closed toward self, never toward a free env label; D the closed exit-code table is untouched (0->pass, 2->not-checked×external, -9->fail×self×timeout). Intent split: the classification vocabulary's internal truth table and env_red_reason's malformed-input matrix belong to developer L1; this entry pins the synthesis line the gate actually consumes. Integration modules unimportable = ENV_FAIL exit 2. Pre-implement red on A is the expected TDD signal; arbitrate/merge must be green",
@@ -2867,6 +2874,145 @@ def _reuse_ledger_module():
         spec.loader.exec_module(mod)
         _REUSE_LEDGER_MOD = mod
     return _REUSE_LEDGER_MOD
+
+
+# ---------------- t261009-11 run record (executor-side driver) ----------------
+#: When the gate drives the runner, the gate owns the ledger write for the whole
+#: round (single-writer discipline: one run never gets two headers). The gate
+#: sets this env before spawning; absent = this process is the top driver and
+#: writes the run record itself.
+LEDGER_OWNER_ENV = "SANDBAR_INTEG_LEDGER_OWNER"
+
+
+def ledger_owner_is_gate(env=None):
+    """Pure: is this round gate-owned (the runner must write nothing)?"""
+    return (os.environ.get(LEDGER_OWNER_ENV, "") if env is None
+            else str(env)).strip().lower() == "gate"
+
+
+def ledger_run_source(env=None):
+    """The run's `source` — same vocabulary and fallback chain as the gate's
+    `_ledger_source`: the engine-injected channel env first, then
+    SANDBAR_TICKET_ID as `lane:<ticket>`; empty = undeterminable (the caller
+    skips the write — a missing row beats a guessed identity)."""
+    get = (os.environ.get if env is None else env.get)
+    s = (get("SANDBAR_INTEG_LEDGER_SOURCE") or "").strip()
+    if s:
+        return s
+    tid = (get("SANDBAR_TICKET_ID") or "").strip()
+    return ("lane:%s" % tid) if tid else ""
+
+
+def run_record_skip_reason(narrowed, commit, env_fp, source):
+    """Pure decision matrix: why the top driver writes no run record this round
+    (None = write). Named reasons only — never a guessed identity, never a
+    silent skip. `narrowed` covers --only rounds and pool-exclusion rounds: a
+    diagnostic round is not a proof, so it wears no `suite` and lands no rows."""
+    if narrowed:
+        return "narrowed round (--only / pool exclusion) is not a proof — no run record"
+    if ledger_owner_is_gate():
+        return "gate-owned round (%s=gate) — the gate writes the run record" % LEDGER_OWNER_ENV
+    if not source:
+        return "source undeterminable (neither SANDBAR_INTEG_LEDGER_SOURCE nor SANDBAR_TICKET_ID set)"
+    if not commit:
+        return "HEAD sha could not be resolved (git absent / dirty tree / not a repo)"
+    if not env_fp:
+        return "environment fingerprint could not be resolved (protocol library absent)"
+    return None
+
+
+def build_run_rows(spec_cases, run_id, commit, env_fp, conc_width, source):
+    """Pure: spec rows -> ledger case rows stamped with the run id. verdict
+    mapping matches the gate's (`pass`/`fail` verbatim, anything else =
+    env_fail — the protocol has no skip). ticket rides the lane: prefix."""
+    import datetime as _dt
+    ts = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    rows = []
+    for c in spec_cases or ():
+        verdict = {"pass": "pass", "fail": "fail"}.get(c.get("status"),
+                                                       "env_fail")
+        rows.append({
+            "ts": ts,
+            "commit": str(commit),
+            "env_fp": str(env_fp),
+            "conc_width": int(conc_width),
+            "pool": str(c.get("suite") or ""),
+            "scenario": str(c.get("name") or ""),
+            "verdict": verdict,
+            "wall_s": c.get("dur_s"),
+            "source": str(source),
+            "ticket": (str(source)[5:] if str(source).startswith("lane:")
+                       else ""),
+            "run": run_id,
+        })
+    return rows
+
+
+def build_run_header(run_id, commit, env_fp, conc_width, pool_config, source,
+                     started_at_ms, duration_s, counts, suite="full"):
+    """Pure: assemble one run header (shape version run-ledger-v1). The verdict
+    is computed by the store's mechanical roll-up — never written by hand."""
+    mod = _reuse_ledger_module()
+    return {
+        "v": mod.RUN_HEADER_V,
+        "id": run_id,
+        "repos": [{"repo": "sandbar", "revision": str(commit)}],
+        "suite": suite,
+        "source": str(source),
+        "env_fp": str(env_fp),
+        "conc_width": int(conc_width),
+        "pool": str(pool_config or ""),
+        "started_at": int(started_at_ms),
+        "duration_s": float(duration_s),
+        "cases": {k: int(counts.get(k, 0)) for k in mod.RUN_CASE_FIELDS},
+        "verdict": mod.run_verdict(counts),
+    }
+
+
+def write_run_record(spec_cases, counts, wall_s, started_at_ms, commit,
+                     env_fp, conc_width, pool_config, narrowed):
+    """The executor-side driver write: mint a run id, append the case rows,
+    then the header. Every skip is named on stderr; any store refusal is loud
+    but never flips a verdict — bookkeeping is not judging. Returns the run id
+    (or None) plus the receipt face for the report."""
+    source = ledger_run_source()
+    why = run_record_skip_reason(narrowed, commit, env_fp, source)
+    if why:
+        sys.stderr.write("RUN_RECORD skip: %s\n" % why)
+        return None, {"skipped": why}
+    face = {"source": source, "commit": commit, "env_fp": env_fp}
+    try:
+        mod = _reuse_ledger_module()
+        # the id's embedded time is the minting instant; the record's own
+        # started_at carries the run's start (identity time != record time)
+        run_id = mod.mint_run_id()
+        rows = build_run_rows(spec_cases, run_id, commit, env_fp, conc_width,
+                              source)
+        rr = mod.append_records(rows)
+        face["rows_written"] = rr.get("written", 0)
+        if rr.get("rejected"):
+            face["rows_rejected"] = rr["rejected"][:10]
+        if not rows or rr.get("written", 0) != len(rows):
+            sys.stderr.write("RUN_RECORD_WARN rows incomplete (%s) — header "
+                             "not written (an interrupted run is a state to "
+                             "see, never invented)\n" % (face["rows_rejected"]
+                                                         or "no cases"))
+            face["header"] = "skipped: rows incomplete"
+            return run_id, face
+        hdr = build_run_header(run_id, commit, env_fp, conc_width, pool_config,
+                               source, started_at_ms, wall_s, counts)
+        hr = mod.append_run_header(hdr)
+        face["header_written"] = hr.get("written", 0)
+        if hr.get("rejected"):
+            face["header_rejected"] = hr["rejected"]
+            sys.stderr.write("RUN_RECORD_WARN header refused: %s\n"
+                             % hr["rejected"])
+        return run_id, face
+    except Exception as e:  # noqa: BLE001 — ledger face degrades loudly
+        sys.stderr.write("RUN_RECORD_WARN run record write failed (%s: %s) — "
+                         "judging is unaffected\n" % (type(e).__name__, e))
+        face["error"] = "%s: %s" % (type(e).__name__, e)
+        return None, face
 
 
 def reusable_names(rows, commit, env_fp, width, candidates=None):
@@ -4833,6 +4979,22 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         _env_red_sorted = sorted(set(env_red_names))
         _summary["env_red_names"] = _env_red_sorted
         _summary["env_red_count"] = len(_env_red_sorted)
+        # ---- t261009-11 run record (executor-side driver) ----
+        # The top driver mints the run id and writes rows + header at the end
+        # of the round; counts come from the same recount the summary carries.
+        # Narrowed rounds (--only / pool exclusion) are not proofs: named skip.
+        _run_counts = {"ran": _ran, "passed": _p, "failed": _f,
+                       "env_failed": _nc}
+        _run_id, _run_face = write_run_record(
+            spec_cases, _run_counts, wall,
+            started_at_ms=int(t0 * 1000),
+            commit=_reuse.get("git_head") or "",
+            env_fp=_fpv["value"], conc_width=conc_width,
+            pool_config=_summary["pool_config"],
+            narrowed=bool(only_names or excluded))
+        if _run_id:
+            _summary["run_id"] = _run_id   # additive: the consumer face
+        _report_run_face = _run_face
         print("INTEG_SUMMARY " + json.dumps(_summary, ensure_ascii=False), flush=True)
     except Exception as _ex:   # 汇总行失败不改场景红绿（观测面），但大声留痕
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
@@ -4885,6 +5047,10 @@ def main(exclude_pools=None, only_scenarios=None) -> int:
         # 260929 直修 B1（宿主令·不开票）：报告落档同带环境红具名名单（与汇总行同名同源，
         # 排序去重；既有键一个不动）。
         _report["env_red_names"] = sorted(set(env_red_names))
+        try:
+            _report["run_record"] = _report_run_face   # t261009-11 观测面
+        except NameError:
+            pass
         rp.write_text(_json.dumps(_report, ensure_ascii=False, indent=1), encoding="utf-8")
         print("报告落档：%s" % rp, flush=True)
     except OSError:

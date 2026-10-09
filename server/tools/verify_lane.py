@@ -1074,9 +1074,14 @@ def _integ(args):
     timed_out = False
     _out_s, _err_s, _rc = '', '', 0
     try:
+        # t261009-11: the gate owns the round's ledger write — tell the runner
+        # (one run never gets two headers). cmd_env may be None (no pool
+        # exclusion = inherit); rebuild either way so the flag is always set.
+        _spawn_env = dict(cmd_env) if cmd_env is not None else dict(os.environ)
+        _spawn_env['SANDBAR_INTEG_LEDGER_OWNER'] = 'gate'
         proc = subprocess.Popen(['/bin/sh', '-c', cmd], cwd=str(root),
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, env=cmd_env, start_new_session=True)
+                                text=True, env=_spawn_env, start_new_session=True)
         try:
             _out_s, _err_s = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as _te:
@@ -1560,6 +1565,7 @@ def _integ(args):
                             'from same-width inspection rows and the '
                             'live-baseline authority'),
     }
+    run_face = {'supported': False}
     if ledger_mod is not None:
         rows, skip_whys = [], []
         if cases_dedup:
@@ -1572,14 +1578,35 @@ def _integ(args):
                              'a dirty row')
             if not lane_width:
                 skip_whys.append('concurrency width missing (no INTEG_SUMMARY)')
+        # ---- t261009-11 run records: the gate is a driver too ----
+        # Two revision sets under test in one round = two runs, two ids, two
+        # headers (lane head, base sha). The runner is told it is gate-owned
+        # (SANDBAR_INTEG_LEDGER_OWNER=gate) so one run never gets two headers.
+        run_support = _ledger_supports_runs(ledger_mod)
+        lane_run_id = baseline_run_id = None
+        run_face = {'supported': run_support}
+        if run_support:
+            lane_run_id = ledger_mod.mint_run_id()
+            baseline_run_id = ledger_mod.mint_run_id()
+            run_face['lane_run_id'] = lane_run_id
+            run_face['baseline_run_id'] = baseline_run_id
+            # a narrowed round (--only / pool exclusion) is not a proof: no
+            # header wears a suite it did not run (rows keep the ids so the
+            # grouping stays visible)
+            lane_narrowed = bool(_self_face) or bool(
+                pool_exclude and pool_exclude.get('applied'))
+            baseline_narrowed = bool(baseline_targeted)
+            run_face['lane_narrowed'] = lane_narrowed
+            run_face['baseline_narrowed'] = baseline_narrowed
         if cases_dedup and not skip_whys:
             rows += _ledger_rows_from_cases(
                 cases_dedup, commit=lane_head, env_fp=lane_fp.get('value'),
-                conc_width=lane_width, source=ledger_source)
+                conc_width=lane_width, source=ledger_source,
+                run_id=lane_run_id)
         if baseline_ok and baseline_fp and baseline_cases and base_sha:
             rows += _ledger_rows_from_cases(
                 baseline_cases, commit=base_sha, env_fp=baseline_fp.get('value'),
-                conc_width=1, source='baseline')
+                conc_width=1, source='baseline', run_id=baseline_run_id)
         ledger_face['written'] = 0
         if rows:
             _rcpt = _ledger_write(ledger_mod, rows)
@@ -1590,7 +1617,40 @@ def _integ(args):
                 ledger_face['error'] = _rcpt['error']
         elif skip_whys:
             ledger_face['write_skipped'] = '；'.join(skip_whys)
+        # headers: only for runs whose rows actually landed (a run that wrote
+        # no rows writes no header — counts must be derivable from the rows)
+        if run_support:
+            hdr_face = {}
+            if (ledger_face.get('written', 0) or 0) > 0 and cases_dedup \
+                    and not skip_whys:
+                if run_face.get('lane_narrowed'):
+                    hdr_face['lane'] = (
+                        'skipped: narrowed round (--only / pool exclusion) '
+                        'is not a proof')
+                else:
+                    _pool_cfg = (executor_summary or {}).get('pool_config') or ''
+                    _hdr = _run_header(
+                        ledger_mod, lane_run_id, lane_head,
+                        lane_fp.get('value'), lane_width, _pool_cfg,
+                        ledger_source, started_at_ms=int(_run_t0 * 1000),
+                        duration_s=runner_used, cases=cases_dedup)
+                    hdr_face['lane'] = _run_header_write(ledger_mod, _hdr)
+            if baseline_ok and baseline_fp and baseline_cases and base_sha \
+                    and (ledger_face.get('written', 0) or 0) > 0:
+                if run_face.get('baseline_narrowed'):
+                    hdr_face['baseline'] = (
+                        'skipped: targeted rerun is not a proof')
+                else:
+                    _bhdr = _run_header(
+                        ledger_mod, baseline_run_id, base_sha,
+                        baseline_fp.get('value'), 1, 'baseline', 'baseline',
+                        started_at_ms=int(_run_t0 * 1000),
+                        duration_s=float(baseline_wall_s or 0),
+                        cases=baseline_cases)
+                    hdr_face['baseline'] = _run_header_write(ledger_mod, _bhdr)
+            run_face['headers'] = hdr_face
     _out['ledger'] = ledger_face
+    _out['run'] = run_face
     return _out
 
 
@@ -1695,6 +1755,10 @@ def _run_baseline(root, cmd, base, lane_timeout, env=None, extra_env=None,
         # t260913-03：过滤开启时基线同 env（泳道/基线同口径；main 侧执行器认该 env
         # 后基线墙钟同步受益——合并前 main 版执行器无视它=恒全集，仅慢不假）
         env = dict(env if env is not None else _os2.environ, SANDBAR_POOL_CONC='1')
+        # t261009-11: the baseline phase is gate-owned too — its rows and (when
+        # not a targeted rerun) its header are written by this process, so the
+        # spawned runner inside the baseline tree must write nothing.
+        env['SANDBAR_INTEG_LEDGER_OWNER'] = 'gate'
         # 260927 基线**不吃跑者总预算**：该预算的语义是「套件本体（泳道侧场景跑面）到点
         # 自行收口」，而基线是**另一趟**（干净 worktree 同命令）——继承同一份预算时它
         # 一开跑就「预算已耗尽」（预算按进程起始算），会把自己的每一条都点名成
@@ -1923,14 +1987,17 @@ def _now_iso():
     return _dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _ledger_rows_from_cases(cases, commit, env_fp, conc_width, source):
-    """规范行用例 → 台账行（十字段）。verdict 映射：pass→pass、fail→fail、
+def _ledger_rows_from_cases(cases, commit, env_fp, conc_width, source,
+                            run_id=None):
+    """规范行用例 → 台账行。verdict 映射：pass→pass、fail→fail、
     not-checked→env_fail（没检验到；协议内无 skip）。ticket 仅 lane:<票> 形态
-    携带票号（inspection/baseline 无票号语义，空串）。"""
+    携带票号（inspection/baseline 无票号语义，空串）。t261009-11：run_id 在场
+    时行带 run（行所属那次套件跑的 id）——只有泳道树账本库支持 run 记录时才带
+    （老账本的十字段封闭校验会拒收未知字段，行保持旧形，由调用点点名降级）。"""
     rows = []
     for c in cases:
         verdict = {'pass': 'pass', 'fail': 'fail'}.get(c.get('status'), 'env_fail')
-        rows.append({
+        row = {
             'ts': _now_iso(),
             'commit': str(commit),
             'env_fp': str(env_fp),
@@ -1941,8 +2008,57 @@ def _ledger_rows_from_cases(cases, commit, env_fp, conc_width, source):
             'wall_s': c.get('dur_s'),
             'source': str(source),
             'ticket': (str(source)[5:] if str(source).startswith('lane:') else ''),
-        })
+        }
+        if run_id:
+            row['run'] = str(run_id)
+        rows.append(row)
     return rows
+
+
+def _ledger_supports_runs(ledger_mod):
+    """Feature probe on the lane-tree ledger library (loaded by file position):
+    a tree older than t261009-11 has no run-record API — the gate then keeps
+    today's behaviour (unstamped rows, no header) and names the degradation,
+    never crashes."""
+    return bool(getattr(ledger_mod, 'mint_run_id', None)) and \
+        bool(getattr(ledger_mod, 'append_run_header', None))
+
+
+def _run_counts_from_cases(cases):
+    """Case rows -> the header's counts block. Mapping is the ledger's own:
+    pass→passed, fail→failed, anything else (not-checked) → env_failed."""
+    counts = {'ran': 0, 'passed': 0, 'failed': 0, 'env_failed': 0}
+    for c in cases or ():
+        counts['ran'] += 1
+        s = c.get('status')
+        if s == 'pass':
+            counts['passed'] += 1
+        elif s == 'fail':
+            counts['failed'] += 1
+        else:
+            counts['env_failed'] += 1
+    return counts
+
+
+def _run_header(ledger_mod, run_id, commit, env_fp, conc_width, pool, source,
+                started_at_ms, duration_s, cases):
+    """Assemble one run header; the verdict is the store's mechanical roll-up,
+    computed by the library — never written by hand here."""
+    counts = _run_counts_from_cases(cases)
+    return {
+        'v': ledger_mod.RUN_HEADER_V,
+        'id': str(run_id),
+        'repos': [{'repo': 'sandbar', 'revision': str(commit)}],
+        'suite': 'full',
+        'source': str(source),
+        'env_fp': str(env_fp),
+        'conc_width': int(conc_width),
+        'pool': str(pool or ''),
+        'started_at': int(started_at_ms),
+        'duration_s': float(duration_s),
+        'cases': counts,
+        'verdict': ledger_mod.run_verdict(counts),
+    }
 
 
 def _ledger_consult(fp_mod, ledger_mod, red_names, lane_fp_value, lane_width,
@@ -1993,6 +2109,19 @@ def _ledger_write(ledger_mod, rows):
         return {'written': 0, 'rejected': [],
                 'error': '台账写失败（%s: %s）——记账缺席不影响判定，点名待治理'
                          % (type(e).__name__, e)}
+
+
+def _run_header_write(ledger_mod, header):
+    """Append one run header; the store re-derives the counts from the rows
+    before the header lands and refuses a mismatch loudly. Receipt folded to a
+    small dict for the run face; a write failure never flips the verdict."""
+    try:
+        rcpt = ledger_mod.append_run_header(header)
+    except Exception as e:  # noqa: BLE001 — loud, never fatal to judging
+        return {'written': 0, 'error': '%s: %s' % (type(e).__name__, e)}
+    if rcpt.get('written'):
+        return {'written': 1, 'id': header.get('id')}
+    return {'written': 0, 'rejected': rcpt.get('rejected')}
 
 
 def run(args):

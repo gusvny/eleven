@@ -96,6 +96,18 @@
       "artifacts": [],
       "console": false,
       "names": []
+    },
+    {
+      "id": "integ-run-records",
+      "paths": [
+        "server/tools/"
+      ],
+      "artifacts": [],
+      "console": false,
+      "names": [
+        "t261009-11-run-record-store",
+        "t261009-11-run-record-drivers"
+      ]
     }
   ],
   "always": [

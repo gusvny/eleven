@@ -222,8 +222,15 @@ def _row(verdict="fail", scenario="s1", ts="2026-09-21T08:00:00+00:00", **over):
 
 def test_consult_trusted_latest_wins(repo, monkeypatch):
     monkeypatch.setattr(vl, "_is_ancestor", lambda *a, **k: True)
-    rows = [_row(verdict="fail", ts="2026-09-20T00:00:00+00:00"),
-            _row(verdict="pass", ts="2026-09-21T00:00:00+00:00")]
+    # ts 必须落在真实时钟的 7 天采信窗内：固定 2026-09 日期随日历老化出窗，
+    # 用例红在日历而非被测代码（时间炸弹修复，t261009-11 顺手）
+    import time as _t
+    import datetime as _dt
+    def _iso(days_ago):
+        return _dt.datetime.fromtimestamp(
+            _t.time() - days_ago * 86400, _dt.timezone.utc).isoformat()
+    rows = [_row(verdict="fail", ts=_iso(2.0)),
+            _row(verdict="pass", ts=_iso(0.5))]
     answers, red, green, amb = vl._ledger_consult(
         fp_mod, _FakeLedger(rows), ["s1"], FP, 4, SHA, repo)
     assert answers["s1"]["verdict"] == "pass", "同键多行取最新可信"

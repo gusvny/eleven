@@ -52,10 +52,12 @@ def ledger_home(tmp_path, monkeypatch):
 
 
 def mk_row(**over):
+    # t261009-11: rows gain `run` (the run record's id). Readers still tolerate
+    # rows without it (legacy) — pinned by test_t261009_11_run_records.py.
     row = {"ts": "2026-09-21T08:00:00+00:00", "commit": COMMIT, "env_fp": FP,
            "conc_width": 4, "pool": "main", "scenario": "s1",
            "verdict": "pass", "wall_s": 1.0, "source": "inspection",
-           "ticket": ""}
+           "ticket": "", "run": "run-" + "A" * 26}
     row.update(over)
     return row
 
@@ -274,7 +276,8 @@ for i in range(5):
     row = {"ts": "2026-09-21T08:00:00+00:00", "commit": "ab" * 20,
            "env_fp": "cd" * 32, "conc_width": 4, "pool": "main",
            "scenario": "s-%s-%d" % (w, i), "verdict": "pass", "wall_s": 1.0,
-           "source": "lane:t%s" % w, "ticket": "t%s" % w}
+           "source": "lane:t%s" % w, "ticket": "t%s" % w,
+           "run": "run-" + "A" * 26}
     rcpt = sl.append_records([row])
     assert rcpt["written"] == 1, rcpt
 print("ok")
@@ -313,7 +316,8 @@ def test_271_rows_size_under_budget():
                 "env_fp": "cd" * 32, "conc_width": 4, "pool": "content",
                 "scenario": "t260916-25-stage-console-lifecycle",
                 "verdict": "env_fail", "wall_s": 123.4,
-                "source": "lane:t260922-12", "ticket": "t260922-12"}
+                "source": "lane:t260922-12", "ticket": "t260922-12",
+                "run": "run-" + "A" * 26}
     clean, why = sl.validate_row(_row(0))
     assert clean is not None and why is None, "行形必须过封闭校验（测真实形）"
     blobs = [sl._dumps(_row(i)).encode("utf-8") for i in range(271)]
