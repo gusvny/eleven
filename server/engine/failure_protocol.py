@@ -32,6 +32,7 @@ ENV_FAIL 是天然「免责标签」，无证据也无人拦。本模块把协�
 """
 import hashlib
 import json
+import re
 
 # 状态词表（封闭）
 STATUSES = ("pass", "fail", "not-checked")
@@ -96,6 +97,48 @@ def normalize_case(obj, attempt_default=1):
         "evidence": str(obj.get("evidence") or ""),
         "artifacts": obj["artifacts"] if isinstance(obj.get("artifacts"), list) else [],
     }
+
+
+# ---------------- Environment-red evidence classification (t261009-12 A) ----------------
+
+#: Closed vocabulary of MEASURED refused-connection families: the browser
+#: ERR_CONNECTION_REFUSED observed on t261008-36 plus the shapes already
+#: measured in lib_transient_retry's whitelist (node ECONNREFUSED, TCP
+#: "connection refused", Rust camel-case connectionrefused, temporalio SDK
+#: "tcp connect error"). Closed-list discipline: a new environment shape is
+#: added only after it is measured in the field — never a broad match (a broad
+#: match would wash assertion reds into environment reds, the mirror image of
+#: the defect under fix). A hit yields the prepare-type reason code
+#: connect_refused (already in PREPARE_REASONS) and classifies as
+#: not-checked x external.
+ENV_RED_PATTERNS = (
+    (re.compile(r"ERR_CONNECTION_REFUSED"), "connect_refused"),
+    (re.compile(r"ECONNREFUSED"), "connect_refused"),
+    (re.compile(r"connectionrefused", re.IGNORECASE), "connect_refused"),
+    (re.compile(r"(?:connection|connect)\s+refused", re.IGNORECASE),
+     "connect_refused"),
+    (re.compile(r"tcp\s+connect\s+error", re.IGNORECASE), "connect_refused"),
+)
+_ENV_RED_SCAN_LEN = 20000      # truncated scan for overlong/hostile input (same rule as lib_transient_retry)
+
+
+def env_red_reason(text):
+    """Evidence text → prepare-type reason code if it names a measured
+    environment failure, else None (t261009-12 Defect A).
+
+    Pure, zero IO (module contract). Fail-closed toward None: malformed input
+    (None / non-str / empty) and a non-matching tail both return None so the
+    caller keeps its existing classification — a free environment label is
+    never granted by a classifier failure. This is the CLASSIFICATION face
+    only; callers decide the status/cause stamping (the executor's synthesis
+    seam stamps not-checked×external on a hit)."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    scanned = text[:_ENV_RED_SCAN_LEN]
+    for pat, reason in ENV_RED_PATTERNS:
+        if pat.search(scanned):
+            return reason
+    return None
 
 
 # ---------------- 三态收紧（fail-closed） ----------------

@@ -1294,6 +1294,11 @@
    "note": "",
    "sync_path": ""
   },
+  "integration/sc_check_concurrency_reorder_face.py": {
+   "anchor": "behaviour",
+   "note": "t261009-03 CL-3 offline L3: the panel POST args land through the real ticket.py CLI on an isolated projects root and the read face returns the new order; stale/empty/injection refusals named with byte-identical state; node.ts forwards order and never fakes success (neutral 409 text); sidebar guard refusal sets the visible order-notice line; holders/count semantics unchanged",
+   "sync_path": ""
+  },
   "integration/sc_check_inspection_produce_chain.py": {
    "anchor": "behaviour",
    "note": "",
@@ -3879,6 +3884,21 @@
    "note": "t261006-14: the one-page aggregate derives new/fixed/overdue from existing ledgers+journals+ticket states, names missing/damaged inputs (never silently blank), writes only its own report, stays invisible to deadman accounting; pre-implement red expected, green at gate",
    "sync_path": ""
   },
+  "integration/t261006-15/sc_t26100615_inspection_tab_journey_layout.mjs": {
+   "anchor": "contract",
+   "note": "t261006-15 P1/P2/P4/P6/P7: rendered tab journey — newest-first period row, verbatim read-only banner, explicit no-report merge face, named-vs-counted separation, not-reviewed never clean, host-only trigger copy + records below period row, Range layout rule (1px left/right lines, equal-width metric grid, full-window width)",
+   "sync_path": ""
+  },
+  "integration/t261006-15/sc_t26100615_period_archive_route.mjs": {
+   "anchor": "contract",
+   "note": "t261006-15 P2/P5: served period-archive route — explicit newest-first order, not-available/merge semantics (adjacency-only, no date arithmetic), per-period report+coverage fetch, malformed-report named reason, unknown-project explicit 400",
+   "sync_path": ""
+  },
+  "integration/t261006-15/sc_t26100615_trigger_gate_attribution.mjs": {
+   "anchor": "behaviour",
+   "note": "t261006-15 P3/P4: gated attributed trigger write (KI-193 family on the new route) — anonymous refused writes nothing, malformed named-refusal, exactly-one attributed record in the project account, failed spawn visible not fabricated, records read newest-first/read-only/torn-line counted",
+   "sync_path": ""
+  },
   "integration/t261006-17/sc_concurrency_face_ledger_route.mjs": {
    "anchor": "contract",
    "note": "CL-2 read face: engine ledger numbers reach the panel route unchanged; malformed ledger and absent declaration are the SAME named ok:false refusal envelope (t261008-48 contract) with absolute paths, engine text verbatim, declared:false carried, never a fabricated number, unlimited face or empty lists; project switch is per-key between restored lawful fixtures",
@@ -3969,6 +3989,211 @@
    "note": "t261007-06 KI-213: settle/block verdict must agree with the disk - real-git incident sequence (join-settle lands, branch-side settle ok/already_settled), disk-agreement truth table, false-'merging state' text retired with the light exit named",
    "sync_path": "server/engine/agent_activities.py, server/engine/dev_lane.py (settle core + block texts)"
   },
+  "integration/t261007-07/sc_platform_banner_suppressed.mjs": {
+   "anchor": "behaviour",
+   "note": "Platform banner suppression: no visible fold toggle (semantic anchor = its four platform-locale aria-labels), no blank strip above the brand row, brand-row height regression guard, middle header present, document.title untouched, guard leg (anchor renamed at doc start) hides nothing and warns exactly once naming the anchor, light+dark screenshots",
+   "sync_path": ""
+  },
+  "integration/t261008-01/sc_t26100801_charter_injection_readable.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-01 Measure 2: injection line 1 readable (title names project), marker in the fold window, strip table, real-file render head has no comment, fold predicate covers new+legacy shapes, wire stays PromptContentPart[] (KI-046), endpoint carries projectName",
+   "sync_path": ""
+  },
+  "integration/t261008-01/sc_t26100801_session_label_handle_face.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-01 Measure 1: charter-raw-title predicate truth table, label helper falls back to the handle (executor fixed handle), band wiring consumes the guarded label with raw title in a tooltip face, handles single-sourced",
+   "sync_path": ""
+  },
+  "integration/t261008-02/sc_middle_column_no_comment_text.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-02: rendered middle-column machine-status head contains no // comment text and none of the t261005-10 (UI-2) comment literal, light+dark with screenshots; S0 family guard: no bare // comment lines in JSX children position in workbench client src, bundles free of the literal and in sync",
+   "sync_path": ""
+  },
+  "integration/t261008-05/sc_executor_panel_height_chain.mjs": {
+   "anchor": "behaviour",
+   "note": "real-browser computed layout of the middle column height chain (t261008-05)",
+   "sync_path": ""
+  },
+  "integration/t261008-07/sc_t26100807_detail_single_column.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-07 detail column: one scrolling column in mock v11 order (order via compareDocumentPosition over semantic anchors), per-state decision-card wording, ops-only action row with no dead buttons, no-data-renders-nothing, source_ticket-filtered requests read reader-side, collapsed heavy sections at the end, crumb walk-back, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
+   "anchor": "behaviour",
+   "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+   "sync_path": ""
+  },
+  "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
+   "anchor": "behaviour",
+   "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",
+   "sync_path": ""
+  },
+  "integration/t261008-19/sc_t26100819_panel_tab_mock_anchors.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-19: panel Metrics Charts face + Docs entry rows vs the 261004 mocks, semantic-text anchors, negative tab-strip/Inspection assertions, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
+   "sync_path": ""
+  },
+  "integration/t261008-21/sc_t26100821_sidebar_popover_retired.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-21: popover retired, dwell pinned at 24h, stale localStorage not steering the knobless window, inspection rows bypass the client window",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_disposition_entry_face.mjs": {
+   "anchor": "behaviour",
+   "note": "panel disposition face: both action labels, verbatim refusals, voided copy keeps the rejection",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_void_named_surface.py": {
+   "anchor": "contract",
+   "note": "void surface named-disposition contract on the engine's own ledger/journal evidence files",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_void_then_rerun_period.py": {
+   "anchor": "behaviour",
+   "note": "void-then-rerun composition and in-flight ordering on open_period_ticket with the stub-client seam",
+   "sync_path": ""
+  },
+  "integration/t261008-22/sc_t26100822_voided_row_ranking.mjs": {
+   "anchor": "behaviour",
+   "note": "voided row derives non-blocked state and leaves the blocked tier in the production sort",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_agent_log_dir.mjs": {
+   "anchor": "contract",
+   "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal (naming-compat: quotes the scenario's leg-B fixture)",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_changes_english_dedup.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-23 changes face: one compact Changes panel plus one full-diff fold (no second Changeset summary), English empty state naming which precondition is missing, never a fabricated diff",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_lane_map_v5.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-23 lane map v5: duration-proportional segment widths, unstarted nominal width, two parallel forks as two bands in one dashed window with the parallel mark, generic renderer, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-23/sc_t26100823_timeline_reason_collapse.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-23 timeline option b: every entry kept, long reason collapsed behind a keyboard-reachable expand control that reveals the full text, malformed entries never yield undefined",
+   "sync_path": ""
+  },
+  "integration/t261008-24/sc_supply_zero_run_blocker.py": {
+   "anchor": "behaviour",
+   "note": "KI-220 t261008-24: real verify_lane zero-run supply receipt refuses (named blocked route), round stays exempt, false-refusal guard",
+   "sync_path": ""
+  },
+  "integration/t261008-24/tests/sc_zero_run_gate_stop.py": {
+   "anchor": "behaviour",
+   "note": "KI-220 t261008-24: real-worker journey - supply-red STOP (no arbitrate round) -> recovery -> retry_qc -> green ran>0 -> merge gate consumes the green-run face",
+   "sync_path": ""
+  },
+  "integration/t261008-25/sc_t261008_25_failed_ticket_disposition.py": {
+   "anchor": "behaviour",
+   "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
+   "sync_path": ""
+  },
+  "integration/t261008-25/sc_t261008_25_status_surface_map.py": {
+   "anchor": "behaviour",
+   "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
+   "sync_path": ""
+  },
+  "integration/t261008-26/sc_lane_vocabulary_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261008-26 KI-226: both lane-vocabulary gate faces plus zero-disturbance negative assertions; drives the real shared.py module (no production snapshot, no value lock beyond the declared vocabulary itself)",
+   "sync_path": ""
+  },
+  "integration/t261008-30/sc_t26100830_lane_rerun_human_gate.py": {
+   "anchor": "behaviour",
+   "note": "t261008-30: incident fingerprint replay through the public lane_legs/lane_findings judgement face; W9 source-text drift guard is auxiliary",
+   "sync_path": ""
+  },
+  "integration/t261008-33/sc_t26100833_anchor_guard_named_failure.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-33: SANDBAR_ANCHOR_MISMATCH named failure before any write across lane/standalone tree shapes; external-caller escape hatch regression",
+   "sync_path": "server/plugins/repo-anchor.mjs"
+  },
+  "integration/t261008-33/sc_t26100833_lane_env_anchor_boundary.mjs": {
+   "anchor": "contract",
+   "note": "t261008-33: every engine-built env for lane work carries the lane root as the repo anchor (single-point seam)",
+   "sync_path": "server/plugins/repo-anchor.mjs"
+  },
+  "integration/t261008-33/sc_t26100833_main_checkout_witness.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-33: incident-class witness - lane evidence write leaves the main checkout clean (delta-based), main root derived from the lane gitfile",
+   "sync_path": "server/plugins/repo-anchor.mjs"
+  },
+  "integration/t261008-35/sc_orphan_check_local_to_leg.py": {
+   "anchor": "behaviour",
+   "note": "pins the ticket contract: the shutdown-reclaim orphan check is local to the leg (no machine-wide process enumeration) and keeps teeth",
+   "sync_path": ""
+  },
+  "integration/t261008-36/sc_t26100836_settings_faces_merge.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-36: panel Settings tab lists Model routes + Project settings, each opens its face in one host-side overlay with the iframe kept (single layer), Back restores, pmod danger anchors unchanged, More-views affordance retired wholesale, light+dark captures",
+   "sync_path": ""
+  },
+  "integration/t261008-36/sc_t26100836_single_routes_path.py": {
+   "anchor": "source-text",
+   "note": "t261008-36 negative face: no model-routes reference in executor-panel source, exactly one ProvidersSection mount site, data-wb-more-views grep-zero, providers client keeps the routes save face",
+   "sync_path": ""
+  },
+  "integration/t261008-37/sc_concurrency_write_entry.mjs": {
+   "anchor": "contract",
+   "note": "CL-2b engine write entry: real spawn three-face agreement (decl bytes / audit file / read face), zero-side-effect refusal table, first-Save creation, entry-absent negative",
+   "sync_path": ""
+  },
+  "integration/t261008-39/sc_board_sweep_brief_contract.mjs": {
+   "anchor": "contract",
+   "note": "t261008-39 board sweep / rerise",
+   "sync_path": ""
+  },
+  "integration/t261008-39/sc_stuck_block_rerise_persistence.mjs": {
+   "anchor": "behaviour",
+   "note": "t261008-39 board sweep / rerise",
+   "sync_path": ""
+  },
+  "integration/t261008-39/sc_sweep_disposition_contract.mjs": {
+   "anchor": "contract",
+   "note": "t261008-39 board sweep / rerise",
+   "sync_path": ""
+  },
+  "integration/t261008-46/sc_mutex_working_peer_ceiling.py": {
+   "anchor": "contract",
+   "note": "t261008-46: working-peer ceiling on the ensure-mutex flock window (named-bound honest red)",
+   "sync_path": ""
+  },
+  "integration/t261008-46/sc_supply_working_peer_ceiling.py": {
+   "anchor": "contract",
+   "note": "t261008-46: two-tier supply contention wait contract (base budget vs working-peer ceiling knob) at the stage_docker CLI process face",
+   "sync_path": ""
+  },
+  "integration/t261008-50/sc_clean_tree_run_output.py": {
+   "anchor": "behaviour",
+   "note": "",
+   "sync_path": ""
+  },
+  "integration/t261009-03/sc_t26100903_reorder_write_face.mjs": {
+   "anchor": "behaviour",
+   "note": "t261009-03 CL-3 L3 journey: the panel POST {project, order} through the real route chain lands and the GET face returns the new order; refusal body text reaches the client in the shape orderNotice renders; refusal paths leave the state file byte-hash identical; holder slots/queue count unchanged",
+   "sync_path": ""
+  },
+  "integration/t261009-12/sc_env_refused_not_self.py": {
+   "anchor": "behaviour",
+   "note": "",
+   "sync_path": ""
+  },
+  "integration/t261009-12/sc_lint_verdict_stable_or_named.py": {
+   "anchor": "behaviour",
+   "note": "",
+   "sync_path": ""
+  },
   "integration/tests/test_fixture_reclaim.mjs": {
    "anchor": "behaviour",
    "note": "",
@@ -3992,221 +4217,6 @@
   "integration/worker-restart/sc_worker_single_poller.py": {
    "anchor": "behaviour",
    "note": "",
-   "sync_path": ""
-  },
-  "integration/t261006-15/sc_t26100615_period_archive_route.mjs": {
-   "anchor": "contract",
-   "note": "t261006-15 P2/P5: served period-archive route — explicit newest-first order, not-available/merge semantics (adjacency-only, no date arithmetic), per-period report+coverage fetch, malformed-report named reason, unknown-project explicit 400",
-   "sync_path": ""
-  },
-  "integration/t261006-15/sc_t26100615_trigger_gate_attribution.mjs": {
-   "anchor": "behaviour",
-   "note": "t261006-15 P3/P4: gated attributed trigger write (KI-193 family on the new route) — anonymous refused writes nothing, malformed named-refusal, exactly-one attributed record in the project account, failed spawn visible not fabricated, records read newest-first/read-only/torn-line counted",
-   "sync_path": ""
-  },
-  "integration/t261006-15/sc_t26100615_inspection_tab_journey_layout.mjs": {
-   "anchor": "contract",
-   "note": "t261006-15 P1/P2/P4/P6/P7: rendered tab journey — newest-first period row, verbatim read-only banner, explicit no-report merge face, named-vs-counted separation, not-reviewed never clean, host-only trigger copy + records below period row, Range layout rule (1px left/right lines, equal-width metric grid, full-window width)",
-   "sync_path": ""
-  },
-  "integration/t261007-07/sc_platform_banner_suppressed.mjs": {
-   "anchor": "behaviour",
-   "note": "Platform banner suppression: no visible fold toggle (semantic anchor = its four platform-locale aria-labels), no blank strip above the brand row, brand-row height regression guard, middle header present, document.title untouched, guard leg (anchor renamed at doc start) hides nothing and warns exactly once naming the anchor, light+dark screenshots",
-   "sync_path": ""
-  },
-  "integration/t261008-07/sc_t26100807_detail_single_column.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-07 detail column: one scrolling column in mock v11 order (order via compareDocumentPosition over semantic anchors), per-state decision-card wording, ops-only action row with no dead buttons, no-data-renders-nothing, source_ticket-filtered requests read reader-side, collapsed heavy sections at the end, crumb walk-back, light+dark captures",
-   "sync_path": ""
-  },
-  "integration/t261008-02/sc_middle_column_no_comment_text.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-02: rendered middle-column machine-status head contains no // comment text and none of the t261005-10 (UI-2) comment literal, light+dark with screenshots; S0 family guard: no bare // comment lines in JSX children position in workbench client src, bundles free of the literal and in sync",
-   "sync_path": ""
-  },
-  "integration/t261008-05/sc_executor_panel_height_chain.mjs": {
-   "anchor": "behaviour",
-   "note": "real-browser computed layout of the middle column height chain (t261008-05)",
-   "sync_path": ""
-  },
-  "integration/t261008-01/sc_t26100801_charter_injection_readable.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-01 Measure 2: injection line 1 readable (title names project), marker in the fold window, strip table, real-file render head has no comment, fold predicate covers new+legacy shapes, wire stays PromptContentPart[] (KI-046), endpoint carries projectName",
-   "sync_path": ""
-  },
-  "integration/t261008-01/sc_t26100801_session_label_handle_face.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-01 Measure 1: charter-raw-title predicate truth table, label helper falls back to the handle (executor fixed handle), band wiring consumes the guarded label with raw title in a tooltip face, handles single-sourced",
-   "sync_path": ""
-  },
-  "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
-   "anchor": "behaviour",
-   "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
-   "sync_path": ""
-  },
-  "integration/t261008-24/sc_supply_zero_run_blocker.py": {
-   "anchor": "behaviour",
-   "note": "KI-220 t261008-24: real verify_lane zero-run supply receipt refuses (named blocked route), round stays exempt, false-refusal guard",
-   "sync_path": ""
-  },
-  "integration/t261008-24/tests/sc_zero_run_gate_stop.py": {
-   "anchor": "behaviour",
-   "note": "KI-220 t261008-24: real-worker journey - supply-red STOP (no arbitrate round) -> recovery -> retry_qc -> green ran>0 -> merge gate consumes the green-run face",
-   "sync_path": ""
-  },
-  "integration/t261008-30/sc_t26100830_lane_rerun_human_gate.py": {
-   "anchor": "behaviour",
-   "note": "t261008-30: incident fingerprint replay through the public lane_legs/lane_findings judgement face; W9 source-text drift guard is auxiliary",
-   "sync_path": ""
-  },
-  "integration/t261008-26/sc_lane_vocabulary_gate.py": {
-   "anchor": "behaviour",
-   "note": "t261008-26 KI-226: both lane-vocabulary gate faces plus zero-disturbance negative assertions; drives the real shared.py module (no production snapshot, no value lock beyond the declared vocabulary itself)",
-   "sync_path": ""
-  },
-  "integration/t261008-22/sc_t26100822_void_named_surface.py": {
-   "anchor": "contract",
-   "note": "void surface named-disposition contract on the engine's own ledger/journal evidence files",
-   "sync_path": ""
-  },
-  "integration/t261008-22/sc_t26100822_void_then_rerun_period.py": {
-   "anchor": "behaviour",
-   "note": "void-then-rerun composition and in-flight ordering on open_period_ticket with the stub-client seam",
-   "sync_path": ""
-  },
-  "integration/t261008-22/sc_t26100822_disposition_entry_face.mjs": {
-   "anchor": "behaviour",
-   "note": "panel disposition face: both action labels, verbatim refusals, voided copy keeps the rejection",
-   "sync_path": ""
-  },
-  "integration/t261008-22/sc_t26100822_voided_row_ranking.mjs": {
-   "anchor": "behaviour",
-   "note": "voided row derives non-blocked state and leaves the blocked tier in the production sort",
-   "sync_path": ""
-  },
-  "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
-   "sync_path": ""
-  },
-  "integration/t261008-35/sc_orphan_check_local_to_leg.py": {
-   "anchor": "behaviour",
-   "note": "pins the ticket contract: the shutdown-reclaim orphan check is local to the leg (no machine-wide process enumeration) and keeps teeth",
-   "sync_path": ""
-  },
-  "integration/t261008-21/sc_t26100821_sidebar_popover_retired.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-21: popover retired, dwell pinned at 24h, stale localStorage not steering the knobless window, inspection rows bypass the client window",
-   "sync_path": ""
-  },
-  "integration/t261008-19/sc_t26100819_panel_tab_mock_anchors.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-19: panel Metrics Charts face + Docs entry rows vs the 261004 mocks, semantic-text anchors, negative tab-strip/Inspection assertions, light+dark captures",
-   "sync_path": ""
-  },
-  "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
-   "anchor": "behaviour",
-   "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",
-   "sync_path": ""
-  },
-  "integration/t261008-25/sc_t261008_25_failed_ticket_disposition.py": {
-   "anchor": "behaviour",
-   "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
-   "sync_path": ""
-  },
-  "integration/t261008-25/sc_t261008_25_status_surface_map.py": {
-   "anchor": "behaviour",
-   "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
-   "sync_path": ""
-  },
-  "integration/t261008-23/sc_t26100823_lane_map_v5.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-23 lane map v5: duration-proportional segment widths, unstarted nominal width, two parallel forks as two bands in one dashed window with the parallel mark, generic renderer, light+dark captures",
-   "sync_path": ""
-  },
-  "integration/t261008-23/sc_t26100823_timeline_reason_collapse.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-23 timeline option b: every entry kept, long reason collapsed behind a keyboard-reachable expand control that reveals the full text, malformed entries never yield undefined",
-   "sync_path": ""
-  },
-  "integration/t261008-23/sc_t26100823_changes_english_dedup.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-23 changes face: one compact Changes panel plus one full-diff fold (no second Changeset summary), English empty state naming which precondition is missing, never a fabricated diff",
-   "sync_path": ""
-  },
-  "integration/t261008-23/sc_t26100823_agent_log_dir.mjs": {
-   "anchor": "contract",
-   "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal (naming-compat: quotes the scenario's leg-B fixture)",
-   "sync_path": ""
-  },
-  "integration/t261008-37/sc_concurrency_write_entry.mjs": {
-   "anchor": "contract",
-   "note": "CL-2b engine write entry: real spawn three-face agreement (decl bytes / audit file / read face), zero-side-effect refusal table, first-Save creation, entry-absent negative",
-   "sync_path": ""
-  },
-  "integration/t261008-36/sc_t26100836_settings_faces_merge.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-36: panel Settings tab lists Model routes + Project settings, each opens its face in one host-side overlay with the iframe kept (single layer), Back restores, pmod danger anchors unchanged, More-views affordance retired wholesale, light+dark captures",
-   "sync_path": ""
-  },
-  "integration/t261008-36/sc_t26100836_single_routes_path.py": {
-   "anchor": "source-text",
-   "note": "t261008-36 negative face: no model-routes reference in executor-panel source, exactly one ProvidersSection mount site, data-wb-more-views grep-zero, providers client keeps the routes save face",
-   "sync_path": ""
-  },
-  "integration/t261008-39/sc_board_sweep_brief_contract.mjs": {
-   "anchor": "contract",
-   "note": "t261008-39 board sweep / rerise",
-   "sync_path": ""
-  },
-  "integration/t261008-39/sc_sweep_disposition_contract.mjs": {
-   "anchor": "contract",
-   "note": "t261008-39 board sweep / rerise",
-   "sync_path": ""
-  },
-  "integration/t261008-39/sc_stuck_block_rerise_persistence.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-39 board sweep / rerise",
-   "sync_path": ""
-  },
-  "integration/t261008-33/sc_t26100833_lane_env_anchor_boundary.mjs": {
-   "anchor": "contract",
-   "note": "t261008-33: every engine-built env for lane work carries the lane root as the repo anchor (single-point seam)",
-   "sync_path": "server/plugins/repo-anchor.mjs"
-  },
-  "integration/t261008-33/sc_t26100833_anchor_guard_named_failure.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-33: SANDBAR_ANCHOR_MISMATCH named failure before any write across lane/standalone tree shapes; external-caller escape hatch regression",
-   "sync_path": "server/plugins/repo-anchor.mjs"
-  },
-  "integration/t261008-33/sc_t26100833_main_checkout_witness.mjs": {
-   "anchor": "behaviour",
-   "note": "t261008-33: incident-class witness - lane evidence write leaves the main checkout clean (delta-based), main root derived from the lane gitfile",
-   "sync_path": "server/plugins/repo-anchor.mjs"
-  },
-  "integration/t261008-50/sc_clean_tree_run_output.py": {
-   "anchor": "behaviour",
-   "note": "",
-   "sync_path": ""
-  },
-  "integration/sc_check_concurrency_reorder_face.py": {
-   "anchor": "behaviour",
-   "note": "t261009-03 CL-3 offline L3: the panel POST args land through the real ticket.py CLI on an isolated projects root and the read face returns the new order; stale/empty/injection refusals named with byte-identical state; node.ts forwards order and never fakes success (neutral 409 text); sidebar guard refusal sets the visible order-notice line; holders/count semantics unchanged",
-   "sync_path": ""
-  },
-  "integration/t261009-03/sc_t26100903_reorder_write_face.mjs": {
-   "anchor": "behaviour",
-   "note": "t261009-03 CL-3 L3 journey: the panel POST {project, order} through the real route chain lands and the GET face returns the new order; refusal body text reaches the client in the shape orderNotice renders; refusal paths leave the state file byte-hash identical; holder slots/queue count unchanged",
-   "sync_path": ""
-  },
-  "integration/t261008-46/sc_supply_working_peer_ceiling.py": {
-   "anchor": "contract",
-   "note": "t261008-46: two-tier supply contention wait contract (base budget vs working-peer ceiling knob) at the stage_docker CLI process face",
-   "sync_path": ""
-  },
-  "integration/t261008-46/sc_mutex_working_peer_ceiling.py": {
-   "anchor": "contract",
-   "note": "t261008-46: working-peer ceiling on the ensure-mutex flock window (named-bound honest red)",
    "sync_path": ""
   }
  }

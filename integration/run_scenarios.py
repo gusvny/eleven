@@ -2686,6 +2686,13 @@ SCENARIOS = [
     ("t261008-50-clean-tree-run-output",
      "Scenario run output never dirties the main work tree (t261008-50, ticket user request: stop tracking scenario run output (evidence/ and out/ as well as shots/) and add a clean-tree regression check; grey-box L3, real git subprocesses on the real tree, offline seconds, zero docker/browser, never touches 3099; incident 261008: tracked evidence PNGs under integration/t261008-36/evidence were regenerated every suite run, turning git status --porcelain dirty on main, so the merge gate's main-untouched check blocked every other lane): A simulated-run face — fresh files under integration/<non-carrier>/{shots,out,evidence}/ (png, non-png stray, name with a space) are each reported by git check-ignore and none appears in git status --porcelain (a run regenerating output leaves main clean); B carrier face — the two hand-preserved deliverable dirs integration/t261004-25/evidence and integration/t261004-28/evidence stay tracked in git ls-files AND are NOT reported ignored (the ! negation fires; a blanket evidence ignore would silently doom their future files); C rule-drift face — .gitignore carries the three output-dir rules and the two carrier negations verbatim, a removed rule turns red with the missing line named; net-zero side effect — all probe files are removed before exit, no git state touched. Division of intent: the developer L1 unit test pins the static untracked face (git ls-files contains no run output); this scenario pins the behaviour face (writing fresh output keeps porcelain clean, the carve-out actually fires both ways) — neither substitutes for the other. git absent / not a git work tree = ENV_FAIL exit 2. Pre-fix tree red on A is the expected TDD signal; green at arbitrate/merge",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261008-50/sc_clean_tree_run_output.py", "ro"),
+    # ---- t261009-12: an environment red never wears the ticket's own cause; the lint verdict is reproducible or names its condition ----
+    ("t261009-12-env-refused-not-self",
+     "An environment failure in a scenario tail must classify as a named env red, never as the ticket's own cause (t261009-12 Defect A, incident t261008-36: tail carried net::ERR_CONNECTION_REFUSED at http://127.0.0.1:21010/ plus a fixture transport error, process exited 1, synthesis stamped fail×self×assert_mismatch pointing every reader at the wrong file; grey-box L2.5, offline seconds, zero docker/browser). The scenario drives the production synthesis seam (_spec_from_output) with real subprocess-shaped outputs and asserts ONLY the emitted protocol line (public gate-consumed face): A the literal incident tail × exit 1 -> not-checked × external, reason a prepare-type code naming the connection-refused family, evidence keeps the observed tail, line parses and enforce_semantics consumes it with ZERO violations (a backed env red is a legal line); B a genuine assertion tail × exit 1 keeps fail×self×assert_mismatch byte-identically (no vocabulary overreach onto real product reds); C malformed faces (None/empty/pattern-free garbage tail × exit 1) fail closed toward self, never toward a free env label; D the closed exit-code table is untouched (0->pass, 2->not-checked×external, -9->fail×self×timeout). Intent split: the classification vocabulary's internal truth table and env_red_reason's malformed-input matrix belong to developer L1; this entry pins the synthesis line the gate actually consumes. Integration modules unimportable = ENV_FAIL exit 2. Pre-implement red on A is the expected TDD signal; arbitrate/merge must be green",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-12/sc_env_refused_not_self.py", "ro"),
+    ("t261009-12-lint-verdict-stable-or-named",
+     "The lint verdict must be reproducible for identical inputs or name its condition (t261009-12 Defect B, measured today: two runs seconds apart printed `LINT done: 0 error / 1 warn` then `20 error` while the fleet was busy — the judged input set is a function of live git state, and on any git read failure the target builder silently degrades to a full rglob; grey-box L3, real lint_tests.py subprocess on the real tree, offline seconds, zero docker, never touches 3099). A two consecutive runs on the untouched tree print byte-identical final `LINT done:` lines; B fault injection — a PATH shim git failing exactly `ls-files` (all other git calls pass through) — the run must NAME the degraded input condition in its own output and the verdict line itself carries the condition (a bare counts line under degraded inputs is the defect face); C under the same injected condition two runs still agree byte-for-byte (naming the condition must not reintroduce drift); D zero residue — shim lives in a temp dir removed in finally, the real tree is never written. Intent split: the pure helpers' unit matrix (base pinning, condition-line formatting, degradation flag) belongs to developer L1; this entry pins the tool's user-visible output contract end to end. python/git or lint_tests.py missing = ENV_FAIL exit 2. Pre-implement red on B is the expected TDD signal; arbitrate/merge must be green",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-12/sc_lint_verdict_stable_or_named.py", "ro"),
 ]
 
 CMD_TIMEOUT = 900
@@ -2997,9 +3004,13 @@ def _spec_from_output(name, pool, out, exit_code, dur, started):
     退役：该口径让嵌套执行器输出顶替本层综合行（260912 实锤：真红被嵌套 pass 顶成
     绿，两套汇总分叉照常放行）。场景 stdout 的 `{`/`[` 行一律视为嵌套产出物——既不
     进本层计数（收集缝已删，见 _emit），也不得经尾段回显混入闸候选（回显中和见
-    _echo_tail）。旧场景只有退出码与文本尾巴，按三态契约反推：exit1=断言级产品红
-    （cause=self/reason=assert_mismatch）、exit2=环境红（cause=external，evidence=
-    尾巴——ENV_FAIL 行点名缺什么）。退出码封闭性之外的码按 fail×other 处理（不归环境）。"""
+    _echo_tail）。旧场景只有退出码与文本尾巴，按三态契约反推：exit1 默认断言级产品
+    红（cause=self/reason=assert_mismatch）——但尾段证据命中实测拒连词表时改判
+    not-checked×external×connect_refused（t261009-12：环境失败必须按观察到的证据
+    具名为环境红，绝不冒充票自身原因；词表=failure_protocol.ENV_RED_PATTERNS /
+    env_red_reason，未命中时行为逐字节不变）。exit2=环境红（cause=external，
+    evidence=尾巴——ENV_FAIL 行点名缺什么）。退出码封闭性之外的码按 fail×other
+    处理（不归环境）。"""
     started_iso = datetime.datetime.fromtimestamp(
         started, datetime.timezone.utc).isoformat(timespec="seconds")
     tail = " | ".join(ln.strip() for ln in out.splitlines() if ln.strip())[-500:]
@@ -3029,6 +3040,18 @@ def _spec_from_output(name, pool, out, exit_code, dur, started):
         return lib_result.spec_line(name=name, suite=pool, status="not-checked",
                                     cause="external", reason="other",
                                     evidence=tail or "ENV_FAIL exit=2（无文本尾巴）",
+                                    dur_s=round(dur, 3), started=started_iso,
+                                    git_sha=sha)
+    # exit1 默认断言级产品红；但尾段证据命中实测拒连词表时改判环境红（t261009-12
+    # Defect A：t261008-36 现场 ERR_CONNECTION_REFUSED 被盖成 self/assert_mismatch，
+    # 每个读者被指去错误文件）。协议库缺席=回落旧分类（执行器不为协议缺席炸）。
+    env_reason = None
+    if _fp_mod is not None and tail:
+        env_reason = _fp_mod.env_red_reason(tail)
+    if env_reason:
+        return lib_result.spec_line(name=name, suite=pool, status="not-checked",
+                                    cause="external", reason=env_reason,
+                                    evidence=tail,
                                     dur_s=round(dur, 3), started=started_iso,
                                     git_sha=sha)
     return lib_result.spec_line(name=name, suite=pool, status="fail",

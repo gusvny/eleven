@@ -106,6 +106,21 @@ atexit.register(shutil.rmtree, PYC, ignore_errors=True)
 
 errors, warns = [], []
 
+#: Unstable-input conditions observed during this run (t261009-12 Defect B):
+#: the lint judged a tree/git state that is not a function of the tree content
+#: (git read failure → rglob degradation, shared-base resolution failure, …).
+#: Every fired condition is printed when it fires AND named on the final
+#: verdict line — two different verdicts for the same inputs can never print
+#: without saying why (measured incident: "LINT done: 0 error / 1 warn" and,
+#: seconds later under fleet load, "20 error" for the same inputs).
+UNSTABLE_INPUTS = []
+
+
+def note_unstable_input(msg):
+    """Record + print one unstable-input condition (visible, never silent)."""
+    UNSTABLE_INPUTS.append(msg)
+    print("NOTE  unstable input: %s" % msg, flush=True)
+
 
 def err(msg):
     errors.append(msg)
@@ -330,8 +345,17 @@ def _lint_targets():
             capture_output=True, text=True, timeout=60)
         if out.returncode == 0:
             return [REPO / r for r in out.stdout.split("\0") if r]
-    except Exception:                            # noqa: BLE001 —— git 不可用=退化不判错
-        pass
+        detail = (out.stderr or "").strip()[-200:] or ("rc=%d" % out.returncode)
+    except Exception as e:                            # noqa: BLE001 —— git 不可用=退化不判错
+        detail = "%s: %s" % (type(e).__name__, e)
+    # t261009-12 Defect B: the degradation is no longer silent — the judged
+    # file set changes shape here (rglob sees ignored-adjacent scratch that
+    # ls-files does not), which is exactly how two runs seconds apart printed
+    # two different verdicts. The condition is named here and again on the
+    # final "LINT done" line.
+    note_unstable_input(
+        "git ls-files failed (%s) — judged set degraded to a full-tree rglob "
+        "walk; file-set shape may differ from a clean git read" % detail)
     return [p for p in REPO.rglob("*") if p.is_file()]
 
 
@@ -1312,17 +1336,20 @@ def lint_snapshot_discipline():
         ok("L18 快照纪律：标记与清单标签成对（%d 个已申报快照测试）" % len(marked))
 
 
-def lint_tier_markers():
+def lint_tier_markers(base=None):
     """L21 (t261004-42): the tier marker check — expensive-pool entries added or
     changed in the diff must carry the declared tier/cost marker in their intent.
     Core lives in integration/lib_tier_marker.py (pure, unit-battery owned);
-    this wrapper owns the diff face (base resolution + added-line mapping)."""
+    this wrapper owns the diff face (base resolution + added-line mapping).
+    t261009-12: `base` is the diff base pinned ONCE in main() for the whole
+    run (one run, one base); $TIER_MARKER_BASE still wins when declared, and
+    None falls back to the shared chain exactly as before."""
     from lib_tier_marker import (EXPENSIVE_POOLS, REGISTRY_REL, check_registry,
                                  changed_entry_names)
     from lib_lint_diff import resolve_base
     print("L21 tier marker: pools = %s; added/changed registry entries only "
           "(per-diff, copy-gate construction)" % "/".join(EXPENSIVE_POOLS))
-    base_ref, how = resolve_base(None, git_diff_callable, env_var="TIER_MARKER_BASE")
+    base_ref, how = resolve_base(base, git_diff_callable, env_var="TIER_MARKER_BASE")
     if base_ref is None:
         # Declared degrade path (not silent): no diff base is an environment
         # property, not a rule violation. The skip line is visible in every run.
@@ -1495,6 +1522,22 @@ def lint_grants_field_parity():
 
 
 def main():
+    # t261009-12 Defect B: pin the diff base ONCE per run and hand the same
+    # ref to every per-diff rule (L15 copy-language, L21 tier marker). Before,
+    # each rule resolved its own base mid-run — while commits land under a
+    # busy fleet the base (and the judged diff) moves between rules, which is
+    # one measured way two verdicts diverged for the same inputs.
+    pinned_base = None
+    try:
+        from lib_lint_diff import resolve_base
+        pinned_base, pinned_how = resolve_base(None, git_diff_callable)
+        print("LINT diff base pinned for this run: %s (%s)"
+              % (pinned_base[:12] if pinned_base else None, pinned_how),
+              flush=True)
+    except Exception as e:                       # noqa: BLE001 —— 判不出=点名，不静默
+        note_unstable_input(
+            "shared diff base could not be resolved (%s: %s) — per-diff rules "
+            "fall back to their own chains" % (type(e).__name__, e))
     lint_syntax()
     lint_collect()
     lint_mjs_imports()
@@ -1513,14 +1556,14 @@ def main():
     # (standalone entry there); wired here in-process like L7 so every lane that runs
     # this static gate carries the rule.
     from lint_copy_language import lint_copy_language as _l15
-    _l15(errors)
+    _l15(errors, base=pinned_base)
     lint_anchor_manifest()
     lint_home_paths()
     lint_snapshot_discipline()
     lint_runtime_state_location()
     lint_grants_field_parity()
     # L21 tier marker (t261004-42): the end-to-end admission rule, shape-only face
-    lint_tier_markers()
+    lint_tier_markers(base=pinned_base)
     # L22 stale pin (t261009-02): a scenario pin of a CJK literal that survives
     # nowhere it could come from = the wording moved without its anchor. Cheap
     # static face of "a wording change carries its pinning anchors in the same
@@ -1528,7 +1571,12 @@ def main():
     from lib_stale_pin import lint_stale_pins as _l22
     _l22(REPO, errors)
     n_e, n_w = len(errors), len(warns)
-    print("LINT done: %d error / %d warn" % (n_e, n_w))
+    # t261009-12 Defect B: the verdict line names any unstable-input condition
+    # that fired, so two different verdicts for the same inputs can never print
+    # without saying why.
+    suffix = (" (unstable inputs: %s)" % "; ".join(UNSTABLE_INPUTS)
+              if UNSTABLE_INPUTS else "")
+    print("LINT done: %d error / %d warn%s" % (n_e, n_w, suffix))
     return 1 if n_e else 0
 
 
