@@ -80,6 +80,14 @@ Two consequences worth stating plainly. **The two minting rules stay two**, and 
 2. **The authority hands out blocks.** A writer leases a range (say 227–276) and increments inside it without asking again. Coordination drops to once per block, and — the useful part — it is **merge-safe**: two clones' appends can be merged because their numbers cannot overlap. What is lost is that the number stops being a count: it becomes an upper bound, and "how many are there" is a query.
 3. **Each writer has its own scope inside the id** (`KI-A-12`, `KI-B-7`): no coordination at all, still short and still sayable out loud, at the cost of the global sequence — nothing can read how many exist off the highest number.
 
+**"So a ULID will not collide?" — almost certainly not, which is not the same thing, and the difference decides how it is used.** A ULID's tail is **80 random bits**: two ids minted in the same millisecond collide with probability on the order of one in 2⁸⁰ per pair, so the birthday threshold — the point where a collision has even odds — is around **10¹² ids inside a single millisecond**. Nothing in this project will approach that, and it is worth saying in those terms rather than as a guarantee: **randomness does not remove collisions, it makes them astronomically unlikely**, which is a different kind of assurance from "the counter cannot repeat".
+
+Three things follow, and they matter more than the probability:
+
+- **Monotonic mode turns it from probability into construction, within one writer.** With the tail incremented instead of re-randomised when the millisecond repeats, two ids from one process cannot be equal on a same-millisecond tie. Across processes it goes back to being probabilistic, because each process seeds its own tail from randomness.
+- **Uniqueness and ordering are carried by different parts.** The randomness carries uniqueness; the timestamp carries ordering. A wrong clock costs ordering and does **not** cost uniqueness.
+- **What a random id cannot do is tell you anything.** No count, no "roughly when", and it cannot be read aloud — the costs already measured above at 4,058 citations.
+
 **Whichever is chosen, one check is mandatory**: the ledger must **refuse a duplicate id loudly**, on append and after any merge. A collision is silent by construction, so the check is the cheapest insurance in this document — and it is what would have caught the ticket number being issued twice.
 
 **And that incident is worth restating, because it was not caused by concurrency**: the ticket number repeated because the next number was derived from a **partial view** (the tickets that happened to be alive). The rule that follows is independent of how many writers there are: **the minter must see the whole id space, retired entries included**. Then the sequence needs coordination it cannot have, and a time id earns its length. Today it is one registrar, a few hundred entries, and references written by hand.
