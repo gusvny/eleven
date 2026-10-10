@@ -1282,6 +1282,11 @@
       "note": "",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261009_58_write_set_record.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
     "server/engine/tests/test_t261009_55_boot_meta_merge.py": {
       "anchor": "behaviour",
       "note": "t261009-55: worker-owned meta extras merge (console_boot/polling) — merge, pid guard, draining guard, malformed-input fail-closed, boot id env read",
@@ -4628,6 +4633,16 @@
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
+    },
+    "integration/t261009-58/sc_t26100958_effective_write_set.py": {
+      "anchor": "contract",
+      "note": "t261009-58 story (1)+(4): one effective write set record - shape, stored-field fallback, record-wins precedence, named malformed refusal, history face",
+      "sync_path": "server/engine/shared.py (write-set record faces); server/engine/dev_lane.py (plan refresh wiring)"
+    },
+    "integration/t261009-58/sc_t26100958_plan_mismatch_and_annex.py": {
+      "anchor": "contract",
+      "note": "t261009-58 story (2)+(3)+(5): named plan-time mismatch + narrow audited annex admission incl. protected refusal and KI-125/KI-158 directory door",
+      "sync_path": "server/engine/shared.py (plan_write_set_mismatch / annex_admission); server/engine/dev_lane.py (annex signal wiring)"
     },
     "integration/t261009-55/sc_t26100955_one_tick_handover.py": {
       "anchor": "contract",

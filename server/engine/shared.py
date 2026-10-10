@@ -4164,6 +4164,17 @@ def normalize_files_changed(raw: Any):
 
 
 @dataclass
+class AnnexRequest:
+    """The annex_write_set signal payload (t261009-58): the ONE lawful route for a
+    file discovered mid-round outside the write set. Every admitted annex is a
+    recorded act — who asked and why ride on the ticket face."""
+
+    files: List[str] = field(default_factory=list)
+    who: str = ""
+    reason: str = ""
+
+
+@dataclass
 class ReworkRequest:
     """The rework signal payload: go back to a target stage and re-run. An empty
     target_stage = the default (the current stage's revision_to, or the previous
@@ -4475,6 +4486,10 @@ class MergeCheckArgs:
     # so RUNNING instances replaying historical events do not break — an empty face
     # reads as RED zero-run (never green-by-default; fail-closed by design).
     last_green_run: Dict[str, Any] = field(default_factory=dict)
+    # t261009-58: the ABSOLUTE path of this ticket's write-set record file (empty =
+    # no record / old ticket). Cross-process readers take absolute paths only
+    # (boundary rule); merge_check uses it for the review face's history lines.
+    write_set_record_path: str = ""
 
 
 # ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----
@@ -4851,6 +4866,391 @@ class ReviewGateArgs:
     no_file_changes: bool = False             # the creation declared 「this ticket changes no files」 → skip the 0-commit gate
 
 
+# ---- t261009-58: ONE effective write set ------------------------------------
+# The defect this family of helpers cures (KI-021/125/158/167, t261009-50/52/56):
+# the write set had more than one source of truth and the faces disagreed. The
+# cure has three parts, each pure here so the tests can pin them without
+# Temporal, disk, or an agent:
+#   1. a durable ticket-scoped record (.sandbar/write_set_record.json in the lane
+#      dir) that every widening (plan union / annex) appends to, with who/reason/
+#      moment — the one answer to "who widened it and why";
+#   2. one precedence rule: the FILE record wins for cross-process readers
+#      (merge review, ticket face); meta["effective_write_set"] is the
+#      workflow-side cache written from the same union atomically and wins for
+#      in-workflow readers (write_set_effective). A reader never unions anything
+#      itself — N readers unioning = N sources of truth, the defect again;
+#   3. a narrow audited annex admission (annex_admission) with injected
+#      predicates — protected paths stay the host's word, files held by another
+#      in-flight ticket stay theirs, and the ticket never wanders into a
+#      directory it has no business in (KI-125's shape).
+# Absent/corrupt record = old ticket = today's behaviour byte for byte; every
+# reader keeps the stored-field fallback and names the fallback when it fires.
+WRITE_SET_RECORD_NAME = ".sandbar/write_set_record.json"   # lane-dir-relative
+ANNEX_MAX_FILES = 8          # per-ticket cap on annex-added files (a small number)
+WS_WIDEN_PLAN_UNION = "plan_union"
+WS_WIDEN_ANNEX = "annex"
+
+
+def write_set_effective(meta: Any) -> List[str]:
+    """The in-workflow effective write set (pure).
+
+    Precedence (pinned by test): meta['effective_write_set'] — the workflow-side
+    cache of the durable record, written at the same moment as the union — wins
+    when it is a non-empty list; otherwise the stored meta['write_set'] (old
+    tickets). Any malformed shape falls back the same way; this function never
+    raises and never returns a non-list."""
+    eff = (meta or {}).get("effective_write_set")
+    if isinstance(eff, list) and eff:
+        return [str(x) for x in eff]
+    ws = (meta or {}).get("write_set")
+    if isinstance(ws, list):
+        return [str(x) for x in ws]
+    return []
+
+
+def build_write_set_record(ticket_id: Any = "", initial: Any = None, at: Any = "",
+                           history: Any = None) -> Dict[str, Any]:
+    """A fresh record for one ticket: initial set + optional widening history
+    (each entry {kind, files, who, reason, at}), effective = initial ∪ history.
+
+    The scenario contract (integration/t261009-58) calls this as
+    build(initial=..., history=[...]); the workflow calls it positionally as
+    (ticket_id, initial, at). History entries that fail apply_write_set_widening
+    (illegal shape / missing who-reason) are refused by name and skipped — the
+    record never carries a silent widening."""
+    init = []
+    for p in (initial or []):
+        if _valid_write_set_entry(p):
+            s = str(p).strip()
+            if s not in init:
+                init.append(s)
+    rec = {"ticket_id": str(ticket_id or ""), "initial": init,
+           "effective": list(init), "history": [], "at": str(at or "")}
+    for it in (history or []):
+        if not isinstance(it, dict):
+            continue
+        rec, _err = apply_write_set_widening(
+            rec, it.get("kind"), it.get("files") or [], it.get("who"),
+            it.get("reason"), it.get("at"))
+    return rec
+
+
+def read_effective_write_set(record: Any, stored: Any) -> List[str]:
+    """The effective-set reader every face asks (pure; scenario contract name).
+
+    A valid record wins (one question, one answer); None / empty / malformed →
+    the stored field, unchanged (old tickets byte-identical). A malformed record
+    is never silently accepted as truth: shape is judged strictly (effective must
+    be a list of strings; every history entry must carry who/reason/at) and the
+    strict-fail path returns the stored field — the fallback IS the named
+    downgrade, the caller logs it when it fired."""
+    if isinstance(record, dict) and isinstance(record.get("effective"), list) \
+            and all(isinstance(x, str) for x in record["effective"]):
+        hist = record.get("history")
+        if isinstance(hist, list) and all(
+                isinstance(h, dict) and str(h.get("reason") or "")
+                for h in hist):
+            return [str(x) for x in record["effective"]]
+    if stored is None:
+        return []
+    if isinstance(stored, (list, tuple)):
+        return [str(x) for x in stored]
+    raise ValueError("stored write set must be a list (found %s)" % type(stored).__name__)
+
+
+def apply_write_set_widening(record: Any, kind: Any, files: Any, who: Any,
+                             reason: Any, at: Any):
+    """Append one widening act to the record (pure; returns (new_record, err)).
+
+    kind is WS_WIDEN_PLAN_UNION or WS_WIDEN_ANNEX; files must be legal write-set
+    entries (illegal ones are refused by name, not silently dropped); already-
+    effective entries are skipped (they are not a widening). The input record is
+    not mutated (workflow event history keeps its own copy)."""
+    rec = record if isinstance(record, dict) else None
+    if rec is None or not isinstance(rec.get("effective"), list) \
+            or not isinstance(rec.get("history"), list):
+        return None, ("write-set record malformed (effective/history missing or "
+                      "not lists) — refusing the widening, the stored field stands")
+    if kind not in (WS_WIDEN_PLAN_UNION, WS_WIDEN_ANNEX):
+        return None, "unknown widening kind %r" % (kind,)
+    who_s, reason_s = str(who or "").strip(), str(reason or "").strip()
+    if not who_s or not reason_s:
+        return None, "widening needs a non-empty who and reason (a recorded act, not a silent one)"
+    if not isinstance(files, list):
+        return None, "widening files must be a list (found %s)" % type(files).__name__
+    bad = [p for p in files if not _valid_write_set_entry(p)]
+    if bad:
+        return None, "widening carries illegal entries %r (refused by name, nothing widened)" % (bad[:5],)
+    eff = [str(x) for x in rec["effective"]]
+    added = []
+    for p in files:
+        s = str(p).strip()
+        if s not in eff and s not in added:
+            added.append(s)
+    if not added:
+        return dict(rec), ""      # nothing new: no history entry, no widening
+    out = dict(rec)
+    out["effective"] = eff + added
+    out["history"] = list(rec["history"]) + [
+        {"kind": kind, "files": added, "who": who_s, "reason": reason_s,
+         "at": str(at or "")}]
+    return out, ""
+
+
+def write_set_record_bytes(record: Any) -> bytes:
+    """Canonical bytes of the record (pure): sorted keys, fixed separators. Same
+    record in → same bytes out — this is what makes the persist activity
+    idempotent under Temporal replay (condition 3 of the plan review)."""
+    return json.dumps(record, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":")).encode("utf-8")
+
+
+def parse_write_set_record(raw: Any):
+    """Parse the record file content (pure; returns (record, err)). Any malformed
+    input — non-dict, missing keys, history not a list — returns (None, err);
+    the caller falls back to the stored field and names the fallback."""
+    if isinstance(raw, (bytes, bytearray)):
+        try:
+            raw = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            return None, "write-set record is not utf-8: %s" % e
+    try:
+        rec = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError) as e:
+        return None, "write-set record is not valid JSON: %s" % e
+    if not isinstance(rec, dict):
+        return None, "write-set record is %s, not an object" % type(rec).__name__
+    for key in ("ticket_id", "initial", "effective", "history"):
+        if key not in rec:
+            return None, "write-set record missing key %r" % key
+    if not isinstance(rec["effective"], list) or not isinstance(rec["history"], list):
+        return None, "write-set record effective/history must be lists"
+    return rec, ""
+
+
+def write_set_record_face(record_path: Any):
+    """Cross-process read of the record (disk access isolated here so agents'
+    activities and tools share one read path). Returns (lines, err): lines are
+    the human-readable history for a face (merge review, ticket face); a missing
+    file returns ([], "") — an old ticket, not a fault; a present-but-broken
+    record returns the named fault so the face shows the fallback, never silence."""
+    p = pathlib.Path(str(record_path or ""))
+    if not p.is_absolute():
+        return [], ("write-set record path is not absolute (%s) — cross-process "
+                    "readers take absolute paths only" % record_path)
+    if not p.exists():
+        return [], ""
+    try:
+        rec, err = parse_write_set_record(p.read_text(encoding="utf-8"))
+    except OSError as e:
+        return [], "write-set record unreadable: %s" % e
+    if err:
+        return [], err
+    return write_set_history_lines(rec), ""
+
+
+def write_set_history_lines(record: Any) -> List[str]:
+    """The ticket-face history (pure): initial set, one line per widening with
+    who/reason/moment, then the effective set. English by the 261004 rule (a
+    face a cross-project reviewer reads)."""
+    rec = record if isinstance(record, dict) else {}
+    lines = ["write set initial (%d): %s" % (len(rec.get("initial") or []),
+                                             ", ".join(str(x) for x in (rec.get("initial") or [])) or "(empty)")]
+    for it in (rec.get("history") or []):
+        if not isinstance(it, dict):
+            continue
+        lines.append("widening %s: +%s who=%s reason=%s at=%s" % (
+            it.get("kind") or "?", ", ".join(str(f) for f in (it.get("files") or [])),
+            it.get("who") or "?", it.get("reason") or "?", it.get("at") or "?"))
+    lines.append("write set effective (%d): %s" % (len(rec.get("effective") or []),
+                                                   ", ".join(str(x) for x in (rec.get("effective") or [])) or "(empty)"))
+    return lines
+
+
+def write_set_holds(entries: Any, path: Any) -> bool:
+    """Whether `entries` authorize `path` (pure): a directory-form entry (trailing
+    '/') holds everything under it; a file-form entry holds exactly itself. Same
+    stance as the runtime gate's prefix semantics for dirs, tightened for files
+    (server/a.py must NOT hold server/a.py.bak)."""
+    s = str(path or "")
+    for e in (entries or []):
+        e = str(e or "")
+        if not e:
+            continue
+        if e.endswith("/"):
+            if s.startswith(e):
+                return True
+        elif s == e:
+            return True
+    return False
+
+
+def plan_write_set_mismatch(initial: Any, plan_files: Any) -> List[str]:
+    """The plan-declared files outside the THEN-current set (pure) — the input of
+    the named mismatch line at review_plan time (t261009-58 rule 2: name it at
+    plan time, never at implement round eight). Exactly refresh_write_set's
+    `added` — one union, one definition, no second truth. Strict on shape: a
+    non-list plan receipt or a non-string entry is a named refusal (ValueError),
+    never a crash-open into admission and never a silent char-iteration admit."""
+    if plan_files is not None and not isinstance(plan_files, list):
+        raise ValueError("plan files must be a list (found %s)"
+                         % type(plan_files).__name__)
+    if any(not isinstance(x, str) for x in (plan_files or [])):
+        raise ValueError("plan files must all be strings (refused, not admitted)")
+    return refresh_write_set(initial, plan_files)[1]
+
+
+def render_write_set_history(record: Any) -> str:
+    """The history face as one human-readable string (pure; scenario contract
+    name). Consumes ONLY the record — never a quarantine diff. Answers "who
+    widened it and why" in the face itself."""
+    return "\n".join(write_set_history_lines(record))
+
+
+def _annex_scope_root(entry: Any) -> str:
+    """The top-level scope of a write-set entry (pure): '' for a repo-root file,
+    else the first path component ('server' for 'server/engine/x.py')."""
+    s = pathlib.PurePosixPath(str(entry or "").strip()).as_posix()
+    if s.startswith("../") or "/" not in s:
+        return ""
+    return s.split("/", 1)[0]
+
+
+def annex_request_faults(req: Any) -> str:
+    """Intake-shape validation of an annex request (pure): who and reason must be
+    non-empty, files must be a non-empty list of legal entries. Returns the
+    refusal text or '' (admitted to the admission queue)."""
+    who = str(getattr(req, "who", "") or "").strip()
+    reason = str(getattr(req, "reason", "") or "").strip()
+    files = getattr(req, "files", None)
+    if not who or not reason:
+        return "annex needs a non-empty who and reason (a recorded act, not a silent one)"
+    if not isinstance(files, list) or not files:
+        return "annex files must be a non-empty list"
+    bad = [p for p in files if not _valid_write_set_entry(p)]
+    if bad:
+        return ("annex carries illegal entries %r (must be repo-relative paths; "
+                "absolute, '..', whole-repo '.', git sentinels ?!*[] forbidden)" % (bad[:5],))
+    return ""
+
+
+def _annex_parent_dir(entry: Any) -> str:
+    """The parent directory of a write-set entry (pure): '' for a repo-root file,
+    the entry itself for a directory-form entry (trailing '/')."""
+    s = str(entry or "").strip()
+    if s.endswith("/"):
+        return s
+    return s.rsplit("/", 1)[0] if "/" in s else ""
+
+
+def annex_scope_ok(entry: Any, effective: Any, scoped_prefixes: Any = None):
+    """KI-125/KI-158 door-check (pure): a widening entry stays inside the
+    directories the ticket already has business in. A FILE entry is in scope when
+    its parent directory equals (or contains) an already-effective entry's
+    directory; a DIRECTORY-form entry additionally needs an already-effective
+    entry under it (never annex a directory the ticket has no business in).
+    scoped_prefixes (optional, from the annex ctx) is a hard cap: the entry must
+    sit under one of them regardless of the effective set. Returns (ok, reason)."""
+    s = str(entry or "").strip()
+    if scoped_prefixes:
+        prefs = [str(x).strip() for x in scoped_prefixes if str(x or "").strip()]
+        if prefs and not any(s.startswith(p) for p in prefs):
+            return False, ("annex %s is outside the ticket's declared scope "
+                           "prefixes (%s) — declare it at plan time or ask the host"
+                           % (s, ", ".join(prefs)))
+    d = _annex_parent_dir(s)
+    parents = [_annex_parent_dir(e) for e in (effective or [])]
+    if any(p == d for p in parents):
+        return True, ""
+    if any(p and p.startswith(d + "/") or (d and p == d) for p in parents) or d.endswith("/"):
+        # the ticket has business DEEPER under this directory (or the entry is a
+        # directory the ticket already works under) -> in scope
+        if s.endswith("/"):
+            for e in (effective or []):
+                e = str(e or "")
+                if e != s and e.startswith(s):
+                    return True, ""
+            return False, ("directory-form annex %s needs an already-authorized "
+                           "entry under it (never a directory the ticket has no "
+                           "business in, KI-125)" % s)
+        return True, ""
+    return False, ("annex %s leaves the ticket's declared scopes (no authorized "
+                   "entry in or under %s) — declare it at plan time or ask the host"
+                   % (s, d or "(repo root)"))
+
+
+def annex_admission(files: Any, effective: Any, protected_hits: Any = None,
+                    holders: Any = None, annexed_so_far: Any = 0,
+                    max_files: Any = ANNEX_MAX_FILES, ctx: Any = None):
+    """The narrow audited annex gate (pure; injected facts, no disk). Returns
+    (admitted, refused): admitted = entries actually widened in this act;
+    refused = list of 'entry: reason' lines, every refusal named.
+
+    Two call shapes: the workflow's positional form
+    (files, effective, protected_hits, holders, annexed_so_far, max_files) and
+    the scenario contract's ctx form annex_admission(files, effective, ctx) where
+    ctx = {protected, holders ({file: ticket_id} or [{ticket_id, file}]), cap,
+    scoped_prefixes, annexed_so_far}.
+
+    Rules, in order: already-authorized → not a widening, skipped; illegal shape
+    → refused; protected → refused (the host's word, never self-authorized);
+    held by another in-flight ticket → refused (theirs, name the holder);
+    outside declared scopes (annex_scope_ok) → refused; per-ticket cap → the
+    rest refused by name."""
+    if isinstance(protected_hits, dict) and "protected" in protected_hits:
+        ctx = protected_hits
+    if ctx is not None:
+        protected_hits = (ctx or {}).get("protected")
+        holders = (ctx or {}).get("holders")
+        max_files = (ctx or {}).get("cap", ANNEX_MAX_FILES)
+        annexed_so_far = (ctx or {}).get("annexed_so_far", 0)
+    eff = [str(x) for x in (effective or [])]
+    prot = set(str(x) for x in (protected_hits or []))
+    holder_of = {}
+    if isinstance(holders, dict):
+        holder_of = {str(k): str(v) for k, v in holders.items()}
+    else:
+        for h in (holders or []):
+            if isinstance(h, dict) and h.get("file"):
+                holder_of[str(h["file"])] = str(h.get("ticket_id") or "?")
+    prefixes = ((ctx or {}).get("scoped_prefixes") if ctx else None)
+    refused, admitted, seen = [], [], set()
+    # Stage the checks first so the per-ticket cap is judged on the WHOLE act, not
+    # partially applied: a request beyond the remaining budget is refused as an act
+    # (a partial widening would make "annex beyond the cap" read as admitted).
+    candidates = []
+    budget = max(0, int(max_files or ANNEX_MAX_FILES) - int(annexed_so_far or 0))
+    for f in (files or []):
+        s = str(f or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        if write_set_holds(eff, s) or any(s.startswith(e) and e.endswith("/") for e in eff):
+            continue                       # already authorized — not a widening
+        if not _valid_write_set_entry(s):
+            refused.append("%s: illegal entry shape" % s)
+            continue
+        if s in prot:
+            refused.append("%s: protected path — stays the host's word (authorize, not annex)" % s)
+            continue
+        if s in holder_of:
+            refused.append("%s: held by in-flight ticket %s" % (s, holder_of[s]))
+            continue
+        ok, reason = annex_scope_ok(s, eff, prefixes)
+        if not ok:
+            refused.append("%s: %s" % (s, reason))
+            continue
+        candidates.append(s)
+    if len(candidates) > budget:
+        for s in candidates:
+            refused.insert(0, "%s: annex request of %d files exceeds the remaining "
+                              "per-ticket budget (%d of %d) — trim or split the act"
+                              % (s, len(candidates), budget,
+                                 int(max_files or ANNEX_MAX_FILES)))
+        return admitted, refused
+    return candidates, refused
+
+
 @dataclass
 class ReviewGateResult:
     """The verify_review_gate receipt. Three-state error precision (ticket t260829-07):
@@ -5064,6 +5464,10 @@ class MergeCheckResult:
     conflict: bool = False                    # True = a merge rehearsal conflict (auto-resolve); False = any other red (blocked)
     conflict_files: List[str] = field(default_factory=list)  # the conflict file list (parsed from the merge-tree output)
     merge_tree_excerpt: str = ""              # a truncated merge-tree output excerpt (carried out and injected into the agent's conflict-resolution prompt)
+    # t261009-58: the write-set record's history lines (who widened, why, when) —
+    # the merge review face reads the record, not the quarantine diffs. Defaulted
+    # EMPTY so RUNNING instances replaying historical events do not break.
+    write_set_history: List[str] = field(default_factory=list)
 
 
 @dataclass

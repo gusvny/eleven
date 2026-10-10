@@ -58,7 +58,7 @@ import subprocess
 import shutil
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # 260927 code_stamp：本模块被 worker 载入的时刻（shared.worker_code_stamp 读它判 stale——
 # 「盘上 mtime 晚于本时刻」= 进程跑的是改动前的旧码，磁盘修复对这个进程无效）
@@ -6121,9 +6121,134 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                          "绿灯" if green else "红灯",
                          "；".join("%s=%s" % (c["item"], "绿" if c["green"] else "红") for c in checks),
                          "（冲突类，转自动消解）" if conflict else "")
+    # t261009-58: the merge review face reads the write-set record's history (who
+    # widened, why, when) instead of the quarantine diffs. A missing record = old
+    # ticket, no lines, no noise; a broken record still never flips the verdict —
+    # the named fallback line rides along so the face shows the blind spot.
+    ws_history, ws_err = ([], "")
+    if str(getattr(args, "write_set_record_path", "") or ""):
+        try:
+            ws_history, ws_err = shared.write_set_record_face(args.write_set_record_path)
+        except Exception as e:      # the face read must never break the gate
+            ws_err = "write-set record read failed: %s" % e
+    if ws_err:
+        ws_history = ["write-set record unreadable: %s (judging fell back to the stored field)" % ws_err]
     return MergeCheckResult(green=green, checks=checks,
                             conflict=conflict, conflict_files=conflict_files,
-                            merge_tree_excerpt=merge_tree_excerpt)
+                            merge_tree_excerpt=merge_tree_excerpt,
+                            write_set_history=ws_history)
+
+
+# ---------- t261009-58: the ONE effective write set — record persistence, holder scan ----------
+# Fault-mode carryover of the borrowed activity pattern (plan-review condition 3):
+#   replay duplicate execution — CARRIED, and answered: the persist activity writes
+#     canonical bytes and skips a byte-identical file, so re-execution is a no-op;
+#   activity failure — CARRIED, and answered: ok=False + a named error, the workflow
+#     raises a visible meta red, never a quiet fall-through to the stored field;
+#   timeout — NOT carried as a hazard: the write is one small file, start_to_close
+#     uses the shared SHORT budget; a timeout retries and ultimately surfaces the
+#     same named red as any other failure.
+
+@dataclass
+class WriteSetRecordArgs:
+    """Inputs of persist_write_set_record (t261009-58). record_path MUST be
+    absolute (boundary rule: cross-process readers take absolute paths only)."""
+    ticket_id: str
+    record_path: str
+    record: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class WriteSetRecordResult:
+    ok: bool = False
+    wrote: bool = False             # False + ok=True = file already byte-identical (idempotent replay)
+    path: str = ""
+    error: str = ""
+
+
+@activity.defn
+async def persist_write_set_record(args: WriteSetRecordArgs) -> WriteSetRecordResult:
+    """Write the durable write-set record (t261009-58). Idempotent: canonical bytes
+    (shared.write_set_record_bytes), and an already-identical file is not rewritten.
+    Never raises: failures come back ok=False with the named error — the workflow
+    turns that into a visible red, because a silent failure would silently fall every
+    judging face back to the stored field (the exact t261009-50 shape, hidden)."""
+    p = Path(str(args.record_path or ""))
+    if not p.is_absolute():
+        return WriteSetRecordResult(error="record path is not absolute (%s)" % args.record_path)
+    if p.name != "write_set_record.json" or ".sandbar" not in p.parts:
+        return WriteSetRecordResult(error=("record path must end in .sandbar/write_set_record.json "
+                                           "(found %s)" % p))
+    try:
+        data = shared.write_set_record_bytes(args.record)
+        if p.exists() and p.read_bytes() == data:
+            return WriteSetRecordResult(ok=True, wrote=False, path=str(p))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(p)          # atomic replace: a reader never sees a half file
+        return WriteSetRecordResult(ok=True, wrote=True, path=str(p))
+    except OSError as e:
+        return WriteSetRecordResult(error="write-set record write failed: %s" % e)
+
+
+@dataclass
+class AnnexHolderScanArgs:
+    """Inputs of annex_holder_scan (t261009-58). lanes_root is the ABSOLUTE parent
+    dir of the sibling lane workspaces; own_lane_dir (absolute) is excluded (the
+    requester never holds against itself); files are the candidate annex entries."""
+    ticket_id: str
+    lanes_root: str
+    own_lane_dir: str = ""
+    files: List[str] = field(default_factory=list)
+
+
+@dataclass
+class AnnexHolderScanResult:
+    holders: List[Dict[str, str]] = field(default_factory=list)   # [{ticket_id, file}]
+    unscanned: List[str] = field(default_factory=list)            # sibling lanes with no/broken record (named, not silent)
+    error: str = ""
+
+
+@activity.defn
+async def annex_holder_scan(args: AnnexHolderScanArgs) -> AnnexHolderScanResult:
+    """Who else in this batch holds the requested files (t261009-58 annex rule b)?
+    Reads each sibling lane's .sandbar/write_set_record.json — the one record this
+    ticket family keeps. A lane without a record (old ticket) is listed in
+    `unscanned`, never silently skipped: the admission line can then name the blind
+    spot. Read-only; never raises."""
+    root = Path(str(args.lanes_root or ""))
+    if not root.is_absolute() or not root.is_dir():
+        return AnnexHolderScanResult(error="lanes_root is not an absolute directory (%s)" % args.lanes_root)
+    holders: List[Dict[str, str]] = []
+    unscanned: List[str] = []
+    try:
+        children = sorted(root.iterdir())
+    except OSError as e:
+        return AnnexHolderScanResult(error="lanes_root scan failed: %s" % e)
+    for child in children:
+        if not child.is_dir() or str(child) == str(args.own_lane_dir or ""):
+            continue
+        rec_path = child / ".sandbar" / "write_set_record.json"
+        if not rec_path.exists():
+            unscanned.append(child.name)
+            continue
+        try:
+            rec, err = shared.parse_write_set_record(rec_path.read_text(encoding="utf-8"))
+        except OSError as e:
+            unscanned.append("%s (unreadable: %s)" % (child.name, e))
+            continue
+        if err:
+            unscanned.append("%s (malformed record: %s)" % (child.name, err))
+            continue
+        if str(rec.get("ticket_id") or "") == str(args.ticket_id):
+            continue                      # the requester's own record, not a holder
+        eff = rec.get("effective") or []
+        for f in (args.files or []):
+            if shared.write_set_holds(eff, f):
+                holders.append({"ticket_id": str(rec.get("ticket_id") or child.name),
+                                "file": str(f)})
+    return AnnexHolderScanResult(holders=holders, unscanned=unscanned)
 
 
 # ---------- dev-lane: automatic conflict resolution loop (ticket t260826-01; the worker runs the merge and settles) ----------
@@ -11108,6 +11233,9 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     changed_files,
     # t260930-02：面计划只读查询（快反馈面 = 本次改动面 ∪ 上轮红名；漏注册=运行时才炸）
     surface_plan,
+    # t261009-58: the ONE effective write set - record persistence + annex holder
+    # scan (missing registration = a runtime blow-up, same stance as the two above)
+    persist_write_set_record, annex_holder_scan,
     # M1-3 (t260902-02): the three-stage close-out — merge only books, archive_ticket
     # exports, teardown_lane tears the lane down.
     archive_ticket, teardown_lane,

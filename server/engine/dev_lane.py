@@ -35,6 +35,7 @@ import asyncio
 import json
 import os
 import re
+import pathlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -91,6 +92,13 @@ with workflow.unsafe.imports_passed_through():
         LaneHeadShaResult,
         merge,
         merge_check,
+        # t261009-58: the ONE effective write set — record persistence + holder scan
+        persist_write_set_record,
+        annex_holder_scan,
+        AnnexHolderScanArgs,
+        AnnexHolderScanResult,
+        WriteSetRecordArgs,
+        WriteSetRecordResult,
         prepare_conflict_resolution,
         prepare_human_gate,
         prepare_ui_evidence,
@@ -189,6 +197,19 @@ with workflow.unsafe.imports_passed_through():
         main_sync_note,
         normalize_files_changed,
         normalize_handover_runs,
+        # t261009-58: the ONE effective write set (durable record + annex; the pure
+        # faces are pinned by tests, the disk faces live in agent_activities)
+        ANNEX_MAX_FILES,
+        AnnexRequest,
+        WS_WIDEN_ANNEX,
+        WS_WIDEN_PLAN_UNION,
+        WRITE_SET_RECORD_NAME,
+        annex_admission,
+        annex_request_faults,
+        apply_write_set_widening,
+        build_write_set_record,
+        write_set_effective,
+        plan_write_set_mismatch,
         parse_arbitration_summary,
         parse_authz_used,
         parse_review_plan_verdict,
@@ -249,6 +270,10 @@ UI_DIFF_PATCH_ID = "dev-lane-ui-diff-v1"
 # tickets starting from an empty write set get their guardrail this way.
 # Same-shaped boolean gate (see the first PATCH_ID note).
 REFRESH_WRITE_SET_PATCH_ID = "dev-lane-refresh-write-set"
+# t261009-58: the ONE effective write set — durable record + annex route. Same
+# boolean-gate rule as every *_PATCH_ID above: a parked old workflow replays down
+# the old branch, so a new gate must not bump DevLaneWorkflow.PATCH_ID.
+EFFECTIVE_WS_PATCH_ID = "dev-lane-effective-write-set"
 KI061_WAKE_RESET_PATCH_ID = "dev-lane-ki061-wake-reset"
 # KI-061 test switch (tests only): default off = fix enabled; set to "1" to skip the
 # over-limit wake-reset guard (a selfcheck uses it to reproduce the stuck behavior).
@@ -1050,6 +1075,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         self._detail_face_on: bool = False
         self.gate_runs: List[Dict[str, Any]] = []
         self.refused: List[Dict[str, Any]] = []
+        # t261009-58: annex requests queue between the intake signal and the next
+        # stage boundary (admission needs the holder-scan activity → awaits → the
+        # main loop drains it, never the signal handler).
+        self._annex_requests: List[Dict[str, Any]] = []
         self.timeline: List[Dict[str, Any]] = []
         self.human_context: Dict[str, Any] = {}
         self.engine_version: int = ENGINE_VERSION_V2
@@ -1369,13 +1398,220 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             else:
                 merged, added, dropped = refresh_write_set(
                     list(self.meta.get("write_set") or []), list(plan_files))
+                if workflow.patched(EFFECTIVE_WS_PATCH_ID):
+                    # t261009-58: capture the pre-union set as the record's `initial`
+                    # (first widening only — later plan rounds must not rewrite it).
+                    if "initial_write_set" not in self.meta:
+                        self.meta["initial_write_set"] = list(self.meta.get("write_set") or [])
                 self.meta["write_set"] = merged
+                # t261009-58: the union result IS the ticket's effective write set —
+                # cache it in meta (the workflow-side copy; the durable record file is
+                # persisted right after by the caller, condition 2's precedence: the
+                # file wins for cross-process readers, this cache wins in-workflow).
+                if workflow.patched(EFFECTIVE_WS_PATCH_ID):
+                    self.meta["effective_write_set"] = merged
+                    self.meta["effective_write_set_at"] = self._now_iso()
+                    self.meta["write_set_last_widening"] = {
+                        "kind": WS_WIDEN_PLAN_UNION, "files": added,
+                        "who": "dev-lane:plan_union", "at": self._now_iso(),
+                        "reason": "the write set follows the plan (t260829-07 union)"}
+                    if added:
+                        # rule 2: name the mismatch at plan time — which files are
+                        # outside the then-current set, and the three lawful ways out.
+                        self._log(
+                            "write-set gap named at plan time (t261009-58): %s %s "
+                            "outside the then-current write set. Three lawful ways "
+                            "out: (1) keep them - this union already admits the "
+                            "plan-declared files into the effective set, recorded "
+                            "in .sandbar/write_set_record.json; (2) change the "
+                            "plan (drop the file); (3) a protected path never goes "
+                            "through annex - ask the host (op=authorize). Do not "
+                            "wait for implement round eight or the merge gate to "
+                            "find out."
+                            % (", ".join(added),
+                               "is" if len(added) == 1 else "are"))
                 for f in added:
                     self._log("授权扩展：+%s（写集跟随方案）" % f)
                 if dropped:
                     self._log("写集刷新丢弃非法条目：%s"
                               % "、".join(str(d) for d in dropped))
                 self._log("写集已随方案定稿刷新：现 %d 条" % len(merged))
+
+    # ---------- t261009-58: the ONE effective write set (record + annex) ----------
+
+    def _effective_write_set(self) -> List[str]:
+        """The write set every judging face reads (one question, one answer).
+
+        Patched: write_set_effective(meta) — meta['effective_write_set'] (the
+        workflow-side cache of the durable record) wins, the stored field is the
+        fallback. Unpatched (old RUNNING instance replaying): the stored field,
+        byte for byte."""
+        if not workflow.patched(EFFECTIVE_WS_PATCH_ID):
+            return list(self.meta.get("write_set") or [])
+        return write_set_effective(self.meta)
+
+    def _write_set_record_path(self) -> str:
+        """The ABSOLUTE record path (boundary rule: cross-process readers take
+        absolute paths only), or '' when the lane workspace is unknown/relative —
+        a relative path must not guess an instance root on the workflow side."""
+        ws = str(self.meta.get("workspace") or "")
+        if not ws:
+            return ""
+        p = pathlib.PurePosixPath(ws)
+        if not p.is_absolute():
+            return ""
+        return str(p / WRITE_SET_RECORD_NAME)
+
+    async def _persist_write_set_record(self, widening: Dict[str, Any]) -> None:
+        """Persist the durable record after one widening (workflow cannot touch
+        disk — the activity does). The record is rebuilt deterministically from
+        meta (initial + history + effective), so the same event history yields the
+        same bytes: idempotent under replay. A failure is a NAMED red on meta —
+        never a quiet fall-through to the stored field (plan-review condition 3)."""
+        # The widening enters the meta history BEFORE the build: a failed persist
+        # must not lose the act — the next persist rebuilds the record from this
+        # history (a recorded act survives its own write failure).
+        if not (widening or {}).get("files"):
+            return      # an empty widening is not an act — no history entry, no write
+        self.meta.setdefault("write_set_history", []).append(dict(widening))
+        rec = build_write_set_record(self.ticket_id,
+                                     self.meta.get("initial_write_set")
+                                     or self.meta.get("write_set") or [],
+                                     self.meta.get("effective_write_set_at") or "")
+        for it in (self.meta.get("write_set_history") or []):
+            rec, err = apply_write_set_widening(
+                rec, it.get("kind"), it.get("files") or [], it.get("who"),
+                it.get("reason"), it.get("at"))
+            if err:      # defensive: meta history was validated at append time
+                self.meta["write_set_record_fault"] = {
+                    "stage": "record_build", "reason": err, "ts": self._now_epoch()}
+                self._log("[RED] write-set record build failed: %s (the effective "
+                          "set still advances in meta, but no durable record - "
+                          "cross-process judges fall back to the stored field)" % err)
+                return
+        path = self._write_set_record_path()
+        if not path:
+            self.meta["write_set_record_fault"] = {
+                "stage": "record_path", "reason": "no absolute lane workspace in meta",
+                "ts": self._now_epoch()}
+            self._log("[RED] write-set record not persisted: meta has no absolute "
+                      "lane workspace path (cross-process judges fall back to the "
+                      "stored field; never treat this as didn't-happen)")
+            return
+        raw = await workflow.execute_activity(
+            persist_write_set_record,
+            WriteSetRecordArgs(ticket_id=self.ticket_id, record_path=path, record=rec),
+            start_to_close_timeout=SHORT, retry_policy=RETRY)
+        res = raw if isinstance(raw, WriteSetRecordResult) else WriteSetRecordResult(
+            ok=bool(raw.get("ok")), wrote=bool(raw.get("wrote")),
+            path=str(raw.get("path") or ""), error=str(raw.get("error") or ""))
+        if res.ok:
+            self.meta["write_set_record_path"] = res.path
+            self.meta.pop("write_set_record_fault", None)
+            self._log("write-set record persisted (%s, %s): %s +%s (who=%s)"
+                      % (res.path,
+                         "written" if res.wrote else "idempotent replay, zero write",
+                         widening.get("kind"), ", ".join(widening.get("files") or []),
+                         widening.get("who")))
+        else:
+            self.meta["write_set_record_fault"] = {
+                "stage": "persist", "reason": res.error, "ts": self._now_epoch()}
+            self._log("[RED] write-set record persist failed: %s (the effective set "
+                      "has advanced in meta; cross-process judges fall back to the "
+                      "stored field until the next widening re-persists it - do "
+                      "NOT rework over this, but see it as a red)" % res.error)
+
+    async def _drain_annex_requests(self) -> None:
+        """Consume queued annex requests at a stage boundary (the signal handler is
+        intake-only: no disk, no await — admission needs activities). Every act,
+        admitted or refused, is named on the timeline."""
+        if not workflow.patched(EFFECTIVE_WS_PATCH_ID) or not self._annex_requests:
+            return
+        queue, self._annex_requests = self._annex_requests, []
+        for req in queue:
+            effective = self._effective_write_set()
+            # rule (a): protected paths stay the host's word — judged from the
+            # workflow's own authorization records (no disk).
+            protected: List[str] = []
+            for auth in self._protected_authz_records():
+                for scope in (auth.get("scope") or []):
+                    protected.append(str(scope))
+            files = [str(f) for f in (req.get("files") or [])]
+            # rule (b): another in-flight ticket holding the file — disk scan via
+            # the activity; its blind spots (old lanes without a record) ride back
+            # named in unscanned and are shown on the admission line.
+            lanes_root = ""
+            ws = str(self.meta.get("workspace") or "")
+            scan = AnnexHolderScanResult()
+            if ws and pathlib.PurePosixPath(ws).is_absolute():
+                raw = await workflow.execute_activity(
+                    annex_holder_scan,
+                    AnnexHolderScanArgs(
+                        ticket_id=self.ticket_id,
+                        lanes_root=str(pathlib.PurePosixPath(ws).parent),
+                        own_lane_dir=ws, files=files),
+                    start_to_close_timeout=SHORT, retry_policy=RETRY)
+                scan = raw if isinstance(raw, AnnexHolderScanResult) else \
+                    AnnexHolderScanResult(
+                        holders=list(raw.get("holders") or []),
+                        unscanned=[str(x) for x in (raw.get("unscanned") or [])],
+                        error=str(raw.get("error") or ""))
+            annexed_so_far = sum(len(it.get("files") or [])
+                                 for it in (self.meta.get("write_set_history") or [])
+                                 if it.get("kind") == WS_WIDEN_ANNEX)
+            admitted, refused = annex_admission(
+                files, effective, protected, scan.holders, annexed_so_far,
+                ANNEX_MAX_FILES)
+            line_extra = ("; unscanned old lanes (named blind spot): %s"
+                          % ", ".join(scan.unscanned)) if scan.unscanned else ""
+            if scan.error:
+                line_extra += "; holder scan failed (%s)" % scan.error
+            for r in refused:
+                self._log("annex refused (named, never silent): %s" % r)
+            if not admitted:
+                self._log("annex widened nothing (who=%s reason=%s)%s"
+                          % (req.get("who"), req.get("reason"), line_extra))
+                self.timeline.append({
+                    "at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
+                    "state": "annex-refused",
+                    "reason": "annex refused: %s (who=%s)" % (
+                        "; ".join(refused) or "nothing to widen", req.get("who"))})
+                continue
+            # rule (c) satisfied → a recorded widening: union + meta cache + durable record
+            merged, added2, _ = refresh_write_set(effective, admitted)
+            widening = {"kind": WS_WIDEN_ANNEX, "files": added2,
+                        "who": str(req.get("who") or "?"),
+                        "reason": str(req.get("reason") or "?"),
+                        "at": self._now_iso()}
+            self.meta["write_set"] = merged
+            self.meta["effective_write_set"] = merged
+            self.meta["write_set_last_widening"] = widening
+            for f in added2:
+                self._log("authorization extension (annex): +%s (who=%s reason=%s)"
+                          % (f, widening["who"], widening["reason"]))
+            if line_extra:
+                self._log("annex notes:%s" % line_extra.replace(";", ";", 1).lstrip(";"))
+            await self._persist_write_set_record(widening)
+
+    @workflow.signal
+    def annex_write_set(self, req: AnnexRequest) -> None:
+        """t261009-58: the narrow audited annex — the ONE lawful route for a file
+        discovered mid-round outside the write set. Intake only (shape validation +
+        queue): the admission itself runs at the next stage boundary where the
+        workflow can await the holder-scan activity. A bad payload is refused by
+        name and never queued."""
+        err = annex_request_faults(req)
+        if err:
+            self.refused.append({"who": str(getattr(req, "who", "") or "?"),
+                                 "want": "annex_write_set", "why": err})
+            self._log("annex refused (intake): %s" % err)
+            return
+        self._annex_requests.append({"files": [str(f) for f in (req.files or [])],
+                                     "who": str(req.who), "reason": str(req.reason)})
+        self._log("annex queued (who=%s files=%s) - judged at the next stage boundary"
+                  % (req.who, ", ".join(str(f) for f in (req.files or []))))
+        self._touch()
+
 
     # ---------- concurrency slot gate (t261004-32, CL-1 engine half) ----------
     # Decision truth lives in concurrency.py (this file only wires it, no
@@ -1567,7 +1803,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             attempt=self._gen("run_integration_tests") + 1,
             # t260913-03：每票段唯一 true 站（策略面只在调用点显式置位；write_set
             # 供例外分支求交）
-            write_set=list(self.meta.get("write_set") or []),
+            write_set=self._effective_write_set(),
             apply_skip_pools=True,
             handover_runs=self._handover_debt_legs(),
             only_names=list(only_names or []))
@@ -2355,7 +2591,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             skip_settle=not settle,
             # t260911-03 路径闸：settle 落点判「段 × 允许面 + 受保护名单」；
             # path_gate 随派单输入钉死（老在途票 meta 无此键=False，不追溯）
-            write_set=list(self.meta.get("write_set") or []),
+            write_set=self._effective_write_set(),
             base_ref=str(self.meta.get("base_ref") or ""),
             path_gate=bool(self.meta.get("path_gate")),
             path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
@@ -3179,6 +3415,9 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # stage hands the slot back as soon as it finishes (rule 4: a paused
             await self._concurrency_release_if_paused()
             await self._pause_gate()
+            # t261009-58: consume queued annex requests at the stage boundary
+            # (intake signal is queue-only; admission needs the holder-scan activity)
+            await self._drain_annex_requests()
             # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal
             # (reason reset to running), not holding (first run / after a pause) =
             # t261005-14: patched guard (same id, same reasoning as run entry).
@@ -3320,6 +3559,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     # directly and can never arrive here in a bad state.
                     if workflow.patched(REFRESH_WRITE_SET_PATCH_ID):
                         self._refresh_write_set_after_plan()
+                        # t261009-58: the union result becomes the ticket's durable
+                        # effective-write-set record (condition 1). The widening was
+                        # stashed by the refresh; persist it right here, while the
+                        # mutation cluster is still one transition window.
+                        widening = self.meta.get("write_set_last_widening") or {}
+                        if widening and workflow.patched(EFFECTIVE_WS_PATCH_ID) \
+                                and not self.meta.get("write_set_record_path"):
+                            await self._persist_write_set_record(widening)
                     if workflow.patched(INTEG_LOOP_PATCH_ID):
                         # New chain: parallel fork (implement ∥ design_integration_tests)
                         impl_done = False
@@ -3432,7 +3679,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                 ReviewGateArgs(
                                     ticket_id=self.ticket_id,
                                     worktree=str(self.meta.get("worktree") or ""),
-                                    write_set=list(self.meta.get("write_set") or []),
+                                    write_set=self._effective_write_set(),
                                     no_file_changes=bool(self.meta.get("no_file_changes"))),
                                 start_to_close_timeout=SHORT, retry_policy=RETRY)
                             g = graw if isinstance(graw, ReviewGateResult) else ReviewGateResult(
@@ -3452,14 +3699,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                 decl_dirs = self.meta.get("ui_evidence_dirs")
                                 if isinstance(decl_dirs, list):
                                     gate_is_ui = is_ui_write_set(
-                                        list(self.meta.get("write_set") or []), decl_dirs)
+                                        self._effective_write_set(), decl_dirs)
                                 else:
                                     gate_is_ui = False
                                     self._log("机械复核 UI 判定：ui_evidence 声明未预载"
                                               "（声明读取失败≠项目未声明，按声明缺省处理）")
                             else:
                                 gate_is_ui = is_ui_write_set(
-                                    list(self.meta.get("write_set") or []))
+                                    self._effective_write_set())
                             gate_rework, gate_note = review_gate_verdict(
                                 g.git_error, g.lane_commits, g.shots_path_error, g.png_count,
                                 bool(self.meta.get("no_file_changes")),
@@ -3540,7 +3787,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     SettleLaneArgs(ticket_id=self.ticket_id,
                                    worktree=str(self.meta.get("worktree") or ""),
                                    stage_id="implement", gen=impl_rounds,
-                                   write_set=list(self.meta.get("write_set") or []),
+                                   write_set=self._effective_write_set(),
                                    base_ref=str(self.meta.get("base_ref") or ""),
                                    path_gate=bool(self.meta.get("path_gate")),
                                    path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
@@ -3726,7 +3973,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             verify_review_gate,
                             ReviewGateArgs(ticket_id=self.ticket_id,
                                            worktree=str(self.meta.get("worktree") or ""),
-                                           write_set=list(self.meta.get("write_set") or []),
+                                           write_set=self._effective_write_set(),
                                            no_file_changes=True),
                             start_to_close_timeout=SHORT, retry_policy=RETRY)
                         gate_pre_s += max(0, self._now_epoch() - _pre_t)
@@ -3790,13 +4037,13 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             self._log("文件级爆炸半径：实际改动 %d 个文件，共享面判定"
                                       "见定点决策" % len(_cf_files))
                         run_only = (targeted_rerun_plan(
-                            list(self.meta.get("write_set") or []), prev_red_names,
+                            self._effective_write_set(), prev_red_names,
                             first_run=(self._gen("run_integration_tests") == 0),
                             changed_files=_cf_files, diff_error=_cf_err)
                             if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
                     else:
                         run_only = (targeted_rerun_plan(
-                            list(self.meta.get("write_set") or []), prev_red_names,
+                            self._effective_write_set(), prev_red_names,
                             first_run=(self._gen("run_integration_tests") == 0))
                             if workflow.patched(TARGETED_RERUN_PATCH_ID) else [])
                     if workflow.patched(SURFACE_PLAN_PATCH_ID) and not run_only \
@@ -4421,7 +4668,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         SettleLaneArgs(ticket_id=self.ticket_id,
                                        worktree=str(self.meta.get("worktree") or ""),
                                        stage_id="arbitrate", gen=tests_rounds,
-                                       write_set=list(self.meta.get("write_set") or []),
+                                       write_set=self._effective_write_set(),
                                        base_ref=str(self.meta.get("base_ref") or ""),
                                        path_gate=bool(self.meta.get("path_gate")),
                                        path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
@@ -4870,7 +5117,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    worktree=str(self.meta.get("worktree") or ""),
                                    branch=str(self.meta.get("branch") or ""),
                                    base_ref=str(self.meta.get("base_ref") or ""),
-                                   write_set=list(self.meta.get("write_set") or []),
+                                   write_set=self._effective_write_set(),
                                    path_gate=bool(self.meta.get("path_gate")),
                                    path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
                                    authorizations=self._protected_authz_records(),
@@ -4883,14 +5130,26 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    # empty on old replays => the new item reads red
                                    # zero-run (never green-by-default).
                                    last_green_run=dict(
-                                       self.meta.get("last_green_run") or {})),
+                                       self.meta.get("last_green_run") or {}),
+                                   # t261009-58: the merge review face reads the
+                                   # write-set record's history (who widened, why) —
+                                   # absolute path (boundary rule), empty = old ticket
+                                   write_set_record_path=str(
+                                       self.meta.get("write_set_record_path") or "")),
                     start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
                 mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
                     green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
                     error=str(raw.get("error") or ""),
                     conflict=bool(raw.get("conflict")),
                     conflict_files=[str(x) for x in (raw.get("conflict_files") or [])],
-                    merge_tree_excerpt=str(raw.get("merge_tree_excerpt") or ""))
+                    merge_tree_excerpt=str(raw.get("merge_tree_excerpt") or ""),
+                    write_set_history=[str(x) for x in (raw.get("write_set_history") or [])])
+                # t261009-58: the write-set history rides on the ticket face (who
+                # widened, why, when) — a reviewer never reconstructs it from the
+                # quarantine diffs.
+                if mc.write_set_history:
+                    self._log("write-set history (merge review face):\n    "
+                              + "\n    ".join(mc.write_set_history))
                 # t260912-03：merge_check 自愈 settle 的授权消费留痕（键在场才记）
                 self._record_authz_uses(
                     "；".join(str(c.get("detail") or "") for c in mc.checks), "merge_check")

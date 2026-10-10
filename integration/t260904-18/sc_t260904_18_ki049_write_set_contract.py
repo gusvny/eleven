@@ -135,6 +135,13 @@ else:
         def _now_epoch(self):
             return 0
 
+        def _now_iso(self):
+            # t261009-58: _refresh_write_set_after_plan now also stamps
+            # meta["effective_write_set_at"] via self._now_iso(); the replay
+            # fake carries the same fixed-clock stub as _now_epoch (same
+            # zero-wall-clock discipline, assertion surface unchanged).
+            return "1970-01-01T00:00:00Z"
+
         def _log(self, note, status=None):
             self.logs.append(str(note))
 
