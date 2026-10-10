@@ -155,15 +155,21 @@ DSH_HOME——控制台默认 preset 缺失会导致建会话报 agent-preset-no
 
 导航定位一律用语义锚（`data-phase`、可见文本、`data-wb-*`），禁哈希类名选择器。
 
-## 板面就绪断言（t260910-05 截图内容断言）
+## 板面就绪断言（t260910-05 截图内容断言；t261011-03 换锚）
 
 板面三视图（`console-board` / `-dark` / `-light`）快门前断言**关键 DOM 在场**：
-筛选条（`.wb-chip-btn`）在场 且（行卡（`.wb-card`）≥1 或 人话空态（`.wb-empty`）在场）
-——260910 暂停票实证「主列表渲染完成前按快门，废图（无操作按钮）全绿混进归档无人
-发现」（走查 agent 是文本模型看不了像素、合并闸只查文件存在性）。断言失败=该视图
-失败不交图，沿既有 run→failures→exitCode 链全链红（无「不交图但全链绿」的旁路）。
-预算 env `SANDBAR_UI_CAPTURE_BOARD_MS`；接线锁=sc_capture_board_assert 场景（桩 page
-驱动 capture.mjs 导出条目面，行为锁不锚源码字面，KI-051）。
+列表容器锚在场 且（行卡（`.wb-card[data-ticket-id]`）≥1 或 人话空态（`.wb-group-empty`）
+在场）——t261011-03 换锚：侧栏视图图标随 t261005-10 UI-2 退役、板面=左列常驻工单
+列表，导出锚键 `BOARD_ANCHORS.chips`（角色名，守卫 sc_capture_board_assert 按
+/chip|filter/ 键名收锚）现指向组头 `.wb-group-head`（产品的筛选 chip 行已退役，组头
+承载「列表容器就绪」角色）。换锚后 board 条目无导航可切，其截图与 `console-default`
+同帧是正确行为（断言视图，摘出 pairwise 袋；同款先例 `console-sessions`）——260910
+暂停票实证「主列表渲染完成前按快门，废图（无操作按钮）全绿混进归档无人发现」（走查
+agent 是文本模型看不了像素、合并闸只查文件存在性）。断言失败=该视图失败不交图，沿
+既有 run→failures→exitCode 链全链红（无「不交图但全链绿」的旁路）。预算 env
+`SANDBAR_UI_CAPTURE_BOARD_MS`；接线锁=sc_capture_board_assert 场景（桩 page 驱动
+capture.mjs 导出条目面，行为锁不锚源码字面，KI-051）。深浅外观专属断言：dark 与
+light 字节级不同（主题真跟随 `prefers-color-scheme`）。
 
 ## 只读红线
 
