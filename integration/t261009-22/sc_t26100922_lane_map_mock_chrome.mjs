@@ -199,8 +199,11 @@ const PROBE = `(() => {
       borderStyle: segCs && segCs.strokeDasharray !== 'none' ? 'dashed' : getComputedStyle(el).borderTopStyle,
     }
   })
-  // svg glyph 探针（菱形=矢量 path；今日图面无 svg）。
-  const svgPaths = [...lm.querySelectorAll('svg path')].map(p => (p.getAttribute('d') || '').slice(0, 60))
+  // svg glyph 探针（菱形=矢量 path）。t261009-79：切片 60 会把绝对坐标长浮点尾
+  // 的闭合 Z 截在窗外（本票 T5 三连红之谜），放宽到 120；断言语义不变（闭合
+  // 四折线族）。失败信息吐全量 d（recorder 全局截断兜底），不再自带盲区。
+  const svgPaths = [...lm.querySelectorAll('svg path')].map(p => (p.getAttribute('d') || '').slice(0, 120))
+  const svgPathsFull = [...lm.querySelectorAll('svg path')].map(p => p.getAttribute('d') || '')
   // now 游标探针（t261009-53 起图面=单个 SVG 场景）：块级窄高虚线边元素，
   // 或 SVG 场景里的虚线竖线（line.wb-lm-cursor，stroke-dasharray 虚线）。
   const cursor = [...lm.querySelectorAll('*')].some(el => {
@@ -214,7 +217,7 @@ const PROBE = `(() => {
   const clocks = axis
     ? [...axis.querySelectorAll('span')].map((e) => (e.textContent || '').trim()).filter(Boolean)
     : (text.match(/\b\d{2}:\d{2}\b/g) || [])
-  return { found: true, text, segs, svgPaths, cursor, clocks,
+  return { found: true, text, segs, svgPaths, svgPathsFull, cursor, clocks,
     header: (lm.querySelector('header, [class*="head"], [class*="lsum"]') || lm).textContent.slice(0, 200) }
 })()`
 
@@ -256,7 +259,7 @@ rec('T4 measured durations are printed on the map (plan 2m, build 8m)',
 // L…Z，故按 KI-051 锚语义：只断 svg path 存在且为闭合四折线族——大小写不敏感，
 // 不锚字面坐标。
 const diamondish = lm.svgPaths.some((d) => /l\s*-?[\d.]+\s+-?[\d.]+/i.test(d) && /z/i.test(d))
-rec('T5 human gate drawn as a vector diamond glyph', diamondish, `svgPaths=${JSON.stringify(lm.svgPaths)}`)
+rec('T5 human gate drawn as a vector diamond glyph', diamondish, `svgPathsFull=${JSON.stringify(lm.svgPathsFull)}`)
 
 // T6 判据6：时间轴=起止两时刻，且与段同一比例尺。起=首条可解析 at=夹具 T0；
 // 止=起+elapsed——开着的 signoff 窗随真实时钟增长（模型口径：头部 elapsed 与

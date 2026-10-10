@@ -922,6 +922,13 @@ function segmentTitle(nv) {
 	if (ever) bits.push(everBlockedTitle(ever));
 	return bits.join(" · ");
 }
+/** Scene coordinates round to 2 decimals (t261009-79): the mock's own laneMap
+*  emits clean short numbers; percentage-width math otherwise leaks float
+*  tails (e.g. `601.4399999999999`) into every rendered attribute — a
+*  downstream scenario's 60-char path slice cut the diamond's closing `Z` out
+*  of its probe window (the T5 red). Rounding at the scene source fixes the
+*  family; no assertion or weight formula changes. */
+const r2 = (n) => Math.round(n * 100) / 100;
 function fillOf(nv) {
 	if (nv.skipped) return {
 		fill: "none",
@@ -951,10 +958,10 @@ function barOf(nv, x, y, w, h, track, now) {
 		id: track === "main" ? nv.node.id : `${nv.node.id}#partner`,
 		stageId: nv.node.id,
 		track,
-		x,
-		y,
-		w,
-		h,
+		x: r2(x),
+		y: r2(y),
+		w: r2(w),
+		h: r2(h),
 		fill: f.fill,
 		fillOpacity: f.fillOpacity,
 		dashed: f.dashed,
@@ -1037,9 +1044,9 @@ function laneMapScene(model) {
 		if (item.kind === "group") {
 			const g = model.groups[item.id];
 			windows.push({
-				x: x - 4,
+				x: r2(x - 4),
 				y: AY - 4,
-				w: w + 8,
+				w: r2(w + 8),
 				h: BY + BH - AY + 8,
 				groupId: g.def.id,
 				active: g.active,
@@ -1047,7 +1054,7 @@ function laneMapScene(model) {
 				windowMs: g.windowMs
 			});
 			parMarks.push({
-				x: x + 5,
+				x: r2(x + 5),
 				y: BY + BH - 1
 			});
 			const head = g.members[0];
@@ -1059,7 +1066,7 @@ function laneMapScene(model) {
 			const pever = everOf(partner);
 			labels.push({
 				text: `${stageDisplayLabel(partner.node.id, partner.node.label)}${partner.vis === "running" ? " now" : labelBit(partner)}`,
-				x: x + 6,
+				x: r2(x + 6),
 				y: BY + BH + 9,
 				track: "partner",
 				level: 0,
@@ -1074,11 +1081,11 @@ function laneMapScene(model) {
 			bars.push(barOf(nv, x, AY, w, AH, "main", now));
 			labels.push(mainLabelOf(nv, i, now));
 			if (nv.node.kind === "human") diamonds.push({
-				x: x + 5,
+				x: r2(x + 5),
 				y: AY + AH / 2
 			});
 		}
-		const cx = x + w / 2;
+		const cx = r2(x + w / 2);
 		const headLabel = item.kind === "group" ? labels[labels.length - 2] : labels[labels.length - 1];
 		headLabel.x = Math.max(CLAMP_MIN, Math.min(cx, CLAMP_MAX));
 		leaders.push({
@@ -1087,7 +1094,7 @@ function laneMapScene(model) {
 			y2: AY - 1
 		});
 		if (now) cursor = {
-			x: x + w,
+			x: r2(x + w),
 			y1: AY - 8,
 			y2: BY + BH + 3
 		};

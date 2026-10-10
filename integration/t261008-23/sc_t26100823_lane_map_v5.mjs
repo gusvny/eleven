@@ -97,10 +97,16 @@ const PROBE = `(() => {
       label: (el.getAttribute('data-stage') || el.getAttribute('data-label') || el.textContent || '').trim().slice(0, 40),
     }
   })
-  const dashed = [...lm.querySelectorAll('*')].filter(el => {
-    const cs = getComputedStyle(el)
-    return (cs.borderTopStyle === 'dashed' || cs.borderStyle === 'dashed') &&
-      Math.round(el.getBoundingClientRect().width) > 40
+  // t261009-79: the mock (261004 laneMap) draws the whole map as ONE SVG scene
+  // and its parallel window is an SVG rect with stroke-dasharray and fill=none
+  // — we believe the mock, so the dashed-window probe reads SVG geometry, not
+  // the retired block renderer's CSS borders (KI-051: anchor the mock's
+  // semantics; the assertion itself — a dashed window box — is unchanged).
+  const dashed = [...lm.querySelectorAll('rect')].filter(r => {
+    const dash = r.getAttribute('stroke-dasharray') || ''
+    return dash !== '' && dash !== 'none' &&
+      (r.getAttribute('fill') || '') === 'none' &&
+      Number(r.getAttribute('height')) > 20
   }).length
   const text = lm.textContent || ''
   return {

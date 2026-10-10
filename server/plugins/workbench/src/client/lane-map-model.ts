@@ -251,6 +251,14 @@ function segmentTitle(nv: LaneNodeView): string {
 
 /* -- Scene (pure geometry; unit tests run it directly, no DOM). -- */
 
+/** Scene coordinates round to 2 decimals (t261009-79): the mock's own laneMap
+ *  emits clean short numbers; percentage-width math otherwise leaks float
+ *  tails (e.g. `601.4399999999999`) into every rendered attribute — a
+ *  downstream scenario's 60-char path slice cut the diamond's closing `Z` out
+ *  of its probe window (the T5 red). Rounding at the scene source fixes the
+ *  family; no assertion or weight formula changes. */
+const r2 = (n: number): number => Math.round(n * 100) / 100
+
 export interface LaneSceneBar {
   /** Unique key inside the scene (stage id; the main and the partner bar of one stage each get one). */
   id: string
@@ -334,10 +342,10 @@ function barOf(nv: LaneNodeView, x: number, y: number, w: number, h: number, tra
     id: track === 'main' ? nv.node.id : `${nv.node.id}#partner`,
     stageId: nv.node.id,
     track,
-    x,
-    y,
-    w,
-    h,
+    x: r2(x),
+    y: r2(y),
+    w: r2(w),
+    h: r2(h),
     fill: f.fill,
     fillOpacity: f.fillOpacity,
     dashed: f.dashed,
@@ -428,16 +436,16 @@ export function laneMapScene(model: LaneMapModel): LaneScene {
     if (item.kind === 'group') {
       const g = model.groups[item.id]
       windows.push({
-        x: x - 4,
+        x: r2(x - 4),
         y: AY - 4,
-        w: w + 8,
+        w: r2(w + 8),
         h: (BY + BH) - AY + 8,
         groupId: g.def.id,
         active: g.active,
         allDone: g.allDone,
         windowMs: g.windowMs,
       })
-      parMarks.push({ x: x + 5, y: BY + BH - 1 })
+      parMarks.push({ x: r2(x + 5), y: BY + BH - 1 })
       const head = g.members[0]
       const partner = g.members[1]
       bars.push(barOf(head, x, AY, w, AH, 'main', now))
@@ -447,7 +455,7 @@ export function laneMapScene(model: LaneMapModel): LaneScene {
       const pever = everOf(partner)
       labels.push({
         text: `${stageDisplayLabel(partner.node.id, partner.node.label)}${partner.vis === 'running' ? ' now' : labelBit(partner)}`,
-        x: x + 6,
+        x: r2(x + 6),
         y: BY + BH + 9,
         track: 'partner',
         level: 0,
@@ -461,15 +469,15 @@ export function laneMapScene(model: LaneMapModel): LaneScene {
       const nv = model.nodes[item.id]
       bars.push(barOf(nv, x, AY, w, AH, 'main', now))
       labels.push(mainLabelOf(nv, i, now))
-      if (nv.node.kind === 'human') diamonds.push({ x: x + 5, y: AY + AH / 2 })
+      if (nv.node.kind === 'human') diamonds.push({ x: r2(x + 5), y: AY + AH / 2 })
     }
-    const cx = x + w / 2
+    const cx = r2(x + w / 2)
     // Clamp + leader for the main (head) label; the partner label sits at the
     // window head with its own anchor (the mock never clamps it).
     const headLabel = item.kind === 'group' ? labels[labels.length - 2] : labels[labels.length - 1]
     headLabel.x = Math.max(CLAMP_MIN, Math.min(cx, CLAMP_MAX))
     leaders.push({ x: cx, y1: headLabel.y + 2.5, y2: AY - 1 })
-    if (now) cursor = { x: x + w, y1: AY - 8, y2: BY + BH + 3 }
+    if (now) cursor = { x: r2(x + w), y1: AY - 8, y2: BY + BH + 3 }
     x += w + GAP
   })
   return { width: W + RPAD, height: LM_SCENE.H, bars, labels, leaders, windows, parMarks, diamonds, cursor }

@@ -185,5 +185,76 @@ ok(rwScene.bars.length === 1 && /×\s*2/.test(rwScene.labels[0].roundBadge || ''
 ok(/越界/.test(rwScene.bars[0].title), 'the first round rework reason survives inside the segment hover title (round chips retired, evidence kept)')
 ok(rwScene.labels[0].everTitle === undefined, 'no ever-blocked badge without a resolved blocked history')
 
+/* H t261009-79 修复锁：slim-pipe 场景输入的模型级重放（P7/P3d/P9/T5/T2b）。
+ * 夹具形状镜 integration/t261008-23/lib_fix23.mjs fixtureTimeline()（每段带引擎
+ * _finish 形状的 done 行、merge 只留 running 开窗 + closed 收尾）；本节在模型层
+ * 锁住浏览器场景点名的人脸，集成闸的浏览器重跑是终审证据。 */
+import { readFileSync as rf } from 'node:fs'
+const fixSrc = rf(new URL('../../../../integration/t261008-23/lib_fix23.mjs', import.meta.url), 'utf8')
+ok(/state:\s*'done'/.test(fixSrc), 'fixture source lock: lib_fix23 fixtureTimeline carries explicit done rows (P7 input truth)')
+const SD = 1_789_440_000_000 // the slim-pipe fixture epoch family (lib_fix23 T0)
+const isoAt = (m) => new Date(SD + m * MIN).toISOString()
+const dn = (m, stage) => ({ at: isoAt(m), stage, state: 'done', reason: 'stage finished' })
+const STAGES = ['create_plan', 'review_plan', 'implement', 'design_integration_tests', 'ui_evidence',
+  'run_integration_tests', 'arbitrate', 'acceptance_walkthrough', 'merge_check', 'merge']
+const slimTopo = {
+  template: 'dev-lane', name: 'dev lane',
+  nodes: STAGES.map((id) => ({ id, label: id, role: 'developer', kind: id === 'merge' ? 'human' : 'agent' })),
+  edges: [['create_plan', 'review_plan'], ['review_plan', 'implement'], ['review_plan', 'design_integration_tests'],
+    ['implement', 'ui_evidence'], ['design_integration_tests', 'ui_evidence'], ['ui_evidence', 'run_integration_tests'],
+    ['run_integration_tests', 'arbitrate'], ['run_integration_tests', 'acceptance_walkthrough'],
+    ['arbitrate', 'merge_check'], ['acceptance_walkthrough', 'merge_check'], ['merge_check', 'merge']],
+  groups: [
+    { id: 'g1', members: ['implement', 'design_integration_tests'], phase: 'p1' },
+    { id: 'g2', members: ['arbitrate', 'acceptance_walkthrough'], phase: 'p2' },
+  ],
+}
+const slimTimeline = [
+  { at: isoAt(0), stage: 'create_plan', state: 'running', reason: 'plan written' }, dn(1, 'create_plan'),
+  { at: isoAt(1), stage: 'review_plan', state: 'running', reason: 'review passed' }, dn(5, 'review_plan'),
+  { at: isoAt(5), stage: 'implement', state: 'running', reason: 'implemented' }, dn(6, 'implement'),
+  { at: isoAt(6), stage: 'design_integration_tests', state: 'running', reason: 'tests designed' }, dn(15, 'design_integration_tests'),
+  { at: isoAt(15), stage: 'ui_evidence', state: 'running', reason: 'captures attached' }, dn(15.5, 'ui_evidence'),
+  { at: isoAt(15.5), stage: 'run_integration_tests', state: 'running', reason: 'suite green' }, dn(30.5, 'run_integration_tests'),
+  { at: isoAt(30.5), stage: 'arbitrate', state: 'running', reason: 'arbitrated' }, dn(35, 'arbitrate'),
+  { at: isoAt(35), stage: 'acceptance_walkthrough', state: 'running', reason: 'walked through' }, dn(38.5, 'acceptance_walkthrough'),
+  { at: isoAt(38.5), stage: 'merge_check', state: 'running', reason: 'checks green' }, dn(39.5, 'merge_check'),
+  { at: isoAt(39.5), stage: 'merge', state: 'running', reason: 'merged' },
+  { at: isoAt(45), stage: 'merge', state: 'closed', reason: '' },
+]
+for (const nowMs of [SD + 50 * MIN, Date.now()]) {
+  const sm = buildLaneMap(slimTopo, { status: 'RUNNING', workflow_id: 'dev-lane', stage: 'merge', stage_state: 'running',
+    meta: { parallel_stages: [['implement', 'design_integration_tests'], ['arbitrate', 'acceptance_walkthrough']] },
+    timeline: slimTimeline }, { nowMs })
+  const ss = laneMapScene(sm)
+  const bars = ss.bars.filter(b => b.track === 'main' || b.track === 'partner')
+  // P7 状态=填充：done 22% 浅填充 ≥4、当前段实色 ≥1（全链 done + merge 在跑）。
+  const tinted = bars.filter(b => Math.abs(b.fillOpacity - 0.22) <= 0.03).length
+  const solid = bars.filter(b => Math.abs(b.fillOpacity - 1) <= 0.02).length
+  ok(tinted >= 4 && solid >= 1, `P7 state-by-fill on the slim-pipe input: tinted=${tinted} solid=${solid}`)
+  // P3d 同级相邻标签不压字（夹具时刻与真实 now 双锚）。
+  const mlab = ss.labels.filter(l => l.track === 'main').sort((p, q) => p.x - q.x)
+  const overlapSlim = [0, 1].some(lv => mlab.filter(l => l.level === lv).some((l, i, arr) =>
+    i > 0 && arr[i - 1].x + arr[i - 1].text.length * 4.5 / 2 > l.x - l.text.length * 4.5 / 2))
+  ok(!overlapSlim, `P3d no same-level label overlap at nowMs=${nowMs === SD + 50 * MIN ? 'fixture' : 'real'}`)
+  // P9 chrome：头部 elapsed 词面 + 起止两个 hh:mm 时钟。
+  ok(sm.header.elapsedText.length > 0, 'P9 header elapsed text present')
+  ok(sm.header.startClock !== null && sm.header.endClock !== null && /\d{2}:\d{2}/.test(sm.header.startClock) && /\d{2}:\d{2}/.test(sm.header.endClock),
+    `P9 axis clocks render (start=${sm.header.startClock} end=${sm.header.endClock})`)
+  // T2b 虚线窗：SVG rect 语义——高跨两道（渲染层补 dasharray + fill none）。
+  const dashedWins = ss.windows.filter(w => w.h > 20)
+  ok(dashedWins.length >= 2, `T2b dashed windows around both tracks (windows=${ss.windows.length})`)
+  // T5 菱形：渲染层 d（绝对坐标、closed fold）在 60 字符窗内满足场景正则。
+  const diaBar = ss.bars.find(b => b.diamond && b.track === 'main')
+  const diaD = diaBar
+    ? `M${diaBar.x + 1.5} ${diaBar.y + diaBar.h / 2} L${diaBar.x + 5} ${diaBar.y + diaBar.h / 2 + 3.5} L${diaBar.x + 8.5} ${diaBar.y + diaBar.h / 2} L${diaBar.x + 5} ${diaBar.y + diaBar.h / 2 - 3.5} Z`
+    : ''
+  ok(/l\s*-?[\d.]+\s+-?[\d.]+/i.test(diaD.slice(0, 60)) && /z/i.test(diaD.slice(0, 60)),
+    'T5 diamond closed-fold regex passes WITHIN a 60-char window (rounding landed)')
+  // 坐标干净：全场景数值属性零长浮点尾（r2 修复面）。
+  const nums = JSON.stringify(ss).match(/\d+\.\d{3,}/g) || []
+  ok(nums.length === 0, `scene coordinates carry no long float tails (found ${nums.slice(0, 3).join(',')})`)
+}
+
 console.log(`\nLANE_MAP_PIPE ran=${passed + failed} pass=${passed} fail=${failed}`)
 process.exit(failed === 0 ? 0 : 1)
