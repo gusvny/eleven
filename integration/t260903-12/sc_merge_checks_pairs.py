@@ -11,7 +11,8 @@ fail-closed 可见，第三种是静默失效（3.5 节判定「src 前缀无改
 步骤：
   1. server/merge-checks.yaml 在场（缺失=红：护栏未启用）；
   2. 解析出至少一对 bundle_pairs，形状=引擎 3.5 节契约（顶格 bundle_pairs: +
-     缩进「- src: X」/「out: Y」成对、值裸 token、其余缩进行=坏行）；坏行=红；
+     缩进「- src: X」/「out: Y」成对、值裸 token、可选「entry:」/「budget_s:」修饰键
+     （t261009-42 扩展）、其余缩进行=坏行）；坏行=红；
   3. 恰含本票声明对 (server/plugins/workbench/src/client/, server/plugins/workbench/lib/)；
   4. 每对 src/out 前缀均为仓内真实目录（isdir）——防路径写错的静默失效。
 
@@ -19,6 +20,7 @@ Hermetic：纯文件读，零端口零网络，不碰 3099。cwd=仓库根；秒
 退出契约：stdout 末行 SUMMARY pass=N fail=K；exit 1 iff fail>0。
 """
 import os
+import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,6 +62,14 @@ def parse_bundle_pairs(text):
             pairs.append(cur)
         elif s.startswith("out:") and cur is not None:
             cur["out"] = s[len("out:"):].strip()
+        # t261009-42 optional per-pair keys (agent_activities._read_bundle_entry_keys
+        # 契约)：这两行是合法形状不是坏行——但仍须形状合法（entry 非空、budget_s 为
+        # 非负整数、且都在某条 `- src:` 之后）；其余未知缩进行照旧=坏行（fail-closed 不放宽）。
+        elif s.startswith("entry:") and cur is not None and s[len("entry:"):].strip():
+            cur["entry"] = True
+        elif s.startswith("budget_s:") and cur is not None \
+                and cur.get("entry") and re.fullmatch(r"\d+", s[len("budget_s:"):].strip() or ""):
+            cur["budget_s"] = True
         else:
             bad = s
     complete = [(p["src"], p["out"]) for p in pairs if p["src"] and p["out"]]
@@ -76,7 +86,7 @@ def main():
 
     print("== 2. 形状可解析（引擎遇坏行 fail-closed，护栏死）")
     pairs, bad = parse_bundle_pairs(text)
-    check(bad is None, "无坏缩进行（契约：只认 - src:/out: 成对，实得坏行=%r）" % bad)
+    check(bad is None, "无坏缩进行（契约：只认 - src:/out: 成对 + 可选 entry:/budget_s: 修饰键，实得坏行=%r）" % bad)
     check(len(pairs) > 0, "解析出至少一对 bundle_pairs（实得 %d 对）" % len(pairs))
 
     print("== 3. 本票声明对登记在案")

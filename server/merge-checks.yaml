@@ -7,3 +7,5 @@
 bundle_pairs:
   - src: server/plugins/workbench/src/client/
     out: server/plugins/workbench/lib/
+    entry: server/plugins/workbench/build-client.sh
+    budget_s: 600

@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 255,
-      "scenarios": 659
+      "scenarios": 660
     },
     "vocab": [
       "behaviour",
@@ -4577,6 +4577,11 @@
     "integration/t261009-51/sc_registry_writer_canonical.py": {
       "anchor": "contract",
       "note": "t261009-51: canonical write path (lib_registry.write_registry) byte shape + content-free normalization proof vs HEAD",
+      "sync_path": ""
+    },
+    "integration/t261009-45/sc_bundle_entry_declaration.py": {
+      "anchor": "contract",
+      "note": "the project declaration carries the build entry; malformed value degrades to named legacy verdict",
       "sync_path": ""
     }
   }
