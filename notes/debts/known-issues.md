@@ -5206,7 +5206,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 ## KI-01M4KQPFS3Z1JMV9QP3F2VKQQ4 **受保护的"期望值基线"**按角色名**消费实现侧导出的锚键** ⇒ 任何正当的产品换锚都逼出一次受保护面改动，而泳道**没有**合法动作能改它；绕开（不改）或硬改（自证豁免）两条路都是坏的**(261011 04:16 `t261011-03` 实测;integration 岗登记并当场处置)**
 
 > **现象（原始读数）**：`t261011-03`（修三条 capture 族真红）在实现段改了 `server/ui-check/capture.mjs` 的就绪锚——`BOARD_ANCHORS.chips = ".wb-chip-btn"` → `group = ".wb-group-head"`（筛选条 chips 随 `t261005-10` UI-2 退役，板面自那以后是左列常驻面；这两次退役在 `sidebar.tsx:1039-1042` 的注释里具名）。为保持语义一致它同步改了守卫 `integration/baselines/sc_capture_board_assert.mjs`（角色正则 `/chip|filter/` → `/group|head/`、`BOARD_FILES` 3 条 → 2 条）⇒ **受保护路径闸具名拒绝**：`path_gate_reason=protected_path`，票停在 `implement/blocked`（`blocked_detail.evidence` 原文点名该文件"is on the protected list（source of truth and expected values）"）。
-> **耦合是真的（读守卫实现，不是泳道多事）**：`collectAnchors()` 把 `capture.mjs` 导出的选择器**按角色键名**分类（`/chip|filter/`、`/card|row/`、`/empty|blank|zero/`），形状腿要求**存在一个 chips 角色的锚**（`anchors.chips.length > 0`），`domMapFrom()` 也用这三类构建桩 DOM ⇒ **把 chips 改名成 group，就会让这条守卫在所有轮次变红**。
+> **耦合是真的（读守卫实现，不是泳道多事）**：`collectAnchors()` 把 `capture.mjs` 导出的选择器**按角色键名**分类（`/chip|filter/`、`/card|row/`、`/empty|blank|zero/`），形状子用例要求**存在一个 chips 角色的锚**（`anchors.chips.length > 0`），`domMapFrom()` 也用这三类构建桩 DOM ⇒ **把 chips 改名成 group，就会让这条守卫在所有轮次变红**。
 > **而它今天每轮都绿**：台账 `capture-board-assert` **1061 行全 pass**（最近 04:18:51 在 `lane:t261011-04`）、**不在已知红名册里** ⇒ 一旦改名落地而不动守卫，**它立刻变成新的"每轮慢性红"**，正是 `KI-01M4FE0T3FG7Y0G9R97NS4T7QJ` 那一族的新成员（该族已在污染"红是新还是已知"的判据）。
 >
 > **危害**：①**正当换锚 → 受保护面改动 → 泳道无可达动作**（闸自己的出路文案是"human-review approval 或 main-tree ticket route"）⇒ 票只能在宿主醒着时解，夜里就是停摆；②**绕开的两条路都坏**：不动守卫 = 把一条绿守卫变成慢性红（噪声 + 污染判据），静默改守卫 = 受保护面自证豁免（保护面存在的理由）；③这是**结构性**的：只要守卫继续按键名猜角色，任何一次产品面重命名都会重演。
