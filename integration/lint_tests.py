@@ -274,6 +274,13 @@ def lint_registry():
     # "Known limitations" in README)
     DEREGISTERED = {INTEG / "baselines" / "sc_ticket_lifecycle.mjs",
                     INTEG / "t260917-01" / "sc_t260917_01_arb_gate_refusal.mjs"}
+    # t261009-54 debt note (merge-gate rework, gen 2): the create_plan-promised
+    # live-console dismiss journey was DELETED, not registered — an exit-2
+    # marker cannot enter SCENARIOS (the gate would run it and go red) and an
+    # orphan sc_ cannot stay. Debt record: seed failure-class fixture tickets on
+    # the stage console, then land the real-click journey; until then the
+    # real-seam evidence for the dismissal route is
+    # sc_t26100954_dismiss_seam_engine_answer.mjs alone.
     orphans = [str(f.relative_to(REPO)) for f in INTEG.rglob("sc_*")
                if f.is_file() and f.resolve() not in registered
                and f.resolve() not in DEREGISTERED]

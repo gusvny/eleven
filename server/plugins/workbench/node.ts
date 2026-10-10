@@ -241,8 +241,12 @@ const EPICS_PREFIX = '/sandbar-workbench/api/epics'
  *  不新开旁路））。
  *  create 不进此表：它没有工单 id，落 exact 路由 /wf/tickets 的 POST 分支
  *  （handleTicketCreate，epic-linkage Tier 3 / t260826-02），与 <id>/<op> 路径正交。
- *  review（审批意见落盘）不进此表——它不经过 admin.py，在路由里按 method 单独分支。 */
-const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', 'sign', 'authorize', 'retry-qc', 'pause', 'resume'])
+ *  review（审批意见落盘）不进此表——它不经过 admin.py，在路由里按 method 单独分支。
+ *  t261009-54 加 dismiss/restore=人工摘除失败票 / 撤回摘除：走 ticket.py 既有
+ *  op=dismiss|restore（t261009-31 CLI 审计面：who 记名、reason 必填非空绝不默认、
+ *  拒收 agent 角色名），不造旁路、不直写 journal。此前缺口：client 已 POST 此二
+ *  路径而本表没有 ⇒ 恒 404「未知操作」，左列按钮点了没反应。 */
+const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', 'sign', 'authorize', 'retry-qc', 'pause', 'resume', 'dismiss', 'restore'])
 
 /** 工单 id 白名单：review 落盘文件名由它拼出，必须防穿路径（同 knowledge DOC_PATH_RE 的角色）。
  *  放行 Han 字（真实工单 id 含中文，54 张全量体检零误伤）；/ \ . % 与控制字符全在表外，穿路径无门。 */
@@ -1320,6 +1324,23 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           const r = await runPocCli(cli, ['ticket', JSON.stringify(withCaller({
             op, ticket_id: id, who, note,
           }))])
+          sendJson(res, 200, r)
+          return
+        }
+        // t261009-54：dismiss/restore = 人工摘除失败票 / 撤回摘除。与 pause/resume
+        // 同形但**刻意不同通道**：走 ticket.py op=dismiss|restore（callTool 审计面，
+        // run-id 入账），不发 Temporal signal——摘除只记 audit journal、不发信号、
+        // 不动状态机（ticket_dismiss.py 自己的契约；别「顺手修」成 signal）。
+        // 借 pause/resume 分支形态的故障模式取舍（review 意见①）：畸形 payload 与
+        // 幂等态（重复 dismiss / 未摘先 restore）**不在路由层处理**——who 空、reason
+        // 空、agent 角色名、未知票、重复处置全部是引擎的具名拒收（t261009-31），
+        // 原样透传给面板显示，路由绝不默认、绝不改写成成功。身份来自请求体
+        // （who→by），路由不注入任何侧常量——journal 行的 who 是审计锚。
+        if (op === 'dismiss' || op === 'restore') {
+          const args: Record<string, unknown> = withCaller({
+            op, id, by: String(body.who ?? ''), reason: String(body.reason ?? ''),
+          })
+          const r = await callTool('ticket', args)
           sendJson(res, 200, r)
           return
         }

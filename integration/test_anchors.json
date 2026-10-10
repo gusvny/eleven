@@ -4649,6 +4649,11 @@
       "note": "",
       "sync_path": ""
     },
+    "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
+      "sync_path": ""
+    },
     "integration/t261009-58/sc_t26100958_effective_write_set.py": {
       "anchor": "contract",
       "note": "t261009-58 story (1)+(4): one effective write set record - shape, stored-field fallback, record-wins precedence, named malformed refusal, history face",
