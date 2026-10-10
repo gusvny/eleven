@@ -460,6 +460,30 @@ class QueryError(ValueError):
         self.face = face
 
 
+# t261009-80: pure pause-effect prediction (mirrors the rule and copy of
+# engine/client.py pause_effect_statement; wording consistency is pinned by the
+# dual-load unit test — this file cannot load client.py, hard temporalio dep).
+_PAUSE_BOUNDARY_EFFECT = (
+    "accepted; the current segment runs to completion, then the ticket stops at the "
+    "next segment boundary awaiting resume")
+_PAUSE_BLOCKED_EFFECT = (
+    "accepted, but this ticket is blocked waiting on a human and will not reach a "
+    "segment boundary, so the pause will not take effect; the slot stays held")
+
+
+def _pause_effect_of(paused, status, stage_state):
+    """Not paused = empty string (never fabricated as a prediction); paused and
+    unable to enter a next segment (blocked / waiting at the human gate) = the
+    line naming "the pause will not take effect, the slot stays held"; any other
+    pause = "stops at the next segment boundary awaiting resume". All three
+    inputs must come from the same snapshot/meta read."""
+    if not paused:
+        return ''
+    if str(status or '') == 'blocked' or str(stage_state or '') == 'awaiting-human':
+        return _PAUSE_BLOCKED_EFFECT
+    return _PAUSE_BOUNDARY_EFFECT
+
+
 def _v2_query(tid):
     """工单查询：返回 (meta, snapshot)。
 
@@ -503,6 +527,19 @@ def _v2_query(tid):
     # as the row face; never fabricated as 'unknown').
     meta['paused'] = bool(snap.get('paused'))
     meta['paused_phase'] = str(snap.get('paused_phase') or '')
+    # t261009-80 (KI-01M4HQ5FJ8HKGY156YCE97X0K7): effect-prediction read face —
+    # when paused AND this ticket can never enter a next segment (blocked /
+    # awaiting-human), show must say plainly "the pause will not take effect",
+    # so "paused" and "stuck" are distinguishable from the face alone. The
+    # wording truth source lives in engine/client.py (pause_effect_statement /
+    # PAUSE_*_EFFECT constants); this layer cannot load that module (hard
+    # temporalio dependency) so it mirrors the copy — consistency is pinned by
+    # test_t261009_80_pause_honesty.py (dual-load comparison). The list row does
+    # NOT carry this key (t261009-35 RULE: rows stay narrow; diagnosis happens
+    # on this detail face). All three inputs come from the same meta (one
+    # snapshot read); not paused = empty string.
+    meta['pause_effect'] = _pause_effect_of(meta.get('paused'), meta.get('status'),
+                                            meta.get('stage_state'))
     # t260915-12 越权对账面（工单③）：越权旗/未声明身份的写操作记名（workflow 侧
     # meta['cross_project_uses']，盖章 op 才有账；retry_qc/update/cancel 的记名只在
     # admin.log——覆盖口径如实分档，见 server/engine/README.md 闸契约节）。

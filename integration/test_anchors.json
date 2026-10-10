@@ -1368,6 +1368,11 @@
       "anchor": "behaviour",
       "note": "t261009-75 KI-01M4HPGHVWAKB62TXYV4G7ENEB: head_states adopts the canonical answer-row shape (string-at/shape-off rows never clear a head), the malformed-answer report names every shape-off row, op=read carries states+report to a human, gate-level change over shape-off-answered heads, and the engine writer stamps a numeric at",
       "sync_path": "server/engine/request_thread.py (head_states / answer report / op=read / reply_op)"
+    },
+    "server/engine/tests/test_t261009_80_pause_honesty.py": {
+      "anchor": "contract",
+      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty unit contract — landing evaluator truth table (landed/refused/pending, baseline-refusal masking, new-refusal-wins), effect statement (paused vs stuck; blocked names will-not-take-effect + slot stays held; the landed+non-effect pairing pinned), pure receipt-face builder key set (existing ticket_id/signal/who/delivered survive with delivered semantics untouched; unconfirmed keeps delivered and names the op=query re-check), bounded poll transient-jitter and budget-exhaustion paths, malformed-snapshot named degradation, and the client/ticket wording-consistency pin",
+      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face / _await_pause_landing); server/tools/ticket.py (_pause_effect_of)"
     }
   },
   "scenarios": {
@@ -4866,6 +4871,11 @@
       "anchor": "behaviour",
       "note": "t261009-75 acceptance 4: answer lands through the sanctioned writer (panel answer POST behind the credential gate) and the item leaves waiting on the panel's OWN split; landed row re-read from the file carries the canonical shape; engine read view agrees on the same file",
       "sync_path": "server/plugins/executor-panel/src/host/api.ts (answer route); server/plugins/executor-panel/src/host/requests.ts (answerRequest); server/engine/request_thread.py (head_states)"
+    },
+    "integration/t261009-80/sc_pause_honest_receipt.py": {
+      "anchor": "contract",
+      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty scenario — the landing evaluator / effect statement / pure receipt-face builder public-contract truth tables (landed/refused/pending, baseline non-misattribution, paused-vs-stuck wording, blocked names will-not-take-effect + slot stays held, unconfirmed keeps delivered with the named re-check face), malformed-input named degradation, and the ticket detail face pause_effect wiring pin",
+      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face); server/tools/ticket.py (_pause_effect_of, _v2_query)"
     }
   },
   "server/engine/tests/test_t261010_75_answer_row_shape.py": {

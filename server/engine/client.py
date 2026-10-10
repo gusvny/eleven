@@ -1558,18 +1558,34 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         # 幂等反馈可辨在 workflow 侧（重复 pause / 空态 resume / 畸形 payload 落
         # refused，snapshot 可观测）；本侧只对「对端不可达/已终结」报结构化 _err。
         # payload 兼容两形：input 包装（node.ts/集成场景先例同 sign）与顶层直给。
+        # t261009-80 (KI-01M4HQ5FJ8HKGY156YCE97X0K7): delivered:true from now on
+        # only means "the signal reached the event history" — after delivery a
+        # bounded poll confirms the landing three-state (landed/refused/
+        # unconfirmed) and the receipt carries the effect prediction: on a
+        # blocked ticket a pause can never reach the segment boundary, so the
+        # receipt must say plainly "will not take effect; the slot stays held"
+        # instead of reading like it took effect (same landing-confirmation
+        # discipline as authorize). All existing receipt keys survive (the
+        # delivered semantics is unchanged; the honesty upgrade is new keys only).
         raw = args.get("input")
         if not isinstance(raw, dict):
             raw = args
         who = str(raw.get("who") or "op-local")
         note = str(raw.get("note") or "")
+        # Baseline refusal list: captured BEFORE delivery (reusing the snapshot
+        # _write_gate already read — no second query) so pre-existing refusals
+        # are never misattributed to this operation.
+        baseline_refused = _refused_entries(gate.get("snap"))
         req = PauseRequest(who=who, note=note,
                            # t260915-12 盖章（同 sign 家族契约）。
                            caller_project=gate["stamp"] if gate else "",
                            cross_project_note=gate["note"] if gate else "")
         await handle.signal(op, req)
-        return _gate_receipt(_ok({"ticket_id": tid, "signal": op, "who": req.who,
-                                  "delivered": True}), gate, op)
+        state2, payload, last_snap = await _await_pause_landing(
+            handle, baseline_refused, op)
+        return _gate_receipt(_ok(_pause_receipt_face(tid, op, req.who, state2,
+                                                     payload, last_snap)),
+                             gate, op)
 
     if op in ("advance", "accept", "dispatch-next"):
         return _err("v2 引擎（模版即代码）已取消 %s：workflow 过门自动推进，"
@@ -2048,6 +2064,153 @@ def _refused_entries(snap: Any) -> List[Dict[str, Any]]:
     if not isinstance(items, list):
         return []
     return [it for it in items if isinstance(it, dict)]
+
+
+# ---- t261009-80: honest pause/resume receipt (KI-01M4HQ5FJ8HKGY156YCE97X0K7) ----
+# Incident shape: a pause signal on a blocked (waiting-on-human) ticket can never
+# reach the between-segment gate, yet the receipt said delivered:true and read as
+# if it took effect. This group makes "post-delivery landing confirmation +
+# effect prediction on the receipt" a fixed step of op=pause|resume (borrowed
+# from the authorize landing-confirmation discipline). Wording truth-source
+# rule: the effect copy is mirrored by server/tools/ticket.py's show face (that
+# layer cannot load this module — hard temporalio dependency), and the two
+# wordings are pinned equal by test_t261009_80_pause_honesty.py (dual-load
+# comparison), so editing one side alone breaks the test.
+
+PAUSE_BOUNDARY_EFFECT = (
+    "accepted; the current segment runs to completion, then the ticket stops at the "
+    "next segment boundary awaiting resume")
+PAUSE_BLOCKED_EFFECT = (
+    "accepted, but this ticket is blocked waiting on a human and will not reach a "
+    "segment boundary, so the pause will not take effect; the slot stays held")
+RESUME_EFFECT = "resume accepted; the pause flag is cleared and the workflow continues"
+
+
+def _cannot_reach_boundary(status: Any, stage_state: Any) -> bool:
+    """Can this ticket still enter a next segment (pure)? A blocked (waiting on a
+    human) or awaiting-human ticket never enters another segment, so the
+    between-segment gate is never consulted and a pause cannot take effect.
+    The literals match the base.py A3.5 criteria ('blocked' / 'awaiting-human')
+    and are listed here instead of imported (the CLI layer does not load the
+    workflow modules)."""
+    return str(status or "") == "blocked" or str(stage_state or "") == "awaiting-human"
+
+
+def pause_effect_statement(paused: Any, status: Any, stage_state: Any) -> str:
+    """One-line effect prediction (pure; wording truth source in the group
+    header). All three inputs MUST come from ONE snapshot/meta read — never a
+    fresh paused paired with a stale status (that would amplify the stale-effect
+    race). Not paused = empty string (absence is honest; never fabricated)."""
+    if not paused:
+        return ""
+    if _cannot_reach_boundary(status, stage_state):
+        return PAUSE_BLOCKED_EFFECT
+    return PAUSE_BOUNDARY_EFFECT
+
+
+def _pause_refusal_key(it: Dict[str, Any]) -> "tuple[str, str]":
+    """Comparison key for a refused entry (who+why; want is filtered by the
+    caller). Used for baseline masking: dicts from two snapshot reads are
+    distinct objects, so compare by content key, not object identity."""
+    return (str(it.get("who") or ""), str(it.get("why") or ""))
+
+
+def evaluate_pause_landing(baseline_refused: List[Dict[str, Any]], snap: Any,
+                           op: str) -> "tuple[str, Any]":
+    """pause/resume landing evaluator, three states (pure): returns (state, payload).
+    - ("refused", why): a NEW refused entry for this op appeared (duplicate pause /
+      empty-state resume / malformed payload) — baseline masking: refusals that
+      existed before delivery are never misattributed (same baseline rule as
+      authorize); refused takes priority over the paused read (on a repeated
+      pause, paused is already True — the refusal is the truth).
+    - ("landed", phase): pause -> snap['paused'] is True; resume -> is False.
+    - ("pending", None): not enough evidence; the caller emits unconfirmed.
+    Borrowed from the _await_authz_landing family; two pieces are deliberately
+    NOT carried (borrow ledger, so the next borrow keeps the trail):
+    (a) the authorize kind/expires axis — pause has no expiry dimension to
+    evaluate; (b) the classify_query_failure hint taxonomy — a failed landing
+    query degrades to unconfirmed + "re-check via op=query" only, no
+    sign-specific hints."""
+    if op not in ("pause", "resume"):
+        return ("pending", None)
+    base_keys = {_pause_refusal_key(it) for it in (baseline_refused or [])
+                 if str(it.get("want") or "") == op}
+    for it in _refused_entries(snap):
+        if str(it.get("want") or "") != op:
+            continue
+        if _pause_refusal_key(it) not in base_keys:
+            return ("refused", str(it.get("why") or ""))
+    if not isinstance(snap, dict):
+        return ("pending", None)
+    paused = snap.get("paused")
+    if op == "pause":
+        if paused is True:
+            return ("landed", str(snap.get("paused_phase") or ""))
+    else:  # resume
+        if paused is False:
+            return ("landed", "")
+    return ("pending", None)
+
+
+async def _await_pause_landing(handle: Any, baseline_refused: List[Dict[str, Any]],
+                               op: str,
+                               polls: int = AUTHZ_LANDING_POLLS,
+                               base_delay: float = AUTHZ_LANDING_BASE_DELAY,
+                               max_delay: float = AUTHZ_LANDING_MAX_DELAY,
+                               timeout: float = QUERY_TIMEOUT_S,
+                               ) -> "tuple[str, Any, Any]":
+    """Bounded post-delivery poll (exponential backoff, same shape as
+    _await_authz_landing): returns (state, payload, last snapshot). A failed
+    per-poll query counts as transition-window jitter (KI-003 lineage) and the
+    loop retries; an exhausted budget returns pending for the caller to emit
+    unconfirmed. Deliberately carries no classify_query_failure hint taxonomy
+    (see the borrow ledger in evaluate_pause_landing's docstring)."""
+    delay = base_delay
+    last_snap: Any = None
+    for _ in range(max(1, polls)):
+        await asyncio.sleep(delay)
+        delay = min(max_delay, delay * 2)
+        try:
+            s = await asyncio.wait_for(handle.query("snapshot"), timeout=timeout)
+        except Exception:
+            continue
+        last_snap = s
+        state, payload = evaluate_pause_landing(baseline_refused, s, op)
+        if state != "pending":
+            return (state, payload, s)
+    return ("pending", None, last_snap)
+
+
+def _pause_receipt_face(tid: str, op: str, who: str, state2: str, payload: Any,
+                        last_snap: Any) -> Dict[str, Any]:
+    """pause/resume receipt-face assembly (pure; the key set is pinned by tests).
+    The existing keys (ticket_id/signal/who/delivered) survive verbatim —
+    delivered still means "the signal reached the event history"; the honesty
+    upgrade lives entirely in the new keys (landing/paused/paused_phase/effect).
+    A non-dict last_snap (no snapshot within the budget) degrades to an empty
+    snapshot, effect empty string."""
+    face = {"ticket_id": tid, "signal": op, "who": who, "delivered": True}
+    if state2 == "refused":
+        return {**face, "landing": "refused", "refused_why": payload}
+    snap2 = last_snap if isinstance(last_snap, dict) else {}
+    paused2 = snap2.get("paused")
+    phase2 = str(snap2.get("paused_phase") or "")
+    if state2 == "landed" and op == "resume":
+        effect = RESUME_EFFECT
+    else:
+        # Single snapshot read: paused/status/stage_state all come from the same
+        # last_snap, never a fresh/stale mix; unconfirmed fabricates no prediction.
+        effect = pause_effect_statement(paused2 if state2 == "landed" else None,
+                                        snap2.get("status"),
+                                        snap2.get("stage_state"))
+    out = {**face, "landing": state2, "paused": paused2,
+           "paused_phase": phase2, "effect": effect}
+    if state2 == "unconfirmed":
+        out["receipt_note"] = (
+            "delivered=signal reached the event history; whether the pause took "
+            "effect was not confirmed within the poll budget — re-check via "
+            "op=query (paused/paused_phase/effect)")
+    return out
 
 
 def classify_query_failure(exc_name: str, msg: str) -> "tuple[str, str]":
