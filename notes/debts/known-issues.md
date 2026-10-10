@@ -5032,3 +5032,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **回归**：L2——(а)名册条目指向 `::` nodeid 且解释器缺 pytest ⇒ 回执**具名**"quiet rerun interpreter has no pytest"（不是裸红、不是假绿）；(b)解释器可用 ⇒ 真复跑并给真判词；L3——一次真实并发台面里，"已入册的引擎单测红"能在**同一轮**被静默判词放行或具名拦住，且两者可区分。
 
 > **补·决定性实验（261010 12:45，可复现原始读数）**：机制已被实验证实，**且实验位置本身是个坑**。①真临时根不是 `/tmp`：引擎 venv 里 `tempfile.gettempdir()` = `/var/folders/7l/_74p2gy11bz094t_c53ngpzw0000gn/T`（macOS `$TMPDIR`）；②decoy 摆在**真临时根的一级子项**才红——`mkdir -p "$T/bundle-freshness-integration-decoy"` 后跑该用例 ⇒ **1 failed in 0.51s**（断言行 238），`rmdir` 后 ⇒ **1 passed in 0.26s**；③**反例（假实验）**：把 decoy 摆到 `/tmp/bundle-freshness-*` 或摆在 `$(mktemp -d)/bundle-freshness-*`（=新建目录**之下**）⇒ **照样 1 passed**——`gettempdir()` 那一级看不见它。**纪律**："证明某命名空间污染会红"的实验，必须先把**那个命名空间的真解析结果**打出来，再往**那一级**摆探针；摆错一级 = 空证据（本岗自己第一遍就摆错在 `/tmp`，读数 green 后才复核出真根）。
+
+## KI-01M4J6926Z30WVQ0R18A5PP6NK **`reconcile_mismatch` 红警**永不收敛**：它把**终态票**与**历史 workflow**也算进"看板×账本不一致" ⇒ 一次报 630 票，红警在看板上长期占位**(261010 13:27 实测;integration 岗值守发现)
+
+> **现象（原始告警行）**：`13:27:34 reconcile_mismatch redline「对账不一致 630 票（project sandbar）」`，detail 前五条＝`t260928-20: board=awaiting ledger=merge；t260928-28: …；t260928-29: …；dispatcher-scan-2026-09-28T14:14:16Z: board=<absent> ledger=scan；dispatcher-scan-2026-09-28T14:14:30Z: …`。**该红警不可行动、且不可能收敛**（下一次心跳同样 630 上下）。
+>
+> **读码定位（两处）**：①`server/plugins/watchdog/src/host/reconcile.ts` 的 `compareStates(ledgerStates, board)` **遍历账本里的每一个状态**、**没有任何终态过滤**：board 有行且 `boardState !== ledgerState` 就记一条 mismatch，board 无行则记 `board=<absent>`；②同文件里其实**已经有**终态口径（`TERMINAL_STATUSES = {closed, verified}` + `isTerminalBoardRow`），但**只被缺行面 `ledgerCoverage` 用**（"终态缺口不可行动，不进告警面"）；③`core.ts:642` 把 `mism.length` 直接落成 **redline**（`title: 对账不一致 N 票`）。
+>
+> **两类构成（实读，261010 14:0x）**：**A 类＝终态票的"态不同"**——看板 284 行里 **279 行 `status=closed` 且 `stage_state` 恒为 `awaiting`**，而账本推演的末段恒为 `merge` ⇒ 279 条"分歧"永远是同一形状（终态票的看板行带的是收口默认值，不是活的段态）；**B 类＝账本有、看板无**——账本 `events.jsonl` 里有 **343 个 `dispatcher-scan-*`** 与 **73 个看板上没有的票 id**（历史/已 prune 的 workflow）⇒ 全部 `board=<absent>`。**两类都不是故障**，加起来就是那个 630。
+>
+> **危害**：①**永不收敛的红警**——宿主正在用的 alerts 面被它长期占据（本夜刚做完"同条件合并 ×N"的可读性改造，这条只会×N 更显眼），红警一旦长期为红就会被读成"红警面本来就这样"，**下一次真不一致会被这 630 淹没**（信噪比）；②**归因误导**——文案"对账不一致 630 票"读起来像"账本大面积坏了"，而实际是"口径把历史算进来了"（与 `KI-055`「台面绿真机红」同族的**报错不精确**）；③"对账是第一公民"的设计意图被稀释成背景噪声。
+>
+> **出路（实现口径归修复票）**：①**mismatch 面按在飞票过滤**——复用同文件既有的 `isTerminalBoardRow`/终态口径，终态票与历史 workflow 的态分歧**只进状态面**，不进红警（与 missing-rows 面同纪律、同一份口径）；②**两类具名分开**：`board=<absent>`（账本有历史遗留）与"两侧态不同"（真分歧候选）**不要合成一个数**，各给各的计数与样例；③**去重键带集合指纹**（照 `makeMissingRowsSpec` 的先例：`project:N:hash8`），让"集合不变"的红警冷却、只有"集合真变"才重响。
+>
+> **纪律（本岗）**：**凡红警（redline），必须能收敛**——不能收敛的对照/历史遗留只能进状态面。凡"两侧比对"的判据，都要能回答"这条差异谁会去动手"；答案是"没人"的差异，不是告警。
+>
+> **回归**：L2——(а)终态票（closed/verified）的看板×账本态分歧**不进** mismatch 红警；(b)账本有而看板无的历史 workflow（如已 prune 的 `dispatcher-scan-*`）**不进**红警；(c)真·在飞票的态分歧**照旧响**且具名；(d)两类计数各自可分。L3——在"看板 284 行 × 账本 11026 行"的真实台面上跑一次心跳，**不产生永不收敛的红警**，且真在飞分歧仍能响亮冒出。
