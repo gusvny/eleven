@@ -4676,6 +4676,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L3——造"长历史 + 在跑 WFT"的形态，断言(а)换手后系统能区分"等待超时重试"与"重放失败"（具名）；(b)`suggest_continue_as_new` 为真时工作流自行 continue-as-new 且历史体量回落；(c)巡检输出包含 attempt/started_time/history_bytes 三列。
 
+> **补充诊断（261010 09:1x，宿主实报「重启 console 后 ticket 常出现查询超时、要等挺久才恢复」；integration 岗读码归因）**：
+> **重启 console ≠ 重启一个界面**：console 是**工单 worker 的唯一 spawn 点**（`server/plugins/temporal-tools/node.ts` 的 supervisor，A 案「工单 worker 跟 console 走」）⇒ 重启一次 = **全部在飞票一起换手**。四条叠加：
+> ① **退出即停 poll**：dispose 对本进程 spawn 的每个工单 worker 发 SIGTERM ⇒ worker **先停止领新活（那条队列的 poller 立刻消失）**，再给在飞活动最长 **1800s** 宽限收尾（`worker.py:105 GRACEFUL_SHUTDOWN_DEFAULT_SEC=1800`）；若 console 被 **SIGKILL**，worker 只能靠 **ppid==1 自守**发现宿主没了，而它**每 30 秒**才看一次（`worker.py:101 WATCH_INTERVAL_DEFAULT_SEC=30`）。
+> ② **票面读的就是"需要 poller 应答"的东西**：引擎用 Temporal **query** 读快照（`client.py` `handle.query("snapshot")`，**8 秒**上限 `QUERY_TIMEOUT_S=8.0`），而 query 必须由**该票队列上的 poller** 应答 ⇒ poller 一没，读就失败，引擎具名分为 `no_poller`（活 poller=0）与 `query_timeout` 两种。**这正是宿主看到的"查询超时"**；console 的 alerts 里同时写着*"队列 … 的**活** poller 数=0（应为 1）"*。
+> ③ **恢复的四层延迟**：新 console 每 **15 秒**一次 ensure（`ticketEnsureMs`）——它会识别 `meta state=draining` 的旧 worker 并**清槽补拉**（这条是 t261005-03 修的，旧实现里"活 pid 挡住替补"最长拖满 30 分钟）→ 新 worker 启动（venv／注册 workflow／归属检查）→ 才第一次 poll。**最慢的一层是第 ④ 条**。
+> ④ **被作废的 STARTED workflow task 要等满 `start_to_close_timeout`（499 秒 ≈ 8 分钟）才会重派**：所以 poller 回来了、票面也能应答了，**那张票的阶段仍然不动**直到超时——纯种 handover 场景已由本 KI 正条记录，这里补的是"为什么"。
+>
+> **两条把"慢"变成"卡"的坏分支**（本次读码新增，实案见 `KI-01M4HMKZQ23649NFRTTFNCTRF6`）：
+> - **`held-unknown`**：旧 worker 的归属 meta 缺失/畸形（draining 写失败只留一行日志，或手工启的 worker 从没写过 meta）⇒ 新 console 见"pid 活着但 meta 不可用"走**保守路径：不补拉** ⇒ 该队列**一直没有 poller**，直到 drain 自己结束（最长 30 分钟）或进程死。**alerts 只报告、不修**。
+> - **worker 活着但 poller 掉了**（`t261009-52` 实测：pid 活、polling=False、票在真干活）——从查询面看与"死掉"无法区分，`reconcile` 甚至误收走它的额度；ensure **不修**这种状态（只替换 `draining` 或死 pid）。
+>
+> **出路（三条，按性价比）**：①**meta 带 console boot 代次**：新 console 把"不是我这一代启的 worker"一律视为可替换（不等它写 `draining`）⇒ 关掉 `held-unknown` 死路，把恢复压到一个 ensure tick；②**读面不依赖 poller**：query 失败时回落 `describe` + 引擎账本（durable facts），并把阶段显式写成 `unavailable(<原因>)`，绝不渲染 `stage=None` + 坏时间戳（阶段判定权威仍在 workflow，只是**面**降级）；③**把 499 秒窗口具名化**（面上写明"等旧任务超时重派"），把"看起来卡住"变成"看得懂在等什么"。
+
 ## KI-01M4GGFXPAHDGSQ9767VMB5NGM **failed 的巡检票永久挂在左栏，且"某期次某路只有 failed"这个覆盖缺口无人出面**(261009 实证;integration 岗登记)
 
 > **现象（261009 实测，`ticket-list {kind:"inspection"}`）**：sandbar 有 **4 张 `failed` + 1 张 `blocked`** 巡检票久挂左栏——
