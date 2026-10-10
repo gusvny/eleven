@@ -2897,6 +2897,60 @@ def _gitlink_refuse(ticket_id: str, stage_id: str, names: List[str],
     return note
 
 
+# ---- t261009-52 (KI-222): a fault-injection fixture is not stageable into a ticket commit ----
+# Recognition is declared in ONE place — integration/lib_fault_injection.py in
+# the repo checkout being settled — shared with lint_tests.py (L16/L17 naming).
+# The engine carries no hard-coded fixture copy: a site that stops routing
+# through the registry turns red in the lint-side wiring anchors instead of
+# silently disarming the refusal. The refusal mirrors _gitlink_refuse's shape:
+# human note + structured refusal + worker log, workspace left untouched.
+
+_FI_LIB_CACHE: Dict[str, Any] = {}
+
+
+def _load_fixture_registry(cwd: Path) -> Tuple[Any, str]:
+    """Load integration/lib_fault_injection.py from the checkout at cwd (by
+    file path — the engine package never imports across tree roots). Cached per
+    resolved path. Returns (module_or_None, diag). On load failure the refusal
+    disarms (fixture_leaks answers []) BUT never silently: diag names the
+    failure, and the L16/L17 backstop still bites at merge_check."""
+    path = (cwd / "integration" / "lib_fault_injection.py").resolve()
+    key = str(path)
+    if key in _FI_LIB_CACHE:
+        return _FI_LIB_CACHE[key], ""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("lib_fault_injection", path)
+        if spec is None or spec.loader is None:
+            raise ImportError("spec unavailable")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _FI_LIB_CACHE[key] = mod
+        return mod, ""
+    except Exception as e:  # noqa: BLE001 — a broken registry must not crash settle
+        diag = ("fault-injection fixture registry unreadable (%s): %s — the "
+                "settle-side refusal is disarmed; the L16/L17 lint backstop "
+                "still applies at merge_check" % (path.name, str(e)[:160]))
+        _FI_LIB_CACHE[key] = None
+        return None, diag
+
+
+def _fixture_leak_refuse(ticket_id: str, stage_id: str, leaks: List[Tuple[str, str]],
+                         fi: Any, refusal: Optional[Dict[str, Any]], *,
+                         face: str) -> str:
+    """Named refusal outlet (mirrors _gitlink_refuse): the settle is refused,
+    nothing is staged, the workspace is preserved, and the note names each file
+    plus its owning scenario."""
+    note = fi.refusal_note(leaks)
+    if refusal is not None:
+        refusal.update({"reason_code": "fault_injection_fixture",
+                        "files": [str(p) for p, _sc in leaks],
+                        "next_action": fi.NEXT_ACTION,
+                        "evidence": note})
+    activity.logger.warning("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
+    return note
+
+
 # ---- KI-009 (ticket t260901-25): full terminal-state reaping of the agent process (draining closes the late-write race window) ----
 
 # Bounded reap window: after terminate, wait at most this long before escalating to
@@ -3414,6 +3468,19 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         # gitlink(160000) 落进泳道分支（squash 无处可搬），0 提交子仓更被整目录吞成
         # 普通文件错形入库（子仓未提交工作与 .git 身份丢失）。拒绝落盘、现场保留
         # （不 reset 不删除，家规），人话点名交人工；重试同拒（幂等红灯）。
+        # t261009-52 (KI-222): a recognised fault-injection fixture is never
+        # staged into a ticket commit — refused by name before any git add.
+        # Judgement strictly before git add (same gate ordering discipline as
+        # the path gates); a file the registry does not recognise is untouched
+        # (not a gate on ordinary files).
+        fi, fi_diag = _load_fixture_registry(cwd)
+        if fi_diag:
+            notes.append(fi_diag)
+            activity.logger.warning("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, fi_diag)
+        leaks = fi.fixture_leaks(dirty) if fi is not None else []
+        if leaks:
+            return _fixture_leak_refuse(ticket_id, stage_id, leaks, fi,
+                                        refusal, face=face)
         hazards = gitlink_risk_from_dirty(dirty, cwd)
         if hazards:
             return _gitlink_refuse(ticket_id, stage_id,
@@ -6364,7 +6431,18 @@ def _settle_merge_core(wt: Path, ticket_id: str, round_no: int,
         return ConflictSettleResult(ok=False,
                                     error="冲突消解 settle：git status 失败（改动清单未知，"
                                           "fail-closed 不落盘）: %s" % (p.stderr or "")[-200:])
-    hazards = gitlink_risk_from_dirty(_dirty_files_from_status_z(p.stdout), wt)
+    _fi_dirty = _dirty_files_from_status_z(p.stdout)
+    # t261009-52 (KI-222): same fixture refusal as the main settle site — a
+    # conflict-resolution round must not stage a leaked fault-injection fixture
+    # either (the R2 add-site precedent: both add-everything sites share one rule).
+    fi, fi_diag = _load_fixture_registry(wt)
+    if fi_diag:
+        activity.logger.warning("conflict-settle：%s", fi_diag)
+    leaks = fi.fixture_leaks(_fi_dirty) if fi is not None else []
+    if leaks:
+        return ConflictSettleResult(
+            ok=False, error="conflict-settle refused: %s" % fi.refusal_note(leaks))
+    hazards = gitlink_risk_from_dirty(_fi_dirty, wt)
     if hazards:
         return ConflictSettleResult(ok=False,
                                     error="冲突消解拒绝落盘：%s"

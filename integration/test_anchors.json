@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 255,
-      "scenarios": 664
+      "engine_tests": 256,
+      "scenarios": 666
     },
     "vocab": [
       "behaviour",
@@ -1280,6 +1280,11 @@
     "server/engine/tests/test_write_set_args.py": {
       "anchor": "behaviour",
       "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_fault_injection_registry.py": {
+      "anchor": "contract",
+      "note": "t261009-52: registry truth table (total on malformed input), refusal/lint note wording, wiring anchors for both add-everything settle sites and the brake-scenario reclaim guards",
       "sync_path": ""
     }
   },
@@ -4597,6 +4602,16 @@
     "integration/worker-restart/sc_worker_single_poller.py": {
       "anchor": "behaviour",
       "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-52/sc_fixture_leak_brakes.py": {
+      "anchor": "behaviour",
+      "note": "K222 leak lifecycle: interrupted brake run must reclaim its fixture",
+      "sync_path": ""
+    },
+    "integration/t261009-52/sc_fixture_refusal_named.py": {
+      "anchor": "behaviour",
+      "note": "K222 refusal + lint naming face",
       "sync_path": ""
     },
     "integration/t261009-35/sc_ticket_detail_pause_faces.py": {

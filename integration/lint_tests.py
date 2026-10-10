@@ -119,6 +119,10 @@ atexit.register(shutil.rmtree, PYC, ignore_errors=True)
 
 errors, warns = [], []
 
+# t261009-52: the ONE fault-injection fixture registry, shared with the
+# settle refusal in server/engine/agent_activities.py — no second definition.
+import lib_fault_injection  # noqa: E402
+
 #: Unstable-input conditions observed during this run (t261009-12 Defect B):
 #: the lint judged a tree/git state that is not a function of the tree content
 #: (git read failure → rglob degradation, shared-base resolution failure, …).
@@ -1201,6 +1205,13 @@ def lint_anchor_manifest():
     missing += [p for p in scen_scripts if p not in m["scenarios"]]
     if missing:
         err("L16 anchor 缺标签（新文件进两棵树必须申报 anchor）：%s" % missing[:6])
+        # t261009-52: when the missing-declaration file is a recognised
+        # fault-injection fixture, say so — the finding stays red (no tooth
+        # filed), the reader stops concluding the product is broken.
+        for _n in sorted({x for x in
+                          (lib_fault_injection.lint_fixture_note(_p)
+                           for _p in missing) if x}):
+            err("L16 " + _n)
     # stale entries
     stale = [k for k in m["engine_tests"] if not (REPO / k).exists()]
     stale += [k for k in m["scenarios"]
@@ -1283,6 +1294,10 @@ L17_EXEMPT = {
     "integration/t261004-20/sc_test_anchor_brakes.py":
         [("Users/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the /Users shape this ticket's brake scenario plants and removes)"),
          ("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the /home shape, same brake scenario)")],
+    "integration/t261009-52/sc_fixture_leak_brakes.py":
+        [("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the exact 261008 KI-222 residue shape, planted by hand to exercise the pre-flight leak report, never resolved)")],
+    "integration/t261009-52/sc_fixture_refusal_named.py":
+        [("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the exact KI-222 residue shape, planted to prove lint names it a fixture, never resolved)")],
     "integration/t261004-20/sc_rewritten_decl_tests_lane_green.py":
         [("Users/user/Documents/sandbar", "the regression-pin needle itself (R3 asserts the two incident files no longer contain it)")],
     "integration/t260929-03/sc_executor_panel_page.mjs":
@@ -1317,6 +1332,13 @@ def lint_home_paths():
     if fired:
         err("L17 测试/场景内绝对家目录路径（改仓根解析；豁免须逐条具名理由）：%s"
             % fired[:6])
+        # t261009-52: name the recognised fault-injection fixture for what it
+        # is (same stance as the L16 note above — red stays red, wording gains
+        # the truth).
+        for _n in sorted({x for x in
+                          (lib_fault_injection.lint_fixture_note(
+                              _f.split(":", 1)[0]) for _f in fired) if x}):
+            err("L17 " + _n)
     if not fired and not stale_exempt:
         ok("L17 家目录路径： %d 个测试/场景文件零命中（豁免 %d 条均在位）"
            % (len(targets), len(exempt_seen)))

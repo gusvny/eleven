@@ -27,17 +27,28 @@ L18 production-snapshot 声明制），本场景从**用户可感知契约**（�
       lint 不再点名该文件（声明制是出路，不是一刀切禁令）。
   B7 清场不变式：全部注入撤除后 lint 回到基线判定（场景零残留——扫描器自己也是
       「绝不吃树」契约的消费者，KISS：注入文件用唯一名，finally 恒撤）。
+  B8 (t261009-52) 中断可清场：finally 不够（SIGINT/SIGTERM 不走 finally）——
+      reclaim 例程自足、挂 SIGINT/SIGTERM/atexit，收尾后按默认处置重投信号
+      （吞掉中断=假绿）；开场 pre-flight 查漏（上轮残留具名报告后清掉）；
+      自检 fixture 注册表（漂移=拒绝面失守，响亮失败）。
 
 纯离线零 docker；对树的写入仅限：server/engine/tests/ 下唯一名注入文件 +
-integration/test_anchors.json 的暂态改写（字节级备份、finally 恢复）。manifest
+integration/test_anchors.json 的暂态改写（字节级备份、finally 恢复；改写走
+lib_registry.write_registry 规范序列化）+ .sandbar/ 下的排他锁文件。manifest
 缺席=FAIL 点名（L16 未落地，TDD 期红属预期；arbitrate/merge 期必须绿）。
+B9 (t261009-52 验收返工) 同树互斥：并发第二跑=具名拒收（flock 运行期持有；
+实测并发碰撞：绿撤后病灶复活、同输入 lint 判定不稳）。
 """
+import os
 import pathlib
+import signal
 import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from lib_result import ScenarioCheck  # noqa: E402
+import lib_fault_injection  # noqa: E402  (t261009-52: the ONE fixture registry)
+import lib_registry  # noqa: E402  (t261009-51: canonical registry serialization)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 LINT = ["python3", "integration/lint_tests.py"]
@@ -70,7 +81,89 @@ def write_planted(text):
     PLANTED.write_text(text, encoding="utf-8")
 
 
+# ---- t261009-52: interruption-proof cleanup --------------------------------
+# Failure record (KI-222): a bare `finally` does not run on SIGINT/SIGTERM, so
+# an interrupted run left the fixture on the tree and an add-everything settle
+# later committed it into a ticket's lane. The reclaim routine below is
+# SELF-CONTAINED (reads only module-level state captured at plant time — review
+# condition 2: a signal handler must not rely on locals mutated later) and is
+# wired to SIGINT, SIGTERM and atexit, so normal exit, error, Ctrl-C and `kill`
+# all reach the same reclaim. After reclaiming, the handler restores the
+# DEFAULT disposition and re-delivers the signal to self, so the harness still
+# sees the interrupt (a swallowed SIGINT would turn an interrupt into a
+# fake-green exit).
+
+_RECLAIM_STATE = {"manifest_bak": None}
+
+
+def _reclaim():
+    """Idempotent tree reclaim: restore the manifest byte-backup, unlink the
+    fixture. Safe to call from a handler, atexit, finally, or twice."""
+    bak = _RECLAIM_STATE["manifest_bak"]
+    if bak is not None:
+        try:
+            MANIFEST.write_bytes(bak)
+        except OSError:
+            pass
+    PLANTED.unlink(missing_ok=True)
+
+
+def _reclaim_and_reraise(signum, _frame):
+    _reclaim()
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+def install_reclaim_guards():
+    import atexit
+    atexit.register(_reclaim)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, _reclaim_and_reraise)
+
+
+def check_registry_self():
+    """The scenario self-checks its own fixture against the shared registry
+    (t261009-52): registry drift would silently disarm the settle-side refusal,
+    so it fails the scenario loudly instead."""
+    registered = lib_fault_injection.fixture_scenario(
+        "server/engine/tests/" + PLANTED.name)
+    if registered != NAME:
+        raise SystemExit(
+            "fixture registry drift: lib_fault_injection.FIXTURES must map "
+            "server/engine/tests/%s to %r (got %r) — the settle refusal is "
+            "disarmed until this is fixed" % (PLANTED.name, NAME, registered))
+
+
+def preflight_leak_check():
+    """Named report at start when the previous run leaked (t261009-52 §4):
+    SIGKILL cannot be handled, so the NEXT run reports the leak by name and
+    cleans it instead of silently proceeding with a dirty tree."""
+    if PLANTED.exists():
+        print("  note pre-flight: the previous run of %s leaked %s — removed "
+              "before starting" % (NAME, PLANTED), flush=True)
+        PLANTED.unlink(missing_ok=True)
+
+
+# ---- t261009-52 acceptance rework: exclusive same-tree planting -------------
+# (the lock itself lives in lib_fault_injection.acquire_planting_lock — ONE
+#  declaration shared with the two L3 cases' manual-plant windows)
+# Measured 261010 (acceptance walkthrough): two concurrent brake runs in one
+# tree collide — each transiently rewrites the anchor manifest while the other's
+# lint reads it (lint verdict instability 0 vs 4 errors over identical input)
+# and the fixture RESURRECTS after one run's green reclaim while the other is
+# still mid-run — spec §(3) violated in its own words. Fix (option (a), the
+# smaller one): an exclusive lock file held for the run's lifetime; a second
+# concurrent run is refused BY NAME instead of colliding. The lock lives under
+# the repo's own .sandbar evidence area (gitignored — the guard must not dirty
+# the very tree it protects).
+
 def main():
+    check_registry_self()
+    # held for the process lifetime = the lock's lifetime (acceptance rework)
+    global _LOCK_FH
+    _LOCK_FH = lib_fault_injection.acquire_planting_lock(REPO)
+    preflight_leak_check()
+    install_reclaim_guards()
     # B1: baseline — lint mechanically healthy; greenness recorded, not asserted
     # (unrelated pre-existing debt in other files must not permanently red THIS
     # scenario; every brake assertion below is a delta against this baseline).
@@ -103,6 +196,7 @@ def main():
     manifest_bak = None
     if MANIFEST.exists():
         manifest_bak = MANIFEST.read_bytes()
+        _RECLAIM_STATE["manifest_bak"] = manifest_bak
     try:
         # B4: manifest coverage — unknown label, then dropped entry
         if manifest_bak is None:
@@ -120,8 +214,7 @@ def main():
             if et and sc:
                 k0 = sorted(et)[0]
                 et[k0] = {"anchor": "bogus", "note": "injected", "sync_path": ""}
-                MANIFEST.write_text(json.dumps(data, ensure_ascii=False, indent=1),
-                                    encoding="utf-8")
+                lib_registry.write_registry(MANIFEST, data)
                 rc, out = run_lint()
                 ok(rc != 0, "B4 L16 manifest coverage: unknown label refused",
                    "lint exited %d on bogus anchor label (expected red)" % rc)
@@ -129,8 +222,7 @@ def main():
                 MANIFEST.write_bytes(manifest_bak)
                 data = json.loads(manifest_bak.decode("utf-8"))
                 del data["scenarios"][sorted(data["scenarios"])[0]]
-                MANIFEST.write_text(json.dumps(data, ensure_ascii=False, indent=1),
-                                    encoding="utf-8")
+                lib_registry.write_registry(MANIFEST, data)
                 rc, out = run_lint()
                 ok(rc != 0, "B4b L16 manifest coverage: dropped entry refused",
                    "lint exited %d with an entry removed (expected red)" % rc)
@@ -159,8 +251,7 @@ def main():
                      "note": "declared snapshot injection (removed in finally)"}
             data.setdefault("engine_tests", {})[
                 "server/engine/tests/" + PLANTED.name] = entry
-            MANIFEST.write_text(json.dumps(data, ensure_ascii=False, indent=1),
-                                encoding="utf-8")
+            lib_registry.write_registry(MANIFEST, data)
             rc, out = run_lint()
             ok(PLANTED.name not in out,
                "B6 snapshot brake accepts declared snapshot",
