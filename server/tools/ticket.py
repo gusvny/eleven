@@ -863,6 +863,15 @@ def _update(a):
     return _poc_ok(out)
 
 
+def _row_int(v, default=0):
+    # t261011-02：投影行的数值键防畸形（引擎行是真源，但畸形输入不外溢成
+    # 垃圾类型——非数值/None/None 形串诚实落缺省，不炸列表）
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _list(a):
     # 纯 Temporal：client.py ticket-list（project 走 ProjectKey search attribute 过滤；
     # 不传=全部项目，admin 全局视图）。Temporal 不可达直接抛错——没有第二真源可降级。
@@ -879,56 +888,59 @@ def _list(a):
     if not out.get('ok'):
         raise ValueError('ticket-list 失败: %s' % (out.get('error') or out))
     v2_rows = (out.get('result') or {}).get('tickets') or []
-    rows = [{
-        'id': r.get('id'), 'project': r.get('project') or '',
-        'epic': r.get('epic') or '',
-        'role': r.get('role'), 'status': r.get('status'),
-        'title': r.get('title'), 'workflow_id': r.get('workflow') or '',
-        'proposal_id': r.get('proposal_id') or '',
-        'stage': r.get('stage'), 'stage_state': r.get('stage_state') or 'awaiting',
-        'engine': r.get('engine') or '',
-        'handoffs': [None] * int(r.get('handoff_count') or 0),   # 只用于计数
-        'pending': [None] * int(r.get('pending_count') or 0),
-        'worktree': r.get('worktree') or '', 'workspace': r.get('workspace'),
-        'created': r.get('created'), 'updated': r.get('updated_ts') or 0,
-        'close_ts': r.get('close_ts') or 0,
-        'authz_active': int(r.get('authz_active') or 0),   # t260912-03 生效中授权计数
-    } for r in v2_rows]
+    # t261011-02 单次薄壳投影（seam 收口）：client.py 行面（_row_from_meta 活行 /
+    # 无快照极简收口行 / 降级行）是唯一真源，这里逐键透传、绝不重算——
+    # 旧实现两次白名单重建把 paused/paused_phase/exec_status/close_health/
+    # close_health_reason/lane_version/develop_line 依次削掉（t260910-04 因此
+    # 绕道 console 直读 client.py；t261009-76 的 opt-in 两键在 CLI 面恒空）。
+    # 本面**不故意丢弃任何引擎行键**——引擎行将来加键而此表未同步时，L1 键集
+    # 断言（integration/tests/test_t261011_02_ticket_list_projection.py）会点名红。
+    # 形状差异仅两处（非丢弃）：①键名沿用 CLI 既有对外名 'workflow'
+    # （引擎行同名，透传即可）；②handoff_count/pending_count 引擎侧本就是计数
+    # （非列表），按数透传。行缺键=老引擎/极简行，按各键诚实缺省补空，
+    # 绝不从他字段反推。'updated' 引擎已按 '%m-%d %H:%M' 本地时区格式化
+    # （读取点=CLI 进程），透传不重算；updated_ts 保持 epoch 秒。
     out_rows = []
-    for meta in rows:
-        if a.get('status') and meta.get('status') != a['status']:
-            continue
-        if a.get('role') and meta.get('role') != a['role']:
-            continue
-        if a.get('workflow') and (meta.get('workflow_id') or '') != a['workflow']:
-            continue
-        if a.get('stage_state') and meta.get('stage_state') != a['stage_state']:
-            continue
-        out_rows.append({
-            'id': meta['id'], 'project': meta.get('project') or '',
-            'epic': meta.get('epic') or '',
-            'role': meta.get('role'), 'status': meta.get('status'),
-            'title': meta.get('title'),
-            'workflow': meta.get('workflow_id') or '',
-            'proposal_id': meta.get('proposal_id') or '',
-            'stage': meta.get('stage'), 'stage_state': meta.get('stage_state', 'awaiting'),
-            'engine': meta.get('engine') or '',
-            'handoff_count': len(meta.get('handoffs') or []),
-            'pending_count': len(meta.get('pending') or []),
-            'worktree': meta.get('worktree') or '',
-            'workspace': meta.get('workspace'),
-            'created': meta.get('created'),
-            'updated': time.strftime('%m-%d %H:%M', time.localtime(meta.get('updated', 0))),
-            'updated_ts': meta.get('updated'),
-            'close_ts': meta.get('close_ts') or 0,
-            # t260912-03：列表可读面＝生效中的人授权条数（client.py 行内已按
-            # expires>now 过滤；行缺键=老引擎，补 0 不炸）
-            'authz_active': int(meta.get('authz_active') or 0),
+    for r in v2_rows:
+        if not isinstance(r, dict):
+            r = {}   # 畸形行不炸列表，投影为全缺省诚实空行
+        row = {
+            'id': r.get('id'), 'project': r.get('project') or '',
+            'epic': r.get('epic') or '',
+            'role': r.get('role'), 'status': r.get('status'),
+            'title': r.get('title'),
+            'workflow': r.get('workflow') or '',
+            'proposal_id': r.get('proposal_id') or '',
+            'stage': r.get('stage'), 'stage_state': r.get('stage_state') or 'awaiting',
+            'paused': bool(r.get('paused')),                       # t260908-01 段间暂停二态
+            'paused_phase': str(r.get('paused_phase') or ''),      # pending / at_gate
+            'engine': r.get('engine') or '',
+            'handoff_count': _row_int(r.get('handoff_count')),
+            'pending_count': _row_int(r.get('pending_count')),
+            'worktree': r.get('worktree') or '', 'workspace': r.get('workspace'),
+            'created': r.get('created'),
+            'updated': r.get('updated') or '',
+            'updated_ts': _row_int(r.get('updated_ts'), 0),
+            'close_ts': _row_int(r.get('close_ts'), 0),
+            'exec_status': r.get('exec_status') or '',             # t260921-03 收口执行态
+            'close_health': r.get('close_health') or '',           # t260921-03 收口健康度
+            'close_health_reason': r.get('close_health_reason') or '',
+            # t260912-03：生效中的人授权条数（client.py 行内已按 expires>now 过滤）
+            'authz_active': _row_int(r.get('authz_active')),
             # t261009-76：逐票 lane opt-in 上板（spec (4)）——操作员不读 workflow
             # 历史即可分辨 opt-in 票与 legacy 票；行缺键=老引擎，补空串不炸
-            'lane_version': meta.get('lane_version') or '',
-            'develop_line': meta.get('develop_line') or '',
-        })
+            'lane_version': r.get('lane_version') or '',
+            'develop_line': r.get('develop_line') or '',
+        }
+        if a.get('status') and row.get('status') != a['status']:
+            continue
+        if a.get('role') and row.get('role') != a['role']:
+            continue
+        if a.get('workflow') and row.get('workflow') != a['workflow']:
+            continue
+        if a.get('stage_state') and row.get('stage_state') != a['stage_state']:
+            continue
+        out_rows.append(row)
     return {'count': len(out_rows), 'tickets': out_rows}
 
 
@@ -1247,13 +1259,85 @@ def validate_write_set_no_notes(write_set):
                 '待落账项（KI/epic/决策档）写进结算 note，由 integration 在 main 落。' % e)
 
 
+# ---------- reconcile 探活三态（t261009-74：draining ≠ dead） ----------
+# 结构化 kind 是唯一分类锚（review C1）：client.py 回执 {ok:false, error, kind}，
+# kind ∈ no_poller / not_found / transient / internal / …——不匹配错误文案（自由
+# 文本会漂移），未识别的 kind 一律 unknown（保槽），宁可少清不可误清。
+_PROBE_KIND_NO_POLLER = 'no_poller'    # client.KIND_NO_POLLER（348 行族，直 spawn 面取字面量）
+_PROBE_KIND_NOT_FOUND = 'not_found'    # workflow 已消亡=唯一可证死的读侧证据
+
+_ENGINE_DATA_DIR = TEMP_POC / 'data'   # 专用 worker pidfile/meta 家（独立全局，
+                                       # 测试可注入 tmp——TEMP_POC 还要装 shared.py）
+
+
+def _holder_evidence(tid):
+    """holder 的本机证据面（纯读）：pidfile 状态 + 进程死活 + worker meta 状态。
+
+    文件形状真源=engine/ticket_worker.py（data/worker-<tid>.pid，旁车
+    <pidfile>.meta）；该模块不在本票写集，这里按同形状只读复刻（读不到=不判定，
+    绝不当不存在）。pidfile 四态由 shared.read_pidfile_state 判（live=进程活），
+    meta 由 shared.read_worker_meta_state 判（state ∈ serving/draining，缺键=旧
+    worker 读 serving——保守：serving+no_poller 落 unknown，不清账）。"""
+    s = _shared()
+    pidfile = _ENGINE_DATA_DIR / ('worker-%s.pid' % tid)
+    pf = s.read_pidfile_state(pidfile)
+    meta, meta_state, _detail = s.read_worker_meta_state(str(pidfile) + '.meta')
+    pf_state = str(pf.get('state') or 'unknown')
+    # 进程死活：live=alive；stale/absent=gone；malformed/读不了=不可证
+    #（读不懂 ≠ 没有——绝不冒充「进程已亡」）。
+    if pf_state == 'live':
+        process = 'alive'
+    elif pf_state in ('stale', 'absent'):
+        process = 'gone'
+    else:
+        process = 'unknown'
+    return {
+        'probe': '',
+        'pidfile': pf_state,
+        'process': process,
+        'pid': pf.get('pid'),
+        'meta': meta_state,
+        'meta_state': str((meta or {}).get('state') or '') if isinstance(meta, dict) else '',
+        'meta_pid': (meta or {}).get('pid') if isinstance(meta, dict) else None,
+    }
+
+
+def _probe_verdict(kind, ev):
+    """探活判定（纯函数，t261009-74 三态 + fail-closed unknown）。
+
+    kind=探针回执的结构化 kind（''=query 有答）；ev=_holder_evidence 产出。
+    返回 live / draining / dead / unknown——只有 dead 进 reconcile 清账单。"""
+    if kind == '':
+        return 'live'
+    if kind == _PROBE_KIND_NOT_FOUND:
+        return 'dead'   # workflow gone：Temporal 侧唯一可证死（本机进程死活无关）
+    if kind == _PROBE_KIND_NO_POLLER:
+        # 停轮询 + pidfile 活 + 旁车 meta 自证 draining 且 pid 对得上 → draining
+        #（meta pid 比对挡 pidfile 指向回收 pid 的「陌生人」情形：对不上=unknown）。
+        if ev.get('process') == 'alive' and ev.get('meta') == 'ok' \
+                and ev.get('meta_state') == 'draining' \
+                and ev.get('pid') is not None \
+                and str((ev.get('meta_pid') or '')) == str(ev.get('pid')):
+            return 'draining'
+        if ev.get('process') == 'gone':
+            return 'dead'   # 没轮询者 + 本机进程确已亡：真僵尸
+        return 'unknown'    # 进程活但 meta 缺/畸形/serving，或进程死活不可证：保槽
+    return 'unknown'        # transient / internal / 未知 kind：不清账（fail-closed）
+
+
 def _concurrency(args):
     """t261004-32：项目并发上限的只读面 + 僵尸 holder 清账（CL-2/CL-3 面板消费）。
 
     - 缺省（reconcile 缺省 false）：read_state——上限、在持（含 human-hold）、
       队列位次与已等时长。面板只读账，不自己算队列（规则8）。
-    - reconcile=true：逐个 holder 用只读 query 探活（workflow 已消亡=僵尸），
-      具名清账并递补队首。声明缺席/畸形在这里具名拒收（规则9），绝不静默 unlimited。
+    - reconcile=true：逐个 holder 用只读 query 探活，判 **三态**（t261009-74，
+      KI-01M4HMKZQ23649NFRTTFNCTRF6 / KI-01M4K9X2Z8W1A6CVB3QD7FHS4M）：
+      live（query 有答）/ draining（worker 进程活着但停轮询——pidfile 活 + meta
+      state=draining，宽停窗口内是**健康态**，保槽具名）/ dead（进程已亡）。
+      只有 dead 是僵尸、只清 dead；其余探活失败（瞬时 RPC 等）= unknown——
+      fail-closed 的语义是「未知不清账」，不是「未知即死亡」，绝不因探针一次
+      抖动把健康票的槽让出去。dropped 逐条带证据（probe/pidfile/process），
+      读者永远看不到裸票号。
     - order=[ticket ids]（CL-3 写脸，t261009-03）：路由到 engine concurrency.reorder
       ——唯一实现在引擎（置换校验/锁内写/具名拒收都在那里，本壳零二次校验），
       写后回读 read_state 同脸返回（面板拿新序比对，绝不本地算队列）。reconcile 与
@@ -1277,16 +1361,38 @@ def _concurrency(args):
         return conc.read_state(project)
     state = conc.read_state(project)
     alive = []
+    draining = []
+    unknown = []
     probe_errors = {}
+    dropped_evidence = []
     for h in state.get('holders') or []:
         tid = str(h.get('ticket') or '')
+        ev = _holder_evidence(tid)
         try:
-            _poc_ok(_poc('query', {'workflow_id': tid}))
+            receipt = _poc('query', {'workflow_id': tid})
+            if isinstance(receipt, dict) and receipt.get('ok'):
+                alive.append(tid)          # live: the workflow answers
+                continue
+            kind = str((receipt or {}).get('kind') or '')
+            note = str((receipt or {}).get('error') or receipt)[:160]
+        except Exception as e:  # noqa: BLE001——spawn/解析层失败：不可证死，按 unknown 保槽
+            kind, note = 'unknown', '%s: %s' % (type(e).__name__, str(e)[:160])
+        verdict = _probe_verdict(kind, ev)
+        if verdict == 'live':
             alive.append(tid)
-        except Exception as e:  # noqa: BLE001——探活失败=该 holder 视为僵尸（具名留底）
-            probe_errors[tid] = '%s: %s' % (type(e).__name__, str(e)[:160])
-    out = conc.reconcile(project, alive)
+        elif verdict == 'draining':
+            draining.append(tid)
+        elif verdict == 'dead':
+            ev['probe'] = kind
+            ev['ticket'] = tid
+            dropped_evidence.append(ev)
+            probe_errors[tid] = 'dead (kind=%s) %s' % (kind, note)
+        else:  # unknown：fail-closed=不清账，具名留底等人看
+            unknown.append(tid)
+            probe_errors[tid] = 'kept (%s) %s' % (kind, note)
+    out = conc.reconcile(project, alive, draining, unknown)
     out['probe_errors'] = probe_errors
+    out['dropped_evidence'] = dropped_evidence
     out['decl'] = state.get('decl')
     return out
 

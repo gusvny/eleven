@@ -90,6 +90,18 @@ LEG_TMP_FIXTURE = "tmp-fixture-water"
 #: 三族会把按族聚合的计数口径（含既有逐字断言）改掉；它只在真降级时出现在 by_leg 里。
 LEG_DATA_UNREADABLE = "data-unreadable"
 
+#: Buffer-stall tokens (t261009-78): the develop-buffer flow's silent stalls, per the
+#: inspection design's closing section (item 7) — these belong to the patrol/watchdog,
+#: not to the artifact-reviewing faces. NOT inside LANE_LEGS, for the same reason as
+#: the two tokens above: the ticket-level three-leg counting and its verbatim
+#: assertions must not move. Each token has its own threshold key and its own named
+#: finding; they are fleet/line/landing-level judgements fed from the delivery
+#: ledger (stall_facts), never from a ticket snapshot.
+LEG_CERT_WAIT = "cert-wait-overdue"
+LEG_FREEZE_NO_REMEDY = "freeze-without-remedy"
+LEG_REPAIR_NOWHERE = "repair-points-nowhere"
+STALL_LEGS = (LEG_CERT_WAIT, LEG_FREEZE_NO_REMEDY, LEG_REPAIR_NOWHERE)
+
 #: ③族（inflight-silent）**不适用**的票态（260926 复核缺陷⑤）：这三态都不是「在飞」——
 #: paused=KI-122 止血动作本身；blocked=等人审签字；stage_state 含 awaiting=等**人门**
 #: （base.py 设计内可挂数小时/数日）。命中这三态时本族不出条，逐条进 meta.suppressed。
@@ -205,14 +217,29 @@ SUITE_DURATION_RANGES = {"suite_slow_round_min": (1, 10080),
 SUITE_DURATION_DEFAULTS = {"suite_slow_round_min": DEFAULT_SUITE_SLOW_ROUND_MIN,
                            "suite_slow_scenario_sec": DEFAULT_SUITE_SLOW_SCENARIO_SEC}
 
+#: Buffer-stall threshold pair (t261009-78): the sixth threshold group — one window per
+#: stall leg, same declared/resolved way as every existing group. Defaults are a
+#: declared-overridable guess (the patrol cadence has not produced a measured basis
+#: yet): 24h for a landing to be covered by a certification, 24h for an open freeze
+#: to show remedy work in flight before the leg names it.
+DEFAULT_CERT_WAIT_OVERDUE_MIN = 1440
+DEFAULT_FREEZE_WITHOUT_REMEDY_MIN = 1440
+STALL_WATCHDOG_KEYS = ("cert_wait_overdue_min", "freeze_without_remedy_min")
+STALL_WATCHDOG_RANGES = {"cert_wait_overdue_min": (1, 10080),
+                         "freeze_without_remedy_min": (1, 10080)}
+STALL_WATCHDOG_DEFAULTS = {"cert_wait_overdue_min": DEFAULT_CERT_WAIT_OVERDUE_MIN,
+                           "freeze_without_remedy_min": DEFAULT_FREEZE_WITHOUT_REMEDY_MIN}
+
 #: The declaration's legal-key universe (ticket trio + water-level pair + suite-duration
-#: pair) and the merged dicts: the declaration parser (inspection_decl) uses the former
+#: pair + buffer-stall pair) and the merged dicts: the declaration parser (inspection_decl) uses the former
 #: to reject unknown fields, the water-level/duration faces read values from the latter
 #: — both take from here, never two copies.
-WATCHDOG_ALL_KEYS = WATCHDOG_KEYS + TMP_WATCHDOG_KEYS + SUITE_DURATION_KEYS
-WATCHDOG_ALL_RANGES = dict(WATCHDOG_RANGES, **TMP_WATCHDOG_RANGES, **SUITE_DURATION_RANGES)
+WATCHDOG_ALL_KEYS = WATCHDOG_KEYS + TMP_WATCHDOG_KEYS + SUITE_DURATION_KEYS \
+    + STALL_WATCHDOG_KEYS
+WATCHDOG_ALL_RANGES = dict(WATCHDOG_RANGES, **TMP_WATCHDOG_RANGES,
+                           **SUITE_DURATION_RANGES, **STALL_WATCHDOG_RANGES)
 WATCHDOG_ALL_DEFAULTS = dict(WATCHDOG_DEFAULTS, **TMP_WATCHDOG_DEFAULTS,
-                             **SUITE_DURATION_DEFAULTS)
+                             **SUITE_DURATION_DEFAULTS, **STALL_WATCHDOG_DEFAULTS)
 
 THRESHOLD_SOURCE_DECL = "declaration"
 THRESHOLD_SOURCE_DEFAULT = "default"
@@ -291,6 +318,58 @@ def _fmt_thresholds(thr: Dict[str, Any]) -> str:
     return ("rerun_rounds=%d fault_loop_min=%d inflight_silent_min=%d"
             % (int(thr.get("rerun_rounds") or 0), int(thr.get("fault_loop_min") or 0),
                int(thr.get("inflight_silent_min") or 0)))
+
+
+def _fmt_stall_thresholds(thr: Dict[str, Any]) -> str:
+    return ("cert_wait_overdue_min=%d freeze_without_remedy_min=%d"
+            % (int(thr.get("cert_wait_overdue_min") or 0),
+               int(thr.get("freeze_without_remedy_min") or 0)))
+
+
+def resolve_stall_thresholds(raw: Any = None):
+    """Buffer-stall windows (t261009-78) -> (thresholds, source, note, problems).
+
+    Shaped line-for-line on ``resolve_thresholds`` (same fallback order: raw absent
+    or not a mapping -> source=default with the named reason; unknown keys named in
+    problems but not fatal; per-key non-integer / out-of-range -> module default
+    with the named reason; source=declaration only when EVERY key came from the
+    declaration legally). Pure: never reads files or the environment — the caller
+    passes the declaration's parsed ``watchdog:`` stanza.
+    """
+    thr = dict(STALL_WATCHDOG_DEFAULTS)
+    problems: List[str] = []
+    if raw is None:
+        return thr, THRESHOLD_SOURCE_DEFAULT, (
+            "stall threshold source=default (no watchdog declaration; module defaults "
+            "%s)" % _fmt_stall_thresholds(thr)), problems
+    if not isinstance(raw, dict):
+        problems.append("watchdog declaration is not a mapping (%s)" % type(raw).__name__)
+        return thr, THRESHOLD_SOURCE_DEFAULT, (
+            "stall threshold source=default (watchdog declaration malformed: not a "
+            "mapping)"), problems
+    unknown = sorted(set(raw) - set(WATCHDOG_ALL_KEYS))
+    if unknown:
+        problems.append("unknown watchdog keys: %s (stall keys: %s)"
+                        % (", ".join(unknown), ", ".join(STALL_WATCHDOG_KEYS)))
+    for k in STALL_WATCHDOG_KEYS:
+        if k not in raw:
+            problems.append("%s absent -> module default %d" % (k, STALL_WATCHDOG_DEFAULTS[k]))
+            continue
+        v = raw.get(k)
+        lo, hi = STALL_WATCHDOG_RANGES[k]
+        ok = (isinstance(v, str) and _INT_RE.match(v) and lo <= int(v) <= hi) \
+            or (isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi)
+        if not ok:
+            problems.append("%s=%r rejected (integer %d~%d) -> module default %d"
+                            % (k, v, lo, hi, STALL_WATCHDOG_DEFAULTS[k]))
+            continue
+        thr[k] = int(v)
+    from_decl = not problems
+    source = THRESHOLD_SOURCE_DECL if from_decl else THRESHOLD_SOURCE_DEFAULT
+    note = ("stall threshold source=%s (%s)" % (
+        source, _fmt_stall_thresholds(thr) if from_decl
+        else "fallbacks: " + "; ".join(problems)))
+    return thr, source, note, problems
 
 
 def resolve_tmp_thresholds(raw: Any = None, env: Any = None):
@@ -758,14 +837,365 @@ def _iso(ts: float) -> str:
         return "unknown"
 
 
+# ========================================================================================
+# Buffer-stall legs (t261009-78): pure judgement over the delivery ledger.
+# All IO (read_rows, patch-id derivation, run verdicts) lives in the caller; this
+# face consumes declared facts and degrades BY NAME on every malformed input —
+# "cannot tell" is never rendered as "fine".
+# ========================================================================================
+
+def stall_facts(rows: Any, *, lines: Any, patch_ids: Any = None,
+                now_ms: Any = 0) -> Dict[str, Any]:
+    """Delivery-ledger rows -> canonical stall facts (pure, zero IO).
+
+    ``rows`` is the delivery ledger row list (develop_certify read face); ``lines``
+    is the declared line list (the face only judges declared lines — an undeclared
+    line is a blind spot and is named, not silently skipped); ``patch_ids`` is the
+    caller's explicit ``{landing_id: patch_id}`` declaration (landings store no
+    patch ids — the same convention the withdrawal/exemption faces use). ``now_ms``
+    is the epoch in ms (the ledger's ``at`` unit).
+
+    Malformed input degrades by name into ``parse_notes``: a non-list rows value,
+    a row refused by the ledger validator, a non-string line entry, a freeze whose
+    state cannot be replayed — each is named and the remaining clean rows are still
+    judged. A missing ``patch_ids`` map with patch-id-named relations present is
+    itself a named note (our blindness), never a "no dangling relation" verdict.
+    """
+    from develop_certify import (  # lazy: keep this module import-light at module load
+        REL_KIND_REPAIRS, REL_KIND_WITHDRAWS, KIND_LANDING, KIND_CERT,
+        CertifyError, _current_relation_rows, freeze_state, validate_row)
+    notes: List[str] = []
+    facts: Dict[str, Any] = {
+        "ledger_read": True, "rows": [], "lines": [], "landings": {},
+        "cert_lines": set(), "freezes": {}, "relations": [],
+        "patch_ids": None, "patch_named_unresolved": 0,
+        "parse_notes": notes, "now_ms": 0,
+    }
+    facts["now_ms"] = int(now_ms) if isinstance(now_ms, (int, float)) \
+        and not isinstance(now_ms, bool) else 0
+    if not isinstance(now_ms, (int, float)) or isinstance(now_ms, bool):
+        notes.append("now_ms unparseable (%r): ages computed against 0" % (now_ms,))
+    if not isinstance(rows, list):
+        facts["ledger_read"] = False
+        notes.append("delivery ledger rows not a list (%s): stall legs cannot run"
+                     % type(rows).__name__)
+        return facts
+    clean: List[Dict[str, Any]] = []
+    for i, r in enumerate(rows):
+        if not isinstance(r, dict):
+            notes.append("ledger row #%d is not an object (skipped)" % i)
+            continue
+        kept, why = validate_row(r)
+        if why:
+            notes.append("ledger row #%d refused by the ledger validator: %s (skipped)"
+                         % (i, why))
+            continue
+        clean.append(kept)
+    facts["rows"] = clean
+    landings = {r["id"]: r for r in clean if r.get("kind") == KIND_LANDING}
+    facts["landings"] = landings
+    facts["cert_lines"] = {r.get("line") for r in clean if r.get("kind") == KIND_CERT}
+    if isinstance(lines, str):
+        lines = [lines]
+    if not isinstance(lines, (list, tuple)):
+        notes.append("declared line list not a list (%s): no line is judged"
+                     % type(lines).__name__)
+        lines = []
+    declared: List[str] = []
+    for ln in lines:
+        if isinstance(ln, str) and ln.strip():
+            declared.append(ln)
+        else:
+            notes.append("declared line entry not a string (%r): skipped" % (ln,))
+    facts["lines"] = declared
+    declared_set = set(declared)
+    for lid, row in sorted(landings.items()):
+        if row.get("line") not in declared_set:
+            notes.append("landing %s sits on undeclared line %r: its wait is not judged "
+                         "(add the line to the declaration to cover it)" % (lid, row.get("line")))
+    for ln in declared:
+        try:
+            st = freeze_state(clean, ln)
+        except Exception as e:  # noqa: BLE001 — a broken freeze read degrades by name
+            notes.append("freeze state unreadable for line %s: %s: %s"
+                         % (ln, type(e).__name__, e))
+            continue
+        if st.get("frozen") and st.get("episode"):
+            ep = next((r for r in clean if r.get("id") == st["episode"]), None)
+            facts["freezes"][ln] = {
+                "episode": st["episode"], "cause": st.get("cause"),
+                "culprit": st.get("culprit"),
+                "opened_ms": int(ep["at"]) if ep and isinstance(ep.get("at"), int) else 0}
+            if not ep or not isinstance(ep.get("at"), int):
+                notes.append("freeze episode %s on line %s has no readable opened-at: "
+                             "open age unknown" % (st["episode"], ln))
+    facts["relations"] = [r for r in _current_relation_rows(clean)
+                          if r.get("kind") in (REL_KIND_REPAIRS, REL_KIND_WITHDRAWS)]
+    if isinstance(patch_ids, dict):
+        facts["patch_ids"] = {str(k): str(v) for k, v in patch_ids.items()
+                              if isinstance(k, str) and isinstance(v, str) and v.strip()}
+    patch_named = 0
+    for rel in facts["relations"]:
+        ev = rel.get("evidence")
+        if isinstance(ev, dict) and ev.get("what") == "patch_id" \
+                and not isinstance(facts["patch_ids"], dict):
+            patch_named += 1
+    if patch_named:
+        facts["patch_named_unresolved"] = patch_named
+        notes.append("patch_ids map not supplied: %d patch-id-named relation(s) cannot "
+                     "be resolved (UNVERIFIED, not clean)" % patch_named)
+    return facts
+
+
+def _stall_target_resolves(facts: Dict[str, Any], ref: Any) -> Tuple[str, str]:
+    """Resolve ONE relation-target reference against the ledger facts.
+    Returns (verdict, detail): verdict is "ok" (the reference names a landing),
+    "blind" (we cannot tell — the patch_ids map was not supplied), or "dangling"
+    (the reference names nothing in the ledger). The three forms are the ledger
+    read face's own: an ``ldg-`` landing id; a patch identity matched through the
+    caller's ``patch_ids`` map; a ticket id naming a landing anywhere."""
+    landings = facts.get("landings") or {}
+    if not (isinstance(ref, str) and ref.strip()):
+        return "dangling", "empty target reference"
+    if ref.startswith("ldg-"):
+        if ref in landings:
+            return "ok", "landing %s" % ref
+        return "dangling", "landing id %s: no landing row in the ledger" % ref
+    pids = facts.get("patch_ids")
+    if isinstance(pids, dict):
+        for lid, pid in pids.items():
+            if pid == ref and lid in landings:
+                return "ok", "patch id %s (landing %s)" % (ref, lid)
+    if any(r.get("ticket") == ref for r in landings.values()):
+        return "ok", "ticket %s (landing %s)" % (
+            ref, next(lid for lid, r in landings.items() if r.get("ticket") == ref))
+    if not isinstance(pids, dict):
+        return "blind", ("reference %r is not an ldg- id and no landing names it as a "
+                         "ticket; without the patch_ids map a patch identity cannot be "
+                         "checked" % ref)
+    return "dangling", ("reference %r: not an ldg- id, matches no patch id, and no "
+                        "landing names it as a ticket" % ref)
+
+
+def stall_legs(facts: Dict[str, Any], ticket_facts: Any, now_ts: float,
+               thresholds: Dict[str, Any],
+               suppressed: Optional[List[str]] = None,
+               is_green: Any = None,
+               parse_notes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """The three buffer-stall legs (pure) -> hit list (English copy + severity + leg).
+
+    ``ticket_facts`` maps ticket_id -> the already-scanned lane facts (used ONLY for
+    the human-gate suppression via ``_not_in_flight_reasons`` and for the
+    remedy-in-flight presence check). ``is_green`` is the optional injected
+    run-verdict reader (``(run_id) -> bool``); when a line HAS certifications and
+    no reader was supplied, the cert-wait judgement for that line degrades BY NAME
+    ("cert coverage unknown") instead of assuming every certification green.
+
+    Remedy-in-flight definition (leg 2, stated here because the ticket text's
+    "running or pending" needs an auditable reading): a CURRENT ``repairs``
+    relation counts as remedy in flight when (a) its ``from`` ticket is a
+    non-terminal ticket in this patrol's scanned set and that ticket is NOT parked
+    at a human gate, or (b) its target landing on the frozen line is not yet
+    covered (state != certified). Both readings are recorded in the finding's why.
+    """
+    from develop_certify import (REL_KIND_REPAIRS, WAIT_CERTIFIED, CertifyError,
+                                 _repair_target_landing, ticket_wait_state)
+    hits: List[Dict[str, Any]] = []
+    if not isinstance(facts, dict) or not facts.get("ledger_read"):
+        return hits
+    if isinstance(ticket_facts, dict):
+        tf_index = ticket_facts
+    else:
+        tf_index = {str(getattr(f, "get", lambda k: None)("ticket_id")): f
+                    for f in (ticket_facts or []) if isinstance(f, dict)}
+    lines = set(facts.get("lines") or [])
+    landings = facts.get("landings") or {}
+    rows = facts.get("rows") or []
+    now_ms = int(facts.get("now_ms") or int(now_ts * 1000))
+    notes: List[str] = parse_notes if parse_notes is not None else []
+
+    def _age_s(at_ms: Any) -> float:
+        try:
+            return max(0.0, (now_ms - int(at_ms)) / 1000.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _not_in_flight(tid: str) -> List[str]:
+        f = tf_index.get(tid)
+        return _not_in_flight_reasons(f) if isinstance(f, dict) else []
+
+    # (1) cert-wait-overdue: a landing not covered by any certification past the window.
+    cert_win = int(thresholds.get("cert_wait_overdue_min")
+                   or DEFAULT_CERT_WAIT_OVERDUE_MIN)
+    for lid, row in sorted(landings.items()):
+        line = row.get("line")
+        if line not in lines:
+            continue
+        try:
+            st = ticket_wait_state(rows, line, row, is_green, now_ms)
+        except CertifyError as e:
+            name = str(e)
+            if "is_green" in name:
+                notes.append("cert coverage unknown for landing %s on line %s: the line "
+                             "has certifications and no run-verdict reader was supplied "
+                             "(UNVERIFIED, not clean)" % (lid, line))
+            else:
+                notes.append("landing %s on line %s unreadable by the wait face: %s"
+                             % (lid, line, name))
+            continue
+        if st.get("state") != "waiting":
+            # certified / red_implicated / reverted are not "waiting for a cert".
+            continue
+        tid = str(row.get("ticket") or "")
+        age_s = _age_s(row.get("at"))
+        if age_s < cert_win * 60:
+            continue
+        gate = _not_in_flight(tid)
+        if gate:
+            if suppressed is not None:
+                suppressed.append(
+                    "%s: cert-wait-overdue NOT reported — the ticket is not in flight "
+                    "(%s); landed %s ago on line %s" % (tid, ", ".join(gate),
+                                                        _mins(age_s), line))
+            continue
+        esc = age_s >= 2 * cert_win * 60
+        hits.append({
+            "leg": LEG_CERT_WAIT, "severity": "high" if esc else "med",
+            "subject": ("landing %s (ticket %s) on line %s has waited %s for a "
+                        "certification (threshold %dmin%s) — the covering cert never "
+                        "arrived" % (lid, tid, line, _mins(age_s), cert_win,
+                                     ", escalated at 2x window" if esc else "")),
+            "why": "the landing sits in the delivery ledger but no green certification "
+                   "covers it: this is the develop-buffer stall the design names "
+                   "'waiting for a certification that never arrives'. The patrol opens "
+                   "the work; this face only names it. Action: check why the certify "
+                   "round is not covering line %s (queue, guard, or a red in range)."
+                   % line,
+            "evidence": ("line=%s landing=%s ticket=%s revision=%s landed_at=%s wait=%s "
+                         "threshold=%dmin | waiting_for=%s" % (
+                         line, lid, tid,
+                         ",".join("%s@%s" % (r.get("repo"), r.get("revision"))
+                                  for r in (row.get("repos") or [])
+                                  if isinstance(r, dict)),
+                                               _iso(row.get("at", 0) / 1000.0
+                                                    if isinstance(row.get("at"), int) else 0),
+                                               _mins(age_s), cert_win,
+                                               st.get("waiting_for"))),
+            "ticket_id": tid, "line": line, "landing_id": lid,
+        })
+
+    # (2) freeze-without-remedy: an open freeze with no remedy work in flight.
+    frz_win = int(thresholds.get("freeze_without_remedy_min")
+                  or DEFAULT_FREEZE_WITHOUT_REMEDY_MIN)
+    for line in sorted(lines):
+        frz = (facts.get("freezes") or {}).get(line)
+        if not frz:
+            continue
+        open_s = _age_s(frz.get("opened_ms"))
+        if open_s < frz_win * 60:
+            continue
+        remedy = None
+        for rel in facts.get("relations") or []:
+            if rel.get("kind") != REL_KIND_REPAIRS:
+                continue
+            tid = str(rel.get("from") or "")
+            gate = _not_in_flight(tid)
+            if tid and tid in tf_index and not gate:
+                remedy = "repairs relation %s: ticket %s is running" % (rel.get("id"), tid)
+                break
+            if line in lines:
+                target = _repair_target_landing(rows, line, rel.get("to"),
+                                                facts.get("patch_ids"))
+                if target is not None:
+                    try:
+                        tst = ticket_wait_state(rows, line, target, is_green, now_ms)
+                    except CertifyError:
+                        tst = None
+                    if tst is not None and tst.get("state") != WAIT_CERTIFIED:
+                        remedy = ("repairs relation %s: its target landing %s is still "
+                                  "pending (state=%s)" % (rel.get("id"), target.get("id"),
+                                                          tst.get("state")))
+                        break
+        if remedy:
+            continue
+        hits.append({
+            "leg": LEG_FREEZE_NO_REMEDY, "severity": "high",
+            "subject": ("line %s has been frozen for %s (threshold %dmin) with no "
+                        "remedy work in flight" % (line, _mins(open_s), frz_win)),
+            "why": "the line's latest freeze episode is open but no current repairs "
+                   "relation counts as remedy in flight (audited reading: a repairs "
+                   "relation whose repairing ticket is a non-terminal, non-gated "
+                   "ticket in this patrol's scan, or whose target landing on the "
+                   "line is not yet covered). A frozen line with nobody repairing it "
+                   "stays red forever. Action: open or re-point the remedy work, or "
+                   "close/re-attribute the freeze.",
+            "evidence": ("line=%s freeze=%s cause=%s culprit=%s open=%s threshold=%dmin "
+                         "| remedies_in_flight=0 (current repairs relations considered: %d)"
+                         % (line, frz.get("episode"), frz.get("cause"),
+                            frz.get("culprit"), _mins(open_s), frz_win,
+                            len([r for r in facts.get("relations") or []
+                                 if r.get("kind") == REL_KIND_REPAIRS]))),
+            "line": line, "freeze_episode": frz.get("episode"),
+            "cause_cert": frz.get("cause"),
+        })
+
+    # (3) repair-points-nowhere: a current relation whose target names nothing.
+    for rel in sorted(facts.get("relations") or [], key=lambda r: str(r.get("id"))):
+        targets: List[Tuple[str, str]] = [("to", rel.get("to"))]
+        ev = rel.get("evidence")
+        if isinstance(ev, dict) and ev.get("what") == "patch_id" \
+                and isinstance(ev.get("ref"), str) and ev["ref"].strip():
+            targets.append(("evidence.patch_id", ev["ref"]))
+        for where, ref in targets:
+            verdict, detail = _stall_target_resolves(facts, ref)
+            if verdict == "ok":
+                continue
+            if verdict == "blind":
+                notes.append("relation %s target %s: %s (UNVERIFIED, not clean)"
+                             % (rel.get("id"), where, detail))
+                continue
+            hits.append({
+                "leg": LEG_REPAIR_NOWHERE, "severity": "med",
+                "subject": ("relation %s (%s %s -> %s) points at nothing: %s"
+                            % (rel.get("id"), rel.get("kind"), rel.get("from"),
+                               rel.get("to"), detail)),
+            "why": "a repairs/withdraws relation whose target landing or patch identity "
+                   "is not in the delivery ledger reads as handled when it handles "
+                   "nothing — worse than no relation. The patrol opens the correction; "
+                   "this face only names it. Action: record a superseding relation "
+                   "naming a real target, or withdraw the dangling one.",
+                "evidence": ("relation=%s kind=%s from=%s to=%s looked_for=%s -> %s "
+                             "| at=%s" % (rel.get("id"), rel.get("kind"),
+                                          rel.get("from"), rel.get("to"), where, detail,
+                                          _iso(rel.get("at", 0) / 1000.0
+                                               if isinstance(rel.get("at"), int) else 0))),
+                "relation_id": rel.get("id"), "from": rel.get("from"),
+                "to": rel.get("to"),
+            })
+    for h in hits:
+        h["evidence"] = h["evidence"][:EVIDENCE_CAP]
+    return hits
+
+
 def lane_findings(tickets: Any, *, now_ts: float,
                   thresholds: Optional[Dict[str, Any]] = None,
-                  tickets_meta: Optional[Dict[str, Any]] = None):
+                  tickets_meta: Optional[Dict[str, Any]] = None,
+                  stall_facts: Any = None,
+                  stall_required: bool = False,
+                  is_green: Any = None):
     """整批票 → (findings, meta)：**每票聚合一条**发现（命中多族时 legs 列全）。
 
     发现形状与 deadman/suite 族同源（inspection_deadman.make_finding；suggest=False——
     流程层故障不开修码票）。meta 带计数（scanned / with_findings / by_leg）与畸形名单。
     入参畸形（tickets 非列表/条目非 dict）不抛：逐条跳过并点名。
+
+    Buffer-stall input (t261009-78): ``stall_facts`` is the delivery-ledger fact dict
+    from ``stall_facts``; ``stall_required=True`` is the activity shell's declaration
+    that this patrol DOES judge the buffer stalls — under it, a missing/unreadable
+    ledger produces ONE report-level low finding ("the stall legs did not run"),
+    never a per-ticket flood and never a silent clean fleet. Callers that do not
+    opt in (existing consumers, and every test that predates this ticket) keep the
+    exact previous behaviour byte-for-byte.
     """
     thr = dict(WATCHDOG_DEFAULTS)
     if isinstance(thresholds, dict):
@@ -773,12 +1203,19 @@ def lane_findings(tickets: Any, *, now_ts: float,
             v = thresholds.get(k)
             if isinstance(v, int) and not isinstance(v, bool) and v > 0:
                 thr[k] = v
+    thr_stall = dict(STALL_WATCHDOG_DEFAULTS)
+    if isinstance(thresholds, dict):
+        for k in STALL_WATCHDOG_KEYS:
+            v = thresholds.get(k)
+            if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                thr_stall[k] = v
     out: List[Dict[str, Any]] = []
     by_leg = {k: 0 for k in LANE_LEGS}
     skipped: List[str] = []
     suppressed: List[str] = []
     human_gate: List[Dict[str, Any]] = []
     scanned = 0
+    tf_index: Dict[str, Dict[str, Any]] = {}
     for f in (tickets if isinstance(tickets, list) else []):
         if not isinstance(f, dict):
             skipped.append("ticket facts is not an object (%s)" % type(f).__name__)
@@ -787,6 +1224,7 @@ def lane_findings(tickets: Any, *, now_ts: float,
             skipped.append("ticket facts without ticket_id (skipped)")
             continue
         scanned += 1
+        tf_index[str(f["ticket_id"])] = f
         legs = lane_legs(f, float(now_ts or 0.0), thr, suppressed, human_gate)
         if not legs:
             continue
@@ -814,6 +1252,46 @@ def lane_findings(tickets: Any, *, now_ts: float,
         finding["ticket_id"] = str(f["ticket_id"])
         finding["project"] = str(f.get("project") or "")
         out.append(finding)
+
+    # ---- buffer-stall legs (t261009-78): report-level, kept OUT of the ticket-level
+    # ---- by_leg/counting contract above (existing verbatim assertions stay valid).
+    stall_by_leg = {k: 0 for k in STALL_LEGS}
+    stall_suppressed: List[str] = []
+    stall_notes: List[str] = []
+    if stall_required:
+        from inspection_deadman import make_finding as _mk
+        if stall_facts is None:
+            stall_by_leg[LEG_DATA_UNREADABLE] = 1
+            finding = _mk(
+                LANE_SCAN, "low",
+                "delivery ledger not supplied: buffer-stall legs did not run "
+                "(cert-wait-overdue / freeze-without-remedy / repair-points-nowhere "
+                "are UNVERIFIED, not clean)",
+                "stall_required=True but no stall_facts argument reached the face",
+                suggest=False)
+            finding["legs"] = [LEG_DATA_UNREADABLE]
+            finding["why"] = ("the patrol declared it judges the develop-buffer stalls, "
+                              "but no delivery-ledger facts were supplied, so the three "
+                              "stall legs could not run: the fleet's stall state is "
+                              "UNVERIFIED, and 'cannot tell' is never a clean fleet. "
+                              "Action: fix the activity shell's ledger read "
+                              "(develop_certify.read_rows + declared lines + patch_ids).")
+            out.append(finding)
+        else:
+            stall_hits = stall_legs(stall_facts, tf_index, float(now_ts or 0.0),
+                                    thr_stall, stall_suppressed, is_green, stall_notes)
+            stall_notes.extend(str(n) for n in (stall_facts.get("parse_notes") or []))
+            for h in stall_hits:
+                stall_by_leg[h["leg"]] = stall_by_leg.get(h["leg"], 0) + 1
+                finding = _mk(LANE_SCAN, h["severity"], h["subject"], h["evidence"],
+                              suggest=False)
+                finding["legs"] = [h["leg"]]
+                finding["why"] = h["why"]
+                for k in ("ticket_id", "line", "landing_id", "relation_id",
+                          "freeze_episode", "cause_cert", "from", "to"):
+                    if h.get(k) is not None:
+                        finding[k] = h[k]
+                out.append(finding)
     meta = {"scan": LANE_SCAN, "scanned": scanned,
             "non_terminal": int((tickets_meta or {}).get("non_terminal") or scanned)
                             if isinstance(tickets_meta, dict) else scanned,
@@ -824,13 +1302,28 @@ def lane_findings(tickets: Any, *, now_ts: float,
             # max_severity contribution - a queue is not a fault, it must not drag
             # green/red.
             "human_gate": human_gate,
-            "thresholds": dict(thr)}
+            "thresholds": dict(thr),
+            # Buffer-stall face (t261009-78): its own counting slots, its own
+            # suppression list, its own degradation notes (a separate contract from
+            # the ticket trio above).
+            "stall": {"ledger_supplied": stall_facts is not None,
+                      "ledger_read": bool(getattr(stall_facts, "get", lambda k: None)
+                                          ("ledger_read")) if stall_facts else None,
+                      "by_leg": stall_by_leg,
+                      "suppressed": stall_suppressed,
+                      "parse_notes": stall_notes,
+                      "thresholds": dict(thr_stall)}}
     return out, meta
 
 
 def _by_leg_all(raw: Any) -> Dict[str, int]:
-    """by_leg 归一（票级三族 + 水位一族，全部给 0 槽）：计数面「这一期看了哪几族」可见，
-    零命中也要看得见槽位（缺槽=读的人以为没这族）。畸形计数逐项归零（不抛）。"""
+    """Normalize a by_leg count map (ticket trio + water level, every slot at 0):
+    the counting face must show which families this period LOOKED at — a missing
+    slot reads as "no such family". Malformed counts normalize to 0, never raise.
+    (t261009-78: the buffer-stall legs deliberately get NO slots here — a verbatim
+    by_leg equality assertion locks this slot set; their counts stay visible under
+    the section's own ``stall`` key, and ``lane_section`` merges them only into its
+    merged by_leg copy, never into this function's contract.)"""
     out = {k: 0 for k in (list(LANE_LEGS) + [LEG_TMP_FIXTURE])}
     if isinstance(raw, dict):
         for k, v in raw.items():
@@ -846,12 +1339,21 @@ def lane_section(findings: Any, meta: Any, *, source: str = "",
     """票面/回执的 lane 段（计数可见 + 阈值来源可见；畸形入参不抛）。"""
     f = [x for x in (findings if isinstance(findings, list) else []) if isinstance(x, dict)]
     m = meta if isinstance(meta, dict) else {}
+    by_leg = _by_leg_all(m.get("by_leg"))
+    # Buffer-stall counts (t261009-78) merge into the same by_leg surface: the slots
+    # exist there, so a zero-hit stall leg stays visible next to the ticket trio.
+    stall = m.get("stall") if isinstance(m.get("stall"), dict) else {}
+    for k, v in (stall.get("by_leg") or {}).items():
+        try:
+            by_leg[str(k)] = by_leg.get(str(k), 0) + int(v or 0)
+        except (TypeError, ValueError):
+            pass
     return {
         "scan": LANE_SCAN,
         "scanned": int(m.get("scanned") or 0),
         "non_terminal": int(m.get("non_terminal") or 0),
         "finding_count": len(f),
-        "by_leg": _by_leg_all(m.get("by_leg")),
+        "by_leg": by_leg,
         "max_severity": ("high" if any(x.get("severity") == "high" for x in f)
                          else "med" if any(x.get("severity") == "med" for x in f)
                          else "low" if f else ""),
@@ -866,6 +1368,9 @@ def lane_section(findings: Any, meta: Any, *, source: str = "",
         # entries only, drop malformed ones.
         "human_gate": [x for x in (m.get("human_gate") or [])
                        if isinstance(x, dict)] if isinstance(m.get("human_gate"), list) else [],
+        # Buffer-stall face (t261009-78): its own counting/suppression/degradation
+        # surface, additive — the ticket-level fields above keep their exact shapes.
+        "stall": dict(m.get("stall")) if isinstance(m.get("stall"), dict) else {},
     }
 
 

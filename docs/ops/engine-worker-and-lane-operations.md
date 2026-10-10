@@ -542,3 +542,29 @@ So: **verify a signal by reading the ticket's timeline for the stage entry it sh
 the signal is parked, not lost - the cheapest lawful unblock is the one the ticket's state calls for (`resume` for
 a parked ticket; wait for the boundary and, if the lane blocks instead, send the signal again then - a rework sent
 to a blocked ticket IS consumed).
+
+### A tree-level red is not the ticket's account: read main's own verdict, then sync the lane (261011, twice in one night)
+
+The shape: a lane's `merge_check` reds on `verify_lane code` (or any tree-wide lint/guard leg), the red's *cause*
+is a line somebody else committed to `main`, and the ticket is charged for it. Two measured instances in one night:
+a banned term in `notes/debts/known-issues.md` (committed `53bd1108`, fixed on `main` one minute later in
+`bb0a7bc7` - the lane's base predated the fix, so `t261011-04` inherited the line and red-lit), and the same
+mechanism one cycle earlier on `t261009-69` (`KI-01M4JV7JKGK3ATFACYN29JDVKW`).
+
+The disposition, in order - and **never rework the ticket for this**:
+
+1. **Read `main`'s own reading of the same judgement** (run the same lint/verify step on the main tree). If main
+   is red, it is a tree-level red: fix it on main (or wait for whoever owns that line), and never send the lane
+   looking for a deliverable change.
+2. If main is already clean, the lane simply lacks the fix: it is a **sync** problem, not a work problem. Bring
+   main in through the engine's own single point - `server/tools/engine_ops.py sync <ticket>` (optionally
+   `--dry-run` first). It calls `prepare_conflict_resolution`; **never hand-write a `git merge` in a lane.**
+3. Then the mechanical leg the blocked round named: `ruling` on the ticket (say plainly that the red is not the
+   ticket's work, and what the lane must NOT do - do not change deliverables for it, do not edit `notes/`, which
+   no lane may write) followed by `retry_qc`.
+4. Confirm by the timeline (`Entered step (attempt N)` on the stage that blocked), and re-read the lane worker's
+   stamp while you are there (`engine_ops workers`): a merge that only touched `notes/` needs no handover.
+
+Why the order matters: a `retry_qc` sent before the sync re-runs the same judgement on the same tree and reds
+again (the signal is consumed, the tree is unchanged); a `rework` spends a whole stage cycle to import one line of
+somebody else's fix. Both look like diligence and are waste.

@@ -30,20 +30,29 @@
 //                                  畸形值不会让板面视图静默失效（本清单 env 名错设无告警
 //                                  的同族坑，见上一条教训）。
 //
-// 视图清单（t260829-07 六视图 + 立项单列表；尽力视图失败置非零退出码但不阻断其余；
-// t261005-16 起另设「具名跳过」：数据缺席类（如新家零立项）跳过不截图、不记失败、
-// 不计退出码，但必须具名可读——尽力失败（渲染/断言故障）与合法空数据两种口径分开）：
-//   console-default.png      hero 落地页（必成视图，失败即整体非零退出）
-//   console-board.png        工单入口（侧栏「工单列表」视图图标）——快门前过板面就绪
-//                            断言（t260910-05）：筛选条在场且（行卡≥1 或 空态在场），
-//                            未就绪=loud 报错不交图（废图防线）
-//   console-epics.png        立项单列表（侧栏「立项单」视图图标 → .wb-ep-root）
-//   console-new-ticket.png   新建工单弹层打开态（只开不提交——「新建后」的只读红线
-//                            降级口径，t260829-07 review 定案；真新建=写操作不豁免）
+// 视图清单（t261011-03 重锚）：工单台 t261005-10 UI-2 退役了侧栏视图图标（Tickets/
+// Epics/Docs 随视图一起退），t261008-36 退役「More views」收纳位并把 Model routes /
+// Project settings 收进执行面板 Settings tab——旧锚 `.wb-view-icon[title=…]` 全部消失，
+// capture 自 261007 起每轮 7 视图失败=退出 1（KI-204 五层修好后仍红的真实根因，三个
+// capture 旅程场景的慢性红同源）。尽力视图失败仍置非零退出码但不阻断其余；具名跳过
+// （数据缺席）不截图、不记失败、不计退出码，但必须具名可读。视图清单改锚当前产品面：
+//   console-default.png      hero 落地页（必成视图；失败=不交图并记 failures[]，
+//                            其余视图照跑、末尾链整体非零退出）；左列工单
+//                            列表就绪断言在此视图内也做一遍（板面=左列常驻面）
+//   console-board.png        工单列表（左列常驻面，侧栏图标已退无可点；快门前过
+//   console-board-dark.png   左列就绪断言（t260910-05 内容断言换锚）：组头在场
+//   console-board-light.png  且（行卡≥1 或 空态在场），未就绪=loud 报错不交图
+//   console-ticket-detail.png 工单详情抽屉（左列行卡点开；零票=具名跳过）
 //   console-sessions.png     项目会话区行（票② R8 改锚 t260904-05：data-wb-psess-row 可见 +
 //                            旧左栏 .wb-sess-* 不在场——本票已按设计删除左栏会话区）
+//   console-settings-routes.png 执行面板 Settings tab → Model routes face（面板入口
+//                            证明=插件 farm 链装载证据，接替退役的 console-providers
+//                            图标视图；t261008-36 同锚族）
 //   console-refresh.png      刷新回归（reload 后再截，防「刷新回不去」回归）
 //   console-chat.png         chat 态（打开已有会话，data-phase=active）
+// 随退役图标一并移除的旧视图（产品面已无此入口，留痕）：console-epics（.wb-ep-root
+// 视图退）、console-new-ticket（入口在立项详情，随立项视图退）、console-docs /
+// console-providers（图标入口退；providers 装载证明由 settings-routes 面接替）。
 //
 // fixture 态专属视图（t260901-24，仅 --fixtures 注入模式进 VIEWS；缺省清单不含）：
 //   console-approval.png     审批抽屉打开态（T-FIX-A awaiting-human ✋；只看不批）
@@ -276,9 +285,14 @@ export { LEDGER_KEY };
 // 「拍到该拍的」机械化——快门前断言板面就绪锚在场，断言失败=截图失败不交图（run
 // 抛错走既有 failures[]→exitCode=1 链传导 prepare_ui_evidence 红，禁止对断言单独
 // 包 try/catch「不阻断」——那会做出「不交图但全链绿」的半吊子）。
-/** 板面就绪锚（语义锚，禁哈希类名）：筛选条=操作面在场；行卡=主列表已渲染；
- *  空态=数据为空但已渲染完（.wb-empty「没有符合筛选的工单。」，src/client/index.tsx）。 */
-export const BOARD_ANCHORS = { chips: ".wb-chip-btn", rows: ".wb-card", empty: ".wb-empty" };
+/** 左列工单列表就绪锚（语义锚，禁哈希类名；t261011-03 换锚）：
+ *  键名 `chips` 保留是**角色名不是字面**——产品的筛选 chip 行随 t261005-10 UI-2 /
+ *  t261008-36 退役后，组头（.wb-group-head，左列常驻板面的渲染面）现在承载这个
+ *  「列表容器就绪」角色（守卫 sc_capture_board_assert 按 /chip|filter/ 键名角色收锚，
+ *  KI-051 锚语义不锚字面——换选择器不换角色键）；
+ *  行卡=主列表已渲染（.wb-card[data-ticket-id]，ticket-row-card.tsx）；空态=数据为空
+ *  但已渲染完（.wb-group-empty「No active tickets」，sidebar.tsx）。 */
+export const BOARD_ANCHORS = { chips: ".wb-group-head", rows: ".wb-card[data-ticket-id]", empty: ".wb-group-empty" };
 /** 就绪预算缺省值（SANDBAR_UI_CAPTURE_BOARD_MS 畸形时回落到此，见 resolveBoardBudgetMs）。 */
 export const BOARD_BUDGET_DEFAULT_MS = 15000;
 
@@ -293,13 +307,14 @@ export function resolveBoardBudgetMs(raw) {
   return { ms: n, defaulted: false };
 }
 
-/** 板面就绪断言：轮询至「筛选条在场 且（行卡 ≥1 或 人话空态在场）」，超时 loud 抛错
+/** 左列工单列表就绪断言：轮询至「组头在场 且（行卡 ≥1 或 人话空态在场）」，超时 loud 抛错
  *  （附三锚计数诊断，沿用 chat 态诊断写法）。探针异常（locator.count 炸）即刻 loud，
  *  不静默不重试吞掉。budgetMs 显式传参优先（场景失败分支钉极小值用），否则读 env。
  *  桩 page 契约（sc_capture_board_assert 依赖）：只需 locator(sel).count()。 */
 export async function assertBoardReady(page, budgetMs) {
   const { ms, defaulted } = resolveBoardBudgetMs(budgetMs ?? process.env.SANDBAR_UI_CAPTURE_BOARD_MS);
-  if (defaulted && budgetMs === undefined) {
+  if (defaulted && process.env.SANDBAR_UI_CAPTURE_BOARD_MS !== undefined) {
+    // 只在 env 真被设置过（且畸形）时 loud——env 未设走缺省是常态，不是畸形（t261011-03）。
     console.log(`[capture] SANDBAR_UI_CAPTURE_BOARD_MS 畸形（须为有限正数）→ 回落缺省 ${BOARD_BUDGET_DEFAULT_MS}ms（loud 提示，不静默）`);
   }
   const deadline = Date.now() + ms;
@@ -311,47 +326,48 @@ export async function assertBoardReady(page, budgetMs) {
     }
   };
   for (;;) {
-    const chips = await count(BOARD_ANCHORS.chips);
+    const group = await count(BOARD_ANCHORS.chips);
     const rows = await count(BOARD_ANCHORS.rows);
     const empty = await count(BOARD_ANCHORS.empty);
-    if (chips > 0 && (rows > 0 || empty > 0)) {
-      return `板面就绪（筛选条=${chips} 行卡=${rows} 空态=${empty}）`;
+    if (group > 0 && (rows > 0 || empty > 0)) {
+      return `左列工单列表就绪（组头=${group} 行卡=${rows} 空态=${empty}）`;
     }
     if (Date.now() >= deadline) {
-      throw new Error(`板面未就绪（${ms}ms 预算耗尽）：筛选条=${chips} 行卡=${rows} 空态=${empty}`
-        + `——主列表渲染未完成，拒拍废图（t260910-05 截图内容断言）`);
+      throw new Error(`板面未就绪（${ms}ms 预算耗尽）：组头=${group} 行卡=${rows} 空态=${empty}`
+        + `——左列工单列表渲染未完成，拒拍废图（t260910-05 截图内容断言）`);
     }
     await new Promise((r) => setTimeout(r, 200));
   }
 }
 
-/** 板面视图统一 run：切视图 → 就绪断言（抛错即该视图失败=不 shoot=无图）。 */
+/** 左列工单列表视图统一 run（t261011-03 换锚）：板面=左列常驻面，无导航可切——
+ *  run 就位（断言就绪，抛错即该视图失败=不 shoot=无图）。 */
 async function openBoardView(page) {
-  const anchor = await openView(page, "Tickets");
   const ready = await assertBoardReady(page);
-  return `${anchor} → ${ready}`;
+  return ready;
 }
 
-/** 板面视图统一 run 工厂（t260910-05 P1 接线锁）：返回「切视图 → 就绪断言」的
- *  run 函数（抛错即该视图失败=不 shoot=无图）。条目与场景共用此工厂产出的同一
- *  函数对象；条目被解绑回裸 openView 时，sc_capture_board_assert 的零 DOM 死板面
- *  腿必红（桩只满足 openView 导航面，未接断言的条目会照常 resolve=真红）。 */
+/** 左列工单列表视图统一 run 工厂（t260910-05 P1 接线锁；t261011-03 换锚后语义=
+ *  「左列就绪断言」）：返回 run 函数（抛错即该视图失败=不 shoot=无图）。条目与
+ *  场景共用此工厂产出的同一函数对象；条目被解绑回不接断言的裸函数时，
+ *  sc_capture_board_assert 的零 DOM 死板面腿必红（零 DOM 桩计数恒 0，断言必拒）。 */
 export function makeBoardRun() {
   return (page) => openBoardView(page);
 }
 
-/** 板面三视图导出条目（t260910-05 P1 接线锁）：default/dark/light 三条 run 收敛到
- *  模块级可导出**数组**面（sc_capture_board_assert findViewEntries 按数组识别），
- *  main 的 VIEWS 与深浅外观循环都从这里取条目——场景桩 page 驱动同一批对象，条目
- *  被解绑即场景红（KI-051 行为锁，不用字面源文本锚）。外观切换（emulateMedia）留在
- *  主循环：条目只管「导航+就绪断言」，桩 page 无需 emulateMedia 面。
- *  与 design_integration_tests 兄弟段预置的 sc_capture_board_assert.mjs 契约对齐
- *  （导出面=makeBoardRun/assertBoardReady/BOARD_ANCHORS + 数组条目；本文件改动不得
- *  单方面破坏该契约，汇合时以场景为准）。 */
+/** 板面三视图导出条目（t260910-05 P1 接线锁；t261011-03 换锚）：board/dark/light
+ *  三条 run 收敛到模块级可导出**数组**面（sc_capture_board_assert findViewEntries 按
+ *  数组识别），main 的 VIEWS 与深浅外观循环都从这里取条目——场景桩 page 驱动同一批
+ *  对象。换锚后板面=左列常驻面（侧栏图标已退，无导航可切）：board 条目不导航、只做
+ *  就绪断言；其截图与 default 同帧是正确行为（断言视图，同 assertDistinct 的
+ *  SESSIONS_SHOT 先例，摘出 pairwise 袋）。外观切换（emulateMedia）留在主循环，条目
+ *  只管「就绪断言」（桩 page 无需 emulateMedia 面）。与 design_integration_tests
+ *  兄弟段预置的 sc_capture_board_assert.mjs 契约对齐（导出面=makeBoardRun/
+ *  assertBoardReady/BOARD_ANCHORS + 数组条目；本文件改动不得单方面破坏该契约）。 */
 export const BOARD_VIEWS = [
-  { file: "console-board.png", title: "工单入口（板面就绪断言）", run: makeBoardRun() },
-  { file: "console-board-dark.png", title: "工单入口（dark 外观，板面就绪断言）", scheme: "dark", run: makeBoardRun() },
-  { file: "console-board-light.png", title: "工单入口（light 外观，板面就绪断言）", scheme: "light", run: makeBoardRun() },
+  { file: "console-board.png", title: "工单列表（左列就绪断言）", run: makeBoardRun() },
+  { file: "console-board-dark.png", title: "工单列表（dark 外观，左列就绪断言）", scheme: "dark", run: makeBoardRun() },
+  { file: "console-board-light.png", title: "工单列表（light 外观，左列就绪断言）", scheme: "light", run: makeBoardRun() },
 ];
 
 async function seedSessions(page, url) {
@@ -730,60 +746,10 @@ async function dismissNotice(page) {
   }
 }
 
-/** 点击侧栏视图图标（语义锚 title）切中列视图。
- *
- *  title 真源 = 插件 PROJECT_ICON_SPECS（server/plugins/workbench/src/client/project-icons.tsx：
- *  Tickets / Docs / Model Routes / Epics / Project Settings）。宿主令 260925「控制台 UI
- *  文案英文化」把这四枚图标 title 从中文改名（提交 31b9ff3 / t260926 批），本夹具漏改 ⇒
- *  全部视图点击恒失败、chat 视图连带红（260929 修；KI-048 同族的「锚文案会自缚」前车之鉴）。
- *  报错面因此必须报出 DOM 实有 title，不再断言单一结论——旧文案「插件未挂载或侧栏收起」
- *  把「改名」这一真因彻底遮住，定位全靠手翻截图。 */
-async function openView(page, title, waitSelector, waitMs = 3000) {
-  const icon = page.locator(`.wb-view-icon[title="${title}"]`).first();
-  let expanderTried = false;
-  try {
-    await icon.waitFor({ state: "visible", timeout: 5000 });
-  } catch {
-    // 261001 口径同步：侧栏做过「行内收纳」改造后，Docs / Model Routes / Project Settings
-    // 三枚图标**只在展开位展开后才渲染**（常驻 = 工单 Tickets + 立项单 Epics 两枚，
-    // 外加一枚 `data-wb-more-views` 的 ⋯ 展开钮；契约见
-    // server/plugins/workbench/tests/executor-entry-css-contract.mjs C5）。
-    // 故：目标图标不可见时**先展开收纳位再找一次**。只认 `data-wb-more-views` 属性、
-    // 不认文案（展开后 title 会切成 "Fewer views"），且仅在未展开态点击——避免把
-    // 后续视图调用变成「收起」。
-    const exp = page.locator(".wb-view-icon[data-wb-more-views]").first();
-    if (await exp.count().catch(() => 0)) {
-      const expTitle = await exp.getAttribute("title").catch(() => "");
-      if (expTitle === "More views") {
-        expanderTried = true;
-        await forceClick(exp).catch(() => {});
-        await page.waitForTimeout(200);
-        try {
-          await icon.waitFor({ state: "visible", timeout: 5000 });
-        } catch { /* 落到下面统一报错（诊断里带上「已展开过」这一事实） */ }
-      }
-    }
-    if (!(await icon.isVisible().catch(() => false))) {
-      const present = await page.evaluate(() => [...new Set([...document.querySelectorAll(".wb-view-icon")]
-        .map((e) => e.getAttribute("title")).filter(Boolean))]).catch(() => []);
-      throw new Error(`侧栏视图图标不可见（[title="${title}"]）——工单台插件未挂载、侧栏收起，`
-        + `或被收纳在「More views」展开位内/图标 title 已改名`
-        + (expanderTried ? "（已尝试展开「More views」收纳位）" : "")
-        + `（DOM 实有：${present.length ? present.join(",") : "无 .wb-view-icon"}）`);
-    }
-  }
-  await forceClick(icon);
-  if (waitSelector) {
-    try {
-      await page.waitForSelector(waitSelector, { timeout: waitMs });
-    } catch {
-      throw new Error(`点击「${title}」后未出现 ${waitSelector}（视图未切换或数据为空）`);
-    }
-  }
-  // 持续轮询台面永不落 idle（KI-156）：settle 用 domcontentloaded，真实就绪由上方的元素 waitFor 承担
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
-  return `[title="${title}"]`;
-}
+/** （t261011-03 移除）侧栏视图图标导航 openView()：工单台 t261005-10 UI-2 退役全部
+ *  侧栏视图图标（Tickets/Epics/Docs 随视图退）、t261008-36 退役「More views」收纳位
+ *  后，`.wb-view-icon` 在台上恒不存在，本函数的所有调用点已改锚当前产品面
+ *  （左列常驻板面 / 执行面板 Settings tab）。留痕注释代替死代码。 */
 
 /** 具名跳过（t261005-16，仲裁 gen1 修向 (a)）：数据缺席是隔离台/新家的**合法状态**
  * （新家零票零立项，fixture 注入又是 opt-in、生产 ui_evidence 通路恒无 fixture），
@@ -791,36 +757,71 @@ async function openView(page, title, waitSelector, waitMs = 3000) {
  * 具名可读（证据闸口径：缺证据要具名，不许静默）。渲染/断言类失败仍走 failures→exit 1。 */
 export class SkipView extends Error {}
 
-/** 新建工单弹层打开态（只开不提交——只读红线降级口径）。需先切到立项单视图且
- * 至少有一个立项可进详情；链路任一步不可达即报错（尽力视图，不阻断其余）。
- * 立项单列表为空 = 新家合法状态 → SkipView 具名跳过（t261005-16）。
- *
- * 按钮文案真源=epics.tsx:459（宿主令 260925 英文化后＝「＋ New Ticket」，旧文案
- * 「＋ 新建工单」随 t260926 批退役；同批 integration/t260907-08 的同类锚已改）。 */
-async function openNewTicketModal(page) {
-  await openView(page, "Epics", ".wb-ep-root");
-  const chip = page.locator(".wb-ep-code").first();
-  try {
-    await chip.waitFor({ state: "visible", timeout: 5000 });
-  } catch {
-    throw new SkipView("立项单列表为空（.wb-ep-code 无行）——新家/隔离台零票零立项的合法状态，数据缺席具名跳过（非渲染故障）");
+/** 工单详情抽屉打开态（只读：点行卡开抽屉，不点任何推进/打回/签字钮）。
+ *  左列零行卡 = 新家/隔离台的合法状态 → SkipView 具名跳过（t261005-16 口径）。
+ *  详情抽屉就绪锚 = 步进条 .wb-d2-steps（仅详情渲染，列表无此元素）。 */
+async function openTicketDetail(page) {
+  const row = page.locator(".wb-card[data-ticket-id]").first();
+  if (!(await row.count())) {
+    throw new SkipView("左列零行卡（.wb-card[data-ticket-id] 无行）——新家/隔离台零票的合法状态，数据缺席具名跳过（非渲染故障）");
   }
-  await forceClick(chip);
-  const btn = page.locator(".wb-ep-btn-green", { hasText: "New Ticket" }).first();
+  await forceClick(row);
   try {
-    await btn.waitFor({ state: "visible", timeout: 5000 });
+    await page.waitForSelector(".wb-d2-steps", { timeout: 8000 });
   } catch {
-    const labels = await page.locator(".wb-ep-btn-green").allInnerTexts().catch(() => []);
-    throw new Error(`立项详情未出现「＋ New Ticket」按钮（.wb-ep-btn-green）`
-      + `——按钮文案可能已改名（DOM 实有：${labels.length ? labels.map((s) => s.trim()).join(" | ") : "无 .wb-ep-btn-green"}）`);
+    throw new Error("点行卡后详情抽屉未出现（.wb-d2-steps 8s 未在场）——抽屉未开或锚漂移");
   }
-  await forceClick(btn);
+  return "左列行卡 → 详情抽屉（.wb-d2-steps 在场；只看不操作）";
+}
+
+/** 执行面板 Settings tab → Model routes face（t261008-36 同锚族；接替退役的
+ *  console-providers 图标视图=providers 插件经 farm 链装载的证据面）。链路：
+ *  项目组头 [data-wb-executor-entry] → 面板 iframe（sandbar-executor-panel）→
+ *  [data-tab="settings"] → [data-wb-panel-face="routes"] → [data-wb-face-overlay]。
+ *  链路任一步不可达即报错（尽力视图，不阻断其余）。只读语义：只开 face 看一眼，
+ *  不点任何设置项（更不碰 remove 流）。 */
+async function openSettingsRoutes(page) {
+  const head = page.locator(".wb-group-head").first();
   try {
-    await page.waitForSelector(".wb-ep-modal", { timeout: 5000 });
+    await head.waitFor({ state: "visible", timeout: 8000 });
   } catch {
-    throw new Error("点击「＋ New Ticket」后弹层未出现（.wb-ep-modal）");
+    throw new Error("项目组头不可见（.wb-group-head 8s 未在场）——左列未渲染，面板入口不可达");
   }
-  return "立项详情 → ＋ New Ticket（只开不提交）";
+  const entry = page.locator("[data-wb-executor-entry]").first();
+  if (!(await entry.count())) {
+    throw new Error("面板入口锚不在场（[data-wb-executor-entry]）——项目组行未渲染入口（锚漂移或插件未挂载）");
+  }
+  await forceClick(entry);
+  try {
+    await page.waitForFunction(
+      () => [...document.querySelectorAll("iframe")].some((f) => /sandbar-executor-panel/.test(f.src || "")),
+      null, { timeout: 10000 },
+    );
+  } catch {
+    throw new Error("执行面板 iframe 未挂载（src 含 sandbar-executor-panel 的 iframe 10s 未出现）");
+  }
+  const frame = page.frameLocator('iframe[src*="sandbar-executor-panel"]');
+  const tab = frame.locator('[data-tab="settings"]').first();
+  try {
+    await tab.waitFor({ state: "visible", timeout: 8000 });
+  } catch {
+    throw new Error("面板 Settings tab 不可见（[data-tab=settings] 8s 未在场）——面板壳层锚漂移");
+  }
+  await forceClick(tab);
+  const routes = frame.locator('[data-wb-panel-face="routes"]').first();
+  try {
+    await routes.waitFor({ state: "visible", timeout: 8000 });
+  } catch {
+    const names = await frame.locator("[data-wb-panel-face]").allInnerTexts().catch(() => []);
+    throw new Error(`Settings 面未见 Model routes 行（[data-wb-panel-face=routes]）——DOM 实有：${names.length ? names.map((s) => s.trim()).join(" | ") : "无 [data-wb-panel-face]"}`);
+  }
+  await forceClick(routes);
+  try {
+    await page.waitForSelector('[data-wb-face-overlay][data-face="routes"]', { timeout: 8000 });
+  } catch {
+    throw new Error("点 Model routes 后 face overlay 未出现（[data-wb-face-overlay][data-face=routes] 8s 未在场）");
+  }
+  return "执行面板 Settings → Model routes face（[data-wb-face-overlay] 在场；只看不改）";
 }
 
 // 健全性断言（t260829-01 建；t260831-02 修正 refresh 假阳性）：多张截图若字节级
@@ -833,12 +834,22 @@ const REFRESH_SHOT = "console-refresh.png";
 // sessions 视图是「断言视图」：不导航，DOM 断言在视图函数内完成——截图与 default
 // 同帧是正确行为（票 t260831-02 实锤判明），摘出 pairwise 袋。
 const SESSIONS_SHOT = "console-sessions.png";
+// board 视图（t261011-03 换锚后同族）：板面=左列常驻面，侧栏图标已退、无导航可切，
+// 条目只做就绪断言——截图与 default 同帧是正确行为（断言视图，SESSIONS_SHOT 同款
+// 口径），摘出 pairwise 袋；它的内容断言就是快门前的左列就绪断言本身。
+const BOARD_SHOT = "console-board.png";
+// 深浅外观条目（t261011-03）：语义=主题跟随 prefers-color-scheme，同样无导航变化
+// ——light 档与 default 同帧是正确行为，摘出 pairwise 袋；专属断言在 main 的外观
+// 循环段：dark ≠ light（主题真翻转），两档都非空白。
+const APPEARANCE_SHOTS = new Set(["console-board-dark.png", "console-board-light.png"]);
 async function assertDistinct(shots) {
   const { createHash } = await import("node:crypto");
   const seen = new Map();
   for (const p of shots) {
     if (path.basename(p) === REFRESH_SHOT) continue; // 专属断言单独做，不进 pairwise 袋
     if (path.basename(p) === SESSIONS_SHOT) continue; // 同上（断言视图，同帧正确）
+    if (path.basename(p) === BOARD_SHOT) continue; // 同上（断言视图，同帧正确）
+    if (APPEARANCE_SHOTS.has(path.basename(p))) continue; // 同上（外观档，专属断言）
     const h = createHash("sha256").update(await readFile(p)).digest("hex");
     if (seen.has(h)) {
       throw new Error(`截图同帧假成功：${p} 与 ${seen.get(h)} 字节级完全相同（sha256=${h.slice(0, 12)}…），导航/视图变化未生效`);
@@ -903,13 +914,13 @@ async function main() {
 
   // 视图清单（声明式；见文件头注释）。run 返回锚点说明；抛错=该视图失败。
   const VIEWS = [
-    // t260910-05：板面条目=导出数组面 BOARD_VIEWS 的同一条目对象（P1 接线锁——
-    // selftest 校验 run 身份相等，解绑回裸 openView = selftest 红 + 场景红）。
+    // t261011-03 换锚：板面条目=导出数组面 BOARD_VIEWS 的同一条目对象（P1 接线锁——
+    // selftest 校验 run 身份相等）；换锚后板面=左列常驻面（图标已退，无导航可切，
+    // 条目只做就绪断言）。epics / new-ticket / docs / providers 图标视图随
+    // t261005-10 UI-2 / t261008-36 退役移除（providers 装载证明由 settings-routes 接）。
     { ...BOARD_VIEWS.find((v) => v.file === "console-board.png") },
-    { file: "console-epics.png", title: "立项单列表",
-      run: (page) => openView(page, "Epics", ".wb-ep-root") },
-    { file: "console-new-ticket.png", title: "新建工单弹层打开态",
-      run: (page) => openNewTicketModal(page) },
+    { file: "console-ticket-detail.png", title: "工单详情抽屉（左列行卡点开）",
+      run: (page) => openTicketDetail(page) },
     { file: "console-sessions.png", title: "项目会话区行（票② R8 改锚）",
       run: async (page) => {
         const entry = page.locator("[data-wb-psess-row]").first();
@@ -919,13 +930,10 @@ async function main() {
         if (stale > 0) throw new Error(`顶部会话入口残留 ${stale} 个（票② R8 应已退役）`);
         return "项目会话区（[data-wb-psess-row] 可见；顶部行不在场，未点击）";
       } },
-    // t260907-05 命名迁移验收面：插件按新包名经农场新链装载的视图证据——
-    // 文档=workbench 插件 DocsSection；模型路由=providers 插件（独立包，
-    // 能渲染=农场 sandbar-providers 链解析通了）。
-    { file: "console-docs.png", title: "文档视图（workbench 插件 DocsSection）",
-      run: (page) => openView(page, "Docs", ".wb-doc-root") },
-    { file: "console-providers.png", title: "模型路由视图（providers 插件经农场新链装载证明）",
-      run: (page) => openView(page, "Model Routes", ".syp-root") },
+    // t261011-03 换锚：文档/模型路由的侧栏图标入口随 t261005-10 UI-2 退役；
+    // providers 插件经 farm 链装载的证明面由面板 Settings → Model routes 接替。
+    { file: "console-settings-routes.png", title: "执行面板 Settings → Model routes face",
+      run: (page) => openSettingsRoutes(page) },
   ];
 
   // fixture 态专属视图（t260901-24）：仅注入模式追加进 VIEWS；缺省清单逐字节不变
@@ -936,7 +944,8 @@ async function main() {
       {
         file: "console-approval.png", title: "审批抽屉（fixture T-FIX-A awaiting-human）",
         run: async (page) => {
-          await openView(page, "Tickets");
+          // t261011-03 换锚：工单列表=左列常驻面（图标入口已退役），就绪断言等行卡
+          await assertBoardReady(page);
           // 行锚=列表 v5 平铺行卡 .wb-card（原表格行 tr.wb-row 随 v5 改版退役）：
           // 票 T-FIX-A stage_state=awaiting-human ⇒ deriveTicketState→'waiting'
           // （ticket-list-model.ts:75），故 data-state 取 waiting 而非 stage_state 原值。
@@ -961,7 +970,7 @@ async function main() {
         run: async (page) => {
           // 先回干净首页再进（上一个视图开着详情抽屉，防列表被抽屉遮挡）
           await gotoConsole(page, url, timeoutMs).catch(() => {});
-          await openView(page, "Tickets");
+          await assertBoardReady(page);
           const row = page.locator(".wb-card", { hasText: "T-FIX-B" }).first();
           try {
             await row.waitFor({ state: "visible", timeout: 8000 });
@@ -996,9 +1005,9 @@ async function main() {
       process.exit(3);
     }
     // 板面就绪断言接线身份锁（t260910-05 P1，行为锁的自检半）：VIEWS 板面条目必须
-    // 引用导出数组面 BOARD_VIEWS 同一条目的同一 run 函数对象——被解绑回裸
-    // openView 时身份不等，selftest 红（闸上红绿半=sc_capture_board_assert 桩驱动
-    // 导出条目）。
+    // 引用导出数组面 BOARD_VIEWS 同一条目的同一 run 函数对象——被解绑回不接断言的
+    // 裸函数时身份不等，selftest 红（闸上红绿半=sc_capture_board_assert 桩驱动导出
+    // 条目）。t261011-03 换锚不改这条锁：board 条目仍在 VIEWS（run=就绪断言）。
     const boardExport = BOARD_VIEWS.find((v) => v.file === "console-board.png");
     const boardEntry = VIEWS.find((v) => v.file === "console-board.png");
     if (!boardExport || !boardEntry || boardEntry.run !== boardExport.run) {
@@ -1111,16 +1120,24 @@ async function main() {
       shots.push(p);
       console.log(`[capture] ${p}`);
     };
-    // hero 落地页（必成视图——失败即整体失败）
+    // hero 落地页（必成视图）。t261011-03：左列工单列表就绪断言（t260910-05 内容
+    // 断言）在此做——板面=左列常驻面（t261005-10 UI-2）；未就绪=loud 报错不交图
+    // （废图防线）。失败处置（t261011-03 仲裁 gen0 code-fault 修向）：记 failures[]
+    // 走既有 run→failures→exitCode 末尾链传导红，**不再 process.exit(1) 中途杀跑**——
+    // 中途退出会把本 run 其余视图全部遮蔽（实锤：capture-redline-gate 的三条红线
+    // 拒跑文案被 hero 视图的 exit 遮死，R1/R2/R3 全部不可达）。废图防线语义不变：
+    // 断言失败即无 default 图 + 退出码必非 0；「必成视图」的红仍是最响的一条。
     try {
       await gotoConsole(page, url, timeoutMs);
       // 首屏就绪：出厂 notice 弹出则先关（盖住后续所有视图，见 dismissNotice 注释）
       const dismissed = await dismissNotice(page);
       if (dismissed) console.log(`[capture]   ${dismissed}`);
+      const boardAnchor = await assertBoardReady(page);
+      console.log(`[capture]   ${boardAnchor}`);
       await shoot("console-default.png");
     } catch (e) {
-      console.error(`[capture] hero 落地页截图失败（必成视图）：${e.message}`);
-      process.exit(1);
+      failures.push(`hero 落地页（必成视图）：${e.message}`);
+      console.error(`[capture] 视图失败（必成视图，不交图，跑完其余视图后整体红）：${e.message}`);
     }
     // 尽力视图：逐个试，单视图失败记失败不阻断
     for (const v of VIEWS) {
@@ -1129,8 +1146,8 @@ async function main() {
         const anchor = await v.run(page);
         await shoot(v.file);
         console.log(`[capture]   锚=${anchor}`);
-        // 弹层视图截完即复位（防污染后续视图）
-        if (v.file === "console-new-ticket.png") {
+        // 弹层/面板视图截完即复位（防污染后续视图）
+        if (v.file === "console-ticket-detail.png" || v.file === "console-settings-routes.png") {
           await page.keyboard.press("Escape").catch(() => {});
           await gotoConsole(page, url, timeoutMs).catch(() => {});
         }
@@ -1177,17 +1194,38 @@ async function main() {
     // 深浅外观证明（t260907-05 验收面③）：主题跟随 prefers-color-scheme
     // （theme.ts 口径），emulateMedia 切换后各拍工单列表一张——改名后的
     // 装载链在两种外观下都成立；拍完恢复仿真（防污染 chat 态）。
-    // t260910-05：条目从导出面 BOARD_VIEWS 取（P1 接线锁，同 VIEWS 板面条目）；
-    // 外观切换留在主循环，条目只管「导航+就绪断言」（桩 page 无需 emulateMedia）。
+    // t260910-05：条目从导出面 BOARD_VIEWS 取（P1 接线锁）；外观切换留在主循环，
+    // 条目只管「就绪断言」（桩 page 无需 emulateMedia）。
+    // t261011-03：板面=左列常驻面（无导航可切），外观档专属断言=dark 与 light
+    // 字节级不同（主题真翻转）且两档都非空白——light 与 default 同帧是正确行为，
+    // 已摘出 pairwise 袋（见 assertDistinct 注释）。
+    const appearanceShots = [];
     for (const entry of BOARD_VIEWS.filter((v) => v.scheme)) {
       try {
         await page.emulateMedia({ colorScheme: entry.scheme });
         const anchor = await entry.run(page);
         await shoot(entry.file);
+        appearanceShots.push(path.join(args.out, entry.file));
         console.log(`[capture]   锚=${anchor}（${entry.scheme} 外观）`);
       } catch (e) {
         failures.push(`外观 ${entry.scheme}：${e.message}`);
         console.error(`[capture] 视图失败（尽力视图，不阻断）：外观 ${entry.scheme}——${e.message}`);
+      }
+    }
+    await page.emulateMedia(null).catch(() => {});
+    if (appearanceShots.length === BOARD_VIEWS.length) {
+      const { createHash } = await import("node:crypto");
+      const hashes = [];
+      for (const p of appearanceShots) {
+        const st = await (await import("node:fs/promises")).stat(p);
+        if (st.size < 2048) {
+          failures.push(`外观证据：${path.basename(p)} 仅 ${st.size} 字节（疑似空白页）`);
+          continue;
+        }
+        hashes.push(createHash("sha256").update(await readFile(p)).digest("hex"));
+      }
+      if (hashes.length === BOARD_VIEWS.length && new Set(hashes).size !== hashes.length) {
+        failures.push("外观证据：dark 与 light 截图字节级相同——主题未跟随 prefers-color-scheme（t260907-05 验收面③，真断言不放松）");
       }
     }
     await page.emulateMedia(null).catch(() => {});

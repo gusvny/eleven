@@ -1369,6 +1369,11 @@
       "note": "t261009-75 KI-01M4HPGHVWAKB62TXYV4G7ENEB: head_states adopts the canonical answer-row shape (string-at/shape-off rows never clear a head), the malformed-answer report names every shape-off row, op=read carries states+report to a human, gate-level change over shape-off-answered heads, and the engine writer stamps a numeric at",
       "sync_path": "server/engine/request_thread.py (head_states / answer report / op=read / reply_op)"
     },
+    "server/engine/tests/test_t261009_74_reconcile_drain_probe.py": {
+      "anchor": "behaviour",
+      "note": "t261009-74 reconcile liveness: draining is not dead - three verdicts keyed on the structured probe kind (no_poller/not_found), pidfile+meta evidence, draining holder keeps its slot and is named, transient/unknown never drops (fail-closed), malformed pidfile/meta never drops, every dropped id carries {ticket,probe,pidfile,process} evidence, dead-holder drop + promotion regression",
+      "sync_path": ""
+    },
     "server/engine/tests/test_t261009_76_intake_optin.py": {
       "anchor": "contract",
       "note": "t261009-76: the intake opt-in unit contract — lane_optin_intake's named refusal truth table (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template), apply_lane_optin's absence-stays-plain-TicketInput identity, and the _row_from_meta lane face",
@@ -1378,6 +1383,16 @@
       "anchor": "contract",
       "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty unit contract — landing evaluator truth table (landed/refused/pending, baseline-refusal masking, new-refusal-wins), effect statement (paused vs stuck; blocked names will-not-take-effect + slot stays held; the landed+non-effect pairing pinned), pure receipt-face builder key set (existing ticket_id/signal/who/delivered survive with delivered semantics untouched; unconfirmed keeps delivered and names the op=query re-check), bounded poll transient-jitter and budget-exhaustion paths, malformed-snapshot named degradation, and the client/ticket wording-consistency pin",
       "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face / _await_pause_landing); server/tools/ticket.py (_pause_effect_of)"
+    },
+    "server/engine/tests/test_t261009_78_watchdog_buffer_stalls.py": {
+      "anchor": "contract",
+      "note": "t261009-78: the three buffer-stall legs (cert-wait-overdue / freeze-without-remedy / repair-points-nowhere) over the delivery ledger - threshold resolver fault modes, degrade-by-name on malformed rows / undeclared lines / missing patch_ids / unsupplied run-reader, human-gate suppression reuse, superseded relations exempt, report-level 'ledger not supplied' entry under stall_required, opt-out keeps old behaviour",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261011_04_code_stamp_wiring_modules.py": {
+      "anchor": "behaviour",
+      "note": "t261011-04 KI-01M4KH2QR5BRQ...: pure stamp layer — the four wiring/body modules (workflows/activities/develop_certify/develop_line) tracked and named stale when mtime newer than the worker baseline (stale list, modules entry, operator stamp line), unreadable mtime never stale with empty mtime field, wiring-marker guards on workflows.py/activities.py",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4765,10 +4780,40 @@
       "note": "",
       "sync_path": ""
     },
-    "integration/t261009-77/sc_t26100977_line_round_runner.py": {
+    "integration/t261009-74/sc_reconcile_draining_slot.py": {
       "anchor": "contract",
-      "note": "t261009-77: the declared runner command turns one candidate revision set into ONE real run header (resolve_runner contract, red-is-a-proof, could-not-run honesty, timeout, inherited gate-owner env, whole-round certification citing the run id)",
-      "sync_path": "integration/line_round_runner.py; server/engine/develop_certify.py (resolve_runner/run_line_round)"
+      "note": "t261009-74 KI-01M4HMKZQ23649NFRTTFNCTRF6/KI-01M4K9X2Z8W1A6CVB3QD7FHS4M: draining holder keeps its slot, evidence on every drop, transient never drops (receipt + engine ledger semantics)",
+      "sync_path": "server/tools/ticket.py (op=concurrency reconcile face); server/engine/concurrency.py (reconcile draining_tickets)"
+    },
+    "integration/t261009-74/sc_reconcile_drain_verdict_receipt.py": {
+      "anchor": "behaviour",
+      "note": "t261009-74: verdict matrix live/draining/dead/unknown over probe+pidfile+meta fixtures; receipt evidence contract",
+      "sync_path": "server/tools/ticket.py (op=concurrency reconcile face)"
+    },
+    "integration/t261009-53/sc_t26100953_lane_map_pipe.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-53 lane map slim-pipe geometry: one baseline of slim equal-height bars, two-level alternating clamped non-overlapping labels above, diamond at the bar head, partner second track inside a both-track dashed window, cursor spanning both tracks, state-by-fill, width proportions survive",
+      "sync_path": ""
+    },
+    "integration/t261009-68/sc_t26100968_lane_map_binds_scene.mjs": {
+      "anchor": "contract",
+      "note": "t261009-68 bundle binding + first-render mount contract: every value export of lane-map-model.ts that the shipped bundle calls is bound in both twin bundles, AND LaneMap itself is mounted node-only (factory evaluated with react stubs, one in-memory export hook, minimal model) so the dangling-reference crash class (host report 261010) reproduces verbatim at first render — machine-checkable without a browser",
+      "sync_path": ""
+    },
+    "integration/t261009-68/sc_t26100968_lane_map_mount_receipt.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-68 crash-free mount receipt: ticket detail opens, zero pageerror (laneMapScene stack named verbatim if it reproduces), lane-map svg mounts through the built bundle, slot-crash containment channel quiet",
+      "sync_path": ""
+    },
+    "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
+      "sync_path": ""
+    },
+    "integration/t261009-22/sc_t26100922_lane_map_mock_chrome.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-22 lane map mock chrome: header kind legend + elapsed/now-at summary + waiting-for-you, durations printed under labels, diamond human gate, time axis at the segment scale, skipped dashed empty, now cursor, hover duration; malformed entries leak nothing",
+      "sync_path": ""
     },
     "integration/t261008-47/sc_ticket_face_english.py": {
       "anchor": "contract",
@@ -4780,39 +4825,14 @@
       "note": "rerun round/wall derivation identical over old- and new-format timelines; named degradation; history rows still drive the leg",
       "sync_path": ""
     },
-    "integration/t261009-22/sc_t26100922_lane_map_mock_chrome.mjs": {
+    "integration/t261009-59/sc_t26100959_tick_triggers.py": {
       "anchor": "behaviour",
-      "note": "t261009-22 lane map mock chrome: header kind legend + elapsed/now-at summary + waiting-for-you, durations printed under labels, diamond human gate, time axis at the segment scale, skipped dashed empty, now cursor, hover duration; malformed entries leak nothing",
-      "sync_path": ""
-    },
-    "integration/t261009-46/sc_legacy_path_untouched.py": {
-      "anchor": "behaviour",
-      "note": "t261009-46 coexistence — legacy-version resolution creates nothing, importing the running-flow modules leaves the new surface unimported (one-way dependency, re-verified for the wired tree), an old-path settle writes nothing into the new homes, workflows_v2 names no new surface",
-      "sync_path": ""
-    },
-    "integration/t261009-46/sc_optin_landing_journey.py": {
-      "anchor": "behaviour",
-      "note": "t261009-46: the opt-in landing journey — version-name refusal matrix never defaulted, proven revision lands on the line with main unmoved and one reader-side ledger row, clean drift pins and lands the proven sha, dirty drifted checkout refuses by name with zero writes",
-      "sync_path": ""
-    },
-    "integration/t261009-53/sc_t26100953_lane_map_pipe.mjs": {
-      "anchor": "behaviour",
-      "note": "t261009-53 lane map slim-pipe geometry: one baseline of slim equal-height bars, two-level alternating clamped non-overlapping labels above, diamond at the bar head, partner second track inside a both-track dashed window, cursor spanning both tracks, state-by-fill, width proportions survive",
-      "sync_path": ""
-    },
-    "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
-      "anchor": "behaviour",
-      "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
+      "note": "t261009-59 tick call site: event/backstop triggers distinguishable, idle writes nothing",
       "sync_path": ""
     },
     "integration/t261009-59/sc_t26100959_tick_failures.py": {
       "anchor": "behaviour",
       "note": "t261009-59 tick call site: named failures, held slot untouched, no call-site bookkeeping",
-      "sync_path": ""
-    },
-    "integration/t261009-59/sc_t26100959_tick_triggers.py": {
-      "anchor": "behaviour",
-      "note": "t261009-59 tick call site: event/backstop triggers distinguishable, idle writes nothing",
       "sync_path": ""
     },
     "integration/t261009-59/sc_t26100959_tick_wired.py": {
@@ -4833,24 +4853,14 @@
       "note": "t261009-64: the withdrawal's two consumers live on the real paths — build_promotion refuses a re-introduced withdrawn patch naming relation+ticket+patch id, fail-closed without the adapter, clean path row shape unchanged, ticket_wait_state reverted face names the relation, superseded/red precedence, malformed rows loud",
       "sync_path": "server/engine/develop_promote.py (build_promotion guard wiring); server/engine/develop_certify.py (ticket_wait_state reverted branch)"
     },
-    "integration/t261009-66/sc_t26100966_relations_reader.py": {
-      "anchor": "contract",
-      "note": "t261009-66: both-directions-from-disk reader (byte-identical read, derived labelled), correction-aware neither-side superseded, one-implementation identity, promotion repairs naming proven from the file",
-      "sync_path": "server/engine/develop_certify.py (relations_of, _relation_target_tickets, validate_row promotion repairs branch); server/engine/develop_promote.py (re-export, build_promotion repairs derivation)"
-    },
-    "integration/t261009-67/sc_t26100967_freeze_stops_landings.py": {
+    "integration/t261009-46/sc_optin_landing_journey.py": {
       "anchor": "behaviour",
-      "note": "t261009-67: the landing act consults the open freeze over a real temp delivery ledger and real git fixtures - frozen line refuses by name (ids on the refusal, zero records, repo untouched), self-declaration reads as the same refusal, current same-line repairs relation lands while superseded/cross-line do not, could-not-run growth row leaves the line landing and the growth in the next certification's range, the REAL certification-adapter subprocess reports the freeze to the promotion signer, and a fix landing keeps the episode open with the fix chain read off the records",
+      "note": "t261009-46: the opt-in landing journey — version-name refusal matrix never defaulted, proven revision lands on the line with main unmoved and one reader-side ledger row, clean drift pins and lands the proven sha, dirty drifted checkout refuses by name with zero writes",
       "sync_path": ""
     },
-    "integration/t261009-68/sc_t26100968_lane_map_binds_scene.mjs": {
-      "anchor": "contract",
-      "note": "t261009-68 bundle binding + first-render mount contract: every value export of lane-map-model.ts that the shipped bundle calls is bound in both twin bundles, AND LaneMap itself is mounted node-only (factory evaluated with react stubs, one in-memory export hook, minimal model) so the dangling-reference crash class (host report 261010) reproduces verbatim at first render — machine-checkable without a browser",
-      "sync_path": ""
-    },
-    "integration/t261009-68/sc_t26100968_lane_map_mount_receipt.mjs": {
+    "integration/t261009-46/sc_legacy_path_untouched.py": {
       "anchor": "behaviour",
-      "note": "t261009-68 crash-free mount receipt: ticket detail opens, zero pageerror (laneMapScene stack named verbatim if it reproduces), lane-map svg mounts through the built bundle, slot-crash containment channel quiet",
+      "note": "t261009-46 coexistence — legacy-version resolution creates nothing, importing the running-flow modules leaves the new surface unimported (one-way dependency, re-verified for the wired tree), an old-path settle writes nothing into the new homes, workflows_v2 names no new surface",
       "sync_path": ""
     },
     "integration/t261009-69/sc_t26100969_finding_entity_observation.py": {
@@ -4861,6 +4871,16 @@
       "anchor": "contract",
       "note": "t261009-70: a boot failure leaves attributable evidence — waitReady rejection carries timeout + bounded log tail + survivor path outside the temp home; malformed logs degrade to a named absence; boot failure stays a failure",
       "sync_path": "integration/t260904-17/lib_fix17.mjs (waitReady + captureBootFailure)"
+    },
+    "integration/t261009-66/sc_t26100966_relations_reader.py": {
+      "anchor": "contract",
+      "note": "t261009-66: both-directions-from-disk reader (byte-identical read, derived labelled), correction-aware neither-side superseded, one-implementation identity, promotion repairs naming proven from the file",
+      "sync_path": "server/engine/develop_certify.py (relations_of, _relation_target_tickets, validate_row promotion repairs branch); server/engine/develop_promote.py (re-export, build_promotion repairs derivation)"
+    },
+    "integration/t261009-67/sc_t26100967_freeze_stops_landings.py": {
+      "anchor": "behaviour",
+      "note": "t261009-67: the landing act consults the open freeze over a real temp delivery ledger and real git fixtures - frozen line refuses by name (ids on the refusal, zero records, repo untouched), self-declaration reads as the same refusal, current same-line repairs relation lands while superseded/cross-line do not, could-not-run growth row leaves the line landing and the growth in the next certification's range, the REAL certification-adapter subprocess reports the freeze to the promotion signer, and a fix landing keeps the episode open with the fix chain read off the records",
+      "sync_path": ""
     },
     "integration/t261009-71/sc_t26100971_finding_chain_records.py": {
       "anchor": "contract",
@@ -4877,14 +4897,39 @@
       "note": "t261009-75 acceptance 4: answer lands through the sanctioned writer (panel answer POST behind the credential gate) and the item leaves waiting on the panel's OWN split; landed row re-read from the file carries the canonical shape; engine read view agrees on the same file",
       "sync_path": "server/plugins/executor-panel/src/host/api.ts (answer route); server/plugins/executor-panel/src/host/requests.ts (answerRequest); server/engine/request_thread.py (head_states)"
     },
+    "integration/t261009-76/sc_intake_optin_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261009-76: the opt-in reachable from the real intake — payload through the intake seam reads as opted in, the named refusal matrix (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template) fires before the workflow starts, absence produces the plain legacy TicketInput with the getattr replay default intact",
+      "sync_path": ""
+    },
     "integration/t261009-76/sc_intake_optin_face.py": {
       "anchor": "contract",
       "note": "t261009-76: the ticket face — the create op's declared schema carries the two opt-in fields with descriptions, and the list projection carries lane_version/develop_line with the old-row empty-string tolerance",
       "sync_path": ""
     },
-    "integration/t261009-76/sc_intake_optin_journey.py": {
+    "integration/t261009-77/sc_t26100977_line_round_runner.py": {
+      "anchor": "contract",
+      "note": "t261009-77: the declared runner command turns one candidate revision set into ONE real run header (resolve_runner contract, red-is-a-proof, could-not-run honesty, timeout, inherited gate-owner env, whole-round certification citing the run id)",
+      "sync_path": "integration/line_round_runner.py; server/engine/develop_certify.py (resolve_runner/run_line_round)"
+    },
+    "integration/t261009-78/sc_buffer_stall_legs_fire.py": {
       "anchor": "behaviour",
-      "note": "t261009-76: the opt-in reachable from the real intake — payload through the intake seam reads as opted in, the named refusal matrix (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template) fires before the workflow starts, absence produces the plain legacy TicketInput with the getattr replay default intact",
+      "note": "t261009-78: the three silent-stall legs fire with named facts through the public findings face - cert-wait-overdue names ticket/line/landing revision/age, window interior stays silent, human-gate ticket suppressed by name, freeze-without-remedy names line/episode/cause/open-age and stays silent once a current repairs relation is in flight, repair-points-nowhere names relation/both ends/looked-for, superseded relations exempt, exact-boundary fires (>=)",
+      "sync_path": ""
+    },
+    "integration/t261009-78/sc_buffer_stall_failclosed.py": {
+      "anchor": "contract",
+      "note": "t261009-78: cannot-tell is never rendered as fine - absent ledger named not clean, malformed rows degrade by name, certs without a run-reader are an explicit unknown, malformed declaration falls back with source surfaced, missing patch map is a note not a dangling finding, findings copy English, existing rerun-rounds leg untouched",
+      "sync_path": ""
+    },
+    "integration/t261011-02/sc_ticket_list_projection_parity.py": {
+      "anchor": "behaviour",
+      "note": "t261011-02: the CLI row face agrees per-key with the engine row face for the same ticket — every key of the real _row_from_meta row (develop-buffer opt-in, paused pair, closed shape) passes the _poc seam into the CLI list verbatim, nothing dropped or recomputed, legacy rows read honestly empty",
+      "sync_path": "server/tools/ticket.py (_list projection)"
+    },
+    "integration/t261011-04/sc_t26101104_wiring_stamp_drift_face.py": {
+      "anchor": "behaviour",
+      "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
       "sync_path": ""
     },
     "integration/t261009-80/sc_pause_honest_receipt.py": {

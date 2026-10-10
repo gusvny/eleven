@@ -4330,6 +4330,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **所以复核的第一步永远不是"登记"，而是"定点复跑"**：单跑红 ⇒ 按真缺陷修；单跑绿 ⇒ 按载荷面处置或标记"已在套件内稳定"。
 > 这与既有的"闸红先同修订重跑一次"是同一条纪律：**先花最小代价区分，再决定往哪一层归因。**
 
+> **补·browser 池四条 100% 红的定点复跑（261011 03:41–03:49，舰队空闲窗口：`ps` 数 `run_scenarios.py` = 0 才开跑；本岗执行）**——这一步正是上一条处方里"留给空闲窗口"的那半边，结论**推翻了"capture 族大概率是环境面"的假设**：
+>
+> | 场景 | 单跑判定 | 墙钟 | `reason` | 判词 |
+> |---|---|---|---|---|
+> | `t261005-16-capture-fresh-home-journey` | **fail** | 87.8 s | `assert_mismatch`（证据里点出 "the deterministic red-before face"） | **真缺陷**（不该按环境面隔离，更不该入册消音） |
+> | `t261006-02-capture-auth-surface-real-stage` | **fail** | 87.6 s | `assert_mismatch` | **真缺陷** |
+> | `t261006-03-engine-path-capture-journey` | **fail** | 295.8 s | `assert_mismatch`；证据含 `502 (Bad Gateway)`、`[capture-lane] capture.mjs 退出码 1`、`ok pre-fix code fails with capture exit 1` | **真缺陷**（与上面 `t261006-03` 第三层残留"引擎路径的工作区解析"同一条线） |
+> | `t261008-36-panel-settings-faces-merge` | **pass** | 14.1 s | — | **套件内敏感**（载荷面；不入册，若套件内再稳定红按 KI-184 家族走） |
+>
+> **结论（对判据与对 develop-buffer 都有影响）**：**四条里 3 条是确定性真红、1 条是载荷敏感**——所以"每轮全量轮都有 4–5 个红"这件事**不是环境噪声，是三条真缺陷在每轮复现**。⇒ ①**入册（跳过）会掩盖真缺陷**，本岗的建议是**先修这三条**；②对 develop-buffer 而言，这正是 `KI-01M4KJ022G8R0RRAZ03C7T9TZ4`（落地前置 `last_green_run` 不可达）的**根**之一：修掉这三条，全量轮才可能零失败，"零失败轮"这条前置才可能被满足——**修它是与所有选项都相容的那条路**（不必放宽判据、也不必入册消音）。
+> **纪律（本轮新增，写给复核者）**：**"长期红"的处置顺序是"定点复跑 → 定性 → 修或入册"，跳过错跑直接入册等于用册子给真缺陷消音**；单跑判定要同时记录 `reason` 与墙钟（`assert_mismatch` 是真断言红，`env_fail`/超时才是环境面），并写明跑批前置条件（本轮的判据是 `ps` 数到 0 个 `run_scenarios.py`）。
+> **已开修复票**：`t261011-03`（三条确定性红，逐条点名失败断言；`t261008-36` 不入票，按载荷面留观）。
+
 > **同族补充二（261009 12:19 实测，含一条可复用的巡检配方）**：**三张票静默停摆 3.5–4.5 小时，其中两张在票面上写着 `running`**。
 > 判据（**四路交叉，任一路可疑就点名**）：①`op=list` 的 `updated` 时间；②`concurrency-state.json` 的 holders 名单；③**泳道目录近 N 分钟内是否有文件被改**（`find .lane/<id> -newermt '-200 minutes' -type f`）；④票面 `stage_state`。
 > 实测：`t261008-43`（blocked，updated 07:51＝**4.5 h 前**，无槽位，泳道 200 分钟内零改动）、`t261008-47`（**running**，08:31＝3.8 h 前，**不在 holders 里**）、`t261009-04`（**running**，08:43＝3.6 h 前，**不在 holders 里**，泳道同样零改动）。
@@ -5137,3 +5150,93 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**「薄壳投影」是第三个消费面**——t261009-35 当初只点名了两个面（引擎行 + `_v2_query` 详情）并立了"新键必须两处同改"的规矩，而这条缝**不在那两处之内**，于是规矩看起来被遵守了、面上却是盲的。**凡新增行键，先问薄壳会不会把它丢掉**；验证口径＝**同一张票、两个面、逐键相等**，不是"各自单测绿"（薄壳那两行代码本身"对"得很，只是它读的键不存在——两层各自单测都会过）。
 >
 > **回归**：L2——(а) 同票两面对读：`lane_version` / `develop_line` / `paused` / `paused_phase` 逐键相等；(b) 未投的键在投影处**具名**（不是静默丢）。L3——一张 buffer 票在板上可辨（lane/line 非空）、一张暂停票 `paused=true`，且两键都来自引擎行而非本地推导。
+
+## KI-01M4KH2QR5BRMQVZWA1C40Y8PF **生产里那条 tick 根本到不了"线轮"**：中央 worker（`sandbar` 队列，起于 2026-10-09 20:20）装的是**接线之前**的 workflow 体（`workflows.py`/`activities.py` 到 2026-10-10 14:30 才落地），而**代码指纹的 16 个模块里没有这两个文件** ⇒ 触发一次调度**看起来成功、实际只跑了巡检**(261011 00:29 触发 + 02:3x 读日志实测;integration 岗登记)
+
+> **现象（原始读数）**：
+> - 00:29 我按宿主令触发一次 `dispatcher-scan`（调度面 `recent_action_times` 记 `2026-10-10T16:29:13Z`）：`server/engine/data/worker.log` 显示这个 workflow 只跑了三个活动——`scan_tickets_report`(id 2)、`write_scan_report`(id 3)、`reconcile_ticket_workers`(id 4)，00:29:15 报"巡检：483 张工单，待决 0 张"**完成**；**日志里没有任何 `line_round_tick_engine` 活动**。
+> - 落盘的巡检报告 `server/engine/out/scan/2026-10-11.json` 键集 = `by_status/generated_at/items/pending_decision_count/red_line/stuck_threshold_hours/summary/total_tickets/unfiled`——**没有 lines/线轮的字段**（新 workflow 体会带上每线的 tick 条目）。
+> - 时间对不上：中央 worker `pid 28404` **起于 `2026-10-09 20:20:59`**（`engine_ops.py workers` 的 `started_at`），而 `server/engine/workflows.py` 与 `server/engine/activities.py` 的最后改动都是 **`2026-10-10 14:30:17`**（`d4837baf`，t261009-50 的接线：`workflows.py:305-312` 调 `line_round_tick_engine`、`activities.py:196` 注册该活动）⇒ **进程里装的是接线前的体**，那个分支在它里面根本不存在。
+> - `delivery.jsonl` 至今不存在——与"tick 从未到达线轮"一致（**不是**"跑了没内容"）。
+> - **指纹面对这件事是盲的**：`shared.CODE_STAMP_MODULES`（worker 起跑时自写的漂移指纹，16 个模块）**不含 `workflows.py`、也不含 `activities.py`** ⇒ 一个"只改了这两个文件"的 worker 会报 `stale=none`（**静默陈旧**）；本次是因为 `agent_activities` 恰好也在同一批改动里才让 stale 列表非空，而它**点不到真正缺的那两个文件**。
+>
+> **危害**：①**点火会静默空跑**——宿主的计划是"设 `SANDBAR_LINE_ROUND_RUNNER` + 重启"，但**只补 runner 环境变量救不了这条路径**：workflow 体里没有那段调用，触发一次照样只跑巡检、照样写报告，而**既不落认证台账、也不报 `runner_missing`**（具名缺 runner 的那条路同样在那个不存在的分支后面）。本夜已经真的发生了一次。②凡"新 workflow 分支 / 新活动注册"类交付物，**只有中央 worker 换手才生效**，而现有漂移面对这条路径**看不见**。
+>
+> **出路**：①**点火先决条件写清**（两步都归宿主/控制台面，本岗做不了）：**中央 worker 必须换手**（按 pidfile TERM，等控制台 supervisor 自动拉起）**且**新进程环境带 `SANDBAR_LINE_ROUND_RUNNER`（+ `SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S`，见 `integration/t261009-77/runner-declaration.md` 第 13/17 行）；②把 `workflows.py` / `activities.py` 加进 `CODE_STAMP_MODULES`（实现归票）；③"接线类"交付物的验收口径补一条：**触发一次真调度，回执里要能看见那个新活动名**。
+>
+> **纪律**：**"新分支/新活动"类改动的生效判据 = 进程重启后的一次真运行记录**——单测绿、场景绿、代码在 main 里，都不算；漂移指纹只覆盖它列出的模块，**未列出的模块陈旧时指纹会说谎**，凡依赖新接线的活儿都必须另取一次真运行证据。
+>
+> **回归**：L3——触发一次真调度：工作日志里出现新活动名（本例 `line_round_tick_engine`），且认证台账有对应行，或具名 `runner_missing`（二者必居其一；"什么都没有"就是本条复发）。
+
+> **补·A/B 实证（261011 02:29，换手后同一条调度再点一次；本岗自纠一处取证瑕疵）**：
+> - **先换手**：`server/tools/engine_ops.py restart --scope central`（本工具**只 kill**，等控制台 supervisor 自动拉起）——旧 pid 28404 → **新 pid 91107，起于 02:29:04，`polling=True`、`stale=none`**（换手 ~15 秒，记录落 `server/engine/data/worker-handovers.jsonl`）。这是本岗在宿主「恢复/点火你自己看情况」授权内做的动作，走的是文档化的正规入口。
+> - **A/B 判据改用"workflow 返回值"而不是日志行**（**自纠**：上面那句"日志里没有 `line_round_tick_engine` 活动"作为证据**不够硬**——那个活动自己不写 INFO 日志，看不见不等于没跑）：直接取两次运行的返回值对比——
+>   - `dispatcher-scan-2026-10-10T16:29:13Z`（换手前）返回值**根本没有 `line_rounds` 键**（键集：`by_status/pending_decision/report_file/report_path/scanned_at/summary/total/worker_reconcile`）⇒ 进程里装的 workflow 体不含那段接线；
+>   - `dispatcher-scan-2026-10-10T18:29:14Z`（换手后）返回值**带 `line_rounds`**：`{"projects":{"sandbar":{"lines":[{"line":"develop-buffer","state":"runner_missing"}],"summary":"line_round_tick: 1 lines, asked 0, idle 0, not-runnable ['develop-buffer']"}}}` ⇒ **接线在生产里活了，并且按设计具名报出"缺 runner"**。
+> - **结论（点火清单收窄到一步）**：中央 worker 换手已完成（本岗 02:29 做掉）；**剩下只有一件、且只有宿主能做**——让控制台宿主进程带 `SANDBAR_LINE_ROUND_RUNNER`（+ 可选 `SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S`）启动（worker 是它的子进程，环境继承），之后下一次 tick 就会真跑线轮，判据＝`delivery.jsonl` 出现行或具名 `could_not_run`。
+> - **纪律（本条教训，写给下次）**：**判"某活动/某分支有没有跑"要取回执或返回值，不要拿日志的有无当证据**——不打日志的活动在日志里与"没跑"同形。
+
+## KI-01M4KJ022G8R0RRAZ03C7T9TZ4 **develop buffer 的落地前置（`meta.last_green_run`）在实践中**不可达**：它要求一整轮**零失败**的全量轮，而盘上 66 轮全量轮**没有一轮是零失败**（4–8 红是常态）⇒ 第一张 opt-in 票即便拿到 runner 与认证也永远落不了地**(261011 02:37 `t261009-80` 实测;integration 岗登记)
+
+> **现象（原始读数）**：`t261009-80`（develop buffer 第一张 opt-in 票）02:26 走完 `merge_check` 进 `merge`，02:37:32 **具名阻塞**：
+> `develop-buffer landing refused: this ticket has no green-run face (meta.last_green_run carries no sha) — the landing consumes the revision the gate judged, and no judged revision is recorded; never falls back to the current tip. Re-verify with retry_qc (a green gate round re-anchors the face).`
+> 它的票面 `log` 里**没有** `green-run face recorded` 一行、只有这条拒绝；`meta.last_green_run` 为 `null`。
+>
+> **真因（两条链，缺一不可）**：
+> 1. **写入端**：`server/engine/dev_lane.py:1958 _ki220_record_green_run` 只在一轮**全量且真绿**时落面，判据是纯函数 `shared.green_run_face`（`server/engine/shared.py:1166`），它要求 `error=="" && ran>0 && failed==0 && blockers 空 && 非定点跑`。
+> 2. **读数（事实）**：`t261009-80` 那轮的机械回执是 **`573 跑 / 546 过 / 5 败 / 22 环境红`**（`results.run_integration_tests.summary`，`status=failed`）⇒ `failed=5 ≠ 0` ⇒ `green_run_face` 返回 None ⇒ **面永远不落**。
+> 3. **这不是偶发**：本岗扫盘上全部全量轮报告（`ran>200` 共 **66 轮**，10-10 23:23 → 10-11 02:40）：**`fail==0` 的轮数为 0**；最近 12 轮的 fail 分别是 8/7/6/4/5/4/5/4/4/5/4。⇒ **只要注册表里有慢性红，这条前置就永远不满足**。
+> 4. **那 5 败不是本票的**：`results.arbitrate.evidence` 写明"FAIL entries … all browser pool；**`__ledger__` 命中红 matches exactly these four -> registered known red**"（即闸自己已把这四条判为**在册的既有红**）。慢性红实测（台账 `scenario-results.jsonl` 全史）：`t261005-16-capture-fresh-home-journey` 519 行里 fail 415、`t261006-02-capture-auth-surface-real-stage` 502 行里 fail 413、`t261006-03-engine-path-capture-journey` 505 行里 fail 421、`t261008-36-panel-settings-faces-merge` 314 行里 fail 169/env_fail 104。
+>
+> **与设计的关系（这是本条的要害，不是"跑得不够多"）**：`docs/design/develop-buffer-v1.md` 的 **Problem** 段一句话点名的就是它——"the only thing standing between a lane and main is a per-ticket precondition（'this ticket's scenarios have a green run on this exact tree'）…so the merge line stalls"，而 **Goal 1/2** 要求"a lane can land **without paying a full suite round**"、"each lane still proves **its own** change（本票场景）…**without any whole-suite round**"。⇒ **实现里 `_dev_buffer_land_step` 依赖的 `last_green_run` 恰是被这份设计移除的那条前置**（而且是更严的形态：要求整轮零失败），**这就是"新流重新引入了它自己被发明出来要移除的东西"**。设计里还有一句可直接引用的约束：**"The existing protections（… the booked-red inventory）keep working unchanged"** —— 而 `green_run_face` **完全不读回执上现成的在册红分类面**（`known_red` 块 / `details` 里的 `__ledger__` 命中红 / `main_side_reds`），只数 `failed`。
+> 5. **拒绝文案给出的出路也不可达**：同一句话让泳道 `retry_qc`「让绿轮重新锚定这一面」——但慢性红不修/不挂账之前，**再跑几轮也不可能零失败**，照做只会空烧 15 分钟一轮的全量套件。
+>
+> **危害**：①**develop buffer 的落地路径实际上一次都没打开过**（换手 + runner 环境变量只是必要条件，不是充分条件）：第一张 opt-in 票到"落地/认证"这一步就永久停住，`delivery.jsonl` 也就永远不会出现行；②它同时**占用并发额度**（`-80` 在 holders 里、reason=running）；③同一批慢性红还在别处制造同类停摆——`t261009-72` 的验收超轮次（6>5）那轮里的红项正是 `t261008-36-panel-settings-faces-merge`（同族的四条之一）。
+>
+> **出路（设计口径归宿主，实现归修复票；本岗只报不做）**：
+> - **选项 A（最窄、与设计那句约束一致）**：`green_run_face` 消费回执上已有的**在册红分类面**——一轮的失败若**全部**是在册红（具名列出并落进面里 `registered_reds`），该轮记绿；有任何**未在册**红仍拒。面形状向后兼容（新增键，缺=老行为）。
+> - **选项 B（按设计的正路）**：让落地消费**新流自己的证明**（本票场景 + 快集、在声明时间预算内），全量轮不再参与落地判据（Goal 1–3 的落地）。
+> - **选项 C（不改码的数据动作）**：把四条慢性红**挂账进 `integration/known-red-baseline.json`** —— 但该文件在**受保护名单**里（`server/engine/path_gates.py:60` 一带，宿主专属），且名册政策是"只缩不增、每条须 owner + retire_when、现 50/50 满格需抬 `max_entries`" ⇒ **纯宿主决定**。
+> - **明确不要做**：不要为了让它绿而放宽 `green_run_face` 的语义（那等于新流自己把证明标准悄悄降级）；也不要对 `-80` 发 `retry_qc` 空转（慢性红不解决，跑多少轮都不会零失败）。
+>
+> **纪律**：**凡"新流引入的前置条件"，必须先在既有盘上量一次"这个条件历史上满足过几次"**——本次答案是 **0/66**。一个从未被满足过的前置，落地即等于永久停摆；量它一次的成本是几分钟，不量的代价是第一张票就死在那里。
+>
+> **回归**：L2——(а) 一轮的失败**全部在册** ⇒ 记绿且面里具名 `registered_reds`；(b) 有任一未在册红 ⇒ 仍拒且具名那条红；(c) 老面（无新键）读法不变。L3——一条 buffer 票的落地：在慢性红仍仍在的前提下能落地并进入"等认证"，且认证一到就收口（不是永远停在 `merge/blocked`）。
+
+## KI-01M4KQPFS3Z1JMV9QP3F2VKQQ4 **受保护的"期望值基线"**按角色名**消费实现侧导出的锚键** ⇒ 任何正当的产品换锚都逼出一次受保护面改动，而泳道**没有**合法动作能改它；绕开（不改）或硬改（自证豁免）两条路都是坏的**(261011 04:16 `t261011-03` 实测;integration 岗登记并当场处置)**
+
+> **现象（原始读数）**：`t261011-03`（修三条 capture 族真红）在实现段改了 `server/ui-check/capture.mjs` 的就绪锚——`BOARD_ANCHORS.chips = ".wb-chip-btn"` → `group = ".wb-group-head"`（筛选条 chips 随 `t261005-10` UI-2 退役，板面自那以后是左列常驻面；这两次退役在 `sidebar.tsx:1039-1042` 的注释里具名）。为保持语义一致它同步改了守卫 `integration/baselines/sc_capture_board_assert.mjs`（角色正则 `/chip|filter/` → `/group|head/`、`BOARD_FILES` 3 条 → 2 条）⇒ **受保护路径闸具名拒绝**：`path_gate_reason=protected_path`，票停在 `implement/blocked`（`blocked_detail.evidence` 原文点名该文件"is on the protected list（source of truth and expected values）"）。
+> **耦合是真的（读守卫实现，不是泳道多事）**：`collectAnchors()` 把 `capture.mjs` 导出的选择器**按角色键名**分类（`/chip|filter/`、`/card|row/`、`/empty|blank|zero/`），形状子用例要求**存在一个 chips 角色的锚**（`anchors.chips.length > 0`），`domMapFrom()` 也用这三类构建桩 DOM ⇒ **把 chips 改名成 group，就会让这条守卫在所有轮次变红**。
+> **而它今天每轮都绿**：台账 `capture-board-assert` **1061 行全 pass**（最近 04:18:51 在 `lane:t261011-04`）、**不在已知红名册里** ⇒ 一旦改名落地而不动守卫，**它立刻变成新的"每轮慢性红"**，正是 `KI-01M4FE0T3FG7Y0G9R97NS4T7QJ` 那一族的新成员（该族已在污染"红是新还是已知"的判据）。
+>
+> **危害**：①**正当换锚 → 受保护面改动 → 泳道无可达动作**（闸自己的出路文案是"human-review approval 或 main-tree ticket route"）⇒ 票只能在宿主醒着时解，夜里就是停摆；②**绕开的两条路都坏**：不动守卫 = 把一条绿守卫变成慢性红（噪声 + 污染判据），静默改守卫 = 受保护面自证豁免（保护面存在的理由）；③这是**结构性**的：只要守卫继续按键名猜角色，任何一次产品面重命名都会重演。
+>
+> **本岗处置（261011 04:2x）**：①**打回**该票（`to_stage=implement`），具名一条动作——**恢复受保护文件 byte-identical、并撤掉配套的登记文案改动**，让自己的修复**从自己这侧**满足守卫现有契约（守卫是**按角色**匹配的，故保留 chips 角色键指向新的就绪锚、保留 `BOARD_FILES` 命名的条目，并加一行注释说明"产品侧的 chip 行已退役、组头接管就绪角色"）；②把"守卫契约本身是否该改"作为**受保护面授权请求**升级宿主（本岗预备，不自行改）；③没有动 main 上的受保护文件（受保护面授权只在宿主）。
+>
+> **出路（设计口径归宿主，实现归票）**：①**守卫的角色词表应成为显式契约**——要么接受**角色别名**（`/chip|filter|group|head/`，前后兼容），要么把"就绪锚的角色名"写进守卫的契约文档并声明"角色名是接口，不许单方面改"；②更彻底：守卫不再按键名猜角色，而是消费实现侧**显式导出的角色映射**（如 `BOARD_ANCHOR_ROLES = {ready, rows, empty}`）——键名之后怎么改都不影响守卫；**KI-051 的"锚语义、不锚字面"在跨文件这一层还没落实**。
+>
+> **纪律**：**凡"期望值/基线"文件消费实现侧的**名字**（键名、标识符、路由、选择器），那就是一条隐式跨文件接口**——改名必须同改；而这类文件若在受保护名单里，**改名就等于要一次授权**。**评审时先问一句：这次改名有没有别处的字面耦合？**
+>
+> **回归**：L1——守卫的锚分类对**角色别名**两种键名都能命中（或对手册声明的角色映射精确命中）；L3——实现侧把就绪锚改名后守卫仍绿（证明耦合已断），且"改名 + 静默改守卫"这条组合**不得**通过。
+
+## KI-01M4KQY65KTP53XFC54B41MJN8 **"字面扫描类守卫"的输入是散文与新资产 ⇒ 违规只在闸上显形、不在写的时候显形**（本夜三例：两次是树级术语 lint 被本岗的 KI 散文点亮、一次是新场景里写了退役路径字面量）**(261011 04:1x `t261011-04` 轮次实测 + 本岗两次自伤;登记留档)**
+
+> **三例（都是同一个形状）**：
+> 1. **`t261011-04` 的新场景** `integration/t261011-04/sc_t26101104_wiring_stamp_drift_face.py` 在 `pick_python()` 里写了退役路径字面量 `os.path.join(REPO, "server", "dsh", "temporal-poc", ".venv", "bin", "python")`（还有一次写在注释里）⇒ 五层结构守卫 `t260907-10-engine-layout` 的 C 段（全仓旧路径零残留）在**闸上**报 `FAIL C 真残留 1 处: …:86`。作者在 `arbitrate` 段自查自纠（去掉退役路径回落、注释改写为"点名不带字面"），复核 `--only t260907-10-engine-layout` 由红转 **pass 0.85 s**、本票场景 pass 1.1 s。**注意：连注释里的字面量都会中招**（扫描器按字面匹配），而"兜底分支永不执行"不是豁免理由。
+> 2. 同夜本岗两次：在已提交的 `notes/` 散文里写了**被废止的术语**（U+817F）⇒ `L7 术语废止` 是**整树**判据 ⇒ **每张泳道的 `verify_lane code` 一起红**（红的是 main、记在票头上）。
+> **形状（本条的价值）**：这类守卫**扫的是"字面"**，而输入是**散文/新写的测试资产**——作者写的时候**没有任何本地信号**，只有跑到闸（或别的泳道跑 verify_lane）才显形。代价：一次全量轮（~15 分钟）+ 一次 tests-fault 迭代。
+> **出路（实现归票；方向已被 `t261011-04` 的仲裁段点名）**：①把"整树字面扫描"这类判据的**廉价子集前置到写侧**——`integration/lint_tests.py`（秒级、已有 L7 这类整树判据）**再加一条**：扫描**新增/改动**的测试资产与文档，命中**退役路径字面量**即报（守卫 `t260907-10` 的实现可直接复用，别写第二份扫描器）；②提交前**必须真跑一次** lint，且**不许用管道掩盖退出码**（本夜实证：`lint | tail -2 && git commit` 里 `tail` 的 rc=0 把 lint 的**非零**吃掉了——lint 自己是对的，`return 1 if n_e else 0`）；
+> **纪律**：**写"字面敏感"的东西（术语、路径、锚选择器、注册名）之前，先想一句"有没有别处的扫描器会因为我这行字报红"**；改动 prose/test 资产后先在本地跑整树扫描再提交。
+> **回归**：L1——把退役路径字面量写进任一新增测试资产/文档 ⇒ **本地 lint（秒级）**即报，不必等到 `t260907-10` 在闸上跑；L3——一次"pre-commit 扫描绿 → 闸绿"的一致回执。
+
+## KI-01M4KWS43KSYN6SPR1BESNDQ19 **同一张票的两轮在不同配置下判读**：验收段的全量轮**不套用已知红豁免**（`known_red_skipped 0` vs 闸轮 44）⇒ 它的 15 败里有 13 条是名册成员，看上去像"一夜之间冒出十三条新红"**(261011 05:43 `t261011-03` 验收轮实测;integration 岗登记并当场分诊)**
+
+> **现象（两份回执同票对比）**：
+> - **验收段那轮**（`.lane/t261011-03/out/integration-report-261011-054330.json`）：`ran 622 / pass 567 / fail 15 / env_fail 40 / wall 862 s`，且回执自带 `known_red_skipped = 0`、`known_red_names = []`、`conc_width = 4`。
+> - **同票的闸轮**（同泳道 `integration-report-261011-044221.json`，出自 `run_integration_tests`）：`ran 577 / pass 553 / fail 2 / env_fail 22`，`known_red_skipped = 44`、`conc_width = 3`。
+> - **逐条点名**：验收轮那 15 条里 **13 条在 `integration/known-red-baseline.json` 名册内**（`t260920-03-terminology-l7-gate`、`t260904-12-no-skip-guard`、`capture-chat-e2e`、`capture-chat-active`、`t260905-05-multitab-guard-assets`、`t260912-01-pw-path-resolution`、`t260916-22-inspect-contract`、`t260929-22-executor-entry-console`、`t260929-09-l10-launch-gate-mechanism`、`auto-rework-trace`、`t260911-05-ki048-status-card-dom`、`t260927-05-external-template-lane-map-render`、`t260904-05-ledger-adversarial-boot`）——**它们在这一轮"跑了"，所以"红了"**；闸轮里它们被跳过（skipped 44）。剩下两条非名册：`t261008-36`（已知载荷敏感）与 **`t260913-04-wiring-contract`（真红，见下）**。
+>
+> **危害**：①**同一个票的两轮数字不可比**（2 败 vs 15 败），而它们都被叫作"全量轮"；一旦有人拿验收轮的数字做归因（人或 agent），就会把**名册成员当成新红**，进而误改产品、误打回票、或在 KI 里记一堆假账；②它同时**掩盖真红**——本夜真正的新红（`t260913-04-wiring-contract`）就埋在这 15 条的噪声里，**只有逐条与名册对读才浮出来**（本岗的做法：把 15 条逐个 grep 名册 + 查该场景台账全史，才把它挑出：台账 1063 行全 pass、含同票 04:45:04 的闸轮 pass 6.55 s，却在 05:43 与 05:47 两次 fail ⇒ 是该票 04:45 之后的改动引入的）。
+> **出路（设计口径归宿主，实现归票）**：①**两处任选其一并写明**——要么让验收段的全量轮**也注入名册豁免**（与闸轮同配置，数字可比），要么在**回执与票面上显式标注"本轮未套用名册豁免，数字不可与闸轮比对"**；②`known_red_skipped` 这一键**必须在两轮都可读**（本轮已可读，是它救了这次分诊）；③评审纪律：**凡读"某轮 fail 数"，先读同轮的 `known_red_skipped` 与 `conc_width`**，与闸轮不一致就先别下结论。
+> **纪律**：**"同一张票、同一个名目、两轮数字"必须先确认两轮同配置**再比；不同配置的两轮放在一起，等于用一把没校准的尺子量两次。
+> **回归**：L1——回执/票面对"未套用名册豁免的轮次"具名标注（或该轮 skipped 数与闸轮一致）；L3——一张票的验收轮与闸轮对同一条红给出一致的"是不是新红"结论。

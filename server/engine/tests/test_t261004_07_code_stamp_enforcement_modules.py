@@ -56,10 +56,6 @@ UNTRACKED_WORKER_MODULES = {
     "agent_runtime": "execution transport layer; no gate verdict or red line",
     "event_ledger": "append-only ledger write; no gate verdict",
     "ui_capture_stage": "UI rig lifecycle primitives; no gate verdict",
-    "activities": "worker entry itself (this scan starts from it); tracking it "
-                  "adds no signal beyond agent_activities/shared",
-    "workflows": "re-export shell over TYPE_CHECKING imports; logic lives in "
-                 "dev_lane/light_lane/inspection_flow (already tracked)",
     "workflows_v2": "lazy template registry read by activities; no red line",
     "ticket_worker": "child process supervisor; the child re-reads its own code",
     "inspection_decl": "instance plan resolution, pure data shaping",
@@ -73,12 +69,6 @@ UNTRACKED_WORKER_MODULES = {
     "temporalio": "external package",
     "sandbar_exec": "sandboxed exec helper (lazy import); transport, not verdict",
     "audit": "audit trail writer (client side); no worker gate verdict",
-    "develop_certify": "t261009-59 (fast carrier; same declaration as landed "
-                       "t261009-50): the activities.py top-level import is "
-                       "the scan tick's line-round ask; the module holds the "
-                       "round body only (tick face, delivery-record writer, "
-                       "red-ladder steps) and decides no red line and no "
-                       "gate verdict",
 }
 
 TRACKED = {name for name, _rel in shared.CODE_STAMP_MODULES}

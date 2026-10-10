@@ -384,8 +384,10 @@ def test_ticket_concurrency_requires_project(ticket_mod):
 
 def test_ticket_concurrency_reconcile_uses_readonly_probe(proj, ticket_mod, monkeypatch):
     """reconcile probes liveness through a stubbed read-only client.py query:
-    a holder whose query fails is a zombie, cleared by name; a query that
-    succeeds is kept. Zero Temporal."""
+    a holder whose probe answers kind=not_found (workflow gone) is a zombie,
+    cleared by name with evidence; a query that succeeds is kept. Zero
+    Temporal. (t261009-74: the stub carries the structured kind — free-text
+    matching is not the classification anchor.)"""
     root, key = proj
     _set_limit(root, key, 1)
     cc.acquire(key, "t-dead")
@@ -395,7 +397,8 @@ def test_ticket_concurrency_reconcile_uses_readonly_probe(proj, ticket_mod, monk
     def fake_poc(subcmd, payload, caller=None):
         probed.append((subcmd, payload.get("workflow_id")))
         if payload.get("workflow_id") == "t-dead":
-            return {"ok": False, "error": "workflow not found"}
+            return {"ok": False, "error": "ticket does not exist: t-dead (no such workflow in Temporal)",
+                    "kind": "not_found"}
         return {"ok": True, "result": {"ok": True, "snapshot": {}}}
 
     monkeypatch.setattr(ticket_mod, "_poc", fake_poc)
@@ -406,7 +409,12 @@ def test_ticket_concurrency_reconcile_uses_readonly_probe(proj, ticket_mod, monk
     assert all(p[0] == "query" for p in probed)          # read-only probe
     assert out["dropped"] == ["t-dead"]
     assert out["promoted"] == "t-alive"                  # head promoted after the clear
-    assert out["probe_errors"]["t-dead"].startswith("ValueError")
+    assert out["probe_errors"]["t-dead"].startswith("dead (kind=not_found)")
+    # t261009-74 spec (3): a dropped id never appears bare — evidence rides along.
+    (drev,) = out["dropped_evidence"]
+    assert drev["ticket"] == "t-dead"
+    assert drev["probe"] == "not_found"
+    assert drev["pidfile"] and drev["process"] in ("alive", "gone")
 
 
 # ---------- shared / module face zero regression ----------

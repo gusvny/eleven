@@ -246,9 +246,12 @@ ok(any("inflight-silent NOT reported" in s for s in sup3),
 # ---------- W9 single-writer drift guard + threshold pins ----------
 section("W9 single-writer judgement + unchanged thresholds")
 src = (ROOT / "server" / "engine" / "inspection_lane_watchdog.py").read_text("utf-8")
-ok(src.count("_not_in_flight_reasons(") == 2,
-   "the helper is defined once and called once (both legs consume one judgement — "
-   "no second inline copy of the rule)")
+ok(src.count("def _not_in_flight_reasons(") == 1,
+   "the helper is defined once (single writer — no second copy of the rule)")
+ok(src.count("_not_in_flight_reasons(") >= 3,
+   "every leg consumes the one judgement (def + at least two call sites — "
+   "t261009-78's buffer-stall suppression routes through the same helper via "
+   "_not_in_flight, never an inline copy)")
 ok(src.count("not_in_flight.append(") == 0,
    "no leg rebuilds the reason list inline (drift between the two copies is the "
    "exact defect this ticket forbids)")

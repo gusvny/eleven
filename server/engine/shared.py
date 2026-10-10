@@ -7345,9 +7345,32 @@ def __getattr__(name):
 #: `failure_protocol` 决定失败归属面。t261004-05 落了执法匹配器修复，但表里没有
 #: `integration_discipline` → 修复落地前启动的 worker 继续按旧红线执法，而 stamp 照报
 #: `stale=none`（假绿）。「改了就必须换进程」的文件必须在指纹面上看得见。
-#: 其余被 worker 载入但**不做执法**的模块（`agent_runtime`=执行传输层、
-#: `event_ledger`=只追加台账写、`ui_capture_stage`=UI 台起拆原语）不进表：
-#: 它们的改动不需要换进程才生效，列入只会稀释 stale 名单的信号。
+#: **261011 adds the wiring and pipeline-body modules** (`workflows`/`activities`/
+#: `develop_certify`/`develop_line`, ticket t261011-04): t261009-50 (d4837baf) put the
+#: line-round wiring inside `workflows.py` (the dispatch-scan body calls
+#: `line_round_tick_engine`) and `activities.py` (top-level import + activity
+#: registration), but neither file was on this list - so a worker stale only on the
+#: wiring reported `stale=none` (live case, 261011 early: one dispatcher-scan trigger
+#: returned a complete receipt with NO `line_rounds` key, a silent miss; after the
+#: worker handover the same trigger named `runner_missing`).
+#: `develop_certify` holds the tick activity body, `develop_line` holds the
+#: develop-buffer machinery - same "already in main, not in this process" silent-stale
+#: class, so all four are on the list.
+#: Worker-loaded modules that stay OFF the list, with the reason each omission is safe
+#: (written down since t261011-04 so the next reviewer does not re-litigate the list;
+#: same discipline as UNTRACKED_WORKER_MODULES in
+#: tests/test_t261004_07_code_stamp_enforcement_modules.py):
+#: - `agent_runtime`: execution transport layer; its changes do not need a new process;
+#: - `event_ledger`: append-only ledger write; decides no verdict;
+#: - `ui_capture_stage`: UI rig lifecycle primitives; same;
+#: - `ticket_worker`: child-process supervisor; the child re-reads its own code;
+#: - `workflows_v2`: lazy template registry read by activities; no red line, no gate;
+#: - `inspection_decl`/`inspection_scan*`/`inspection_inspect`: inspection plan
+#:   parsing and scan implementations; pure data shaping or lazy imports, not gates;
+#: - `sandbar_exec`: lazy sandbox exec helper (transport, not verdict);
+#:   `audit`: client-side ledger write.
+#: Entry criterion unchanged: a file goes on the list when **a change needs a new
+#: process to take effect**; when you add one, write the reason next to the entry.
 CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     ("agent_activities", "server/engine/agent_activities.py"),
     ("integration_discipline", "server/engine/integration_discipline.py"),
@@ -7375,6 +7398,26 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     # at all (declaration fail-closed + slot ledger) — an enforcement module, so
     # it must be visible on the code-stamp fingerprint (tripwire criterion (a)).
     ("concurrency", "server/engine/concurrency.py"),
+    # t261011-04: the dispatch-scan workflow body itself gained a branch here
+    # (t261009-50: it calls line_round_tick_engine and returns line_rounds). A
+    # worker whose loaded copy predates the wiring runs a body with no such
+    # branch and returns a plausible scan without the line_rounds key — silent
+    # staleness measured live on 261011. Must be visible on the stamp.
+    ("workflows", "server/engine/workflows.py"),
+    # t261011-04: the activity registration lives here (activities.py registers
+    # the line-round tick at top level and imports develop_certify eagerly).
+    # A stale copy registers no tick activity: the trigger fires, nothing runs,
+    # and nothing names the gap. Must be visible on the stamp.
+    ("activities", "server/engine/activities.py"),
+    # t261011-04: develop_certify holds the line-round tick body (tick face,
+    # delivery-record writer, red-ladder steps) — the "wiring landed in main,
+    # not in the running process" failure class applies to the body too, so its
+    # freshness must be visible on the stamp.
+    ("develop_certify", "server/engine/develop_certify.py"),
+    # t261011-04: develop_line carries the develop-buffer machinery. It is only
+    # lazily imported (develop_certify), so the tripwire's top-level-import scan
+    # cannot see it — tracked here explicitly for the same silent-stale reason.
+    ("develop_line", "server/engine/develop_line.py"),
     ("verify_lane", "server/tools/verify_lane.py"),
 )
 

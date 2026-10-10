@@ -547,21 +547,36 @@ def read_state(project_key: str) -> Dict[str, Any]:
     return face
 
 
-def reconcile(project_key: str, alive_tickets: Iterable[str]) -> Dict[str, Any]:
+def reconcile(project_key: str, alive_tickets: Iterable[str],
+              draining_tickets: Iterable[str] = (),
+              unknown_tickets: Iterable[str] = ()) -> Dict[str, Any]:
     """Drop holders whose workflows are gone (crash-path leak janitor, review
     item 5). `alive_tickets` is the caller-verified set of live ticket ids
-    (ticket.py checks Temporal per holder). Promotion follows in the same
-    locked step. Named output: exactly which stale holders were dropped."""
+    (ticket.py checks Temporal per holder). `draining_tickets` (t261009-74)
+    is the caller-verified set of holders whose dedicated worker process is
+    alive but stopped polling (graceful drain); `unknown_tickets` is the set
+    whose liveness could not be proven (transient probe errors, unreadable
+    pidfile/meta). Neither keeps-to-drop: the slot is a fact about a lane
+    that still holds work, so draining AND unknown holders KEEP their slot —
+    only `dead` is a zombie, and fail-closed means "do not drop on unknown".
+    Callers omitting the arguments keep today's behavior. Promotion follows
+    in the same locked step. Named output: exactly which stale holders were
+    dropped, and which holders are draining."""
     k = _check_key(project_key)
     alive = {str(t) for t in (alive_tickets or ())}
+    draining = {str(t) for t in (draining_tickets or ())} - alive
+    unknown = {str(t) for t in (unknown_tickets or ())} - alive - draining
     root = os.path.join(str(shared.perkey_projects_root()), k)
     now = time.time()
     dropped: List[str] = []
     with _locked(root) as g:
         doc = g.doc
-        keep = [h for h in doc["holders"] if h.get("ticket") in alive]
+        keep = [h for h in doc["holders"] if h.get("ticket") in alive
+                or h.get("ticket") in draining or h.get("ticket") in unknown]
         dropped = [h.get("ticket") for h in doc["holders"]
-                   if h.get("ticket") not in alive]
+                   if h.get("ticket") not in alive
+                   and h.get("ticket") not in draining
+                   and h.get("ticket") not in unknown]
         doc["holders"] = keep
         promoted = None
         limit = load_limit(k)
@@ -572,6 +587,8 @@ def reconcile(project_key: str, alive_tickets: Iterable[str]) -> Dict[str, Any]:
                                    "since": now, "reason": REASON_RUNNING})
             promoted = head.get("ticket")
         return {"dropped": dropped, "promoted": promoted,
+                "draining": [h.get("ticket") for h in doc["holders"]
+                             if h.get("ticket") in draining],
                 "holders": len(doc["holders"]), "waiting": len(doc["queue"])}
 
 
