@@ -661,3 +661,285 @@ def _period_order_key(period: str) -> Tuple[int, int]:
 def _str_key(s: str) -> int:
     # stable, dependency-free ordering proxy for non-numeric periods
     return sum((i + 1) * ord(c) for i, c in enumerate(s[:32]))
+
+
+# ---- the finding chain's relation faces (t261009-71) ------------------------
+#
+# The record models' kind ``originates from a finding`` (record-models §B,
+# "only kinds with a live consumer") is declared in the delivery ledger's
+# vocabulary (``develop_certify.REL_KIND_ORIGINATES``). These are its live
+# consumers, the inspection design's closing section: the finding's face
+# answers "which tickets were opened from me", the ticket's face answers
+# "which finding did I come from", a finding is CLOSED when its quoted
+# content is gone (not merely when a ticket was opened), and a finding
+# already seen under its content-minted id is not filed again.
+#
+# Import direction: inspection -> promote -> certify, never back; the
+# direction logic itself is ``develop_certify.relations_of`` — consumed,
+# never re-implemented here.
+
+import develop_certify as dc  # noqa: E402  (vocabulary + row loader)
+import develop_promote as dp  # noqa: E402  (current-relation view)
+
+
+def delivery_ledger_path(project: Any,
+                         ledger_dir: Any = None) -> Tuple[Optional[Path], str]:
+    """The delivery ledger file the relation rows are read FROM (never from
+    a return value). Same three-priority chain as every path helper here:
+    explicit dir (flat ``<project>.jsonl``), SANDBAR_DELIVERY_LEDGER_DIR,
+    then the project store. Never raises; (None, reason) when underivable."""
+    proj = str(project or "").strip()
+    if not proj or "\0" in proj:
+        return None, "no project key — delivery ledger path underivable"
+    d = (str(ledger_dir).strip() if ledger_dir else "") \
+        or os.environ.get(dc.LEDGER_DIR_ENV, "").strip()
+    if d:
+        return Path(d) / ("%s.jsonl" % proj), ""
+    home = Path(os.path.expanduser("~"))
+    return home / ".sandbar" / "projects" / proj / "ledger" / dc.MAIN_NAME, ""
+
+
+def _relation_to_finding_id(to: Any) -> str:
+    """The bare finding id a relation target names: a ``finding:`` or
+    ``fi-`` prefix is stripped; anything else is taken as stored. Never
+    raises; empty string on unusable input."""
+    s = str(to or "").strip()
+    if s.startswith("finding:"):
+        return s[len("finding:"):].strip()
+    if s.startswith("fi-"):
+        return s[len("fi-"):].strip()
+    return s
+
+
+def _current_relations_from_disk(ledger_path: Any
+                                 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Current relation rows read from the ledger FILE on disk. Borrowed
+    failure modes: missing/unreadable ledger = empty + named note; corrupt
+    lines counted by ``read_rows``; the current view is
+    ``develop_promote.current_relations`` — consumed, never re-implemented.
+    Never raises."""
+    notes: Dict[str, Any] = {}
+    p = Path(ledger_path) if ledger_path else None
+    if p is None:
+        notes["delivery_ledger_note"] = "no delivery ledger path"
+        return [], notes
+    if not p.is_file():
+        notes["delivery_ledger_note"] = ("delivery ledger absent (%s)"
+                                         % p.name)
+        return [], notes
+    try:
+        rows, bad = dc.read_rows(p)
+    except OSError as e:  # defensive: read_rows already guards, named anyway
+        notes["delivery_ledger_note"] = ("delivery ledger unreadable (%s: %s)"
+                                         % (type(e).__name__, e))
+        return [], notes
+    if bad:
+        notes["delivery_ledger_corrupt_lines"] = len(bad)
+    return dp.current_relations(rows), notes
+
+
+def _finding_id_matches(stored: Any, fid: str) -> bool:
+    """Same widening rule the finding faces read by (t261009-69): an old
+    8-hex stored id resolves to a 16-hex query id by prefix. One helper so
+    the relation faces never re-implement the comparison."""
+    from inspection_inspect import legacy_id_matches
+    return legacy_id_matches(str(stored or "").strip(), fid)
+
+
+def finding_work_of(ledger_path: Any, finding_id: Any) -> Dict[str, Any]:
+    """The FINDING's read face (t261009-71, consumer a): which current
+    ``originates from a finding`` relations name this finding — i.e. which
+    work tickets were opened from it. The relation rows come from the
+    ledger file on disk; a ticket whose relation names the finding by any
+    of the id's forms (``finding:<id>``, ``fi-<id>``, bare hex, legacy
+    8-hex prefix) is answered, and each entry names WHICH form matched.
+    Malformed relation rows are filtered by the current-view reader, never
+    crashed on; a missing ledger degrades by name."""
+    out: Dict[str, Any] = {
+        "finding_id": str(finding_id or "").strip(),
+        "available": False,
+        "reason": "",
+        "tickets": [],
+        "notes": {},
+    }
+    fid = out["finding_id"]
+    if not fid:
+        out["reason"] = "no finding id given — query refused (named)"
+        return out
+    rels, notes = _current_relations_from_disk(ledger_path)
+    out["notes"] = notes
+    for rel in rels:
+        if rel.get("kind") != dc.REL_KIND_ORIGINATES:
+            continue
+        to = str(rel.get("to") or "").strip()
+        bare = _relation_to_finding_id(to)
+        if not _finding_id_matches(bare, fid):
+            continue
+        out["tickets"].append({
+            "id": rel.get("id"),
+            "ticket": rel.get("from"),
+            "recorded_by": rel.get("recorded_by"),
+            "reason": rel.get("reason"),
+            "at": rel.get("at"),
+            "id_form": ("finding-prefixed" if to != bare else
+                        ("legacy 8-hex prefix" if bare != fid else "exact")),
+        })
+    out["available"] = True
+    if not out["tickets"]:
+        out["reason"] = ("no work ticket records originating from finding %r "
+                         "in the current relation ledger" % fid)
+    return out
+
+
+def origin_finding_of(ledger_path: Any, ticket: Any, project: Any = None,
+                      ledger_dir: Any = None) -> Dict[str, Any]:
+    """The TICKET's read face (t261009-71, consumer a): which finding this
+    ticket came from, over the current ``originates from a finding``
+    relations read from the ledger file on disk. ``ledger_path`` is the
+    delivery ledger FILE; when absent it is resolved from
+    ``project`` + ``ledger_dir`` (the delivery-ledger priority chain), and
+    an underivable path is a named refusal, never a guess. Direction logic
+    goes through ``develop_certify.relations_of`` (the ONE declared
+    reader); this face only narrows it to the finding kind and names the
+    finding refs — a finding id is never shown as a ticket."""
+    out: Dict[str, Any] = {
+        "ticket": str(ticket or "").strip(),
+        "available": False,
+        "reason": "",
+        "findings": [],
+        "finding_refs": [],
+        "notes": {},
+    }
+    t = out["ticket"]
+    if not t:
+        out["reason"] = "no ticket id given — query refused (named)"
+        return out
+    if ledger_path and str(ledger_path).strip():
+        p: Optional[Path] = Path(ledger_path)
+    else:
+        p, why = delivery_ledger_path(project, ledger_dir)
+        if p is None:
+            out["reason"] = why
+            return out
+    rows, notes = _current_relations_from_disk(p)
+    rel = dc.relations_of(rows, t)
+    out["notes"] = notes
+    for entry in rel["as_actor"].get(dc.REL_KIND_ORIGINATES, []):
+        out["findings"].append(dict(entry, derived=False))
+    for entry in rel["as_benefited"].get(dc.REL_KIND_ORIGINATES, []):
+        out["findings"].append(dict(entry, derived=True))
+    out["finding_refs"] = rel.get("finding_refs", [])
+    out["available"] = True
+    if not out["findings"]:
+        out["reason"] = ("ticket %r records no originating finding in the "
+                         "current relation ledger" % t)
+    return out
+
+
+def finding_closure(ledger_path: Any, findings_path: Any,
+                    observations_path: Any, finding_id: Any) -> Dict[str, Any]:
+    """The closing rule (t261009-71, consumer b): a finding is closed when
+    its QUOTED CONTENT IS GONE — the newest sighting no longer confirms the
+    content — not merely when a ticket was opened from it. The two states
+    the design separates are distinguishable on this face:
+
+    - ``never_seen``: the entity ledger holds no such finding id.
+    - ``open_no_work``: seen, content confirmed, no originating relation.
+    - ``work_opened_content_present``: an originating relation exists AND
+      the newest sighting still verifies.
+    - ``closed_content_gone``: the newest sighting is anything but
+      ``verified`` — content no longer confirmed (the models doc's own
+      content-gone example is ``downgraded`` with a "quoted line no longer"
+      note; ``unlocatable`` is the other mintable token). The newest
+      verification is reported VERBATIM in ``newest_verification`` — the
+      tokens stay distinguishable there; the status branches only on
+      confirmed vs not.
+
+    All rows come from the ledger files on disk; absent ledgers and a
+    finding with sightings but no newest-verifiable state degrade by name.
+    """
+    out: Dict[str, Any] = {
+        "finding_id": str(finding_id or "").strip(),
+        "available": False,
+        "reason": "",
+        "status": "never_seen",
+        "work_opened": False,
+        "newest_verification": None,
+        "newest_period": None,
+        "notes": {},
+    }
+    fid = out["finding_id"]
+    if not fid:
+        out["reason"] = "no finding id given — query refused (named)"
+        return out
+    hist = finding_history(findings_path, observations_path, fid)
+    out["notes"] = hist.get("notes", {})
+    rels, rnotes = _current_relations_from_disk(ledger_path)
+    if rnotes:
+        out["notes"].update(rnotes)
+    for rel in rels:
+        if rel.get("kind") != dc.REL_KIND_ORIGINATES:
+            continue
+        to = str(rel.get("to") or "").strip()
+        bare = _relation_to_finding_id(to)
+        if _finding_id_matches(bare, fid):
+            out["work_opened"] = True
+            break
+    if not hist.get("available"):
+        out["reason"] = hist.get("reason", "finding entity not found")
+        return out
+    out["available"] = True
+    last = hist.get("last_sighting")
+    if last is None:
+        # entity exists, zero sightings: no state asserts the content is
+        # gone, and none asserts it is present — named, not guessed
+        out["status"] = "open_no_work" if not out["work_opened"] \
+            else "work_opened_no_sighting"
+        out["reason"] = ("entity found but zero sightings — content state "
+                         "unknown (named, not an error)")
+        return out
+    ver = str(last.get("verification") or "").strip()
+    out["newest_verification"] = ver
+    out["newest_period"] = last.get("period")
+    if ver == "verified":
+        out["status"] = "work_opened_content_present" if out["work_opened"] \
+            else "open_no_work"
+    else:
+        out["status"] = "closed_content_gone"
+    return out
+
+
+def finding_already_filed(findings_path: Any, finding_id: Any) -> Dict[str, Any]:
+    """The dedupe face (t261009-71, consumer c): is this finding already on
+    file under its content-minted id? Derived from the ENTITY ledger — the
+    id IS the content — never from prose. The same widening rule as
+    ``finding_history`` applies, and ``resolution`` names which form
+    matched. Absent ledger degrades to ``already_filed: False`` WITH the
+    named note (nothing has ever been filed, which is the honest answer),
+    never raises."""
+    out: Dict[str, Any] = {
+        "finding_id": str(finding_id or "").strip(),
+        "available": False,
+        "already_filed": False,
+        "resolution": "unresolved",
+        "reason": "",
+        "notes": {},
+    }
+    fid = out["finding_id"]
+    if not fid:
+        out["reason"] = "no finding id given — query refused (named)"
+        return out
+    entities, notes = load_jsonl_rows(findings_path, "finding-entity")
+    out["notes"] = notes
+    for e in entities:
+        stored = str(e.get("id") or "")
+        if _finding_id_matches(stored, fid):
+            out["already_filed"] = True
+            out["resolution"] = ("exact" if stored == fid
+                                 else "legacy 8-hex prefix")
+            break
+    out["available"] = True
+    if not out["already_filed"]:
+        out["reason"] = ("finding %r not in the entity ledger — not filed "
+                         "before" % fid)
+    return out

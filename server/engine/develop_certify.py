@@ -108,13 +108,23 @@ KIND_PROMOTION = "promotion"
 REL_KIND_WITHDRAWS = "withdraws"
 REL_KIND_REPAIRS = "repairs"
 REL_KIND_SUPERSEDES = "supersedes"
-RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS, REL_KIND_SUPERSEDES)
+# The finding-chain kind (t261009-71, record-models §B line 618): a work
+# ticket names the finding it was opened FROM. Single-direction-stored
+# (ticket -> finding), derived on read like every other kind; its live
+# consumers are the inspection design's closing section (both-direction
+# read, content-based closure, no second filing) — "only kinds with a
+# live consumer".
+REL_KIND_ORIGINATES = "originates from a finding"
+RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS, REL_KIND_SUPERSEDES,
+                  REL_KIND_ORIGINATES)
 
 # What a relation's evidence may be about (t261009-62): the declared
 # subject vocabulary — one shape ``{"what": <one of these>, "ref": <str>}``.
 # Extension (e.g. observations, P2-f) adds names here; the shape is fixed.
+# ``finding`` (t261009-71): the ref is the content-minted finding id the
+# attribution rests on.
 RELATION_EVIDENCE_WHATS = ("revision", "patch_id", "ticket",
-                           "certification", "path_line")
+                           "certification", "path_line", "finding")
 
 
 def _relation_recorder_not_beneficiary(row):
@@ -143,6 +153,12 @@ RELATION_RECORDER_RULES = {
     REL_KIND_WITHDRAWS: _relation_recorder_not_beneficiary,
     REL_KIND_REPAIRS: _relation_recorder_not_beneficiary,
     REL_KIND_SUPERSEDES: _relation_recorder_not_beneficiary,
+    # t261009-71: for ``originates from a finding`` the ``from`` ticket is
+    # the beneficiary — the relation claims the finding as the ticket's
+    # justification — so the SAME structural rule applies: the ticket that
+    # benefits may not record its own origin. Table discipline, no new
+    # rule shape.
+    REL_KIND_ORIGINATES: _relation_recorder_not_beneficiary,
 }
 
 CHANGE_ATTRIBUTION = "attribution"
@@ -842,6 +858,24 @@ def _current_relation_rows(rows):
     return [r for r in rels if r["id"] not in superseded]
 
 
+def _relation_finding_ref(ref):
+    """Is this relation-target reference a FINDING id by form (t261009-71)?
+    Two shapes name a finding: the declared ``finding:<id>`` prefix, and a
+    bare content-minted id (``fi-`` prefix, or 8/16 hex characters — the
+    two truncations the models document allows). A finding is not a ticket;
+    a reader must never show one as one."""
+    if not (isinstance(ref, str) and ref.strip()):
+        return False
+    r = ref.strip()
+    if r.startswith("finding:"):
+        return bool(r[len("finding:"):].strip())
+    if r.startswith("fi-"):
+        return len(r) > 3
+    body = r[2:] if r.startswith("0x") else r
+    return len(body) in (8, 16) and all(c in "0123456789abcdefABCDEF"
+                                        for c in body)
+
+
 def _relation_target_tickets(rows, ref, patch_ids):
     """Resolve ONE relation target reference to the set of ticket ids it
     names (t261009-66). Relations are project-level facts (goal 15), so —
@@ -852,9 +886,14 @@ def _relation_target_tickets(rows, ref, patch_ids):
     ``patch_ids={landing_id: pid}`` map (landings store no patch ids, so
     the map is the caller's explicit declaration); any other non-empty
     string is a ticket id BY FORM and names itself — a reader shows the
-    stored fact whether or not a landing for that ticket exists."""
+    stored fact whether or not a landing for that ticket exists. A finding
+    id by form (t261009-71: ``finding:<id>``, ``fi-<id>``, or bare content
+    hex) is NOT a ticket and resolves to the empty set — the by-form
+    fallback must never mint a phantom ticket out of a finding."""
     out = set()
     if not (isinstance(ref, str) and ref.strip()):
+        return out
+    if _relation_finding_ref(ref):
         return out
     if ref.startswith("ldg-"):
         for r in rows:
@@ -899,6 +938,9 @@ def relations_of(rows, ticket, patch_ids=None):
       identity but no ``patch_ids`` map was supplied — the gap stays
       visible by name, never guessed into an answer (the same honesty rule
       as the outcome face's ``repaired_unresolved``).
+    - ``finding_refs`` (t261009-71): the finding-id references (``finding:``
+      prefix, ``fi-`` prefix, or bare content hex) among this ticket's
+      current relations, named as findings — never shown as tickets.
 
     Corrected relations (``supersedes_relation`` linkage, t261009-62) drop
     out through ``_current_relation_rows`` — a corrected relation never
@@ -915,12 +957,19 @@ def relations_of(rows, ticket, patch_ids=None):
     as_actor = {k: [] for k in RELATION_KINDS}
     as_benefited = {k: [] for k in RELATION_KINDS}
     unresolved = []
+    finding_refs = []
     for rel in current:
         kind = rel.get("kind")
         if kind not in RELATION_KINDS:
             continue
         entry = {"id": rel.get("id"), "from": rel.get("from"),
                  "to": rel.get("to"), "kind": kind, "at": rel.get("at")}
+        if _relation_finding_ref(rel.get("to")):
+            # A finding id is never a ticket (t261009-71): kept visible as
+            # a named finding reference instead of guessed into a ticket.
+            finding_refs.append({"id": rel.get("id"),
+                                 "ref": str(rel.get("to")).strip(),
+                                 "kind": kind})
         if rel.get("from") == ticket:
             as_actor[kind].append(dict(entry, derived=False))
         if ticket in _relation_target_tickets(rows, rel.get("to"), patch_ids):
@@ -928,7 +977,8 @@ def relations_of(rows, ticket, patch_ids=None):
         elif _patch_named_rel(rel) and not isinstance(patch_ids, dict):
             unresolved.append(rel.get("id"))
     return {"ticket": ticket, "as_actor": as_actor,
-            "as_benefited": as_benefited, "unresolved": unresolved}
+            "as_benefited": as_benefited, "unresolved": unresolved,
+            "finding_refs": finding_refs}
 
 
 def _repair_target_landing(rows, line, ref, patch_ids):

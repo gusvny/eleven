@@ -1359,15 +1359,20 @@
       "note": "t261009-67: freeze-stop landing truth table - frozen line refuses a landing by name carrying freeze episode id + cause cert, structural exemption via the recorded repairs relation (no kind parameter to self-declare), could-not-run growth keeps the line landing, open_freeze_summary signer face fields, chain of fixes stays visible, malformed rows named",
       "sync_path": ""
     },
-    "server/engine/tests/test_t261009_76_intake_optin.py": {
+    "server/engine/tests/test_t261009_71_finding_relations.py": {
       "anchor": "contract",
-      "note": "t261009-76: the intake opt-in unit contract — lane_optin_intake's named refusal truth table (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template), apply_lane_optin's absence-stays-plain-TicketInput identity, and the _row_from_meta lane face",
+      "note": "t261009-71 developer L1: originates-from-a-finding validator truth table (evidence, recorder, correction) and the new read faces over temp ledgers",
       "sync_path": ""
     },
     "server/engine/tests/test_t261010_75_answer_row_shape.py": {
       "anchor": "behaviour",
       "note": "t261009-75 KI-01M4HPGHVWAKB62TXYV4G7ENEB: head_states adopts the canonical answer-row shape (string-at/shape-off rows never clear a head), the malformed-answer report names every shape-off row, op=read carries states+report to a human, gate-level change over shape-off-answered heads, and the engine writer stamps a numeric at",
       "sync_path": "server/engine/request_thread.py (head_states / answer report / op=read / reply_op)"
+    },
+    "server/engine/tests/test_t261009_76_intake_optin.py": {
+      "anchor": "contract",
+      "note": "t261009-76: the intake opt-in unit contract — lane_optin_intake's named refusal truth table (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template), apply_lane_optin's absence-stays-plain-TicketInput identity, and the _row_from_meta lane face",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4847,14 +4852,9 @@
       "note": "t261009-67: the landing act consults the open freeze over a real temp delivery ledger and real git fixtures - frozen line refuses by name (ids on the refusal, zero records, repo untouched), self-declaration reads as the same refusal, current same-line repairs relation lands while superseded/cross-line do not, could-not-run growth row leaves the line landing and the growth in the next certification's range, the REAL certification-adapter subprocess reports the freeze to the promotion signer, and a fix landing keeps the episode open with the fix chain read off the records",
       "sync_path": ""
     },
-    "integration/t261009-76/sc_intake_optin_journey.py": {
-      "anchor": "behaviour",
-      "note": "t261009-76: the opt-in reachable from the real intake — payload through the intake seam reads as opted in, the named refusal matrix (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template) fires before the workflow starts, absence produces the plain legacy TicketInput with the getattr replay default intact",
-      "sync_path": ""
-    },
-    "integration/t261009-76/sc_intake_optin_face.py": {
+    "integration/t261009-71/sc_t26100971_finding_chain_records.py": {
       "anchor": "contract",
-      "note": "t261009-76: the ticket face — the create op's declared schema carries the two opt-in fields with descriptions, and the list projection carries lane_version/develop_line with the old-row empty-string tolerance",
+      "note": "t261009-71 P2-f record half: originates-from-a-finding kind declared + live consumers (both-direction read faces, content-based closure with verbatim newest-verification token, entity-derived dedupe), degrade-by-name; assertions on public contract names over real temp ledger files",
       "sync_path": ""
     },
     "integration/t261009-75/sc_t26100975_answer_row_reader_agreement.mjs": {
@@ -4866,6 +4866,16 @@
       "anchor": "behaviour",
       "note": "t261009-75 acceptance 4: answer lands through the sanctioned writer (panel answer POST behind the credential gate) and the item leaves waiting on the panel's OWN split; landed row re-read from the file carries the canonical shape; engine read view agrees on the same file",
       "sync_path": "server/plugins/executor-panel/src/host/api.ts (answer route); server/plugins/executor-panel/src/host/requests.ts (answerRequest); server/engine/request_thread.py (head_states)"
+    },
+    "integration/t261009-76/sc_intake_optin_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261009-76: the opt-in reachable from the real intake — payload through the intake seam reads as opted in, the named refusal matrix (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template) fires before the workflow starts, absence produces the plain legacy TicketInput with the getattr replay default intact",
+      "sync_path": ""
+    },
+    "integration/t261009-76/sc_intake_optin_face.py": {
+      "anchor": "contract",
+      "note": "t261009-76: the ticket face — the create op's declared schema carries the two opt-in fields with descriptions, and the list projection carries lane_version/develop_line with the old-row empty-string tolerance",
+      "sync_path": ""
     }
   },
   "server/engine/tests/test_t261010_75_answer_row_shape.py": {
