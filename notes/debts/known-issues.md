@@ -5228,3 +5228,15 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路（实现归票；方向已被 `t261011-04` 的仲裁段点名）**：①把"整树字面扫描"这类判据的**廉价子集前置到写侧**——`integration/lint_tests.py`（秒级、已有 L7 这类整树判据）**再加一条**：扫描**新增/改动**的测试资产与文档，命中**退役路径字面量**即报（守卫 `t260907-10` 的实现可直接复用，别写第二份扫描器）；②提交前**必须真跑一次** lint，且**不许用管道掩盖退出码**（本夜实证：`lint | tail -2 && git commit` 里 `tail` 的 rc=0 把 lint 的**非零**吃掉了——lint 自己是对的，`return 1 if n_e else 0`）；
 > **纪律**：**写"字面敏感"的东西（术语、路径、锚选择器、注册名）之前，先想一句"有没有别处的扫描器会因为我这行字报红"**；改动 prose/test 资产后先在本地跑整树扫描再提交。
 > **回归**：L1——把退役路径字面量写进任一新增测试资产/文档 ⇒ **本地 lint（秒级）**即报，不必等到 `t260907-10` 在闸上跑；L3——一次"pre-commit 扫描绿 → 闸绿"的一致回执。
+
+## KI-01M4KWS43KSYN6SPR1BESNDQ19 **同一张票的两轮在不同配置下判读**：验收段的全量轮**不套用已知红豁免**（`known_red_skipped 0` vs 闸轮 44）⇒ 它的 15 败里有 13 条是名册成员，看上去像"一夜之间冒出十三条新红"**(261011 05:43 `t261011-03` 验收轮实测;integration 岗登记并当场分诊)**
+
+> **现象（两份回执同票对比）**：
+> - **验收段那轮**（`.lane/t261011-03/out/integration-report-261011-054330.json`）：`ran 622 / pass 567 / fail 15 / env_fail 40 / wall 862 s`，且回执自带 `known_red_skipped = 0`、`known_red_names = []`、`conc_width = 4`。
+> - **同票的闸轮**（同泳道 `integration-report-261011-044221.json`，出自 `run_integration_tests`）：`ran 577 / pass 553 / fail 2 / env_fail 22`，`known_red_skipped = 44`、`conc_width = 3`。
+> - **逐条点名**：验收轮那 15 条里 **13 条在 `integration/known-red-baseline.json` 名册内**（`t260920-03-terminology-l7-gate`、`t260904-12-no-skip-guard`、`capture-chat-e2e`、`capture-chat-active`、`t260905-05-multitab-guard-assets`、`t260912-01-pw-path-resolution`、`t260916-22-inspect-contract`、`t260929-22-executor-entry-console`、`t260929-09-l10-launch-gate-mechanism`、`auto-rework-trace`、`t260911-05-ki048-status-card-dom`、`t260927-05-external-template-lane-map-render`、`t260904-05-ledger-adversarial-boot`）——**它们在这一轮"跑了"，所以"红了"**；闸轮里它们被跳过（skipped 44）。剩下两条非名册：`t261008-36`（已知载荷敏感）与 **`t260913-04-wiring-contract`（真红，见下）**。
+>
+> **危害**：①**同一个票的两轮数字不可比**（2 败 vs 15 败），而它们都被叫作"全量轮"；一旦有人拿验收轮的数字做归因（人或 agent），就会把**名册成员当成新红**，进而误改产品、误打回票、或在 KI 里记一堆假账；②它同时**掩盖真红**——本夜真正的新红（`t260913-04-wiring-contract`）就埋在这 15 条的噪声里，**只有逐条与名册对读才浮出来**（本岗的做法：把 15 条逐个 grep 名册 + 查该场景台账全史，才把它挑出：台账 1063 行全 pass、含同票 04:45:04 的闸轮 pass 6.55 s，却在 05:43 与 05:47 两次 fail ⇒ 是该票 04:45 之后的改动引入的）。
+> **出路（设计口径归宿主，实现归票）**：①**两处任选其一并写明**——要么让验收段的全量轮**也注入名册豁免**（与闸轮同配置，数字可比），要么在**回执与票面上显式标注"本轮未套用名册豁免，数字不可与闸轮比对"**；②`known_red_skipped` 这一键**必须在两轮都可读**（本轮已可读，是它救了这次分诊）；③评审纪律：**凡读"某轮 fail 数"，先读同轮的 `known_red_skipped` 与 `conc_width`**，与闸轮不一致就先别下结论。
+> **纪律**：**"同一张票、同一个名目、两轮数字"必须先确认两轮同配置**再比；不同配置的两轮放在一起，等于用一把没校准的尺子量两次。
+> **回归**：L1——回执/票面对"未套用名册豁免的轮次"具名标注（或该轮 skipped 数与闸轮一致）；L3——一张票的验收轮与闸轮对同一条红给出一致的"是不是新红"结论。
