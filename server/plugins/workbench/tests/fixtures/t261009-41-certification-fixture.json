@@ -1,0 +1,193 @@
+{
+  "generated_by": "integration/t261009-41/test_model_fixture_contract.py",
+  "input": {
+    "certs": [
+      {
+        "at": 1791500120000,
+        "id": "cert-A",
+        "run": "run-green"
+      },
+      {
+        "at": 1791500240000,
+        "id": "cert-B",
+        "run": "run-red"
+      }
+    ],
+    "freeze": {
+      "cause": "cert-B",
+      "closed_at": null,
+      "culprit": "t260922-12-gate-ledger-debt-not-blocked",
+      "episode": "frz-A",
+      "frozen": true
+    },
+    "line": {
+      "line_id": "develop-buffer",
+      "owner": "host",
+      "scope": "epic develop-buffer"
+    },
+    "outcomes": [
+      {
+        "delivered_in": "prom-A",
+        "ending": "ended",
+        "ticket": "t261009-18"
+      },
+      {
+        "delivered_in": "prom-A",
+        "ending": "ended",
+        "ticket": "t261009-19"
+      },
+      {
+        "delivered_in": null,
+        "ending": "open",
+        "ticket": "t261009-20"
+      },
+      {
+        "delivered_in": null,
+        "ending": "open",
+        "ticket": "t261009-21"
+      },
+      {
+        "delivered_in": null,
+        "ending": "open",
+        "ticket": "t261009-22"
+      },
+      {
+        "delivered_in": null,
+        "ending": "ended",
+        "ticket": "t261009-23"
+      },
+      {
+        "delivered_in": null,
+        "ending": "ended",
+        "ticket": "t261009-24"
+      }
+    ],
+    "roundState": "idle",
+    "runs": [
+      {
+        "cases": {
+          "env_failed": 0,
+          "failed": 0,
+          "passed": 498,
+          "ran": 498
+        },
+        "id": "run-green",
+        "repos": [
+          {
+            "repo": "sandbar",
+            "revision": "396b221a"
+          }
+        ],
+        "source": "scheduled",
+        "started_at": 1791499700000,
+        "verdict": "green"
+      },
+      {
+        "cases": {
+          "env_failed": 0,
+          "failed": 2,
+          "passed": 496,
+          "ran": 498
+        },
+        "id": "run-red",
+        "repos": [
+          {
+            "repo": "sandbar",
+            "revision": "396b221a"
+          }
+        ],
+        "source": "scheduled",
+        "started_at": 1791500180000,
+        "verdict": "red"
+      }
+    ],
+    "ticketMeta": {
+      "t261009-18": {
+        "epic": "develop-buffer",
+        "title": "Land a proven lane onto a declared line"
+      },
+      "t261009-19": {
+        "epic": "develop-buffer",
+        "title": "Certify a line on a schedule"
+      },
+      "t261009-20": {
+        "epic": "engine-hardening",
+        "title": "Guard the route change"
+      },
+      "t261009-21": {
+        "epic": "develop-buffer",
+        "title": "A ticket that is only waiting holds nothing"
+      },
+      "t261009-22": {
+        "epic": "console-ui",
+        "title": "Draw the lane map"
+      },
+      "t261009-23": {
+        "epic": "develop-buffer",
+        "title": "Promote the certified part"
+      },
+      "t261009-24": {
+        "epic": "develop-buffer",
+        "title": "Chain the rounds"
+      }
+    },
+    "waitStates": [
+      {
+        "covered_by": "cert-A",
+        "overdue": false,
+        "state": "certified",
+        "ticket": "t261009-18",
+        "waiting_for": null,
+        "waiting_since": 1791500000000
+      },
+      {
+        "covered_by": "cert-A",
+        "overdue": false,
+        "state": "certified",
+        "ticket": "t261009-19",
+        "waiting_for": null,
+        "waiting_since": 1791500060000
+      },
+      {
+        "covered_by": "cert-A",
+        "overdue": false,
+        "state": "certified",
+        "ticket": "t261009-23",
+        "waiting_for": null,
+        "waiting_since": 1791500090000
+      },
+      {
+        "covered_by": "cert-A",
+        "overdue": false,
+        "state": "certified",
+        "ticket": "t261009-24",
+        "waiting_for": null,
+        "waiting_since": 1791500150000
+      },
+      {
+        "covered_by": null,
+        "overdue": false,
+        "state": "waiting",
+        "ticket": "t261009-20",
+        "waiting_for": "cert-B",
+        "waiting_since": 1791500360000
+      },
+      {
+        "covered_by": null,
+        "overdue": false,
+        "state": "waiting",
+        "ticket": "t261009-21",
+        "waiting_for": "cert-B",
+        "waiting_since": 1791500420000
+      },
+      {
+        "covered_by": null,
+        "overdue": false,
+        "state": "waiting",
+        "ticket": "t261009-22",
+        "waiting_for": "cert-B",
+        "waiting_since": 1791500480000
+      }
+    ]
+  }
+}
