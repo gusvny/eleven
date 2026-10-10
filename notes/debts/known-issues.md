@@ -4945,6 +4945,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > - **额度不释放**：`-50` 停在 `paused-waiting` 期间，`concurrency-state.json` 里它**始终记着 `running` 占一个额度**（本岗为腾额度而暂停，结果一个额度都没腾出来）——与代码里"paused (stage boundary) 是真实释放点"的注释不符。
 > **出路相应改成两条**：①**票面必须显示暂停**（`paused`/`paused_phase` 进 show/list 两个面，并写明"停在暂停点、等 resume/retry_qc"）；②**段边界暂停要真的释放额度**（或明确写清"暂停不释放"并给出腾额度的合法手段）。③另记一条**新用处**：`retry_qc` 能把 `paused-waiting` 的票唤醒（快照里随即出现 `state:"retry-requested"`），**这是暂停之后的合法出路**，值得写进运维文档。
 
+> **再补一条观测（261010 11:08，still 订正自己但只记事实、不再翻结论）**：`-50` 停在 `paused-waiting` 期间，`concurrency-state.json` 里它**在 09:48 / 10:08 / 10:18 三次观测都仍记 `running` 占额度**；到 **11:08 观测时它的额度已经不在册**（holders 里没有它），而票面**仍读 `run_integration_tests/running`**。⇒ **事实**：①"暂停生效后**并非立刻**释放额度"，至少占了 35 分钟以上；②**额度最终消失了，但消失的时刻与触发条件未定**（可能是 promote/reconcile 周期、也可能是 `retry_qc` 唤醒路径）；③**票面自始至终没显示暂停**。**本轮不结论"释放/不释放"**（本岗已因只读一个面翻过三次结论）：要定名需要 worker 日志里 `CAUSE_PAUSED` 那一行与 `concurrency-state.json` 的时间序列对读——**留给修复票取证，别再猜**。
+
 ## KI-01M4HR0ECTNFS4RWSQ8M0GE17J **写集条目形状与"声明的构建链前缀"不对齐 ⇒ 构建产物拿不到合法身份、被 settle 回滚，票卡在同一条 `bundle 新鲜度` 上**(261010 实案 `t261009-53`;integration 岗登记)
 
 > **现象**：`t261009-53`（泳道图按 mock 重画，改 `server/plugins/workbench/src/client/` 下三个文件）在 `merge_check` 判 `bundle 新鲜度` 红，回执原文 *"no build entry declared for this pair; verdict from the diff heuristic: freshness could not be established mechanically"*，而它的泳道里 `lib/client.{cjs,js}` **确实重建过**（mtime 09:36）——**产物被 settle 回滚了两次**：`.sandbar/quarantine/unauth-implement-gen0/manifest.json`（ts 1791594527）与 `.sandbar/quarantine/unauth-arbitrate-gen0/manifest.json`（ts 1791596183）都把这两个文件记为 `action: "reverted"`，并留下 diff。
