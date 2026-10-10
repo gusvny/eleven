@@ -4978,3 +4978,22 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（本岗已改做法）**：**凡要 executor"在回执里声明 X"，必须点名"字段名 + 它在哪个对象里 + 该字段的语义"**——本次我只写了"在方案回执里声明前缀"，没点名字段，它就把空的 `files_changed` 交上来了（我在同一天重复了两次同样的措辞错误）。
 >
 > **回归**：L2——(а)计划段 `files_changed` 非空且含写集外路径 ⇒ 写集并集后包含它（且**各面**都认）；(b)计划段 `files_changed == []` ⇒ **具名提示**（不是静默 no-op）；L3——一条"交付物在写集外"的泳道，按②的提示补声明后**一轮内**把写集补齐并走出去。
+
+## KI-01M4J0JGYJWCJ1Z2XD3KW431FV **未申报的"负载敏感"单测在车队并发跑电池时成片变红 ⇒ 同时卡住多张票在 `merge_check`；而它们在泳道里单跑、在 main 上单跑都绿**(261010 实测;integration 岗登记)
+
+> **现象（261010 12:1x，一次三张同时卡）**：`t261009-52`、`t261009-55`、`t261009-58` **同时**在 `merge_check` 判 `泳道内 verify_lane code 绿灯` 红，红项是 pytest 失败：
+> - `-52`：`test_t260917_09_tests_streak.py::test_g_real_registry_missing_name_fail_closed` ＋ `test_t260927_01_suite_timeout_attribution.py::test_budget_env_visibility_is_additive`（2 failed / **4566 passed**）
+> - `-55`：`test_t260917_09_tests_streak.py::test_g_real_registry_missing_name_fail_closed`（1 failed / **4576 passed**）
+> - `-58`：`test_t260927_01_suite_timeout_attribution.py::test_budget_env_visibility_is_additive`（1 failed / **4561 passed**）
+>
+> **取证（三项，逐条做过）**：① **各自泳道单跑均绿**——`-58` 泳道跑那条 **1 passed / 2.97s**、`-55` 泳道跑那条 **1 passed / 0.21s**；② **main 上两条同跑也绿**（`2 passed in 2.13s`）⇒ **不是 main 侧回归**；③ 三票写集互不相干、每轮 4561–4576 条通过、只红这 1–2 条 ⇒ **并发跑电池（当时 7–8 条车道同时跑）下的负载敏感假红**。
+>
+> **机理**：闸的负载敏感豁免**只覆盖"已申报"的条目**（`agent_activities._load_sensitive_roster` 读 `integration/known-red-baseline.json`，`dev_lane.quiet_baseline_covered` 据此判本轮是否算数）；`t260901_25_t03_reap_process_group` 已在册（`t261009-15` 的"静默基线身份"名单，本夜也因此红过一次），**但上面两条从未申报** ⇒ 车队一挤就红，而闸**无法把它们与真红区分** ⇒ 一律 blocked 等人。
+>
+> **危害**：①**成片卡票**（一次三张，各占一个 `human-hold` 额度；本夜累计四次以上"同一类假红"）；②**归因成本**：每张票都要重新取证"是假红"，值班要跑泳道单跑 + main 单跑来证伪（本岗本次用了三条命令）；③**与真红混淆**：负载敏感的单测一旦真的坏了，也会被当成"又是抖动"。
+>
+> **出路（两条，判据面决策归宿主）**：①**把这两条挂进"负载敏感"名册**（`integration/known-red-baseline.json` 的 load-sensitive 条目；该文件在受保护名单上、名册政策要求"**须 integration 岗位判词 + home**"）——本岗已具备判词与取证，**但改受保护期望值归宿主批**；②**加固测试本身**（把对负载/时序的隐含假设显式化，例如给这两条加互斥/重试/超时余量），修完从名册里退出——**更根本，但要先定位它们各自的敏感点**。
+>
+> **纪律（写进值守做法）**：遇到"**多张票同时红在同 1–2 条单测**"这个形状，**先按本条的取证三步走**（泳道单跑 → main 单跑 → 看其余通过数），**再决定是假红还是真红**；不要把"多数票都红同一条"读成"产品坏了"。
+>
+> **回归**：L2——(а)名册内的负载敏感条目在并发下红 ⇒ 本轮不计入（既有机制）；(b)**名册外的**同类红 ⇒ **要么被具名判为"未申报的负载敏感"并给出出路，要么照常拦**（不许静默放过）；L3——一次"7–8 条车道同时跑"的台面里，未申报的负载敏感单测**不产生成片 blocked**。
