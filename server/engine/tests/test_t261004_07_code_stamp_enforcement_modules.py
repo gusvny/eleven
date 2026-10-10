@@ -73,8 +73,9 @@ UNTRACKED_WORKER_MODULES = {
     "temporalio": "external package",
     "sandbar_exec": "sandboxed exec helper (lazy import); transport, not verdict",
     "audit": "audit trail writer (client side); no worker gate verdict",
-    "develop_certify": "t261009-50: the activities.py top-level import is the "
-                       "scan tick's line-round ask; the module holds the "
+    "develop_certify": "t261009-59 (fast carrier; same declaration as landed "
+                       "t261009-50): the activities.py top-level import is "
+                       "the scan tick's line-round ask; the module holds the "
                        "round body only (tick face, delivery-record writer, "
                        "red-ladder steps) and decides no red line and no "
                        "gate verdict",
