@@ -849,6 +849,13 @@ def lint_integration_gate_settlement():
 L12_WHITELIST = {
     # 文件 → 理由（为什么它不需要清理）
     "integration/run_scenarios.py": "执行器自身（被调用方，不是调用点）",
+    # t261009-77：线轮 runner 自身（被 SANDBAR_LINE_ROUND_RUNNER 声明、被引擎
+    # resolve_runner 以 worker env 起子进程的被调用方）。它必须如实继承 worker
+    # env——候选集与旋钮就是经它传给套件的声明面，清理它=破坏契约；隔离面由它
+    # 自己控制（RUN_ROOT 自建树、运行级台账目录、owner/reuse 旋钮显式改写），
+    # 与场景夹具「继承外层泳道收窄旋钮」缺陷族不同面。
+    "integration/line_round_runner.py":
+        "线轮 runner 自身=被调用方；worker env 继承即契约（t261009-77）",
     "integration/lib_env.py": "清理单点自身（定义处）",
     # 误判面（含令牌但不起执行器/闸）：夹具**文本**里写的合成会话/声明串，不是调用点。
     # 判据=这些字面量只进 write_session/tool_frame 这类夹具构造器，从不进 subprocess。
