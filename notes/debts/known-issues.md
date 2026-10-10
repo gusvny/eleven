@@ -5162,3 +5162,30 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >   - `dispatcher-scan-2026-10-10T18:29:14Z`（换手后）返回值**带 `line_rounds`**：`{"projects":{"sandbar":{"lines":[{"line":"develop-buffer","state":"runner_missing"}],"summary":"line_round_tick: 1 lines, asked 0, idle 0, not-runnable ['develop-buffer']"}}}` ⇒ **接线在生产里活了，并且按设计具名报出"缺 runner"**。
 > - **结论（点火清单收窄到一步）**：中央 worker 换手已完成（本岗 02:29 做掉）；**剩下只有一件、且只有宿主能做**——让控制台宿主进程带 `SANDBAR_LINE_ROUND_RUNNER`（+ 可选 `SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S`）启动（worker 是它的子进程，环境继承），之后下一次 tick 就会真跑线轮，判据＝`delivery.jsonl` 出现行或具名 `could_not_run`。
 > - **纪律（本条教训，写给下次）**：**判"某活动/某分支有没有跑"要取回执或返回值，不要拿日志的有无当证据**——不打日志的活动在日志里与"没跑"同形。
+
+## KI-01M4KJ022G8R0RRAZ03C7T9TZ4 **develop buffer 的落地前置（`meta.last_green_run`）在实践中**不可达**：它要求一整轮**零失败**的全量轮，而盘上 66 轮全量轮**没有一轮是零失败**（4–8 红是常态）⇒ 第一张 opt-in 票即便拿到 runner 与认证也永远落不了地**(261011 02:37 `t261009-80` 实测;integration 岗登记)
+
+> **现象（原始读数）**：`t261009-80`（develop buffer 第一张 opt-in 票）02:26 走完 `merge_check` 进 `merge`，02:37:32 **具名阻塞**：
+> `develop-buffer landing refused: this ticket has no green-run face (meta.last_green_run carries no sha) — the landing consumes the revision the gate judged, and no judged revision is recorded; never falls back to the current tip. Re-verify with retry_qc (a green gate round re-anchors the face).`
+> 它的票面 `log` 里**没有** `green-run face recorded` 一行、只有这条拒绝；`meta.last_green_run` 为 `null`。
+>
+> **真因（两条链，缺一不可）**：
+> 1. **写入端**：`server/engine/dev_lane.py:1958 _ki220_record_green_run` 只在一轮**全量且真绿**时落面，判据是纯函数 `shared.green_run_face`（`server/engine/shared.py:1166`），它要求 `error=="" && ran>0 && failed==0 && blockers 空 && 非定点跑`。
+> 2. **读数（事实）**：`t261009-80` 那轮的机械回执是 **`573 跑 / 546 过 / 5 败 / 22 环境红`**（`results.run_integration_tests.summary`，`status=failed`）⇒ `failed=5 ≠ 0` ⇒ `green_run_face` 返回 None ⇒ **面永远不落**。
+> 3. **这不是偶发**：本岗扫盘上全部全量轮报告（`ran>200` 共 **66 轮**，10-10 23:23 → 10-11 02:40）：**`fail==0` 的轮数为 0**；最近 12 轮的 fail 分别是 8/7/6/4/5/4/5/4/4/5/4。⇒ **只要注册表里有慢性红，这条前置就永远不满足**。
+> 4. **那 5 败不是本票的**：`results.arbitrate.evidence` 写明"FAIL entries … all browser pool；**`__ledger__` 命中红 matches exactly these four -> registered known red**"（即闸自己已把这四条判为**在册的既有红**）。慢性红实测（台账 `scenario-results.jsonl` 全史）：`t261005-16-capture-fresh-home-journey` 519 行里 fail 415、`t261006-02-capture-auth-surface-real-stage` 502 行里 fail 413、`t261006-03-engine-path-capture-journey` 505 行里 fail 421、`t261008-36-panel-settings-faces-merge` 314 行里 fail 169/env_fail 104。
+>
+> **与设计的关系（这是本条的要害，不是"跑得不够多"）**：`docs/design/develop-buffer-v1.md` 的 **Problem** 段一句话点名的就是它——"the only thing standing between a lane and main is a per-ticket precondition（'this ticket's scenarios have a green run on this exact tree'）…so the merge line stalls"，而 **Goal 1/2** 要求"a lane can land **without paying a full suite round**"、"each lane still proves **its own** change（本票场景）…**without any whole-suite round**"。⇒ **实现里 `_dev_buffer_land_step` 依赖的 `last_green_run` 恰是被这份设计移除的那条前置**（而且是更严的形态：要求整轮零失败），**这就是"新流重新引入了它自己被发明出来要移除的东西"**。设计里还有一句可直接引用的约束：**"The existing protections（… the booked-red inventory）keep working unchanged"** —— 而 `green_run_face` **完全不读回执上现成的在册红分类面**（`known_red` 块 / `details` 里的 `__ledger__` 命中红 / `main_side_reds`），只数 `failed`。
+> 5. **拒绝文案给出的出路也不可达**：同一句话让泳道 `retry_qc`「让绿轮重新锚定这一面」——但慢性红不修/不挂账之前，**再跑几轮也不可能零失败**，照做只会空烧 15 分钟一轮的全量套件。
+>
+> **危害**：①**develop buffer 的落地路径实际上一次都没打开过**（换手 + runner 环境变量只是必要条件，不是充分条件）：第一张 opt-in 票到"落地/认证"这一步就永久停住，`delivery.jsonl` 也就永远不会出现行；②它同时**占用并发额度**（`-80` 在 holders 里、reason=running）；③同一批慢性红还在别处制造同类停摆——`t261009-72` 的验收超轮次（6>5）那轮里的红项正是 `t261008-36-panel-settings-faces-merge`（同族的四条之一）。
+>
+> **出路（设计口径归宿主，实现归修复票；本岗只报不做）**：
+> - **选项 A（最窄、与设计那句约束一致）**：`green_run_face` 消费回执上已有的**在册红分类面**——一轮的失败若**全部**是在册红（具名列出并落进面里 `registered_reds`），该轮记绿；有任何**未在册**红仍拒。面形状向后兼容（新增键，缺=老行为）。
+> - **选项 B（按设计的正路）**：让落地消费**新流自己的证明**（本票场景 + 快集、在声明时间预算内），全量轮不再参与落地判据（Goal 1–3 的落地）。
+> - **选项 C（不改码的数据动作）**：把四条慢性红**挂账进 `integration/known-red-baseline.json`** —— 但该文件在**受保护名单**里（`server/engine/path_gates.py:60` 一带，宿主专属），且名册政策是"只缩不增、每条须 owner + retire_when、现 50/50 满格需抬 `max_entries`" ⇒ **纯宿主决定**。
+> - **明确不要做**：不要为了让它绿而放宽 `green_run_face` 的语义（那等于新流自己把证明标准悄悄降级）；也不要对 `-80` 发 `retry_qc` 空转（慢性红不解决，跑多少轮都不会零失败）。
+>
+> **纪律**：**凡"新流引入的前置条件"，必须先在既有盘上量一次"这个条件历史上满足过几次"**——本次答案是 **0/66**。一个从未被满足过的前置，落地即等于永久停摆；量它一次的成本是几分钟，不量的代价是第一张票就死在那里。
+>
+> **回归**：L2——(а) 一轮的失败**全部在册** ⇒ 记绿且面里具名 `registered_reds`；(b) 有任一未在册红 ⇒ 仍拒且具名那条红；(c) 老面（无新键）读法不变。L3——一条 buffer 票的落地：在慢性红仍在的前提下能落地并进入"等认证"，且认证一到就收口（不是永远停在 `merge/blocked`）。
