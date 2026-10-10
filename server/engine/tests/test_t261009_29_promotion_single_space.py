@@ -54,8 +54,10 @@ def PROM(idx, tickets=("t1",), cert_id="cert-001", at=3000):
 
 
 def REL(idx, kind, from_t, to_t, at=4000):
+    # t261009-62: relation rows carry evidence in the declared shape
     return {"kind": kind, "id": "rel-%03d" % idx, "from": from_t, "to": to_t,
             "recorded_by": "integration", "reason": "t261009-29 test",
+            "evidence": {"what": "ticket", "ref": to_t},
             "at": at}
 
 

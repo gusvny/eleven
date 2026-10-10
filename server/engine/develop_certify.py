@@ -110,6 +110,41 @@ REL_KIND_REPAIRS = "repairs"
 REL_KIND_SUPERSEDES = "supersedes"
 RELATION_KINDS = (REL_KIND_WITHDRAWS, REL_KIND_REPAIRS, REL_KIND_SUPERSEDES)
 
+# What a relation's evidence may be about (t261009-62): the declared
+# subject vocabulary — one shape ``{"what": <one of these>, "ref": <str>}``.
+# Extension (e.g. observations, P2-f) adds names here; the shape is fixed.
+RELATION_EVIDENCE_WHATS = ("revision", "patch_id", "ticket",
+                           "certification", "path_line")
+
+
+def _relation_recorder_not_beneficiary(row):
+    """The shared structural rule behind every kind's permission today: the
+    recorder may never be the ticket that benefits (``from``). A recorder
+    naming a ticket uses the ``ticket:<id>`` form; a ``ticket:`` prefix with
+    an unusable id cannot be evaluated, so it fails closed. Bare actor
+    names (``host``, ``integration``, the patrol) stay legal — attribution
+    by a person is the design's normal path."""
+    recorded_by = row.get("recorded_by")
+    if not isinstance(recorded_by, str) or not recorded_by.strip():
+        return "relation_missing_recorded_by"
+    if recorded_by.startswith("ticket:"):
+        named = recorded_by[len("ticket:"):].strip()
+        if not named:
+            return "relation_recorder_malformed"
+        if named == row.get("from"):
+            return "relation_self_benefit:%s" % row.get("from")
+    return ""
+
+
+#: Per-kind recorder permission (t261009-62): each kind's rule lives here;
+#: a kind missing from the table refuses by name (fail closed) rather than
+#: being accepted with no rule.
+RELATION_RECORDER_RULES = {
+    REL_KIND_WITHDRAWS: _relation_recorder_not_beneficiary,
+    REL_KIND_REPAIRS: _relation_recorder_not_beneficiary,
+    REL_KIND_SUPERSEDES: _relation_recorder_not_beneficiary,
+}
+
 CHANGE_ATTRIBUTION = "attribution"
 CHANGE_CLOSED = "closed"
 CHANGE_REOPENED = "reopened"
@@ -344,6 +379,38 @@ def validate_row(row):
             return _bad("relation_missing_recorded_by")
         if not isinstance(row.get("reason"), str) or not row["reason"].strip():
             return _bad("relation_missing_reason")
+        # Evidence (t261009-62): a relation asserts an attribution, so the
+        # row must say WHAT it is about, in the one declared shape.
+        ev = row.get("evidence")
+        if not isinstance(ev, dict):
+            return _bad("relation_missing_evidence")
+        if ev.get("what") not in RELATION_EVIDENCE_WHATS:
+            return _bad("relation_evidence_what_unknown:%r"
+                        % (ev.get("what"),))
+        if not isinstance(ev.get("ref"), str) or not ev["ref"].strip():
+            return _bad("relation_evidence_ref_invalid")
+        # Who may record what (t261009-62): the kind's own rule decides.
+        # Today every kind shares one structural rule — the recorder may
+        # never be the ticket that benefits (``from``) — held in a table so
+        # later consumers (t261009-63/-64) add entries without reshaping
+        # this validator. Fail closed: a recorder that cannot be evaluated
+        # is a refusal, never an acceptance.
+        rule = RELATION_RECORDER_RULES.get(kind)
+        if rule is None:  # unreachable while RELATION_KINDS ⊆ table keys
+            return _bad("relation_recorder_rule_missing:%s" % kind)
+        bad = rule(row)
+        if bad:
+            return _bad(bad)
+        # Correction linkage (t261009-62): a wrong relation is corrected by
+        # a NEW row naming the old row's id. Row-local checks only — whether
+        # the named id exists is the reader's question (a dangling pointer
+        # never matches, so the correcting row stays current).
+        sup = row.get("supersedes_relation")
+        if sup is not None:
+            if not isinstance(sup, str) or not sup.startswith("rel-"):
+                return _bad("relation_supersedes_not_rel")
+            if sup == rid:
+                return _bad("relation_supersedes_self")
     else:
         return _bad("kind_unknown:%r" % (kind,))
     if not _valid_at(row.get("at")):

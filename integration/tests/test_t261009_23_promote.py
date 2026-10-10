@@ -189,7 +189,8 @@ class TestStoreFace(TempCase):
 
     def test_append_assigns_monotonic_seq_and_refuses_duplicates(self):
         rows = self.seeded()
-        rel = dp.record_relation("withdraws", "t2", "t1", "integration", "undo")
+        rel = dp.record_relation("withdraws", "t2", "t1", "integration", "undo",
+                           {"what": "ticket", "ref": "t1"})
         r1 = dp.append_rows([rel], self.delivery)
         # the promotion's seq continues the DELIVERY ledger's space
         self.assertEqual(r1["seqs"], [5])
@@ -205,12 +206,14 @@ class TestStoreFace(TempCase):
     def test_malformed_ledger_blocks_append_loudly(self):
         self.delivery.parent.mkdir(parents=True, exist_ok=True)
         self.delivery.write_text("{not json}\n", encoding="utf-8")
-        rel = dp.record_relation("withdraws", "t2", "t1", "integration", "undo")
+        rel = dp.record_relation("withdraws", "t2", "t1", "integration", "undo",
+                           {"what": "ticket", "ref": "t1"})
         with self.assertRaises(dp.PromoteError):
             dp.append_rows([rel], self.delivery)
 
     def test_validate_row_truth_table(self):
-        good = dp.record_relation("withdraws", "t2", "t1", "integration", "undo")
+        good = dp.record_relation("withdraws", "t2", "t1", "integration", "undo",
+                           {"what": "ticket", "ref": "t1"})
         self.assertEqual(dp.validate_row(good), (good, ""))
         cases = [
             (None, "row_not_object"),
@@ -269,7 +272,8 @@ class TestWithdrawalGuard(TempCase):
         ])
         delivery, _ = dc.read_rows(self.delivery)
         dp.append_rows([dp.record_relation(
-            "withdraws", "t2", "t1", "integration", "undo t1", at_ms=1)],
+            "withdraws", "t2", "t1", "integration", "undo t1",
+            {"what": "ticket", "ref": "t1"}, at_ms=1)],
             self.delivery)
         rows, _ = dc.read_rows(self.delivery)
         return rows
@@ -299,7 +303,8 @@ class TestWithdrawalGuard(TempCase):
     def test_unknown_withdrawn_target_is_loud(self):
         rows = self.seeded()
         dp.append_rows([dp.record_relation(
-            "withdraws", "t2", "t-ghost", "integration", "undo", at_ms=1)],
+            "withdraws", "t2", "t-ghost", "integration", "undo",
+            {"what": "ticket", "ref": "t-ghost"}, at_ms=1)],
             self.delivery)
         rows, _ = dc.read_rows(self.delivery)
         with self.assertRaises(dp.WithdrawnTargetUnknown):
@@ -378,7 +383,8 @@ class TestTicketOutcome(TempCase):
             cert_id="cert-x003", main_after=[{"repo": "r", "revision": "rev3"}],
             tickets=["t3"], at_ms=1791514000000))
         dp.append_rows([dp.record_relation(
-            "withdraws", "t3", "t2", "integration", "undo t2", at_ms=5)],
+            "withdraws", "t3", "t2", "integration", "undo t2",
+            {"what": "ticket", "ref": "t2"}, at_ms=5)],
             self.delivery)
         dp.append_rows([prom3], self.delivery)
         rows2, _ = dc.read_rows(self.delivery)

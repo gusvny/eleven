@@ -54,8 +54,10 @@ def promotion(seq, tickets, at=3000, pid=None, cid="cert-2"):
 
 
 def relation(kind, from_t, to_t, at=4000, rid="rel-1"):
+    # t261009-62: relation rows carry evidence in the declared shape
     return {"kind": kind, "id": rid, "from": from_t, "to": to_t,
             "recorded_by": "integration", "reason": "goal-14 test",
+            "evidence": {"what": "ticket", "ref": to_t},
             "at": at}
 
 

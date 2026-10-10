@@ -143,7 +143,8 @@ def main():
     # resolvable — the fixture exercises the guard, not the unknown-target
     # refusal (that face is t261009-23's entry).
     dc.append_rows([landing("t-2", "c" * 40, 2500)], led)
-    rel = dp.record_relation("withdraws", "t-2", "t-1", "host", "undo t-1")
+    rel = dp.record_relation("withdraws", "t-2", "t-1", "host", "undo t-1",
+                       {"what": "ticket", "ref": "t-1"})
     dc.append_rows([rel], led)
 
     ok(not os.path.exists(os.path.join(os.path.dirname(led),

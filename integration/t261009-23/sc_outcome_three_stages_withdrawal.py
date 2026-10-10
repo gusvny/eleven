@@ -217,6 +217,7 @@ try:
     rel = dp.record_relation("withdraws", from_ticket="t-withdraw-work",
                              to_ticket="t-b", recorded_by="host",
                              reason="the fix broke the build",
+                             evidence={"what": "ticket", "ref": "t-b"},
                              at_ms=1791510102000)
     dp.append_rows([rel], ppath)
     prows, _bad = dc.read_rows(ppath)
@@ -266,6 +267,7 @@ try:
     rel = dp.record_relation("withdraws", from_ticket="t-withdraw-work",
                              to_ticket="t-c", recorded_by="host",
                              reason="the fix broke the build",
+                             evidence={"what": "ticket", "ref": "t-c"},
                              at_ms=1791510202000)
     dp.append_rows([rel], ppath)
     drows, _b1 = dc.read_rows(dpath)
@@ -298,7 +300,8 @@ d = tmpdir("sc_t26100923_wd4_")
 ppath = os.path.join(d, "promotions.jsonl")
 rel = dp.record_relation("withdraws", from_ticket="t-withdraw-work",
                          to_ticket="t-never-landed", recorded_by="host",
-                         reason="r", at_ms=1791510300000)
+                         reason="r", evidence={"what": "ticket", "ref": "t-never-landed"},
+                         at_ms=1791510300000)
 dp.append_rows([rel], ppath)
 prows, _bd = dc.read_rows(ppath)
 loud = False
@@ -320,7 +323,7 @@ try:
     dc.append_rows([landing_row("t-e", rev, 1791510400000)], dpath)
     ppath = os.path.join(d, "promotions.jsonl")
     rel = dp.record_relation("withdraws", from_ticket="t-withdraw-work",
-                             to_ticket="t-e", recorded_by="host", reason="r",
+                             to_ticket="t-e", recorded_by="host", reason="r", evidence={"what": "ticket", "ref": "t-e"},
                              at_ms=1791510402000)
     dp.append_rows([rel], ppath)
     drows, _b1 = dc.read_rows(dpath)

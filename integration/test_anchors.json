@@ -1326,6 +1326,10 @@
       "anchor": "contract",
       "note": "t261009-50 wiring tripwire: line_round_tick_engine registered in ALL_ACTIVITIES (executed-but-unregistered would be an activity-not-found on every tick), workflows.py carries LINE_ROUND_PATCH_ID == dispatcher-scan-line-round, engine body reachable",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_62_relation_evidence.py": {
+      "anchor": "contract",
+      "note": "t261009-62: relation rows refuse evidence-less / self-benefiting / malformed rows by name; supersedes_relation corrections resolve via current_relations (declared row contract, temp ledgers)"
     }
   },
   "scenarios": {
@@ -4742,6 +4746,10 @@
       "anchor": "behaviour",
       "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
       "sync_path": ""
+    },
+    "integration/t261009-62/sc_t26100962_relation_contract.py": {
+      "anchor": "contract",
+      "note": "t261009-62: the relation ledger's row contract read back from disk - evidence required by name, recorder entitlement fail-closed, correction-by-new-record with byte-identical history and legacy rows staying current"
     }
   }
 }

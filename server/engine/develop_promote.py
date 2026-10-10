@@ -415,11 +415,22 @@ def record_promotion(row, path):
 
 
 def record_relation(rel_kind, from_ticket, to_ticket, recorded_by, reason,
-                    at_ms=None):
+                    evidence, supersedes_relation=None, at_ms=None):
     """Build one relation row (record-models §B shape: the ``kind`` FIELD is
     the relation kind, the ``rel-`` prefix is the family). This is how a
     withdrawal is recorded — as work and a relation, NEVER as a revert
-    record type (spec (e))."""
+    record type (spec (e)).
+
+    ``evidence`` (t261009-62) is the row's declared-shape statement of WHAT
+    the attribution is about: ``{"what": <one of dc.RELATION_EVIDENCE_WHATS>,
+    "ref": "<non-empty string>"}``. A row without usable evidence, or one
+    recorded by the ticket that benefits (recorder ``ticket:<from>``), is
+    refused by name through the shared validator — never silently accepted.
+
+    ``supersedes_relation`` (t261009-62) corrects a wrong relation by a NEW
+    row: name the old row's id and the older row drops out of
+    ``current_relations`` while staying byte-identical in the file.
+    """
     row = {
         "id": dc.mint_id("rel", at_ms=at_ms),
         "from": from_ticket,
@@ -427,12 +438,43 @@ def record_relation(rel_kind, from_ticket, to_ticket, recorded_by, reason,
         "kind": rel_kind,
         "recorded_by": recorded_by,
         "reason": reason,
+        "evidence": evidence,
         "at": int(at_ms) if at_ms is not None else int(time.time() * 1000),
     }
+    if supersedes_relation is not None:
+        row["supersedes_relation"] = supersedes_relation
     clean, why = validate_row(row)
     if clean is None:
         raise PromoteError(why)
     return clean
+
+
+def current_relations(rows):
+    """The current-state view of the relation ledger (t261009-62): every
+    relation row EXCEPT the ones another row supersedes. Corrections are
+    new rows, never edits — so a reader that answers "what are the current
+    relations" must read through the ``supersedes_relation`` linkage, not
+    trust first records.
+
+    Deliberately NOT ``validate_row``: this filter decides only (a) is the
+    line a parseable dict carrying a ``rel-`` id and (b) is it superseded
+    by another such row. Legacy rows written before ``evidence`` existed
+    stay visible here — a write-time rule going silent at read time would
+    be the writer-says-ok/reader-can't-see failure class. A dangling
+    ``supersedes_relation`` (naming an id no row carries) never matches, so
+    the correcting row simply stays current. A supersedes cycle (A names B,
+    B names A) makes BOTH non-current: the file's honest state is that
+    neither claim stands, and the chain is still readable in the raw rows.
+    """
+    rels = [r for r in rows
+            if isinstance(r, dict) and isinstance(r.get("id"), str)
+            and r["id"].startswith("rel-")]
+    superseded = set()
+    for r in rels:
+        target = r.get("supersedes_relation")
+        if isinstance(target, str) and target.startswith("rel-"):
+            superseded.add(target)
+    return [r for r in rels if r["id"] not in superseded]
 
 
 # ---- the withdrawal guard ---------------------------------------------------
