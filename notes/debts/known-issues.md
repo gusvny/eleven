@@ -5055,3 +5055,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **本岗 14:55 按章程做换手（`engine_ops.py restart --scope lane:<t>` ×3），三次都被**安全默认**拒收**：`refusing handover … in-flight agent activity run_integration_tests … would be destroyed by a TERM … --force 才继续`。三条 `pending_workflow_task.present=false` ⇒ **本条 KI 原记的"WFT 被作废"危险不适用**。**⇒ 正确处置是"等排空"，不是 `--force`**（force 会掐掉真在跑的电池，并让票记一次 worker 终止 = 另一条 KI）。
 > **做法**：①重启后先 `workers` 看 `polling` 列——出现 `state=live + polling=False + ppid=1` 就**不要**再重启、**也不要** force 换手；②看那三条车道有没有真进程在跑（有 ⇒ 等它跑完，宽限 1800s）；③排空结束后旧 worker 自退 ⇒ supervisor 补位 ⇒ 验"新 pid + 活 poller=1"；④只有"无进程在跑且 pidfile 仍被占"才考虑换手，且仍优先用工具的 `--inflight-policy wait` 而非 `--force`。
 > **纪律**：**重启不是"干净的截断"**——它把在跑的活动变成"排空中的无 poller 窗口"（最长 30 分钟）；宣布"重启完成"之前，验收面是**每张在飞票都有活 poller**，而不是"console 进程起来了"。
+
+## KI-01M4K9X2Z8W1A6CVB3QD7FHS4M **`reconcile` 把"排空中的在飞票"当僵尸丢掉额度**：重启后 worker 停 poll（`polling=False`）⇒ 快照探针 `no_poller` ⇒ 额度被释放，而那张票其实还在跑真活动**(261010 15:07 实测;integration 岗值守发现)
+
+> **现象（原始回执）**：`concurrency reconcile` 回执 `{"dropped": ["t261009-46"], "holders": 3, "probe_errors": {"t261009-46": "ValueError: Temporal 拒绝: no_poller: snapshot unavailable for ticket t261009-46 - queue sandbar-ticket-t261009-46 has 0 live pollers …"}}`。同刻实读：`-46` 的 worker **进程活着、`ppid=1`、`polling=False`（console 14:52 重启后正在优雅排空）**，其车道里 `verify_lane` 的**真进程仍在跑**。
+> **机理**：reconcile 判"僵尸"的手段是**向该票的队列要快照**；而"排空中的 worker 停 poll"与"worker 已死"给出**同一个探针结果**（`no_poller`）⇒ 活票被判成死的，**额度被释放**。危害是双向的：①**额度账失真**（本班次限 8、持有者被少算 1，别的票会被放进本不该让出的名额）；②**误导值守**——`dropped: ["t…"]` 读起来像"这张票没人管了"，而它其实在跑（本岗差点据此去"换手救票"，而正确的动作是**等排空**）。
+> **与既有条目的关系**：本条是 `KI-01M4HMKZQ23649NFRTTFNCTRF6`（"正在干活的票被 reconcile 当僵尸丢掉"）的**第二个实例、不同触发面**——上一条是"探针/身份错配"，本条是**"停 poll 的在飞票"**；也与 `KI-01M4GF5R8NHQNATH7WD7SKF94X` 的重启排空追记同族（同一窗口的三种面孔：无 poller 查询失败 / 换手被拒 / 额度被丢）。
+> **出路（实现口径归修复票）**：①探针**区分三态**："无 poller"必须再问一次"该队列是否**仍有一个活着的工人进程持有 pidfile 且正在排空**"——是则不判僵尸、只标 `draining`（**具名**、不释放额度、不进 dropped）；②`dropped` 文案**必须带上判定依据**（`probe=no_poller, pidfile_alive=true, draining=true`），别让人只看到一个票号；③排空期**保留额度**（额度是"这票占着一条车道"的事实，与它的 poller 状态无关）。
+> **纪律（本岗已改做法）**：**见到 `dropped` 先核 pidfile + `polling` 列 + 车道内有无真进程**，三样都不是"死"才当活票处理；**重启后的 30 分钟内不要相信任何 reconcile 的僵尸判定**。
+> **回归**：L2——(а)探针 `no_poller` 但 pidfile 存活且进程在 ⇒ **不判僵尸、不释放额度**，回执具名 `draining`；(b)真死（pidfile 无主 + 无进程）⇒ 照旧丢弃并具名；(c)派生的机器检查挂掉 ⇒ 仍 fail-closed 但**不冒充"票死了"**。L3——一次真 console 重启后立即跑 reconcile，**在飞票的额度不因排空窗口被释放**，且回执能把"排空"与"死亡"分开说。
