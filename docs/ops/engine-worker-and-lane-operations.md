@@ -522,3 +522,23 @@ The rules that survive the fix:
 4. Do **not** reach for `integration/known-red-baseline.json` as a stopgap: the roster's quiet rerun builds
    `python3 -m pytest …`, and the lane worker's PATH has no engine venv, so the rerun can only ever be red
    (`KI-01M4J1DZH3QBMR3HV3Q78DVJ9Q`). A row would block exactly as before, while looking like a fix.
+
+**A signal's delivery receipt is not the same as the stage moving (261010, measured twice in one shift).** `rework`
+and `retry_qc` return `delivered: true` when the signal reaches the workflow's inbox; the workflow then consumes it
+at **its own checkpoint** - which is not "immediately". Two measured shapes:
+
+1. **The ticket is parked at a segment boundary** (`paused` / `paused-waiting`): the signal lands on the ticket's
+   timeline as `retry-requested` / a rework entry and the stage does **not** move until a `resume` arrives. Measured
+   on t261009-50: `retry_qc` at 10:59 recorded `retry-requested`, the ticket stayed `paused-waiting` for the next
+   hour, and a later `resume` consumed the pending rework in the same second (`create_plan rework` →
+   `Entered step (attempt 4)`). **A parked ticket needs `resume`, not another signal.**
+2. **The ticket is mid-stage with an activity running**: a rework sent to an earlier stage is accepted but sits in
+   the inbox until the workflow reaches a boundary it checks - measured on t261009-46 (rework to `implement` sent
+   at 16:00 while `run_integration_tests` was running; the ticket then went through `run_integration_tests done` →
+   `arbitrate`/`acceptance_walkthrough` → `merge_check` without rewinding, `pending: []` the whole way).
+
+So: **verify a signal by reading the ticket's timeline for the stage entry it should cause** (`Entered step
+(attempt N)` on the target stage), never by the `delivered: true` receipt. If the timeline shows no such entry,
+the signal is parked, not lost - the cheapest lawful unblock is the one the ticket's state calls for (`resume` for
+a parked ticket; wait for the boundary and, if the lane blocks instead, send the signal again then - a rework sent
+to a blocked ticket IS consumed).
