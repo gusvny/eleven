@@ -4997,3 +4997,13 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（写进值守做法）**：遇到"**多张票同时红在同 1–2 条单测**"这个形状，**先按本条的取证三步走**（泳道单跑 → main 单跑 → 看其余通过数），**再决定是假红还是真红**；不要把"多数票都红同一条"读成"产品坏了"。
 >
 > **回归**：L2——(а)名册内的负载敏感条目在并发下红 ⇒ 本轮不计入（既有机制）；(b)**名册外的**同类红 ⇒ **要么被具名判为"未申报的负载敏感"并给出出路，要么照常拦**（不许静默放过）；L3——一次"7–8 条车道同时跑"的台面里，未申报的负载敏感单测**不产生成片 blocked**。
+
+> **同族第二个实例、机制不同（261010 12:2x，`-55`/`-58` 第二次卡闸；integration 岗登记）**：两条泳道重跑后**换了一条测试**红——`test_t261009_42_bundle_freshness.py::test_rebuild_temp_copy_reaped_on_every_path`（1 failed / 4561 passed），而**该文件在 main 上单跑 15 passed / 1.43s、在 `-55` 泳道单跑 15 passed / 1.36s**（本岗三步取证同样的做法）。
+> **根因读码（这次不是时序，是"读了机器全局命名空间"）**：该测试的断言是
+> ```python
+> leftovers = [p for p in Path(tempfile.gettempdir()).glob("bundle-freshness-*")]
+> assert leftovers == []
+> ```
+> —— 它**在共享的系统临时目录里 glob 一个机器级命名空间**，而 `-42` 的检查在**任何**泳道跑闸时都会真的创建 `bundle-freshness-*` 临时目录（`_bundle_freshness_rebuild` 的 `TemporaryDirectory(prefix="bundle-freshness-")`）⇒ **别的泳道正在重建时，本泳道这条断言必然看到"残留"** ⇒ 车队越忙越红。**它既不关本票的事，也不是产品缺陷，而是这条测试自己没做隔离。**
+> **修法（比挂名册更根本，推荐）**：测试内把临时根**收进自己的沙盒**——`monkeypatch.setenv("TMPDIR", str(tmp_path))`（或 `monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))`）后再 glob，只数**自己**创建的目录；这样它对"别的泳道在重建"免疫，而**"本路径没回收"这个真断言仍然有效**（有界的残留照旧红）。
+> **纪律补充**：**凡断言"临时目录/文件没有残留"的测试，必须先把临时根收进自己的沙盒**——否则它在并发车队里是一条必然假红的断言（本条与 `KI-072` 的时序敏感合起来，正是今晚四次"并发假红卡票"的两大来源）。
