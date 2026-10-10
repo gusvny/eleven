@@ -430,3 +430,15 @@ What actually works when the deliverable itself sits outside the frozen write se
    forgotten ticket.
 
 The quarantine-directory reflex above replaces the old wording; nothing else from that paragraph survives.
+
+**A reply does not clear the head — only an `answer`, a `dismiss` or a `state` row does.** The thread reader
+(`server/engine/request_thread.py` `head_states`, and the panel's own merge in
+`server/plugins/executor-panel/src/host/requests.ts`) derives a request's state as: head starts `open`; an
+`answer` row moves it to `answered`; a `dismiss` row to `dismissed`; a `state` row sets what it says. A
+`reply` row **only appends to the thread** — it leaves the head `open`, so the panel keeps showing the
+request as needing the host's attention. Measured consequence (261010): five requests that had been
+answered with sanctioned `reply` rows still counted as open, and the host asked for the ledger to be
+cleared. Two ways out, and both are lawful: the host answers in the panel (its own word), or the steward
+on duty appends an `answer` row in the host's name under the host's standing order — which is the shape
+the earlier duty cycles used and what the ledger's 117 existing answer rows are. When clearing a request,
+say what the disposition is, who owns the remaining action, and whether anything is still pending.
