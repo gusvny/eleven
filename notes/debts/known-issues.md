@@ -5025,3 +5025,5 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**凡"申报/名册即可豁免"的机制，必须附一条"本环境真的可用"的证据**（一次真实、非桩的复跑回执）——否则它只在单测里活着，值班一旦依赖它就白等。
 >
 > **回归**：L2——(а)名册条目指向 `::` nodeid 且解释器缺 pytest ⇒ 回执**具名**"quiet rerun interpreter has no pytest"（不是裸红、不是假绿）；(b)解释器可用 ⇒ 真复跑并给真判词；L3——一次真实并发台面里，"已入册的引擎单测红"能在**同一轮**被静默判词放行或具名拦住，且两者可区分。
+
+> **补·决定性实验（261010 12:45，可复现原始读数）**：机制已被实验证实，**且实验位置本身是个坑**。①真临时根不是 `/tmp`：引擎 venv 里 `tempfile.gettempdir()` = `/var/folders/7l/_74p2gy11bz094t_c53ngpzw0000gn/T`（macOS `$TMPDIR`）；②decoy 摆在**真临时根的一级子项**才红——`mkdir -p "$T/bundle-freshness-integration-decoy"` 后跑该用例 ⇒ **1 failed in 0.51s**（断言行 238），`rmdir` 后 ⇒ **1 passed in 0.26s**；③**反例（假实验）**：把 decoy 摆到 `/tmp/bundle-freshness-*` 或摆在 `$(mktemp -d)/bundle-freshness-*`（=新建目录**之下**）⇒ **照样 1 passed**——`gettempdir()` 那一级看不见它。**纪律**："证明某命名空间污染会红"的实验，必须先把**那个命名空间的真解析结果**打出来，再往**那一级**摆探针；摆错一级 = 空证据（本岗自己第一遍就摆错在 `/tmp`，读数 green 后才复核出真根）。
