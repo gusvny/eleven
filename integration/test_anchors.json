@@ -4896,6 +4896,11 @@
       "anchor": "contract",
       "note": "t261009-77: the declared runner command turns one candidate revision set into ONE real run header (resolve_runner contract, red-is-a-proof, could-not-run honesty, timeout, inherited gate-owner env, whole-round certification citing the run id)",
       "sync_path": "integration/line_round_runner.py; server/engine/develop_certify.py (resolve_runner/run_line_round)"
+    },
+    "integration/t261011-02/sc_ticket_list_projection_parity.py": {
+      "anchor": "behaviour",
+      "note": "t261011-02: the CLI row face agrees per-key with the engine row face for the same ticket — every key of the real _row_from_meta row (develop-buffer opt-in, paused pair, closed shape) passes the _poc seam into the CLI list verbatim, nothing dropped or recomputed, legacy rows read honestly empty",
+      "sync_path": "server/tools/ticket.py (_list projection)"
     }
   },
   "server/engine/tests/test_t261010_75_answer_row_shape.py": {

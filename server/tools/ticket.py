@@ -826,6 +826,15 @@ def _update(a):
     return _poc_ok(out)
 
 
+def _row_int(v, default=0):
+    # t261011-02：投影行的数值键防畸形（引擎行是真源，但畸形输入不外溢成
+    # 垃圾类型——非数值/None/None 形串诚实落缺省，不炸列表）
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _list(a):
     # 纯 Temporal：client.py ticket-list（project 走 ProjectKey search attribute 过滤；
     # 不传=全部项目，admin 全局视图）。Temporal 不可达直接抛错——没有第二真源可降级。
@@ -842,56 +851,59 @@ def _list(a):
     if not out.get('ok'):
         raise ValueError('ticket-list 失败: %s' % (out.get('error') or out))
     v2_rows = (out.get('result') or {}).get('tickets') or []
-    rows = [{
-        'id': r.get('id'), 'project': r.get('project') or '',
-        'epic': r.get('epic') or '',
-        'role': r.get('role'), 'status': r.get('status'),
-        'title': r.get('title'), 'workflow_id': r.get('workflow') or '',
-        'proposal_id': r.get('proposal_id') or '',
-        'stage': r.get('stage'), 'stage_state': r.get('stage_state') or 'awaiting',
-        'engine': r.get('engine') or '',
-        'handoffs': [None] * int(r.get('handoff_count') or 0),   # 只用于计数
-        'pending': [None] * int(r.get('pending_count') or 0),
-        'worktree': r.get('worktree') or '', 'workspace': r.get('workspace'),
-        'created': r.get('created'), 'updated': r.get('updated_ts') or 0,
-        'close_ts': r.get('close_ts') or 0,
-        'authz_active': int(r.get('authz_active') or 0),   # t260912-03 生效中授权计数
-    } for r in v2_rows]
+    # t261011-02 单次薄壳投影（seam 收口）：client.py 行面（_row_from_meta 活行 /
+    # 无快照极简收口行 / 降级行）是唯一真源，这里逐键透传、绝不重算——
+    # 旧实现两次白名单重建把 paused/paused_phase/exec_status/close_health/
+    # close_health_reason/lane_version/develop_line 依次削掉（t260910-04 因此
+    # 绕道 console 直读 client.py；t261009-76 的 opt-in 两键在 CLI 面恒空）。
+    # 本面**不故意丢弃任何引擎行键**——引擎行将来加键而此表未同步时，L1 键集
+    # 断言（integration/tests/test_t261011_02_ticket_list_projection.py）会点名红。
+    # 形状差异仅两处（非丢弃）：①键名沿用 CLI 既有对外名 'workflow'
+    # （引擎行同名，透传即可）；②handoff_count/pending_count 引擎侧本就是计数
+    # （非列表），按数透传。行缺键=老引擎/极简行，按各键诚实缺省补空，
+    # 绝不从他字段反推。'updated' 引擎已按 '%m-%d %H:%M' 本地时区格式化
+    # （读取点=CLI 进程），透传不重算；updated_ts 保持 epoch 秒。
     out_rows = []
-    for meta in rows:
-        if a.get('status') and meta.get('status') != a['status']:
-            continue
-        if a.get('role') and meta.get('role') != a['role']:
-            continue
-        if a.get('workflow') and (meta.get('workflow_id') or '') != a['workflow']:
-            continue
-        if a.get('stage_state') and meta.get('stage_state') != a['stage_state']:
-            continue
-        out_rows.append({
-            'id': meta['id'], 'project': meta.get('project') or '',
-            'epic': meta.get('epic') or '',
-            'role': meta.get('role'), 'status': meta.get('status'),
-            'title': meta.get('title'),
-            'workflow': meta.get('workflow_id') or '',
-            'proposal_id': meta.get('proposal_id') or '',
-            'stage': meta.get('stage'), 'stage_state': meta.get('stage_state', 'awaiting'),
-            'engine': meta.get('engine') or '',
-            'handoff_count': len(meta.get('handoffs') or []),
-            'pending_count': len(meta.get('pending') or []),
-            'worktree': meta.get('worktree') or '',
-            'workspace': meta.get('workspace'),
-            'created': meta.get('created'),
-            'updated': time.strftime('%m-%d %H:%M', time.localtime(meta.get('updated', 0))),
-            'updated_ts': meta.get('updated'),
-            'close_ts': meta.get('close_ts') or 0,
-            # t260912-03：列表可读面＝生效中的人授权条数（client.py 行内已按
-            # expires>now 过滤；行缺键=老引擎，补 0 不炸）
-            'authz_active': int(meta.get('authz_active') or 0),
+    for r in v2_rows:
+        if not isinstance(r, dict):
+            r = {}   # 畸形行不炸列表，投影为全缺省诚实空行
+        row = {
+            'id': r.get('id'), 'project': r.get('project') or '',
+            'epic': r.get('epic') or '',
+            'role': r.get('role'), 'status': r.get('status'),
+            'title': r.get('title'),
+            'workflow': r.get('workflow') or '',
+            'proposal_id': r.get('proposal_id') or '',
+            'stage': r.get('stage'), 'stage_state': r.get('stage_state') or 'awaiting',
+            'paused': bool(r.get('paused')),                       # t260908-01 段间暂停二态
+            'paused_phase': str(r.get('paused_phase') or ''),      # pending / at_gate
+            'engine': r.get('engine') or '',
+            'handoff_count': _row_int(r.get('handoff_count')),
+            'pending_count': _row_int(r.get('pending_count')),
+            'worktree': r.get('worktree') or '', 'workspace': r.get('workspace'),
+            'created': r.get('created'),
+            'updated': r.get('updated') or '',
+            'updated_ts': _row_int(r.get('updated_ts'), 0),
+            'close_ts': _row_int(r.get('close_ts'), 0),
+            'exec_status': r.get('exec_status') or '',             # t260921-03 收口执行态
+            'close_health': r.get('close_health') or '',           # t260921-03 收口健康度
+            'close_health_reason': r.get('close_health_reason') or '',
+            # t260912-03：生效中的人授权条数（client.py 行内已按 expires>now 过滤）
+            'authz_active': _row_int(r.get('authz_active')),
             # t261009-76：逐票 lane opt-in 上板（spec (4)）——操作员不读 workflow
             # 历史即可分辨 opt-in 票与 legacy 票；行缺键=老引擎，补空串不炸
-            'lane_version': meta.get('lane_version') or '',
-            'develop_line': meta.get('develop_line') or '',
-        })
+            'lane_version': r.get('lane_version') or '',
+            'develop_line': r.get('develop_line') or '',
+        }
+        if a.get('status') and row.get('status') != a['status']:
+            continue
+        if a.get('role') and row.get('role') != a['role']:
+            continue
+        if a.get('workflow') and row.get('workflow') != a['workflow']:
+            continue
+        if a.get('stage_state') and row.get('stage_state') != a['stage_state']:
+            continue
+        out_rows.append(row)
     return {'count': len(out_rows), 'tickets': out_rows}
 
 
