@@ -69,9 +69,23 @@ CLI (same shape as the other engine entries: one JSON argv):
   op="state" : append a state row (the engine side only allows resolved;
                evidence required).
   op="link"  : append a link row (supersedes derives the superseded state row).
+  op="read"  : the engine's read face over the caller's project ledger -- head
+               states plus the named malformed-answer report (KI-01M4HPGHVWAKB62TXYV4G7ENEB:
+               the steward checks "is the ledger clear" on THIS face, not by
+               diffing two tools).
   Output: one JSON receipt on stdout; ok=true carries row / linked_to; a
   refusal carries field + error. Exit codes: 0 = landed; 2 = refused
   (including a non-JSON / non-object argv -- field=body).
+
+Canonical answer-row shape (KI-01M4HPGHVWAKB62TXYV4G7ENEB, t261009-75): ONE
+shape, declared once, enforced by BOTH readers --
+  answer : {type:"answer", answer_for, at:number, answer} -- the exact mirror
+           of the panel's isAnswerRow (executor-panel/src/host/requests.ts).
+  A row either clears a head on both faces or on neither. The panel's stricter
+  stance is the truth source; rows written outside the sanctioned writers
+  (e.g. hand-written rows with `at` as a string) are named by both faces and
+  keep the head open. Historical panel-written rows always carry a numeric
+  `at`, so they stay answered -- only out-of-writer rows flip.
 
 Direct-write closure (t261006-05, KI-208, same as executor_requests): the
 resident executor channels (cwd / declared-session) must not append the ledger
@@ -134,7 +148,7 @@ RESIDENT_EXECUTOR_CHANNELS = executor_requests.RESIDENT_EXECUTOR_CHANNELS
 DIRECT_WRITE_REFUSAL = executor_requests.DIRECT_WRITE_REFUSAL
 
 USAGE = ("usage: python3 server/engine/request_thread.py "
-         "'{\"op\":\"file|reply|state|link\",\"project\":\"<key>\",...}'")
+         "'{\"op\":\"file|reply|state|link|read\",\"project\":\"<key>\",...}'")
 
 
 def _refuse(field: str, error: str) -> Dict[str, Any]:
@@ -272,15 +286,46 @@ def _append_line_unlocked(fd: int, row: Dict[str, Any]) -> None:
     os.write(fd, line.encode("utf-8"))
 
 
+# ---------- canonical answer-row shape (KI-01M4HPGHVWAKB62TXYV4G7ENEB) ----------
+
+def is_answer_row(r: Any) -> bool:
+    """The ONE canonical answer-row shape -- the exact mirror of the panel's
+    isAnswerRow (executor-panel/src/host/requests.ts; incident: 261010 six
+    hand-written rows with `at` as a string cleared the engine's account while
+    the panel kept six waiting). A row either clears a head on both faces or
+    on neither; there is no third shape table."""
+    if not isinstance(r, dict):
+        return False
+    at = r.get("at")
+    return (r.get("type") == "answer"
+            and isinstance(r.get("answer_for"), str)
+            and isinstance(at, (int, float)) and not isinstance(at, bool)
+            and isinstance(r.get("answer"), str))
+
+
+def malformed_answer_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Name every answer-shaped row that fails the canonical predicate (the
+    read face reports these, never silently drops them)."""
+    return [{"answer_for": r.get("answer_for"), "at": r.get("at")}
+            for r in rows
+            if isinstance(r, dict) and r.get("type") == "answer"
+            and not is_answer_row(r)]
+
+
 # ---------- read view: state computation ----------
 
 def head_states(rows: Sequence[Dict[str, Any]]) -> Dict[str, str]:
     """The head-state table (read-side merge; torn-op tolerance, never a
     write-path license):
 
-    - state rows take effect in landing order (an answer row also records
-      `answered`: the legacy answer row keeps judging the head answered -- zero
-      migration for existing rows);
+    - state rows take effect in landing order; an ANSWER row clears a head
+      only when it matches the canonical answer-row shape (KI-
+      01M4HPGHVWAKB62TXYV4G7ENEB): shape-off rows keep the head open and are
+      named by malformed_answer_rows -- previously ANY dict row with
+      type=="answer" cleared a head, which let hand-written string-`at` rows
+      disagree with the panel. Panel-written rows always carry a numeric `at`
+      (the panel also lands an answered state row), so history stays answered;
+      only out-of-writer rows flip to open -- on BOTH faces alike;
     - a supersedes link without its derived state row (a crash between the two
       appends) -> the reader recomputes superseded (display/contract repair);
     - no record at all = open."""
@@ -290,7 +335,7 @@ def head_states(rows: Sequence[Dict[str, Any]]) -> Dict[str, str]:
         t = r.get("type")
         if t == "answer":
             k = r.get("answer_for")
-            if k in states and states[k] == STATE_OPEN:
+            if is_answer_row(r) and k in states and states[k] == STATE_OPEN:
                 states[k] = STATE_ANSWERED
         elif t == "state":
             k = r.get("state_for")
@@ -756,9 +801,45 @@ def link_op(body: Dict[str, Any], now_ms: int, seq: int,
         return {"ok": True, "rows": out_rows, "file": path}
 
 
+def read_op(body: Dict[str, Any], now_ms: int, seq: int,
+            env: Optional[Dict[str, str]] = None, cwd: str = "",
+            projects: Optional[Sequence[Dict[str, Any]]] = None,
+            exclude_trees: Sequence[str] = (),
+            load_decl: Optional[Callable[[str], Dict[str, Any]]] = None,
+            delivered_via: Optional[str] = None) -> Dict[str, Any]:
+    """op=read: the engine's read face (KI-01M4HPGHVWAKB62TXYV4G7ENEB). Returns
+    the caller's project ledger verdict: head states, the named malformed
+    answer rows, and the malformed-line count -- so "the ledger is clear" is
+    checkable from the engine side alone and matches the panel's split. The
+    strict answer predicate also moves three internal gates (declared change):
+    the duplicate scan (file_thread_op), the resolved gate (state_op) and the
+    supersedes gate (link_op) all see a shape-off-answered head as OPEN."""
+    env = dict(os.environ if env is None else env)
+    body = executor_requests._sanitize(body)
+    gated = _resolve_and_gate(body, env, cwd, projects, exclude_trees, load_decl, delivered_via)
+    if not gated.get("ok"):
+        return gated
+    key = gated["caller"]["project"]
+    path = str(executor_requests.ledger_file(key, env))
+    out: Dict[str, Any] = {"ok": True, "file": path, "states": {},
+                           "malformed_answer_rows": [], "malformed_lines": 0}
+    if not os.path.exists(path):
+        return out
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        rows, mal = _read_rows_unlocked(fd)
+    finally:
+        os.close(fd)
+    out["states"] = head_states(rows)
+    out["malformed_answer_rows"] = malformed_answer_rows(rows)
+    out["malformed_lines"] = mal
+    return out
+
+
 # ---------- CLI ----------
 
-_OPS = {"file": file_thread_op, "reply": reply_op, "state": state_op, "link": link_op}
+_OPS = {"file": file_thread_op, "reply": reply_op, "state": state_op,
+        "link": link_op, "read": read_op}
 
 
 def _emit(out: Dict[str, Any]) -> None:

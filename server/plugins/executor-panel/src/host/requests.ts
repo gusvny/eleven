@@ -483,6 +483,14 @@ function isRequestRow(v: unknown): v is RequestRow {
     && typeof r.question === 'string'
 }
 
+/** Canonical answer-row shape -- ONE shape, declared once, enforced by BOTH
+ *  readers (KI-01M4HPGHVWAKB62TXYV4G7ENEB, t261009-75). This predicate is the
+ *  truth source; the engine's read face (server/engine/request_thread.py
+ *  `is_answer_row`) mirrors it exactly, and a shape-off answer row clears a
+ *  head on NEITHER face: it is counted as malformed below and the head stays
+ *  waiting -- the safe direction. Historical panel-written rows always carry
+ *  a numeric `at` (the panel also lands an answered state row), so only
+ *  out-of-writer rows are affected. */
 function isAnswerRow(v: unknown): v is AnswerRow {
   if (typeof v !== 'object' || v === null) return false
   const r = v as Record<string, unknown>
