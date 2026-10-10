@@ -47,10 +47,15 @@ for t in d:
 
 ## 四、开工前的已知缺口（如实记，先解决再宣布"可测"）
 
-- **run 账本几乎是空的**：`~/.sandbar/projects/sandbar/ledger/scenario-runs.jsonl` 目前**只有 1 行**
-  （`{"v":"run-ledger-v1", …, "suite":"full", "source":"inspection", …}`）。T0.1 的"跑批头记录"机制在，
-  但**写入面很稀疏**。⇒ "每次落地的全量跑次数"**现在只能从票面 timeline 数**（`run_integration_tests` 的
-  attempt 数），不能从 run 账本数。**要么**把 run 账本的写入面补上（实现票），**要么**把口径正式改成
-  "票面 timeline 计数"并在此文件里改掉上面的取数命令——**两条都行，但必须先定一条**，不许量的时候临时改口径。
+- **run 账本的头记录是"按设计稀疏"的，不是坏的（261010 17:0x 复核，本岗先前判成缺口是错的）**：
+  `~/.sandbar/projects/sandbar/ledger/scenario-runs.jsonl` 只有 **1 行**（`source=inspection`），而同一目录的
+  `scenario-results.jsonl` **行里带 run id**（尾部 6 万行里有 **203 个不同 run**、来源 `lane:<票>`）。
+  读码确认这是**明文的具名规则**，不是漏写：`integration/run_scenarios.py` 的
+  `run_record_skip_reason` 逐条点名——**"窄轮（`--only`／池排除）不是证明 ⇒ 不落头记录，但行保留 run id 让分组仍可见"**、
+  **"gate-owned 轮由 gate 写"**（`SANDBAR_INTEG_LEDGER_OWNER=gate`，免得一轮两个头）、以及
+  "source/commit/env_fp 推不出来就跳过"。⇒ **口径结论不变、理由要改**：
+  **"每次落地的全量跑次数"不能指望头记录**（车道的闸轮多为窄轮），要么**按 run id 分组数**（行里有），
+  要么**数票面 timeline 的 `run_integration_tests` attempt**——量之前先把这两条选一条写进本文件，
+  不许量的时候临时改口径。
 - **新流样本还没有**：`-46`（新泳道版本的 opt-in 与落地通路）是开关；**它落地 + 第一张 opt-in 票走完**之前，
   新流那一组是空的。⇒ 本文件和 epic 判据 #1 都**只在有第一张 opt-in 票之后**才可宣布"可测"。
