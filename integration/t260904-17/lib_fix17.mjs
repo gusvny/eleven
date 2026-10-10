@@ -263,7 +263,85 @@ async function buildProfile(tmpHome, laneWorkbenchDir) {
   return profDir;
 }
 
-async function waitReady(port, timeoutMs, logPath) {
+// t261009-70: a boot failure must leave evidence. The old behavior threw
+// "隔离台就绪超时（45s）：log=<tmpHome>/console.log" and the caller's clean() deleted
+// exactly that log on the way out, so "harness broken" was indistinguishable from
+// "scenario boot path broken". Now: on timeout we read the log BEFORE reclamation,
+// embed a bounded tail in the error text, and copy a bounded slice (last 256 KB) to a
+// survivor file in $TMPDIR that no reclamation path touches. The machine-facing fact
+// stays the scenario's env_fail exit code — the message text is for humans only; no
+// parser may match on it (grep 261010: nothing matches the old string today either).
+const LOG_TAIL_CHARS = 4000;
+const SURVIVOR_MAX_BYTES = 256 * 1024;
+
+/**
+ * Snapshot console.log for a boot failure, before tmpHome reclamation deletes it.
+ * Never throws: a missing/empty/unreadable log is reported honestly instead.
+ *
+ * Evidence contract (settled t261009-70 rework, byte-exact survivor):
+ *   - a MISSING or EMPTY log is a NAMED ABSENCE (the worst lie would be to quote
+ *     invented lines) — no survivor;
+ *   - a PRESENT log gets a byte-exact survivor copy: the file is read as raw bytes
+ *     and the last SURVIVOR_MAX_BYTES bytes are copied verbatim (rework item: the
+ *     first cut read utf8 and corrupted binary logs — 5 non-UTF8 bytes came back as
+ *     10 replacement-sequence bytes); console.log is a text face in practice, but
+ *     the copy must never be lossier than the source;
+ *   - the message tail is a TEXT face: a valid-UTF8 log quotes its last
+ *     LOG_TAIL_CHARS chars; a log that is not valid UTF-8 names the lossy decode
+ *     instead of printing replacement-character garbage (named absence stays
+ *     reserved for missing/empty — present-but-binary is evidence, not absence).
+ *
+ * @returns {{survivor: string|null, tail: string}} survivor = preserved bounded log
+ *   path (filename carries the label for attribution), or null; tail = bounded text
+ *   for the error message.
+ */
+export function captureBootFailure(logPath, label = 'boot') {
+  let bytes = null;
+  try { bytes = readFileSync(logPath); } catch { /* absent or unreadable */ }
+  if (!bytes) {
+    return { survivor: null, tail: '(console.log absent or unreadable — child died before writing anything)' };
+  }
+  if (bytes.length === 0) {
+    return { survivor: null, tail: '(console.log empty — child produced no output)' };
+  }
+  const safeLabel = String(label).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'boot';
+  let survivor = null;
+  try {
+    const bounded = bytes.length > SURVIVOR_MAX_BYTES ? bytes.subarray(bytes.length - SURVIVOR_MAX_BYTES) : bytes;
+    survivor = path.join(tmpdir(), `fix17-console-${safeLabel}-${Date.now()}-${process.pid}.log`);
+    writeFileSync(survivor, bounded);
+  } catch { survivor = null; /* copy failed: the tail in the message is the fallback */ }
+  const strict = new TextDecoder('utf-8', { fatal: true });
+  let tail;
+  let textAll = null;
+  try { textAll = strict.decode(bytes); } catch { textAll = null; }
+  if (textAll !== null) {
+    tail = textAll.slice(-LOG_TAIL_CHARS);
+  } else {
+    // not valid UTF-8: quote the tail only if the tail slice itself is clean text,
+    // otherwise name the lossy decode instead of printing replacement garbage
+    const loose = new TextDecoder('utf-8');
+    const sliced = loose.decode(bytes.subarray(Math.max(0, bytes.length - LOG_TAIL_CHARS)));
+    tail = sliced.includes('\uFFFD')
+      ? `(console.log is ${bytes.length} bytes and not valid UTF-8 — text tail withheld rather than quoted as replacement garbage; byte-exact survivor preserved)`
+      : sliced;
+  }
+  return { survivor, tail };
+}
+
+/** Build the ready-timeout error with embedded evidence (tail + survivor path). */
+function bootFailureError(timeoutMs, logPath, label) {
+  const { survivor, tail } = captureBootFailure(logPath, label);
+  return new Error(
+    `stage console not ready in ${Math.round(timeoutMs / 1000)}s (env red — boot failure, not a scenario fail); `
+    + `log tail: ${JSON.stringify(tail)}; full log preserved at: ${survivor || '(copy failed or log empty)'}`,
+  );
+}
+
+// t261009-70: exported for the contract face (sc_t26100970_boot_evidence.mjs +
+// integration/tests/test_t261009_70_boot_evidence.mjs) — the timeout-under-test is
+// injected short; the 45 s boot path stays the browser family's job.
+export async function waitReady(port, timeoutMs, logPath, label = 'ready') {
   const url = `http://127.0.0.1:${port}/sandbar-workbench/api/wf/projects`;
   const t0 = Date.now();
   for (;;) {
@@ -271,7 +349,7 @@ async function waitReady(port, timeoutMs, logPath) {
       const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
       if (r.ok) return;
     } catch { /* 未就绪，续等 */ }
-    if (Date.now() - t0 > timeoutMs) throw new Error(`隔离台就绪超时（${Math.round(timeoutMs / 1000)}s）：log=${logPath}`);
+    if (Date.now() - t0 > timeoutMs) throw bootFailureError(timeoutMs, logPath, label);
     await new Promise((r) => setTimeout(r, 500));
   }
 }
@@ -298,7 +376,8 @@ export async function bootConsole(projectsRoot, stub) {
       cwd: REPO_ROOT, detached: true, stdio: ['ignore', logFd, logFd],
       env: benchEnv(tmpHome, projectsRoot, stub),
     });
-    await waitReady(port, 45000, path.join(tmpHome, 'console.log'));
+    await waitReady(port, 45000, path.join(tmpHome, 'console.log'),
+      `boot-${path.basename(String(projectsRoot))}`);
     const bench = {
       port, tmpHome, projectsRoot, proc, logFd, clean,
       base: `http://127.0.0.1:${port}`,
@@ -313,7 +392,22 @@ export async function bootConsole(projectsRoot, stub) {
       },
     };
     return bench;
-  } catch (e) { clean(); throw e; }
+  } catch (e) {
+    // t261009-70: evidence before reclamation, for every failure path of bootConsole
+    // (profile build, spawn, anything) — not just the waitReady timeout. Skip if the
+    // error already carries its own snapshot (avoid duplicate attachment).
+    try {
+      const logPath = path.join(tmpHome, 'console.log');
+      if (existsSync(logPath) && !(e instanceof Error && String(e.message).includes('log preserved at'))) {
+        const { survivor, tail } = captureBootFailure(logPath,
+          `bootfail-${path.basename(String(projectsRoot))}`);
+        const note = `boot failure evidence — log tail: ${JSON.stringify(tail)}; full log preserved at: ${survivor || '(copy failed)'}`;
+        if (e instanceof Error) e.message += `\n${note}`; else throw new Error(`${String(e)}\n${note}`);
+      }
+    } catch { /* evidence attachment must never mask the original failure */ }
+    clean();
+    throw e;
+  }
 }
 
 export function teardownOnExit(teardown) {

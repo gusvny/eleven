@@ -4812,6 +4812,11 @@
       "anchor": "contract",
       "note": "t261009-69: the finding entity/observation ledger contract read back from disk - 16-hex content-minted id stable across periods, one entity row never duplicated on re-sighting, observation keyed (finding,period) with no id, first/periods/last answered by query, named degradation on corrupt/absent ledger, legacy 8-hex id still resolving"
     },
+    "integration/t261009-70/sc_t26100970_boot_evidence.mjs": {
+      "anchor": "contract",
+      "note": "t261009-70: a boot failure leaves attributable evidence — waitReady rejection carries timeout + bounded log tail + survivor path outside the temp home; malformed logs degrade to a named absence; boot failure stays a failure",
+      "sync_path": "integration/t260904-17/lib_fix17.mjs (waitReady + captureBootFailure)"
+    },
     "integration/t261009-66/sc_t26100966_relations_reader.py": {
       "anchor": "contract",
       "note": "t261009-66: both-directions-from-disk reader (byte-identical read, derived labelled), correction-aware neither-side superseded, one-implementation identity, promotion repairs naming proven from the file",
