@@ -2906,10 +2906,10 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **同族第三次（261010，`t261009-50`；integration 岗登记并当轮处置）**：这次不是"锁资产"，而是**票的交付物本身**（"谁在什么时机调那一轮"=调用点）住在写集之外——调用点必须在 `server/engine/workflows.py` 的 `DispatcherScanWorkflow.run()` 里加一步、并在 `server/engine/activities.py` 加一个活动（workflow 体零 IO 纪律），而该票写集是 `dispatcher_loop.py`/`scan_schedule.py`/`develop_certify.py`/`tests/`/`integration/` ⇒ **任何实现轮都无法满足验收**：它已 implement 7 / 测试 5 / 验收 3 / arbitrate 3，全卡在同一个原因上（票面 `blocked_reason` 每次都点名同一项）。
 >
 > **本轮新测出来的两件事（都改了我自己的口径，已写进 `docs/ops`）**：
-> ① **「计划回执并集」这条路在计划段不成立**——`create_plan` 的 `stage_create_plan_gen*.json` 里 `files_changed` **只含 `integration/<票>/plan.md`**，方案正文虽然点名了两个调用点文件，**并集没有东西可读** ⇒ 写集不长（`-50` 复审后写集逐字不变，我实测确认）。**先例 `t261008-47` 能成，是因为它在实现轮真写了那两个 yaml 路径**，与"方案说我要改 X"是两回事。**⇒ 我此前在 `docs/ops` §10 与判词里引用的那条路是错的，已就地下更正**（提交 `18c5bca7`），并把可行出路改成三条：**人放宽写集**（最小改动、票自己做完）／**另开一张拥有那些文件的票**（本票验收口径要跟着改）／**先暂停挂起**（`op=pause` 在段边界生效并**释放并发额度**，别让轮次继续烧）。
-> ② **`plan.md` 会被 settle 回滚**（实测 `.sandbar/quarantine/unauth-create_plan-gen2` 里躺着它的 diff）：因为 `plan.md` **不在写集里** ⇒ **票据结构上"要求你产出一份方案文件"却又不给它写集席位**，结果是方案文件消失而票面不解释为什么（表现为"方案不见了/原地打转"）。**写票纪律**：凡 spec 要求落一份文件（方案/设计/报告），**该文件必须在写集里**。
+> ① **【本岗订正】我先前写的「计划回执并集在计划段不成立」是错的**——并集**确实生效**：泳道 `git diff --stat main...HEAD` 实测 `server/engine/activities.py +19`、`server/engine/workflows.py +26`（含接线与 `workflow.patched` 守卫），implement 轮自述也写着 *Write-set union per host ruling (plan gen-2 receipt files_changed, review_plan gen2 PASS): activities.py + workflows.py authorized*。**我错在哪**：读了**旧那一版** `stage_create_plan_gen1` 的回执（gen-1 的 `files_changed` 只有 `plan.md`），又把**票面 `write_set` 字段**当成「写集有没有长」的判据——而该字段**不会随并集重写**（并集只作用于**那一轮的有效写集**）。**纪律（已写进 `docs/ops` §10，再更正一次）**：判「写集是否长出」**看泳道差集**（`git diff --name-only main...HEAD`）＋该轮自述，**不看票面字段**；读回执要读**被审过的那一版**。这是本岗今晚第三次被「只读一个面」绊倒（前两次：KI 里写「已备票载」、锚点缩进量错），已立规矩：**凡结论要落进文档/KI，必先取可重放的原始面（差集/字节/日志），不取派生字段。**
 >
-> **当轮处置（留痕可推翻）**：给宿主的升级＝**推荐第①条**（把 `server/engine/workflows.py` 与 `server/engine/activities.py` 加进 `t261009-50` 写集，最小改动、本票自己把接线做完）；**放宽写集归宿主**，故同时**暂停该票**（段边界生效、释放额度）并在票面写明**恢复条件**。**并且封掉了它自己找的歪路**：它把接线写成 `integration/t261009-50/wiring-handoff.md` 的补丁文本等"后续票"——那正是 `KI-01M4HBC9ANXZXQRDQR54Z9C0MZ`（机制落地、调用点没人认领）的形态。
+> ② **两条仍成立的确认（都已实测）**：
+**并且封掉了它自己找的歪路**：它把接线写成 `integration/t261009-50/wiring-handoff.md` 的补丁文本等"后续票"——那正是 `KI-01M4HBC9ANXZXQRDQR54Z9C0MZ`（机制落地、调用点没人认领）的形态。
 >
 > **⇒ 该族的上游仍是 `KI-021`（写集冻结无扩写集机制）**：本族已三次咬人（`KI-158` 粒度覆盖不到 → `KI-167` 锁资产在写集外 → 本次**交付物本身**在写集外），三次的现场处置都是"人肉换载体/放宽"，**没有一次是机制自己解决**。上游那条（写集改革，`notes/discussions/260904-write-set-reform.md`）值得单独安排，不然这张单会一直以新面孔出现。
 
