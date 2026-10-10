@@ -15,6 +15,7 @@ intent（守护的用户可感知行为）：**一条命令答得出「这张票
 """
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import os
@@ -26,6 +27,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 POC = pathlib.Path(__file__).resolve().parent.parent
 REPO = POC.parents[1]
@@ -430,6 +432,128 @@ def _wait_gone(proc, timeout=10.0) -> bool:
             return True
         _t.sleep(0.1)
     return proc.poll() is not None
+
+
+class WiringStaleFaceTest(unittest.TestCase):
+    """t261011-04 L3: the operator faces must NAME a stale wiring module.
+
+    A worker stale only on ``workflows.py``/``activities.py`` used to be
+    invisible (the stamp did not track them). Both operator faces
+    (``engine_ops workers`` / ``engine_ops drift``) render ``stamp["stale"]``
+    and ``stamp["stamp_line"]`` verbatim — into the worker row and into the
+    drift alert text — so this pins that the module names reach both faces
+    instead of only a count or an empty list.
+    """
+
+    FAKE_STAMP = {
+        "available": True,
+        "worker_started_at": "2026-10-09T20:20:59",
+        "worker_pid": 28404,
+        "modules": {},
+        "stale": ["workflows", "activities"],
+        "stamp_line": "worker pid=28404 started=2026-10-09T20:20:59 "
+                      "stale=workflows,activities",
+    }
+
+    def test_stamp_for_names_wiring_modules_on_fixture_repo(self):
+        # Real stamp_for, fixture repo: workflows.py/activities.py newer than
+        # the worker baseline => the payload the faces embed names them.
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="engine-ops-wiring-"))
+        try:
+            for name in ("workflows", "activities"):
+                fp = tmp / "server" / "engine" / ("%s.py" % name)
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                fp.write_text("# wiring\n", encoding="utf-8")
+            base = (datetime.datetime.now()
+                    - datetime.timedelta(minutes=5)).isoformat(timespec="seconds")
+            st = eo.stamp_for(None, str(tmp), base)
+            self.assertTrue(st["available"])
+            self.assertEqual(sorted(st["stale"]), ["activities", "workflows"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _patched_drift_env(self, tmp):
+        lane = {"path": str(tmp / "lane"), "branch": "lane/t-x",
+                "source": "fixture", "available": True, "note": ""}
+        pid_row = {"state": "live", "pid": 28404, "raw": "28404",
+                   "started_at": "2026-10-09T20:20:59", "detail": "", "meta": {}}
+
+        def _fake_git(args, cwd):
+            # merge-base -> a ref; rev-list --count -> 0; diff --name-only -> none.
+            if "merge-base" in args:
+                return (0, "abc123def")
+            if "--count" in args:
+                return (0, "0")
+            if "--name-only" in args:
+                return (0, "")
+            return (0, "")
+
+        return (
+            mock.patch.object(eo, "_lane_paths", return_value=lane),
+            mock.patch.object(eo, "git", side_effect=_fake_git),
+            mock.patch.object(eo, "DATA", tmp),
+            mock.patch.object(eo, "read_pidfile", return_value=pid_row),
+            mock.patch.object(eo, "tree_of_pid",
+                              return_value={"tree": str(tmp / "tree"),
+                                            "available": True, "note": "",
+                                            "pid": 28404, "exe": "",
+                                            "cwd": str(tmp / "tree")}),
+            mock.patch.object(eo, "repo_root_from_tree", return_value=str(tmp)),
+            mock.patch.object(eo, "stamp_for",
+                              return_value=dict(self.FAKE_STAMP)),
+            mock.patch.object(eo, "_queues_of", return_value=["q1"]),
+            mock.patch.object(eo, "_queue_pollers",
+                              return_value={"queue": "q1", "available": False,
+                                            "live": [], "stale_history": [],
+                                            "unverifiable": [],
+                                            "live_count": 0, "note": "fixture"}),
+        )
+
+    def test_workers_face_carries_wiring_module_names(self):
+        # The workers row embeds stamp["stale"] + stamp_line verbatim.
+        w = {"kind": "central", "ticket": "", "pid": 28404,
+             "pidfile": "/tmp/worker.pid", "state": "live", "detail": "",
+             "started_at": "2026-10-09T20:20:59", "meta_repo_root": "/r",
+             "cwd": "/r", "tree": "/r", "tree_available": True,
+             "tree_note": "", "queues": [], "stamp": dict(self.FAKE_STAMP)}
+        with mock.patch.object(eo, "_enumerate_workers", return_value=[w]), \
+                mock.patch.object(eo, "_queue_pollers",
+                                  return_value={"queue": "sandbar",
+                                                "available": False, "live": [],
+                                                "stale_history": [],
+                                                "unverifiable": [],
+                                                "live_count": 0,
+                                                "note": "fixture"}):
+            args = argparse.Namespace(host=None, ns=None)
+            res = eo.cmd_workers(args)
+        rendered = json.dumps(res["result"]["workers"])
+        self.assertIn("workflows", rendered)
+        self.assertIn("activities", rendered)
+        self.assertIn("stale=workflows,activities", rendered,
+                      "stamp_line (what the operator reads) must name the module")
+
+    def test_drift_alert_names_wiring_modules(self):
+        # cmd_drift gates the stamp on the pidfile existing under DATA — that
+        # gate stays real code; only the process-side lookups are fixtures.
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="engine-ops-drift-"))
+        (tmp / "worker-t-x.pid").write_text("28404", encoding="utf-8")
+        try:
+            patches = self._patched_drift_env(tmp)
+            with patches[0], patches[1], patches[2], patches[3], patches[4], \
+                    patches[5], patches[6], patches[7], patches[8]:
+                args = argparse.Namespace(host=None, ns=None, ticket="t-x")
+                res = eo.cmd_drift(args)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        stamp = res["result"]["lane_worker"]["stamp"]
+        self.assertEqual(sorted(stamp["stale"]), ["activities", "workflows"])
+        # The alert text names the module, not only a count.
+        self.assertTrue(any("workflows" in a and "activities" in a
+                            for a in res["result"]["alerts"]),
+                        res["result"]["alerts"])
+        # The one-line error names each module, not only a count.
+        self.assertIn("workflows", res["error"])
+        self.assertIn("activities", res["error"])
 
 
 if __name__ == "__main__":

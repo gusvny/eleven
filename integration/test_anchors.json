@@ -1383,6 +1383,11 @@
       "anchor": "contract",
       "note": "t261009-78: the three buffer-stall legs (cert-wait-overdue / freeze-without-remedy / repair-points-nowhere) over the delivery ledger - threshold resolver fault modes, degrade-by-name on malformed rows / undeclared lines / missing patch_ids / unsupplied run-reader, human-gate suppression reuse, superseded relations exempt, report-level 'ledger not supplied' entry under stall_required, opt-out keeps old behaviour",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261011_04_code_stamp_wiring_modules.py": {
+      "anchor": "behaviour",
+      "note": "t261011-04 KI-01M4KH2QR5BRQ...: pure stamp layer — the four wiring/body modules (workflows/activities/develop_certify/develop_line) tracked and named stale when mtime newer than the worker baseline (stale list, modules entry, operator stamp line), unreadable mtime never stale with empty mtime field, wiring-marker guards on workflows.py/activities.py",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4916,6 +4921,11 @@
       "anchor": "behaviour",
       "note": "t261011-02: the CLI row face agrees per-key with the engine row face for the same ticket — every key of the real _row_from_meta row (develop-buffer opt-in, paused pair, closed shape) passes the _poc seam into the CLI list verbatim, nothing dropped or recomputed, legacy rows read honestly empty",
       "sync_path": "server/tools/ticket.py (_list projection)"
+    },
+    "integration/t261011-04/sc_t26101104_wiring_stamp_drift_face.py": {
+      "anchor": "behaviour",
+      "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
+      "sync_path": ""
     }
   },
   "server/engine/tests/test_t261010_75_answer_row_shape.py": {
