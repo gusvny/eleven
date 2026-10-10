@@ -4836,3 +4836,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（本岗已改自己的取证方法）**：**为签字/裁决采集判据时不得只 grep**——输出**先落文件再筛**（本次正是这条救了归因）；**遇到一次不可复现的红，先取正文、再定名**；**落地窗口内不读判据**（读到就等 30 秒复跑，并记下"读到的是落地中"）。
 >
 > **回归**：L3——在"某票 squash 落地进行中"的窗口内读该类判据，断言**不出具假红**（要么快照一致、要么具名"mid-landing"），落地完成后同一判据为绿；L1——对复合判据喂"清单含条目但文件缺席"与"文件在但清单无条目"两态，断言分别具名（这两态在**稳定树**上仍是真红，**不许被这次修复顺手放过**）。
+
+## KI-01M4HKWVMH6V2613RY7ZRCXQKB **并集授权在"轮"面上生效、在 **settle 面**上滞后 ⇒ 已授权的文件被当越权**回滚**、那一轮的活儿消失、验收循环重启（`t261009-50` 实证；同一票因此在同一原因上烧了 8 轮）**(261010 实测;executor 报证、integration 岗登记)
+
+> **现象（时间线全部取自泳道自己的物件，非推断）**：
+> - `08:17:47` **implement settle 落提交** `a4ed2124`「worker-settled (gen0, 5 files changed)」——**它的 5 个文件里没有那两个并集文件**（只有 `integration/run_scenarios.py`／新场景／`wiring-handoff.md`／`test_anchors.json`／新单测）。
+> - **同一秒** `.lane/t261009-50/.sandbar/quarantine/unauth-implement-gen0/manifest.json`（`ts=1791591467`）把 **`server/engine/activities.py` 与 `server/engine/workflows.py`** 逐条记为 **`action: reverted`**，并留下两份 diff（2173 B / 3217 B）。
+> - 而**那一轮的轮内自述写着它们已获授权**：*"Write-set union per host ruling (plan gen-2 receipt files_changed, review_plan gen2 PASS): activities.py + workflows.py authorized as call-site files"*。
+> - **这两个文件最后是怎么进树的**：`git log main..HEAD -- <两个路径>` 只列出 `0e78e1da`（**冲突消解合并提交**），`git diff --stat main HEAD` 才看到 `activities.py +19`／`workflows.py +26` ⇒ **接线是靠"下一次合并的 `git add -A`"顺手带进来的，不是靠"被授权的那一轮"**。泳道最终留住了它，**但是靠意外，不是靠裁决所指定的那条路**。
+>
+> **机理（已证与待证的界限说清）**：**已证**＝同一秒里"轮说已授权"与"settle 记 `reverted`"同时存在，即**授权在 settle 面没生效**；**待证（首要假设）**＝写集刷新（`shared.refresh_write_set`，`review_plan` 通过后并集）与紧随其后的那一轮 settle **取参数**之间存在时序差——settle 拿到的仍是刷新前的写集。**替代假设**：settle 读的是另一个字段／并集记录落盘晚于 settle 的参数快照。**未钉死前不要当机制用**；钉死它需要的证据：在**同一轮**里同时记录"workflow 传给 settle 的 write_set"与"轮内自述的并集授权"，两者不一致即可定案。
+>
+> **危害**：①**活儿静默消失**——轮面说"我获授权了"，落盘面把它回滚，票面看不出为什么（本族第三次咬人：`-47` 的注入夹具、`-167` 的锁资产、本次的并集授权，都是"干对了却被回滚"）；②**空转**——`-50` 因此在同一原因上 implement 7／测试 5／验收 3／arbitrate 3，直到并集之外的另一条路（合并里的 `add -A`）把它带进去；③**审计风险**：只读 implement 提交的读者会断言"接线从未落地"（这是我自己也差点得出的结论）。
+>
+> **出路（实现口径归修复票）**：①**settle 必须读到与该轮同一份写集**（刷新要在"会被 settle 看见"的位置落定，或在轮开始时把当轮有效写集**记进该轮**并由 settle 读它）；②**不一致要具名炸**：当轮自述声称某文件获授权、而 settle 手上的写集不含它 ⇒ **具名拒收（点名文件与两边的来源）**，绝不静默回滚——一次点破胜过八轮空转；③**禁止"靠下一次合并顺手带进来"**：授权过的文件必须出现在**被授权那一轮的提交**里，落地路径要能被 `git log main..HEAD -- <path>` 一眼读出（本条的验收面就是这个命令）。
+>
+> **回归**：L3——(а)一条走"计划并集"的泳道，断言 settle **不隔离**并集文件、且 `git log main..HEAD -- <该文件>` **点名那一轮**；(b)注入"轮已授权、settle 写集不含"的形态，断言**具名拒收**而非静默回滚（对照：现有行为是回滚 + 清单记 reverted）；(c)反向对照——**未授权**的文件照旧回滚（别把这次修复放大成"什么都不回滚"）。L1——写集刷新与 settle 参数快照的**顺序**真值表。
