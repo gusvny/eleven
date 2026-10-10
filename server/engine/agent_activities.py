@@ -5964,6 +5964,205 @@ async def lane_head_sha(args: LaneHeadShaArgs) -> LaneHeadShaResult:
     return LaneHeadShaResult(ok=True, sha=lines[0])
 
 
+# ---- develop-buffer landing path (t261009-46) ---------------------------------
+# develop-buffer gate region (t261009-46) -- begin
+# Everything between the BEGIN/END markers is reachable ONLY by a ticket that
+# opted into the develop-buffer lane version (dev_lane's version gate); a
+# legacy ticket never executes any of it. The new-surface imports here are
+# LAZY on purpose: develop_line imports this module at its own module level,
+# so a module-level import back would be a cycle. The re-stated inert face
+# (t261009-18 sc_old_flow_inert_face.py, face B) asserts that these are the
+# ONLY textual references to develop_line/develop_certify in this module and
+# that the module-level import graph stays one-way.
+
+@dataclass
+class LandToLineArgs:
+    """Inputs of land_to_line: the ticket's proven revision lands onto its
+    declared develop line. ``proven_sha`` is the revision the gate judged
+    (the meta["last_green_run"] sha's provenance, anchored at the green gate
+    round — never the current tip); ``worktree`` is the lane worktree whose
+    HEAD must sit at that revision."""
+
+    ticket_id: str
+    project_key: str = ""
+    line_id: str = ""
+    worktree: str = ""
+    proven_sha: str = ""
+
+
+@dataclass
+class LandToLineResult:
+    """The landing receipt (ok=False + named error on every refusal — never a
+    raise: the workflow turns the named text into a blocked face)."""
+
+    ok: bool = False
+    line_id: str = ""
+    revisions: Dict[str, str] = field(default_factory=dict)
+    error: str = ""
+
+
+def _land_to_line_refuse(note: str) -> LandToLineResult:
+    return LandToLineResult(ok=False, error=note)
+
+
+@activity.defn
+async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
+    """The develop-buffer landing act, called ONLY behind the version gate.
+    Consumes the PROVEN revision (not the current tip): the lane checkout is
+    pinned at the proven sha first (``pin_lane_revision`` refuses by name when
+    the checkout cannot be pinned), then the phase-1 serialized landing
+    (``develop_line.land_ticket``) does the act — the add/commit sequence
+    stays ``_settle_merge_core``'s single implementation, only the destination
+    changes (the line's branch, not main). Main is NOT touched here: delivery
+    moves only through a signed promotion. Single-repository phase: the line
+    must declare exactly one repository and the lane worktree maps to it — a
+    multi-repository line refuses by name (per-repo proven anchoring is a
+    later declaration, not a silent single-repo assumption)."""
+    import develop_line  # lazy: develop_line imports this module at module level
+
+    if not isinstance(args.ticket_id, str) or not args.ticket_id.strip():
+        return _land_to_line_refuse("malformed ticket_id: %r" % (args.ticket_id,))
+    if not isinstance(args.project_key, str) or not args.project_key.strip():
+        return _land_to_line_refuse(
+            "ticket %s has no project key — the landing needs the project store"
+            % args.ticket_id)
+    if not isinstance(args.line_id, str) or not args.line_id.strip():
+        return _land_to_line_refuse(
+            "ticket %s opted into %s but names no develop line (meta.develop_line "
+            "empty) — a develop-buffer ticket must declare the line it lands on"
+            % (args.ticket_id, develop_line.LANE_VERSION_DEVELOP_BUFFER))
+    if not (isinstance(args.worktree, str) and args.worktree.strip()):
+        return _land_to_line_refuse(
+            "ticket %s: lane worktree empty/malformed — refusing to land"
+            % args.ticket_id)
+    if not (isinstance(args.proven_sha, str) and args.proven_sha.strip()):
+        return _land_to_line_refuse(
+            "ticket %s: the proven revision is empty/malformed — refusing to "
+            "land (the landing consumes the revision the gate judged, never "
+            "the current tip)" % args.ticket_id)
+    try:
+        line = develop_line.load_line(args.project_key, args.line_id)
+    except Exception as e:  # noqa: BLE001 — the named refusal travels in the receipt
+        return _land_to_line_refuse(
+            "ticket %s: develop line %r unreadable in project %r: %s: %s"
+            % (args.ticket_id, args.line_id, args.project_key,
+               type(e).__name__, str(e)[:300]))
+    if len(line.repositories) != 1:
+        return _land_to_line_refuse(
+            "ticket %s: line %r declares %d repositories — the per-ticket "
+            "landing wires the single-repository phase; a multi-repository "
+            "line needs its per-repo proven anchoring declared first, it is "
+            "never assumed" % (args.ticket_id, args.line_id, len(line.repositories)))
+    repo_name = line.repositories[0].name
+    # Pin BEFORE the act: the checkout must sit at the proven revision, or
+    # nothing lands (all-or-nothing starts at the pin, not at the merge).
+    try:
+        develop_line.pin_lane_revision(Path(args.worktree), args.proven_sha)
+    except Exception as e:  # noqa: BLE001
+        return _land_to_line_refuse(
+            "ticket %s: pinning %r at the proven revision failed — landing "
+            "refused, nothing landed: %s" % (args.ticket_id, repo_name, str(e)[:300]))
+    try:
+        res = develop_line.land_ticket(
+            line, args.project_key, {repo_name: Path(args.worktree)},
+            args.ticket_id, performed_by="engine:land_to_line")
+    except Exception as e:  # noqa: BLE001 — LandingError family + ledger faults
+        return _land_to_line_refuse(
+            "ticket %s: landing onto line %r refused: %s: %s"
+            % (args.ticket_id, args.line_id, type(e).__name__, str(e)[:400]))
+    return LandToLineResult(ok=True, line_id=args.line_id,
+                            revisions=dict(getattr(res, "revisions", None) or {}))
+
+
+@dataclass
+class CertWaitArgs:
+    """Inputs of certification_wait: read the landing's wait face off the
+    delivery ledger (the phase-1 decision face; the tick's round schedule that
+    produces certifications is t261009-30 and is deliberately NOT here)."""
+
+    ticket_id: str
+    project_key: str = ""
+    line_id: str = ""
+
+
+@dataclass
+class CertWaitResult:
+    """The wait face. ``state`` uses the phase-1 vocabulary (waiting /
+    certified / red_implicated / reverted) or ``run_verdict_unreadable`` —
+    the honest stop when a certification exists but no run-verdict reader
+    does (the reader is t261009-30's producer side; guessing green would mint
+    a delivery nobody proved)."""
+
+    ok: bool = False
+    state: str = ""
+    covered_by: str = ""
+    waiting_for: str = ""
+    error: str = ""
+
+
+def cert_wait_face(rows: List[Dict[str, Any]], line_id: str,
+                   landing: Dict[str, Any], is_green: Optional[Any],
+                   now_ms: int) -> Dict[str, Any]:
+    """Pure face over ``develop_certify.ticket_wait_state`` with THIS ticket's
+    honesty rule pinned: once the line has ANY certification, a caller without
+    a run-verdict reader must say so by name — a guessed ``None`` reads as
+    "every certification is green" and mints a delivery nobody proved (zero
+    runs are never proof). Unit tests inject a reader here; the activity has
+    none until t261009-30 builds the run-record home."""
+    import develop_certify  # lazy, same cycle discipline as land_to_line
+
+    has_certs = bool(develop_certify._of_kind(
+        rows, develop_certify.KIND_CERT, line_id))
+    if has_certs and not callable(is_green):
+        return {"state": "run_verdict_unreadable",
+                "reason": "certifications exist on line %r but no run-verdict "
+                          "reader is built yet (t261009-30) — refusing to guess "
+                          "green; the ticket stops named, not silently delivered"
+                          % line_id}
+    return develop_certify.ticket_wait_state(
+        rows, line_id, landing, is_green, now_ms)
+
+
+@activity.defn
+async def certification_wait(args: CertWaitArgs) -> CertWaitResult:
+    """ONE read of the landing's wait face (the workflow polls; this activity
+    never sleeps — polling stays on the workflow side so a waiting ticket holds
+    no worker slot longer than one read)."""
+    import develop_certify  # lazy
+
+    if not (isinstance(args.ticket_id, str) and args.ticket_id.strip()) \
+            or not (isinstance(args.project_key, str) and args.project_key.strip()) \
+            or not (isinstance(args.line_id, str) and args.line_id.strip()):
+        return CertWaitResult(ok=False, error="malformed CertWaitArgs: ticket/"
+                              "project/line must be non-empty strings")
+    try:
+        rows, bad = develop_certify.read_rows(
+            develop_certify.ledger_path(args.project_key))
+    except Exception as e:  # noqa: BLE001
+        return CertWaitResult(ok=False, error="delivery ledger unreadable: %s: %s"
+                              % (type(e).__name__, str(e)[:300]))
+    if bad:
+        return CertWaitResult(ok=False, error="delivery ledger has %d malformed "
+                              "lines — refusing to judge a wait over corrupt records"
+                              % len(bad))
+    landings = [r for r in rows
+                if isinstance(r, dict)
+                and r.get("kind") == develop_certify.KIND_LANDING
+                and r.get("ticket") == args.ticket_id
+                and r.get("line") == args.line_id]
+    if not landings:
+        return CertWaitResult(ok=False, error="no landing record for ticket %s on "
+                              "line %r — nothing to wait for"
+                              % (args.ticket_id, args.line_id))
+    face = cert_wait_face(rows, args.line_id, landings[-1], None,
+                          int(time.time() * 1000))
+    return CertWaitResult(ok=True, state=str(face.get("state") or ""),
+                          covered_by=str(face.get("covered_by") or ""),
+                          waiting_for=str(face.get("waiting_for") or ""))
+
+# develop-buffer gate region (t261009-46) -- end
+
+
 @activity.defn
 async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     """Programmatic checks before the merge (260824 dev-lane, no agent — every

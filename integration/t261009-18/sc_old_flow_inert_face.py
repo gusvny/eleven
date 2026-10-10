@@ -121,12 +121,104 @@ def main():
                                          | {k for k in before
                                             if after.get(k) != before[k]})[:5])
 
-        # --- B: one-way dependency, source-text face ---
+        # --- B: one-way dependency, re-stated by t261009-46 ---
+        # The opt-in wiring (t261009-46) makes dev_lane import develop_line at
+        # module level (declared inert — every behaviour sits behind the
+        # version gate) and gives agent_activities lazy new-surface imports
+        # inside its declared develop-buffer gate region. The face keeps its
+        # teeth by asserting the WIRING-LEVEL invariants, not a no-reference
+        # ban the wiring itself retired:
+        #   B1  the module-level import graph stays one-way, with ONE declared
+        #       exception: dev_lane.py's inert import of develop_line (the
+        #       wiring itself; every behaviour sits behind the version gate).
+        #       agent_activities and workflows_v2 carry none.
+        #   B2  in agent_activities, every textual reference to the new
+        #       surface sits between the declared gate-region markers;
+        #   B3  in dev_lane, every AST reference to the new surface sits in
+        #       the declared seams (is_develop_buffer_ticket, the _init
+        #       intake, the _dev_buffer_* steps) — no other old-flow code
+        #       path reaches it;
+        #   B4  workflows_v2 names no new surface at all.
+        # (Gray-box per the review condition: declared marker/seam NAMES only,
+        # never private line numbers or branch-internal order.)
+        import ast
+        NEW_PREFIXES = ("develop_line", "develop_certify", "develop_promote")
         for mod in ("dev_lane.py", "workflows_v2.py", "agent_activities.py"):
             p = os.path.join(engine, mod)
-            txt = open(p).read() if os.path.exists(p) else ""
-            check("B-running-flow-no-reference-%s" % mod,
-                  "develop_line" not in txt, "%s references develop_line" % mod)
+            txt = open(p, encoding="utf-8", errors="replace").read() \
+                if os.path.exists(p) else ""
+            tree = ast.parse(txt) if txt else ast.parse("pass")
+            module_level_new = set()
+            for node in tree.body:
+                if isinstance(node, ast.Import):
+                    module_level_new |= {a.name for a in node.names
+                                         if a.name.startswith(NEW_PREFIXES)}
+                elif isinstance(node, ast.ImportFrom) and \
+                        (node.module or "").startswith(NEW_PREFIXES):
+                    module_level_new.add(node.module)
+            check("B1-module-level-graph-one-way-%s" % mod,
+                  not module_level_new or mod == "dev_lane.py",
+                  "module-level imports of the new surface: %s"
+                  % sorted(module_level_new))
+
+        acts_txt = open(os.path.join(engine, "agent_activities.py"),
+                        encoding="utf-8", errors="replace").read()
+        BEGIN = "# develop-buffer gate region (t261009-46) -- begin"
+        END = "# develop-buffer gate region (t261009-46) -- end"
+        i0, i1 = acts_txt.find(BEGIN), acts_txt.find(END)
+        check("B2-gate-region-markers-present", 0 <= i0 < i1,
+              "declared gate-region markers missing from agent_activities.py")
+        if 0 <= i0 < i1:
+            outside = acts_txt[:i0] + acts_txt[i1 + len(END):]
+            check("B2-references-confined-to-gate-region",
+                  "develop_line" not in outside and "develop_certify" not in outside,
+                  "new-surface reference outside the declared gate region")
+
+        def _new_names(node):
+            out = set()
+            for n in ast.walk(node):
+                if isinstance(n, ast.Name) and n.id.startswith(NEW_PREFIXES):
+                    out.add(n.id)
+                if isinstance(n, ast.Attribute) and \
+                        isinstance(n.value, ast.Name) and \
+                        n.value.id.startswith(NEW_PREFIXES):
+                    out.add(n.value.id)
+            return out
+
+        lane_tree = ast.parse(open(os.path.join(engine, "dev_lane.py"),
+                                   encoding="utf-8", errors="replace").read())
+        breaches = []
+        for node in lane_tree.body:
+            if isinstance(node, ast.FunctionDef):
+                if node.name != "is_develop_buffer_ticket":
+                    breaches.extend("%s" % node.name for _ in [0]
+                                    if _new_names(node))
+            elif isinstance(node, ast.ClassDef):
+                for sub in node.body:
+                    if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        if sub.name.startswith("_dev_buffer") or sub.name == "_init":
+                            continue
+                        if _new_names(sub):
+                            breaches.append("%s.%s" % (node.name, sub.name))
+                    elif isinstance(sub, ast.AnnAssign) and \
+                            getattr(sub.target, "id", "") == "develop_line_id":
+                        continue  # the declared input field, not a reference
+                    elif _new_names(sub):
+                        breaches.append("%s.<class-body>" % node.name)
+            elif _new_names(node):
+                breaches.append("<module-body:%s>" % type(node).__name__)
+        check("B3-dev-lane-references-in-declared-seams", not breaches,
+              "new-surface references outside the declared seams: %s"
+              % sorted(set(breaches))[:5])
+
+        wf_txt = open(os.path.join(engine, "workflows_v2.py"),
+                      encoding="utf-8", errors="replace").read() \
+            if os.path.exists(os.path.join(engine, "workflows_v2.py")) else ""
+        check("B4-workflows-v2-names-nothing-new",
+              not any(w in wf_txt for w in ("develop_line", "develop_certify",
+                                            "develop_promote", "land_to_line",
+                                            "LANE_VERSION")),
+              "workflows_v2.py names the new surface")
 
         # --- C: landing write-locality ---
         repo = make_repo(repos_root, "repo1")

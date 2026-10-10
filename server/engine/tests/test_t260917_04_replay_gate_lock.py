@@ -342,6 +342,24 @@ BRANCH_REGISTRY = {
         "an arbitrate re-judgement spin.",
     "dev_lane.py#run#await self._ki220_supply_zero_run_stop(closing)#1":
         "KI-220: same-shaped closing-full-run branch (serial side), same self-guard.",
+    # t261009-46 develop-buffer landing path, two sites. Self-guard shape
+    # (KI-220 precedent): _dev_buffer_land_step's FIRST statement is
+    # workflow.patched(DEV_BUFFER_LANDING_PATCH_ID) — an old history without
+    # the marker returns False at the top, executes zero commands, and the run
+    # loop falls through to the legacy human-gate path (byte-identical; the
+    # original inline archive/teardown block was restored there verbatim).
+    # The version predicate is_develop_buffer_ticket routes only opt-in
+    # tickets to this call; it is NOT the replay gate, the patched() id is.
+    "dev_lane.py#run#await self._dev_buffer_land_step()#0":
+        "t261009-46: develop-buffer landing step; self-guarded at the method "
+        "top by workflow.patched(DEV_BUFFER_LANDING_PATCH_ID) - old-history "
+        "replay executes zero commands and takes the legacy human-gate path "
+        "(is_develop_buffer_ticket is False for every pre-change ticket).",
+    "dev_lane.py#_dev_buffer_land_step#not await self._archive_and_teardown()#0":
+        "t261009-46: the landing step's shared close-out; the whole method is "
+        "behind workflow.patched(DEV_BUFFER_LANDING_PATCH_ID) (see the entry "
+        "above), so this branch is unreachable on old-history replay; the "
+        "legacy path uses the original inline block, not this helper.",
     # 260929 集成判停两处（串行 / 并行汇合侧）：外层已处
     # workflow.patched(INTEG_STALL_PATCH_ID) 门内（AST 祖先链核实，自证钉在
     # test_260929_integ_stall_guard.py::test_stall_branches_are_inside_their_patch_gate

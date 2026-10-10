@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 264,
-      "scenarios": 682
+      "engine_tests": 267,
+      "scenarios": 687
     },
     "vocab": [
       "behaviour",
@@ -1334,6 +1334,11 @@
     "server/engine/tests/test_t261009_63_repair_exemption.py": {
       "anchor": "behaviour",
       "note": "t261009-63: repair-exemption behaviour truth table - three naming forms grant the frozen-line fix landing, named refusals (no relation / wrong kind / foreign from / detached / cross-line / superseded / unmapped patch-id / malformed repair), unfrozen unchanged, relation never mints a kind; beneficiary face repaired_by/repaired_at/repaired_unresolved, tie-break, invalid-at, ending untouched"
+    },
+    "server/engine/tests/test_t261009_46_lane_version_optin.py": {
+      "anchor": "behaviour",
+      "note": "t261009-46: the version-gated landing path — refusal matrix, pin-the-proven-revision, the activity's receipts, and the one-way import graph",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4763,6 +4768,16 @@
     "integration/t261009-63/sc_t26100963_repair_exemption.py": {
       "anchor": "contract",
       "note": "t261009-63: the repairs relation's two consumers read back from disk - no relation no exemption (named refusals), three naming forms grant the frozen-line landing, cross-line target is a scoping refusal, corrected relation grants nothing, and the repaired side reports repaired_by/repaired_at (unmapped patch-id stays visible as repaired_unresolved)"
+    },
+    "integration/t261009-46/sc_optin_landing_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261009-46: the opt-in landing journey — version-name refusal matrix never defaulted, proven revision lands on the line with main unmoved and one reader-side ledger row, clean drift pins and lands the proven sha, dirty drifted checkout refuses by name with zero writes",
+      "sync_path": ""
+    },
+    "integration/t261009-46/sc_legacy_path_untouched.py": {
+      "anchor": "behaviour",
+      "note": "t261009-46 coexistence — legacy-version resolution creates nothing, importing the running-flow modules leaves the new surface unimported (one-way dependency, re-verified for the wired tree), an old-path settle writes nothing into the new homes, workflows_v2 names no new surface",
+      "sync_path": ""
     }
   }
 }

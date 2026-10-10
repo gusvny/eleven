@@ -36,6 +36,7 @@ import json
 import os
 import re
 import pathlib
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -82,6 +83,10 @@ with workflow.unsafe.imports_passed_through():
     # ——FLOW_BRIEF 的 clause 由其 prompt_clause() 从 FORBIDDEN_ENTRIES 渲染，
     # 文案与执法匹配器同源（声明=执法，两侧必须同批改）。
     import integration_discipline
+    # t261009-46: the develop-buffer lane version's registry — the ONE declared
+    # module-level existing->new import edge (inert: every behaviour sits behind
+    # is_develop_buffer_ticket); loaded inside the passed-through import block.
+    import develop_line
     from agent_activities import (
         INTEG_GUARD_SEC,  # t260924-05 KI-116：外层预算派生源（内层守卫 + 300）
         arbitrate,
@@ -90,6 +95,14 @@ with workflow.unsafe.imports_passed_through():
         changed_files,
         LaneHeadShaArgs,
         LaneHeadShaResult,
+        # t261009-46: the develop-buffer landing act + the certification wait
+        # face (reachable only through is_develop_buffer_ticket).
+        land_to_line,
+        LandToLineArgs,
+        LandToLineResult,
+        certification_wait,
+        CertWaitArgs,
+        CertWaitResult,
         merge,
         merge_check,
         # t261009-58: the ONE effective write set — record persistence + holder scan
@@ -224,6 +237,55 @@ with workflow.unsafe.imports_passed_through():
     )
 
 SHORT = timedelta(minutes=2)
+
+# ---- develop-buffer lane version (t261009-46) ---------------------------------
+# develop-buffer gate region (t261009-46) -- begin
+# The per-ticket opt-in: a ticket names its lane version at open (the input's
+# ``lane_version`` field); an unknown/malformed name is refused BY NAME at
+# intake (workflow start — the nearest sound seam inside this write set; the
+# dispatch-side fields land here verbatim once client.py grows them, see the
+# implement handover). A ticket that did not opt in (empty/absent = legacy) is
+# never moved: every landing-path branch keys on is_develop_buffer_ticket.
+
+#: The certification wait poll: the workflow re-reads the wait face on this
+#: cadence, up to CERT_WAIT_ROUNDS reads. Polling lives on the workflow side
+#: so a waiting ticket holds no worker slot beyond one read (goal 15).
+CERT_WAIT_INTERVAL_S = 300
+CERT_WAIT_ROUNDS = 96  # ≈ 8h, then a named blocked for a human
+
+#: Replay gate (t260917-04 lock, family Same-shaped boolean gate): the whole
+#: develop-buffer landing path is NEW code. A history recorded before this
+#: change replays with workflow.patched()=False here — the landing step
+#: returns at its top without executing any command, and the run loop takes
+#: the legacy human-gate path exactly as before. New tickets evaluate True.
+DEV_BUFFER_LANDING_PATCH_ID = "dev-buffer-landing-v1"
+
+
+@dataclass
+class DevLaneTicketInput(TicketInput):
+    """The dev-lane workflow's input shape, extended by the per-ticket lane
+    version (t261009-46). Defaults empty = a payload that predates the field
+    (every in-flight ticket) replays as a legacy ticket, never moved."""
+
+    lane_version: str = ""     # the explicit opt-in; "" = did not opt in (legacy)
+    develop_line_id: str = ""  # the declared line the ticket lands on (required for develop-buffer)
+
+
+def is_develop_buffer_ticket(meta: Any) -> bool:
+    """The ONE version gate: True iff the ticket's parsed lane version is the
+    develop-buffer flow. Every landing-path branch keys on this predicate and
+    on nothing else — no template sniffing, no global switch, no silent
+    migration (design coexistence rule: 'how a ticket chooses'). A malformed
+    value never raises here: intake already refused it by name before it could
+    reach meta — this predicate only routes, and anything that is not the
+    develop-buffer name routes to the legacy path."""
+    try:
+        return develop_line.is_develop_buffer_version(
+            str((meta or {}).get("lane_version") or ""))
+    except develop_line.LaneVersionError:
+        return False
+
+# develop-buffer gate region (t261009-46) -- end
 MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane verify_lane
                                          # (tsc/smoke, can take minutes)
 MERGE_TO = timedelta(minutes=5)
@@ -1238,6 +1300,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             "epic": inp.epic,
             "stage": first.id,
             "stage_state": "awaiting",
+            # t261009-46: the per-ticket lane version, resolved at intake (see
+            # the intake block right after this dict — a bad name never lands
+            # in meta; it refuses the workflow start by name).
+            "lane_version": "",
+            "develop_line": str(getattr(inp, "develop_line_id", "") or ""),
             "write_set": list(inp.write_set),
             "no_file_changes": bool(getattr(inp, "no_file_changes", False)),
             # t260911-03 路径闸总开关：随派单输入钉死（getattr 缺省 False=老在途票
@@ -1284,6 +1351,16 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                      "note": "ticket created (%s: activity direct orchestration, steps=%s)"
                              % (self.TEMPLATE_ID, [s.id for s in self.STAGES])}],
         }
+        # t261009-46: lane-version intake (spec (1) — explicit, per ticket,
+        # refused by name, never defaulted). The refusal point is the workflow
+        # START: this is the nearest sound intake seam inside this ticket's
+        # write set (the dispatch side carries the fields verbatim once
+        # client.py grows them — named in the implement handover). A present-
+        # but-bad name raises out of _init and the start fails with the named
+        # reason; absence resolves to legacy (the ticket did not opt in) and
+        # replays identically for in-flight tickets.
+        self.meta["lane_version"] = develop_line.parse_lane_version(
+            getattr(inp, "lane_version", "") or "")
         if _dropped:
             # t260929-19：畸形/重复增项显式降级——log 类台账点名（非 _mark 段状态，
             # 避免污染下游 snapshot/lane 读的段状态机）。
@@ -3322,8 +3399,205 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         return {"stop": _sync_stop, "phase": _sync_phase,
                 "sync_s": _sync_s}
 
+    # ---------- develop-buffer landing path (t261009-46, version-gated) ------
+
+    async def _archive_and_teardown(self) -> bool:
+        """The M1-3 close-out (archive fail-closed -> teardown), SHARED by both
+        merge paths. Extracted verbatim from the human-gate path by t261009-46
+        so the develop-buffer path cannot grow a second close-out sequence;
+        returns False after turning the ticket blocked (the caller continues),
+        True when the ticket body is archived and the lane torn down."""
+        if not workflow.patched(ARCHIVE_PATCH_ID):
+            return True
+        # archive_ticket: fail-closed — a failed archive means the report
+        # would be lost with the teardown, so go blocked and keep the lane
+        # (no bare raise: a workflow task retrying on an exception never
+        # reaches a terminal state, only blocked has an exit).
+        try:
+            ares = await workflow.execute_activity(
+                archive_ticket,
+                ArchiveArgs(ticket_id=self.ticket_id,
+                            project_key=str(self.meta.get("project") or ""),
+                            worktree=str(self.meta.get("worktree") or ""),
+                            meta=dict(self.meta)),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:
+            await self._blocked(
+                "merge",
+                "ticket data archive failed (fail-closed, lane kept, not torn down): %s: %s%s"
+                % (type(e).__name__, str(e)[:400],
+                   shared.exception_chain_note(e)))
+            return False
+        if not isinstance(ares, ArchiveResult) or not ares.ok:
+            await self._blocked(
+                "merge",
+                "ticket data archive receipt abnormal (fail-closed, lane kept, not torn down): %s"
+                % ((getattr(ares, "error", "") or repr(ares))[:400]))
+            return False
+        self._log("ticket data archived: %s"
+                  % (getattr(ares, "archive_path", "") or "(path unknown)"))
+        # teardown_lane: tear down the lane (a cleanup failure only warns in
+        # the receipt; lane leftovers are reclaimable garbage, the data itself
+        # is already listed in archive.json, so closing the ticket is not
+        # blocked).
+        try:
+            tr = await workflow.execute_activity(
+                teardown_lane,
+                MergeArgs(ticket_id=self.ticket_id,
+                          worktree=str(self.meta.get("worktree") or ""),
+                          branch=str(self.meta.get("branch") or ""),
+                          # t260913-05: meta.repo_worktrees is the per-repo
+                          # detail source of truth, handed to teardown for the
+                          # per-repo cleanup — when the on-disk manifest mirror
+                          # vanished with a partial teardown (Temporal retry),
+                          # it still names the member repos, never falling
+                          # back to a single-repo anchor and leaving silent
+                          # residue. Payload compatibility: in-flight tickets
+                          # without the key -> empty list -> teardown falls
+                          # back to manifest/single-repo.
+                          repo_worktrees=list(self.meta.get("repo_worktrees") or [])),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:
+            await self._blocked(
+                "merge",
+                "lane teardown fault (ticket body archived, lane residue "
+                "awaiting human): %s: %s%s"
+                % (type(e).__name__, str(e)[:400],
+                   shared.exception_chain_note(e)))
+            return False
+        if not isinstance(tr, MergeResult) or not tr.ok:
+            await self._blocked(
+                "merge",
+                "lane teardown receipt abnormal (ticket body archived, "
+                "lane residue awaiting human): %s"
+                % ((getattr(tr, "error", "") or repr(tr))[:400]))
+            return False
+        if tr.error:
+            self._log("lane teardown warning (residue recoverable, ticket body archived): %s"
+                      % tr.error)
+        return True
+
+    async def _dev_buffer_land_step(self) -> bool:
+        """The develop-buffer landing path (t261009-46) — the version-gated
+        replacement for the per-ticket human merge gate. Consumes the PROVEN
+        revision (``meta.last_green_run.sha`` — the sha the green gate round
+        anchored on the exact tree it judged, KI-220; a missing face refuses
+        by name, never falls back to the current tip), lands it onto the
+        declared line through the phase-1 landing act, then waits for a
+        certification that covers the landing (bounded poll; the schedule
+        that produces certifications is t261009-30 and is deliberately not
+        here). Main is NOT touched: delivery moves only through a signed
+        promotion (spec (5)). Recovery-shaped: a re-entry after a landing is
+        already recorded skips straight to the wait (one landing per ticket
+        is refused loudly, never attempted twice). Returns True when the
+        ticket's post-landing life is over (archived + torn down); False when
+        the ticket is blocked named (the caller continues)."""
+        # Replay gate (t260917-04, Same-shaped boolean gate, KI-220 shape):
+        # self-guard FIRST — an old history without the marker executes zero
+        # commands here and the run loop falls through to the legacy path.
+        if not workflow.patched(DEV_BUFFER_LANDING_PATCH_ID):
+            return False
+        st = self._step("merge")
+        self._enter("merge")
+        line_id = str(self.meta.get("develop_line") or "")
+        green = dict(self.meta.get("last_green_run") or {})
+        proven_sha = str(green.get("sha") or "")
+        if not proven_sha:
+            await self._blocked(
+                "merge",
+                "develop-buffer landing refused: this ticket has no green-run "
+                "face (meta.last_green_run carries no sha) — the landing "
+                "consumes the revision the gate judged, and no judged revision "
+                "is recorded; never falls back to the current tip. Re-verify "
+                "with retry_qc (a green gate round re-anchors the face).")
+            return False
+        lraw = await workflow.execute_activity(
+            land_to_line,
+            LandToLineArgs(ticket_id=self.ticket_id,
+                           project_key=str(self.meta.get("project") or ""),
+                           line_id=line_id,
+                           worktree=str(self.meta.get("worktree") or ""),
+                           proven_sha=proven_sha),
+            start_to_close_timeout=MERGE_TO, retry_policy=RETRY)
+        lr = lraw if isinstance(lraw, LandToLineResult) else LandToLineResult(
+            ok=bool(lraw.get("ok")), line_id=str(lraw.get("line_id") or ""),
+            revisions=dict(lraw.get("revisions") or {}),
+            error=str(lraw.get("error") or ""))
+        if lr.ok:
+            self.meta["landing"] = {
+                "line": lr.line_id, "proven_sha": proven_sha,
+                "revisions": dict(lr.revisions), "at": self._now_epoch()}
+            self._log("develop-buffer landing recorded on line %s (proven %s)"
+                      % (lr.line_id, proven_sha[:12]))
+        else:
+            already = "already landed" in (lr.error or "") \
+                or "already has a landing" in (lr.error or "")
+            if not already:
+                # A drifted checkout / undeclared line / duplicate landing:
+                # the refusal is named, nothing landed, the tip is untouched.
+                await self._blocked("merge", "develop-buffer landing refused: %s"
+                                    % (lr.error or "unknown"))
+                return False
+            self._log("develop-buffer landing already recorded; resuming the wait")
+        # Wait for the covering certification (goal 14): polling stays on the
+        # workflow side — a waiting ticket holds no worker slot beyond one
+        # read (goal 15). The schedule that produces certifications is
+        # t261009-30; until it exists every wait ends at this bound, named.
+        for i in range(CERT_WAIT_ROUNDS):
+            craw = await workflow.execute_activity(
+                certification_wait,
+                CertWaitArgs(ticket_id=self.ticket_id,
+                             project_key=str(self.meta.get("project") or ""),
+                             line_id=line_id),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+            cr = craw if isinstance(craw, CertWaitResult) else CertWaitResult(
+                ok=bool(craw.get("ok")), state=str(craw.get("state") or ""),
+                covered_by=str(craw.get("covered_by") or ""),
+                waiting_for=str(craw.get("waiting_for") or ""),
+                error=str(craw.get("error") or ""))
+            if not cr.ok:
+                await self._blocked("merge",
+                                    "develop-buffer wait face unreadable: %s"
+                                    % (cr.error or "unknown"))
+                return False
+            if cr.state == "certified":
+                self._log("certification %s covers the landing — the ticket ends"
+                          % (cr.covered_by or "?"))
+                break
+            if cr.state in ("red_implicated", "reverted", "run_verdict_unreadable"):
+                await self._blocked(
+                    "merge",
+                    "develop-buffer wait stopped named: state=%s%s — the remedy "
+                    "for a red that implicates a landing is a new fix ticket "
+                    "against the line, never a return of this ticket to work"
+                    % (cr.state,
+                       (" (" + cr.waiting_for + ")") if cr.waiting_for else ""))
+                return False
+            # still waiting (or the poll index is exhausted below)
+            if i < CERT_WAIT_ROUNDS - 1:
+                await workflow.sleep(CERT_WAIT_INTERVAL_S)
+        else:
+            await self._blocked(
+                "merge",
+                "no certification covered this landing within %d polls x %ds "
+                "(the certification round schedule is t261009-30, not built "
+                "yet) — stopped named for a human, not silently delivered"
+                % (CERT_WAIT_ROUNDS, CERT_WAIT_INTERVAL_S))
+            return False
+        if not await self._archive_and_teardown():
+            return False
+        self._finish("merge", by="engine:land",
+                     evidence="develop-buffer landing on %s (proven %s)"
+                              % (line_id, proven_sha[:12]))
+        self._handoff("merge", "Landed onto line %s; certified; ticket ends at "
+                               "the buffer (main moves only via promotion)" % line_id)
+        return True
+
     @workflow.run
-    async def run(self, inp: TicketInput) -> Dict[str, Any]:
+    async def run(self, inp: DevLaneTicketInput) -> Dict[str, Any]:
+        # DevLaneTicketInput (t261009-46): the input shape extended by the
+        # per-ticket lane version; the annotation is what Temporal decodes
+        # against, so the opt-in fields survive the payload round-trip.
         self._init(inp)
 
         # t261004-32: concurrency gate - judge the slot before the first stage
@@ -5403,8 +5677,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 phase = "merge_check"
                 continue
 
-            # 5) merge (human gate → approve signature → the merge activity really merges)
+            # 5) merge — the version fork (t261009-46): a develop-buffer ticket
+            #    lands onto its declared line (no per-ticket human merge gate;
+            #    main moves only via a signed promotion); a legacy ticket takes
+            #    the human-gate path below, byte-identical.
             if phase == "merge":
+                if is_develop_buffer_ticket(self.meta):
+                    if await self._dev_buffer_land_step():
+                        phase = "done"
+                    continue
                 st = self._step("merge")
                 self._enter("merge")
                 prep_ctx = await workflow.execute_activity(
@@ -5521,6 +5802,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                               fallback="merge")
                     continue
                 if archive_on:
+                    # t260917-04 replay lock: the ORIGINAL inline close-out is
+                    # kept verbatim as the only legacy-path sequence (a history
+                    # recorded before t261009-46 replays it byte-identically);
+                    # the develop-buffer landing step uses the extracted
+                    # _archive_and_teardown helper instead (same sequence, new
+                    # code, behind DEV_BUFFER_LANDING_PATCH_ID).
                     # archive_ticket: fail-closed — a failed archive means the report
                     # would be lost with the teardown, so go blocked and keep the lane
                     # (no bare raise: a workflow task retrying on an exception never
@@ -5546,8 +5833,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             "ticket data archive receipt abnormal (fail-closed, lane kept, not torn down): %s"
                             % ((getattr(ares, "error", "") or repr(ares))[:400]))
                         continue
-                    self._log("工单数据出仓归档完成：%s"
-                              % (getattr(ares, "archive_path", "") or "（路径未知）"))
+                    self._log("ticket data archived: %s"
+                              % (getattr(ares, "archive_path", "") or "(path unknown)"))
                     # teardown_lane: tear down the lane (a cleanup failure only warns in
                     # the receipt; lane leftovers are reclaimable garbage, the data itself
                     # is already listed in archive.json, so closing the ticket is not
@@ -5558,11 +5845,16 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             MergeArgs(ticket_id=self.ticket_id,
                                       worktree=str(self.meta.get("worktree") or ""),
                                       branch=str(self.meta.get("branch") or ""),
-                                      # 拆道逐仓化（t260913-05）：meta.repo_worktrees 是
-                                      # 明细真源，递给 teardown 逐仓三清——盘上清单镜像
-                                      # 已随部分拆除消失（Temporal 重试）时，靠它仍能点
-                                      # 名成员仓，绝不回落单仓锚留静默残留。payload 兼容：
-                                      # 在途旧票无此键 → 空列表 → teardown 回落清单/单仓。
+                                      # t260913-05: meta.repo_worktrees is the per-repo
+                                      # detail source of truth, handed to teardown for
+                                      # the per-repo cleanup — when the on-disk
+                                      # manifest mirror vanished with a partial
+                                      # teardown (Temporal retry), it still names the
+                                      # member repos, never falling back to a
+                                      # single-repo anchor and leaving silent residue.
+                                      # Payload compatibility: in-flight tickets without
+                                      # the key -> empty list -> teardown falls back to
+                                      # manifest/single-repo.
                                       repo_worktrees=list(self.meta.get("repo_worktrees") or [])),
                             start_to_close_timeout=SHORT, retry_policy=RETRY)
                     except Exception as e:

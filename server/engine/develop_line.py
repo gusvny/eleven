@@ -20,9 +20,13 @@ What lives here:
     landing entry (`LandingLegacyLedgerError`) — never read as "no landings",
     never silently migrated; conversion is a dedicated later ticket.
 
-Coexistence (rule 13): nothing on the running flow imports this module yet. The
-new behaviour becomes reachable only through the new lane version (a follow-up
-ticket wires it); today's tickets are byte-for-byte unaffected.
+Coexistence (rule 13, as wired by t261009-46): the new behaviour is reachable ONLY
+through the per-ticket lane version — a ticket names its version when it is opened
+(the dev_lane intake refuses an unknown/malformed name by title), and a ticket that
+did not opt in runs today's flow byte-identically. The dependency stays one-way at
+the module level: this module imports the running flow's settle core, and the
+running flow reaches the new surface only behind the version gate (dev_lane's
+``is_develop_buffer_ticket`` predicate + its gated ``_dev_buffer_*`` step methods).
 
 Reuse discipline: the add/commit sequence is NEVER copied here — the landing
 imports ``_settle_merge_core`` from agent_activities (the single implementation
@@ -33,6 +37,7 @@ implementation is in the create_plan gen1 evidence (7 items).
 import fcntl
 import json
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -89,6 +94,79 @@ class LandingLegacyLedgerError(LandingError):
     The landing act refuses by name: the legacy rows are NOT migrated here and
     are never read as "no landings" — conversion to the delivery ledger is a
     dedicated later ticket."""
+
+
+class LandNotPinnedError(LandingError):
+    """The caller could not pin the lane checkout at the PROVEN revision
+    (t261009-46; the t261009-18 handover precondition). The landing refuses by
+    name instead of landing the current tip — landing a different tip than the
+    one the gate judged is exactly the silent wrong-delivery the handover
+    warns about."""
+
+
+# ------------------------------------------------------------------ lane version
+
+
+#: The version name a ticket does NOT carry (the fleet's running flow). Absence
+#: of an explicit opt-in at intake resolves here; a PRESENT-but-bad name never
+#: defaults to either version — it is refused by title.
+LANE_VERSION_LEGACY = "legacy-v1"
+#: The develop-buffer flow's version name (the opt-in a develop-buffer ticket
+#: carries; the only name the version gate routes to the landing path).
+LANE_VERSION_DEVELOP_BUFFER = "develop-buffer-v1"
+#: The closed registry: intake validates against exactly these, never a prefix
+#: match, never a guess.
+LANE_VERSIONS = (LANE_VERSION_LEGACY, LANE_VERSION_DEVELOP_BUFFER)
+
+#: A version name is lowercase kebab of alnum segments — a malformed shape is
+#: refused as malformed (not as unknown), so the face says which kind of bad.
+_VERSION_NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+
+class LaneVersionError(ValueError):
+    """A lane-version name is malformed — refused at intake, never defaulted."""
+
+
+class UnknownLaneVersionError(LaneVersionError):
+    """A well-formed lane-version name that is not in the registry."""
+
+
+def parse_lane_version(name: Any) -> str:
+    """Intake validation of the per-ticket opt-in (t261009-46 spec (1)).
+
+    Returns the canonical version name. Refusals, each by name:
+      - a non-string or blank value -> malformed;
+      - a wrong-shape string (uppercase, spaces, underscores, leading/trailing
+        dash) -> malformed;
+      - a well-shaped unknown name -> unknown, with the registry listed.
+    An ABSENT opt-in (``""`` / ``None``) is not refused here: absence is the
+    legacy ticket's shape (it did not opt in); callers resolve it to
+    ``LANE_VERSION_LEGACY``. A present-but-bad name is NEVER resolved to
+    anything — the caller must refuse."""
+    if name is None or (isinstance(name, str) and not name.strip()):
+        return LANE_VERSION_LEGACY
+    if not isinstance(name, str):
+        raise LaneVersionError(
+            "lane version malformed: expected a string, got %r" % (type(name).__name__,))
+    stripped = name.strip()
+    if stripped != name:
+        raise LaneVersionError(
+            "lane version malformed (surrounding whitespace): %r" % name)
+    if not _VERSION_NAME_RE.match(stripped):
+        raise LaneVersionError(
+            "lane version malformed (lowercase kebab-case expected): %r" % name)
+    if stripped not in LANE_VERSIONS:
+        raise UnknownLaneVersionError(
+            "unknown lane version %r (registry: %s) — refused at intake, never "
+            "defaulted to either version" % (stripped, ", ".join(LANE_VERSIONS)))
+    return stripped
+
+
+def is_develop_buffer_version(name: Any) -> bool:
+    """True iff the ticket's parsed version is the develop-buffer flow. The
+    single version gate: every landing-path branch keys on this comparison and
+    on nothing else (no template sniffing, no global switch)."""
+    return parse_lane_version(name) == LANE_VERSION_DEVELOP_BUFFER
 
 
 # ---------------------------------------------------------------- declaration
@@ -345,6 +423,52 @@ def _abort_if_merging(repo: Path, wt_dir: Path) -> None:
     """Terminal-state discipline: never leave a mid-merge worktree behind."""
     if _rev(wt_dir, "MERGE_HEAD"):
         _git(["merge", "--abort"], wt_dir)
+
+
+def pin_lane_revision(wt_dir: Path, proven_sha: str) -> str:
+    """Pin the lane checkout at the PROVEN revision (t261009-46 spec (3); the
+    t261009-18 handover precondition). ``land_ticket`` consumes the lane
+    repository's CURRENT HEAD, so the caller must guarantee the checkout sits
+    at the revision the gate passed — this helper is that guarantee:
+      - HEAD already == proven -> return it (the common case, zero mutation);
+      - otherwise, a CLEAN tree is checked out (detached) at the proven sha;
+      - a dirty tree, an unresolvable revision, or any git failure raises
+        ``LandNotPinnedError`` naming both shas — the landing refuses instead
+        of landing something else. Never a silent fallback to HEAD."""
+    if not isinstance(proven_sha, str) or not proven_sha.strip():
+        raise LandNotPinnedError("proven revision missing — refusing to land")
+    proven = proven_sha.strip()
+    resolved = _rev(wt_dir, proven)
+    if not resolved or set(resolved) == {"0"}:
+        # an all-zero sha "verifies" syntactically in git — it is not a commit
+        raise LandNotPinnedError(
+            "proven revision %s is not resolvable in the lane repo %s — "
+            "refusing to land a revision the gate never judged"
+            % (proven[:12], wt_dir))
+    head = _rev(wt_dir, "HEAD")
+    if head and head == proven:
+        return head
+    dirty = _git(["status", "--porcelain"], wt_dir)
+    if dirty.returncode != 0:
+        raise LandNotPinnedError(
+            "cannot read the lane checkout state in %s: %s"
+            % (wt_dir, (dirty.stderr or "")[-200:]))
+    if (dirty.stdout or "").strip():
+        raise LandNotPinnedError(
+            "lane checkout %s is dirty — refusing to move it to the proven "
+            "revision %s (uncommitted work would be discarded; handle by hand)"
+            % (wt_dir, proven[:12]))
+    co = _git(["checkout", "-q", "--detach", proven], wt_dir)
+    if co.returncode != 0:
+        raise LandNotPinnedError(
+            "pinning the lane checkout at the proven revision %s failed: %s"
+            % (proven[:12], (co.stderr or co.stdout or "")[-200:]))
+    pinned = _rev(wt_dir, "HEAD")
+    if pinned != proven:
+        raise LandNotPinnedError(
+            "pin verification failed: HEAD %s != proven %s — refusing to land"
+            % ((pinned or "?")[:12], proven[:12]))
+    return pinned
 
 
 def _check_inputs(ticket_id: Any, performed_by: Any, repo_paths: Dict[str, Path]) -> None:

@@ -1,0 +1,4757 @@
+{
+  "_header": {
+    "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
+    "labelled_counts": {
+      "engine_tests": 265,
+      "scenarios": 684
+    },
+    "vocab": [
+      "behaviour",
+      "contract",
+      "production-snapshot",
+      "source-text"
+    ],
+    "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
+  },
+  "engine_tests": {
+    "server/engine/tests/test_t261009_49_face_coverage.py": {
+      "anchor": "behaviour",
+      "note": "t261009-49: period-x-face coverage projection truth table (five states, blocked shell never produced, failed vs not_run, never/last-ok, injected attempt reader fault modes, cap truncation, aggregate wiring)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_47_rework_hold.py": {
+      "anchor": "source-text",
+      "note": "t261009-47 KI-01M4H53WAP7FFS2CN3YP7XENPQ: rework deliver-or-refuse — landing-decision invariant truth table (hold ONLY a running mechanical round, consume at every parked state per review R3), hold-branch-before-consume and no-spin source locks in dev_lane/light_lane, terminal named-refusal guards at the real loop exits, coalescing queue at the internal send-back sites, single shared patch id ki212-rework-hold-v1",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_env_red_named_channel.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_inspect_scope_collapse.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_inspection_lane_residue_repair.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_inspection_no_change_skip.py": {
+      "anchor": "contract",
+      "note": "t261004-20 rewrite: skip-flag invariants over the real decl (no value lock; value locks live in the marked snapshot files)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_inspection_schedule_drift.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_inspection_spawn_visibility.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_integ_gate_settlement.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_integ_stall_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_ki002_ki029_recurrence.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260929_main_sync_abort_recovery.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260930_cancel_audit_and_terminal_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260930_handover_and_write_set_honesty.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_260930_unknown_phase_hardening.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_261006_inspection_aggregate.py": {
+      "anchor": "behaviour",
+      "note": "t261006-14: per-rule truth table for the aggregate page (window edges, verdict winner across periods and within one file, overdue boundary, degraded ticket states, damaged-input naming, determinism, write-scope of the weekly shell face)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_activity_arg_fields.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_agent_runtime.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_client_audit.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_engine_ops.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_engine_venv_fallback.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_event_ledger.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_integration_route.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_ki015_crop.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_ki044_ui_changed_paths.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_ki048_merge_classify.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_lane_derive.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_light_lane_lane.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_multirepo_anchor.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_multirepo_root_activity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_parallel_stages_meta.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_parse_arbitration_summary.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_sandbar_exec.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_14_registry_loader.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_16_t01_merge_gate_base_main_green.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_16_t02_base_must_be_main_tip.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_16_t03_out_of_set_precision.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_16_t04_malformed_inputs_fail_closed.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_16_t05_merge_check_wiring.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_19_t01_cap_previous_context.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_19_t02_arb_ctx_tail_budget.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_21_i02_spawn_wiring.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_21_t01_read_side_resolution.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_21_t02_copy_creds.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_23_t01_client_retry_and_degrade.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_23_t02_list_running_degrade.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_23_t03_breathe_replay_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_25_t01_dirty_pure_functions.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_25_t02_source_locks.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_25_t03_reap_process_group.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260901_26_i03_lane_merge_scope.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260902_02_t01_archive_paths.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260902_02_t02_path_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260902_07_tests_test_route_lookup.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260902_07_tests_test_route_table.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260902_09_t01_creds_merge.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260904_02_registry_anchor.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260904_02_worker_meta.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260904_03_t01_dispatch_header_indexed.py": {
+      "anchor": "contract",
+      "note": "verbatim rule quotes in the dispatch template (knowledge-base anchors)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260904_09_settle_snapshot.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260904_18_gate_pure.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260905_01_doc_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260905_02_watch_interval.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260905_03_inspection_decl.py": {
+      "anchor": "production-snapshot",
+      "note": "real decl enabled/scan_face/specs-order values; marker added t261004-20",
+      "sync_path": "server/engine/tests/test_t260905_03_inspection_decl.py"
+    },
+    "server/engine/tests/test_t260905_03_inspection_flow.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260905_03_inspection_scan.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260905_10_t01_quarantine_and_identity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260905_10_t02_host_ruling.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260907_04_naming_compat.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260907_07_epic_project_anchor.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260908_01_ki061_wake_reset.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260908_02_payload_roundtrip.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260910_03_fuses.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260910_08_lane_materialization.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260910_09_inspection_flow_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260910_09_inspection_scan_ms.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260910_13_failure_protocol.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260911_02_decl_kinds.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260911_02_scan_doc.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260911_02_ticket_count.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260911_02_watcher.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260911_03_path_gates.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260912_03_authz_cli.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260912_03_authz_payload.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260912_03_authz_sign.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_01_authz_marker.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_01_integ_budget_pair.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_01_sign_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_02_inspection_deadman.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_02_inspection_suite.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_03_pool_exclude.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260913_05_teardown_multirepo.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260914_01_settle_lane_stance.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260914_model_routes_fallback.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_01_detail_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_04_write_set_root_entry.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_08_inspection_board.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_12_t01_caller_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_12_t02_client_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_18_inspection_stage.py": {
+      "anchor": "contract",
+      "note": "t261004-20 rewrite: lawful-declaration invariants over the real decl (no value lock; value locks live in the marked snapshot files)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260915_20_inspection_project.py": {
+      "anchor": "production-snapshot",
+      "note": "real decl project identity of every instance; marker added t261004-20",
+      "sync_path": "server/engine/tests/test_t260915_20_inspection_project.py"
+    },
+    "server/engine/tests/test_t26091620_nested_repo_guards.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t26091620_write_set_gitlink_truth.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_02_inspection_decl_placement.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_02_inspection_ticketing.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_05_inspection_topology.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_19_gate_deadlock.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_21_admin_log_rotation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_22_inspect_activity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_22_inspect_core.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_22_inspect_flow.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_22_inspect_verdict.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_23_session_dualname.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_24_dsh_pin.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_28_lane_dsh_profile.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260916_29_worker_graceful_stop.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_01_arb_gate_refusal.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_02_inspection_ledger_archive.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_02_inspection_redirect.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_04_replay_gate_lock.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_05_session_parse_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_08_env_fail_signal.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260917_09_tests_streak.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260919_02_terminal_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260920_01_supply_wait_budget.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260921_03_close_health.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260921_04_integration_discipline.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260921_09_lane_commit_verdict.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260921_14_dsh_path_pin.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_02_session_type_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_06_resume_addressing.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_08_integration_discipline_m_form.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_09_update_prevalidate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_10_cancel_entry.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_11_dsh_wedge_auto_quarantine.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_14_integration_discipline_segment_parsing.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260922_18_main_sync.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260923_known_red_exempt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260923_targeted_rerun.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260924_04_project_templates.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260924_05_ki116_budget.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260924_06_inspect_scope.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260924_09_suite_evidence_guard.py": {
+      "anchor": "contract",
+      "note": "dual-truth lock: guard constant == verify.yaml exclude_pools",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t26092512_gate_phase_timings.py": {
+      "anchor": "source-text",
+      "note": "asserts tokens inside run_scenarios.py source and verify.yaml cmd verbatim",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_01_produce_activity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_01_produce_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_01_produce_decl.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_01_produce_flow.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_04_file_blast_radius.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_08_caller_identity_injection.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_09_terminated_period_reopen.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_13_lane_audit.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_16_ki121_worker_startup.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_17_fork_gate_wake.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_21_report_language.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260925_23_template_path_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260926_02_folded_untracked.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260926_03_create_face_template_visibility.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260926_ki122_adoption.py": {
+      "anchor": "source-text",
+      "note": "reads server/tools/verify_lane.py source text for the adoption lock",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260926_lane_watchdog.py": {
+      "anchor": "production-snapshot",
+      "note": "real decl watchdog key values (five-key literal); marker added t261004-20",
+      "sync_path": "server/engine/tests/test_t260926_lane_watchdog.py"
+    },
+    "server/engine/tests/test_t261008_30_lane_watchdog_human_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261008-30: rerun-rounds leg exempt on human-gate tickets (shared not-in-flight rule), exemption named in suppressed, human_gate wait datum, span never labelled per-round",
+      "sync_path": "server/engine/tests/test_t261008_30_lane_watchdog_human_gate.py"
+    },
+    "server/engine/tests/test_t260926_tmp_fixture_water.py": {
+      "anchor": "production-snapshot",
+      "note": "real decl watchdog water-key values; marker added t261004-20",
+      "sync_path": "server/engine/tests/test_t260926_tmp_fixture_water.py"
+    },
+    "server/engine/tests/test_t260927_01_suite_timeout_attribution.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_05_external_catalog_topology.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_close_out_entry.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_gate_receipt_two_object.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_ki142_accepted_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_ki143_replay_preflight.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_tmp_fixture_family.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260927_ws_dir_in_project.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260928_20_ledger_wiring.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260929_04_result_file_diagnosis.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260929_18_face_failure_chain.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260929_19_acceptance_extra.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260930_01_known_red_round_exempt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260930_01_ledger_reuse.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260930_02_surface_plan.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260930_02_surface_plan_query.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t260930_14_executor_grants.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261001_05_unreadable_classification.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261001_12_ledger_location.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261001_20_executor_grant_declared_channel.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261002_02_gate_recheck.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261002_03_conc_calibration.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261002_10_codegen_freshness.py": {
+      "anchor": "contract",
+      "note": "t261004-20 backfill: asserts the path-gate codegen-freshness exemption (M-state reverted generated files are exempt), not a user-facing flow",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261002_10_merge_check_resync.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261002_11_ki191_fixture_dedup.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261002_13_tmp_leaker_reclaim.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261003_03_ki192_period_adjudication.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_05_integration_discipline_node_check.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_07_code_stamp_enforcement_modules.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_11_executor_actions.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_18_grants_write_entry.py": {
+      "anchor": "contract",
+      "note": "t261004-28 carrier: port of the t261004-18 entry-contract test (host write saves+audits source, executor-channel/meta-op refusals, malformed args structured refusal); docstrings/comments translated per host L15 ruling, engine-coupled refusal literals kept as marked data; engine entry cmd_executor_grants_write landed via t261004-18 squash",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_19_open_ticket_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261004-28 carrier: port of the t261004-19 open-ticket gate judgement-core matrix (declaration face, authority surface, five refusals one allow, per-epic cap, audit rows); docstrings/comments translated per host L15 ruling; asserted refusal substrings re-anchored to the landed engine texts (the t261004-19 squash anglicized the open-ticket refusal messages; adaptation named in the carrier guard's ADAPTED_LITERALS table); engine face landed via t261004-19 squash",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_19_source_order_lock.py": {
+      "anchor": "source-text",
+      "note": "t261004-28 carrier: the t261004-19 source-order lock (epic assignment must precede the executor gate's consumption in cmd_ticket_start; UnboundLocalError defect class); author text preserved at integration/t261004-28/evidence/t261004-19_source_order_lock.py.txt",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_23_executor_requests.py": {
+      "anchor": "contract",
+      "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_25_test_face_gate.py": {
+      "anchor": "behaviour",
+      "note": "developer L1: predicate truth table (t261004-25; t261004-34 updated the idempotence pin to the named processed-path-ledger skip)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_27_executor_delivery.py": {
+      "anchor": "behaviour",
+      "note": "t261004-27: delivery face refusal matrix + identity survival are the file's asserted behaviour",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_30_executor_oneshot.py": {
+      "anchor": "contract",
+      "note": "t261004-30 settle-note CLI: row schema, identity gate, malformed-argv fail-closed, object-key drift lock",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_31_declared_session_seam.py": {
+      "anchor": "behaviour",
+      "note": "t261004-31: declared-executor-session seam — new identity tier fires only for a session named in the project declaration; exempt/absent/unnamed stay undeclared",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_32_concurrency.py": {
+      "anchor": "contract",
+      "note": "t261004-32 concurrency limit engine half: declaration fail-closed truth table + slot ledger contract + lane wiring source-scan guards",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_34_recovery_idempotent.py": {
+      "anchor": "behaviour",
+      "note": "t261004-34: recovery idempotence truth tables (developer L1, landed with implement)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_36_copy_marker_retirement.py": {
+      "anchor": "behaviour",
+      "note": "t261004-36: zero temporary copy-lang-allow data markers (retirement guard)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_41_grants_open_ticket_entry.py": {
+      "anchor": "contract",
+      "note": "t261004-41: the executor-grants-write entry reads and forwards open_ticket_epics/open_ticket_cap (round-trip, absent=inherit on disk, explicit [] clear-all, malformed values degrade to inherit); split out of the t261004-18 carrier file in implement gen4 — the carrier is pinned verbatim by t261004-28 and must not grow",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_42_inspect_tier_criteria.py": {
+      "anchor": "contract",
+      "note": "t261004-42: the tier-admission A/B/C criteria live in the single declared test-face list and reach the inspect prompt",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261004_44_deliver_refusal.py": {
+      "anchor": "behaviour",
+      "note": "t261004-44 KI-197 unit face: a fingerprint missing the delivery class yields an immediate named refusal (class + registered set + failed check) with no workflow started; a listed class proceeds even on a stale file (review C3); a missing fingerprint degrades to the bounded wait; the bounded wait and the duplicate-started receipt read (review C1) time out into named refusals with the zombie handle cancelled; the audit row is fail-open over its own append failing (review C2).",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261005_03_drain_handover.py": {
+      "anchor": "behaviour"
+    },
+    "server/engine/tests/test_t261005_03_lane_reclaim.py": {
+      "anchor": "behaviour"
+    },
+    "server/engine/tests/test_t261005_03_named_read_degrade.py": {
+      "anchor": "contract"
+    },
+    "server/engine/tests/test_t261005_12_gate_engine_recording.py": {
+      "anchor": "contract",
+      "note": "t261005-12 gate-recording routing contract: the gate submits actions-record through the _submit_engine_delivery seam, the production delivery dispatch lands the row, an exempt pass submits nothing, every recording failure is named in record_note, and the engine-written last-failure marker keeps the last failure only",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261005_14_gate_replay_compat.py": {
+      "anchor": "behaviour",
+      "note": "t261005-14: CL-1 concurrency family replay safety - pre-CL-1 replay (patched=False) emits zero family commands and reaches prepare_workspace first; new runs stay gated; releasing/renewing helpers guarded; static lock pins both lane patch ids",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261005_15_gate_window_b.py": {
+      "anchor": "behaviour",
+      "note": "t261005-15 developer L1: three-window regression for the CL-1 gate time anchor - window-(b) start_time schedules the gate without a marker, pre-CL-1 start_time skips, marked runs gate, degraded info() faces fall back; ships with the fix (registered by the integration stage to satisfy L16 coverage)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261005_16_bench_registry_stage.py": {
+      "anchor": "contract",
+      "note": "t261005-16: the engine-owned production stage path must not replay the retired seed - python bench-registry mirror (schema-v1 project list, .migrated marker, live workspace, occupied-target fail-loud), up_stage wires --fixtures-dir + SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects, up-failure and down_stage cleanup, product loads exactly capture-bench (KI-204 acceptance rework)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_01_ui_evidence_one_read_point.py": {
+      "anchor": "behaviour",
+      "note": "t261006-01 KI-205 layer 5: one evidence read point - gate item _ui_evidence_gate_check counts only TOP-LEVEL pngs under ui_evidence_dir() and derives every printed path from that same sticky resolution (subdir shape = red, legacy-named shape green/red with legacy path in text, hostile ui_paths stringified); source pins: producer writes ui_evidence_dir(cwd) flat, capture-lane ENV_FAIL names real exits only",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_05_executor_preset_approval_clause.py": {
+      "anchor": "source-text",
+      "note": "t261006-05 source-text lock: the executor preset carries the approval/escalation persona clause (no answerer / sandbox-inside preference / client.py deliver) and never names the direct ledger-append CLI"
+    },
+    "server/engine/tests/test_t261006_07_conflict_deadlock.py": {
+      "anchor": "behaviour",
+      "note": "t261006-07: the conflict-round cap can no longer deadlock a lane — settle-first plan on a blocked route, human signal (rework/retry_qc) resets the counter (rejected rework never does), settle-success resets it, join mid-merge guard settles a clean face through the shared settle core, blocked texts name executable exits only",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_08_shutdown_reclaim.py": {
+      "anchor": "behaviour",
+      "note": "t261006-08: pins the NEW shutdown/cancel process-group reclamation behaviour (reap_spawn_group TERM-to-KILL escalation, owned-spawn registry, cancel-vs-timeout wall-clock disambiguation under the py3.9 wait_for race, worker shutdown-reclaim receipt); no production snapshot involved",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_11_inspection_doc_mech.py": {
+      "anchor": "contract",
+      "note": "t261006-11 doc-face mechanical layer unit truth tables (developer L1; anchor registered by integration to keep L16 coverage complete)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_12_review_ledger.py": {
+      "anchor": "contract",
+      "note": "t261006-12 L1: review-ledger module truth tables (path derivation incl hostile project_key, JSONL load degradation, slice ordering/bounds/determinism, coverage partition, append write-back notes)",
+      "sync_path": "server/engine/inspection_review_ledger.py"
+    },
+    "server/engine/tests/test_t261006_13_shared_surface.py": {
+      "anchor": "behaviour",
+      "note": "t261006-13: shared surface pure functions (B1/B2/B3), cross-face dedupe identity+fail-open (B4), machine notes (B5), new decl keys fail-closed, surface activity on a real git repo",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261006_19_counter_reset_replay.py": {
+      "anchor": "contract",
+      "note": "t261006-19 developer L1 (white-box, ships with the guard): pre-fix history replay shape, window(b)/marker/boundary truth table, malformed info() fallback, static locks on the patch id / anchor literals and the four gated reset sites",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261007_02_request_thread.py": {
+      "anchor": "contract",
+      "note": "t261007-02 thread face contract: five-state machine with fixed setters, four link kinds (supersedes machine-derives the state row, both physically present), duplicate re-file links without opening a head (from omitted, triple snapshot), register-derived source/project (read-back), expiry never mutates state, named refusals, malformed-input faces",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261007_06_already_settled_face.py": {
+      "anchor": "behaviour",
+      "note": "t261007-06 KI-213 L1: already_settled face of the settle core - incident sequence, fail-closed measured-fact counter-cases, malformed inputs, source locks on the retired merging-state text",
+      "sync_path": "server/engine/agent_activities.py, server/engine/shared.py, server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_template_topology.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_ticket_cli.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_ticket_pause.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_ui_capture_stage.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_worker_single_poller_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_write_set_args.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_24_zero_run_supply.py": {
+      "anchor": "behaviour",
+      "note": "KI-220 t261008-24: zero-run supply blocker classifier + green-run merge precondition truth tables",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_26_lane_vocabulary.py": {
+      "anchor": "behaviour",
+      "note": "t261008-26 KI-226 developer L1: derive_lane_workspace vocabulary table + lane_workspace_gate_error table incl. zero-disturbance shapes; anchor registered by the integration stage to satisfy L16 coverage",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_22_void_surface.py": {
+      "anchor": "contract",
+      "note": "t261008-22: the named void surface's contract (population gate / idempotence / zero-write refusals / journal+ledger agreement) on fixture ledger dirs",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_25_status_surface_map.py": {
+      "anchor": "behaviour",
+      "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_25_archive_terminal.py": {
+      "anchor": "behaviour",
+      "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_25_board_status_filter.py": {
+      "anchor": "behaviour",
+      "note": "t261008-25 KI-223: exhaustive status-to-surface map / named reason-required terminal archive exit (failure class kept verbatim, archive stays queryable, manifest survives prune) / board status filter at the ticket-list face",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_37_concurrency_set_limit.py": {
+      "anchor": "behaviour",
+      "note": "t261008-37 CL-2b: engine concurrency-limit write entry (set_limit truth table, zero-side-effect on refusal, rollback, spawn contract)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_33_anchor_discipline.py": {
+      "anchor": "contract",
+      "note": "t261008-33: engine env single point (ANCHOR_ENV_KNOBS strip + lane_subprocess_env) and the anchor guard verdict; decision-table parity with server/plugins/repo-anchor.mjs",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "server/engine/tests/test_t261009_03_concurrency_reorder_cli.py": {
+      "anchor": "behaviour",
+      "note": "t261009-03 CL-3: ticket.py order face routes to the engine reorder - refusal-by-name with byte-identical state, valid permutation reads back through read_state, empty/non-permutation/unqueued-id refused, holder accounting untouched, no-order-key output byte-identical to the pre-change read face, reconcile path unchanged, reconcile+order -> order wins (review conditional 4a)",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "server/engine/tests/test_t261008_43_suite_duration.py": {
+      "anchor": "behaviour",
+      "note": "t261008-43 suite-duration leg: pure judgement face + resolver fault modes + wiring source assertions",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_45_shared_lazy_paths.py": {
+      "anchor": "behaviour",
+      "note": "lazy shared.py path constants: sandboxed import + env-override behaviour",
+      "sync_path": "server/engine/shared.py"
+    },
+    "server/engine/tests/test_t261009_15_quiet_baseline.py": {
+      "anchor": "behaviour",
+      "note": "t261009-15: quiet-baseline verdict for known load-sensitive checks at merge_check (carrier-independent identity normalizer, structured red item names, roster exact matching, quiet rerun full-terminal-state reaping, coverage predicate)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_01_checkout_shape_discriminator.py": {
+      "anchor": "contract",
+      "note": "t261009-01: pre-existing-main discriminator pure faces (probe plan cap/fail-closed, receipt face naming, kill-switch, decision-table composition record-not-blocker)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_29_ki227_stale_worker_visibility.py": {
+      "anchor": "behaviour",
+      "note": "t261008-29 KI-227 unit face: the v2 worker fingerprint carries a non-empty code identity and the activity registry (fingerprint moves when an activity is added; v1 docs still read); the comparison face reports a strict-subset worker stale naming the missing activities, dead pid offline, and empty/absent identity unknown (never fresh), and is observe-only (no writes/kills surface); the memo path persists the stage failure-isolated behind the KI-227 patch gate, and the terminal face decodes the memo stage or keeps the honest-unavailable note.",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_17_moved_main_settle.py": {
+      "anchor": "behaviour",
+      "note": "moved-main settle convergence + rerun predicate (t261009-17)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_20_settle_rerun_guard.py": {
+      "anchor": "source-text",
+      "note": "t261009-20: both settle_shape_needs_rerun routing sites must stay behind workflow.patched(SETTLE_RERUN_PATCH_ID) + the guarded decision expression",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_31_ticket_dismiss.py": {
+      "anchor": "contract",
+      "note": "t261009-31: dismissal journal contract — named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, payload key shape dismissed:{at,who,reason}, no-inspection-import pin, append-OSError propagation",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_28_landing_delivery_ledger.py": {
+      "anchor": "behaviour",
+      "note": "t261009-28 L1 (developer): the landing act appends one validate_row-clean delivery row through append_rows with a writer seq, legacy landings.jsonl refused by name (LandingLegacyLedgerError), no stored base, act-time ancestor check from the ledger-derived certification, torn-ledger/rejected-row/duplicate named failures with zero records, git all-or-nothing unchanged",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_27_ticket_outcome_faces.py": {
+      "anchor": "behaviour",
+      "note": "t261009-27 L1: ticket_outcome field truth tables (withdrawn_at/superseded/ending/product_kind/ended_by/ended_at/compare_outcomes)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_38_bundle_out_face.py": {
+      "anchor": "contract",
+      "note": "bundle_out_face predicate truth tables + gate fallback wiring (developer L1, this ticket)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_39_yaml_follows_code.py": {
+      "anchor": "contract",
+      "note": "the generated workflows/*.yaml must byte-match the generator's output (gen_workflows_doc.py); pins the yaml-follows-code invariant settled by t261009-39",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_42_bundle_freshness.py": {
+      "anchor": "contract",
+      "note": "t261009-42: bundle freshness verdict truth tables — entry-key reader order alignment/fail-closed, rebuild three states (identical green / different stale red / could-not-establish named degraded), never 'assumed fresh', temp-copy reaping",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261008_47_english_ticket_face.py": {
+      "anchor": "contract",
+      "note": "t261008-47: engine UI copy English — parser re-keyed on structured timeline fields (old/new format), narrow CJK guard over emission points",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_29_promotion_single_space.py": {
+      "anchor": "behaviour",
+      "note": "t261009-29 L1: one ledger/one seq space — the shared writer admits promotion+relation kinds and stamps the shared seq; legacy promotion.jsonl migration (at-then-file order, named refusals incl. in-file duplicates, rename, idempotent no-op) and the unmigrated-legacy refusal on every consumer-reachable face; ticket_outcome/one-list projection with the single as_of cursor",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_30_line_round.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 L1: run_line_round truth tables on injected seams - decide/guard/run/record per tick, guard joined and released on every terminal path, chain retries an open range within CHAIN_LIMIT with the named exceed face, backstop/change trigger wiring, candidate_set head-per-repo, could-not-run grows the range, malformed ledger/garbage runner named refusals, refuse_delivered_checkout incl. symlink",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_engine_ops_preflight.py": {
+      "anchor": "behaviour",
+      "note": "t261009-48 developer L1: preflight face, blockers, refusal text, disposition table",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_59_line_round_tick.py": {
+      "anchor": "contract",
+      "note": "t261009-59 line-round tick call site: trigger shapes, idle, per-line named failures",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_59_wiring.py": {
+      "anchor": "contract",
+      "note": "t261009-59 wiring tripwire: line_round_tick_engine registered in ALL_ACTIVITIES (executed-but-unregistered would be an activity-not-found on every tick), workflows.py carries LINE_ROUND_PATCH_ID == dispatcher-scan-line-round, engine body reachable",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_55_boot_meta_merge.py": {
+      "anchor": "behaviour",
+      "note": "t261009-55: worker-owned meta extras merge (console_boot/polling) — merge, pid guard, draining guard, malformed-input fail-closed, boot id env read",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_55_ensure_handover.py": {
+      "anchor": "contract",
+      "note": "t261009-55: ensureTicketWorkersOnce decision contract — foreign-boot one-tick handover, stale-meta-cleared (pidfile authority), proven-zero-poller repair, unproven probe never clears a slot, probe budget cap, clear-only when spawn absent",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_55_read_degrade_named.py": {
+      "anchor": "contract",
+      "note": "t261009-55: read-face degrade by name — durable face block on no_poller/query_timeout receipts (memo stage/status, unavailable cause label, orphan-window note), kind/wording byte-identical, malformed inputs never guess",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_fault_injection_registry.py": {
+      "anchor": "contract",
+      "note": "t261009-52: registry truth table (total on malformed input), refusal/lint note wording, wiring anchors for both add-everything settle sites and the brake-scenario reclaim guards",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_58_write_set_record.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_50_line_round_tick.py": {
+      "anchor": "contract",
+      "note": "t261009-50 line-round tick call site: trigger shapes, idle, per-line named failures",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_50_wiring.py": {
+      "anchor": "contract",
+      "note": "t261009-50 wiring tripwire: line_round_tick_engine registered in ALL_ACTIVITIES (executed-but-unregistered would be an activity-not-found on every tick), workflows.py carries LINE_ROUND_PATCH_ID == dispatcher-scan-line-round, engine body reachable",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_46_lane_version_optin.py": {
+      "anchor": "behaviour",
+      "note": "t261009-46: the version-gated landing path — refusal matrix, pin-the-proven-revision, the activity's receipts, and the one-way import graph",
+      "sync_path": ""
+    }
+  },
+  "scenarios": {
+    "integration/t261009-47/sc_t26100947_rework_hold.py": {
+      "anchor": "contract",
+      "note": "t261009-47 KI-01M4H53WAP7FFS2CN3YP7XENPQ: rework deliver-or-refuse source locks + landing-decision invariant micro replay",
+      "sync_path": "server/engine/dev_lane.py (hold wiring, patch gate, terminal guard); server/engine/light_lane.py; server/engine/base.py"
+    },
+    "integration/baselines/sc_auto_rework_trace.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_capture_board_assert.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_capture_chat_active.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_capture_chat_e2e.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_capture_lane_preset.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_capture_redline_gate.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_metrics_contract_api_freeze.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_metrics_contract_criteria_faultmodes.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_metrics_contract_doc_structure.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_metrics_contract_schema_sync.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_notes_write_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_sandbar_contract_v1.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_sandbar_dsh_compat.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_ticket_evidence_images.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_ticket_session_restore.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/baselines/sc_ui_evidence_failure_retention.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/engine-ops/sc_engine_ops_offline.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/executor-loop/sc_executor_authority_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/executor-loop/sc_executor_oneshot_trigger.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/light-lane/sc_light_lane_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/sc_check_auto_rework_trace.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/sc_check_concurrency_reorder_face.py": {
+      "anchor": "behaviour",
+      "note": "t261009-03 CL-3 offline L3: the panel POST args land through the real ticket.py CLI on an isolated projects root and the read face returns the new order; stale/empty/injection refusals named with byte-identical state; node.ts forwards order and never fakes success (neutral 409 text); sidebar guard refusal sets the visible order-notice line; holders/count semantics unchanged",
+      "sync_path": ""
+    },
+    "integration/sc_check_inspection_produce_chain.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/sc_emit_surrogate_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/sc_scenarios_guard_drift.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/sc_scenarios_guard_pipeline.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/sc_scenarios_guard_spec.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-13/sc_evidence_lightbox_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-16/sc_t06_settle_lane_anchoring.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-18/sc_check.sh": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-19/sc_t04_cache_probe.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-21/sc_i01_parity_py_vs_mjs.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-21/sc_i03_ui_check_wiring.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-21/sc_t03_creds_source_helper.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-22/sc_t02_approve_modal_ui.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-22/sc_t03_approve_modal_faultmodes.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-23/sc_t04_yaml_chain_truth.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-24/sc_t01_fixture_pack.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-24/sc_t02_load_fixtures_malformed.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-24/sc_t03_route_decision.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260901-24/sc_t04_gate_interlock.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t01_archive_layout.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t02_archive_ticket.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t03_fail_closed_idempotent.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t03_merge_teardown.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t04_prune_archive_legacy.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t04_teardown_versioning.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t05_prune_e2e.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-02/sc_t06_archive_legacy_e2e.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-05/sc_t06_ui_build_gate.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-07/tests/sc_test_credential_probe.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-09/sc_it01_creds_merge_blackbox.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-09/sc_it02_spawn_creds_refresh.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-11/sc_t01_format_args_pairing.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-11/sc_t02_arbitrate_log_renders.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260902-11/sc_t03_log_faultsurface.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-01/sc_contract_v11_checks_exec.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-01/sc_contract_v11_integ_protocol.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-01/sc_contract_v11_onboarding.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-01/sc_contract_v11_regression_rods.mjs": {
+      "anchor": "contract",
+      "note": "verify.yaml header contract rods",
+      "sync_path": ""
+    },
+    "integration/t260903-02/sc_conditional_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-02/sc_fork_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-02/sc_lock_update_integrity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-03/sc_paths_contract_doc_guard.py": {
+      "anchor": "contract",
+      "note": "paths declaration contract doc guard",
+      "sync_path": ""
+    },
+    "integration/t260903-03/sc_paths_failclosed_red.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-03/sc_paths_spawn_seam.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-04/sc_t01_parallel_stages_meta.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-04/sc_t02_parallel_ui_truth.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-04/sc_t03_live_round_freshness.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-04/sc_t04_client_bundle_sync.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-06/sc_query_kind_no_lie.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-09/sc_metrics_kpi_invariants.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-10/sc_sandbar_doctor_compat_matrix.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-10/sc_sandbar_installer_console_line.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-10/sc_sandbar_installer_fail_closed.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-10/sc_sandbar_installer_lifecycle.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-10/sc_sandbar_installer_orphan_claim.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-10/sc_sandbar_upgrade_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-12/sc_merge_checks_pairs.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-12/sc_ver_semver_rc.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-13/sc_metrics_golden_freeze.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260903-13/sc_workbench_bundle_loads.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-01/sc_project_sessions_ledger_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-02/sc_doctor_zombie.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-02/sc_ticket_start_anchor.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-02/sc_worker_fingerprint_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-03/sc_dispatch_composition_integrity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-03/sc_dispatch_knowledge_constant_and_linked.py": {
+      "anchor": "contract",
+      "note": "knowledge-base directory anchor constant",
+      "sync_path": ""
+    },
+    "integration/t260904-03/sc_forced_reading_stays_retired.py": {
+      "anchor": "contract",
+      "note": "retirement guard over engine code + live docs",
+      "sync_path": ""
+    },
+    "integration/t260904-04/sc_metrics_stale_cache_heal_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-04/sc_metrics_universe_reason_cap.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-04/sc_panel_residue_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-04/sc_project_repo_registry_seam.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-05/sc_ledger_adversarial_boot.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-06/sc_spec_card_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-07/sc_session_charter_endpoint_live.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-07/sc_session_charter_source_contract.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-08/sc_template_face_narrowing.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-08/sc_template_retire_no_revival.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-09/sc_metrics_settle_snapshot_read_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-09/sc_settle_snapshot_write_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-10/sc_project_add_dual_loader.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-10/sc_project_add_rejections.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-10/sc_project_list_report.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-12/sc_deregistry_honest.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-12/sc_executor_three_state.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-12/sc_gate_failsafe_envfail.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-12/sc_no_skip_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-12/sc_supply_gate_ethred.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-13/sc_ki044_lane_patchgate_wiring.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-13/sc_ki044_merge_gate_ui_item.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-13/sc_ki044_ui_diff_judgement.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-14/sc_project_remove_gates.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-14/sc_project_remove_lifecycle.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-15/sc_project_ui_host_routes.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-15/sc_project_ui_rail_add_remove.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-15/sc_project_ui_settings_isolation.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-17/sc_ticket_list_http_contract.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-18/sc_t260904_18_ki049_write_set_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-18/sc_t260904_18_refs_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-18/sc_t260904_18_ui_evidence_declaration.py": {
+      "anchor": "contract",
+      "note": "real verify.yaml ui_evidence declaration set (migration rod)",
+      "sync_path": ""
+    },
+    "integration/t260904-19/sc_stage_docker_cli_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260904-19/sc_stage_docker_parallel_zero_residue.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-01/sc_doc_gate_questions.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-02/sc_console_duplicate_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-02/sc_ticket_worker_watch_exit.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-02/sc_worker_lifecycle.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-03/sc_inspection_decl_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-03/sc_inspection_ki051_anchor_replay.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-03/sc_inspection_period_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-03/sc_inspection_scan_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-05/sc_modal_dialog_semantics.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-05/sc_multitab_guard_assets.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-06/sc_docs_wording_retired.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-08/sc_hex_clean.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-08/sc_wb_contrast_guard.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-09/sc_platform_context_anchor_contract.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-10/sc_host_ruling_injection.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-10/sc_lane_identity_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260905-10/sc_torn_session_quarantine.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260906-01/sc_add_creates_container.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260906-01/sc_add_scaffold_faultlines.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260906-01/sc_routes_uninitialized_init.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260906-01/sc_session_entry_empty_labeled.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-01/sc_migration_path_hygiene.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-01/sc_smoke_suite_lane_green.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-04/sc_dispatcher_lock_fallback.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-04/sc_env_compat_bridge.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-04/sc_lane_dot_dir_sticky.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-04/sc_naming_grep_assert.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-04/sc_queue_dual_registration.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-04/sc_schedule_legacy_retire.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-05/sc_naming_residue_fulltext.py": {
+      "anchor": "contract",
+      "note": "naming residue full-text guard (retirement)",
+      "sync_path": ""
+    },
+    "integration/t260907-05/sc_profile_farm_sandbar_links.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-05/sc_workbench_route_renamed_serves.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-06/sc_t260907_06_multirepo_failclosed.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-06/sc_t260907_06_multirepo_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-06/sc_t260907_06_multirepo_merge_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-07/sc_epic_anchor_same_source.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-07/sc_epic_anchor_two_projects.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-07/sc_epic_cli_ticket_start.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-10/sc_engine_layout.py": {
+      "anchor": "contract",
+      "note": "file-level layout contract",
+      "sync_path": ""
+    },
+    "integration/t260907-10/sc_engine_venv_compat.py": {
+      "anchor": "contract",
+      "note": "verify.yaml test-lane declaration contract",
+      "sync_path": ""
+    },
+    "integration/t260907-10/sc_worker_reap_predicate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-11/sc_wb_anchor_cross_project_faces.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-11/sc_wb_anchor_evidence_family.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260907-11/sc_wb_anchor_key_resolution.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260908-01/sc_ki061_inflight_replay_compat.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260908-01/sc_ki061_overlimit_wake_revive.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260908-01/sc_ticket_pause_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260908-02/sc_t260908_02_mixed_payload.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-03/sc_t260910_03_formal_entry_fuses.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-04/sc_console_paused_list.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-06/sc_ki067_entry_audit.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-08/sc_t260910_08_lane_materialization.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-09/sc_inspection_ms_decl_gate.py": {
+      "anchor": "contract",
+      "note": "declared declaration gate (non-snapshot pin, per its own header)",
+      "sync_path": ""
+    },
+    "integration/t260910-09/sc_inspection_ms_scan_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-10/sc_docs_project_anchor.mjs": {
+      "anchor": "contract",
+      "note": "docs project anchor through the doc API",
+      "sync_path": ""
+    },
+    "integration/t260910-11/sc_inspection_decl_v2_rename.py": {
+      "anchor": "contract",
+      "note": "delivered decl shape: renamed ids present (subset) + face field retired",
+      "sync_path": ""
+    },
+    "integration/t260910-11/sc_inspection_temporal_isolation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-11/sc_inspection_ticket_query.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-12/sc_cwd_independence.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-12/sc_full_capacity_queue.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-12/sc_herd_no_crosstalk.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-12/sc_holder_kill_reclaim.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-12/sc_idempotent_reup.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-12/sc_transient_retry_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-13/sc_t260910_13_executor_fail_closed.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-13/sc_t260910_13_failure_protocol_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-13/sc_t260910_13_failure_protocol_pytest_source.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-14/sc_retire_replay_compat.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-14/sc_retire_surface_clear.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-14/sc_routes_resolver_parity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-14/sc_routes_truth_fallback.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-14/sc_routes_ui_parity_save.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-15/sc_build_reproducible.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260910-15/sc_toolchain_pinned.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-01/sc_t260911_01_filter_contract_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-01/sc_t260911_01_multirepo_diff_faces.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-02/sc_inspection_doc_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-02/sc_inspection_trigger_kinds.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-03/tests/sc_pathgate_legacy_compat.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-03/tests/sc_pathgate_normal_faces_land.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-03/tests/sc_pathgate_protected_reject.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-03/tests/sc_pathgate_walkthrough_reject.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-04/sc_t260911_04_multirepo_fullchain_landing.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-05/sc_ki048_dirty_main_merge_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-05/sc_ki048_status_card_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260911-06/sc_artifact_provenance.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-01/sc_t260912_01_pw_path_resolution.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-01/sc_t260912_01_summary_count_purity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-02/sc_stage_burst_managed_subnets.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-02/sc_stage_fuse_headroom_resident.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-02/sc_stage_fuse_runaway_named_stop.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-02/sc_stage_net_table_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-02/sc_stage_sweep_cost_failure.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-02/sc_stage_sweep_owner_gone.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-03/tests/sc_authz_cli_queryable.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-03/tests/sc_authz_overlimit_accept.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912-03/tests/sc_authz_protected_path.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260912/sc_t260912_mixed_root.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-01/tests/sc_authz_signal_delivery.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-02/sc_inspection_lane_lifecycle.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-02/sc_inspection_schedule_daily.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-02/sc_inspection_suite_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-02/sc_integ_run_singleflight.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-03/sc_pool_exclude_asset_closure.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-03/sc_pool_exclude_force_assets.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-03/sc_pool_exclude_no_false_green.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-03/sc_pool_exclude_switch_forms.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-04/sc_t26091304_image_supervisor.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-04/sc_t26091304_lifecycle_gc.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-04/sc_t26091304_multirepo.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-04/sc_t26091304_sandbox_neglock.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-04/sc_t26091304_wiring_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-05/sc_t260913_05_teardown_residue_visible.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260913-05/sc_t260913_05_teardown_scope_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-01/sc_multirepo_dir_stance.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-01/sc_settle_empty_staging_locks.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-01/sc_settle_old_lane_stance.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-05/sc_routes_fingerprint_diagnostics.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-05/sc_routes_isolation_bench_declares_table.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-05/sc_routes_no_silent_pickup.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260914-05/sc_routes_production_declarations.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-01/tests/sc_detail_face_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-01/tests/sc_detail_red_refusal_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-04/sc_t260915_04_write_set_root_entry_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-05/sc_ticket_detail_lane_map_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-05/tests/sc_detail_lane_reds.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-08/sc_inspection_board_rows.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-08/sc_inspection_sign_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-12/tests/sc_check_cross_project_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-12/tests/sc_cross_project_gate_realchain.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-17/sc_ticket_time_file.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-17/sc_ticket_time_viewer.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-18/sc_capture_stage_kill_reclaim.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-18/sc_stage_inventory_mapping.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-18/sc_stage_orphan_sweep.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-19/sc_sidebar_inspection_ui.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-20/sc_inspection_decl_project_identity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260915-20/sc_inspection_project_identity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-02/sc_inspection_board_legacy_rows.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-02/sc_inspection_decl_gate_aggregate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-02/sc_inspection_decl_relocation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-04/sc_ticket_detail_lane_map_everblocked_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-05/sc_inspection_detail_lane_map_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-05/sc_inspection_dual_source_lock.mjs": {
+      "anchor": "contract",
+      "note": "dual-source lock over prompt source",
+      "sync_path": ""
+    },
+    "integration/t260916-05/sc_inspection_topology_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-15/sc_sidebar_merged_sort_ui.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-19/sc_t26091619_disposal_matrix.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-19/sc_t26091619_incident_replay.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-20/sc_t260916_20_nested_repo_fullchain.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-21/sc_admin_log_rotation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-22/sc_inspection_inspect_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-22/sc_inspection_inspect_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-22/sc_inspection_verdict_cli.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-23/sc_session_dualname_faces.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-23/sc_session_dualname_ts_faces.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-24/sc_dsh_probe_selftest.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-24/sc_t260916_24_dsh_expected_loud.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-24/sc_t260916_24_dsh_face_meta.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-25/sc_stage_console_fault_paths.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-25/sc_stage_console_guardrails.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-25/sc_stage_console_lifecycle.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-25/sc_stage_console_prepare_refresh.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-25/sc_stage_console_selfcheck_red.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-26/sc_console_boot_no_plugin_banner.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-26/sc_plugin_inject_contract.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-28/sc_t260916_28_lane_dsh_missing_profile.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-29/sc_console_crash_graceful_stop.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260916-29/sc_worker_stop_grace_knob.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-02/sc_inspection_board_unresolved_running.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-02/sc_inspection_ledger_archive.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-02/sc_inspection_legacy_fire_redirect.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-04/sc_t260917_04_replay_compat.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-05/sc_t260917_05_session_face_loud.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-05/sc_t260917_05_session_face_loud_host.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-07/sc_test_ns_consistency.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-08/sc_t260917_08_env_fail_handover.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-08/sc_t260917_08_env_signal_boundary.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-09/tests/sc_tests_false_escalation_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260917-09/tests/sc_tests_streak_reset.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260919-02/sc_failed_state_ui_model.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260919-02/sc_terminal_face_board.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260920-01/sc_supply_assembly_seam.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260920-01/sc_supply_decl_contract.py": {
+      "anchor": "contract",
+      "note": "real verify.yaml supply declaration content contract",
+      "sync_path": ""
+    },
+    "integration/t260920-01/sc_supply_ensure_wait_cap.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260920-01/sc_supply_wait_budget_probe.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260920-03/sc_terminology_baseline_floor.py": {
+      "anchor": "contract",
+      "note": "terminology lint baseline (docs/terminology.md)",
+      "sync_path": ""
+    },
+    "integration/t260920-03/sc_terminology_l7_gate.py": {
+      "anchor": "contract",
+      "note": "terminology L7 gate (docs/terminology.md)",
+      "sync_path": ""
+    },
+    "integration/t260921-03/sc_close_health_board.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-03/sc_close_health_ui_model.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-04/sc_discipline_clause_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-04/sc_discipline_receipt_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-05/sc_t26092105_docker_closeout_fault_tolerate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-05/sc_t26092105_host_closeout_zero_docker.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-06/sc_batch_manifest_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-06/sc_batch_ns_isolation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-06/sc_batch_runner_form.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-06/sc_batch_seam_regression.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-08/sc_inspect_quote_overlong_soft_warn.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-09/sc_multirepo_zero_commit_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-09/sc_multirepo_zero_commit_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-09/sc_zero_commit_single_repo_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-14/sc_t260921_14_pin_flip.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-14/sc_t260921_14_rollback.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260921-14/sc_t260921_14_tri_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-02/sc_t260922_02_engine_face_dualgen.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-02/sc_t260922_02_mirror_verdicts_agree.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-02/sc_t260922_02_workbench_faces_dualgen.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-03/sc_t260922_03_probe_live_cred_env.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-03/sc_t260922_03_probe_live_green.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-06/sc_t260922_06_resume_seam_faces.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-06/sc_t260922_06_resume_seam_wiring.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-07/sc_t260922_07_engine_sidecar_diagnostics.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-07/sc_t260922_07_escape_out_of_roots.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-07/sc_t260922_07_probe_sidecar_criteria.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-09/sc_t26092209_update_accept_replay_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-09/sc_t26092209_update_reject_audit_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-10/sc_t260922_10_cancel_contract_surface.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-10/sc_t260922_10_cancel_refusal_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-10/sc_t260922_10_cancel_trace_ordering.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-11/sc_t260922_11_wedge_raise_face_arbitrate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-11/sc_t260922_11_wedge_recovery_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-12/sc_gate_baseline_deps_links.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-12/sc_gate_ledger_debt_not_blocked.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-12/sc_gate_ledger_regression_blocked.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-12/sc_ledger_query_no_false_green.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-14/sc_discipline_quoted_segment_incident.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-18/sc_main_sync_gate_evidence.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260922-18/sc_main_sync_incident_shapes.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-04/sc_project_template_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-04/sc_project_template_ticket_journey.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-05/sc_ki116_inspection_receipt_signal.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-05/sc_t260924_05_inspection_suite_ran_parity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-06/sc_inspect_scope_input.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-06/sc_inspect_zero_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-09/sc_t260924_09_fixed_rerun_entry.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-09/sc_t260924_09_suite_guard_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260924-09/sc_t260924_09_walkthrough_copy_discipline.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-01/sc_inspection_produce_doc.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-04/sc_t260925_04_file_blast_radius.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-04/sc_t260925_04_full_run_invariants.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-08/tests/sc_lane_caller_injection.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-08/tests/sc_undeclared_policy_refuse.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-09/sc_period_slot_reopen.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-12/sc_t260925_12_executor_timings_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-12/sc_t260925_12_stage_record_timings.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-13/sc_lane_audit_classify.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-13/sc_lane_audit_prune_guard.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-13/sc_lane_audit_realfacet_readonly.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-16/sc_worker_startup_dryrun.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-17/sc_t260925_17_fork_gate_redrive.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-17/sc_t260925_17_wake_reset_source_lock.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-18/sc_ui_english_spec_markdown.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-21/sc_t260925_21_report_language_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-23/tests/sc_template_pathgate_faces.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260925-23/tests/sc_template_pathgate_load_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260926-02/tests/sc_pathgate_folded_untracked.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260926-03/sc_ki123_create_face_template_visibility.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260926-05/sc_inspection_report_ui_dom.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260927-05/sc_external_template_catalog_topology.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260927-05/sc_external_template_lane_map_render.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-13/ledger_live_check.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-13/sc_event_ledger_projection.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-13/sc_registry_additive_keys.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-20/sc_ledger_engine_scope_rows.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-20/sc_ledger_second_family_wiring.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-28/sc_profile_plugin_mounts.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-28/sc_watchdog_alert_discipline.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-28/sc_watchdog_liveness_selflock.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-28/sc_watchdog_reconcile_board_truth.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-28/sc_watchdog_status_surface.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-28/sc_watchdog_tail_dedupe_rotation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-29/sc_executor_charter_grant_home.py": {
+      "anchor": "behaviour",
+      "note": "t261009-14: grant facts relocated with zero coverage loss (sandbar section keeps executor-grants.json; generic template drops block+file refs) and the charter-identity scenario stays live-judged (never in known-red-baseline).",
+      "sync_path": ""
+    },
+    "integration/t260928-29/sc_executor_charter_identity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260928-29/sc_executor_preset_repo_contract.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-03/sc_executor_panel_api.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-03/sc_executor_panel_page.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-04/sc_wake_digested_window.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-04/sc_wake_host_api_delivery.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-04/sc_wake_real_session_bench.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-04/sc_wake_self_wake_loop.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-04/sc_wake_session_identity.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-07/sc_watchdog_board_reader_real_shape.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-08/sc_watchdog_real_engine_probe.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-08/sc_watchdog_real_progress_signal.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-08/sc_watchdog_real_selflock_signal.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-09/sc_l10_launch_gate_mechanism.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-18/sc_face_failure_chain_malformed_matrix.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-18/sc_face_failure_reason_real_wrap.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-19/sc_acceptance_extra_face_survival.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-22/sc_executor_entry_console.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260929-22/sc_grants_upstream_400_text.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260930-01/sc_known_red_round_exempt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260930-01/sc_ledger_reuse_round.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t260930-02/sc_surface_plan_query.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261002-10/sc_merge_check_resync.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261002-11/sc_ki191_fixture_period_isolation.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261002-13/sc_tmp_alarm_owner_receipt.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261002-13/sc_tmp_backlog_sweep_safety.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261002-13/sc_tmp_producer_zero_residue.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261002-14/sc_vocab_drift_guards.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-03/sc_ki192_supersede_adjudication.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-06/sc_executor_grants_session_roundtrip.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-06/sc_executor_panel_page_redesign.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-06/sc_executor_panel_recent_actions.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-06/sc_executor_panel_requests_options.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-09/sc_executor_panel_open_session.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-09/sc_executor_panel_theme_follow.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-09/sc_executor_panel_unfold_layout.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-10/sc_t26100310_recent_actions_real_source.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-10/sc_t26100310_route_shell_parity.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-13/sc_ledger_tab_honesty.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-14/sc_panel_draft_survives_poll.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-14/sc_panel_expand_survives_poll.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-15/sc_wake_decision_state_bypass.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261003-15/sc_wake_verdict_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-02/sc_block_text_executor_escape.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-02/sc_executor_preset_doctrine.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-08/sc_watchdog_prose_backstop.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-08/sc_watchdog_waiting_face.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-11/sc_t26100411_ledger_record_and_replay.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-11/sc_t26100411_panel_reads_project_record.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-12/sc_watchdog_long_turn_not_stall.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-12/sc_watchdog_running_bit_fallbacks.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-13/sc_alert_face_order_and_dates.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-13/sc_ledger_coverage_alert_converge.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-14/sc_panel_cap_check_guard.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-14/sc_panel_list_contract_render.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-16/sc_panel_markdown_render.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser + API stubs; markdown render contract on live DOM",
+      "sync_path": ""
+    },
+    "integration/t261004-16/sc_panel_width_columns.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser geometry checks",
+      "sync_path": ""
+    },
+    "integration/t261004-17/sc_t26100417_answer_routes_per_question.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser journey",
+      "sync_path": ""
+    },
+    "integration/t261004-17/sc_t26100417_bridge_mirror_carries_options.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser journey",
+      "sync_path": ""
+    },
+    "integration/t261004-17/sc_t26100417_charter_request_discipline.py": {
+      "anchor": "contract",
+      "note": "verbatim clause checks against server/session_charter.md",
+      "sync_path": ""
+    },
+    "integration/t261004-17/sc_t26100417_request_card_answerable.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser journey",
+      "sync_path": ""
+    },
+    "integration/t261004-18/sc_ki193_unauth_write_refusal.mjs": {
+      "anchor": "behaviour",
+      "note": "KI-193: every panel write endpoint answers 401 to a credential-less request and leaves the ledger, grants declaration and watchdog declaration byte-identical; a malformed body is refused by the identity gate, not the syntax gate; the read face stays open.",
+      "sync_path": ""
+    },
+    "integration/t261004-18/sc_ki193_writer_identity_and_audit_source.mjs": {
+      "anchor": "behaviour",
+      "note": "KI-193: with a valid console-shaped credential, a forged body by records the server-derived writer host with a visible by_claimed/writer_mismatch, a grants master write records updated_by=host, the authority-write audit names its source face, and the grants readout stays consistent after the engine-routed write.",
+      "sync_path": ""
+    },
+    "integration/t261004-19/sc_open_ticket_epic_gate_verdicts.py": {
+      "anchor": "behaviour",
+      "note": "drives the public gate funnel client._executor_grant_gate with the open-ticket context: named verdicts, per-epic cap, no-self-widening, audit rows",
+      "sync_path": ""
+    },
+    "integration/t261004-19/sc_open_ticket_panel_section.mjs": {
+      "anchor": "behaviour",
+      "note": "real browser: Grants page epic-authorization section, audited save, actions epic face",
+      "sync_path": ""
+    },
+    "integration/t261004-20/sc_rewritten_decl_tests_lane_green.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-20/sc_test_anchor_brakes.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-22/sc_d2b_carrier_wait_contract.py": {
+      "anchor": "behaviour",
+      "note": "t261004-20 backfill: the carrier test must wait to a deadline and name its cause on a genuine failure",
+      "sync_path": ""
+    },
+    "integration/t261004-23/sc_engine_request_filing.py": {
+      "anchor": "contract",
+      "note": "t261004-20 backfill: who may file a request through the engine (identity + named refusals)",
+      "sync_path": ""
+    },
+    "integration/t261004-23/sc_panel_engine_row_old_door.mjs": {
+      "anchor": "behaviour",
+      "note": "t261004-20 backfill: the panel shows an engine-filed row with its source; the old door refuses and names the engine path",
+      "sync_path": ""
+    },
+    "integration/t261004-24/sc_copy_language_console_english.py": {
+      "anchor": "behaviour",
+      "note": "real console surface, English-copy check on live DOM",
+      "sync_path": ""
+    },
+    "integration/t261004-24/sc_copy_language_per_diff_gate.py": {
+      "anchor": "behaviour",
+      "note": "fault-injection brake: plants copy violations, asserts the L15 gate bites",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_anchor_presence.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_mergecheck_carveout.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_quarantine_recover.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-25/sc_t26100425_test_face_gate.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261004-26/sc_guard_statement_level_faces.py": {
+      "anchor": "behaviour",
+      "note": "fault-injection brake: -23 wrap shape bites the statement-level surrogate predicate; planted L7 mention probes bite the term gate",
+      "sync_path": ""
+    },
+    "integration/t261004-26/sc_hostile_identity_fixture_chain.py": {
+      "anchor": "behaviour",
+      "note": "fault-injection chain: hostile inherited caller identity must not flip identity-gated guard scenarios; cleaning point strips identity; planted L12 probes bite",
+      "sync_path": ""
+    },
+    "integration/t261004-26/sc_panel_flake_stability.py": {
+      "anchor": "behaviour",
+      "note": "stability face: the two de-flaked panel tests run 3/3 consecutive green rounds through their declared node --test entries",
+      "sync_path": ""
+    },
+    "integration/t261004-27/sc_engine_delivery.py": {
+      "anchor": "contract",
+      "note": "t261004-27: the executor's ledger writes run in the engine process - identity survival, named refusals, no self-authorization",
+      "sync_path": ""
+    },
+    "integration/t261004-28/sc_carrier_verbatim_port_guard.py": {
+      "anchor": "contract",
+      "note": "t261004-28 carrier delivery contract: the three ported engine unit tests stay code-identical to their author sources (comments/docstrings/non-ASCII literals aside, test names+count kept), the source-order lock keeps a byte-identical evidence copy under integration/t261004-28/evidence/, all are registered, and the three files run under pytest (C1-C6 faces of the carrier itself)",
+      "sync_path": ""
+    },
+    "integration/t261004-29/sc_alert_clear_wake.mjs": {
+      "anchor": "behaviour",
+      "note": "clear wakes once per fire episode; restart raises no phantom clear",
+      "sync_path": ""
+    },
+    "integration/t261004-29/sc_wake_on_answer.mjs": {
+      "anchor": "contract",
+      "note": "answer response must carry wake outcome; answer never lost to wake failure",
+      "sync_path": ""
+    },
+    "integration/t261004-29/sc_wake_route_receipt.mjs": {
+      "anchor": "contract",
+      "note": "wake route mount/degrade + named input validation beside status route",
+      "sync_path": ""
+    },
+    "integration/t261004-29/sc_wake_self_feed_guard.mjs": {
+      "anchor": "contract",
+      "note": "self-feed guard stays on new sources; every outcome is an explicit receipt",
+      "sync_path": ""
+    },
+    "integration/t261004-30/sc_executor_one_shot_session.py": {
+      "anchor": "contract",
+      "note": "t261004-30 one-shot executor session: per-object lock, single-knob cap, exit-path release, reference-protected retention",
+      "sync_path": ""
+    },
+    "integration/t261004-31/sc_t26100431_declared_session_gate.py": {
+      "anchor": "behaviour",
+      "note": "declared-executor-session seam behavior: real gate funnel, isolated registry, no value lock on the production declaration",
+      "sync_path": ""
+    },
+    "integration/t261004-32/sc_t26100432_decl_fail_closed.py": {
+      "anchor": "contract",
+      "note": "declaration refusal matrix + read-face shape (host rules 6/7/8/9)",
+      "sync_path": ""
+    },
+    "integration/t261004-32/sc_t26100432_slot_ledger.py": {
+      "anchor": "behaviour",
+      "note": "slot ledger semantics: judge-before-start, four release points, human-hold, pause, lower, order, reconcile (rules 1-5,8; KI-188 family)",
+      "sync_path": ""
+    },
+    "integration/t261004-34/sc_copy_language_comment_blind_spot.py": {
+      "anchor": "behaviour",
+      "note": "wired per-diff gate face: whole-line comments fire, marker exemptions hold (tmp-repo probe, no shared-tree writes)",
+      "sync_path": ""
+    },
+    "integration/t261004-34/sc_lint_battery_wired_into_code_lane.py": {
+      "anchor": "contract",
+      "note": "verify.yaml lanes.code.checks actively wires integration/lint_tests.py (real YAML parse; commented-out is not wired)",
+      "sync_path": "verify.yaml"
+    },
+    "integration/t261004-34/sc_no_concurrent_shared_tree_planting.py": {
+      "anchor": "source-text",
+      "note": "registry/source pin: shared-tree planters may only run from the exclusive pool",
+      "sync_path": ""
+    },
+    "integration/t261004-34/sc_quarantine_recovery_idempotent.py": {
+      "anchor": "behaviour",
+      "note": "multi-batch idempotence + deliberate-removal respect of the quarantine recovery (real lane fixture, direct settle)",
+      "sync_path": ""
+    },
+    "integration/t261004-35/sc_t26100435_msolve_context_contract.py": {
+      "anchor": "contract",
+      "note": "the agent-facing conflict-resolution text carries the red line + parse-level self-check and stays same-source with FORBIDDEN_ENTRIES",
+      "sync_path": ""
+    },
+    "integration/t261004-36/sc_engine_refusal_copy_english.py": {
+      "anchor": "behaviour",
+      "note": "t261004-36: operator-readable refusal/receipt copy is English and refusals stay precise",
+      "sync_path": ""
+    },
+    "integration/t261004-36/sc_no_data_marker.py": {
+      "anchor": "behaviour",
+      "note": "t261004-36: zero data-id copy-language exemptions under server/engine and integration",
+      "sync_path": ""
+    },
+    "integration/t261004-41/sc_grants_open_ticket_roundtrip.mjs": {
+      "anchor": "behaviour",
+      "note": "t261004-41 (host report 261004): a saved grants declaration round-trips every field the Grants page edits — full-field save (grants/night_tier/executor_sessions/open_ticket_epics/open_ticket_cap) reads back verbatim through GET, a partial edit inherits the open_ticket_* keys, an explicit [] clears the list, a master toggle leaves epics/cap untouched, and malformed input is refused with an explicit failure and no partial write.",
+      "sync_path": ""
+    },
+    "integration/t261004-43/sc_activity_ledger_root.py": {
+      "anchor": "contract",
+      "note": "t261004-43: the delivery ACTIVITY forwards the executing-process env so rows land in the instance projects root and the receipt exposes mis-location (absolute result.file)",
+      "sync_path": ""
+    },
+    "integration/t261004-44/sc_deliver_bounded_refusal.py": {
+      "anchor": "behaviour",
+      "note": "KI-197: deliver refuses immediately (named class + registered set) when the worker fingerprint lacks the class without starting a workflow; a wedged engine is a bounded named refusal with the zombie handle cancelled; the already-started fallback receipt is bounded too (review C1); the refusal survives its own audit-append failing (review C2).",
+      "sync_path": ""
+    },
+    "integration/t261004-44/sc_question_bridge_live_path.mjs": {
+      "anchor": "behaviour",
+      "note": "KI-196 live path: a real cordis app + real plugin apply + real agent-scoped emit lands two bridge-written question rows (shared group_id, raised_by session) under the instance projects root, the row ids round-trip answers back to the asking session via the real route surface, and the bridge state face reports mounted/counter/events.",
+      "sync_path": ""
+    },
+    "integration/t261004-44/sc_watchdog_silent_faces.mjs": {
+      "anchor": "behaviour",
+      "note": "ticket C: the watchdog raises a redline naming session+face for a pending ask with no mirrored row past the deadline and for a deliver_refused ledger row; a mirrored-in-time ask stays clear; a malformed ledger row crashes nothing and is named.",
+      "sync_path": ""
+    },
+    "integration/t261009-61/sc_reconcile_scope_t261009-61.mjs": {
+      "anchor": "contract",
+      "note": "reconcile heartbeat redline scoped to actionable in-flight divergences: Class A terminal drift and Class B ledger-only history raise no reconcile_mismatch, a real in-flight divergence still redlines named, the 630-shape fixture counts 1, converges once the ticket goes terminal",
+      "sync_path": "server/plugins/watchdog/src/host/reconcile.ts"
+    },
+    "integration/t261005-02/sc_watchdog_self_heal_config_and_failure.py": {
+      "anchor": "behaviour",
+      "note": "t261005-02 self-heal component contract (status face + cancel act)",
+      "sync_path": ""
+    },
+    "integration/t261005-02/sc_watchdog_self_heal_fires_once.py": {
+      "anchor": "behaviour",
+      "note": "t261005-02 self-heal component contract (status face + cancel act)",
+      "sync_path": ""
+    },
+    "integration/t261005-02/sc_watchdog_self_heal_holds.py": {
+      "anchor": "behaviour",
+      "note": "t261005-02 self-heal component contract (status face + cancel act)",
+      "sync_path": ""
+    },
+    "integration/t261005-03/sc_t26100503_drain_handover.py": {
+      "anchor": "contract",
+      "note": "t261005-03 clause A: guard admits draining owner, refuses serving/mismatch/malformed; takeover named",
+      "sync_path": ""
+    },
+    "integration/t261005-03/sc_t26100503_named_read_degrade.py": {
+      "anchor": "contract",
+      "note": "t261005-03 clause B: snapshot read degrades bounded and named (no_poller/query_timeout/cannot-prove/malformed queue)",
+      "sync_path": ""
+    },
+    "integration/t261005-03/sc_t26100503_orphan_probe_reclaim.py": {
+      "anchor": "behaviour",
+      "note": "t261005-03 clause C: probe counts visible, dry-run default, --apply refuses non-orphans, named refusal on bad root",
+      "sync_path": ""
+    },
+    "integration/t261005-04/sc_ticket_detail_overlay.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261005-05/sc_ui4_identity_cross_surface.mjs": {
+      "anchor": "contract",
+      "note": "UI-4 headline promise: same identity on sidebar face and panel face, single source, fallback, key text kept beside badge",
+      "sync_path": ""
+    },
+    "integration/t261005-05/sc_ui4_identity_space_contract.mjs": {
+      "anchor": "behaviour",
+      "note": "declared identity space: palette/outline/structure exactness, determinism, malformed-key fallback, distinctness over registry+undeclared sets",
+      "sync_path": ""
+    },
+    "integration/t261005-06/sc_chat_band_and_two_entrances.mjs": {
+      "anchor": "behaviour",
+      "note": "UI-5 UI face: identity band channel switch, handle labels, both §2.6 entrances, executor row, zero-residue lifecycle",
+      "sync_path": ""
+    },
+    "integration/t261005-06/sc_sessions_project_file_journey.mjs": {
+      "anchor": "contract",
+      "note": "UI-5 data face: sessions.json round-trip, hostile-file tolerance, refusal atomicity, id-union merge, executor grants merge, short codes, one-shot migration (contract anchors on session-ledger-file.ts / session-handles.ts)",
+      "sync_path": ""
+    },
+    "integration/t261005-09/sc_left_column_ui_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "UI-1 left-column journey: brand first row, project identity + colour block, order-free ticket rows (no invented queue face), session handles with new-session entrance, executor handle only when a face marks it, inspection rows still present",
+      "sync_path": ""
+    },
+    "integration/t261005-09/sc_session_handle_contract.mjs": {
+      "anchor": "contract",
+      "note": "UI-1 session handle public contract: first-4-hex derivation, collision ladder to the tail form, malformed-input no-throw, purity, executor constant single source, client single-source import",
+      "sync_path": ""
+    },
+    "integration/t261005-10/sc_ui2_board_metrics_entrance_retired.mjs": {
+      "anchor": "source-text",
+      "note": "UI-2: whole-tree absence guard — board view retired, wb-metrics-toggle family zero sites, bundle freshness (KI-052 family)",
+      "sync_path": ""
+    },
+    "integration/t261005-10/sc_ui2_epics_docs_metrics_tabs_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "UI-2 browser journey: epics/docs/metrics tab faces render fixture facts, row click opens existing overlay, 500/malformed degrade to named faces, no board icon at runtime",
+      "sync_path": ""
+    },
+    "integration/t261005-10/sc_ui2_panel_tab_order_contract.mjs": {
+      "anchor": "contract",
+      "note": "UI-2: one 9-tab strip in fixed order, no board tab; single concurrency-limit row face = facts + provenance, never a guessed number (CL-2 boundary)",
+      "sync_path": ""
+    },
+    "integration/t261005-12/sc_gate_recording_engine_route.py": {
+      "anchor": "contract",
+      "note": "t261005-12 routing contract: caller writes no ledger row, engine-side delivery dispatch lands the row, fail-open named failure, exempt zero-row, last-failure marker face",
+      "sync_path": ""
+    },
+    "integration/t261005-12/sc_recent_actions_failure_face.mjs": {
+      "anchor": "contract",
+      "note": "t261005-12 reader face: last-failure marker surfaces through the panel actions read; malformed marker treated absent; rows and failure both visible; read-only red line",
+      "sync_path": ""
+    },
+    "integration/t261005-13/sc_t26100513_evidence_layout_gate.py": {
+      "anchor": "contract",
+      "note": "t261005-13: the top-level non-recursive screenshot layout rule must be stated on the gate refusal faces, the worker-side check and the producer copy (README + capture-lane usage) - the choice named, not implied (host ruling 261005-B)",
+      "sync_path": ""
+    },
+    "integration/t261005-13/sc_t26100513_receipt_port_contract.py": {
+      "anchor": "contract",
+      "note": "t261005-13: boot receipt port contract at the public up_stage seam - producer/consumer agreement named on the engine side, fail-closed pins kept (missing/wrong-type/phantom-key receipts stay red)",
+      "sync_path": ""
+    },
+    "integration/t261005-14/sc_t261005_14_gate_replay_compat.py": {
+      "anchor": "contract",
+      "note": "CL-1 concurrency command family replay-safety contract: pre-CL-1 replay emits zero family commands, new runs stay gated, guard completeness on every gate call site (both lanes)",
+      "sync_path": ""
+    },
+    "integration/t261005-15/sc_gate_window_b_time_anchor.py": {
+      "anchor": "contract",
+      "note": "t261005-15 CL-1 gate three-window time-anchor contract: window-(b) histories (gate in history, no marker) replay gated via the start_time arm, window (a) stays verbatim, the marker arm stays primary for window (c), the landing-instant boundary is inclusive, and a degraded info() probe never raises - it falls back to the patched() verdict",
+      "sync_path": ""
+    },
+    "integration/t261005-16/sc_bench_registry_fresh_home.py": {
+      "anchor": "contract",
+      "note": "t261005-16: a fresh home must not replay the retired seed entry - bench registry build contract (.migrated marker + live workspace dir, fail-loud on a foreign file), loader skip face with the no-marker negative control against the real protected seed (read-only), production load sees only the bench project, key whitelist intact (KI-204)",
+      "sync_path": ""
+    },
+    "integration/t261005-16/sc_capture_fresh_home_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "t261005-16: the capture bench journey is independent of the host registry - a hostile SANDBAR_PROJECTS_DIR (retired entry, dead probe dir) must not leak into the bench (exit 0, no workspace-creation failure, probe never appears, PNGs flat), clean fresh-home journey opt-in, no temp-home residue (KI-204)",
+      "sync_path": ""
+    },
+    "integration/t261006-01/sc_ui_evidence_two_shapes.py": {
+      "anchor": "behaviour",
+      "note": "t261006-01: shape A (subdir PNG) stays red and shape B (legacy sticky dir) text==judgement with a runnable next_action; capture ENV_FAIL names an operator exit; worker-side no-png refusal derives from the resolution (KI-205)",
+      "sync_path": ""
+    },
+    "integration/t261006-02/sc_auth_surface_probe_contract.mjs": {
+      "anchor": "contract",
+      "note": "t261006-02: the auth-surface answer is probed, not assumed — 200 bare entry browser-trust, 401+token legacy entry, 401/303 tokenless refusal names the missing surface and generation facts, unknown status refuses, and the refusal is reachable via the real --stage-json seam (KI-205 layer 6)",
+      "sync_path": ""
+    },
+    "integration/t261006-02/sc_capture_auth_surface_real_stage.mjs": {
+      "anchor": "behaviour",
+      "note": "t261006-02: one real capture run on the production pathway exits 0 with flat top-level PNGs and an auth-surface receipt whose observed token source agrees with the producer token_source=none (KI-205 layer 6)",
+      "sync_path": ""
+    },
+    "integration/t261006-03/sc_engine_path_capture_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261006-03: capture through the engine own path (run_capture_stage services=full -> capture-lane --stage-json) exits 0 with flat PNGs at the shared.ui_evidence_dir read point, teardown reclaimed, no workspace-invalid-path or seed host-path leak; live anti-proof: pre-fix fixtures-dir level fails with the same named error",
+      "sync_path": ""
+    },
+    "integration/t261006-03/sc_engine_path_mount_contract.py": {
+      "anchor": "contract",
+      "note": "t261006-03: the engine stage boot passes the FIXTURES ROOT as --fixtures-dir - fixtures root directly contains projects/ (.migrated + container-path declared workspace) and workspace/, SANDBAR_TEST_PROJECTS_DIR=/fixtures/projects inside the mount, no host-absolute declared dir, pre-fix layout control (KI-204 layer-3 residual)",
+      "sync_path": ""
+    },
+    "integration/t261006-05/sc_t26100605_awaiting_approval_liveness.mjs": {
+      "anchor": "contract",
+      "note": "t261006-05: an unanswered approval judges to the named awaiting_approval state (never long_turn) with the id in evidence; approvalFace asked/decided/unreadable truth table; base truth table unchanged without approval input",
+      "sync_path": ""
+    },
+    "integration/t261006-05/sc_t26100605_delivery_pointer_agreement.py": {
+      "anchor": "source-text",
+      "note": "t261006-05: engine CLI refusal face, persona clause and family scan must all name the same engine-side deliver replacement and never recommend the direct --op file append",
+      "sync_path": ""
+    },
+    "integration/t261006-05/sc_t26100605_executor_direct_write_refused.py": {
+      "anchor": "behaviour",
+      "note": "t261006-05: executor-shaped direct ledger write is a bounded named refusal pointing at the engine-side deliver face, zero ledger side effect, lane-agent exempt caller unchanged",
+      "sync_path": ""
+    },
+    "integration/t261006-07/sc_main_sync_conflict_deadlock.py": {
+      "anchor": "behaviour",
+      "note": "t261006-07: the main-sync conflict round cap can no longer lock a fully-resolved lane out — route truth table on the real pure function, a resolved-but-unstaged real git merge face settles through the real worker activity (abort idempotent), counter resets on human signals and settle success, block texts name executable exits only, operator sync --abort entry exists and is documented",
+      "sync_path": ""
+    },
+    "integration/t261006-08/sc_t26100608_cancel_reaps_process_group.py": {
+      "anchor": "behaviour",
+      "note": "t261006-08 R1/KI-210: real-tree reap on the cancel face — TERM-first receipt, grandchild dies with group, CancelledError re-raised, idempotent on dead pids, session-isolation source lock",
+      "sync_path": ""
+    },
+    "integration/t261006-08/sc_t26100608_shutdown_rollcall_receipt.py": {
+      "anchor": "contract",
+      "note": "t261006-08 R2+R3: roll-call enumerates owned children; machine-parseable shutdown-reclaim receipt with leftover naming; empty registry owned=0; epilogue-after-Worker.shutdown source lock",
+      "sync_path": ""
+    },
+    "integration/t261006-08/sc_t26100608_term_first_tmp_lifecycle.py": {
+      "anchor": "behaviour",
+      "note": "t261006-08 R4: TERM-first lets the child reclaim its own temp fixtures; bounded KILL escalation on a TERM-resisting child; shared-reaper source lock; sweeper non-regression",
+      "sync_path": ""
+    },
+    "integration/t261006-11/sc_check_doc_mech_wiring.py": {
+      "anchor": "source-text",
+      "note": "t261006-11 wiring source-lock: activity registered and merged into the same findings pipes, retired module stays retired with successor pointer, real-library replay returns the agent shape",
+      "sync_path": ""
+    },
+    "integration/t261006-11/sc_doc_mech_findings_contract.py": {
+      "anchor": "contract",
+      "note": "t261006-11 doc-face mechanical layer: seven rule families fire planted defects, agent finding shape single-sourced, three false-positive disciplines, malformed-input degrade, id stability",
+      "sync_path": ""
+    },
+    "integration/t261006-12/sc_review_ledger_period_chain.py": {
+      "anchor": "source-text",
+      "note": "t261006-12 period-chain contract: skip_when_unchanged and the stub path never advance the ledger, one append seam serves slice and full scope, full write-back restarts rotation, report payload carries both coverage lists and the human line names NOT-reviewed",
+      "sync_path": "server/engine/agent_activities.py"
+    },
+    "integration/t261006-12/sc_review_ledger_rotation.py": {
+      "anchor": "contract",
+      "note": "t261006-12 rotation contract: slice selection is least-recently-reviewed with declared ordering and tie rule, deterministic, bounded 40-60; a lost/corrupt/torn/non-UTF-8 ledger degrades to everything-unreviewed plus a named note and never raises; hostile project_key refused; coverage lists partition the inventory",
+      "sync_path": ""
+    },
+    "integration/t261006-13/sc_t26100613_base_chain_surface.py": {
+      "anchor": "contract",
+      "note": "t261006-13 B1/B2/B3: base chain never self-seeds HEAD, one shared period surface consumed fail-closed by both faces, coverage verdict loud-fails on uncomputable surface and names thresholds on little-to-review",
+      "sync_path": ""
+    },
+    "integration/t261006-13/sc_t26100613_cross_face_dedupe.py": {
+      "anchor": "contract",
+      "note": "t261006-13 B4: shared_scans owner declaration fail-closed, non-owner keeps one pointer note, finding id stable under wording drift and distinct per object, malformed owner ledger fail-open with a name",
+      "sync_path": ""
+    },
+    "integration/t261006-13/sc_t26100613_machine_notes.py": {
+      "anchor": "contract",
+      "note": "t261006-13 B5: truncation/skipped/unreadable noise becomes counted machine notes adding zero findings, permanent unreadable state stays visible, sweep-not-run remains a finding",
+      "sync_path": ""
+    },
+    "integration/t261006-14/sc_inspection_aggregate_report.py": {
+      "anchor": "behaviour",
+      "note": "t261006-14: the one-page aggregate derives new/fixed/overdue from existing ledgers+journals+ticket states, names missing/damaged inputs (never silently blank), writes only its own report, stays invisible to deadman accounting; pre-implement red expected, green at gate",
+      "sync_path": ""
+    },
+    "integration/t261006-15/sc_t26100615_inspection_tab_journey_layout.mjs": {
+      "anchor": "contract",
+      "note": "t261006-15 P1/P2/P4/P6/P7: rendered tab journey — newest-first period row, verbatim read-only banner, explicit no-report merge face, named-vs-counted separation, not-reviewed never clean, host-only trigger copy + records below period row, Range layout rule (1px left/right lines, equal-width metric grid, full-window width)",
+      "sync_path": ""
+    },
+    "integration/t261006-15/sc_t26100615_period_archive_route.mjs": {
+      "anchor": "contract",
+      "note": "t261006-15 P2/P5: served period-archive route — explicit newest-first order, not-available/merge semantics (adjacency-only, no date arithmetic), per-period report+coverage fetch, malformed-report named reason, unknown-project explicit 400",
+      "sync_path": ""
+    },
+    "integration/t261006-15/sc_t26100615_trigger_gate_attribution.mjs": {
+      "anchor": "behaviour",
+      "note": "t261006-15 P3/P4: gated attributed trigger write (KI-193 family on the new route) — anonymous refused writes nothing, malformed named-refusal, exactly-one attributed record in the project account, failed spawn visible not fabricated, records read newest-first/read-only/torn-line counted",
+      "sync_path": ""
+    },
+    "integration/t261006-17/sc_concurrency_face_ledger_route.mjs": {
+      "anchor": "contract",
+      "note": "CL-2 read face: engine ledger numbers reach the panel route unchanged; malformed ledger and absent declaration are the SAME named ok:false refusal envelope (t261008-48 contract) with absolute paths, engine text verbatim, declared:false carried, never a fabricated number, unlimited face or empty lists; project switch is per-key between restored lawful fixtures",
+      "sync_path": ""
+    },
+    "integration/t261006-17/sc_concurrency_overview_ui.mjs": {
+      "anchor": "behaviour",
+      "note": "CL-2 Overview block render: three chip states with amber on over-the-limit, holders-only list with amber dot on human-hold, no queue listing/explanation copy, audit phrase, project switch; chip-state screenshots are the ticket evidence",
+      "sync_path": ""
+    },
+    "integration/t261006-17/sc_concurrency_save_gate.mjs": {
+      "anchor": "contract",
+      "note": "CL-2 save face: S0 read-path pin (the GET face resolves the seeded PROJECTS-ROOT declaration before any POST, t261008-48), credential gate 401 before disk touch, body by-claim refused, CL-2b-absent named refusal with declaration bytes unchanged, save lands in the audit file read reader-side and the GET face reflects it (KI-193/KI-198)",
+      "sync_path": ""
+    },
+    "integration/t261006-18/sc_t26100618_left_column_order.mjs": {
+      "anchor": "behaviour",
+      "note": "CL-3 left-column user faces: two counts, position numbers, handgrip/arrows on queued rows only, green/amber dots without controls, write-through-then-re-read, malformed-face fallback, 380px width, capture artifact",
+      "sync_path": ""
+    },
+    "integration/t261006-18/sc_t26100618_order_to_next_start.py": {
+      "anchor": "behaviour",
+      "note": "CL-3 engine consumption journey: queue face excludes holders, reorder write face returns verbatim on the same read face, next start promotes the person-set head, refusal matrix leaves the ledger untouched",
+      "sync_path": ""
+    },
+    "integration/t261006-19/sc_counter_reset_replay_guard.py": {
+      "anchor": "contract",
+      "note": "t261006-19 (KI-212) counter-reset family replay contract: pre-e9daa05 history keeps the over-cap counter and the blocked route across rework/retry_qc wakes (no implement where history holds concurrency_renew), window(b)/marker positives keep the reset firing, degraded info() falls back to the marker arm, source lock on the four gated sites",
+      "sync_path": ""
+    },
+    "integration/t261007-01/sc_dismiss_status_and_reopen_guard.mjs": {
+      "anchor": "behaviour",
+      "note": "t261007-01: a dismissed request reads back as the third status dismissed and no longer counts as waiting; a verbatim re-file is refused naming the prior dismiss, a re-raise with new evidence passes, an answer after the dismiss wins (design note §9 change-of-mind), both rows stay in the trace, and dismissing an answered request is refused 409.",
+      "sync_path": ""
+    },
+    "integration/t261007-01/sc_dismiss_unauth_refusal.mjs": {
+      "anchor": "behaviour",
+      "note": "t261007-01: the dismiss write with no console credential answers 401/403 (honest body, forged by, and malformed body all hit the identity gate) and leaves the request ledger byte-identical; the read face stays open.",
+      "sync_path": ""
+    },
+    "integration/t261007-01/sc_dismiss_writer_identity.mjs": {
+      "anchor": "behaviour",
+      "note": "t261007-01: the dismiss row read back from the ledger file records the server-derived writer host with the ticket shape {dismiss_for, at, by}; a forged body by stays visible as by_claimed/writer_mismatch and is never recorded as the writer.",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_request_thread_panel_view.mjs": {
+      "anchor": "contract",
+      "note": "t261007-02 panel face: five states round-trip, waiting list open-only, ownership fields + none-with-reason, links (supersedes with from, duplicates re-file without from), delegated by/via/anchor trio, host state face credential gate and terminal no-rewrite, answer route lands the answered state row",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_request_thread_states.py": {
+      "anchor": "contract",
+      "note": "t261007-02 engine entry: one case per state transition, the three named refusals, duplicate re-file links instead of opening, register read-back of project/source_class, expiry still open, malformed CLI argv named",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_t26100702_duplicate_refile_links.py": {
+      "anchor": "behaviour",
+      "note": "duplicate re-file links instead of opening (mechanical family guard, open items only); four link kinds; supersedes auto-sets superseded on the target",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_t26100702_panel_thread_view.mjs": {
+      "anchor": "behaviour",
+      "note": "panel thread view: five states, waiting=open-only incl. expired-open, two fields + by/via/anchor columns, malformed row counted; host-only state route with KI-193 credential gate",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_t26100702_reply_and_delegated_answer.py": {
+      "anchor": "contract",
+      "note": "reply writer-permission table (project session may not answer) and by/via/anchor as three distinct row fields",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_t26100702_resolved_evidence_gate.py": {
+      "anchor": "contract",
+      "note": "no evidence means no resolved; named refusals write nothing; legal ticket/commit evidence accepted; malformed argv fail-closed",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_t26100702_source_identity_register.py": {
+      "anchor": "behaviour",
+      "note": "three source classes, register-derived project (never self-reported), rotten-register named refusal, single hard epic check with no ticket-epic cross-check",
+      "sync_path": ""
+    },
+    "integration/t261007-02/sc_t26100702_state_machine_permissions.py": {
+      "anchor": "behaviour",
+      "note": "five-state machine, who-may-set refusals, terminal closed, expiry never mutates state; CLI receipt + ledger file read-back",
+      "sync_path": ""
+    },
+    "integration/t261007-06/sc_already_settled_no_false_block.py": {
+      "anchor": "behaviour",
+      "note": "t261007-06 KI-213: settle/block verdict must agree with the disk - real-git incident sequence (join-settle lands, branch-side settle ok/already_settled), disk-agreement truth table, false-'merging state' text retired with the light exit named",
+      "sync_path": "server/engine/agent_activities.py, server/engine/dev_lane.py (settle core + block texts)"
+    },
+    "integration/t261007-07/sc_platform_banner_suppressed.mjs": {
+      "anchor": "behaviour",
+      "note": "Platform banner suppression: no visible fold toggle (semantic anchor = its four platform-locale aria-labels), no blank strip above the brand row, brand-row height regression guard, middle header present, document.title untouched, guard leg (anchor renamed at doc start) hides nothing and warns exactly once naming the anchor, light+dark screenshots",
+      "sync_path": ""
+    },
+    "integration/t261008-01/sc_t26100801_charter_injection_readable.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-01 Measure 2: injection line 1 readable (title names project), marker in the fold window, strip table, real-file render head has no comment, fold predicate covers new+legacy shapes, wire stays PromptContentPart[] (KI-046), endpoint carries projectName",
+      "sync_path": ""
+    },
+    "integration/t261008-01/sc_t26100801_session_label_handle_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-01 Measure 1: charter-raw-title predicate truth table, label helper falls back to the handle (executor fixed handle), band wiring consumes the guarded label with raw title in a tooltip face, handles single-sourced",
+      "sync_path": ""
+    },
+    "integration/t261008-02/sc_middle_column_no_comment_text.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-02: rendered middle-column machine-status head contains no // comment text and none of the t261005-10 (UI-2) comment literal, light+dark with screenshots; S0 family guard: no bare // comment lines in JSX children position in workbench client src, bundles free of the literal and in sync",
+      "sync_path": ""
+    },
+    "integration/t261008-05/sc_executor_panel_height_chain.mjs": {
+      "anchor": "behaviour",
+      "note": "real-browser computed layout of the middle column height chain (t261008-05)",
+      "sync_path": ""
+    },
+    "integration/t261008-07/sc_t26100807_detail_single_column.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-07 detail column: one scrolling column in mock v11 order (order via compareDocumentPosition over semantic anchors), per-state decision-card wording, ops-only action row with no dead buttons, no-data-renders-nothing, source_ticket-filtered requests read reader-side, collapsed heavy sections at the end, crumb walk-back, light+dark captures",
+      "sync_path": ""
+    },
+    "integration/t261008-08/sc_t26100808_left_column_row_composition.mjs": {
+      "anchor": "behaviour",
+      "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
+      "sync_path": ""
+    },
+    "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
+      "anchor": "behaviour",
+      "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",
+      "sync_path": ""
+    },
+    "integration/t261008-19/sc_t26100819_panel_tab_mock_anchors.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-19: panel Metrics Charts face + Docs entry rows vs the 261004 mocks, semantic-text anchors, negative tab-strip/Inspection assertions, light+dark captures",
+      "sync_path": ""
+    },
+    "integration/t261008-20/sc_overview_ledger_dialog_conc_block.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-20: dialog journey over the served page face with API stubs — assertions land on user-visible DOM text/state, not on internal names (the static negative leg pins only the retired markers as absence).",
+      "sync_path": ""
+    },
+    "integration/t261008-21/sc_t26100821_sidebar_popover_retired.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-21: popover retired, dwell pinned at 24h, stale localStorage not steering the knobless window, inspection rows bypass the client window",
+      "sync_path": ""
+    },
+    "integration/t261008-22/sc_t26100822_disposition_entry_face.mjs": {
+      "anchor": "behaviour",
+      "note": "panel disposition face: both action labels, verbatim refusals, voided copy keeps the rejection",
+      "sync_path": ""
+    },
+    "integration/t261008-22/sc_t26100822_void_named_surface.py": {
+      "anchor": "contract",
+      "note": "void surface named-disposition contract on the engine's own ledger/journal evidence files",
+      "sync_path": ""
+    },
+    "integration/t261008-22/sc_t26100822_void_then_rerun_period.py": {
+      "anchor": "behaviour",
+      "note": "void-then-rerun composition and in-flight ordering on open_period_ticket with the stub-client seam",
+      "sync_path": ""
+    },
+    "integration/t261008-22/sc_t26100822_voided_row_ranking.mjs": {
+      "anchor": "behaviour",
+      "note": "voided row derives non-blocked state and leaves the blocked tier in the production sort",
+      "sync_path": ""
+    },
+    "integration/t261008-23/sc_t26100823_agent_log_dir.mjs": {
+      "anchor": "contract",
+      "note": "t261008-23 agent-log read face: .sandbar first with .suyou compat fallback, probed directory reported, honest empty state when no directory exists, surviving isolated workspace path after worktree removal (naming-compat: quotes the scenario's leg-B fixture)",
+      "sync_path": ""
+    },
+    "integration/t261008-23/sc_t26100823_changes_english_dedup.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-23 changes face: one compact Changes panel plus one full-diff fold (no second Changeset summary), English empty state naming which precondition is missing, never a fabricated diff",
+      "sync_path": ""
+    },
+    "integration/t261008-23/sc_t26100823_lane_map_v5.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-23 lane map v5: duration-proportional segment widths, unstarted nominal width, two parallel forks as two bands in one dashed window with the parallel mark, generic renderer, light+dark captures",
+      "sync_path": ""
+    },
+    "integration/t261008-23/sc_t26100823_timeline_reason_collapse.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-23 timeline option b: every entry kept, long reason collapsed behind a keyboard-reachable expand control that reveals the full text, malformed entries never yield undefined",
+      "sync_path": ""
+    },
+    "integration/t261008-24/sc_supply_zero_run_blocker.py": {
+      "anchor": "behaviour",
+      "note": "KI-220 t261008-24: real verify_lane zero-run supply receipt refuses (named blocked route), round stays exempt, false-refusal guard",
+      "sync_path": ""
+    },
+    "integration/t261008-24/tests/sc_zero_run_gate_stop.py": {
+      "anchor": "behaviour",
+      "note": "KI-220 t261008-24: real-worker journey - supply-red STOP (no arbitrate round) -> recovery -> retry_qc -> green ran>0 -> merge gate consumes the green-run face",
+      "sync_path": ""
+    },
+    "integration/t261008-25/sc_t261008_25_failed_ticket_disposition.py": {
+      "anchor": "behaviour",
+      "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
+      "sync_path": ""
+    },
+    "integration/t261008-25/sc_t261008_25_status_surface_map.py": {
+      "anchor": "behaviour",
+      "note": "KI-223 disposition journey / status-surface exhaustiveness (public receipts, not internals)",
+      "sync_path": ""
+    },
+    "integration/t261008-26/sc_lane_vocabulary_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261008-26 KI-226: both lane-vocabulary gate faces plus zero-disturbance negative assertions; drives the real shared.py module (no production snapshot, no value lock beyond the declared vocabulary itself)",
+      "sync_path": ""
+    },
+    "integration/t261008-29/sc_stale_worker_visibility.py": {
+      "anchor": "behaviour",
+      "note": "KI-227 stale-worker visibility: fingerprint v2 carries code fingerprint + activity set, activity fingerprint moves on activity add, strict-subset worker is stale_activities by the comparison face, degraded inputs named, observe-only negative",
+      "sync_path": ""
+    },
+    "integration/t261008-29/sc_terminal_stage_memo_face.py": {
+      "anchor": "behaviour",
+      "note": "KI-227 terminal-stage memo face: memo sandbar_stage reaches the terminal failure face as last_stage with memo provenance, pre-fix tickets keep the honest-unavailable note, malformed memo degrades named, the read writes nothing",
+      "sync_path": ""
+    },
+    "integration/t261008-30/sc_t26100830_lane_rerun_human_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261008-30: incident fingerprint replay through the public lane_legs/lane_findings judgement face; W9 source-text drift guard is auxiliary",
+      "sync_path": ""
+    },
+    "integration/t261008-33/sc_t26100833_anchor_guard_named_failure.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-33: SANDBAR_ANCHOR_MISMATCH named failure before any write across lane/standalone tree shapes; external-caller escape hatch regression",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "integration/t261008-33/sc_t26100833_lane_env_anchor_boundary.mjs": {
+      "anchor": "contract",
+      "note": "t261008-33: every engine-built env for lane work carries the lane root as the repo anchor (single-point seam)",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "integration/t261008-33/sc_t26100833_main_checkout_witness.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-33: incident-class witness - lane evidence write leaves the main checkout clean (delta-based), main root derived from the lane gitfile",
+      "sync_path": "server/plugins/repo-anchor.mjs"
+    },
+    "integration/t261008-35/sc_orphan_check_local_to_leg.py": {
+      "anchor": "behaviour",
+      "note": "pins the ticket contract: the shutdown-reclaim orphan check is local to the leg (no machine-wide process enumeration) and keeps teeth",
+      "sync_path": ""
+    },
+    "integration/t261008-36/sc_t26100836_settings_faces_merge.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-36: panel Settings tab lists Model routes + Project settings, each opens its face in one host-side overlay with the iframe kept (single layer), Back restores, pmod danger anchors unchanged, More-views affordance retired wholesale, light+dark captures",
+      "sync_path": ""
+    },
+    "integration/t261008-36/sc_t26100836_single_routes_path.py": {
+      "anchor": "source-text",
+      "note": "t261008-36 negative face: no model-routes reference in executor-panel source, exactly one ProvidersSection mount site, data-wb-more-views grep-zero, providers client keeps the routes save face",
+      "sync_path": ""
+    },
+    "integration/t261008-37/sc_concurrency_write_entry.mjs": {
+      "anchor": "contract",
+      "note": "CL-2b engine write entry: real spawn three-face agreement (decl bytes / audit file / read face), zero-side-effect refusal table, first-Save creation, entry-absent negative",
+      "sync_path": ""
+    },
+    "integration/t261008-39/sc_board_sweep_brief_contract.mjs": {
+      "anchor": "contract",
+      "note": "t261008-39 board sweep / rerise",
+      "sync_path": ""
+    },
+    "integration/t261008-39/sc_stuck_block_rerise_persistence.mjs": {
+      "anchor": "behaviour",
+      "note": "t261008-39 board sweep / rerise",
+      "sync_path": ""
+    },
+    "integration/t261008-39/sc_sweep_disposition_contract.mjs": {
+      "anchor": "contract",
+      "note": "t261008-39 board sweep / rerise",
+      "sync_path": ""
+    },
+    "integration/t261008-43/sc_inspection_suite_duration_leg.py": {
+      "anchor": "behaviour",
+      "note": "t261008-43: grey-box L3 rod — the suite-duration leg contract (threshold surface, slow-round finding with source line, outliers capped+counted, bigger-vs-slower trend, coexistence/classification) exercised through the public judgement functions over in-memory fixture receipts",
+      "sync_path": ""
+    },
+    "integration/t261008-45/sc_executor_workflow_sandbox_validates.py": {
+      "anchor": "behaviour",
+      "note": "t261008-45: real worker start against a stage Temporal (reader-side poller evidence, no RestrictedWorkflowAccessError, SIGTERM reaped) plus the sandbox re-import family guard",
+      "sync_path": "server/engine/worker.py"
+    },
+    "integration/t261008-46/sc_mutex_working_peer_ceiling.py": {
+      "anchor": "contract",
+      "note": "t261008-46: working-peer ceiling on the ensure-mutex flock window (named-bound honest red)",
+      "sync_path": ""
+    },
+    "integration/t261008-46/sc_supply_working_peer_ceiling.py": {
+      "anchor": "contract",
+      "note": "t261008-46: two-tier supply contention wait contract (base budget vs working-peer ceiling knob) at the stage_docker CLI process face",
+      "sync_path": ""
+    },
+    "integration/t261008-50/sc_clean_tree_run_output.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-01/sc_t261009_01_clean_checkout_shared_faces.py": {
+      "anchor": "behaviour",
+      "note": "runs the real runner entries in a clean clone; pins the user-visible green-from-clean-checkout contract, not source text",
+      "sync_path": ""
+    },
+    "integration/t261009-01/sc_t261009_01_gate_preexisting_red_face.py": {
+      "anchor": "contract",
+      "note": "binds to the classifier public entry + classification enum (the new gate contract from ticket t261009-01 deliverable 2)",
+      "sync_path": ""
+    },
+    "integration/t261009-03/sc_t26100903_reorder_write_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-03 CL-3 L3 journey: the panel POST {project, order} through the real route chain lands and the GET face returns the new order; refusal body text reaches the client in the shape orderNotice renders; refusal paths leave the state file byte-hash identical; holder slots/queue count unchanged",
+      "sync_path": ""
+    },
+    "integration/t261009-10/sc_refusal_copy_anchor_contract.mjs": {
+      "anchor": "contract",
+      "note": "resolveAgentBaseDir refusal contract on the shared stable anchor + smoke-face anchor-rot tripwire",
+      "sync_path": ""
+    },
+    "integration/t261009-11/sc_run_record_drivers.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-11/sc_run_record_store.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-12/sc_env_refused_not_self.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-12/sc_lint_verdict_stable_or_named.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-13/sc_t26100913_hatch_audit_debt_face.py": {
+      "anchor": "contract",
+      "note": "t261009-13 slice 1 c+d+e store contract: append-only JSONL with refused calls writing nothing, torn line = named fail-closed refusal never a silent zero-debt list, certification coverage clears exactly the covered revision while uncovered siblings stay outstanding, a forged second landing-granting family is never counted as a debt or clearance and the op catalogue declares exactly one hatch op",
+      "sync_path": ""
+    },
+    "integration/t261009-13/sc_t26100913_hatch_one_door.py": {
+      "anchor": "behaviour",
+      "note": "t261009-13 slice 1 a+b one-door journey: host authorisation lands one reader-side record carrying who/breakage/revisions/expiry/moment, the act reads back as an outstanding certification debt, a ticket-path origin cwd is refused by name leaving the store byte-identical (origin judged, not payload), agent role names and -agent suffix identities are refused by name",
+      "sync_path": ""
+    },
+    "integration/t261009-15/sc_t26100915_quiet_baseline_identity.py": {
+      "anchor": "contract",
+      "note": "t261009-15: carrier-independent identity seam — engine canonical_check_name vs booked roster row vs the two real carriers (KI-072)",
+      "sync_path": ""
+    },
+    "integration/t261009-16/sc_fast_set_declaration.py": {
+      "anchor": "behaviour",
+      "note": "pins the CLI declaration face (membership/budget/cost), not internal names",
+      "sync_path": ""
+    },
+    "integration/t261009-16/sc_fast_set_gate.py": {
+      "anchor": "behaviour",
+      "note": "pins fail-closed refusal faces over fixture injections",
+      "sync_path": ""
+    },
+    "integration/t261009-17/sc_t26100917_moved_main_not_human.py": {
+      "anchor": "behaviour",
+      "note": "KI-01M4FKAWY0EP59PY0V0QZWWGV5 regression: moved main must not stop a lane for a human; judged through the public settle receipt",
+      "sync_path": ""
+    },
+    "integration/t261009-18/sc_line_declaration_contract.py": {
+      "anchor": "contract",
+      "note": "t261009-18: the declaration reader's fail-closed contract — absent/malformed/unknown-version/duplicate-branch refusals, multi-repo shape, empty extra set legal",
+      "sync_path": ""
+    },
+    "integration/t261009-18/sc_line_landing_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261009-18: the landing journey over real git repos and the real store files — linear history, reader-side record, one-per-ticket refusal, conflict bounce, cross-process serialization",
+      "sync_path": ""
+    },
+    "integration/t261009-18/sc_old_flow_inert_face.py": {
+      "anchor": "behaviour",
+      "note": "t261009-18: coexistence — import writes nothing, one-way dependency source-text face, landing write-locality inside the develop area only",
+      "sync_path": ""
+    },
+    "integration/t261009-19/sc_t26100919_certify_once.py": {
+      "anchor": "behaviour",
+      "note": "t261009-19 certification journey: at most one certification per tick (held guard refuses every trigger, second acquire gets no token), the record cites the run (run id/judged_by/booked_red/at) with zero counts/verdict keys and a verdict-restating append refused by name, the covered range derived from the shared seq order (same-seq landing excluded, stored covered_range a legal projection), and the green certified prefix answers landable even with a red certification later on the line (goal 8)",
+      "sync_path": ""
+    },
+    "integration/t261009-19/sc_t26100919_red_bounded.py": {
+      "anchor": "behaviour",
+      "note": "t261009-19 bounded red journey: the ladder answers rerun before any search, a unique per-lane hit isolates for free, a one-landing range isolates by arithmetic, an unfiltered multi-landing range reaches search and its range_key recorded as a searched change refuses the same range by name (goal 10), the boundary sentence is recordable as an attribution change; freeze episode carries only id/line/cause (state/culprit/closure are keyed change rows, should_freeze false for no attribution); a missing or zero-run header raises CouldNotRun and lands a range-growth row with no freeze row (goal 24); garbage red_cert/lane_reds shapes raise CertifyError by name",
+      "sync_path": ""
+    },
+    "integration/t261009-20/sc_settle_rerun_replay_guard.py": {
+      "anchor": "source-text",
+      "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
+      "sync_path": ""
+    },
+    "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
+      "anchor": "behaviour",
+      "note": "t261009-21 waiting/freeze journey: the green certified prefix answers landable while a red freeze is open (goal 8), waiting is a distinct dated face (waiting_since from the landing record's at, waiting_for present, overdue past a declared bound surfaced not tolerated, red_implicated/certified/waiting never conflated), needs_slot is False only for waiting (goal 15) and the frozen line admits only the structurally-declared fix kind with unknown kinds refused by name (goal 17), and the culprit/covered range is derived per line from record order - an interleaved other-line landing never widens it and no landing row ever carries a culprit/range/waiting field (spec d)",
+      "sync_path": ""
+    },
+    "integration/t261009-23/sc_outcome_three_stages_withdrawal.py": {
+      "anchor": "behaviour",
+      "note": "t261009-23: promotion human surface / outcome three stages + withdrawal guard (grey-box L3, public develop_promote face)",
+      "sync_path": ""
+    },
+    "integration/t261009-23/sc_promotion_proof_signature.py": {
+      "anchor": "behaviour",
+      "note": "t261009-23: promotion human surface / outcome three stages + withdrawal guard (grey-box L3, public develop_promote face)",
+      "sync_path": ""
+    },
+    "integration/t261009-27/sc_t26100927_outcome_endings_kind_compare.py": {
+      "anchor": "behaviour",
+      "note": "t261009-27: endings that are not deliveries (withdrawn/superseded coexisting with the three stages), the product's kind deciding the ending fact with unknown named, and rebuild-and-compare naming the moved field - through the public develop_promote outcome/compare faces",
+      "sync_path": ""
+    },
+    "integration/t261009-28/sc_t26100928_legacy_and_ancestor_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261009-28: legacy landings.jsonl refused by name with zero writes anywhere, control landing accepted, and the certified-revision ancestor gate refuses a stale lane tip recording nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-28/sc_t26100928_one_home_landing_record.py": {
+      "anchor": "behaviour",
+      "note": "t261009-28: the landing act records once in the delivery ledger through its own writer (writer-assigned seq, no second shape) and the landing is computable in the shared ordering space (derive_range / should_certify / has_landing)",
+      "sync_path": ""
+    },
+    "integration/t261009-36/sc_discipline_read_not_run.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/tests/test_fixture_reclaim.mjs": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/tests/test_stage_docker.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/tests/test_stage_lease.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/with_stage.sh": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/worker-restart/sc_worker_single_poller.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-22/sc_t26100922_lane_map_mock_chrome.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-22 lane map mock chrome: header kind legend + elapsed/now-at summary + waiting-for-you, durations printed under labels, diamond human gate, time axis at the segment scale, skipped dashed empty, now cursor, hover duration; malformed entries leak nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-31/sc_t26100931_dismiss_journal_contract.py": {
+      "anchor": "contract",
+      "note": "t261009-31: the dismissal journal/operation contract through the public ops — one-row append, named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, append-failure propagation",
+      "sync_path": ""
+    },
+    "integration/t261009-31/sc_t26100931_dismiss_reader_face.py": {
+      "anchor": "contract",
+      "note": "t261009-31: the read face — list/detail rows carry dismissed:{at,who,reason}, read failure degrades to named dismissed_note, no DONE-family reclassification, CLI ops human-only and signal-free",
+      "sync_path": ""
+    },
+    "integration/t261009-38/sc_t26100938_gate_admits_bundle_out.py": {
+      "anchor": "behaviour",
+      "note": "drives real settle_lane on a git lane fixture (gate face of the bundle-out rule)",
+      "sync_path": ""
+    },
+    "integration/t261009-42/sc_bundle_freshness_verdict.py": {
+      "anchor": "contract",
+      "note": "t261009-42: merge-check item 3.5 three-state freshness verdict at the gate level (rebuild declared entry + byte-compare; legacy verdict kept when no entry declared)",
+      "sync_path": ""
+    },
+    "integration/t261009-38/sc_t26100938_mergecheck_pair_agreement.py": {
+      "anchor": "contract",
+      "note": "merge-check whitelist face of the bundle-out rule: widen helper + verify_lane run() over the shared declaration (admit by name / refuse both directions)",
+      "sync_path": ""
+    },
+    "integration/t261009-39/sc_t261009_39_yaml_follows_code.py": {
+      "anchor": "contract",
+      "note": "t261009-39: generated workflow yaml is pure generator output (KI-154)",
+      "sync_path": ""
+    },
+    "integration/t261008-47/sc_ticket_face_english.py": {
+      "anchor": "contract",
+      "note": "engine ticket-face copy surface: no CJK at emission points; narrowness re-proven; fixtures moved with the copy",
+      "sync_path": ""
+    },
+    "integration/t261008-47/sc_timeline_rerun_stats.py": {
+      "anchor": "behaviour",
+      "note": "rerun round/wall derivation identical over old- and new-format timelines; named degradation; history rows still drive the leg",
+      "sync_path": ""
+    },
+    "integration/t261009-29/sc_promotion_one_seq_space.py": {
+      "anchor": "behaviour",
+      "note": "t261009-29: the promotion and withdrawal relations live in the SAME delivery.jsonl and seq space as landings and certifications - the shared append face stamps one strictly increasing sequence across kinds, the promotion row keeps every field and gains seq, ticket_outcome consumes ONE rows list with a single delivery cursor, and the withdrawal guard stays armed inside the one file",
+      "sync_path": ""
+    },
+    "integration/t261009-29/sc_legacy_promotion_ledger_migration.py": {
+      "anchor": "behaviour",
+      "note": "t261009-29: the legacy promotion.jsonl is migrated into delivery.jsonl in at-then-file order (rename out of the way, idempotent second run) or refused BY NAME on the read/append faces while unmigrated - never silently read as no promotions; malformed and duplicate legacy input aborts by name appending nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_round_green_and_growth.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round contract",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_round_red_freeze_exempt.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round contract",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_round_slot_chain_checkout.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round contract",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_line_round.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round: green round certifies the head and closes the range over a real temp ledger (certification cites the run, restates nothing, waiting ticket answers certified/landable); guard-held joins with zero runs and zero writes; red opens the freeze keyed to the red cert with the rerun-first ladder and the structural fix exemption; could-not-run writes range_growth never a freeze; corrupt ledger/guard refuse loud with the guard released; the delivered checkout (incl. symlink alias) is refused before any runner runs",
+      "sync_path": ""
+    },
+    "integration/t261009-32/sc_t26100943_left_column_dismiss.mjs": {
+      "anchor": "contract",
+      "note": "the left-column dismiss face + dwell-rule hole, judged on the public client faces (inSandbar, dismissed read helpers, sidebar copy/wiring shape); engine half is t261009-31's entries",
+      "sync_path": ""
+    },
+    "integration/t261009-48/sc_t26100948_preflight_refuse.py": {
+      "anchor": "contract",
+      "note": "t261009-48 pre-flight face + named refusal + kill-ordering on engine_ops restart",
+      "sync_path": ""
+    },
+    "integration/t261009-48/sc_t26100948_handover_record.py": {
+      "anchor": "contract",
+      "note": "t261009-48 append-only handover record: disposition/who/why/in-flight, reader-side jsonl",
+      "sync_path": ""
+    },
+    "integration/t261009-49/sc_face_coverage_engine.py": {
+      "anchor": "behaviour",
+      "note": "t261009-49: the engine coverage projection names each period-without-a-result over a deterministic fixture tree (five states, blocked shell never produced, named last-ok/never lines, raising reader named, dead-man untouched, projection rides the aggregate report)",
+      "sync_path": ""
+    },
+    "integration/t261009-49/sc_face_coverage_panel_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-49: the panel pure view module renders the coverage answer (five distinct copies, failed named block with attempt evidence, blocked shell never produced, unknown state never re-derived, malformed payloads degrade)",
+      "sync_path": ""
+    },
+    "integration/t261009-51/sc_registry_style_drift_bite.py": {
+      "anchor": "contract",
+      "note": "t261009-51: lint bites on registry serialization style drift; names file + first differing line; never rewrites",
+      "sync_path": ""
+    },
+    "integration/t261009-51/sc_registry_writer_canonical.py": {
+      "anchor": "contract",
+      "note": "t261009-51: canonical write path (lib_registry.write_registry) byte shape + content-free normalization proof vs HEAD",
+      "sync_path": ""
+    },
+    "integration/t261009-59/sc_t26100959_tick_triggers.py": {
+      "anchor": "behaviour",
+      "note": "t261009-59 tick call site: event/backstop triggers distinguishable, idle writes nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-59/sc_t26100959_tick_failures.py": {
+      "anchor": "behaviour",
+      "note": "t261009-59 tick call site: named failures, held slot untouched, no call-site bookkeeping",
+      "sync_path": ""
+    },
+    "integration/t261009-59/sc_t26100959_tick_wired.py": {
+      "anchor": "source-text",
+      "note": "t261009-59 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)",
+      "sync_path": ""
+    },
+    "integration/t261009-45/sc_bundle_entry_declaration.py": {
+      "anchor": "contract",
+      "note": "the project declaration carries the build entry; malformed value degrades to named legacy verdict",
+      "sync_path": ""
+    },
+    "integration/t261009-41/sc_t26100941_certification_face_seam.mjs": {
+      "anchor": "contract",
+      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
+      "sync_path": ""
+    },
+    "integration/t261009-41/sc_t26100941_fixture_contract_gate.py": {
+      "anchor": "contract",
+      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
+      "sync_path": ""
+    },
+    "integration/t261009-41/sc_t26100941_freeze_promote_contract.py": {
+      "anchor": "contract",
+      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
+      "sync_path": ""
+    },
+    "integration/t261009-35/sc_ticket_detail_pause_faces.py": {
+      "anchor": "contract",
+      "note": "detail face (ticket.py show) must carry the snapshot pause pair; both-faces-one-source seam",
+      "sync_path": ""
+    },
+    "integration/t261009-57/sc_t26100957_alerts_face_coalesce.mjs": {
+      "anchor": "contract",
+      "note": "t261009-57 alerts face: display_max knob (default 8 coalesced rows, 0=show all), xN run coalescing with cleared-refire boundary, relative-time-first with absolute on hover, full-text wrap, level words, ledger read-only journey",
+      "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts"
+    },
+    "integration/t261009-55/sc_t26100955_one_tick_handover.py": {
+      "anchor": "contract",
+      "note": "t261009-55 KI-01M4GF5R8NHQNATH7WD7SKF94X addendum: one-tick boot-generation handover + proven-zero-poller repair, ensureTicketWorkersOnce decision records",
+      "sync_path": "server/plugins/temporal-tools/node.ts (ensureTicketWorkersOnce); server/engine/worker.py (meta console_boot/polling)"
+    },
+    "integration/t261009-55/sc_t26100955_read_face_poller_gap.py": {
+      "anchor": "contract",
+      "note": "t261009-55 spec 3+4: snapshot-failure degrade face (unavailable(cause@queue/ticket), durable stage, orphan start_to_close note)",
+      "sync_path": "server/engine/client.py (_classify_snapshot_failure consumers, degrade seam)"
+    },
+    "integration/t261009-52/sc_fixture_leak_brakes.py": {
+      "anchor": "behaviour",
+      "note": "K222 leak lifecycle: interrupted brake run must reclaim its fixture",
+      "sync_path": ""
+    },
+    "integration/t261009-52/sc_fixture_refusal_named.py": {
+      "anchor": "behaviour",
+      "note": "K222 refusal + lint naming face",
+      "sync_path": ""
+    },
+    "integration/t261009-44/sc_t26100944_certification_route_reader.mjs": {
+      "anchor": "contract",
+      "note": "t261009-44: Slice 2 — the certification route + reader seam the tab reads through (read journey, named degradation, no write path)",
+      "sync_path": ""
+    },
+    "integration/t261009-44/sc_t26100944_certification_tab_page.mjs": {
+      "anchor": "contract",
+      "note": "t261009-44: Slice 2 — the page-visible Certification tab and its wiring to the one registered route (dead-button proof live)",
+      "sync_path": ""
+    },
+    "integration/t261009-58/sc_t26100958_effective_write_set.py": {
+      "anchor": "contract",
+      "note": "t261009-58 story (1)+(4): one effective write set record - shape, stored-field fallback, record-wins precedence, named malformed refusal, history face",
+      "sync_path": "server/engine/shared.py (write-set record faces); server/engine/dev_lane.py (plan refresh wiring)"
+    },
+    "integration/t261009-58/sc_t26100958_plan_mismatch_and_annex.py": {
+      "anchor": "contract",
+      "note": "t261009-58 story (2)+(3)+(5): named plan-time mismatch + narrow audited annex admission incl. protected refusal and KI-125/KI-158 directory door",
+      "sync_path": "server/engine/shared.py (plan_write_set_mismatch / annex_admission); server/engine/dev_lane.py (annex signal wiring)"
+    },
+    "integration/t261009-60/sc_leftover_assert_scope.py": {
+      "anchor": "behaviour",
+      "note": "runs the real engine test file under pytest with a planted foreign decoy; sweep scanner teeth proven on a synthetic offender",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_triggers.py": {
+      "anchor": "behaviour",
+      "note": "t261009-50 tick call site: event/backstop triggers distinguishable, idle writes nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_failures.py": {
+      "anchor": "behaviour",
+      "note": "t261009-50 tick call site: named failures, held slot untouched, no call-site bookkeeping",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_wired.py": {
+      "anchor": "source-text",
+      "note": "t261009-50 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)"
+    },
+    "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
+      "sync_path": ""
+    },
+    "integration/t261009-46/sc_optin_landing_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261009-46: the opt-in landing journey — version-name refusal matrix never defaulted, proven revision lands on the line with main unmoved and one reader-side ledger row, clean drift pins and lands the proven sha, dirty drifted checkout refuses by name with zero writes",
+      "sync_path": ""
+    },
+    "integration/t261009-46/sc_legacy_path_untouched.py": {
+      "anchor": "behaviour",
+      "note": "t261009-46 coexistence — legacy-version resolution creates nothing, importing the running-flow modules leaves the new surface unimported (one-way dependency, re-verified for the wired tree), an old-path settle writes nothing into the new homes, workflows_v2 names no new surface",
+      "sync_path": ""
+    }
+  }
+}
