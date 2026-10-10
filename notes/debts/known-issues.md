@@ -4330,6 +4330,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **所以复核的第一步永远不是"登记"，而是"定点复跑"**：单跑红 ⇒ 按真缺陷修；单跑绿 ⇒ 按载荷面处置或标记"已在套件内稳定"。
 > 这与既有的"闸红先同修订重跑一次"是同一条纪律：**先花最小代价区分，再决定往哪一层归因。**
 
+> **补·browser 池四条 100% 红的定点复跑（261011 03:41–03:49，舰队空闲窗口：`ps` 数 `run_scenarios.py` = 0 才开跑；本岗执行）**——这一步正是上一条处方里"留给空闲窗口"的那半边，结论**推翻了"capture 族大概率是环境面"的假设**：
+>
+> | 场景 | 单跑判定 | 墙钟 | `reason` | 判词 |
+> |---|---|---|---|---|
+> | `t261005-16-capture-fresh-home-journey` | **fail** | 87.8 s | `assert_mismatch`（证据里点出 "the deterministic red-before face"） | **真缺陷**（不该按环境面隔离，更不该入册消音） |
+> | `t261006-02-capture-auth-surface-real-stage` | **fail** | 87.6 s | `assert_mismatch` | **真缺陷** |
+> | `t261006-03-engine-path-capture-journey` | **fail** | 295.8 s | `assert_mismatch`；证据含 `502 (Bad Gateway)`、`[capture-lane] capture.mjs 退出码 1`、`ok pre-fix code fails with capture exit 1` | **真缺陷**（与上面 `t261006-03` 第三层残留"引擎路径的工作区解析"同一条线） |
+> | `t261008-36-panel-settings-faces-merge` | **pass** | 14.1 s | — | **套件内敏感**（载荷面；不入册，若套件内再稳定红按 KI-184 家族走） |
+>
+> **结论（对判据与对 develop-buffer 都有影响）**：**四条里 3 条是确定性真红、1 条是载荷敏感**——所以"每轮全量轮都有 4–5 个红"这件事**不是环境噪声，是三条真缺陷在每轮复现**。⇒ ①**入册（跳过）会掩盖真缺陷**，本岗的建议是**先修这三条**；②对 develop-buffer 而言，这正是 `KI-01M4KJ022G8R0RRAZ03C7T9TZ4`（落地前置 `last_green_run` 不可达）的**根**之一：修掉这三条，全量轮才可能零失败，"零失败轮"这条前置才可能被满足——**修它是与所有选项都相容的那条路**（不必放宽判据、也不必入册消音）。
+> **纪律（本轮新增，写给复核者）**：**"长期红"的处置顺序是"定点复跑 → 定性 → 修或入册"，跳过错跑直接入册等于用册子给真缺陷消音**；单跑判定要同时记录 `reason` 与墙钟（`assert_mismatch` 是真断言红，`env_fail`/超时才是环境面），并写明跑批前置条件（本轮的判据是 `ps` 数到 0 个 `run_scenarios.py`）。
+> **已开修复票**：`t261011-03`（三条确定性红，逐条点名失败断言；`t261008-36` 不入票，按载荷面留观）。
+
 > **同族补充二（261009 12:19 实测，含一条可复用的巡检配方）**：**三张票静默停摆 3.5–4.5 小时，其中两张在票面上写着 `running`**。
 > 判据（**四路交叉，任一路可疑就点名**）：①`op=list` 的 `updated` 时间；②`concurrency-state.json` 的 holders 名单；③**泳道目录近 N 分钟内是否有文件被改**（`find .lane/<id> -newermt '-200 minutes' -type f`）；④票面 `stage_state`。
 > 实测：`t261008-43`（blocked，updated 07:51＝**4.5 h 前**，无槽位，泳道 200 分钟内零改动）、`t261008-47`（**running**，08:31＝3.8 h 前，**不在 holders 里**）、`t261009-04`（**running**，08:43＝3.6 h 前，**不在 holders 里**，泳道同样零改动）。
