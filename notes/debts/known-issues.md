@@ -4872,6 +4872,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **处置**：已开标准解法票 **`t261009-58`**（写集单源：并集落成“有效写集”的持久记录，**settle / verify_lane / merge 判据都读它**；> 计划段具名报出越集文件；实现中途发现的走**有界可审计的 annex**；受保护面照旧归宿主）；该票落地前 `t261009-50` **暂停**（段边界生效、释放额度）。
 > **纪律补一条**：**“授权生效”必须在每一个读它的面上都成立**——凡新增/改动一个读写集的判据，都要在验收里回答“它读的是哪一份写集”。
 
+> **更正（261010 13:20；读码复核后推翻上面"第三面"的机理）**：上面那段判为 **merge 闸读"存储写集"、并集不进它的输入、因此"没有任何泳道动作能清掉这条红"** —— **这是错的**。读码（`server/engine/dev_lane.py:4873`）把 `write_set=list(self.meta.get("write_set") or [])` 交给 `merge_check`，而 `_refresh_write_set_after_plan`（同文件 `:1372`）正是把并集结果**写回 `self.meta["write_set"]`**；merge_check 侧 `_lane_scopes(wt, branch, base_ref, args.write_set)` 再把它逐仓 rebasing，交给泳道内 `verify_lane`（`server/engine/agent_activities.py:5410` 附近）⇒ **merge 面读的就是并集后的那一份（meta），不是建票时的票面字段**。回执里 `judge = ticket write_set` 是**判据的名字**，不是"读票面存储字段"的意思。
+> **那 `-50` 为什么会被拒？** 因为**那一票的并集输入是薄/空的**：`t261009-50` 的 `create_plan` gen-2 回执里 `files_changed` 只有 `["integration/t261009-50/plan.md"]`（`files_changed_shape: ok`），**两个调用点文件只写在"方案散文"里、没进那个数组** ⇒ 并集只加了 plan.md（`meta.write_set` 实读：初始 6 条 + plan.md，**没有** `activities.py`/`workflows.py`）⇒ 两个面都照旧判越界。**这正是上一条 KI（`KI-01M4HS8G7P0K1M5BV6C2TC4EQY`：字段名与语义相反、空/薄数组静默 no-op）在本票的第三次咬人**，与"merge 面不读并集"无关。
+> **后果（记档）**：本岗 09:28 据此错误机理给 `-50` 下了"今天没有合法解"的裁决并**暂停了 3.5 小时**；宿主因此第三次追问"写集不对有没有标准解法"。**实际出路不需要宿主授权**：**一次 `create_plan` 重跑，把两个调用点文件写进回执的 `files_changed` 数组**即可（并集加进 `meta.write_set`，两个面同时放行）。已于 13:20 按此发 `rework to_stage=create_plan` + `resume`（timeline：`create_plan running Entered step (attempt 4)`；`resume` 没有白烧一轮闸）。
+> **纪律（本岗自查）**：**"X 面读的是哪一份写集"这类结论，必须落到"哪个文件的哪一行把哪份变量交给了它"**——只凭回执里一个判据名字就推断数据来源，本岗已因此错一次、并让一张高优票白停 3.5 小时。`t261009-58`（写集单源）**仍然该做**（把"有效写集"落成持久记录，免去每张票都要重跑计划段），但它**不是** `-50` 的救命绳。
+
 ## KI-01M4HMCZAM4ZBC2CKN15HDBZHP **"死按钮"：客户端 POST 的路径在**服务端路由表里不存在**，而票面的验证是**读客户端源码文本**（断言"会发请求"而不是"有人应答"）⇒ 台面绿、真机红**(261010 实证;integration 岗登记)
 
 > **现象（宿主 261010 实报：「这个 failed 的 ticket 的 dismiss 按钮页没用啊」，重启后仍无反应）**：左栏行上的 dismiss 按下无任何效果。**读盘定位（三层，全部有出处）**：
