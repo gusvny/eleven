@@ -2791,6 +2791,11 @@
       "note": "",
       "sync_path": ""
     },
+    "integration/t260916-26/sc_t26091626_boot_evidence.mjs": {
+      "anchor": "contract",
+      "note": "t261009-73: the t260916-26 bench face of the attributable-boot-evidence contract - attachBootEvidence annotation carries failure context + bounded tail + survivor outside the reclaimed temp home; missing/empty logs name the absence, binary logs keep a byte-exact survivor; dedupe marker blocks double annotation; pre-log boot failure rejects named with zero fabricated survivors",
+      "sync_path": "integration/t260916-26/lib_t260916_26_bench.mjs (attachBootEvidence + bootLaneConsole catch)"
+    },
     "integration/t260916-26/sc_console_boot_no_plugin_banner.mjs": {
       "anchor": "behaviour",
       "note": "",

@@ -14,6 +14,15 @@
 // 勿用 17233——那是供给台实占端口，260910 实锤）、票源走 FIX17 桩、随机高端口
 // （freePort 拒 3099=红线零接触）、四路径回收。lib_fix17 侧若改 boot 骨架，本票
 // 场景的回归面=「boot 失败=ENV_FAIL 点名」，不会假绿。
+// t261009-73: boot failures are attributable. Every failure path of
+// bootLaneConsole (readiness timeout included) carries a bounded log tail in the
+// message plus a survivor copy OUTSIDE the reclaimed tmpHome, by reusing
+// lib_fix17.captureBootFailure directly (no local wrapper — one behaviour, one
+// place). Error text reuses the fix17 template verbatim (source: lib_fix17.mjs
+// bootFailureError + bootConsole catch), including the "log preserved at"
+// dedupe marker. A boot failure stays env-red; the 45 s timeout is unchanged.
+// Family receipt: integration/t261009-73/family-sweep.md.
+import { captureBootFailure } from '../t260904-17/lib_fix17.mjs';
 import { spawn } from 'node:child_process';
 import {
   mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, openSync, closeSync,
@@ -67,7 +76,12 @@ async function buildLaneProfile(tmpHome) {
   return { profDir, laneAnchors };
 }
 
-async function waitReady(port, timeoutMs, logPath) {
+// t261009-73: readiness timeout carries evidence instead of naming a log the
+// caller's reclamation deletes. Template strings match lib_fix17.bootFailureError
+// verbatim so the evidence phrase stays one contract across both faces.
+// Exported for the contract face (integration/tests/test_t26100916_26_boot_evidence.mjs,
+// same discipline as lib_fix17.waitReady): the timeout-under-test is injected short.
+export async function waitReady(port, timeoutMs, logPath) {
   const url = `http://127.0.0.1:${port}/sandbar-workbench/api/wf/projects`;
   const t0 = Date.now();
   for (;;) {
@@ -75,9 +89,36 @@ async function waitReady(port, timeoutMs, logPath) {
       const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
       if (r.ok) return;
     } catch { /* 未就绪，续等 */ }
-    if (Date.now() - t0 > timeoutMs) throw new Error(`隔离台就绪超时（${Math.round(timeoutMs / 1000)}s）：log=${logPath}`);
+    if (Date.now() - t0 > timeoutMs) {
+      const { survivor, tail } = captureBootFailure(logPath, 't26091626-boot');
+      throw new Error(
+        `stage console not ready in ${Math.round(timeoutMs / 1000)}s (env red — boot failure, not a scenario fail); `
+        + `log tail: ${JSON.stringify(tail)}; full log preserved at: ${survivor || '(copy failed or log empty)'}`,
+      );
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
+}
+
+/**
+ * t261009-73 (exported for tests and the gate scenario sc_t26091626_boot_evidence.mjs
+ * — pure append-and-annotate, no state): attach boot-failure evidence to `err`
+ * BEFORE the caller reclaims tmpHome. A missing/unreadable log still annotates —
+ * captureBootFailure degrades to a named absence, never a fabricated line. Skips
+ * only when the error already carries its own snapshot (the "log preserved at"
+ * dedupe marker, same as lib_fix17.bootConsole). Evidence attachment must never
+ * mask the original failure, so the whole append is try/caught.
+ */
+export function attachBootEvidence(err, logPath, label) {
+  try {
+    if (err instanceof Error && String(err.message).includes('log preserved at')) return err;
+    if (err instanceof Error && String(err.message).includes('log preserved at')) return err;
+    const { survivor, tail } = captureBootFailure(logPath, label);
+    const note = `boot failure evidence — log tail: ${JSON.stringify(tail)}; full log preserved at: ${survivor || '(copy failed)'}`;
+    if (err instanceof Error) err.message += `\n${note}`;
+    else throw new Error(`${String(err)}\n${note}`);
+  } catch { /* never mask the original failure */ }
+  return err;
 }
 
 function benchEnv(tmpHome, projectsRoot, stub) {
@@ -134,5 +175,15 @@ export async function bootLaneConsole(projectsRoot, stub) {
         clean();
       },
     };
-  } catch (e) { clean(); throw e; }
+  } catch (e) {
+    // t261009-73: evidence before reclamation, for every failure path (profile
+    // build, freePort, spawn, readiness timeout) — not just waitReady. A boot
+    // that failed before any log exists rejects named with nothing quoted (the
+    // gate scenario's F case), so the annotation only runs when a log exists.
+    const logPath = path.join(tmpHome, 'console.log');
+    if (existsSync(logPath)) attachBootEvidence(e, logPath,
+      `bootfail-${path.basename(String(projectsRoot))}`);
+    clean();
+    throw e;
+  }
 }
