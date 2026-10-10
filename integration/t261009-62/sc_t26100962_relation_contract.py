@@ -111,9 +111,20 @@ def refused(exc, *names):
 # ---------- A. evidence: required, one shape, refused by name ----------
 section("A a relation without evidence of WHAT it is about is refused by name")
 
-if set(dc.RELATION_EVIDENCE_WHATS) != {
-        "revision", "patch_id", "ticket", "certification", "path_line"}:
-    ok(False, "A0 fixture: declared evidence vocabulary changed shape")
+# A0 fixture guard (narrowed by t261009-71 arbitration): the vocabulary is
+# ADDITIVE by declaration (develop_certify.py: "Extension adds names here;
+# the shape is fixed" — P2-f added "finding"), so the original five
+# subjects must still be present and the shape must stay a tuple of
+# non-empty strings; exact-set equality would forbid every declared
+# extension and rot on each one.
+originals = {"revision", "patch_id", "ticket", "certification",
+             "path_line"}
+if (not isinstance(dc.RELATION_EVIDENCE_WHATS, tuple)
+        or not originals <= set(dc.RELATION_EVIDENCE_WHATS)
+        or not all(isinstance(w, str) and w
+                   for w in dc.RELATION_EVIDENCE_WHATS)):
+    ok(False, "A0 fixture: declared evidence vocabulary lost a base "
+              "subject or changed shape")
     raise SystemExit(1)
 
 cases = [

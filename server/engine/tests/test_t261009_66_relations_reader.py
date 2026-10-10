@@ -84,8 +84,10 @@ def PROMOTE_KW(tickets=("t1",), revision="rev1"):
                 signer="integration")
 
 
-ACTOR_KINDS = (dc.REL_KIND_WITHDRAWS, dc.REL_KIND_REPAIRS,
-               dc.REL_KIND_SUPERSEDES)
+# t261009-71: the vocabulary gained ``originates from a finding``; the
+# reader's face is keyed by the WHOLE declared tuple, so the expectation
+# reads the tuple itself instead of restating it.
+ACTOR_KINDS = dc.RELATION_KINDS
 
 
 def ids(entries):
