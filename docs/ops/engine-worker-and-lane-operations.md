@@ -442,3 +442,20 @@ cleared. Two ways out, and both are lawful: the host answers in the panel (its o
 on duty appends an `answer` row in the host's name under the host's standing order — which is the shape
 the earlier duty cycles used and what the ledger's 117 existing answer rows are. When clearing a request,
 say what the disposition is, who owns the remaining action, and whether anything is still pending.
+
+**Write the row in the STRICT reader's shape, and verify against the reader the host looks at.** (261010: I
+answered six requests by hand and told the host the ledger was clear; the panel still showed six.) The two
+readers of `requests.jsonl` disagree on what a valid row is:
+
+- the engine's `request_thread.head_states` only needs an `answer` row's `answer_for` to hit a head;
+- the panel's `executor-panel/src/host/requests.ts` (`isAnswerRow`) also requires **`at` to be a number**, and
+  its `splitWaiting` deliberately keeps a shape-off row in the "waiting" bucket ("an over-wait beats silencing
+  a possibly-open item").
+
+So a hand-written row with `at` as a *string* is counted by the engine and **ignored by the panel** — the engine
+says zero pending while the host still sees the items. Recipe for the deputy answer: `{"type":"answer",
+"id":"ans-<ms>-<n>","answer_for":"<req-id>","at":<integer ms>,"by":"host（经 integration 值守会话代答；<order>）",
+"answer":"…"}`, every field in the strict reader's type; and check the result with the **panel's** split
+(waiting = rows whose status is not answered/resolved/dismissed/superseded). Never rewrite a bad row — the
+ledger is append-only; land a corrected row (and note the correction inside it), and expect the malformed one
+to keep counting in the ledger-health line.
