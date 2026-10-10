@@ -2,7 +2,7 @@
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
-<title>Executor panel — Certification tab (mock v15, 261009)</title>
+<title>Executor panel — Certification tab (mock v20 · FINAL, 261009)</title>
 <style>
 :root{--bg:#fff;--panel:#f6f8fa;--panel2:#eaeef2;--line:#d0d7de;--line-soft:#e4e9ee;--fg:#1f2328;--muted:#57606a;--faint:#6e7781;
 --blue:#0969da;--red:#cf222e;--amber:#9a6700;--green:#1a7f37;--hover:#eef1f4;--accent-soft:#dbe9ff;--green-soft:#dafbe1;--red-soft:#ffebe9;--warn-soft:#fff8c5}
@@ -77,6 +77,12 @@ pre{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;white-spa
 </style>
 </head>
 <body>
+<!-- Revision note (261010): this file IS the final, host-approved revision (the v5→v20
+     iteration; the last deltas removed the emoji glyphs, went to one combobox, chained the
+     rounds, read `line <sha>` on the measured column and dropped the redundant `promote N`
+     count). Its <title> used to read "mock v15" — a stale label that made reviewers cite an
+     older revision than the one on disk. Tickets implementing the tab (t261009-44) must read
+     THIS file as the yardstick, item by item; do not rely on the version word. -->
 <div class="bar"><span class="w">sandbar</span><span class="g"></span>
   <button class="ico" id="st" title="mock scaffolding, not part of the design: flip the line between green and frozen">mock: state</button>
   <button class="ico" id="th" title="mock scaffolding, not part of the design: light / dark">mock: theme</button></div>
