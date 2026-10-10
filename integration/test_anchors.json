@@ -4673,6 +4673,11 @@
       "anchor": "contract",
       "note": "t261009-57 alerts face: display_max knob (default 8 coalesced rows, 0=show all), xN run coalescing with cleared-refire boundary, relative-time-first with absolute on hover, full-text wrap, level words, ledger read-only journey",
       "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts"
+    },
+    "integration/t261009-60/sc_leftover_assert_scope.py": {
+      "anchor": "behaviour",
+      "note": "runs the real engine test file under pytest with a planted foreign decoy; sweep scanner teeth proven on a synthetic offender",
+      "sync_path": ""
     }
   }
 }

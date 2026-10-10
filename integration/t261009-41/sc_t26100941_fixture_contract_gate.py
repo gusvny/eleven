@@ -37,8 +37,7 @@ def main():
         fail("fixture-contract pytest not delivered at %s (C1 deliverable "
              "absent — implement not done)" % os.path.relpath(CONTRACT, ROOT))
     py = None
-    for cand in ("server/engine/.venv/bin/python",
-                 "server/dsh/temporal-poc/.venv/bin/python", sys.executable):  # engine-venv-compat 回落链（t260907-10 行级豁免）
+    for cand in ("server/engine/.venv/bin/python", sys.executable):
         p = os.path.join(ROOT, cand)
         if os.path.isfile(p) and os.access(p, os.X_OK):
             py = p

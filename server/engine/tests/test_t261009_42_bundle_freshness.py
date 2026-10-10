@@ -226,13 +226,24 @@ def test_rebuild_never_says_assumed_fresh(tmp_path, monkeypatch) -> None:
 
 
 def test_rebuild_temp_copy_reaped_on_every_path(tmp_path, monkeypatch) -> None:
-    """Bounds: no bundle-freshness temp dir survives any terminal path."""
+    """Bounds: no bundle-freshness temp dir survives any terminal path.
+
+    t261009-60: the assertion must read only THIS test's namespace, never the
+    machine-global system temp — another lane running the gate legitimately
+    creates `bundle-freshness-*` there and used to false-red us (KI-01M4J0JGY
+    JWCJ1Z2XD3KW431FV). Patch both TMPDIR (children inherit) and tempfile.
+    tempdir (gettempdir() memoises its first answer, so the env alone is
+    order-dependent). Glob the scoped root only: an unreaped dir left by the
+    code under test still lands here and still reds.
+    """
+    import tempfile as _tf
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(_tf, "tempdir", str(tmp_path))
     repo = _make_repo(tmp_path, b"x")
     aa._bundle_freshness_rebuild(repo, "server/plugins/w/lib/",
                                  "server/plugins/w/absent.sh", 60)
     monkeypatch.setenv("BUNDLE_STUB_OUTPUT", "y")
     aa._bundle_freshness_rebuild(repo, "server/plugins/w/lib/",
                                  "server/plugins/w/build.sh", 60)
-    import tempfile as _tf
-    leftovers = [p for p in Path(_tf.gettempdir()).glob("bundle-freshness-*")]
+    leftovers = [p for p in tmp_path.glob("bundle-freshness-*")]
     assert leftovers == []
