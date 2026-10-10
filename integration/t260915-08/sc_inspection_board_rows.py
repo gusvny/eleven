@@ -468,7 +468,11 @@ def main() -> int:
                   "stage", "stage_state", "paused", "paused_phase", "handoff_count",
                   "pending_count", "worktree", "workspace", "created", "updated",
                   "updated_ts", "close_ts", "engine", "exec_status", "authz_active",
-                  "close_health", "close_health_reason"}
+                  "close_health", "close_health_reason",
+                  # t261009-76 有意扩（键只加，parity 纪律不破）：票面要求④「操作者不看
+                  # workflow 历史」——lane_version/develop_line 进行面；与引擎 UT
+                  # DEVLANE_ROW_KEYS、t260919-02 DEV_ROW_KEYS 钉同一键集。
+                  "lane_version", "develop_line"}
         if row is None:
             ok(False, "dev-lane 行 parity 无行可验")
         else:

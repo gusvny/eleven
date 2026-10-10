@@ -50,6 +50,10 @@ DEVLANE_ROW_KEYS = {
     # 收口健康度+事实原因——要求②「每行带一个可判定字段」dev-lane 行同名单；
     # 推导=引擎 _close_health_of（COMPLETED→ok / 失败族→failed / 在飞→''）。
     "close_health", "close_health_reason",
+    # t261009-76 intentional extension (keys only added; the parity discipline
+    # itself holds): spec (4) "the operator reads the lane version and line off
+    # the ticket face, not the workflow history" — the list row carries both.
+    "lane_version", "develop_line",
 }
 
 
@@ -390,8 +394,10 @@ def test_row_awaiting_gate_derives_from_stage_state_not_human_gate():
     assert row["paused"] is False and row["authz_active"] == 0
     assert row["created"] == 1760000000 and row["updated_ts"] == 1760000000
     assert row["report_path"].endswith(".json")
-    # dev-lane 通用键全在场（UI 组件零特判可跑）
-    assert DEVLANE_ROW_KEYS <= set(row)
+    # The common dev-lane keys must all be present (the UI runs with zero
+    # special-casing); the two lane keys are dev-lane-row specific (t261009-76
+    # spec (4)) and an inspection row does not carry them.
+    assert DEVLANE_ROW_KEYS - {"lane_version", "develop_line"} <= set(row)
 
 
 def test_row_signed_human_gate_passthrough_and_closed_state():

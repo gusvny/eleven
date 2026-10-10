@@ -1627,6 +1627,91 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---------- M11 v2: ticket-start / ticket-list / ticket-query ----------
 
+# t261009-76: the develop-buffer opt-in rides the real intake. The validators live
+# at module level (callable without Temporal, so the unit tests exercise the SAME
+# code path ticket-start runs) but import develop_line/dev_lane LOCALLY inside the
+# function bodies — the KI-227 rule keeps this module free of the heavy dev_lane
+# import at load time (dev_lane pulls temporalio.workflow and breaks the offline
+# stub-scenario family). The opt-in path pays the import; absence (every legacy
+# ticket, every stub replay) never does.
+
+def lane_optin_intake(args: Dict[str, Any], template_id: str,
+                      project_key: str) -> "Tuple[bool, str, str, str]":
+    """Intake validation of the per-ticket lane-version opt-in (t261009-76, spec
+    (1)-(2)). Returns ``(ok, lane_version, develop_line_id, err)``: ok=True carries
+    the CANONICAL version (``""`` = the payload did not opt in = legacy, never
+    migrated) and the declared line id; ok=False carries a named refusal and empty
+    fields. Refusals, each by name:
+      - either field on a non-dev-lane template (dev-lane is the only workflow
+        whose input shape declares them; a foreign template must never receive an
+        input whose history dict carries unknown keys);
+      - an unknown/malformed lane version (develop_line.parse_lane_version names
+        the kind of bad and lists the registry);
+      - a develop-buffer version with an empty develop_line_id;
+      - a develop-buffer version whose develop_line_id is not declared in
+        ``<develop_dir>/lines.json`` — the declaration file is the SINGLE truth,
+        the refusal only quotes its named error (declared ids listed), never a
+        duplicated copy of the list;
+      - a line id paired with the legacy version (fail-closed symmetry: a legacy
+        ticket names no line).
+    Callers run this BEFORE the workflow start (before any Temporal call), so the
+    refusal does not depend on Temporal reachability. The workflow's own _init
+    re-validates through parse_lane_version — that is the replay guard, this is
+    the intake gate; the two never diverge because both delegate to the same
+    develop_line functions."""
+    import develop_line  # local: KI-227 heavy-import rule (see block comment above)
+    lv_raw = args.get("lane_version")
+    dl_raw = args.get("develop_line_id")
+    lv_present = lv_raw is not None and str(lv_raw).strip() != ""
+    dl_present = dl_raw is not None and str(dl_raw).strip() != ""
+    if (lv_present or dl_present) and template_id != "dev-lane":
+        return (False, "", "",
+                "ticket-start refused: lane_version/develop_line_id are only read "
+                "by the dev-lane workflow (template %r does not carry them)" % template_id)
+    if not lv_present and not dl_present:
+        return (True, "", "", "")  # absence = the ticket did not opt in (legacy)
+    try:
+        lane_version = develop_line.parse_lane_version(lv_raw)
+    except develop_line.LaneVersionError as e:
+        return (False, "", "", "ticket-start refused: %s" % e)
+    develop_line_id = dl_raw.strip() if isinstance(dl_raw, str) else ""
+    if lane_version == develop_line.LANE_VERSION_DEVELOP_BUFFER:
+        if not develop_line_id:
+            return (False, "", "",
+                    "ticket-start refused: a develop-buffer ticket requires "
+                    "develop_line_id (the declared line it lands on)")
+        try:
+            develop_line.load_line(project_key, develop_line_id)
+        except develop_line.LineDeclarationError as e:
+            return (False, "", "", "ticket-start refused: %s" % e)
+    elif develop_line_id:
+        return (False, "", "",
+                "ticket-start refused: develop_line_id %r requires "
+                "lane_version=develop-buffer-v1 (a legacy ticket names no line)"
+                % develop_line_id)
+    return (True, lane_version, develop_line_id, "")
+
+
+def apply_lane_optin(inp: Any, lane_version: str, develop_line_id: str) -> Any:
+    """Carry a validated opt-in into the workflow input shape (t261009-76 spec
+    (1)/(3)). BOTH fields empty → the plain TicketInput is returned UNCHANGED
+    (absence stays byte-identical legacy — no silent migration, and every
+    in-flight ticket's stored input shape is untouched; the engine's
+    ``getattr(inp, "lane_version", "")`` default remains the replay guard).
+    Either field present → the SAME fields are rebuilt into DevLaneTicketInput
+    (the subclass dev_lane.run is annotated with), so the workflow reads the
+    ticket as opted-in."""
+    if not lane_version and not develop_line_id:
+        return inp
+    import dataclasses
+    from dev_lane import DevLaneTicketInput  # local: KI-227 heavy-import rule
+    return DevLaneTicketInput(
+        **dataclasses.asdict(inp),
+        lane_version=lane_version,
+        develop_line_id=develop_line_id,
+    )
+
+
 async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     """Create a v2 ticket: template id → workflow class (the shared.TEMPLATE_CLASS_NAMES
     mapping), with every business attribute pinned into TicketInput (state lives only in
@@ -1799,6 +1884,12 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("背景文件闸故障（fail-closed）：%s: %s" % (type(e).__name__, e))
     if not ok_refs:
         return _err("ticket-start refused: %s" % refs_err)
+    # t261009-76: the lane-version opt-in gate — named refusals BEFORE _connect()
+    # (the refusal path must not depend on Temporal being reachable, same
+    # discipline as the refs gate directly above).
+    ok_lv, lane_version, develop_line_id, lv_err = lane_optin_intake(args, tpl, project)
+    if not ok_lv:
+        return _err(lv_err)
     inp = TicketInput(
         ticket_id=tid, template_id=tpl,
         project=project,
@@ -1836,6 +1927,10 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         path_gate=bool(getattr(cls, "PATH_GATE", False)),
         path_gate_rules=dict(getattr(cls, "PATH_GATE_RULES", None) or {}),
     )
+    # t261009-76: carry a validated opt-in into DevLaneTicketInput (both fields
+    # empty → the plain TicketInput above is returned unchanged — absence stays
+    # legacy, spec (3)).
+    inp = apply_lane_optin(inp, lane_version, develop_line_id)
     client = await _connect()
     try:
         # 每工单专属队列（260824）：workflow 只被专属队列（LEGACY 旧前缀 suyou-ticket-<tid>）上的 worker 执行，  # naming-compat
@@ -2134,6 +2229,11 @@ def _row_from_meta(tid: str, meta: Dict[str, Any], exec_status: str) -> Dict[str
         "pending_count": len(meta.get("pending") or []),
         "worktree": meta.get("worktree") or "",
         "workspace": meta.get("workspace"),
+        # t261009-76: the per-ticket lane opt-in on the list face (spec (4)) —
+        # an operator reads which version/line a ticket was created with straight
+        # from the board, without opening the workflow history. Empty = legacy.
+        "lane_version": meta.get("lane_version") or "",
+        "develop_line": meta.get("develop_line") or "",
         "created": meta.get("created"),
         "updated": _t.strftime("%m-%d %H:%M", _t.localtime(meta.get("updated") or 0)),
         "updated_ts": meta.get("updated"),
@@ -3586,6 +3686,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "workflow": "", "proposal_id": "",
                          "stage": None, "stage_state": "failed",
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
+                         # t261009-76: row-keyset parity with the live row (spec (4));
+                         # no snapshot = nothing to read, honest empty, never a guess
+                         "lane_version": "", "develop_line": "",
                          "workspace": None, "created": None,
                          "updated": (time.strftime("%m-%d %H:%M", time.localtime(e["close_ts"]))
                                      if e["close_ts"] else ""),
@@ -3632,6 +3735,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                                    if dur.get("last_stage_available") else None),
                          "stage_state": "running",
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
+                         # t261009-76: row-keyset parity with the live row (spec (4));
+                         # no snapshot = nothing to read, honest empty, never a guess
+                         "lane_version": "", "develop_line": "",
                          "workspace": None, "created": None,
                          "updated": (time.strftime("%m-%d %H:%M", time.localtime(_row_updated_ts))
                                      if _row_updated_ts else ""),
@@ -3671,6 +3777,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "title": "", "workflow": "", "proposal_id": "",
                          "stage": None, "stage_state": "awaiting",
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
+                         # t261009-76: row-keyset parity with the live row (spec (4));
+                         # no snapshot = nothing to read, honest empty, never a guess
+                         "lane_version": "", "develop_line": "",
                          "workspace": None, "created": None, "updated": "", "updated_ts": 0,
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,

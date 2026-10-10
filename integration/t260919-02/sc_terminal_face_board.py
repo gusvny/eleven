@@ -352,7 +352,12 @@ DEV_ROW_KEYS = {"id", "project", "epic", "role", "status", "title", "workflow", 
                 "stage", "stage_state", "handoff_count",
                 "pending_count", "worktree", "workspace", "created", "updated",
                 "updated_ts", "close_ts", "engine", "exec_status", "authz_active",
-                "close_health", "close_health_reason"}
+                "close_health", "close_health_reason",
+                # t261009-76 有意扩（键只加，parity 纪律不破）：票面要求④「操作者不看 workflow 历史」——
+                # 列表行带 lane_version/develop_line（与 client.py _row_from_meta 逐键一致；
+                # 引擎 UT DEVLANE_ROW_KEYS、t260915-08 场景 pinned 钉同一键集）。
+                "lane_version", "develop_line"}
+
 
 
 # ---------------------------------------------------------------- face 宽容读取（灰盒浅绑定）

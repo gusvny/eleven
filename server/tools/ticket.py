@@ -19,7 +19,9 @@ stage_state（进度维度，与 status 正交）：running | awaiting | awaitin
 
 op:
   create {workflow, project, title, body?, user_request?, spec?, role?, lane?, write_set?,
-          acceptance?, deliverables?, id?, worktree?, branch?, workspace?, proposal_id?, book_path?}
+          acceptance?, deliverables?, id?, worktree?, branch?, workspace?, proposal_id?, book_path?,
+          lane_version?, develop_line_id?}   （lane 两字段=t261009-76 逐票 opt-in，仅 dev-lane；
+          缺省=legacy；未知/畸形版本、未声明 line id 在 client.py intake 具名拒收）
       → 转发 client.py ticket-start（模板 id→workflow 类）；dev-lane 自动登记
         .lane/t<id> + 分支 lane/t<id>（未创建，仅登记路径；旧名 .worktrees 兼容读）
       → 正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body），
@@ -185,6 +187,8 @@ TOOL = {
             'worktree': {'type': 'string', 'description': 'create 显式登记泳道路径（缺省 dev-lane 自动 .lane/<id>）'},
             'branch': {'type': 'string', 'description': 'create 显式登记分支名（缺省 lane/<id>）'},
             'workspace': {'type': 'object', 'description': 'create 显式登记工作空间 {type: worktree|dir, path}（缺省按模板推导：lane=worktree→泳道，模板带 workspace:dir→/tmp/sandbar-ws/<id> 隔离目录（老 base 粘滞））'},
+            'lane_version': {'type': 'string', 'description': 'create 逐票 lane 版本 opt-in（t261009-76，仅 dev-lane 模板）：registry=legacy-v1|develop-buffer-v1；缺省/空=未 opt-in（legacy，绝不静默迁移）。未知/畸形名在建票口具名拒收（附 registry 清单）；校验单点=client.py'},
+            'develop_line_id': {'type': 'string', 'description': 'create 声明的 develop line id（仅 dev-lane；lane_version=develop-buffer-v1 时必填）：必须已在 <develop_dir>/lines.json 声明（声明文件是唯一真源，未声明的 id 具名拒收并列出已声明 id）'},
             'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume/cancel/dismiss/restore 必填非空——正规入口不落 op-local；dismiss/restore 拒收 agent 角色名）'},
             'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 收）'},
             'gate': {'type': 'string', 'description': 'sign：审批门标识（可选，缺省空串透传）'},
@@ -779,6 +783,11 @@ def _create(a):
         'spec': a.get('spec') or '',
         'body': a.get('body') or '（无正文）',
         'created': now,
+        # t261009-76: the develop-buffer opt-in rides the payload verbatim —
+        # thin-shell discipline: validation single point = client.py
+        # lane_optin_intake (named refusals before the workflow start).
+        'lane_version': a.get('lane_version') or '',
+        'develop_line_id': a.get('develop_line_id') or '',
     }
     if flag:
         payload['cross_project'] = flag
@@ -878,6 +887,10 @@ def _list(a):
             # t260912-03：列表可读面＝生效中的人授权条数（client.py 行内已按
             # expires>now 过滤；行缺键=老引擎，补 0 不炸）
             'authz_active': int(meta.get('authz_active') or 0),
+            # t261009-76：逐票 lane opt-in 上板（spec (4)）——操作员不读 workflow
+            # 历史即可分辨 opt-in 票与 legacy 票；行缺键=老引擎，补空串不炸
+            'lane_version': meta.get('lane_version') or '',
+            'develop_line': meta.get('develop_line') or '',
         })
     return {'count': len(out_rows), 'tickets': out_rows}
 
