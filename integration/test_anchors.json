@@ -4716,6 +4716,16 @@
       "note": "",
       "sync_path": ""
     },
+    "integration/t261009-53/sc_t26100953_lane_map_pipe.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-53 lane map slim-pipe geometry: one baseline of slim equal-height bars, two-level alternating clamped non-overlapping labels above, diamond at the bar head, partner second track inside a both-track dashed window, cursor spanning both tracks, state-by-fill, width proportions survive",
+      "sync_path": ""
+    },
+    "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
+      "sync_path": ""
+    },
     "integration/t261009-22/sc_t26100922_lane_map_mock_chrome.mjs": {
       "anchor": "behaviour",
       "note": "t261009-22 lane map mock chrome: header kind legend + elapsed/now-at summary + waiting-for-you, durations printed under labels, diamond human gate, time axis at the segment scale, skipped dashed empty, now cursor, hover duration; malformed entries leak nothing",
@@ -4744,11 +4754,6 @@
     "integration/t261009-59/sc_t26100959_tick_wired.py": {
       "anchor": "source-text",
       "note": "t261009-59 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)",
-      "sync_path": ""
-    },
-    "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
-      "anchor": "behaviour",
-      "note": "t261009-54 the dismiss button's answer side: real node.ts op dispatch -> real ticket.py dismiss/restore -> journal file on disk -> list face changes; refusals verbatim zero-write; route invents nothing (who=by, reason never defaulted)",
       "sync_path": ""
     },
     "integration/t261009-62/sc_t26100962_relation_contract.py": {

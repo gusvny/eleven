@@ -260,7 +260,8 @@ const domInventory = `(() => {
   const root = document.querySelector('.wb-drawer') || document
   const els = [...root.querySelectorAll('[class*="wb-lanemap"], [class*="wb-lm-"]')]
   return els.map(el => ({
-    cls: String(el.className || ''), text: (el.textContent || '').slice(0, 140),
+    // t261009-53 起图面=SVG 场景：SVG 元素的 className 是 SVGAnimatedString，取 baseVal
+    cls: typeof el.className === 'string' ? el.className : String(el.className.baseVal || ''), text: (el.textContent || '').slice(0, 140),
     title: el.getAttribute('title') || '',
     dataKind: el.getAttribute('data-kind') || '', dataId: el.getAttribute('data-id') || '',
     dataVis: el.getAttribute('data-vis') || '',

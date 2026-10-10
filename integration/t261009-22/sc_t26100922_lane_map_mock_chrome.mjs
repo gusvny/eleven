@@ -188,21 +188,27 @@ const PROBE = `(() => {
   // 段探针：data-weight-ms / data-band（模型携带的语义锚）+ 几何。
   const segs = [...lm.querySelectorAll('[data-weight-ms], [data-band]')].map(el => {
     const r = el.getBoundingClientRect()
+    const segEl = el.tagName === 'g' ? el.querySelector('rect') : null
+    const segCs = segEl ? getComputedStyle(segEl) : null
     return {
       w: Math.round(r.width), h: Math.round(r.height),
       ms: Number(el.getAttribute('data-weight-ms')),
       band: el.getAttribute('data-band') || null,
       stage: el.getAttribute('data-stage') || el.getAttribute('data-label') || '',
-      borderStyle: getComputedStyle(el).borderTopStyle,
+      // t261009-53 起段=SVG rect：虚线空框（skipped）落在 rect 的 stroke-dasharray 上
+      borderStyle: segCs && segCs.strokeDasharray !== 'none' ? 'dashed' : getComputedStyle(el).borderTopStyle,
     }
   })
   // svg glyph 探针（菱形=矢量 path；今日图面无 svg）。
   const svgPaths = [...lm.querySelectorAll('svg path')].map(p => (p.getAttribute('d') || '').slice(0, 60))
-  // now 游标探针：窄高、虚线边的元素。
+  // now 游标探针（t261009-53 起图面=单个 SVG 场景）：块级窄高虚线边元素，
+  // 或 SVG 场景里的虚线竖线（line.wb-lm-cursor，stroke-dasharray 虚线）。
   const cursor = [...lm.querySelectorAll('*')].some(el => {
     const r = el.getBoundingClientRect()
     const cs = getComputedStyle(el)
-    return r.height > 16 && r.width <= 8 && (cs.borderLeftStyle === 'dashed' || cs.borderRightStyle === 'dashed' || cs.borderTopStyle === 'dashed')
+    const blockCursor = r.height > 16 && r.width <= 8 && (cs.borderLeftStyle === 'dashed' || cs.borderRightStyle === 'dashed' || cs.borderTopStyle === 'dashed')
+    const svgCursor = el.tagName === 'line' && el.classList.contains('wb-lm-cursor') && cs.strokeDasharray !== 'none'
+    return blockCursor || svgCursor
   })
   const axis = lm.querySelector('[data-testid="lane-map-axis"]')
   const clocks = axis
@@ -246,9 +252,10 @@ rec('T4 measured durations are printed on the map (plan 2m, build 8m)',
   text.replace(/\s+/g, ' ').slice(0, 160))
 
 // T5 判据5：人门段菱形 glyph（矢量 path；虚线圈人形脸退役）。菱形 path 的
-// d 形如 M..l3.5 3.5 l-3.5 3.5 l-3.5 -3.5 z（四段等长折线闭合）——按
-// KI-051 锚语义：只断 svg path 存在且为闭合四折线族，不锚字面坐标。
-const diamondish = lm.svgPaths.some((d) => /l\s*-?[\d.]+\s+-?[\d.]+/.test(d) && /z/.test(d))
+// d 形如 M..l3.5 3.5 ... z（四段等长折线闭合；t261009-53 起实现用绝对坐标
+// L…Z，故按 KI-051 锚语义：只断 svg path 存在且为闭合四折线族——大小写不敏感，
+// 不锚字面坐标。
+const diamondish = lm.svgPaths.some((d) => /l\s*-?[\d.]+\s+-?[\d.]+/i.test(d) && /z/i.test(d))
 rec('T5 human gate drawn as a vector diamond glyph', diamondish, `svgPaths=${JSON.stringify(lm.svgPaths)}`)
 
 // T6 判据6：时间轴=起止两时刻，且与段同一比例尺。起=首条可解析 at=夹具 T0；

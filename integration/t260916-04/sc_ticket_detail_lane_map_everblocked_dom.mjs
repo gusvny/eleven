@@ -403,7 +403,8 @@ async function dismissOverlays(p) {
 const domMapInventory = `(() => {
   const els = [...document.querySelectorAll('[class*="wb-lanemap"], [class*="wb-lm-"]')];
   return els.map(el => ({
-    cls: el.className, text: (el.textContent || '').slice(0, 120),
+    // t261009-53 起图面=SVG 场景：SVG 元素的 className 是 SVGAnimatedString，取 baseVal
+    cls: typeof el.className === 'string' ? el.className : String(el.className.baseVal || ''), text: (el.textContent || '').slice(0, 120),
     title: el.getAttribute('title') || '',
     dataKind: el.getAttribute('data-kind') || '', dataId: el.getAttribute('data-id') || '',
     dataVis: el.getAttribute('data-vis') || '', dataGen: el.getAttribute('data-gen') || '',

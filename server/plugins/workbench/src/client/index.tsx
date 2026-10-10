@@ -411,18 +411,20 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-status-card .sc-signwhat-ttl{font-size:12px;font-weight:700;color:var(--dsw-derive-accent-deep,#0550ae)}
 .wb-status-card .sc-signwhat ul{margin:4px 0 0;padding-left:18px}
 .wb-status-card .sc-signwhat li{font-size:11.5px;line-height:1.7;word-break:break-all}
-/* t260915-05: real lane map (topology-driven) - nodes / parallel dashed window /
- * human gate dashed ring / round strips / xN badge.
- * t261008-23 v5: segment width follows the weight share (inline width%, the
- * renderer computes pct); the fixed min-width retired (72px constant width
- * conflicts with v5 width-proportional-to-duration); the readable minimum is
- * kept by the renderer's MIN_PCT floor instead. */
-/* t261009-22 (mock 261004 criteria 2/3/4/5/6): the container becomes a block
- * with three rows - header (legend + elapsed/now summary), the pipe row (the
- * old flex layout moved into .wb-lm-track; the inter-segment arrows are
- * retired for the continuous-pipe look) and the footer time axis. Segment
- * fills by kind x state (22% tint / solid + amber outline / grey / skipped
- * dashed-empty); the now cursor rides the right edge of the current item. */
+/* t260915-05: real lane map (topology-driven).
+ * t261008-23 v5: segment width follows the weight share; the readable minimum
+ * is kept by the renderer's MIN_PCT floor (all width policy lives in the
+ * model, the renderer only maps weight to width).
+ * t261009-22: the container is a block with three rows - header (legend +
+ * elapsed/now summary), the pipe, the footer time axis.
+ * t261009-53 (mock laneMap(t), criteria 1-8): the pipe itself is ONE SVG
+ * scene (laneMapScene/LaneSceneSvg) - slim 12px bars on one baseline, labels
+ * floating above in two clamped levels with dotted leaders, the human diamond
+ * at the bar head, the partner bar on a second track inside a dashed window
+ * that surrounds both tracks, the now cursor spanning both tracks. The old
+ * block row (.wb-lm-track min-height + .wb-lm-item/.wb-lm-band full-background
+ * fills + .wb-lm-node flex column) is retired. Fills are inline SVG
+ * attributes, so no per-state background CSS remains here. */
 .wb-lanemap{margin:10px 0 4px;padding:12px 12px 8px;overflow-x:auto;background:var(--dsw-derive-canvas,#fff);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;display:block}
 .wb-lm-head{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--dsw-derive-muted,#57606a);padding:0 2px 8px;flex-wrap:wrap}
 .wb-lm-head>b{font-size:12px;color:var(--dsw-derive-fg,#1f2328);white-space:nowrap}
@@ -432,108 +434,35 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-lm-k.k-gate{background:var(--dsw-derive-accent,#0969da);opacity:.35}
 .wb-lm-k.k-human{background:var(--dsw-derive-warn,#bf8700)}
 .wb-lm-lsum{margin-left:auto;font-family:ui-monospace,monospace;font-size:10px;white-space:nowrap}
-.wb-lm-track{display:flex;align-items:stretch;gap:2px;min-height:96px}
-.wb-lm-item{position:relative;display:flex;align-items:center;min-width:0;border-radius:8px}
-/* Segment fills: done = kind colour at 22% tint; running = solid + amber
- * outline (the mock's now box) + inverted text; todo = grey; skipped =
- * dashed empty; blocked keeps its solid red (t260916-04 rule). */
-.wb-lm-item[data-kind=agent]{background:color-mix(in srgb,var(--dsw-derive-success,#4ac26b) 22%,transparent)}
-.wb-lm-item[data-kind=gate]{background:color-mix(in srgb,var(--dsw-derive-accent,#0969da) 22%,transparent)}
-.wb-lm-item[data-kind=human]{background:color-mix(in srgb,var(--dsw-derive-warn,#bf8700) 22%,transparent)}
-.wb-lm-item[data-vis=todo]{background:color-mix(in srgb,var(--dsw-derive-border,#d0d7de) 18%,transparent)}
-.wb-lm-item[data-vis=running]{background:var(--dsw-derive-success,#4ac26b);box-shadow:0 0 0 1.5px var(--dsw-derive-warn,#bf8700)}
-.wb-lm-item[data-vis=running][data-kind=gate]{background:var(--dsw-derive-accent,#0969da)}
-.wb-lm-item[data-vis=running][data-kind=human]{background:var(--dsw-derive-warn,#bf8700)}
-.wb-lm-item[data-vis=blocked]{background:var(--dsw-derive-danger,#cf222e)}
-.wb-lm-item[data-vis=running] .wb-lm-name,.wb-lm-item[data-vis=blocked] .wb-lm-name,
-.wb-lm-item[data-vis=running] .wb-lm-dur,.wb-lm-item[data-vis=blocked] .wb-lm-dur{color:var(--dsw-derive-canvas,#fff)}
-.wb-lm-item[data-skipped]{background:transparent;box-shadow:none;border:1.5px dashed var(--dsw-derive-border,#d0d7de)}
-.wb-lm-item[data-skipped] .wb-lm-name,.wb-lm-item[data-skipped] .wb-lm-dur{color:var(--dsw-derive-muted,#8c959f)}
-/* Bands inside a parallel window use the same fills (a band is a segment in
- * the window; same rules as the item level). */
-.wb-lm-band{border-radius:8px}
-.wb-lm-band[data-kind=agent]{background:color-mix(in srgb,var(--dsw-derive-success,#4ac26b) 22%,transparent)}
-.wb-lm-band[data-kind=gate]{background:color-mix(in srgb,var(--dsw-derive-accent,#0969da) 22%,transparent)}
-.wb-lm-band[data-kind=human]{background:color-mix(in srgb,var(--dsw-derive-warn,#bf8700) 22%,transparent)}
-.wb-lm-band[data-vis=todo]{background:color-mix(in srgb,var(--dsw-derive-border,#d0d7de) 18%,transparent)}
-.wb-lm-band[data-vis=running]{background:var(--dsw-derive-success,#4ac26b);box-shadow:0 0 0 1.5px var(--dsw-derive-warn,#bf8700)}
-.wb-lm-band[data-vis=running][data-kind=gate]{background:var(--dsw-derive-accent,#0969da)}
-.wb-lm-band[data-vis=running][data-kind=human]{background:var(--dsw-derive-warn,#bf8700)}
-.wb-lm-band[data-vis=blocked]{background:var(--dsw-derive-danger,#cf222e)}
-.wb-lm-band[data-vis=running] .wb-lm-name,.wb-lm-band[data-vis=blocked] .wb-lm-name,
-.wb-lm-band[data-vis=running] .wb-lm-dur,.wb-lm-band[data-vis=blocked] .wb-lm-dur{color:var(--dsw-derive-canvas,#fff)}
-/* skipped on the band too (acceptance rework: the attribute and the styled
- * surface must be the same element - the item-level row is not reachable
- * inside a parallel window) */
-.wb-lm-band[data-skipped]{background:transparent;box-shadow:none;border:1.5px dashed var(--dsw-derive-border,#d0d7de)}
-.wb-lm-band[data-skipped] .wb-lm-name,.wb-lm-band[data-skipped] .wb-lm-dur{color:var(--dsw-derive-muted,#8c959f)}
-/* Now cursor: one dashed vertical line on the right edge of the current item
- * (the mock's nowMark; a real element, not a pseudo - DOM probes and the
- * accessibility tree can enumerate it). */
-.wb-lm-cursor{position:absolute;right:-1px;top:-8px;bottom:-8px;border-left:1.5px dashed var(--dsw-derive-accent,#0969da);pointer-events:none}
-.wb-lm-node{display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:4px 8px;border-radius:8px;min-width:0;overflow:visible}
-/* Labels alternate above/below via a leader line (t261009-22 criterion 4):
- * default puts the label below the dot (dot-leader-label-rounds), .wb-lm-alt
- * puts it above (label-leader-dot-rounds). */
-.wb-lm-node .wb-lm-dot{order:1}
-.wb-lm-node .wb-lm-leader{order:2}
-.wb-lm-node .wb-lm-label{order:3}
-.wb-lm-node .wb-lm-rounds{order:4}
-.wb-lm-node.wb-lm-alt .wb-lm-label{order:1}
-.wb-lm-node.wb-lm-alt .wb-lm-leader{order:2}
-.wb-lm-node.wb-lm-alt .wb-lm-dot{order:3}
-.wb-lm-leader{width:1px;height:8px;background:var(--dsw-derive-border,#d0d7de);flex:none}
-/* label chip: a canvas background so alternating labels stay readable where
- * narrow segments make neighbours overlap (acceptance cosmetic observation) */
-.wb-lm-label{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0;background:var(--dsw-derive-canvas,#fff);padding:0 3px;border-radius:4px}
-/* canvas clamp (mock criterion 4): the edge labels align inward so their text
- * cannot spill past the map's padding box */
-.wb-lm-item:first-child .wb-lm-label{align-items:flex-start;text-align:left}
-.wb-lm-item:last-child .wb-lm-label{align-items:flex-end;text-align:right}
-.wb-lm-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-canvas,#fff);display:flex;align-items:center;justify-content:center;font-size:12px;font-style:normal}
-.wb-lm-node[data-vis=done] .wb-lm-dot{border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success,#1a7f37)}
-.wb-lm-node[data-vis=running] .wb-lm-dot{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent-deep,#0550ae);box-shadow:0 0 0 4px rgba(9,105,218,.12)}
-/* t260916-04：当前受阻=实心红（既有强调收实底，反白 glyph），与「曾受阻=完成色+角标」区分 */
-.wb-lm-node[data-vis=blocked] .wb-lm-dot{border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger,#cf222e);color:var(--dsw-derive-canvas,#fff)}
-.wb-lm-node[data-vis=awaiting-human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5);color:var(--dsw-derive-warn-deep,#7d4e00)}
-/* t261009-22: human gate = a diamond (SVG glyph inside the dot; the old
- * dashed-ring styling is retired). */
-.wb-lm-node[data-kind=human] .wb-lm-dot{border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
-.wb-lm-node[data-kind=human][data-vis=todo] .wb-lm-dot{background:var(--dsw-derive-canvas,#fff)}
-.wb-lm-diamond{display:block}
-/* 程序化闸=方点（kind 形状区分：agent 叙述/程序化闸/人门拍板） */
-.wb-lm-node[data-kind=gate] .wb-lm-dot{border-radius:6px}
-.wb-lm-name{font-size:11px;font-weight:600;color:var(--dsw-derive-fg,#1f2328);line-height:1.3;text-align:center;white-space:nowrap}
-.wb-lm-dur{font-size:9.5px;color:var(--dsw-derive-muted,#57606a);font-family:ui-monospace,monospace;white-space:nowrap}
-.wb-lm-opt{font-style:normal;font-size:9.5px;color:var(--dsw-derive-muted,#8c959f);border:1px dashed var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;margin-left:3px}
+/* The SVG scene scales to the map width (same aspect as the mock's viewBox).
+ * Fills: inline SVG attributes (22% tint done / solid running / grey todo /
+ * dashed-empty skipped / solid red blocked). The current bar gets the mock's
+ * amber outline via data-now. */
+.wb-lm-svg{display:block;width:100%;height:auto;min-width:560px}
+.wb-lm-node{cursor:default}
+.wb-lm-node[data-now=true] rect{stroke:var(--dsw-derive-warn,#bf8700);stroke-width:1.5}
+.wb-lm-parallel[data-active=true]{stroke:var(--dsw-derive-accent,#0969da)}
 /* t261009-22: the footer time axis (start/end clocks at the segment scale;
  * missing clocks render the line only, never a made-up time). */
 .wb-lm-axis{display:flex;align-items:center;gap:6px;margin-top:10px;padding:0 2px}
 .wb-lm-axis-line{flex:1;border-top:1px solid var(--dsw-derive-border,#d0d7de)}
 .wb-lm-axis-t{font-size:9px;color:var(--dsw-derive-muted,#8c959f);font-family:ui-monospace,monospace;white-space:nowrap}
 .wb-lm-axis[data-clock=false] .wb-lm-axis-t{display:none}
-/* t260916-04：历史已解除受阻=完成色+「曾受阻」角标（黄点；hover 出经过，lane-map.tsx） */
-.wb-lm-ever{font-style:normal;font-size:9.5px;color:var(--dsw-derive-warn-deep,#953800);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn,#d4a72c);border-radius:8px;padding:0 5px;margin-left:3px;cursor:default;white-space:nowrap}
-.wb-lm-ever::before{content:'●';color:var(--dsw-derive-warn,#9a6700);margin-right:2px;font-size:8px;vertical-align:1px}
-.wb-lm-rounds{display:flex;gap:3px;flex-wrap:wrap;justify-content:center}
-.wb-lm-round{font-size:9px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;padding:0 4px;cursor:default}
-.wb-lm-round[data-state=done]{color:var(--dsw-derive-success,#1a7f37);border-color:var(--dsw-derive-success,#4ac26b);background:var(--dsw-derive-success-bg,#dafbe1)}
-.wb-lm-round[data-state=running]{color:var(--dsw-derive-accent-deep,#0550ae);border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
-.wb-lm-round[data-state=blocked]{color:var(--dsw-derive-danger,#cf222e);border-color:var(--dsw-derive-danger,#cf222e);background:var(--dsw-derive-danger-bg,#ffebe9)}
-.wb-lm-round[data-state=awaiting-human]{color:var(--dsw-derive-warn-deep,#7d4e00);border-color:var(--dsw-derive-warn,#bf8700);background:var(--dsw-derive-warn-bg,#fff8c5)}
-.wb-lm-round[data-state=rework]{color:var(--dsw-derive-warn-deep,#953800);border-style:dashed;border-color:var(--dsw-derive-warn,#d4a72c)}
-/* Parallel group: dashed window + same-window bands (v5: the main band spans
- * the window; a partner band takes its own weight share, set inline). */
-.wb-lm-parallel{position:relative;display:inline-flex;flex-direction:column;justify-content:center;border:1.5px dashed var(--dsw-derive-border,#8c959f);border-radius:10px;background:rgba(140,149,159,.04);padding:14px 10px 8px;margin:0 4px;flex:1}
-.wb-lm-parallel[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);background:var(--dsw-derive-accent-bg,#ddf4ff)}
-.wb-lm-plabel{position:absolute;top:-8px;left:10px;background:var(--dsw-derive-canvas,#fff);padding:0 6px;font-size:9.5px;color:var(--dsw-derive-muted,#57606a)}
-.wb-lm-par-mark{font-style:normal;color:var(--dsw-derive-muted,#57606a);margin-left:4px}
-.wb-lm-branches{display:flex;flex-direction:column;gap:2px;width:100%}
-.wb-lm-band{display:flex;align-items:center;min-width:0}
-.wb-lm-node-inlane{flex-direction:row;min-width:0;padding:2px 6px}
-.wb-lm-node-inlane .wb-lm-dot{width:20px;height:20px;font-size:10px;flex:none}
-.wb-lm-node-inlane .wb-lm-name{white-space:normal;text-align:left}
-.wb-lm-node-inlane .wb-lm-rounds{display:none}
+/* Now cursor (the mock's nowMark): one dashed vertical line spanning both
+ * tracks, drawn by LaneSceneSvg as line.wb-lm-cursor. */
+.wb-lm-cursor{pointer-events:none}
+/* Labels float ABOVE the pipe in two alternating levels (baseline-4 /
+ * baseline-13), middle-anchored on their bar, clamped by laneMapScene - the
+ * mock's own sizes (8px names, 7.5px duration/partner line). */
+.wb-lm-label{font-size:8px;fill:var(--dsw-derive-muted,#57606a)}
+.wb-lm-label.wb-lm-label-now{fill:var(--dsw-derive-fg,#1f2328);font-weight:600}
+.wb-lm-plabel{font-size:7.5px}
+.wb-lm-opt{fill:var(--dsw-derive-muted,#8c959f);font-size:7.5px}
+.wb-lm-round{fill:var(--dsw-derive-muted,#57606a);font-size:7.5px}
+/* t260916-04: the ever-blocked badge = amber inline text in the label (the title carries the story; the face stays) */
+.wb-lm-ever{fill:var(--dsw-derive-warn-deep,#953800);font-size:7.5px;cursor:default}
+.wb-lm-par-mark{font-size:8px}
+.wb-lm-diamond{stroke-width:1.5}
 /* t260915-05：检查明细区（mock ① ck-rows） */
 .wb-checks{margin:6px 0 10px}
 .wb-checks-ttl{font-weight:600;font-size:12.5px;margin-bottom:6px;color:var(--dsw-derive-fg,#1f2328)}

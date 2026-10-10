@@ -423,7 +423,8 @@ async function dismissOverlays(p) {
 const domMapInventory = `(() => {
   const els = [...document.querySelectorAll('[class*="wb-lanemap"], [class*="wb-lm-"]')];
   return els.map(el => ({
-    cls: el.className, text: (el.textContent || '').slice(0, 120),
+    // t261009-53 起图面=SVG 场景：SVG 元素的 className 是 SVGAnimatedString，取 baseVal
+    cls: typeof el.className === 'string' ? el.className : String(el.className.baseVal || ''), text: (el.textContent || '').slice(0, 120),
     title: el.getAttribute('title') || '',
     dataKind: el.getAttribute('data-kind') || '', dataId: el.getAttribute('data-id') || '',
     dataVis: el.getAttribute('data-vis') || '', dataGen: el.getAttribute('data-gen') || '',
@@ -587,14 +588,13 @@ async function scenarioBlueCard(page) {
 async function scenarioRounds(page) {
   return withMap(page, 'L4', async (inv) => {
     const text = inv.map(x => `${x.text} ${x.title}`).join(' | ')
-    // ×N 徽章（返工史归徽章；badge=title「该段共 N 轮」）
-    const badges = inv.filter(x => x.cls.includes('wb-lm-badge'))
-    if (!badges.length && !/×\s*\d/.test(text)) return `×N 徽章缺席（create_plan 返工 2 次的票）`
-    // 逐轮格（wb-lm-round[data-gen]）hover title 出该轮证据/打回原因
-    const rounds = inv.filter(x => x.cls.includes('wb-lm-round') && x.dataGen)
-    if (rounds.length < 3) return `逐轮格不足 3 格（create_plan 三轮，实得 ${rounds.length}）：${JSON.stringify(rounds).slice(0, 200)}`
-    if (!rounds.some(x => `${x.title}`.includes('越界'))) {
-      return `逐轮格 hover title 缺第 1 轮打回原因「越界」：${JSON.stringify(rounds).slice(0, 260)}`
+    // ×N 徽章（t261009-53 起逐轮格退休：返工史归标签行 ×N + 段 hover title；
+    // 设计稿 §7.6 判据 7——返工信息由耗时行的 ×n 承载，不画弧也不摆轮格）
+    if (!/×\s*\d/.test(text)) return `×N 徽章缺席（create_plan 返工 2 次的票）`
+    // 段 hover title 折叠了逐轮证据：第 1 轮打回原因「越界」必须在场
+    const seg = inv.find(x => x.dataId === 'create_plan')
+    if (!seg || !`${seg.title}`.includes('越界')) {
+      return `create_plan 段 hover title 缺第 1 轮打回原因「越界」：${seg ? String(seg.title).slice(0, 260) : 'segment absent'}`
     }
     // 单向流：节点不因返工重复（create_plan 语义位恰 1）＋返工弧恒零
     const cp = inv.filter(x => x.dataId === 'create_plan')

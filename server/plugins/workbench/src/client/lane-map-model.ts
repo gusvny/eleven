@@ -171,6 +171,311 @@ export interface LaneMapModel {
   nowItem: string | null
 }
 
+
+/* -- Scene geometry (t261009-53, a value-for-value copy of the mock's
+ * laneMap(t); a pure function LaneMap draws). Lives in the model layer: no
+ * JSX, node runs it directly in unit tests; the renderer (lane-map.tsx) only
+ * draws it. The generic-renderer promise is unchanged: no dev-lane business
+ * words here, labels all come from the topology/model. */
+
+/* Scene canvas, the mock's own numbers (laneMap(t)): W=700 PAD=8 RPAD=30,
+ * main baseline AY=30 bar h=12, partner track BY=46 h=12, 4px gap, 96 tall
+ * viewBox, labels two levels at baseline-4 / baseline-13, x clamped into
+ * [20, W+RPAD-20]. */
+export const LM_SCENE = {
+  W: 700,
+  PAD: 8,
+  RPAD: 30,
+  H: 96,
+  AY: 30,
+  AH: 12,
+  BY: 46,
+  BH: 12,
+  GAP: 4,
+  MINW: 12,
+  LABEL_LO: 26,
+  LABEL_HI: 17,
+  CLAMP_MIN: 20,
+  CLAMP_MAX: 710,
+} as const
+
+/** Segment fills by kind (criterion 2: agent green / gate blue / human amber). */
+const LM_KIND_FILL: Record<LaneNodeKind, string> = {
+  agent: 'var(--dsw-derive-success,#4ac26b)',
+  gate: 'var(--dsw-derive-accent,#0969da)',
+  human: 'var(--dsw-derive-warn,#bf8700)',
+}
+const LM_TODO_FILL = 'var(--dsw-derive-border,#d0d7de)'
+const LM_BLOCKED_FILL = 'var(--dsw-derive-danger,#cf222e)'
+
+/** Human words for the resolution step of the ever-blocked story (vocabulary = lane-states resolvedBy). */
+const RESOLVED_HOW: Record<string, string> = {
+  rerun: 'stage rerun completed',
+  advanced: 'workflow advanced to later stages',
+  closed: 'ticket closed',
+}
+
+/** The ever-blocked story (when / why / how resolved): shared by the badge and the segment hover title. */
+function everBlockedTitle(h: LaneBlockedHistory): string {
+  const bits = [`Blocked ${h.passes.length}× before`]
+  if (h.last.at) bits.push(h.last.at)
+  if (h.last.reason) bits.push(h.last.reason)
+  if (h.last.gen !== undefined) bits.push(`Round ${h.last.gen}`)
+  if (h.resolved) {
+    bits.push(`Resolved (${RESOLVED_HOW[h.resolvedBy ?? ''] || 'resolved'}${h.resolvedAt ? `: ${h.resolvedAt}` : ''})`)
+  }
+  return bits.join(' · ')
+}
+
+/** Only a resolved blocked history earns the ever-blocked badge (t260916-04: a currently blocked stage carries none). */
+function everOf(nv: LaneNodeView): LaneBlockedHistory | undefined {
+  const h = nv.blockedHistory
+  return h && h.resolved === true && h.passes.length > 0 && nv.vis === 'done' ? h : undefined
+}
+
+/** Segment hover title (criterion 8): name · who · duration · rounds · blocked
+ *  history. The per-round evidence (each round's reason) rides here too - the
+ *  round chips are retired (design criterion 7: rework is carried by ×N). */
+function segmentTitle(nv: LaneNodeView): string {
+  const bits = [`${stageDisplayLabel(nv.node.id, nv.node.label)} · ${nv.node.role} · ${nv.node.kind}`]
+  if (nv.node.optional) bits.push(nv.node.optional)
+  bits.push(nv.durationText)
+  bits.push(`${nv.rounds.length} round${nv.rounds.length === 1 ? '' : 's'}`)
+  if (nv.rounds.length > 1) {
+    bits.push(nv.rounds.map(r => `R${r.gen} ${r.state}${r.reason ? `: ${r.reason}` : ''}`).join(' / '))
+  }
+  const ever = everOf(nv)
+  if (ever) bits.push(everBlockedTitle(ever))
+  return bits.join(' · ')
+}
+
+/* -- Scene (pure geometry; unit tests run it directly, no DOM). -- */
+
+export interface LaneSceneBar {
+  /** Unique key inside the scene (stage id; the main and the partner bar of one stage each get one). */
+  id: string
+  stageId: string
+  track: 'main' | 'partner'
+  x: number
+  y: number
+  w: number
+  h: number
+  fill: string
+  fillOpacity: number
+  /** skipped = dashed empty box (fill none + dashed stroke). */
+  dashed: boolean
+  kind: LaneNodeKind | null
+  vis: D2Visual | null
+  skipped: boolean
+  now: boolean
+  /** Human gate: a diamond at the bar head (criterion 5). */
+  diamond: boolean
+  /** Resolved blocked history (the t260916-04 badge contract). */
+  ever: boolean
+  /** v5 weight (the data-weight-ms semantic anchor; t261008-23 does not regress). */
+  weightMs: number
+  title: string
+}
+
+export interface LaneSceneLabel {
+  text: string
+  x: number
+  y: number
+  track: 'main' | 'partner'
+  /** Two alternating levels (0 = baseline-4, 1 = baseline-13); partner labels are always 0. */
+  level: 0 | 1
+  anchor: 'middle' | 'start'
+  now: boolean
+  /** Conditional-stage note (tspan.wb-lm-opt). */
+  opt?: string
+  /** Rounds badge xN (tspan.wb-lm-round). */
+  roundBadge?: string
+  /** Ever-blocked badge story (the title of tspan.wb-lm-ever). */
+  everTitle?: string
+}
+
+export interface LaneSceneWindow {
+  x: number
+  y: number
+  w: number
+  h: number
+  groupId: string
+  active: boolean
+  allDone: boolean
+  windowMs: number
+}
+
+export interface LaneScene {
+  width: number
+  height: number
+  bars: LaneSceneBar[]
+  labels: LaneSceneLabel[]
+  /** Dotted leaders: a label drops to its bar top. */
+  leaders: Array<{ x: number; y1: number; y2: number }>
+  windows: LaneSceneWindow[]
+  /** Parallel mark positions. */
+  parMarks: Array<{ x: number; y: number }>
+  diamonds: Array<{ x: number; y: number }>
+  /** Now cursor: a dashed vertical line spanning both tracks (null = no current segment). */
+  cursor: { x: number; y1: number; y2: number } | null
+}
+
+function fillOf(nv: LaneNodeView): { fill: string; fillOpacity: number; dashed: boolean } {
+  if (nv.skipped) return { fill: 'none', fillOpacity: 1, dashed: true }
+  if (nv.vis === 'blocked') return { fill: LM_BLOCKED_FILL, fillOpacity: 1, dashed: false }
+  if (nv.vis === 'todo') return { fill: LM_TODO_FILL, fillOpacity: 0.35, dashed: false }
+  return { fill: LM_KIND_FILL[nv.node.kind], fillOpacity: nv.vis === 'done' ? 0.22 : 1, dashed: false }
+}
+
+function barOf(nv: LaneNodeView, x: number, y: number, w: number, h: number, track: 'main' | 'partner', now: boolean): LaneSceneBar {
+  const f = fillOf(nv)
+  const ever = everOf(nv)
+  return {
+    id: track === 'main' ? nv.node.id : `${nv.node.id}#partner`,
+    stageId: nv.node.id,
+    track,
+    x,
+    y,
+    w,
+    h,
+    fill: f.fill,
+    fillOpacity: f.fillOpacity,
+    dashed: f.dashed,
+    kind: nv.node.kind,
+    vis: nv.vis,
+    skipped: Boolean(nv.skipped),
+    now,
+    diamond: nv.node.kind === 'human',
+    /** The t260916-04 face stays: an ever-blocked stage carries data-ever-blocked=true on its node. */
+    ever: Boolean(ever),
+    weightMs: nv.weightMs,
+    title: segmentTitle(nv),
+  }
+}
+
+function labelBit(nv: LaneNodeView): string {
+  const durBit = nv.durSource === 'nominal' ? '' : nv.durationText
+  return durBit ? ` ${durBit}${nv.badge ? ` · ${nv.badge}` : ''}` : ''
+}
+
+/** Main label: name + `duration · ×N` in the same caption (criterion 4/7);
+ *  done/running stages print their duration, unstarted prints the name only,
+ *  the current stage appends `now` (the mock's wording). */
+function mainLabelOf(nv: LaneNodeView, i: number, now: boolean): LaneSceneLabel {
+  const ever = everOf(nv)
+  return {
+    text: `${stageDisplayLabel(nv.node.id, nv.node.label)}${now ? ' now' : labelBit(nv)}`,
+    x: 0,
+    y: i % 2 === 0 ? LM_SCENE.LABEL_LO : LM_SCENE.LABEL_HI,
+    track: 'main',
+    level: i % 2 === 0 ? 0 : 1,
+    anchor: 'middle',
+    now,
+    opt: nv.node.optional || undefined,
+    roundBadge: nv.badge || undefined,
+    everTitle: ever ? everBlockedTitle(ever) : undefined,
+  }
+}
+
+/** Partner band width (%): min(1, partner/window) x 100 (the mock line ~677 clamp). */
+function lmBandPct(partnerMs: number, windowMs: number): number {
+  if (!(windowMs > 0)) return 100
+  return Math.min(1, partnerMs / windowMs) * 100
+}
+
+/* v5 time-share geometry (t261008-23, mock 261004 612-690): the fixed floor
+ * keeps narrow stages readable; the renderer only maps weight to width. */
+const LM_MIN_PCT = 6
+
+/** v5 time-share main lane: band width = MIN_PCT + flex x (weight/totalWeight)
+ *  (the mock's own formula; t261008-23, unchanged). */
+function lmWidths(model: LaneMapModel): Array<{ id: string; weightMs: number; pct: number }> {
+  const weights = model.items.map(it => ({
+    id: it.id,
+    weightMs: it.kind === 'group' ? (model.groups[it.id]?.windowMs ?? 0) : (model.nodes[it.id]?.weightMs ?? 0),
+  }))
+  const total = weights.reduce((a, r) => a + r.weightMs, 0)
+  const flex = 100 - LM_MIN_PCT * weights.length
+  return weights.map(w => ({
+    ...w,
+    pct: LM_MIN_PCT + (total > 0 ? flex * (w.weightMs / total) : flex / Math.max(1, weights.length)),
+  }))
+}
+
+/**
+ * Model -> SVG scene (a pure function; LaneMap only draws it). The geometry
+ * copies the mock's laneMap(t) value for value: 12-tall slim bars on one
+ * baseline, two floating label levels (middle anchor, clamped into
+ * [20, W+RPAD-20]), dotted leaders, the diamond at the bar head, the partner
+ * on a second track (one dashed window around both tracks + the parallel
+ * mark), the now cursor spanning both tracks.
+ */
+export function laneMapScene(model: LaneMapModel): LaneScene {
+  const { W, PAD, RPAD, AY, AH, BY, BH, GAP, MINW, CLAMP_MIN, CLAMP_MAX } = LM_SCENE
+  const usable = W - PAD - RPAD
+  const pctOf = new Map(lmWidths(model).map(w => [w.id, w.pct]))
+  const bars: LaneSceneBar[] = []
+  const labels: LaneSceneLabel[] = []
+  const leaders: LaneScene['leaders'] = []
+  const windows: LaneSceneWindow[] = []
+  const parMarks: LaneScene['parMarks'] = []
+  const diamonds: LaneScene['diamonds'] = []
+  let cursor: LaneScene['cursor'] = null
+  let x = PAD
+  model.items.forEach((item, i) => {
+    const w = Math.max(0, (usable * (pctOf.get(item.id) ?? 0)) / 100)
+    const now = model.nowItem === item.id
+    if (item.kind === 'group') {
+      const g = model.groups[item.id]
+      windows.push({
+        x: x - 4,
+        y: AY - 4,
+        w: w + 8,
+        h: (BY + BH) - AY + 8,
+        groupId: g.def.id,
+        active: g.active,
+        allDone: g.allDone,
+        windowMs: g.windowMs,
+      })
+      parMarks.push({ x: x + 5, y: BY + BH - 1 })
+      const head = g.members[0]
+      const partner = g.members[1]
+      bars.push(barOf(head, x, AY, w, AH, 'main', now))
+      labels.push(mainLabelOf(head, i, now))
+      const pw = Math.max(MINW, (w * lmBandPct(partner.weightMs, g.windowMs)) / 100)
+      bars.push(barOf(partner, x, BY, pw, BH, 'partner', partner.vis === 'running'))
+      const pever = everOf(partner)
+      labels.push({
+        text: `${stageDisplayLabel(partner.node.id, partner.node.label)}${partner.vis === 'running' ? ' now' : labelBit(partner)}`,
+        x: x + 6,
+        y: BY + BH + 9,
+        track: 'partner',
+        level: 0,
+        anchor: 'start',
+        now: partner.vis === 'running',
+        opt: partner.node.optional || undefined,
+        roundBadge: partner.badge || undefined,
+        everTitle: pever ? everBlockedTitle(pever) : undefined,
+      })
+    } else {
+      const nv = model.nodes[item.id]
+      bars.push(barOf(nv, x, AY, w, AH, 'main', now))
+      labels.push(mainLabelOf(nv, i, now))
+      if (nv.node.kind === 'human') diamonds.push({ x: x + 5, y: AY + AH / 2 })
+    }
+    const cx = x + w / 2
+    // Clamp + leader for the main (head) label; the partner label sits at the
+    // window head with its own anchor (the mock never clamps it).
+    const headLabel = item.kind === 'group' ? labels[labels.length - 2] : labels[labels.length - 1]
+    headLabel.x = Math.max(CLAMP_MIN, Math.min(cx, CLAMP_MAX))
+    leaders.push({ x: cx, y1: headLabel.y + 2.5, y2: AY - 1 })
+    if (now) cursor = { x: x + w, y1: AY - 8, y2: BY + BH + 3 }
+    x += w + GAP
+  })
+  return { width: W + RPAD, height: LM_SCENE.H, bars, labels, leaders, windows, parMarks, diamonds, cursor }
+}
+
+
 /* ── 输入校形（畸形防御的最小结构） ── */
 
 interface DetailLike {

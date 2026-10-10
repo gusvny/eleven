@@ -83,8 +83,8 @@ ok(/\{"at":\s*self\._now_iso\(\),\s*"stage":\s*step,\s*"state":\s*state,\s*"reas
 /* ---- 4. 健壮性：空 reason / 未知步 id / 缺 timeline 不回退 ---- */
 section('rendering robustness')
 ok(/\{\s*t\.reason\s*\?/.test(body), '空 reason 有三元守卫（不渲染 undefined/null）')
-ok(/wf\?\.stages\.find\(\s*\(?s\)?\s*=>/.test(body) && /\?\.name\s*\?\?\s*id/.test(body),
-  '未知 stage id 回显原 id（wf 缺失/步不在模版也不崩）')
+ok(/wf\?\.stages\.find\(\s*\(?\w+\)?\s*=>/.test(body) && /stageDisplayLabel\(\s*id,\s*wf\?\.stages\.find/.test(body),
+  '未知 stage id 回显原 id（wf 缺失/步不在模版也不崩；t260925 起 name 经 ui-labels.stageDisplayLabel(id, engineName)——unknown id 由映射层回落原 id，语义不变）')
 ok(/detail\.timeline\s*\?\?\s*\[\]/.test(body), 'timeline 缺失时按空数组处理（?? [] 不回退）')
 ok(/reworks\.length === 0\s*\)\s*return null/.test(body), '无 rework 记录时横幅整体不渲染')
 
