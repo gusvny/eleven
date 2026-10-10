@@ -4937,6 +4937,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L2——在 `blocked` 等待态发 `pause`，断言(а)**票面 `paused=true` 且额度被释放**（走①）或 (b) **回执具名说明本次不生效**（走②）；两种都不许出现"回执成功、票面与额度毫无变化"。L3——一张 blocked 票暂停后，队列里下一张被提升。
 
+> **订正（261010 11:0x，**读工作流快照**拿到硬证据后；本岗第三次订正自己的"没生效"结论）**：`-50` 的 `pause` **其实生效了**——工作流快照的时间线逐字写着：
+> `{"at":"2026-10-10T01:42:40+00:00"(=09:42:40 本地), "gen":10, "reason":"between-segment pause in effect; waiting for resume signal", "stage":"run_integration_tests", "state":"paused-waiting"}`。
+> ⇒ 它在我发 `pause` 之后、**该轮电池跑完的段边界**真的进了 `paused-waiting`（这也解释了它此后 76 分钟**零写入、在飞活动为空、WFT 为空**——不是卡死，是**停在暂停点等人**）。
+> **本条正条里"在 `blocked` 等待里静默失效"的说法要收窄**：①对**段内/段边界**的票，`pause` **会**生效（本条实证）；②对 `blocked` 等待的票（`-35`/`-41` 那两次）**是否生效我并未验证**——当时我只看了票面就下了结论，**那两处不能作为证据**（票面本来就不显示 paused，见下）。**本条真正站得住的、也正是危害所在的两条**：
+> - **票面不显示**：`op=show` 与列表面都读 `paused=None`／`paused_phase=None`，而内部状态是 `paused-waiting` ⇒ **操作者无法区分"暂停生效了"与"暂停没生效"**（我因此两次得出相反的错误结论）；
+> - **额度不释放**：`-50` 停在 `paused-waiting` 期间，`concurrency-state.json` 里它**始终记着 `running` 占一个额度**（本岗为腾额度而暂停，结果一个额度都没腾出来）——与代码里"paused (stage boundary) 是真实释放点"的注释不符。
+> **出路相应改成两条**：①**票面必须显示暂停**（`paused`/`paused_phase` 进 show/list 两个面，并写明"停在暂停点、等 resume/retry_qc"）；②**段边界暂停要真的释放额度**（或明确写清"暂停不释放"并给出腾额度的合法手段）。③另记一条**新用处**：`retry_qc` 能把 `paused-waiting` 的票唤醒（快照里随即出现 `state:"retry-requested"`），**这是暂停之后的合法出路**，值得写进运维文档。
+
 ## KI-01M4HR0ECTNFS4RWSQ8M0GE17J **写集条目形状与"声明的构建链前缀"不对齐 ⇒ 构建产物拿不到合法身份、被 settle 回滚，票卡在同一条 `bundle 新鲜度` 上**(261010 实案 `t261009-53`;integration 岗登记)
 
 > **现象**：`t261009-53`（泳道图按 mock 重画，改 `server/plugins/workbench/src/client/` 下三个文件）在 `merge_check` 判 `bundle 新鲜度` 红，回执原文 *"no build entry declared for this pair; verdict from the diff heuristic: freshness could not be established mechanically"*，而它的泳道里 `lib/client.{cjs,js}` **确实重建过**（mtime 09:36）——**产物被 settle 回滚了两次**：`.sandbar/quarantine/unauth-implement-gen0/manifest.json`（ts 1791594527）与 `.sandbar/quarantine/unauth-arbitrate-gen0/manifest.json`（ts 1791596183）都把这两个文件记为 `action: "reverted"`，并留下 diff。
