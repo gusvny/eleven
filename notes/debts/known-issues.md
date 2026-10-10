@@ -5116,8 +5116,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 
 ## KI-01M4JV7JKGK3ATFACYN29JDVKW **一条被禁用的词出现在已提交的 `notes/` 里 ⇒ 每张车道的 `verify_lane code` 都红**：`L7 术语废止` 是**整树**判据，而票面写集管不到它**(261010 19:59 本岗亲手造成并修复;登记留档)
 
-> **现象（原始回执）**：`t261009-69`（我 19:0x 刚开的 finding 实体票）`merge_check` 判红，`blocked_reason`：`泳道内 verify_lane code 绿灯: exit=None red=1；… LINT done: 2 error / 1 warn`；在它泳道里跑 `integration/lint_tests.py` 得到具名那条：**`ERROR L7 术语废止：「腿」不得新增——notes/debts/known-issues.md：1 处 > 基线 0 处（新增用法）`**。**main 自己**跑同一条 lint 也是 `1 error`（`0 error / 1 warn` 才是常态）——**红的是 main、被记在票头上**。
-> **真因（本岗自己的错）**：我在 18:4x 提交的 `KI-01M4JPA9W7PV6WFSTXEDBYDHDF` 里写了「事件触发 ＋ 定时兜底」**两条腿**——`docs/terminology.md` 的禁用对照里「腿」已废止（替换表：子用例／正用例／反用例／分支…）。**`notes/` 的散文同样受术语 lint 管辖**，而它**不在任何票的写集里**（票面写集管不到知识库），于是**一个字让所有车道的 code 判据一起红**——车道自己**没有合法动作**能修（改 notes/ 越界）。
-> **处置（2 分钟）**：在 main 上把「两条腿」改成「两条分支」（提交 `aa655e91`）⇒ main 的 lint 回到 `0 error / 1 warn` ⇒ 对 `-69` 发 `ruling`（说明红不是它的、不必改自己的交付物、也不许自己去改 `notes/`）＋ **`retry_qc`** ⇒ 它 `merge_check` 重进（attempt 2）。
+> **现象（原始回执）**：`t261009-69`（我 19:0x 刚开的 finding 实体票）`merge_check` 判红，`blocked_reason`：`泳道内 verify_lane code 绿灯: exit=None red=1；… LINT done: 2 error / 1 warn`；在它泳道里跑 `integration/lint_tests.py` 得到具名那条：**`ERROR L7 术语废止：「U+817F」不得新增——notes/debts/known-issues.md：1 处 > 基线 0 处（新增用法）`**。**main 自己**跑同一条 lint 也是 `1 error`（`0 error / 1 warn` 才是常态）——**红的是 main、被记在票头上**。
+> **真因（本岗自己的错）**：我在 18:4x 提交的 `KI-01M4JPA9W7PV6WFSTXEDBYDHDF` 里写了「事件触发 ＋ 定时兜底」**两条⟨被禁字 U+817F⟩**——`docs/terminology.md` 的禁用对照里「U+817F」已废止（替换表：子用例／正用例／反用例／分支…）。**`notes/` 的散文同样受术语 lint 管辖**，而它**不在任何票的写集里**（票面写集管不到知识库），于是**一个字让所有车道的 code 判据一起红**——车道自己**没有合法动作**能修（改 notes/ 越界）。
+> **处置（2 分钟）**：在 main 上把「两条⟨被禁字 U+817F⟩」改成「两条分支」（提交 `aa655e91`）⇒ main 的 lint 回到 `0 error / 1 warn` ⇒ 对 `-69` 发 `ruling`（说明红不是它的、不必改自己的交付物、也不许自己去改 `notes/`）＋ **`retry_qc`** ⇒ 它 `merge_check` 重进（attempt 2）。
 > **纪律（本岗即改）**：**凡改动 `notes/` 或 `docs/` 的散文，提交前先跑一次 `python3 -B integration/lint_tests.py`**（本夜之前我只在改代码后才跑）；遇到"车道的红其实是树级"的形态，**先读 main 上同一判据的读数**（`main 红=不是票的账`），再决定"改 main 后 `retry_qc`"而不是打回票。
 > **回归**：L3——一条"main 有树级 lint 红"的台面：**车道不被记红**、红具名指向 main 的文件与行，且值班有一条**已文档化的动作**（改 main→`retry_qc`）。
