@@ -21,6 +21,7 @@ from temporalio.exceptions import ApplicationError
 with workflow.unsafe.imports_passed_through():
     from activities import (
         ai_review_stub,
+        line_round_tick_engine,
         machine_qc,
         process_stage,
         publish_dry_run,
@@ -233,6 +234,10 @@ SCAN_PATCH_ID = "dispatcher-scan-v2"
 # missing / reap stray). Separate patch id — old running instances skip the
 # reconcile section on replay, keeping determinism.
 WORKER_RECONCILE_PATCH_ID = "dispatcher-scan-worker-reconcile"
+# t261009-50: the scan tick also ASKS the line round (once per declared line,
+# event trigger + scheduled backstop; the round owns all records). Separate
+# patch id — old running instances skip the section on replay.
+LINE_ROUND_PATCH_ID = "dispatcher-scan-line-round"
 
 
 @workflow.defn
@@ -295,6 +300,20 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
                 reconcile_ticket_workers,
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=retry)
+        # t261009-50: the tick asks the line round for every declared line
+        # (event trigger + scheduled backstop; body truth
+        # develop_certify.line_round_tick_engine). Spec (4): a broken
+        # line-round hook is named, never fatal — the ticket-report part of
+        # the scan still completes.
+        line_rounds: Dict[str, Any] = {}
+        if workflow.patched(LINE_ROUND_PATCH_ID):
+            try:
+                line_rounds = await workflow.execute_activity(
+                    line_round_tick_engine,
+                    start_to_close_timeout=timedelta(minutes=30),
+                    retry_policy=retry)
+            except BaseException as e:  # noqa: BLE001 — named, never fatal
+                line_rounds = {"error": "%s: %s" % (type(e).__name__, e)}
         workflow.logger.info(
             "巡检：%s 张工单，待决 %s 张（疑似卡死 %s / 待补 %s / 可签 %s）→ %s",
             report.total_tickets, len(report.items),
@@ -307,6 +326,12 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
             % (report.total_tickets, len(report.items),
                report.summary.get("疑似卡死", 0), report.summary.get("待补", 0),
                report.summary.get("可签", 0)))
+        if line_rounds:
+            # t261009-50: the bounded one-line line-round summary rides the
+            # same operator face (engine-scope event ledger).
+            self._ledger_note(
+                "scan", "done",
+                str(line_rounds.get("summary", "line_round_tick: n/a")))
         await self._ledger_flush()
         return {
             "total": report.total_tickets,
@@ -316,6 +341,7 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
             "report_file": written.get("file"),
             "report_path": written.get("path"),
             "worker_reconcile": reconcile,
+            "line_rounds": line_rounds,
             "scanned_at": workflow.now().isoformat(timespec="seconds"),
         }
 

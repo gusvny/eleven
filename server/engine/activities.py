@@ -35,6 +35,10 @@ from temporalio.client import Client
 from event_ledger import append_event_ledger as _append_event_ledger
 # t261004-27：执行器项目账投递活动（活动体真源在 executor_delivery.py；此处只注册）。
 from executor_delivery import delivery_activity as _executor_delivery_activity
+# t261009-50: the scan tick's line-round ask (body truth in develop_certify.py;
+# develop_line imports this module family, so develop_certify must not depend
+# back at module level — this import direction is safe).
+from develop_certify import line_round_tick_engine as _line_round_tick_engine
 
 from shared import (
     ADMIN_PY,
@@ -186,6 +190,17 @@ async def publish_dry_run(proposal_id: str) -> str:
 async def record_signature(sig: Signature) -> str:
     activity.logger.info("signature by=%s decision=%s", sig.who, sig.decision)
     return f"{sig.decision} by {sig.who}: {sig.note}"
+
+
+@activity.defn
+async def line_round_tick_engine() -> Dict[str, Any]:
+    """t261009-50: the scan tick's line-round ask — one ask per declared line
+    of every line-declaring project (event trigger + scheduled backstop; the
+    round owns all records). Body truth: develop_certify.line_round_tick_engine.
+    The body is blocking (file IO + the declared runner subprocess), so it
+    runs in a thread; failures are per-line named entries inside the result,
+    never raised (the scan tick must survive a broken line)."""
+    return await asyncio.to_thread(_line_round_tick_engine)
 
 
 @activity.defn
@@ -1340,6 +1355,10 @@ ALL_ACTIVITIES = [
     ticket_scan,
     scan_tickets_report,
     reconcile_ticket_workers,
+    # t261009-50: the scan tick's line-round ask (once per declared line;
+    # event trigger + scheduled backstop, the round owns all records; body
+    # truth develop_certify.line_round_tick_engine).
+    line_round_tick_engine,
     # KI-122①（260926 宿主直修令）：已知红名册只读面（裁决采纳判据的名册归属）
     read_known_red_roster,
     write_scan_report,

@@ -1004,6 +1004,262 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
     # unreachable: every branch above returns
 
 
+# ---- the tick call site (t261009-50) ----------------------------------------
+
+#: The scheduled backstop interval: how long a quiet line waits before the
+#: tick asks anyway. The line declaration is the natural per-line home, but
+#: develop_line.py is outside this ticket's write set — a module constant with
+#: an env override ships now, a per-line declared field is the follow-up.
+LINE_BACKSTOP_MS_DEFAULT = 24 * 60 * 60 * 1000
+BACKSTOP_MS_ENV = "SANDBAR_LINE_BACKSTOP_MS"
+#: The declared full-suite runner command (the production ``runner`` seam for
+#: run_line_round). Unset means the tick cannot reach a round for the line —
+#: a named, operator-visible ``runner_missing``, never a silent idle and
+#: never a ledger row (t261009-46 owns wiring a real runner).
+RUNNER_CMD_ENV = "SANDBAR_LINE_ROUND_RUNNER"
+RUNNER_TIMEOUT_ENV = "SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S"
+RUNNER_TIMEOUT_S_DEFAULT = 3600
+#: Who the tick says judged when it asks on the schedule's behalf.
+TICK_JUDGED_BY = "dispatcher-scan"
+#: The expected-red inventory version in force when the tick asks (the
+#: certification record refuses an empty booked_red by name — the tick
+#: carries this declared default until the inventory versioning ticket
+#: declares a real source).
+TICK_BOOKED_RED = "scan-default-v1"
+
+
+def backstop_ms_from_env(env=None):
+    """The tick's backstop interval. Unset → the default; a set but
+    non-integer or non-positive value is a named error, never a guess."""
+    env = os.environ if env is None else env
+    raw = str(env.get(BACKSTOP_MS_ENV, "")).strip()
+    if not raw:
+        return LINE_BACKSTOP_MS_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        raise CertifyError("backstop_ms_not_int:%r" % raw)
+    if value < 1:
+        raise CertifyError("backstop_ms_not_positive:%r" % raw)
+    return value
+
+
+def runner_timeout_s_from_env(env=None):
+    env = os.environ if env is None else env
+    raw = str(env.get(RUNNER_TIMEOUT_ENV, "")).strip()
+    if not raw:
+        return RUNNER_TIMEOUT_S_DEFAULT
+    try:
+        value = int(raw)
+    except ValueError:
+        raise CertifyError("runner_timeout_not_int:%r" % raw)
+    if value < 1:
+        raise CertifyError("runner_timeout_not_positive:%r" % raw)
+    return value
+
+
+def resolve_runner(line, env=None):
+    """The production runner seam. Returns a callable
+    ``runner(candidate_repos) -> run header`` built from the declared command,
+    or None when no runner is declared (``runner_missing`` — the tick records
+    it on the operator surface and moves on; spec (4)). The command runs with
+    ``SANDBAR_LINE_ROUND_CANDIDATES`` (the candidate revision set as JSON) in
+    its environment, in a tree of its own; it must print one JSON run header
+    (``{"id": "run-…", "cases": {"ran", "failed", "env_failed"}}``) on
+    success. A nonzero exit, a malformed header, a timeout or an OS-level
+    failure raises CouldNotRun — the round's own "could not run" path records
+    range growth and opens nothing (goal 24)."""
+    env = os.environ if env is None else env
+    cmd = str(env.get(RUNNER_CMD_ENV, "")).strip()
+    if not cmd:
+        return None
+    timeout_s = runner_timeout_s_from_env(env)
+
+    import subprocess
+
+    def runner(candidate_repos):
+        run_env = dict(env)
+        run_env["SANDBAR_LINE_ROUND_CANDIDATES"] = json.dumps(candidate_repos)
+        try:
+            proc = subprocess.run(cmd, shell=True, capture_output=True,
+                                  text=True, env=run_env, timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            raise CouldNotRun("runner_timeout:%ds" % timeout_s)
+        except OSError as e:
+            raise CouldNotRun("runner_unreachable:%s" % e)
+        if proc.returncode != 0:
+            raise CouldNotRun("runner_failed_exit_%d:%s"
+                              % (proc.returncode, proc.stderr.strip()[-200:]))
+        try:
+            header = json.loads(proc.stdout)
+        except ValueError:
+            raise CouldNotRun("runner_header_malformed")
+        if not isinstance(header, dict):
+            raise CouldNotRun("runner_header_not_object")
+        return header
+
+    return runner
+
+
+def line_round_tick(project_key, load_lines, read_rows, append_rows,
+                    resolve_runner_fn, guard_path, now_ms, backstop_ms=None,
+                    judged_by=TICK_JUDGED_BY, booked_red=TICK_BOOKED_RED,
+                    chain_limit=CHAIN_LIMIT, lane_reds=None, env=None):
+    """One scheduled tick's ask, per declared line (t261009-50 spec 1-5).
+
+    This is the CALL SITE, not a second round: it reads the records, asks
+    ``should_certify`` (the one decision) with the superset trigger, maps the
+    reason to the trigger string, and hands the ask to ``run_line_round``
+    (the one round, with its guard, chaining and checkout refusal). It adds
+    no bookkeeping beyond the returned entries — what this tick already did.
+
+    Per line, exactly once per tick:
+    - idle (no event, no backstop due): ``{"state": "idle", "reason": …}`` —
+      the tick starts no round and writes nothing;
+    - ``runner_missing``: the declared runner is absent — a named entry on
+      the operator surface only, never a delivery-ledger row;
+    - otherwise the round runs (or joins a round already in flight —
+      ``run_line_round``'s own join rule answers, the guard is left as found,
+      zero rows written) and the entry carries the round's ``trigger`` and
+      ``end`` so the two trigger shapes stay distinguishable on the record;
+    - every ``CertifyError`` is caught per line as a named ``error`` entry —
+      one broken line never takes the tick down, and the tick never looks
+      like "nothing to do" when a line could not be reached.
+    """
+    try:
+        lines = load_lines(project_key)
+    except Exception as e:
+        return {"lines": [{"error": "line_declaration_unreadable:%s"
+                           % (type(e).__name__,)}],
+                "summary": "line_round_tick: declaration unreadable (%s)"
+                           % (type(e).__name__,)}
+    if backstop_ms is not None and (isinstance(backstop_ms, bool)
+                                    or not isinstance(backstop_ms, int)
+                                    or backstop_ms < 1):
+        # Named refusal at the face (spec 4 / arbitration gen0 F6c): a
+        # non-int backstop must never reach should_certify's comparison as a
+        # raw TypeError — every declared line gets the named per-line error
+        # entry and the tick's result stays whole.
+        named = "backstop_ms_not_int:%r" % (backstop_ms,)
+        return {"lines": [{"line": line, "state": "error", "error": named}
+                          for line in sorted(lines)],
+                "summary": "line_round_tick: %s" % named}
+    if now_ms is not None and (isinstance(now_ms, bool)
+                               or not isinstance(now_ms, int)):
+        named = "backstop_needs_now_ms:%r" % (now_ms,)
+        return {"lines": [{"line": line, "state": "error", "error": named}
+                          for line in sorted(lines)],
+                "summary": "line_round_tick: %s" % named}
+    entries = []
+    rows, bad = read_rows()
+    if bad:
+        named = "ledger_has_malformed_lines:%d" % len(bad)
+        return {"lines": [{"error": named}],
+                "summary": "line_round_tick: %s" % named}
+    for line in sorted(lines):
+        try:
+            go, why = should_certify("backstop", rows, line,
+                                     guard_held(guard_path), now_ms=now_ms,
+                                     backstop_ms=backstop_ms)
+        except CertifyError as e:
+            entries.append({"line": line, "state": "error",
+                            "error": str(e)})
+            continue
+        if not go and why in ("range_empty", "backstop_not_elapsed"):
+            entries.append({"line": line, "state": "idle", "reason": why})
+            continue
+        runner = resolve_runner_fn(line, env)
+        if runner is None:
+            entries.append({"line": line, "state": "runner_missing"})
+            continue
+        trigger = "change" if why == "range_non_empty" else "backstop"
+        try:
+            res = run_line_round(line, trigger, guard_path, runner, read_rows,
+                                 append_rows, judged_by, booked_red,
+                                 backstop_ms=backstop_ms, now_ms=now_ms,
+                                 chain_limit=chain_limit, lane_reds=lane_reds)
+        except CertifyError as e:
+            entries.append({"line": line, "state": "error", "error": str(e)})
+            continue
+        entries.append({"line": line, "state": res["end"]["state"],
+                        "trigger": trigger, "reason": why,
+                        "rounds": res["rounds"]})
+    asked = [e for e in entries if "rounds" in e]
+    failed = [e["line"] for e in entries if e.get("state") in
+              ("error", "runner_missing")]
+    idle = [e["line"] for e in entries if e.get("state") == "idle"]
+    summary = ("line_round_tick: %d lines, asked %d, idle %d, not-runnable %s"
+               % (len(entries), len(asked), len(idle),
+                  failed if failed else "none"))
+    return {"lines": entries, "summary": summary}
+
+
+def declared_line_projects(projects_root=None):
+    """The projects whose develop dir declares at least one line — the tick's
+    enumeration (the scan is engine-level; lines are per project). A project
+    without ``data/develop/lines.json`` is simply not a line project; a
+    declared but UNREADABLE file is left to line_round_tick's own named
+    handling (never silently dropped here)."""
+    from shared import perkey_projects_root  # local: keep module import-light
+
+    root = Path(projects_root) if projects_root else perkey_projects_root()
+    try:
+        entries = sorted(root.iterdir())
+    except OSError as e:
+        raise CertifyError("projects_root_unreadable:%s" % e)
+    return [d.name for d in entries
+            if (d / "data" / "develop" / "lines.json").is_file()]
+
+
+def line_round_tick_engine():
+    """The engine-level tick body: one ask per declared line of every
+    line-declaring project. This is what the scan tick's activity calls;
+    one project's failure is an entry, never the tick's death (spec 4)."""
+    out = {}
+    try:
+        projects = declared_line_projects()
+    except CertifyError as e:
+        return {"projects": {}, "summary": "line_round_tick: %s" % e}
+    for project_key in projects:
+        try:
+            out[project_key] = line_round_tick_activity(project_key)
+        except Exception as e:  # the activity body itself failed loudly
+            out[project_key] = {
+                "lines": [{"error": "tick_activity_failed:%s:%s"
+                           % (type(e).__name__, e)}],
+                "summary": "line_round_tick: activity failed (%s)"
+                           % (type(e).__name__,)}
+    total = sum(len(r.get("lines", [])) for r in out.values())
+    failed = [k for k, r in out.items()
+              if any(l.get("state") in ("error", "runner_missing")
+                     for l in r.get("lines", []))]
+    summary = "line_round_tick: %d projects, %d lines, not-runnable %s" \
+        % (len(out), total, failed if failed else "none")
+    return {"projects": out, "summary": summary}
+
+
+def line_round_tick_activity(project_key):
+    """The production body of the scan tick's line-round activity. The
+    ``@activity.defn`` wrapper and its ALL_ACTIVITIES registration live in
+    activities.py (the single activity registration face; t261009-50 wiring),
+    and the DispatcherScanWorkflow patched block calls that wrapper — the
+    exact pending patch is in integration/t261009-50/wiring-handoff.md.
+    Determinism: file IO and the runner subprocess belong in the activity,
+    never in workflow code (DispatcherScanWorkflow's contract)."""
+    from develop_line import load_lines  # local: develop_line imports us
+
+    ledger = ledger_path(project_key)
+    return line_round_tick(
+        project_key,
+        load_lines=load_lines,
+        read_rows=lambda: read_rows(ledger),
+        append_rows=lambda batch: append_rows(batch, ledger),
+        resolve_runner_fn=resolve_runner,
+        guard_path=str(ledger.parent / "tick-anchor"),
+        now_ms=int(time.time() * 1000),
+        backstop_ms=backstop_ms_from_env())
+
+
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------
 
 def range_key(landing_ids):

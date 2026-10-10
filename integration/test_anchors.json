@@ -1306,6 +1306,16 @@
       "anchor": "contract",
       "note": "t261009-52: registry truth table (total on malformed input), refusal/lint note wording, wiring anchors for both add-everything settle sites and the brake-scenario reclaim guards",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_50_line_round_tick.py": {
+      "anchor": "contract",
+      "note": "t261009-50 line-round tick call site: trigger shapes, idle, per-line named failures",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_50_wiring.py": {
+      "anchor": "contract",
+      "note": "t261009-50 wiring tripwire: line_round_tick_engine registered in ALL_ACTIVITIES (executed-but-unregistered would be an activity-not-found on every tick), workflows.py carries LINE_ROUND_PATCH_ID == dispatcher-scan-line-round, engine body reachable",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4678,6 +4688,20 @@
       "anchor": "behaviour",
       "note": "runs the real engine test file under pytest with a planted foreign decoy; sweep scanner teeth proven on a synthetic offender",
       "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_triggers.py": {
+      "anchor": "behaviour",
+      "note": "t261009-50 tick call site: event/backstop triggers distinguishable, idle writes nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_failures.py": {
+      "anchor": "behaviour",
+      "note": "t261009-50 tick call site: named failures, held slot untouched, no call-site bookkeeping",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_wired.py": {
+      "anchor": "source-text",
+      "note": "t261009-50 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)"
     }
   }
 }

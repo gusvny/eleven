@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """dispatcher-scan Schedule governance tool (M6, t260821-m6-scan-expand).
 
+Since t261009-50 the scan tick this Schedule fires also ASKS the line round
+for every declared develop line (event trigger + scheduled backstop; body
+truth `develop_certify.line_round_tick`, pending wiring see
+integration/t261009-50/wiring-handoff.md). This tool's own face is unchanged:
+it governs pause/resume/trigger of the Schedule, nothing else.
+
 Note governance: pause/resume must carry a note saying who, why, and at what
 frequency. The note goes into the schedule state, so anyone can read it via
 `describe` or the Temporal UI — no unexplained pauses.
