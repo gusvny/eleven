@@ -114,7 +114,24 @@ check("F2b cause names the red cert", st["cause"] == "cert-red")
 check("F2c culprit named from attribution", st["culprit"] == T_WAIT)
 check("F2d ordinary landing refused while frozen",
       dc.may_land(rows, LINE, "chore") is False)
-check("F2e fix kind still lands (goal 8)", dc.may_land(rows, LINE, "fix") is True)
+# t261009-63: the exemption is derived from a current `repairs` relation
+# naming the repaired landing — kind-only self-declaration is refused by name.
+def _raised41(fn):
+    try:
+        fn()
+        return ""
+    except dc.CertifyError as e:
+        return str(e)
+check("F2e0 kind-only fix refused BY NAME on a frozen line (no relation)",
+      "freeze_repair_relation_missing" in _raised41(
+          lambda: dc.may_land(rows, LINE, "fix")))
+rel41 = {"id": "rel-fix41", "from": "t-fixer", "to": T_CERT,
+         "kind": dc.REL_KIND_REPAIRS, "recorded_by": "host",
+         "reason": "repairs the landing the red implicated",
+         "evidence": {"what": "ticket", "ref": T_CERT},
+         "at": 1791510000000}
+check("F2e fix kind still lands through the repairs relation (goal 8)",
+      dc.may_land(rows + [rel41], LINE, "fix", "t-fixer", rel41) is True)
 try:
     undecl = None
     dc.may_land(rows, LINE, "fxi")

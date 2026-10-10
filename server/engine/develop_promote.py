@@ -566,9 +566,109 @@ def check_withdrawn(candidate_ticket, rows, patch_id_fn, repo):
     return guard
 
 
+# ---- the repair readers (t261009-63) ----------------------------------------
+
+def repairing_relations(rows, from_ticket):
+    """The CURRENT ``repairs`` relations recorded BY ``from_ticket``
+    (t261009-63) — the remedy side of the repair relation, read from the
+    one ledger list. A SELECTOR, not a validator: it filters by kind,
+    ``from`` and the ``current_relations`` correction linkage, and returns
+    those raw rows. Consumers re-check the fields they use (``may_land``
+    re-validates in full — the judge never trusts a helper's filter;
+    ``ticket_outcome`` checks ``at``/``id`` as it selects)."""
+    return [r for r in current_relations(rows)
+            if r.get("kind") == REL_KIND_REPAIRS
+            and r.get("from") == from_ticket]
+
+
+def _patch_named(rel):
+    """Does this relation name a patch identity via its evidence? (t261009-63:
+    the ``repaired_unresolved`` bucket is only honest for relations whose
+    target is a patch identity — a ticket- or landing-named relation that
+    credits nobody is simply about someone else, never a gap to report.)"""
+    ev = rel.get("evidence")
+    return isinstance(ev, dict) and ev.get("what") == "patch_id" \
+        and isinstance(ev.get("ref"), str) and ev["ref"].strip() != ""
+
+
+def _repair_credit(rows, ticket, patch_ids):
+    """The repaired side of the relation (t261009-63): who repaired the
+    ticket/landing of ``ticket``. A current ``repairs`` relation credits
+    ``ticket`` through ANY of its three target forms — ``to`` equal to the
+    ticket; ``to`` a ``ldg-`` landing id whose landing row names the
+    ticket; or a patch identity (``to``/evidence ref) matched against the
+    caller-supplied ``patch_ids={landing_id: pid}`` map, inverted: a pid
+    of a landing whose ``ticket`` is the credited one. Without the map a
+    patch-id-named relation is NEVER a silent nothing: it lands in
+    ``repaired_unresolved`` so the gap stays visible, never guessed.
+    Selection mirrors the ``superseded_by`` loop exactly (non-dict rows
+    and rows with an unusable ``from``/``id`` skipped; an invalid ``at``
+    still wins with a None timestamp — the honest timestamp face of a
+    recorded repair)."""
+    landings = {}
+    by_pid = {}
+    if isinstance(patch_ids, dict):
+        for r in rows:
+            if isinstance(r, dict) and r.get("kind") == dc.KIND_LANDING \
+                    and isinstance(r.get("ticket"), str):
+                landings[r.get("id")] = r
+                pid = patch_ids.get(r.get("id"))
+                if isinstance(pid, str) and pid:
+                    by_pid[pid] = r["ticket"]
+    else:
+        for r in rows:
+            if isinstance(r, dict) and r.get("kind") == dc.KIND_LANDING \
+                    and isinstance(r.get("id"), str):
+                landings[r.get("id")] = r
+
+    def _credits(rel):
+        to = rel.get("to")
+        if to == ticket:
+            return True
+        if isinstance(to, str) and to.startswith("ldg-"):
+            landing = landings.get(to)
+            return landing is not None and landing.get("ticket") == ticket
+        refs = []
+        ev = rel.get("evidence")
+        if isinstance(ev, dict) and ev.get("what") == "patch_id" \
+                and isinstance(ev.get("ref"), str):
+            refs.append(ev["ref"])
+        if isinstance(to, str):
+            refs.append(to)
+        return any(by_pid.get(ref) == ticket for ref in refs)
+
+    repaired_by = None
+    repaired_at = None
+    # The winning relation's OWN id: the at-tie must compare id against id
+    # (arbitration t261009-63 gen1 — comparing against ``repaired_by``, the
+    # ticket NAME, made the tie-break order-dependent, since ``rel-…`` sorts
+    # before any ticket id).
+    repaired_rel_id = None
+    unresolved = []
+    for rel in current_relations(rows):
+        if rel.get("kind") != REL_KIND_REPAIRS:
+            continue
+        if not _valid_str(rel.get("from")):
+            continue
+        if not _credits(rel):
+            if not isinstance(patch_ids, dict) and _patch_named(rel):
+                unresolved.append(rel.get("id"))
+            continue
+        at = rel.get("at") if dc._valid_at(rel.get("at")) else 0
+        if (repaired_at is None or at > repaired_at
+                or (at == repaired_at and _valid_str(rel.get("id"))
+                    and (repaired_rel_id is None
+                         or rel["id"] > repaired_rel_id))):
+            repaired_by = rel.get("from")
+            repaired_at = rel["at"] if at else None
+            repaired_rel_id = rel.get("id")
+    return repaired_by, repaired_at, unresolved
+
+
 # ---- the outcome projection (derived only; three stages stay distinct) ------
 
-def ticket_outcome(rows, ticket, is_green=None, ticket_record=None):
+def ticket_outcome(rows, ticket, is_green=None, ticket_record=None,
+                   patch_ids=None):
     """The ticket's outcome as a derived view (record-models projection
     rules): three INDEPENDENT fields — ``landed_at`` (the revision set the
     ticket put on the line), ``certified_by`` (a green certification whose
@@ -595,6 +695,18 @@ def ticket_outcome(rows, ticket, is_green=None, ticket_record=None):
       id, break ties). Coexistence is the point: a ticket can be delivered
       and later superseded, so these sit beside ``delivered_in`` rather
       than replacing it;
+    - ``repaired_by`` / ``repaired_at`` / ``repaired_unresolved``
+      (t261009-63): the newest current ``repairs`` relation that credits
+      this ticket (relation ``at``, then relation id, break ties; an
+      invalid ``at`` still wins with a None timestamp — the honest face of
+      a recorded repair). A relation credits the ticket through ANY of its
+      three target forms: ``to`` equal to the ticket; ``to`` a ``ldg-``
+      landing id whose landing row names the ticket; or a patch identity
+      matched against the explicit ``patch_ids={landing_id: pid}`` input.
+      Without the map a patch-id-named relation is recorded in
+      ``repaired_unresolved`` (its id) instead of being silently dropped —
+      the gap stays visible, never guessed. A repair is a CAUSE fact, not
+      an ending: it never changes ``ending``.
     - ``ending``: which ending applies, in precedence order
       reverted > superseded > withdrawn > ended > open. A convenience
       summary — never a status enum; every independent field behind it
@@ -756,6 +868,13 @@ def ticket_outcome(rows, ticket, is_green=None, ticket_record=None):
     else:
         ending = "open"
 
+    # The repaired side (t261009-63): who repaired this ticket/landing,
+    # derived from current ``repairs`` relations. A cause fact beside the
+    # endings — never an ending of its own; ``repaired_unresolved`` names
+    # the patch-id relations the caller's map could not place.
+    repaired_by, repaired_at, repaired_unresolved = _repair_credit(
+        rows, ticket, patch_ids)
+
     # The single cursor of the one ordering space (t261009-29): there is no
     # second file, so ``as_of`` carries the delivery ledger's max seq alone.
     d_seq = max([r.get("seq") for r in rows
@@ -768,6 +887,9 @@ def ticket_outcome(rows, ticket, is_green=None, ticket_record=None):
         "withdrawn_at": withdrawn_at,
         "superseded_by": superseded_by,
         "superseded_at": superseded_at,
+        "repaired_by": repaired_by,
+        "repaired_at": repaired_at,
+        "repaired_unresolved": repaired_unresolved,
         "product_kind": product_kind,
         "ended_by": ended_by,
         "ended_at": ended_at,
@@ -783,6 +905,7 @@ def ticket_outcome(rows, ticket, is_green=None, ticket_record=None):
 OUTCOME_COMPARE_FIELDS = (
     "landed_at", "certified_by", "delivered_in", "reverted_at",
     "withdrawn_at", "superseded_by", "superseded_at",
+    "repaired_by", "repaired_at", "repaired_unresolved",
     "product_kind", "ended_by", "ended_at", "ending", "waiting_since",
 )
 

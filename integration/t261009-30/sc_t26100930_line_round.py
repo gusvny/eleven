@@ -140,8 +140,25 @@ def run(tmp):
           repr(st))
     check("C2 the ladder's first step is the rerun (goal 9)",
           outc["rounds"][0]["next"] == "rerun")
-    check("C3 the fix exemption is structural",
-          dc.may_land(rows_c, LINE, "fix")
+    # t261009-63: the exemption comes from a current `repairs` relation
+    # naming the repaired landing — never from the kind alone.
+    def _raised(fn):
+        try:
+            fn()
+            return ""
+        except dc.CertifyError as e:
+            return str(e)
+    fix_ldg = [x for x in rows_c if x["kind"] == "landing"][0]
+    rel = {"id": "rel-fixc1", "from": "t-fixer", "to": fix_ldg["ticket"],
+           "kind": dc.REL_KIND_REPAIRS, "recorded_by": "host",
+           "reason": "repairs the landing the red implicated",
+           "evidence": {"what": "ticket", "ref": fix_ldg["ticket"]},
+           "at": 1791510000000}
+    check("C3a kind-only fix refused BY NAME on a frozen line (no relation)",
+          "freeze_repair_relation_missing" in _raised(
+              lambda: dc.may_land(rows_c, LINE, "fix")))
+    check("C3b the fix exemption is structural through the relation",
+          dc.may_land(rows_c + [rel], LINE, "fix", "t-fixer", rel)
           and not dc.may_land(rows_c, LINE, "chore"))
 
     # ---- D: could-not-run grows the range, never a freeze (goal 24)

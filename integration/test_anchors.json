@@ -1330,6 +1330,10 @@
     "server/engine/tests/test_t261009_62_relation_evidence.py": {
       "anchor": "contract",
       "note": "t261009-62: relation rows refuse evidence-less / self-benefiting / malformed rows by name; supersedes_relation corrections resolve via current_relations (declared row contract, temp ledgers)"
+    },
+    "server/engine/tests/test_t261009_63_repair_exemption.py": {
+      "anchor": "behaviour",
+      "note": "t261009-63: repair-exemption behaviour truth table - three naming forms grant the frozen-line fix landing, named refusals (no relation / wrong kind / foreign from / detached / cross-line / superseded / unmapped patch-id / malformed repair), unfrozen unchanged, relation never mints a kind; beneficiary face repaired_by/repaired_at/repaired_unresolved, tie-break, invalid-at, ending untouched"
     }
   },
   "scenarios": {
@@ -4750,6 +4754,10 @@
     "integration/t261009-62/sc_t26100962_relation_contract.py": {
       "anchor": "contract",
       "note": "t261009-62: the relation ledger's row contract read back from disk - evidence required by name, recorder entitlement fail-closed, correction-by-new-record with byte-identical history and legacy rows staying current"
+    },
+    "integration/t261009-63/sc_t26100963_repair_exemption.py": {
+      "anchor": "contract",
+      "note": "t261009-63: the repairs relation's two consumers read back from disk - no relation no exemption (named refusals), three naming forms grant the frozen-line landing, cross-line target is a scoping refusal, corrected relation grants nothing, and the repaired side reports repaired_by/repaired_at (unmapped patch-id stays visible as repaired_unresolved)"
     }
   }
 }

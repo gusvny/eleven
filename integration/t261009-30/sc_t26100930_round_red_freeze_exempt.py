@@ -118,9 +118,27 @@ ok(len(runner.calls) == 1
    "certification (the implicated range's head)")
 
 section("F the freeze exemption is structural, and proof loss freezes nothing")
-ok(mod.may_land(rows, LINE, "fix"),
-   "F1a the structurally exempt fix kind still answers landable on a frozen "
-   "line (goal 16/17)")
+# t261009-63: the exemption is derived from a current `repairs` relation
+# naming the repaired landing — kind-only self-declaration is refused.
+def _raised(fn):
+    try:
+        fn()
+        return ""
+    except mod.CertifyError as e:
+        return str(e)
+fix_ldg = [r for r in rows if r.get("kind") == mod.KIND_LANDING][0]
+rel = {"id": "rel-fixf1", "from": "t-fixer", "to": fix_ldg["ticket"],
+       "kind": mod.REL_KIND_REPAIRS, "recorded_by": "host",
+       "reason": "repairs the landing the red implicated",
+       "evidence": {"what": "ticket", "ref": fix_ldg["ticket"]},
+       "at": 1791510000000}
+ok("freeze_repair_relation_missing" in _raised(
+       lambda: mod.may_land(rows, LINE, "fix")),
+   "F1a0 a kind-only fix is refused BY NAME on a frozen line — no "
+   "relation, no exemption (t261009-63)")
+ok(mod.may_land(rows + [rel], LINE, "fix", "t-fixer", rel),
+   "F1a the structurally exempt fix kind answers landable on a frozen "
+   "line through a current repairs relation (goal 16/17)")
 ok(not mod.may_land(rows, LINE, "chore"),
    "F1b a declared non-exempt kind (chore) answers NOT landable while "
    "frozen")

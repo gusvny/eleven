@@ -268,11 +268,26 @@ def main():
        "C2 调度器不认识的脸被点名拒绝——绝不默认进（或出）容量",
        "err=%s" % (unk,))
 
-    mf1e, _, m_fix = _call(dc.may_land, rows, _LINE, dc.FREEZE_EXEMPT_KIND)
+    # t261009-63: the exemption is derived from a current `repairs` relation
+    # naming the landing it repairs — never from the kind alone.
+    no_rel, norele, _ = _call(dc.may_land, rows, _LINE,
+                              dc.FREEZE_EXEMPT_KIND)
+    ok(no_rel == "CertifyError" and "freeze_repair_relation_missing" in str(norele),
+       "C3a 冻结线上只自称 fix 而无 repairs 关系，点名拒绝（t261009-63："
+       "无关系即无豁免）",
+       "err=%s" % (norele,))
+    repair_rel = {"id": "rel-fix01", "from": "t-fix", "to": "t-x-1",
+                  "kind": dc.REL_KIND_REPAIRS, "recorded_by": "host",
+                  "reason": "repairs ldg-0001's landing",
+                  "evidence": {"what": "ticket", "ref": "t-x-1"},
+                  "at": _AT + 900}
+    mfe, _, m_fix = _call(dc.may_land, rows + [repair_rel], _LINE,
+                          dc.FREEZE_EXEMPT_KIND, "t-fix", repair_rel)
+    ok(mfe is None and m_fix is True,
+       "C3b 冻结线上，指名所修 landing 的当前 repairs 关系给出豁免"
+       "（goal 16/17 + t261009-63）",
+       "may_land(fix)=%r err=%r" % (m_fix, mfe))
     mc1e, _, m_chore = _call(dc.may_land, rows, _LINE, "chore")
-    ok(mf1e is None and m_fix is True,
-       "C3 冻结线上，结构豁免的 fix 类工作可落（goal 16：豁免否则死锁）",
-       "may_land(fix)=%r err=%r" % (m_fix, mf1e))
     ok(mc1e is None and m_chore is False,
        "C4 冻结线上，其它类工作不落（landings stop）", "may_land(chore)=False")
     mo1e, _, m_open = _call(dc.may_land, [], _LINE, "chore")

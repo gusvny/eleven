@@ -801,19 +801,129 @@ def freeze_state(rows, line):
             "culprit": culprit, "closed_at": closed_at}
 
 
-def may_land(rows, line, ticket_kind):
+def _current_relation_rows(rows):
+    """The current (non-superseded) ``rel-`` rows of the ledger list
+    (t261009-63): every relation row EXCEPT the ones another row
+    supersedes. The same linkage ``develop_promote.current_relations``
+    reads; re-declared here because the engine's certify half must not
+    import the promote half (import direction: promote -> certify, never
+    back). A supersedes cycle makes BOTH rows non-current, as there."""
+    rels = [r for r in rows
+            if isinstance(r, dict) and isinstance(r.get("id"), str)
+            and r["id"].startswith("rel-")]
+    superseded = set()
+    for r in rels:
+        target = r.get("supersedes_relation")
+        if isinstance(target, str) and target.startswith("rel-"):
+            superseded.add(target)
+    return [r for r in rels if r["id"] not in superseded]
+
+
+def _repair_target_landing(rows, line, ref, patch_ids):
+    """Resolve ONE repair-target reference to a landing row on ``line``
+    (t261009-63). Three naming forms, all resolving to the landing the
+    repair names: a ``ldg-`` landing id; a ticket id whose latest landing
+    sits on the line; a patch identity matched against the caller-supplied
+    ``patch_ids={landing_id: pid}`` map (landings do not store patch ids —
+    the withdrawal guard computes them through git — so the map is the
+    caller's explicit declaration). None when the reference names nothing
+    on THIS line. A cross-line target is not an invalid relation — it is
+    simply not an exemption for this line (the freeze on line L comes from
+    a red on line L, so only repairing L's own landing justifies landing
+    into L); relations themselves stay project-level facts (goal 15)."""
+    landings = [r for r in rows
+                if isinstance(r, dict) and r.get("kind") == KIND_LANDING
+                and r.get("line") == line]
+    if isinstance(ref, str) and ref.startswith("ldg-"):
+        for r in landings:
+            if r.get("id") == ref:
+                return r
+        return None
+    if isinstance(patch_ids, dict):
+        for r in landings:
+            if isinstance(patch_ids.get(r.get("id")), str) \
+                    and patch_ids[r["id"]] == ref:
+                return r
+    for r in landings:
+        if r.get("ticket") == ref:
+            return r
+    return None
+
+
+def _repair_grants(rows, line, ticket, repair, patch_ids):
+    """Is ``repair`` a CURRENT ``repairs`` relation by ``ticket`` that names
+    a landing on ``line`` (t261009-63)? Returns "" when it grants, else a
+    named refusal. Deliberately re-checks every field it consumes — this
+    face is the judge, never a trustee of the caller's or of a helper's
+    filter (fail closed, defence in depth)."""
+    if not isinstance(repair, dict):
+        return "repair_relation_not_record"
+    if repair.get("kind") != REL_KIND_REPAIRS:
+        return "repair_relation_not_repairs"
+    if repair.get("from") != ticket:
+        return "repair_from_not_ticket:%r" % (repair.get("from"),)
+    if not (isinstance(repair.get("id"), str)
+            and repair["id"].startswith("rel-")):
+        return "repair_relation_id_not_rel"
+    if not any(r.get("id") == repair["id"]
+               for r in _current_relation_rows(rows)):
+        return "repair_relation_superseded:%s" % repair["id"]
+    ev = repair.get("evidence")
+    targets = []
+    if isinstance(repair.get("to"), str) and repair["to"].strip():
+        targets.append(repair["to"])
+    if (isinstance(ev, dict) and ev.get("what") == "patch_id"
+            and isinstance(ev.get("ref"), str) and ev["ref"].strip()):
+        targets.append(ev["ref"])
+    if not targets:
+        return "repair_target_missing"
+    for ref in targets:
+        if _repair_target_landing(rows, line, ref, patch_ids) is not None:
+            return ""
+    return "repair_target_unresolved:%s" % "|".join(targets)
+
+
+def may_land(rows, line, ticket_kind, ticket=None, repair=None,
+             patch_ids=None):
     """May this kind of ticket land into ``line`` now? An unfrozen line
-    takes every declared kind. A frozen line takes only the structurally
-    exempt fix kind (goal 16/17) — judged from the records, never from a
-    ticket's own claim. An undeclared kind is refused by name, never
-    guessed into an exemption NOR into a silent no (a misspelled fix kind
-    on a frozen line would deadlock the fix without a trace)."""
+    takes every declared kind — with or without a repair relation. A
+    frozen line takes only the structurally exempt fix kind (goal 16/17),
+    and since t261009-63 the exemption is DERIVED FROM A ``repairs``
+    RELATION, never from the ticket's own kind alone: ``ticket`` names the
+    candidate and ``repair`` must be a current ``repairs`` relation
+    recorded BY that ticket naming a landing on this line — by landing id,
+    by the repaired ticket's id, or by patch identity matched against the
+    explicit ``patch_ids={landing_id: pid}`` map (a patch-id-named
+    relation without the map is refused by name, never guessed into an
+    exemption). The same-line requirement is THIS face's scoping, not a
+    relation rule: relations are project-level facts (goal 15), but only a
+    repair of the line's OWN landing justifies landing into that line's
+    freeze. NO relation at all is refused by name —
+    ``freeze_repair_relation_missing`` — so a ticket that merely declares
+    itself a fix cannot land during a freeze (the one new intent this
+    ticket owns). An undeclared kind is refused by name as before (a
+    misspelled fix kind must not deadlock silently), and a relation never
+    mints a kind: a non-exempt kind on a frozen line is refused with or
+    without one."""
     if not isinstance(ticket_kind, str) or not ticket_kind.strip():
         raise CertifyError("ticket_kind_missing")
     if ticket_kind not in LANDABLE_KINDS:
         raise CertifyError("ticket_kind_undeclared:%r" % (ticket_kind,))
-    return (not freeze_state(rows, line)["frozen"]) \
-        or ticket_kind == FREEZE_EXEMPT_KIND
+    if patch_ids is not None and not isinstance(patch_ids, dict):
+        raise CertifyError("patch_ids_not_map")
+    frozen = freeze_state(rows, line)["frozen"]
+    if not frozen:
+        return True
+    if ticket_kind != FREEZE_EXEMPT_KIND:
+        return False
+    if repair is None:
+        raise CertifyError("freeze_repair_relation_missing")
+    if not (isinstance(ticket, str) and ticket.strip()):
+        raise CertifyError("repair_ticket_missing")
+    why = _repair_grants(rows, line, ticket, repair, patch_ids)
+    if why:
+        raise CertifyError(why)
+    return True
 
 
 def ticket_wait_state(rows, line, landing, is_green, now_ms,

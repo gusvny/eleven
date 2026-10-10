@@ -121,7 +121,11 @@ def test_r2_red_opens_freeze_and_derives_culprit(tmp_path):
     # culprit is NOT yet named, the exemption is already structural.
     assert r["next"] == "rerun"
     assert st["culprit"] is None
-    assert dc.may_land(rows, LINE, "fix") is True
+    # t261009-63: the exemption is derived from a `repairs` relation, never
+    # from the kind alone — a frozen line refuses the kind-only fix BY NAME,
+    # and every other declared kind still answers False.
+    with pytest.raises(dc.CertifyError, match="freeze_repair_relation_missing"):
+        dc.may_land(rows, LINE, "fix")
     assert dc.may_land(rows, LINE, "chore") is False
 
 
