@@ -59,9 +59,11 @@ function summarize() {
 
 // t261009-37 (host order 261009-(1)): the Alerts tab left the strip (its face moved
 // into the Overview Alerts block) — DELIBERATE口径 change, declared in the ticket
-// report; the Ledger tab left earlier (t261008-20). Source of truth = the page's
-// own tab-order unit contract (tests/t261005-10-page-contract.test.mjs).
-const ORDER = ['overview', 'epics', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+// report; the Ledger tab left earlier (t261008-20). t261009-44: the Certification
+// tab joins after Inspection (dispatch spec 4 — a Certification entry in the
+// panel's tab row; DELIBERATE, declared in that ticket). Source of truth = the
+// page's own tab-order unit contract (tests/t261005-10-page-contract.test.mjs).
+const ORDER = ['overview', 'epics', 'inspection', 'certification', 'metrics', 'docs', 'grants', 'settings']
 
 // ------------------------------------------------------------- production face
 const HARNESS = REPO + '/server/plugins/executor-panel/harness.mjs'

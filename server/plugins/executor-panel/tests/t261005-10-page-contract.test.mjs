@@ -18,9 +18,10 @@ let n = 0
 // ---- T1 tab strip: fixed order, no board, no duplicates ----
 // t261008-20 (host order): the Ledger tab left the strip; t261009-37 (host order
 // 261009-(1)): the Alerts tab left too — both faces live in the Overview blocks.
-const ORDER = ['overview', 'epics', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+// t261009-44: the Certification tab joins the strip (after Inspection).
+const ORDER = ['overview', 'epics', 'inspection', 'certification', 'metrics', 'docs', 'grants', 'settings']
 const tabs = [...html.matchAll(/data-tab="([a-z_-]+)"/g)].map(m => m[1])
-assert(JSON.stringify(tabs) === JSON.stringify(ORDER), `tab strip is the 7 fixed-order tabs (got [${tabs.join(',')}])`)
+assert(JSON.stringify(tabs) === JSON.stringify(ORDER), `tab strip is the 8 fixed-order tabs (got [${tabs.join(',')}])`)
 assert(!tabs.includes('board'), 'no status-board tab in the strip')
 assert(!tabs.includes('ledger'), 'no Ledger tab in the strip (t261008-20)')
 assert(!tabs.includes('alerts'), 'no Alerts tab in the strip (t261009-37)')

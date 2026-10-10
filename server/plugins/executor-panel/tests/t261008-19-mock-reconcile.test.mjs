@@ -61,7 +61,9 @@ assert(countDocsTree({ groups: [null, { files: 'nope' }, { files: [{ rel: 'a.md'
 // page-contract test's ORDER; t261008-20 retired the Ledger tab; t261009-37 retired
 // the Alerts tab — host order 261009-(1), face moved into the Overview). This
 // ticket's guard is only that THIS ticket changed nothing about the strip.
-const ORDER = ['overview', 'epics', 'inspection', 'metrics', 'docs', 'grants', 'settings']
+// t261009-44: the Certification tab joins the strip (after Inspection, before Metrics);
+// this guard keeps its original job — the ORDER here is the current declared strip.
+const ORDER = ['overview', 'epics', 'inspection', 'certification', 'metrics', 'docs', 'grants', 'settings']
 const tabs = [...html.matchAll(/data-tab="([a-z_-]+)"/g)].map(m => m[1])
 assert(JSON.stringify(tabs) === JSON.stringify(ORDER), 'the tab strip order is unchanged')
 const paneInsp = html.slice(html.indexOf('id="paneInsp"'), html.indexOf('id="paneSet"'))

@@ -61,6 +61,10 @@ import {
 // CONC_LIMITS constant table is embedded as JSON next to them (the embedded function
 // sources read it from page scope).
 import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
+// t261009-44: the Certification tab's render core — embedded via String() like
+// the other pure cores, so the UT and the page run one implementation. The
+// CERT_COPIES copy table rides along as JSON (single copy source).
+import { buildCertificationCore, resultCell, verdictCell, CERT_COPIES } from './certification-view.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 
@@ -202,9 +206,17 @@ const EMBEDDED = EMBED_CONSTS + [
   String(limitStep), String(concChipState),
   // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
   String(countDocsTree), String(docEntryRow),
+  // t261009-44: the Certification tab's render core + its result/verdict cells
+  // (closure-free; the CERT_COPIES table is embedded as JSON below it).
+  String(buildCertificationCore), String(resultCell), String(verdictCell),
   // t261009-57: alerts face core — relative time, coalesce-then-cap (one implementation).
   String(relTimeAgo), String(coalesceAlerts), String(capCoalesced),
 ].join('\n')
+
+/** t261009-44: the Certification tab's copy table as JSON — the data half of the
+ *  embedded render core. CERT_COPIES (certification-view.ts) stays the single
+ *  copy source; the page JS reads the named-absence sentence from here. */
+const CERT_TABLES = JSON.stringify({ COPIES: CERT_COPIES })
 
 /** t261006-15: Inspection tables (verbatim empty copies + instance labels) as JSON —
  *  the data half of the embedded period-view core. EMPTY_COPIES (inspection-view.ts)
@@ -255,7 +267,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 ui-sans-serif,
 input.tab{position:absolute;opacity:0;pointer-events:none}
 .seg label{color:var(--muted);cursor:pointer;padding:5px 12px;border-radius:7px;display:flex;align-items:center;gap:6px;font-size:12px}
 .seg label:hover{color:var(--fg)}
-#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-inspection:checked~.seg label[for=t-inspection],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
+#t-overview:checked~.seg label[for=t-overview],#t-epics:checked~.seg label[for=t-epics],#t-inspection:checked~.seg label[for=t-inspection],#t-certification:checked~.seg label[for=t-certification],#t-metrics:checked~.seg label[for=t-metrics],#t-docs:checked~.seg label[for=t-docs],#t-grants:checked~.seg label[for=t-grants],#t-settings:checked~.seg label[for=t-settings]{background:var(--panel2);color:var(--fg)}.badge{min-width:18px;height:18px;border-radius:9px;background:var(--blue);color:var(--badge-fg);font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;padding:0 5px}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sect.lead{margin-top:18px}
@@ -472,6 +484,34 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 .blk .bbd .act .t{flex:0 0 96px;white-space:nowrap}
 .blk .bbd .act .tk{flex:0 0 88px;overflow:hidden;text-overflow:ellipsis}
 .evfile{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;max-width:22ch;white-space:nowrap}
+/* ---- t261009-44: the Certification tab (mock v15's layout law) ---- */
+/* .linebar: one bar, one boundary; the delivered part is a FIXED-width cap on
+   the left — a running total never grows into the segment scale. */
+.linebar{display:flex;align-items:stretch;height:38px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.linebar .s{display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--fg)}
+.linebar .s.cap{flex:0 0 9px;background:var(--panel2)}
+.linebar .s.cert{background:var(--green-soft)}
+.linebar .s.wait{background:var(--warn-soft)}
+.linebar .s .n{font-weight:700}
+.lbt{display:flex;align-items:center;gap:14px;margin-top:6px;font-size:12px;color:var(--muted)}
+.flow{display:flex;align-items:center;gap:10px;margin-top:10px}
+.sw{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.sw .track{width:30px;height:16px;border-radius:999px;background:var(--line);position:relative}
+.sw .knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--bg);border:1px solid var(--line)}
+#paneCert select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:5px 9px;font:inherit;font-size:12.5px}
+#paneCert .card{border:1px solid var(--line);border-radius:10px;background:var(--bg);margin-top:12px}
+#paneCert .card .hd{display:flex;align-items:center;gap:10px;padding:11px 14px;flex-wrap:wrap}
+#paneCert .card h3{margin:0;padding:8px 14px;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);font-size:11.5px;letter-spacing:.35px;text-transform:uppercase;color:var(--muted)}
+#paneCert .card .pad{padding:10px 14px 14px}
+#paneCert table{width:100%;border-collapse:collapse;font-size:12.5px}
+#paneCert th,#paneCert td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line-soft)}
+#paneCert th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.3px;font-weight:600}
+#paneCert tr:last-child td{border-bottom:0}
+#paneCert .pick{display:flex;align-items:center;gap:10px;padding:2px 0}
+#paneCert .lbl{color:var(--muted);font-size:12.5px}
+#paneCert .state{font-weight:650;font-size:15px}
+#paneCert .st.g{color:var(--green)}#paneCert .st.r{color:var(--red)}
+#paneCert .who{color:var(--faint);font-size:11.5px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -481,6 +521,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   <input class="tab" type="radio" name="tb" id="t-overview" checked>
   <input class="tab" type="radio" name="tb" id="t-epics">
   <input class="tab" type="radio" name="tb" id="t-inspection">
+  <input class="tab" type="radio" name="tb" id="t-certification">
   <input class="tab" type="radio" name="tb" id="t-metrics">
   <input class="tab" type="radio" name="tb" id="t-docs">
   <input class="tab" type="radio" name="tb" id="t-grants">
@@ -492,6 +533,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <label for="t-overview" data-tab="overview">Overview <span id="reqBadge" class="badge zero">0</span></label>
     <label for="t-epics" data-tab="epics">Epics</label>
     <label for="t-inspection" data-tab="inspection">Inspection</label>
+    <label for="t-certification" data-tab="certification">Certification</label>
     <label for="t-metrics" data-tab="metrics">Metrics</label>
     <label for="t-docs" data-tab="docs">Docs</label>
     <label for="t-grants" data-tab="grants">Grants</label>
@@ -606,6 +648,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
        adjudication surface, not resolved here. The three label strings are
        byte-identical to the mock. The value-side copy states the real data state:
        there is no chart data drawn in this build (named degraded face, not silence). -->
+  <!-- t261009-44: the Certification tab — the develop ledgers' face, drawn as the
+       approved mock v15 draws it. The body is rendered by the embedded pure core
+       buildCertificationCore; this section only carries the mount points. -->
+  <section id="paneCert" style="display:none">
+    <div id="certBody"></div>
+  </section>
+
   <section id="paneMetrics" style="display:none">
     <div id="metricsBanner"></div>
     <div class="grid" id="metricsGrid"></div>
@@ -755,6 +804,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   var IDENTITY_RUNTIME = ${IDENTITY_DATA};
   // t261006-17 (CL-2): the limit-range table the embedded limitStep/concChipState read.
   var CONC_LIMITS = ${JSON.stringify(CONC_LIMITS)};
+  // t261009-44: the Certification tab's copy table (the named promote-dialog
+  // absence sentence lives here — one copy source).
+  var CERT_RUNTIME = ${CERT_TABLES};
+  // the embedded render core reads the copy table by its module name (one source)
+  var CERT_COPIES = CERT_RUNTIME.COPIES;
   var PROJECT_PALETTE_12 = IDENTITY_RUNTIME.PROJECT_PALETTE_12;
   var IDENTITY_OUTLINES = IDENTITY_RUNTIME.IDENTITY_OUTLINES;
   var IDENTITY_STRUCTURES = IDENTITY_RUNTIME.IDENTITY_STRUCTURES;
@@ -2265,13 +2319,44 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
   };
 
+  // ---- Certification tab (t261009-44) ----
+  // Lazy like the other reference faces: a tab that is never opened must never
+  // request anything. The route is GET-only; the promote button renders the
+  // dialog's named absence (CERT_RUNTIME.COPIES.promoteAbsent), never a fake.
+  var CERT = { loadedFor: '', data: null };
+  function renderCert(){
+    var body = el('certBody');
+    body.innerHTML = buildCertificationCore(CERT.data || {ok:false, reason:'the certification face has not been read yet'});
+    var line = el('certLine');
+    if(line) line.onchange = function(){ loadCertification(); };
+    var promo = el('certPromote');
+    if(promo) promo.onclick = function(){
+      var note = el('certPromoteNote');
+      if(!note) return;
+      note.hidden = false;
+      note.textContent = CERT_RUNTIME.COPIES.promoteAbsent;
+    };
+  }
+  function loadCertification(){
+    if(!state.project){ CERT.data={ok:false, reason:'no project is selected — the develop ledgers cannot be resolved'}; renderCert(); return; }
+    var lineSel = el('certLine');
+    var q = '/sandbar-executor-panel/api/certification?project='+encodeURIComponent(state.project);
+    var want = lineSel && lineSel.value;
+    if(want) q += '&line='+encodeURIComponent(want);
+    fetch(q).then(function(r){ return r.json(); }).then(function(j){
+      CERT.loadedFor = state.project; CERT.data = j; renderCert();
+    }).catch(function(e){
+      CERT.data = {ok:false, reason:String((e && e.message) || e)}; renderCert();
+    });
+  }
+
   // ---- tab switching ----
   // t261005-10 (UI-2): the nine-tab fixed order (mock v11); the four read-only
   // faces load on first activation (lazy — they are reference faces, not live
   // state, so they stay out of the 5s poll).
   var PANES = [['t-overview','paneOv'],['t-epics','paneEpics'],
-    ['t-inspection','paneInsp'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
-  var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': inspEnsureLoaded, 't-metrics': loadMetrics, 't-docs': loadDocs };  function showTab(id){
+    ['t-inspection','paneInsp'],['t-certification','paneCert'],['t-metrics','paneMetrics'],['t-docs','paneDocs'],['t-grants','paneGrants'],['t-settings','paneSet']];
+  var TAB_LOADER = { 't-epics': loadEpics, 't-inspection': inspEnsureLoaded, 't-certification': loadCertification, 't-metrics': loadMetrics, 't-docs': loadDocs };  function showTab(id){
     for(var i=0;i<PANES.length;i++){
       el(PANES[i][1]).style.display = (PANES[i][0]===id) ? '' : 'none';
     }

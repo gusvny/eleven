@@ -4549,6 +4549,16 @@
       "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
       "sync_path": ""
     },
+    "integration/t261009-44/sc_t26100944_certification_route_reader.mjs": {
+      "anchor": "contract",
+      "note": "t261009-44: Slice 2 — the certification route + reader seam the tab reads through (read journey, named degradation, no write path)",
+      "sync_path": ""
+    },
+    "integration/t261009-44/sc_t26100944_certification_tab_page.mjs": {
+      "anchor": "contract",
+      "note": "t261009-44: Slice 2 — the page-visible Certification tab and its wiring to the one registered route (dead-button proof live)",
+      "sync_path": ""
+    },
     "integration/t261009-42/sc_bundle_freshness_verdict.py": {
       "anchor": "contract",
       "note": "t261009-42: merge-check item 3.5 three-state freshness verdict at the gate level (rebuild declared entry + byte-compare; legacy verdict kept when no entry declared)",

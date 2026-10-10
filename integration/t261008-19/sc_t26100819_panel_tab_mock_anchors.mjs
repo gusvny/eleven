@@ -105,7 +105,10 @@ const OUT_DIR = join(REPO, 'integration', 't261008-19', 'out')
 // same source of truth as the t261005-10 page-contract test's ORDER.
 // t261009-37 arbitration (host order 261009-(2), declared口径 change): Alerts
 // left the strip for the Overview blocks, so the declared order drops it.
-const TAB_ORDER = ['Overview', 'Epics', 'Inspection', 'Metrics', 'Docs', 'Grants', 'Settings']
+// t261009-44: Certification joins after Inspection (dispatch spec 4 — DELIBERATE
+// strip change, declared in that ticket; the pin follows the served page, and the
+// Certification tab's own face rules stay owned by its own scenarios).
+const TAB_ORDER = ['Overview', 'Epics', 'Inspection', 'Certification', 'Metrics', 'Docs', 'Grants', 'Settings']
 const CHART_ENTRIES = ['lanes per day', 'stage duration', 'gate reds']
 const MOCK_ILLUSTRATIVE = ['38', '2h10m', '25 pages', '60 pages']
 
@@ -197,7 +200,7 @@ async function main() {
       await page.waitForTimeout(400)
       const T = (n) => theme[0].toUpperCase() + theme.slice(1) + ':' + n
 
-      // ---- N1 NEGATIVE: the tab strip is unchanged (9 tabs, declared order) ----
+      // ---- N1 NEGATIVE: the tab strip is unchanged (declared order, no drift) ----
       const tabs = await page.evaluate(() =>
         [...document.querySelectorAll('.seg label[data-tab]')].map((l) => l.textContent.trim().replace(/\s*\d+$/, '')))
       C.case(T('N1-tab-strip-unchanged'),

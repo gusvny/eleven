@@ -54,6 +54,10 @@ import { readConcurrency, spawnConcurrencyLimitWrite, CONCURRENCY_LIMIT_MIN, CON
   CONCURRENCY_UNLIMITED, readLastLimitAudit, concurrencyDeclarationPath,
   type ConcurrencyRead, type ConcurrencyWriteFace } from './concurrency.ts'
 import { readOneShotFace, fsOneShotIo, type OneShotIo } from './one-shot-view.ts'
+// t261009-44: the Certification tab's read face — the engine develop ledgers
+// through the adapter seam, derived into the Slice 1 face. GET-only: no write
+// path exists in this slice (certify/promote stay record-signed operations).
+import { certificationFace, type CertFaceRead } from './certification-reader.ts'
 import type { BridgeStatusSnapshot } from './question-bridge.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
@@ -151,6 +155,10 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   // ledger (ticket.py op=concurrency) and never recomputes it; POST saves the
   // declaration through the engine entry (client.py concurrency-limit-write, CL-2b).
   { path: '/sandbar-executor-panel/api/concurrency', methods: ['GET', 'POST'] },
+  // t261009-44: the Certification tab's read face. GET-only — the certify/promote
+  // act stays a record-signed engine operation; this route derives and returns the
+  // face (and the raw input arrays behind it), it never writes a ledger.
+  { path: '/sandbar-executor-panel/api/certification', methods: ['GET'] },
 ]
 
 export interface ApiDeps {
@@ -200,6 +208,9 @@ export interface ApiDeps {
   engineConcurrencyRead?: (key: string, env: NodeJS.ProcessEnv) => Promise<ConcurrencyRead>
   /** Concurrency limit write face (default spawnConcurrencyLimitWrite via the engine CLI; test stub, t261006-17). */
   engineConcurrencyWrite?: ConcurrencyWriteFace
+  /** t261009-44 Certification read face (default certificationFace via the adapter
+   *  seam; tests inject a stub — a unit test never spawns the engine adapter). */
+  certificationRead?: CertFaceRead
 }
 
 /** Wake-call result (ok:false always carries a human-readable reason — the receipt
@@ -981,6 +992,23 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
     // t261005-10 (UI-2) note: its GET-only declaration read face on this route is
     // SUPERSEDED by this CL-2 face (engine-ledger numbers + save); the response is a
     // superset (limit/unlimited/decl), so the read-only row keeps working off `decl`.
+    }
+    // ---- certification (t261009-44): the tab's read face ----
+    if (path === '/sandbar-executor-panel/api/certification') {
+      if (method !== 'GET') return bad(405, 'GET only (a read face: the certify/promote act is a record-signed engine operation, never this route)')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const line = query.get('line') ?? ''
+      const read = await (deps.certificationRead ?? certificationFace)(
+        { project: key, line: line || undefined }, { env })
+      if (!read.ok) {
+        // ONE ok:false envelope for every refusal (the adapter's named reason
+        // travels verbatim: missing declaration, malformed ledger row, absent
+        // run headers) — the face degrades by name, nothing is invented.
+        return { status: 200, json: { ok: false, project: key, reason: read.reason,
+          note: 'the certification face is not derivable — the reason above names what could not be read' } }
+      }
+      return { status: 200, json: { ...read, note: 'face derived by the engine projections (develop_certify/develop_promote) — the panel recomputes nothing' } }
     }
     return bad(404, `未知面板路由：${path}`)
   }
