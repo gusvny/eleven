@@ -632,6 +632,11 @@ export class Watchdog {
         this.reconcileState = degradedResult(board.error ?? 'board reader 失败', nowMs)
         await this.raise({ rule: 'reconcile_degraded', target: this.project, level: 'redline', title: `对账降级（project ${this.project}）`, detail: this.reconcileState.reason ?? '' })
       } else {
+        // compareStates scope (t261009-61): the count covers only real in-flight,
+        // both-sides-present divergences — terminal state-word drift and ledger-only
+        // history are dropped inside the pure function (doctrine in reconcile.ts), so
+        // N can converge. A real in-flight divergence re-raising every heartbeat is
+        // intentional: it stays actionable until fixed.
         const mism = compareStates(deriveTicketStates(this.ledgerRows), board.rows)
         // 缺行覆盖（t261004-13）：只有账本**零行**覆盖的在飞票进告警；终态缺口只进状态面。
         const coverage = ledgerCoverage(board.rows, this.ledgerRows)

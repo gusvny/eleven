@@ -1,11 +1,11 @@
-// reconcile UT：比对/降级/缺行覆盖两桶/集合指纹去重键语义（t261004-13）。
+// reconcile UT：比对（t261009-61 scope 收窄）/降级/缺行覆盖两桶/集合指纹去重键语义（t261004-13）。
 import { compareStates, degradedResult, makeMissingRowsSpec, ledgerCoverage, fnv1a8 } from '../src/host/reconcile.ts'
 import { parseLedgerLine } from '../src/host/ledger-tail.ts'
 import { ledgerLine, assert, done } from './lib.mjs'
 
 let n = 0
 const row = (ticket, stageState) => parseLedgerLine(ledgerLine({ ticket, stage_state: stageState }))
-// 一致 / 不一致 / 看板缺票。
+// 一致 / 不一致 / scope 收窄（t261009-61）。
 {
   const led = new Map([['t1', { stage: 'implement', stage_state: 'running' }], ['t2', { stage: 'review', stage_state: 'done' }]])
   const board = [{ id: 't1', stage: 'implement', stage_state: 'running' }, { id: 't2', stage: 'review', stage_state: 'done' }]
@@ -13,12 +13,37 @@ const row = (ticket, stageState) => parseLedgerLine(ledgerLine({ ticket, stage_s
   const board2 = [{ id: 't1', stage: 'implement', stage_state: 'done' }, { id: 't2', stage: 'review', stage_state: 'done' }]
   const m = compareStates(led, board2)
   assert(m.length === 1 && m[0].ticket === 't1' && m[0].board_state === 'done', 'divergent state → mismatch with both sides')
+  // t261009-61 Class B：账本独有 id（归档/剪枝 workflow）不再逐票计——缺行面拥有可行动方向。
   const board3 = [{ id: 't3', stage_state: 'x' }]
-  const m2 = compareStates(led, board3)
-  assert(m2.length === 2 && m2[0].board_state === '<absent>', 'ledger ticket absent from board = mismatch (board is truth)')
+  assert(compareStates(led, board3).length === 0, 'ledger-only history (no board row) is suppressed, missing-rows face owns the actionable direction')
   const emptyLed = new Map()
   assert(compareStates(emptyLed, board2).length === 0, 'empty ledger vs board → not per-ticket mismatch (missing-rows face owns it)')
   n += 4
+}
+// t261009-61：630 票形态归零 + 真在飞分歧保留。
+{
+  // Class A：279 张收尾票 status=closed、stage_state=awaiting vs 账本末段 merge → 全部不数。
+  const closedRows = new Map(Array.from({ length: 279 }, (_, i) => [`t2609xx-${i}`, { stage: 'implement', stage_state: 'merge' }]))
+  const closedBoard = Array.from({ length: 279 }, (_, i) => ({ id: `t2609xx-${i}`, stage_state: 'awaiting', status: 'closed' }))
+  assert(compareStates(closedRows, closedBoard).length === 0, 'terminal state-word drift (closed+awaiting vs merge) is structural → 0 mismatches')
+  // verified 同理。
+  assert(compareStates(new Map([['v1', { stage_state: 'merge' }]]), [{ id: 'v1', stage_state: 'awaiting', status: 'verified' }]).length === 0, 'verified rows suppressed the same way')
+  // Class B 混合形态：账本独有 dispatcher-scan id → 不数。
+  const mixed = new Map([['dispatcher-scan-2026-09-28T14:14:16Z', { stage: 'scan', stage_state: 'scan' }], ['t9', { stage_state: 'running' }]])
+  const mixedBoard = [{ id: 't9', stage_state: 'done' }]
+  const mm = compareStates(mixed, mixedBoard)
+  assert(mm.length === 1 && mm[0].ticket === 't9', 'mixed input returns only the actionable in-flight divergence (scan id dropped)')
+  // 真在飞分歧仍在（level/文案不动，scope 修）。
+  const live = compareStates(new Map([['t5', { stage_state: 'merge' }]]), [{ id: 't5', stage_state: 'running', status: 'dispatched' }])
+  assert(live.length === 1 && live[0].board_state === 'running' && live[0].ledger_state === 'merge', 'real in-flight divergence (dispatched) still counts')
+  // status 缺席的历史票保守按在飞：分叉照数（宁多看一眼，不假报平安）。
+  const nostat = compareStates(new Map([['h1', { stage_state: 'merge' }]]), [{ id: 'h1', stage_state: 'awaiting' }])
+  assert(nostat.length === 1, 'status-less board row stays conservative in-flight (divergence counted)')
+  // 畸形输入不炸不数：缺 id / 两侧态空。
+  const bad = new Map([['', { stage_state: 'x' }], ['t6', {}], ['t7', { stage_state: 'running' }]])
+  const badBoard = [{ stage_state: 'y' }, { id: 't6', stage_state: '' }, { id: 't7', stage_state: 'running' }]
+  assert(compareStates(bad, badBoard).length === 0, 'malformed rows (blank id, empty states) neither throw nor count')
+  n += 7
 }
 // 降级显式。
 {

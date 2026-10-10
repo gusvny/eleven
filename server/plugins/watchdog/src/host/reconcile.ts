@@ -53,8 +53,18 @@ export interface ReconcileResult {
   mismatches: Mismatch[]
 }
 
-/** 推演态 vs 看板真源比对（纯函数）。账本缺票不在此报——那归 missing-rows 面
- *  （账本可能整段缺，逐票 mismatch 会把一件事拆成 N 条响声，违反「一声就够」）。 */
+/** Derived ledger state vs board truth comparison (pure function). Scope narrowed
+ *  (t261009-61) to actionable rows only: both sides present AND in flight.
+ *  - Terminal board rows (status=closed/verified) drift by construction: the close-out
+ *    default (awaiting) never equals the ledger's derived last stage (merge). A state
+ *    word nobody can act on is not a mismatch — same terminal doctrine as
+ *    ledgerCoverage; status-less historical rows stay conservative (in flight).
+ *  - Ledger-only ids (archived/pruned workflows the board no longer lists) are history,
+ *    not an action: the missing-rows face (ledgerCoverage) owns the actionable
+ *    direction (board row with zero ledger rows).
+ *  A real in-flight divergence re-raises reconcile_mismatch every heartbeat ON PURPOSE:
+ *  it stays actionable until someone fixes it (alert doctrine: an actionable error
+ *  keeps sounding until handled). */
 export function compareStates(
   ledgerStates: Map<string, { stage?: string; stage_state?: string }>,
   board: BoardRow[],
@@ -62,11 +72,10 @@ export function compareStates(
   const boardMap = new Map(board.map(b => [boardId(b), b]))
   const mism: Mismatch[] = []
   for (const [ticket, led] of ledgerStates) {
+    if (ticket === '') continue // blank id on either side has no reportable object (same rule as ledgerCoverage)
     const b = boardMap.get(ticket)
-    if (!b) {
-      mism.push({ ticket, board_state: '<absent>', ledger_state: ledgerState(led) || '<unknown>' })
-      continue
-    }
+    if (!b) continue // ledger-only history (archived/pruned) — not actionable here (t261009-61)
+    if (isTerminalBoardRow(b)) continue // terminal state-word drift is structural, never actionable
     const bs = boardState(b)
     const ls = ledgerState(led)
     if (bs !== '' && ls !== '' && bs !== ls) {

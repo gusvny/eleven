@@ -3799,6 +3799,11 @@
       "note": "ticket C: the watchdog raises a redline naming session+face for a pending ask with no mirrored row past the deadline and for a deliver_refused ledger row; a mirrored-in-time ask stays clear; a malformed ledger row crashes nothing and is named.",
       "sync_path": ""
     },
+    "integration/t261009-61/sc_reconcile_scope_t261009-61.mjs": {
+      "anchor": "contract",
+      "note": "reconcile heartbeat redline scoped to actionable in-flight divergences: Class A terminal drift and Class B ledger-only history raise no reconcile_mismatch, a real in-flight divergence still redlines named, the 630-shape fixture counts 1, converges once the ticket goes terminal",
+      "sync_path": "server/plugins/watchdog/src/host/reconcile.ts"
+    },
     "integration/t261005-02/sc_watchdog_self_heal_config_and_failure.py": {
       "anchor": "behaviour",
       "note": "t261005-02 self-heal component contract (status face + cancel act)",
