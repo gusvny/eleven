@@ -433,6 +433,26 @@ def build_promotion(cert_id, line, tickets, main_before, main_after, signer,
     after = _repos_map(main_after)
     if after != cert_repos:
         raise PromotionRefused("main_after_not_certified_revision")
+    # t261009-66: the promotion NAMES the remedy work that rode with it —
+    # the current ``repairs`` AND ``withdraws`` relations recorded BY the
+    # covered tickets, read back from ``delivery_rows`` (the ledger rows,
+    # never a return value). Withdrawals ride under the same field name:
+    # withdrawal is work too (record-models: "withdrawal is work, not a
+    # record"), so the entry carries its ``kind`` and the name ``repairs``
+    # reads as "remedy relations" here. Direction logic goes through the
+    # ONE reader (``relations_of`` as_actor side) — no second matching
+    # implementation. Legacy rows without the field stay valid; a new row
+    # always carries it (empty list when none) for a stable shape.
+    named, repairs = set(), []
+    for t in dict.fromkeys(tickets or []):
+        face = dc.relations_of(delivery_rows, t)
+        for kind in (REL_KIND_REPAIRS, REL_KIND_WITHDRAWS):
+            for entry in face["as_actor"][kind]:
+                if entry["id"] in named:
+                    continue
+                named.add(entry["id"])
+                repairs.append({"id": entry["id"], "from": entry["from"],
+                                "to": entry["to"], "kind": entry["kind"]})
     row = {
         "kind": KIND_PROMOTION,
         "id": dc.mint_id("prom", at_ms=at_ms),
@@ -442,6 +462,7 @@ def build_promotion(cert_id, line, tickets, main_before, main_after, signer,
         "tickets": list(tickets),
         "main_before": list(main_before),
         "main_after": list(main_after),
+        "repairs": repairs,
         "signer": signer,
         "on_behalf_of": on_behalf_of,
         "authority": authority,
@@ -521,6 +542,13 @@ def current_relations(rows):
         if isinstance(target, str) and target.startswith("rel-"):
             superseded.add(target)
     return [r for r in rels if r["id"] not in superseded]
+
+
+#: The ONE relation reader (t261009-66), re-exported as the same object so
+#: promote-side faces call one name and no second direction implementation
+#: appears (import direction: promote -> certify — the implementation lives
+#: in develop_certify, beside the ledger kinds it reads).
+relations_of = dc.relations_of
 
 
 # ---- the withdrawal guard ---------------------------------------------------

@@ -1348,6 +1348,11 @@
     "server/engine/tests/test_t261009_69_finding_entity_observation.py": {
       "anchor": "contract",
       "note": "t261009-69: the five MUST-BECOME-TRUE points on the pure + thin-IO faces - 16-hex content mint stable across periods, observation keyed (finding,period) with no id and no second entity, finding_history answered from the ledger, named degradation on corrupt/absent/malformed input, legacy 8-hex prefix resolution with id_resolution named"
+    },
+    "server/engine/tests/test_t261009_66_relations_reader.py": {
+      "anchor": "contract",
+      "note": "t261009-66: relations_of two-direction reader truth table (stored actor side, derived+labelled benefited side, three target forms, unresolved honesty bucket, superseded/cycle exclusion, malformed rows) and the promotion repairs naming face (covered-ticket remedies named with kind, uncovered not, empty list stable shape, legacy row valid, malformed field refused)",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4806,6 +4811,11 @@
     "integration/t261009-69/sc_t26100969_finding_entity_observation.py": {
       "anchor": "contract",
       "note": "t261009-69: the finding entity/observation ledger contract read back from disk - 16-hex content-minted id stable across periods, one entity row never duplicated on re-sighting, observation keyed (finding,period) with no id, first/periods/last answered by query, named degradation on corrupt/absent ledger, legacy 8-hex id still resolving"
+    },
+    "integration/t261009-66/sc_t26100966_relations_reader.py": {
+      "anchor": "contract",
+      "note": "t261009-66: both-directions-from-disk reader (byte-identical read, derived labelled), correction-aware neither-side superseded, one-implementation identity, promotion repairs naming proven from the file",
+      "sync_path": "server/engine/develop_certify.py (relations_of, _relation_target_tickets, validate_row promotion repairs branch); server/engine/develop_promote.py (re-export, build_promotion repairs derivation)"
     }
   }
 }

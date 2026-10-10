@@ -191,14 +191,17 @@ class BuildPromotionGuardTest(unittest.TestCase):
         self.assertEqual(row["tickets"], ["t1"])
 
     def test_withdrawal_free_ledger_row_shape_unchanged(self):
-        # spec (3): a withdrawal-free ledger is byte-for-byte unaffected —
-        # the row carries exactly the pre-change key set
+        # spec (3): a withdrawal-free ledger is unaffected — the row carries
+        # the promotion key set. t261009-66 later ADDED ``repairs`` (the
+        # promotion names the remedy relations it carries, empty list when
+        # none); everything else stays the pre-change key set.
         row = dp.build_promotion(delivery_rows=clean_ledger(), **PROMOTE_KW())
         self.assertEqual(
             sorted(row.keys()),
             ["at", "authority", "certification", "id", "kind", "line",
-             "main_after", "main_before", "note", "on_behalf_of", "repos",
-             "signer", "tickets"])
+             "main_after", "main_before", "note", "on_behalf_of",
+             "repairs", "repos", "signer", "tickets"])
+        self.assertEqual(row["repairs"], [])
 
     def test_withdrawal_free_ledger_ignores_broken_adapter(self):
         # no withdrawals -> the adapter is never consulted, even a raising

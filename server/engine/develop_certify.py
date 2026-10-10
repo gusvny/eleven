@@ -365,6 +365,27 @@ def validate_row(row):
         if "note" in row and row["note"] is not None \
                 and not isinstance(row["note"], str):
             return _bad("promotion_note_not_string")
+        # t261009-66: the promotion NAMES the remedy relations it contains
+        # (``repairs`` / ``withdraws`` rows recorded by covered tickets).
+        # The field is a naming of ledger rows (each entry cites its
+        # ``rel-`` id), never a second stored direction — the ledger stays
+        # the source. Legacy rows without the field stay valid (append-only
+        # ledger, old rows byte-identical).
+        if "repairs" in row and row["repairs"] is not None:
+            reps = row["repairs"]
+            if not isinstance(reps, list):
+                return _bad("promotion_repairs_not_list")
+            for e in reps:
+                if not (isinstance(e, dict)
+                        and isinstance(e.get("id"), str)
+                        and e["id"].startswith("rel-")
+                        and isinstance(e.get("from"), str)
+                        and e["from"].strip()
+                        and isinstance(e.get("to"), str)
+                        and e["to"].strip()
+                        and e.get("kind") in (REL_KIND_REPAIRS,
+                                              REL_KIND_WITHDRAWS)):
+                    return _bad("promotion_repairs_entry_invalid")
     elif kind in RELATION_KINDS:
         # Record-models §B shape: the ``kind`` FIELD carries the relation
         # kind, the ``rel-`` id prefix carries the family — family detection
@@ -819,6 +840,95 @@ def _current_relation_rows(rows):
         if isinstance(target, str) and target.startswith("rel-"):
             superseded.add(target)
     return [r for r in rels if r["id"] not in superseded]
+
+
+def _relation_target_tickets(rows, ref, patch_ids):
+    """Resolve ONE relation target reference to the set of ticket ids it
+    names (t261009-66). Relations are project-level facts (goal 15), so —
+    unlike ``_repair_target_landing`` — there is NO line scoping here: the
+    benefited side is answered across lines. The same three target forms
+    the exemption face resolves: a ``ldg-`` landing id (the landing row
+    names its ticket); a patch identity matched against the caller-supplied
+    ``patch_ids={landing_id: pid}`` map (landings store no patch ids, so
+    the map is the caller's explicit declaration); any other non-empty
+    string is a ticket id BY FORM and names itself — a reader shows the
+    stored fact whether or not a landing for that ticket exists."""
+    out = set()
+    if not (isinstance(ref, str) and ref.strip()):
+        return out
+    if ref.startswith("ldg-"):
+        for r in rows:
+            if (isinstance(r, dict) and r.get("kind") == KIND_LANDING
+                    and r.get("id") == ref
+                    and isinstance(r.get("ticket"), str) and r["ticket"]):
+                out.add(r["ticket"])
+        return out
+    if isinstance(patch_ids, dict):
+        for r in rows:
+            if (isinstance(r, dict) and r.get("kind") == KIND_LANDING
+                    and patch_ids.get(r.get("id")) == ref
+                    and isinstance(r.get("ticket"), str) and r["ticket"]):
+                out.add(r["ticket"])
+    return out | {ref}
+
+
+def _patch_named_rel(rel):
+    """Does this relation name a patch identity via its evidence? The same
+    rule ``develop_promote._patch_named`` reads; declared here because the
+    certify half must not import the promote half (import direction:
+    promote -> certify, never back)."""
+    ev = rel.get("evidence")
+    return isinstance(ev, dict) and ev.get("what") == "patch_id" \
+        and isinstance(ev.get("ref"), str) and ev["ref"].strip() != ""
+
+
+def relations_of(rows, ticket, patch_ids=None):
+    """The ONE declared relation reader (t261009-66): what are this
+    ticket's relations, from BOTH directions, over the ledger rows —
+    "One direction is stored; the other side is derived" (ticket-relations
+    design). Never writes; never a second stored row.
+
+    - ``as_actor`` (the STORED side): current relation rows whose ``from``
+      is this ticket — what it repairs / withdraws / supersedes.
+    - ``as_benefited`` (the DERIVED side, every entry marked
+      ``"derived": True``): current relation rows whose ``to`` RESOLVES to
+      this ticket — what repaired / withdrew / superseded it. Resolution
+      goes through ``_relation_target_tickets`` (ticket id, ``ldg-``
+      landing id, or patch identity via ``patch_ids``).
+    - ``unresolved``: ids of relations whose evidence names a patch
+      identity but no ``patch_ids`` map was supplied — the gap stays
+      visible by name, never guessed into an answer (the same honesty rule
+      as the outcome face's ``repaired_unresolved``).
+
+    Corrected relations (``supersedes_relation`` linkage, t261009-62) drop
+    out through ``_current_relation_rows`` — a corrected relation never
+    appears as current; a supersedes CYCLE makes both rows non-current,
+    as there. Malformed rows are filtered the same way, never crashed on.
+
+    Consumers call THIS for direction logic — no second implementation of
+    the direction matching may appear (the promote half re-exports it as
+    the same object).
+    """
+    if not (isinstance(ticket, str) and ticket.strip()):
+        raise CertifyError("relations_of_bad_ticket")
+    current = _current_relation_rows(rows)
+    as_actor = {k: [] for k in RELATION_KINDS}
+    as_benefited = {k: [] for k in RELATION_KINDS}
+    unresolved = []
+    for rel in current:
+        kind = rel.get("kind")
+        if kind not in RELATION_KINDS:
+            continue
+        entry = {"id": rel.get("id"), "from": rel.get("from"),
+                 "to": rel.get("to"), "kind": kind, "at": rel.get("at")}
+        if rel.get("from") == ticket:
+            as_actor[kind].append(dict(entry, derived=False))
+        if ticket in _relation_target_tickets(rows, rel.get("to"), patch_ids):
+            as_benefited[kind].append(dict(entry, derived=True))
+        elif _patch_named_rel(rel) and not isinstance(patch_ids, dict):
+            unresolved.append(rel.get("id"))
+    return {"ticket": ticket, "as_actor": as_actor,
+            "as_benefited": as_benefited, "unresolved": unresolved}
 
 
 def _repair_target_landing(rows, line, ref, patch_ids):
