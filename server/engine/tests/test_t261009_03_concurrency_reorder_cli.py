@@ -204,7 +204,10 @@ def test_ticket_no_order_key_never_calls_reorder(proj, ticket_mod, monkeypatch):
 def test_ticket_reconcile_path_unchanged(proj, ticket_mod, monkeypatch):
     def fake_poc(subcmd, payload, caller=None):
         assert subcmd == "query"  # read-only probe, unchanged
-        return {"status": "RUNNING"}
+        # Production receipt shape with the structured kind (t261009-74):
+        # kind=not_found is the only probe answer that reads as death.
+        return {"ok": False, "error": "ticket does not exist: t1 (no such workflow in Temporal)",
+                "kind": "not_found"}
     monkeypatch.setattr(ticket_mod, "_poc", fake_poc)
     out = ticket_mod.run({"op": "concurrency", "project": "proj-alpha",
                           "reconcile": True})

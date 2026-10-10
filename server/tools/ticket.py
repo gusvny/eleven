@@ -1222,13 +1222,85 @@ def validate_write_set_no_notes(write_set):
                 '待落账项（KI/epic/决策档）写进结算 note，由 integration 在 main 落。' % e)
 
 
+# ---------- reconcile 探活三态（t261009-74：draining ≠ dead） ----------
+# 结构化 kind 是唯一分类锚（review C1）：client.py 回执 {ok:false, error, kind}，
+# kind ∈ no_poller / not_found / transient / internal / …——不匹配错误文案（自由
+# 文本会漂移），未识别的 kind 一律 unknown（保槽），宁可少清不可误清。
+_PROBE_KIND_NO_POLLER = 'no_poller'    # client.KIND_NO_POLLER（348 行族，直 spawn 面取字面量）
+_PROBE_KIND_NOT_FOUND = 'not_found'    # workflow 已消亡=唯一可证死的读侧证据
+
+_ENGINE_DATA_DIR = TEMP_POC / 'data'   # 专用 worker pidfile/meta 家（独立全局，
+                                       # 测试可注入 tmp——TEMP_POC 还要装 shared.py）
+
+
+def _holder_evidence(tid):
+    """holder 的本机证据面（纯读）：pidfile 状态 + 进程死活 + worker meta 状态。
+
+    文件形状真源=engine/ticket_worker.py（data/worker-<tid>.pid，旁车
+    <pidfile>.meta）；该模块不在本票写集，这里按同形状只读复刻（读不到=不判定，
+    绝不当不存在）。pidfile 四态由 shared.read_pidfile_state 判（live=进程活），
+    meta 由 shared.read_worker_meta_state 判（state ∈ serving/draining，缺键=旧
+    worker 读 serving——保守：serving+no_poller 落 unknown，不清账）。"""
+    s = _shared()
+    pidfile = _ENGINE_DATA_DIR / ('worker-%s.pid' % tid)
+    pf = s.read_pidfile_state(pidfile)
+    meta, meta_state, _detail = s.read_worker_meta_state(str(pidfile) + '.meta')
+    pf_state = str(pf.get('state') or 'unknown')
+    # 进程死活：live=alive；stale/absent=gone；malformed/读不了=不可证
+    #（读不懂 ≠ 没有——绝不冒充「进程已亡」）。
+    if pf_state == 'live':
+        process = 'alive'
+    elif pf_state in ('stale', 'absent'):
+        process = 'gone'
+    else:
+        process = 'unknown'
+    return {
+        'probe': '',
+        'pidfile': pf_state,
+        'process': process,
+        'pid': pf.get('pid'),
+        'meta': meta_state,
+        'meta_state': str((meta or {}).get('state') or '') if isinstance(meta, dict) else '',
+        'meta_pid': (meta or {}).get('pid') if isinstance(meta, dict) else None,
+    }
+
+
+def _probe_verdict(kind, ev):
+    """探活判定（纯函数，t261009-74 三态 + fail-closed unknown）。
+
+    kind=探针回执的结构化 kind（''=query 有答）；ev=_holder_evidence 产出。
+    返回 live / draining / dead / unknown——只有 dead 进 reconcile 清账单。"""
+    if kind == '':
+        return 'live'
+    if kind == _PROBE_KIND_NOT_FOUND:
+        return 'dead'   # workflow gone：Temporal 侧唯一可证死（本机进程死活无关）
+    if kind == _PROBE_KIND_NO_POLLER:
+        # 停轮询 + pidfile 活 + 旁车 meta 自证 draining 且 pid 对得上 → draining
+        #（meta pid 比对挡 pidfile 指向回收 pid 的「陌生人」情形：对不上=unknown）。
+        if ev.get('process') == 'alive' and ev.get('meta') == 'ok' \
+                and ev.get('meta_state') == 'draining' \
+                and ev.get('pid') is not None \
+                and str((ev.get('meta_pid') or '')) == str(ev.get('pid')):
+            return 'draining'
+        if ev.get('process') == 'gone':
+            return 'dead'   # 没轮询者 + 本机进程确已亡：真僵尸
+        return 'unknown'    # 进程活但 meta 缺/畸形/serving，或进程死活不可证：保槽
+    return 'unknown'        # transient / internal / 未知 kind：不清账（fail-closed）
+
+
 def _concurrency(args):
     """t261004-32：项目并发上限的只读面 + 僵尸 holder 清账（CL-2/CL-3 面板消费）。
 
     - 缺省（reconcile 缺省 false）：read_state——上限、在持（含 human-hold）、
       队列位次与已等时长。面板只读账，不自己算队列（规则8）。
-    - reconcile=true：逐个 holder 用只读 query 探活（workflow 已消亡=僵尸），
-      具名清账并递补队首。声明缺席/畸形在这里具名拒收（规则9），绝不静默 unlimited。
+    - reconcile=true：逐个 holder 用只读 query 探活，判 **三态**（t261009-74，
+      KI-01M4HMKZQ23649NFRTTFNCTRF6 / KI-01M4K9X2Z8W1A6CVB3QD7FHS4M）：
+      live（query 有答）/ draining（worker 进程活着但停轮询——pidfile 活 + meta
+      state=draining，宽停窗口内是**健康态**，保槽具名）/ dead（进程已亡）。
+      只有 dead 是僵尸、只清 dead；其余探活失败（瞬时 RPC 等）= unknown——
+      fail-closed 的语义是「未知不清账」，不是「未知即死亡」，绝不因探针一次
+      抖动把健康票的槽让出去。dropped 逐条带证据（probe/pidfile/process），
+      读者永远看不到裸票号。
     - order=[ticket ids]（CL-3 写脸，t261009-03）：路由到 engine concurrency.reorder
       ——唯一实现在引擎（置换校验/锁内写/具名拒收都在那里，本壳零二次校验），
       写后回读 read_state 同脸返回（面板拿新序比对，绝不本地算队列）。reconcile 与
@@ -1252,16 +1324,38 @@ def _concurrency(args):
         return conc.read_state(project)
     state = conc.read_state(project)
     alive = []
+    draining = []
+    unknown = []
     probe_errors = {}
+    dropped_evidence = []
     for h in state.get('holders') or []:
         tid = str(h.get('ticket') or '')
+        ev = _holder_evidence(tid)
         try:
-            _poc_ok(_poc('query', {'workflow_id': tid}))
+            receipt = _poc('query', {'workflow_id': tid})
+            if isinstance(receipt, dict) and receipt.get('ok'):
+                alive.append(tid)          # live: the workflow answers
+                continue
+            kind = str((receipt or {}).get('kind') or '')
+            note = str((receipt or {}).get('error') or receipt)[:160]
+        except Exception as e:  # noqa: BLE001——spawn/解析层失败：不可证死，按 unknown 保槽
+            kind, note = 'unknown', '%s: %s' % (type(e).__name__, str(e)[:160])
+        verdict = _probe_verdict(kind, ev)
+        if verdict == 'live':
             alive.append(tid)
-        except Exception as e:  # noqa: BLE001——探活失败=该 holder 视为僵尸（具名留底）
-            probe_errors[tid] = '%s: %s' % (type(e).__name__, str(e)[:160])
-    out = conc.reconcile(project, alive)
+        elif verdict == 'draining':
+            draining.append(tid)
+        elif verdict == 'dead':
+            ev['probe'] = kind
+            ev['ticket'] = tid
+            dropped_evidence.append(ev)
+            probe_errors[tid] = 'dead (kind=%s) %s' % (kind, note)
+        else:  # unknown：fail-closed=不清账，具名留底等人看
+            unknown.append(tid)
+            probe_errors[tid] = 'kept (%s) %s' % (kind, note)
+    out = conc.reconcile(project, alive, draining, unknown)
     out['probe_errors'] = probe_errors
+    out['dropped_evidence'] = dropped_evidence
     out['decl'] = state.get('decl')
     return out
 
