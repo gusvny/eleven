@@ -459,3 +459,31 @@ says zero pending while the host still sees the items. Recipe for the deputy ans
 (waiting = rows whose status is not answered/resolved/dismissed/superseded). Never rewrite a bad row — the
 ledger is append-only; land a corrected row (and note the correction inside it), and expect the malformed one
 to keep counting in the ledger-health line.
+
+## 12. Who signs the merge gate: the executor first, the steward as the fallback
+
+Host order (261010): *"如果 executor 没有 sign 你再 sign，不然让 executor sign"* — the executor signs its own
+ticket's `merge` gate; the steward signs only when the executor has not. This narrows the earlier standing
+order ("你可以代签"), which had been read as "the steward signs green merge gates".
+
+The executor holds the grant (`executor-grants.json`, `grants.sign = true`) and is named in the declaration's
+`executor_sessions`; the ticket face and `ticket.py op=sign` are the same channel for both roles, so the
+grant is the only thing that differs. The steward's own work upstream of that signature is unchanged and is
+what makes the executor's signature cheap to give:
+
+1. read the gate receipt for the **current** round (`gate_runs` last `merge_check`, and the timeline's
+   `merge_check done` line) — not a stale round's;
+2. check the green is against the **current** main (a `main_untouched` + `merge rehearsal` pair from before
+   your own last commit to main is stale);
+3. put the instruction where the lane reads it — a `ruling` on the ticket names the receipt and says "sign it
+   yourself" — and say in the same note what the steward will do if the signature does not appear.
+
+Then wait. The fallback is deliberate, not a race: a lane parked at an unsigned green gate costs one slot and
+nothing else, while a steward that pre-empts the executor's signature (measured 261010: `-52` and `-55` were
+signed by the steward minutes after their gates went green, before the executor's own round could pick them
+up) removes the executor's chance to act on its own ticket and hides whether its sign path works at all.
+
+**When the steward must still sign on sight:** the ticket is blocked on a human gate for other reasons and is
+holding a slot while a decision is already in hand (a freeze lifting, a queue head), or the executor has said
+in the thread that it cannot sign. Record `who` truthfully either way — the steward's signature carries
+"host（经 integration 值守会话代签）", never the host's own name without its word.
