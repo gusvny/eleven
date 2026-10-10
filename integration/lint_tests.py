@@ -76,6 +76,19 @@ practice:
         never a silent pass. (Numbered L21 after the main-sync merge: main took
         L19 runtime-state location and L20 grants-write parity first; the rule
         is unchanged, only the label moved.)
+  L23 registry serialization (t261009-51, incident KI-01M4HD396VNTTAY20CH0681N0Q):
+        every declared JSON registry under integration/ (the list lives in
+        integration/lib_registry.py DECLARED_REGISTRIES) must be on the canonical
+        serialization — UTF-8, ensure_ascii=False, indent=2, insertion key order,
+        one trailing newline. The check re-serializes the parsed structure in
+        memory and byte-compares with disk; a file that differs is red and NAMED
+        with the first differing line, so the reader sees the style drift (the
+        measured fault: t261009-48/49 flipped the anchors file 1-space ↔ 2-space
+        between writers — a 9082-line diff carrying zero semantic change).
+        Serialization only — never judges content; parse failures stay with the
+        existing faces (L16/L4). It REPORTS, never rewrites: fix a red by running
+        the canonical writer (integration/lib_registry.py write_registry), so no
+        gate silently reformats a shared source of truth.
 
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
@@ -1521,6 +1534,59 @@ def lint_grants_field_parity():
            % (sorted(page_keys), list(GRANTS_WRITE_FIELDS)))
 
 
+# ---- L23 registry serialization (t261009-51) --------------------------------
+def lint_registry_serialization(err, repo=None):
+    """L23 (t261009-51): declared JSON registries must be on the canonical
+    serialization (see integration/lib_registry.py module doc — the form and
+    the declared set live there, declared once, not in a writer's head).
+
+    Re-serializes the parsed structure in memory and byte-compares with disk.
+    Judgement faces:
+      - drift (even byte-only, e.g. indent style): RED naming the file and the
+        first differing line — the reader sees the style drift, not a generic
+        mismatch;
+      - unreadable declared registry: fail-closed RED (a missing shared source
+        of truth must not buy a green);
+      - malformed JSON: NOT this check's face — parse failures belong to the
+        existing content faces (L16 anchor manifest / L4 registry); skipped
+        silently here on purpose, the other checks name it.
+    Reports only. It NEVER rewrites a registry (fail loud, never silently
+    reformat a shared source of truth); fix a red with the canonical writer
+    (integration/lib_registry.py write_registry).
+
+    `repo`/`err` are injectable so the unit battery can drive a tmp tree
+    (integration/t261009-51/test_lib_registry.py) without touching the real
+    registries.
+    """
+    from lib_registry import (DECLARED_REGISTRIES, canonical_registry_bytes,
+                              first_diff_line)
+    root = Path(repo) if repo is not None else REPO
+    reds = 0
+    for rel in DECLARED_REGISTRIES:
+        p = root / rel
+        try:
+            raw = p.read_text(encoding="utf-8")
+        except OSError as e:
+            err("L23 registry serialization: declared registry %s unreadable "
+                "(fail-closed): %s: %s" % (rel, type(e).__name__, e))
+            reds += 1
+            continue
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue                       # content face (L16/L4) names it, not L23
+        drift = first_diff_line(canonical_registry_bytes(obj), raw)
+        if drift:
+            err("L23 registry serialization: %s is off the canonical form "
+                "(%s) — append via integration/lib_registry.py "
+                "write_registry; this lint reports and never rewrites"
+                % (rel, drift))
+            reds += 1
+    if not reds:
+        ok("L23 registry serialization: %d declared registries on the "
+           "canonical form" % len(DECLARED_REGISTRIES))
+
+
 def main():
     # t261009-12 Defect B: pin the diff base ONCE per run and hand the same
     # ref to every per-diff rule (L15 copy-language, L21 tier marker). Before,
@@ -1570,6 +1636,10 @@ def main():
     # change"; stated limits live in integration/lib_stale_pin.py's docstring.
     from lib_stale_pin import lint_stale_pins as _l22
     _l22(REPO, errors)
+    # L23 registry serialization (t261009-51): the anchors file must not flip
+    # styles between writers — the canonical form is declared in
+    # integration/lib_registry.py and byte-compared here.
+    lint_registry_serialization(err)
     n_e, n_w = len(errors), len(warns)
     # t261009-12 Defect B: the verdict line names any unstable-input condition
     # that fired, so two different verdicts for the same inputs can never print

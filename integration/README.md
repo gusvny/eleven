@@ -202,6 +202,25 @@ delivered=true` 但票面字段不动、`refused` 也空；②旧进程 import �
 `spawn_ticket_worker`，或控制台 ensure 补拉）；**受限会话里手工 spawn 不可作为重启手段**——
 手工起的进程继承当前会话沙箱（写不了主库 `.git` 等），不是引擎语义下的合法 worker。
 
+## JSON registries: the canonical write path (t261009-51)
+
+The shared JSON registries under `integration/` — `test_anchors.json`,
+`known-red-baseline.json`, `batch_stage_exceptions.json` (the declared set lives in
+`integration/lib_registry.py`) — have ONE canonical serialization: UTF-8,
+`ensure_ascii=False`, `indent=2`, insertion key order, one trailing newline. Do not
+append to them by hand-rolling `json.dumps`: import the single entry point
+`integration/lib_registry.py` and call `write_registry(path, obj)`; it emits the
+canonical bytes. The known failure modes of this style are declared in that module's
+docstring (a lone-surrogate payload raises loudly — never silently downgrade to
+`ensure_ascii=True`; family precedent `lib_emit_anchor.py`).
+
+`lint_tests.py` L23 byte-compares each declared registry against its canonical
+re-serialization and names the first differing line when the style drifts. It only
+reports — it never rewrites; fix a red by running the canonical writer. Measured
+fault behind this rule (KI-01M4HD396VNTTAY20CH0681N0Q): the anchors file flipped
+1-space ↔ 2-space between writers, so a three-entry append produced a 9082-line diff
+with zero semantic change.
+
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：
