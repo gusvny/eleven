@@ -5154,3 +5154,11 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**"新分支/新活动"类改动的生效判据 = 进程重启后的一次真运行记录**——单测绿、场景绿、代码在 main 里，都不算；漂移指纹只覆盖它列出的模块，**未列出的模块陈旧时指纹会说谎**，凡依赖新接线的活儿都必须另取一次真运行证据。
 >
 > **回归**：L3——触发一次真调度：工作日志里出现新活动名（本例 `line_round_tick_engine`），且认证台账有对应行，或具名 `runner_missing`（二者必居其一；"什么都没有"就是本条复发）。
+
+> **补·A/B 实证（261011 02:29，换手后同一条调度再点一次；本岗自纠一处取证瑕疵）**：
+> - **先换手**：`server/tools/engine_ops.py restart --scope central`（本工具**只 kill**，等控制台 supervisor 自动拉起）——旧 pid 28404 → **新 pid 91107，起于 02:29:04，`polling=True`、`stale=none`**（换手 ~15 秒，记录落 `server/engine/data/worker-handovers.jsonl`）。这是本岗在宿主「恢复/点火你自己看情况」授权内做的动作，走的是文档化的正规入口。
+> - **A/B 判据改用"workflow 返回值"而不是日志行**（**自纠**：上面那句"日志里没有 `line_round_tick_engine` 活动"作为证据**不够硬**——那个活动自己不写 INFO 日志，看不见不等于没跑）：直接取两次运行的返回值对比——
+>   - `dispatcher-scan-2026-10-10T16:29:13Z`（换手前）返回值**根本没有 `line_rounds` 键**（键集：`by_status/pending_decision/report_file/report_path/scanned_at/summary/total/worker_reconcile`）⇒ 进程里装的 workflow 体不含那段接线；
+>   - `dispatcher-scan-2026-10-10T18:29:14Z`（换手后）返回值**带 `line_rounds`**：`{"projects":{"sandbar":{"lines":[{"line":"develop-buffer","state":"runner_missing"}],"summary":"line_round_tick: 1 lines, asked 0, idle 0, not-runnable ['develop-buffer']"}}}` ⇒ **接线在生产里活了，并且按设计具名报出"缺 runner"**。
+> - **结论（点火清单收窄到一步）**：中央 worker 换手已完成（本岗 02:29 做掉）；**剩下只有一件、且只有宿主能做**——让控制台宿主进程带 `SANDBAR_LINE_ROUND_RUNNER`（+ 可选 `SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S`）启动（worker 是它的子进程，环境继承），之后下一次 tick 就会真跑线轮，判据＝`delivery.jsonl` 出现行或具名 `could_not_run`。
+> - **纪律（本条教训，写给下次）**：**判"某活动/某分支有没有跑"要取回执或返回值，不要拿日志的有无当证据**——不打日志的活动在日志里与"没跑"同形。
