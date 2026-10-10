@@ -381,15 +381,40 @@ check", the mechanism is the signal: `rework` (`to_stage=…`, with the named it
 looping exactly where it was (measured: a lane kept cycling implement → tests → acceptance for
 several rounds after a ruling that told it to re-plan, and only moved when the `rework` arrived).
 
-**Correction (261010, measured on t261009-50): the plan-round union does not work.** Step 1 above
-says "list the file in the ticket's plan receipt so the write set takes a union". That presupposes
-the receipt's `files_changed` names the file — and **a `create_plan` round's `files_changed` contains
-only the plan document itself** (`integration/<ticket>/plan.md`), not the files the plan intends to
-touch. The union therefore has nothing to read and the write set does not grow; the lane re-plans,
-returns to implement, and bounces exactly as before. The precedent that did work (`t261008-47`) grew
-its write set because that ticket **actually wrote** the two declaration files in an implement round,
-so the receipt legitimately listed them — that is a different situation from "the plan says I will
-touch X".
+**Correction, and then a correction of that correction (261010, t261009-50).** I first wrote here
+that "the plan-round union does not work" — that was **wrong**, and the lane proved it: it re-planned
+with the two call-site files named, `review_plan` passed, the union admitted them, and the implement
+round wrote them (`git diff --stat main...HEAD` in the lane shows `server/engine/activities.py +19`
+and `server/engine/workflows.py +26`, including the wiring and its `workflow.patched` guard). The
+route works.
+
+What misled me is worth keeping, because it will mislead the next reader the same way:
+
+- **The ticket face's `write_set` field is not rewritten when the union fires.** The union applies to
+  the *round's* effective write set, so `op=show` keeps showing the original entries and a face-only
+  reading says "the write set did not grow". To see whether the union took effect, read the **lane's
+  diff** (`git diff --name-only main...HEAD` inside the lane) and the implement round's own statement
+  (it carries a line like "Write-set union … authorized as call-site files"). Never judge the union
+  from the stored field.
+- **The union keys off the receipt of the *reviewed* plan round.** An older `stage_create_plan_gen*.json`
+  (for example a gen-1 receipt from before the plan was re-authored) can still show `files_changed`
+  = `plan.md` only. Reading a stale receipt reproduces exactly my mistake.
+
+Two confirmed hazards in the same area:
+
+1. **A plan/design artefact that the ticket's spec asks for must be in the write set.** Measured on
+   the same ticket: `integration/<ticket>/plan.md` was rolled back by the settle path gate
+   (`.sandbar/quarantine/unauth-create_plan-gen*` carries its diff) because it had no write-set seat,
+   and the ticket face does not explain why. Put plan artefacts in the write set when the spec asks
+   for one.
+2. **The union is a round-level authorization; the settle judges with the write set it is handed.**
+   On this ticket the two files were quarantined once anyway
+   (`.sandbar/quarantine/unauth-implement-gen0/server__engine__{activities,workflows}.py.diff`,
+   08:17:47, right after the union-bearing round), the round's work was rolled back, and the accept
+   loop restarted. Whether that was an ordering race between the write-set refresh and the settle that
+   followed it is **not yet proven** — do not treat it as a known mechanism; treat it as a reason to
+   check the quarantine directory (`.sandbar/quarantine/unauth-*`) when a lane's work seems to vanish
+   between rounds, and to record what you find.
 
 What actually works when the deliverable itself sits outside the frozen write set:
 
@@ -404,7 +429,4 @@ What actually works when the deliverable itself sits outside the frozen write se
    round can clear. Record the resume condition on the ticket; an unrecorded pause becomes a
    forgotten ticket.
 
-Also worth knowing: a ticket whose plan (or any other deliverable) is a file **outside its write set**
-has that file rolled back by the settle path gate (measured: `.sandbar/quarantine/unauth-create_plan-gen2`
-carrying `plan.md`'s diff) — the ticket face does not explain why, so put plan/design artefacts in the
-write set when a ticket's spec asks for one.
+The quarantine-directory reflex above replaces the old wording; nothing else from that paragraph survives.
