@@ -380,3 +380,31 @@ check", the mechanism is the signal: `rework` (`to_stage=…`, with the named it
 `retry_qc`. Write the ruling **and** send the signal; a ruling alone leaves a lane that is already
 looping exactly where it was (measured: a lane kept cycling implement → tests → acceptance for
 several rounds after a ruling that told it to re-plan, and only moved when the `rework` arrived).
+
+**Correction (261010, measured on t261009-50): the plan-round union does not work.** Step 1 above
+says "list the file in the ticket's plan receipt so the write set takes a union". That presupposes
+the receipt's `files_changed` names the file — and **a `create_plan` round's `files_changed` contains
+only the plan document itself** (`integration/<ticket>/plan.md`), not the files the plan intends to
+touch. The union therefore has nothing to read and the write set does not grow; the lane re-plans,
+returns to implement, and bounces exactly as before. The precedent that did work (`t261008-47`) grew
+its write set because that ticket **actually wrote** the two declaration files in an implement round,
+so the receipt legitimately listed them — that is a different situation from "the plan says I will
+touch X".
+
+What actually works when the deliverable itself sits outside the frozen write set:
+
+1. **A human widens the write set** for the named files (the host's call — say which files and why on
+   the ticket), then the lane does the work itself. This is the smallest change and it stays one
+   ticket. Use it when the deliverable IS the out-of-set file (a call site, a wiring point).
+2. **A separate ticket owns those files**, and the original ticket's acceptance is re-scoped to point
+   at it — the honest version of "hand over to the owning ticket". Do not accept a "handoff patch
+   text" left in the lane: the deliverable is then in nobody's hands.
+3. **Park the lane while the decision is pending** (`op=pause`): a pause takes effect at the stage
+   boundary, releases the concurrency slot, and stops the rounds from burning on a blocker that no
+   round can clear. Record the resume condition on the ticket; an unrecorded pause becomes a
+   forgotten ticket.
+
+Also worth knowing: a ticket whose plan (or any other deliverable) is a file **outside its write set**
+has that file rolled back by the settle path gate (measured: `.sandbar/quarantine/unauth-create_plan-gen2`
+carrying `plan.md`'s diff) — the ticket face does not explain why, so put plan/design artefacts in the
+write set when a ticket's spec asks for one.
