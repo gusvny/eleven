@@ -359,17 +359,34 @@ def _ticket_landing(delivery_rows, ticket):
 
 def build_promotion(cert_id, line, tickets, main_before, main_after, signer,
                     on_behalf_of=None, authority=None, note=None, at_ms=None,
-                    delivery_rows=(), is_green=None):
+                    delivery_rows=(), is_green=None, patch_id_fn=None):
     """Build one promotion row, or raise PromotionRefused with a named
     reason. Every check answers a spec sentence:
 
     - a named certification that exists and is green (spec (b));
     - every ticket carried has a landing contained in the certified
       revision (the promotion delivers content that was proven);
+    - NO candidate re-introduces a withdrawn patch (t261009-64): the
+      landed guard (``check_withdrawn``) fires on the real builder. A hit
+      refuses ``withdrawn_patch_present:<rel-id>:<ticket>:<patch-id>`` —
+      which withdrawal relation, which candidate ticket, which patch
+      identity. When the patch id cannot be recomputed to enrich the
+      reason, the original guard refusal (relation id only) is re-raised,
+      so the withdrawal diagnosis is never masked by the recompute. A
+      ledger carrying any ``withdraws`` relation WITHOUT an injected
+      ``patch_id_fn`` refuses ``withdrawn_guard_unavailable`` — the guard
+      never silently shrinks; this deliberately over-refuses on
+      withdrawal-bearing ledgers whose candidates do not overlap the
+      withdrawal. A withdrawal-FREE ledger is byte-for-byte unaffected.
     - ``main_after`` equals the certified revision per repository (what
       main becomes is what was certified, nothing else);
     - signer present; delegation fields stand together (spec (a)).
     """
+    has_withdrawals = any(isinstance(r, dict)
+                          and r.get("kind") == REL_KIND_WITHDRAWS
+                          for r in delivery_rows)
+    if has_withdrawals and not callable(patch_id_fn):
+        raise PromotionRefused("withdrawn_guard_unavailable")
     cert = check_certification(cert_id, delivery_rows, is_green=is_green)
     cert_repos = _repos_map(cert["repos"])
     for t in tickets or []:
@@ -380,6 +397,35 @@ def build_promotion(cert_id, line, tickets, main_before, main_after, signer,
         for repo, rev in lrev.items():
             if cert_repos.get(repo) != rev:
                 raise PromotionRefused("tickets_not_covered:%s" % t)
+            if has_withdrawals:
+                # t261009-64: the withdrawal guard fires HERE, on the real
+                # builder (spec: the refusal must not live in a test-only
+                # helper). check_withdrawn owns the guard semantics; this
+                # face only enriches its refusal with the ticket and the
+                # patch identity. A withdrawal-free ledger never reaches
+                # this call, so the adapter (real git work) is never
+                # consulted on the unaffected path. Cost note (review
+                # cond. 2): the guard set is rebuilt per (ticket, repo)
+                # call — O(tickets x repos) guard constructions, fine at
+                # ledger scale; the seam for a future perf pass is hoisting
+                # withdrawn_patch_ids out of the loop.
+                try:
+                    check_withdrawn(t, delivery_rows, patch_id_fn, repo)
+                except PromotionRefused as exc:
+                    if not str(exc).startswith("withdrawn_patch_present:"):
+                        raise
+                    rel_id = str(exc).split(":", 1)[1]
+                    try:
+                        pid = patch_id_fn(rev, repo)
+                    except PatchIdUnavailable:
+                        # review cond. 1: the recompute failure must not
+                        # mask the withdrawal diagnosis — fall back to the
+                        # original guard refusal (relation id only)
+                        raise PromotionRefused(
+                            "withdrawn_patch_present:%s" % rel_id) from exc
+                    raise PromotionRefused(
+                        "withdrawn_patch_present:%s:%s:%s"
+                        % (rel_id, t, pid)) from exc
     if (on_behalf_of is None) != (authority is None):
         raise PromotionRefused("delegation_incomplete")
     if not _valid_str(signer):
@@ -533,7 +579,13 @@ def withdrawn_patch_ids(rows, patch_id_fn, repo):
     for row in sorted(rows, key=lambda r: r.get("seq") or 0):
         if row.get("kind") != REL_KIND_WITHDRAWS:
             continue
-        rel_id = row["id"]
+        rel_id = row.get("id")
+        # t261009-64 incidental robustness fix: a row carrying the withdraws
+        # kind but no usable rel- id used to crash with a bare KeyError —
+        # a malformed withdrawal claim refuses loudly instead
+        if not (isinstance(rel_id, str) and rel_id.startswith("rel-")):
+            raise WithdrawnTargetUnknown(
+                "withdrawn_relation_id_invalid:%r" % (rel_id,))
         target = latest.get(row.get("to"))
         if target is None:
             raise WithdrawnTargetUnknown(

@@ -758,8 +758,10 @@ def should_freeze(attribution_value):
 WAIT_WAITING = "waiting"
 WAIT_CERTIFIED = "certified"
 WAIT_RED_IMPLICATED = "red_implicated"
-WAIT_REVERTED = "reverted"  # reserved: needs the relation records (later
-# ticket); unreachable today and stated as such, never faked.
+WAIT_REVERTED = "reverted"
+# t261009-64: reachable. A ticket whose landing was withdrawn shows this
+# waiting face; ``withdrawn_by`` names the withdrawal relation that ended
+# the landing's life (derived from the current relation rows, never stored).
 
 FREEZE_EXEMPT_KIND = "fix"
 """The one ticket kind that may land on a frozen line. Being exempt is a
@@ -931,13 +933,16 @@ def ticket_wait_state(rows, line, landing, is_green, now_ms,
     """The waiting ticket's face, derived from the records (goal 14/16).
 
     Returns a dict: ``state`` (waiting / certified / red_implicated /
-    reverted-reserved), ``waiting_since`` (the landing's own ``at`` — the
+    reverted), ``waiting_since`` (the landing's own ``at`` — the
     record order decides, not a clock race), ``waiting_for`` (the id of the
     certification this landing is queued behind — the line's latest one; None
-    while none exists yet), ``covered_by`` (the green certification id that
-    ended the wait, if any), and ``overdue`` (True only once the wait has
-    outlived the declared ``wait_bound_ms`` — surfaced, not silently
-    tolerated; the patrol consumes it once the surfaces exist).
+    while none exists yet; for ``reverted`` it names the withdrawal relation),
+    ``covered_by`` (the green certification id that ended the wait, if any),
+    ``withdrawn_by`` (for ``reverted`` only: the id of the CURRENT
+    ``withdraws`` relation that ended the landing's life — the face names
+    the withdrawal, derived, never stored), and ``overdue`` (True only once
+    the wait has outlived the declared ``wait_bound_ms`` — surfaced, not
+    silently tolerated; the patrol consumes it once the surfaces exist).
 
     ``waiting`` and ``red_implicated`` never look the same: implicated means
     the landing sits in the derived range of a RED certification on this
@@ -969,6 +974,19 @@ def ticket_wait_state(rows, line, landing, is_green, now_ms,
 
     base = {"waiting_since": landing["at"], "waiting_for": None,
             "covered_by": None, "overdue": False}
+    # reverted (t261009-64): the landing's ticket is the ``to`` of a CURRENT
+    # ``withdraws`` relation — the ticket's life is over regardless of any
+    # later red, so this face outranks red_implicated. Checked AFTER the
+    # input validation above (a caller with certs on the line and no
+    # ``is_green`` is still refused by name), from the module-local current
+    # relation rows (certify never imports promote).
+    for rel in _current_relation_rows(rows):
+        rel_id = rel.get("id")
+        if (rel.get("kind") == REL_KIND_WITHDRAWS
+                and rel.get("to") == landing.get("ticket")
+                and isinstance(rel_id, str) and rel_id.startswith("rel-")):
+            return dict(base, state=WAIT_REVERTED,
+                        waiting_for=rel_id, withdrawn_by=rel_id)
     # red_implicated: in the derived range of a red certification (goal 16's
     # "red and implicated" — distinct from plain waiting by construction).
     for cert in certs:

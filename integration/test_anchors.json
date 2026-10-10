@@ -1335,6 +1335,11 @@
       "anchor": "behaviour",
       "note": "t261009-63: repair-exemption behaviour truth table - three naming forms grant the frozen-line fix landing, named refusals (no relation / wrong kind / foreign from / detached / cross-line / superseded / unmapped patch-id / malformed repair), unfrozen unchanged, relation never mints a kind; beneficiary face repaired_by/repaired_at/repaired_unresolved, tie-break, invalid-at, ending untouched"
     },
+    "server/engine/tests/test_t261009_64_promotion_guard_and_reverted_face.py": {
+      "anchor": "contract",
+      "note": "t261009-64: builder-path withdrawal guard truth table (three-part named refusal, fail-closed without adapter, declared over-refusal, clean-path key-set pin) and the reverted waiting face (withdrawn_by names the relation, superseded does not flip, red precedence, validation contract intact)",
+      "sync_path": "server/engine/develop_promote.py (build_promotion guard wiring); server/engine/develop_certify.py (ticket_wait_state reverted branch)"
+    },
     "server/engine/tests/test_t261009_46_lane_version_optin.py": {
       "anchor": "behaviour",
       "note": "t261009-46: the version-gated landing path — refusal matrix, pin-the-proven-revision, the activity's receipts, and the one-way import graph",
@@ -4782,6 +4787,11 @@
     "integration/t261009-63/sc_t26100963_repair_exemption.py": {
       "anchor": "contract",
       "note": "t261009-63: the repairs relation's two consumers read back from disk - no relation no exemption (named refusals), three naming forms grant the frozen-line landing, cross-line target is a scoping refusal, corrected relation grants nothing, and the repaired side reports repaired_by/repaired_at (unmapped patch-id stays visible as repaired_unresolved)"
+    },
+    "integration/t261009-64/sc_t26100964_promotion_withdrawal_face.py": {
+      "anchor": "behaviour",
+      "note": "t261009-64: the withdrawal's two consumers live on the real paths — build_promotion refuses a re-introduced withdrawn patch naming relation+ticket+patch id, fail-closed without the adapter, clean path row shape unchanged, ticket_wait_state reverted face names the relation, superseded/red precedence, malformed rows loud",
+      "sync_path": "server/engine/develop_promote.py (build_promotion guard wiring); server/engine/develop_certify.py (ticket_wait_state reverted branch)"
     },
     "integration/t261009-46/sc_optin_landing_journey.py": {
       "anchor": "behaviour",
