@@ -4936,3 +4936,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（本岗已改做法）**：**发完 `pause` 必须核票面的 `paused` 与 `holders` 列表**（回执只说明送达，不说明生效）；**凡"保护性动作"，验收都要落在"它保护了什么"上**（额度是否真释放、票是否真停住），不能落在"信号是否送达"上。
 >
 > **回归**：L2——在 `blocked` 等待态发 `pause`，断言(а)**票面 `paused=true` 且额度被释放**（走①）或 (b) **回执具名说明本次不生效**（走②）；两种都不许出现"回执成功、票面与额度毫无变化"。L3——一张 blocked 票暂停后，队列里下一张被提升。
+
+## KI-01M4HR0ECTNFS4RWSQ8M0GE17J **写集条目形状与"声明的构建链前缀"不对齐 ⇒ 构建产物拿不到合法身份、被 settle 回滚，票卡在同一条 `bundle 新鲜度` 上**(261010 实案 `t261009-53`;integration 岗登记)
+
+> **现象**：`t261009-53`（泳道图按 mock 重画，改 `server/plugins/workbench/src/client/` 下三个文件）在 `merge_check` 判 `bundle 新鲜度` 红，回执原文 *"no build entry declared for this pair; verdict from the diff heuristic: freshness could not be established mechanically"*，而它的泳道里 `lib/client.{cjs,js}` **确实重建过**（mtime 09:36）——**产物被 settle 回滚了两次**：`.sandbar/quarantine/unauth-implement-gen0/manifest.json`（ts 1791594527）与 `.sandbar/quarantine/unauth-arbitrate-gen0/manifest.json`（ts 1791596183）都把这两个文件记为 `action: "reverted"`，并留下 diff。
+>
+> **根因（读码定位，不是猜）**：t261009-38 给"声明的构建链产物"开了合法身份——`path_gates.bundle_out_face(path, write_set, bundle_pairs)` 要求三件事同时成立：路径安全、`bundle_pairs` 里某对的 **out 前缀**覆盖该路径、**该对的 src 前缀被本票写集覆盖**（`src == entry` 或 `src` 落在 `entry + '/'` 之下）。本票写集写的是**三个具体文件**（`…/lane-map.tsx`、`…/lane-map-model.ts`、`…/index.tsx`），而 pair 声明的 src 是**目录前缀** `server/plugins/workbench/src/client/` ⇒ **前缀不被"文件条目"覆盖** ⇒ 豁免返回 `None` ⇒ 产物按越权回滚 ⇒ 重建多少次都不进差集 ⇒ 判据永远是"src 改了但产物没重建"。**对照（同一晚、同一判据）**：`t261009-35` 与 `t261009-41` 的写集写的就是那个**目录前缀**，因此从未被这一条卡住。
+>
+> **危害**：①**形状错一个字，整条产物流失**——且表现为"越权写"，文案把人引向"你是不是改了不该改的文件"，而真正的问题是"写集粒度与前缀声明不一致"；②**票面看不出**（写集字段照旧、quarantine 里才有痕迹）；③与 `KI-01M4HR...`（`test_face` 阶段缺 bundle-out 回退，见下）叠加时更难归因。
+>
+> **同族另一条（同一 tick 顺手读码发现，一并登记）**：`STAGE_PATH_RULES` 里 `arbitrate` 的 kind 是 **`test_face`**，而 `judge_stage_paths` 的 `test_face` 分支**没有** `_bundle_out_ok()` 回退（`write_set`/`join`/`self_heal` 三个分支都有）⇒ **即使写集形状正确，产物只要在 `arbitrate` 段被写就仍会被判越权回滚**（这正是本票 `unauth-arbitrate-gen0` 那条的成因之一）。要修就得决定：`test_face` 分支是否也承认"声明的构建链产物"。
+>
+> **出路（两条，实现口径归修复票）**：①**写集条目形状与声明前缀对齐**（写票纪律 + 机检）：凡改动落在某条 `bundle_pairs` 的 src 前缀之下的票，**写集必须含该前缀**（而不是只写具体文件）；在**计划段**加一条具名检查："你的改动落在已声明的构建链 src 前缀下，但写集里没有该前缀 ⇒ 具名报出并给动作（把前缀写进方案回执让并集加上）"。②**`test_face`（arbitrate）分支补上 `_bundle_out_ok()` 回退**，或明确声明"该段不承认构建产物"并在回执里说清（不要让它以"越权写"的面孔出现）。
+>
+> **纪律（写票时就要问的一句）**：**"本票的改动会不会落在某条已声明构建链的 src 前缀下？"** —— 会，就把**前缀**写进写集；只写文件会在产物那一步翻车。
+>
+> **回归**：L2——(а)写集合前缀 + 改动 src ⇒ 产物被放行（不进 quarantine）；(b)写集只含文件 + 改动 src ⇒ **具名报出"写集粒度与前缀声明不一致"并给出动作**（不是"越权写"的模糊文案）；L3——一条真改 UI src 的泳道跑完 `merge_check`，断言 `lib/` 出现在 `git diff --name-only main...HEAD` 且该红不再出现。
