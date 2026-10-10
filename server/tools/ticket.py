@@ -487,6 +487,18 @@ def _v2_query(tid):
               'human_context', 'engine', 'workflow_class',  # gens=t260915-01 ③ 段→轮次读数
               'topology'):  # t260915-05 ④ 模板拓扑导出（门内 additive 键；缺=旧票回落模板级导出）
         meta[k] = snap.get(k)
+    # t261009-35: carry the between-segment pause pair on the detail face.
+    # Source of truth = the snapshot TOP-LEVEL keys paused / paused_phase
+    # (TicketPauseMixin product; orthogonal to stage_state — a pause is never
+    # derived from stage_state, and a ticket between stages for any other
+    # reason is not paused). Two consumer faces: the row assembly in
+    # server/engine/client.py (ticket-list, both branches) and this detail
+    # assembly in _v2_query (ticket show). RULE: any new pause-related key must
+    # be added to BOTH faces in the same change — editing one face alone means
+    # the two faces disagree silently. Absent key = False / '' (same default
+    # as the row face; never fabricated as 'unknown').
+    meta['paused'] = bool(snap.get('paused'))
+    meta['paused_phase'] = str(snap.get('paused_phase') or '')
     # t260915-12 越权对账面（工单③）：越权旗/未声明身份的写操作记名（workflow 侧
     # meta['cross_project_uses']，盖章 op 才有账；retry_qc/update/cancel 的记名只在
     # admin.log——覆盖口径如实分档，见 server/engine/README.md 闸契约节）。

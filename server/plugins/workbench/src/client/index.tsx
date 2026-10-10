@@ -1208,6 +1208,13 @@ interface TicketDetail {
   epic?: string
   stage: string | null
   stage_state: string
+  /** Between-segment pause pair (t261009-35): the detail face merges the same
+   *  snapshot top-level keys the list row face merges (paused / paused_phase,
+   *  carried by ticket show via _v2_query; absent = false / '').
+   *  availableOps and the detail pause badge both read these fields, so the
+   *  button renders Resume while the ticket is paused. */
+  paused?: boolean
+  paused_phase?: string
   status: string
   role: string
   lane?: string

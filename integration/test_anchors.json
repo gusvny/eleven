@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 255,
-      "scenarios": 663
+      "scenarios": 664
     },
     "vocab": [
       "behaviour",
@@ -4597,6 +4597,11 @@
     "integration/worker-restart/sc_worker_single_poller.py": {
       "anchor": "behaviour",
       "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-35/sc_ticket_detail_pause_faces.py": {
+      "anchor": "contract",
+      "note": "detail face (ticket.py show) must carry the snapshot pause pair; both-faces-one-source seam",
       "sync_path": ""
     }
   }
