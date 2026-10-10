@@ -217,6 +217,10 @@ export interface WatchdogStatus {
     reason: string
   }
   alerts: Array<Record<string, unknown>>
+  /** t261009-57: the configured Alerts-face cap, delivered on the same payload as
+   *  the rows it caps — one source (alerts.display_max), no second number the face
+   *  could disagree with. Counts COALESCED rows; 0 = show all. */
+  alerts_display_max: number
   notify: { beep: boolean; unseen_redline: number }
   last_error: string | null
 }
@@ -1113,7 +1117,12 @@ export class Watchdog {
       self_heal: this.selfHealFace,
       wake_receipts: this.wakeReceipts.slice(-20),
       sweep_rerise: this.sweepRerise,
-      alerts: this.alerts.slice(-50),
+      // t261009-57: the payload carries the WHOLE in-memory buffer (already bounded
+      // at 200 rows on load and append — no slice here, the old hard-coded 50 is
+      // gone). The host-facing cap is alerts.display_max, applied by the panel to
+      // the COALESCED rows and delivered on this same payload (alerts_display_max).
+      alerts: this.alerts,
+      alerts_display_max: this.cfg.config.alerts.display_max,
       notify: { beep: this.cfg.config.alerts.enabled && this.cfg.config.alerts.sound && beepKeys.length > 0, unseen_redline: beepKeys.length },
       last_error: this.lastError,
     }

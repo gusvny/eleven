@@ -76,7 +76,7 @@ export function nightOverrideVerdict(
 export const KNOB_PATHS = [
   'enabled', 'executor_session', 'stall_minutes', 'reconcile_seconds',
   'alerts.enabled', 'alerts.sound', 'alerts.desktop', 'alerts.night',
-  'alerts.redline', 'alerts.keep_days',
+  'alerts.redline', 'alerts.keep_days', 'alerts.display_max',
 ] as const
 
 /** Settings 读面：声明+溯源（未声明旋钮显式 factory-default）+config_error+夜间覆盖判定。 */

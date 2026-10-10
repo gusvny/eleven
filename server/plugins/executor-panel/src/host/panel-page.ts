@@ -63,6 +63,113 @@ import {
 import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
+
+// ---- t261009-57: alerts face core (coalesce first, cap second; relative time) ----
+// Closure-free pure functions, embedded via String(fn) like the other cores, so the
+// UT and the page run one implementation.
+
+/** Relative elapsed time: "just now" / "3m ago" / "2h ago" / "1d ago". Malformed or
+ *  future input renders the honest dash (no fabricated time). Fixed by the caller
+ *  per render — the poll loop re-renders, so labels recompute on every refresh. */
+export function relTimeAgo(atMs: unknown, nowMs: number): string {
+  if (typeof atMs !== 'number' || !Number.isFinite(atMs) || atMs > nowMs + 60_000) return '—'
+  const s = Math.max(0, Math.floor((nowMs - atMs) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return m + 'm ago'
+  const h = Math.floor(m / 60)
+  if (h < 24) return h + 'h ago'
+  return Math.floor(h / 24) + 'd ago'
+}
+
+/** One coalesced alert row: a run of consecutive same-key payload rows. */
+export interface CoalescedAlert {
+  key: string
+  rule: string
+  target: string
+  level: string
+  title: string
+  count: number
+  first_at: number
+  last_at: number
+  night_muted: boolean
+  /** True when this group's oldest row IS the oldest payload row — the run may
+   *  predate the 200-row window, so first_at is a lower bound, not a fact. The
+   *  face renders "first ≥ …" and the window start on hover for this group. */
+  at_window_edge: boolean
+}
+
+/** Coalesce payload rows into condition rows. Identity = the payload's own `key`
+ *  (rule:target[@scope], t261001-19) — nothing is invented face-side. Only CONSECUTIVE
+ *  same-key rows merge: a same-key row after a different key means the condition
+ *  cleared and refired, and that refire is its own group (never merged across the
+ *  cleared period). Rows the window cannot parse (non-object, missing/bad `at`)
+ *  pass through as count-1 rows with NaN times — the coalescer never throws, and
+ *  the ledger keeps every line (presentation only). Output is newest-first.
+ *  SELF-CONTAINED (t261009-37 lesson): every predicate lives INSIDE the function —
+ *  the page embeds this source verbatim, so a module-level helper here would be a
+ *  ReferenceError at page runtime (silent, try/catch-wrapped empty face). */
+export function coalesceAlerts(rows: unknown): CoalescedAlert[] {
+  const ok = (r: unknown): r is Record<string, unknown> =>
+    r !== null && typeof r === 'object' && !Array.isArray(r)
+    && typeof (r as Record<string, unknown>).at === 'number'
+    && Number.isFinite((r as Record<string, unknown>).at as number)
+  const out: CoalescedAlert[] = []
+  if (!Array.isArray(rows)) return out
+  // PAYLOAD ORDER, not time-sorted: the payload is the heartbeat append order, and
+  // that is the order "cleared and refired" is observable in (a different key fired
+  // in between). Sorting by `at` first would artificially interleave two persisting
+  // conditions that share a cadence and shred them into one-row groups.
+  const valid = rows.filter(ok) as Array<Record<string, unknown>>
+  const malformed = rows.filter(r => !ok(r))
+  const atWindowEdge = valid.length > 0 ? valid[0] : null
+  let lastKey: string | null = null
+  for (const r of valid) {
+    const k = typeof r.key === 'string' && r.key !== '' ? r.key : null
+    const g = (out.length > 0 && k !== null && k === lastKey) ? out[out.length - 1] : null
+    if (g) {
+      g.count++
+      g.last_at = r.at as number
+      if (typeof r.title === 'string' && r.title !== '') g.title = r.title
+      if (r.night_muted === true) g.night_muted = true
+    } else {
+      out.push({
+        key: k ?? '', rule: String(r.rule ?? ''), target: String(r.target ?? ''),
+        level: String(r.level ?? ''), title: String(r.title ?? ''),
+        count: 1, first_at: r.at as number, last_at: r.at as number,
+        night_muted: r.night_muted === true,
+        at_window_edge: r === atWindowEdge,
+      })
+    }
+    lastKey = k
+  }
+  for (const r of malformed) {
+    // Keep every readable field — only the malformed `at` degrades to the dash.
+    // Zeroing the whole record here would silently drop the alert text (the exact
+    // information the reader needs) whenever one field is bad: shape validation is
+    // a degrade-factory, not a filter (t261009-57 arbitrate round 1, W1).
+    const o: Record<string, unknown> = (r !== null && typeof r === 'object' && !Array.isArray(r) ? r : {})
+    out.push({
+      key: String(o.key ?? ''), rule: String(o.rule ?? ''), target: String(o.target ?? ''),
+      level: String(o.level ?? ''), title: String(o.title ?? ''),
+      count: 1, first_at: NaN, last_at: NaN, night_muted: o.night_muted === true,
+      at_window_edge: false,
+    })
+  }
+  return out.reverse()
+}
+
+/** Cap the COALESCED rows to alerts.display_max (the ONE host number; it arrives on
+ *  the same payload as the rows). 0 = show all — an explicit branch, never
+ *  slice(-max) (slice(-0) returns the whole array and would silently look right). */
+export function capCoalesced(groups: CoalescedAlert[], max: unknown): { rows: CoalescedAlert[]; total: number; capped: boolean } {
+  const m = (typeof max === 'number' && Number.isInteger(max) && max >= 0) ? max : 8
+  const total = groups.length
+  const rows = m === 0 ? groups : groups.slice(0, m)
+  return { rows, total, capped: m !== 0 && total > m }
+}
+
+
 // t261009-37 (defect found by the colour-bar work): the two module-private
 // constants the embedded identity functions close over. project-identity.ts does
 // not export them, so the embedded isProjectKeyLike/baseIdentity sources used to
@@ -95,6 +202,8 @@ const EMBEDDED = EMBED_CONSTS + [
   String(limitStep), String(concChipState),
   // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
   String(countDocsTree), String(docEntryRow),
+  // t261009-57: alerts face core — relative time, coalesce-then-cap (one implementation).
+  String(relTimeAgo), String(coalesceAlerts), String(capCoalesced),
 ].join('\n')
 
 /** t261006-15: Inspection tables (verbatim empty copies + instance labels) as JSON —
@@ -157,6 +266,9 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .head:hover{background:var(--hover)}
 .row.done .head .txt{color:var(--muted)}
 .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* t261009-57: alert titles wrap — the whole text is readable, no ellipsis cut.
+   The shared .txt above keeps its nowrap shape for the other faces. */
+.altxt{flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word;white-space:normal}
 .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-top:5px}
 .dot.amber{background:var(--amber)}.dot.grey{background:var(--dot-grey)}.dot.red{background:var(--red)}.dot.blue{background:var(--blue)}
 /* t261006-17 (CL-2), renamed t261008-20: the Concurrent limit block — knob buttons, limit value, three-state chip. */
@@ -451,7 +563,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         </div>
 
         <div class="blk">
-          <div class="bhd"><span class="sect">Alerts</span><span class="n" id="alertHead">0</span><span class="grow"></span><span class="muted">Times are local.</span></div>
+          <div class="bhd"><span class="sect">Alerts</span><span class="n" id="alertHead">0</span><span class="grow"></span><span class="muted">Times show how long ago. Hover for the exact time.</span></div>
           <div class="bbd">
             <div id="alertBanner"></div>
             <div id="alertList"></div>
@@ -1300,18 +1412,40 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       el('wakeCount').textContent='0';
       return;
     }
-    // t261004-14：alerts 最新在前（payload 可能是追加序）；cap='all'，契约见 LIST_CONTRACTS。
-    var rows = newestFirst(st.alerts||[]);
-    // t261009-37: the face lives in the Overview Alerts block — the header carries
-    // the bare count (#alertHead), the body is unchanged (rows + night-muted banner).
-    el('alertHead').textContent = String(rows.length);
+    // t261009-57: coalesce FIRST (runs of the same condition key, consecutive only),
+    // THEN cap to alerts.display_max — the ONE host number, delivered on the same
+    // status payload as the rows (st.alerts_display_max), so the two can never
+    // disagree. The ledger keeps every row; this is presentation only.
+    var co = coalesceAlerts(st.alerts||[]);
+    var cap = capCoalesced(co, st.alerts_display_max);
+    var rows = cap.rows;
+    // The header names both numbers when the knob truncated, so the host can see a
+    // deeper window exists and turn alerts.display_max.
+    el('alertHead').textContent = cap.capped ? (rows.length+' of '+cap.total+' conditions') : String(rows.length);
+    var nowMs = Date.now(); // captured once per render; the poll loop re-renders
     var html = '';
     for(var i=0;i<rows.length;i++){
       var a2 = rows[i];
       var cls = a2.level==='redline' ? 'red' : (a2.night_muted ? 'blue' : 'amber');
-      html += '<div class="row"><div class="head" style="cursor:default"><span class="dot '+cls+'"></span>'
-        + '<span class="txt">'+esc(a2.title)+'</span>'
-        + '<span class="meta">'+esc(localDateTime(a2.at))+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
+      var levelWord = a2.level==='redline' ? 'redline' : (a2.level==='warn' ? 'warn' : (a2.level==='info' ? 'info' : ''));
+      var timeHtml = function(at, label){
+        // <time datetime> for semantics, the absolute moment on hover (title);
+        // relative first — the two are never shown at once. Malformed at = dash.
+        var rel = relTimeAgo(at, nowMs);
+        if(rel==='—') return '<span class="t">'+esc(rel)+'</span>';
+        return '<time datetime="'+esc(new Date(at).toISOString())+'" title="'+esc(localDateTime(at))+'">'+esc((label||'')+rel)+'</time>';
+      };
+      var times = a2.count>1
+        ? timeHtml(a2.first_at, (a2.at_window_edge?'first ≥ ':'first ')) + ' · last ' + timeHtml(a2.last_at, '')
+        : timeHtml(a2.last_at, '');
+      // Full text on hover plus a wrapping title — the ellipsis cut is gone. A
+      // malformed at adds no absolute (nothing is fabricated from NaN).
+      var tip = a2.title
+        + (isNaN(a2.last_at) ? '' : ' · ' + localDateTime(a2.last_at))
+        + (a2.at_window_edge ? ' (first seen may predate the status window)' : '');
+      html += '<div class="row" title="'+esc(tip)+'"><div class="head" style="cursor:default"><span class="dot '+cls+'"></span>'
+        + '<span class="txt altxt">'+esc(a2.title)+(a2.count>1?' <span class="meta">x'+a2.count+'</span>':'')+'</span>'
+        + '<span class="meta">'+esc(levelWord)+(levelWord?' · ':'')+times+(a2.night_muted?' · night-muted':'')+'</span></div></div>';
     }
     if(rows.length===0) html = '<div class="empty">'+esc(emptyCopyOf('alerts'))+'</div>';
     el('alertList').innerHTML = html;
@@ -1793,7 +1927,8 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     ['alerts.night.end','hhmm','Night ends at this time.'],
     ['alerts.night.policy','policy','The night alert policy.'],
     ['alerts.redline','string[]','These rules always alert, even at night.'],
-    ['alerts.keep_days','number','Days to keep alerts.']
+    ['alerts.keep_days','number','Days to keep alerts.'],
+    ['alerts.display_max','number','Coalesced alert rows to show. 0 shows all.']
   ];
   function getIn(o,path){ var parts=path.split('.'); for(var i=0;i<parts.length;i++){ if(o==null) return undefined; o=o[parts[i]]; } return o; }
   function setIn(o,path,v){ var parts=path.split('.'); var c=o; for(var i=0;i<parts.length-1;i++){ c[parts[i]]=c[parts[i]]||{}; c=c[parts[i]]; } c[parts[parts.length-1]]=v; }

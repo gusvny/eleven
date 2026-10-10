@@ -25,7 +25,10 @@ assert(!H.includes('data-tab="alerts"') && !H.includes('id="t-alerts"') && !H.in
 assert(!/['"]t-alerts['"]/.test(H), 'no stale t-alerts wiring (PANES/loader)')
 assert(H.includes('>Alerts</span>') && H.includes('id="alertHead"') && H.includes('id="alertBanner"') && H.includes('id="alertList"'),
   'the Alerts block carries the header count and the unchanged body (banner + rows)')
-assert(H.includes("el('alertHead').textContent = String(rows.length)"), 'the Alerts header count comes from the real rows')
+// t261009-57: the header count is coalesce-then-cap aware — rows-of-total named when
+// the alerts.display_max knob truncated, the bare count otherwise.
+assert(H.includes("cap.capped ? (rows.length+' of '+cap.total+' conditions') : String(rows.length)"),
+  'the Alerts header names rows-of-total when truncated, the bare count otherwise')
 assert(!H.includes("'Recent · '"), "the old 'Recent · N' header wording is gone")
 
 // ---- 2. Events face in, entry and dialog out ----

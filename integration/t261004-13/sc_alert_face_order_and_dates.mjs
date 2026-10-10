@@ -5,9 +5,11 @@
 // Intent（用户可感知行为；工单 Part A 原话 + plan review 定稿）：
 //   A1 Alerts 列表最新在前：两条不同时刻的 alert，先渲染的行是较晚的那条
 //      （工单病灶=守望者回传 oldest-first 尾巴被照序渲染，最新的沉底）。
-//   A2 时间带日期：alert 行时间文本 = 本机 MM-DD HH:MM 短本地形（同机同 TZ 现算期望，
-//      锚格式不锚字面），不再是无日期 HH:MM（跨天 alert 长得一样=本票缺陷）。
-//   A3 跨天可分辨：不同日期的两条 alert 渲染出不同的时间串（A2 的可判对面）。
+//   A2 时间可读（t261009-57 宿主令 261010 改契，声明改契非静默放宽）：行时间=相对优先
+//      「Nm ago / just now」，绝对 MM-DD HH:MM 只活在 hover（<time datetime> 在场、
+//      title 属性带本机绝对形，同机同 TZ 现算期望，锚格式不锚字面）；可见文本不得漏绝对形。
+//   A3 跨天可分辨：不同日期的两条 alert 在 hover 绝对串（与 <time datetime> ISO）上不同
+//      （A2 的可判对面；病灶「跨天长得一样」仍被锁，读的位置随宿主令移到 hover）。
 //   A4 Ledger 页签 wakes 行同形：同一日期化 helper 覆盖 wakes（工单点名「两处一致」），
 //      渲染值与 A2 同格式。
 //   A5 「Times are local.」标签仍在场（日期化不得丢掉时区口径声明）。
@@ -154,14 +156,19 @@ async function main() {
     const iNew = listText.indexOf('newer-alert')
     const iOld = listText.indexOf('older-alert')
     C.case('A1-alerts-newest-first', iNew !== -1 && iOld !== -1 && iNew < iOld, `newer@${iNew} older@${iOld}`)
-    // 日期化：时间文本带 MM-DD HH:MM（本机现算期望），且两条跨天串不同
+    // 日期化（t261009-57 宿主令 261010 改契：行时间=相对优先「Nm ago」，绝对形只活在
+    // hover——<time datetime> ISO 在场、title 属性带本机绝对形）。跨天可分辨改锚 hover
+    // 绝对串（读者悬停即得日期，病灶「跨天长得一样」仍被锁，只是换了读的位置）。
     const wantNew = localMDHM(TS_NEW)
     const wantOld = localMDHM(TS_OLD)
     const times = await page.evaluate(() => Array.from(document.querySelectorAll('.alert .meta, .meta')).map(e => e.textContent.trim()))
-    const tNew = times.find(t => t.includes(wantNew))
-    const tOld = times.find(t => t.includes(wantOld))
-    C.case('A2-timestamp-carries-date', Boolean(tNew && tOld), `want "${wantNew}"/"${wantOld}" got ${JSON.stringify(times.slice(0, 6))}`)
-    C.case('A3-cross-day-distinguishable', Boolean(tNew && tOld && wantNew !== wantOld), `"${wantNew}" vs "${wantOld}"`)
+    C.case('A2-relative-time-first', times.some(t => /\b(just now|\d+\s*[smhd]\s+ago)\b/i.test(t)), `want relative wording, got ${JSON.stringify(times.slice(0, 6))}`)
+    C.case('A2-absolute-not-visible', !times.some(t => /\d{2}-\d{2} \d{2}:\d{2}/.test(t)), `absolute MM-DD HH:MM must live on hover only, got ${JSON.stringify(times.slice(0, 6))}`)
+    const timeTags = await page.evaluate(() => Array.from(document.querySelectorAll('time[datetime]')).map(e => ({ dt: e.getAttribute('datetime'), title: (e.closest('[title]') ? e.closest('[title]').getAttribute('title') : '') || (e.getAttribute('title') || '') })))
+    const hoverNew = timeTags.some(e => e.title.includes(wantNew))
+    const hoverOld = timeTags.some(e => e.title.includes(wantOld))
+    C.case('A2-timestamp-carries-date', hoverNew && hoverOld, `hover titles must carry "${wantNew}"/"${wantOld}", got ${JSON.stringify(timeTags.slice(0, 4))}`)
+    C.case('A3-cross-day-distinguishable', hoverNew && hoverOld && wantNew !== wantOld && timeTags.some(e => /\d{4}-\d{2}-\d{2}T/.test(e.dt)), `"${wantNew}" vs "${wantOld}" across <time datetime> + hover`)
     // A5 时区口径标签仍在
     C.case('A5-times-are-local-label', /Times are local\./.test(listText), 'label missing')
 

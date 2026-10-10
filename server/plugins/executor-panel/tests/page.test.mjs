@@ -159,14 +159,20 @@ assert(PANEL_PAGE_HTML.includes('function localDateTime'), 'dated local-time for
 assert(!PANEL_PAGE_HTML.includes('hhmmLocal'), 'no stale hhmmLocal name left anywhere in the page')
 // t261003-13 rework: the wake row computes `when` once (guarded, dash on malformed
 // input) and renders esc(when) — the local-time formatter is still the only clock.
-assert(PANEL_PAGE_HTML.includes('esc(localDateTime(x.at))') && PANEL_PAGE_HTML.includes('esc(localDateTime(a2.at))')
+// t261009-57: the Alerts rows moved to relative time + <time datetime> (absolute on
+// hover); the Overview actions row keeps the direct localDateTime face, the wake row
+// stays guarded. The old esc(localDateTime(a2.at)) alert pin retired with the face.
+assert(PANEL_PAGE_HTML.includes('esc(localDateTime(x.at))')
   && PANEL_PAGE_HTML.includes("var when = bad ? '—' : localDateTime(w2.at)") && PANEL_PAGE_HTML.includes("esc(when)"),
-  'Overview, Alerts and wake rows all render local time (wake row via the guarded when)')
+  'Overview and wake rows still render local time (wake row via the guarded when)')
+assert(PANEL_PAGE_HTML.includes('relTimeAgo(at, nowMs)') && PANEL_PAGE_HTML.includes('new Date(at).toISOString()'),
+  'alert rows render relative first with the absolute moment in <time datetime>')
 {
   const caps = (PANEL_PAGE_HTML.match(/>Times are local\./g) || []).length
-  // t261009-37: the Alerts block header, the Recent actions block header, and the
-  // Events footer (the dialog and its copy are gone with the dialog).
-  assert(caps === 3, 'Times are local. caption on the Alerts/Recent actions headers and the Events footer, found ' + caps)
+  // t261009-57: the Alerts header now states the relative-time contract instead.
+  assert(caps === 2, 'Times are local. caption on the Recent actions header and the Events footer, found ' + caps)
+  assert(PANEL_PAGE_HTML.includes('Times show how long ago. Hover for the exact time.'),
+    'the Alerts header states the relative-first, hover-absolute contract')
 }
 
 n += 60

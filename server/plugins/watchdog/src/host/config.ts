@@ -75,6 +75,10 @@ export interface WatchdogConfig {
     night: { start: string; end: string; policy: 'silent' | 'redline-only' | 'normal' }
     redline: string[]
     keep_days: number
+    /** t261009-57: how many COALESCED alert rows the panel Alerts face shows.
+     *  0 = show all. Bounds the coalesced presentation only — the status payload
+     *  carries the raw (buffer-bounded) rows and the ledger keeps every line. */
+    display_max: number
   }
 }
 
@@ -101,6 +105,7 @@ export const FACTORY_DEFAULTS: WatchdogConfig = {
     redline: ['reconcile_mismatch', 'ledger_unreadable', 'engine_down', 'self_lock', 'stall', 'executor_missing',
       'ask_unmirrored', 'deliver_refused', 'executor_awaiting_approval'],
     keep_days: 14,
+    display_max: 8,
   },
 }
 
@@ -275,6 +280,13 @@ export function parseWatchdogConfig(raw: string, file: string): ResolvedConfig {
         if (typeof a.keep_days !== 'number' || !Number.isFinite(a.keep_days) || a.keep_days < 0) {
           problems.push('alerts.keep_days must be a number >= 0 (0 = never expire by age)')
         } else { al.keep_days = a.keep_days; keys['alerts.keep_days'] = `${file}#alerts.keep_days` }
+      }
+      // t261009-57: one host-adjustable number for the Alerts face — it counts
+      // COALESCED rows (coalesce first, cap second). 0 = show all (named sentinel).
+      if ('display_max' in a) {
+        if (typeof a.display_max !== 'number' || !Number.isInteger(a.display_max) || a.display_max < 0 || a.display_max > 1000) {
+          problems.push('alerts.display_max must be an integer between 0 and 1000 (0 = show all)')
+        } else { al.display_max = a.display_max; keys['alerts.display_max'] = `${file}#alerts.display_max` }
       }
       if ('redline' in a) {
         if (!Array.isArray(a.redline) || a.redline.some(r => typeof r !== 'string' || r === '')) {
