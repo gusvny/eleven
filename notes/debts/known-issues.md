@@ -5121,3 +5121,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **处置（2 分钟）**：在 main 上把「两条⟨被禁字 U+817F⟩」改成「两条分支」（提交 `aa655e91`）⇒ main 的 lint 回到 `0 error / 1 warn` ⇒ 对 `-69` 发 `ruling`（说明红不是它的、不必改自己的交付物、也不许自己去改 `notes/`）＋ **`retry_qc`** ⇒ 它 `merge_check` 重进（attempt 2）。
 > **纪律（本岗即改）**：**凡改动 `notes/` 或 `docs/` 的散文，提交前先跑一次 `python3 -B integration/lint_tests.py`**（本夜之前我只在改代码后才跑）；遇到"车道的红其实是树级"的形态，**先读 main 上同一判据的读数**（`main 红=不是票的账`），再决定"改 main 后 `retry_qc`"而不是打回票。
 > **回归**：L3——一条"main 有树级 lint 红"的台面：**车道不被记红**、红具名指向 main 的文件与行，且值班有一条**已文档化的动作**（改 main→`retry_qc`）。
+
+## KI-01M4KGVAQ1VQSCDFKVR108V96B **`ticket list` 把每张票都报成 legacy**：薄壳行投影**重建行时丢掉 `lane_version`/`develop_line`**（t261009-76 加在薄壳里的那两行读的键永远不存在）；同一条缝还丢 `paused`/`paused_phase`（t260910-04 当年绕开未修）与 `exec_status`/`close_health`**(261011 02:2x 本岗给 develop buffer 第一张 opt-in 票查"它落在哪条线上"时实测;登记留档)**
+
+> **现象（原始读数，同一张票同一分钟对读）**：
+> - **引擎行有键**：`server/engine/client.py` 的 `_row_from_meta`（t261009-76 在此加了 `lane_version` / `develop_line`，值来自 workflow meta）。实测 `client.py ticket-list {"project":"sandbar"}` 给 `t261009-80` 的行：`lane_version='develop-buffer-v1'`、`develop_line='develop-buffer'`。
+> - **薄壳把键丢了**：`server/tools/ticket.py` 的 `_list`（约 837-855 行）把引擎行**逐键复制进一个新的 dict**（固定子集，不含这两个键），随后约 892 行再从那个 dict 读 `meta.get('lane_version')` ⇒ **只可能得到空串**。同一张票、同一刻，`ticket.py list` 的行给的是 `lane_version=''`、`develop_line=''`。
+> - **workflow 本身是对的**（排除"上游没写"）：`ticket-query` 的 `meta` 两键齐全（`develop-buffer-v1` / `develop-buffer`）⇒ 盲的只有这一层投影。
+> - **同族（同一条缝，老账）**：`paused` / `paused_phase` 被同样丢掉——t260910-04 读过这条缝，当时的处置是**把 console 直接改读 `client.py`**，薄壳没修，于是 CLI 面至今看不见段间暂停；`exec_status` / `close_health` / `close_health_reason`（t260921-03 加）同样丢。**逐键实测：引擎行 27 键 vs 薄壳行 22 键**，差的正是这 5 个，另有两个键的值被清空。
+>
+> **危害**：①**值守/代理面看不见票在哪条线上**——`ticket list` 是文档化的操作面，而 buffer 的第一张 opt-in 票此刻正在飞；t261009-76 spec (4)「不看 workflow 历史、直接从板面读出票的版本与线」在这个面上**未兑现**。②**本岗自己的四路对账也吃这个面**（`paused` 在这里永远读不到，只能另开 `show`）。③今天**没有引擎路由读这个被丢的键**（版本闸读的是 workflow meta，`dev_lane.is_develop_buffer_ticket`），所以此刻是**盲**、不是**错落**；但哪天真有读取方信 CLI 行，就会把 buffer 票当 legacy 送进老的人审合并路——那一步就是**直接落 main**（本条的危害上限）。
+>
+> **出路（实现归票 `t261011-02`）**：①薄壳**透传，不重算**——引擎行是唯一真源，缺键就诚实地缺（不猜、不造 `unknown`）；②**关缝不只是关点**：把引擎行键集与投影键集逐键对清，故意不投的键**在投影处一句话说明**（一处，不按键分散）；③两层回归：L1 纯投影（不碰 Temporal/console）+ L3 **同一张票两面对读**（含一张 buffer 票 + 一张真暂停票），任一面丢键或重算即红。
+>
+> **纪律**：**「薄壳投影」是第三个消费面**——t261009-35 当初只点名了两个面（引擎行 + `_v2_query` 详情）并立了"新键必须两处同改"的规矩，而这条缝**不在那两处之内**，于是规矩看起来被遵守了、面上却是盲的。**凡新增行键，先问薄壳会不会把它丢掉**；验证口径＝**同一张票、两个面、逐键相等**，不是"各自单测绿"（薄壳那两行代码本身"对"得很，只是它读的键不存在——两层各自单测都会过）。
+>
+> **回归**：L2——(а) 同票两面对读：`lane_version` / `develop_line` / `paused` / `paused_phase` 逐键相等；(b) 未投的键在投影处**具名**（不是静默丢）。L3——一张 buffer 票在板上可辨（lane/line 非空）、一张暂停票 `paused=true`，且两键都来自引擎行而非本地推导。
