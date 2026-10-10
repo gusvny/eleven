@@ -232,6 +232,58 @@ def _log_shutdown_outcome() -> None:
                      e.get("ticket"), e.get("stage"), e.get("gen"), e.get("outcome"))
 
 
+CONSOLE_BOOT_ENV = "SANDBAR_CONSOLE_BOOT"  # t261009-55: set by the console at spawn
+
+
+def merge_worker_meta_extras(meta_path: "str | None", extras: dict) -> bool:
+    """t261009-55: merge console_boot / polling into this worker's ownership meta.
+
+    WHY a worker-owned merge instead of new shared.write_worker_meta kwargs: the
+    meta schema lives in shared.py, which is NOT in this ticket's write set — so
+    the worker post-processes the file it just (best-effort) wrote: read the meta,
+    verify it still names OUR pid, add the extras, atomically replace the file
+    (tmp + os.replace, same discipline as shared.write_worker_meta).
+
+    Guards (borrow-fault-mode table, t261005-03):
+    - pid guard: after a takeover the meta may belong to the replacement; a pid
+      mismatch means we never clobber the new owner's fingerprint.
+    - draining guard: a meta already in state='draining' is never re-touched — a
+      late refresher tick must not resurrect a released slot as polling.
+    Best-effort like the base write: any failure logs once (debug) and returns
+    False; the ensure side treats a boot-less meta under the pre-t261009-55 rules
+    (named transitional limitation, plan R6)."""
+    if not meta_path or not isinstance(extras, dict) or not extras:
+        return False
+    try:
+        import json as _json
+        import shared as _shared
+        meta, _state, _detail = _shared.read_worker_meta_state(meta_path)
+        if not isinstance(meta, dict) or int(meta.get("pid") or 0) != os.getpid():
+            return False
+        if str(meta.get("state") or "") == _shared.WORKER_META_STATE_DRAINING:
+            return False
+        merged = dict(meta)
+        merged.update(extras)
+        p = pathlib.Path(meta_path)
+        tmp = p.with_name("%s.tmp.merge.%d" % (p.name, os.getpid()))
+        tmp.write_text(_json.dumps(merged, ensure_ascii=False), "utf-8")
+        os.replace(tmp, p)
+        return True
+    except Exception as e:  # noqa: BLE001 — the extras are observability, never a gate
+        logging.debug("meta extras merge skipped (%s: %s) meta=%s",
+                      type(e).__name__, e, meta_path)
+        return False
+
+
+def console_boot_id() -> str:
+    """This worker's console boot generation (t261009-55): whatever the console
+    already knows about itself (supervisor pid + process start ms), passed at
+    spawn via SANDBAR_CONSOLE_BOOT. Empty when unset (foreground runs /
+    pre-upgrade consoles) — a boot-less meta keeps the pre-t261009-55 ensure
+    rules (named transitional limitation, plan R6)."""
+    return str(os.environ.get(CONSOLE_BOOT_ENV) or "").strip()
+
+
 def mark_meta_draining(meta_path: "str | None") -> bool:
     """Rewrite this worker's ownership meta with state='draining' (t261005-03).
 
@@ -594,6 +646,21 @@ async def run_worker(args: argparse.Namespace) -> None:
                                     dsh_face=face)
         logging.info("worker 归属指纹：repo_root=%s pid=%d meta=%s",
                      payload.get("repo_root"), payload.get("pid"), meta_path)
+        # t261009-55: boot generation + polling fact ride on the same meta (worker-
+        # owned merge, shared.py untouched). console_boot lets a RESTARTED console
+        # admit a substitute in one ensure tick without waiting for this worker to
+        # reach state='draining'; polling lets the ensure name and repair an alive
+        # worker that shed its poller.
+        _extras: dict = {"polling": True}
+        _boot = console_boot_id()
+        if _boot:
+            _extras["console_boot"] = _boot
+        if merge_worker_meta_extras(meta_path, _extras):
+            logging.info("worker meta extras merged: console_boot=%s polling=true (meta=%s)",
+                         _boot or "(unset)", meta_path)
+        else:
+            logging.warning("worker meta extras merge failed — the ensure keeps the "
+                            "pre-t261009-55 rules for this worker (meta=%s)", meta_path)
     else:
         logging.info("worker 归属指纹：前台模式不落 meta（repo_root=%s）", REPO_ROOT)
     if face["expected_state"] == "mismatch":
@@ -723,7 +790,28 @@ async def run_worker(args: argparse.Namespace) -> None:
         logging.info("worker 起来了：queues=%s host=%s",
                      ",".join(configured_task_queues()), TARGET_HOST)
     run_tasks = [asyncio.create_task(w.run()) for w in workers]
+
+    # t261009-55: keep the meta's `polling` fact honest — one refresh per watch
+    # interval. polling = every poller task still alive (a crashed/exited run task
+    # means this worker has shed its poller while the process lives; the ensure
+    # names that state and repairs it). Draining-guarded + pid-guarded in the
+    # merge, so a late tick can never resurrect a released slot.
+    async def _meta_refresher() -> None:
+        while not stop.is_set():
+            await asyncio.sleep(watch_interval)
+            polling = bool(run_tasks) and all(not t.done() for t in run_tasks)
+            merge_worker_meta_extras(meta_path, {"polling": polling})
+
+    meta_refresher_task: "asyncio.Task | None" = None
+    if meta_path:
+        meta_refresher_task = asyncio.create_task(_meta_refresher())
     await stop.wait()
+    if meta_refresher_task is not None:
+        meta_refresher_task.cancel()
+        try:
+            await meta_refresher_task
+        except asyncio.CancelledError:
+            pass
     await _graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path)
 
 

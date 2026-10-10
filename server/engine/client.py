@@ -1399,7 +1399,9 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         # poller) — same classifier as ticket-query/detail.
         snap, rerr = await _snapshot_read_named(handle, tid, client)
         if rerr is not None:
-            return rerr
+            # t261009-55 spec (3): same durable-facts face augmentation as the
+            # ticket-query detail read (kind/wording byte-identical).
+            return await _augment_read_failure_receipt(rerr, tid, handle, desc)
         running = desc.status is not None and desc.status.name == "RUNNING"
         return _ok({
             "ticket_id": tid,
@@ -2508,6 +2510,75 @@ async def _snapshot_read_named(handle: Any, tid: str, client: Any,
         raise
 
 
+def _orphan_window_note(cause: str) -> str:
+    """t261009-55 spec (4): name the platform-side orphan window instead of
+    leaving it silent. While a killed worker's STARTED workflow task has not yet
+    timed out, the ticket is WAITING ON THE PLATFORM, not stuck — the wait is
+    bounded by the workflow task's start_to_close_timeout (499s). Timeout value
+    deliberately unchanged in this ticket (naming is the requirement)."""
+    return ("orphan window: if this ticket's dedicated worker was just killed, its "
+            "STARTED workflow task still has to time out (start_to_close_timeout, "
+            "499s) — the ticket is waiting on the platform, not stuck; cause=%s"
+            % cause)
+
+
+async def _augment_read_failure_receipt(receipt: Dict[str, Any], tid: str,
+                                        handle: Any, desc: Any) -> Dict[str, Any]:
+    """t261009-55 spec (3): a failing snapshot read degrades BY NAME to the facts
+    still readable without a poller — the receipt keeps its kind/wording/HTTP
+    level byte-identical (the t260919-02 face discipline: add keys, never change
+    semantics); the face gains a `durable` block:
+
+    - workflow status from describe (server-side, no poller needed);
+    - last known stage + time from the engine's stage memo (persisted at every
+      stage entry, readable while RUNNING and after — the durable store is
+      authoritative for "where was this ticket last seen", never for the stage
+      DECISION, which stays the workflow's);
+    - `unavailable(<named cause> @ queue=<q> ticket=<tid>)` labelling exactly
+      which read failed and why (no_poller vs query_timeout);
+    - the named orphan-window note (spec 4).
+
+    Augmentation is best-effort: a describe/memo failure leaves the receipt
+    unchanged (never a half-made face)."""
+    try:
+        kind = str(receipt.get("kind") or "")
+        if kind not in (KIND_NO_POLLER, KIND_TRANSIENT):
+            return receipt
+        cause = "no_poller" if kind == KIND_NO_POLLER else "query_timeout"
+        queue = ticket_task_queue(tid)
+        durable: Dict[str, Any] = {
+            "status": (desc.status.name if getattr(desc, "status", None) is not None else None),
+            "queue": queue,
+            "ticket": tid,
+            "unavailable": "unavailable(%s @ queue=%s ticket=%s)" % (cause, queue, tid),
+            "orphan_window_note": _orphan_window_note(cause),
+        }
+        stage_face = await _terminal_face_stage_from_memo(desc)
+        durable["last_stage"] = stage_face.get("last_stage")
+        durable["last_stage_available"] = bool(stage_face.get("last_stage_available"))
+        durable["last_stage_note"] = stage_face.get("last_stage_note") or ""
+        hist = stage_face.get("last_stage_history")
+        last_ts = 0
+        if isinstance(hist, list) and hist and isinstance(hist[-1], dict):
+            try:
+                last_ts = int(hist[-1].get("ts") or 0)
+            except (TypeError, ValueError):
+                last_ts = 0
+        durable["updated_ts"] = last_ts
+        durable["updated"] = (time.strftime("%m-%d %H:%M", time.localtime(last_ts))
+                              if last_ts else "")
+        if not durable["last_stage_available"] and not last_ts:
+            durable["durable_note"] = ("no durable stage/time readable without the "
+                                       "poller; the missing part is labelled, not "
+                                       "guessed")
+        face = receipt.get("face") if isinstance(receipt.get("face"), dict) else {}
+        face["durable"] = durable
+        receipt["face"] = face
+        return receipt
+    except Exception:  # noqa: BLE001 — the augmentation is an enhancement, never a new failure
+        return receipt
+
+
 # ---- 终态失败票两面可见（t260919-02）：判别/原因提取/失败面 ----
 # 终态「活/成」白名单（UI deriveTicketState 的 EXEC_STATUS_ALIVE 同一词表的双侧
 # 镜像；改这里必须同步改 UI 侧并跑两侧 UT）。口径=补集：显式在跑（RUNNING）与
@@ -2925,7 +2996,11 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             snap, rerr = await _snapshot_read_named(handle, tid, client)
             if rerr is not None:
-                return rerr
+                # t261009-55 spec (3): the read fails BY NAME, and the receipt
+                # carries the durable facts (memo stage/status) + the
+                # unavailable(<cause> @ queue/ticket) label + the orphan-window
+                # note. Kind/wording byte-identical — only the face is added.
+                return await _augment_read_failure_receipt(rerr, tid, handle, desc)
         except Exception as e:
             return _err("snapshot 查询失败（已重试 %d 次，瞬时抖动？请刷新重试）：%s: %s"
                         % (QUERY_RETRY_ATTEMPTS - 1, type(e).__name__, e), KIND_TRANSIENT)
@@ -3390,6 +3465,39 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                         degrade["_no_poller_face"] = pface
                 except Exception:  # noqa: BLE001 — the naming is an enhancement; it never crashes the list
                     pass
+                # t261009-55 spec (3): durable facts readable WITHOUT a poller —
+                # last known stage + time from the stage memo, describe status.
+                # The degraded row must not render stage=None with a bogus updated:
+                # whatever the memo still proves is rendered; the missing part is
+                # labelled unavailable(<cause> @ queue/ticket) (cause = no_poller
+                # when the probe proved zero, else the query_timeout that did happen).
+                try:
+                    _ddesc = await _describe_with_retry(client.get_workflow_handle(tid))
+                    _sf = await _terminal_face_stage_from_memo(_ddesc)
+                    _hist = _sf.get("last_stage_history")
+                    _ts = 0
+                    if isinstance(_hist, list) and _hist and isinstance(_hist[-1], dict):
+                        try:
+                            _ts = int(_hist[-1].get("ts") or 0)
+                        except (TypeError, ValueError):
+                            _ts = 0
+                    _cause = ("no_poller" if (degrade.get("_no_poller_face") or {})
+                              .get("queue") else "query_timeout")
+                    degrade["_durable"] = {
+                        "status": (_ddesc.status.name if getattr(_ddesc, "status", None)
+                                   is not None else None),
+                        "last_stage": _sf.get("last_stage"),
+                        "last_stage_available": bool(_sf.get("last_stage_available")),
+                        "last_stage_note": _sf.get("last_stage_note") or "",
+                        "updated_ts": _ts,
+                        "queue": ticket_task_queue(tid),
+                        "ticket": tid,
+                        "unavailable": "unavailable(%s @ queue=%s ticket=%s)" % (
+                            _cause, ticket_task_queue(tid), tid),
+                        "orphan_window_note": _orphan_window_note(_cause),
+                    }
+                except Exception:  # noqa: BLE001 — durable enrichment is best-effort, the row shape never changes
+                    pass
                 return degrade
 
         if exec_status == "COMPLETED" and close_ts \
@@ -3495,14 +3603,39 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             # t261005-03: when the probe proved zero live pollers, the title names the
             # cause (which queue, 0 pollers) instead of a generic "timeout, refresh".
             npf = meta.get("_no_poller_face") or {}
+            # t261009-55 spec (3): the degraded row renders the durable facts (memo
+            # stage/time) instead of a bare stage=None + bogus updated. The labels
+            # ride INSIDE existing family-wide keys (the title string), never as new
+            # top-level row keys — the t260919-02/t260921-03 no-snapshot-family
+            # parity contract pins ONE keyset across FAILED/minimal/degraded shapes
+            # (arbitrate gen1 code-fault fix).
+            dur = meta.get("_durable") or {}
+            _row_updated_ts = int(dur.get("updated_ts") or 0)
+            _dur_title = ""
+            if dur:
+                _dur_title = (
+                    "; %s (durable stage: %s; status=%s)" % (
+                        dur.get("unavailable") or "unavailable(query_timeout)",
+                        (dur.get("last_stage") if dur.get("last_stage_available")
+                         else (dur.get("last_stage_note") or "memo unavailable")),
+                        dur.get("status") or "unknown"))
+                if dur.get("orphan_window_note"):
+                    _dur_title += (
+                        "; waiting on the platform, not stuck "
+                        "(STARTED task start_to_close_timeout 499s)")
             rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
                          "role": None,
                          "status": "dispatched",
                          "title": "查询超时，刷新重试",
                          "workflow": "", "proposal_id": "",
-                         "stage": None, "stage_state": "running",
+                         "stage": (dur.get("last_stage")
+                                   if dur.get("last_stage_available") else None),
+                         "stage_state": "running",
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
-                         "workspace": None, "created": None, "updated": "", "updated_ts": 0,
+                         "workspace": None, "created": None,
+                         "updated": (time.strftime("%m-%d %H:%M", time.localtime(_row_updated_ts))
+                                     if _row_updated_ts else ""),
+                         "updated_ts": _row_updated_ts,
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,
                          "close_health": _close_health_of(exec_status)[0],
@@ -3517,6 +3650,11 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                     "worker stopped polling or absent); wait for the ensure "
                     "replacement before refreshing"
                     % (npf.get("queue") or ticket_task_queue(tid)))
+            if _dur_title:
+                # the labels append into the EXISTING title key (a family-wide
+                # string slot) — never a new top-level row key (parity, arbitrate
+                # gen1 code-fault fix)
+                rows[-1]["title"] += _dur_title
         elif meta:
             meta.setdefault("project", sa_project)
             # epic takes the EpicCode SA as truth (SA first) with meta as fallback (the
@@ -3834,6 +3972,24 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
                 "failed": failed,
                 "summary": "archive-legacy：过账 %d，已有档跳过 %d，失败 %d"
                            % (len(written), len(skipped), len(failed))})
+
+
+async def cmd_queue_pollers(args: Dict[str, Any]) -> Dict[str, Any]:
+    """t261009-55: one queue's proven live-poller face (the console ensure's
+    confirmation probe for the alive-worker-no-poller repair).
+
+    Contract = queue_live_pollers verbatim: available=false (probe failed /
+    temporalio absent / malformed queue name / unprovable) is a VALUE — the
+    caller never upgrades an unproven face into a no_poller claim, so a probe
+    outage must never clear a worker slot. Shaped for the node-side probe:
+    {available, live_pollers, stale_history, unverifiable, note, ticket, queue}."""
+    queue = str(args.get("queue") or "")
+    tid = str(args.get("ticket_id") or "")
+    client = await _connect()
+    face = await queue_live_pollers(client, queue)
+    if tid:
+        face["ticket"] = tid
+    return _ok(face)
 
 
 async def cmd_running_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -4470,6 +4626,7 @@ COMMANDS = {
     "ticket-archive-legacy": cmd_ticket_archive_legacy,
     "ticket-archive-terminal": cmd_ticket_archive_terminal,
     "running-tickets": cmd_running_tickets,
+    "queue-pollers": cmd_queue_pollers,
     "cancel-audit": cmd_cancel_audit,
     "template-faces": cmd_template_faces,
     "executor-grants-write": cmd_executor_grants_write,
@@ -4498,7 +4655,9 @@ USAGE = (
     "  pause/resume=段间暂停·恢复（t260908-01：当前段自然跑完停在段间门口，重复/空态\n"
     "  /畸形拒收落 refused，snapshot 的 paused/paused_phase 二态可观测），\n"
     "  update=状态维护，query 只读。\n"
-    "ticket-start 创建 v2 工单（模板 id→workflow 类）；ticket-list/ticket-query=工单台数据源。\n"
+    "ticket-start creates a v2 ticket (template id -> workflow class); "
+    "ticket-list/ticket-query feed the board; queue-pollers = one queue's live-poller "
+    "face (the console ensure zero-poller confirmation probe, t261009-55).\n"
     "lane-orphans/lane-reclaim (t261005-03): orphan lane-worker probe / guarded reclaim.\n"
     "  args accept a bare lane-root path (or JSON {lane_root, apply}); lane-reclaim is\n"
     "  dry-run unless apply=true — killing belongs to humans, only the condemned rows\n"

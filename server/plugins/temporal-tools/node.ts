@@ -265,6 +265,23 @@ export interface WorkerMeta {
   /** t261005-03：槽位状态。'draining' = 该 worker 已停止 polling、正在收尾——不是活
    * owner，ensure 可立即放替补接管。缺省/未知值=serving（保守：不开槽）。 */
   state?: string
+  /** t261009-55：console boot 代际（<supervisor pid>-<start ms>，spawn 时经
+   * SANDBAR_CONSOLE_BOOT 注入、worker 起跑并入 meta）。异代 ⇒ 属于上一次 console
+   * 启动，ensure 可像 draining 一样放替补——重启换手不再依赖旧 worker 走到
+   * draining。缺省=上一代/前台 worker（兼容期按旧规则走，计划 R6 点名）。 */
+  console_boot?: string
+  /** t261009-55：worker 自报 poller 事实（watch tick 刷新）。false = 进程活着
+   * 但已脱落 poller——ensure 确认零活 poller 后按可修复态放替补。 */
+  polling?: boolean
+}
+
+/** 本 console 的 boot 代际（t261009-55）：supervisor pid + 进程起的毫秒时刻，模块
+ * 加载即定死一次——同一进程内所有工单 worker 同代，重启即换代。不落盘：worker
+ * 侧经 SANDBAR_CONSOLE_BOOT 拿到同一串并写进自己的 meta（对账锚=串本身）。 */
+let _consoleBootId: string | null = null
+export function consoleBootId(): string {
+  if (_consoleBootId === null) _consoleBootId = `${process.pid}-${Date.now()}`
+  return _consoleBootId
 }
 
 /** 读 meta 结果：state 四态与 python 侧 shared.read_worker_meta_state 对齐。 */
@@ -323,19 +340,46 @@ export function judgeTicketWorkerMeta(
 export interface TicketWorkerDecision {
   tid: string
   action: 'spawned' | 'held-same' | 'held-foreign' | 'held-unknown' | 'replaced-draining'
+    | 'replaced-foreign-boot' | 'replaced-no-poller' | 'stale-meta-cleared'
   /** action=held-foreign 时必带：异仓根/pid/tid（告警记录的最小闭环）。 */
   warn?: { repoRoot: string; pid: number; tid: string }
   /** action=held-unknown 时必带：meta 路径/失败原因（兼容跳过不哑巴，review C3）。 */
   reason?: string
 }
 
+/** t261009-55：零活 poller 探针（可注入）。契约对齐 client.py 的不可证面纪律：
+ * proven=false（探针失败/超时/temporalio 不可用）时 ensure 绝不开槽——只 held +
+ * 点名 no_poller_unproven。proven=true 时 live 即描述确认的活 poller 数。 */
+export interface PollerProbeResult { proven: boolean; live: number; detail?: string }
+
 /** 单轮 ensure 的可注入依赖：running=在册 RUNNING 工单清单（fetch 归调用方）；
- * spawn 可注入（缺省=不拉起只记录——真拉起出口在 apply 闭包侧注入）。 */
+ * spawn 可注入（缺省=不拉起只记录——真拉起出口在 apply 闭包侧注入）。
+ * ownBoot=本 console 代际（缺省=不做代际判定，纯旧路径）；probePollers=零活
+ * poller 探针（缺省=不做 no-poller 修复，只在 polling=false 时 held 点名）。 */
 export interface EnsureTicketWorkersOnceDeps {
   dataDir: string
   repoRoot: string
   running: { id: string; queue: string }[]
   spawn?: (tid: string, queue: string) => { pid: number } | void
+  ownBoot?: string
+  probePollers?: (tid: string, queue: string) => Promise<PollerProbeResult>
+  /** 探针并发上限（每轮 ensure；缺省 4——病态批量脱落时也只花这许多 describe）。 */
+  probeConcurrency?: number
+}
+
+/** 单个在册工单的替换决策（清槽 + 可选拉起），t261005-03 清场路径的三处复用点
+ * （replaced-draining / replaced-foreign-boot / replaced-no-poller）共用。 */
+function replaceSlot(
+  tid: string, queue: string, pf: string, mf: string, existing: number,
+  deps: EnsureTicketWorkersOnceDeps, action: TicketWorkerDecision['action'],
+  why: string): TicketWorkerDecision {
+  try { unlinkSync(pf) } catch { /* 已不在 */ }
+  try { unlinkSync(mf) } catch { /* 已不在 */ }
+  if (deps.spawn) {
+    deps.spawn(tid, queue)
+    return { tid, action, reason: `${why}（pid=${existing}），替补已拉起` }
+  }
+  return { tid, action, reason: `${why}（pid=${existing}），但未提供 spawn 出口（仅清场不拉起）` }
 }
 
 /** 一轮工单 worker 归属判定 + 补拉决策（纯决策面，不做日志/网络）：
@@ -344,6 +388,8 @@ export interface EnsureTicketWorkersOnceDeps {
 export async function ensureTicketWorkersOnce(
   deps: EnsureTicketWorkersOnceDeps): Promise<{ decisions: TicketWorkerDecision[] }> {
   const decisions: TicketWorkerDecision[] = []
+  let probesUsed = 0
+  const probeCap = Math.max(1, deps.probeConcurrency ?? 4)
   for (const r of deps.running) {
     const pf = join(deps.dataDir, `worker-${r.id}.pid`)
     const mf = join(deps.dataDir, `worker-${r.id}.meta`)
@@ -357,16 +403,8 @@ export async function ensureTicketWorkersOnce(
       // 精确匹配才开槽：meta 缺失/畸形/异值一律按保守旧路径走（unknown/foreign）。
       if (read.meta && read.meta.state === 'draining'
         && read.meta.pid === existing) {
-        try { unlinkSync(pf) } catch { /* 已不在 */ }
-        try { unlinkSync(mf) } catch { /* 已不在 */ }
-        if (deps.spawn) {
-          deps.spawn(r.id, r.queue)
-          decisions.push({ tid: r.id, action: 'replaced-draining',
-            reason: `draining worker pid=${existing} 已让槽（meta state=draining），替补已拉起` })
-        } else {
-          decisions.push({ tid: r.id, action: 'replaced-draining',
-            reason: `draining worker pid=${existing} 已让槽，但未提供 spawn 出口（仅清场不拉起）` })
-        }
+        decisions.push(replaceSlot(r.id, r.queue, pf, mf, existing, deps,
+          'replaced-draining', 'draining worker 已让槽（meta state=draining）'))
         continue
       }
       const verdict = judgeTicketWorkerMeta(read.meta, deps.repoRoot)
@@ -382,6 +420,69 @@ export async function ensureTicketWorkersOnce(
           tid: r.id, action: 'held-unknown',
           reason: `meta=${mf} state=${read.state}：${read.detail}（pidfile=${pf} pid=${existing}）`,
         })
+        continue
+      }
+      // ---- t261009-55：同仓在册 worker 的代际换手与 no-poller 修复 ----
+      // 顺序（borrow-fault-mode 表）：draining → 异仓拒接 → unknown 拒接 →
+      // 代际 → no-poller。异仓/unknown 永不被本票替换（kill 归人，fail-closed）。
+      const boot = read.meta?.console_boot
+      if (deps.ownBoot && boot && boot !== deps.ownBoot) {
+        if (read.meta?.pid === existing) {
+          // 异代同仓：上一轮 console 起的 worker。像 draining 一样放槽——重启换手
+          // 不依赖旧 worker 自己写 draining（SIGKILL 宿主时它根本写不了）。
+          decisions.push(replaceSlot(r.id, r.queue, pf, mf, existing, deps,
+            'replaced-foreign-boot',
+            `console boot 代际已换（meta=${boot} 本机=${deps.ownBoot}）`))
+        } else {
+          // R4 清场竞序：meta 是异代、却记着别的 pid ⇒ 相对 pidfile 已是陈旧指纹
+          // （旧 worker 迟到的 watch-tick 补写）。只清 meta 不动 pidfile——pidfile
+          // 是槽位真源，绝不因陈旧指纹动它；下一轮按 pidfile 缺 meta 的保守路径走。
+          try { unlinkSync(mf) } catch { /* 已不在 */ }
+          decisions.push({ tid: r.id, action: 'stale-meta-cleared',
+            reason: `stale meta cleared: meta pid=${read.meta?.pid} != pidfile pid=${existing} ` +
+              `(boot=${boot})——仅清 meta，pidfile 为槽位真源不动` })
+        }
+        continue
+      }
+      if (read.meta?.polling === false) {
+        // 两段式（计划 R2/R3）：meta 的 polling=false 只是便宜触发器；开槽前必须
+        // 有**已证实**的零活 poller 面。探针缺省/失败/不可证 ⇒ held 点名，绝不清槽
+        // ——瞬时探针故障绝不批量换掉健康的同代 worker（不可证面不开槽，对齐
+        // client.py 的「cannot prove」纪律）。
+        if (!deps.probePollers) {
+          decisions.push({ tid: r.id, action: 'held-same',
+            reason: `no_poller_unproven: meta polling=false（pid=${existing}），` +
+              `但未提供探针出口——不可证不清槽（pidfile=${pf}）` })
+          continue
+        }
+        if (probesUsed >= probeCap) {
+          decisions.push({ tid: r.id, action: 'held-same',
+            reason: `no_poller_unproven: meta polling=false（pid=${existing}），` +
+              `本轮探针预算已用满（cap=${probeCap}）——下一轮再证，不清槽` })
+          continue
+        }
+        probesUsed += 1
+        let probe: PollerProbeResult | null = null
+        try { probe = await deps.probePollers(r.id, r.queue) } catch (err: any) {
+          probe = { proven: false, live: -1, detail: `${err?.message ?? err}` }
+        }
+        if (!probe || !probe.proven) {
+          decisions.push({ tid: r.id, action: 'held-same',
+            reason: `no_poller_unproven: meta polling=false（pid=${existing} queue=${r.queue}），` +
+              `探针不可证（${probe?.detail ?? 'no detail'}）——不可证不清槽` })
+          continue
+        }
+        if (probe.live > 0) {
+          // meta 说脱落、队列上却有活 poller：陈旧的自报事实。held（不动槽），
+          // 留痕——下一轮 worker 侧 refresher 会把 polling 修正回来。
+          decisions.push({ tid: r.id, action: 'held-same',
+            reason: `polling=false 与队列事实矛盾（queue=${r.queue} live=${probe.live}）` +
+              `——held，等 worker refresher 自愈` })
+          continue
+        }
+        decisions.push(replaceSlot(r.id, r.queue, pf, mf, existing, deps,
+          'replaced-no-poller',
+          `no_poller_alive_pid: pid=${existing} 活着但 queue=${r.queue} 已证 0 活 poller`))
         continue
       }
       decisions.push({ tid: r.id, action: 'held-same' })           // 本仓在册，照旧
@@ -440,6 +541,16 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
   const running = runningAll.filter(r => !deps.ticketChildren.has(r.id))  // 本进程已持有的不管
   const { decisions } = await ensureTicketWorkersOnce({
     dataDir: deps.dataDir, repoRoot: deps.repoRoot, running,
+    ownBoot: consoleBootId(),
+    probePollers: async (tid, queue) => {
+      // 真探针 = client.py queue-pollers（describe_task_queue 的已证实活 poller 面；
+      // 探针失败在 python 侧即 named cannot-prove，绝不成假零）。
+      const out = await deps.cli('queue-pollers', { ticket_id: tid, queue })
+      if (!out?.ok) return { proven: false, live: -1, detail: String(out?.error ?? 'cli failed') }
+      const r = out.result ?? {}
+      if (r.available === false) return { proven: false, live: -1, detail: String(r.note ?? 'unprovable') }
+      return { proven: true, live: Number(r.live_pollers ?? 0) }
+    },
     spawn: (tid, queue) => { deps.spawnTicketWorker(tid, queue); return { pid: -1 } },
   })
   for (const d of decisions) {
@@ -459,6 +570,27 @@ export async function ensureTicketWorkers(deps: EnsureTicketWorkersDeps): Promis
       deps.log.info(
         'sandbar-temporal-tools supervisor: 工单 worker %s draining 让槽已换手：%s',
         d.tid, d.reason ?? '')
+    } else if (d.action === 'replaced-foreign-boot') {
+      // t261009-55：console 重启换手——异代 worker 一次 ensure tick 内放槽，
+      // 不再等旧 worker 走到 draining（SIGKILL 宿主下旧 worker 写不了 draining）。
+      deps.log.warn(
+        'sandbar-temporal-tools supervisor: 工单 worker %s console boot 异代换手：%s',
+        d.tid, d.reason ?? '')
+    } else if (d.action === 'replaced-no-poller') {
+      // t261009-55：活 pid + 已证零活 poller = 点名的可修复态（t261009-52 实案：
+      // pid 活、polling=false、票在写文件）。与 draining 同一条清槽路径。
+      deps.log.warn(
+        'sandbar-temporal-tools supervisor: 工单 worker %s no-poller 修复换手：%s',
+        d.tid, d.reason ?? '')
+    } else if (d.action === 'stale-meta-cleared') {
+      // t261009-55 R4：陈旧异代指纹只清 meta 不动 pidfile（pidfile=槽位真源）。
+      deps.log.info(
+        'sandbar-temporal-tools supervisor: 工单 worker %s 陈旧 meta 已清：%s',
+        d.tid, d.reason ?? '')
+    } else if (d.action === 'held-same' && d.reason) {
+      // no_poller_unproven 等「held 但要点名」的留痕——不哑巴（review C3 同纪律）。
+      deps.log.info(
+        'sandbar-temporal-tools supervisor: 工单 worker %s held（%s）', d.tid, d.reason)
     } else if (d.action === 'held-unknown') {
       // meta 缺失/畸形/读失败三态都在 reason 里（review C3：兼容跳过不许哑巴）。
       // 行为不劣于现状（老版 worker 无 meta 照样跳过），但留痕可查。
@@ -681,6 +813,7 @@ export function apply(ctx: Context, config?: TemporalToolsConfig): (() => void) 
           SANDBAR_WATCH_WORKFLOW: tid, // workflow 收口自退
           SANDBAR_WATCH_PPID: '1',     // 宿主 SIGKILL → ppid=1 自退
           SANDBAR_WORKER_META: join(dataDir, `worker-${tid}.meta`), // 归属指纹自报（KI-033，ensure 据此判异仓）
+          SANDBAR_CONSOLE_BOOT: consoleBootId(), // t261009-55：boot 代际——重启换手一次 ensure tick 完成，不依赖旧 worker 写 draining
         },
         stdio: ['ignore', fd, fd],
       })

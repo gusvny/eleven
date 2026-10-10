@@ -1282,6 +1282,21 @@
       "note": "",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261009_55_boot_meta_merge.py": {
+      "anchor": "behaviour",
+      "note": "t261009-55: worker-owned meta extras merge (console_boot/polling) — merge, pid guard, draining guard, malformed-input fail-closed, boot id env read",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_55_ensure_handover.py": {
+      "anchor": "contract",
+      "note": "t261009-55: ensureTicketWorkersOnce decision contract — foreign-boot one-tick handover, stale-meta-cleared (pidfile authority), proven-zero-poller repair, unproven probe never clears a slot, probe budget cap, clear-only when spawn absent",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_55_read_degrade_named.py": {
+      "anchor": "contract",
+      "note": "t261009-55: read-face degrade by name — durable face block on no_poller/query_timeout receipts (memo stage/status, unavailable cause label, orphan-window note), kind/wording byte-identical, malformed inputs never guess",
+      "sync_path": ""
+    },
     "server/engine/tests/test_fault_injection_registry.py": {
       "anchor": "contract",
       "note": "t261009-52: registry truth table (total on malformed input), refusal/lint note wording, wiring anchors for both add-everything settle sites and the brake-scenario reclaim guards",
@@ -4603,6 +4618,16 @@
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
+    },
+    "integration/t261009-55/sc_t26100955_one_tick_handover.py": {
+      "anchor": "contract",
+      "note": "t261009-55 KI-01M4GF5R8NHQNATH7WD7SKF94X addendum: one-tick boot-generation handover + proven-zero-poller repair, ensureTicketWorkersOnce decision records",
+      "sync_path": "server/plugins/temporal-tools/node.ts (ensureTicketWorkersOnce); server/engine/worker.py (meta console_boot/polling)"
+    },
+    "integration/t261009-55/sc_t26100955_read_face_poller_gap.py": {
+      "anchor": "contract",
+      "note": "t261009-55 spec 3+4: snapshot-failure degrade face (unavailable(cause@queue/ticket), durable stage, orphan start_to_close note)",
+      "sync_path": "server/engine/client.py (_classify_snapshot_failure consumers, degrade seam)"
     },
     "integration/t261009-52/sc_fixture_leak_brakes.py": {
       "anchor": "behaviour",
