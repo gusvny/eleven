@@ -487,3 +487,29 @@ up) removes the executor's chance to act on its own ticket and hides whether its
 holding a slot while a decision is already in hand (a freeze lifting, a queue head), or the executor has said
 in the thread that it cannot sign. Record `who` truthfully either way — the steward's signature carries
 "host（经 integration 值守会话代签）", never the host's own name without its word.
+
+### One lane through the merge gate at a time (261010, while `t261009-60` is unlanded)
+
+The engine suite contains a test that asset **the shared system temp root has no `bundle-freshness-*`
+leftovers** (`server/engine/tests/test_t261009_42_bundle_freshness.py::test_rebuild_temp_copy_reaped_on_every_path`,
+`KI-01M4J0JGYJWCJ1Z2XD3KW431FV`). Any lane's `merge_check` runs the declared-build-chain freshness check, which
+rebuilds the client bundle inside `TemporaryDirectory(prefix="bundle-freshness-")` — **in the shared temp root**
+(`tempfile.gettempdir()` = `/var/folders/…/T` on macOS, *not* `/tmp`) for minutes at a time. So while two lanes
+sit in `merge_check`, each one's suite run sees the other's live directory and reports a false red.
+
+Measured (261010): `-55` and `-58` entered `merge_check` together at 12:29 → both red at 12:37 (`4561 passed`,
+8:44 wall, one failure); `-55` alone at 12:48 → six green checks. Reproduce the mechanism in one command: create
+a direct child of `tempfile.gettempdir()` named `bundle-freshness-*` and run that single test — it fails in
+0.51s; remove it and it passes in 0.26s. A decoy placed anywhere else (for example `$(mktemp -d)/bundle-freshness-*`
+or `/tmp`) proves nothing, because the glob only looks at the top level of the resolved temp root.
+
+Until `t261009-60` lands the isolation fix:
+
+1. **Serialize `merge_check`**: let one lane hold that stage, and retry the others **one at a time** rather than
+   firing `retry_qc` at every red in the same minute. This is the difference between a coin flip and a pass.
+2. Read the red before believing it: if the failure is that one test and the round's other 4500+ cases pass, and
+   the test passes alone in the lane and alone on main, it is this false red — do not call it the ticket's fault
+   and do not weaken the gate.
+3. Do **not** book it in `integration/known-red-baseline.json` as a stopgap: the roster's quiet rerun builds
+   `python3 -m pytest …`, and the lane worker's PATH has no engine venv, so the rerun can only ever be red
+   (`KI-01M4J1DZH3QBMR3HV3Q78DVJ9Q`). A row would block exactly as before, while looking like a fix.
