@@ -5137,3 +5137,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**「薄壳投影」是第三个消费面**——t261009-35 当初只点名了两个面（引擎行 + `_v2_query` 详情）并立了"新键必须两处同改"的规矩，而这条缝**不在那两处之内**，于是规矩看起来被遵守了、面上却是盲的。**凡新增行键，先问薄壳会不会把它丢掉**；验证口径＝**同一张票、两个面、逐键相等**，不是"各自单测绿"（薄壳那两行代码本身"对"得很，只是它读的键不存在——两层各自单测都会过）。
 >
 > **回归**：L2——(а) 同票两面对读：`lane_version` / `develop_line` / `paused` / `paused_phase` 逐键相等；(b) 未投的键在投影处**具名**（不是静默丢）。L3——一张 buffer 票在板上可辨（lane/line 非空）、一张暂停票 `paused=true`，且两键都来自引擎行而非本地推导。
+
+## KI-01M4KH2QR5BRMQVZWA1C40Y8PF **生产里那条 tick 根本到不了"线轮"**：中央 worker（`sandbar` 队列，起于 2026-10-09 20:20）装的是**接线之前**的 workflow 体（`workflows.py`/`activities.py` 到 2026-10-10 14:30 才落地），而**代码指纹的 16 个模块里没有这两个文件** ⇒ 触发一次调度**看起来成功、实际只跑了巡检**(261011 00:29 触发 + 02:3x 读日志实测;integration 岗登记)
+
+> **现象（原始读数）**：
+> - 00:29 我按宿主令触发一次 `dispatcher-scan`（调度面 `recent_action_times` 记 `2026-10-10T16:29:13Z`）：`server/engine/data/worker.log` 显示这个 workflow 只跑了三个活动——`scan_tickets_report`(id 2)、`write_scan_report`(id 3)、`reconcile_ticket_workers`(id 4)，00:29:15 报"巡检：483 张工单，待决 0 张"**完成**；**日志里没有任何 `line_round_tick_engine` 活动**。
+> - 落盘的巡检报告 `server/engine/out/scan/2026-10-11.json` 键集 = `by_status/generated_at/items/pending_decision_count/red_line/stuck_threshold_hours/summary/total_tickets/unfiled`——**没有 lines/线轮的字段**（新 workflow 体会带上每线的 tick 条目）。
+> - 时间对不上：中央 worker `pid 28404` **起于 `2026-10-09 20:20:59`**（`engine_ops.py workers` 的 `started_at`），而 `server/engine/workflows.py` 与 `server/engine/activities.py` 的最后改动都是 **`2026-10-10 14:30:17`**（`d4837baf`，t261009-50 的接线：`workflows.py:305-312` 调 `line_round_tick_engine`、`activities.py:196` 注册该活动）⇒ **进程里装的是接线前的体**，那个分支在它里面根本不存在。
+> - `delivery.jsonl` 至今不存在——与"tick 从未到达线轮"一致（**不是**"跑了没内容"）。
+> - **指纹面对这件事是盲的**：`shared.CODE_STAMP_MODULES`（worker 起跑时自写的漂移指纹，16 个模块）**不含 `workflows.py`、也不含 `activities.py`** ⇒ 一个"只改了这两个文件"的 worker 会报 `stale=none`（**静默陈旧**）；本次是因为 `agent_activities` 恰好也在同一批改动里才让 stale 列表非空，而它**点不到真正缺的那两个文件**。
+>
+> **危害**：①**点火会静默空跑**——宿主的计划是"设 `SANDBAR_LINE_ROUND_RUNNER` + 重启"，但**只补 runner 环境变量救不了这条路径**：workflow 体里没有那段调用，触发一次照样只跑巡检、照样写报告，而**既不落认证台账、也不报 `runner_missing`**（具名缺 runner 的那条路同样在那个不存在的分支后面）。本夜已经真的发生了一次。②凡"新 workflow 分支 / 新活动注册"类交付物，**只有中央 worker 换手才生效**，而现有漂移面对这条路径**看不见**。
+>
+> **出路**：①**点火先决条件写清**（两步都归宿主/控制台面，本岗做不了）：**中央 worker 必须换手**（按 pidfile TERM，等控制台 supervisor 自动拉起）**且**新进程环境带 `SANDBAR_LINE_ROUND_RUNNER`（+ `SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S`，见 `integration/t261009-77/runner-declaration.md` 第 13/17 行）；②把 `workflows.py` / `activities.py` 加进 `CODE_STAMP_MODULES`（实现归票）；③"接线类"交付物的验收口径补一条：**触发一次真调度，回执里要能看见那个新活动名**。
+>
+> **纪律**：**"新分支/新活动"类改动的生效判据 = 进程重启后的一次真运行记录**——单测绿、场景绿、代码在 main 里，都不算；漂移指纹只覆盖它列出的模块，**未列出的模块陈旧时指纹会说谎**，凡依赖新接线的活儿都必须另取一次真运行证据。
+>
+> **回归**：L3——触发一次真调度：工作日志里出现新活动名（本例 `line_round_tick_engine`），且认证台账有对应行，或具名 `runner_missing`（二者必居其一；"什么都没有"就是本条复发）。
