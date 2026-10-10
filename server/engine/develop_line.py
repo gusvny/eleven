@@ -52,8 +52,8 @@ from agent_activities import _git, _settle_merge_core  # noqa: E402
 # that assigns `seq` under flock, the reader, and the kind constants. No import
 # cycle: develop_certify imports neither this module nor agent_activities.
 from develop_certify import (  # noqa: E402
-    KIND_CERT, KIND_LANDING, _of_kind, append_rows, ledger_path, mint_id,
-    read_rows,
+    KIND_CERT, KIND_LANDING, _of_kind, append_rows, landing_freeze_face,
+    ledger_path, mint_id, read_rows,
 )
 
 # Record shape version (ledger-record-models rule 24: every record carries the
@@ -102,6 +102,16 @@ class LandNotPinnedError(LandingError):
     name instead of landing the current tip — landing a different tip than the
     one the gate judged is exactly the silent wrong-delivery the handover
     warns about."""
+
+
+class LineFrozenError(LandingError):
+    """The line is under an open freeze and this ticket is not the structural
+    exemption (t261009-67, design items 16/17/95/168). The landing refuses
+    BEFORE any worktree mutation, naming the freeze episode id, the cause
+    certification and the reason — a red that implicates content stops
+    landings, and the exemption is judged from a recorded ``repairs``
+    relation, never from anything the landing or the ticket declares about
+    itself."""
 
 
 # ------------------------------------------------------------------ lane version
@@ -582,7 +592,20 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
     # The state each repository sits on, DERIVED once before the act: the
     # line's latest certification's revision per repository (None where the
     # line has never certified that repo). Never stored on the landing.
-    certs = _of_kind(read_rows(ledger_path(project_key))[0], KIND_CERT, line.line_id)
+    rows = read_rows(ledger_path(project_key))[0]
+    # The freeze consultation (t261009-67, goals 16/17/168): judged INSIDE the
+    # locked region, BEFORE any worktree mutation, from the same ledger read
+    # the ancestor gate consumes — so a freeze opened concurrently is already
+    # in these rows and no freeze can slip between check and act. The face
+    # takes no kind parameter: the only way through a frozen line is a
+    # current ``repairs`` relation naming a landing on THIS line (structural,
+    # never self-declared). Tests anchor on the reason + freeze/cause ids.
+    face = landing_freeze_face(rows, line.line_id, ticket_id)
+    if not face["allowed"]:
+        raise LineFrozenError(
+            "landing refused: line %r is frozen (freeze %s, cause cert %s): %s"
+            % (line.line_id, face["freeze"], face["cause"], face["reason"]))
+    certs = _of_kind(rows, KIND_CERT, line.line_id)
     cert_rev: Dict[str, str] = {}
     if certs:
         for r in certs[-1].get("repos", []):

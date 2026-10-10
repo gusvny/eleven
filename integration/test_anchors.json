@@ -1353,6 +1353,11 @@
       "anchor": "contract",
       "note": "t261009-66: relations_of two-direction reader truth table (stored actor side, derived+labelled benefited side, three target forms, unresolved honesty bucket, superseded/cycle exclusion, malformed rows) and the promotion repairs naming face (covered-ticket remedies named with kind, uncovered not, empty list stable shape, legacy row valid, malformed field refused)",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_67_freeze_landing_and_faces.py": {
+      "anchor": "contract",
+      "note": "t261009-67: freeze-stop landing truth table - frozen line refuses a landing by name carrying freeze episode id + cause cert, structural exemption via the recorded repairs relation (no kind parameter to self-declare), could-not-run growth keeps the line landing, open_freeze_summary signer face fields, chain of fixes stays visible, malformed rows named",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4826,6 +4831,11 @@
       "anchor": "contract",
       "note": "t261009-66: both-directions-from-disk reader (byte-identical read, derived labelled), correction-aware neither-side superseded, one-implementation identity, promotion repairs naming proven from the file",
       "sync_path": "server/engine/develop_certify.py (relations_of, _relation_target_tickets, validate_row promotion repairs branch); server/engine/develop_promote.py (re-export, build_promotion repairs derivation)"
+    },
+    "integration/t261009-67/sc_t26100967_freeze_stops_landings.py": {
+      "anchor": "behaviour",
+      "note": "t261009-67: the landing act consults the open freeze over a real temp delivery ledger and real git fixtures - frozen line refuses by name (ids on the refusal, zero records, repo untouched), self-declaration reads as the same refusal, current same-line repairs relation lands while superseded/cross-line do not, could-not-run growth row leaves the line landing and the growth in the next certification's range, the REAL certification-adapter subprocess reports the freeze to the promotion signer, and a fix landing keeps the episode open with the fix chain read off the records",
+      "sync_path": ""
     }
   }
 }

@@ -83,6 +83,10 @@ export interface TicketMeta {
 export interface CertificationInput {
   line?: LineInput | null
   freeze?: FreezeInput | null
+  /** t261009-67: the engine's open_freeze_summary output — the signer's
+   *  freeze face (cause cert + the chain of fix landings). Absent on older
+   *  adapter receipts; present-but-malformed degrades the face by name. */
+  freezeSummary?: unknown
   waitStates?: unknown
   outcomes?: unknown
   certs?: unknown
@@ -90,6 +94,16 @@ export interface CertificationInput {
   ticketMeta?: unknown
   /** Records' own round state ('idle' | 'running'); absent = 'idle'. Rule 9. */
   roundState?: unknown
+}
+
+/** One fix landing of the chain, as the signer face shows it (goal 166):
+ *  the fix landing, its ticket, and the landing its current repairs
+ *  relation names (null when the repair target is unresolved — the gap
+ *  stays visible, never guessed closed). */
+export interface FixChainRow {
+  landing: string
+  ticket: string
+  repaired: string | null
 }
 
 export interface TicketRow {
@@ -126,8 +140,16 @@ export interface CertificationFace {
   lineId: string
   state: 'GREEN' | 'FROZEN'
   frozen: boolean
-  /** One freeze line + the blockers verbatim; null when not frozen. */
-  frozenFace: { banner: string; blockers: string[] } | null
+  /** One freeze line + the blockers verbatim; null when not frozen.
+   *  t261009-67: carries the cause certification and the chain of fixes
+   *  (goal 167: the signer sees what froze the line and which fix is
+   *  reopening it). */
+  frozenFace: {
+    banner: string
+    blockers: string[]
+    cause: string
+    fixChain: FixChainRow[]
+  } | null
   deliveredTotal: number
   certified: CertifiedRow[]
   waiting: WaitingRow[]
@@ -180,6 +202,40 @@ function freezeFace(v: unknown): { frozen: boolean; culprit: string } | null {
   return { frozen: v.frozen, culprit: str(v.culprit).trim() }
 }
 
+/** The engine's open_freeze_summary output, validated (t261009-67). Absent
+ *  (null/undefined) = an older adapter receipt: an empty signer face rides
+ *  along. Present but malformed degrades the whole face by name — a frozen
+ *  line whose signer face cannot be read is never rendered as if it could. */
+function freezeSummaryFace(v: unknown): {
+  cause: string
+  fixChain: FixChainRow[]
+} | null {
+  if (v === null || v === undefined) return { cause: '', fixChain: [] }
+  if (!isObj(v)) return null
+  if (!optStr(v.cause) || !optStr(v.freeze)) return null
+  if (v.fix_landings !== undefined && !Array.isArray(v.fix_landings)) {
+    return null
+  }
+  if (Array.isArray(v.fix_landings)
+    && v.fix_landings.some((x) => !isObj(x))) {
+    return null
+  }
+  const fixChain: FixChainRow[] = list(v.fix_landings).map((r) => {
+    const repairs = list(r.repairs)
+    let repaired: string | null = null
+    for (const rep of repairs) {
+      const cand = rep.repaired
+      if (typeof cand === 'string' && cand.trim()) repaired = cand.trim()
+    }
+    return {
+      landing: str(r.landing).trim(),
+      ticket: str(r.ticket).trim(),
+      repaired,
+    }
+  })
+  return { cause: str(v.cause).trim(), fixChain }
+}
+
 /** HH:MM, 24h local — the only clock the face shows. */
 export function formatClock(ms: unknown): string {
   const n = num(ms)
@@ -229,12 +285,16 @@ export function deriveCertificationFace(input: CertificationInput): Certificatio
 
   const freeze = freezeFace(input.freeze)
   if (freeze === null) return emptyFace('freeze record unreadable')
+  const summary = freezeSummaryFace(input.freezeSummary)
+  if (summary === null) return emptyFace('freeze summary unreadable')
   const frozen = freeze.frozen
   const culprit = freeze.culprit
   const frozenFace = frozen
     ? {
         banner: 'Frozen by a red round — new landings stop; the certified part can still be promoted.',
         blockers: culprit ? [culprit] : [],
+        cause: summary.cause,
+        fixChain: summary.fixChain,
       }
     : null
 

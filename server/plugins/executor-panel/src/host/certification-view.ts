@@ -128,7 +128,11 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     + '</div></div>'
     + (frozen
       ? `<div class="banner red" id="certBanner"><b>FROZEN</b> <span id="certBannerTxt">${esc(str(frozenFace && frozenFace.banner))}</span>`
+        + (frozenFace && str(frozenFace.cause) ? ` <span class="mono k" id="certCause" title="the red certification that opened this freeze episode">cause ${esc(str(frozenFace.cause))}</span>` : '')
         + (blockers.length ? ` <span class="mono k" id="certBannerNames">${esc(blockers.map((b) => str(b)).filter(Boolean).join(' · '))}</span>` : '')
+        + (frozenFace && Array.isArray(frozenFace.fixChain) && frozenFace.fixChain.length
+          ? `<div class="mono k" id="certFixChain" title="the landings made while the freeze was open — the exempt fixes and what each repairs; this chain is the next red's candidate culprits">fix chain: ${esc((frozenFace.fixChain as { landing?: unknown; ticket?: unknown; repaired?: unknown }[]).map((f) => `${str(f.ticket)} (${str(f.landing)}${f.repaired ? ' repairs ' + str(f.repaired) : ''})`).join(' → '))}</div>`
+          : '')
         + '</div>'
       : '')
     + `<div class="card"><h3>${CERT_COPIES.waiting} <span class="k" id="certWaitCount">${waiting.length}</span></h3>`

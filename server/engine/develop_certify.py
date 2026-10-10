@@ -1038,6 +1038,149 @@ def may_land(rows, line, ticket_kind, ticket=None, repair=None,
     return True
 
 
+def landing_freeze_face(rows, line, ticket_id, patch_ids=None):
+    """The landing act's freeze consultation (t261009-67, goals 16/17/168):
+    may THIS ticket land into ``line`` NOW, judged from the records alone?
+
+    Returns a dict, never raises for a refusal (the caller formats the named
+    error): ``allowed`` / ``reason`` ("" when allowed) / ``freeze`` (the live
+    episode id) / ``cause`` (the certification that opened it) / ``relation``
+    and ``repaired`` (the granting ``repairs`` relation and the landing it
+    names, when the exemption grants).
+
+    The STRUCTURAL rule, kept structural at the enforcement point: this face
+    takes NO kind parameter — there is nothing a caller can claim about
+    itself. On an unfrozen line every landing passes (the freeze does not
+    exist, so there is nothing to exempt). On a frozen line the ONLY path
+    through is a CURRENT ``repairs`` relation recorded BY ``ticket_id``
+    naming a landing on THIS line — read through the ONE relation reader
+    (``relations_of`` as_actor side) and judged by ``_repair_grants`` (which
+    re-checks every field it consumes). A ticket with no relation at all is
+    refused ``freeze_landing_refused`` — the same named refusal covers every
+    self-declaration attempt, because a self-assertion is not an input here.
+    A relation that names nothing on this line (or a superseded one, or a
+    patch-id-named one without the ``patch_ids`` map) is refused with
+    ``_repair_grants``' own named reason, plus the freeze id and cause.
+    """
+    if not isinstance(line, str) or not line.strip():
+        raise CertifyError("line_missing")
+    if not (isinstance(ticket_id, str) and ticket_id.strip()):
+        raise CertifyError("ticket_id_missing")
+    if patch_ids is not None and not isinstance(patch_ids, dict):
+        raise CertifyError("patch_ids_not_map")
+    fs = freeze_state(rows, line)
+    if not fs["frozen"]:
+        return {"allowed": True, "reason": "", "freeze": None,
+                "cause": None, "relation": None, "repaired": None}
+    ep, cause = fs["episode"], fs["cause"]
+    rels = relations_of(rows, ticket_id, patch_ids)["as_actor"]["repairs"]
+    if not rels:
+        return {"allowed": False, "reason": "freeze_landing_refused",
+                "freeze": ep, "cause": cause, "relation": None,
+                "repaired": None}
+    last_why = "repair_target_unresolved"
+    for entry in rels:
+        rel_id = entry.get("id")
+        row = next((r for r in rows
+                    if isinstance(r, dict) and r.get("id") == rel_id), None)
+        if row is None:  # the reader only lists current rows; never guessed
+            last_why = "repair_relation_row_missing:%s" % rel_id
+            continue
+        why = _repair_grants(rows, line, ticket_id, row, patch_ids)
+        if not why:
+            repaired = None
+            ev = row.get("evidence")
+            ev_ref = ev.get("ref") if isinstance(ev, dict) else None
+            for ref in (row.get("to"), ev_ref):
+                if not (isinstance(ref, str) and ref.strip()):
+                    continue
+                hit = _repair_target_landing(rows, line, ref, patch_ids)
+                if hit is not None:
+                    repaired = hit.get("id")
+                    break
+            return {"allowed": True, "reason": "", "freeze": ep,
+                    "cause": cause, "relation": rel_id, "repaired": repaired}
+        last_why = why
+    return {"allowed": False, "reason": last_why, "freeze": ep,
+            "cause": cause, "relation": None, "repaired": None}
+
+
+def open_freeze_summary(rows, line, patch_ids=None):
+    """The promotion signer's freeze face (t261009-67, goals 167/166), read
+    from the ledger alone: the live freeze episode, the certification that
+    caused it, the derived culprit, and the CHAIN OF FIXES — every landing
+    made on the line while this episode has been open, each joined to the
+    current ``repairs`` relations recorded by its ticket (the ONE reader,
+    as_actor side; a repair whose target cannot be resolved here is listed
+    with ``repaired: null`` — the gap stays visible, never guessed closed).
+    Under an open freeze those landings are exactly the exempt fix landings,
+    so this list is also the next red's candidate-culprit chain read off the
+    records (goal 166: the next fix names the previous fix's landing).
+    ``pending_fixes`` names the remedy work already RECORDED (a current
+    ``repairs`` relation naming a landing on this line) whose ticket has not
+    landed yet — the fix "that will reopen" the freeze (item 167), visible
+    before its landing exists, read from the same records."""
+    if not isinstance(line, str) or not line.strip():
+        raise CertifyError("line_missing")
+    fs = freeze_state(rows, line)
+    base = {"frozen": fs["frozen"], "freeze": fs["episode"],
+            "cause": fs["cause"], "culprit": fs["culprit"],
+            "opened_at": None, "fix_landings": [], "pending_fixes": []}
+    if not fs["frozen"]:
+        return base
+    episodes = _of_kind(rows, KIND_FREEZE, line)
+    base["opened_at"] = episodes[-1].get("at") if episodes else None
+    for ldg in _of_kind(rows, KIND_LANDING, line):
+        at = ldg.get("at")
+        if not isinstance(at, int) or isinstance(at, bool):
+            continue
+        if base["opened_at"] is not None and at < base["opened_at"]:
+            continue
+        ticket = ldg.get("ticket")
+        repairs = []
+        if isinstance(ticket, str) and ticket.strip():
+            face = relations_of(rows, ticket, patch_ids)
+            for entry in face["as_actor"]["repairs"]:
+                rel_id = entry.get("id")
+                row = next((r for r in rows if isinstance(r, dict)
+                            and r.get("id") == rel_id), None)
+                repaired = None
+                if row is not None:
+                    ev = row.get("evidence")
+                    ev_ref = ev.get("ref") if isinstance(ev, dict) else None
+                    for ref in (row.get("to"), ev_ref):
+                        if not (isinstance(ref, str) and ref.strip()):
+                            continue
+                        hit = _repair_target_landing(rows, line, ref,
+                                                     patch_ids)
+                        if hit is not None:
+                            repaired = hit.get("id")
+                            break
+                repairs.append({"id": rel_id, "repaired": repaired})
+        base["fix_landings"].append({"landing": ldg.get("id"),
+                                     "ticket": ticket, "at": at,
+                                     "repairs": repairs})
+    # The fixes recorded but not yet landed: current repairs relations whose
+    # target resolves on THIS line and whose actor ticket has no landing
+    # during this episode — the "will reopen" side of item 167.
+    landed = {f["ticket"] for f in base["fix_landings"]}
+    for rel in _current_relation_rows(rows):
+        if rel.get("kind") != REL_KIND_REPAIRS:
+            continue
+        actor = rel.get("from")
+        if not (isinstance(actor, str) and actor.strip()) or actor in landed:
+            continue
+        ev = rel.get("evidence")
+        ev_ref = ev.get("ref") if isinstance(ev, dict) else None
+        targets = [t for t in (rel.get("to"), ev_ref)
+                   if isinstance(t, str) and t.strip()]
+        if any(_repair_target_landing(rows, line, t, patch_ids) is not None
+               for t in targets):
+            base["pending_fixes"].append({"ticket": actor,
+                                          "relation": rel.get("id")})
+    return base
+
+
 def ticket_wait_state(rows, line, landing, is_green, now_ms,
                       wait_bound_ms=None):
     """The waiting ticket's face, derived from the records (goal 14/16).

@@ -121,6 +121,10 @@ def line_input(rows, line_id, is_green, now_ms):
     """One line's model input, engine-derived. Raises CertifyError (named)
     through — the caller turns it into that line's named degradation."""
     freeze = dc.freeze_state(rows, line_id)
+    # t261009-67: the promotion signer's freeze face — the live episode, its
+    # cause certification, and the chain of fix landings (with their current
+    # repairs relations) read off the ledger by the engine's own derivation.
+    freeze_summary = dc.open_freeze_summary(rows, line_id)
     landings = [r for r in rows if r.get("kind") == dc.KIND_LANDING
                 and r.get("line") == line_id]
     wait_states = []
@@ -141,6 +145,7 @@ def line_input(rows, line_id, is_green, now_ms):
     return {
         "line": {"line_id": line_id},
         "freeze": freeze,
+        "freezeSummary": freeze_summary,
         "waitStates": wait_states,
         "outcomes": outcomes,
         "certs": certs,
