@@ -865,6 +865,246 @@ function stageDisplayLabel(stageId, engineName) {
 /** Nominal weight (ms) for an unstarted stage: the mock's NOMINAL constant,
 *  so the first stage cannot swallow the row. */
 const LANE_NOMINAL_MS = 10 * 6e4;
+const LM_SCENE = {
+	W: 700,
+	PAD: 8,
+	RPAD: 30,
+	H: 96,
+	AY: 30,
+	AH: 12,
+	BY: 46,
+	BH: 12,
+	GAP: 4,
+	MINW: 12,
+	LABEL_LO: 26,
+	LABEL_HI: 17,
+	CLAMP_MIN: 20,
+	CLAMP_MAX: 710
+};
+/** Segment fills by kind (criterion 2: agent green / gate blue / human amber). */
+const LM_KIND_FILL = {
+	agent: "var(--dsw-derive-success,#4ac26b)",
+	gate: "var(--dsw-derive-accent,#0969da)",
+	human: "var(--dsw-derive-warn,#bf8700)"
+};
+const LM_TODO_FILL = "var(--dsw-derive-border,#d0d7de)";
+const LM_BLOCKED_FILL = "var(--dsw-derive-danger,#cf222e)";
+/** Human words for the resolution step of the ever-blocked story (vocabulary = lane-states resolvedBy). */
+const RESOLVED_HOW = {
+	rerun: "stage rerun completed",
+	advanced: "workflow advanced to later stages",
+	closed: "ticket closed"
+};
+/** The ever-blocked story (when / why / how resolved): shared by the badge and the segment hover title. */
+function everBlockedTitle(h) {
+	const bits = [`Blocked ${h.passes.length}× before`];
+	if (h.last.at) bits.push(h.last.at);
+	if (h.last.reason) bits.push(h.last.reason);
+	if (h.last.gen !== void 0) bits.push(`Round ${h.last.gen}`);
+	if (h.resolved) bits.push(`Resolved (${RESOLVED_HOW[h.resolvedBy ?? ""] || "resolved"}${h.resolvedAt ? `: ${h.resolvedAt}` : ""})`);
+	return bits.join(" · ");
+}
+/** Only a resolved blocked history earns the ever-blocked badge (t260916-04: a currently blocked stage carries none). */
+function everOf(nv) {
+	const h = nv.blockedHistory;
+	return h && h.resolved === true && h.passes.length > 0 && nv.vis === "done" ? h : void 0;
+}
+/** Segment hover title (criterion 8): name · who · duration · rounds · blocked
+*  history. The per-round evidence (each round's reason) rides here too - the
+*  round chips are retired (design criterion 7: rework is carried by ×N). */
+function segmentTitle(nv) {
+	const bits = [`${stageDisplayLabel(nv.node.id, nv.node.label)} · ${nv.node.role} · ${nv.node.kind}`];
+	if (nv.node.optional) bits.push(nv.node.optional);
+	bits.push(nv.durationText);
+	bits.push(`${nv.rounds.length} round${nv.rounds.length === 1 ? "" : "s"}`);
+	if (nv.rounds.length > 1) bits.push(nv.rounds.map((r) => `R${r.gen} ${r.state}${r.reason ? `: ${r.reason}` : ""}`).join(" / "));
+	const ever = everOf(nv);
+	if (ever) bits.push(everBlockedTitle(ever));
+	return bits.join(" · ");
+}
+function fillOf(nv) {
+	if (nv.skipped) return {
+		fill: "none",
+		fillOpacity: 1,
+		dashed: true
+	};
+	if (nv.vis === "blocked") return {
+		fill: LM_BLOCKED_FILL,
+		fillOpacity: 1,
+		dashed: false
+	};
+	if (nv.vis === "todo") return {
+		fill: LM_TODO_FILL,
+		fillOpacity: .35,
+		dashed: false
+	};
+	return {
+		fill: LM_KIND_FILL[nv.node.kind],
+		fillOpacity: nv.vis === "done" ? .22 : 1,
+		dashed: false
+	};
+}
+function barOf(nv, x, y, w, h, track, now) {
+	const f = fillOf(nv);
+	const ever = everOf(nv);
+	return {
+		id: track === "main" ? nv.node.id : `${nv.node.id}#partner`,
+		stageId: nv.node.id,
+		track,
+		x,
+		y,
+		w,
+		h,
+		fill: f.fill,
+		fillOpacity: f.fillOpacity,
+		dashed: f.dashed,
+		kind: nv.node.kind,
+		vis: nv.vis,
+		skipped: Boolean(nv.skipped),
+		now,
+		diamond: nv.node.kind === "human",
+		/** The t260916-04 face stays: an ever-blocked stage carries data-ever-blocked=true on its node. */
+		ever: Boolean(ever),
+		weightMs: nv.weightMs,
+		title: segmentTitle(nv)
+	};
+}
+function labelBit(nv) {
+	const durBit = nv.durSource === "nominal" ? "" : nv.durationText;
+	return durBit ? ` ${durBit}${nv.badge ? ` · ${nv.badge}` : ""}` : "";
+}
+/** Main label: name + `duration · ×N` in the same caption (criterion 4/7);
+*  done/running stages print their duration, unstarted prints the name only,
+*  the current stage appends `now` (the mock's wording). */
+function mainLabelOf(nv, i, now) {
+	const ever = everOf(nv);
+	return {
+		text: `${stageDisplayLabel(nv.node.id, nv.node.label)}${now ? " now" : labelBit(nv)}`,
+		x: 0,
+		y: i % 2 === 0 ? LM_SCENE.LABEL_LO : LM_SCENE.LABEL_HI,
+		track: "main",
+		level: i % 2 === 0 ? 0 : 1,
+		anchor: "middle",
+		now,
+		opt: nv.node.optional || void 0,
+		roundBadge: nv.badge || void 0,
+		everTitle: ever ? everBlockedTitle(ever) : void 0
+	};
+}
+/** Partner band width (%): min(1, partner/window) x 100 (the mock line ~677 clamp). */
+function lmBandPct(partnerMs, windowMs) {
+	if (!(windowMs > 0)) return 100;
+	return Math.min(1, partnerMs / windowMs) * 100;
+}
+const LM_MIN_PCT = 6;
+/** v5 time-share main lane: band width = MIN_PCT + flex x (weight/totalWeight)
+*  (the mock's own formula; t261008-23, unchanged). */
+function lmWidths(model) {
+	const weights = model.items.map((it) => ({
+		id: it.id,
+		weightMs: it.kind === "group" ? model.groups[it.id]?.windowMs ?? 0 : model.nodes[it.id]?.weightMs ?? 0
+	}));
+	const total = weights.reduce((a, r) => a + r.weightMs, 0);
+	const flex = 100 - LM_MIN_PCT * weights.length;
+	return weights.map((w) => ({
+		...w,
+		pct: LM_MIN_PCT + (total > 0 ? flex * (w.weightMs / total) : flex / Math.max(1, weights.length))
+	}));
+}
+/**
+* Model -> SVG scene (a pure function; LaneMap only draws it). The geometry
+* copies the mock's laneMap(t) value for value: 12-tall slim bars on one
+* baseline, two floating label levels (middle anchor, clamped into
+* [20, W+RPAD-20]), dotted leaders, the diamond at the bar head, the partner
+* on a second track (one dashed window around both tracks + the parallel
+* mark), the now cursor spanning both tracks.
+*/
+function laneMapScene(model) {
+	const { W, PAD, RPAD, AY, AH, BY, BH, GAP, MINW, CLAMP_MIN, CLAMP_MAX } = LM_SCENE;
+	const usable = W - PAD - RPAD;
+	const pctOf = new Map(lmWidths(model).map((w) => [w.id, w.pct]));
+	const bars = [];
+	const labels = [];
+	const leaders = [];
+	const windows = [];
+	const parMarks = [];
+	const diamonds = [];
+	let cursor = null;
+	let x = PAD;
+	model.items.forEach((item, i) => {
+		const w = Math.max(0, usable * (pctOf.get(item.id) ?? 0) / 100);
+		const now = model.nowItem === item.id;
+		if (item.kind === "group") {
+			const g = model.groups[item.id];
+			windows.push({
+				x: x - 4,
+				y: AY - 4,
+				w: w + 8,
+				h: BY + BH - AY + 8,
+				groupId: g.def.id,
+				active: g.active,
+				allDone: g.allDone,
+				windowMs: g.windowMs
+			});
+			parMarks.push({
+				x: x + 5,
+				y: BY + BH - 1
+			});
+			const head = g.members[0];
+			const partner = g.members[1];
+			bars.push(barOf(head, x, AY, w, AH, "main", now));
+			labels.push(mainLabelOf(head, i, now));
+			const pw = Math.max(MINW, w * lmBandPct(partner.weightMs, g.windowMs) / 100);
+			bars.push(barOf(partner, x, BY, pw, BH, "partner", partner.vis === "running"));
+			const pever = everOf(partner);
+			labels.push({
+				text: `${stageDisplayLabel(partner.node.id, partner.node.label)}${partner.vis === "running" ? " now" : labelBit(partner)}`,
+				x: x + 6,
+				y: BY + BH + 9,
+				track: "partner",
+				level: 0,
+				anchor: "start",
+				now: partner.vis === "running",
+				opt: partner.node.optional || void 0,
+				roundBadge: partner.badge || void 0,
+				everTitle: pever ? everBlockedTitle(pever) : void 0
+			});
+		} else {
+			const nv = model.nodes[item.id];
+			bars.push(barOf(nv, x, AY, w, AH, "main", now));
+			labels.push(mainLabelOf(nv, i, now));
+			if (nv.node.kind === "human") diamonds.push({
+				x: x + 5,
+				y: AY + AH / 2
+			});
+		}
+		const cx = x + w / 2;
+		const headLabel = item.kind === "group" ? labels[labels.length - 2] : labels[labels.length - 1];
+		headLabel.x = Math.max(CLAMP_MIN, Math.min(cx, CLAMP_MAX));
+		leaders.push({
+			x: cx,
+			y1: headLabel.y + 2.5,
+			y2: AY - 1
+		});
+		if (now) cursor = {
+			x: x + w,
+			y1: AY - 8,
+			y2: BY + BH + 3
+		};
+		x += w + GAP;
+	});
+	return {
+		width: W + RPAD,
+		height: LM_SCENE.H,
+		bars,
+		labels,
+		leaders,
+		windows,
+		parMarks,
+		diamonds,
+		cursor
+	};
+}
 function asString(v) {
 	return typeof v === "string" ? v : "";
 }
@@ -1223,6 +1463,35 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 }
 //#endregion
 //#region src/client/lane-map.tsx
+/**
+* lane-map.tsx —— 真泳道图（拓扑驱动）+ 检查明细区组件（t260915-05，mock ①③④）。
+*
+* 渲染器通用性承诺（mock callout G）：本组件只认「节点+边+kind+组」，
+* 标签/顺序/并行/人门全部来自 LaneMapModel（引擎 template_topology 导出契约），
+* 组件内零 dev-lane 业务词——换模板换项目同一组件（fixture-two-step 对拍锚）。
+*
+* Scene (t261009-53, a value-for-value copy of the mock's laneMap(t) in
+* notes/discussions/261004-concurrency-limit-mock.html, design doc 261004
+* section 7.6 criteria 1-8):
+*   - every main-track segment = a slim bar (rect h 12, rx 3) on ONE shared
+*     baseline; width = its time share (the v5 weight formula is untouched,
+*     t261008-23 does not regress); a segment is no longer a filled block;
+*   - labels float above the pipe in two alternating levels (baseline-4 /
+*     baseline-13), middle-anchored on their bar, clamped into the canvas,
+*     with a dotted leader down to the bar top; duration and rounds ride in
+*     the same caption (`38m · ×2`; criterion 7: rework is carried by ×n -
+*     the round chips are retired, their evidence folded into the hover title);
+*   - the human gate diamond sits at the LEFT head of the bar (the mock's
+*     7px path), not inside a box;
+*   - the parallel partner bar sits on a second track below, at its own width,
+*     inside a dashed window that surrounds BOTH tracks, with the ∥ mark;
+*   - state is carried by fill (criterion 3): done = 22% tint of the kind
+*     colour, current = solid + the now cursor (a dashed vertical line spanning
+*     both tracks), not started = grey, skipped = dashed empty box, blocked =
+*     solid red (t260916-04 rule); ever-blocked = an inline amber badge in the
+*     label (title carries the story; the t260916-04 face stays);
+*   - header / legend / time axis rows untouched (t261009-22 faces all kept).
+*/
 /** Scene -> SVG (the truth is laneMapScene; this only draws). Public anchor
 *  contract (DOM scenarios assert on these data-* keys, not on internals):
 *  g.wb-lm-node[data-id/kind/vis/skipped/now], g.wb-lm-band[data-band=partner],

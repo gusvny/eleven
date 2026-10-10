@@ -27,6 +27,7 @@
  *     label (title carries the story; the t260916-04 face stays);
  *   - header / legend / time axis rows untouched (t261009-22 faces all kept).
  */
+import { laneMapScene } from './lane-map-model.ts'
 import type { LaneMapModel, GateRunView, LaneScene } from './lane-map-model.ts'
 
 /** Scene -> SVG (the truth is laneMapScene; this only draws). Public anchor
