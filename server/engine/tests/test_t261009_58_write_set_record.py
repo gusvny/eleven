@@ -337,3 +337,51 @@ def test_holder_scan_named_blind_spots(tmp_path):
     res2 = asyncio.run(annex_holder_scan(AnnexHolderScanArgs(
         ticket_id="t-me", lanes_root="rel", files=["x.py"])))
     assert "not an absolute directory" in res2.error
+
+
+# ---------- F. held gate-face edits (t261009-65, re-applied from t261009-58) ----------
+#
+# Host order 261010 authorized the protected-path write on server/engine/path_gates.py
+# for this follow-up ticket; the two tests below were green in t261009-58 gen2 and are
+# re-landed with the edits they pin. Source of truth:
+# integration/t261009-58/path_gates_held_edits.md.
+
+import path_gates as pg  # noqa: E402
+
+
+def test_bundle_out_admits_entries_under_src_prefix():
+    # Edit 1: a write set naming CONCRETE files under a declared build-chain src
+    # prefix admits the rebuilt out-prefix files (t261009-53 lost
+    # lib/client.{cjs,js} twice to quarantine). The src side stays bound by the
+    # write-set judge, so widening the OUT side adds nothing the src side does
+    # not guard; fail-closed shapes unchanged.
+    pairs = [("src/client", "lib")]
+    ws = ["src/client/a.c", "src/client/b.c"]
+    for f in ("lib/client.cjs", "lib/client.js"):
+        assert pg.bundle_out_face(f, ws, pairs) == "src/client"
+    # old directory shape unchanged
+    assert pg.bundle_out_face("lib/client.js", ["src/client/"], pairs) == "src/client"
+    # out outside the declared out prefix stays refused
+    assert pg.bundle_out_face("dist/client.cjs", ws, pairs) is None
+    # src outside the write set stays refused
+    assert pg.bundle_out_face("lib/client.js", ["src/other/x.c"], pairs) is None
+    # empty / missing declaration fail-closed
+    assert pg.bundle_out_face("lib/client.js", ws, []) is None
+    assert pg.bundle_out_face("lib/client.js", ws, None) is None
+    # the SAME predicate in bundle_out_prefixes — one judge, no second truth
+    assert pg.bundle_out_prefixes(ws, pairs) == ["lib"]
+    assert pg.bundle_out_prefixes(ws, []) == []
+    assert pg.bundle_out_prefixes(ws, None) == []
+
+
+def test_arbitrate_test_face_admits_bundle_out_named():
+    # Edit 2: arbitrate (kind=test_face) gains the same _bundle_out_ok() fallback
+    # the write_set / join / self_heal kinds carry — a rebuilt out-prefix file is
+    # a NAMED pass, never an "unauthorized write" face.
+    notes: list = []
+    ok, _, reason = pg.judge_stage_paths(
+        "arbitrate", ["lib/client.js"], write_set=["src/client/a.c"],
+        ticket_id="t261009-65", notes_out=notes,
+        bundle_pairs=[("src/client", "lib")])
+    assert ok and reason == ""
+    assert notes == ["%s: lib/client.js (src src/client)" % pg.BUNDLE_OUT_FACE_NOTE]

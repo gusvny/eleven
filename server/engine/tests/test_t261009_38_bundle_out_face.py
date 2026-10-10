@@ -156,14 +156,15 @@ def test_judge_join_and_self_heal_get_fallback():
 
 
 def test_judge_other_kinds_do_not_widen():
-    # prefixes / result_files / ui_dirs / ticket_receipts / test_face faces keep
-    # today's behaviour: the bundle rule adds nothing there.
+    # prefixes / result_files / ui_dirs / ticket_receipts faces keep today's
+    # behaviour: the bundle rule adds nothing there. (t261009-65: ("arbitrate",
+    # None) LEFT this list — the host ruling granted arbitrate's test_face kind
+    # the bundle-out fallback; see test_arbitrate_test_face_admits_bundle_out_named_pin.)
     bad = [
         ("design_integration_tests", None),
         ("create_plan", None),
         ("ui_evidence", ("ui",)),
         ("run_integration_tests", None),
-        ("arbitrate", None),
     ]
     for stage, ui in bad:
         notes: list = []
@@ -173,6 +174,21 @@ def test_judge_other_kinds_do_not_widen():
         assert not ok, (stage, reason)
         assert reason in ("unauthorized_path", "ui_dirs_missing"), (stage, reason)
         assert notes == []
+
+
+def test_arbitrate_test_face_admits_bundle_out_named_pin():
+    # t261009-65: this pin REVERSES the legacy "arbitrate never widens" spec —
+    # the host ruling (261010, held-edit from t261009-58) granted arbitrate's
+    # test_face kind the same bundle-out-face fallback the write_set / join /
+    # self_heal kinds carry. The reversal is the ruling reversing a spec, not a
+    # test fudge; the pass is NAMED.
+    notes: list = []
+    ok, _, reason = pg.judge_stage_paths(
+        "arbitrate", [OUT_FILE], write_set=WS, ticket_id="t261009-38",
+        notes_out=notes, bundle_pairs=PAIRS)
+    assert ok and reason == ""
+    assert notes == ["%s: %s (src %s)"
+                     % (pg.BUNDLE_OUT_FACE_NOTE, OUT_FILE, SRC.rstrip("/"))]
 
 
 def test_judge_result_files_still_pass_and_protected_still_red_together():

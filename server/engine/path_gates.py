@@ -119,7 +119,8 @@ _STAGE_FACE_DESC = {
     "ticket_receipts": "this ticket's scenario receipts (integration/<ticket_id>/) + result files",
     "test_face": "test face (tests/ dirs, test_*.py, integration/ scenario scripts sc_*.py/.mjs, "
                  "scenario roster integration/README.md and integration/run_scenarios.py)"
-                 " ∪ this ticket's scenarios + result files",
+                 " ∪ this ticket's scenarios ∪ declared build-chain outputs (bundle-out-face, named)"
+                 " + result files",
     "self_heal": "write-set files ∪ this ticket's scenarios + result files (self-heal closeout)",
     "prefixes": None,  # prefixes 用规则里的前缀拼
 }
@@ -231,8 +232,12 @@ def bundle_out_face(path: Any, write_set: Any, bundle_pairs: Any) -> Optional[st
          path; pair members that are not plain safe prefix strings are skipped,
          never guessed;
       3. that pair's src prefix is covered by the ticket's write set
-         (src == entry or src under entry + '/'), judged with the same
-         _within/_entries stance as the write-set match itself.
+         (src == entry, or src under an entry, or an entry under src),
+         judged with the same _within/_entries stance as the write-set
+         match itself. (t261009-65: the write set may name concrete files
+         under the src prefix — `src/client/a.c` covers `src/client` —
+         the src side stays bound by the write-set judge, so widening
+         the out side adds nothing the src side does not guard.)
     Anything else returns None = the write stays refused. Fail-closed by
     construction: a missing/malformed/empty declaration, a malformed path, or an
     empty/missing write set all return None — the gate admits nothing extra."""
@@ -258,7 +263,7 @@ def bundle_out_face(path: Any, write_set: Any, bundle_pairs: Any) -> Optional[st
             continue
         if not _within(norm, (out,)):
             continue
-        if _within(src, ws):
+        if _within(src, ws) or any(_within(e, (src,)) for e in ws):
             return src
     return None
 
@@ -285,7 +290,7 @@ def bundle_out_prefixes(write_set: Any, bundle_pairs: Any) -> List[str]:
         out = _norm_path(raw_out.strip().rstrip("/")) if raw_out.strip() else ""
         if not src or not out or not _is_safe_path(src) or not _is_safe_path(out):
             continue
-        if _within(src, ws) and out not in outs:
+        if (_within(src, ws) or any(_within(e, (src,)) for e in ws)) and out not in outs:
             outs.append(out)
     return outs
 
@@ -484,9 +489,10 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
       现实一致）。
     - bundle_pairs (t261009-38, optional): the declaration pairs ((src, out)
       prefixes) the caller loaded from this repo's server/merge-checks.yaml.
-      Default None = the judged face stays byte-identical to history; only the
-      write_set/join/self_heal kinds gain a fallback: a file that misses the
-      write set tries the ticket-test-face fallback, then the bundle-out-face
+      Default None = the judged face stays byte-identical to history; the
+      write_set/join/self_heal kinds and (since t261009-65) the test_face kind
+      gain a fallback: a file that misses the kind's own face tries the
+      ticket-test-face fallback, then the bundle-out-face
       fallback (paired src inside the write set -> the out-prefix write is
       admitted and NAMED; declaration missing/malformed/empty -> the fallback
       judges None and nothing widens).
@@ -551,7 +557,11 @@ def judge_stage_paths(stage_id: str, files: Iterable[Any], write_set: Any = None
         if kind == "test_face":
             if is_test_face(f) or _is_scenario_script(f):
                 return ""
-            return "" if (receipt and _within(f, (receipt,))) else "unauthorized_path"
+            # t261009-65: arbitrate gains the same bundle-out-face fallback the
+            # write_set / join / self_heal kinds carry — a rebuilt out-prefix
+            # file written during arbitrate is a NAMED pass, not an
+            # "unauthorized write" (ruling 261010; held-edit from t261009-58).
+            return "" if (_test_face_ok() or _bundle_out_ok()) else "unauthorized_path"
         if kind == "self_heal":
             if ws_ok and _within(f, ws):
                 return ""

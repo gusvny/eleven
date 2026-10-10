@@ -3814,11 +3814,6 @@
       "note": "ticket C: the watchdog raises a redline naming session+face for a pending ask with no mirrored row past the deadline and for a deliver_refused ledger row; a mirrored-in-time ask stays clear; a malformed ledger row crashes nothing and is named.",
       "sync_path": ""
     },
-    "integration/t261009-61/sc_reconcile_scope_t261009-61.mjs": {
-      "anchor": "contract",
-      "note": "reconcile heartbeat redline scoped to actionable in-flight divergences: Class A terminal drift and Class B ledger-only history raise no reconcile_mismatch, a real in-flight divergence still redlines named, the 630-shape fixture counts 1, converges once the ticket goes terminal",
-      "sync_path": "server/plugins/watchdog/src/host/reconcile.ts"
-    },
     "integration/t261005-02/sc_watchdog_self_heal_config_and_failure.py": {
       "anchor": "behaviour",
       "note": "t261005-02 self-heal component contract (status face + cancel act)",
@@ -4484,7 +4479,206 @@
       "note": "t261009-28: the landing act records once in the delivery ledger through its own writer (writer-assigned seq, no second shape) and the landing is computable in the shared ordering space (derive_range / should_certify / has_landing)",
       "sync_path": ""
     },
+    "integration/t261009-29/sc_legacy_promotion_ledger_migration.py": {
+      "anchor": "behaviour",
+      "note": "t261009-29: the legacy promotion.jsonl is migrated into delivery.jsonl in at-then-file order (rename out of the way, idempotent second run) or refused BY NAME on the read/append faces while unmigrated - never silently read as no promotions; malformed and duplicate legacy input aborts by name appending nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-29/sc_promotion_one_seq_space.py": {
+      "anchor": "behaviour",
+      "note": "t261009-29: the promotion and withdrawal relations live in the SAME delivery.jsonl and seq space as landings and certifications - the shared append face stamps one strictly increasing sequence across kinds, the promotion row keeps every field and gains seq, ticket_outcome consumes ONE rows list with a single delivery cursor, and the withdrawal guard stays armed inside the one file",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_line_round.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round: green round certifies the head and closes the range over a real temp ledger (certification cites the run, restates nothing, waiting ticket answers certified/landable); guard-held joins with zero runs and zero writes; red opens the freeze keyed to the red cert with the rerun-first ladder and the structural fix exemption; could-not-run writes range_growth never a freeze; corrupt ledger/guard refuse loud with the guard released; the delivered checkout (incl. symlink alias) is refused before any runner runs",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_round_green_and_growth.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round contract",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_round_red_freeze_exempt.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round contract",
+      "sync_path": ""
+    },
+    "integration/t261009-30/sc_t26100930_round_slot_chain_checkout.py": {
+      "anchor": "behaviour",
+      "note": "t261009-30 line round contract",
+      "sync_path": ""
+    },
+    "integration/t261009-31/sc_t26100931_dismiss_journal_contract.py": {
+      "anchor": "contract",
+      "note": "t261009-31: the dismissal journal/operation contract through the public ops — one-row append, named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, append-failure propagation",
+      "sync_path": ""
+    },
+    "integration/t261009-31/sc_t26100931_dismiss_reader_face.py": {
+      "anchor": "contract",
+      "note": "t261009-31: the read face — list/detail rows carry dismissed:{at,who,reason}, read failure degrades to named dismissed_note, no DONE-family reclassification, CLI ops human-only and signal-free",
+      "sync_path": ""
+    },
+    "integration/t261009-32/sc_t26100943_left_column_dismiss.mjs": {
+      "anchor": "contract",
+      "note": "the left-column dismiss face + dwell-rule hole, judged on the public client faces (inSandbar, dismissed read helpers, sidebar copy/wiring shape); engine half is t261009-31's entries",
+      "sync_path": ""
+    },
+    "integration/t261009-35/sc_ticket_detail_pause_faces.py": {
+      "anchor": "contract",
+      "note": "detail face (ticket.py show) must carry the snapshot pause pair; both-faces-one-source seam",
+      "sync_path": ""
+    },
     "integration/t261009-36/sc_discipline_read_not_run.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
+    },
+    "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
+      "sync_path": ""
+    },
+    "integration/t261009-38/sc_t26100938_gate_admits_bundle_out.py": {
+      "anchor": "behaviour",
+      "note": "drives real settle_lane on a git lane fixture (gate face of the bundle-out rule)",
+      "sync_path": ""
+    },
+    "integration/t261009-38/sc_t26100938_mergecheck_pair_agreement.py": {
+      "anchor": "contract",
+      "note": "merge-check whitelist face of the bundle-out rule: widen helper + verify_lane run() over the shared declaration (admit by name / refuse both directions)",
+      "sync_path": ""
+    },
+    "integration/t261009-39/sc_t261009_39_yaml_follows_code.py": {
+      "anchor": "contract",
+      "note": "t261009-39: generated workflow yaml is pure generator output (KI-154)",
+      "sync_path": ""
+    },
+    "integration/t261009-41/sc_t26100941_certification_face_seam.mjs": {
+      "anchor": "contract",
+      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
+      "sync_path": ""
+    },
+    "integration/t261009-41/sc_t26100941_fixture_contract_gate.py": {
+      "anchor": "contract",
+      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
+      "sync_path": ""
+    },
+    "integration/t261009-41/sc_t26100941_freeze_promote_contract.py": {
+      "anchor": "contract",
+      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
+      "sync_path": ""
+    },
+    "integration/t261009-42/sc_bundle_freshness_verdict.py": {
+      "anchor": "contract",
+      "note": "t261009-42: merge-check item 3.5 three-state freshness verdict at the gate level (rebuild declared entry + byte-compare; legacy verdict kept when no entry declared)",
+      "sync_path": ""
+    },
+    "integration/t261009-44/sc_t26100944_certification_route_reader.mjs": {
+      "anchor": "contract",
+      "note": "t261009-44: Slice 2 — the certification route + reader seam the tab reads through (read journey, named degradation, no write path)",
+      "sync_path": ""
+    },
+    "integration/t261009-44/sc_t26100944_certification_tab_page.mjs": {
+      "anchor": "contract",
+      "note": "t261009-44: Slice 2 — the page-visible Certification tab and its wiring to the one registered route (dead-button proof live)",
+      "sync_path": ""
+    },
+    "integration/t261009-45/sc_bundle_entry_declaration.py": {
+      "anchor": "contract",
+      "note": "the project declaration carries the build entry; malformed value degrades to named legacy verdict",
+      "sync_path": ""
+    },
+    "integration/t261009-48/sc_t26100948_handover_record.py": {
+      "anchor": "contract",
+      "note": "t261009-48 append-only handover record: disposition/who/why/in-flight, reader-side jsonl",
+      "sync_path": ""
+    },
+    "integration/t261009-48/sc_t26100948_preflight_refuse.py": {
+      "anchor": "contract",
+      "note": "t261009-48 pre-flight face + named refusal + kill-ordering on engine_ops restart",
+      "sync_path": ""
+    },
+    "integration/t261009-49/sc_face_coverage_engine.py": {
+      "anchor": "behaviour",
+      "note": "t261009-49: the engine coverage projection names each period-without-a-result over a deterministic fixture tree (five states, blocked shell never produced, named last-ok/never lines, raising reader named, dead-man untouched, projection rides the aggregate report)",
+      "sync_path": ""
+    },
+    "integration/t261009-49/sc_face_coverage_panel_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-49: the panel pure view module renders the coverage answer (five distinct copies, failed named block with attempt evidence, blocked shell never produced, unknown state never re-derived, malformed payloads degrade)",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_failures.py": {
+      "anchor": "behaviour",
+      "note": "t261009-50 tick call site: named failures, held slot untouched, no call-site bookkeeping",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_triggers.py": {
+      "anchor": "behaviour",
+      "note": "t261009-50 tick call site: event/backstop triggers distinguishable, idle writes nothing",
+      "sync_path": ""
+    },
+    "integration/t261009-50/sc_t26100950_tick_wired.py": {
+      "anchor": "source-text",
+      "note": "t261009-50 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)"
+    },
+    "integration/t261009-51/sc_registry_style_drift_bite.py": {
+      "anchor": "contract",
+      "note": "t261009-51: lint bites on registry serialization style drift; names file + first differing line; never rewrites",
+      "sync_path": ""
+    },
+    "integration/t261009-51/sc_registry_writer_canonical.py": {
+      "anchor": "contract",
+      "note": "t261009-51: canonical write path (lib_registry.write_registry) byte shape + content-free normalization proof vs HEAD",
+      "sync_path": ""
+    },
+    "integration/t261009-52/sc_fixture_leak_brakes.py": {
+      "anchor": "behaviour",
+      "note": "K222 leak lifecycle: interrupted brake run must reclaim its fixture",
+      "sync_path": ""
+    },
+    "integration/t261009-52/sc_fixture_refusal_named.py": {
+      "anchor": "behaviour",
+      "note": "K222 refusal + lint naming face",
+      "sync_path": ""
+    },
+    "integration/t261009-55/sc_t26100955_one_tick_handover.py": {
+      "anchor": "contract",
+      "note": "t261009-55 KI-01M4GF5R8NHQNATH7WD7SKF94X addendum: one-tick boot-generation handover + proven-zero-poller repair, ensureTicketWorkersOnce decision records",
+      "sync_path": "server/plugins/temporal-tools/node.ts (ensureTicketWorkersOnce); server/engine/worker.py (meta console_boot/polling)"
+    },
+    "integration/t261009-55/sc_t26100955_read_face_poller_gap.py": {
+      "anchor": "contract",
+      "note": "t261009-55 spec 3+4: snapshot-failure degrade face (unavailable(cause@queue/ticket), durable stage, orphan start_to_close note)",
+      "sync_path": "server/engine/client.py (_classify_snapshot_failure consumers, degrade seam)"
+    },
+    "integration/t261009-57/sc_t26100957_alerts_face_coalesce.mjs": {
+      "anchor": "contract",
+      "note": "t261009-57 alerts face: display_max knob (default 8 coalesced rows, 0=show all), xN run coalescing with cleared-refire boundary, relative-time-first with absolute on hover, full-text wrap, level words, ledger read-only journey",
+      "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts"
+    },
+    "integration/t261009-58/sc_t26100958_effective_write_set.py": {
+      "anchor": "contract",
+      "note": "t261009-58 story (1)+(4): one effective write set record - shape, stored-field fallback, record-wins precedence, named malformed refusal, history face",
+      "sync_path": "server/engine/shared.py (write-set record faces); server/engine/dev_lane.py (plan refresh wiring)"
+    },
+    "integration/t261009-58/sc_t26100958_plan_mismatch_and_annex.py": {
+      "anchor": "contract",
+      "note": "t261009-58 story (2)+(3)+(5): named plan-time mismatch + narrow audited annex admission incl. protected refusal and KI-125/KI-158 directory door",
+      "sync_path": "server/engine/shared.py (plan_write_set_mismatch / annex_admission); server/engine/dev_lane.py (annex signal wiring)"
+    },
+    "integration/t261009-60/sc_leftover_assert_scope.py": {
+      "anchor": "behaviour",
+      "note": "runs the real engine test file under pytest with a planted foreign decoy; sweep scanner teeth proven on a synthetic offender",
+      "sync_path": ""
+    },
+    "integration/t261009-61/sc_reconcile_scope_t261009-61.mjs": {
+      "anchor": "contract",
+      "note": "reconcile heartbeat redline scoped to actionable in-flight divergences: Class A terminal drift and Class B ledger-only history raise no reconcile_mismatch, a real in-flight divergence still redlines named, the 630-shape fixture counts 1, converges once the ticket goes terminal",
+      "sync_path": "server/plugins/watchdog/src/host/reconcile.ts"
+    },
+    "integration/t261009-65/sc_t26100965_bundle_out_file_entry_faces.py": {
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
@@ -4519,36 +4713,6 @@
       "note": "t261009-22 lane map mock chrome: header kind legend + elapsed/now-at summary + waiting-for-you, durations printed under labels, diamond human gate, time axis at the segment scale, skipped dashed empty, now cursor, hover duration; malformed entries leak nothing",
       "sync_path": ""
     },
-    "integration/t261009-31/sc_t26100931_dismiss_journal_contract.py": {
-      "anchor": "contract",
-      "note": "t261009-31: the dismissal journal/operation contract through the public ops — one-row append, named zero-write refusal matrix, LAST-row-wins reversibility, malformed-line counting, append-failure propagation",
-      "sync_path": ""
-    },
-    "integration/t261009-31/sc_t26100931_dismiss_reader_face.py": {
-      "anchor": "contract",
-      "note": "t261009-31: the read face — list/detail rows carry dismissed:{at,who,reason}, read failure degrades to named dismissed_note, no DONE-family reclassification, CLI ops human-only and signal-free",
-      "sync_path": ""
-    },
-    "integration/t261009-38/sc_t26100938_gate_admits_bundle_out.py": {
-      "anchor": "behaviour",
-      "note": "drives real settle_lane on a git lane fixture (gate face of the bundle-out rule)",
-      "sync_path": ""
-    },
-    "integration/t261009-42/sc_bundle_freshness_verdict.py": {
-      "anchor": "contract",
-      "note": "t261009-42: merge-check item 3.5 three-state freshness verdict at the gate level (rebuild declared entry + byte-compare; legacy verdict kept when no entry declared)",
-      "sync_path": ""
-    },
-    "integration/t261009-38/sc_t26100938_mergecheck_pair_agreement.py": {
-      "anchor": "contract",
-      "note": "merge-check whitelist face of the bundle-out rule: widen helper + verify_lane run() over the shared declaration (admit by name / refuse both directions)",
-      "sync_path": ""
-    },
-    "integration/t261009-39/sc_t261009_39_yaml_follows_code.py": {
-      "anchor": "contract",
-      "note": "t261009-39: generated workflow yaml is pure generator output (KI-154)",
-      "sync_path": ""
-    },
     "integration/t261008-47/sc_ticket_face_english.py": {
       "anchor": "contract",
       "note": "engine ticket-face copy surface: no CJK at emission points; narrowness re-proven; fixtures moved with the copy",
@@ -4557,76 +4721,6 @@
     "integration/t261008-47/sc_timeline_rerun_stats.py": {
       "anchor": "behaviour",
       "note": "rerun round/wall derivation identical over old- and new-format timelines; named degradation; history rows still drive the leg",
-      "sync_path": ""
-    },
-    "integration/t261009-29/sc_promotion_one_seq_space.py": {
-      "anchor": "behaviour",
-      "note": "t261009-29: the promotion and withdrawal relations live in the SAME delivery.jsonl and seq space as landings and certifications - the shared append face stamps one strictly increasing sequence across kinds, the promotion row keeps every field and gains seq, ticket_outcome consumes ONE rows list with a single delivery cursor, and the withdrawal guard stays armed inside the one file",
-      "sync_path": ""
-    },
-    "integration/t261009-29/sc_legacy_promotion_ledger_migration.py": {
-      "anchor": "behaviour",
-      "note": "t261009-29: the legacy promotion.jsonl is migrated into delivery.jsonl in at-then-file order (rename out of the way, idempotent second run) or refused BY NAME on the read/append faces while unmigrated - never silently read as no promotions; malformed and duplicate legacy input aborts by name appending nothing",
-      "sync_path": ""
-    },
-    "integration/t261009-37/sc_overview_blocks_colour_refused.mjs": {
-      "anchor": "behaviour",
-      "note": "t261009-37: four-block Overview geometry (uniform gaps, one start line), refused fact on the row with aligned time columns (no tooltip dependence), identity colour equals the shared projectIdentity single source on a 3px top bar with no leak onto semantic chips, Open session retired with the session chip kept, light+dark captures.",
-      "sync_path": ""
-    },
-    "integration/t261009-30/sc_t26100930_round_green_and_growth.py": {
-      "anchor": "behaviour",
-      "note": "t261009-30 line round contract",
-      "sync_path": ""
-    },
-    "integration/t261009-30/sc_t26100930_round_red_freeze_exempt.py": {
-      "anchor": "behaviour",
-      "note": "t261009-30 line round contract",
-      "sync_path": ""
-    },
-    "integration/t261009-30/sc_t26100930_round_slot_chain_checkout.py": {
-      "anchor": "behaviour",
-      "note": "t261009-30 line round contract",
-      "sync_path": ""
-    },
-    "integration/t261009-30/sc_t26100930_line_round.py": {
-      "anchor": "behaviour",
-      "note": "t261009-30 line round: green round certifies the head and closes the range over a real temp ledger (certification cites the run, restates nothing, waiting ticket answers certified/landable); guard-held joins with zero runs and zero writes; red opens the freeze keyed to the red cert with the rerun-first ladder and the structural fix exemption; could-not-run writes range_growth never a freeze; corrupt ledger/guard refuse loud with the guard released; the delivered checkout (incl. symlink alias) is refused before any runner runs",
-      "sync_path": ""
-    },
-    "integration/t261009-32/sc_t26100943_left_column_dismiss.mjs": {
-      "anchor": "contract",
-      "note": "the left-column dismiss face + dwell-rule hole, judged on the public client faces (inSandbar, dismissed read helpers, sidebar copy/wiring shape); engine half is t261009-31's entries",
-      "sync_path": ""
-    },
-    "integration/t261009-48/sc_t26100948_preflight_refuse.py": {
-      "anchor": "contract",
-      "note": "t261009-48 pre-flight face + named refusal + kill-ordering on engine_ops restart",
-      "sync_path": ""
-    },
-    "integration/t261009-48/sc_t26100948_handover_record.py": {
-      "anchor": "contract",
-      "note": "t261009-48 append-only handover record: disposition/who/why/in-flight, reader-side jsonl",
-      "sync_path": ""
-    },
-    "integration/t261009-49/sc_face_coverage_engine.py": {
-      "anchor": "behaviour",
-      "note": "t261009-49: the engine coverage projection names each period-without-a-result over a deterministic fixture tree (five states, blocked shell never produced, named last-ok/never lines, raising reader named, dead-man untouched, projection rides the aggregate report)",
-      "sync_path": ""
-    },
-    "integration/t261009-49/sc_face_coverage_panel_face.mjs": {
-      "anchor": "behaviour",
-      "note": "t261009-49: the panel pure view module renders the coverage answer (five distinct copies, failed named block with attempt evidence, blocked shell never produced, unknown state never re-derived, malformed payloads degrade)",
-      "sync_path": ""
-    },
-    "integration/t261009-51/sc_registry_style_drift_bite.py": {
-      "anchor": "contract",
-      "note": "t261009-51: lint bites on registry serialization style drift; names file + first differing line; never rewrites",
-      "sync_path": ""
-    },
-    "integration/t261009-51/sc_registry_writer_canonical.py": {
-      "anchor": "contract",
-      "note": "t261009-51: canonical write path (lib_registry.write_registry) byte shape + content-free normalization proof vs HEAD",
       "sync_path": ""
     },
     "integration/t261009-59/sc_t26100959_tick_triggers.py": {
@@ -4643,95 +4737,6 @@
       "anchor": "source-text",
       "note": "t261009-59 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)",
       "sync_path": ""
-    },
-    "integration/t261009-45/sc_bundle_entry_declaration.py": {
-      "anchor": "contract",
-      "note": "the project declaration carries the build entry; malformed value degrades to named legacy verdict",
-      "sync_path": ""
-    },
-    "integration/t261009-41/sc_t26100941_certification_face_seam.mjs": {
-      "anchor": "contract",
-      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
-      "sync_path": ""
-    },
-    "integration/t261009-41/sc_t26100941_fixture_contract_gate.py": {
-      "anchor": "contract",
-      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
-      "sync_path": ""
-    },
-    "integration/t261009-41/sc_t26100941_freeze_promote_contract.py": {
-      "anchor": "contract",
-      "note": "t261009-41: the certification tab's projection contract / face seam / fixture drift gate",
-      "sync_path": ""
-    },
-    "integration/t261009-35/sc_ticket_detail_pause_faces.py": {
-      "anchor": "contract",
-      "note": "detail face (ticket.py show) must carry the snapshot pause pair; both-faces-one-source seam",
-      "sync_path": ""
-    },
-    "integration/t261009-57/sc_t26100957_alerts_face_coalesce.mjs": {
-      "anchor": "contract",
-      "note": "t261009-57 alerts face: display_max knob (default 8 coalesced rows, 0=show all), xN run coalescing with cleared-refire boundary, relative-time-first with absolute on hover, full-text wrap, level words, ledger read-only journey",
-      "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts"
-    },
-    "integration/t261009-55/sc_t26100955_one_tick_handover.py": {
-      "anchor": "contract",
-      "note": "t261009-55 KI-01M4GF5R8NHQNATH7WD7SKF94X addendum: one-tick boot-generation handover + proven-zero-poller repair, ensureTicketWorkersOnce decision records",
-      "sync_path": "server/plugins/temporal-tools/node.ts (ensureTicketWorkersOnce); server/engine/worker.py (meta console_boot/polling)"
-    },
-    "integration/t261009-55/sc_t26100955_read_face_poller_gap.py": {
-      "anchor": "contract",
-      "note": "t261009-55 spec 3+4: snapshot-failure degrade face (unavailable(cause@queue/ticket), durable stage, orphan start_to_close note)",
-      "sync_path": "server/engine/client.py (_classify_snapshot_failure consumers, degrade seam)"
-    },
-    "integration/t261009-52/sc_fixture_leak_brakes.py": {
-      "anchor": "behaviour",
-      "note": "K222 leak lifecycle: interrupted brake run must reclaim its fixture",
-      "sync_path": ""
-    },
-    "integration/t261009-52/sc_fixture_refusal_named.py": {
-      "anchor": "behaviour",
-      "note": "K222 refusal + lint naming face",
-      "sync_path": ""
-    },
-    "integration/t261009-44/sc_t26100944_certification_route_reader.mjs": {
-      "anchor": "contract",
-      "note": "t261009-44: Slice 2 — the certification route + reader seam the tab reads through (read journey, named degradation, no write path)",
-      "sync_path": ""
-    },
-    "integration/t261009-44/sc_t26100944_certification_tab_page.mjs": {
-      "anchor": "contract",
-      "note": "t261009-44: Slice 2 — the page-visible Certification tab and its wiring to the one registered route (dead-button proof live)",
-      "sync_path": ""
-    },
-    "integration/t261009-58/sc_t26100958_effective_write_set.py": {
-      "anchor": "contract",
-      "note": "t261009-58 story (1)+(4): one effective write set record - shape, stored-field fallback, record-wins precedence, named malformed refusal, history face",
-      "sync_path": "server/engine/shared.py (write-set record faces); server/engine/dev_lane.py (plan refresh wiring)"
-    },
-    "integration/t261009-58/sc_t26100958_plan_mismatch_and_annex.py": {
-      "anchor": "contract",
-      "note": "t261009-58 story (2)+(3)+(5): named plan-time mismatch + narrow audited annex admission incl. protected refusal and KI-125/KI-158 directory door",
-      "sync_path": "server/engine/shared.py (plan_write_set_mismatch / annex_admission); server/engine/dev_lane.py (annex signal wiring)"
-    },
-    "integration/t261009-60/sc_leftover_assert_scope.py": {
-      "anchor": "behaviour",
-      "note": "runs the real engine test file under pytest with a planted foreign decoy; sweep scanner teeth proven on a synthetic offender",
-      "sync_path": ""
-    },
-    "integration/t261009-50/sc_t26100950_tick_triggers.py": {
-      "anchor": "behaviour",
-      "note": "t261009-50 tick call site: event/backstop triggers distinguishable, idle writes nothing",
-      "sync_path": ""
-    },
-    "integration/t261009-50/sc_t26100950_tick_failures.py": {
-      "anchor": "behaviour",
-      "note": "t261009-50 tick call site: named failures, held slot untouched, no call-site bookkeeping",
-      "sync_path": ""
-    },
-    "integration/t261009-50/sc_t26100950_tick_wired.py": {
-      "anchor": "source-text",
-      "note": "t261009-50 wiring face: patched ask in DispatcherScanWorkflow.run + activity registration (source-text pin by design)"
     },
     "integration/t261009-54/sc_t26100954_dismiss_seam_engine_answer.mjs": {
       "anchor": "behaviour",
