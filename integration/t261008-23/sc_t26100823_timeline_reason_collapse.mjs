@@ -29,7 +29,9 @@ try {
   process.exit(2)
 }
 
-const LONG = fixtureTimeline()[2].reason
+// t261009-79: the fixture interleaves done marks, so rows must be selected by
+// stage, never by position.
+const LONG = fixtureTimeline().find((r) => r.stage === 'implement').reason
 const detail = fixtureTicketDetail(fixtureTimeline())
 // 畸形条目三态：缺 reason、缺 state、at 缺失——都不得炸、不得丢行。
 detail.timeline.push(

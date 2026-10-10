@@ -18,22 +18,40 @@ export const T0 = 1789353600000 // ms
 export function fixtureTimeline({ start = T0, longReason = true } = {}) {
   const LONG = 'handoff from implement: implemented the lane map v5 renderer with duration-proportional segment widths, folded the Changeset panel into Changes, moved the agent-log resolver onto the .sandbar directory with a .suyou compat fallback, and left the timeline rows in place because the host chose option b (collapse the reason, keep every entry) — this sentence is deliberately long so the collapse face has a real wall of prose to shorten'  // naming-compat
   // lane-durations contract (t260901-12): `at` is an ISO string (non-ISO is
-  // skipped -> nominal weight) and windows OPEN on `state:'running'` marks
-  // (the engine has no done mark). Durations then vary via the settle chain
-  // (next stage's running mark closes the previous window; the trailing
-  // merge:closed mark closes the tail). Fixture gap: numeric at + state 'done'
-  // produced all-nominal weights and the widths collapsed to equal.
+  // skipped -> nominal weight) and windows OPEN on `state:'running'` marks.
+  // Durations close via the settle chain (the NEXT mark at the stage's window
+  // close closes the previous window; the trailing merge:closed mark closes
+  // the tail). Fixture gap (t260901-12): numeric at + state 'done' produced
+  // all-nominal weights and the widths collapsed to equal — the marks below
+  // keep ISO `at` so windows still measure.
+  // t261009-79: every stage also carries an explicit `done` row at its window
+  // close, in the engine `_finish` shape (lane-states rule 2 reads the latest
+  // explicit state; without it deriveStageStates conservatively returns
+  // `running` for every stage and the map paints all-solid bars — the P7
+  // tinted=0 red). The scenario intent is "全链 done + merge 在跑": merge keeps
+  // only its running mark (open pointer), everything else finishes. Consumers
+  // must not index rows positionally (select by stage).
   const iso = (ms) => new Date(ms).toISOString()
+  const done = (mins, stage) => ({ at: iso(start + mins * 60e3), stage, state: 'done', reason: 'stage finished' })
   const rows = [
     { at: iso(start), stage: 'create_plan', state: 'running', reason: 'plan written' },
+    done(1, 'create_plan'),
     { at: iso(start + 60e3), stage: 'review_plan', state: 'running', reason: 'review passed with conditions' },
+    done(5, 'review_plan'),
     { at: iso(start + 300e3), stage: 'implement', state: 'running', reason: longReason ? LONG : 'implemented' },
+    done(6, 'implement'),
     { at: iso(start + 360e3), stage: 'design_integration_tests', state: 'running', reason: longReason ? LONG : 'tests designed' },
+    done(15, 'design_integration_tests'),
     { at: iso(start + 900e3), stage: 'ui_evidence', state: 'running', reason: 'captures attached' },
+    done(15.5, 'ui_evidence'),
     { at: iso(start + 930e3), stage: 'run_integration_tests', state: 'running', reason: 'suite green' },
+    done(30.5, 'run_integration_tests'),
     { at: iso(start + 1830e3), stage: 'arbitrate', state: 'running', reason: longReason ? LONG : 'arbitrated' },
+    done(35, 'arbitrate'),
     { at: iso(start + 2100e3), stage: 'acceptance_walkthrough', state: 'running', reason: longReason ? LONG : 'walked through' },
+    done(38.5, 'acceptance_walkthrough'),
     { at: iso(start + 2310e3), stage: 'merge_check', state: 'running', reason: 'checks green' },
+    done(39.5, 'merge_check'),
     { at: iso(start + 2370e3), stage: 'merge', state: 'running', reason: 'merged' },
     { at: iso(start + 2430e3), stage: 'merge', state: 'closed', reason: '' },
   ]
