@@ -4919,3 +4919,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路（纪律，已按此执行）**：①**手写账本行必须按最严读者的形状写**（就本条而言：`at` 用**整数毫秒**）；值班代答的配方写进 `docs/ops` §11，附"四个字段一个都不能变形"的提示；②**核对清零要用宿主看的那个读面**（面板的 `splitWaiting` 口径），不许拿引擎读面当代理——本次的教训与今晚另外两次同源（**只读一个面就下结论**）；③**两个读者对同一行必须给同一结论**，做不到就至少在**面**上具名（malformed 行要能被看见，并说清"它没生效"），不许一边认一边不认。
 >
 > **回归**：L2——喂一行 `at` 为字符串的 `answer` 行，断言(а)**面板口径仍 waiting**（保持"宁多等不误清"的语义）、(b) 该行被计入 `malformed_rows` 且**在面上可见**、(c) 补一行整数 `at` 的同一判词后 waiting 归零；两条读面对同一组合法输入必须给同一结论。
+
+## KI-01M4HQ5FJ8HKGY156YCE97X0K7 **`pause` 在 `blocked` 等待里**静默失效**：回执 `delivered:true`、票面 `paused=None`、**额度不释放** ⇒ 值守想用暂停腾挪并发时，既没停住也没放开，而且两处都看不出来**(261010 三次实测;integration 岗登记)
+
+> **现象（261010，本岗一夜三次踩中）**：
+> - 09:15 对 `t261009-50` 发 `pause`（回执 `{"ok":true, "signal":"pause", "delivered":true}`）⇒ 票面 `op=show` 与**列表面**都 `paused=None`、`paused_phase=None`，票继续在 `run_integration_tests` 跑；
+> - 09:45 对 `t261009-35`、`t261009-41`（两张停在 `merge_check/blocked` 的票，各占一个并发额度）各发 `pause`，回执同样 `delivered:true` ⇒ **列表面 `paused=None`**，且 `concurrency-state.json` 的 `holders` **一条没少**（`human-hold` 两条仍在）、`reconcile` 无 promoted ⇒ **额度没有释放**。
+> - 三次的共同点：**票正处在 `blocked` 等待里**。
+>
+> **机理（读码）**：`blocked` 的等待唤醒条件只有 `retry_token` 与新到的 `rework`（`dev_lane.py` 里 `await self._wait(lambda: self._retry_token > token or self._rework is not None)` 一族的写法），**`pause` 不在唤醒集合里** ⇒ 信号落在 workflow 的输入队列上但没人处理，**既不置 `paused`、也走不到"段边界释放额度"那条路**（`CAUSE_PAUSED` 的真实释放路径在段边界，代码注释原文 *"releases at exactly two points: paused (stage boundary) and terminated"*）。而 `pause` 的**回执是"已送达"语义**，不是"已生效"语义 ⇒ 操作者看到 `delivered:true` 会以为停住了。
+>
+> **危害**：①**保护动作静默无效**——值守为了腾额度/避免空转而暂停，结果什么都没发生，而且**票面看不出**（`paused=None` 与"没发过暂停"完全同形）；②**额度被钉死**：`blocked` 的票按设计占额度（`human gate eats the slot on purpose`），而**唯一能腾挪它的动作恰好在 `blocked` 里失效** ⇒ 队列被压住、别的票排不上（本岗当晚正因此无法给宿主"快一点"的可行解）；③**误判来源**：本岗第一反应是"暂停被随后的 rework 取代"（一个听起来合理的解释），**而真相是它压根没生效**——**只核回执不核票面，就会得出一个自洽但错误的结论**（今晚第五次"只读一个面"）。
+>
+> **出路（两条，实现口径归修复票）**：①**把 `pause` 纳入 `blocked` 等待的唤醒集合**（唤醒后按既有 `CAUSE_PAUSED` 路径**真的释放额度**并置 `paused`）——最小改动，且释放路径已存在，缺的只是"叫醒"；②若不做①，则 **`pause` 必须具名拒收**：票在 `blocked` 等待里时明确回 **"本次暂停不会生效、额度不会释放"**，绝不回一个会被读成成功的 `delivered:true`。
+>
+> **纪律（本岗已改做法）**：**发完 `pause` 必须核票面的 `paused` 与 `holders` 列表**（回执只说明送达，不说明生效）；**凡"保护性动作"，验收都要落在"它保护了什么"上**（额度是否真释放、票是否真停住），不能落在"信号是否送达"上。
+>
+> **回归**：L2——在 `blocked` 等待态发 `pause`，断言(а)**票面 `paused=true` 且额度被释放**（走①）或 (b) **回执具名说明本次不生效**（走②）；两种都不许出现"回执成功、票面与额度毫无变化"。L3——一张 blocked 票暂停后，队列里下一张被提升。
