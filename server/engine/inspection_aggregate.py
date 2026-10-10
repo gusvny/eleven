@@ -69,6 +69,29 @@ ORDERING_NOTE = (
     "for winner election, ascending for listing; findings by (SEVERITY_RANK, "
     "finding id)")
 
+#: t261009-69 receipt (requirement 5): the mint widened 8 -> 16 hex; old period
+#: ledgers on disk still carry 8-hex ids and are NOT renumbered. Cross-period and
+#: verdict matching therefore resolves a stored id by stored value first, then by
+#: the 8-hex prefix rule (an 8-hex id is a strict prefix of the widened id for the
+#: same content, because the widening only extends the same sha256 digest).
+LEGACY_ID_NOTE = (
+    "finding ids are minted at 16 hex since t261009-69; stored 8-hex ids from "
+    "older period ledgers still resolve (exact match, else 8-hex prefix of the "
+    "widened id) — history is not renumbered")
+
+_MINT_ID_WIDTH = 16
+
+
+def _fid_lookup_keys(fid: str) -> List[str]:
+    """Lookup keys for a minted finding id: the id itself, then its 8-hex
+    prefix when widened (the alias under which an older ledger stored it).
+    Stored values are compared AS STORED (no case folding — ids are minted
+    lowercase, but a stored id must keep resolving verbatim)."""
+    f = str(fid or "").strip()
+    if len(f) > 8:
+        return [f, f[:8]]
+    return [f]
+
 _SEVERITY_RANK = {"high": 0, "med": 1, "low": 2}
 _PERIOD_RE = re.compile(r"^(\d{8})(?:-([1-9]\d*))?$")
 
@@ -405,13 +428,31 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
                          ) if anchor_date else None
     first_seen: Dict[str, str] = {}
     first_seen_finding: Dict[str, Dict[str, Any]] = {}
+    # legacy-id aliases (t261009-69): alias key -> canonical id, so an 8-hex id
+    # stored in an older ledger resolves to the same finding as its widened form
+    fid_alias: Dict[str, str] = {}
+
+    def _canon(fid: str) -> str:
+        """Resolve a finding id to its canonical key: exact alias hit first,
+        then the 8-hex prefix alias (a stored 8-hex id seen earlier resolves a
+        later widened sighting of the same content), else the id itself."""
+        f = str(fid or "").strip()
+        if f in fid_alias:
+            return fid_alias[f]
+        if len(f) > 8 and f[:8] in fid_alias:
+            return fid_alias[f[:8]]
+        return f
+
     for period in periods:
         for f in ledgers["docs"][period].get("findings") or []:
             if isinstance(f, dict) and f.get("id"):
                 fid = str(f["id"])
-                if fid not in first_seen:
-                    first_seen[fid] = period
-                    first_seen_finding[fid] = f
+                canon = _canon(fid)
+                for k in _fid_lookup_keys(fid):
+                    fid_alias.setdefault(k, canon)
+                if canon not in first_seen:
+                    first_seen[canon] = period
+                    first_seen_finding[canon] = f
     in_window = [p for p in periods
                  if anchor_date and _period_date(p)
                  and window_start_date < _period_date(p) <= anchor_date]
@@ -430,8 +471,10 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
             if not isinstance(f, dict) or not f.get("id"):
                 continue
             fid = str(f["id"])
-            seen = first_seen.get(fid, period)
-            latest[fid] = {"finding": f, "period": period, "seen": seen}
+            canon = fid_alias.get(fid, fid)   # legacy 8-hex stored id resolves here
+            seen = first_seen.get(canon, period)
+            latest[canon] = {"finding": f, "period": period, "seen": seen,
+                             "id": fid}
 
     new_findings: List[Dict[str, Any]] = []
     fixed: List[Dict[str, Any]] = []
@@ -440,17 +483,22 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
     added_new: set = set()
     ticket_reader_errors: List[str] = []
 
-    for fid, st in latest.items():
+    for canon, st in latest.items():
         f, period, seen = st["finding"], st["period"], st["seen"]
+        fid = st.get("id") or canon
         # rule 1: first-seen inside the window AND the first-seen entry counts.
         # A later recurring flag does not un-new the first occurrence.
-        if seen in in_window and _counted(first_seen_finding.get(fid, f)) \
-                and fid not in added_new:
-            added_new.add(fid)
+        if seen in in_window and _counted(first_seen_finding.get(canon, f)) \
+                and canon not in added_new:
+            added_new.add(canon)
             new_by_sev[str(f.get("severity"))] = \
                 new_by_sev.get(str(f.get("severity")), 0) + 1
             new_findings.append(dict(f, period=period))
-        winner = verdicts["winners"].get(fid)
+        winner = None
+        for k in _fid_lookup_keys(fid) + _fid_lookup_keys(canon):
+            winner = verdicts["winners"].get(k)   # stored value first, then prefix alias
+            if winner:
+                break
         verdict = str((winner or {}).get("verdict") or "")
         try:
             lookup = ticket_lookup(f) if ticket_lookup else None
@@ -474,7 +522,7 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
         # unknowable) is conservatively aged from before the window.
         seen_date = _period_date(seen)
         if seen_date and window_start_date \
-                and bool(first_seen_finding.get(fid, {}).get("recurring")):
+                and bool(first_seen_finding.get(canon, {}).get("recurring")):
             seen_date = min(seen_date, window_start_date - timedelta(days=1))
         if (anchor_date and seen_date
                 and (anchor_date - seen_date).days > int(overdue_days)
@@ -517,6 +565,8 @@ def build_aggregate(instance_id: str, ledger_dir: Any,
     return {
         "kind": "inspection-aggregate",
         "instance_id": inst,
+        "finding_id_width": _MINT_ID_WIDTH,
+        "legacy_id_note": LEGACY_ID_NOTE,
         "anchor_period": anchor,
         "window_days": int(window_days),
         "overdue_days": int(overdue_days),

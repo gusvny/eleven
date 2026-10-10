@@ -111,7 +111,10 @@ def test_mint_id_stable_across_whitespace_and_evidence_order():
                                 dict(a["evidence"][0])])
     assert ins.mint_finding_id(a) == ins.mint_finding_id(b)
     assert ins.mint_finding_id(b2) == ins.mint_finding_id(b3)   # 证据顺序不影响 id
-    assert len(ins.mint_finding_id(a)) == 8
+    # t261009-69: the mint widened 8 -> 16 hex (models doc: a 32-bit space has even
+    # odds of a collision at ~65k findings, and a collision silently merges two
+    # different findings into one id)
+    assert len(ins.mint_finding_id(a)) == ins.FINDING_ID_HEX == 16
 
 
 def test_mint_id_changes_with_content():

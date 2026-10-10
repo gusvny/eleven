@@ -380,7 +380,8 @@ class ShapeAndStabilityTest(unittest.TestCase):
         ids2 = [f["id"] for f in _run(repo)["findings"]]
         self.assertEqual(ids1, ids2)
         # bare content-hash ids (mint_finding_id): the scan tag carries the rule id
-        self.assertTrue(all(len(i) == 8 for i in ids1))
+        # t261009-69: the mint widened 8 -> 16 hex (collision-margin ruling)
+        self.assertTrue(all(len(i) == 16 for i in ids1))
 
     def test_deterministic_order(self):
         repo = _mk_repo(**{"docs/reference/a.md": FM + "see [x](missing.md)\n- [ ] t\n"})

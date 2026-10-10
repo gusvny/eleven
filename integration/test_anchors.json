@@ -1339,6 +1339,10 @@
       "anchor": "behaviour",
       "note": "t261009-46: the version-gated landing path — refusal matrix, pin-the-proven-revision, the activity's receipts, and the one-way import graph",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_69_finding_entity_observation.py": {
+      "anchor": "contract",
+      "note": "t261009-69: the five MUST-BECOME-TRUE points on the pure + thin-IO faces - 16-hex content mint stable across periods, observation keyed (finding,period) with no id and no second entity, finding_history answered from the ledger, named degradation on corrupt/absent/malformed input, legacy 8-hex prefix resolution with id_resolution named"
     }
   },
   "scenarios": {
@@ -4778,6 +4782,10 @@
       "anchor": "behaviour",
       "note": "t261009-46 coexistence — legacy-version resolution creates nothing, importing the running-flow modules leaves the new surface unimported (one-way dependency, re-verified for the wired tree), an old-path settle writes nothing into the new homes, workflows_v2 names no new surface",
       "sync_path": ""
+    },
+    "integration/t261009-69/sc_t26100969_finding_entity_observation.py": {
+      "anchor": "contract",
+      "note": "t261009-69: the finding entity/observation ledger contract read back from disk - 16-hex content-minted id stable across periods, one entity row never duplicated on re-sighting, observation keyed (finding,period) with no id, first/periods/last answered by query, named degradation on corrupt/absent ledger, legacy 8-hex id still resolving"
     }
   }
 }

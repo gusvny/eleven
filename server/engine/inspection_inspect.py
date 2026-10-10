@@ -217,9 +217,18 @@ def parse_agent_findings(text: str) -> List[Dict[str, Any]]:
     return out
 
 
+#: Finding id width in hex characters (t261009-69; ledger-record-models-v1 §finding):
+#: widened 8 -> 16 because a collision here does not look like an error — it silently
+#: merges two different findings into one id (a 32-bit space has even odds at ~65k
+#: findings). The id is compared and printed, never typed, so length is free. Old
+#: period reports on disk still carry 8-hex ids and are NOT renumbered —
+#: `legacy_id_matches` resolves them by stored value / prefix.
+FINDING_ID_HEX = 16
+
+
 def mint_finding_id(finding: Dict[str, Any]) -> str:
-    """Content-hash finding id (8 hex): stable across periods for the same rule+object;
-    a changed object mints a new id.
+    """Content-hash finding id (16 hex, widened from 8 by t261009-69): stable across
+    periods for the same rule+object; a changed object mints a new id.
 
     Identity contract (design 261004 section 5 discipline 1; t261006-13 review
     condition 2): rule + object, NEVER wording. Hash input = subject (the rule+object
@@ -234,7 +243,28 @@ def mint_finding_id(finding: Dict[str, Any]) -> str:
         "%s\x1f%d" % (_norm_rel_path(ev.get("path")), int(ev.get("line") or 0))
         for ev in (finding.get("evidence") or []) if isinstance(ev, dict)})
     parts.extend(locs)
-    return hashlib.sha256("\x1e".join(parts).encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha256("\x1e".join(parts).encode("utf-8")).hexdigest()[:FINDING_ID_HEX]
+
+
+def legacy_id_matches(stored: Any, minted: Any) -> bool:
+    """Does a stored finding id resolve to a minted (16-hex) one? (t261009-69
+    requirement 5: the 8->16 widening does NOT renumber history — an existing 8-hex
+    id keeps resolving to its finding.) Matching rule, declared:
+      - equal strings match (same-width ids, the normal case);
+      - a stored 8-hex id matches a longer minted id that STARTS WITH it (an 8-hex
+        id is a strict prefix of the widened id for the same content, because the
+        widening only extends the same sha256 digest);
+      - anything else (non-str, empty, wrong length, non-hex) does not match —
+        malformed input degrades to False, never raises."""
+    s, m = (stored if isinstance(stored, str) else ""), (minted if isinstance(minted, str) else "")
+    s, m = s.strip().lower(), m.strip().lower()
+    if not s or not m:
+        return False
+    if not all(c in "0123456789abcdef" for c in s + m):
+        return False
+    if s == m:
+        return True
+    return len(s) == 8 and len(m) > 8 and m.startswith(s)
 
 
 #: 缩面塌陷发现的 scan 标签（260929 宿主令：塌陷记在**票面**上，不记 KI 册）。
@@ -389,22 +419,44 @@ def recheck_evidence(findings: List[Dict[str, Any]], base_dir: Any) -> List[Dict
     return out
 
 
+def id_in_legacy_set(fid: Any, ids: Any) -> bool:
+    """Is a minted finding id in a set of STORED ids, under the widening rule
+    (t261009-69 requirement 5)? Exact match first; then, because the 8->16
+    widening only extends the same sha256 digest, a 16-hex minted id whose
+    8-hex PREFIX is in the stored set matches (an older period's ledger stores
+    the legacy form). Malformed inputs degrade to False, never raise."""
+    f = fid if isinstance(fid, str) else ""
+    s = ids if isinstance(ids, (set, frozenset, list, tuple)) else ()
+    f = f.strip()
+    if not f:
+        return False
+    if f in s:
+        return True
+    return len(f) > 8 and f[:8] in s
+
+
 def dedupe_and_suppress(findings: List[Dict[str, Any]], prev_ids: Any,
                         fake_ids: Any) -> List[Dict[str, Any]]:
-    """跨期去重 + 假报压制（工单要点④⑥）：
-    - id ∈ 上期清单 → recurring=True（不进 summary 计数、不进建议；裁定④「不累计」）；
-    - id ∈ 历史 false-positive 裁定集 → verdict=false-positive + suppressed=True
-      （同上排除；假报跨期不再重复计数，但票面仍点名可见）。"""
+    """Cross-period dedupe + false-positive suppression (ticket points 4/6):
+    - id in the previous period's list -> recurring=True (kept out of the summary
+      count and out of suggestions; ruling 4: not double-counted);
+    - id in the historical false-positive verdict set -> verdict=false-positive +
+      suppressed=True (likewise excluded; a false positive is never re-counted
+      across periods, but stays visible on the ticket face by name).
+    Membership resolves stored ids under the widening rule
+    (`id_in_legacy_set`): an 8-hex id from a pre-widening ledger still marks
+    its widened re-sighting recurring/suppressed — the widening does not
+    renumber history."""
     prev = set(prev_ids or [])
     fake = set(fake_ids or [])
     for f in findings:
         fid = str(f.get("id") or "")
-        if fid and fid in prev:
+        if fid and id_in_legacy_set(fid, prev):
             # recurring 先标（上期已见）；若同条又被裁过假报，下面的 fake 分支覆盖
             # verified 态——人已裁定是更终局的事实（场景 P2 契约：压制优先可读）。
             f["recurring"] = True
             f["verified"] = "recurring"
-        if fid and fid in fake:
+        if fid and id_in_legacy_set(fid, fake):
             f["verdict"] = VERDICT_FAKE
             f["suppressed"] = True
             # verified 字段双写 dedupe 态（单值态字段契约：票面/场景 finding_state
