@@ -5048,3 +5048,10 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（本岗）**：**凡红警（redline），必须能收敛**——不能收敛的对照/历史遗留只能进状态面。凡"两侧比对"的判据，都要能回答"这条差异谁会去动手"；答案是"没人"的差异，不是告警。
 >
 > **回归**：L2——(а)终态票（closed/verified）的看板×账本态分歧**不进** mismatch 红警；(b)账本有而看板无的历史 workflow（如已 prune 的 `dispatcher-scan-*`）**不进**红警；(c)真·在飞票的态分歧**照旧响**且具名；(d)两类计数各自可分。L3——在"看板 284 行 × 账本 11026 行"的真实台面上跑一次心跳，**不产生永不收敛的红警**，且真在飞分歧仍能响亮冒出。
+
+> **补·形状（261010 14:52 console 重启实测；integration 岗登记）——"重启后三张票集体无 poller"是**排空中间态**，不是坏，且**不许强推换手**：
+> 宿主 14:52 重启 console（旧 pid 70035 → 新 pid 56196）。重启后 `engine_ops.py workers` 实读：**三张票的车道 worker 仍在、但 `polling=False`**（`t261009-46` pid 68735 / `-53` pid 1177 / `-59` pid 84628，三者 `ppid=1` 已成孤儿、pidfile 仍被它们占着）⇒ 那三条队列**活 poller 数=0**、票查询返回 `no_poller`/`snapshot query failed`。同刻 supervisor 只给"旧 worker 已死"的票起了新 worker（`-54`/`-65`/`t261010-05/06`/`t261005-11`，新 pid 且 `polling=True`）。
+> **真因＝**这些 worker 收到 TERM 后进入**优雅排空**（停 poll、把在飞活动跑完，宽限 `SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC=1800`）；**排空期间 pidfile 仍归旧 pid ⇒ supervisor 不会补位**，于是"票无 poller"的窗口＝"排空还剩多久"。实读佐证：那三条车道**有真进程在跑**（`-59` 的 `pytest .lane/t261009-59/server/engine/tests -q --collect-only` + `lint_tests.py` + `lane_audit.py`、`-46` 的 `verify_lane`）。
+> **本岗 14:55 按章程做换手（`engine_ops.py restart --scope lane:<t>` ×3），三次都被**安全默认**拒收**：`refusing handover … in-flight agent activity run_integration_tests … would be destroyed by a TERM … --force 才继续`。三条 `pending_workflow_task.present=false` ⇒ **本条 KI 原记的"WFT 被作废"危险不适用**。**⇒ 正确处置是"等排空"，不是 `--force`**（force 会掐掉真在跑的电池，并让票记一次 worker 终止 = 另一条 KI）。
+> **做法**：①重启后先 `workers` 看 `polling` 列——出现 `state=live + polling=False + ppid=1` 就**不要**再重启、**也不要** force 换手；②看那三条车道有没有真进程在跑（有 ⇒ 等它跑完，宽限 1800s）；③排空结束后旧 worker 自退 ⇒ supervisor 补位 ⇒ 验"新 pid + 活 poller=1"；④只有"无进程在跑且 pidfile 仍被占"才考虑换手，且仍优先用工具的 `--inflight-policy wait` 而非 `--force`。
+> **纪律**：**重启不是"干净的截断"**——它把在跑的活动变成"排空中的无 poller 窗口"（最长 30 分钟）；宣布"重启完成"之前，验收面是**每张在飞票都有活 poller**，而不是"console 进程起来了"。
