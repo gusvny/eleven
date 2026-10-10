@@ -373,3 +373,10 @@ a gate), and say who owns the decision. When the request asks for something only
 (a protected path, a widened write set, a design call), the steward's job is: **escalate in the same
 breath, record the escalation id on the ticket, and tell the lane to hold** — a lane parked on a
 named human decision is cheap; a lane invited to work around one is not.
+
+**A ruling records; a signal moves.** `op=ruling` writes the decision into the ticket's event history —
+it does **not** advance or rewind a stage. When the decision is "go back and re-plan" or "re-run the
+check", the mechanism is the signal: `rework` (`to_stage=…`, with the named item in the note) or
+`retry_qc`. Write the ruling **and** send the signal; a ruling alone leaves a lane that is already
+looping exactly where it was (measured: a lane kept cycling implement → tests → acceptance for
+several rounds after a ruling that told it to re-plan, and only moved when the `rework` arrived).
