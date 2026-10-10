@@ -5007,3 +5007,21 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > —— 它**在共享的系统临时目录里 glob 一个机器级命名空间**，而 `-42` 的检查在**任何**泳道跑闸时都会真的创建 `bundle-freshness-*` 临时目录（`_bundle_freshness_rebuild` 的 `TemporaryDirectory(prefix="bundle-freshness-")`）⇒ **别的泳道正在重建时，本泳道这条断言必然看到"残留"** ⇒ 车队越忙越红。**它既不关本票的事，也不是产品缺陷，而是这条测试自己没做隔离。**
 > **修法（比挂名册更根本，推荐）**：测试内把临时根**收进自己的沙盒**——`monkeypatch.setenv("TMPDIR", str(tmp_path))`（或 `monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))`）后再 glob，只数**自己**创建的目录；这样它对"别的泳道在重建"免疫，而**"本路径没回收"这个真断言仍然有效**（有界的残留照旧红）。
 > **纪律补充**：**凡断言"临时目录/文件没有残留"的测试，必须先把临时根收进自己的沙盒**——否则它在并发车队里是一条必然假红的断言（本条与 `KI-072` 的时序敏感合起来，正是今晚四次"并发假红卡票"的两大来源）。
+
+## KI-01M4J1DZH3QBMR3HV3Q78DVJ9Q **"负载敏感豁免"的串行复跑在生产里是死的：它用 worker PATH 上的 `python3 -m pytest`，而那条 python 没有 pytest ⇒ 任何"引擎单测"名字的名册条目永远拿不到绿色静默判词**(261010 读码+实测;integration 岗登记)
+
+> **现象（12:35，本岗差点踩进去）**：`-55`/`-58` 的第二轮 `merge_check` 红项是**单条** pytest 失败（`test_t261009_42_bundle_freshness.py::test_rebuild_temp_copy_reaped_on_every_path`，台账 `red_items` 只有这一条、`quiet_verdicts` 为空）。按机制，**把它挂进 `integration/known-red-baseline.json`（verdict=`isolated`）就能触发"静默复跑"，串行跑绿即本轮不计入**——这正是名册给人的出路。本岗照做前先核了一遍命令，发现**这条路对"引擎单测"名字是死的**。
+>
+> **取证（两项原始读数）**：① `agent_activities._quiet_rerun_green`（`server/engine/agent_activities.py`，名字含 `::` 或前缀 `server/engine/tests/` 时）构造的命令是 **`["python3","-m","pytest","-q", <nodeid>]`**——**裸 `python3`**；② 车道 worker 的环境（实测 `ps eww -p 54354`，即跑本轮 `-55` 闸的那个进程）`PATH` 是宿主 PATH（`/usr/local/bin:/usr/bin:/bin:…`），**不含 `server/engine/.venv/bin`**；③ 于是 `/usr/bin/python3 -m pytest` 实测回 **`No module named pytest`**，而引擎 venv 里 `pytest 8.4.2` 是有的。⇒ **静默复跑只能红**，挂名册也照旧 blocked（好在方向是 fail-closed，不会假绿）。
+>
+> **为什么一直没被发现**：名册在册 50 条**全是场景形状的名字**（`t260910-09-ms-decl-gate`、`t13-evidence-lightbox`…），它们走的是 `cmd = ["python3", raw]` 分支、且场景自带 `sys.path` 引导；**引擎单测名字从未入册**。机制自身的单测用**桩进程**驱动（`_quiet_rerun_green` 的子进程被 stub），所以"解释器可用性"这一环在测试里根本不存在。全库检索也**找不到一条生产期的绿色静默判词**（`load_sensitive_quiet_green_log` 无行）——机制从未真正生效过。
+>
+> **危害**：①**"申报即可放行"是空头承诺**——它把值班引向"挂个名册就行"，而挂上去仍然卡（本岗若直接挂，会白等一轮且误判"机制坏了"）；②**静默**：复跑红与"真红"在票面同形（都只是一个红项），没人会去读那行命令；③在册条目本身**看似有效**（闸面、卫生测试、L1 全绿），属于"落地了但运行时不可用"的一类（与 `KI-01M4HBC9ANXZXQRDQR54Z9C0MZ`「机制落地无调用点」同族）。
+>
+> **附带发现（同一段代码，另计）**：`canonical_check_name` 对 `path::test_name` 会**丢掉函数名**（`test_t261009_42_bundle_freshness.py::test_x` → `t261009_42_bundle_freshness`）⇒ 一条按"文件"身份入册的行，会同时给**同文件其它用例**的名册身份。方向仍 fail-closed（每条红仍要各自复跑绿才放行），但"名册条目点名到用例"这个直觉是错的，写判词时不要以为它只管一条。
+>
+> **出路（判据归宿主，实现归修复票）**：①**静默复跑用真解释器**：pytest 分支改用引擎 venv 的解释器（或 `sys.executable`）——**最便宜且直接治本**；②**复跑命令与被复跑的那次闸用同一条命令**（`verify_lane` 回执带上"本次是怎么跑的"这一条，复跑照抄），从根上消掉"两套环境"的缝；③**把"解释器不可用"具名**：复跑前探一次 `import pytest`，不可用就在红项上写 **"quiet rerun interpreter has no pytest（机制在本环境不可用）"**，而不是一个与真红同形的红。
+>
+> **纪律**：**凡"申报/名册即可豁免"的机制，必须附一条"本环境真的可用"的证据**（一次真实、非桩的复跑回执）——否则它只在单测里活着，值班一旦依赖它就白等。
+>
+> **回归**：L2——(а)名册条目指向 `::` nodeid 且解释器缺 pytest ⇒ 回执**具名**"quiet rerun interpreter has no pytest"（不是裸红、不是假绿）；(b)解释器可用 ⇒ 真复跑并给真判词；L3——一次真实并发台面里，"已入册的引擎单测红"能在**同一轮**被静默判词放行或具名拦住，且两者可区分。
