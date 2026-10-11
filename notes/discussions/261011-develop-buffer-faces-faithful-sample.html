@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Develop buffer — faithful sample (261011 v5: LineOn pill, colour = state, every old element kept)</title>
+<title>Develop buffer — faithful sample (261011 v6: LineOn colour pill · step name + stage dots kept · sentences off the row)</title>
 <style>
-  /* 颜色/字号/间距照抄 server/plugins/workbench/src/client/index.tsx 的 .wb-card 家族
-     （token 名与 fallback 值都取真源）。v5 按宿主令改：①选 B（LineOn 徽标）；②状态用
-     **颜色**表达（不用字形）；③**行上原有的元素一个不少**（点/状态字/票号/标题/类别徽标/
-     暂停徽标/收口健康徽标）。 */
+  /* 卡片 CSS 逐条照抄 server/plugins/workbench/src/client/index.tsx 与 sidebar.tsx
+     （token 名与 fallback 值都取真源）。v6 按宿主令改：①B（LineOn 徽标，颜色=状态）；
+     ②**保留**：stage 进度点阵（.wb-card-lane，点数=模板阶段数）与 **step name**（.wb-card-stage）；
+     ③**去掉**行上的整句文字（如 "waiting for certification"）——那些话进 tooltip 与详情头。 */
   :root{
     --canvas:#fff; --ink-strong:#24292f; --muted:#57606a; --accent:#0969da;
     --border:#d0d7de; --warn-bg:#fff8c5; --warn:#bf8700; --warn-text:#7d4e00;
-    --warn-border:#eac54f; --warn-surface:#fff8e6;
+    --warn-border:#eac54f; --warn-surface:#fff8e6; --success-solid:#2da44e;
     --danger-bg:#ffebe9; --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182;
     --success:#1a7f37; --success-deep:#116329; --success-border:#4ac26b; --success-surface:#dafbe1;
     --done-bg:#f6f8fa;
@@ -24,18 +24,17 @@
   .sub{color:#9aa4b2;font-size:13px}
   .note{background:#161b22;border:1px solid #30363d;border-left:3px solid #79b8ff;padding:10px 12px;border-radius:6px;margin:12px 0;font-size:13px;color:#9aa4b2}
   .light{background:#fff;color:#24292f;border:1px solid #d0d7de;border-radius:10px;padding:10px}
-  .cap{color:#9aa4b2;font-size:11px;margin:12px 0 4px}
   code{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:1px 5px;color:#e6e9ef}
   .light code{background:#f6f8fa;border-color:#d0d7de;color:#24292f}
 
-  /* ---- 真源卡片（逐条来自 index.tsx:224-267） ---- */
+  /* ---- 真源卡片（index.tsx:224-283） ---- */
   .wb-card{display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;
     border:1px solid var(--border);border-left-width:4px;border-radius:8px;background:var(--canvas);
     border-left-color:#d0d7de;flex-wrap:wrap}
   .wb-card[data-state=waiting]{background:var(--warn-bg);border-left-color:var(--warn)}
   .wb-card[data-state=blocked]{background:var(--danger-bg);border-left-color:var(--danger)}
-  .wb-card[data-active=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .wb-card[data-state=done]{color:var(--muted);background:var(--done-bg)}
+  .wb-card[data-active=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
   .wb-card-dot{width:9px;height:9px;flex:none;position:relative}
   .wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--muted)}
@@ -48,37 +47,38 @@
   .wb-card-state[data-state=waiting]{color:var(--warn-text)}
   .wb-card-state[data-state=blocked]{color:var(--danger)}
   .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--ink-strong)}
+  /* 第二行（compact 形态的真源）：step name + 点阵 */
   .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;flex:1 1 260px;min-width:0}
+  .wb-card-stage{flex:none;font-size:10px;color:var(--muted)}
   .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent);flex:none}
   .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid var(--border);border-radius:10px;flex:none;white-space:nowrap;color:var(--muted)}
   .wb-card-paused{font-size:11px;font-weight:600;flex:none;padding:0 7px;line-height:18px;
-    border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);
-    background:var(--warn-surface);white-space:nowrap}
+    border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);background:var(--warn-surface);white-space:nowrap}
   .wb-card-paused.is-pending{border-style:dashed}
   .wb-card-health{display:inline-flex;align-items:center;flex:none;padding:0 5px;font-size:11px;
     border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);background:var(--warn-surface)}
+  /* 迷你站道：点数=模板阶段数；绿=已过 / 状态色=当前 / 灰=未来（index.tsx:275-282） */
+  .wb-card-lane{display:inline-flex;gap:4px;align-items:center;flex:none}
+  .wb-card-lane-dot{width:8px;height:8px;border-radius:50%;background:var(--border);display:inline-block}
+  .wb-card-lane-dot[data-visual=done]{background:var(--success-solid)}
+  .wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--warn-border)}
+  .wb-card-lane-dot[data-visual=current][data-state=blocked]{background:var(--danger)}
+  .wb-card-lane-dot[data-visual=current][data-state=active]{background:var(--accent)}
+  /* 旧的整句面（本页只用来做"今天 vs v6"的对照） */
+  .wb-card-progress{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:12px}
   .wb-col{width:360px}
   .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid #d0d7de;background:#f6f8fa;color:#57606a;margin-right:6px}
 
-  /* ================= 本页主角：LineOn 徽标（v5 = 颜色即状态） =================
-     形状与 .wb-card-paused 同族（11px、圆角、边框），**定宽**：文字常量 "LineOn"，
-     状态**只用颜色**承载（宿主令）；词进 tooltip 与详情头，并给读屏留 aria-label。 */
+  /* ===== 主角：LineOn 徽标（v6 = 文字定宽 "LineOn"，颜色即状态） ===== */
   .ln-pill{display:inline-flex;align-items:center;flex:none;font-size:11px;font-weight:600;
     padding:0 7px;line-height:18px;border:1px solid var(--border);border-radius:10px;
     white-space:nowrap;color:var(--muted);background:#f6f8fa}
-  /* 1 · 在线上干活、未落地 —— 基准态：淡灰描边，不抢眼 */
   .ln-pill[data-line-state=online]{border-color:var(--border);color:var(--muted);background:#f6f8fa}
-  /* 2 · 已落地、等认证 —— 与暂停徽标同族的暖色 */
   .ln-pill[data-line-state=waiting]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
-  /* 3 · 等过头了（overdue）—— 暖色 ＋ ! 后缀，不加新色 */
   .ln-pill[data-line-state=overdue]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
-  /* 4 · 落在红认证的派生区间里 —— 红 */
   .ln-pill[data-line-state=red]{border-color:var(--danger-border);color:var(--danger);background:var(--danger-bg)}
-  /* 5 · 认证覆盖 —— 绿（描边） */
   .ln-pill[data-line-state=certified]{border-color:var(--success-border);color:var(--success-deep);background:var(--success-surface)}
-  /* 6 · 已随签字晋级 —— 更实的绿（实心），与"认证覆盖"一眼可分 */
   .ln-pill[data-line-state=delivered]{border-color:var(--success);color:#fff;background:var(--success)}
-  /* 7 · 落地被撤回 —— 灰实心（终局且是"废"的意思） */
   .ln-pill[data-line-state=withdrawn]{border-color:var(--border);color:var(--muted);background:#eaeef2}
 
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
@@ -94,38 +94,89 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Develop buffer — faithful sample <span class="sub">(v5: B chosen · LineOn pill · colour = state · every old element kept)</span></h1>
-  <p class="sub">261011 · integration steward · <b>sample only, nothing runs.</b> Card CSS is copied from the real left-column card
-    (<code>server/plugins/workbench/src/client/index.tsx</code>, <code>.wb-card</code> family, lines 224-267).</p>
+  <h1>Develop buffer — faithful sample <span class="sub">(v6: LineOn colour pill · step name + stage dots kept · sentences off the row)</span></h1>
+  <p class="sub">261011 · integration steward · <b>sample only, nothing runs.</b> Card CSS copied from the real left-column card
+    (<code>index.tsx</code> <code>.wb-card</code> family 224-283 ＋ <code>sidebar.tsx</code> 的 compact 覆盖).</p>
 
-  <div class="note"><b>宿主定稿</b>：选 <b>B</b>——一枚 <code>LineOn</code> 徽标；<b>状态用颜色表达</b>（不再用字形）；<b>行上原有的元素一个不少</b>（状态点、状态字、票号、标题、类别徽标、暂停徽标、收口健康徽标全部保留）。<br>
-    <b>本页要你确认的只剩两件</b>：① 下面那条<b>颜色语义表</b>（尤其 <i>certified</i> 与 <i>delivered</i> 要不要一眼可分）；② 线级 <code>FROZEN</code> 放左栏表头还是票行（我建议表头——它是线的属性）。</div>
+  <div class="note"><b>宿主定稿（累积）</b>：选 <b>B</b>（一枚定宽 <code>LineOn</code> 徽标）· <b>颜色即状态</b> · <b>行上原元素一个不少</b> · 暂停只留 <code>⏸</code>；
+    <b>本轮新增</b>：<b>保留</b> stage 进度点阵（<code>.wb-card-lane</code>，点数＝模板阶段数）与 <b>step name</b>（<code>.wb-card-stage</code>），
+    <b>去掉</b>行上的整句文字（<code>waiting for certification</code> 之类）⇒ 那一行只剩 <i>step name ＋ 点阵</i>，标题与行面因此不再被句子挤。</div>
 
-  <h2>1 · 行上原有的元素（一个不少）＋ 新徽标插在哪</h2>
-  <div class="legend"><span class="swatch" style="background:#bf8700;border-color:#bf8700"></span><b>① 状态点</b>
+  <h2>1 · 对照：今天 vs v6（同一张票、同一个 360px 栏）</h2>
+  <div class="grid2">
+    <div>
+      <div class="sub" style="color:#9aa4b2">今天（第二行是一整句）</div>
+      <div class="light wb-col">
+        <div class="wb-card" data-state="waiting">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="waiting"></span>
+            <span class="wb-card-state" data-state="waiting">waiting</span>
+            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
+          </div>
+          <div class="wb-card-l2">
+            <span class="wb-card-id">t261009-80</span>
+            <span class="wb-card-progress">merge · waiting for certification</span>
+          </div>
+        </div>
+      </div>
+      <p class="sub">第二行 ≈ 34 个字符的句子（≈250px）＋ 票号；状态其实在上面（waiting）与行底色里已经说过一遍。</p>
+    </div>
+    <div>
+      <div class="sub" style="color:#79b8ff"><b>v6</b>（第二行＝step name ＋ 阶段点阵）</div>
+      <div class="light wb-col">
+        <div class="wb-card" data-state="waiting">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="waiting"></span>
+            <span class="wb-card-state" data-state="waiting">waiting</span>
+            <span class="ln-pill" data-line-state="waiting"
+                  title="LineOn · on line develop-buffer · landed 13:50 · waiting for the covering certification · holds no concurrency slot"
+                  aria-label="On the develop-buffer line: waiting for certification">LineOn</span>
+            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
+          </div>
+          <div class="wb-card-l2">
+            <span class="wb-card-id">t261009-80</span>
+            <span class="wb-card-stage" data-wb-row-stage="merge">merge</span>
+            <span class="wb-card-lane" title="Stage dots (10)"><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="current" data-state="waiting"></span><span class="wb-card-lane-dot" data-visual="todo"></span></span>
+          </div>
+        </div>
+      </div>
+      <p class="sub">第二行 ≈ <code>merge</code>（5 字符）＋ 10 个 8px 点（≈116px）；<b>整句搬进 tooltip 与详情头</b>。行身高不变，但行面只剩"扫视需要的东西"。</p>
+    </div>
+  </div>
+
+  <h2>2 · 行上的元素清单（照宿主令：一个不少，句子除外）</h2>
+  <div class="legend">
+    <span class="swatch" style="background:#bf8700;border-color:#bf8700"></span><b>① 状态点</b>
     <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>② 状态字</b>
-    <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>③ LineOn 徽标（新）</b>
-    <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>④ 暂停徽标</b>
+    <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>③ LineOn（新）</b>
+    <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>④ 暂停 ⏸</b>
     <span class="swatch" style="background:#f6f8fa"></span><b>⑤ 类别徽标</b>
     <span class="swatch" style="background:#0969da;border-color:#0969da"></span><b>⑥ 票号</b>
     <span class="swatch" style="background:#f6f8fa"></span><b>⑦ 标题</b>
-    <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>⑧ 收口健康</b></div>
+    <span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span><b>⑧ 收口健康</b>
+    <span class="swatch" style="background:#2da44e;border-color:#2da44e"></span><b>⑨ stage 点阵</b>
+    <span class="swatch" style="background:#57606a;border-color:#57606a"></span><b>⑩ step name</b>
+  </div>
   <div class="light wb-col">
     <div class="wb-card" data-state="waiting" data-active="true">
       <div class="wb-card-l1">
-        <span class="wb-card-dot" data-state="waiting"></span>
-        <span class="wb-card-state" data-state="waiting">waiting</span>
+        <span class="wb-card-dot" data-state="waiting"></span>                                        <!-- ① -->
+        <span class="wb-card-state" data-state="waiting">waiting</span>                               <!-- ② -->
         <span class="ln-pill" data-line-state="waiting"
               title="LineOn · on line develop-buffer · landed 13:50 · waiting for the covering certification · holds no concurrency slot"
-              aria-label="On the develop-buffer line: waiting for certification">LineOn</span>
+              aria-label="On the develop-buffer line: waiting for certification">LineOn</span>            <!-- ③ -->
         <span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate"
               title="Halted at the stage gate: next stage not dispatched; click Resume to continue"
-              aria-label="Halted at the stage gate">⏸</span>
-        <span class="wb-card-epic">engine-hardening</span>
-        <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-        <span class="wb-card-health" title="close-out health: attention">!</span>
+              aria-label="Halted at the stage gate">⏸</span>                                          <!-- ④ -->
+        <span class="wb-card-epic">engine-hardening</span>                                             <!-- ⑤ -->
+        <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span> <!-- ⑦ -->
+        <span class="wb-card-health" title="close-out health: attention">!</span>                       <!-- ⑧ -->
       </div>
-      <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>merge · waiting for certification</span></div>
+      <div class="wb-card-l2">
+        <span class="wb-card-id">t261009-80</span>                                                     <!-- ⑥ -->
+        <span class="wb-card-stage" data-wb-row-stage="merge">merge</span>                             <!-- ⑩ -->
+        <span class="wb-card-lane" title="Stage dots (10)"><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="current" data-state="waiting"></span><span class="wb-card-lane-dot" data-visual="todo"></span></span> <!-- ⑨ -->
+      </div>
     </div>
     <div class="wb-card" data-active="true">
       <div class="wb-card-l1">
@@ -133,127 +184,52 @@
         <span class="wb-card-state" data-state="running">running</span>
         <span class="wb-card-title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span>
       </div>
-      <div class="wb-card-l2"><span class="wb-card-id">t261011-18</span><span>implement</span></div>
+      <div class="wb-card-l2">
+        <span class="wb-card-id">t261011-18</span>
+        <span class="wb-card-stage" data-wb-row-stage="implement">implement</span>
+        <span class="wb-card-lane" title="Stage dots (10)"><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="done"></span><span class="wb-card-lane-dot" data-visual="current" data-state="active"></span><span class="wb-card-lane-dot" data-visual="todo"></span><span class="wb-card-lane-dot" data-visual="todo"></span><span class="wb-card-lane-dot" data-visual="todo"></span><span class="wb-card-lane-dot" data-visual="todo"></span><span class="wb-card-lane-dot" data-visual="todo"></span><span class="wb-card-lane-dot" data-visual="todo"></span><span class="wb-card-lane-dot" data-visual="todo"></span></span>
+      </div>
     </div>
   </div>
-  <p class="sub">第一行 <code>t261009-80</code> 是<b>真票</b>（唯一在线的票，已落地、等认证 ⇒ 暖色 <code>LineOn</code>）；第二行 <code>t261011-18</code> 是 legacy 票 ⇒ <b>一个字都不加</b>（与今天逐字节相同）。暂停徽标按你的令只留 <code>⏸</code>，词进 tooltip ＋ <code>aria-label</code>，两个断言锚点 <code>data-paused</code> / <code>data-paused-phase</code> 原样保留。</p>
+  <p class="sub">第一行 <code>t261009-80</code> 是真票（唯一在线的票：已落地、等认证 ⇒ 暖色 <code>LineOn</code>，点阵第 9 格＝当前阶段 <span style="color:#d4a72c">暖色</span>）；第二行 <code>t261011-18</code> 是 legacy 票 ⇒ <b>不加 <code>LineOn</code></b>，其余元素照旧。点阵与 step name <b>本来就在卡上</b>（<code>laneDots()</code> / <code>stageDisplayLabel()</code>），本轮只是把"整句"从行上撤掉。</p>
 
-  <h2>2 · 颜色语义表（徽标文字永远是 <code>LineOn</code>，只有颜色变）</h2>
+  <h2>3 · LineOn 的颜色语义（文字恒定，只有颜色变）</h2>
   <div class="light">
     <table>
-      <tr><th>颜色</th><th>徽标</th><th>状态（引擎词）</th><th>读哪个面</th><th>tooltip 句子</th></tr>
-      <tr><td><span class="swatch" style="background:#f6f8fa"></span> 淡灰描边</td>
-        <td><span class="ln-pill" data-line-state="online">LineOn</span></td>
-        <td>在线上干活、<b>未落地</b>（基准态）</td><td>票面 <code>lane_version</code>=develop-buffer-v1 ＋ <code>develop_line</code>，且无 landing 行</td>
-        <td>on line develop-buffer · not landed · proof: own scenarios + fast set</td></tr>
-      <tr><td><span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span> 暖色（与暂停同族）</td>
-        <td><span class="ln-pill" data-line-state="waiting">LineOn</span></td>
-        <td><code>waiting</code>（已落地、等覆盖它的认证）</td><td><code>ticket_wait_state.state == waiting</code></td>
-        <td>landed &lt;when&gt; · waiting for &lt;cert id&gt; · holds no slot</td></tr>
-      <tr><td><span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span> 暖色 ＋ <code>!</code></td>
-        <td><span class="ln-pill" data-line-state="overdue">LineOn !</span></td>
-        <td><code>waiting</code> 且 <code>overdue: true</code></td><td>同上 ＋ 等待超过声明上界</td>
-        <td>the wait outlived its declared bound</td></tr>
-      <tr><td><span class="swatch" style="background:#ffebe9;border-color:#ff8182"></span> 红</td>
-        <td><span class="ln-pill" data-line-state="red">LineOn</span></td>
-        <td><code>red_implicated</code>（落在红认证的派生区间）</td><td>同上 ＋ 在红认证的 range 内</td>
-        <td>inside red certification &lt;cert id&gt;</td></tr>
-      <tr><td><span class="swatch" style="background:#dafbe1;border-color:#4ac26b"></span> 绿（描边）</td>
-        <td><span class="ln-pill" data-line-state="certified">LineOn</span></td>
-        <td><code>certified</code>（认证已覆盖）</td><td><code>state == certified</code> → <code>covered_by</code></td>
-        <td>covered by &lt;cert id&gt;</td></tr>
-      <tr><td><span class="swatch" style="background:#1a7f37;border-color:#1a7f37"></span> 绿（实心）</td>
-        <td><span class="ln-pill" data-line-state="delivered">LineOn</span></td>
-        <td><code>delivered</code>（已随签字晋级进 main）</td><td><code>ticket_outcome.delivered_in</code></td>
-        <td>delivered in promotion &lt;id&gt;</td></tr>
-      <tr><td><span class="swatch" style="background:#eaeef2"></span> 灰实心</td>
-        <td><span class="ln-pill" data-line-state="withdrawn">LineOn</span></td>
-        <td>落地被撤回（<code>ending: withdrawn</code> / <code>reverted</code>）</td><td>当前 <code>withdraws</code> 关系以该票为 to</td>
-        <td>withdrawn by &lt;relation id&gt; — never delivered</td></tr>
-      <tr><td><i>不渲染</i></td><td><i>（无）</i></td><td>不在线上（legacy 票）</td><td><code>lane_version != develop-buffer-v1</code></td><td>—</td></tr>
+      <tr><th>颜色</th><th>徽标</th><th>状态（引擎词）</th><th>读哪个面</th></tr>
+      <tr><td><span class="swatch" style="background:#f6f8fa"></span> 淡灰描边</td><td><span class="ln-pill" data-line-state="online">LineOn</span></td><td>在线上干活、<b>未落地</b></td><td><code>lane_version</code>=develop-buffer-v1 ＋ <code>develop_line</code>，无 landing 行</td></tr>
+      <tr><td><span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span> 暖色（与暂停同族）</td><td><span class="ln-pill" data-line-state="waiting">LineOn</span></td><td><code>waiting</code>（已落地、等认证）</td><td><code>ticket_wait_state.state == waiting</code></td></tr>
+      <tr><td><span class="swatch" style="background:#fff8e6;border-color:#eac54f"></span> 暖色 ＋ <code>!</code></td><td><span class="ln-pill" data-line-state="overdue">LineOn !</span></td><td><code>waiting</code> 且 <code>overdue</code></td><td>等待超过声明上界</td></tr>
+      <tr><td><span class="swatch" style="background:#ffebe9;border-color:#ff8182"></span> 红</td><td><span class="ln-pill" data-line-state="red">LineOn</span></td><td><code>red_implicated</code></td><td>落在红认证的派生区间</td></tr>
+      <tr><td><span class="swatch" style="background:#dafbe1;border-color:#4ac26b"></span> 绿（描边）</td><td><span class="ln-pill" data-line-state="certified">LineOn</span></td><td><code>certified</code></td><td><code>covered_by</code></td></tr>
+      <tr><td><span class="swatch" style="background:#1a7f37;border-color:#1a7f37"></span> 绿（实心）</td><td><span class="ln-pill" data-line-state="delivered">LineOn</span></td><td><code>delivered</code>（已晋级进 main）</td><td><code>ticket_outcome.delivered_in</code></td></tr>
+      <tr><td><span class="swatch" style="background:#eaeef2"></span> 灰实心</td><td><span class="ln-pill" data-line-state="withdrawn">LineOn</span></td><td>落地被撤回</td><td>当前 <code>withdraws</code> 关系以该票为 to</td></tr>
+      <tr><td><i>不渲染</i></td><td><i>（无）</i></td><td>不在线上（legacy 票）</td><td><code>lane_version != develop-buffer-v1</code></td></tr>
     </table>
-    <p class="sub" style="color:#57606a"><b>四个状态在真实盘上的颜色</b>（按今日读数）：<code>t261009-80</code> = 暖色（已落地、等认证）；<code>t261011-18</code> = 不渲染；<b>绿/红/灰三档今天没有样本</b>（认证、晋级、撤回都还没发生过）——它们是形状样本，已在此标明，不冒充实测。</p>
+    <p class="sub" style="color:#57606a">今天盘上有真实样本的只有 1 档（<code>-80</code>＝暖色）；绿/红/灰三档尚无样本（认证、晋级、撤回都没发生过）。颜色全部用既有令牌（warn / danger / success / muted 四族），不新造色。</p>
   </div>
 
-  <h2>3 · 六个状态并排（360px 栏里的真实宽度）</h2>
-  <div class="light wb-col">
-    <div class="wb-card" data-active="true">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="running"></span><span class="wb-card-state" data-state="running">running</span>
-        <span class="ln-pill" data-line-state="online" title="on line develop-buffer · not landed">LineOn</span>
-        <span class="wb-card-title">The lane's own proof still pays the whole suite: the declared fast set is wired into no lane…</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t…</span><span>implement</span></div>
-    </div>
-    <div class="wb-card" data-state="waiting" data-active="true">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="waiting"></span><span class="wb-card-state" data-state="waiting">waiting</span>
-        <span class="ln-pill" data-line-state="waiting" title="landed 13:50 · waiting for the covering certification">LineOn</span>
-        <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert…</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>merge · waiting for certification</span></div>
-    </div>
-    <div class="wb-card" data-state="waiting">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="waiting"></span><span class="wb-card-state" data-state="waiting">waiting</span>
-        <span class="ln-pill" data-line-state="overdue" title="the wait outlived its declared bound">LineOn !</span>
-        <span class="wb-card-title">（形状样本：等待超过声明上界）</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t…</span><span>merge · overdue</span></div>
-    </div>
-    <div class="wb-card" data-state="blocked">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="blocked"></span><span class="wb-card-state" data-state="blocked">blocked</span>
-        <span class="ln-pill" data-line-state="red" title="inside red certification cert-…">LineOn</span>
-        <span class="wb-card-title">（形状样本：落在红认证的派生区间里）</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t…</span><span>merge · red implicated</span></div>
-    </div>
-    <div class="wb-card" data-state="done">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="done"></span><span class="wb-card-state" data-state="done">done</span>
-        <span class="ln-pill" data-line-state="certified" title="covered by cert-…">LineOn</span>
-        <span class="wb-card-title">（形状样本：认证已覆盖）</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t…</span><span>certified</span></div>
-    </div>
-    <div class="wb-card" data-state="done">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="done"></span><span class="wb-card-state" data-state="done">done</span>
-        <span class="ln-pill" data-line-state="delivered" title="delivered in promotion prm-…">LineOn</span>
-        <span class="wb-card-title">（形状样本：已随签字晋级进 main）</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t…</span><span>delivered</span></div>
-    </div>
-    <div class="wb-card" data-state="done">
-      <div class="wb-card-l1"><span class="wb-card-dot" data-state="done"></span><span class="wb-card-state" data-state="done">done</span>
-        <span class="ln-pill" data-line-state="withdrawn" title="withdrawn by rel-… — never delivered">LineOn</span>
-        <span class="wb-card-title">（形状样本：落地被撤回）</span></div>
-      <div class="wb-card-l2"><span class="wb-card-id">t…</span><span>withdrawn</span></div>
-    </div>
-  </div>
-  <p class="sub">徽标是<b>定宽</b>的（文字恒为 <code>LineOn</code>），因此<b>状态变化不会让标题回流</b>；只多占 ≈52px，<code>LineOn !</code> 那一档多 6px。</p>
-
-  <h2>4 · 状态词的第二落点：票详情头（颜色在左栏，词在这里）</h2>
+  <h2>4 · 撤下来的那些"句子"放哪（tooltip ＋ 详情头）</h2>
   <div class="light">
     <div style="font-weight:600;color:#24292f;margin:4px 0">A pause that cannot reach a boundary is invisible and inert…</div>
     <div><span class="tag">t261009-80</span><span class="tag">merge</span><span class="tag">waiting</span>
       <span class="ln-pill" data-line-state="waiting" style="vertical-align:middle">LineOn</span>
-      <span class="tag">on line <code>develop-buffer</code> · waiting for certification since 13:50</span></div>
+      <span class="tag">on line develop-buffer</span><span class="tag">waiting for certification since 13:50</span></div>
     <table>
       <tr><th>Line</th><td><code>develop-buffer</code> · branch <code>develop</code> · owner host</td></tr>
       <tr><th>Landing</th><td>revision <code>6efc7b3e</code> · proven <code>20a3d48d</code> · landed 13:50:28</td></tr>
       <tr><th>Covering certification</th><td>none yet · <b>Freeze</b> open · <b>Promotions</b> none</td></tr>
-      <tr><th>Slot</th><td>this ticket holds no concurrency slot while it waits (by design)</td></tr>
+      <tr><th>Slot</th><td>holds no concurrency slot while waiting (by design)</td></tr>
     </table>
+    <p class="sub" style="color:#57606a">行上只留形状：<b>点 · 状态字 · LineOn 颜色 · ⏸ · 类别 · 票号 · 标题 · 健康 · step name · 点阵</b>；句子的归属＝tooltip（悬停即读）＋ 详情头（打开即读）。</p>
   </div>
 
-  <h2>5 · 还不存在的部分（说清楚，不含糊）</h2>
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px">
-    <table>
-      <tr><th>Thing</th><th>Status</th></tr>
-      <tr><td>行上带 <code>lane_version</code> / <code>develop_line</code></td><td>REAL（列表投影已带；<code>-80</code> 实测 develop-buffer-v1 / develop-buffer）</td></tr>
-      <tr><td>行上带"这条线的状态"</td><td><b>MISSING</b>——今天列表只带成员身份；状态在落地账本里，只有 executor 面板的 certification adapter 在读 ⇒ 需要一个小读面</td></tr>
-      <tr><td>六个状态里在盘上有真实样本的</td><td><b>只有 1 个</b>（<code>-80</code> = 暖色/等认证）；绿/红/灰都没有过样本</td></tr>
-      <tr><td><code>LineOn</code> 徽标本身 ＋ tooltip ＋ <code>aria-label</code></td><td><b>MISSING</b>——本页就是它的样子</td></tr>
-    </table>
-    <p class="sub"><b>实现口径（写进票面）</b>：颜色只能由<b>引擎给的状态</b>推出来——列表投影新增一个小 <code>line_face</code>（或复用 host adapter 的同一份 derivation），<b>前端不得自行推导</b>；词表继续用 <code>FACE_WORDS</code>；<b>颜色只用既有令牌</b>（warn / danger / success / muted 四族），不新造色；写集 <code>server/plugins/workbench/</code> ＋ <code>integration/</code>。</p>
-  </div>
-
-  <h2>6 · 要你定的（只剩两件）</h2>
+  <h2>5 · 要你定的（两件，顺便一个可选）</h2>
   <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;font-size:13px;color:#9aa4b2">
-    <p><b>已定</b>：B ＋ 颜色即状态 ＋ 原元素全保留 ＋ 暂停只留图标。</p>
-    <p>① <b>颜色语义表照上面办吗</b>——重点是 <i>certified</i>（绿描边）与 <i>delivered</i>（绿实心）要不要一眼可分；若要更省，可把 delivered 也做成绿描边（两者只在 tooltip 里分）。</p>
-    <p>② <b>线级 <code>FROZEN</code> 放哪</b>：我建议放<b>左栏表头/筛选项</b>（线不是票的属性），票行只显示票自己的状态。</p>
-    <p>③（可选）<b>徽标要不要兼当筛选器</b>——点一下只看这条线的票；要就得按按钮语义做（键盘可达）。</p>
+    <p>① <b>颜色表照上面办吗</b>——<i>certified</i>（绿描边）与 <i>delivered</i>（绿实心）要不要一眼可分；想更省就把 delivered 也做成绿描边（两者只在 tooltip 里分）。</p>
+    <p>② <b>线级 <code>FROZEN</code> 放哪</b>：建议放左栏表头/筛选项（线不是票的属性），票行只显示票自己的状态。</p>
+    <p>③（可选，但如果你要的是"标题整行"就说）<b>标题要不要独占一行</b>：现在标题在 L1（与徽标同行、靠 ellipsis 截断）。若你要标题拿满一整行，我可以把 <b>标题移到第二行</b>（L1 只留点/状态字/LineOn/⏸/类别；L2 ＝ 标题 ＋ 票号 ＋ step name ＋ 点阵）——那是**改行卡结构**，需要你点头，我不擅自改。</p>
+    <p style="margin-top:10px"><b>实现口径（票里钉死）</b>：颜色只能由引擎给的状态推出来（列表投影新增小 <code>line_face</code>，或复用 host adapter 同一份 derivation），前端不得自推；词表用 <code>FACE_WORDS</code>；颜色只用既有令牌；写集 <code>server/plugins/workbench/</code> ＋ <code>integration/</code>。</p>
   </div>
 </div>
 </body>
