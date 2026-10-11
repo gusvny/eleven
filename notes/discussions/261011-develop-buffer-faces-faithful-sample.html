@@ -2,40 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>左栏行面 — 样子（261011 v11）</title>
+<title>左栏行面 — 样子（261011 v13）</title>
 <style>
   :root{
-    --canvas:#fff; --ink:#24292f; --muted:#57606a; --accent:#0969da; --accent-bg:#ddf4ff;
-    --border:#d0d7de; --warn-bg:#fff8c5; --warn:#bf8700; --warn-text:#7d4e00; --warn-border:#eac54f; --warn-surface:#fff8e6;
-    --passed:#2da44e; --danger-bg:#ffebe9; --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182;
+    --ink:#24292f; --muted:#57606a; --accent:#0969da; --accent-bg:#ddf4ff; --border:#d0d7de;
+    --warn:#bf8700; --warn-text:#7d4e00; --warn-border:#eac54f; --warn-surface:#fff8e6;
+    --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182; --danger-bg:#ffebe9;
     --success:#1a7f37; --success-deep:#116329; --success-border:#4ac26b; --success-surface:#dafbe1;
+    --accent-dim:#bcd9f7; --warn-dim:#f2dfae; --danger-dim:#f3c3c1; --success-dim:#b9e6c5;
   }
   body{margin:0;background:#f6f8fa;color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC",sans-serif}
   .wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px}
   h1{font-size:18px;margin:0 0 2px}
-  h2{font-size:13px;margin:28px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  h2{font-size:13px;margin:26px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
   p{margin:6px 0;font-size:13px;color:var(--muted)}
   .col{width:360px}
   .board{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}
 
-  /* 行卡（左栏）——**零底色**：左栏项目行的 waiting/blocked 行不上漆（现状，由
-     t260915-19 的 waiting-yellow-control 断言守着）；收口行只整行淡一档，不铺色。 */
-  .tk{display:flex;flex-direction:column;gap:4px;padding:6px 10px;margin:0 0 6px;border:1px solid var(--border);border-radius:8px;background:#fff}
+  /* 行卡（左栏）：三行、无底色、无彩色左条 */
+  .tk{display:flex;flex-direction:column;gap:4px;padding:6px 10px;margin:0 0 6px;
+    border:1px solid var(--border);border-radius:8px;background:#fff}
   .tk[data-state=done]{opacity:.72}
   .tk[data-active=true]{box-shadow:inset 0 0 0 1px var(--accent)}
   .r{display:flex;align-items:center;gap:6px;min-width:0}
   .id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent);flex:none}
-  .rank{flex:none;font-size:12px;font-weight:700;min-width:18px;text-align:center}
-  .title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto;color:var(--ink)}
+  /* 位次：实心圆徽标（已定） */
+  .rank{flex:none;font-size:11px;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;min-width:19px;line-height:19px;text-align:center;display:inline-block}
+  .title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
   .step{flex:none;font-size:10px;color:var(--muted)}
   .epic{font-size:11px;padding:0 8px;border:1px solid var(--border);border-radius:10px;flex:none;white-space:nowrap;color:var(--muted)}
   .pause{font-size:11px;font-weight:600;flex:none;padding:0 7px;line-height:18px;border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);background:var(--warn-surface)}
-  .ql{display:inline-flex;align-items:center;gap:2px;flex:none;margin-left:auto;color:var(--muted);font-size:11px}
-  .qdot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--border)}
-  .qdot[data-order-dot=work]{background:var(--success)}
-  .qdot[data-order-dot=hold],.qdot[data-order-dot=paused]{background:var(--warn)}
+  .ql{display:inline-flex;align-items:center;gap:3px;flex:none;margin-left:auto;color:var(--muted);font-size:11px}
 
-  /* LineOn */
+  /* LineOn 徽标：文字恒定，颜色即状态 */
   .ln{display:inline-flex;align-items:center;flex:none;font-size:11px;font-weight:600;padding:0 6px;line-height:16px;border:1px solid var(--border);border-radius:10px;white-space:nowrap;color:var(--muted);background:#f6f8fa}
   .ln[data-s=online]{border-color:var(--border);color:var(--muted);background:#f6f8fa}
   .ln[data-s=waiting]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
@@ -45,123 +44,60 @@
   .ln[data-s=delivered]{border-color:var(--success);color:#fff;background:var(--success)}
   .ln[data-s=withdrawn]{border-color:var(--border);color:var(--muted);background:#eaeef2}
 
-  /* 十格点阵 */
+  /* 十格点阵：第 N 格 ⇒ 前 N 格满色，其余同色相淡档（不出灰） */
   .dots{display:inline-flex;align-items:center;gap:2px;flex:none}
-  .d{width:5px;height:5px;border-radius:1px;background:var(--border)}
-  .d[data-v=passed]{background:var(--passed)}
-  .d[data-v=cur][data-st=active]{background:var(--accent)}
-  .d[data-v=cur][data-st=waiting]{background:var(--warn)}
-  .d[data-v=cur][data-st=blocked]{background:var(--danger)}
-  .d[data-v=cur][data-st=failed]{background:var(--danger-solid)}
-  .d[data-v=cur][data-st=done]{background:var(--passed)}
-  /* M2：十格全部上状态色 */
-  .d[data-v=all][data-st=active]{background:var(--accent)}
-  .d[data-v=all][data-st=waiting]{background:var(--warn)}
-  .d[data-v=all][data-st=blocked]{background:var(--danger)}
-  .d[data-v=all][data-st=failed]{background:var(--danger-solid)}
-  .d[data-v=all][data-st=done]{background:var(--passed)}
-  /* M3：整阵同色相，已过/当前＝满色，未到＝同色相淡档 */
-  .d[data-v=full][data-st=active]{background:var(--accent)}
-  .d[data-v=dim][data-st=active]{background:#bcd9f7}
-  .d[data-v=full][data-st=waiting]{background:var(--warn)}
-  .d[data-v=dim][data-st=waiting]{background:#f2dfae}
-  .d[data-v=full][data-st=blocked]{background:var(--danger)}
-  .d[data-hollow=true]{background:#fff;border:1px solid var(--danger)}
-  .d[data-v=dim][data-st=blocked]{background:#f3c3c1}
-  .d[data-v=full][data-st=failed]{background:var(--danger-solid)}
-  .d[data-v=dim][data-st=failed]{background:#f3c3c1}
-  .d[data-v=full][data-st=done]{background:var(--passed)}
-  .d[data-v=dim][data-st=done]{background:#b9e6c5}
-
-  /* 位次三种候选 */
-  .r-a{color:var(--ink);font-size:13px;font-weight:700}
-  .r-b{font-size:11px;font-weight:700;color:var(--accent);background:var(--accent-bg);border:1px solid #96c8f2;border-radius:999px;padding:0 7px;line-height:17px}
-  .r-c{font-size:11px;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;min-width:19px;line-height:19px;text-align:center;display:inline-block}
-
-  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:4px}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
-  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-  .sw{width:14px;height:14px;border-radius:4px;border:1px solid var(--border);display:inline-block}
+  .d{width:6px;height:6px;border-radius:1px;background:var(--border)}
+  .d[data-k=full][data-st=active]{background:var(--accent)}
+  .d[data-k=dim][data-st=active]{background:var(--accent-dim)}
+  .d[data-k=full][data-st=waiting]{background:var(--warn)}
+  .d[data-k=dim][data-st=waiting]{background:var(--warn-dim)}
+  .d[data-k=full][data-st=blocked]{background:var(--danger)}
+  .d[data-k=dim][data-st=blocked]{background:var(--danger-dim)}
+  .d[data-k=full][data-st=failed]{background:var(--danger-solid)}
+  .d[data-k=dim][data-st=failed]{background:var(--danger-dim)}
+  .d[data-k=full][data-st=done]{background:var(--success)}
+  .d[data-k=dim][data-st=done]{background:var(--success-dim)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>左栏行面 — 样子</h1>
-  <p>261011 · 只画样子（实现细节在同目录 <b>261011-left-column-line-face-design.md</b>）。</p>
+  <p>261011 · 只放样子（实现细节见同目录 <b>261011-left-column-line-face-design.md</b>）。</p>
+  <p><b>点阵规矩（唯一一条）</b>：票走到第 N 格 ⇒ <b>前 N 格上满色的状态色</b>，<b>其余 10−N 格上同色相的淡档</b>（不是灰）。</p>
 
-  <h2>1 · 一行</h2>
+  <h2>1 · 三行卡（真票）</h2>
   <div class="col board">
     <div class="tk" data-state="active" data-active="true">
-      <div class="r">
-        <span class="id">t261011-18</span>
-        <span class="rank r-b">1</span>
-        <span class="ql">⋮⋮ ⌃ ⌄</span>
-      </div>
+      <div class="r"><span class="id">t261011-18</span><span class="rank">1</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
       <div class="r"><span class="title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span></div>
       <div class="r"><span class="step">implement</span><span class="epic">engine-hardening</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="active"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span></div>
     </div>
     <div class="tk" data-state="waiting" data-active="true">
-      <div class="r">
-        <span class="id">t261009-80</span>
-        <span class="rank r-b">3</span>
-        <span class="ln" data-s="waiting">LineOn</span>
-        <span class="pause">⏸</span>
-        <span class="ql">⋮⋮ ⌃ ⌄</span>
-      </div>
+      <div class="r"><span class="id">t261009-80</span><span class="rank">3</span><span class="ln" data-s="waiting">LineOn</span><span class="pause">⏸</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
       <div class="r"><span class="title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span></div>
       <div class="r"><span class="step">merge</span><span class="epic">engine-hardening</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span></span></div>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="dim" data-st="waiting"></span></span></div>
     </div>
     <div class="tk" data-state="done">
-      <div class="r">
-        <span class="id">t261011-16</span>
-        <span class="rank r-b">5</span>
-        <span class="ln" data-s="certified">LineOn</span>
-        <span class="ql">⋮⋮ ⌃ ⌄</span>
-      </div>
+      <div class="r"><span class="id">t261011-16</span><span class="rank">5</span><span class="ln" data-s="certified">LineOn</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
       <div class="r"><span class="title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span></div>
       <div class="r"><span class="step">merge</span><span class="epic">engine-hardening</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span></span></div>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span></span></div>
     </div>
   </div>
-  <p>第一行＝在跑的票；第二行＝在线上的票（已落地、等认证）；第三行＝已收口且已认证。没有走线的票（legacy）不加 <code>LineOn</code>。</p>
+  <p>没有走线的票（legacy）不加 <code>LineOn</code>，别的元素照旧。</p>
 
-  <h2>2 · 排队位次（已定：实心圆徽标）</h2>
+  <h2>2 · 五个状态（同一条规矩）</h2>
   <div class="col board">
-    <div class="tk"><div class="r"><span class="id">t261009-80</span><span class="rank r-a">3</span><span class="title">A · 加粗数字（13px / 700）</span></div></div>
-    <div class="tk"><div class="r"><span class="id">t261009-80</span><span class="rank r-b">3</span><span class="title">B · 小胶囊（浅蓝底＋描边）</span></div></div>
-    <div class="tk"><div class="r"><span class="id">t261009-80</span><span class="rank r-c">3</span><span class="title">C · 实心圆徽标（蓝底白字）</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span><span class="title">active · 第 3 格 ⇒ 3 格蓝 + 7 格淡蓝</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="dim" data-st="waiting"></span></span><span class="title">waiting · 第 9 格 ⇒ 9 格黄 + 1 格淡黄</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="dim" data-st="blocked"></span><span class="d" data-k="dim" data-st="blocked"></span></span><span class="title">blocked · 第 8 格 ⇒ 8 格红 + 2 格淡红</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="failed"></span><span class="d" data-k="full" data-st="failed"></span><span class="d" data-k="full" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span></span><span class="title">failed · 第 3 格 ⇒ 3 格红 + 7 格淡红（与 blocked 同一色相）</span></div></div>
+    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span></span><span class="title">done · 十格全绿</span></div></div>
   </div>
-  <p>比现在那个 10px 灰数字显眼得多。位次只在"排队中"的行上出现（在跑/被暂挂的行按现行语义不显示）。</p>
 
-  <h2>3 · 点阵（已定：整阵同一个状态色）</h2>
-  <p><b>M1</b>＝已过格＋当前格一起上状态色（未到的仍是灰）——保留了"走到第几格"；<b>M2</b>＝十格全部上状态色（纯状态带，进度由 step name 说）。</p>
-  <div class="col board">
-    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="active"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">M1 · active — 前两格＋当前格蓝</span></div></div>
-    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span></span><span class="title">M2 · active — 十格全蓝</span></div></div>
-    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span></span><span class="title">M1 · waiting — 走到第 9 格，整段暖色</span></div></div>
-    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span></span><span class="title">M2 · waiting — 十格全暖色</span></div></div>
-    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">M1 · blocked — 整段红到当前格</span></div></div>
-    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span></span><span class="title">M2 · blocked — 十格全红</span></div></div>
-    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="failed"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">M1 · failed — 整段实红（与 blocked 同族）</span></div></div>
-    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span></span><span class="title">M2 · failed — 十格全实红</span></div></div>
-    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span></span><span class="title">M1/M2 · done — 全绿（两法同形）</span></div></div>
-  </div>
-  <p>两法都"整个点阵一个颜色"。差别只有一处：<b>M1 还能看出走到第几格</b>（灰格＝还没到），<b>M2 看不出来</b>（要靠 step name）。M2 的色块更长更醒目，代价是把"进度"这一维从点阵上拿掉了。</p>
-
-  <h2>3b · 整阵同色相：已过/当前满色，未到同色淡档</h2>
-  <p>同一色相铺满十格；<b>已过/当前＝满色</b>，<b>未到＝同色相的淡档</b>。这样 failed 的行不会出现"红格 + 灰格"的拼色，同时"走到第几格"仍看得出来。</p>
-  <div class="col board">
-    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="active"></span><span class="d" data-v="full" data-st="active"></span><span class="d" data-v="full" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span></span><span class="title">M3 · active — 前 3 格满蓝，其余淡蓝</span></div></div>
-    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="dim" data-st="waiting"></span></span><span class="title">M3 · waiting — 前 9 格满暖，最后 1 格淡暖</span></div></div>
-    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-hollow="true"></span><span class="d" data-v="full" data-hollow="true"></span><span class="d" data-v="full" data-hollow="true"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span></span><span class="title">M3 · blocked — 满红到当前格，其余淡红（没有灰格）</span></div></div>
-    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="failed"></span><span class="d" data-v="full" data-st="failed"></span><span class="d" data-v="full" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span></span><span class="title">M3 · failed — 整阵都是红：前方满红、后方淡红</span></div></div>
-    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span></span><span class="title">M3 · done — 十格全满绿</span></div></div>
-  </div>
-  <p>M3 就是你那句"灰的那几格也跟着变色"——只是那几格用<b>同色相的淡档</b>，不是纯灰：既做到"整阵一个状态色"，又保住"走到第几格"。</p>
-
-  <h2>4 · LineOn 的颜色</h2>
+  <h2>3 · LineOn 的颜色（文字恒定 LineOn）</h2>
   <div class="board" style="padding:12px">
     <p style="margin:0 0 8px"><span class="ln" data-s="online">LineOn</span> 在线上、未落地 &nbsp;
       <span class="ln" data-s="waiting">LineOn</span> 等认证 &nbsp;
@@ -170,49 +106,17 @@
       <span class="ln" data-s="certified">LineOn</span> 认证已覆盖 &nbsp;
       <span class="ln" data-s="delivered">LineOn</span> 已随签字晋级 &nbsp;
       <span class="ln" data-s="withdrawn">LineOn</span> 落地被撤回</p>
-    <table>
-      <tr><th>颜色</th><th>状态</th></tr>
-      <tr><td><span class="sw" style="background:#f6f8fa"></span> 淡灰</td><td>在线上干活、未落地</td></tr>
-      <tr><td><span class="sw" style="background:#fff8e6;border-color:#eac54f"></span> 暖色</td><td>等认证（等过头时加 <code>!</code>）</td></tr>
-      <tr><td><span class="sw" style="background:#ffebe9;border-color:#ff8182"></span> 红</td><td>落在红认证的区间里</td></tr>
-      <tr><td><span class="sw" style="background:#dafbe1;border-color:#4ac26b"></span> 绿（描边）</td><td>认证已覆盖</td></tr>
-      <tr><td><span class="sw" style="background:#1a7f37;border-color:#1a7f37"></span> 绿（实心）</td><td>已晋级进 main</td></tr>
-      <tr><td><span class="sw" style="background:#eaeef2"></span> 灰（实心）</td><td>落地被撤回</td></tr>
-    </table>
+    <p style="margin:0">不在线上的票：不渲染这枚徽标。</p>
   </div>
 
-  <h2>5 · 底色（已定：不要）</h2>
-  <div class="col board">
-    <div class="tk" data-state="waiting">
-      <div class="r"><span class="id">t…</span><span class="rank r-b">2</span><span class="ln" data-s="waiting">LineOn</span><span class="title">A · 保留行底色（今天）——余光就能看出"这几行要留意"</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
-    </div>
-    <div class="tk" data-state="blocked">
-      <div class="r"><span class="id">t…</span><span class="rank r-b">4</span><span class="title">A · 红底：卡住的行整行是红的</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
-    </div>
-  </div>
-  <div class="col board" style="margin-top:10px">
-    <div class="tk">
-      <div class="r"><span class="id">t…</span><span class="rank r-b">2</span><span class="ln" data-s="waiting">LineOn</span><span class="title">B · 去掉行底色——只有第 9 格是暖色</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
-    </div>
-    <div class="tk">
-      <div class="r"><span class="id">t…</span><span class="rank r-b">4</span><span class="title" style="color:var(--danger)">B · 去掉行底色——只有第 3 格是红的</span>
-        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
-    </div>
-  </div>
-  <p>两版的<b>信息量一样</b>（状态都在点阵那一格上）；差别是**扫视力**：A 整行有底色，余光扫一列时"哪几行要留意"直接跳出来；B 要**定睛找到那一格**才看得到。B 更干净，也顺带没有"底色 × 深色主题"的对比度风险。</p>
-
-  <h2>6 · 已定</h2>
+  <h2>4 · 已定</h2>
   <div class="board" style="padding:12px;font-size:13px">
-    <p style="margin:2px 0">三行卡：票号·位次·LineOn·⏸ ／ 标题独占 ／ step name·类别·十格点阵</p>
-    <p style="margin:2px 0">LineOn 徽标，颜色即状态；不在线上的票不渲染</p>
-    <p style="margin:2px 0">行上不放整句（句子进 tooltip 与详情头）</p>
+    <p style="margin:2px 0">三行卡：票号 · 位次 · LineOn · ⏸（·行尾排序控件）／标题独占／step name · 类别 · 十格点阵</p>
     <p style="margin:2px 0">票号永远在行首；位次＝实心圆徽标</p>
-    <p style="margin:2px 0">点阵整阵同色相（未到用同色淡档）；卡住＝空心红格，失败＝实心红格</p>
+    <p style="margin:2px 0">点阵：第 N 格 ⇒ 前 N 格满色状态色 + 其余同色淡档</p>
     <p style="margin:2px 0">无彩色左条、无行底色（含中列板面）；收口行只整行淡一档</p>
     <p style="margin:2px 0">暂停只留 ⏸（两相位靠边框实/虚）；线冻结提示放左栏顶栏</p>
+    <p style="margin:2px 0">行上不放整句——句子只在 tooltip 与详情头</p>
   </div>
 </div>
 </body>
