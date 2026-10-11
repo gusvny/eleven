@@ -5408,3 +5408,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**凡"覆盖/包含"这类判据，把"谁覆盖谁"的规则抄成一句话，然后全仓 grep 它的每一处实现**——本条的三个面各写各的，谁都不算错，合起来却互相矛盾。
 >
 > **回归**：L2——同一组记录上，**等待面与结局面**对"这张落地是否被认证覆盖"给出**同一个答案**；L3——一次"线头前进（有推进记录）→ 一轮判绿 → 之前的落地在**两个面**都被记为已覆盖"的连贯回执；且一次**没有推进记录的手工 commit 之后**，机制必须**具名**说明"线头动了但不在任何一轮的候选里"，而不是静默 `range_empty`。
+
+## KI-01M4P0FK2W87WXW2S6N8BXECYZ **"看不见"刚修好，"看错了"就来了**：轮次面（`face.json`）对**一跑没跑**的轮次写 **`green`**，并写**终态 `done`** 而 `updated_at == started_at` **(261012 01:3x `t261011-26` 落地后第一眼实测;integration 岗登记)**
+
+> **实测（原始读数）**：`~/.sandbar/projects/sandbar/data/develop/rounds/run-01M4NRCPW8M7K53XKABN1E6HJC/face.json` =
+> `{"state":"done","counts":{"ran":0,"pass":0,"fail":0,"env_fail":0},"outcome":{"verdict":"green"},"started_at":"…15:13:07Z","updated_at":"…15:13:07Z"}`；
+> 而紧挨着它的 `suite.log` 里明写 `INTEG_SUMMARY {"ran": 1, "passed": 1, "failed": 0, …}`。
+>
+> **两处都不对，而且是同一族**：①**零跑算绿**——引擎自己的判据是 `develop_certify.run_verdict`：`green iff ran > 0 and failed == 0 and env_failed == 0`，注释里还写着"**ran == 0 is never a proof（一条真实事故立下的规矩）**"；②**开局就写终态**——`state: done` 而 `updated_at == started_at` ⇒ 面在"还没判过任何一条"时就已经长得像"跑完了"。
+>
+> **危害**：①这是**假绿**，而且是**专门给人看的那一面**上的假绿——值守/宿主会据此以为某一轮过了；②它与既有两条同族：`KI-01M4MRB4Z62JGVHVNXPTDV0THS`（绿轮面可由 5 条场景的收窄轮铸出）与 `KI-01M4N5ASATAVWP6E38NSPECCAT`（覆盖判据两把尺子）——**三处都是"判据/面"没守住 `ran > 0` 这条最低线**；③"看不见"换成"看错"是**净退步**：没有面时人会去翻日志，有了假绿的面，人就不翻了。
+>
+> **出路（实现归票，已开 `t261012-01`）**：①**GREEN 必须有正的 ran**（复用引擎那条规则；数不出来就说"没有证明/计数不可读"并具名原因）；②**终态只能由终态事实写**（见到套件自己的 summary 才写 `done`；没见到而进程还活着就是 `running`，进程死了没 summary 就是 `failed` + 具名 reason）；③**同一轮的面与留存日志必须对得上**（对不上就写"计数不可读：原因"，不许在真 summary 旁边摆一排 0）；④四种终局可辨（green / red / no proof / could-not-run reason）。
+>
+> **纪律**：**凡"给人看的状态面"，第一件事是问"它能不能在什么都不成立的时候说出一个看起来成立的话"**；`ran == 0` 这类**零值边界**必须在面这一侧显式挡住，不能指望读者自己去和日志对账。
+>
+> **回归**：L1——`ran == 0` 的任何组合都不得产出 `green`；无 summary 不得写 `done`；L2——同一轮 `face.json` 的计数与 `suite.log` 的 summary **逐字段相等**或具名不可读；L3——一次真实轮次：面在跑动时是 `running`、结束时是四种终局之一，且与落地账本行一致。
