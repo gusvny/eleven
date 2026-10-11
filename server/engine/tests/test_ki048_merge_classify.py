@@ -1,12 +1,19 @@
 """KI-048（t260911-05）合并失败正确分类直调用例（零 Temporal server / 零模型 / 零网络，
 git 夹具 tmp 自足，仿 t260910-03 fuses harness）。
 
-覆盖（create_plan gen1 方案步骤 1/3 + review 附条件意见）：
-  - _classify_main_dirty 六形态：干净 / 暂存(main_staged) / 重叠未提交(main_dirty·重叠) /
-    不重叠未提交(main_dirty·不重叠，保守拦) / 未跟踪相撞(untracked_collision) /
-    未跟踪不相撞(干净)；畸形（branch 以 - 开头=diff 失败）不作脏判定降级 clean+note；
-  - _dirty_block_note 人话三问（哪个文件/什么原因/怎么处理）+ clean 恒空串 +
-    文件封顶 MERGE_FILES_CAP 计数注记；
+Coverage (create_plan gen1 steps 1/3 + review conditions + the t261011-16 prose
+exemption):
+  - _classify_main_dirty truth table: clean / staged (main_staged) / unstaged
+    overlapping (main_dirty) / unstaged non-overlapping CODE (main_dirty, the
+    conservative rule survives t261011-16 for non-prose) / unstaged non-overlapping
+    PROSE (exempt, the spared files ride back in "exempted" — t261011-16) /
+    PROSE overlapping the merge surface (still refuses) / STAGED prose (still
+    refuses) / merge-surface diff fault + prose (still refuses, fail-closed, review
+    binding condition 1) / untracked collision (untracked_collision) / untracked
+    non-colliding (clean); malformed entries are dropped without guessing; a
+    malformed branch (leading "-") on a clean tree degrades to clean+note;
+  - _dirty_block_note: the three questions (which file / why / what to do) +
+    clean is always "" + the MERGE_FILES_CAP count overflow note;
   - _squash_merge 失败路径分类：staged→dirty/main_staged；重叠→dirty/main_dirty；
     未跟踪相撞→dirty/untracked_collision；真冲突→conflict/conflict；
     非法 branch→failed/merge_fault；干净→merged；
@@ -108,19 +115,82 @@ def test_classify_unstaged_overlapping(repo_lane):
     (root / "f.txt").write_text("host overlapping\n", encoding="utf-8")  # 泳道也改了 f.txt
     v = aa._classify_main_dirty(root, br)
     assert v["kind"] == "main_dirty" and "f.txt" in v["files"]
-    assert "重叠" in v["note"]
+    assert "overlaps" in v["note"]
 
 
-def test_classify_unstaged_non_overlapping_conservative_block(repo_lane):
+def test_classify_unstaged_non_overlapping_code_block(repo_lane):
     root, lane, br = repo_lane
-    # tracked 的无关文件改动（先落库成 tracked，再改——未跟踪走相撞形态，另一用例）
+    # An unrelated tracked CODE file (commit it first, then edit it — an untracked
+    # file takes the collision shape, covered by another case): non-prose dirt keeps
+    # the conservative block; host order 261011 allows prose only.
     (root / "other.txt").write_text("tracked base\n", encoding="utf-8")
     _git("add", "-A", cwd=root)
     _git("commit", "-m", "add other", cwd=root)
     (root / "other.txt").write_text("unrelated edit\n", encoding="utf-8")
     v = aa._classify_main_dirty(root, br)
     assert v["kind"] == "main_dirty" and "other.txt" in v["files"]
-    assert "不重叠" in v["note"]  # KI-048 保守拦（gen1 review 确认）
+    assert "no overlap" in v["note"]  # conservative rule survives for non-prose
+
+
+def test_classify_prose_dirt_non_overlapping_exempt(repo_lane):
+    """t261011-16 (host order 261011): a non-overlapping, unstaged prose edit no
+    longer blocks the close-out."""
+    root, lane, br = repo_lane
+    (root / "notes").mkdir()
+    (root / "notes" / "discussion.md").write_text("tracked base\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    _git("commit", "-m", "add note", cwd=root)
+    (root / "notes" / "discussion.md").write_text("owner edit\n", encoding="utf-8")
+    v = aa._classify_main_dirty(root, br)
+    assert v["kind"] == ""  # exempt: not a refusal
+    assert v["exempted"] == ["notes/discussion.md"]  # observable, never silent
+    assert "exempted" in v["note"]
+
+
+def test_classify_prose_dirt_overlapping_still_refuses(repo_lane):
+    """The merge surface itself writes this prose file -> a NAMED refusal, never a
+    silent overwrite."""
+    root, lane, br = repo_lane
+    (root / "notes").mkdir()
+    note = root / "notes" / "discussion.md"
+    note.write_text("tracked base\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    _git("commit", "-m", "add note", cwd=root)
+    (lane / "notes").mkdir()
+    (lane / "notes" / "discussion.md").write_text("lane side\n", encoding="utf-8")
+    _git("add", "-A", cwd=lane)
+    _git("commit", "-m", "lane touches the note", cwd=lane)
+    note.write_text("owner edit\n", encoding="utf-8")
+    v = aa._classify_main_dirty(root, br)
+    assert v["kind"] == "main_dirty" and "notes/discussion.md" in v["files"]
+    assert "overlaps" in v["note"]
+    assert "exempted" not in v  # a refusal shape never carries the exemption face
+
+
+def test_classify_staged_prose_still_refuses(repo_lane):
+    root, lane, br = repo_lane
+    (root / "notes").mkdir()
+    (root / "notes" / "discussion.md").write_text("owner staged\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    v = aa._classify_main_dirty(root, br)
+    assert v["kind"] == "main_staged" and "notes/discussion.md" in v["files"]
+    assert "exempted" not in v
+
+
+def test_classify_diff_fault_never_exempts_prose(repo_lane):
+    """Review binding condition 1: when the merge-surface diff fails the surface is
+    UNKNOWN -> prose is NOT exempted (fail-closed; an exemption on an unknown surface
+    could silently carry a truly-overlapping prose file into the ticket's commit)."""
+    root, lane, br = repo_lane
+    (root / "notes").mkdir()
+    (root / "notes" / "discussion.md").write_text("tracked base\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    _git("commit", "-m", "add note", cwd=root)
+    (root / "notes" / "discussion.md").write_text("owner edit\n", encoding="utf-8")
+    v = aa._classify_main_dirty(root, "-bad-branch")  # git parses it as an option
+    assert v["kind"] == "main_dirty" and "notes/discussion.md" in v["files"]
+    assert "merge surface unknown" in v["note"]
+    assert "exempted" not in v
 
 
 def test_classify_untracked_collision(repo_lane):
@@ -249,6 +319,54 @@ def test_squash_clean_merges(repo_lane):
     root, lane, br = repo_lane
     res = aa._squash_merge(root, lane, br, "t26091105ut", defer_teardown=True)
     assert res.ok and res.action == "merged" and res.merge_commit
+
+
+def test_squash_lands_with_exempted_prose_dirty_owner_bytes_untouched(repo_lane):
+    """t261011-16 hard evidence: with an exempted prose file dirty on main, the
+    close-out still lands AND (a) the merge commit's file list does NOT contain the
+    prose file, (b) the file on disk stays byte-identical (the 260908 auto-stash red
+    line), (c) the exemption is recorded on the receipt, never silent."""
+    root, lane, br = repo_lane
+    (root / "notes").mkdir()
+    note = root / "notes" / "discussion.md"
+    note.write_text("tracked base\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    _git("commit", "-m", "add note", cwd=root)
+    note.write_text("owner edit\n", encoding="utf-8")  # dirty, unstaged, prose
+    before = _snapshot(root)
+    res = aa._squash_merge(root, lane, br, "t26091105ut", defer_teardown=True)
+    assert res.ok and res.action == "merged" and res.merge_commit
+    names = _git("show", "--name-only", "--format=", res.merge_commit, cwd=root).split()
+    assert "f.txt" in names  # the ticket's own delivery lands as usual
+    assert "notes/discussion.md" not in names  # (a) not in the commit
+    assert note.read_bytes() == b"owner edit\n"  # (b) bytes untouched
+    after = _snapshot(root)
+    assert after["stash"] == before["stash"]  # no auto-stash
+    assert "prose dirt exempted" in (res.error or "")  # (c) on the receipt
+
+
+def test_squash_prose_overlapping_named_refusal(repo_lane):
+    """Ticket requirement 4: a prose file the merge surface touches ends in a NAMED
+    refusal (the classifier layer; even if the exemption mis-fired, git's own
+    merge --squash refusal is the fail-closed backstop — this pins the first layer)."""
+    root, lane, br = repo_lane
+    (root / "notes").mkdir()
+    note = root / "notes" / "discussion.md"
+    note.write_text("tracked base\n", encoding="utf-8")
+    _git("add", "-A", cwd=root)
+    _git("commit", "-m", "add note", cwd=root)
+    (lane / "notes").mkdir()
+    (lane / "notes" / "discussion.md").write_text("lane side\n", encoding="utf-8")
+    _git("add", "-A", cwd=lane)
+    _git("commit", "-m", "lane touches the note", cwd=lane)
+    note.write_text("owner edit\n", encoding="utf-8")
+    before = _snapshot(root)
+    res = aa._squash_merge(root, lane, br, "t26091105ut", defer_teardown=True)
+    assert not res.ok
+    assert res.action == "dirty" and res.reason == "main_dirty"
+    assert "notes/discussion.md" in res.files  # named refusal
+    _assert_main_untouched(root, before)
+    assert lane.is_dir()
 
 
 def test_squash_race_outlet_never_coerced_to_conflict(repo_lane, monkeypatch):

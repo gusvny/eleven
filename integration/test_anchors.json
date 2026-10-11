@@ -4961,6 +4961,11 @@
       "anchor": "behaviour",
       "note": "t261011-15: dismiss reason box visible in viewport on a long list + ?project= on the wire",
       "sync_path": ""
+    },
+    "integration/t261011-16/sc_t26101116_prose_dirt_landing.py": {
+      "anchor": "behaviour",
+      "note": "t261011-16 KI-048 prose-allowance: the exempt prose dirt landing (commit file list excludes it, bytes survive, no stash), inverted control against the pre-fix conservative rule, named-teeth canaries (code dirty / staged prose / untracked collision), overlapping prose named refusal, diff-fault fail-closed",
+      "sync_path": ""
     }
   }
 }
