@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Line round — UI mock (261011 v1): from the Certification tab, click a run id</title>
+<style>
+  /* 颜色/字号/间距沿用 workbench 既有 token（--dsw-derive-* 家族）；本页只画样子。
+     入口约定（宿主令 261011）：Certification tab → 轮次列表里的 run id → 轮次详情。 */
+  :root{
+    --canvas:#fff; --surface:#f6f8fa; --ink:#1f2328; --ink-strong:#24292f; --muted:#57606a;
+    --border:#d0d7de; --accent:#0969da; --accent-bg:#ddf4ff; --accent-solid:#1f6feb;
+    --warn:#bf8700; --warn-text:#7d4e00; --warn-border:#eac54f; --warn-surface:#fff8e6; --warn-bg:#fff8c5;
+    --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182; --danger-bg:#ffebe9;
+    --success:#1a7f37; --success-solid:#2da44e; --success-deep:#116329; --success-surface:#dafbe1;
+  }
+  body{margin:0;background:#0d1117;color:#e6e9ef;font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 18px 60px}
+  h1{font-size:18px;margin:0 0 4px}
+  h2{font-size:12px;margin:26px 0 8px;color:#79b8ff;text-transform:uppercase;letter-spacing:.08em}
+  p{margin:6px 0;color:#9aa4b2;font-size:12.5px}
+  code{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:1px 5px;color:#e6e9ef;font-size:12px}
+  .panel{background:var(--canvas);color:var(--ink);border:1px solid var(--border);border-radius:10px}
+  .panel+.panel{margin-top:10px}
+  .hd{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .bd{padding:10px 12px}
+  .tabs{display:flex;gap:2px;padding:0 8px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .tab{padding:6px 12px;font-size:12px;color:var(--muted);border:1px solid transparent;border-bottom:none;border-radius:6px 6px 0 0;cursor:default}
+  .tab[data-on=true]{background:var(--canvas);color:var(--ink);border-color:var(--border);font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:0 7px;line-height:18px;border-radius:10px;border:1px solid var(--border);color:var(--muted);background:var(--surface);white-space:nowrap}
+  .pill[data-k=green]{border-color:var(--success-solid);color:var(--success-deep);background:var(--success-surface)}
+  .pill[data-k=red]{border-color:var(--danger-border);color:var(--danger);background:var(--danger-bg)}
+  .pill[data-k=run]{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+  .pill[data-k=warn]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .sha{color:var(--accent);font-family:ui-monospace,Menlo,monospace;font-size:12px;text-decoration:none;border-bottom:1px dotted var(--accent)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  tr:last-child td{border-bottom:none}
+  .bar{height:14px;border-radius:7px;background:var(--surface);border:1px solid var(--border);overflow:hidden;display:flex}
+  .seg{height:100%}
+  .seg[data-k=pass]{background:var(--success-solid)}
+  .seg[data-k=fail]{background:var(--danger-solid)}
+  .seg[data-k=env]{background:var(--warn-border)}
+  .rows{display:flex;flex-direction:column;gap:6px}
+  .row{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--canvas)}
+  .row[data-live=true]{box-shadow:inset 0 0 0 1px var(--accent)}
+  .grow{flex:1 1 auto;min-width:0}
+  .muted{color:var(--muted)}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;font-size:12.5px}
+  .kv b{color:var(--muted);font-weight:600}
+  .link{color:var(--accent);cursor:default;border-bottom:1px dotted var(--accent)}
+  .note{background:#161b22;border:1px solid #30363d;border-left:3px solid #79b8ff;border-radius:6px;padding:8px 10px;color:#9aa4b2;font-size:12px;margin:10px 0}
+  .screen{margin-top:6px}
+  .caption{color:#9aa4b2;font-size:12px;margin:14px 0 4px}
+  .empty{padding:14px;border:1px dashed var(--border);border-radius:8px;color:var(--muted);background:var(--surface);font-style:italic}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Line round — UI mock <span style="color:#9aa4b2">(v1)</span></h1>
+  <p>261011 · integration steward · 只画样子（实现细节见 <code>notes/discussions/261011-left-column-line-face-design.md</code> 的口径与 <code>t261011-26</code> 的进度面）。入口如宿主所定：<b>Certification tab → 轮次列表 → 点 run id → 轮次详情</b>。</p>
+
+  <div class="note"><b>三条底线（页面上的每个数都受它约束）</b>：①**值只来自引擎记录**（轮次台账 / 落地账本 / runner 的进度面），前端不推导；②**英文界面**，词表沿用既有英文标识（<code>GREEN / FROZEN / certified / waiting / running / idle / delivered / line / as of</code>）；③**颜色只用既有令牌**，不新造色。</div>
+
+  <h2>1 · Certification tab（入口）— 轮次列表里 run id 可点</h2>
+  <div class="panel screen">
+    <div class="tabs">
+      <span class="tab">Overview</span><span class="tab">Requests</span><span class="tab" data-on="true">Certification</span><span class="tab">Recent actions</span>
+    </div>
+    <div class="bd">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <b class="grow">line <span class="mono">develop-buffer</span></b>
+        <span class="pill" data-k="run">running</span>
+        <span class="pill">auto rounds</span>
+        <span class="pill">1 landing uncertified</span>
+      </div>
+      <p style="color:var(--muted)">Certified through <span class="sha">6efc7b3e</span> · <span class="mono">1</span> landing since · last round <span class="link">run-261011-2213</span> (running, 12 min)</p>
+
+      <div class="bar" style="margin:8px 0">
+        <span class="seg" data-k="pass" style="width:62%"></span><span class="seg" data-k="env" style="width:6%"></span><span class="seg" data-k="fail" style="width:2%"></span><span class="seg" style="width:30%;background:var(--surface)"></span>
+      </div>
+      <p style="color:var(--muted);font-size:12px">in round <span class="link">run-261011-2213</span>: pass 379 · env 40 · fail 12 · waiting 251 &nbsp;|&nbsp; <b>green needs fail 0 and env 0</b></p>
+
+      <table style="margin-top:8px">
+        <tr><th>run id</th><th>started</th><th>trigger</th><th>result</th><th>verdict</th><th>measured</th></tr>
+        <tr data-live="true">
+          <td><span class="link">run-261011-2213</span></td><td>22:13</td><td>auto</td>
+          <td class="mono">379 / 12 / 40</td><td><span class="pill" data-k="run">running</span></td><td><span class="sha">353b2479</span></td></tr>
+        <tr><td><span class="link">run-261011-1649</span></td><td>16:49</td><td>manual</td><td class="mono">391 / 70 / 227</td><td><span class="pill" data-k="red">red · 70</span></td><td><span class="sha">6efc7b3e</span></td></tr>
+        <tr><td><span class="link">run-261011-1446</span></td><td>14:46</td><td>auto</td><td class="mono">— / — / —</td><td><span class="pill" data-k="warn">could not run</span></td><td><span class="sha">6efc7b3e</span></td></tr>
+        <tr><td colspan="6" class="muted" style="font-size:12px">older rounds folded · <span class="link">show all 7</span></td></tr>
+      </table>
+      <p style="color:var(--muted);font-size:12px">点任意 run id 进入 <b>轮次详情</b>（第 2 节）。列表本身只用：run id / started / trigger / 计数 / 结论 / 被判的 revision。</p>
+    </div>
+  </div>
+
+  <h2>2 · 轮次详情（点 run id 进来）</h2>
+  <div class="panel screen">
+    <div class="hd">
+      <b class="grow">Round <span class="mono">run-261011-2213</span></b>
+      <span class="pill" data-k="run">running · 12 min</span>
+      <span class="pill">line <span class="mono">develop-buffer</span></span>
+      <span class="pill">auto</span>
+      <span class="link">Retained log</span>
+    </div>
+    <div class="bd">
+      <div class="kv">
+        <b>measured revision</b><span><span class="sha">353b2479</span> <span class="muted">landing t261011-25 onto line develop-buffer · rev 9be9bee4</span></span>
+        <b>started / elapsed</b><span>22:13:09 · 12 min <span class="muted">(budget 60 min, ceiling from SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S)</span></span>
+        <b>progress</b><span>379 ran · 12 fail · 40 env-fail · 251 not yet judged <span class="muted">(the same round the tab shows at a glance)</span></span>
+        <b>current pool</b><span><span class="mono">ro</span> <span class="muted">· pools in flight: ro (pole), main, engine</span></span>
+        <b>last judged</b><span class="mono">t261008-20-overview-ledger-dialog-conc-block</span> <span class="pill" data-k="warn">env_fail</span> <span class="muted">0.1 s</span></span>
+      </div>
+
+      <h2 style="color:#57606a;font-size:11px;margin:16px 0 6px">Failures (named, never "some tests failed")</h2>
+      <table>
+        <tr><th>scenario</th><th>pool</th><th>status</th><th>reason</th><th>s</th></tr>
+        <tr><td class="mono">t261006-17-concurrency-save-gate</td><td>ro</td><td><span class="pill" data-k="red">fail</span></td><td>assert_mismatch · S3.named-refusal-entry-absent</td><td>0.6</td></tr>
+        <tr><td class="mono">t260904-19-stage-docker</td><td>exclusive</td><td><span class="pill" data-k="warn">env_fail</span></td><td>external · shared stage held by another lane (120 s window)</td><td>0.1</td></tr>
+        <tr><td colspan="5" class="muted" style="font-size:12px">… 50 more · <span class="link">group by cause</span> · <span class="link">only failures</span></td></tr>
+      </table>
+      <p style="color:var(--muted);font-size:12px">两栏分类是**引擎给的**：<code>fail</code>＝票头账（判红），<code>env_fail</code>＝环境面（今天同样判红，因为 <code>run_verdict</code> 要求 env 也是 0）。</p>
+
+      <h2 style="color:#57606a;font-size:11px;margin:16px 0 6px">Pools</h2>
+      <table>
+        <tr><th>pool</th><th>scenarios</th><th>done</th><th>serial time</th><th>state</th></tr>
+        <tr><td class="mono">ro</td><td>488</td><td>379</td><td>6.2 min</td><td><span class="pill" data-k="run">running (pole)</span></td></tr>
+        <tr><td class="mono">engine</td><td>31</td><td>4</td><td>0.4 min</td><td><span class="pill">running</span></td></tr>
+        <tr><td class="mono">exclusive</td><td>26</td><td>0</td><td>—</td><td><span class="pill">queued</span></td></tr>
+        <tr><td class="mono">main · browser-free · browser</td><td>143</td><td>0</td><td>—</td><td><span class="pill">queued</span></td></tr>
+      </table>
+
+      <h2 style="color:#57606a;font-size:11px;margin:16px 0 6px">What this round will write</h2>
+      <div class="kv">
+        <b>if green</b><span>a <code>certification</code> row naming this run + the covered range ⇒ <b>covers</b> landings <span class="mono">t261009-80</span>, <span class="mono">t261011-25</span> · boundary moves to <span class="sha">353b2479</span></span>
+        <b>if red</b><span>a <code>certification</code> (red) + a <code>freeze</code> row · line <span class="pill" data-k="red">FROZEN</span> with the blockers verbatim</span>
+        <b>if it cannot run</b><span>one <code>range_growth</code> row naming why (e.g. <code>runner_timeout:3600s</code>, <code>runner_signaled:15</code>) — today's rule: a dead round must still leave one row</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>3 · 三种"没有东西可看"的状态（今天全是这一栏）</h2>
+  <div class="panel screen"><div class="bd">
+    <div class="empty"><b>No round recorded yet</b> — the delivery ledger has a landing but no certification and no round ledger row. (Today's reality before <code>t261011-26</code>.)</div>
+    <div class="empty" style="margin-top:8px"><b>Round running, no records yet</b> — the runner is up but the suite has not written its header; the tab shows the live progress face only (never an invented count).</div>
+    <div class="empty" style="margin-top:8px"><b>Round ended, nothing provable</b> — <code>could not run</code> with the named reason (<code>runner_timeout:3600s</code> / <code>suite_rc_1:run_id_missing_from_summary</code>), so the round is not "red" and not "green": it is <b>no proof</b>.</div>
+    <p style="color:var(--muted);font-size:12px">第三种最要紧：**"没跑成"不能长得像"红"**（红是产品有毛病，没跑成是环境/预算），也不能长得像"绿"。</p>
+  </div></div>
+
+  <h2>4 · 口径（写进票面）</h2>
+  <div class="panel screen"><div class="bd">
+    <p style="color:var(--muted)">① 页面上的每个数都能指到一条记录（轮次台账 / 落地账本 / 进度面），**前端不推导、不兜底成 0**；② run id 是唯一入口锚点（<code>run-&lt;yyyymmdd&gt;-&lt;hhmm&gt;</code>），详情页只认它；③ 计数三态沿用引擎词：<code>pass / fail / env_fail</code>（外加 <code>not yet judged</code> 只作显示，不落账）；④ 冻结/边界/晋级沿用 certification tab 既有面，本页只做"这一轮"的展开；⑤ 保留日志链接指向**稳定路径**（<code>t261011-26</code> 的留存面），不再指向系统 temp。</p>
+  </div></div>
+</div>
+</body>
+</html>
