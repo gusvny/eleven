@@ -773,3 +773,22 @@ export function snapshotDigest(detail: unknown): SnapshotDigest {
 
   return { workflow, timeline, handoffs, gates }
 }
+
+/* ------------------------------------------------- dismiss/restore request URL */
+
+/**
+ * t261011-15: the dismiss/restore request URL with the per-request project
+ * anchor. The route's caller identity flows ONLY through `?project=`
+ * (node.ts anchorOf -> caller_project); the POST body is the engine contract
+ * `{who, reason}` and must not grow a project field. A blank project key (the
+ * unowned inspection group) omits the query entirely — the route's own
+ * discipline: no view key, no guessing, the call stays undeclared and the
+ * engine keeps its refusal semantics.
+ */
+export function dismissRequestUrl(projectKey: string, ticketId: string,
+                                  action: 'dismiss' | 'restore'): string {
+  const base = `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/${action}`
+  return typeof projectKey === 'string' && projectKey !== ''
+    ? `${base}?project=${encodeURIComponent(projectKey)}`
+    : base
+}
