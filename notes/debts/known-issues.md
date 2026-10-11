@@ -5317,3 +5317,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**凡"按前缀/路径豁免"的判据，必须对**该前缀下实际存在的文件**做一次全量清点**——`notes/` 与 `docs/` 不是纯散文目录（四个代码文件就在里面）。豁免写成前缀的那一刻，"散文"这个词就已经不是判据了。
 >
 > **回归**：L1——`docs/scripts/build_index.py` 未暂存改动 ⇒ **仍 `main_dirty` 拒**（窄化后），而 `notes/*.md` 未暂存且不重叠 ⇒ 豁免；L3——一次真实落地：被豁免的文件**不在提交里**、落地后**逐字节不变**（本条已用临时仓在分类器层面验证，L3 待下一次真实落地复验）。
+
+## KI-01M4MNZ3VK46MGH2XWPVE2NVZC **闸的判据取自"跑它的那个 worker 的代码版本"**：main 上改了闸代码、而**票自己的泳道 worker** 是改前起的 ⇒ 闸照样按旧代码拒，看上去像"修了没用"（本夜实证：`-17` 的合并前脏检查）**(261011 13:03:57 `t261011-17` merge_check 实测 + 纯函数直读反证;integration 岗登记)**
+
+> **现象（原始读数）**：`t261011-17`（写集并集修好、轮次 `584/580/fail 0` 干净）12:56:29 进 `merge_check`，**13:03:57 被"合并前脏检查"红住**，`blocked_detail.evidence` 点名三个文件并写着：
+> `main 工作区有未提交改动（git 本地改动保护，非冲突）——挡事文件：docs/ops/engine-worker-and-lane-operations.md、notes/debts/known-issues.md、notes/discussions/261011-develop-buffer-faces-faithful-sample.html｜**不重叠（仍保守拦：main 侧可能有未提交的无主编辑）**｜…`
+> ——这后半句是 **`t261011-16` 落地前的旧文案**。修好之后的行为应该是把这三个文件**豁免**（`exempted` 键）并不再拒。
+>
+> **真因（三读定位，缺一不可）**：
+> 1. **worker 启动时刻早于闸代码改动**：本票泳道 worker **pid 25123，`started_at` = 11:44:43**；而 `server/engine/agent_activities.py` 的 mtime = **11:53:51**（`-16` 落地那一刻）。`engine_ops workers` 对这个 worker 逐字给出 **`stale: ["agent_activities"]`** ⇒ 它跑的是旧代码。
+> 2. **文案指纹**：把闸的 `evidence` 与新旧两份文案对读——旧：`不重叠（仍保守拦：…）`；新：`prose dirt exempted (host order 261011, left untouched): …` 或 `overlaps the close-out paths: …` / `merge surface unknown …`。**闸自己的措辞就是它的代码版本指纹**（这一条是本条最便宜的判据，不需要任何仪器）。
+> 3. **纯函数直读反证（本岗在原树上跑当前代码）**：`_classify_main_dirty(<repo>, 'lane/t261011-17')` ⇒ **`kind: ""`，`exempted: [上述三个文件]`，note 为豁免文案** ⇒ **交付物是好的**，红来自**旧代码在跑**。
+>
+> **危害**：①**方向性误判**——最容易得出的结论是"`-16` 的修复没生效/假的"，于是去看它的实现、去改它的场景、甚至 rework 一个完全无辜的泳道；真实原因与那条票**毫无关系**。②**反方向同样成立**：一次"闸在旧代码下绿"的轮次，会被当成"新代码也绿"的证据。③它与 `KI-01M4KH2QR5BRMQVZWA1C40Y8PF`（中央 worker 早于接线/盖章）是**同族**：都是"**代码的新旧**由 **进程的起跑线**决定，而面上没有一处把两者对齐"；本条把它的**判据与处置**写全。
+>
+> **纪律（三读定位，先做再说话）**：凡"**修了没用**"的闸红，**先读三样**——①**跑这闸的 worker 的启动时刻**（`engine_ops workers` → 该票泳道行的 `started_at`/`pid`）；②**它的 `stale` 名单**里有没有本闸所在模块；③**闸自己的措辞**对不对得上新代码。三样都指向旧代码 ⇒ 结论是"**换手**"，不是"**返工**"。**并且**：落地一个"闸代码"改动之后，**在飞票的泳道 worker 一律视为旧代码**——要它按新判据判，就得换手（按 pidfile TERM、等控制台 supervisor 拉起、验新 pid ＋ live poller=1）；否则那一票的每一轮闸判都是旧代码的判。
+>
+> **回归**：L2——`engine_ops workers` 对"启动早于某模块 mtime"的 worker **必须**给出该模块在 `stale` 里（已有 `test_engine_ops.py` 覆盖同一形状，此处只作锚点）；L3——**一次"闸代码落地 → 换手 → 同一条脏面由红转绿"的连贯回执**（本条的正面形态：`retry_qc` 之后闸自己打出 `prose dirt exempted …` 文案），且**换手前的那次红必须能在报告里被指认为旧代码的判**。
