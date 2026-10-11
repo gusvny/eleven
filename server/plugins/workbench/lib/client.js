@@ -6533,6 +6533,19 @@ function ticketDisplayTitle(t) {
 	if (first !== "") return first;
 	return t.id;
 }
+/**
+* t261011-15: the dismiss/restore request URL with the per-request project
+* anchor. The route's caller identity flows ONLY through `?project=`
+* (node.ts anchorOf -> caller_project); the POST body is the engine contract
+* `{who, reason}` and must not grow a project field. A blank project key (the
+* unowned inspection group) omits the query entirely — the route's own
+* discipline: no view key, no guessing, the call stays undeclared and the
+* engine keeps its refusal semantics.
+*/
+function dismissRequestUrl(projectKey, ticketId, action) {
+	const base = `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/${action}`;
+	return typeof projectKey === "string" && projectKey !== "" ? `${base}?project=${encodeURIComponent(projectKey)}` : base;
+}
 //#endregion
 //#region src/client/ticket-row-card.tsx
 /** Row tooltip title: id + stage context (C2 consumer: stage-short topology) +
@@ -8879,8 +8892,8 @@ function inspectionDegradedNote(err) {
 */
 const CONCURRENCY_URL = "/sandbar-workbench/api/wf/concurrency";
 const CONCURRENCY_REORDER_URL = "/sandbar-workbench/api/wf/concurrency/reorder";
-const DISMISS_URL = (id) => `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/dismiss`;
-const RESTORE_URL = (id) => `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/restore`;
+const DISMISS_URL = (projectKey, id) => dismissRequestUrl(projectKey, id, "dismiss");
+const RESTORE_URL = (projectKey, id) => dismissRequestUrl(projectKey, id, "restore");
 const OPERATOR_KEY$1 = "sandbar-workbench-operator-v1";
 function sidebarOperator() {
 	try {
@@ -9215,6 +9228,13 @@ function WorkbenchSidebar(props) {
 	const [unownedDismissedOpen, setUnownedDismissedOpen] = (0, react.useState)(false);
 	const [dismissPrompt, setDismissPrompt] = (0, react.useState)(null);
 	const [dismissReason, setDismissReason] = (0, react.useState)("");
+	const dismissPromptRef = (0, react.useRef)(null);
+	const dismissReasonRef = (0, react.useRef)(null);
+	(0, react.useEffect)(() => {
+		if (dismissPrompt === null) return;
+		dismissPromptRef.current?.scrollIntoView({ block: "nearest" });
+		dismissReasonRef.current?.focus();
+	}, [dismissPrompt]);
 	/** Write in flight (ticket id -> true): controls disabled against double writes. */
 	const [dismissBusy, setDismissBusy] = (0, react.useState)({});
 	/** Named refusal (ticket id -> verbatim error; '' = none) rendered in the prompt panel. */
@@ -9499,7 +9519,7 @@ function WorkbenchSidebar(props) {
 		}));
 		let refused = "";
 		try {
-			const r = await fetch(action === "dismiss" ? DISMISS_URL(ticketId) : RESTORE_URL(ticketId), {
+			const r = await fetch(action === "dismiss" ? DISMISS_URL(projectKey, ticketId) : RESTORE_URL(projectKey, ticketId), {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
@@ -9575,6 +9595,64 @@ function WorkbenchSidebar(props) {
 			children: "⊞"
 		})]
 	});
+	const renderDismissPrompt = () => {
+		if (dismissPrompt === null) return null;
+		const p = dismissPrompt;
+		const notice = dismissNotice[p.ticketId] ?? "";
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			ref: dismissPromptRef,
+			className: "wb-dismiss-prompt",
+			"data-wb-dismiss-prompt": "",
+			role: "dialog",
+			"aria-label": `${p.action} ${p.ticketId}`,
+			children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-dismiss-prompt-title",
+					children: p.action === "dismiss" ? `Dismiss ${p.ticketId} — off the board, not done (restorable)` : `Restore ${p.ticketId} — back on the board`
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+					ref: dismissReasonRef,
+					className: "wb-dismiss-reason",
+					"data-wb-dismiss-reason": "",
+					value: dismissReason,
+					placeholder: "Reason (required, recorded)",
+					onChange: (e) => setDismissReason(e.target.value)
+				}),
+				notice !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-order-notice",
+					"data-wb-dismiss-notice": "",
+					role: "alert",
+					children: notice
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-dismiss-prompt-actions",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-card-btn wb-card-btn-dismiss",
+						"data-dismiss-confirm": "",
+						disabled: dismissBusy[p.ticketId] === true || dismissReason.trim() === "",
+						onClick: () => {
+							submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason);
+						},
+						children: p.action === "dismiss" ? "Dismiss" : "Restore"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-card-btn",
+						"data-dismiss-cancel": "",
+						onClick: () => {
+							setDismissPrompt(null);
+							setDismissReason("");
+							setDismissNotice((m) => ({
+								...m,
+								[p.ticketId]: ""
+							}));
+						},
+						children: "Cancel"
+					})]
+				})
+			]
+		});
+	};
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		ref: rootRef,
 		className: "wb-sb wide",
@@ -9782,6 +9860,7 @@ function WorkbenchSidebar(props) {
 										})
 									}, t.id);
 								}),
+								dismissPrompt?.projectKey === g.project.key && renderDismissPrompt(),
 								orderNotice[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "wb-order-notice",
 									"data-wb-order-notice": "",
@@ -9883,6 +9962,7 @@ function WorkbenchSidebar(props) {
 										action: "dismiss"
 									})
 								}, t.id)),
+								dismissPrompt?.projectKey === "" && renderDismissPrompt(),
 								!inspCollapsed && unownedDismissed.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "wb-dismissed-fold",
 									"data-wb-dismissed-fold": "unowned",
@@ -9960,62 +10040,7 @@ function WorkbenchSidebar(props) {
 								className: "wb-project-add-plus",
 								children: "＋"
 							}), "Add project"]
-						}),
-						dismissPrompt !== null && (() => {
-							const p = dismissPrompt;
-							const notice = dismissNotice[p.ticketId] ?? "";
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "wb-dismiss-prompt",
-								"data-wb-dismiss-prompt": "",
-								role: "dialog",
-								"aria-label": `${p.action} ${p.ticketId}`,
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "wb-dismiss-prompt-title",
-										children: p.action === "dismiss" ? `Dismiss ${p.ticketId} — off the board, not done (restorable)` : `Restore ${p.ticketId} — back on the board`
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-										className: "wb-dismiss-reason",
-										"data-wb-dismiss-reason": "",
-										value: dismissReason,
-										placeholder: "Reason (required, recorded)",
-										onChange: (e) => setDismissReason(e.target.value)
-									}),
-									notice !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-										className: "wb-order-notice",
-										"data-wb-dismiss-notice": "",
-										role: "alert",
-										children: notice
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-dismiss-prompt-actions",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											className: "wb-card-btn wb-card-btn-dismiss",
-											"data-dismiss-confirm": "",
-											disabled: dismissBusy[p.ticketId] === true || dismissReason.trim() === "",
-											onClick: () => {
-												submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason);
-											},
-											children: p.action === "dismiss" ? "Dismiss" : "Restore"
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											className: "wb-card-btn",
-											"data-dismiss-cancel": "",
-											onClick: () => {
-												setDismissPrompt(null);
-												setDismissReason("");
-												setDismissNotice((m) => ({
-													...m,
-													[p.ticketId]: ""
-												}));
-											},
-											children: "Cancel"
-										})]
-									})
-								]
-							});
-						})()
+						})
 					]
 				})]
 			}),

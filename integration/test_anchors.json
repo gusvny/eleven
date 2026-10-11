@@ -4966,6 +4966,11 @@
       "anchor": "behaviour",
       "note": "t261011-11: the fast set's patrol face (--print-fast-set-review) and its append-only verdict ledger judged over the real CLI with fixture ledgers/roster; declarations printed beside measurements, must-lose-membership fail-closed, breach is a signal never a trim",
       "sync_path": ""
+    },
+    "integration/t261011-15/sc_t26101115_dismiss_prompt_visible.mjs": {
+      "anchor": "behaviour",
+      "note": "t261011-15: dismiss reason box visible in viewport on a long list + ?project= on the wire",
+      "sync_path": ""
     }
   }
 }

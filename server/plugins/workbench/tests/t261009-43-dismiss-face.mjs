@@ -107,7 +107,12 @@ ok(cardSrc.includes("data-dismissed={dismissedVoucher ? '1' : undefined}"),
 ok(sidebarSrc.includes("JSON.stringify({ who: sidebarOperator(), reason })"),
   'the POST body carries who + reason (the engine requires both)')
 ok(sidebarSrc.includes("reason.trim() === ''"), 'the face refuses an empty reason before POSTing (asks first)')
-ok(sidebarSrc.includes('encodeURIComponent(id)'), 'ticket id is URL-encoded on the op path')
+// t261011-15: the URL construction moved to the model layer's single point
+// (dismissRequestUrl) — the encoding anchor moved with it, and the sidebar
+// must build its dismiss/restore URLs through that helper (no second path).
+const modelSrc = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-list-model.ts'), 'utf8')
+ok(modelSrc.includes('encodeURIComponent(ticketId)'), 'ticket id is URL-encoded on the op path (model-layer single point)')
+ok(sidebarSrc.includes('dismissRequestUrl('), 'the sidebar builds dismiss/restore URLs via the model-layer helper')
 ok(sidebarSrc.includes('setReloadNonce(n => n + 1)'),
   'success re-reads the face (reloadNonce) — the row leaves on the engine payload, never a local flip')
 ok(sidebarSrc.includes('dismiss journal') === false || true, 'no-op anchor guard')

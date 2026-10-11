@@ -124,6 +124,8 @@ import {
   stageDotsLit, faceCounts,
   type ConcFace,
 } from './queue-model.ts'
+// t261011-15: the dismiss/restore request URL builder (pure, node-testable).
+import { dismissRequestUrl } from './ticket-list-model.ts'
 const CONCURRENCY_URL = '/sandbar-workbench/api/wf/concurrency'
 const CONCURRENCY_REORDER_URL = '/sandbar-workbench/api/wf/concurrency/reorder'
 // t261009-43: the person's dismissal write face (engine ops dismiss/restore,
@@ -131,10 +133,15 @@ const CONCURRENCY_REORDER_URL = '/sandbar-workbench/api/wf/concurrency/reorder'
 // discipline: verbatim same-source with node.ts's op route path — NOTE the
 // route whitelist entry lives in node.ts, OUTSIDE this ticket's write set
 // (named debt on the ticket; the client contract is fixed and stub-tested).
-const DISMISS_URL = (id: string): string =>
-  `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/dismiss`
-const RESTORE_URL = (id: string): string =>
-  `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(id)}/restore`
+// t261011-15: the URL builders delegate to the model-layer helper — the
+// per-request project anchor rides `?project=` (node.ts anchorOf ->
+// caller_project; the POST body stays the engine contract {who, reason}).
+// A blank project key (unowned inspection group) omits the query: no view
+// key, no guessing (the route's own discipline at node.ts:1258-1260).
+const DISMISS_URL = (projectKey: string, id: string): string =>
+  dismissRequestUrl(projectKey, id, 'dismiss')
+const RESTORE_URL = (projectKey: string, id: string): string =>
+  dismissRequestUrl(projectKey, id, 'restore')
 // t261009-43: the person identity for dismiss/restore. Mirrors index.tsx
 // operatorOf (SAME localStorage key = one person identity per browser); a
 // local copy because importing index.tsx from the sidebar is a forbidden
@@ -640,6 +647,19 @@ export function WorkbenchSidebar(props: SidebarProps) {
     { projectKey: string; ticketId: string; action: 'dismiss' | 'restore' } | null
   >(null)
   const [dismissReason, setDismissReason] = useState('')
+  // t261011-15: visibility of the reason prompt. The prompt used to render as
+  // the LAST child of .wb-ticket-list — on a long board it opened below the
+  // fold, the click looked inert and no request was ever sent. Now the prompt
+  // renders anchored to the row that opened it (slot per group), and this
+  // effect scrolls it into view and focuses the reason box on open (restore
+  // gets the same rule for free — same slot, same effect).
+  const dismissPromptRef = useRef<HTMLDivElement | null>(null)
+  const dismissReasonRef = useRef<HTMLTextAreaElement | null>(null)
+  useEffect(() => {
+    if (dismissPrompt === null) return
+    dismissPromptRef.current?.scrollIntoView({ block: 'nearest' })
+    dismissReasonRef.current?.focus()
+  }, [dismissPrompt])
   /** Write in flight (ticket id -> true): controls disabled against double writes. */
   const [dismissBusy, setDismissBusy] = useState<Record<string, boolean>>({})
   /** Named refusal (ticket id -> verbatim error; '' = none) rendered in the prompt panel. */
@@ -989,7 +1009,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
     setDismissBusy(m => ({ ...m, [ticketId]: true }))
     let refused = ''
     try {
-      const r = await fetch(action === 'dismiss' ? DISMISS_URL(ticketId) : RESTORE_URL(ticketId), {
+      const r = await fetch(action === 'dismiss'
+        ? DISMISS_URL(projectKey, ticketId) : RESTORE_URL(projectKey, ticketId), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ who: sidebarOperator(), reason }),
@@ -1119,6 +1140,49 @@ export function WorkbenchSidebar(props: SidebarProps) {
   }
 
   // 展开态：双列
+  // t261011-15: the reason prompt — one row, one action at a time. Rendered
+  // ANCHORED to the group that owns the row (slot per project block and one
+  // in the unowned inspection group) instead of as the last child of the
+  // scroll container: on a board taller than the viewport the old position
+  // opened below the fold, the click looked inert and no request was ever
+  // sent. The open effect (dismissPromptRef above) scrolls the slot into
+  // view and focuses the reason box; restore keeps the same rule (same slot,
+  // same effect). The engine refuses an empty reason, so Confirm stays
+  // disabled until the reason is non-blank; a refusal surfaces verbatim
+  // (never swallowed); a success closes the prompt and re-reads the face.
+  const renderDismissPrompt = () => {
+    if (dismissPrompt === null) return null
+    const p = dismissPrompt
+    const notice = dismissNotice[p.ticketId] ?? ''
+    return (
+      <div ref={dismissPromptRef} className="wb-dismiss-prompt" data-wb-dismiss-prompt=""
+        role="dialog" aria-label={`${p.action} ${p.ticketId}`}>
+        <div className="wb-dismiss-prompt-title">
+          {p.action === 'dismiss'
+            ? `Dismiss ${p.ticketId} — off the board, not done (restorable)`
+            : `Restore ${p.ticketId} — back on the board`}
+        </div>
+        <textarea ref={dismissReasonRef} className="wb-dismiss-reason" data-wb-dismiss-reason=""
+          value={dismissReason}
+          placeholder="Reason (required, recorded)"
+          onChange={(e) => setDismissReason(e.target.value)} />
+        {notice !== '' && (
+          <div className="wb-order-notice" data-wb-dismiss-notice="" role="alert">{notice}</div>
+        )}
+        <div className="wb-dismiss-prompt-actions">
+          <button type="button" className="wb-card-btn wb-card-btn-dismiss" data-dismiss-confirm=""
+            disabled={dismissBusy[p.ticketId] === true || dismissReason.trim() === ''}
+            onClick={() => { void submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason) }}>
+            {p.action === 'dismiss' ? 'Dismiss' : 'Restore'}
+          </button>
+          <button type="button" className="wb-card-btn" data-dismiss-cancel=""
+            onClick={() => { setDismissPrompt(null); setDismissReason(''); setDismissNotice(m => ({ ...m, [p.ticketId]: '' })) }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div ref={rootRef} className="wb-sb wide">
       <style>{CSS}</style>
@@ -1292,6 +1356,12 @@ export function WorkbenchSidebar(props: SidebarProps) {
                         onDismiss={() => setDismissPrompt({ projectKey: g.project.key, ticketId: t.id, action: 'dismiss' })} />
                     )
                   })}
+                  {/* t261011-15: the reason prompt slot — anchored to this group,
+                      right after the clicked row's list (the open effect scrolls
+                      it into view and focuses the reason box; a long board can
+                      no longer push it below the fold). Restore opens from the
+                      dismissed fold below but lands in the same slot. */}
+                  {dismissPrompt?.projectKey === g.project.key && renderDismissPrompt()}
                   {/* Reorder-refusal notice (t261006-18 A7): the engine write face's
                       named refusal verbatim - visible, order untouched (the face
                       re-read restores truth), never silently swallowed. */}
@@ -1362,6 +1432,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
                   onOpen={() => handleTicketClick(t, '')}
                   onDismiss={() => setDismissPrompt({ projectKey: '', ticketId: t.id, action: 'dismiss' })} />
               ))}
+              {/* t261011-15: the unowned group's own prompt slot (blank project key
+                  — the URL builder omits ?project= for it, no guessing). */}
+              {dismissPrompt?.projectKey === '' && renderDismissPrompt()}
               {/* t261009-43: the unowned group's own dismissed fold (separate
                   boolean from the project-keyed record — no registry key exists
                   here to key it by). */}
@@ -1407,42 +1480,10 @@ export function WorkbenchSidebar(props: SidebarProps) {
             onClick={() => setModal({ kind: 'add' })}>
             <span className="wb-project-add-plus">＋</span>Add project
           </div>
-          {/* t261009-43: the reason prompt — one row, one action at a time. The
-              engine refuses an empty reason, so Confirm stays disabled until
-              the reason is non-blank; a refusal surfaces verbatim (never
-              swallowed); a success closes the prompt and re-reads the face. */}
-          {dismissPrompt !== null && (() => {
-            const p = dismissPrompt
-            const notice = dismissNotice[p.ticketId] ?? ''
-            return (
-              <div className="wb-dismiss-prompt" data-wb-dismiss-prompt="" role="dialog"
-                aria-label={`${p.action} ${p.ticketId}`}>
-                <div className="wb-dismiss-prompt-title">
-                  {p.action === 'dismiss'
-                    ? `Dismiss ${p.ticketId} — off the board, not done (restorable)`
-                    : `Restore ${p.ticketId} — back on the board`}
-                </div>
-                <textarea className="wb-dismiss-reason" data-wb-dismiss-reason=""
-                  value={dismissReason}
-                  placeholder="Reason (required, recorded)"
-                  onChange={(e) => setDismissReason(e.target.value)} />
-                {notice !== '' && (
-                  <div className="wb-order-notice" data-wb-dismiss-notice="" role="alert">{notice}</div>
-                )}
-                <div className="wb-dismiss-prompt-actions">
-                  <button type="button" className="wb-card-btn wb-card-btn-dismiss" data-dismiss-confirm=""
-                    disabled={dismissBusy[p.ticketId] === true || dismissReason.trim() === ''}
-                    onClick={() => { void submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason) }}>
-                    {p.action === 'dismiss' ? 'Dismiss' : 'Restore'}
-                  </button>
-                  <button type="button" className="wb-card-btn" data-dismiss-cancel=""
-                    onClick={() => { setDismissPrompt(null); setDismissReason(''); setDismissNotice(m => ({ ...m, [p.ticketId]: '' })) }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )
-          })()}
+          {/* t261011-15: the tail-of-container prompt render retired here — the
+              prompt now renders anchored to the group that owns the row
+              (renderDismissPrompt slots above), so a long board cannot push it
+              below the fold. */}
         </div>
       </div>
       {/* 中列：四视图（现成的工单台/文档/模型/立项单 UI，从 chat 页签迁来；左列图标直切，无 tab 条）。
