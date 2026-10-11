@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Develop buffer — faithful sample (261011 v3)</title>
+<style>
+  /* 颜色/字号/间距照抄 server/plugins/workbench/src/client/index.tsx 的 .wb-card 家族
+     （token 名与 fallback 值都取真源，见各处注释行号）。 */
+  :root{
+    --canvas:#fff; --ink-strong:#24292f; --muted:#57606a; --accent:#0969da;
+    --border:#d0d7de; --warn-bg:#fff8c5; --warn:#bf8700; --warn-text:#7d4e00;
+    --danger-bg:#ffebe9; --danger:#cf222e; --danger-solid:#d1242f;
+    --done-bg:#f6f8fa;
+  }
+  body{margin:0;background:#0d1117;color:#e6e9ef;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB",sans-serif}
+  .wrap{max-width:1120px;margin:0 auto;padding:26px 18px 60px}
+  h1{font-size:19px;margin:0 0 4px}
+  h2{font-size:14px;margin:30px 0 8px;color:#79b8ff;text-transform:uppercase;letter-spacing:.08em}
+  p{margin:6px 0}
+  .sub{color:#9aa4b2;font-size:13px}
+  .note{background:#161b22;border:1px solid #30363d;border-left:3px solid #79b8ff;padding:10px 12px;border-radius:6px;margin:12px 0;font-size:13px;color:#9aa4b2}
+  .light{background:#fff;color:#24292f;border:1px solid #d0d7de;border-radius:10px;padding:10px}
+  .cap{color:#9aa4b2;font-size:11px;margin:12px 0 4px}
+  code{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:1px 5px;color:#e6e9ef}
+  .light code{background:#f6f8fa;border-color:#d0d7de;color:#24292f}
+
+  /* ---- 真源卡片（逐条来自 index.tsx:224-267） ---- */
+  .wb-card{display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;
+    border:1px solid var(--border);border-left-width:4px;border-radius:8px;background:var(--canvas);
+    border-left-color:#d0d7de}
+  .wb-card[data-state=waiting]{background:var(--warn-bg);border-left-color:var(--warn)}
+  .wb-card[data-state=blocked]{background:var(--danger-bg);border-left-color:var(--danger)}
+  .wb-card[data-active=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  .wb-card[data-state=done]{color:var(--muted);background:var(--done-bg)}
+  .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
+  .wb-card-dot{width:9px;height:9px;flex:none;position:relative}
+  .wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--muted)}
+  .wb-card-dot[data-state=running]::before{background:var(--accent)}
+  .wb-card-dot[data-state=blocked]::before{background:var(--danger)}
+  .wb-card-dot[data-state=done]::before{background:var(--muted)}
+  .wb-card-state{font-size:11px;font-weight:600;flex:none;color:var(--muted)}
+  .wb-card-state[data-state=running]{color:var(--accent)}
+  .wb-card-state[data-state=blocked]{color:var(--danger)}
+  .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--ink-strong)}
+  .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;flex:1 1 260px;min-width:0}
+  .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent);flex:none}
+  .wb-col{width:360px}
+  /* 候选标记（提案） */
+  .mk{font-size:11px;flex:none;line-height:1;padding:1px 4px;border-radius:4px;border:1px solid #a371f7;color:#6f42c1;background:#f3eefe}
+  .cardbar-dash{border-left-style:dashed !important}
+  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid #d0d7de;background:#f6f8fa;color:#57606a;margin-right:6px}
+  .tag.b{uargin:0;border-color:#a371f7;background:#f3eefe;color:#6f42c1}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #30363d;vertical-align:top}
+  .light th,.light td{border-bottom:1px solid #d0d7de}
+  th{color:#9aa4b2;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .light th{color:#57606a}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .empty{color:#57606a;font-style:italic;padding:12px;border:1px dashed #d0d7de;border-radius:8px;background:#f6f8fa}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Develop buffer — faithful sample <span class="sub">(v3: real card CSS, real rows)</span></h1>
+  <p class="sub">261011 · integration steward · <b>sample only, nothing runs.</b> Colours, spacings and class names are copied from the real left-column card
+    (<code>server/plugins/workbench/src/client/index.tsx</code>, <code>.wb-card</code> family, lines 224-267); the rows are the real board rows read a minute ago.</p>
+
+  <h2>1 · The left column as it is, then with a marker</h2>
+  <p class="sub">Left column budget ≈ 360px. Rows below are real: <code>t261009-80</code> is the buffer ticket (running), <code>t261011-16</code> is legacy (running), the two grey ones are closed today.</p>
+
+  <div class="grid2">
+    <div>
+      <div class="cap">A · today (nothing new)</div>
+      <div class="light wb-col">
+        <div class="wb-card" data-active="true">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="running"></span>
+            <span class="wb-card-state" data-state="running">running</span>
+            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
+          </div>
+          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
+        </div>
+        <div class="wb-card">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="running"></span>
+            <span class="wb-card-state" data-state="running">running</span>
+            <span class="wb-card-title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span>
+          </div>
+          <div class="wb-card-l2"><span class="wb-card-id">t261011-16</span><span>run_integration_tests</span></div>
+        </div>
+        <div class="wb-card" data-state="done">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="done"></span>
+            <span class="wb-card-state" data-state="done">done</span>
+            <span class="wb-card-title">The lane's own proof still pays the whole suite: the declared fast set is wired into no lane…</span>
+          </div>
+          <div class="wb-card-l2"><span class="wb-card-id">t261011-10</span><span>merge</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="cap">B · one 11px tag on buffer rows only (my recommendation)</div>
+      <div class="light wb-col">
+        <div class="wb-card" data-active="true">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="running"></span>
+            <span class="wb-card-state" data-state="running">running</span>
+            <span class="mk" title="develop-buffer-v1 · line develop-buffer · waiting for certification">⇥ buf</span>
+            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
+          </div>
+          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
+        </div>
+        <div class="wb-card">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="running"></span>
+            <span class="wb-card-state" data-state="running">running</span>
+            <span class="wb-card-title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span>
+          </div>
+          <div class="wb-card-l2"><span class="wb-card-id">t261011-16</span><span>run_integration_tests</span></div>
+        </div>
+        <div class="wb-card" data-state="done">
+          <div class="wb-card-l1">
+            <span class="wb-card-dot" data-state="done"></span>
+            <span class="wb-card-state" data-state="done">done</span>
+            <span class="wb-card-title">The lane's own proof still pays the whole suite: the declared fast set is wired into no lane…</span>
+          </div>
+          <div class="wb-card-l2"><span class="wb-card-id">t261011-10</span><span>merge</span></div>
+        </div>
+      </div>
+      <p class="sub">Legacy rows are byte-identical to today. The tag costs ~40px and sits before the title, which shortens by the same amount — that is the trade.</p>
+    </div>
+  </div>
+
+  <div class="cap" style="margin-top:16px">C · zero-ink alternative: the left border's <b>style</b> carries it (solid = legacy, dashed = buffer line)</div>
+  <div class="light wb-col">
+    <div class="wb-card cardbar-dash" data-active="true" title="develop-buffer-v1 · line develop-buffer · waiting for certification">
+      <div class="wb-card-l1">
+        <span class="wb-card-dot" data-state="running"></span>
+        <span class="wb-card-state" data-state="running">running</span>
+        <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
+      </div>
+      <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
+    </div>
+    <div class="wb-card">
+      <div class="wb-card-l1">
+        <span class="wb-card-dot" data-state="running"></span>
+        <span class="wb-card-state" data-state="running">running</span>
+        <span class="wb-card-title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span>
+      </div>
+      <div class="wb-card-l2"><span class="wb-card-id">t261011-16</span><span>run_integration_tests</span></div>
+    </div>
+  </div>
+  <p class="sub">0px stolen; the words ride in the tooltip. Weakness: the left border already carries the epic colour today, so a dashed version reads as "no colour", not obviously as "on a line".</p>
+
+  <h2>2 · Where the words go (there is room here)</h2>
+  <div class="grid2">
+    <div class="light">
+      <p class="sub" style="color:#57606a">Ticket detail header (one line, only for buffer tickets)</p>
+      <div style="font-weight:600;color:#24292f;margin:4px 0">A pause that cannot reach a boundary is invisible and inert…</div>
+      <div><span class="tag">t261009-80</span><span class="tag">merge</span><span class="tag">running</span>
+        <span class="tag" style="border-color:#a371f7;background:#f3eefe;color:#6f42c1">develop-buffer-v1</span>
+        <span class="tag" style="border-color:#a371f7;background:#f3eefe;color:#6f42c1">line: develop-buffer</span>
+        <span class="tag">waiting for certification</span></div>
+      <table>
+        <tr><th>Line</th><td>develop-buffer · branch <code>develop</code></td></tr>
+        <tr><th>Landings</th><td>0 &nbsp;·&nbsp; <b>Certifications</b> 0 &nbsp;·&nbsp; <b>Freeze</b> open &nbsp;·&nbsp; <b>Promotion</b> none yet</td></tr>
+        <tr><th>Proof</th><td>own scenarios + declared fast set (67 members) · ceiling 5 min · <i>the old full round for tickets created before 11:02</i></td></tr>
+      </table>
+    </div>
+    <div class="light">
+      <p class="sub" style="color:#57606a">Certification tab (exists today, in the executor panel) — empty until a landing happens</p>
+      <div class="empty">No landing recorded on line <code>develop-buffer</code> yet — the delivery ledger has not been created. (An absent ledger is "never ran", never "ran with nothing".)</div>
+      <p class="sub" style="color:#57606a;margin-top:10px">Once it lands, the tab reads (shape):</p>
+      <table>
+        <tr><th>When</th><th>Revision</th><th>Covers</th><th>Ran/fail/env</th><th>Driver</th></tr>
+        <tr><td>11:30</td><td><code>c0e57d06</code></td><td>landing #1</td><td>580 / 0 / 22</td><td>scheduled</td></tr>
+        <tr><th>Attributed reds</th><td colspan="4">none — green round; a red would name the responsible landing here</td></tr>
+        <tr><th>Promotion</th><td colspan="4">waiting for one human signature <span class="tag">sign here</span></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2>3 · Real vs missing</h2>
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px">
+    <table>
+      <tr><th>Thing</th><th>Status</th></tr>
+      <tr><td>engine row carries <code>lane_version</code> / <code>develop_line</code></td><td>REAL (CLI face agrees, 27 = 27 keys)</td></tr>
+      <tr><td>lane proof = own scenarios + fast set, 5-minute ceiling</td><td>REAL (t261011-10) — only for tickets created after it landed</td></tr>
+      <tr><td>certification tab (reader + adapter)</td><td>REAL (t261009-41/44)</td></tr>
+      <tr><td>row marker (B tag / C dashed border) + tooltip</td><td><b>MISSING</b> — pick B or C</td></tr>
+      <tr><td>detail header tags + Line line</td><td><b>MISSING</b></td></tr>
+      <tr><td>a first landing / certification to display</td><td>PENDING — no records on the line yet</td></tr>
+    </table>
+  </div>
+
+  <p class="sub" style="margin-top:22px">Pick B or C (or say "B with another glyph") and I open one small UI ticket (write set <code>server/plugins/workbench/</code> + <code>integration/</code>);
+    values come from the engine row, never re-derived in the front end.</p>
+</div>
+</body>
+</html>
