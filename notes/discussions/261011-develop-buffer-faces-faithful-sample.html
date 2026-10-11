@@ -147,12 +147,36 @@
     </table>
   </div>
 
-  <h2>5 · 等你定的</h2>
+  <h2>5 · 行底色留不留（黄色/红色整行底 vs 只有点阵变色）</h2>
+  <div class="col board">
+    <div class="tk" data-state="waiting">
+      <div class="r"><span class="id">t…</span><span class="rank r-b">2</span><span class="ln" data-s="waiting">LineOn</span><span class="title">A · 保留行底色（今天）——余光就能看出"这几行要留意"</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
+    </div>
+    <div class="tk" data-state="blocked">
+      <div class="r"><span class="id">t…</span><span class="rank r-b">4</span><span class="title">A · 红底：卡住的行整行是红的</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
+    </div>
+  </div>
+  <div class="col board" style="margin-top:10px">
+    <div class="tk">
+      <div class="r"><span class="id">t…</span><span class="rank r-b">2</span><span class="ln" data-s="waiting">LineOn</span><span class="title">B · 去掉行底色——只有第 9 格是暖色</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
+    </div>
+    <div class="tk">
+      <div class="r"><span class="id">t…</span><span class="rank r-b">4</span><span class="title" style="color:var(--danger)">B · 去掉行底色——只有第 3 格是红的</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
+    </div>
+  </div>
+  <p>两版的**信息量一样**（状态都在点阵那一格上）；差别是**扫视力**：A 整行有底色，余光扫一列时"哪几行要留意"直接跳出来；B 要**定睛找到那一格**才看得到。B 更干净，也顺带没有"底色 × 深色主题"的对比度风险。</p>
+
+  <h2>6 · 等你定的</h2>
   <div class="board" style="padding:12px;font-size:13px">
     <p style="margin:2px 0">① 位次用 A / B / C 哪一种？</p>
-    <p style="margin:2px 0">② 彩色 <code>LineOn</code> 的「认证已覆盖」与「已晋级」要不要一眼可分？</p>
-    <p style="margin:2px 0">③ 三行（现在这样）还是压成两行？</p>
-    <p style="margin:2px 0">④ 线级的「线被冻结」提示放左栏顶栏还是票行上？</p>
+    <p style="margin:2px 0">② 行底色（黄/红整行底）留不留？去掉的话要不要给"卡住/失败"一个更便宜的整行记号（例如标题变色）？</p>
+    <p style="margin:2px 0">③ 彩色 <code>LineOn</code> 的「认证已覆盖」与「已晋级」要不要一眼可分？</p>
+    <p style="margin:2px 0">④ 三行（现在这样）还是压成两行？</p>
+    <p style="margin:2px 0">⑤ 线级的「线被冻结」提示放左栏顶栏还是票行上？</p>
   </div>
 </div>
 </body>
