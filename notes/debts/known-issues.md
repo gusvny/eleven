@@ -5393,3 +5393,18 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **回归**：L1——SIGTERM 打断该场景后，真实注册表**逐字节不变**（或断言负控只落在临时面）；L2——注册表损坏时 lint/守卫**具名**报"账本解析失败"（W5 面已有，保留）；L3——一次被打断的守卫运行之后，`git status` 对这些注册表**零差异**。
 
 > **同族补一（261011 15:2x，同一次踩坑的第二面：**不只是"被 kill 之后"才坏**）**：那个负控在**运行的那几秒里**就把真实注册表改成了坏账本 ⇒ **并发的读者会读到它**。本岗实测：后台守卫作业（`bash-11`）正在跑时，我另一条命令里的 `lint_tests.py` 直接报 **`ERROR L16 anchor 清单不可读（fail-closed）：test_anchors.json: Expecting property name…`（2 条）**；守卫跑完再跑同一条 lint ⇒ **rc=0**。⇒ 这个洞有两个显形：**①被打断后残留（跨进程、跨提交）**、**②运行窗口内的并发可见（瞬时）**。②的代价是**假红**——同一棵树，同一分钟，两个读者给出相反结论；排查者会去查"谁改了账本"（没人改，是**有守卫正在做负控**）。**修法同一条**（负控写临时面）；**纪律补一条**：**并发跑守卫/巡检期间读注册表得到的红，先问一句"有没有负控正在动它"**，别急着定性。
+
+## KI-01M4N5ASATAVWP6E38NSPECCAT **"覆盖"同一件事两个面两把尺子**：结局面按 **seq**（后一张绿认证覆盖之前的落地），等待面按 **revision 精确相等**（`landable`）⇒ 线头一旦前进，前一票在**等待面永远等不到**、在**结局面却已 certified**；且**没有 landing 行的提交不会被任何线轮判到** **(261011 17:5x 宿主提问"新 commit 通过 ⇒ 之前的提交不都通过了"时读码定位;integration 岗登记)**
+
+> **三个面的原始读数（都读码，不是猜）**：
+> 1. **等待面（精确相等）**：`server/engine/develop_certify.py:585 landable()` —— "Containment per repository is **revision equality** in the single-repository phase（the records name exact revisions；**ancestry is a git question this pure face does not open**）"；`ticket_wait_state()` 判 `certified` 用的就是它 ⇒ **落地只有在"它自己就是那一轮被判的 revision"时才可能等到覆盖**。
+> 2. **结局面（按 seq）**：`server/engine/develop_promote.py:750 ticket_outcome()` 的 `certified_by`＝"**a green certification whose seq is AFTER the landing's**" ⇒ **后面那一轮的绿认证确实把前面的落地记成已认证**（宿主直觉的那一面在这里成立）。
+> 3. **谁被算进一轮**：`develop_certify.derive_range()` 的 `covered_landings`＝**最后一张认证之后、`kind=landing` 的那些行**；`candidate_set()` 取的是"**区间内每仓最后一条 landing 的 revision**（＝线头）"。⇒ **一轮只把一个 revision 当候选**，而 `landable` 要精确相等 ⇒ **区间里非最后那一条 landing，永远得不到"自己的"认证**（它只能靠局面 2 的 seq 规则被记成 certified）。
+>
+> **危害**：①**两个面说两套话**：同一张票，"等待面"显示还在等、而"结局面/账本"已说被认证——值守与复核读到哪一面就会得出相反的结论（本夜宿主与实现之间的那道缝就是这个）；②**手工推进线头不会触发任何一轮**：直接 commit 到 `develop` **不产生 landing 行** ⇒ `derive_range().covered_landings` 为空 ⇒ `run_line_round` 直接 `END_IDLE/range_empty`（`should_certify` 对 change 触发也返回 `range_empty=False`）⇒ **"提交了新 commit 却没被跑"是机制的必然，不是运气问题**；③多仓阶段会立刻放大（每仓各自 HEAD）。
+>
+> **出路（设计口径归宿主，实现归票）**：把两面对齐到**同一条规则**——要么等待面也按"seq 之后的绿认证"（与 `ticket_outcome` 一致，简单、与宿主直觉一致，代价是"被后面的轮次带走"成为正式语义），要么结局面改成精确相等（更严，但会让"线头前进即锁死此前的落地"成为正式语义）；**并**给"线头前进"配一条**可被 `derive_range` 认出的自证面**（例如每次推进都有一条对应的 landing/推进记录），否则"提交了但没人跑"仍会重复发生。
+>
+> **纪律**：**凡"覆盖/包含"这类判据，把"谁覆盖谁"的规则抄成一句话，然后全仓 grep 它的每一处实现**——本条的三个面各写各的，谁都不算错，合起来却互相矛盾。
+>
+> **回归**：L2——同一组记录上，**等待面与结局面**对"这张落地是否被认证覆盖"给出**同一个答案**；L3——一次"线头前进（有推进记录）→ 一轮判绿 → 之前的落地在**两个面**都被记为已覆盖"的连贯回执；且一次**没有推进记录的手工 commit 之后**，机制必须**具名**说明"线头动了但不在任何一轮的候选里"，而不是静默 `range_empty`。
