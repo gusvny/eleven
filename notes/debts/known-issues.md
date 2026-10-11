@@ -5487,6 +5487,9 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L2——线轮面必须把 `env_red_names` 与内容红分开陈列且都有名字；L3——一次线轮里，凡"要起 console 才能判"的用例要么真判出红绿、要么在面上具名"未判成：<原因>"，不得静默计入 env 计数了事。
 
+> **同族补一（261012 21:45，**报错指向已关闭的票**：读者会去追一个不存在的工作）**：`t261009-80` 的 stop 文案原文是「no certification covered this landing within 96 polls x 300s（**the certification round schedule is t261009-30, not built yet**）—— stopped named for a human, not silently delivered」；而 `t261009-30`（"the round: the line's full suite runs once per tick…"）**早已 closed**，线轮的生产者其实是"计划 paused + 那个串轮实例已结束"，跟"票没建"无关。⇒ **同一族病的第三面**："为什么没有认证" 这句话必须由**当前事实**生成（生产者是否在跑、上一轮为什么没铸证、`range_growth` 的 reason 是什么），**不能写死一个历史判断**；否则读者去追一张早就关掉的票。落盘与具名（本条主条）是同一个要求的两半：**状态要写下来，而且写下的话必须随事实变**。
+
+
 > **同族补一（261012 19:0x，挂死的**第二个形态**：卡死的不是子进程管道，而是**批台租约**）**：同一轮里又挂住一条（`integration/t260908-01/sc_ki061_overlimit_wake_revive.py`，pid 8314，5:14 elapsed / CPU 0.62s），lsof 显示它攥着**与上一条完全相同的锁**：`~/.sandbar/test-stages/ensure-batch-2c3e0560-96cb7d89.lock`；同时场上有**孤儿 stage helper pid 51249**（`--project batch-2c3e0560-96cb7d89 --anchor-pid 51064`＝本轮跑器、ppid 1、已活 30+ 分钟、攥着 `hold-batch-….log`），而 `stage-sweep` 早就把该台判成「活台而主人锚非工作树（`…/T/line-round-e8e6yz40/sandbar`，疑被测树）」。⇒ **批台租约为一个临时测试树而起、卡住不释放，于是该项目的每个消费者用例都排在它后面**（不是红、不是超时，是**静默排队**）。本岗处置：按 pid 杀掉卡住的用例与那个 helper 之后，同一批消费者立刻**具名**落 `ENV_FAIL: 批台 batch-2c3e0560-96cb7d89 不在位（runner 未预起/已收口/中途亡）`——**挂死变红，且是诚实的红**（t260921-06 要求⑤：ns 不可用=环境红）。教训：**租约类挂死的诊断入口是 `lsof <pid>` 看它攥着哪把锁，再看谁攥着同一把锁**；"锚点进程还活着"不等于"租约健康"（锚点是**临时测试树/跑器**时尤其如此）。出处：`KI-01M4P588XXRNW31H7BWA3P4VHM` 同族。
 
 ## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRV **收窄轮不成证明**——**实证到手**：账本原文 `suite_rc_1:run_id_missing_from_summary` **(261012 19:2x 读账本 `delivery.jsonl` seq 16;integration 岗记录，属 `KI-01M4P6Z4T5C1R2S8N9K7H3QWDM` 的实证补记)**
