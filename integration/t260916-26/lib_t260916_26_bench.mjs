@@ -31,7 +31,7 @@ import {
 import { copyFile, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { REPO_ROOT, mainRoot, freePort } from '../t260904-17/lib_fix17.mjs';
+import { REPO_ROOT, mainRoot, freePort, benchRepoPatch, buildEngineRepo } from '../t260904-17/lib_fix17.mjs';
 
 const DEAD_TEMPORAL = '127.0.0.1:1'; // 死端口兜底红线（与 lib_fix17 同款，理由见其头注）
 
@@ -128,21 +128,11 @@ function benchEnv(tmpHome, projectsRoot, stub) {
   delete env.SANDBAR_NAMESPACE;
   env.FIX17_CTRL = stub.ctrlPath;
   env.FIX17_TRACE = stub.tracePath;
-  // 引擎通道夹具仓（与 lib_fix17 同款：python venv shim 拦 ticket-list，拦截面外炸得响）
-  const engineRepo = path.join(stub.dir, 'engine-repo');
-  const venvBin = path.join(engineRepo, 'server', 'engine', '.venv', 'bin');
-  mkdirSync(venvBin, { recursive: true });
-  writeFileSync(path.join(engineRepo, 'server', 'engine', 'client.py'),
-    '# fix17 夹具占位：引擎通道由 FIX17 桩按 argv 拦截（ticket-list）；拦截面外到此=桩缺口\n');
-  try { unlinkSync(path.join(venvBin, 'python')); } catch { /* 首次无 */ }
-  symlinkSync(path.join(stub.dir, 'python3'), path.join(venvBin, 'python'));
-  // repo 其余可读面投影（docs|notes 只读软链回真树，同 lib_fix17）
-  for (const face of ['docs', 'notes']) {
-    const dest = path.join(engineRepo, face);
-    try { unlinkSync(dest); } catch { /* 首次无 */ }
-    symlinkSync(path.join(REPO_ROOT, face), dest);
-  }
-  env.SANDBAR_REPO = engineRepo;
+  // t261009-72：夹具仓不再经 env SANDBAR_REPO 声明（泳道 worktree 里 repo-anchor 判
+  // SANDBAR_ANCHOR_MISMATCH=boot 全灭根因）；makeTicketStub 已随桩建好 engineRepo，
+  // 锚改由 bootLaneConsole 的 benchRepoPatch config.repo 补丁面声明。这里显式 delete，
+  // 防宿主环境串进来的 SANDBAR_REPO 复活同一条错锚。
+  delete env.SANDBAR_REPO;
   env.PATH = `${stub.dir}:${process.env.PATH || ''}`;
   return env;
 }
@@ -155,8 +145,12 @@ export async function bootLaneConsole(projectsRoot, stub) {
     const { laneAnchors } = await buildLaneProfile(tmpHome);
     const port = await freePort();
     if (port === 3099) throw new Error('freePort 撞 3099（概率≈0，命中即拒跑）');
-    const patchFile = path.join(tmpHome, 'port.patch.yml');
-    writeFileSync(patchFile, `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`);
+    // t261009-72：单 patch 文件合并 webserver 端口 + 插件 repo 锚（config.repo 面，
+    // 见 lib_fix17 模块头不变量）；夹具仓随 makeTicketStub 建好（t261009-03 式自带
+    // stub 则兜底同款路径现造）。
+    const patchFile = path.join(tmpHome, 'bench.patch.yml');
+    writeFileSync(patchFile, `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`
+      + benchRepoPatch(stub.engineRepo ?? buildEngineRepo(stub.dir)));
     const logFd = openSync(path.join(tmpHome, 'console.log'), 'a');
     const proc = spawn('dsh', ['--profile', 'suyou', '--patch', patchFile,
       '--port', String(port), '--host', '127.0.0.1', '--no-open'], {

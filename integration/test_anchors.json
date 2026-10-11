@@ -1366,8 +1366,8 @@
     },
     "server/engine/tests/test_t261010_75_answer_row_shape.py": {
       "anchor": "behaviour",
-      "note": "t261009-75 KI-01M4HPGHVWAKB62TXYV4G7ENEB: head_states adopts the canonical answer-row shape (string-at/shape-off rows never clear a head), the malformed-answer report names every shape-off row, op=read carries states+report to a human, gate-level change over shape-off-answered heads, and the engine writer stamps a numeric at",
-      "sync_path": "server/engine/request_thread.py (head_states / answer report / op=read / reply_op)"
+      "note": "KI-01M4HPGHVWAKB62TXYV4G7ENEB: one canonical answer-row shape -- head_states clears a head only on the panel-strict predicate, shape-off rows are named by the read face (op=read) and keep the head open on BOTH faces; gate-level declared change (supersedes/duplicate scan see such heads as open) and the writer stamps numeric at",
+      "sync_path": ""
     },
     "server/engine/tests/test_t261009_74_reconcile_drain_probe.py": {
       "anchor": "behaviour",
@@ -4867,6 +4867,11 @@
       "note": "t261009-70: a boot failure leaves attributable evidence — waitReady rejection carries timeout + bounded log tail + survivor path outside the temp home; malformed logs degrade to a named absence; boot failure stays a failure",
       "sync_path": "integration/t260904-17/lib_fix17.mjs (waitReady + captureBootFailure)"
     },
+    "integration/t261009-72/sc_t26100972_bench_boot_anchor.mjs": {
+      "anchor": "behaviour",
+      "note": "t261009-72: the isolated bench console boots on the lib_fix17 face with the fixture repo declared via the profile-patch config.repo seam (immune to a hostile env SANDBAR_REPO), the engine channel lands on the stub, and the anchor guard verdict table is unchanged",
+      "sync_path": "integration/t260904-17/lib_fix17.mjs (benchEnv/benchRepoPatch/bootConsole); integration/t260916-26/lib_t260916_26_bench.mjs (same face); server/plugins/repo-anchor.mjs (verdict table, read-only dependency)"
+    },
     "integration/t261009-66/sc_t26100966_relations_reader.py": {
       "anchor": "contract",
       "note": "t261009-66: both-directions-from-disk reader (byte-identical read, derived labelled), correction-aware neither-side superseded, one-implementation identity, promotion repairs naming proven from the file",
@@ -4927,10 +4932,5 @@
       "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
       "sync_path": ""
     }
-  },
-  "server/engine/tests/test_t261010_75_answer_row_shape.py": {
-    "anchor": "behaviour",
-    "note": "KI-01M4HPGHVWAKB62TXYV4G7ENEB: one canonical answer-row shape -- head_states clears a head only on the panel-strict predicate, shape-off rows are named by the read face (op=read) and keep the head open on BOTH faces; gate-level declared change (supersedes/duplicate scan see such heads as open) and the writer stamps numeric at",
-    "sync_path": ""
   }
 }

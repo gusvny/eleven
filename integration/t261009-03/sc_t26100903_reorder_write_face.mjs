@@ -75,13 +75,14 @@ function realPython() {
 }
 
 /**
- * t261009-03 夹具 shim：与 fix17 同缝（PATH python3 + SANDBAR_REPO 夹具仓
- * .venv 软链，benchEnv 消费），差异=op=concurrency 的 ticket call 透传真链。
- * 返回 makeTicketStub 同形状对象（bootConsole/benchEnv 只用 dir/ctrlPath/tracePath）。
+ * t261009-03 夹具 shim：与 fix17 同缝（PATH python3 + 夹具仓 .venv 软链；t261009-72
+ * 起夹具仓经 config.repo 锚补丁声明，bootConsole 兜底建在同款路径），差异=
+ * op=concurrency 的 ticket call 透传真链。返回 makeTicketStub 同形状对象（bootConsole
+ * 只用 dir/ctrlPath/tracePath，engineRepo 由兜底 buildEngineRepo 现造）。
  */
 function makeConcurrencyPassthroughStub(realPy) {
-  // benchEnv 会在 stub.dir/engine-repo 造夹具仓并把 SANDBAR_REPO 指过去——锚取
-  // 同一路径，shim 源码里按它做真仓替换（与 benchEnv 的实际路径必然一致）。
+  // bootConsole 兜底在 stub.dir/engine-repo 现造夹具仓并经 config.repo 钉锚——锚取
+  // 同一路径，shim 源码里按它做真仓替换（与兜底建仓路径必然一致）。
   const dir = mkdtempSync(join(tmpdir(), 't26100903-shim-'))
   const fakeRepoAnchor = join(dir, 'engine-repo')
   const ctrlPath = join(dir, 'ctrl.json')
