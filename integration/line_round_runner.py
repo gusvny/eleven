@@ -58,7 +58,17 @@ SUITE_CMD_ENV = "SANDBAR_LINE_ROUND_SUITE_CMD"
 #: Pools the line round does not run by default (host order 261011): the
 #: exclusive pool nests whole suites/consoles and made every round hit the cap.
 #: Overridable with the same key; an empty value runs every pool.
-EXCLUDE_POOLS_DEFAULT = "exclusive"
+#: Opt-in ONLY (261012, after the 261011 exclusion round exposed this): a round
+#: that excludes a pool is a NARROWED round, and the suite refuses to write a run
+#: record for it — `run_scenarios.run_record_skip_reason()` says it in words
+#: ("narrowed round (--only / pool exclusion) is not a proof — no run record"),
+#: because the record is what makes a round evidence. Without it `INTEG_SUMMARY`
+#: carries no run id, this runner's `read_header()` finds no header, and the
+#: engine can only record range growth: **no certification, ever**. The default
+#: is therefore the FULL round (every pool, ~11 min of exclusive-pool time
+#: measured on 26 of its 27 entries). The env override stays for DIAGNOSTIC
+#: rounds, which are explicitly not proofs — and the runner says so on stderr.
+EXCLUDE_POOLS_DEFAULT = ""
 EXCLUDE_POOLS_ENV = "SANDBAR_LINE_ROUND_EXCLUDE_POOLS"
 REPO_PATH_PREFIX = "SANDBAR_LINE_ROUND_REPO_PATH_"
 RUN_ROOT_ENV = "SANDBAR_LINE_ROUND_RUN_ROOT"
@@ -259,15 +269,18 @@ def prepare_tree(candidate, run_root, env=None):
 
 
 def exclude_pools_value(env=None):
-    """Pools this round does NOT run — declared once, here.
+    """Pools this round does NOT run — declared once, here. Default: none.
 
-    Host order 261011 ('先把 exclusive 的池排除掉，把 line run 跑通先'): the
-    exclusive pool's scenarios nest whole suites/consoles (a single round
-    measured 900 s + 548 s + 274 s on three of them, and every round before
-    that hit the runner's own 3600 s cap), so they are out of the every-round
-    scope. The value is named on the round: the suite receipt already carries
-    `excluded_pools`, so the exclusion is never silent. An operator overrides
-    it with SANDBAR_LINE_ROUND_EXCLUDE_POOLS (an empty value = run every pool).
+    Host order 261011 ('先把 exclusive 的池排除掉，把 line run 跑通先') got a round
+    running, but 261012 found what that costs: an exclusion makes the round
+    NARROWED, a narrowed round writes no run record, and a round without a
+    record has no header to relay — so it can never become a certification
+    (`run_scenarios.run_record_skip_reason` + this module's `read_header`).
+    The exclusion is therefore opt-in (diagnostics), never the default: the
+    certification round runs every pool. An operator sets
+    SANDBAR_LINE_ROUND_EXCLUDE_POOLS to narrow a diagnostic round (an empty
+    value = run every pool); when it is set, the runner says on stderr that
+    this round cannot mint a certification.
     """
     env = os.environ if env is None else env
     raw = env.get(EXCLUDE_POOLS_ENV)
@@ -278,8 +291,9 @@ def exclude_pools_value(env=None):
 
 def suite_argv(env=None):
     """The declared full suite command; override parsed with shlex, default
-    is this interpreter plus the suite entry point. The declared pool
-    exclusion is appended unless the override already names one."""
+    is this interpreter plus the suite entry point. A NARROWING pool
+    exclusion is appended only when the operator asked for one, and it is
+    announced on stderr: such a round is a diagnostic, not a proof."""
     env = os.environ if env is None else env
     raw = str(env.get(SUITE_CMD_ENV, "")).strip()
     if not raw:
@@ -291,6 +305,12 @@ def suite_argv(env=None):
     excluded = exclude_pools_value(env)
     if excluded and "--exclude-pools" not in argv:
         argv = argv + ["--exclude-pools", excluded]
+    if excluded or "--only" in argv:
+        sys.stderr.write(
+            "%s NARROWED: round is narrowed (exclude-pools=%r) — the suite "
+            "writes no run record for a narrowed round, so this round can "
+            "produce evidence but NO certification\n"
+            % (TAG, excluded or "--only"))
     return argv
 
 
