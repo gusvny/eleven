@@ -1413,6 +1413,11 @@
       "anchor": "contract",
       "note": "t261011-17: the worker registration surface is closed — lane_head_sha/land_to_line/certification_wait in the COMPOSED worker table, every @activity.defn under server/engine composed-or-named-exempt (selfcheck stubs + the in-process pure function), @workflow.defn complete against ALL_WORKFLOWS+ALL_WORKFLOWS_V2, negative control on a synthetic defn, and the green-run-face miss note written on both failure exits and cleared on success",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261011_24_landing_squash.py": {
+      "anchor": "behaviour",
+      "note": "t261011-24: line landing = one squash commit (shared _squash_merge_core) — single-parent landing commits, named landing message, record revision = new line HEAD, squash-conflict cleanup + idempotent retry, staged-empty KI-213 recovery, race refused_unstarted named landing fault, gitlink gate",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4990,6 +4995,11 @@
       "anchor": "contract",
       "note": "t261011-18: the line round runs the suite inside its own cloned checkout — the runner hands over the two assets the clone cannot resolve, operator pointers pass through verbatim, a bad pointer is a named could-not-run, and an unrunnable round grows the range without minting a certification (A3 re-signed by t261011-21: the clone now carries the provisioned assets)",
       "sync_path": "integration/line_round_runner.py; integration/bench.py (_resolve_asset)"
+    },
+    "integration/t261011-24/sc_t26101124_line_landing_squash_history.py": {
+      "anchor": "behaviour",
+      "note": "t261011-24: a line landing is ONE single-parent squash commit per ticket naming ticket+line, lane step commits absent from the line rev-list, conflict bounce-back leaves no merge-state residue and a resolved retry lands, the lost-record recovery re-lands naming the current head, a gitlink lane refuses by name, and the main close-out act stays one-commit-per-ticket (recipe refactor behaviour-neutral)",
+      "sync_path": ""
     },
     "integration/t261011-21/sc_t26101121_clone_assets_line_round.py": {
       "anchor": "contract",

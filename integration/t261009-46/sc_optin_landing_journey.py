@@ -207,13 +207,22 @@ def main():
         line_tip = rev(repo, line_branch)
         check("land-receipt-ok", getattr(r, "ok", False) is True and not getattr(r, "error", "x"),
               "ok=%r error=%r" % (getattr(r, "ok", None), getattr(r, "error", "")[:120]))
+        # t261011-24 (host order 261011): the landing is a SQUASH commit — the
+        # proven revision reaches the line as CONTENT (and through the record),
+        # never as lane-commit ancestry; the lane's commits stay out of the
+        # line history and the landing commit is single-parent.
+        proven_content = git("show", "%s:b.txt" % line_branch, cwd=repo).stdout
         check("line-carries-proven",
-              subprocess.run(["git", "merge-base", "--is-ancestor", proven, line_tip],
-                             cwd=repo).returncode == 0,
-              "proven %s not on line tip %s" % (proven[:12], line_tip[:12]))
+              proven_content.strip() == "b"
+              and subprocess.run(["git", "merge-base", "--is-ancestor", proven,
+                                  line_tip], cwd=repo).returncode != 0,
+              "line b.txt=%r / proven %s ancestry=%r"
+              % (proven_content[:20], proven[:12], subprocess.run(
+                  ["git", "merge-base", "--is-ancestor", proven, line_tip],
+                  cwd=repo).returncode))
         check("line-is-merge-commit",
               len(git("log", "-1", "--format=%P", line_branch, cwd=repo)
-                  .stdout.split()) == 2,
+                  .stdout.split()) == 1,
               "line tip parents: %r" % git("log", "-1", "--format=%P", line_branch,
                                            cwd=repo).stdout.strip())
         check("main-did-not-move", rev(repo, "main") == main_before,
@@ -259,8 +268,17 @@ def main():
             check("landed-content-is-proven", shown.strip() == "v1",
                   "line carries %r" % shown[:40])
             parents = git("log", "-1", "--format=%P", "develop-c", cwd=repo2).stdout.split()
-            check("merge-parent-is-proven", sha_proven in parents,
-                  "parents=%r tip=%s" % (parents, sha_tip[:12]))
+            line_hist = git("rev-list", "develop-c", cwd=repo2).stdout.split()
+            # t261011-24: squash landing — the line carries the PROVEN CONTENT,
+            # a single-parent commit, and NEITHER lane commit (proven nor the
+            # unproven drifted tip) enters the line history by sha.
+            check("merge-parent-is-proven",
+                  len(parents) == 1
+                  and sha_proven not in line_hist and sha_tip not in line_hist
+                  and git("show", "develop-c:c.txt", cwd=repo2).stdout.strip() == "v1",
+                  "parents=%r tip=%s proven-in-hist=%s tip-in-hist=%s"
+                  % (parents, line_tip[:12], sha_proven in line_hist,
+                     sha_tip in line_hist))
             checkout_txt = git("show", "HEAD:c.txt", cwd=repo2).stdout
             check("checkout-was-pinned-to-proven", checkout_txt.strip() == "v1",
                   "lane HEAD content %r after landing" % checkout_txt[:40])

@@ -10,7 +10,9 @@
 --squash 不算数，只看字符串常量出现在哪些函数体里）。
 
 断言：
-  1. 全文件 "--squash" 字符串常量只出现在 merge() 与 _squash_merge() 体内；
+  1. 全文件 "--squash" 字符串常量只出现在收口路径体内：merge()、_squash_merge()
+     与 _squash_merge_core()（t261011-24：squash 配方抽成两目的地共享核——main
+     收口 + develop 线落——核心就是收口实现本体，不算越界；泳道内消解回路仍禁）；
   2. merge() 壳体内转调 _squash_merge（dev_lane 调用点零改动的承诺）；
   3. settle_conflict_resolution（泳道内冲突消解落盘）体内引用 MERGE_HEAD——
      真合并回路还在；
@@ -85,8 +87,10 @@ def main():
     print("== 1. --squash 只许在收口路径 ==")
     sites = squash_sites(tree)
     ok(len(sites) > 0, "存在 --squash 收口实现（一个都没有 = 本单没落地）")
-    bad = [s for s in sites if s not in ("merge", "_squash_merge")]
-    ok(not bad, "--squash 全部在 merge/_squash_merge 体内（越界: %s）" % bad)
+    bad = [s for s in sites if s not in ("merge", "_squash_merge",
+                                         "_squash_merge_core")]
+    ok(not bad, "--squash 全部在收口路径体内 merge/_squash_merge/"
+                "_squash_merge_core（越界: %s）" % bad)
 
     print("== 2. merge() 壳转调 _squash_merge ==")
     merge_fn = body_of(tree, "merge")

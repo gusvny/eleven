@@ -28,11 +28,12 @@ the module level: this module imports the running flow's settle core, and the
 running flow reaches the new surface only behind the version gate (dev_lane's
 ``is_develop_buffer_ticket`` predicate + its gated ``_dev_buffer_*`` step methods).
 
-Reuse discipline: the add/commit sequence is NEVER copied here — the landing
-imports ``_settle_merge_core`` from agent_activities (the single implementation
-of MERGE_HEAD check → staging → conflict-marker scan → merge commit) and only
-parameterises the base ref. The full fault-mode trade-off list for that borrowed
-implementation is in the create_plan gen1 evidence (7 items).
+Reuse discipline: the squash recipe is NEVER copied here — the landing imports
+``_squash_merge_core`` from agent_activities (t261011-24: the single
+implementation of gitlink gate → merge --squash → three-step conflict cleanup →
+staged-emptiness probe, shared with the main close-out ``_squash_merge``).
+The full fault-mode trade-off ledger for that borrowed implementation is in
+the create_plan gen1 evidence (7 rows).
 """
 import fcntl
 import json
@@ -47,7 +48,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import shared
 # The single add/commit implementation (t261006-07 discipline) — imported, never
 # re-implemented. _git is the same bounded-timeout subprocess family.
-from agent_activities import _git, _settle_merge_core  # noqa: E402
+from agent_activities import _git, _squash_merge_core  # noqa: E402
 # The delivery ledger's own faces (t261009-28): validation, the single writer
 # that assigns `seq` under flock, the reader, and the kind constants. No import
 # cycle: develop_certify imports neither this module nor agent_activities.
@@ -654,13 +655,14 @@ def land_ticket(line: DevelopLine, project_key: str,
     Serialized by an exclusive lock on ``<develop_dir>/landings.lock`` held for
     the whole act (two landings cannot interleave — goal 7). Per repository,
     sequentially, all-or-nothing (goal 18): seed-or-checkout the line worktree →
-    assert it is clean (so the settle core's ``add -A`` stages merge output only)
-    → fail-closed merge-base → ``merge --no-ff --no-commit`` (MERGE_HEAD must
-    survive to the settle core) → the imported ``_settle_merge_core`` performs
-    the one merge commit → message amend (the settle core's conflict-resolution
-    message is wrong for a landing; see the fault-mode ledger) → record the
-    post-amend sha. On any failure: abort every MERGE_HEAD holder, name the
-    per-repo faces, append NO record.
+    assert it is clean → fail-closed merge-base → the ancestor gate (t261009-28
+    stance: certified content must sit under the tip the landing builds on —
+    never a silent fast-forward) → the shared squash recipe ``_squash_merge_core``
+    (t261011-24, host order 261011: the line reads as ONE commit per ticket like
+    main — no merge commits, no lane step history) → one landing commit →
+    record the post-commit sha. On any failure: restore every touched worktree
+    (the core's conflict cleanup, plus ``_abort_if_merging`` as defense in
+    depth), name the per-repo faces, append NO record.
     """
     result = LandingResult(ok=False, ticket_id=ticket_id, line_id=line.line_id)
     _check_inputs(ticket_id, performed_by, repo_paths)
@@ -798,11 +800,13 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
             # Named "already contained" path. Two distinct faces:
             #  - a record already exists → the ticket landed before: refuse as a
             #    duplicate (nothing to land);
-            #  - no record → this is the KI-213 recovery face: a crashed landing
-            #    left its merge commit on the line before the record was written.
-            #    Complete the landing WITHOUT amending (the commit pre-dates this
-            #    call — rewriting it would corrupt a history another landing may
-            #    already sit on) and append the missing record.
+            #  - no record → the KI-213 recovery face, ancestor shape: the lane
+            #    tip itself already sits on the line (line seeded from the lane
+            #    tip, or a pre-squash crash left it reachable). Complete the
+            #    landing WITHOUT rewriting history and append the missing record.
+            #    (After a squash landing the lane tip is never an ancestor of the
+            #    line, so the post-squash crash shape is covered by the
+            #    staged-empty recovery face below — t261011-24.)
             anc = _git(["merge-base", "--is-ancestor", lane_sha, "HEAD"], wt_dir)
             if anc.returncode == 0:
                 if has_landing(project_key, ticket_id, line.line_id):
@@ -818,42 +822,67 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
                 result.faces[name] = ("recovered: lane tip already on the line "
                                       "(no new commit, no amend)")
                 continue
-            merge = _git(["merge", "--no-ff", "--no-commit", lane_sha], wt_dir)
-            if merge.returncode != 0:
+            # The shared squash recipe (t261011-24; one implementation with the
+            # main close-out — see the fault-mode ledger in the plan evidence).
+            # Outcome mapping: the core reports facts; this caller names them.
+            core = _squash_merge_core(wt_dir, lane_sha)
+            if core.status == "failed":
+                _abort_if_merging(lane_repo, wt_dir)
+                result.faces[name] = "squash refused: %s" % core.reason
+                raise LandingError(
+                    "squash landing of %s onto line %r refused in %r (%s): %s"
+                    % (ticket_id, line.line_id, name, core.reason, core.error))
+            if core.status == "refused_unstarted":
+                # The merge refused BEFORE starting: the line worktree picked up
+                # dirt between the cleanliness assert above and the merge (race)
+                # or git faulted. The core already left the scene pristine (no
+                # MERGE_HEAD, nothing staged); abort is defense in depth.
+                _abort_if_merging(lane_repo, wt_dir)
+                result.faces[name] = "squash refused to start"
+                raise LandingError(
+                    "landing of %s onto line %r in %r: git merge --squash refused "
+                    "to start (line worktree dirt appeared between the cleanliness "
+                    "assert and the merge, or a git fault): %s — line state preserved"
+                    % (ticket_id, line.line_id, name, core.raw))
+            if core.status == "conflict":
+                # The three-step cleanup already ran inside the core (squash
+                # conflict = no MERGE_HEAD; --quit + reset --merge HEAD);
+                # _abort_if_merging is defense in depth only.
                 _abort_if_merging(lane_repo, wt_dir)
                 result.faces[name] = "conflict: bounced back to the lane (no record written)"
                 raise LandingError(
                     "landing of %s onto line %r conflicts in repository %r — the lane "
-                    "re-merges the line and lands again" % (ticket_id, line.line_id, name))
-            settle = _settle_merge_core(wt_dir, ticket_id, 0, base_ref=branch)
-            if not settle.ok:
-                _abort_if_merging(lane_repo, wt_dir)
-                result.faces[name] = "settle refused: %s" % settle.error
-                raise LandingError("settle core refused the landing in %r: %s"
-                                   % (name, settle.error))
-            if getattr(settle, "already_settled", False):
-                # KI-213 recovery face: the commit pre-dates this landing call —
-                # amending would rewrite a pre-existing line commit. Named path:
-                # refuse for re-inspection, never silently amend HEAD.
-                _abort_if_merging(lane_repo, wt_dir)
-                result.faces[name] = "already_settled recovery face — no new commit by this landing"
-                raise LandingError(
-                    "landing of %s in %r hit the already_settled face (MERGE_HEAD absent "
-                    "at settle) — refuse for re-inspection" % (ticket_id, name))
-            # Message stance (create_plan gen1 option c): the settle core commits
-            # with its conflict-resolution message; the landing amends it under
-            # the lock, before any record write. The record must never name a sha
-            # the branch history no longer contains, so only the post-amend sha
-            # survives here (the pre-amend hash is discarded by design).
+                    "re-merges the line and lands again: %s"
+                    % (ticket_id, line.line_id, name, core.error))
+            if core.staged_empty:
+                # KI-213 recovery face, squash re-scope (t261011-24): the lane
+                # content is already on the line — a previous attempt committed
+                # before the record was written (including the partial multi-repo
+                # retry: repo A committed → empty staging here, repo B squashes
+                # normally). No empty commit; record the CURRENT line HEAD.
+                head_sha = _rev(wt_dir, "HEAD")
+                if not head_sha:
+                    raise LandingError("recovery face: HEAD unreadable in %r" % name)
+                rev_map[name] = head_sha
+                result.faces[name] = ("recovered: lane content already on the line "
+                                      "(no new commit)")
+                continue
+            # One commit per ticket (host order 261011, KI-006 stance): the squash
+            # staged the whole lane delta; the landing commits it once, under the
+            # lock, before any record write — the record's revision is exactly the
+            # new line HEAD, so certifications and the ranges derived from landing
+            # rows are untouched.
             msg = ("landing %s onto line %s (%s): rev %s"
                    % (ticket_id, line.line_id, name, lane_sha[:12]))
-            amend = _git(["commit", "--amend", "-m", msg], wt_dir)
-            if amend.returncode != 0:
-                result.faces[name] = "amend failed: %s" % ((amend.stderr or "")[-200:])
-                raise LandingError("landing commit amend failed in %r" % name)
+            c = _git(["commit", "-m", msg], wt_dir)
+            if c.returncode != 0:
+                result.faces[name] = "commit failed: %s" % ((c.stderr or c.stdout or "")[-200:])
+                raise LandingError("squash landing commit failed in %r — the line "
+                                   "worktree keeps the staged changes; needs manual "
+                                   "handling" % name)
             new_sha = _rev(wt_dir, "HEAD")
             if not new_sha:
-                raise LandingError("post-amend HEAD unreadable in %r" % name)
+                raise LandingError("post-commit HEAD unreadable in %r" % name)
             rev_map[name] = new_sha
             result.faces[name] = "landed at %s" % new_sha[:12]
         except LandingError:

@@ -168,13 +168,21 @@ def main():
                   {x.get("repo"): x.get("revision")
                    for x in rows[-1].get("repos", [])}.get("repo1") == shas[-1],
                   "%s vs %s" % (rows[-1].get("repos"), shas[-1]))
-        log = git("log", "--format=%P|%s", line_branch, cwd=repo).stdout.strip().splitlines()
-        merges = [ln for ln in log if ln.split("|")[0].count(" ") == 1]
-        check("A-linear-two-merge-commits", len(merges) == 2, str(log))
-        if len(merges) == 2:
-            parents0 = merges[0].split("|")[0].split()
-            check("A-linear-parent-chain", parents0[0] == shas[0],
-                  "first merge parent %s != first landing head %s" % (parents0[0], shas[0]))
+        # t261011-24 (host order 261011): a landing is ONE SQUASH commit per
+        # ticket — single-parent, chained on the previous line head; the lane's
+        # step commits never enter the line history. The commits the landings
+        # added are exactly main..line_branch (under squash the lane tips are
+        # NOT ancestors of the line, so nothing else is reachable from the lane
+        # side); each of them must be single-parent.
+        log = git("log", "--format=%P|%s", "main..%s" % line_branch,
+                  cwd=repo).stdout.strip().splitlines()
+        landings = log
+        check("A-linear-two-merge-commits", len(landings) == 2, str(log))
+        if len(landings) == 2:
+            parents0 = landings[0].split("|")[0].split()
+            check("A-linear-parent-chain", parents0 == [shas[0]],
+                  "newest landing parent %r != previous line head %s"
+                  % (parents0, shas[0]))
             msgs = git("log", "--format=%s", line_branch, cwd=repo).stdout
             check("A-landing-message-face", "landing" in msgs and "t-j1" in msgs,
                   msgs[:200])

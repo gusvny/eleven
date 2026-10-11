@@ -170,6 +170,36 @@ def main():
               "declared gate-region markers missing from agent_activities.py")
         if 0 <= i0 < i1:
             outside = acts_txt[:i0] + acts_txt[i1 + len(END):]
+            # t261011-24: the gate checks CODE references, not prose. Since the
+            # shared squash core moved into this module, its docstrings name
+            # develop_line.land_ticket as documentation; strip comments and
+            # docstrings before the containment judgement so a prose mention
+            # never passes and a real reference never hides in a comment.
+            import ast as _ast
+            import io as _io
+            import tokenize as _tokenize
+            try:
+                toks = list(_tokenize.generate_tokens(
+                    _io.StringIO(outside).readline))
+                drop_lines = set()
+                for tok in toks:
+                    if tok.type == _tokenize.COMMENT:
+                        drop_lines.add(tok.start[0])
+                tree = _ast.parse(outside)
+                for node in _ast.walk(tree):
+                    if (isinstance(node, (_ast.Module, _ast.FunctionDef,
+                                          _ast.AsyncFunctionDef, _ast.ClassDef))
+                            and node.body and isinstance(node.body[0], _ast.Expr)
+                            and isinstance(node.body[0].value, _ast.Constant)
+                            and isinstance(node.body[0].value.value, str)):
+                        drop_lines.update(range(
+                            node.body[0].lineno,
+                            (node.body[0].end_lineno or node.body[0].lineno) + 1))
+                outside = "\n".join(
+                    ln for i, ln in enumerate(outside.splitlines(), 1)
+                    if i not in drop_lines)
+            except (_tokenize.TokenError, SyntaxError):
+                pass  # unparseable source: judge the raw text, fail-closed
             check("B2-references-confined-to-gate-region",
                   "develop_line" not in outside and "develop_certify" not in outside,
                   "new-surface reference outside the declared gate region")
