@@ -5240,3 +5240,19 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路（设计口径归宿主，实现归票）**：①**两处任选其一并写明**——要么让验收段的全量轮**也注入名册豁免**（与闸轮同配置，数字可比），要么在**回执与票面上显式标注"本轮未套用名册豁免，数字不可与闸轮比对"**；②`known_red_skipped` 这一键**必须在两轮都可读**（本轮已可读，是它救了这次分诊）；③评审纪律：**凡读"某轮 fail 数"，先读同轮的 `known_red_skipped` 与 `conc_width`**，与闸轮不一致就先别下结论。
 > **纪律**：**"同一张票、同一个名目、两轮数字"必须先确认两轮同配置**再比；不同配置的两轮放在一起，等于用一把没校准的尺子量两次。
 > **回归**：L1——回执/票面对"未套用名册豁免的轮次"具名标注（或该轮 skipped 数与闸轮一致）；L3——一张票的验收轮与闸轮对同一条红给出一致的"是不是新红"结论。
+
+## KI-01M4M3AT3R8MEXS07A31182MJC **worker 的"启动基准"取自旁车 meta 的 `ts`，而 drain 会重写它** ⇒ 换手中途的工人被读成"刚起、无陈旧、polling=True"，与"换手已完成"在面上同形**(261011 07:41 `engine_ops restart --scope central` 被上层 60 s 超时打断后的实测;integration 岗登记)
+
+> **现象（原始读数，同一进程两种读法）**：
+> - 我在 07:41 跑换手（首次运行被上层 60 s 超时打断）。旧 worker **pid 91107**（`ps lstart` = **02:29:04**）被 TERM 后进入优雅排空，`server/engine/data/worker.pid.meta` 被重写为 `{"version":1,"pid":91107,"repo_root":"…","ts":1791675698,"state":"draining"}`（07:41:38）。
+> - 此后 `engine_ops workers` 的中央行是：`pid 91107 | started_at 2026-10-11T07:41:38 | stale=none | polling=True`——**与"刚换手、新工人在位"逐字同形**。而事实是：**同一个进程**、`worker.log` 里写着 `Beginning worker shutdown, will wait 0:30:00 before cancelling activities`，且它**在等一个 owned 子进程组**（`shutdown roll-call: owned child process group tag=integ-chain pid=82171`，是 07:30 起的 inspection 链）。
+> - **读码确认**：`server/tools/engine_ops.py:239` `st["started_at"] = _iso(meta["meta"].get("ts")) or _iso(st.get("mtime"))`；而 `stamp_for(pid, tree, started_at)`（`:212-228`）**用这个 started_at 当陈旧判定基准** ⇒ drain 一写 meta，基准就跳到 drain 时刻 ⇒ 比它旧的模块全判"不陈旧"（`stale=[]`）。
+> - **队列面同理**：`queues.sandbar.live` 仍按 pid 验活把该 draining pid 算作"1 个活 poller"（原文 `live_count 1`，identity `91107@…`）⇒ **"中央队列有活 poller"也可能指的是一个已停 poll、正在退出的工人**。
+>
+> **危害**：①**换手会被误判为已完成**——值守或面板据此去点火/推票，实际新工人还没起、队列**没人服务**（本夜正是"点火"的当口，`scan_schedule.py trigger` 造出来的 workflow 会排队等到新工人上线）；②`stale=none` 在换手窗口里**不可信**；③与同族既有条目（`t261005-03` 的 draining 语义、`KI-01M4GF5R8NHQNATH7WD7SKF94X` 的"换手会把在跑 WFT 作废"）合成一句话：**draining 是一个状态，不是"已换好"**，而面上没有一处把两者分开。
+>
+> **出路（实现归票）**：①**启动基准取进程真实启动时刻**（`ps lstart` / `/proc/<pid>/stat` / psutil），旁车 meta 只作补充；meta 的 `ts` 改名为"最近一次状态变化时刻"，**不再充当启动基准**；②工人面在 `state=draining` 时**必须显式打 `draining` 徽标并明说"这不是新工人"**，`polling` 一栏随 draining 置 false（别让"pid 活着"冒充"在 poll"）；③换手机器在排空未完成时 `wait_note` **具名**说明"旧工人排空中（有 owned 子进程组），新工人尚未起"，而不是空 note + `disposition: clear`。
+>
+> **纪律**：**"进程还在" ≠ "工人在服务"**。换手后必须**同时**核三样：**新 pid ≠ 旧 pid**、`ps lstart` **晚于换手时刻**、meta `state` **不是 `draining`**；只看工具回执或 `workers` 的 `started_at` 会被这条 KI 骗过去。
+>
+> **回归**：L1——drain 后 `stamp_for` 的 started_at 仍等于**进程启动时刻**（不是 meta 重写时刻）；L3——一次带 owned 子进程组的换手：面在排空窗口内显示 `draining` 且明说新工人未起，换手完成后上列三项全变。

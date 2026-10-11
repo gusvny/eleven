@@ -568,3 +568,28 @@ The disposition, in order - and **never rework the ticket for this**:
 Why the order matters: a `retry_qc` sent before the sync re-runs the same judgement on the same tree and reds
 again (the signal is consumed, the tree is unchanged); a `rework` spends a whole stage cycle to import one line of
 somebody else's fix. Both look like diligence and are waste.
+
+### Restarting the console does NOT re-environment an alive central worker (261011, found while wiring the line-round runner)
+
+The central worker (`server/engine/data/worker.pid`, queue `sandbar`) is spawned by the console's supervisor, so it
+inherits **the console process's environment**. But the supervisor only spawns when the worker is *not alive*:
+
+```ts
+if (!workerAlive()) { spawnWorker() }   // server/plugins/temporal-tools/node.ts, ensureOnce()
+```
+
+An alive worker is kept as-is (the generation rule that lets the ticket-worker ensure place a replacement belongs to
+the *ticket* workers, not to this one). So: **start the console with a new environment variable and the running
+central worker keeps the old one** — the new value only reaches the queue after the worker is handed over.
+
+The sequence that actually takes effect (two steps, two owners):
+
+1. the *host* starts the console with the variable in its environment (`./start-console.sh` prints the line-round
+   runner it exports, so the startup log says which value the worker will get);
+2. the *steward* hands the worker over — `server/tools/engine_ops.py restart --scope central` (kill only; the
+   supervisor respawns it and the tool proves one live poller), then confirms with `engine_ops workers` that the
+   new pid's stamp carries the change.
+
+Judging it: the line-round tick names its own state on the operator surface. With no runner declared it reports
+`runner_missing`; with a runner declared it produces a delivery-ledger row or a named `could_not_run`. "The console
+restarted and nothing changed" is the expected outcome of doing step 1 alone.

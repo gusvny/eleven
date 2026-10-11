@@ -200,6 +200,33 @@ fi
 
 echo "▶ 启动 sandbar 控制台：$DSH_BIN --profile sandbar ${ARGS[*]:-（默认端口 3099）}"
 [ -n "$DSH_BITS_NOTE" ] && echo "  bits 指纹对账通过（${DSH_BITS_NOTE}）"
+
+# ── develop buffer 的线轮 runner（261011 宿主令：加进启动脚本）────────────────
+# 为什么在启动脚本里：引擎的 `develop_certify.resolve_runner` 是在**扫描 tick 的那一刻**
+#   读 `os.environ`，而执行那个 tick 的中央 worker 是**控制台进程的子进程** ⇒ runner 命令
+#   必须坐在**控制台自己的环境**里，宿主的交互 shell 里 export 不算数（worker 不继承它）。
+# 生效条件：改这里之后**要重启 console** 才生效（worker 是启动时 spawn 的）。
+# 关掉它：显式给空值启动（`SANDBAR_LINE_ROUND_RUNNER= ./start-console.sh`）——
+#   此时线轮会在运维面**具名**报 `runner_missing`（不静默、也不写认证台账）。
+# 声明口径与代价：见 integration/t261009-77/runner-declaration.md
+#   （runner 自带一棵 clone 出来的树，跑的是全量套件，一轮 8–12 分钟 + clone 时间）。
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+LINE_ROUND_RUNNER="$REPO_DIR/integration/line_round_runner.py"
+if [ -z "${SANDBAR_LINE_ROUND_RUNNER+x}" ]; then
+  if [ -f "$LINE_ROUND_RUNNER" ]; then
+    export SANDBAR_LINE_ROUND_RUNNER="python3 $LINE_ROUND_RUNNER"
+    echo "  line-round runner：已设 ${SANDBAR_LINE_ROUND_RUNNER}"
+  else
+    echo "⚠️  未找到 $LINE_ROUND_RUNNER —— 不设 SANDBAR_LINE_ROUND_RUNNER；线轮会在运维面报 runner_missing" >&2
+  fi
+else
+  echo "  line-round runner：沿用环境里已有的值：${SANDBAR_LINE_ROUND_RUNNER:-（空=关）}"
+fi
+if [ -n "${SANDBAR_LINE_ROUND_RUNNER:-}" ]; then
+  export SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S="${SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S:-3600}"
+  echo "  line-round 超时：${SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S}s"
+fi
+
 # profile 即 app 容器——sandbar profile 组合 dsh-base+dsh-web-app+本仓补丁，直接 boot 出 web UI。
 # bash 3.2 空数组 + set -u：${ARGS[@]} 需 + 守卫，否则 unbound
 # 输出过 sed 改写打印 URL（260929 补记）：URL 可能落在任一输出流故 2>&1 合流；
