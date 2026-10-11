@@ -3116,14 +3116,19 @@ FAST_SET_ENV = "SANDBAR_SCENARIO_FAST_SET"
 #: and is pinned by the L1 battery. The pole arithmetic assumes the
 #: SANDBAR_CONC_POOLS default width 3 for the ro pool; a width change
 #: invalidates the budget and is a named stewardship event, never a silent one.
-FAST_SET_BUDGET_MIN = 2
+FAST_SET_BUDGET_MIN = 5
 FAST_SET_BUDGET_NOTE = (
-    "fast-set budget: %d minutes wall clock. Accounting: serial members sum, "
+    "fast-set budget: %d minutes wall clock (HOST ORDER 261011: the lane's fast "
+    "proof stays inside five minutes). Accounting: serial members sum, "
     "parallel pools count by their slowest member (pole) at the declared "
     "concurrency width (SANDBAR_CONC_POOLS default ro:3). Measured basis "
-    "(261009, scenario-ledger means): 18 ro members, ~1.3s summed case time — "
-    "the budget is headroom for process startup and machine variance, not a "
-    "target. Breach is a named stewardship signal, never an auto-trim."
+    "(261011, scenario-ledger means): the 18-member declaration used ~1.3s of "
+    "case time and ran in 2.2s wall clock end to end — so the budget is headroom "
+    "for process startup, machine variance and a much larger membership; it is a "
+    "ceiling, not a target. Breach is a named stewardship signal, never an "
+    "auto-trim: the per-member cost and catch evidence behind every add/remove "
+    "verdict is the integration patrol's standing duty (design goal 4), and the "
+    "own-scenario leg of a lane's proof is budgeted together with this set."
 ) % FAST_SET_BUDGET_MIN
 #: What each member is FOR (the design rule: "each member must say what
 #: breakage it is meant to catch early — a member that catches nothing has
