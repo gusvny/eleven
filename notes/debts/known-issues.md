@@ -5488,3 +5488,34 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **回归**：L2——线轮面必须把 `env_red_names` 与内容红分开陈列且都有名字；L3——一次线轮里，凡"要起 console 才能判"的用例要么真判出红绿、要么在面上具名"未判成：<原因>"，不得静默计入 env 计数了事。
 
 > **同族补一（261012 19:0x，挂死的**第二个形态**：卡死的不是子进程管道，而是**批台租约**）**：同一轮里又挂住一条（`integration/t260908-01/sc_ki061_overlimit_wake_revive.py`，pid 8314，5:14 elapsed / CPU 0.62s），lsof 显示它攥着**与上一条完全相同的锁**：`~/.sandbar/test-stages/ensure-batch-2c3e0560-96cb7d89.lock`；同时场上有**孤儿 stage helper pid 51249**（`--project batch-2c3e0560-96cb7d89 --anchor-pid 51064`＝本轮跑器、ppid 1、已活 30+ 分钟、攥着 `hold-batch-….log`），而 `stage-sweep` 早就把该台判成「活台而主人锚非工作树（`…/T/line-round-e8e6yz40/sandbar`，疑被测树）」。⇒ **批台租约为一个临时测试树而起、卡住不释放，于是该项目的每个消费者用例都排在它后面**（不是红、不是超时，是**静默排队**）。本岗处置：按 pid 杀掉卡住的用例与那个 helper 之后，同一批消费者立刻**具名**落 `ENV_FAIL: 批台 batch-2c3e0560-96cb7d89 不在位（runner 未预起/已收口/中途亡）`——**挂死变红，且是诚实的红**（t260921-06 要求⑤：ns 不可用=环境红）。教训：**租约类挂死的诊断入口是 `lsof <pid>` 看它攥着哪把锁，再看谁攥着同一把锁**；"锚点进程还活着"不等于"租约健康"（锚点是**临时测试树/跑器**时尤其如此）。出处：`KI-01M4P588XXRNW31H7BWA3P4VHM` 同族。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRV **收窄轮不成证明**——**实证到手**：账本原文 `suite_rc_1:run_id_missing_from_summary` **(261012 19:2x 读账本 `delivery.jsonl` seq 16;integration 岗记录，属 `KI-01M4P6Z4T5C1R2S8N9K7H3QWDM` 的实证补记)**
+
+> **原文（`~/.sandbar/projects/sandbar/ledger/delivery.jsonl` seq 16，`at`=17:33:29Z，`kind=range_growth`，`line=develop-buffer`）**：
+> `runner_failed_exit_2: No such file or directory: '…/rounds/round-20261011T183337Z-50912/suite.log')` 换行 `LINE_ROUND_RUNNER could_not_run: suite_rc_1:run_id_missing_from_summary`
+> —— 本轮（窄轮，`--exclude-pools exclusive`）**套件跑完了**（判 695 条），但因为它收窄 ⇒ 不写 run record ⇒ `INTEG_SUMMARY` 无 `run_id` ⇒ 跑器 `read_header` 第一步就失败 ⇒ 引擎只能记 `range_growth`。
+> **危害补**：①**"跑完了却没铸认证"的最短解释就是这一行**，而它埋在第二段（前一段是 retain 的 `Errno 2`，另一条缺陷）；②它同时证明"减用例/抬超时都不能让认证出现"——**判据的完整性被动过，轮次就不再是证据**。
+> **纪律**：**任何"本轮判了什么"的结论，先看账本里那一行的 reason 原文，再看面**；`run_id_missing_from_summary` 与 `runner_timeout` 是**两种病**，混看会把修复引向"加时间"。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRW **轮次的"保留证据"被它自己的 prune 删掉**：窗口对**共享目录**做名字排序切片 ⇒ 删的正好是 `round-`（排在 `run-` 前），而 retain 的失败又把**真因挤到行尾** **(261012 19:2x 执行器会话定位 + integration 岗复核;修票 `t261012-06`)**
+
+> **机理（逐点读码复核）**：`integration/lib_round_face.py` `FaceWriter._prune`（`FACE_RETAIN_ROUNDS`＝10）把 `data/develop/rounds/` 下**所有目录**按名字排序后删掉除最新十条之外的；而该票自己的场景把夹具写成 `run-<id>` 目录落在**同一个生产目录**里 ⇒ `round-` 恒排在 `run-` 前（o<u）⇒ **切片删掉的正是 round 目录**；`start()` 先建本轮目录、随即 `_prune()`，于是**本轮目录被自己删掉**；`current.json` 是文件不是目录，所以活面照常。
+> **实测后果**：①`rounds/` 目录里**十条全是 `run-`**（22:45–23:13 的夹具）；②账本 seq 14 与 seq 16 的 reason **头版是 `retain` 的 `Errno 2`**，真因埋在第二段（本岗 19:0x 想看 18:33 轮的留存日志时，目录已不在）；③"轮次保留证据"这条交付承诺**在这一轮上从未成立过一次**。
+> **出路（已开票 `t261012-06`）**：①窗口只认 `round-` 形状（不得对共享目录做名字排序切片，且不得删正在写的轮次目录）；②场景夹具写临时目录，不许在生产 face 目录里留实体；③**retain 失败必须排在轮次真因之后**（观测面不许盖住判决面）。
+> **纪律**：**"保留 N 条"这类窗口，先问它排序的是哪一类目录、有没有别人往同一个目录里写东西**；"删旧留新"在一个**共享命名空间**里是删除别人东西的委婉说法。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRX **行级状态不落盘**：tick 把每条线的 `state/error` 只放进 activity 载荷，什么都不写 ⇒ 下一个人只能**靠实验排除** **(261012 19:2x 执行器会话的 ask 2;integration 岗认同并登记)**
+
+> **实测**：执行器为回答"线为何 not-runnable"不得不：读 `develop_certify.py:1862-1866` 的两种状态词表 → 在进程内手跑 `derive_range`/`should_certify` 排除决策面 → 读 `resolve_runner` 的唯一 None 条件 → 再解释"在飞的轮次为何照跑"。**四步排除法换一句话**：`line_round_tick: 1 projects, 1 lines, not-runnable ['sandbar']`（`line_round_tick_engine()` 的 summary 只带项目名，不带**原因**；中心 worker 日志当天停在 01:33）。
+> **危害**：①运维面（面板/汇总行）说的是"不可跑"，而**为什么**不可跑只活在那个 activity 的返回值里，Temporal 历史之外无人可读；②诊断成本被转嫁给下一个读者，且**它只能推断**——推断错了就会去改错的东西（本岗当夜就差点把"挂死"当成"慢"）。
+> **出路（实现归票）**：每条线一行落盘（`state` + `error`/`reason` 原文 + `trigger` + `at`），或至少让 tick 的 summary 带上**具名原因**（如 `not-runnable ['sandbar:runner_missing']`）；"没写下来"不是省事，是把成本推给下一个人。
+> **纪律**：**凡"状态由某次调用算出、只随返回值离开"的东西，等于没有状态**；运维面必须能回答"为什么"。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRY **执行器没有自撤路径**：自己发的 notice 会**常驻 waiting 列表**（dismiss 只归宿主面板） **(261012 19:2x 执行器会话自报 + integration 岗登记)**
+
+> **实测**：`server/engine/request_thread.py` 第 66-70 行把 answered/dismissed 固定给宿主（面板凭据门后），`op=state` 只允许 doer 落 `resolved`；本岗实测以项目会话身份落 `resolved` 被**具名拒收**：`{"field":"state","error":"a project session cannot resolve; the doer (executor or lane agent) resolves with evidence"}`。⇒ 执行器**既不能自撤、也不能自解**它自己发的 notice/更正行，而这些行会继续出现在宿主的 waiting 列表里（执行器原话："my notice rows re-arm the nudge"）。
+> **危害**：①"清一下请求队列"这件事**结构性做不完**——只有宿主能关；②未读列表里的行会**越积越多**，于是真正待裁的行被噪音淹没（本岗当夜实测：321 行账本、17 行 open，其中 4 行是"通知/撤回/moot"类）。
+> **出路（设计口径归宿主，实现归票）**：二选一——(a) 给执行器一条**自撤自己发的 notice** 的路（限 kind=notice/correction，且只许撤自己 raised_by 的行）；(b) 保持现状，但在**面板侧**把"通知/撤回/moot"类行折叠或自动过期，并让 `read` 面把它们与"待宿主裁"分开陈列。在此之前，执行器应在文本里写明"不需要答复"。
+> **纪律**：**凡"只有一个人能关"的队列，等于没有关闭语义**；先问"谁能让这一行离开列表"，再谈"队列清空"。
+
+> **记账卫生补记（同日发现，未开票）**：`request_thread.py op=read` 报 **6 条畸形 answer 行**（`at` 是**字符串** `"1791595136393"` 而非整数）：`req-1791593200761-0001`、`req-1791583819064-0001`、`req-1791589875769-0001`、`req-1791591196298-0001`、`req-1791591623036-0001`、`req-1791592228683-0001`。读取面**具名报出**（未静默），代价是这 6 行在状态机上不计入 answered。写入侧应把 `at` 类型钉死（int）；判据面保留这条具名报告。
