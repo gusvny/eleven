@@ -1455,6 +1455,14 @@ SCENARIOS = [
      "The operator drift face NAMES the wiring modules (ticket t261011-04 / KI-01M4KH2QR5BRQ..., grey-box L3, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233; incident 261011 = central worker up since 10-09 20:20 while workflows.py/activities.py changed 10-10 14:30 (line-round wiring d4837baf); a fired dispatcher-scan returned a complete scan with NO line_rounds key and the drift face said stale=none — a worker stale ONLY on the wiring was a silent stale worker): W0 CODE_STAMP_MODULES in the tree under test contains workflows/activities/develop_certify/develop_line; W1 with a LIVE fixture-tree worker whose baseline is one hour old and all stamp-module files touched now, `engine_ops drift` exits 1 AND the alert text AND result.lane_worker.stamp.stale name each of the four modules (a count-only alert fails — naming is the ticket); W2 a fresh worker (files older than baseline) gets no stamp alert and no stale names (no false red); W3 a deleted module file degrades named (never faked stale, mtime stays empty, readable wiring modules still named); W4 the comment region naming CODE_STAMP_MODULES calls out by name which worker-loaded modules stay OUT (the ticket's say-it-out-loud half; wording-independent judge: at least two untracked engine module names in the region). Intent split: engine-ops-offline-faces owns the general offline drift face, t261008-29-stale-worker-visibility owns the fingerprint-v2 activity-set comparison, t261009-48-preflight-refuse owns the restart pre-flight stamp display, the pure stamp truth table is developer L1 — none re-asserted here. Pre-implementation tree = red on W0/W1 (TDD signal); green required at the integration gate. git/python/engine module missing = ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261011-04/sc_t26101104_wiring_stamp_drift_face.py", "ro"),
 
+    # ---- t261011-10: the lane's proof is its own scenarios plus the DECLARED fast set ----
+    ("t261011-10-fast-proof-membership",
+     "The lane's proof is its own scenarios plus the DECLARED fast set, and the membership is on the receipt (ticket t261011-10 required outcomes 1/2/3, design docs/design/develop-buffer-v1.md goals 3/4/5/12/13, grey-box L3, the real run_scenarios.py --print-fast-set face (one-inventory read in a fresh subprocess) plus the real server/engine modules driven offline over fixture meta, offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A UNION FACE — for a develop-buffer ticket behind the declared patch id the gate-round proof set is exactly own scenarios UNION the fast-set members read from the ONE declared CLI face in this worktree (no hand-kept second list can shrink or grow it, no duplicates); B RECEIPT FACE — the round's receipt carries the proof membership, the declared budget, and the round's wall clock, a budget breach surfaces as a NAMED stewardship warning (never an auto-trim, never a fabricated green, exactly-at-budget is no breach); C FULL SUITE LEAVES THE LANE — the patch id literal is unique and every new behaviour site consults the patch gate (KI-061 replay discipline), the closing-run face survives untouched for the legacy version. Intent split: the CLI declaration/refusal faces belong to t261009-16 (this entry CONSUMES that face); the degradation truth table belongs to sc_t26101110_proof_degradation_named; the parser's malformed-input matrix and spawn fault-mode table belong to developer L1. Pre-implement red expected (TDD signal); green required at the integration gate/merge. run_scenarios.py or server/engine modules missing/unimportable = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261011-10/sc_t26101110_fast_proof_membership.py", "ro"),
+    ("t261011-10-proof-degradation-named",
+     "Every degraded lane proof is NAMED, and the full suite never re-enters the lane path (ticket t261011-10 required outcome 3 + review gen0 [R1] ruling + KI-220 (an empty/zero run must never be read ambiguously) + KI-055 lesson (a quiet surface reads green), grey-box L3, the real run_scenarios.py CLI face driven into a booked-red refusal via a fixture roster plus the real server/engine decision seam over fixture shapes, offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A DECLARATION REFUSED — the lane still proves its OWN scenarios and says BY NAME that the fast set is absent this round (a refusal is never read as an empty legitimate set, no full-suite flag); B OWN FACE ABSENT — the lane still proves the fast set and names the reduction (never a quiet fast-only round); C BOTH SOURCES ABSENT — the round is REFUSED BY NAME before any run: no run executes, the full suite is NEVER the fallback (the gen0 [R1] defect face), and the message names both absent sources; D LEGACY UNTOUCHED — a legacy-version meta is not opted into any of these outcomes (design goals 12/13). Intent split: the CLI's own refusal faces belong to t261009-16-fast-set-gate (A here only pins the lane's CONSUMPTION of a refused declaration); the happy union/receipt face belongs to sc_t26101110_fast_proof_membership; pure truth-table internals belong to developer L1. Pre-implement red expected (TDD signal); green required at the integration gate/merge. run_scenarios.py or server/engine modules missing/unimportable = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261011-10/sc_t26101110_proof_degradation_named.py", "ro"),
+
     ("t261009-48-preflight-refuse",
      "Look before you kill (t261009-48, KI-01M4GF5R8NHQNATH7WD7SKF94X / KI-01M4H1DN2Z10J973DD6PBMPB4W, grey-box L2/L3, offline seconds, zero docker/Temporal/3099): before `engine_ops restart` signals anything the operator must be TOLD what the kill costs, and a target holding a STARTED workflow task or an in-flight agent activity must be REFUSED BY NAME under the default-safe policy. P1 the restart subcommand declares the operator knobs --force/--inflight-policy/--inflight-wait/--reason on the public parser face; P2 the pre-flight face built from a fixture describe payload reports pending workflow task, in-flight activity (ticket/stage/gen/attempt/elapsed), history event count, and the stale-code stamp; P3 the disposition is refuse and names ticket/stage/gen/attempt/elapsed — never a bare busy; P4 a clean target is not refused while the pre-flight face is still produced on every path; P5 the refusal path signals NOTHING (patched kill counter stays zero — kill-before-report was the incident shape); P6 a malformed describe payload degrades to NAMED fields without crashing and without fabricating an in-flight verdict (external-input three-state); P7 a long history surfaces alongside the pre-flight with a continue-as-new hint (report, never an automatic action); P8 _kill_and_wait_for_respawn remains the single signalling site (no new kill path, spec item 4). Intent split: the record-writer contract is owned by t261009-48-handover-record; the existing live-process guard and offline drift faces stay with engine-ops-offline-faces (not re-asserted); the real in-flight end-to-end on a live stage belongs to the engine pool, not this offline entry. Red expected pre-implement (TDD signal); green by arbitrate/merge. engine_ops unimportable = ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261009-48/sc_t26100948_preflight_refuse.py", "ro"),
@@ -3901,6 +3909,50 @@ def print_fast_set_declaration() -> int:
         print("FAST_SET_LEDGER_WARN %d malformed ledger row(s) ignored — "
               "named, never silently dropped" % bad, flush=True)
     return 0
+
+
+def own_set_entries(ticket_id, registry=None):
+    """The ticket's OWN scenario set, derived from the one inventory (host
+    order 261011 PART ONE): every registry entry whose command path lives
+    under ``integration/<ticket_id>/``. Derived, never guessed — a ticket's
+    own proof is what its change actually carries. Malformed ticket slug is a
+    named ValueError (never an empty set read as "nothing own")."""
+    import re as _re
+    tid = str(ticket_id or "").strip()
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9-]*", tid):
+        raise ValueError("own-set query: malformed ticket id %r "
+                         "(expected [a-z0-9-] slug)" % tid)
+    reg = SCENARIOS if registry is None else registry
+    marker = "integration/%s/" % tid
+    out = []
+    for e in reg:
+        cmd = e[2] if len(e) > 2 else ""
+        if marker in str(cmd):
+            out.append(e)
+    names = [e[0] for e in out]
+    dups = sorted(set(n for n in names if names.count(n) > 1))
+    if dups:
+        raise ValueError("own-set declaration malformed: duplicate registry "
+                         "name(s) %s" % dups)
+    return out
+
+
+def print_own_set_declaration(ticket_id) -> int:
+    """--print-own-set <ticket_id>: the read-only PART ONE face (never runs a
+    case, never takes the lock). Prints the derived own-scenario names; an
+    empty set is a legitimate answer (a ticket whose change carries no
+    registered own scenario) — printed as members=0, not an error."""
+    try:
+        members = own_set_entries(ticket_id)
+    except ValueError as e:
+        print("REFUSED [__own_set__] %s" % e, flush=True)
+        print("OWN_SET_DECLARATION refused (named error) — nothing ran",
+              flush=True)
+        return 2
+    print("OWN_SET_DECLARATION members=%d ticket=%s"
+          % (len(members), str(ticket_id).strip()), flush=True)
+    for e in members:
+        print("  member %s pool=%s" % (e[0], pool_of(e)), flush=True)
 
 
 def print_fast_set_review() -> int:
@@ -6716,6 +6768,12 @@ def _cli(argv):
                   "nothing ran", flush=True)
             return 2
         return print_fast_set_declaration()
+    # --print-own-set（t261011-10，宿主令 261011 PART ONE）：工单自有场景派生面——
+    # 同类只读查询面，不起场景、不占锁，故在锁之前分流。
+    if "--print-own-set" in argv:
+        i = argv.index("--print-own-set")
+        return print_own_set_declaration(
+            argv[i + 1] if i + 1 < len(argv) else "")
     if not _runner_cap_guard():
         print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
         return 2
