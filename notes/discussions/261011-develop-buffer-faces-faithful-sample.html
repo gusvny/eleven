@@ -300,11 +300,13 @@
 
   <h2>6 · 要宿主定的几件事（定完就开一张小 UI 票）</h2>
   <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;font-size:13px;color:#9aa4b2">
+    <p><b>已经定了的（本页已按令改，不再是问题）</b>：<b>暂停徽标只留图标</b>（§2；词进 tooltip + aria + 详情头）。</p>
     <p>① <b>选 A / B / C</b>（我的建议：<b>B</b>——定宽不回流、宿主自己提的"LineOn pill"、状态词进 tooltip 与详情头）。</p>
     <p>② <b>状态词进不进 pill</b>：B 是"字形定宽 + 词在 tooltip"，若你要"字面就能读"，那就是 C（挪到 L2 带词）。</p>
     <p>③ <b>这枚 pill 要不要顺手当筛选器</b>（点一下 = 只看这条线的票）——若点，它就得是按钮语义（键盘可达）。</p>
     <p>④ <b>线级 FROZEN 放哪</b>：放左栏表头/筛选项（线不是票的属性），票行只显示票自己的状态——如果你要"冻结时每行都提醒"，那是一条新决定。</p>
     <p style="margin-top:10px"><b>实现口径（票里钉死）</b>：值只能来自引擎行（list projection 新增一个小 <code>line_face</code>，或在 host adapter 里用同一个 derivation），<b>前端不得自行推导状态</b>；词表继续用 <code>FACE_WORDS</code>；写集 <code>server/plugins/workbench/</code> + <code>integration/</code>。</p>
+    <p style="margin-top:10px"><b>本页（v4）相对 v3 改了什么</b>：新增 §1 的三个线面候选（v3 只有"在不在线上"，v4 带上"走到哪个状态"）、§2 暂停徽标图标化（按宿主令）、§3 状态表（每条状态都能指到引擎的哪个面）、§5 详情头把状态词说全；§6 的 ①②③④ 就是等你的那四件。</p>
   </div>
 </div>
 </body>
