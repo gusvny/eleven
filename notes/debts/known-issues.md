@@ -5546,3 +5546,12 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **回归**：L1——构造两个泳道 A/B（B 有未落地文件），在 A 上做一次冲突消解：A 的 diff **不得**出现 B 的任何文件（sha 级断言）；L2——写集判据的拒收文案对每个越界文件**报出归属票**（或"不属于任何在飞泳道"）；L3——一次真实的"面外文件"事件：从被拦到退回 main 版本**不需要人工介入**，且期间没有任何外来文件以 A 的名义落地。
 
 > **同族补二（261012 21:05，`KI-01M4P588XXRNW31H7BWA3P4VHM` 家族的**第三个形态**：卡死的不是用例的等待，而是**本轮自己的前奏**）**：一条**普通诊断轮**（`--only light-lane-workflow-e2e`，交付树）也卡在同一处——`batch-stage: 批台预起 ensure --project batch-2cc8a398-df0ce4ca` 之后**再无一行输出**（hold 日志 0 字节、ensure 锁在场；helper pid 60124 已 5:39 elapsed / CPU 0.20s）⇒ **用例根本没机会开始跑**。本岗处置：杀掉该 helper 与自己的诊断轮（诊断不值得再等一小时）。教训：**"批台供给卡死"不只伤消费者用例，也伤轮次前奏本身**——于是"这条用例又挂了"这个说法在任何一侧都不成立，真正变的是**批台**；诊断"某轮为什么慢"时，第一步应看 `batch-stage` 那行之后**有没有下一行**（见 `KI-01M4P7B2XQ3K9Y6T4N8W5A1CRY` 同族的观测面建议：把每段前奏的耗时/结果自成一行落盘）。
+
+## KI-01M4PKH23DKWXY1KFM490S7P8F **授权"发下去了却没生效"**：`_within` 的 docstring 说"条目尾斜杠同义"，实现却不剥尾斜杠 ⇒ 用目录写法（`integration/baselines/`）写的**人授权静默失效**，闸照拒、且**不给任何"scope 未命中"的提示** **(261012 23:0x 本岗实测：宿主已批 + 授权已落账，`-05` 仍被同一文案拒收)**
+
+> **实测链（全部当场读数）**：①宿主 261012 批准 `t261012-05` 改受保护面；②本岗以 `op=authorize kind=protected_path` 落授权，**scope 写成目录写法** `integration/baselines/`；③票面 log 明确记 `human authorization issued (…): kind=protected_path scope=integration/baselines/ expires=… reason=…` ⇒ **授权确实进了 workflow**；④`retry_qc` 后**同一个受保护闸再次拒收**，文案逐字相同（`Protected-path gate refused the write … is on the protected list … no lane may change it`）——**没有一个字提到"授权在册但 scope 没命中"**。
+> **根因（读码）**：`authz_gates._match()` 用 `path_gates._within(path, scope)` 判命中，而 `_within` 的实现是 `path == s or path.startswith(s + "/")`——**`s` 带着尾斜杠时，两个条件都不成立**（`…/baselines/` 与 `…/baselines//…` 都不匹配）；但 `_within` 的 docstring 写着「条目可写 `app/src` 指代整个前缀；**条目尾斜杠同义**」⇒ **文档与实现不一致**，而失效是**静默**的（对外只表现为"授权了也没用"）。
+> **危害**：①**人已经批了，机器却在原地打转**——值守会以为"授权通道坏了/引擎不认"，进而去走更重的路（改写集、手工落盘）；②目录写法是**最自然**的写法（"我批这个目录下的改动"），所以这条几乎必然被踩；③它与本族其它条目同病：**判据失败时不告诉读者"哪一条没命中、为什么"**。
+> **出路（实现归票）**：①`_within` 按 docstring 剥尾斜杠（`s.rstrip("/")`）或 `_match` 用 `path_gates` 的规范化入口；②授权未命中时**具名**：拒收文案附一行「在册授权 N 条，未命中原因：scope=`integration/baselines/` 与路径 `integration/baselines/x.mjs` 不匹配（尾斜杠）」；③`op=authorize` 在 intake 侧就该拒"scope 条目带尾斜杠"（或自动规范化并回执写清"已规范化为 `integration/baselines`"）。
+> **纪律**：**"我批了"与"它生效了"之间必须有一条可读的回执**；凡"豁免/白名单"这类机制，**未命中要出声**——否则使用者会永远怀疑通道而不去怀疑自己的写法。
+> **回归**：L1——`scope=["a/b"]` 与 `scope=["a/b/"]` 对路径 `a/b/c` **同判命中**（或后者在 intake 被具名规范化）；L2——授权在册但 scope 未命中时，拒收文案必须**具名 scope 与路径的不匹配**；L3——一次真实的人授权改受保护面：从 `op=authorize` 到闸放行**不需要第二次尝试**。
