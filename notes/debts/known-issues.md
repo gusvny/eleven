@@ -5294,3 +5294,26 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**凡"新增活动/工作流"，注册面的判据不是"我加了装饰器"，而是"worker 合成表里有它"**；`@activity.defn` **只是元数据**，worker 服务的是**表**。凡"调用新活动"的票，验收必须含一条**合成表成员**断言（本族缺这条断言三天无人知）。
 >
 > **回归**：L1——①三条活动均在 `ALL_AGENT_ACTIVITIES` 内；②AST 扫描：每个 `@activity.defn` 要么在表内、要么在**具名豁免清单**内（新增一个未注册的活动 ⇒ 立刻红）；③`compose_worker_activities()` 的产出里含这三条名字（**判据取合成表、不取单一清单**，防"加进清单但合成表没接"）。L3——一张 develop buffer 票的落地链路**走通到 `land_to_line` 与 `certification_wait`**（打桩亦可：断言三次活动调用**都真的到达 worker**、不再出现 `ActivityError`）。
+
+## KI-01M4MJ2J7Q0T9S0V6M3Y8W1B4C **「散文面豁免」是按**前缀**判的，于是 `docs/` 与 `notes/` 下的**代码/机器读的资产**也一并被豁免**：`docs/scripts/build_index.py` 未提交也不再挡落地，而票面规格写的是"teeth … and code" **(261011 12:0x `t261011-16` 落地后本岗用临时仓实测（不是读码推测）;integration 岗登记，处置待宿主定窄化口径)**
+
+> **实测（临时 git 仓 + 直接调落地分类器，四例，正对照在内）**：
+> | 场景（main 工作树） | 判定 |
+> | --- | --- |
+> | 非重叠、未暂存的**散文**改动（`notes/other.md`） | `kind: ""` ＋ `exempted: ["notes/other.md"]` ⇒ **豁免（正对照：交付物按预期工作）** |
+> | 非重叠、未暂存的**代码**改动（`docs/scripts/build_index.py`） | `kind: ""` ＋ `exempted: [该文件]` ⇒ **也被豁免**（本条要说的） |
+> | 散文改动**与收口面重叠** | `kind: "main_dirty"`、具名 overlap ⇒ 牙还在 |
+> | 已暂存改动（任意前缀） | `kind: "main_staged"` ⇒ 牙还在 |
+> | 未跟踪文件、不在收口面上 | `kind: ""`（无碰撞）⇒ 语义正确 |
+>
+> **读码定位（为什么是"前缀"而不是"散文性"）**：`server/engine/agent_activities.py` 的 `MAIN_DIRT_PROSE_ALLOWANCE = ("notes/", "docs/")` ＋ `_is_prose_path()` 只做 `p == prefix[:-1] or p.startswith(prefix)`（即只按**路径前缀**判），随后"非散文/重叠/面未知"三条牙照旧。
+>
+> **被豁免的非散文面（`git ls-files` 清点，共 4 个代码文件 + 一批机器读数据）**：`docs/scripts/build_index.py`（真被用的工具：doc-mech 那条 finding 就让人跑 `python3 docs/scripts/build_index.py`）、`notes/discussions/261010-demo-ppt-render.mjs`、`notes/discussions/260927-cancelled-gap5/project-template-lane-map.mjs` 与同目录的 `test_t260927_template_directory_face.py`；另有 `docs/index.json`、`docs/inspection-sample.yaml`、`docs/model-routes-sample.yaml` 与 20+ 个 `notes/queued-*-ticket.json`。
+>
+> **危害（有边界，但方向不对）**：①**伤不到"一票一提交"**——未暂存文件**永远不会**被引擎 stage/stash/commit（`_squash_merge` 的成功回执只把它记进 `exempted`，不碰字节）⇒ 最坏结果是"**闸不再看它**"，不是"它混进了提交"；②真正的损失是**判据的语义**：票面规格明确写"keep the teeth where they belong: staged content, real collisions, and code"，而实现把"code"换成了"路径前缀"——`docs/scripts/*.py` 是**跑得起来的代码**，它未提交时落地照样放行；③它与宿主令的原话**是相容的**（宿主：「main 只改了 notes / docs 这种其实没关系的」），所以这不是实现跑偏，而是**宿主的口语边界与票面规格的边界不一致**——口径归宿主。
+>
+> **出路（口径归宿主，实现归票）**：①**窄化判据**（推荐）——豁免按"是否是散文/文档形态"判，而不是按前缀：给 `MAIN_DIRT_PROSE_ALLOWANCE` 加一条**具名排除表**（`docs/scripts/`、`notes/**/*.py|*.mjs|*.js|*.ts|*.json|*.yaml`）或直接按扩展名白名单（`.md/.html/.txt/.rst/.pdf`）；②或**承认现状并把规格改过来**（写明"notes/docs 前缀下的一切都豁免"，含代码），免得下一个人拿票面规格去对账；③无论选哪条，**都要把"被豁免的文件清单"打进回执**（今天已有 `exempted` 键，方向对）。
+>
+> **纪律**：**凡"按前缀/路径豁免"的判据，必须对**该前缀下实际存在的文件**做一次全量清点**——`notes/` 与 `docs/` 不是纯散文目录（四个代码文件就在里面）。豁免写成前缀的那一刻，"散文"这个词就已经不是判据了。
+>
+> **回归**：L1——`docs/scripts/build_index.py` 未暂存改动 ⇒ **仍 `main_dirty` 拒**（窄化后），而 `notes/*.md` 未暂存且不重叠 ⇒ 豁免；L3——一次真实落地：被豁免的文件**不在提交里**、落地后**逐字节不变**（本条已用临时仓在分类器层面验证，L3 待下一次真实落地复验）。

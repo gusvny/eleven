@@ -407,6 +407,21 @@ Two confirmed hazards in the same area:
    (`.sandbar/quarantine/unauth-create_plan-gen*` carries its diff) because it had no write-set seat,
    and the ticket face does not explain why. Put plan artefacts in the write set when the spec asks
    for one.
+   **The same holds for a *code* file, not only plan artefacts (measured 261011, t261011-17).** That
+   ticket's spec item 3 asked for a note on the ticket face; the single writer for it is
+   `server/engine/dev_lane.py`, but the write set I authored named only `agent_activities.py` + the
+   test dirs + `integration/`. The lane edited `dev_lane.py` anyway, the settle path gate rolled the
+   edit back, and the lane's own scenario then failed against a tree where the change was absent —
+   while the implement statement still said the note was present (`git diff main...HEAD` in the lane
+   is the reader that settles it; the statement is not). The rule: **when a spec item names a
+   behaviour, put the file that owns that behaviour in the write set** — or have the plan name it as
+   a call-site file, which is what admits it to the round's effective write set.
+   That rollback is **not** silent: the settle path gate preserves the reverted edit at
+   `<lane>/.sandbar/quarantine/<stage>-gen*/manifest.json` with its own diff file. Measured on
+   t261011-17: three entries (`unauth-implement-gen0`, `-gen0-2`, `-gen0-3` at 11:54 / 11:56 / 12:15),
+   each naming `server/engine/dev_lane.py` with `"action": "reverted"`. So when a statement and
+   `git diff` disagree, the third reader is the quarantine manifest — and three entries for the same
+   path is the signal that the write set, not the lane, is the thing to fix.
 2. **The union is a round-level authorization; the settle judges with the write set it is handed.**
    On this ticket the two files were quarantined once anyway
    (`.sandbar/quarantine/unauth-implement-gen0/server__engine__{activities,workflows}.py.diff`,
