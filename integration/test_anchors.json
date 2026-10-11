@@ -4966,6 +4966,11 @@
       "anchor": "behaviour",
       "note": "t261011-16 KI-048 prose-allowance: the exempt prose dirt landing (commit file list excludes it, bytes survive, no stash), inverted control against the pre-fix conservative rule, named-teeth canaries (code dirty / staged prose / untracked collision), overlapping prose named refusal, diff-fault fail-closed",
       "sync_path": ""
+    },
+    "integration/t261011-18/sc_t26101118_line_round_assets.py": {
+      "anchor": "contract",
+      "note": "t261011-18: the line round runs the suite inside its own cloned checkout — the runner hands over the two assets the clone cannot resolve, operator pointers pass through verbatim, a bad pointer is a named could-not-run, and an unrunnable round grows the range without minting a certification",
+      "sync_path": "integration/line_round_runner.py; integration/bench.py (_resolve_asset)"
     }
   }
 }

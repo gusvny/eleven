@@ -35,7 +35,11 @@ Environment seams:
                                      without one falls back to the checkout
                                      this runner file lives in;
 - ``SANDBAR_LINE_ROUND_RUN_ROOT``    run-tree parent override (tests);
-- ``SANDBAR_LINE_ROUND_RUN_STATE_DIR``  stale-run sweep bookkeeping (tests).
+- ``SANDBAR_LINE_ROUND_RUN_STATE_DIR``  stale-run sweep bookkeeping (tests);
+
+Asset hand-off (t261011-18): the runner exports SANDBAR_POC_PYTHON and
+SANDBAR_TEMPORAL_BIN into the suite env, resolved from this runner's own
+checkout; an unresolvable asset is a named could-not-run (asset_missing:<KEY>).
 """
 import json
 import os
@@ -64,6 +68,18 @@ SOURCE_ENV = "SANDBAR_INTEG_LEDGER_SOURCE"
 REUSE_ENV = "SANDBAR_LEDGER_REUSE"
 GIT_SHA_ENV = "SANDBAR_GIT_SHA"
 LEDGER_DIR_ENV = "SANDBAR_SCENARIO_LEDGER_DIR"
+#: Assets the suite cannot resolve out of its own run tree (t261011-18): the
+#: suite runs with cwd = a CLONE, whose .git is a directory, so bench's
+#: main-tree fallback (main_root_of, gitfile-only) finds nothing there and
+#: the gitignored .venv / temporal binary are absent too. The runner
+#: resolves both keys from ITS OWN checkout (a real worktree, so the
+#: fallback fires) and exports the absolute paths into the suite env
+#: (ticket route 1: hand the suite the assets, never widen the isolation).
+#: An unset key that cannot be resolved is a named could-not-run carrying
+#: the env key — never a silent skip, never a header, never a
+#: certification.
+POC_PYTHON_ENV = "SANDBAR_POC_PYTHON"
+TEMPORAL_BIN_ENV = "SANDBAR_TEMPORAL_BIN"
 #: What the run record wears. The record model (docs/reference/
 #: ledger-record-models-v1.md) proposes `scheduled`, but the store's closed
 #: source vocabulary today (scenario_ledger._check_source) accepts only
@@ -179,19 +195,70 @@ def suite_argv(env=None):
     return argv
 
 
-def suite_env(run_root, primary_revision):
+def asset_env(env):
+    """The two suite-unresolvable asset keys, resolved for the suite
+    (t261011-18). A key already set in the incoming environment is passed
+    through verbatim (worker/test override wins, and bench's own env-first
+    order means the suite would honor it anyway). Otherwise the asset is
+    resolved through THIS checkout's integration/bench.py — the runner's
+    own tree, a real worktree, whose main-tree fallback works where the
+    run-tree clone's cannot. A genuinely absent asset is a named
+    could-not-run naming the env key, raised before any suite spawn."""
+    own_dir = str(Path(__file__).resolve().parent)
+    inserted = False
+    if own_dir not in sys.path:
+        sys.path.insert(0, own_dir)
+        inserted = True
+    try:
+        import bench  # noqa: PLC0415 — this checkout's own resolver
+    except Exception as e:  # noqa: BLE001
+        die("bench_module_unreadable:%s" % e)
+    finally:
+        # only undo an insert WE made: read_header later relies on this
+        # directory staying importable (the clone's integration dir may
+        # not carry scenario_ledger)
+        if inserted:
+            sys.path.remove(own_dir)
+    out = {}
+    for key, resolver in ((POC_PYTHON_ENV, bench.resolve_poc_python),
+                          (TEMPORAL_BIN_ENV, bench.resolve_temporal_bin)):
+        declared = str(env.get(key, "")).strip()
+        if declared:
+            if not Path(declared).exists():
+                die("asset_missing:%s:%s=%s 不存在（env 指路优先，检查路径）"
+                    % (key, key, declared))
+            out[key] = env[key]
+            continue
+        # blank declared value: bench's resolver reads os.environ, so a
+        # blank string would be taken as a (nonexistent) pointer — lift it
+        # for the resolution and keep it out of the suite env
+        held = os.environ.pop(key, None)
+        try:
+            out[key] = str(resolver())
+        except bench.MissingAsset as e:
+            die("asset_missing:%s:%s" % (key, str(e).replace("\n", " ")))
+        finally:
+            if held is not None:
+                os.environ[key] = held
+    return out
+
+
+def suite_env(run_root, primary_revision, env=None):
     """The suite's environment: the runner-mode pins (C1 owner neutralized,
     reuse off — a fully reused round would mint a ran==0 header, which the
     engine refuses; better to not offer the trap), the run-scoped ledger dir
     (the run record is self-consistent and never intermixes with the
-    worker's interactive ledger) and the pinned revision."""
-    run_env = dict(os.environ)
+    worker's interactive ledger), the pinned revision, and the two asset
+    keys the clone cannot resolve by itself (asset_env)."""
+    env = os.environ if env is None else env
+    run_env = dict(env)
     for key in (GATE_OWNER_ENV, TICKET_ENV):
         run_env.pop(key, None)
     run_env[SOURCE_ENV] = RUN_SOURCE
     run_env[REUSE_ENV] = "0"
     run_env[LEDGER_DIR_ENV] = str(Path(run_root) / "ledger")
     run_env[GIT_SHA_ENV] = primary_revision
+    run_env.update(asset_env(env))
     return run_env
 
 

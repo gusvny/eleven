@@ -165,9 +165,21 @@ ok(len([r for r in rows if r.get("kind") == mod.KIND_FREEZE]) == n_freezes,
    "F2a could-not-run opened NO second freeze")
 ok(any(r.get("kind") == mod.KIND_RANGE_GROWTH for r in rows),
    "F2b could-not-run grew the range instead (goal 24)")
-ok(res2.get("end", {}).get("state") == mod.END_CHAIN_LIMIT,
-   "F2c the retry chain stops at its declared bound, named — never an "
-   "unbounded loop")
+_end = res2.get("end", {})
+_suppressed = any(r.get("duplicate_row_suppressed") for r in
+                  res2.get("rounds", []))
+# t261011-18 rework: the chain terminates named EITHER at its declared
+# bound (chain_limit) OR earlier by suppressing a chained retry whose
+# reason is byte-identical to the immediately preceding grew round (one
+# unrunnable outcome = ONE row; the next tick retries through the normal
+# trigger faces). Both shapes are NAMED terminations — never an unbounded
+# loop; a suppression must say so on the round entry.
+ok(_end.get("state") == mod.END_CHAIN_LIMIT
+   or (_end.get("state") == mod.STATE_GREW and _end.get("reason")
+       and _suppressed),
+   "F2c the retry chain stops NAMED — at its declared bound, or by "
+   "suppressing a byte-identical in-tick retry (never an unbounded loop, "
+   "never a silent stop)")
 g = mod.guard_acquire(guard, "itg30-f-probe")
 ok(g is not None, "F2d the guard is released after the growth chain")
 if g is not None:
