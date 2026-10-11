@@ -152,6 +152,39 @@ SCENARIOS = [
     ("t261011-26-round-evidence-kept",
      "The round's evidence is KEPT at a stable path and the rolling bookkeeping can never eat a live round (ticket t261011-26 spec item 2 + the review_plan condition on finish/prune keyed by run_id; grey-box L3, the REAL integration/line_round_runner.py as a subprocess over the same shared fixture as the sibling entry, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A RETAINED LOG - after a round ends its suite log survives at rounds/<run_id>/suite.log under the declared face dir with the suite's judged PASS lines and the INTEG_SUMMARY intact (evidence no longer the temp dir's casualty, read from the reader side); B ROLLING RETENTION - seeded old run dirs beyond the declared keep window are pruned, the just-finished round's own evidence survives its own prune; C LIVE-ROUND SAFETY - a face dir already carrying a live pointer naming ANOTHER run survives this round's finish: the stranger's current.json is NOT deleted and the run dir it names is NOT pruned even when old (deletion and pruning key on the run_id read from the face on disk, never on whatever sits in rounds/); fast-catch: the overlapping-round class where a straggler round steals or deletes the next round's live face (arbitration round 1 leg C1, shipped once already) and the evidence-loss class where the suite log dies with the temp dir again are both caught here in seconds, offline; D HONEST BOOKKEEPING - a real prune names itself on stderr non-fatally, an empty face dir stays silent. Division of intent: the live-face content and terminal-outcome vocabulary belong to the sibling t261011-26-round-progress-face; retention arithmetic and prune-policy unit tables belong to developer L1. Pre-implement tree red = the named TDD signal; green required at the integration gate / merge. line_round_runner.py or git missing = ENV_FAIL exit 2",
      "python3 integration/t261011-26/sc_t26101126_round_evidence_kept.py", "ro", "fast"),
+    # ---- t261012-01: the round face never prints a green it cannot support ----
+    ("t261012-01-round-face-truth",
+     "The round face never prints a green it cannot support (ticket "
+     "t261012-01, user words: face.json read {'state': 'done', 'counts': "
+     "{'ran': 0, ...}, 'outcome': {'verdict': 'green'}} beside a retained "
+     "suite.log saying INTEG_SUMMARY {'ran': 1, ...} — the exact false-green "
+     "the certification rules exist to prevent; grey-box L3, the REAL "
+     "integration/line_round_runner.py as a subprocess over the t261011-26 "
+     "shared git fixture + incident-class stub suites, offline seconds, zero "
+     "docker/Temporal-server/browser, never touches 3099/7233): A NO GREEN "
+     "OVER NOTHING - a round whose header/summary counted ran == 0 ends "
+     "state=done but its outcome verdict is the no-proof verdict, never "
+     "green (the engine's develop_certify.run_verdict rule: ran > 0 and "
+     "fail == 0 and env_fail == 0); B TERMINAL FACTS ONLY - a suite exiting "
+     "0 WITHOUT its INTEG_SUMMARY lands state=failed carrying a reason that "
+     "NAMES the missing summary, never a fabricated done; C COUNTS AGREE OR "
+     "ARE NAMED UNREADABLE - for the same round the terminal face's counts "
+     "agree with the INTEG_SUMMARY parsed from the retained suite.log read "
+     "back from the READER side, and a real summary beside per-scenario "
+     "lines the parser does not know never publishes silent zeros (the "
+     "face carries the summary's own numbers or a 'counts unreadable: "
+     "<why>' note); D FOUR-WAY TERMINALS - green / red / no-proof / "
+     "failed+named-reason stay four distinguishable records read from disk "
+     "without worker.log. Division of intent: live-face visibility, "
+     "retained-evidence survival, rolling retention and overlapping-round "
+     "safety belong to the shipped t261011-26 sibling entries (their shared "
+     "fixture helpers are reused here, not re-proved); parser truth tables "
+     "and torn-JSON rows belong to developer L1; the panel's rendering of "
+     "the verdicts is its own ticket. Pre-implement tree red = the named "
+     "TDD signal (A/C legs are the incident replay); green required at the "
+     "integration gate / merge. line_round_runner.py or git missing = "
+     "ENV_FAIL exit 2",
+     "python3 integration/t261012-01/sc_t26101201_round_face_truth.py", "ro", "fast"),
     # ---- t261011-02: the CLI board row says what the engine row says ----
     ("t261011-02-ticket-list-projection-parity",
      "For the same ticket the CLI board face and the engine row face agree per-key (ticket t261011-02, user words 'the CLI row says what the engine row says — fix the whole seam, not just the one key'; incident = ticket.py _list rebuilt rows through fixed key whitelists twice, so lane_version/develop_line read '' for every ticket while the develop-buffer opt-in's first ticket was in flight, and the same seam had already eaten paused/paused_phase (t260908-01, t260910-04 rerouted the console instead of repairing the projection) and exec_status/close_health/close_health_reason; grey-box L3, the REAL engine row builder _row_from_meta loaded from the real client.py over real meta shapes (develop-buffer opt-in, between-segment paused, minimal closed, legacy no-key rows) fed through the declared _poc transport seam into the real CLI op entry ticket.run({'op':'list'}), offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A PER-KEY AGREEMENT on the ticket's two named covers — the develop-buffer ticket's lane_version/develop_line and the paused ticket's paused/paused_phase arrive on the CLI row with the engine's exact values, and NO key of the engine row is recomputed or rename-drifted; B KEY-SET PARITY — every key of the real engine row (including the caller-added close_ts and the closed-row shape's health/exec_status keys) is carried, so the day the engine adds a key and the projection does not, this reds by name; C HONEST ABSENCE — a legacy row missing the newer keys reads honestly empty, never guessed, never a crash; D SINGLE SOURCE — the engine-formatted updated string and epoch updated_ts arrive verbatim, never re-derived from the CLI wall clock. Scope guard: the console and the engine row face are read, never modified. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. Engine tree or ticket.py missing/unimportable = ENV_FAIL exit 2",
@@ -3337,6 +3370,10 @@ FAST_SET_CATCH = {
         "the round's suite log dying with its temp dir again, or an "
         "overlapping round stealing/deleting the next round's live face "
         "(arbitration round 1 leg C1 tripwire)",
+    "t261012-01-round-face-truth":
+        "the round face saying green over ran=0, a done without a parsed "
+        "summary, or publishing silent zeros beside a real INTEG_SUMMARY "
+        "(the t261012-01 false-green incident class)",
 }
 
 

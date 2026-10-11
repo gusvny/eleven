@@ -28,12 +28,21 @@ single writer)::
      "state": "running" | "done" | "failed",
      "pool": "<pool name>" | "unknown",
      "counts": {"ran": n, "pass": n, "fail": n, "env_fail": n},
+     "counts_note": "counts unreadable: <why>" | "counts disagree: <...>",
      "last_scenario": {"name": "...", "verdict": "PASS|FAIL|ENV_FAIL"} | null,
-     "outcome": {"verdict": "green|red", "reason": "..."} | null}
+     "outcome": {"verdict": "green|red|no_proof", "reason": "..."} | null}
 
 ``outcome`` is present only on the terminal ``face.json`` (never on a live
 ``current.json``), so "timed out" / "could not run" / "red" / "green" are
-distinguishable from records alone, without reading worker.log.
+distinguishable from records alone, without reading worker.log. The verdict
+vocabulary is FOUR-way distinguishable (t261012-01 spec 1+4): ``green``
+(requires ran > 0 — ``terminal_verdict``), ``red``, ``no_proof`` (ran == 0 or
+an unreadable count — never green, never red), and ``state=failed`` with the
+named could-not-run reason. ``counts_note`` appears only when the counts are
+NOT a trustworthy roll-up of the log: unreadable per-scenario lines beside a
+real summary, or header/summary disagreement — the face never publishes
+silent zeros next to a real summary, and never grants green from a
+disagreement.
 
 Vocabulary pin (review condition 2): the log parser below recognises the
 suite's output lines AS THEY ARE PRINTED TODAY by
@@ -94,6 +103,63 @@ _POOL_RE = re.compile(r"^(?:点名|跳过) \[(.+?)\]（池=(.+?)）")
 _POOL_EXCLUDED_RE = re.compile(r"^本轮跳过池=(.+?)（少 \d+ 条）")
 SUMMARY_PREFIX = "INTEG_SUMMARY "
 
+#: Count vocabulary, both spellings the suite prints (pinned like the block
+#: regexes above). The INTEG_SUMMARY lines of ``run_scenarios.py`` (main path
+#: ~line 6400 and budget-exhausted path ~line 5820) use ``ran / pass / fail /
+#: not_checked``; the ledger run header's ``cases`` and the engine's
+#: ``develop_certify.run_verdict`` use ``ran / passed / failed / env_failed``;
+#: ``REPROBE_SUMMARY`` prints ``passed / failed / env_fail``. All fold to one
+#: canonical shape here, so a verdict never reads a 0 out of a renamed key.
+_SUMMARY_KEY_ALIASES = {
+    "ran": ("ran",),
+    "pass": ("pass", "passed"),
+    "fail": ("fail", "failed"),
+    "env_fail": ("not_checked", "env_fail", "env_failed"),
+}
+
+
+def normalize_summary_counts(obj):
+    """A summary-shaped dict -> the canonical counts (partial: only the keys
+    actually present), or None when no known count key hits at all. Integers
+    only (a float like NaN is not a count, a bool is not a proof)."""
+    if not isinstance(obj, dict):
+        return None
+    out = {}
+    for canon, aliases in _SUMMARY_KEY_ALIASES.items():
+        for alias in aliases:
+            v = obj.get(alias)
+            if isinstance(v, int) and not isinstance(v, bool):
+                out[canon] = v
+                break
+    return out or None
+
+
+def counts_agree(header_counts, summary_counts):
+    """True when the two canonical counts disagree on NO key the summary
+    actually carries. The summary may be partial (some sites print only
+    ``ran``); missing keys on either side are not a disagreement — a partial
+    witness is not a contradicting one."""
+    return all(header_counts.get(k) == v
+               for k, v in summary_counts.items())
+
+
+def terminal_verdict(counts):
+    """The engine's rule, pinned from ``develop_certify.run_verdict``:
+    green iff ran > 0 AND fail == 0 AND env_fail == 0 — ran == 0 is never a
+    proof (a live incident made that rule, t261012-01). One deliberate
+    divergence: the engine collapses ran == 0 to red; the FACE says
+    ``no_proof`` instead — a round that ran nothing is not a failure either,
+    and the four terminal outcomes (green / red / no_proof / failed+reason)
+    must stay distinguishable. Unreadable counts (None) -> ``no_proof``:
+    an unreadable count is not a proof."""
+    if not counts:
+        return "no_proof"
+    if counts.get("ran", 0) <= 0:
+        return "no_proof"
+    if counts.get("fail", 0) == 0 and counts.get("env_fail", 0) == 0:
+        return "green"
+    return "red"
+
 
 def _now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -102,14 +168,31 @@ def _now_iso():
 def snapshot_progress(text):
     """Pure: the whole suite-log text -> the progress the face should carry.
     Parses a SNAPSHOT (never deltas), so re-parsing the grown file is safe
-    and idempotent. Unknown/garbled lines are ignored (degrade rule)."""
+    and idempotent. Unknown/garbled lines are IGNORED for the running counts
+    (degrade rule) but NAMED in the return: ``scenario_lines_seen`` false
+    beside a summary means the face's zero counts are an unreadable log, not
+    a quiet round — the caller publishes a ``counts_note``, never the zeros
+    alone (t261012-01 spec 3)."""
     counts = {"ran": 0, "pass": 0, "fail": 0, "env_fail": 0}
     last = None
     pool = "unknown"
     summary_seen = False
+    scenario_lines_seen = False
+    summary_counts = None
+    summary_error = None
     for line in (text or "").splitlines():
         line = line.strip()
-        summary_seen = summary_seen or line.startswith(SUMMARY_PREFIX)
+        if line.startswith(SUMMARY_PREFIX):
+            summary_seen = True
+            try:
+                payload = json.loads(line[len(SUMMARY_PREFIX):])
+            except ValueError as e:
+                summary_error = "integ_summary_malformed:%s" % e
+            else:
+                summary_counts = normalize_summary_counts(payload)
+                if summary_counts is None:
+                    summary_error = "integ_summary_counts_unreadable"
+            continue
         m = _POOL_EXCLUDED_RE.match(line)
         if m:
             continue  # exclusion names what did NOT run; pool stays honest
@@ -119,23 +202,28 @@ def snapshot_progress(text):
             continue
         m = _ENV_FAIL_RE.match(line)
         if m:
+            scenario_lines_seen = True
             counts["ran"] += 1
             counts["env_fail"] += 1
             last = {"name": m.group(1), "verdict": "ENV_FAIL"}
             continue
         m = _FAIL_RE.match(line)
         if m:
+            scenario_lines_seen = True
             counts["ran"] += 1
             counts["fail"] += 1
             last = {"name": m.group(1), "verdict": "FAIL"}
             continue
         m = _PASS_RE.match(line)
         if m:
+            scenario_lines_seen = True
             counts["ran"] += 1
             counts["pass"] += 1
             last = {"name": m.group(1), "verdict": "PASS"}
     out = {"counts": counts, "pool": pool,
-           "last_scenario": last, "summary_seen": summary_seen}
+           "last_scenario": last, "summary_seen": summary_seen,
+           "scenario_lines_seen": scenario_lines_seen,
+           "summary_counts": summary_counts, "summary_error": summary_error}
     return out
 
 
@@ -245,10 +333,22 @@ class FaceWriter:
             sys.stderr.write("%s warn: face start failed (%s)\n" % (TAG, e))
 
     def merge_progress(self, snap):
+        note = None
+        if snap.get("summary_seen") and not snap.get("scenario_lines_seen"):
+            # t261012-01 spec 3: a real summary beside unrecognized
+            # per-scenario lines must not read as zeros — name it.
+            note = ("counts unreadable: no recognizable per-scenario result "
+                    "lines in suite.log%s" % (
+                        "; " + snap["summary_error"]
+                        if snap.get("summary_error") else ""))
         self.face.update({"pool": snap["pool"],
                           "counts": snap["counts"],
                           "last_scenario": snap["last_scenario"],
                           "updated_at": _now_iso()})
+        if note is not None:
+            self.face["counts_note"] = note
+        else:
+            self.face.pop("counts_note", None)
 
     def finish(self, state, verdict=None, reason=None):
         """Terminal write: face.json inside the run dir (outcome stays

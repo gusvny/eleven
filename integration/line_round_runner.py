@@ -488,13 +488,56 @@ def run(env=None):
         if header is None:
             die("suite_rc_%d:%s" % (rc, why))
         if face is not None:
-            # outcome stays visible (t261011-26 spec 4): completed-but-red is
-            # a proof, completed-clean is green — counts come from the relayed
-            # header (the same recount the suite produced), never recounted
+            # outcome stays visible (t261011-26 spec 4) — and TRUTHFUL
+            # (t261012-01): green requires ran > 0, the face counts agree
+            # with the retained log, and an unreadable count is NAMED, never
+            # silently zero beside a real INTEG_SUMMARY.
             cases = header.get("cases") or {}
-            red = int(cases.get("failed", 0)) + int(cases.get("env_failed", 0))
-            face.merge_progress(lib_round_face.snapshot_progress(
-                log_path.read_text(encoding="utf-8", errors="replace")))
+            header_counts = lib_round_face.normalize_summary_counts(cases)
+            snap = lib_round_face.snapshot_progress(
+                log_path.read_text(encoding="utf-8", errors="replace"))
+            face.merge_progress(snap)
+            summary_counts = snap["summary_counts"]
+            if not snap["scenario_lines_seen"] and summary_counts is not None:
+                # the log's per-scenario lines are in an unknown shape: the
+                # face counts come from the suite's own INTEG_SUMMARY (they
+                # agree with the retained log by construction); the zeros of
+                # an unreadable parse are never published alone
+                counts = summary_counts
+                face.face["counts"] = counts
+                face.face["counts_note"] = (
+                    "counts from INTEG_SUMMARY: per-scenario result lines "
+                    "unrecognized in suite.log")
+            elif header_counts is not None or summary_counts is not None:
+                counts = header_counts or summary_counts  # header wins
+                if counts is summary_counts:
+                    face.face["counts"] = counts
+            else:
+                counts = None  # nothing readable anywhere: not a proof
+            if summary_counts is not None and header_counts is not None \
+                    and not lib_round_face.counts_agree(header_counts,
+                                                        summary_counts):
+                # the incident's exact family (face 0, log ran=1): a
+                # disagreement is published, and green is NOT granted from
+                # either side alone
+                face.face["counts_note"] = (
+                    "counts disagree: header=%s INTEG_SUMMARY=%s — green is "
+                    "not granted from a disagreement"
+                    % (header_counts, summary_counts))
+            verdict = (lib_round_face.terminal_verdict(counts)
+                       if counts is not None else "no_proof")
+            if verdict == "green" and "counts disagree" in \
+                    face.face.get("counts_note", ""):
+                verdict = "no_proof"
+            reason = ""
+            if verdict == "no_proof":
+                if counts is None:
+                    reason = "counts unreadable — no proof"
+                elif counts.get("ran", 0) <= 0:
+                    reason = "no scenario ran (ran=0) — no proof"
+                else:
+                    reason = "green refused: %s" % face.face.get(
+                        "counts_note", "")
             # the ledger's run id is the round's real identity — relabel the
             # retained evidence dir to it so face and ledger join 1:1
             run_id = header.get("id")
@@ -507,7 +550,7 @@ def run(env=None):
                 except OSError:
                     pass  # keep the provisional dir; the face still lands
             face.retain_log(log_path)
-            face.finish("done", "red" if red else "green", None)
+            face.finish("done", verdict, reason)
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0

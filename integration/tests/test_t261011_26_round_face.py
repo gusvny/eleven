@@ -384,13 +384,17 @@ class RoundFaceEndToEnd(StubTree):
         "       'cases': counts, 'verdict': sl.run_verdict(counts)}\n"
         "r = sl.append_run_header(hdr)\n"
         "assert r['written'] == 1, r\n"
-        "for i, v in enumerate(verdicts):\n"
-        "    fmt = {'pass': 'PASS [sc_%d] (0.1s)',\n"
-        "           'fail': 'FAIL [sc_%d] exit=1 (0.1s)',\n"
-        "           'env_fail': 'ENV_FAIL [sc_%d] exit=2 (0.1s)'}[v]\n"
-        "    print(fmt % i, flush=True)\n"
-        "print('INTEG_SUMMARY %s' % json.dumps({'ran': len(rows),\n"
-        "      'run_id': rid}), flush=True)\n")
+        "mode = os.environ.get('STUB_LOG_MODE', '')\n"
+        "if mode != 'nolines':\n"
+        "    for i, v in enumerate(verdicts):\n"
+        "        fmt = {'pass': 'PASS [sc_%d] (0.1s)',\n"
+        "               'fail': 'FAIL [sc_%d] exit=1 (0.1s)',\n"
+        "               'env_fail': 'ENV_FAIL [sc_%d] exit=2 (0.1s)'}[v]\n"
+        "        print(fmt % i, flush=True)\n"
+        "n = 1 if mode == 'shortsummary' else len(rows)\n"
+        "if mode != 'nosummary':\n"
+        "    print('INTEG_SUMMARY %s' % json.dumps({'ran': n,\n"
+        "          'run_id': rid}), flush=True)\n")
 
     def write_stub(self):
         self.stub_path = Path(self.tmp.name) / "stub_suite.py"
@@ -460,6 +464,199 @@ class RoundFaceEndToEnd(StubTree):
         # point: no traceback, no half-written face anywhere
         self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
         self.assertNotIn("Traceback", proc.stderr)
+
+
+class TerminalVerdict(unittest.TestCase):
+    """t261012-01: the face may never print a green it cannot support."""
+
+    def test_truth_table(self):
+        zeros = {"ran": 0, "pass": 0, "fail": 0, "env_fail": 0}
+        self.assertEqual(lrf.terminal_verdict(zeros), "no_proof")  # incident
+        self.assertEqual(lrf.terminal_verdict(None), "no_proof")
+        self.assertEqual(lrf.terminal_verdict({}), "no_proof")
+        self.assertEqual(lrf.terminal_verdict({"ran": 1, "pass": 1}),
+                         "green")
+        self.assertEqual(
+            lrf.terminal_verdict({"ran": 3, "pass": 2, "fail": 1}), "red")
+        self.assertEqual(lrf.terminal_verdict({"ran": 2, "env_fail": 1}),
+                         "red")
+
+    def test_matches_engine_rule_where_it_judges(self):
+        # the engine's run_verdict (develop_certify.py:704) for every input
+        # that RAN something; ran==0 deliberately diverges (face says
+        # no_proof, engine says red) — that divergence is the ticket
+        sys.path.insert(0, str(ROOT / "server" / "engine"))
+        try:
+            import develop_certify as dc
+        except ImportError:
+            self.skipTest("server engine tree absent")
+        for counts in ({"ran": 1, "pass": 1}, {"ran": 2, "fail": 1},
+                       {"ran": 1, "env_fail": 1},
+                       {"ran": 5, "pass": 4, "fail": 1, "env_fail": 0}):
+            eng = dc.run_verdict({"ran": counts["ran"],
+                                  "failed": counts.get("fail", 0),
+                                  "env_failed": counts.get("env_fail", 0)})
+            self.assertEqual(lrf.terminal_verdict(counts), eng, counts)
+
+
+class SummaryCountVocabulary(unittest.TestCase):
+    """Both summary spellings the suite prints (review condition 1)."""
+
+    SHAPES = [
+        # the suite's INTEG_SUMMARY main + budget-exhausted print sites
+        # (~6400 / ~5820)
+        ({"ran": 2, "pass": 2, "fail": 0, "not_checked": 0},
+         {"ran": 2, "pass": 2, "fail": 0, "env_fail": 0}),
+        # ledger header cases / engine vocabulary
+        ({"ran": 2, "passed": 2, "failed": 0, "env_failed": 0},
+         {"ran": 2, "pass": 2, "fail": 0, "env_fail": 0}),
+        # REPROBE_SUMMARY vocabulary
+        ({"ran": 1, "passed": 1, "failed": 0, "env_fail": 0},
+         {"ran": 1, "pass": 1, "fail": 0, "env_fail": 0}),
+        # partial (stub suites print only ran) — partial is not wrong
+        ({"ran": 2}, {"ran": 2}),
+    ]
+
+    def test_all_printed_shapes_normalize(self):
+        for raw, want in self.SHAPES:
+            self.assertEqual(lrf.normalize_summary_counts(raw), want, raw)
+
+    def test_junk_is_none_never_a_count(self):
+        for junk in (None, "x", [], {}, {"ran": "2"}, {"ran": True},
+                     {"pass": None}, {"ran": float("nan")}):
+            out = lrf.normalize_summary_counts(junk)
+            if out is not None:
+                for v in out.values():
+                    self.assertIsInstance(v, int, junk)
+            if junk in (None, "x", [], {}, {"pass": None}):
+                self.assertIsNone(out, junk)
+
+    def test_counts_agree_partial_witness_not_contradiction(self):
+        header = {"ran": 2, "pass": 2, "fail": 0, "env_fail": 0}
+        self.assertTrue(lrf.counts_agree(header, {"ran": 2}))
+        self.assertFalse(lrf.counts_agree(header, {"ran": 1}))  # incident
+        self.assertFalse(lrf.counts_agree(
+            header, {"ran": 2, "pass": 2, "fail": 1, "env_fail": 0}))
+
+    def test_snapshot_parses_both_summary_shapes(self):
+        for raw in ('{"ran": 2, "pass": 2, "fail": 0, "not_checked": 0}',
+                    '{"ran": 2, "passed": 2, "failed": 0, "env_failed": 0}'):
+            s = lrf.snapshot_progress("PASS [x] (1s)\nINTEG_SUMMARY " + raw)
+            self.assertTrue(s["summary_seen"])
+            self.assertTrue(s["scenario_lines_seen"])
+            self.assertEqual(s["summary_counts"]["ran"], 2, raw)
+            self.assertIsNone(s["summary_error"])
+
+    def test_snapshot_malformed_summary_named_not_raised(self):
+        s = lrf.snapshot_progress("PASS [x] (1s)\nINTEG_SUMMARY not-json")
+        self.assertTrue(s["summary_seen"])
+        self.assertIsNone(s["summary_counts"])
+        self.assertIn("malformed", s["summary_error"])
+
+    def test_snapshot_summary_without_known_count_keys_named(self):
+        s = lrf.snapshot_progress('INTEG_SUMMARY {"wall_s": 3.0}')
+        self.assertTrue(s["summary_seen"])
+        self.assertIsNone(s["summary_counts"])
+        self.assertIn("unreadable", s["summary_error"])
+
+
+class UnreadableCounts(unittest.TestCase):
+    """t261012-01 spec 3: zeros beside a real summary are never silent."""
+
+    UNRECOGNIZED = ("SCENARIO sc_a ok 1.2s\n"          # not the pinned shape
+                    "SCENARIO sc_b fail 0.5s\n"
+                    'INTEG_SUMMARY {"ran": 2, "passed": 1, "failed": 1}\n')
+
+    def test_snapshot_flags_unrecognized_lines(self):
+        s = lrf.snapshot_progress(self.UNRECOGNIZED)
+        self.assertFalse(s["scenario_lines_seen"])
+        self.assertEqual(s["counts"]["ran"], 0)   # the raw parse IS zeros...
+        self.assertEqual(s["summary_counts"]["ran"], 2)  # ...but named here
+
+    def test_merge_progress_publishes_counts_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = lrf.FaceWriter(Path(tmp), "r1", "l", {})
+            w.start()
+            w.merge_progress(lrf.snapshot_progress(self.UNRECOGNIZED))
+            self.assertIn("counts unreadable", w.face["counts_note"])
+            # readable log: the note is gone, never stale
+            w.merge_progress(lrf.snapshot_progress("PASS [x] (1s)\n"))
+            self.assertNotIn("counts_note", w.face)
+
+    def test_note_also_covers_malformed_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w = lrf.FaceWriter(Path(tmp), "r1", "l", {})
+            w.start()
+            w.merge_progress(lrf.snapshot_progress(
+                "INTEG_SUMMARY {torn"))
+            self.assertIn("counts unreadable", w.face["counts_note"])
+            self.assertIn("malformed", w.face["counts_note"])
+
+
+class TruthfulTerminalFace(RoundFaceEndToEnd):
+    """t261012-01 e2e over the real runner: the terminal face.json can no
+    longer say green over nothing, disagree with the log silently, or look
+    done without a terminal fact (review conditions 1-3 exercised live)."""
+
+    def face_of(self, proc):
+        self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+        out = json.loads(proc.stdout)
+        return json.loads(
+            (self.rounds() / out["id"] / "face.json").read_text()), out
+
+    def test_ran_zero_is_no_proof_never_green(self):
+        # the incident's verdict shape: a round whose cases ran NOTHING.
+        # Today the ledger itself refuses a zero-row header
+        # (ran_zero_no_rows_never_a_proof), so the live path lands failed —
+        # either way the face must NEVER say green, and the pure
+        # done+no_proof vocabulary is pinned in TerminalVerdict + the
+        # disagreement case below (header ran=0 -> done + no_proof).
+        self.write_stub()
+        proc = self.run_runner({"STUB_VERDICTS": "[]"})
+        self.assertNotEqual(proc.returncode, 0)
+        faces = list(self.rounds().glob("*/face.json"))
+        self.assertEqual(len(faces), 1)
+        face = json.loads(faces[0].read_text())
+        self.assertEqual(face["state"], "failed")
+        self.assertIn("integ_summary_missing",
+                      face["outcome"]["reason"])
+        self.assertNotIn("green", json.dumps(face))
+
+    def test_unrecognized_lines_counts_from_summary_named(self):
+        # the incident's counts shape: log per-scenario lines the parser
+        # does not know, next to a real INTEG_SUMMARY -> counts come from
+        # the summary, named — never silent zeros
+        self.write_stub()
+        proc = self.run_runner({"STUB_LOG_MODE": "nolines"})
+        face, _ = self.face_of(proc)
+        self.assertEqual(face["outcome"]["verdict"], "green")  # ran=2 proven
+        self.assertEqual(face["counts"]["ran"], 2)
+        self.assertIn("counts from INTEG_SUMMARY", face["counts_note"])
+
+    def test_counts_disagreement_never_green(self):
+        # review condition 2: header says ran=2, the log's summary says
+        # ran=1 — the disagreement is published and green is refused
+        self.write_stub()
+        proc = self.run_runner({"STUB_LOG_MODE": "shortsummary"})
+        face, _ = self.face_of(proc)
+        self.assertIn("counts disagree", face["counts_note"])
+        self.assertIn("header=", face["counts_note"])
+        self.assertNotEqual(face["outcome"]["verdict"], "green")
+        self.assertEqual(face["outcome"]["verdict"], "no_proof")
+
+    def test_exit0_without_summary_is_failed_not_done(self):
+        # review condition 3 / spec 2: a suite that exits 0 WITHOUT its
+        # summary line never produces state=done (this exercises the
+        # parse_integ_summary -> die -> face_failed path, distinct from the
+        # in-place snapshot degrade the unit classes above pin)
+        self.write_stub()
+        proc = self.run_runner({"STUB_LOG_MODE": "nosummary"})
+        self.assertNotEqual(proc.returncode, 0)
+        faces = list(self.rounds().glob("*/face.json"))
+        self.assertEqual(len(faces), 1)
+        face = json.loads(faces[0].read_text())
+        self.assertEqual(face["state"], "failed")
+        self.assertIn("integ_summary_missing", face["outcome"]["reason"])
 
 
 if __name__ == "__main__":

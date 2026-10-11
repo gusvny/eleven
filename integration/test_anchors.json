@@ -5021,6 +5021,9 @@
     },
     "integration/t261011-26/sc_t26101126_round_evidence_kept.py": {
       "anchor": "contract"
+    },
+    "integration/t261012-01/sc_t26101201_round_face_truth.py": {
+      "anchor": "contract"
     }
   }
 }
