@@ -125,7 +125,8 @@ const PROBE = `(() => {
   return { found: true, svg: true, text: (lm.textContent || ''),
     vbw: vb ? vb.width : null, vbh: vb ? vb.height : null,
     rects, texts, lines, paths, gs,
-    header: (lm.querySelector('header, [class*="head"], [class*="lsum"]') || lm).textContent.slice(0, 200) }
+    header: (lm.querySelector('header, [class*="head"], [class*="lsum"]') || lm).textContent.slice(0, 200),
+    axis: (() => { const ax = lm.querySelector('.wb-lm-axis[data-clock="true"]') || lm.querySelector('[data-testid="lane-map-axis"]'); if (!ax) return null; return { clock: ax.getAttribute('data-clock'), spans: [...ax.querySelectorAll('.wb-lm-axis-t')].map((s) => (s.textContent || '').trim()) } })() }
 })()`
 
 let lm = null
@@ -258,13 +259,17 @@ rec('P8 proportional widths survive (not equal-width blocks)',
   ws.length >= 6 && Math.min(...ws) > 0 && Math.max(...ws) / Math.min(...ws) >= 2,
   `w range ${Math.min(...ws)}..${Math.max(...ws)}`)
 
-// P9 chrome 存活绊线：头部 elapsed/now-at + 时间轴两时刻（深断言归 t261009-22）。
-// 时间轴起止时刻是 t261009-22 交付的 HTML 行（.wb-lm-axis），不在 SVG 里，
-// 故按整图 textContent 认时刻（t261009-53 实现对拍修正）。
+// P9 chrome 存活绊线：头部 elapsed/now-at + 时间轴轴行两时刻（深断言归 t261009-22）。
+// t261011-09 宿主裁决加强（改前史：textContent 把相邻时刻粘成 "now10:4013:39"，
+// \b 永不命中=断言假阴性；裸 \d{2}:\d{2} 数全文又只证「图上某处有个 HH:MM」）——
+// 直接读产品真实渲染的轴行：.wb-lm-axis[data-clock="true"]（回落 lane-map-axis
+// testid）在场，且其下两个 .wb-lm-axis-t span 均为非空 HH:MM。语义不变=两个
+// HH:MM 时刻渲染在轴上；产品未退役任何面（DOM 实证轴时刻一直渲染）。
+const HHMM = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(s)
 rec('P9 chrome tripwire: header summary and axis clocks still render',
   /elapsed/i.test(lm.header) && /now at/i.test(lm.header) &&
-  (lm.text.match(/\b\d{2}:\d{2}\b/g) || []).length >= 2,
-  lm.header.slice(0, 120))
+  lm.axis && lm.axis.spans.length >= 2 && lm.axis.spans.every(HHMM),
+  `${lm.header.slice(0, 100)} axis=${JSON.stringify(lm.axis)}`)
 
 // P10 全程零页错、零 undefined 字面（畸形时间线条目已在夹具外由 t261009-22
 // 覆盖；此处锁本票重写后不引入新的崩溃面）。
