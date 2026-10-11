@@ -4251,6 +4251,11 @@
       "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
       "sync_path": ""
     },
+    "integration/t261011-19/sc_t26101119_left_column_line_face.mjs": {
+      "anchor": "behaviour",
+      "note": "user-perceivable LineOn pill faces (one pill, constant text, engine-word anchor, overdue bang, colour-carries-state, absence/malformed render nothing), whole-matrix same-hue dot rule (never grey; blocked hollow vs failed solid), board state-background removal, and the engine-fed real-route leg (fixture develop store -> line_face/line_frozen in the response, named degradation never silent) (t261011-19)",
+      "sync_path": ""
+    },
     "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
       "anchor": "behaviour",
       "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",

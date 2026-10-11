@@ -534,6 +534,92 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     return JSON.parse(stdout)
   }
 
+  // ---------------------------------------------------------------------------
+  // t261011-19: the left column's LineOn pill data source. The engine derives
+  // the line face (spawn src/host/line-face-adapter.py once per project; its
+  // receipt is one single-line JSON); this route only ASSEMBLES: engine faces
+  // land on matching rows verbatim, and a dev-lane opt-in row with no landing
+  // row gets the membership word 'on_line' (lane_version + develop_line are
+  // themselves engine row keys — no state is derived here, only presence).
+  // Failure discipline: a non-zero exit, empty stdout, or non-JSON stdout all
+  // become ONE named `line_face_error` string; rows pass through un-enriched
+  // and the list never 502s because of the enrichment (explicit degradation,
+  // never silent).
+  // Spawn fan-out discipline (KI-018 polling family): `GET /wf/tickets` is
+  // what the console polls every 10 s per project, so the adapter spawn sits
+  // behind a 15 s TTL cache with a single-flight in-flight promise map —
+  // concurrent polls share one spawn instead of one each; a failed receipt is
+  // NOT cached past its own TTL. The timeout bounds the hang; the
+  // single-flight map bounds the fan-out.
+  const LINE_FACE_TTL_MS = 15_000
+  type LineFaceRead = {
+    frozen: boolean | null
+    faces: Map<string, { face: string; overdue: boolean }>
+    error: string
+  }
+  const lineFaceCache = new Map<string, { at: number; promise: Promise<LineFaceRead> }>()
+
+  async function readLineFace(repoDir: string, projectKey: string): Promise<LineFaceRead> {
+    const key = `${repoDir}::${projectKey}`
+    const hit = lineFaceCache.get(key)
+    if (hit && Date.now() - hit.at < LINE_FACE_TTL_MS) return hit.promise
+    const entry = {
+      at: Date.now(),
+      promise: (async (): Promise<LineFaceRead> => {
+        const poc = join(repoDir, 'server', 'engine')
+        const venvPy = join(poc, '.venv', 'bin', 'python')
+        const python = existsSync(venvPy) ? venvPy : 'python3'
+        const adapter = join(repoDir, 'server', 'plugins', 'workbench', 'src', 'host', 'line-face-adapter.py')
+        try {
+          const { stdout } = await execFileP(python, [adapter, projectKey], {
+            cwd: repoDir, timeout: 20_000, maxBuffer: 4 * 1024 * 1024,
+          })
+          const doc = JSON.parse(stdout)
+          if (doc?.ok !== true) {
+            return { frozen: null, faces: new Map(), error: `line-face adapter: ${String(doc?.reason ?? 'refused')}` }
+          }
+          const faces = new Map<string, { face: string; overdue: boolean }>()
+          for (const f of (Array.isArray(doc.faces) ? doc.faces : [])) {
+            if (f && typeof f.ticket === 'string' && typeof f.face === 'string') {
+              faces.set(f.ticket, { face: f.face, overdue: f.overdue === true })
+            }
+          }
+          return { frozen: doc.frozen === true, faces, error: '' }
+        } catch (err) {
+          // Crash path (traceback on stderr / signal / timeout): one named
+          // error, rows pass through un-enriched, nothing stays cached good.
+          lineFaceCache.delete(key)
+          return { frozen: null, faces: new Map(), error: String(err instanceof Error ? err.message : err) }
+        }
+      })(),
+    }
+    lineFaceCache.set(key, entry)
+    return entry.promise
+  }
+
+  /** Attach per-row line_face keys + the project-level frozen flag (t261011-19).
+   *  Degradation contract (arbitration round 1, code-fault fix): when the
+   *  adapter read carried a named error, rows pass through UN-enriched — the
+   *  `on_line` membership branch is taken ONLY on a clean read. A stuck
+   *  adapter must never present a legitimate-looking line state; the error
+   *  string already names the cause, and the pill's absence is the honest
+   *  "unreadable" face. */
+  function applyLineFace(tickets: any[], face: LineFaceRead): { frozen: boolean | null; error: string } {
+    for (const tk of tickets) {
+      const hit = face.error === '' ? face.faces.get(String(tk.id)) : undefined
+      if (hit) {
+        tk.line_face = hit.face
+        tk.line_face_overdue = hit.overdue
+      } else if (face.error === '' && tk.lane_version === 'develop-buffer-v1' && tk.develop_line) {
+        // On-line, not landed (the design's baseline row): membership only,
+        // from two engine row keys — never a derived state.
+        tk.line_face = 'on_line'
+        tk.line_face_overdue = false
+      }
+    }
+    return { frozen: face.frozen, error: face.error }
+  }
+
   /** 台面：ticket list + workflow list 并行（F1 更正：主列表不再逐票 show 取 pending——
    *  审批理由详情抽屉自可见，行卡不放审批理由=mock 口径）。
    *  多项目化（260823）：?project=<key> 必传（projects.yaml 注册表，无默认值）——
@@ -668,7 +754,16 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           }
         } catch { /* 静默 */ }
       }))
-      sendJson(res, 200, { ok: true, result: { count: tickets.length, tickets }, workflows })
+      // t261011-19: the LineOn pill enrichment — best-effort, named on failure,
+      // never a 502 (see readLineFace/applyLineFace above).
+      const lf = applyLineFace(tickets, await readLineFace(repo, projectKey))
+      sendJson(res, 200, {
+        ok: true,
+        result: {
+          count: tickets.length, tickets,
+          line_frozen: lf.frozen, line_face_error: lf.error,
+        },
+        workflows })
     } catch (err) {
       sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }

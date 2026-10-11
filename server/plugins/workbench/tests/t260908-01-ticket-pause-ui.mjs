@@ -32,13 +32,19 @@ ok('pauseOpOf：畸形输入不 throw 且按真值性归位（undefined→pause�
   assert.equal(pauseOpOf('true'), 'resume')
 })
 
-/* ------------------------------------------------ pausedBadgeText 二态文案 */
+/* ------------------------------------------------ pausedBadgeText 二态文案
+   t261011-19：徽标图标化后，行面只留 ⏸ 单字形；二态文案只活在 title/aria。
+   断言改钉「锚点 + 词语义」不钉逐字 copy（宿主令：never the copy）——
+   两相位可辨、未知相位兜底到 pending 语义、词带 ⏸ 字形。 */
 
-ok('pausedBadgeText：at_gate/pending/未知相位 三行真值', () => {
-  assert.equal(pausedBadgeText('at_gate'), '⏸ Paused at the stage gate')
-  assert.equal(pausedBadgeText('pending'), '⏸ Pausing (takes effect between stages)')
-  assert.equal(pausedBadgeText(undefined), '⏸ Pausing (takes effect between stages)') // 未知兜底=保守提示
-  assert.equal(pausedBadgeText('some_future_phase'), '⏸ Pausing (takes effect between stages)')
+ok('pausedBadgeText：两相位语义可辨，未知/畸形相位兜底到 pending 语义', () => {
+  const gate = pausedBadgeText('at_gate')
+  const pending = pausedBadgeText('pending')
+  assert.notEqual(gate, pending, '两相位文案可辨（不钉逐字 copy）')
+  assert.equal(pausedBadgeText(undefined), pending, '未知相位兜底=保守 pending 语义')
+  assert.equal(pausedBadgeText('some_future_phase'), pending)
+  assert.equal(pausedBadgeText(''), pending)
+  assert.ok(gate.startsWith('⏸') && pending.startsWith('⏸'), '词带暂停字形（icon 同源）')
 })
 
 /* ------------------------------------------------ 源码锁（防消费面漂移） */
@@ -47,6 +53,15 @@ ok('行卡源码锁：暂停徽标 data 锚点 + pause/resume 操作位 + busy �
   const card = readFileSync(join(repo, 'server/plugins/workbench/src/client/ticket-row-card.tsx'), 'utf8')
   assert.ok(card.includes("data-paused=\"1\""), '徽标 data-paused 锚点')
   assert.ok(card.includes("data-paused-phase="), '徽标 data-paused-phase 锚点')
+  // t261011-19：compact 行面只留 ⏸ 字形；词走 aria-label/title，不逐字钉 copy。
+  const compactIcon = card.slice(card.indexOf('const pauseIcon'), card.indexOf('const ctlSpan'))
+  assert.ok(compactIcon.includes("role=\"img\""), 'compact 暂停徽标 role=img')
+  assert.ok(compactIcon.includes('aria-label={pausedBadgeText(t.paused_phase)}'), '词进 aria-label')
+  assert.ok(compactIcon.includes("'Halted at the stage gate") || compactIcon.includes('title={t.paused_phase'),
+    'title 承载二态语境')
+  assert.ok(compactIcon.includes('⏸'), '行面字形=⏸')
+  assert.ok(!/\n\s*Paused at the stage gate'?\s*\}/.test(compactIcon) || !compactIcon.includes('>\n            ⏸ Paused'),
+    '行面不渲染整句 copy')
   assert.ok(card.includes("'pause' | 'resume'"), 'CardOp 键集含 pause/resume')
   assert.ok(card.includes("ops.includes('pause')") && card.includes("ops.includes('resume')"),
     'pause/resume 操作位渲染分支')

@@ -226,20 +226,20 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
   cursor:pointer;font-size:13px;flex-wrap:wrap;box-shadow:0 1px 2px rgba(31,35,40,.05)}
 /* hover 不再改写底色（会盖掉 waiting/blocked 状态行底）——改阴影提层，主题安全 */
 .wb-card:hover{box-shadow:0 1px 4px rgba(31,35,40,.14)}
-/* 状态行底=主题令牌派生（t260905-08 根因修复：原行内写死浅色×主题字色=深色不可读）。
- * t260915-08 实证补②：板面卡实际渲染在 .wb-sb-right 内，sidebar 后注入样式表的
- * .wb-sb .wb-card {background:transparent} 规则（同特异性 0,2,0、后序胜）会把状态底色
- * 整体压平（先于本票就存在的看板级 bug，dev-lane 等待行同样瞎）——状态行特有规则
- * 一律提特异性到 .wb-root .wb-card[data-state=…]（0,3,0，顺序无关压制 blanket 规则；
- * active 行让位 sidebar 的选中底色，设计如此）。
- * t260915-08 仲裁修复（hex-clean 看守打回项）：老浏览器 color-mix IACVT 的静态回退
- * 色收编进 theme.ts 令牌声明位（@supports not 分档覆盖令牌值），本消费位只经 var()
- * fallback 供出（allowlist C 合法位），零裸 hex。 */
-.wb-root .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
-.wb-root .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
-/* t260919-02「已失败」行卡：红系行底+实红点/状态字（与 blocked 同令牌族不同文案，
- * 与 done 灰/active 蓝可辨；特异性 0,3,0 与 waiting/blocked 同档，压 sidebar blanket）。 */
-.wb-root .wb-card[data-state=failed]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+/* The state row background used to be theme-token derived (t260905-08: the old
+ * hard-coded light wash met light text in the dark theme = unreadable).
+ * t261011-19 (host order): the state-derived row background retires wholesale —
+ * the left column never had one and the board drops it too; the ticket state is
+ * now carried by the WHOLE dot matrix (reached cells = full state hue, unreached
+ * = a dim shade of the SAME hue, never grey; blocked = hollow red cell, failed =
+ * solid red cell — shape, not a new colour). Closed rows keep only the whole-row
+ * 0.72 dim (.wb-card[data-state=done]); active keeps the selected outline.
+ * t260905-08-wb-contrast-guard measures text against the EFFECTIVE background;
+ * with the wash gone it measures against the panel/canvas base — the changed
+ * expectation is declared on the ticket (not in the known-red roster: red is red).
+ * History note (kept): t260915-08 once raised these rules to
+ * .wb-root .wb-card[data-state=...] (0,3,0) to beat the sidebar blanket, and
+ * t260919-02 added the failed wash — both retire with this ticket. */
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
 .wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
@@ -272,14 +272,22 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-card-role{flex:none}
 .wb-card-pending{font-size:11px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
   border-radius:4px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* 迷你站道：点数=模板阶段数；绿=已过/状态色=当前/灰=未来（颜色随 data-state 派生） */
+/* Mini lane: dot count = topology stage count. t261011-19 (host order, verbatim):
+ * reached cell N = the first N cells in the FULL state colour, the remaining
+ * 10-N cells in a dim shade of the SAME hue (never grey); blocked = hollow red
+ * cell, failed = solid red cell (shape split). A closed row (data-state=done)
+ * takes the muted family across the matrix (the row is already dimmed 0.72). */
 .wb-card-lane{display:inline-flex;gap:4px;align-items:center;flex:none}
 .wb-card-lane-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-derive-border,#d0d7de);display:inline-block}
-.wb-card-lane-dot[data-visual=done]{background:var(--dsw-derive-success-solid,#2da44e)}
-.wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--dsw-derive-warn-border,#d4a72c)}
-.wb-card-lane-dot[data-visual=current][data-state=blocked]{background:var(--dsw-derive-danger,#cf222e)}
-.wb-card-lane-dot[data-visual=current][data-state=failed]{background:var(--dsw-derive-danger-solid,#d1242f)}
-.wb-card-lane-dot[data-visual=current][data-state=active]{background:var(--dsw-derive-accent,#0969da)}
+.wb-card-lane-dot[data-visual=done],.wb-card-lane-dot[data-visual=current]{background:var(--dsw-derive-accent,#0969da)}
+.wb-card-lane-dot[data-visual=todo][data-state=active]{background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-card-lane-dot[data-visual=done][data-state=waiting],.wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--dsw-derive-warn-border,#d4a72c)}
+.wb-card-lane-dot[data-visual=todo][data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-card-lane-dot[data-visual=done][data-state=blocked],.wb-card-lane-dot[data-visual=current][data-state=blocked]{background:transparent;border:1px solid var(--dsw-derive-danger,#cf222e)}
+.wb-card-lane-dot[data-visual=todo][data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-card-lane-dot[data-visual=done][data-state=failed],.wb-card-lane-dot[data-visual=current][data-state=failed]{background:var(--dsw-derive-danger-solid,#d1242f)}
+.wb-card-lane-dot[data-visual=todo][data-state=failed]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-card-lane-dot[data-visual=done][data-state=done],.wb-card-lane-dot[data-visual=current][data-state=done]{background:var(--dsw-derive-border,#d0d7de)}
 /* 行卡动作位（右侧）：衍生动作（去签字/看原因）+ 管理动作 */
 .wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
 .wb-card-btn{font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid var(--dsw-derive-border,#d0d7de);

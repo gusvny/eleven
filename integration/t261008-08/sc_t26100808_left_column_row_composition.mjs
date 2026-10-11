@@ -201,6 +201,8 @@ function rowFace(id) {
     grip: !!row.querySelector('[data-order-grip]'),
     controls: controlsIn(row),
     tip: row.getAttribute('title') || '',
+    pausedPhase: row.querySelector('[data-paused]')
+      ? row.querySelector('[data-paused]').getAttribute('data-paused-phase') : null,
     visibleTime: /\\b\\d{1,2}:\\d{2}\\b/.test(row.textContent || '') || /\\bago\\b/.test(row.textContent || ''),
   }
 }
@@ -274,13 +276,21 @@ async function runBrowser(pw, browser) {
       !q.visibleTime && /Updated\b/.test(q.tip),
       `visibleTime=${q.visibleTime} tip=${JSON.stringify(q.tip.slice(0, 120))}`)
 
-    // T1b 行面构成（票面点名断言面）：一行=位次号+彩点+编号+标题（无英文状态词、
-    // 无 epic chip）；二行=阶段小字+epic chip+十格点（无进展句元素、无相对时间元素）。
+    // T1b 行面构成（票面点名断言面；t261011-19 三行卡）：一行=票号→位次→LineOn
+    // 锚（不在线上的票不渲染）→标题独立成行；三行=阶段小字+epic chip+十格点
+    // （无进展句元素、无相对时间元素、无行首状态点——状态改由点阵整阵承担）。
     const comp = await probe(page, `(() => {
       const row = rowFor(${JSON.stringify(Q1)})
       if (!row) return null
+      const leaves = [...row.querySelectorAll('*')].filter(el => el.children.length === 0)
+        .map(el => (el.textContent || '').trim())
       return {
         stateWord: !!row.querySelector('.wb-card-state'),
+        headDot: !!row.querySelector('.wb-card-dot'),
+        idFirst: leaves[0] === ${JSON.stringify(Q1)},
+        pos: !!row.querySelector('[data-order-pos]'),
+        pill: row.querySelector('[data-line-face]') ? row.querySelector('[data-line-face]').getAttribute('data-line-face') : null,
+        titleOwnLine: !!row.querySelector('.wb-card-l2 .wb-card-title'),
         stage: row.querySelector('.wb-card-stage') ? row.querySelector('.wb-card-stage').textContent.trim() : null,
         epic: row.querySelector('.wb-card-epic') ? row.querySelector('.wb-card-epic').textContent.trim() : null,
         dots: row.querySelectorAll('.wb-stage-dot').length,
@@ -288,8 +298,10 @@ async function runBrowser(pw, browser) {
         time: !!row.querySelector('.wb-card-time'),
       }
     })()`)
-    rec('T1b queued row composition: line1 = pos + dot + id + title (no state word), line2 = stage + epic + ten dots',
-      !!comp && comp.stateWord === false && !!comp.stage && !!comp.epic && comp.dots === 10
+    rec('T1b queued row composition (three-line card): line1 = id -> pos -> LineOn anchor, line2 = title alone, line3 = stage + epic + ten dots',
+      !!comp && comp.stateWord === false && comp.headDot === false && comp.idFirst === true
+        && comp.pos === true && comp.titleOwnLine === true
+        && !!comp.stage && !!comp.epic && comp.dots === 10
         && comp.prog === false && comp.time === false,
       comp ? JSON.stringify(comp) : 'no row')
 
@@ -318,11 +330,16 @@ async function runBrowser(pw, browser) {
       !!blk && blk.blw === 0 && blk.bbw >= 1 && blk.badge >= 1 && blk.name === true,
       blk ? JSON.stringify(blk) : 'no block')
 
-    // T3 你暂停的行：琥珀点（paused），无位次号、无把手、无排序控件（区别 human-hold 行）。
+    // T3 你暂停的行（t261011-19 declared口径 change, host order 261011 + design §14
+    // #9): the pause face is the ICON ONLY — the amber data-order-dot=paused marker
+    // is RETIRED on the compact row, the two-phase wording lives in title/aria, the
+    // data-paused / data-paused-phase anchors stay. Rank stays QUEUED-only: a paused
+    // row shows no position number, no grip, no ordering controls. The old
+    // `dot === 'paused'` pin was an anchor on a face this ticket retires on purpose.
     const p3 = await probe(page, `rowFace(${JSON.stringify(PAU)})`)
-    rec('T3 paused row: dot only, no position, no controls',
-      !!p3 && p3.dot === 'paused' && !p3.pos && !p3.grip && p3.controls.length === 0,
-      p3 ? `dot=${p3.dot} pos=${p3.pos} grip=${p3.grip} controls=${JSON.stringify(p3.controls)}` : 'no row')
+    rec('T3 paused row: pause anchor only (icon face), no dot, no position, no controls',
+      !!p3 && p3.dot === null && p3.pausedPhase !== null && !p3.pos && !p3.grip && p3.controls.length === 0,
+      p3 ? `dot=${p3.dot} pausedPhase=${p3.pausedPhase} pos=${p3.pos} grip=${p3.grip} controls=${JSON.stringify(p3.controls)}` : 'no row')
 
     // T4 明暗两主题捕获（验收证据面；尽力而为，不判红）。
     const outDir = join(REPO, 'integration', 't261008-08', 'out')

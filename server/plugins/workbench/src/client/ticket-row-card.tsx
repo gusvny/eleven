@@ -17,7 +17,7 @@ import type { OrderKind } from './queue-model.ts'
 import {
   deriveTicketState, STATE4_LABEL, epicColorOf, stageShortOf, relativeTime,
   laneDots, toMillis, ticketDisplayTitle, pausedBadgeText, closeHealthOf, closeHealthBadgeOf,
-  dismissedFaceOf, dismissedNoteOf,
+  dismissedFaceOf, dismissedNoteOf, lineFaceOf, linePillText,
   type WfLike,
 } from './ticket-list-model.ts'
 import { stageDisplayLabel } from './ui-labels.ts'
@@ -64,6 +64,11 @@ export interface CardTicket {
    *  read (the dismissed key is absent then). Non-empty = keep the row visible
    *  and surface the note; never read as "dismissed". */
   dismissed_note?: unknown
+  /** t261011-19: the ENGINE's line-face word (host list route enrichment fed by
+   *  src/host/line-face-adapter.py) + its overdue flag. Read through
+   *  lineFaceOf — a mapping, never a derivation; absent/unknown => no pill. */
+  line_face?: unknown
+  line_face_overdue?: unknown
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -236,6 +241,102 @@ export function TicketRowCard({
   //   原 rowTone 行内浅色写死=深色主题浅字撞浅底根因，宿主 260906 实报）。
   // 彩条 borderLeftColor 保留 epicColor 原色（装饰不承载文字；17 号 T6/walkthrough
   // 断言直读此值，R8 已核平）。
+  // t261011-19: shared row fragments. The compact (left-column) card becomes a
+  // THREE-line card (design contract §14 #1): L1 = id -> rank -> LineOn pill ->
+  // pause icon -> row-end ordering controls; L2 = the title alone; L3 = step
+  // name -> category chip -> the ten-cell dot matrix at the right edge. The
+  // board (non-compact) card keeps its current two-line composition unchanged.
+  const lineFace = compact ? lineFaceOf(t) : null
+  const idSpan = <span className="wb-card-id">{t.id}</span>
+  const posSpan = ordering?.kind === 'queued' && (
+    <span className="wb-order-pos" data-order-pos={ordering.pos ?? 0}
+      title={`Queue position ${ordering.pos ?? 0}`}>{ordering.pos ?? ''}</span>
+  )
+  const pillSpan = lineFace && (
+    <span className="wb-line-pill" data-line-face={t.line_face}
+      data-line-overdue={lineFace.overdue ? '1' : undefined}
+      title={`Line ${t.line_face === 'on_line' ? 'on the develop line, not landed' : `state: ${String(t.line_face)}`}`}>
+      {linePillText(lineFace)}
+    </span>
+  )
+  const pauseIcon = compact && t.paused && (
+    <span className="wb-card-paused" data-paused="1"
+      data-paused-phase={t.paused_phase || 'pending'} role="img"
+      aria-label={pausedBadgeText(t.paused_phase)}
+      title={t.paused_phase === 'at_gate'
+        ? 'Halted at the stage gate: next stage not dispatched; click Resume to continue'
+        : 'Pause accepted: the current stage (incl. in-flight agent) finishes, then stops'}>
+      ⏸
+    </span>
+  )
+  const ctlSpan = orderable && (
+    <span className="wb-order-ctl" data-order-ctl="">
+      <span className="wb-order-grip" data-order-grip="" title="Drag to reorder"
+        aria-label={`Drag to reorder ${t.id}`}>⋮⋮</span>
+      <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
+        aria-label={`Move ${t.id} up`} title="Move up"
+        onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(-1) }}>⌃</button>
+      <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
+        aria-label={`Move ${t.id} down`} title="Move down"
+        onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(1) }}>⌄</button>
+    </span>
+  )
+  const titleSpan = (
+    <span className="wb-card-title" data-wb-row-title={ticketDisplayTitle(t)}
+      data-title-src={t.title?.trim() ? 'title' : t.title_or_first ? 'first' : 'id'}>
+      {ticketDisplayTitle(t)}
+    </span>
+  )
+  const kindSpan = kindBadge && (
+    <span className="wb-card-kind" data-kind-badge={kindBadge.text}
+      title={`Kind: ${kindBadge.text}`}>
+      {kindBadge.text}
+    </span>
+  )
+  const healthSpan = (() => {
+    const badge = closeHealthBadgeOf(t)
+    return badge !== '' && (
+      <span className="wb-card-health" data-close-health={closeHealthOf(t)}
+        title={t.close_health_reason || badge}>
+        {badge}
+      </span>
+    )
+  })()
+  const noteSpan = dismissedNoteOf(t) !== '' && (
+    <span className="wb-card-dismiss-note" data-dismiss-note="1"
+      title={dismissedNoteOf(t)}>Dismiss note</span>
+  )
+  const viewersSpan = (peerViewers?.length ?? 0) > 0 && (
+    <span title={`Viewed from another tab: ${(peerViewers ?? []).map(v => v.who).join(', ')}`}>👀</span>
+  )
+  const epicChip = t.epic && (
+    <span className="wb-card-epic"
+      style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
+      title={`Epic: ${t.epic}`}
+      onClick={(ev) => { ev.stopPropagation(); onOpenEpic?.(t.epic ?? '') }}>
+      {t.epic}
+    </span>
+  )
+  const stageSpan = compact && stageLabel !== '' && (
+    <span className="wb-card-stage" data-wb-row-stage={stageLabel}>{stageLabel}</span>
+  )
+  // t261011-19: the compact ten-cell matrix carries the state on every cell —
+  // container data-state + per-cell data-visual (lit = reached, dim = not yet
+  // reached; CSS paints both in the SAME state hue, dim shade for todo; blocked
+  // vs failed split by SHAPE: hollow vs solid red). data-on stays for the
+  // existing lit-count anchor; the count stays exactly 10.
+  const dotsSpan = compact && ordering?.dotsLit !== undefined && (
+    <span className="wb-stage-dots" data-lit={ordering.dotsLit} data-state={state4}
+      title={`Stage dots: ${ordering.dotsLit} of 10`}>
+      {Array.from({ length: 10 }, (_, i) => {
+        const lit = i < (ordering.dotsLit ?? 0)
+        return (
+          <span key={i} className="wb-stage-dot"
+            data-on={lit || undefined} data-visual={lit ? 'lit' : 'todo'} />
+        )
+      })}
+    </span>
+  )
   return (
     <div
       className="wb-card" data-ticket-id={t.id}
@@ -253,157 +354,102 @@ export function TicketRowCard({
       role="button"
     >
       <div className="wb-card-l1">
-        {/* CL-3 order marks (t261006-18): queued = leading position number;
-            at-work = green dot; human-hold / paused = amber dot. At-work,
-            hold and paused rows render NO ordering controls - everything
-            comes from the parent's ordering projection, never judged here. */}
-        {ordering?.kind === 'queued' && (
-          <span className="wb-order-pos" data-order-pos={ordering.pos ?? 0}
-            title={`Queue position ${ordering.pos ?? 0}`}>{ordering.pos ?? ''}</span>
-        )}
-        {ordering?.kind === 'atwork' && (
-          <span className="wb-order-dot" data-order-dot="work" title="At work" />
-        )}
-        {(ordering?.kind === 'hold' || ordering?.kind === 'paused') && (
-          <span className="wb-order-dot" data-order-dot={ordering.kind === 'hold' ? 'hold' : 'paused'}
-            title={ordering.kind === 'hold' ? 'Holding a slot at the human gate' : 'Paused by you (no slot)'} />
-        )}
-        {/* 状态点着色走 CSS 伪元素（::before）——元素本体无圆角无底色，
-            不与迷你站道圆点混数（UI 场景 T5 以几何特征数点） */}
-        <span className="wb-card-dot" data-state={state4} />
-        {/* t261008-08 (mock v11): the left-column line 1 keeps dot + id + title
-            only — the English state word leaves the row face (the state stays
-            on the coloured dot); the board column keeps it. */}
-        {!compact && (
-          <span className="wb-card-state" data-state={state4}>{STATE4_LABEL[state4]}</span>
-        )}
-        {/* 段间暂停徽标（t260908-01）：二态文案防「已暂停却还在跑」误读——
-            pending=信号已受理、当前段还在跑（待段间生效）；at_gate=已停在段间门口。 */}
-        {t.paused && (
-          <span className="wb-card-paused" data-paused="1"
-            data-paused-phase={t.paused_phase || 'pending'}
-            title={t.paused_phase === 'at_gate'
-              ? 'Halted at the stage gate: next stage not dispatched; click Resume to continue'
-              : 'Pause accepted: the current stage (incl. in-flight agent) finishes, then stops'}>
-            {pausedBadgeText(t.paused_phase)}
-          </span>
-        )}
-        {/* 类别徽标（t260916-15）：父层给的来源类别小 chip（如侧栏巡检行），排状态
-            之后、编号之前=扫视起点区；缺省不渲染（中列板面零变化）。 */}
-        {kindBadge && (
-          <span className="wb-card-kind" data-kind-badge={kindBadge.text}
-            title={`Kind: ${kindBadge.text}`}>
-            {kindBadge.text}
-          </span>
-        )}
-        {/* 收口健康徽标（t260921-03）：异常收口/待核行可扫读（正常收口不贴徽标=
-            既有收口行零变化，失败行已有「已失败」态字不重复贴）。判定走模型层
-            closeHealthOf 单点（引擎键优先、缺键兜底），data-close-health=渲染断言锚。 */}
-        {(() => {
-          const badge = closeHealthBadgeOf(t)
-          return badge !== '' && (
-            <span className="wb-card-health" data-close-health={closeHealthOf(t)}
-              title={t.close_health_reason || badge}>
-              {badge}
-            </span>
-          )
-        })()}
-        {/* t261009-43: the engine's journal-read-failure note, surfaced ON the
-            row (not only the tooltip) — a row with a note stays on the board
-            and must say why its dismissal face is unreadable. Full text in the
-            title; the chip is the visible anchor (data-dismiss-note). */}
-        {dismissedNoteOf(t) !== '' && (
-          <span className="wb-card-dismiss-note" data-dismiss-note="1"
-            title={dismissedNoteOf(t)}>Dismiss note</span>
-        )}
-        <span className="wb-card-id">{t.id}</span>
-        {(peerViewers?.length ?? 0) > 0 && (
-          <span title={`Viewed from another tab: ${(peerViewers ?? []).map(v => v.who).join(', ')}`}>👀</span>
-        )}
-        {/* 标题展示选择（t260905-07）：title → title_or_first（无标题票首句，t260903-10
-            现场）→ 工单号（enrichment 失败的最后兜底，宁显编号不显「（无标题）」） */}
-        <span className="wb-card-title" data-wb-row-title={ticketDisplayTitle(t)}
-          data-title-src={t.title?.trim() ? 'title' : t.title_or_first ? 'first' : 'id'}>
-          {ticketDisplayTitle(t)}
-        </span>
-        {/* CL-3 ordering controls (t261008-08, mock v11): handgrip (drag anchor)
-            + one-step up/down arrows, queued rows only, at the ROW END (mock:
-            arrows trail the row, never the row head). Every click/drag ends in
-            the parent's POST reorder -> re-read the same face; zero local
-            order state. Position number stays first, grip right after it. */}
-        {orderable && (
-          <span className="wb-order-ctl" data-order-ctl="">
-            <span className="wb-order-grip" data-order-grip="" title="Drag to reorder"
-              aria-label={`Drag to reorder ${t.id}`}>⋮⋮</span>
-            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
-              aria-label={`Move ${t.id} up`} title="Move up"
-              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(-1) }}>⌃</button>
-            <button type="button" className="wb-order-arrow" disabled={ordering?.busy}
-              aria-label={`Move ${t.id} down`} title="Move down"
-              onClick={(ev) => { ev.stopPropagation(); ordering?.onMove?.(1) }}>⌄</button>
-          </span>
-        )}
-        {/* Epic chip: coloured chip, click filters by epic (stopPropagation keeps
-            row navigation out). t261008-08: on compact rows the chip drops to
-            line 2 (mock: l2 = stage · epic + dots). */}
-        {!compact && t.epic && (
-          <span className="wb-card-epic"
-            style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
-            title={`Epic: ${t.epic}`}
-            onClick={(ev) => { ev.stopPropagation(); onOpenEpic?.(t.epic ?? '') }}>
-            {t.epic}
-          </span>
+        {compact ? (
+          /* t261011-19 three-line card, L1: id FIRST -> rank -> LineOn pill ->
+             pause icon -> row-end ordering controls (queued rows only). */
+          <>
+            {idSpan}
+            {posSpan}
+            {pillSpan}
+            {pauseIcon}
+            {ctlSpan}
+          </>
+        ) : (
+          // Board column: the existing composition, byte-for-byte in order.
+          <>
+            {/* CL-3 order marks (t261006-18): queued = leading position number;
+                at-work = green dot; human-hold / paused = amber dot. At-work,
+                hold and paused rows render NO ordering controls - everything
+                comes from the parent's ordering projection, never judged here. */}
+            {ordering?.kind === 'queued' && (
+              <span className="wb-order-pos" data-order-pos={ordering.pos ?? 0}
+                title={`Queue position ${ordering.pos ?? 0}`}>{ordering.pos ?? ''}</span>
+            )}
+            {ordering?.kind === 'atwork' && (
+              <span className="wb-order-dot" data-order-dot="work" title="At work" />
+            )}
+            {(ordering?.kind === 'hold' || ordering?.kind === 'paused') && (
+              <span className="wb-order-dot" data-order-dot={ordering.kind === 'hold' ? 'hold' : 'paused'}
+                title={ordering.kind === 'hold' ? 'Holding a slot at the human gate' : 'Paused by you (no slot)'} />
+            )}
+            {/* State dot colouring rides the CSS ::before pseudo-element — the
+                element itself stays borderless and uncoloured so it never joins
+                the mini-lane dot count (the UI scenario counts dots geometrically). */}
+            <span className="wb-card-dot" data-state={state4} />
+            <span className="wb-card-state" data-state={state4}>{STATE4_LABEL[state4]}</span>
+            {/* Inter-stage pause badge (t260908-01): two-phase wording guards
+                against the "paused but still running" misread — pending = signal
+                accepted, the current stage (incl. an in-flight agent) finishes;
+                at_gate = halted at the stage gate. */}
+            {t.paused && (
+              <span className="wb-card-paused" data-paused="1"
+                data-paused-phase={t.paused_phase || 'pending'}
+                title={t.paused_phase === 'at_gate'
+                  ? 'Halted at the stage gate: next stage not dispatched; click Resume to continue'
+                  : 'Pause accepted: the current stage (incl. in-flight agent) finishes, then stops'}>
+                {pausedBadgeText(t.paused_phase)}
+              </span>
+            )}
+            {kindSpan}
+            {healthSpan}
+            {noteSpan}
+            {idSpan}
+            {viewersSpan}
+            {titleSpan}
+            {ctlSpan}
+            {!compact && t.epic && epicChip}
+          </>
         )}
       </div>
-      <div className="wb-card-l2">
-        {/* t261008-08 (mock v11): compact line 2 = stage small text + epic chip +
-            ten-cell progress dots; the progress sentence and the updated time
-            moved into the tooltip (cardTitle), off the row face. */}
-        {compact && stageLabel !== '' && (
-          <span className="wb-card-stage" data-wb-row-stage={stageLabel}>{stageLabel}</span>
-        )}
-        {compact && t.epic && (
-          <span className="wb-card-epic"
-            style={{ borderColor: epicColor, ['--epic-c' as string]: epicColor, color: epicChipColor() }}
-            title={`Epic: ${t.epic}`}
-            onClick={(ev) => { ev.stopPropagation(); onOpenEpic?.(t.epic ?? '') }}>
-            {t.epic}
-          </span>
-        )}
-        {/* Progress sentence: the host timeline's last human-readable line; falls
-            back to the relative/absolute time when absent.
-            t261008-08: compact rows moved it into the tooltip (cardTitle) —
-            EXCEPT rows the parent hands a synthesized progress sentence
-            (t260915-19 triage face: waiting-for-signature + finding counts are
-            at-a-glance row facts, not hover facts; the mock v11 has no such
-            row, so no mock conflict). The board column keeps it. */}
-        {(!compact || progress) && (
+      {compact ? (
+        <>
+          {/* L2: the title alone (t261011-19, design §14 #1). */}
+          <div className="wb-card-l2">{titleSpan}</div>
+          {/* L3: step name -> category chip -> the ten-cell dot matrix at the
+              right edge; every element the compact row already had stays
+              (kind/health/dismiss-note/viewers/epic chips; a synthesized
+              progress face keeps its at-a-glance exception). */}
+          <div className="wb-card-l3">
+            {stageSpan}
+            {kindSpan}
+            {healthSpan}
+            {noteSpan}
+            {viewersSpan}
+            {t.epic && epicChip}
+            {progress && (
+              <span className="wb-card-progress" data-state={progress.state}>{progress.text}</span>
+            )}
+            {dotsSpan}
+          </div>
+        </>
+      ) : (
+        <div className="wb-card-l2">
+          {/* Progress sentence: the host timeline's last human-readable line; falls
+              back to the relative/absolute time when absent. */}
           <span className="wb-card-progress" data-state={progress?.state ?? ''}>
             {progress ? progress.text : (t.updated || '')}
           </span>
-        )}
-        {!compact && <span className="wb-card-time">{rel ?? (t.updated || '')}</span>}
-        {t.role && !compact && <span className="wb-card-role">· {t.role}</span>}
-        {!compact && dots.length > 0 && (
-          <span className="wb-card-lane" title={`Stage dots (${dots.length})`}>
-            {dots.map((d, i) => (
-              <span key={i} className="wb-card-lane-dot" data-visual={d} data-state={state4} />
-            ))}
-          </span>
-        )}
-        {/* CL-3 ten-cell progress dots (t261006-18, design §7.2 default):
-            compact (left-column) rows light up to the current stage;
-            data-lit = lit count, the render-assertion anchor.
-            undefined = not rendered (existing rows unchanged). */}
-        {compact && ordering?.dotsLit !== undefined && (
-          <span className="wb-stage-dots" data-lit={ordering.dotsLit}
-            title={`Stage dots: ${ordering.dotsLit} of 10`}>
-            {Array.from({ length: 10 }, (_, i) => (
-              <span key={i} className="wb-stage-dot" data-on={i < (ordering.dotsLit ?? 0) || undefined} />
-            ))}
-          </span>
-        )}
-      </div>
+          <span className="wb-card-time">{rel ?? (t.updated || '')}</span>
+          {t.role && <span className="wb-card-role">· {t.role}</span>}
+          {dots.length > 0 && (
+            <span className="wb-card-lane" title={`Stage dots (${dots.length})`}>
+              {dots.map((d, i) => (
+                <span key={i} className="wb-card-lane-dot" data-visual={d} data-state={state4} />
+              ))}
+            </span>
+          )}
+        </div>
+      )}
       <div className="wb-card-ops" onClick={ev => ev.stopPropagation()}>
         {/* 衍生动作位=纯导航（R3）：等你→去签字（详情审批区）；受阻→看原因（阻塞原因区） */}
         {state4 === 'waiting' && (

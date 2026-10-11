@@ -37,31 +37,40 @@ ok(card.includes('style={compact ? undefined : { borderLeftColor: epicColor }}')
   'A1 borderLeftColor inline colour guarded by !compact (compact rows carry no epic bar)')
 ok(!card.includes('style={{ borderLeftColor: epicColor }}'),
   'A1b no unconditional borderLeftColor inline style remains')
-// A2 状态英文词：compact 行不再渲染 wb-card-state（状态语义由彩点承载）。
-ok(card.includes('!compact && (\n          <span className="wb-card-state"'),
-  'A2 the English state word renders only on non-compact rows')
-// A3 compact 二行 = 阶段小字 + epic chip；epic chip 一行位仅 !compact。
-ok(card.includes('{compact && stageLabel !== \'\' && (\n          <span className="wb-card-stage"'),
-  'A3 compact line 2 leads with the small stage label')
-ok(card.includes('{compact && t.epic && (\n          <span className="wb-card-epic"'),
-  'A3b the epic chip renders on compact line 2 (mock: l2 = stage · epic + dots)')
-ok(card.includes('{!compact && t.epic && (\n          <span className="wb-card-epic"'),
+// A2 状态英文词：只在板面分支渲染（t261011-19 三行卡后，compact 行=板面 ternary
+// 的另一支，源锚从「!compact 前缀」改为「状态词 span 落在 Board column 分支内」）。
+const stateWordIdx = card.indexOf('<span className="wb-card-state" data-state={state4}>')
+const boardBranchIdx = card.indexOf('// Board column')
+const compactBranchIdx = card.indexOf('{compact ? (')
+ok(stateWordIdx !== -1 && boardBranchIdx !== -1
+  && compactBranchIdx < stateWordIdx && stateWordIdx > boardBranchIdx,
+  'A2 the English state word renders only in the board (non-compact) branch')
+// A3 compact 三行卡（t261011-19）：L2 标题独占；L3 阶段小字 + epic chip + 点阵。
+ok(card.includes('const stageSpan = compact && stageLabel !== \'\' && ('),
+  'A3 compact line 3 leads with the small stage label')
+ok(card.includes('const titleSpan = (') && card.includes("<div className=\"wb-card-l2\">{titleSpan}</div>"),
+  'A3a compact line 2 is the title alone')
+ok(card.includes('{t.epic && epicChip}'),
+  'A3b the epic chip renders on compact line 3 (three-line card)')
+ok(card.includes('{!compact && t.epic && epicChip}'),
   'A3c the board (non-compact) keeps the epic chip on line 1')
-// A4 compact 一句进展：默认收进悬停；但父层给了合成进展句的 compact 行（t260915-19
-// 巡检行分诊面）保持行面可见（arbitrate gen3 打回项：行面分诊事实不许只活在悬停）。
-ok(card.includes('{(!compact || progress) && (\n          <span className="wb-card-progress"'),
+// A4 compact 一句进展：默认收进悬停；父层给合成进展句的行保持行面可见（t260915-19
+// 分诊面纪律不变，落点从旧二行移到三行卡的第三行）。
+ok(card.includes('{progress && (\n              <span className="wb-card-progress"'),
   'A4 the progress sentence renders on the board rows and on compact rows carrying a synthesized progress face')
-ok(card.includes('{!compact && <span className="wb-card-time">'),
+ok(card.includes('<span className="wb-card-time">{rel ?? (t.updated || \'\')}</span>'),
   'A4b the relative time renders only on non-compact rows')
-// A5 箭头到行尾：wb-order-ctl 块必须位于标题块之后（DOM 序=视觉序）。
-const titleIdx = card.indexOf('data-wb-row-title=')
+// A5 箭头到行尾（t261011-19 语义更新）：排序控件收在第一行行尾（L1 内、L2 标题行之前），
+// 标题行在点阵第三行之前（DOM 序=视觉序：L1 → L2 → L3）。
+const l2Idx = card.indexOf('<div className="wb-card-l2">{titleSpan}</div>')
+const l3Idx = card.indexOf('<div className="wb-card-l3">')
 const ctlIdx = card.indexOf('data-order-ctl=')
-ok(titleIdx !== -1 && ctlIdx !== -1 && titleIdx < ctlIdx,
-  'A5 ordering controls (grip + arrows) render after the title = at the row end')
+ok(ctlIdx !== -1 && l2Idx !== -1 && l3Idx !== -1 && ctlIdx < l2Idx && l2Idx < l3Idx,
+  'A5 ordering controls close line 1; the title line sits before the metadata line')
 const posIdx = card.indexOf('data-order-pos=')
 const gripIdx = card.indexOf('data-order-grip=')
 ok(posIdx !== -1 && gripIdx !== -1 && posIdx < gripIdx,
-  'A5b position number stays first, handgrip right after it')
+  'A5b position number stays before the handgrip (id -> pos -> pill -> icon -> controls)')
 // A6 悬停收编：cardTitle 带 compact/progress/rel 参数；compact 时收进展句与时间。
 ok(/export function cardTitle\(t: CardTicket, wf\?: WfLike \| null, compact = false,\n  progress\?: CardProgress, rel\?: string \| null\)/.test(card),
   'A6 cardTitle takes compact/progress/rel (tooltip absorbs the moved facts)')

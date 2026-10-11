@@ -203,6 +203,54 @@ export function pausedBadgeText(phase?: unknown): string {
   return phase === 'at_gate' ? '⏸ Paused at the stage gate' : '⏸ Pausing (takes effect between stages)'
 }
 
+/* ------------------------------------------------------------- LineOn pill（t261011-19） */
+
+/**
+ * The LineOn pill face (t261011-19): a MAP from the ENGINE's line-face word to
+ * a pill colour family. This is a mapping, not a derivation — the word itself
+ * comes from the engine (the list route's line_face key, fed by
+ * src/host/line-face-adapter.py reusing the certification adapter's engine
+ * calls). Absent / malformed / unknown word => null (the pill renders
+ * nothing; never a guessed state).
+ *   on_line        -> muted outline (on the line, not landed)
+ *   waiting        -> warn (+ '!' when the engine's overdue flag is true)
+ *   red_implicated -> danger
+ *   certified      -> success outline
+ *   delivered      -> success solid
+ *   withdrawn      -> muted solid
+ */
+export type LineFaceKind =
+  | 'muted-outline' | 'warn' | 'danger' | 'success-outline' | 'success-solid' | 'muted-solid'
+
+export interface LineFace {
+  kind: LineFaceKind
+  /** The engine's overdue flag (ticket_wait_state); drives the '!' suffix. */
+  overdue: boolean
+}
+
+const LINE_FACE_KINDS: Record<string, LineFaceKind> = {
+  on_line: 'muted-outline',
+  waiting: 'warn',
+  red_implicated: 'danger',
+  certified: 'success-outline',
+  delivered: 'success-solid',
+  withdrawn: 'muted-solid',
+}
+
+export function lineFaceOf(row: { line_face?: unknown; line_face_overdue?: unknown }): LineFace | null {
+  const word = row?.line_face
+  if (typeof word !== 'string') return null
+  const kind = LINE_FACE_KINDS[word]
+  if (kind === undefined) return null
+  return { kind, overdue: row.line_face_overdue === true }
+}
+
+/** The pill's constant text (design §14 #2: colour carries the state; the '!'
+ *  suffix is the engine's overdue flag, not a new state word). */
+export function linePillText(face: LineFace): string {
+  return face.overdue ? 'LineOn!' : 'LineOn'
+}
+
 /* ------------------------------------------------------------- 左栏合并排序（t260916-15） */
 
 /** 排序层消费的行最小字段面：dev-lane 行与巡检行同形（多字段不关心），全键可缺

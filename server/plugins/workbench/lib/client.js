@@ -6305,6 +6305,29 @@ function pauseOpOf(paused) {
 function pausedBadgeText(phase) {
 	return phase === "at_gate" ? "⏸ Paused at the stage gate" : "⏸ Pausing (takes effect between stages)";
 }
+const LINE_FACE_KINDS = {
+	on_line: "muted-outline",
+	waiting: "warn",
+	red_implicated: "danger",
+	certified: "success-outline",
+	delivered: "success-solid",
+	withdrawn: "muted-solid"
+};
+function lineFaceOf(row) {
+	const word = row?.line_face;
+	if (typeof word !== "string") return null;
+	const kind = LINE_FACE_KINDS[word];
+	if (kind === void 0) return null;
+	return {
+		kind,
+		overdue: row.line_face_overdue === true
+	};
+}
+/** The pill's constant text (design §14 #2: colour carries the state; the '!'
+*  suffix is the engine's overdue flag, not a new state word). */
+function linePillText(face) {
+	return face.overdue ? "LineOn!" : "LineOn";
+}
 /**
 * 排序层（t260916-15；t260919-02 增第三参 execStatus 与 failed 档；t260921-03 done
 * 拆两层成四档）：等你/受阻/已失败 → 在跑 → **已结束·异常** → 已结束·正常。
@@ -6607,6 +6630,134 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		ev.stopPropagation();
 		ordering?.onDrop?.();
 	};
+	const lineFace = compact ? lineFaceOf(t) : null;
+	const idSpan = /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-id",
+		children: t.id
+	});
+	const posSpan = ordering?.kind === "queued" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-order-pos",
+		"data-order-pos": ordering.pos ?? 0,
+		title: `Queue position ${ordering.pos ?? 0}`,
+		children: ordering.pos ?? ""
+	});
+	const pillSpan = lineFace && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-line-pill",
+		"data-line-face": t.line_face,
+		"data-line-overdue": lineFace.overdue ? "1" : void 0,
+		title: `Line ${t.line_face === "on_line" ? "on the develop line, not landed" : `state: ${String(t.line_face)}`}`,
+		children: linePillText(lineFace)
+	});
+	const pauseIcon = compact && t.paused && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-paused",
+		"data-paused": "1",
+		"data-paused-phase": t.paused_phase || "pending",
+		role: "img",
+		"aria-label": pausedBadgeText(t.paused_phase),
+		title: t.paused_phase === "at_gate" ? "Halted at the stage gate: next stage not dispatched; click Resume to continue" : "Pause accepted: the current stage (incl. in-flight agent) finishes, then stops",
+		children: "⏸"
+	});
+	const ctlSpan = orderable && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+		className: "wb-order-ctl",
+		"data-order-ctl": "",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-order-grip",
+				"data-order-grip": "",
+				title: "Drag to reorder",
+				"aria-label": `Drag to reorder ${t.id}`,
+				children: "⋮⋮"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-order-arrow",
+				disabled: ordering?.busy,
+				"aria-label": `Move ${t.id} up`,
+				title: "Move up",
+				onClick: (ev) => {
+					ev.stopPropagation();
+					ordering?.onMove?.(-1);
+				},
+				children: "⌃"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-order-arrow",
+				disabled: ordering?.busy,
+				"aria-label": `Move ${t.id} down`,
+				title: "Move down",
+				onClick: (ev) => {
+					ev.stopPropagation();
+					ordering?.onMove?.(1);
+				},
+				children: "⌄"
+			})
+		]
+	});
+	const titleSpan = /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-title",
+		"data-wb-row-title": ticketDisplayTitle(t),
+		"data-title-src": t.title?.trim() ? "title" : t.title_or_first ? "first" : "id",
+		children: ticketDisplayTitle(t)
+	});
+	const kindSpan = kindBadge && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-kind",
+		"data-kind-badge": kindBadge.text,
+		title: `Kind: ${kindBadge.text}`,
+		children: kindBadge.text
+	});
+	const healthSpan = (() => {
+		const badge = closeHealthBadgeOf(t);
+		return badge !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "wb-card-health",
+			"data-close-health": closeHealthOf(t),
+			title: t.close_health_reason || badge,
+			children: badge
+		});
+	})();
+	const noteSpan = dismissedNoteOf(t) !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-dismiss-note",
+		"data-dismiss-note": "1",
+		title: dismissedNoteOf(t),
+		children: "Dismiss note"
+	});
+	const viewersSpan = (peerViewers?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		title: `Viewed from another tab: ${(peerViewers ?? []).map((v) => v.who).join(", ")}`,
+		children: "👀"
+	});
+	const epicChip = t.epic && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-epic",
+		style: {
+			borderColor: epicColor,
+			["--epic-c"]: epicColor,
+			color: epicChipColor()
+		},
+		title: `Epic: ${t.epic}`,
+		onClick: (ev) => {
+			ev.stopPropagation();
+			onOpenEpic?.(t.epic ?? "");
+		},
+		children: t.epic
+	});
+	const stageSpan = compact && stageLabel !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-card-stage",
+		"data-wb-row-stage": stageLabel,
+		children: stageLabel
+	});
+	const dotsSpan = compact && ordering?.dotsLit !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		className: "wb-stage-dots",
+		"data-lit": ordering.dotsLit,
+		"data-state": state4,
+		title: `Stage dots: ${ordering.dotsLit} of 10`,
+		children: Array.from({ length: 10 }, (_, i) => {
+			const lit = i < (ordering.dotsLit ?? 0);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "wb-stage-dot",
+				"data-on": lit || void 0,
+				"data-visual": lit ? "lit" : "todo"
+			}, i);
+		})
+	});
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-card",
 		"data-ticket-id": t.id,
@@ -6627,9 +6778,15 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		onClick: () => onOpen(),
 		role: "button",
 		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				className: "wb-card-l1",
-				children: [
+				children: compact ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					idSpan,
+					posSpan,
+					pillSpan,
+					pauseIcon,
+					ctlSpan
+				] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 					ordering?.kind === "queued" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-order-pos",
 						"data-order-pos": ordering.pos ?? 0,
@@ -6650,7 +6807,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						className: "wb-card-dot",
 						"data-state": state4
 					}),
-					!compact && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-state",
 						"data-state": state4,
 						children: STATE4_LABEL[state4]
@@ -6662,145 +6819,58 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						title: t.paused_phase === "at_gate" ? "Halted at the stage gate: next stage not dispatched; click Resume to continue" : "Pause accepted: the current stage (incl. in-flight agent) finishes, then stops",
 						children: pausedBadgeText(t.paused_phase)
 					}),
-					kindBadge && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-kind",
-						"data-kind-badge": kindBadge.text,
-						title: `Kind: ${kindBadge.text}`,
-						children: kindBadge.text
-					}),
-					(() => {
-						const badge = closeHealthBadgeOf(t);
-						return badge !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-card-health",
-							"data-close-health": closeHealthOf(t),
-							title: t.close_health_reason || badge,
-							children: badge
-						});
-					})(),
-					dismissedNoteOf(t) !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-dismiss-note",
-						"data-dismiss-note": "1",
-						title: dismissedNoteOf(t),
-						children: "Dismiss note"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-id",
-						children: t.id
-					}),
-					(peerViewers?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						title: `Viewed from another tab: ${(peerViewers ?? []).map((v) => v.who).join(", ")}`,
-						children: "👀"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-title",
-						"data-wb-row-title": ticketDisplayTitle(t),
-						"data-title-src": t.title?.trim() ? "title" : t.title_or_first ? "first" : "id",
-						children: ticketDisplayTitle(t)
-					}),
-					orderable && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-						className: "wb-order-ctl",
-						"data-order-ctl": "",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-order-grip",
-								"data-order-grip": "",
-								title: "Drag to reorder",
-								"aria-label": `Drag to reorder ${t.id}`,
-								children: "⋮⋮"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "wb-order-arrow",
-								disabled: ordering?.busy,
-								"aria-label": `Move ${t.id} up`,
-								title: "Move up",
-								onClick: (ev) => {
-									ev.stopPropagation();
-									ordering?.onMove?.(-1);
-								},
-								children: "⌃"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "wb-order-arrow",
-								disabled: ordering?.busy,
-								"aria-label": `Move ${t.id} down`,
-								title: "Move down",
-								onClick: (ev) => {
-									ev.stopPropagation();
-									ordering?.onMove?.(1);
-								},
-								children: "⌄"
-							})
-						]
-					}),
-					!compact && t.epic && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-epic",
-						style: {
-							borderColor: epicColor,
-							["--epic-c"]: epicColor,
-							color: epicChipColor()
-						},
-						title: `Epic: ${t.epic}`,
-						onClick: (ev) => {
-							ev.stopPropagation();
-							onOpenEpic?.(t.epic ?? "");
-						},
-						children: t.epic
-					})
-				]
+					kindSpan,
+					healthSpan,
+					noteSpan,
+					idSpan,
+					viewersSpan,
+					titleSpan,
+					ctlSpan,
+					!compact && t.epic && epicChip
+				] })
 			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			compact ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-card-l2",
+				children: titleSpan
+			}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-card-l3",
+				children: [
+					stageSpan,
+					kindSpan,
+					healthSpan,
+					noteSpan,
+					viewersSpan,
+					t.epic && epicChip,
+					progress && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-card-progress",
+						"data-state": progress.state,
+						children: progress.text
+					}),
+					dotsSpan
+				]
+			})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-card-l2",
 				children: [
-					compact && stageLabel !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-stage",
-						"data-wb-row-stage": stageLabel,
-						children: stageLabel
-					}),
-					compact && t.epic && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-card-epic",
-						style: {
-							borderColor: epicColor,
-							["--epic-c"]: epicColor,
-							color: epicChipColor()
-						},
-						title: `Epic: ${t.epic}`,
-						onClick: (ev) => {
-							ev.stopPropagation();
-							onOpenEpic?.(t.epic ?? "");
-						},
-						children: t.epic
-					}),
-					(!compact || progress) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-progress",
 						"data-state": progress?.state ?? "",
 						children: progress ? progress.text : t.updated || ""
 					}),
-					!compact && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-time",
 						children: rel ?? (t.updated || "")
 					}),
-					t.role && !compact && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					t.role && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "wb-card-role",
 						children: ["· ", t.role]
 					}),
-					!compact && dots.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					dots.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-card-lane",
 						title: `Stage dots (${dots.length})`,
 						children: dots.map((d, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "wb-card-lane-dot",
 							"data-visual": d,
 							"data-state": state4
-						}, i))
-					}),
-					compact && ordering?.dotsLit !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-stage-dots",
-						"data-lit": ordering.dotsLit,
-						title: `Stage dots: ${ordering.dotsLit} of 10`,
-						children: Array.from({ length: 10 }, (_, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-stage-dot",
-							"data-on": i < (ordering.dotsLit ?? 0) || void 0
 						}, i))
 					})
 				]
@@ -9001,10 +9071,50 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-derive-muted,#57606a); padding:1px 2px; border-radius:3px; }
 .wb-order-arrow:hover { background:rgba(255,255,255,.08); color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-order-arrow:disabled { opacity:.4; cursor:default; }
-/* Line-2 ten-cell progress dots (design §7.2 default): lit up to the current stage, zero extra row height. */
+/* Line-2 ten-cell progress dots (design §7.2 default): lit up to the current stage, zero extra row height.
+   t261011-19 (host order, verbatim): a ticket that has reached cell N gets the
+   first N cells in the FULL state colour and the remaining 10-N cells in a dim
+   shade of the SAME hue, never grey; blocked = hollow red cell, failed = solid
+   red cell (shape, not a new colour). data-state lives on the .wb-stage-dots
+   container. */
 .wb-stage-dots { display:inline-flex; align-items:center; gap:2px; flex:none; }
 .wb-stage-dot { width:5px; height:5px; border-radius:1px; background:var(--dsw-derive-border,#d0d7de); }
 .wb-stage-dot[data-on=true] { background:var(--dsw-derive-accent,#0969da); }
+.wb-stage-dots[data-state=active] .wb-stage-dot { background:var(--dsw-derive-accent-bg,#ddf4ff); }
+.wb-stage-dots[data-state=active] .wb-stage-dot[data-visual=lit] { background:var(--dsw-derive-accent,#0969da); }
+.wb-stage-dots[data-state=waiting] .wb-stage-dot { background:var(--dsw-derive-warn-bg,#fff8c5); }
+.wb-stage-dots[data-state=waiting] .wb-stage-dot[data-visual=lit] { background:var(--dsw-derive-warn-border,#d4a72c); }
+.wb-stage-dots[data-state=blocked] .wb-stage-dot { background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-stage-dots[data-state=blocked] .wb-stage-dot[data-visual=lit] { background:transparent; border:1px solid var(--dsw-derive-danger,#cf222e); }
+.wb-stage-dots[data-state=failed] .wb-stage-dot { background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-stage-dots[data-state=failed] .wb-stage-dot[data-visual=lit] { background:var(--dsw-derive-danger-solid,#d1242f); }
+.wb-stage-dots[data-state=done] .wb-stage-dot { background:var(--dsw-derive-border,#d0d7de); }
+/* t261011-19: the LineOn pill — constant text, the COLOUR is the engine's line
+   state (token families only: muted/warn/danger/success). data-line-face is the
+   named render-assertion anchor; outline vs solid carries outline/solid states. */
+.wb-line-pill { flex:none; font-size:10px; font-weight:600; line-height:14px; padding:0 6px;
+  border-radius:8px; border:1px solid var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-muted,#57606a); background:transparent; white-space:nowrap; }
+.wb-line-pill[data-line-face=waiting] { border-color:var(--dsw-derive-warn-border,#eac54f);
+  color:var(--dsw-derive-warn-deep,#7d4e00); background:var(--dsw-derive-warn-surface,#fff8e6); }
+.wb-line-pill[data-line-face=red_implicated] { border-color:var(--dsw-derive-danger-border,#ff9b9b);
+  color:var(--dsw-derive-danger,#cf222e); background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-line-pill[data-line-face=certified] { border-color:var(--dsw-derive-success-border,#7dd9a0);
+  color:var(--dsw-derive-success,#1a7f37); background:transparent; }
+.wb-line-pill[data-line-face=delivered] { border-color:var(--dsw-derive-success-solid,#2da44e);
+  color:var(--dsw-derive-on-solid,#fff); background:var(--dsw-derive-success-solid,#2da44e); }
+.wb-line-pill[data-line-face=withdrawn] { border-color:var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-ink-strong,#24292f); background:var(--dsw-derive-border,#d0d7de); }
+/* t261011-19: the three-line compact card — L3 = step name -> chips -> the dot
+   matrix at the right edge (the matrix eats the slack, like the board's controls). */
+.wb-sb .wb-card-l3 { display:flex; align-items:center; gap:6px; min-width:0; font-size:11px;
+  color:var(--dsw-derive-muted,#57606a); }
+.wb-sb .wb-card-l3 .wb-stage-dots { margin-left:auto; }
+/* t261011-19: the line-level FROZEN notice — ONE per project block, in the
+   left-column header area (a line is not a ticket attribute; never per row). */
+.wb-line-frozen { margin:2px 8px 4px 14px; padding:3px 8px; font-size:10px; line-height:1.5;
+  color:var(--dsw-derive-warn-deep,#7d4e00); background:var(--dsw-derive-warn-surface,#fff8e6);
+  border:1px solid var(--dsw-derive-warn-border,#eac54f); border-radius:5px; flex:none; }
 /* Reorder-refusal notice (A7): one line with the engine's refusal verbatim (same token family as .wb-insp-degraded, no new palette). */
 .wb-order-notice { margin:2px 8px 6px 14px; padding:4px 8px; font-size:10px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
@@ -9200,6 +9310,7 @@ function WorkbenchSidebar(props) {
 	const [projects, setProjects] = (0, react.useState)([]);
 	/** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
 	const [ticketsByProject, setTicketsByProject] = (0, react.useState)({});
+	const [lineFrozenByProject, setLineFrozenByProject] = (0, react.useState)({});
 	const [concByProject, setConcByProject] = (0, react.useState)({});
 	/** Reorder in flight (project key -> true): controls disabled against double writes; every write ends in POST -> re-read the same face. */
 	const [reorderBusy, setReorderBusy] = (0, react.useState)({});
@@ -9402,9 +9513,13 @@ function WorkbenchSidebar(props) {
 					key: p.key,
 					dirs: p.dirs
 				})));
+				const lineFrozenEntries = [];
 				const entries = await Promise.all(list.map(async (p) => {
 					try {
-						const tickets = (await fetch(`/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then((r) => r.json()))?.result?.tickets ?? [];
+						const tr = await fetch(`/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then((r) => r.json());
+						const tickets = tr?.result?.tickets ?? [];
+						const lf = tr?.result?.line_frozen;
+						lineFrozenEntries.push([p.key, typeof lf === "boolean" ? lf : null]);
 						publishProjectEntry(p.key, tickets.map((t) => t.id));
 						return [p.key, tickets];
 					} catch {
@@ -9422,6 +9537,7 @@ function WorkbenchSidebar(props) {
 				if (cancelled) return;
 				setTicketsByProject(Object.fromEntries(entries));
 				setConcByProject(Object.fromEntries(concEntries));
+				setLineFrozenByProject(Object.fromEntries(lineFrozenEntries));
 			} catch {}
 			try {
 				const wr = await fetch("/sandbar-workbench/api/wf/workflows").then((r) => r.json());
@@ -9789,6 +9905,12 @@ function WorkbenchSidebar(props) {
 									})
 								]
 							}), !collapsed[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+								lineFrozenByProject[g.project.key] === true && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "wb-line-frozen",
+									"data-line-frozen": "1",
+									title: "The develop line is frozen: promotions hold; tickets keep working",
+									children: "Line frozen"
+								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(ProjectSessionRow, {
 									projectKey: g.project.key,
 									projectName: g.project.name,
@@ -12637,20 +12759,20 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
   cursor:pointer;font-size:13px;flex-wrap:wrap;box-shadow:0 1px 2px rgba(31,35,40,.05)}
 /* hover 不再改写底色（会盖掉 waiting/blocked 状态行底）——改阴影提层，主题安全 */
 .wb-card:hover{box-shadow:0 1px 4px rgba(31,35,40,.14)}
-/* 状态行底=主题令牌派生（t260905-08 根因修复：原行内写死浅色×主题字色=深色不可读）。
- * t260915-08 实证补②：板面卡实际渲染在 .wb-sb-right 内，sidebar 后注入样式表的
- * .wb-sb .wb-card {background:transparent} 规则（同特异性 0,2,0、后序胜）会把状态底色
- * 整体压平（先于本票就存在的看板级 bug，dev-lane 等待行同样瞎）——状态行特有规则
- * 一律提特异性到 .wb-root .wb-card[data-state=…]（0,3,0，顺序无关压制 blanket 规则；
- * active 行让位 sidebar 的选中底色，设计如此）。
- * t260915-08 仲裁修复（hex-clean 看守打回项）：老浏览器 color-mix IACVT 的静态回退
- * 色收编进 theme.ts 令牌声明位（@supports not 分档覆盖令牌值），本消费位只经 var()
- * fallback 供出（allowlist C 合法位），零裸 hex。 */
-.wb-root .wb-card[data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
-.wb-root .wb-card[data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
-/* t260919-02「已失败」行卡：红系行底+实红点/状态字（与 blocked 同令牌族不同文案，
- * 与 done 灰/active 蓝可辨；特异性 0,3,0 与 waiting/blocked 同档，压 sidebar blanket）。 */
-.wb-root .wb-card[data-state=failed]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+/* The state row background used to be theme-token derived (t260905-08: the old
+ * hard-coded light wash met light text in the dark theme = unreadable).
+ * t261011-19 (host order): the state-derived row background retires wholesale —
+ * the left column never had one and the board drops it too; the ticket state is
+ * now carried by the WHOLE dot matrix (reached cells = full state hue, unreached
+ * = a dim shade of the SAME hue, never grey; blocked = hollow red cell, failed =
+ * solid red cell — shape, not a new colour). Closed rows keep only the whole-row
+ * 0.72 dim (.wb-card[data-state=done]); active keeps the selected outline.
+ * t260905-08-wb-contrast-guard measures text against the EFFECTIVE background;
+ * with the wash gone it measures against the panel/canvas base — the changed
+ * expectation is declared on the ticket (not in the known-red roster: red is red).
+ * History note (kept): t260915-08 once raised these rules to
+ * .wb-root .wb-card[data-state=...] (0,3,0) to beat the sidebar blanket, and
+ * t260919-02 added the failed wash — both retire with this ticket. */
 .wb-card[data-active=true]{border-color:var(--dsw-derive-accent,#0969da);box-shadow:inset 0 0 0 1px var(--dsw-derive-accent,#0969da)}
 .wb-card[data-state=done]{color:var(--dsw-derive-muted,#57606a)}
 .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
@@ -12683,14 +12805,22 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-card-role{flex:none}
 .wb-card-pending{font-size:11px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);
   border-radius:4px;padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* 迷你站道：点数=模板阶段数；绿=已过/状态色=当前/灰=未来（颜色随 data-state 派生） */
+/* Mini lane: dot count = topology stage count. t261011-19 (host order, verbatim):
+ * reached cell N = the first N cells in the FULL state colour, the remaining
+ * 10-N cells in a dim shade of the SAME hue (never grey); blocked = hollow red
+ * cell, failed = solid red cell (shape split). A closed row (data-state=done)
+ * takes the muted family across the matrix (the row is already dimmed 0.72). */
 .wb-card-lane{display:inline-flex;gap:4px;align-items:center;flex:none}
 .wb-card-lane-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-derive-border,#d0d7de);display:inline-block}
-.wb-card-lane-dot[data-visual=done]{background:var(--dsw-derive-success-solid,#2da44e)}
-.wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--dsw-derive-warn-border,#d4a72c)}
-.wb-card-lane-dot[data-visual=current][data-state=blocked]{background:var(--dsw-derive-danger,#cf222e)}
-.wb-card-lane-dot[data-visual=current][data-state=failed]{background:var(--dsw-derive-danger-solid,#d1242f)}
-.wb-card-lane-dot[data-visual=current][data-state=active]{background:var(--dsw-derive-accent,#0969da)}
+.wb-card-lane-dot[data-visual=done],.wb-card-lane-dot[data-visual=current]{background:var(--dsw-derive-accent,#0969da)}
+.wb-card-lane-dot[data-visual=todo][data-state=active]{background:var(--dsw-derive-accent-bg,#ddf4ff)}
+.wb-card-lane-dot[data-visual=done][data-state=waiting],.wb-card-lane-dot[data-visual=current][data-state=waiting]{background:var(--dsw-derive-warn-border,#d4a72c)}
+.wb-card-lane-dot[data-visual=todo][data-state=waiting]{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-card-lane-dot[data-visual=done][data-state=blocked],.wb-card-lane-dot[data-visual=current][data-state=blocked]{background:transparent;border:1px solid var(--dsw-derive-danger,#cf222e)}
+.wb-card-lane-dot[data-visual=todo][data-state=blocked]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-card-lane-dot[data-visual=done][data-state=failed],.wb-card-lane-dot[data-visual=current][data-state=failed]{background:var(--dsw-derive-danger-solid,#d1242f)}
+.wb-card-lane-dot[data-visual=todo][data-state=failed]{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-card-lane-dot[data-visual=done][data-state=done],.wb-card-lane-dot[data-visual=current][data-state=done]{background:var(--dsw-derive-border,#d0d7de)}
 /* 行卡动作位（右侧）：衍生动作（去签字/看原因）+ 管理动作 */
 .wb-card-ops{display:flex;gap:6px;align-items:center;flex:none;margin-left:auto}
 .wb-card-btn{font-size:12px;padding:2px 10px;border-radius:6px;border:1px solid var(--dsw-derive-border,#d0d7de);
