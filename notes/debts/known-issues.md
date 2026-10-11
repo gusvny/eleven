@@ -5442,3 +5442,47 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**凡"超时"两字，必追问三件事**——超时后**杀的是谁**（直接子进程？整个进程组？）、**谁还攥着 fd/管道/锁**、**这个超时自己会不会被卡住**。**给子进程挂上 `timeout=` 不等于能收回成本**；同理，**给整轮挂外部上限，只是把"卡死"变成"付费卡死"**，不是止损。
 
 > **回归**：L1——注入"孙进程继承 stdout 且不退出"的桩场景：必须在 `CMD_TIMEOUT` 量级内返回**具名超时红**，且**跑完零存活后代**（`killpg` 断言 + `ps` 残骸为零）；L2——超时红的实测耗时 ≤ 预算 + 短余量（如 30s）；L3——一轮线轮在**含一条挂死场景**的情况下仍收敛到终局（红）并由面点名那条场景，**不撞外部 3600s 上限**。
+
+## KI-01M4P6Z4T5C1R2S8N9K7H3QWDM **"跑通"不是"可认证"**：给证明轮挂上省时开关（池排除/`--only`）＝把它降级成诊断轮，而诊断轮**不写 run record** ⇒ 无 header ⇒ 引擎只能记 `range_growth` ⇒ **永远铸不出认证**（宿主 261011「先把 exclusive 排除掉，把 line run 跑通先」→ 261012 integration 岗读码实证）
+
+> **读码链（每一环都有原文）**：①`integration/run_scenarios.py` `run_record_skip_reason()` 第一句就是 `if narrowed: return "narrowed round (--only / pool exclusion) is not a proof — no run record"`，而 `narrowed` 由 `bool(only_names or excluded)` 决定（池排除**就是**收窄）；②`INTEG_SUMMARY` 只在 `_run_id` 存在时才带 `run_id` 键（additive 面）；③`integration/line_round_runner.py` 的 `read_header()` 先要 `summary["run_id"]`（否则 `run_id_missing_from_summary`），再拿它去 run-scoped ledger 里找 header（否则 `run_header_missing:<id>`），找不到就 `die()`——**stdout 上不再有 header**；④`server/engine/develop_certify.build_certification()` 拿不到 header ⇒ `run_id_not_run_id` / `run_cases_missing` ⇒ `CouldNotRun` ⇒ `could_not_run_row()` ⇒ 只增一行 `range_growth`（`should_certify` 下次照样再试，于是**每轮都白跑**）。
+>
+> **账本读数（原始）**：`~/.sandbar/projects/sandbar/ledger/delivery.jsonl` 15 行＝`range_growth` 13 + `landing` 2，**certification 0 行**——这条线**从来没有铸造过任何一次认证**，所以每张已落地/待落地的票都停在等认证。
+>
+> **危害**：①**症状与真因相反**：所有面都在说"轮次跑起来了/跑完了"，而真相是这一轮**按设计不构成证据**，什么都没发生；②这个开关是**响应宿主加速令**加上的（`-21` 把它设成缺省），一次"帮忙"把认证面整体关掉了；③`--only` 同罪，且更隐蔽（定点复跑本来是取证手段，不是证明手段）。
+>
+> **出路（本岗 261012 已做 + 引擎侧建议）**：①跑器侧缺省切回**诊断（保护）**并在 stderr **具名声明**"本轮收窄、不能产出认证"，翻转条件写在常量注释里（环境保真度修好、UI/DOM 用例真跑起来后把 `SANDBAR_LINE_ROUND_EXCLUDE_POOLS` 置空即恢复证明轮）——见 `integration/line_round_runner.py` 两次提交（`8495c375` 揭示机制、`0e013409` 定成保护默认）；②引擎侧建议把"header 缺席且原因是 narrowed"**具名成 narrowed**，别落成 `run_header_missing` 这类指向"文件丢了"的话（报错必须精确）。
+>
+> **纪律**：**凡"加速/跳过/只跑这几条"的开关，先问它是否改变了判据的完整性**；"跑通"与"可认证"是两个词，中间隔着"这轮算不算证据"。
+>
+> **回归**：L2——任何收窄轮必须在轮次面上具名"本轮不产出证明"（不得只说"跑了 N 条"）；L3——一次全量线轮产出 run record + header + certification 行（绿或红皆可），且账本里"跑了但没认证"的形态**不得由收窄静默造成**。
+
+## KI-01M4P6Z4T5C1R2S8N9K7H3QWDN **判据函数写了意图，却没人调用**：`should_freeze()` 是死代码，于是**环境红也冻结整条线**（261012 integration 岗读码实证）
+
+> **读码**：`server/engine/develop_certify.py:802` `should_freeze(attribution_value)` 的 docstring 写着「A freeze opens only when the red implicates content. `could not run` is not a red — it grows the range instead.」——全仓 `grep 'should_freeze('` **只命中这个定义本身**；而 `run_line_round()`（1420-1512）在 `verdict == "red"` 时**无条件** `batch += open_freeze_rows(cert)`，归因（`next_red_action`）是**之后**才尝试的事。
+>
+> **代价（读 `may_land`：1066-1106）**：冻结的线**拒绝一切落地**，白名单只有 `LANDABLE_KINDS = ("fix","chore")`，且 `fix` 还必须带一条指向本线某次落地的 `repairs` 关系（`freeze_repair_relation_missing`）。⇒ 一次**环境红**（本轮实测 `not-checked/external` 20 条全是 UI/DOM/console 用例）会把整条交付线的落地一起冻住：**环境的问题，内容的代价**。
+>
+> **危害**：①把"环境没准备好"读成"修订有问题"——正是判据面最怕的混淆；②在认证轮的环境保真度还没修好之前（见同夜 KI `环境保真度` 条），任何全量轮的红证都会冻结线，**把宿主想推进的落地一起挡住**；③"写了判据却没接线"是静默的：读代码的人以为有这道闸，跑起来才发现没有。
+>
+> **出路（实现归票）**：让冻结的开启条件与 `should_freeze` 的意图一致——**按红的种类分流**：内容红 ⇒ 开冻结；环境红/`could not run` ⇒ 只 grow 范围并把"环境红名单"具名在面与回执上（`INTEG_SUMMARY.env_red_names` 已在，可直接消费）。要么接上这个函数，要么删掉它并**在文档里把"环境红也冻结"写成明规则**——不许两者并存。
+>
+> **纪律**：**同一份判据里，凡是"写了意图却没人调用"的函数，都要当成没写**；"红 ⇒ 动作"的每一处都要问"这类红真的是这个动作的理由吗"。
+>
+> **回归**：L1——`env_failed > 0 and failed == 0` 的红**不得**开冻结（或按 `should_freeze` 的意图具名拒绝）；L2——红轮里"是否有冻结行"必须与"是否有内容归因"一致。
+
+## KI-01M4P6Z4T5C1R2S8N9K7H3QWDP **认证轮判的不是修订，是跑器能给的环境**：20 条 UI/DOM 用例在线轮里**从未跑过**，多条 self-red 在交付树里却是绿的（261012 integration 岗实测）
+
+> **实测（本轮 `round-20261011T183337Z-50912`，窄轮诊断面）**：判 667 条＝**615 pass / 32 fail(self) / 20 not-checked(external)**；那 20 条 external **全是要开 console 才能判的 UI/DOM 用例**（`t261008-02-middle-column-no-comment-text`、`t260904-15-project-ui-rail-add-remove`、`capture-chat-e2e`、`capture-chat-active`、`t260925-18-ui-english-spec-markdown`、`t13-evidence-lightbox`、`t260904-06-spec-card-dom`、`t260911-05-ki048-status-card-dom`、`t260915-05-detail-lane-map-dom`、`t260916-04-lane-map-everblocked-dom`、`t260916-05-inspection-detail-lane-map-dom`、`t260926-05-inspection-report-ui-dom` …）。
+>
+> **定点复跑对照（main 交付树，`--only` 同一批名字）**：`t260930-01-ledger-reuse-round` **pass 2.5s**、`t261004-28-carrier-verbatim-port-guard` **pass 53.0s** —— 两者在线轮里都是 red（2.1s / 28.3s）；同时 `t261008-24-zero-run-gate-stop`、`t02-t260902-02-archive-legacy-e2e`、`t260904-15-project-ui-settings-isolation` **在 main 也红**（既有欠账，不是线轮引入）。⇒ 线轮的红**至少有一部分是环境/跑器面造成的**，不能当成"修订有 32 个问题"读。
+>
+> **机理候选（读码，未逐条证实）**：①跑器的 env 钉改变了用例看到的世界（`suite_env` 里 `SANDBAR_LEDGER_REUSE=0`、摘掉 `SANDBAR_INTEG_LEDGER_OWNER`/`SANDBAR_TICKET_ID`）——含"复用/驱动面"的机制用例因此失真；②克隆的资产面是 symlink（`-21` 的 `CLONE_ASSETS`），构建产物/插件 bundle 的新旧与主树不一致；③UI/DOM 面需要真起 console，而线轮的克隆里起不来（本轮 20 条即此）。
+>
+> **危害**：①**绿不可达、红不可信**——红可能全是环境的，绿永远拿不到，而这张"红"还会被当成内容问题去归因（老账：`-21` 前的 220 条 env 红里 105 条是解释器/依赖、63 条 Temporal、43 条 browser、**0 条 docker**）；②它把"线轮"变成"跑器自检"，而**跑器自检的结果被当成对修订的判决**。
+>
+> **出路**：①让线轮的环境与车道轮**同保真**（同资产面、能真起 console/浏览器面——这是认证轮能不能判 UI 的前提）；②轮次面把"环境红"与"内容红"**分开具名**（`env_red_names` 已在 `INTEG_SUMMARY` 里，直接用），让读者一眼看出哪些是"没判成"而不是"判红了"；③**在此之后**再谈判据口径（是否与闸轮同口径、挂账册是否也适用于线轮）。
+>
+> **纪律**：**一个"全量证明"如果连它要检查的那些面都跑不起来，它证明的只是"跑不起来"**；凡"红名单"，先分"判红了"与"没判成"两类，再谈归因。
+>
+> **回归**：L2——线轮面必须把 `env_red_names` 与内容红分开陈列且都有名字；L3——一次线轮里，凡"要起 console 才能判"的用例要么真判出红绿、要么在面上具名"未判成：<原因>"，不得静默计入 env 计数了事。
