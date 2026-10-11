@@ -131,6 +131,63 @@ def self_repo_root():
     return Path(__file__).resolve().parent.parent
 
 
+#: Gitignored-but-required asset paths the round's clone cannot carry by
+#: itself (t261011-21): prepare_tree() git-clones each candidate, and a
+#: clone only carries committed files, so every cwd-relative probe into
+#: these paths silently falls back inside the clone (system python3 without
+#: pytest/PyYAML/temporalio, missing playwright-core candidates) and turns
+#: the round red on environment, not product. Each entry names its
+#: evidenced consumer:
+#: - server/engine/.venv
+#:     registry probes `PY=server/engine/.venv/bin/python` and the
+#:     PyYAML/temporalio self-rescue chains (the missing-interpreter and
+#:     much of the Temporal-shaped classes in the 261011-1649 suite log).
+#: - server/engine/bin/temporal
+#:     scenarios that spawn their own worker/console binary next to the
+#:     interpreter (Temporal-shaped class).
+#: - node_modules
+#:     profile-farm / workbench surfaces resolving the bare package name
+#:     from the repo root.
+#: - server/ui-check/node_modules/playwright-core
+#:     lib_pw_deps.mjs's LOCAL_PW candidate chain (browser/capture class).
+#: The materialisation is one symlink per entry pointing at the source
+#: checkout's copy (one copy on disk, the isolation never widened). An
+#: entry genuinely absent from the source is NOT faked: it is reported on
+#: stderr and skipped, so the scenario-side env_fail classification keeps
+#: telling the truth — never a silent swallow, never a fabricated green.
+CLONE_ASSETS = (
+    "server/engine/.venv",
+    "server/engine/bin/temporal",
+    "node_modules",
+    "server/ui-check/node_modules/playwright-core",
+)
+
+
+def materialise_assets(clone_root, source_root):
+    """Link each declared gitignored asset from the source checkout into
+    the freshly made clone (t261011-21). A destination that already exists
+    in the clone (a committed path) is never overwritten; an entry absent
+    from the source is skipped with a named stderr line; a failed link is
+    a named could-not-run — never a half-provisioned clone that pretends
+    to be whole. Idempotent by construction (exists-check first)."""
+    for rel in CLONE_ASSETS:
+        dst = Path(clone_root) / rel
+        if dst.exists() or dst.is_symlink():
+            continue
+        src = Path(source_root) / rel
+        if not src.exists():
+            sys.stderr.write("%s asset_absent_in_source:%s — the clone "
+                             "stays without it; scenario env-fails (if any) "
+                             "stay the honest classification\n"
+                             % (TAG, rel))
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.symlink(os.path.abspath(str(src)), str(dst))
+        except OSError as e:
+            die("asset_link_failed:%s:%s" % (rel, e))
+
+
 def source_for(repo, env=None):
     """Per-repo source checkout: the declared path env first, the runner's
     own checkout as fallback. Returns (path, declared_or_default)."""
@@ -179,6 +236,7 @@ def prepare_tree(candidate, run_root, env=None):
     if proc.returncode != 0:
         die("checkout_failed:%s@%s:%s"
             % (repo, revision, proc.stderr.strip()[-300:]))
+    materialise_assets(dst, src)
     return dst, src, how
 
 

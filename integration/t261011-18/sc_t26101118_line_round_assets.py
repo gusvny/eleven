@@ -216,6 +216,18 @@ def _build_fixture(tmp):
         env_fail("fixture commit failed", (r.stderr or "")[-300:])
         sys.exit(2)
     head = _git("rev-parse", "HEAD", cwd=src).stdout.strip()
+    # Source-side gitignored assets (t261011-21): that ticket materialises
+    # the declared clone assets INTO the clone, so the fixture's source
+    # checkout now carries the gitignored pair for the provisioning to link
+    # — leg A3 (re-signed) judges their presence in the clone; the env-key
+    # faces A4-A7 are unchanged and keep resolving from the RUNNER's own
+    # checkout, not from these markers.
+    (eng / ".venv" / "bin").mkdir(parents=True, exist_ok=True)
+    (eng / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 0\n",
+                                                  encoding="utf-8")
+    (eng / "bin").mkdir(parents=True, exist_ok=True)
+    (eng / "bin" / "temporal").write_text("#!/bin/sh\nexit 0\n",
+                                          encoding="utf-8")
     return src, head
 
 
@@ -289,10 +301,20 @@ def main():
     if probe_a.is_file():
         probe = json.loads(probe_a.read_text(encoding="utf-8"))
         clone = str(probe.get("cwd", ""))
-        ok(probe.get("clone_poc_exists") is False
-           and probe.get("clone_temporal_exists") is False,
-           "A3 precondition: the clone carries NEITHER asset "
-           "(the handover is load-bearing, not decorative)",
+        # A3 deliberately RE-SIGNED by t261011-21: that ticket materialises
+        # the gitignored assets INTO the clone (declared list, one symlink
+        # per entry), so the clone now CARRIES .venv / temporal. This face's
+        # old contract ("the clone carries NEITHER asset, the handover is
+        # load-bearing") was the pre-t261011-21 incident precondition; the
+        # load-bearing seam it guarded — the env keys arriving at EXISTING
+        # paths OUTSIDE the clone — stays asserted by A4-A7 unchanged. The
+        # clone-relative probe faces are owned by
+        # t261011-21-clone-assets-line-round.
+        ok(probe.get("clone_poc_exists") is True
+           and probe.get("clone_temporal_exists") is True,
+           "A3 (re-signed t261011-21) the clone CARRIES the provisioned "
+           "assets; the handover keys stay the seam for env-key consumers "
+           "(A4-A7)",
            json.dumps({k: probe.get(k) for k in
                        ("clone_poc_exists", "clone_temporal_exists")}))
         poc_env = str(probe.get("poc_env", ""))

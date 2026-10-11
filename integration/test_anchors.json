@@ -14,6 +14,11 @@
     "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
   },
   "engine_tests": {
+    "server/engine/tests/test_t26101121_tick_budget_reap_abort.py": {
+      "anchor": "behaviour",
+      "note": "t261011-21 host order 261011: line-round tick budget dominates CHAIN_LIMIT x runner timeout and is the constant at the workflows call site; resolve_runner spawns its own session, registers the live pid, and timeout/unwind reaps the whole process group (TERM-first, ESRCH/EPERM tolerated, idempotent, failed spawn never registers); abort_inflight_ticks leaves one could_not_run row per in-flight line through the real validator, never releases a guard, never masks the caller's exception; shutdown face reaps+appends+clears; the activity wrapper aborts, reaps and re-raises the original exception",
+      "sync_path": ""
+    },
     "server/engine/tests/test_t261009_49_face_coverage.py": {
       "anchor": "behaviour",
       "note": "t261009-49: period-x-face coverage projection truth table (five states, blocked shell never produced, failed vs not_run, never/last-ok, injected attempt reader fault modes, cap truncation, aggregate wiring)",
@@ -4969,8 +4974,13 @@
     },
     "integration/t261011-18/sc_t26101118_line_round_assets.py": {
       "anchor": "contract",
-      "note": "t261011-18: the line round runs the suite inside its own cloned checkout — the runner hands over the two assets the clone cannot resolve, operator pointers pass through verbatim, a bad pointer is a named could-not-run, and an unrunnable round grows the range without minting a certification",
+      "note": "t261011-18: the line round runs the suite inside its own cloned checkout — the runner hands over the two assets the clone cannot resolve, operator pointers pass through verbatim, a bad pointer is a named could-not-run, and an unrunnable round grows the range without minting a certification (A3 re-signed by t261011-21: the clone now carries the provisioned assets)",
       "sync_path": "integration/line_round_runner.py; integration/bench.py (_resolve_asset)"
+    },
+    "integration/t261011-21/sc_t26101121_clone_assets_line_round.py": {
+      "anchor": "contract",
+      "note": "t261011-21: the line round's clone carries the gitignored assets the suite's cwd-relative probes need (interpreter chain picks the provisioned venv, temporal + playwright-core probes resolve), absence stays honest (env_failed==1 relayed, nothing fabricated), committed destinations are never clobbered, links target absolute source paths",
+      "sync_path": "integration/line_round_runner.py (prepare_tree/materialise_assets)"
     }
   }
 }
