@@ -5261,6 +5261,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 
 ## KI-01M4MGYS34G938XD63W97A09EF **三条 `@activity.defn` 从未注册进 worker 的活动表**（`lane_head_sha` / `land_to_line` / `certification_wait`）：一挂「绿轮面」就永远落不了盘 ⇒ develop buffer 的落地在**前置**处具名拒绝；而前置后面还排着两条**同族死面**——这条路径**一次都没通过电** **(261011 11:40 `t261011-16` 的**零失败轮**实测 + 读码全族扫描;integration 岗登记)**
 
+> **✅ 已闭合（261011 13:18，`t261011-17` 落地 `545c6cba`）**：三条活动补齐进表，第四个成员（`activities.py:inspection_period_identity`）按其真实处境处置（**摘掉空挂的 `@activity.defn`**——它只被当普通函数调用，见本岗 12:2x 的只读核验）；L1 新增守卫 `test_t261011_17_registration_guard.py`（含负对照），L2/L3 两条场景（`t261011-17-registration-surface` = 按**合成表** `compose_worker_activities()` 判、`t261011-17-green-run-face-note` = 面注记的四态真值）在闸轮与本岗手跑**双绿**。**收尾判据（可复用）**：`worker_dryrun` 的活动数 **78 → 81** 且三名齐在。**配套纪律（本轮实证）**：注册是**进程级**的 ⇒ 落地后**中央与在飞票的泳道 worker 都要换手**（本岗实测：中央 pid 10378→20506、`-80` 泳道 pid 7139→20684，`stale` 清空）——**不换手，票的闸与活动仍是旧代码**（同族见 `KI-01M4MNZ3VK46MGH2XWPVE2NVZC`）。
+
 > **现象（原始读数，两条独立佐证）**：
 > 1. **零失败轮照样落不了面**：`t261011-16` 的闸轮回执 `.lane/t261011-16/out/integration-report-261011-113856.json` = **`ran 582 / pass 578 / fail 0 / env_fail 4 / wall 846.6 s`**（`known_red_skipped 46`、`excluded_pools [engine, exclusive]`）——**这是一轮 `failed==0` 的真绿轮**，`shared.green_run_face` 的四条判据（`error==""`、`ran>0`、`failed==0`、`blockers` 空、非定点跑）**全部满足**；但同一分钟它的票面 `log` 里落的是：
 >    `green-run face not recorded (lane_head_sha failed): ActivityError: Activity task failed`（ts `1791690003` = **11:40:03**）⇒ `meta.last_green_run` **仍是 `null`**。`t261009-80` 更早的一次同形（ts `1791673614` = **07:06:54**）也在盘上。
@@ -5334,3 +5336,20 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（三读定位，先做再说话）**：凡"**修了没用**"的闸红，**先读三样**——①**跑这闸的 worker 的启动时刻**（`engine_ops workers` → 该票泳道行的 `started_at`/`pid`）；②**它的 `stale` 名单**里有没有本闸所在模块；③**闸自己的措辞**对不对得上新代码。三样都指向旧代码 ⇒ 结论是"**换手**"，不是"**返工**"。**并且**：落地一个"闸代码"改动之后，**在飞票的泳道 worker 一律视为旧代码**——要它按新判据判，就得换手（按 pidfile TERM、等控制台 supervisor 拉起、验新 pid ＋ live poller=1）；否则那一票的每一轮闸判都是旧代码的判。
 >
 > **回归**：L2——`engine_ops workers` 对"启动早于某模块 mtime"的 worker **必须**给出该模块在 `stale` 里（已有 `test_engine_ops.py` 覆盖同一形状，此处只作锚点）；L3——**一次"闸代码落地 → 换手 → 同一条脏面由红转绿"的连贯回执**（本条的正面形态：`retry_qc` 之后闸自己打出 `prose dirt exempted …` 文案），且**换手前的那次红必须能在报告里被指认为旧代码的判**。
+
+## KI-01M4MRB4Z62JGVHVNXPTDV0THS **「绿轮面」可以由**5 条场景的收窄轮**铸出**：它只问 `targeted_only`，不问"这轮跑了几条/是不是全量"——而同一个引擎里的 **run 账本写入器**对"收窄轮"是明确拒写的 **(261011 13:41:50 `t261009-80` 实测：面 `ran=5` 铸出并随即被落地消费;integration 岗登记)**
+
+> **实测（原始读数，同一夜同一票）**：`t261009-80` 13:40:44 的验收段回执 = **`ran 5 / pass 1 / fail 0 / env_fail 4 / wall 45.9 s`**；**13:41:50 票面 log 落 `green-run face recorded (ran=5, sha=20a3d48d3b62)`**；**13:50:28 该面被落地消费**——`develop-buffer landing recorded on line develop-buffer (proven 20a3d48d3b62)`，落地账本由此**第一次**出现行（`ldg-01M4MR6EBXMBJFCFDKGM32MFZN`）。⇒ **一个只跑了 5 条场景（其中 4 条还是环境红）的轮次，成了"这张票在这一版树上是绿的"这一判据的唯一来源**。
+>
+> **两套判据在同一棵树上的分歧（本条的要点）**：
+> - **run 账本写入器**（`integration/run_scenarios.py:4267 run_record_skip_reason`）：`narrowed`（`--only` **或** pool 排除）⇒ 具名拒写：`"narrowed round (--only / pool exclusion) is not a proof — no run record"`；闸侧同款（`server/tools/verify_lane.py:1709-1758`，"收窄轮不戴 suite"）。
+> - **绿轮面判据**（`server/engine/shared.py:1166 green_run_face`）：只看 `error=="" && ran>0 && failed==0 && blockers 空 && 非 targeted_only`——**`ran` 只要求 >0**，**没有下界**，也**不读任何 narrowing 标记**。
+> ⇒ 于是"**收窄轮不是证明**"这条纪律在账本面成立、在**面**面失效；而**面才是落地闸真正消费的东西**（`dev_lane.py:3618-3649`：无 sha ⇒ 具名拒绝落地；有 sha ⇒ 直接拿它当"判过的那一版"）。
+>
+> **为什么是"高风险"而不是"学术问题"**：面是**授权**（它决定"哪一版树被免检地写进线"）。若某票的实现轮之后只跑过 1 条自证场景并零计红，面就会以那版树铸出并落地——**整条"证明换落地"的语义被一个 `ran>0` 兜住**。今夜能铸出这面是**好事**（它证明注册面修复生效、develop buffer 第一次通电），但**同一个机制在别处会给出比设计意图弱得多的证据**。
+>
+> **出路（设计口径归宿主，实现归票）**：①`green_run_face` 收一个"**这轮是什么轮**"的具名输入（`narrowed` / `scope`），**收窄轮不得铸面**（与账本面同一套判词），或②给 `ran` 一个**下界**（本票证明面 / 快集面 vs 全量面分开记，面里带 `scope` 字段），让"面"与"账本"两处**同口径**；③无论选哪条，**面里要带上"它凭什么"**（`ran`、`scope`、`skipped`、`overrides`）。
+>
+> **纪律**：**凡"某机制产出的是授权/免检凭据"，必须检查它的判据里有没有"这条凭据本来该有多强"的那一问**；同一个引擎里若另一处已经对同类输入说了"这不算证明"，两处必须同口径——**否则读者会以为纪律是全仓的，而它其实只在某一个面成立**。
+>
+> **回归**：L1——`green_run_face` 对"收窄轮"（`narrowed=True` 或 `ran < 声明下界`）**返回 None**；L2——同一轮同时跑 run 账本写入器与面铸造器，两者对"这轮算不算证明"**给出同一答案**；L3——一次真实落地：若被消费的面来自收窄轮，闸必须点名拒绝并给出"再跑一轮全量"的具名动作。
