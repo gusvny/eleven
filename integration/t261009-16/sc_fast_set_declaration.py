@@ -195,10 +195,17 @@ try:
     check("E no member is in the booked-red roster",
           not (set(member_names) & set(reds)),
           "overlap: %s" % sorted(set(member_names) & set(reds)))
+    # 池判定必须"取 token 再比较"，不能用子串：`\bbrowser\b` 会命中
+    # `pool=browser-free`（连字符是词边界），把一个**便宜的另一池**误判成
+    # 那根 19.6 分钟串行杆。261011 实测：本集合新增两条 browser-free 成员
+    # （lane-map 值绑定面、capture preset 面）当场被误报为违规。
+    def _pool_token(line: str) -> str:
+        m = re.search(r"pool=([A-Za-z0-9_-]+)", line)
+        return (m.group(1) if m else "").lower()
     browser_members = [ln for ln in out.splitlines()
-                       if re.search(r"\bbrowser\b", ln, re.I)
-                       and "fast-catch:" in ln]
-    check("E no browser-pool member", len(browser_members) == 0,
+                       if "fast-catch:" in ln and _pool_token(ln) == "browser"]
+    check("E no browser-pool member (exact pool token; browser-free is a different, cheap pool)",
+          len(browser_members) == 0,
           "browser members: %s" % browser_members[:3])
 
 finally:
