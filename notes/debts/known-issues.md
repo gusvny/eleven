@@ -5178,6 +5178,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 
 ## KI-01M4KJ022G8R0RRAZ03C7T9TZ4 **develop buffer 的落地前置（`meta.last_green_run`）在实践中**不可达**：它要求一整轮**零失败**的全量轮，而盘上 66 轮全量轮**没有一轮是零失败**（4–8 红是常态）⇒ 第一张 opt-in 票即便拿到 runner 与认证也永远落不了地**(261011 02:37 `t261009-80` 实测;integration 岗登记)
 
+> **⚠️ 更正（261011 11:4x，实测反证，归因改两层）**：本条原把"前置不可达"归给"盘上 66 轮没有一轮零失败"。**11:38:56 出现了零失败轮**（`t261011-16`：`ran 582 / pass 578 / fail 0 / env_fail 4`）——`green_run_face` 的四条判据全满足，**面仍然没落**：同一分钟票面 log 是 `green-run face not recorded (lane_head_sha failed): ActivityError: Activity task failed`。⇒ **第一因是 `lane_head_sha` 这条活动从未注册进 worker 活动表（写面根本执行不到）**，见 `KI-01M4MGYS34G938XD63W97A09EF`；**本条的"慢性红"是第二因**（注册修好后，慢性红仍会让多数轮不绿，下面的选项 A/B 仍然要在）。**顺序不能倒**：不修注册，修多少条红都不会出现第一张绿轮面。读书时的正确姿势：**先看 `log` 里有没有 `green-run face recorded` 一行**，再看 `fail` 数。
+
 > **现象（原始读数）**：`t261009-80`（develop buffer 第一张 opt-in 票）02:26 走完 `merge_check` 进 `merge`，02:37:32 **具名阻塞**：
 > `develop-buffer landing refused: this ticket has no green-run face (meta.last_green_run carries no sha) — the landing consumes the revision the gate judged, and no judged revision is recorded; never falls back to the current tip. Re-verify with retry_qc (a green gate round re-anchors the face).`
 > 它的票面 `log` 里**没有** `green-run face recorded` 一行、只有这条拒绝；`meta.last_green_run` 为 `null`。
@@ -5256,3 +5258,39 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**"进程还在" ≠ "工人在服务"**。换手后必须**同时**核三样：**新 pid ≠ 旧 pid**、`ps lstart` **晚于换手时刻**、meta `state` **不是 `draining`**；只看工具回执或 `workers` 的 `started_at` 会被这条 KI 骗过去。
 >
 > **回归**：L1——drain 后 `stamp_for` 的 started_at 仍等于**进程启动时刻**（不是 meta 重写时刻）；L3——一次带 owned 子进程组的换手：面在排空窗口内显示 `draining` 且明说新工人未起，换手完成后上列三项全变。
+
+## KI-01M4MGYS34G938XD63W97A09EF **三条 `@activity.defn` 从未注册进 worker 的活动表**（`lane_head_sha` / `land_to_line` / `certification_wait`）：一挂「绿轮面」就永远落不了盘 ⇒ develop buffer 的落地在**前置**处具名拒绝；而前置后面还排着两条**同族死面**——这条路径**一次都没通过电** **(261011 11:40 `t261011-16` 的**零失败轮**实测 + 读码全族扫描;integration 岗登记)**
+
+> **现象（原始读数，两条独立佐证）**：
+> 1. **零失败轮照样落不了面**：`t261011-16` 的闸轮回执 `.lane/t261011-16/out/integration-report-261011-113856.json` = **`ran 582 / pass 578 / fail 0 / env_fail 4 / wall 846.6 s`**（`known_red_skipped 46`、`excluded_pools [engine, exclusive]`）——**这是一轮 `failed==0` 的真绿轮**，`shared.green_run_face` 的四条判据（`error==""`、`ran>0`、`failed==0`、`blockers` 空、非定点跑）**全部满足**；但同一分钟它的票面 `log` 里落的是：
+>    `green-run face not recorded (lane_head_sha failed): ActivityError: Activity task failed`（ts `1791690003` = **11:40:03**）⇒ `meta.last_green_run` **仍是 `null`**。`t261009-80` 更早的一次同形（ts `1791673614` = **07:06:54**）也在盘上。
+> 2. **同族前例（失败形态早就见过）**：`t261008-09` 因 `NotFoundError: Activity function run_inspection_surface for workflow t261008-09 is not registered on this worker, available activities: …` **整票 FAILED**（`server/admin.log`，ts `1791678158`）⇒ "活动没注册"这个故障形态**在盘上不是第一次**，只是那次是**炸票**，这次被 `try/except` **吞成一行 note**。
+>
+> **读码定位（不是猜）**：
+> - 注册面**只有两份清单**：`server/engine/worker.py:123` `acts = list(ALL_ACTIVITIES) + list(ALL_AGENT_ACTIVITIES) + list(CONCURRENCY_ACTIVITIES) + [make_stage_activity(s) …]`（`compose_worker_activities`，KI-121 的唯一性断言也在那里）；`ALL_AGENT_ACTIVITIES` 定义在 `server/engine/agent_activities.py:11633`。
+> - **实测成员**：`import agent_activities; 'lane_head_sha' in {a.__name__ for a in ALL_AGENT_ACTIVITIES}` = **False**（表里 44 个，只有 `resolve_main_head`）。
+> - **引入史**：`git log -S "async def lane_head_sha" -- server/engine/agent_activities.py` 只有一条 = `611ca1ae`（**t261008-24** 的 squash，10-08）；`git log -S "lane_head_sha,"`（表内元素形态）**零命中** ⇒ **从落地那天起就没注册过**，三天内每一次"绿轮落面"都在静默失败。
+> - **调用点**：`dev_lane.py:2114-2120` 走 `workflow.execute_activity("lane_head_sha", …)`，`except` 分支只 `_log` 一行（`dev_lane.py:2125`）——**fail-closed 但静默**：票不会红、不会 blocked，只有 `meta.last_green_run` 永远是空。
+>
+> **全族扫描（"实报即全族线索"口径，本岗 AST 扫描全部 `@activity.defn` × worker 合成表）**：`server/engine` 下共 **77** 个 `@activity.defn`，其中 **57 个在表内**；未在表内且**位于生产模块**的有 **4 个**：
+> | 活动 | 定义 | 是否被当活动调用 |
+> | --- | --- | --- |
+> | `lane_head_sha` | `agent_activities.py:5947` | **是**（`dev_lane.py:2114`，字符串名）⇒ **当前死面** |
+> | `land_to_line` | `agent_activities.py:6009` | **是**（`dev_lane.py:3650` `execute_activity(land_to_line, …)`）⇒ **修好上一条后立刻撞上的下一条** |
+> | `certification_wait` | `agent_activities.py:6127` | **是**（`dev_lane.py:3683`，落地后"等认证"的轮询）⇒ **第三条** |
+> | `inspection_period_identity` | `activities.py:1162` | 否（`activities.py:1187` 是**直接 Python 调用**）⇒ 无运行期影响，但同样挂着 `@activity.defn` 却在表外（**装饰器的语义与注册面脱钩**） |
+> 其余未注册者是**自检脚本里的桩**（`selfcheck_ki061_wake_reset.py` / `selfcheck_t260916_19_join_escape.py` 的 `stub*`、`selfcheck_graceful_stop_probe.py:guarded_probe`）——**预期不入表**，但"预期"必须**具名写下来**，否则守卫写不成。
+>
+> **危害（比"少一个注册"重得多）**：
+> 1. **它把 develop buffer 的落地路径整条废掉**，而且**死在前置处**：`dev_lane.py:3640-3649` 在拿到 `last_green_run.sha` 之前就具名拒绝 ⇒ **`land_to_line` 与 `certification_wait` 这两条同族死面被"挡在后面"，从来没机会显形**。修一条会露出下一条（**先死面遮后死面**），所以必须**一次修全族**。
+> 2. **它让 `KI-01M4KJ022G8R0RRAZ03C7T9TZ4` 的归因偏了一层**：那条把"落地前置不可达"归给"盘上 66 轮没有一轮零失败"；**实测反证**——今天 11:38 就有过一轮 `fail 0`，**仍然落不了面**。⇒ 前置的**第一因是注册缺失**（写面根本执行不了），"慢性红"只是**第二因**（即便注册修好，慢性红仍会让多数轮不绿）。两条都要修，但**顺序不能倒**：不修注册，修多少红都不会有一张面。
+> 3. **静默是设计选择，不是安慰**：面缺 ⇒ 落地 fail-closed 拒（方向对），但**票面/回执/面板上没有任何"这里有个面本该被写"的正面信号**——只有 `log` 里一行 note。凡"fail-closed + 静默"的组合，**必须有守卫在别处炸**，否则它就是一个可持续三天的隐性停摆（本条即三天）。
+>
+> **出路（实现归票，本岗只报不做；票已开）**：
+> ①**把三条同族活动一次补齐**进 `ALL_AGENT_ACTIVITIES`（`lane_head_sha, land_to_line, certification_wait`），并按既有注释纪律在表内写明"缺注册=运行时才炸"；
+> ②**补一条"注册面覆盖"守卫（这是本条的真正价值）**：断言 `server/engine` 下**每一个 `@activity.defn`** 都在 worker 合成表里，或落在一份**具名豁免清单**里（豁免须写理由，自检桩是唯一合法豁免类）；同一形状对 `@workflow.defn` 与 `ALL_WORKFLOWS` 也做一遍（本岗实测 `workflows.py:353` 的 `ALL_WORKFLOWS` 覆盖 `DevLaneWorkflow` 等，**该面目前是全的**，但不能靠"目前是全的"）。
+> ③**给 `lane_head_sha` 的静默失败加一条可观测面**：面没落下时，除 `log` 之外应在**票面结果**里留一条具名 note（否则值守只能靠翻 `log`）。
+>
+> **纪律**：**凡"新增活动/工作流"，注册面的判据不是"我加了装饰器"，而是"worker 合成表里有它"**；`@activity.defn` **只是元数据**，worker 服务的是**表**。凡"调用新活动"的票，验收必须含一条**合成表成员**断言（本族缺这条断言三天无人知）。
+>
+> **回归**：L1——①三条活动均在 `ALL_AGENT_ACTIVITIES` 内；②AST 扫描：每个 `@activity.defn` 要么在表内、要么在**具名豁免清单**内（新增一个未注册的活动 ⇒ 立刻红）；③`compose_worker_activities()` 的产出里含这三条名字（**判据取合成表、不取单一清单**，防"加进清单但合成表没接"）。L3——一张 develop buffer 票的落地链路**走通到 `land_to_line` 与 `certification_wait`**（打桩亦可：断言三次活动调用**都真的到达 worker**、不再出现 `ActivityError`）。
