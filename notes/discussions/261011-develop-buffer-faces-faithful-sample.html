@@ -2,20 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Develop buffer — faithful sample (261011 v9: id 永远开头 · 无彩色左条 · 三个点各是什么)</title>
+<title>Develop buffer — faithful sample (261011 v10: 排队位次 ＋ active 交给点阵颜色 · 去掉行首状态点)</title>
 <style>
-  /* 左栏（compact）真源：
-     · 卡片：sidebar.tsx:415-427（.wb-sb .wb-card —— 透明底、**border-left-width:0**（4px 彩条在左栏已退役，t261008-08））
-     · 一行组成：t261008-08/…row_composition.mjs:277-292（一行=位次号+彩点+编号+标题，无英文状态词；二行=阶段小字+类别+十格点）
-     · 三个点：.wb-card-dot（9px 圆，随 data-state）/ .wb-order-dot（8px 圆，data-order-dot=work|hold|paused）
-       / .wb-stage-dot（5px 方块，data-on，蓝=已过/当前）
-     v9 按宿主令：①ticket id 永远开头；②去掉彩色左条（左栏本来就没有）；③把"要不要状态彩点"画成两版。 */
+  /* 真源：
+     · 左栏卡片 sidebar.tsx:415-427（透明底、border-left-width:0）
+     · 行首排序标记 ticket-row-card.tsx:255-268（queued=位次号 .wb-order-pos / atwork=绿点 /
+       hold·paused=琥珀点；**atwork/hold/paused 行不渲染排序控件**）；断言面 = …row_composition.mjs T1b/T3
+     · 十格点 ticket-row-card.tsx:399-402（`ordering.dotsLit` 决定亮几格，今天只区分蓝/灰）
+     · 板面已存在的"当前格带状态色"写法 index.tsx:278-282（本页把它借给左栏） */
   :root{
     --canvas:#fff; --ink-strong:#24292f; --muted:#57606a; --accent:#0969da;
     --border:#d0d7de; --warn-bg:#fff8c5; --warn:#bf8700; --warn-text:#7d4e00;
-    --warn-border:#eac54f; --warn-surface:#fff8e6; --success:#1a7f37; --success-solid:#2da44e;
+    --warn-border:#eac54f; --warn-surface:#fff8e6; --passed:#2da44e;
     --danger-bg:#ffebe9; --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182;
-    --success-deep:#116329; --success-border:#4ac26b; --success-surface:#dafbe1;
+    --success:#1a7f37; --success-deep:#116329; --success-border:#4ac26b; --success-surface:#dafbe1;
     --done-bg:#f6f8fa;
   }
   body{margin:0;background:#0d1117;color:#e6e9ef;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB",sans-serif}
@@ -29,7 +29,6 @@
   code{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:1px 5px;color:#e6e9ef}
   .light code{background:#f6f8fa;border-color:#d0d7de;color:#24292f}
 
-  /* 左栏卡片：透明底 + **无左色条**（真源基线），仅在 waiting/blocked/failed 时按令牌派生行底 */
   .wb-card{display:flex;flex-direction:column;gap:4px;padding:6px 10px;margin-bottom:6px;
     border:1px solid var(--border);border-left-width:0;border-radius:8px;background:transparent}
   .wb-card[data-state=waiting]{background:var(--warn-bg)}
@@ -39,23 +38,22 @@
   .wb-card[data-active=true]{box-shadow:inset 0 0 0 1px var(--accent)}
   .row{display:flex;align-items:center;gap:6px;min-width:0}
   .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent);flex:none}
-  .wb-card-pos{flex:none;font-size:11px;color:var(--muted);min-width:12px;font-variant-numeric:tabular-nums}
-  /* 点① 状态彩点：9px 圆，随 data-state */
-  .wb-card-dot{width:9px;height:9px;flex:none;border-radius:50%;background:var(--muted)}
-  .wb-card-dot[data-state=active]{background:var(--accent)}
-  .wb-card-dot[data-state=waiting]{background:var(--warn)}
-  .wb-card-dot[data-state=blocked]{background:var(--danger)}
-  .wb-card-dot[data-state=failed]{background:var(--danger-solid)}
-  /* 点② 排队/工作点（ordering queue）：8px 圆 */
+  /* 排队位次（queued 行）：真源 .wb-order-pos（10px、600、等宽数字） */
+  .wb-order-pos{flex:none;min-width:14px;text-align:center;font-size:10px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+  /* 排队/工作点（atwork=绿 / hold·paused=琥珀）——不是票状态点 */
   .wb-order-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--border)}
   .wb-order-dot[data-order-dot=work]{background:var(--success)}
   .wb-order-dot[data-order-dot=hold]{background:var(--warn)}
   .wb-order-dot[data-order-dot=paused]{background:var(--warn)}
-  /* 点③ 十格 stage 点：5px 方块 */
+  /* 十格点：已过=绿 / 当前格=状态色 / 未到=灰（板面写法借到左栏） */
   .wb-stage-dots{display:inline-flex;align-items:center;gap:2px;flex:none}
   .wb-stage-dot{width:5px;height:5px;border-radius:1px;background:var(--border)}
-  .wb-stage-dot[data-on=true]{background:var(--accent)}
-
+  .wb-stage-dot[data-visual=passed]{background:var(--passed)}
+  .wb-stage-dot[data-visual=current][data-state=active]{background:var(--accent)}
+  .wb-stage-dot[data-visual=current][data-state=waiting]{background:var(--warn)}
+  .wb-stage-dot[data-visual=current][data-state=blocked]{background:var(--danger)}
+  .wb-stage-dot[data-visual=current][data-state=failed]{background:var(--danger-solid)}
+  .wb-stage-dot[data-visual=current][data-state=done]{background:var(--passed)}
   .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto;color:var(--ink-strong)}
   .wb-card-stage{flex:none;font-size:10px;color:var(--muted)}
   .wb-card-epic{font-size:11px;padding:0 8px;border:1px solid var(--border);border-radius:10px;flex:none;white-space:nowrap;color:var(--muted)}
@@ -83,109 +81,75 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Develop buffer — faithful sample <span class="sub">(v9: id 永远开头 · 无彩色左条 · 三个点各是什么)</span></h1>
+  <h1>Develop buffer — faithful sample <span class="sub">(v10: 排队位次 ＋ active 交给点阵 · 去掉行首状态点)</span></h1>
   <p class="sub">261011 · integration steward · <b>sample only, nothing runs.</b></p>
 
-  <div class="note"><b>你这条令落到盘上的读法（我先量了一遍）</b>：
-    ① <b>彩色左条（左括号）在左栏本来就没有</b>——<code>sidebar.tsx:415-423</code> 明确写 <code>.wb-sb .wb-card{border-left-width:0}</code>（"left-column rows drop the inherited 4px epic bar"，t261008-08）。<b>我前几版又把它画回来了，是错的</b>；本版去掉。
-    ② <b>左栏那个带颜色的圆点是真的</b>（<code>.wb-card-dot</code>，9px，随 <code>data-state</code> 变色），而且它是左栏**唯一的状态载体**——英文状态词在 t261008-08 就被撤掉了，当时的定稿理由正是"状态留在彩点上"。所以"有没有用"＝"左栏还要不要显示票的状态"，见 §3 两版对照。
-    ③ <b>id 永远开头</b>：可以，<b>且不破任何断言</b>——<code>…row_composition.mjs</code> 的探针只查元素的有无（<code>stateWord===false</code>、<code>stage</code>、<code>epic</code>、<code>dots===10</code>）与"票号仍在行上"（T5 用 leaf 文本含票号），**没有一处断言顺序**。</div>
+  <div class="note"><b>你这两条我按盘上真源接住了</b>：
+    ① <b>排队位次</b>——真源就有（<code>ticket-row-card.tsx:255-258</code>：<code>ordering.kind==='queued'</code> 时行首渲染位次号 <code>.wb-order-pos</code>；<code>atwork/hold/paused</code> 三种行**不渲染位次号、也不渲染排序控件**，只给一个 8px 排队点：<code>work</code> 绿 / <code>hold·paused</code> 琥珀）。我前面几版把它画成了行尾一个不起眼的"1"，<b>这次按真源放在 id 之后、醒目位置</b>。
+    ② <b>active 用点阵颜色表示，够吗</b>——<b>够，但要照板面已有的写法给"当前格"上状态色</b>（<code>index.tsx:278-282</code> 板面已经这么做：<code>data-visual=current</code> ＋ <code>data-state</code> ⇒ 蓝/琥珀/红）。同时<b>已过格要改成绿</b>，否则"已过格"与"active 的当前格"都是蓝，**看不出当前格在第几格**。左栏今天只有一个"亮几格"的蓝（<code>dotsLit</code>），这一改是把板面的那套借过来。</div>
 
-  <h2>1 · 行（id 开头 · 三行版：状态行 / 标题独占 / 元数据行）</h2>
+  <h2>1 · 行（id 开头 · 位次紧跟 · 无状态点 · 状态在点阵的当前格上）</h2>
   <div class="light wb-col">
     <div class="wb-card" data-state="waiting" data-active="true">
       <div class="row">
         <span class="wb-card-id">t261009-80</span>
-        <span class="wb-card-dot" data-state="waiting" title="ticket state: waiting"></span>
-        <span class="ln-pill" data-line-state="waiting" title="on line develop-buffer · landed 13:50 · waiting for the covering certification" aria-label="On the develop-buffer line: waiting for certification">LineOn</span>
-        <span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate" title="Halted at the stage gate; click Resume to continue" aria-label="Halted at the stage gate">⏸</span>
-        <span class="wb-order-ctl" title="queued rows only">1 ⋮⋮ ⌃ ⌄</span>
+        <span class="wb-order-pos" data-order-pos="3" title="Queue position 3">3</span>
+        <span class="ln-pill" data-line-state="waiting" title="on line develop-buffer · landed 13:50 · waiting for the covering certification">LineOn</span>
+        <span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate" title="Halted at the stage gate">⏸</span>
+        <span class="wb-order-ctl" title="queued rows only">⋮⋮ ⌃ ⌄</span>
       </div>
       <div class="row"><span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span></div>
       <div class="row"><span class="wb-card-stage" data-wb-row-stage="merge">merge</span><span class="wb-card-epic">engine-hardening</span>
-        <span class="wb-stage-dots" style="margin-left:auto" title="stage dots (10): blue = passed/current"><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot"></span></span></div>
+        <span class="wb-stage-dots" style="margin-left:auto" title="stage dots (10): green = passed, the lit one takes the state colour, grey = ahead"><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="current" data-state="waiting"></span><span class="wb-stage-dot"></span></span></div>
     </div>
-    <div class="wb-card" data-active="true">
+    <div class="wb-card" data-state="active" data-active="true">
       <div class="row">
         <span class="wb-card-id">t261011-18</span>
-        <span class="wb-card-dot" data-state="active" title="ticket state: active"></span>
-        <span class="wb-order-ctl">2 ⋮⋮ ⌃ ⌄</span>
+        <span class="wb-order-pos" data-order-pos="1" title="Queue position 1">1</span>
+        <span class="wb-order-ctl">⋮⋮ ⌃ ⌄</span>
       </div>
       <div class="row"><span class="wb-card-title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span></div>
       <div class="row"><span class="wb-card-stage" data-wb-row-stage="implement">implement</span><span class="wb-card-epic">engine-hardening</span>
-        <span class="wb-stage-dots" style="margin-left:auto"><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span></span></div>
+        <span class="wb-stage-dots" style="margin-left:auto" title="current cell = blue = active"><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="current" data-state="active"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span><span class="wb-stage-dot"></span></span></div>
+    </div>
+    <div class="wb-card" data-state="blocked">
+      <div class="row"><span class="wb-card-id">t261011-17</span>
+        <span class="wb-order-dot" data-order-dot="hold" title="Holding a slot at the human gate"></span>
+        <span class="wb-order-ctl" style="color:var(--muted)">（hold 行：无位次号、无控件）</span></div>
+      <div class="row"><span class="wb-card-title">（形状样本：卡在闸上，等的不是人）</span></div>
+      <div class="row"><span class="wb-card-stage">merge_check</span><span class="wb-card-epic">engine-hardening</span>
+        <span class="wb-stage-dots" style="margin-left:auto"><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="passed"></span><span class="wb-stage-dot" data-visual="current" data-state="blocked"></span><span class="wb-stage-dot"></span></span></div>
     </div>
   </div>
-  <p class="sub">第一行是真票（唯一在线的：已落地、等认证 ⇒ 暖色 <code>LineOn</code>）；第二行是 legacy（无 <code>LineOn</code>）。位次号（排队行才有）跟 id 走、在行尾与拖拽把手相邻。</p>
+  <p class="sub">第一行真票（<code>-80</code>：已落地、等认证 ⇒ 暖色 <code>LineOn</code> ＋ 当前格琥珀）；第二行真票（<code>-18</code>：在跑 ⇒ 当前格蓝）；第三行是形状样本（blocked ⇒ 当前格红 ＋ 行底色红）。legacy 票不加 <code>LineOn</code>。</p>
 
-  <h2>2 · 三个"点"各是什么（别混）</h2>
+  <h2>2 · 五个状态在这套写法下长什么样（无状态点）</h2>
   <div class="light">
     <table>
-      <tr><th>点</th><th>长什么样</th><th>载什么</th><th>真源</th></tr>
-      <tr><td><span class="swatch" style="background:#bf8700;border-color:#bf8700;border-radius:50%"></span> <code>.wb-card-dot</code></td>
-        <td>9px 圆</td><td><b>票的状态</b>：active 蓝 / waiting 琥珀 / blocked 红 / failed 实红 / done 灰（<code>data-state</code>）</td><td><code>index.tsx:246-252</code> ＋ <code>deriveTicketState()</code></td></tr>
-      <tr><td><span class="swatch" style="background:#1a7f37;border-color:#1a7f37;border-radius:50%"></span> <code>.wb-order-dot</code></td>
-        <td>8px 圆</td><td><b>排队/工作态</b>：<code>work</code> 绿 / <code>hold</code>·<code>paused</code> 琥珀（排队行专用）</td><td><code>sidebar.tsx:393-395</code></td></tr>
-      <tr><td><span class="swatch" style="background:#0969da;border-color:#0969da;border-radius:1px"></span> <code>.wb-stage-dot</code> ×10</td>
-        <td>5px 方块</td><td><b>走到第几格</b>：<code>data-on=true</code> 蓝、否则灰（<b>不载状态</b>）</td><td><code>sidebar.tsx:407-409</code></td></tr>
+      <tr><th>状态</th><th>当前格颜色</th><th>行底色</th><th>其它线索</th></tr>
+      <tr><td><b>active</b>（在跑）</td><td><span class="swatch" style="background:#0969da;border-color:#0969da"></span> 蓝</td><td>无</td><td>⏸ 若无；排序位次/控件在场</td></tr>
+      <tr><td><b>waiting</b>（等认证/等人）</td><td><span class="swatch" style="background:#bf8700;border-color:#bf8700"></span> 琥珀</td><td><span class="swatch" style="background:#fff8c5"></span> 琥珀</td><td>⏸（被暂停时）；<code>LineOn</code> 暖色</td></tr>
+      <tr><td><b>blocked</b>（卡住）</td><td><span class="swatch" style="background:#cf222e;border-color:#cf222e"></span> 红</td><td><span class="swatch" style="background:#ffebe9"></span> 红</td><td>—</td></tr>
+      <tr><td><b>failed</b>（已失败）</td><td><span class="swatch" style="background:#d1242f;border-color:#d1242f"></span> 实红</td><td><span class="swatch" style="background:#ffebe9"></span> 红</td><td><b>与 blocked 同族红</b>（要分清就得给 failed 一个形状差异）</td></tr>
+      <tr><td><b>done</b>（已收口）</td><td><span class="swatch" style="background:#2da44e;border-color:#2da44e"></span> 绿（=已过格）</td><td>整行 0.72 淡</td><td>—</td></tr>
     </table>
-    <p class="sub" style="color:#57606a">所以"点阵上的点有颜色就够了"这句话，在左栏对应的其实是**第三行那十格蓝/灰块**——它回答"这条票走到流程第几步"，**不回答"现在是跑着还是卡了"**。</p>
   </div>
 
-  <h2>3 · "那个带颜色的圆点有用吗"——两版对照</h2>
-  <div class="grid2">
-    <div>
-      <div class="sub" style="color:#79b8ff"><b>V-a · 保留状态彩点（今天的行为）</b></div>
-      <div class="light wb-col">
-        <div class="wb-card" data-state="waiting">
-          <div class="row"><span class="wb-card-id">t261009-80</span><span class="wb-card-dot" data-state="waiting"></span>
-            <span class="ln-pill" data-line-state="waiting">LineOn</span><span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate">⏸</span></div>
-          <div class="row"><span class="wb-card-title">…行底色（琥珀）＋彩点（琥珀）＝两张网说同一件事</span></div>
-          <div class="row"><span class="wb-card-stage">merge</span><span class="wb-card-epic">engine-hardening</span><span class="wb-stage-dots" style="margin-left:auto"><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot"></span></span></div>
-        </div>
-        <div class="wb-card" data-state="done">
-          <div class="row"><span class="wb-card-id">t261011-16</span><span class="wb-card-dot" data-state="done"></span><span class="wb-order-ctl">3 ⋮⋮</span></div>
-          <div class="row"><span class="wb-card-title">已收口的票：灰点 + 整行淡（0.72）</span></div>
-        </div>
-      </div>
-      <p class="sub">状态有两条冗余通道（行底色 + 彩点）；<code>active</code>（在跑）没有行底色，**只靠彩点的蓝**。</p>
-    </div>
-    <div>
-      <div class="sub" style="color:#79b8ff"><b>V-b · 去掉状态彩点</b>（点击/悬停不再是状态线索）</div>
-      <div class="light wb-col">
-        <div class="wb-card" data-state="waiting">
-          <div class="row"><span class="wb-card-id">t261009-80</span>
-            <span class="ln-pill" data-line-state="waiting">LineOn</span><span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate">⏸</span></div>
-          <div class="row"><span class="wb-card-title">…行底色（琥珀）仍在，但"在跑"的票与"排队没开始"的票看着一样</span></div>
-          <div class="row"><span class="wb-card-stage">merge</span><span class="wb-card-epic">engine-hardening</span><span class="wb-stage-dots" style="margin-left:auto"><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot" data-on="true"></span><span class="wb-stage-dot"></span></span></div>
-        </div>
-        <div class="wb-card" data-active="true">
-          <div class="row"><span class="wb-card-id">t261011-18</span><span class="wb-order-ctl">2 ⋮⋮</span></div>
-          <div class="row"><span class="wb-card-title">在跑的票：白底、无点 ⇒ 与"排队中"在视觉上无区别</span></div>
-        </div>
-      </div>
-      <p class="sub"><b>代价说清</b>：① <code>active</code> 失去唯一线索（行底色不覆盖它）；② 十格点不载状态，补不上；③ 左栏的"状态"从此只剩 <i>waiting/blocked/failed 的行底色</i> 与 <i>LineOn 的线状态</i>——**票状态与线状态会被混成一个观感**。</p>
-    </div>
-  </div>
-
-  <h2>4 · LineOn 颜色（不变）</h2>
+  <h2>3 · 说清代价（我的判断：可以做，但下面三件要知道）</h2>
   <div class="light">
-    <p class="sub" style="color:#57606a">
-      <span class="ln-pill" data-line-state=online>LineOn</span> 在线上未落地 ·
-      <span class="ln-pill" data-line-state=waiting>LineOn</span> 等认证 ·
-      <span class="ln-pill" data-line-state=overdue>LineOn !</span> 等过头 ·
-      <span class="ln-pill" data-line-state=red>LineOn</span> 落红区间 ·
-      <span class="ln-pill" data-line-state=certified>LineOn</span> 认证覆盖 ·
-      <span class="ln-pill" data-line-state=delivered>LineOn</span> 已晋级 ·
-      <span class="ln-pill" data-line-state=withdrawn>LineOn</span> 已撤回 · legacy 票不渲染。</p>
+    <p class="sub" style="color:#57606a">① <b>状态线索从"行首"移到"行中某一格"</b>：今天一眼看行首的点就知道状态；改后要**先数到第几格**才看到当前格的颜色——扫一列票时，格位随阶段不同，眼睛要"找那一格"。这是**主要的可读性代价**。
+      ② <b>active 与"排队没开始"的区分</b>：active＝当前格蓝；未开始＝全灰（无当前格）——可分，但要求"当前格"必须真的渲染出来（<code>dotsLit</code> 今天给的是"亮几格"，要能推出"哪一格是当前"）。
+      ③ <b>blocked 与 failed 同族红</b>（<code>#cf222e</code> / <code>#d1242f</code>）：只靠颜色分不出——要区分就得给 failed 一个形状差异（例如当前格实心加圈），或把词留在 tooltip。</p>
+    <p class="sub" style="color:#57606a"><b>影响面（写进票面）</b>：左栏十格点的渲染在 <code>ticket-row-card.tsx:399-402</code>（喂 <code>ordering.dotsLit</code>，只区分蓝/灰）。要让当前格带状态色，需要把行已有的 <code>state4</code> 传到当前格上（板面 <code>index.tsx:278-282</code> 已有同款写法，**照抄它、不新造色**）。
+      <b>既有断言不受影响</b>：<code>…row_composition.mjs</code> 只查 <code>.wb-stage-dot</code> 数量＝10 与元素有无（未查颜色/顺序）；<b>唯一要留神</b>的是 T3（paused 行＝只有琥珀点、无位次、无控件）——本版保持该语义，若你要 paused 行也显示位次，得同票改那条断言。</p>
   </div>
 
-  <h2>5 · 收敛：本版已按你的令改的 / 还要你一句话的</h2>
+  <h2>4 · 还要你一句话的</h2>
   <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;font-size:13px;color:#9aa4b2">
-    <p><b>已改</b>：① ticket id 永远开头；② <b>去掉彩色左条</b>（左栏本来就没有，是我前几版画错）；③ 行内不再有任何状态<b>词</b>（左栏本来就没有）。</p>
-    <p>① <b>状态彩点留不留</b>：留（V-a，今天的行为，active 靠它）还是去（V-b，active 就没线索了）？</p>
-    <p>② <b>行数</b>：三行（本版：状态行 / 标题独占 / 元数据行）还是挤成两行（LineOn 与 ⏸ 挪到元数据行）？</p>
-    <p>③ <b>LineOn 的 certified（绿描边）与 delivered（绿实心）要不要一眼可分</b>。</p>
+    <p>① <b>确认去掉行首状态点</b>（状态交给点阵当前格 ＋ 行底色）——我按你的意思已经这么画了；若你其实想留，说一声我改回。</p>
+    <p>② <b>已过格用绿色</b>（与板面一致）可以吗？否则"已过"和"active 的当前格"都是蓝，看不出当前格在哪。</p>
+    <p>③ <b>blocked 与 failed 要不要一眼可分</b>（同族红）——要的话我给 failed 的当前格加形状差异。</p>
+    <p>④ <b>行数</b>：本版三行（状态行／标题独占／元数据行）；也可以挤成两行（<code>LineOn</code> 与 ⏸ 挪到元数据行）。</p>
   </div>
 </div>
 </body>
