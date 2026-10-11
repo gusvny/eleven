@@ -6160,6 +6160,209 @@ async def certification_wait(args: CertWaitArgs) -> CertWaitResult:
                           covered_by=str(face.get("covered_by") or ""),
                           waiting_for=str(face.get("waiting_for") or ""))
 
+@dataclass
+class FastSetDeclarationArgs:
+    """t261011-10 fast-set declaration query input: which lane to ask. The
+    result dataclass lives here (not shared.py) because shared.py is outside
+    this ticket's write set — flagged to review in the plan, one-line move if
+    review prefers otherwise."""
+
+    ticket_id: str
+    worktree: str = ""
+
+
+@dataclass
+class FastSetDeclarationResult:
+    """t261011-10 fast-set declaration result. ``error`` non-empty = the fast
+    set is UNAVAILABLE this round (named reason); ``refusals`` non-empty = the
+    declaration face refused (a refusal is a gate error, never an empty
+    legitimate set)."""
+
+    members: List[str] = field(default_factory=list)
+    budget_min: int = 0
+    refusals: List[str] = field(default_factory=list)
+    error: str = ""
+    wall_s: float = 0.0
+    # Host order 261011 PART ONE: the ticket's OWN scenarios, derived from the
+    # one registry by case path (integration/<ticket_id>/). ``own_error``
+    # non-empty = the own face is unavailable this round (named).
+    own_members: List[str] = field(default_factory=list)
+    own_error: str = ""
+
+
+def _readonly_query_env(cwd):
+    """ONE strip criterion for the runner's read-only query faces (the
+    fast-set/own-set declaration faces and the surface-plan face). Composes
+    the lane strip face (lane_subprocess_env — anchor pinned to cwd,
+    t261008-33) and pops the knobs that would silently narrow the query's
+    view of the registry. Single-source lock test_t260917_08 counts the
+    lane_subprocess_env literals; both query faces route through HERE so the
+    count stays at the locked 2 while the strip criterion stays one."""
+    env = lane_subprocess_env(cwd)
+    for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS",
+              "SANDBAR_KNOWN_RED_EXCLUDE"):
+        env.pop(k, None)
+    return env
+
+
+def _kill_group(proc) -> None:
+    """Kill a spawned subprocess's whole process group, then reap it. Fallback
+    to proc.kill() when the group face is unavailable (t261006-08 spawn/reap
+    discipline: every path — normal, error, timeout, cancel — reaches a
+    terminal state for the child chain)."""
+    import signal
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:  # noqa: BLE001 — already gone / no group
+        try:
+            proc.kill()
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        proc.wait()  # reap after SIGKILL — bounded, no zombie survives
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@activity.defn
+async def fast_set_declaration(
+        args: FastSetDeclarationArgs) -> FastSetDeclarationResult:
+    """t261011-10: read the lane's fast-set declaration (members + declared
+    budget) from the executor's read-only query face `--print-fast-set` in the
+    LANE worktree (the lane's own runner copy is the truth source,
+    t260904-18). Zero scenarios started, zero locks.
+
+    Fault-mode trade-off list (borrowed from surface_plan's spawn discipline,
+    create_plan gen1 [R2], each row brought-or-not with reason):
+    - normal exit 0: stdout parsed into the declaration result;
+    - non-zero exit (REFUSED face): refusals parsed + error named — NEVER read
+      as an empty legitimate set;
+    - timeout: bounded wait_for (FAST_SET_DECL_TO), then kill the process
+      GROUP (start_new_session=True below makes killpg reach any child) and
+      reap with wait() — no orphan survives;
+    - cancel: CancelledError kills + reaps the child before re-raising;
+    - partial output on timeout: DISCARDED, named as a timeout error — a
+      half-read declaration must never become a half fast set;
+    - output size: the declaration face is O(members) lines (18 today), read
+      to EOF with no extra cap — same stance as surface_plan;
+    - env inheritance: lane_subprocess_env strip face, query knobs
+      (SANDBAR_SCENARIO_ONLY / EXCLUDE_POOLS / KNOWN_RED_EXCLUDE) popped so
+      the query cannot silently narrow the table;
+    - cwd: the LANE worktree root (args.worktree, empty = engine repo root).
+    """
+    import asyncio as _aio
+    t0 = time.time()
+    cwd = str(args.worktree or REPO_ROOT)
+    # Mixed-version seam probe (same family as surface_plan): an old lane copy
+    # without --print-fast-set would have the flag silently ignored by _cli,
+    # and a refused-to-parse empty output must never become an empty fast set.
+    _runner = os.path.join(cwd, "integration", "run_scenarios.py")
+    try:
+        with open(_runner, encoding="utf-8") as _fh:
+            _runner_src = _fh.read()
+    except Exception as e:  # noqa: BLE001 — unreadable = capability unknown
+        return FastSetDeclarationResult(
+            error="lane runner unreadable (%s: %s) — fast set unavailable"
+                  % (type(e).__name__, e))
+    if "--print-fast-set" not in _runner_src:
+        return FastSetDeclarationResult(
+            error="lane runner predates the fast-set query face (mixed-version "
+                  "seam) — fast set unavailable (zero spawn)")
+    cmd = [sys.executable, "integration/run_scenarios.py", "--print-fast-set"]
+    env = _readonly_query_env(cwd)
+    try:
+        proc = await _aio.create_subprocess_exec(
+            *cmd, cwd=cwd, stdout=_aio.subprocess.PIPE,
+            stderr=_aio.subprocess.PIPE, env=env,
+            start_new_session=True)  # killpg reaches children; cancel-safe
+        try:
+            out_b, err_b = await _aio.wait_for(
+                proc.communicate(), timeout=FAST_SET_DECL_TO)
+        except _aio.TimeoutError:
+            _kill_group(proc)
+            return FastSetDeclarationResult(
+                error="fast-set declaration query timed out (%ds) — partial "
+                      "output discarded" % FAST_SET_DECL_TO)
+        except asyncio.CancelledError:
+            _kill_group(proc)
+            raise
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001 — spawn failed / any exec face error
+        return FastSetDeclarationResult(
+            error="fast-set declaration query failed to start (%s: %s)"
+                  % (type(e).__name__, e))
+    stdout = (out_b or b"").decode("utf-8", "replace")
+    stderr = (err_b or b"").decode("utf-8", "replace")
+    import develop_line  # lazy: develop_line imports this module at module level
+    try:
+        decl = develop_line.parse_fast_set_declaration(stdout)
+    except develop_line.LineDeclarationError as e:
+        return FastSetDeclarationResult(
+            error="fast-set declaration output malformed: %s" % e)
+    if proc.returncode != 0 and not decl.refusals:
+        return FastSetDeclarationResult(
+            error="fast-set declaration query exited %s%s"
+                  % (proc.returncode,
+                     ("｜stderr: %s" % stderr.strip()[:200]) if stderr.strip() else ""))
+    err = ""
+    if decl.refusals:
+        err = "fast-set declaration REFUSED (%d named error(s)): %s" % (
+            len(decl.refusals), "；".join(decl.refusals)[:400])
+    # Host order 261011 PART ONE: derive the ticket's OWN scenarios from the
+    # one registry via the read-only `--print-own-set <ticket_id>` face (same
+    # fault table as the fast face; the two faces share the capability probe,
+    # env strip, cwd and reaping discipline). The fast set NEVER substitutes
+    # for the own part — both legs are read and both are named.
+    own_members: List[str] = []
+    own_error = ""
+    if "--print-own-set" not in _runner_src:
+        own_error = ("lane runner predates the own-set query face "
+                     "(mixed-version seam) — own derivation unavailable")
+    else:
+        cmd2 = [sys.executable, "integration/run_scenarios.py",
+                "--print-own-set", str(args.ticket_id or "")]
+        try:
+            proc2 = await _aio.create_subprocess_exec(
+                *cmd2, cwd=cwd, stdout=_aio.subprocess.PIPE,
+                stderr=_aio.subprocess.PIPE, env=env,
+                start_new_session=True)
+            try:
+                o2_b, _e2_b = await _aio.wait_for(
+                    proc2.communicate(), timeout=FAST_SET_DECL_TO)
+            except _aio.TimeoutError:
+                _kill_group(proc2)
+                own_error = ("own-set query timed out (%ds) — partial output "
+                             "discarded" % FAST_SET_DECL_TO)
+            except asyncio.CancelledError:
+                _kill_group(proc2)
+                raise
+            if not own_error:
+                so = (o2_b or b"").decode("utf-8", "replace")
+                try:
+                    od = develop_line.parse_own_set_declaration(
+                        so, str(args.ticket_id or ""))
+                    if od.refusals:
+                        own_error = ("own-set face REFUSED (%d named "
+                                     "error(s)): %s"
+                                     % (len(od.refusals),
+                                        "；".join(od.refusals)[:200]))
+                    else:
+                        own_members = list(od.members)
+                except develop_line.LineDeclarationError as e2:
+                    own_error = "own-set output malformed: %s" % e2
+        except asyncio.CancelledError:
+            raise
+        except Exception as e2:  # noqa: BLE001 — spawn failed
+            own_error = ("own-set query failed to start (%s: %s)"
+                         % (type(e2).__name__, e2))
+    return FastSetDeclarationResult(
+        members=list(decl.members), budget_min=int(decl.budget_min),
+        refusals=list(decl.refusals), error=err,
+        wall_s=round(time.time() - t0, 1),
+        own_members=own_members, own_error=own_error)
+
+
 # develop-buffer gate region (t261009-46) -- end
 
 
@@ -9576,14 +9779,12 @@ async def surface_plan(args: shared.SurfacePlanArgs) -> shared.SurfacePlanResult
                   "按全量跑（fail-closed，零 spawn）")
     cmd = [sys.executable, "integration/run_scenarios.py", "--print-surface-plan",
            ",".join(files)]
-    env = lane_subprocess_env(cwd)
-    # The query face is read-only: strip the knobs that change executor behaviour
-    # so the query does not silently narrow the table by name/excluded pools
-    # (t261008-33: the anchor knob is already pinned to cwd by
-    # lane_subprocess_env, so the query process anchors at the lane).
-    for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS",
-              "SANDBAR_KNOWN_RED_EXCLUDE"):
-        env.pop(k, None)
+    # The query face is read-only: the shared strip point pops the knobs that
+    # change executor behaviour so the query does not silently narrow the
+    # table by name/excluded pools (t261008-33: the anchor knob is already
+    # pinned to cwd by lane_subprocess_env, so the query process anchors at
+    # the lane).
+    env = _readonly_query_env(cwd)
     try:
         proc = await _aio.create_subprocess_exec(
             *cmd, cwd=cwd, stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
@@ -11423,6 +11624,12 @@ async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
 #: 超时=全量（fail-closed）。
 SURFACE_PLAN_TO = 300
 
+# t261011-10: fast-set declaration query subprocess bound (seconds). The
+# declaration face is read-only and seconds-scale offline (steward measurement:
+# 18 members declared in ~2.2s while the machine was loaded); 60s is generous
+# headroom, and a timeout names the fast set UNAVAILABLE (never a partial read).
+FAST_SET_DECL_TO = 60
+
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
     # t260925-01 产出型巡检 produce 段（受限可写 agent + 机械自检四闸）
@@ -11432,6 +11639,9 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     changed_files,
     # t260930-02：面计划只读查询（快反馈面 = 本次改动面 ∪ 上轮红名；漏注册=运行时才炸）
     surface_plan,
+    # t261011-10: fast-set declaration read-only query (develop-buffer lane
+    # proof face; a missing registration only surfaces at runtime)
+    fast_set_declaration,
     # t261009-58: the ONE effective write set - record persistence + annex holder
     # scan (missing registration = a runtime blow-up, same stance as the two above)
     persist_write_set_record, annex_holder_scan,

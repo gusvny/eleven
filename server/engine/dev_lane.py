@@ -119,6 +119,10 @@ with workflow.unsafe.imports_passed_through():
         reprobe_red_scenarios,
         run_integration_tests,
         surface_plan,
+        # t261011-10: fast-set declaration query (develop-buffer lane proof)
+        fast_set_declaration,
+        FastSetDeclarationArgs,
+        FastSetDeclarationResult,
         settle_conflict_resolution,
         settle_lane,
         teardown_lane,
@@ -286,6 +290,117 @@ def is_develop_buffer_ticket(meta: Any) -> bool:
         return False
 
 # develop-buffer gate region (t261009-46) -- end
+
+# t261011-10: the develop-buffer lane's own proof = its own scenarios plus the
+# declared fast set, inside the declared budget (design goals 3/4/5). The full
+# suite LEAVES the lane path unconditionally on this version — it stays on the
+# line round (goal 6); the legacy version's gate is byte-identical (goals 12/13).
+# Same-shaped boolean gate (KI-061 replay discipline): in-flight instances
+# replaying old history evaluate patched()=False here and take the verbatim old
+# path; new tickets record the marker.
+DEV_BUFFER_FAST_PROOF_PATCH_ID = "dev-buffer-fast-proof-v1"
+
+#: Host order 261011: the declared ceiling for the WHOLE lane proof (own
+#: scenarios plus the fast set, both parts together) is 5 minutes — the
+#: round's wall clock is judged against THIS ceiling. The fast set's own
+#: declared budget (FAST_SET_BUDGET_MIN, 2 min) is still surfaced on the
+#: receipt as the declaration face's headroom note; a breach of either is a
+#: NAMED stewardship signal, never an auto-trim.
+DEV_BUFFER_PROOF_BUDGET_MIN = 5
+
+
+@dataclass
+class FastProofPlan:
+    """The pure decision face for a develop-buffer round's proof (UT-tested).
+
+    run_only: the SANDBAR_SCENARIO_ONLY face (own ∪ fast members; empty means
+    the caller must REFUSE the round — never read as "run everything").
+    warning: a named stewardship line for the receipt (degradation or budget
+    breach), never an auto-trim, never silent.
+    blocked_reason: non-empty = the proof plan itself failed (both sources
+    absent) — the round is refused BEFORE any run activity; the full suite is
+    NEVER the fallback (ticket required outcome 3)."""
+
+    run_only: List[str] = field(default_factory=list)
+    warning: str = ""
+    blocked_reason: str = ""
+    fast_members: List[str] = field(default_factory=list)
+    budget_min: int = 0
+    fast_error: str = ""
+
+
+def fast_proof_plan(own_names, fast_result) -> FastProofPlan:
+    """Union the round's own scenarios with the declared fast set.
+
+    ``fast_result`` is a FastSetDeclarationResult-shaped object (or dict):
+    error non-empty / refusals non-empty = the fast set is unavailable this
+    round (named); empty members with no error = a legitimate empty declared
+    set (spec (d)). Degradation is always a NAMED warning; the both-sources-
+    empty outcome is a named refusal, never the full suite."""
+    def _s(x):
+        return str(x).strip()
+    own = sorted({_s(n) for n in (own_names or []) if _s(n)})
+    if fast_result is None:
+        # No result at all (caller-level failure) = the fast set is
+        # UNAVAILABLE this round, by name — never an empty legitimate set.
+        return fast_proof_plan(own, {"members": [], "budget_min": 0,
+                                     "error": "fast-set declaration result "
+                                              "absent (no activity result)"})
+    if isinstance(fast_result, dict):
+        f_members = [str(m) for m in (fast_result.get("members") or [])]
+        f_err = str(fast_result.get("error") or "")
+        f_budget = int(fast_result.get("budget_min") or 0)
+    else:
+        f_members = list(getattr(fast_result, "members", None) or [])
+        f_err = str(getattr(fast_result, "error", "") or "")
+        f_budget = int(getattr(fast_result, "budget_min", 0) or 0)
+    fast = sorted({_s(n) for n in f_members if _s(n)})
+    union = sorted(set(own) | set(fast))
+    warning = ""
+    if f_err:
+        warning = ("fast set unavailable this round (%s); proof = own "
+                   "scenarios only (%d)" % (f_err, len(own)))
+    elif not fast and own:
+        warning = ("declared fast set is empty (legitimate until the "
+                   "declaration provides members); proof = own scenarios "
+                   "only (%d)" % len(own))
+    elif not own and fast:
+        # Named reduction (arbitrate fault 1, plan v2 step 2.2): an
+        # own-absent round proves the fast set alone and MUST say so — a
+        # quiet fast-only round reads as a full proof (KI-055 quiet-surface
+        # face). The fast set never substitutes for the own part.
+        warning = ("own scenarios absent this round (surface/prev-red/own-set "
+                   "face unresolvable); proof = declared fast set only (%d) "
+                   "— the fast set never substitutes for the own part"
+                   % len(fast))
+    if not union:
+        return FastProofPlan(
+            run_only=[], blocked_reason=(
+                "proof-plan empty: no own scenarios (surface/prev-red face "
+                "unresolvable) and the fast set is unavailable (%s) — the "
+                "round is refused before any run; the full suite is never a "
+                "lane fallback" % (f_err or "declared empty")),
+            fast_members=fast, budget_min=f_budget, fast_error=f_err)
+    return FastProofPlan(run_only=union, warning=warning, fast_members=fast,
+                         budget_min=f_budget, fast_error=f_err)
+
+
+def fast_budget_verdict(wall_s, budget_min) -> Tuple[bool, str]:
+    """Named stewardship verdict for the round's wall clock against the
+    declared budget. A breach is a NAMED signal — never an auto-trim, never a
+    red. Exactly at budget = no breach (the budget is headroom, not a target)."""
+    try:
+        wall = float(wall_s)
+        budget = float(budget_min)
+    except (TypeError, ValueError):
+        return False, ""
+    if budget <= 0:
+        return False, ""
+    if wall > budget * 60.0:
+        return True, ("fast-set budget breached: %.1fs wall > %gs declared "
+                      "(stewardship signal — membership review, never an "
+                      "auto-trim)" % (wall, budget * 60.0))
+    return False, ""
 MERGE_CHECK_TO = timedelta(minutes=20)   # merge_check includes the in-lane verify_lane
                                          # (tsc/smoke, can take minutes)
 MERGE_TO = timedelta(minutes=5)
@@ -1890,9 +2005,29 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         同形入参（同代数、同策略值，走 _integ_run_args 单写者），仅 only_names
         为空（全量面，不注入 SANDBAR_SCENARIO_ONLY）。回执形状同
         IntegrationRunResult。"""
-        rraw = await workflow.execute_activity(
-            run_integration_tests, self._integ_run_args(),
-            start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+        if workflow.patched(DEV_BUFFER_FAST_PROOF_PATCH_ID) and \
+                is_develop_buffer_ticket(self.meta):
+            # t261011-10: on this version the closing run is the SAME scoped
+            # face (own ∪ fast members, cached at the gate round this round) —
+            # the full suite NEVER runs on the lane (required outcome 3).
+            # An empty cache = the round's proof-plan step did not run: refuse
+            # by name (loud), never pay the full suite to disambiguate.
+            _fp_only = [str(n).strip()
+                        for n in (self.meta.get("fast_proof_only") or [])
+                        if str(n).strip()]
+            if not _fp_only:
+                return IntegrationRunResult(
+                    ran=0, passed=0, failed=0, env_fail=0, details=[],
+                    error="fast-proof closing face missing (no cached proof "
+                          "plan for this round) — the full suite is never a "
+                          "lane fallback; re-run the gate round")
+            rraw = await workflow.execute_activity(
+                run_integration_tests, self._integ_run_args(_fp_only),
+                start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+        else:
+            rraw = await workflow.execute_activity(
+                run_integration_tests, self._integ_run_args(),
+                start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
         return rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
             ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
             failed=int(rraw.get("failed") or 0),
@@ -4354,26 +4489,122 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                          self.meta["surface_plan_trace"]["reason"] or "-",
                                          ("｜" + self.meta["surface_plan_trace"]["error"])
                                          if self.meta["surface_plan_trace"]["error"] else ""))
-                    if run_only:
-                        self._log("两层复跑：定点复跑面（%s）——仅快反馈，放行只认收口全量跑"
-                                  % ",".join(run_only))
-                    _integ_t = self._now_epoch()   # t260925-12
-                    rraw = await workflow.execute_activity(
-                        run_integration_tests,
-                        self._integ_run_args(run_only),
-                        start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
-                    gate_integ_s += max(0, self._now_epoch() - _integ_t)
-                    ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
-                        ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
-                        failed=int(rraw.get("failed") or 0),
-                        env_fail=int(rraw.get("env_fail") or 0),
-                        details=[dict(d) for d in (rraw.get("details") or [])],
-                        error=str(rraw.get("error") or ""),
-                        # t260917-08（review R3）：dict 回退重建点——新计数键漏写=
-                        # 命令跑了回执仍显 0（报文与事实相反），与上述键同批补齐
-                        handover_ran=int(rraw.get("handover_ran") or 0),
-                        handover_passed=int(rraw.get("handover_passed") or 0),
-                        handover_failed=int(rraw.get("handover_failed") or 0))
+                    # t261011-10: develop-buffer lane proof = own scenarios ∪
+                    # the declared fast set (design goals 3/4/5); the full
+                    # suite LEAVES the lane path (required outcome 3). Gated:
+                    # the legacy version stays byte-identical and in-flight
+                    # replays take the verbatim old path (KI-061 discipline).
+                    _fs_refusal = ""
+                    if workflow.patched(DEV_BUFFER_FAST_PROOF_PATCH_ID) and \
+                            is_develop_buffer_ticket(self.meta):
+                        _fs_t = self._now_epoch()
+                        _fs = await workflow.execute_activity(
+                            fast_set_declaration,
+                            FastSetDeclarationArgs(
+                                ticket_id=self.ticket_id,
+                                worktree=str(self.meta.get("worktree") or "")),
+                            start_to_close_timeout=INTEG_RUN_TO,
+                            retry_policy=RETRY)
+                        gate_cf_s += max(0, self._now_epoch() - _fs_t)
+                        # Host order 261011 PART ONE: the own face is DERIVED
+                        # (registry entries under integration/<ticket_id>/ via
+                        # the read-only own-set query) and merged with the
+                        # surface/prev-red faces — never guessed. An own-face
+                        # absence is named on the round, and the fast set
+                        # never substitutes for the own part.
+                        _own_names = sorted(
+                            set(run_only)
+                            | set(str(n).strip()
+                                  for n in (getattr(_fs, "own_members", None)
+                                            or []) if str(n).strip()))
+                        _fplan = fast_proof_plan(_own_names, _fs)
+                        self.meta["fast_set_proof"] = {
+                            "members": list(_fplan.fast_members),
+                            "count": len(_fplan.fast_members),
+                            "own_members": list(getattr(_fs, "own_members",
+                                                        None) or []),
+                            "budget_min": int(_fplan.budget_min),
+                            "proof_budget_min": DEV_BUFFER_PROOF_BUDGET_MIN,
+                            "wall_s": 0.0, "breach": False,
+                            "error": _fplan.fast_error,
+                            "own_error": str(getattr(_fs, "own_error", "")
+                                             or "")}
+                        if getattr(_fs, "own_error", ""):
+                            self._log("own-set face unavailable this round "
+                                      "(%s) — named, the proof still carries "
+                                      "what it derived"
+                                      % str(_fs.own_error)[:200])
+                        if _fplan.blocked_reason:
+                            # [R1]: both sources absent = a NAMED failed round,
+                            # refused BEFORE any run — never the full suite.
+                            self._log(_fplan.blocked_reason)
+                            self.meta["blocked_detail"] = {
+                                "reason_code": "fast_proof_plan_empty",
+                                "item": "__fast_proof_plan__",
+                                "detail": _fplan.blocked_reason}
+                            _fs_refusal = _fplan.blocked_reason
+                        else:
+                            run_only = list(_fplan.run_only)
+                            self.meta["fast_proof_only"] = list(run_only)
+                            if _fplan.warning:
+                                self._log(_fplan.warning)
+                    if _fs_refusal:
+                        # The proof-plan step failed by name: the round is
+                        # judged on this zero-run receipt — no run activity,
+                        # never the full suite.
+                        ir = IntegrationRunResult(
+                            ran=0, passed=0, failed=0, env_fail=0, details=[],
+                            error=_fs_refusal)
+                    else:
+                        if run_only:
+                            self._log("two-tier rerun: targeted face (%s) — "
+                                      "fast feedback only; release still reads "
+                                      "the closing run" % ",".join(run_only))
+                        _integ_t = self._now_epoch()   # t260925-12
+                        rraw = await workflow.execute_activity(
+                            run_integration_tests,
+                            self._integ_run_args(run_only),
+                            start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+                        gate_integ_s += max(0, self._now_epoch() - _integ_t)
+                        ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(
+                            ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
+                            failed=int(rraw.get("failed") or 0),
+                            env_fail=int(rraw.get("env_fail") or 0),
+                            details=[dict(d) for d in (rraw.get("details") or [])],
+                            error=str(rraw.get("error") or ""),
+                            # t260917-08 (review R3): dict-fallback rebuild
+                            # point — a missed new counter key would show 0 in
+                            # the receipt while the command ran; patched in the
+                            # same batch as the keys above
+                            handover_ran=int(rraw.get("handover_ran") or 0),
+                            handover_passed=int(rraw.get("handover_passed") or 0),
+                            handover_failed=int(rraw.get("handover_failed") or 0))
+                        # t261011-10 receipt face (outcomes 1/2): record the
+                        # round's wall clock against the declared budget — a
+                        # breach is a NAMED stewardship line, never an
+                        # auto-trim, never a red.
+                        _fsp = dict(self.meta.get("fast_set_proof") or {})
+                        if _fsp and not _fsp.get("error"):
+                            # Host order 261011: the ceiling covers the WHOLE
+                            # proof (both parts together) — 5 minutes.
+                            _fwall = max(0, self._now_epoch() - _integ_t)
+                            _fbreach, _fnote = fast_budget_verdict(
+                                _fwall, DEV_BUFFER_PROOF_BUDGET_MIN)
+                            _fsp["wall_s"] = round(_fwall, 1)
+                            _fsp["breach"] = _fbreach
+                            self.meta["fast_set_proof"] = _fsp
+                            _shown = ", ".join(_fsp.get("members") or [])
+                            _own_n = len(_fsp.get("own_members") or [])
+                            self._log("fast-set proof: %d member(s) [%s] "
+                                      "own=%d wall=%.1fs proof-ceiling=%ss "
+                                      "declared-fast-budget=%ss%s"
+                                      % (int(_fsp.get("count") or 0),
+                                         (_shown[:300] + "…") if len(_shown) > 300 else _shown,
+                                         _own_n,
+                                         float(_fsp["wall_s"]),
+                                         DEV_BUFFER_PROOF_BUDGET_MIN * 60,
+                                         int(_fsp.get("budget_min") or 0) * 60,
+                                         ("｜" + _fnote) if _fnote else ""))
                 except Exception as e:
                     # t260929-18：error 进仲裁/票面 → 链下钻带上真实根因。
                     ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s%s"

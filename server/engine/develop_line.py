@@ -307,6 +307,157 @@ def extra_scenarios(line: DevelopLine, inventory: Optional[List[Dict[str, Any]]]
     return names
 
 
+# ------------------------------------------------- fast-set declaration reader
+# t261011-10: the lane proof's fast-set membership and budget, read from the
+# executor's ONE declared query face (`integration/run_scenarios.py
+# --print-fast-set`). Choice recorded in create_plan gen1 [R3]: the engine
+# holds no scenario inventory (the registry is executor-side), and the query
+# face is the only declared surface returning members + budget + named
+# refusals in one read, produced by the same validate_fast_set() code that
+# polices membership — zero drift by construction. The text shape parsed here
+# is a declared output contract guarded by the t261009-16 L3 scenarios.
+
+
+@dataclass
+class FastSetDeclaration:
+    """The parsed `--print-fast-set` face: members, declared budget, refusals.
+
+    A REFUSED declaration is NOT an empty legitimate set: non-empty
+    ``refusals`` means the declaration face refused (gate errors) and the
+    caller must treat the fast set as UNAVAILABLE this round — never as
+    "no members"."""
+
+    members: List[str] = field(default_factory=list)
+    budget_min: int = 0
+    refusals: List[str] = field(default_factory=list)
+
+
+def parse_fast_set_declaration(stdout: Any) -> FastSetDeclaration:
+    """Pure parser over the `--print-fast-set` stdout text shape. Malformed
+    input is a LOUD error (LineDeclarationError) carrying the offending
+    excerpt — never guessed into an empty set."""
+    if not isinstance(stdout, str) or not stdout.strip():
+        raise LineDeclarationError(
+            "fast-set declaration output is empty or not text: %r"
+            % (type(stdout).__name__,))
+    refusals = [ln.strip() for ln in stdout.splitlines()
+                if ln.strip().startswith("REFUSED [")]
+    if refusals:
+        return FastSetDeclaration(members=[], budget_min=0, refusals=refusals)
+    head = None
+    member_names: List[str] = []
+    for ln in stdout.splitlines():
+        t = ln.strip()
+        if t.startswith("FAST_SET_DECLARATION "):
+            head = t
+        elif t.startswith("member "):
+            name = t[len("member "):].split(" ", 1)[0].strip()
+            if not name:
+                raise LineDeclarationError(
+                    "fast-set member line unparsable: %r" % ln[:200])
+            member_names.append(name)
+    if head is None:
+        raise LineDeclarationError(
+            "fast-set declaration header absent (no FAST_SET_DECLARATION line); "
+            "output head: %r" % stdout.strip()[:200])
+    fields: Dict[str, str] = {}
+    for tok in head[len("FAST_SET_DECLARATION "):].split():
+        if "=" in tok:
+            k, v = tok.split("=", 1)
+            fields[k] = v
+    try:
+        members_n = int(fields["members"])
+        budget_min = int(fields["budget_min"])
+    except (KeyError, ValueError) as e:
+        raise LineDeclarationError(
+            "fast-set declaration header malformed (%s: %s): %r"
+            % (type(e).__name__, e, head[:200]))
+    if members_n < 0 or budget_min <= 0:
+        raise LineDeclarationError(
+            "fast-set declaration counts out of range (members=%d budget_min=%d)"
+            % (members_n, budget_min))
+    if len(member_names) != members_n:
+        raise LineDeclarationError(
+            "fast-set member count mismatch: header says %d, body carries %d"
+            % (members_n, len(member_names)))
+    if len(set(member_names)) != len(member_names):
+        dupes = sorted({n for n in member_names if member_names.count(n) > 1})
+        raise LineDeclarationError(
+            "fast-set duplicate member name(s): %s" % ",".join(dupes))
+    return FastSetDeclaration(members=member_names, budget_min=budget_min,
+                              refusals=[])
+
+
+@dataclass
+class OwnSetDeclaration:
+    """The parsed `--print-own-set <ticket_id>` face (host order 261011 PART
+    ONE: the ticket's own scenarios, derived from the one registry by case
+    path). A refusal is a named error, never an empty legitimate set."""
+
+    members: List[str] = field(default_factory=list)
+    ticket_id: str = ""
+    refusals: List[str] = field(default_factory=list)
+
+
+def parse_own_set_declaration(stdout: Any, ticket_id: str = "") -> OwnSetDeclaration:
+    """Pure parser over the `--print-own-set` output shape. Malformed input is
+    a LOUD LineDeclarationError — never guessed into an empty set."""
+    if not isinstance(stdout, str) or not stdout.strip():
+        raise LineDeclarationError(
+            "own-set declaration output is empty or not text: %r"
+            % (type(stdout).__name__,))
+    refusals = [ln.strip() for ln in stdout.splitlines()
+                if ln.strip().startswith("REFUSED [")]
+    if refusals:
+        return OwnSetDeclaration(members=[], ticket_id="",
+                                 refusals=refusals)
+    head = None
+    member_names: List[str] = []
+    for ln in stdout.splitlines():
+        t = ln.strip()
+        if t.startswith("OWN_SET_DECLARATION "):
+            head = t
+        elif t.startswith("member "):
+            name = t[len("member "):].split(" ", 1)[0].strip()
+            if not name:
+                raise LineDeclarationError(
+                    "own-set member line unparsable: %r" % ln[:200])
+            member_names.append(name)
+    if head is None:
+        raise LineDeclarationError(
+            "own-set declaration header absent (no OWN_SET_DECLARATION line); "
+            "output head: %r" % stdout.strip()[:200])
+    fields: Dict[str, str] = {}
+    for tok in head[len("OWN_SET_DECLARATION "):].split():
+        if "=" in tok:
+            k, v = tok.split("=", 1)
+            fields[k] = v
+    try:
+        members_n = int(fields["members"])
+    except (KeyError, ValueError) as e:
+        raise LineDeclarationError(
+            "own-set declaration header malformed (%s: %s): %r"
+            % (type(e).__name__, e, head[:200]))
+    if members_n < 0:
+        raise LineDeclarationError(
+            "own-set declaration members out of range (%d)" % members_n)
+    if len(member_names) != members_n:
+        raise LineDeclarationError(
+            "own-set member count mismatch: header says %d, body carries %d"
+            % (members_n, len(member_names)))
+    if len(set(member_names)) != len(member_names):
+        dupes = sorted({n for n in member_names if member_names.count(n) > 1})
+        raise LineDeclarationError(
+            "own-set duplicate member name(s): %s" % ",".join(dupes))
+    if ticket_id and fields.get("ticket") not in (None, ticket_id):
+        raise LineDeclarationError(
+            "own-set declaration ticket mismatch: asked %r, face says %r"
+            % (ticket_id, fields.get("ticket")))
+    return OwnSetDeclaration(members=member_names,
+                             ticket_id=str(fields.get("ticket") or ""),
+                             refusals=[])
+
+
 # ------------------------------------------------------------------ record id
 
 

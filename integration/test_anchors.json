@@ -1388,6 +1388,16 @@
       "anchor": "behaviour",
       "note": "t261011-04 KI-01M4KH2QR5BRQ...: pure stamp layer — the four wiring/body modules (workflows/activities/develop_certify/develop_line) tracked and named stale when mtime newer than the worker baseline (stale list, modules entry, operator stamp line), unreadable mtime never stale with empty mtime field, wiring-marker guards on workflows.py/activities.py",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261011_10_fast_set_declaration.py": {
+      "anchor": "contract",
+      "note": "t261011-10 L1: parse_fast_set_declaration truth table — happy shape, REFUSED lines populate refusals (never an empty legitimate set), empty/non-string stdout, unparsable member line, garbage budget_min, error strings carry the offending excerpt",
+      "sync_path": "server/engine/develop_line.py (parse_fast_set_declaration)"
+    },
+    "server/engine/tests/test_t261011_10_fast_set_proof.py": {
+      "anchor": "contract",
+      "note": "t261011-10 L1: fast_proof_plan truth table — union, refused->own-only+warning, own-empty->fast-only+warning, both-empty->named fail with NO run face and NO full flag; budget boundary (wall==budget no breach); version and patch gating; malformed fast_result",
+      "sync_path": "server/engine/dev_lane.py (fast_proof_plan, DEV_BUFFER_FAST_PROOF_PATCH_ID)"
     }
   },
   "scenarios": {
@@ -4931,6 +4941,16 @@
       "anchor": "behaviour",
       "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
       "sync_path": ""
+    },
+    "integration/t261011-10/sc_t26101110_fast_proof_membership.py": {
+      "anchor": "contract",
+      "note": "t261011-10: the lane's proof set is own scenarios UNION the declared fast-set members read from the one CLI face, receipt carries membership+budget+wall clock with a named breach warning, patch-id-gated wiring, legacy closing face untouched",
+      "sync_path": "server/engine/dev_lane.py (fast_proof_plan, DEV_BUFFER_FAST_PROOF_PATCH_ID, fast_set_proof receipt); server/engine/develop_line.py (parse_fast_set_declaration)"
+    },
+    "integration/t261011-10/sc_t26101110_proof_degradation_named.py": {
+      "anchor": "behaviour",
+      "note": "t261011-10: every degraded lane proof is named — refused declaration proves own-only with a named warning, own-absent proves fast-only named, both-absent refuses the round before any run and never falls back to the full suite, legacy meta not opted in",
+      "sync_path": "server/engine/dev_lane.py (fast_proof_plan degradation outcomes, is_develop_buffer_ticket)"
     },
     "integration/t261011-11/sc_fast_set_review_patrol.py": {
       "anchor": "behaviour",
