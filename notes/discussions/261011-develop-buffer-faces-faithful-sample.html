@@ -34,6 +34,10 @@
   .epic{font-size:11px;padding:0 8px;border:1px solid var(--border);border-radius:10px;flex:none;white-space:nowrap;color:var(--muted)}
   .pause{font-size:11px;font-weight:600;flex:none;padding:0 7px;line-height:18px;border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);background:var(--warn-surface)}
   .ql{display:inline-flex;align-items:center;gap:3px;flex:none;margin-left:auto;color:var(--muted);font-size:11px}
+  /* 排队/工作记号（真源 .wb-order-dot）：work=绿 / hold·paused=琥珀；只有 queued 行才有位次号 */
+  .qdot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--border)}
+  .qdot[data-order-dot=work]{background:var(--success)}
+  .qdot[data-order-dot=hold],.qdot[data-order-dot=paused]{background:var(--warn)}
 
   /* LineOn 徽标：文字恒定，颜色即状态 */
   .ln{display:inline-flex;align-items:center;flex:none;font-size:11px;font-weight:600;padding:0 6px;line-height:16px;border:1px solid var(--border);border-radius:10px;white-space:nowrap;color:var(--muted);background:#f6f8fa}
@@ -63,31 +67,42 @@
 <body>
 <div class="wrap">
   <h1>左栏行面 — 样子</h1>
-  <p>261011 · 只放样子（实现细节见同目录 <b>261011-left-column-line-face-design.md</b>）。</p>
+  <p>261011 · <b>定稿（宿主认可）</b>。只放样子；实现细节见同目录 <b>261011-left-column-line-face-design.md</b> §14。</p>
   <p><b>点阵规矩（唯一一条）</b>：票走到第 N 格 ⇒ <b>前 N 格上满色的状态色</b>，<b>其余 10−N 格上同色相的淡档</b>（不是灰）。</p>
 
   <h2>1 · 三行卡（真票）</h2>
   <div class="col board">
     <div class="tk" data-state="active" data-active="true">
-      <div class="r"><span class="id">t261011-18</span><span class="rank">1</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
+      <div class="r"><span class="id">t261011-18</span><span class="qdot" data-order-dot="work" title="at work"></span><span class="ql">（在跑：绿点，无位次、无排序控件）</span></div>
       <div class="r"><span class="title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span></div>
       <div class="r"><span class="step">implement</span><span class="epic">engine-hardening</span>
         <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span></div>
     </div>
     <div class="tk" data-state="waiting" data-active="true">
-      <div class="r"><span class="id">t261009-80</span><span class="rank">3</span><span class="ln" data-s="waiting">LineOn</span><span class="pause">⏸</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
+      <div class="r"><span class="id">t261009-80</span><span class="qdot" data-order-dot="paused" title="paused by you (no slot)"></span><span class="ln" data-s="waiting">LineOn</span><span class="pause">⏸</span></div>
       <div class="r"><span class="title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span></div>
       <div class="r"><span class="step">merge</span><span class="epic">engine-hardening</span>
         <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="dim" data-st="waiting"></span></span></div>
     </div>
     <div class="tk" data-state="done">
-      <div class="r"><span class="id">t261011-16</span><span class="rank">5</span><span class="ln" data-s="certified">LineOn</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
+      <div class="r"><span class="id">t261011-16</span><span class="ln" data-s="certified">LineOn</span><span class="ql">（已收口：无排队记号）</span></div>
       <div class="r"><span class="title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span></div>
       <div class="r"><span class="step">merge</span><span class="epic">engine-hardening</span>
         <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span></span></div>
     </div>
   </div>
   <p>没有走线的票（legacy）不加 <code>LineOn</code>，别的元素照旧。</p>
+
+  <h2>1b · 排队中的行（位次＝现状样式，不动）</h2>
+  <div class="col board">
+    <div class="tk" data-state="active">
+      <div class="r"><span class="id">t261011-19</span><span class="rank" data-order-pos="3" title="Queue position 3">3</span><span class="ln" data-s="online">LineOn</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
+      <div class="r"><span class="title">Left column: LineOn line-state pill, three-line row, state by stage dots, no row background</span></div>
+      <div class="r"><span class="step">implement</span><span class="epic">engine-hardening</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span></div>
+    </div>
+  </div>
+  <p>位次号只出现在"排队中"的行上（样式与现在逐字节相同）；在跑＝绿点、被暂挂/被暂停＝琥珀点，这两种行按现行语义不给位次号、不给排序控件。</p>
 
   <h2>2 · 五个状态（同一条规矩）</h2>
   <div class="col board">
