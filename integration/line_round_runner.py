@@ -97,9 +97,22 @@ TAG = "LINE_ROUND_RUNNER"
 
 def die(reason):
     """The one could-not-run exit: named reason on stderr, nonzero exit,
-    stdout stays empty — the engine's CouldNotRun path carries the name."""
+    stdout stays empty — the engine's CouldNotRun path carries the name.
+    A registered face hook (run()) records the terminal failed state FIRST,
+    so the round's outcome stays visible on its stable face (t261011-26)."""
+    hook = _FACE_HOOK[0]
+    if hook is not None:
+        try:
+            hook(reason)
+        except Exception:  # noqa: BLE001 — the face never masks the verdict
+            pass
     sys.stderr.write("%s could_not_run: %s\n" % (TAG, reason))
     sys.exit(2)
+
+
+#: The active round's terminal-face hook, set/cleared by run() (die() calls
+#: it so every could-not-run path lands on the face). One runner = one round.
+_FACE_HOOK = [None]
 
 
 def parse_candidates(env=None):
@@ -353,9 +366,35 @@ def run(env=None):
     run_root = Path(env.get(RUN_ROOT_ENV, "").strip() or tempfile.mkdtemp(
         prefix="line-round-"))
     run_root.mkdir(parents=True, exist_ok=True)
+    # The round's stable face (t261011-26): resolved BEFORE anything runs so
+    # even a pre-spawn could-not-run is visible. Unresolved = named degrade,
+    # the round runs exactly as before, only the face is absent.
+    import lib_round_face
+    fdir, line_id = lib_round_face.resolve_develop_dir(
+        sorted({c["repo"] for c in candidates}), env)
+    face = watcher = None
+    if fdir is not None:
+        round_id = "round-%s-%d" % (time.strftime("%Y%m%dT%H%M%SZ",
+                                                  time.gmtime()), os.getpid())
+        face = lib_round_face.FaceWriter(
+            fdir, round_id, line_id,
+            {c["repo"]: c["revision"] for c in candidates})
+        face.start()
     state = RunState(env, run_root)
     state.sweep_stale()
     state.record()
+    watcher_holder = [None]
+
+    def face_failed(reason):
+        # every could-not-run path (die, signal unwind) lands here first:
+        # state=failed + the named reason, distinguishable without worker.log
+        if watcher_holder[0] is not None:
+            watcher_holder[0].stop()
+        if face is not None:
+            face.retain_log(run_root / "suite.log")
+            face.finish("failed", None, reason)
+
+    _FACE_HOOK[0] = face_failed
     try:
         clones = {}
         for candidate in candidates:
@@ -371,6 +410,10 @@ def run(env=None):
         log_path = run_root / "suite.log"
         argv = suite_argv(env)
         with open(log_path, "wb") as log:
+            if face is not None:
+                watcher = lib_round_face.LogWatcher(face, log_path)
+                watcher_holder[0] = watcher
+                watcher.start()
             try:
                 proc = subprocess.Popen(
                     argv, cwd=str(primary),
@@ -406,6 +449,9 @@ def run(env=None):
                 signal.signal(signal.SIGTERM, prev_term)
                 signal.signal(signal.SIGINT, prev_int)
         summary, why = parse_integ_summary(log_path)
+        if watcher is not None:
+            watcher.stop()
+            watcher_holder[0] = None
         if summary is None:
             die("suite_rc_%d:%s;%s"
                 % (rc, why, tail(log_path.read_text(
@@ -413,10 +459,34 @@ def run(env=None):
         header, why = read_header(primary, Path(run_root) / "ledger", summary)
         if header is None:
             die("suite_rc_%d:%s" % (rc, why))
+        if face is not None:
+            # outcome stays visible (t261011-26 spec 4): completed-but-red is
+            # a proof, completed-clean is green — counts come from the relayed
+            # header (the same recount the suite produced), never recounted
+            cases = header.get("cases") or {}
+            red = int(cases.get("failed", 0)) + int(cases.get("env_failed", 0))
+            face.merge_progress(lib_round_face.snapshot_progress(
+                log_path.read_text(encoding="utf-8", errors="replace")))
+            # the ledger's run id is the round's real identity — relabel the
+            # retained evidence dir to it so face and ledger join 1:1
+            run_id = header.get("id")
+            if isinstance(run_id, str) and run_id.strip():
+                try:
+                    renamed = face.run_dir.with_name(run_id)
+                    face.run_dir.rename(renamed)
+                    face.run_dir = renamed
+                    face.face["run_id"] = run_id
+                except OSError:
+                    pass  # keep the provisional dir; the face still lands
+            face.retain_log(log_path)
+            face.finish("done", "red" if red else "green", None)
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0
     finally:
+        _FACE_HOOK[0] = None
+        if watcher_holder[0] is not None:
+            watcher_holder[0].stop()
         state.retire()
         shutil.rmtree(run_root, ignore_errors=True)
 

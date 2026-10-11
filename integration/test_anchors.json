@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 267,
-      "scenarios": 687
+      "scenarios": 722
     },
     "vocab": [
       "behaviour",
@@ -5015,6 +5015,12 @@
       "anchor": "contract",
       "note": "t261011-21: the line round's clone carries the gitignored assets the suite's cwd-relative probes need (interpreter chain picks the provisioned venv, temporal + playwright-core probes resolve), absence stays honest (env_failed==1 relayed, nothing fabricated), committed destinations are never clobbered, links target absolute source paths",
       "sync_path": "integration/line_round_runner.py (prepare_tree/materialise_assets)"
+    },
+    "integration/t261011-26/sc_t26101126_round_progress_face.py": {
+      "anchor": "contract"
+    },
+    "integration/t261011-26/sc_t26101126_round_evidence_kept.py": {
+      "anchor": "contract"
     }
   }
 }
