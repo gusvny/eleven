@@ -4931,6 +4931,11 @@
       "anchor": "behaviour",
       "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
       "sync_path": ""
+    },
+    "integration/t261011-11/sc_fast_set_review_patrol.py": {
+      "anchor": "behaviour",
+      "note": "t261011-11: the fast set's patrol face (--print-fast-set-review) and its append-only verdict ledger judged over the real CLI with fixture ledgers/roster; declarations printed beside measurements, must-lose-membership fail-closed, breach is a signal never a trim",
+      "sync_path": ""
     }
   }
 }
