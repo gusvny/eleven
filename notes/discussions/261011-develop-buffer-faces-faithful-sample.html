@@ -61,6 +61,17 @@
   .d[data-v=all][data-st=blocked]{background:var(--danger)}
   .d[data-v=all][data-st=failed]{background:var(--danger-solid)}
   .d[data-v=all][data-st=done]{background:var(--passed)}
+  /* M3：整阵同色相，已过/当前＝满色，未到＝同色相淡档 */
+  .d[data-v=full][data-st=active]{background:var(--accent)}
+  .d[data-v=dim][data-st=active]{background:#bcd9f7}
+  .d[data-v=full][data-st=waiting]{background:var(--warn)}
+  .d[data-v=dim][data-st=waiting]{background:#f2dfae}
+  .d[data-v=full][data-st=blocked]{background:var(--danger)}
+  .d[data-v=dim][data-st=blocked]{background:#f3c3c1}
+  .d[data-v=full][data-st=failed]{background:var(--danger-solid)}
+  .d[data-v=dim][data-st=failed]{background:#f3c3c1}
+  .d[data-v=full][data-st=done]{background:var(--passed)}
+  .d[data-v=dim][data-st=done]{background:#b9e6c5}
 
   /* 位次三种候选 */
   .r-a{color:var(--ink);font-size:13px;font-weight:700}
@@ -139,6 +150,17 @@
   </div>
   <p>两法都"整个点阵一个颜色"。差别只有一处：<b>M1 还能看出走到第几格</b>（灰格＝还没到），<b>M2 看不出来</b>（要靠 step name）。M2 的色块更长更醒目，代价是把"进度"这一维从点阵上拿掉了。</p>
 
+  <h2>3b · M3：整阵同一个色相，两档明度（failed 时不再是"红配灰"）</h2>
+  <p>同一色相铺满十格；<b>已过/当前＝满色</b>，<b>未到＝同色相的淡档</b>。这样 failed 的行不会出现"红格 + 灰格"的拼色，同时"走到第几格"仍看得出来。</p>
+  <div class="col board">
+    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="active"></span><span class="d" data-v="full" data-st="active"></span><span class="d" data-v="full" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span><span class="d" data-v="dim" data-st="active"></span></span><span class="title">M3 · active — 前 3 格满蓝，其余淡蓝</span></div></div>
+    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="full" data-st="waiting"></span><span class="d" data-v="dim" data-st="waiting"></span></span><span class="title">M3 · waiting — 前 9 格满暖，最后 1 格淡暖</span></div></div>
+    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="blocked"></span><span class="d" data-v="full" data-st="blocked"></span><span class="d" data-v="full" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span><span class="d" data-v="dim" data-st="blocked"></span></span><span class="title">M3 · blocked — 满红到当前格，其余淡红（没有灰格）</span></div></div>
+    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="failed"></span><span class="d" data-v="full" data-st="failed"></span><span class="d" data-v="full" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span><span class="d" data-v="dim" data-st="failed"></span></span><span class="title">M3 · failed — 整阵都是红：前方满红、后方淡红</span></div></div>
+    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span><span class="d" data-v="full" data-st="done"></span></span><span class="title">M3 · done — 十格全满绿</span></div></div>
+  </div>
+  <p>M3 就是你那句"灰的那几格也跟着变色"——只是那几格用<b>同色相的淡档</b>，不是纯灰：既做到"整阵一个状态色"，又保住"走到第几格"。</p>
+
   <h2>4 · LineOn 的颜色</h2>
   <div class="board" style="padding:12px">
     <p style="margin:0 0 8px"><span class="ln" data-s="online">LineOn</span> 在线上、未落地 &nbsp;
@@ -185,7 +207,7 @@
   <h2>6 · 等你定的</h2>
   <div class="board" style="padding:12px;font-size:13px">
     <p style="margin:2px 0">① 位次用 A / B / C 哪一种？</p>
-    <p style="margin:2px 0">② 点阵变色用 <b>M1</b>（已过＋当前格，仍能看出走到第几格）还是 <b>M2</b>（十格全变色，进度靠 step name）？</p>
+    <p style="margin:2px 0">② 点阵变色用 <b>M1</b>（已过＋当前格上色、未到留灰）／<b>M2</b>（十格全变色、进度靠 step name）／<b>M3</b>（整阵同色相，未到用淡档 —— 我按你这句话画的，推荐）？</p>
     <p style="margin:2px 0">③ 行底色（黄/红整行底）留不留？去掉的话要不要给"卡住/失败"一个更便宜的整行记号（例如标题变色）？</p>
     <p style="margin:2px 0">④ 彩色 <code>LineOn</code> 的「认证已覆盖」与「已晋级」要不要一眼可分？</p>
     <p style="margin:2px 0">⑤ 三行（现在这样）还是压成两行？</p>
