@@ -170,18 +170,21 @@
     </div>
 
     <div class="pad" style="border-top:1px solid var(--line)">
-      <div style="font-weight:600;margin-bottom:4px">What this round writes</div>
-      <div class="kv">
-        <b>green</b><span>a <code>certification</code> row naming this run &rArr; covers <span class="mono">t261009-80</span>, <span class="mono">t261011-25</span>; boundary moves to <span class="mono">353b2479</span></span>
-        <b>red</b><span>a red <code>certification</code> + a <code>freeze</code> row &rArr; line <b>FROZEN</b> with the blockers verbatim</span>
-        <b>no proof</b><span>one <code>range_growth</code> row naming why (<code>runner_timeout:3600s</code>, <code>could_not_run:…</code>)</span>
-      </div>
+      <div style="font-weight:600;margin-bottom:4px">Wrote</div>
+      <div class="k" style="font-size:12.5px">nothing yet — the round is still running; the dialog states that instead of listing what it <i>might</i> write.</div>
     </div>
 
     <div class="pad" style="border-top:1px solid var(--line);display:flex;gap:8px;align-items:center">
       <span class="link">Retained log</span><span class="k" style="font-size:11.5px">(stable path — the round's own log no longer lives in a system temp dir)</span>
     </div>
   </div>
+
+  <h2>2b · 同一个 <b>Wrote</b> 位，在三种终局下各是一行（示例）</h2>
+  <div class="panel"><div class="pad" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">
+    <div><span class="pill" data-k="green">green</span> <span class="link mono">certification cert-…</span> <span class="k">covers</span> <span class="mono">t261009-80</span>, <span class="mono">t261011-25</span> <span class="k">· boundary &rarr;</span> <span class="mono">353b2479</span></div>
+    <div><span class="pill" data-k="red">red</span> <span class="link mono">certification cert-… (red)</span> <span class="k">+</span> <span class="link mono">freeze frz-…</span> <span class="k">· line</span> <b>FROZEN</b> <span class="k">with the blockers verbatim</span></div>
+    <div><span class="pill" data-k="none">no proof</span> <span class="link mono">range_growth</span> <span class="k">— reason</span> <span class="mono">runner_timeout:3600s</span></div>
+  </div></div>
 
   <h2>3 · 三种"没东西可看"（同一个 dialog 的三种空态）</h2>
   <div class="panel" style="color:var(--fg)">
