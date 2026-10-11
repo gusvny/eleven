@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Develop buffer faces — mock (261011)</title>
+<title>Develop buffer faces — mock v2 (261011, narrow left column)</title>
 <style>
   :root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--ink:#e6e9ef;--dim:#9aa4b2;--acc:#6ea8fe;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--buf:#a371f7}
   *{box-sizing:border-box}
@@ -14,134 +14,163 @@
   p{margin:6px 0}
   .sub{color:var(--dim);font-size:13px}
   .note{background:#141821;border:1px solid var(--line);border-left:3px solid var(--acc);padding:10px 12px;border-radius:6px;margin:12px 0;font-size:13px;color:var(--dim)}
+  .bad{background:#1d1414;border-left-color:var(--bad)}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
-  .row{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;margin:7px 0;background:#12151c}
-  .row .id{color:var(--dim);min-width:96px}
-  .row .title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .row .stage{color:var(--dim);font-size:12px;min-width:132px;text-align:right}
-  .badge{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid;white-space:nowrap}
-  .b-legacy{color:var(--dim);border-color:#39404e;background:#1a1e27}
-  .b-buffer{color:#d7c6ff;border-color:#4b3a7a;background:#241c3a}
-  .b-wait{color:#ffd783;border-color:#5a4a1f;background:#2a2413}
-  .b-ok{color:#9ff0b0;border-color:#245130;background:#132418}
-  .b-bad{color:#ffb3ae;border-color:#5c2a28;background:#2a1615}
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
   th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
   th{color:var(--dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em}
+  code{background:#0c0f14;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
   .empty{color:var(--dim);font-style:italic;padding:12px;border:1px dashed var(--line);border-radius:8px;background:#12151c}
   .real{color:var(--ok);font-size:11px;border:1px solid #245130;background:#132418;border-radius:999px;padding:2px 7px}
   .illus{color:var(--warn);font-size:11px;border:1px solid #5a4a1f;background:#2a2413;border-radius:999px;padding:2px 7px}
-  code{background:#0c0f14;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
-  ul{margin:6px 0 6px 18px;padding:0}
-  li{margin:3px 0}
+  .badge{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid;white-space:nowrap}
+  .b-buffer{color:#d7c6ff;border-color:#4b3a7a;background:#241c3a}
+  .b-wait{color:#ffd783;border-color:#5a4a1f;background:#2a2413}
+  .b-legacy{color:var(--dim);border-color:#39404e;background:#1a1e27}
+  .b-ok{color:#9ff0b0;border-color:#245130;background:#132418}
+
+  /* ---- the narrow-column simulator: 340px = the left column's real budget ---- */
+  .col{width:340px;background:#12151c;border:1px solid var(--line);border-radius:10px;padding:8px}
+  .colcap{width:340px;color:var(--dim);font-size:11px;margin:4px 0 6px}
+  .r{display:flex;align-items:center;gap:6px;padding:7px 8px;border:1px solid var(--line);border-radius:7px;margin:6px 0;background:#12151c;position:relative;overflow:hidden}
+  .r .bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:#39404e}
+  .r.buf .bar{background:var(--buf)}
+  .r.bufdash .bar{background:repeating-linear-gradient(180deg,var(--buf) 0 4px,transparent 4px 8px)}
+  .r.wait{background:#1d1a12}
+  .r .id{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:11.5px;min-width:88px}
+  .r .glyph{color:#d7c6ff;font-size:12px;min-width:12px;text-align:center}
+  .r .ti{flex:1;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .r .st{color:var(--dim);font-size:11px;white-space:nowrap}
+  .r .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:0 0 auto}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Develop buffer — the faces a person needs (mock)</h1>
-  <p class="sub">261011 · by the integration steward, for the host to react to. <b>This is a mock: no code, nothing runs.</b> Legend:
-    <span class="real">TODAY — real</span> = what the engine already produces; <span class="illus">ILLUSTRATIVE</span> = shape I propose, nothing built yet.</p>
+  <h1>Develop buffer — the faces, v2 <span class="sub">(narrow left column respected)</span></h1>
+  <p class="sub">261011 · integration steward. <b>Mock only, nothing runs.</b>
+    <span class="real">TODAY — real</span> = the engine already produces it; <span class="illus">ILLUSTRATIVE</span> = shape I propose.</p>
 
-  <div class="note">
-    <b>Why this mock exists.</b> The new flow (a ticket opts into the develop buffer: <code>lane_version=develop-buffer-v1</code>, <code>develop_line=develop-buffer</code>)
-    changes three things: <b>what evidence the lane must produce</b> (its own scenarios + the declared fast set, 5-minute ceiling), <b>where it lands</b> (onto the <code>develop</code> line, not main),
-    and <b>who signs</b> (one human signature per promotion, not per ticket). The <b>stage diagram does not change</b> — the buffer is a lane <i>version</i> on the same template, so the lane map looks the same by design.
-    What is missing today is the <b>face that says "this ticket is on the buffer, and here is the line's state"</b>.
+  <div class="note bad">
+    <b>v1's mistake, corrected here.</b> v1 put two chips on every board row (<span class="badge b-buffer">DEVELOP BUFFER · develop</span> <span class="badge b-wait">waiting for certification</span>) —
+    roughly 200px of ink on a column that is already squeezing the ticket title. The left column's budget is ~340px and the title must keep the space. So the row gets <b>almost no new ink</b>;
+    the words move to the faces that have room.
   </div>
 
-  <h2>1 · Board row (left column, ticket console)</h2>
-  <p class="sub">One line per ticket. The engine row already carries the two keys (fixed today: the CLI face dropped them and now agrees key-for-key with the engine, 27 = 27). <span class="real">TODAY — real data</span></p>
-  <div class="panel">
-    <div class="row">
-      <span class="id mono">t261011-10</span>
-      <span class="title">The lane's own proof still pays the whole suite …</span>
-      <span class="badge b-legacy">legacy-v1</span>
-      <span class="stage">merge · closed</span>
+  <h2>1 · Left column at its real width (340px)</h2>
+  <p class="sub">Today's row, then three ways to mark a buffer ticket without stealing the title's space.</p>
+
+  <div class="colcap">A · today (reference)</div>
+  <div class="col">
+    <div class="r"><span class="bar"></span><span class="id">t261011-10</span><span class="ti">The lane's own proof still pays the whole suite…</span><span class="st">merge</span></div>
+    <div class="r wait"><span class="bar"></span><span class="id">t261009-80</span><span class="ti">A pause that cannot reach a boundary is invisible…</span><span class="st">blocked</span></div>
+  </div>
+
+  <div class="colcap" style="margin-top:16px">B · <b>recommended</b>: one 12px glyph on buffer rows + tooltip</div>
+  <div class="col">
+    <div class="r"><span class="bar"></span><span class="id">t261011-10</span><span class="ti">The lane's own proof still pays the whole suite…</span><span class="st">merge</span></div>
+    <div class="r buf wait" title="develop-buffer-v1 · line develop · waiting for certification">
+      <span class="bar"></span><span class="glyph">⇥</span><span class="id">t261009-80</span><span class="ti">A pause that cannot reach a boundary is invisible…</span><span class="st">blocked</span>
     </div>
-    <div class="row">
-      <span class="id mono">t261009-80</span>
-      <span class="title">A pause that cannot reach a boundary is invisible and inert …</span>
-      <span class="badge b-buffer">DEVELOP BUFFER · develop</span>
+  </div>
+  <p class="sub">Cost on a buffer row: <b>one glyph (~12px)</b>; legacy rows untouched. The words live in the <code>title=</code> tooltip and in the detail (below).
+    The row tint already carries "waiting"/"blocked" today, so the buffer marker rides on the existing channels instead of adding a pill.</p>
+
+  <div class="colcap" style="margin-top:16px">C · zero-text alternative: mark by the left-edge bar's <b>shape</b> (dashed) — 0px</div>
+  <div class="col">
+    <div class="r"><span class="bar"></span><span class="id">t261011-10</span><span class="ti">The lane's own proof still pays the whole suite…</span><span class="st">merge</span></div>
+    <div class="r bufdash wait" title="develop-buffer-v1 · line develop · waiting for certification">
+      <span class="bar"></span><span class="id">t261009-80</span><span class="ti">A pause that cannot reach a boundary is invisible…</span><span class="st">blocked</span>
+    </div>
+  </div>
+  <p class="sub">Rule: <b>solid bar = legacy, dashed bar = on a buffer line.</b> Reuses the epic colour-bar channel, so nothing new is introduced; the tooltip carries the words.
+    Reads slower than a glyph at a glance — offered in case even 12px is too much.</p>
+
+  <div class="colcap" style="margin-top:16px">D · the words go to the detail header (no pill in the row at all)</div>
+  <div class="col">
+    <div class="r buf wait" title="develop-buffer-v1 · line develop · waiting for certification">
+      <span class="bar"></span><span class="glyph">⇥</span><span class="id">t261009-80</span><span class="ti">A pause that cannot reach a boundary is invisible…</span><span class="dot"></span>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:8px">
+    <div class="mono" style="color:var(--dim)">t261009-80 · merge · blocked</div>
+    <div style="margin-top:6px">
+      <span class="badge b-buffer">develop-buffer-v1</span>
+      <span class="badge b-buffer">line: develop</span>
       <span class="badge b-wait">waiting for certification</span>
-      <span class="stage">merge · blocked</span>
     </div>
-    <p class="sub">Proposal: a <span class="badge b-buffer">DEVELOP BUFFER · &lt;line&gt;</span> badge on the row (and the line's state pill), so a reader can tell a buffer ticket from a legacy one <b>without opening anything</b>.
-    Today the values exist in the data but <b>the console renders neither</b> — that is the gap this mock is about. <span class="illus">ILLUSTRATIVE</span></p>
   </div>
 
-  <h2>2 · Ticket detail — a "Line" card</h2>
-  <p class="sub">What a reader needs to answer "where does this ticket deliver to, and has it been proven there?"</p>
+  <h2>2 · Where the words live (no space problem)</h2>
   <div class="grid2">
     <div class="panel">
-      <h3>Line</h3>
+      <h3>Ticket detail — Line card</h3>
       <table>
         <tr><th>Line</th><td class="mono">develop-buffer</td></tr>
         <tr><th>Branch</th><td class="mono">develop</td></tr>
         <tr><th>Lane version</th><td class="mono">develop-buffer-v1</td></tr>
-        <tr><th>Landings on the line</th><td class="mono">0</td></tr>
+        <tr><th>Landings</th><td class="mono">0</td></tr>
         <tr><th>Certifications</th><td class="mono">0</td></tr>
         <tr><th>Freeze</th><td>open</td></tr>
         <tr><th>Promotion</th><td>— none yet —</td></tr>
       </table>
-      <p class="sub"><span class="real">TODAY — real</span> These are the true current values: the line has never been landed on, so <code>delivery.jsonl</code> does not exist yet.</p>
+      <p class="sub"><span class="real">TODAY — real values</span>: the line has never been landed on, so <code>delivery.jsonl</code> does not exist yet. <span class="illus">ILLUSTRATIVE</span> as a card.</p>
     </div>
     <div class="panel">
-      <h3>This ticket's outcome, in three stages</h3>
+      <h3>Ticket outcome, three stages</h3>
       <table>
-        <tr><th>Stage</th><th>State</th></tr>
-        <tr><td>1 · landing …</td><td><span class="badge b-wait">not yet — needs a failure-free proof round</span></td></tr>
-        <tr><td>2 · certification …</td><td><span class="badge b-legacy">not yet</span></td></tr>
-        <tr><td>3 · promotion to main</td><td><span class="badge b-legacy">not yet</span></td></tr>
+        <tr><th>1 · landing</th><td><span class="badge b-wait">not yet — needs a failure-free proof round</span></td></tr>
+        <tr><th>2 · certification</th><td><span class="badge b-legacy">not yet</span></td></tr>
+        <tr><th>3 · promotion to main</th><td><span class="badge b-legacy">not yet</span></td></tr>
       </table>
-      <p class="sub">Goal 14 of the design: the ticket's record must show all three — the revision it landed at, the certification that covered it, and whether it reached main (or was later reverted). <span class="illus">ILLUSTRATIVE</span></p>
+      <p class="sub">Goal 14: the record must show the revision it landed at, the certification that covered it, and whether it reached main (or was later reverted). <span class="illus">ILLUSTRATIVE</span></p>
     </div>
   </div>
 
-  <h2>3 · Certification tab (executor panel — the face already exists)</h2>
-  <p class="sub">Reads the line's delivery ledger (<code>certification-reader.ts</code> → <code>certification-adapter.py</code>, landed as t261009-41/44). It is empty today for one reason only: nothing has landed.</p>
+  <h2>3 · Certification tab (exists today, in the executor panel)</h2>
   <div class="panel">
     <h3>Today</h3>
     <div class="empty">No landing recorded on line <code>develop-buffer</code> yet — the delivery ledger has not been created. (An absent ledger is "never ran", never "ran with nothing".)</div>
-    <h3>Once a run happens (shape I propose)</h3>
+    <h3>Once a run happens (shape)</h3>
     <table>
-      <tr><th>When</th><th>Revision</th><th>Covers</th><th>Ran / failed / env</th><th>Booked-red inventory</th><th>Driver</th><th>Run</th></tr>
-      <tr><td class="mono">11:30</td><td class="mono">c0e57d06</td><td class="mono">landing #1 (t261009-80)</td><td class="mono">580 / 0 / 22</td><td class="mono">scan-default-v1</td><td>scheduled (backstop)</td><td class="mono">run-01M4…</td></tr>
-      <tr><th>Attributed reds</th><th colspan="6">range searched · landing found responsible · how · what happened to it</th></tr>
-      <tr><td class="mono">11:52</td><td colspan="6">none — the round was green; the prefix keeps its proof</td></tr>
-      <tr><th>Freeze</th><th colspan="6">open · keyed to the certification above (a red would open one and exempt only the repair ticket)</th></tr>
+      <tr><th>When</th><th>Revision</th><th>Covers</th><th>Ran / fail / env</th><th>Booked-red inventory</th><th>Driver</th><th>Run</th></tr>
+      <tr><td class="mono">11:30</td><td class="mono">c0e57d06</td><td class="mono">landing #1</td><td class="mono">580 / 0 / 22</td><td class="mono">scan-default-v1</td><td>scheduled</td><td class="mono">run-01M4…</td></tr>
+      <tr><th>Attributed reds</th><th colspan="6">range searched · landing found responsible · how · what happened</th></tr>
+      <tr><td class="mono">—</td><td colspan="6">none — green round, the prefix keeps its proof</td></tr>
+      <tr><th>Freeze</th><th colspan="6">open (a red would open one, exempting only the repair ticket)</th></tr>
       <tr><th>Promotion</th><th colspan="6">waiting for a human signature — one per promotion, not one per ticket <span class="badge b-wait">sign here</span></th></tr>
     </table>
-    <p class="sub"><span class="illus">ILLUSTRATIVE</span> — but every column maps to a record the engine already writes or has a ticket for (run records, certification rows, freeze rows, promotion rows).</p>
   </div>
 
-  <h2>4 · The states a reader must be able to tell apart</h2>
+  <h2>4 · States a reader must tell apart</h2>
   <div class="panel">
-    <ul>
-      <li><b>buffer ticket, proof not yet clean</b> — <span class="badge b-wait">needs a failure-free proof round</span> (this is exactly where <code>t261009-80</code> stood all morning: one load-shaped red per attempt, and the two-part proof that fixes it landed at 11:02)</li>
-      <li><b>landed, waiting for certification</b> — <span class="badge b-wait">waiting for certification</span>: the designed end state of a ticket; it holds no slot while waiting</li>
-      <li><b>certified, waiting for promotion</b> — <span class="badge b-ok">certified by run-…</span> + <span class="badge b-wait">sign here</span></li>
-      <li><b>frozen</b> — the line is red: no new landings except the repair ticket; named owner and escalation point</li>
-      <li><b>promoted</b> — the buffer's content is in main, with the signature recorded</li>
-      <li><b>could not run</b> — not a red: the range grows, nothing opens, and the reason is named (<code>runner_missing</code>, <code>could_not_run</code>)</li>
-    </ul>
+    <table>
+      <tr><th>State</th><th>How it reads</th></tr>
+      <tr><td>proof not yet clean</td><td><span class="badge b-wait">needs a failure-free proof round</span> — where <code>t261009-80</code> stood all morning</td></tr>
+      <tr><td>landed, waiting for certification</td><td><span class="badge b-wait">waiting for certification</span> — designed end state; holds no slot while waiting</td></tr>
+      <tr><td>certified, waiting for promotion</td><td><span class="badge b-ok">certified by run-…</span> + <span class="badge b-wait">sign here</span></td></tr>
+      <tr><td>frozen (line red)</td><td>no new landings except the repair ticket; named owner + escalation point</td></tr>
+      <tr><td>promoted</td><td>the buffer's content is in main, signature recorded</td></tr>
+      <tr><td>could not run</td><td>not a red: range grows, nothing opens, reason named (<code>runner_missing</code>, <code>could_not_run</code>)</td></tr>
+    </table>
   </div>
 
-  <h2>5 · What is real vs missing (so nobody mistakes the mock for the state)</h2>
+  <h2>5 · Real vs missing</h2>
   <div class="panel">
     <table>
       <tr><th>Thing</th><th>Status</th></tr>
-      <tr><td>engine row carries <code>lane_version</code> / <code>develop_line</code></td><td><span class="real">REAL</span> (and the CLI face now agrees, 27 = 27 keys)</td></tr>
-      <tr><td>the lane's proof is "own scenarios + declared fast set", 5-minute ceiling</td><td><span class="real">REAL</span> (t261011-10, landed 11:02; fast set 67 members ≈ 13 s)</td></tr>
+      <tr><td>engine row carries <code>lane_version</code> / <code>develop_line</code></td><td><span class="real">REAL</span> (CLI face agrees, 27 = 27 keys)</td></tr>
+      <tr><td>the lane's proof is "own scenarios + fast set", 5-minute ceiling</td><td><span class="real">REAL</span> (t261011-10) — <b>only for tickets created after it landed</b>; an in-flight ticket keeps the old rule</td></tr>
       <tr><td>certification read face (tab reader + adapter)</td><td><span class="real">REAL</span> (t261009-41/44)</td></tr>
-      <tr><td>board row renders the two keys (badge/pill)</td><td><span class="badge b-bad">MISSING</span> — the console reads the engine rows but renders neither key</td></tr>
-      <tr><td>ticket detail "Line" card + the three-stage outcome</td><td><span class="badge b-bad">MISSING</span> — proposed here</td></tr>
-      <tr><td>a first landing / first certification to show anywhere</td><td><span class="badge b-wait">PENDING</span> — the line has no records yet</td></tr>
+      <tr><td>row marker (glyph or dashed bar) + tooltip</td><td><span class="badge b-legacy">MISSING</span> — ~12px, buffer rows only</td></tr>
+      <tr><td>detail header badges + Line card</td><td><span class="badge b-legacy">MISSING</span></td></tr>
+      <tr><td>a first landing / certification to show</td><td><span class="badge b-wait">PENDING</span> — no records on the line yet</td></tr>
     </table>
   </div>
 
-  <p class="sub" style="margin-top:26px">Ask me for changes to this mock and I will re-cut it; if you approve the shape, the two MISSING rows become one small UI ticket (write set: <code>server/plugins/workbench/</code> + <code>integration/</code>), with the field values taken from the engine row, never re-derived in the front end.</p>
+  <p class="sub" style="margin-top:26px">Tell me which row variant you want (B, C or D) and I re-cut; on your word the two MISSING rows become one small UI ticket
+    (write set <code>server/plugins/workbench/</code> + <code>integration/</code>) whose values come from the engine row, never re-derived in the front end.</p>
 </div>
 </body>
 </html>

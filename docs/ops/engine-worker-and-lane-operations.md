@@ -407,6 +407,21 @@ Two confirmed hazards in the same area:
    (`.sandbar/quarantine/unauth-create_plan-gen*` carries its diff) because it had no write-set seat,
    and the ticket face does not explain why. Put plan artefacts in the write set when the spec asks
    for one.
+   **The same holds for a *code* file, not only plan artefacts (measured 261011, t261011-17).** That
+   ticket's spec item 3 asked for a note on the ticket face; the single writer for it is
+   `server/engine/dev_lane.py`, but the write set I authored named only `agent_activities.py` + the
+   test dirs + `integration/`. The lane edited `dev_lane.py` anyway, the settle path gate rolled the
+   edit back, and the lane's own scenario then failed against a tree where the change was absent —
+   while the implement statement still said the note was present (`git diff main...HEAD` in the lane
+   is the reader that settles it; the statement is not). The rule: **when a spec item names a
+   behaviour, put the file that owns that behaviour in the write set** — or have the plan name it as
+   a call-site file, which is what admits it to the round's effective write set.
+   That rollback is **not** silent: the settle path gate preserves the reverted edit at
+   `<lane>/.sandbar/quarantine/<stage>-gen*/manifest.json` with its own diff file. Measured on
+   t261011-17: three entries (`unauth-implement-gen0`, `-gen0-2`, `-gen0-3` at 11:54 / 11:56 / 12:15),
+   each naming `server/engine/dev_lane.py` with `"action": "reverted"`. So when a statement and
+   `git diff` disagree, the third reader is the quarantine manifest — and three entries for the same
+   path is the signal that the write set, not the lane, is the thing to fix.
 2. **The union is a round-level authorization; the settle judges with the write set it is handed.**
    On this ticket the two files were quarantined once anyway
    (`.sandbar/quarantine/unauth-implement-gen0/server__engine__{activities,workflows}.py.diff`,
@@ -593,3 +608,27 @@ The sequence that actually takes effect (two steps, two owners):
 Judging it: the line-round tick names its own state on the operator surface. With no runner declared it reports
 `runner_missing`; with a runner declared it produces a delivery-ledger row or a named `could_not_run`. "The console
 restarted and nothing changed" is the expected outcome of doing step 1 alone.
+
+### A new lane-flow gate NEVER applies to a ticket already in flight (261011, measured on t261009-80)
+
+The engine gates every new workflow branch behind `workflow.patched(<patch id>)` so old histories replay byte-identically
+(KI-061 discipline). The consequence is operational and easy to miss:
+
+> `t261011-10` landed the develop-buffer two-part proof at 11:02 (`DEV_BUFFER_FAST_PROOF_PATCH_ID = "dev-buffer-fast-proof-v1"`,
+> inside `if workflow.patched(...) and is_develop_buffer_ticket(...)`). The already-running buffer ticket `t261009-80`
+> (history started 02:22) evaluates `patched() = False`, so its round at 11:17:30 ran the **full 581-scenario suite** again
+> (`ran 581 / pass 576 / fail 1`) — not the own+fast plan the design requires. Measured, not inferred: the round's receipt
+> shows 581 cases while a fresh buffer lane's closing run is the scoped plan (the fast set alone measured 13s).
+
+Rules that follow:
+
+1. **Do not expect a landing in flight to pick up a new proof/flow rule.** An in-flight ticket keeps the old evidence rule
+   for its whole life; the only tickets that exercise a new gate are those **created after the change landed** (their history
+   records the marker).
+2. So "we shipped the flow fix, now the parked ticket will benefit" is false. When a new lane-flow rule matters for a ticket
+   that is already running, the choices are: keep rolling the old rule (the lottery), park it, or **open a fresh ticket** to
+   exercise the new rule end to end.
+3. When you open that fresh ticket, say in its face that it is the **first run on the new gate** — the receipt is the evidence
+   the change works (a compared wall clock or case count against the old path is the cheapest proof).
+4. The same rule applies in reverse: a fix landed for legacy tickets must not be expected to change anything for a ticket that
+   already opted into the new version, and vice versa.

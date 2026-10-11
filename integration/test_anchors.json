@@ -1403,6 +1403,11 @@
       "anchor": "contract",
       "note": "t261011-10 L1: fast_proof_plan truth table — union, refused->own-only+warning, own-empty->fast-only+warning, both-empty->named fail with NO run face and NO full flag; budget boundary (wall==budget no breach); version and patch gating; malformed fast_result",
       "sync_path": "server/engine/dev_lane.py (fast_proof_plan, DEV_BUFFER_FAST_PROOF_PATCH_ID)"
+    },
+    "server/engine/tests/test_t261011_17_registration_guard.py": {
+      "anchor": "contract",
+      "note": "t261011-17: the worker registration surface is closed — lane_head_sha/land_to_line/certification_wait in the COMPOSED worker table, every @activity.defn under server/engine composed-or-named-exempt (selfcheck stubs + the in-process pure function), @workflow.defn complete against ALL_WORKFLOWS+ALL_WORKFLOWS_V2, negative control on a synthetic defn, and the green-run-face miss note written on both failure exits and cleared on success",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -4970,6 +4975,21 @@
     "integration/t261011-15/sc_t26101115_dismiss_prompt_visible.mjs": {
       "anchor": "behaviour",
       "note": "t261011-15: dismiss reason box visible in viewport on a long list + ?project= on the wire",
+      "sync_path": ""
+    },
+    "integration/t261011-17/sc_t26101117_registration_surface.py": {
+      "anchor": "behaviour",
+      "note": "t261011-17: composed worker registration table carries the develop-buffer landing path; no production @activity.defn outside it or the named selfcheck exemptions; @workflow.defn surface complete vs declared lists",
+      "sync_path": ""
+    },
+    "integration/t261011-17/sc_t26101117_green_run_face_note.py": {
+      "anchor": "behaviour",
+      "note": "t261011-17: green-run face miss leaves a named note on the ticket face (both failure exits), cleared on success, inert on unpatched replay",
+      "sync_path": ""
+    },
+    "integration/t261011-16/sc_t26101116_prose_dirt_landing.py": {
+      "anchor": "behaviour",
+      "note": "t261011-16 KI-048 prose-allowance: the exempt prose dirt landing (commit file list excludes it, bytes survive, no stash), inverted control against the pre-fix conservative rule, named-teeth canaries (code dirty / staged prose / untracked collision), overlapping prose named refusal, diff-fault fail-closed",
       "sync_path": ""
     }
   }

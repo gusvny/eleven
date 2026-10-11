@@ -7323,13 +7323,38 @@ def _merge_started(repo: Path) -> bool:
 # into the note (an unbounded list can blow up the ticket face / the gate record).
 MERGE_FILES_CAP = 20
 
+# Prose allowance (host order 261011, ticket t261011-16): an uncommitted, UNSTAGED,
+# tracked edit under one of these repo-root-relative prefixes does NOT block a
+# close-out — the host's ruling: a main-tree change confined to notes/docs does not
+# actually matter. The owner's bytes must survive
+# the merge untouched (the 260908 auto-stash red line): the exemption only lifts the
+# classifier's refusal, the engine never stages/stashes/commits these files. All
+# other teeth stay: main_staged (a staged file WOULD ride into the ticket's commit),
+# untracked_collision (a real collision), non-prose tracked dirt (the host allowed
+# prose, not code), and prose dirt overlapping the merge surface (never a silent
+# overwrite). Declared here, in ONE place, next to its only consumer (the classifier
+# below); matched as `p == prefix[:-1] or p.startswith(prefix)`.
+MAIN_DIRT_PROSE_ALLOWANCE = ("notes/", "docs/")
+
+
+def _is_prose_path(path: str) -> bool:
+    """True when `path` (repo-root-relative, git status form) sits under the declared
+    prose allowance. Pure function."""
+    for pref in MAIN_DIRT_PROSE_ALLOWANCE:
+        if path == pref[:-1] or path.startswith(pref):
+            return True
+    return False
+
+
 # Classification verdicts (reason codes on the failure-classification protocol's open
 # vocabulary; "" = clean, never a failure code):
 #   main_staged        — staged content in the main tree (would fold into the
 #                        ticket's own commit, breaking one-ticket-one-commit)
-#   main_dirty         — uncommitted tracked changes (overlapping or not: both block,
-#                        fail-closed — the main tree may carry ownerless edits at any
-#                        time, the KI-048 operating root cause; two-tone wording only)
+#   main_dirty         — uncommitted tracked changes (fail-closed by default — the
+#                        main tree may carry ownerless edits at any time, the KI-048
+#                        operating root cause; the ONLY exception is the declared
+#                        prose allowance below: unstaged, non-overlapping, surface
+#                        known)
 #   untracked_collision— an untracked file sits on a path this merge would write
 #   conflict           — the merge started and left a conflict scene (real conflict)
 #   merge_fault        — everything else (bad ref, commit fault, race outlet still
@@ -7354,10 +7379,14 @@ def _classify_main_dirty(repo: Path, branch: str) -> Dict[str, Any]:
               merge attempt itself re-judges).
 
     Verdict precedence: staged > tracked-dirty > untracked-collision — a staged hit
-    means the merge must refuse regardless of anything else; tracked dirt blocks even
-    when it does not overlap (git only refuses on overlap, but closing out over any
-    uncommitted main-tree change risks folding ownerless edits into the ticket's
-    commit — the conservative reading integration confirmed in plan review gen1).
+    means the merge must refuse regardless of anything else; tracked dirt blocks when
+    it is code, overlaps the merge surface, or the merge surface is UNKNOWN (a
+    merge-surface diff failure must never exempt prose dirt — fail-closed, review
+    binding condition 1); ONLY a non-overlapping, unstaged, tracked edit under the
+    declared prose allowance (MAIN_DIRT_PROSE_ALLOWANCE above, host order 261011) is
+    exempt: kind stays "" and the spared files ride back in the additive "exempted"
+    key so the exemption is observable, never silent. The 260908 auto-stash red line
+    holds either way: exempted files are never staged/stashed/committed by the engine.
     """
     out: Dict[str, Any] = {"kind": "", "files": [], "extra": 0, "note": ""}
 
@@ -7365,15 +7394,18 @@ def _classify_main_dirty(repo: Path, branch: str) -> Dict[str, Any]:
         names = sorted({n.strip() for n in names if isinstance(n, str) and n.strip()})
         return names[:MERGE_FILES_CAP], max(0, len(names) - MERGE_FILES_CAP)
 
-    # Paths this merge would write (three-dot: only what the lane brings; a diff
-    # fault is not a dirt verdict — degrade to clean+note, the merge attempt itself
-    # fails closed on its own).
+    # Paths this merge would write (three-dot: only what the lane brings). A diff
+    # fault is not itself a dirt verdict — but the merge surface is then UNKNOWN, so
+    # the prose exemption below must NOT fire (review binding condition 1: a prose
+    # file that actually overlaps could otherwise be silently carried into the
+    # ticket's commit; tracked dirt still refuses, fail-closed).
     p = _git(["diff", "--name-only", "main...%s" % branch], repo)
-    if p.returncode != 0:
-        out["note"] = "merge 面 diff 失败（不作脏判定）: %s" % ((p.stderr or "")[-150:])
-        merge_paths: set = set()
-    else:
+    surface_known = p.returncode == 0
+    if surface_known:
         merge_paths = {ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()}
+    else:
+        merge_paths: set = set()
+        out["note"] = "merge-surface diff failed (no dirt verdict on this face): %s" % ((p.stderr or "")[-150:])
 
     # 1) staged content (precise list via --cached --name-only)
     p = _git(["diff", "--cached", "--name-only"], repo)
@@ -7404,11 +7436,29 @@ def _classify_main_dirty(repo: Path, branch: str) -> Dict[str, Any]:
     else:
         out["note"] = "status 失败（不作工作区判定）: %s" % ((p.stderr or "")[-150:])
     if tracked:
+        # Prose-allowance split (host order 261011): blocking = non-prose dirt, OR
+        # prose dirt overlapping the (known) merge surface, OR any dirt while the
+        # merge surface is unknown (diff fault — fail-closed). Exempt = prose-only,
+        # non-overlapping, surface known.
+        other = [x for x in tracked if not _is_prose_path(x)]
         overlap = sorted(set(tracked) & merge_paths)
+        if other or overlap or not surface_known:
+            files, extra = _cap(tracked)
+            if not surface_known:
+                note = ("merge surface unknown (diff failed; prose is NOT exempted "
+                        "here, fail-closed)")
+            elif overlap:
+                note = "overlaps the close-out paths: %s" % ", ".join(overlap[:5])
+            else:
+                note = ("no overlap (non-prose edit, still blocks: the main tree "
+                        "may carry ownerless edits at any time)")
+            out.update(kind="main_dirty", files=files, extra=extra, note=note)
+            return out
         files, extra = _cap(tracked)
-        out.update(kind="main_dirty", files=files, extra=extra,
-                   note=("与收口路径重叠：%s" % "、".join(overlap[:5])) if overlap
-                         else "不重叠（仍保守拦：main 侧可能有未提交的无主编辑）")
+        out["exempted"] = files
+        out["extra"] = extra
+        out["note"] = ("prose dirt exempted (host order 261011, left untouched): %s"
+                       % ", ".join(files))
         return out
     colliding = sorted(set(untracked) & merge_paths)
     if colliding:
@@ -7488,8 +7538,10 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
     #      the "main tree untouched" guarantee are structurally preserved — no
     #      stash/checkout/commit ever happens on this path (the 260908 auto-stash
     #      incident red line). Covers: staged content (the old 0.5 pre-check,
-    #      subsumed), uncommitted tracked changes (overlapping or not —
-    #      fail-closed), and untracked files colliding with the merge surface.
+    #      subsumed), uncommitted tracked changes (fail-closed by default; the only
+    #      exemption is the declared prose allowance — unstaged, non-overlapping,
+    #      surface known — recorded, never acted upon), and untracked files colliding
+    #      with the merge surface.
     verdict = _classify_main_dirty(repo, branch)
     if verdict.get("kind"):
         return MergeResult(ok=False, action="dirty", reason=str(verdict["kind"]),
@@ -7497,6 +7549,13 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                            error="合并收口被 main 工作区未提交改动挡住（git 本地改动保护，"
                                  "非冲突；主树现场未动）：%s"
                                  % _dirty_block_note(verdict))
+    # Prose-allowance observability (t261011-16): an exemption rides onto the success
+    # receipt so it is never silent — and the engine still never touches the file
+    # (no stash/checkout/commit; the 260908 red line).
+    exempted_note = ""
+    if verdict.get("exempted"):
+        exempted_note = ("prose dirt exempted on main (host order 261011, bytes "
+                         "untouched): %s" % ", ".join(verdict["exempted"]))
 
     # 0.6) gitlink 红灯（t260916-20）：泳道分支差集含 160000（嵌套仓）=引擎不支持其
     #      合并——squash 只搬树内条目，gitlink 内容无处可搬（静默丢=nusuyou t260916-08
@@ -7583,6 +7642,8 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
     # 2) Close out: nothing collectable in the index (a retry, or the content is
     #    already equivalent) → produce no empty commit, back-fill with the HEAD sha
     warns: List[str] = []
+    if exempted_note:
+        warns.append(exempted_note)
     dq = _git(["diff", "--cached", "--quiet"], repo)
     if dq.returncode == 0:
         head = _git(["rev-parse", "--short", "HEAD"], repo)
@@ -11681,5 +11742,13 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # The period change surface (t261006-13 B1/B2/B3): one computation per period,
     # a missing registration only surfaces at runtime (same discipline as above).
     run_inspection_surface,
+    # t261011-17: the develop-buffer landing path — lane_head_sha anchors the
+    # green-run face (meta.last_green_run), land_to_line lands the judged
+    # revision on a line, certification_wait polls the covering certification.
+    # All three were decorated and executed (dev_lane.py) but never registered:
+    # a missing registration only surfaces at runtime, and here it silently
+    # refused EVERY develop-buffer landing at the precondition and swallowed
+    # the face miss into one log line (try/except at dev_lane.py).
+    lane_head_sha, land_to_line, certification_wait,
 ]
 

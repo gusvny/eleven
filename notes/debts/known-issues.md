@@ -5178,6 +5178,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 
 ## KI-01M4KJ022G8R0RRAZ03C7T9TZ4 **develop buffer 的落地前置（`meta.last_green_run`）在实践中**不可达**：它要求一整轮**零失败**的全量轮，而盘上 66 轮全量轮**没有一轮是零失败**（4–8 红是常态）⇒ 第一张 opt-in 票即便拿到 runner 与认证也永远落不了地**(261011 02:37 `t261009-80` 实测;integration 岗登记)
 
+> **⚠️ 更正（261011 11:4x，实测反证，归因改两层）**：本条原把"前置不可达"归给"盘上 66 轮没有一轮零失败"。**11:38:56 出现了零失败轮**（`t261011-16`：`ran 582 / pass 578 / fail 0 / env_fail 4`）——`green_run_face` 的四条判据全满足，**面仍然没落**：同一分钟票面 log 是 `green-run face not recorded (lane_head_sha failed): ActivityError: Activity task failed`。⇒ **第一因是 `lane_head_sha` 这条活动从未注册进 worker 活动表（写面根本执行不到）**，见 `KI-01M4MGYS34G938XD63W97A09EF`；**本条的"慢性红"是第二因**（注册修好后，慢性红仍会让多数轮不绿，下面的选项 A/B 仍然要在）。**顺序不能倒**：不修注册，修多少条红都不会出现第一张绿轮面。读书时的正确姿势：**先看 `log` 里有没有 `green-run face recorded` 一行**，再看 `fail` 数。
+
 > **现象（原始读数）**：`t261009-80`（develop buffer 第一张 opt-in 票）02:26 走完 `merge_check` 进 `merge`，02:37:32 **具名阻塞**：
 > `develop-buffer landing refused: this ticket has no green-run face (meta.last_green_run carries no sha) — the landing consumes the revision the gate judged, and no judged revision is recorded; never falls back to the current tip. Re-verify with retry_qc (a green gate round re-anchors the face).`
 > 它的票面 `log` 里**没有** `green-run face recorded` 一行、只有这条拒绝；`meta.last_green_run` 为 `null`。
@@ -5256,3 +5258,79 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**"进程还在" ≠ "工人在服务"**。换手后必须**同时**核三样：**新 pid ≠ 旧 pid**、`ps lstart` **晚于换手时刻**、meta `state` **不是 `draining`**；只看工具回执或 `workers` 的 `started_at` 会被这条 KI 骗过去。
 >
 > **回归**：L1——drain 后 `stamp_for` 的 started_at 仍等于**进程启动时刻**（不是 meta 重写时刻）；L3——一次带 owned 子进程组的换手：面在排空窗口内显示 `draining` 且明说新工人未起，换手完成后上列三项全变。
+
+## KI-01M4MGYS34G938XD63W97A09EF **三条 `@activity.defn` 从未注册进 worker 的活动表**（`lane_head_sha` / `land_to_line` / `certification_wait`）：一挂「绿轮面」就永远落不了盘 ⇒ develop buffer 的落地在**前置**处具名拒绝；而前置后面还排着两条**同族死面**——这条路径**一次都没通过电** **(261011 11:40 `t261011-16` 的**零失败轮**实测 + 读码全族扫描;integration 岗登记)**
+
+> **现象（原始读数，两条独立佐证）**：
+> 1. **零失败轮照样落不了面**：`t261011-16` 的闸轮回执 `.lane/t261011-16/out/integration-report-261011-113856.json` = **`ran 582 / pass 578 / fail 0 / env_fail 4 / wall 846.6 s`**（`known_red_skipped 46`、`excluded_pools [engine, exclusive]`）——**这是一轮 `failed==0` 的真绿轮**，`shared.green_run_face` 的四条判据（`error==""`、`ran>0`、`failed==0`、`blockers` 空、非定点跑）**全部满足**；但同一分钟它的票面 `log` 里落的是：
+>    `green-run face not recorded (lane_head_sha failed): ActivityError: Activity task failed`（ts `1791690003` = **11:40:03**）⇒ `meta.last_green_run` **仍是 `null`**。`t261009-80` 更早的一次同形（ts `1791673614` = **07:06:54**）也在盘上。
+> 2. **同族前例（失败形态早就见过）**：`t261008-09` 因 `NotFoundError: Activity function run_inspection_surface for workflow t261008-09 is not registered on this worker, available activities: …` **整票 FAILED**（`server/admin.log`，ts `1791678158`）⇒ "活动没注册"这个故障形态**在盘上不是第一次**，只是那次是**炸票**，这次被 `try/except` **吞成一行 note**。
+>
+> **读码定位（不是猜）**：
+> - 注册面**只有两份清单**：`server/engine/worker.py:123` `acts = list(ALL_ACTIVITIES) + list(ALL_AGENT_ACTIVITIES) + list(CONCURRENCY_ACTIVITIES) + [make_stage_activity(s) …]`（`compose_worker_activities`，KI-121 的唯一性断言也在那里）；`ALL_AGENT_ACTIVITIES` 定义在 `server/engine/agent_activities.py:11633`。
+> - **实测成员**：`import agent_activities; 'lane_head_sha' in {a.__name__ for a in ALL_AGENT_ACTIVITIES}` = **False**（表里 44 个，只有 `resolve_main_head`）。
+> - **引入史**：`git log -S "async def lane_head_sha" -- server/engine/agent_activities.py` 只有一条 = `611ca1ae`（**t261008-24** 的 squash，10-08）；`git log -S "lane_head_sha,"`（表内元素形态）**零命中** ⇒ **从落地那天起就没注册过**，三天内每一次"绿轮落面"都在静默失败。
+> - **调用点**：`dev_lane.py:2114-2120` 走 `workflow.execute_activity("lane_head_sha", …)`，`except` 分支只 `_log` 一行（`dev_lane.py:2125`）——**fail-closed 但静默**：票不会红、不会 blocked，只有 `meta.last_green_run` 永远是空。
+>
+> **全族扫描（"实报即全族线索"口径，本岗 AST 扫描全部 `@activity.defn` × worker 合成表）**：`server/engine` 下共 **77** 个 `@activity.defn`，其中 **57 个在表内**；未在表内且**位于生产模块**的有 **4 个**：
+> | 活动 | 定义 | 是否被当活动调用 |
+> | --- | --- | --- |
+> | `lane_head_sha` | `agent_activities.py:5947` | **是**（`dev_lane.py:2114`，字符串名）⇒ **当前死面** |
+> | `land_to_line` | `agent_activities.py:6009` | **是**（`dev_lane.py:3650` `execute_activity(land_to_line, …)`）⇒ **修好上一条后立刻撞上的下一条** |
+> | `certification_wait` | `agent_activities.py:6127` | **是**（`dev_lane.py:3683`，落地后"等认证"的轮询）⇒ **第三条** |
+> | `inspection_period_identity` | `activities.py:1162` | 否（`activities.py:1187` 是**直接 Python 调用**）⇒ 无运行期影响，但同样挂着 `@activity.defn` 却在表外（**装饰器的语义与注册面脱钩**） |
+> 其余未注册者是**自检脚本里的桩**（`selfcheck_ki061_wake_reset.py` / `selfcheck_t260916_19_join_escape.py` 的 `stub*`、`selfcheck_graceful_stop_probe.py:guarded_probe`）——**预期不入表**，但"预期"必须**具名写下来**，否则守卫写不成。
+>
+> **危害（比"少一个注册"重得多）**：
+> 1. **它把 develop buffer 的落地路径整条废掉**，而且**死在前置处**：`dev_lane.py:3640-3649` 在拿到 `last_green_run.sha` 之前就具名拒绝 ⇒ **`land_to_line` 与 `certification_wait` 这两条同族死面被"挡在后面"，从来没机会显形**。修一条会露出下一条（**先死面遮后死面**），所以必须**一次修全族**。
+> 2. **它让 `KI-01M4KJ022G8R0RRAZ03C7T9TZ4` 的归因偏了一层**：那条把"落地前置不可达"归给"盘上 66 轮没有一轮零失败"；**实测反证**——今天 11:38 就有过一轮 `fail 0`，**仍然落不了面**。⇒ 前置的**第一因是注册缺失**（写面根本执行不了），"慢性红"只是**第二因**（即便注册修好，慢性红仍会让多数轮不绿）。两条都要修，但**顺序不能倒**：不修注册，修多少红都不会有一张面。
+> 3. **静默是设计选择，不是安慰**：面缺 ⇒ 落地 fail-closed 拒（方向对），但**票面/回执/面板上没有任何"这里有个面本该被写"的正面信号**——只有 `log` 里一行 note。凡"fail-closed + 静默"的组合，**必须有守卫在别处炸**，否则它就是一个可持续三天的隐性停摆（本条即三天）。
+>
+> **出路（实现归票，本岗只报不做；票已开）**：
+> ①**把三条同族活动一次补齐**进 `ALL_AGENT_ACTIVITIES`（`lane_head_sha, land_to_line, certification_wait`），并按既有注释纪律在表内写明"缺注册=运行时才炸"；
+> ②**补一条"注册面覆盖"守卫（这是本条的真正价值）**：断言 `server/engine` 下**每一个 `@activity.defn`** 都在 worker 合成表里，或落在一份**具名豁免清单**里（豁免须写理由，自检桩是唯一合法豁免类）；同一形状对 `@workflow.defn` 与 `ALL_WORKFLOWS` 也做一遍（本岗实测 `workflows.py:353` 的 `ALL_WORKFLOWS` 覆盖 `DevLaneWorkflow` 等，**该面目前是全的**，但不能靠"目前是全的"）。
+> ③**给 `lane_head_sha` 的静默失败加一条可观测面**：面没落下时，除 `log` 之外应在**票面结果**里留一条具名 note（否则值守只能靠翻 `log`）。
+>
+> **纪律**：**凡"新增活动/工作流"，注册面的判据不是"我加了装饰器"，而是"worker 合成表里有它"**；`@activity.defn` **只是元数据**，worker 服务的是**表**。凡"调用新活动"的票，验收必须含一条**合成表成员**断言（本族缺这条断言三天无人知）。
+>
+> **回归**：L1——①三条活动均在 `ALL_AGENT_ACTIVITIES` 内；②AST 扫描：每个 `@activity.defn` 要么在表内、要么在**具名豁免清单**内（新增一个未注册的活动 ⇒ 立刻红）；③`compose_worker_activities()` 的产出里含这三条名字（**判据取合成表、不取单一清单**，防"加进清单但合成表没接"）。L3——一张 develop buffer 票的落地链路**走通到 `land_to_line` 与 `certification_wait`**（打桩亦可：断言三次活动调用**都真的到达 worker**、不再出现 `ActivityError`）。
+
+## KI-01M4MJ2J7Q0T9S0V6M3Y8W1B4C **「散文面豁免」是按**前缀**判的，于是 `docs/` 与 `notes/` 下的**代码/机器读的资产**也一并被豁免**：`docs/scripts/build_index.py` 未提交也不再挡落地，而票面规格写的是"teeth … and code" **(261011 12:0x `t261011-16` 落地后本岗用临时仓实测（不是读码推测）;integration 岗登记，处置待宿主定窄化口径)**
+
+> **实测（临时 git 仓 + 直接调落地分类器，四例，正对照在内）**：
+> | 场景（main 工作树） | 判定 |
+> | --- | --- |
+> | 非重叠、未暂存的**散文**改动（`notes/other.md`） | `kind: ""` ＋ `exempted: ["notes/other.md"]` ⇒ **豁免（正对照：交付物按预期工作）** |
+> | 非重叠、未暂存的**代码**改动（`docs/scripts/build_index.py`） | `kind: ""` ＋ `exempted: [该文件]` ⇒ **也被豁免**（本条要说的） |
+> | 散文改动**与收口面重叠** | `kind: "main_dirty"`、具名 overlap ⇒ 牙还在 |
+> | 已暂存改动（任意前缀） | `kind: "main_staged"` ⇒ 牙还在 |
+> | 未跟踪文件、不在收口面上 | `kind: ""`（无碰撞）⇒ 语义正确 |
+>
+> **读码定位（为什么是"前缀"而不是"散文性"）**：`server/engine/agent_activities.py` 的 `MAIN_DIRT_PROSE_ALLOWANCE = ("notes/", "docs/")` ＋ `_is_prose_path()` 只做 `p == prefix[:-1] or p.startswith(prefix)`（即只按**路径前缀**判），随后"非散文/重叠/面未知"三条牙照旧。
+>
+> **被豁免的非散文面（`git ls-files` 清点，共 4 个代码文件 + 一批机器读数据）**：`docs/scripts/build_index.py`（真被用的工具：doc-mech 那条 finding 就让人跑 `python3 docs/scripts/build_index.py`）、`notes/discussions/261010-demo-ppt-render.mjs`、`notes/discussions/260927-cancelled-gap5/project-template-lane-map.mjs` 与同目录的 `test_t260927_template_directory_face.py`；另有 `docs/index.json`、`docs/inspection-sample.yaml`、`docs/model-routes-sample.yaml` 与 20+ 个 `notes/queued-*-ticket.json`。
+>
+> **危害（有边界，但方向不对）**：①**伤不到"一票一提交"**——未暂存文件**永远不会**被引擎 stage/stash/commit（`_squash_merge` 的成功回执只把它记进 `exempted`，不碰字节）⇒ 最坏结果是"**闸不再看它**"，不是"它混进了提交"；②真正的损失是**判据的语义**：票面规格明确写"keep the teeth where they belong: staged content, real collisions, and code"，而实现把"code"换成了"路径前缀"——`docs/scripts/*.py` 是**跑得起来的代码**，它未提交时落地照样放行；③它与宿主令的原话**是相容的**（宿主：「main 只改了 notes / docs 这种其实没关系的」），所以这不是实现跑偏，而是**宿主的口语边界与票面规格的边界不一致**——口径归宿主。
+>
+> **出路（口径归宿主，实现归票）**：①**窄化判据**（推荐）——豁免按"是否是散文/文档形态"判，而不是按前缀：给 `MAIN_DIRT_PROSE_ALLOWANCE` 加一条**具名排除表**（`docs/scripts/`、`notes/**/*.py|*.mjs|*.js|*.ts|*.json|*.yaml`）或直接按扩展名白名单（`.md/.html/.txt/.rst/.pdf`）；②或**承认现状并把规格改过来**（写明"notes/docs 前缀下的一切都豁免"，含代码），免得下一个人拿票面规格去对账；③无论选哪条，**都要把"被豁免的文件清单"打进回执**（今天已有 `exempted` 键，方向对）。
+>
+> **纪律**：**凡"按前缀/路径豁免"的判据，必须对**该前缀下实际存在的文件**做一次全量清点**——`notes/` 与 `docs/` 不是纯散文目录（四个代码文件就在里面）。豁免写成前缀的那一刻，"散文"这个词就已经不是判据了。
+>
+> **回归**：L1——`docs/scripts/build_index.py` 未暂存改动 ⇒ **仍 `main_dirty` 拒**（窄化后），而 `notes/*.md` 未暂存且不重叠 ⇒ 豁免；L3——一次真实落地：被豁免的文件**不在提交里**、落地后**逐字节不变**（本条已用临时仓在分类器层面验证，L3 待下一次真实落地复验）。
+
+## KI-01M4MNZ3VK46MGH2XWPVE2NVZC **闸的判据取自"跑它的那个 worker 的代码版本"**：main 上改了闸代码、而**票自己的泳道 worker** 是改前起的 ⇒ 闸照样按旧代码拒，看上去像"修了没用"（本夜实证：`-17` 的合并前脏检查）**(261011 13:03:57 `t261011-17` merge_check 实测 + 纯函数直读反证;integration 岗登记)**
+
+> **现象（原始读数）**：`t261011-17`（写集并集修好、轮次 `584/580/fail 0` 干净）12:56:29 进 `merge_check`，**13:03:57 被"合并前脏检查"红住**，`blocked_detail.evidence` 点名三个文件并写着：
+> `main 工作区有未提交改动（git 本地改动保护，非冲突）——挡事文件：docs/ops/engine-worker-and-lane-operations.md、notes/debts/known-issues.md、notes/discussions/261011-develop-buffer-faces-faithful-sample.html｜**不重叠（仍保守拦：main 侧可能有未提交的无主编辑）**｜…`
+> ——这后半句是 **`t261011-16` 落地前的旧文案**。修好之后的行为应该是把这三个文件**豁免**（`exempted` 键）并不再拒。
+>
+> **真因（三读定位，缺一不可）**：
+> 1. **worker 启动时刻早于闸代码改动**：本票泳道 worker **pid 25123，`started_at` = 11:44:43**；而 `server/engine/agent_activities.py` 的 mtime = **11:53:51**（`-16` 落地那一刻）。`engine_ops workers` 对这个 worker 逐字给出 **`stale: ["agent_activities"]`** ⇒ 它跑的是旧代码。
+> 2. **文案指纹**：把闸的 `evidence` 与新旧两份文案对读——旧：`不重叠（仍保守拦：…）`；新：`prose dirt exempted (host order 261011, left untouched): …` 或 `overlaps the close-out paths: …` / `merge surface unknown …`。**闸自己的措辞就是它的代码版本指纹**（这一条是本条最便宜的判据，不需要任何仪器）。
+> 3. **纯函数直读反证（本岗在原树上跑当前代码）**：`_classify_main_dirty(<repo>, 'lane/t261011-17')` ⇒ **`kind: ""`，`exempted: [上述三个文件]`，note 为豁免文案** ⇒ **交付物是好的**，红来自**旧代码在跑**。
+>
+> **危害**：①**方向性误判**——最容易得出的结论是"`-16` 的修复没生效/假的"，于是去看它的实现、去改它的场景、甚至 rework 一个完全无辜的泳道；真实原因与那条票**毫无关系**。②**反方向同样成立**：一次"闸在旧代码下绿"的轮次，会被当成"新代码也绿"的证据。③它与 `KI-01M4KH2QR5BRMQVZWA1C40Y8PF`（中央 worker 早于接线/盖章）是**同族**：都是"**代码的新旧**由 **进程的起跑线**决定，而面上没有一处把两者对齐"；本条把它的**判据与处置**写全。
+>
+> **纪律（三读定位，先做再说话）**：凡"**修了没用**"的闸红，**先读三样**——①**跑这闸的 worker 的启动时刻**（`engine_ops workers` → 该票泳道行的 `started_at`/`pid`）；②**它的 `stale` 名单**里有没有本闸所在模块；③**闸自己的措辞**对不对得上新代码。三样都指向旧代码 ⇒ 结论是"**换手**"，不是"**返工**"。**并且**：落地一个"闸代码"改动之后，**在飞票的泳道 worker 一律视为旧代码**——要它按新判据判，就得换手（按 pidfile TERM、等控制台 supervisor 拉起、验新 pid ＋ live poller=1）；否则那一票的每一轮闸判都是旧代码的判。
+>
+> **回归**：L2——`engine_ops workers` 对"启动早于某模块 mtime"的 worker **必须**给出该模块在 `stale` 里（已有 `test_engine_ops.py` 覆盖同一形状，此处只作锚点）；L3——**一次"闸代码落地 → 换手 → 同一条脏面由红转绿"的连贯回执**（本条的正面形态：`retry_qc` 之后闸自己打出 `prose dirt exempted …` 文案），且**换手前的那次红必须能在报告里被指认为旧代码的判**。
