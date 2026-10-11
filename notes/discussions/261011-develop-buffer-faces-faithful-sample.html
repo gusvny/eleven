@@ -18,10 +18,9 @@
   .col{width:360px}
   .board{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}
 
-  /* 行卡（左栏） */
+  /* 行卡（左栏）——**零底色**：左栏项目行的 waiting/blocked 行不上漆（现状，由
+     t260915-19 的 waiting-yellow-control 断言守着）；收口行只整行淡一档，不铺色。 */
   .tk{display:flex;flex-direction:column;gap:4px;padding:6px 10px;margin:0 0 6px;border:1px solid var(--border);border-radius:8px;background:#fff}
-  .tk[data-state=waiting]{background:var(--warn-bg)}
-  .tk[data-state=blocked],.tk[data-state=failed]{background:var(--danger-bg)}
   .tk[data-state=done]{opacity:.72}
   .tk[data-active=true]{box-shadow:inset 0 0 0 1px var(--accent)}
   .r{display:flex;align-items:center;gap:6px;min-width:0}
@@ -181,7 +180,7 @@
     </table>
   </div>
 
-  <h2>5 · 行底色留不留（黄色/红色整行底 vs 只有点阵变色）</h2>
+  <h2>5 · 行底色：已按你的令去掉（左栏本来就是"无底色"）</h2>
   <div class="col board">
     <div class="tk" data-state="waiting">
       <div class="r"><span class="id">t…</span><span class="rank r-b">2</span><span class="ln" data-s="waiting">LineOn</span><span class="title">A · 保留行底色（今天）——余光就能看出"这几行要留意"</span>
@@ -208,7 +207,7 @@
   <div class="board" style="padding:12px;font-size:13px">
     <p style="margin:2px 0">① 位次用 A / B / C 哪一种？</p>
     <p style="margin:2px 0">② 点阵变色用 <b>M1</b>（已过＋当前格上色、未到留灰）／<b>M2</b>（十格全变色、进度靠 step name）／<b>M3</b>（整阵同色相，未到用淡档 —— 我按你这句话画的，推荐）？</p>
-    <p style="margin:2px 0">③ 行底色（黄/红整行底）留不留？去掉的话要不要给"卡住/失败"一个更便宜的整行记号（例如标题变色）？</p>
+    <p style="margin:2px 0">③ 中列板面的行底色要不要**也**去掉？（左栏本来就是无底色；板面还有 `t260905-08` 对比度看守与 `t260915-19` 巡检行"上漆"断言两处牵动）</p>
     <p style="margin:2px 0">④ 彩色 <code>LineOn</code> 的「认证已覆盖」与「已晋级」要不要一眼可分？</p>
     <p style="margin:2px 0">⑤ 三行（现在这样）还是压成两行？</p>
     <p style="margin:2px 0">⑥ 线级的「线被冻结」提示放左栏顶栏还是票行上？</p>
