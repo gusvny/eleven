@@ -55,6 +55,12 @@
   .d[data-v=cur][data-st=blocked]{background:var(--danger)}
   .d[data-v=cur][data-st=failed]{background:var(--danger-solid)}
   .d[data-v=cur][data-st=done]{background:var(--passed)}
+  /* M2：十格全部上状态色 */
+  .d[data-v=all][data-st=active]{background:var(--accent)}
+  .d[data-v=all][data-st=waiting]{background:var(--warn)}
+  .d[data-v=all][data-st=blocked]{background:var(--danger)}
+  .d[data-v=all][data-st=failed]{background:var(--danger-solid)}
+  .d[data-v=all][data-st=done]{background:var(--passed)}
 
   /* 位次三种候选 */
   .r-a{color:var(--ink);font-size:13px;font-weight:700}
@@ -118,14 +124,20 @@
   </div>
   <p>三种都比现在那个 10px 灰数字显眼。位次只在"排队中"的行上出现；正在跑/被暂挂的行按现行语义不显示位次。</p>
 
-  <h2>3 · 五个票状态（状态由点阵当前格的颜色表示）</h2>
+  <h2>3 · 点阵怎么变色：两种读法 × 五个状态</h2>
+  <p><b>M1</b>＝已过格＋当前格一起上状态色（未到的仍是灰）——保留了"走到第几格"；<b>M2</b>＝十格全部上状态色（纯状态带，进度由 step name 说）。</p>
   <div class="col board">
-    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="active"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">active — 在跑</span></div></div>
-    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">waiting — 等认证/等人</span></div></div>
-    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">blocked — 卡住</span></div></div>
-    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="failed"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">failed — 已失败</span></div></div>
-    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span></span><span class="title">done — 已收口</span></div></div>
+    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="active"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">M1 · active — 前两格＋当前格蓝</span></div></div>
+    <div class="tk" data-state="active"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span><span class="d" data-v="all" data-st="active"></span></span><span class="title">M2 · active — 十格全蓝</span></div></div>
+    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="waiting"></span><span class="d"></span></span><span class="title">M1 · waiting — 走到第 9 格，整段暖色</span></div></div>
+    <div class="tk" data-state="waiting"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span><span class="d" data-v="all" data-st="waiting"></span></span><span class="title">M2 · waiting — 十格全暖色</span></div></div>
+    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">M1 · blocked — 整段红到当前格</span></div></div>
+    <div class="tk" data-state="blocked"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span><span class="d" data-v="all" data-st="blocked"></span></span><span class="title">M2 · blocked — 十格全红</span></div></div>
+    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="failed"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span><span class="title">M1 · failed — 整段实红（与 blocked 同族）</span></div></div>
+    <div class="tk" data-state="failed"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span><span class="d" data-v="all" data-st="failed"></span></span><span class="title">M2 · failed — 十格全实红</span></div></div>
+    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span></span><span class="title">M1/M2 · done — 全绿（两法同形）</span></div></div>
   </div>
+  <p>两法都"整个点阵一个颜色"。差别只有一处：<b>M1 还能看出走到第几格</b>（灰格＝还没到），<b>M2 看不出来</b>（要靠 step name）。M2 的色块更长更醒目，代价是把"进度"这一维从点阵上拿掉了。</p>
 
   <h2>4 · LineOn 的颜色</h2>
   <div class="board" style="padding:12px">
@@ -168,15 +180,16 @@
         <span class="dots" style="margin-left:auto"><span class="d" data-v="passed"></span><span class="d" data-v="passed"></span><span class="d" data-v="cur" data-st="blocked"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span><span class="d"></span></span></div>
     </div>
   </div>
-  <p>两版的**信息量一样**（状态都在点阵那一格上）；差别是**扫视力**：A 整行有底色，余光扫一列时"哪几行要留意"直接跳出来；B 要**定睛找到那一格**才看得到。B 更干净，也顺带没有"底色 × 深色主题"的对比度风险。</p>
+  <p>两版的<b>信息量一样</b>（状态都在点阵那一格上）；差别是**扫视力**：A 整行有底色，余光扫一列时"哪几行要留意"直接跳出来；B 要**定睛找到那一格**才看得到。B 更干净，也顺带没有"底色 × 深色主题"的对比度风险。</p>
 
   <h2>6 · 等你定的</h2>
   <div class="board" style="padding:12px;font-size:13px">
     <p style="margin:2px 0">① 位次用 A / B / C 哪一种？</p>
-    <p style="margin:2px 0">② 行底色（黄/红整行底）留不留？去掉的话要不要给"卡住/失败"一个更便宜的整行记号（例如标题变色）？</p>
-    <p style="margin:2px 0">③ 彩色 <code>LineOn</code> 的「认证已覆盖」与「已晋级」要不要一眼可分？</p>
-    <p style="margin:2px 0">④ 三行（现在这样）还是压成两行？</p>
-    <p style="margin:2px 0">⑤ 线级的「线被冻结」提示放左栏顶栏还是票行上？</p>
+    <p style="margin:2px 0">② 点阵变色用 <b>M1</b>（已过＋当前格，仍能看出走到第几格）还是 <b>M2</b>（十格全变色，进度靠 step name）？</p>
+    <p style="margin:2px 0">③ 行底色（黄/红整行底）留不留？去掉的话要不要给"卡住/失败"一个更便宜的整行记号（例如标题变色）？</p>
+    <p style="margin:2px 0">④ 彩色 <code>LineOn</code> 的「认证已覆盖」与「已晋级」要不要一眼可分？</p>
+    <p style="margin:2px 0">⑤ 三行（现在这样）还是压成两行？</p>
+    <p style="margin:2px 0">⑥ 线级的「线被冻结」提示放左栏顶栏还是票行上？</p>
   </div>
 </div>
 </body>
