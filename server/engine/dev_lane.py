@@ -2124,14 +2124,28 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         except Exception as e:  # noqa: BLE001 — face stays absent => merge gate red (fail-closed)
             self._log("green-run face not recorded (lane_head_sha failed): "
                       "%s: %s" % (type(e).__name__, e))
+            # t261011-17: the miss must be readable on the ticket face, not only
+            # in the worker log (a steward should not have to grep). Strictly
+            # additive observability: the precondition stays fail-closed.
+            self.meta["green_run_note"] = {
+                "face": "green_run", "recorded": False,
+                "reason": "lane_head_sha activity failed",
+                "error": "%s: %s" % (type(e).__name__, e),
+                "at": self._now_epoch()}
             return
         if not getattr(res, "ok", False) or not getattr(res, "sha", ""):
-            self._log("green-run face not recorded: %s"
-                      % (getattr(res, "error", "") or "unknown lane_head_sha failure"))
+            err = str(getattr(res, "error", "") or "unknown lane_head_sha failure")
+            self._log("green-run face not recorded: %s" % err)
+            self.meta["green_run_note"] = {
+                "face": "green_run", "recorded": False,
+                "reason": "lane_head_sha returned failure",
+                "error": err, "at": self._now_epoch()}
             return
         face["sha"] = str(res.sha)
         face["at"] = self._now_epoch()
         self.meta["last_green_run"] = face
+        # t261011-17: a recovered lane must not carry a stale failure note.
+        self.meta.pop("green_run_note", None)
         self._log("green-run face recorded (ran=%d%s, sha=%s)"
                   % (int(face.get("ran", 0)),
                      ", no_scenarios" if face.get("no_scenarios") else "",

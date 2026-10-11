@@ -1158,13 +1158,21 @@ async def count_archived_tickets(args: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "result": result["result"]}
 
 
-@activity.defn
 def inspection_period_identity(args: Dict[str, Any]) -> str:
     """期票归属项目身份的单一取值点（t260915-20 R2/R3，纯函数单测友好）：
     **只认** args["instance_project_key"]（实例级身份键）——watcher 计数源
     project_key 即使混进 args 也不得串用（身份≠计数源，两 key 分叉时票面/SA 必须归
     身份键；串键=静默错挂，正是本票要杀的族）。缺省空=旧 watcher payload（跨部署
-    过渡窗）——票面 project 空，双空形态在 workflow 侧被无主守卫拦成 blocked。"""
+    legacy transition window (pre-t260915-20 watcher payload); empty ticket
+    project with an empty instance key is that legacy shape and is caught by
+    the workflow-side unowned guard as blocked (restated in English with this
+    edit, t261011-17 copy gate).
+    t261011-17: the @activity.defn decorator is removed - this function is only
+    ever called in-process by trigger_inspection_period (this module) and is
+    never dispatched via execute_activity; decorating it made it a dead activity
+    outside the registration surface (the fourth member of the registration
+    guard's red-name family). With the decorator gone the registration surface
+    and the execution surface agree again."""
     return str((args or {}).get("instance_project_key") or "").strip()
 
 

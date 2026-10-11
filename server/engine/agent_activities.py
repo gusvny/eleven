@@ -11742,5 +11742,13 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # The period change surface (t261006-13 B1/B2/B3): one computation per period,
     # a missing registration only surfaces at runtime (same discipline as above).
     run_inspection_surface,
+    # t261011-17: the develop-buffer landing path — lane_head_sha anchors the
+    # green-run face (meta.last_green_run), land_to_line lands the judged
+    # revision on a line, certification_wait polls the covering certification.
+    # All three were decorated and executed (dev_lane.py) but never registered:
+    # a missing registration only surfaces at runtime, and here it silently
+    # refused EVERY develop-buffer landing at the precondition and swallowed
+    # the face miss into one log line (try/except at dev_lane.py).
+    lane_head_sha, land_to_line, certification_wait,
 ]
 
