@@ -90,7 +90,24 @@ practice:
         the canonical writer (integration/lib_registry.py write_registry), so no
         gate silently reformats a shared source of truth.
 
+  L25 wait-bound discipline (t261011-22): an ADDED line under integration/
+        that declares a large real-time bound (deadline=/timeout= with a
+        3+ digit literal, sleep( with a 2+ digit literal) is an error naming
+        file:line and WHICH pattern matched, unless the line or the line above
+        carries `SANCTIONED-WAIT: <reason>` — a test buys its evidence with an
+        INJECTABLE bound (the engine's wait_bound_ms precedent), never by
+        sleeping the production bound. Per-diff (L15/L21 construction, core in
+        integration/lib_wait_bound.py).
+
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
+       python3 integration/lint_tests.py --rules=L16,L17   # run a SUBSET of
+       rules (t261011-22 host refinement: a mechanism test runs the rule it
+       plants for, never the whole ~20-rule battery; unknown rule id = named
+       error, never a silent subset)
+       python3 integration/lint_tests.py --scope-files=server/engine/tests/x.py
+       # prune the scopable rules (L1/L16/L17/L18) to exactly the named files —
+       # the proof cut is DECLARED on the scoped-run banner, never silent;
+       # malformed scope (absolute path, .. traversal) is a named refusal
        python3 integration/lint_tests.py --write-tmpdir-baseline   # regenerate L8's
        grandfather list (existing debt; only new debt may turn L8 yellow)
 """
@@ -154,28 +171,36 @@ def ok(msg):
 
 
 # L1 syntax
-def lint_syntax():
+def lint_syntax(paths=None):
+    """L1 syntax. `paths` (repo-relative strings) scopes the walk to exactly
+    these files (t261011-22 --scope-files: a mechanism run proves less by
+    DECLARATION — the scoped-run banner names the proof cut — never by
+    silence)."""
     n_py = n_mjs = 0
-    for f in INTEG.rglob("*.py"):
+    if paths is not None:
+        # a post-reclaim scoped run legally names a path that is gone —
+        # judge only what exists (the absence is already warned in main())
+        py_files = [REPO / p for p in paths
+                    if str(p).endswith(".py") and (REPO / p).exists()]
+        mjs_files = [REPO / p for p in paths
+                     if str(p).endswith(".mjs") and (REPO / p).exists()]
+    else:
+        py_files = INTEG.rglob("*.py")
+        mjs_files = ([f for d in (WB_TESTS, WD_TESTS) if d.is_dir()
+                      for f in d.glob("*.mjs")]
+                     + list(INTEG.rglob("*.mjs")))
+    for f in py_files:
         try:
             py_compile.compile(str(f), cfile=str(Path(PYC) / (f.name + ".pyc")), doraise=True)
             n_py += 1
         except py_compile.PyCompileError as e:
             err("L1 语法 %s: %s" % (f.relative_to(REPO), str(e).splitlines()[-1][:120]))
-    for tests_dir in (WB_TESTS, WD_TESTS):
-        if tests_dir.is_dir():
-            for f in tests_dir.glob("*.mjs"):
-                p = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
-                if p.returncode != 0:
-                    err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
-                else:
-                    n_mjs += 1
     # Also syntax-check every integration/**/*.mjs (t260907-04: a mechanical
     # sweep appended a python-style `# naming-compat` line into an mjs file,
     # and the SyntaxError only blew up when the suite ran — this second-level
     # lint should have caught it; L1 originally checked only workbench/tests
     # mjs, which left the blind spot)
-    for f in INTEG.rglob("*.mjs"):
+    for f in mjs_files:
         p = subprocess.run(["node", "--check", str(f)], capture_output=True, text=True)
         if p.returncode != 0:
             err("L1 语法 %s: %s" % (f.relative_to(REPO), (p.stderr or "").splitlines()[-1][:120]))
@@ -1243,11 +1268,13 @@ def _load_anchor_manifest():
         return None
 
 
-def lint_anchor_manifest():
+def lint_anchor_manifest(paths=None):
     """L16（t261004-20）：anchor 清单覆盖面/词表/同步路径。覆盖两棵树：
     server/engine/tests/test_*.py 与 SCENARIOS 在册场景脚本；每个文件必须有词表内
     标签；production-snapshot 必须给 sync_path（值变时改哪个文件）；清单里的死条目
-    同样报错（防清单腐烂）。"""
+    同样报错（防清单腐烂）。`paths`（repo 相对串）= 作用域剪枝（t261011-22
+    --scope-files）：覆盖面只查点名文件、死条目/词表只判点名条目——剪掉的证明
+    由 scoped-run 横幅声明，不静默。"""
     m = _load_anchor_manifest()
     if m is None:
         return
@@ -1257,14 +1284,21 @@ def lint_anchor_manifest():
             return
     covered = set(m["engine_tests"]) | set(m["scenarios"])
     # coverage: engine tests
-    missing = [str(p.relative_to(REPO)) for p in sorted((REPO / "server/engine/tests").glob("test_*.py"))
+    if paths is not None:
+        engine_tests = [REPO / p for p in paths
+                        if p.startswith("server/engine/tests/")
+                        and str(p).endswith(".py") and (REPO / p).exists()]
+    else:
+        engine_tests = sorted((REPO / "server/engine/tests").glob("test_*.py"))
+    missing = [str(p.relative_to(REPO)) for p in sorted(engine_tests)
                if str(p.relative_to(REPO)) not in m["engine_tests"]]
     # coverage: registered scenario scripts (same extraction as L4)
     sys.path.insert(0, str(INTEG))
     import run_scenarios as rs  # noqa: E402
     scen_scripts = sorted({p for e in rs.SCENARIOS for p in str(e[2]).split()
                            if p.startswith("integration/") and (REPO / p).exists()})
-    missing += [p for p in scen_scripts if p not in m["scenarios"]]
+    if paths is None:
+        missing += [p for p in scen_scripts if p not in m["scenarios"]]
     if missing:
         err("L16 anchor 缺标签（新文件进两棵树必须申报 anchor）：%s" % missing[:6])
         # t261009-52: when the missing-declaration file is a recognised
@@ -1278,6 +1312,9 @@ def lint_anchor_manifest():
     stale = [k for k in m["engine_tests"] if not (REPO / k).exists()]
     stale += [k for k in m["scenarios"]
               if not (REPO / k).exists() or (k not in scen_scripts)]
+    if paths is not None:
+        scoped = set(paths)
+        stale = [k for k in stale if k in scoped]
     if stale:
         err("L16 anchor 死条目（文件已删/场景已注销，清单须同步）：%s" % stale[:6])
     # t261004-25: commit protection — every present engine_tests entry must be
@@ -1306,8 +1343,11 @@ def lint_anchor_manifest():
                 "fail-closed): %s" % (tracked.stderr or "").strip()[-200:])
         else:
             known = set(tracked.stdout.split())
+            guarded_keys = (set(paths) if paths is not None
+                            else set(m["engine_tests"]))
             unguarded = sorted(k for k in m["engine_tests"]
-                               if (REPO / k).exists() and k not in known)
+                               if k in guarded_keys
+                               and (REPO / k).exists() and k not in known)
             if unguarded:
                 err("L16 anchor entries without commit protection (present but "
                     "untracked — a checkout/clean silently destroys required "
@@ -1317,8 +1357,12 @@ def lint_anchor_manifest():
                    "commit-tracked")
     # vocabulary + sync path
     bad_vocab, no_sync = [], []
+    judged = (set(paths) if paths is not None
+              else set(m["engine_tests"]) | set(m["scenarios"]))
     for tree in ("engine_tests", "scenarios"):
         for k, v in m[tree].items():
+            if k not in judged:
+                continue
             a = (v or {}).get("anchor")
             if a not in ANCHOR_VOCAB:
                 bad_vocab.append("%s=%r" % (k, a))
@@ -1367,13 +1411,17 @@ L17_EXEMPT = {
 }
 
 
-def lint_home_paths():
+def lint_home_paths(paths=None):
     """L17（t261004-20）：引擎测试/场景脚本内禁绝对家目录路径——测试必须检查它所跑的
     那棵树（仓根解析），不得绑写测试时的机器。豁免表逐条带理由；豁免条目失配即报
-    （豁免不许静默腐烂）。"""
-    targets = sorted((REPO / "server/engine/tests").glob("test_*.py"))
-    targets += [p for pat in ("sc_*.py", "sc_*.mjs", "*/sc_*.py", "*/sc_*.mjs")
-                for p in INTEG.glob(pat)]
+    （豁免不许静默腐烂）。`paths` = 作用域剪枝（t261011-22 --scope-files）：只判
+    点名文件；豁免失配面只在全量跑执法（剪枝跑不再全表，避免无关红）。"""
+    if paths is not None:
+        targets = [REPO / p for p in paths if (REPO / p).exists()]
+    else:
+        targets = sorted((REPO / "server/engine/tests").glob("test_*.py"))
+        targets += [p for pat in ("sc_*.py", "sc_*.mjs", "*/sc_*.py", "*/sc_*.mjs")
+                    for p in INTEG.glob(pat)]
     fired, exempt_seen = [], set()
     for p in targets:
         rel = str(p.relative_to(REPO))
@@ -1387,7 +1435,9 @@ def lint_home_paths():
                 else:
                     fired.append("%s:%d %s" % (rel, no, hit))
     stale_exempt = [(rel, a) for rel, pairs in L17_EXEMPT.items()
-                    for a, _why in pairs if (rel, a) not in exempt_seen]
+                    for a, _why in pairs
+                    if (paths is None or rel in set(paths))
+                    and (rel, a) not in exempt_seen]
     if stale_exempt:
         err("L17 豁免条目失配（锚行已不在，豁免须同步删除）：%s"
             % ["%s :: %s" % s for s in stale_exempt[:4]])
@@ -1406,21 +1456,29 @@ def lint_home_paths():
            % (len(targets), len(exempt_seen)))
 
 
-def lint_snapshot_discipline():
+def lint_snapshot_discipline(paths=None):
     """L18（t261004-20）：production-snapshot 申报纪律——引擎测试里的
     @pytest.mark.production_snapshot 标记与清单里的 production-snapshot 标签必须
     成对出现：有标记无标签=未申报的快照断言（拒收）；有标签无标记=申报了却不肯
-    戴标记（同样拒收）。场景脚本不适用（非 pytest，走 L16 覆盖）。"""
+    戴标记（同样拒收）。场景脚本不适用（非 pytest，走 L16 覆盖）。`paths` =
+    作用域剪枝（t261011-22 --scope-files）：标记扫描与清单标签都只看点名文件。"""
     m = _load_anchor_manifest()
     if m is None:
         return
     marked = set()
-    for p in sorted((REPO / "server/engine/tests").glob("test_*.py")):
+    if paths is not None:
+        engine_tests = [REPO / p for p in paths
+                        if p.startswith("server/engine/tests/")
+                        and str(p).endswith(".py") and (REPO / p).exists()]
+    else:
+        engine_tests = sorted((REPO / "server/engine/tests").glob("test_*.py"))
+    for p in engine_tests:
         if re.search(r"^@pytest\.mark\.production_snapshot\b",
                      p.read_text(encoding="utf-8", errors="replace"), re.M):
             marked.add(str(p.relative_to(REPO)))
     labelled = {k for k, v in m.get("engine_tests", {}).items()
-                if (v or {}).get("anchor") == "production-snapshot"}
+                if (v or {}).get("anchor") == "production-snapshot"
+                and (paths is None or k in set(paths))}
     undeclared = sorted(marked - labelled)
     unmarked = sorted(labelled - marked)
     if undeclared:
@@ -1484,6 +1542,142 @@ def git_diff_callable(*args):
     """Real git callable for L21 (cwd = repo root); fake-able in the battery."""
     r = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+# ---- L25 wait-bound discipline (t261011-22) ----------------------------------
+
+def lint_wait_bounds(base=None):
+    """L25 (t261011-22): an ADDED line under integration/ that declares a large
+    real-time bound is a defect unless the line (or the one above it) carries
+    `SANCTIONED-WAIT: <reason>`. A test buys its evidence with an injectable
+    seconds-scale bound that it ASSERTS fired (the engine's wait_bound_ms
+    precedent), never by sleeping the production bound. Per-diff, L15/L21
+    construction; core truth table in integration/lib_wait_bound.py (unit
+    battery integration/tests/test_t261011_22_wait_bound_lint.py)."""
+    from lib_lint_diff import resolve_base
+    from lib_wait_bound import SCOPE_PREFIX, added_wait_defects
+    base_ref, how = resolve_base(base, git_diff_callable, env_var="WAIT_BOUND_BASE")
+    if base_ref is None:
+        warn("L25 wait-bound: skipped, no diff base resolvable — %s "
+             "(declare $WAIT_BOUND_BASE to pin one)" % how)
+        return
+    rc, diff_text = git_diff_callable("diff", "--unified=0", base_ref)
+    if rc != 0:
+        warn("L25 wait-bound: skipped, git diff failed — %s" % diff_text.strip()[:200])
+        return
+    sys.path.insert(0, str(INTEG))
+    import run_scenarios as rs  # noqa: E402  (same import face as L4/L21)
+    #: declared cost class per scenario script path (L21 vocabulary): a
+    #: `cost: seconds` entry that starts waiting real minutes is named as the
+    #: contradiction it is — being slow is a defect, not patience (spec §6).
+    cost_by_script = {}
+    for e in rs.SCENARIOS:
+        m = re.search(r"\bcost:\s*([A-Za-z0-9_-]+)", e[1] or "")
+        for p in str(e[2]).split():
+            if p.startswith("integration/"):
+                cost_by_script[p] = m.group(1) if m else None
+    n = 0
+    for path, lineno, name, text in added_wait_defects(diff_text):
+        n += 1
+        msg = ("L25 wait-bound: %s:%d declares a real-time wait (%s pattern: "
+               "%s) — make the bound injectable (seconds-scale, assert it "
+               "fired and NAMED the failing check) or add `SANCTIONED-WAIT: "
+               "<reason>` on this or the previous line"
+               % (path, lineno, name, text.strip()[:120]))
+        if cost_by_script.get(path) == "seconds":
+            msg += ("; this script's registry entry declares cost: seconds — "
+                    "the wait contradicts its own declared ceiling")
+        err(msg)
+    if n == 0:
+        ok("L25 wait-bound: no unsanctioned real-time wait added under %s "
+           "(base %s)" % (SCOPE_PREFIX, base_ref[:12]))
+
+
+#: The subset selector's dispatch table (t261011-22 host refinement: a
+#: mechanism test runs the rule(s) it plants for, never the whole battery).
+#: Every entry takes (base, scope): scope = --scope-files paths or None
+#: (full walk). Adding a rule here is one entry; unknown ids are a NAMED
+#: error (never a silent subset).
+RULES = {
+    "L1": lambda base, scope=None: lint_syntax(scope),
+    "L16": lambda base, scope=None: lint_anchor_manifest(scope),
+    "L17": lambda base, scope=None: lint_home_paths(scope),
+    "L18": lambda base, scope=None: lint_snapshot_discipline(scope),
+    "L25": lint_wait_bounds,
+}
+
+#: Rules whose walk can be pruned to --scope-files paths (t261011-22). L25 is
+#: per-diff (it judges the committed diff, not the walked tree), so it cannot
+#: run under a scope — that combination is a named error, never a silent cut.
+SCOPED_RULES = ("L1", "L16", "L17", "L18")
+
+
+def parse_rules_arg(argv):
+    """Parse `--rules=A,B` from argv (t261011-22). Returns (ids or None, bad).
+
+    None = no selector declared (full battery). Malformed input — empty item,
+    empty value, repeated flag — is surfaced as `bad` so main() can fail with a
+    NAME instead of silently running everything or nothing. Pure; battery
+    owns the truth table."""
+    ids, bad = [], []
+    seen = False
+    for a in argv:
+        if not a.startswith("--rules="):
+            continue
+        if seen:
+            bad.append("repeated --rules flag")
+        seen = True
+        value = a[len("--rules="):]
+        if not value.strip():
+            bad.append("--rules= with an empty value")
+            continue
+        for part in value.split(","):
+            part = part.strip()
+            if not part:
+                bad.append("--rules= with an empty item")
+            elif part not in RULES:
+                bad.append("unknown rule id %r (declared: %s)"
+                           % (part, ",".join(sorted(RULES))))
+            elif part not in ids:
+                ids.append(part)
+    return (sorted(ids) if ids and not bad else None), bad
+
+
+def parse_scope_arg(argv):
+    """Parse `--scope-files=a,b` from argv (t261011-22). Returns (paths or
+    None, bad). None = no scope declared (full-tree walks).
+
+    Malformed input — empty item/value, repeated flag, absolute path, `..`
+    traversal — is surfaced as `bad` (named, fail-closed: a scoped run never
+    silently proves nothing). A scope path that does not exist in the tree is
+    LEGAL here (a brake plants and reclaims inside one window, so a post-reclaim
+    scoped run over the same path must stay green); each missing path is
+    reported by main() as a visible warn, not an error. Pure; battery owns the
+    truth table."""
+    paths, bad = [], []
+    seen = False
+    for a in argv:
+        if not a.startswith("--scope-files="):
+            continue
+        if seen:
+            bad.append("repeated --scope-files flag")
+        seen = True
+        value = a[len("--scope-files="):]
+        if not value.strip():
+            bad.append("--scope-files= with an empty value")
+            continue
+        for part in value.split(","):
+            part = part.strip()
+            if not part:
+                bad.append("--scope-files= with an empty item")
+            elif part.startswith("/") or ".." in Path(part).parts:
+                bad.append("scope path %r must be repo-relative without .. "
+                           "traversal (the scope names the files a scoped run "
+                           "judges)" % part)
+            elif part not in paths:
+                paths.append(part)
+    return (paths if paths and not bad else None), bad
+
 
 # ---- L19 runtime-state location (host order 261004) -------------------------
 
@@ -1688,43 +1882,84 @@ def main():
         note_unstable_input(
             "shared diff base could not be resolved (%s: %s) — per-diff rules "
             "fall back to their own chains" % (type(e).__name__, e))
-    lint_syntax()
-    lint_collect()
-    lint_mjs_imports()
-    lint_registry()
-    lint_three_state()
-    lint_terminology()
-    lint_tmpdir_hygiene()
-    lint_ticket_start_identity()
-    lint_console_no_open()
-    lint_integration_gate_settlement()
-    lint_narrowing_env_inheritance()
-    lint_tool_stdout_channel()
-    lint_evaluate_probe_join()
-    lint_vocab_cross_language_locks()
-    # L15 copy-language gate (t261004-24): new product copy must stay English
-    # (writing-standard §1/§2). Implementation lives in integration/lint_copy_language.py
-    # (standalone entry there); wired here in-process like L7 so every lane that runs
-    # this static gate carries the rule.
-    from lint_copy_language import lint_copy_language as _l15
-    _l15(errors, base=pinned_base)
-    lint_anchor_manifest()
-    lint_home_paths()
-    lint_snapshot_discipline()
-    lint_runtime_state_location()
-    lint_grants_field_parity()
-    # L21 tier marker (t261004-42): the end-to-end admission rule, shape-only face
-    lint_tier_markers(base=pinned_base)
-    # L22 stale pin (t261009-02): a scenario pin of a CJK literal that survives
-    # nowhere it could come from = the wording moved without its anchor. Cheap
-    # static face of "a wording change carries its pinning anchors in the same
-    # change"; stated limits live in integration/lib_stale_pin.py's docstring.
-    from lib_stale_pin import lint_stale_pins as _l22
-    _l22(REPO, errors)
-    # L23 registry serialization (t261009-51): the anchors file must not flip
-    # styles between writers — the canonical form is declared in
-    # integration/lib_registry.py and byte-compared here.
-    lint_registry_serialization(err)
+    # t261011-22 selectors: `--rules=L16,L17` runs ONLY the named rules, and
+    # `--scope-files=a,b` prunes the scopable rules' walks to exactly the named
+    # files (a mechanism test plants for one rule and asserts that rule's bite
+    # over one path — the full ~20-rule battery is not what makes that proof).
+    # Malformed selector input is a named error; a scoped run says so on its
+    # own banner line and its verdict line keeps the same "LINT done" shape.
+    rule_ids, rule_bad = parse_rules_arg(sys.argv[1:])
+    scope_files, scope_bad = parse_scope_arg(sys.argv[1:])
+    selector_bad = rule_bad + scope_bad
+    if scope_files is not None and rule_ids is not None:
+        outside = [r for r in rule_ids if r not in SCOPED_RULES]
+        if outside:
+            selector_bad.append(
+                "--rules %s cannot run under --scope-files (scopable rules: %s; "
+                "%s judges the committed diff, not a walked path)"
+                % (",".join(outside), ",".join(SCOPED_RULES), ",".join(outside)))
+    if selector_bad:
+        for b in selector_bad:
+            err("selector: %s" % b)
+        print("LINT done: %d error / %d warn" % (len(errors), len(warns)))
+        return 1
+    if scope_files is not None:
+        missing = [p for p in scope_files if not (REPO / p).exists()]
+        if missing:
+            warn("scope paths not on the tree (nothing judged there — the "
+                 "scoped run proves less by declaration): %s" % missing)
+        scoped_ids = (rule_ids if rule_ids is not None else list(SCOPED_RULES))
+        print("LINT scoped run: rules = %s; files = %s (scope declaration — "
+              "the full battery is NOT run here)"
+              % (",".join(scoped_ids), ",".join(scope_files)), flush=True)
+        for rid in scoped_ids:
+            RULES[rid](pinned_base, scope_files)
+    elif rule_ids is not None:
+        print("LINT scoped run: rules = %s (subset selector — the full "
+              "battery is NOT run here)" % ",".join(rule_ids), flush=True)
+        for rid in rule_ids:
+            RULES[rid](pinned_base)
+    else:
+        lint_syntax()
+        lint_collect()
+        lint_mjs_imports()
+        lint_registry()
+        lint_three_state()
+        lint_terminology()
+        lint_tmpdir_hygiene()
+        lint_ticket_start_identity()
+        lint_console_no_open()
+        lint_integration_gate_settlement()
+        lint_narrowing_env_inheritance()
+        lint_tool_stdout_channel()
+        lint_evaluate_probe_join()
+        lint_vocab_cross_language_locks()
+        # L15 copy-language gate (t261004-24): new product copy must stay English
+        # (writing-standard §1/§2). Implementation lives in integration/lint_copy_language.py
+        # (standalone entry there); wired here in-process like L7 so every lane that runs
+        # this static gate carries the rule.
+        from lint_copy_language import lint_copy_language as _l15
+        _l15(errors, base=pinned_base)
+        lint_anchor_manifest()
+        lint_home_paths()
+        lint_snapshot_discipline()
+        lint_runtime_state_location()
+        lint_grants_field_parity()
+        # L21 tier marker (t261004-42): the end-to-end admission rule, shape-only face
+        lint_tier_markers(base=pinned_base)
+        # L22 stale pin (t261009-02): a scenario pin of a CJK literal that survives
+        # nowhere it could come from = the wording moved without its anchor. Cheap
+        # static face of "a wording change carries its pinning anchors in the same
+        # change"; stated limits live in integration/lib_stale_pin.py's docstring.
+        from lib_stale_pin import lint_stale_pins as _l22
+        _l22(REPO, errors)
+        # L23 registry serialization (t261009-51): the anchors file must not flip
+        # styles between writers — the canonical form is declared in
+        # integration/lib_registry.py and byte-compared here.
+        lint_registry_serialization(err)
+        # L25 wait-bound discipline (t261011-22): no test buys evidence with
+        # real wall-clock minutes (per-diff face).
+        lint_wait_bounds(base=pinned_base)
     n_e, n_w = len(errors), len(warns)
     # t261009-12 Defect B: the verdict line names any unstable-input condition
     # that fired, so two different verdicts for the same inputs can never print
