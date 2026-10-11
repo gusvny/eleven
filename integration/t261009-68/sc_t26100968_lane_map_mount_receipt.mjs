@@ -101,7 +101,11 @@ const probe = await page.evaluate(`(() => {
   const lm = document.querySelector('[data-testid="detail-lane-map"]')
   if (!lm) return { found: false }
   return { found: true, svg: !!lm.querySelector('svg'), nodes: lm.querySelectorAll('g[data-id]').length }
-})()`.replace(/\n/g, ' '))
+})()`.replace(/\n/g, '; '))  // t261009-72 rework: the newlines were this program's
+// ONLY statement separators (no semicolons in the body) — collapsing them to spaces
+// turned `const lm = …') if (!lm)` into a SyntaxError inside page.evaluate, so the
+// M3 probe died before ever observing the mount (gate round 1). '; ' restores both
+// separators; the leading `; ` right after `{` is a legal empty statement.
 rec('M3 lane map mounts', probe.found && probe.svg,
   probe.found ? `svg present, ${probe.nodes} node groups` : '[data-testid="detail-lane-map"] absent from the opened drawer')
 

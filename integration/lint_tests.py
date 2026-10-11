@@ -1144,6 +1144,54 @@ def _load_integ_module(name, rel):
     return mod
 
 
+def lint_evaluate_probe_join():
+    """L24（t261009-72）：page.evaluate 探针串不得把无分号 IIFE 的换行按空格塌缩。
+
+    犯例形态（t261009-68 第 1 轮闸实案，9.9s FAIL）：多行 `(() => { … })()` 模板串
+    的换行是唯一语句分隔符（body 无分号），`.replace(/\\n/g, ' ')` 塌缩后
+    `const lm = …') if (…)` 成 SyntaxError——探针在观察到任何 DOM 之前就崩，
+    场景红但断言面（本该观察的挂载面）一次都没跑过。修法=塌缩成 `'; '` 或直接传
+    函数。展示文案的塌缩（错误消息压行）不在此列。"""
+    import re
+    # 反引号模板串（允许转义）后紧跟按空格塌缩换行；串体须像程序（含 => 或语句关键字）
+    pat = re.compile(
+        r"`(?P<body>(?:[^`\\]|\\.)*?)`\.replace\(/\\n/g, ' '\)", re.S)
+    programish = re.compile(r"=>|\bconst\b|\blet\b|\breturn\b|\bif\b|\bfunction\b")
+    hits = []
+    for mjs in sorted(INTEG.rglob("*.mjs")):
+        if mjs.name.startswith("lint_"):
+            continue
+        try:
+            txt = mjs.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for m in pat.finditer(txt):
+            if programish.search(m.group("body")):
+                line = txt[:m.start()].count("\n") + 1
+                hits.append("%s:%d" % (mjs.relative_to(REPO), line))
+    # 自证（不碰真树）：程序串犯例必被抓；展示文案塌缩与 '; ' 修复形态必放行
+    fake_bad = "const p = await page.evaluate(`(() => {\n  const lm = q('x')\n  if (!lm) return 0\n})()`.replace(/\\n/g, ' '))"
+    fake_text = "log('rows: ' + txt.slice(0, 140).replace(/\\n/g, ' '))"
+    fake_fixed = "const p = await page.evaluate(`(() => {\n  const lm = q('x')\n  if (!lm) return 0\n})()`.replace(/\\n/g, '; '))"
+    proof = []
+    m_bad = pat.search(fake_bad)
+    if not m_bad or not programish.search(m_bad.group("body")):
+        proof.append("合成犯例没被抓")
+    for name, fake in (("展示文案塌缩被误报", fake_text), ("'; ' 修复形态被误报", fake_fixed)):
+        m = pat.search(fake)
+        if m and programish.search(m.group("body")):
+            proof.append(name)
+    if proof:
+        err("L24 自证失败（看守没牙）：%s" % "；".join(proof))
+        return
+    if hits:
+        err("L24 evaluate 探针串把无分号程序的换行按空格塌缩（%s）——塌缩后语句失去分隔符，"
+            "page.evaluate 里 SyntaxError、探针未观察先崩（t261009-68 第 1 轮闸实案）；"
+            "修法：塌缩成 `'; '` 或直接传函数不传串" % ", ".join(hits[:8]))
+        return
+    ok("L24 evaluate 探针串换行塌缩：integration/** 零犯例（展示文案塌缩与 '; ' 修复形态放行）")
+
+
 def lint_vocab_cross_language_locks():
     """L14（t261002-14）：跨语言词表机械互锁——
       · integration/lib_env.py 的 NARROWING_ENV_PREFIXES/NAMES 必须 与
@@ -1652,6 +1700,7 @@ def main():
     lint_integration_gate_settlement()
     lint_narrowing_env_inheritance()
     lint_tool_stdout_channel()
+    lint_evaluate_probe_join()
     lint_vocab_cross_language_locks()
     # L15 copy-language gate (t261004-24): new product copy must stay English
     # (writing-standard §1/§2). Implementation lives in integration/lint_copy_language.py

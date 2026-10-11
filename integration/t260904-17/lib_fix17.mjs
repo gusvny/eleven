@@ -20,6 +20,22 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// t261009-72 harness invariant (read before touching the repo anchor again):
+//   The bench console's OWN TREE is the lane worktree this module is loaded from —
+//   the plugins load from there, so `repo-anchor.mjs` derives the guard's own root
+//   from that tree, and a lane worktree must never receive writes aimed at another
+//   checkout. The shim fixture repo (`$TMPDIR/fix17-shim-*/engine-repo`) is NOT that
+//   tree: it is SERVED FIXTURE DATA the harness owns for the length of one scenario —
+//   a `.venv/bin/python` symlink onto the stub shim (engine channel interception) plus
+//   read-only `docs`/`notes` projections of the real knowledge base. Because it is
+//   foreign, the fixture repo must be declared through the documented primary seam —
+//   per-plugin `config.repo` in the harness-generated profile patch (see
+//   `benchRepoPatch`) — never through `env SANDBAR_REPO`. The env seam is exactly what
+//   `repo-anchor.mjs` refuses in lane worktrees (`SANDBAR_ANCHOR_MISMATCH`, the
+//   t261009-72 root cause: every lib_fix17 scenario env-failed at the 45 s boot);
+//   `config.repo` is an explicit, co-located choice by the process owner, which the
+//   guard deliberately honours. Do NOT weaken the guard to re-admit the env seam.
+
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEAD_TEMPORAL = '127.0.0.1:1'; // 死端口兜底红线。勿用 17233——那是供给台 Temporal 的实占端口（260910 实锤：列表直走引擎通道后「死端口」连上了供给台，ok:true 空行=隔离假绿）；夹具票源全走桩
 
@@ -88,6 +104,32 @@ export function realPython() {
  *                          {mode:'fail'} | {mode:'delay', ms:N, then:'ok'|'fail'} } }
  * 轨迹：每次被拦截的调用追加一行 {op,id,t0,t1}（时序/并发断言面）。
  */
+/** 造引擎通道夹具仓（t260910-04 起 handleTickets 直调 runPocCli→client.py；其 python
+ * 解析 venv 优先、PATH shim 被短路）——在 <stubDir>/engine-repo 造一个
+ * .venv/bin/python=桩 shim 的假引擎仓，插件 repo 锚指过去，引擎通道才落进桩的
+ * 拦截面。client.py 只放占位（桩按 argv 拦 ticket-list，拦截面外的引擎调用炸得响=
+ * 干净失败，不静默漏真 Temporal）。t261009-72 起独立导出：makeTicketStub 建桩时
+ * 一并调用；自带 stub 的调用方（如 t261009-03 的透传桩）由 bootConsole 兜底调用，
+ * 路径同款，shim 内的锚替换不受影响。 */
+export function buildEngineRepo(stubDir) {
+  const engineRepo = path.join(stubDir, 'engine-repo');
+  const venvBin = path.join(engineRepo, 'server', 'engine', '.venv', 'bin');
+  mkdirSync(venvBin, { recursive: true });
+  writeFileSync(path.join(engineRepo, 'server', 'engine', 'client.py'),
+    '# fix17 夹具占位：引擎通道由 FIX17 桩按 argv 拦截（ticket-list）；拦截面外到此=桩缺口\n');
+  try { unlinkSync(path.join(venvBin, 'python')); } catch { /* 首次无 */ }
+  symlinkSync(path.join(stubDir, 'python3'), path.join(venvBin, 'python'));
+  // repo 其余可读面投影（t260910-04 验收补）：docs 路由读 <repo>/docs|notes（真库定稿
+  // 知识库），repo 锚到夹具仓后必须把这两面软链回真树，否则 t260905-06 文档族
+  // 「真库篇目」断言全数假红（260910 实测：docs 树=0 篇）。软链=只读投影，不写真树。
+  for (const face of ['docs', 'notes']) {
+    const dest = path.join(engineRepo, face);
+    try { unlinkSync(dest); } catch { /* 首次无 */ }
+    symlinkSync(REPO_ROOT + '/' + face, dest);
+  }
+  return engineRepo;
+}
+
 export function makeTicketStub() {
   const dir = tmpRoot('fix17-shim-');
   const ctrlPath = path.join(dir, 'ctrl.json');
@@ -102,8 +144,8 @@ args = sys.argv[1:]
 isAdmin = any(a.endswith('admin.py') for a in args)
 # 引擎通道拦截（t260910-04 起列表主数据直走 client.py ticket-list，不再经 admin.py
 # ticket:list——桩必须同拦两条通道，否则夹具行恒空=整族契约红）。runPocCli 的 venv
-# 优先解析会短路 PATH shim，靠 benchEnv 的 SANDBAR_REPO 夹具仓把 .venv/bin/python
-# 符链回本桩，引擎通道才落得进拦截面。
+# 优先解析会短路 PATH shim，靠夹具仓（stub.dir/engine-repo，经 config.repo 锚补丁
+# 声明，t261009-72）把 .venv/bin/python 符链回本桩，引擎通道才落得进拦截面。
 isEngineList = (not isAdmin) and any(a.endswith('client.py') for a in args) and ('ticket-list' in args)
 if not isAdmin and not isEngineList:
     os.execv(REAL, [REAL] + args)  # 非本桩面：透传真解释器
@@ -174,8 +216,10 @@ emit({'ok': False, 'error': 'fix17 桩不可达'})
 `;
   writeFileSync(path.join(dir, 'python3'), shim);
   chmodSync(path.join(dir, 'python3'), 0o755);
+  // 引擎通道夹具仓随桩一并建好（bootConsole 靠它生成 config.repo 锚补丁，见模块头）。
+  const engineRepo = buildEngineRepo(dir);
   return {
-    dir, ctrlPath, tracePath,
+    dir, ctrlPath, tracePath, engineRepo,
     setCtrl(obj) { writeFileSync(ctrlPath, JSON.stringify(obj)); },
     readTrace() {
       const txt = require$read(tracePath);
@@ -193,36 +237,42 @@ emit({'ok': False, 'error': 'fix17 桩不可达'})
 import { readFileSync } from 'node:fs';
 function require$read(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
-function benchEnv(tmpHome, projectsRoot, stub) {
+/** 隔离台进程 env（t261009-72 起导出供单测断言面）。
+ * 锚纪律见模块头：夹具仓经 benchRepoPatch 的 config.repo 声明——env SANDBAR_REPO
+ * 在泳道 worktree 里会被 repo-anchor 判 SANDBAR_ANCHOR_MISMATCH（boot 全灭根因），
+ * 这里显式 delete，防宿主环境串进来的 SANDBAR_REPO 复活同一条错锚。 */
+export function benchEnv(tmpHome, projectsRoot, stub) {
   const env = { ...process.env, DSH_HOME: tmpHome, SANDBAR_PROJECTS_DIR: projectsRoot };
   delete env.SANDBAR_PROJECTS_YAML;
+  delete env.SANDBAR_REPO;
   env.SANDBAR_TARGET_HOST = DEAD_TEMPORAL;
   delete env.SANDBAR_NAMESPACE;
   env.FIX17_CTRL = stub.ctrlPath;
   env.FIX17_TRACE = stub.tracePath;
-  // 引擎通道夹具仓（t260910-04 起 handleTickets 直调 runPocCli→client.py；其 python
-  // 解析 venv 优先、PATH shim 被短路）——造一个 .venv/bin/python=桩 shim 的假引擎仓，
-  // SANDBAR_REPO 把 workbench 的 repo 锚（config.repo ?? SANDBAR_REPO ?? 位置推导）
-  // 指过去，引擎通道才落进桩的拦截面。client.py 只放占位（桩按 argv 拦 ticket-list，
-  // 拦截面外的引擎调用炸得响=干净失败，不静默漏真 Temporal）。
-  const engineRepo = path.join(stub.dir, 'engine-repo');
-  const venvBin = path.join(engineRepo, 'server', 'engine', '.venv', 'bin');
-  mkdirSync(venvBin, { recursive: true });
-  writeFileSync(path.join(engineRepo, 'server', 'engine', 'client.py'),
-    '# fix17 夹具占位：引擎通道由 FIX17 桩按 argv 拦截（ticket-list）；拦截面外到此=桩缺口\n');
-  try { unlinkSync(path.join(venvBin, 'python')); } catch { /* 首次无 */ }
-  symlinkSync(path.join(stub.dir, 'python3'), path.join(venvBin, 'python'));
-  // repo 其余可读面投影（t260910-04 验收补）：docs 路由读 <repo>/docs|notes（真库定稿
-  // 知识库），repo 锚到夹具仓后必须把这两面软链回真树，否则 t260905-06 文档族
-  // 「真库篇目」断言全数假红（260910 实测：docs 树=0 篇）。软链=只读投影，不写真树。
-  for (const face of ['docs', 'notes']) {
-    const dest = path.join(engineRepo, face);
-    try { unlinkSync(dest); } catch { /* 首次无 */ }
-    symlinkSync(path.join(REPO_ROOT, face), dest);
-  }
-  env.SANDBAR_REPO = engineRepo;
   env.PATH = `${stub.dir}${path.delimiter === ':' ? ':' : ':'}${process.env.PATH || ''}`;
   return env;
+}
+
+/** 锚补丁插件面：隔离台里所有走共享锚链（config.repo → SANDBAR_REPO → 位置推导）的
+ * 插件都把 repo 显式钉到夹具仓——与旧 env.SANDBAR_REPO 的可见面逐插件对齐
+ * （t261009-72 前=六个插件全读到 env；现在=同六插件全读到 config.repo，行为等价，
+ * 只是锚来源换了 seam）。config.repo 是 repo-anchor 判定的 documented primary seam，
+ * 泳道 worktree 里也放行。 */
+const ANCHOR_PLUGIN_IDS = [
+  'sandbar-workbench',
+  'sandbar-admin-ui',
+  'sandbar-knowledge',
+  'sandbar-temporal-tools',
+  'sandbar-executor-panel',
+  'sandbar-watchdog',
+];
+
+/** 生成把各插件 repo 锚钉到夹具仓的 patch 追加块（t261009-72）。
+ * 纯函数，单测断言面。路径用 JSON 双引号标量（合法 YAML），$tmpdir 含引号/反斜杠/
+ * 冒号/# 等畸形字符也逐字保真。 */
+export function benchRepoPatch(engineRepo) {
+  const repo = JSON.stringify(String(engineRepo));
+  return ANCHOR_PLUGIN_IDS.map((id) => `- id: ${id}\n  config:\n    repo: ${repo}\n`).join('');
 }
 
 /** 主树根解析（泳道 worktree 布局下借用主树已装依赖；只读主树，不写）。 */
@@ -368,8 +418,12 @@ export async function bootConsole(projectsRoot, stub) {
     await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'plugins', 'workbench'));
     const port = await freePort();
     if (port === 3099) throw new Error('freePort 撞 3099（概率≈0，命中即拒跑）');
-    const patchFile = path.join(tmpHome, 'port.patch.yml');
-    writeFileSync(patchFile, `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`);
+    const patchFile = path.join(tmpHome, 'bench.patch.yml');
+    // 单个 patch 文件合并两面：webserver 端口 + 插件 repo 锚（t261009-72，见模块头不变量）。
+    // 兜底 buildEngineRepo：自带 stub 的调用方（t261009-03 等）没带 engineRepo 时，
+    // 在同款路径 <stub.dir>/engine-repo 现造，锚与其 shim 内替换路径必然一致。
+    writeFileSync(patchFile, `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: ${port}\n`
+      + benchRepoPatch(stub.engineRepo ?? buildEngineRepo(stub.dir)));
     const logFd = openSync(path.join(tmpHome, 'console.log'), 'a');
     const proc = spawn('dsh', ['--profile', 'suyou', '--patch', patchFile,
       '--port', String(port), '--host', '127.0.0.1', '--no-open'], {
