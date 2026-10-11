@@ -55,6 +55,11 @@ from pathlib import Path
 
 CANDIDATES_ENV = "SANDBAR_LINE_ROUND_CANDIDATES"
 SUITE_CMD_ENV = "SANDBAR_LINE_ROUND_SUITE_CMD"
+#: Pools the line round does not run by default (host order 261011): the
+#: exclusive pool nests whole suites/consoles and made every round hit the cap.
+#: Overridable with the same key; an empty value runs every pool.
+EXCLUDE_POOLS_DEFAULT = "exclusive"
+EXCLUDE_POOLS_ENV = "SANDBAR_LINE_ROUND_EXCLUDE_POOLS"
 REPO_PATH_PREFIX = "SANDBAR_LINE_ROUND_REPO_PATH_"
 RUN_ROOT_ENV = "SANDBAR_LINE_ROUND_RUN_ROOT"
 STATE_DIR_ENV = "SANDBAR_LINE_ROUND_RUN_STATE_DIR"
@@ -253,16 +258,39 @@ def prepare_tree(candidate, run_root, env=None):
     return dst, src, how
 
 
+def exclude_pools_value(env=None):
+    """Pools this round does NOT run — declared once, here.
+
+    Host order 261011 ('先把 exclusive 的池排除掉，把 line run 跑通先'): the
+    exclusive pool's scenarios nest whole suites/consoles (a single round
+    measured 900 s + 548 s + 274 s on three of them, and every round before
+    that hit the runner's own 3600 s cap), so they are out of the every-round
+    scope. The value is named on the round: the suite receipt already carries
+    `excluded_pools`, so the exclusion is never silent. An operator overrides
+    it with SANDBAR_LINE_ROUND_EXCLUDE_POOLS (an empty value = run every pool).
+    """
+    env = os.environ if env is None else env
+    raw = env.get(EXCLUDE_POOLS_ENV)
+    if raw is None:
+        return EXCLUDE_POOLS_DEFAULT
+    return str(raw).strip()
+
+
 def suite_argv(env=None):
     """The declared full suite command; override parsed with shlex, default
-    is this interpreter plus the suite entry point."""
+    is this interpreter plus the suite entry point. The declared pool
+    exclusion is appended unless the override already names one."""
     env = os.environ if env is None else env
     raw = str(env.get(SUITE_CMD_ENV, "")).strip()
     if not raw:
-        return [sys.executable, "integration/run_scenarios.py"]
-    argv = shlex.split(raw)
-    if not argv:
-        die("suite_cmd_empty:%s" % SUITE_CMD_ENV)
+        argv = [sys.executable, "integration/run_scenarios.py"]
+    else:
+        argv = shlex.split(raw)
+        if not argv:
+            die("suite_cmd_empty:%s" % SUITE_CMD_ENV)
+    excluded = exclude_pools_value(env)
+    if excluded and "--exclude-pools" not in argv:
+        argv = argv + ["--exclude-pools", excluded]
     return argv
 
 
