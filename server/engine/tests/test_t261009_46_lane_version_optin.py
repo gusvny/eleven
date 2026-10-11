@@ -201,13 +201,13 @@ def test_land_to_line_lands_the_proven_revision(env, tmp_path):
         worktree=str(repo), proven_sha=proven)))
     assert res.ok, res.error
     assert res.revisions["r"] == _git("rev-parse", "develop", cwd=repo).stdout.strip()
-    # the landed content CONTAINS the proven revision (the merge commit's
-    # lane parent is the pinned proven sha; the recorded revision is the
-    # line branch's new head)
-    assert _git("merge-base", "--is-ancestor", proven, "develop",
-                cwd=repo, check=False).returncode == 0
+    # the landed content IS the proven revision's content, in ONE squash
+    # commit (t261011-24: a squash landing, so the proven sha is no longer an
+    # ancestor of the line — the content is, judged via the tree)
+    assert "feature" in _git("show", "develop:feat.txt",
+                             cwd=repo).stdout
     parents = _git("log", "-1", "--format=%P", "develop", cwd=repo).stdout.split()
-    assert proven in parents
+    assert len(parents) == 1, "a landing is one single-parent squash commit"
     rows, bad = dc.read_rows(dc.ledger_path(project))
     assert not bad
     landings = [r for r in rows if r.get("kind") == dc.KIND_LANDING]
@@ -336,12 +336,13 @@ DEV_LINE = (POC / "develop_line.py").read_text("utf-8")
 
 
 def test_no_second_merge_sequence_in_the_landing_path():
-    # (2): the add/commit sequence is _settle_merge_core's single
-    # implementation — the landing path imports it and never stages/commits
-    # by itself.
-    assert "_settle_merge_core" in DEV_LINE  # imported, not copied
+    # (2), re-ruled by t261011-24: the squash recipe is _squash_merge_core's
+    # single implementation (shared with the main close-out) — the landing
+    # path imports it and never stages by itself; its ONE git commit just
+    # records the staged squash result under the landing message.
+    assert "_squash_merge_core" in DEV_LINE  # imported, not copied
     landing_src = DEV_LINE[DEV_LINE.index("def land_ticket"):DEV_LINE.index("def pin_lane_revision")]
-    for banned in ('"add",', "'add',", '"commit"', "'commit'"):
+    for banned in ('"add",', "'add',", '"merge",', "'merge',"):
         assert banned not in landing_src, banned
     # the workflow-side landing step only orchestrates the activity
     step_src = DEV_LANE[DEV_LANE.index("async def _dev_buffer_land_step"):

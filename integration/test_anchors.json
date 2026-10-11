@@ -14,6 +14,11 @@
     "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
   },
   "engine_tests": {
+    "server/engine/tests/test_t26101121_tick_budget_reap_abort.py": {
+      "anchor": "behaviour",
+      "note": "t261011-21 host order 261011: line-round tick budget dominates CHAIN_LIMIT x runner timeout and is the constant at the workflows call site; resolve_runner spawns its own session, registers the live pid, and timeout/unwind reaps the whole process group (TERM-first, ESRCH/EPERM tolerated, idempotent, failed spawn never registers); abort_inflight_ticks leaves one could_not_run row per in-flight line through the real validator, never releases a guard, never masks the caller's exception; shutdown face reaps+appends+clears; the activity wrapper aborts, reaps and re-raises the original exception",
+      "sync_path": ""
+    },
     "server/engine/tests/test_t261009_49_face_coverage.py": {
       "anchor": "behaviour",
       "note": "t261009-49: period-x-face coverage projection truth table (five states, blocked shell never produced, failed vs not_run, never/last-ok, injected attempt reader fault modes, cap truncation, aggregate wiring)",
@@ -1327,6 +1332,11 @@
       "note": "t261009-50 wiring tripwire: line_round_tick_engine registered in ALL_ACTIVITIES (executed-but-unregistered would be an activity-not-found on every tick), workflows.py carries LINE_ROUND_PATCH_ID == dispatcher-scan-line-round, engine body reachable",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261011_23_range_coverage.py": {
+      "anchor": "contract",
+      "note": "t261011-23 (KI-01M4N5ASATAVWP6E38NSPECCAT): range-based coverage contract - a landing is covered iff prev_cert(cert).seq < landing.seq <= cert.seq of a GREEN certification (the derive_range/_red_range predicate, replacing revision equality); properties: post-cert landing still waiting, red-range red_implicated unchanged, non-head landing inside a green range certified with covered_by naming it, two-face agreement pins on solo/head/waiting shapes plus the named non-head outcome-face divergence gap",
+      "sync_path": "server/engine/develop_certify.py (_covering_green_cert / landable / ticket_wait_state certified branch)"
+    },
     "server/engine/tests/test_t261009_62_relation_evidence.py": {
       "anchor": "contract",
       "note": "t261009-62: relation rows refuse evidence-less / self-benefiting / malformed rows by name; supersedes_relation corrections resolve via current_relations (declared row contract, temp ledgers)"
@@ -1407,6 +1417,11 @@
     "server/engine/tests/test_t261011_17_registration_guard.py": {
       "anchor": "contract",
       "note": "t261011-17: the worker registration surface is closed — lane_head_sha/land_to_line/certification_wait in the COMPOSED worker table, every @activity.defn under server/engine composed-or-named-exempt (selfcheck stubs + the in-process pure function), @workflow.defn complete against ALL_WORKFLOWS+ALL_WORKFLOWS_V2, negative control on a synthetic defn, and the green-run-face miss note written on both failure exits and cleared on success",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261011_24_landing_squash.py": {
+      "anchor": "behaviour",
+      "note": "t261011-24: line landing = one squash commit (shared _squash_merge_core) — single-parent landing commits, named landing message, record revision = new line HEAD, squash-conflict cleanup + idempotent retry, staged-empty KI-213 recovery, race refused_unstarted named landing fault, gitlink gate",
       "sync_path": ""
     }
   },
@@ -2506,11 +2521,6 @@
       "note": "",
       "sync_path": ""
     },
-    "integration/t260912-03/tests/sc_authz_overlimit_accept.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
     "integration/t260912-03/tests/sc_authz_protected_path.py": {
       "anchor": "behaviour",
       "note": "",
@@ -2667,16 +2677,6 @@
       "sync_path": ""
     },
     "integration/t260915-08/sc_inspection_sign_journey.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/t260915-12/tests/sc_check_cross_project_gate.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/t260915-12/tests/sc_cross_project_gate_realchain.py": {
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
@@ -4261,6 +4261,11 @@
       "note": "user-perceivable left-column row faces: tooltip containment, project-block bottom border, engine-paused dot-only row, malformed-timestamp three-state",
       "sync_path": ""
     },
+    "integration/t261011-19/sc_t26101119_left_column_line_face.mjs": {
+      "anchor": "behaviour",
+      "note": "user-perceivable LineOn pill faces (one pill, constant text, engine-word anchor, overdue bang, colour-carries-state, absence/malformed render nothing), whole-matrix same-hue dot rule (never grey; blocked hollow vs failed solid), board state-background removal, and the engine-fed real-route leg (fixture develop store -> line_face/line_frozen in the response, named degradation never silent) (t261011-19)",
+      "sync_path": ""
+    },
     "integration/t261008-18/sc_middle_head_strip_retired.mjs": {
       "anchor": "behaviour",
       "note": "real-browser middle-column head: strip retired, panel head title+chip, zero orphan strip polling, layout chain co-survives (t261008-18)",
@@ -4535,6 +4540,10 @@
       "anchor": "source-text",
       "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
       "sync_path": ""
+    },
+    "integration/t261011-23/sc_t26101123_faces_agree_on_range.py": {
+      "anchor": "behaviour",
+      "note": "t261011-23 one rule two faces: the waiting face answers by GREEN-range membership (prev_cert.seq < landing.seq <= cert.seq) so a non-head landing inside a green range reads certified with covered_by naming that certification and landable True (KI-01M4N5ASATAVWP6E38NSPECCAT, the t261009-80 incident shape); face agreement with ticket_outcome.certified_by is pinned on shared shapes (head landing certified on both faces with the same cert id; post-cert landing uncovered on both faces) plus the universal direction outcome-certified implies wait-certified; the residual non-head outcome divergence (develop_promote outside the ticket write set, fallback (b)) stays pinned by name; red_implicated unchanged and a later red never overturns already-covered landings; real temp delivery ledger via the engine's own writer/reader"
     },
     "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
       "anchor": "behaviour",
@@ -4991,6 +5000,41 @@
       "anchor": "behaviour",
       "note": "t261011-16 KI-048 prose-allowance: the exempt prose dirt landing (commit file list excludes it, bytes survive, no stash), inverted control against the pre-fix conservative rule, named-teeth canaries (code dirty / staged prose / untracked collision), overlapping prose named refusal, diff-fault fail-closed",
       "sync_path": ""
+    },
+    "integration/t261011-18/sc_t26101118_line_round_assets.py": {
+      "anchor": "contract",
+      "note": "t261011-18: the line round runs the suite inside its own cloned checkout — the runner hands over the two assets the clone cannot resolve, operator pointers pass through verbatim, a bad pointer is a named could-not-run, and an unrunnable round grows the range without minting a certification (A3 re-signed by t261011-21: the clone now carries the provisioned assets)",
+      "sync_path": "integration/line_round_runner.py; integration/bench.py (_resolve_asset)"
+    },
+    "integration/t261011-22/sc_t26101122_wait_bound_brakes.py": {
+      "anchor": "behaviour",
+      "note": "t261011-22: real-time-wait lint brake bites on added scenario lines, names file + line token, sanctioned-wait exemption honored, byte-rollback hygiene",
+      "sync_path": ""
+    },
+    "integration/t261011-22/sc_t26101122_scoped_lint_brakes.py": {
+      "anchor": "behaviour",
+      "note": "t261011-22: scope-selector mechanism — scoped run red names planted lesion, summary line survives, clean scoped run green, malformed scope refused named",
+      "sync_path": ""
+    },
+    "integration/t261011-24/sc_t26101124_line_landing_squash_history.py": {
+      "anchor": "behaviour",
+      "note": "t261011-24: a line landing is ONE single-parent squash commit per ticket naming ticket+line, lane step commits absent from the line rev-list, conflict bounce-back leaves no merge-state residue and a resolved retry lands, the lost-record recovery re-lands naming the current head, a gitlink lane refuses by name, and the main close-out act stays one-commit-per-ticket (recipe refactor behaviour-neutral)",
+      "sync_path": ""
+    },
+    "integration/t261011-21/sc_t26101121_clone_assets_line_round.py": {
+      "anchor": "contract",
+      "note": "t261011-21: the line round's clone carries the gitignored assets the suite's cwd-relative probes need (interpreter chain picks the provisioned venv, temporal + playwright-core probes resolve), absence stays honest (env_failed==1 relayed, nothing fabricated), committed destinations are never clobbered, links target absolute source paths",
+      "sync_path": "integration/line_round_runner.py (prepare_tree/materialise_assets)"
+    },
+    "integration/t261011-25/sc_t261011_25_journey_handshake_sweep.py": {
+      "anchor": "behaviour",
+      "note": "t261011-25 part 1: the project-template journey waits by handshake or a declared injected bound, never a fixed-interval poll (journey file sweep with teeth: no time.sleep / no poll_snap), and the handshake helper over real pipes reads a live line blocking, fires a named timeout within its bound, and refuses EOF / oversized / never-matching lines by name",
+      "sync_path": ""
+    },
+    "integration/t261011-25/sc_t261011_25_prelude_receipt.py": {
+      "anchor": "contract",
+      "note": "t261011-25 part 2: the run header carries an additive prelude_s number on measured rounds and relays verbatim through line_round_runner.read_header (reader-side), an unmeasured round keeps the key absent (never a fake 0), and malformed prelude_s (-1.0 / True / non-number) is refused by name with the ledger untouched",
+      "sync_path": "integration/run_scenarios.py (write_run_record/build_run_header); integration/scenario_ledger.py (validate_run_header)"
     }
   }
 }

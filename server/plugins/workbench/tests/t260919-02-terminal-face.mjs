@@ -162,8 +162,11 @@ ok((idxSrc.match(/setTerminalFace\(null\)/g) || []).length >= 2, '切单/重开/
 // 消费面收拢到 ticket-list-model（STATE4_LABEL）与左栏行卡（sidebar 的
 // .wb-sb .wb-card-state data-state 覆写）。源锁随消费面搬家。
 ok(modelSrc.includes("'failed'"), '五态枚举含 failed（模型层 TicketState4）')
-ok(sbSrc.includes("[data-state=failed]") && idxSrc.includes(".wb-root .wb-card[data-state=failed]"),
-  'failed 红系 CSS 消费点在源（左栏行卡/板面遗留覆写）')
+// t261011-19：行底退役后，板面红系消费点=点阵整阵着色（实心红格/淡档同色相），
+// 左栏红系消费点=点阵 lit 格（实心）与 todo 淡档——源锚随消费面搬家。
+ok(sbSrc.includes('[data-state=failed] .wb-stage-dot[data-visual=lit]')
+  && idxSrc.includes('.wb-card-lane-dot[data-visual=done][data-state=failed]'),
+  'failed 红系 CSS 消费点在源（t261011-19 起挂在点阵，行底已退役）')
 ok(idxSrc.includes('deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided)'), 'deriveTicketState 调用点传 exec_status 与 voided（t261008-22：void 行改判数据源随行）')
 ok(idxSrc.includes("if (deriveTicketState(t.status, t.stage_state, t.exec_status, t.voided) === 'failed') return []"),
   'availableOps：失败行零管理操作（终态票零推进入口，行卡面）')

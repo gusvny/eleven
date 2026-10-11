@@ -357,7 +357,12 @@ def test_squash_merge_gitlink_preflight_fault_fail_closed(lane_repo):
     root, lane = lane_repo
     res = aa._squash_merge(root, lane, "lane/definitely-not-a-branch", "t26091620ut")
     assert res.ok is False and res.reason == "merge_fault"
-    assert "merge-base 失败" in (res.error or "")
+    # t261011-24: the recipe moved into the shared core `_squash_merge_core`;
+    # its moved message lines were re-worded in English per the 261004 writing
+    # standard (changed lines follow the new rules), so the pin follows the
+    # wording. The refusal must still state WHAT failed — the merge-base
+    # resolution — not just the reason code.
+    assert "merge-base failed" in (res.error or "")
 
 
 # ---------- _squash_merge 内联清理守卫（老票唯一拆道通道） ----------

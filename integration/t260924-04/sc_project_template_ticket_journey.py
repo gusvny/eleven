@@ -44,6 +44,8 @@ from lib_gate import (Fail, parse_out_json, poc_python, require_bench,  # noqa: 
                       require_stage, run_poc_client, stage_down)
 sys.path.insert(0, INTEG)
 from lib_tmp_reclaim import mkdtemp_reclaimed  # noqa: E402  （集成侧回收 helper：注册表+atexit）
+sys.path.insert(0, HERE)
+from lib_journey_handshake import LineReader  # noqa: E402  （握手消费原语：事件代替固定间隔轮询）
 
 LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORKFLOW")
 EXT_ID = "journey-two-step"
@@ -74,11 +76,23 @@ class JourneyTwoStepWorkflow(TicketWorkflowBase):
 
     @workflow.run
     async def run(self, inp: TicketInput):
-        return await self._main(inp)
+        # 握手生产面（261011 族 D：事件代替固定间隔轮询）：生产者（本夹具 workflow，
+        # 活在 worker 进程内）向 stdout 写两行事件，场景父进程经 LineReader 阻塞读。
+        # temporalio 沙箱不拦 stdout（实现段 spike：SandboxRestrictions.default 无
+        # stdout 面、workflow_sandbox 包零 print/stdout 拦截），行直达 worker 进程
+        # stdout 管道。重放（续跑子用例 worker 重启）会再打一遍：消费面按行匹配，
+        # 重复行无害。
+        print("JOURNEY workflow started " + TEMPLATE_ID, flush=True)
+        out = await self._main(inp)
+        # 落点说明（评审 comment 2）：finished 行在 workflow 返回路径上，而 `closed`
+        # 状态由引擎在 workflow 返回**之后**持久化——消费面读到本行后做一次
+        # **声明的有界等待**（PERSIST_BOUND_S，非轮询）再断言 closed，竞态窗口关死。
+        print("JOURNEY workflow finished " + TEMPLATE_ID, flush=True)
+        return out
 ''' % EXT_ID
 BROKEN_MODULE = '''from temporalio import workflow\nTEMPLATE_ID = "jn-broken-tpl"\n@workflow.defn\nclass JnBrokenWorkflow:\n    @workflow.run\n    async def run(self, inp):\n        return inp\nraise RuntimeError("t260924-04 场景②夹具：模块加载即炸")\n'''
 
-G = {"tmp": "", "projects": ""}
+G = {"tmp": "", "projects": "", "readers": {}}
 
 
 def write_registry(name, key, main_dir, modules=None, broken=False):
@@ -140,18 +154,39 @@ def query(py, stage, registry, tid):
     return s
 
 
-def poll_snap(py, stage, registry, tid, cond, timeout_s, label, fail):
-    deadline = time.time() + timeout_s
-    last = {}
-    while time.time() < deadline:
-        last = query(py, stage, registry, tid)
-        if cond(last):
-            return last
-        # 步距 1s：票 closed → 专属 worker watch 自退窗口只有 ~2s（收口自退）,
-        # 3s 步距会整窗跨过、之后只撞 no-poller 误报（client.py:1863 已知病灶族）。
-        time.sleep(1)
-    fail.bail("超时未等到：%s（末回执=%r）"
-              % (label, json.dumps(last, ensure_ascii=False, default=str)[:400]), 1)
+# ---- 握手纪律（261011 族 D / 评审 comment 2）：等待只走两条通道，零固定间隔轮询 ----
+# ①生产者行：夹具 workflow 的 stdout 事件（started/finished），LineReader 阻塞读；
+# ②注入的秒界：等待长度=声明的常数（不是探测循环）。各常量语义：
+PERSIST_BOUND_S = 5.0   # finished 行 → 引擎持久化 closed 的声明界（评审 comment 2 竞态窗）
+BOOT_BOUND_S = 3.0      # worker 进程拉起的声明界（原 time.sleep(3) 的具名化；无生产者行的面用）
+PREP_BOUND_S = 15.0     # workflow started 行 → 段活动在飞的声明界（stub delay=20s 保证窗内）
+LINE_BOOT_S = 30.0      # 等生产者 started 行的硬上界（worker 拉起+拾取）
+LINE_TIMEOUT_S = 240.0  # 等生产者行的硬上界（原 poll_snap 超时窗，超时=具名断言失败）
+
+
+def _started_line(reader, label):
+    """等 started 行（worker 已拉起且已拾取票=原来 sleep(3)+poll 的替换面）。"""
+    return reader.wait_for(lambda l: "JOURNEY workflow started" in l,
+                           LINE_BOOT_S, label)
+
+
+def _finished_then_query(py, stage, registry, tid, label, fail):
+    """等 finished 行 → 声明的持久化界 → 单次查询返回终态快照。
+    超时/EOF/读死=具名 bail（与原 poll_snap 超时同语义同三态）。"""
+    reader = G["readers"][tid]
+    line = reader.wait_for(lambda l: "JOURNEY workflow finished" in l,
+                           LINE_TIMEOUT_S, label)
+    if line is None:
+        why = getattr(reader, "death", None) or ("timeout", "?")
+        fail.bail("超时未等到：%s（reader 终态=%r，末 3 行=%r）"
+                  % (label, why, reader.lines[-3:]), 1)
+    wait_seconds_bound(PERSIST_BOUND_S)
+    return query(py, stage, registry, tid)
+
+
+def wait_seconds_bound(bound_s):
+    from lib_journey_handshake import wait_seconds
+    wait_seconds(bound_s)
 
 
 def start_worker(py, stage, registry, tid, delay_sec="8"):
@@ -165,10 +200,16 @@ def start_worker(py, stage, registry, tid, delay_sec="8"):
         "SANDBAR_UI_CAPTURE_STUB": "1",
     }
     log = open(os.path.join(G["tmp"], "worker-%s-%d.log" % (tid, time.time())), "ab")
-    return subprocess.Popen([py, os.path.join(ENGINE, "worker.py")],
+    # stdout=PIPE + LineReader（tee 镜像进同一日志文件）：等待面=生产者行的阻塞读，
+    # 不再靠父进程定时探测。读者线程死亡/EOF 具名化（评审 comment 3：tee 死 →
+    # 管道缓冲满 → worker 挂死成 hang 的缺陷面在 lib_journey_handshake 堵死）。
+    proc = subprocess.Popen([py, os.path.join(ENGINE, "worker.py")],
                             env=env_for(stage, registry, extra),
-                            cwd=ENGINE, stdout=log, stderr=subprocess.STDOUT,
+                            cwd=ENGINE, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
                             start_new_session=True)
+    G["readers"][tid] = LineReader(proc.stdout, log)
+    return proc
 
 
 def stop_worker(proc):
@@ -179,6 +220,13 @@ def stop_worker(proc):
         except Exception:
             proc.kill()
             proc.wait(timeout=10)
+    # 终态回收（全路径：正常/报错/超时/取消都到这里）：关读端让读者线程走到
+    # EOF sentinel 终态，fd 不漏。
+    if proc and proc.stdout:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
 
 
 def ticket_start(py, stage, registry, key, tid, template_id):
@@ -222,40 +270,53 @@ def main():
                    "探针：坏模块拒收面可观测（rc=%s，out尾=%s）" % (rc, out[-120:]))
 
         # ---- A1 全链：外置模板建票 → 桩脑驱动 → closed ----
-        w1 = start_worker(py, stage, reg_a, "t26092404a" + _sfx)
+        _tid_a = "t26092404a" + _sfx
+        w1 = start_worker(py, stage, reg_a, _tid_a)
         workers.append(w1)
-        time.sleep(3)
+        rc, ack, out = ticket_start(py, stage, reg_a, GOOD_KEY, _tid_a, EXT_ID)
+        # 握手：started 行=worker 拉起且拾取票（替换原 sleep(3)+轮询观测）。
+        if _started_line(G["readers"][_tid_a], "A1 started 行") is None:
+            fail.bail("超时未等到：A1 workflow started 行（reader 终态=%r，末 3 行=%r）"
+                      % (getattr(G["readers"][_tid_a], "death", None),
+                         G["readers"][_tid_a].lines[-3:]), 1)
         fail.check(w1.poll() is None, "A1 worker 已拉起（pid=%s）" % w1.pid)
-        rc, ack, out = ticket_start(py, stage, reg_a, GOOD_KEY,
-                                    "t26092404a" + _sfx, EXT_ID)
         fail.check(rc == 0 and ack.get("ok") is not False,
                    "A1 外置模板 ticket-start 受理（rc=%s out尾=%s）" % (rc, out[-160:]))
-        fin = poll_snap(py, stage, reg_a, "t26092404a" + _sfx,
-                        lambda x: x.get("status") == "closed", 240,
-                        "A1 外置模板全链走完到 closed", fail)
+        fin = _finished_then_query(py, stage, reg_a, _tid_a,
+                                   "A1 外置模板全链走完到 closed", fail)
         fail.check(fin.get("status") == "closed", "A1 票终态 closed")
         stop_worker(w1)
 
         # ---- A1 续跑：段在飞时停 worker → 重起 → 同票走完 ----
-        w2 = start_worker(py, stage, reg_a, "t26092404b" + _sfx, delay_sec="20")
+        _tid_b = "t26092404b" + _sfx
+        w2 = start_worker(py, stage, reg_a, _tid_b, delay_sec="20")
         workers.append(w2)
-        time.sleep(3)
-        rc, ack2, _ = ticket_start(py, stage, reg_a, GOOD_KEY,
-                                   "t26092404b" + _sfx, EXT_ID)
+        rc, ack2, _ = ticket_start(py, stage, reg_a, GOOD_KEY, _tid_b, EXT_ID)
         fail.check(rc == 0 and ack2.get("ok") is not False, "A1 续跑票受理")
-        poll_snap(py, stage, reg_a, "t26092404b" + _sfx,
-                  lambda x: (x.get("stage") or "").startswith("j_")
-                  and x.get("stage_state") == "running", 150,
-                  "外置段进入在飞窗口", fail)
+        # 握手：started 行 → 注入的秒界（PREP_BOUND_S，段活动 20s 在飞窗内）→ 单次
+        # 查询断言在飞（替换原 150s/1s 步轮询）。
+        if _started_line(G["readers"][_tid_b], "A1 续跑 started 行") is None:
+            fail.bail("超时未等到：A1 续跑 workflow started 行（reader 终态=%r）"
+                      % (getattr(G["readers"][_tid_b], "death", None),), 1)
+        wait_seconds_bound(PREP_BOUND_S)
+        inflight = query(py, stage, reg_a, _tid_b)
+        fail.check((inflight.get("stage") or "").startswith("j_")
+                   and inflight.get("stage_state") == "running",
+                   "外置段进入在飞窗口")
         stop_worker(w2)
         fail.check(True, "A1 段在飞窗口内 worker 已停（模拟工人重启前置态）")
         mid = query(py, stage, reg_a, "t26092404b" + _sfx)
         fail.check(mid.get("status") != "closed", "A1 停机时票未完（有可续跑面）")
-        w3 = start_worker(py, stage, reg_a, "t26092404b" + _sfx)
+        w3 = start_worker(py, stage, reg_a, _tid_b)
         workers.append(w3)
-        fin2 = poll_snap(py, stage, reg_a, "t26092404b" + _sfx,
-                         lambda x: x.get("status") == "closed", 240,
-                         "A1 重启后续跑到 closed（幂等靠既有结果文件机制）", fail)
+        # 握手：重启 worker 重放历史 → started 行再现（重放确定性重跑 run()）；
+        # 之后 finished 行 + 持久化界 → 单次查询（替换原 240s/1s 步轮询）。
+        if _started_line(G["readers"][_tid_b], "A1 重启重放 started 行") is None:
+            fail.bail("超时未等到：重启后 workflow started 行（重放未拾取？reader 终态=%r）"
+                      % (getattr(G["readers"][_tid_b], "death", None),), 1)
+        fin2 = _finished_then_query(py, stage, reg_a, _tid_b,
+                                    "A1 重启后续跑到 closed（幂等靠既有结果文件机制）",
+                                    fail)
         fail.check(fin2.get("status") == "closed", "A1 续跑终态 closed")
         stop_worker(w3)
 
@@ -283,7 +344,9 @@ def main():
                    "A3 建票失败可见原因：点名拒收检查＋来件（拒收≠装死）")
         w4 = start_worker(py, stage, reg_b, "t26092404d" + _sfx)
         workers.append(w4)
-        time.sleep(3)
+        # dev-lane 是引擎内置模板（夹具外，无生产者行可用）：走注入的秒界通道
+        # （原固定 sleep(3) 的具名化声明，非探测循环）。
+        wait_seconds_bound(BOOT_BOUND_S)
         rc, dev, _ = ticket_start(py, stage, reg_b, BAD_KEY,
                                   "t26092404d" + _sfx, "dev-lane")
         fail.check(rc == 0 and dev.get("ok") is not False,

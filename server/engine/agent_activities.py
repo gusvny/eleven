@@ -7490,6 +7490,111 @@ def _dirty_block_note(verdict: Dict[str, Any]) -> str:
     return "%s——挡事文件：%s%s" % (why, listing, tail)
 
 
+class SquashOutcome:
+    """Receipt of the shared squash-merge recipe (t261011-24).
+
+    status: merged | conflict | refused_unstarted | failed
+      - merged: the squash staged cleanly; `staged_empty` says whether the index
+        holds anything collectable (False = a retry / already-equivalent face);
+      - conflict: the merge started and the three-step cleanup ran; `error`
+        names the conflict and any cleanup residue, `files` the parsed list;
+      - refused_unstarted: the merge refused BEFORE starting (measured via
+        _merge_started) — the FACT only; the WHY is caller-owned (main
+        re-classifies dirt, the line landing names its own fault); `raw`
+        carries the merge output tail for the caller's message;
+      - failed: the gitlink pre-gate tripped; `reason` is gitlink_present |
+        merge_fault, `files` the gitlink names, `error` the refusal/fault text.
+    """
+
+    def __init__(self, status: str, error: str = "", files=None, raw: str = ""):
+        self.status = status
+        self.error = error
+        self.files = list(files or [])
+        self.raw = raw
+        self.reason = ""
+        self.staged_empty = False
+
+
+def _squash_merge_core(repo: Path, branch: str) -> SquashOutcome:
+    """THE squash-merge recipe, one copy for two destinations (t261011-24):
+    the main close-out (_squash_merge) and the develop-line landing
+    (the develop-buffer landing act). Carried VERBATIM from _squash_merge:
+      - the gitlink pre-gate (t260916-20): a squash moves in-tree entries only,
+        so a nested repo is a loud refusal on ANY destination; read-only
+        judgement before the merge, so a retry is safe; merge-base/diff faults
+        fail closed, never silently skipped;
+      - `git merge --squash` (no automatic commit);
+      - the three-step conflict cleanup (git 2.50 measured: a squash conflict
+        leaves no MERGE_HEAD, so --abort is unavailable; --quit clears only
+        MERGE_MSG, then `reset --merge HEAD` rolls the conflict state back out
+        of the index/workspace — aligned with a real merge's --abort, never
+        --hard, so unrelated unstaged changes survive; acceptance is "the
+        conflict state is restored", not a fully clean tree). Idempotent, so
+        Temporal timeout-retries are safe;
+      - the staged-emptiness probe (`diff --cached --quiet`).
+    Deliberately NOT here (caller-owned, per the t261011-24 fault-mode ledger):
+      - dirt classification (main-only semantics: _classify_main_dirty +
+        prose exemption stay in _squash_merge; the line landing has already
+        asserted its engine-owned worktree clean and names its own fault);
+      - input ref guard (the landing consumes a resolvable hex sha, not a ref);
+      - commit / message / snapshot export / lane teardown.
+    """
+    base_sha, base_err = _merge_base_ref(branch, repo)
+    if not base_sha:
+        o = SquashOutcome("failed", error="gitlink pre-gate merge-base failed (fail-closed, never "
+                                          "a silent skip): %s" % base_err)
+        o.reason = "merge_fault"
+        return o
+    p = _git(["-c", "core.quotepath=false", "diff", "--raw",
+              "%s...%s" % (base_sha, branch)], repo)
+    if p.returncode != 0:
+        o = SquashOutcome("failed", error="gitlink pre-gate failed (diff --raw rc=%d, "
+                                          "fail-closed): %s"
+                          % (p.returncode, (p.stderr or p.stdout or "").strip()[-200:]))
+        o.reason = "merge_fault"
+        return o
+    links = staged_gitlinks(p.stdout)
+    if links:
+        o = SquashOutcome("failed", files=links,
+                          error="merge red light (t260916-20): %s" % _gitlink_refusal_note(links))
+        o.reason = "gitlink_present"
+        return o
+    p = _git(["merge", "--squash", branch], repo, timeout=120)
+    out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
+    if p.returncode != 0:
+        if not _merge_started(repo):
+            return SquashOutcome("refused_unstarted", raw=out[-400:],
+                                 error="git merge --squash %s refused before starting: %s"
+                                       % (branch, out[-400:]))
+        leftover: List[str] = []
+        _git(["merge", "--quit"], repo, timeout=60)  # only the re-check below matters; its rc is ignored
+        rs = _git(["reset", "--merge", "HEAD"], repo, timeout=60)
+        if rs.returncode != 0:
+            leftover.append("reset --merge rc=%s：%s"
+                            % (rs.returncode, (rs.stderr or "")[-200:]))
+        else:
+            lu = _git(["ls-files", "-u"], repo)
+            st = _git(["status", "--porcelain"], repo)
+            if (lu.stdout or "").strip():
+                leftover.append("ls-files -u still non-empty: %s" % (lu.stdout or "").strip()[:200])
+            unmerged_lines = [ln for ln in (st.stdout or "").splitlines()
+                              if len(ln) >= 2 and ln[:2] in (
+                                  "UU", "AA", "DD", "AU", "UA", "DU", "UD")]
+            if unmerged_lines:
+                leftover.append("status still has unmerged lines: %s"
+                                % ", ".join(unmerged_lines[:5]))
+        err = "git merge --squash %s conflict: %s" % (branch, out[-400:])
+        if leftover:
+            err += "; cleanup left residue: " + "; ".join(leftover)
+        return SquashOutcome("conflict", error=err,
+                             files=_parse_conflict_files(out)[:MERGE_FILES_CAP],
+                             raw=out[-400:])
+    o = SquashOutcome("merged")
+    dq = _git(["diff", "--cached", "--quiet"], repo)
+    o.staged_empty = dq.returncode == 0
+    return o
+
+
 def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                   defer_teardown: bool = False, project_key: str = "") -> "MergeResult":
     """The squash close-out implementation (the merge() activity delegates here, so it
@@ -7557,95 +7662,49 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
         exempted_note = ("prose dirt exempted on main (host order 261011, bytes "
                          "untouched): %s" % ", ".join(verdict["exempted"]))
 
-    # 0.6) gitlink 红灯（t260916-20）：泳道分支差集含 160000（嵌套仓）=引擎不支持其
-    #      合并——squash 只搬树内条目，gitlink 内容无处可搬（静默丢=nusuyou t260916-08
-    #      实案）。位次在 merge --squash 之前，把静默丢变成响亮红灯。只读判定、无写
-    #      操作 → Temporal 重试安全（取舍 d）；红灯 failed：主树未动、泳道不拆（取舍
-    #      b）；merge-base/diff 自身故障也 failed（fail-closed，绝不静默跳闸）。
-    base_sha, base_err = _merge_base_ref(branch, repo)
-    if not base_sha:
+    # 0.6 + 1) THE shared squash recipe (t261011-24): one implementation for the
+    # main close-out and the develop-buffer landing act.
+    # The core carries the gitlink gate (0.6, t260916-20), `merge --squash`, the
+    # three-step conflict cleanup (verbatim, still one copy) and the staged-
+    # emptiness probe; a merge that refused to start is reported as the FACT
+    # (refused_unstarted) — the classification below (main's dirt re-check) is
+    # the caller-owned remnant, the line landing names its own fault instead.
+    core = _squash_merge_core(repo, branch)
+    if core.status == "failed":
+        return MergeResult(ok=False, action="failed", reason=core.reason,
+                           files=core.files, error=core.error)
+    if core.status == "refused_unstarted":
+        # The merge never started. The pre-read (0.5) judged clean, so this is
+        # either dirt that appeared between the read and the merge (race) or a
+        # git fault — re-classify honestly; if still clean this is a fault, and
+        # it is NEVER coerced to conflict (the reason-non-empty invariant: an
+        # unclassifiable shape falls to merge_fault → failed → blocked for a
+        # human, not an idle resolution loop).
+        race = _classify_main_dirty(repo, branch)
+        if race.get("kind"):
+            return MergeResult(ok=False, action="dirty", reason=str(race["kind"]),
+                               files=list(race.get("files") or []),
+                               error="git merge --squash %s refused before starting (clean at "
+                                     "read, main dirt appeared at merge — race exit): "
+                                     "%s (main tree preserved as-is)"
+                                     % (branch, _dirty_block_note(race)))
         return MergeResult(ok=False, action="failed", reason="merge_fault",
-                           error="gitlink 前置判定的 merge-base 失败（fail-closed 不静默"
-                                 "跳闸）：%s" % base_err)
-    p = _git(["-c", "core.quotepath=false", "diff", "--raw",
-              "%s...%s" % (base_sha, branch)], repo)
-    if p.returncode != 0:
-        return MergeResult(ok=False, action="failed", reason="merge_fault",
-                           error="gitlink 前置判定失败（diff --raw rc=%d，fail-closed）：%s"
-                                 % (p.returncode, (p.stderr or p.stdout or "").strip()[-200:]))
-    links = staged_gitlinks(p.stdout)
-    if links:
-        return MergeResult(ok=False, action="failed", reason="gitlink_present",
-                           files=links,
-                           error="合并红灯（t260916-20）：%s" % _gitlink_refusal_note(links))
-
-    # 1) squash merge (no automatic commit)
-    p = _git(["merge", "--squash", branch], repo, timeout=120)
-    out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
-    if p.returncode != 0:
-        if not _merge_started(repo):
-            # The merge never started. The pre-read (0.5) judged clean, so this is
-            # either dirt that appeared between the read and the merge (race) or a
-            # git fault — re-classify honestly; if still clean this is a fault, and
-            # it is NEVER coerced to conflict (the reason-non-empty invariant: an
-            # unclassifiable shape falls to merge_fault → failed → blocked for a
-            # human, not an idle resolution loop).
-            race = _classify_main_dirty(repo, branch)
-            if race.get("kind"):
-                return MergeResult(ok=False, action="dirty", reason=str(race["kind"]),
-                                   files=list(race.get("files") or []),
-                                   error="git merge --squash %s 未开始即被拒（读时干净、"
-                                         "merge 时 main 已有未提交改动——竞态出口）：%s（主树原样保留）"
-                                         % (branch, _dirty_block_note(race)))
-            return MergeResult(ok=False, action="failed", reason="merge_fault",
-                               error="git merge --squash %s 未开始即被拒（复判 main 干净，"
-                                     "归故障非冲突）：%s（主树未提交改动原样保留）"
-                                     % (branch, out[-400:]))
-        # It did start: clean up (--quit clears only MERGE_MSG; reset --merge is what
-        # rolls the merge conflict state back out of the index/workspace). --merge
-        # rather than --hard (the ticket t260901-26 integration ruling): --merge
-        # aligns with a real merge's --abort semantics and restores only what this
-        # merge dirtied, preserving unrelated unstaged changes in the main tree byte
-        # for byte; --hard would wipe those unrelated unstaged changes too = silent
-        # data loss on the failure path. Staged changes were already blocked before
-        # the merge by the 0.5 pre-check, so --merge's refusal to restore the index
-        # has no regression surface.
-        leftover: List[str] = []
-        _git(["merge", "--quit"], repo, timeout=60)  # only the conflict-state re-check below matters; its rc is ignored
-        rs = _git(["reset", "--merge", "HEAD"], repo, timeout=60)
-        if rs.returncode != 0:
-            leftover.append("reset --merge rc=%s：%s"
-                            % (rs.returncode, (rs.stderr or "")[-200:]))
-        else:
-            lu = _git(["ls-files", "-u"], repo)
-            st = _git(["status", "--porcelain"], repo)
-            if (lu.stdout or "").strip():
-                leftover.append("ls-files -u 仍非空：%s" % (lu.stdout or "").strip()[:200])
-            # The acceptance only asks "is the conflict state restored" (unmerged
-            # lines), not "is the whole tree clean" — unrelated unstaged changes in
-            # the main tree (the " M" lines) deserve to survive; they are not residue
-            unmerged_lines = [ln for ln in (st.stdout or "").splitlines()
-                              if len(ln) >= 2 and ln[:2] in (
-                                  "UU", "AA", "DD", "AU", "UA", "DU", "UD")]
-            if unmerged_lines:
-                leftover.append("status 仍有 unmerged 行：%s"
-                                % "、".join(unmerged_lines[:5]))
-        err = "git merge --squash %s 冲突：%s" % (branch, out[-400:])
-        if leftover:
-            err += "；清理后仍有残留：" + "；".join(leftover)
+                           error="git merge --squash %s refused before starting (main clean "
+                                 "on re-check, a fault, not a conflict): %s (main tree "
+                                 "uncommitted changes preserved)"
+                                 % (branch, core.raw))
+    if core.status == "conflict":
         # A real conflict: the merge started and left a scene (reason code pinned to
         # the protocol word; the parsed conflict file list rides along when present)
         return MergeResult(ok=False, action="conflict", reason="conflict",
-                           files=_parse_conflict_files(out)[:MERGE_FILES_CAP],
-                           error=err)
+                           files=core.files, error=core.error)
 
     # 2) Close out: nothing collectable in the index (a retry, or the content is
     #    already equivalent) → produce no empty commit, back-fill with the HEAD sha
     warns: List[str] = []
     if exempted_note:
         warns.append(exempted_note)
-    dq = _git(["diff", "--cached", "--quiet"], repo)
-    if dq.returncode == 0:
+    if core.staged_empty:
         head = _git(["rev-parse", "--short", "HEAD"], repo)
         merge_commit = head.stdout.strip() if head.returncode == 0 else ""
         warns.append("main 已含本单改动（squash 暂存区无可收内容），未产新提交")

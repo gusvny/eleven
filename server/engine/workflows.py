@@ -11,6 +11,7 @@ This file keeps the step-1 ContentPipelineWorkflow / DispatcherScanWorkflow
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -238,6 +239,14 @@ WORKER_RECONCILE_PATCH_ID = "dispatcher-scan-worker-reconcile"
 # event trigger + scheduled backstop; the round owns all records). Separate
 # patch id — old running instances skip the section on replay.
 LINE_ROUND_PATCH_ID = "dispatcher-scan-line-round"
+# t261011-21 (host order 261011 defect 1): the tick's activity must outlive a
+# FULL round, not 30 minutes of one. Derivation: CHAIN_LIMIT (4, develop_certify)
+# chained rounds x RUNNER_TIMEOUT_S_DEFAULT (3600 s, develop_certify) = 4 h,
+# plus a 1 h margin for clone/checkout/sweep overhead. The runner's own clock
+# stays 3600 s (env SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S); a runner exceeding it
+# is reaped and named runner_timeout. Serial-rounds assumption: if a future
+# ticket parallelises rounds inside one tick, revisit this formula.
+LINE_ROUND_TICK_BUDGET = timedelta(hours=5)
 
 
 @workflow.defn
@@ -310,8 +319,13 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
             try:
                 line_rounds = await workflow.execute_activity(
                     line_round_tick_engine,
-                    start_to_close_timeout=timedelta(minutes=30),
+                    start_to_close_timeout=LINE_ROUND_TICK_BUDGET,
                     retry_policy=retry)
+            except asyncio.CancelledError:
+                # t261011-21 (review C1): a genuine cancellation must stay
+                # cancelled — the named-error face below is for a FAILED
+                # activity, never for a cancelled one.
+                raise
             except BaseException as e:  # noqa: BLE001 — named, never fatal
                 line_rounds = {"error": "%s: %s" % (type(e).__name__, e)}
         workflow.logger.info(

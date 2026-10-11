@@ -235,7 +235,12 @@ def main():
        "row=covered_range list")
 
     # ---------------- D 最大已认证前缀恒可落 ----------------
-    prefix_landing = _landing(1, _C)  # 内容=绿认证盖住的那份修订
+    # t261011-23 仲裁迭代：覆盖从「修订相等」改为「绿区间成员」（票面一把尺子），
+    # 所以「被绿认证盖住」的判据必须落在账本里拿得到 seq 的那行 landing 上
+    # （ldg-0001 在绿认证之前落账、内容=绿认证候选 _C）——账外的裸行没有 seq，
+    # 不在任何区间内，这不是覆盖面的语义。
+    rows_by_id = {r["id"]: r for r in rows if r.get("id")}
+    prefix_landing = rows_by_id["ldg-0001"]  # 内容=绿认证盖住的那份修订
     ok(dc.landable(rows, _LINE, prefix_landing,
                    is_green=lambda r: True) is True,
        "D1 绿认证盖住的 landing 答「可落」", "landable=True")
@@ -258,6 +263,8 @@ def main():
     ok(rng2["certified_prefix"] == _repos(_B),
        "D2 前缀面照实答最大已认证修订集（最后一份认证=红的那份——面诚实）",
        "prefix=%r" % (rng2["certified_prefix"],))
+    rows2_by_id = {r["id"]: r for r in rows2 if r.get("id")}
+    prefix_landing = rows2_by_id["ldg-0001"]
     ok(dc.landable(rows2, _LINE, prefix_landing,
                    is_green=lambda r: r == green_run) is True,
        "D3 绿认证盖住的 landing 在红认证在账时仍答「可落」——"

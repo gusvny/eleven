@@ -2,309 +2,137 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Develop buffer — faithful sample (261011 v4: the line face in the left column)</title>
+<title>左栏行面 — 样子（261011 v13）</title>
 <style>
-  /* 颜色/字号/间距照抄 server/plugins/workbench/src/client/index.tsx 的 .wb-card 家族
-     （token 名与 fallback 值都取真源，见各处注释行号）。v4 只加一个"线面"标记，
-     其余卡片 CSS 与 v3 逐字相同。 */
   :root{
-    --canvas:#fff; --ink-strong:#24292f; --muted:#57606a; --accent:#0969da;
-    --border:#d0d7de; --warn-bg:#fff8c5; --warn:#bf8700; --warn-text:#7d4e00;
-    --warn-border:#eac54f; --warn-surface:#fff8e6;
-    --danger-bg:#ffebe9; --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182;
+    --ink:#24292f; --muted:#57606a; --accent:#0969da; --accent-bg:#ddf4ff; --border:#d0d7de;
+    --warn:#bf8700; --warn-text:#7d4e00; --warn-border:#eac54f; --warn-surface:#fff8e6;
+    --danger:#cf222e; --danger-solid:#d1242f; --danger-border:#ff8182; --danger-bg:#ffebe9;
     --success:#1a7f37; --success-deep:#116329; --success-border:#4ac26b; --success-surface:#dafbe1;
-    --done-bg:#f6f8fa;
+    --accent-dim:#bcd9f7; --warn-dim:#f2dfae; --danger-dim:#f3c3c1; --success-dim:#b9e6c5;
   }
-  body{margin:0;background:#0d1117;color:#e6e9ef;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB",sans-serif}
-  .wrap{max-width:1120px;margin:0 auto;padding:26px 18px 60px}
-  h1{font-size:19px;margin:0 0 4px}
-  h2{font-size:14px;margin:30px 0 8px;color:#79b8ff;text-transform:uppercase;letter-spacing:.08em}
-  p{margin:6px 0}
-  .sub{color:#9aa4b2;font-size:13px}
-  .note{background:#161b22;border:1px solid #30363d;border-left:3px solid #79b8ff;padding:10px 12px;border-radius:6px;margin:12px 0;font-size:13px;color:#9aa4b2}
-  .light{background:#fff;color:#24292f;border:1px solid #d0d7de;border-radius:10px;padding:10px}
-  .cap{color:#9aa4b2;font-size:11px;margin:12px 0 4px}
-  code{background:#161b22;border:1px solid #30363d;border-radius:4px;padding:1px 5px;color:#e6e9ef}
-  .light code{background:#f6f8fa;border-color:#d0d7de;color:#24292f}
+  body{margin:0;background:#f6f8fa;color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC",sans-serif}
+  .wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:18px;margin:0 0 2px}
+  h2{font-size:13px;margin:26px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  p{margin:6px 0;font-size:13px;color:var(--muted)}
+  .col{width:360px}
+  .board{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px}
 
-  /* ---- 真源卡片（逐条来自 index.tsx:224-267） ---- */
-  .wb-card{display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:6px;
-    border:1px solid var(--border);border-left-width:4px;border-radius:8px;background:var(--canvas);
-    border-left-color:#d0d7de}
-  .wb-card[data-state=waiting]{background:var(--warn-bg);border-left-color:var(--warn)}
-  .wb-card[data-state=blocked]{background:var(--danger-bg);border-left-color:var(--danger)}
-  .wb-root .wb-card[data-state=failed]{background:var(--danger-bg);border-left-color:var(--danger)}
-  .wb-card[data-active=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
-  .wb-card[data-state=done]{color:var(--muted);background:var(--done-bg)}
-  .wb-card-l1{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 320px}
-  .wb-card-dot{width:9px;height:9px;flex:none;position:relative}
-  .wb-card-dot::before{content:'';position:absolute;inset:0;border-radius:50%;background:var(--muted)}
-  .wb-card-dot[data-state=running]::before{background:var(--accent)}
-  .wb-card-dot[data-state=blocked]::before{background:var(--danger)}
-  .wb-card-dot[data-state=failed]::before{background:var(--danger-solid)}
-  .wb-card-dot[data-state=done]::before{background:var(--muted)}
-  .wb-card-state{font-size:11px;font-weight:600;flex:none;color:var(--muted)}
-  .wb-card-state[data-state=running]{color:var(--accent)}
-  .wb-card-state[data-state=blocked]{color:var(--danger)}
-  .wb-card-state[data-state=done]{color:var(--muted)}
-  .wb-card-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;color:var(--ink-strong)}
-  .wb-card-l2{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;flex:1 1 260px;min-width:0}
-  .wb-card-id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent);flex:none}
-  .wb-col{width:360px}
-  .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid #d0d7de;background:#f6f8fa;color:#57606a;margin-right:6px}
+  /* 行卡（左栏）：三行、无底色、无彩色左条 */
+  .tk{display:flex;flex-direction:column;gap:4px;padding:6px 10px;margin:0 0 6px;
+    border:1px solid var(--border);border-radius:8px;background:#fff}
+  .tk[data-state=done]{opacity:.72}
+  .tk[data-active=true]{box-shadow:inset 0 0 0 1px var(--accent)}
+  .r{display:flex;align-items:center;gap:6px;min-width:0}
+  .id{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--accent);flex:none}
+  /* 位次：保持现状（真源 .wb-order-pos：10px/600、accent 字色 + 12% accent 底、4px 圆角、min-width 14px） */
+  .rank{flex:none;min-width:14px;text-align:center;font-size:10px;font-weight:600;color:var(--accent);
+    background:var(--accent-bg);border-radius:4px;padding:0 3px;line-height:14px}
+  .title{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+  .step{flex:none;font-size:10px;color:var(--muted)}
+  .epic{font-size:11px;padding:0 8px;border:1px solid var(--border);border-radius:10px;flex:none;white-space:nowrap;color:var(--muted)}
+  .pause{font-size:11px;font-weight:600;flex:none;padding:0 7px;line-height:18px;border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);background:var(--warn-surface)}
+  .ql{display:inline-flex;align-items:center;gap:3px;flex:none;margin-left:auto;color:var(--muted);font-size:11px}
+  /* 排队/工作记号（真源 .wb-order-dot）：work=绿 / hold·paused=琥珀；只有 queued 行才有位次号 */
+  .qdot{flex:none;width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--border)}
+  .qdot[data-order-dot=work]{background:var(--success)}
+  .qdot[data-order-dot=hold],.qdot[data-order-dot=paused]{background:var(--warn)}
 
-  /* 段间暂停徽标（真源 index.tsx:263）。`.is-pending` 是本页的"虚线"候选变体：
-     同一字形，虚线=已受理但未生效，实线=已停在段间门口 */
-  .wb-card-paused{font-size:11px;font-weight:600;flex:none;padding:0 7px;line-height:18px;
-    border:1px solid var(--warn-border);border-radius:10px;color:var(--warn-text);
-    background:var(--warn-surface);white-space:nowrap}
-  .wb-card-paused.is-pending{border-style:dashed}
+  /* LineOn 徽标：文字恒定，颜色即状态 */
+  .ln{display:inline-flex;align-items:center;flex:none;font-size:11px;font-weight:600;padding:0 6px;line-height:16px;border:1px solid var(--border);border-radius:10px;white-space:nowrap;color:var(--muted);background:#f6f8fa}
+  .ln[data-s=online]{border-color:var(--border);color:var(--muted);background:#f6f8fa}
+  .ln[data-s=waiting]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
+  .ln[data-s=overdue]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
+  .ln[data-s=red]{border-color:var(--danger-border);color:var(--danger);background:var(--danger-bg)}
+  .ln[data-s=certified]{border-color:var(--success-border);color:var(--success-deep);background:var(--success-surface)}
+  .ln[data-s=delivered]{border-color:var(--success);color:#fff;background:var(--success)}
+  .ln[data-s=withdrawn]{border-color:var(--border);color:var(--muted);background:#eaeef2}
 
-  /* ================= 本页新增：线面标记（三个候选） =================
-     A · 图标（无底、无字）      B · LineOn 徽标 + 状态字形（定宽，放 L1）
-     C · LineOn 徽标 + 状态词（放 L2，L1 一字不让）                       */
-  .ln-ico{font-size:12px;flex:none;line-height:1;color:var(--muted)}
-  /* B：一枚定宽徽标，11px；状态由"字形 + 色调"两路承载（字形给形状，色调给轻重） */
-  .ln-pill{display:inline-flex;align-items:center;gap:4px;flex:none;font-size:11px;
-    padding:0 7px;border:1px solid var(--border);border-radius:10px;line-height:18px;
-    color:var(--muted);background:transparent;white-space:nowrap}
-  .ln-pill .ln-g{font-size:10px;line-height:1}
-  .ln-pill[data-line-state=waiting]{border-color:var(--warn-border);color:var(--warn-text);background:var(--warn-surface)}
-  .ln-pill[data-line-state=certified]{border-color:var(--success-border);color:var(--success-deep);background:var(--success-surface)}
-  .ln-pill[data-line-state=red]{border-color:var(--danger-border);color:var(--danger);background:var(--danger-bg)}
-  .ln-pill[data-line-state=withdrawn]{border-color:var(--border);color:var(--muted);background:var(--done-bg)}
-  .ln-pill[data-line-state=delivered]{border-color:var(--success-border);color:var(--success-deep);background:var(--success-surface)}
-  /* C：同一枚徽标放在 L2，但带状态词，读起来不用查字形 */
-  .ln-pill.wide{padding:0 8px}
-  .wb-card-l2 .ln-pill{margin-left:auto}
-  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
-  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #30363d;vertical-align:top}
-  .light th,.light td{border-bottom:1px solid #d0d7de}
-  th{color:#9aa4b2;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
-  .light th{color:#57606a}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .empty{color:#57606a;font-style:italic;padding:12px;border:1px dashed #d0d7de;border-radius:8px;background:#f6f8fa}
-  .shape{border-top:1px dashed #30363d;margin-top:14px;padding-top:10px}
+  /* 十格点阵：第 N 格 ⇒ 前 N 格满色，其余同色相淡档（不出灰） */
+  .dots{display:inline-flex;align-items:center;gap:2px;flex:none}
+  .d{width:6px;height:6px;border-radius:1px;background:var(--border)}
+  .d[data-k=full][data-st=active]{background:var(--accent)}
+  .d[data-k=dim][data-st=active]{background:var(--accent-dim)}
+  .d[data-k=full][data-st=waiting]{background:var(--warn)}
+  .d[data-k=dim][data-st=waiting]{background:var(--warn-dim)}
+  .d[data-k=full][data-st=blocked]{background:var(--danger)}
+  .d[data-k=dim][data-st=blocked]{background:var(--danger-dim)}
+  .d[data-k=full][data-st=failed]{background:var(--danger-solid)}
+  .d[data-k=dim][data-st=failed]{background:var(--danger-dim)}
+  .d[data-k=full][data-st=done]{background:var(--success)}
+  .d[data-k=dim][data-st=done]{background:var(--success-dim)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Develop buffer — faithful sample <span class="sub">(v4: what the left column says about the line)</span></h1>
-  <p class="sub">261011 · integration steward · <b>sample only, nothing runs.</b> Colours, spacings and class names are copied from the real left-column card
-    (<code>server/plugins/workbench/src/client/index.tsx</code>, <code>.wb-card</code> family, lines 224-267). Rows are the real board rows, read while writing this page.</p>
+  <h1>左栏行面 — 样子</h1>
+  <p>261011 · <b>定稿（宿主认可）</b>。只放样子；实现细节见同目录 <b>261011-left-column-line-face-design.md</b> §14。</p>
+  <p><b>点阵规矩（唯一一条）</b>：票走到第 N 格 ⇒ <b>前 N 格上满色的状态色</b>，<b>其余 10−N 格上同色相的淡档</b>（不是灰）。</p>
 
-  <div class="note"><b>宿主问的是</b>：「有没有走 line、走到 line 的什么状态」——一个图标，或者一枚 <code>LineOn</code> 的 pill。<br>
-    <b>本页的答案</b>：一枚 <b>LineOn 徽标</b>承载"在不在线上"，<b>状态</b>由它内部的字形 + 色调承载（三个候选 A/B/C，见下）；
-    <b>词从引擎来</b>（not invented）——<code>develop_certify.ticket_wait_state</code> 的 <i>waiting / certified / red_implicated / reverted</i>、
-    <code>develop_promote.ticket_outcome</code> 的 <i>ending: withdrawn / ended / delivered_in</i>、<code>freeze_state</code> 的 <i>frozen</i>；
-    词表白名单已存在于 <code>certification-model.ts</code> 的 <code>FACE_WORDS</code>（'line' / 'waiting' / 'certified' / 'green' / 'red' / 'FROZEN' / 'delivered'）。</div>
-
-  <h2>1 · Three ways to carry it in a 360px row</h2>
-  <p class="sub">Real rows first. <code>t261009-80</code> is the only ticket actually on a line today (<code>lane_version=develop-buffer-v1</code>, <code>develop_line=develop-buffer</code>) — and it has <b>not landed</b>, so its honest state right now is the neutral one. <code>t261011-16</code> / <code>t261011-17</code> are legacy: nothing is added to them.</p>
-
-  <div class="grid2">
-    <div>
-      <div class="cap">A · icon only (≈16px, no chrome, state = glyph shape)</div>
-      <div class="light wb-col">
-        <div class="wb-card" data-active="true">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="running"></span>
-            <span class="wb-card-state" data-state="running">running</span>
-            <span class="ln-ico" title="on line develop-buffer · not landed · proof: own scenarios + fast set">⑃</span>
-            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
-        </div>
-        <div class="wb-card">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="running"></span>
-            <span class="wb-card-state" data-state="running">running</span>
-            <span class="wb-card-title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261011-17</span><span>run_integration_tests</span></div>
-        </div>
-        <div class="wb-card" data-state="done">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="done"></span>
-            <span class="wb-card-state" data-state="done">done</span>
-            <span class="wb-card-title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261011-16</span><span>merge · 554691e0</span></div>
-        </div>
-      </div>
-      <p class="sub">16px, cheapest, no reflow. Cost: a glyph nobody can read without a legend, and the state is <i>shape-only</i> (colour on this row already belongs to the stage).</p>
+  <h2>1 · 三行卡（真票）</h2>
+  <div class="col board">
+    <div class="tk" data-state="active" data-active="true">
+      <div class="r"><span class="id">t261011-18</span><span class="qdot" data-order-dot="work" title="at work"></span><span class="ql">（在跑：绿点，无位次、无排序控件）</span></div>
+      <div class="r"><span class="title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span></div>
+      <div class="r"><span class="step">implement</span><span class="epic">engine-hardening</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span></div>
     </div>
-
-    <div>
-      <div class="cap">B · <b>LineOn</b> pill + state glyph in L1 — my recommendation</div>
-      <div class="light wb-col">
-        <div class="wb-card" data-active="true">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="running"></span>
-            <span class="wb-card-state" data-state="running">running</span>
-            <span class="ln-pill" title="LineOn · line develop-buffer · not landed · proof: own scenarios + fast set (5 min ceiling)"><span>LineOn</span><span class="ln-g">⑃</span></span>
-            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
-        </div>
-        <div class="wb-card">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="running"></span>
-            <span class="wb-card-state" data-state="running">running</span>
-            <span class="wb-card-title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261011-17</span><span>run_integration_tests</span></div>
-        </div>
-        <div class="wb-card" data-state="done">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="done"></span>
-            <span class="wb-card-state" data-state="done">done</span>
-            <span class="wb-card-title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261011-16</span><span>merge · 554691e0</span></div>
-        </div>
-      </div>
-      <p class="sub">Fixed width ≈ 56px for every state (the state word lives in the tooltip and in the detail header) ⇒ <b>no reflow</b> when the state changes. Legacy rows are byte-identical to today.</p>
+    <div class="tk" data-state="waiting" data-active="true">
+      <div class="r"><span class="id">t261009-80</span><span class="qdot" data-order-dot="paused" title="paused by you (no slot)"></span><span class="ln" data-s="waiting">LineOn</span><span class="pause">⏸</span></div>
+      <div class="r"><span class="title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span></div>
+      <div class="r"><span class="step">merge</span><span class="epic">engine-hardening</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="dim" data-st="waiting"></span></span></div>
+    </div>
+    <div class="tk" data-state="done">
+      <div class="r"><span class="id">t261011-16</span><span class="ln" data-s="certified">LineOn</span><span class="ql">（已收口：无排队记号）</span></div>
+      <div class="r"><span class="title">The merge close-out refuses on ANY uncommitted main-tree change, including an owner's prose edit…</span></div>
+      <div class="r"><span class="step">merge</span><span class="epic">engine-hardening</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span></span></div>
     </div>
   </div>
+  <p>没有走线的票（legacy）不加 <code>LineOn</code>，别的元素照旧。</p>
 
-  <div class="shape">
-    <div class="cap">C · same pill, but on the muted L2 line and carrying the <b>word</b> — L1 gives up nothing</div>
-    <div class="light wb-col">
-      <div class="wb-card" data-active="true">
-        <div class="wb-card-l1">
-          <span class="wb-card-dot" data-state="running"></span>
-          <span class="wb-card-state" data-state="running">running</span>
-          <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-        </div>
-        <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span>
-          <span class="ln-pill wide" title="line develop-buffer"><span>LineOn</span><span class="ln-g">⑃</span></span></div>
-      </div>
-      <div class="wb-card" data-active="true">
-        <div class="wb-card-l1">
-          <span class="wb-card-dot" data-state="running"></span>
-          <span class="wb-card-state" data-state="running">running</span>
-          <span class="wb-card-title">(shape sample — a landed ticket waiting for its covering certification)</span>
-        </div>
-        <div class="wb-card-l2"><span class="wb-card-id">t…-80</span><span>merge · waiting</span>
-          <span class="ln-pill wide" data-line-state="waiting" title="landed on develop-buffer at 11:30 · waiting for the covering certification · holds no concurrency slot"><span>LineOn</span><span class="ln-g">◔ waiting</span></span></div>
-      </div>
-      <p class="sub">L2 already reads <code>id · stage</code> and the pill rides its right edge (<code>margin-left:auto</code>), so the width question disappears; the price is that the line face moves away from the identity line.</p>
+  <h2>1b · 排队中的行（位次＝现状样式，不动）</h2>
+  <div class="col board">
+    <div class="tk" data-state="active">
+      <div class="r"><span class="id">t261011-19</span><span class="rank" data-order-pos="3" title="Queue position 3">3</span><span class="ln" data-s="online">LineOn</span><span class="ql">⋮⋮ ⌃ ⌄</span></div>
+      <div class="r"><span class="title">Left column: LineOn line-state pill, three-line row, state by stage dots, no row background</span></div>
+      <div class="r"><span class="step">implement</span><span class="epic">engine-hardening</span>
+        <span class="dots" style="margin-left:auto"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span></div>
     </div>
   </div>
+  <p>位次号只出现在"排队中"的行上（样式与现在逐字节相同）；在跑＝绿点、被暂挂/被暂停＝琥珀点，这两种行按现行语义不给位次号、不给排序控件。</p>
 
-  <h2>2 · The pause badge: icon only (host order 261011)</h2>
-  <p class="sub">Today the row prints a whole sentence at 11px bold — <code>⏸ Paused at the stage gate</code> or <code>⏸ Pausing (takes effect between stages)</code> (from <code>ticket-list-model.ts:202</code> <code>pausedBadgeText()</code>). ~180px of a 360px row for one bit of information. Host: the words are unnecessary, an icon is enough.</p>
-  <div class="grid2">
-    <div>
-      <div class="cap">today</div>
-      <div class="light wb-col">
-        <div class="wb-card" data-state="waiting">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="waiting"></span>
-            <span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate">⏸ Paused at the stage gate</span>
-            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
-        </div>
-      </div>
-    </div>
-    <div>
-      <div class="cap">proposed: the glyph alone (≈22px), two phases by tone, words on hover + in the detail header</div>
-      <div class="light wb-col">
-        <div class="wb-card" data-state="waiting">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="waiting"></span>
-            <span class="wb-card-paused" data-paused="1" data-paused-phase="at_gate"
-                  title="Halted at the stage gate: next stage not dispatched; click Resume to continue"
-                  aria-label="Halted at the stage gate: next stage not dispatched; click Resume to continue">⏸</span>
-            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
-        </div>
-        <div class="wb-card" data-state="waiting">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="waiting"></span>
-            <span class="wb-card-paused is-pending" data-paused="1" data-paused-phase="pending"
-                  title="Pause accepted: the current stage (incl. in-flight agent) finishes, then stops"
-                  aria-label="Pause accepted: the current stage (incl. in-flight agent) finishes, then stops">⏸</span>
-            <span class="wb-card-title">A pause that cannot reach a boundary is invisible and inert: the face shows neither `paused` nor the…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261009-80</span><span>run_integration_tests</span></div>
-        </div>
-        <div class="wb-card" data-active="true">
-          <div class="wb-card-l1">
-            <span class="wb-card-dot" data-state="running"></span>
-            <span class="wb-card-state" data-state="running">running</span>
-            <span class="wb-card-title">Register the develop-buffer activities that were never wired (lane_head_sha / land_to_line /…</span>
-          </div>
-          <div class="wb-card-l2"><span class="wb-card-id">t261011-17</span><span>run_integration_tests</span></div>
-        </div>
-      </div>
-      <p class="sub">Same two phases, no sentence: <b>at_gate</b> = the icon in the current warm tone (a solid pill edge = it has stopped); <b>pending</b> = same glyph with a <b>dashed</b> edge (accepted, not in effect yet). A row that is not paused renders nothing, exactly as today. The two data anchors <code>data-paused</code> / <code>data-paused-phase</code> stay (they are the assertion面), so the icon is the only thing that changes.</p>
-    </div>
-  </div>
-  <div class="note"><b>代价要说清楚</b>：①<code>server/plugins/workbench/tests/t260908-01-ticket-pause-ui.mjs</code> 里有两条 <b>逐字钉住文案</b>的断言
-    （<code>assert.equal(pausedBadgeText('at_gate'), '⏸ Paused at the stage gate')</code> …）——改图标就必须同票重写它（L1 随实现重写是既定纪律），
-    并把断言改成"锚点 + title/aria 取词"，**不再钉 copy**；②`integration/` 侧**零断言**这两句文案（我 grep 过：没有场景引用
-    <code>wb-card-paused</code> / <code>pausedBadgeText</code>）⇒ 这次改动**不欠任何集成用例的账**，但顺手说明了一件事：
-    暂停徽标的文案**从来没有被任何 L2/L3 用例看住过**；③可访问性：图标化之后 <code>aria-label</code> 是唯一给读屏的字面，**不能省**。</div>
-
-  <h2>3 · The state table (every row is an engine word, never a UI invention)</h2>
-  <div class="light">
-    <table>
-      <tr><th>Pill</th><th>Tone (existing token)</th><th>Engine face it reads</th><th>Tooltip sentence</th><th>Slot?</th></tr>
-      <tr><td><i>(nothing)</i></td><td>—</td><td><code>lane_version != develop-buffer-v1</code> or <code>develop_line</code> empty</td><td>—</td><td>—</td></tr>
-      <tr><td><code>LineOn ⑃</code></td><td>border/muted (transparent)</td><td>on a line, <b>no landing row</b> yet</td><td>on line develop-buffer · not landed · proof: own scenarios + fast set</td><td>yes</td></tr>
-      <tr><td><code>LineOn ◔ waiting</code></td><td><code>--dsw-derive-warn*</code> (same family as the paused pill)</td><td><code>ticket_wait_state.state == waiting</code></td><td>landed at &lt;waiting_since&gt; · waiting for &lt;waiting_for&gt; · holds no concurrency slot</td><td><b>no</b> (<code>needs_slot</code>)</td></tr>
-      <tr><td><code>LineOn ✕ red</code></td><td><code>--dsw-derive-danger*</code></td><td><code>state == red_implicated</code> (derived range of a red certification)</td><td>inside a red certification's range: &lt;waiting_for&gt;</td><td><b>no</b></td></tr>
-      <tr><td><code>LineOn ✓ certified</code></td><td><code>--dsw-derive-success*</code></td><td><code>state == certified</code> → <code>covered_by</code></td><td>covered by &lt;covered_by&gt;</td><td>no (life over)</td></tr>
-      <tr><td><code>LineOn ↑ delivered</code></td><td><code>--dsw-derive-success-deep</code></td><td><code>ticket_outcome.delivered_in</code> (a promotion row carries it)</td><td>delivered in promotion &lt;id&gt;</td><td>no</td></tr>
-      <tr><td><code>LineOn ↩ withdrawn</code></td><td>muted on <code>--dsw-derive-done</code> surface</td><td><code>ending == withdrawn</code> (or <code>reverted</code>)</td><td>withdrawn by &lt;withdrawn_by&gt; — never delivered</td><td>no</td></tr>
-      <tr><td><code>&nbsp;!&nbsp;</code> mark on a waiting pill</td><td>same as waiting</td><td><code>overdue: true</code> (wait outlived the declared bound)</td><td>the wait has outlived its declared bound</td><td>no</td></tr>
-      <tr><td><code>FROZEN</code> (line level, not per row)</td><td><code>--dsw-derive-danger*</code></td><td><code>freeze_state(rows, line).frozen</code> + <code>culprit</code></td><td>line develop-buffer is frozen — culprit: …</td><td>—</td></tr>
-    </table>
+  <h2>2 · 五个状态（同一条规矩）</h2>
+  <div class="col board">
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="full" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span><span class="d" data-k="dim" data-st="active"></span></span><span class="title">active · 第 3 格 ⇒ 3 格蓝 + 7 格淡蓝</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="full" data-st="waiting"></span><span class="d" data-k="dim" data-st="waiting"></span></span><span class="title">waiting · 第 9 格 ⇒ 9 格黄 + 1 格淡黄</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="full" data-st="blocked"></span><span class="d" data-k="dim" data-st="blocked"></span><span class="d" data-k="dim" data-st="blocked"></span></span><span class="title">blocked · 第 8 格 ⇒ 8 格红 + 2 格淡红</span></div></div>
+    <div class="tk"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="failed"></span><span class="d" data-k="full" data-st="failed"></span><span class="d" data-k="full" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span><span class="d" data-k="dim" data-st="failed"></span></span><span class="title">failed · 第 3 格 ⇒ 3 格红 + 7 格淡红（与 blocked 同一色相）</span></div></div>
+    <div class="tk" data-state="done"><div class="r"><span class="id">t…</span><span class="dots"><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span><span class="d" data-k="full" data-st="done"></span></span><span class="title">done · 十格全绿</span></div></div>
   </div>
 
-  <div class="note"><b>两个必须说清楚的口径</b>：①上面 <b>waiting / red / certified / delivered / withdrawn 五行今天在盘上都不存在</b>——落地账本
-    （<code>delivery.jsonl</code>）到现在还没被创建过，"没有账本 = 从没跑过"，不是"跑了但没内容"；所以 §1 里带状态的行是<b>形状样本</b>，已明确标注。
-    ②<code>waiting</code> 与 <code>red</code> 的票<b>不占并发槽位</b>（<code>needs_slot</code> 的白名单：只有 waiting/red 需要被调度，其余是终局）——
-    这一枚 pill 顺手解释了一族老问题："票怎么不见了但它还在飞"。</div>
-
-  <h2>4 · Real vs missing</h2>
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px">
-    <table>
-      <tr><th>Thing</th><th>Status</th></tr>
-      <tr><td>the row already carries <code>lane_version</code> / <code>develop_line</code></td><td>REAL — verified on the list projection just now (<code>-80</code>: develop-buffer-v1 / develop-buffer)</td></tr>
-      <tr><td>the wait/outcome state derivation</td><td>REAL — <code>develop_certify.ticket_wait_state</code>, <code>develop_promote.ticket_outcome</code>, <code>freeze_state</code></td></tr>
-      <tr><td>a per-ticket state word reaching the preload list</td><td><b>MISSING</b> — today the list carries membership only; the state lives in the delivery ledger, which the executor panel's certification adapter reads (<code>server/plugins/executor-panel/src/host/certification-adapter.py</code>)</td></tr>
-      <tr><td>the pill itself (+ tooltip)</td><td><b>MISSING</b> — pick A / B / C</td></tr>
-      <tr><td>a first landing to show anything but the neutral state</td><td><b>PENDING</b> — blocked on <code>t261011-17</code> (activity registration) ⇒ then the first landing</td></tr>
-    </table>
+  <h2>3 · LineOn 的颜色（文字恒定 LineOn）</h2>
+  <div class="board" style="padding:12px">
+    <p style="margin:0 0 8px"><span class="ln" data-s="online">LineOn</span> 在线上、未落地 &nbsp;
+      <span class="ln" data-s="waiting">LineOn</span> 等认证 &nbsp;
+      <span class="ln" data-s="overdue">LineOn !</span> 等过头 &nbsp;
+      <span class="ln" data-s="red">LineOn</span> 落在红认证区间 &nbsp;
+      <span class="ln" data-s="certified">LineOn</span> 认证已覆盖 &nbsp;
+      <span class="ln" data-s="delivered">LineOn</span> 已随签字晋级 &nbsp;
+      <span class="ln" data-s="withdrawn">LineOn</span> 落地被撤回</p>
+    <p style="margin:0">不在线上的票：不渲染这枚徽标。</p>
   </div>
 
-  <h2>5 · 状态词的第二落点：票详情头（B 的字形在左栏，词在这里）</h2>
-  <div class="light">
-    <p class="sub" style="color:#57606a">Ticket detail header — only for tickets that are on a line</p>
-    <div style="font-weight:600;color:#24292f;margin:4px 0">A pause that cannot reach a boundary is invisible and inert…</div>
-    <div><span class="tag">t261009-80</span><span class="tag">run_integration_tests</span><span class="tag">running</span>
-      <span class="ln-pill" style="vertical-align:middle"><span>LineOn</span><span class="ln-g">⑃</span></span>
-      <span class="tag">on line <code>develop-buffer</code> · not landed</span></div>
-    <table>
-      <tr><th>Line</th><td><code>develop-buffer</code> · branch <code>develop</code> · owner host</td></tr>
-      <tr><th>Line state</th><td>not landed yet (no landing row for this ticket) &nbsp;·&nbsp; <b>Freeze</b> open &nbsp;·&nbsp; <b>Certifications</b> 0 &nbsp;·&nbsp; <b>Promotions</b> none</td></tr>
-      <tr><th>Proof</th><td>own scenarios + declared fast set (67 members) · ceiling 5 min · <i>the old full round for tickets created before 11:02</i></td></tr>
-    </table>
-    <p class="sub" style="color:#57606a;margin-top:8px">Once it lands, this row reads the words out loud: <code>waiting for &lt;cert id&gt;</code> → <code>covered by &lt;cert id&gt;</code> → <code>delivered in &lt;promotion id&gt;</code>; a red certification reads <code>red · inside &lt;cert id&gt;'s range</code>, never the same face as plain waiting.</p>
-  </div>
-
-  <h2>6 · 要宿主定的几件事（定完就开一张小 UI 票）</h2>
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:12px;font-size:13px;color:#9aa4b2">
-    <p>① <b>选 A / B / C</b>（我的建议：<b>B</b>——定宽不回流、宿主自己提的"LineOn pill"、状态词进 tooltip 与详情头）。</p>
-    <p>② <b>状态词进不进 pill</b>：B 是"字形定宽 + 词在 tooltip"，若你要"字面就能读"，那就是 C（挪到 L2 带词）。</p>
-    <p>③ <b>这枚 pill 要不要顺手当筛选器</b>（点一下 = 只看这条线的票）——若点，它就得是按钮语义（键盘可达）。</p>
-    <p>④ <b>线级 FROZEN 放哪</b>：放左栏表头/筛选项（线不是票的属性），票行只显示票自己的状态——如果你要"冻结时每行都提醒"，那是一条新决定。</p>
-    <p style="margin-top:10px"><b>实现口径（票里钉死）</b>：值只能来自引擎行（list projection 新增一个小 <code>line_face</code>，或在 host adapter 里用同一个 derivation），<b>前端不得自行推导状态</b>；词表继续用 <code>FACE_WORDS</code>；写集 <code>server/plugins/workbench/</code> + <code>integration/</code>。</p>
+  <h2>4 · 已定</h2>
+  <div class="board" style="padding:12px;font-size:13px">
+    <p style="margin:2px 0">三行卡：票号 · 位次 · LineOn · ⏸（·行尾排序控件）／标题独占／step name · 类别 · 十格点阵</p>
+    <p style="margin:2px 0">票号永远在行首；位次保持现状（不动）</p>
+    <p style="margin:2px 0">点阵：第 N 格 ⇒ 前 N 格满色状态色 + 其余同色淡档</p>
+    <p style="margin:2px 0">无彩色左条、无行底色（含中列板面）；收口行只整行淡一档</p>
+    <p style="margin:2px 0">暂停只留 ⏸（两相位靠边框实/虚）；线冻结提示放左栏顶栏</p>
+    <p style="margin:2px 0">行上不放整句——句子只在 tooltip 与详情头</p>
   </div>
 </div>
 </body>

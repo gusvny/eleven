@@ -5261,6 +5261,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 
 ## KI-01M4MGYS34G938XD63W97A09EF **三条 `@activity.defn` 从未注册进 worker 的活动表**（`lane_head_sha` / `land_to_line` / `certification_wait`）：一挂「绿轮面」就永远落不了盘 ⇒ develop buffer 的落地在**前置**处具名拒绝；而前置后面还排着两条**同族死面**——这条路径**一次都没通过电** **(261011 11:40 `t261011-16` 的**零失败轮**实测 + 读码全族扫描;integration 岗登记)**
 
+> **✅ 已闭合（261011 13:18，`t261011-17` 落地 `545c6cba`）**：三条活动补齐进表，第四个成员（`activities.py:inspection_period_identity`）按其真实处境处置（**摘掉空挂的 `@activity.defn`**——它只被当普通函数调用，见本岗 12:2x 的只读核验）；L1 新增守卫 `test_t261011_17_registration_guard.py`（含负对照），L2/L3 两条场景（`t261011-17-registration-surface` = 按**合成表** `compose_worker_activities()` 判、`t261011-17-green-run-face-note` = 面注记的四态真值）在闸轮与本岗手跑**双绿**。**收尾判据（可复用）**：`worker_dryrun` 的活动数 **78 → 81** 且三名齐在。**配套纪律（本轮实证）**：注册是**进程级**的 ⇒ 落地后**中央与在飞票的泳道 worker 都要换手**（本岗实测：中央 pid 10378→20506、`-80` 泳道 pid 7139→20684，`stale` 清空）——**不换手，票的闸与活动仍是旧代码**（同族见 `KI-01M4MNZ3VK46MGH2XWPVE2NVZC`）。
+
 > **现象（原始读数，两条独立佐证）**：
 > 1. **零失败轮照样落不了面**：`t261011-16` 的闸轮回执 `.lane/t261011-16/out/integration-report-261011-113856.json` = **`ran 582 / pass 578 / fail 0 / env_fail 4 / wall 846.6 s`**（`known_red_skipped 46`、`excluded_pools [engine, exclusive]`）——**这是一轮 `failed==0` 的真绿轮**，`shared.green_run_face` 的四条判据（`error==""`、`ran>0`、`failed==0`、`blockers` 空、非定点跑）**全部满足**；但同一分钟它的票面 `log` 里落的是：
 >    `green-run face not recorded (lane_head_sha failed): ActivityError: Activity task failed`（ts `1791690003` = **11:40:03**）⇒ `meta.last_green_run` **仍是 `null`**。`t261009-80` 更早的一次同形（ts `1791673614` = **07:06:54**）也在盘上。
@@ -5334,3 +5336,75 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律（三读定位，先做再说话）**：凡"**修了没用**"的闸红，**先读三样**——①**跑这闸的 worker 的启动时刻**（`engine_ops workers` → 该票泳道行的 `started_at`/`pid`）；②**它的 `stale` 名单**里有没有本闸所在模块；③**闸自己的措辞**对不对得上新代码。三样都指向旧代码 ⇒ 结论是"**换手**"，不是"**返工**"。**并且**：落地一个"闸代码"改动之后，**在飞票的泳道 worker 一律视为旧代码**——要它按新判据判，就得换手（按 pidfile TERM、等控制台 supervisor 拉起、验新 pid ＋ live poller=1）；否则那一票的每一轮闸判都是旧代码的判。
 >
 > **回归**：L2——`engine_ops workers` 对"启动早于某模块 mtime"的 worker **必须**给出该模块在 `stale` 里（已有 `test_engine_ops.py` 覆盖同一形状，此处只作锚点）；L3——**一次"闸代码落地 → 换手 → 同一条脏面由红转绿"的连贯回执**（本条的正面形态：`retry_qc` 之后闸自己打出 `prose dirt exempted …` 文案），且**换手前的那次红必须能在报告里被指认为旧代码的判**。
+
+## KI-01M4MRB4Z62JGVHVNXPTDV0THS **「绿轮面」可以由**5 条场景的收窄轮**铸出**：它只问 `targeted_only`，不问"这轮跑了几条/是不是全量"——而同一个引擎里的 **run 账本写入器**对"收窄轮"是明确拒写的 **(261011 13:41:50 `t261009-80` 实测：面 `ran=5` 铸出并随即被落地消费;integration 岗登记)**
+
+> **实测（原始读数，同一夜同一票）**：`t261009-80` 13:40:44 的验收段回执 = **`ran 5 / pass 1 / fail 0 / env_fail 4 / wall 45.9 s`**；**13:41:50 票面 log 落 `green-run face recorded (ran=5, sha=20a3d48d3b62)`**；**13:50:28 该面被落地消费**——`develop-buffer landing recorded on line develop-buffer (proven 20a3d48d3b62)`，落地账本由此**第一次**出现行（`ldg-01M4MR6EBXMBJFCFDKGM32MFZN`）。⇒ **一个只跑了 5 条场景（其中 4 条还是环境红）的轮次，成了"这张票在这一版树上是绿的"这一判据的唯一来源**。
+>
+> **两套判据在同一棵树上的分歧（本条的要点）**：
+> - **run 账本写入器**（`integration/run_scenarios.py:4267 run_record_skip_reason`）：`narrowed`（`--only` **或** pool 排除）⇒ 具名拒写：`"narrowed round (--only / pool exclusion) is not a proof — no run record"`；闸侧同款（`server/tools/verify_lane.py:1709-1758`，"收窄轮不戴 suite"）。
+> - **绿轮面判据**（`server/engine/shared.py:1166 green_run_face`）：只看 `error=="" && ran>0 && failed==0 && blockers 空 && 非 targeted_only`——**`ran` 只要求 >0**，**没有下界**，也**不读任何 narrowing 标记**。
+> ⇒ 于是"**收窄轮不是证明**"这条纪律在账本面成立、在**面**面失效；而**面才是落地闸真正消费的东西**（`dev_lane.py:3618-3649`：无 sha ⇒ 具名拒绝落地；有 sha ⇒ 直接拿它当"判过的那一版"）。
+>
+> **为什么是"高风险"而不是"学术问题"**：面是**授权**（它决定"哪一版树被免检地写进线"）。若某票的实现轮之后只跑过 1 条自证场景并零计红，面就会以那版树铸出并落地——**整条"证明换落地"的语义被一个 `ran>0` 兜住**。今夜能铸出这面是**好事**（它证明注册面修复生效、develop buffer 第一次通电），但**同一个机制在别处会给出比设计意图弱得多的证据**。
+>
+> **出路（设计口径归宿主，实现归票）**：①`green_run_face` 收一个"**这轮是什么轮**"的具名输入（`narrowed` / `scope`），**收窄轮不得铸面**（与账本面同一套判词），或②给 `ran` 一个**下界**（本票证明面 / 快集面 vs 全量面分开记，面里带 `scope` 字段），让"面"与"账本"两处**同口径**；③无论选哪条，**面里要带上"它凭什么"**（`ran`、`scope`、`skipped`、`overrides`）。
+>
+> **纪律**：**凡"某机制产出的是授权/免检凭据"，必须检查它的判据里有没有"这条凭据本来该有多强"的那一问**；同一个引擎里若另一处已经对同类输入说了"这不算证明"，两处必须同口径——**否则读者会以为纪律是全仓的，而它其实只在某一个面成立**。
+>
+> **回归**：L1——`green_run_face` 对"收窄轮"（`narrowed=True` 或 `ran < 声明下界`）**返回 None**；L2——同一轮同时跑 run 账本写入器与面铸造器，两者对"这轮算不算证明"**给出同一答案**；L3——一次真实落地：若被消费的面来自收窄轮，闸必须点名拒绝并给出"再跑一轮全量"的具名动作。
+
+## KI-01M4MVHTHHS52JXZ9C6JRE8KXM **泳道轮排除 `engine`/`exclusive` 池 ⇒ 该池里的慢性红既**不进票头账**、**也没有 owner**；而**线轮跑全量** ⇒ 线轮/认证面注定红（buffer 最后一公里的第二道结构性障碍）**(261011 14:0x 线轮 + 14:48 本岗主树定点复跑，两次独立实测;integration 岗登记)**
+
+> **实测（两次独立读数，同一批名字）**：
+> 1. **线轮**（`.sandbar/evidence/line-round-261011-1410-suite.log`）：这批名字在线轮里是 `status: fail, cause: self, reason: assert_mismatch`。
+> 2. **本岗主树定点复跑**（venv 齐备，`out/integration-report-261011-144838.json`）：把线轮日志里前 12 条 `FAIL` 拿来跑 ⇒ **`ran 12 / pass 9 / fail 3`**——**9 条在主树是绿的**（⇒ 那些红是"线轮检出缺资产"造成，见 `KI-01M4MGYS34G938XD63W97A09EF` 的修票 `t261011-18`），**剩下 3 条是真红**：
+> | 名字 | 本轮 | 池 | 台账史（`scenario-results.jsonl`） | 在名册 |
+> | --- | --- | --- | --- | --- |
+> | `t260912-03-authz-overlimit-accept` | FAIL 602.7 s | engine | fail 4 / env_fail 1 | **否** |
+> | `t260915-12-gate-real-chain` | FAIL 251.9 s | engine | fail 1 / env_fail 4 | **否** |
+> | `t260915-12-cross-project-gate` | FAIL 0.1 s | engine | **fail 5（一次没绿过）** | **否** |
+> 三条台账的**最后一行都停在 10-10 08:58**——即**此后它们再没被跑过**。
+>
+> **为什么"再没被跑过"（读码/读回执）**：泳道轮的机械回执都带 **`excluded_pools: ["engine", "exclusive"]`**（`excluded_count` 88，见 `-16`/`-17` 各轮回执）⇒ 这两个池在**票轮里根本不跑**。于是它们**不计入票头的 `fail`**（票面据此判"零失败"）、**不在 `known-red` 名册里**（名册是给"跑到了但红"的东西挂账的）、**也没有 owner/retire_when**（名册才要求这两个字段）——**三个面同时看不见它们**。而**线轮跑全量**（`run_scenarios.py` 不带 `--only`）⇒ 它们**必然出现在线轮的回执里**，而线轮正是**认证**的判据来源。
+>
+> **危害（结构性，不是"又红了几条"）**：①**"全量绿"在结构上不可能**：只要这两个池里还有未修也未挂账的红，线轮就注定红 ⇒ 认证要么产出红认证（线冻结/落地被判 `red_implicated`），要么根本跑不出记录（今天就是这个状态）；②**两把尺子**：票轮与线轮的失败集合**天然不等价**（票轮 88 条不跑），而两边都被叫作"这棵树绿不绿"——任一方拿数字做归因都会错；③**无人认领**：这批红没有 owner（不在名册 ⇒ 不适用名册的 owner/retire_when 纪律），于是"修不修"没有归属，**这正是它们能躺两天不动的机制原因**。
+>
+> **出路（口径归宿主，实现归票）**：①**逐条定性这 3 条**（真缺陷 / 环境面），该修的修、该挂账的挂账（名册满格需宿主抬 `max_entries`）；②**把两个口径对齐**——要么线轮也按同一套池口径证明（并**在面里具名"哪些池被排除"**），要么票轮不再静默排除（`excluded_pools` 现在只在回执里，票面/面板上看不见）；③无论选哪条，**"被排除的池"必须是一等可见面**（今天只有一个回执键），否则每次读判据都得重新推导一遍。
+>
+> **纪律**：**凡"某类输入被排除在判据之外"，必须同时回答"谁为它们负责"**——被排除的红不是"不存在"，是"**没有账、没有主**"；而**另一把尺子（线轮/巡检/全量）一旦把它们量出来，就会以"这棵树不绿"的形态反噬**。排除与负责必须成对出现。
+>
+> **回归**：L2——票轮回执/票面**具名**被排除的池与条数（今天只有回执里的 `excluded_pools`），且**线轮的面**同样具名"本轮的池口径"；L3——一次线轮判词：要么这些池参与并被算进绿/红，要么被显式排除并写明"因此本轮不覆盖 engine/exclusive 池"，**两种形态都不许静默**。
+
+## KI-01M4MXABSC08WDPYGEWCPMSZSD **"负控直接写真实资产"的守卫**：`finally` 回滚**不被 SIGTERM 覆盖** ⇒ 一次被打断的运行会把真实注册表**留成坏账本**，而它**会被 commit 带进 main**，下一个读它的人（或守卫）看到的是"守卫红了"而不是"资产坏了" **(261011 15:1x 本岗自己踩到：`integration/test_anchors.json` 被写成 `{not json` 并随 `afd26577` 进 main;已修 `2b10a100`)**
+
+> **现象（原始读数，链条四步）**：
+> 1. **负控写真实路径**：`integration/t261004-25/sc_t26100425_anchor_presence.py:60-79` —— `original = ANCHORS.read_bytes()`，然后为两个负控**直接改写真实注册表**（`:76 ANCHORS.write_text("{not json", encoding="utf-8")`），最后 `finally: ANCHORS.write_bytes(original)`（"字节回滚，零残留"——**正常路径下它是对的**）。
+> 2. **打断**：我把这组守卫放进一条 **60 s 命令预算**里跑（`run_scenarios.py --only … | tail`），到点被 **SIGTERM** 杀掉 ⇒ **`finally` 没执行**（Python 默认 SIGTERM 终止不跑 `finally`；这不是偶发，是语义）⇒ 文件留在 `{not json`。
+> 3. **污染被提交**：我接着用 `git add -A integration/` 提交退役批 ⇒ **坏账本随 `afd26577` 进了 main**。
+> 4. **症状指向错的方向**：随后 `t261004-25-anchor-presence-lint` 红在 `W5.test_anchors.json.parse | Expecting property name enclosed in double quotes: line 1 column 2`、`t261009-51-registry-writer-canonical` 也红 ⇒ **面上像"守卫坏了/规则变严了"**，真因是**资产坏了**。修复=按 `lib_registry.write_registry` 重写规范形并除退役三条锚（`2b10a100`）。
+>
+> **危害（这是本条的价值）**：①`test_anchors.json` 是**真源注册表**（280+713 条锚）；它坏着的每一分钟，lint / 守卫 / 巡检读到的都是"非法账本"——**判据面全瞎**；②一旦被提交，**故障就跨过了"工作树"这道防线**（正常的脏改会被合并闸挡住，但**已提交**的坏账本没有任何闸会挡）；③症状与真因相反，最贵的代价是**误诊**（去改守卫/放宽规则，而该做的只是恢复资产）。
+>
+> **出路（实现归票，纪律归本岗）**：①**负控写临时面**——把它写的坏账本放到临时副本里，让被检的 lint/reader 指向那个副本（需要 reader 支持路径覆盖；若不支持，就把整个仓的一层目录复制到临时根再跑），**真实资产只读**；②或**注册信号处理器**：`SIGTERM/SIGINT` → 先 `write_bytes(original)` 再退出（比 `finally` 可靠）；③**判据面加一条**：任何"注入/负控"场景的**入口**先声明"我动的是哪条真实路径"，并在**异常退出**时留下可检的回执（否则无法事后分辨"谁把它写坏的"）；④**本岗纪律（已立即执行）**：`git add` **具名**，不用 `-A`；长套件**一律后台作业**，不用命令预算掐（§二百六十七 那次也是同一教训的另一面）。
+>
+> **纪律**：**"回滚写在 `finally` 里" ≠ "回滚一定会发生"**——凡是动真实资产的测试，必须把"进程被 kill"当成一等终态来设计（信号处理器/临时面/幂等恢复三选一）；同时**提交前逐文件读 diff**，别让 `-A` 把别人的（或自己的）现场带走。
+>
+> **回归**：L1——SIGTERM 打断该场景后，真实注册表**逐字节不变**（或断言负控只落在临时面）；L2——注册表损坏时 lint/守卫**具名**报"账本解析失败"（W5 面已有，保留）；L3——一次被打断的守卫运行之后，`git status` 对这些注册表**零差异**。
+
+> **同族补一（261011 15:2x，同一次踩坑的第二面：**不只是"被 kill 之后"才坏**）**：那个负控在**运行的那几秒里**就把真实注册表改成了坏账本 ⇒ **并发的读者会读到它**。本岗实测：后台守卫作业（`bash-11`）正在跑时，我另一条命令里的 `lint_tests.py` 直接报 **`ERROR L16 anchor 清单不可读（fail-closed）：test_anchors.json: Expecting property name…`（2 条）**；守卫跑完再跑同一条 lint ⇒ **rc=0**。⇒ 这个洞有两个显形：**①被打断后残留（跨进程、跨提交）**、**②运行窗口内的并发可见（瞬时）**。②的代价是**假红**——同一棵树，同一分钟，两个读者给出相反结论；排查者会去查"谁改了账本"（没人改，是**有守卫正在做负控**）。**修法同一条**（负控写临时面）；**纪律补一条**：**并发跑守卫/巡检期间读注册表得到的红，先问一句"有没有负控正在动它"**，别急着定性。
+
+## KI-01M4N5ASATAVWP6E38NSPECCAT **"覆盖"同一件事两个面两把尺子**：结局面按 **seq**（后一张绿认证覆盖之前的落地），等待面按 **revision 精确相等**（`landable`）⇒ 线头一旦前进，前一票在**等待面永远等不到**、在**结局面却已 certified**；且**没有 landing 行的提交不会被任何线轮判到** **(261011 17:5x 宿主提问"新 commit 通过 ⇒ 之前的提交不都通过了"时读码定位;integration 岗登记)**
+
+> **三个面的原始读数（都读码，不是猜）**：
+> 1. **等待面（精确相等）**：`server/engine/develop_certify.py:585 landable()` —— "Containment per repository is **revision equality** in the single-repository phase（the records name exact revisions；**ancestry is a git question this pure face does not open**）"；`ticket_wait_state()` 判 `certified` 用的就是它 ⇒ **落地只有在"它自己就是那一轮被判的 revision"时才可能等到覆盖**。
+> 2. **结局面（按 seq）**：`server/engine/develop_promote.py:750 ticket_outcome()` 的 `certified_by`＝"**a green certification whose seq is AFTER the landing's**" ⇒ **后面那一轮的绿认证确实把前面的落地记成已认证**（宿主直觉的那一面在这里成立）。
+> 3. **谁被算进一轮**：`develop_certify.derive_range()` 的 `covered_landings`＝**最后一张认证之后、`kind=landing` 的那些行**；`candidate_set()` 取的是"**区间内每仓最后一条 landing 的 revision**（＝线头）"。⇒ **一轮只把一个 revision 当候选**，而 `landable` 要精确相等 ⇒ **区间里非最后那一条 landing，永远得不到"自己的"认证**（它只能靠局面 2 的 seq 规则被记成 certified）。
+>
+> **危害**：①**两个面说两套话**：同一张票，"等待面"显示还在等、而"结局面/账本"已说被认证——值守与复核读到哪一面就会得出相反的结论（本夜宿主与实现之间的那道缝就是这个）；②**手工推进线头不会触发任何一轮**：直接 commit 到 `develop` **不产生 landing 行** ⇒ `derive_range().covered_landings` 为空 ⇒ `run_line_round` 直接 `END_IDLE/range_empty`（`should_certify` 对 change 触发也返回 `range_empty=False`）⇒ **"提交了新 commit 却没被跑"是机制的必然，不是运气问题**；③多仓阶段会立刻放大（每仓各自 HEAD）。
+>
+> **出路（设计口径归宿主，实现归票）**：把两面对齐到**同一条规则**——要么等待面也按"seq 之后的绿认证"（与 `ticket_outcome` 一致，简单、与宿主直觉一致，代价是"被后面的轮次带走"成为正式语义），要么结局面改成精确相等（更严，但会让"线头前进即锁死此前的落地"成为正式语义）；**并**给"线头前进"配一条**可被 `derive_range` 认出的自证面**（例如每次推进都有一条对应的 landing/推进记录），否则"提交了但没人跑"仍会重复发生。
+>
+> **纪律**：**凡"覆盖/包含"这类判据，把"谁覆盖谁"的规则抄成一句话，然后全仓 grep 它的每一处实现**——本条的三个面各写各的，谁都不算错，合起来却互相矛盾。
+>
+> **回归**：L2——同一组记录上，**等待面与结局面**对"这张落地是否被认证覆盖"给出**同一个答案**；L3——一次"线头前进（有推进记录）→ 一轮判绿 → 之前的落地在**两个面**都被记为已覆盖"的连贯回执；且一次**没有推进记录的手工 commit 之后**，机制必须**具名**说明"线头动了但不在任何一轮的候选里"，而不是静默 `range_empty`。

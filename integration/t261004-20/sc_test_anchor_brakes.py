@@ -51,7 +51,22 @@ import lib_fault_injection  # noqa: E402  (t261009-52: the ONE fixture registry)
 import lib_registry  # noqa: E402  (t261009-51: canonical registry serialization)
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-LINT = ["python3", "integration/lint_tests.py"]
+# t261011-22 (host refinement): this scenario tests the LINT MECHANISM —
+# "plant a lesion -> the rule goes red and names the file -> clean tree back
+# to baseline" — so it invokes only the three rules the plant bites (L16
+# anchor manifest, L17 home-path, L18 snapshot discipline) via the --rules
+# subset selector, never the full ~20-rule battery (~100 s per run; the
+# round's 180 s item was this scenario buying its evidence with full lint
+# runs). The full battery keeps being covered by ordinary rounds.
+# NOTE (t261011-22, spec §5 tradeoff, deliberate): the plant stays in the
+# REAL delivered tree and this entry stays in the exclusive pool — the
+# mechanism under proof is "a leaked fixture on the DELIVERED tree is named
+# and reclaimed" (KI-222's leak entered a ticket lane from the real tree), so
+# a temporary tree copy would no longer prove it. The cost that motivated the
+# exclusive pool is removed by the scoped lint + the explicit PLANTED:
+# handshake instead.
+LINT = ["python3", "integration/lint_tests.py",
+        "--rules=L16,L17,L18"]
 MANIFEST = REPO / "integration" / "test_anchors.json"
 PLANTED = REPO / "server" / "engine" / "tests" / "test_zz_t26100420_planted_anchor_case.py"
 NAME = "t261004-20-test-anchor-brakes"
@@ -61,7 +76,8 @@ ok, finish = _ck.ok, _ck.finish
 
 
 def run_lint():
-    r = subprocess.run(LINT, cwd=str(REPO), capture_output=True, text=True, timeout=300)
+    # SANCTIONED-WAIT: hard kill ceiling on a child lint subprocess, never slept to.
+    r = subprocess.run(LINT, cwd=str(REPO), capture_output=True, text=True, timeout=120)
     return r.returncode, r.stdout + r.stderr
 
 
@@ -78,7 +94,12 @@ MARKER_SYNC = ("import pytest\n\n\n"
 
 
 def write_planted(text):
+    # Explicit plant handshake (t261011-22 spec §5): the file exists on disk
+    # BEFORE the line is printed, and the line is flushed immediately — a
+    # parent acting on "PLANTED:" can never observe a half-written file, and
+    # it never has to poll the tree for the fixture's appearance.
     PLANTED.write_text(text, encoding="utf-8")
+    print("PLANTED: %s" % PLANTED.relative_to(REPO), flush=True)
 
 
 # ---- t261009-52: interruption-proof cleanup --------------------------------

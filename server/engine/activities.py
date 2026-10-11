@@ -39,6 +39,9 @@ from executor_delivery import delivery_activity as _executor_delivery_activity
 # develop_line imports this module family, so develop_certify must not depend
 # back at module level — this import direction is safe).
 from develop_certify import line_round_tick_engine as _line_round_tick_engine
+# t261011-21: the reap/abort faces live in the same body-truth module (the
+# import-direction comment above applies — develop_certify never imports us).
+import develop_certify as _develop_certify
 
 from shared import (
     ADMIN_PY,
@@ -199,8 +202,22 @@ async def line_round_tick_engine() -> Dict[str, Any]:
     round owns all records). Body truth: develop_certify.line_round_tick_engine.
     The body is blocking (file IO + the declared runner subprocess), so it
     runs in a thread; failures are per-line named entries inside the result,
-    never raised (the scan tick must survive a broken line)."""
-    return await asyncio.to_thread(_line_round_tick_engine)
+    never raised (the scan tick must survive a broken line).
+
+    t261011-21 (host order 261011 defects 2+3): Temporal's cancellation
+    never reaches the blocking thread, so on ANY unwinding exception this
+    wrapper first reaps the registered runner process group and writes the
+    named abort rows, then re-raises the ORIGINAL exception — a cancelled
+    activity must still look cancelled (t261006-08 C3); nothing is
+    swallowed."""
+    try:
+        return await asyncio.to_thread(_line_round_tick_engine)
+    except BaseException:
+        # abort rows BEFORE the reap: the rows name the in-flight lines,
+        # which only the still-populated registry knows
+        _develop_certify.abort_inflight_ticks("activity_unwinding")
+        _develop_certify.reap_inflight_runners(reason="activity_unwinding")
+        raise
 
 
 @activity.defn

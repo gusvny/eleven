@@ -17,7 +17,9 @@ SANDBAR_SCENARIO_LEDGER_DIR 整体覆盖（测试隔离缝，同 SANDBAR_INSPECT
 run 记录（t261009-11）：每次套件跑收口一行 header，落同目录 runs.jsonl
 （同锁），字段见 RUN_HEADER_FIELDS（v=run-ledger-v1；verdict=counts 的机械
 roll-up；写前按主账重数该 run 的行，counts 对不上或行零在=响亮拒写；
-line 字段暂缺=具名欠账——树里尚无 line 身份可填）。
+line 字段暂缺=具名欠账——树里尚无 line 身份可填）。t261011-25 起可选
+prelude_s/prelude_legs（同 v1 形状上的 additive 可选键：在场必须可量、
+缺席照旧合法——前奏墙钟与分项，line-round 回执读它把前奏成本从场景成本分开）。
 
 写入面（单写者纪律）：唯一写者=闸（server/tools/verify_lane.py）——lane/巡检/
 基线三路都经 lane=integ 收口。本模块提供被闸按文件位装载的库面与本 CLI（查询/
@@ -86,6 +88,12 @@ RUN_SUITES = ("full", "fast-set")
 RUN_HEADER_FIELDS = ("v", "id", "repos", "suite", "source", "env_fp",
                      "conc_width", "pool", "started_at", "duration_s",
                      "cases", "verdict")
+#: t261011-25：ADDITIVE OPTIONAL header fields (same run-ledger-v1 shape — no
+#: version bump; a header without them is exactly as valid as before). A header
+#: carrying them must measure them (number >= 0, bool excluded); absence stays
+#: the honest shape of an unmeasured path (never a fabricated 0). ``prelude_legs``
+#: is a flat name->seconds map (strings only), validated with the same bound.
+RUN_HEADER_OPTIONAL_NUMBER_FIELDS = ("prelude_s",)
 RUN_CASE_FIELDS = ("ran", "passed", "failed", "env_failed")
 
 
@@ -485,11 +493,13 @@ def derive_counts(rows, run_id):
 
 
 def validate_run_header(hdr):
-    """Closed-schema check over RUN_HEADER_FIELDS. Returns (clean, None) or
+    """Closed-schema check over RUN_HEADER_FIELDS (+ the t261011-25 additive
+    optional prelude pair, which is NOT required). Returns (clean, None) or
     (None, reason); malformed input is refused by name, never guessed."""
     if not isinstance(hdr, dict):
         return None, "header_not_dict"
-    extra = sorted(set(hdr) - set(RUN_HEADER_FIELDS))
+    extra = sorted(set(hdr) - set(RUN_HEADER_FIELDS)
+                   - set(RUN_HEADER_OPTIONAL_NUMBER_FIELDS) - {"prelude_legs"})
     if extra:
         return None, "unknown_fields:%s" % ",".join(extra)
     missing = [f for f in RUN_HEADER_FIELDS if f not in hdr]
@@ -527,6 +537,20 @@ def validate_run_header(hdr):
     d = hdr["duration_s"]
     if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
         return None, "duration_s_not_nonnegative_number"
+    # t261011-25 additive optional pair (absent = valid; present = measured)
+    for f in RUN_HEADER_OPTIONAL_NUMBER_FIELDS:
+        if f in hdr:
+            v = hdr[f]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                return None, "%s_not_nonnegative_number" % f
+    if "prelude_legs" in hdr:
+        legs = hdr["prelude_legs"]
+        if not isinstance(legs, dict):
+            return None, "prelude_legs_not_object"
+        for k, v in legs.items():
+            if not isinstance(k, str) or isinstance(v, bool) \
+                    or not isinstance(v, (int, float)) or v < 0:
+                return None, "prelude_legs_entry_invalid:%r" % (k,)
     cases = hdr["cases"]
     if not isinstance(cases, dict) or set(cases) != set(RUN_CASE_FIELDS):
         return None, "cases_not_exact_counts"

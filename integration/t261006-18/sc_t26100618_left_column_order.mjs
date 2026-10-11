@@ -368,17 +368,23 @@ async function runBrowser(pw, browser) {
       !!dotsOK && dotsOK.ok === true,
       dotsOK ? `dot cells=${dotsOK.n}` : 'no row')
 
-    // A3 在跑票：绿点、无任何排序控件。
-    const runRow = await probe(page, `(() => { const r = rowFor(${JSON.stringify(RUN)}); return r ? { ctl: controlsIn(r), dot: dotColor(r) } : null })()`)
-    rec('A3 at-work row: green dot, no handgrip, no arrows',
-      !!runRow && runRow.dot === 'green' && runRow.ctl.length === 0,
-      runRow ? `dot=${runRow.dot} controls=${JSON.stringify(runRow.ctl)}` : 'no row (pre-implement red expected)')
+    // A3 在跑票（t261011-19 declared口径 change, design §14 line ①: the compact
+    // row's LEADING colour marker is retired — the green data-order-dot=work now
+    // lives only on the board column; the left column carries the state via the
+    // ten-cell matrix and the LineOn pill). The stable contract here: no ordering
+    // controls on an at-work row, and no colour marker on the compact row.
+    const runRow = await probe(page, `(() => { const r = rowFor(${JSON.stringify(RUN)}); return r ? { ctl: controlsIn(r), dot: dotColor(r), marker: !!r.querySelector('[data-order-dot]') } : null })()`)
+    rec('A3 at-work row: no ordering controls, leading colour marker retired on the compact row',
+      !!runRow && runRow.ctl.length === 0 && runRow.marker === false,
+      runRow ? `marker=${runRow.marker} controls=${JSON.stringify(runRow.ctl)}` : 'no row (pre-implement red expected)')
 
-    // A4 人门占坑票：琥珀点、无任何排序控件。
-    const holdRow = await probe(page, `(() => { const r = rowFor(${JSON.stringify(HOLD)}); return r ? { ctl: controlsIn(r), dot: dotColor(r) } : null })()`)
-    rec('A4 held-for-you row: amber dot, no handgrip, no arrows',
-      !!holdRow && holdRow.dot === 'amber' && holdRow.ctl.length === 0,
-      holdRow ? `dot=${holdRow.dot} controls=${JSON.stringify(holdRow.ctl)}` : 'no row (pre-implement red expected)')
+    // A4 人门占坑票（same declared口径 change: the amber hold dot is retired on the
+    // compact row; anchors live on the board column only). Stable contract: no
+    // ordering controls, no colour marker on the compact row.
+    const holdRow = await probe(page, `(() => { const r = rowFor(${JSON.stringify(HOLD)}); return r ? { ctl: controlsIn(r), marker: !!r.querySelector('[data-order-dot]') } : null })()`)
+    rec('A4 held-for-you row: no ordering controls, leading colour marker retired on the compact row',
+      !!holdRow && holdRow.ctl.length === 0 && holdRow.marker === false,
+      holdRow ? `marker=${holdRow.marker} controls=${JSON.stringify(holdRow.ctl)}` : 'no row (pre-implement red expected)')
 
     // A5 排队票行有把手与上下箭头（可发现性面；拖拽本体不锚）。
     const grip = await probe(page, `(() => { const r = rowFor(${JSON.stringify(Q2)}); return r ? controlsIn(r) : null })()`)

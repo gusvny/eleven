@@ -403,10 +403,50 @@ const CSS = `${DERIVE_TOKENS_CSS}
   color:var(--dsw-derive-muted,#57606a); padding:1px 2px; border-radius:3px; }
 .wb-order-arrow:hover { background:rgba(255,255,255,.08); color:var(--dsw-alias-label-primary,#1f2328); }
 .wb-order-arrow:disabled { opacity:.4; cursor:default; }
-/* Line-2 ten-cell progress dots (design §7.2 default): lit up to the current stage, zero extra row height. */
+/* Line-2 ten-cell progress dots (design §7.2 default): lit up to the current stage, zero extra row height.
+   t261011-19 (host order, verbatim): a ticket that has reached cell N gets the
+   first N cells in the FULL state colour and the remaining 10-N cells in a dim
+   shade of the SAME hue, never grey; blocked = hollow red cell, failed = solid
+   red cell (shape, not a new colour). data-state lives on the .wb-stage-dots
+   container. */
 .wb-stage-dots { display:inline-flex; align-items:center; gap:2px; flex:none; }
 .wb-stage-dot { width:5px; height:5px; border-radius:1px; background:var(--dsw-derive-border,#d0d7de); }
 .wb-stage-dot[data-on=true] { background:var(--dsw-derive-accent,#0969da); }
+.wb-stage-dots[data-state=active] .wb-stage-dot { background:var(--dsw-derive-accent-bg,#ddf4ff); }
+.wb-stage-dots[data-state=active] .wb-stage-dot[data-visual=lit] { background:var(--dsw-derive-accent,#0969da); }
+.wb-stage-dots[data-state=waiting] .wb-stage-dot { background:var(--dsw-derive-warn-bg,#fff8c5); }
+.wb-stage-dots[data-state=waiting] .wb-stage-dot[data-visual=lit] { background:var(--dsw-derive-warn-border,#d4a72c); }
+.wb-stage-dots[data-state=blocked] .wb-stage-dot { background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-stage-dots[data-state=blocked] .wb-stage-dot[data-visual=lit] { background:transparent; border:1px solid var(--dsw-derive-danger,#cf222e); }
+.wb-stage-dots[data-state=failed] .wb-stage-dot { background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-stage-dots[data-state=failed] .wb-stage-dot[data-visual=lit] { background:var(--dsw-derive-danger-solid,#d1242f); }
+.wb-stage-dots[data-state=done] .wb-stage-dot { background:var(--dsw-derive-border,#d0d7de); }
+/* t261011-19: the LineOn pill — constant text, the COLOUR is the engine's line
+   state (token families only: muted/warn/danger/success). data-line-face is the
+   named render-assertion anchor; outline vs solid carries outline/solid states. */
+.wb-line-pill { flex:none; font-size:10px; font-weight:600; line-height:14px; padding:0 6px;
+  border-radius:8px; border:1px solid var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-muted,#57606a); background:transparent; white-space:nowrap; }
+.wb-line-pill[data-line-face=waiting] { border-color:var(--dsw-derive-warn-border,#eac54f);
+  color:var(--dsw-derive-warn-deep,#7d4e00); background:var(--dsw-derive-warn-surface,#fff8e6); }
+.wb-line-pill[data-line-face=red_implicated] { border-color:var(--dsw-derive-danger-border,#ff9b9b);
+  color:var(--dsw-derive-danger,#cf222e); background:var(--dsw-derive-danger-bg,#ffebe9); }
+.wb-line-pill[data-line-face=certified] { border-color:var(--dsw-derive-success-border,#7dd9a0);
+  color:var(--dsw-derive-success,#1a7f37); background:transparent; }
+.wb-line-pill[data-line-face=delivered] { border-color:var(--dsw-derive-success-solid,#2da44e);
+  color:var(--dsw-derive-on-solid,#fff); background:var(--dsw-derive-success-solid,#2da44e); }
+.wb-line-pill[data-line-face=withdrawn] { border-color:var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-ink-strong,#24292f); background:var(--dsw-derive-border,#d0d7de); }
+/* t261011-19: the three-line compact card — L3 = step name -> chips -> the dot
+   matrix at the right edge (the matrix eats the slack, like the board's controls). */
+.wb-sb .wb-card-l3 { display:flex; align-items:center; gap:6px; min-width:0; font-size:11px;
+  color:var(--dsw-derive-muted,#57606a); }
+.wb-sb .wb-card-l3 .wb-stage-dots { margin-left:auto; }
+/* t261011-19: the line-level FROZEN notice — ONE per project block, in the
+   left-column header area (a line is not a ticket attribute; never per row). */
+.wb-line-frozen { margin:2px 8px 4px 14px; padding:3px 8px; font-size:10px; line-height:1.5;
+  color:var(--dsw-derive-warn-deep,#7d4e00); background:var(--dsw-derive-warn-surface,#fff8e6);
+  border:1px solid var(--dsw-derive-warn-border,#eac54f); border-radius:5px; flex:none; }
 /* Reorder-refusal notice (A7): one line with the engine's refusal verbatim (same token family as .wb-insp-degraded, no new palette). */
 .wb-order-notice { margin:2px 8px 6px 14px; padding:4px 8px; font-size:10px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
@@ -604,6 +644,11 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
+  // t261011-19: the ENGINE's line-level frozen flag per project (the list
+  // route's line_frozen key, fed by src/host/line-face-adapter.py). Rendered
+  // ONCE in the header area — a line is not a ticket attribute. null = the
+  // adapter did not answer (no notice, never an invented flag).
+  const [lineFrozenByProject, setLineFrozenByProject] = useState<Record<string, boolean | null>>({})
   // CL-3 (t261006-18): project key -> concurrency read face (GET /wf/concurrency
   // thin projection). null = face failed/malformed (rows carry zero order marks,
   // never a locally invented order); undefined = not fetched yet.
@@ -879,10 +924,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
         // t260903-07：项目集发布给 chat 项目 tag 装饰器（整体一个请求，成功才发，
         // 失败不发——单态保留 last-known-good）。
         publishProjects(list.map(p => ({ key: p.key, dirs: p.dirs })))
+        // t261011-19: per-project line-level frozen flag, captured from the
+        // same replies as the ticket rows.
+        const lineFrozenEntries: (readonly [string, boolean | null])[] = []
         const entries = await Promise.all(list.map(async (p) => {
           try {
             const tr = await fetch(`/sandbar-workbench/api/wf/tickets?project=${encodeURIComponent(p.key)}`).then(r => r.json())
             const tickets = (tr?.result?.tickets ?? []) as Ticket[]
+            // t261011-19: the line-level frozen flag rides the same reply.
+            const lf = tr?.result?.line_frozen
+            lineFrozenEntries.push([p.key, typeof lf === 'boolean' ? lf : null] as const)
             // t260903-07：逐项目成功分支才发布工单→项目映射（catch 分支不发，见上方 import 注释）。
             // t260915-19 取舍：映射只含 dev-lane 行——巡检行不进 chat 项目 tag 装饰器
             // （其语义=工单会话归属，巡检票无会话；行仍在左栏组内可见，非静默丢失）。
@@ -906,6 +957,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
         if (cancelled) return
         setTicketsByProject(Object.fromEntries(entries))
         setConcByProject(Object.fromEntries(concEntries))
+        setLineFrozenByProject(Object.fromEntries(lineFrozenEntries))
       } catch { /* 静默 */ }
       // CL-3 ten-cell dots (design §7.2): fetch the topology once (/wf/workflows
       // global template face, same source as the epics create dialog, zero host
@@ -1280,6 +1332,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
                       tab=项目内登记序号（关闭不回收，R2）；点 tab 切换（R4）；关闭钮
                       确认弹层后剔入口（R5）；current 高亮唯一（R6）。数据=账册按
                       project 过滤，工单/磁盘存量/subagent 不进账册口径不变。 */}
+                  {/* t261011-19: the line-level FROZEN notice — engine flag, ONE
+                      per project block in the header area, never per ticket. */}
+                  {lineFrozenByProject[g.project.key] === true && (
+                    <div className="wb-line-frozen" data-line-frozen="1"
+                      title="The develop line is frozen: promotions hold; tickets keep working">
+                      Line frozen
+                    </div>
+                  )}
                   <ProjectSessionRow
                     projectKey={g.project.key}
                     projectName={g.project.name}

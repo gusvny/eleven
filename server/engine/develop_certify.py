@@ -582,23 +582,41 @@ def derive_range(rows, line):
             "certified_prefix": last["repos"]}
 
 
-def landable(rows, line, landing, is_green=None):
-    """May this landing be delivered? True iff it is contained in a
-    certification on this line whose run is green. ``is_green`` maps a run id
-    to bool (injected; None means every certification counts — a caller that
-    cannot read runs must say so, not guess). Containment per repository is
-    revision equality in the single-repository phase (the records name exact
-    revisions; ancestry is a git question this pure face does not open)."""
+def _covering_green_cert(rows, line, landing, is_green):
+    """THE one coverage rule (t261011-23, KI-01M4N5ASATAVWP6E38NSPECCAT): a
+    landing is covered iff it lies inside the range of a GREEN certification
+    on its line — ``prev_cert(cert).seq < landing.seq <= cert.seq``, the same
+    predicate ``derive_range()`` computes for ``covered_landings`` and
+    ``_red_range()`` uses for reds. Revision identity is NOT tested here in
+    the single-repository phase: it matters only where the BUILDER anchors it
+    (``candidate_set()`` takes the per-repo HEAD across the range — the
+    multi-repository per-repo anchoring), never in this reader. Certification
+    ranges partition the line's landings, so at most one cert's range
+    contains a landing; the first hit is returned. Returns None when no green
+    range contains the landing."""
     if not isinstance(landing, dict):
         raise CertifyError("landing_not_object")
-    lrev = {r["repo"]: r["revision"] for r in landing.get("repos", [])}
-    for cert in _of_kind(rows, KIND_CERT, line):
+    certs = _of_kind(rows, KIND_CERT, line)
+    for cert in certs:
         if callable(is_green) and not is_green(cert.get("run")):
             continue
-        crev = {r["repo"]: r["revision"] for r in cert.get("repos", [])}
-        if lrev == crev:
-            return True
-    return False
+        prev_seq = 0
+        for earlier in certs:
+            if earlier["seq"] < cert["seq"] and earlier["seq"] > prev_seq:
+                prev_seq = earlier["seq"]
+        if prev_seq < landing.get("seq", 0) <= cert["seq"]:
+            return cert
+    return None
+
+
+def landable(rows, line, landing, is_green=None):
+    """May this landing be delivered? True iff it lies inside the range of a
+    GREEN certification on this line: ``prev_cert(cert).seq < landing.seq <=
+    cert.seq`` — a green round certifies the range that has grown since the
+    previous certification, not one ticket per round (t261011-23). ``is_green``
+    maps a run id to bool (injected; None means every certification counts — a
+    caller that cannot read runs must say so, not guess)."""
+    return _covering_green_cert(rows, line, landing, is_green) is not None
 
 
 # ---- the tick decision -----------------------------------------------------
@@ -1299,13 +1317,12 @@ def ticket_wait_state(rows, line, landing, is_green, now_ms,
                for l in _red_range(rows, line, cert)):
             return dict(base, state=WAIT_RED_IMPLICATED,
                         waiting_for=cert["id"])
-    if landable(rows, line, landing, is_green=is_green):
-        covered = [c for c in certs
-                   if _green(c)
-                   and {r["repo"]: r["revision"] for r in c["repos"]}
-                   == {r["repo"]: r["revision"] for r in landing["repos"]}]
+    # certified (t261011-23): range-based, the same rule as the outcome face
+    # and the red path — inside a GREEN certification's range.
+    covering = _covering_green_cert(rows, line, landing, is_green)
+    if covering is not None:
         return dict(base, state=WAIT_CERTIFIED,
-                    covered_by=covered[-1]["id"])
+                    covered_by=covering["id"])
     last = certs[-1] if certs else None
     state = dict(base, state=WAIT_WAITING,
                  waiting_for=last["id"] if last else None)
@@ -1566,7 +1583,19 @@ def resolve_runner(line, env=None):
     (``{"id": "run-…", "cases": {"ran", "failed", "env_failed"}}``) on
     success. A nonzero exit, a malformed header, a timeout or an OS-level
     failure raises CouldNotRun — the round's own "could not run" path records
-    range growth and opens nothing (goal 24)."""
+    range growth and opens nothing (goal 24).
+
+    t261011-21 (host order 261011 defect 2): the runner is spawned as its
+    own session (``start_new_session=True``) and registered in
+    ``_INFLIGHT_RUNNERS`` while it lives, so a timed-out or cancelled tick
+    can reap the WHOLE process group instead of orphaning a full suite
+    (the 17:19 incident: the activity failed at 30 min and runner pid
+    97387 kept running). The reap is the t261006-08 shape, sync twin:
+    TERM first (the runner's own signal handlers reclaim the run tree),
+    bounded wait, KILL, bounded wait; ESRCH/EPERM tolerate + direct-child
+    fallback (same disposition as agent_activities.reap_spawn_group); the
+    group-escape residual is declined — the repo-level sweep tooling stays
+    the net (the ticket's fault-mode table)."""
     env = os.environ if env is None else env
     cmd = str(env.get(RUNNER_CMD_ENV, "")).strip()
     if not cmd:
@@ -1579,17 +1608,33 @@ def resolve_runner(line, env=None):
         run_env = dict(env)
         run_env["SANDBAR_LINE_ROUND_CANDIDATES"] = json.dumps(candidate_repos)
         try:
-            proc = subprocess.run(cmd, shell=True, capture_output=True,
-                                  text=True, env=run_env, timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            raise CouldNotRun("runner_timeout:%ds" % timeout_s)
+            proc = subprocess.Popen(
+                cmd, shell=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, env=run_env,
+                start_new_session=True)
         except OSError as e:
             raise CouldNotRun("runner_unreachable:%s" % e)
+        # registered strictly AFTER a successful spawn: a failed Popen
+        # never enters the registry (no leak between Popen and register)
+        _INFLIGHT_RUNNERS[proc.pid] = {
+            "proc": proc, "line": str(line), "at": time.time()}
+        try:
+            try:
+                out, err = proc.communicate(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                reap_runner_proc(proc, tag="line-round-runner")
+                raise CouldNotRun("runner_timeout:%ds" % timeout_s)
+            except BaseException:
+                # a cancelled/killed waiter must not leave the tree alive
+                reap_runner_proc(proc, tag="line-round-runner")
+                raise
+        finally:
+            _INFLIGHT_RUNNERS.pop(proc.pid, None)
         if proc.returncode != 0:
             raise CouldNotRun("runner_failed_exit_%d:%s"
-                              % (proc.returncode, proc.stderr.strip()[-200:]))
+                              % (proc.returncode, (err or "").strip()[-200:]))
         try:
-            header = json.loads(proc.stdout)
+            header = json.loads(out)
         except ValueError:
             raise CouldNotRun("runner_header_malformed")
         if not isinstance(header, dict):
@@ -1597,6 +1642,137 @@ def resolve_runner(line, env=None):
         return header
 
     return runner
+
+
+#: Spawned line-round runner processes this worker still owns
+#: (pid -> {"proc", "line", "at"}). Consumed by reap_inflight_runners /
+#: shutdown_inflight_ticks; an entry is removed the moment its wait ends.
+_INFLIGHT_RUNNERS = {}
+#: In-flight tick contexts (project_key -> {"guard_path", "at"}), registered
+#: by line_round_tick_activity so an activity-level abort can leave the ONE
+#: named ledger row the ticket demands (host order 261011 defect 3).
+_INFLIGHT_TICKS = {}
+#: Bounded waits of the TERM-first reap (short on purpose: the runner's own
+#: TERM path reclaims its run tree in seconds).
+_REAP_TERM_WAIT_S = 10.0
+_REAP_KILL_WAIT_S = 5.0
+
+
+def reap_runner_proc(proc, tag=""):
+    """TERM the runner's process group -> bounded wait -> KILL -> bounded
+    wait; the zombie is collected either way. Never raises for a group
+    already gone (ESRCH) or a group we may not signal (EPERM) — falls back
+    to signalling the direct child, best effort. Idempotent on an
+    already-exited proc. Other OSErrors propagate (same stance as
+    agent_activities._reap_agent_proc)."""
+    import errno
+    import signal
+    import subprocess
+    if getattr(proc, "returncode", None) is not None:
+        return ""
+
+    def _sig(sig_value):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig_value)
+        except OSError as e:
+            if e.errno not in (errno.ESRCH, errno.EPERM):
+                raise
+            try:
+                proc.send_signal(sig_value)
+            except (ProcessLookupError, OSError):
+                pass
+
+    def _wait_bounded(t):
+        try:
+            proc.wait(timeout=t)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+
+    _sig(signal.SIGTERM)
+    if not _wait_bounded(_REAP_TERM_WAIT_S):
+        _sig(signal.SIGKILL)
+        _wait_bounded(_REAP_KILL_WAIT_S)
+    note = "reaped pid=%s returncode=%s" % (proc.pid, proc.returncode)
+    if tag:
+        note = "%s %s" % (tag, note)
+    return note
+
+
+def reap_inflight_runners(reason=""):
+    """Reap every registered runner (a timed-out / cancelled tick must not
+    orphan a full suite — host order 261011 defect 2). Idempotent: a pid
+    whose wait already ended was popped by the wait's own finally or a
+    previous pass. Returns the list of reaped pids; never raises for a
+    gone group, so it can run on the cancellation path before the
+    original exception is re-raised."""
+    reaped = []
+    for pid, info in list(_INFLIGHT_RUNNERS.items()):
+        proc = info.get("proc")
+        _INFLIGHT_RUNNERS.pop(pid, None)
+        if proc is None:
+            continue
+        reap_runner_proc(proc, tag="[line-round-reap]")
+        reaped.append(pid)
+    return reaped
+
+
+def abort_inflight_ticks(reason, append_rows_fn=None, now_ms=None):
+    """The abort-row face (host order 261011 defect 3): for every tick
+    context whose guard is STILL held (a round was genuinely in flight),
+    append ONE ``could_not_run`` row per in-flight runner line naming why —
+    a dead round must never look like no round. Rows land through
+    ``append_rows_fn`` when the caller injects one, else through the
+    context's own ledger path (the activity/shutdown faces). Scoped on
+    purpose: a held guard is only a FILTER here; this face NEVER releases
+    a guard (the release belongs exclusively to run_line_round's finally —
+    a foreign guard stays untouched). An append failure is named on stderr
+    and never masks the caller's original exception. Returns the appended
+    lines."""
+    import sys as _sys
+    appended = []
+    reason = str(reason or "activity_aborted").strip()
+    for project_key, ctx in list(_INFLIGHT_TICKS.items()):
+        guard_path = ctx.get("guard_path")
+        ledger = ctx.get("ledger")
+        write = append_rows_fn
+        if write is None and ledger:
+            write = lambda batch: append_rows(batch, str(ledger))  # noqa: E731
+        try:
+            if not guard_path or not guard_held(guard_path):
+                continue
+            lines = sorted({str(info.get("line") or "<unknown>")
+                            for info in _INFLIGHT_RUNNERS.values()})
+            for line in lines:
+                row = could_not_run_row(
+                    line, "activity_aborted:%s" % reason, at_ms=now_ms)
+                if write is not None:
+                    write([row])
+                appended.append(line)
+        except Exception as e:  # noqa: BLE001 — never mask the re-raise
+            _sys.stderr.write(
+                "LINE_ROUND_ABORT row_failed:%s:%s: %s\n"
+                % (project_key, reason, e))
+    return appended
+
+
+def shutdown_inflight_ticks():
+    """Worker-shutdown face (t261011-21 review C2): reap every in-flight
+    runner and write the abort rows on graceful stop, so a stopped worker
+    cannot re-create the orphan shape by another door. Registered via
+    atexit at import; SIGKILL stays unnetted (the sweep tooling is that
+    net, unchanged). Idempotent by construction. The abort rows are written
+    BEFORE the reap clears the registry — the rows name the in-flight
+    lines, which only the still-populated registry knows."""
+    appended = abort_inflight_ticks("worker_shutdown")
+    reaped = reap_inflight_runners(reason="worker_shutdown")
+    _INFLIGHT_TICKS.clear()
+    return {"reaped": reaped, "appended": appended}
+
+
+import atexit as _atexit  # noqa: E402 — registered once at import
+
+_atexit.register(shutdown_inflight_ticks)
 
 
 def line_round_tick(project_key, load_lines, read_rows, append_rows,
@@ -1747,15 +1923,24 @@ def line_round_tick_activity(project_key):
     from develop_line import load_lines  # local: develop_line imports us
 
     ledger = ledger_path(project_key)
-    return line_round_tick(
-        project_key,
-        load_lines=load_lines,
-        read_rows=lambda: read_rows(ledger),
-        append_rows=lambda batch: append_rows(batch, ledger),
-        resolve_runner_fn=resolve_runner,
-        guard_path=str(ledger.parent / "tick-anchor"),
-        now_ms=int(time.time() * 1000),
-        backstop_ms=backstop_ms_from_env())
+    guard_path = str(ledger.parent / "tick-anchor")
+    # t261011-21 defect 3: registered so an activity-level abort
+    # (abort_inflight_ticks) can find this tick's guard and leave the ONE
+    # named row; popped the moment the body returns either way.
+    _INFLIGHT_TICKS[str(project_key)] = {
+        "guard_path": guard_path, "ledger": str(ledger), "at": time.time()}
+    try:
+        return line_round_tick(
+            project_key,
+            load_lines=load_lines,
+            read_rows=lambda: read_rows(ledger),
+            append_rows=lambda batch: append_rows(batch, ledger),
+            resolve_runner_fn=resolve_runner,
+            guard_path=guard_path,
+            now_ms=int(time.time() * 1000),
+            backstop_ms=backstop_ms_from_env())
+    finally:
+        _INFLIGHT_TICKS.pop(str(project_key), None)
 
 
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------

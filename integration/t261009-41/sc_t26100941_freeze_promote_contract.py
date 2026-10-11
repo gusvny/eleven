@@ -141,12 +141,25 @@ check("F2f undeclared kind refused BY NAME, never read as the freeze",
       undecl is not None and "undeclared" in undecl)
 
 # F3 the certified/waiting boundary comes from the records' order.
+# t261011-23 arbitrate iteration: coverage is now GREEN-RANGE membership
+# (prev_cert.seq < landing.seq <= cert.seq, one rule, two faces), so the
+# t-wait landing (seq 2) sits inside cert-green's range (0 < 2 <= 3) and
+# reads certified — the fixture's t-wait did NOT land after the red round,
+# so the old F3b check name did not match its own fixture. The intent
+# (a landing after the red round is not silently certified) moves to a
+# landing that actually lands after cert-red (seq > 4).
 cov = dc.ticket_wait_state(rows, LINE, landing(T_CERT, 1000, 1), is_green, 9999)
 w = dc.ticket_wait_state(rows, LINE, landing(T_WAIT, 1500, 2), is_green, 9999)
 check("F3 covered landing is certified with covered_by",
       cov["state"] == "certified" and cov.get("covered_by") == "cert-green")
-check("F3b landing after the red round is NOT silently certified",
-      w["state"] in ("waiting", "red_implicated"))
+check("F3b landing inside the green round's range is certified (range rule, t261011-23)",
+      w["state"] == "certified" and w.get("covered_by") == "cert-green")
+after_red = {"kind": "landing", "id": "ldg-t-after", "ticket": "t-after",
+             "line": LINE, "repos": [{"repo": "r", "revision": "rev-t-after"}],
+             "at": 3500, "seq": 7}
+wa = dc.ticket_wait_state(rows, LINE, after_red, is_green, 9999)
+check("F3c landing after the red round is NOT silently certified",
+      wa["state"] in ("waiting", "red_implicated"))
 
 # F4 named refusals on malformed input (loud, never guessed).
 def raises(fn):
