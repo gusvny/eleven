@@ -593,3 +593,27 @@ The sequence that actually takes effect (two steps, two owners):
 Judging it: the line-round tick names its own state on the operator surface. With no runner declared it reports
 `runner_missing`; with a runner declared it produces a delivery-ledger row or a named `could_not_run`. "The console
 restarted and nothing changed" is the expected outcome of doing step 1 alone.
+
+### A new lane-flow gate NEVER applies to a ticket already in flight (261011, measured on t261009-80)
+
+The engine gates every new workflow branch behind `workflow.patched(<patch id>)` so old histories replay byte-identically
+(KI-061 discipline). The consequence is operational and easy to miss:
+
+> `t261011-10` landed the develop-buffer two-part proof at 11:02 (`DEV_BUFFER_FAST_PROOF_PATCH_ID = "dev-buffer-fast-proof-v1"`,
+> inside `if workflow.patched(...) and is_develop_buffer_ticket(...)`). The already-running buffer ticket `t261009-80`
+> (history started 02:22) evaluates `patched() = False`, so its round at 11:17:30 ran the **full 581-scenario suite** again
+> (`ran 581 / pass 576 / fail 1`) — not the own+fast plan the design requires. Measured, not inferred: the round's receipt
+> shows 581 cases while a fresh buffer lane's closing run is the scoped plan (the fast set alone measured 13s).
+
+Rules that follow:
+
+1. **Do not expect a landing in flight to pick up a new proof/flow rule.** An in-flight ticket keeps the old evidence rule
+   for its whole life; the only tickets that exercise a new gate are those **created after the change landed** (their history
+   records the marker).
+2. So "we shipped the flow fix, now the parked ticket will benefit" is false. When a new lane-flow rule matters for a ticket
+   that is already running, the choices are: keep rolling the old rule (the lottery), park it, or **open a fresh ticket** to
+   exercise the new rule end to end.
+3. When you open that fresh ticket, say in its face that it is the **first run on the new gate** — the receipt is the evidence
+   the change works (a compared wall clock or case count against the old path is the cheapest proof).
+4. The same rule applies in reverse: a fix landed for legacy tickets must not be expected to change anything for a ticket that
+   already opted into the new version, and vice versa.
