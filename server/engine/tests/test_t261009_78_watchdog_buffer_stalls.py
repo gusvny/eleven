@@ -254,15 +254,41 @@ def test_c9_repair_ticket_parked_at_a_human_gate_is_not_remedy_in_flight():
 
 
 def test_c10_pending_target_landing_counts_as_remedy_in_flight():
+    # t261011-23 fixture update (named reason, intent unchanged): under the
+    # range-coverage rule, a certification whose range contains the landing
+    # COVERS it (certified), and a certified target is no longer a PENDING
+    # remedy. For the landing to be genuinely pending, its seq must lie AFTER
+    # the last certification (outside every range) — which is what the old
+    # fixture could only express through a revision mismatch.
     cert = {"kind": "certification", "id": "cert-r", "line": LINE,
             "repos": _repos("rev-other"), "run": "run-r", "booked_red": "none",
             "judged_by": "inspector", "seq": 9, "at": NOW_MS - 1 * H}
-    f = _facts([_freeze(), _landing(tid="t-fixer", lid="ldg-fix"), _rel(frm="t-fixer"),
-                cert])
+    f = _facts([_freeze(), _landing(tid="t-fixer", lid="ldg-fix", seq=10),
+                _rel(frm="t-fixer"), cert])
     hits = lw.stall_legs(f, {}, NOW, _thr(freeze_without_remedy_min=60,
                                           cert_wait_overdue_min=10080),
                          is_green=lambda run: True)
     assert hits == []
+
+
+def test_c10b_covered_target_landing_is_no_longer_a_pending_remedy():
+    # Named consequence of the range rule (t261011-23): a target landing
+    # INSIDE the green certification's range is certified — the remedy is
+    # done, not in flight — so an open freeze with nothing else in flight
+    # names the freeze-without-remedy leg (the repair relation should have
+    # been resolved; a stuck-open freeze stays visible, never silenced).
+    cert = {"kind": "certification", "id": "cert-r", "line": LINE,
+            "repos": _repos("rev-other"), "run": "run-r", "booked_red": "none",
+            "judged_by": "inspector", "seq": 9, "at": NOW_MS - 1 * H}
+    f = _facts([_freeze(), _landing(tid="t-fixer", lid="ldg-fix", seq=1),
+                _rel(frm="t-fixer"), cert])
+    hits = lw.stall_legs(f, {}, NOW, _thr(freeze_without_remedy_min=60,
+                                          cert_wait_overdue_min=10080),
+                         is_green=lambda run: True)
+    assert len(hits) == 1
+    h = hits[0]
+    assert h["leg"] == lw.LEG_FREEZE_NO_REMEDY
+    assert "remedies_in_flight=0" in h["evidence"]
 
 
 def test_c11_frozen_but_young_is_silent():

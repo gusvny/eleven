@@ -582,23 +582,41 @@ def derive_range(rows, line):
             "certified_prefix": last["repos"]}
 
 
-def landable(rows, line, landing, is_green=None):
-    """May this landing be delivered? True iff it is contained in a
-    certification on this line whose run is green. ``is_green`` maps a run id
-    to bool (injected; None means every certification counts — a caller that
-    cannot read runs must say so, not guess). Containment per repository is
-    revision equality in the single-repository phase (the records name exact
-    revisions; ancestry is a git question this pure face does not open)."""
+def _covering_green_cert(rows, line, landing, is_green):
+    """THE one coverage rule (t261011-23, KI-01M4N5ASATAVWP6E38NSPECCAT): a
+    landing is covered iff it lies inside the range of a GREEN certification
+    on its line — ``prev_cert(cert).seq < landing.seq <= cert.seq``, the same
+    predicate ``derive_range()`` computes for ``covered_landings`` and
+    ``_red_range()`` uses for reds. Revision identity is NOT tested here in
+    the single-repository phase: it matters only where the BUILDER anchors it
+    (``candidate_set()`` takes the per-repo HEAD across the range — the
+    multi-repository per-repo anchoring), never in this reader. Certification
+    ranges partition the line's landings, so at most one cert's range
+    contains a landing; the first hit is returned. Returns None when no green
+    range contains the landing."""
     if not isinstance(landing, dict):
         raise CertifyError("landing_not_object")
-    lrev = {r["repo"]: r["revision"] for r in landing.get("repos", [])}
-    for cert in _of_kind(rows, KIND_CERT, line):
+    certs = _of_kind(rows, KIND_CERT, line)
+    for cert in certs:
         if callable(is_green) and not is_green(cert.get("run")):
             continue
-        crev = {r["repo"]: r["revision"] for r in cert.get("repos", [])}
-        if lrev == crev:
-            return True
-    return False
+        prev_seq = 0
+        for earlier in certs:
+            if earlier["seq"] < cert["seq"] and earlier["seq"] > prev_seq:
+                prev_seq = earlier["seq"]
+        if prev_seq < landing.get("seq", 0) <= cert["seq"]:
+            return cert
+    return None
+
+
+def landable(rows, line, landing, is_green=None):
+    """May this landing be delivered? True iff it lies inside the range of a
+    GREEN certification on this line: ``prev_cert(cert).seq < landing.seq <=
+    cert.seq`` — a green round certifies the range that has grown since the
+    previous certification, not one ticket per round (t261011-23). ``is_green``
+    maps a run id to bool (injected; None means every certification counts — a
+    caller that cannot read runs must say so, not guess)."""
+    return _covering_green_cert(rows, line, landing, is_green) is not None
 
 
 # ---- the tick decision -----------------------------------------------------
@@ -1299,13 +1317,12 @@ def ticket_wait_state(rows, line, landing, is_green, now_ms,
                for l in _red_range(rows, line, cert)):
             return dict(base, state=WAIT_RED_IMPLICATED,
                         waiting_for=cert["id"])
-    if landable(rows, line, landing, is_green=is_green):
-        covered = [c for c in certs
-                   if _green(c)
-                   and {r["repo"]: r["revision"] for r in c["repos"]}
-                   == {r["repo"]: r["revision"] for r in landing["repos"]}]
+    # certified (t261011-23): range-based, the same rule as the outcome face
+    # and the red path — inside a GREEN certification's range.
+    covering = _covering_green_cert(rows, line, landing, is_green)
+    if covering is not None:
         return dict(base, state=WAIT_CERTIFIED,
-                    covered_by=covered[-1]["id"])
+                    covered_by=covering["id"])
     last = certs[-1] if certs else None
     state = dict(base, state=WAIT_WAITING,
                  waiting_for=last["id"] if last else None)

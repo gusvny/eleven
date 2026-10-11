@@ -1332,6 +1332,11 @@
       "note": "t261009-50 wiring tripwire: line_round_tick_engine registered in ALL_ACTIVITIES (executed-but-unregistered would be an activity-not-found on every tick), workflows.py carries LINE_ROUND_PATCH_ID == dispatcher-scan-line-round, engine body reachable",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261011_23_range_coverage.py": {
+      "anchor": "contract",
+      "note": "t261011-23 (KI-01M4N5ASATAVWP6E38NSPECCAT): range-based coverage contract - a landing is covered iff prev_cert(cert).seq < landing.seq <= cert.seq of a GREEN certification (the derive_range/_red_range predicate, replacing revision equality); properties: post-cert landing still waiting, red-range red_implicated unchanged, non-head landing inside a green range certified with covered_by naming it, two-face agreement pins on solo/head/waiting shapes plus the named non-head outcome-face divergence gap",
+      "sync_path": "server/engine/develop_certify.py (_covering_green_cert / landable / ticket_wait_state certified branch)"
+    },
     "server/engine/tests/test_t261009_62_relation_evidence.py": {
       "anchor": "contract",
       "note": "t261009-62: relation rows refuse evidence-less / self-benefiting / malformed rows by name; supersedes_relation corrections resolve via current_relations (declared row contract, temp ledgers)"
@@ -4520,6 +4525,10 @@
       "anchor": "source-text",
       "note": "t261009-20: both settle_shape_needs_rerun routing sites stay behind workflow.patched(SETTLE_RERUN_PATCH_ID); SETTLE_RERUN_PATCH_ID literal unique; hostile settle errors keep the rerun branch unreachable",
       "sync_path": ""
+    },
+    "integration/t261011-23/sc_t26101123_faces_agree_on_range.py": {
+      "anchor": "behaviour",
+      "note": "t261011-23 one rule two faces: the waiting face answers by GREEN-range membership (prev_cert.seq < landing.seq <= cert.seq) so a non-head landing inside a green range reads certified with covered_by naming that certification and landable True (KI-01M4N5ASATAVWP6E38NSPECCAT, the t261009-80 incident shape); face agreement with ticket_outcome.certified_by is pinned on shared shapes (head landing certified on both faces with the same cert id; post-cert landing uncovered on both faces) plus the universal direction outcome-certified implies wait-certified; the residual non-head outcome divergence (develop_promote outside the ticket write set, fallback (b)) stays pinned by name; red_implicated unchanged and a later red never overturns already-covered landings; real temp delivery ledger via the engine's own writer/reader"
     },
     "integration/t261009-21/sc_t26100921_waiting_freeze.py": {
       "anchor": "behaviour",
