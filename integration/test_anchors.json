@@ -4941,6 +4941,11 @@
       "anchor": "contract",
       "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty scenario — the landing evaluator / effect statement / pure receipt-face builder public-contract truth tables (landed/refused/pending, baseline non-misattribution, paused-vs-stuck wording, blocked names will-not-take-effect + slot stays held, unconfirmed keeps delivered with the named re-check face), malformed-input named degradation, and the ticket detail face pause_effect wiring pin",
       "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face); server/tools/ticket.py (_pause_effect_of, _v2_query)"
+    },
+    "integration/t261011-11/sc_fast_set_review_patrol.py": {
+      "anchor": "behaviour",
+      "note": "t261011-11: the fast set's patrol face (--print-fast-set-review) and its append-only verdict ledger judged over the real CLI with fixture ledgers/roster; declarations printed beside measurements, must-lose-membership fail-closed, breach is a signal never a trim",
+      "sync_path": ""
     }
   }
 }

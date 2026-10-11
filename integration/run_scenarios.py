@@ -122,6 +122,10 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t261011-11: the fast set gets a patrol face and a verdict record ----
+    ("t261011-11-fast-set-review-patrol",
+     "The fast set's patrol is a face and a record: membership decisions become evidence-led and auditable (ticket t261011-11, user words 'nobody can see why a member is in it, what it costs, or what it has ever caught — give the patrol a face and a record'; design goal 4 docs/design/develop-buffer-v1.md 'membership is maintained, not fixed'; grey-box L3, the REAL run_scenarios.py CLI subprocess over env-injected fixture ledgers plus the public review core discovered by contract name, offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A the ONE read-only review face exits 0 on the real tree printing the CURRENT DECLARATIONS (cadence, catch window, budget, width) beside the measurements, one line per member with its fast-catch clause, and — with empty ledgers — NAMES the no-measured-cost and no-recorded-verdict cases per member, never a fabricated number or silence; B fixture scenario ledger: mean AND max cost shown with run counts, a member red inside a judged round surfaced as catch evidence, and the declared no-catch-in-window flag firing for a member without reds; C fixture verdict ledger read back by the SAME face — corrections are new rows and the LATEST verdict (remove after keep) is what the reader sees, malformed verdict rows named non-fatally (the face still exits 0); D a member that became booked (fixture roster via SANDBAR_KNOWN_RED_ROSTER) is NAMED must-lose-membership with a NON-ZERO exit — fail closed, never silently kept; E over a fixture registry the pure core flags a browser-pool member must-lose-membership and names a coverage gap driven from the registry's own grouping (never a second hand-kept list); F a measured wall clock over the declared budget produces a NAMED breach signal with the full member list intact (a signal, never an auto-trim); G the declaration comment carries the periodic cadence interval and the four event triggers (MISS / red inside a round / budget breach named / roster-pool guards) and the face prints the declared cadence value; H the review face refuses to combine with --fast-set, exit 2, REFUSED [__fast_set__] prefix. Intent split: the declaration face and gate refusals belong to t261009-16-fast-set-declaration/-gate (not re-asserted); per-flag truth tables and ledger row-shape matrices belong to developer L1. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2",
+     "python3 -B integration/t261011-11/sc_fast_set_review_patrol.py", "ro"),
     # ---- t261011-02: the CLI board row says what the engine row says ----
     ("t261011-02-ticket-list-projection-parity",
      "For the same ticket the CLI board face and the engine row face agree per-key (ticket t261011-02, user words 'the CLI row says what the engine row says — fix the whole seam, not just the one key'; incident = ticket.py _list rebuilt rows through fixed key whitelists twice, so lane_version/develop_line read '' for every ticket while the develop-buffer opt-in's first ticket was in flight, and the same seam had already eaten paused/paused_phase (t260908-01, t260910-04 rerouted the console instead of repairing the projection) and exec_status/close_health/close_health_reason; grey-box L3, the REAL engine row builder _row_from_meta loaded from the real client.py over real meta shapes (develop-buffer opt-in, between-segment paused, minimal closed, legacy no-key rows) fed through the declared _poc transport seam into the real CLI op entry ticket.run({'op':'list'}), offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A PER-KEY AGREEMENT on the ticket's two named covers — the develop-buffer ticket's lane_version/develop_line and the paused ticket's paused/paused_phase arrive on the CLI row with the engine's exact values, and NO key of the engine row is recomputed or rename-drifted; B KEY-SET PARITY — every key of the real engine row (including the caller-added close_ts and the closed-row shape's health/exec_status keys) is carried, so the day the engine adds a key and the projection does not, this reds by name; C HONEST ABSENCE — a legacy row missing the newer keys reads honestly empty, never guessed, never a crash; D SINGLE SOURCE — the engine-formatted updated string and epoch updated_ts arrive verbatim, never re-derived from the CLI wall clock. Scope guard: the console and the engine row face are read, never modified. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. Engine tree or ticket.py missing/unimportable = ENV_FAIL exit 2",
@@ -3535,6 +3539,307 @@ def fast_set_wall_estimate(entries, costs, width=3):
     return {"est_s": round(est, 2), "width": int(width), "pools": out}
 
 
+def fast_set_cost_stats(rows, names):
+    """Pure: ({name: {mean_s, max_s, runs} | None}, bad_rows) from scenario-
+    ledger rows. No usable row -> None: the caller names the no-measurement
+    case, never fabricates a 0. Malformed rows are counted, never dropped
+    silently. fast_set_costs() delegates here for its mean."""
+    by = {}
+    bad = 0
+    for r in rows:
+        if not isinstance(r, dict) or not isinstance(r.get("scenario"), str):
+            bad += 1
+            continue
+        w = r.get("wall_s")
+        if isinstance(w, bool) or not isinstance(w, (int, float)) or w < 0:
+            bad += 1
+            continue
+        by.setdefault(r["scenario"], []).append(float(w))
+    stats = {}
+    for n in names:
+        v = by.get(n)
+        stats[n] = ({"mean_s": round(sum(v) / len(v), 2),
+                     "max_s": round(max(v), 2),
+                     "runs": len(v)} if v else None)
+    return stats, bad
+
+
+def fast_set_costs(rows, names):
+    """Pure: (costs, bad_rows) — mean wall_s per member name from ledger rows.
+
+    A member with no row (or no usable row) maps to None: the caller must say
+    "no measured cost", never fabricate a 0. Malformed rows are counted and
+    named, never fatal and never silently dropped. Delegates to
+    fast_set_cost_stats() (mean+max+runs) and keeps its mean-only contract.
+    """
+    stats, bad = fast_set_cost_stats(rows, names)
+    return {n: (s["mean_s"] if s else None) for n, s in stats.items()}, bad
+
+
+# ---- t261011-11: the fast-set patrol (cadence, triggers, verdict ledger) ------
+# The patrol is the standing duty behind the stewardship note at the
+# declaration: membership is MAINTAINED, not fixed (design goal 4). Cadence
+# and triggers, declared here in the declaration's own comment block so a
+# membership edit can never outrun them:
+#
+# Periodic review: every FAST_SET_REVIEW_CADENCE_DAYS days, the integration
+# patrol runs --print-fast-set-review and records a keep/add/remove verdict
+# row per member it judged (append-only; see FAST_SET_REVIEW_LEDGER_ENV).
+#
+# Event-driven review, four named triggers:
+#   (a) MISS — a defect reached the buffer/line that a member was meant to
+#       catch: an ADD candidate (the missing class joins via its fast marker).
+#   (b) RED-IN-ROUND — a member went red inside a judged round: fix it or
+#       remove it. A red is a catch only if it matches the member's own
+#       fast-catch clause; the review face names both so a human judges.
+#   (c) BUDGET BREACH — the set's measured wall estimate
+#       (fast_set_wall_estimate) exceeds FAST_SET_BUDGET_MIN: a NAMED
+#       stewardship signal, never an auto-trim.
+#   (d) GUARD FIRES — the roster/pool guards (fast_set_preflight) name a
+#       member booked (known-red roster) or browser-pool: that member MUST
+#       lose membership, fail closed, never silently kept.
+#
+#: The declared concurrency width the budget's pole arithmetic assumes
+#: (SANDBAR_CONC_POOLS default ro:3). Changing it invalidates the budget —
+#: a named stewardship event. The per-member budget share derives from THIS
+#: constant, never from a second hand-kept number.
+FAST_SET_CONC_WIDTH = 3
+#: Declared per-member budget contribution, in seconds: the wall budget split
+#: across one width-slot's worth of members. Derived, not declared twice.
+FAST_SET_MEMBER_BUDGET_S = round(FAST_SET_BUDGET_MIN * 60 / FAST_SET_CONC_WIDTH)
+#: Declared periodic review cadence, in days (the patrol's standing interval).
+FAST_SET_REVIEW_CADENCE_DAYS = 14
+#: Declared catch window, in judged rounds: a member with no red row of its
+#: own across this many judged rounds carries the no-catch-in-window flag.
+FAST_SET_CATCH_WINDOW_ROUNDS = 20
+#: The verdict ledger: append-only JSONL rows, one per patrol decision —
+#: {"at", "member", "verdict": keep|add|remove, "cost_s", "evidence", "who"}.
+#: Corrections are NEW rows (the later row per member wins); the file is
+#: never rewritten. AUDITABILITY RULE: this ledger must stay git-tracked and
+#: must NEVER be gitignored — an untracked verdict record is no record.
+FAST_SET_REVIEW_LEDGER_ENV = "SANDBAR_FAST_SET_REVIEW_LEDGER"
+FAST_SET_REVIEW_VERDICTS = ("keep", "add", "remove")
+FAST_SET_REVIEW_ROW_FIELDS = ("at", "member", "verdict", "cost_s",
+                              "evidence", "who")
+
+
+def _fast_set_review_ledger_path():
+    """Default verdict-ledger path, env-overridable (test seam + lane seam)."""
+    return (os.environ.get(FAST_SET_REVIEW_LEDGER_ENV)
+            or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "fast-set-review.jsonl"))
+
+
+def fast_set_review_rows(path=None):
+    """Read the verdict ledger -> (rows, bad_samples). Absent file = no
+    recorded verdicts (a fresh patrol, not an error — the face names it). A
+    malformed line is counted and named, never guessed and never fatal: the
+    readable rows stay readable."""
+    target = path or _fast_set_review_ledger_path()
+    rows, bad = [], []
+    try:
+        with open(target, encoding="utf-8") as fh:
+            for ln in fh:
+                s = ln.strip()
+                if not s:
+                    continue
+                try:
+                    obj = json.loads(s)
+                except ValueError:
+                    bad.append(s[:160])
+                    continue
+                if isinstance(obj, dict):
+                    rows.append(obj)
+                else:
+                    bad.append(s[:160])
+    except FileNotFoundError:
+        return [], []
+    except IsADirectoryError:
+        bad.append("verdict ledger path is a directory: %s" % target)
+        return [], bad
+    except OSError as e:
+        bad.append("verdict ledger unreadable (%s: %s): %s"
+                   % (type(e).__name__, e, target))
+        return [], bad
+    return rows, bad[:10]
+
+
+def _fast_set_review_row_error(row):
+    """The named reason `row` is not a legal verdict row, or None."""
+    if not isinstance(row, dict):
+        return "verdict row must be a JSON object, got %s" % type(row).__name__
+    for f in FAST_SET_REVIEW_ROW_FIELDS:
+        if f not in row:
+            return "verdict row missing field %r" % f
+    for f in ("at", "member", "evidence", "who"):
+        v = row[f]
+        if not isinstance(v, str) or not v.strip():
+            return "verdict row field %r must be a non-empty string" % f
+    if row["verdict"] not in FAST_SET_REVIEW_VERDICTS:
+        return "verdict row verdict %r outside %s" % (
+            row["verdict"], ",".join(FAST_SET_REVIEW_VERDICTS))
+    c = row["cost_s"]
+    if c is not None and (isinstance(c, bool) or not isinstance(c, (int, float))
+                          or c < 0):
+        return "verdict row cost_s must be a non-negative number or null"
+    return None
+
+
+def fast_set_review_append(row, path=None):
+    """Append ONE verdict row to the ledger. The exact row shape is enforced
+    fail-closed (a named refusal, nothing written). Append-only by contract:
+    existing bytes are never rewritten — a correction is a new row."""
+    err = _fast_set_review_row_error(row)
+    if err:
+        raise ValueError("REFUSED [__fast_set__] %s — nothing written" % err)
+    with open(path or _fast_set_review_ledger_path(), "a",
+              encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def fast_set_review_verdicts(rows):
+    """Pure: last recorded verdict row per member (a correction is a later
+    row, and it wins). Members without any row are absent from the dict —
+    the face names the no-recorded-verdict case, it never invents one."""
+    out = {}
+    for r in rows:
+        if _fast_set_review_row_error(r) is None:
+            out[r["member"]] = r
+    return out
+
+
+def fast_set_review_rounds(rows):
+    """Pure: the judged-round view of scenario-ledger rows ->
+    {"rounds": <ordered distinct run ids>, "unrunned_rows": <int>,
+     "note": <named degradation or "">}.
+
+    A judged round = a distinct ledger `run` id. Legacy rows without `run`
+    are not judgeable as rounds and are counted under unrunned_rows, never
+    folded into a fabricated count. An empty or run-less ledger degrades
+    NAMED via `note`: the window flag is then not judged at all."""
+    rounds, seen, unrunned = [], set(), 0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("run")
+        if not isinstance(rid, str) or not rid.strip():
+            unrunned += 1
+            continue
+        if rid not in seen:
+            seen.add(rid)
+            rounds.append(rid)
+    note = ""
+    if not rounds:
+        note = ("no judged rounds in the scenario ledger (no rows carry a "
+                "run id%s) — no-catch-in-window is NOT judged, never "
+                "fabricated" % ("" if not unrunned else
+                                "; %d run-less legacy row(s) seen" % unrunned))
+    return {"rounds": rounds, "unrunned_rows": unrunned, "note": note}
+
+
+def fast_set_member_red_runs(rows, names):
+    """Pure: {member: [run ids]} of a member's red (verdict=fail) rows inside
+    judged rounds. pass/env_fail/skip never count as a catch; run-less rows
+    are not judgeable and are skipped (fast_set_review_rounds names them)."""
+    out = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rid = r.get("run")
+        if not isinstance(rid, str) or not rid.strip():
+            continue
+        if r.get("verdict") == "fail" and r.get("scenario") in names:
+            out.setdefault(r["scenario"], []).append(rid)
+    return out
+
+
+def fast_set_review(members, costs=None, booked=None, verdicts=None,
+                    rounds_view=None, red_runs=None,
+                    width=FAST_SET_CONC_WIDTH, registry=None):
+    """Pure flag core: {"members": {member: [named flags]}, ...set lines}.
+
+    `costs` accepts either the mean (number) or the full stats dict from
+    fast_set_cost_stats() ({mean_s, max_s, runs}) per member. Optional inputs
+    (booked/verdicts/rounds_view/red_runs) default to their empty shape so a
+    caller can probe the core over a fixture registry.
+
+    Flags (each named, none hidden):
+    - over-budget-share: measured mean exceeds FAST_SET_MEMBER_BUDGET_S (an
+      unmeasured member can never carry it).
+    - red-in-round: the member has red row(s) inside judged rounds — worded
+      as evidence TO JUDGE against the member's own fast-catch clause, never
+      silently equated with a catch (review condition 2).
+    - no-catch-in-window: no red of its own within the last
+      FAST_SET_CATCH_WINDOW_ROUNDS judged rounds; not judged at all when the
+      ledger has no rounds (named degradation, not a flag — review cond. 3).
+    - must-lose-membership:booked / must-lose-membership:browser-pool: the
+      existing guards' conditions, named — the member must LOSE membership,
+      fail closed, never silently kept.
+    - recorded-remove: the member's last patrol verdict is REMOVE —
+      membership outlived its verdict, a named stewardship signal.
+    Set-level keys: "uncovered_pools" (registry-derived coverage gap when a
+    registry is supplied), "rounds_note" (the named window degradation).
+    """
+    booked = set(booked or ())
+    verdicts = verdicts or {}
+    rounds_view = rounds_view or {
+        "rounds": [], "unrunned_rows": 0,
+        "note": "no judged-round view supplied — window not judged"}
+    red_runs = red_runs or {}
+    recent = set(rounds_view["rounds"][-FAST_SET_CATCH_WINDOW_ROUNDS:])
+    has_rounds = bool(rounds_view["rounds"])
+    per = {}
+    for e in members:
+        name = e[0]
+        f = []
+        c = (costs or {}).get(name)
+        mean = c["mean_s"] if isinstance(c, dict) else c
+        if mean is not None and mean > FAST_SET_MEMBER_BUDGET_S:
+            f.append("over-budget-share (mean %.2fs > declared %.2fs)"
+                     % (mean, FAST_SET_MEMBER_BUDGET_S))
+        reds = red_runs.get(name) or []
+        if reds:
+            f.append("red-in-round: %d red row(s) in judged rounds (%s) — a "
+                     "red counts as a catch only if it matches this "
+                     "member's fast-catch clause; judge the match"
+                     % (len(reds), ",".join(reds[:3])))
+        elif has_rounds and name not in red_runs:
+            f.append("no-catch-in-window: no red of its own in the last %d "
+                     "judged rounds (declared window)"
+                     % FAST_SET_CATCH_WINDOW_ROUNDS)
+        if name in booked:
+            f.append("must-lose-membership:booked (on the known-red roster — "
+                     "a booked-red case cannot back a tripwire)")
+        if pool_of(e) == "browser":
+            f.append("must-lose-membership:browser-pool (the round's serial "
+                     "pole — refused by the existing guards)")
+        v = verdicts.get(name)
+        if v is not None and v["verdict"] == "remove":
+            f.append("recorded-remove: the last patrol verdict is REMOVE — "
+                     "membership outlived its verdict")
+        per[name] = f
+    return {"members": per,
+            "member_budget_s": FAST_SET_MEMBER_BUDGET_S,
+            "width": int(width),
+            "uncovered_pools": (fast_set_uncovered_pools(registry)
+                                if registry is not None else []),
+            "rounds_note": rounds_view.get("note", "")}
+
+
+def fast_set_uncovered_pools(registry=None):
+    """Pure: registry pools holding in-registry scenarios but ZERO fast
+    members — the coverage-gap view, driven from the registry's own grouping
+    (never a second hand-kept class list)."""
+    reg = SCENARIOS if registry is None else registry
+    pools, covered = {}, set()
+    for e in reg:
+        p = pool_of(e)
+        pools[p] = pools.get(p, 0) + 1
+        if FAST_SET_MARKER in e[3:]:
+            covered.add(p)
+    return sorted(p for p in pools if p not in covered)
+
+
 def fast_set_mode_enabled(flag=None, env=None):
     """--fast-set resolution: explicit flag > env switch > off."""
     if flag is not None:
@@ -3572,7 +3877,7 @@ def print_fast_set_declaration() -> int:
         costs = {n: None for n in names}
     else:
         costs, bad = fast_set_costs(rows, names)
-    est = fast_set_wall_estimate(members, costs, width=3)
+    est = fast_set_wall_estimate(members, costs, width=FAST_SET_CONC_WIDTH)
     print("FAST_SET_DECLARATION members=%d budget_min=%d" %
           (len(members), FAST_SET_BUDGET_MIN), flush=True)
     print("FAST_SET_BUDGET %s" % FAST_SET_BUDGET_NOTE, flush=True)
@@ -3595,6 +3900,127 @@ def print_fast_set_declaration() -> int:
     if bad:
         print("FAST_SET_LEDGER_WARN %d malformed ledger row(s) ignored — "
               "named, never silently dropped" % bad, flush=True)
+    return 0
+
+
+def print_fast_set_review() -> int:
+    """--print-fast-set-review (t261011-11): the patrol's read-only review
+    face — the ONE face that shows the evidence behind membership.
+
+    Per member: measured cost (mean AND max from the scenario ledger, the
+    no-measurement case named), its fast-catch clause, the last recorded
+    patrol verdict (named when the verdict ledger has none), and the named
+    flags from fast_set_review(). Set-level lines print the CURRENT
+    DECLARATIONS (budget, width, cadence, catch window, per-member share)
+    next to the measured numbers, the wall estimate with the budget-breach
+    named signal (suggestion, never an auto-trim), and the coverage-gap
+    pools. Fail closed: a guard error or any must-lose-membership flag
+    prints everything it can and still refuses non-zero, by name.
+    """
+    members, errors = fast_set_preflight()
+    # The roster's own errors (absent/malformed/untrustworthy) already surface
+    # as preflight errors above — here only the booked NAME SET is needed.
+    booked = set()
+    try:
+        booked, _ = read_known_red_roster_strict(_REPO_ROOT)
+    except Exception:  # noqa: BLE001 — named by preflight; flags need no crash
+        booked = set()
+    try:
+        import scenario_ledger as _sl
+        rows, sl_bad = _sl.read_rows()
+    except Exception as _ex:   # noqa: BLE001 — unreadable ledger = unmeasured
+        rows, sl_bad = None, 0
+        print("FAST_SET_REVIEW_LEDGER_UNREADABLE scenario ledger (%s: %s) — "
+              "all costs unmeasured, window not judged"
+              % (type(_ex).__name__, _ex), flush=True)
+    names = [e[0] for e in members]
+    empty = rows is None
+    srows = [] if empty else rows
+    stats, sl_bad = (({n: None for n in names}, 0) if empty
+                     else fast_set_cost_stats(srows, names))
+    vrows, vbad = fast_set_review_rows()
+    verdicts = fast_set_review_verdicts(vrows)
+    rounds_view = fast_set_review_rounds(srows)
+    red_runs = fast_set_member_red_runs(srows, set(names))
+    review = fast_set_review(members, stats, booked, verdicts, rounds_view,
+                             red_runs, registry=SCENARIOS)
+    flags = review["members"]
+    must_lose = [n for n in names
+                 if any(f.startswith("must-lose-membership") for f in
+                        flags.get(n, []))]
+    est = fast_set_wall_estimate(members,
+                                 {n: (s["mean_s"] if s else None)
+                                  for n, s in stats.items()},
+                                 width=FAST_SET_CONC_WIDTH)
+    print("FAST_SET_REVIEW members=%d budget_min=%d width=%d "
+          "cadence_days=%d catch_window_rounds=%d member_budget_s=%d"
+          % (len(members), FAST_SET_BUDGET_MIN, FAST_SET_CONC_WIDTH,
+             FAST_SET_REVIEW_CADENCE_DAYS, FAST_SET_CATCH_WINDOW_ROUNDS,
+             FAST_SET_MEMBER_BUDGET_S), flush=True)
+    print("FAST_SET_BUDGET %s" % FAST_SET_BUDGET_NOTE, flush=True)
+    for e in members:
+        n = e[0]
+        st = stats.get(n)
+        meas = ("mean=%.2fs max=%.2fs runs=%d" % (st["mean_s"], st["max_s"],
+                                                  st["runs"]) if st
+                else "no measured cost (no usable ledger row)")
+        v = verdicts.get(n)
+        vs = ("verdict=%s (at %s by %s: %s)" % (v["verdict"], v["at"],
+                                                v["who"], v["evidence"])
+              if v else "verdict=none (no recorded verdict)")
+        fl = (" flags=[%s]" % "; ".join(flags.get(n, []))
+              if flags.get(n) else "")
+        print("  member %s pool=%s serial=%s %s %s fast-catch: %s%s"
+              % (n, pool_of(e), "yes" if "serial" in e[3:] else "no",
+                 meas, vs, FAST_SET_CATCH.get(
+                     n, "<NO fast-catch clause declared — a declaration "
+                     "error; validate_fast_set() refuses this member>"),
+                 fl), flush=True)
+    print("FAST_SET_REVIEW_ESTIMATE %s" % json.dumps(est, ensure_ascii=False),
+          flush=True)
+    if est["est_s"] > FAST_SET_BUDGET_MIN * 60:
+        print("FAST_SET_REVIEW_BUDGET_BREACH measured estimate %.2fs "
+              "exceeds the declared %d-minute budget — NAMED stewardship "
+              "signal for the patrol, never an auto-trim"
+              % (est["est_s"], FAST_SET_BUDGET_MIN), flush=True)
+    uncovered = fast_set_uncovered_pools()
+    if uncovered:
+        print("FAST_SET_REVIEW_UNCOVERED %d pool(s) with in-registry "
+              "scenarios but zero fast members (coverage gap, registry-"
+              "derived): %s" % (len(uncovered), ",".join(uncovered)),
+              flush=True)
+    if rounds_view["note"]:
+        print("FAST_SET_REVIEW_WINDOW %s" % rounds_view["note"], flush=True)
+    unmeasured = [n for n in names if stats.get(n) is None]
+    if unmeasured:
+        print("FAST_SET_REVIEW_UNMEASURED %d member(s) with no measured "
+              "cost: %s" % (len(unmeasured), ",".join(unmeasured)),
+              flush=True)
+    if sl_bad:
+        print("FAST_SET_REVIEW_LEDGER_WARN %d malformed scenario-ledger "
+              "row(s) ignored — named, never silently dropped" % sl_bad,
+              flush=True)
+    if not verdicts:
+        print("FAST_SET_REVIEW_NO_VERDICTS no recorded patrol verdict rows "
+              "in the verdict ledger (%s) — the patrol's first review has "
+              "not been recorded yet" % _fast_set_review_ledger_path(),
+              flush=True)
+    if vbad:
+        print("FAST_SET_REVIEW_VERDICT_WARN %d malformed verdict-ledger "
+              "row(s) ignored — named, never silently dropped" % len(vbad),
+              flush=True)
+    if must_lose or errors:
+        for m in errors:
+            print("REFUSED [__fast_set__] %s" % m, flush=True)
+        for n in must_lose:
+            print("REFUSED [__fast_set__] member %s must LOSE membership: "
+                  "%s" % (n, "; ".join(
+                      f for f in flags[n]
+                      if f.startswith("must-lose-membership"))), flush=True)
+        print("FAST_SET_REVIEW refused (%d guard error(s), %d "
+              "must-lose-membership member(s)) — nothing ran"
+              % (len(errors), len(must_lose)), flush=True)
+        return 2
     return 0
 
 
@@ -6274,6 +6700,15 @@ def _cli(argv):
         return print_surface_plan(argv[i + 1] if i + 1 < len(argv) else "")
     # --print-fast-set（t261009-16）：fast global set 声明面——与 --print-pool-assets
     # 同类的只读查询面，**不起场景、不占锁**，故在锁之前分流。
+    # --print-fast-set-review（t261011-11）：fast set 巡检面——只读（不起场景、
+    # 不占锁，锁前分流）；与 --fast-set / --print-fast-set 互斥（点名拒绝）。
+    if "--print-fast-set-review" in argv:
+        if "--fast-set" in argv or "--print-fast-set" in argv:
+            print("REFUSED [__fast_set__] --print-fast-set-review together "
+                  "with --fast-set/--print-fast-set is a caller bug (one "
+                  "face per read) — nothing ran", flush=True)
+            return 2
+        return print_fast_set_review()
     if "--print-fast-set" in argv:
         if "--fast-set" in argv:
             print("REFUSED [__fast_set__] --fast-set and --print-fast-set "
