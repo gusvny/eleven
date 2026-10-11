@@ -4707,10 +4707,17 @@ def _git(args: List[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedP
                           capture_output=True, text=True, timeout=timeout)
 
 
-def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
-    """The baseline ref for the whitelist diff: the current merge-base(main, branch).
+def _merge_base_ref(branch: str, repo: Path, other: str = "main") -> Tuple[str, str]:
+    """The baseline ref for the whitelist diff: the current merge-base(other, branch).
     Returns (ref, err).
 
+    ``other`` is the side the lane is measured against. The default ``main`` keeps
+    every legacy caller byte-identical. A develop-buffer lane passes ITS LINE instead
+    (261012 host-ordered direct fix, KI-01M4PAVBP6EZFGYC2VVQ0Z90J7): such a lane is
+    based on the line, so merge-base(main, lane) falls back to the point where main and
+    the lane diverged — the diff then carries everything the LINE received since then
+    (other tickets' landed work), and each of those files is reported as an
+    out-of-write-set write by THIS ticket. Measured 261011/261012 on t261012-02/03/04.
     Non-empty ref = success (normally a single line; multiple lines = malformed, keep
     the first and leave a trace in err).
     Empty ref = resolution failed, and err is the detail text for a fail-closed red
@@ -4720,15 +4727,16 @@ def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
     verify_lane either.
     (Ticket t260901-18: for the full stance see the merge_check item 3 comment.)
     """
-    p = _git(["merge-base", "main", branch], repo)
+    other = str(other or "main") or "main"
+    p = _git(["merge-base", other, branch], repo)
     if p.returncode != 0 or not (p.stdout or "").strip():
-        return "", "merge-base main %s 解析失败 rc=%s：%s" % (
-            branch, p.returncode, ((p.stderr or p.stdout or "").strip())[-200:])
+        return "", "merge-base %s %s failed rc=%s: %s" % (
+            other, branch, p.returncode, ((p.stderr or p.stdout or "").strip())[-200:])
     lines = [ln.strip() for ln in p.stdout.strip().splitlines() if ln.strip()]
     ref = lines[0]
     if len(lines) > 1:
-        return ref, "merge-base main %s 输出 %d 行（畸形），取首行：%s" % (
-            branch, len(lines), ref)
+        return ref, "merge-base %s %s printed %d lines (malformed), took the first: %s" % (
+            other, branch, len(lines), ref)
     return ref, ""
 
 
@@ -5510,14 +5518,23 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         # Item 1's commit check still uses the pinned base_ref (semantics = the lane
         # has this ticket's output, guarding against a fast-forward misjudged as
         # 0 commits); the two items intentionally use different base stances.
-        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"])  # the merge-base must also anchor the lane repo (real near-miss in ticket t260903-11)
+        # 261012 host-ordered direct fix (KI-01M4PAVBP6EZFGYC2VVQ0Z90J7): the "other
+        # side" of a develop-buffer lane's write-set diff is THE LINE it lands on, not
+        # main — otherwise merge-base(main, lane) falls back to the point where the line
+        # and main diverged, the diff carries everything the line received since then,
+        # and other tickets' landed work is reported as this ticket's out-of-write-set
+        # write (measured on t261012-02/03/04). An empty base_other_ref means main: the
+        # historical behaviour, byte for byte, and the fail-closed fallback for every
+        # case that cannot be resolved (legacy tickets included).
+        _other = str(getattr(args, "base_other_ref", "") or "").strip() or "main"
+        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"], other=_other)  # the merge-base must also anchor the lane repo (real near-miss in ticket t260903-11)
         if not wl_base:
             # Fail-closed: a red item is merge_check's normal channel, the activity
             # doesn't raise. verify_lane doesn't run this round (tsc/smoke are
             # skipped with it, the red already means blocked, restored on retry);
             # when merge-base fails, item 4's merge-tree main almost certainly goes
             # red too, so no new blocking surface is added.
-            checks.append({"item": "写集白名单基线（merge-base main × %s）" % sc["branch"],
+            checks.append({"item": "write-set whitelist baseline (merge-base %s x %s)" % (_other, sc["branch"]),
                            "green": False, "detail": wl_err,
                            "id": "verify_lane_code", "reason_code": "merge_base_failed",
                            "next_action": "泳道内 merge-base 失败（git 环境类）——排查泳道仓后发 retry_qc"})

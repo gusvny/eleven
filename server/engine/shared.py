@@ -4473,6 +4473,15 @@ class MergeCheckArgs:
     # t260912-03 人授权结构化记录（defaulted 空表，零回归）：自愈 settle 的受保护闸
     # 豁免面与 workflow 侧一致（workflow 已按票+时效过滤）。
     authorizations: List[Dict[str, Any]] = field(default_factory=list)
+    # 261012 host-ordered direct fix (KI-01M4PAVBP6EZFGYC2VVQ0Z90J7): the "other side"
+    # of the write-set whitelist diff. Empty = main (legacy tickets and every case whose
+    # line cannot be resolved keep the historical behaviour, byte for byte); dev_lane
+    # passes the BRANCH NAME of the line a develop-buffer ticket belongs to, because such
+    # a lane is based on the line and measuring it against main counts everything the
+    # line received since its divergence from main as this ticket's writes (measured on
+    # t261012-02/03/04). Defaulted empty so old events replay unchanged (same precedent
+    # as path_gate / no_file_changes).
+    base_other_ref: str = ""
     # t260921-09 三态判据（实证 nusuyou t260920-04：多仓票某仓声明在写集但本票零改动，
     # 被逐仓「泳道分支有 commit」必判红，票在最后一道机械门前无正当出路）：建票声明
     # 「本票无文件改动」（allow_empty_write_set → meta.no_file_changes）时豁免整票零

@@ -535,3 +535,24 @@ def test_protected_gate_normalizes_equivalent_path_forms():
         "design_integration_tests", ["./integration/t260926-99/sc_x.py"],
         write_set=["integration"], ticket_id="t260926-99")
     assert (ok, vio6, reason6) == (True, [], "")
+
+
+def test_t261012_within_trailing_slash_entry_is_same():
+    """261012 host-ordered direct fix (KI-01M4PKH23DKWXY1KFM490S7P8F): the docstring
+    promised a trailing slash was equivalent, while the old implementation appended "/"
+    verbatim so such an entry never matched - a recorded human authorization
+    (authz_gates._match -> this function) stayed unapplied and the gate never said the
+    scope had missed. Pinned here: both spellings match; the prefix does not leak
+    (baselines does not match baselines2); empty/degenerate entries admit nothing."""
+    import path_gates as pg
+    path = "integration/baselines/sc_capture_chat_e2e.mjs"
+    assert pg._within(path, ["integration/baselines"]) is True
+    assert pg._within(path, ["integration/baselines/"]) is True
+    assert pg._within(path, ["integration/baselines//"]) is True
+    assert pg._within(path, ["integration/baselines2"]) is False
+    assert pg._within(path, ["integration/baselines2/"]) is False
+    assert pg._within(path, ["", "/", "//"]) is False
+    # an exact entry matches with or without the trailing slash (a grant may name a
+    # file or a directory)
+    assert pg._within(path, [path]) is True
+    assert pg._within("integration/README.md", ["integration/README.md/"]) is True

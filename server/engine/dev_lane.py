@@ -1631,6 +1631,37 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
     # ---------- t261009-58: the ONE effective write set (record + annex) ----------
 
+    def _write_set_other_side(self) -> str:
+        """The "other side" ref of the write-set diff (261012 host-ordered direct fix,
+        KI-01M4PAVBP6EZFGYC2VVQ0Z90J7).
+
+        A develop-buffer lane is based on the LINE it lands on, so measuring it against
+        main walks merge-base(main, lane) back to where the line and main diverged: the
+        diff then carries everything the line received since, and other tickets' landed
+        work is read as this ticket's out-of-write-set write (measured on
+        t261012-02/03/04). Return the BRANCH NAME of the line this ticket belongs to;
+        every other case returns "" — the caller then keeps main, the historical and
+        stricter behaviour, byte for byte (legacy tickets, no line id, unreadable
+        declaration, multi-repository line: all fail closed onto main)."""
+        try:
+            if not is_develop_buffer_ticket(self.meta):
+                return ""
+        except Exception:
+            return ""
+        line_id = str(self.meta.get("develop_line") or "")
+        if not line_id:
+            return ""
+        try:
+            import develop_line  # local: the module edge declared by t261009-46
+            lines = develop_line.load_lines(str(self.meta.get("project") or ""))
+        except Exception:
+            return ""
+        line = lines.get(line_id) if isinstance(lines, dict) else None
+        repos = list(getattr(line, "repositories", []) or [])
+        if line is None or len(repos) != 1:
+            return ""   # a multi-repository line: one side is not enough — keep main
+        return str(getattr(repos[0], "branch", "") or "")
+
     def _effective_write_set(self) -> List[str]:
         """The write set every judging face reads (one question, one answer).
 
@@ -5636,6 +5667,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    worktree=str(self.meta.get("worktree") or ""),
                                    branch=str(self.meta.get("branch") or ""),
                                    base_ref=str(self.meta.get("base_ref") or ""),
+                                   # 261012 host-ordered direct fix: a develop-buffer
+                                   # ticket's write-set diff measures against the LINE
+                                   # (empty = main; legacy stays byte-identical)
+                                   base_other_ref=self._write_set_other_side(),
                                    write_set=self._effective_write_set(),
                                    path_gate=bool(self.meta.get("path_gate")),
                                    path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
