@@ -1631,7 +1631,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
     # ---------- t261009-58: the ONE effective write set (record + annex) ----------
 
-    def _write_set_other_side(self) -> str:
+    def _dev_buffer_write_set_other_side(self) -> str:
         """The "other side" ref of the write-set diff (261012 host-ordered direct fix,
         KI-01M4PAVBP6EZFGYC2VVQ0Z90J7).
 
@@ -5667,10 +5667,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    worktree=str(self.meta.get("worktree") or ""),
                                    branch=str(self.meta.get("branch") or ""),
                                    base_ref=str(self.meta.get("base_ref") or ""),
-                                   # 261012 host-ordered direct fix: a develop-buffer
-                                   # ticket's write-set diff measures against the LINE
-                                   # (empty = main; legacy stays byte-identical)
-                                   base_other_ref=self._write_set_other_side(),
+                                   # 261012 caliber (host ruling): pass both
+                                   # sides' merge-bases down. The whitelist
+                                   # judges "this ticket's own write" as the
+                                   # intersection of the two three-dot diffs
+                                   # (files that differ from main AND from the
+                                   # line). Empty = main: the intersection
+                                   # degrades to the old caliber, byte for byte
+                                   # (legacy).
+                                   base_other_ref=self._dev_buffer_write_set_other_side(),
                                    write_set=self._effective_write_set(),
                                    path_gate=bool(self.meta.get("path_gate")),
                                    path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),

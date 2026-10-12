@@ -27,6 +27,19 @@ lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约�
   1. 写集白名单：git diff --name-only <base>...HEAD（三点=merge-base 对称差，
       口径=「本次合并将给 main 带来什么」——泳道在制期间他人并入 main 的文件
       不进差集、不判越界；t260901-14 假阳性修正，base 建议传当前 main tip）。
+      261012 caliber (host ruling): "this ticket's own write" is a file that
+      differs from BOTH baselines. The caller may pass base_other (the other
+      side's merge-base; for a develop-buffer ticket it is the line side). The
+      whitelist then judges the INTERSECTION of the two three-dot diffs. When
+      base_other is absent or equals base, the caliber is the old one, byte for
+      byte (legacy tickets, and the main fallback when the line is
+      unresolvable). Rationale: main and the line have diverged, so each side
+      carries commits the other lacks. Measure against one side only and the
+      other side's work is charged to this ticket. Measured on t261012-02: vs
+      main the diff misjudged 3 files of the line; vs the line it misjudged 7
+      files of main; the intersection is exactly this ticket's 5 files. The
+      intersection still judges conflict-resolution smuggle (content present on
+      neither side) as red (KI-01M4PAVBP6E).
       判据优先级=调用方 write_set
      （工单精判，空列表=零写集，任何改动即红）> verify.yaml write_allow（粗判据）；
      协调目录（.sandbar/ 老 .suyou/）与 .dsh/ 引擎运行时目录一律不判（与 merge_check SETTLE_PATHSPEC 同口径）。  # naming-compat
@@ -88,6 +101,13 @@ TOOL = {
             'scope': {'type': 'string', 'description': 'content 道：期次（如 260627）、all（全库）或缺省 auto（只扫 git 变更期次）'},
             'path': {'type': 'string', 'description': 'code 道：泳道根目录（缺省主树）'},
             'base': {'type': 'string', 'description': 'code 道：diff 对比的 git ref（三点口径 base...HEAD；合并闸必传当前 main tip；手动调用缺省=跳过白名单并注明）'},
+            'base_other': {'type': 'string',
+                           'description': 'code lane (261012 caliber): the other side\'s merge-base. When present, the write-set '
+                                          'whitelist judges the INTERSECTION of the two three-dot diffs as "this ticket\'s own write" '
+                                          '(files that differ from both sides). A develop-buffer ticket passes the line side; a legacy '
+                                          'ticket passes main or nothing (same value as base = the old caliber, byte for byte). '
+                                          'Absent/empty = old caliber. A failing second diff is fail-closed red '
+                                          '(reason_code=baseline_diff_failed): nothing is judged.'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
                           'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外分支判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
             'apply_skip_pools': {'type': 'boolean',
@@ -489,6 +509,29 @@ def _code(a):
         items = []
         carved = []
         ticket_id = str(a.get('ticket_id') or '')
+        # 261012 caliber (host ruling): "this ticket's own write" is a file that
+        # differs from BOTH baselines. The lane sits on its own line and has also
+        # synced main. The two sides have diverged: each carries commits the other
+        # lacks. Measure against one side only and the other side's work is
+        # charged to this ticket. Measured on t261012-02: vs main the diff
+        # misjudged 3 files of the line; vs the line it misjudged 7 files of main.
+        # The INTERSECTION of the two three-dot diffs is exactly this ticket's own
+        # 5 files (byte-equal to its three implement commits). Conflict-resolution
+        # smuggle (content present on neither side) stays red (KI-01M4PAVBP6E).
+        # base_other absent or equal to base = the old caliber, byte for byte
+        # (legacy tickets, and the main fallback when the line is unresolvable).
+        base_other = str(a.get('base_other') or '').strip()
+        keep = None
+        if base_other and base_other != base:
+            rc2, out2 = _sh(['git', '-c', 'core.quotepath=false', 'diff',
+                             '--name-only', base_other + '...HEAD'], root, crop=None)
+            if rc2 != 0:
+                items.append({'detail': 'git diff failed (other baseline %s): %s'
+                                        % (base_other, out2[-200:]),
+                              'reason_code': 'baseline_diff_failed'})
+                keep = set()   # fail-closed: no intersection ⇒ judge nothing (never fall back to the one-sided caliber)
+            else:
+                keep = {ln.strip() for ln in out2.splitlines() if ln.strip()}
         # name-status（非 name-only）：增/改/删分开判——删除敏感路径=正确清退
         # 不红（t260903-12：merge-base 漂移后清除运行时目录的 D 被误红成「入库」）；
         # 新增/修改敏感路径才是泄漏。
@@ -508,6 +551,12 @@ def _code(a):
                 st = ln.split('	')[0][:1]
                 f = ln.split('	')[-1].strip()
                 if not f:
+                    continue
+                if keep is not None and f not in keep:
+                    # Equal to the other side ⇒ not this ticket's write (the
+                    # other side's merged-in work). Skip the whole line. The
+                    # notes/ gate below needs the same "whose write is this"
+                    # answer, so the filter sits before it.
                     continue
                 # 宿主令 260904 机械闸：dev-lane 工单禁写 notes/（票据/知识库账本归
                 # main 侧直管）。独立于写集判定——声明了 notes/ 也拦（防自授权）；
