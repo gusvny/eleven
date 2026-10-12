@@ -5574,3 +5574,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > 这条是**过宽**方向（前两种是过窄）：字面锚既漏真变化、又误伤合法变化。处置：**不放宽
 > 守卫**，改我方措辞回避该令牌（`both sides' merge-bases`）。遗留小账：该正则宜改成
 > **路径形态**（如 `baselines/`）而非裸词，届时按「改锚点」同法处置。
+
+## KI-01M4QF22M2JFY184GMX3Q80652 **scan_schedule.resume 报 ok 而未真解暂停（update×unpause 竞态）**：模式
+（261012/integration 岗实测登记；integration 岗登记）
+
+> **实测（当场）**：宿主令恢复 dispatcher-scan。`scan_schedule.py resume --minutes 45 --note …` 返回 `{"ok":true,"resumed":true}`，但其自带 describe 回读 `paused:true`、note 仍是旧值（间隔 45m 却已生效）。紧随其后的独立 describe 同样 `paused:true`。隔秒裸调 `handle.unpause(note=…)` 后 `paused:false`、note 为新值——恢复才真生效。
+> **根因（读码）**：`cmd_resume` 先 `handle.update(_upd)`（整体重建 spec/policy 的读-改-写）再 `handle.unpause(note=…)`。update 的读-改-写与 unpause 的落盘之间存在竞态/覆盖：间隔写进去了，解暂停被吞。命令对 unpause 结果不做回读校验，直接 `_ok` 返回。
+> **危害**：**报绿实红**的最危险一类——运维面看到 ok:true 就走人，线轮继续黑暗（本例若不回读，dispatcher-scan 至今仍停）；且自带 describe 的 `after` 就带着反证，等于把矛盾一起打包返回。
+> **出路**：resume/pause 收尾必须回读校验目标态（paused==期望、note==新值），不符即 `_err` 具名（绝不 ok 返回）；或改用单次 update 同时改 spec 与 paused（消灭两步竞态）。
+> **纪律**：凡「改了调度/闸/开关」类操作，**成功 = 回读证实**，命令返回值不算证据。
+> **回归**：L1——mock handle 上 update 后 unpause 被吞的场景，resume 必须红；L2——真 Temporal 上 resume 后 describe.paused==False 且 note 为新值。
+
