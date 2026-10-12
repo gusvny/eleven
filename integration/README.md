@@ -613,3 +613,33 @@ t260916-23 dualname 族；0.1.1/0.1.5 live 双版对照（验收④）归升级�
 与 developer L1（server/headless-resume/test/summarize.test.mjs 纯函数语义）intent 分工：
 彼守 summarize.js 语义 golden/畸形族，本组守装配面（守卫接线/回落链次序/退出码）与
 物化装载面——纯函数单测过≠守卫接线在、真源单测过≠副本可装载。
+
+## t261011-26 — line round live face + retained evidence (`lib_round_face.py`)
+
+The line round used to be invisible while it ran: its suite log lived in a
+per-round system temp dir and was deleted at round end, and nothing answered
+"how is the round doing" (host question 261011). The runner
+(`line_round_runner.py`) now publishes, via `lib_round_face.py`:
+
+- `<develop_dir>/rounds/current.json` — the LIVE face, exists ONLY while a
+  round runs (ABSENCE = idle, the rule workbench `certification-model.ts`'s
+  `roundState` input already declares). One writer = the runner. Written
+  atomically, refreshed by a log-watching thread every ~2s from the suite
+  log's own vocabulary (PASS/FAIL/ENV_FAIL blocks, pool banners,
+  INTEG_SUMMARY); unknown lines are ignored, never counted.
+- `<develop_dir>/rounds/<run_id>/` — retained evidence per round:
+  `face.json` (terminal record: state done/failed + outcome green/red/named
+  could-not-run reason) and `suite.log`, kept rolling for the last
+  `FACE_RETAIN_ROUNDS` (10) rounds.
+
+Face shape (the contract; `lib_round_face.py` module docstring is the truth
+source): `run_id` (relabeled to the ledger run id at round end), `line`,
+`revision` map, `started_at`/`updated_at`, `state` (running/done/failed),
+`pool` (`unknown` until a banner is seen), `counts`
+(ran/pass/fail/env_fail), `last_scenario` (name + verdict), terminal-only
+`outcome` (verdict + reason). Consumer faces (adapters) are a separate
+ticket — until one lands, publishing is not panel-visible.
+
+Unresolved develop dir (no project declares the candidate repos) is a named
+stderr degrade: the round runs exactly as before, only the face is absent.
+Unit battery: `integration/tests/test_t261011_26_round_face.py`.

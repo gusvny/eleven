@@ -5408,3 +5408,136 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**凡"覆盖/包含"这类判据，把"谁覆盖谁"的规则抄成一句话，然后全仓 grep 它的每一处实现**——本条的三个面各写各的，谁都不算错，合起来却互相矛盾。
 >
 > **回归**：L2——同一组记录上，**等待面与结局面**对"这张落地是否被认证覆盖"给出**同一个答案**；L3——一次"线头前进（有推进记录）→ 一轮判绿 → 之前的落地在**两个面**都被记为已覆盖"的连贯回执；且一次**没有推进记录的手工 commit 之后**，机制必须**具名**说明"线头动了但不在任何一轮的候选里"，而不是静默 `range_empty`。
+
+## KI-01M4P0FK2W87WXW2S6N8BXECYZ **"看不见"刚修好，"看错了"就来了**：轮次面（`face.json`）对**一跑没跑**的轮次写 **`green`**，并写**终态 `done`** 而 `updated_at == started_at` **(261012 01:3x `t261011-26` 落地后第一眼实测;integration 岗登记)**
+
+> **实测（原始读数）**：`~/.sandbar/projects/sandbar/data/develop/rounds/run-01M4NRCPW8M7K53XKABN1E6HJC/face.json` =
+> `{"state":"done","counts":{"ran":0,"pass":0,"fail":0,"env_fail":0},"outcome":{"verdict":"green"},"started_at":"…15:13:07Z","updated_at":"…15:13:07Z"}`；
+> 而紧挨着它的 `suite.log` 里明写 `INTEG_SUMMARY {"ran": 1, "passed": 1, "failed": 0, …}`。
+>
+> **两处都不对，而且是同一族**：①**零跑算绿**——引擎自己的判据是 `develop_certify.run_verdict`：`green iff ran > 0 and failed == 0 and env_failed == 0`，注释里还写着"**ran == 0 is never a proof（一条真实事故立下的规矩）**"；②**开局就写终态**——`state: done` 而 `updated_at == started_at` ⇒ 面在"还没判过任何一条"时就已经长得像"跑完了"。
+>
+> **危害**：①这是**假绿**，而且是**专门给人看的那一面**上的假绿——值守/宿主会据此以为某一轮过了；②它与既有两条同族：`KI-01M4MRB4Z62JGVHVNXPTDV0THS`（绿轮面可由 5 条场景的收窄轮铸出）与 `KI-01M4N5ASATAVWP6E38NSPECCAT`（覆盖判据两把尺子）——**三处都是"判据/面"没守住 `ran > 0` 这条最低线**；③"看不见"换成"看错"是**净退步**：没有面时人会去翻日志，有了假绿的面，人就不翻了。
+>
+> **出路（实现归票，已开 `t261012-01`）**：①**GREEN 必须有正的 ran**（复用引擎那条规则；数不出来就说"没有证明/计数不可读"并具名原因）；②**终态只能由终态事实写**（见到套件自己的 summary 才写 `done`；没见到而进程还活着就是 `running`，进程死了没 summary 就是 `failed` + 具名 reason）；③**同一轮的面与留存日志必须对得上**（对不上就写"计数不可读：原因"，不许在真 summary 旁边摆一排 0）；④四种终局可辨（green / red / no proof / could-not-run reason）。
+>
+> **纪律**：**凡"给人看的状态面"，第一件事是问"它能不能在什么都不成立的时候说出一个看起来成立的话"**；`ran == 0` 这类**零值边界**必须在面这一侧显式挡住，不能指望读者自己去和日志对账。
+>
+> **回归**：L1——`ran == 0` 的任何组合都不得产出 `green`；无 summary 不得写 `done`；L2——同一轮 `face.json` 的计数与 `suite.log` 的 summary **逐字段相等**或具名不可读；L3——一次真实轮次：面在跑动时是 `running`、结束时是四种终局之一，且与落地账本行一致。
+
+## KI-01M4P588XXRNW31H7BWA3P4VHM **"超时"不是止损**：场景挂死时 `subprocess.run(timeout=)` 的收尾会**再等一次管道 EOF**，而写端被孙进程攥着 ⇒ 900s 场景超时形同虚设，整轮只能由外部 3600s 上限砍死 **(261011 18:33-19:0x 线轮 `round-20261011T183337Z-50912` 实测；宿主问"去掉了 exclusive 还要跑这么久"；integration 岗登记)**
+
+> **实测（原始读数，全部当场取）**：
+> 1. **量不是问题**：本轮（线 develop-buffer，revision `353b2479`，18:33:37Z 起，套件首行「本轮跳过池=exclusive（少 27 条）」＝排除已生效）**13 分钟内判完 663 条**——pass 615 / fail 28 / not-checked 20（面 env_fail 19），最慢一条 `t260910-08-lane-materialization` 378.0s；按场景起止算**平均并发 5.81、峰值 18**（串行则 ~82 分钟）。⇒ 并发与用例量都不是这一轮花掉一小时的原因。
+> 2. **一条场景钉死整轮**：`t260911-04-multirepo-fullchain-landing`（`integration/t260911-04/sc_t260911_04_multirepo_fullchain_landing.py`，pid 97997）自 18:46:20 起挂住；18:57:49 复测**已跑 10:34、累计 CPU 0.87s**、`%CPU 0.0`，`suite.log` 自 18:47 起**零新行**——判完 663 条之后再无条目落账（在册口径约 686 条，剩约 23 条全被这一条挡住）。
+> 3. **它不是在算，是在等管道**：`sample 97997` 的 2547 个样本里 **2287 在 `__select`、257 在 `poll`**（栈中段是 Python 子进程调用链）；直接子进程 **98116 已是 `<defunct>`**（父未 `wait`），同时每隔数秒冒出一个短命孙进程 ⇒ **写端被活着的孙进程继承**，父侧 `communicate()` 永远等不到 EOF。
+> 4. **同伴与会话证据**：该场景 fd 4 打开 `~/.sandbar/test-stages/ensure-batch-2c3e0560-96cb7d89.lock`；另有**孤儿 stage helper pid 51249**（`--project batch-2c3e0560-96cb7d89 --anchor-pid 51064 --lease-id batch-…-1791743624972-55c87de5`，ppid=1、已活 23:44、fd 2 攥着 `hold-batch-2c3e0560-96cb7d89.log`、无子进程）——`--anchor-pid 51064` 正是**本轮跑器 `run_scenarios.py`**。即：**同一项目上有一个活着的对端租约**，而这条场景正卡在该项目的 ensure 互斥面上（正常轮次里它 <1s 就返回 `not-checked`）。
+> 5. **机制（读码）**：`integration/run_scenarios.py:4799` 用 `subprocess.run(["/bin/sh","-c",cmd], capture_output=True, timeout=CMD_TIMEOUT)`，`CMD_TIMEOUT=900`（:4163）；超时分支 `except subprocess.TimeoutExpired`（:4805）**拿不到控制权**——CPython 3.9 的 `subprocess.run` 在超时里只 `kill()` **直接子进程（`/bin/sh`）**，随后**再调一次 `communicate()` 且不设超时**；孙进程还攥着写端时它永不返回。**止损点自己也被卡住了。**
+> 6. **上一轮同族读数**：账本行 `runner_timeout:3600s`（外部 3600s 上限）后停在 682 条 ⇒ **同一个形状**：十几分钟的活 + 一条挂死，赔掉 45-60 分钟机器时间。
+
+> **危害**：①**线轮永远跑不完 ⇒ 没有认证 ⇒ 卡在 merge 的票永远等不到**（本轮期间 `t261009-80`、`t261011-25` 就在等认证），整条 develop-buffer 交付面被一条场景堵死；②**场景级止损是假止损**，唯一真止损是外部上限——每挂一次赔近一小时，且**症状长得像"测试就是慢"**，会把诊断直接引到"减用例/加并发"上去（本轮第一遍分析就差点顺着这条路走）；③**挂死会自我复制**：孤儿 helper（51249）还活着占着项目租约，下一轮在同一项目上大概率撞同一面墙；④与 `KI-01M4MXABSC08WDPYGEWCPMSZSD`（负控写真实注册表、`finally` 对 SIGTERM 不安全）同族——**都是"进程被强杀/卡住"这条终态没被当成一等终态来设计**。
+
+> **出路（实现归票）**：①**超时要杀进程组且不碰管道**：场景与跑器统一 `start_new_session=True` + 超时 `os.killpg(pgid, SIGKILL)`，子进程输出**直写文件或 DEVNULL，不用 PIPE**（或杀完显式关闭管道 fd）——`run()` 的二次 `communicate()` 就没有可等的东西；②**场景自己起的 daemon/helper 不得继承场景的 stdout/stderr**（`stdout=DEVNULL` + 新会话），场景结束（含被杀）后**断言零存活后代**；③**场景内的"等租约/等 ensure"必须自己收敛**：硬上限到点就落**具名红**（现状是等成无声的挂），并让租约面能识别"锚点进程已死/孤儿 helper"；④`CMD_TIMEOUT` **保留 900s 作上限**（`t260910-08` 合法 378s 已证明不能一刀切小），但要有**逐条声明式预算**（长命家族显式抬/压），并给"同一条场景一轮内挂两次"加**具名熔断**（跳过必须点名，不许静默）。
+
+> **纪律**：**凡"超时"两字，必追问三件事**——超时后**杀的是谁**（直接子进程？整个进程组？）、**谁还攥着 fd/管道/锁**、**这个超时自己会不会被卡住**。**给子进程挂上 `timeout=` 不等于能收回成本**；同理，**给整轮挂外部上限，只是把"卡死"变成"付费卡死"**，不是止损。
+
+> **回归**：L1——注入"孙进程继承 stdout 且不退出"的桩场景：必须在 `CMD_TIMEOUT` 量级内返回**具名超时红**，且**跑完零存活后代**（`killpg` 断言 + `ps` 残骸为零）；L2——超时红的实测耗时 ≤ 预算 + 短余量（如 30s）；L3——一轮线轮在**含一条挂死场景**的情况下仍收敛到终局（红）并由面点名那条场景，**不撞外部 3600s 上限**。
+
+## KI-01M4P6Z4T5C1R2S8N9K7H3QWDM **"跑通"不是"可认证"**：给证明轮挂上省时开关（池排除/`--only`）＝把它降级成诊断轮，而诊断轮**不写 run record** ⇒ 无 header ⇒ 引擎只能记 `range_growth` ⇒ **永远铸不出认证**（宿主 261011「先把 exclusive 排除掉，把 line run 跑通先」→ 261012 integration 岗读码实证）
+
+> **读码链（每一环都有原文）**：①`integration/run_scenarios.py` `run_record_skip_reason()` 第一句就是 `if narrowed: return "narrowed round (--only / pool exclusion) is not a proof — no run record"`，而 `narrowed` 由 `bool(only_names or excluded)` 决定（池排除**就是**收窄）；②`INTEG_SUMMARY` 只在 `_run_id` 存在时才带 `run_id` 键（additive 面）；③`integration/line_round_runner.py` 的 `read_header()` 先要 `summary["run_id"]`（否则 `run_id_missing_from_summary`），再拿它去 run-scoped ledger 里找 header（否则 `run_header_missing:<id>`），找不到就 `die()`——**stdout 上不再有 header**；④`server/engine/develop_certify.build_certification()` 拿不到 header ⇒ `run_id_not_run_id` / `run_cases_missing` ⇒ `CouldNotRun` ⇒ `could_not_run_row()` ⇒ 只增一行 `range_growth`（`should_certify` 下次照样再试，于是**每轮都白跑**）。
+>
+> **账本读数（原始）**：`~/.sandbar/projects/sandbar/ledger/delivery.jsonl` 15 行＝`range_growth` 13 + `landing` 2，**certification 0 行**——这条线**从来没有铸造过任何一次认证**，所以每张已落地/待落地的票都停在等认证。
+>
+> **危害**：①**症状与真因相反**：所有面都在说"轮次跑起来了/跑完了"，而真相是这一轮**按设计不构成证据**，什么都没发生；②这个开关是**响应宿主加速令**加上的（`-21` 把它设成缺省），一次"帮忙"把认证面整体关掉了；③`--only` 同罪，且更隐蔽（定点复跑本来是取证手段，不是证明手段）。
+>
+> **出路（本岗 261012 已做 + 引擎侧建议）**：①跑器侧缺省切回**诊断（保护）**并在 stderr **具名声明**"本轮收窄、不能产出认证"，翻转条件写在常量注释里（环境保真度修好、UI/DOM 用例真跑起来后把 `SANDBAR_LINE_ROUND_EXCLUDE_POOLS` 置空即恢复证明轮）——见 `integration/line_round_runner.py` 两次提交（`8495c375` 揭示机制、`0e013409` 定成保护默认）；②引擎侧建议把"header 缺席且原因是 narrowed"**具名成 narrowed**，别落成 `run_header_missing` 这类指向"文件丢了"的话（报错必须精确）。
+>
+> **纪律**：**凡"加速/跳过/只跑这几条"的开关，先问它是否改变了判据的完整性**；"跑通"与"可认证"是两个词，中间隔着"这轮算不算证据"。
+>
+> **回归**：L2——任何收窄轮必须在轮次面上具名"本轮不产出证明"（不得只说"跑了 N 条"）；L3——一次全量线轮产出 run record + header + certification 行（绿或红皆可），且账本里"跑了但没认证"的形态**不得由收窄静默造成**。
+
+## KI-01M4P6Z4T5C1R2S8N9K7H3QWDN **判据函数写了意图，却没人调用**：`should_freeze()` 是死代码，于是**环境红也冻结整条线**（261012 integration 岗读码实证）
+
+> **读码**：`server/engine/develop_certify.py:802` `should_freeze(attribution_value)` 的 docstring 写着「A freeze opens only when the red implicates content. `could not run` is not a red — it grows the range instead.」——全仓 `grep 'should_freeze('` **只命中这个定义本身**；而 `run_line_round()`（1420-1512）在 `verdict == "red"` 时**无条件** `batch += open_freeze_rows(cert)`，归因（`next_red_action`）是**之后**才尝试的事。
+>
+> **代价（读 `may_land`：1066-1106）**：冻结的线**拒绝一切落地**，白名单只有 `LANDABLE_KINDS = ("fix","chore")`，且 `fix` 还必须带一条指向本线某次落地的 `repairs` 关系（`freeze_repair_relation_missing`）。⇒ 一次**环境红**（本轮实测 `not-checked/external` 20 条全是 UI/DOM/console 用例）会把整条交付线的落地一起冻住：**环境的问题，内容的代价**。
+>
+> **危害**：①把"环境没准备好"读成"修订有问题"——正是判据面最怕的混淆；②在认证轮的环境保真度还没修好之前（见同夜 KI `环境保真度` 条），任何全量轮的红证都会冻结线，**把宿主想推进的落地一起挡住**；③"写了判据却没接线"是静默的：读代码的人以为有这道闸，跑起来才发现没有。
+>
+> **出路（实现归票）**：让冻结的开启条件与 `should_freeze` 的意图一致——**按红的种类分流**：内容红 ⇒ 开冻结；环境红/`could not run` ⇒ 只 grow 范围并把"环境红名单"具名在面与回执上（`INTEG_SUMMARY.env_red_names` 已在，可直接消费）。要么接上这个函数，要么删掉它并**在文档里把"环境红也冻结"写成明规则**——不许两者并存。
+>
+> **纪律**：**同一份判据里，凡是"写了意图却没人调用"的函数，都要当成没写**；"红 ⇒ 动作"的每一处都要问"这类红真的是这个动作的理由吗"。
+>
+> **回归**：L1——`env_failed > 0 and failed == 0` 的红**不得**开冻结（或按 `should_freeze` 的意图具名拒绝）；L2——红轮里"是否有冻结行"必须与"是否有内容归因"一致。
+
+## KI-01M4P6Z4T5C1R2S8N9K7H3QWDP **认证轮判的不是修订，是跑器能给的环境**：20 条 UI/DOM 用例在线轮里**从未跑过**，多条 self-red 在交付树里却是绿的（261012 integration 岗实测）
+
+> **实测（本轮 `round-20261011T183337Z-50912`，窄轮诊断面）**：判 667 条＝**615 pass / 32 fail(self) / 20 not-checked(external)**；那 20 条 external **全是要开 console 才能判的 UI/DOM 用例**（`t261008-02-middle-column-no-comment-text`、`t260904-15-project-ui-rail-add-remove`、`capture-chat-e2e`、`capture-chat-active`、`t260925-18-ui-english-spec-markdown`、`t13-evidence-lightbox`、`t260904-06-spec-card-dom`、`t260911-05-ki048-status-card-dom`、`t260915-05-detail-lane-map-dom`、`t260916-04-lane-map-everblocked-dom`、`t260916-05-inspection-detail-lane-map-dom`、`t260926-05-inspection-report-ui-dom` …）。
+>
+> **定点复跑对照（main 交付树，`--only` 同一批名字）**：`t260930-01-ledger-reuse-round` **pass 2.5s**、`t261004-28-carrier-verbatim-port-guard` **pass 53.0s** —— 两者在线轮里都是 red（2.1s / 28.3s）；同时 `t261008-24-zero-run-gate-stop`、`t02-t260902-02-archive-legacy-e2e`、`t260904-15-project-ui-settings-isolation` **在 main 也红**（既有欠账，不是线轮引入）。⇒ 线轮的红**至少有一部分是环境/跑器面造成的**，不能当成"修订有 32 个问题"读。
+>
+> **机理候选（读码，未逐条证实）**：①跑器的 env 钉改变了用例看到的世界（`suite_env` 里 `SANDBAR_LEDGER_REUSE=0`、摘掉 `SANDBAR_INTEG_LEDGER_OWNER`/`SANDBAR_TICKET_ID`）——含"复用/驱动面"的机制用例因此失真；②克隆的资产面是 symlink（`-21` 的 `CLONE_ASSETS`），构建产物/插件 bundle 的新旧与主树不一致；③UI/DOM 面需要真起 console，而线轮的克隆里起不来（本轮 20 条即此）。
+>
+> **危害**：①**绿不可达、红不可信**——红可能全是环境的，绿永远拿不到，而这张"红"还会被当成内容问题去归因（老账：`-21` 前的 220 条 env 红里 105 条是解释器/依赖、63 条 Temporal、43 条 browser、**0 条 docker**）；②它把"线轮"变成"跑器自检"，而**跑器自检的结果被当成对修订的判决**。
+>
+> **出路**：①让线轮的环境与车道轮**同保真**（同资产面、能真起 console/浏览器面——这是认证轮能不能判 UI 的前提）；②轮次面把"环境红"与"内容红"**分开具名**（`env_red_names` 已在 `INTEG_SUMMARY` 里，直接用），让读者一眼看出哪些是"没判成"而不是"判红了"；③**在此之后**再谈判据口径（是否与闸轮同口径、挂账册是否也适用于线轮）。
+>
+> **纪律**：**一个"全量证明"如果连它要检查的那些面都跑不起来，它证明的只是"跑不起来"**；凡"红名单"，先分"判红了"与"没判成"两类，再谈归因。
+>
+> **回归**：L2——线轮面必须把 `env_red_names` 与内容红分开陈列且都有名字；L3——一次线轮里，凡"要起 console 才能判"的用例要么真判出红绿、要么在面上具名"未判成：<原因>"，不得静默计入 env 计数了事。
+
+> **同族补一（261012 19:0x，挂死的**第二个形态**：卡死的不是子进程管道，而是**批台租约**）**：同一轮里又挂住一条（`integration/t260908-01/sc_ki061_overlimit_wake_revive.py`，pid 8314，5:14 elapsed / CPU 0.62s），lsof 显示它攥着**与上一条完全相同的锁**：`~/.sandbar/test-stages/ensure-batch-2c3e0560-96cb7d89.lock`；同时场上有**孤儿 stage helper pid 51249**（`--project batch-2c3e0560-96cb7d89 --anchor-pid 51064`＝本轮跑器、ppid 1、已活 30+ 分钟、攥着 `hold-batch-….log`），而 `stage-sweep` 早就把该台判成「活台而主人锚非工作树（`…/T/line-round-e8e6yz40/sandbar`，疑被测树）」。⇒ **批台租约为一个临时测试树而起、卡住不释放，于是该项目的每个消费者用例都排在它后面**（不是红、不是超时，是**静默排队**）。本岗处置：按 pid 杀掉卡住的用例与那个 helper 之后，同一批消费者立刻**具名**落 `ENV_FAIL: 批台 batch-2c3e0560-96cb7d89 不在位（runner 未预起/已收口/中途亡）`——**挂死变红，且是诚实的红**（t260921-06 要求⑤：ns 不可用=环境红）。教训：**租约类挂死的诊断入口是 `lsof <pid>` 看它攥着哪把锁，再看谁攥着同一把锁**；"锚点进程还活着"不等于"租约健康"（锚点是**临时测试树/跑器**时尤其如此）。出处：`KI-01M4P588XXRNW31H7BWA3P4VHM` 同族。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRV **收窄轮不成证明**——**实证到手**：账本原文 `suite_rc_1:run_id_missing_from_summary` **(261012 19:2x 读账本 `delivery.jsonl` seq 16;integration 岗记录，属 `KI-01M4P6Z4T5C1R2S8N9K7H3QWDM` 的实证补记)**
+
+> **原文（`~/.sandbar/projects/sandbar/ledger/delivery.jsonl` seq 16，`at`=17:33:29Z，`kind=range_growth`，`line=develop-buffer`）**：
+> `runner_failed_exit_2: No such file or directory: '…/rounds/round-20261011T183337Z-50912/suite.log')` 换行 `LINE_ROUND_RUNNER could_not_run: suite_rc_1:run_id_missing_from_summary`
+> —— 本轮（窄轮，`--exclude-pools exclusive`）**套件跑完了**（判 695 条），但因为它收窄 ⇒ 不写 run record ⇒ `INTEG_SUMMARY` 无 `run_id` ⇒ 跑器 `read_header` 第一步就失败 ⇒ 引擎只能记 `range_growth`。
+> **危害补**：①**"跑完了却没铸认证"的最短解释就是这一行**，而它埋在第二段（前一段是 retain 的 `Errno 2`，另一条缺陷）；②它同时证明"减用例/抬超时都不能让认证出现"——**判据的完整性被动过，轮次就不再是证据**。
+> **纪律**：**任何"本轮判了什么"的结论，先看账本里那一行的 reason 原文，再看面**；`run_id_missing_from_summary` 与 `runner_timeout` 是**两种病**，混看会把修复引向"加时间"。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRW **轮次的"保留证据"被它自己的 prune 删掉**：窗口对**共享目录**做名字排序切片 ⇒ 删的正好是 `round-`（排在 `run-` 前），而 retain 的失败又把**真因挤到行尾** **(261012 19:2x 执行器会话定位 + integration 岗复核;修票 `t261012-06`)**
+
+> **机理（逐点读码复核）**：`integration/lib_round_face.py` `FaceWriter._prune`（`FACE_RETAIN_ROUNDS`＝10）把 `data/develop/rounds/` 下**所有目录**按名字排序后删掉除最新十条之外的；而该票自己的场景把夹具写成 `run-<id>` 目录落在**同一个生产目录**里 ⇒ `round-` 恒排在 `run-` 前（o<u）⇒ **切片删掉的正是 round 目录**；`start()` 先建本轮目录、随即 `_prune()`，于是**本轮目录被自己删掉**；`current.json` 是文件不是目录，所以活面照常。
+> **实测后果**：①`rounds/` 目录里**十条全是 `run-`**（22:45–23:13 的夹具）；②账本 seq 14 与 seq 16 的 reason **头版是 `retain` 的 `Errno 2`**，真因埋在第二段（本岗 19:0x 想看 18:33 轮的留存日志时，目录已不在）；③"轮次保留证据"这条交付承诺**在这一轮上从未成立过一次**。
+> **出路（已开票 `t261012-06`）**：①窗口只认 `round-` 形状（不得对共享目录做名字排序切片，且不得删正在写的轮次目录）；②场景夹具写临时目录，不许在生产 face 目录里留实体；③**retain 失败必须排在轮次真因之后**（观测面不许盖住判决面）。
+> **纪律**：**"保留 N 条"这类窗口，先问它排序的是哪一类目录、有没有别人往同一个目录里写东西**；"删旧留新"在一个**共享命名空间**里是删除别人东西的委婉说法。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRX **行级状态不落盘**：tick 把每条线的 `state/error` 只放进 activity 载荷，什么都不写 ⇒ 下一个人只能**靠实验排除** **(261012 19:2x 执行器会话的 ask 2;integration 岗认同并登记)**
+
+> **实测**：执行器为回答"线为何 not-runnable"不得不：读 `develop_certify.py:1862-1866` 的两种状态词表 → 在进程内手跑 `derive_range`/`should_certify` 排除决策面 → 读 `resolve_runner` 的唯一 None 条件 → 再解释"在飞的轮次为何照跑"。**四步排除法换一句话**：`line_round_tick: 1 projects, 1 lines, not-runnable ['sandbar']`（`line_round_tick_engine()` 的 summary 只带项目名，不带**原因**；中心 worker 日志当天停在 01:33）。
+> **危害**：①运维面（面板/汇总行）说的是"不可跑"，而**为什么**不可跑只活在那个 activity 的返回值里，Temporal 历史之外无人可读；②诊断成本被转嫁给下一个读者，且**它只能推断**——推断错了就会去改错的东西（本岗当夜就差点把"挂死"当成"慢"）。
+> **出路（实现归票）**：每条线一行落盘（`state` + `error`/`reason` 原文 + `trigger` + `at`），或至少让 tick 的 summary 带上**具名原因**（如 `not-runnable ['sandbar:runner_missing']`）；"没写下来"不是省事，是把成本推给下一个人。
+> **纪律**：**凡"状态由某次调用算出、只随返回值离开"的东西，等于没有状态**；运维面必须能回答"为什么"。
+
+## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRY **执行器没有自撤路径**：自己发的 notice 会**常驻 waiting 列表**（dismiss 只归宿主面板） **(261012 19:2x 执行器会话自报 + integration 岗登记)**
+
+> **实测**：`server/engine/request_thread.py` 第 66-70 行把 answered/dismissed 固定给宿主（面板凭据门后），`op=state` 只允许 doer 落 `resolved`；本岗实测以项目会话身份落 `resolved` 被**具名拒收**：`{"field":"state","error":"a project session cannot resolve; the doer (executor or lane agent) resolves with evidence"}`。⇒ 执行器**既不能自撤、也不能自解**它自己发的 notice/更正行，而这些行会继续出现在宿主的 waiting 列表里（执行器原话："my notice rows re-arm the nudge"）。
+> **危害**：①"清一下请求队列"这件事**结构性做不完**——只有宿主能关；②未读列表里的行会**越积越多**，于是真正待裁的行被噪音淹没（本岗当夜实测：321 行账本、17 行 open，其中 4 行是"通知/撤回/moot"类）。
+> **出路（设计口径归宿主，实现归票）**：二选一——(a) 给执行器一条**自撤自己发的 notice** 的路（限 kind=notice/correction，且只许撤自己 raised_by 的行）；(b) 保持现状，但在**面板侧**把"通知/撤回/moot"类行折叠或自动过期，并让 `read` 面把它们与"待宿主裁"分开陈列。在此之前，执行器应在文本里写明"不需要答复"。
+> **纪律**：**凡"只有一个人能关"的队列，等于没有关闭语义**；先问"谁能让这一行离开列表"，再谈"队列清空"。
+
+> **记账卫生补记（同日发现，未开票）**：`request_thread.py op=read` 报 **6 条畸形 answer 行**（`at` 是**字符串** `"1791595136393"` 而非整数）：`req-1791593200761-0001`、`req-1791583819064-0001`、`req-1791589875769-0001`、`req-1791591196298-0001`、`req-1791591623036-0001`、`req-1791592228683-0001`。读取面**具名报出**（未静默），代价是这 6 行在状态机上不计入 answered。写入侧应把 `at` 类型钉死（int）；判据面保留这条具名报告。
+
+## KI-01M4P8C3WQ6K2Y9T5N7R4A1DFS **失败分支被"尾 1500 字符"吃掉**：一类红**不可归因**，而且看起来像"这条用例什么都没说" **(261012 20:05 本岗实测;integration 岗登记)**
+
+> **实测（当场）**：`--only capture-chat-e2e`（交付树）→ 48s、`pass 7 / fail 1`，而跑器打印的用例输出块里**只有通过的子用例**：`[PASS] A8 seed-message-on-transcript`、`[PASS] A7 no-bare-typeerror`、`[PASS] A6 console-torn-down`，紧接着就是 `SUMMARY pass=7 fail=1 env_fail=0 na=0`——**失败分支那一行根本不在打印块里**。`capture-chat-active` 同形。
+> **机制（读码）**：`integration/run_scenarios.py` 收集用例输出时**只留尾部 1500 字符**（`((proc.stdout or "") + (proc.stderr or ""))[-1500:]`），并把这段当作 `evidence` 落账/上屏；用例若**把失败分支印在成功子用例之前**（很多脚本先打总判、后打明细，或先打 summary 再打 legs），被截掉的恰好是**唯一有诊断价值的那几行**。
+> **危害**：①**红不可归因**——值守看到的是"这条用例有 N 条子用例、1 条红了、但没说是哪条"，只能**重跑一次并直接读全量 stdout**（本岗当晚为 `capture-chat-e2e` 就得这么干，且那一次仍可能被并发交错盖掉）；②它制造一种**假的"用例没说话"**：账面上有红、有计数、有耗时，唯独没有原因——与 `KI-01M4P7B2XQ3K9Y6T4N8W5A1CRX`（行级状态不落盘）同族：**都在把诊断成本推给下一个读者**；③与留存日志缺陷叠加时最糟：轮次日志被 prune 删掉（`KI-01M4P7B2XQ3K9Y6T4N8W5A1CRW`）＋用例输出被截尾 ⇒ **红因在两条路上同时消失**。
+> **出路（实现归票）**：①**失败时保留全量输出**（或保留"失败分支行"的**结构化提取**：`[FAIL] <leg>` 整行必须与 summary 一起落）；②更根本：让用例把**失败分支具名**写进一条机器可读行（而非只在自由文本里），跑器按行抽取，与长度限制解耦；③面（轮次 face / 面板 dialog）应显示"失败分支名单"，而不是只显示计数——`t261012-03` 的 Failure 表正是这条的消费面。
+> **纪律**：**凡"为省空间截断"的观测值，先问"被截掉的那一段是不是唯一有诊断价值的那一段"**；日志可以截尾，**判据与原因不能**。
+
+> **回归**：L1——构造一条"失败分支印在前、成功子用例印在后"的桩用例：跑器落账/上屏的 evidence 必须**包含失败分支行**（或具名给出结构化失败分支），不得只剩通过的子用例；L2——真实用例 `capture-chat-e2e` / `capture-chat-active` 的轮次行里**读得出失败分支名**；L3——面板 Failure 表列出的用例，每一项都能点到"哪一条子用例红了"。
+
+## KI-01M4PAVBP6EZFGYC2VVQ0Z90J7 **跨泳道污染**：A 票的"冲突消解"把 **B 票未落地的文件**整份带进自己的泳道（字节相同），于是 A 票被写集判据正当地拦下，而拦阻文案**不告诉任何人"这些文件属于另一张票"** **(261012 20:35 本岗在 `t261012-02` 实测,已按判据打回 implement)**
+
+> **实测（逐项 sha 对比，全部当场取）**：`t261012-02`（写集 `integration/`，做的是跑器挂死修复）的泳道 HEAD `1d8109fd 't261012-02 conflict resolution (round 0): worker-settled merge commit'` 里带着 **`t261009-80` 的未落地工作**：
+> - `server/engine/client.py`：lane-02 `042e877abc32` **==** lane-80 `042e877abc32`（**字节相同**）；
+> - `server/tools/ticket.py`：lane-02 `1b47d9a1e388` **==** lane-80 `1b47d9a1e388`；
+> - `server/engine/tests/test_t261009_80_pause_honesty.py`（230 行 / 9715 字节）：**只存在于 lane-80**（其 `ccb21ed5`），`main` 里**没有**这个文件。
+> `merge_check` 因此具名拒收：`越界写: server/engine/client.py；…test_t261009_80_pause_honesty.py；…server/tools/ticket.py（判据=工单 write_set：integration/）`，disposition＝`non-conflict red → blocked, waiting for a human`。
+> **危害**：①**修挂死的票被一张不属于它的账卡住**（今晚的认证主线就卡在这条链上）；②如果没人核 sha，最容易的"解法"是**放宽写集**——那会把这批外来文件**以 A 票的名义落地**，于是**归因被污染**（B 票的工作记在 A 票账上，且 B 票还会再落一次）；③拦阻文案只说"越界写：<文件>"，**不点名这些文件属于哪张在飞票**，读者只能靠 `git` 考古（本岗今晚就是这么查的）——观测面缺口与 `KI-01M4P7B2XQ3K9Y6T4N8W5A1CRX` 同族。
+> **出路（实现归票 + 判据面）**：①**冲突消解只许取 main 的一侧**（或用 merge-base 的三方合并），**不得从任何兄弟泳道工作树取文件**——"worker-settled merge"这条路径要把"文件来源"钉死；②写集判据在报"越界写"时**加一列"该文件当前属于哪张在飞票的泳道"**（用 sha 直接比对即可，零猜测）；③兜底：settle/路径闸的"面外文件挪档/回滚"要能在**没有人工干预**的情况下把这类文件退回 main 版本（今晚是人工打回的）。
+> **纪律**：**"谁的文件"必须由内容（sha）回答，不能由路径回答**；凡看到"越界写"，第一件事不是问"要不要放宽写集"，而是问"这些文件是不是别人的在飞工作"。
+> **回归**：L1——构造两个泳道 A/B（B 有未落地文件），在 A 上做一次冲突消解：A 的 diff **不得**出现 B 的任何文件（sha 级断言）；L2——写集判据的拒收文案对每个越界文件**报出归属票**（或"不属于任何在飞泳道"）；L3——一次真实的"面外文件"事件：从被拦到退回 main 版本**不需要人工介入**，且期间没有任何外来文件以 A 的名义落地。

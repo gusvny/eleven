@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 267,
-      "scenarios": 687
+      "scenarios": 722
     },
     "vocab": [
       "behaviour",
@@ -1389,11 +1389,6 @@
       "note": "t261009-76: the intake opt-in unit contract — lane_optin_intake's named refusal truth table (unknown/malformed/empty line/undeclared line/legacy-with-line/foreign template), apply_lane_optin's absence-stays-plain-TicketInput identity, and the _row_from_meta lane face",
       "sync_path": ""
     },
-    "server/engine/tests/test_t261009_80_pause_honesty.py": {
-      "anchor": "contract",
-      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty unit contract — landing evaluator truth table (landed/refused/pending, baseline-refusal masking, new-refusal-wins), effect statement (paused vs stuck; blocked names will-not-take-effect + slot stays held; the landed+non-effect pairing pinned), pure receipt-face builder key set (existing ticket_id/signal/who/delivered survive with delivered semantics untouched; unconfirmed keeps delivered and names the op=query re-check), bounded poll transient-jitter and budget-exhaustion paths, malformed-snapshot named degradation, and the client/ticket wording-consistency pin",
-      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face / _await_pause_landing); server/tools/ticket.py (_pause_effect_of)"
-    },
     "server/engine/tests/test_t261009_78_watchdog_buffer_stalls.py": {
       "anchor": "contract",
       "note": "t261009-78: the three buffer-stall legs (cert-wait-overdue / freeze-without-remedy / repair-points-nowhere) over the delivery ledger - threshold resolver fault modes, degrade-by-name on malformed rows / undeclared lines / missing patch_ids / unsupplied run-reader, human-gate suppression reuse, superseded relations exempt, report-level 'ledger not supplied' entry under stall_required, opt-out keeps old behaviour",
@@ -1423,6 +1418,11 @@
       "anchor": "behaviour",
       "note": "t261011-24: line landing = one squash commit (shared _squash_merge_core) — single-parent landing commits, named landing message, record revision = new line HEAD, squash-conflict cleanup + idempotent retry, staged-empty KI-213 recovery, race refused_unstarted named landing fault, gitlink gate",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261009_80_pause_honesty.py": {
+      "anchor": "contract",
+      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty unit contract — landing evaluator truth table (landed/refused/pending, baseline-refusal masking, new-refusal-wins), effect statement (paused vs stuck; blocked names will-not-take-effect + slot stays held; the landed+non-effect pairing pinned), pure receipt-face builder key set (existing ticket_id/signal/who/delivered survive with delivered semantics untouched; unconfirmed keeps delivered and names the op=query re-check), bounded poll transient-jitter and budget-exhaustion paths, malformed-snapshot named degradation, and the client/ticket wording-consistency pin",
+      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face / _await_pause_landing); server/tools/ticket.py (_pause_effect_of)"
     }
   },
   "scenarios": {
@@ -4961,11 +4961,6 @@
       "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
       "sync_path": ""
     },
-    "integration/t261009-80/sc_pause_honest_receipt.py": {
-      "anchor": "contract",
-      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty scenario — the landing evaluator / effect statement / pure receipt-face builder public-contract truth tables (landed/refused/pending, baseline non-misattribution, paused-vs-stuck wording, blocked names will-not-take-effect + slot stays held, unconfirmed keeps delivered with the named re-check face), malformed-input named degradation, and the ticket detail face pause_effect wiring pin",
-      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face); server/tools/ticket.py (_pause_effect_of, _v2_query)"
-    },
     "integration/t261011-10/sc_t26101110_fast_proof_membership.py": {
       "anchor": "contract",
       "note": "t261011-10: the lane's proof set is own scenarios UNION the declared fast-set members read from the one CLI face, receipt carries membership+budget+wall clock with a named breach warning, patch-id-gated wiring, legacy closing face untouched",
@@ -5025,6 +5020,30 @@
       "anchor": "contract",
       "note": "t261011-21: the line round's clone carries the gitignored assets the suite's cwd-relative probes need (interpreter chain picks the provisioned venv, temporal + playwright-core probes resolve), absence stays honest (env_failed==1 relayed, nothing fabricated), committed destinations are never clobbered, links target absolute source paths",
       "sync_path": "integration/line_round_runner.py (prepare_tree/materialise_assets)"
+    },
+    "integration/t261011-26/sc_t26101126_round_progress_face.py": {
+      "anchor": "contract"
+    },
+    "integration/t261011-26/sc_t26101126_round_evidence_kept.py": {
+      "anchor": "contract"
+    },
+    "integration/t261012-01/sc_t26101201_round_face_truth.py": {
+      "anchor": "contract"
+    },
+    "integration/t261012-02/sc_t26101202_case_timeout_reaps_group.py": {
+      "anchor": "contract",
+      "note": "t261012-02: a hung case's timeout red lands within the case budget plus margin (group kill, never a no-timeout communicate on an inherited pipe) and the case leaves zero live descendants on every terminal state; timeout evidence keeps the pre-timeout stdout and names the cause",
+      "sync_path": "integration/run_scenarios.py (_run_entry)"
+    },
+    "integration/t261012-02/sc_t26101202_case_spawn_contract.py": {
+      "anchor": "contract",
+      "note": "t261012-02: runner spawn contract source locks (start_new_session=True, never PIPE at the case and stage-helper spawn seams), hang-twice skip-by-name on the face, and the budget ladder (wait ceiling + grace < CMD_TIMEOUT = 900, no silent global cut)",
+      "sync_path": "integration/run_scenarios.py (_run_entry) + integration/stage_docker.py (helper spawns)"
+    },
+    "integration/t261009-80/sc_pause_honest_receipt.py": {
+      "anchor": "contract",
+      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty scenario — the landing evaluator / effect statement / pure receipt-face builder public-contract truth tables (landed/refused/pending, baseline non-misattribution, paused-vs-stuck wording, blocked names will-not-take-effect + slot stays held, unconfirmed keeps delivered with the named re-check face), malformed-input named degradation, and the ticket detail face pause_effect wiring pin",
+      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face); server/tools/ticket.py (_pause_effect_of, _v2_query)"
     },
     "integration/t261011-25/sc_t261011_25_journey_handshake_sweep.py": {
       "anchor": "behaviour",

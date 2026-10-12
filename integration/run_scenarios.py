@@ -122,6 +122,15 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t261012-02: a hung case must not eat the round — the per-case
+    # budget is real (group kill, no inherited pipe) and a twice-hung
+    # entry is skipped by name ----
+    ("t261012-02-case-timeout-reaps-group",
+     "A hung case's timeout red lands within the case budget plus a small margin, and the case leaves zero live descendants (ticket t261012-02 requirement (1)+(2), measured defect = round-20261011T183337Z-50912 hung 10+ min at 0.87s CPU on a subprocess pipe whose write end a live grandchild held while the direct /bin/sh child was defunct - CPython subprocess.run() re-calls communicate() with NO timeout after killing the direct child, so the 900s budget never fired and only the outer 3600s runner cap ended the round; grey-box L3, the REAL integration/run_scenarios.py _run_entry driven in isolated driver subprocesses with an injected small budget over real child/grandchild process trees, offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A the incident shape - a case whose child forks a pipe-holding grandchild and exits is judged a named timeout red WITHIN budget+margin and both child and grandchild are dead when the entry returns (reader-side pid probes, ESRCH=dead); B a case ending normally after backgrounding a sleeper leaves zero live descendants; C same on a red exit; D the timeout evidence keeps the case's pre-timeout stdout and names the cause (diagnostics not regressed). The scenario's own driver children run start_new_session=True with file stdout and a hard outer deadline - the harness never waits on an inherited pipe. Intent split: the spawn-site source locks and the hang-twice skip-by-name face belong to t261012-02-case-spawn-contract; the engine activity reaper/shutdown roll-call stays with t261006-08 (KI-210, different carrier). Pre-implement red = the named TDD signal; green required at the integration gate / merge. python3 missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261012-02/sc_t26101202_case_timeout_reaps_group.py", "ro"),
+    ("t261012-02-case-spawn-contract",
+     "The runner's spawn contract: sessions isolated, no inherited pipe, a twice-hung entry skipped by name, and the budget ladder stays honest (ticket t261012-02 requirements (2)+(4), grey-box L2/L3, source-lock faces over the real integration/run_scenarios.py and stage_docker.py plus one behaviour leg through the real _run_entry, offline seconds, zero docker/Temporal/browser, never touches 3099/7233): S1 source lock - the case spawn site carries start_new_session=True and routes stdout/stderr to files/DEVNULL, never capture_output/PIPE (t261006-08 C5 shape applied to the case-spawn seam); S2 source lock - every stage_docker.py spawn launching the module's own long-lived helper CLI carries start_new_session=True and never a PIPE stdout (a helper outliving its case holds at most a file, never a pipe the runner waits on - observed orphan pid 51249 held hold-batch-*.log a whole round); S3 behaviour - second scheduling of an entry that already timed out this round is a named skip (entry name + reason in the verdict tail that lands on the round face/log) and burns no second budget (requirement 4 tail: never silently); S4 budget ladder - the stage-wait ceiling default plus grace stays strictly under CMD_TIMEOUT and CMD_TIMEOUT stays the declared 900s ceiling (requirement 4: t260910-08 legitimately takes 378s - a silent global cut is a red by name). Intent split: the timeout/group-reap behaviour faces over real process trees belong to t261012-02-case-timeout-reaps-group; the engine reaper stays with t261006-08; the stage-lease named-red truth tables stay with stage_docker's own entries. S1/S3 red pre-implement = the named TDD signal; S2/S4 are green-today regression locks; green required at the integration gate / merge. python3 or integration modules missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261012-02/sc_t26101202_case_spawn_contract.py", "ro"),
     # ---- t261011-21: the line round's clone carries its gitignored assets ----
     ("t261011-21-clone-assets-line-round",
      "The line round's clone carries the gitignored assets the suite's cwd-relative probes need, and absence stays honest (ticket t261011-21, incident = the first runnable line round carried 220 environment reds, none docker-shaped: prepare_tree clones committed files only, so the clone has no server/engine/.venv, no server/engine/bin/temporal, no node_modules, no server/ui-check/node_modules/playwright-core, and the registry/scenario probes (`PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3`, lib_pw_deps LOCAL_PW) resolve RELATIVE to cwd, silently falling back to a system python3 without pytest/PyYAML/temporalio; one env red turns the whole round red per run_verdict, so a landed ticket waited for a certification that could never arrive; grey-box L3, the REAL runner driven through the real resolve_runner seam over real git fixture trees + a stub suite whose probe faces are the incident's own probe shapes run with cwd=clone, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE incident headline - a provisioned round ends with the suite's own cwd-relative probes RESOLVING: the interpreter chain picks the clone's provisioned venv python (NOT the python3 fallback, marker recorded from the consumer side), the temporal binary probe and the playwright-core marker probe each find their asset through the clone-relative path, one real header, env_failed==0; B honesty kept - an asset genuinely absent from the SOURCE checkout is materialised as NOTHING: the clone has no path there, the suite classifies env_fail from its own evidence, the round still relays the real header with env_failed==1 (a red is a proof) - never a could-not-run, never a fabricated green, never a silent swallow; C a committed file at an asset destination is NEVER clobbered by the provisioning (the clone's committed content survives byte-identical, the round still completes); D boundary discipline on the write face - each materialised link's target is an ABSOLUTE path under the SOURCE checkout, and the evidence is read from the consumer side (cwd=clone), not from the writer's receipt. Intent split (no intent-level duplication): the env-key hand-over (SANDBAR_POC_PYTHON/SANDBAR_TEMPORAL_BIN) and its named could-not-run faces belong to t261011-18-line-round-assets (whose A3 clone-absence precondition face is deliberately re-signed by this ticket, naming comment in place there); the runner command->one-header contract, red-is-a-proof, malformed candidates, tree overlap, SIGTERM reclaim belong to t261009-77-line-round-runner and the t261009-30 family; the materialisation unit truth tables belong to developer L1 (in-ticket unit battery). Out of scope, untouched: scenario assertions, pool exclusions, run_verdict (server/engine/develop_certify.py). Pre-implement tree red on A3-A7/B/C = the named TDD signal; green required at the integration gate / merge. git unavailable or develop_certify unimportable = ENV_FAIL exit 2",
@@ -145,6 +154,46 @@ SCENARIOS = [
     ("t261011-17-green-run-face-note",
      "A green-run face miss is visible on the ticket face, not only in the worker log (ticket t261011-17 spec item 3, user words: a steward on duty should not have to grep the log to learn that a face was supposed to be written; incident = t261011-16's failure-free green round left meta.last_green_run null with the miss swallowed into one log line by the try/except; grey-box L3, the REAL dev_lane._ki220_record_green_run driven through a stubbed workflow facade at the module seam, offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A activity failure - meta carries NO last_green_run face (fail-closed untouched, never a fabricated green) AND a named miss note naming the green-run face and lane_head_sha; B activity returns ok=false - equally observable, no face, note present; C success - the face lands with sha+at and the miss note is GONE (a recovered lane must not carry a stale failure note); D unpatched replay - the recorder is inert, no face and no note (old in-flight replays observe nothing). Intent split: the note truth-table matrix, malformed activity-result shapes and guard mechanics belong to the developer's L1 tests; the registration surface completeness belongs to t261011-17-registration-surface; the develop-buffer landing refusal text and shared.green_run_face semantics are out of scope (spec item 4, precondition stays fail-closed - leg A asserts exactly that half). Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. Engine tree or dev_lane unimportable = ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261011-17/sc_t26101117_green_run_face_note.py", "ro"),
+    # ---- t261011-26: a line round is visible while it runs; its evidence is kept ----
+    ("t261011-26-round-progress-face",
+     "The running line round is VISIBLE at a stable path and its outcome stays distinguishable after it ends (ticket t261011-26, user words 'is there really nowhere to see how the line run is going?' - today the round is only readable from a per-round system temp dir that shutil.rmtree deletes the moment it ends, the ledger only rows at round END, and the ticket face's roundState input can only ever read idle; grey-box L3, the REAL integration/line_round_runner.py as a subprocess over a real git fixture tree + a stub suite carrying run_scenarios.py's own PASS/FAIL/ENV_FAIL block vocabulary, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A LIVE FACE - while the round runs, a parseable face EXISTS at the declared stable path under the face dir (rounds/current.json via the declared SANDBAR_LINE_ROUND_FACE_DIR seam, absence = idle exactly as certification-model's roundState rule states), read from the READER side, carrying state=running + run_id + started_at/updated_at, counts that GROW as the suite judges scenarios, and the last judged scenario's name + verdict; B TERMINAL OUTCOMES - three rounds land three distinguishable terminal records read back from disk: done/green, done/red (a completed red is a proof, never could-not-run), failed + the runner's NAMED reason (could-not-run), so green/red/could-not-run/timeout no longer collapse into one silence and current.json is GONE after every finish (absence = idle, no stale running face); fast-catch: a running round that silently produces no live face (the 22:13 incident class: only the agent who knew the temp dir could see it) or a terminal outcome that collapses into unreadable silence is caught here in seconds, offline, instead of at the next time somebody asks how the round is doing and the answer is again no; C CONTRACT UNCHANGED - the face is a pure observer: the runner still writes exactly one JSON header on stdout with untouched exit semantics; D HONEST DEGRADE - an unresolvable face dir (projects root with no declaring lines.json) degrades NAMED on stderr, writes NO face anywhere, and the round still completes honestly. Division of intent: parser truth tables (log vocabulary, torn rows, idempotent re-parse), atomic-write injection and per-field shape validation belong to developer L1; the runner->header contract/red-is-a-proof/timeout/SIGTERM reclaim belong to t261009-77-line-round-runner and t261011-18; the panel's rendering of roundState is its own ticket; retained evidence + rolling retention + overlapping-round safety belong to the sibling t261011-26-round-evidence-kept entry. Pre-implement tree red = the named TDD signal; green required at the integration gate / merge. line_round_runner.py or git missing = ENV_FAIL exit 2",
+     "python3 integration/t261011-26/sc_t26101126_round_progress_face.py", "ro", "fast"),
+    ("t261011-26-round-evidence-kept",
+     "The round's evidence is KEPT at a stable path and the rolling bookkeeping can never eat a live round (ticket t261011-26 spec item 2 + the review_plan condition on finish/prune keyed by run_id; grey-box L3, the REAL integration/line_round_runner.py as a subprocess over the same shared fixture as the sibling entry, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A RETAINED LOG - after a round ends its suite log survives at rounds/<run_id>/suite.log under the declared face dir with the suite's judged PASS lines and the INTEG_SUMMARY intact (evidence no longer the temp dir's casualty, read from the reader side); B ROLLING RETENTION - seeded old run dirs beyond the declared keep window are pruned, the just-finished round's own evidence survives its own prune; C LIVE-ROUND SAFETY - a face dir already carrying a live pointer naming ANOTHER run survives this round's finish: the stranger's current.json is NOT deleted and the run dir it names is NOT pruned even when old (deletion and pruning key on the run_id read from the face on disk, never on whatever sits in rounds/); fast-catch: the overlapping-round class where a straggler round steals or deletes the next round's live face (arbitration round 1 leg C1, shipped once already) and the evidence-loss class where the suite log dies with the temp dir again are both caught here in seconds, offline; D HONEST BOOKKEEPING - a real prune names itself on stderr non-fatally, an empty face dir stays silent. Division of intent: the live-face content and terminal-outcome vocabulary belong to the sibling t261011-26-round-progress-face; retention arithmetic and prune-policy unit tables belong to developer L1. Pre-implement tree red = the named TDD signal; green required at the integration gate / merge. line_round_runner.py or git missing = ENV_FAIL exit 2",
+     "python3 integration/t261011-26/sc_t26101126_round_evidence_kept.py", "ro", "fast"),
+    # ---- t261012-01: the round face never prints a green it cannot support ----
+    ("t261012-01-round-face-truth",
+     "The round face never prints a green it cannot support (ticket "
+     "t261012-01, user words: face.json read {'state': 'done', 'counts': "
+     "{'ran': 0, ...}, 'outcome': {'verdict': 'green'}} beside a retained "
+     "suite.log saying INTEG_SUMMARY {'ran': 1, ...} — the exact false-green "
+     "the certification rules exist to prevent; grey-box L3, the REAL "
+     "integration/line_round_runner.py as a subprocess over the t261011-26 "
+     "shared git fixture + incident-class stub suites, offline seconds, zero "
+     "docker/Temporal-server/browser, never touches 3099/7233): A NO GREEN "
+     "OVER NOTHING - a round whose header/summary counted ran == 0 ends "
+     "state=done but its outcome verdict is the no-proof verdict, never "
+     "green (the engine's develop_certify.run_verdict rule: ran > 0 and "
+     "fail == 0 and env_fail == 0); B TERMINAL FACTS ONLY - a suite exiting "
+     "0 WITHOUT its INTEG_SUMMARY lands state=failed carrying a reason that "
+     "NAMES the missing summary, never a fabricated done; C COUNTS AGREE OR "
+     "ARE NAMED UNREADABLE - for the same round the terminal face's counts "
+     "agree with the INTEG_SUMMARY parsed from the retained suite.log read "
+     "back from the READER side, and a real summary beside per-scenario "
+     "lines the parser does not know never publishes silent zeros (the "
+     "face carries the summary's own numbers or a 'counts unreadable: "
+     "<why>' note); D FOUR-WAY TERMINALS - green / red / no-proof / "
+     "failed+named-reason stay four distinguishable records read from disk "
+     "without worker.log. Division of intent: live-face visibility, "
+     "retained-evidence survival, rolling retention and overlapping-round "
+     "safety belong to the shipped t261011-26 sibling entries (their shared "
+     "fixture helpers are reused here, not re-proved); parser truth tables "
+     "and torn-JSON rows belong to developer L1; the panel's rendering of "
+     "the verdicts is its own ticket. Pre-implement tree red = the named "
+     "TDD signal (A/C legs are the incident replay); green required at the "
+     "integration gate / merge. line_round_runner.py or git missing = "
+     "ENV_FAIL exit 2",
+     "python3 integration/t261012-01/sc_t26101201_round_face_truth.py", "ro", "fast"),
     # ---- t261011-02: the CLI board row says what the engine row says ----
     ("t261011-02-ticket-list-projection-parity",
      "For the same ticket the CLI board face and the engine row face agree per-key (ticket t261011-02, user words 'the CLI row says what the engine row says — fix the whole seam, not just the one key'; incident = ticket.py _list rebuilt rows through fixed key whitelists twice, so lane_version/develop_line read '' for every ticket while the develop-buffer opt-in's first ticket was in flight, and the same seam had already eaten paused/paused_phase (t260908-01, t260910-04 rerouted the console instead of repairing the projection) and exec_status/close_health/close_health_reason; grey-box L3, the REAL engine row builder _row_from_meta loaded from the real client.py over real meta shapes (develop-buffer opt-in, between-segment paused, minimal closed, legacy no-key rows) fed through the declared _poc transport seam into the real CLI op entry ticket.run({'op':'list'}), offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A PER-KEY AGREEMENT on the ticket's two named covers — the develop-buffer ticket's lane_version/develop_line and the paused ticket's paused/paused_phase arrive on the CLI row with the engine's exact values, and NO key of the engine row is recomputed or rename-drifted; B KEY-SET PARITY — every key of the real engine row (including the caller-added close_ts and the closed-row shape's health/exec_status keys) is carried, so the day the engine adds a key and the projection does not, this reds by name; C HONEST ABSENCE — a legacy row missing the newer keys reads honestly empty, never guessed, never a crash; D SINGLE SOURCE — the engine-formatted updated string and epoch updated_ts arrive verbatim, never re-derived from the CLI wall clock. Scope guard: the console and the engine row face are read, never modified. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. Engine tree or ticket.py missing/unimportable = ENV_FAIL exit 2",
@@ -3331,6 +3380,18 @@ FAST_SET_CATCH = {
     "t261008-43-inspection-suite-duration-leg":
         "the integration round going slow or hanging without the inspection "
         "suite face noticing (KI-060 family tripwire)",
+    "t261011-26-round-progress-face":
+        "a running line round publishing no live face (or an unreadable "
+        "terminal outcome) — the 22:13 incident class where a round was "
+        "invisible to everyone but the agent who knew the temp dir",
+    "t261011-26-round-evidence-kept":
+        "the round's suite log dying with its temp dir again, or an "
+        "overlapping round stealing/deleting the next round's live face "
+        "(arbitration round 1 leg C1 tripwire)",
+    "t261012-01-round-face-truth":
+        "the round face saying green over ran=0, a done without a parsed "
+        "summary, or publishing silent zeros beside a real INTEG_SUMMARY "
+        "(the t261012-01 false-green incident class)",
 }
 
 
@@ -4746,13 +4807,55 @@ def _counts_mismatch(spec_cases, ran, passed, failed, env_failed):
     return "；".join(diff) if diff else None
 
 
+#: names of entries that already timed out in this process. Grounding note
+#: (t261012-02 review comment 2): the executor schedules each entry exactly once
+#: per round and the reprobe face is a separate process, so no in-round
+#: re-invocation path exists today — the hung-twice guard over this set is
+#: DECLARED DEFENSIVE dead code, kept because the ticket requires a named skip
+#: if such a path ever exists (never silently shipped as a landed requirement).
+_HUNG_THIS_ROUND = set()
+
+#: grace between the group SIGKILL and a final direct-pid sweep (settlement of
+#: the reap itself; the budget contract is CMD_TIMEOUT + this margin, test-locked)
+_KILL_GRACE_S = 10
+
+
+def _read_back(fhs):
+    """Decode both captured output files (replace-chars, per t260911-04 gen3).
+    Decoding never raises; I/O errors degrade to a named marker, never a loss
+    of the verdict."""
+    parts = []
+    for fh in fhs:
+        try:
+            fh.seek(0)
+            parts.append(fh.read().decode("utf-8", "replace"))
+        except OSError as ex:
+            parts.append("<output read-back failed: %s: %s>"
+                         % (type(ex).__name__, ex))
+    return "".join(parts)
+
+
 def _run_entry(entry):
     """Run one scenario (cmd via /bin/sh -c, cwd = repo root). Returns
     (name, exit_code, tail, dur_s). dur_s = that scenario's wall time
     (KI-060 prep 2: timing distribution — the summary line only gives the
-    total; finding the slow scenarios relies on these per-entry marks)."""
+    total; finding the slow scenarios relies on these per-entry marks).
+
+    t261012-02: the case runs in its own session (start_new_session=True) and
+    its stdout/stderr go to temp files, never PIPE — CPython's subprocess.run()
+    re-calls communicate() with NO timeout after killing only the direct child,
+    so a grandchild holding an inherited pipe write end used to defeat
+    CMD_TIMEOUT entirely (the 261011 round hung ~1h on one case). On the budget
+    the GROUP is SIGKILLed, so a timeout red lands within CMD_TIMEOUT +
+    _KILL_GRACE_S, always (test-locked, not assumed)."""
     name, cmd = entry[0], entry[2]
     t_start = time.time()
+    if name in _HUNG_THIS_ROUND:   # declared defensive: see _HUNG_THIS_ROUND note
+        return (name, 1,
+                "skipped by hung-twice guard: this entry already timed out "
+                "(>%ds, process group killed) earlier in this round — see "
+                "that verdict's evidence for the hang" % CMD_TIMEOUT,
+                time.time() - t_start, t_start, "")
     # 净化 lane 自身 env 再下放（t260910-08 arbitrate）：机械跑若从 dev-lane 内
     # 发起（runner 本身住在泳道里），SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW
     # 会触发带递归守卫的场景（capture 族/auto-rework-trace）的「嵌套于 lane 步」
@@ -4769,35 +4872,107 @@ def _run_entry(entry):
     # 非消费者条目零注入（例外通道显式化，env 缺席=逐字旧行为）。
     if _BATCH_STATE["project"] and name in _BATCH_STATE["consumers"]:
         child_env[BATCH_ENV] = _BATCH_STATE["project"]
+    # t261012-02: capture via temp FILES, not pipes — nothing the case spawns
+    # can hold a pipe the runner waits on, and the evidence survives the group
+    # kill (read back AFTER reap; fds closed on every path below).
+    out_fh = err_fh = None
+    proc = None
     try:
-        # 解码加固（t260911-04 仲裁 gen3 实锤）：text=True 默认严格解码，任一场景输出
-        # 含非法字节即抛 UnicodeDecodeError 穿透池线程 → 池级异常 → 该池未跑条目静默
-        # 丢失（实案：192 跑 ≠ 在册 216，池级异常点名 0xef 处解码失败）。诊断文本按
-        # 替换字符净化，判定仍严格由退出码承载——不弱化三态契约，只堵条目丢失。
-        proc = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True,
-                              text=True, encoding="utf-8", errors="replace",
-                              timeout=CMD_TIMEOUT, env=child_env)
-        return (name, proc.returncode,
-                ((proc.stdout or "") + (proc.stderr or ""))[-1500:],
-                time.time() - t_start, t_start,
-                ((proc.stdout or "") + (proc.stderr or "")))
-    except subprocess.TimeoutExpired:
-        return (name, -9, "超时（>%ds）" % CMD_TIMEOUT, time.time() - t_start,
-                t_start, "")
+        out_fh = tempfile.TemporaryFile()
+        err_fh = tempfile.TemporaryFile()
+        proc = subprocess.Popen(["/bin/sh", "-c", cmd], stdin=subprocess.DEVNULL,
+                                stdout=out_fh, stderr=err_fh,
+                                start_new_session=True, env=child_env)
     except OSError as ex:
         # spawn 面（t260911 仲裁实锤：宿主资源压力下 spawn 可抛 OSError）——
         # 按协议分类落红绝不 raise 穿透（条目静默丢失＝fail-open 家族复发）：
         # 专用码 -8（非超时非断言），综合为 not-checked×external，evidence 点名原文。
+        for fh in (out_fh, err_fh):
+            if fh is not None:
+                fh.close()
         return (name, _SPAWN_FAIL, "spawn 失败: %s: %s" % (type(ex).__name__, ex),
                 time.time() - t_start, t_start, "")
+    try:
+        # proc.wait (not communicate): with no pipes to drain it is the honest
+        # primitive (review comment 1); the files carry the evidence.
+        try:
+            proc.wait(timeout=CMD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            # The budget is real now: kill the WHOLE session/group (the direct
+            # /bin/sh child AND every grandchild), never only the direct pid.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass   # already gone / unreapable: still sweep the direct pid below
+            try:
+                proc.wait(timeout=_KILL_GRACE_S)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                try:
+                    proc.wait(timeout=_KILL_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    pass   # unreapable after two SIGKILLs: verdict still lands
+            _HUNG_THIS_ROUND.add(name)
+            out = _read_back((out_fh, err_fh))
+            return (name, -9,
+                    "超时（>%ds，进程组已 SIGKILL）" % CMD_TIMEOUT,
+                    time.time() - t_start, t_start, out)
+        # 解码加固（t260911-04 仲裁 gen3 实锤）：输出按替换字符净化，判定仍严格由
+        # 退出码承载——不弱化三态契约，只堵条目丢失/穿透。
+        out = _read_back((out_fh, err_fh))
+        return (name, proc.returncode, out[-1500:], time.time() - t_start,
+                t_start, out)
     except Exception as e:  # noqa: BLE001
         # 丢单防御（t260910-14 arbitrate gen3）：起跑侧任何异常若穿出到 drain 线程，
         # 该场景将零结果行（gen0 实锤：登记 196 实跑 195、t02 静默消失）——兜底记
         # ENV 口径一行留痕（起跑失败=环境/供给事件，非产品红），计数保持诚实。
-        # （6 元组形态随 main 侧协议扩展对齐；OSError 已由上一支专用码承接。）
+        # （6 元组形态随 main 侧协议扩展对齐；OSError 已由 spawn 支路专用码承接。）
         return (name, 2,
                 "runner 捕获场景进程异常（留痕不静默丢场景）：%r" % (e,),
                 time.time() - t_start, t_start, "")
+    finally:
+        # Full-terminal-state discipline (t261012-02 arbitrate gen0): the
+        # group is swept on EVERY terminal path — normal and red exits too.
+        # A case that backgrounds a grandchild and exits leaves that
+        # grandchild alive holding the (deleted-but-open) output file: the
+        # pid-51249 orphan class from the ticket body. The session is already
+        # isolated (start_new_session=True), so one bounded killpg(SIGKILL)
+        # here reaches every descendant that did not detach into its own
+        # session; own-session helpers (stage hold legs) are outside the
+        # group by design and stay untouched. fd close also happens on every
+        # path, read-back raising included.
+        if proc is not None:
+            # pgid == proc.pid (the child is its own group leader via
+            # start_new_session=True); getpgid(proc.pid) would FAIL once the
+            # direct child is reaped — exactly the normal/red paths — so the
+            # pid recorded at spawn is the only reliable handle (arbitrate
+            # gen0 leg B evidence: a backgrounded sleep 31 survived the old
+            # getpgid-based sweep).
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass   # group already gone: terminal state
+            if proc.poll() is None:
+                try:
+                    proc.wait(timeout=_KILL_GRACE_S)
+                except subprocess.TimeoutExpired:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                    try:
+                        proc.wait(timeout=_KILL_GRACE_S)
+                    except subprocess.TimeoutExpired:
+                        pass   # unreapable after two SIGKILLs: verdict still landed
+        for fh in (out_fh, err_fh):
+            if fh is not None:
+                try:
+                    fh.close()
+                except OSError:
+                    pass
 
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

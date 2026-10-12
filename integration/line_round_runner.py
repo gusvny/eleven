@@ -55,6 +55,33 @@ from pathlib import Path
 
 CANDIDATES_ENV = "SANDBAR_LINE_ROUND_CANDIDATES"
 SUITE_CMD_ENV = "SANDBAR_LINE_ROUND_SUITE_CMD"
+#: Pools the line round does not run by default (host order 261011): the
+#: exclusive pool nests whole suites/consoles and made every round hit the cap.
+#: Overridable with the same key; an empty value runs every pool.
+#: PROTECTIVE default (261012): keep rounds DIAGNOSTIC until the round's
+#: environment is faithful enough to judge the revision.
+#:
+#: Why not full: a full round is the only kind that can mint a certification
+#: (a narrowed round writes no run record ⇒ no header ⇒ the engine can only
+#: record range growth), but a round that ends RED mints a RED certification
+#: and a red certification OPENS A FREEZE — `develop_certify.run_line_round`
+#: appends `open_freeze_rows` on any red, and a frozen line refuses every
+#: landing except a `fix` carrying a `repairs` relation. The measured red set
+#: at the line head is not the revision's fault: of the 32 self-fails and 20
+#: environment cases, several PASS in the delivered tree (t260930-01,
+#: t261004-28 measured 261012) and 20 UI/DOM cases never ran at all
+#: (`not-checked/external`) because the round cannot boot the console it would
+#: inspect. Freezing the line over that would block the very landings this
+#: work exists to move. Note also `develop_certify.should_freeze()` — dead
+#: code today — says a freeze "opens only when the red implicates content".
+#:
+#: Flip condition (the certification round): once the round's UI/DOM cases
+#: actually run and the environment-induced self-reds are gone, set
+#: SANDBAR_LINE_ROUND_EXCLUDE_POOLS="" for the tick's environment — or change
+#: this default — and the round becomes a proof again. Diagnostic mode is
+#: always announced on stderr; it is never silent.
+EXCLUDE_POOLS_DEFAULT = "exclusive"
+EXCLUDE_POOLS_ENV = "SANDBAR_LINE_ROUND_EXCLUDE_POOLS"
 REPO_PATH_PREFIX = "SANDBAR_LINE_ROUND_REPO_PATH_"
 RUN_ROOT_ENV = "SANDBAR_LINE_ROUND_RUN_ROOT"
 STATE_DIR_ENV = "SANDBAR_LINE_ROUND_RUN_STATE_DIR"
@@ -97,9 +124,22 @@ TAG = "LINE_ROUND_RUNNER"
 
 def die(reason):
     """The one could-not-run exit: named reason on stderr, nonzero exit,
-    stdout stays empty — the engine's CouldNotRun path carries the name."""
+    stdout stays empty — the engine's CouldNotRun path carries the name.
+    A registered face hook (run()) records the terminal failed state FIRST,
+    so the round's outcome stays visible on its stable face (t261011-26)."""
+    hook = _FACE_HOOK[0]
+    if hook is not None:
+        try:
+            hook(reason)
+        except Exception:  # noqa: BLE001 — the face never masks the verdict
+            pass
     sys.stderr.write("%s could_not_run: %s\n" % (TAG, reason))
     sys.exit(2)
+
+
+#: The active round's terminal-face hook, set/cleared by run() (die() calls
+#: it so every could-not-run path lands on the face). One runner = one round.
+_FACE_HOOK = [None]
 
 
 def parse_candidates(env=None):
@@ -240,16 +280,49 @@ def prepare_tree(candidate, run_root, env=None):
     return dst, src, how
 
 
+def exclude_pools_value(env=None):
+    """Pools this round does NOT run — declared once, here. Default: none.
+
+    Host order 261011 ('先把 exclusive 的池排除掉，把 line run 跑通先') got a round
+    running, but 261012 found what that costs: an exclusion makes the round
+    NARROWED, a narrowed round writes no run record, and a round without a
+    record has no header to relay — so it can never become a certification
+    (`run_scenarios.run_record_skip_reason` + this module's `read_header`).
+    The exclusion is therefore opt-in (diagnostics), never the default: the
+    certification round runs every pool. An operator sets
+    SANDBAR_LINE_ROUND_EXCLUDE_POOLS to narrow a diagnostic round (an empty
+    value = run every pool); when it is set, the runner says on stderr that
+    this round cannot mint a certification.
+    """
+    env = os.environ if env is None else env
+    raw = env.get(EXCLUDE_POOLS_ENV)
+    if raw is None:
+        return EXCLUDE_POOLS_DEFAULT
+    return str(raw).strip()
+
+
 def suite_argv(env=None):
     """The declared full suite command; override parsed with shlex, default
-    is this interpreter plus the suite entry point."""
+    is this interpreter plus the suite entry point. A NARROWING pool
+    exclusion is appended only when the operator asked for one, and it is
+    announced on stderr: such a round is a diagnostic, not a proof."""
     env = os.environ if env is None else env
     raw = str(env.get(SUITE_CMD_ENV, "")).strip()
     if not raw:
-        return [sys.executable, "integration/run_scenarios.py"]
-    argv = shlex.split(raw)
-    if not argv:
-        die("suite_cmd_empty:%s" % SUITE_CMD_ENV)
+        argv = [sys.executable, "integration/run_scenarios.py"]
+    else:
+        argv = shlex.split(raw)
+        if not argv:
+            die("suite_cmd_empty:%s" % SUITE_CMD_ENV)
+    excluded = exclude_pools_value(env)
+    if excluded and "--exclude-pools" not in argv:
+        argv = argv + ["--exclude-pools", excluded]
+    if excluded or "--only" in argv:
+        sys.stderr.write(
+            "%s NARROWED: round is narrowed (exclude-pools=%r) — the suite "
+            "writes no run record for a narrowed round, so this round can "
+            "produce evidence but NO certification\n"
+            % (TAG, excluded or "--only"))
     return argv
 
 
@@ -353,9 +426,35 @@ def run(env=None):
     run_root = Path(env.get(RUN_ROOT_ENV, "").strip() or tempfile.mkdtemp(
         prefix="line-round-"))
     run_root.mkdir(parents=True, exist_ok=True)
+    # The round's stable face (t261011-26): resolved BEFORE anything runs so
+    # even a pre-spawn could-not-run is visible. Unresolved = named degrade,
+    # the round runs exactly as before, only the face is absent.
+    import lib_round_face
+    fdir, line_id = lib_round_face.resolve_develop_dir(
+        sorted({c["repo"] for c in candidates}), env)
+    face = watcher = None
+    if fdir is not None:
+        round_id = "round-%s-%d" % (time.strftime("%Y%m%dT%H%M%SZ",
+                                                  time.gmtime()), os.getpid())
+        face = lib_round_face.FaceWriter(
+            fdir, round_id, line_id,
+            {c["repo"]: c["revision"] for c in candidates})
+        face.start()
     state = RunState(env, run_root)
     state.sweep_stale()
     state.record()
+    watcher_holder = [None]
+
+    def face_failed(reason):
+        # every could-not-run path (die, signal unwind) lands here first:
+        # state=failed + the named reason, distinguishable without worker.log
+        if watcher_holder[0] is not None:
+            watcher_holder[0].stop()
+        if face is not None:
+            face.retain_log(run_root / "suite.log")
+            face.finish("failed", None, reason)
+
+    _FACE_HOOK[0] = face_failed
     try:
         clones = {}
         for candidate in candidates:
@@ -371,6 +470,10 @@ def run(env=None):
         log_path = run_root / "suite.log"
         argv = suite_argv(env)
         with open(log_path, "wb") as log:
+            if face is not None:
+                watcher = lib_round_face.LogWatcher(face, log_path)
+                watcher_holder[0] = watcher
+                watcher.start()
             try:
                 proc = subprocess.Popen(
                     argv, cwd=str(primary),
@@ -406,6 +509,9 @@ def run(env=None):
                 signal.signal(signal.SIGTERM, prev_term)
                 signal.signal(signal.SIGINT, prev_int)
         summary, why = parse_integ_summary(log_path)
+        if watcher is not None:
+            watcher.stop()
+            watcher_holder[0] = None
         if summary is None:
             die("suite_rc_%d:%s;%s"
                 % (rc, why, tail(log_path.read_text(
@@ -413,10 +519,77 @@ def run(env=None):
         header, why = read_header(primary, Path(run_root) / "ledger", summary)
         if header is None:
             die("suite_rc_%d:%s" % (rc, why))
+        if face is not None:
+            # outcome stays visible (t261011-26 spec 4) — and TRUTHFUL
+            # (t261012-01): green requires ran > 0, the face counts agree
+            # with the retained log, and an unreadable count is NAMED, never
+            # silently zero beside a real INTEG_SUMMARY.
+            cases = header.get("cases") or {}
+            header_counts = lib_round_face.normalize_summary_counts(cases)
+            snap = lib_round_face.snapshot_progress(
+                log_path.read_text(encoding="utf-8", errors="replace"))
+            face.merge_progress(snap)
+            summary_counts = snap["summary_counts"]
+            if not snap["scenario_lines_seen"] and summary_counts is not None:
+                # the log's per-scenario lines are in an unknown shape: the
+                # face counts come from the suite's own INTEG_SUMMARY (they
+                # agree with the retained log by construction); the zeros of
+                # an unreadable parse are never published alone
+                counts = summary_counts
+                face.face["counts"] = counts
+                face.face["counts_note"] = (
+                    "counts from INTEG_SUMMARY: per-scenario result lines "
+                    "unrecognized in suite.log")
+            elif header_counts is not None or summary_counts is not None:
+                counts = header_counts or summary_counts  # header wins
+                if counts is summary_counts:
+                    face.face["counts"] = counts
+            else:
+                counts = None  # nothing readable anywhere: not a proof
+            if summary_counts is not None and header_counts is not None \
+                    and not lib_round_face.counts_agree(header_counts,
+                                                        summary_counts):
+                # the incident's exact family (face 0, log ran=1): a
+                # disagreement is published, and green is NOT granted from
+                # either side alone
+                face.face["counts_note"] = (
+                    "counts disagree: header=%s INTEG_SUMMARY=%s — green is "
+                    "not granted from a disagreement"
+                    % (header_counts, summary_counts))
+            verdict = (lib_round_face.terminal_verdict(counts)
+                       if counts is not None else "no_proof")
+            if verdict == "green" and "counts disagree" in \
+                    face.face.get("counts_note", ""):
+                verdict = "no_proof"
+            reason = ""
+            if verdict == "no_proof":
+                if counts is None:
+                    reason = "counts unreadable — no proof"
+                elif counts.get("ran", 0) <= 0:
+                    reason = "no scenario ran (ran=0) — no proof"
+                else:
+                    reason = "green refused: %s" % face.face.get(
+                        "counts_note", "")
+            # the ledger's run id is the round's real identity — relabel the
+            # retained evidence dir to it so face and ledger join 1:1
+            run_id = header.get("id")
+            if isinstance(run_id, str) and run_id.strip():
+                try:
+                    renamed = face.run_dir.with_name(run_id)
+                    face.run_dir.rename(renamed)
+                    face.run_dir = renamed
+                    face.face["run_id"] = run_id
+                except OSError:
+                    pass  # keep the provisional dir; the face still lands
+            face.retain_log(log_path)
+            face.finish("done", verdict, reason)
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0
     finally:
+        _FACE_HOOK[0] = None
+        if watcher_holder[0] is not None:
+            watcher_holder[0].stop()
         state.retire()
         shutil.rmtree(run_root, ignore_errors=True)
 
