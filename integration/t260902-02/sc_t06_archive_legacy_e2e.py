@@ -75,7 +75,13 @@ async def _inject_scenario(sb):
     if m:
         L.ok(m.get("legacy") is True, "legacy=true")
         L.ok(m.get("files") == [], "files 为空（不伪造报告）")
-        L.ok("不可恢复" in str(m.get("reason", "")),
+        # 261012 (KI-01M4PX56PCD family): anchor the promise, not the prose.
+        # The copy-language gate anglicized this reason ("...stage report
+        # unrecoverable (legacy tickets posted honestly)"); the promise is
+        # that the reason NAMES the unrecoverable state — anchor the stable
+        # token in either language, never one language's wording.
+        _reason = str(m.get("reason", ""))
+        L.ok("unrecoverable" in _reason.lower() or "不可恢复" in _reason,
              "reason 写明报告不可恢复（实际 %r）" % m.get("reason"))
         L.ok(m.get("ticket_id") == T_OK, "ticket_id 回写")
         L.ok((m.get("meta") or {}).get("title") == "integ-t06", "meta 快照原样入 manifest")
