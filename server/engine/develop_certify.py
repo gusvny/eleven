@@ -1618,6 +1618,18 @@ def resolve_runner(line, env=None):
         # this injection); "not run" is never "green" — the receipt's
         # INTEG_KNOWN_RED channel names every skipped entry per round.
         run_env.setdefault("SANDBAR_KNOWN_RED_EXCLUDE", "1")
+        # 261012 (same host order, second face): the roster the round reads
+        # must be the MAINTAINED one. The clone is pinned at the line
+        # revision, so its default roster copy lags every main-side booking
+        # until the next landing (measured: a fresh booking for a 1838s
+        # timeout entry did not reach the very next round — 31 skips, not
+        # 32). The roster is integration's ledger maintained on main, not
+        # product code under test: point the round at THIS checkout's copy.
+        # An explicit operator override keeps priority (setdefault).
+        _roster = (Path(__file__).resolve().parents[2]
+                   / "integration" / "known-red-baseline.json")
+        if _roster.exists():
+            run_env.setdefault("SANDBAR_KNOWN_RED_ROSTER", str(_roster))
         try:
             proc = subprocess.Popen(
                 cmd, shell=True, stdout=subprocess.PIPE,
