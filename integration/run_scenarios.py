@@ -4356,7 +4356,12 @@ def run_record_skip_reason(narrowed, commit, env_fp, source):
     """Pure decision matrix: why the top driver writes no run record this round
     (None = write). Named reasons only — never a guessed identity, never a
     silent skip. `narrowed` covers --only rounds and pool-exclusion rounds: a
-    diagnostic round is not a proof, so it wears no `suite` and lands no rows."""
+    diagnostic round is not a proof, so it wears no `suite` and lands no rows.
+    261012: the caller decides narrowing — for the line-round runner's rounds
+    (source `lane:line-round`) the declared pool exclusion IS the round's
+    caliber, not a diagnostic narrowing (every full line round died as
+    run_id_missing_from_summary otherwise; the runner's contract requires the
+    run record)."""
     if narrowed:
         return "narrowed round (--only / pool exclusion) is not a proof — no run record"
     if ledger_owner_is_gate():
@@ -6495,6 +6500,15 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # The top driver mints the run id and writes rows + header at the end
         # of the round; counts come from the same recount the summary carries.
         # Narrowed rounds (--only / pool exclusion) are not proofs: named skip.
+        # 261012 (host order "make the round run"): EXCEPT the line-round
+        # runner's rounds — for source `lane:line-round` the declared pool
+        # exclusion IS the round's caliber (the runner's suite command excludes
+        # the exclusive pool by design), not a diagnostic narrowing. Measured:
+        # every full line round died as could-not-run:run_id_missing_from_
+        # summary because the skip left the summary without a run_id while the
+        # runner's contract requires one. --only stays narrowed in every mode.
+        _narrowed = bool(only_names) or (
+            bool(excluded) and ledger_run_source() != "lane:line-round")
         _run_counts = {"ran": _ran, "passed": _p, "failed": _f,
                        "env_failed": _nc}
         _run_id, _run_face = write_run_record(
@@ -6503,7 +6517,7 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             commit=_reuse.get("git_head") or "",
             env_fp=_fpv["value"], conc_width=conc_width,
             pool_config=_summary["pool_config"],
-            narrowed=bool(only_names or excluded))
+            narrowed=_narrowed)
         if _run_id:
             _summary["run_id"] = _run_id   # additive: the consumer face
         _report_run_face = _run_face
