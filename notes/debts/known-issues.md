@@ -5596,3 +5596,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**闸的红 ≠ 修复没用**——先问「跑闸的进程吃的哪份码」。改引擎码后的第一次重验，drift 检查是前置步骤，不是可选项。
 > **回归**：L1——mock 面锁「drift 报 stale ⇒ retry_qc 文案含先换手」；L3——真台注入：起旧 worker、落新码、发 retry_qc，断言处置链先换手再重跑（而非直接重跑旧码）。
 
+
+## KI-01M4QJA3QWP53VQ5T1MGASF5D7 **泳道 main 同步在 detached HEAD 上落提交、分支 ref 掉队 ⇒ 闸按旧 ref 量错基线**：模式
+（261012/t261012-03 实测；integration 岗登记）
+
+> **实测**：-03 泳道 worktree 处 **detached HEAD**（80e1ea24），其上的 main 合并提交信息为「Merge branch 'main' into **HEAD**」（对照：正常次写作 into lane/...）；分支 ref lane/t261012-03 停在旧得多的 f7032b15，且与 HEAD **真分叉**（merge-base=01c5c3da 旧分叉点）。merge_check 按分支 ref 量 ⇒ 基线取到旧分叉点，全部 main 侧近期改动（CLAUDE.md、notes/、agent_activities、dev_lane、path_gates、shared）被误判为本票越界写（red=8）。同刻 -02（ref==HEAD）判据干净——同机制对照成立。
+> **根因**：worker 的 main 同步/settle 在 worktree 处于 detached HEAD 时直接 commit，分支 ref 不随之推进；无「提交后 ref==HEAD」自检，脱节静默累积（-03 至少两轮合并如此）。
+> **危害**：闸的红看起来像「修复没生效/写集违规」，实为**量错了对象**（ref≠树）；且脱节若带到最后落地，落地并的是旧 ref，HEAD 上的合并成果全部漏掉。
+> **出路**：settle/主同步收尾自检「分支 ref == worktree HEAD」，不等则显式收敛（在分支上并回 HEAD 或拒绝并具名）；merge_check 前置同样校验（量之前先证「量的就是树」）。处置实录（-03，261012）：checkout 分支→merge 80e1ea24（无冲突，两侧内容保全）→ merge-base(main,branch)=e4ae2061 → 闸载荷 dry-run 写集 0 红。
+> **纪律**：**闸量的是 ref，干活的是 HEAD——两者必须先证相等**。
+> **回归**：L1——settle 收尾断言 ref==HEAD（构造 detached 落提交场景必须红/自愈）；L3——真台注入 detached 脱节后跑 merge_check，断言要么自愈要么具名红，绝不静默量旧 ref。
+
