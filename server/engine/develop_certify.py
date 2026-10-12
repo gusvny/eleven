@@ -1607,6 +1607,17 @@ def resolve_runner(line, env=None):
     def runner(candidate_repos):
         run_env = dict(env)
         run_env["SANDBAR_LINE_ROUND_CANDIDATES"] = json.dumps(candidate_repos)
+        # 261012 (host order "make the round run"): the booked-red exemption
+        # belongs on EVERY round path, this line round included. Measured on
+        # round-20261012T123320Z: the rostered serial chain re-ran every tick
+        # (31 booked entries, several multi-minute serials), starving the
+        # 3600s runner budget — the exact wall-clock defect t260930-01 fixed
+        # for lane rounds ("a round's wall clock was decided by one serial
+        # chain, 7 of its 9 entries booked"). The observation post for booked
+        # reds stays the daily inspection and manual runs (they do NOT get
+        # this injection); "not run" is never "green" — the receipt's
+        # INTEG_KNOWN_RED channel names every skipped entry per round.
+        run_env.setdefault("SANDBAR_KNOWN_RED_EXCLUDE", "1")
         try:
             proc = subprocess.Popen(
                 cmd, shell=True, stdout=subprocess.PIPE,
