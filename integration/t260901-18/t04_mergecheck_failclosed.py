@@ -18,12 +18,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from t18lib import (ok, finish, import_engine, VerifyLaneCapture, lane_root,
                     git, make_repo, commit, mkdtemp, rmtree)
 
-BASELINE_ITEM = "写集白名单基线"
+# 261012 (KI-01M4PX56PCD7E186EKSJG53FYD): anchor the machine key, not the copy.
+# The red item's wording may change (the copy-language gate even forces it);
+# the contract is the reason_code plus the item being red. Keep detail
+# assertions on precision properties (a real rc=, the failed refs named),
+# never on wording.
+BASELINE_REASON = "merge_base_failed"
 
 
 def find_baseline_red(res):
     for c in res.checks:
-        if c.get("item", "").startswith(BASELINE_ITEM) and c.get("green") is False:
+        if c.get("reason_code") == BASELINE_REASON and c.get("green") is False:
             return c
     return None
 
@@ -40,11 +45,12 @@ def main() -> int:
     with VerifyLaneCapture(aa) as cap_a:
         res_a = asyncio.run(aa.merge_check(args_a))
     red_a = find_baseline_red(res_a)
-    ok(red_a is not None, "A：分支不存在 → 出现 fail-closed 红项「写集白名单基线」")
+    ok(red_a is not None, "A: unknown branch -> the fail-closed red item is present")
     ok(red_a is not None and "merge-base" in red_a.get("detail", "")
-       and "解析失败" in red_a["detail"] and "rc=" in red_a["detail"],
-       "A：detail 精确（merge-base 解析失败 + rc=），不回落旧口径")
-    ok(cap_a.payload is None, "A：verify_lane 未被调用（不把坏口径传下去）")
+       and "rc=" in red_a["detail"] and args_a.branch in red_a["detail"],
+       "A: the detail is precise (the merge-base failure is named, the real git "
+       "rc= is carried, the failing ref is named) — never falls back to the old caliber")
+    ok(cap_a.payload is None, "A: verify_lane is not called (a bad baseline is never passed down)")
 
     # ---- 场景 B：main 不存在（隔离假仓，REPO_ROOT 指过去）----
     tmp = mkdtemp()

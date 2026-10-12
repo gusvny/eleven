@@ -30,14 +30,18 @@ case "${1:-}" in
     run t04_mergecheck_failclosed.py
     echo "PASS t04-mergecheck-failclosed"
     ;;
+  t05-two-sided-baseline)
+    run t05_two_sided_baseline.py
+    echo "PASS t05-two-sided-baseline"
+    ;;
   all)
-    for t in t01-whitelist-caliber t02-literal-main-hazard t03-mergecheck-wiring t04-mergecheck-failclosed; do
+    for t in t01-whitelist-caliber t02-literal-main-hazard t03-mergecheck-wiring t04-mergecheck-failclosed t05-two-sided-baseline; do
       bash "$0" "$t" || exit 1
     done
     echo "PASS all (t260901-18)"
     ;;
   *)
-    echo "用法: bash integration/t260901-18/check.sh <t01-whitelist-caliber|t02-literal-main-hazard|t03-mergecheck-wiring|t04-mergecheck-failclosed|all>" >&2
+    echo "用法: bash integration/t260901-18/check.sh <t01-whitelist-caliber|t02-literal-main-hazard|t03-mergecheck-wiring|t04-mergecheck-failclosed|t05-two-sided-baseline|all>" >&2
     exit 2
     ;;
 esac

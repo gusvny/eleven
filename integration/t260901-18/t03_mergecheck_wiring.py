@@ -54,8 +54,11 @@ def main() -> int:
     items = [c.get("item", "") for c in res.checks]
     ok(any("verify_lane" in it for it in items),
        "merge-base 成功路径走「泳道内 verify_lane code 绿灯」项（非 fail-closed 项）")
-    ok(not any(it.startswith("写集白名单基线") for it in items),
-       "merge-base 成功路径未触发 fail-closed 红项")
+    # 261012 (KI-01M4PX56PCD): anchor the machine key, not the copy. This is the
+    # reverse assertion; its positive control is t04 (same construct on the
+    # failure path: the item IS present there), so a silent weakening is caught.
+    ok(not any(c.get("reason_code") == "merge_base_failed" for c in res.checks),
+       "the merge-base success path does not fire the fail-closed red item")
 
     return finish()
 

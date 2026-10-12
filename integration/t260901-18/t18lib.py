@@ -76,15 +76,22 @@ def write_verify_yaml(repo: Path) -> None:
         "utf-8")
 
 
-def verify_lane_code(repo: Path, base: str, write_set):
-    """真跑 verify_lane code 道（lane=code 白名单判定的真实现），返回 run() 结果 dict。"""
+def verify_lane_code(repo: Path, base: str, write_set, base_other: str = None):
+    """真跑 verify_lane code 道（lane=code 白名单判定的真实现），返回 run() 结果 dict。
+    base_other (261012 caliber): the other side's merge-base. When passed, the
+    whitelist judges the intersection of the two three-dot diffs ("this ticket's
+    own write" = files that differ from both sides). Absent/None = the old
+    caliber, byte for byte unchanged."""
     sys.path.insert(0, str(lane_root() / "server" / "tools"))
     import verify_lane
     # 260930：进程内调闸同样吃继承旋钮——剥完再跑
+    payload = {"lane": "code", "path": str(repo), "base": base,
+               "require_base": True, "write_set": list(write_set),
+               "skip_slow": True}
+    if base_other:
+        payload["base_other"] = base_other
     with no_narrowing_env():
-        return verify_lane.run({"lane": "code", "path": str(repo), "base": base,
-                                "require_base": True, "write_set": list(write_set),
-                                "skip_slow": True})
+        return verify_lane.run(payload)
 
 
 def whitelist_items(result):
