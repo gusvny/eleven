@@ -54,8 +54,10 @@ else:
     # 且解析失败 fail-closed 红
     if "wl_base, wl_err = _merge_base_ref(" not in body:
         fails.append("第3项缺 _merge_base_ref 基线解析（t260901-18 fail-closed 口径）")
-    if "写集白名单基线" not in body:
-        fails.append("第3项缺 merge-base 失败红 item（fail-closed）")
+    # 261012 (KI-01M4PX56PCD): anchor the machine key, not the copy wording.
+    if "merge_base_failed" not in body:
+        fails.append("item 3 lacks the fail-closed merge-base red item "
+                     "(machine key reason_code=merge_base_failed)")
     # 第 3.5 项：bundle_pairs 用 main...branch 三点
     if not re.search(r'git",\s*"diff",\s*"--name-only",\s*["\']main\.\.\.%s["\']\s*%\s*(args\.branch|sc\[.branch.\])', body):
         if not re.search(r"main\.\.\.%s['\"]\s*%\s*(args\.branch|sc\[.branch.\])", body):

@@ -52,8 +52,17 @@ export type CertRead =
       per_line: Record<string, CertLineRead>
       meta_notes: string[]
       runs_note: string
+      /** t261012-03: the Rounds table's source — the runner's published faces. */
+      round_faces: RoundFacesSection
     }
-  | { ok: false; reason: string }
+  | {
+      ok: false
+      reason: string
+      /** t261012-03 fault 2: a refusal receipt still carries the round-faces
+       *  section when the adapter managed to read it — the Rounds table is
+       *  independent of the line declaration's readability. */
+      round_faces?: RoundFacesSection
+    }
 
 /** The route's answer: the derived face plus the raw input arrays the panel
  *  needs to build links (certs, runs, outcomes ride along verbatim). */
@@ -73,6 +82,40 @@ export type CertReadFace = (
   args: { project: string; line?: string },
   opts?: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv },
 ) => Promise<CertFaceRead>
+
+/** t261012-03: the adapter's `round_faces` section, validated softly — every
+ *  per-file state stays a named state (face / absent / reason); a section the
+ *  receipt does not carry degrades to a named section error, never to rows
+ *  of zeros. */
+export interface RoundFacesSection {
+  dir: string
+  error?: string
+  live?: { ok: true; face: Record<string, unknown> } | { ok: false; reason: string }
+  rounds?: Array<Record<string, unknown>>
+  older?: number
+}
+
+/** t261012-03: the `round` mode's receipt — one round's dialog facts from the
+ *  retained evidence. Each absence (no terminal face, no log) is its own
+ *  named field, never an empty default. */
+export interface RoundRead {
+  ok: boolean
+  project?: string
+  run?: string
+  face?: Record<string, unknown> | null
+  face_reason?: string | null
+  failures?: Record<string, unknown> | null
+  failures_absent?: string | null
+  wrote?: string[]
+  wrote_note?: string
+  trigger?: string | null
+  trigger_note?: string
+  log_path?: string
+  log_absent?: string | null
+  reason?: string
+}
+
+export type CertRoundRead = RoundRead & { ok: true; project: string; run: string }
 
 /** Adapter script path (same-repo relative: src/host -> this file's sibling). */
 export function certificationAdapterPath(): string {
@@ -96,7 +139,24 @@ export function parseCertReceipt(stdout: string): CertRead {
     return { ok: false, reason: 'certification receipt has an unexpected shape (no fallback, no invented face)' }
   }
   if (doc.ok === false) {
-    return { ok: false, reason: typeof doc.reason === 'string' && doc.reason ? doc.reason : 'certification read refused (reason absent)' }
+    const rfSection = isObj(doc.round_faces) ? doc.round_faces : null
+    return {
+      ok: false,
+      reason: typeof doc.reason === 'string' && doc.reason ? doc.reason : 'certification read refused (reason absent)',
+      round_faces: rfSection
+        ? {
+            dir: typeof rfSection.dir === 'string' ? rfSection.dir : '',
+            error: typeof rfSection.error === 'string' ? rfSection.error : undefined,
+            live: rfSection && isObj(rfSection.live)
+              ? (rfSection.live.ok === true
+                ? { ok: true, face: (isObj(rfSection.live.face) ? rfSection.live.face : {}) as Record<string, unknown> }
+                : { ok: false, reason: typeof rfSection.live.reason === 'string' ? rfSection.live.reason : 'live face unreadable (reason absent)' })
+              : undefined,
+            rounds: Array.isArray(rfSection.rounds) ? rfSection.rounds as Array<Record<string, unknown>> : [],
+            older: typeof rfSection.older === 'number' && Number.isFinite(rfSection.older) ? rfSection.older : undefined,
+          }
+        : undefined,
+    }
   }
   if (typeof doc.project !== 'string' || !Array.isArray(doc.lines)
     || !isObj(doc.per_line)) {
@@ -113,6 +173,7 @@ export function parseCertReceipt(stdout: string): CertRead {
       perLine[k] = { ok: false, reason: typeof v.reason === 'string' ? v.reason : 'line refused (reason absent)' }
     }
   }
+  const section = isObj(doc.round_faces) ? doc.round_faces : null
   return {
     ok: true,
     project: doc.project,
@@ -120,6 +181,56 @@ export function parseCertReceipt(stdout: string): CertRead {
     per_line: perLine,
     meta_notes: Array.isArray(doc.meta_notes) ? (doc.meta_notes as string[]) : [],
     runs_note: typeof doc.runs_note === 'string' ? doc.runs_note : '',
+    round_faces: {
+      dir: typeof section?.dir === 'string' ? section.dir : '',
+      error: typeof section?.error === 'string'
+        ? section.error
+        : (section ? undefined : 'the receipt carries no round_faces section (older adapter) — the Rounds table cannot be drawn from this answer'),
+      live: section && isObj(section.live)
+        ? (section.live.ok === true
+          ? { ok: true, face: (isObj(section.live.face) ? section.live.face : {}) as Record<string, unknown> }
+          : { ok: false, reason: typeof section.live.reason === 'string' ? section.live.reason : 'live face unreadable (reason absent)' })
+        : undefined,
+      rounds: section && Array.isArray(section.rounds) ? section.rounds as Array<Record<string, unknown>> : [],
+      older: section && typeof section.older === 'number' && Number.isFinite(section.older) ? section.older : undefined,
+    } satisfies RoundFacesSection,
+  }
+}
+
+/** t261012-03: the `round` mode's receipt parse — strict like its sibling:
+ *  ok:false travels with its named reason; an ok:true receipt missing its
+ *  facts shape refuses by name. */
+export function parseRoundReceipt(stdout: string): RoundRead {
+  let doc: unknown
+  try {
+    doc = JSON.parse(String(stdout).trim() || 'null')
+  } catch {
+    return { ok: false, reason: 'round receipt is not valid JSON (no fallback, no invented face)' }
+  }
+  if (!isObj(doc) || typeof doc.ok !== 'boolean') {
+    return { ok: false, reason: 'round receipt has an unexpected shape (no fallback, no invented face)' }
+  }
+  if (doc.ok === false) {
+    return { ok: false, reason: typeof doc.reason === 'string' && doc.reason ? doc.reason : 'round read refused (reason absent)' }
+  }
+  if (typeof doc.project !== 'string' || typeof doc.run !== 'string'
+    || !Array.isArray(doc.wrote)) {
+    return { ok: false, reason: 'round receipt is missing its project/run/wrote facts' }
+  }
+  return {
+    ok: true,
+    project: doc.project,
+    run: doc.run,
+    face: isObj(doc.face) ? doc.face as Record<string, unknown> : null,
+    face_reason: typeof doc.face_reason === 'string' ? doc.face_reason : null,
+    failures: isObj(doc.failures) ? doc.failures as Record<string, unknown> : null,
+    failures_absent: typeof doc.failures_absent === 'string' ? doc.failures_absent : null,
+    wrote: doc.wrote as string[],
+    wrote_note: typeof doc.wrote_note === 'string' ? doc.wrote_note : '',
+    trigger: typeof doc.trigger === 'string' ? doc.trigger : null,
+    trigger_note: typeof doc.trigger_note === 'string' ? doc.trigger_note : '',
+    log_path: typeof doc.log_path === 'string' ? doc.log_path : '',
+    log_absent: typeof doc.log_absent === 'string' ? doc.log_absent : null,
   }
 }
 
@@ -127,19 +238,23 @@ export function parseCertReceipt(stdout: string): CertRead {
  * Spawn the adapter (full-termination recovery, same four settled paths as
  * the grants spawn face). The project key is validated upstream (route);
  * here it is still passed as ONE argv — no shell, no splicing.
+ * t261012-03: generalized to take the whole argv tail so the `round` mode
+ * rides the SAME four settled paths — one spawn face, two modes.
  */
-export function spawnCertificationRead(
-  project: string,
+type SpawnResult<T> = { parse: (stdout: string) => T; label: string }
+function spawnAdapter<T>(
+  argvTail: string[],
+  spec: SpawnResult<T>,
   opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
-): Promise<CertRead> {
+): Promise<T | { ok: false; reason: string }> {
   const run = opts.execFileFn ?? execFileCb
   return new Promise((resolve) => {
     let settled = false
-    const finish = (r: CertRead): void => {
+    const finish = (r: T | { ok: false; reason: string }): void => {
       if (!settled) { settled = true; resolve(r) }
     }
     try {
-      run(enginePython(opts.env), [certificationAdapterPath(), project],
+      run(enginePython(opts.env), [certificationAdapterPath(), ...argvTail],
         { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: opts.env },
         (err, stdout) => {
           // A non-zero exit may still carry the full JSON receipt on stdout —
@@ -148,17 +263,39 @@ export function spawnCertificationRead(
           if (err && out.trim() === '') {
             const killed = (err as NodeJS.ErrnoException & { killed?: boolean }).killed === true
             finish({ ok: false, reason: (killed
-              ? 'certification read timed out and was killed: '
-              : 'certification read failed: ')
+              ? `${spec.label} timed out and was killed: `
+              : `${spec.label} failed: `)
               + String(err.message ?? err).slice(0, 300) }) // LIST-CAP-OK: error-message length limit, not a list cap
             return
           }
-          finish(parseCertReceipt(out))
+          finish(spec.parse(out))
         })
     } catch (e) {
-      finish({ ok: false, reason: 'certification read could not spawn: ' + (e instanceof Error ? e.message : String(e)) })
+      finish({ ok: false, reason: `${spec.label} could not spawn: ` + (e instanceof Error ? e.message : String(e)) })
     }
   })
+}
+
+export function spawnCertificationRead(
+  project: string,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<CertRead> {
+  return spawnAdapter<CertRead>([project], { parse: parseCertReceipt, label: 'certification read' }, opts)
+}
+
+/** t261012-03: the `round` mode — the dialog's one fetch per open. The run id
+ *  is validated HERE too (charset + no `..`), not only adapter-side: a plugin
+ *  boundary does not rely on the spawned process alone to refuse garbage. */
+const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+export function spawnCertificationRound(
+  project: string,
+  runId: string,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<RoundRead> {
+  if (!RUN_ID_RE.test(runId) || runId.includes('..')) {
+    return Promise.resolve({ ok: false, reason: `malformed run id ${JSON.stringify(runId.slice(0, 80))}` }) // LIST-CAP-OK: error-message length limit, not a list cap
+  }
+  return spawnAdapter<RoundRead>(['round', project, runId], { parse: parseRoundReceipt, label: 'round read' }, opts)
 }
 
 /** Line choice: the query's `line` when given (unknown = named refusal), else

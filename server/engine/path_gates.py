@@ -399,9 +399,21 @@ def _entries(write_set: Any) -> Tuple[bool, List[str]]:
 
 
 def _within(path: str, entries: Sequence[str]) -> bool:
-    """条目匹配：路径 == 条目，或路径以「条目 + /」为目录前缀（条目可写 `app/src`
-    指代整个前缀；条目尾斜杠同义）。"""
-    return any(path == s or path.startswith(s + "/") for s in entries)
+    """Entry match: path == entry, or path has the directory prefix "entry + /"
+    (an entry such as `app/src` names a whole prefix; a trailing slash is equivalent).
+
+    The trailing-slash promise must actually hold (261012 host-ordered direct fix):
+    the old implementation appended "/" verbatim, so an entry written as
+    `integration/baselines/` matched NOTHING — while this docstring promised the two
+    forms were equivalent. The failure was silent: a recorded human authorization
+    (authz_gates._match -> this function) stayed unapplied, the gate refused again and
+    never said the scope had missed (KI-01M4PKH23DKWXY1KFM490S7P8F). Normalize each
+    entry (strip trailing slashes) before matching; an empty or degenerate entry
+    matches nothing — a miss is safer than a pass.
+    """
+    return any(
+        s and (path == s or path.startswith(s + "/"))
+        for s in (str(e).rstrip("/") for e in entries))
 
 
 def _is_result_file(path: str) -> bool:

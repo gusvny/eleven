@@ -15,7 +15,9 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const testsDir = join(repo, "server/plugins/executor-panel/tests");
 const HELPERS = new Set(["lib.mjs"]);
 // 浏览器族（真 chromium 驱动）：只随 L3 场景跑，永不进 --pure 快道。
-const BROWSER_RE = /^browser-.*\.test\.mjs$/;
+// t261012-03：`*-shot.mjs`（截图脚本，t261009-44-shot 起也是真浏览器驱动）
+// 同属浏览器族——旧正则只认 browser- 前缀，--pure 快道被它误伤（fail-closed 红）。
+const BROWSER_RE = /^(browser-.*\.test|.*-shot)\.mjs$/;
 const BROWSER_DEP_RE = /playwright|chromium|puppeteer/;
 
 const pure = process.argv.includes("--pure");

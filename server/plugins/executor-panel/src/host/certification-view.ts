@@ -42,18 +42,202 @@ export const CERT_COPIES = {
 
 /** The helpers ride INSIDE each exported function's source: the page embeds
  *  these functions via String(), so each must be closure-free on its own
- *  (the t261009-37 lesson — module-private closures never reach the page). */
-/** '478 pass · 4 fail · 16 env' — the rounds table's labelled summing result. */
-export function resultCell(result: unknown): string {
+ *  (the t261009-37 lesson — module-private closures never reach the page).
+ *  The one allowed module-level name is the copy table: the page aliases it
+ *  (`var CERT_COPIES = CERT_RUNTIME.COPIES`) before the embed. */
+
+/** t261012-03: the Rounds table + round dialog's copy table (the mock's own
+ *  column and state words, fixed once). */
+export const ROUND_COPIES = {
+  rounds: 'Rounds',
+  started: 'Started',
+  trigger: 'Trigger',
+  result: 'Result',
+  verdict: 'Verdict',
+  measured: 'Measured',
+  running: 'running',
+  green: 'green',
+  red: 'red',
+  noProof: 'no proof',
+  couldNotRun: 'could not run',
+  unreadableOutcome: 'unreadable outcome',
+  noCell: '—',
+  older: 'older rounds not shown',
+  sectionError: 'The rounds faces are not readable',
+  noSection: 'The receipt carries no round-faces section',
+  resultSoFar: 'result so far',
+  lastJudged: 'last judged',
+  failures: 'Failures',
+  scenario: 'Scenario',
+  status: 'Status',
+  duration: 'Duration',
+  more: 'more',
+  wrote: 'Wrote',
+  nothingYet: 'nothing yet — the round is still running; the dialog states that instead of listing what it might write.',
+  wroteAbsent: 'no ledger record cites this run',
+  retainedLog: 'Retained log',
+  logAbsent: 'retained log not written',
+  countsUnreadable: 'counts unreadable',
+  dialogRefused: 'The round record is not readable',
+  triggerUnreadable: 'trigger unreadable',
+  faceAbsent: 'no terminal face is retained for this run',
+} as const
+
+/** '379 pass · 12 fail · 40 env' — the face's own counts. A counts_note (the
+ *  face saying its counts are NOT a trustworthy roll-up, t261012-01) renders
+ *  verbatim INSTEAD of the numbers: a round with unreadable counts never reads
+ *  as a completed zero line (KI-01M4P0FK2W87WXW2S6N8BXECYZ). A face without a
+ *  counts object names the absence — never invented zeros. */
+export function countsCell(counts: unknown, note: unknown): string {
+  if (typeof note === 'string' && note) return note
+  if (typeof counts !== 'object' || counts === null || Array.isArray(counts)) {
+    return ROUND_COPIES.countsUnreadable
+  }
+  const c = counts as Record<string, unknown>
   const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-  const r = (typeof result === 'object' && result !== null && !Array.isArray(result)) ? result as Record<string, unknown> : {}
-  return `${num(r.pass)} pass · ${num(r.fail)} fail · ${num(r.env)} env`
+  return `${num(c.pass)} pass · ${num(c.fail)} fail · ${num(c.env_fail)} env`
 }
 
-/** 'red · 2 blockers' or 'green' — the mechanical verdict, never a glyph alone. */
-export function verdictCell(verdict: unknown, blockers: unknown): string {
-  const n = (typeof blockers === 'number' && Number.isFinite(blockers)) ? blockers : 0
-  return verdict === 'red' ? `${CERT_COPIES.red} · ${n} ${CERT_COPIES.blockers}` : CERT_COPIES.green
+/** The state pill: derived from the face's OWN fields only, in a fixed order
+ *  — running wins first, then the failed state (a could-not-run round never
+ *  falls through to an outcome word), then the outcome verdict. No glyph
+ *  carries meaning; every word is a face word. */
+export function roundPill(face: unknown): { k: string; text: string } {
+  const f = (typeof face === 'object' && face !== null && !Array.isArray(face))
+    ? face as Record<string, unknown> : {}
+  if (f.state === 'running') return { k: 'run', text: ROUND_COPIES.running }
+  if (f.state === 'failed') return { k: 'none', text: ROUND_COPIES.couldNotRun }
+  const o = (typeof f.outcome === 'object' && f.outcome !== null && !Array.isArray(f.outcome))
+    ? f.outcome as Record<string, unknown> : null
+  const v = o ? String(o.verdict ?? '') : ''
+  if (v === 'green') return { k: 'green', text: ROUND_COPIES.green }
+  if (v === 'red') return { k: 'red', text: ROUND_COPIES.red }
+  if (v === 'no_proof') return { k: 'none', text: ROUND_COPIES.noProof }
+  return { k: 'none', text: ROUND_COPIES.unreadableOutcome }
+}
+
+/** The terminal reason (why a round is red / no proof / could not run) — an
+ *  outcome field, absent while running. */
+export function roundReason(face: unknown): string {
+  const f = (typeof face === 'object' && face !== null && !Array.isArray(face))
+    ? face as Record<string, unknown> : {}
+  const o = (typeof f.outcome === 'object' && f.outcome !== null && !Array.isArray(f.outcome))
+    ? f.outcome as Record<string, unknown> : null
+  return o && typeof o.reason === 'string' ? o.reason : ''
+}
+
+/** The trigger word, pinned by certification-model.triggerWord ('scheduled'
+ *  → auto, anything else → manual); inlined here because every consumer is
+ *  embedded via String() — no module imports survive the embed. */
+export function roundTriggerWord(source: unknown): string {
+  return source === 'scheduled' ? 'auto' : 'manual'
+}
+
+/** 'auto' / 'manual' from the run headers the tab already carries (raw.runs);
+ *  an unknown run id renders the em-dash, never a guessed trigger word. */
+export function roundTrigger(runs: unknown, runId: unknown): string {
+  const id = typeof runId === 'string' ? runId : ''
+  if (!Array.isArray(runs)) return ROUND_COPIES.noCell
+  for (const r of runs) {
+    const h = (typeof r === 'object' && r !== null) ? r as Record<string, unknown> : {}
+    if (h.id === id) {
+      const s = h.source
+      return typeof s === 'string' && s ? roundTriggerWord(s) : ROUND_COPIES.noCell
+    }
+  }
+  return ROUND_COPIES.noCell
+}
+
+/** {repo: rev} -> 'repo:rev · …' — the revision set the round measured. */
+export function roundMeasured(revision: unknown): string {
+  if (typeof revision !== 'object' || revision === null || Array.isArray(revision)) {
+    return ROUND_COPIES.noCell
+  }
+  const parts = Object.entries(revision as Record<string, unknown>)
+    .map(([repo, rev]) => `${repo}:${String(rev ?? '')}`)
+  return parts.length ? parts.join(' · ') : ROUND_COPIES.noCell
+}
+
+/**
+ * The Rounds table's body + notes (t261012-03): rows from the runner's
+ * published faces ONLY. `rf` is the receipt's round_faces section (validated
+ * softly by the reader); `runs` is the tab's raw.runs (headers, for the
+ * trigger column). Per-row named states — an absent or unreadable face names
+ * itself in the row, never counts in its place. The live face (current.json)
+ * leads; a terminal face for the same run does not duplicate the row.
+ */
+export function buildRoundsRows(rf: unknown, runs: unknown): string {
+  const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  if (typeof rf !== 'object' || rf === null || Array.isArray(rf)) {
+    return ''
+  }
+  const section = rf as Record<string, unknown>
+  const row = (runId: unknown, face: unknown, named: string): string => {
+    const id = str(runId)
+    const pill = face ? roundPill(face) : { k: 'none', text: named }
+    const result = face ? countsCell((face as Record<string, unknown>).counts, (face as Record<string, unknown>).counts_note) : named
+    const measured = face ? roundMeasured((face as Record<string, unknown>).revision) : ROUND_COPIES.noCell
+    const started = face ? str((face as Record<string, unknown>).started_at) : ROUND_COPIES.noCell
+    return `<tr data-run="${esc(id)}">`
+      + `<td><span class="link mono" data-round-link="${esc(id)}" title="open the record of this round">${esc(id)}</span></td>`
+      + `<td class="mono">${esc(started)}</td>`
+      + `<td>${esc(roundTrigger(runs, id))}</td>`
+      + `<td class="mono">${esc(result)}</td>`
+      + `<td><span class="pill" data-k="${esc(pill.k)}">${esc(pill.text)}</span>`
+      + (face && roundReason(face) ? ` <span class="k">${esc(roundReason(face))}</span>` : '')
+      + '</td>'
+      + `<td class="mono k">${esc(measured)}</td></tr>`
+  }
+  const rows: string[] = []
+  const seen: Record<string, boolean> = {}
+  const live = section.live
+  if (typeof live === 'object' && live !== null) {
+    const l = live as Record<string, unknown>
+    if (l.ok === true) {
+      const f = (typeof l.face === 'object' && l.face !== null && !Array.isArray(l.face))
+        ? l.face as Record<string, unknown> : {}
+      const id = str(f.run_id)
+      seen[id] = true
+      rows.push(row(id, f, ''))
+    } else {
+      rows.push(`<tr><td colspan="6" class="k">${esc(str(l.reason))}</td></tr>`)
+    }
+  }
+  const entries = Array.isArray(section.rounds) ? section.rounds as Record<string, unknown>[] : []
+  for (const e of entries) {
+    const id = str(e.run_id)
+    if (seen[id]) continue
+    seen[id] = true
+    if (typeof e.face === 'object' && e.face !== null) {
+      rows.push(row(id, e.face, ''))
+    } else if (typeof e.absent === 'string') {
+      rows.push(row(id, null, e.absent))
+    } else {
+      rows.push(row(id, null, str(e.reason) || 'face unreadable (reason absent)'))
+    }
+  }
+  const body = rows.join('') || '<tr><td colspan="6" class="k">—</td></tr>'
+  const older = typeof section.older === 'number' && section.older > 0
+    ? `<div class="who" id="certRoundsOlder">${section.older} ${ROUND_COPIES.older}</div>` : ''
+  return body + older
+}
+
+/**
+ * The Rounds card's degrade banner: the section's own named error (an
+ * unreadable rounds path) — the table above keeps its last readable state
+ * (the page holds the last good section; degrade scope is THIS table only).
+ */
+export function roundsSectionNote(rf: unknown): string {
+  if (typeof rf !== 'object' || rf === null || Array.isArray(rf)) {
+    return `<div class="banner red" id="certRoundsDegrade">${ROUND_COPIES.noSection}</div>`
+  }
+  const err = (rf as Record<string, unknown>).error
+  if (typeof err === 'string' && err) {
+    return `<div class="banner red" id="certRoundsDegrade"><b>${ROUND_COPIES.sectionError}:</b> ${err
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`
+  }
+  return ''
 }
 
 /**
@@ -66,10 +250,21 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
   const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
   if (!data || data.ok !== true) {
     const reason = str(data && data.reason) || 'the reason above names what could not be read'
-    return `<div class="banner red" id="certDegrade"><b>${CERT_COPIES.degrade}:</b> <span>${esc(reason)}</span></div>`
+    // t261012-03 fault 2: a refusal receipt still carries the round-faces
+    // section — the Rounds table survives the line declaration's refusal.
+    const rfRefused = (typeof data.round_faces === 'object' && data.round_faces !== null && !Array.isArray(data.round_faces))
+      ? data.round_faces : null
+    const roundsCard = rfRefused
+      ? `<div class="card"><h3>${ROUND_COPIES.rounds}</h3><div class="pad">`
+        + roundsSectionNote(rfRefused)
+        + `<table><thead><tr><th>Round</th><th>${ROUND_COPIES.started}</th><th>${ROUND_COPIES.trigger}</th><th>${ROUND_COPIES.result}</th><th>${ROUND_COPIES.verdict}</th><th>${ROUND_COPIES.measured}</th></tr></thead><tbody id="certRoundRows">${buildRoundsRows(rfRefused, [])}</tbody></table></div></div>`
+      : ''
+    return `<div class="banner red" id="certDegrade"><b>${CERT_COPIES.degrade}:</b> <span>${esc(reason)}</span></div>` + roundsCard
   }
   const face = (typeof data.face === 'object' && data.face !== null && !Array.isArray(data.face))
     ? data.face as Record<string, unknown> : {}
+  const raw = (typeof data.raw === 'object' && data.raw !== null && !Array.isArray(data.raw))
+    ? data.raw as Record<string, unknown> : {}
   const lines = Array.isArray(data.lines) ? data.lines as Record<string, unknown>[] : []
   const boundary = (typeof face.boundary === 'object' && face.boundary !== null && !Array.isArray(face.boundary))
     ? face.boundary as Record<string, unknown> : null
@@ -98,14 +293,12 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
   const certRows = certified.map((c) =>
     `<tr>${cell(c.ticket, c.title)}<td class="mono k">${esc(str(c.epic))}</td><td><span class="link mono" title="open the round's record">${esc(str(c.certifiedBy))}</span></td></tr>`
   ).join('') || '<tr><td colspan="3" class="k">—</td></tr>'
-  const roundRows = rounds.map((r) =>
-    `<tr><td><span class="link mono" title="open the record of this round">${esc(str(r.runId))}</span></td>`
-    + `<td class="mono">${esc(str(r.startedAt))}</td>`
-    + `<td title="${str(r.trigger) === 'auto' ? 'started by itself: chained onto the round before it' : 'started by a person'}">${esc(str(r.trigger))}</td>`
-    + `<td class="mono">${esc(resultCell(r.result))}</td>`
-    + `<td class="st ${str(r.verdict) === 'red' ? 'r' : 'g'}">${esc(verdictCell(r.verdict, r.blockers))}</td>`
-    + `<td class="mono k">${esc(str(r.measured))}</td></tr>`
-  ).join('') || '<tr><td colspan="6" class="k">—</td></tr>'
+  // t261012-03: the Rounds table reads the runner's published faces (the
+  // receipt's round_faces section), not a headers-derived projection. The
+  // headers still feed the trigger column (raw.runs) — nothing else.
+  const rf = (typeof data.round_faces === 'object' && data.round_faces !== null && !Array.isArray(data.round_faces))
+    ? data.round_faces : null
+  const runs = raw && Array.isArray(raw.runs) ? raw.runs : []
 
   return ''
     + `<div class="pick"><span class="lbl">Line</span><select id="certLine">${options}</select></div>`
@@ -144,6 +337,92 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     + '</div>'
     + `<div class="who" id="certPromoteNote" data-wired="false" hidden></div>`
     + '</div></div>'
-    + `<div class="card"><h3>Rounds</h3><div class="pad"><table><thead><tr><th>Round</th><th>Started</th><th>Trigger</th><th>Result</th><th>Verdict</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">Measured</th></tr></thead><tbody id="certRoundRows">${roundRows}</tbody></table>`
+    + `<div class="card"><h3>${ROUND_COPIES.rounds}</h3><div class="pad">`
+    + roundsSectionNote(rf)
+    + `<table><thead><tr><th>Round</th><th>${ROUND_COPIES.started}</th><th>${ROUND_COPIES.trigger}</th><th>${ROUND_COPIES.result}</th><th>${ROUND_COPIES.verdict}</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">${ROUND_COPIES.measured}</th></tr></thead><tbody id="certRoundRows">${rf ? buildRoundsRows(rf, runs) : ''}</tbody></table>`
     + `<div class="who" id="certRunNote">${CERT_COPIES.runAbsent}</div></div></div>`
+}
+
+/**
+ * The round dialog's body (t261012-03, the approved mock §2): ONE fetch per
+ * open, rendered from the `round` mode's receipt. `d` is the
+ * /api/certification/round JSON (validated softly — a refusal renders its
+ * named reason). Blocks, in mock order: top (run id, state pill, line),
+ * kv facts, Failures, the ONE Wrote line, the retained log path.
+ */
+export function buildRoundDialogCore(d: Record<string, unknown>): string {
+  const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  if (!d || d.ok !== true) {
+    const reason = str(d && d.reason) || 'the reason above names what could not be read'
+    return `<div class="banner red" id="roundDegrade"><b>${ROUND_COPIES.dialogRefused}:</b> <span>${esc(reason)}</span></div>`
+  }
+  const face = (typeof d.face === 'object' && d.face !== null && !Array.isArray(d.face))
+    ? d.face as Record<string, unknown> : null
+  const faceNote = str(d.face_reason)
+  const pill = face ? roundPill(face) : { k: 'none', text: faceNote || ROUND_COPIES.faceAbsent }
+  const reason = face ? roundReason(face) : ''
+  const counts = face ? countsCell(face.counts, face.counts_note) : ROUND_COPIES.countsUnreadable
+  const running = face !== null && face.state === 'running'
+  const failures = (typeof d.failures === 'object' && d.failures !== null && !Array.isArray(d.failures))
+    ? d.failures as Record<string, unknown> : null
+  const failuresAbsent = str(d.failures_absent)
+  const failureRows = failures && Array.isArray(failures.rows)
+    ? (failures.rows as Record<string, unknown>[])
+      .map((f) => `<tr><td class="mono">${esc(str(f.name))}</td>`
+        + `<td><span class="pill" data-k="${f.verdict === 'fail' ? 'red' : 'none'}">${esc(str(f.verdict))}</span></td>`
+        + `<td class="mono k">${esc(str(f.duration))}</td></tr>`)
+      .join('')
+    : ''
+  const more = failures && typeof failures.more === 'number' && failures.more > 0
+    ? `<tr><td colspan="3" class="k">… ${failures.more} ${ROUND_COPIES.more}</td></tr>` : ''
+  const failuresBody = failuresAbsent
+    ? `<div class="k" id="roundFailuresAbsent">${esc(failuresAbsent)}</div>`
+    : `<table><thead><tr><th>${ROUND_COPIES.scenario}</th><th>${ROUND_COPIES.status}</th><th>${ROUND_COPIES.duration}</th></tr></thead><tbody id="roundFailureRows">`
+      + (failureRows || more || '<tr><td colspan="3" class="k">—</td></tr>') + more + '</tbody></table>'
+  // The ONE Wrote line: running names the absence of a write; a terminal
+  // failed round with no ledger row names its could-not-run reason; a
+  // terminal round with no citing record names that absence. Several facts
+  // render as ONE line with N clauses — nothing silently dropped.
+  let wroteLine: string
+  if (running) wroteLine = ROUND_COPIES.nothingYet
+  else if (Array.isArray(d.wrote) && (d.wrote as unknown[]).length) {
+    wroteLine = (d.wrote as unknown[]).map((c) => esc(str(c))).join(' · ')
+  } else if (face && (face.state === 'failed' || reason)) {
+    wroteLine = esc(reason || faceNote) || esc(ROUND_COPIES.wroteAbsent)
+  } else {
+    wroteLine = ROUND_COPIES.wroteAbsent
+  }
+  const wroteNote = str(d.wrote_note)
+  const wrote = `<div class="k" id="roundWrote">${wroteLine}</div>`
+    + (wroteNote ? `<div class="k" id="roundWroteNote">${esc(wroteNote)}</div>` : '')
+  const logPath = str(d.log_path)
+  const logAbsent = str(d.log_absent)
+  const trigger = d.trigger == null
+    ? (str(d.trigger_note) || ROUND_COPIES.triggerUnreadable)
+    : roundTriggerWord(d.trigger)
+  const last = failures && typeof failures.last === 'object' && failures.last !== null
+    ? failures.last as Record<string, unknown> : null
+  return ''
+    + `<div class="top"><span class="mono" id="roundRunId"><b>${esc(str(d.run))}</b></span>`
+    + `<span class="pill" data-k="${esc(pill.k)}" id="roundPill">${esc(pill.text)}</span>`
+    + (face && str(face.line) ? `<span class="pill">line ${esc(str(face.line))}</span>` : '')
+    + (reason ? `<span class="k" id="roundReason">${esc(reason)}</span>` : '')
+    + '<span class="x" data-round-close="1">✕</span></div>'
+    + '<div class="pad"><div class="kv">'
+    + `<b>${ROUND_COPIES.measured}</b><span class="mono" id="roundMeasured">${face ? esc(roundMeasured(face.revision)) : ROUND_COPIES.noCell}</span>`
+    + `<b>${ROUND_COPIES.started} · ${ROUND_COPIES.trigger}</b><span class="mono">${face ? esc(str(face.started_at)) : ROUND_COPIES.noCell} · ${esc(trigger)}</span>`
+    + `<b>${running ? ROUND_COPIES.resultSoFar : ROUND_COPIES.verdict}</b><span class="mono" id="roundResult">${esc(counts)}</span>`
+    + `<b>${ROUND_COPIES.lastJudged}</b><span class="mono" id="roundLastJudged">${last
+      ? `${esc(str(last.name))} <span class="k">${esc(str(last.verdict))}${last.duration ? ' · ' + esc(str(last.duration)) : ''}</span>`
+      : ROUND_COPIES.noCell}</span>`
+    + '</div></div>'
+    + `<div class="pad" style="border-top:1px solid var(--line)"><div style="font-weight:600;margin-bottom:4px">${ROUND_COPIES.failures}</div>${failuresBody}</div>`
+    + `<div class="pad" style="border-top:1px solid var(--line)"><div style="font-weight:600;margin-bottom:4px">${ROUND_COPIES.wrote}</div>${wrote}</div>`
+    + `<div class="pad" style="border-top:1px solid var(--line);display:flex;gap:8px;align-items:center">`
+    + `<span>${ROUND_COPIES.retainedLog}</span>`
+    + (logAbsent
+      ? `<span class="k" id="roundLogAbsent">${esc(logAbsent)}</span>`
+      : `<span class="mono k" id="roundLogPath">${esc(logPath)}</span>`)
+    + '</div>'
 }

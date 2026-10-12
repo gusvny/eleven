@@ -64,7 +64,7 @@ import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 // t261009-44: the Certification tab's render core — embedded via String() like
 // the other pure cores, so the UT and the page run one implementation. The
 // CERT_COPIES copy table rides along as JSON (single copy source).
-import { buildCertificationCore, resultCell, verdictCell, CERT_COPIES } from './certification-view.ts'
+import { buildCertificationCore, buildRoundDialogCore, buildRoundsRows, countsCell, roundPill, roundReason, roundTrigger, roundTriggerWord, roundMeasured, roundsSectionNote, CERT_COPIES, ROUND_COPIES } from './certification-view.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 
@@ -206,17 +206,21 @@ const EMBEDDED = EMBED_CONSTS + [
   String(limitStep), String(concChipState),
   // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
   String(countDocsTree), String(docEntryRow),
-  // t261009-44: the Certification tab's render core + its result/verdict cells
-  // (closure-free; the CERT_COPIES table is embedded as JSON below it).
-  String(buildCertificationCore), String(resultCell), String(verdictCell),
+  // t261009-44 + t261012-03: the Certification tab's render core and the
+  // rounds-faces helpers + the round dialog core (closure-free; the copy
+  // tables ride as JSON below).
+  String(buildCertificationCore), String(buildRoundsRows), String(roundsSectionNote), String(roundTriggerWord),
+  String(countsCell), String(roundPill), String(roundReason), String(roundTrigger), String(roundMeasured),
+  String(buildRoundDialogCore),
   // t261009-57: alerts face core — relative time, coalesce-then-cap (one implementation).
   String(relTimeAgo), String(coalesceAlerts), String(capCoalesced),
 ].join('\n')
 
-/** t261009-44: the Certification tab's copy table as JSON — the data half of the
- *  embedded render core. CERT_COPIES (certification-view.ts) stays the single
- *  copy source; the page JS reads the named-absence sentence from here. */
-const CERT_TABLES = JSON.stringify({ COPIES: CERT_COPIES })
+/** t261009-44 + t261012-03: the Certification tab's copy tables as JSON — the
+ *  data half of the embedded render cores. CERT_COPIES / ROUND_COPIES
+ *  (certification-view.ts) stay the single copy sources; the page JS reads the
+ *  named-absence sentences from here. */
+const CERT_TABLES = JSON.stringify({ COPIES: CERT_COPIES, ROUND: ROUND_COPIES })
 
 /** t261006-15: Inspection tables (verbatim empty copies + instance labels) as JSON —
  *  the data half of the embedded period-view core. EMPTY_COPIES (inspection-view.ts)
@@ -511,6 +515,18 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 #paneCert .lbl{color:var(--muted);font-size:12.5px}
 #paneCert .state{font-weight:650;font-size:15px}
 #paneCert .st.g{color:var(--green)}#paneCert .st.r{color:var(--red)}
+/* t261012-03: the rounds faces' state pills + the round dialog (the mock's
+   own classes: .dlg/.top/.x/.kv; pill keys green/red/run/none). */
+#paneCert .pill[data-k]{font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--muted);background:var(--bg)}
+#paneCert .pill[data-k=green]{border-color:var(--green);color:var(--green);background:var(--green-soft,transparent)}
+#paneCert .pill[data-k=red]{border-color:var(--red);color:var(--red);background:var(--red-soft,transparent)}
+#paneCert .pill[data-k=run]{border-color:var(--accent,#3b82f6);color:var(--accent,#3b82f6)}
+#paneCert .dlg{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.35);max-width:640px;width:100%;overflow:hidden;font-size:12.5px}
+#paneCert .dlg .top{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line)}
+#paneCert .dlg .x{margin-left:auto;color:var(--muted);cursor:pointer}
+#paneCert .dlg .kv{display:grid;grid-template-columns:132px 1fr;gap:5px 10px}
+#paneCert .dlg .kv b{color:var(--muted);font-weight:600}
+#paneCert [data-round-link]{cursor:pointer}
 #paneCert .who{color:var(--faint);font-size:11.5px;margin-top:8px}
 </style>
 </head>
@@ -653,6 +669,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
        buildCertificationCore; this section only carries the mount points. -->
   <section id="paneCert" style="display:none">
     <div id="certBody"></div>
+    <!-- t261012-03: the round dialog (mock §2) — one overlay, filled by the
+         embedded buildRoundDialogCore on a run-id click; never pre-rendered. -->
+    <div id="roundDlgWrap" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:48px 16px;z-index:40">
+      <div class="dlg" id="roundDlg" role="dialog" aria-label="round record"></div>
+    </div>
   </section>
 
   <section id="paneMetrics" style="display:none">
@@ -809,6 +830,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   var CERT_RUNTIME = ${CERT_TABLES};
   // the embedded render core reads the copy table by its module name (one source)
   var CERT_COPIES = CERT_RUNTIME.COPIES;
+  var ROUND_COPIES = CERT_RUNTIME.ROUND;
   var PROJECT_PALETTE_12 = IDENTITY_RUNTIME.PROJECT_PALETTE_12;
   var IDENTITY_OUTLINES = IDENTITY_RUNTIME.IDENTITY_OUTLINES;
   var IDENTITY_STRUCTURES = IDENTITY_RUNTIME.IDENTITY_STRUCTURES;
@@ -2319,13 +2341,20 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
   };
 
-  // ---- Certification tab (t261009-44) ----
+  // ---- Certification tab (t261009-44; rounds faces t261012-03) ----
   // Lazy like the other reference faces: a tab that is never opened must never
-  // request anything. The route is GET-only; the promote button renders the
+  // request anything. The routes are GET-only; the promote button renders the
   // dialog's named absence (CERT_RUNTIME.COPIES.promoteAbsent), never a fake.
-  var CERT = { loadedFor: '', data: null };
+  // t261012-03 degrade rule: the LAST GOOD round-faces section is kept
+  // per-SECTION (CERT.roundFaces) — a live-face read that degrades leaves the
+  // previous Rounds table standing and never rolls back the rest of the tab,
+  // which re-renders from the fresh answer as before.
+  var CERT = { loadedFor: '', data: null, roundFaces: null };
   function renderCert(){
     var body = el('certBody');
+    if(CERT.roundFaces && CERT.data && CERT.data.ok === true){
+      CERT.data.round_faces = CERT.roundFaces;
+    }
     body.innerHTML = buildCertificationCore(CERT.data || {ok:false, reason:'the certification face has not been read yet'});
     var line = el('certLine');
     if(line) line.onchange = function(){ loadCertification(); };
@@ -2336,7 +2365,35 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       note.hidden = false;
       note.textContent = CERT_RUNTIME.COPIES.promoteAbsent;
     };
+    var rows = el('certRoundRows');
+    if(rows) rows.onclick = function(ev){
+      var t = ev.target && ev.target.closest ? ev.target.closest('[data-round-link]') : null;
+      if(t) openRoundDialog(t.getAttribute('data-round-link'));
+    };
+    var wrap = el('roundDlgWrap');
+    if(wrap) wrap.onclick = function(ev){
+      if(ev.target === wrap) closeRoundDialog();
+      var x = ev.target && ev.target.closest ? ev.target.closest('[data-round-close]') : null;
+      if(x) closeRoundDialog();
+    };
   }
+  function closeRoundDialog(){
+    var wrap = el('roundDlgWrap');
+    if(wrap){ wrap.hidden = true; }
+  }
+  function openRoundDialog(runId){
+    var dlg = el('roundDlg'), wrap = el('roundDlgWrap');
+    if(!dlg || !wrap || !runId || !state.project) return;
+    dlg.innerHTML = '<div class="pad k">reading the round record…</div>';
+    wrap.hidden = false;
+    fetch('/sandbar-executor-panel/api/certification/round?project='+encodeURIComponent(state.project)+'&run='+encodeURIComponent(runId))
+      .then(function(r){ return r.json(); })
+      .then(function(j){ dlg.innerHTML = buildRoundDialogCore(j); })
+      .catch(function(e){ dlg.innerHTML = buildRoundDialogCore({ok:false, reason:String((e&&e.message)||e)}); });
+  }
+  // Close paths: the ✕ button and the backdrop click (the mock's own close
+  // affordance). No global Escape listener — the page is pinned Escape-free
+  // by the t261008-20 contract (the retired ledger dialog's machinery).
   function loadCertification(){
     if(!state.project){ CERT.data={ok:false, reason:'no project is selected — the develop ledgers cannot be resolved'}; renderCert(); return; }
     var lineSel = el('certLine');
@@ -2344,7 +2401,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var want = lineSel && lineSel.value;
     if(want) q += '&line='+encodeURIComponent(want);
     fetch(q).then(function(r){ return r.json(); }).then(function(j){
-      CERT.loadedFor = state.project; CERT.data = j; renderCert();
+      CERT.loadedFor = state.project; CERT.data = j;
+      // t261012-03 fault 2: a refusal receipt still carries the section —
+      // the last-good section updates from it too.
+      if(j && j.round_faces && !j.round_faces.error){
+        CERT.roundFaces = j.round_faces;
+      }
+      renderCert();
     }).catch(function(e){
       CERT.data = {ok:false, reason:String((e && e.message) || e)}; renderCert();
     });

@@ -309,7 +309,7 @@
     "integration/tests/test_stage_lease.py": 0,
     "integration/tests/test_transient_retry.py": 0,
     "integration/with_stage.sh": 0,
-    "notes/debts/known-issues.md": 0,
+    "notes/debts/known-issues.md": 16,
     "notes/discussions/260904-charter-injection-invalid-payload.md": 3,
     "notes/discussions/260904-integration-scenarios-triage.md": 1,
     "notes/discussions/260910-overnight-plan.md": 1,

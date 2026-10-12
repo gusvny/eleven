@@ -4961,6 +4961,11 @@
       "note": "t261011-04 KI-01M4KH2QR5BRQ...: drift face names the wiring modules (workflows/activities/develop_certify/develop_line) stale on the operator alert, fresh worker not stale, deleted module degrades named, exclusion reasoning written next to CODE_STAMP_MODULES",
       "sync_path": ""
     },
+    "integration/t261009-80/sc_pause_honest_receipt.py": {
+      "anchor": "contract",
+      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty scenario — the landing evaluator / effect statement / pure receipt-face builder public-contract truth tables (landed/refused/pending, baseline non-misattribution, paused-vs-stuck wording, blocked names will-not-take-effect + slot stays held, unconfirmed keeps delivered with the named re-check face), malformed-input named degradation, and the ticket detail face pause_effect wiring pin",
+      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face); server/tools/ticket.py (_pause_effect_of, _v2_query)"
+    },
     "integration/t261011-10/sc_t26101110_fast_proof_membership.py": {
       "anchor": "contract",
       "note": "t261011-10: the lane's proof set is own scenarios UNION the declared fast-set members read from the one CLI face, receipt carries membership+budget+wall clock with a named breach warning, patch-id-gated wiring, legacy closing face untouched",
@@ -5030,6 +5035,16 @@
     "integration/t261012-01/sc_t26101201_round_face_truth.py": {
       "anchor": "contract"
     },
+    "integration/t261012-03/sc_t26101203_rounds_table_honest_faces.py": {
+      "anchor": "behaviour",
+      "note": "t261012-03: the Certification tab's Rounds table is fed by the runner's published round faces (adapter-as-reader over the SANDBAR_LINE_ROUND_FACE_DIR seam) and the run id opens the round dialog; absence/unreadability named, never zeros (KI-01M4P0FK2W87WXW2S6N8BXECYZ false-green family)",
+      "sync_path": ""
+    },
+    "integration/t261012-03/sc_t26101203_round_dialog_journey.mjs": {
+      "anchor": "behaviour",
+      "note": "t261012-03: the Certification tab's Rounds table is fed by the runner's published round faces (adapter-as-reader over the SANDBAR_LINE_ROUND_FACE_DIR seam) and the run id opens the round dialog; absence/unreadability named, never zeros (KI-01M4P0FK2W87WXW2S6N8BXECYZ false-green family)",
+      "sync_path": ""
+    },
     "integration/t261012-02/sc_t26101202_case_timeout_reaps_group.py": {
       "anchor": "contract",
       "note": "t261012-02: a hung case's timeout red lands within the case budget plus margin (group kill, never a no-timeout communicate on an inherited pipe) and the case leaves zero live descendants on every terminal state; timeout evidence keeps the pre-timeout stdout and names the cause",
@@ -5039,11 +5054,6 @@
       "anchor": "contract",
       "note": "t261012-02: runner spawn contract source locks (start_new_session=True, never PIPE at the case and stage-helper spawn seams), hang-twice skip-by-name on the face, and the budget ladder (wait ceiling + grace < CMD_TIMEOUT = 900, no silent global cut)",
       "sync_path": "integration/run_scenarios.py (_run_entry) + integration/stage_docker.py (helper spawns)"
-    },
-    "integration/t261009-80/sc_pause_honest_receipt.py": {
-      "anchor": "contract",
-      "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty scenario — the landing evaluator / effect statement / pure receipt-face builder public-contract truth tables (landed/refused/pending, baseline non-misattribution, paused-vs-stuck wording, blocked names will-not-take-effect + slot stays held, unconfirmed keeps delivered with the named re-check face), malformed-input named degradation, and the ticket detail face pause_effect wiring pin",
-      "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face); server/tools/ticket.py (_pause_effect_of, _v2_query)"
     },
     "integration/t261011-25/sc_t261011_25_journey_handshake_sweep.py": {
       "anchor": "behaviour",

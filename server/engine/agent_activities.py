@@ -4707,10 +4707,17 @@ def _git(args: List[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedP
                           capture_output=True, text=True, timeout=timeout)
 
 
-def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
-    """The baseline ref for the whitelist diff: the current merge-base(main, branch).
+def _merge_base_ref(branch: str, repo: Path, other: str = "main") -> Tuple[str, str]:
+    """The baseline ref for the whitelist diff: the current merge-base(other, branch).
     Returns (ref, err).
 
+    ``other`` is the side the lane is measured against. The default ``main`` keeps
+    every legacy caller byte-identical. A develop-buffer lane passes ITS LINE instead
+    (261012 host-ordered direct fix, KI-01M4PAVBP6EZFGYC2VVQ0Z90J7): such a lane is
+    based on the line, so merge-base(main, lane) falls back to the point where main and
+    the lane diverged — the diff then carries everything the LINE received since then
+    (other tickets' landed work), and each of those files is reported as an
+    out-of-write-set write by THIS ticket. Measured 261011/261012 on t261012-02/03/04.
     Non-empty ref = success (normally a single line; multiple lines = malformed, keep
     the first and leave a trace in err).
     Empty ref = resolution failed, and err is the detail text for a fail-closed red
@@ -4720,15 +4727,16 @@ def _merge_base_ref(branch: str, repo: Path) -> Tuple[str, str]:
     verify_lane either.
     (Ticket t260901-18: for the full stance see the merge_check item 3 comment.)
     """
-    p = _git(["merge-base", "main", branch], repo)
+    other = str(other or "main") or "main"
+    p = _git(["merge-base", other, branch], repo)
     if p.returncode != 0 or not (p.stdout or "").strip():
-        return "", "merge-base main %s 解析失败 rc=%s：%s" % (
-            branch, p.returncode, ((p.stderr or p.stdout or "").strip())[-200:])
+        return "", "merge-base %s %s failed rc=%s: %s" % (
+            other, branch, p.returncode, ((p.stderr or p.stdout or "").strip())[-200:])
     lines = [ln.strip() for ln in p.stdout.strip().splitlines() if ln.strip()]
     ref = lines[0]
     if len(lines) > 1:
-        return ref, "merge-base main %s 输出 %d 行（畸形），取首行：%s" % (
-            branch, len(lines), ref)
+        return ref, "merge-base %s %s printed %d lines (malformed), took the first: %s" % (
+            other, branch, len(lines), ref)
     return ref, ""
 
 
@@ -5510,20 +5518,41 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         # Item 1's commit check still uses the pinned base_ref (semantics = the lane
         # has this ticket's output, guarding against a fast-forward misjudged as
         # 0 commits); the two items intentionally use different base stances.
-        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"])  # the merge-base must also anchor the lane repo (real near-miss in ticket t260903-11)
-        if not wl_base:
+        # 261012 caliber (host ruling; follows KI-01M4PAVBP6EZFGYC2VVQ0Z90J7):
+        # a ticket's own write is a file that differs from BOTH baselines. The
+        # lane sits on its own line and has also synced main. The two sides have
+        # diverged: each carries commits the other lacks. Measure against one
+        # side only and the other side's work is charged to this ticket. Measured
+        # on t261012-02: vs main the diff misjudged 3 files of the line; vs the
+        # line it misjudged 7 files of main. The intersection of the two
+        # three-dot diffs is exactly this ticket's own 5 files. So resolve and
+        # pass both baselines down. An empty base_other_ref means main: the two
+        # sides coincide, the intersection degrades to the old caliber, byte for
+        # byte (legacy tickets, and every case where the line is unresolvable).
+        _other = str(getattr(args, "base_other_ref", "") or "").strip() or "main"
+        wl_base, wl_err = _merge_base_ref(sc["branch"], sc["repo"], other=_other)  # the merge-base must also anchor the lane repo (real near-miss in ticket t260903-11)
+        # The main side is judged the same way. One resolution serves both when
+        # the sides coincide (legacy stays byte-identical).
+        wl_base2, wl_err2 = ((wl_base, wl_err) if _other == "main" else
+                             _merge_base_ref(sc["branch"], sc["repo"], other="main"))
+        _bad_side = _other if not wl_base else ("main" if not wl_base2 else "")
+        if _bad_side:
             # Fail-closed: a red item is merge_check's normal channel, the activity
             # doesn't raise. verify_lane doesn't run this round (tsc/smoke are
             # skipped with it, the red already means blocked, restored on retry);
             # when merge-base fails, item 4's merge-tree main almost certainly goes
-            # red too, so no new blocking surface is added.
-            checks.append({"item": "写集白名单基线（merge-base main × %s）" % sc["branch"],
-                           "green": False, "detail": wl_err,
+            # red too, so no new blocking surface is added. The item NAMES the side
+            # that failed (the t260901-18 precision contract, machine-keyed by
+            # reason_code below).
+            checks.append({"item": "write-set whitelist baseline (merge-base %s x %s)" % (_bad_side, sc["branch"]),
+                           "green": False,
+                           "detail": (wl_err if _bad_side == _other else wl_err2),
                            "id": "verify_lane_code", "reason_code": "merge_base_failed",
                            "next_action": "泳道内 merge-base 失败（git 环境类）——排查泳道仓后发 retry_qc"})
         else:
-            if wl_err:  # multi-line malformed output: keep the first line, leave a searchable trace
-                activity.logger.info("[%s] %s", args.ticket_id, wl_err)
+            if wl_err or wl_err2:  # multi-line malformed output: keep the first line, leave a searchable trace
+                activity.logger.info("[%s] %s", args.ticket_id,
+                                     " / ".join(x for x in (wl_err, wl_err2) if x))
             lane_admin = sc["tree"] / "server" / "admin.py"
             admin_bin = str(lane_admin if lane_admin.is_file() else
                              Path(__file__).resolve().parents[1] / "admin.py")  # cross-project without an engine layout: fall back to the main-tree copy
@@ -5538,6 +5567,12 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 "python3", admin_bin, "call", "verify_lane",
                 json.dumps({"lane": "code", "path": str(sc["tree"]),
                             "base": wl_base, "require_base": True,
+                            # 261012 caliber: the second baseline. The whitelist
+                            # judges "this ticket's own write" as the intersection
+                            # of the two three-dot diffs. Same value as base
+                            # (legacy / main fallback) = the old caliber, byte for
+                            # byte unchanged.
+                            "base_other": wl_base2,
                             "write_set": list(eff_ws),
                             # t261004-25: pass the ticket id down — verify_lane's
                             # write-set whitelist then admits ticket-test-face files

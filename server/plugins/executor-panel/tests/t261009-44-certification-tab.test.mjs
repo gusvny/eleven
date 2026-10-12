@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { assert, done } from './lib.mjs'
 import { PANEL_PAGE_HTML } from '../src/host/panel-page.ts'
 import { PANEL_API_ROUTES } from '../src/host/api.ts'
-import { buildCertificationCore, resultCell, verdictCell, CERT_COPIES } from '../src/host/certification-view.ts'
+import { buildCertificationCore, countsCell, roundPill, roundTrigger, roundMeasured, CERT_COPIES } from '../src/host/certification-view.ts'
 import { deriveCertificationFace } from '../../workbench/src/client/certification-model.ts'
 
 let n = 0
@@ -36,10 +36,24 @@ const greenFace = deriveCertificationFace(greenInput)
 assert(greenFace.ok === true && greenFace.frozen === false, 'green variant derives')
 n += 2
 
-const routeAnswer = (face, line = 'develop-buffer') => ({
+const routeAnswer = (face, line = 'develop-buffer', rf = null) => ({
   ok: true, project: 'proj-x', line, lines: [{ line_id: 'develop-buffer', scope: 'epic develop-buffer', owner: 'host' }],
-  face, raw: fixture, notes: [],
+  face, raw: { ...fixture, runs: RF_RUNS }, notes: [],
+  round_faces: rf ?? { dir: '/tmp/rounds', rounds: [] },
 })
+
+// t261012-03: the rounds-faces fixture the table renders from (the runner's
+// own face shape — lib_round_face's documented contract).
+const RF_RUNS = [{ id: 'run-a', source: 'scheduled' }, { id: 'run-b', source: 'person' }]
+const RF_SECTION = {
+  dir: '/tmp/rounds',
+  live: { ok: true, face: { run_id: 'run-live', state: 'running', started_at: '2026-10-11T22:13:09Z', counts: { ran: 4, pass: 4, fail: 0, env_fail: 0 }, revision: { sandbar: '353b2479' } } },
+  rounds: [
+    { run_id: 'run-a', face: { run_id: 'run-a', state: 'done', started_at: '2026-10-11T16:49:00Z', counts: { ran: 10, pass: 8, fail: 2, env_fail: 0 }, outcome: { verdict: 'red', reason: '2 failing scenarios' }, revision: { sandbar: '6efc7b3e' } } },
+    { run_id: 'run-b', face: { run_id: 'run-b', state: 'done', started_at: '2026-10-11T14:46:00Z', counts: { ran: 5, pass: 5, fail: 0, env_fail: 0 }, outcome: { verdict: 'green', reason: '' }, revision: { sandbar: '6efc7b3e' } } },
+    { run_id: 'run-x', absent: 'terminal face not written' },
+  ],
+}
 
 // ---- C2a: the tab's fetch target is exactly a registered route path ----
 {
@@ -78,16 +92,22 @@ const routeAnswer = (face, line = 'develop-buffer') => ({
   assert(!/Tally|tally/.test(html), 'no tally row exists (counts appear once)')
   // Promote disabled only at zero: promotable 2 stays alive through the freeze
   assert(html.includes('data-promotable="2"') && !html.includes('id="certPromote" disabled'), 'Promote stays alive through a freeze (promotable 2)')
-  // trigger enum: only auto|manual in the trigger cells
-  const triggers = [...html.matchAll(/title="[^"]*">(\w+)<\/td>/g)].map((m) => m[1]).filter((w) => w === 'auto' || w === 'manual')
-  assert(triggers.length === frozenFace.rounds.length, 'every round renders a trigger word')
-  assert(frozenFace.rounds.every((r) => r.trigger === 'auto' || r.trigger === 'manual'), 'trigger enum is auto|manual only')
-  // labelled summing result + verdict cells
-  assert(html.includes(resultCell(frozenFace.rounds[0].result)), 'the labelled summing result renders')
-  assert(html.includes(verdictCell('red', 2)) && html.includes('red · 2 blockers'), 'red verdict names its blocker count')
-  assert(html.includes(verdictCell('green', 0)), 'green verdict renders as the engine word')
-  // line <sha>
-  assert(/^line [0-9a-f]{8}$/.test(frozenFace.rounds[0].measured) && html.includes('line ' + frozenFace.rounds[0].measured.slice(5)), 'measured renders as line <sha>')
+  // trigger enum: only auto|manual, joined from the headers the tab carries
+  assert(roundTrigger(RF_RUNS, 'run-a') === 'auto' && roundTrigger(RF_RUNS, 'run-b') === 'manual', 'trigger joins the headers by run id')
+  assert(roundTrigger(RF_RUNS, 'run-none') === '—', 'an unknown run renders the em-dash, never a guessed trigger')
+  // t261012-03: the table renders the PUBLISHED FACES, not a projection
+  const rfHtml = buildCertificationCore(routeAnswer(frozenFace, 'develop-buffer', RF_SECTION))
+  assert(rfHtml.includes('data-round-link="run-live"') && rfHtml.includes('data-round-link="run-a"'), 'the live face leads and the terminal faces follow')
+  assert(rfHtml.includes('<td>auto</td>') && rfHtml.includes('<td>manual</td>'), 'trigger words render per row')
+  assert(rfHtml.includes('data-k="run"') && rfHtml.includes('>running<'), 'the live round renders as running')
+  assert(rfHtml.includes('data-k="red"') && rfHtml.includes('data-k="green"'), 'terminal verdicts render their own pill keys')
+  assert(rfHtml.includes(countsCell({ pass: 8, fail: 2, env_fail: 0 }, '')), 'the labelled counts render')
+  assert(rfHtml.includes('terminal face not written'), 'a run dir without its face names the absence, never zeros')
+  assert(rfHtml.includes('2 failing scenarios'), 'a red round names its outcome reason')
+  assert(roundPill({ state: 'failed', outcome: null }).text === 'could not run', 'a failed state never reads as an outcome word')
+  assert(roundPill({ state: 'done', outcome: { verdict: 'no_proof', reason: 'ran nothing' } }).text === 'no proof', 'no_proof renders the none pill')
+  assert(roundPill({ state: 'done', outcome: { verdict: 'weird' } }).text === 'unreadable outcome', 'an unknown verdict never reads green')
+  assert(roundMeasured({ sandbar: '6efc7b3e' }) === 'sandbar:6efc7b3e' && rfHtml.includes('sandbar:6efc7b3e'), 'measured renders as repo:rev')
   // the one-line freeze banner naming its blockers
   assert(html.includes('id="certBanner"') && html.includes(frozenFace.frozenFace.blockers[0]), 'the freeze banner names its blockers')
   // every ticket row carries id, title and epic

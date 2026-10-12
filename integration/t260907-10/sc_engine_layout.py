@@ -17,8 +17,9 @@ high-level steps：
   B. server/dsh 目录不存在（包装层退场）。
   C. 全仓旧路径零残留（连写 server/dsh／temporal-poc＋段式杂糅两型），全后缀扫描
      （沿 t260907-05 取舍清单「带」项：无 include 白名单），豁免逐处归类（列名制）：
-       - 文件级：server/admin.log（追加式审计流水不可改写）；CLAUDE.md（写集外宿主
-         merge 债，review gen0 A1 申报在案——其目录节由宿主/main 侧更新）；
+       - 文件级：server/admin.log（追加式审计流水不可改写）；〔CLAUDE.md 的写集外宿主
+         merge 债已于 261012 清偿——宿主令更正目录节为 v6 真身，该豁免随之摘除，
+         CLAUDE.md 现与全仓同判，再有残留即红〕；
        - 前缀级：notes/（历史票快照与账本，非活指针）；integration/t260907-10/
          （本场景族自身＋fixture 面，沿 t260907-04 先例）；
        - 行级（回落链行三形态，工单⑤切法一；摘除票落地后归零）：engine-venv-compat
@@ -70,7 +71,7 @@ TEXT_EXT = {".py", ".md", ".mjs", ".js", ".cjs", ".sh", ".yaml", ".yml", ".json"
 # 文件级豁免（列名制，逐处可归因）
 EXEMPT_FILES = {
     "server/admin.log",   # 追加式审计流水：回执逐字引用历史 write_set，不可改写
-    "CLAUDE.md",          # 写集外宿主 merge 债（gen0 A1 申报）；内容现由宿主侧处置
+    # （CLAUDE.md 豁免 261012 摘除：宿主令已把目录节更正为 v6 真身，债清、同判）
     # 回落契约专属 UT（断言载体：fixture 造旧路径＋「回落命中旧路径」断言，
     # token 即被测契约内容——沿 t260907-04 UT 豁免先例）
     "server/engine/tests/test_engine_venv_fallback.py",

@@ -54,12 +54,16 @@ function apiWithRead(read, extra = {}) {
 
 // the refusal envelope: the reader's named reason travels verbatim
 {
-  const api = apiWithRead(async () => ({ ok: false, reason: 'delivery ledger has 1 malformed line(s): garbage {' }))
+  const api = apiWithRead(async () => ({
+    ok: false, reason: 'delivery ledger has 1 malformed line(s): garbage {',
+    round_faces: { dir: '/r', live: { ok: true, face: { run_id: 'run-live', state: 'running' } }, rounds: [] },
+  }))
   const r = await api.handle('GET', ROUTE, Q('project=proj-x'), '')
   assert(r.status === 200 && r.json.ok === false, 'refusal: 200 ok:false (the editor works, the face degrades)')
   assert(r.json.reason === 'delivery ledger has 1 malformed line(s): garbage {', 'the named reason travels verbatim (never rewritten)')
   assert(typeof r.json.note === 'string' && r.json.note.length > 0, 'the degrade states itself')
-  n += 3
+  assert(r.json.round_faces && r.json.round_faces.live && r.json.round_faces.live.ok === true, 't261012-03 fault 2: the refusal still carries the round-faces section')
+  n += 4
 }
 
 // the boundary refusals
@@ -78,6 +82,30 @@ function apiWithRead(read, extra = {}) {
   const post = await apiOk.handle('POST', ROUTE, Q('project=p'), '{}')
   assert(post.status === 405, 'POST (credentialed): 405 (no write path on this route)')
   n += 3
+}
+
+// ---- t261012-03: the round dialog's route (one retained round per open) ----
+{
+  const api = createApi({ HOME: '/nonexistent-home', SANDBAR_PANEL_DIR: '/nonexistent-projects' }, {
+    certificationRoundRead: async (project, run) => ({
+      ok: true, project, run, face: { run_id: run, state: 'done' }, face_reason: null,
+      failures: { rows: [], more: 0, judged: 0, last: null }, failures_absent: null,
+      wrote: ['certification cert-1 (line l)'], wrote_note: '', trigger: 'scheduled', trigger_note: '',
+      log_path: '/r/' + run + '/suite.log', log_absent: null,
+    }),
+  })
+  const entry = PANEL_API_ROUTES.find((r) => r.path === '/sandbar-executor-panel/api/certification/round')
+  assert(entry !== undefined && entry.methods.length === 1 && entry.methods[0] === 'GET', 'the round route is registered, GET-only')
+  const r = await api.handle('GET', '/sandbar-executor-panel/api/certification/round', Q('project=proj-x&run=run-a'), '')
+  assert(r.status === 200 && r.json.ok === true && r.json.run === 'run-a', 'happy round read: the queried run answers')
+  assert(Array.isArray(r.json.wrote) && r.json.wrote.length === 1, 'the Wrote facts ride along')
+  const refused = await api.handle('GET', '/sandbar-executor-panel/api/certification/round', Q('project=proj-x&run=run-z'), '')
+  assert(refused.status === 200 && refused.json.run === 'run-z', 'the queried run id stays on the refusal envelope')
+  const badRun = await api.handle('GET', '/sandbar-executor-panel/api/certification/round', Q('project=proj-x&run=../escape'), '')
+  assert(badRun.status === 400 && badRun.json.error.includes('malformed run id'), 'a traversal run id refuses at the boundary, by name')
+  const weird = await api.handle('GET', '/sandbar-executor-panel/api/certification/round', Q('project=proj-x&run=not%20ok'), '')
+  assert(weird.status === 400, 'a charset-violating run id refuses at the boundary')
+  n += 6
 }
 
 done(n)

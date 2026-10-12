@@ -57,7 +57,7 @@ import { readOneShotFace, fsOneShotIo, type OneShotIo } from './one-shot-view.ts
 // t261009-44: the Certification tab's read face — the engine develop ledgers
 // through the adapter seam, derived into the Slice 1 face. GET-only: no write
 // path exists in this slice (certify/promote stay record-signed operations).
-import { certificationFace, type CertFaceRead } from './certification-reader.ts'
+import { certificationFace, spawnCertificationRound, type CertFaceRead, type RoundRead } from './certification-reader.ts'
 import type { BridgeStatusSnapshot } from './question-bridge.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
@@ -159,6 +159,10 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   // act stays a record-signed engine operation; this route derives and returns the
   // face (and the raw input arrays behind it), it never writes a ledger.
   { path: '/sandbar-executor-panel/api/certification', methods: ['GET'] },
+  // t261012-03: the round dialog's read face — ONE fetch per open over the
+  // retained evidence (terminal face + suite.log + the ledger rows citing the
+  // run). GET-only; it never writes and never polls.
+  { path: '/sandbar-executor-panel/api/certification/round', methods: ['GET'] },
 ]
 
 export interface ApiDeps {
@@ -211,6 +215,9 @@ export interface ApiDeps {
   /** t261009-44 Certification read face (default certificationFace via the adapter
    *  seam; tests inject a stub — a unit test never spawns the engine adapter). */
   certificationRead?: CertFaceRead
+  /** t261012-03 round dialog read face (default spawnCertificationRound via the
+   *  adapter seam; tests inject a stub — a unit test never spawns the engine). */
+  certificationRoundRead?: (project: string, run: string) => Promise<RoundRead>
 }
 
 /** Wake-call result (ok:false always carries a human-readable reason — the receipt
@@ -1006,9 +1013,27 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
         // travels verbatim: missing declaration, malformed ledger row, absent
         // run headers) — the face degrades by name, nothing is invented.
         return { status: 200, json: { ok: false, project: key, reason: read.reason,
+          round_faces: read.round_faces,
           note: 'the certification face is not derivable — the reason above names what could not be read' } }
       }
       return { status: 200, json: { ...read, note: 'face derived by the engine projections (develop_certify/develop_promote) — the panel recomputes nothing' } }
+    }
+    // ---- round dialog (t261012-03): one retained round's record ----
+    if (path === '/sandbar-executor-panel/api/certification/round') {
+      if (method !== 'GET') return bad(405, 'GET only (a read face over retained evidence — the panel starts no round and rewrites nothing)')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const run = query.get('run') ?? ''
+      // The reader re-validates; the boundary refuses first, by name.
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(run) || run.includes('..')) {
+        return bad(400, `malformed run id ${JSON.stringify(run.slice(0, 80))}`) // LIST-CAP-OK: error-message length limit, not a list cap
+      }
+      const read = await (deps.certificationRoundRead ?? spawnCertificationRound)(key, run)
+      if (!read.ok) {
+        return { status: 200, json: { ok: false, project: key, run, reason: read.reason,
+          note: 'the round record is not readable — the reason above names what could not be read' } }
+      }
+      return { status: 200, json: { ...read, note: 'one round’s retained evidence (face.json + suite.log + citing ledger rows) — read once per open' } }
     }
     return bad(404, `未知面板路由：${path}`)
   }
