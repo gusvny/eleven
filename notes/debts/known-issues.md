@@ -5607,3 +5607,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**闸量的是 ref，干活的是 HEAD——两者必须先证相等**。
 > **回归**：L1——settle 收尾断言 ref==HEAD（构造 detached 落提交场景必须红/自愈）；L3——真台注入 detached 脱节后跑 merge_check，断言要么自愈要么具名红，绝不静默量旧 ref。
 
+
+## KI-01M4R5BBV855DG3TT645AVXXAB **worker 硬换手把在飞线轮 runner 变孤儿（收尸册只在进程内存）**：模式
+（261012/round-20261012T123320Z 实测；integration 岗登记）
+
+> **实测**：中央 worker 换手（engine_ops restart，TERM＋supervisor 拉新）时线轮活动在飞：runner（pid 20170）**未被收尸**——`_INFLIGHT_RUNNERS` 收尸册只在 worker 进程内存，优雅停机钩子（reap_inflight_runners）未及/未跑到；孤儿 runner 继续烧 CPU、占 stage 互斥，其产出永无人记账（父活动随旧 worker 消亡），3600s 预算超时也不再有人执行。同窗口 Temporal 重试起新活动→新 runner 与孤儿并发=再次互卡。
+> **根因**：收尸登记单点在进程内存，worker 的非优雅终态（硬 TERM/SIGKILL/崩溃）带走整本册子；restart 前也不检查在飞 runner。
+> **危害**：①资源泄漏＋互斥互卡（本轮实测孤儿拖慢后继轮）；②无人记账的半程结果污染 rounds 现场观察；③超时兜底失效（预算形同虚设）。
+> **出路**：收尸册落盘（pidfile/登记文件，worker 启动时扫残留并具名收养或收割）；engine_ops restart 前置检查在飞线轮并先优雅收割；runner 自身加墙钟自毙（子进程侧双保险，不依赖父进程存活）。
+> **纪律**：**换手引擎进程前，先问「谁家孩子在飞」**——在飞子进程的收尸登记必须在进程外可寻。
+> **回归**：L3——真台注入：活动在飞时硬杀 worker，断言 runner 被落盘册收割或自毙，绝不无声续跑。
+
