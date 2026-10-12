@@ -5585,3 +5585,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：凡「改了调度/闸/开关」类操作，**成功 = 回读证实**，命令返回值不算证据。
 > **回归**：L1——mock handle 上 update 后 unpause 被吞的场景，resume 必须红；L2——真 Temporal 上 resume 后 describe.paused==False 且 note 为新值。
 
+
+## KI-01M4QHN1V0098CCQ0NH9CVZ1BN **重验闸前不查 worker 漂移 ⇒ 修复「看起来没生效」空转多轮**：模式
+（261012/t261012-02 六轮空转实测；integration 岗登记）
+
+> **实测**：宿主直修（2a23c658，261012 13:53 落 main）行为正确——泳道树内直跑 verify_lane 两种载荷对照：传 `base_other` 零红、不传 3 红。但其后 merge_check 连续多轮仍按旧判据出红。`engine_ops workers` 的 code_stamp 给出解释：服务该票的 **lane worker 是提交前起的进程**，`stale=agent_activities,dev_lane`（Python 导入缓存：改码不换进程=白改）。按 pidfile TERM＋supervisor 拉新后，stale 清空，重验即恢复新判据。
+> **根因**：`retry_qc` 的既有流程只保证「泳道树并进新 main」，**不保证「执行活动的 worker 进程吃到新码」**。而诊断侧（含本岗）连续多轮把「闸仍红」读成「修复没生效/被回滚」，没有人先跑 `engine_ops drift`——这个工具恰是为「谁在服务/吃哪份代码/漂没漂」造的，全程在场、零人调用。
+> **危害**：①无效重验空转（每轮全量套件 ~7.5 分钟，当晚至少 6 轮）；②诊断被引向错误方向（怀疑修复本身、怀疑外部杀进程）；③「无输出」死亡与陈旧 worker 混在同一现场，归因难度翻倍。
+> **出路**：`retry_qc` 收到信号后（或推票前）先跑 `engine_ops drift`，stale 非空即先换手（pidfile TERM＋等 supervisor 拉新＋stale 清零自证）再起闸；把「worker stale ⇒ 先换手」写进 retry_qc 的处置文案。
+> **纪律**：**闸的红 ≠ 修复没用**——先问「跑闸的进程吃的哪份码」。改引擎码后的第一次重验，drift 检查是前置步骤，不是可选项。
+> **回归**：L1——mock 面锁「drift 报 stale ⇒ retry_qc 文案含先换手」；L3——真台注入：起旧 worker、落新码、发 retry_qc，断言处置链先换手再重跑（而非直接重跑旧码）。
+
