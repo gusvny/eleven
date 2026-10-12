@@ -44,3 +44,13 @@
 3. `debt: zero-run-gate-stop recovery semantics vs stall interaction`（真台分诊票）
 4. `debt: hostile-identity fixture residue + L25 wait-bound probe policy`
 5. 其余未诊条目合开一张 `debt: line-round standing-red sweep (per-name triage inside)`
+
+## 补记（261012 同日）：判绿口径的严格性 + 精确账
+
+- `develop_certify.run_verdict`：**green ⇔ ran>0 且 failed==0 且 env_failed==0**——env 红同样卡绿。故 A 类（轮环境敏感）不是「不用管」，而是要**硬化**（场景面：去全局状态依赖/克隆安全/竞争容忍）。
+- 精确账（全量轮 fail+not-checked 去重 25）：已修 2（随落线上线）、已入册 1（multirepo）→ **剩 22**。
+  - **场景硬化类 ~7**：engine-layout、registry-additive-keys、registry-style-drift-bite、terminology-baseline-floor、run-record-drivers、wait-bound-brakes、executor-fail-closed（main 单验全过；轮内真机面/克隆面敏感——改场景不改产品）
+  - **真修类 ~5**：executor-entry-console（E4 图标产品回归疑、E5 端点×夹具播种）、epic-cli-ticket-start、ki067-entry-audit（**合同裁决**：拒收面 client vs workflow）、carrier-verbatim-port-guard、hostile-identity-fixture-chain（夹具残留+L25 口径）
+  - **待分诊 ~10**：zero-run-gate-stop、fast-set 三场景、ledger-reuse-round、guard-statement-level-faces、project-ui-settings-isolation、bench-boot-anchor、lane-materialization、teardown-residue-visible、executor-timings-receipt、multitab-guard-assets、pw-path-resolution、ticket-detail-overlay、executor-panel-theme-follow（先去重后分流）
+  - **browser/env 族**：面板/截图族在克隆里 bench 资产/装配敏感——bench 健壮性工作（非删测）
+- 工作类型结论：**大头是改场景（夹具/锚/硬化），小头是改产品（E4/E5、拒收面），一处要合同裁决（ki067），零删测**。
