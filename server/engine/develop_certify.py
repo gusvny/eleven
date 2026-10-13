@@ -1477,7 +1477,17 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                                            judged_by, at_ms=now_ms, line=line)
                 verdict = run_verdict(header["cases"])
                 batch = [cert]
-                if verdict == "red":
+                # 261013 (design goal 24 + KI-01M4P6Z4T5C1R2S8N9K7H3QWDN):
+                # the freeze opens only on a red that implicates CONTENT
+                # (failed > 0). An env-only red (failed == 0, env_failed > 0)
+                # means part of the suite was unavailable, not that the
+                # revision is guilty — it grows the range like any red, but
+                # freezing the line over an environment gap was exactly the
+                # "环境的问题，内容的代价" misjudgment. should_freeze's written
+                # intent is now wired (it was dead code; the docstring stays
+                # the truth of this branch).
+                _content_failed = int(header["cases"].get("failed", 0))
+                if verdict == "red" and should_freeze(_content_failed > 0):
                     batch += open_freeze_rows(cert, at_ms=now_ms)
                 res = append_rows(batch)
                 if res["written"] != len(batch):
@@ -1495,20 +1505,32 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                         raise CertifyError(
                             "ledger_has_malformed_lines:%d" % len(bad2))
                     red_cert = _of_kind(rows2, KIND_CERT, line)[-1]
-                    frz = _of_kind(rows2, KIND_FREEZE, line)[-1]
-                    entry["freeze"] = frz["id"]
-                    try:
-                        action, target = next_red_action(rows2, line, red_cert,
-                                                         lane_reds)
-                    except AlreadySearchedError:
-                        action, target = "already_searched", None
-                    entry["next"] = action
-                    if action == "isolated":
-                        append_rows([freeze_change_row(
-                            frz["id"], CHANGE_ATTRIBUTION, judged_by,
-                            "red ladder isolated the culprit",
-                            value=target["id"], at_ms=now_ms, line=line)])
-                        entry["attribution"] = target["id"]
+                    freezes = _of_kind(rows2, KIND_FREEZE, line)
+                    if not freezes:
+                        # 261013 (KI-01M4P6Z4T5C1R2S8N9K7H3QWDN): an env-only
+                        # red opens no freeze, so there is no culprit to derive
+                        # — the ladder exists to isolate content guilt. Named,
+                        # never silent: the entry says why no freeze is open.
+                        entry["next"] = "env_red_no_freeze"
+                        entry["note"] = ("env-only red (failed=0, env_failed>0)"
+                                         " — range grew, no freeze (design "
+                                         "goal 24: freeze keys on content red)")
+                    if freezes:
+                        frz = freezes[-1]
+                        entry["freeze"] = frz["id"]
+                        try:
+                            action, target = next_red_action(rows2, line,
+                                                             red_cert,
+                                                             lane_reds)
+                        except AlreadySearchedError:
+                            action, target = "already_searched", None
+                        entry["next"] = action
+                        if action == "isolated":
+                            append_rows([freeze_change_row(
+                                frz["id"], CHANGE_ATTRIBUTION, judged_by,
+                                "red ladder isolated the culprit",
+                                value=target["id"], at_ms=now_ms, line=line)])
+                            entry["attribution"] = target["id"]
                 rounds.append(entry)
             except CouldNotRun as e:
                 append_rows([could_not_run_row(line, str(e), at_ms=now_ms)])

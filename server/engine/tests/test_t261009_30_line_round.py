@@ -153,6 +153,33 @@ def test_r2b_after_rerun_the_ladder_isolates(tmp_path):
     assert dc.freeze_state(rows, LINE)["frozen"] is True
 
 
+# ---- R2b: an env-only red grows the range, never a freeze (261013 wiring of
+#      should_freeze's written intent; KI-01M4P6Z4T5C1R2S8N9K7H3QWDN: the
+#      function was dead code, so an env gap froze the line as if content were
+#      guilty — "环境的问题，内容的代价") --------------------------------
+
+def test_r2b_env_only_red_never_freezes(tmp_path):
+    """failed==0 + env_failed>0 => red cert booked, range grows, NO freeze row.
+    The freeze's cause must never point at a content-implication that an
+    env-only round does not carry."""
+    p = ledger(tmp_path)
+    ldg = landing("sandbar", "ok-rev")
+    seed(p, ldg)
+    env_red_header = {"id": dc.mint_id("run"), "cases": {"ran": 10,
+                                                         "failed": 0,
+                                                         "env_failed": 4}}
+    out = dc.run_line_round(LINE, "change", guard_path(tmp_path),
+                            lambda c: env_red_header, reader(p), writer(p),
+                            "round-engine", "booked-v1")
+    r = out["rounds"][0]
+    assert r["state"] == dc.STATE_RED and r["verdict"] == "red"
+    rows, _ = dc.read_rows(p)
+    kinds = {x["kind"] for x in rows}
+    assert "certification" in kinds       # the round is judged and booked
+    assert "freeze" not in kinds          # but an env gap never freezes content
+    assert dc.freeze_state(rows, LINE)["frozen"] is False
+
+
 # ---- R3: could-not-run grows the range, never a freeze (goal 24) ------------
 
 @pytest.mark.parametrize("bad_header", [None, "not a dict",
