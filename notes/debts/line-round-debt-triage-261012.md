@@ -79,3 +79,7 @@
 
 ## 真修收口（本轮全部实证绿，全部 main 提交）
 b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path 清单 ｜ b57c61d4 bench 锚岗夹具 ｜ 552275f2 epic-cli N3 锚token ｜ ea2dc3b8 册子 canonical（连坐愈 guard-statement＋carrier-port）｜ e0e3263b lib_fix15 goto ｜ 96889155 teardown 夹具并发声明
+
+## 补记 5（261013）：一次纪律自我纠察
+- integration 岗直修的「死指针回落」（1fca1f8b）**破坏了钉住的合同**（t261011-18 钉：死指针=fail-closed 具名拒、绝不静默回落）——已回滚（50d4bf61），场景复绿。**教训：修「能跑通」时绝不能越过钉住的合同；合同面要改先改册子/打招呼。**
+- **运维腐叶（待清）**：worker 环境链上的 `SANDBAR_POC_PYTHON` 指向已清场的临时目录（asset_missing 的根源）。合同是对的（死指针该具名拒），腐叶该清——清法=控制台/监督器重启动（其环境链刷新）。**在清之前，快轮会具名挂 asset_missing——这是诚实的红，不是产品病。**
