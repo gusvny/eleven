@@ -5470,6 +5470,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**同一份判据里，凡是"写了意图却没人调用"的函数，都要当成没写**；"红 ⇒ 动作"的每一处都要问"这类红真的是这个动作的理由吗"。
 >
 > **回归**：L1——`env_failed > 0 and failed == 0` 的红**不得**开冻结（或按 `should_freeze` 的意图具名拒绝）；L2——红轮里"是否有冻结行"必须与"是否有内容归因"一致。
+> 
+> **实证补记（261013，integration 直修落地）**：已按出路接线——`run_line_round` 的红分叉改走 `should_freeze(failed>0)`（`c381dd24`）：内容红照旧冻结+归因梯；环境-only 红只长范围、记 cert、不冻结，回执具名 `env_red_no_freeze`。回归 L1 已落（`test_r2b_env_only_red_never_freezes`；同族 R2 内容红冻结面不变）。冻结/落地/轮族 262 条全绿。
 
 ## KI-01M4P6Z4T5C1R2S8N9K7H3QWDP **认证轮判的不是修订，是跑器能给的环境**：20 条 UI/DOM 用例在线轮里**从未跑过**，多条 self-red 在交付树里却是绿的（261012 integration 岗实测）
 
@@ -5606,6 +5608,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：settle/主同步收尾自检「分支 ref == worktree HEAD」，不等则显式收敛（在分支上并回 HEAD 或拒绝并具名）；merge_check 前置同样校验（量之前先证「量的就是树」）。处置实录（-03，261012）：checkout 分支→merge 80e1ea24（无冲突，两侧内容保全）→ merge-base(main,branch)=e4ae2061 → 闸载荷 dry-run 写集 0 红。
 > **纪律**：**闸量的是 ref，干活的是 HEAD——两者必须先证相等**。
 > **回归**：L1——settle 收尾断言 ref==HEAD（构造 detached 落提交场景必须红/自愈）；L3——真台注入 detached 脱节后跑 merge_check，断言要么自愈要么具名红，绝不静默量旧 ref。
+>
+> **实证补记（261013）**：同族另一面——`t261008-08 lane-materialization` 的 T5b 挂在「单仓泳道应注册为带分支的 worktree，实得 branch 字段空（detached 形）」：物化是 `worktree add -b`（对），但生命周期某处让它失分支。与 -03 的 ref 脱节同族，归票深挖（多仓/单仓物化的分支注册面）。
 
 
 ## KI-01M4R5BBV855DG3TT645AVXXAB **worker 硬换手把在飞线轮 runner 变孤儿（收尸册只在进程内存）**：模式
@@ -5628,4 +5632,25 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①计数器在收到人裁（arbitration_verdict 授权落账）时重置/放行；或②判停路由把「先并一次 main 再测」纳入释放路径；或③验收段判停时允许一次受控 main 同步重测。
 > **纪律**：**判停的释放条件必须在该阶段内可达**——依赖下游阶段才能满足的释放条件＝死锁。
 > **回归**：L3——真台注入同面停轮＋人裁授权，断言票被放行（而非计数器继续加）。
+
+
+## KI-01M4T7EGQH1Z7P07AQVN1NMENQ **close_out 终止票不释放并发槽（终止≠释放点接线缺失）**：模式
+（261013/t261012-02/03 实测；integration 岗登记）
+
+> **实测**：两张票已落线（交付账＋线尖为证）但 merge 段簿记楔死，用 close_out 记名收口（terminated）后，concurrency-state.json 的 holders **仍占槽**（8/8 占满，新票 t261013-04 卡在 create_plan queued）。concurrency.release(cause=terminated) 是现成的正规原语，但 close_out 的终止路径没调它——结果=终止的票继续占槽，新工作被饿死。
+> **根因**：release 只挂在 pause/terminate 的「真释放点」，而 close_out 走 signal close_out_notice＋terminate 的单点（client.py），没人把 terminate 接到 release。
+> **危害**：并发上限名存实亡——楔死票累积占槽，整个系统渐进锁死（当天实测：8 槽全被 human-hold/楔死票占满，运载票进不来）。
+> **出路**：terminate 收口路径接 release（cause=terminated）；reconcile 面把「终止态仍占槽」列为具名异常。
+> **纪律**：**占资源的每个状态终点都要问「槽/锁/handler 释放了吗」**——终止是终点的一种。
+> **回归**：L1——close_out 后 release 被调（mock 面）；L3——真台收口一张占槽票，holders 立即减一、队头被顶上。
+
+## KI-01M4T7EGRDSTBVXWVPDF1RJK58 **merge 段簿记楔死：票已落线，checks 两项不落、段不收口、槽不释放**：模式
+（261013/t261012-02/03 实测；integration 岗登记）
+
+> **实测**：-02/-03 落线后（landing 行在账、线尖前移），workflow 停在「merge running」数小时——merge 段的「Human sign-off recorded」「Merge booked + lane cleaned up」两项检查 done=False，尽管签字已投递、落线已发生。其专属 lane worker 在此之前「收口自退」（worker 日志：watch 判票已收口 → 优雅停机），留下 merge 段再无人服务。
+> **根因**：①worker 的收口判定与 workflow 的真实段终态脱节——票没到终态它就退了；②merge 段的完成度判定（checks 落项）与落线动作脱节——落线成了但段面没记。
+> **危害**：票看板永不归零、并发槽被占死（与 KI-01M4T7EGQH1Z7P07AQVN1NMENQ 叠加成锁死）、签过字的票看起来「没走完」。
+> **出路**：worker 自退判定改读 workflow 终态而非本地推测；merge 段的 checks 在落线/签字动作发生处就地落项（不依赖段末统一收口）。
+> **纪律**：**「自退」必须对着权威终态退**，不对自己以为的终态退。
+> **回归**：L3——真台注入「落线成但段未收口＋worker 已退」，断言 reconcile/巡检面具名捞出该楔死形态。
 

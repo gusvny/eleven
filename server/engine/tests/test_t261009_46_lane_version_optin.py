@@ -303,13 +303,17 @@ def test_cert_wait_waiting_before_any_certification(env, tmp_path):
 
 
 def test_cert_wait_refuses_to_guess_green_once_certs_exist(env, tmp_path):
-    # The honesty rule: a certification exists but no run-verdict reader is
-    # built yet (t261009-30) — the face stops NAMED, never mints a green.
+    # The honesty rule, updated 261013 when the run-verdict reader got wired
+    # (agent_activities.certification_wait now injects a real reader over the
+    # runs ledger): a cert citing a run the reader does NOT know must never
+    # read green — the landing reads red_implicated (conservative), never
+    # certified. Pre-wiring, this same face was the named run_verdict_unreadable.
     project, repo, proven = _landing_setup(env, tmp_path)
     _append_landing_and_cert(project, "t46", proven, green=True)
     res = asyncio.run(aa.certification_wait(aa.CertWaitArgs(
         ticket_id="t46", project_key=project, line_id="buffer")))
-    assert res.ok and res.state == "run_verdict_unreadable"
+    # never certified on an unknown run — that's the whole promise
+    assert res.ok and res.state != "certified" and res.state == "red_implicated"
 
 
 def test_cert_wait_face_certified_with_injected_reader(env, tmp_path):

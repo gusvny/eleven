@@ -269,6 +269,23 @@ def test_e6_kill_switch_disables_reuse(value, clean_repo, tmp_path, monkeypatch)
     assert RS.LEDGER_REUSE_ENV in plan["disabled_reason"]
 
 
+@pytest.mark.parametrize("value", ["0", "off", "false", "no"])
+def test_e6_kill_switch_disables_reuse_but_keeps_git_head(value, clean_repo, tmp_path, monkeypatch):
+    """261013 regression (the run_id_missing_from_summary chain): the kill switch
+    disables REUSE but must NOT strip the HEAD identity — git_head is also the
+    end-of-round run record's commit key. Pre-fix order resolved git_head only
+    AFTER the reuse-off early return, so every line round (which pins REUSE=0)
+    wrote no run record and the runner refused the round."""
+    ledger = tmp_path / "ledger"
+    _write_ledger(ledger, [_row(commit=_row_head(clean_repo))])
+    monkeypatch.setenv("SANDBAR_LEDGER_REUSE", value)
+    plan = _plan(monkeypatch, clean_repo, ledger, ["t-scn"])
+    assert plan["enabled"] is False and plan["names"] == []
+    assert RS.LEDGER_REUSE_ENV in plan["disabled_reason"]
+    # the fix: the identity is resolved even when reuse is off
+    assert plan["git_head"] == _git(clean_repo, "rev-parse", "HEAD").stdout.strip()
+
+
 @pytest.mark.parametrize("value", ["1", "on", "true", "yes", "anything", ""])
 def test_e7_other_values_leave_reuse_enabled(value, clean_repo, tmp_path, monkeypatch):
     ledger = tmp_path / "ledger"

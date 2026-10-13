@@ -170,35 +170,28 @@ class AssetEnvLeg(unittest.TestCase):
             self.assertIn("asset_missing:", proc.stderr)
             self.assertNotIn("INTEG_SUMMARY", proc.stdout)
 
-    # ---- C: a genuinely absent declared asset is NEVER a silent pass ----
-    # 261012 (host order "fix what is broken"): a dead declared pointer is
-    # rot, not a directive — the runner ignores it, names it on stderr
-    # (asset_pointer_dead) and resolves locally; it dies with a named
-    # could-not-run only when the local resolution fails too (the dead
-    # pointer named in the message).
+    # ---- C: a genuinely absent declared asset is a named could-not-run ----
+    #
+    # Why this variant and not the line's (t261013-06, the develop-line carrier):
+    # the line's copy asserted the dead-pointer FALLBACK (`asset_pointer_dead`,
+    # exit 0 after a local resolution). Main rolled that fallback back by host
+    # order (commit 50d4bf61, recorded in notes/debts/known-issues.md as "the
+    # fallback overrode the contract"), and this carrier delivers main's batch,
+    # so the strict variant below is the sanctioned contract. The replaced
+    # assertions are listed with their reasons in
+    # integration/t261013-06/merge_deviations.json.
 
     def test_c_absent_asset_named_before_spawn(self):
         bad = str(self.tmp / "nope" / "python")
         proc = self.run_runner(self.base_env(
             {POC_ENV: bad, BIN_ENV: str(self.stub)}))
-        self.assertIn("asset_pointer_dead:%s=%s" % (POC_ENV, bad),
-                      proc.stderr)
-        expected_poc, expected_bin = expected_assets()
-        if expected_poc.exists() and expected_bin.exists():
-            # local resolution succeeds: the round proceeds, the dead
-            # pointer was named and never handed to the suite
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-        else:
-            # asset-less environment: the local resolution dies NAMED, with
-            # the dead pointer named in the message
-            self.assertEqual(proc.returncode, 2)
-            self.assertIn("LINE_ROUND_RUNNER could_not_run:", proc.stderr)
-            self.assertIn("asset_missing:%s" % POC_ENV, proc.stderr)
-            self.assertIn(bad, proc.stderr)
-            self.assertNotIn("INTEG_SUMMARY", proc.stdout)
-            # never a header, never a certification, never a silent skip
-            self.assertEqual(proc.stdout.strip(), "")
-            self.assertFalse(self.receipt.exists())
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("LINE_ROUND_RUNNER could_not_run:", proc.stderr)
+        self.assertIn("asset_missing:%s" % POC_ENV, proc.stderr)
+        self.assertIn(bad, proc.stderr)
+        # never a header, never a certification, never a silent skip
+        self.assertEqual(proc.stdout.strip(), "")
+        self.assertFalse(self.receipt.exists())
 
     # ---- D: empty-string keys count as unset (resolved, not passed) ----
 

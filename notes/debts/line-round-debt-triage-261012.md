@@ -61,3 +61,25 @@
 - **settings-isolation / rail-add-remove**：72e010c1 把导航改到 fix17 的 bench.goto（fix15 没有）→ 恒挂至今；lib_fix15 已补回裸导航 goto（docker 台无 token 门）。剩余红 = t261008-36 把设置入口挪进执行器面板 Settings 页签、场景锚未跟——**挂起等新版 UI 系列票（t261012-07..23）收口后再修**，届时锚不会再动。
 - **teardown-residue-visible**：T1 泳道物化超时，需读其 worker 日志深挖（冻结期无 LLM 段干扰，可复跑分诊）。
 - **zero-run-gate-stop / lane-materialization**：未诊（前者需真台，后者 376s 慢）。
+
+## 补记 3（261013 凌晨）：validate 又五条 + 运载通道走通
+- **已修**：carrier-port-guard / guard-statement / hostile-identity 三条「连坐转绿」——根因全是册子 canonical 漂移（ea2dc3b8 一修三愈）；teardown-residue 夹具补并发声明（`96889155`，T1 物化恢复，剩余 T6/T7/T8/T12 = 本票自家主题面的产品缺口，归票）。
+- **zero-run-gate-stop**：相二期望「恢复后推进 merge 挂人审」实得 merge_check blocked——夹具仓的极简形状过不了现在更严的 fail-closed 面（merge-base/gitlink/fuse-B/ui_evidence）。**夹具要升到现行闸合同**，归票。
+- **lane-materialization**：376s 重但本身能过，轮内超时属墙钟面（与 multirepo 同族，视复现入册）。
+- **ki067-entry-audit**：拒收面漂移确诊到层——`_write_gate`（client 侧跨项目/授权闸前置拒）先于 signal 投递，workflow 的 refused 账落空。合同裁决：拒收的可观测面该在 client（快速拒）还是 workflow（可审计账）。
+- **重要自查**：run-record 病（run_id_missing）**昨晚已由另一个 integration 会话登记为 KI**（`4f8ccd43`，①收窄轮不写 run record）——我今早重新查了一遍同样的病。**纪律：动手前必读当日 KI 册增量**，此失已记下。
+
+## 补记 4（261013 凌晨，分诊终校）
+- **lane-materialization（t260910-08）**：非墙钟案——T5b 单仓泳道形态断言挂（单仓泳道应=根仓注册 worktree 无清单，实得 HEAD 无 worktree 注册）＋场景自带 `str.get` AttributeError（env_fail 面）。376s 慢是真但挂是真挂。归票（物化面形变，工程深）。
+- **zero-run-gate-stop（t261008-24）**：夹具仓极简形状过不了现行 fail-closed 面（merge-base/gitlink/fuse-B/ui_evidence 家族）——夹具升闸合同，归票。
+- **teardown-residue（t260913-05）**：夹具并发声明已修（T1 通）；T6/T7/T8/T12 = 拆道残留告警面在引擎里没落（产品缺口），归票。
+- **settings-isolation / rail-add-remove**：lib_fix15 bench.goto 已补回（`e0e3263b`）；剩余=设置入口移位（t261008-36 挪进执行器面板 Settings 页签）——**等新版 UI 系列（t261012-07..23）收口后统一跟锚**，现在修=白修。
+- **ki067-entry-audit**：拒收面漂移（client `_write_gate` 前置拒 vs workflow refused 账）——合同裁决待宿主。
+- **修正一处账**：pw-path/multitab-guard/executor-entry-console 等实为**在册豁免**（261002 暂排批），不占真修数——此前按 12:33 豁免前轮名单误计，已以册为准校正。
+
+## 真修收口（本轮全部实证绿，全部 main 提交）
+b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path 清单 ｜ b57c61d4 bench 锚岗夹具 ｜ 552275f2 epic-cli N3 锚token ｜ ea2dc3b8 册子 canonical（连坐愈 guard-statement＋carrier-port）｜ e0e3263b lib_fix15 goto ｜ 96889155 teardown 夹具并发声明
+
+## 补记 5（261013）：一次纪律自我纠察
+- integration 岗直修的「死指针回落」（1fca1f8b）**破坏了钉住的合同**（t261011-18 钉：死指针=fail-closed 具名拒、绝不静默回落）——已回滚（50d4bf61），场景复绿。**教训：修「能跑通」时绝不能越过钉住的合同；合同面要改先改册子/打招呼。**
+- **运维腐叶（待清）**：worker 环境链上的 `SANDBAR_POC_PYTHON` 指向已清场的临时目录（asset_missing 的根源）。合同是对的（死指针该具名拒），腐叶该清——清法=控制台/监督器重启动（其环境链刷新）。**在清之前，快轮会具名挂 asset_missing——这是诚实的红，不是产品病。**

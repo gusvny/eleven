@@ -1,0 +1,298 @@
+{
+ "version": 1,
+ "ticket": "t261013-06",
+ "what": "Accepted deviations of the develop-line carrier's conflict resolution. Each entry names one line and the reason it may be absent from the settled result. Anything not listed here stays red in integration/tools/merge_loss_check.py.",
+ "settled_revision": "8afef7d14679a434586f0158257f6f9515a5c2db",
+ "sides": {
+  "ours": "develop",
+  "theirs": "572cf7b2",
+  "base": "545c6cba0312da22b4bcddb4f57c4db6b6804870"
+ },
+ "deviations": [
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "        run tree may be deleted right after — the copy happens FIRST.\"\"\""
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "        \"\"\"Rolling retention keyed on run ids (review condition 1): the"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "        newest FACE_RETAIN_ROUNDS run dirs survive; a dir named by the live"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "        pointer on disk survives regardless of age (a concurrently running"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "        round is never pruned under a finishing one).\"\"\""
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "            dirs = sorted((d for d in self.rounds_dir.iterdir() if d.is_dir()),"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "                          key=lambda d: d.name)"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "            for d in dirs[:-FACE_RETAIN_ROUNDS] if len(dirs) > FACE_RETAIN_ROUNDS else []:"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main",
+   "text": "                if d.name == str(live):"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "        if declared and Path(declared).exists():"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # 261012 (host order \"fix what is broken\"): a declared pointer"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # that no longer exists is rot, not an asset directive — the"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # worker env can carry it for days after the pointed temp tree"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # was reaped (measured: t26101118-assets-* garbage-collected,"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # every fast carrier after it died on asset_missing). Fall"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # through to the local resolution and NAME the ignored pointer"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # on stderr: visible, never silent; the run dies only when the"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            # local resolution fails too, with the dead pointer named."
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "                \"%s asset_pointer_dead:%s=%s — ignored, resolving locally\\n\""
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "                % (TAG, key, declared))"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "        # blank (or dead) declared value: bench's resolver reads"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "        # os.environ, so a blank string would be taken as a (nonexistent)"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "        # pointer — lift it for the resolution and keep it out of the suite"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "        # env; a dead pointer must be lifted too, or the resolver would"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "        # \"find\" the same dead path again"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "            die(\"asset_missing:%s:%s (declared pointer %r was dead)\""
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the dead-pointer fallback that main rolled back by host order (commit 50d4bf61, recorded in notes/debts/known-issues.md); the resolved runner keeps the strict named could-not-run",
+   "text": "                % (key, str(e).replace(\"\\n\", \" \"), declared or \"<none>\"))"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the lane's older die() docstring and hook-first block, replaced by the line's ordering (reason on stderr first, the face note trails) that this file's own DieOrdering test requires",
+   "text": "    stdout stays empty — the engine's CouldNotRun path carries the name."
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the lane's older die() docstring and hook-first block, replaced by the line's ordering (reason on stderr first, the face note trails) that this file's own DieOrdering test requires",
+   "text": "    A registered face hook (run()) records the terminal failed state FIRST,"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the lane's older die() docstring and hook-first block, replaced by the line's ordering (reason on stderr first, the face note trails) that this file's own DieOrdering test requires",
+   "text": "    so the round's outcome stays visible on its stable face (t261011-26).\"\"\""
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "    # ---- C: a genuinely absent declared asset is NEVER a silent pass ----"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "    # 261012 (host order \"fix what is broken\"): a dead declared pointer is"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "    # rot, not a directive — the runner ignores it, names it on stderr"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "    # (asset_pointer_dead) and resolves locally; it dies with a named"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "    # could-not-run only when the local resolution fails too (the dead"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "    # pointer named in the message)."
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "        self.assertIn(\"asset_pointer_dead:%s=%s\" % (POC_ENV, bad),"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "                      proc.stderr)"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "            # local resolution succeeds: the round proceeds, the dead"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "            # pointer was named and never handed to the suite"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "            # asset-less environment: the local resolution dies NAMED, with"
+  },
+  {
+   "file": "integration/tests/test_t26101118_line_round_assets.py",
+   "why": "assertions and comments for the rolled-back fallback face; the resolved file keeps the strict region C, consistent with the resolved runner (evidence: 50d4bf61 and the notes ledger entry)",
+   "text": "            # the dead pointer named in the message"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        # names chosen so \"round-1\" is the lexically NEWEST (real ids are"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        # timestamps, so newest = greatest name); the live pointer names an"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        # OLD dir, which must survive the prune anyway"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "            (self.dev / \"rounds\" / (\"q-old-%02d\" % i)).mkdir()"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        (self.dev / \"rounds\" / \"q-old-00\" / \"x\").write_text(\"keep-alive\")"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        live = lrf.FaceWriter(self.dev, \"q-old-00\", \"l\", {})"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        (self.dev / \"rounds\" / \"current.json\").write_text("
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "            json.dumps({\"run_id\": \"q-old-00\"}))"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        names = {d.name for d in (self.dev / \"rounds\").iterdir()}"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        self.assertIn(\"q-old-00\", names)      # live pointer's dir survives"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        self.assertIn(\"round-1\", names)       # newest survives"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        self.assertNotIn(\"q-old-02\", names)   # oldest pruned"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "        self.assertLessEqual("
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "            len([n for n in names if n != \"current.json\"]),"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the lane's old name-sorted prune expectations, superseded by the line's rework tests; they would fail against the resolved lib_round_face.py (mtime/shape keying)",
+   "text": "            lrf.FACE_RETAIN_ROUNDS + 1)"
+  }
+ ]
+}

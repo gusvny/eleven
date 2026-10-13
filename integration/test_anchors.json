@@ -5079,6 +5079,11 @@
       "anchor": "contract",
       "note": "t261011-25 part 2: the run header carries an additive prelude_s number on measured rounds and relays verbatim through line_round_runner.read_header (reader-side), an unmeasured round keeps the key absent (never a fake 0), and malformed prelude_s (-1.0 / True / non-number) is refused by name with the ledger untouched",
       "sync_path": "integration/run_scenarios.py (write_run_record/build_run_header); integration/scenario_ledger.py (validate_run_header)"
+    },
+    "integration/t261013-06/sc_t26101306_freeze_closure_resumes_landings.py": {
+      "anchor": "behaviour",
+      "note": "t261013-06: the freeze lifecycle's closing half — the recorded closure unfreezes the line and an ordinary ticket lands again through the real landing act; a closure naming another episode or another line closes nothing and the act still refuses by name; an unknown change word is refused on the write side and never closes the episode as a hand-edited ledger line; a reopened row freezes the line again",
+      "sync_path": ""
     }
   }
 }
