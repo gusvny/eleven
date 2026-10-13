@@ -5608,6 +5608,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：settle/主同步收尾自检「分支 ref == worktree HEAD」，不等则显式收敛（在分支上并回 HEAD 或拒绝并具名）；merge_check 前置同样校验（量之前先证「量的就是树」）。处置实录（-03，261012）：checkout 分支→merge 80e1ea24（无冲突，两侧内容保全）→ merge-base(main,branch)=e4ae2061 → 闸载荷 dry-run 写集 0 红。
 > **纪律**：**闸量的是 ref，干活的是 HEAD——两者必须先证相等**。
 > **回归**：L1——settle 收尾断言 ref==HEAD（构造 detached 落提交场景必须红/自愈）；L3——真台注入 detached 脱节后跑 merge_check，断言要么自愈要么具名红，绝不静默量旧 ref。
+>
+> **实证补记（261013）**：同族另一面——`t261008-08 lane-materialization` 的 T5b 挂在「单仓泳道应注册为带分支的 worktree，实得 branch 字段空（detached 形）」：物化是 `worktree add -b`（对），但生命周期某处让它失分支。与 -03 的 ref 脱节同族，归票深挖（多仓/单仓物化的分支注册面）。
 
 
 ## KI-01M4R5BBV855DG3TT645AVXXAB **worker 硬换手把在飞线轮 runner 变孤儿（收尸册只在进程内存）**：模式
