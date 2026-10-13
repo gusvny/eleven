@@ -103,3 +103,11 @@ b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path
 - **轮口径已挂（c0a8a64e，32 豁免生效）**：2 条 external（t260904-19-stage-docker、t260911-02-trigger-kinds＝docker/外部供给）＋ 11 条 self（scenario-guard-pipeline-landed、period-journey、console-paused-list、doc-face、suite-journey、sign-journey、project-identity-realchain、relocation-realchain、inspect-journey、verdict-cli、legacy-fire-redirect）。
 - **结构确认**：冲绿=「轮环境供给族手术（docker/浏览器在克隆里起得来）＋场景硬化族＋归票产品缺口」三类，与早前分诊一致。这是工程，非一改即绿。
 - **结论**：certify 机器面全通可用（晋升驱动就绪），线红是内容欠账的清账工程。绿证一出现 promote.py 即可晋 main。
+
+## 补记 9（261013）：冲绿病因实证定性（逐类取样诊断）
+- **滞后假设否证**：采样挂在 main 上也挂（如 doc-face）——不是「线追 main」能清，是真欠账。
+- **三类实证**：
+  ① 环境供给族（stage-docker/trigger-kinds＝docker/外部在克隆起不来）；
+  ② 负载敏感族（scenario-guard-pipeline-landed＝整条 engine pytest 走廊，单跑绿并发挤红）；
+  ③ 产品/引擎缺口族（doc-face＝inspect→落账链缺发现行；ki067/teardown/lane 物化/UI 锚）。
+- **结论**：冲绿=测试环境保真（①②）＋产品缺口清账（③）的**多日工程**，跨测试基建与引擎开发。certify 机器面已全通（晋升驱动就绪）；绿证是唯一剩余项，且属清账工程非机器问题。
