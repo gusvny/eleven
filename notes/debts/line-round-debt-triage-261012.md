@@ -83,3 +83,10 @@ b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path
 ## 补记 5（261013）：一次纪律自我纠察
 - integration 岗直修的「死指针回落」（1fca1f8b）**破坏了钉住的合同**（t261011-18 钉：死指针=fail-closed 具名拒、绝不静默回落）——已回滚（50d4bf61），场景复绿。**教训：修「能跑通」时绝不能越过钉住的合同；合同面要改先改册子/打招呼。**
 - **运维腐叶（待清）**：worker 环境链上的 `SANDBAR_POC_PYTHON` 指向已清场的临时目录（asset_missing 的根源）。合同是对的（死指针该具名拒），腐叶该清——清法=控制台/监督器重启动（其环境链刷新）。**在清之前，快轮会具名挂 asset_missing——这是诚实的红，不是产品病。**
+
+## 补记 6（261013）：certify 链收官——晋升驱动接线 + 两个真缺口
+- **certify 最后一段（认证前缀→晋 main）此前不存在**：`build_promotion` 是纯库函数、全仓无人调用。已接线：`develop_promote.promote_buffer` 驱动（校验全过→干净检出一次 ff 合并动 ref+工作区，否则只动 ref+具名；拒红具名零副作用）＋ `server/tools/promote.py` 宿主入口（promotable 探针 + promote 人签）。夹具实证：绿前缀真快进 main+落账；探针如实回「当前无绿前缀」（线红）。
+- **缺口①（已修）**：线轮的 run 头没落持久库（只活在临时树）——轮引用的 run 没人读得回 → 每个落地卡 run_verdict_unreadable。已在 run_line_round 补持久化（runs_store 穿三层）。
+- **缺口②（已修）**：阅读器 `import scenario_ledger` 是死路——引擎**永不 import integration 支持层**（develop_certify 铁律），引擎进程里 ModuleNotFoundError。两处阅读器（certification_wait + 晋升）全改 stdlib 直读 JSONL。
+- **缺口③（证实在案，未修）**：线轮 face 只留计数、suite.log 重命名/保留静默 OSError 吞了——每轮 fail 名单随临时树蒸发，分诊只能靠轮在跑时读活日志。
+- **现状**：certify 机器面全通（落线→轮→绿证→promote→main），剩余唯一卡点是**线还红**（30 挂主体=轮环境/供给族＋归票产品缺口）。绿证一出现，promote 即可晋 main。
