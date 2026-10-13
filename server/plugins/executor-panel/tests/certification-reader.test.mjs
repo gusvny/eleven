@@ -124,10 +124,15 @@ function adapterEnv(home, runsPath) {
   'rounds face: auto trigger, green verdict, line <sha> shape')
   n += 2
 
-  // fail-closed run-header rule: certs on the line + no runs ledger = named refusal
+  // fail-closed run-header rule: certs on the line + no READABLE runs ledger =
+  // named refusal. 261013: the panel now POINTS the adapter at the project's
+  // runs store (it used to spawn without SANDBAR_RUNS_LEDGER, so every read
+  // degraded and the Rounds table rendered empty) — so the reachable
+  // fail-closed case is "the store the panel points at is absent/unreadable",
+  // still a named refusal, never a default green.
   const noRuns = await spawnCertificationRead(P, { env: { ...process.env, SANDBAR_PROJECTS_DIR: home } })
   assert(noRuns.ok === true && noRuns.per_line['develop-buffer'].ok === false
-    && noRuns.per_line['develop-buffer'].reason.includes('SANDBAR_RUNS_LEDGER'),
+    && /run headers|SANDBAR_RUNS_LEDGER/.test(noRuns.per_line['develop-buffer'].reason),
   'absent run headers fail the line CLOSED (never a default green)')
   n += 1
 

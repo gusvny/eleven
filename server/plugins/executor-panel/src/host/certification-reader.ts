@@ -25,6 +25,7 @@
 
 import { execFile as execFileCb } from 'node:child_process'
 import { enginePython } from './executor-grants.ts'
+import { concurrencyProjectsRoot } from './concurrency.ts'
 import {
   deriveCertificationFace,
   type CertificationFace,
@@ -139,8 +140,19 @@ export function spawnCertificationRead(
       if (!settled) { settled = true; resolve(r) }
     }
     try {
-      run(enginePython(opts.env), [certificationAdapterPath(), project],
-        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: opts.env },
+      // 261013 (the empty-Rounds report): the adapter reads run headers from
+      // $SANDBAR_RUNS_LEDGER and refuses by name when it is unset (it never
+      // guesses a lane tree root) — and the panel never set it, so every
+      // certification read failed named and the Rounds table rendered empty.
+      // Point it at the project's runs store (same projects root the engine
+      // reads) when the caller did not pin one explicitly.
+      const spawnEnv = { ...(opts.env ?? process.env) }
+      if (!spawnEnv.SANDBAR_RUNS_LEDGER) {
+        spawnEnv.SANDBAR_RUNS_LEDGER = concurrencyProjectsRoot(spawnEnv)
+          + '/' + String(project) + '/ledger/scenario-runs.jsonl'
+      }
+      run(enginePython(spawnEnv), [certificationAdapterPath(), project],
+        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: spawnEnv },
         (err, stdout) => {
           // A non-zero exit may still carry the full JSON receipt on stdout —
           // parseable wins over the error text (same stance as the grants face).
