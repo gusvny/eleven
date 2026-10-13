@@ -68,3 +68,14 @@
 - **lane-materialization**：376s 重但本身能过，轮内超时属墙钟面（与 multirepo 同族，视复现入册）。
 - **ki067-entry-audit**：拒收面漂移确诊到层——`_write_gate`（client 侧跨项目/授权闸前置拒）先于 signal 投递，workflow 的 refused 账落空。合同裁决：拒收的可观测面该在 client（快速拒）还是 workflow（可审计账）。
 - **重要自查**：run-record 病（run_id_missing）**昨晚已由另一个 integration 会话登记为 KI**（`4f8ccd43`，①收窄轮不写 run record）——我今早重新查了一遍同样的病。**纪律：动手前必读当日 KI 册增量**，此失已记下。
+
+## 补记 4（261013 凌晨，分诊终校）
+- **lane-materialization（t260910-08）**：非墙钟案——T5b 单仓泳道形态断言挂（单仓泳道应=根仓注册 worktree 无清单，实得 HEAD 无 worktree 注册）＋场景自带 `str.get` AttributeError（env_fail 面）。376s 慢是真但挂是真挂。归票（物化面形变，工程深）。
+- **zero-run-gate-stop（t261008-24）**：夹具仓极简形状过不了现行 fail-closed 面（merge-base/gitlink/fuse-B/ui_evidence 家族）——夹具升闸合同，归票。
+- **teardown-residue（t260913-05）**：夹具并发声明已修（T1 通）；T6/T7/T8/T12 = 拆道残留告警面在引擎里没落（产品缺口），归票。
+- **settings-isolation / rail-add-remove**：lib_fix15 bench.goto 已补回（`e0e3263b`）；剩余=设置入口移位（t261008-36 挪进执行器面板 Settings 页签）——**等新版 UI 系列（t261012-07..23）收口后统一跟锚**，现在修=白修。
+- **ki067-entry-audit**：拒收面漂移（client `_write_gate` 前置拒 vs workflow refused 账）——合同裁决待宿主。
+- **修正一处账**：pw-path/multitab-guard/executor-entry-console 等实为**在册豁免**（261002 暂排批），不占真修数——此前按 12:33 豁免前轮名单误计，已以册为准校正。
+
+## 真修收口（本轮全部实证绿，全部 main 提交）
+b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path 清单 ｜ b57c61d4 bench 锚岗夹具 ｜ 552275f2 epic-cli N3 锚token ｜ ea2dc3b8 册子 canonical（连坐愈 guard-statement＋carrier-port）｜ e0e3263b lib_fix15 goto ｜ 96889155 teardown 夹具并发声明
