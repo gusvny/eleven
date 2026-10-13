@@ -143,6 +143,10 @@ class Leg(unittest.TestCase):
         env["SANDBAR_LINE_ROUND_REPO_PATH_SANDBAR"] = str(self.src)
         env["SANDBAR_LINE_ROUND_RUN_ROOT"] = str(run_root)
         env["SANDBAR_LINE_ROUND_RUN_STATE_DIR"] = str(self.tmp / "state")
+        # t261012-06: the runner's face dir must be pinned into this tmp
+        # tree — an un-pinned resolution writes round dirs into the
+        # production face dir this machine may own
+        env["SANDBAR_LINE_ROUND_FACE_DIR"] = str(self.tmp / "face")
         env["SUITE_INTEGRATION_DIR"] = str(self.integration_src)
         env["SUITE_RECEIPT"] = str(self.receipt)
         env["SUITE_COMMIT"] = self.sha

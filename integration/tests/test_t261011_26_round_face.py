@@ -189,23 +189,88 @@ class FaceWriterLifecycle(unittest.TestCase):
         self.assertEqual(kept.read_text(), "PASS [x] (1s)\n")
 
     def test_prune_keeps_newest_and_live(self):
-        # names chosen so "round-1" is the lexically NEWEST (real ids are
-        # timestamps, so newest = greatest name); the live pointer names an
-        # OLD dir, which must survive the prune anyway
+        # t261012-06 semantics: the window counts ROUND-SHAPED dirs only,
+        # ordered by mtime (newest kept), never by name; the live pointer's
+        # dir survives regardless of age. Foreign names (`q-old-*`) are NOT
+        # round evidence and are never touched, whatever their count or age.
+        rounds = self.dev / "rounds"
         for i in range(lrf.FACE_RETAIN_ROUNDS + 3):
-            (self.dev / "rounds" / ("q-old-%02d" % i)).mkdir()
-        (self.dev / "rounds" / "q-old-00" / "x").write_text("keep-alive")
-        live = lrf.FaceWriter(self.dev, "q-old-00", "l", {})
-        (self.dev / "rounds" / "current.json").write_text(
-            json.dumps({"run_id": "q-old-00"}))
+            (rounds / ("run-seed%02d" % i)).mkdir()
+            (rounds / ("q-old-%02d" % i)).mkdir()  # foreign scratch
+            (rounds / ("run-seed%02d" % i) / "suite.log").write_text("s")
+        # distinct mtimes: seed00 oldest, seed12 newest
+        now = time.time()
+        for i in range(lrf.FACE_RETAIN_ROUNDS + 3):
+            old = now - 86400 * (30 - i)
+            os.utime(str(rounds / ("run-seed%02d" % i)), (old, old))
+        (rounds / "run-seed00" / "x").write_text("keep-alive")
+        live = lrf.FaceWriter(self.dev, "run-seed00", "l", {})
+        (rounds / "current.json").write_text(
+            json.dumps({"run_id": "run-seed00"}))
         live.start()  # triggers prune
-        names = {d.name for d in (self.dev / "rounds").iterdir()}
-        self.assertIn("q-old-00", names)      # live pointer's dir survives
-        self.assertIn("round-1", names)       # newest survives
-        self.assertNotIn("q-old-02", names)   # oldest pruned
-        self.assertLessEqual(
-            len([n for n in names if n != "current.json"]),
-            lrf.FACE_RETAIN_ROUNDS + 1)
+        names = {d.name for d in rounds.iterdir()}
+        self.assertIn("run-seed00", names)    # live pointer's dir survives
+        self.assertIn("run-seed12", names)    # newest survives
+        self.assertNotIn("run-seed01", names)  # oldest pruned
+        # foreign dirs survive whatever their number (13 > window)
+        for i in range(lrf.FACE_RETAIN_ROUNDS + 3):
+            self.assertIn("q-old-%02d" % i, names)
+        kept = [n for n in names if n.startswith("run-seed")]
+        self.assertLessEqual(len(kept), lrf.FACE_RETAIN_ROUNDS + 1)
+
+    def test_prune_never_deletes_the_writing_round_dir(self):
+        # t261012-06: even a dir whose mtime is the oldest must survive when
+        # it belongs to the round that is being written right now
+        rounds = self.dev / "rounds"
+        for i in range(lrf.FACE_RETAIN_ROUNDS + 2):
+            d = rounds / ("run-seed%02d" % i)
+            d.mkdir()
+            old = time.time() - 86400 * (40 - i)
+            os.utime(str(d), (old, old))
+        self.w.start()  # this writer's own dir "round-1" already exists
+        self.assertIn("round-1",
+                      {d.name for d in rounds.iterdir()})
+
+    def test_kept_log_survives_next_round_start(self):
+        # t261012-06 spec 4: a finished round's retained suite.log must
+        # still be readable after the NEXT round starts on the same dir
+        log = Path(self.tmp.name) / "suite.log"
+        log.write_text("PASS [x] (1s)\nINTEG_SUMMARY {\"ran\": 1}\n")
+        self.w.retain_log(log)
+        kept = self.dev / "rounds" / "round-1" / "suite.log"
+        self.assertTrue(kept.exists())
+        nxt = lrf.FaceWriter(self.dev, "round-2", "l1", {"r": "rev2"})
+        nxt.start()
+        self.assertTrue(kept.exists(), "next round's start ate the evidence")
+
+    def test_retain_log_failure_is_named_secondary_note(self):
+        # t261012-06: a copy failure lands on the face as evidence_note and
+        # never raises, never touches outcome.reason. Barrier: the
+        # destination path exists as a DIRECTORY, so copyfile fails with an
+        # OSError. Call order mirrors the runner (retain BEFORE finish), so
+        # the note reaches disk with the terminal face.
+        (self.dev / "rounds" / "round-1" / "suite.log").mkdir()
+        src = Path(self.tmp.name) / "suite.log"
+        src.write_text("PASS [x] (1s)\n")
+        self.w.retain_log(src)
+        self.w.finish("failed", None, "could_not_run:runner_timeout:30s")
+        face = json.loads(
+            (self.dev / "rounds" / "round-1" / "face.json").read_text())
+        self.assertIn("suite log retention failed", face["evidence_note"])
+        self.assertEqual(face["outcome"]["reason"],
+                         "could_not_run:runner_timeout:30s")
+
+    def test_prune_tolerates_torn_pointer_and_absent_dir(self):
+        # malformed-input cases: a torn current.json and a vanishing dir
+        # must degrade named, never raise out of start()
+        rounds = self.dev / "rounds"
+        (rounds / "current.json").write_text("{torn")
+        (rounds / "run-torn").mkdir()
+        w = lrf.FaceWriter(self.dev, "round-t", "l", {})
+        w.start()  # must not raise
+        self.assertTrue(w.run_dir.exists())
+        w2 = lrf.FaceWriter(self.dev / "no-such-dev", "round-x", "l", {})
+        w2.start()  # absent rounds dir: silent honest degrade
 
 
 DECL = [{"version": 1, "line_id": "l1", "scope": "", "owner": "",
@@ -456,6 +521,33 @@ class RoundFaceEndToEnd(StubTree):
         self.assertIn("suite_rc_3", face["outcome"]["reason"])
         self.assertIn("could_not_run", proc.stderr)
 
+    def test_incident_seed_run_dirs_round_evidence_survives(self):
+        # t261012-06 incident reproduction: the face dir already holds ten
+        # run-* dirs (what the buggy fixtures once wrote into the production
+        # dir); a new round starting must keep its own dir, retain its log,
+        # and its own reason must lead stderr (any retention note trails).
+        rounds = self.rounds()
+        now = time.time()
+        for i in range(10):
+            d = rounds / ("run-seed%02d" % i)
+            d.mkdir(parents=True)
+            old = now - 86400 * (30 - i)
+            os.utime(str(d), (old, old))
+        self.stub_path = Path(self.tmp.name) / "stub_suite.py"
+        self.stub_path.write_text("import sys; sys.exit(3)\n")
+        proc = self.run_runner()
+        self.assertNotEqual(proc.returncode, 0)
+        faces = list(rounds.glob("round-*/face.json"))
+        self.assertEqual(len(faces), 1, "the live round's dir was deleted")
+        face = json.loads(faces[0].read_text())
+        self.assertEqual(face["state"], "failed")
+        self.assertIn("could_not_run", proc.stderr)
+        reason_at = proc.stderr.find("could_not_run")
+        warn_at = proc.stderr.find("retention failed")
+        if warn_at >= 0:
+            self.assertLess(reason_at, warn_at,
+                            "a secondary note must trail the round's reason")
+
     def test_unresolvable_face_dir_degrades_honest(self):
         self.write_stub()
         proc = self.run_runner({lrf.FACE_DIR_ENV: "",
@@ -464,6 +556,38 @@ class RoundFaceEndToEnd(StubTree):
         # point: no traceback, no half-written face anywhere
         self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
         self.assertNotIn("Traceback", proc.stderr)
+
+
+class DieOrdering(unittest.TestCase):
+    """t261012-06: on the could-not-run exit the round's OWN reason must be
+    on stderr FIRST; the face hook's retention warn is a secondary note that
+    trails it (the engine's CouldNotRun reason is the stderr tail)."""
+
+    def tearDown(self):
+        runner._FACE_HOOK[0] = None
+
+    def test_reason_leads_secondary_note_trails(self):
+        import io
+        from contextlib import redirect_stderr
+        buf = io.StringIO()
+        code = [None]
+        def hook(reason):
+            w = lrf.FaceWriter(Path("/nonexistent-zz-face"), "round-z",
+                               "l", {})
+            w.retain_log(Path("/nonexistent-zz-src/suite.log"))
+        runner._FACE_HOOK[0] = hook
+        with redirect_stderr(buf):
+            try:
+                runner.die("suite_rc_1:real_reason_here")
+            except SystemExit as e:
+                code[0] = e.code
+        self.assertEqual(code[0], 2)
+        err = buf.getvalue()
+        reason_at = err.find("could_not_run: suite_rc_1:real_reason_here")
+        warn_at = err.find("retention failed")
+        self.assertGreaterEqual(reason_at, 0)
+        self.assertGreater(warn_at, reason_at,
+                           "copy-error note must trail the reason: %r" % err)
 
 
 class TerminalVerdict(unittest.TestCase):

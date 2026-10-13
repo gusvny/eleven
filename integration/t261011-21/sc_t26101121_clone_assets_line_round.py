@@ -323,6 +323,9 @@ def _declare_runner(src, head, tmp, tag, extra=None):
     env["SANDBAR_LINE_ROUND_SUITE_CMD"] = "python3 tools/stub_suite.py"
     env["SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S"] = "120"
     env["SANDBAR_LINE_ROUND_RUN_ROOT"] = str(tmp / ("runroot-" + tag))
+    # t261012-06: a scenario must never leave entities in the directory a
+    # production face owns — the face dir is pinned into this tmp tree
+    env["SANDBAR_LINE_ROUND_FACE_DIR"] = str(tmp / ("face-" + tag))
     env.update({k: str(v) for k, v in (extra or {}).items()})
     return env
 

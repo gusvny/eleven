@@ -90,6 +90,13 @@ PROJECTS_DIR_ENV = "SANDBAR_PROJECTS_DIR"
 FACE_POLL_S = 2.0
 #: Rolling retention for per-round evidence directories.
 FACE_RETAIN_ROUNDS = 10
+#: The only directory shapes the retention window may ever delete: the
+#: provisional dir this writer creates (`round-<ts>-<pid>`) and the evidence
+#: dir it relabels to the ledger run id (`run-<id>`). Anything else living in
+#: the shared rounds dir (fixture leftovers, scratch) is foreign — t261012-06:
+#: a name sort over a shared directory once deleted exactly the live round
+#: dirs because `run-` fixture dirs outranked `round-` lexically.
+ROUND_DIR_RE = re.compile(r"^(?:round|run)-")
 CURRENT_NAME = "current.json"
 FACE_NAME = "face.json"
 LOG_NAME = "suite.log"
@@ -371,10 +378,15 @@ class FaceWriter:
 
     def retain_log(self, src_path):
         """Copy the suite log into the run dir (retained evidence). The
-        run tree may be deleted right after — the copy happens FIRST."""
+        run tree may be deleted right after — the copy happens FIRST. A copy
+        failure is a NAMED SECONDARY note on the face (`evidence_note`),
+        never the round's reason (t261012-06): the verdict belongs to the
+        suite; a missing copy only hides the evidence, not the outcome."""
         try:
             shutil.copyfile(str(src_path), str(self.run_dir / LOG_NAME))
         except OSError as e:
+            self.face["evidence_note"] = ("suite log retention failed: %s"
+                                          % e)
             sys.stderr.write("%s warn: suite log retention failed (%s)\n"
                              % (TAG, e))
 
@@ -405,16 +417,32 @@ class FaceWriter:
                              % (TAG, e))
 
     def _prune(self):
-        """Rolling retention keyed on run ids (review condition 1): the
-        newest FACE_RETAIN_ROUNDS run dirs survive; a dir named by the live
-        pointer on disk survives regardless of age (a concurrently running
-        round is never pruned under a finishing one)."""
+        """Rolling retention keyed on the ROUND-DIR SHAPE, ordered by mtime
+        (t261012-06): the newest FACE_RETAIN_ROUNDS round-shaped dirs survive.
+        A name sort over a shared directory is banned — foreign dirs (`run-`
+        fixture leftovers once outranked every `round-` dir lexically) must
+        never enter the window, and a dir named by the live pointer on disk
+        or THIS round's own dir survives regardless of age (a round that is
+        being written is never pruned). Note the mtime property: a dir's
+        mtime moves when a file is written into it, so an old evidence dir
+        receiving a late write can legitimately jump the window."""
         try:
             live = _read_current_run_id(self.rounds_dir)
-            dirs = sorted((d for d in self.rounds_dir.iterdir() if d.is_dir()),
-                          key=lambda d: d.name)
-            for d in dirs[:-FACE_RETAIN_ROUNDS] if len(dirs) > FACE_RETAIN_ROUNDS else []:
-                if d.name == str(live):
+            shaped = [d for d in self.rounds_dir.iterdir()
+                      if d.is_dir() and ROUND_DIR_RE.match(d.name)]
+            shaped.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+            old = (shaped[FACE_RETAIN_ROUNDS:]
+                   if len(shaped) > FACE_RETAIN_ROUNDS else [])
+            foreign = [d.name for d in self.rounds_dir.iterdir()
+                       if d.is_dir() and not ROUND_DIR_RE.match(d.name)]
+            if foreign:
+                # named, never deleted: the window owns only round evidence
+                sys.stderr.write(
+                    "%s note: %d foreign dir(s) under rounds/ left untouched "
+                    "(retention keys on round dirs only): %s\n"
+                    % (TAG, len(foreign), ",".join(sorted(foreign)[:5])))
+            for d in old:
+                if d.name == str(live) or d.name == str(self.run_id):
                     continue
                 shutil.rmtree(d, ignore_errors=True)
         except OSError as e:

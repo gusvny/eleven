@@ -124,16 +124,20 @@ TAG = "LINE_ROUND_RUNNER"
 
 def die(reason):
     """The one could-not-run exit: named reason on stderr, nonzero exit,
-    stdout stays empty — the engine's CouldNotRun path carries the name.
-    A registered face hook (run()) records the terminal failed state FIRST,
-    so the round's outcome stays visible on its stable face (t261011-26)."""
+    stdout stays empty — the engine's CouldNotRun path carries the name
+    (it reads the STDERR TAIL, develop_certify runner()). The face hook runs
+    AFTER the reason is on stderr (t261012-06): its retention-failure warn
+    is a SECONDARY note and must trail the round's own reason, never lead
+    the ledger row. The outcome still lands on the stable face before exit
+    (t261011-26)."""
+    sys.stderr.write("%s could_not_run: %s\n" % (TAG, reason))
+    sys.stderr.flush()
     hook = _FACE_HOOK[0]
     if hook is not None:
         try:
             hook(reason)
         except Exception:  # noqa: BLE001 — the face never masks the verdict
             pass
-    sys.stderr.write("%s could_not_run: %s\n" % (TAG, reason))
     sys.exit(2)
 
 
@@ -354,20 +358,32 @@ def asset_env(env):
     for key, resolver in ((POC_PYTHON_ENV, bench.resolve_poc_python),
                           (TEMPORAL_BIN_ENV, bench.resolve_temporal_bin)):
         declared = str(env.get(key, "")).strip()
-        if declared:
-            if not Path(declared).exists():
-                die("asset_missing:%s:%s=%s 不存在（env 指路优先，检查路径）"
-                    % (key, key, declared))
+        if declared and Path(declared).exists():
             out[key] = env[key]
             continue
-        # blank declared value: bench's resolver reads os.environ, so a
-        # blank string would be taken as a (nonexistent) pointer — lift it
-        # for the resolution and keep it out of the suite env
+        if declared:
+            # 261012 (host order "fix what is broken"): a declared pointer
+            # that no longer exists is rot, not an asset directive — the
+            # worker env can carry it for days after the pointed temp tree
+            # was reaped (measured: t26101118-assets-* garbage-collected,
+            # every fast carrier after it died on asset_missing). Fall
+            # through to the local resolution and NAME the ignored pointer
+            # on stderr: visible, never silent; the run dies only when the
+            # local resolution fails too, with the dead pointer named.
+            sys.stderr.write(
+                "%s asset_pointer_dead:%s=%s — ignored, resolving locally\n"
+                % (TAG, key, declared))
+        # blank (or dead) declared value: bench's resolver reads
+        # os.environ, so a blank string would be taken as a (nonexistent)
+        # pointer — lift it for the resolution and keep it out of the suite
+        # env; a dead pointer must be lifted too, or the resolver would
+        # "find" the same dead path again
         held = os.environ.pop(key, None)
         try:
             out[key] = str(resolver())
         except bench.MissingAsset as e:
-            die("asset_missing:%s:%s" % (key, str(e).replace("\n", " ")))
+            die("asset_missing:%s:%s (declared pointer %r was dead)"
+                % (key, str(e).replace("\n", " "), declared or "<none>"))
         finally:
             if held is not None:
                 os.environ[key] = held

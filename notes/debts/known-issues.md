@@ -5487,6 +5487,9 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 >
 > **回归**：L2——线轮面必须把 `env_red_names` 与内容红分开陈列且都有名字；L3——一次线轮里，凡"要起 console 才能判"的用例要么真判出红绿、要么在面上具名"未判成：<原因>"，不得静默计入 env 计数了事。
 
+> **同族补一（261012 21:45，**报错指向已关闭的票**：读者会去追一个不存在的工作）**：`t261009-80` 的 stop 文案原文是「no certification covered this landing within 96 polls x 300s（**the certification round schedule is t261009-30, not built yet**）—— stopped named for a human, not silently delivered」；而 `t261009-30`（"the round: the line's full suite runs once per tick…"）**早已 closed**，线轮的生产者其实是"计划 paused + 那个串轮实例已结束"，跟"票没建"无关。⇒ **同一族病的第三面**："为什么没有认证" 这句话必须由**当前事实**生成（生产者是否在跑、上一轮为什么没铸证、`range_growth` 的 reason 是什么），**不能写死一个历史判断**；否则读者去追一张早就关掉的票。落盘与具名（本条主条）是同一个要求的两半：**状态要写下来，而且写下的话必须随事实变**。
+
+
 > **同族补一（261012 19:0x，挂死的**第二个形态**：卡死的不是子进程管道，而是**批台租约**）**：同一轮里又挂住一条（`integration/t260908-01/sc_ki061_overlimit_wake_revive.py`，pid 8314，5:14 elapsed / CPU 0.62s），lsof 显示它攥着**与上一条完全相同的锁**：`~/.sandbar/test-stages/ensure-batch-2c3e0560-96cb7d89.lock`；同时场上有**孤儿 stage helper pid 51249**（`--project batch-2c3e0560-96cb7d89 --anchor-pid 51064`＝本轮跑器、ppid 1、已活 30+ 分钟、攥着 `hold-batch-….log`），而 `stage-sweep` 早就把该台判成「活台而主人锚非工作树（`…/T/line-round-e8e6yz40/sandbar`，疑被测树）」。⇒ **批台租约为一个临时测试树而起、卡住不释放，于是该项目的每个消费者用例都排在它后面**（不是红、不是超时，是**静默排队**）。本岗处置：按 pid 杀掉卡住的用例与那个 helper 之后，同一批消费者立刻**具名**落 `ENV_FAIL: 批台 batch-2c3e0560-96cb7d89 不在位（runner 未预起/已收口/中途亡）`——**挂死变红，且是诚实的红**（t260921-06 要求⑤：ns 不可用=环境红）。教训：**租约类挂死的诊断入口是 `lsof <pid>` 看它攥着哪把锁，再看谁攥着同一把锁**；"锚点进程还活着"不等于"租约健康"（锚点是**临时测试树/跑器**时尤其如此）。出处：`KI-01M4P588XXRNW31H7BWA3P4VHM` 同族。
 
 ## KI-01M4P7B2XQ3K9Y6T4N8W5A1CRV **收窄轮不成证明**——**实证到手**：账本原文 `suite_rc_1:run_id_missing_from_summary` **(261012 19:2x 读账本 `delivery.jsonl` seq 16;integration 岗记录，属 `KI-01M4P6Z4T5C1R2S8N9K7H3QWDM` 的实证补记)**
@@ -5541,3 +5544,88 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路（实现归票 + 判据面）**：①**冲突消解只许取 main 的一侧**（或用 merge-base 的三方合并），**不得从任何兄弟泳道工作树取文件**——"worker-settled merge"这条路径要把"文件来源"钉死；②写集判据在报"越界写"时**加一列"该文件当前属于哪张在飞票的泳道"**（用 sha 直接比对即可，零猜测）；③兜底：settle/路径闸的"面外文件挪档/回滚"要能在**没有人工干预**的情况下把这类文件退回 main 版本（今晚是人工打回的）。
 > **纪律**：**"谁的文件"必须由内容（sha）回答，不能由路径回答**；凡看到"越界写"，第一件事不是问"要不要放宽写集"，而是问"这些文件是不是别人的在飞工作"。
 > **回归**：L1——构造两个泳道 A/B（B 有未落地文件），在 A 上做一次冲突消解：A 的 diff **不得**出现 B 的任何文件（sha 级断言）；L2——写集判据的拒收文案对每个越界文件**报出归属票**（或"不属于任何在飞泳道"）；L3——一次真实的"面外文件"事件：从被拦到退回 main 版本**不需要人工介入**，且期间没有任何外来文件以 A 的名义落地。
+
+> **同族补二（261012 21:05，`KI-01M4P588XXRNW31H7BWA3P4VHM` 家族的**第三个形态**：卡死的不是用例的等待，而是**本轮自己的前奏**）**：一条**普通诊断轮**（`--only light-lane-workflow-e2e`，交付树）也卡在同一处——`batch-stage: 批台预起 ensure --project batch-2cc8a398-df0ce4ca` 之后**再无一行输出**（hold 日志 0 字节、ensure 锁在场；helper pid 60124 已 5:39 elapsed / CPU 0.20s）⇒ **用例根本没机会开始跑**。本岗处置：杀掉该 helper 与自己的诊断轮（诊断不值得再等一小时）。教训：**"批台供给卡死"不只伤消费者用例，也伤轮次前奏本身**——于是"这条用例又挂了"这个说法在任何一侧都不成立，真正变的是**批台**；诊断"某轮为什么慢"时，第一步应看 `batch-stage` 那行之后**有没有下一行**（见 `KI-01M4P7B2XQ3K9Y6T4N8W5A1CRY` 同族的观测面建议：把每段前奏的耗时/结果自成一行落盘）。
+
+## KI-01M4PKH23DKWXY1KFM490S7P8F **授权"发下去了却没生效"**：`_within` 的 docstring 说"条目尾斜杠同义"，实现却不剥尾斜杠 ⇒ 用目录写法（`integration/baselines/`）写的**人授权静默失效**，闸照拒、且**不给任何"scope 未命中"的提示** **(261012 23:0x 本岗实测：宿主已批 + 授权已落账，`-05` 仍被同一文案拒收)**
+
+> **实测链（全部当场读数）**：①宿主 261012 批准 `t261012-05` 改受保护面；②本岗以 `op=authorize kind=protected_path` 落授权，**scope 写成目录写法** `integration/baselines/`；③票面 log 明确记 `human authorization issued (…): kind=protected_path scope=integration/baselines/ expires=… reason=…` ⇒ **授权确实进了 workflow**；④`retry_qc` 后**同一个受保护闸再次拒收**，文案逐字相同（`Protected-path gate refused the write … is on the protected list … no lane may change it`）——**没有一个字提到"授权在册但 scope 没命中"**。
+> **根因（读码）**：`authz_gates._match()` 用 `path_gates._within(path, scope)` 判命中，而 `_within` 的实现是 `path == s or path.startswith(s + "/")`——**`s` 带着尾斜杠时，两个条件都不成立**（`…/baselines/` 与 `…/baselines//…` 都不匹配）；但 `_within` 的 docstring 写着「条目可写 `app/src` 指代整个前缀；**条目尾斜杠同义**」⇒ **文档与实现不一致**，而失效是**静默**的（对外只表现为"授权了也没用"）。
+> **危害**：①**人已经批了，机器却在原地打转**——值守会以为"授权通道坏了/引擎不认"，进而去走更重的路（改写集、手工落盘）；②目录写法是**最自然**的写法（"我批这个目录下的改动"），所以这条几乎必然被踩；③它与本族其它条目同病：**判据失败时不告诉读者"哪一条没命中、为什么"**。
+> **出路（实现归票）**：①`_within` 按 docstring 剥尾斜杠（`s.rstrip("/")`）或 `_match` 用 `path_gates` 的规范化入口；②授权未命中时**具名**：拒收文案附一行「在册授权 N 条，未命中原因：scope=`integration/baselines/` 与路径 `integration/baselines/x.mjs` 不匹配（尾斜杠）」；③`op=authorize` 在 intake 侧就该拒"scope 条目带尾斜杠"（或自动规范化并回执写清"已规范化为 `integration/baselines`"）。
+> **纪律**：**"我批了"与"它生效了"之间必须有一条可读的回执**；凡"豁免/白名单"这类机制，**未命中要出声**——否则使用者会永远怀疑通道而不去怀疑自己的写法。
+> **回归**：L1——`scope=["a/b"]` 与 `scope=["a/b/"]` 对路径 `a/b/c` **同判命中**（或后者在 intake 被具名规范化）；L2——授权在册但 scope 未命中时，拒收文案必须**具名 scope 与路径的不匹配**；L3——一次真实的人授权改受保护面：从 `op=authorize` 到闸放行**不需要第二次尝试**。
+
+## KI-01M4PX56PCD7E186EKSJG53FYD **锚对了"要精确"，锚错了"怎么说"**：三处测试用**中文字面**锚同一条 fail-closed 红项（红项名 `写集白名单基线`、detail 词 `解析失败`），且**各自内联、无单一真源** ⇒ 措辞一改（契约没变）就无故变红；而**反向断言（"不出现"）被静默削弱成永真** **(261012 09:5x 本机时钟读数；本岗复核直修 `352b2c9b` 的连带红时实测;integration 岗登记)**
+
+> **实测（当场）**：`352b2c9b`（261012 宿主直修）在把"另一侧"参数化的同时，把红项名与 detail **英文化**（`写集白名单基线（merge-base main × %s）` → `write-set whitelist baseline (…)`；`merge-base main %s 解析失败 rc=%s：%s` → `merge-base %s %s failed rc=%s: %s`）。**行为本身零退化**——fail-closed 仍在、`reason_code=merge_base_failed` 仍在、baseline 算不出时 verify_lane 仍未被调用——但测试面三处全动：`integration/t260901-16/t05_merge_check_wiring.py` 1 红（断言红项名字面在函数体里）；`integration/t260901-18/t04_mergecheck_failclosed.py` `PASS=7 FAIL=4`——**4 条连坐**：定位函数 `find_baseline_red` 用 `startswith("写集白名单基线")` 找红项，名字一换就**找不到**，于是连本可以过的 detail 断言（含 `rc=`）一起判红；`integration/t260901-18/t03_mergecheck_wiring.py` `PASS=11 FAIL=0`——**最后这个"全绿"是假的**：它断言「绿路径下不出现 `写集白名单基线`」，换了语言后**平凡成立**，守卫已在守空气。
+> **根因（读码）**：断言把**呈现措辞**当锚点。红项字典里本就带机器可读键 `reason_code`，却没被用作定位锚；detail 的"精确性"被表达成对中文词的字面匹配；同一 token 在三处**各自内联**（t04 的 `BASELINE_ITEM` 常量、t05/t03 里裸字面），无单一真源。
+> **危害**：①**契约不变的合法改动**（翻译、措辞优化、参数化顺手改写）无故变红，且红得像"功能坏了"，诊断成本全部转嫁给改动人（本岗为此先查了 fail-closed 是否真丢，才定性成措辞漂移）；②**反向断言静默失守**——"不出现"这类断言在换语言/换命名后平凡成立，账面全绿而守卫失效，**比红更危险**；③单一真源缺失 ⇒ 改一处碎两处，且没人知道还有几处（本岗 grep 才数出是三处）。
+> **出路（实现归票，本条只记账不动手）**：①定位锚换 **`reason_code`**（稳定机器键）＋**结构事实**（`green=False`、baseline 解析失败时 verify_lane **不被调用**、detail 含 git 真实 `rc=` 与两个 ref 名）；②人话措辞若要守，抽**单一真源**（共享常量或契约文档），三处引用同一处，禁止内联字面；③detail 只守"精确性属性"不守字面；④**反向断言必须配阳性对照**（同构造下把措辞换回旧形应当红），否则永真断言永远无人察觉。
+> **纪律**：**锚承诺，不锚措辞**——凡用字面做断言，先问一句"换个说法、契约没变，它会不会红？"会红就是绑错了。**反向断言无阳性对照＝没在守**。
+> **回归**：L1——同一条红项换措辞（英文化/参数化改写），锚点测试**不得**变红；L2——`reason_code` 变/丢、detail 不再含 `rc=`、或失败路径开始调用 verify_lane，测试必须红；L3——一次真实措辞变更（翻译或优化）：全族测试零误红，且每条反向断言都有阳性对照证明仍在守。
+>
+> **实证补记（261012 当日）**：同日撞见本病灶的**第二种形态**——契约把红 item 的中文前缀字面当锚（t04 的 `BASELINE_ITEM`、t05 接线脚本 grep 该字面、t03 的 `startswith` 反向断言）。直修把文案英文化**实为合规**（`integration/lint_copy_language.py`：server/engine 新增行禁 CJK，宿主令 261004），三条契约当场全红，于是形成**死结**：文案中文 ⇒ 文案闸 18 红；文案英文 ⇒ 三条契约红。**碰这几行，两头必碎一头**。这正说明锚措辞不是「稍欠精确」，而是**结构性不可维护**。已按本 KI 的出路改锚：三处全改 `reason_code=merge_base_failed` ＋结构事实（detail 点名的 ref 与真实 `rc=`），文案走英文；文案闸 0 违规、三契约全绿、t260901-18 全族（含新增 t05 两侧交集）绿。**并行发现**：根 CLAUDE.md 规则 3「文档注释用现代中文」**已被 261004 退役**（`server/session_charter.md`：文档与代码注释改英文、存量不动、`notes/` 保持中文），字面却还挂着——已随宿主令一并更正。
+>
+> **第三种形态（同日，方向相反的同一病灶）**：`test_t260917_01_arb_gate_refusal` 用
+> `notes/|known-issues|baselines|\.worktrees/` 子串扫 `dev_lane.py` 全文，禁项目专属路径。
+> 意图对（引擎不得内嵌项目路径），但**子串太宽**：把英文普通技术词 `baselines` 也扫死——
+> 注释里写「pass both baselines」即误红（中文原稿没有该 ASCII 词，一译英文就撞）。
+> 这条是**过宽**方向（前两种是过窄）：字面锚既漏真变化、又误伤合法变化。处置：**不放宽
+> 守卫**，改我方措辞回避该令牌（`both sides' merge-bases`）。遗留小账：该正则宜改成
+> **路径形态**（如 `baselines/`）而非裸词，届时按「改锚点」同法处置。
+
+## KI-01M4QF22M2JFY184GMX3Q80652 **scan_schedule.resume 报 ok 而未真解暂停（update×unpause 竞态）**：模式
+（261012/integration 岗实测登记；integration 岗登记）
+
+> **实测（当场）**：宿主令恢复 dispatcher-scan。`scan_schedule.py resume --minutes 45 --note …` 返回 `{"ok":true,"resumed":true}`，但其自带 describe 回读 `paused:true`、note 仍是旧值（间隔 45m 却已生效）。紧随其后的独立 describe 同样 `paused:true`。隔秒裸调 `handle.unpause(note=…)` 后 `paused:false`、note 为新值——恢复才真生效。
+> **根因（读码）**：`cmd_resume` 先 `handle.update(_upd)`（整体重建 spec/policy 的读-改-写）再 `handle.unpause(note=…)`。update 的读-改-写与 unpause 的落盘之间存在竞态/覆盖：间隔写进去了，解暂停被吞。命令对 unpause 结果不做回读校验，直接 `_ok` 返回。
+> **危害**：**报绿实红**的最危险一类——运维面看到 ok:true 就走人，线轮继续黑暗（本例若不回读，dispatcher-scan 至今仍停）；且自带 describe 的 `after` 就带着反证，等于把矛盾一起打包返回。
+> **出路**：resume/pause 收尾必须回读校验目标态（paused==期望、note==新值），不符即 `_err` 具名（绝不 ok 返回）；或改用单次 update 同时改 spec 与 paused（消灭两步竞态）。
+> **纪律**：凡「改了调度/闸/开关」类操作，**成功 = 回读证实**，命令返回值不算证据。
+> **回归**：L1——mock handle 上 update 后 unpause 被吞的场景，resume 必须红；L2——真 Temporal 上 resume 后 describe.paused==False 且 note 为新值。
+
+
+## KI-01M4QHN1V0098CCQ0NH9CVZ1BN **重验闸前不查 worker 漂移 ⇒ 修复「看起来没生效」空转多轮**：模式
+（261012/t261012-02 六轮空转实测；integration 岗登记）
+
+> **实测**：宿主直修（2a23c658，261012 13:53 落 main）行为正确——泳道树内直跑 verify_lane 两种载荷对照：传 `base_other` 零红、不传 3 红。但其后 merge_check 连续多轮仍按旧判据出红。`engine_ops workers` 的 code_stamp 给出解释：服务该票的 **lane worker 是提交前起的进程**，`stale=agent_activities,dev_lane`（Python 导入缓存：改码不换进程=白改）。按 pidfile TERM＋supervisor 拉新后，stale 清空，重验即恢复新判据。
+> **根因**：`retry_qc` 的既有流程只保证「泳道树并进新 main」，**不保证「执行活动的 worker 进程吃到新码」**。而诊断侧（含本岗）连续多轮把「闸仍红」读成「修复没生效/被回滚」，没有人先跑 `engine_ops drift`——这个工具恰是为「谁在服务/吃哪份代码/漂没漂」造的，全程在场、零人调用。
+> **危害**：①无效重验空转（每轮全量套件 ~7.5 分钟，当晚至少 6 轮）；②诊断被引向错误方向（怀疑修复本身、怀疑外部杀进程）；③「无输出」死亡与陈旧 worker 混在同一现场，归因难度翻倍。
+> **出路**：`retry_qc` 收到信号后（或推票前）先跑 `engine_ops drift`，stale 非空即先换手（pidfile TERM＋等 supervisor 拉新＋stale 清零自证）再起闸；把「worker stale ⇒ 先换手」写进 retry_qc 的处置文案。
+> **纪律**：**闸的红 ≠ 修复没用**——先问「跑闸的进程吃的哪份码」。改引擎码后的第一次重验，drift 检查是前置步骤，不是可选项。
+> **回归**：L1——mock 面锁「drift 报 stale ⇒ retry_qc 文案含先换手」；L3——真台注入：起旧 worker、落新码、发 retry_qc，断言处置链先换手再重跑（而非直接重跑旧码）。
+
+
+## KI-01M4QJA3QWP53VQ5T1MGASF5D7 **泳道 main 同步在 detached HEAD 上落提交、分支 ref 掉队 ⇒ 闸按旧 ref 量错基线**：模式
+（261012/t261012-03 实测；integration 岗登记）
+
+> **实测**：-03 泳道 worktree 处 **detached HEAD**（80e1ea24），其上的 main 合并提交信息为「Merge branch 'main' into **HEAD**」（对照：正常次写作 into lane/...）；分支 ref lane/t261012-03 停在旧得多的 f7032b15，且与 HEAD **真分叉**（merge-base=01c5c3da 旧分叉点）。merge_check 按分支 ref 量 ⇒ 基线取到旧分叉点，全部 main 侧近期改动（CLAUDE.md、notes/、agent_activities、dev_lane、path_gates、shared）被误判为本票越界写（red=8）。同刻 -02（ref==HEAD）判据干净——同机制对照成立。
+> **根因**：worker 的 main 同步/settle 在 worktree 处于 detached HEAD 时直接 commit，分支 ref 不随之推进；无「提交后 ref==HEAD」自检，脱节静默累积（-03 至少两轮合并如此）。
+> **危害**：闸的红看起来像「修复没生效/写集违规」，实为**量错了对象**（ref≠树）；且脱节若带到最后落地，落地并的是旧 ref，HEAD 上的合并成果全部漏掉。
+> **出路**：settle/主同步收尾自检「分支 ref == worktree HEAD」，不等则显式收敛（在分支上并回 HEAD 或拒绝并具名）；merge_check 前置同样校验（量之前先证「量的就是树」）。处置实录（-03，261012）：checkout 分支→merge 80e1ea24（无冲突，两侧内容保全）→ merge-base(main,branch)=e4ae2061 → 闸载荷 dry-run 写集 0 红。
+> **纪律**：**闸量的是 ref，干活的是 HEAD——两者必须先证相等**。
+> **回归**：L1——settle 收尾断言 ref==HEAD（构造 detached 落提交场景必须红/自愈）；L3——真台注入 detached 脱节后跑 merge_check，断言要么自愈要么具名红，绝不静默量旧 ref。
+
+
+## KI-01M4R5BBV855DG3TT645AVXXAB **worker 硬换手把在飞线轮 runner 变孤儿（收尸册只在进程内存）**：模式
+（261012/round-20261012T123320Z 实测；integration 岗登记）
+
+> **实测**：中央 worker 换手（engine_ops restart，TERM＋supervisor 拉新）时线轮活动在飞：runner（pid 20170）**未被收尸**——`_INFLIGHT_RUNNERS` 收尸册只在 worker 进程内存，优雅停机钩子（reap_inflight_runners）未及/未跑到；孤儿 runner 继续烧 CPU、占 stage 互斥，其产出永无人记账（父活动随旧 worker 消亡），3600s 预算超时也不再有人执行。同窗口 Temporal 重试起新活动→新 runner 与孤儿并发=再次互卡。
+> **根因**：收尸登记单点在进程内存，worker 的非优雅终态（硬 TERM/SIGKILL/崩溃）带走整本册子；restart 前也不检查在飞 runner。
+> **危害**：①资源泄漏＋互斥互卡（本轮实测孤儿拖慢后继轮）；②无人记账的半程结果污染 rounds 现场观察；③超时兜底失效（预算形同虚设）。
+> **出路**：收尸册落盘（pidfile/登记文件，worker 启动时扫残留并具名收养或收割）；engine_ops restart 前置检查在飞线轮并先优雅收割；runner 自身加墙钟自毙（子进程侧双保险，不依赖父进程存活）。
+> **纪律**：**换手引擎进程前，先问「谁家孩子在飞」**——在飞子进程的收尸登记必须在进程外可寻。
+> **回归**：L3——真台注入：活动在飞时硬杀 worker，断言 runner 被落盘册收割或自毙，绝不无声续跑。
+
+
+## KI-01M4RMTPXXW36WY2S0YN7P82XF **判停释放依赖测量面变化，而变化源在闸后才并 main——验收段可空转死锁**：模式
+（261012/t261012-06 连停 4 轮实测；integration 岗登记）
+
+> **实测**：-06（保留窗口修复票）在验收段连续 4 轮判停（测量面逐字相同）。判停释放只认**签名变化**（闸拦名单/计数/明细/基线 ref）；基线 ref 变化需要泳道并新 main，而 main 同步只发生在 **merge_check 入口**——判停在验收段，到不了 merge_check。人裁（authorize arbitration_verdict）与 retry_qc 均不重置计数器，重试只是把「N 连同面」的 N 加一。
+> **根因**：签名释放条件与刷新机制错位——能改变签名的动作（main 同步）被排在被卡阶段的下游。
+> **危害**：程序性死锁：健康的票（闸绿、仲裁正面）也会被空转到上限；人裁入了账也救不动，只能靠岗外手工收拢（本例由 integration 手动并 main 改变基线解锁）。
+> **出路**：①计数器在收到人裁（arbitration_verdict 授权落账）时重置/放行；或②判停路由把「先并一次 main 再测」纳入释放路径；或③验收段判停时允许一次受控 main 同步重测。
+> **纪律**：**判停的释放条件必须在该阶段内可达**——依赖下游阶段才能满足的释放条件＝死锁。
+> **回归**：L3——真台注入同面停轮＋人裁授权，断言票被放行（而非计数器继续加）。
+

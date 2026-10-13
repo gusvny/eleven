@@ -90,6 +90,10 @@ class CloneAssetsLeg(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("SANDBAR_")}
         env["SANDBAR_LINE_ROUND_REPO_PATH_SANDBAR"] = str(self.src)
+        # t261012-06 hygiene: this file drives the round runner module, so
+        # it carries the face-dir pin even though today only prepare_tree()
+        # runs — if a leg ever spawns a real round, the pin is in place
+        env["SANDBAR_LINE_ROUND_FACE_DIR"] = str(self.tmp / "face")
         return env
 
     def prepare(self):

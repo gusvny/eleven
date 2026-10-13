@@ -161,6 +161,61 @@ SCENARIOS = [
     ("t261011-26-round-evidence-kept",
      "The round's evidence is KEPT at a stable path and the rolling bookkeeping can never eat a live round (ticket t261011-26 spec item 2 + the review_plan condition on finish/prune keyed by run_id; grey-box L3, the REAL integration/line_round_runner.py as a subprocess over the same shared fixture as the sibling entry, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A RETAINED LOG - after a round ends its suite log survives at rounds/<run_id>/suite.log under the declared face dir with the suite's judged PASS lines and the INTEG_SUMMARY intact (evidence no longer the temp dir's casualty, read from the reader side); B ROLLING RETENTION - seeded old run dirs beyond the declared keep window are pruned, the just-finished round's own evidence survives its own prune; C LIVE-ROUND SAFETY - a face dir already carrying a live pointer naming ANOTHER run survives this round's finish: the stranger's current.json is NOT deleted and the run dir it names is NOT pruned even when old (deletion and pruning key on the run_id read from the face on disk, never on whatever sits in rounds/); fast-catch: the overlapping-round class where a straggler round steals or deletes the next round's live face (arbitration round 1 leg C1, shipped once already) and the evidence-loss class where the suite log dies with the temp dir again are both caught here in seconds, offline; D HONEST BOOKKEEPING - a real prune names itself on stderr non-fatally, an empty face dir stays silent. Division of intent: the live-face content and terminal-outcome vocabulary belong to the sibling t261011-26-round-progress-face; retention arithmetic and prune-policy unit tables belong to developer L1. Pre-implement tree red = the named TDD signal; green required at the integration gate / merge. line_round_runner.py or git missing = ENV_FAIL exit 2",
      "python3 integration/t261011-26/sc_t26101126_round_evidence_kept.py", "ro", "fast"),
+    # ---- t261012-06: the retention window never deletes its own kept evidence ----
+    ("t261012-06-rounds-window",
+     "The retention window never deletes its own kept evidence and a "
+     "retention failure never masks the round's real reason (ticket "
+     "t261012-06, user words: the rounds dir held exactly ten run-<id> "
+     "fixture dirs, the prune's name sort deleted the round dirs including "
+     "the round that is starting, and delivery-ledger rows carried the "
+     "copy error instead of the round's reason; grey-box L3, the REAL "
+     "integration/line_round_runner.py as a subprocess over the t261011-26 "
+     "shared git fixture + stub suites, offline seconds, zero docker/"
+     "Temporal-server/browser, never touches 3099/7233): A INCIDENT SHAPE - "
+     "a rounds dir pre-crowded with more run-<id> entries than the window "
+     "holds (they sort after round-...) plus foreign non-round entries: a "
+     "round keeps its retained suite.log, the NEXT round starting keeps "
+     "its own evidence and does NOT delete the first round's kept log, and "
+     "foreign entries are never touched (the window keys on the round-dir "
+     "shape and recency, never on a name sort over a shared dir); B "
+     "ROLLING STILL ROLLS - old round-shaped dirs beyond the window are "
+     "still pruned, the fix is a shape-keyed window, not delete-nothing; C "
+     "RETENTION-FAILURE HONESTY - an occupied suite.log slot fails the "
+     "copy while the round still completes honestly (exit, stdout header, "
+     "terminal face intact), the failure is NAMED on stderr and on the "
+     "face as a secondary note that never changes the verdict, and on a "
+     "could-not-run round the runner's OWN reason line comes after every "
+     "retention warn. Division of intent: uncrowded-dir retained-log "
+     "survival and live-pointer safety belong to t261011-26-round-"
+     "evidence-kept; prune-policy unit truth tables belong to developer "
+     "L1. Pre-implement tree red = the named TDD signal; green required at "
+     "the integration gate / merge. line_round_runner.py or git missing = "
+     "ENV_FAIL exit 2",
+     "python3 integration/t261012-06/sc_t26101206_rounds_window.py",
+     "ro", "fast"),
+    ("t261012-06-face-dir-hygiene",
+     "Every scenario/test that drives the real line-round runner pins a "
+     "temp face dir, so fixture entities can never land in the directory a "
+     "production face owns (ticket t261012-06 spec 2: the rounds dir held "
+     "exactly ten run-<id> fixture dirs written by scenarios into the "
+     "production face dir, and the prune's name sort then deleted the live "
+     "round dirs; pure file scan over integration/, offline seconds, zero "
+     "docker/Temporal-server/browser, never touches 3099/7233; the real "
+     "ledgers are never written): the guard scans every scenario/test "
+     "driver of the runner and requires either the face-dir env pin (the "
+     "literal or lib_round_face's FACE_DIR_ENV constant) or the shared "
+     "t261011-26 fixture; the driver regex matches only files that "
+     "actually resolve/spawn the REAL runner (the engine's resolver seam, "
+     "the runner-command env seam, a spawn of the runner script) - path "
+     "strings in tables, the face module itself, injected fake resolvers "
+     "and import-only files are not drivers. A driver without a pin is "
+     "FAIL named with the file list (each writes fixture entities into "
+     "the production face dir); the polluter list is the ticket face's "
+     "named answer. Three states: pure file scan, no environment "
+     "dependencies - PASS / FAIL only; a missing integration tree = FAIL "
+     "named (it can never be an environment problem).",
+     "python3 integration/t261012-06/sc_t26101206_face_dir_hygiene.py",
+     "ro", "fast"),
     # ---- t261012-03: the Certification tab shows the runner's published rounds ----
     ("t261012-03-rounds-table-honest-faces",
      "The Certification tab's Rounds table shows the runner's PUBLISHED rounds honestly (ticket t261012-03 spec 1, user words: 'reading only the faces the runner already publishes at the stable path ... When the face is missing or unreadable the table says so BY NAME - it never renders zeros in its place' - the false-green family, live KI-01M4P0FK2W87WXW2S6N8BXECYZ; grey-box L3, the REAL server/plugins/executor-panel/src/host/certification-adapter.py as a subprocess - the reader side the panel invokes - over a fixture face tree seeded through the declared SANDBAR_LINE_ROUND_FACE_DIR seam, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A FACES ARE THE ONLY SOURCE - the receipt's round-faces section carries one row per published round (the live round from rounds/current.json with state=running and its counts, terminal rounds from rounds/<run_id>/face.json) and NO row no face names; the trigger joins from the run header, absent header = NAMED absence never an invented 'auto'; B ABSENCE AND UNREADABILITY ARE NAMED - a run dir without face.json, a torn/empty/non-JSON face file and an unreadable face DIR each surface as a named state, never counts zeros, never a crash; a face-dir failure degrades the SECTION inside an otherwise-ok receipt, the rest of the tab stays intact; C UNTRUSTWORTHY COUNTS STAY UNTRUSTWORTHY - a face carrying counts_note passes the note through verbatim so an unmeasured round can never present as a completed measured result; D NO SILENT RETENTION ASSUMPTION - more run dirs on disk than the writer's keep window all reach the reader, any render cap is DECLARED ('N older rounds not shown'), never a silent drop of the oldest rows; E LIVE POINTER IS THE ONLY LIVE SOURCE - no current.json means NO live row (absence = idle) while terminal rows still render. Division of intent: the face file contract itself (fields, atomic write, retention pruning, live-pointer guard) belongs to the t261011-26 pair; parse truth tables, receipt-shape unit matrices and the view core's pill/zero rules belong to developer L1 and the sibling t261012-03-round-dialog-journey entry. Pre-implement tree red = the named TDD signal; green required at the integration gate / merge. Engine modules or the adapter missing = ENV_FAIL exit 2",
@@ -4382,7 +4437,12 @@ def run_record_skip_reason(narrowed, commit, env_fp, source):
     """Pure decision matrix: why the top driver writes no run record this round
     (None = write). Named reasons only — never a guessed identity, never a
     silent skip. `narrowed` covers --only rounds and pool-exclusion rounds: a
-    diagnostic round is not a proof, so it wears no `suite` and lands no rows."""
+    diagnostic round is not a proof, so it wears no `suite` and lands no rows.
+    261012: the caller decides narrowing — for the line-round runner's rounds
+    (source `lane:line-round`) the declared pool exclusion IS the round's
+    caliber, not a diagnostic narrowing (every full line round died as
+    run_id_missing_from_summary otherwise; the runner's contract requires the
+    run record)."""
     if narrowed:
         return "narrowed round (--only / pool exclusion) is not a proof — no run record"
     if ledger_owner_is_gate():
@@ -6672,6 +6732,15 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # The top driver mints the run id and writes rows + header at the end
         # of the round; counts come from the same recount the summary carries.
         # Narrowed rounds (--only / pool exclusion) are not proofs: named skip.
+        # 261012 (host order "make the round run"): EXCEPT the line-round
+        # runner's rounds — for source `lane:line-round` the declared pool
+        # exclusion IS the round's caliber (the runner's suite command excludes
+        # the exclusive pool by design), not a diagnostic narrowing. Measured:
+        # every full line round died as could-not-run:run_id_missing_from_
+        # summary because the skip left the summary without a run_id while the
+        # runner's contract requires one. --only stays narrowed in every mode.
+        _narrowed = bool(only_names) or (
+            bool(excluded) and ledger_run_source() != "lane:line-round")
         _run_counts = {"ran": _ran, "passed": _p, "failed": _f,
                        "env_failed": _nc}
         _run_id, _run_face = write_run_record(
@@ -6680,7 +6749,7 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             commit=_reuse.get("git_head") or "",
             env_fp=_fpv["value"], conc_width=conc_width,
             pool_config=_summary["pool_config"],
-            narrowed=bool(only_names or excluded),
+            narrowed=_narrowed,
             prelude_s=_prelude_s, prelude_legs=_prelude_leg_s)
         if _run_id:
             _summary["run_id"] = _run_id   # additive: the consumer face

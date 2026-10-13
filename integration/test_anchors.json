@@ -5035,6 +5035,16 @@
     "integration/t261012-01/sc_t26101201_round_face_truth.py": {
       "anchor": "contract"
     },
+    "integration/t261012-06/sc_t26101206_rounds_window.py": {
+      "anchor": "behaviour",
+      "note": "t261012-06: the retention window must not delete its own kept evidence; shape/recency keying, foreign entries untouched, retention-failure honesty (named note, reason never masked)",
+      "sync_path": "integration/lib_round_face.py (FaceWriter._prune/retain_log); integration/line_round_runner.py (die/face_failed stderr order)"
+    },
+    "integration/t261012-06/sc_t26101206_face_dir_hygiene.py": {
+      "anchor": "source-text",
+      "note": "t261012-06 spec 2: every runner-driving scenario/test pins a temp face dir — no fixture entities in the production face dir",
+      "sync_path": "integration/t261011-21, t261009-77, t261011-18 scenario/test files (env pins)"
+    },
     "integration/t261012-03/sc_t26101203_rounds_table_honest_faces.py": {
       "anchor": "behaviour",
       "note": "t261012-03: the Certification tab's Rounds table is fed by the runner's published round faces (adapter-as-reader over the SANDBAR_LINE_ROUND_FACE_DIR seam) and the run id opens the round dialog; absence/unreadability named, never zeros (KI-01M4P0FK2W87WXW2S6N8BXECYZ false-green family)",

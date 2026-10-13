@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -126,11 +127,20 @@ def build_tree(root: Path, baseline_counts: dict, files: dict) -> Path:
 
     同构关键：真基线把「基线文件自身」列 allowlist（-1）——term 字段本身
     含被禁字，不自豁免则看守开机即自红；合成基线必须复刻该形状。
+    261012 修：lint_tests.py 的同族依赖（lib_*、lint_*）必须随行——此前只拷
+    主脚本，lint_tests 后来新增 lib_fault_injection 顶层导入后，自测树
+    ModuleNotFoundError 连挂 7 项（main 与线轮同挂，实测 261012）。随行清单
+    从 lint_tests.py 自身的导入句动态解析，不手抄（手抄必再腐）。
     """
     counts = {"integration/terminology-baseline.json": -1, **baseline_counts}
     integ = root / "integration"
     integ.mkdir(parents=True)
     shutil.copy2(LINT, integ / "lint_tests.py")
+    _LOCAL_DEP_RE = re.compile(r"^\s*(?:import|from)\s+(lib_\w+|lint_\w+)", re.M)
+    for mod in sorted(set(_LOCAL_DEP_RE.findall(LINT.read_text(encoding="utf-8")))):
+        src = INTEG / (mod + ".py")
+        if src.is_file() and mod != "lint_tests":
+            shutil.copy2(src, integ / src.name)
     (integ / "terminology-baseline.json").write_text(
         json.dumps({"term": TERM, "counts": counts,
                     "note": "看守自证电池同构基线（临时树，用毕即焚）"},

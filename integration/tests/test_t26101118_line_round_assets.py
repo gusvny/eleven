@@ -118,6 +118,10 @@ class AssetEnvLeg(unittest.TestCase):
         env["SANDBAR_LINE_ROUND_REPO_PATH_SANDBAR"] = str(self.src)
         env["SANDBAR_LINE_ROUND_RUN_ROOT"] = str(self.tmp / "run")
         env["SANDBAR_LINE_ROUND_RUN_STATE_DIR"] = str(self.tmp / "state")
+        # t261012-06: the runner's face dir must be pinned into this tmp
+        # tree — an un-pinned resolution writes round dirs into the
+        # production face dir this machine may own
+        env["SANDBAR_LINE_ROUND_FACE_DIR"] = str(self.tmp / "face")
         env["SANDBAR_LINE_ROUND_CANDIDATES"] = json.dumps(
             [{"repo": "sandbar", "revision": self.sha}])
         env["SUITE_INTEGRATION_DIR"] = str(ROOT / "integration")
@@ -166,19 +170,35 @@ class AssetEnvLeg(unittest.TestCase):
             self.assertIn("asset_missing:", proc.stderr)
             self.assertNotIn("INTEG_SUMMARY", proc.stdout)
 
-    # ---- C: a genuinely absent declared asset is a named could-not-run ----
+    # ---- C: a genuinely absent declared asset is NEVER a silent pass ----
+    # 261012 (host order "fix what is broken"): a dead declared pointer is
+    # rot, not a directive — the runner ignores it, names it on stderr
+    # (asset_pointer_dead) and resolves locally; it dies with a named
+    # could-not-run only when the local resolution fails too (the dead
+    # pointer named in the message).
 
     def test_c_absent_asset_named_before_spawn(self):
         bad = str(self.tmp / "nope" / "python")
         proc = self.run_runner(self.base_env(
             {POC_ENV: bad, BIN_ENV: str(self.stub)}))
-        self.assertEqual(proc.returncode, 2)
-        self.assertIn("LINE_ROUND_RUNNER could_not_run:", proc.stderr)
-        self.assertIn("asset_missing:%s" % POC_ENV, proc.stderr)
-        self.assertIn(bad, proc.stderr)
-        # never a header, never a certification, never a silent skip
-        self.assertEqual(proc.stdout.strip(), "")
-        self.assertFalse(self.receipt.exists())
+        self.assertIn("asset_pointer_dead:%s=%s" % (POC_ENV, bad),
+                      proc.stderr)
+        expected_poc, expected_bin = expected_assets()
+        if expected_poc.exists() and expected_bin.exists():
+            # local resolution succeeds: the round proceeds, the dead
+            # pointer was named and never handed to the suite
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        else:
+            # asset-less environment: the local resolution dies NAMED, with
+            # the dead pointer named in the message
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("LINE_ROUND_RUNNER could_not_run:", proc.stderr)
+            self.assertIn("asset_missing:%s" % POC_ENV, proc.stderr)
+            self.assertIn(bad, proc.stderr)
+            self.assertNotIn("INTEG_SUMMARY", proc.stdout)
+            # never a header, never a certification, never a silent skip
+            self.assertEqual(proc.stdout.strip(), "")
+            self.assertFalse(self.receipt.exists())
 
     # ---- D: empty-string keys count as unset (resolved, not passed) ----
 
