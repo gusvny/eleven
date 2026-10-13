@@ -61,3 +61,10 @@
 - **settings-isolation / rail-add-remove**：72e010c1 把导航改到 fix17 的 bench.goto（fix15 没有）→ 恒挂至今；lib_fix15 已补回裸导航 goto（docker 台无 token 门）。剩余红 = t261008-36 把设置入口挪进执行器面板 Settings 页签、场景锚未跟——**挂起等新版 UI 系列票（t261012-07..23）收口后再修**，届时锚不会再动。
 - **teardown-residue-visible**：T1 泳道物化超时，需读其 worker 日志深挖（冻结期无 LLM 段干扰，可复跑分诊）。
 - **zero-run-gate-stop / lane-materialization**：未诊（前者需真台，后者 376s 慢）。
+
+## 补记 3（261013 凌晨）：validate 又五条 + 运载通道走通
+- **已修**：carrier-port-guard / guard-statement / hostile-identity 三条「连坐转绿」——根因全是册子 canonical 漂移（ea2dc3b8 一修三愈）；teardown-residue 夹具补并发声明（`96889155`，T1 物化恢复，剩余 T6/T7/T8/T12 = 本票自家主题面的产品缺口，归票）。
+- **zero-run-gate-stop**：相二期望「恢复后推进 merge 挂人审」实得 merge_check blocked——夹具仓的极简形状过不了现在更严的 fail-closed 面（merge-base/gitlink/fuse-B/ui_evidence）。**夹具要升到现行闸合同**，归票。
+- **lane-materialization**：376s 重但本身能过，轮内超时属墙钟面（与 multirepo 同族，视复现入册）。
+- **ki067-entry-audit**：拒收面漂移确诊到层——`_write_gate`（client 侧跨项目/授权闸前置拒）先于 signal 投递，workflow 的 refused 账落空。合同裁决：拒收的可观测面该在 client（快速拒）还是 workflow（可审计账）。
+- **重要自查**：run-record 病（run_id_missing）**昨晚已由另一个 integration 会话登记为 KI**（`4f8ccd43`，①收窄轮不写 run record）——我今早重新查了一遍同样的病。**纪律：动手前必读当日 KI 册增量**，此失已记下。
