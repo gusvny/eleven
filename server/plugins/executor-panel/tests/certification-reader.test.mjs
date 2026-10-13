@@ -136,9 +136,13 @@ function adapterEnv(home, runsPath) {
   'absent run headers fail the line CLOSED (never a default green)')
   n += 1
 
-  // cited run missing from the headers = named refusal (never an invented verdict)
+  // cited run missing from the headers: 261013 the display DEGRADES per-round
+  // (renders the readable rounds, names the lost records) instead of refusing
+  // the whole line — the green JUDGMENT stays fail-closed (an absent run reads
+  // not-green, never promoted). Never an invented verdict.
   const other = await certificationFace({ project: P }, { env: adapterEnv(home, seedRunsOther(home)) })
-  assert(other.ok === false && other.reason.includes('run headers absent for cited round(s)'), 'cited run missing from headers refuses by name')
+  assert(other.ok === true && other.face && (other.notes || []).some((x) => /run records absent for cited round/.test(x)),
+    'a lost run record degrades the display named, never invented; green judgment stays closed')
   n += 1
 
   // malformed delivery row: the engine reader counts it, the seam refuses by name
